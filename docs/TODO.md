@@ -11,20 +11,20 @@
 - [x] `internal/domain/note.go` — `Note` struct (`ID`, `Title`, `Content`, `CreatedAt`, `UpdatedAt`)
 
 ## 2. Usecases layer
-- [ ] `internal/usecases/notes/manager.go`
-    - [ ] `Storage` interface (next to consumer, not in infra)
-        - [ ] `Create(ctx, *Note) error`
-        - [ ] `List(ctx, limit, offset int) ([]Note, int, error)`
-        - [ ] `Get(ctx, id int64) (*Note, error)`
-        - [ ] `Update(ctx, id int64, *Note) error`
-        - [ ] `Delete(ctx, id int64) error`
-    - [ ] `Renderer` interface — `Render(content string) (string, error)`
-    - [ ] `//go:generate mockgen` directive
-    - [ ] `Manager` struct with constructor `NewManager(storage Storage, renderer Renderer, log *slog.Logger) *Manager`
-    - [ ] CRUD methods on `Manager`
-    - [ ] Input validation (title not empty, content ≤ limit) → domain sentinel errors
-- [ ] `internal/usecases/notes/manager_test.go` — unit tests (testify/suite + gomock)
-- [ ] `internal/usecases/notes/manager_mocks_test.go` — generated mocks
+- [x] `internal/usecases/notes/manager.go`
+    - [x] `Storage` interface (next to consumer, not in infra)
+        - [x] `Create(ctx, *Note) error`
+        - [x] `List(ctx, limit, offset int) ([]Note, int, error)`
+        - [x] `Get(ctx, id int64) (*Note, error)`
+        - [x] `Update(ctx, id int64, *Note) error`
+        - [x] `Delete(ctx, id int64) error`
+    - [x] `Renderer` interface — `Render(content string) (string, error)`
+    - [x] `//go:generate mockgen` directive
+    - [x] `Manager` struct with constructor `NewManager(storage Storage, renderer Renderer, log *slog.Logger) *Manager`
+    - [x] CRUD methods on `Manager`
+    - [x] Input validation (title not empty, content ≤ limit) → domain sentinel errors
+- [x] `internal/usecases/notes/manager_test.go` — unit tests (testify/suite + gomock)
+- [x] `internal/usecases/notes/manager_mocks_test.go` — generated mocks
 
 ## 3. Infra layer
 
@@ -72,7 +72,7 @@
 - [ ] Smoke test: start → curl → stop
 
 ## 6. Documentation and CI
-- [ ] `README.md` — description, quick start, curl examples
+- [x] `README.md` — description, quick start, curl examples
 - [ ] Dockerfile (multi-stage → scratch)
 - [ ] `docker-compose.yml` — local dev environment
 - [ ] GitHub Actions: lint + test on push
@@ -80,6 +80,11 @@
 ## 7. Improvements (v2)
 - [ ] Note search (`GET /notes?q=...`)
 - [ ] Tags / categories
+- [ ] Syntax highlighting in HTML (`goldmark-highlighting` + `chroma`)
+- [ ] Note versioning — change history (`GET /notes/{id}/history`)
+- [ ] Cursor-based pagination instead of offset
+- [ ] ETag / `If-None-Match` for response caching
+- [ ] Mermaid diagram support in renderer
 - [ ] Middleware: rate limiting, CORS
 - [ ] Metrics (Prometheus) via interface in usecases, implementation in `internal/infra/metrics/`
 - [ ] PostgreSQL storage implementation
