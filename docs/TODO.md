@@ -1,14 +1,14 @@
 # padmark — TODO
 
 ## 0. Project initialization
-- [ ] `go mod init github.com/partyzanex/padmark`
-- [ ] Create directory structure (`cmd/`, `internal/`, `templates/`, `migrations/`)
-- [ ] Add `README.md`, `LICENSE`
-- [ ] Configure linter (`golangci-lint`)
+- [x] `go mod init github.com/partyzanex/padmark`
+- [x] Create directory structure (`cmd/`, `internal/`, `templates/`, `migrations/`)
+- [x] Add `README.md`, `LICENSE`
+- [x] Configure linter (`golangci-lint`)
 
 ## 1. Domain layer
-- [ ] `internal/domain/errors.go` — sentinel errors (`ErrNotFound`, `ErrTitleRequired`, `ErrContentTooLong`)
-- [ ] `internal/domain/note.go` — `Note` struct (`ID`, `Title`, `Content`, `CreatedAt`, `UpdatedAt`)
+- [x] `internal/domain/errors.go` — sentinel errors (`ErrNotFound`, `ErrTitleRequired`, `ErrContentTooLong`)
+- [x] `internal/domain/note.go` — `Note` struct (`ID`, `Title`, `Content`, `CreatedAt`, `UpdatedAt`)
 
 ## 2. Usecases layer
 - [ ] `internal/usecases/notes/manager.go`
