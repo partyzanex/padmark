@@ -32,8 +32,7 @@
 - [x] `internal/infra/storage/sqlite/repository.go` — SQLite implementation via `modernc.org/sqlite` + `uptrace/bun`
     - [x] Returns `*Repository`, implements `notes.Storage`
     - [x] Translates `sql.ErrNoRows` → `domain.ErrNotFound`
-- [ ] `migrations/` — goose SQL migrations (`pressly/goose/v3`, embedded via `//go:embed *.sql`)
-- [ ] `internal/infra/storage/memory.go` — in-memory implementation (`sync.RWMutex` + `map`) for tests only
+- [x] `migrations/` — goose SQL migrations (`pressly/goose/v3`, embedded via `//go:embed *.sql`)
 - [x] Tests for SQLite storage (12 integration tests)
 
 ### Markdown renderer
