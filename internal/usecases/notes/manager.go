@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/partyzanex/padmark/internal/domain"
 )
 
@@ -16,10 +18,9 @@ const maxContentLength = 100_000
 // Storage defines persistence operations for notes.
 type Storage interface {
 	Create(ctx context.Context, note *domain.Note) error
-	List(ctx context.Context, limit, offset int) ([]domain.Note, int, error)
-	Get(ctx context.Context, id int64) (*domain.Note, error)
-	Update(ctx context.Context, id int64, note *domain.Note) error
-	Delete(ctx context.Context, id int64) error
+	Get(ctx context.Context, id string) (*domain.Note, error)
+	Update(ctx context.Context, id string, note *domain.Note) error
+	Delete(ctx context.Context, id string) error
 }
 
 // Renderer defines markdown-to-HTML rendering.
@@ -47,8 +48,13 @@ func (m *Manager) Create(ctx context.Context, note *domain.Note) (*domain.Note, 
 	}
 
 	now := time.Now()
+	note.ID = uuid.NewString()
 	note.CreatedAt = now
 	note.UpdatedAt = now
+
+	if note.ContentType == "" {
+		note.ContentType = domain.ContentTypeMarkdown
+	}
 
 	err = m.storage.Create(ctx, note)
 	if err != nil {
@@ -60,18 +66,8 @@ func (m *Manager) Create(ctx context.Context, note *domain.Note) (*domain.Note, 
 	return note, nil
 }
 
-// List returns a paginated list of notes and total count.
-func (m *Manager) List(ctx context.Context, limit, offset int) ([]domain.Note, int, error) {
-	notes, total, err := m.storage.List(ctx, limit, offset)
-	if err != nil {
-		return nil, 0, fmt.Errorf("list notes: %w", err)
-	}
-
-	return notes, total, nil
-}
-
 // Get returns a note by ID.
-func (m *Manager) Get(ctx context.Context, id int64) (*domain.Note, error) {
+func (m *Manager) Get(ctx context.Context, id string) (*domain.Note, error) {
 	note, err := m.storage.Get(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("get note: %w", err)
@@ -81,7 +77,7 @@ func (m *Manager) Get(ctx context.Context, id int64) (*domain.Note, error) {
 }
 
 // Update validates and updates an existing note.
-func (m *Manager) Update(ctx context.Context, id int64, note *domain.Note) (*domain.Note, error) {
+func (m *Manager) Update(ctx context.Context, id string, note *domain.Note) (*domain.Note, error) {
 	err := m.validate(note)
 	if err != nil {
 		return nil, err
@@ -101,7 +97,7 @@ func (m *Manager) Update(ctx context.Context, id int64, note *domain.Note) (*dom
 }
 
 // Delete removes a note by ID.
-func (m *Manager) Delete(ctx context.Context, id int64) error {
+func (m *Manager) Delete(ctx context.Context, id string) error {
 	err := m.storage.Delete(ctx, id)
 	if err != nil {
 		return fmt.Errorf("delete note: %w", err)
@@ -111,7 +107,7 @@ func (m *Manager) Delete(ctx context.Context, id int64) error {
 }
 
 // GetRendered fetches a note and returns its content rendered as HTML.
-func (m *Manager) GetRendered(ctx context.Context, id int64) (string, error) {
+func (m *Manager) GetRendered(ctx context.Context, id string) (string, error) {
 	note, err := m.storage.Get(ctx, id)
 	if err != nil {
 		return "", fmt.Errorf("get note for render: %w", err)
@@ -119,7 +115,7 @@ func (m *Manager) GetRendered(ctx context.Context, id int64) (string, error) {
 
 	html, err := m.renderer.Render(note.Content)
 	if err != nil {
-		return "", fmt.Errorf("render note %d: %w", id, err)
+		return "", fmt.Errorf("render note %s: %w", id, err)
 	}
 
 	return html, nil
@@ -132,6 +128,10 @@ func (m *Manager) validate(note *domain.Note) error {
 
 	if len(note.Content) > maxContentLength {
 		return domain.ErrContentTooLong
+	}
+
+	if note.ContentType != "" && !note.ContentType.Valid() {
+		return domain.ErrInvalidContentType
 	}
 
 	return nil

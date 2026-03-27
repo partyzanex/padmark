@@ -56,7 +56,7 @@ func (mr *MockStorageMockRecorder) Create(ctx, note any) *gomock.Call {
 }
 
 // Delete mocks base method.
-func (m *MockStorage) Delete(ctx context.Context, id int64) error {
+func (m *MockStorage) Delete(ctx context.Context, id string) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "Delete", ctx, id)
 	ret0, _ := ret[0].(error)
@@ -70,7 +70,7 @@ func (mr *MockStorageMockRecorder) Delete(ctx, id any) *gomock.Call {
 }
 
 // Get mocks base method.
-func (m *MockStorage) Get(ctx context.Context, id int64) (*domain.Note, error) {
+func (m *MockStorage) Get(ctx context.Context, id string) (*domain.Note, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "Get", ctx, id)
 	ret0, _ := ret[0].(*domain.Note)
@@ -84,24 +84,8 @@ func (mr *MockStorageMockRecorder) Get(ctx, id any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Get", reflect.TypeOf((*MockStorage)(nil).Get), ctx, id)
 }
 
-// List mocks base method.
-func (m *MockStorage) List(ctx context.Context, limit, offset int) ([]domain.Note, int, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "List", ctx, limit, offset)
-	ret0, _ := ret[0].([]domain.Note)
-	ret1, _ := ret[1].(int)
-	ret2, _ := ret[2].(error)
-	return ret0, ret1, ret2
-}
-
-// List indicates an expected call of List.
-func (mr *MockStorageMockRecorder) List(ctx, limit, offset any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "List", reflect.TypeOf((*MockStorage)(nil).List), ctx, limit, offset)
-}
-
 // Update mocks base method.
-func (m *MockStorage) Update(ctx context.Context, id int64, note *domain.Note) error {
+func (m *MockStorage) Update(ctx context.Context, id string, note *domain.Note) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "Update", ctx, id, note)
 	ret0, _ := ret[0].(error)

@@ -46,8 +46,10 @@ func (s *ManagerTestSuite) TestCreate_OK() {
 
 	s.Require().NoError(err)
 	s.Equal(note, result)
+	s.NotEmpty(result.ID)
 	s.False(result.CreatedAt.IsZero())
 	s.False(result.UpdatedAt.IsZero())
+	s.Equal(domain.ContentTypeMarkdown, result.ContentType)
 }
 
 func (s *ManagerTestSuite) TestCreate_EmptyTitle() {
@@ -64,6 +66,14 @@ func (s *ManagerTestSuite) TestCreate_ContentTooLong() {
 	s.True(errors.Is(err, domain.ErrContentTooLong))
 }
 
+func (s *ManagerTestSuite) TestCreate_InvalidContentType() {
+	note := &domain.Note{Title: "hi", ContentType: "application/pdf"}
+
+	_, err := s.manager.Create(s.T().Context(), note)
+
+	s.True(errors.Is(err, domain.ErrInvalidContentType))
+}
+
 func (s *ManagerTestSuite) TestCreate_StorageError() {
 	storageErr := errors.New("db error")
 	note := &domain.Note{Title: "hi"}
@@ -75,44 +85,22 @@ func (s *ManagerTestSuite) TestCreate_StorageError() {
 	s.True(errors.Is(err, storageErr))
 }
 
-// List
-
-func (s *ManagerTestSuite) TestList_OK() {
-	want := []domain.Note{{ID: 1, Title: "a"}, {ID: 2, Title: "b"}}
-	s.storage.EXPECT().List(gomock.Any(), 10, 0).Return(want, 2, nil)
-
-	notes, total, err := s.manager.List(s.T().Context(), 10, 0)
-
-	s.Require().NoError(err)
-	s.Equal(want, notes)
-	s.Equal(2, total)
-}
-
-func (s *ManagerTestSuite) TestList_StorageError() {
-	storageErr := errors.New("db error")
-	s.storage.EXPECT().List(gomock.Any(), 10, 0).Return(nil, 0, storageErr)
-
-	_, _, err := s.manager.List(s.T().Context(), 10, 0)
-
-	s.True(errors.Is(err, storageErr))
-}
-
 // Get
 
 func (s *ManagerTestSuite) TestGet_OK() {
-	want := &domain.Note{ID: 1, Title: "a"}
-	s.storage.EXPECT().Get(gomock.Any(), int64(1)).Return(want, nil)
+	want := &domain.Note{ID: "abc-123", Title: "a"}
+	s.storage.EXPECT().Get(gomock.Any(), "abc-123").Return(want, nil)
 
-	note, err := s.manager.Get(s.T().Context(), 1)
+	note, err := s.manager.Get(s.T().Context(), "abc-123")
 
 	s.Require().NoError(err)
 	s.Equal(want, note)
 }
 
 func (s *ManagerTestSuite) TestGet_NotFound() {
-	s.storage.EXPECT().Get(gomock.Any(), int64(99)).Return(nil, domain.ErrNotFound)
+	s.storage.EXPECT().Get(gomock.Any(), "missing").Return(nil, domain.ErrNotFound)
 
-	_, err := s.manager.Get(s.T().Context(), 99)
+	_, err := s.manager.Get(s.T().Context(), "missing")
 
 	s.True(errors.Is(err, domain.ErrNotFound))
 }
@@ -121,26 +109,26 @@ func (s *ManagerTestSuite) TestGet_NotFound() {
 
 func (s *ManagerTestSuite) TestUpdate_OK() {
 	note := &domain.Note{Title: "updated", Content: "body"}
-	s.storage.EXPECT().Update(gomock.Any(), int64(1), note).Return(nil)
+	s.storage.EXPECT().Update(gomock.Any(), "abc-123", note).Return(nil)
 
-	result, err := s.manager.Update(s.T().Context(), 1, note)
+	result, err := s.manager.Update(s.T().Context(), "abc-123", note)
 
 	s.Require().NoError(err)
-	s.Equal(int64(1), result.ID)
+	s.Equal("abc-123", result.ID)
 	s.False(result.UpdatedAt.IsZero())
 }
 
 func (s *ManagerTestSuite) TestUpdate_EmptyTitle() {
-	_, err := s.manager.Update(s.T().Context(), 1, &domain.Note{})
+	_, err := s.manager.Update(s.T().Context(), "abc-123", &domain.Note{})
 
 	s.True(errors.Is(err, domain.ErrTitleRequired))
 }
 
 func (s *ManagerTestSuite) TestUpdate_NotFound() {
 	note := &domain.Note{Title: "updated"}
-	s.storage.EXPECT().Update(gomock.Any(), int64(99), note).Return(domain.ErrNotFound)
+	s.storage.EXPECT().Update(gomock.Any(), "missing", note).Return(domain.ErrNotFound)
 
-	_, err := s.manager.Update(s.T().Context(), 99, note)
+	_, err := s.manager.Update(s.T().Context(), "missing", note)
 
 	s.True(errors.Is(err, domain.ErrNotFound))
 }
@@ -148,17 +136,17 @@ func (s *ManagerTestSuite) TestUpdate_NotFound() {
 // Delete
 
 func (s *ManagerTestSuite) TestDelete_OK() {
-	s.storage.EXPECT().Delete(gomock.Any(), int64(1)).Return(nil)
+	s.storage.EXPECT().Delete(gomock.Any(), "abc-123").Return(nil)
 
-	err := s.manager.Delete(s.T().Context(), 1)
+	err := s.manager.Delete(s.T().Context(), "abc-123")
 
 	s.Require().NoError(err)
 }
 
 func (s *ManagerTestSuite) TestDelete_NotFound() {
-	s.storage.EXPECT().Delete(gomock.Any(), int64(99)).Return(domain.ErrNotFound)
+	s.storage.EXPECT().Delete(gomock.Any(), "missing").Return(domain.ErrNotFound)
 
-	err := s.manager.Delete(s.T().Context(), 99)
+	err := s.manager.Delete(s.T().Context(), "missing")
 
 	s.True(errors.Is(err, domain.ErrNotFound))
 }
@@ -166,31 +154,31 @@ func (s *ManagerTestSuite) TestDelete_NotFound() {
 // GetRendered
 
 func (s *ManagerTestSuite) TestGetRendered_OK() {
-	note := &domain.Note{ID: 1, Content: "# Hello"}
-	s.storage.EXPECT().Get(gomock.Any(), int64(1)).Return(note, nil)
+	note := &domain.Note{ID: "abc-123", Content: "# Hello"}
+	s.storage.EXPECT().Get(gomock.Any(), "abc-123").Return(note, nil)
 	s.renderer.EXPECT().Render("# Hello").Return("<h1>Hello</h1>", nil)
 
-	html, err := s.manager.GetRendered(s.T().Context(), 1)
+	html, err := s.manager.GetRendered(s.T().Context(), "abc-123")
 
 	s.Require().NoError(err)
 	s.Equal("<h1>Hello</h1>", html)
 }
 
 func (s *ManagerTestSuite) TestGetRendered_StorageError() {
-	s.storage.EXPECT().Get(gomock.Any(), int64(1)).Return(nil, domain.ErrNotFound)
+	s.storage.EXPECT().Get(gomock.Any(), "abc-123").Return(nil, domain.ErrNotFound)
 
-	_, err := s.manager.GetRendered(s.T().Context(), 1)
+	_, err := s.manager.GetRendered(s.T().Context(), "abc-123")
 
 	s.True(errors.Is(err, domain.ErrNotFound))
 }
 
 func (s *ManagerTestSuite) TestGetRendered_RenderError() {
 	renderErr := errors.New("render failed")
-	note := &domain.Note{ID: 1, Content: "bad"}
-	s.storage.EXPECT().Get(gomock.Any(), int64(1)).Return(note, nil)
+	note := &domain.Note{ID: "abc-123", Content: "bad"}
+	s.storage.EXPECT().Get(gomock.Any(), "abc-123").Return(note, nil)
 	s.renderer.EXPECT().Render("bad").Return("", renderErr)
 
-	_, err := s.manager.GetRendered(s.T().Context(), 1)
+	_, err := s.manager.GetRendered(s.T().Context(), "abc-123")
 
 	s.True(errors.Is(err, renderErr))
 }
