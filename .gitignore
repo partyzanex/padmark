@@ -1,0 +1,10 @@
+.idea/
+bin/
+vendor/
+.gocache/
+*.mk
+*.out
+*.test
+*.log
+coverage.txt
+coverage.xml
