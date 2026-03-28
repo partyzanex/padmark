@@ -21,6 +21,7 @@ const slugChars = "abcdefghijklmnopqrstuvwxyz0123456789"
 
 func newSlug() string {
 	const length = 8
+
 	buf := make([]byte, length)
 
 	var rnd [8]byte
@@ -35,6 +36,27 @@ func newSlug() string {
 	for i := range length {
 		buf[i] = slugChars[n%uint64(len(slugChars))]
 		n /= uint64(len(slugChars))
+	}
+
+	return string(buf)
+}
+
+const editCodeChars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+
+func newEditCode() string {
+	const length = 12
+
+	rnd := make([]byte, length)
+
+	_, err := rand.Read(rnd)
+	if err != nil {
+		panic("crypto/rand unavailable: " + err.Error())
+	}
+
+	buf := make([]byte, length)
+
+	for i := range length {
+		buf[i] = editCodeChars[rnd[i]%byte(len(editCodeChars))]
 	}
 
 	return string(buf)
@@ -87,6 +109,8 @@ func (m *Manager) Create(ctx context.Context, note *domain.Note) (*domain.Note, 
 		note.ID = newSlug()
 	}
 
+	note.EditCode = newEditCode()
+
 	now := time.Now()
 	note.CreatedAt = now
 	note.UpdatedAt = now
@@ -97,6 +121,16 @@ func (m *Manager) Create(ctx context.Context, note *domain.Note) (*domain.Note, 
 	}
 
 	m.log.DebugContext(ctx, "note created", "id", note.ID)
+
+	return note, nil
+}
+
+// Peek fetches a note by ID without incrementing views or triggering burn-after-reading.
+func (m *Manager) Peek(ctx context.Context, id string) (*domain.Note, error) {
+	note, err := m.storage.Get(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("peek note: %w", err)
+	}
 
 	return note, nil
 }
@@ -117,7 +151,7 @@ func (m *Manager) Get(ctx context.Context, id string) (*domain.Note, error) {
 		return nil, domain.ErrExpired
 	}
 
-	if note.BurnAfterReading {
+	if note.BurnAfterReading && note.ExpiresAt == nil {
 		delErr := m.storage.Delete(ctx, id)
 		if delErr != nil {
 			m.log.ErrorContext(ctx, "burn after reading: delete note", "id", id, "err", delErr)
@@ -137,7 +171,7 @@ func (m *Manager) View(ctx context.Context, id string) (*domain.Note, error) {
 		return nil, err
 	}
 
-	if !note.BurnAfterReading {
+	if !note.BurnAfterReading || note.ExpiresAt != nil {
 		incErr := m.storage.IncrementViews(ctx, id)
 		if incErr != nil {
 			m.log.ErrorContext(ctx, "increment views", "id", id, "err", incErr)
@@ -150,22 +184,32 @@ func (m *Manager) View(ctx context.Context, id string) (*domain.Note, error) {
 }
 
 // Update validates and updates an existing note, preserving immutable metadata.
-func (m *Manager) Update(ctx context.Context, id string, note *domain.Note) (*domain.Note, error) {
+// The caller must supply the correct edit code.
+func (m *Manager) Update(
+	ctx context.Context, id, editCode string, note *domain.Note,
+) (*domain.Note, error) {
 	err := m.validate(note)
 	if err != nil {
 		return nil, err
 	}
 
-	existing, err := m.Get(ctx, id)
+	existing, err := m.storage.Get(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("update note: %w", err)
+	}
+
+	if existing.EditCode != editCode {
+		return nil, domain.ErrForbidden
 	}
 
 	note.ID = id
 	note.CreatedAt = existing.CreatedAt
 	note.UpdatedAt = time.Now()
-	note.ExpiresAt = existing.ExpiresAt
-	note.BurnAfterReading = existing.BurnAfterReading
+	note.EditCode = existing.EditCode
+
+	if note.ExpiresAt == nil {
+		note.ExpiresAt = existing.ExpiresAt
+	}
 
 	if note.ContentType == "" {
 		note.ContentType = existing.ContentType
@@ -181,9 +225,18 @@ func (m *Manager) Update(ctx context.Context, id string, note *domain.Note) (*do
 	return note, nil
 }
 
-// Delete removes a note by ID.
-func (m *Manager) Delete(ctx context.Context, id string) error {
-	err := m.storage.Delete(ctx, id)
+// Delete removes a note by ID after verifying the edit code.
+func (m *Manager) Delete(ctx context.Context, id, editCode string) error {
+	existing, err := m.storage.Get(ctx, id)
+	if err != nil {
+		return fmt.Errorf("delete note: %w", err)
+	}
+
+	if existing.EditCode != editCode {
+		return domain.ErrForbidden
+	}
+
+	err = m.storage.Delete(ctx, id)
 	if err != nil {
 		return fmt.Errorf("delete note: %w", err)
 	}

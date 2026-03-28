@@ -252,9 +252,9 @@ func (s *HandlerSuite) TestUpdateNote_OK() {
 		CreatedAt:   createdAt,
 		UpdatedAt:   time.Now(),
 	}
-	s.manager.EXPECT().Update(gomock.Any(), testID, gomock.Any()).Return(updated, nil)
+	s.manager.EXPECT().Update(gomock.Any(), testID, "editcode1234", gomock.Any()).Return(updated, nil)
 
-	body := `{"title":"new title","content":"new content"}`
+	body := `{"title":"new title","content":"new content","edit_code":"editcode1234"}`
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPut, "/notes/"+testID, strings.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")
@@ -272,7 +272,7 @@ func (s *HandlerSuite) TestUpdateNote_OK() {
 }
 
 func (s *HandlerSuite) TestUpdateNote_NotFound() {
-	s.manager.EXPECT().Update(gomock.Any(), "missing", gomock.Any()).Return(nil, domain.ErrNotFound)
+	s.manager.EXPECT().Update(gomock.Any(), "missing", "", gomock.Any()).Return(nil, domain.ErrNotFound)
 
 	body := `{"title":"title","content":"content"}`
 	w := httptest.NewRecorder()
@@ -282,6 +282,19 @@ func (s *HandlerSuite) TestUpdateNote_NotFound() {
 	s.router.ServeHTTP(w, r)
 
 	s.Equal(http.StatusNotFound, w.Code)
+}
+
+func (s *HandlerSuite) TestUpdateNote_Forbidden() {
+	s.manager.EXPECT().Update(gomock.Any(), testID, "wrong", gomock.Any()).Return(nil, domain.ErrForbidden)
+
+	body := `{"title":"title","content":"content","edit_code":"wrong"}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPut, "/notes/"+testID, strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusForbidden, w.Code)
 }
 
 func (s *HandlerSuite) TestUpdateNote_InvalidBody() {
@@ -296,10 +309,11 @@ func (s *HandlerSuite) TestUpdateNote_InvalidBody() {
 // DeleteNote
 
 func (s *HandlerSuite) TestDeleteNote_OK() {
-	s.manager.EXPECT().Delete(gomock.Any(), testID).Return(nil)
+	s.manager.EXPECT().Delete(gomock.Any(), testID, "editcode1234").Return(nil)
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodDelete, "/notes/"+testID, nil)
+	r.Header.Set("X-Edit-Code", "editcode1234")
 
 	s.router.ServeHTTP(w, r)
 
@@ -307,14 +321,27 @@ func (s *HandlerSuite) TestDeleteNote_OK() {
 }
 
 func (s *HandlerSuite) TestDeleteNote_NotFound() {
-	s.manager.EXPECT().Delete(gomock.Any(), "nonexistent").Return(domain.ErrNotFound)
+	s.manager.EXPECT().Delete(gomock.Any(), "nonexistent", "code").Return(domain.ErrNotFound)
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodDelete, "/notes/nonexistent", nil)
+	r.Header.Set("X-Edit-Code", "code")
 
 	s.router.ServeHTTP(w, r)
 
 	s.Equal(http.StatusNotFound, w.Code)
+}
+
+func (s *HandlerSuite) TestDeleteNote_Forbidden() {
+	s.manager.EXPECT().Delete(gomock.Any(), testID, "wrong").Return(domain.ErrForbidden)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodDelete, "/notes/"+testID, nil)
+	r.Header.Set("X-Edit-Code", "wrong")
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusForbidden, w.Code)
 }
 
 // Health

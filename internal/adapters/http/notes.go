@@ -48,9 +48,10 @@ type noteRequest struct {
 	Title            string             `json:"title"`
 	Content          string             `json:"content"`
 	ContentType      domain.ContentType `json:"content_type,omitempty"`
-	Slug             string             `json:"slug,omitempty"`               // custom slug; absent = auto-generated 8-char ID
-	TTL              int64              `json:"ttl,omitempty"`                // seconds; 0 or absent means never expires
-	BurnAfterReading bool               `json:"burn_after_reading,omitempty"` // delete on first read
+	Slug             string             `json:"slug,omitempty"`
+	EditCode         string             `json:"edit_code,omitempty"`
+	TTL              int64              `json:"ttl,omitempty"`
+	BurnAfterReading bool               `json:"burn_after_reading,omitempty"`
 }
 
 type noteResponse struct {
@@ -61,6 +62,7 @@ type noteResponse struct {
 	Title            string             `json:"title"`
 	Content          string             `json:"content"`
 	ContentType      domain.ContentType `json:"content_type"`
+	EditCode         string             `json:"edit_code,omitempty"`
 	Views            int                `json:"views"`
 	BurnAfterReading bool               `json:"burn_after_reading"`
 }
@@ -111,11 +113,14 @@ func (h *Handler) CreateNote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	resp := toNoteResponse(note)
+	resp.EditCode = note.EditCode
+
 	w.Header().Set("Content-Type", mimeJSON)
 	w.Header().Set("Location", "/"+note.ID)
 	w.WriteHeader(http.StatusCreated)
 
-	err = json.NewEncoder(w).Encode(toNoteResponse(note))
+	err = json.NewEncoder(w).Encode(resp)
 	if err != nil {
 		h.log.ErrorContext(r.Context(), "encode create response", "err", err)
 	}
@@ -187,10 +192,19 @@ func (h *Handler) UpdateNote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	note, err := h.manager.Update(r.Context(), id, &domain.Note{
-		Title:       req.Title,
-		Content:     req.Content,
-		ContentType: req.ContentType,
+	var expiresAt *time.Time
+
+	if req.TTL > 0 {
+		t := time.Now().Add(time.Duration(req.TTL) * time.Second)
+		expiresAt = &t
+	}
+
+	note, err := h.manager.Update(r.Context(), id, req.EditCode, &domain.Note{
+		Title:            req.Title,
+		Content:          req.Content,
+		ContentType:      req.ContentType,
+		ExpiresAt:        expiresAt,
+		BurnAfterReading: req.BurnAfterReading,
 	})
 	if err != nil {
 		h.log.ErrorContext(r.Context(), "update note", "id", id, "err", err)
@@ -211,7 +225,12 @@ func (h *Handler) UpdateNote(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) DeleteNote(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	err := h.manager.Delete(r.Context(), id)
+	editCode := r.Header.Get("X-Edit-Code")
+	if editCode == "" {
+		editCode = r.URL.Query().Get("edit_code")
+	}
+
+	err := h.manager.Delete(r.Context(), id, editCode)
 	if err != nil {
 		writeError(w, err)
 		return

@@ -28,6 +28,7 @@ type Note struct {
 	Title            string
 	Content          string
 	ContentType      ContentType
+	EditCode         string // secret token required to edit or delete the note
 	Views            int
 	BurnAfterReading bool // if true, the note is deleted on the first read
 }

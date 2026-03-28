@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -26,6 +27,7 @@ func NewRouter(handler *Handler) http.Handler {
 	mux.HandleFunc("DELETE /notes/{id}", handler.DeleteNote)
 	mux.HandleFunc("GET /healthz", handler.Healthz)
 	mux.HandleFunc("GET /readyz", handler.Readyz)
+	mux.HandleFunc("GET /edit/{id}", handler.EditPage)
 	mux.HandleFunc("GET /{id}", handler.GetNote)
 
 	return withRequestID(withLogging(handler.log, withRecovery(handler.log, mux)))
@@ -71,7 +73,12 @@ func withLogging(log *slog.Logger, next http.Handler) http.Handler {
 
 		next.ServeHTTP(rec, r)
 
-		log.InfoContext(r.Context(), "http",
+		level := slog.LevelInfo
+		if strings.HasPrefix(r.URL.Path, "/static/") {
+			level = slog.LevelDebug
+		}
+
+		log.Log(r.Context(), level, "http",
 			"method", r.Method,
 			"path", r.URL.Path,
 			"status", rec.status,

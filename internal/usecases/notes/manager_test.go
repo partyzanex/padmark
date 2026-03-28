@@ -48,6 +48,8 @@ func (s *ManagerTestSuite) TestCreate_OK() {
 	s.Require().NoError(err)
 	s.Equal(note, result)
 	s.NotEmpty(result.ID)
+	s.NotEmpty(result.EditCode)
+	s.Len(result.EditCode, 12)
 	s.False(result.CreatedAt.IsZero())
 	s.False(result.UpdatedAt.IsZero())
 	s.Equal(domain.ContentTypeMarkdown, result.ContentType)
@@ -199,6 +201,7 @@ func (s *ManagerTestSuite) TestUpdate_OK() {
 		ID:          "abc-123",
 		Title:       "old",
 		ContentType: domain.ContentTypeMarkdown,
+		EditCode:    "secret123456",
 		CreatedAt:   time.Now().Add(-time.Hour),
 	}
 	note := &domain.Note{Title: "updated", Content: "body"}
@@ -206,17 +209,18 @@ func (s *ManagerTestSuite) TestUpdate_OK() {
 	s.storage.EXPECT().Get(gomock.Any(), "abc-123").Return(existing, nil)
 	s.storage.EXPECT().Update(gomock.Any(), "abc-123", note).Return(nil)
 
-	result, err := s.manager.Update(s.T().Context(), "abc-123", note)
+	result, err := s.manager.Update(s.T().Context(), "abc-123", "secret123456", note)
 
 	s.Require().NoError(err)
 	s.Equal("abc-123", result.ID)
 	s.False(result.UpdatedAt.IsZero())
 	s.Equal(existing.CreatedAt, result.CreatedAt)
 	s.Equal(existing.ContentType, result.ContentType)
+	s.Equal("secret123456", result.EditCode)
 }
 
 func (s *ManagerTestSuite) TestUpdate_EmptyTitle() {
-	_, err := s.manager.Update(s.T().Context(), "abc-123", &domain.Note{})
+	_, err := s.manager.Update(s.T().Context(), "abc-123", "code", &domain.Note{})
 
 	s.True(errors.Is(err, domain.ErrTitleRequired))
 }
@@ -226,27 +230,53 @@ func (s *ManagerTestSuite) TestUpdate_NotFound() {
 
 	s.storage.EXPECT().Get(gomock.Any(), "missing").Return(nil, domain.ErrNotFound)
 
-	_, err := s.manager.Update(s.T().Context(), "missing", note)
+	_, err := s.manager.Update(s.T().Context(), "missing", "code", note)
 
 	s.True(errors.Is(err, domain.ErrNotFound))
+}
+
+func (s *ManagerTestSuite) TestUpdate_Forbidden() {
+	existing := &domain.Note{
+		ID:       "abc-123",
+		Title:    "old",
+		EditCode: "secret123456",
+	}
+	note := &domain.Note{Title: "updated"}
+
+	s.storage.EXPECT().Get(gomock.Any(), "abc-123").Return(existing, nil)
+
+	_, err := s.manager.Update(s.T().Context(), "abc-123", "wrong-code", note)
+
+	s.True(errors.Is(err, domain.ErrForbidden))
 }
 
 // Delete
 
 func (s *ManagerTestSuite) TestDelete_OK() {
+	existing := &domain.Note{ID: "abc-123", EditCode: "secret123456"}
+	s.storage.EXPECT().Get(gomock.Any(), "abc-123").Return(existing, nil)
 	s.storage.EXPECT().Delete(gomock.Any(), "abc-123").Return(nil)
 
-	err := s.manager.Delete(s.T().Context(), "abc-123")
+	err := s.manager.Delete(s.T().Context(), "abc-123", "secret123456")
 
 	s.Require().NoError(err)
 }
 
 func (s *ManagerTestSuite) TestDelete_NotFound() {
-	s.storage.EXPECT().Delete(gomock.Any(), "missing").Return(domain.ErrNotFound)
+	s.storage.EXPECT().Get(gomock.Any(), "missing").Return(nil, domain.ErrNotFound)
 
-	err := s.manager.Delete(s.T().Context(), "missing")
+	err := s.manager.Delete(s.T().Context(), "missing", "code")
 
 	s.True(errors.Is(err, domain.ErrNotFound))
+}
+
+func (s *ManagerTestSuite) TestDelete_Forbidden() {
+	existing := &domain.Note{ID: "abc-123", EditCode: "secret123456"}
+	s.storage.EXPECT().Get(gomock.Any(), "abc-123").Return(existing, nil)
+
+	err := s.manager.Delete(s.T().Context(), "abc-123", "wrong-code")
+
+	s.True(errors.Is(err, domain.ErrForbidden))
 }
 
 // GetRendered

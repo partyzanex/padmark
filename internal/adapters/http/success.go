@@ -12,6 +12,7 @@ var successTmplSrc string
 
 type successViewData struct {
 	URL              string
+	EditCode         string
 	ExpiresLabel     string
 	BurnAfterReading bool
 }
@@ -33,6 +34,7 @@ func (h *Handler) SuccessPage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	noteURL := scheme + "://" + r.Host + "/" + id
+	editCode := query.Get("edit_code")
 	burn := query.Get("burn") == "1"
 
 	expiresLabel := "never expires"
@@ -49,6 +51,7 @@ func (h *Handler) SuccessPage(w http.ResponseWriter, r *http.Request) {
 
 	err := h.successTmpl.Execute(w, successViewData{
 		URL:              noteURL,
+		EditCode:         editCode,
 		ExpiresLabel:     expiresLabel,
 		BurnAfterReading: burn,
 	})

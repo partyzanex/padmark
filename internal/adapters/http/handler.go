@@ -15,6 +15,9 @@ import (
 //go:embed static
 var staticFS embed.FS
 
+//go:embed templates/header.html
+var headerTmplSrc string
+
 // StaticHandler serves embedded static assets under /static/.
 //
 //nolint:gochecknoglobals // package-level FS handler is intentional
@@ -23,10 +26,11 @@ var StaticHandler = http.FileServer(http.FS(staticFS))
 // NoteManager is the interface the HTTP adapter requires from the business logic layer.
 type NoteManager interface {
 	Create(ctx context.Context, note *domain.Note) (*domain.Note, error)
+	Peek(ctx context.Context, id string) (*domain.Note, error)
 	View(ctx context.Context, id string) (*domain.Note, error)
 	GetRendered(ctx context.Context, id string) (*domain.Note, string, error)
-	Update(ctx context.Context, id string, note *domain.Note) (*domain.Note, error)
-	Delete(ctx context.Context, id string) error
+	Update(ctx context.Context, id, editCode string, note *domain.Note) (*domain.Note, error)
+	Delete(ctx context.Context, id, editCode string) error
 }
 
 // Pinger checks database connectivity.
@@ -45,15 +49,22 @@ type Handler struct {
 	errorTmpl   *template.Template
 }
 
+// parseTmpl parses a page template together with the shared header partial.
+func parseTmpl(name, src string) *template.Template {
+	return template.Must(
+		template.Must(template.New(name).Parse(src)).Parse(headerTmplSrc),
+	)
+}
+
 // NewHandler creates a Handler with required dependencies.
 func NewHandler(manager NoteManager, log *slog.Logger) *Handler {
 	return &Handler{
 		manager:     manager,
 		log:         log,
-		noteTmpl:    template.Must(template.New("note").Parse(noteTmplSrc)),
-		indexTmpl:   template.Must(template.New("index").Parse(indexTmplSrc)),
-		successTmpl: template.Must(template.New("success").Parse(successTmplSrc)),
-		errorTmpl:   template.Must(template.New("error").Parse(errorTmplSrc)),
+		noteTmpl:    parseTmpl("note", noteTmplSrc),
+		indexTmpl:   parseTmpl("index", indexTmplSrc),
+		successTmpl: parseTmpl("success", successTmplSrc),
+		errorTmpl:   parseTmpl("error", errorTmplSrc),
 	}
 }
 

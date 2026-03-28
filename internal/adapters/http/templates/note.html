@@ -351,24 +351,7 @@
 <body>
 <div class="wrapper">
 
-    <div class="header">
-        <div class="header-left">
-            <a href="/" class="logo">Padmark<span class="logo-dot"></span></a>
-        </div>
-        <div class="header-nav">
-            <a href="https://github.com/partyzanex/padmark" class="header-link" target="_blank" rel="noopener noreferrer">GitHub</a>
-            <span class="header-sep"></span>
-            <button class="theme-icon" data-theme="light" title="Light" onclick="setTheme('light')">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
-            </button>
-            <button class="theme-icon active" data-theme="dim" title="Dim" onclick="setTheme('dim')">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 2a7 7 0 0 0 0 20 10 10 0 0 1 0-20z"/></svg>
-            </button>
-            <button class="theme-icon" data-theme="dark" title="Dark" onclick="setTheme('dark')">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3a7 7 0 0 0 9.79 9.79z"/></svg>
-            </button>
-        </div>
-    </div>
+    {{template "header"}}
 
     <div class="meta-bar">
         <div class="meta-info">
@@ -410,7 +393,7 @@
     <div class="paste-footer">
         <a href="/{{.ID}}?raw=1" class="paste-footer-link">Raw</a>
         <span class="paste-footer-sep">·</span>
-        <a href="/" class="paste-footer-link">Edit</a>
+        <a href="/edit/{{.ID}}" class="paste-footer-link">Edit</a>
         <span class="paste-footer-sep">·</span>
         <a href="/" class="paste-footer-link">New</a>
     </div>
@@ -420,23 +403,7 @@
 <textarea id="raw-content" hidden>{{.RawContent}}</textarea>
 
 <script>
-    (function () {
-        const saved = localStorage.getItem('theme') || 'dim';
-        document.documentElement.setAttribute('data-theme', saved);
-        document.querySelectorAll('.theme-icon').forEach(btn => {
-            btn.classList.toggle('active', btn.dataset.theme === saved);
-        });
-    }());
-
-    function setTheme(theme) {
-        document.documentElement.classList.add('theme-transitioning');
-        document.documentElement.setAttribute('data-theme', theme);
-        localStorage.setItem('theme', theme);
-        document.querySelectorAll('.theme-icon').forEach(btn => {
-            btn.classList.toggle('active', btn.dataset.theme === theme);
-        });
-        setTimeout(() => document.documentElement.classList.remove('theme-transitioning'), 450);
-    }
+    {{template "theme-js"}}
 
     function copyRaw(btn) {
         const raw = document.getElementById('raw-content').value;

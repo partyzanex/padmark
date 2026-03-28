@@ -23,6 +23,8 @@ func writeError(w http.ResponseWriter, err error) {
 		http.Error(w, domain.ErrInvalidSlug.Error(), http.StatusUnprocessableEntity)
 	case errors.Is(err, domain.ErrSlugConflict):
 		http.Error(w, domain.ErrSlugConflict.Error(), http.StatusConflict)
+	case errors.Is(err, domain.ErrForbidden):
+		http.Error(w, domain.ErrForbidden.Error(), http.StatusForbidden)
 	default:
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 	}

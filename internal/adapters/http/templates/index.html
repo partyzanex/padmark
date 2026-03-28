@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Padmark</title>
+    <title>Padmark{{if .EditMode}} — Edit{{end}}</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
@@ -12,30 +12,7 @@
 <body>
 <div class="wrapper">
 
-    <div class="header">
-        <div class="header-left">
-            <div class="logo">Padmark<span class="logo-dot"></span></div>
-            <span class="tagline">markdown snippets</span>
-        </div>
-        <div class="header-right">
-            <div class="theme-switcher" id="themeSwitcher">
-                <button class="theme-btn" data-theme="light" title="Light" onclick="setTheme('light')">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
-                </button>
-                <button class="theme-btn active" data-theme="dim" title="Dim" onclick="setTheme('dim')">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 2a7 7 0 0 0 0 20 10 10 0 0 1 0-20z"/></svg>
-                </button>
-                <button class="theme-btn" data-theme="dark" title="Dark" onclick="setTheme('dark')">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3a7 7 0 0 0 9.79 9.79z"/></svg>
-                </button>
-                <div class="theme-indicator" id="themeIndicator"></div>
-            </div>
-            <div class="header-links">
-                <a href="/notes" class="header-link">API</a>
-                <a href="https://github.com/partyzanex/padmark" class="header-link" target="_blank" rel="noopener noreferrer">GitHub</a>
-            </div>
-        </div>
-    </div>
+    {{template "header"}}
 
     <div class="editor-container">
         <div class="editor-toolbar">
@@ -47,7 +24,7 @@
                 <button class="toolbar-btn" onclick="insertMd('\n```\n', '\n```\n')">block</button>
             </div>
         </div>
-        <textarea class="editor-textarea" id="editor" placeholder="Paste or write your Markdown…" spellcheck="false" oninput="updateCount()"></textarea>
+        <textarea class="editor-textarea" id="editor" placeholder="Paste or write your Markdown…" spellcheck="false" oninput="updateCount()">{{.Content}}</textarea>
         <div class="editor-footer">
             <span class="char-count" id="charCount">0 characters</span>
             <span class="format-hint">
@@ -60,71 +37,81 @@
     <div class="options-row">
         <div class="field-group">
             <label class="field-label">Title <span class="optional">· shown in the header</span></label>
-            <input type="text" class="field-input" placeholder="My snippet" id="titleInput">
+            <input type="text" class="field-input" placeholder="My snippet" id="titleInput" value="{{.Title}}">
         </div>
+        {{if .EditMode}}
+        <div class="field-group">
+            <label class="field-label">Edit code <span class="optional">· required</span></label>
+            <input type="text" class="field-input" placeholder="Paste your edit code" id="editCodeInput">
+        </div>
+        {{else}}
         <div class="field-group">
             <label class="field-label">Slug <span class="optional">· optional</span></label>
             <input type="text" class="field-input" placeholder="my-snippet" id="slugInput"
                    pattern="[a-zA-Z0-9_-]+" title="Letters, numbers, hyphens and underscores only">
         </div>
+        {{end}}
     </div>
 
     <div class="burn-row">
         <label class="burn-checkbox" id="burnLabel">
-            <input type="checkbox" id="burnCheck" onchange="toggleBurn()">
+            <input type="checkbox" id="burnCheck" onchange="toggleBurn()"{{if .BurnAfterReading}} checked{{end}}>
             <span class="checkmark"></span>
             <span class="burn-text">Burn after reading in</span>
         </label>
-        <div class="burn-time-wrap" id="burnTimeWrap">
+        <div class="burn-time-wrap{{if .BurnAfterReading}} active{{end}}" id="burnTimeWrap">
             <div class="select-wrap">
-                <select class="field-select burn-select" id="burnTime" disabled>
+                <select class="field-select burn-select" id="burnTime"{{if not .BurnAfterReading}} disabled{{end}}>
                     <option value="300">5 minutes</option>
                     <option value="600">10 minutes</option>
                     <option value="1800">30 minutes</option>
                     <option value="3600" selected>1 hour</option>
+                    <option value="14400">4 hours</option>
+                    <option value="43200">12 hours</option>
                     <option value="86400">24 hours</option>
+                    <option value="259200">3 days</option>
+                    <option value="604800">7 days</option>
+                    <option value="2592000">30 days</option>
+                    <option value="7776000">90 days</option>
                 </select>
             </div>
         </div>
     </div>
 
     <div class="publish-row">
-        <button class="btn-publish" id="publishBtn" onclick="publish()">Publish</button>
+        {{if .EditMode}}
+        <button class="btn-publish" id="submitBtn" onclick="save()">Save</button>
+        {{else}}
+        <button class="btn-publish" id="submitBtn" onclick="publish()">Publish</button>
+        {{end}}
         <span class="shortcut-hint"><kbd>Ctrl</kbd> + <kbd>Enter</kbd></span>
     </div>
 
 </div>
 
 <script>
+    const editMode = {{.EditMode}};
+    const noteID = {{.ID | js}};
+
     function updateCount() {
         const len = document.getElementById('editor').value.length;
         document.getElementById('charCount').textContent = len + ' character' + (len === 1 ? '' : 's');
     }
+    updateCount();
 
-    const themes = ['light', 'dim', 'dark'];
+    {{template "theme-js"}}
 
-    function setTheme(theme) {
-        document.documentElement.classList.add('theme-transitioning');
-        document.documentElement.setAttribute('data-theme', theme);
-        const idx = themes.indexOf(theme);
-        document.getElementById('themeIndicator').setAttribute('data-pos', idx);
-        document.querySelectorAll('.theme-btn').forEach(btn => {
-            btn.classList.toggle('active', btn.dataset.theme === theme);
-        });
-        localStorage.setItem('theme', theme);
-        setTimeout(() => document.documentElement.classList.remove('theme-transitioning'), 450);
-    }
-
-    // Restore saved theme
+    // Pre-select closest burn time option when editing
     (function () {
-        const saved = localStorage.getItem('theme');
-        const theme = themes.includes(saved) ? saved : 'dim';
-        document.documentElement.setAttribute('data-theme', theme);
-        const idx = themes.indexOf(theme);
-        document.getElementById('themeIndicator').setAttribute('data-pos', idx);
-        document.querySelectorAll('.theme-btn').forEach(btn => {
-            btn.classList.toggle('active', btn.dataset.theme === theme);
-        });
+        const ttl = {{.TTL}};
+        if (ttl <= 0) return;
+        const sel = document.getElementById('burnTime');
+        const opts = Array.from(sel.options).map(o => parseInt(o.value));
+        let best = opts[0];
+        for (const v of opts) {
+            if (Math.abs(v - ttl) < Math.abs(best - ttl)) best = v;
+        }
+        sel.value = String(best);
     })();
 
     function insertMd(before, after) {
@@ -136,6 +123,12 @@
         updateCount();
     }
 
+    function showError(btn, label, msg) {
+        btn.textContent = msg;
+        btn.style.background = '#ef4444';
+        setTimeout(() => { btn.textContent = label; btn.style.background = ''; }, 1800);
+    }
+
     function toggleBurn() {
         const checked = document.getElementById('burnCheck').checked;
         const wrap = document.getElementById('burnTimeWrap');
@@ -144,22 +137,21 @@
         sel.disabled = !checked;
     }
 
+    function getBurnTTL() {
+        const checked = document.getElementById('burnCheck').checked;
+        return checked ? parseInt(document.getElementById('burnTime').value) : 0;
+    }
+
     async function publish() {
-        const btn = document.getElementById('publishBtn');
+        const btn = document.getElementById('submitBtn');
         const content = document.getElementById('editor').value.trim();
         const titleInput = document.getElementById('titleInput').value.trim();
         const slug = document.getElementById('slugInput').value.trim();
         const burnAfterReading = document.getElementById('burnCheck').checked;
-        const ttl = burnAfterReading ? parseInt(document.getElementById('burnTime').value) : 0;
+        const ttl = getBurnTTL();
 
-        if (!content) {
-            btn.textContent = 'Enter some text first';
-            btn.style.background = '#ef4444';
-            setTimeout(() => { btn.textContent = 'Publish'; btn.style.background = ''; }, 1800);
-            return;
-        }
+        if (!content) { showError(btn, 'Publish', 'Enter some text first'); return; }
 
-        // Derive title: explicit input → first non-empty line → "Untitled"
         let title = titleInput;
         if (!title) {
             title = content.split('\n').map(l => l.replace(/^#+\s*/, '').trim()).find(l => l.length > 0) || 'Untitled';
@@ -180,12 +172,11 @@
                 body: JSON.stringify(payload)
             });
 
-            if (!resp.ok) {
-                throw new Error('HTTP ' + resp.status);
-            }
+            if (!resp.ok) { throw new Error('HTTP ' + resp.status); }
 
             const note = await resp.json();
             const params = new URLSearchParams({ id: note.id });
+            if (note.edit_code) params.set('edit_code', note.edit_code);
             if (note.burn_after_reading) params.set('burn', '1');
             if (note.expires_at) params.set('expires', note.expires_at);
             window.location.href = '/success?' + params.toString();
@@ -198,10 +189,48 @@
         }
     }
 
+    async function save() {
+        const btn = document.getElementById('submitBtn');
+        const content = document.getElementById('editor').value.trim();
+        const title = document.getElementById('titleInput').value.trim();
+        const editCode = document.getElementById('editCodeInput').value.trim();
+        const ttl = getBurnTTL();
+
+        if (!content) { showError(btn, 'Save', 'Enter some text first'); return; }
+        if (!editCode) { showError(btn, 'Save', 'Edit code required'); return; }
+
+        btn.textContent = 'Saving…';
+        btn.style.opacity = '0.7';
+        btn.disabled = true;
+
+        const burn = document.getElementById('burnCheck').checked;
+        const payload = { title: title || 'Untitled', content, edit_code: editCode, burn_after_reading: burn };
+        if (ttl > 0) payload.ttl = ttl;
+
+        try {
+            const resp = await fetch('/notes/' + noteID, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            if (resp.status === 403) { throw new Error('Invalid edit code'); }
+            if (!resp.ok) { throw new Error('HTTP ' + resp.status); }
+
+            window.location.href = '/' + noteID;
+        } catch (err) {
+            btn.textContent = err.message || 'Error — try again';
+            btn.style.background = '#ef4444';
+            btn.style.opacity = '1';
+            btn.disabled = false;
+            setTimeout(() => { btn.textContent = 'Save'; btn.style.background = ''; }, 2500);
+        }
+    }
+
     document.addEventListener('keydown', e => {
         if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
             e.preventDefault();
-            publish();
+            editMode ? save() : publish();
         }
     });
 </script>

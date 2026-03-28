@@ -24,6 +24,7 @@ type note struct {
 	Title            string     `bun:"title"`
 	Content          string     `bun:"content"`
 	ContentType      string     `bun:"content_type"`
+	EditCode         string     `bun:"edit_code"`
 	Views            int        `bun:"views"`
 	BurnAfterReading bool       `bun:"burn_after_reading"`
 }
@@ -45,6 +46,7 @@ func (r *Repository) Create(ctx context.Context, domNote *domain.Note) error {
 		Title:            domNote.Title,
 		Content:          domNote.Content,
 		ContentType:      string(domNote.ContentType),
+		EditCode:         domNote.EditCode,
 		CreatedAt:        domNote.CreatedAt,
 		UpdatedAt:        domNote.UpdatedAt,
 		ExpiresAt:        domNote.ExpiresAt,
@@ -84,24 +86,27 @@ func (r *Repository) Get(ctx context.Context, id string) (*domain.Note, error) {
 		Title:            dbNote.Title,
 		Content:          dbNote.Content,
 		ContentType:      domain.ContentType(dbNote.ContentType),
+		EditCode:         dbNote.EditCode,
 		Views:            dbNote.Views,
 		BurnAfterReading: dbNote.BurnAfterReading,
 	}, nil
 }
 
-// Update modifies an existing note. expires_at is immutable and not touched.
+// Update modifies an existing note.
 func (r *Repository) Update(ctx context.Context, id string, domNote *domain.Note) error {
 	dbNote := &note{
-		ID:          id,
-		Title:       domNote.Title,
-		Content:     domNote.Content,
-		ContentType: string(domNote.ContentType),
-		CreatedAt:   domNote.CreatedAt,
-		UpdatedAt:   domNote.UpdatedAt,
+		ID:               id,
+		Title:            domNote.Title,
+		Content:          domNote.Content,
+		ContentType:      string(domNote.ContentType),
+		ExpiresAt:        domNote.ExpiresAt,
+		BurnAfterReading: domNote.BurnAfterReading,
+		CreatedAt:        domNote.CreatedAt,
+		UpdatedAt:        domNote.UpdatedAt,
 	}
 
 	result, err := r.db.NewUpdate().Model(dbNote).
-		Column("title", "content", "content_type", "updated_at").
+		Column("title", "content", "content_type", "expires_at", "burn_after_reading", "updated_at").
 		Where("id = ?", id).
 		Exec(ctx)
 	if err != nil {

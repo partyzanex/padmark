@@ -10,33 +10,12 @@
     <link rel="stylesheet" href="/static/style.css">
     <style>
         body::before { background: radial-gradient(circle, rgba(52,211,153,0.05) 0%, transparent 70%); }
-        .wrapper     { max-width: 600px; }
-        .header      { margin-bottom: 48px; }
     </style>
 </head>
 <body>
 <div class="wrapper">
 
-    <div class="header">
-        <div class="header-left">
-            <a href="/" class="logo">Padmark<span class="logo-dot"></span></a>
-        </div>
-        <div class="header-right">
-            <div style="display:flex;align-items:center;gap:6px;">
-                <button class="theme-icon" data-theme="light" title="Light" onclick="setTheme('light')">
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
-                </button>
-                <button class="theme-icon active" data-theme="dim" title="Dim" onclick="setTheme('dim')">
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 2a7 7 0 0 0 0 20 10 10 0 0 1 0-20z"/></svg>
-                </button>
-                <button class="theme-icon" data-theme="dark" title="Dark" onclick="setTheme('dark')">
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3a7 7 0 0 0 9.79 9.79z"/></svg>
-                </button>
-            </div>
-            <span class="header-sep"></span>
-            <a href="https://github.com/partyzanex/padmark" class="header-link" target="_blank" rel="noopener noreferrer">GitHub</a>
-        </div>
-    </div>
+    {{template "header"}}
 
     <div class="success-card">
         <div class="success-banner">
@@ -53,12 +32,30 @@
             <div class="field-block">
                 <span class="field-block-label">View link</span>
                 <div class="copy-row">
-                    <a href="{{.URL}}" class="copy-value" target="_blank" rel="noopener noreferrer">{{.URL}}</a>
+                    <a href="{{.URL}}" class="copy-value">{{.URL}}</a>
                     <button class="copy-btn" id="copyLinkBtn" onclick="copyText(this, {{.URL | js}})">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
                         Copy
                     </button>
                 </div>
+            </div>
+
+            <div class="card-divider"></div>
+
+            <div class="field-block">
+                <span class="field-block-label">Edit code</span>
+                <div class="copy-row secret-row">
+                    <span class="copy-value">{{.EditCode}}</span>
+                    <button class="copy-btn" onclick="copyText(this, {{.EditCode | js}})">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                        Copy
+                    </button>
+                </div>
+            </div>
+
+            <div class="warning-block">
+                <span class="warning-icon">⚠</span>
+                <span class="warning-text">Save this code — you need it to edit or delete the paste. It cannot be recovered.</span>
             </div>
 
             {{if .BurnAfterReading}}
@@ -85,23 +82,7 @@
 </div>
 
 <script>
-    (function () {
-        const saved = localStorage.getItem('theme') || 'dim';
-        document.documentElement.setAttribute('data-theme', saved);
-        document.querySelectorAll('.theme-icon').forEach(btn => {
-            btn.classList.toggle('active', btn.dataset.theme === saved);
-        });
-    }());
-
-    function setTheme(theme) {
-        document.documentElement.classList.add('theme-transitioning');
-        document.documentElement.setAttribute('data-theme', theme);
-        localStorage.setItem('theme', theme);
-        document.querySelectorAll('.theme-icon').forEach(btn => {
-            btn.classList.toggle('active', btn.dataset.theme === theme);
-        });
-        setTimeout(() => document.documentElement.classList.remove('theme-transitioning'), 450);
-    }
+    {{template "theme-js"}}
 
     function copyText(btn, text) {
         navigator.clipboard.writeText(text).then(() => {
