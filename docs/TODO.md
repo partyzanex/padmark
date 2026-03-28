@@ -36,11 +36,11 @@
 - [x] Tests for SQLite storage (12 integration tests)
 
 ### Markdown renderer
-- [ ] `internal/infra/render/markdown.go` — goldmark wrapper
-    - [ ] Extensions: tables, strikethrough, autolinks
-    - [ ] Sanitize output with `bluemonday`
-    - [ ] Returns `*Renderer`, implements `notes.Renderer`
-- [ ] Tests for renderer
+- [x] `internal/infra/render/markdown.go` — goldmark wrapper
+    - [x] Extensions: tables, strikethrough, autolinks
+    - [x] Sanitize output with `bluemonday`
+    - [x] Returns `*Renderer`, implements `notes.Renderer`
+- [x] Tests for renderer
 
 ### CLI / config
 - [ ] `internal/infra/cmd/flags.go` — three constant groups: `Flag*`, `Env*` (`PADMARK_*`), `Default*`
