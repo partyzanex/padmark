@@ -1,7 +1,9 @@
 package http_test
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -18,13 +20,16 @@ import (
 
 // testNoteResponse mirrors noteResponse for decoding test responses.
 type testNoteResponse struct {
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
-	ID          string    `json:"id"`
-	Title       string    `json:"title"`
-	Content     string    `json:"content"`
-	ContentType string    `json:"content_type"`
-	Views       int       `json:"views"`
+	CreatedAt        time.Time  `json:"created_at"`
+	UpdatedAt        time.Time  `json:"updated_at"`
+	ExpiresAt        *time.Time `json:"expires_at"`
+	ID               string     `json:"id"`
+	Title            string     `json:"title"`
+	Content          string     `json:"content"`
+	ContentType      string     `json:"content_type"`
+	EditCode         string     `json:"edit_code"`
+	Views            int        `json:"views"`
+	BurnAfterReading bool       `json:"burn_after_reading"`
 }
 
 type HandlerSuite struct {
@@ -66,10 +71,124 @@ func newTestNote(title, content string) *domain.Note {
 	}
 }
 
-// CreateNote
+// ── IndexPage ──
+
+func (s *HandlerSuite) TestIndexPage() {
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusOK, w.Code)
+	s.Contains(w.Header().Get("Content-Type"), "text/html")
+	s.Contains(w.Body.String(), "Padmark")
+	s.Contains(w.Body.String(), "Publish")
+}
+
+// ── EditPage ──
+
+func (s *HandlerSuite) TestEditPage_OK() {
+	note := newTestNote("edit me", "# hello")
+	note.BurnAfterReading = true
+
+	future := time.Now().Add(time.Hour)
+	note.ExpiresAt = &future
+
+	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/edit/"+testID, nil)
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusOK, w.Code)
+	s.Contains(w.Header().Get("Content-Type"), "text/html")
+
+	body := w.Body.String()
+	s.Contains(body, "edit me")
+	s.Contains(body, "# hello")
+	s.Contains(body, "Save")
+	s.Contains(body, "checked")
+}
+
+func (s *HandlerSuite) TestEditPage_NotFound() {
+	s.manager.EXPECT().Peek(gomock.Any(), "missing").Return(nil, domain.ErrNotFound)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/edit/missing", nil)
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusNotFound, w.Code)
+	s.Contains(w.Body.String(), "not found")
+}
+
+// ── SuccessPage ──
+
+func (s *HandlerSuite) TestSuccessPage_OK() {
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/success?id=abc", nil)
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusOK, w.Code)
+	s.Contains(w.Header().Get("Content-Type"), "text/html")
+	s.Contains(w.Body.String(), "Paste created")
+	s.Contains(w.Body.String(), "http://example.com/abc")
+	s.Contains(w.Body.String(), "never expires")
+}
+
+func (s *HandlerSuite) TestSuccessPage_NoID() {
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/success", nil)
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusSeeOther, w.Code)
+	s.Equal("/", w.Header().Get("Location"))
+}
+
+func (s *HandlerSuite) TestSuccessPage_WithBurnAndExpires() {
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet,
+		"/success?id=abc&burn=1&expires=2026-06-15T12:00:00Z&edit_code=secret123", nil)
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusOK, w.Code)
+
+	body := w.Body.String()
+	s.Contains(body, "Burn after reading")
+	s.Contains(body, "expires Jun 15, 2026")
+	s.Contains(body, "secret123")
+}
+
+func (s *HandlerSuite) TestSuccessPage_HTTPS() {
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/success?id=abc", nil)
+	r.Header.Set("X-Forwarded-Proto", "https")
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusOK, w.Code)
+	s.Contains(w.Body.String(), "https://")
+}
+
+func (s *HandlerSuite) TestSuccessPage_InvalidExpires() {
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/success?id=abc&expires=bad-date", nil)
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusOK, w.Code)
+	s.Contains(w.Body.String(), "never expires")
+}
+
+// ── CreateNote ──
 
 func (s *HandlerSuite) TestCreateNote_OK() {
 	note := newTestNote("hello", "# world")
+	note.EditCode = "editcode1234"
 	s.manager.EXPECT().Create(gomock.Any(), gomock.Any()).Return(note, nil)
 
 	body := `{"title":"hello","content":"# world"}`
@@ -88,6 +207,38 @@ func (s *HandlerSuite) TestCreateNote_OK() {
 	s.Equal("hello", resp.Title)
 	s.Equal("# world", resp.Content)
 	s.NotEmpty(resp.ID)
+	s.Equal("editcode1234", resp.EditCode)
+}
+
+func (s *HandlerSuite) TestCreateNote_WithTTL() {
+	note := newTestNote("burn", "content")
+	note.BurnAfterReading = true
+
+	future := time.Now().Add(time.Hour)
+	note.ExpiresAt = &future
+
+	s.manager.EXPECT().Create(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, n *domain.Note) (*domain.Note, error) {
+			s.True(n.BurnAfterReading)
+			s.NotNil(n.ExpiresAt)
+			note.ID = n.ID
+
+			return note, nil
+		})
+
+	body := `{"title":"burn","content":"content","burn_after_reading":true,"ttl":3600}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/notes", strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusCreated, w.Code)
+
+	var resp testNoteResponse
+	s.Require().NoError(json.NewDecoder(w.Body).Decode(&resp))
+	s.True(resp.BurnAfterReading)
+	s.NotNil(resp.ExpiresAt)
 }
 
 func (s *HandlerSuite) TestCreateNote_EmptyTitle() {
@@ -144,7 +295,59 @@ func (s *HandlerSuite) TestCreateNote_SlugConflict() {
 	s.Equal(http.StatusConflict, w.Code)
 }
 
-// GetNote
+func (s *HandlerSuite) TestCreateNote_InvalidContentType() {
+	s.manager.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil, domain.ErrInvalidContentType)
+
+	body := `{"title":"t","content":"c","content_type":"application/pdf"}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/notes", strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusUnprocessableEntity, w.Code)
+}
+
+func (s *HandlerSuite) TestCreateNote_ContentTooLong() {
+	s.manager.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil, domain.ErrContentTooLong)
+
+	body := `{"title":"t","content":"c"}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/notes", strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusRequestEntityTooLarge, w.Code)
+}
+
+func (s *HandlerSuite) TestCreateNote_InvalidSlug() {
+	s.manager.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil, domain.ErrInvalidSlug)
+
+	body := `{"title":"t","content":"c","slug":"bad slug!"}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/notes", strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusUnprocessableEntity, w.Code)
+}
+
+func (s *HandlerSuite) TestCreateNote_InternalError() {
+	s.manager.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil, errors.New("db crashed"))
+
+	body := `{"title":"t","content":"c"}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/notes", strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusInternalServerError, w.Code)
+}
+
+// ── GetNote ──
 
 func (s *HandlerSuite) TestGetNote_JSON() {
 	note := newTestNote("my title", "**bold**")
@@ -165,6 +368,7 @@ func (s *HandlerSuite) TestGetNote_JSON() {
 	s.Equal("my title", resp.Title)
 	s.Equal("**bold**", resp.Content)
 	s.Equal(3, resp.Views)
+	s.Empty(resp.EditCode, "edit_code must not be exposed in GET")
 }
 
 func (s *HandlerSuite) TestGetNote_HTML() {
@@ -187,6 +391,78 @@ func (s *HandlerSuite) TestGetNote_HTML() {
 	s.Contains(body, "<strong>bold</strong>")
 }
 
+func (s *HandlerSuite) TestGetNote_HTML_WithExpiry() {
+	note := newTestNote("expiring", "body")
+
+	future := time.Now().Add(24 * time.Hour)
+	note.ExpiresAt = &future
+
+	s.manager.EXPECT().GetRendered(gomock.Any(), testID).
+		Return(note, "<p>body</p>", nil)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
+	r.Header.Set("Accept", "text/html")
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusOK, w.Code)
+	s.Contains(w.Body.String(), "Expires")
+}
+
+func (s *HandlerSuite) TestGetNote_HTML_NotFound() {
+	s.manager.EXPECT().GetRendered(gomock.Any(), "missing").Return(nil, "", domain.ErrNotFound)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/notes/missing", nil)
+	r.Header.Set("Accept", "text/html")
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusNotFound, w.Code)
+	s.Contains(w.Header().Get("Content-Type"), "text/html")
+	s.Contains(w.Body.String(), "not found")
+}
+
+func (s *HandlerSuite) TestGetNote_HTML_Expired() {
+	s.manager.EXPECT().GetRendered(gomock.Any(), testID).Return(nil, "", domain.ErrExpired)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
+	r.Header.Set("Accept", "text/html")
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusGone, w.Code)
+	s.Contains(w.Body.String(), "expired")
+}
+
+func (s *HandlerSuite) TestGetNote_HTML_Forbidden() {
+	s.manager.EXPECT().GetRendered(gomock.Any(), testID).Return(nil, "", domain.ErrForbidden)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
+	r.Header.Set("Accept", "text/html")
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusForbidden, w.Code)
+	s.Contains(w.Body.String(), "Forbidden")
+}
+
+func (s *HandlerSuite) TestGetNote_HTML_InternalError() {
+	s.manager.EXPECT().GetRendered(gomock.Any(), testID).Return(nil, "", errors.New("boom"))
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
+	r.Header.Set("Accept", "text/html")
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusInternalServerError, w.Code)
+	s.Contains(w.Body.String(), "Internal server error")
+}
+
 func (s *HandlerSuite) TestGetNote_Plain() {
 	note := newTestNote("plain note", "raw content here")
 	note.ContentType = domain.ContentTypePlain
@@ -203,6 +479,18 @@ func (s *HandlerSuite) TestGetNote_Plain() {
 	s.Equal("raw content here", w.Body.String())
 }
 
+func (s *HandlerSuite) TestGetNote_Plain_NotFound() {
+	s.manager.EXPECT().View(gomock.Any(), testID).Return(nil, domain.ErrNotFound)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
+	r.Header.Set("Accept", "text/plain")
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusNotFound, w.Code)
+}
+
 func (s *HandlerSuite) TestGetNote_Markdown() {
 	note := newTestNote("md note", "raw **md**")
 	s.manager.EXPECT().View(gomock.Any(), testID).Return(note, nil)
@@ -216,6 +504,49 @@ func (s *HandlerSuite) TestGetNote_Markdown() {
 	s.Equal(http.StatusOK, w.Code)
 	s.Contains(w.Header().Get("Content-Type"), "text/markdown")
 	s.Equal("raw **md**", w.Body.String())
+}
+
+func (s *HandlerSuite) TestGetNote_RawQuery() {
+	note := newTestNote("raw note", "raw content")
+	s.manager.EXPECT().View(gomock.Any(), testID).Return(note, nil)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID+"?raw=1", nil)
+	r.Header.Set("Accept", "text/html")
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusOK, w.Code)
+	s.Contains(w.Header().Get("Content-Type"), "text/markdown")
+	s.Equal("raw content", w.Body.String())
+}
+
+func (s *HandlerSuite) TestGetNote_UnknownAccept() {
+	note := newTestNote("unknown", "body")
+	s.manager.EXPECT().View(gomock.Any(), testID).Return(note, nil)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
+	r.Header.Set("Accept", "image/png")
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusOK, w.Code)
+	s.Contains(w.Header().Get("Content-Type"), "application/json")
+}
+
+func (s *HandlerSuite) TestGetNote_AcceptWildcard() {
+	note := newTestNote("wildcard", "body")
+	s.manager.EXPECT().View(gomock.Any(), testID).Return(note, nil)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
+	r.Header.Set("Accept", "*/*")
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusOK, w.Code)
+	s.Contains(w.Header().Get("Content-Type"), "application/json")
 }
 
 func (s *HandlerSuite) TestGetNote_NotFound() {
@@ -240,7 +571,24 @@ func (s *HandlerSuite) TestGetNote_Expired() {
 	s.Equal(http.StatusGone, w.Code)
 }
 
-// UpdateNote
+func (s *HandlerSuite) TestGetNote_ShortURL() {
+	note := newTestNote("short", "body")
+	s.manager.EXPECT().View(gomock.Any(), testID).Return(note, nil)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/"+testID, nil)
+	r.Header.Set("Accept", "application/json")
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusOK, w.Code)
+
+	var resp testNoteResponse
+	s.Require().NoError(json.NewDecoder(w.Body).Decode(&resp))
+	s.Equal("short", resp.Title)
+}
+
+// ── UpdateNote ──
 
 func (s *HandlerSuite) TestUpdateNote_OK() {
 	createdAt := time.Now().Add(-time.Hour)
@@ -269,6 +617,27 @@ func (s *HandlerSuite) TestUpdateNote_OK() {
 	s.Equal("new content", resp.Content)
 	s.Equal(createdAt.Unix(), resp.CreatedAt.Unix(), "created_at must be preserved")
 	s.Equal("text/plain", resp.ContentType, "content_type must be preserved when not provided")
+}
+
+func (s *HandlerSuite) TestUpdateNote_WithTTL() {
+	updated := newTestNote("updated", "body")
+
+	s.manager.EXPECT().Update(gomock.Any(), testID, "code", gomock.Any()).
+		DoAndReturn(func(_ context.Context, _ string, _ string, n *domain.Note) (*domain.Note, error) {
+			s.NotNil(n.ExpiresAt)
+			s.True(n.BurnAfterReading)
+
+			return updated, nil
+		})
+
+	body := `{"title":"updated","content":"body","edit_code":"code","burn_after_reading":true,"ttl":3600}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPut, "/notes/"+testID, strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusOK, w.Code)
 }
 
 func (s *HandlerSuite) TestUpdateNote_NotFound() {
@@ -306,7 +675,7 @@ func (s *HandlerSuite) TestUpdateNote_InvalidBody() {
 	s.Equal(http.StatusBadRequest, w.Code)
 }
 
-// DeleteNote
+// ── DeleteNote ──
 
 func (s *HandlerSuite) TestDeleteNote_OK() {
 	s.manager.EXPECT().Delete(gomock.Any(), testID, "editcode1234").Return(nil)
@@ -314,6 +683,17 @@ func (s *HandlerSuite) TestDeleteNote_OK() {
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodDelete, "/notes/"+testID, nil)
 	r.Header.Set("X-Edit-Code", "editcode1234")
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusNoContent, w.Code)
+}
+
+func (s *HandlerSuite) TestDeleteNote_QueryParam() {
+	s.manager.EXPECT().Delete(gomock.Any(), testID, "fromquery").Return(nil)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodDelete, "/notes/"+testID+"?edit_code=fromquery", nil)
 
 	s.router.ServeHTTP(w, r)
 
@@ -344,7 +724,7 @@ func (s *HandlerSuite) TestDeleteNote_Forbidden() {
 	s.Equal(http.StatusForbidden, w.Code)
 }
 
-// Health
+// ── Health ──
 
 func (s *HandlerSuite) TestHealthz() {
 	w := httptest.NewRecorder()
@@ -366,7 +746,30 @@ func (s *HandlerSuite) TestReadyz_OK() {
 	s.Equal(http.StatusOK, w.Code)
 }
 
-// Middleware
+func (s *HandlerSuite) TestReadyz_NoPinger() {
+	handler := adhttp.NewHandler(s.manager, slog.New(slog.DiscardHandler))
+	router := adhttp.NewRouter(handler)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusOK, w.Code)
+}
+
+func (s *HandlerSuite) TestReadyz_Error() {
+	s.pinger.EXPECT().PingContext(gomock.Any()).Return(errors.New("db down"))
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusServiceUnavailable, w.Code)
+}
+
+// ── Middleware ──
 
 func (s *HandlerSuite) TestRequestIDHeader() {
 	s.manager.EXPECT().View(gomock.Any(), testID).Return(newTestNote("title", "content"), nil)
@@ -377,4 +780,163 @@ func (s *HandlerSuite) TestRequestIDHeader() {
 	s.router.ServeHTTP(w, r)
 
 	s.NotEmpty(w.Header().Get("X-Request-ID"))
+}
+
+func (s *HandlerSuite) TestStaticAssets() {
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/static/style.css", nil)
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusOK, w.Code)
+	s.Contains(w.Header().Get("Content-Type"), "text/css")
+}
+
+// ── Broken writer tests (cover error-log branches) ──
+
+type failWriter struct {
+	header http.Header
+	code   int
+}
+
+func newFailWriter() *failWriter                 { return &failWriter{header: http.Header{}} }
+func (fw *failWriter) Header() http.Header       { return fw.header }
+func (fw *failWriter) WriteHeader(code int)      { fw.code = code }
+func (fw *failWriter) Write([]byte) (int, error) { return 0, errors.New("write failed") }
+
+func (s *HandlerSuite) TestIndexPage_WriteFail() {
+	handler := adhttp.NewHandler(s.manager, slog.New(slog.DiscardHandler))
+	fw := newFailWriter()
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+
+	handler.IndexPage(fw, r)
+
+	s.Equal(0, fw.code)
+}
+
+func (s *HandlerSuite) TestEditPage_WriteFail() {
+	note := newTestNote("edit", "body")
+	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
+
+	handler := adhttp.NewHandler(s.manager, slog.New(slog.DiscardHandler))
+	fw := newFailWriter()
+	r := httptest.NewRequest(http.MethodGet, "/edit/"+testID, nil)
+	r.SetPathValue("id", testID)
+
+	handler.EditPage(fw, r)
+
+	s.NotNil(fw)
+}
+
+func (s *HandlerSuite) TestSuccessPage_WriteFail() {
+	handler := adhttp.NewHandler(s.manager, slog.New(slog.DiscardHandler))
+	fw := newFailWriter()
+	r := httptest.NewRequest(http.MethodGet, "/success?id=abc", nil)
+
+	handler.SuccessPage(fw, r)
+
+	s.NotNil(fw)
+}
+
+func (s *HandlerSuite) TestGetNote_HTML_WriteFail() {
+	note := newTestNote("note", "body")
+	s.manager.EXPECT().GetRendered(gomock.Any(), testID).Return(note, "<p>body</p>", nil)
+
+	handler := adhttp.NewHandler(s.manager, slog.New(slog.DiscardHandler))
+	fw := newFailWriter()
+	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
+	r.SetPathValue("id", testID)
+	r.Header.Set("Accept", "text/html")
+
+	handler.GetNote(fw, r)
+
+	s.NotNil(fw)
+}
+
+func (s *HandlerSuite) TestGetNote_Plain_WriteFail() {
+	note := newTestNote("note", "body")
+	s.manager.EXPECT().View(gomock.Any(), testID).Return(note, nil)
+
+	handler := adhttp.NewHandler(s.manager, slog.New(slog.DiscardHandler))
+	fw := newFailWriter()
+	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
+	r.SetPathValue("id", testID)
+	r.Header.Set("Accept", "text/plain")
+
+	handler.GetNote(fw, r)
+
+	s.NotNil(fw)
+}
+
+func (s *HandlerSuite) TestGetNote_JSON_WriteFail() {
+	note := newTestNote("note", "body")
+	s.manager.EXPECT().View(gomock.Any(), testID).Return(note, nil)
+
+	handler := adhttp.NewHandler(s.manager, slog.New(slog.DiscardHandler))
+	fw := newFailWriter()
+	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
+	r.SetPathValue("id", testID)
+	r.Header.Set("Accept", "application/json")
+
+	handler.GetNote(fw, r)
+
+	s.NotNil(fw)
+}
+
+func (s *HandlerSuite) TestCreateNote_WriteFail() {
+	note := newTestNote("t", "c")
+	s.manager.EXPECT().Create(gomock.Any(), gomock.Any()).Return(note, nil)
+
+	handler := adhttp.NewHandler(s.manager, slog.New(slog.DiscardHandler))
+	fw := newFailWriter()
+	r := httptest.NewRequest(http.MethodPost, "/notes", strings.NewReader(`{"title":"t","content":"c"}`))
+
+	handler.CreateNote(fw, r)
+
+	s.NotNil(fw)
+}
+
+func (s *HandlerSuite) TestUpdateNote_WriteFail() {
+	note := newTestNote("t", "c")
+	s.manager.EXPECT().Update(gomock.Any(), testID, "code", gomock.Any()).Return(note, nil)
+
+	handler := adhttp.NewHandler(s.manager, slog.New(slog.DiscardHandler))
+	fw := newFailWriter()
+	body := `{"title":"t","content":"c","edit_code":"code"}`
+	r := httptest.NewRequest(http.MethodPut, "/notes/"+testID, strings.NewReader(body))
+	r.SetPathValue("id", testID)
+
+	handler.UpdateNote(fw, r)
+
+	s.NotNil(fw)
+}
+
+func (s *HandlerSuite) TestWriteErrorPage_WriteFail() {
+	s.manager.EXPECT().GetRendered(gomock.Any(), testID).Return(nil, "", domain.ErrNotFound)
+
+	handler := adhttp.NewHandler(s.manager, slog.New(slog.DiscardHandler))
+	fw := newFailWriter()
+	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
+	r.SetPathValue("id", testID)
+	r.Header.Set("Accept", "text/html")
+
+	handler.GetNote(fw, r)
+
+	s.Equal(http.StatusNotFound, fw.code)
+}
+
+func (s *HandlerSuite) TestRecovery_Panic() {
+	s.manager.EXPECT().View(gomock.Any(), "panic-id").DoAndReturn(
+		func(_ context.Context, _ string) (*domain.Note, error) {
+			panic("test panic")
+		},
+	)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/notes/panic-id", nil)
+	r.Header.Set("Accept", "application/json")
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusInternalServerError, w.Code)
 }
