@@ -32,7 +32,7 @@ func (h *Handler) SuccessPage(w http.ResponseWriter, r *http.Request) {
 		scheme = "https"
 	}
 
-	noteURL := scheme + "://" + r.Host + "/notes/" + id
+	noteURL := scheme + "://" + r.Host + "/" + id
 	burn := query.Get("burn") == "1"
 
 	expiresLabel := "never expires"

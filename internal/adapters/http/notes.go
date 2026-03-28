@@ -48,7 +48,7 @@ type noteRequest struct {
 	Title            string             `json:"title"`
 	Content          string             `json:"content"`
 	ContentType      domain.ContentType `json:"content_type,omitempty"`
-	Slug             string             `json:"slug,omitempty"`               // custom slug; absent = auto-generated UUID
+	Slug             string             `json:"slug,omitempty"`               // custom slug; absent = auto-generated 8-char ID
 	TTL              int64              `json:"ttl,omitempty"`                // seconds; 0 or absent means never expires
 	BurnAfterReading bool               `json:"burn_after_reading,omitempty"` // delete on first read
 }
@@ -112,7 +112,7 @@ func (h *Handler) CreateNote(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", mimeJSON)
-	w.Header().Set("Location", "/notes/"+note.ID)
+	w.Header().Set("Location", "/"+note.ID)
 	w.WriteHeader(http.StatusCreated)
 
 	err = json.NewEncoder(w).Encode(toNoteResponse(note))

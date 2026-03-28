@@ -390,7 +390,7 @@
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
                 Copy
             </button>
-            <a href="/notes/{{.ID}}?raw=1" class="meta-btn">
+            <a href="/{{.ID}}?raw=1" class="meta-btn">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
                 Raw
             </a>
@@ -408,7 +408,7 @@
     </div>
 
     <div class="paste-footer">
-        <a href="/notes/{{.ID}}?raw=1" class="paste-footer-link">Raw</a>
+        <a href="/{{.ID}}?raw=1" class="paste-footer-link">Raw</a>
         <span class="paste-footer-sep">·</span>
         <a href="/" class="paste-footer-link">Edit</a>
         <span class="paste-footer-sep">·</span>
@@ -421,7 +421,7 @@
 
 <script>
     (function () {
-        const saved = localStorage.getItem('padmark-theme') || 'dim';
+        const saved = localStorage.getItem('theme') || 'dim';
         document.documentElement.setAttribute('data-theme', saved);
         document.querySelectorAll('.theme-icon').forEach(btn => {
             btn.classList.toggle('active', btn.dataset.theme === saved);
@@ -431,7 +431,7 @@
     function setTheme(theme) {
         document.documentElement.classList.add('theme-transitioning');
         document.documentElement.setAttribute('data-theme', theme);
-        localStorage.setItem('padmark-theme', theme);
+        localStorage.setItem('theme', theme);
         document.querySelectorAll('.theme-icon').forEach(btn => {
             btn.classList.toggle('active', btn.dataset.theme === theme);
         });

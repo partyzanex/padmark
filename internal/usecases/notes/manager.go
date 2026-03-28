@@ -4,18 +4,41 @@ package notes
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/binary"
 	"fmt"
 	"html"
 	"log/slog"
 	"regexp"
 	"time"
 
-	"github.com/google/uuid"
-
 	"github.com/partyzanex/padmark/internal/domain"
 )
 
 var slugRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,99}$`)
+
+const slugChars = "abcdefghijklmnopqrstuvwxyz0123456789"
+
+func newSlug() string {
+	const length = 8
+	buf := make([]byte, length)
+
+	var rnd [8]byte
+
+	_, err := rand.Read(rnd[:])
+	if err != nil {
+		panic("crypto/rand unavailable: " + err.Error())
+	}
+
+	n := binary.LittleEndian.Uint64(rnd[:])
+
+	for i := range length {
+		buf[i] = slugChars[n%uint64(len(slugChars))]
+		n /= uint64(len(slugChars))
+	}
+
+	return string(buf)
+}
 
 const maxContentLength = 100_000
 
@@ -61,7 +84,7 @@ func (m *Manager) Create(ctx context.Context, note *domain.Note) (*domain.Note, 
 			return nil, domain.ErrInvalidSlug
 		}
 	} else {
-		note.ID = uuid.NewString()
+		note.ID = newSlug()
 	}
 
 	now := time.Now()

@@ -26,6 +26,7 @@ func NewRouter(handler *Handler) http.Handler {
 	mux.HandleFunc("DELETE /notes/{id}", handler.DeleteNote)
 	mux.HandleFunc("GET /healthz", handler.Healthz)
 	mux.HandleFunc("GET /readyz", handler.Readyz)
+	mux.HandleFunc("GET /{id}", handler.GetNote)
 
 	return withRequestID(withLogging(handler.log, withRecovery(handler.log, mux)))
 }

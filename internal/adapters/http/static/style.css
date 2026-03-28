@@ -514,27 +514,6 @@ body::before {
 
 .field-input::placeholder { color: var(--text-muted); }
 
-.slug-prefix {
-    position: relative;
-}
-
-.slug-prefix .field-input {
-    padding-left: 80px;
-}
-
-.slug-prefix::before {
-    content: '/notes/';
-    position: absolute;
-    left: 14px;
-    top: 50%;
-    transform: translateY(-50%);
-    font-family: var(--font-mono);
-    font-size: 0.82rem;
-    color: var(--text-muted);
-    pointer-events: none;
-    z-index: 1;
-}
-
 /* Custom select */
 .select-wrap { position: relative; }
 

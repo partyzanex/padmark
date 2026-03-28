@@ -80,7 +80,7 @@ func (s *HandlerSuite) TestCreateNote_OK() {
 	s.router.ServeHTTP(w, r)
 
 	s.Equal(http.StatusCreated, w.Code)
-	s.Contains(w.Header().Get("Location"), "/notes/")
+	s.Contains(w.Header().Get("Location"), "/")
 	s.Contains(w.Header().Get("Content-Type"), "application/json")
 
 	var resp testNoteResponse
@@ -124,7 +124,7 @@ func (s *HandlerSuite) TestCreateNote_WithSlug() {
 	s.router.ServeHTTP(w, r)
 
 	s.Equal(http.StatusCreated, w.Code)
-	s.Equal("/notes/my-note", w.Header().Get("Location"))
+	s.Equal("/my-note", w.Header().Get("Location"))
 
 	var resp testNoteResponse
 	s.Require().NoError(json.NewDecoder(w.Body).Decode(&resp))
