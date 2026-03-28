@@ -86,19 +86,20 @@
     - [x] Action buttons: Copy (raw content), Raw (link to `?raw=1`), Link (copy URL)
     - [x] Compact theme switcher (icon buttons, no pill)
     - [x] Footer links: Raw · Edit · New
-- [ ] Success / confirmation page — template matching `docs/design/success.html` (shown after `POST /notes`)
-    - [ ] Display generated URL with one-click copy
-    - [ ] "Burn after reading" warning banner when enabled
-    - [ ] TTL / expiry info
+- [x] Success / confirmation page — `GET /success?id=...&burn=1&expires=...`, template matching `docs/design/success.html`
+    - [x] Display generated URL with one-click copy
+    - [x] "Burn after reading" warning banner when enabled
+    - [x] TTL / expiry info (shown in subtitle: "just now · expires Jan 2, 2006")
 - [ ] Error page — template matching `docs/design/error.html`
     - [ ] 404 Not Found variant
     - [ ] Generic error variant
 
 ### Shared UI
-- [ ] Add `--success-glow`, `--warn`, `--warn-bg`, `--warn-border`, `--err-red`, `--err-amber` CSS variables to `static/style.css`
-- [ ] Add success-page and error-page component styles to `static/style.css`
+- [x] Add `--success-glow`, `--success-muted`, `--warn`, `--warn-bg`, `--warn-border` CSS variables to `static/style.css`
+- [ ] Add `--err-red`, `--err-amber` CSS variables to `static/style.css` (needed by error page)
+- [ ] Add success-page and error-page component styles to `static/style.css` (currently inline in templates)
 - [ ] Restore Slug field to `GET /` editor (alongside Title) — maps to custom slug feature above
-- [x] Theme preference persisted in `localStorage` on view page (index: `'theme'` key; view page: `'padmark-theme'` key — unify in a follow-up)
+- [ ] Unify `localStorage` theme key: view page uses `'padmark-theme'`, index/success use `'theme'`
 
 ## 9. Improvements (v2)
 - [ ] Note search (`GET /notes?q=...`)

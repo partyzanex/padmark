@@ -178,7 +178,10 @@
             }
 
             const note = await resp.json();
-            window.location.href = '/notes/' + note.id;
+            const params = new URLSearchParams({ id: note.id });
+            if (note.burn_after_reading) params.set('burn', '1');
+            if (note.expires_at) params.set('expires', note.expires_at);
+            window.location.href = '/success?' + params.toString();
         } catch (err) {
             btn.textContent = 'Error — try again';
             btn.style.background = '#ef4444';

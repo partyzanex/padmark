@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dim">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Padmark — Paste created</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            overflow-x: hidden;
+        }
+
+        body::before {
+            content: '';
+            position: fixed;
+            top: -40%;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 800px;
+            height: 800px;
+            background: radial-gradient(circle, rgba(52,211,153,0.05) 0%, transparent 70%);
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .wrapper {
+            position: relative;
+            z-index: 1;
+            width: 100%;
+            max-width: 600px;
+            padding: 60px 24px 80px;
+        }
+
+        /* ── Header ── */
+        .header {
+            margin-bottom: 48px;
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            animation: fade-up 0.5s ease both;
+        }
+
+        .header-left { display: flex; align-items: baseline; gap: 12px; }
+        .header-right { display: flex; align-items: center; gap: 20px; }
+        .header-links { display: flex; gap: 16px; }
+
+        .theme-icon {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            padding: 4px;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: color 0.25s ease, background 0.25s ease;
+        }
+
+        .theme-icon:hover {
+            color: var(--text-secondary);
+            background: var(--accent-glow);
+        }
+
+        .theme-icon.active { color: var(--text-primary); }
+
+        .header-sep {
+            width: 1px;
+            height: 14px;
+            background: var(--border-subtle);
+            margin: 0 2px;
+        }
+
+        /* ── Success card ── */
+        .success-card {
+            background: var(--bg-surface);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-lg);
+            overflow: hidden;
+            animation: fade-up 0.5s ease 0.08s both;
+        }
+
+        .success-banner {
+            padding: 24px 28px;
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            border-bottom: 1px solid var(--border-subtle);
+            background: var(--success-muted);
+        }
+
+        .success-icon {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background: var(--success);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            box-shadow: 0 0 16px var(--success-glow);
+            animation: pop-in 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) 0.3s both;
+        }
+
+        .success-icon svg {
+            width: 18px;
+            height: 18px;
+            stroke: #0a0a0f;
+            stroke-width: 3;
+            fill: none;
+        }
+
+        .success-title {
+            font-family: var(--font-display);
+            font-size: 1.15rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .success-subtitle {
+            font-family: var(--font-mono);
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            margin-top: 2px;
+        }
+
+        /* ── Card body ── */
+        .card-body {
+            padding: 28px;
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+        }
+
+        .field-block {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .field-block-label {
+            font-family: var(--font-mono);
+            font-size: 0.68rem;
+            font-weight: 500;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
+
+        .copy-row {
+            display: flex;
+            align-items: stretch;
+            border-radius: var(--radius-sm);
+            overflow: hidden;
+            border: 1px solid var(--border-subtle);
+            transition: border-color 0.2s ease;
+        }
+
+        .copy-row:hover { border-color: var(--border-focus); }
+
+        .copy-value {
+            flex: 1;
+            padding: 11px 14px;
+            background: var(--bg-elevated);
+            font-family: var(--font-mono);
+            font-size: 0.82rem;
+            color: var(--accent-hover);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            display: flex;
+            align-items: center;
+            border: none;
+            outline: none;
+            user-select: all;
+            text-decoration: none;
+        }
+
+        a.copy-value:hover {
+            text-decoration: underline;
+            text-underline-offset: 3px;
+        }
+
+        .copy-btn {
+            padding: 0 16px;
+            background: var(--bg-surface);
+            border: none;
+            border-left: 1px solid var(--border-subtle);
+            color: var(--text-secondary);
+            font-family: var(--font-mono);
+            font-size: 0.68rem;
+            font-weight: 500;
+            letter-spacing: 0.03em;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s ease;
+            white-space: nowrap;
+        }
+
+        .copy-btn:hover {
+            background: var(--accent-glow);
+            color: var(--text-primary);
+        }
+
+        .copy-btn svg { width: 14px; height: 14px; flex-shrink: 0; }
+        .copy-btn.copied { color: var(--success); }
+
+        .card-divider {
+            width: 100%;
+            height: 1px;
+            background: var(--border-subtle);
+        }
+
+        /* ── Warning ── */
+        .warning-block {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            padding: 12px 14px;
+            background: var(--warn-bg);
+            border: 1px solid var(--warn-border);
+            border-radius: var(--radius-sm);
+        }
+
+        .warning-icon { flex-shrink: 0; font-size: 0.9rem; line-height: 1.4; }
+
+        .warning-text {
+            font-family: var(--font-mono);
+            font-size: 0.72rem;
+            color: var(--text-secondary);
+            line-height: 1.5;
+        }
+
+        /* ── Actions ── */
+        .actions-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 0 28px 24px;
+            animation: fade-up 0.5s ease 0.16s both;
+        }
+
+        .btn-primary {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 11px 22px;
+            background: var(--accent);
+            color: #fff;
+            font-family: var(--font-display);
+            font-size: 0.85rem;
+            font-weight: 600;
+            border: none;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            text-decoration: none;
+            transition: all 0.25s ease;
+        }
+
+        .btn-primary:hover {
+            background: var(--accent-hover);
+            box-shadow: 0 4px 20px var(--accent-glow-strong);
+            transform: translateY(-1px);
+        }
+
+        .btn-primary:active { transform: translateY(0); }
+        .btn-primary svg { width: 15px; height: 15px; }
+
+        .btn-ghost {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 11px 20px;
+            background: transparent;
+            color: var(--text-secondary);
+            font-family: var(--font-display);
+            font-size: 0.85rem;
+            font-weight: 500;
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            text-decoration: none;
+            transition: all 0.25s ease;
+        }
+
+        .btn-ghost:hover {
+            border-color: var(--border-focus);
+            color: var(--text-primary);
+            background: var(--accent-glow);
+        }
+
+        .btn-ghost svg { width: 14px; height: 14px; }
+
+        /* ── Animations ── */
+        @keyframes pop-in {
+            from { opacity: 0; transform: scale(0.5); }
+            to   { opacity: 1; transform: scale(1); }
+        }
+
+        /* ── Responsive ── */
+        @media (max-width: 600px) {
+            .wrapper { padding: 36px 16px 60px; }
+            .success-banner { padding: 18px 20px; }
+            .card-body { padding: 20px; }
+            .actions-row { padding: 0 20px 20px; flex-wrap: wrap; }
+            .copy-value { font-size: 0.75rem; }
+        }
+    </style>
+</head>
+<body>
+<div class="wrapper">
+
+    <div class="header">
+        <div class="header-left">
+            <a href="/" class="logo">Padmark<span class="logo-dot"></span></a>
+        </div>
+        <div class="header-right">
+            <div style="display:flex;align-items:center;gap:6px;">
+                <button class="theme-icon" data-theme="light" title="Light" onclick="setTheme('light')">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+                </button>
+                <button class="theme-icon active" data-theme="dim" title="Dim" onclick="setTheme('dim')">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 2a7 7 0 0 0 0 20 10 10 0 0 1 0-20z"/></svg>
+                </button>
+                <button class="theme-icon" data-theme="dark" title="Dark" onclick="setTheme('dark')">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3a7 7 0 0 0 9.79 9.79z"/></svg>
+                </button>
+            </div>
+            <span class="header-sep"></span>
+            <a href="https://github.com/partyzanex/padmark" class="header-link" target="_blank" rel="noopener noreferrer">GitHub</a>
+        </div>
+    </div>
+
+    <div class="success-card">
+        <div class="success-banner">
+            <div class="success-icon">
+                <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+            </div>
+            <div>
+                <div class="success-title">Paste created</div>
+                <div class="success-subtitle">just now · {{.ExpiresLabel}}</div>
+            </div>
+        </div>
+
+        <div class="card-body">
+            <div class="field-block">
+                <span class="field-block-label">View link</span>
+                <div class="copy-row">
+                    <a href="{{.URL}}" class="copy-value" target="_blank" rel="noopener noreferrer">{{.URL}}</a>
+                    <button class="copy-btn" id="copyLinkBtn" onclick="copyText(this, {{.URL | js}})">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                        Copy
+                    </button>
+                </div>
+            </div>
+
+            {{if .BurnAfterReading}}
+            <div class="card-divider"></div>
+            <div class="warning-block">
+                <span class="warning-icon">🔥</span>
+                <span class="warning-text">Burn after reading — this note will be deleted permanently after the first person reads it.</span>
+            </div>
+            {{end}}
+        </div>
+
+        <div class="actions-row">
+            <a href="{{.URL}}" class="btn-primary">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                Go to paste
+            </a>
+            <a href="/" class="btn-ghost">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                Create another
+            </a>
+        </div>
+    </div>
+
+</div>
+
+<script>
+    (function () {
+        const saved = localStorage.getItem('theme') || 'dim';
+        document.documentElement.setAttribute('data-theme', saved);
+        document.querySelectorAll('.theme-icon').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.theme === saved);
+        });
+    }());
+
+    function setTheme(theme) {
+        document.documentElement.classList.add('theme-transitioning');
+        document.documentElement.setAttribute('data-theme', theme);
+        localStorage.setItem('theme', theme);
+        document.querySelectorAll('.theme-icon').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.theme === theme);
+        });
+        setTimeout(() => document.documentElement.classList.remove('theme-transitioning'), 450);
+    }
+
+    function copyText(btn, text) {
+        navigator.clipboard.writeText(text).then(() => {
+            const orig = btn.innerHTML;
+            btn.classList.add('copied');
+            btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> Copied`;
+            setTimeout(() => { btn.innerHTML = orig; btn.classList.remove('copied'); }, 2000);
+        });
+    }
+</script>
+</body>
+</html>

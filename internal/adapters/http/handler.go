@@ -36,20 +36,22 @@ type Pinger interface {
 
 // Handler holds dependencies for all HTTP handlers.
 type Handler struct {
-	manager   NoteManager
-	log       *slog.Logger
-	pinger    Pinger
-	noteTmpl  *template.Template
-	indexTmpl *template.Template
+	manager     NoteManager
+	log         *slog.Logger
+	pinger      Pinger
+	noteTmpl    *template.Template
+	indexTmpl   *template.Template
+	successTmpl *template.Template
 }
 
 // NewHandler creates a Handler with required dependencies.
 func NewHandler(manager NoteManager, log *slog.Logger) *Handler {
 	return &Handler{
-		manager:   manager,
-		log:       log,
-		noteTmpl:  template.Must(template.New("note").Parse(noteTmplSrc)),
-		indexTmpl: template.Must(template.New("index").Parse(indexTmplSrc)),
+		manager:     manager,
+		log:         log,
+		noteTmpl:    template.Must(template.New("note").Parse(noteTmplSrc)),
+		indexTmpl:   template.Must(template.New("index").Parse(indexTmplSrc)),
+		successTmpl: template.Must(template.New("success").Parse(successTmplSrc)),
 	}
 }
 

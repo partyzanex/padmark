@@ -18,6 +18,7 @@ func NewRouter(handler *Handler) http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /", handler.IndexPage)
+	mux.HandleFunc("GET /success", handler.SuccessPage)
 	mux.Handle("GET /static/", StaticHandler)
 	mux.HandleFunc("POST /notes", handler.CreateNote)
 	mux.HandleFunc("GET /notes/{id}", handler.GetNote)
