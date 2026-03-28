@@ -7,21 +7,15 @@ import (
 	"net/http"
 	"time"
 
+	_ "embed"
+
 	"github.com/partyzanex/padmark/internal/domain"
 )
 
-var noteTmpl = template.Must(template.New("note").Parse(`<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{{.Title}}</title>
-  <style>body{max-width:800px;margin:2rem auto;font-family:sans-serif;line-height:1.6;padding:0 1rem}pre,code{background:#f4f4f4;padding:.2em .4em;border-radius:3px}</style>
-</head>
-<body>
-{{.Body}}
-</body>
-</html>`))
+//go:embed templates/note.html
+var noteTmplSrc string
+
+var noteTmpl = template.Must(template.New("note").Parse(noteTmplSrc))
 
 type noteRequest struct {
 	Title       string             `json:"title"`
