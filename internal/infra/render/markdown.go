@@ -44,7 +44,8 @@ func NewRenderer() *Renderer {
 func (r *Renderer) Render(content string) (string, error) {
 	var buf bytes.Buffer
 
-	if err := r.md.Convert([]byte(content), &buf); err != nil {
+	err := r.md.Convert([]byte(content), &buf)
+	if err != nil {
 		return "", fmt.Errorf("render markdown: %w", err)
 	}
 

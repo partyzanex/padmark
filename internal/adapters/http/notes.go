@@ -15,8 +15,6 @@ import (
 //go:embed templates/note.html
 var noteTmplSrc string
 
-var noteTmpl = template.Must(template.New("note").Parse(noteTmplSrc))
-
 type noteRequest struct {
 	Title       string             `json:"title"`
 	Content     string             `json:"content"`
@@ -32,21 +30,23 @@ type noteResponse struct {
 	ContentType domain.ContentType `json:"content_type"`
 }
 
-func toNoteResponse(n *domain.Note) noteResponse {
+func toNoteResponse(note *domain.Note) noteResponse {
 	return noteResponse{
-		ID:          n.ID,
-		Title:       n.Title,
-		Content:     n.Content,
-		ContentType: n.ContentType,
-		CreatedAt:   n.CreatedAt,
-		UpdatedAt:   n.UpdatedAt,
+		ID:          note.ID,
+		Title:       note.Title,
+		Content:     note.Content,
+		ContentType: note.ContentType,
+		CreatedAt:   note.CreatedAt,
+		UpdatedAt:   note.UpdatedAt,
 	}
 }
 
 // CreateNote handles POST /notes.
 func (h *Handler) CreateNote(w http.ResponseWriter, r *http.Request) {
 	var req noteRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+
+	err := json.NewDecoder(r.Body).Decode(&req)
+	if err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
@@ -59,6 +59,7 @@ func (h *Handler) CreateNote(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.log.ErrorContext(r.Context(), "create note", "err", err)
 		writeError(w, err)
+
 		return
 	}
 
@@ -66,7 +67,8 @@ func (h *Handler) CreateNote(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Location", "/notes/"+note.ID)
 	w.WriteHeader(http.StatusCreated)
 
-	if err = json.NewEncoder(w).Encode(toNoteResponse(note)); err != nil {
+	err = json.NewEncoder(w).Encode(toNoteResponse(note))
+	if err != nil {
 		h.log.ErrorContext(r.Context(), "encode create response", "err", err)
 	}
 }
@@ -85,10 +87,14 @@ func (h *Handler) GetNote(w http.ResponseWriter, r *http.Request) {
 
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
-		if err = noteTmpl.Execute(w, struct {
+		err = h.noteTmpl.Execute(w, struct {
 			Title string
 			Body  template.HTML
-		}{Title: note.Title, Body: template.HTML(rendered)}); err != nil {
+		}{
+			Title: note.Title,
+			Body:  template.HTML(rendered), //nolint:gosec // content is bluemonday-sanitized
+		})
+		if err != nil {
 			h.log.ErrorContext(r.Context(), "render note template", "id", id, "err", err)
 		}
 
@@ -99,8 +105,17 @@ func (h *Handler) GetNote(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		fmt.Fprint(w, note.Content)
+		ct := "text/plain; charset=utf-8"
+		if note.ContentType == domain.ContentTypeMarkdown {
+			ct = "text/markdown; charset=utf-8"
+		}
+
+		w.Header().Set("Content-Type", ct)
+
+		_, err = fmt.Fprint(w, note.Content) //nolint:gosec // raw content is intentional for text/plain and text/markdown
+		if err != nil {
+			h.log.ErrorContext(r.Context(), "write plain content", "id", id, "err", err)
+		}
 
 	default:
 		note, err := h.manager.Get(r.Context(), id)
@@ -111,7 +126,8 @@ func (h *Handler) GetNote(w http.ResponseWriter, r *http.Request) {
 
 		w.Header().Set("Content-Type", mimeJSON)
 
-		if err = json.NewEncoder(w).Encode(toNoteResponse(note)); err != nil {
+		err = json.NewEncoder(w).Encode(toNoteResponse(note))
+		if err != nil {
 			h.log.ErrorContext(r.Context(), "encode get response", "err", err)
 		}
 	}
@@ -122,7 +138,9 @@ func (h *Handler) UpdateNote(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
 	var req noteRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+
+	err := json.NewDecoder(r.Body).Decode(&req)
+	if err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
@@ -135,12 +153,14 @@ func (h *Handler) UpdateNote(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.log.ErrorContext(r.Context(), "update note", "id", id, "err", err)
 		writeError(w, err)
+
 		return
 	}
 
 	w.Header().Set("Content-Type", mimeJSON)
 
-	if err = json.NewEncoder(w).Encode(toNoteResponse(note)); err != nil {
+	err = json.NewEncoder(w).Encode(toNoteResponse(note))
+	if err != nil {
 		h.log.ErrorContext(r.Context(), "encode update response", "err", err)
 	}
 }
@@ -149,7 +169,8 @@ func (h *Handler) UpdateNote(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) DeleteNote(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	if err := h.manager.Delete(r.Context(), id); err != nil {
+	err := h.manager.Delete(r.Context(), id)
+	if err != nil {
 		writeError(w, err)
 		return
 	}

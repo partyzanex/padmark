@@ -102,3 +102,29 @@ golangci-lint v2, nearly all linters enabled:
 - Binaries go to `bin/` (gitignored); vendor is committed (`go mod vendor`)
 - `cmd/server/main.go` is 10–15 lines; all logic lives in `internal/infra/cmd/`
 - Dockerfile: multi-stage build → scratch image
+
+## Frontend Guidelines
+
+### Design references
+
+HTML mockups live in `docs/design/`:
+- `padmark-main.html` — main page (editor)
+- `padmark-success.html` — post-create confirmation page
+- `padmark-view.html` — note view page
+
+**Always read the relevant mockup in full before writing any template or CSS.**
+
+### Rules
+
+- All styles, colours, fonts, and spacing must come **exclusively** from the mockups — do not invent values
+- Fonts: **Outfit** (UI), **JetBrains Mono** (code / labels), **Source Serif 4** (prose)
+- Three themes: **light**, **dim** (default), **dark** — implemented via CSS variables on `[data-theme]`
+- Do not change the design unless explicitly requested
+- Do not add colours, fonts, or spacing not present in the mockups
+- Templating engine: `html/template`; styles inline in `<style>` blocks
+
+### Workflow for each frontend task
+
+1. Read the relevant `design/*.html` mockup in full
+2. Implement using the exact CSS variables, class names, and layout from the mockup
+3. After implementation, compare your output against the mockup — every variable, class, and spacing value must match

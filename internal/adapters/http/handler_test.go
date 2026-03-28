@@ -34,6 +34,7 @@ type testNoteResponse struct {
 
 type HandlerSuite struct {
 	suite.Suite
+
 	db     *bun.DB
 	router http.Handler
 }
@@ -59,22 +60,6 @@ func (s *HandlerSuite) SetupTest() {
 
 func (s *HandlerSuite) TearDownTest() {
 	s.Require().NoError(s.db.Close())
-}
-
-// createNote is a test helper that inserts a note and returns its ID.
-func (s *HandlerSuite) createNote(title, content string) string {
-	body := fmt.Sprintf(`{"title":%q,"content":%q}`, title, content)
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodPost, "/notes", strings.NewReader(body))
-	r.Header.Set("Content-Type", "application/json")
-
-	s.router.ServeHTTP(w, r)
-	s.Require().Equal(http.StatusCreated, w.Code)
-
-	var resp testNoteResponse
-	s.Require().NoError(json.NewDecoder(w.Body).Decode(&resp))
-
-	return resp.ID
 }
 
 // CreateNote
@@ -156,10 +141,20 @@ func (s *HandlerSuite) TestGetNote_HTML() {
 }
 
 func (s *HandlerSuite) TestGetNote_Plain() {
-	id := s.createNote("plain note", "raw content here")
+	// Create a text/plain note so the response Content-Type matches.
+	body := `{"title":"plain note","content":"raw content here","content_type":"text/plain"}`
+	cw := httptest.NewRecorder()
+	cr := httptest.NewRequest(http.MethodPost, "/notes", strings.NewReader(body))
+	cr.Header.Set("Content-Type", "application/json")
+	s.router.ServeHTTP(cw, cr)
+	s.Require().Equal(http.StatusCreated, cw.Code)
+
+	var created testNoteResponse
+
+	s.Require().NoError(json.NewDecoder(cw.Body).Decode(&created))
 
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet, "/notes/"+id, nil)
+	r := httptest.NewRequest(http.MethodGet, "/notes/"+created.ID, nil)
 	r.Header.Set("Accept", "text/plain")
 
 	s.router.ServeHTTP(w, r)
@@ -179,6 +174,7 @@ func (s *HandlerSuite) TestGetNote_Markdown() {
 	s.router.ServeHTTP(w, r)
 
 	s.Equal(http.StatusOK, w.Code)
+	s.Contains(w.Header().Get("Content-Type"), "text/markdown")
 	s.Equal("raw **md**", w.Body.String())
 }
 
@@ -194,11 +190,21 @@ func (s *HandlerSuite) TestGetNote_NotFound() {
 // UpdateNote
 
 func (s *HandlerSuite) TestUpdateNote_OK() {
-	id := s.createNote("old title", "old content")
+	// Create with explicit content_type so we can verify it is preserved.
+	createBody := `{"title":"old title","content":"old content","content_type":"text/plain"}`
+	cw := httptest.NewRecorder()
+	cr := httptest.NewRequest(http.MethodPost, "/notes", strings.NewReader(createBody))
+	cr.Header.Set("Content-Type", "application/json")
+	s.router.ServeHTTP(cw, cr)
+	s.Require().Equal(http.StatusCreated, cw.Code)
+
+	var created testNoteResponse
+
+	s.Require().NoError(json.NewDecoder(cw.Body).Decode(&created))
 
 	body := `{"title":"new title","content":"new content"}`
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodPut, "/notes/"+id, strings.NewReader(body))
+	r := httptest.NewRequest(http.MethodPut, "/notes/"+created.ID, strings.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")
 
 	s.router.ServeHTTP(w, r)
@@ -209,6 +215,8 @@ func (s *HandlerSuite) TestUpdateNote_OK() {
 	s.Require().NoError(json.NewDecoder(w.Body).Decode(&resp))
 	s.Equal("new title", resp.Title)
 	s.Equal("new content", resp.Content)
+	s.False(resp.CreatedAt.IsZero(), "created_at must be preserved")
+	s.Equal(created.ContentType, resp.ContentType, "content_type must be preserved when not provided")
 }
 
 func (s *HandlerSuite) TestUpdateNote_NotFound() {
@@ -291,4 +299,20 @@ func (s *HandlerSuite) TestRequestIDHeader() {
 	s.router.ServeHTTP(w, r)
 
 	s.NotEmpty(w.Header().Get("X-Request-ID"))
+}
+
+// createNote is a test helper that inserts a note and returns its ID.
+func (s *HandlerSuite) createNote(title, content string) string {
+	body := fmt.Sprintf(`{"title":%q,"content":%q}`, title, content)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/notes", strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+
+	s.router.ServeHTTP(w, r)
+	s.Require().Equal(http.StatusCreated, w.Code)
+
+	var resp testNoteResponse
+	s.Require().NoError(json.NewDecoder(w.Body).Decode(&resp))
+
+	return resp.ID
 }

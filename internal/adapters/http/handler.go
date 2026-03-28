@@ -1,21 +1,44 @@
+//go:generate go run go.uber.org/mock/mockgen@latest -source=handler.go -destination=handler_mocks_test.go -package=http_test
+
 package http
 
 import (
+	"context"
+	"html/template"
 	"log/slog"
 
-	"github.com/partyzanex/padmark/internal/usecases/notes"
+	"github.com/partyzanex/padmark/internal/domain"
 )
+
+// NoteManager is the interface the HTTP adapter requires from the business logic layer.
+type NoteManager interface {
+	Create(ctx context.Context, note *domain.Note) (*domain.Note, error)
+	Get(ctx context.Context, id string) (*domain.Note, error)
+	GetRendered(ctx context.Context, id string) (*domain.Note, string, error)
+	Update(ctx context.Context, id string, note *domain.Note) (*domain.Note, error)
+	Delete(ctx context.Context, id string) error
+}
+
+// Pinger checks database connectivity.
+type Pinger interface {
+	PingContext(ctx context.Context) error
+}
 
 // Handler holds dependencies for all HTTP handlers.
 type Handler struct {
-	manager *notes.Manager
-	log     *slog.Logger
-	pinger  Pinger
+	manager  NoteManager
+	log      *slog.Logger
+	pinger   Pinger
+	noteTmpl *template.Template
 }
 
 // NewHandler creates a Handler with required dependencies.
-func NewHandler(manager *notes.Manager, log *slog.Logger) *Handler {
-	return &Handler{manager: manager, log: log}
+func NewHandler(manager NoteManager, log *slog.Logger) *Handler {
+	return &Handler{
+		manager:  manager,
+		log:      log,
+		noteTmpl: template.Must(template.New("note").Parse(noteTmplSrc)),
+	}
 }
 
 // WithPinger attaches a readiness probe to the handler.

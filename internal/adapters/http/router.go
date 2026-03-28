@@ -14,17 +14,17 @@ type contextKey uint8
 const keyRequestID contextKey = 1
 
 // NewRouter registers all routes and wraps them with request-ID, logging, and recovery middleware.
-func NewRouter(h *Handler) http.Handler {
+func NewRouter(handler *Handler) http.Handler {
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("POST /notes", h.CreateNote)
-	mux.HandleFunc("GET /notes/{id}", h.GetNote)
-	mux.HandleFunc("PUT /notes/{id}", h.UpdateNote)
-	mux.HandleFunc("DELETE /notes/{id}", h.DeleteNote)
-	mux.HandleFunc("GET /healthz", h.Healthz)
-	mux.HandleFunc("GET /readyz", h.Readyz)
+	mux.HandleFunc("POST /notes", handler.CreateNote)
+	mux.HandleFunc("GET /notes/{id}", handler.GetNote)
+	mux.HandleFunc("PUT /notes/{id}", handler.UpdateNote)
+	mux.HandleFunc("DELETE /notes/{id}", handler.DeleteNote)
+	mux.HandleFunc("GET /healthz", handler.Healthz)
+	mux.HandleFunc("GET /readyz", handler.Readyz)
 
-	return withRequestID(withLogging(h.log, withRecovery(h.log, mux)))
+	return withRequestID(withLogging(handler.log, withRecovery(handler.log, mux)))
 }
 
 func withRequestID(next http.Handler) http.Handler {
@@ -37,6 +37,7 @@ func withRequestID(next http.Handler) http.Handler {
 
 type statusRecorder struct {
 	http.ResponseWriter
+
 	status  int
 	written bool
 }
@@ -56,7 +57,7 @@ func (sr *statusRecorder) Write(b []byte) (int, error) {
 		sr.written = true
 	}
 
-	return sr.ResponseWriter.Write(b)
+	return sr.ResponseWriter.Write(b) //nolint:wrapcheck // pass-through implementation of io.Writer
 }
 
 func withLogging(log *slog.Logger, next http.Handler) http.Handler {
@@ -77,9 +78,11 @@ func withLogging(log *slog.Logger, next http.Handler) http.Handler {
 
 func withRecovery(log *slog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+
 		defer func() {
 			if p := recover(); p != nil {
-				log.ErrorContext(r.Context(), "panic recovered", "panic", p)
+				log.ErrorContext(ctx, "panic recovered", "panic", p)
 				http.Error(w, "internal server error", http.StatusInternalServerError)
 			}
 		}()

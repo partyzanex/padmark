@@ -11,6 +11,7 @@ import (
 
 type RendererSuite struct {
 	suite.Suite
+
 	r *render.Renderer
 }
 

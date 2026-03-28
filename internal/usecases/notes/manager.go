@@ -5,6 +5,7 @@ package notes
 import (
 	"context"
 	"fmt"
+	"html"
 	"log/slog"
 	"time"
 
@@ -76,21 +77,31 @@ func (m *Manager) Get(ctx context.Context, id string) (*domain.Note, error) {
 	return note, nil
 }
 
-// Update validates and updates an existing note.
+// Update validates and updates an existing note, preserving immutable metadata.
 func (m *Manager) Update(ctx context.Context, id string, note *domain.Note) (*domain.Note, error) {
 	err := m.validate(note)
 	if err != nil {
 		return nil, err
 	}
 
+	existing, err := m.storage.Get(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("update note: %w", err)
+	}
+
+	note.ID = id
+	note.CreatedAt = existing.CreatedAt
 	note.UpdatedAt = time.Now()
+
+	if note.ContentType == "" {
+		note.ContentType = existing.ContentType
+	}
 
 	err = m.storage.Update(ctx, id, note)
 	if err != nil {
 		return nil, fmt.Errorf("update note: %w", err)
 	}
 
-	note.ID = id
 	m.log.DebugContext(ctx, "note updated", "id", id)
 
 	return note, nil
@@ -106,19 +117,24 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
-// GetRendered fetches a note and returns it together with its content rendered as HTML.
+// GetRendered fetches a note and returns it together with its content as safe HTML.
+// Plain-text notes are HTML-escaped and wrapped in <pre>; markdown notes are rendered.
 func (m *Manager) GetRendered(ctx context.Context, id string) (*domain.Note, string, error) {
 	note, err := m.storage.Get(ctx, id)
 	if err != nil {
 		return nil, "", fmt.Errorf("get note for render: %w", err)
 	}
 
-	html, err := m.renderer.Render(note.Content)
+	if note.ContentType == domain.ContentTypePlain {
+		return note, "<pre>" + html.EscapeString(note.Content) + "</pre>", nil
+	}
+
+	rendered, err := m.renderer.Render(note.Content)
 	if err != nil {
 		return nil, "", fmt.Errorf("render note %s: %w", id, err)
 	}
 
-	return note, html, nil
+	return note, rendered, nil
 }
 
 func (m *Manager) validate(note *domain.Note) error {

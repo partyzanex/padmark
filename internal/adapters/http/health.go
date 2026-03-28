@@ -1,14 +1,8 @@
 package http
 
 import (
-	"context"
 	"net/http"
 )
-
-// Pinger checks database connectivity.
-type Pinger interface {
-	PingContext(ctx context.Context) error
-}
 
 // Healthz handles GET /healthz — always returns 200.
 func (h *Handler) Healthz(w http.ResponseWriter, _ *http.Request) {
@@ -22,7 +16,8 @@ func (h *Handler) Readyz(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.pinger.PingContext(r.Context()); err != nil {
+	err := h.pinger.PingContext(r.Context())
+	if err != nil {
 		http.Error(w, "db unavailable", http.StatusServiceUnavailable)
 		return
 	}

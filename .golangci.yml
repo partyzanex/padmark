@@ -44,6 +44,9 @@ linters:
     gocyclo:
       min-complexity: 12
 
+    cyclop:
+      max-complexity: 12
+
     depguard:
       rules:
         main:
@@ -68,6 +71,7 @@ linters:
         - GenerateIntRes
         - GetRequestByIDRes
         - GetTokensRes
+        - http.Handler
 
     lll:
       line-length: 121
@@ -161,6 +165,10 @@ linters:
 
     varnamelen:
       min-name-length: 2
+      ignore-names:
+        - w  # idiomatic http.ResponseWriter parameter
+        - r  # idiomatic *http.Request parameter
+        - b  # idiomatic []byte parameter (io.Writer)
 
     revive:
       confidence: 0.4
@@ -173,6 +181,12 @@ linters:
         linters:
           - funlen
       - text: "Function 'Run' is too long"
+        linters:
+          - funlen
+      - text: "Function 'action' has too many statements"
+        linters:
+          - funlen
+      - text: "Function 'action' is too long"
         linters:
           - funlen
       - text: "cyclomatic complexity [0-9]+ of func `Run` is high"

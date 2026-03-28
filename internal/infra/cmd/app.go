@@ -23,7 +23,10 @@ import (
 	"github.com/partyzanex/padmark/internal/usecases/notes"
 )
 
-const shutdownTimeout = 10 * time.Second
+const (
+	shutdownTimeout   = 10 * time.Second
+	readHeaderTimeout = 5 * time.Second
+)
 
 // NewApp builds the CLI application with all flags configured.
 func NewApp() *cli.Command {
@@ -62,7 +65,7 @@ func NewApp() *cli.Command {
 
 // Run starts the application with the provided context and os.Args.
 func Run(ctx context.Context) error {
-	return NewApp().Run(ctx, os.Args)
+	return NewApp().Run(ctx, os.Args) //nolint:wrapcheck // top-level delegation, cli errors are self-descriptive
 }
 
 func action(ctx context.Context, cmd *cli.Command) error {
@@ -74,9 +77,16 @@ func action(ctx context.Context, cmd *cli.Command) error {
 	if err != nil {
 		return fmt.Errorf("open db: %w", err)
 	}
-	defer db.Close()
 
-	if err = sqlite.Migrate(ctx, db); err != nil {
+	defer func() {
+		closeErr := db.Close()
+		if closeErr != nil {
+			log.ErrorContext(ctx, "close db", "err", closeErr)
+		}
+	}()
+
+	err = sqlite.Migrate(ctx, db)
+	if err != nil {
 		return fmt.Errorf("migrate: %w", err)
 	}
 
@@ -94,8 +104,9 @@ func action(ctx context.Context, cmd *cli.Command) error {
 
 	// 6. Server
 	srv := &http.Server{
-		Addr:    cmd.String(FlagAddr),
-		Handler: router,
+		Addr:              cmd.String(FlagAddr),
+		Handler:           router,
+		ReadHeaderTimeout: readHeaderTimeout,
 	}
 
 	stopCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
@@ -104,10 +115,11 @@ func action(ctx context.Context, cmd *cli.Command) error {
 	errCh := make(chan error, 1)
 
 	go func() {
-		log.InfoContext(ctx, "server started", "addr", srv.Addr)
+		log.InfoContext(ctx, "server started", "addr", srv.Addr, "dsn", cmd.String(FlagDSN))
 
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			errCh <- err
+		serveErr := srv.ListenAndServe()
+		if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+			errCh <- serveErr
 		}
 
 		close(errCh)
@@ -119,12 +131,15 @@ func action(ctx context.Context, cmd *cli.Command) error {
 	case <-stopCtx.Done():
 	}
 
+	// stopCtx is already cancelled at this point, so we use a fresh background context
+	// to give the server the full shutdownTimeout to drain in-flight requests.
 	shutCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 
 	log.InfoContext(ctx, "shutting down")
 
-	if err = srv.Shutdown(shutCtx); err != nil {
+	err = srv.Shutdown(shutCtx) //nolint:contextcheck
+	if err != nil {
 		return fmt.Errorf("shutdown: %w", err)
 	}
 
@@ -139,7 +154,8 @@ func openDB(ctx context.Context, dsn string) (*bun.DB, error) {
 
 	db := bun.NewDB(sqldb, sqlitedialect.New())
 
-	if err = db.PingContext(ctx); err != nil {
+	err = db.PingContext(ctx)
+	if err != nil {
 		return nil, fmt.Errorf("db ping: %w", err)
 	}
 

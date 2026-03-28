@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dim">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Padmark — 404</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+
+        :root {
+            --bg-deep: #0a0a0f;
+            --bg-surface: #111118;
+            --bg-elevated: #18181f;
+            --border-subtle: rgba(255,255,255,0.06);
+            --border-focus: rgba(120,130,255,0.4);
+            --text-primary: #e8e8ed;
+            --text-secondary: #7a7a8e;
+            --text-muted: #4a4a5e;
+            --accent: #6366f1;
+            --accent-hover: #818cf8;
+            --accent-glow: rgba(99,102,241,0.15);
+            --accent-glow-strong: rgba(99,102,241,0.3);
+            --err-red: #f87171;
+            --err-red-muted: rgba(248,113,113,0.08);
+            --err-red-border: rgba(248,113,113,0.15);
+            --err-amber: #fbbf24;
+            --err-amber-muted: rgba(251,191,36,0.08);
+            --err-amber-border: rgba(251,191,36,0.15);
+            --font-display: 'Outfit', sans-serif;
+            --font-mono: 'JetBrains Mono', monospace;
+            --radius-sm: 8px;
+            --radius-lg: 16px;
+        }
+
+        [data-theme="dim"] {
+            --bg-deep: #1e1e28;
+            --bg-surface: #272733;
+            --bg-elevated: #2e2e3a;
+            --border-subtle: rgba(255,255,255,0.08);
+            --border-focus: rgba(120,130,255,0.35);
+            --text-primary: #d8d8e0;
+            --text-secondary: #8e8ea2;
+            --text-muted: #5e5e74;
+            --accent: #7c7ff7;
+            --accent-hover: #9b9dfa;
+            --accent-glow: rgba(124,127,247,0.12);
+            --accent-glow-strong: rgba(124,127,247,0.25);
+        }
+
+        [data-theme="light"] {
+            --bg-deep: #f4f4f8;
+            --bg-surface: #ffffff;
+            --bg-elevated: #eeeef3;
+            --border-subtle: rgba(0,0,0,0.08);
+            --border-focus: rgba(99,102,241,0.35);
+            --text-primary: #1a1a2e;
+            --text-secondary: #5c5c78;
+            --text-muted: #9898ae;
+            --accent: #5558e8;
+            --accent-hover: #6366f1;
+            --accent-glow: rgba(85,88,232,0.1);
+            --accent-glow-strong: rgba(85,88,232,0.2);
+            --err-red-muted: rgba(220,38,38,0.06);
+            --err-red-border: rgba(220,38,38,0.12);
+            --err-amber-muted: rgba(217,160,0,0.06);
+            --err-amber-border: rgba(217,160,0,0.14);
+        }
+
+        html { font-size: 16px; }
+
+        body {
+            font-family: var(--font-display);
+            background: var(--bg-deep);
+            color: var(--text-primary);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            overflow-x: hidden;
+            transition: background 0.4s ease, color 0.4s ease;
+        }
+
+        body::before {
+            content: '';
+            position: fixed;
+            top: -40%;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 800px;
+            height: 800px;
+            background: radial-gradient(circle, rgba(248,113,113,0.04) 0%, transparent 70%);
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .wrapper {
+            position: relative;
+            z-index: 1;
+            width: 100%;
+            max-width: 540px;
+            padding: 60px 24px 80px;
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+
+        /* Header */
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 0;
+            animation: fade-up 0.45s ease both;
+        }
+
+        .header-left { display: flex; align-items: baseline; gap: 12px; }
+
+        .logo {
+            font-family: var(--font-display);
+            font-size: 1.5rem;
+            font-weight: 700;
+            letter-spacing: -0.03em;
+            background: linear-gradient(135deg, var(--text-primary) 0%, var(--text-secondary) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            text-decoration: none;
+        }
+
+        .logo-dot {
+            display: inline-block;
+            width: 5px; height: 5px;
+            background: var(--accent);
+            border-radius: 50%;
+            margin-left: 1px;
+            vertical-align: baseline;
+            box-shadow: 0 0 8px var(--accent-glow-strong);
+        }
+
+        .header-nav {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+
+        .header-link {
+            font-family: var(--font-mono);
+            font-size: 0.72rem;
+            color: var(--text-secondary);
+            text-decoration: none;
+            letter-spacing: 0.04em;
+            transition: color 0.2s;
+        }
+        .header-link:hover { color: var(--accent-hover); }
+
+        .header-sep {
+            width: 1px;
+            height: 14px;
+            background: var(--border-subtle);
+            margin: 0 2px;
+        }
+
+        .theme-icon {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            padding: 4px;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: color 0.25s ease, background 0.25s ease;
+        }
+        .theme-icon:hover { color: var(--text-secondary); background: var(--accent-glow); }
+        .theme-icon.active { color: var(--text-primary); }
+
+        /* Error content */
+        .error-center {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .error-content {
+            text-align: center;
+            animation: fade-up 0.5s ease 0.08s both;
+        }
+
+        .error-code {
+            font-family: var(--font-mono);
+            font-size: 7rem;
+            font-weight: 600;
+            letter-spacing: -0.04em;
+            line-height: 1;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+            position: relative;
+            display: inline-block;
+        }
+
+        .error-code::after {
+            content: '';
+            position: absolute;
+            bottom: 6px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 60%;
+            height: 3px;
+            border-radius: 2px;
+            background: var(--err-red);
+            opacity: 0.4;
+        }
+
+        /* color variants */
+        .error-content[data-type="client"] .error-code::after {
+            background: var(--err-amber);
+        }
+
+        .error-content[data-type="server"] .error-code::after {
+            background: var(--err-red);
+        }
+
+        .error-title {
+            font-family: var(--font-display);
+            font-size: 1.3rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 8px;
+            letter-spacing: -0.01em;
+        }
+
+        .error-desc {
+            font-family: var(--font-mono);
+            font-size: 0.78rem;
+            color: var(--text-secondary);
+            line-height: 1.6;
+            max-width: 380px;
+            margin: 0 auto 32px;
+        }
+
+        .error-actions {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .btn-primary {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 11px 24px;
+            background: var(--accent);
+            color: #fff;
+            font-family: var(--font-display);
+            font-size: 0.85rem;
+            font-weight: 600;
+            border: none;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            text-decoration: none;
+            transition: all 0.25s ease;
+        }
+        .btn-primary:hover {
+            background: var(--accent-hover);
+            box-shadow: 0 4px 20px var(--accent-glow-strong);
+            transform: translateY(-1px);
+        }
+        .btn-primary:active { transform: translateY(0); }
+        .btn-primary svg { width: 15px; height: 15px; }
+
+        .btn-ghost {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 11px 20px;
+            background: transparent;
+            color: var(--text-secondary);
+            font-family: var(--font-display);
+            font-size: 0.85rem;
+            font-weight: 500;
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            text-decoration: none;
+            transition: all 0.25s ease;
+        }
+        .btn-ghost:hover {
+            border-color: var(--border-focus);
+            color: var(--text-primary);
+            background: var(--accent-glow);
+        }
+        .btn-ghost svg { width: 14px; height: 14px; }
+
+        /* Error detail (optional, for 500) */
+        .error-detail {
+            margin-top: 24px;
+            padding: 14px 18px;
+            background: var(--err-red-muted);
+            border: 1px solid var(--err-red-border);
+            border-radius: var(--radius-sm);
+            text-align: left;
+            max-width: 420px;
+            margin-left: auto;
+            margin-right: auto;
+            animation: fade-up 0.4s ease 0.22s both;
+        }
+
+        .error-content[data-type="client"] .error-detail {
+            background: var(--err-amber-muted);
+            border-color: var(--err-amber-border);
+        }
+
+        .error-detail-label {
+            font-family: var(--font-mono);
+            font-size: 0.6rem;
+            font-weight: 500;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            margin-bottom: 6px;
+        }
+
+        .error-detail-text {
+            font-family: var(--font-mono);
+            font-size: 0.72rem;
+            color: var(--text-secondary);
+            line-height: 1.55;
+            word-break: break-all;
+        }
+
+        /* Tabs to switch demo */
+        .demo-tabs {
+            display: flex;
+            justify-content: center;
+            gap: 4px;
+            margin-top: auto;
+            padding-top: 32px;
+            animation: fade-up 0.4s ease 0.26s both;
+        }
+
+        .demo-tab {
+            font-family: var(--font-mono);
+            font-size: 0.68rem;
+            color: var(--text-muted);
+            background: var(--bg-surface);
+            border: 1px solid var(--border-subtle);
+            padding: 6px 14px;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            letter-spacing: 0.02em;
+        }
+
+        .demo-tab:hover {
+            border-color: var(--border-focus);
+            color: var(--text-secondary);
+        }
+
+        .demo-tab.active {
+            background: var(--accent-glow);
+            border-color: var(--border-focus);
+            color: var(--text-primary);
+        }
+
+        /* Animations */
+        @keyframes fade-up {
+            from { opacity: 0; transform: translateY(12px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .theme-transitioning,
+        .theme-transitioning *,
+        .theme-transitioning *::before,
+        .theme-transitioning *::after {
+            transition: background-color 0.4s ease, border-color 0.4s ease, color 0.4s ease, box-shadow 0.4s ease !important;
+        }
+
+        @media (max-width: 600px) {
+            .wrapper { padding: 36px 16px 48px; }
+            .error-code { font-size: 5rem; }
+            .error-title { font-size: 1.1rem; }
+            .error-actions { flex-direction: column; }
+        }
+    </style>
+</head>
+<body>
+<div class="wrapper">
+
+    <div class="header">
+        <div class="header-left">
+            <a href="#" class="logo">Padmark<span class="logo-dot"></span></a>
+        </div>
+        <div class="header-nav">
+            <a href="#" class="header-link">API</a>
+            <a href="#" class="header-link">GitHub</a>
+            <span class="header-sep"></span>
+            <button class="theme-icon" data-theme="light" title="Light" onclick="setTheme('light')">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+            </button>
+            <button class="theme-icon active" data-theme="dim" title="Dim" onclick="setTheme('dim')">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 2a7 7 0 0 0 0 20 10 10 0 0 1 0-20z"/></svg>
+            </button>
+            <button class="theme-icon" data-theme="dark" title="Dark" onclick="setTheme('dark')">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3a7 7 0 0 0 9.79 9.79z"/></svg>
+            </button>
+        </div>
+    </div>
+
+    <div class="error-center">
+        <div class="error-content" id="errorContent" data-type="client">
+            <div class="error-code" id="errorCode">404</div>
+            <div class="error-title" id="errorTitle">Paste not found</div>
+            <div class="error-desc" id="errorDesc">The paste you're looking for doesn't exist, has expired, or was deleted by its author.</div>
+
+            <div class="error-actions">
+                <a href="#" class="btn-primary">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                    Create new paste
+                </a>
+                <a href="#" class="btn-ghost">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+                    Home
+                </a>
+            </div>
+
+            <div class="error-detail" id="errorDetail" style="display:none;">
+                <div class="error-detail-label">Details</div>
+                <div class="error-detail-text" id="errorDetailText"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Demo switcher — remove in production -->
+    <div class="demo-tabs">
+        <button class="demo-tab active" onclick="showError('404')">404</button>
+        <button class="demo-tab" onclick="showError('410')">410</button>
+        <button class="demo-tab" onclick="showError('429')">429</button>
+        <button class="demo-tab" onclick="showError('500')">500</button>
+        <button class="demo-tab" onclick="showError('502')">502</button>
+        <button class="demo-tab" onclick="showError('503')">503</button>
+    </div>
+
+</div>
+
+<script>
+    const errors = {
+        '404': {
+            type: 'client',
+            title: 'Paste not found',
+            desc: "The paste you're looking for doesn't exist, has expired, or was deleted by its author.",
+            detail: null
+        },
+        '410': {
+            type: 'client',
+            title: 'Paste expired',
+            desc: 'This paste had a limited lifetime and has been automatically deleted after expiration.',
+            detail: null
+        },
+        '429': {
+            type: 'client',
+            title: 'Too many requests',
+            desc: "You've hit the rate limit. Please wait a moment before trying again.",
+            detail: 'Rate limit: 60 requests per minute. Retry after 23 seconds.'
+        },
+        '500': {
+            type: 'server',
+            title: 'Internal server error',
+            desc: "Something went wrong on our end. The issue has been logged and we're looking into it.",
+            detail: 'ERR_INTERNAL: unexpected nil pointer in storage layer — ref: pad_8f2a1c'
+        },
+        '502': {
+            type: 'server',
+            title: 'Bad gateway',
+            desc: 'The server received an invalid response from an upstream service. Try again shortly.',
+            detail: null
+        },
+        '503': {
+            type: 'server',
+            title: 'Service unavailable',
+            desc: 'Padmark is temporarily down for maintenance. We should be back in a few minutes.',
+            detail: 'Scheduled maintenance window: 02:00–02:30 UTC'
+        }
+    };
+
+    function showError(code) {
+        const err = errors[code];
+        const el = document.getElementById('errorContent');
+        el.setAttribute('data-type', err.type);
+        document.getElementById('errorCode').textContent = code;
+        document.getElementById('errorTitle').textContent = err.title;
+        document.getElementById('errorDesc').textContent = err.desc;
+        document.title = `Padmark — ${code}`;
+
+        const detailEl = document.getElementById('errorDetail');
+        if (err.detail) {
+            document.getElementById('errorDetailText').textContent = err.detail;
+            detailEl.style.display = 'block';
+        } else {
+            detailEl.style.display = 'none';
+        }
+
+        document.querySelectorAll('.demo-tab').forEach(t => {
+            t.classList.toggle('active', t.textContent === code);
+        });
+    }
+
+    function setTheme(theme) {
+        document.documentElement.classList.add('theme-transitioning');
+        document.documentElement.setAttribute('data-theme', theme);
+        document.querySelectorAll('.theme-icon').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.theme === theme);
+        });
+        setTimeout(() => document.documentElement.classList.remove('theme-transitioning'), 450);
+    }
+</script>
+</body>
+</html>

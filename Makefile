@@ -13,6 +13,10 @@ $(GOOSE):
 	@echo "Installing goose $(GOOSE_VERSION)..."
 	GOBIN=$(CURDIR)/bin go install github.com/pressly/goose/v3/cmd/goose@$(GOOSE_VERSION)
 
+.PHONY: run
+run: build
+	set -a && . ./.env && set +a && go run ./cmd/server
+
 .PHONY: test
 test:
 	go test -v -count=1 -race ./... -coverprofile=cover.out

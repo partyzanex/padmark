@@ -1,7 +1,6 @@
 package sqlite
 
 import (
-	"context"
 	"database/sql"
 	"errors"
 	"testing"
@@ -20,7 +19,6 @@ type RepositoryTestSuite struct {
 
 	db   *bun.DB
 	repo *Repository
-	ctx  context.Context
 }
 
 func (s *RepositoryTestSuite) SetupTest() {
@@ -34,7 +32,6 @@ func (s *RepositoryTestSuite) SetupTest() {
 	s.Require().NoError(err)
 
 	s.repo = NewRepository(s.db)
-	s.ctx = s.T().Context()
 }
 
 func (s *RepositoryTestSuite) TearDownTest() {
@@ -57,7 +54,7 @@ func (s *RepositoryTestSuite) TestCreate_OK() {
 		UpdatedAt:   time.Now(),
 	}
 
-	err := s.repo.Create(s.ctx, domNote)
+	err := s.repo.Create(s.T().Context(), domNote)
 
 	s.Require().NoError(err)
 }
@@ -66,14 +63,14 @@ func (s *RepositoryTestSuite) TestCreate_SetsID() {
 	note1 := &domain.Note{ID: "id-1", Title: "a", Content: "b", CreatedAt: time.Now(), UpdatedAt: time.Now()}
 	note2 := &domain.Note{ID: "id-2", Title: "c", Content: "d", CreatedAt: time.Now(), UpdatedAt: time.Now()}
 
-	s.Require().NoError(s.repo.Create(s.ctx, note1))
-	s.Require().NoError(s.repo.Create(s.ctx, note2))
+	s.Require().NoError(s.repo.Create(s.T().Context(), note1))
+	s.Require().NoError(s.repo.Create(s.T().Context(), note2))
 
-	result1, err := s.repo.Get(s.ctx, "id-1")
+	result1, err := s.repo.Get(s.T().Context(), "id-1")
 	s.Require().NoError(err)
 	s.Equal("id-1", result1.ID)
 
-	result2, err := s.repo.Get(s.ctx, "id-2")
+	result2, err := s.repo.Get(s.T().Context(), "id-2")
 	s.Require().NoError(err)
 	s.Equal("id-2", result2.ID)
 }
@@ -89,9 +86,9 @@ func (s *RepositoryTestSuite) TestGet_OK() {
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 	}
-	s.Require().NoError(s.repo.Create(s.ctx, domNote))
+	s.Require().NoError(s.repo.Create(s.T().Context(), domNote))
 
-	result, err := s.repo.Get(s.ctx, domNote.ID)
+	result, err := s.repo.Get(s.T().Context(), domNote.ID)
 
 	s.Require().NoError(err)
 	s.Equal(domNote.Title, result.Title)
@@ -100,7 +97,7 @@ func (s *RepositoryTestSuite) TestGet_OK() {
 }
 
 func (s *RepositoryTestSuite) TestGet_NotFound() {
-	_, err := s.repo.Get(s.ctx, "nonexistent")
+	_, err := s.repo.Get(s.T().Context(), "nonexistent")
 
 	s.True(errors.Is(err, domain.ErrNotFound))
 }
@@ -116,7 +113,7 @@ func (s *RepositoryTestSuite) TestUpdate_OK() {
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 	}
-	s.Require().NoError(s.repo.Create(s.ctx, domNote))
+	s.Require().NoError(s.repo.Create(s.T().Context(), domNote))
 
 	updated := &domain.Note{
 		Title:       "new",
@@ -125,11 +122,11 @@ func (s *RepositoryTestSuite) TestUpdate_OK() {
 		CreatedAt:   domNote.CreatedAt,
 		UpdatedAt:   time.Now(),
 	}
-	err := s.repo.Update(s.ctx, domNote.ID, updated)
+	err := s.repo.Update(s.T().Context(), domNote.ID, updated)
 
 	s.Require().NoError(err)
 
-	result, err := s.repo.Get(s.ctx, domNote.ID)
+	result, err := s.repo.Get(s.T().Context(), domNote.ID)
 
 	s.Require().NoError(err)
 	s.Equal("new", result.Title)
@@ -140,7 +137,7 @@ func (s *RepositoryTestSuite) TestUpdate_OK() {
 func (s *RepositoryTestSuite) TestUpdate_NotFound() {
 	domNote := &domain.Note{Title: "test", Content: "test", CreatedAt: time.Now(), UpdatedAt: time.Now()}
 
-	err := s.repo.Update(s.ctx, "nonexistent", domNote)
+	err := s.repo.Update(s.T().Context(), "nonexistent", domNote)
 
 	s.True(errors.Is(err, domain.ErrNotFound))
 }
@@ -155,19 +152,19 @@ func (s *RepositoryTestSuite) TestDelete_OK() {
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
-	s.Require().NoError(s.repo.Create(s.ctx, domNote))
+	s.Require().NoError(s.repo.Create(s.T().Context(), domNote))
 
-	err := s.repo.Delete(s.ctx, domNote.ID)
+	err := s.repo.Delete(s.T().Context(), domNote.ID)
 
 	s.Require().NoError(err)
 
-	_, err = s.repo.Get(s.ctx, domNote.ID)
+	_, err = s.repo.Get(s.T().Context(), domNote.ID)
 
 	s.True(errors.Is(err, domain.ErrNotFound))
 }
 
 func (s *RepositoryTestSuite) TestDelete_NotFound() {
-	err := s.repo.Delete(s.ctx, "nonexistent")
+	err := s.repo.Delete(s.T().Context(), "nonexistent")
 
 	s.True(errors.Is(err, domain.ErrNotFound))
 }

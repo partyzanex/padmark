@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/mock/gomock"
@@ -108,7 +109,15 @@ func (s *ManagerTestSuite) TestGet_NotFound() {
 // Update
 
 func (s *ManagerTestSuite) TestUpdate_OK() {
+	existing := &domain.Note{
+		ID:          "abc-123",
+		Title:       "old",
+		ContentType: domain.ContentTypeMarkdown,
+		CreatedAt:   time.Now().Add(-time.Hour),
+	}
 	note := &domain.Note{Title: "updated", Content: "body"}
+
+	s.storage.EXPECT().Get(gomock.Any(), "abc-123").Return(existing, nil)
 	s.storage.EXPECT().Update(gomock.Any(), "abc-123", note).Return(nil)
 
 	result, err := s.manager.Update(s.T().Context(), "abc-123", note)
@@ -116,6 +125,8 @@ func (s *ManagerTestSuite) TestUpdate_OK() {
 	s.Require().NoError(err)
 	s.Equal("abc-123", result.ID)
 	s.False(result.UpdatedAt.IsZero())
+	s.Equal(existing.CreatedAt, result.CreatedAt)
+	s.Equal(existing.ContentType, result.ContentType)
 }
 
 func (s *ManagerTestSuite) TestUpdate_EmptyTitle() {
@@ -126,7 +137,8 @@ func (s *ManagerTestSuite) TestUpdate_EmptyTitle() {
 
 func (s *ManagerTestSuite) TestUpdate_NotFound() {
 	note := &domain.Note{Title: "updated"}
-	s.storage.EXPECT().Update(gomock.Any(), "missing", note).Return(domain.ErrNotFound)
+
+	s.storage.EXPECT().Get(gomock.Any(), "missing").Return(nil, domain.ErrNotFound)
 
 	_, err := s.manager.Update(s.T().Context(), "missing", note)
 

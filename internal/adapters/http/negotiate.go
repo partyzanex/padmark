@@ -10,6 +10,9 @@ const (
 	mimeHTML     = "text/html"
 	mimePlain    = "text/plain"
 	mimeMarkdown = "text/markdown"
+
+	// acceptMIMEParts is the maximum number of parts when splitting a MIME type on ";".
+	acceptMIMEParts = 2
 )
 
 type format uint8
@@ -28,8 +31,8 @@ func negotiate(r *http.Request) format {
 		return formatJSON
 	}
 
-	for _, part := range strings.Split(accept, ",") {
-		mime := strings.TrimSpace(strings.SplitN(part, ";", 2)[0])
+	for part := range strings.SplitSeq(accept, ",") {
+		mime := strings.TrimSpace(strings.SplitN(part, ";", acceptMIMEParts)[0])
 		switch mime {
 		case mimeHTML:
 			return formatHTML
