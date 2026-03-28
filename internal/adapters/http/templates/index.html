@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dim">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Padmark</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="wrapper">
+
+    <div class="header">
+        <div class="header-left">
+            <div class="logo">Padmark<span class="logo-dot"></span></div>
+            <span class="tagline">markdown snippets</span>
+        </div>
+        <div class="header-right">
+            <div class="theme-switcher" id="themeSwitcher">
+                <button class="theme-btn" data-theme="light" title="Light" onclick="setTheme('light')">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+                </button>
+                <button class="theme-btn active" data-theme="dim" title="Dim" onclick="setTheme('dim')">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 2a7 7 0 0 0 0 20 10 10 0 0 1 0-20z"/></svg>
+                </button>
+                <button class="theme-btn" data-theme="dark" title="Dark" onclick="setTheme('dark')">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3a7 7 0 0 0 9.79 9.79z"/></svg>
+                </button>
+                <div class="theme-indicator" id="themeIndicator"></div>
+            </div>
+            <div class="header-links">
+                <a href="/notes" class="header-link">API</a>
+                <a href="https://github.com/partyzanex/padmark" class="header-link" target="_blank" rel="noopener noreferrer">GitHub</a>
+            </div>
+        </div>
+    </div>
+
+    <div class="editor-container">
+        <div class="editor-toolbar">
+            <span class="toolbar-label">Markdown</span>
+            <div class="toolbar-actions">
+                <button class="toolbar-btn" onclick="insertMd('**', '**')">B</button>
+                <button class="toolbar-btn" style="font-style:italic" onclick="insertMd('_', '_')">I</button>
+                <button class="toolbar-btn" onclick="insertMd('`', '`')">&lt;/&gt;</button>
+                <button class="toolbar-btn" onclick="insertMd('\n```\n', '\n```\n')">block</button>
+            </div>
+        </div>
+        <textarea class="editor-textarea" id="editor" placeholder="Paste or write your Markdown…" spellcheck="false" oninput="updateCount()"></textarea>
+        <div class="editor-footer">
+            <span class="char-count" id="charCount">0 characters</span>
+            <span class="format-hint">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 113 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                Markdown supported
+            </span>
+        </div>
+    </div>
+
+    <div class="options-row">
+        <div class="field-group">
+            <label class="field-label">Title <span class="optional">· shown in the header</span></label>
+            <input type="text" class="field-input" placeholder="My snippet" id="titleInput">
+        </div>
+        <div class="field-group">
+            <label class="field-label">Format</label>
+            <div class="select-wrap">
+                <select class="field-select" id="formatSelect">
+                    <option value="markdown">Markdown</option>
+                    <option value="plain">Plain text</option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <div class="publish-row">
+        <button class="btn-publish" id="publishBtn" onclick="publish()">Publish</button>
+        <span class="shortcut-hint"><kbd>Ctrl</kbd> + <kbd>Enter</kbd></span>
+    </div>
+
+</div>
+
+<script>
+    function updateCount() {
+        const len = document.getElementById('editor').value.length;
+        document.getElementById('charCount').textContent = len + ' character' + (len === 1 ? '' : 's');
+    }
+
+    const themes = ['light', 'dim', 'dark'];
+
+    function setTheme(theme) {
+        document.documentElement.classList.add('theme-transitioning');
+        document.documentElement.setAttribute('data-theme', theme);
+        const idx = themes.indexOf(theme);
+        document.getElementById('themeIndicator').setAttribute('data-pos', idx);
+        document.querySelectorAll('.theme-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.theme === theme);
+        });
+        localStorage.setItem('theme', theme);
+        setTimeout(() => document.documentElement.classList.remove('theme-transitioning'), 450);
+    }
+
+    // Restore saved theme
+    (function () {
+        const saved = localStorage.getItem('theme');
+        const theme = themes.includes(saved) ? saved : 'dim';
+        document.documentElement.setAttribute('data-theme', theme);
+        const idx = themes.indexOf(theme);
+        document.getElementById('themeIndicator').setAttribute('data-pos', idx);
+        document.querySelectorAll('.theme-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.theme === theme);
+        });
+    })();
+
+    function insertMd(before, after) {
+        const ta = document.getElementById('editor');
+        const start = ta.selectionStart, end = ta.selectionEnd;
+        const sel = ta.value.substring(start, end);
+        ta.setRangeText(before + sel + after, start, end, 'select');
+        ta.focus();
+        updateCount();
+    }
+
+    async function publish() {
+        const btn = document.getElementById('publishBtn');
+        const content = document.getElementById('editor').value.trim();
+        const titleInput = document.getElementById('titleInput').value.trim();
+        const contentType = document.getElementById('formatSelect').value;
+
+        if (!content) {
+            btn.textContent = 'Enter some text first';
+            btn.style.background = '#ef4444';
+            setTimeout(() => { btn.textContent = 'Publish'; btn.style.background = ''; }, 1800);
+            return;
+        }
+
+        // Derive title: explicit input → first non-empty line → "Untitled"
+        let title = titleInput;
+        if (!title) {
+            title = content.split('\n').map(l => l.replace(/^#+\s*/, '').trim()).find(l => l.length > 0) || 'Untitled';
+        }
+
+        btn.textContent = 'Publishing…';
+        btn.style.opacity = '0.7';
+        btn.disabled = true;
+
+        try {
+            const resp = await fetch('/notes', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ title, content, content_type: contentType })
+            });
+
+            if (!resp.ok) {
+                throw new Error('HTTP ' + resp.status);
+            }
+
+            const note = await resp.json();
+            window.location.href = '/notes/' + note.id;
+        } catch (err) {
+            btn.textContent = 'Error — try again';
+            btn.style.background = '#ef4444';
+            btn.style.opacity = '1';
+            btn.disabled = false;
+            setTimeout(() => { btn.textContent = 'Publish'; btn.style.background = ''; }, 2500);
+        }
+    }
+
+    document.addEventListener('keydown', e => {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+            e.preventDefault();
+            publish();
+        }
+    });
+</script>
+</body>
+</html>

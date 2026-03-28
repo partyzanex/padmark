@@ -17,6 +17,8 @@ const keyRequestID contextKey = 1
 func NewRouter(handler *Handler) http.Handler {
 	mux := http.NewServeMux()
 
+	mux.HandleFunc("GET /", handler.IndexPage)
+	mux.Handle("GET /static/", StaticHandler)
 	mux.HandleFunc("POST /notes", handler.CreateNote)
 	mux.HandleFunc("GET /notes/{id}", handler.GetNote)
 	mux.HandleFunc("PUT /notes/{id}", handler.UpdateNote)

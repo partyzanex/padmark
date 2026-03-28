@@ -4,11 +4,21 @@ package http
 
 import (
 	"context"
+	"embed"
 	"html/template"
 	"log/slog"
+	"net/http"
 
 	"github.com/partyzanex/padmark/internal/domain"
 )
+
+//go:embed static
+var staticFS embed.FS
+
+// StaticHandler serves embedded static assets under /static/.
+//
+//nolint:gochecknoglobals // package-level FS handler is intentional
+var StaticHandler = http.FileServer(http.FS(staticFS))
 
 // NoteManager is the interface the HTTP adapter requires from the business logic layer.
 type NoteManager interface {
@@ -26,18 +36,20 @@ type Pinger interface {
 
 // Handler holds dependencies for all HTTP handlers.
 type Handler struct {
-	manager  NoteManager
-	log      *slog.Logger
-	pinger   Pinger
-	noteTmpl *template.Template
+	manager   NoteManager
+	log       *slog.Logger
+	pinger    Pinger
+	noteTmpl  *template.Template
+	indexTmpl *template.Template
 }
 
 // NewHandler creates a Handler with required dependencies.
 func NewHandler(manager NoteManager, log *slog.Logger) *Handler {
 	return &Handler{
-		manager:  manager,
-		log:      log,
-		noteTmpl: template.Must(template.New("note").Parse(noteTmplSrc)),
+		manager:   manager,
+		log:       log,
+		noteTmpl:  template.Must(template.New("note").Parse(noteTmplSrc)),
+		indexTmpl: template.Must(template.New("index").Parse(indexTmplSrc)),
 	}
 }
 

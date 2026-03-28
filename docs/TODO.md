@@ -72,7 +72,35 @@
 - [x] `README.md` — description, quick start, curl examples
 - [x] Dockerfile (multi-stage → scratch)
 
-## 7. Improvements (v2)
+## 7. Frontend / UI (design parity)
+
+### Backend features required by the design
+- [ ] Note TTL / expiry — `ExpiresAt *time.Time` in domain, `ttl` param in `POST /notes`, auto-expire check on `GET`
+- [ ] Burn-after-reading — `BurnAfterReading bool` in domain, delete note on first `GET`
+- [ ] View count — `Views int` in domain, increment on `GET /notes/{id}`
+- [ ] Custom slug — allow client to supply a custom `id`/slug in `POST /notes`; validate uniqueness
+
+### Pages
+- [ ] View page (`GET /notes/{id}` HTML) — replace `templates/note.html` with template matching `docs/design/view.html`
+    - [ ] Meta bar: created date, view count, expiry label
+    - [ ] Action buttons: Copy (raw content), Raw (link to `text/plain`), Link (copy URL)
+    - [ ] Compact theme switcher (icon buttons, no pill)
+    - [ ] Footer links: Raw · Edit · New
+- [ ] Success / confirmation page — template matching `docs/design/success.html` (shown after `POST /notes`)
+    - [ ] Display generated URL with one-click copy
+    - [ ] "Burn after reading" warning banner when enabled
+    - [ ] TTL / expiry info
+- [ ] Error page — template matching `docs/design/error.html`
+    - [ ] 404 Not Found variant
+    - [ ] Generic error variant
+
+### Shared UI
+- [ ] Add `--success-glow`, `--warn`, `--warn-bg`, `--warn-border`, `--err-red`, `--err-amber` CSS variables to `static/style.css`
+- [ ] Add success-page and error-page component styles to `static/style.css`
+- [ ] Restore Slug field to `GET /` editor (alongside Title) — maps to custom slug feature above
+- [ ] Theme preference persisted in `localStorage` on view page and success page (already done on index)
+
+## 9. Improvements (v2)
 - [ ] Note search (`GET /notes?q=...`)
 - [ ] Tags / categories
 - [ ] Syntax highlighting in HTML (`goldmark-highlighting` + `chroma`)
