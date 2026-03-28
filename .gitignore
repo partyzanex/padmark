@@ -8,3 +8,4 @@ vendor/
 *.log
 coverage.txt
 coverage.xml
+padmark.db

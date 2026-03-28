@@ -70,9 +70,7 @@
 
 ## 6. Documentation and CI
 - [x] `README.md` — description, quick start, curl examples
-- [ ] Dockerfile (multi-stage → scratch)
-- [ ] `docker-compose.yml` — local dev environment
-- ~~[ ] GitHub Actions: lint + test on push~~
+- [x] Dockerfile (multi-stage → scratch)
 
 ## 7. Improvements (v2)
 - [ ] Note search (`GET /notes?q=...`)
