@@ -10,6 +10,7 @@ require (
 	github.com/uptrace/bun v1.2.18
 	github.com/uptrace/bun/dialect/sqlitedialect v1.2.18
 	github.com/uptrace/bun/driver/sqliteshim v1.2.18
+	github.com/urfave/cli/v3 v3.8.0
 	github.com/yuin/goldmark v1.8.2
 	go.uber.org/mock v0.6.0
 )

@@ -43,10 +43,10 @@
 - [x] Tests for renderer
 
 ### CLI / config
-- [ ] `internal/infra/cmd/flags.go` — three constant groups: `Flag*`, `Env*` (`PADMARK_*`), `Default*`
-- [ ] `internal/infra/cmd/app.go` — `NewApp()`, `Run()`, `action()`
-    - [ ] DI order: logger → storage → renderer → manager → handler → router → server
-    - [ ] Graceful shutdown via `signal.NotifyContext` + `srv.Shutdown`
+- [x] `internal/infra/cmd/flags.go` — three constant groups: `Flag*`, `Env*` (`PADMARK_*`), `Default*`
+- [x] `internal/infra/cmd/app.go` — `NewApp()`, `Run()`, `action()`
+    - [x] DI order: logger → storage → renderer → manager → handler → router → server
+    - [x] Graceful shutdown via `signal.NotifyContext` + `srv.Shutdown`
 
 ## 4. Adapters layer
 - [ ] `internal/adapters/http/handler.go` — `Handler` struct, `NewHandler(*notes.Manager, *slog.Logger) *Handler`
