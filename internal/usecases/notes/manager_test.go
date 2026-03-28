@@ -75,6 +75,18 @@ func (s *ManagerTestSuite) TestCreate_InvalidContentType() {
 	s.True(errors.Is(err, domain.ErrInvalidContentType))
 }
 
+func (s *ManagerTestSuite) TestCreate_WithTTL() {
+	future := time.Now().Add(time.Hour)
+	note := &domain.Note{Title: "hello", Content: "world", ExpiresAt: &future}
+	s.storage.EXPECT().Create(gomock.Any(), note).Return(nil)
+
+	result, err := s.manager.Create(s.T().Context(), note)
+
+	s.Require().NoError(err)
+	s.NotNil(result.ExpiresAt)
+	s.True(result.ExpiresAt.After(time.Now()))
+}
+
 func (s *ManagerTestSuite) TestCreate_StorageError() {
 	storageErr := errors.New("db error")
 	note := &domain.Note{Title: "hi"}
@@ -96,6 +108,17 @@ func (s *ManagerTestSuite) TestGet_OK() {
 
 	s.Require().NoError(err)
 	s.Equal(want, note)
+}
+
+func (s *ManagerTestSuite) TestGet_Expired() {
+	past := time.Now().Add(-time.Minute)
+	note := &domain.Note{ID: "abc-123", Title: "a", ExpiresAt: &past}
+	s.storage.EXPECT().Get(gomock.Any(), "abc-123").Return(note, nil)
+	s.storage.EXPECT().Delete(gomock.Any(), "abc-123").Return(nil)
+
+	_, err := s.manager.Get(s.T().Context(), "abc-123")
+
+	s.True(errors.Is(err, domain.ErrExpired))
 }
 
 func (s *ManagerTestSuite) TestGet_NotFound() {
@@ -175,6 +198,17 @@ func (s *ManagerTestSuite) TestGetRendered_OK() {
 	s.Require().NoError(err)
 	s.Equal(note, result)
 	s.Equal("<h1>Hello</h1>", html)
+}
+
+func (s *ManagerTestSuite) TestGetRendered_Expired() {
+	past := time.Now().Add(-time.Minute)
+	note := &domain.Note{ID: "abc-123", Content: "# Hello", ExpiresAt: &past}
+	s.storage.EXPECT().Get(gomock.Any(), "abc-123").Return(note, nil)
+	s.storage.EXPECT().Delete(gomock.Any(), "abc-123").Return(nil)
+
+	_, _, err := s.manager.GetRendered(s.T().Context(), "abc-123")
+
+	s.True(errors.Is(err, domain.ErrExpired))
 }
 
 func (s *ManagerTestSuite) TestGetRendered_StorageError() {

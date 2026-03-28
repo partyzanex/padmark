@@ -11,6 +11,8 @@ func writeError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, domain.ErrNotFound):
 		http.Error(w, domain.ErrNotFound.Error(), http.StatusNotFound)
+	case errors.Is(err, domain.ErrExpired):
+		http.Error(w, domain.ErrExpired.Error(), http.StatusGone)
 	case errors.Is(err, domain.ErrTitleRequired):
 		http.Error(w, domain.ErrTitleRequired.Error(), http.StatusUnprocessableEntity)
 	case errors.Is(err, domain.ErrInvalidContentType):

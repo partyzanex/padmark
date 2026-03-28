@@ -67,11 +67,20 @@ func (m *Manager) Create(ctx context.Context, note *domain.Note) (*domain.Note, 
 	return note, nil
 }
 
-// Get returns a note by ID.
+// Get returns a note by ID. If the note has expired it is deleted and ErrExpired is returned.
 func (m *Manager) Get(ctx context.Context, id string) (*domain.Note, error) {
 	note, err := m.storage.Get(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("get note: %w", err)
+	}
+
+	if note.ExpiresAt != nil && time.Now().After(*note.ExpiresAt) {
+		delErr := m.storage.Delete(ctx, id)
+		if delErr != nil {
+			m.log.ErrorContext(ctx, "delete expired note", "id", id, "err", delErr)
+		}
+
+		return nil, domain.ErrExpired
 	}
 
 	return note, nil
@@ -84,7 +93,7 @@ func (m *Manager) Update(ctx context.Context, id string, note *domain.Note) (*do
 		return nil, err
 	}
 
-	existing, err := m.storage.Get(ctx, id)
+	existing, err := m.Get(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("update note: %w", err)
 	}
@@ -92,6 +101,7 @@ func (m *Manager) Update(ctx context.Context, id string, note *domain.Note) (*do
 	note.ID = id
 	note.CreatedAt = existing.CreatedAt
 	note.UpdatedAt = time.Now()
+	note.ExpiresAt = existing.ExpiresAt
 
 	if note.ContentType == "" {
 		note.ContentType = existing.ContentType
@@ -120,7 +130,7 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 // GetRendered fetches a note and returns it together with its content as safe HTML.
 // Plain-text notes are HTML-escaped and wrapped in <pre>; markdown notes are rendered.
 func (m *Manager) GetRendered(ctx context.Context, id string) (*domain.Note, string, error) {
-	note, err := m.storage.Get(ctx, id)
+	note, err := m.Get(ctx, id)
 	if err != nil {
 		return nil, "", fmt.Errorf("get note for render: %w", err)
 	}

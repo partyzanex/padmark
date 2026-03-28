@@ -19,11 +19,13 @@ type noteRequest struct {
 	Title       string             `json:"title"`
 	Content     string             `json:"content"`
 	ContentType domain.ContentType `json:"content_type,omitempty"`
+	TTL         int64              `json:"ttl,omitempty"` // seconds; 0 or absent means never expires
 }
 
 type noteResponse struct {
 	CreatedAt   time.Time          `json:"created_at"`
 	UpdatedAt   time.Time          `json:"updated_at"`
+	ExpiresAt   *time.Time         `json:"expires_at"`
 	ID          string             `json:"id"`
 	Title       string             `json:"title"`
 	Content     string             `json:"content"`
@@ -38,6 +40,7 @@ func toNoteResponse(note *domain.Note) noteResponse {
 		ContentType: note.ContentType,
 		CreatedAt:   note.CreatedAt,
 		UpdatedAt:   note.UpdatedAt,
+		ExpiresAt:   note.ExpiresAt,
 	}
 }
 
@@ -51,10 +54,18 @@ func (h *Handler) CreateNote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var expiresAt *time.Time
+
+	if req.TTL > 0 {
+		t := time.Now().Add(time.Duration(req.TTL) * time.Second)
+		expiresAt = &t
+	}
+
 	note, err := h.manager.Create(r.Context(), &domain.Note{
 		Title:       req.Title,
 		Content:     req.Content,
 		ContentType: req.ContentType,
+		ExpiresAt:   expiresAt,
 	})
 	if err != nil {
 		h.log.ErrorContext(r.Context(), "create note", "err", err)

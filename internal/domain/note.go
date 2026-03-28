@@ -23,6 +23,7 @@ func (ct ContentType) Valid() bool {
 type Note struct {
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
+	ExpiresAt   *time.Time // nil means the note never expires
 	ID          string
 	Title       string
 	Content     string

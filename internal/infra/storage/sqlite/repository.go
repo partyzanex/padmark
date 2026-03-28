@@ -16,12 +16,13 @@ import (
 type note struct {
 	bun.BaseModel `bun:"table:notes"`
 
-	CreatedAt   time.Time `bun:"created_at"`
-	UpdatedAt   time.Time `bun:"updated_at"`
-	ID          string    `bun:"id,pk"`
-	Title       string    `bun:"title"`
-	Content     string    `bun:"content"`
-	ContentType string    `bun:"content_type"`
+	CreatedAt   time.Time  `bun:"created_at"`
+	UpdatedAt   time.Time  `bun:"updated_at"`
+	ExpiresAt   *time.Time `bun:"expires_at"`
+	ID          string     `bun:"id,pk"`
+	Title       string     `bun:"title"`
+	Content     string     `bun:"content"`
+	ContentType string     `bun:"content_type"`
 }
 
 // Repository implements notes.Storage using SQLite.
@@ -43,6 +44,7 @@ func (r *Repository) Create(ctx context.Context, domNote *domain.Note) error {
 		ContentType: string(domNote.ContentType),
 		CreatedAt:   domNote.CreatedAt,
 		UpdatedAt:   domNote.UpdatedAt,
+		ExpiresAt:   domNote.ExpiresAt,
 	}
 
 	_, err := r.db.NewInsert().Model(dbNote).Exec(ctx)
@@ -70,13 +72,14 @@ func (r *Repository) Get(ctx context.Context, id string) (*domain.Note, error) {
 		ID:          dbNote.ID,
 		CreatedAt:   dbNote.CreatedAt,
 		UpdatedAt:   dbNote.UpdatedAt,
+		ExpiresAt:   dbNote.ExpiresAt,
 		Title:       dbNote.Title,
 		Content:     dbNote.Content,
 		ContentType: domain.ContentType(dbNote.ContentType),
 	}, nil
 }
 
-// Update modifies an existing note.
+// Update modifies an existing note. expires_at is immutable and not touched.
 func (r *Repository) Update(ctx context.Context, id string, domNote *domain.Note) error {
 	dbNote := &note{
 		ID:          id,
