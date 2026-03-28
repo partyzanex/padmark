@@ -37,6 +37,12 @@ html { font-size: 16px; }
     --warn:              #fbbf24;
     --warn-bg:           rgba(251,191,36,0.08);
     --warn-border:       rgba(251,191,36,0.15);
+    --err-red:           #f87171;
+    --err-red-muted:     rgba(248,113,113,0.08);
+    --err-red-border:    rgba(248,113,113,0.15);
+    --err-amber:         #fbbf24;
+    --err-amber-muted:   rgba(251,191,36,0.08);
+    --err-amber-border:  rgba(251,191,36,0.15);
 
     --font-display: 'Outfit', sans-serif;
     --font-serif:   'Source Serif 4', Georgia, serif;
@@ -106,6 +112,10 @@ html { font-size: 16px; }
     --success-muted:     rgba(16,185,129,0.08);
     --warn-bg:           rgba(217,160,0,0.08);
     --warn-border:       rgba(217,160,0,0.18);
+    --err-red-muted:     rgba(220,38,38,0.06);
+    --err-red-border:    rgba(220,38,38,0.12);
+    --err-amber-muted:   rgba(217,160,0,0.06);
+    --err-amber-border:  rgba(217,160,0,0.14);
 
     --syn-keyword: #7c3aed;
     --syn-string:  #16a34a;

@@ -90,16 +90,16 @@
     - [x] Display generated URL with one-click copy
     - [x] "Burn after reading" warning banner when enabled
     - [x] TTL / expiry info (shown in subtitle: "just now · expires Jan 2, 2006")
-- [ ] Error page — template matching `docs/design/error.html`
-    - [ ] 404 Not Found variant
-    - [ ] Generic error variant
+- [x] Error page — template matching `docs/design/error.html`; rendered by `h.writeErrorPage` on HTML requests
+    - [x] 404 Not Found variant (`ErrNotFound` → 404, `data-type="client"`, amber underline)
+    - [x] Generic error variant (`ErrExpired` → 410; fallback → 500, `data-type="server"`, red underline)
 
 ### Shared UI
 - [x] Add `--success-glow`, `--success-muted`, `--warn`, `--warn-bg`, `--warn-border` CSS variables to `static/style.css`
-- [ ] Add `--err-red`, `--err-amber` CSS variables to `static/style.css` (needed by error page)
+- [x] Add `--err-red`, `--err-red-muted`, `--err-red-border`, `--err-amber`, `--err-amber-muted`, `--err-amber-border` CSS variables to `static/style.css`
 - [ ] Add success-page and error-page component styles to `static/style.css` (currently inline in templates)
 - [ ] Restore Slug field to `GET /` editor (alongside Title) — maps to custom slug feature above
-- [ ] Unify `localStorage` theme key: view page uses `'padmark-theme'`, index/success use `'theme'`
+- [ ] Unify `localStorage` theme key: view page uses `'padmark-theme'`, index/success/error use `'theme'`
 
 ## 9. Improvements (v2)
 - [ ] Note search (`GET /notes?q=...`)

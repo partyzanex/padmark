@@ -129,7 +129,7 @@ func (h *Handler) GetNote(w http.ResponseWriter, r *http.Request) {
 	case formatHTML:
 		note, rendered, err := h.manager.GetRendered(r.Context(), id)
 		if err != nil {
-			writeError(w, err)
+			h.writeErrorPage(w, r, err)
 			return
 		}
 

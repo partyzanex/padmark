@@ -42,6 +42,7 @@ type Handler struct {
 	noteTmpl    *template.Template
 	indexTmpl   *template.Template
 	successTmpl *template.Template
+	errorTmpl   *template.Template
 }
 
 // NewHandler creates a Handler with required dependencies.
@@ -52,6 +53,7 @@ func NewHandler(manager NoteManager, log *slog.Logger) *Handler {
 		noteTmpl:    template.Must(template.New("note").Parse(noteTmplSrc)),
 		indexTmpl:   template.Must(template.New("index").Parse(indexTmplSrc)),
 		successTmpl: template.Must(template.New("success").Parse(successTmplSrc)),
+		errorTmpl:   template.Must(template.New("error").Parse(errorTmplSrc)),
 	}
 }
 

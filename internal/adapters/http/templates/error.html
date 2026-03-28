@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dim">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Padmark — {{.Code}}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            overflow-x: hidden;
+        }
+
+        body::before {
+            content: '';
+            position: fixed;
+            top: -40%;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 800px;
+            height: 800px;
+            background: radial-gradient(circle, rgba(248,113,113,0.04) 0%, transparent 70%);
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .wrapper {
+            position: relative;
+            z-index: 1;
+            width: 100%;
+            max-width: 540px;
+            padding: 60px 24px 80px;
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+
+        /* ── Header ── */
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 0;
+            animation: fade-up 0.45s ease both;
+        }
+
+        .header-left { display: flex; align-items: baseline; gap: 12px; }
+
+        .header-nav {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+
+        .header-sep {
+            width: 1px;
+            height: 14px;
+            background: var(--border-subtle);
+            margin: 0 2px;
+        }
+
+        .theme-icon {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            padding: 4px;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: color 0.25s ease, background 0.25s ease;
+        }
+
+        .theme-icon:hover { color: var(--text-secondary); background: var(--accent-glow); }
+        .theme-icon.active { color: var(--text-primary); }
+
+        /* ── Error content ── */
+        .error-center {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .error-content {
+            text-align: center;
+            animation: fade-up 0.5s ease 0.08s both;
+        }
+
+        .error-code {
+            font-family: var(--font-mono);
+            font-size: 7rem;
+            font-weight: 600;
+            letter-spacing: -0.04em;
+            line-height: 1;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+            position: relative;
+            display: inline-block;
+        }
+
+        .error-code::after {
+            content: '';
+            position: absolute;
+            bottom: 6px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 60%;
+            height: 3px;
+            border-radius: 2px;
+            opacity: 0.4;
+        }
+
+        .error-content[data-type="client"] .error-code::after { background: var(--err-amber); }
+        .error-content[data-type="server"] .error-code::after { background: var(--err-red); }
+
+        .error-title {
+            font-family: var(--font-display);
+            font-size: 1.3rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 8px;
+            letter-spacing: -0.01em;
+        }
+
+        .error-desc {
+            font-family: var(--font-mono);
+            font-size: 0.78rem;
+            color: var(--text-secondary);
+            line-height: 1.6;
+            max-width: 380px;
+            margin: 0 auto 32px;
+        }
+
+        .error-actions {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .btn-primary {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 11px 24px;
+            background: var(--accent);
+            color: #fff;
+            font-family: var(--font-display);
+            font-size: 0.85rem;
+            font-weight: 600;
+            border: none;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            text-decoration: none;
+            transition: all 0.25s ease;
+        }
+
+        .btn-primary:hover {
+            background: var(--accent-hover);
+            box-shadow: 0 4px 20px var(--accent-glow-strong);
+            transform: translateY(-1px);
+        }
+
+        .btn-primary:active { transform: translateY(0); }
+        .btn-primary svg { width: 15px; height: 15px; }
+
+        .btn-ghost {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 11px 20px;
+            background: transparent;
+            color: var(--text-secondary);
+            font-family: var(--font-display);
+            font-size: 0.85rem;
+            font-weight: 500;
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            text-decoration: none;
+            transition: all 0.25s ease;
+        }
+
+        .btn-ghost:hover {
+            border-color: var(--border-focus);
+            color: var(--text-primary);
+            background: var(--accent-glow);
+        }
+
+        .btn-ghost svg { width: 14px; height: 14px; }
+
+        /* ── Error detail (server errors) ── */
+        .error-detail {
+            margin-top: 24px;
+            padding: 14px 18px;
+            border-radius: var(--radius-sm);
+            text-align: left;
+            max-width: 420px;
+            margin-left: auto;
+            margin-right: auto;
+            animation: fade-up 0.4s ease 0.22s both;
+        }
+
+        .error-content[data-type="server"] .error-detail {
+            background: var(--err-red-muted);
+            border: 1px solid var(--err-red-border);
+        }
+
+        .error-content[data-type="client"] .error-detail {
+            background: var(--err-amber-muted);
+            border: 1px solid var(--err-amber-border);
+        }
+
+        .error-detail-label {
+            font-family: var(--font-mono);
+            font-size: 0.6rem;
+            font-weight: 500;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            margin-bottom: 6px;
+        }
+
+        .error-detail-text {
+            font-family: var(--font-mono);
+            font-size: 0.72rem;
+            color: var(--text-secondary);
+            line-height: 1.55;
+            word-break: break-all;
+        }
+
+        /* ── Animations ── */
+        @media (max-width: 600px) {
+            .wrapper { padding: 36px 16px 48px; }
+            .error-code { font-size: 5rem; }
+            .error-title { font-size: 1.1rem; }
+            .error-actions { flex-direction: column; }
+        }
+    </style>
+</head>
+<body>
+<div class="wrapper">
+
+    <div class="header">
+        <div class="header-left">
+            <a href="/" class="logo">Padmark<span class="logo-dot"></span></a>
+        </div>
+        <div class="header-nav">
+            <a href="https://github.com/partyzanex/padmark" class="header-link" target="_blank" rel="noopener noreferrer">GitHub</a>
+            <span class="header-sep"></span>
+            <button class="theme-icon" data-theme="light" title="Light" onclick="setTheme('light')">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+            </button>
+            <button class="theme-icon active" data-theme="dim" title="Dim" onclick="setTheme('dim')">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 2a7 7 0 0 0 0 20 10 10 0 0 1 0-20z"/></svg>
+            </button>
+            <button class="theme-icon" data-theme="dark" title="Dark" onclick="setTheme('dark')">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3a7 7 0 0 0 9.79 9.79z"/></svg>
+            </button>
+        </div>
+    </div>
+
+    <div class="error-center">
+        <div class="error-content" data-type="{{.ErrorType}}">
+            <div class="error-code">{{.Code}}</div>
+            <div class="error-title">{{.Title}}</div>
+            <div class="error-desc">{{.Desc}}</div>
+
+            <div class="error-actions">
+                <a href="/" class="btn-primary">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                    Create new paste
+                </a>
+                <a href="/" class="btn-ghost">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+                    Home
+                </a>
+            </div>
+
+            {{if .Detail}}
+            <div class="error-detail">
+                <div class="error-detail-label">Details</div>
+                <div class="error-detail-text">{{.Detail}}</div>
+            </div>
+            {{end}}
+        </div>
+    </div>
+
+</div>
+
+<script>
+    (function () {
+        const saved = localStorage.getItem('theme') || 'dim';
+        document.documentElement.setAttribute('data-theme', saved);
+        document.querySelectorAll('.theme-icon').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.theme === saved);
+        });
+    }());
+
+    function setTheme(theme) {
+        document.documentElement.classList.add('theme-transitioning');
+        document.documentElement.setAttribute('data-theme', theme);
+        localStorage.setItem('theme', theme);
+        document.querySelectorAll('.theme-icon').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.theme === theme);
+        });
+        setTimeout(() => document.documentElement.classList.remove('theme-transitioning'), 450);
+    }
+</script>
+</body>
+</html>
