@@ -1135,3 +1135,60 @@ func (s *HandlerSuite) TestLoginPage_WriteFail() {
 
 	s.NotNil(fw)
 }
+
+// ── API docs ──
+
+func (s *HandlerSuite) TestAPIDocsPage() {
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api", nil)
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusOK, w.Code)
+	s.Contains(w.Header().Get("Content-Type"), "text/html")
+	s.Contains(w.Body.String(), "openapi.yaml")
+	s.Contains(w.Body.String(), "redoc")
+}
+
+func (s *HandlerSuite) TestAPISpec() {
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/openapi.yaml", nil)
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusOK, w.Code)
+	s.Equal("application/yaml", w.Header().Get("Content-Type"))
+	s.Contains(w.Body.String(), "openapi: 3.1.0")
+	s.Contains(w.Body.String(), "Padmark API")
+}
+
+func (s *HandlerSuite) TestAPIDocsPage_WriteFail() {
+	handler := adhttp.NewHandler(s.manager, slog.New(slog.DiscardHandler))
+	fw := newFailWriter()
+	r := httptest.NewRequest(http.MethodGet, "/api", nil)
+
+	handler.APIDocsPage(fw, r)
+
+	s.NotNil(fw)
+}
+
+func (s *HandlerSuite) TestAPISpec_WriteFail() {
+	fw := newFailWriter()
+	r := httptest.NewRequest(http.MethodGet, "/api/openapi.yaml", nil)
+
+	adhttp.APISpec(fw, r)
+
+	s.NotNil(fw)
+}
+
+func (s *HandlerSuite) TestAPIDocsPage_Public() {
+	handler := adhttp.NewHandler(s.manager, slog.New(slog.DiscardHandler))
+	router := adhttp.NewRouter(handler, []string{"secret"})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api", nil)
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusOK, w.Code, "/api should be public")
+}

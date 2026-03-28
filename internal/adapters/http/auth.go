@@ -69,6 +69,7 @@ func extractToken(r *http.Request) string {
 func isPublicPath(path string) bool {
 	return path == "/login" ||
 		strings.HasPrefix(path, "/static/") ||
+		strings.HasPrefix(path, "/api") ||
 		path == "/healthz" || path == "/readyz"
 }
 
@@ -86,10 +87,13 @@ func loginHandler(tokens map[string]struct{}) http.HandlerFunc {
 			return
 		}
 
+		const tenYears = 10 * 365 * 24 * 60 * 60
+
 		http.SetCookie(w, &http.Cookie{
 			Name:     tokenCookieName,
 			Value:    token,
 			Path:     "/",
+			MaxAge:   tenYears,
 			HttpOnly: true,
 			SameSite: http.SameSiteStrictMode,
 		})

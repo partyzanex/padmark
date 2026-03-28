@@ -183,7 +183,7 @@ body::before {
     position: relative;
     z-index: 1;
     width: 100%;
-    max-width: 720px;
+    max-width: 980px;
     padding: 60px 24px 80px;
 }
 

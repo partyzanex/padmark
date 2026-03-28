@@ -46,6 +46,7 @@ type Handler struct {
 	noteTmpl    *template.Template
 	indexTmpl   *template.Template
 	loginTmpl   *template.Template
+	apidocsTmpl *template.Template
 	successTmpl *template.Template
 	errorTmpl   *template.Template
 }
@@ -65,6 +66,7 @@ func NewHandler(manager NoteManager, log *slog.Logger) *Handler {
 		noteTmpl:    parseTmpl("note", noteTmplSrc),
 		indexTmpl:   parseTmpl("index", indexTmplSrc),
 		loginTmpl:   parseTmpl("login", loginTmplSrc),
+		apidocsTmpl: parseTmpl("apidocs", apidocsTmplSrc),
 		successTmpl: parseTmpl("success", successTmplSrc),
 		errorTmpl:   parseTmpl("error", errorTmplSrc),
 	}

@@ -23,6 +23,8 @@ func NewRouter(handler *Handler, tokens []string) http.Handler {
 
 	mux.HandleFunc("GET /login", handler.LoginPage)
 	mux.HandleFunc("POST /login", loginHandler(tokenSet))
+	mux.HandleFunc("GET /api", handler.APIDocsPage)
+	mux.HandleFunc("GET /api/openapi.yaml", APISpec)
 	mux.HandleFunc("GET /", handler.IndexPage)
 	mux.HandleFunc("GET /success", handler.SuccessPage)
 	mux.Handle("GET /static/", StaticHandler)
