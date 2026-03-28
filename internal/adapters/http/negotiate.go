@@ -24,8 +24,13 @@ const (
 )
 
 // negotiate parses the Accept header and returns the preferred response format.
-// Priority: text/html > text/plain|text/markdown > application/json (default).
+// A ?raw=1 query parameter always selects formatPlain, overriding the Accept header.
+// Priority: ?raw=1 > text/html > text/plain|text/markdown > application/json (default).
 func negotiate(r *http.Request) format {
+	if r.URL.Query().Get("raw") == "1" {
+		return formatPlain
+	}
+
 	accept := r.Header.Get("Accept")
 	if accept == "" {
 		return formatJSON

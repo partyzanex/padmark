@@ -15,11 +15,40 @@ import (
 //go:embed templates/note.html
 var noteTmplSrc string
 
+type noteViewData struct {
+	Body         template.HTML
+	Title        string
+	ID           string
+	CreatedAt    string
+	ExpiresLabel string
+	RawContent   string
+	Views        int
+}
+
+func toNoteViewData(note *domain.Note, rendered string) noteViewData {
+	created := note.CreatedAt.Format("Jan 2, 2006, 3:04 PM")
+
+	expires := "Never expires"
+	if note.ExpiresAt != nil {
+		expires = "Expires " + note.ExpiresAt.Format("Jan 2, 2006")
+	}
+
+	return noteViewData{
+		ID:           note.ID,
+		Title:        note.Title,
+		Body:         template.HTML(rendered), //nolint:gosec // content is bluemonday-sanitized
+		RawContent:   note.Content,
+		CreatedAt:    created,
+		Views:        note.Views,
+		ExpiresLabel: expires,
+	}
+}
+
 type noteRequest struct {
 	Title            string             `json:"title"`
 	Content          string             `json:"content"`
 	ContentType      domain.ContentType `json:"content_type,omitempty"`
-	Slug             string             `json:"slug,omitempty"`               // custom URL-safe ID; absent = auto-generated UUID
+	Slug             string             `json:"slug,omitempty"`               // custom slug; absent = auto-generated UUID
 	TTL              int64              `json:"ttl,omitempty"`                // seconds; 0 or absent means never expires
 	BurnAfterReading bool               `json:"burn_after_reading,omitempty"` // delete on first read
 }
@@ -106,13 +135,7 @@ func (h *Handler) GetNote(w http.ResponseWriter, r *http.Request) {
 
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
-		err = h.noteTmpl.Execute(w, struct {
-			Title string
-			Body  template.HTML
-		}{
-			Title: note.Title,
-			Body:  template.HTML(rendered), //nolint:gosec // content is bluemonday-sanitized
-		})
+		err = h.noteTmpl.Execute(w, toNoteViewData(note, rendered))
 		if err != nil {
 			h.log.ErrorContext(r.Context(), "render note template", "id", id, "err", err)
 		}

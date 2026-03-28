@@ -81,11 +81,11 @@
 - [x] Custom slug — allow client to supply a custom `id`/slug in `POST /notes`; validate uniqueness
 
 ### Pages
-- [ ] View page (`GET /notes/{id}` HTML) — replace `templates/note.html` with template matching `docs/design/view.html`
-    - [ ] Meta bar: created date, view count, expiry label
-    - [ ] Action buttons: Copy (raw content), Raw (link to `text/plain`), Link (copy URL)
-    - [ ] Compact theme switcher (icon buttons, no pill)
-    - [ ] Footer links: Raw · Edit · New
+- [x] View page (`GET /notes/{id}` HTML) — replace `templates/note.html` with template matching `docs/design/view.html`
+    - [x] Meta bar: created date, view count, expiry label
+    - [x] Action buttons: Copy (raw content), Raw (link to `?raw=1`), Link (copy URL)
+    - [x] Compact theme switcher (icon buttons, no pill)
+    - [x] Footer links: Raw · Edit · New
 - [ ] Success / confirmation page — template matching `docs/design/success.html` (shown after `POST /notes`)
     - [ ] Display generated URL with one-click copy
     - [ ] "Burn after reading" warning banner when enabled
@@ -98,7 +98,7 @@
 - [ ] Add `--success-glow`, `--warn`, `--warn-bg`, `--warn-border`, `--err-red`, `--err-amber` CSS variables to `static/style.css`
 - [ ] Add success-page and error-page component styles to `static/style.css`
 - [ ] Restore Slug field to `GET /` editor (alongside Title) — maps to custom slug feature above
-- [ ] Theme preference persisted in `localStorage` on view page and success page (already done on index)
+- [x] Theme preference persisted in `localStorage` on view page (index: `'theme'` key; view page: `'padmark-theme'` key — unify in a follow-up)
 
 ## 9. Improvements (v2)
 - [ ] Note search (`GET /notes?q=...`)

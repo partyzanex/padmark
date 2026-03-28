@@ -1,87 +1,461 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dim">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{{.Title}}</title>
-  <style>
-    *, *::before, *::after { box-sizing: border-box; }
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Title}} — Padmark</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&family=Outfit:wght@300;400;500;600;700&family=Source+Serif+4:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&display=swap" rel="stylesheet">
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            overflow-x: hidden;
+        }
 
-    body {
-      max-width: 800px;
-      margin: 2rem auto;
-      padding: 0 1rem;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      font-size: 1rem;
-      line-height: 1.7;
-      color: #222;
-      background: #fff;
-    }
+        .wrapper {
+            position: relative;
+            z-index: 1;
+            width: 100%;
+            max-width: 780px;
+            padding: 48px 24px 80px;
+        }
 
-    h1, h2, h3, h4, h5, h6 {
-      line-height: 1.3;
-      margin: 1.5em 0 0.5em;
-      font-weight: 600;
-    }
-    h1 { font-size: 2rem; border-bottom: 2px solid #e0e0e0; padding-bottom: .3em; }
-    h2 { font-size: 1.5rem; border-bottom: 1px solid #e0e0e0; padding-bottom: .2em; }
+        /* ── Header ── */
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 32px;
+            animation: fade-up 0.45s ease both;
+        }
 
-    a { color: #0969da; text-decoration: none; }
-    a:hover { text-decoration: underline; }
+        .header-left { display: flex; align-items: baseline; gap: 12px; }
 
-    p { margin: 0 0 1em; }
+        .header-nav {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
 
-    pre {
-      background: #f6f8fa;
-      border: 1px solid #d0d7de;
-      border-radius: 6px;
-      padding: 1em;
-      overflow-x: auto;
-    }
+        .header-sep {
+            width: 1px;
+            height: 14px;
+            background: var(--border-subtle);
+            margin: 0 2px;
+        }
 
-    code {
-      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-      font-size: .875em;
-      background: #f6f8fa;
-      border: 1px solid #d0d7de;
-      border-radius: 3px;
-      padding: .15em .4em;
-    }
+        .theme-icon {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            padding: 4px;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: color 0.25s ease, background 0.25s ease;
+        }
 
-    pre code {
-      background: none;
-      border: none;
-      padding: 0;
-      font-size: inherit;
-    }
+        .theme-icon:hover {
+            color: var(--text-secondary);
+            background: var(--accent-glow);
+        }
 
-    blockquote {
-      margin: 0 0 1em;
-      padding: .5em 1em;
-      border-left: 4px solid #d0d7de;
-      color: #57606a;
-    }
-    blockquote > *:last-child { margin-bottom: 0; }
+        .theme-icon.active { color: var(--text-primary); }
 
-    table {
-      border-collapse: collapse;
-      width: 100%;
-      margin: 0 0 1em;
-    }
-    th, td {
-      border: 1px solid #d0d7de;
-      padding: .4em .8em;
-      text-align: left;
-    }
-    th { background: #f6f8fa; font-weight: 600; }
-    tr:nth-child(even) { background: #f6f8fa; }
+        /* ── Meta bar ── */
+        .meta-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-bottom: 24px;
+            animation: fade-up 0.45s ease 0.06s both;
+        }
 
-    img { max-width: 100%; height: auto; }
+        .meta-info {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
 
-    hr { border: none; border-top: 1px solid #d0d7de; margin: 2em 0; }
-  </style>
+        .meta-tag {
+            font-family: var(--font-mono);
+            font-size: 0.68rem;
+            color: var(--text-muted);
+            letter-spacing: 0.03em;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .meta-tag svg {
+            width: 13px;
+            height: 13px;
+            opacity: 0.6;
+        }
+
+        .meta-actions {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .meta-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 5px 12px;
+            background: var(--bg-surface);
+            border: 1px solid var(--border-subtle);
+            border-radius: 6px;
+            color: var(--text-secondary);
+            font-family: var(--font-mono);
+            font-size: 0.65rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            letter-spacing: 0.02em;
+            text-decoration: none;
+        }
+
+        .meta-btn:hover {
+            border-color: var(--border-focus);
+            color: var(--text-primary);
+            background: var(--accent-glow);
+        }
+
+        .meta-btn.copied { color: #34d399; }
+        .meta-btn svg { width: 12px; height: 12px; }
+
+        /* ── Article card ── */
+        .article-card {
+            background: var(--bg-surface);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-lg);
+            overflow: hidden;
+            animation: fade-up 0.5s ease 0.1s both;
+        }
+
+        /* ── Prose ── */
+        .prose {
+            padding: 40px 44px 48px;
+            font-family: var(--font-serif);
+            font-size: 1.02rem;
+            line-height: 1.78;
+            color: var(--text-prose);
+        }
+
+        .prose h1 {
+            font-family: var(--font-display);
+            font-size: 1.65rem;
+            font-weight: 700;
+            color: var(--text-primary);
+            letter-spacing: -0.02em;
+            margin-bottom: 16px;
+            line-height: 1.3;
+        }
+
+        .prose h2 {
+            font-family: var(--font-display);
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            letter-spacing: -0.01em;
+            margin-top: 36px;
+            margin-bottom: 12px;
+            padding-top: 24px;
+            border-top: 1px solid var(--border-subtle);
+            line-height: 1.35;
+        }
+
+        .prose h2:first-child,
+        .prose h1 + h2 {
+            border-top: none;
+            padding-top: 0;
+            margin-top: 28px;
+        }
+
+        .prose p { margin-bottom: 14px; }
+
+        .prose ul, .prose ol {
+            margin-bottom: 14px;
+            padding-left: 6px;
+            list-style: none;
+        }
+
+        .prose li {
+            position: relative;
+            padding-left: 20px;
+            margin-bottom: 6px;
+        }
+
+        .prose li::before {
+            content: '';
+            position: absolute;
+            left: 2px;
+            top: 11px;
+            width: 5px;
+            height: 5px;
+            border-radius: 50%;
+            background: var(--accent);
+            opacity: 0.6;
+        }
+
+        .prose code {
+            font-family: var(--font-mono);
+            font-size: 0.82em;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-subtle);
+            padding: 2px 7px;
+            border-radius: 5px;
+            color: var(--accent-hover);
+            font-weight: 400;
+        }
+
+        .prose .code-block-wrap {
+            position: relative;
+            margin: 20px -44px;
+            border-top: 1px solid var(--border-subtle);
+            border-bottom: 1px solid var(--border-subtle);
+        }
+
+        .code-block-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 20px;
+            background: var(--bg-elevated);
+            border-bottom: 1px solid var(--border-subtle);
+        }
+
+        .code-lang {
+            font-family: var(--font-mono);
+            font-size: 0.62rem;
+            font-weight: 500;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
+
+        .code-copy-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            font-family: var(--font-mono);
+            font-size: 0.6rem;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            padding: 2px 6px;
+            border-radius: 4px;
+            transition: all 0.2s;
+        }
+
+        .code-copy-btn:hover {
+            color: var(--text-secondary);
+            background: var(--accent-glow);
+        }
+
+        .code-copy-btn.copied { color: #34d399; }
+        .code-copy-btn svg { width: 12px; height: 12px; }
+
+        .prose pre {
+            background: var(--bg-code);
+            padding: 20px 24px;
+            overflow-x: auto;
+            margin: 0;
+        }
+
+        .prose pre code {
+            background: none;
+            border: none;
+            padding: 0;
+            border-radius: 0;
+            font-size: 0.8rem;
+            line-height: 1.65;
+            color: var(--text-prose);
+            font-weight: 400;
+        }
+
+        .tok-kw  { color: var(--syn-keyword); }
+        .tok-str { color: var(--syn-string); }
+        .tok-num { color: var(--syn-number); }
+        .tok-fn  { color: var(--syn-func); }
+        .tok-cm  { color: var(--syn-comment); font-style: italic; }
+        .tok-type { color: var(--syn-type); }
+        .tok-nil { color: var(--syn-nil); }
+
+        .prose a {
+            color: var(--accent-hover);
+            text-decoration: underline;
+            text-underline-offset: 3px;
+            text-decoration-color: var(--accent-glow-strong);
+            transition: all 0.2s;
+        }
+
+        .prose a:hover { text-decoration-color: var(--accent-hover); }
+        .prose strong { color: var(--text-primary); font-weight: 600; }
+        .prose em { font-style: italic; }
+
+        /* ── Paste footer ── */
+        .paste-footer {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            margin-top: 20px;
+            padding: 16px 0;
+            animation: fade-up 0.45s ease 0.18s both;
+        }
+
+        .paste-footer-link {
+            font-family: var(--font-mono);
+            font-size: 0.78rem;
+            color: var(--accent-hover);
+            text-decoration: none;
+            letter-spacing: 0.02em;
+            transition: color 0.2s ease;
+        }
+
+        .paste-footer-link:hover {
+            color: var(--text-primary);
+            text-decoration: underline;
+            text-underline-offset: 3px;
+        }
+
+        .paste-footer-sep {
+            color: var(--text-muted);
+            font-size: 0.75rem;
+            user-select: none;
+        }
+
+        /* ── Responsive ── */
+        @media (max-width: 640px) {
+            .wrapper { padding: 32px 12px 60px; }
+            .prose { padding: 28px 22px 32px; }
+            .prose .code-block-wrap { margin-left: -22px; margin-right: -22px; }
+            .prose h1 { font-size: 1.35rem; }
+            .prose h2 { font-size: 1.1rem; }
+            .meta-bar { flex-direction: column; align-items: flex-start; }
+        }
+    </style>
 </head>
 <body>
-{{.Body}}
+<div class="wrapper">
+
+    <div class="header">
+        <div class="header-left">
+            <a href="/" class="logo">Padmark<span class="logo-dot"></span></a>
+        </div>
+        <div class="header-nav">
+            <a href="https://github.com/partyzanex/padmark" class="header-link" target="_blank" rel="noopener noreferrer">GitHub</a>
+            <span class="header-sep"></span>
+            <button class="theme-icon" data-theme="light" title="Light" onclick="setTheme('light')">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+            </button>
+            <button class="theme-icon active" data-theme="dim" title="Dim" onclick="setTheme('dim')">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 2a7 7 0 0 0 0 20 10 10 0 0 1 0-20z"/></svg>
+            </button>
+            <button class="theme-icon" data-theme="dark" title="Dark" onclick="setTheme('dark')">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3a7 7 0 0 0 9.79 9.79z"/></svg>
+            </button>
+        </div>
+    </div>
+
+    <div class="meta-bar">
+        <div class="meta-info">
+            <span class="meta-tag">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                {{.CreatedAt}}
+            </span>
+            <span class="meta-tag">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                {{.Views}} views
+            </span>
+            <span class="meta-tag">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                {{.ExpiresLabel}}
+            </span>
+        </div>
+        <div class="meta-actions">
+            <button class="meta-btn" onclick="copyRaw(this)">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                Copy
+            </button>
+            <a href="/notes/{{.ID}}?raw=1" class="meta-btn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                Raw
+            </a>
+            <button class="meta-btn" onclick="copyLink(this)">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+                Link
+            </button>
+        </div>
+    </div>
+
+    <div class="article-card">
+        <div class="prose">
+            {{.Body}}
+        </div>
+    </div>
+
+    <div class="paste-footer">
+        <a href="/notes/{{.ID}}?raw=1" class="paste-footer-link">Raw</a>
+        <span class="paste-footer-sep">·</span>
+        <a href="/" class="paste-footer-link">Edit</a>
+        <span class="paste-footer-sep">·</span>
+        <a href="/" class="paste-footer-link">New</a>
+    </div>
+
+</div>
+
+<textarea id="raw-content" hidden>{{.RawContent}}</textarea>
+
+<script>
+    (function () {
+        const saved = localStorage.getItem('padmark-theme') || 'dim';
+        document.documentElement.setAttribute('data-theme', saved);
+        document.querySelectorAll('.theme-icon').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.theme === saved);
+        });
+    }());
+
+    function setTheme(theme) {
+        document.documentElement.classList.add('theme-transitioning');
+        document.documentElement.setAttribute('data-theme', theme);
+        localStorage.setItem('padmark-theme', theme);
+        document.querySelectorAll('.theme-icon').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.theme === theme);
+        });
+        setTimeout(() => document.documentElement.classList.remove('theme-transitioning'), 450);
+    }
+
+    function copyRaw(btn) {
+        const raw = document.getElementById('raw-content').value;
+        navigator.clipboard.writeText(raw).then(() => {
+            const orig = btn.innerHTML;
+            btn.classList.add('copied');
+            btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> Copied`;
+            setTimeout(() => { btn.innerHTML = orig; btn.classList.remove('copied'); }, 2000);
+        });
+    }
+
+    function copyLink(btn) {
+        navigator.clipboard.writeText(window.location.href).then(() => {
+            const orig = btn.innerHTML;
+            btn.classList.add('copied');
+            btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> Copied`;
+            setTimeout(() => { btn.innerHTML = orig; btn.classList.remove('copied'); }, 2000);
+        });
+    }
+</script>
 </body>
 </html>

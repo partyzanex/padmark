@@ -6,6 +6,7 @@
     <title>Padmark</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -61,12 +62,22 @@
             <label class="field-label">Title <span class="optional">· shown in the header</span></label>
             <input type="text" class="field-input" placeholder="My snippet" id="titleInput">
         </div>
-        <div class="field-group">
-            <label class="field-label">Format</label>
+    </div>
+
+    <div class="burn-row">
+        <label class="burn-checkbox" id="burnLabel">
+            <input type="checkbox" id="burnCheck" onchange="toggleBurn()">
+            <span class="checkmark"></span>
+            <span class="burn-text">Burn after reading in</span>
+        </label>
+        <div class="burn-time-wrap" id="burnTimeWrap">
             <div class="select-wrap">
-                <select class="field-select" id="formatSelect">
-                    <option value="markdown">Markdown</option>
-                    <option value="plain">Plain text</option>
+                <select class="field-select burn-select" id="burnTime" disabled>
+                    <option value="300">5 minutes</option>
+                    <option value="600">10 minutes</option>
+                    <option value="1800">30 minutes</option>
+                    <option value="3600" selected>1 hour</option>
+                    <option value="86400">24 hours</option>
                 </select>
             </div>
         </div>
@@ -120,11 +131,20 @@
         updateCount();
     }
 
+    function toggleBurn() {
+        const checked = document.getElementById('burnCheck').checked;
+        const wrap = document.getElementById('burnTimeWrap');
+        const sel = document.getElementById('burnTime');
+        wrap.classList.toggle('active', checked);
+        sel.disabled = !checked;
+    }
+
     async function publish() {
         const btn = document.getElementById('publishBtn');
         const content = document.getElementById('editor').value.trim();
         const titleInput = document.getElementById('titleInput').value.trim();
-        const contentType = document.getElementById('formatSelect').value;
+        const burnAfterReading = document.getElementById('burnCheck').checked;
+        const ttl = burnAfterReading ? parseInt(document.getElementById('burnTime').value) : 0;
 
         if (!content) {
             btn.textContent = 'Enter some text first';
@@ -143,11 +163,14 @@
         btn.style.opacity = '0.7';
         btn.disabled = true;
 
+        const payload = { title, content, burn_after_reading: burnAfterReading };
+        if (ttl > 0) payload.ttl = ttl;
+
         try {
             const resp = await fetch('/notes', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ title, content, content_type: contentType })
+                body: JSON.stringify(payload)
             });
 
             if (!resp.ok) {

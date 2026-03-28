@@ -47,6 +47,10 @@ func NewManager(storage Storage, renderer Renderer, log *slog.Logger) *Manager {
 
 // Create validates and persists a new note.
 func (m *Manager) Create(ctx context.Context, note *domain.Note) (*domain.Note, error) {
+	if note.ContentType == "" {
+		note.ContentType = domain.ContentTypeMarkdown
+	}
+
 	err := m.validate(note)
 	if err != nil {
 		return nil, err
@@ -63,10 +67,6 @@ func (m *Manager) Create(ctx context.Context, note *domain.Note) (*domain.Note, 
 	now := time.Now()
 	note.CreatedAt = now
 	note.UpdatedAt = now
-
-	if note.ContentType == "" {
-		note.ContentType = domain.ContentTypeMarkdown
-	}
 
 	err = m.storage.Create(ctx, note)
 	if err != nil {
