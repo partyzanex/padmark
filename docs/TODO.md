@@ -14,7 +14,6 @@
 - [x] `internal/usecases/notes/manager.go`
     - [x] `Storage` interface (next to consumer, not in infra)
         - [x] `Create(ctx, *Note) error`
-        - [x] `List(ctx, limit, offset int) ([]Note, int, error)`
         - [x] `Get(ctx, id int64) (*Note, error)`
         - [x] `Update(ctx, id int64, *Note) error`
         - [x] `Delete(ctx, id int64) error`
@@ -49,24 +48,23 @@
     - [x] Graceful shutdown via `signal.NotifyContext` + `srv.Shutdown`
 
 ## 4. Adapters layer
-- [ ] `internal/adapters/http/handler.go` — `Handler` struct, `NewHandler(*notes.Manager, *slog.Logger) *Handler`
-- [ ] `internal/adapters/http/notes.go` — CRUD handlers
-    - [ ] `CreateNote` — parse JSON, 201 + `Location`
-    - [ ] `ListNotes` — pagination, 200
-    - [ ] `GetNote` — content negotiation by `Accept`
-    - [ ] `UpdateNote` — parse JSON, 200
-    - [ ] `DeleteNote` — 204
-- [ ] `internal/adapters/http/negotiate.go` — parse `Accept`, select format
-    - [ ] `application/json` → JSON object
-    - [ ] `text/html` → render markdown to HTML page
-    - [ ] `text/plain`, `text/markdown` → raw markdown
-- [ ] `internal/adapters/http/errors.go` — `writeError()`: translate domain errors to HTTP status codes
-- [ ] `internal/adapters/http/health.go` — `GET /healthz` (liveness), `GET /readyz` (readiness, checks DB)
-- [ ] `internal/adapters/http/router.go` — `NewRouter(*Handler) http.Handler`, middleware: logging, recovery, request ID
-- [ ] Handler tests (`httptest`)
+- [x] `internal/adapters/http/handler.go` — `Handler` struct, `NewHandler(*notes.Manager, *slog.Logger) *Handler`
+- [x] `internal/adapters/http/notes.go` — CRUD handlers
+    - [x] `CreateNote` — parse JSON, 201 + `Location`
+    - [x] `GetNote` — content negotiation by `Accept`
+    - [x] `UpdateNote` — parse JSON, 200
+    - [x] `DeleteNote` — 204
+- [x] `internal/adapters/http/negotiate.go` — parse `Accept`, select format
+    - [x] `application/json` → JSON object
+    - [x] `text/html` → render markdown to HTML page
+    - [x] `text/plain`, `text/markdown` → raw markdown
+- [x] `internal/adapters/http/errors.go` — `writeError()`: translate domain errors to HTTP status codes
+- [x] `internal/adapters/http/health.go` — `GET /healthz` (liveness), `GET /readyz` (readiness, checks DB)
+- [x] `internal/adapters/http/router.go` — `NewRouter(*Handler) http.Handler`, middleware: logging, recovery, request ID
+- [x] Handler tests (`httptest`)
 
 ## 5. Entry point
-- [ ] `cmd/server/main.go` — 10–15 lines, delegates to `internal/infra/cmd`
+- [x] `cmd/server/main.go` — 10–15 lines, delegates to `internal/infra/cmd`
 - [ ] `templates/note.html` — HTML wrapper (charset, base CSS)
 - [ ] Smoke test: start → curl → stop
 

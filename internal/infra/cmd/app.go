@@ -17,6 +17,7 @@ import (
 	"github.com/uptrace/bun/driver/sqliteshim"
 	"github.com/urfave/cli/v3"
 
+	adaptershttp "github.com/partyzanex/padmark/internal/adapters/http"
 	"github.com/partyzanex/padmark/internal/infra/render"
 	"github.com/partyzanex/padmark/internal/infra/storage/sqlite"
 	"github.com/partyzanex/padmark/internal/usecases/notes"
@@ -87,9 +88,9 @@ func action(ctx context.Context, cmd *cli.Command) error {
 	// 4. Manager
 	manager := notes.NewManager(repo, renderer, log)
 
-	// 5. Handler + Router (wired when adapters layer is implemented)
-	_ = manager
-	router := http.NewServeMux()
+	// 5. Handler + Router
+	handler := adaptershttp.NewHandler(manager, log).WithPinger(db.DB)
+	router := adaptershttp.NewRouter(handler)
 
 	// 6. Server
 	srv := &http.Server{

@@ -106,19 +106,19 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
-// GetRendered fetches a note and returns its content rendered as HTML.
-func (m *Manager) GetRendered(ctx context.Context, id string) (string, error) {
+// GetRendered fetches a note and returns it together with its content rendered as HTML.
+func (m *Manager) GetRendered(ctx context.Context, id string) (*domain.Note, string, error) {
 	note, err := m.storage.Get(ctx, id)
 	if err != nil {
-		return "", fmt.Errorf("get note for render: %w", err)
+		return nil, "", fmt.Errorf("get note for render: %w", err)
 	}
 
 	html, err := m.renderer.Render(note.Content)
 	if err != nil {
-		return "", fmt.Errorf("render note %s: %w", id, err)
+		return nil, "", fmt.Errorf("render note %s: %w", id, err)
 	}
 
-	return html, nil
+	return note, html, nil
 }
 
 func (m *Manager) validate(note *domain.Note) error {

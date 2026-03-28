@@ -158,16 +158,17 @@ func (s *ManagerTestSuite) TestGetRendered_OK() {
 	s.storage.EXPECT().Get(gomock.Any(), "abc-123").Return(note, nil)
 	s.renderer.EXPECT().Render("# Hello").Return("<h1>Hello</h1>", nil)
 
-	html, err := s.manager.GetRendered(s.T().Context(), "abc-123")
+	result, html, err := s.manager.GetRendered(s.T().Context(), "abc-123")
 
 	s.Require().NoError(err)
+	s.Equal(note, result)
 	s.Equal("<h1>Hello</h1>", html)
 }
 
 func (s *ManagerTestSuite) TestGetRendered_StorageError() {
 	s.storage.EXPECT().Get(gomock.Any(), "abc-123").Return(nil, domain.ErrNotFound)
 
-	_, err := s.manager.GetRendered(s.T().Context(), "abc-123")
+	_, _, err := s.manager.GetRendered(s.T().Context(), "abc-123")
 
 	s.True(errors.Is(err, domain.ErrNotFound))
 }
@@ -178,7 +179,7 @@ func (s *ManagerTestSuite) TestGetRendered_RenderError() {
 	s.storage.EXPECT().Get(gomock.Any(), "abc-123").Return(note, nil)
 	s.renderer.EXPECT().Render("bad").Return("", renderErr)
 
-	_, err := s.manager.GetRendered(s.T().Context(), "abc-123")
+	_, _, err := s.manager.GetRendered(s.T().Context(), "abc-123")
 
 	s.True(errors.Is(err, renderErr))
 }
