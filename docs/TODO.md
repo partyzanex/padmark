@@ -98,7 +98,7 @@
 - [x] Add `--success-glow`, `--success-muted`, `--warn`, `--warn-bg`, `--warn-border` CSS variables to `static/style.css`
 - [x] Add `--err-red`, `--err-red-muted`, `--err-red-border`, `--err-amber`, `--err-amber-muted`, `--err-amber-border` CSS variables to `static/style.css`
 - [x] Add success-page and error-page component styles to `static/style.css` (currently inline in templates)
-- [ ] Restore Slug field to `GET /` editor (alongside Title) — maps to custom slug feature above
+- [x] Restore Slug field to `GET /` editor (alongside Title) — maps to custom slug feature above
 - [ ] Unify `localStorage` theme key: view page uses `'padmark-theme'`, index/success/error use `'theme'`
 
 ## 9. Improvements (v2)

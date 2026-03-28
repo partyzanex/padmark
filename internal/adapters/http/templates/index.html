@@ -62,6 +62,13 @@
             <label class="field-label">Title <span class="optional">· shown in the header</span></label>
             <input type="text" class="field-input" placeholder="My snippet" id="titleInput">
         </div>
+        <div class="field-group">
+            <label class="field-label">Slug <span class="optional">· optional</span></label>
+            <div class="slug-prefix">
+                <input type="text" class="field-input" placeholder="my-snippet" id="slugInput"
+                       pattern="[a-zA-Z0-9_-]+" title="Letters, numbers, hyphens and underscores only">
+            </div>
+        </div>
     </div>
 
     <div class="burn-row">
@@ -143,6 +150,7 @@
         const btn = document.getElementById('publishBtn');
         const content = document.getElementById('editor').value.trim();
         const titleInput = document.getElementById('titleInput').value.trim();
+        const slug = document.getElementById('slugInput').value.trim();
         const burnAfterReading = document.getElementById('burnCheck').checked;
         const ttl = burnAfterReading ? parseInt(document.getElementById('burnTime').value) : 0;
 
@@ -164,6 +172,7 @@
         btn.disabled = true;
 
         const payload = { title, content, burn_after_reading: burnAfterReading };
+        if (slug) payload.slug = slug;
         if (ttl > 0) payload.ttl = ttl;
 
         try {
