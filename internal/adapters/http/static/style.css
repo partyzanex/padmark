@@ -959,6 +959,331 @@ kbd {
 .paste-footer-sep { color: var(--text-muted); font-size: 0.75rem; user-select: none; }
 
 /* ================================================================
+   Buttons (shared across pages)
+   ================================================================ */
+.btn-primary {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 11px 22px;
+    background: var(--accent);
+    color: #fff;
+    font-family: var(--font-display);
+    font-size: 0.85rem;
+    font-weight: 600;
+    border: none;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    text-decoration: none;
+    transition: all 0.25s ease;
+}
+
+.btn-primary:hover {
+    background: var(--accent-hover);
+    box-shadow: 0 4px 20px var(--accent-glow-strong);
+    transform: translateY(-1px);
+}
+
+.btn-primary:active { transform: translateY(0); }
+.btn-primary svg    { width: 15px; height: 15px; }
+
+.btn-ghost {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 11px 20px;
+    background: transparent;
+    color: var(--text-secondary);
+    font-family: var(--font-display);
+    font-size: 0.85rem;
+    font-weight: 500;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    text-decoration: none;
+    transition: all 0.25s ease;
+}
+
+.btn-ghost:hover {
+    border-color: var(--border-focus);
+    color: var(--text-primary);
+    background: var(--accent-glow);
+}
+
+.btn-ghost svg { width: 14px; height: 14px; }
+
+/* ================================================================
+   Success page
+   ================================================================ */
+.success-card {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    animation: fade-up 0.5s ease 0.08s both;
+}
+
+.success-banner {
+    padding: 24px 28px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    border-bottom: 1px solid var(--border-subtle);
+    background: var(--success-muted);
+}
+
+.success-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: var(--success);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    box-shadow: 0 0 16px var(--success-glow);
+    animation: pop-in 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) 0.3s both;
+}
+
+.success-icon svg {
+    width: 18px;
+    height: 18px;
+    stroke: #0a0a0f;
+    stroke-width: 3;
+    fill: none;
+}
+
+.success-title {
+    font-family: var(--font-display);
+    font-size: 1.15rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.success-subtitle {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    margin-top: 2px;
+}
+
+.card-body {
+    padding: 28px;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+}
+
+.field-block {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.field-block-label {
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+
+.copy-row {
+    display: flex;
+    align-items: stretch;
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    border: 1px solid var(--border-subtle);
+    transition: border-color 0.2s ease;
+}
+
+.copy-row:hover { border-color: var(--border-focus); }
+
+.copy-value {
+    flex: 1;
+    padding: 11px 14px;
+    background: var(--bg-elevated);
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+    color: var(--accent-hover);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: flex;
+    align-items: center;
+    border: none;
+    outline: none;
+    user-select: all;
+    text-decoration: none;
+}
+
+a.copy-value:hover {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+}
+
+.copy-btn {
+    padding: 0 16px;
+    background: var(--bg-surface);
+    border: none;
+    border-left: 1px solid var(--border-subtle);
+    color: var(--text-secondary);
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    font-weight: 500;
+    letter-spacing: 0.03em;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+}
+
+.copy-btn:hover { background: var(--accent-glow); color: var(--text-primary); }
+.copy-btn svg   { width: 14px; height: 14px; flex-shrink: 0; }
+.copy-btn.copied { color: var(--success); }
+
+.card-divider {
+    width: 100%;
+    height: 1px;
+    background: var(--border-subtle);
+}
+
+.warning-block {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 12px 14px;
+    background: var(--warn-bg);
+    border: 1px solid var(--warn-border);
+    border-radius: var(--radius-sm);
+}
+
+.warning-icon { flex-shrink: 0; font-size: 0.9rem; line-height: 1.4; }
+
+.warning-text {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--text-secondary);
+    line-height: 1.5;
+}
+
+.actions-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 0 28px 24px;
+    animation: fade-up 0.5s ease 0.16s both;
+}
+
+/* ================================================================
+   Error page
+   ================================================================ */
+.error-center {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.error-content {
+    text-align: center;
+    animation: fade-up 0.5s ease 0.08s both;
+}
+
+.error-code {
+    font-family: var(--font-mono);
+    font-size: 7rem;
+    font-weight: 600;
+    letter-spacing: -0.04em;
+    line-height: 1;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+    position: relative;
+    display: inline-block;
+}
+
+.error-code::after {
+    content: '';
+    position: absolute;
+    bottom: 6px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 60%;
+    height: 3px;
+    border-radius: 2px;
+    opacity: 0.4;
+}
+
+.error-content[data-type="client"] .error-code::after { background: var(--err-amber); }
+.error-content[data-type="server"] .error-code::after { background: var(--err-red); }
+
+.error-title {
+    font-family: var(--font-display);
+    font-size: 1.3rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 8px;
+    letter-spacing: -0.01em;
+}
+
+.error-desc {
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    line-height: 1.6;
+    max-width: 380px;
+    margin: 0 auto 32px;
+}
+
+.error-actions {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.error-detail {
+    margin: 24px auto 0;
+    padding: 14px 18px;
+    border-radius: var(--radius-sm);
+    text-align: left;
+    max-width: 420px;
+    animation: fade-up 0.4s ease 0.22s both;
+}
+
+.error-content[data-type="server"] .error-detail {
+    background: var(--err-red-muted);
+    border: 1px solid var(--err-red-border);
+}
+
+.error-content[data-type="client"] .error-detail {
+    background: var(--err-amber-muted);
+    border: 1px solid var(--err-amber-border);
+}
+
+.error-detail-label {
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 6px;
+}
+
+.error-detail-text {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--text-secondary);
+    line-height: 1.55;
+    word-break: break-all;
+}
+
+/* ================================================================
    Animations
    ================================================================ */
 @keyframes fade-up {
@@ -969,6 +1294,11 @@ kbd {
 @keyframes pulse-dot {
     0%, 100% { opacity: 1; box-shadow: 0 0 8px var(--accent-glow-strong); }
     50%       { opacity: 0.6; box-shadow: 0 0 16px var(--accent-glow); }
+}
+
+@keyframes pop-in {
+    from { opacity: 0; transform: scale(0.5); }
+    to   { opacity: 1; transform: scale(1); }
 }
 
 /* ================================================================
@@ -985,4 +1315,14 @@ kbd {
     .prose h1       { font-size: 1.35rem; }
     .prose h2       { font-size: 1.1rem; }
     .meta-bar       { flex-direction: column; align-items: flex-start; }
+}
+
+@media (max-width: 600px) {
+    .success-banner { padding: 18px 20px; }
+    .card-body      { padding: 20px; }
+    .actions-row    { padding: 0 20px 20px; flex-wrap: wrap; }
+    .copy-value     { font-size: 0.75rem; }
+    .error-code     { font-size: 5rem; }
+    .error-title    { font-size: 1.1rem; }
+    .error-actions  { flex-direction: column; }
 }
