@@ -84,6 +84,20 @@ func (mr *MockStorageMockRecorder) Get(ctx, id any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Get", reflect.TypeOf((*MockStorage)(nil).Get), ctx, id)
 }
 
+// IncrementViews mocks base method.
+func (m *MockStorage) IncrementViews(ctx context.Context, id string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "IncrementViews", ctx, id)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// IncrementViews indicates an expected call of IncrementViews.
+func (mr *MockStorageMockRecorder) IncrementViews(ctx, id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IncrementViews", reflect.TypeOf((*MockStorage)(nil).IncrementViews), ctx, id)
+}
+
 // Update mocks base method.
 func (m *MockStorage) Update(ctx context.Context, id string, note *domain.Note) error {
 	m.ctrl.T.Helper()

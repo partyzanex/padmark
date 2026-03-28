@@ -28,5 +28,6 @@ type Note struct {
 	Title            string
 	Content          string
 	ContentType      ContentType
+	Views            int
 	BurnAfterReading bool // if true, the note is deleted on the first read
 }

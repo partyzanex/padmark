@@ -19,6 +19,7 @@ type noteRequest struct {
 	Title            string             `json:"title"`
 	Content          string             `json:"content"`
 	ContentType      domain.ContentType `json:"content_type,omitempty"`
+	Slug             string             `json:"slug,omitempty"`               // custom URL-safe ID; absent = auto-generated UUID
 	TTL              int64              `json:"ttl,omitempty"`                // seconds; 0 or absent means never expires
 	BurnAfterReading bool               `json:"burn_after_reading,omitempty"` // delete on first read
 }
@@ -31,6 +32,7 @@ type noteResponse struct {
 	Title            string             `json:"title"`
 	Content          string             `json:"content"`
 	ContentType      domain.ContentType `json:"content_type"`
+	Views            int                `json:"views"`
 	BurnAfterReading bool               `json:"burn_after_reading"`
 }
 
@@ -43,6 +45,7 @@ func toNoteResponse(note *domain.Note) noteResponse {
 		CreatedAt:        note.CreatedAt,
 		UpdatedAt:        note.UpdatedAt,
 		ExpiresAt:        note.ExpiresAt,
+		Views:            note.Views,
 		BurnAfterReading: note.BurnAfterReading,
 	}
 }
@@ -65,6 +68,7 @@ func (h *Handler) CreateNote(w http.ResponseWriter, r *http.Request) {
 	}
 
 	note, err := h.manager.Create(r.Context(), &domain.Note{
+		ID:               req.Slug,
 		Title:            req.Title,
 		Content:          req.Content,
 		ContentType:      req.ContentType,
@@ -114,7 +118,7 @@ func (h *Handler) GetNote(w http.ResponseWriter, r *http.Request) {
 		}
 
 	case formatPlain:
-		note, err := h.manager.Get(r.Context(), id)
+		note, err := h.manager.View(r.Context(), id)
 		if err != nil {
 			writeError(w, err)
 			return
@@ -133,7 +137,7 @@ func (h *Handler) GetNote(w http.ResponseWriter, r *http.Request) {
 		}
 
 	default:
-		note, err := h.manager.Get(r.Context(), id)
+		note, err := h.manager.View(r.Context(), id)
 		if err != nil {
 			writeError(w, err)
 			return

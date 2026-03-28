@@ -87,6 +87,24 @@ func (s *ManagerTestSuite) TestCreate_WithTTL() {
 	s.True(result.ExpiresAt.After(time.Now()))
 }
 
+func (s *ManagerTestSuite) TestCreate_WithSlug() {
+	note := &domain.Note{ID: "my-slug", Title: "hello", Content: "world"}
+	s.storage.EXPECT().Create(gomock.Any(), note).Return(nil)
+
+	result, err := s.manager.Create(s.T().Context(), note)
+
+	s.Require().NoError(err)
+	s.Equal("my-slug", result.ID)
+}
+
+func (s *ManagerTestSuite) TestCreate_InvalidSlug() {
+	note := &domain.Note{ID: "bad slug!", Title: "hello"}
+
+	_, err := s.manager.Create(s.T().Context(), note)
+
+	s.True(errors.Is(err, domain.ErrInvalidSlug))
+}
+
 func (s *ManagerTestSuite) TestCreate_StorageError() {
 	storageErr := errors.New("db error")
 	note := &domain.Note{Title: "hi"}
@@ -136,6 +154,40 @@ func (s *ManagerTestSuite) TestGet_NotFound() {
 	s.storage.EXPECT().Get(gomock.Any(), "missing").Return(nil, domain.ErrNotFound)
 
 	_, err := s.manager.Get(s.T().Context(), "missing")
+
+	s.True(errors.Is(err, domain.ErrNotFound))
+}
+
+// View
+
+func (s *ManagerTestSuite) TestView_OK() {
+	want := &domain.Note{ID: "abc-123", Title: "a", Views: 5}
+	s.storage.EXPECT().Get(gomock.Any(), "abc-123").Return(want, nil)
+	s.storage.EXPECT().IncrementViews(gomock.Any(), "abc-123").Return(nil)
+
+	note, err := s.manager.View(s.T().Context(), "abc-123")
+
+	s.Require().NoError(err)
+	s.Equal(want, note)
+	s.Equal(6, note.Views)
+}
+
+func (s *ManagerTestSuite) TestView_BurnAfterReading() {
+	want := &domain.Note{ID: "abc-123", Title: "a", BurnAfterReading: true}
+	s.storage.EXPECT().Get(gomock.Any(), "abc-123").Return(want, nil)
+	s.storage.EXPECT().Delete(gomock.Any(), "abc-123").Return(nil)
+
+	note, err := s.manager.View(s.T().Context(), "abc-123")
+
+	s.Require().NoError(err)
+	s.Equal(want, note)
+	s.Equal(0, note.Views) // no increment for burn-after-reading
+}
+
+func (s *ManagerTestSuite) TestView_NotFound() {
+	s.storage.EXPECT().Get(gomock.Any(), "missing").Return(nil, domain.ErrNotFound)
+
+	_, err := s.manager.View(s.T().Context(), "missing")
 
 	s.True(errors.Is(err, domain.ErrNotFound))
 }
@@ -202,6 +254,7 @@ func (s *ManagerTestSuite) TestDelete_NotFound() {
 func (s *ManagerTestSuite) TestGetRendered_OK() {
 	note := &domain.Note{ID: "abc-123", Content: "# Hello"}
 	s.storage.EXPECT().Get(gomock.Any(), "abc-123").Return(note, nil)
+	s.storage.EXPECT().IncrementViews(gomock.Any(), "abc-123").Return(nil)
 	s.renderer.EXPECT().Render("# Hello").Return("<h1>Hello</h1>", nil)
 
 	result, html, err := s.manager.GetRendered(s.T().Context(), "abc-123")
@@ -247,6 +300,7 @@ func (s *ManagerTestSuite) TestGetRendered_RenderError() {
 	renderErr := errors.New("render failed")
 	note := &domain.Note{ID: "abc-123", Content: "bad"}
 	s.storage.EXPECT().Get(gomock.Any(), "abc-123").Return(note, nil)
+	s.storage.EXPECT().IncrementViews(gomock.Any(), "abc-123").Return(nil)
 	s.renderer.EXPECT().Render("bad").Return("", renderErr)
 
 	_, _, err := s.manager.GetRendered(s.T().Context(), "abc-123")

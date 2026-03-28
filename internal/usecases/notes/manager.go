@@ -7,12 +7,15 @@ import (
 	"fmt"
 	"html"
 	"log/slog"
+	"regexp"
 	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/partyzanex/padmark/internal/domain"
 )
+
+var slugRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,99}$`)
 
 const maxContentLength = 100_000
 
@@ -22,6 +25,7 @@ type Storage interface {
 	Get(ctx context.Context, id string) (*domain.Note, error)
 	Update(ctx context.Context, id string, note *domain.Note) error
 	Delete(ctx context.Context, id string) error
+	IncrementViews(ctx context.Context, id string) error
 }
 
 // Renderer defines markdown-to-HTML rendering.
@@ -48,8 +52,15 @@ func (m *Manager) Create(ctx context.Context, note *domain.Note) (*domain.Note, 
 		return nil, err
 	}
 
+	if note.ID != "" {
+		if !slugRe.MatchString(note.ID) {
+			return nil, domain.ErrInvalidSlug
+		}
+	} else {
+		note.ID = uuid.NewString()
+	}
+
 	now := time.Now()
-	note.ID = uuid.NewString()
 	note.CreatedAt = now
 	note.UpdatedAt = now
 
@@ -89,6 +100,26 @@ func (m *Manager) Get(ctx context.Context, id string) (*domain.Note, error) {
 			m.log.ErrorContext(ctx, "burn after reading: delete note", "id", id, "err", delErr)
 		} else {
 			m.log.DebugContext(ctx, "note burned", "id", id)
+		}
+	}
+
+	return note, nil
+}
+
+// View returns a note by ID and increments its view counter.
+// Burn-after-reading notes are not incremented because they are deleted on read.
+func (m *Manager) View(ctx context.Context, id string) (*domain.Note, error) {
+	note, err := m.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	if !note.BurnAfterReading {
+		incErr := m.storage.IncrementViews(ctx, id)
+		if incErr != nil {
+			m.log.ErrorContext(ctx, "increment views", "id", id, "err", incErr)
+		} else {
+			note.Views++
 		}
 	}
 
@@ -137,10 +168,10 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
-// GetRendered fetches a note and returns it together with its content as safe HTML.
+// GetRendered fetches a note, increments its view counter, and returns it with content as safe HTML.
 // Plain-text notes are HTML-escaped and wrapped in <pre>; markdown notes are rendered.
 func (m *Manager) GetRendered(ctx context.Context, id string) (*domain.Note, string, error) {
-	note, err := m.Get(ctx, id)
+	note, err := m.View(ctx, id)
 	if err != nil {
 		return nil, "", fmt.Errorf("get note for render: %w", err)
 	}

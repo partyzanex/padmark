@@ -19,6 +19,10 @@ func writeError(w http.ResponseWriter, err error) {
 		http.Error(w, domain.ErrInvalidContentType.Error(), http.StatusUnprocessableEntity)
 	case errors.Is(err, domain.ErrContentTooLong):
 		http.Error(w, domain.ErrContentTooLong.Error(), http.StatusRequestEntityTooLarge)
+	case errors.Is(err, domain.ErrInvalidSlug):
+		http.Error(w, domain.ErrInvalidSlug.Error(), http.StatusUnprocessableEntity)
+	case errors.Is(err, domain.ErrSlugConflict):
+		http.Error(w, domain.ErrSlugConflict.Error(), http.StatusConflict)
 	default:
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 	}

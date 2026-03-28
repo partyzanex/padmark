@@ -23,7 +23,7 @@ var StaticHandler = http.FileServer(http.FS(staticFS))
 // NoteManager is the interface the HTTP adapter requires from the business logic layer.
 type NoteManager interface {
 	Create(ctx context.Context, note *domain.Note) (*domain.Note, error)
-	Get(ctx context.Context, id string) (*domain.Note, error)
+	View(ctx context.Context, id string) (*domain.Note, error)
 	GetRendered(ctx context.Context, id string) (*domain.Note, string, error)
 	Update(ctx context.Context, id string, note *domain.Note) (*domain.Note, error)
 	Delete(ctx context.Context, id string) error

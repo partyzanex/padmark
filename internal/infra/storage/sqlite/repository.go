@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/uptrace/bun"
@@ -23,6 +24,7 @@ type note struct {
 	Title            string     `bun:"title"`
 	Content          string     `bun:"content"`
 	ContentType      string     `bun:"content_type"`
+	Views            int        `bun:"views"`
 	BurnAfterReading bool       `bun:"burn_after_reading"`
 }
 
@@ -51,6 +53,10 @@ func (r *Repository) Create(ctx context.Context, domNote *domain.Note) error {
 
 	_, err := r.db.NewInsert().Model(dbNote).Exec(ctx)
 	if err != nil {
+		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+			return domain.ErrSlugConflict
+		}
+
 		return fmt.Errorf("sqlite create: %w", err)
 	}
 
@@ -78,6 +84,7 @@ func (r *Repository) Get(ctx context.Context, id string) (*domain.Note, error) {
 		Title:            dbNote.Title,
 		Content:          dbNote.Content,
 		ContentType:      domain.ContentType(dbNote.ContentType),
+		Views:            dbNote.Views,
 		BurnAfterReading: dbNote.BurnAfterReading,
 	}, nil
 }
@@ -99,6 +106,29 @@ func (r *Repository) Update(ctx context.Context, id string, domNote *domain.Note
 		Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("sqlite update: %w", err)
+	}
+
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("sqlite rowsaffected: %w", err)
+	}
+
+	if affected == 0 {
+		return domain.ErrNotFound
+	}
+
+	return nil
+}
+
+// IncrementViews atomically increments the view counter for a note.
+func (r *Repository) IncrementViews(ctx context.Context, id string) error {
+	result, err := r.db.NewUpdate().
+		TableExpr("notes").
+		Set("views = views + 1").
+		Where("id = ?", id).
+		Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("sqlite increment views: %w", err)
 	}
 
 	affected, err := result.RowsAffected()

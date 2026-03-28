@@ -1,9 +1,7 @@
 package http_test
 
 import (
-	"database/sql"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -12,14 +10,10 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/suite"
-	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect/sqlitedialect"
-	"github.com/uptrace/bun/driver/sqliteshim"
+	"go.uber.org/mock/gomock"
 
 	adhttp "github.com/partyzanex/padmark/internal/adapters/http"
-	"github.com/partyzanex/padmark/internal/infra/render"
-	"github.com/partyzanex/padmark/internal/infra/storage/sqlite"
-	"github.com/partyzanex/padmark/internal/usecases/notes"
+	"github.com/partyzanex/padmark/internal/domain"
 )
 
 // testNoteResponse mirrors noteResponse for decoding test responses.
@@ -30,13 +24,16 @@ type testNoteResponse struct {
 	Title       string    `json:"title"`
 	Content     string    `json:"content"`
 	ContentType string    `json:"content_type"`
+	Views       int       `json:"views"`
 }
 
 type HandlerSuite struct {
 	suite.Suite
 
-	db     *bun.DB
-	router http.Handler
+	ctrl    *gomock.Controller
+	manager *MockNoteManager
+	pinger  *MockPinger
+	router  http.Handler
 }
 
 func TestHandler(t *testing.T) {
@@ -44,27 +41,37 @@ func TestHandler(t *testing.T) {
 }
 
 func (s *HandlerSuite) SetupTest() {
-	sqldb, err := sql.Open(sqliteshim.DriverName(), ":memory:")
-	s.Require().NoError(err)
-	sqldb.SetMaxOpenConns(1)
+	s.ctrl = gomock.NewController(s.T())
+	s.manager = NewMockNoteManager(s.ctrl)
+	s.pinger = NewMockPinger(s.ctrl)
 
-	s.db = bun.NewDB(sqldb, sqlitedialect.New())
-	s.Require().NoError(sqlite.Migrate(s.T().Context(), s.db))
-
-	repo := sqlite.NewRepository(s.db)
-	renderer := render.NewRenderer()
-	manager := notes.NewManager(repo, renderer, slog.New(slog.DiscardHandler))
-	handler := adhttp.NewHandler(manager, slog.New(slog.DiscardHandler)).WithPinger(s.db.DB)
+	handler := adhttp.NewHandler(s.manager, slog.New(slog.DiscardHandler)).WithPinger(s.pinger)
 	s.router = adhttp.NewRouter(handler)
 }
 
 func (s *HandlerSuite) TearDownTest() {
-	s.Require().NoError(s.db.Close())
+	s.ctrl.Finish()
+}
+
+const testID = "abc-123"
+
+func newTestNote(title, content string) *domain.Note {
+	return &domain.Note{
+		ID:          testID,
+		Title:       title,
+		Content:     content,
+		ContentType: domain.ContentTypeMarkdown,
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}
 }
 
 // CreateNote
 
 func (s *HandlerSuite) TestCreateNote_OK() {
+	note := newTestNote("hello", "# world")
+	s.manager.EXPECT().Create(gomock.Any(), gomock.Any()).Return(note, nil)
+
 	body := `{"title":"hello","content":"# world"}`
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPost, "/notes", strings.NewReader(body))
@@ -84,6 +91,8 @@ func (s *HandlerSuite) TestCreateNote_OK() {
 }
 
 func (s *HandlerSuite) TestCreateNote_EmptyTitle() {
+	s.manager.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil, domain.ErrTitleRequired)
+
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPost, "/notes", strings.NewReader(`{"content":"body"}`))
 	r.Header.Set("Content-Type", "application/json")
@@ -102,13 +111,48 @@ func (s *HandlerSuite) TestCreateNote_InvalidBody() {
 	s.Equal(http.StatusBadRequest, w.Code)
 }
 
+func (s *HandlerSuite) TestCreateNote_WithSlug() {
+	note := newTestNote("slugged", "body")
+	note.ID = "my-note"
+	s.manager.EXPECT().Create(gomock.Any(), gomock.Any()).Return(note, nil)
+
+	body := `{"title":"slugged","content":"body","slug":"my-note"}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/notes", strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusCreated, w.Code)
+	s.Equal("/notes/my-note", w.Header().Get("Location"))
+
+	var resp testNoteResponse
+	s.Require().NoError(json.NewDecoder(w.Body).Decode(&resp))
+	s.Equal("my-note", resp.ID)
+}
+
+func (s *HandlerSuite) TestCreateNote_SlugConflict() {
+	s.manager.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil, domain.ErrSlugConflict)
+
+	body := `{"title":"first","content":"body","slug":"taken"}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/notes", strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusConflict, w.Code)
+}
+
 // GetNote
 
 func (s *HandlerSuite) TestGetNote_JSON() {
-	id := s.createNote("my title", "**bold**")
+	note := newTestNote("my title", "**bold**")
+	note.Views = 3
+	s.manager.EXPECT().View(gomock.Any(), testID).Return(note, nil)
 
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet, "/notes/"+id, nil)
+	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
 	r.Header.Set("Accept", "application/json")
 
 	s.router.ServeHTTP(w, r)
@@ -120,13 +164,16 @@ func (s *HandlerSuite) TestGetNote_JSON() {
 	s.Require().NoError(json.NewDecoder(w.Body).Decode(&resp))
 	s.Equal("my title", resp.Title)
 	s.Equal("**bold**", resp.Content)
+	s.Equal(3, resp.Views)
 }
 
 func (s *HandlerSuite) TestGetNote_HTML() {
-	id := s.createNote("HTML note", "# Heading\n\n**bold**")
+	note := newTestNote("HTML note", "# Heading\n\n**bold**")
+	s.manager.EXPECT().GetRendered(gomock.Any(), testID).
+		Return(note, "<h1>Heading</h1>\n<strong>bold</strong>", nil)
 
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet, "/notes/"+id, nil)
+	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
 	r.Header.Set("Accept", "text/html")
 
 	s.router.ServeHTTP(w, r)
@@ -136,25 +183,17 @@ func (s *HandlerSuite) TestGetNote_HTML() {
 
 	body := w.Body.String()
 	s.Contains(body, "HTML note")
-	s.Contains(body, "<h1")
+	s.Contains(body, "<h1>Heading</h1>")
 	s.Contains(body, "<strong>bold</strong>")
 }
 
 func (s *HandlerSuite) TestGetNote_Plain() {
-	// Create a text/plain note so the response Content-Type matches.
-	body := `{"title":"plain note","content":"raw content here","content_type":"text/plain"}`
-	cw := httptest.NewRecorder()
-	cr := httptest.NewRequest(http.MethodPost, "/notes", strings.NewReader(body))
-	cr.Header.Set("Content-Type", "application/json")
-	s.router.ServeHTTP(cw, cr)
-	s.Require().Equal(http.StatusCreated, cw.Code)
-
-	var created testNoteResponse
-
-	s.Require().NoError(json.NewDecoder(cw.Body).Decode(&created))
+	note := newTestNote("plain note", "raw content here")
+	note.ContentType = domain.ContentTypePlain
+	s.manager.EXPECT().View(gomock.Any(), testID).Return(note, nil)
 
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet, "/notes/"+created.ID, nil)
+	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
 	r.Header.Set("Accept", "text/plain")
 
 	s.router.ServeHTTP(w, r)
@@ -165,10 +204,11 @@ func (s *HandlerSuite) TestGetNote_Plain() {
 }
 
 func (s *HandlerSuite) TestGetNote_Markdown() {
-	id := s.createNote("md note", "raw **md**")
+	note := newTestNote("md note", "raw **md**")
+	s.manager.EXPECT().View(gomock.Any(), testID).Return(note, nil)
 
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet, "/notes/"+id, nil)
+	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
 	r.Header.Set("Accept", "text/markdown")
 
 	s.router.ServeHTTP(w, r)
@@ -179,6 +219,8 @@ func (s *HandlerSuite) TestGetNote_Markdown() {
 }
 
 func (s *HandlerSuite) TestGetNote_NotFound() {
+	s.manager.EXPECT().View(gomock.Any(), "nonexistent").Return(nil, domain.ErrNotFound)
+
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/notes/nonexistent", nil)
 
@@ -187,24 +229,34 @@ func (s *HandlerSuite) TestGetNote_NotFound() {
 	s.Equal(http.StatusNotFound, w.Code)
 }
 
+func (s *HandlerSuite) TestGetNote_Expired() {
+	s.manager.EXPECT().View(gomock.Any(), testID).Return(nil, domain.ErrExpired)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusGone, w.Code)
+}
+
 // UpdateNote
 
 func (s *HandlerSuite) TestUpdateNote_OK() {
-	// Create with explicit content_type so we can verify it is preserved.
-	createBody := `{"title":"old title","content":"old content","content_type":"text/plain"}`
-	cw := httptest.NewRecorder()
-	cr := httptest.NewRequest(http.MethodPost, "/notes", strings.NewReader(createBody))
-	cr.Header.Set("Content-Type", "application/json")
-	s.router.ServeHTTP(cw, cr)
-	s.Require().Equal(http.StatusCreated, cw.Code)
-
-	var created testNoteResponse
-
-	s.Require().NoError(json.NewDecoder(cw.Body).Decode(&created))
+	createdAt := time.Now().Add(-time.Hour)
+	updated := &domain.Note{
+		ID:          testID,
+		Title:       "new title",
+		Content:     "new content",
+		ContentType: domain.ContentTypePlain,
+		CreatedAt:   createdAt,
+		UpdatedAt:   time.Now(),
+	}
+	s.manager.EXPECT().Update(gomock.Any(), testID, gomock.Any()).Return(updated, nil)
 
 	body := `{"title":"new title","content":"new content"}`
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodPut, "/notes/"+created.ID, strings.NewReader(body))
+	r := httptest.NewRequest(http.MethodPut, "/notes/"+testID, strings.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")
 
 	s.router.ServeHTTP(w, r)
@@ -215,14 +267,16 @@ func (s *HandlerSuite) TestUpdateNote_OK() {
 	s.Require().NoError(json.NewDecoder(w.Body).Decode(&resp))
 	s.Equal("new title", resp.Title)
 	s.Equal("new content", resp.Content)
-	s.False(resp.CreatedAt.IsZero(), "created_at must be preserved")
-	s.Equal(created.ContentType, resp.ContentType, "content_type must be preserved when not provided")
+	s.Equal(createdAt.Unix(), resp.CreatedAt.Unix(), "created_at must be preserved")
+	s.Equal("text/plain", resp.ContentType, "content_type must be preserved when not provided")
 }
 
 func (s *HandlerSuite) TestUpdateNote_NotFound() {
+	s.manager.EXPECT().Update(gomock.Any(), "missing", gomock.Any()).Return(nil, domain.ErrNotFound)
+
 	body := `{"title":"title","content":"content"}`
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodPut, "/notes/nonexistent", strings.NewReader(body))
+	r := httptest.NewRequest(http.MethodPut, "/notes/missing", strings.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")
 
 	s.router.ServeHTTP(w, r)
@@ -231,10 +285,8 @@ func (s *HandlerSuite) TestUpdateNote_NotFound() {
 }
 
 func (s *HandlerSuite) TestUpdateNote_InvalidBody() {
-	id := s.createNote("title", "content")
-
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodPut, "/notes/"+id, strings.NewReader(`bad`))
+	r := httptest.NewRequest(http.MethodPut, "/notes/"+testID, strings.NewReader(`bad`))
 
 	s.router.ServeHTTP(w, r)
 
@@ -244,23 +296,19 @@ func (s *HandlerSuite) TestUpdateNote_InvalidBody() {
 // DeleteNote
 
 func (s *HandlerSuite) TestDeleteNote_OK() {
-	id := s.createNote("to delete", "bye")
+	s.manager.EXPECT().Delete(gomock.Any(), testID).Return(nil)
 
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodDelete, "/notes/"+id, nil)
+	r := httptest.NewRequest(http.MethodDelete, "/notes/"+testID, nil)
 
 	s.router.ServeHTTP(w, r)
 
 	s.Equal(http.StatusNoContent, w.Code)
-
-	// confirm gone
-	w2 := httptest.NewRecorder()
-	r2 := httptest.NewRequest(http.MethodGet, "/notes/"+id, nil)
-	s.router.ServeHTTP(w2, r2)
-	s.Equal(http.StatusNotFound, w2.Code)
 }
 
 func (s *HandlerSuite) TestDeleteNote_NotFound() {
+	s.manager.EXPECT().Delete(gomock.Any(), "nonexistent").Return(domain.ErrNotFound)
+
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodDelete, "/notes/nonexistent", nil)
 
@@ -280,7 +328,9 @@ func (s *HandlerSuite) TestHealthz() {
 	s.Equal(http.StatusOK, w.Code)
 }
 
-func (s *HandlerSuite) TestReadyz() {
+func (s *HandlerSuite) TestReadyz_OK() {
+	s.pinger.EXPECT().PingContext(gomock.Any()).Return(nil)
+
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/readyz", nil)
 
@@ -292,27 +342,12 @@ func (s *HandlerSuite) TestReadyz() {
 // Middleware
 
 func (s *HandlerSuite) TestRequestIDHeader() {
-	id := s.createNote("title", "content")
+	s.manager.EXPECT().View(gomock.Any(), testID).Return(newTestNote("title", "content"), nil)
+
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet, "/notes/"+id, nil)
+	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
 
 	s.router.ServeHTTP(w, r)
 
 	s.NotEmpty(w.Header().Get("X-Request-ID"))
-}
-
-// createNote is a test helper that inserts a note and returns its ID.
-func (s *HandlerSuite) createNote(title, content string) string {
-	body := fmt.Sprintf(`{"title":%q,"content":%q}`, title, content)
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodPost, "/notes", strings.NewReader(body))
-	r.Header.Set("Content-Type", "application/json")
-
-	s.router.ServeHTTP(w, r)
-	s.Require().Equal(http.StatusCreated, w.Code)
-
-	var resp testNoteResponse
-	s.Require().NoError(json.NewDecoder(w.Body).Decode(&resp))
-
-	return resp.ID
 }

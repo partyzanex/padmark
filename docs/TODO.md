@@ -77,8 +77,8 @@
 ### Backend features required by the design
 - [x] Note TTL / expiry — `ExpiresAt *time.Time` in domain, `ttl` param in `POST /notes`, auto-expire check on `GET`
 - [x] Burn-after-reading — `BurnAfterReading bool` in domain, delete note on first `GET`
-- [ ] View count — `Views int` in domain, increment on `GET /notes/{id}`
-- [ ] Custom slug — allow client to supply a custom `id`/slug in `POST /notes`; validate uniqueness
+- [x] View count — `Views int` in domain, increment on `GET /notes/{id}`
+- [x] Custom slug — allow client to supply a custom `id`/slug in `POST /notes`; validate uniqueness
 
 ### Pages
 - [ ] View page (`GET /notes/{id}` HTML) — replace `templates/note.html` with template matching `docs/design/view.html`

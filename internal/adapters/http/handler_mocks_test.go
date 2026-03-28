@@ -70,21 +70,6 @@ func (mr *MockNoteManagerMockRecorder) Delete(ctx, id any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Delete", reflect.TypeOf((*MockNoteManager)(nil).Delete), ctx, id)
 }
 
-// Get mocks base method.
-func (m *MockNoteManager) Get(ctx context.Context, id string) (*domain.Note, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Get", ctx, id)
-	ret0, _ := ret[0].(*domain.Note)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// Get indicates an expected call of Get.
-func (mr *MockNoteManagerMockRecorder) Get(ctx, id any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Get", reflect.TypeOf((*MockNoteManager)(nil).Get), ctx, id)
-}
-
 // GetRendered mocks base method.
 func (m *MockNoteManager) GetRendered(ctx context.Context, id string) (*domain.Note, string, error) {
 	m.ctrl.T.Helper()
@@ -114,6 +99,21 @@ func (m *MockNoteManager) Update(ctx context.Context, id string, note *domain.No
 func (mr *MockNoteManagerMockRecorder) Update(ctx, id, note any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Update", reflect.TypeOf((*MockNoteManager)(nil).Update), ctx, id, note)
+}
+
+// View mocks base method.
+func (m *MockNoteManager) View(ctx context.Context, id string) (*domain.Note, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "View", ctx, id)
+	ret0, _ := ret[0].(*domain.Note)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// View indicates an expected call of View.
+func (mr *MockNoteManagerMockRecorder) View(ctx, id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "View", reflect.TypeOf((*MockNoteManager)(nil).View), ctx, id)
 }
 
 // MockPinger is a mock of Pinger interface.

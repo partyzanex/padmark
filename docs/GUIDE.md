@@ -726,3 +726,4 @@ docker compose up -d  # Local infrastructure
 | Migrations | `pressly/goose/v3` (embedded SQL) |
 | Tests | `stretchr/testify/suite` + `go.uber.org/mock` |
 | Containers | `testcontainers/testcontainers-go` |
+
