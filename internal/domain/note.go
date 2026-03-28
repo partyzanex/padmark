@@ -21,11 +21,12 @@ func (ct ContentType) Valid() bool {
 }
 
 type Note struct {
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
-	ExpiresAt   *time.Time // nil means the note never expires
-	ID          string
-	Title       string
-	Content     string
-	ContentType ContentType
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+	ExpiresAt        *time.Time // nil means the note never expires
+	ID               string
+	Title            string
+	Content          string
+	ContentType      ContentType
+	BurnAfterReading bool // if true, the note is deleted on the first read
 }

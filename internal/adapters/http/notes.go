@@ -16,31 +16,34 @@ import (
 var noteTmplSrc string
 
 type noteRequest struct {
-	Title       string             `json:"title"`
-	Content     string             `json:"content"`
-	ContentType domain.ContentType `json:"content_type,omitempty"`
-	TTL         int64              `json:"ttl,omitempty"` // seconds; 0 or absent means never expires
+	Title            string             `json:"title"`
+	Content          string             `json:"content"`
+	ContentType      domain.ContentType `json:"content_type,omitempty"`
+	TTL              int64              `json:"ttl,omitempty"`                // seconds; 0 or absent means never expires
+	BurnAfterReading bool               `json:"burn_after_reading,omitempty"` // delete on first read
 }
 
 type noteResponse struct {
-	CreatedAt   time.Time          `json:"created_at"`
-	UpdatedAt   time.Time          `json:"updated_at"`
-	ExpiresAt   *time.Time         `json:"expires_at"`
-	ID          string             `json:"id"`
-	Title       string             `json:"title"`
-	Content     string             `json:"content"`
-	ContentType domain.ContentType `json:"content_type"`
+	CreatedAt        time.Time          `json:"created_at"`
+	UpdatedAt        time.Time          `json:"updated_at"`
+	ExpiresAt        *time.Time         `json:"expires_at"`
+	ID               string             `json:"id"`
+	Title            string             `json:"title"`
+	Content          string             `json:"content"`
+	ContentType      domain.ContentType `json:"content_type"`
+	BurnAfterReading bool               `json:"burn_after_reading"`
 }
 
 func toNoteResponse(note *domain.Note) noteResponse {
 	return noteResponse{
-		ID:          note.ID,
-		Title:       note.Title,
-		Content:     note.Content,
-		ContentType: note.ContentType,
-		CreatedAt:   note.CreatedAt,
-		UpdatedAt:   note.UpdatedAt,
-		ExpiresAt:   note.ExpiresAt,
+		ID:               note.ID,
+		Title:            note.Title,
+		Content:          note.Content,
+		ContentType:      note.ContentType,
+		CreatedAt:        note.CreatedAt,
+		UpdatedAt:        note.UpdatedAt,
+		ExpiresAt:        note.ExpiresAt,
+		BurnAfterReading: note.BurnAfterReading,
 	}
 }
 
@@ -62,10 +65,11 @@ func (h *Handler) CreateNote(w http.ResponseWriter, r *http.Request) {
 	}
 
 	note, err := h.manager.Create(r.Context(), &domain.Note{
-		Title:       req.Title,
-		Content:     req.Content,
-		ContentType: req.ContentType,
-		ExpiresAt:   expiresAt,
+		Title:            req.Title,
+		Content:          req.Content,
+		ContentType:      req.ContentType,
+		ExpiresAt:        expiresAt,
+		BurnAfterReading: req.BurnAfterReading,
 	})
 	if err != nil {
 		h.log.ErrorContext(r.Context(), "create note", "err", err)

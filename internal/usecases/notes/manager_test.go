@@ -110,6 +110,17 @@ func (s *ManagerTestSuite) TestGet_OK() {
 	s.Equal(want, note)
 }
 
+func (s *ManagerTestSuite) TestGet_BurnAfterReading() {
+	note := &domain.Note{ID: "abc-123", Title: "a", BurnAfterReading: true}
+	s.storage.EXPECT().Get(gomock.Any(), "abc-123").Return(note, nil)
+	s.storage.EXPECT().Delete(gomock.Any(), "abc-123").Return(nil)
+
+	result, err := s.manager.Get(s.T().Context(), "abc-123")
+
+	s.Require().NoError(err)
+	s.Equal(note, result)
+}
+
 func (s *ManagerTestSuite) TestGet_Expired() {
 	past := time.Now().Add(-time.Minute)
 	note := &domain.Note{ID: "abc-123", Title: "a", ExpiresAt: &past}
@@ -198,6 +209,19 @@ func (s *ManagerTestSuite) TestGetRendered_OK() {
 	s.Require().NoError(err)
 	s.Equal(note, result)
 	s.Equal("<h1>Hello</h1>", html)
+}
+
+func (s *ManagerTestSuite) TestGetRendered_BurnAfterReading() {
+	note := &domain.Note{ID: "abc-123", Content: "# Hello", BurnAfterReading: true}
+	s.storage.EXPECT().Get(gomock.Any(), "abc-123").Return(note, nil)
+	s.storage.EXPECT().Delete(gomock.Any(), "abc-123").Return(nil)
+	s.renderer.EXPECT().Render("# Hello").Return("<h1>Hello</h1>", nil)
+
+	result, rendered, err := s.manager.GetRendered(s.T().Context(), "abc-123")
+
+	s.Require().NoError(err)
+	s.Equal(note, result)
+	s.Equal("<h1>Hello</h1>", rendered)
 }
 
 func (s *ManagerTestSuite) TestGetRendered_Expired() {

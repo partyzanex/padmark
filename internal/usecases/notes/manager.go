@@ -83,6 +83,15 @@ func (m *Manager) Get(ctx context.Context, id string) (*domain.Note, error) {
 		return nil, domain.ErrExpired
 	}
 
+	if note.BurnAfterReading {
+		delErr := m.storage.Delete(ctx, id)
+		if delErr != nil {
+			m.log.ErrorContext(ctx, "burn after reading: delete note", "id", id, "err", delErr)
+		} else {
+			m.log.DebugContext(ctx, "note burned", "id", id)
+		}
+	}
+
 	return note, nil
 }
 
@@ -102,6 +111,7 @@ func (m *Manager) Update(ctx context.Context, id string, note *domain.Note) (*do
 	note.CreatedAt = existing.CreatedAt
 	note.UpdatedAt = time.Now()
 	note.ExpiresAt = existing.ExpiresAt
+	note.BurnAfterReading = existing.BurnAfterReading
 
 	if note.ContentType == "" {
 		note.ContentType = existing.ContentType
