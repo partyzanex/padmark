@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dim">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Padmark — Login</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+        .login-center {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .login-card {
+            width: 100%;
+            max-width: 380px;
+            background: var(--bg-surface);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-lg);
+            padding: 36px 32px;
+            animation: fade-up 0.5s ease both;
+        }
+        .login-title {
+            font-family: var(--font-display);
+            font-size: 1.15rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 6px;
+        }
+        .login-desc {
+            font-family: var(--font-mono);
+            font-size: 0.72rem;
+            color: var(--text-muted);
+            margin-bottom: 24px;
+        }
+        .login-error {
+            font-family: var(--font-mono);
+            font-size: 0.72rem;
+            color: var(--err-red);
+            margin-bottom: 16px;
+        }
+        .login-btn {
+            width: 100%;
+            margin-top: 16px;
+        }
+        .wrapper { display: flex; flex-direction: column; min-height: 100vh; }
+        .header  { margin-bottom: 0; }
+    </style>
+</head>
+<body>
+<div class="wrapper">
+
+    {{template "header"}}
+
+    <div class="login-center">
+        <div class="login-card">
+            <div class="login-title">Authentication required</div>
+            <div class="login-desc">Enter your access token to continue.</div>
+
+            {{if .Error}}
+            <div class="login-error">Invalid token. Please try again.</div>
+            {{end}}
+
+            <form method="POST" action="/login">
+                <div class="field-group">
+                    <label class="field-label" for="token">Token</label>
+                    <input type="password" class="field-input" name="token" id="token"
+                           placeholder="Paste your token" autofocus required>
+                </div>
+                <button type="submit" class="btn-publish login-btn">Sign in</button>
+            </form>
+        </div>
+    </div>
+
+</div>
+
+<script>
+    {{template "theme-js"}}
+</script>
+</body>
+</html>

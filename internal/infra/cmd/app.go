@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -58,6 +59,11 @@ func NewApp() *cli.Command {
 				Value:   DefaultLogFormat,
 				Usage:   "Log format: json, text",
 			},
+			&cli.StringFlag{
+				Name:    FlagAuthTokens,
+				Sources: cli.EnvVars(EnvAuthTokens),
+				Usage:   "Comma-separated Bearer tokens for write endpoints (empty = no auth)",
+			},
 		},
 		Action: action,
 	}
@@ -100,7 +106,19 @@ func action(ctx context.Context, cmd *cli.Command) error {
 
 	// 5. Handler + Router
 	handler := adaptershttp.NewHandler(manager, log).WithPinger(db.DB)
-	router := adaptershttp.NewRouter(handler)
+
+	var tokens []string
+
+	if raw := cmd.String(FlagAuthTokens); raw != "" {
+		for part := range strings.SplitSeq(raw, ",") {
+			tok := strings.TrimSpace(part)
+			if tok != "" {
+				tokens = append(tokens, tok)
+			}
+		}
+	}
+
+	router := adaptershttp.NewRouter(handler, tokens)
 
 	// 6. Server
 	srv := &http.Server{

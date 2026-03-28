@@ -51,7 +51,7 @@ func (s *HandlerSuite) SetupTest() {
 	s.pinger = NewMockPinger(s.ctrl)
 
 	handler := adhttp.NewHandler(s.manager, slog.New(slog.DiscardHandler)).WithPinger(s.pinger)
-	s.router = adhttp.NewRouter(handler)
+	s.router = adhttp.NewRouter(handler, nil)
 }
 
 func (s *HandlerSuite) TearDownTest() {
@@ -748,7 +748,7 @@ func (s *HandlerSuite) TestReadyz_OK() {
 
 func (s *HandlerSuite) TestReadyz_NoPinger() {
 	handler := adhttp.NewHandler(s.manager, slog.New(slog.DiscardHandler))
-	router := adhttp.NewRouter(handler)
+	router := adhttp.NewRouter(handler, nil)
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/readyz", nil)
@@ -939,4 +939,199 @@ func (s *HandlerSuite) TestRecovery_Panic() {
 	s.router.ServeHTTP(w, r)
 
 	s.Equal(http.StatusInternalServerError, w.Code)
+}
+
+// ── Auth middleware ──
+
+func (s *HandlerSuite) TestAuth_NoTokensConfigured() {
+	note := newTestNote("t", "c")
+	s.manager.EXPECT().Create(gomock.Any(), gomock.Any()).Return(note, nil)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/notes", strings.NewReader(`{"title":"t","content":"c"}`))
+	r.Header.Set("Content-Type", "application/json")
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusCreated, w.Code)
+}
+
+func (s *HandlerSuite) TestAuth_BearerToken() {
+	note := newTestNote("t", "c")
+	s.manager.EXPECT().Create(gomock.Any(), gomock.Any()).Return(note, nil)
+
+	handler := adhttp.NewHandler(s.manager, slog.New(slog.DiscardHandler))
+	router := adhttp.NewRouter(handler, []string{"secret-token"})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/notes", strings.NewReader(`{"title":"t","content":"c"}`))
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("Authorization", "Bearer secret-token")
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusCreated, w.Code)
+}
+
+func (s *HandlerSuite) TestAuth_CookieToken() {
+	note := newTestNote("t", "c")
+	s.manager.EXPECT().View(gomock.Any(), testID).Return(note, nil)
+
+	handler := adhttp.NewHandler(s.manager, slog.New(slog.DiscardHandler))
+	router := adhttp.NewRouter(handler, []string{"secret-token"})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
+	r.Header.Set("Accept", "application/json")
+	r.AddCookie(&http.Cookie{Name: "padmark_token", Value: "secret-token"})
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusOK, w.Code)
+}
+
+func (s *HandlerSuite) TestAuth_MissingToken_API() {
+	handler := adhttp.NewHandler(s.manager, slog.New(slog.DiscardHandler))
+	router := adhttp.NewRouter(handler, []string{"secret-token"})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/notes", strings.NewReader(`{"title":"t","content":"c"}`))
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("Accept", "application/json")
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusUnauthorized, w.Code)
+}
+
+func (s *HandlerSuite) TestAuth_MissingToken_Browser() {
+	handler := adhttp.NewHandler(s.manager, slog.New(slog.DiscardHandler))
+	router := adhttp.NewRouter(handler, []string{"secret-token"})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.Header.Set("Accept", "text/html")
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusSeeOther, w.Code)
+	s.Equal("/login", w.Header().Get("Location"))
+}
+
+func (s *HandlerSuite) TestAuth_InvalidToken() {
+	handler := adhttp.NewHandler(s.manager, slog.New(slog.DiscardHandler))
+	router := adhttp.NewRouter(handler, []string{"secret-token"})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.Header.Set("Accept", "text/html")
+	r.AddCookie(&http.Cookie{Name: "padmark_token", Value: "wrong"})
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusSeeOther, w.Code)
+}
+
+func (s *HandlerSuite) TestAuth_PublicPaths() {
+	handler := adhttp.NewHandler(s.manager, slog.New(slog.DiscardHandler)).WithPinger(s.pinger)
+	router := adhttp.NewRouter(handler, []string{"secret-token"})
+
+	for _, path := range []string{"/login", "/static/style.css", "/healthz"} {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodGet, path, nil)
+
+		router.ServeHTTP(w, r)
+
+		s.NotEqual(http.StatusUnauthorized, w.Code, "path %s should be public", path)
+		s.NotEqual(http.StatusSeeOther, w.Code, "path %s should not redirect", path)
+	}
+}
+
+// ── Login ──
+
+func (s *HandlerSuite) TestLoginPage() {
+	handler := adhttp.NewHandler(s.manager, slog.New(slog.DiscardHandler))
+	router := adhttp.NewRouter(handler, []string{"token"})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/login", nil)
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusOK, w.Code)
+	s.Contains(w.Body.String(), "Authentication required")
+}
+
+func (s *HandlerSuite) TestLoginPage_Error() {
+	handler := adhttp.NewHandler(s.manager, slog.New(slog.DiscardHandler))
+	router := adhttp.NewRouter(handler, []string{"token"})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/login?error=1", nil)
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusOK, w.Code)
+	s.Contains(w.Body.String(), "Invalid token")
+}
+
+func (s *HandlerSuite) TestLogin_OK() {
+	handler := adhttp.NewHandler(s.manager, slog.New(slog.DiscardHandler))
+	router := adhttp.NewRouter(handler, []string{"valid-token"})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/login",
+		strings.NewReader("token=valid-token"))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusSeeOther, w.Code)
+	s.Equal("/", w.Header().Get("Location"))
+
+	cookies := w.Result().Cookies()
+	s.Require().NotEmpty(cookies)
+	s.Equal("padmark_token", cookies[0].Name)
+	s.Equal("valid-token", cookies[0].Value)
+	s.True(cookies[0].HttpOnly)
+}
+
+func (s *HandlerSuite) TestLogin_InvalidToken() {
+	handler := adhttp.NewHandler(s.manager, slog.New(slog.DiscardHandler))
+	router := adhttp.NewRouter(handler, []string{"valid-token"})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/login",
+		strings.NewReader("token=wrong"))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusSeeOther, w.Code)
+	s.Contains(w.Header().Get("Location"), "/login?error=1")
+}
+
+func (s *HandlerSuite) TestLogin_EmptyToken() {
+	handler := adhttp.NewHandler(s.manager, slog.New(slog.DiscardHandler))
+	router := adhttp.NewRouter(handler, []string{"valid-token"})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/login",
+		strings.NewReader("token="))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusSeeOther, w.Code)
+	s.Contains(w.Header().Get("Location"), "/login?error=1")
+}
+
+func (s *HandlerSuite) TestLoginPage_WriteFail() {
+	handler := adhttp.NewHandler(s.manager, slog.New(slog.DiscardHandler))
+	fw := newFailWriter()
+	r := httptest.NewRequest(http.MethodGet, "/login?error=1", nil)
+
+	handler.LoginPage(fw, r)
+
+	s.NotNil(fw)
 }

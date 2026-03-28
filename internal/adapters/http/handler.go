@@ -45,6 +45,7 @@ type Handler struct {
 	pinger      Pinger
 	noteTmpl    *template.Template
 	indexTmpl   *template.Template
+	loginTmpl   *template.Template
 	successTmpl *template.Template
 	errorTmpl   *template.Template
 }
@@ -63,6 +64,7 @@ func NewHandler(manager NoteManager, log *slog.Logger) *Handler {
 		log:         log,
 		noteTmpl:    parseTmpl("note", noteTmplSrc),
 		indexTmpl:   parseTmpl("index", indexTmplSrc),
+		loginTmpl:   parseTmpl("login", loginTmplSrc),
 		successTmpl: parseTmpl("success", successTmplSrc),
 		errorTmpl:   parseTmpl("error", errorTmplSrc),
 	}

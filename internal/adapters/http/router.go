@@ -14,10 +14,15 @@ type contextKey uint8
 
 const keyRequestID contextKey = 1
 
-// NewRouter registers all routes and wraps them with request-ID, logging, and recovery middleware.
-func NewRouter(handler *Handler) http.Handler {
+// NewRouter registers all routes and wraps them with middleware.
+// If tokens is non-empty, all routes except /login, /static/, /healthz, /readyz require auth.
+// Browser users without a valid cookie are redirected to the login page.
+func NewRouter(handler *Handler, tokens []string) http.Handler {
+	tokenSet := makeTokenSet(tokens)
 	mux := http.NewServeMux()
 
+	mux.HandleFunc("GET /login", handler.LoginPage)
+	mux.HandleFunc("POST /login", loginHandler(tokenSet))
 	mux.HandleFunc("GET /", handler.IndexPage)
 	mux.HandleFunc("GET /success", handler.SuccessPage)
 	mux.Handle("GET /static/", StaticHandler)
@@ -30,7 +35,22 @@ func NewRouter(handler *Handler) http.Handler {
 	mux.HandleFunc("GET /edit/{id}", handler.EditPage)
 	mux.HandleFunc("GET /{id}", handler.GetNote)
 
-	return withRequestID(withLogging(handler.log, withRecovery(handler.log, mux)))
+	stack := withRecovery(handler.log, mux)
+	stack = newAuthMiddleware(tokens, stack)
+	stack = withLogging(handler.log, stack)
+	stack = withRequestID(stack)
+
+	return stack
+}
+
+func makeTokenSet(tokens []string) map[string]struct{} {
+	set := make(map[string]struct{}, len(tokens))
+
+	for _, tok := range tokens {
+		set[tok] = struct{}{}
+	}
+
+	return set
 }
 
 func withRequestID(next http.Handler) http.Handler {
