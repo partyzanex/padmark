@@ -74,7 +74,7 @@ func isPublicPath(path string) bool {
 }
 
 // loginHandler validates the token from a form POST and sets a session cookie.
-func loginHandler(tokens map[string]struct{}) http.HandlerFunc {
+func loginHandler(tokens map[string]struct{}, cookieMaxAge int) http.HandlerFunc {
 	const maxLoginBody = 1024
 
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -87,14 +87,13 @@ func loginHandler(tokens map[string]struct{}) http.HandlerFunc {
 			return
 		}
 
-		const tenYears = 10 * 365 * 24 * 60 * 60
-
 		http.SetCookie(w, &http.Cookie{
 			Name:     tokenCookieName,
 			Value:    token,
 			Path:     "/",
-			MaxAge:   tenYears,
+			MaxAge:   cookieMaxAge,
 			HttpOnly: true,
+			Secure:   r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == protoHTTPS,
 			SameSite: http.SameSiteStrictMode,
 		})
 

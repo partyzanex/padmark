@@ -29,8 +29,8 @@ func (h *Handler) SuccessPage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	scheme := "http"
-	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
-		scheme = "https"
+	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == protoHTTPS {
+		scheme = protoHTTPS
 	}
 
 	noteURL := scheme + "://" + r.Host + "/" + id

@@ -35,46 +35,74 @@ const (
 // NewApp builds the CLI application with all flags configured.
 func NewApp() *cli.Command {
 	return &cli.Command{
-		Name:  "padmark",
-		Usage: "Markdown notes HTTP service",
-		Flags: []cli.Flag{
-			&cli.StringFlag{
-				Name:    FlagAddr,
-				Sources: cli.EnvVars(EnvAddr),
-				Value:   DefaultAddr,
-				Usage:   "HTTP listen address",
-			},
-			&cli.StringFlag{
-				Name:    FlagStorage,
-				Sources: cli.EnvVars(EnvStorage),
-				Value:   DefaultStorage,
-				Usage:   "Storage backend: sqlite, postgres",
-			},
-			&cli.StringFlag{
-				Name:    FlagDSN,
-				Sources: cli.EnvVars(EnvDSN),
-				Value:   DefaultDSN,
-				Usage:   "Database DSN (file path for sqlite, connection string for postgres)",
-			},
-			&cli.StringFlag{
-				Name:    FlagLogLevel,
-				Sources: cli.EnvVars(EnvLogLevel),
-				Value:   DefaultLogLevel,
-				Usage:   "Log level: debug, info, warn, error",
-			},
-			&cli.StringFlag{
-				Name:    FlagLogFormat,
-				Sources: cli.EnvVars(EnvLogFormat),
-				Value:   DefaultLogFormat,
-				Usage:   "Log format: json, text",
-			},
-			&cli.StringFlag{
-				Name:    FlagAuthTokens,
-				Sources: cli.EnvVars(EnvAuthTokens),
-				Usage:   "Comma-separated Bearer tokens for write endpoints (empty = no auth)",
-			},
-		},
+		Name:   "padmark",
+		Usage:  "Markdown notes HTTP service",
+		Flags:  appFlags(),
 		Action: action,
+	}
+}
+
+func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
+	return []cli.Flag{
+		&cli.StringFlag{
+			Name:    FlagAddr,
+			Sources: cli.EnvVars(EnvAddr),
+			Value:   DefaultAddr,
+			Usage:   "HTTP listen address",
+		},
+		&cli.StringFlag{
+			Name:    FlagStorage,
+			Sources: cli.EnvVars(EnvStorage),
+			Value:   DefaultStorage,
+			Usage:   "Storage backend: sqlite, postgres",
+		},
+		&cli.StringFlag{
+			Name:    FlagDSN,
+			Sources: cli.EnvVars(EnvDSN),
+			Value:   DefaultDSN,
+			Usage:   "Database DSN (file path for sqlite, connection string for postgres)",
+		},
+		&cli.StringFlag{
+			Name:    FlagLogLevel,
+			Sources: cli.EnvVars(EnvLogLevel),
+			Value:   DefaultLogLevel,
+			Usage:   "Log level: debug, info, warn, error",
+		},
+		&cli.StringFlag{
+			Name:    FlagLogFormat,
+			Sources: cli.EnvVars(EnvLogFormat),
+			Value:   DefaultLogFormat,
+			Usage:   "Log format: json, text",
+		},
+		&cli.StringFlag{
+			Name:    FlagAuthTokens,
+			Sources: cli.EnvVars(EnvAuthTokens),
+			Usage:   "Comma-separated Bearer tokens for write endpoints (empty = no auth)",
+		},
+		&cli.IntFlag{
+			Name:    FlagCookieMaxAge,
+			Sources: cli.EnvVars(EnvCookieMaxAge),
+			Value:   DefaultCookieMaxAge,
+			Usage:   "Auth cookie max-age in seconds (default: 3 months)",
+		},
+		&cli.IntFlag{
+			Name:    FlagReadTimeout,
+			Sources: cli.EnvVars(EnvReadTimeout),
+			Value:   DefaultReadTimeout,
+			Usage:   "HTTP read timeout in seconds",
+		},
+		&cli.IntFlag{
+			Name:    FlagMaxHeaderBytes,
+			Sources: cli.EnvVars(EnvMaxHeaderBytes),
+			Value:   DefaultMaxHeaderBytes,
+			Usage:   "Maximum size of request headers in bytes",
+		},
+		&cli.IntFlag{
+			Name:    FlagMaxBodyBytes,
+			Sources: cli.EnvVars(EnvMaxBodyBytes),
+			Value:   DefaultMaxBodyBytes,
+			Usage:   "Maximum size of request body in bytes",
+		},
 	}
 }
 
@@ -129,13 +157,17 @@ func action(ctx context.Context, cmd *cli.Command) error {
 		}
 	}
 
-	router := adaptershttp.NewRouter(handler, ogenHandler, tokens)
+	cookieMaxAge := cmd.Int(FlagCookieMaxAge)
+	maxBodyBytes := cmd.Int(FlagMaxBodyBytes)
+	router := adaptershttp.NewRouter(handler, ogenHandler, tokens, cookieMaxAge, maxBodyBytes)
 
 	// 6. Server
 	srv := &http.Server{
 		Addr:              cmd.String(FlagAddr),
 		Handler:           router,
+		ReadTimeout:       time.Duration(cmd.Int(FlagReadTimeout)) * time.Second,
 		ReadHeaderTimeout: readHeaderTimeout,
+		MaxHeaderBytes:    cmd.Int(FlagMaxHeaderBytes),
 	}
 
 	stopCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)

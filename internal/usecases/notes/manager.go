@@ -5,10 +5,12 @@ package notes
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/binary"
 	"fmt"
 	"html"
 	"log/slog"
+	"math/big"
 	"regexp"
 	"time"
 
@@ -46,17 +48,16 @@ const editCodeChars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz01234
 func newEditCode() string {
 	const length = 12
 
-	rnd := make([]byte, length)
-
-	_, err := rand.Read(rnd)
-	if err != nil {
-		panic("crypto/rand unavailable: " + err.Error())
-	}
-
+	charsetSize := big.NewInt(int64(len(editCodeChars)))
 	buf := make([]byte, length)
 
-	for i := range length {
-		buf[i] = editCodeChars[rnd[i]%byte(len(editCodeChars))]
+	for idx := range length {
+		nn, err := rand.Int(rand.Reader, charsetSize)
+		if err != nil {
+			panic("crypto/rand unavailable: " + err.Error())
+		}
+
+		buf[idx] = editCodeChars[nn.Int64()]
 	}
 
 	return string(buf)
@@ -198,7 +199,7 @@ func (m *Manager) Update(
 		return nil, fmt.Errorf("update note: %w", err)
 	}
 
-	if existing.EditCode != editCode {
+	if subtle.ConstantTimeCompare([]byte(existing.EditCode), []byte(editCode)) != 1 {
 		return nil, domain.ErrForbidden
 	}
 
@@ -232,7 +233,7 @@ func (m *Manager) Delete(ctx context.Context, id, editCode string) error {
 		return fmt.Errorf("delete note: %w", err)
 	}
 
-	if existing.EditCode != editCode {
+	if subtle.ConstantTimeCompare([]byte(existing.EditCode), []byte(editCode)) != 1 {
 		return domain.ErrForbidden
 	}
 

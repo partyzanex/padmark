@@ -16,10 +16,14 @@ type contextKey uint8
 
 const keyRequestID contextKey = 1
 
+const protoHTTPS = "https"
+
 // NewRouter registers all routes and wraps them with middleware.
 // The ogen-generated server handles JSON API routes (POST/PUT/DELETE /notes, GET /notes/{id} JSON,
 // /healthz, /readyz). Manual handlers serve HTML pages, content-negotiated views, login, and static.
-func NewRouter(handler *Handler, ogenHandler *OgenHandler, tokens []string) http.Handler {
+func NewRouter(
+	handler *Handler, ogenHandler *OgenHandler, tokens []string, cookieMaxAge, maxBodyBytes int,
+) http.Handler {
 	ogenSrv, err := ogenapi.NewServer(ogenHandler)
 	if err != nil {
 		panic("ogen server: " + err.Error())
@@ -36,7 +40,7 @@ func NewRouter(handler *Handler, ogenHandler *OgenHandler, tokens []string) http
 
 	// Manual handlers: HTML pages + content-negotiated GET + login + static + api docs
 	mux.HandleFunc("GET /login", handler.LoginPage)
-	mux.HandleFunc("POST /login", loginHandler(makeTokenSet(tokens)))
+	mux.HandleFunc("POST /login", loginHandler(makeTokenSet(tokens), cookieMaxAge))
 	mux.HandleFunc("GET /api", handler.APIDocsPage)
 	mux.HandleFunc("GET /api/openapi.yaml", APISpec)
 	mux.HandleFunc("GET /", handler.IndexPage)
@@ -48,6 +52,8 @@ func NewRouter(handler *Handler, ogenHandler *OgenHandler, tokens []string) http
 
 	stack := withRecovery(handler.log, mux)
 	stack = newAuthMiddleware(tokens, stack)
+	stack = withBodyLimit(int64(maxBodyBytes), stack)
+	stack = withSecurityHeaders(stack)
 	stack = withLogging(handler.log, stack)
 	stack = withRequestID(stack)
 
@@ -115,6 +121,40 @@ func withLogging(log *slog.Logger, next http.Handler) http.Handler {
 			"status", rec.status,
 			"duration", time.Since(start),
 		)
+	})
+}
+
+func withBodyLimit(maxBytes int64, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Body != nil && r.ContentLength != 0 {
+			r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+func withSecurityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		header := w.Header()
+		header.Set("X-Content-Type-Options", "nosniff")
+		header.Set("X-Frame-Options", "DENY")
+		header.Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		header.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		header.Set("Content-Security-Policy",
+			"default-src 'self'; "+
+				"script-src 'self' 'unsafe-inline' https://cdn.redoc.ly; "+
+				"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "+
+				"font-src 'self' https://fonts.gstatic.com; "+
+				"img-src 'self' data:; "+
+				"connect-src 'self'",
+		)
+
+		if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == protoHTTPS {
+			header.Set("Strict-Transport-Security", "max-age=63072000; includeSubDomains")
+		}
+
+		next.ServeHTTP(w, r)
 	})
 }
 
