@@ -14,12 +14,15 @@ import (
 	"time"
 
 	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/dialect/pgdialect"
 	"github.com/uptrace/bun/dialect/sqlitedialect"
+	"github.com/uptrace/bun/driver/pgdriver"
 	"github.com/uptrace/bun/driver/sqliteshim"
 	"github.com/urfave/cli/v3"
 
 	adaptershttp "github.com/partyzanex/padmark/internal/adapters/http"
 	"github.com/partyzanex/padmark/internal/infra/render"
+	"github.com/partyzanex/padmark/internal/infra/storage/postgres"
 	"github.com/partyzanex/padmark/internal/infra/storage/sqlite"
 	"github.com/partyzanex/padmark/internal/usecases/notes"
 )
@@ -42,10 +45,16 @@ func NewApp() *cli.Command {
 				Usage:   "HTTP listen address",
 			},
 			&cli.StringFlag{
+				Name:    FlagStorage,
+				Sources: cli.EnvVars(EnvStorage),
+				Value:   DefaultStorage,
+				Usage:   "Storage backend: sqlite, postgres",
+			},
+			&cli.StringFlag{
 				Name:    FlagDSN,
 				Sources: cli.EnvVars(EnvDSN),
 				Value:   DefaultDSN,
-				Usage:   "SQLite DSN (file path or :memory:)",
+				Usage:   "Database DSN (file path for sqlite, connection string for postgres)",
 			},
 			&cli.StringFlag{
 				Name:    FlagLogLevel,
@@ -79,7 +88,10 @@ func action(ctx context.Context, cmd *cli.Command) error {
 	log := newLogger(cmd.String(FlagLogLevel), cmd.String(FlagLogFormat))
 
 	// 2. Storage
-	db, err := openDB(ctx, cmd.String(FlagDSN))
+	storage := cmd.String(FlagStorage)
+	dsn := cmd.String(FlagDSN)
+
+	db, err := openDB(ctx, storage, dsn)
 	if err != nil {
 		return fmt.Errorf("open db: %w", err)
 	}
@@ -91,12 +103,10 @@ func action(ctx context.Context, cmd *cli.Command) error {
 		}
 	}()
 
-	err = sqlite.Migrate(ctx, db)
+	repo, err := initStorage(ctx, storage, db)
 	if err != nil {
-		return fmt.Errorf("migrate: %w", err)
+		return err
 	}
-
-	repo := sqlite.NewRepository(db)
 
 	// 3. Renderer
 	renderer := render.NewRenderer()
@@ -134,7 +144,9 @@ func action(ctx context.Context, cmd *cli.Command) error {
 	errCh := make(chan error, 1)
 
 	go func() {
-		log.InfoContext(ctx, "server started", "addr", srv.Addr, "dsn", cmd.String(FlagDSN))
+		log.InfoContext(ctx, "server started",
+			"addr", srv.Addr, "storage", storage, "dsn", dsn,
+		)
 
 		serveErr := srv.ListenAndServe()
 		if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
@@ -150,8 +162,6 @@ func action(ctx context.Context, cmd *cli.Command) error {
 	case <-stopCtx.Done():
 	}
 
-	// stopCtx is already cancelled at this point, so we use a fresh background context
-	// to give the server the full shutdownTimeout to drain in-flight requests.
 	shutCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 
@@ -165,20 +175,49 @@ func action(ctx context.Context, cmd *cli.Command) error {
 	return <-errCh
 }
 
-func openDB(ctx context.Context, dsn string) (*bun.DB, error) {
-	sqldb, err := sql.Open(sqliteshim.DriverName(), dsn)
-	if err != nil {
-		return nil, fmt.Errorf("sql open: %w", err)
+func openDB(ctx context.Context, storage, dsn string) (*bun.DB, error) {
+	var db *bun.DB
+
+	switch storage {
+	case "postgres":
+		sqldb := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
+		db = bun.NewDB(sqldb, pgdialect.New())
+
+	default: // sqlite
+		sqldb, err := sql.Open(sqliteshim.DriverName(), dsn)
+		if err != nil {
+			return nil, fmt.Errorf("sql open sqlite: %w", err)
+		}
+
+		db = bun.NewDB(sqldb, sqlitedialect.New())
 	}
 
-	db := bun.NewDB(sqldb, sqlitedialect.New())
-
-	err = db.PingContext(ctx)
+	err := db.PingContext(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("db ping: %w", err)
 	}
 
 	return db, nil
+}
+
+func initStorage(ctx context.Context, storage string, db *bun.DB) (notes.Storage, error) {
+	switch storage {
+	case "postgres":
+		err := postgres.Migrate(ctx, db)
+		if err != nil {
+			return nil, fmt.Errorf("postgres migrate: %w", err)
+		}
+
+		return postgres.NewRepository(db), nil
+
+	default: // sqlite
+		err := sqlite.Migrate(ctx, db)
+		if err != nil {
+			return nil, fmt.Errorf("sqlite migrate: %w", err)
+		}
+
+		return sqlite.NewRepository(db), nil
+	}
 }
 
 func newLogger(level, format string) *slog.Logger {

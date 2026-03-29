@@ -180,6 +180,10 @@ linters:
       - path: ogen_(handler|convert)\.go
         linters:
           - ireturn
+      # factory function returns interface by design
+      - path: app\.go
+        linters:
+          - ireturn
       # test helper method ordering
       - path: _test\.go
         linters:
