@@ -71,6 +71,29 @@ func buildRouter(
 	return adaptershttp.NewRouter(handler, ogenHandler, tokens, opts), nil
 }
 
+func httpRedirectHandler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "https://"+r.Host+r.URL.RequestURI(), http.StatusMovedPermanently)
+	})
+}
+
+func startRedirectServer(addr string, cancel context.CancelCauseFunc) {
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           httpRedirectHandler(),
+		ReadHeaderTimeout: readHeaderTimeout,
+	}
+
+	compat.Append(shutdown.ContextFn(srv.Shutdown))
+
+	go func() {
+		err := srv.ListenAndServe()
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			cancel(err)
+		}
+	}()
+}
+
 func listenAndServe(srv *http.Server, tlsCert, tlsKey string, cancel context.CancelCauseFunc) {
 	var serveErr error
 
@@ -111,6 +134,12 @@ func runServer(ctx context.Context, cmd *cli.Command, router http.Handler) error
 	defer cancelServer(nil)
 
 	go listenAndServe(srv, tlsCert, tlsKey, cancelServer)
+
+	if tlsCert != "" {
+		if redirectAddr := cmd.String(FlagHTTPRedirectAddr); redirectAddr != "" {
+			startRedirectServer(redirectAddr, cancelServer)
+		}
+	}
 
 	shutCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()

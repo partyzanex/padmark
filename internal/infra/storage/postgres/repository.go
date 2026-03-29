@@ -5,10 +5,10 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/driver/pgdriver"
 
 	"github.com/partyzanex/padmark/internal/domain"
 )
@@ -55,7 +55,8 @@ func (r *Repository) Create(ctx context.Context, domNote *domain.Note) error {
 
 	_, err := r.db.NewInsert().Model(dbNote).Exec(ctx)
 	if err != nil {
-		if strings.Contains(err.Error(), "duplicate key") {
+		var pgErr pgdriver.Error
+		if errors.As(err, &pgErr) && pgErr.Field('C') == "23505" {
 			return domain.ErrSlugConflict
 		}
 

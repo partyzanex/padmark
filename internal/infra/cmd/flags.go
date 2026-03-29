@@ -4,40 +4,42 @@ import "github.com/urfave/cli/v3"
 
 // Flag names used in CLI flags.
 const (
-	FlagAddr           = "addr"
-	FlagStorage        = "storage"
-	FlagDSN            = "dsn"
-	FlagLogLevel       = "log-level"
-	FlagLogFormat      = "log-format"
-	FlagAuthTokens     = "auth-tokens" //nolint:gosec // flag name, not a credential
-	FlagCookieMaxAge   = "cookie-max-age"
-	FlagReadTimeout    = "read-timeout"
-	FlagMaxHeaderBytes = "max-header-bytes"
-	FlagMaxBodyBytes   = "max-body-bytes"
-	FlagRateLimit      = "rate-limit"
-	FlagRateBurst      = "rate-burst"
-	FlagTLSCert        = "tls-cert"
-	FlagTLSKey         = "tls-key"
-	FlagTrustedProxies = "trusted-proxies"
+	FlagAddr             = "addr"
+	FlagStorage          = "storage"
+	FlagDSN              = "dsn"
+	FlagLogLevel         = "log-level"
+	FlagLogFormat        = "log-format"
+	FlagAuthTokens       = "auth-tokens" //nolint:gosec // flag name, not a credential
+	FlagCookieMaxAge     = "cookie-max-age"
+	FlagReadTimeout      = "read-timeout"
+	FlagMaxHeaderBytes   = "max-header-bytes"
+	FlagMaxBodyBytes     = "max-body-bytes"
+	FlagRateLimit        = "rate-limit"
+	FlagRateBurst        = "rate-burst"
+	FlagTLSCert          = "tls-cert"
+	FlagTLSKey           = "tls-key"
+	FlagHTTPRedirectAddr = "http-redirect-addr"
+	FlagTrustedProxies   = "trusted-proxies"
 )
 
 // Env vars used to configure the service (prefix: PADMARK_*).
 const (
-	EnvAddr           = "PADMARK_ADDR"
-	EnvStorage        = "PADMARK_STORAGE"
-	EnvDSN            = "PADMARK_DSN"
-	EnvLogLevel       = "PADMARK_LOG_LEVEL"
-	EnvLogFormat      = "PADMARK_LOG_FORMAT"
-	EnvAuthTokens     = "PADMARK_AUTH_TOKENS" //nolint:gosec // env var name, not a credential
-	EnvCookieMaxAge   = "PADMARK_COOKIE_MAX_AGE"
-	EnvReadTimeout    = "PADMARK_READ_TIMEOUT"
-	EnvMaxHeaderBytes = "PADMARK_MAX_HEADER_BYTES"
-	EnvMaxBodyBytes   = "PADMARK_MAX_BODY_BYTES"
-	EnvRateLimit      = "PADMARK_RATE_LIMIT"
-	EnvRateBurst      = "PADMARK_RATE_BURST"
-	EnvTLSCert        = "PADMARK_TLS_CERT"
-	EnvTLSKey         = "PADMARK_TLS_KEY"
-	EnvTrustedProxies = "PADMARK_TRUSTED_PROXIES"
+	EnvAddr             = "PADMARK_ADDR"
+	EnvStorage          = "PADMARK_STORAGE"
+	EnvDSN              = "PADMARK_DSN"
+	EnvLogLevel         = "PADMARK_LOG_LEVEL"
+	EnvLogFormat        = "PADMARK_LOG_FORMAT"
+	EnvAuthTokens       = "PADMARK_AUTH_TOKENS" //nolint:gosec // env var name, not a credential
+	EnvCookieMaxAge     = "PADMARK_COOKIE_MAX_AGE"
+	EnvReadTimeout      = "PADMARK_READ_TIMEOUT"
+	EnvMaxHeaderBytes   = "PADMARK_MAX_HEADER_BYTES"
+	EnvMaxBodyBytes     = "PADMARK_MAX_BODY_BYTES"
+	EnvRateLimit        = "PADMARK_RATE_LIMIT"
+	EnvRateBurst        = "PADMARK_RATE_BURST"
+	EnvTLSCert          = "PADMARK_TLS_CERT"
+	EnvTLSKey           = "PADMARK_TLS_KEY"
+	EnvHTTPRedirectAddr = "PADMARK_HTTP_REDIRECT_ADDR"
+	EnvTrustedProxies   = "PADMARK_TRUSTED_PROXIES"
 )
 
 // Default values for all flags.
@@ -138,6 +140,11 @@ func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
 			Name:    FlagTLSKey,
 			Sources: cli.EnvVars(EnvTLSKey),
 			Usage:   "Path to TLS private key file (PEM); enables HTTPS when set together with --tls-cert",
+		},
+		&cli.StringFlag{
+			Name:    FlagHTTPRedirectAddr,
+			Sources: cli.EnvVars(EnvHTTPRedirectAddr),
+			Usage:   "Address for the HTTP→HTTPS redirect listener (e.g. :80); only active when TLS is enabled",
 		},
 		&cli.StringFlag{
 			Name:    FlagTrustedProxies,

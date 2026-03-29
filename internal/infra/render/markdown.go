@@ -34,9 +34,13 @@ func NewRenderer() *Renderer {
 		),
 	)
 
+	policy := bluemonday.UGCPolicy()
+	policy.RequireNoFollowOnLinks(true)
+	policy.AddTargetBlankToFullyQualifiedLinks(true)
+
 	return &Renderer{
 		md:     md,
-		policy: bluemonday.UGCPolicy(),
+		policy: policy,
 	}
 }
 

@@ -5,10 +5,11 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/uptrace/bun"
+	sqlite "modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 
 	"github.com/partyzanex/padmark/internal/domain"
 )
@@ -55,7 +56,8 @@ func (r *Repository) Create(ctx context.Context, domNote *domain.Note) error {
 
 	_, err := r.db.NewInsert().Model(dbNote).Exec(ctx)
 	if err != nil {
-		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+		var sqliteErr *sqlite.Error
+		if errors.As(err, &sqliteErr) && sqliteErr.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE {
 			return domain.ErrSlugConflict
 		}
 
