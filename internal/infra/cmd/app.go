@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -210,7 +211,7 @@ func action(ctx context.Context, cmd *cli.Command) error {
 
 	go func() {
 		log.InfoContext(ctx, "server started",
-			"addr", srv.Addr, "storage", storage, "dsn", dsn, "tls", tlsCert != "",
+			"addr", srv.Addr, "storage", storage, "dsn", redactDSN(dsn), "tls", tlsCert != "",
 		)
 
 		var serveErr error
@@ -312,4 +313,24 @@ func newLogger(level, format string) *slog.Logger {
 	}
 
 	return slog.New(slog.NewJSONHandler(os.Stderr, opts))
+}
+
+// redactDSN removes credentials from a DSN before logging.
+// URL-format DSNs (postgres://user:pass@host/db) have the password replaced with "***".
+// Key-value DSNs containing "password=" are replaced entirely with "<redacted>".
+// Plain file paths (sqlite) are returned as-is.
+func redactDSN(dsn string) string {
+	if u, err := url.Parse(dsn); err == nil && u.User != nil {
+		if _, hasPassword := u.User.Password(); hasPassword {
+			u.User = url.UserPassword(u.User.Username(), "***")
+		}
+
+		return u.String()
+	}
+
+	if strings.Contains(dsn, "password=") {
+		return "<redacted>"
+	}
+
+	return dsn
 }
