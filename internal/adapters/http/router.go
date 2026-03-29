@@ -18,11 +18,17 @@ const keyRequestID contextKey = 1
 
 const protoHTTPS = "https"
 
+// RouterOptions holds configurable parameters for the middleware stack.
+type RouterOptions struct {
+	CookieMaxAge int
+	MaxBodyBytes int
+	RateLimit    int
+	RateBurst    int
+}
+
 // NewRouter registers all routes and wraps them with middleware.
-// The ogen-generated server handles JSON API routes (POST/PUT/DELETE /notes, GET /notes/{id} JSON,
-// /healthz, /readyz). Manual handlers serve HTML pages, content-negotiated views, login, and static.
 func NewRouter(
-	handler *Handler, ogenHandler *OgenHandler, tokens []string, cookieMaxAge, maxBodyBytes int,
+	handler *Handler, ogenHandler *OgenHandler, tokens []string, opts RouterOptions,
 ) http.Handler {
 	ogenSrv, err := ogenapi.NewServer(ogenHandler)
 	if err != nil {
@@ -40,7 +46,7 @@ func NewRouter(
 
 	// Manual handlers: HTML pages + content-negotiated GET + login + static + api docs
 	mux.HandleFunc("GET /login", handler.LoginPage)
-	mux.HandleFunc("POST /login", loginHandler(makeTokenSet(tokens), cookieMaxAge))
+	mux.HandleFunc("POST /login", loginHandler(makeTokenSet(tokens), opts.CookieMaxAge))
 	mux.HandleFunc("GET /api", handler.APIDocsPage)
 	mux.HandleFunc("GET /api/openapi.yaml", APISpec)
 	mux.HandleFunc("GET /", handler.IndexPage)
@@ -52,7 +58,13 @@ func NewRouter(
 
 	stack := withRecovery(handler.log, mux)
 	stack = newAuthMiddleware(tokens, stack)
-	stack = withBodyLimit(int64(maxBodyBytes), stack)
+
+	stack = withBodyLimit(int64(opts.MaxBodyBytes), stack)
+
+	if opts.RateLimit > 0 {
+		stack = withRateLimit(opts.RateLimit, opts.RateBurst, stack)
+	}
+
 	stack = withSecurityHeaders(stack)
 	stack = withLogging(handler.log, stack)
 	stack = withRequestID(stack)

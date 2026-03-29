@@ -12,6 +12,8 @@ const (
 	FlagReadTimeout    = "read-timeout"
 	FlagMaxHeaderBytes = "max-header-bytes"
 	FlagMaxBodyBytes   = "max-body-bytes"
+	FlagRateLimit      = "rate-limit"
+	FlagRateBurst      = "rate-burst"
 )
 
 // Env vars used to configure the service (prefix: PADMARK_*).
@@ -26,6 +28,8 @@ const (
 	EnvReadTimeout    = "PADMARK_READ_TIMEOUT"
 	EnvMaxHeaderBytes = "PADMARK_MAX_HEADER_BYTES"
 	EnvMaxBodyBytes   = "PADMARK_MAX_BODY_BYTES"
+	EnvRateLimit      = "PADMARK_RATE_LIMIT"
+	EnvRateBurst      = "PADMARK_RATE_BURST"
 )
 
 // Default values for all flags.
@@ -39,4 +43,6 @@ const (
 	DefaultReadTimeout    = 30                // seconds
 	DefaultMaxHeaderBytes = 64 * 1024         // 64 KB
 	DefaultMaxBodyBytes   = 256 * 1024        // 256 KB
+	DefaultRateLimit      = 10                // requests per second per IP
+	DefaultRateBurst      = 20                // max burst size per IP
 )

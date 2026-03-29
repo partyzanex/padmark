@@ -59,7 +59,9 @@ func (s *HandlerSuite) newRouter(tokens []string) http.Handler {
 	handler := adhttp.NewHandler(s.manager, discardLog).WithPinger(s.pinger)
 	ogen := adhttp.NewOgenHandler(s.manager, s.pinger, discardLog)
 
-	return adhttp.NewRouter(handler, ogen, tokens, 90*24*60*60, 256*1024)
+	opts := adhttp.RouterOptions{CookieMaxAge: 90 * 24 * 60 * 60, MaxBodyBytes: 256 * 1024}
+
+	return adhttp.NewRouter(handler, ogen, tokens, opts)
 }
 
 func (s *HandlerSuite) TearDownTest() {
@@ -756,7 +758,8 @@ func (s *HandlerSuite) TestReadyz_OK() {
 func (s *HandlerSuite) TestReadyz_NoPinger() {
 	handler := adhttp.NewHandler(s.manager, discardLog)
 	ogen := adhttp.NewOgenHandler(s.manager, nil, discardLog)
-	router := adhttp.NewRouter(handler, ogen, nil, 90*24*60*60, 256*1024)
+	opts := adhttp.RouterOptions{CookieMaxAge: 90 * 24 * 60 * 60, MaxBodyBytes: 256 * 1024}
+	router := adhttp.NewRouter(handler, ogen, nil, opts)
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/readyz", nil)
@@ -1154,7 +1157,8 @@ func (s *HandlerSuite) TestAPIDocsPage_Public() {
 	discardLog := slog.New(slog.DiscardHandler)
 	handler := adhttp.NewHandler(s.manager, discardLog)
 	ogen := adhttp.NewOgenHandler(s.manager, s.pinger, discardLog)
-	router := adhttp.NewRouter(handler, ogen, []string{"secret"}, 90*24*60*60, 256*1024)
+	opts := adhttp.RouterOptions{CookieMaxAge: 90 * 24 * 60 * 60, MaxBodyBytes: 256 * 1024}
+	router := adhttp.NewRouter(handler, ogen, []string{"secret"}, opts)
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/api", nil)

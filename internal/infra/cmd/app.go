@@ -103,6 +103,18 @@ func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
 			Value:   DefaultMaxBodyBytes,
 			Usage:   "Maximum size of request body in bytes",
 		},
+		&cli.IntFlag{
+			Name:    FlagRateLimit,
+			Sources: cli.EnvVars(EnvRateLimit),
+			Value:   DefaultRateLimit,
+			Usage:   "Rate limit: requests per second per IP (0 = disabled)",
+		},
+		&cli.IntFlag{
+			Name:    FlagRateBurst,
+			Sources: cli.EnvVars(EnvRateBurst),
+			Value:   DefaultRateBurst,
+			Usage:   "Rate limit: max burst size per IP",
+		},
 	}
 }
 
@@ -157,9 +169,13 @@ func action(ctx context.Context, cmd *cli.Command) error {
 		}
 	}
 
-	cookieMaxAge := cmd.Int(FlagCookieMaxAge)
-	maxBodyBytes := cmd.Int(FlagMaxBodyBytes)
-	router := adaptershttp.NewRouter(handler, ogenHandler, tokens, cookieMaxAge, maxBodyBytes)
+	routerOpts := adaptershttp.RouterOptions{
+		CookieMaxAge: cmd.Int(FlagCookieMaxAge),
+		MaxBodyBytes: cmd.Int(FlagMaxBodyBytes),
+		RateLimit:    cmd.Int(FlagRateLimit),
+		RateBurst:    cmd.Int(FlagRateBurst),
+	}
+	router := adaptershttp.NewRouter(handler, ogenHandler, tokens, routerOpts)
 
 	// 6. Server
 	srv := &http.Server{
