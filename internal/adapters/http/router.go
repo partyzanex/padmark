@@ -48,11 +48,12 @@ func NewRouter(
 	}
 
 	mux := http.NewServeMux()
+	lockout := newNoteFailLockout()
 
 	// Ogen-handled JSON API routes
 	mux.Handle("POST /notes", ogenSrv)
-	mux.Handle("PUT /notes/{id}", ogenSrv)
-	mux.Handle("DELETE /notes/{id}", ogenSrv)
+	mux.Handle("PUT /notes/{id}", withFailLockout(lockout, ogenSrv))
+	mux.Handle("DELETE /notes/{id}", withFailLockout(lockout, ogenSrv))
 	mux.Handle("GET /healthz", ogenSrv)
 	mux.Handle("GET /readyz", ogenSrv)
 
