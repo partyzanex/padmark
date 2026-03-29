@@ -1,122 +1,165 @@
 # padmark
 
-A minimalist Markdown notes service with a REST API.
-
-Write a note in Markdown — get it back as JSON, HTML, or plain text depending on the `Accept` header.
+A self-hosted Markdown pastebin with a web UI, REST API, burn-after-reading, edit codes, and token-based auth.
 
 ## Features
 
-- CRUD for notes via REST API
-- Markdown → HTML rendering (goldmark + bluemonday)
-- Content negotiation: `application/json`, `text/html`, `text/plain`
-- OpenAPI 3.1 specification
-- SQLite storage (`modernc.org/sqlite`)
+- **Web UI** — create, view, and edit notes in the browser with live Markdown preview
+- **REST API** — JSON CRUD with OpenAPI 3.1 spec and generated Go client (`pkg/client`)
+- **Content negotiation** — `application/json`, `text/html`, `text/plain`, `text/markdown` via `Accept` header
+- **Short URLs** — notes accessible at `/{id}` (8-char random slug or custom)
+- **Burn after reading** — auto-delete on first read (without TTL) or auto-expire after TTL
+- **Edit codes** — secret 12-char token returned on creation, required for edit/delete
+- **Token auth** — optional Bearer token + cookie-based login for the web UI
+- **Storage backends** — SQLite (default) or PostgreSQL
+- **Spec-first API** — [ogen](https://github.com/ogen-go/ogen) generated server and client from `openapi.yaml`
+- **Three themes** — light, dim (default), dark — persisted in cookie
+- **API docs** — embedded Redoc UI at `/api`
 
 ## Quick start
 
 ```bash
-go run ./cmd/server
+# SQLite (default)
+go run ./cmd/server --addr :4000
+
+# PostgreSQL
+go run ./cmd/server --storage postgres --dsn "postgres://user:pass@localhost:5432/padmark?sslmode=disable"
 ```
 
-The server starts at `http://localhost:8080`.
+Open `http://localhost:4000` in the browser.
+
+## Configuration
+
+| Flag | Env | Default | Description |
+|------|-----|---------|-------------|
+| `--addr` | `PADMARK_ADDR` | `:8080` | HTTP listen address |
+| `--storage` | `PADMARK_STORAGE` | `sqlite` | Storage backend: `sqlite`, `postgres` |
+| `--dsn` | `PADMARK_DSN` | `padmark.db` | Database DSN |
+| `--log-level` | `PADMARK_LOG_LEVEL` | `info` | Log level: debug, info, warn, error |
+| `--log-format` | `PADMARK_LOG_FORMAT` | `json` | Log format: json, text |
+| `--auth-tokens` | `PADMARK_AUTH_TOKENS` | *(empty)* | Comma-separated Bearer tokens (empty = no auth) |
 
 ## API
 
 ### Create a note
 
 ```bash
-curl -X POST http://localhost:8080/notes \
+curl -X POST http://localhost:4000/notes \
   -H "Content-Type: application/json" \
-  -d '{"title": "First note", "content": "# Hello\n\nThis is **padmark**."}'
+  -d '{"title":"Hello","content":"# Hello\n\nThis is **padmark**."}'
 ```
+
+Response includes `edit_code` — save it to edit or delete the note later.
 
 ### Get a note
 
 ```bash
-# JSON (default)
-curl http://localhost:8080/notes/{id}
+# JSON
+curl http://localhost:4000/notes/{id}
 
 # Rendered HTML
-curl -H "Accept: text/html" http://localhost:8080/notes/{id}
+curl -H "Accept: text/html" http://localhost:4000/notes/{id}
 
 # Raw Markdown
-curl -H "Accept: text/plain" http://localhost:8080/notes/{id}
+curl http://localhost:4000/{id}?raw=1
 ```
 
-### Update
+### Update (requires edit code)
 
 ```bash
-curl -X PUT http://localhost:8080/notes/{id} \
+curl -X PUT http://localhost:4000/notes/{id} \
   -H "Content-Type: application/json" \
-  -d '{"title": "Updated", "content": "# New content"}'
+  -d '{"title":"Updated","content":"# New","edit_code":"JmNkn0LdjbMw"}'
 ```
 
-### Delete
+### Delete (requires edit code)
 
 ```bash
-curl -X DELETE http://localhost:8080/notes/{id}
+curl -X DELETE http://localhost:4000/notes/{id} \
+  -H "X-Edit-Code: JmNkn0LdjbMw"
 ```
+
+### Burn after reading + TTL
+
+```bash
+curl -X POST http://localhost:4000/notes \
+  -H "Content-Type: application/json" \
+  -d '{"title":"Secret","content":"eyes only","burn_after_reading":true,"ttl":3600}'
+```
+
+### Auth (when tokens are configured)
+
+```bash
+# API
+curl -H "Authorization: Bearer my-token" http://localhost:4000/notes
+
+# Browser — visit /login and enter the token
+```
+
+### API docs
+
+Interactive docs at `/api`, raw spec at `/api/openapi.yaml`.
 
 ## Project structure
 
 ```
-cmd/server/main.go                        — entry point (10–15 lines)
+cmd/server/main.go                          Entry point
+openapi.yaml                                OpenAPI 3.1 spec (source of truth)
+pkg/client/                                 Generated Go API client (ogen)
 internal/
-  domain/                                 — entities and sentinel errors
-  usecases/notes/manager.go               — business logic, Storage and Renderer interfaces
+  domain/                                   Entities, sentinel errors
+  usecases/notes/                           Business logic (Manager)
   infra/
-    storage/sqlite.go                     — SQLite implementation (uptrace/bun)
-    storage/memory.go                     — in-memory implementation (for tests)
-    render/markdown.go                    — Markdown → HTML (goldmark + bluemonday)
-    cmd/app.go                            — DI, CLI, graceful shutdown
-    cmd/flags.go                          — configuration (Flag*, Env*, Default*)
+    storage/sqlite/                         SQLite repository + migrations
+    storage/postgres/                       PostgreSQL repository + migrations
+    render/                                 Markdown → HTML (goldmark + bluemonday)
+    cmd/                                    DI, CLI flags, graceful shutdown
   adapters/http/
-    notes.go                              — CRUD handlers
-    negotiate.go                          — content negotiation
-    health.go                             — /healthz, /readyz
-    errors.go                             — domain errors → HTTP status translation
-migrations/                               — goose SQL migrations
-templates/note.html                       — HTML wrapper for rendering
+    handler.go                              Handler struct, interfaces, templates
+    router.go                               Routing, middleware (auth, logging, recovery)
+    ogen_handler.go                         ogen Handler implementation
+    ogen_convert.go                         Domain ↔ ogen type mapping
+    ogenapi/                                Generated ogen server code
+    web_*.go                                HTML page handlers
+    middleware_auth.go                      Token auth (Bearer + cookie)
+    templates/                              HTML templates (shared header)
+    static/                                 CSS, favicon
+    spec/                                   Embedded OpenAPI spec
+migrations/
+  sqlite/                                   Goose SQL migrations
+  postgres/                                 Goose SQL migrations
 ```
 
 ## Build and test
 
 ```bash
-make build     # build binary
-make test      # run tests
-make lint      # golangci-lint
-make run       # build and run
+make build                    # Build binary
+make test                     # Unit tests (-race)
+make lint                     # golangci-lint
+make gen                      # go generate (mocks + ogen)
+
+# Integration tests (requires Docker)
+go test -tags=integration -v ./internal/infra/storage/postgres/
 ```
 
 ## Docker
 
 ```bash
 docker build -t padmark .
-docker run -p 8080:8080 padmark
+docker run -p 4000:8080 padmark
 ```
 
 ## Stack
 
 - Go 1.25+
+- [ogen](https://github.com/ogen-go/ogen) — spec-first API server and client generation
 - [goldmark](https://github.com/yuin/goldmark) — Markdown parsing
 - [bluemonday](https://github.com/microcosm-cc/bluemonday) — HTML sanitization
-- [uptrace/bun](https://github.com/uptrace/bun) + [modernc.org/sqlite](https://gitlab.com/cznic/sqlite) — SQLite
+- [uptrace/bun](https://github.com/uptrace/bun) — database toolkit (SQLite + PostgreSQL)
 - [pressly/goose](https://github.com/pressly/goose) — migrations
 - [urfave/cli](https://github.com/urfave/cli) — CLI and configuration
-- [testify](https://github.com/stretchr/testify) + [gomock](https://github.com/uber-go/mock) — tests
-
-## Roadmap
-
-- [ ] Full-text search (`GET /notes?q=...`)
-- [ ] Tags and categories
-- [ ] Syntax highlighting in HTML (`goldmark-highlighting` + `chroma`)
-- [ ] Note versioning (`GET /notes/{id}/history`)
-- [ ] Cursor-based pagination instead of offset
-- [ ] ETag / `If-None-Match` for response caching
-- [ ] Mermaid diagram support
-- [ ] Rate limiting and CORS
-- [ ] Metrics (Prometheus)
-- [ ] PostgreSQL storage
+- [testcontainers-go](https://github.com/testcontainers/testcontainers-go) — Postgres integration tests
+- [testify](https://github.com/stretchr/testify) + [gomock](https://github.com/uber-go/mock) — testing
 
 ## License
 
