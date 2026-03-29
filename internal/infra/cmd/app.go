@@ -115,6 +115,16 @@ func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
 			Value:   DefaultRateBurst,
 			Usage:   "Rate limit: max burst size per IP",
 		},
+		&cli.StringFlag{
+			Name:    FlagTLSCert,
+			Sources: cli.EnvVars(EnvTLSCert),
+			Usage:   "Path to TLS certificate file (PEM); enables HTTPS when set together with --tls-key",
+		},
+		&cli.StringFlag{
+			Name:    FlagTLSKey,
+			Sources: cli.EnvVars(EnvTLSKey),
+			Usage:   "Path to TLS private key file (PEM); enables HTTPS when set together with --tls-cert",
+		},
 	}
 }
 
@@ -189,14 +199,27 @@ func action(ctx context.Context, cmd *cli.Command) error {
 	stopCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	tlsCert := cmd.String(FlagTLSCert)
+	tlsKey := cmd.String(FlagTLSKey)
+
+	if (tlsCert == "") != (tlsKey == "") {
+		return fmt.Errorf("--tls-cert and --tls-key must both be set to enable TLS")
+	}
+
 	errCh := make(chan error, 1)
 
 	go func() {
 		log.InfoContext(ctx, "server started",
-			"addr", srv.Addr, "storage", storage, "dsn", dsn,
+			"addr", srv.Addr, "storage", storage, "dsn", dsn, "tls", tlsCert != "",
 		)
 
-		serveErr := srv.ListenAndServe()
+		var serveErr error
+		if tlsCert != "" {
+			serveErr = srv.ListenAndServeTLS(tlsCert, tlsKey)
+		} else {
+			serveErr = srv.ListenAndServe()
+		}
+
 		if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
 			errCh <- serveErr
 		}

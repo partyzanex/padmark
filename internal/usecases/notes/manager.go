@@ -6,7 +6,6 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
-	"encoding/binary"
 	"fmt"
 	"html"
 	"log/slog"
@@ -22,22 +21,18 @@ var slugRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,99}$`)
 const slugChars = "abcdefghijklmnopqrstuvwxyz0123456789"
 
 func newSlug() string {
-	const length = 8
+	const length = 10
 
+	charsetSize := big.NewInt(int64(len(slugChars)))
 	buf := make([]byte, length)
 
-	var rnd [8]byte
+	for idx := range length {
+		nn, err := rand.Int(rand.Reader, charsetSize)
+		if err != nil {
+			panic("crypto/rand unavailable: " + err.Error())
+		}
 
-	_, err := rand.Read(rnd[:])
-	if err != nil {
-		panic("crypto/rand unavailable: " + err.Error())
-	}
-
-	n := binary.LittleEndian.Uint64(rnd[:])
-
-	for i := range length {
-		buf[i] = slugChars[n%uint64(len(slugChars))]
-		n /= uint64(len(slugChars))
+		buf[idx] = slugChars[nn.Int64()]
 	}
 
 	return string(buf)

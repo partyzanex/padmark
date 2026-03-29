@@ -14,6 +14,8 @@ const (
 	FlagMaxBodyBytes   = "max-body-bytes"
 	FlagRateLimit      = "rate-limit"
 	FlagRateBurst      = "rate-burst"
+	FlagTLSCert        = "tls-cert"
+	FlagTLSKey         = "tls-key"
 )
 
 // Env vars used to configure the service (prefix: PADMARK_*).
@@ -30,6 +32,8 @@ const (
 	EnvMaxBodyBytes   = "PADMARK_MAX_BODY_BYTES"
 	EnvRateLimit      = "PADMARK_RATE_LIMIT"
 	EnvRateBurst      = "PADMARK_RATE_BURST"
+	EnvTLSCert        = "PADMARK_TLS_CERT"
+	EnvTLSKey         = "PADMARK_TLS_KEY"
 )
 
 // Default values for all flags.
