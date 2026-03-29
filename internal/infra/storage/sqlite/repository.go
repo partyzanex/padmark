@@ -92,6 +92,37 @@ func (r *Repository) Get(ctx context.Context, id string) (*domain.Note, error) {
 	}, nil
 }
 
+// Consume atomically deletes a note and returns it. Returns domain.ErrNotFound if no row was deleted.
+func (r *Repository) Consume(ctx context.Context, id string) (*domain.Note, error) {
+	var dbNote note
+
+	err := r.db.NewDelete().
+		Model(&dbNote).
+		Where("id = ?", id).
+		Returning("*").
+		Scan(ctx)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, domain.ErrNotFound
+		}
+
+		return nil, fmt.Errorf("sqlite consume: %w", err)
+	}
+
+	return &domain.Note{
+		ID:               dbNote.ID,
+		CreatedAt:        dbNote.CreatedAt,
+		UpdatedAt:        dbNote.UpdatedAt,
+		ExpiresAt:        dbNote.ExpiresAt,
+		Title:            dbNote.Title,
+		Content:          dbNote.Content,
+		ContentType:      domain.ContentType(dbNote.ContentType),
+		EditCode:         dbNote.EditCode,
+		Views:            dbNote.Views,
+		BurnAfterReading: dbNote.BurnAfterReading,
+	}, nil
+}
+
 // Update modifies an existing note.
 func (r *Repository) Update(ctx context.Context, id string, domNote *domain.Note) error {
 	dbNote := &note{

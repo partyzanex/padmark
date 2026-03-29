@@ -72,6 +72,7 @@ const (
 type Storage interface {
 	Create(ctx context.Context, note *domain.Note) error
 	Get(ctx context.Context, id string) (*domain.Note, error)
+	Consume(ctx context.Context, id string) (*domain.Note, error)
 	Update(ctx context.Context, id string, note *domain.Note) error
 	Delete(ctx context.Context, id string) error
 	IncrementViews(ctx context.Context, id string) error
@@ -140,6 +141,7 @@ func (m *Manager) Peek(ctx context.Context, id string) (*domain.Note, error) {
 }
 
 // Get returns a note by ID. If the note has expired it is deleted and ErrExpired is returned.
+// Burn-after-reading notes are atomically consumed (deleted and returned) to prevent races.
 func (m *Manager) Get(ctx context.Context, id string) (*domain.Note, error) {
 	note, err := m.storage.Get(ctx, id)
 	if err != nil {
@@ -155,13 +157,15 @@ func (m *Manager) Get(ctx context.Context, id string) (*domain.Note, error) {
 		return nil, domain.ErrExpired
 	}
 
-	if note.BurnAfterReading && note.ExpiresAt == nil {
-		delErr := m.storage.Delete(ctx, id)
-		if delErr != nil {
-			m.log.ErrorContext(ctx, "burn after reading: delete note", "id", id, "err", delErr)
-		} else {
-			m.log.DebugContext(ctx, "note burned", "id", id)
+	if note.BurnAfterReading {
+		consumed, consumeErr := m.storage.Consume(ctx, id)
+		if consumeErr != nil {
+			return nil, fmt.Errorf("burn after reading: %w", consumeErr)
 		}
+
+		m.log.DebugContext(ctx, "note burned", "id", id)
+
+		return consumed, nil
 	}
 
 	return note, nil

@@ -41,6 +41,21 @@ func (m *MockStorage) EXPECT() *MockStorageMockRecorder {
 	return m.recorder
 }
 
+// Consume mocks base method.
+func (m *MockStorage) Consume(ctx context.Context, id string) (*domain.Note, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Consume", ctx, id)
+	ret0, _ := ret[0].(*domain.Note)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Consume indicates an expected call of Consume.
+func (mr *MockStorageMockRecorder) Consume(ctx, id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Consume", reflect.TypeOf((*MockStorage)(nil).Consume), ctx, id)
+}
+
 // Create mocks base method.
 func (m *MockStorage) Create(ctx context.Context, note *domain.Note) error {
 	m.ctrl.T.Helper()

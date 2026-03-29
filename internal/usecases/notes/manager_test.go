@@ -141,7 +141,7 @@ func (s *ManagerTestSuite) TestGet_OK() {
 func (s *ManagerTestSuite) TestGet_BurnAfterReading() {
 	note := &domain.Note{ID: "abc-123", Title: "a", BurnAfterReading: true}
 	s.storage.EXPECT().Get(gomock.Any(), "abc-123").Return(note, nil)
-	s.storage.EXPECT().Delete(gomock.Any(), "abc-123").Return(nil)
+	s.storage.EXPECT().Consume(gomock.Any(), "abc-123").Return(note, nil)
 
 	result, err := s.manager.Get(s.T().Context(), "abc-123")
 
@@ -185,7 +185,7 @@ func (s *ManagerTestSuite) TestView_OK() {
 func (s *ManagerTestSuite) TestView_BurnAfterReading() {
 	want := &domain.Note{ID: "abc-123", Title: "a", BurnAfterReading: true}
 	s.storage.EXPECT().Get(gomock.Any(), "abc-123").Return(want, nil)
-	s.storage.EXPECT().Delete(gomock.Any(), "abc-123").Return(nil)
+	s.storage.EXPECT().Consume(gomock.Any(), "abc-123").Return(want, nil)
 
 	note, err := s.manager.View(s.T().Context(), "abc-123")
 
@@ -305,7 +305,7 @@ func (s *ManagerTestSuite) TestGetRendered_OK() {
 func (s *ManagerTestSuite) TestGetRendered_BurnAfterReading() {
 	note := &domain.Note{ID: "abc-123", Content: "# Hello", BurnAfterReading: true}
 	s.storage.EXPECT().Get(gomock.Any(), "abc-123").Return(note, nil)
-	s.storage.EXPECT().Delete(gomock.Any(), "abc-123").Return(nil)
+	s.storage.EXPECT().Consume(gomock.Any(), "abc-123").Return(note, nil)
 	s.renderer.EXPECT().Render("# Hello").Return("<h1>Hello</h1>", nil)
 
 	result, rendered, err := s.manager.GetRendered(s.T().Context(), "abc-123")
