@@ -48,7 +48,7 @@ func (h *OgenHandler) CreateNote(
 		BurnAfterReading: req.BurnAfterReading.Or(false),
 	})
 	if err != nil {
-		return mapCreateError(err), nil
+		return mapCreateError(err, h.log), nil
 	}
 
 	return &ogenapi.CreateNoteResponseHeaders{
@@ -63,7 +63,7 @@ func (h *OgenHandler) GetNote(
 ) (ogenapi.GetNoteRes, error) {
 	note, err := h.manager.View(ctx, params.ID)
 	if err != nil {
-		return mapGetError(err), nil
+		return mapGetError(err, h.log), nil
 	}
 
 	return domainToResponse(note), nil
@@ -88,7 +88,7 @@ func (h *OgenHandler) UpdateNote(
 		BurnAfterReading: req.BurnAfterReading.Or(false),
 	})
 	if err != nil {
-		return mapUpdateError(err), nil
+		return mapUpdateError(err, h.log), nil
 	}
 
 	return domainToResponse(note), nil
@@ -105,7 +105,7 @@ func (h *OgenHandler) DeleteNote(
 
 	err := h.manager.Delete(ctx, params.ID, editCode)
 	if err != nil {
-		return mapDeleteError(err), nil
+		return mapDeleteError(err, h.log), nil
 	}
 
 	return &ogenapi.DeleteNoteNoContent{}, nil

@@ -2,10 +2,13 @@ package http
 
 import (
 	"errors"
+	"log/slog"
 
 	"github.com/partyzanex/padmark/internal/adapters/http/ogenapi"
 	"github.com/partyzanex/padmark/internal/domain"
 )
+
+const internalErrorMessage = "internal server error"
 
 func domainToResponse(note *domain.Note) *ogenapi.NoteResponse {
 	resp := &ogenapi.NoteResponse{
@@ -50,7 +53,7 @@ func errResp(err error) ogenapi.ErrorResponse {
 	return ogenapi.ErrorResponse{Message: err.Error()}
 }
 
-func mapCreateError(err error) ogenapi.CreateNoteRes {
+func mapCreateError(err error, log *slog.Logger) ogenapi.CreateNoteRes {
 	r := errResp(err)
 
 	switch {
@@ -69,13 +72,15 @@ func mapCreateError(err error) ogenapi.CreateNoteRes {
 
 		return &v
 	default:
-		v := ogenapi.CreateNoteInternalServerError(r)
+		log.Error("create note failed", slog.String("error", err.Error()))
+
+		v := ogenapi.CreateNoteInternalServerError(ogenapi.ErrorResponse{Message: internalErrorMessage})
 
 		return &v
 	}
 }
 
-func mapGetError(err error) ogenapi.GetNoteRes {
+func mapGetError(err error, log *slog.Logger) ogenapi.GetNoteRes {
 	r := errResp(err)
 
 	switch {
@@ -88,13 +93,15 @@ func mapGetError(err error) ogenapi.GetNoteRes {
 
 		return &v
 	default:
-		v := ogenapi.GetNoteInternalServerError(r)
+		log.Error("get note failed", slog.String("error", err.Error()))
+
+		v := ogenapi.GetNoteInternalServerError(ogenapi.ErrorResponse{Message: internalErrorMessage})
 
 		return &v
 	}
 }
 
-func mapUpdateError(err error) ogenapi.UpdateNoteRes {
+func mapUpdateError(err error, log *slog.Logger) ogenapi.UpdateNoteRes {
 	r := errResp(err)
 
 	switch {
@@ -112,13 +119,15 @@ func mapUpdateError(err error) ogenapi.UpdateNoteRes {
 
 		return &v
 	default:
-		v := ogenapi.UpdateNoteInternalServerError(r)
+		log.Error("update note failed", slog.String("error", err.Error()))
+
+		v := ogenapi.UpdateNoteInternalServerError(ogenapi.ErrorResponse{Message: internalErrorMessage})
 
 		return &v
 	}
 }
 
-func mapDeleteError(err error) ogenapi.DeleteNoteRes {
+func mapDeleteError(err error, log *slog.Logger) ogenapi.DeleteNoteRes {
 	r := errResp(err)
 
 	switch {
@@ -131,7 +140,9 @@ func mapDeleteError(err error) ogenapi.DeleteNoteRes {
 
 		return &v
 	default:
-		v := ogenapi.DeleteNoteInternalServerError(r)
+		log.Error("delete note failed", slog.String("error", err.Error()))
+
+		v := ogenapi.DeleteNoteInternalServerError(ogenapi.ErrorResponse{Message: internalErrorMessage})
 
 		return &v
 	}
