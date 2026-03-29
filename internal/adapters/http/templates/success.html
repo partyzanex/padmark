@@ -8,7 +8,7 @@
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <link rel="stylesheet" href="/static/style.css">
-    <style>
+    <style nonce="{{.Nonce}}">
         body::before { background: radial-gradient(circle, rgba(52,211,153,0.05) 0%, transparent 70%); }
     </style>
 </head>
@@ -33,7 +33,7 @@
                 <span class="field-block-label">View link</span>
                 <div class="copy-row">
                     <a href="{{.URL}}" class="copy-value">{{.URL}}</a>
-                    <button class="copy-btn" id="copyLinkBtn" onclick="copyText(this, {{.URL | js}})">
+                    <button class="copy-btn" id="copyLinkBtn" data-url="{{.URL}}">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
                         Copy
                     </button>
@@ -42,11 +42,11 @@
 
             <div class="card-divider"></div>
 
-            <div class="field-block">
+            <div class="field-block" id="editCodeBlock">
                 <span class="field-block-label">Edit code</span>
                 <div class="copy-row secret-row">
-                    <span class="copy-value">{{.EditCode}}</span>
-                    <button class="copy-btn" onclick="copyText(this, {{.EditCode | js}})">
+                    <span class="copy-value" id="editCodeValue"></span>
+                    <button class="copy-btn" id="editCodeCopyBtn">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
                         Copy
                     </button>
@@ -81,17 +81,40 @@
 
 </div>
 
-<script>
+<script nonce="{{.Nonce}}">
     {{template "theme-js"}}
 
-    function copyText(btn, text) {
-        navigator.clipboard.writeText(text).then(() => {
-            const orig = btn.innerHTML;
-            btn.classList.add('copied');
-            btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> Copied`;
-            setTimeout(() => { btn.innerHTML = orig; btn.classList.remove('copied'); }, 2000);
-        });
+    function flashCopied(btn, orig) {
+        btn.classList.add('copied');
+        btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> Copied`;
+        setTimeout(() => { btn.innerHTML = orig; btn.classList.remove('copied'); }, 2000);
     }
+
+    function copyText(btn, text) {
+        const orig = btn.innerHTML;
+        navigator.clipboard.writeText(text).then(() => flashCopied(btn, orig));
+    }
+
+    (function () {
+        const copyLinkBtn = document.getElementById('copyLinkBtn');
+        copyLinkBtn.addEventListener('click', function () {
+            copyText(this, this.dataset.url);
+        });
+
+        const id = new URLSearchParams(location.search).get('id');
+        const key = 'padmark_edit_' + id;
+        const code = sessionStorage.getItem(key);
+        if (code) {
+            sessionStorage.removeItem(key);
+            document.getElementById('editCodeValue').textContent = code;
+            document.getElementById('editCodeCopyBtn').addEventListener('click', function () {
+                copyText(this, code);
+            });
+        } else {
+            // edit code not available (e.g. page was refreshed) — hide the block
+            document.getElementById('editCodeBlock').style.display = 'none';
+        }
+    })();
 </script>
 </body>
 </html>

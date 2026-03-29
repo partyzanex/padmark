@@ -17,6 +17,7 @@ type errorViewData struct {
 	Desc      string
 	Detail    string
 	ErrorType string // "client" or "server"
+	Nonce     string
 	Code      int
 }
 
@@ -56,6 +57,7 @@ func domainErrToPageData(err error) errorViewData {
 // writeErrorPage renders the HTML error template for browser requests.
 func (h *Handler) writeErrorPage(w http.ResponseWriter, r *http.Request, err error) {
 	data := domainErrToPageData(err)
+	data.Nonce = nonceFromContext(r.Context())
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(data.Code)

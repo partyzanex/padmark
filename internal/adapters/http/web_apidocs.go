@@ -16,11 +16,15 @@ var openapiSpec []byte
 //go:embed templates/apidocs.html
 var apidocsTmplSrc string
 
+type apiDocsViewData struct {
+	Nonce string
+}
+
 // APIDocsPage handles GET /api — renders the OpenAPI spec with Redoc.
 func (h *Handler) APIDocsPage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
-	err := h.apidocsTmpl.Execute(w, nil)
+	err := h.apidocsTmpl.Execute(w, apiDocsViewData{Nonce: nonceFromContext(r.Context())})
 	if err != nil {
 		h.log.ErrorContext(r.Context(), "render apidocs template", "err", err)
 	}

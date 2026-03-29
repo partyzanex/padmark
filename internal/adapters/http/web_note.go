@@ -22,6 +22,7 @@ type noteViewData struct {
 	CreatedAt    string
 	ExpiresLabel string
 	RawContent   string
+	Nonce        string
 	Views        int
 }
 
@@ -84,7 +85,10 @@ func (h *Handler) GetNote(w http.ResponseWriter, r *http.Request) {
 
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
-		err = h.noteTmpl.Execute(w, toNoteViewData(note, rendered))
+		data := toNoteViewData(note, rendered)
+		data.Nonce = nonceFromContext(r.Context())
+
+		err = h.noteTmpl.Execute(w, data)
 		if err != nil {
 			h.log.ErrorContext(r.Context(), "render note template", "id", id, "err", err)
 		}

@@ -2,6 +2,8 @@ package http
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"log/slog"
 	"net"
 	"net/http"
@@ -15,7 +17,15 @@ import (
 
 type contextKey uint8
 
-const keyRequestID contextKey = 1
+const (
+	keyRequestID contextKey = 1
+	keyNonce     contextKey = 2
+)
+
+func nonceFromContext(ctx context.Context) string {
+	v, _ := ctx.Value(keyNonce).(string)
+	return v
+}
 
 const protoHTTPS = "https"
 
@@ -157,6 +167,17 @@ func withStaticCacheControl(next http.Handler) http.Handler {
 
 func withSecurityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var b [16]byte
+
+		_, err := rand.Read(b[:])
+		if err != nil {
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
+
+		nonce := base64.StdEncoding.EncodeToString(b[:])
+		r = r.WithContext(context.WithValue(r.Context(), keyNonce, nonce))
+
 		header := w.Header()
 		header.Set("Cache-Control", "private, no-store")
 		header.Set("X-Content-Type-Options", "nosniff")
@@ -165,8 +186,8 @@ func withSecurityHeaders(next http.Handler) http.Handler {
 		header.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
 		header.Set("Content-Security-Policy",
 			"default-src 'self'; "+
-				"script-src 'self' 'unsafe-inline' https://cdn.redoc.ly; "+
-				"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "+
+				"script-src 'self' 'nonce-"+nonce+"' https://cdn.redoc.ly; "+
+				"style-src 'self' 'nonce-"+nonce+"' https://fonts.googleapis.com; "+
 				"font-src 'self' https://fonts.gstatic.com; "+
 				"img-src 'self' data:; "+
 				"connect-src 'self'",

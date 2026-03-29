@@ -33,6 +33,7 @@ func (h *Handler) EditPage(w http.ResponseWriter, r *http.Request) {
 		TTL:              ttl,
 		EditMode:         true,
 		BurnAfterReading: note.BurnAfterReading,
+		Nonce:            nonceFromContext(r.Context()),
 	})
 	if err != nil {
 		h.log.ErrorContext(r.Context(), "render edit template", "id", id, "err", err)

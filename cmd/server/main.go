@@ -11,8 +11,9 @@ import (
 func main() {
 	app := cmd.NewApp()
 
-	if err := app.Run(context.Background(), os.Args); err != nil {
-		slog.Error(err.Error())
+	err := app.Run(context.Background(), os.Args)
+	if err != nil {
+		slog.Error("run", "err", err)
 		os.Exit(1)
 	}
 }

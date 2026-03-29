@@ -44,6 +44,7 @@ func openDB(ctx context.Context, storage, dsn string) (*bun.DB, error) {
 	return db, nil
 }
 
+//nolint:ireturn // multiple implementations (sqlite, postgres) require interface return
 func initStorage(ctx context.Context, storage string, db *bun.DB) (notes.Storage, error) {
 	switch storage {
 	case "postgres":
@@ -108,12 +109,13 @@ func parseTrustedProxies(raw string) ([]*net.IPNet, error) {
 // Key-value DSNs containing "password=" are replaced entirely with "<redacted>".
 // Plain file paths (sqlite) are returned as-is.
 func redactDSN(dsn string) string {
-	if u, err := url.Parse(dsn); err == nil && u.User != nil {
-		if _, hasPassword := u.User.Password(); hasPassword {
-			u.User = url.UserPassword(u.User.Username(), "***")
+	parsedURL, parseErr := url.Parse(dsn)
+	if parseErr == nil && parsedURL.User != nil {
+		if _, hasPassword := parsedURL.User.Password(); hasPassword {
+			parsedURL.User = url.UserPassword(parsedURL.User.Username(), "***")
 		}
 
-		return u.String()
+		return parsedURL.String()
 	}
 
 	if strings.Contains(dsn, "password=") {

@@ -10,6 +10,7 @@ import (
 var loginTmplSrc string
 
 type loginViewData struct {
+	Nonce string
 	Error bool
 }
 
@@ -19,6 +20,7 @@ func (h *Handler) LoginPage(w http.ResponseWriter, r *http.Request) {
 
 	err := h.loginTmpl.Execute(w, loginViewData{
 		Error: r.URL.Query().Get("error") == "1",
+		Nonce: nonceFromContext(r.Context()),
 	})
 	if err != nil {
 		h.log.ErrorContext(r.Context(), "render login template", "err", err)

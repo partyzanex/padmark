@@ -46,7 +46,8 @@ func migrateAction(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	defer func() {
-		if closeErr := db.Close(); closeErr != nil {
+		closeErr := db.Close()
+		if closeErr != nil {
 			log.ErrorContext(ctx, "close db", "err", closeErr)
 		}
 	}()

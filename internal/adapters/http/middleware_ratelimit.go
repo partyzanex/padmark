@@ -27,22 +27,32 @@ type rateLimitMiddleware struct {
 }
 
 func withRateLimit(rps, burst int, trustedProxies []*net.IPNet, next http.Handler) http.Handler {
-	c := gcache.New(maxTrackedIPs).
+	limiterCache := gcache.New(maxTrackedIPs).
 		ARC().
 		Expiration(limiterTTL).
-		LoaderFunc(func(_ interface{}) (interface{}, error) {
+		LoaderFunc(func(_ any) (any, error) {
 			return rate.NewLimiter(rate.Limit(rps), burst), nil
 		}).
 		Build()
 
-	return &rateLimitMiddleware{cache: c, trustedProxies: trustedProxies, next: next}
+	return &rateLimitMiddleware{cache: limiterCache, trustedProxies: trustedProxies, next: next}
 }
 
 func (rl *rateLimitMiddleware) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	ip := clientIP(req, rl.trustedProxies)
 
-	v, _ := rl.cache.Get(ip) // LoaderFunc never returns an error
-	limiter := v.(*rate.Limiter)
+	cached, err := rl.cache.Get(ip)
+	if err != nil {
+		// LoaderFunc never errors; this path is unreachable in practice.
+		http.Error(rw, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	limiter, ok := cached.(*rate.Limiter)
+	if !ok {
+		http.Error(rw, "internal server error", http.StatusInternalServerError)
+		return
+	}
 
 	if !limiter.Allow() {
 		http.Error(rw, "too many requests", http.StatusTooManyRequests)

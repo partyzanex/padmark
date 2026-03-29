@@ -18,13 +18,13 @@
         <div class="editor-toolbar">
             <span class="toolbar-label">Markdown</span>
             <div class="toolbar-actions">
-                <button class="toolbar-btn" onclick="insertMd('**', '**')">B</button>
-                <button class="toolbar-btn" style="font-style:italic" onclick="insertMd('_', '_')">I</button>
-                <button class="toolbar-btn" onclick="insertMd('`', '`')">&lt;/&gt;</button>
-                <button class="toolbar-btn" onclick="insertMd('\n```\n', '\n```\n')">block</button>
+                <button class="toolbar-btn" id="mdBold">B</button>
+                <button class="toolbar-btn" id="mdItalic" style="font-style:italic">I</button>
+                <button class="toolbar-btn" id="mdCode">&lt;/&gt;</button>
+                <button class="toolbar-btn" id="mdBlock">block</button>
             </div>
         </div>
-        <textarea class="editor-textarea" id="editor" placeholder="Paste or write your Markdown…" spellcheck="false" oninput="updateCount()">{{.Content}}</textarea>
+        <textarea class="editor-textarea" id="editor" placeholder="Paste or write your Markdown…" spellcheck="false">{{.Content}}</textarea>
         <div class="editor-footer">
             <span class="char-count" id="charCount">0 characters</span>
             <span class="format-hint">
@@ -55,7 +55,7 @@
 
     <div class="burn-row">
         <label class="burn-checkbox" id="burnLabel">
-            <input type="checkbox" id="burnCheck" onchange="toggleBurn()"{{if .BurnAfterReading}} checked{{end}}>
+            <input type="checkbox" id="burnCheck"{{if .BurnAfterReading}} checked{{end}}>
             <span class="checkmark"></span>
             <span class="burn-text">Burn after reading in</span>
         </label>
@@ -79,17 +79,13 @@
     </div>
 
     <div class="publish-row">
-        {{if .EditMode}}
-        <button class="btn-publish" id="submitBtn" onclick="save()">Save</button>
-        {{else}}
-        <button class="btn-publish" id="submitBtn" onclick="publish()">Publish</button>
-        {{end}}
+        <button class="btn-publish" id="submitBtn">{{if .EditMode}}Save{{else}}Publish{{end}}</button>
         <span class="shortcut-hint"><kbd>Ctrl</kbd> + <kbd>Enter</kbd></span>
     </div>
 
 </div>
 
-<script>
+<script nonce="{{.Nonce}}">
     const editMode = {{.EditMode}};
     const noteID = {{.ID | js}};
 
@@ -175,8 +171,10 @@
             if (!resp.ok) { throw new Error('HTTP ' + resp.status); }
 
             const note = await resp.json();
+            if (note.edit_code) {
+                sessionStorage.setItem('padmark_edit_' + note.id, note.edit_code);
+            }
             const params = new URLSearchParams({ id: note.id });
-            if (note.edit_code) params.set('edit_code', note.edit_code);
             if (note.burn_after_reading) params.set('burn', '1');
             if (note.expires_at) params.set('expires', note.expires_at);
             window.location.href = '/success?' + params.toString();
@@ -226,6 +224,14 @@
             setTimeout(() => { btn.textContent = 'Save'; btn.style.background = ''; }, 2500);
         }
     }
+
+    document.getElementById('editor').addEventListener('input', updateCount);
+    document.getElementById('burnCheck').addEventListener('change', toggleBurn);
+    document.getElementById('submitBtn').addEventListener('click', editMode ? save : publish);
+    document.getElementById('mdBold').addEventListener('click', () => insertMd('**', '**'));
+    document.getElementById('mdItalic').addEventListener('click', () => insertMd('_', '_'));
+    document.getElementById('mdCode').addEventListener('click', () => insertMd('`', '`'));
+    document.getElementById('mdBlock').addEventListener('click', () => insertMd('\n```\n', '\n```\n'));
 
     document.addEventListener('keydown', e => {
         if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {

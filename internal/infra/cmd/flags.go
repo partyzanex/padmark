@@ -142,7 +142,8 @@ func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
 		&cli.StringFlag{
 			Name:    FlagTrustedProxies,
 			Sources: cli.EnvVars(EnvTrustedProxies),
-			Usage:   "Comma-separated list of trusted proxy CIDRs or IPs (e.g. 10.0.0.0/8,127.0.0.1); X-Forwarded-For and X-Real-IP are only trusted from these addresses",
+			Usage: "Comma-separated list of trusted proxy CIDRs or IPs (e.g. 10.0.0.0/8,127.0.0.1); " +
+				"X-Forwarded-For and X-Real-IP are only trusted from these addresses",
 		},
 	}
 }

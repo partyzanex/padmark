@@ -8,7 +8,7 @@
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <link rel="stylesheet" href="/static/style.css">
-    <style>
+    <style nonce="{{.Nonce}}">
         .wrapper { max-width: 100%; padding: 60px 24px 0; }
         .header  { margin-bottom: 24px; }
         .redoc-wrap { margin: 0 -24px; }
@@ -21,8 +21,8 @@
 <div class="redoc-wrap">
     <redoc spec-url="/api/openapi.yaml"></redoc>
 </div>
-<script src="https://cdn.redoc.ly/redoc/latest/bundles/redoc.standalone.js"></script>
-<script>
+<script src="https://cdn.redoc.ly/redoc/latest/bundles/redoc.standalone.js" nonce="{{.Nonce}}"></script>
+<script nonce="{{.Nonce}}">
     {{template "theme-js"}}
 </script>
 </body>
