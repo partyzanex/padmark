@@ -161,7 +161,7 @@ func (s *HandlerSuite) TestSuccessPage_NoID() {
 func (s *HandlerSuite) TestSuccessPage_WithBurnAndExpires() {
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet,
-		"/success?id=abc&burn=1&expires=2026-06-15T12:00:00Z&edit_code=secret123", nil)
+		"/success?id=abc&burn=1&expires=2026-06-15T12:00:00Z", nil)
 
 	s.router.ServeHTTP(w, r)
 
@@ -170,7 +170,9 @@ func (s *HandlerSuite) TestSuccessPage_WithBurnAndExpires() {
 	body := w.Body.String()
 	s.Contains(body, "Burn after reading")
 	s.Contains(body, "expires Jun 15, 2026")
-	s.Contains(body, "secret123")
+	// edit code is stored in sessionStorage before redirect and read by client-side JS;
+	// it is never rendered into the HTML by the server.
+	s.Contains(body, "editCodeBlock")
 }
 
 func (s *HandlerSuite) TestSuccessPage_HTTPS() {
@@ -892,6 +894,105 @@ func (s *HandlerSuite) TestGetNote_JSON_WriteFail() {
 	handler.GetNote(fw, r)
 
 	s.NotNil(fw)
+}
+
+// ── Rate limit ──
+
+func (s *HandlerSuite) TestRateLimit_Exceeded() {
+	handler := adhttp.NewHandler(s.manager, discardLog).WithPinger(s.pinger)
+	ogen := adhttp.NewOgenHandler(s.manager, s.pinger, discardLog)
+	opts := adhttp.RouterOptions{
+		CookieMaxAge: 90 * 24 * 60 * 60,
+		MaxBodyBytes: 256 * 1024,
+		RateLimit:    1,
+		RateBurst:    1,
+	}
+	router := adhttp.NewRouter(handler, ogen, nil, opts)
+
+	send := func() int {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.RemoteAddr = "203.0.113.1:5000"
+		router.ServeHTTP(w, r)
+
+		return w.Code
+	}
+
+	s.Equal(http.StatusOK, send())
+	s.Equal(http.StatusTooManyRequests, send())
+}
+
+func (s *HandlerSuite) TestRateLimit_DifferentIPs() {
+	handler := adhttp.NewHandler(s.manager, discardLog).WithPinger(s.pinger)
+	ogen := adhttp.NewOgenHandler(s.manager, s.pinger, discardLog)
+	opts := adhttp.RouterOptions{
+		CookieMaxAge: 90 * 24 * 60 * 60,
+		MaxBodyBytes: 256 * 1024,
+		RateLimit:    1,
+		RateBurst:    1,
+	}
+	router := adhttp.NewRouter(handler, ogen, nil, opts)
+
+	send := func(ip string) int {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.RemoteAddr = ip + ":5000"
+		router.ServeHTTP(w, r)
+
+		return w.Code
+	}
+
+	s.Equal(http.StatusOK, send("203.0.113.1"))
+	s.Equal(http.StatusOK, send("203.0.113.2"))
+}
+
+// ── Fail lockout ──
+
+func (s *HandlerSuite) TestFailLockout_Lockout() {
+	s.manager.EXPECT().
+		Update(gomock.Any(), testID, "wrong", gomock.Any()).
+		Return(nil, domain.ErrForbidden).
+		Times(10)
+
+	body := `{"title":"t","content":"c","edit_code":"wrong"}`
+
+	for range 10 {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodPut, "/notes/"+testID, strings.NewReader(body))
+		r.Header.Set("Content-Type", "application/json")
+		s.router.ServeHTTP(w, r)
+		s.Equal(http.StatusForbidden, w.Code)
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPut, "/notes/"+testID, strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+	s.router.ServeHTTP(w, r)
+	s.Equal(http.StatusTooManyRequests, w.Code)
+}
+
+// ── writeError default branch ──
+
+func (s *HandlerSuite) TestGetNote_Plain_Expired() {
+	s.manager.EXPECT().View(gomock.Any(), testID).Return(nil, domain.ErrExpired)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
+	r.Header.Set("Accept", "text/plain")
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusGone, w.Code)
+}
+
+func (s *HandlerSuite) TestGetNote_Plain_InternalError() {
+	s.manager.EXPECT().View(gomock.Any(), testID).Return(nil, errors.New("unexpected db error"))
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
+	r.Header.Set("Accept", "text/plain")
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusInternalServerError, w.Code)
 }
 
 func (s *HandlerSuite) TestWriteErrorPage_WriteFail() {

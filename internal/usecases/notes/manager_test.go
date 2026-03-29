@@ -345,3 +345,23 @@ func (s *ManagerTestSuite) TestGetRendered_RenderError() {
 
 	s.True(errors.Is(err, renderErr))
 }
+
+// Peek
+
+func (s *ManagerTestSuite) TestPeek_OK() {
+	note := &domain.Note{ID: "peek-id", Title: "t", Content: "c"}
+	s.storage.EXPECT().Get(gomock.Any(), "peek-id").Return(note, nil)
+
+	result, err := s.manager.Peek(s.T().Context(), "peek-id")
+
+	s.Require().NoError(err)
+	s.Equal(note, result)
+}
+
+func (s *ManagerTestSuite) TestPeek_NotFound() {
+	s.storage.EXPECT().Get(gomock.Any(), "missing").Return(nil, domain.ErrNotFound)
+
+	_, err := s.manager.Peek(s.T().Context(), "missing")
+
+	s.True(errors.Is(err, domain.ErrNotFound))
+}

@@ -168,3 +168,118 @@ func (s *RepositoryTestSuite) TestDelete_NotFound() {
 
 	s.True(errors.Is(err, domain.ErrNotFound))
 }
+
+// DuplicateSlug
+
+func (s *RepositoryTestSuite) TestCreate_DuplicateSlug() {
+	ctx := s.T().Context()
+
+	n := &domain.Note{ID: "dup-1", Title: "a", Content: "b", CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	s.Require().NoError(s.repo.Create(ctx, n))
+
+	dup := &domain.Note{ID: "dup-1", Title: "c", Content: "d", CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	err := s.repo.Create(ctx, dup)
+
+	s.ErrorIs(err, domain.ErrSlugConflict)
+}
+
+// AllFields
+
+func (s *RepositoryTestSuite) TestCreate_AllFields() {
+	ctx := s.T().Context()
+
+	future := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
+	note := &domain.Note{
+		ID:               "all-fields",
+		Title:            "title",
+		Content:          "content",
+		ContentType:      domain.ContentTypePlain,
+		EditCode:         "s3cr3t",
+		ExpiresAt:        &future,
+		BurnAfterReading: true,
+		CreatedAt:        time.Now(),
+		UpdatedAt:        time.Now(),
+	}
+	s.Require().NoError(s.repo.Create(ctx, note))
+
+	got, err := s.repo.Get(ctx, "all-fields")
+	s.Require().NoError(err)
+	s.Equal("s3cr3t", got.EditCode)
+	s.True(got.BurnAfterReading)
+	s.Equal(domain.ContentTypePlain, got.ContentType)
+	s.NotNil(got.ExpiresAt)
+}
+
+// IncrementViews
+
+func (s *RepositoryTestSuite) TestIncrementViews_OK() {
+	ctx := s.T().Context()
+
+	n := &domain.Note{ID: "views-ok", Title: "t", Content: "c", CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	s.Require().NoError(s.repo.Create(ctx, n))
+
+	s.Require().NoError(s.repo.IncrementViews(ctx, "views-ok"))
+	s.Require().NoError(s.repo.IncrementViews(ctx, "views-ok"))
+
+	got, err := s.repo.Get(ctx, "views-ok")
+	s.Require().NoError(err)
+	s.Equal(2, got.Views)
+}
+
+func (s *RepositoryTestSuite) TestIncrementViews_NotFound() {
+	err := s.repo.IncrementViews(s.T().Context(), "views-missing")
+
+	s.ErrorIs(err, domain.ErrNotFound)
+}
+
+// Consume
+
+func (s *RepositoryTestSuite) TestConsume_OK() {
+	ctx := s.T().Context()
+
+	n := &domain.Note{ID: "consume-ok", Title: "burn", Content: "me", CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	s.Require().NoError(s.repo.Create(ctx, n))
+
+	got, err := s.repo.Consume(ctx, "consume-ok")
+	s.Require().NoError(err)
+	s.Equal("consume-ok", got.ID)
+	s.Equal("burn", got.Title)
+
+	_, err = s.repo.Get(ctx, "consume-ok")
+	s.ErrorIs(err, domain.ErrNotFound)
+}
+
+func (s *RepositoryTestSuite) TestConsume_NotFound() {
+	_, err := s.repo.Consume(s.T().Context(), "consume-missing")
+
+	s.ErrorIs(err, domain.ErrNotFound)
+}
+
+// Migrate
+
+func (s *RepositoryTestSuite) TestMigrate_OK() {
+	ctx := s.T().Context()
+
+	sqldb, err := sql.Open(sqliteshim.DriverName(), "file:migrate_ok?mode=memory&cache=shared")
+	s.Require().NoError(err)
+
+	db := bun.NewDB(sqldb, sqlitedialect.New())
+
+	defer func() { s.Require().NoError(db.Close()) }()
+
+	s.Require().NoError(Migrate(ctx, db))
+}
+
+func (s *RepositoryTestSuite) TestMigrate_Idempotent() {
+	ctx := s.T().Context()
+
+	sqldb, err := sql.Open(sqliteshim.DriverName(), "file:migrate_idem?mode=memory&cache=shared")
+	s.Require().NoError(err)
+
+	db := bun.NewDB(sqldb, sqlitedialect.New())
+
+	defer func() { s.Require().NoError(db.Close()) }()
+
+	s.Require().NoError(Migrate(ctx, db))
+	s.Require().NoError(Migrate(ctx, db))
+}

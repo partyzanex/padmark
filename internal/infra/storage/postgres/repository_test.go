@@ -1,5 +1,3 @@
-//go:build integration
-
 package postgres
 
 import (
@@ -256,6 +254,27 @@ func (s *RepositoryTestSuite) TestDelete_OK() {
 
 func (s *RepositoryTestSuite) TestDelete_NotFound() {
 	err := s.repo.Delete(s.T().Context(), "nonexistent")
+
+	s.ErrorIs(err, domain.ErrNotFound)
+}
+
+// Consume
+
+func (s *RepositoryTestSuite) TestConsume_OK() {
+	ctx := s.T().Context()
+	s.Require().NoError(s.repo.Create(ctx, newNote("con-ok", "burn", "me")))
+
+	got, err := s.repo.Consume(ctx, "con-ok")
+	s.Require().NoError(err)
+	s.Equal("con-ok", got.ID)
+	s.Equal("burn", got.Title)
+
+	_, err = s.repo.Get(ctx, "con-ok")
+	s.ErrorIs(err, domain.ErrNotFound)
+}
+
+func (s *RepositoryTestSuite) TestConsume_NotFound() {
+	_, err := s.repo.Consume(s.T().Context(), "con-missing")
 
 	s.ErrorIs(err, domain.ErrNotFound)
 }

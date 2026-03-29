@@ -57,7 +57,9 @@ func (r *Repository) Create(ctx context.Context, domNote *domain.Note) error {
 	_, err := r.db.NewInsert().Model(dbNote).Exec(ctx)
 	if err != nil {
 		var sqliteErr *sqlite.Error
-		if errors.As(err, &sqliteErr) && sqliteErr.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE {
+		if errors.As(err, &sqliteErr) &&
+			(sqliteErr.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE ||
+				sqliteErr.Code() == sqlite3.SQLITE_CONSTRAINT_PRIMARYKEY) {
 			return domain.ErrSlugConflict
 		}
 
