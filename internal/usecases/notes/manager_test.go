@@ -61,6 +61,14 @@ func (s *ManagerTestSuite) TestCreate_EmptyTitle() {
 	s.True(errors.Is(err, domain.ErrTitleRequired))
 }
 
+func (s *ManagerTestSuite) TestCreate_TitleTooLong() {
+	note := &domain.Note{Title: strings.Repeat("x", maxTitleLength+1), Content: "body"}
+
+	_, err := s.manager.Create(s.T().Context(), note)
+
+	s.True(errors.Is(err, domain.ErrTitleTooLong))
+}
+
 func (s *ManagerTestSuite) TestCreate_ContentTooLong() {
 	note := &domain.Note{Title: "hi", Content: strings.Repeat("x", maxContentLength+1)}
 

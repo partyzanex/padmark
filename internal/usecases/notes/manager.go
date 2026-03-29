@@ -63,7 +63,10 @@ func newEditCode() string {
 	return string(buf)
 }
 
-const maxContentLength = 100_000
+const (
+	maxTitleLength   = 500
+	maxContentLength = 100_000
+)
 
 // Storage defines persistence operations for notes.
 type Storage interface {
@@ -268,6 +271,10 @@ func (m *Manager) GetRendered(ctx context.Context, id string) (*domain.Note, str
 func (m *Manager) validate(note *domain.Note) error {
 	if note.Title == "" {
 		return domain.ErrTitleRequired
+	}
+
+	if len([]rune(note.Title)) > maxTitleLength {
+		return domain.ErrTitleTooLong
 	}
 
 	if len(note.Content) > maxContentLength {
