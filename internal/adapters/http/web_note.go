@@ -100,12 +100,22 @@ func (h *Handler) GetNote(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		ext := ".txt"
 		ct := "text/plain; charset=utf-8"
+
 		if note.ContentType == domain.ContentTypeMarkdown {
 			ct = "text/markdown; charset=utf-8"
+			ext = ".md"
 		}
 
-		w.Header().Set("Content-Type", ct)
+		hdr := w.Header()
+		hdr.Set("Content-Type", ct)
+
+		// When the client explicitly requests raw content via ?raw=1, force a
+		// download so that browsers and CDNs do not render or cache the file inline.
+		if r.URL.Query().Get("raw") == "1" {
+			hdr.Set("Content-Disposition", "attachment; filename=\""+id+ext+"\"")
+		}
 
 		_, err = fmt.Fprint(w, note.Content) //nolint:gosec // raw content is intentional for text/plain and text/markdown
 		if err != nil {
