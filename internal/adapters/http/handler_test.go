@@ -45,13 +45,21 @@ func TestHandler(t *testing.T) {
 	suite.Run(t, new(HandlerSuite))
 }
 
+var discardLog = slog.New(slog.DiscardHandler) //nolint:gochecknoglobals // test helper
+
 func (s *HandlerSuite) SetupTest() {
 	s.ctrl = gomock.NewController(s.T())
 	s.manager = NewMockNoteManager(s.ctrl)
 	s.pinger = NewMockPinger(s.ctrl)
 
-	handler := adhttp.NewHandler(s.manager, slog.New(slog.DiscardHandler)).WithPinger(s.pinger)
-	s.router = adhttp.NewRouter(handler, nil)
+	s.router = s.newRouter(nil)
+}
+
+func (s *HandlerSuite) newRouter(tokens []string) http.Handler {
+	handler := adhttp.NewHandler(s.manager, discardLog).WithPinger(s.pinger)
+	ogen := adhttp.NewOgenHandler(s.manager, s.pinger, discardLog)
+
+	return adhttp.NewRouter(handler, ogen, tokens)
 }
 
 func (s *HandlerSuite) TearDownTest() {
@@ -245,7 +253,7 @@ func (s *HandlerSuite) TestCreateNote_EmptyTitle() {
 	s.manager.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil, domain.ErrTitleRequired)
 
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodPost, "/notes", strings.NewReader(`{"content":"body"}`))
+	r := httptest.NewRequest(http.MethodPost, "/notes", strings.NewReader(`{"title":"","content":"body"}`))
 	r.Header.Set("Content-Type", "application/json")
 
 	s.router.ServeHTTP(w, r)
@@ -296,8 +304,7 @@ func (s *HandlerSuite) TestCreateNote_SlugConflict() {
 }
 
 func (s *HandlerSuite) TestCreateNote_InvalidContentType() {
-	s.manager.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil, domain.ErrInvalidContentType)
-
+	// ogen validates the enum at schema level → 400
 	body := `{"title":"t","content":"c","content_type":"application/pdf"}`
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPost, "/notes", strings.NewReader(body))
@@ -305,7 +312,7 @@ func (s *HandlerSuite) TestCreateNote_InvalidContentType() {
 
 	s.router.ServeHTTP(w, r)
 
-	s.Equal(http.StatusUnprocessableEntity, w.Code)
+	s.Equal(http.StatusBadRequest, w.Code)
 }
 
 func (s *HandlerSuite) TestCreateNote_ContentTooLong() {
@@ -643,7 +650,7 @@ func (s *HandlerSuite) TestUpdateNote_WithTTL() {
 func (s *HandlerSuite) TestUpdateNote_NotFound() {
 	s.manager.EXPECT().Update(gomock.Any(), "missing", "", gomock.Any()).Return(nil, domain.ErrNotFound)
 
-	body := `{"title":"title","content":"content"}`
+	body := `{"title":"title","content":"content","edit_code":""}`
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPut, "/notes/missing", strings.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")
@@ -747,8 +754,9 @@ func (s *HandlerSuite) TestReadyz_OK() {
 }
 
 func (s *HandlerSuite) TestReadyz_NoPinger() {
-	handler := adhttp.NewHandler(s.manager, slog.New(slog.DiscardHandler))
-	router := adhttp.NewRouter(handler, nil)
+	handler := adhttp.NewHandler(s.manager, discardLog)
+	ogen := adhttp.NewOgenHandler(s.manager, nil, discardLog)
+	router := adhttp.NewRouter(handler, ogen, nil)
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/readyz", nil)
@@ -883,34 +891,6 @@ func (s *HandlerSuite) TestGetNote_JSON_WriteFail() {
 	s.NotNil(fw)
 }
 
-func (s *HandlerSuite) TestCreateNote_WriteFail() {
-	note := newTestNote("t", "c")
-	s.manager.EXPECT().Create(gomock.Any(), gomock.Any()).Return(note, nil)
-
-	handler := adhttp.NewHandler(s.manager, slog.New(slog.DiscardHandler))
-	fw := newFailWriter()
-	r := httptest.NewRequest(http.MethodPost, "/notes", strings.NewReader(`{"title":"t","content":"c"}`))
-
-	handler.CreateNote(fw, r)
-
-	s.NotNil(fw)
-}
-
-func (s *HandlerSuite) TestUpdateNote_WriteFail() {
-	note := newTestNote("t", "c")
-	s.manager.EXPECT().Update(gomock.Any(), testID, "code", gomock.Any()).Return(note, nil)
-
-	handler := adhttp.NewHandler(s.manager, slog.New(slog.DiscardHandler))
-	fw := newFailWriter()
-	body := `{"title":"t","content":"c","edit_code":"code"}`
-	r := httptest.NewRequest(http.MethodPut, "/notes/"+testID, strings.NewReader(body))
-	r.SetPathValue("id", testID)
-
-	handler.UpdateNote(fw, r)
-
-	s.NotNil(fw)
-}
-
 func (s *HandlerSuite) TestWriteErrorPage_WriteFail() {
 	s.manager.EXPECT().GetRendered(gomock.Any(), testID).Return(nil, "", domain.ErrNotFound)
 
@@ -960,8 +940,7 @@ func (s *HandlerSuite) TestAuth_BearerToken() {
 	note := newTestNote("t", "c")
 	s.manager.EXPECT().Create(gomock.Any(), gomock.Any()).Return(note, nil)
 
-	handler := adhttp.NewHandler(s.manager, slog.New(slog.DiscardHandler))
-	router := adhttp.NewRouter(handler, []string{"secret-token"})
+	router := s.newRouter([]string{"secret-token"})
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPost, "/notes", strings.NewReader(`{"title":"t","content":"c"}`))
@@ -977,8 +956,7 @@ func (s *HandlerSuite) TestAuth_CookieToken() {
 	note := newTestNote("t", "c")
 	s.manager.EXPECT().View(gomock.Any(), testID).Return(note, nil)
 
-	handler := adhttp.NewHandler(s.manager, slog.New(slog.DiscardHandler))
-	router := adhttp.NewRouter(handler, []string{"secret-token"})
+	router := s.newRouter([]string{"secret-token"})
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
@@ -991,8 +969,7 @@ func (s *HandlerSuite) TestAuth_CookieToken() {
 }
 
 func (s *HandlerSuite) TestAuth_MissingToken_API() {
-	handler := adhttp.NewHandler(s.manager, slog.New(slog.DiscardHandler))
-	router := adhttp.NewRouter(handler, []string{"secret-token"})
+	router := s.newRouter([]string{"secret-token"})
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPost, "/notes", strings.NewReader(`{"title":"t","content":"c"}`))
@@ -1005,8 +982,7 @@ func (s *HandlerSuite) TestAuth_MissingToken_API() {
 }
 
 func (s *HandlerSuite) TestAuth_MissingToken_Browser() {
-	handler := adhttp.NewHandler(s.manager, slog.New(slog.DiscardHandler))
-	router := adhttp.NewRouter(handler, []string{"secret-token"})
+	router := s.newRouter([]string{"secret-token"})
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -1019,8 +995,7 @@ func (s *HandlerSuite) TestAuth_MissingToken_Browser() {
 }
 
 func (s *HandlerSuite) TestAuth_InvalidToken() {
-	handler := adhttp.NewHandler(s.manager, slog.New(slog.DiscardHandler))
-	router := adhttp.NewRouter(handler, []string{"secret-token"})
+	router := s.newRouter([]string{"secret-token"})
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -1033,8 +1008,7 @@ func (s *HandlerSuite) TestAuth_InvalidToken() {
 }
 
 func (s *HandlerSuite) TestAuth_PublicPaths() {
-	handler := adhttp.NewHandler(s.manager, slog.New(slog.DiscardHandler)).WithPinger(s.pinger)
-	router := adhttp.NewRouter(handler, []string{"secret-token"})
+	router := s.newRouter([]string{"secret-token"})
 
 	for _, path := range []string{"/login", "/static/style.css", "/healthz"} {
 		w := httptest.NewRecorder()
@@ -1050,8 +1024,7 @@ func (s *HandlerSuite) TestAuth_PublicPaths() {
 // ── Login ──
 
 func (s *HandlerSuite) TestLoginPage() {
-	handler := adhttp.NewHandler(s.manager, slog.New(slog.DiscardHandler))
-	router := adhttp.NewRouter(handler, []string{"token"})
+	router := s.newRouter([]string{"token"})
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/login", nil)
@@ -1063,8 +1036,7 @@ func (s *HandlerSuite) TestLoginPage() {
 }
 
 func (s *HandlerSuite) TestLoginPage_Error() {
-	handler := adhttp.NewHandler(s.manager, slog.New(slog.DiscardHandler))
-	router := adhttp.NewRouter(handler, []string{"token"})
+	router := s.newRouter([]string{"token"})
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/login?error=1", nil)
@@ -1076,8 +1048,7 @@ func (s *HandlerSuite) TestLoginPage_Error() {
 }
 
 func (s *HandlerSuite) TestLogin_OK() {
-	handler := adhttp.NewHandler(s.manager, slog.New(slog.DiscardHandler))
-	router := adhttp.NewRouter(handler, []string{"valid-token"})
+	router := s.newRouter([]string{"valid-token"})
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPost, "/login",
@@ -1097,8 +1068,7 @@ func (s *HandlerSuite) TestLogin_OK() {
 }
 
 func (s *HandlerSuite) TestLogin_InvalidToken() {
-	handler := adhttp.NewHandler(s.manager, slog.New(slog.DiscardHandler))
-	router := adhttp.NewRouter(handler, []string{"valid-token"})
+	router := s.newRouter([]string{"valid-token"})
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPost, "/login",
@@ -1112,8 +1082,7 @@ func (s *HandlerSuite) TestLogin_InvalidToken() {
 }
 
 func (s *HandlerSuite) TestLogin_EmptyToken() {
-	handler := adhttp.NewHandler(s.manager, slog.New(slog.DiscardHandler))
-	router := adhttp.NewRouter(handler, []string{"valid-token"})
+	router := s.newRouter([]string{"valid-token"})
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPost, "/login",
@@ -1182,8 +1151,10 @@ func (s *HandlerSuite) TestAPISpec_WriteFail() {
 }
 
 func (s *HandlerSuite) TestAPIDocsPage_Public() {
-	handler := adhttp.NewHandler(s.manager, slog.New(slog.DiscardHandler))
-	router := adhttp.NewRouter(handler, []string{"secret"})
+	discardLog := slog.New(slog.DiscardHandler)
+	handler := adhttp.NewHandler(s.manager, discardLog)
+	ogen := adhttp.NewOgenHandler(s.manager, s.pinger, discardLog)
+	router := adhttp.NewRouter(handler, ogen, []string{"secret"})
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/api", nil)

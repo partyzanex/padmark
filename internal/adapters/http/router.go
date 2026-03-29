@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/partyzanex/padmark/internal/adapters/http/ogenapi"
 )
 
 type contextKey uint8
@@ -15,25 +17,32 @@ type contextKey uint8
 const keyRequestID contextKey = 1
 
 // NewRouter registers all routes and wraps them with middleware.
-// If tokens is non-empty, all routes except /login, /static/, /healthz, /readyz require auth.
-// Browser users without a valid cookie are redirected to the login page.
-func NewRouter(handler *Handler, tokens []string) http.Handler {
-	tokenSet := makeTokenSet(tokens)
+// The ogen-generated server handles JSON API routes (POST/PUT/DELETE /notes, GET /notes/{id} JSON,
+// /healthz, /readyz). Manual handlers serve HTML pages, content-negotiated views, login, and static.
+func NewRouter(handler *Handler, ogenHandler *OgenHandler, tokens []string) http.Handler {
+	ogenSrv, err := ogenapi.NewServer(ogenHandler)
+	if err != nil {
+		panic("ogen server: " + err.Error())
+	}
+
 	mux := http.NewServeMux()
 
+	// Ogen-handled JSON API routes
+	mux.Handle("POST /notes", ogenSrv)
+	mux.Handle("PUT /notes/{id}", ogenSrv)
+	mux.Handle("DELETE /notes/{id}", ogenSrv)
+	mux.Handle("GET /healthz", ogenSrv)
+	mux.Handle("GET /readyz", ogenSrv)
+
+	// Manual handlers: HTML pages + content-negotiated GET + login + static + api docs
 	mux.HandleFunc("GET /login", handler.LoginPage)
-	mux.HandleFunc("POST /login", loginHandler(tokenSet))
+	mux.HandleFunc("POST /login", loginHandler(makeTokenSet(tokens)))
 	mux.HandleFunc("GET /api", handler.APIDocsPage)
 	mux.HandleFunc("GET /api/openapi.yaml", APISpec)
 	mux.HandleFunc("GET /", handler.IndexPage)
 	mux.HandleFunc("GET /success", handler.SuccessPage)
 	mux.Handle("GET /static/", StaticHandler)
-	mux.HandleFunc("POST /notes", handler.CreateNote)
 	mux.HandleFunc("GET /notes/{id}", handler.GetNote)
-	mux.HandleFunc("PUT /notes/{id}", handler.UpdateNote)
-	mux.HandleFunc("DELETE /notes/{id}", handler.DeleteNote)
-	mux.HandleFunc("GET /healthz", handler.Healthz)
-	mux.HandleFunc("GET /readyz", handler.Readyz)
 	mux.HandleFunc("GET /edit/{id}", handler.EditPage)
 	mux.HandleFunc("GET /{id}", handler.GetNote)
 

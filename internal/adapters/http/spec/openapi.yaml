@@ -1,28 +1,17 @@
 openapi: 3.1.0
 info:
   title: Padmark API
-  description: HTTP service for creating, storing, and rendering Markdown notes with content negotiation, burn-after-reading, and token-based auth.
+  description: JSON API for creating, storing, and managing Markdown notes.
   version: 1.0.0
-  license:
-    name: MIT
-    url: https://github.com/partyzanex/padmark/blob/main/LICENSE
 
 servers:
   - url: http://localhost:8080
-    description: Local development
-
-security:
-  - bearerAuth: []
 
 tags:
   - name: notes
     description: CRUD operations on notes
-  - name: auth
-    description: Token-based authentication
   - name: health
     description: Liveness and readiness probes
-  - name: pages
-    description: Server-rendered HTML pages (browser)
 
 paths:
   /notes:
@@ -30,28 +19,12 @@ paths:
       operationId: createNote
       summary: Create a new note
       tags: [notes]
-      security:
-        - bearerAuth: []
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/NoteRequest"
-            examples:
-              minimal:
-                summary: Minimal note
-                value:
-                  title: Hello
-                  content: "# Hello World"
-              withSlug:
-                summary: Custom slug + burn
-                value:
-                  title: Secret
-                  content: "Top secret content"
-                  slug: my-secret
-                  burn_after_reading: true
-                  ttl: 3600
+              $ref: "#/components/schemas/CreateNoteRequest"
       responses:
         "201":
           description: Note created
@@ -60,57 +33,31 @@ paths:
               description: Canonical URL of the created note
               schema:
                 type: string
-                example: /abc12345
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/NoteResponseWithEditCode"
+                $ref: "#/components/schemas/CreateNoteResponse"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/Error"
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Error"
         "409":
-          description: Slug already taken
-          content:
-            text/plain:
-              schema:
-                type: string
-                example: "slug is already taken"
+          $ref: "#/components/responses/Error"
         "413":
-          description: Content exceeds maximum length
-          content:
-            text/plain:
-              schema:
-                type: string
-                example: "content exceeds maximum length"
+          $ref: "#/components/responses/Error"
         "422":
-          $ref: "#/components/responses/ValidationError"
+          $ref: "#/components/responses/Error"
         "500":
-          $ref: "#/components/responses/InternalError"
+          $ref: "#/components/responses/Error"
 
   /notes/{id}:
     get:
       operationId: getNote
       summary: Get a note by ID
-      description: |
-        Returns a note in the format determined by the `Accept` header:
-        - `application/json` — JSON object (default)
-        - `text/html` — rendered HTML page
-        - `text/plain` / `text/markdown` — raw content
-
-        The `?raw=1` query parameter forces raw content output regardless of the Accept header.
-
-        Each GET increments the view counter. Burn-after-reading notes without a TTL are deleted on first read.
+      description: Returns a note as JSON. Increments the view counter.
       tags: [notes]
-      security: []
       parameters:
         - $ref: "#/components/parameters/noteId"
-        - name: raw
-          in: query
-          description: Force raw content output
-          schema:
-            type: string
-            enum: ["1"]
       responses:
         "200":
           description: Note found
@@ -118,32 +65,18 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/NoteResponse"
-            text/html:
-              schema:
-                type: string
-            text/plain:
-              schema:
-                type: string
-            text/markdown:
-              schema:
-                type: string
         "404":
-          $ref: "#/components/responses/NotFound"
+          $ref: "#/components/responses/Error"
         "410":
-          description: Note has expired
-          content:
-            text/plain:
-              schema:
-                type: string
-                example: "note has expired"
+          $ref: "#/components/responses/Error"
+        "500":
+          $ref: "#/components/responses/Error"
 
     put:
       operationId: updateNote
       summary: Update an existing note
       description: Requires the edit code that was returned when the note was created.
       tags: [notes]
-      security:
-        - bearerAuth: []
       parameters:
         - $ref: "#/components/parameters/noteId"
       requestBody:
@@ -151,13 +84,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/NoteUpdateRequest"
-            example:
-              title: Updated title
-              content: "# Updated content"
-              edit_code: JmNkn0LdjbMw
-              burn_after_reading: true
-              ttl: 7200
+              $ref: "#/components/schemas/UpdateNoteRequest"
       responses:
         "200":
           description: Note updated
@@ -166,149 +93,44 @@ paths:
               schema:
                 $ref: "#/components/schemas/NoteResponse"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/Error"
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Error"
         "403":
-          description: Invalid edit code
-          content:
-            text/plain:
-              schema:
-                type: string
-                example: "invalid edit code"
+          $ref: "#/components/responses/Error"
         "404":
-          $ref: "#/components/responses/NotFound"
+          $ref: "#/components/responses/Error"
         "422":
-          $ref: "#/components/responses/ValidationError"
+          $ref: "#/components/responses/Error"
         "500":
-          $ref: "#/components/responses/InternalError"
+          $ref: "#/components/responses/Error"
 
     delete:
       operationId: deleteNote
       summary: Delete a note
-      description: |
-        Requires the edit code. Pass it via `X-Edit-Code` header or `?edit_code=` query parameter.
+      description: Requires the edit code via X-Edit-Code header or edit_code query parameter.
       tags: [notes]
-      security:
-        - bearerAuth: []
       parameters:
         - $ref: "#/components/parameters/noteId"
         - name: X-Edit-Code
           in: header
-          description: Edit code for the note
           schema:
             type: string
         - name: edit_code
           in: query
-          description: Edit code (alternative to X-Edit-Code header)
           schema:
             type: string
       responses:
         "204":
           description: Note deleted
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Error"
         "403":
-          description: Invalid edit code
-          content:
-            text/plain:
-              schema:
-                type: string
-                example: "invalid edit code"
+          $ref: "#/components/responses/Error"
         "404":
-          $ref: "#/components/responses/NotFound"
+          $ref: "#/components/responses/Error"
         "500":
-          $ref: "#/components/responses/InternalError"
-
-  /{id}:
-    get:
-      operationId: getNoteShort
-      summary: Get a note by ID (short URL)
-      description: Alias for `GET /notes/{id}`. Same behavior and content negotiation.
-      tags: [notes]
-      security: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: raw
-          in: query
-          schema:
-            type: string
-            enum: ["1"]
-      responses:
-        "200":
-          description: Note found
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/NoteResponse"
-            text/html:
-              schema:
-                type: string
-            text/plain:
-              schema:
-                type: string
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "410":
-          description: Note has expired
-
-  /login:
-    get:
-      operationId: loginPage
-      summary: Login page
-      description: Renders the token input form. Public, no auth required.
-      tags: [auth]
-      security: []
-      parameters:
-        - name: error
-          in: query
-          description: Show error message when set to "1"
-          schema:
-            type: string
-            enum: ["1"]
-      responses:
-        "200":
-          description: Login form HTML
-          content:
-            text/html:
-              schema:
-                type: string
-    post:
-      operationId: login
-      summary: Authenticate with a token
-      description: |
-        Validates the token and sets an HttpOnly session cookie (`padmark_token`).
-        On success redirects to `/`. On failure redirects to `/login?error=1`.
-      tags: [auth]
-      security: []
-      requestBody:
-        required: true
-        content:
-          application/x-www-form-urlencoded:
-            schema:
-              type: object
-              required: [token]
-              properties:
-                token:
-                  type: string
-                  description: Access token
-      responses:
-        "303":
-          description: Redirect after login attempt
-          headers:
-            Location:
-              schema:
-                type: string
-                enum: ["/", "/login?error=1"]
-            Set-Cookie:
-              description: Session cookie (only on success)
-              schema:
-                type: string
-                example: "padmark_token=<token>; Path=/; HttpOnly; SameSite=Strict"
+          $ref: "#/components/responses/Error"
 
   /healthz:
     get:
@@ -324,145 +146,46 @@ paths:
     get:
       operationId: readyz
       summary: Readiness probe
-      description: Returns 200 if the database is reachable, 503 otherwise.
       tags: [health]
       security: []
       responses:
         "200":
           description: Service is ready
         "503":
-          description: Database unavailable
-          content:
-            text/plain:
-              schema:
-                type: string
-                example: "db unavailable"
-
-  /:
-    get:
-      operationId: indexPage
-      summary: Editor page (create mode)
-      tags: [pages]
-      responses:
-        "200":
-          description: Note editor HTML
-          content:
-            text/html:
-              schema:
-                type: string
-
-  /edit/{id}:
-    get:
-      operationId: editPage
-      summary: Editor page (edit mode)
-      description: Pre-fills the editor with the note content. Requires auth when tokens are configured.
-      tags: [pages]
-      parameters:
-        - $ref: "#/components/parameters/noteId"
-      responses:
-        "200":
-          description: Note editor HTML with pre-filled content
-          content:
-            text/html:
-              schema:
-                type: string
-        "404":
-          description: Note not found (HTML error page)
-
-  /success:
-    get:
-      operationId: successPage
-      summary: Post-create confirmation page
-      tags: [pages]
-      parameters:
-        - name: id
-          in: query
-          required: true
-          schema:
-            type: string
-        - name: edit_code
-          in: query
-          schema:
-            type: string
-        - name: burn
-          in: query
-          schema:
-            type: string
-            enum: ["1"]
-        - name: expires
-          in: query
-          description: RFC 3339 timestamp
-          schema:
-            type: string
-            format: date-time
-      responses:
-        "200":
-          description: Success page HTML
-          content:
-            text/html:
-              schema:
-                type: string
-        "303":
-          description: Redirect to / when id is missing
+          $ref: "#/components/responses/Error"
 
 components:
-  securitySchemes:
-    bearerAuth:
-      type: http
-      scheme: bearer
-      description: |
-        Pass one of the tokens configured via `PADMARK_AUTH_TOKENS`.
-        Browser users authenticate via the `/login` form which sets a persistent cookie (10 years).
-
   parameters:
     noteId:
       name: id
       in: path
       required: true
-      description: Note ID (8-char alphanumeric slug or custom slug)
       schema:
         type: string
-        pattern: "^[a-zA-Z0-9][a-zA-Z0-9_-]{0,99}$"
-        examples:
-          - abc12345
-          - my-note
 
   schemas:
-    NoteRequest:
+    CreateNoteRequest:
       type: object
       required: [title, content]
       properties:
         title:
           type: string
-          description: Note title (required, shown in the header)
-          examples: ["My snippet"]
         content:
           type: string
-          description: Note content (max 100,000 characters)
-          examples: ["# Hello\n\nThis is **bold**."]
         content_type:
           type: string
           enum: ["text/markdown", "text/plain"]
           default: "text/markdown"
-          description: Content format
         slug:
           type: string
-          pattern: "^[a-zA-Z0-9][a-zA-Z0-9_-]{0,99}$"
-          description: Custom slug. If omitted, an 8-char random ID is generated.
         ttl:
           type: integer
           format: int64
-          minimum: 0
-          description: Time-to-live in seconds. 0 or omitted means no expiry.
-          examples: [3600, 86400]
         burn_after_reading:
           type: boolean
           default: false
-          description: |
-            When true with a TTL, the note auto-expires after the TTL.
-            When true without a TTL, the note is deleted on first read.
 
-    NoteUpdateRequest:
+    UpdateNoteRequest:
       type: object
       required: [title, content, edit_code]
       properties:
@@ -475,22 +198,18 @@ components:
           enum: ["text/markdown", "text/plain"]
         edit_code:
           type: string
-          description: Secret code returned on creation. Required for update.
         ttl:
           type: integer
           format: int64
-          minimum: 0
-          description: New TTL in seconds. 0 or omitted keeps the current expiry.
         burn_after_reading:
           type: boolean
-          description: Update burn-after-reading flag.
 
     NoteResponse:
       type: object
+      required: [id, title, content, content_type, views, burn_after_reading, created_at, updated_at]
       properties:
         id:
           type: string
-          examples: ["abc12345"]
         title:
           type: string
         content:
@@ -509,63 +228,49 @@ components:
           type: string
           format: date-time
         expires_at:
-          type: ["string", "null"]
+          type: string
           format: date-time
-          description: "Null when the note never expires."
 
-    NoteResponseWithEditCode:
-      description: Returned only from POST /notes. Includes the edit code.
-      allOf:
-        - $ref: "#/components/schemas/NoteResponse"
-        - type: object
-          properties:
-            edit_code:
-              type: string
-              description: Secret code needed to edit or delete the note. Only returned on creation.
-              examples: ["JmNkn0LdjbMw"]
+    CreateNoteResponse:
+      type: object
+      required: [id, title, content, content_type, views, burn_after_reading, created_at, updated_at, edit_code]
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        content:
+          type: string
+        content_type:
+          type: string
+          enum: ["text/markdown", "text/plain"]
+        views:
+          type: integer
+        burn_after_reading:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+        edit_code:
+          type: string
+
+    ErrorResponse:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
 
   responses:
-    BadRequest:
-      description: Invalid request body
+    Error:
+      description: Error response
       content:
-        text/plain:
+        application/json:
           schema:
-            type: string
-            example: "invalid request body"
-
-    Unauthorized:
-      description: Missing or invalid auth token
-      content:
-        text/plain:
-          schema:
-            type: string
-            examples:
-              - "authorization required"
-              - "invalid token"
-
-    NotFound:
-      description: Note not found
-      content:
-        text/plain:
-          schema:
-            type: string
-            example: "not found"
-
-    ValidationError:
-      description: Validation failed
-      content:
-        text/plain:
-          schema:
-            type: string
-            examples:
-              - "title is required"
-              - "unsupported content type"
-              - "invalid slug: use 1-100 alphanumeric/hyphen/underscore, start with alphanumeric"
-
-    InternalError:
-      description: Internal server error
-      content:
-        text/plain:
-          schema:
-            type: string
-            example: "internal server error"
+            $ref: "#/components/schemas/ErrorResponse"

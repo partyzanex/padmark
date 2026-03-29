@@ -106,6 +106,7 @@ func action(ctx context.Context, cmd *cli.Command) error {
 
 	// 5. Handler + Router
 	handler := adaptershttp.NewHandler(manager, log).WithPinger(db.DB)
+	ogenHandler := adaptershttp.NewOgenHandler(manager, db.DB, log)
 
 	var tokens []string
 
@@ -118,7 +119,7 @@ func action(ctx context.Context, cmd *cli.Command) error {
 		}
 	}
 
-	router := adaptershttp.NewRouter(handler, tokens)
+	router := adaptershttp.NewRouter(handler, ogenHandler, tokens)
 
 	// 6. Server
 	srv := &http.Server{

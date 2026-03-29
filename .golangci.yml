@@ -176,6 +176,15 @@ linters:
   # Exclusions (migrated from v1 `issues.exclude`, `exclude-rules`, `exclude-dirs`).
   exclusions:
     rules:
+      # ogen handler must return generated interfaces — unavoidable
+      - path: ogen_(handler|convert)\.go
+        linters:
+          - ireturn
+      # test helper method ordering
+      - path: _test\.go
+        linters:
+          - funcorder
+
       # v1 issues.exclude mapped to text-based rules
       - text: "Function 'Run' has too many statements"
         linters:
@@ -231,6 +240,9 @@ linters:
     # v1 issues.exclude-dirs mapped to v2 exclusions.paths
     paths:
       - internal/api/v1
+      - internal/adapters/http/ogenapi
+      - pkg/client
+    generated: lax
 
 issues:
   max-issues-per-linter: 0
