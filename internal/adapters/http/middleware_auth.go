@@ -69,7 +69,7 @@ func extractToken(r *http.Request) string {
 func isPublicPath(path string) bool {
 	return path == "/login" ||
 		strings.HasPrefix(path, "/static/") ||
-		strings.HasPrefix(path, "/api") ||
+		path == "/api" || path == "/api/openapi.yaml" ||
 		path == "/healthz" || path == "/readyz"
 }
 

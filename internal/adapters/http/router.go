@@ -51,7 +51,7 @@ func NewRouter(
 	mux.HandleFunc("GET /api/openapi.yaml", APISpec)
 	mux.HandleFunc("GET /", handler.IndexPage)
 	mux.HandleFunc("GET /success", handler.SuccessPage)
-	mux.Handle("GET /static/", StaticHandler)
+	mux.Handle("GET /static/", withStaticCacheControl(StaticHandler))
 	mux.HandleFunc("GET /notes/{id}", handler.GetNote)
 	mux.HandleFunc("GET /edit/{id}", handler.EditPage)
 	mux.HandleFunc("GET /{id}", handler.GetNote)
@@ -146,9 +146,17 @@ func withBodyLimit(maxBytes int64, next http.Handler) http.Handler {
 	})
 }
 
+func withStaticCacheControl(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		next.ServeHTTP(w, r)
+	})
+}
+
 func withSecurityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		header := w.Header()
+		header.Set("Cache-Control", "private, no-store")
 		header.Set("X-Content-Type-Options", "nosniff")
 		header.Set("X-Frame-Options", "DENY")
 		header.Set("Referrer-Policy", "strict-origin-when-cross-origin")
