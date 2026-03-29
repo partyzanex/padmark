@@ -3,41 +3,46 @@ package http
 import (
 	"net"
 	"net/http"
-	"sync"
+	"strings"
 	"time"
 
+	"github.com/bluele/gcache"
 	"golang.org/x/time/rate"
 )
 
-type ipLimiter struct {
-	limiter  *rate.Limiter
-	lastSeen time.Time
-}
+// maxTrackedIPs is the capacity of the ARC cache that maps client IPs to rate
+// limiters. ARC evicts entries automatically when the cache is full, bounding
+// memory usage regardless of how many unique IPs are seen.
+const maxTrackedIPs = 100_000
+
+// limiterTTL is the idle lifetime of a per-IP entry. An IP that has not been
+// seen for this duration is evicted and will receive a fresh limiter bucket on
+// the next request.
+const limiterTTL = 10 * time.Minute
 
 type rateLimitMiddleware struct {
-	limiters map[string]*ipLimiter
-	next     http.Handler
-	mu       sync.Mutex
-	rps      rate.Limit
-	burst    int
+	cache          gcache.Cache
+	next           http.Handler
+	trustedProxies []*net.IPNet
 }
 
-func withRateLimit(rps, burst int, next http.Handler) http.Handler {
-	rl := &rateLimitMiddleware{
-		limiters: make(map[string]*ipLimiter),
-		rps:      rate.Limit(rps),
-		burst:    burst,
-		next:     next,
-	}
+func withRateLimit(rps, burst int, trustedProxies []*net.IPNet, next http.Handler) http.Handler {
+	c := gcache.New(maxTrackedIPs).
+		ARC().
+		Expiration(limiterTTL).
+		LoaderFunc(func(_ interface{}) (interface{}, error) {
+			return rate.NewLimiter(rate.Limit(rps), burst), nil
+		}).
+		Build()
 
-	go rl.cleanup()
-
-	return rl
+	return &rateLimitMiddleware{cache: c, trustedProxies: trustedProxies, next: next}
 }
 
 func (rl *rateLimitMiddleware) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
-	ip := clientIP(req)
-	limiter := rl.getLimiter(ip)
+	ip := clientIP(req, rl.trustedProxies)
+
+	v, _ := rl.cache.Get(ip) // LoaderFunc never returns an error
+	limiter := v.(*rate.Limiter)
 
 	if !limiter.Allow() {
 		http.Error(rw, "too many requests", http.StatusTooManyRequests)
@@ -47,65 +52,45 @@ func (rl *rateLimitMiddleware) ServeHTTP(rw http.ResponseWriter, req *http.Reque
 	rl.next.ServeHTTP(rw, req)
 }
 
-func (rl *rateLimitMiddleware) getLimiter(ip string) *rate.Limiter {
-	rl.mu.Lock()
-	defer rl.mu.Unlock()
-
-	entry, ok := rl.limiters[ip]
-	if !ok {
-		entry = &ipLimiter{limiter: rate.NewLimiter(rl.rps, rl.burst)}
-		rl.limiters[ip] = entry
+// clientIP returns the real client IP for rate limiting purposes.
+// X-Forwarded-For and X-Real-IP are only trusted when the direct connection
+// originates from a trusted proxy CIDR. If trustedProxies is empty, these
+// headers are ignored and RemoteAddr is used directly.
+func clientIP(req *http.Request, trustedProxies []*net.IPNet) string {
+	remoteHost, _, err := net.SplitHostPort(req.RemoteAddr)
+	if err != nil {
+		remoteHost = req.RemoteAddr
 	}
 
-	entry.lastSeen = time.Now()
-
-	return entry.limiter
-}
-
-func (rl *rateLimitMiddleware) cleanup() {
-	ticker := time.NewTicker(time.Minute)
-	defer ticker.Stop()
-
-	for range ticker.C {
-		rl.mu.Lock()
-
-		for ip, entry := range rl.limiters {
-			if time.Since(entry.lastSeen) > 3*time.Minute {
-				delete(rl.limiters, ip)
+	if len(trustedProxies) > 0 && isTrustedProxy(remoteHost, trustedProxies) {
+		if forwarded := req.Header.Get("X-Forwarded-For"); forwarded != "" {
+			// X-Forwarded-For may be a comma-separated list; the leftmost entry
+			// is the original client IP as set by the first proxy in the chain.
+			first, _, _ := strings.Cut(forwarded, ",")
+			if ip := strings.TrimSpace(first); ip != "" {
+				return ip
 			}
 		}
 
-		rl.mu.Unlock()
-	}
-}
-
-func clientIP(req *http.Request) string {
-	if forwarded := req.Header.Get("X-Forwarded-For"); forwarded != "" {
-		if idx := indexOf(forwarded, ','); idx != -1 {
-			return forwarded[:idx]
-		}
-
-		return forwarded
-	}
-
-	if realIP := req.Header.Get("X-Real-IP"); realIP != "" {
-		return realIP
-	}
-
-	host, _, err := net.SplitHostPort(req.RemoteAddr)
-	if err != nil {
-		return req.RemoteAddr
-	}
-
-	return host
-}
-
-func indexOf(str string, ch byte) int {
-	for idx := range len(str) {
-		if str[idx] == ch {
-			return idx
+		if realIP := strings.TrimSpace(req.Header.Get("X-Real-IP")); realIP != "" {
+			return realIP
 		}
 	}
 
-	return -1
+	return remoteHost
+}
+
+func isTrustedProxy(ip string, proxies []*net.IPNet) bool {
+	parsed := net.ParseIP(ip)
+	if parsed == nil {
+		return false
+	}
+
+	for _, cidr := range proxies {
+		if cidr.Contains(parsed) {
+			return true
+		}
+	}
+
+	return false
 }

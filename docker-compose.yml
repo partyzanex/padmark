@@ -1,0 +1,44 @@
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: padmark
+      POSTGRES_USER: padmark
+      POSTGRES_PASSWORD: padmark
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U padmark -d padmark"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  migrate:
+    build: .
+    command: migrate
+    environment:
+      PADMARK_STORAGE: postgres
+      PADMARK_DSN: "postgres://padmark:padmark@db:5432/padmark?sslmode=disable"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: on-failure
+
+  app:
+    build: .
+    command: serve
+    ports:
+      - "8080:8080"
+    environment:
+      PADMARK_STORAGE: postgres
+      PADMARK_DSN: "postgres://padmark:padmark@db:5432/padmark?sslmode=disable"
+      PADMARK_ADDR: ":8080"
+      PADMARK_LOG_FORMAT: json
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+volumes:
+  db_data:

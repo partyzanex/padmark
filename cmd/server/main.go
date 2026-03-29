@@ -2,16 +2,17 @@ package main
 
 import (
 	"context"
-	"fmt"
+	"log/slog"
 	"os"
 
 	"github.com/partyzanex/padmark/internal/infra/cmd"
 )
 
 func main() {
-	err := cmd.Run(context.Background())
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
+	app := cmd.NewApp()
+
+	if err := app.Run(context.Background(), os.Args); err != nil {
+		slog.Error(err.Error())
 		os.Exit(1)
 	}
 }

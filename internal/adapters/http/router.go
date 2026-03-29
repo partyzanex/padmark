@@ -3,6 +3,7 @@ package http
 import (
 	"context"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -20,10 +21,11 @@ const protoHTTPS = "https"
 
 // RouterOptions holds configurable parameters for the middleware stack.
 type RouterOptions struct {
-	CookieMaxAge int
-	MaxBodyBytes int
-	RateLimit    int
-	RateBurst    int
+	TrustedProxies []*net.IPNet
+	CookieMaxAge   int
+	MaxBodyBytes   int
+	RateLimit      int
+	RateBurst      int
 }
 
 // NewRouter registers all routes and wraps them with middleware.
@@ -62,7 +64,7 @@ func NewRouter(
 	stack = withBodyLimit(int64(opts.MaxBodyBytes), stack)
 
 	if opts.RateLimit > 0 {
-		stack = withRateLimit(opts.RateLimit, opts.RateBurst, stack)
+		stack = withRateLimit(opts.RateLimit, opts.RateBurst, opts.TrustedProxies, stack)
 	}
 
 	stack = withSecurityHeaders(stack)
