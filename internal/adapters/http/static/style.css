@@ -422,7 +422,17 @@ body::before {
     line-height: 1.7;
     resize: vertical;
     outline: none;
+    scrollbar-width: thin;
+    scrollbar-color: var(--accent-glow-strong) transparent;
 }
+
+.editor-textarea::-webkit-scrollbar { width: 6px; }
+.editor-textarea::-webkit-scrollbar-track { background: transparent; }
+.editor-textarea::-webkit-scrollbar-thumb {
+    background: var(--accent-glow-strong);
+    border-radius: 3px;
+}
+.editor-textarea::-webkit-scrollbar-thumb:hover { background: var(--accent); }
 
 .editor-textarea::placeholder {
     color: var(--text-muted);
@@ -893,7 +903,17 @@ kbd {
     padding: 20px 24px;
     overflow-x: auto;
     margin: 0;
+    scrollbar-width: thin;
+    scrollbar-color: var(--accent-glow-strong) transparent;
 }
+
+.prose pre::-webkit-scrollbar { height: 6px; }
+.prose pre::-webkit-scrollbar-track { background: transparent; }
+.prose pre::-webkit-scrollbar-thumb {
+    background: var(--accent-glow-strong);
+    border-radius: 3px;
+}
+.prose pre::-webkit-scrollbar-thumb:hover { background: var(--accent); }
 
 .prose pre code {
     background: none;
