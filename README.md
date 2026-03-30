@@ -7,13 +7,15 @@ A self-hosted Markdown pastebin with a web UI, REST API, burn-after-reading, edi
 - **Web UI** — create, view, and edit notes in the browser with live Markdown preview
 - **REST API** — JSON CRUD with OpenAPI 3.1 spec and generated Go client (`pkg/client`)
 - **Content negotiation** — `application/json`, `text/html`, `text/plain`, `text/markdown` via `Accept` header
-- **Short URLs** — notes accessible at `/{id}` (8-char random slug or custom)
-- **Burn after reading** — auto-delete on first read (without TTL) or auto-expire after TTL
+- **Short URLs** — notes accessible at `/{id}` (10-char random slug or custom)
+- **Burn after reading** — deleted immediately on first read; with TTL — survives for N seconds after first read
 - **Edit codes** — secret 12-char token returned on creation, required for edit/delete
+- **Rate limiting** — per-IP token bucket (configurable RPS and burst)
+- **TLS support** — HTTPS with optional HTTP→HTTPS redirect listener
 - **Token auth** — optional Bearer token + cookie-based login for the web UI
 - **Storage backends** — SQLite (default) or PostgreSQL
 - **Spec-first API** — [ogen](https://github.com/ogen-go/ogen) generated server and client from `openapi.yaml`
-- **Three themes** — light, dim (default), dark — persisted in cookie
+- **Three themes** — light, dim (default), dark — persisted in localStorage
 - **API docs** — embedded Redoc UI at `/api`
 
 ## Quick start
@@ -34,10 +36,20 @@ Open `http://localhost:4000` in the browser.
 |------|-----|---------|-------------|
 | `--addr` | `PADMARK_ADDR` | `:8080` | HTTP listen address |
 | `--storage` | `PADMARK_STORAGE` | `sqlite` | Storage backend: `sqlite`, `postgres` |
-| `--dsn` | `PADMARK_DSN` | `padmark.db` | Database DSN |
+| `--dsn` | `PADMARK_DSN` | `padmark.db` | Database DSN (file path for SQLite, connection string for PostgreSQL) |
 | `--log-level` | `PADMARK_LOG_LEVEL` | `info` | Log level: debug, info, warn, error |
 | `--log-format` | `PADMARK_LOG_FORMAT` | `json` | Log format: json, text |
-| `--auth-tokens` | `PADMARK_AUTH_TOKENS` | *(empty)* | Comma-separated Bearer tokens (empty = no auth) |
+| `--auth-tokens` | `PADMARK_AUTH_TOKENS` | *(empty)* | Comma-separated Bearer tokens for write endpoints (empty = no auth) |
+| `--cookie-max-age` | `PADMARK_COOKIE_MAX_AGE` | `7776000` | Auth cookie max-age in seconds (default: 3 months) |
+| `--read-timeout` | `PADMARK_READ_TIMEOUT` | `30` | HTTP read timeout in seconds |
+| `--max-header-bytes` | `PADMARK_MAX_HEADER_BYTES` | `65536` | Maximum request header size in bytes |
+| `--max-body-bytes` | `PADMARK_MAX_BODY_BYTES` | `262144` | Maximum request body size in bytes |
+| `--rate-limit` | `PADMARK_RATE_LIMIT` | `10` | Requests per second per IP (0 = disabled) |
+| `--rate-burst` | `PADMARK_RATE_BURST` | `20` | Max burst size per IP |
+| `--tls-cert` | `PADMARK_TLS_CERT` | *(empty)* | Path to TLS certificate PEM file (enables HTTPS) |
+| `--tls-key` | `PADMARK_TLS_KEY` | *(empty)* | Path to TLS private key PEM file (enables HTTPS) |
+| `--http-redirect-addr` | `PADMARK_HTTP_REDIRECT_ADDR` | *(empty)* | HTTP→HTTPS redirect listener address (e.g. `:80`); TLS only |
+| `--trusted-proxies` | `PADMARK_TRUSTED_PROXIES` | *(empty)* | Comma-separated trusted proxy CIDRs/IPs for `X-Forwarded-For` |
 
 ## API
 
@@ -79,13 +91,21 @@ curl -X DELETE http://localhost:4000/notes/{id} \
   -H "X-Edit-Code: JmNkn0LdjbMw"
 ```
 
-### Burn after reading + TTL
+### Burn after reading
 
 ```bash
+# Delete immediately on first read (no TTL)
+curl -X POST http://localhost:4000/notes \
+  -H "Content-Type: application/json" \
+  -d '{"title":"Secret","content":"eyes only","burn_after_reading":true}'
+
+# Survive for 1 hour after first read, then expire
 curl -X POST http://localhost:4000/notes \
   -H "Content-Type: application/json" \
   -d '{"title":"Secret","content":"eyes only","burn_after_reading":true,"ttl":3600}'
 ```
+
+`ttl` is the grace period in seconds **after the first read** — the note is not deleted immediately but becomes inaccessible once the TTL elapses. Without `ttl` (or `ttl=0`) the note is deleted on the first read.
 
 ### Auth (when tokens are configured)
 
@@ -139,7 +159,7 @@ make lint                     # golangci-lint
 make gen                      # go generate (mocks + ogen)
 
 # Integration tests (requires Docker)
-go test -tags=integration -v ./internal/infra/storage/postgres/
+go test -tags=integration ./tests/
 ```
 
 ## Docker
