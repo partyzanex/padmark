@@ -21,6 +21,7 @@ type noteViewData struct {
 	ID           string
 	CreatedAt    string
 	ExpiresLabel string
+	ExpiresISO   string // RFC 3339 timestamp for JS client-side formatting; empty when never expires
 	RawContent   string
 	Nonce        string
 	Views        int
@@ -30,8 +31,11 @@ func toNoteViewData(note *domain.Note, rendered string) noteViewData {
 	created := note.CreatedAt.Format("Jan 2, 2006, 3:04 PM")
 
 	expires := "Never expires"
+	expiresISO := ""
+
 	if note.ExpiresAt != nil {
 		expires = "Expires " + note.ExpiresAt.Format("Jan 2, 2006")
+		expiresISO = note.ExpiresAt.UTC().Format(time.RFC3339)
 	}
 
 	return noteViewData{
@@ -42,6 +46,7 @@ func toNoteViewData(note *domain.Note, rendered string) noteViewData {
 		CreatedAt:    created,
 		Views:        note.Views,
 		ExpiresLabel: expires,
+		ExpiresISO:   expiresISO,
 	}
 }
 

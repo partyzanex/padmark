@@ -260,17 +260,49 @@ func (s *RepositoryTestSuite) TestDelete_NotFound() {
 
 // Consume
 
-func (s *RepositoryTestSuite) TestConsume_OK() {
+func (s *RepositoryTestSuite) TestConsume_BurnAfterReading() {
 	ctx := s.T().Context()
-	s.Require().NoError(s.repo.Create(ctx, newNote("con-ok", "burn", "me")))
 
-	got, err := s.repo.Consume(ctx, "con-ok")
+	n := newNote("con-bar", "burn", "me")
+	n.BurnAfterReading = true
+	s.Require().NoError(s.repo.Create(ctx, n))
+
+	got, err := s.repo.Consume(ctx, "con-bar")
 	s.Require().NoError(err)
-	s.Equal("con-ok", got.ID)
-	s.Equal("burn", got.Title)
+	s.Equal("con-bar", got.ID)
 
-	_, err = s.repo.Get(ctx, "con-ok")
+	_, err = s.repo.Get(ctx, "con-bar")
 	s.ErrorIs(err, domain.ErrNotFound)
+}
+
+func (s *RepositoryTestSuite) TestConsume_Expired() {
+	ctx := s.T().Context()
+
+	past := time.Now().Add(-time.Hour)
+	n := newNote("con-exp", "expired", "me")
+	n.ExpiresAt = &past
+	s.Require().NoError(s.repo.Create(ctx, n))
+
+	got, err := s.repo.Consume(ctx, "con-exp")
+	s.Require().NoError(err)
+	s.Equal("con-exp", got.ID)
+
+	_, err = s.repo.Get(ctx, "con-exp")
+	s.ErrorIs(err, domain.ErrNotFound)
+}
+
+func (s *RepositoryTestSuite) TestConsume_NotEligible() {
+	ctx := s.T().Context()
+
+	s.Require().NoError(s.repo.Create(ctx, newNote("con-no", "plain", "me")))
+
+	_, err := s.repo.Consume(ctx, "con-no")
+	s.ErrorIs(err, domain.ErrNotFound)
+
+	// note must still exist
+	got, err := s.repo.Get(ctx, "con-no")
+	s.Require().NoError(err)
+	s.Equal("con-no", got.ID)
 }
 
 func (s *RepositoryTestSuite) TestConsume_NotFound() {

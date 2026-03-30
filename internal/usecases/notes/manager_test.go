@@ -85,16 +85,16 @@ func (s *ManagerTestSuite) TestCreate_InvalidContentType() {
 	s.True(errors.Is(err, domain.ErrInvalidContentType))
 }
 
-func (s *ManagerTestSuite) TestCreate_WithTTL() {
-	future := time.Now().Add(time.Hour)
-	note := &domain.Note{Title: "hello", Content: "world", ExpiresAt: &future}
+func (s *ManagerTestSuite) TestCreate_WithBurnTTL() {
+	note := &domain.Note{Title: "hello", Content: "world", BurnAfterReading: true, BurnTTL: 3600}
 	s.storage.EXPECT().Create(gomock.Any(), note).Return(nil)
 
 	result, err := s.manager.Create(s.T().Context(), note)
 
 	s.Require().NoError(err)
-	s.NotNil(result.ExpiresAt)
-	s.True(result.ExpiresAt.After(time.Now()))
+	s.True(result.BurnAfterReading)
+	s.Equal(int64(3600), result.BurnTTL)
+	s.Nil(result.ExpiresAt) // expiry is set on first read, not at creation
 }
 
 func (s *ManagerTestSuite) TestCreate_WithSlug() {
@@ -149,6 +149,17 @@ func (s *ManagerTestSuite) TestGet_BurnAfterReading() {
 	s.Equal(note, result)
 }
 
+func (s *ManagerTestSuite) TestGet_BurnAfterReading_WithTTL() {
+	note := &domain.Note{ID: "abc-123", Title: "a", BurnAfterReading: true, BurnTTL: 3600}
+	s.storage.EXPECT().Get(gomock.Any(), "abc-123").Return(note, nil)
+	s.storage.EXPECT().SetBurnExpiry(gomock.Any(), "abc-123", gomock.Any()).Return(note, nil)
+
+	result, err := s.manager.Get(s.T().Context(), "abc-123")
+
+	s.Require().NoError(err)
+	s.Equal(note, result)
+}
+
 func (s *ManagerTestSuite) TestGet_Expired() {
 	past := time.Now().Add(-time.Minute)
 	note := &domain.Note{ID: "abc-123", Title: "a", ExpiresAt: &past}
@@ -192,6 +203,18 @@ func (s *ManagerTestSuite) TestView_BurnAfterReading() {
 	s.Require().NoError(err)
 	s.Equal(want, note)
 	s.Equal(0, note.Views) // no increment for burn-after-reading
+}
+
+func (s *ManagerTestSuite) TestView_BurnAfterReading_WithTTL() {
+	want := &domain.Note{ID: "abc-123", Title: "a", BurnAfterReading: true, BurnTTL: 1800}
+	s.storage.EXPECT().Get(gomock.Any(), "abc-123").Return(want, nil)
+	s.storage.EXPECT().SetBurnExpiry(gomock.Any(), "abc-123", gomock.Any()).Return(want, nil)
+	// note stays readable during grace period — IncrementViews must NOT be called
+
+	note, err := s.manager.View(s.T().Context(), "abc-123")
+
+	s.Require().NoError(err)
+	s.Equal(want, note)
 }
 
 func (s *ManagerTestSuite) TestView_NotFound() {
@@ -364,4 +387,59 @@ func (s *ManagerTestSuite) TestPeek_NotFound() {
 	_, err := s.manager.Peek(s.T().Context(), "missing")
 
 	s.True(errors.Is(err, domain.ErrNotFound))
+}
+
+// View TTL regression tests
+
+// TestView_WithTTL_SecondViewSucceeds reproduces the bug where a note with ExpiresAt set
+// (but BurnAfterReading=false) was returning 404 on the second view because View was
+// incorrectly calling IncrementViews for burn-after-reading notes that also had ExpiresAt set.
+// For a plain TTL note (BurnAfterReading=false), multiple views must succeed.
+func (s *ManagerTestSuite) TestView_WithTTL_SecondViewSucceeds() {
+	future := time.Now().Add(time.Hour)
+	note := &domain.Note{ID: "ttl-note", Title: "t", Views: 0, ExpiresAt: &future}
+
+	// First view
+	s.storage.EXPECT().Get(gomock.Any(), "ttl-note").Return(note, nil)
+	s.storage.EXPECT().IncrementViews(gomock.Any(), "ttl-note").Return(nil)
+
+	result, err := s.manager.View(s.T().Context(), "ttl-note")
+	s.Require().NoError(err)
+	s.Equal(1, result.Views)
+
+	// Second view — must NOT return ErrNotFound
+	note2 := &domain.Note{ID: "ttl-note", Title: "t", Views: 1, ExpiresAt: &future}
+	s.storage.EXPECT().Get(gomock.Any(), "ttl-note").Return(note2, nil)
+	s.storage.EXPECT().IncrementViews(gomock.Any(), "ttl-note").Return(nil)
+
+	result2, err := s.manager.View(s.T().Context(), "ttl-note")
+	s.Require().NoError(err)
+	s.Equal(2, result2.Views)
+}
+
+// TestView_BurnAfterReading_NoIncrementViews verifies that burn-after-reading notes
+// are consumed (deleted) and IncrementViews is NOT called on the already-deleted note.
+func (s *ManagerTestSuite) TestView_BurnAfterReading_NoIncrementViews() {
+	note := &domain.Note{ID: "burn-note", Title: "t", BurnAfterReading: true}
+	s.storage.EXPECT().Get(gomock.Any(), "burn-note").Return(note, nil)
+	s.storage.EXPECT().Consume(gomock.Any(), "burn-note").Return(note, nil)
+	// IncrementViews must NOT be called
+
+	result, err := s.manager.View(s.T().Context(), "burn-note")
+	s.Require().NoError(err)
+	s.Equal(note, result)
+}
+
+// TestView_BurnAfterReading_WithBurnTTL_NoIncrementViews verifies that a burn-after-reading note
+// with BurnTTL > 0 starts a timer on first view and IncrementViews is NOT called.
+// The note remains readable during the grace period.
+func (s *ManagerTestSuite) TestView_BurnAfterReading_WithBurnTTL_NoIncrementViews() {
+	note := &domain.Note{ID: "burn-ttl", Title: "t", BurnAfterReading: true, BurnTTL: 3600}
+	s.storage.EXPECT().Get(gomock.Any(), "burn-ttl").Return(note, nil)
+	s.storage.EXPECT().SetBurnExpiry(gomock.Any(), "burn-ttl", gomock.Any()).Return(note, nil)
+	// IncrementViews must NOT be called — note is in burn mode
+
+	result, err := s.manager.View(s.T().Context(), "burn-ttl")
+	s.Require().NoError(err)
+	s.Equal(note, result)
 }

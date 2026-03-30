@@ -62,17 +62,17 @@
         <div class="burn-time-wrap{{if .BurnAfterReading}} active{{end}}" id="burnTimeWrap">
             <div class="select-wrap">
                 <select class="field-select burn-select" id="burnTime"{{if not .BurnAfterReading}} disabled{{end}}>
-                    <option value="300">5 minutes</option>
-                    <option value="600">10 minutes</option>
-                    <option value="1800">30 minutes</option>
-                    <option value="3600" selected>1 hour</option>
-                    <option value="14400">4 hours</option>
-                    <option value="43200">12 hours</option>
-                    <option value="86400">24 hours</option>
-                    <option value="259200">3 days</option>
-                    <option value="604800">7 days</option>
-                    <option value="2592000">30 days</option>
-                    <option value="7776000">90 days</option>
+                    <option value="300"{{if eq .TTL 300}} selected{{end}}>5 minutes</option>
+                    <option value="600"{{if eq .TTL 600}} selected{{end}}>10 minutes</option>
+                    <option value="1800"{{if eq .TTL 1800}} selected{{end}}>30 minutes</option>
+                    <option value="3600"{{if or (eq .TTL 3600) (eq .TTL 0)}} selected{{end}}>1 hour</option>
+                    <option value="14400"{{if eq .TTL 14400}} selected{{end}}>4 hours</option>
+                    <option value="43200"{{if eq .TTL 43200}} selected{{end}}>12 hours</option>
+                    <option value="86400"{{if eq .TTL 86400}} selected{{end}}>24 hours</option>
+                    <option value="259200"{{if eq .TTL 259200}} selected{{end}}>3 days</option>
+                    <option value="604800"{{if eq .TTL 604800}} selected{{end}}>7 days</option>
+                    <option value="2592000"{{if eq .TTL 2592000}} selected{{end}}>30 days</option>
+                    <option value="7776000"{{if eq .TTL 7776000}} selected{{end}}>90 days</option>
                 </select>
             </div>
         </div>
@@ -97,19 +97,6 @@
 
     {{template "theme-js"}}
 
-    // Pre-select closest burn time option when editing
-    (function () {
-        const ttl = {{.TTL}};
-        if (ttl <= 0) return;
-        const sel = document.getElementById('burnTime');
-        const opts = Array.from(sel.options).map(o => parseInt(o.value));
-        let best = opts[0];
-        for (const v of opts) {
-            if (Math.abs(v - ttl) < Math.abs(best - ttl)) best = v;
-        }
-        sel.value = String(best);
-    })();
-
     function insertMd(before, after) {
         const ta = document.getElementById('editor');
         const start = ta.selectionStart, end = ta.selectionEnd;
@@ -133,9 +120,9 @@
         sel.disabled = !checked;
     }
 
-    function getBurnTTL() {
-        const checked = document.getElementById('burnCheck').checked;
-        return checked ? parseInt(document.getElementById('burnTime').value) : 0;
+    function getTTL() {
+        if (!document.getElementById('burnCheck').checked) return 0;
+        return parseInt(document.getElementById('burnTime').value);
     }
 
     async function publish() {
@@ -144,7 +131,7 @@
         const titleInput = document.getElementById('titleInput').value.trim();
         const slug = document.getElementById('slugInput').value.trim();
         const burnAfterReading = document.getElementById('burnCheck').checked;
-        const ttl = getBurnTTL();
+        const ttl = getTTL();
 
         if (!content) { showError(btn, 'Publish', 'Enter some text first'); return; }
 
@@ -192,7 +179,7 @@
         const content = document.getElementById('editor').value.trim();
         const title = document.getElementById('titleInput').value.trim();
         const editCode = document.getElementById('editCodeInput').value.trim();
-        const ttl = getBurnTTL();
+        const ttl = getTTL();
 
         if (!content) { showError(btn, 'Save', 'Enter some text first'); return; }
         if (!editCode) { showError(btn, 'Save', 'Edit code required'); return; }

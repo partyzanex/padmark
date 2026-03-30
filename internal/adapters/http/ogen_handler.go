@@ -3,7 +3,6 @@ package http
 import (
 	"context"
 	"log/slog"
-	"time"
 
 	"github.com/partyzanex/padmark/internal/adapters/http/ogenapi"
 	"github.com/partyzanex/padmark/internal/domain"
@@ -27,11 +26,11 @@ func NewOgenHandler(manager NoteManager, pinger Pinger, log *slog.Logger) *OgenH
 func (h *OgenHandler) CreateNote(
 	ctx context.Context, req *ogenapi.CreateNoteRequest,
 ) (ogenapi.CreateNoteRes, error) {
-	var expiresAt *time.Time
+	burnAfterReading := req.BurnAfterReading.Or(false)
 
-	if req.TTL.IsSet() && req.TTL.Value > 0 {
-		tt := time.Now().Add(time.Duration(req.TTL.Value) * time.Second)
-		expiresAt = &tt
+	var burnTTL int64
+	if burnAfterReading && req.TTL.IsSet() && req.TTL.Value > 0 {
+		burnTTL = req.TTL.Value
 	}
 
 	ct := domain.ContentTypeMarkdown
@@ -44,8 +43,8 @@ func (h *OgenHandler) CreateNote(
 		Title:            req.Title,
 		Content:          req.Content,
 		ContentType:      ct,
-		ExpiresAt:        expiresAt,
-		BurnAfterReading: req.BurnAfterReading.Or(false),
+		BurnTTL:          burnTTL,
+		BurnAfterReading: burnAfterReading,
 	})
 	if err != nil {
 		return mapCreateError(err, h.log), nil
@@ -73,19 +72,19 @@ func (h *OgenHandler) GetNote(
 func (h *OgenHandler) UpdateNote(
 	ctx context.Context, req *ogenapi.UpdateNoteRequest, params ogenapi.UpdateNoteParams,
 ) (ogenapi.UpdateNoteRes, error) {
-	var expiresAt *time.Time
+	burnAfterReading := req.BurnAfterReading.Or(false)
 
-	if req.TTL.IsSet() && req.TTL.Value > 0 {
-		tt := time.Now().Add(time.Duration(req.TTL.Value) * time.Second)
-		expiresAt = &tt
+	var burnTTL int64
+	if burnAfterReading && req.TTL.IsSet() && req.TTL.Value > 0 {
+		burnTTL = req.TTL.Value
 	}
 
 	note, err := h.manager.Update(ctx, params.ID, req.EditCode, &domain.Note{
 		Title:            req.Title,
 		Content:          req.Content,
 		ContentType:      domain.ContentType(req.ContentType.Or("")),
-		ExpiresAt:        expiresAt,
-		BurnAfterReading: req.BurnAfterReading.Or(false),
+		BurnTTL:          burnTTL,
+		BurnAfterReading: burnAfterReading,
 	})
 	if err != nil {
 		return mapUpdateError(err, h.log), nil

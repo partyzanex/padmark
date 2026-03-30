@@ -12,6 +12,7 @@ package notes
 import (
 	context "context"
 	reflect "reflect"
+	time "time"
 
 	domain "github.com/partyzanex/padmark/internal/domain"
 	gomock "go.uber.org/mock/gomock"
@@ -111,6 +112,21 @@ func (m *MockStorage) IncrementViews(ctx context.Context, id string) error {
 func (mr *MockStorageMockRecorder) IncrementViews(ctx, id any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IncrementViews", reflect.TypeOf((*MockStorage)(nil).IncrementViews), ctx, id)
+}
+
+// SetBurnExpiry mocks base method.
+func (m *MockStorage) SetBurnExpiry(ctx context.Context, id string, expiresAt time.Time) (*domain.Note, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SetBurnExpiry", ctx, id, expiresAt)
+	ret0, _ := ret[0].(*domain.Note)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// SetBurnExpiry indicates an expected call of SetBurnExpiry.
+func (mr *MockStorageMockRecorder) SetBurnExpiry(ctx, id, expiresAt any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetBurnExpiry", reflect.TypeOf((*MockStorage)(nil).SetBurnExpiry), ctx, id, expiresAt)
 }
 
 // Update mocks base method.

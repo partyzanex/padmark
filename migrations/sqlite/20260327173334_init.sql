@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS notes (
     edit_code          TEXT     NOT NULL DEFAULT '',
     views              INTEGER  NOT NULL DEFAULT 0,
     burn_after_reading INTEGER  NOT NULL DEFAULT 0,
+    burn_ttl           INTEGER  NOT NULL DEFAULT 0,
     expires_at         DATETIME,
     created_at         DATETIME NOT NULL,
     updated_at         DATETIME NOT NULL

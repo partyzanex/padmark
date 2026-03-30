@@ -68,6 +68,7 @@ type Storage interface {
 	Create(ctx context.Context, note *domain.Note) error
 	Get(ctx context.Context, id string) (*domain.Note, error)
 	Consume(ctx context.Context, id string) (*domain.Note, error)
+	SetBurnExpiry(ctx context.Context, id string, expiresAt time.Time) (*domain.Note, error)
 	Update(ctx context.Context, id string, note *domain.Note) error
 	Delete(ctx context.Context, id string) error
 	IncrementViews(ctx context.Context, id string) error
@@ -111,7 +112,7 @@ func (m *Manager) Create(ctx context.Context, note *domain.Note) (*domain.Note, 
 
 	note.EditCode = newEditCode()
 
-	now := time.Now()
+	now := time.Now().UTC()
 	note.CreatedAt = now
 	note.UpdatedAt = now
 
@@ -153,6 +154,19 @@ func (m *Manager) Get(ctx context.Context, id string) (*domain.Note, error) {
 	}
 
 	if note.BurnAfterReading {
+		if note.BurnTTL > 0 {
+			expiresAt := time.Now().UTC().Add(time.Duration(note.BurnTTL) * time.Second)
+
+			updated, burnErr := m.storage.SetBurnExpiry(ctx, id, expiresAt)
+			if burnErr != nil {
+				return nil, fmt.Errorf("burn after reading: %w", burnErr)
+			}
+
+			m.log.DebugContext(ctx, "burn timer started", "id", id, "expires_at", expiresAt)
+
+			return updated, nil
+		}
+
 		consumed, consumeErr := m.storage.Consume(ctx, id)
 		if consumeErr != nil {
 			return nil, fmt.Errorf("burn after reading: %w", consumeErr)
@@ -174,7 +188,7 @@ func (m *Manager) View(ctx context.Context, id string) (*domain.Note, error) {
 		return nil, err
 	}
 
-	if !note.BurnAfterReading || note.ExpiresAt != nil {
+	if !note.BurnAfterReading {
 		incErr := m.storage.IncrementViews(ctx, id)
 		if incErr != nil {
 			m.log.ErrorContext(ctx, "increment views", "id", id, "err", incErr)

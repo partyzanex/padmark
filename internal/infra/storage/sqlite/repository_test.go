@@ -197,6 +197,7 @@ func (s *RepositoryTestSuite) TestCreate_AllFields() {
 		EditCode:         "s3cr3t",
 		ExpiresAt:        &future,
 		BurnAfterReading: true,
+		BurnTTL:          3600,
 		CreatedAt:        time.Now(),
 		UpdatedAt:        time.Now(),
 	}
@@ -206,6 +207,7 @@ func (s *RepositoryTestSuite) TestCreate_AllFields() {
 	s.Require().NoError(err)
 	s.Equal("s3cr3t", got.EditCode)
 	s.True(got.BurnAfterReading)
+	s.Equal(int64(3600), got.BurnTTL)
 	s.Equal(domain.ContentTypePlain, got.ContentType)
 	s.NotNil(got.ExpiresAt)
 }
@@ -234,19 +236,54 @@ func (s *RepositoryTestSuite) TestIncrementViews_NotFound() {
 
 // Consume
 
-func (s *RepositoryTestSuite) TestConsume_OK() {
+func (s *RepositoryTestSuite) TestConsume_BurnAfterReading() {
 	ctx := s.T().Context()
 
-	n := &domain.Note{ID: "consume-ok", Title: "burn", Content: "me", CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	n := &domain.Note{
+		ID: "consume-bar", Title: "burn", Content: "me",
+		BurnAfterReading: true, CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}
 	s.Require().NoError(s.repo.Create(ctx, n))
 
-	got, err := s.repo.Consume(ctx, "consume-ok")
+	got, err := s.repo.Consume(ctx, "consume-bar")
 	s.Require().NoError(err)
-	s.Equal("consume-ok", got.ID)
-	s.Equal("burn", got.Title)
+	s.Equal("consume-bar", got.ID)
 
-	_, err = s.repo.Get(ctx, "consume-ok")
+	_, err = s.repo.Get(ctx, "consume-bar")
 	s.ErrorIs(err, domain.ErrNotFound)
+}
+
+func (s *RepositoryTestSuite) TestConsume_Expired() {
+	ctx := s.T().Context()
+
+	past := time.Now().Add(-time.Hour)
+	n := &domain.Note{
+		ID: "consume-exp", Title: "expired", Content: "me",
+		ExpiresAt: &past, CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	s.Require().NoError(s.repo.Create(ctx, n))
+
+	got, err := s.repo.Consume(ctx, "consume-exp")
+	s.Require().NoError(err)
+	s.Equal("consume-exp", got.ID)
+
+	_, err = s.repo.Get(ctx, "consume-exp")
+	s.ErrorIs(err, domain.ErrNotFound)
+}
+
+func (s *RepositoryTestSuite) TestConsume_NotEligible() {
+	ctx := s.T().Context()
+
+	n := &domain.Note{ID: "consume-no", Title: "plain", Content: "me", CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	s.Require().NoError(s.repo.Create(ctx, n))
+
+	_, err := s.repo.Consume(ctx, "consume-no")
+	s.ErrorIs(err, domain.ErrNotFound)
+
+	// note must still exist
+	got, err := s.repo.Get(ctx, "consume-no")
+	s.Require().NoError(err)
+	s.Equal("consume-no", got.ID)
 }
 
 func (s *RepositoryTestSuite) TestConsume_NotFound() {

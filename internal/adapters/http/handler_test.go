@@ -225,14 +225,13 @@ func (s *HandlerSuite) TestCreateNote_OK() {
 func (s *HandlerSuite) TestCreateNote_WithTTL() {
 	note := newTestNote("burn", "content")
 	note.BurnAfterReading = true
-
-	future := time.Now().Add(time.Hour)
-	note.ExpiresAt = &future
+	note.BurnTTL = 3600
 
 	s.manager.EXPECT().Create(gomock.Any(), gomock.Any()).
 		DoAndReturn(func(_ context.Context, n *domain.Note) (*domain.Note, error) {
 			s.True(n.BurnAfterReading)
-			s.NotNil(n.ExpiresAt)
+			s.Equal(int64(3600), n.BurnTTL)
+			s.Nil(n.ExpiresAt) // expiry is set on first read, not at creation
 			note.ID = n.ID
 
 			return note, nil
@@ -250,7 +249,6 @@ func (s *HandlerSuite) TestCreateNote_WithTTL() {
 	var resp testNoteResponse
 	s.Require().NoError(json.NewDecoder(w.Body).Decode(&resp))
 	s.True(resp.BurnAfterReading)
-	s.NotNil(resp.ExpiresAt)
 }
 
 func (s *HandlerSuite) TestCreateNote_EmptyTitle() {
@@ -635,8 +633,9 @@ func (s *HandlerSuite) TestUpdateNote_WithTTL() {
 
 	s.manager.EXPECT().Update(gomock.Any(), testID, "code", gomock.Any()).
 		DoAndReturn(func(_ context.Context, _ string, _ string, n *domain.Note) (*domain.Note, error) {
-			s.NotNil(n.ExpiresAt)
 			s.True(n.BurnAfterReading)
+			s.Equal(int64(3600), n.BurnTTL)
+			s.Nil(n.ExpiresAt) // expiry is set on first read, not at update time
 
 			return updated, nil
 		})

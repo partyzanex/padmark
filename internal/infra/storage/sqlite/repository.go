@@ -27,6 +27,7 @@ type note struct {
 	ContentType      string     `bun:"content_type"`
 	EditCode         string     `bun:"edit_code"`
 	Views            int        `bun:"views"`
+	BurnTTL          int64      `bun:"burn_ttl"`
 	BurnAfterReading bool       `bun:"burn_after_reading"`
 }
 
@@ -40,6 +41,22 @@ func NewRepository(db *bun.DB) *Repository {
 	return &Repository{db: db}
 }
 
+func toDomain(dbNote *note) *domain.Note {
+	return &domain.Note{
+		ID:               dbNote.ID,
+		CreatedAt:        dbNote.CreatedAt,
+		UpdatedAt:        dbNote.UpdatedAt,
+		ExpiresAt:        dbNote.ExpiresAt,
+		Title:            dbNote.Title,
+		Content:          dbNote.Content,
+		ContentType:      domain.ContentType(dbNote.ContentType),
+		EditCode:         dbNote.EditCode,
+		Views:            dbNote.Views,
+		BurnTTL:          dbNote.BurnTTL,
+		BurnAfterReading: dbNote.BurnAfterReading,
+	}
+}
+
 // Create inserts a new note.
 func (r *Repository) Create(ctx context.Context, domNote *domain.Note) error {
 	dbNote := &note{
@@ -51,6 +68,7 @@ func (r *Repository) Create(ctx context.Context, domNote *domain.Note) error {
 		CreatedAt:        domNote.CreatedAt,
 		UpdatedAt:        domNote.UpdatedAt,
 		ExpiresAt:        domNote.ExpiresAt,
+		BurnTTL:          domNote.BurnTTL,
 		BurnAfterReading: domNote.BurnAfterReading,
 	}
 
@@ -82,27 +100,19 @@ func (r *Repository) Get(ctx context.Context, id string) (*domain.Note, error) {
 		return nil, fmt.Errorf("sqlite get: %w", err)
 	}
 
-	return &domain.Note{
-		ID:               dbNote.ID,
-		CreatedAt:        dbNote.CreatedAt,
-		UpdatedAt:        dbNote.UpdatedAt,
-		ExpiresAt:        dbNote.ExpiresAt,
-		Title:            dbNote.Title,
-		Content:          dbNote.Content,
-		ContentType:      domain.ContentType(dbNote.ContentType),
-		EditCode:         dbNote.EditCode,
-		Views:            dbNote.Views,
-		BurnAfterReading: dbNote.BurnAfterReading,
-	}, nil
+	return toDomain(&dbNote), nil
 }
 
-// Consume atomically deletes a note and returns it. Returns domain.ErrNotFound if no row was deleted.
+// Consume atomically deletes a note and returns it, but only if the note is eligible for deletion:
+// burn_after_reading is set (with no grace period), or expires_at has passed.
+// Returns domain.ErrNotFound otherwise.
 func (r *Repository) Consume(ctx context.Context, id string) (*domain.Note, error) {
 	var dbNote note
 
 	err := r.db.NewDelete().
 		Model(&dbNote).
 		Where("id = ?", id).
+		Where("burn_after_reading OR (expires_at IS NOT NULL AND expires_at <= ?)", time.Now()).
 		Returning("*").
 		Scan(ctx)
 	if err != nil {
@@ -113,18 +123,31 @@ func (r *Repository) Consume(ctx context.Context, id string) (*domain.Note, erro
 		return nil, fmt.Errorf("sqlite consume: %w", err)
 	}
 
-	return &domain.Note{
-		ID:               dbNote.ID,
-		CreatedAt:        dbNote.CreatedAt,
-		UpdatedAt:        dbNote.UpdatedAt,
-		ExpiresAt:        dbNote.ExpiresAt,
-		Title:            dbNote.Title,
-		Content:          dbNote.Content,
-		ContentType:      domain.ContentType(dbNote.ContentType),
-		EditCode:         dbNote.EditCode,
-		Views:            dbNote.Views,
-		BurnAfterReading: dbNote.BurnAfterReading,
-	}, nil
+	return toDomain(&dbNote), nil
+}
+
+// SetBurnExpiry atomically sets expires_at and clears burn_after_reading on first read
+// for notes with a burn grace period. Returns domain.ErrNotFound if no eligible row is found.
+func (r *Repository) SetBurnExpiry(ctx context.Context, id string, expiresAt time.Time) (*domain.Note, error) {
+	var dbNote note
+
+	err := r.db.NewUpdate().
+		Model(&dbNote).
+		Set("expires_at = ?", expiresAt).
+		Set("burn_after_reading = 0").
+		Where("id = ?", id).
+		Where("burn_after_reading").
+		Returning("*").
+		Scan(ctx)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, domain.ErrNotFound
+		}
+
+		return nil, fmt.Errorf("sqlite set burn expiry: %w", err)
+	}
+
+	return toDomain(&dbNote), nil
 }
 
 // Update modifies an existing note.
@@ -135,13 +158,14 @@ func (r *Repository) Update(ctx context.Context, id string, domNote *domain.Note
 		Content:          domNote.Content,
 		ContentType:      string(domNote.ContentType),
 		ExpiresAt:        domNote.ExpiresAt,
+		BurnTTL:          domNote.BurnTTL,
 		BurnAfterReading: domNote.BurnAfterReading,
 		CreatedAt:        domNote.CreatedAt,
 		UpdatedAt:        domNote.UpdatedAt,
 	}
 
 	result, err := r.db.NewUpdate().Model(dbNote).
-		Column("title", "content", "content_type", "expires_at", "burn_after_reading", "updated_at").
+		Column("title", "content", "content_type", "expires_at", "burn_ttl", "burn_after_reading", "updated_at").
 		Where("id = ?", id).
 		Exec(ctx)
 	if err != nil {

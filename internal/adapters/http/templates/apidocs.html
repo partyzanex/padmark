@@ -1,29 +1,16 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dim">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Padmark — API</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-    <link rel="stylesheet" href="/static/style.css">
-    <style nonce="{{.Nonce}}">
-        .wrapper { max-width: 100%; padding: 60px 24px 0; }
-        .header  { margin-bottom: 24px; }
-        .redoc-wrap { margin: 0 -24px; }
-    </style>
 </head>
 <body>
-<div class="wrapper">
-    {{template "header"}}
-</div>
-<div class="redoc-wrap">
-    <redoc spec-url="/api/openapi.yaml"></redoc>
-</div>
-<script src="https://cdn.redoc.ly/redoc/latest/bundles/redoc.standalone.js" nonce="{{.Nonce}}"></script>
-<script nonce="{{.Nonce}}">
-    {{template "theme-js"}}
-</script>
+    <div id="redoc-container"></div>
+    <script src="https://cdn.redoc.ly/redoc/latest/bundles/redoc.standalone.js" nonce="{{.Nonce}}"></script>
+    <script nonce="{{.Nonce}}">
+        Redoc.init('/api/openapi.yaml', {nonce: '{{.Nonce}}'}, document.getElementById('redoc-container'));
+    </script>
 </body>
 </html>
