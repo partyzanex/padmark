@@ -15,7 +15,7 @@ $(GOOSE):
 
 .PHONY: run
 run: build
-	set -a && . ./.env && set +a && go run ./cmd/server
+	set -a && . ./.env && set +a && go run ./cmd/padmark-server
 
 .PHONY: test
 test:

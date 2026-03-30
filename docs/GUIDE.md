@@ -59,7 +59,7 @@ domain  <--  usecases  <--  infra
 
 ```
 padmark/
-├── cmd/server/
+├── cmd/padmark-server/
 │   └── main.go                  # 10-15 lines, delegates to infra/cmd
 │
 ├── internal/
@@ -317,7 +317,7 @@ const (
 ### main.go
 
 ```go
-// cmd/server/main.go
+// cmd/padmark-server/main.go
 package main
 
 import "github.com/partyzanex/padmark/internal/infra/cmd"

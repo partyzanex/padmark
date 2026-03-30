@@ -22,10 +22,10 @@ A self-hosted Markdown pastebin with a web UI, REST API, burn-after-reading, edi
 
 ```bash
 # SQLite (default)
-go run ./cmd/server --addr :4000
+go run ./cmd/padmark-server --addr :4000
 
 # PostgreSQL
-go run ./cmd/server --storage postgres --dsn "postgres://user:pass@localhost:5432/padmark?sslmode=disable"
+go run ./cmd/padmark-server --storage postgres --dsn "postgres://user:pass@localhost:5432/padmark?sslmode=disable"
 ```
 
 Open `http://localhost:4000` in the browser.
@@ -123,7 +123,7 @@ Interactive docs at `/api`, raw spec at `/api/openapi.yaml`.
 ## Project structure
 
 ```
-cmd/server/main.go                          Entry point
+cmd/padmark-server/main.go                          Entry point
 openapi.yaml                                OpenAPI 3.1 spec (source of truth)
 pkg/client/                                 Generated Go API client (ogen)
 internal/

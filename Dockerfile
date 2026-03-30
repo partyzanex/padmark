@@ -9,7 +9,7 @@ RUN CGO_ENABLED=0 go build \
       -trimpath \
       -ldflags="-s -w" \
       -o /bin/server \
-      ./cmd/server && \
+      ./cmd/padmark-server && \
     mkdir /data && chown nobody:nobody /data
 
 # ------------------------------------------------------------

@@ -100,7 +100,7 @@ golangci-lint v2, nearly all linters enabled:
 
 - `*.mk` files are auto-generated from `github.com/partyzanex/go-makefile` — do not edit manually
 - Binaries go to `bin/` (gitignored); vendor is committed (`go mod vendor`)
-- `cmd/server/main.go` is 10–15 lines; all logic lives in `internal/infra/cmd/`
+- `cmd/padmark-server/main.go` is 10–15 lines; all logic lives in `internal/infra/cmd/`
 - Dockerfile: multi-stage build → scratch image
 
 ## Frontend Guidelines
