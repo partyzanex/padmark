@@ -35,7 +35,9 @@ func (c *codeRecorder) Unwrap() http.ResponseWriter {
 
 // handleCreateNoteRequest handles createNote operation.
 //
-// Create a new note.
+// Creates a note and returns it together with the one-time `edit_code`.
+// If `slug` is omitted a 10-character random slug is generated.
+// Responds `409 Conflict` when the requested slug is already taken.
 //
 // POST /notes
 func (s *Server) handleCreateNoteRequest(args [0]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -178,7 +180,8 @@ func (s *Server) handleCreateNoteRequest(args [0]string, argsEscaped bool, w htt
 
 // handleDeleteNoteRequest handles deleteNote operation.
 //
-// Requires the edit code via X-Edit-Code header or edit_code query parameter.
+// Permanently deletes the note.  The edit code must be supplied either as the
+// `X-Edit-Code` request header or the `edit_code` query parameter.
 //
 // DELETE /notes/{id}
 func (s *Server) handleDeleteNoteRequest(args [1]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -329,7 +332,11 @@ func (s *Server) handleDeleteNoteRequest(args [1]string, argsEscaped bool, w htt
 
 // handleGetNoteRequest handles getNote operation.
 //
-// Returns a note as JSON. Increments the view counter.
+// Returns the note as JSON.  Increments the view counter on every call.
+// For burn-after-reading notes **without TTL** the note is deleted on this request and
+// the response body is the last snapshot of the note before deletion.
+// For burn-after-reading notes **with TTL** `expires_at` is set on the first read to
+// `now + ttl` and the note expires automatically when that timestamp is reached.
 //
 // GET /notes/{id}
 func (s *Server) handleGetNoteRequest(args [1]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -472,7 +479,7 @@ func (s *Server) handleGetNoteRequest(args [1]string, argsEscaped bool, w http.R
 
 // handleHealthzRequest handles healthz operation.
 //
-// Liveness probe.
+// Returns 200 as long as the process is running.
 //
 // GET /healthz
 func (s *Server) handleHealthzRequest(args [0]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -596,7 +603,7 @@ func (s *Server) handleHealthzRequest(args [0]string, argsEscaped bool, w http.R
 
 // handleReadyzRequest handles readyz operation.
 //
-// Readiness probe.
+// Returns 200 when the storage backend is reachable, 503 otherwise.
 //
 // GET /readyz
 func (s *Server) handleReadyzRequest(args [0]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -720,7 +727,9 @@ func (s *Server) handleReadyzRequest(args [0]string, argsEscaped bool, w http.Re
 
 // handleUpdateNoteRequest handles updateNote operation.
 //
-// Requires the edit code that was returned when the note was created.
+// Replaces the note's title, content, content type, and burn settings.
+// The `edit_code` must match the one returned when the note was created.
+// Returns the updated note.
 //
 // PUT /notes/{id}
 func (s *Server) handleUpdateNoteRequest(args [1]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {

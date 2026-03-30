@@ -1,7 +1,27 @@
 openapi: 3.1.0
 info:
   title: Padmark API
-  description: JSON API for creating, storing, and managing Markdown notes.
+  description: |
+    JSON API for creating, storing, and managing Markdown notes.
+
+    ## Authentication
+
+    When the server is started with `--auth-tokens`, all write endpoints (`POST`, `PUT`, `DELETE`)
+    require a Bearer token in the `Authorization` header.  Read endpoints (`GET`) are always public.
+
+    ## Burn-after-reading
+
+    Notes can be configured to self-destruct after the first read:
+
+    - **Without TTL** (`burn_after_reading: true`): the note is deleted the moment it is first read.
+    - **With TTL** (`burn_after_reading: true, ttl: N`): the note stays accessible for *N* seconds
+      after the first read, then expires.  The exact expiry timestamp is returned in `expires_at`.
+
+    ## Edit codes
+
+    Every note is created with a randomly generated 12-character `edit_code`.  It is returned
+    **once** in the `CreateNoteResponse` and is never exposed again.  Store it — it is required
+    for `PUT` and `DELETE`.
   version: 1.0.0
 
 servers:
@@ -18,6 +38,10 @@ paths:
     post:
       operationId: createNote
       summary: Create a new note
+      description: |
+        Creates a note and returns it together with the one-time `edit_code`.
+        If `slug` is omitted a 10-character random slug is generated.
+        Responds `409 Conflict` when the requested slug is already taken.
       tags: [notes]
       requestBody:
         required: true
@@ -27,12 +51,13 @@ paths:
               $ref: "#/components/schemas/CreateNoteRequest"
       responses:
         "201":
-          description: Note created
+          description: Note created successfully
           headers:
             Location:
-              description: Canonical URL of the created note
+              description: Canonical URL of the created note (`/{id}`)
               schema:
                 type: string
+                example: /abcde12345
           content:
             application/json:
               schema:
@@ -42,8 +67,10 @@ paths:
         "401":
           $ref: "#/components/responses/Error"
         "409":
+          description: A note with the requested slug already exists
           $ref: "#/components/responses/Error"
         "413":
+          description: Request body exceeds the server limit (default 256 KB)
           $ref: "#/components/responses/Error"
         "422":
           $ref: "#/components/responses/Error"
@@ -54,7 +81,14 @@ paths:
     get:
       operationId: getNote
       summary: Get a note by ID
-      description: Returns a note as JSON. Increments the view counter.
+      description: |
+        Returns the note as JSON.  Increments the view counter on every call.
+
+        For burn-after-reading notes **without TTL** the note is deleted on this request and
+        the response body is the last snapshot of the note before deletion.
+
+        For burn-after-reading notes **with TTL** `expires_at` is set on the first read to
+        `now + ttl` and the note expires automatically when that timestamp is reached.
       tags: [notes]
       parameters:
         - $ref: "#/components/parameters/noteId"
@@ -66,8 +100,10 @@ paths:
               schema:
                 $ref: "#/components/schemas/NoteResponse"
         "404":
+          description: Note not found
           $ref: "#/components/responses/Error"
         "410":
+          description: Note has expired or was already consumed (burn-after-reading)
           $ref: "#/components/responses/Error"
         "500":
           $ref: "#/components/responses/Error"
@@ -75,7 +111,10 @@ paths:
     put:
       operationId: updateNote
       summary: Update an existing note
-      description: Requires the edit code that was returned when the note was created.
+      description: |
+        Replaces the note's title, content, content type, and burn settings.
+        The `edit_code` must match the one returned when the note was created.
+        Returns the updated note.
       tags: [notes]
       parameters:
         - $ref: "#/components/parameters/noteId"
@@ -97,8 +136,10 @@ paths:
         "401":
           $ref: "#/components/responses/Error"
         "403":
+          description: Wrong edit code
           $ref: "#/components/responses/Error"
         "404":
+          description: Note not found
           $ref: "#/components/responses/Error"
         "422":
           $ref: "#/components/responses/Error"
@@ -108,16 +149,20 @@ paths:
     delete:
       operationId: deleteNote
       summary: Delete a note
-      description: Requires the edit code via X-Edit-Code header or edit_code query parameter.
+      description: |
+        Permanently deletes the note.  The edit code must be supplied either as the
+        `X-Edit-Code` request header or the `edit_code` query parameter.
       tags: [notes]
       parameters:
         - $ref: "#/components/parameters/noteId"
         - name: X-Edit-Code
           in: header
+          description: Edit code returned at note creation (alternative to `edit_code` query param)
           schema:
             type: string
         - name: edit_code
           in: query
+          description: Edit code returned at note creation (alternative to `X-Edit-Code` header)
           schema:
             type: string
       responses:
@@ -126,8 +171,10 @@ paths:
         "401":
           $ref: "#/components/responses/Error"
         "403":
+          description: Wrong edit code
           $ref: "#/components/responses/Error"
         "404":
+          description: Note not found
           $ref: "#/components/responses/Error"
         "500":
           $ref: "#/components/responses/Error"
@@ -136,8 +183,8 @@ paths:
     get:
       operationId: healthz
       summary: Liveness probe
+      description: Returns 200 as long as the process is running.
       tags: [health]
-      security: []
       responses:
         "200":
           description: Service is alive
@@ -146,22 +193,33 @@ paths:
     get:
       operationId: readyz
       summary: Readiness probe
+      description: Returns 200 when the storage backend is reachable, 503 otherwise.
       tags: [health]
-      security: []
       responses:
         "200":
           description: Service is ready
         "503":
+          description: Storage backend unreachable
           $ref: "#/components/responses/Error"
 
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: |
+        Static Bearer token configured via `--auth-tokens` / `PADMARK_AUTH_TOKENS`.
+        Required for write operations when the server is started with tokens configured.
+
   parameters:
     noteId:
       name: id
       in: path
       required: true
+      description: Note ID (slug) — 10-char random string or the custom slug chosen at creation
       schema:
         type: string
+        example: abcde12345
 
   schemas:
     CreateNoteRequest:
@@ -170,20 +228,39 @@ components:
       properties:
         title:
           type: string
+          description: Human-readable title shown in the note header
+          example: My snippet
         content:
           type: string
+          description: Note body. Interpreted as Markdown unless `content_type` is `text/plain`
+          example: "# Hello\n\nThis is **padmark**."
         content_type:
           type: string
           enum: ["text/markdown", "text/plain"]
           default: "text/markdown"
+          description: MIME type of `content`; controls rendering on the view page
         slug:
           type: string
-        ttl:
-          type: integer
-          format: int64
+          description: |
+            Custom URL-friendly identifier. Must match `[a-zA-Z0-9_-]+`.
+            If omitted a 10-character random slug is generated.
+            Returns `409` if the slug is already taken.
+          example: my-snippet
         burn_after_reading:
           type: boolean
           default: false
+          description: |
+            When `true` the note self-destructs after the first read.
+            If `ttl` is also provided the note is not deleted immediately but expires `ttl`
+            seconds after the first read.
+        ttl:
+          type: integer
+          format: int64
+          description: |
+            Grace period in seconds after the first read before the note expires.
+            Only meaningful when `burn_after_reading` is `true`.
+            `0` (or omitted) means the note is deleted on the first read with no grace period.
+          example: 3600
 
     UpdateNoteRequest:
       type: object
@@ -191,18 +268,30 @@ components:
       properties:
         title:
           type: string
+          description: New title
+          example: Updated title
         content:
           type: string
+          description: New body
+          example: "# Updated\n\nNew content."
         content_type:
           type: string
           enum: ["text/markdown", "text/plain"]
+          description: New content type; defaults to the note's current type when omitted
         edit_code:
           type: string
+          description: The edit code returned when the note was created
+          example: JmNkn0LdjbMw
+        burn_after_reading:
+          type: boolean
+          description: Update the burn-after-reading flag
         ttl:
           type: integer
           format: int64
-        burn_after_reading:
-          type: boolean
+          description: |
+            New TTL in seconds (grace period after first read).
+            Only meaningful when `burn_after_reading` is `true`.
+          example: 3600
 
     NoteResponse:
       type: object
@@ -210,55 +299,57 @@ components:
       properties:
         id:
           type: string
+          description: Unique slug identifying the note
+          example: abcde12345
         title:
           type: string
+          description: Note title
+          example: My snippet
         content:
           type: string
+          description: Note body (Markdown or plain text depending on `content_type`)
         content_type:
           type: string
           enum: ["text/markdown", "text/plain"]
+          description: MIME type of `content`
         views:
           type: integer
+          description: Number of times the note has been fetched via GET
+          example: 3
         burn_after_reading:
           type: boolean
-        created_at:
-          type: string
-          format: date-time
-        updated_at:
-          type: string
-          format: date-time
+          description: |
+            `true` until the first read (or permanently `false` for non-burn notes).
+            After the first read of a note with a TTL this becomes `false` and `expires_at`
+            is set.
         expires_at:
           type: string
           format: date-time
+          description: |
+            ISO 8601 timestamp after which the note is inaccessible.
+            Set on the first read for burn-after-reading notes that have a TTL.
+            `null` for notes that are not expiring.
+        created_at:
+          type: string
+          format: date-time
+          description: Creation timestamp (UTC)
+        updated_at:
+          type: string
+          format: date-time
+          description: Last-update timestamp (UTC)
 
     CreateNoteResponse:
-      type: object
-      required: [id, title, content, content_type, views, burn_after_reading, created_at, updated_at, edit_code]
-      properties:
-        id:
-          type: string
-        title:
-          type: string
-        content:
-          type: string
-        content_type:
-          type: string
-          enum: ["text/markdown", "text/plain"]
-        views:
-          type: integer
-        burn_after_reading:
-          type: boolean
-        created_at:
-          type: string
-          format: date-time
-        updated_at:
-          type: string
-          format: date-time
-        expires_at:
-          type: string
-          format: date-time
-        edit_code:
-          type: string
+      allOf:
+        - $ref: "#/components/schemas/NoteResponse"
+        - type: object
+          required: [edit_code]
+          properties:
+            edit_code:
+              type: string
+              description: |
+                One-time secret required for future `PUT` and `DELETE` requests.
+                This is the only time `edit_code` is returned — store it securely.
+              example: JmNkn0LdjbMw
 
     ErrorResponse:
       type: object
@@ -266,6 +357,8 @@ components:
       properties:
         message:
           type: string
+          description: Human-readable error description
+          example: note not found
 
   responses:
     Error:

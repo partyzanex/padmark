@@ -15,7 +15,9 @@ var _ Handler = UnimplementedHandler{}
 
 // CreateNote implements createNote operation.
 //
-// Create a new note.
+// Creates a note and returns it together with the one-time `edit_code`.
+// If `slug` is omitted a 10-character random slug is generated.
+// Responds `409 Conflict` when the requested slug is already taken.
 //
 // POST /notes
 func (UnimplementedHandler) CreateNote(ctx context.Context, req *CreateNoteRequest) (r CreateNoteRes, _ error) {
@@ -24,7 +26,8 @@ func (UnimplementedHandler) CreateNote(ctx context.Context, req *CreateNoteReque
 
 // DeleteNote implements deleteNote operation.
 //
-// Requires the edit code via X-Edit-Code header or edit_code query parameter.
+// Permanently deletes the note.  The edit code must be supplied either as the
+// `X-Edit-Code` request header or the `edit_code` query parameter.
 //
 // DELETE /notes/{id}
 func (UnimplementedHandler) DeleteNote(ctx context.Context, params DeleteNoteParams) (r DeleteNoteRes, _ error) {
@@ -33,7 +36,11 @@ func (UnimplementedHandler) DeleteNote(ctx context.Context, params DeleteNotePar
 
 // GetNote implements getNote operation.
 //
-// Returns a note as JSON. Increments the view counter.
+// Returns the note as JSON.  Increments the view counter on every call.
+// For burn-after-reading notes **without TTL** the note is deleted on this request and
+// the response body is the last snapshot of the note before deletion.
+// For burn-after-reading notes **with TTL** `expires_at` is set on the first read to
+// `now + ttl` and the note expires automatically when that timestamp is reached.
 //
 // GET /notes/{id}
 func (UnimplementedHandler) GetNote(ctx context.Context, params GetNoteParams) (r GetNoteRes, _ error) {
@@ -42,7 +49,7 @@ func (UnimplementedHandler) GetNote(ctx context.Context, params GetNoteParams) (
 
 // Healthz implements healthz operation.
 //
-// Liveness probe.
+// Returns 200 as long as the process is running.
 //
 // GET /healthz
 func (UnimplementedHandler) Healthz(ctx context.Context) error {
@@ -51,7 +58,7 @@ func (UnimplementedHandler) Healthz(ctx context.Context) error {
 
 // Readyz implements readyz operation.
 //
-// Readiness probe.
+// Returns 200 when the storage backend is reachable, 503 otherwise.
 //
 // GET /readyz
 func (UnimplementedHandler) Readyz(ctx context.Context) (r ReadyzRes, _ error) {
@@ -60,7 +67,9 @@ func (UnimplementedHandler) Readyz(ctx context.Context) (r ReadyzRes, _ error) {
 
 // UpdateNote implements updateNote operation.
 //
-// Requires the edit code that was returned when the note was created.
+// Replaces the note's title, content, content type, and burn settings.
+// The `edit_code` must match the one returned when the note was created.
+// Returns the updated note.
 //
 // PUT /notes/{id}
 func (UnimplementedHandler) UpdateNote(ctx context.Context, req *UpdateNoteRequest, params UpdateNoteParams) (r UpdateNoteRes, _ error) {

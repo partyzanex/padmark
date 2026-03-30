@@ -157,15 +157,15 @@ func (s *CreateNoteRequest) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
-		if s.TTL.Set {
-			e.FieldStart("ttl")
-			s.TTL.Encode(e)
-		}
-	}
-	{
 		if s.BurnAfterReading.Set {
 			e.FieldStart("burn_after_reading")
 			s.BurnAfterReading.Encode(e)
+		}
+	}
+	{
+		if s.TTL.Set {
+			e.FieldStart("ttl")
+			s.TTL.Encode(e)
 		}
 	}
 }
@@ -175,8 +175,8 @@ var jsonFieldsNameOfCreateNoteRequest = [6]string{
 	1: "content",
 	2: "content_type",
 	3: "slug",
-	4: "ttl",
-	5: "burn_after_reading",
+	4: "burn_after_reading",
+	5: "ttl",
 }
 
 // Decode decodes CreateNoteRequest from json.
@@ -233,16 +233,6 @@ func (s *CreateNoteRequest) Decode(d *jx.Decoder) error {
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"slug\"")
 			}
-		case "ttl":
-			if err := func() error {
-				s.TTL.Reset()
-				if err := s.TTL.Decode(d); err != nil {
-					return err
-				}
-				return nil
-			}(); err != nil {
-				return errors.Wrap(err, "decode field \"ttl\"")
-			}
 		case "burn_after_reading":
 			if err := func() error {
 				s.BurnAfterReading.Reset()
@@ -252,6 +242,16 @@ func (s *CreateNoteRequest) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"burn_after_reading\"")
+			}
+		case "ttl":
+			if err := func() error {
+				s.TTL.Reset()
+				if err := s.TTL.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"ttl\"")
 			}
 		default:
 			return d.Skip()
@@ -421,18 +421,18 @@ func (s *CreateNoteResponse) encodeFields(e *jx.Encoder) {
 		e.Bool(s.BurnAfterReading)
 	}
 	{
+		if s.ExpiresAt.Set {
+			e.FieldStart("expires_at")
+			s.ExpiresAt.Encode(e, json.EncodeDateTime)
+		}
+	}
+	{
 		e.FieldStart("created_at")
 		json.EncodeDateTime(e, s.CreatedAt)
 	}
 	{
 		e.FieldStart("updated_at")
 		json.EncodeDateTime(e, s.UpdatedAt)
-	}
-	{
-		if s.ExpiresAt.Set {
-			e.FieldStart("expires_at")
-			s.ExpiresAt.Encode(e, json.EncodeDateTime)
-		}
 	}
 	{
 		e.FieldStart("edit_code")
@@ -447,9 +447,9 @@ var jsonFieldsNameOfCreateNoteResponse = [10]string{
 	3: "content_type",
 	4: "views",
 	5: "burn_after_reading",
-	6: "created_at",
-	7: "updated_at",
-	8: "expires_at",
+	6: "expires_at",
+	7: "created_at",
+	8: "updated_at",
 	9: "edit_code",
 }
 
@@ -532,8 +532,18 @@ func (s *CreateNoteResponse) Decode(d *jx.Decoder) error {
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"burn_after_reading\"")
 			}
+		case "expires_at":
+			if err := func() error {
+				s.ExpiresAt.Reset()
+				if err := s.ExpiresAt.Decode(d, json.DecodeDateTime); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"expires_at\"")
+			}
 		case "created_at":
-			requiredBitSet[0] |= 1 << 6
+			requiredBitSet[0] |= 1 << 7
 			if err := func() error {
 				v, err := json.DecodeDateTime(d)
 				s.CreatedAt = v
@@ -545,7 +555,7 @@ func (s *CreateNoteResponse) Decode(d *jx.Decoder) error {
 				return errors.Wrap(err, "decode field \"created_at\"")
 			}
 		case "updated_at":
-			requiredBitSet[0] |= 1 << 7
+			requiredBitSet[1] |= 1 << 0
 			if err := func() error {
 				v, err := json.DecodeDateTime(d)
 				s.UpdatedAt = v
@@ -555,16 +565,6 @@ func (s *CreateNoteResponse) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"updated_at\"")
-			}
-		case "expires_at":
-			if err := func() error {
-				s.ExpiresAt.Reset()
-				if err := s.ExpiresAt.Decode(d, json.DecodeDateTime); err != nil {
-					return err
-				}
-				return nil
-			}(); err != nil {
-				return errors.Wrap(err, "decode field \"expires_at\"")
 			}
 		case "edit_code":
 			requiredBitSet[1] |= 1 << 1
@@ -588,8 +588,8 @@ func (s *CreateNoteResponse) Decode(d *jx.Decoder) error {
 	// Validate required fields.
 	var failures []validate.FieldError
 	for i, mask := range [2]uint8{
-		0b11111111,
-		0b00000010,
+		0b10111111,
+		0b00000011,
 	} {
 		if result := (requiredBitSet[i] & mask) ^ mask; result != 0 {
 			// Mask only required fields and check equality to mask using XOR.
@@ -1147,18 +1147,18 @@ func (s *NoteResponse) encodeFields(e *jx.Encoder) {
 		e.Bool(s.BurnAfterReading)
 	}
 	{
+		if s.ExpiresAt.Set {
+			e.FieldStart("expires_at")
+			s.ExpiresAt.Encode(e, json.EncodeDateTime)
+		}
+	}
+	{
 		e.FieldStart("created_at")
 		json.EncodeDateTime(e, s.CreatedAt)
 	}
 	{
 		e.FieldStart("updated_at")
 		json.EncodeDateTime(e, s.UpdatedAt)
-	}
-	{
-		if s.ExpiresAt.Set {
-			e.FieldStart("expires_at")
-			s.ExpiresAt.Encode(e, json.EncodeDateTime)
-		}
 	}
 }
 
@@ -1169,9 +1169,9 @@ var jsonFieldsNameOfNoteResponse = [9]string{
 	3: "content_type",
 	4: "views",
 	5: "burn_after_reading",
-	6: "created_at",
-	7: "updated_at",
-	8: "expires_at",
+	6: "expires_at",
+	7: "created_at",
+	8: "updated_at",
 }
 
 // Decode decodes NoteResponse from json.
@@ -1253,8 +1253,18 @@ func (s *NoteResponse) Decode(d *jx.Decoder) error {
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"burn_after_reading\"")
 			}
+		case "expires_at":
+			if err := func() error {
+				s.ExpiresAt.Reset()
+				if err := s.ExpiresAt.Decode(d, json.DecodeDateTime); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"expires_at\"")
+			}
 		case "created_at":
-			requiredBitSet[0] |= 1 << 6
+			requiredBitSet[0] |= 1 << 7
 			if err := func() error {
 				v, err := json.DecodeDateTime(d)
 				s.CreatedAt = v
@@ -1266,7 +1276,7 @@ func (s *NoteResponse) Decode(d *jx.Decoder) error {
 				return errors.Wrap(err, "decode field \"created_at\"")
 			}
 		case "updated_at":
-			requiredBitSet[0] |= 1 << 7
+			requiredBitSet[1] |= 1 << 0
 			if err := func() error {
 				v, err := json.DecodeDateTime(d)
 				s.UpdatedAt = v
@@ -1276,16 +1286,6 @@ func (s *NoteResponse) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"updated_at\"")
-			}
-		case "expires_at":
-			if err := func() error {
-				s.ExpiresAt.Reset()
-				if err := s.ExpiresAt.Decode(d, json.DecodeDateTime); err != nil {
-					return err
-				}
-				return nil
-			}(); err != nil {
-				return errors.Wrap(err, "decode field \"expires_at\"")
 			}
 		default:
 			return d.Skip()
@@ -1297,8 +1297,8 @@ func (s *NoteResponse) Decode(d *jx.Decoder) error {
 	// Validate required fields.
 	var failures []validate.FieldError
 	for i, mask := range [2]uint8{
-		0b11111111,
-		0b00000000,
+		0b10111111,
+		0b00000001,
 	} {
 		if result := (requiredBitSet[i] & mask) ^ mask; result != 0 {
 			// Mask only required fields and check equality to mask using XOR.
@@ -1770,15 +1770,15 @@ func (s *UpdateNoteRequest) encodeFields(e *jx.Encoder) {
 		e.Str(s.EditCode)
 	}
 	{
-		if s.TTL.Set {
-			e.FieldStart("ttl")
-			s.TTL.Encode(e)
-		}
-	}
-	{
 		if s.BurnAfterReading.Set {
 			e.FieldStart("burn_after_reading")
 			s.BurnAfterReading.Encode(e)
+		}
+	}
+	{
+		if s.TTL.Set {
+			e.FieldStart("ttl")
+			s.TTL.Encode(e)
 		}
 	}
 }
@@ -1788,8 +1788,8 @@ var jsonFieldsNameOfUpdateNoteRequest = [6]string{
 	1: "content",
 	2: "content_type",
 	3: "edit_code",
-	4: "ttl",
-	5: "burn_after_reading",
+	4: "burn_after_reading",
+	5: "ttl",
 }
 
 // Decode decodes UpdateNoteRequest from json.
@@ -1847,16 +1847,6 @@ func (s *UpdateNoteRequest) Decode(d *jx.Decoder) error {
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"edit_code\"")
 			}
-		case "ttl":
-			if err := func() error {
-				s.TTL.Reset()
-				if err := s.TTL.Decode(d); err != nil {
-					return err
-				}
-				return nil
-			}(); err != nil {
-				return errors.Wrap(err, "decode field \"ttl\"")
-			}
 		case "burn_after_reading":
 			if err := func() error {
 				s.BurnAfterReading.Reset()
@@ -1866,6 +1856,16 @@ func (s *UpdateNoteRequest) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"burn_after_reading\"")
+			}
+		case "ttl":
+			if err := func() error {
+				s.TTL.Reset()
+				if err := s.TTL.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"ttl\"")
 			}
 		default:
 			return d.Skip()

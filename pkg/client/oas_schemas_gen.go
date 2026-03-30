@@ -22,12 +22,24 @@ func (*CreateNoteInternalServerError) createNoteRes() {}
 
 // Ref: #/components/schemas/CreateNoteRequest
 type CreateNoteRequest struct {
-	Title            string                          `json:"title"`
-	Content          string                          `json:"content"`
-	ContentType      OptCreateNoteRequestContentType `json:"content_type"`
-	Slug             OptString                       `json:"slug"`
-	TTL              OptInt64                        `json:"ttl"`
-	BurnAfterReading OptBool                         `json:"burn_after_reading"`
+	// Human-readable title shown in the note header.
+	Title string `json:"title"`
+	// Note body. Interpreted as Markdown unless `content_type` is `text/plain`.
+	Content string `json:"content"`
+	// MIME type of `content`; controls rendering on the view page.
+	ContentType OptCreateNoteRequestContentType `json:"content_type"`
+	// Custom URL-friendly identifier. Must match `[a-zA-Z0-9_-]+`.
+	// If omitted a 10-character random slug is generated.
+	// Returns `409` if the slug is already taken.
+	Slug OptString `json:"slug"`
+	// When `true` the note self-destructs after the first read.
+	// If `ttl` is also provided the note is not deleted immediately but expires `ttl`
+	// seconds after the first read.
+	BurnAfterReading OptBool `json:"burn_after_reading"`
+	// Grace period in seconds after the first read before the note expires.
+	// Only meaningful when `burn_after_reading` is `true`.
+	// `0` (or omitted) means the note is deleted on the first read with no grace period.
+	TTL OptInt64 `json:"ttl"`
 }
 
 // GetTitle returns the value of Title.
@@ -50,14 +62,14 @@ func (s *CreateNoteRequest) GetSlug() OptString {
 	return s.Slug
 }
 
-// GetTTL returns the value of TTL.
-func (s *CreateNoteRequest) GetTTL() OptInt64 {
-	return s.TTL
-}
-
 // GetBurnAfterReading returns the value of BurnAfterReading.
 func (s *CreateNoteRequest) GetBurnAfterReading() OptBool {
 	return s.BurnAfterReading
+}
+
+// GetTTL returns the value of TTL.
+func (s *CreateNoteRequest) GetTTL() OptInt64 {
+	return s.TTL
 }
 
 // SetTitle sets the value of Title.
@@ -80,16 +92,17 @@ func (s *CreateNoteRequest) SetSlug(val OptString) {
 	s.Slug = val
 }
 
-// SetTTL sets the value of TTL.
-func (s *CreateNoteRequest) SetTTL(val OptInt64) {
-	s.TTL = val
-}
-
 // SetBurnAfterReading sets the value of BurnAfterReading.
 func (s *CreateNoteRequest) SetBurnAfterReading(val OptBool) {
 	s.BurnAfterReading = val
 }
 
+// SetTTL sets the value of TTL.
+func (s *CreateNoteRequest) SetTTL(val OptInt64) {
+	s.TTL = val
+}
+
+// MIME type of `content`; controls rendering on the view page.
 type CreateNoteRequestContentType string
 
 const (
@@ -135,18 +148,34 @@ type CreateNoteRequestEntityTooLarge ErrorResponse
 
 func (*CreateNoteRequestEntityTooLarge) createNoteRes() {}
 
+// Merged schema.
 // Ref: #/components/schemas/CreateNoteResponse
 type CreateNoteResponse struct {
-	ID               string                        `json:"id"`
-	Title            string                        `json:"title"`
-	Content          string                        `json:"content"`
-	ContentType      CreateNoteResponseContentType `json:"content_type"`
-	Views            int                           `json:"views"`
-	BurnAfterReading bool                          `json:"burn_after_reading"`
-	CreatedAt        time.Time                     `json:"created_at"`
-	UpdatedAt        time.Time                     `json:"updated_at"`
-	ExpiresAt        OptDateTime                   `json:"expires_at"`
-	EditCode         string                        `json:"edit_code"`
+	// Unique slug identifying the note.
+	ID string `json:"id"`
+	// Note title.
+	Title string `json:"title"`
+	// Note body (Markdown or plain text depending on `content_type`).
+	Content string `json:"content"`
+	// MIME type of `content`.
+	ContentType CreateNoteResponseContentType `json:"content_type"`
+	// Number of times the note has been fetched via GET.
+	Views int `json:"views"`
+	// `true` until the first read (or permanently `false` for non-burn notes).
+	// After the first read of a note with a TTL this becomes `false` and `expires_at`
+	// is set.
+	BurnAfterReading bool `json:"burn_after_reading"`
+	// ISO 8601 timestamp after which the note is inaccessible.
+	// Set on the first read for burn-after-reading notes that have a TTL.
+	// `null` for notes that are not expiring.
+	ExpiresAt OptDateTime `json:"expires_at"`
+	// Creation timestamp (UTC).
+	CreatedAt time.Time `json:"created_at"`
+	// Last-update timestamp (UTC).
+	UpdatedAt time.Time `json:"updated_at"`
+	// One-time secret required for future `PUT` and `DELETE` requests.
+	// This is the only time `edit_code` is returned — store it securely.
+	EditCode string `json:"edit_code"`
 }
 
 // GetID returns the value of ID.
@@ -179,6 +208,11 @@ func (s *CreateNoteResponse) GetBurnAfterReading() bool {
 	return s.BurnAfterReading
 }
 
+// GetExpiresAt returns the value of ExpiresAt.
+func (s *CreateNoteResponse) GetExpiresAt() OptDateTime {
+	return s.ExpiresAt
+}
+
 // GetCreatedAt returns the value of CreatedAt.
 func (s *CreateNoteResponse) GetCreatedAt() time.Time {
 	return s.CreatedAt
@@ -187,11 +221,6 @@ func (s *CreateNoteResponse) GetCreatedAt() time.Time {
 // GetUpdatedAt returns the value of UpdatedAt.
 func (s *CreateNoteResponse) GetUpdatedAt() time.Time {
 	return s.UpdatedAt
-}
-
-// GetExpiresAt returns the value of ExpiresAt.
-func (s *CreateNoteResponse) GetExpiresAt() OptDateTime {
-	return s.ExpiresAt
 }
 
 // GetEditCode returns the value of EditCode.
@@ -229,6 +258,11 @@ func (s *CreateNoteResponse) SetBurnAfterReading(val bool) {
 	s.BurnAfterReading = val
 }
 
+// SetExpiresAt sets the value of ExpiresAt.
+func (s *CreateNoteResponse) SetExpiresAt(val OptDateTime) {
+	s.ExpiresAt = val
+}
+
 // SetCreatedAt sets the value of CreatedAt.
 func (s *CreateNoteResponse) SetCreatedAt(val time.Time) {
 	s.CreatedAt = val
@@ -239,16 +273,12 @@ func (s *CreateNoteResponse) SetUpdatedAt(val time.Time) {
 	s.UpdatedAt = val
 }
 
-// SetExpiresAt sets the value of ExpiresAt.
-func (s *CreateNoteResponse) SetExpiresAt(val OptDateTime) {
-	s.ExpiresAt = val
-}
-
 // SetEditCode sets the value of EditCode.
 func (s *CreateNoteResponse) SetEditCode(val string) {
 	s.EditCode = val
 }
 
+// MIME type of `content`.
 type CreateNoteResponseContentType string
 
 const (
@@ -349,6 +379,7 @@ func (*DeleteNoteUnauthorized) deleteNoteRes() {}
 
 // Ref: #/components/schemas/ErrorResponse
 type ErrorResponse struct {
+	// Human-readable error description.
 	Message string `json:"message"`
 }
 
@@ -381,15 +412,28 @@ type HealthzOK struct{}
 
 // Ref: #/components/schemas/NoteResponse
 type NoteResponse struct {
-	ID               string                  `json:"id"`
-	Title            string                  `json:"title"`
-	Content          string                  `json:"content"`
-	ContentType      NoteResponseContentType `json:"content_type"`
-	Views            int                     `json:"views"`
-	BurnAfterReading bool                    `json:"burn_after_reading"`
-	CreatedAt        time.Time               `json:"created_at"`
-	UpdatedAt        time.Time               `json:"updated_at"`
-	ExpiresAt        OptDateTime             `json:"expires_at"`
+	// Unique slug identifying the note.
+	ID string `json:"id"`
+	// Note title.
+	Title string `json:"title"`
+	// Note body (Markdown or plain text depending on `content_type`).
+	Content string `json:"content"`
+	// MIME type of `content`.
+	ContentType NoteResponseContentType `json:"content_type"`
+	// Number of times the note has been fetched via GET.
+	Views int `json:"views"`
+	// `true` until the first read (or permanently `false` for non-burn notes).
+	// After the first read of a note with a TTL this becomes `false` and `expires_at`
+	// is set.
+	BurnAfterReading bool `json:"burn_after_reading"`
+	// ISO 8601 timestamp after which the note is inaccessible.
+	// Set on the first read for burn-after-reading notes that have a TTL.
+	// `null` for notes that are not expiring.
+	ExpiresAt OptDateTime `json:"expires_at"`
+	// Creation timestamp (UTC).
+	CreatedAt time.Time `json:"created_at"`
+	// Last-update timestamp (UTC).
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // GetID returns the value of ID.
@@ -422,6 +466,11 @@ func (s *NoteResponse) GetBurnAfterReading() bool {
 	return s.BurnAfterReading
 }
 
+// GetExpiresAt returns the value of ExpiresAt.
+func (s *NoteResponse) GetExpiresAt() OptDateTime {
+	return s.ExpiresAt
+}
+
 // GetCreatedAt returns the value of CreatedAt.
 func (s *NoteResponse) GetCreatedAt() time.Time {
 	return s.CreatedAt
@@ -430,11 +479,6 @@ func (s *NoteResponse) GetCreatedAt() time.Time {
 // GetUpdatedAt returns the value of UpdatedAt.
 func (s *NoteResponse) GetUpdatedAt() time.Time {
 	return s.UpdatedAt
-}
-
-// GetExpiresAt returns the value of ExpiresAt.
-func (s *NoteResponse) GetExpiresAt() OptDateTime {
-	return s.ExpiresAt
 }
 
 // SetID sets the value of ID.
@@ -467,6 +511,11 @@ func (s *NoteResponse) SetBurnAfterReading(val bool) {
 	s.BurnAfterReading = val
 }
 
+// SetExpiresAt sets the value of ExpiresAt.
+func (s *NoteResponse) SetExpiresAt(val OptDateTime) {
+	s.ExpiresAt = val
+}
+
 // SetCreatedAt sets the value of CreatedAt.
 func (s *NoteResponse) SetCreatedAt(val time.Time) {
 	s.CreatedAt = val
@@ -477,14 +526,10 @@ func (s *NoteResponse) SetUpdatedAt(val time.Time) {
 	s.UpdatedAt = val
 }
 
-// SetExpiresAt sets the value of ExpiresAt.
-func (s *NoteResponse) SetExpiresAt(val OptDateTime) {
-	s.ExpiresAt = val
-}
-
 func (*NoteResponse) getNoteRes()    {}
 func (*NoteResponse) updateNoteRes() {}
 
+// MIME type of `content`.
 type NoteResponseContentType string
 
 const (
@@ -825,12 +870,19 @@ func (*UpdateNoteNotFound) updateNoteRes() {}
 
 // Ref: #/components/schemas/UpdateNoteRequest
 type UpdateNoteRequest struct {
-	Title            string                          `json:"title"`
-	Content          string                          `json:"content"`
-	ContentType      OptUpdateNoteRequestContentType `json:"content_type"`
-	EditCode         string                          `json:"edit_code"`
-	TTL              OptInt64                        `json:"ttl"`
-	BurnAfterReading OptBool                         `json:"burn_after_reading"`
+	// New title.
+	Title string `json:"title"`
+	// New body.
+	Content string `json:"content"`
+	// New content type; defaults to the note's current type when omitted.
+	ContentType OptUpdateNoteRequestContentType `json:"content_type"`
+	// The edit code returned when the note was created.
+	EditCode string `json:"edit_code"`
+	// Update the burn-after-reading flag.
+	BurnAfterReading OptBool `json:"burn_after_reading"`
+	// New TTL in seconds (grace period after first read).
+	// Only meaningful when `burn_after_reading` is `true`.
+	TTL OptInt64 `json:"ttl"`
 }
 
 // GetTitle returns the value of Title.
@@ -853,14 +905,14 @@ func (s *UpdateNoteRequest) GetEditCode() string {
 	return s.EditCode
 }
 
-// GetTTL returns the value of TTL.
-func (s *UpdateNoteRequest) GetTTL() OptInt64 {
-	return s.TTL
-}
-
 // GetBurnAfterReading returns the value of BurnAfterReading.
 func (s *UpdateNoteRequest) GetBurnAfterReading() OptBool {
 	return s.BurnAfterReading
+}
+
+// GetTTL returns the value of TTL.
+func (s *UpdateNoteRequest) GetTTL() OptInt64 {
+	return s.TTL
 }
 
 // SetTitle sets the value of Title.
@@ -883,16 +935,17 @@ func (s *UpdateNoteRequest) SetEditCode(val string) {
 	s.EditCode = val
 }
 
-// SetTTL sets the value of TTL.
-func (s *UpdateNoteRequest) SetTTL(val OptInt64) {
-	s.TTL = val
-}
-
 // SetBurnAfterReading sets the value of BurnAfterReading.
 func (s *UpdateNoteRequest) SetBurnAfterReading(val OptBool) {
 	s.BurnAfterReading = val
 }
 
+// SetTTL sets the value of TTL.
+func (s *UpdateNoteRequest) SetTTL(val OptInt64) {
+	s.TTL = val
+}
+
+// New content type; defaults to the note's current type when omitted.
 type UpdateNoteRequestContentType string
 
 const (

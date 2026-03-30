@@ -16,9 +16,12 @@ import (
 
 // DeleteNoteParams is parameters of deleteNote operation.
 type DeleteNoteParams struct {
-	ID        string
+	// Note ID (slug) — 10-char random string or the custom slug chosen at creation.
+	ID string
+	// Edit code returned at note creation (alternative to `edit_code` query param).
 	XEditCode OptString `json:",omitempty,omitzero"`
-	EditCode  OptString `json:",omitempty,omitzero"`
+	// Edit code returned at note creation (alternative to `X-Edit-Code` header).
+	EditCode OptString `json:",omitempty,omitzero"`
 }
 
 func unpackDeleteNoteParams(packed middleware.Parameters) (params DeleteNoteParams) {
@@ -183,6 +186,7 @@ func decodeDeleteNoteParams(args [1]string, argsEscaped bool, r *http.Request) (
 
 // GetNoteParams is parameters of getNote operation.
 type GetNoteParams struct {
+	// Note ID (slug) — 10-char random string or the custom slug chosen at creation.
 	ID string
 }
 
@@ -248,6 +252,7 @@ func decodeGetNoteParams(args [1]string, argsEscaped bool, r *http.Request) (par
 
 // UpdateNoteParams is parameters of updateNote operation.
 type UpdateNoteParams struct {
+	// Note ID (slug) — 10-char random string or the custom slug chosen at creation.
 	ID string
 }
 

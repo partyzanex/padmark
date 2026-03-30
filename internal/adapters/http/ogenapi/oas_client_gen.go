@@ -29,37 +29,46 @@ func trimTrailingSlashes(u *url.URL) {
 type Invoker interface {
 	// CreateNote invokes createNote operation.
 	//
-	// Create a new note.
+	// Creates a note and returns it together with the one-time `edit_code`.
+	// If `slug` is omitted a 10-character random slug is generated.
+	// Responds `409 Conflict` when the requested slug is already taken.
 	//
 	// POST /notes
 	CreateNote(ctx context.Context, request *CreateNoteRequest) (CreateNoteRes, error)
 	// DeleteNote invokes deleteNote operation.
 	//
-	// Requires the edit code via X-Edit-Code header or edit_code query parameter.
+	// Permanently deletes the note.  The edit code must be supplied either as the
+	// `X-Edit-Code` request header or the `edit_code` query parameter.
 	//
 	// DELETE /notes/{id}
 	DeleteNote(ctx context.Context, params DeleteNoteParams) (DeleteNoteRes, error)
 	// GetNote invokes getNote operation.
 	//
-	// Returns a note as JSON. Increments the view counter.
+	// Returns the note as JSON.  Increments the view counter on every call.
+	// For burn-after-reading notes **without TTL** the note is deleted on this request and
+	// the response body is the last snapshot of the note before deletion.
+	// For burn-after-reading notes **with TTL** `expires_at` is set on the first read to
+	// `now + ttl` and the note expires automatically when that timestamp is reached.
 	//
 	// GET /notes/{id}
 	GetNote(ctx context.Context, params GetNoteParams) (GetNoteRes, error)
 	// Healthz invokes healthz operation.
 	//
-	// Liveness probe.
+	// Returns 200 as long as the process is running.
 	//
 	// GET /healthz
 	Healthz(ctx context.Context) error
 	// Readyz invokes readyz operation.
 	//
-	// Readiness probe.
+	// Returns 200 when the storage backend is reachable, 503 otherwise.
 	//
 	// GET /readyz
 	Readyz(ctx context.Context) (ReadyzRes, error)
 	// UpdateNote invokes updateNote operation.
 	//
-	// Requires the edit code that was returned when the note was created.
+	// Replaces the note's title, content, content type, and burn settings.
+	// The `edit_code` must match the one returned when the note was created.
+	// Returns the updated note.
 	//
 	// PUT /notes/{id}
 	UpdateNote(ctx context.Context, request *UpdateNoteRequest, params UpdateNoteParams) (UpdateNoteRes, error)
@@ -106,7 +115,9 @@ func (c *Client) requestURL(ctx context.Context) *url.URL {
 
 // CreateNote invokes createNote operation.
 //
-// Create a new note.
+// Creates a note and returns it together with the one-time `edit_code`.
+// If `slug` is omitted a 10-character random slug is generated.
+// Responds `409 Conflict` when the requested slug is already taken.
 //
 // POST /notes
 func (c *Client) CreateNote(ctx context.Context, request *CreateNoteRequest) (CreateNoteRes, error) {
@@ -183,7 +194,8 @@ func (c *Client) sendCreateNote(ctx context.Context, request *CreateNoteRequest)
 
 // DeleteNote invokes deleteNote operation.
 //
-// Requires the edit code via X-Edit-Code header or edit_code query parameter.
+// Permanently deletes the note.  The edit code must be supplied either as the
+// `X-Edit-Code` request header or the `edit_code` query parameter.
 //
 // DELETE /notes/{id}
 func (c *Client) DeleteNote(ctx context.Context, params DeleteNoteParams) (DeleteNoteRes, error) {
@@ -313,7 +325,11 @@ func (c *Client) sendDeleteNote(ctx context.Context, params DeleteNoteParams) (r
 
 // GetNote invokes getNote operation.
 //
-// Returns a note as JSON. Increments the view counter.
+// Returns the note as JSON.  Increments the view counter on every call.
+// For burn-after-reading notes **without TTL** the note is deleted on this request and
+// the response body is the last snapshot of the note before deletion.
+// For burn-after-reading notes **with TTL** `expires_at` is set on the first read to
+// `now + ttl` and the note expires automatically when that timestamp is reached.
 //
 // GET /notes/{id}
 func (c *Client) GetNote(ctx context.Context, params GetNoteParams) (GetNoteRes, error) {
@@ -405,7 +421,7 @@ func (c *Client) sendGetNote(ctx context.Context, params GetNoteParams) (res Get
 
 // Healthz invokes healthz operation.
 //
-// Liveness probe.
+// Returns 200 as long as the process is running.
 //
 // GET /healthz
 func (c *Client) Healthz(ctx context.Context) error {
@@ -479,7 +495,7 @@ func (c *Client) sendHealthz(ctx context.Context) (res *HealthzOK, err error) {
 
 // Readyz invokes readyz operation.
 //
-// Readiness probe.
+// Returns 200 when the storage backend is reachable, 503 otherwise.
 //
 // GET /readyz
 func (c *Client) Readyz(ctx context.Context) (ReadyzRes, error) {
@@ -553,7 +569,9 @@ func (c *Client) sendReadyz(ctx context.Context) (res ReadyzRes, err error) {
 
 // UpdateNote invokes updateNote operation.
 //
-// Requires the edit code that was returned when the note was created.
+// Replaces the note's title, content, content type, and burn settings.
+// The `edit_code` must match the one returned when the note was created.
+// Returns the updated note.
 //
 // PUT /notes/{id}
 func (c *Client) UpdateNote(ctx context.Context, request *UpdateNoteRequest, params UpdateNoteParams) (UpdateNoteRes, error) {
