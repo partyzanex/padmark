@@ -27,7 +27,7 @@ type RepositoryTestSuite struct {
 func (s *RepositoryTestSuite) SetupSuite() {
 	ctx := s.T().Context()
 
-	container, err := tcpostgres.Run(ctx, "postgres:16-alpine",
+	container, err := tcpostgres.Run(ctx, "postgres:18-alpine",
 		tcpostgres.WithDatabase("padmark_test"),
 		tcpostgres.WithUsername("test"),
 		tcpostgres.WithPassword("test"),
