@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"fmt"
 
+	highlighting "github.com/yuin/goldmark-highlighting/v2"
+
+	chromahtml "github.com/alecthomas/chroma/v2/formatters/html"
 	"github.com/microcosm-cc/bluemonday"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/extension"
@@ -17,13 +20,20 @@ type Renderer struct {
 	policy *bluemonday.Policy
 }
 
-// NewRenderer returns a Renderer with tables, strikethrough, and autolinks enabled.
+// NewRenderer returns a Renderer with tables, strikethrough, autolinks and syntax highlighting enabled.
 func NewRenderer() *Renderer {
 	md := goldmark.New(
 		goldmark.WithExtensions(
 			extension.Table,
 			extension.Strikethrough,
 			extension.Linkify,
+			highlighting.NewHighlighting(
+				highlighting.WithStyle("github-dark"),
+				highlighting.WithFormatOptions(
+					chromahtml.WithClasses(false),
+					chromahtml.WithLineNumbers(false),
+				),
+			),
 		),
 		goldmark.WithParserOptions(
 			parser.WithAutoHeadingID(),
@@ -37,6 +47,7 @@ func NewRenderer() *Renderer {
 	policy := bluemonday.UGCPolicy()
 	policy.RequireNoFollowOnLinks(true)
 	policy.AddTargetBlankToFullyQualifiedLinks(true)
+	policy.AllowAttrs("style").OnElements("span", "code", "pre")
 
 	return &Renderer{
 		md:     md,
