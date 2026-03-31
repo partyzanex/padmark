@@ -261,6 +261,12 @@ components:
             Only meaningful when `burn_after_reading` is `true`.
             `0` (or omitted) means the note is deleted on the first read with no grace period.
           example: 3600
+        edit_code:
+          type: string
+          description: |
+            Optional custom edit code. If omitted a random 12-character code is generated.
+            Intended for CLI and automation use; the web UI does not expose this field.
+          example: MySecretCode1
 
     UpdateNoteRequest:
       type: object

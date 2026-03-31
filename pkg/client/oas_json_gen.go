@@ -168,15 +168,22 @@ func (s *CreateNoteRequest) encodeFields(e *jx.Encoder) {
 			s.TTL.Encode(e)
 		}
 	}
+	{
+		if s.EditCode.Set {
+			e.FieldStart("edit_code")
+			s.EditCode.Encode(e)
+		}
+	}
 }
 
-var jsonFieldsNameOfCreateNoteRequest = [6]string{
+var jsonFieldsNameOfCreateNoteRequest = [7]string{
 	0: "title",
 	1: "content",
 	2: "content_type",
 	3: "slug",
 	4: "burn_after_reading",
 	5: "ttl",
+	6: "edit_code",
 }
 
 // Decode decodes CreateNoteRequest from json.
@@ -252,6 +259,16 @@ func (s *CreateNoteRequest) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"ttl\"")
+			}
+		case "edit_code":
+			if err := func() error {
+				s.EditCode.Reset()
+				if err := s.EditCode.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"edit_code\"")
 			}
 		default:
 			return d.Skip()

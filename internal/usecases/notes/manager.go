@@ -110,7 +110,9 @@ func (m *Manager) Create(ctx context.Context, note *domain.Note) (*domain.Note, 
 		note.ID = newSlug()
 	}
 
-	note.EditCode = newEditCode()
+	if note.EditCode == "" {
+		note.EditCode = newEditCode()
+	}
 
 	now := time.Now().UTC()
 	note.CreatedAt = now

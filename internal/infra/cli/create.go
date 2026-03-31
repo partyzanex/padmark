@@ -52,6 +52,12 @@ func createCommand() *urcli.Command {
 				Name:  FlagTTL,
 				Usage: "Seconds the note survives after the first read (only with --burn)",
 			},
+			&urcli.StringFlag{
+				Name:    FlagEditCode,
+				Aliases: []string{"e"},
+				Usage:   "Custom edit code (random 12-char code generated if omitted)",
+				Sources: urcli.EnvVars(EnvEditCode),
+			},
 		},
 		Action: createAction,
 	}
@@ -106,6 +112,10 @@ func buildCreateReq(cmd *urcli.Command, content string) *padmark.CreateNoteReque
 
 	if slug := cmd.String(FlagSlug); slug != "" {
 		req.Slug = padmark.NewOptString(slug)
+	}
+
+	if ec := cmd.String(FlagEditCode); ec != "" {
+		req.EditCode = padmark.NewOptString(ec)
 	}
 
 	if cmd.Bool(FlagBurn) {

@@ -43,6 +43,7 @@ func (h *OgenHandler) CreateNote(
 		Title:            req.Title,
 		Content:          req.Content,
 		ContentType:      ct,
+		EditCode:         req.EditCode.Or(""),
 		BurnTTL:          burnTTL,
 		BurnAfterReading: burnAfterReading,
 	})

@@ -55,6 +55,71 @@ func (s *ManagerTestSuite) TestCreate_OK() {
 	s.Equal(domain.ContentTypeMarkdown, result.ContentType)
 }
 
+func (s *ManagerTestSuite) TestCreate_WithCustomEditCode() {
+	note := &domain.Note{Title: "hello", Content: "world", EditCode: "MyCustomCode1"}
+	s.storage.EXPECT().Create(gomock.Any(), note).Return(nil)
+
+	result, err := s.manager.Create(s.T().Context(), note)
+
+	s.Require().NoError(err)
+	s.Equal("MyCustomCode1", result.EditCode)
+}
+
+func (s *ManagerTestSuite) TestCreate_EmptyEditCodeIsGenerated() {
+	note := &domain.Note{Title: "hello", Content: "world", EditCode: ""}
+	s.storage.EXPECT().Create(gomock.Any(), note).Return(nil)
+
+	result, err := s.manager.Create(s.T().Context(), note)
+
+	s.Require().NoError(err)
+	s.NotEmpty(result.EditCode)
+	s.Len(result.EditCode, 12)
+}
+
+func (s *ManagerTestSuite) TestCreate_CustomEditCodeUsedForUpdate() {
+	customCode := "MyCustomCode1"
+
+	note := &domain.Note{Title: "hello", Content: "world", EditCode: customCode}
+	s.storage.EXPECT().Create(gomock.Any(), note).Return(nil)
+
+	created, err := s.manager.Create(s.T().Context(), note)
+	s.Require().NoError(err)
+	s.Equal(customCode, created.EditCode)
+
+	// Update with the custom code must succeed
+	s.storage.EXPECT().Get(gomock.Any(), created.ID).Return(created, nil)
+	s.storage.EXPECT().Update(gomock.Any(), created.ID, gomock.Any()).Return(nil)
+
+	updated, err := s.manager.Update(s.T().Context(), created.ID, customCode, &domain.Note{
+		Title:   "updated",
+		Content: "new body",
+	})
+
+	s.Require().NoError(err)
+	s.Equal("updated", updated.Title)
+	s.Equal(customCode, updated.EditCode)
+}
+
+func (s *ManagerTestSuite) TestCreate_CustomEditCodeWrongCodeForbidden() {
+	customCode := "MyCustomCode1"
+
+	note := &domain.Note{Title: "hello", Content: "world", EditCode: customCode}
+	s.storage.EXPECT().Create(gomock.Any(), note).Return(nil)
+
+	created, err := s.manager.Create(s.T().Context(), note)
+	s.Require().NoError(err)
+
+	// Update with wrong code must fail
+	s.storage.EXPECT().Get(gomock.Any(), created.ID).Return(created, nil)
+
+	_, err = s.manager.Update(s.T().Context(), created.ID, "WrongCode1234", &domain.Note{
+		Title:   "updated",
+		Content: "new body",
+	})
+
+	s.ErrorIs(err, domain.ErrForbidden)
+}
+
 func (s *ManagerTestSuite) TestCreate_EmptyTitle() {
 	_, err := s.manager.Create(s.T().Context(), &domain.Note{Content: "body"})
 

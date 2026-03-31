@@ -1,110 +1,183 @@
 # padmark
 
-A self-hosted Markdown pastebin with a web UI, REST API, burn-after-reading, edit codes, and token-based auth.
+Padmark is a self-hosted Markdown pastebin with a web UI, JSON API, and CLI.
+
+It is built for one simple job: publish a note, get a short link, and keep editing or deleting that note with a private edit code instead of a user account.
+
+## What Padmark Is For
+
+Padmark is useful when you want to:
+
+- share Markdown notes, snippets, logs, or short instructions by URL;
+- run a private pastebin inside your own infrastructure;
+- create notes that disappear after the first read;
+- script note creation and retrieval from the terminal or another service.
+
+Padmark is not a team wiki, not a collaborative editor, and not a document management system. It is intentionally lightweight.
+
+## Core Model
+
+Every note has:
+
+- a public URL slug such as `abc123def4` or a custom slug you choose;
+- a title and body;
+- a content type: `text/markdown` or `text/plain`;
+- an `edit_code` returned once at creation time;
+- optional burn-after-reading behavior;
+- a view counter.
+
+The `edit_code` is the only secret required to update or delete a note. There are no per-note user accounts.
+
+## Burn-After-Reading
+
+Padmark supports two burn modes:
+
+- `burn_after_reading: true` with no TTL: the note is deleted on the first successful read;
+- `burn_after_reading: true` with `ttl: N`: the first read starts a countdown, and the note expires `N` seconds later.
+
+This is different from a normal fixed expiry. The timer starts on first read, not on creation.
+
+## Interfaces
+
+Padmark exposes the same note service in three ways:
+
+- Web UI: create, read, and edit notes in the browser
+- REST API: JSON CRUD with OpenAPI 3.1
+- CLI: `padmark-cli` for terminal workflows
+
+The API spec is the source of truth for the generated server and Go client.
 
 ## Features
 
-- **CLI client** — `padmark-cli` for creating, reading, editing, and deleting notes from the terminal
-- **Web UI** — create, view, and edit notes in the browser with live Markdown preview
-- **REST API** — JSON CRUD with OpenAPI 3.1 spec and generated Go client (`pkg/client`)
-- **Content negotiation** — `application/json`, `text/html`, `text/plain`, `text/markdown` via `Accept` header
-- **Short URLs** — notes accessible at `/{id}` (10-char random slug or custom)
-- **Burn after reading** — deleted immediately on first read; with TTL — survives for N seconds after first read
-- **Edit codes** — secret 12-char token returned on creation, required for edit/delete
-- **Rate limiting** — per-IP token bucket (configurable RPS and burst)
-- **TLS support** — HTTPS with optional HTTP→HTTPS redirect listener
-- **Token auth** — optional Bearer token + cookie-based login for the web UI
-- **Storage backends** — SQLite (default) or PostgreSQL
-- **Spec-first API** — [ogen](https://github.com/ogen-go/ogen) generated server and client from `openapi.yaml`
-- **Three themes** — light, dim (default), dark — persisted in localStorage
-- **API docs** — embedded Redoc UI at `/api`
+- Markdown and plain-text notes
+- Short URLs with generated or custom slugs
+- One-time `edit_code` for update and delete operations
+- Burn-after-reading with optional post-read TTL
+- HTML, JSON, Markdown, and plain-text responses depending on `Accept`
+- Sanitized Markdown rendering for browser views
+- SQLite or PostgreSQL storage
+- Optional token-based authentication
+- Per-IP rate limiting
+- TLS support with optional HTTP to HTTPS redirect
+- Embedded API docs at `/api`
 
-## Quick start
+## Quick Start
+
+### Run with SQLite
 
 ```bash
-# SQLite (default)
-go run ./cmd/padmark-server --addr :4000
-
-# PostgreSQL
-go run ./cmd/padmark-server --storage postgres --dsn "postgres://user:pass@localhost:5432/padmark?sslmode=disable"
+go run ./cmd/padmark-server serve --addr :4000
 ```
 
-Open `http://localhost:4000` in the browser.
-
-## Configuration
-
-| Flag | Env | Default | Description |
-|------|-----|---------|-------------|
-| `--addr` | `PADMARK_ADDR` | `:8080` | HTTP listen address |
-| `--storage` | `PADMARK_STORAGE` | `sqlite` | Storage backend: `sqlite`, `postgres` |
-| `--dsn` | `PADMARK_DSN` | `padmark.db` | Database DSN (file path for SQLite, connection string for PostgreSQL) |
-| `--log-level` | `PADMARK_LOG_LEVEL` | `info` | Log level: debug, info, warn, error |
-| `--log-format` | `PADMARK_LOG_FORMAT` | `json` | Log format: json, text |
-| `--auth-tokens` | `PADMARK_AUTH_TOKENS` | *(empty)* | Comma-separated Bearer tokens for write endpoints (empty = no auth) |
-| `--cookie-max-age` | `PADMARK_COOKIE_MAX_AGE` | `7776000` | Auth cookie max-age in seconds (default: 3 months) |
-| `--read-timeout` | `PADMARK_READ_TIMEOUT` | `30` | HTTP read timeout in seconds |
-| `--max-header-bytes` | `PADMARK_MAX_HEADER_BYTES` | `65536` | Maximum request header size in bytes |
-| `--max-body-bytes` | `PADMARK_MAX_BODY_BYTES` | `262144` | Maximum request body size in bytes |
-| `--rate-limit` | `PADMARK_RATE_LIMIT` | `10` | Requests per second per IP (0 = disabled) |
-| `--rate-burst` | `PADMARK_RATE_BURST` | `20` | Max burst size per IP |
-| `--tls-cert` | `PADMARK_TLS_CERT` | *(empty)* | Path to TLS certificate PEM file (enables HTTPS) |
-| `--tls-key` | `PADMARK_TLS_KEY` | *(empty)* | Path to TLS private key PEM file (enables HTTPS) |
-| `--http-redirect-addr` | `PADMARK_HTTP_REDIRECT_ADDR` | *(empty)* | HTTP→HTTPS redirect listener address (e.g. `:80`); TLS only |
-| `--trusted-proxies` | `PADMARK_TRUSTED_PROXIES` | *(empty)* | Comma-separated trusted proxy CIDRs/IPs for `X-Forwarded-For` |
-
-## CLI
+Or, since `serve` is the default action:
 
 ```bash
-# Install
+go run ./cmd/padmark-server --addr :4000
+```
+
+Then open `http://localhost:4000`.
+
+### Run with PostgreSQL
+
+```bash
+go run ./cmd/padmark-server serve \
+  --storage postgres \
+  --dsn "postgres://user:pass@localhost:5432/padmark?sslmode=disable" \
+  --addr :4000
+```
+
+### Run migrations only
+
+```bash
+go run ./cmd/padmark-server migrate --storage sqlite --dsn padmark.db
+```
+
+## Using the Web UI
+
+Open `/` and publish a note:
+
+1. Enter the note content
+2. Optionally set a title
+3. Optionally choose a custom slug
+4. Optionally enable burn-after-reading
+5. Click `Publish`
+
+After creation, Padmark shows:
+
+- the note URL;
+- the `edit_code`.
+
+Store the `edit_code`. It is required for editing and deleting, and it cannot be recovered later.
+
+## Using the CLI
+
+Install:
+
+```bash
 go install github.com/partyzanex/padmark/cmd/padmark-cli@latest
+```
 
-# Global flags
-#   --url, -u    Server URL (env: PADMARK_URL, default: http://localhost:8080)
-#   --token      Bearer token (env: PADMARK_TOKEN)
+Defaults:
 
-# Create a note from a file
+- server URL: `http://localhost:8080`
+- env vars: `PADMARK_URL`, `PADMARK_TOKEN`, `PADMARK_EDIT_CODE`
+
+Examples:
+
+```bash
+# Create from a file
 padmark-cli create --file note.md
 
-# Create with custom slug and burn-after-reading (1 hour TTL)
-padmark-cli create --title "Secret" --content "eyes only" --slug my-secret --burn --ttl 3600
-
-# Pipe content from stdin
+# Create from stdin
 echo "# Hello" | padmark-cli create
 
-# Get a note (tabular output)
-padmark-cli get abc123def45
+# Create with a custom slug
+padmark-cli create --title "Runbook" --content "..." --slug deploy-notes
 
-# Get raw content only
-padmark-cli get --raw abc123def45
+# Create a burn-after-reading note that lives for 1 hour after first read
+padmark-cli create --title "Secret" --content "eyes only" --burn --ttl 3600
 
-# Get as JSON
-padmark-cli get --json abc123def45
+# Fetch a note
+padmark-cli get abc123def4
 
-# Edit a note
-padmark-cli edit abc123def45 --edit-code JmNkn0LdjbMw --title "Updated" --file new.md
+# Print only raw content
+padmark-cli get --raw abc123def4
+
+# Print JSON
+padmark-cli get --json abc123def4
+
+# Update a note
+padmark-cli edit abc123def4 --edit-code JmNkn0LdjbMw --file updated.md
 
 # Delete a note
-padmark-cli delete abc123def45 --edit-code JmNkn0LdjbMw
+padmark-cli delete abc123def4 --edit-code JmNkn0LdjbMw
 
-# Check server health
+# Health checks
 padmark-cli ping
 ```
 
-The edit code can also be set via `PADMARK_EDIT_CODE` environment variable.
+If `--title` is omitted, the CLI derives it from the first non-empty line of content.
 
-## API
+## Using the API
 
 ### Create a note
 
 ```bash
 curl -X POST http://localhost:4000/notes \
   -H "Content-Type: application/json" \
-  -d '{"title":"Hello","content":"# Hello\n\nThis is **padmark**."}'
+  -d '{
+    "title": "Hello",
+    "content": "# Hello\n\nThis is **padmark**."
+  }'
 ```
 
-Response includes `edit_code` — save it to edit or delete the note later.
+The response includes:
 
-### Get a note
+- `id`
+- `edit_code`
+- note metadata
+
+### Read a note
 
 ```bash
 # JSON
@@ -113,135 +186,205 @@ curl http://localhost:4000/notes/{id}
 # Rendered HTML
 curl -H "Accept: text/html" http://localhost:4000/notes/{id}
 
-# Raw Markdown
-curl http://localhost:4000/{id}?raw=1
+# Raw Markdown or text
+curl -H "Accept: text/plain" http://localhost:4000/notes/{id}
+
+# Browser-friendly short URL
+curl http://localhost:4000/{id}
 ```
 
-### Update (requires edit code)
+### Update a note
 
 ```bash
 curl -X PUT http://localhost:4000/notes/{id} \
   -H "Content-Type: application/json" \
-  -d '{"title":"Updated","content":"# New","edit_code":"JmNkn0LdjbMw"}'
+  -d '{
+    "title": "Updated",
+    "content": "# New content",
+    "edit_code": "JmNkn0LdjbMw"
+  }'
 ```
 
-### Delete (requires edit code)
+### Delete a note
 
 ```bash
 curl -X DELETE http://localhost:4000/notes/{id} \
   -H "X-Edit-Code: JmNkn0LdjbMw"
 ```
 
-### Burn after reading
+The edit code may also be sent as the `edit_code` query parameter.
+
+### Burn-after-reading examples
 
 ```bash
-# Delete immediately on first read (no TTL)
+# Delete immediately on first read
 curl -X POST http://localhost:4000/notes \
   -H "Content-Type: application/json" \
-  -d '{"title":"Secret","content":"eyes only","burn_after_reading":true}'
+  -d '{
+    "title": "Secret",
+    "content": "eyes only",
+    "burn_after_reading": true
+  }'
 
-# Survive for 1 hour after first read, then expire
+# Start a 1 hour expiry window on first read
 curl -X POST http://localhost:4000/notes \
   -H "Content-Type: application/json" \
-  -d '{"title":"Secret","content":"eyes only","burn_after_reading":true,"ttl":3600}'
+  -d '{
+    "title": "Secret",
+    "content": "eyes only",
+    "burn_after_reading": true,
+    "ttl": 3600
+  }'
 ```
 
-`ttl` is the grace period in seconds **after the first read** — the note is not deleted immediately but becomes inaccessible once the TTL elapses. Without `ttl` (or `ttl=0`) the note is deleted on the first read.
+## Authentication
 
-### Auth (when tokens are configured)
+Authentication is optional. When no tokens are configured, Padmark is open.
+
+When `--auth-tokens` or `PADMARK_AUTH_TOKENS` is set, Padmark behaves like a private service:
+
+- browser users must authenticate at `/login`;
+- API and CLI clients must send `Authorization: Bearer <token>`;
+- static assets, `/login`, `/api`, `/api/openapi.yaml`, `/healthz`, and `/readyz` remain public.
+
+Example:
 
 ```bash
-# API
-curl -H "Authorization: Bearer my-token" http://localhost:4000/notes
-
-# Browser — visit /login and enter the token
+PADMARK_AUTH_TOKENS="token-a,token-b" go run ./cmd/padmark-server serve
 ```
 
-### API docs
-
-Interactive docs at `/api`, raw spec at `/api/openapi.yaml`.
-
-## Project structure
-
-```
-cmd/padmark-server/main.go                  Server entry point
-cmd/padmark-cli/main.go                     CLI client entry point
-openapi.yaml                                OpenAPI 3.1 spec (source of truth)
-pkg/client/                                 Generated Go API client (ogen)
-internal/
-  domain/                                   Entities, sentinel errors
-  usecases/notes/                           Business logic (Manager)
-  infra/
-    storage/sqlite/                         SQLite repository + migrations
-    storage/postgres/                       PostgreSQL repository + migrations
-    render/                                 Markdown → HTML (goldmark + bluemonday)
-    server/                                 Server DI, CLI flags, graceful shutdown
-    cli/                                    CLI client commands (create, get, edit, delete, ping)
-  adapters/http/
-    handler.go                              Handler struct, interfaces, templates
-    router.go                               Routing, middleware (auth, logging, recovery)
-    ogen_handler.go                         ogen Handler implementation
-    ogen_convert.go                         Domain ↔ ogen type mapping
-    ogenapi/                                Generated ogen server code
-    web_*.go                                HTML page handlers
-    middleware_auth.go                      Token auth (Bearer + cookie)
-    templates/                              HTML templates (shared header)
-    static/                                 CSS, favicon
-    spec/                                   Embedded OpenAPI spec
-migrations/
-  sqlite/                                   Goose SQL migrations
-  postgres/                                 Goose SQL migrations
-```
-
-## Build and test
+CLI example:
 
 ```bash
-make build                    # Build binary
-make test                     # Unit tests (-race)
-make lint                     # golangci-lint
-make gen                      # go generate (mocks + ogen)
-make docker-build             # Docker image (partyzanex/padmark:latest)
+padmark-cli --token token-a create --content "private note"
+```
 
-# Integration tests (requires Docker)
-go test -tags=integration ./tests/
+API example:
+
+```bash
+curl -H "Authorization: Bearer token-a" http://localhost:4000/notes/{id}
+```
+
+## Configuration
+
+### Server flags
+
+| Flag | Env | Default | Description |
+|------|-----|---------|-------------|
+| `--addr` | `PADMARK_ADDR` | `:8080` | HTTP listen address |
+| `--storage` | `PADMARK_STORAGE` | `sqlite` | Storage backend: `sqlite` or `postgres` |
+| `--dsn` | `PADMARK_DSN` | `padmark.db` | SQLite file path or PostgreSQL connection string |
+| `--log-level` | `PADMARK_LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
+| `--log-format` | `PADMARK_LOG_FORMAT` | `json` | Log format: `json` or `text` |
+| `--auth-tokens` | `PADMARK_AUTH_TOKENS` | empty | Comma-separated Bearer tokens |
+| `--cookie-max-age` | `PADMARK_COOKIE_MAX_AGE` | `7776000` | Auth cookie lifetime in seconds |
+| `--read-timeout` | `PADMARK_READ_TIMEOUT` | `30` | HTTP read timeout in seconds |
+| `--max-header-bytes` | `PADMARK_MAX_HEADER_BYTES` | `65536` | Maximum request header size |
+| `--max-body-bytes` | `PADMARK_MAX_BODY_BYTES` | `262144` | Maximum request body size |
+| `--rate-limit` | `PADMARK_RATE_LIMIT` | `10` | Requests per second per IP; `0` disables it |
+| `--rate-burst` | `PADMARK_RATE_BURST` | `20` | Burst size per IP |
+| `--tls-cert` | `PADMARK_TLS_CERT` | empty | TLS certificate path |
+| `--tls-key` | `PADMARK_TLS_KEY` | empty | TLS private key path |
+| `--http-redirect-addr` | `PADMARK_HTTP_REDIRECT_ADDR` | empty | HTTP listener that redirects to HTTPS |
+| `--trusted-proxies` | `PADMARK_TRUSTED_PROXIES` | empty | Trusted proxy CIDRs or IPs for forwarded client IPs |
+
+### CLI flags
+
+Global CLI options:
+
+- `--url`, `-u`: Padmark server URL
+- `--token`: Bearer token
+
+Command-specific options:
+
+- `create`: `--title`, `--content`, `--file`, `--slug`, `--plain`, `--burn`, `--ttl`, `--edit-code`
+- `get`: `--raw`, `--json`
+- `edit`: `--edit-code`, `--title`, `--content`, `--file`, `--plain`, `--burn`, `--ttl`
+- `delete`: `--edit-code`
+
+## Content Negotiation
+
+For `GET /notes/{id}` and the short URL view:
+
+- `Accept: application/json` returns JSON metadata and content
+- `Accept: text/html` returns rendered HTML
+- `Accept: text/plain` returns raw content
+- `Accept: text/markdown` is treated like plain/raw output
+
+The short route `/{id}` is convenient for browser access.
+
+## API Docs
+
+- Interactive docs: `/api`
+- Raw OpenAPI spec: `/api/openapi.yaml`
+
+The main API definition lives in [`openapi.yaml`](openapi.yaml).
+
+## Project Layout
+
+```text
+cmd/padmark-server/            Server entry point
+cmd/padmark-cli/               CLI entry point
+openapi.yaml                   OpenAPI 3.1 source of truth
+pkg/client/                    Generated Go client
+internal/domain/               Domain models and errors
+internal/usecases/notes/       Business logic
+internal/adapters/http/        HTTP handlers, templates, middleware
+internal/infra/storage/        SQLite and PostgreSQL repositories
+internal/infra/render/         Markdown rendering and sanitization
+internal/infra/server/         Server bootstrap and CLI commands
+internal/infra/cli/            CLI implementation
+migrations/                    SQL migrations
+docs/                          Development notes
+```
+
+## Build and Test
+
+```bash
+make build
+make test
+make lint
+make gen
+```
+
+Coverage HTML:
+
+```bash
+make cover
 ```
 
 ## Docker
 
+Build:
+
 ```bash
-# Build
 make docker-build
 make docker-build DOCKER_TAG=v1.0.0
+```
 
-# Run
+Run:
+
+```bash
 docker run -p 4000:8080 partyzanex/padmark
+```
 
-# Docker Compose (PostgreSQL)
+Run with PostgreSQL via Compose:
+
+```bash
 docker compose up
 ```
 
-## CI/CD
+The included [`docker-compose.yml`](docker-compose.yml) starts:
 
-GitHub Actions workflow (`.github/workflows/ci.yml`):
-
-1. **Prepare** — warm Go module and build cache
-2. **Lint** + **Test** — run in parallel using the cached dependencies
-3. **Docker build & push** — push to Docker Hub on tag `v*` (semver) or commit to `main` (latest)
-
-Required GitHub secrets: `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`.
+- PostgreSQL
+- a migration job
+- the Padmark app
 
 ## Stack
 
-- Go 1.26+
-- [ogen](https://github.com/ogen-go/ogen) — spec-first API server and client generation
-- [goldmark](https://github.com/yuin/goldmark) — Markdown parsing
-- [bluemonday](https://github.com/microcosm-cc/bluemonday) — HTML sanitization
-- [uptrace/bun](https://github.com/uptrace/bun) — database toolkit (SQLite + PostgreSQL)
-- [pressly/goose](https://github.com/pressly/goose) — migrations
-- [urfave/cli](https://github.com/urfave/cli) — CLI and configuration
-- [testcontainers-go](https://github.com/testcontainers/testcontainers-go) — Postgres integration tests
-- [testify](https://github.com/stretchr/testify) + [gomock](https://github.com/uber-go/mock) — testing
-
-## License
-
-MIT
+- Go
+- ogen
+- goldmark
+- bluemonday
+- bun
+- goose

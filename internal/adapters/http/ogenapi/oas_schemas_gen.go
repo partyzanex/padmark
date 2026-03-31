@@ -40,6 +40,9 @@ type CreateNoteRequest struct {
 	// Only meaningful when `burn_after_reading` is `true`.
 	// `0` (or omitted) means the note is deleted on the first read with no grace period.
 	TTL OptInt64 `json:"ttl"`
+	// Optional custom edit code. If omitted a random 12-character code is generated.
+	// Intended for CLI and automation use; the web UI does not expose this field.
+	EditCode OptString `json:"edit_code"`
 }
 
 // GetTitle returns the value of Title.
@@ -72,6 +75,11 @@ func (s *CreateNoteRequest) GetTTL() OptInt64 {
 	return s.TTL
 }
 
+// GetEditCode returns the value of EditCode.
+func (s *CreateNoteRequest) GetEditCode() OptString {
+	return s.EditCode
+}
+
 // SetTitle sets the value of Title.
 func (s *CreateNoteRequest) SetTitle(val string) {
 	s.Title = val
@@ -100,6 +108,11 @@ func (s *CreateNoteRequest) SetBurnAfterReading(val OptBool) {
 // SetTTL sets the value of TTL.
 func (s *CreateNoteRequest) SetTTL(val OptInt64) {
 	s.TTL = val
+}
+
+// SetEditCode sets the value of EditCode.
+func (s *CreateNoteRequest) SetEditCode(val OptString) {
+	s.EditCode = val
 }
 
 // MIME type of `content`; controls rendering on the view page.
