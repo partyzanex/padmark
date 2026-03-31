@@ -137,6 +137,9 @@ padmark-cli create --title "Runbook" --content "..." --slug deploy-notes
 # Create a burn-after-reading note that lives for 1 hour after first read
 padmark-cli create --title "Secret" --content "eyes only" --burn --ttl 3600
 
+# Create with a custom edit code (instead of auto-generated)
+padmark-cli create --title "Note" --content "hello" --edit-code MySecretCode1
+
 # Fetch a note
 padmark-cli get abc123def4
 
@@ -171,11 +174,19 @@ curl -X POST http://localhost:4000/notes \
   }'
 ```
 
-The response includes:
+The response includes `id`, `edit_code`, and note metadata.
 
-- `id`
-- `edit_code`
-- note metadata
+You can supply your own `edit_code` instead of having one generated:
+
+```bash
+curl -X POST http://localhost:4000/notes \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title": "Hello",
+    "content": "# Hello",
+    "edit_code": "MySecretCode1"
+  }'
+```
 
 ### Read a note
 
