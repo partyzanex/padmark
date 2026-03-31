@@ -39,7 +39,7 @@ domain  <--  usecases  <--  infra
 
 ### Dependency injection
 
-Manual DI in `internal/infra/cmd/app.go`, `action()` function. Order:
+Manual DI in `internal/infra/server/app.go`, `action()` function. Order:
 1. Logger → 2. Infrastructure (storage, renderer) → 3. Business logic → 4. HTTP handler/router → 5. Server + graceful shutdown
 
 ### Configuration (`flags.go`)
@@ -100,7 +100,7 @@ golangci-lint v2, nearly all linters enabled:
 
 - `*.mk` files are auto-generated from `github.com/partyzanex/go-makefile` — do not edit manually
 - Binaries go to `bin/` (gitignored); vendor is committed (`go mod vendor`)
-- `cmd/padmark-server/main.go` is 10–15 lines; all logic lives in `internal/infra/cmd/`
+- `cmd/padmark-server/main.go` is 10–15 lines; all logic lives in `internal/infra/server/`
 - Dockerfile: multi-stage build → scratch image
 
 ## Frontend Guidelines

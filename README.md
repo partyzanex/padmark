@@ -4,6 +4,7 @@ A self-hosted Markdown pastebin with a web UI, REST API, burn-after-reading, edi
 
 ## Features
 
+- **CLI client** — `padmark-cli` for creating, reading, editing, and deleting notes from the terminal
 - **Web UI** — create, view, and edit notes in the browser with live Markdown preview
 - **REST API** — JSON CRUD with OpenAPI 3.1 spec and generated Go client (`pkg/client`)
 - **Content negotiation** — `application/json`, `text/html`, `text/plain`, `text/markdown` via `Accept` header
@@ -50,6 +51,46 @@ Open `http://localhost:4000` in the browser.
 | `--tls-key` | `PADMARK_TLS_KEY` | *(empty)* | Path to TLS private key PEM file (enables HTTPS) |
 | `--http-redirect-addr` | `PADMARK_HTTP_REDIRECT_ADDR` | *(empty)* | HTTP→HTTPS redirect listener address (e.g. `:80`); TLS only |
 | `--trusted-proxies` | `PADMARK_TRUSTED_PROXIES` | *(empty)* | Comma-separated trusted proxy CIDRs/IPs for `X-Forwarded-For` |
+
+## CLI
+
+```bash
+# Install
+go install github.com/partyzanex/padmark/cmd/padmark-cli@latest
+
+# Global flags
+#   --url, -u    Server URL (env: PADMARK_URL, default: http://localhost:8080)
+#   --token      Bearer token (env: PADMARK_TOKEN)
+
+# Create a note from a file
+padmark-cli create --file note.md
+
+# Create with custom slug and burn-after-reading (1 hour TTL)
+padmark-cli create --title "Secret" --content "eyes only" --slug my-secret --burn --ttl 3600
+
+# Pipe content from stdin
+echo "# Hello" | padmark-cli create
+
+# Get a note (tabular output)
+padmark-cli get abc123def45
+
+# Get raw content only
+padmark-cli get --raw abc123def45
+
+# Get as JSON
+padmark-cli get --json abc123def45
+
+# Edit a note
+padmark-cli edit abc123def45 --edit-code JmNkn0LdjbMw --title "Updated" --file new.md
+
+# Delete a note
+padmark-cli delete abc123def45 --edit-code JmNkn0LdjbMw
+
+# Check server health
+padmark-cli ping
+```
+
+The edit code can also be set via `PADMARK_EDIT_CODE` environment variable.
 
 ## API
 
@@ -123,7 +164,8 @@ Interactive docs at `/api`, raw spec at `/api/openapi.yaml`.
 ## Project structure
 
 ```
-cmd/padmark-server/main.go                          Entry point
+cmd/padmark-server/main.go                  Server entry point
+cmd/padmark-cli/main.go                     CLI client entry point
 openapi.yaml                                OpenAPI 3.1 spec (source of truth)
 pkg/client/                                 Generated Go API client (ogen)
 internal/
@@ -133,7 +175,8 @@ internal/
     storage/sqlite/                         SQLite repository + migrations
     storage/postgres/                       PostgreSQL repository + migrations
     render/                                 Markdown → HTML (goldmark + bluemonday)
-    cmd/                                    DI, CLI flags, graceful shutdown
+    server/                                 Server DI, CLI flags, graceful shutdown
+    cli/                                    CLI client commands (create, get, edit, delete, ping)
   adapters/http/
     handler.go                              Handler struct, interfaces, templates
     router.go                               Routing, middleware (auth, logging, recovery)
@@ -157,6 +200,7 @@ make build                    # Build binary
 make test                     # Unit tests (-race)
 make lint                     # golangci-lint
 make gen                      # go generate (mocks + ogen)
+make docker-build             # Docker image (partyzanex/padmark:latest)
 
 # Integration tests (requires Docker)
 go test -tags=integration ./tests/
@@ -165,13 +209,30 @@ go test -tags=integration ./tests/
 ## Docker
 
 ```bash
-docker build -t padmark .
-docker run -p 4000:8080 padmark
+# Build
+make docker-build
+make docker-build DOCKER_TAG=v1.0.0
+
+# Run
+docker run -p 4000:8080 partyzanex/padmark
+
+# Docker Compose (PostgreSQL)
+docker compose up
 ```
+
+## CI/CD
+
+GitHub Actions workflow (`.github/workflows/ci.yml`):
+
+1. **Prepare** — warm Go module and build cache
+2. **Lint** + **Test** — run in parallel using the cached dependencies
+3. **Docker build & push** — push to Docker Hub on tag `v*` (semver) or commit to `main` (latest)
+
+Required GitHub secrets: `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`.
 
 ## Stack
 
-- Go 1.25+
+- Go 1.26+
 - [ogen](https://github.com/ogen-go/ogen) — spec-first API server and client generation
 - [goldmark](https://github.com/yuin/goldmark) — Markdown parsing
 - [bluemonday](https://github.com/microcosm-cc/bluemonday) — HTML sanitization

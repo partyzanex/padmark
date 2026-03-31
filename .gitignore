@@ -10,3 +10,5 @@ coverage.txt
 coverage.xml
 padmark.db
 .env
+padmark-cli
+padmark-server

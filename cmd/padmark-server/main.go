@@ -5,11 +5,11 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/partyzanex/padmark/internal/infra/cmd"
+	"github.com/partyzanex/padmark/internal/infra/server"
 )
 
 func main() {
-	app := cmd.NewApp()
+	app := server.NewApp()
 
 	err := app.Run(context.Background(), os.Args)
 	if err != nil {

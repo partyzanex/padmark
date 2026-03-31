@@ -296,7 +296,7 @@ func (h *Handler) negotiate(w http.ResponseWriter, r *http.Request, note *domain
 Three constant groups: flag names, env vars, defaults.
 
 ```go
-// internal/infra/cmd/flags.go
+// internal/infra/server/flags.go
 package cmd
 
 const (
@@ -320,7 +320,7 @@ const (
 // cmd/padmark-server/main.go
 package main
 
-import "github.com/partyzanex/padmark/internal/infra/cmd"
+import "github.com/partyzanex/padmark/internal/infra/server"
 
 func main() {
     app := cmd.NewApp()
@@ -331,7 +331,7 @@ func main() {
 }
 ```
 
-10-15 lines. All logic in `internal/infra/cmd/`.
+10-15 lines. All logic in `internal/infra/server/`.
 
 ---
 
@@ -340,7 +340,7 @@ func main() {
 All dependency wiring in `action()` in `app.go`. Manual DI, no frameworks.
 
 ```go
-// internal/infra/cmd/app.go
+// internal/infra/server/app.go
 func action(ctx context.Context, cmd *cli.Command) error {
     log := newLogger(cmd.String(FlagLogLevel))
 
