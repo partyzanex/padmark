@@ -44,7 +44,7 @@ html { font-size: 16px; }
     --err-amber-muted:   rgba(251,191,36,0.08);
     --err-amber-border:  rgba(251,191,36,0.15);
 
-    --font-display: 'Outfit', sans-serif;
+    --font-display: 'Source Serif 4', Georgia, serif;
     --font-serif:   'Source Serif 4', Georgia, serif;
     --font-mono:    'JetBrains Mono', monospace;
 
