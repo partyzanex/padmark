@@ -8,7 +8,7 @@ RUN CGO_ENABLED=0 go build \
       -mod=vendor \
       -trimpath \
       -ldflags="-s -w" \
-      -o /bin/padmark- \
+      -o /bin/padmark-server \
       ./cmd/padmark-server && \
     # Pre-create /data owned by nobody (UID 65534) so the SQLite backend
     # can write padmark.db inside the scratch image (PADMARK_DSN=/data/padmark.db).
