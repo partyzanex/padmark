@@ -89,7 +89,17 @@
 
     function copyText(btn, text) {
         const orig = btn.innerHTML;
-        navigator.clipboard.writeText(text).then(() => flashCopied(btn, orig));
+        if (navigator.clipboard) {
+            navigator.clipboard.writeText(text).then(() => flashCopied(btn, orig));
+        } else {
+            const el = document.createElement('textarea');
+            el.value = text;
+            document.body.appendChild(el);
+            el.select();
+            document.execCommand('copy');
+            document.body.removeChild(el);
+            flashCopied(btn, orig);
+        }
     }
 
     (function () {

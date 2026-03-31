@@ -34,7 +34,7 @@
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
                 Copy
             </button>
-            <a href="/{{.ID}}?raw=1" class="meta-btn">
+            <a href="/{{.ID}}?raw=1" class="meta-btn" target="_blank" rel="noopener">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
                 Raw
             </a>
@@ -52,7 +52,7 @@
     </div>
 
     <div class="paste-footer">
-        <a href="/{{.ID}}?raw=1" class="paste-footer-link">Raw</a>
+        <a href="/{{.ID}}?raw=1" class="paste-footer-link" target="_blank" rel="noopener">Raw</a>
         <span class="paste-footer-sep">·</span>
         <a href="/edit/{{.ID}}" class="paste-footer-link">Edit</a>
         <span class="paste-footer-sep">·</span>
@@ -88,11 +88,31 @@
 
     document.getElementById('copyRawBtn').addEventListener('click', function () {
         const raw = document.getElementById('raw-content').value;
-        navigator.clipboard.writeText(raw).then(() => flashCopied(this));
+        if (navigator.clipboard) {
+            navigator.clipboard.writeText(raw).then(() => flashCopied(this));
+        } else {
+            const el = document.createElement('textarea');
+            el.value = raw;
+            document.body.appendChild(el);
+            el.select();
+            document.execCommand('copy');
+            document.body.removeChild(el);
+            flashCopied(this);
+        }
     });
 
     document.getElementById('copyLinkBtn').addEventListener('click', function () {
-        navigator.clipboard.writeText(window.location.href).then(() => flashCopied(this));
+        if (navigator.clipboard) {
+            navigator.clipboard.writeText(window.location.href).then(() => flashCopied(this));
+        } else {
+            const el = document.createElement('textarea');
+            el.value = window.location.href;
+            document.body.appendChild(el);
+            el.select();
+            document.execCommand('copy');
+            document.body.removeChild(el);
+            flashCopied(this);
+        }
     });
 </script>
 </body>
