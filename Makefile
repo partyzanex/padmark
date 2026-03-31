@@ -25,6 +25,13 @@ test:
 cover: test
 	go tool cover -html cover.out
 
+DOCKER_IMAGE ?= partyzanex/padmark
+DOCKER_TAG   ?= latest
+
+.PHONY: docker-build
+docker-build:
+	DOCKER_BUILDKIT=1 docker build -t $(DOCKER_IMAGE):$(DOCKER_TAG) .
+
 .PHONY: migrate-sqlite-up
 migrate-sqlite-up: $(GOOSE)
 	$(GOOSE) -dir migrations/sqlite sqlite3 $(DB_SQLITE) up
