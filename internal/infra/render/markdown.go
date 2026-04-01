@@ -30,7 +30,7 @@ func NewRenderer() *Renderer {
 			highlighting.NewHighlighting(
 				highlighting.WithStyle("github-dark"),
 				highlighting.WithFormatOptions(
-					chromahtml.WithClasses(false),
+					chromahtml.WithClasses(true),
 					chromahtml.WithLineNumbers(false),
 				),
 			),
@@ -47,7 +47,7 @@ func NewRenderer() *Renderer {
 	policy := bluemonday.UGCPolicy()
 	policy.RequireNoFollowOnLinks(true)
 	policy.AddTargetBlankToFullyQualifiedLinks(true)
-	policy.AllowAttrs("style").OnElements("span", "code", "pre")
+	policy.AllowAttrs("class").OnElements("span", "code", "pre", "div")
 
 	return &Renderer{
 		md:     md,
