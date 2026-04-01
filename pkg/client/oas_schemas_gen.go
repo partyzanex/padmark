@@ -181,7 +181,7 @@ type CreateNoteResponse struct {
 	// ISO 8601 timestamp after which the note is inaccessible.
 	// Set on the first read for burn-after-reading notes that have a TTL.
 	// `null` for notes that are not expiring.
-	ExpiresAt OptDateTime `json:"expires_at"`
+	ExpiresAt OptNilDateTime `json:"expires_at"`
 	// Creation timestamp (UTC).
 	CreatedAt time.Time `json:"created_at"`
 	// Last-update timestamp (UTC).
@@ -222,7 +222,7 @@ func (s *CreateNoteResponse) GetBurnAfterReading() bool {
 }
 
 // GetExpiresAt returns the value of ExpiresAt.
-func (s *CreateNoteResponse) GetExpiresAt() OptDateTime {
+func (s *CreateNoteResponse) GetExpiresAt() OptNilDateTime {
 	return s.ExpiresAt
 }
 
@@ -272,7 +272,7 @@ func (s *CreateNoteResponse) SetBurnAfterReading(val bool) {
 }
 
 // SetExpiresAt sets the value of ExpiresAt.
-func (s *CreateNoteResponse) SetExpiresAt(val OptDateTime) {
+func (s *CreateNoteResponse) SetExpiresAt(val OptNilDateTime) {
 	s.ExpiresAt = val
 }
 
@@ -442,7 +442,7 @@ type NoteResponse struct {
 	// ISO 8601 timestamp after which the note is inaccessible.
 	// Set on the first read for burn-after-reading notes that have a TTL.
 	// `null` for notes that are not expiring.
-	ExpiresAt OptDateTime `json:"expires_at"`
+	ExpiresAt OptNilDateTime `json:"expires_at"`
 	// Creation timestamp (UTC).
 	CreatedAt time.Time `json:"created_at"`
 	// Last-update timestamp (UTC).
@@ -480,7 +480,7 @@ func (s *NoteResponse) GetBurnAfterReading() bool {
 }
 
 // GetExpiresAt returns the value of ExpiresAt.
-func (s *NoteResponse) GetExpiresAt() OptDateTime {
+func (s *NoteResponse) GetExpiresAt() OptNilDateTime {
 	return s.ExpiresAt
 }
 
@@ -525,7 +525,7 @@ func (s *NoteResponse) SetBurnAfterReading(val bool) {
 }
 
 // SetExpiresAt sets the value of ExpiresAt.
-func (s *NoteResponse) SetExpiresAt(val OptDateTime) {
+func (s *NoteResponse) SetExpiresAt(val OptNilDateTime) {
 	s.ExpiresAt = val
 }
 
@@ -676,52 +676,6 @@ func (o OptCreateNoteRequestContentType) Or(d CreateNoteRequestContentType) Crea
 	return d
 }
 
-// NewOptDateTime returns new OptDateTime with value set to v.
-func NewOptDateTime(v time.Time) OptDateTime {
-	return OptDateTime{
-		Value: v,
-		Set:   true,
-	}
-}
-
-// OptDateTime is optional time.Time.
-type OptDateTime struct {
-	Value time.Time
-	Set   bool
-}
-
-// IsSet returns true if OptDateTime was set.
-func (o OptDateTime) IsSet() bool { return o.Set }
-
-// Reset unsets value.
-func (o *OptDateTime) Reset() {
-	var v time.Time
-	o.Value = v
-	o.Set = false
-}
-
-// SetTo sets value to v.
-func (o *OptDateTime) SetTo(v time.Time) {
-	o.Set = true
-	o.Value = v
-}
-
-// Get returns value and boolean that denotes whether value was set.
-func (o OptDateTime) Get() (v time.Time, ok bool) {
-	if !o.Set {
-		return v, false
-	}
-	return o.Value, true
-}
-
-// Or returns value if set, or given parameter if does not.
-func (o OptDateTime) Or(d time.Time) time.Time {
-	if v, ok := o.Get(); ok {
-		return v
-	}
-	return d
-}
-
 // NewOptInt64 returns new OptInt64 with value set to v.
 func NewOptInt64(v int64) OptInt64 {
 	return OptInt64{
@@ -762,6 +716,69 @@ func (o OptInt64) Get() (v int64, ok bool) {
 
 // Or returns value if set, or given parameter if does not.
 func (o OptInt64) Or(d int64) int64 {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptNilDateTime returns new OptNilDateTime with value set to v.
+func NewOptNilDateTime(v time.Time) OptNilDateTime {
+	return OptNilDateTime{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptNilDateTime is optional nullable time.Time.
+type OptNilDateTime struct {
+	Value time.Time
+	Set   bool
+	Null  bool
+}
+
+// IsSet returns true if OptNilDateTime was set.
+func (o OptNilDateTime) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptNilDateTime) Reset() {
+	var v time.Time
+	o.Value = v
+	o.Set = false
+	o.Null = false
+}
+
+// SetTo sets value to v.
+func (o *OptNilDateTime) SetTo(v time.Time) {
+	o.Set = true
+	o.Null = false
+	o.Value = v
+}
+
+// IsNull returns true if value is Null.
+func (o OptNilDateTime) IsNull() bool { return o.Null }
+
+// SetToNull sets value to null.
+func (o *OptNilDateTime) SetToNull() {
+	o.Set = true
+	o.Null = true
+	var v time.Time
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptNilDateTime) Get() (v time.Time, ok bool) {
+	if o.Null {
+		return v, false
+	}
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptNilDateTime) Or(d time.Time) time.Time {
 	if v, ok := o.Get(); ok {
 		return v
 	}

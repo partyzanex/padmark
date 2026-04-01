@@ -331,6 +331,7 @@ components:
         expires_at:
           type: string
           format: date-time
+          nullable: true
           description: |
             ISO 8601 timestamp after which the note is inaccessible.
             Set on the first read for burn-after-reading notes that have a TTL.

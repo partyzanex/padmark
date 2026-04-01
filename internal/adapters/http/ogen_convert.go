@@ -23,7 +23,7 @@ func domainToResponse(note *domain.Note) *ogenapi.NoteResponse {
 	}
 
 	if note.ExpiresAt != nil {
-		resp.ExpiresAt = ogenapi.NewOptDateTime(*note.ExpiresAt)
+		resp.ExpiresAt = ogenapi.NewOptNilDateTime(*note.ExpiresAt)
 	}
 
 	return resp
@@ -43,7 +43,7 @@ func domainToCreateResponse(note *domain.Note) ogenapi.CreateNoteResponse {
 	}
 
 	if note.ExpiresAt != nil {
-		resp.ExpiresAt = ogenapi.NewOptDateTime(*note.ExpiresAt)
+		resp.ExpiresAt = ogenapi.NewOptNilDateTime(*note.ExpiresAt)
 	}
 
 	return resp
