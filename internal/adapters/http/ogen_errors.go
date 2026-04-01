@@ -10,49 +10,11 @@ import (
 
 const internalErrorMessage = "internal server error"
 
-func domainToResponse(note *domain.Note) *ogenapi.NoteResponse {
-	resp := &ogenapi.NoteResponse{
-		ID:               note.ID,
-		Title:            note.Title,
-		Content:          note.Content,
-		ContentType:      ogenapi.NoteResponseContentType(note.ContentType),
-		Views:            note.Views,
-		BurnAfterReading: note.BurnAfterReading,
-		CreatedAt:        note.CreatedAt,
-		UpdatedAt:        note.UpdatedAt,
-	}
-
-	if note.ExpiresAt != nil {
-		resp.ExpiresAt = ogenapi.NewOptNilDateTime(*note.ExpiresAt)
-	}
-
-	return resp
-}
-
-func domainToCreateResponse(note *domain.Note) ogenapi.CreateNoteResponse {
-	resp := ogenapi.CreateNoteResponse{
-		ID:               note.ID,
-		Title:            note.Title,
-		Content:          note.Content,
-		ContentType:      ogenapi.CreateNoteResponseContentType(note.ContentType),
-		EditCode:         note.EditCode,
-		Views:            note.Views,
-		BurnAfterReading: note.BurnAfterReading,
-		CreatedAt:        note.CreatedAt,
-		UpdatedAt:        note.UpdatedAt,
-	}
-
-	if note.ExpiresAt != nil {
-		resp.ExpiresAt = ogenapi.NewOptNilDateTime(*note.ExpiresAt)
-	}
-
-	return resp
-}
-
 func errResp(err error) ogenapi.ErrorResponse {
 	return ogenapi.ErrorResponse{Message: err.Error()}
 }
 
+//nolint:ireturn // ogen response union types are interfaces by design
 func mapCreateError(err error, log *slog.Logger) ogenapi.CreateNoteRes {
 	r := errResp(err)
 
@@ -81,6 +43,7 @@ func mapCreateError(err error, log *slog.Logger) ogenapi.CreateNoteRes {
 	}
 }
 
+//nolint:ireturn // ogen response union types are interfaces by design
 func mapGetError(err error, log *slog.Logger) ogenapi.GetNoteRes {
 	r := errResp(err)
 
@@ -102,6 +65,7 @@ func mapGetError(err error, log *slog.Logger) ogenapi.GetNoteRes {
 	}
 }
 
+//nolint:ireturn // ogen response union types are interfaces by design
 func mapUpdateError(err error, log *slog.Logger) ogenapi.UpdateNoteRes {
 	r := errResp(err)
 
@@ -129,6 +93,7 @@ func mapUpdateError(err error, log *slog.Logger) ogenapi.UpdateNoteRes {
 	}
 }
 
+//nolint:ireturn // ogen response union types are interfaces by design
 func mapDeleteError(err error, log *slog.Logger) ogenapi.DeleteNoteRes {
 	r := errResp(err)
 

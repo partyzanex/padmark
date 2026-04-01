@@ -58,11 +58,6 @@ func newEditCode() string {
 	return string(buf)
 }
 
-const (
-	maxTitleLength   = 500
-	maxContentLength = 100_000
-)
-
 // Storage defines persistence operations for notes.
 type Storage interface {
 	Create(ctx context.Context, note *domain.Note) error
@@ -97,9 +92,9 @@ func (m *Manager) Create(ctx context.Context, note *domain.Note) (*domain.Note, 
 		note.ContentType = domain.ContentTypeMarkdown
 	}
 
-	err := m.validate(note)
+	err := note.Validate()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("validate: %w", err)
 	}
 
 	if note.ID != "" {
@@ -207,9 +202,9 @@ func (m *Manager) View(ctx context.Context, id string) (*domain.Note, error) {
 func (m *Manager) Update(
 	ctx context.Context, id, editCode string, note *domain.Note,
 ) (*domain.Note, error) {
-	err := m.validate(note)
+	err := note.Validate()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("validate: %w", err)
 	}
 
 	existing, err := m.storage.Get(ctx, id)
@@ -281,24 +276,4 @@ func (m *Manager) GetRendered(ctx context.Context, id string) (*domain.Note, str
 	}
 
 	return note, rendered, nil
-}
-
-func (m *Manager) validate(note *domain.Note) error {
-	if note.Title == "" {
-		return domain.ErrTitleRequired
-	}
-
-	if len([]rune(note.Title)) > maxTitleLength {
-		return domain.ErrTitleTooLong
-	}
-
-	if len(note.Content) > maxContentLength {
-		return domain.ErrContentTooLong
-	}
-
-	if note.ContentType != "" && !note.ContentType.Valid() {
-		return domain.ErrInvalidContentType
-	}
-
-	return nil
 }

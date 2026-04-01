@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/partyzanex/padmark/internal/infra/cli"
+	"github.com/partyzanex/padmark/internal/adapters/cli"
 )
 
 func main() {

@@ -344,7 +344,7 @@ internal/adapters/http/        HTTP handlers, templates, middleware
 internal/infra/storage/        SQLite and PostgreSQL repositories
 internal/infra/render/         Markdown rendering and sanitization
 internal/infra/server/         Server bootstrap and CLI commands
-internal/infra/cli/            CLI implementation
+internal/adapters/cli/         CLI implementation
 migrations/                    SQL migrations
 docs/                          Development notes
 ```

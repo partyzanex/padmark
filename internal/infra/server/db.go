@@ -19,24 +19,41 @@ import (
 	"github.com/partyzanex/padmark/internal/usecases/notes"
 )
 
-func openDB(ctx context.Context, storage, dsn string) (*bun.DB, error) {
-	var db *bun.DB
+// dbOpener creates a *bun.DB from a DSN without connecting.
+type dbOpener func(dsn string) (*bun.DB, error)
 
-	switch storage {
-	case "postgres":
-		sqldb := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
-		db = bun.NewDB(sqldb, pgdialect.New())
+func openPostgresDB(dsn string) (*bun.DB, error) {
+	sqldb := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
 
-	default: // sqlite
-		sqldb, err := sql.Open(sqliteshim.DriverName(), dsn)
-		if err != nil {
-			return nil, fmt.Errorf("sql open sqlite: %w", err)
-		}
+	return bun.NewDB(sqldb, pgdialect.New()), nil
+}
 
-		db = bun.NewDB(sqldb, sqlitedialect.New())
+func openSQLiteDB(dsn string) (*bun.DB, error) {
+	sqldb, err := sql.Open(sqliteshim.DriverName(), dsn)
+	if err != nil {
+		return nil, fmt.Errorf("sql open sqlite: %w", err)
 	}
 
-	err := db.PingContext(ctx)
+	return bun.NewDB(sqldb, sqlitedialect.New()), nil
+}
+
+func openDB(ctx context.Context, storage, dsn string) (*bun.DB, error) {
+	openers := map[string]dbOpener{
+		"postgres": openPostgresDB,
+		"sqlite":   openSQLiteDB,
+	}
+
+	opener, ok := openers[storage]
+	if !ok {
+		return nil, fmt.Errorf("unknown storage backend %q: supported backends: postgres, sqlite", storage)
+	}
+
+	db, err := opener(dsn)
+	if err != nil {
+		return nil, err
+	}
+
+	err = db.PingContext(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("db ping: %w", err)
 	}
@@ -44,25 +61,42 @@ func openDB(ctx context.Context, storage, dsn string) (*bun.DB, error) {
 	return db, nil
 }
 
+// storageInit runs migrations and returns a ready-to-use repository.
+type storageInit func(ctx context.Context, db *bun.DB) (notes.Storage, error)
+
+//nolint:ireturn // multiple implementations (sqlite, postgres) require interface return
+func initPostgresStorage(ctx context.Context, db *bun.DB) (notes.Storage, error) {
+	err := postgres.Migrate(ctx, db)
+	if err != nil {
+		return nil, fmt.Errorf("postgres migrate: %w", err)
+	}
+
+	return postgres.NewRepository(db), nil
+}
+
+//nolint:ireturn // multiple implementations (sqlite, postgres) require interface return
+func initSQLiteStorage(ctx context.Context, db *bun.DB) (notes.Storage, error) {
+	err := sqlite.Migrate(ctx, db)
+	if err != nil {
+		return nil, fmt.Errorf("sqlite migrate: %w", err)
+	}
+
+	return sqlite.NewRepository(db), nil
+}
+
 //nolint:ireturn // multiple implementations (sqlite, postgres) require interface return
 func initStorage(ctx context.Context, storage string, db *bun.DB) (notes.Storage, error) {
-	switch storage {
-	case "postgres":
-		err := postgres.Migrate(ctx, db)
-		if err != nil {
-			return nil, fmt.Errorf("postgres migrate: %w", err)
-		}
-
-		return postgres.NewRepository(db), nil
-
-	default: // sqlite
-		err := sqlite.Migrate(ctx, db)
-		if err != nil {
-			return nil, fmt.Errorf("sqlite migrate: %w", err)
-		}
-
-		return sqlite.NewRepository(db), nil
+	inits := map[string]storageInit{
+		"postgres": initPostgresStorage,
+		"sqlite":   initSQLiteStorage,
 	}
+
+	init, ok := inits[storage]
+	if !ok {
+		return nil, fmt.Errorf("unknown storage backend %q: supported backends: postgres, sqlite", storage)
+	}
+
+	return init(ctx, db)
 }
 
 // parseTrustedProxies parses a comma-separated list of CIDRs or bare IP addresses.
