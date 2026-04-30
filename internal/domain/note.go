@@ -37,6 +37,7 @@ type Note struct {
 	Views            int
 	BurnTTL          int64 // seconds the note lives after first read; 0 = deleted immediately on first read
 	BurnAfterReading bool  // if true, the note is consumed on the first read (deleted or timer-started)
+	Private          bool  // if true, requires server auth token to view
 }
 
 // Validate checks that the note fields satisfy business rules.

@@ -43,6 +43,9 @@ type CreateNoteRequest struct {
 	// Optional custom edit code. If omitted a random 12-character code is generated.
 	// Intended for CLI and automation use; the web UI does not expose this field.
 	EditCode OptString `json:"edit_code"`
+	// When `true` the note requires a valid server auth token to view.
+	// Only meaningful when the server is started with `--auth-tokens`.
+	Private OptBool `json:"private"`
 }
 
 // GetTitle returns the value of Title.
@@ -80,6 +83,11 @@ func (s *CreateNoteRequest) GetEditCode() OptString {
 	return s.EditCode
 }
 
+// GetPrivate returns the value of Private.
+func (s *CreateNoteRequest) GetPrivate() OptBool {
+	return s.Private
+}
+
 // SetTitle sets the value of Title.
 func (s *CreateNoteRequest) SetTitle(val string) {
 	s.Title = val
@@ -113,6 +121,11 @@ func (s *CreateNoteRequest) SetTTL(val OptInt64) {
 // SetEditCode sets the value of EditCode.
 func (s *CreateNoteRequest) SetEditCode(val OptString) {
 	s.EditCode = val
+}
+
+// SetPrivate sets the value of Private.
+func (s *CreateNoteRequest) SetPrivate(val OptBool) {
+	s.Private = val
 }
 
 // MIME type of `content`; controls rendering on the view page.
@@ -178,6 +191,9 @@ type CreateNoteResponse struct {
 	// After the first read of a note with a TTL this becomes `false` and `expires_at`
 	// is set.
 	BurnAfterReading bool `json:"burn_after_reading"`
+	// `true` when the note requires a valid server auth token to view.
+	// `false` for publicly accessible notes.
+	Private OptBool `json:"private"`
 	// ISO 8601 timestamp after which the note is inaccessible.
 	// Set on the first read for burn-after-reading notes that have a TTL.
 	// `null` for notes that are not expiring.
@@ -219,6 +235,11 @@ func (s *CreateNoteResponse) GetViews() int {
 // GetBurnAfterReading returns the value of BurnAfterReading.
 func (s *CreateNoteResponse) GetBurnAfterReading() bool {
 	return s.BurnAfterReading
+}
+
+// GetPrivate returns the value of Private.
+func (s *CreateNoteResponse) GetPrivate() OptBool {
+	return s.Private
 }
 
 // GetExpiresAt returns the value of ExpiresAt.
@@ -269,6 +290,11 @@ func (s *CreateNoteResponse) SetViews(val int) {
 // SetBurnAfterReading sets the value of BurnAfterReading.
 func (s *CreateNoteResponse) SetBurnAfterReading(val bool) {
 	s.BurnAfterReading = val
+}
+
+// SetPrivate sets the value of Private.
+func (s *CreateNoteResponse) SetPrivate(val OptBool) {
+	s.Private = val
 }
 
 // SetExpiresAt sets the value of ExpiresAt.
@@ -439,6 +465,9 @@ type NoteResponse struct {
 	// After the first read of a note with a TTL this becomes `false` and `expires_at`
 	// is set.
 	BurnAfterReading bool `json:"burn_after_reading"`
+	// `true` when the note requires a valid server auth token to view.
+	// `false` for publicly accessible notes.
+	Private OptBool `json:"private"`
 	// ISO 8601 timestamp after which the note is inaccessible.
 	// Set on the first read for burn-after-reading notes that have a TTL.
 	// `null` for notes that are not expiring.
@@ -477,6 +506,11 @@ func (s *NoteResponse) GetViews() int {
 // GetBurnAfterReading returns the value of BurnAfterReading.
 func (s *NoteResponse) GetBurnAfterReading() bool {
 	return s.BurnAfterReading
+}
+
+// GetPrivate returns the value of Private.
+func (s *NoteResponse) GetPrivate() OptBool {
+	return s.Private
 }
 
 // GetExpiresAt returns the value of ExpiresAt.
@@ -522,6 +556,11 @@ func (s *NoteResponse) SetViews(val int) {
 // SetBurnAfterReading sets the value of BurnAfterReading.
 func (s *NoteResponse) SetBurnAfterReading(val bool) {
 	s.BurnAfterReading = val
+}
+
+// SetPrivate sets the value of Private.
+func (s *NoteResponse) SetPrivate(val OptBool) {
+	s.Private = val
 }
 
 // SetExpiresAt sets the value of ExpiresAt.
@@ -913,6 +952,8 @@ type UpdateNoteRequest struct {
 	// New TTL in seconds (grace period after first read).
 	// Only meaningful when `burn_after_reading` is `true`.
 	TTL OptInt64 `json:"ttl"`
+	// Update the private flag.
+	Private OptBool `json:"private"`
 }
 
 // GetTitle returns the value of Title.
@@ -945,6 +986,11 @@ func (s *UpdateNoteRequest) GetTTL() OptInt64 {
 	return s.TTL
 }
 
+// GetPrivate returns the value of Private.
+func (s *UpdateNoteRequest) GetPrivate() OptBool {
+	return s.Private
+}
+
 // SetTitle sets the value of Title.
 func (s *UpdateNoteRequest) SetTitle(val string) {
 	s.Title = val
@@ -973,6 +1019,11 @@ func (s *UpdateNoteRequest) SetBurnAfterReading(val OptBool) {
 // SetTTL sets the value of TTL.
 func (s *UpdateNoteRequest) SetTTL(val OptInt64) {
 	s.TTL = val
+}
+
+// SetPrivate sets the value of Private.
+func (s *UpdateNoteRequest) SetPrivate(val OptBool) {
+	s.Private = val
 }
 
 // New content type; defaults to the note's current type when omitted.

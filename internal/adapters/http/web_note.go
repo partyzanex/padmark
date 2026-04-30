@@ -25,6 +25,8 @@ type noteViewData struct {
 	RawContent   string
 	Nonce        string
 	Views        int
+	Private      bool
+	CanEdit      bool
 }
 
 func toNoteViewData(note *domain.Note, rendered string) noteViewData {
@@ -47,6 +49,7 @@ func toNoteViewData(note *domain.Note, rendered string) noteViewData {
 		Views:        note.Views,
 		ExpiresLabel: expires,
 		ExpiresISO:   expiresISO,
+		Private:      note.Private,
 	}
 }
 
@@ -60,6 +63,7 @@ type noteJSON struct {
 	ContentType      domain.ContentType `json:"content_type"`
 	Views            int                `json:"views"`
 	BurnAfterReading bool               `json:"burn_after_reading"`
+	Private          bool               `json:"private"`
 }
 
 func toNoteJSON(note *domain.Note) noteJSON {
@@ -73,6 +77,56 @@ func toNoteJSON(note *domain.Note) noteJSON {
 		ExpiresAt:        note.ExpiresAt,
 		Views:            note.Views,
 		BurnAfterReading: note.BurnAfterReading,
+		Private:          note.Private,
+	}
+}
+
+// handlePrivateAuth checks whether a note is private and the caller is authenticated.
+// It writes the response and returns true when the request has been handled (either
+// because auth failed or because the note doesn't exist).
+func (h *Handler) handlePrivateAuth(w http.ResponseWriter, r *http.Request, id string) bool {
+	if h.allowedTokens == nil {
+		return false
+	}
+
+	note, err := h.manager.Peek(r.Context(), id)
+	if err != nil {
+		h.writeErrorPage(w, r, err)
+
+		return true
+	}
+
+	if !note.Private || h.isAuthenticated(r) {
+		return false
+	}
+
+	if negotiate(r) == formatHTML {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+
+		return true
+	}
+
+	http.Error(w, "unauthorized", http.StatusUnauthorized)
+
+	return true
+}
+
+func (h *Handler) renderNoteHTML(w http.ResponseWriter, r *http.Request, id string) {
+	note, rendered, err := h.manager.GetRendered(r.Context(), id)
+	if err != nil {
+		h.writeErrorPage(w, r, err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+
+	data := toNoteViewData(note, rendered)
+	data.Nonce = nonceFromContext(r.Context())
+	data.CanEdit = note.Private && h.isAuthenticated(r)
+
+	err = h.noteTmpl.Execute(w, data)
+	if err != nil {
+		h.log.ErrorContext(r.Context(), "render note template", "id", id, "err", err)
 	}
 }
 
@@ -80,23 +134,14 @@ func toNoteJSON(note *domain.Note) noteJSON {
 func (h *Handler) GetNote(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
+	// Check auth for private notes before any side effects (view count, burn).
+	if handled := h.handlePrivateAuth(w, r, id); handled {
+		return
+	}
+
 	switch negotiate(r) {
 	case formatHTML:
-		note, rendered, err := h.manager.GetRendered(r.Context(), id)
-		if err != nil {
-			h.writeErrorPage(w, r, err)
-			return
-		}
-
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-
-		data := toNoteViewData(note, rendered)
-		data.Nonce = nonceFromContext(r.Context())
-
-		err = h.noteTmpl.Execute(w, data)
-		if err != nil {
-			h.log.ErrorContext(r.Context(), "render note template", "id", id, "err", err)
-		}
+		h.renderNoteHTML(w, r, id)
 
 	case formatPlain:
 		note, err := h.manager.View(r.Context(), id)

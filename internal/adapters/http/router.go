@@ -47,6 +47,8 @@ func NewRouter(
 		panic("ogen server: " + err.Error())
 	}
 
+	handler.WithAuth(tokens)
+
 	mux := http.NewServeMux()
 	lockout := newNoteFailLockout()
 

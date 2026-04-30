@@ -18,6 +18,7 @@ type editorViewData struct {
 	TTL              int64 // remaining seconds, for pre-selecting the burn time option
 	EditMode         bool
 	BurnAfterReading bool
+	Private          bool
 }
 
 // IndexPage handles GET / — serves the note editor.

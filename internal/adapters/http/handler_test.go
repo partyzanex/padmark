@@ -100,6 +100,7 @@ func (s *HandlerSuite) TestIndexPage() {
 func (s *HandlerSuite) TestEditPage_OK() {
 	note := newTestNote("edit me", "# hello")
 	note.BurnAfterReading = true
+	note.Private = true
 
 	future := time.Now().Add(time.Hour)
 	note.ExpiresAt = &future
@@ -119,6 +120,7 @@ func (s *HandlerSuite) TestEditPage_OK() {
 	s.Contains(body, "# hello")
 	s.Contains(body, "Save")
 	s.Contains(body, "checked")
+	s.Contains(body, `id="privateCheck" checked`)
 }
 
 func (s *HandlerSuite) TestEditPage_NotFound() {
@@ -597,6 +599,71 @@ func (s *HandlerSuite) TestGetNote_ShortURL() {
 	s.Equal("short", resp.Title)
 }
 
+func (s *HandlerSuite) TestGetNote_Private_HTML_Unauthorized() {
+	note := newTestNote("secret", "private content")
+	note.Private = true
+	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
+
+	router := s.newRouter([]string{"secret-token"})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
+	r.Header.Set("Accept", "text/html")
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusSeeOther, w.Code)
+	s.Equal("/login", w.Header().Get("Location"))
+}
+
+func (s *HandlerSuite) TestGetNote_Private_JSON_Unauthorized() {
+	note := newTestNote("secret", "private content")
+	note.Private = true
+	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
+
+	router := s.newRouter([]string{"secret-token"})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
+	r.Header.Set("Accept", "application/json")
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusUnauthorized, w.Code)
+}
+
+func (s *HandlerSuite) TestGetNote_Private_Authorized() {
+	note := newTestNote("secret", "private content")
+	note.Private = true
+	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
+	s.manager.EXPECT().View(gomock.Any(), testID).Return(note, nil)
+
+	router := s.newRouter([]string{"secret-token"})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
+	r.Header.Set("Accept", "application/json")
+	r.Header.Set("Authorization", "Bearer secret-token")
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusOK, w.Code)
+}
+
+func (s *HandlerSuite) TestGetNote_Private_NotFound() {
+	s.manager.EXPECT().Peek(gomock.Any(), "missing").Return(nil, domain.ErrNotFound)
+
+	router := s.newRouter([]string{"secret-token"})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/notes/missing", nil)
+	r.Header.Set("Accept", "application/json")
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusNotFound, w.Code)
+}
+
 // ── UpdateNote ──
 
 func (s *HandlerSuite) TestUpdateNote_OK() {
@@ -641,6 +708,26 @@ func (s *HandlerSuite) TestUpdateNote_WithTTL() {
 		})
 
 	body := `{"title":"updated","content":"body","edit_code":"code","burn_after_reading":true,"ttl":3600}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPut, "/notes/"+testID, strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusOK, w.Code)
+}
+
+func (s *HandlerSuite) TestUpdateNote_WithPrivate() {
+	updated := newTestNote("updated", "body")
+
+	s.manager.EXPECT().Update(gomock.Any(), testID, "code", gomock.Any()).
+		DoAndReturn(func(_ context.Context, _ string, _ string, n *domain.Note) (*domain.Note, error) {
+			s.True(n.Private)
+
+			return updated, nil
+		})
+
+	body := `{"title":"updated","content":"body","edit_code":"code","private":true}`
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPut, "/notes/"+testID, strings.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")
@@ -1057,6 +1144,7 @@ func (s *HandlerSuite) TestAuth_BearerToken() {
 
 func (s *HandlerSuite) TestAuth_CookieToken() {
 	note := newTestNote("t", "c")
+	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
 	s.manager.EXPECT().View(gomock.Any(), testID).Return(note, nil)
 
 	router := s.newRouter([]string{"secret-token"})
@@ -1122,6 +1210,85 @@ func (s *HandlerSuite) TestAuth_PublicPaths() {
 		s.NotEqual(http.StatusUnauthorized, w.Code, "path %s should be public", path)
 		s.NotEqual(http.StatusSeeOther, w.Code, "path %s should not redirect", path)
 	}
+}
+
+func (s *HandlerSuite) TestAuth_PublicNoteView() {
+	note := newTestNote("public", "body")
+	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
+	s.manager.EXPECT().View(gomock.Any(), testID).Return(note, nil)
+
+	router := s.newRouter([]string{"secret-token"})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
+	r.Header.Set("Accept", "application/json")
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusOK, w.Code)
+}
+
+func (s *HandlerSuite) TestAuth_CreateRequiresAuth() {
+	router := s.newRouter([]string{"secret-token"})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/notes", strings.NewReader(`{"title":"t","content":"c"}`))
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("Accept", "application/json")
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusUnauthorized, w.Code)
+}
+
+func (s *HandlerSuite) TestAuth_UpdateRequiresAuth() {
+	router := s.newRouter([]string{"secret-token"})
+
+	w := httptest.NewRecorder()
+	body := `{"title":"t","content":"c","edit_code":"x"}`
+	r := httptest.NewRequest(http.MethodPut, "/notes/"+testID, strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("Accept", "application/json")
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusUnauthorized, w.Code)
+}
+
+func (s *HandlerSuite) TestAuth_DeleteRequiresAuth() {
+	router := s.newRouter([]string{"secret-token"})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodDelete, "/notes/"+testID, nil)
+	r.Header.Set("Accept", "application/json")
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusUnauthorized, w.Code)
+}
+
+func (s *HandlerSuite) TestGetNote_Public_NoEditButtons() {
+	note := newTestNote("public note", "content")
+	s.manager.EXPECT().GetRendered(gomock.Any(), testID).Return(note, "<p>content</p>", nil)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
+	r.Header.Set("Accept", "text/html")
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusOK, w.Code)
+
+	body := w.Body.String()
+	s.NotContains(body, `href="/edit/`)
+	// "New" link should only appear when CanEdit is true; "Raw" is always present.
+	// The paste-footer contains Raw for public notes, but not Edit/New.
+	pasteFooterStart := strings.Index(body, `class="paste-footer"`)
+	s.Require().GreaterOrEqual(pasteFooterStart, 0)
+	pasteFooterEnd := strings.Index(body[pasteFooterStart:], "</div>")
+	footer := body[pasteFooterStart : pasteFooterStart+pasteFooterEnd]
+	s.NotContains(footer, "Edit")
+	s.NotContains(footer, "New")
 }
 
 // ── Login ──

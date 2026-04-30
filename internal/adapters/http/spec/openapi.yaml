@@ -7,7 +7,8 @@ info:
     ## Authentication
 
     When the server is started with `--auth-tokens`, all write endpoints (`POST`, `PUT`, `DELETE`)
-    require a Bearer token in the `Authorization` header.  Read endpoints (`GET`) are always public.
+    require a Bearer token in the `Authorization` header.  Read endpoints (`GET`) are public by
+    default; notes with `private: true` require a valid token to view.
 
     ## Burn-after-reading
 
@@ -268,6 +269,13 @@ components:
             Intended for CLI and automation use; the web UI does not expose this field.
           example: MySecretCode1
 
+        private:
+          type: boolean
+          default: false
+          description: |
+            When `true` the note requires a valid server auth token to view.
+            Only meaningful when the server is started with `--auth-tokens`.
+
     UpdateNoteRequest:
       type: object
       required: [title, content, edit_code]
@@ -298,6 +306,9 @@ components:
             New TTL in seconds (grace period after first read).
             Only meaningful when `burn_after_reading` is `true`.
           example: 3600
+        private:
+          type: boolean
+          description: Update the private flag
 
     NoteResponse:
       type: object
@@ -328,6 +339,11 @@ components:
             `true` until the first read (or permanently `false` for non-burn notes).
             After the first read of a note with a TTL this becomes `false` and `expires_at`
             is set.
+        private:
+          type: boolean
+          description: |
+            `true` when the note requires a valid server auth token to view.
+            `false` for publicly accessible notes.
         expires_at:
           type: string
           format: date-time

@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/style.css?p={{styleVersion}}">
 </head>
 <body>
 <div class="wrapper">
@@ -53,28 +53,39 @@
         {{end}}
     </div>
 
-    <div class="burn-row">
-        <label class="burn-checkbox" id="burnLabel">
-            <input type="checkbox" id="burnCheck"{{if .BurnAfterReading}} checked{{end}}>
-            <span class="checkmark"></span>
-            <span class="burn-text">Burn after reading in</span>
-        </label>
-        <div class="burn-time-wrap{{if .BurnAfterReading}} active{{end}}" id="burnTimeWrap">
-            <div class="select-wrap">
-                <select class="field-select burn-select" id="burnTime"{{if not .BurnAfterReading}} disabled{{end}}>
-                    <option value="300"{{if eq .TTL 300}} selected{{end}}>5 minutes</option>
-                    <option value="600"{{if eq .TTL 600}} selected{{end}}>10 minutes</option>
-                    <option value="1800"{{if eq .TTL 1800}} selected{{end}}>30 minutes</option>
-                    <option value="3600"{{if or (eq .TTL 3600) (eq .TTL 0)}} selected{{end}}>1 hour</option>
-                    <option value="14400"{{if eq .TTL 14400}} selected{{end}}>4 hours</option>
-                    <option value="43200"{{if eq .TTL 43200}} selected{{end}}>12 hours</option>
-                    <option value="86400"{{if eq .TTL 86400}} selected{{end}}>24 hours</option>
-                    <option value="259200"{{if eq .TTL 259200}} selected{{end}}>3 days</option>
-                    <option value="604800"{{if eq .TTL 604800}} selected{{end}}>7 days</option>
-                    <option value="2592000"{{if eq .TTL 2592000}} selected{{end}}>30 days</option>
-                    <option value="7776000"{{if eq .TTL 7776000}} selected{{end}}>90 days</option>
-                </select>
+    <div class="options-row note-flags-row">
+        <div class="burn-row">
+            <label class="burn-checkbox" id="burnLabel">
+                <input type="checkbox" id="burnCheck"{{if .BurnAfterReading}} checked{{end}}>
+                <span class="checkmark"></span>
+                <span class="burn-text">Burn after reading in</span>
+            </label>
+            <div class="burn-time-wrap{{if .BurnAfterReading}} active{{end}}" id="burnTimeWrap">
+                <div class="select-wrap">
+                    <select class="field-select burn-select" id="burnTime"{{if not .BurnAfterReading}} disabled{{end}}>
+                        <option value="300"{{if eq .TTL 300}} selected{{end}}>5 minutes</option>
+                        <option value="600"{{if eq .TTL 600}} selected{{end}}>10 minutes</option>
+                        <option value="1800"{{if eq .TTL 1800}} selected{{end}}>30 minutes</option>
+                        <option value="3600"{{if or (eq .TTL 3600) (eq .TTL 0)}} selected{{end}}>1 hour</option>
+                        <option value="14400"{{if eq .TTL 14400}} selected{{end}}>4 hours</option>
+                        <option value="43200"{{if eq .TTL 43200}} selected{{end}}>12 hours</option>
+                        <option value="86400"{{if eq .TTL 86400}} selected{{end}}>24 hours</option>
+                        <option value="259200"{{if eq .TTL 259200}} selected{{end}}>3 days</option>
+                        <option value="604800"{{if eq .TTL 604800}} selected{{end}}>7 days</option>
+                        <option value="2592000"{{if eq .TTL 2592000}} selected{{end}}>30 days</option>
+                        <option value="7776000"{{if eq .TTL 7776000}} selected{{end}}>90 days</option>
+                    </select>
+                </div>
             </div>
+        </div>
+
+        <div class="burn-row private-row">
+            <label class="burn-checkbox" id="privateLabel">
+                <input type="checkbox" id="privateCheck"{{if .Private}} checked{{end}}>
+                <span class="checkmark"></span>
+                <span class="burn-text">Private note</span>
+            </label>
+            <span class="shortcut-hint">Requires server auth token to view</span>
         </div>
     </div>
 
@@ -120,6 +131,10 @@
         sel.disabled = !checked;
     }
 
+    function getPrivate() {
+        return document.getElementById('privateCheck').checked;
+    }
+
     function getTTL() {
         if (!document.getElementById('burnCheck').checked) return 0;
         return parseInt(document.getElementById('burnTime').value);
@@ -144,7 +159,8 @@
         btn.style.opacity = '0.7';
         btn.disabled = true;
 
-        const payload = { title, content, burn_after_reading: burnAfterReading };
+        const privateNote = getPrivate();
+        const payload = { title, content, burn_after_reading: burnAfterReading, private: privateNote };
         if (slug) payload.slug = slug;
         if (ttl > 0) payload.ttl = ttl;
 
@@ -189,7 +205,8 @@
         btn.disabled = true;
 
         const burn = document.getElementById('burnCheck').checked;
-        const payload = { title: title || 'Untitled', content, edit_code: editCode, burn_after_reading: burn };
+        const privateNote = getPrivate();
+        const payload = { title: title || 'Untitled', content, edit_code: editCode, burn_after_reading: burn, private: privateNote };
         if (ttl > 0) payload.ttl = ttl;
 
         try {

@@ -28,6 +28,7 @@ type note struct {
 	Views            int        `bun:"views"`
 	BurnTTL          int64      `bun:"burn_ttl"`
 	BurnAfterReading bool       `bun:"burn_after_reading"`
+	Private          bool       `bun:"private"`
 }
 
 // Repository implements notes.Storage using PostgreSQL.
@@ -53,6 +54,7 @@ func toDomain(dbNote *note) *domain.Note {
 		Views:            dbNote.Views,
 		BurnTTL:          dbNote.BurnTTL,
 		BurnAfterReading: dbNote.BurnAfterReading,
+		Private:          dbNote.Private,
 	}
 }
 
@@ -69,6 +71,7 @@ func (r *Repository) Create(ctx context.Context, domNote *domain.Note) error {
 		ExpiresAt:        domNote.ExpiresAt,
 		BurnTTL:          domNote.BurnTTL,
 		BurnAfterReading: domNote.BurnAfterReading,
+		Private:          domNote.Private,
 	}
 
 	_, err := r.db.NewInsert().Model(dbNote).Exec(ctx)
@@ -157,12 +160,13 @@ func (r *Repository) Update(ctx context.Context, id string, domNote *domain.Note
 		ExpiresAt:        domNote.ExpiresAt,
 		BurnTTL:          domNote.BurnTTL,
 		BurnAfterReading: domNote.BurnAfterReading,
+		Private:          domNote.Private,
 		CreatedAt:        domNote.CreatedAt,
 		UpdatedAt:        domNote.UpdatedAt,
 	}
 
 	result, err := r.db.NewUpdate().Model(dbNote).
-		Column("title", "content", "content_type", "expires_at", "burn_ttl", "burn_after_reading", "updated_at").
+		Column("title", "content", "content_type", "expires_at", "burn_ttl", "burn_after_reading", "private", "updated_at").
 		Where("id = ?", id).
 		Exec(ctx)
 	if err != nil {

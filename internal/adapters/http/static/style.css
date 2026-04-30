@@ -704,6 +704,7 @@ kbd {
     color: var(--text-secondary);
     letter-spacing: 0.01em;
     transition: color 0.2s ease;
+    white-space: nowrap;
 }
 
 .burn-checkbox input:checked ~ .burn-text { color: var(--text-primary); }
@@ -720,6 +721,34 @@ kbd {
 }
 
 .burn-select { min-width: 130px; }
+
+.note-flags-row {
+    align-items: start;
+    animation-delay: 0.17s;
+}
+
+.note-flags-row .burn-row {
+    align-items: center;
+    flex-wrap: nowrap;
+    height: 42px;
+    min-height: 42px;
+    margin-bottom: 0;
+    min-width: 0;
+    animation: none;
+}
+
+.note-flags-row .burn-checkbox,
+.note-flags-row .shortcut-hint {
+    min-height: 42px;
+}
+
+.note-flags-row .burn-checkbox {
+    flex-shrink: 0;
+}
+
+.private-row .shortcut-hint {
+    white-space: nowrap;
+}
 
 /* ================================================================
    View page: meta bar

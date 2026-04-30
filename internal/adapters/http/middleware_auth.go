@@ -31,7 +31,7 @@ type authMiddleware struct {
 }
 
 func (am *authMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if isPublicPath(r.URL.Path) {
+	if isPublicPath(r.URL.Path) || isPublicRoute(r) {
 		am.next.ServeHTTP(w, r)
 		return
 	}
@@ -71,6 +71,34 @@ func isPublicPath(path string) bool {
 		strings.HasPrefix(path, "/static/") ||
 		path == "/api" || path == "/api/openapi.yaml" ||
 		path == "/healthz" || path == "/readyz"
+}
+
+// isPublicRoute allows GET requests for note view paths through the auth middleware.
+// The handler checks the per-note private flag and requires auth when the note is private.
+func isPublicRoute(r *http.Request) bool {
+	if r.Method != http.MethodGet {
+		return false
+	}
+
+	path := r.URL.Path
+	trimmed := strings.TrimPrefix(path, "/")
+
+	// GET /notes/{id} — single segment after "notes/"
+	if after, ok := strings.CutPrefix(trimmed, "notes/"); ok {
+		return after != "" && !strings.Contains(after, "/")
+	}
+
+	// Catch-all GET /{id} — single path segment that isn't a known route
+	if trimmed == "" || strings.Contains(trimmed, "/") {
+		return false
+	}
+
+	switch trimmed {
+	case "login", "api", "success", "edit", "healthz", "readyz":
+		return false
+	}
+
+	return true
 }
 
 // loginHandler validates the token from a form POST and sets a session cookie.

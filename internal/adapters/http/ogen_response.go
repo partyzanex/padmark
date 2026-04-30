@@ -15,6 +15,7 @@ func domainToResponse(note *domain.Note) *ogenapi.NoteResponse {
 		BurnAfterReading: note.BurnAfterReading,
 		CreatedAt:        note.CreatedAt,
 		UpdatedAt:        note.UpdatedAt,
+		Private:          ogenapi.NewOptBool(note.Private),
 	}
 
 	if note.ExpiresAt != nil {
@@ -35,6 +36,7 @@ func domainToCreateResponse(note *domain.Note) ogenapi.CreateNoteResponse {
 		BurnAfterReading: note.BurnAfterReading,
 		CreatedAt:        note.CreatedAt,
 		UpdatedAt:        note.UpdatedAt,
+		Private:          ogenapi.NewOptBool(note.Private),
 	}
 
 	if note.ExpiresAt != nil {

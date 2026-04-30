@@ -46,6 +46,7 @@ func (h *OgenHandler) CreateNote(
 		EditCode:         req.EditCode.Or(""),
 		BurnTTL:          burnTTL,
 		BurnAfterReading: burnAfterReading,
+		Private:          req.Private.Or(false),
 	})
 	if err != nil {
 		return mapCreateError(err, h.log), nil
@@ -86,6 +87,7 @@ func (h *OgenHandler) UpdateNote(
 		ContentType:      domain.ContentType(req.ContentType.Or("")),
 		BurnTTL:          burnTTL,
 		BurnAfterReading: burnAfterReading,
+		Private:          req.Private.Or(false),
 	})
 	if err != nil {
 		return mapUpdateError(err, h.log), nil
