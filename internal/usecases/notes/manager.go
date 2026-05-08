@@ -193,7 +193,7 @@ func (m *Manager) Update(
 
 	note.ID = id
 	note.CreatedAt = existing.CreatedAt
-	note.UpdatedAt = time.Now()
+	note.UpdatedAt = time.Now().UTC()
 	note.EditCode = existing.EditCode
 
 	if note.ExpiresAt == nil {
