@@ -44,7 +44,8 @@ func (s *RepositoryTestSuite) SetupSuite() {
 	s.db = bun.NewDB(sqldb, pgdialect.New())
 	s.Require().NoError(s.db.PingContext(ctx))
 
-	s.Require().NoError(Migrate(ctx, s.db))
+	_, migrateErr := Migrate(ctx, s.db)
+	s.Require().NoError(migrateErr)
 
 	s.repo = NewRepository(s.db)
 }
@@ -408,7 +409,7 @@ func (s *RepositoryTestSuite) TestConsume_NotFound() {
 
 func (s *RepositoryTestSuite) TestMigrate_Idempotent() {
 	// Running Migrate again should not fail (all migrations already applied).
-	err := Migrate(s.T().Context(), s.db)
+	_, err := Migrate(s.T().Context(), s.db)
 
 	s.Require().NoError(err)
 }

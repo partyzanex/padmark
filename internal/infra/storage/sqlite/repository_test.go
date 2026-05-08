@@ -423,7 +423,8 @@ func (s *RepositoryTestSuite) TestMigrate_OK() {
 
 	defer func() { s.Require().NoError(db.Close()) }()
 
-	s.Require().NoError(Migrate(ctx, db))
+	_, migrateErr := Migrate(ctx, db)
+	s.Require().NoError(migrateErr)
 }
 
 func (s *RepositoryTestSuite) TestMigrate_Idempotent() {
@@ -436,6 +437,9 @@ func (s *RepositoryTestSuite) TestMigrate_Idempotent() {
 
 	defer func() { s.Require().NoError(db.Close()) }()
 
-	s.Require().NoError(Migrate(ctx, db))
-	s.Require().NoError(Migrate(ctx, db))
+	_, migrateErr := Migrate(ctx, db)
+	s.Require().NoError(migrateErr)
+
+	_, migrateErr2 := Migrate(ctx, db)
+	s.Require().NoError(migrateErr2)
 }

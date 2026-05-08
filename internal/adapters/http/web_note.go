@@ -133,7 +133,7 @@ func (h *Handler) renderNoteHTML(w http.ResponseWriter, r *http.Request, id stri
 
 	data := toNoteViewData(note, rendered)
 	data.Nonce = nonceFromContext(r.Context())
-	data.CanEdit = h.allowedTokens != nil && h.isAuthenticated(r)
+	data.CanEdit = h.allowedTokens == nil || h.isAuthenticated(r)
 
 	err = h.noteTmpl.Execute(w, data)
 	if err != nil {

@@ -54,7 +54,7 @@ func migrateAction(ctx context.Context, cmd *cli.Command) error {
 
 	log.InfoContext(ctx, "running migrations", "storage", storage)
 
-	_, err = initStorage(ctx, storage, db)
+	_, err = initStorage(ctx, storage, db, log)
 	if err != nil {
 		return err
 	}

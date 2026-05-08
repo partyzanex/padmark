@@ -4,10 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/url"
+	"path/filepath"
 	"strings"
 
+	"github.com/pressly/goose/v3"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
 	"github.com/uptrace/bun/dialect/sqlitedialect"
@@ -62,41 +65,45 @@ func openDB(ctx context.Context, storage, dsn string) (*bun.DB, error) {
 }
 
 // storageInit runs migrations and returns a ready-to-use repository.
-type storageInit func(ctx context.Context, db *bun.DB) (notes.Storage, error)
+type storageInit func(ctx context.Context, db *bun.DB, log *slog.Logger) (notes.Storage, error)
 
 //nolint:ireturn // multiple implementations (sqlite, postgres) require interface return
-func initPostgresStorage(ctx context.Context, db *bun.DB) (notes.Storage, error) {
-	err := postgres.Migrate(ctx, db)
+func initPostgresStorage(ctx context.Context, db *bun.DB, log *slog.Logger) (notes.Storage, error) {
+	results, err := postgres.Migrate(ctx, db)
 	if err != nil {
 		return nil, fmt.Errorf("postgres migrate: %w", err)
 	}
+
+	logMigrations(ctx, log, results)
 
 	return postgres.NewRepository(db), nil
 }
 
 //nolint:ireturn // multiple implementations (sqlite, postgres) require interface return
-func initSQLiteStorage(ctx context.Context, db *bun.DB) (notes.Storage, error) {
-	err := sqlite.Migrate(ctx, db)
+func initSQLiteStorage(ctx context.Context, db *bun.DB, log *slog.Logger) (notes.Storage, error) {
+	results, err := sqlite.Migrate(ctx, db)
 	if err != nil {
 		return nil, fmt.Errorf("sqlite migrate: %w", err)
 	}
+
+	logMigrations(ctx, log, results)
 
 	return sqlite.NewRepository(db), nil
 }
 
 //nolint:ireturn // multiple implementations (sqlite, postgres) require interface return
-func initStorage(ctx context.Context, storage string, db *bun.DB) (notes.Storage, error) {
+func initStorage(ctx context.Context, storage string, db *bun.DB, log *slog.Logger) (notes.Storage, error) {
 	inits := map[string]storageInit{
 		"postgres": initPostgresStorage,
 		"sqlite":   initSQLiteStorage,
 	}
 
-	init, ok := inits[storage]
+	fn, ok := inits[storage]
 	if !ok {
 		return nil, fmt.Errorf("unknown storage backend %q: supported backends: postgres, sqlite", storage)
 	}
 
-	return init(ctx, db)
+	return fn(ctx, db, log)
 }
 
 // parseTrustedProxies parses a comma-separated list of CIDRs or bare IP addresses.
@@ -157,4 +164,28 @@ func redactDSN(dsn string) string {
 	}
 
 	return dsn
+}
+
+func logMigrations(ctx context.Context, log *slog.Logger, results []*goose.MigrationResult) {
+	applied := 0
+
+	for _, res := range results {
+		if res.Empty {
+			continue
+		}
+
+		applied++
+
+		log.InfoContext(ctx, "migration applied",
+			"version", res.Source.Version,
+			"file", filepath.Base(res.Source.Path),
+			"duration", res.Duration,
+		)
+	}
+
+	if applied == 0 {
+		log.InfoContext(ctx, "migrations: already up to date")
+	} else {
+		log.InfoContext(ctx, "migrations: done", "applied", applied)
+	}
 }

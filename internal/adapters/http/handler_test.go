@@ -1380,7 +1380,8 @@ func (s *HandlerSuite) TestAuth_DeleteRequiresAuth() {
 	s.Equal(http.StatusUnauthorized, w.Code)
 }
 
-func (s *HandlerSuite) TestGetNote_Public_NoEditButtons() {
+func (s *HandlerSuite) TestGetNote_OpenInstance_ShowsEditButtons() {
+	// No auth tokens configured → CanEdit is always true.
 	note := newTestNote("public note", "content")
 	s.manager.EXPECT().GetRendered(gomock.Any(), testID).Return(note, "<p>content</p>", nil)
 
@@ -1393,15 +1394,30 @@ func (s *HandlerSuite) TestGetNote_Public_NoEditButtons() {
 	s.Equal(http.StatusOK, w.Code)
 
 	body := w.Body.String()
+	s.Contains(body, `href="/edit/`)
+	s.Contains(body, "New")
+}
+
+func (s *HandlerSuite) TestGetNote_AuthInstance_Unauthenticated_HidesEditButtons() {
+	// Auth tokens configured, user not authenticated → CanEdit is false.
+	// handlePrivateAuth calls Peek first; the public note is then rendered via GetRenderedPreloaded.
+	router := s.newRouter([]string{"secret-token"})
+	note := newTestNote("public note", "content")
+
+	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
+	s.manager.EXPECT().GetRenderedPreloaded(gomock.Any(), testID, note).Return(note, "<p>content</p>", nil)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
+	r.Header.Set("Accept", "text/html")
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusOK, w.Code)
+
+	body := w.Body.String()
 	s.NotContains(body, `href="/edit/`)
-	// "New" link should only appear when CanEdit is true; "Raw" is always present.
-	// The paste-footer contains Raw for public notes, but not Edit/New.
-	pasteFooterStart := strings.Index(body, `class="paste-footer"`)
-	s.Require().GreaterOrEqual(pasteFooterStart, 0)
-	pasteFooterEnd := strings.Index(body[pasteFooterStart:], "</div>")
-	footer := body[pasteFooterStart : pasteFooterStart+pasteFooterEnd]
-	s.NotContains(footer, "Edit")
-	s.NotContains(footer, "New")
+	s.NotContains(body, ">New<")
 }
 
 // ── Login ──

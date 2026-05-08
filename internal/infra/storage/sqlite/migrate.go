@@ -11,16 +11,16 @@ import (
 )
 
 // Migrate applies all pending goose migrations to the database.
-func Migrate(ctx context.Context, db *bun.DB) error {
+func Migrate(ctx context.Context, db *bun.DB) ([]*goose.MigrationResult, error) {
 	provider, err := goose.NewProvider(goose.DialectSQLite3, db.DB, sqlitemigrations.FS)
 	if err != nil {
-		return fmt.Errorf("migrations provider: %w", err)
+		return nil, fmt.Errorf("migrations provider: %w", err)
 	}
 
-	_, err = provider.Up(ctx)
+	results, err := provider.Up(ctx)
 	if err != nil {
-		return fmt.Errorf("migrations up: %w", err)
+		return nil, fmt.Errorf("migrations up: %w", err)
 	}
 
-	return nil
+	return results, nil
 }

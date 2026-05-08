@@ -199,7 +199,13 @@ func (m *Manager) Update(
 	note.EditCode = existing.EditCode
 
 	if note.ExpiresAt == nil {
-		note.ExpiresAt = existing.ExpiresAt
+		// When burn is being disabled (BurnTTL cleared) but the existing note has a
+		// burn-timer expiry, do not inherit it — the stale expiry must be dropped.
+		if note.BurnTTL == 0 && existing.BurnTTL > 0 {
+			note.ExpiresAt = nil
+		} else {
+			note.ExpiresAt = existing.ExpiresAt
+		}
 	}
 
 	if note.ContentType == nil {

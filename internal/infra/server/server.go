@@ -176,7 +176,7 @@ func serverAction(ctx context.Context, cmd *cli.Command) error {
 		}
 	}()
 
-	repo, err := initStorage(ctx, storage, db)
+	repo, err := initStorage(ctx, storage, db, log)
 	if err != nil {
 		return err
 	}
