@@ -41,6 +41,7 @@ func NewRenderer() *Renderer {
 		goldmark.WithRendererOptions(
 			html.WithHardWraps(),
 			html.WithXHTML(),
+			html.WithUnsafe(),
 		),
 	)
 

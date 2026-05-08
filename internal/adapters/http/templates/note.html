@@ -140,6 +140,28 @@
             flashCopied(this);
         }
     });
+
+    document.querySelectorAll('.markdown-body pre').forEach(function (pre) {
+        const btn = document.createElement('button');
+        btn.className = 'copy-code-btn';
+        btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy';
+        btn.addEventListener('click', function () {
+            const code = pre.querySelector('code');
+            const text = (code || pre).textContent;
+            if (navigator.clipboard) {
+                navigator.clipboard.writeText(text).then(function () { flashCopied(btn); });
+            } else {
+                const el = document.createElement('textarea');
+                el.value = text;
+                document.body.appendChild(el);
+                el.select();
+                document.execCommand('copy');
+                document.body.removeChild(el);
+                flashCopied(btn);
+            }
+        });
+        pre.appendChild(btn);
+    });
 </script>
 </body>
 </html>

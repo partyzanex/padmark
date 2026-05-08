@@ -814,6 +814,31 @@ kbd {
 .meta-btn.copied { color: #34d399; }
 .meta-btn svg { width: 12px; height: 12px; }
 
+.copy-code-btn {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: 5px;
+    color: var(--text-secondary);
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: opacity 0.15s ease, color 0.2s ease, border-color 0.2s ease;
+    letter-spacing: 0.02em;
+    opacity: 0;
+}
+.copy-code-btn svg { width: 11px; height: 11px; }
+.copy-code-btn:hover { border-color: var(--border-focus); color: var(--text-primary); background: var(--accent-glow); }
+.copy-code-btn.copied { color: #34d399; }
+.markdown-body pre:hover > .copy-code-btn { opacity: 1; }
+
 /* ================================================================
    View page: article card + prose
    ================================================================ */
@@ -1349,6 +1374,7 @@ kbd {
 
 .markdown-body .highlight pre,
 .markdown-body pre {
+  position: relative;
   padding: var(--base-size-16);
   overflow: auto;
   font-size: 85%;
