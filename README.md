@@ -24,7 +24,8 @@ Every note has:
 - a content type: `text/markdown` or `text/plain`;
 - an `edit_code` returned once at creation time;
 - optional burn-after-reading behavior;
-- a view counter.
+- a view counter;
+- an optional `private` flag that restricts read access to authenticated users.
 
 The `edit_code` is the only secret required to update or delete a note. There are no per-note user accounts.
 
@@ -53,6 +54,7 @@ The API spec is the source of truth for the generated server and Go client.
 - Short URLs with generated or custom slugs
 - One-time `edit_code` for update and delete operations
 - Burn-after-reading with optional post-read TTL
+- Private notes visible only to authenticated users
 - HTML, JSON, Markdown, and plain-text responses depending on `Accept`
 - Sanitized Markdown rendering for browser views
 - SQLite or PostgreSQL storage
@@ -290,8 +292,9 @@ curl -H "Authorization: Bearer token-a" http://localhost:4000/notes/{id}
 | `--auth-tokens` | `PADMARK_AUTH_TOKENS` | empty | Comma-separated Bearer tokens |
 | `--cookie-max-age` | `PADMARK_COOKIE_MAX_AGE` | `7776000` | Auth cookie lifetime in seconds |
 | `--read-timeout` | `PADMARK_READ_TIMEOUT` | `30` | HTTP read timeout in seconds |
+| `--write-timeout` | `PADMARK_WRITE_TIMEOUT` | `60` | HTTP write timeout in seconds |
 | `--max-header-bytes` | `PADMARK_MAX_HEADER_BYTES` | `65536` | Maximum request header size |
-| `--max-body-bytes` | `PADMARK_MAX_BODY_BYTES` | `262144` | Maximum request body size |
+| `--max-body-bytes` | `PADMARK_MAX_BODY_BYTES` | `4194304` | Maximum request body size |
 | `--rate-limit` | `PADMARK_RATE_LIMIT` | `10` | Requests per second per IP; `0` disables it |
 | `--rate-burst` | `PADMARK_RATE_BURST` | `20` | Burst size per IP |
 | `--tls-cert` | `PADMARK_TLS_CERT` | empty | TLS certificate path |

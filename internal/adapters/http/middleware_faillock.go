@@ -2,7 +2,6 @@ package http
 
 import (
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/bluele/gcache"
@@ -23,72 +22,45 @@ const (
 	maxTrackedFailures = 10_000
 )
 
-// noteFailLockout tracks consecutive failed edit-code attempts per note ID.
-// After maxFailedAttempts failures it returns true from isLocked, causing the
-// withFailLockout middleware to respond 429 instead of forwarding the request.
-type noteFailLockout struct {
-	cache gcache.Cache
-	mu    sync.Mutex
-}
-
-func newNoteFailLockout() *noteFailLockout {
-	return &noteFailLockout{
-		cache: gcache.New(maxTrackedFailures).ARC().Build(),
-	}
-}
-
-func (fl *noteFailLockout) isLocked(id string) bool {
-	fl.mu.Lock()
-	defer fl.mu.Unlock()
-
-	cached, err := fl.cache.Get(id)
-	if err != nil {
-		return false
-	}
-
-	count, ok := cached.(int)
-
-	return ok && count >= maxFailedAttempts
-}
-
-func (fl *noteFailLockout) recordFailure(id string) {
-	fl.mu.Lock()
-	defer fl.mu.Unlock()
-
-	count := 0
-
-	cached, getErr := fl.cache.Get(id)
-	if getErr == nil {
-		if prevCount, ok := cached.(int); ok {
-			count = prevCount
-		}
-	}
-
-	setErr := fl.cache.SetWithExpire(id, count+1, failLockoutDur)
-	if setErr != nil {
-		// ARC SetWithExpire never returns an error in practice; skip silently.
-		return
-	}
+//nolint:ireturn // gcache.Cache is an interface by design; no concrete type is exposed by the library
+func newFailLockoutCache() gcache.Cache {
+	return gcache.New(maxTrackedFailures).ARC().Build()
 }
 
 // withFailLockout wraps edit-code-protected routes (PUT /notes/{id},
 // DELETE /notes/{id}). It rejects requests with 429 when the note is locked,
 // and increments the failure counter when the upstream handler responds 403.
-func withFailLockout(lockout *noteFailLockout, next http.Handler) http.Handler {
+func withFailLockout(cache gcache.Cache, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
 
-		if lockout.isLocked(id) {
-			http.Error(w, "too many failed attempts, try again later", http.StatusTooManyRequests)
+		cached, err := cache.Get(id)
+		if err == nil {
+			if count, ok := cached.(int); ok && count >= maxFailedAttempts {
+				http.Error(w, "too many failed attempts, try again later", http.StatusTooManyRequests)
 
-			return
+				return
+			}
 		}
 
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(rec, r)
 
 		if rec.status == http.StatusForbidden {
-			lockout.recordFailure(id)
+			count := 0
+
+			prev, getErr := cache.Get(id)
+			if getErr == nil {
+				if prevCount, ok := prev.(int); ok {
+					count = prevCount
+				}
+			}
+
+			setErr := cache.SetWithExpire(id, count+1, failLockoutDur)
+			if setErr != nil {
+				// ARC SetWithExpire never returns an error in practice; skip silently.
+				return
+			}
 		}
 	})
 }

@@ -154,8 +154,12 @@ func handleCreateNoteRes(res padmark.CreateNoteRes) (*padmark.CreateNoteResponse
 // firstLine returns the first non-empty, non-heading line of content as a title fallback.
 func firstLine(content string) string {
 	for _, line := range strings.SplitN(content, "\n", firstLineScanLimit) {
-		line = strings.TrimLeft(line, "# ")
-		line = strings.TrimSpace(line)
+		trimmed := strings.TrimLeft(line, "#")
+		if len(trimmed) < len(line) {
+			trimmed = strings.TrimPrefix(trimmed, " ")
+		}
+
+		line = strings.TrimSpace(trimmed)
 
 		if line != "" {
 			return line

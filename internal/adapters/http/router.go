@@ -50,7 +50,7 @@ func NewRouter(
 	handler.WithAuth(tokens)
 
 	mux := http.NewServeMux()
-	lockout := newNoteFailLockout()
+	lockout := newFailLockoutCache()
 
 	// Ogen-handled JSON API routes
 	mux.Handle("POST /notes", ogenSrv)

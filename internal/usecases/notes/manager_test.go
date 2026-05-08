@@ -616,3 +616,85 @@ func (s *ManagerTestSuite) TestGetRenderedPreloaded_Expired() {
 
 	s.True(errors.Is(err, domain.ErrExpired))
 }
+
+// Peek — expiry policy is intentionally NOT applied
+
+// TestPeek_ReturnsExpiredNote documents that Peek bypasses expiry policy by design.
+// Callers (e.g. auth middleware) use Peek to inspect note metadata without side effects;
+// they must not trigger deletion or policy enforcement.
+func (s *ManagerTestSuite) TestPeek_ReturnsExpiredNote() {
+	past := time.Now().Add(-time.Minute)
+	note := &domain.Note{ID: "expired-peek", Title: "t", ExpiresAt: &past}
+
+	s.storage.EXPECT().Get(gomock.Any(), "expired-peek").Return(note, nil)
+	// Delete must NOT be called — Peek does not enforce expiry.
+
+	result, err := s.manager.Peek(s.T().Context(), "expired-peek")
+
+	s.Require().NoError(err)
+	s.Equal(note, result)
+}
+
+// Update — private notes
+
+func (s *ManagerTestSuite) TestUpdate_PrivateNote_CorrectCode() {
+	priv := true
+	existing := &domain.Note{
+		ID:       "priv-1",
+		Title:    "secret",
+		EditCode: "rightcode1234",
+		Private:  &priv,
+	}
+	note := &domain.Note{Title: "updated secret"}
+
+	s.storage.EXPECT().Get(gomock.Any(), "priv-1").Return(existing, nil)
+	s.storage.EXPECT().Update(gomock.Any(), "priv-1", note).Return(nil)
+
+	result, err := s.manager.Update(s.T().Context(), "priv-1", "rightcode1234", note)
+
+	s.Require().NoError(err)
+	s.Equal("updated secret", result.Title)
+}
+
+func (s *ManagerTestSuite) TestUpdate_PrivateNote_WrongCode() {
+	priv := true
+	existing := &domain.Note{
+		ID:       "priv-2",
+		Title:    "secret",
+		EditCode: "rightcode1234",
+		Private:  &priv,
+	}
+	note := &domain.Note{Title: "hijacked"}
+
+	s.storage.EXPECT().Get(gomock.Any(), "priv-2").Return(existing, nil)
+
+	_, err := s.manager.Update(s.T().Context(), "priv-2", "wrongcode0000", note)
+
+	s.True(errors.Is(err, domain.ErrForbidden))
+}
+
+// Consume error path
+
+func (s *ManagerTestSuite) TestGet_BurnAfterReading_ConsumeError() {
+	consumeErr := errors.New("storage unavailable")
+	note := &domain.Note{ID: "burn-err", Title: "t", BurnAfterReading: true}
+
+	s.storage.EXPECT().Get(gomock.Any(), "burn-err").Return(note, nil)
+	s.storage.EXPECT().Consume(gomock.Any(), "burn-err").Return(nil, consumeErr)
+
+	_, err := s.manager.Get(s.T().Context(), "burn-err")
+
+	s.True(errors.Is(err, consumeErr))
+}
+
+func (s *ManagerTestSuite) TestView_BurnAfterReading_ConsumeError() {
+	consumeErr := errors.New("storage unavailable")
+	note := &domain.Note{ID: "burn-err-view", Title: "t", BurnAfterReading: true}
+
+	s.storage.EXPECT().Get(gomock.Any(), "burn-err-view").Return(note, nil)
+	s.storage.EXPECT().Consume(gomock.Any(), "burn-err-view").Return(nil, consumeErr)
+
+	_, err := s.manager.View(s.T().Context(), "burn-err-view")
+
+	s.True(errors.Is(err, consumeErr))
+}

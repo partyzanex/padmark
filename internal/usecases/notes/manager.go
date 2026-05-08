@@ -125,7 +125,9 @@ func (m *Manager) Create(ctx context.Context, note *domain.Note) (*domain.Note, 
 	return note, nil
 }
 
-// Peek fetches a note by ID without incrementing views or triggering burn-after-reading.
+// Peek fetches a note by ID without incrementing views, triggering burn-after-reading,
+// or applying expiry policy. Intentionally returns expired notes as-is — callers that
+// need expiry enforcement should use Get or View instead.
 func (m *Manager) Peek(ctx context.Context, id string) (*domain.Note, error) {
 	note, err := m.storage.Get(ctx, id)
 	if err != nil {

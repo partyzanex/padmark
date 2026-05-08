@@ -142,6 +142,8 @@ func runServer(ctx context.Context, cmd *cli.Command, router http.Handler) error
 		}
 	}
 
+	// context.Background() is intentional: shutCtx must outlive serverCtx so that
+	// graceful shutdown can complete even when serverCtx is already cancelled.
 	shutCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 

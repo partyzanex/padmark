@@ -1080,6 +1080,96 @@ func (s *HandlerSuite) TestFailLockout_Lockout() {
 	s.Equal(http.StatusTooManyRequests, w.Code)
 }
 
+func (s *HandlerSuite) TestFailLockout_NoIncrementOnSuccess() {
+	note := newTestNote("t", "c")
+	s.manager.EXPECT().
+		Update(gomock.Any(), testID, "valid", gomock.Any()).
+		Return(note, nil).
+		Times(11)
+
+	body := `{"title":"t","content":"c","edit_code":"valid"}`
+
+	for range 11 {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodPut, "/notes/"+testID, strings.NewReader(body))
+		r.Header.Set("Content-Type", "application/json")
+		s.router.ServeHTTP(w, r)
+		s.Equal(http.StatusOK, w.Code)
+	}
+}
+
+func (s *HandlerSuite) TestFailLockout_NoIncrementOnNonForbiddenError() {
+	s.manager.EXPECT().
+		Update(gomock.Any(), testID, "wrong", gomock.Any()).
+		Return(nil, domain.ErrNotFound).
+		Times(11)
+
+	body := `{"title":"t","content":"c","edit_code":"wrong"}`
+
+	for range 11 {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodPut, "/notes/"+testID, strings.NewReader(body))
+		r.Header.Set("Content-Type", "application/json")
+		s.router.ServeHTTP(w, r)
+		s.Equal(http.StatusNotFound, w.Code)
+	}
+}
+
+func (s *HandlerSuite) TestFailLockout_DeleteAlsoLocked() {
+	s.manager.EXPECT().
+		Delete(gomock.Any(), testID, "wrong").
+		Return(domain.ErrForbidden).
+		Times(10)
+
+	for range 10 {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodDelete, "/notes/"+testID, nil)
+		r.Header.Set("X-Edit-Code", "wrong")
+		s.router.ServeHTTP(w, r)
+		s.Equal(http.StatusForbidden, w.Code)
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodDelete, "/notes/"+testID, nil)
+	r.Header.Set("X-Edit-Code", "wrong")
+	s.router.ServeHTTP(w, r)
+	s.Equal(http.StatusTooManyRequests, w.Code)
+}
+
+func (s *HandlerSuite) TestFailLockout_IndependentPerNoteID() {
+	body := `{"title":"t","content":"c","edit_code":"wrong"}`
+
+	s.manager.EXPECT().
+		Update(gomock.Any(), testID, "wrong", gomock.Any()).
+		Return(nil, domain.ErrForbidden).
+		Times(10)
+
+	for range 10 {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodPut, "/notes/"+testID, strings.NewReader(body))
+		r.Header.Set("Content-Type", "application/json")
+		s.router.ServeHTTP(w, r)
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPut, "/notes/"+testID, strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+	s.router.ServeHTTP(w, r)
+	s.Equal(http.StatusTooManyRequests, w.Code)
+
+	const otherID = "other-note"
+
+	s.manager.EXPECT().
+		Update(gomock.Any(), otherID, "wrong", gomock.Any()).
+		Return(nil, domain.ErrForbidden)
+
+	w = httptest.NewRecorder()
+	r = httptest.NewRequest(http.MethodPut, "/notes/"+otherID, strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+	s.router.ServeHTTP(w, r)
+	s.Equal(http.StatusForbidden, w.Code)
+}
+
 // ── writeError default branch ──
 
 func (s *HandlerSuite) TestGetNote_Plain_Expired() {
