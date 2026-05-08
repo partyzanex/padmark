@@ -15,7 +15,6 @@ linters:
     - paralleltest
     - containedctx
     - tparallel
-    - copyloopvar
     - err113
 
   # Linters configuration (migrated from `linters-settings` in v1).
@@ -164,11 +163,18 @@ linters:
           yaml: camel
 
     varnamelen:
-      min-name-length: 2
+      min-name-length: 3
       ignore-names:
-        - w  # idiomatic http.ResponseWriter parameter
-        - r  # idiomatic *http.Request parameter
-        - b  # idiomatic []byte parameter (io.Writer)
+        - w
+        - r
+        - b
+        - i
+        - j
+        - m
+        - n
+        - wg
+        - db
+        - id
 
     revive:
       confidence: 0.4

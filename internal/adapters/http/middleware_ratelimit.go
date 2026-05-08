@@ -38,28 +38,28 @@ func withRateLimit(rps, burst int, trustedProxies []*net.IPNet, next http.Handle
 	return &rateLimitMiddleware{cache: limiterCache, trustedProxies: trustedProxies, next: next}
 }
 
-func (rl *rateLimitMiddleware) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
-	ip := clientIP(req, rl.trustedProxies)
+func (rl *rateLimitMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	ip := clientIP(r, rl.trustedProxies)
 
 	cached, err := rl.cache.Get(ip)
 	if err != nil {
 		// LoaderFunc never errors; this path is unreachable in practice.
-		http.Error(rw, "internal server error", http.StatusInternalServerError)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
 	limiter, ok := cached.(*rate.Limiter)
 	if !ok {
-		http.Error(rw, "internal server error", http.StatusInternalServerError)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
 	if !limiter.Allow() {
-		http.Error(rw, "too many requests", http.StatusTooManyRequests)
+		http.Error(w, "too many requests", http.StatusTooManyRequests)
 		return
 	}
 
-	rl.next.ServeHTTP(rw, req)
+	rl.next.ServeHTTP(w, r)
 }
 
 // clientIP returns the real client IP for rate limiting purposes.

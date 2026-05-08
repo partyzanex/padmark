@@ -10,12 +10,12 @@ func domainToResponse(note *domain.Note) *ogenapi.NoteResponse {
 		ID:               note.ID,
 		Title:            note.Title,
 		Content:          note.Content,
-		ContentType:      ogenapi.NoteResponseContentType(note.ContentType),
+		ContentType:      ogenapi.NoteResponseContentType(derefContentType(note.ContentType)),
 		Views:            note.Views,
 		BurnAfterReading: note.BurnAfterReading,
 		CreatedAt:        note.CreatedAt,
 		UpdatedAt:        note.UpdatedAt,
-		Private:          ogenapi.NewOptBool(note.Private),
+		Private:          ogenapi.NewOptBool(note.Private != nil && *note.Private),
 	}
 
 	if note.ExpiresAt != nil {
@@ -30,13 +30,13 @@ func domainToCreateResponse(note *domain.Note) ogenapi.CreateNoteResponse {
 		ID:               note.ID,
 		Title:            note.Title,
 		Content:          note.Content,
-		ContentType:      ogenapi.CreateNoteResponseContentType(note.ContentType),
+		ContentType:      ogenapi.CreateNoteResponseContentType(derefContentType(note.ContentType)),
 		EditCode:         note.EditCode,
 		Views:            note.Views,
 		BurnAfterReading: note.BurnAfterReading,
 		CreatedAt:        note.CreatedAt,
 		UpdatedAt:        note.UpdatedAt,
-		Private:          ogenapi.NewOptBool(note.Private),
+		Private:          ogenapi.NewOptBool(note.Private != nil && *note.Private),
 	}
 
 	if note.ExpiresAt != nil {

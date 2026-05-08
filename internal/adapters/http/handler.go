@@ -44,7 +44,9 @@ type NoteManager interface {
 	Create(ctx context.Context, note *domain.Note) (*domain.Note, error)
 	Peek(ctx context.Context, id string) (*domain.Note, error)
 	View(ctx context.Context, id string) (*domain.Note, error)
+	ViewPreloaded(ctx context.Context, id string, preloaded *domain.Note) (*domain.Note, error)
 	GetRendered(ctx context.Context, id string) (*domain.Note, string, error)
+	GetRenderedPreloaded(ctx context.Context, id string, preloaded *domain.Note) (*domain.Note, string, error)
 	Update(ctx context.Context, id, editCode string, note *domain.Note) (*domain.Note, error)
 	Delete(ctx context.Context, id, editCode string) error
 }
@@ -58,7 +60,6 @@ type Pinger interface {
 type Handler struct {
 	manager       NoteManager
 	log           *slog.Logger
-	pinger        Pinger
 	noteTmpl      *template.Template
 	indexTmpl     *template.Template
 	loginTmpl     *template.Template
@@ -89,12 +90,6 @@ func NewHandler(manager NoteManager, log *slog.Logger) *Handler {
 		successTmpl: parseTmpl("success", successTmplSrc),
 		errorTmpl:   parseTmpl("error", errorTmplSrc),
 	}
-}
-
-// WithPinger attaches a readiness probe to the handler.
-func (h *Handler) WithPinger(p Pinger) *Handler {
-	h.pinger = p
-	return h
 }
 
 // WithAuth attaches server auth tokens to the handler.

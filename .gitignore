@@ -12,3 +12,4 @@ padmark.db
 .env
 padmark-cli
 padmark-server
+.serena/

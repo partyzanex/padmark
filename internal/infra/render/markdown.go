@@ -22,7 +22,7 @@ type Renderer struct {
 
 // NewRenderer returns a Renderer with tables, strikethrough, autolinks and syntax highlighting enabled.
 func NewRenderer() *Renderer {
-	md := goldmark.New(
+	gmd := goldmark.New(
 		goldmark.WithExtensions(
 			extension.Table,
 			extension.Strikethrough,
@@ -50,7 +50,7 @@ func NewRenderer() *Renderer {
 	policy.AllowAttrs("class").OnElements("span", "code", "pre", "div")
 
 	return &Renderer{
-		md:     md,
+		md:     gmd,
 		policy: policy,
 	}
 }

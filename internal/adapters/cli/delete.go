@@ -39,7 +39,7 @@ func deleteAction(ctx context.Context, cmd *urcli.Command) error {
 		return errors.New("--edit-code is required (or set PADMARK_EDIT_CODE)")
 	}
 
-	cl, err := newPadmarkClient(cmd)
+	padmarkClient, err := newPadmarkClient(cmd)
 	if err != nil {
 		return err
 	}
@@ -49,7 +49,7 @@ func deleteAction(ctx context.Context, cmd *urcli.Command) error {
 		XEditCode: padmark.NewOptString(editCode),
 	}
 
-	res, err := cl.DeleteNote(ctx, params)
+	res, err := padmarkClient.DeleteNote(ctx, params)
 	if err != nil {
 		return fmt.Errorf("delete note: %w", err)
 	}

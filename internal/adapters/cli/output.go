@@ -32,33 +32,33 @@ func (ew *errWriter) printf(format string, args ...any) {
 }
 
 func printNote(w io.Writer, note *padmark.NoteResponse) error {
-	tw := tabwriter.NewWriter(w, twMinWidth, twTabWidth, twPadding, ' ', 0)
-	ew := &errWriter{w: tw}
+	twr := tabwriter.NewWriter(w, twMinWidth, twTabWidth, twPadding, ' ', 0)
+	ewr := &errWriter{w: twr}
 
-	ew.printf("id:\t%s\n", note.ID)
-	ew.printf("title:\t%s\n", note.Title)
-	ew.printf("type:\t%s\n", note.ContentType)
-	ew.printf("views:\t%d\n", note.Views)
+	ewr.printf("id:\t%s\n", note.ID)
+	ewr.printf("title:\t%s\n", note.Title)
+	ewr.printf("type:\t%s\n", note.ContentType)
+	ewr.printf("views:\t%d\n", note.Views)
 
 	if note.BurnAfterReading {
-		ew.printf("burn:\tyes\n")
+		ewr.printf("burn:\tyes\n")
 	}
 
 	if exp, ok := note.ExpiresAt.Get(); ok {
 		//nolint:gosmopolitan // CLI tool: show local time for readability
-		ew.printf("expires:\t%s\n", exp.Local().Format(time.DateTime))
+		ewr.printf("expires:\t%s\n", exp.Local().Format(time.DateTime))
 	}
 
 	//nolint:gosmopolitan // CLI tool: show local time for readability
-	ew.printf("created:\t%s\n", note.CreatedAt.Local().Format(time.DateTime))
+	ewr.printf("created:\t%s\n", note.CreatedAt.Local().Format(time.DateTime))
 	//nolint:gosmopolitan // CLI tool: show local time for readability
-	ew.printf("updated:\t%s\n", note.UpdatedAt.Local().Format(time.DateTime))
+	ewr.printf("updated:\t%s\n", note.UpdatedAt.Local().Format(time.DateTime))
 
-	if ew.err != nil {
-		return fmt.Errorf("write note: %w", ew.err)
+	if ewr.err != nil {
+		return fmt.Errorf("write note: %w", ewr.err)
 	}
 
-	flushErr := tw.Flush()
+	flushErr := twr.Flush()
 	if flushErr != nil {
 		return fmt.Errorf("flush: %w", flushErr)
 	}
@@ -86,27 +86,27 @@ func printNoteJSON(w io.Writer, note *padmark.NoteResponse) error {
 }
 
 func printCreateResult(w io.Writer, serverURL string, note *padmark.CreateNoteResponse) error {
-	tw := tabwriter.NewWriter(w, twMinWidth, twTabWidth, twPadding, ' ', 0)
-	ew := &errWriter{w: tw}
+	twr := tabwriter.NewWriter(w, twMinWidth, twTabWidth, twPadding, ' ', 0)
+	erw := &errWriter{w: twr}
 
-	ew.printf("id:\t%s\n", note.ID)
-	ew.printf("url:\t%s/%s\n", serverURL, note.ID)
-	ew.printf("edit-code:\t%s\n", note.EditCode)
+	erw.printf("id:\t%s\n", note.ID)
+	erw.printf("url:\t%s/%s\n", serverURL, note.ID)
+	erw.printf("edit-code:\t%s\n", note.EditCode)
 
 	if note.BurnAfterReading {
-		ew.printf("burn:\tyes\n")
+		erw.printf("burn:\tyes\n")
 	}
 
 	if exp, ok := note.ExpiresAt.Get(); ok {
 		//nolint:gosmopolitan // CLI tool: show local time for readability
-		ew.printf("expires:\t%s\n", exp.Local().Format(time.DateTime))
+		erw.printf("expires:\t%s\n", exp.Local().Format(time.DateTime))
 	}
 
-	if ew.err != nil {
-		return fmt.Errorf("write result: %w", ew.err)
+	if erw.err != nil {
+		return fmt.Errorf("write result: %w", erw.err)
 	}
 
-	flushErr := tw.Flush()
+	flushErr := twr.Flush()
 	if flushErr != nil {
 		return fmt.Errorf("flush: %w", flushErr)
 	}

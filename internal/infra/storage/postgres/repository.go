@@ -49,13 +49,29 @@ func toDomain(dbNote *note) *domain.Note {
 		ExpiresAt:        dbNote.ExpiresAt,
 		Title:            dbNote.Title,
 		Content:          dbNote.Content,
-		ContentType:      domain.ContentType(dbNote.ContentType),
+		ContentType:      contentTypePtr(dbNote.ContentType),
 		EditCode:         dbNote.EditCode,
 		Views:            dbNote.Views,
 		BurnTTL:          dbNote.BurnTTL,
 		BurnAfterReading: dbNote.BurnAfterReading,
-		Private:          dbNote.Private,
+		Private:          new(dbNote.Private),
 	}
+}
+
+func boolVal(b *bool) bool { return b != nil && *b }
+
+func contentTypePtr(s string) *domain.ContentType {
+	ct := domain.ContentType(s)
+
+	return &ct
+}
+
+func contentTypeVal(ct *domain.ContentType) string {
+	if ct == nil {
+		return ""
+	}
+
+	return string(*ct)
 }
 
 // Create inserts a new note.
@@ -64,14 +80,14 @@ func (r *Repository) Create(ctx context.Context, domNote *domain.Note) error {
 		ID:               domNote.ID,
 		Title:            domNote.Title,
 		Content:          domNote.Content,
-		ContentType:      string(domNote.ContentType),
+		ContentType:      contentTypeVal(domNote.ContentType),
 		EditCode:         domNote.EditCode,
 		CreatedAt:        domNote.CreatedAt,
 		UpdatedAt:        domNote.UpdatedAt,
 		ExpiresAt:        domNote.ExpiresAt,
 		BurnTTL:          domNote.BurnTTL,
 		BurnAfterReading: domNote.BurnAfterReading,
-		Private:          domNote.Private,
+		Private:          boolVal(domNote.Private),
 	}
 
 	_, err := r.db.NewInsert().Model(dbNote).Exec(ctx)
@@ -156,17 +172,24 @@ func (r *Repository) Update(ctx context.Context, id string, domNote *domain.Note
 		ID:               id,
 		Title:            domNote.Title,
 		Content:          domNote.Content,
-		ContentType:      string(domNote.ContentType),
 		ExpiresAt:        domNote.ExpiresAt,
 		BurnTTL:          domNote.BurnTTL,
 		BurnAfterReading: domNote.BurnAfterReading,
-		Private:          domNote.Private,
 		CreatedAt:        domNote.CreatedAt,
 		UpdatedAt:        domNote.UpdatedAt,
 	}
 
+	var ctVal *string
+
+	if domNote.ContentType != nil {
+		sv := string(*domNote.ContentType)
+		ctVal = &sv
+	}
+
 	result, err := r.db.NewUpdate().Model(dbNote).
-		Column("title", "content", "content_type", "expires_at", "burn_ttl", "burn_after_reading", "private", "updated_at").
+		Column("title", "content", "expires_at", "burn_ttl", "burn_after_reading", "updated_at").
+		Set("content_type = COALESCE(?, content_type)", ctVal).
+		Set("private = COALESCE(?, private)", domNote.Private).
 		Where("id = ?", id).
 		Exec(ctx)
 	if err != nil {

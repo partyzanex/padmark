@@ -5,6 +5,7 @@
 package http
 
 import (
+	"log/slog"
 	"net/http"
 
 	_ "embed"
@@ -36,8 +37,8 @@ func APISpec(w http.ResponseWriter, _ *http.Request) {
 
 	_, err := w.Write(openapiSpec)
 	if err != nil {
-		http.Error(w, "failed to write spec", http.StatusInternalServerError)
-
-		return
+		// Headers are already sent — changing the response is impossible.
+		// Only log the error; calling http.Error here would corrupt the body.
+		slog.Error("write openapi spec", "err", err)
 	}
 }

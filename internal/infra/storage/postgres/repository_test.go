@@ -78,7 +78,7 @@ func newNote(id, title, content string) *domain.Note {
 		ID:          id,
 		Title:       title,
 		Content:     content,
-		ContentType: domain.ContentTypeMarkdown,
+		ContentType: new(domain.ContentTypeMarkdown),
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
@@ -132,7 +132,7 @@ func (s *RepositoryTestSuite) TestGet_OK() {
 	s.Require().NoError(err)
 	s.Equal("test", got.Title)
 	s.Equal("body", got.Content)
-	s.Equal(domain.ContentTypeMarkdown, got.ContentType)
+	s.Equal(new(domain.ContentTypeMarkdown), got.ContentType)
 	s.Equal(0, got.Views)
 }
 
@@ -151,7 +151,7 @@ func (s *RepositoryTestSuite) TestUpdate_OK() {
 	updated := &domain.Note{
 		Title:       "new",
 		Content:     "new",
-		ContentType: domain.ContentTypePlain,
+		ContentType: new(domain.ContentTypePlain),
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 	}
@@ -162,7 +162,7 @@ func (s *RepositoryTestSuite) TestUpdate_OK() {
 	s.Require().NoError(err)
 	s.Equal("new", got.Title)
 	s.Equal("new", got.Content)
-	s.Equal(domain.ContentTypePlain, got.ContentType)
+	s.Equal(new(domain.ContentTypePlain), got.ContentType)
 }
 
 func (s *RepositoryTestSuite) TestUpdate_ExpiresAt() {
@@ -217,6 +217,99 @@ func (s *RepositoryTestSuite) TestUpdate_NotFound() {
 	err := s.repo.Update(s.T().Context(), "nonexistent", note)
 
 	s.ErrorIs(err, domain.ErrNotFound)
+}
+
+// TestUpdate_Private_Nil_PreservesExistingValue verifies that passing Private=nil to Update
+// keeps the existing private value in the DB (via COALESCE(NULL, private)).
+func (s *RepositoryTestSuite) TestUpdate_Private_Nil_PreservesExistingValue() {
+	ctx := s.T().Context()
+
+	note := newNote("priv-nil-1", "t", "c")
+	note.Private = new(true)
+	s.Require().NoError(s.repo.Create(ctx, note))
+
+	// Update with Private=nil — must not touch the private column.
+	updated := &domain.Note{
+		Title:     "t2",
+		Content:   "c2",
+		Private:   nil,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	s.Require().NoError(s.repo.Update(ctx, "priv-nil-1", updated))
+
+	got, err := s.repo.Get(ctx, "priv-nil-1")
+	s.Require().NoError(err)
+	s.True(got.Private != nil && *got.Private, "private must be preserved when Update receives Private=nil")
+}
+
+// TestUpdate_Private_ExplicitFalse_ClearsPrivacy verifies that passing Private=&false
+// explicitly sets the column to false, even if the note was previously private.
+func (s *RepositoryTestSuite) TestUpdate_Private_ExplicitFalse_ClearsPrivacy() {
+	ctx := s.T().Context()
+
+	note := newNote("priv-false-1", "t", "c")
+	note.Private = new(true)
+	s.Require().NoError(s.repo.Create(ctx, note))
+
+	updated := &domain.Note{
+		Title:     "t2",
+		Content:   "c2",
+		Private:   new(false),
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	s.Require().NoError(s.repo.Update(ctx, "priv-false-1", updated))
+
+	got, err := s.repo.Get(ctx, "priv-false-1")
+	s.Require().NoError(err)
+	s.False(got.Private != nil && *got.Private, "private must be cleared when Update receives Private=&false")
+}
+
+// TestUpdate_ContentType_Nil_PreservesExistingValue verifies that passing ContentType=nil to Update
+// keeps the existing content_type in the DB (via COALESCE(NULL, content_type)).
+func (s *RepositoryTestSuite) TestUpdate_ContentType_Nil_PreservesExistingValue() {
+	ctx := s.T().Context()
+
+	note := newNote("ct-nil-pg", "t", "c")
+	note.ContentType = new(domain.ContentTypePlain)
+	s.Require().NoError(s.repo.Create(ctx, note))
+
+	updated := &domain.Note{
+		Title:       "t2",
+		Content:     "c2",
+		ContentType: nil,
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}
+	s.Require().NoError(s.repo.Update(ctx, "ct-nil-pg", updated))
+
+	got, err := s.repo.Get(ctx, "ct-nil-pg")
+	s.Require().NoError(err)
+	s.Equal(new(domain.ContentTypePlain), got.ContentType,
+		"content_type must be preserved when Update receives ContentType=nil")
+}
+
+// TestUpdate_ContentType_ExplicitChange verifies that passing ContentType=&markdown changes the column.
+func (s *RepositoryTestSuite) TestUpdate_ContentType_ExplicitChange() {
+	ctx := s.T().Context()
+
+	note := newNote("ct-change-pg", "t", "c")
+	note.ContentType = new(domain.ContentTypePlain)
+	s.Require().NoError(s.repo.Create(ctx, note))
+
+	updated := &domain.Note{
+		Title:       "t2",
+		Content:     "c2",
+		ContentType: new(domain.ContentTypeMarkdown),
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}
+	s.Require().NoError(s.repo.Update(ctx, "ct-change-pg", updated))
+
+	got, err := s.repo.Get(ctx, "ct-change-pg")
+	s.Require().NoError(err)
+	s.Equal(new(domain.ContentTypeMarkdown), got.ContentType, "content_type must be updated when explicitly set")
 }
 
 // ── IncrementViews ──
@@ -341,7 +434,7 @@ func (s *RepositoryTestSuite) TestRoundtrip_CRUD() {
 	updated := &domain.Note{
 		Title:       "updated",
 		Content:     "# Updated",
-		ContentType: domain.ContentTypePlain,
+		ContentType: new(domain.ContentTypePlain),
 		CreatedAt:   got.CreatedAt,
 		UpdatedAt:   time.Now(),
 	}
@@ -350,7 +443,7 @@ func (s *RepositoryTestSuite) TestRoundtrip_CRUD() {
 	got, err = s.repo.Get(ctx, "rt1")
 	s.Require().NoError(err)
 	s.Equal("updated", got.Title)
-	s.Equal(domain.ContentTypePlain, got.ContentType)
+	s.Equal(new(domain.ContentTypePlain), got.ContentType)
 
 	// Views
 	s.Require().NoError(s.repo.IncrementViews(ctx, "rt1"))

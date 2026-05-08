@@ -113,11 +113,12 @@ type statusRecorder struct {
 }
 
 func (sr *statusRecorder) WriteHeader(status int) {
-	if !sr.written {
-		sr.status = status
-		sr.written = true
+	if sr.written {
+		return
 	}
 
+	sr.status = status
+	sr.written = true
 	sr.ResponseWriter.WriteHeader(status)
 }
 

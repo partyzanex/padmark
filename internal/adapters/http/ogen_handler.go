@@ -33,20 +33,15 @@ func (h *OgenHandler) CreateNote(
 		burnTTL = req.TTL.Value
 	}
 
-	ct := domain.ContentTypeMarkdown
-	if req.ContentType.IsSet() {
-		ct = domain.ContentType(req.ContentType.Value)
-	}
-
 	note, err := h.manager.Create(ctx, &domain.Note{
 		ID:               req.Slug.Or(""),
 		Title:            req.Title,
 		Content:          req.Content,
-		ContentType:      ct,
+		ContentType:      optCreateContentTypePtr(req.ContentType),
 		EditCode:         req.EditCode.Or(""),
 		BurnTTL:          burnTTL,
 		BurnAfterReading: burnAfterReading,
-		Private:          req.Private.Or(false),
+		Private:          optBoolPtr(req.Private),
 	})
 	if err != nil {
 		return mapCreateError(err, h.log), nil
@@ -84,10 +79,10 @@ func (h *OgenHandler) UpdateNote(
 	note, err := h.manager.Update(ctx, params.ID, req.EditCode, &domain.Note{
 		Title:            req.Title,
 		Content:          req.Content,
-		ContentType:      domain.ContentType(req.ContentType.Or("")),
+		ContentType:      optUpdateContentTypePtr(req.ContentType),
 		BurnTTL:          burnTTL,
 		BurnAfterReading: burnAfterReading,
-		Private:          req.Private.Or(false),
+		Private:          optBoolPtr(req.Private),
 	})
 	if err != nil {
 		return mapUpdateError(err, h.log), nil
@@ -111,6 +106,51 @@ func (h *OgenHandler) DeleteNote(
 	}
 
 	return &ogenapi.DeleteNoteNoContent{}, nil
+}
+
+// derefContentType dereferences *ContentType; returns markdown as the safe default when nil.
+func derefContentType(ct *domain.ContentType) domain.ContentType {
+	if ct == nil {
+		return domain.ContentTypeMarkdown
+	}
+
+	return *ct
+}
+
+// optBoolPtr converts an OptBool to *bool: nil when not set, pointer to value otherwise.
+// Passing nil to storage.Update causes COALESCE(NULL, private) to keep the existing DB value.
+func optBoolPtr(o ogenapi.OptBool) *bool {
+	if !o.IsSet() {
+		return nil
+	}
+
+	v := o.Value
+
+	return &v
+}
+
+// optCreateContentTypePtr converts an optional create-request content type to *domain.ContentType.
+// nil means "not set" — manager.Create will default to markdown.
+func optCreateContentTypePtr(o ogenapi.OptCreateNoteRequestContentType) *domain.ContentType {
+	if !o.IsSet() {
+		return nil
+	}
+
+	ct := domain.ContentType(o.Value)
+
+	return &ct
+}
+
+// optUpdateContentTypePtr converts an optional update-request content type to *domain.ContentType.
+// nil means "not set" — storage.Update will COALESCE to keep the existing DB value.
+func optUpdateContentTypePtr(o ogenapi.OptUpdateNoteRequestContentType) *domain.ContentType {
+	if !o.IsSet() {
+		return nil
+	}
+
+	ct := domain.ContentType(o.Value)
+
+	return &ct
 }
 
 // Healthz implements ogenapi.Handler.

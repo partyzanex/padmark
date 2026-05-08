@@ -49,7 +49,7 @@ func toNoteViewData(note *domain.Note, rendered string) noteViewData {
 		Views:        note.Views,
 		ExpiresLabel: expires,
 		ExpiresISO:   expiresISO,
-		Private:      note.Private,
+		Private:      note.Private != nil && *note.Private,
 	}
 }
 
@@ -71,48 +71,59 @@ func toNoteJSON(note *domain.Note) noteJSON {
 		ID:               note.ID,
 		Title:            note.Title,
 		Content:          note.Content,
-		ContentType:      note.ContentType,
+		ContentType:      derefContentType(note.ContentType),
 		CreatedAt:        note.CreatedAt,
 		UpdatedAt:        note.UpdatedAt,
 		ExpiresAt:        note.ExpiresAt,
 		Views:            note.Views,
 		BurnAfterReading: note.BurnAfterReading,
-		Private:          note.Private,
+		Private:          note.Private != nil && *note.Private,
 	}
 }
 
 // handlePrivateAuth checks whether a note is private and the caller is authenticated.
-// It writes the response and returns true when the request has been handled (either
-// because auth failed or because the note doesn't exist).
-func (h *Handler) handlePrivateAuth(w http.ResponseWriter, r *http.Request, id string) bool {
+// Returns the preloaded note (when auth is configured) and false when the request may proceed.
+// Returns nil and true when the response has been written (auth failed or note not found).
+func (h *Handler) handlePrivateAuth(w http.ResponseWriter, r *http.Request, id string) (*domain.Note, bool) {
 	if h.allowedTokens == nil {
-		return false
+		return nil, false
 	}
 
 	note, err := h.manager.Peek(r.Context(), id)
 	if err != nil {
 		h.writeErrorPage(w, r, err)
 
-		return true
+		return nil, true
 	}
 
-	if !note.Private || h.isAuthenticated(r) {
-		return false
+	if (note.Private == nil || !*note.Private) || h.isAuthenticated(r) {
+		return note, false
 	}
 
 	if negotiate(r) == formatHTML {
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 
-		return true
+		return nil, true
 	}
 
 	http.Error(w, "unauthorized", http.StatusUnauthorized)
 
-	return true
+	return nil, true
 }
 
-func (h *Handler) renderNoteHTML(w http.ResponseWriter, r *http.Request, id string) {
-	note, rendered, err := h.manager.GetRendered(r.Context(), id)
+func (h *Handler) renderNoteHTML(w http.ResponseWriter, r *http.Request, id string, preloaded *domain.Note) {
+	var (
+		note     *domain.Note
+		rendered string
+		err      error
+	)
+
+	if preloaded != nil {
+		note, rendered, err = h.manager.GetRenderedPreloaded(r.Context(), id, preloaded)
+	} else {
+		note, rendered, err = h.manager.GetRendered(r.Context(), id)
+	}
+
 	if err != nil {
 		h.writeErrorPage(w, r, err)
 		return
@@ -135,37 +146,40 @@ func (h *Handler) GetNote(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
 	// Check auth for private notes before any side effects (view count, burn).
-	if handled := h.handlePrivateAuth(w, r, id); handled {
+	// When auth is configured, preloaded holds the already-fetched note so the
+	// subsequent View/GetRendered can skip a second SELECT.
+	preloaded, handled := h.handlePrivateAuth(w, r, id)
+	if handled {
 		return
 	}
 
 	switch negotiate(r) {
 	case formatHTML:
-		h.renderNoteHTML(w, r, id)
+		h.renderNoteHTML(w, r, id, preloaded)
 
 	case formatPlain:
-		note, err := h.manager.View(r.Context(), id)
+		note, err := h.viewNote(r, id, preloaded)
 		if err != nil {
 			writeError(w, err)
 			return
 		}
 
-		ct := "text/plain; charset=utf-8"
+		contentType := "text/plain; charset=utf-8"
 
-		if note.ContentType == domain.ContentTypeMarkdown {
-			ct = "text/markdown; charset=utf-8"
+		if note.ContentType == nil || *note.ContentType == domain.ContentTypeMarkdown {
+			contentType = "text/markdown; charset=utf-8"
 		}
 
 		hdr := w.Header()
-		hdr.Set("Content-Type", ct)
+		hdr.Set("Content-Type", contentType)
 
-		_, err = fmt.Fprint(w, note.Content) //nolint:gosec // raw content is intentional for text/plain and text/markdown
+		_, err = fmt.Fprint(w, note.Content) // raw content is intentional for text/plain and text/markdown
 		if err != nil {
 			h.log.ErrorContext(r.Context(), "write plain content", "id", id, "err", err)
 		}
 
 	default:
-		note, err := h.manager.View(r.Context(), id)
+		note, err := h.viewNote(r, id, preloaded)
 		if err != nil {
 			writeError(w, err)
 			return
@@ -178,4 +192,22 @@ func (h *Handler) GetNote(w http.ResponseWriter, r *http.Request) {
 			h.log.ErrorContext(r.Context(), "encode get response", "err", err)
 		}
 	}
+}
+
+func (h *Handler) viewNote(r *http.Request, id string, preloaded *domain.Note) (*domain.Note, error) {
+	if preloaded != nil {
+		note, err := h.manager.ViewPreloaded(r.Context(), id, preloaded)
+		if err != nil {
+			return nil, fmt.Errorf("view note: %w", err)
+		}
+
+		return note, nil
+	}
+
+	note, err := h.manager.View(r.Context(), id)
+	if err != nil {
+		return nil, fmt.Errorf("view note: %w", err)
+	}
+
+	return note, nil
 }

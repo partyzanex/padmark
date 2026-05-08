@@ -28,16 +28,16 @@ const (
 type Note struct {
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
-	ExpiresAt        *time.Time // nil means the note never expires; set after first read for burn notes with BurnTTL > 0
+	ExpiresAt        *time.Time
+	Private          *bool
 	ID               string
 	Title            string
 	Content          string
-	ContentType      ContentType
-	EditCode         string // secret token required to edit or delete the note
+	ContentType      *ContentType // nil means not set (keep existing on update); defaults to markdown on create
+	EditCode         string
 	Views            int
-	BurnTTL          int64 // seconds the note lives after first read; 0 = deleted immediately on first read
-	BurnAfterReading bool  // if true, the note is consumed on the first read (deleted or timer-started)
-	Private          bool  // if true, requires server auth token to view
+	BurnTTL          int64
+	BurnAfterReading bool
 }
 
 // Validate checks that the note fields satisfy business rules.
@@ -54,7 +54,7 @@ func (n *Note) Validate() error {
 		return ErrContentTooLong
 	}
 
-	if n.ContentType != "" && !n.ContentType.Valid() {
+	if n.ContentType != nil && !n.ContentType.Valid() {
 		return ErrInvalidContentType
 	}
 

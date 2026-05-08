@@ -122,6 +122,7 @@ func runServer(ctx context.Context, cmd *cli.Command, router http.Handler) error
 		Addr:              cmd.String(FlagAddr),
 		Handler:           router,
 		ReadTimeout:       time.Duration(cmd.Int(FlagReadTimeout)) * time.Second,
+		WriteTimeout:      time.Duration(cmd.Int(FlagWriteTimeout)) * time.Second,
 		ReadHeaderTimeout: readHeaderTimeout,
 		MaxHeaderBytes:    cmd.Int(FlagMaxHeaderBytes),
 	}
@@ -179,7 +180,7 @@ func serverAction(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	manager := notes.NewManager(repo, render.NewRenderer(), log)
-	handler := adaptershttp.NewHandler(manager, log).WithPinger(db.DB)
+	handler := adaptershttp.NewHandler(manager, log)
 	ogenHandler := adaptershttp.NewOgenHandler(manager, db.DB, log)
 
 	router, err := buildRouter(cmd, handler, ogenHandler)

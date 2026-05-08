@@ -49,7 +49,7 @@ func (s *RepositoryTestSuite) TestCreate_OK() {
 		ID:          "test-id-1",
 		Title:       "hello",
 		Content:     "world",
-		ContentType: domain.ContentTypeMarkdown,
+		ContentType: new(domain.ContentTypeMarkdown),
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 	}
@@ -82,7 +82,7 @@ func (s *RepositoryTestSuite) TestGet_OK() {
 		ID:          "get-test-id",
 		Title:       "test",
 		Content:     "body",
-		ContentType: domain.ContentTypeMarkdown,
+		ContentType: new(domain.ContentTypeMarkdown),
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 	}
@@ -109,7 +109,7 @@ func (s *RepositoryTestSuite) TestUpdate_OK() {
 		ID:          "update-test-id",
 		Title:       "old",
 		Content:     "old",
-		ContentType: domain.ContentTypeMarkdown,
+		ContentType: new(domain.ContentTypeMarkdown),
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 	}
@@ -118,7 +118,7 @@ func (s *RepositoryTestSuite) TestUpdate_OK() {
 	updated := &domain.Note{
 		Title:       "new",
 		Content:     "new",
-		ContentType: domain.ContentTypePlain,
+		ContentType: new(domain.ContentTypePlain),
 		CreatedAt:   domNote.CreatedAt,
 		UpdatedAt:   time.Now(),
 	}
@@ -131,7 +131,7 @@ func (s *RepositoryTestSuite) TestUpdate_OK() {
 	s.Require().NoError(err)
 	s.Equal("new", result.Title)
 	s.Equal("new", result.Content)
-	s.Equal(domain.ContentTypePlain, result.ContentType)
+	s.Equal(new(domain.ContentTypePlain), result.ContentType)
 }
 
 func (s *RepositoryTestSuite) TestUpdate_NotFound() {
@@ -140,6 +140,125 @@ func (s *RepositoryTestSuite) TestUpdate_NotFound() {
 	err := s.repo.Update(s.T().Context(), "nonexistent", domNote)
 
 	s.True(errors.Is(err, domain.ErrNotFound))
+}
+
+// TestUpdate_Private_Nil_PreservesExistingValue verifies that passing Private=nil to Update
+// keeps the existing private value in the DB (via COALESCE(NULL, private)).
+func (s *RepositoryTestSuite) TestUpdate_Private_Nil_PreservesExistingValue() {
+	ctx := s.T().Context()
+
+	note := &domain.Note{
+		ID:          "priv-nil-1",
+		Title:       "t",
+		Content:     "c",
+		ContentType: new(domain.ContentTypeMarkdown),
+		Private:     new(true),
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}
+	s.Require().NoError(s.repo.Create(ctx, note))
+
+	// Update with Private=nil — must not touch the private column.
+	updated := &domain.Note{
+		Title:     "t2",
+		Content:   "c2",
+		Private:   nil,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	s.Require().NoError(s.repo.Update(ctx, "priv-nil-1", updated))
+
+	got, err := s.repo.Get(ctx, "priv-nil-1")
+	s.Require().NoError(err)
+	s.True(got.Private != nil && *got.Private, "private must be preserved when Update receives Private=nil")
+}
+
+// TestUpdate_Private_ExplicitFalse_ClearsPrivacy verifies that passing Private=&false
+// explicitly sets the column to false, even if the note was previously private.
+func (s *RepositoryTestSuite) TestUpdate_Private_ExplicitFalse_ClearsPrivacy() {
+	ctx := s.T().Context()
+
+	note := &domain.Note{
+		ID:          "priv-false-1",
+		Title:       "t",
+		Content:     "c",
+		ContentType: new(domain.ContentTypeMarkdown),
+		Private:     new(true),
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}
+	s.Require().NoError(s.repo.Create(ctx, note))
+
+	updated := &domain.Note{
+		Title:     "t2",
+		Content:   "c2",
+		Private:   new(false),
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	s.Require().NoError(s.repo.Update(ctx, "priv-false-1", updated))
+
+	got, err := s.repo.Get(ctx, "priv-false-1")
+	s.Require().NoError(err)
+	s.False(got.Private != nil && *got.Private, "private must be cleared when Update receives Private=&false")
+}
+
+// TestUpdate_ContentType_Nil_PreservesExistingValue verifies that passing ContentType=nil to Update
+// keeps the existing content_type in the DB (via COALESCE(NULL, content_type)).
+func (s *RepositoryTestSuite) TestUpdate_ContentType_Nil_PreservesExistingValue() {
+	ctx := s.T().Context()
+
+	note := &domain.Note{
+		ID:          "ct-nil-1",
+		Title:       "t",
+		Content:     "c",
+		ContentType: new(domain.ContentTypePlain),
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}
+	s.Require().NoError(s.repo.Create(ctx, note))
+
+	updated := &domain.Note{
+		Title:       "t2",
+		Content:     "c2",
+		ContentType: nil,
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}
+	s.Require().NoError(s.repo.Update(ctx, "ct-nil-1", updated))
+
+	got, err := s.repo.Get(ctx, "ct-nil-1")
+	s.Require().NoError(err)
+	s.Equal(new(domain.ContentTypePlain), got.ContentType,
+		"content_type must be preserved when Update receives ContentType=nil")
+}
+
+// TestUpdate_ContentType_ExplicitChange verifies that passing ContentType=&markdown changes the column.
+func (s *RepositoryTestSuite) TestUpdate_ContentType_ExplicitChange() {
+	ctx := s.T().Context()
+
+	note := &domain.Note{
+		ID:          "ct-change-1",
+		Title:       "t",
+		Content:     "c",
+		ContentType: new(domain.ContentTypePlain),
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}
+	s.Require().NoError(s.repo.Create(ctx, note))
+
+	updated := &domain.Note{
+		Title:       "t2",
+		Content:     "c2",
+		ContentType: new(domain.ContentTypeMarkdown),
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}
+	s.Require().NoError(s.repo.Update(ctx, "ct-change-1", updated))
+
+	got, err := s.repo.Get(ctx, "ct-change-1")
+	s.Require().NoError(err)
+	s.Equal(new(domain.ContentTypeMarkdown), got.ContentType, "content_type must be updated when explicitly set")
 }
 
 // Delete
@@ -193,7 +312,7 @@ func (s *RepositoryTestSuite) TestCreate_AllFields() {
 		ID:               "all-fields",
 		Title:            "title",
 		Content:          "content",
-		ContentType:      domain.ContentTypePlain,
+		ContentType:      new(domain.ContentTypePlain),
 		EditCode:         "s3cr3t",
 		ExpiresAt:        &future,
 		BurnAfterReading: true,
@@ -208,7 +327,7 @@ func (s *RepositoryTestSuite) TestCreate_AllFields() {
 	s.Equal("s3cr3t", got.EditCode)
 	s.True(got.BurnAfterReading)
 	s.Equal(int64(3600), got.BurnTTL)
-	s.Equal(domain.ContentTypePlain, got.ContentType)
+	s.Equal(new(domain.ContentTypePlain), got.ContentType)
 	s.NotNil(got.ExpiresAt)
 }
 

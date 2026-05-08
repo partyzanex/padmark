@@ -35,7 +35,7 @@ func (h *Handler) EditPage(w http.ResponseWriter, r *http.Request) {
 		TTL:              ttl,
 		EditMode:         true,
 		BurnAfterReading: note.BurnAfterReading || note.BurnTTL > 0,
-		Private:          note.Private,
+		Private:          note.Private != nil && *note.Private,
 		Nonce:            nonceFromContext(r.Context()),
 	})
 	if err != nil {

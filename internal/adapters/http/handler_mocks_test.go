@@ -86,6 +86,22 @@ func (mr *MockNoteManagerMockRecorder) GetRendered(ctx, id any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetRendered", reflect.TypeOf((*MockNoteManager)(nil).GetRendered), ctx, id)
 }
 
+// GetRenderedPreloaded mocks base method.
+func (m *MockNoteManager) GetRenderedPreloaded(ctx context.Context, id string, preloaded *domain.Note) (*domain.Note, string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetRenderedPreloaded", ctx, id, preloaded)
+	ret0, _ := ret[0].(*domain.Note)
+	ret1, _ := ret[1].(string)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
+}
+
+// GetRenderedPreloaded indicates an expected call of GetRenderedPreloaded.
+func (mr *MockNoteManagerMockRecorder) GetRenderedPreloaded(ctx, id, preloaded any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetRenderedPreloaded", reflect.TypeOf((*MockNoteManager)(nil).GetRenderedPreloaded), ctx, id, preloaded)
+}
+
 // Peek mocks base method.
 func (m *MockNoteManager) Peek(ctx context.Context, id string) (*domain.Note, error) {
 	m.ctrl.T.Helper()
@@ -129,6 +145,21 @@ func (m *MockNoteManager) View(ctx context.Context, id string) (*domain.Note, er
 func (mr *MockNoteManagerMockRecorder) View(ctx, id any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "View", reflect.TypeOf((*MockNoteManager)(nil).View), ctx, id)
+}
+
+// ViewPreloaded mocks base method.
+func (m *MockNoteManager) ViewPreloaded(ctx context.Context, id string, preloaded *domain.Note) (*domain.Note, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ViewPreloaded", ctx, id, preloaded)
+	ret0, _ := ret[0].(*domain.Note)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ViewPreloaded indicates an expected call of ViewPreloaded.
+func (mr *MockNoteManagerMockRecorder) ViewPreloaded(ctx, id, preloaded any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ViewPreloaded", reflect.TypeOf((*MockNoteManager)(nil).ViewPreloaded), ctx, id, preloaded)
 }
 
 // MockPinger is a mock of Pinger interface.

@@ -19,30 +19,30 @@ func pingCommand() *urcli.Command {
 }
 
 func pingAction(ctx context.Context, cmd *urcli.Command) error {
-	cl, err := newPadmarkClient(cmd)
+	padmarkClient, err := newPadmarkClient(cmd)
 	if err != nil {
 		return err
 	}
 
-	ew := &errWriter{w: os.Stdout}
-	ew.printf("server: %s\n", cmd.String(FlagURL))
+	erw := &errWriter{w: os.Stdout}
+	erw.printf("server: %s\n", cmd.String(FlagURL))
 
-	liveErr := checkLiveness(ctx, cl)
+	liveErr := checkLiveness(ctx, padmarkClient)
 	if liveErr != nil {
-		ew.printf("healthz: FAIL (%s)\n", liveErr)
+		erw.printf("healthz: FAIL (%s)\n", liveErr)
 	} else {
-		ew.printf("healthz: OK\n")
+		erw.printf("healthz: OK\n")
 	}
 
-	readyErr := checkReadiness(ctx, cl)
+	readyErr := checkReadiness(ctx, padmarkClient)
 	if readyErr != nil {
-		ew.printf("readyz:  FAIL (%s)\n", readyErr)
+		erw.printf("readyz:  FAIL (%s)\n", readyErr)
 	} else {
-		ew.printf("readyz:  OK\n")
+		erw.printf("readyz:  OK\n")
 	}
 
-	if ew.err != nil {
-		return fmt.Errorf("write output: %w", ew.err)
+	if erw.err != nil {
+		return fmt.Errorf("write output: %w", erw.err)
 	}
 
 	return readyErr

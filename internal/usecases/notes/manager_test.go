@@ -52,7 +52,7 @@ func (s *ManagerTestSuite) TestCreate_OK() {
 	s.Len(result.EditCode, 12)
 	s.False(result.CreatedAt.IsZero())
 	s.False(result.UpdatedAt.IsZero())
-	s.Equal(domain.ContentTypeMarkdown, result.ContentType)
+	s.Equal(new(domain.ContentTypeMarkdown), result.ContentType)
 }
 
 func (s *ManagerTestSuite) TestCreate_WithCustomEditCode() {
@@ -143,7 +143,7 @@ func (s *ManagerTestSuite) TestCreate_ContentTooLong() {
 }
 
 func (s *ManagerTestSuite) TestCreate_InvalidContentType() {
-	note := &domain.Note{Title: "hi", ContentType: "application/pdf"}
+	note := &domain.Note{Title: "hi", ContentType: new(domain.ContentType("application/pdf"))}
 
 	_, err := s.manager.Create(s.T().Context(), note)
 
@@ -296,7 +296,7 @@ func (s *ManagerTestSuite) TestUpdate_OK() {
 	existing := &domain.Note{
 		ID:          "abc-123",
 		Title:       "old",
-		ContentType: domain.ContentTypeMarkdown,
+		ContentType: new(domain.ContentTypeMarkdown),
 		EditCode:    "secret123456",
 		CreatedAt:   time.Now().Add(-time.Hour),
 	}
@@ -497,14 +497,122 @@ func (s *ManagerTestSuite) TestView_BurnAfterReading_NoIncrementViews() {
 
 // TestView_BurnAfterReading_WithBurnTTL_NoIncrementViews verifies that a burn-after-reading note
 // with BurnTTL > 0 starts a timer on first view and IncrementViews is NOT called.
-// The note remains readable during the grace period.
+// SetBurnExpiry returns the note with BurnAfterReading=false (as the real storage does after
+// flipping the column), so the test exercises the actual production code path.
 func (s *ManagerTestSuite) TestView_BurnAfterReading_WithBurnTTL_NoIncrementViews() {
-	note := &domain.Note{ID: "burn-ttl", Title: "t", BurnAfterReading: true, BurnTTL: 3600}
-	s.storage.EXPECT().Get(gomock.Any(), "burn-ttl").Return(note, nil)
-	s.storage.EXPECT().SetBurnExpiry(gomock.Any(), "burn-ttl", gomock.Any()).Return(note, nil)
-	// IncrementViews must NOT be called — note is in burn mode
+	future := time.Now().Add(time.Hour)
+	// Real storage flips burn_after_reading=false and sets expires_at.
+	noteAfterBurn := &domain.Note{ID: "burn-ttl", Title: "t", BurnAfterReading: false, BurnTTL: 3600, ExpiresAt: &future}
+
+	s.storage.EXPECT().Get(gomock.Any(), "burn-ttl").
+		Return(&domain.Note{ID: "burn-ttl", Title: "t", BurnAfterReading: true, BurnTTL: 3600}, nil)
+	s.storage.EXPECT().SetBurnExpiry(gomock.Any(), "burn-ttl", gomock.Any()).Return(noteAfterBurn, nil)
+	// IncrementViews must NOT be called — note is in burn grace period
 
 	result, err := s.manager.View(s.T().Context(), "burn-ttl")
 	s.Require().NoError(err)
+	s.False(result.BurnAfterReading)
+	s.NotNil(result.ExpiresAt)
+}
+
+// TestGet_BurnTTL_Race_SetBurnExpiryNotFound reproduces the race condition where two concurrent
+// requests both read the note (BurnAfterReading=true, BurnTTL>0) before either calls SetBurnExpiry.
+//
+// Timeline:
+//
+//	Request A: storage.Get() → note{BurnAfterReading:true, BurnTTL:3600}
+//	Request B: storage.Get() → note{BurnAfterReading:true, BurnTTL:3600}  (same snapshot)
+//	Request A: storage.SetBurnExpiry() → OK, DB: burn_after_reading=FALSE
+//	Request B: storage.SetBurnExpiry() → ErrNotFound (WHERE burn_after_reading=TRUE matches 0 rows)
+//
+// Request B's note still exists — its burn timer was started by A. manager.Get must return
+// the note successfully; propagating ErrNotFound here is incorrect.
+func (s *ManagerTestSuite) TestGet_BurnTTL_Race_SetBurnExpiryNotFound() {
+	note := &domain.Note{ID: "burn-ttl-race", Title: "t", BurnAfterReading: true, BurnTTL: 3600}
+
+	// Request B's perspective: it read the note before A's SetBurnExpiry committed.
+	s.storage.EXPECT().Get(gomock.Any(), "burn-ttl-race").Return(note, nil)
+	// A already flipped burn_after_reading=false; B's conditional UPDATE matches 0 rows.
+	s.storage.EXPECT().SetBurnExpiry(gomock.Any(), "burn-ttl-race", gomock.Any()).
+		Return(nil, domain.ErrNotFound)
+
+	// The fix must re-fetch the note to return its current state (BurnAfterReading=false, ExpiresAt set).
+	future := time.Now().Add(time.Hour)
+	noteAfterBurn := &domain.Note{
+		ID:               "burn-ttl-race",
+		Title:            "t",
+		BurnAfterReading: false,
+		BurnTTL:          3600,
+		ExpiresAt:        &future,
+	}
+	s.storage.EXPECT().Get(gomock.Any(), "burn-ttl-race").Return(noteAfterBurn, nil)
+
+	// The note exists and its burn timer is running — Get must succeed, not return ErrNotFound.
+	result, err := s.manager.Get(s.T().Context(), "burn-ttl-race")
+	s.Require().NoError(err)
+	s.NotNil(result)
+	s.False(result.BurnAfterReading)
+	s.NotNil(result.ExpiresAt)
+}
+
+// ViewPreloaded
+
+func (s *ManagerTestSuite) TestViewPreloaded_OK() {
+	note := &domain.Note{ID: "pre-1", Title: "a", Views: 2}
+
+	s.storage.EXPECT().IncrementViews(gomock.Any(), "pre-1").Return(nil)
+
+	result, err := s.manager.ViewPreloaded(s.T().Context(), "pre-1", note)
+
+	s.Require().NoError(err)
 	s.Equal(note, result)
+	s.Equal(3, result.Views)
+}
+
+func (s *ManagerTestSuite) TestViewPreloaded_BurnAfterReading() {
+	note := &domain.Note{ID: "pre-2", BurnAfterReading: true}
+	s.storage.EXPECT().Consume(gomock.Any(), "pre-2").Return(note, nil)
+
+	result, err := s.manager.ViewPreloaded(s.T().Context(), "pre-2", note)
+
+	s.Require().NoError(err)
+	s.Equal(note, result)
+	s.Equal(0, result.Views)
+}
+
+func (s *ManagerTestSuite) TestViewPreloaded_Expired() {
+	past := time.Now().Add(-time.Minute)
+	note := &domain.Note{ID: "pre-3", ExpiresAt: &past}
+
+	s.storage.EXPECT().Delete(gomock.Any(), "pre-3").Return(nil)
+
+	_, err := s.manager.ViewPreloaded(s.T().Context(), "pre-3", note)
+
+	s.True(errors.Is(err, domain.ErrExpired))
+}
+
+// GetRenderedPreloaded
+
+func (s *ManagerTestSuite) TestGetRenderedPreloaded_OK() {
+	note := &domain.Note{ID: "rp-1", Content: "# Hello"}
+
+	s.storage.EXPECT().IncrementViews(gomock.Any(), "rp-1").Return(nil)
+	s.renderer.EXPECT().Render("# Hello").Return("<h1>Hello</h1>", nil)
+
+	result, rendered, err := s.manager.GetRenderedPreloaded(s.T().Context(), "rp-1", note)
+
+	s.Require().NoError(err)
+	s.Equal(note, result)
+	s.Equal("<h1>Hello</h1>", rendered)
+}
+
+func (s *ManagerTestSuite) TestGetRenderedPreloaded_Expired() {
+	past := time.Now().Add(-time.Minute)
+	note := &domain.Note{ID: "rp-2", ExpiresAt: &past, Content: "x"}
+
+	s.storage.EXPECT().Delete(gomock.Any(), "rp-2").Return(nil)
+
+	_, _, err := s.manager.GetRenderedPreloaded(s.T().Context(), "rp-2", note)
+
+	s.True(errors.Is(err, domain.ErrExpired))
 }

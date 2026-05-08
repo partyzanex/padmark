@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
+	"errors"
 	"fmt"
 	"html"
 	"log/slog"
@@ -88,8 +89,9 @@ func NewManager(storage Storage, renderer Renderer, log *slog.Logger) *Manager {
 
 // Create validates and persists a new note.
 func (m *Manager) Create(ctx context.Context, note *domain.Note) (*domain.Note, error) {
-	if note.ContentType == "" {
-		note.ContentType = domain.ContentTypeMarkdown
+	if note.ContentType == nil {
+		ct := domain.ContentTypeMarkdown
+		note.ContentType = &ct
 	}
 
 	err := note.Validate()
@@ -141,40 +143,7 @@ func (m *Manager) Get(ctx context.Context, id string) (*domain.Note, error) {
 		return nil, fmt.Errorf("get note: %w", err)
 	}
 
-	if note.ExpiresAt != nil && time.Now().After(*note.ExpiresAt) {
-		delErr := m.storage.Delete(ctx, id)
-		if delErr != nil {
-			m.log.ErrorContext(ctx, "delete expired note", "id", id, "err", delErr)
-		}
-
-		return nil, domain.ErrExpired
-	}
-
-	if note.BurnAfterReading {
-		if note.BurnTTL > 0 {
-			expiresAt := time.Now().UTC().Add(time.Duration(note.BurnTTL) * time.Second)
-
-			updated, burnErr := m.storage.SetBurnExpiry(ctx, id, expiresAt)
-			if burnErr != nil {
-				return nil, fmt.Errorf("burn after reading: %w", burnErr)
-			}
-
-			m.log.DebugContext(ctx, "burn timer started", "id", id, "expires_at", expiresAt)
-
-			return updated, nil
-		}
-
-		consumed, consumeErr := m.storage.Consume(ctx, id)
-		if consumeErr != nil {
-			return nil, fmt.Errorf("burn after reading: %w", consumeErr)
-		}
-
-		m.log.DebugContext(ctx, "note burned", "id", id)
-
-		return consumed, nil
-	}
-
-	return note, nil
+	return m.applyNotePolicy(ctx, id, note)
 }
 
 // View returns a note by ID and increments its view counter.
@@ -185,14 +154,20 @@ func (m *Manager) View(ctx context.Context, id string) (*domain.Note, error) {
 		return nil, err
 	}
 
-	if !note.BurnAfterReading {
-		incErr := m.storage.IncrementViews(ctx, id)
-		if incErr != nil {
-			m.log.ErrorContext(ctx, "increment views", "id", id, "err", incErr)
-		} else {
-			note.Views++
-		}
+	m.applyViewIncrement(ctx, id, note)
+
+	return note, nil
+}
+
+// ViewPreloaded is like View but skips the initial storage.Get by reusing an already-fetched note.
+// Use this when the caller has already loaded the note (e.g. during auth checks) to avoid a second SELECT.
+func (m *Manager) ViewPreloaded(ctx context.Context, id string, preloaded *domain.Note) (*domain.Note, error) {
+	note, err := m.applyNotePolicy(ctx, id, preloaded)
+	if err != nil {
+		return nil, err
 	}
+
+	m.applyViewIncrement(ctx, id, note)
 
 	return note, nil
 }
@@ -225,7 +200,7 @@ func (m *Manager) Update(
 		note.ExpiresAt = existing.ExpiresAt
 	}
 
-	if note.ContentType == "" {
+	if note.ContentType == nil {
 		note.ContentType = existing.ContentType
 	}
 
@@ -259,21 +234,124 @@ func (m *Manager) Delete(ctx context.Context, id, editCode string) error {
 }
 
 // GetRendered fetches a note, increments its view counter, and returns it with content as safe HTML.
-// Plain-text notes are HTML-escaped and wrapped in <pre>; markdown notes are rendered.
 func (m *Manager) GetRendered(ctx context.Context, id string) (*domain.Note, string, error) {
 	note, err := m.View(ctx, id)
 	if err != nil {
 		return nil, "", fmt.Errorf("get note for render: %w", err)
 	}
 
-	if note.ContentType == domain.ContentTypePlain {
-		return note, "<pre>" + html.EscapeString(note.Content) + "</pre>", nil
+	rendered, err := m.renderNote(id, note)
+	if err != nil {
+		return nil, "", err
+	}
+
+	return note, rendered, nil
+}
+
+// GetRenderedPreloaded is like GetRendered but skips the initial storage.Get by reusing an already-fetched note.
+// Use this when the caller has already loaded the note (e.g. during auth checks) to avoid a second SELECT.
+func (m *Manager) GetRenderedPreloaded(
+	ctx context.Context, id string, preloaded *domain.Note,
+) (*domain.Note, string, error) {
+	note, err := m.ViewPreloaded(ctx, id, preloaded)
+	if err != nil {
+		return nil, "", fmt.Errorf("get note for render: %w", err)
+	}
+
+	rendered, err := m.renderNote(id, note)
+	if err != nil {
+		return nil, "", err
+	}
+
+	return note, rendered, nil
+}
+
+// applyNotePolicy applies expiry and burn-after-reading logic to an already-fetched note.
+func (m *Manager) applyNotePolicy(ctx context.Context, id string, note *domain.Note) (*domain.Note, error) {
+	if note.ExpiresAt != nil && time.Now().After(*note.ExpiresAt) {
+		delErr := m.storage.Delete(ctx, id)
+		if delErr != nil {
+			m.log.ErrorContext(ctx, "delete expired note", "id", id, "err", delErr)
+		}
+
+		return nil, domain.ErrExpired
+	}
+
+	if note.BurnAfterReading {
+		return m.burnNote(ctx, id, note)
+	}
+
+	return note, nil
+}
+
+// applyViewIncrement increments the view counter unless the note is in a burn state.
+// After SetBurnExpiry the storage flips burn_after_reading=false, so the note
+// comes back with BurnAfterReading=false. Checking only BurnAfterReading
+// would incorrectly increment views during the burn grace period.
+// BurnTTL>0 && ExpiresAt!=nil is the unique signature of a note whose burn
+// timer has been started but has not yet expired.
+func (m *Manager) applyViewIncrement(ctx context.Context, id string, note *domain.Note) {
+	inBurnGrace := note.BurnTTL > 0 && note.ExpiresAt != nil
+	if note.BurnAfterReading || inBurnGrace {
+		return
+	}
+
+	incErr := m.storage.IncrementViews(ctx, id)
+	if incErr != nil {
+		m.log.ErrorContext(ctx, "increment views", "id", id, "err", incErr)
+	} else {
+		note.Views++
+	}
+}
+
+// renderNote converts note content to safe HTML.
+// Plain-text notes are HTML-escaped and wrapped in <pre>; markdown notes are rendered.
+func (m *Manager) renderNote(id string, note *domain.Note) (string, error) {
+	if note.ContentType != nil && *note.ContentType == domain.ContentTypePlain {
+		return "<pre>" + html.EscapeString(note.Content) + "</pre>", nil
 	}
 
 	rendered, err := m.renderer.Render(note.Content)
 	if err != nil {
-		return nil, "", fmt.Errorf("render note %s: %w", id, err)
+		return "", fmt.Errorf("render note %s: %w", id, err)
 	}
 
-	return note, rendered, nil
+	return rendered, nil
+}
+
+func (m *Manager) burnNote(ctx context.Context, id string, note *domain.Note) (*domain.Note, error) {
+	if note.BurnTTL > 0 {
+		return m.startBurnTimer(ctx, id, note)
+	}
+
+	consumed, consumeErr := m.storage.Consume(ctx, id)
+	if consumeErr != nil {
+		return nil, fmt.Errorf("burn after reading: %w", consumeErr)
+	}
+
+	m.log.DebugContext(ctx, "note burned", "id", id)
+
+	return consumed, nil
+}
+
+func (m *Manager) startBurnTimer(ctx context.Context, id string, note *domain.Note) (*domain.Note, error) {
+	expiresAt := time.Now().UTC().Add(time.Duration(note.BurnTTL) * time.Second)
+
+	updated, burnErr := m.storage.SetBurnExpiry(ctx, id, expiresAt)
+	if burnErr != nil {
+		if errors.Is(burnErr, domain.ErrNotFound) {
+			current, getErr := m.storage.Get(ctx, id)
+			if getErr != nil {
+				return nil, fmt.Errorf("burn after reading (re-fetch): %w", getErr)
+			}
+
+			return current, nil
+		}
+
+		return nil, fmt.Errorf("burn after reading: %w", burnErr)
+	}
+
+	m.log.DebugContext(ctx, "burn timer started", "id", id, "expires_at", expiresAt)
+
+	return updated, nil
 }

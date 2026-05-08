@@ -12,6 +12,7 @@ const (
 	FlagAuthTokens       = "auth-tokens" //nolint:gosec // flag name, not a credential
 	FlagCookieMaxAge     = "cookie-max-age"
 	FlagReadTimeout      = "read-timeout"
+	FlagWriteTimeout     = "write-timeout"
 	FlagMaxHeaderBytes   = "max-header-bytes"
 	FlagMaxBodyBytes     = "max-body-bytes"
 	FlagRateLimit        = "rate-limit"
@@ -32,6 +33,7 @@ const (
 	EnvAuthTokens       = "PADMARK_AUTH_TOKENS" //nolint:gosec // env var name, not a credential
 	EnvCookieMaxAge     = "PADMARK_COOKIE_MAX_AGE"
 	EnvReadTimeout      = "PADMARK_READ_TIMEOUT"
+	EnvWriteTimeout     = "PADMARK_WRITE_TIMEOUT"
 	EnvMaxHeaderBytes   = "PADMARK_MAX_HEADER_BYTES"
 	EnvMaxBodyBytes     = "PADMARK_MAX_BODY_BYTES"
 	EnvRateLimit        = "PADMARK_RATE_LIMIT"
@@ -51,8 +53,9 @@ const (
 	DefaultLogFormat      = "json"
 	DefaultCookieMaxAge   = 90 * 24 * 60 * 60 // 3 months in seconds
 	DefaultReadTimeout    = 30                // seconds
+	DefaultWriteTimeout   = 60                // seconds
 	DefaultMaxHeaderBytes = 64 * 1024         // 64 KB
-	DefaultMaxBodyBytes   = 256 * 1024        // 256 KB
+	DefaultMaxBodyBytes   = 4 * 1024 * 1024   // 4 MB
 	DefaultRateLimit      = 10                // requests per second per IP
 	DefaultRateBurst      = 20                // max burst size per IP
 )
@@ -106,6 +109,12 @@ func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
 			Sources: cli.EnvVars(EnvReadTimeout),
 			Value:   DefaultReadTimeout,
 			Usage:   "HTTP read timeout in seconds",
+		},
+		&cli.IntFlag{
+			Name:    FlagWriteTimeout,
+			Sources: cli.EnvVars(EnvWriteTimeout),
+			Value:   DefaultWriteTimeout,
+			Usage:   "HTTP write timeout in seconds",
 		},
 		&cli.IntFlag{
 			Name:    FlagMaxHeaderBytes,
