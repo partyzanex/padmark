@@ -69,10 +69,12 @@ func (s *ManagerSuite) TestCreate_SlugConflict() {
 	s.ErrorIs(err, domain.ErrSlugConflict)
 }
 
-func (s *ManagerSuite) TestCreate_TitleRequired() {
-	_, err := s.Manager.Create(s.T().Context(), &domain.Note{Content: "c"})
+func (s *ManagerSuite) TestCreate_EmptyTitleAllowed() {
+	result, err := s.Manager.Create(s.T().Context(), &domain.Note{Content: "c"})
 
-	s.ErrorIs(err, domain.ErrTitleRequired)
+	s.NoError(err)
+	s.NotEmpty(result.ID)
+	s.Empty(result.Title)
 }
 
 // ── Get / expiry / burn ──

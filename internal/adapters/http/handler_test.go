@@ -254,15 +254,16 @@ func (s *HandlerSuite) TestCreateNote_WithTTL() {
 }
 
 func (s *HandlerSuite) TestCreateNote_EmptyTitle() {
-	s.manager.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil, domain.ErrTitleRequired)
+	note := newTestNote("", "body")
+	s.manager.EXPECT().Create(gomock.Any(), gomock.Any()).Return(note, nil)
 
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodPost, "/notes", strings.NewReader(`{"title":"","content":"body"}`))
+	r := httptest.NewRequest(http.MethodPost, "/notes", strings.NewReader(`{"content":"body"}`))
 	r.Header.Set("Content-Type", "application/json")
 
 	s.router.ServeHTTP(w, r)
 
-	s.Equal(http.StatusUnprocessableEntity, w.Code)
+	s.Equal(http.StatusCreated, w.Code)
 }
 
 func (s *HandlerSuite) TestCreateNote_InvalidBody() {

@@ -23,7 +23,7 @@ func (*CreateNoteInternalServerError) createNoteRes() {}
 // Ref: #/components/schemas/CreateNoteRequest
 type CreateNoteRequest struct {
 	// Human-readable title shown in the note header.
-	Title string `json:"title"`
+	Title OptString `json:"title"`
 	// Note body. Interpreted as Markdown unless `content_type` is `text/plain`.
 	Content string `json:"content"`
 	// MIME type of `content`; controls rendering on the view page.
@@ -49,7 +49,7 @@ type CreateNoteRequest struct {
 }
 
 // GetTitle returns the value of Title.
-func (s *CreateNoteRequest) GetTitle() string {
+func (s *CreateNoteRequest) GetTitle() OptString {
 	return s.Title
 }
 
@@ -89,7 +89,7 @@ func (s *CreateNoteRequest) GetPrivate() OptBool {
 }
 
 // SetTitle sets the value of Title.
-func (s *CreateNoteRequest) SetTitle(val string) {
+func (s *CreateNoteRequest) SetTitle(val OptString) {
 	s.Title = val
 }
 
@@ -940,7 +940,7 @@ func (*UpdateNoteNotFound) updateNoteRes() {}
 // Ref: #/components/schemas/UpdateNoteRequest
 type UpdateNoteRequest struct {
 	// New title.
-	Title string `json:"title"`
+	Title OptString `json:"title"`
 	// New body.
 	Content string `json:"content"`
 	// New content type; defaults to the note's current type when omitted.
@@ -957,7 +957,7 @@ type UpdateNoteRequest struct {
 }
 
 // GetTitle returns the value of Title.
-func (s *UpdateNoteRequest) GetTitle() string {
+func (s *UpdateNoteRequest) GetTitle() OptString {
 	return s.Title
 }
 
@@ -992,7 +992,7 @@ func (s *UpdateNoteRequest) GetPrivate() OptBool {
 }
 
 // SetTitle sets the value of Title.
-func (s *UpdateNoteRequest) SetTitle(val string) {
+func (s *UpdateNoteRequest) SetTitle(val OptString) {
 	s.Title = val
 }
 

@@ -225,7 +225,7 @@ components:
   schemas:
     CreateNoteRequest:
       type: object
-      required: [title, content]
+      required: [content]
       properties:
         title:
           type: string
@@ -278,7 +278,7 @@ components:
 
     UpdateNoteRequest:
       type: object
-      required: [title, content, edit_code]
+      required: [content, edit_code]
       properties:
         title:
           type: string

@@ -111,10 +111,9 @@ func buildUpdateReq(cmd *urcli.Command, content, editCode string) *padmark.Updat
 		title = firstLine(content)
 	}
 
-	req := &padmark.UpdateNoteRequest{
-		Title:    title,
-		Content:  content,
-		EditCode: editCode,
+	req := &padmark.UpdateNoteRequest{Content: content, EditCode: editCode}
+	if title != "" {
+		req.Title = padmark.NewOptString(title)
 	}
 
 	if cmd.Bool(FlagPlain) {

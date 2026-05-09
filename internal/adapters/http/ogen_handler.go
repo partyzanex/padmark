@@ -35,7 +35,7 @@ func (h *OgenHandler) CreateNote(
 
 	note, err := h.manager.Create(ctx, &domain.Note{
 		ID:               req.Slug.Or(""),
-		Title:            req.Title,
+		Title:            req.Title.Or(""),
 		Content:          req.Content,
 		ContentType:      optCreateContentTypePtr(req.ContentType),
 		EditCode:         req.EditCode.Or(""),
@@ -77,7 +77,7 @@ func (h *OgenHandler) UpdateNote(
 	}
 
 	note, err := h.manager.Update(ctx, params.ID, req.EditCode, &domain.Note{
-		Title:            req.Title,
+		Title:            req.Title.Or(""),
 		Content:          req.Content,
 		ContentType:      optUpdateContentTypePtr(req.ContentType),
 		BurnTTL:          burnTTL,

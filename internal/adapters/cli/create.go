@@ -99,9 +99,9 @@ func buildCreateReq(cmd *urcli.Command, content string) *padmark.CreateNoteReque
 		title = firstLine(content)
 	}
 
-	req := &padmark.CreateNoteRequest{
-		Title:   title,
-		Content: content,
+	req := &padmark.CreateNoteRequest{Content: content}
+	if title != "" {
+		req.Title = padmark.NewOptString(title)
 	}
 
 	if cmd.Bool(FlagPlain) {

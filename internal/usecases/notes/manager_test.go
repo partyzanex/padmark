@@ -121,9 +121,14 @@ func (s *ManagerTestSuite) TestCreate_CustomEditCodeWrongCodeForbidden() {
 }
 
 func (s *ManagerTestSuite) TestCreate_EmptyTitle() {
-	_, err := s.manager.Create(s.T().Context(), &domain.Note{Content: "body"})
+	note := &domain.Note{Content: "body"}
+	s.storage.EXPECT().Create(gomock.Any(), note).Return(nil)
 
-	s.True(errors.Is(err, domain.ErrTitleRequired))
+	result, err := s.manager.Create(s.T().Context(), note)
+
+	s.NoError(err)
+	s.NotEmpty(result.ID)
+	s.Empty(result.Title)
 }
 
 func (s *ManagerTestSuite) TestCreate_TitleTooLong() {
@@ -132,14 +137,6 @@ func (s *ManagerTestSuite) TestCreate_TitleTooLong() {
 	_, err := s.manager.Create(s.T().Context(), note)
 
 	s.True(errors.Is(err, domain.ErrTitleTooLong))
-}
-
-func (s *ManagerTestSuite) TestCreate_ContentTooLong() {
-	note := &domain.Note{Title: "hi", Content: strings.Repeat("x", domain.MaxContentLength+1)}
-
-	_, err := s.manager.Create(s.T().Context(), note)
-
-	s.True(errors.Is(err, domain.ErrContentTooLong))
 }
 
 func (s *ManagerTestSuite) TestCreate_InvalidContentType() {
@@ -316,9 +313,20 @@ func (s *ManagerTestSuite) TestUpdate_OK() {
 }
 
 func (s *ManagerTestSuite) TestUpdate_EmptyTitle() {
-	_, err := s.manager.Update(s.T().Context(), "abc-123", "code", &domain.Note{})
+	existing := &domain.Note{
+		ID:       "abc-123",
+		Title:    "original",
+		Content:  "original body",
+		EditCode: "code",
+	}
 
-	s.True(errors.Is(err, domain.ErrTitleRequired))
+	s.storage.EXPECT().Get(gomock.Any(), "abc-123").Return(existing, nil)
+	s.storage.EXPECT().Update(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
+
+	result, err := s.manager.Update(s.T().Context(), "abc-123", "code", &domain.Note{})
+
+	s.NoError(err)
+	s.NotNil(result)
 }
 
 func (s *ManagerTestSuite) TestUpdate_NotFound() {

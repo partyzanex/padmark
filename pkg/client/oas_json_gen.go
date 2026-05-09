@@ -137,8 +137,10 @@ func (s *CreateNoteRequest) Encode(e *jx.Encoder) {
 // encodeFields encodes fields.
 func (s *CreateNoteRequest) encodeFields(e *jx.Encoder) {
 	{
-		e.FieldStart("title")
-		e.Str(s.Title)
+		if s.Title.Set {
+			e.FieldStart("title")
+			s.Title.Encode(e)
+		}
 	}
 	{
 		e.FieldStart("content")
@@ -204,11 +206,9 @@ func (s *CreateNoteRequest) Decode(d *jx.Decoder) error {
 	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
 		switch string(k) {
 		case "title":
-			requiredBitSet[0] |= 1 << 0
 			if err := func() error {
-				v, err := d.Str()
-				s.Title = string(v)
-				if err != nil {
+				s.Title.Reset()
+				if err := s.Title.Decode(d); err != nil {
 					return err
 				}
 				return nil
@@ -297,7 +297,7 @@ func (s *CreateNoteRequest) Decode(d *jx.Decoder) error {
 	// Validate required fields.
 	var failures []validate.FieldError
 	for i, mask := range [1]uint8{
-		0b00000011,
+		0b00000010,
 	} {
 		if result := (requiredBitSet[i] & mask) ^ mask; result != 0 {
 			// Mask only required fields and check equality to mask using XOR.
@@ -1836,8 +1836,10 @@ func (s *UpdateNoteRequest) Encode(e *jx.Encoder) {
 // encodeFields encodes fields.
 func (s *UpdateNoteRequest) encodeFields(e *jx.Encoder) {
 	{
-		e.FieldStart("title")
-		e.Str(s.Title)
+		if s.Title.Set {
+			e.FieldStart("title")
+			s.Title.Encode(e)
+		}
 	}
 	{
 		e.FieldStart("content")
@@ -1893,11 +1895,9 @@ func (s *UpdateNoteRequest) Decode(d *jx.Decoder) error {
 	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
 		switch string(k) {
 		case "title":
-			requiredBitSet[0] |= 1 << 0
 			if err := func() error {
-				v, err := d.Str()
-				s.Title = string(v)
-				if err != nil {
+				s.Title.Reset()
+				if err := s.Title.Decode(d); err != nil {
 					return err
 				}
 				return nil
@@ -1978,7 +1978,7 @@ func (s *UpdateNoteRequest) Decode(d *jx.Decoder) error {
 	// Validate required fields.
 	var failures []validate.FieldError
 	for i, mask := range [1]uint8{
-		0b00001011,
+		0b00001010,
 	} {
 		if result := (requiredBitSet[i] & mask) ^ mask; result != 0 {
 			// Mask only required fields and check equality to mask using XOR.

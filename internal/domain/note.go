@@ -20,10 +20,7 @@ func (ct ContentType) Valid() bool {
 	return false
 }
 
-const (
-	MaxTitleLength   = 500
-	MaxContentLength = 100_000
-)
+const MaxTitleLength = 500
 
 type Note struct {
 	CreatedAt        time.Time
@@ -42,16 +39,8 @@ type Note struct {
 
 // Validate checks that the note fields satisfy business rules.
 func (n *Note) Validate() error {
-	if n.Title == "" {
-		return ErrTitleRequired
-	}
-
 	if len([]rune(n.Title)) > MaxTitleLength {
 		return ErrTitleTooLong
-	}
-
-	if len(n.Content) > MaxContentLength {
-		return ErrContentTooLong
 	}
 
 	if n.ContentType != nil && !n.ContentType.Valid() {

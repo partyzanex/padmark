@@ -19,8 +19,7 @@ func mapCreateError(err error, log *slog.Logger) ogenapi.CreateNoteRes {
 	r := errResp(err)
 
 	switch {
-	case errors.Is(err, domain.ErrTitleRequired),
-		errors.Is(err, domain.ErrTitleTooLong),
+	case errors.Is(err, domain.ErrTitleTooLong),
 		errors.Is(err, domain.ErrInvalidContentType),
 		errors.Is(err, domain.ErrInvalidSlug):
 		v := ogenapi.CreateNoteUnprocessableEntity(r)
@@ -78,8 +77,7 @@ func mapUpdateError(err error, log *slog.Logger) ogenapi.UpdateNoteRes {
 		v := ogenapi.UpdateNoteNotFound(r)
 
 		return &v
-	case errors.Is(err, domain.ErrTitleRequired),
-		errors.Is(err, domain.ErrTitleTooLong),
+	case errors.Is(err, domain.ErrTitleTooLong),
 		errors.Is(err, domain.ErrInvalidContentType):
 		v := ogenapi.UpdateNoteUnprocessableEntity(r)
 
