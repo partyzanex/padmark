@@ -1,0 +1,462 @@
+{
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/pkg/client/oas_operations_gen.go": {
+    "mtime": 1778319148.772402,
+    "hash": "b3f240921f6480dd20731865f2aaa44e"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/pkg/client/oas_client_gen.go": {
+    "mtime": 1778319148.7947228,
+    "hash": "ed2073a28ca5d5cd5f6e89e2aaf939c3"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/pkg/client/oas_parameters_gen.go": {
+    "mtime": 1778319148.7734325,
+    "hash": "d777b45ebf0285c6ad42f7d59950dbf9"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/pkg/client/oas_validators_gen.go": {
+    "mtime": 1778319148.7729218,
+    "hash": "1c16ffd56fc450e994514a09edc4949d"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/pkg/client/oas_unimplemented_gen.go": {
+    "mtime": 1778319148.7727723,
+    "hash": "8d4d691389039360d75bb1dd330a40ee"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/pkg/client/oas_response_encoders_gen.go": {
+    "mtime": 1778319148.7737217,
+    "hash": "024ca29429d83b6c1641c141d0c3f177"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/pkg/client/oas_cfg_gen.go": {
+    "mtime": 1778319148.7734325,
+    "hash": "33b6b9cc66f281e26ed30c8a1a66b538"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/pkg/client/oas_defaults_gen.go": {
+    "mtime": 1778319148.7720394,
+    "hash": "64cbde768d291173cbf6123143c294dc"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/pkg/client/oas_server_gen.go": {
+    "mtime": 1778319148.7729218,
+    "hash": "addbd0fc3f057e4de6672fbda1a48aa4"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/pkg/client/oas_response_decoders_gen.go": {
+    "mtime": 1778319148.795723,
+    "hash": "56e9f651bcba9a37498b50ef498cc1cc"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/pkg/client/oas_middleware_gen.go": {
+    "mtime": 1778319148.7720394,
+    "hash": "228d2054ae5b244e98d20076b17f39ab"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/pkg/client/oas_handlers_gen.go": {
+    "mtime": 1778319148.7747216,
+    "hash": "8f707a016a55a9b6d7bfbada43c5afbc"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/pkg/client/oas_schemas_gen.go": {
+    "mtime": 1778319148.7757218,
+    "hash": "b1c78237e70dafa526ebe82f915821f9"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/pkg/client/oas_request_encoders_gen.go": {
+    "mtime": 1778319148.7725348,
+    "hash": "beeee402ed50ee155c34be23392c52ae"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/pkg/client/oas_interfaces_gen.go": {
+    "mtime": 1778319148.7718697,
+    "hash": "c347e7416fd0efce9bd8aab2ad84712e"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/pkg/client/oas_router_gen.go": {
+    "mtime": 1778319148.7734325,
+    "hash": "ee3a54f80cb766e9282005e2f7b4d0eb"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/pkg/client/oas_request_decoders_gen.go": {
+    "mtime": 1778319148.7938557,
+    "hash": "3648b2e8ae97773db499147749a74ed7"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/pkg/client/oas_labeler_gen.go": {
+    "mtime": 1778319148.7729218,
+    "hash": "7fa2554b002f7d6834ffe6ea83bbb050"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/pkg/client/oas_json_gen.go": {
+    "mtime": 1778319148.781722,
+    "hash": "c3cf9055908c0d6647d64fa493568ae9"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/cmd/padmark-server/main.go": {
+    "mtime": 1774968709.3680453,
+    "hash": "0951749e3f70ca0548a17b5e8f501fe6"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/cmd/padmark-cli/main.go": {
+    "mtime": 1775081196.7742052,
+    "hash": "9ce546f3df74dc36adfdba05fbe7af7d"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/migrations/postgres/embed.go": {
+    "mtime": 1774748077.4315867,
+    "hash": "89bf79536a56f683958946368ad6ef23"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/migrations/postgres/20260430163000_add_private.sql": {
+    "mtime": 1777556340.440035,
+    "hash": "d7d4c64f6f1b6f3876c71011bd431086"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/migrations/postgres/20260329000001_init.sql": {
+    "mtime": 1778262943.7446208,
+    "hash": "fb451d492f02288a41fc7f0c6aecd731"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/migrations/postgres/20260508000001_idx_notes_expires_at.sql": {
+    "mtime": 1778262947.8409243,
+    "hash": "a43ff11f2139854c3b96dfdaa700b68e"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/migrations/sqlite/embed.go": {
+    "mtime": 1774633429.563564,
+    "hash": "5ee425e0df3f3e6cb86116ede93a0cb0"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/migrations/sqlite/20260430163000_add_private.sql": {
+    "mtime": 1777556340.4080336,
+    "hash": "79efc334dc9727b61134803718ec1322"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/migrations/sqlite/20260327173334_init.sql": {
+    "mtime": 1778262944.7706969,
+    "hash": "ca4f80225348fb925c9cc26df3e965b1"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/migrations/sqlite/20260508000001_idx_notes_expires_at.sql": {
+    "mtime": 1778262948.564978,
+    "hash": "a43ff11f2139854c3b96dfdaa700b68e"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/tests/manager/suite_test.go": {
+    "mtime": 1778294832.180536,
+    "hash": "c415ee02cf6bf0eac5c5bb2eb406cc1a"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/tests/manager/postgres_test.go": {
+    "mtime": 1778268349.203594,
+    "hash": "608fff70b764eb777aacc7a96b5c379a"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/tests/manager/sqlite_test.go": {
+    "mtime": 1778268349.7506218,
+    "hash": "eca68b7ccf37b1ef412acd7d6c358123"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/adapters/cli/create.go": {
+    "mtime": 1778294929.6783412,
+    "hash": "f138c27849013c48a0afede3d399ff84"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/adapters/cli/create_test.go": {
+    "mtime": 1778264535.941212,
+    "hash": "a8dcb6c15bbdb6a766383f9fda11fad5"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/adapters/cli/output.go": {
+    "mtime": 1778253370.1584918,
+    "hash": "f4c3bb3ddda187040d07bc41235bc76c"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/adapters/cli/ping.go": {
+    "mtime": 1778253323.1044145,
+    "hash": "f7b34e917aa17e65587ab3abe86d8466"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/adapters/cli/flags.go": {
+    "mtime": 1775081090.862809,
+    "hash": "956855370b7414ad8536fab9d462df23"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/adapters/cli/app.go": {
+    "mtime": 1775081105.4985468,
+    "hash": "cf30d934094907e9a7f6fc01e164b0d7"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/adapters/cli/get.go": {
+    "mtime": 1775081135.8600774,
+    "hash": "7630517de57f22dd8b70d497c3b2ea49"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/adapters/cli/edit.go": {
+    "mtime": 1778294938.5017757,
+    "hash": "9d250bc0b101c3a1ead11c89ecfcc3a6"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/adapters/cli/delete.go": {
+    "mtime": 1778253388.0732887,
+    "hash": "e42f15d774f3e9e628f982131e5aa3ce"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/adapters/http/web_success.go": {
+    "mtime": 1774823259.7259617,
+    "hash": "e7a3fa9f8d34ea27a864ee1c9d65f891"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/adapters/http/ogen_handler.go": {
+    "mtime": 1778294908.1782818,
+    "hash": "530ad334b4138e034911062350c6f23c"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/adapters/http/web_error.go": {
+    "mtime": 1774823296.7389169,
+    "hash": "f85248ef65354fb8107b973a5f00e29e"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/adapters/http/web_login.go": {
+    "mtime": 1774823288.1849167,
+    "hash": "6a88052a9eeadf9ab02b0a8e396e1067"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/adapters/http/ogen_errors.go": {
+    "mtime": 1778294809.0553958,
+    "hash": "ad8dae4001300b368729cf791b1a5693"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/adapters/http/errors.go": {
+    "mtime": 1778294802.3990676,
+    "hash": "ff1d9b5e0a03f7e60f7bd7dc817a28c5"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/adapters/http/middleware_ratelimit_test.go": {
+    "mtime": 1774829755.9052722,
+    "hash": "24eaa1304a7851344d2ac9ba034dcfa8"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/adapters/http/handler_test.go": {
+    "mtime": 1778294827.6483126,
+    "hash": "9daf4ea1da55a9ff8f1fccfaa607ff81"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/adapters/http/middleware_faillock.go": {
+    "mtime": 1778263788.3830779,
+    "hash": "c59d4b45211b2dabbab7b833baf8ce93"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/adapters/http/web_note.go": {
+    "mtime": 1778267316.9153044,
+    "hash": "fc07be0bc709d7f4d34c75baa63409f4"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/adapters/http/web_apidocs.go": {
+    "mtime": 1778247360.8242614,
+    "hash": "471d6b1c1cbdabfbd67aa61a61f83b57"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/adapters/http/middleware_ratelimit.go": {
+    "mtime": 1778253148.445935,
+    "hash": "bec78daecf1aa935cdc8c6a3d8c121fa"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/adapters/http/web_edit.go": {
+    "mtime": 1778248638.7873983,
+    "hash": "6c17e4d869fe329917730120503b7873"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/adapters/http/router.go": {
+    "mtime": 1778263752.5480316,
+    "hash": "deab130231a1d0002fcbe9ff33a9526b"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/adapters/http/middleware_auth.go": {
+    "mtime": 1777567389.9550726,
+    "hash": "e59ab9c2e95ff2b8d21f3ade25fcbfc5"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/adapters/http/web_index.go": {
+    "mtime": 1777555343.759201,
+    "hash": "76378ff15a1f92405b5db0822cb579d9"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/adapters/http/ogen_response.go": {
+    "mtime": 1778255750.3917017,
+    "hash": "b00f621900131b0a521459f3b394d4cf"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/adapters/http/handler.go": {
+    "mtime": 1778260394.2735026,
+    "hash": "e223bf35bfc6b89fda118273abe95b74"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/adapters/http/handler_mocks_test.go": {
+    "mtime": 1778260432.468453,
+    "hash": "3ef9806ab1b171d712345a90075cbb9a"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/adapters/http/negotiate.go": {
+    "mtime": 1774710326.9774663,
+    "hash": "d93d46d4b7d86b9b18ae51b48d0a4789"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/adapters/http/router_test.go": {
+    "mtime": 1778253100.8969738,
+    "hash": "c81548a61591c64ac1c2574c53b52cfc"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/adapters/http/ogenapi/oas_operations_gen.go": {
+    "mtime": 1778319148.7459424,
+    "hash": "9f5054aa67eae53b163c192269b44db3"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/adapters/http/ogenapi/oas_client_gen.go": {
+    "mtime": 1778319148.7477202,
+    "hash": "9b7fd3d1370b2f620f33452c0e6d1337"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/adapters/http/ogenapi/oas_parameters_gen.go": {
+    "mtime": 1778319148.7469034,
+    "hash": "2f0dc00a771d82568ca08f4c004d086a"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/adapters/http/ogenapi/oas_validators_gen.go": {
+    "mtime": 1778319148.7464924,
+    "hash": "127371d0e77bbc4dc56a2840674780b9"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/adapters/http/ogenapi/oas_unimplemented_gen.go": {
+    "mtime": 1778319148.7459424,
+    "hash": "3726a187c5e1d47be21e7361778e232b"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/adapters/http/ogenapi/oas_response_encoders_gen.go": {
+    "mtime": 1778319148.7469034,
+    "hash": "4b15a6b2116d3afc678ce163910270fd"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/adapters/http/ogenapi/oas_cfg_gen.go": {
+    "mtime": 1778319148.7469034,
+    "hash": "46d216338294ccb9b2d783c8f0d31782"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/adapters/http/ogenapi/oas_defaults_gen.go": {
+    "mtime": 1778319148.7464924,
+    "hash": "9aebb053444c302dfaf70b8a2e21a158"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/adapters/http/ogenapi/oas_server_gen.go": {
+    "mtime": 1778319148.7461398,
+    "hash": "fbe182f75ddd6fe2774a5eb38bae69a2"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/adapters/http/ogenapi/oas_response_decoders_gen.go": {
+    "mtime": 1778319148.7487202,
+    "hash": "87fdcbe5d5ca704353bc0e663390bf67"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/adapters/http/ogenapi/oas_middleware_gen.go": {
+    "mtime": 1778319148.7464924,
+    "hash": "c479aa3d5851a0de8487941e3203f67f"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/adapters/http/ogenapi/oas_handlers_gen.go": {
+    "mtime": 1778319148.7497203,
+    "hash": "574c514bf7e8f2b7930ca36deeda95ba"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/adapters/http/ogenapi/oas_schemas_gen.go": {
+    "mtime": 1778319148.7487202,
+    "hash": "99650767c5a719201273b98da16151ff"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/adapters/http/ogenapi/oas_request_encoders_gen.go": {
+    "mtime": 1778319148.7456894,
+    "hash": "436f9684c4d31bb8b284b898fcaefef9"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/adapters/http/ogenapi/oas_interfaces_gen.go": {
+    "mtime": 1778319148.7461398,
+    "hash": "bb72812e751a2df731504192348f31d2"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/adapters/http/ogenapi/oas_router_gen.go": {
+    "mtime": 1778319148.7469034,
+    "hash": "4546239b974be10a74000e449bb2326c"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/adapters/http/ogenapi/oas_request_decoders_gen.go": {
+    "mtime": 1778319148.7461398,
+    "hash": "ef636e4469088068baeab9b6a98118ab"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/adapters/http/ogenapi/oas_labeler_gen.go": {
+    "mtime": 1778319148.7459424,
+    "hash": "3343fa2c408a4673c1ca9fbc444f6c2e"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/adapters/http/ogenapi/oas_json_gen.go": {
+    "mtime": 1778319148.7557206,
+    "hash": "f47520518fc5b6c6a5a7a8159c09b1b6"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/infra/render/markdown_test.go": {
+    "mtime": 1774706361.385756,
+    "hash": "8198dde6e57be2bfedca2cadf547ffc3"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/infra/render/markdown.go": {
+    "mtime": 1778270254.0570529,
+    "hash": "1d8dc51e8d57fd7f9b9e115674ec82d5"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/infra/storage/postgres/migrate.go": {
+    "mtime": 1778267803.628808,
+    "hash": "0e6c6ddd562246e690680687f3e2de6e"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/infra/storage/postgres/repository_test.go": {
+    "mtime": 1778267993.8164709,
+    "hash": "37db359c0d44a42b98cf4030b61b7f75"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/infra/storage/postgres/repository.go": {
+    "mtime": 1778256416.6416552,
+    "hash": "e414f5c4aa49a1c3a66ece3fb556badb"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/infra/storage/sqlite/migrate.go": {
+    "mtime": 1778267805.4719014,
+    "hash": "ee3e4f9cac4c21c2682c274a7c873daf"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/infra/storage/sqlite/repository_test.go": {
+    "mtime": 1778268014.6575317,
+    "hash": "054861ef9a02289292f54cba5b72bfd2"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/infra/storage/sqlite/repository.go": {
+    "mtime": 1778256422.5529475,
+    "hash": "d3cdf6ea3a715ee93bd27528b9ec8495"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/infra/server/db.go": {
+    "mtime": 1778267970.1682677,
+    "hash": "0cc98f48803d80fcdd117e1a48fca3ae"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/infra/server/flags.go": {
+    "mtime": 1778293808.8636043,
+    "hash": "fdbd7eb72780340d9eca2784dcb5aa0f"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/infra/server/app.go": {
+    "mtime": 1774968704.2361445,
+    "hash": "9d31dcd6c29c0770b41377cbeb506093"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/infra/server/migrate.go": {
+    "mtime": 1778267982.9189165,
+    "hash": "51729fd77266e9e80f77ef7a717a3c5b"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/infra/server/server.go": {
+    "mtime": 1778293595.5407152,
+    "hash": "db550726b68181f9a6ad88e6bea5ade5"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/infra/server/logger.go": {
+    "mtime": 1774968704.2362833,
+    "hash": "0501e3a0ecee2aafe295cc26654ed2a6"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/usecases/notes/manager_mocks_test.go": {
+    "mtime": 1774877933.9812157,
+    "hash": "1fc75c21022ee4b84c0cca3c50061a54"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/usecases/notes/manager_test.go": {
+    "mtime": 1778294782.1810703,
+    "hash": "97312376b4cbba0210c13230e57c6aa6"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/usecases/notes/manager.go": {
+    "mtime": 1778293592.5355642,
+    "hash": "317583a1d93cf603f26643c02b252c42"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/domain/errors.go": {
+    "mtime": 1774812752.5994506,
+    "hash": "7617a15e187c63c77e7cfe16e9c582d7"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/domain/note.go": {
+    "mtime": 1778294689.0534747,
+    "hash": "706f1cd7c19655a19b8519e6a62a1d9a"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/domain/note_test.go": {
+    "mtime": 1774829430.5285718,
+    "hash": "0b6a36e8f49209e90771500a38e7e2ff"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/docker-compose.yml": {
+    "mtime": 1774821683.173819,
+    "hash": "5e8a2a155d930118d20cf896fbf6a0f6"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/openapi.yaml": {
+    "mtime": 1778294892.2044947,
+    "hash": "01b33906231bfb622723105544f4f919"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/README.md": {
+    "mtime": 1778266152.2992706,
+    "hash": "189313957b661e50791293620c3f9e97"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/CLAUDE.md": {
+    "mtime": 1774968715.4383488,
+    "hash": "ed17c947ee1a1278573e7d348c3493d0"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/docs/GUIDE.md": {
+    "mtime": 1774968721.0856311,
+    "hash": "301e140c1b0c4b9e2f555d201b14fe67"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/adapters/http/spec/openapi.yaml": {
+    "mtime": 1778319148.7304032,
+    "hash": "01b33906231bfb622723105544f4f919"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/adapters/http/templates/success.html": {
+    "mtime": 1777565748.00817,
+    "hash": "2b9c82a3a5ce984df1f8e2d3049111d7"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/adapters/http/templates/header.html": {
+    "mtime": 1774823320.5529485,
+    "hash": "0ee337c46dd70553cc567bce58508993"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/adapters/http/templates/note.html": {
+    "mtime": 1778270717.4851615,
+    "hash": "e2c91feb257604e906efd79ebd96b748"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/adapters/http/templates/login.html": {
+    "mtime": 1777565748.00811,
+    "hash": "9b2edde6b5bf41e1356cddb3463c58f5"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/adapters/http/templates/error.html": {
+    "mtime": 1777565748.008049,
+    "hash": "d4ede8cdaccdcb465466953726481aaf"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/adapters/http/templates/index.html": {
+    "mtime": 1777565748.0078316,
+    "hash": "ed38e9fcbb1766cfe800ae03dfb0f39c"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/adapters/http/templates/apidocs.html": {
+    "mtime": 1774876789.2963624,
+    "hash": "cd2213d4709c26d5fb342078b1bc75e7"
+  },
+  "/home/dmitry/go/src/github.com/partyzanex/padmark/internal/adapters/http/static/favicon.svg": {
+    "mtime": 1774710929.1722453,
+    "hash": "ab7ab7f7277a1a082a85330d105a867e"
+  }
+}
