@@ -13,3 +13,9 @@ padmark.db
 padmark-cli
 padmark-server
 .serena/
+
+# graphify: keep human-readable reports, ignore derived artifacts
+.graphify/*
+!.graphify/GRAPH_REPORT.md
+!.graphify/wiki/
+graphify-out/

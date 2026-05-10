@@ -1,11 +1,15 @@
 package http
 
 import (
+	"bytes"
+	"context"
 	net_http "net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // spyResponseWriter counts how many times WriteHeader is called by the code under test.
@@ -70,6 +74,20 @@ func TestAPISpec_WriteError_DoesNotCorruptBody(t *testing.T) {
 		"WriteHeader must not be called when Write fails")
 }
 
+// TestOpenAPISpecInSync verifies that spec/openapi.yaml (the embedded copy) is identical
+// to the root openapi.yaml (the source of truth). Run `go generate ./internal/adapters/http/`
+// to regenerate the copy when the root file changes.
+func TestOpenAPISpecInSync(t *testing.T) {
+	root, err := os.ReadFile("../../../openapi.yaml")
+	require.NoError(t, err, "read root openapi.yaml")
+
+	spec, err := os.ReadFile("spec/openapi.yaml")
+	require.NoError(t, err, "read spec/openapi.yaml")
+
+	assert.True(t, bytes.Equal(root, spec),
+		"spec/openapi.yaml is out of sync with root openapi.yaml; run: go generate ./internal/adapters/http/")
+}
+
 // TestAPISpec_OK_SetsContentType verifies the happy path: correct Content-Type header.
 func TestAPISpec_OK_SetsContentType(t *testing.T) {
 	rec := httptest.NewRecorder()
@@ -80,4 +98,62 @@ func TestAPISpec_OK_SetsContentType(t *testing.T) {
 	assert.Equal(t, net_http.StatusOK, rec.Code)
 	assert.Equal(t, "application/yaml", rec.Header().Get("Content-Type"))
 	assert.NotEmpty(t, rec.Body.Bytes())
+}
+
+func TestNoPinger(t *testing.T) {
+	var pinger Pinger = NoPinger{}
+
+	assert.NoError(t, pinger.PingContext(context.Background()))
+}
+
+func TestSafeNextURL(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"", ""},
+		{"/", "/"},
+		{"/notes/abc123", "/notes/abc123"},
+		{"/notes/abc?foo=bar", "/notes/abc?foo=bar"},
+		{"https://evil.com", ""},
+		{"//evil.com/path", ""},
+		{"evil.com/path", ""},
+		{"javascript:alert(1)", ""},
+		{"/valid/../path", "/valid/../path"},
+	}
+
+	for _, tc := range tests {
+		got := safeNextURL(tc.input)
+		assert.Equal(t, tc.want, got, "safeNextURL(%q)", tc.input)
+	}
+}
+
+func TestIsPublicRoute(t *testing.T) {
+	named := map[string]struct{}{
+		"login": {}, "api": {}, "success": {}, "healthz": {}, "readyz": {},
+	}
+
+	tests := []struct {
+		method string
+		path   string
+		want   bool
+	}{
+		{net_http.MethodGet, "/notes/abc123", true},
+		{net_http.MethodGet, "/notes/abc/extra", false},
+		{net_http.MethodPost, "/notes/abc123", false},
+		{net_http.MethodGet, "/abc123", true},
+		{net_http.MethodGet, "/success", false},
+		{net_http.MethodGet, "/a/b", false},
+		{net_http.MethodGet, "/", false},
+		{net_http.MethodGet, "/login", false},
+		{net_http.MethodGet, "/api", false},
+		{net_http.MethodGet, "/healthz", false},
+		{net_http.MethodGet, "/unknown-page", true},
+	}
+
+	for _, tc := range tests {
+		req := httptest.NewRequest(tc.method, tc.path, nil)
+		got := isPublicRoute(req, named)
+		assert.Equal(t, tc.want, got, "%s %s", tc.method, tc.path)
+	}
 }

@@ -54,6 +54,10 @@ func (h *OgenHandler) CreateNote(
 }
 
 // GetNote implements ogenapi.Handler.
+// NOTE: GET /notes/{id} is intentionally NOT routed to ogenSrv in NewRouter — it is handled
+// by Handler.GetNote, which enforces per-note private auth and HTML/browser redirects.
+// If this route is ever added to ogenSrv, private notes will be publicly accessible via
+// the JSON API without authentication. Implement an auth check here before doing so.
 func (h *OgenHandler) GetNote(
 	ctx context.Context, params ogenapi.GetNoteParams,
 ) (ogenapi.GetNoteRes, error) {
@@ -160,10 +164,6 @@ func (h *OgenHandler) Healthz(_ context.Context) error {
 
 // Readyz implements ogenapi.Handler.
 func (h *OgenHandler) Readyz(ctx context.Context) (ogenapi.ReadyzRes, error) {
-	if h.pinger == nil {
-		return &ogenapi.ReadyzOK{}, nil
-	}
-
 	pingErr := h.pinger.PingContext(ctx)
 	if pingErr != nil {
 		return &ogenapi.ErrorResponse{Message: "db unavailable"}, nil //nolint:nilerr // intentional: map ping error to 503

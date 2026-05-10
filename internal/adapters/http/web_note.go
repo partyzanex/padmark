@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
+	"net/url"
 	"time"
 
 	_ "embed"
@@ -101,7 +102,8 @@ func (h *Handler) handlePrivateAuth(w http.ResponseWriter, r *http.Request, id s
 	}
 
 	if negotiate(r) == formatHTML {
-		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		loginURL := "/login?next=" + url.QueryEscape(r.URL.RequestURI())
+		http.Redirect(w, r, loginURL, http.StatusSeeOther)
 
 		return nil, true
 	}

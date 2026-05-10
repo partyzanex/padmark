@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/mock/gomock"
 
@@ -35,6 +36,34 @@ func (s *ManagerTestSuite) TearDownTest() {
 
 func TestManagerTestSuite(t *testing.T) {
 	suite.Run(t, new(ManagerTestSuite))
+}
+
+// randomString
+
+func TestRandomString_Length(t *testing.T) {
+	const chars = "abc"
+
+	for _, length := range []int{1, 5, 10, 32} {
+		got := randomString(chars, length)
+		assert.Len(t, got, length, "length=%d", length)
+	}
+}
+
+func TestRandomString_OnlyUsesCharset(t *testing.T) {
+	const chars = "xyz"
+
+	got := randomString(chars, 100)
+
+	for _, ch := range got {
+		assert.Contains(t, chars, string(ch))
+	}
+}
+
+func TestRandomString_Entropy(t *testing.T) {
+	first := randomString(slugChars, slugLength)
+	second := randomString(slugChars, slugLength)
+
+	assert.NotEqual(t, first, second, "two calls should almost never produce the same string")
 }
 
 // Create

@@ -56,6 +56,11 @@ type Pinger interface {
 	PingContext(ctx context.Context) error
 }
 
+// NoPinger is a no-op Pinger for use when database health checks are not required.
+type NoPinger struct{}
+
+func (NoPinger) PingContext(_ context.Context) error { return nil }
+
 // Handler holds dependencies for all HTTP handlers.
 type Handler struct {
 	manager       NoteManager
@@ -79,8 +84,9 @@ func parseTmpl(name, src string) *template.Template {
 }
 
 // NewHandler creates a Handler with required dependencies.
-func NewHandler(manager NoteManager, log *slog.Logger) *Handler {
-	return &Handler{
+// tokens is the list of valid auth tokens; pass nil to disable auth.
+func NewHandler(manager NoteManager, log *slog.Logger, tokens []string) *Handler {
+	handler := &Handler{
 		manager:     manager,
 		log:         log,
 		noteTmpl:    parseTmpl("note", noteTmplSrc),
@@ -90,16 +96,12 @@ func NewHandler(manager NoteManager, log *slog.Logger) *Handler {
 		successTmpl: parseTmpl("success", successTmplSrc),
 		errorTmpl:   parseTmpl("error", errorTmplSrc),
 	}
-}
 
-// WithAuth attaches server auth tokens to the handler.
-// When tokens are configured, private notes require a valid token to view.
-func (h *Handler) WithAuth(tokens []string) *Handler {
 	if len(tokens) > 0 {
-		h.allowedTokens = makeTokenSet(tokens)
+		handler.allowedTokens = makeTokenSet(tokens)
 	}
 
-	return h
+	return handler
 }
 
 // isAuthenticated reports whether the request carries a valid server auth token.

@@ -56,12 +56,12 @@ func (s *HandlerSuite) SetupTest() {
 }
 
 func (s *HandlerSuite) newRouter(tokens []string) http.Handler {
-	handler := adhttp.NewHandler(s.manager, discardLog)
+	handler := adhttp.NewHandler(s.manager, discardLog, tokens)
 	ogen := adhttp.NewOgenHandler(s.manager, s.pinger, discardLog)
 
 	opts := adhttp.RouterOptions{CookieMaxAge: 90 * 24 * 60 * 60, MaxBodyBytes: 256 * 1024}
 
-	return adhttp.NewRouter(handler, ogen, tokens, opts)
+	return adhttp.NewRouter(handler, ogen, opts)
 }
 
 func (s *HandlerSuite) TearDownTest() {
@@ -614,7 +614,8 @@ func (s *HandlerSuite) TestGetNote_Private_HTML_Unauthorized() {
 	router.ServeHTTP(w, r)
 
 	s.Equal(http.StatusSeeOther, w.Code)
-	s.Equal("/login", w.Header().Get("Location"))
+	s.True(strings.HasPrefix(w.Header().Get("Location"), "/login?next="),
+		"should redirect to /login with ?next= param")
 }
 
 func (s *HandlerSuite) TestGetNote_Private_JSON_Unauthorized() {
@@ -868,10 +869,10 @@ func (s *HandlerSuite) TestReadyz_OK() {
 }
 
 func (s *HandlerSuite) TestReadyz_NoPinger() {
-	handler := adhttp.NewHandler(s.manager, discardLog)
-	ogen := adhttp.NewOgenHandler(s.manager, nil, discardLog)
+	handler := adhttp.NewHandler(s.manager, discardLog, nil)
+	ogen := adhttp.NewOgenHandler(s.manager, adhttp.NoPinger{}, discardLog)
 	opts := adhttp.RouterOptions{CookieMaxAge: 90 * 24 * 60 * 60, MaxBodyBytes: 256 * 1024}
-	router := adhttp.NewRouter(handler, ogen, nil, opts)
+	router := adhttp.NewRouter(handler, ogen, opts)
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/readyz", nil)
@@ -928,7 +929,7 @@ func (fw *failWriter) WriteHeader(code int)      { fw.code = code }
 func (fw *failWriter) Write([]byte) (int, error) { return 0, errors.New("write failed") }
 
 func (s *HandlerSuite) TestIndexPage_WriteFail() {
-	handler := adhttp.NewHandler(s.manager, slog.New(slog.DiscardHandler))
+	handler := adhttp.NewHandler(s.manager, slog.New(slog.DiscardHandler), nil)
 	fw := newFailWriter()
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
 
@@ -941,7 +942,7 @@ func (s *HandlerSuite) TestEditPage_WriteFail() {
 	note := newTestNote("edit", "body")
 	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
 
-	handler := adhttp.NewHandler(s.manager, slog.New(slog.DiscardHandler))
+	handler := adhttp.NewHandler(s.manager, slog.New(slog.DiscardHandler), nil)
 	fwr := newFailWriter()
 	r := httptest.NewRequest(http.MethodGet, "/edit/"+testID, nil)
 	r.SetPathValue("id", testID)
@@ -952,7 +953,7 @@ func (s *HandlerSuite) TestEditPage_WriteFail() {
 }
 
 func (s *HandlerSuite) TestSuccessPage_WriteFail() {
-	handler := adhttp.NewHandler(s.manager, slog.New(slog.DiscardHandler))
+	handler := adhttp.NewHandler(s.manager, slog.New(slog.DiscardHandler), nil)
 	fwr := newFailWriter()
 	r := httptest.NewRequest(http.MethodGet, "/success?id=abc", nil)
 
@@ -965,7 +966,7 @@ func (s *HandlerSuite) TestGetNote_HTML_WriteFail() {
 	note := newTestNote("note", "body")
 	s.manager.EXPECT().GetRendered(gomock.Any(), testID).Return(note, "<p>body</p>", nil)
 
-	handler := adhttp.NewHandler(s.manager, slog.New(slog.DiscardHandler))
+	handler := adhttp.NewHandler(s.manager, slog.New(slog.DiscardHandler), nil)
 	fwr := newFailWriter()
 	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
 	r.SetPathValue("id", testID)
@@ -980,7 +981,7 @@ func (s *HandlerSuite) TestGetNote_Plain_WriteFail() {
 	note := newTestNote("note", "body")
 	s.manager.EXPECT().View(gomock.Any(), testID).Return(note, nil)
 
-	handler := adhttp.NewHandler(s.manager, slog.New(slog.DiscardHandler))
+	handler := adhttp.NewHandler(s.manager, slog.New(slog.DiscardHandler), nil)
 	fwr := newFailWriter()
 	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
 	r.SetPathValue("id", testID)
@@ -995,7 +996,7 @@ func (s *HandlerSuite) TestGetNote_JSON_WriteFail() {
 	note := newTestNote("note", "body")
 	s.manager.EXPECT().View(gomock.Any(), testID).Return(note, nil)
 
-	handler := adhttp.NewHandler(s.manager, slog.New(slog.DiscardHandler))
+	handler := adhttp.NewHandler(s.manager, slog.New(slog.DiscardHandler), nil)
 	fwr := newFailWriter()
 	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
 	r.SetPathValue("id", testID)
@@ -1009,7 +1010,7 @@ func (s *HandlerSuite) TestGetNote_JSON_WriteFail() {
 // ── Rate limit ──
 
 func (s *HandlerSuite) TestRateLimit_Exceeded() {
-	handler := adhttp.NewHandler(s.manager, discardLog)
+	handler := adhttp.NewHandler(s.manager, discardLog, nil)
 	ogen := adhttp.NewOgenHandler(s.manager, s.pinger, discardLog)
 	opts := adhttp.RouterOptions{
 		CookieMaxAge: 90 * 24 * 60 * 60,
@@ -1017,7 +1018,7 @@ func (s *HandlerSuite) TestRateLimit_Exceeded() {
 		RateLimit:    1,
 		RateBurst:    1,
 	}
-	router := adhttp.NewRouter(handler, ogen, nil, opts)
+	router := adhttp.NewRouter(handler, ogen, opts)
 
 	send := func() int {
 		w := httptest.NewRecorder()
@@ -1033,7 +1034,7 @@ func (s *HandlerSuite) TestRateLimit_Exceeded() {
 }
 
 func (s *HandlerSuite) TestRateLimit_DifferentIPs() {
-	handler := adhttp.NewHandler(s.manager, discardLog)
+	handler := adhttp.NewHandler(s.manager, discardLog, nil)
 	ogen := adhttp.NewOgenHandler(s.manager, s.pinger, discardLog)
 	opts := adhttp.RouterOptions{
 		CookieMaxAge: 90 * 24 * 60 * 60,
@@ -1041,7 +1042,7 @@ func (s *HandlerSuite) TestRateLimit_DifferentIPs() {
 		RateLimit:    1,
 		RateBurst:    1,
 	}
-	router := adhttp.NewRouter(handler, ogen, nil, opts)
+	router := adhttp.NewRouter(handler, ogen, opts)
 
 	send := func(ip string) int {
 		w := httptest.NewRecorder()
@@ -1198,7 +1199,7 @@ func (s *HandlerSuite) TestGetNote_Plain_InternalError() {
 func (s *HandlerSuite) TestWriteErrorPage_WriteFail() {
 	s.manager.EXPECT().GetRendered(gomock.Any(), testID).Return(nil, "", domain.ErrNotFound)
 
-	handler := adhttp.NewHandler(s.manager, slog.New(slog.DiscardHandler))
+	handler := adhttp.NewHandler(s.manager, slog.New(slog.DiscardHandler), nil)
 	fwr := newFailWriter()
 	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
 	r.SetPathValue("id", testID)
@@ -1296,7 +1297,8 @@ func (s *HandlerSuite) TestAuth_MissingToken_Browser() {
 	router.ServeHTTP(w, r)
 
 	s.Equal(http.StatusSeeOther, w.Code)
-	s.Equal("/login", w.Header().Get("Location"))
+	s.True(strings.HasPrefix(w.Header().Get("Location"), "/login?next="),
+		"should redirect to /login with ?next= param")
 }
 
 func (s *HandlerSuite) TestAuth_InvalidToken() {
@@ -1496,13 +1498,85 @@ func (s *HandlerSuite) TestLogin_EmptyToken() {
 }
 
 func (s *HandlerSuite) TestLoginPage_WriteFail() {
-	handler := adhttp.NewHandler(s.manager, slog.New(slog.DiscardHandler))
+	handler := adhttp.NewHandler(s.manager, slog.New(slog.DiscardHandler), nil)
 	fw := newFailWriter()
 	r := httptest.NewRequest(http.MethodGet, "/login?error=1", nil)
 
 	handler.LoginPage(fw, r)
 
 	s.NotNil(fw)
+}
+
+func (s *HandlerSuite) TestLoginPage_WithNext() {
+	router := s.newRouter([]string{"token"})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/login?next=%2Fnotes%2Fabc", nil)
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusOK, w.Code)
+	s.Contains(w.Body.String(), `name="next"`)
+	s.Contains(w.Body.String(), `/notes/abc`)
+}
+
+func (s *HandlerSuite) TestLogin_OK_WithNext() {
+	router := s.newRouter([]string{"valid-token"})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/login",
+		strings.NewReader("token=valid-token&next=%2Fnotes%2Fabc"))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusSeeOther, w.Code)
+	s.Equal("/notes/abc", w.Header().Get("Location"))
+}
+
+func (s *HandlerSuite) TestLogin_InvalidToken_PreservesNext() {
+	router := s.newRouter([]string{"valid-token"})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/login",
+		strings.NewReader("token=wrong&next=%2Fnotes%2Fabc"))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusSeeOther, w.Code)
+	loc := w.Header().Get("Location")
+	s.Contains(loc, "/login?error=1")
+	s.Contains(loc, "next=")
+}
+
+func (s *HandlerSuite) TestLogin_Next_OpenRedirectBlocked() {
+	router := s.newRouter([]string{"valid-token"})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/login",
+		strings.NewReader("token=valid-token&next=https%3A%2F%2Fevil.com"))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusSeeOther, w.Code)
+	s.Equal("/", w.Header().Get("Location"))
+}
+
+func (s *HandlerSuite) TestAuth_MissingToken_NextContainsOriginalURL() {
+	router := s.newRouter([]string{"secret-token"})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/success?foo=bar", nil)
+	r.Header.Set("Accept", "text/html")
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusSeeOther, w.Code)
+	loc := w.Header().Get("Location")
+	s.True(strings.HasPrefix(loc, "/login?next="), "must redirect to login with next")
+	s.Contains(loc, "%2Fsuccess")
 }
 
 // ── API docs ──
@@ -1532,7 +1606,7 @@ func (s *HandlerSuite) TestAPISpec() {
 }
 
 func (s *HandlerSuite) TestAPIDocsPage_WriteFail() {
-	handler := adhttp.NewHandler(s.manager, slog.New(slog.DiscardHandler))
+	handler := adhttp.NewHandler(s.manager, slog.New(slog.DiscardHandler), nil)
 	fw := newFailWriter()
 	r := httptest.NewRequest(http.MethodGet, "/api", nil)
 
@@ -1552,10 +1626,10 @@ func (s *HandlerSuite) TestAPISpec_WriteFail() {
 
 func (s *HandlerSuite) TestAPIDocsPage_Public() {
 	discardLog := slog.New(slog.DiscardHandler)
-	handler := adhttp.NewHandler(s.manager, discardLog)
+	handler := adhttp.NewHandler(s.manager, discardLog, []string{"secret"})
 	ogen := adhttp.NewOgenHandler(s.manager, s.pinger, discardLog)
 	opts := adhttp.RouterOptions{CookieMaxAge: 90 * 24 * 60 * 60, MaxBodyBytes: 256 * 1024}
-	router := adhttp.NewRouter(handler, ogen, []string{"secret"}, opts)
+	router := adhttp.NewRouter(handler, ogen, opts)
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/api", nil)

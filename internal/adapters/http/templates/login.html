@@ -64,6 +64,7 @@
             {{end}}
 
             <form method="POST" action="/login">
+                {{if .Next}}<input type="hidden" name="next" value="{{.Next}}">{{end}}
                 <div class="field-group">
                     <label class="field-label" for="token">Token</label>
                     <input type="password" class="field-input" name="token" id="token"

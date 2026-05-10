@@ -2,36 +2,34 @@ package http
 
 import (
 	"net/http"
+	"net/url"
 	"strings"
 )
 
 const tokenCookieName = "padmark_token"
 
 // newAuthMiddleware wraps the entire handler tree with token-based auth.
-// If tokens is empty, auth is disabled and all requests pass through.
+// If tokenSet is empty, auth is disabled and all requests pass through.
 // Browser requests without a valid cookie are redirected to /login.
 // API requests without a valid Bearer token receive 401.
-func newAuthMiddleware(tokens []string, next http.Handler) http.Handler {
-	if len(tokens) == 0 {
+// namedRoutes is the set of single-segment path names that are named page routes,
+// not note IDs — maintained in NewRouter alongside route registrations.
+func newAuthMiddleware(tokenSet, namedRoutes map[string]struct{}, next http.Handler) http.Handler {
+	if len(tokenSet) == 0 {
 		return next
 	}
 
-	allowed := make(map[string]struct{}, len(tokens))
-
-	for _, tok := range tokens {
-		allowed[tok] = struct{}{}
-	}
-
-	return &authMiddleware{allowed: allowed, next: next}
+	return &authMiddleware{allowed: tokenSet, namedRoutes: namedRoutes, next: next}
 }
 
 type authMiddleware struct {
-	allowed map[string]struct{}
-	next    http.Handler
+	allowed     map[string]struct{}
+	namedRoutes map[string]struct{}
+	next        http.Handler
 }
 
 func (am *authMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if isPublicPath(r.URL.Path) || isPublicRoute(r) {
+	if isPublicPath(r.URL.Path) || isPublicRoute(r, am.namedRoutes) {
 		am.next.ServeHTTP(w, r)
 		return
 	}
@@ -44,7 +42,9 @@ func (am *authMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	accept := r.Header.Get("Accept")
 	if accept == "" || strings.Contains(accept, "text/html") {
-		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		loginURL := "/login?next=" + url.QueryEscape(r.URL.RequestURI())
+		http.Redirect(w, r, loginURL, http.StatusSeeOther)
+
 		return
 	}
 
@@ -74,8 +74,10 @@ func isPublicPath(path string) bool {
 }
 
 // isPublicRoute allows GET requests for note view paths through the auth middleware.
+// namedRoutes is the set of single-segment path names registered as named page routes
+// in NewRouter; they must not be treated as public note IDs.
 // The handler checks the per-note private flag and requires auth when the note is private.
-func isPublicRoute(r *http.Request) bool {
+func isPublicRoute(r *http.Request, namedRoutes map[string]struct{}) bool {
 	if r.Method != http.MethodGet {
 		return false
 	}
@@ -88,17 +90,14 @@ func isPublicRoute(r *http.Request) bool {
 		return after != "" && !strings.Contains(after, "/")
 	}
 
-	// Catch-all GET /{id} — single path segment that isn't a known route
+	// Catch-all GET /{id} — single path segment that is not a named page route
 	if trimmed == "" || strings.Contains(trimmed, "/") {
 		return false
 	}
 
-	switch trimmed {
-	case "login", "api", "success", "edit", "healthz", "readyz":
-		return false
-	}
+	_, isNamed := namedRoutes[trimmed]
 
-	return true
+	return !isNamed
 }
 
 // loginHandler validates the token from a form POST and sets a session cookie.
@@ -109,9 +108,16 @@ func loginHandler(tokens map[string]struct{}, cookieMaxAge int) http.HandlerFunc
 		r.Body = http.MaxBytesReader(w, r.Body, maxLoginBody)
 
 		token := r.FormValue("token")
+		next := safeNextURL(r.FormValue("next"))
 
 		if _, ok := tokens[token]; !ok || token == "" {
-			http.Redirect(w, r, "/login?error=1", http.StatusSeeOther)
+			dest := "/login?error=1"
+			if next != "" {
+				dest += "&next=" + url.QueryEscape(next)
+			}
+
+			http.Redirect(w, r, dest, http.StatusSeeOther)
+
 			return
 		}
 
@@ -125,6 +131,26 @@ func loginHandler(tokens map[string]struct{}, cookieMaxAge int) http.HandlerFunc
 			SameSite: http.SameSiteStrictMode,
 		})
 
-		http.Redirect(w, r, "/", http.StatusSeeOther)
+		dest := "/"
+		if next != "" {
+			dest = next
+		}
+
+		http.Redirect(w, r, dest, http.StatusSeeOther)
 	}
+}
+
+// safeNextURL validates that the redirect target is a local path to prevent open redirects.
+// Returns empty string if the value is absent or unsafe.
+func safeNextURL(next string) string {
+	if next == "" {
+		return ""
+	}
+
+	parsed, err := url.Parse(next)
+	if err != nil || parsed.Host != "" || parsed.Scheme != "" || !strings.HasPrefix(next, "/") {
+		return ""
+	}
+
+	return next
 }

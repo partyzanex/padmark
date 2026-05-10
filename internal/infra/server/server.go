@@ -49,12 +49,6 @@ func buildRouter(
 	handler *adaptershttp.Handler,
 	ogenHandler *adaptershttp.OgenHandler,
 ) (http.Handler, error) {
-	var tokens []string
-
-	if raw := cmd.String(FlagAuthTokens); raw != "" {
-		tokens = parseTokens(raw)
-	}
-
 	trustedProxies, err := parseTrustedProxies(cmd.String(FlagTrustedProxies))
 	if err != nil {
 		return nil, err
@@ -68,7 +62,7 @@ func buildRouter(
 		TrustedProxies: trustedProxies,
 	}
 
-	return adaptershttp.NewRouter(handler, ogenHandler, tokens, opts), nil
+	return adaptershttp.NewRouter(handler, ogenHandler, opts), nil
 }
 
 func httpRedirectHandler() http.Handler {
@@ -181,8 +175,9 @@ func serverAction(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
+	tokens := parseTokens(cmd.String(FlagAuthTokens))
 	manager := notes.NewManager(repo, render.NewRenderer(), log)
-	handler := adaptershttp.NewHandler(manager, log)
+	handler := adaptershttp.NewHandler(manager, log, tokens)
 	ogenHandler := adaptershttp.NewOgenHandler(manager, db.DB, log)
 
 	router, err := buildRouter(cmd, handler, ogenHandler)

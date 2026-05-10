@@ -40,14 +40,14 @@ type RouterOptions struct {
 
 // NewRouter registers all routes and wraps them with middleware.
 func NewRouter(
-	handler *Handler, ogenHandler *OgenHandler, tokens []string, opts RouterOptions,
+	handler *Handler, ogenHandler *OgenHandler, opts RouterOptions,
 ) http.Handler {
 	ogenSrv, err := ogenapi.NewServer(ogenHandler)
 	if err != nil {
 		panic("ogen server: " + err.Error())
 	}
 
-	handler.WithAuth(tokens)
+	tokenSet := handler.allowedTokens
 
 	mux := http.NewServeMux()
 	lockout := newFailLockoutCache()
@@ -61,7 +61,7 @@ func NewRouter(
 
 	// Manual handlers: HTML pages + content-negotiated GET + login + static + api docs
 	mux.HandleFunc("GET /login", handler.LoginPage)
-	mux.HandleFunc("POST /login", loginHandler(makeTokenSet(tokens), opts.CookieMaxAge))
+	mux.HandleFunc("POST /login", loginHandler(tokenSet, opts.CookieMaxAge))
 	mux.HandleFunc("GET /api", handler.APIDocsPage)
 	mux.HandleFunc("GET /api/openapi.yaml", APISpec)
 	mux.HandleFunc("GET /", handler.IndexPage)
@@ -71,8 +71,19 @@ func NewRouter(
 	mux.HandleFunc("GET /edit/{id}", handler.EditPage)
 	mux.HandleFunc("GET /{id}", handler.GetNote)
 
+	// namedRoutes lists single-segment GET paths that are named page routes, not note IDs.
+	// The auth middleware uses this set to block access when auth is enabled.
+	// Add an entry here whenever a new single-segment named GET route is registered above.
+	namedRoutes := map[string]struct{}{
+		"login":   {},
+		"api":     {},
+		"success": {},
+		"healthz": {},
+		"readyz":  {},
+	}
+
 	stack := withRecovery(handler.log, mux)
-	stack = newAuthMiddleware(tokens, stack)
+	stack = newAuthMiddleware(tokenSet, namedRoutes, stack)
 
 	stack = withBodyLimit(int64(opts.MaxBodyBytes), stack)
 

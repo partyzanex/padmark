@@ -19,41 +19,28 @@ import (
 
 var slugRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,99}$`)
 
-const slugChars = "abcdefghijklmnopqrstuvwxyz0123456789"
+const (
+	slugChars  = "abcdefghijklmnopqrstuvwxyz0123456789"
+	slugLength = 10
 
-func newSlug() string {
-	const length = 10
+	editCodeChars  = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+	editCodeLength = 12
+)
 
-	charsetSize := big.NewInt(int64(len(slugChars)))
+func newSlug() string     { return randomString(slugChars, slugLength) }
+func newEditCode() string { return randomString(editCodeChars, editCodeLength) }
+
+func randomString(chars string, length int) string {
+	size := big.NewInt(int64(len(chars)))
 	buf := make([]byte, length)
 
 	for idx := range length {
-		nn, err := rand.Int(rand.Reader, charsetSize)
+		nn, err := rand.Int(rand.Reader, size)
 		if err != nil {
 			panic("crypto/rand unavailable: " + err.Error())
 		}
 
-		buf[idx] = slugChars[nn.Int64()]
-	}
-
-	return string(buf)
-}
-
-const editCodeChars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
-
-func newEditCode() string {
-	const length = 12
-
-	charsetSize := big.NewInt(int64(len(editCodeChars)))
-	buf := make([]byte, length)
-
-	for idx := range length {
-		nn, err := rand.Int(rand.Reader, charsetSize)
-		if err != nil {
-			panic("crypto/rand unavailable: " + err.Error())
-		}
-
-		buf[idx] = editCodeChars[nn.Int64()]
+		buf[idx] = chars[nn.Int64()]
 	}
 
 	return string(buf)
