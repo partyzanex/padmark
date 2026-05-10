@@ -27,7 +27,7 @@ domain  <--  usecases  <--  infra
 
 - **domain** (`internal/domain/`) — entities and sentinel errors. Stdlib only, **no interfaces**.
 - **usecases** (`internal/usecases/notes/`) — business logic. Dependency interfaces defined **here**, next to consumer (DIP). Struct named `Manager`.
-- **infra** (`internal/infra/`) — implementations: storage (`memory`, `sqlite`, `postgres`), markdown renderer, CLI/config (`infra/cmd/`).
+- **infra** (`internal/infra/`) — implementations: storage (`sqlite`, `postgres`), markdown renderer, CLI/config (`infra/cmd/`).
 - **adapters** (`internal/adapters/http/`) — HTTP handlers, content negotiation, error translation.
 
 ### Naming
@@ -39,8 +39,13 @@ domain  <--  usecases  <--  infra
 
 ### Dependency injection
 
-Manual DI in `internal/infra/server/app.go`, `action()` function. Order:
+Manual DI in `internal/infra/server/server.go`, `serverAction()` function. Order:
 1. Logger → 2. Infrastructure (storage, renderer) → 3. Business logic → 4. HTTP handler/router → 5. Server + graceful shutdown
+
+Key constructor rules:
+- `NewHandler(manager NoteManager, log *slog.Logger, tokens []string)` — token set is built inside the constructor; never mutate `handler.allowedTokens` after construction.
+- `NewRouter(handler *Handler, ogenHandler *OgenHandler, opts RouterOptions)` — reads `handler.allowedTokens` directly; does not accept tokens separately.
+- Use `NoPinger{}` when no DB pinger is available (e.g. in-memory or test setups) instead of passing `nil`.
 
 ### Configuration (`flags.go`)
 
@@ -52,6 +57,12 @@ Three constant groups: flag names (`Flag*`), env vars (`Env*`), defaults (`Defau
 - Always wrap with operation context: `fmt.Errorf("get note: %w", err)`
 - Translate storage errors to domain errors: `sql.ErrNoRows` → `domain.ErrNotFound`
 - Adapters translate to HTTP status codes via a dedicated `writeError()` function
+
+### Auth middleware
+
+- `namedRoutes` set is defined inline in `NewRouter`, next to the `mux.Handle*` calls. Add a new entry here whenever a new single-segment named GET route is registered.
+- `isPublicRoute` allows GET `/{id}` and `GET /notes/{id}` through for public notes. Private-note access control happens inside the handler via `handlePrivateAuth`.
+- Browser redirect on auth failure: `/login?next=<encoded-original-url>`. `safeNextURL` validates the value — rejects any URL with a host or scheme (open-redirect protection).
 
 ## Coding Rules
 

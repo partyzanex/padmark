@@ -1,6 +1,6 @@
 services:
   db:
-    image: postgres:17-alpine
+    image: postgres:18-alpine
     restart: unless-stopped
     environment:
       POSTGRES_DB: padmark
@@ -13,20 +13,11 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    networks:
+      - padmark
 
-  migrate:
-    build: .
-    command: migrate
-    environment:
-      PADMARK_STORAGE: postgres
-      PADMARK_DSN: "postgres://padmark:padmark@db:5432/padmark?sslmode=disable"
-    depends_on:
-      db:
-        condition: service_healthy
-    restart: on-failure
-
-  app:
-    build: .
+  padmark:
+    image: partydev/padmark:latest
     command: serve
     ports:
       - "8080:8080"
@@ -36,9 +27,14 @@ services:
       PADMARK_ADDR: ":8080"
       PADMARK_LOG_FORMAT: json
     depends_on:
-      migrate:
-        condition: service_completed_successfully
+      db:
+        condition: service_healthy
     restart: unless-stopped
+    networks:
+      - padmark
+
+networks:
+  padmark:
 
 volumes:
   db_data:
