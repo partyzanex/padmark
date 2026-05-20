@@ -128,6 +128,7 @@ func (h *Handler) renderNoteHTML(w http.ResponseWriter, r *http.Request, id stri
 
 	if err != nil {
 		h.writeErrorPage(w, r, err)
+
 		return
 	}
 
@@ -163,6 +164,7 @@ func (h *Handler) GetNote(w http.ResponseWriter, r *http.Request) {
 		note, err := h.viewNote(r, id, preloaded)
 		if err != nil {
 			writeError(w, err)
+
 			return
 		}
 
@@ -184,6 +186,7 @@ func (h *Handler) GetNote(w http.ResponseWriter, r *http.Request) {
 		note, err := h.viewNote(r, id, preloaded)
 		if err != nil {
 			writeError(w, err)
+
 			return
 		}
 

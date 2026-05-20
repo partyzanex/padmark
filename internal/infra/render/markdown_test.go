@@ -59,17 +59,17 @@ func (s *RendererSuite) TestAutolink() {
 func (s *RendererSuite) TestSanitizesScriptTags() {
 	out, err := s.r.Render("<script>alert('xss')</script>")
 	s.Require().NoError(err)
-	s.False(strings.Contains(out, "<script>"), "script tag must be stripped")
+	s.NotContains(out, "<script>", "script tag must be stripped")
 }
 
 func (s *RendererSuite) TestSanitizesOnclickAttribute() {
 	out, err := s.r.Render(`<a href="/" onclick="evil()">click</a>`)
 	s.Require().NoError(err)
-	s.False(strings.Contains(out, "onclick"), "onclick must be stripped")
+	s.NotContains(out, "onclick", "onclick must be stripped")
 }
 
 func (s *RendererSuite) TestEmptyInput() {
 	out, err := s.r.Render("")
 	s.Require().NoError(err)
-	s.Equal("", out)
+	s.Empty(out)
 }

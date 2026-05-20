@@ -99,7 +99,7 @@ func (s *RepositoryTestSuite) TestGet_OK() {
 func (s *RepositoryTestSuite) TestGet_NotFound() {
 	_, err := s.repo.Get(s.T().Context(), "nonexistent")
 
-	s.True(errors.Is(err, domain.ErrNotFound))
+	s.ErrorIs(err, domain.ErrNotFound)
 }
 
 // Update
@@ -139,7 +139,7 @@ func (s *RepositoryTestSuite) TestUpdate_NotFound() {
 
 	err := s.repo.Update(s.T().Context(), "nonexistent", domNote)
 
-	s.True(errors.Is(err, domain.ErrNotFound))
+	s.ErrorIs(err, domain.ErrNotFound)
 }
 
 // TestUpdate_Private_Nil_PreservesExistingValue verifies that passing Private=nil to Update
@@ -279,13 +279,13 @@ func (s *RepositoryTestSuite) TestDelete_OK() {
 
 	_, err = s.repo.Get(s.T().Context(), domNote.ID)
 
-	s.True(errors.Is(err, domain.ErrNotFound))
+	s.ErrorIs(err, domain.ErrNotFound)
 }
 
 func (s *RepositoryTestSuite) TestDelete_NotFound() {
 	err := s.repo.Delete(s.T().Context(), "nonexistent")
 
-	s.True(errors.Is(err, domain.ErrNotFound))
+	s.ErrorIs(err, domain.ErrNotFound)
 }
 
 // DuplicateSlug
@@ -397,7 +397,7 @@ func (s *RepositoryTestSuite) TestConsume_NotEligible() {
 	s.Require().NoError(s.repo.Create(ctx, n))
 
 	_, err := s.repo.Consume(ctx, "consume-no")
-	s.ErrorIs(err, domain.ErrNotFound)
+	s.Require().ErrorIs(err, domain.ErrNotFound)
 
 	// note must still exist
 	got, err := s.repo.Get(ctx, "consume-no")

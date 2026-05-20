@@ -391,7 +391,7 @@ func (s *RepositoryTestSuite) TestConsume_NotEligible() {
 	s.Require().NoError(s.repo.Create(ctx, newNote("con-no", "plain", "me")))
 
 	_, err := s.repo.Consume(ctx, "con-no")
-	s.ErrorIs(err, domain.ErrNotFound)
+	s.Require().ErrorIs(err, domain.ErrNotFound)
 
 	// note must still exist
 	got, err := s.repo.Get(ctx, "con-no")
@@ -457,5 +457,5 @@ func (s *RepositoryTestSuite) TestRoundtrip_CRUD() {
 	s.Require().NoError(s.repo.Delete(ctx, "rt1"))
 
 	_, err = s.repo.Get(ctx, "rt1")
-	s.True(errors.Is(err, domain.ErrNotFound))
+	s.ErrorIs(err, domain.ErrNotFound)
 }

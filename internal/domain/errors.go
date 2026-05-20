@@ -12,4 +12,5 @@ var (
 	ErrInvalidSlug        = errors.New("invalid slug: use 1-100 alphanumeric/hyphen/underscore, start with alphanumeric")
 	ErrSlugConflict       = errors.New("slug is already taken")
 	ErrForbidden          = errors.New("invalid edit code")
+	ErrDecryptionFailed   = errors.New("content decryption failed")
 )

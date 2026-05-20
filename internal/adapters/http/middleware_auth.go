@@ -31,12 +31,14 @@ type authMiddleware struct {
 func (am *authMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if isPublicPath(r.URL.Path) || isPublicRoute(r, am.namedRoutes) {
 		am.next.ServeHTTP(w, r)
+
 		return
 	}
 
 	token := extractToken(r)
 	if _, ok := am.allowed[token]; ok {
 		am.next.ServeHTTP(w, r)
+
 		return
 	}
 

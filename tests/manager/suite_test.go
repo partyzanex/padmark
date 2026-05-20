@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/partyzanex/padmark/internal/domain"
+	"github.com/partyzanex/padmark/internal/infra/crypto"
 	"github.com/partyzanex/padmark/internal/infra/render"
 	"github.com/partyzanex/padmark/internal/usecases/notes"
 )
@@ -22,7 +23,7 @@ type ManagerSuite struct {
 }
 
 func newManager(storage notes.Storage) *notes.Manager {
-	return notes.NewManager(storage, render.NewRenderer(), discardLog)
+	return notes.NewManager(storage, render.NewRenderer(), crypto.New(), crypto.NewEditCodeHasher(), discardLog)
 }
 
 // ── Create ──
@@ -72,7 +73,7 @@ func (s *ManagerSuite) TestCreate_SlugConflict() {
 func (s *ManagerSuite) TestCreate_EmptyTitleAllowed() {
 	result, err := s.Manager.Create(s.T().Context(), &domain.Note{Content: "c"})
 
-	s.NoError(err)
+	s.Require().NoError(err)
 	s.NotEmpty(result.ID)
 	s.Empty(result.Title)
 }
@@ -103,7 +104,7 @@ func (s *ManagerSuite) TestGet_Expired_DeletesNote() {
 	s.Require().NoError(err)
 
 	_, err = s.Manager.Get(ctx, created.ID)
-	s.ErrorIs(err, domain.ErrExpired)
+	s.Require().ErrorIs(err, domain.ErrExpired)
 
 	// note must be removed from storage
 	_, err = s.Manager.Peek(ctx, created.ID)

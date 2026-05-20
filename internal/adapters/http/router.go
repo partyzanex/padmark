@@ -24,6 +24,7 @@ const (
 
 func nonceFromContext(ctx context.Context) string {
 	v, _ := ctx.Value(keyNonce).(string)
+
 	return v
 }
 
@@ -187,6 +188,7 @@ func withSecurityHeaders(next http.Handler) http.Handler {
 		_, err := rand.Read(b[:])
 		if err != nil {
 			http.Error(w, "internal server error", http.StatusInternalServerError)
+
 			return
 		}
 

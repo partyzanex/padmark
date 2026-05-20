@@ -18,7 +18,7 @@ type PostgresManagerSuite struct {
 	ManagerSuite
 
 	container *tcpostgres.PostgresContainer
-	db        *bun.DB //nolint:containedctx // bun.DB is not a context — lint false positive
+	db        *bun.DB
 }
 
 func (s *PostgresManagerSuite) SetupSuite() {

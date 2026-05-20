@@ -12,6 +12,7 @@ func (h *Handler) EditPage(w http.ResponseWriter, r *http.Request) {
 	note, err := h.manager.Peek(r.Context(), id)
 	if err != nil {
 		h.writeErrorPage(w, r, err)
+
 		return
 	}
 

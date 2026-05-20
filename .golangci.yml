@@ -6,14 +6,10 @@ linters:
 
   # Keep roughly the same disabled set as in v1 (drop fully-deprecated ones).
   disable:
-    - godot
-    - testifylint
-    - nlreturn
     - wsl
     - nonamedreturns
     - testpackage
     - paralleltest
-    - containedctx
     - tparallel
     - err113
 

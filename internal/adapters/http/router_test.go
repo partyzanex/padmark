@@ -55,6 +55,7 @@ type errorWriter struct {
 
 func (e *errorWriter) Write(b []byte) (int, error) {
 	e.body = append(e.body, b...)
+
 	return 0, assert.AnError
 }
 

@@ -133,6 +133,7 @@ func handleCreateNoteRes(res padmark.CreateNoteRes) (*padmark.CreateNoteResponse
 	switch typed := res.(type) {
 	case *padmark.CreateNoteResponseHeaders:
 		resp := typed.Response
+
 		return &resp, nil
 	case *padmark.CreateNoteBadRequest:
 		return nil, fmt.Errorf("bad request: %s", typed.Message)

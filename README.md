@@ -1,8 +1,36 @@
 # padmark
 
-A self-hosted notepad for sharing Markdown snippets by URL — no accounts, no friction.
+Self-hosted Markdown graveyard for AI agents and beyond.
 
-Publish a note, get a short link, and manage it later with a one-time edit code. That's it.
+---
+
+## Screenshots
+
+| Create | View (dim) | Edit |
+|---|---|---|
+| ![Create](docs/screens/create.png) | ![View](docs/screens/view.png) | ![Edit](docs/screens/edit.png) |
+
+| View (dark) | View (light) | Created |
+|---|---|---|
+| ![View dark](docs/screens/view_dark.png) | ![Edit light](docs/screens/edit_light.png) | ![Created](docs/screens/created.png) |
+
+---
+
+## Why not GitHub Gist / Pastebin / PrivateBin?
+
+Those tools are built for humans. padmark is built for agents — and humans who script things.
+
+| | padmark | Gist | Pastebin | PrivateBin |
+|---|---|---|---|---|
+| Self-hosted | ✓ | ✗ | ✗ | ✓ |
+| REST API + OpenAPI spec | ✓ | partial | ✗ | ✗ |
+| Content negotiation (HTML / JSON / plain from same URL) | ✓ | ✗ | ✗ | ✗ |
+| Burn-after-reading with grace period TTL | ✓ | ✗ | ✓ | ✓ |
+| Per-note private flag | ✓ | ✗ | ✗ | ✗ |
+| Built-in CLI + stdin | ✓ | partial | ✗ | ✗ |
+| Single binary, SQLite by default | ✓ | — | — | ✗ |
+
+**The key feature:** one URL, many consumers. An AI agent hits `/notes/{id}` with `Accept: application/json` and gets structured data. A browser hits the same URL and gets rendered HTML. A shell script pipes to `padmark-cli` from stdin. No adapters, no glue.
 
 ---
 

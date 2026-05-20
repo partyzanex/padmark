@@ -25,6 +25,7 @@ func (h *Handler) SuccessPage(w http.ResponseWriter, r *http.Request) {
 	id := query.Get("id")
 	if id == "" {
 		http.Redirect(w, r, "/", http.StatusSeeOther)
+
 		return
 	}
 

@@ -14,6 +14,26 @@ import (
 	"github.com/partyzanex/padmark/internal/domain"
 )
 
+// passthroughEncryptor is a test double that returns content unchanged.
+type passthroughEncryptor struct{}
+
+func (passthroughEncryptor) Encrypt(pt, _ string) (string, error) { return pt, nil }
+func (passthroughEncryptor) Decrypt(ct, _ string) (string, error) { return ct, nil }
+
+// identityHasher is a test double that stores and compares edit codes as plaintext.
+type identityHasher struct{}
+
+func (identityHasher) Hash(code string) (string, error) { return code, nil }
+func (identityHasher) Verify(hash, code string) bool    { return hash == code }
+
+// failingEncryptor is a test double whose Decrypt always returns an error.
+type failingEncryptor struct{}
+
+func (failingEncryptor) Encrypt(pt, _ string) (string, error) { return pt, nil }
+func (failingEncryptor) Decrypt(_, _ string) (string, error) {
+	return "", errors.New("decryption failed")
+}
+
 type ManagerTestSuite struct {
 	suite.Suite
 
@@ -27,7 +47,7 @@ func (s *ManagerTestSuite) SetupTest() {
 	s.ctrl = gomock.NewController(s.T())
 	s.storage = NewMockStorage(s.ctrl)
 	s.renderer = NewMockRenderer(s.ctrl)
-	s.manager = NewManager(s.storage, s.renderer, slog.New(slog.DiscardHandler))
+	s.manager = NewManager(s.storage, s.renderer, passthroughEncryptor{}, identityHasher{}, slog.New(slog.DiscardHandler))
 }
 
 func (s *ManagerTestSuite) TearDownTest() {
@@ -155,7 +175,7 @@ func (s *ManagerTestSuite) TestCreate_EmptyTitle() {
 
 	result, err := s.manager.Create(s.T().Context(), note)
 
-	s.NoError(err)
+	s.Require().NoError(err)
 	s.NotEmpty(result.ID)
 	s.Empty(result.Title)
 }
@@ -165,7 +185,7 @@ func (s *ManagerTestSuite) TestCreate_TitleTooLong() {
 
 	_, err := s.manager.Create(s.T().Context(), note)
 
-	s.True(errors.Is(err, domain.ErrTitleTooLong))
+	s.ErrorIs(err, domain.ErrTitleTooLong)
 }
 
 func (s *ManagerTestSuite) TestCreate_InvalidContentType() {
@@ -173,7 +193,7 @@ func (s *ManagerTestSuite) TestCreate_InvalidContentType() {
 
 	_, err := s.manager.Create(s.T().Context(), note)
 
-	s.True(errors.Is(err, domain.ErrInvalidContentType))
+	s.ErrorIs(err, domain.ErrInvalidContentType)
 }
 
 func (s *ManagerTestSuite) TestCreate_WithBurnTTL() {
@@ -203,7 +223,7 @@ func (s *ManagerTestSuite) TestCreate_InvalidSlug() {
 
 	_, err := s.manager.Create(s.T().Context(), note)
 
-	s.True(errors.Is(err, domain.ErrInvalidSlug))
+	s.ErrorIs(err, domain.ErrInvalidSlug)
 }
 
 func (s *ManagerTestSuite) TestCreate_StorageError() {
@@ -214,7 +234,7 @@ func (s *ManagerTestSuite) TestCreate_StorageError() {
 	_, err := s.manager.Create(s.T().Context(), note)
 
 	s.Require().Error(err)
-	s.True(errors.Is(err, storageErr))
+	s.ErrorIs(err, storageErr)
 }
 
 // Get
@@ -259,7 +279,7 @@ func (s *ManagerTestSuite) TestGet_Expired() {
 
 	_, err := s.manager.Get(s.T().Context(), "abc-123")
 
-	s.True(errors.Is(err, domain.ErrExpired))
+	s.ErrorIs(err, domain.ErrExpired)
 }
 
 func (s *ManagerTestSuite) TestGet_NotFound() {
@@ -267,7 +287,7 @@ func (s *ManagerTestSuite) TestGet_NotFound() {
 
 	_, err := s.manager.Get(s.T().Context(), "missing")
 
-	s.True(errors.Is(err, domain.ErrNotFound))
+	s.ErrorIs(err, domain.ErrNotFound)
 }
 
 // View
@@ -313,7 +333,7 @@ func (s *ManagerTestSuite) TestView_NotFound() {
 
 	_, err := s.manager.View(s.T().Context(), "missing")
 
-	s.True(errors.Is(err, domain.ErrNotFound))
+	s.ErrorIs(err, domain.ErrNotFound)
 }
 
 // Update
@@ -354,7 +374,7 @@ func (s *ManagerTestSuite) TestUpdate_EmptyTitle() {
 
 	result, err := s.manager.Update(s.T().Context(), "abc-123", "code", &domain.Note{})
 
-	s.NoError(err)
+	s.Require().NoError(err)
 	s.NotNil(result)
 }
 
@@ -365,7 +385,7 @@ func (s *ManagerTestSuite) TestUpdate_NotFound() {
 
 	_, err := s.manager.Update(s.T().Context(), "missing", "code", note)
 
-	s.True(errors.Is(err, domain.ErrNotFound))
+	s.ErrorIs(err, domain.ErrNotFound)
 }
 
 func (s *ManagerTestSuite) TestUpdate_Forbidden() {
@@ -380,7 +400,7 @@ func (s *ManagerTestSuite) TestUpdate_Forbidden() {
 
 	_, err := s.manager.Update(s.T().Context(), "abc-123", "wrong-code", note)
 
-	s.True(errors.Is(err, domain.ErrForbidden))
+	s.ErrorIs(err, domain.ErrForbidden)
 }
 
 // Delete
@@ -400,7 +420,7 @@ func (s *ManagerTestSuite) TestDelete_NotFound() {
 
 	err := s.manager.Delete(s.T().Context(), "missing", "code")
 
-	s.True(errors.Is(err, domain.ErrNotFound))
+	s.ErrorIs(err, domain.ErrNotFound)
 }
 
 func (s *ManagerTestSuite) TestDelete_Forbidden() {
@@ -409,7 +429,7 @@ func (s *ManagerTestSuite) TestDelete_Forbidden() {
 
 	err := s.manager.Delete(s.T().Context(), "abc-123", "wrong-code")
 
-	s.True(errors.Is(err, domain.ErrForbidden))
+	s.ErrorIs(err, domain.ErrForbidden)
 }
 
 // GetRendered
@@ -448,7 +468,7 @@ func (s *ManagerTestSuite) TestGetRendered_Expired() {
 
 	_, _, err := s.manager.GetRendered(s.T().Context(), "abc-123")
 
-	s.True(errors.Is(err, domain.ErrExpired))
+	s.ErrorIs(err, domain.ErrExpired)
 }
 
 func (s *ManagerTestSuite) TestGetRendered_StorageError() {
@@ -456,7 +476,7 @@ func (s *ManagerTestSuite) TestGetRendered_StorageError() {
 
 	_, _, err := s.manager.GetRendered(s.T().Context(), "abc-123")
 
-	s.True(errors.Is(err, domain.ErrNotFound))
+	s.ErrorIs(err, domain.ErrNotFound)
 }
 
 func (s *ManagerTestSuite) TestGetRendered_RenderError() {
@@ -468,7 +488,7 @@ func (s *ManagerTestSuite) TestGetRendered_RenderError() {
 
 	_, _, err := s.manager.GetRendered(s.T().Context(), "abc-123")
 
-	s.True(errors.Is(err, renderErr))
+	s.ErrorIs(err, renderErr)
 }
 
 // Peek
@@ -488,7 +508,7 @@ func (s *ManagerTestSuite) TestPeek_NotFound() {
 
 	_, err := s.manager.Peek(s.T().Context(), "missing")
 
-	s.True(errors.Is(err, domain.ErrNotFound))
+	s.ErrorIs(err, domain.ErrNotFound)
 }
 
 // View TTL regression tests
@@ -625,7 +645,7 @@ func (s *ManagerTestSuite) TestViewPreloaded_Expired() {
 
 	_, err := s.manager.ViewPreloaded(s.T().Context(), "pre-3", note)
 
-	s.True(errors.Is(err, domain.ErrExpired))
+	s.ErrorIs(err, domain.ErrExpired)
 }
 
 // GetRenderedPreloaded
@@ -651,7 +671,7 @@ func (s *ManagerTestSuite) TestGetRenderedPreloaded_Expired() {
 
 	_, _, err := s.manager.GetRenderedPreloaded(s.T().Context(), "rp-2", note)
 
-	s.True(errors.Is(err, domain.ErrExpired))
+	s.ErrorIs(err, domain.ErrExpired)
 }
 
 // Peek — expiry policy is intentionally NOT applied
@@ -707,7 +727,7 @@ func (s *ManagerTestSuite) TestUpdate_PrivateNote_WrongCode() {
 
 	_, err := s.manager.Update(s.T().Context(), "priv-2", "wrongcode0000", note)
 
-	s.True(errors.Is(err, domain.ErrForbidden))
+	s.ErrorIs(err, domain.ErrForbidden)
 }
 
 // Consume error path
@@ -721,7 +741,7 @@ func (s *ManagerTestSuite) TestGet_BurnAfterReading_ConsumeError() {
 
 	_, err := s.manager.Get(s.T().Context(), "burn-err")
 
-	s.True(errors.Is(err, consumeErr))
+	s.ErrorIs(err, consumeErr)
 }
 
 func (s *ManagerTestSuite) TestView_BurnAfterReading_ConsumeError() {
@@ -733,5 +753,69 @@ func (s *ManagerTestSuite) TestView_BurnAfterReading_ConsumeError() {
 
 	_, err := s.manager.View(s.T().Context(), "burn-err-view")
 
-	s.True(errors.Is(err, consumeErr))
+	s.ErrorIs(err, consumeErr)
+}
+
+// Decryption failure
+
+func TestGet_DecryptionFailure(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	storage := NewMockStorage(ctrl)
+	renderer := NewMockRenderer(ctrl)
+	mgr := NewManager(storage, renderer, failingEncryptor{}, identityHasher{}, slog.New(slog.DiscardHandler))
+
+	note := &domain.Note{ID: "enc-fail", Title: "t", Content: "ciphertext"}
+	storage.EXPECT().Get(gomock.Any(), "enc-fail").Return(note, nil)
+
+	_, err := mgr.Get(t.Context(), "enc-fail")
+
+	assert.ErrorIs(t, err, domain.ErrDecryptionFailed)
+}
+
+func TestPeek_DecryptionFailure(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	storage := NewMockStorage(ctrl)
+	renderer := NewMockRenderer(ctrl)
+	mgr := NewManager(storage, renderer, failingEncryptor{}, identityHasher{}, slog.New(slog.DiscardHandler))
+
+	note := &domain.Note{ID: "enc-fail-peek", Title: "t", Content: "ciphertext"}
+	storage.EXPECT().Get(gomock.Any(), "enc-fail-peek").Return(note, nil)
+
+	_, err := mgr.Peek(t.Context(), "enc-fail-peek")
+
+	assert.ErrorIs(t, err, domain.ErrDecryptionFailed)
+}
+
+// TestGet_BurnAfterReading_DecryptionFailure verifies that decryption failure on the initial
+// storage.Get result propagates as ErrDecryptionFailed before Consume is ever called.
+func TestGet_BurnAfterReading_DecryptionFailure(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	storage := NewMockStorage(ctrl)
+	renderer := NewMockRenderer(ctrl)
+	mgr := NewManager(storage, renderer, failingEncryptor{}, identityHasher{}, slog.New(slog.DiscardHandler))
+
+	// decryptNote runs before applyNotePolicy, so Consume is never reached.
+	raw := &domain.Note{ID: "burn-enc-fail", Title: "t", BurnAfterReading: true, Content: "ciphertext"}
+	storage.EXPECT().Get(gomock.Any(), "burn-enc-fail").Return(raw, nil)
+
+	_, err := mgr.Get(t.Context(), "burn-enc-fail")
+
+	assert.ErrorIs(t, err, domain.ErrDecryptionFailed)
+}
+
+// TestGet_BurnTTL_DecryptionFailure verifies that decryption failure on the initial
+// storage.Get result propagates as ErrDecryptionFailed before SetBurnExpiry is ever called.
+func TestGet_BurnTTL_DecryptionFailure(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	storage := NewMockStorage(ctrl)
+	renderer := NewMockRenderer(ctrl)
+	mgr := NewManager(storage, renderer, failingEncryptor{}, identityHasher{}, slog.New(slog.DiscardHandler))
+
+	// decryptNote runs before applyNotePolicy, so SetBurnExpiry is never reached.
+	raw := &domain.Note{ID: "burn-ttl-enc-fail", Title: "t", BurnAfterReading: true, BurnTTL: 3600, Content: "ciphertext"}
+	storage.EXPECT().Get(gomock.Any(), "burn-ttl-enc-fail").Return(raw, nil)
+
+	_, err := mgr.Get(t.Context(), "burn-ttl-enc-fail")
+
+	assert.ErrorIs(t, err, domain.ErrDecryptionFailed)
 }

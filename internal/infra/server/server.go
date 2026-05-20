@@ -14,6 +14,7 @@ import (
 	"github.com/urfave/cli/v3"
 
 	adaptershttp "github.com/partyzanex/padmark/internal/adapters/http"
+	"github.com/partyzanex/padmark/internal/infra/crypto"
 	"github.com/partyzanex/padmark/internal/infra/render"
 	"github.com/partyzanex/padmark/internal/usecases/notes"
 )
@@ -176,7 +177,7 @@ func serverAction(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	tokens := parseTokens(cmd.String(FlagAuthTokens))
-	manager := notes.NewManager(repo, render.NewRenderer(), log)
+	manager := notes.NewManager(repo, render.NewRenderer(), crypto.New(), crypto.NewEditCodeHasher(), log)
 	handler := adaptershttp.NewHandler(manager, log, tokens)
 	ogenHandler := adaptershttp.NewOgenHandler(manager, db.DB, log)
 

@@ -5,7 +5,6 @@ package notes
 import (
 	"context"
 	"crypto/rand"
-	"crypto/subtle"
 	"errors"
 	"fmt"
 	"html"
@@ -20,8 +19,8 @@ import (
 var slugRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,99}$`)
 
 const (
-	slugChars  = "abcdefghijklmnopqrstuvwxyz0123456789"
-	slugLength = 10
+	slugChars  = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	slugLength = 32
 
 	editCodeChars  = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
 	editCodeLength = 12
@@ -62,16 +61,32 @@ type Renderer interface {
 	Render(content string) (string, error)
 }
 
+// Encryptor encrypts and decrypts note content using the note's ID as key material.
+type Encryptor interface {
+	Encrypt(plaintext, key string) (string, error)
+	Decrypt(ciphertext, key string) (string, error)
+}
+
+// EditCodeHasher hashes and verifies note edit codes.
+type EditCodeHasher interface {
+	Hash(code string) (string, error)
+	Verify(storedHash, code string) bool
+}
+
 // Manager implements note business logic.
 type Manager struct {
-	storage  Storage
-	renderer Renderer
-	log      *slog.Logger
+	storage   Storage
+	renderer  Renderer
+	encryptor Encryptor
+	hasher    EditCodeHasher
+	log       *slog.Logger
 }
 
 // NewManager creates a new Manager with required dependencies.
-func NewManager(storage Storage, renderer Renderer, log *slog.Logger) *Manager {
-	return &Manager{storage: storage, renderer: renderer, log: log}
+func NewManager(
+	storage Storage, renderer Renderer, encryptor Encryptor, hasher EditCodeHasher, log *slog.Logger,
+) *Manager {
+	return &Manager{storage: storage, renderer: renderer, encryptor: encryptor, hasher: hasher, log: log}
 }
 
 // Create validates and persists a new note.
@@ -98,14 +113,40 @@ func (m *Manager) Create(ctx context.Context, note *domain.Note) (*domain.Note, 
 		note.EditCode = newEditCode()
 	}
 
+	plaintextCode := note.EditCode
+
+	hashedCode, hashErr := m.hasher.Hash(note.EditCode)
+	if hashErr != nil {
+		return nil, fmt.Errorf("hash edit code: %w", hashErr)
+	}
+
+	note.EditCode = hashedCode
+
 	now := time.Now().UTC()
 	note.CreatedAt = now
 	note.UpdatedAt = now
 
+	plaintextContent := note.Content
+
+	encrypted, encErr := m.encryptor.Encrypt(note.Content, note.ID)
+	if encErr != nil {
+		note.EditCode = plaintextCode
+
+		return nil, fmt.Errorf("encrypt content: %w", encErr)
+	}
+
+	note.Content = encrypted
+
 	err = m.storage.Create(ctx, note)
 	if err != nil {
+		note.Content = plaintextContent
+		note.EditCode = plaintextCode
+
 		return nil, fmt.Errorf("create note: %w", err)
 	}
+
+	note.Content = plaintextContent
+	note.EditCode = plaintextCode
 
 	m.log.DebugContext(ctx, "note created", "id", note.ID)
 
@@ -121,6 +162,11 @@ func (m *Manager) Peek(ctx context.Context, id string) (*domain.Note, error) {
 		return nil, fmt.Errorf("peek note: %w", err)
 	}
 
+	err = m.decryptNote(note)
+	if err != nil {
+		return nil, fmt.Errorf("peek note: %w", err)
+	}
+
 	return note, nil
 }
 
@@ -128,6 +174,11 @@ func (m *Manager) Peek(ctx context.Context, id string) (*domain.Note, error) {
 // Burn-after-reading notes are atomically consumed (deleted and returned) to prevent races.
 func (m *Manager) Get(ctx context.Context, id string) (*domain.Note, error) {
 	note, err := m.storage.Get(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("get note: %w", err)
+	}
+
+	err = m.decryptNote(note)
 	if err != nil {
 		return nil, fmt.Errorf("get note: %w", err)
 	}
@@ -176,14 +227,14 @@ func (m *Manager) Update(
 		return nil, fmt.Errorf("update note: %w", err)
 	}
 
-	if subtle.ConstantTimeCompare([]byte(existing.EditCode), []byte(editCode)) != 1 {
+	if !m.hasher.Verify(existing.EditCode, editCode) {
 		return nil, domain.ErrForbidden
 	}
 
 	note.ID = id
 	note.CreatedAt = existing.CreatedAt
 	note.UpdatedAt = time.Now().UTC()
-	note.EditCode = existing.EditCode
+	note.EditCode = editCode
 
 	if note.ExpiresAt == nil {
 		// When burn is being disabled (BurnTTL cleared) but the existing note has a
@@ -199,10 +250,23 @@ func (m *Manager) Update(
 		note.ContentType = existing.ContentType
 	}
 
+	plaintext := note.Content
+
+	encrypted, encErr := m.encryptor.Encrypt(note.Content, id)
+	if encErr != nil {
+		return nil, fmt.Errorf("encrypt content: %w", encErr)
+	}
+
+	note.Content = encrypted
+
 	err = m.storage.Update(ctx, id, note)
 	if err != nil {
+		note.Content = plaintext
+
 		return nil, fmt.Errorf("update note: %w", err)
 	}
+
+	note.Content = plaintext
 
 	m.log.DebugContext(ctx, "note updated", "id", id)
 
@@ -216,7 +280,7 @@ func (m *Manager) Delete(ctx context.Context, id, editCode string) error {
 		return fmt.Errorf("delete note: %w", err)
 	}
 
-	if subtle.ConstantTimeCompare([]byte(existing.EditCode), []byte(editCode)) != 1 {
+	if !m.hasher.Verify(existing.EditCode, editCode) {
 		return domain.ErrForbidden
 	}
 
@@ -314,6 +378,19 @@ func (m *Manager) renderNote(id string, note *domain.Note) (string, error) {
 	return rendered, nil
 }
 
+func (m *Manager) decryptNote(note *domain.Note) error {
+	plaintext, err := m.encryptor.Decrypt(note.Content, note.ID)
+	if err != nil {
+		m.log.Warn("content decryption failed", "id", note.ID, "err", err)
+
+		return domain.ErrDecryptionFailed
+	}
+
+	note.Content = plaintext
+
+	return nil
+}
+
 func (m *Manager) burnNote(ctx context.Context, id string, note *domain.Note) (*domain.Note, error) {
 	if note.BurnTTL > 0 {
 		return m.startBurnTimer(ctx, id, note)
@@ -322,6 +399,11 @@ func (m *Manager) burnNote(ctx context.Context, id string, note *domain.Note) (*
 	consumed, consumeErr := m.storage.Consume(ctx, id)
 	if consumeErr != nil {
 		return nil, fmt.Errorf("burn after reading: %w", consumeErr)
+	}
+
+	decErr := m.decryptNote(consumed)
+	if decErr != nil {
+		return nil, fmt.Errorf("burn after reading: %w", decErr)
 	}
 
 	m.log.DebugContext(ctx, "note burned", "id", id)
@@ -334,19 +416,33 @@ func (m *Manager) startBurnTimer(ctx context.Context, id string, note *domain.No
 
 	updated, burnErr := m.storage.SetBurnExpiry(ctx, id, expiresAt)
 	if burnErr != nil {
-		if errors.Is(burnErr, domain.ErrNotFound) {
-			current, getErr := m.storage.Get(ctx, id)
-			if getErr != nil {
-				return nil, fmt.Errorf("burn after reading (re-fetch): %w", getErr)
-			}
+		return m.handleSetBurnExpiryErr(ctx, id, burnErr)
+	}
 
-			return current, nil
-		}
-
-		return nil, fmt.Errorf("burn after reading: %w", burnErr)
+	decErr := m.decryptNote(updated)
+	if decErr != nil {
+		return nil, fmt.Errorf("burn after reading: %w", decErr)
 	}
 
 	m.log.DebugContext(ctx, "burn timer started", "id", id, "expires_at", expiresAt)
 
 	return updated, nil
+}
+
+func (m *Manager) handleSetBurnExpiryErr(ctx context.Context, id string, burnErr error) (*domain.Note, error) {
+	if !errors.Is(burnErr, domain.ErrNotFound) {
+		return nil, fmt.Errorf("burn after reading: %w", burnErr)
+	}
+
+	current, getErr := m.storage.Get(ctx, id)
+	if getErr != nil {
+		return nil, fmt.Errorf("burn after reading (re-fetch): %w", getErr)
+	}
+
+	decErr := m.decryptNote(current)
+	if decErr != nil {
+		return nil, fmt.Errorf("burn after reading (re-fetch): %w", decErr)
+	}
+
+	return current, nil
 }

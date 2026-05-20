@@ -45,17 +45,20 @@ func (rl *rateLimitMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	if err != nil {
 		// LoaderFunc never errors; this path is unreachable in practice.
 		http.Error(w, "internal server error", http.StatusInternalServerError)
+
 		return
 	}
 
 	limiter, ok := cached.(*rate.Limiter)
 	if !ok {
 		http.Error(w, "internal server error", http.StatusInternalServerError)
+
 		return
 	}
 
 	if !limiter.Allow() {
 		http.Error(w, "too many requests", http.StatusTooManyRequests)
+
 		return
 	}
 
