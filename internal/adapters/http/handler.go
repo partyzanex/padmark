@@ -9,10 +9,26 @@ import (
 	"encoding/hex"
 	"html/template"
 	"log/slog"
+	"maps"
+	"net"
 	"net/http"
 
 	"github.com/partyzanex/padmark/internal/domain"
 )
+
+// AuthManager performs TOTP-based authentication and user management.
+type AuthManager interface {
+	Login(ctx context.Context, username, password, totpCode, userAgent, clientIP string) (string, error)
+	Logout(ctx context.Context, sessionID string) error
+	GetSession(ctx context.Context, sessionID string) (*domain.User, error)
+	GenerateInvite(ctx context.Context, adminUserID string) (string, error)
+	AcceptInvite(ctx context.Context, token, username, password string) (string, error)
+	AcceptFirstAdmin(ctx context.Context, username, password string) (string, error)
+	ChangePassword(ctx context.Context, sessionID, oldPassword, newPassword string) error
+	IsEmpty(ctx context.Context) (bool, error)
+	ListUsers(ctx context.Context, adminUserID string) ([]*domain.User, error)
+	RevokeUser(ctx context.Context, adminUserID, targetUserID string) error
+}
 
 //go:embed static
 var staticFS embed.FS
@@ -72,16 +88,22 @@ func (NoPinger) PingContext(_ context.Context) error { return nil }
 
 // Handler holds dependencies for all HTTP handlers.
 type Handler struct {
-	manager       NoteManager
-	revealStore   RevealTokenStore
-	log           *slog.Logger
-	noteTmpl      *template.Template
-	indexTmpl     *template.Template
-	loginTmpl     *template.Template
-	apidocsTmpl   *template.Template
-	successTmpl   *template.Template
-	errorTmpl     *template.Template
-	allowedTokens map[string]struct{}
+	manager        NoteManager
+	authMgr        AuthManager
+	revealStore    RevealTokenStore
+	log            *slog.Logger
+	noteTmpl       *template.Template
+	indexTmpl      *template.Template
+	loginTmpl      *template.Template
+	setupTmpl      *template.Template
+	adminTmpl      *template.Template
+	changePwTmpl   *template.Template
+	apidocsTmpl    *template.Template
+	successTmpl    *template.Template
+	errorTmpl      *template.Template
+	allowedTokens  map[string]struct{}
+	csrfSecret     []byte
+	trustedProxies []*net.IPNet
 }
 
 // parseTmpl parses a page template together with the shared header partial.
@@ -94,17 +116,20 @@ func parseTmpl(name, src string) *template.Template {
 }
 
 // NewHandler creates a Handler with required dependencies.
-// tokens is the list of valid auth tokens; pass nil to disable auth.
+// tokens is the list of valid auth tokens; pass nil to disable token auth.
 func NewHandler(manager NoteManager, log *slog.Logger, tokens []string) *Handler {
 	handler := &Handler{
-		manager:     manager,
-		log:         log,
-		noteTmpl:    parseTmpl("note", noteTmplSrc),
-		indexTmpl:   parseTmpl("index", indexTmplSrc),
-		loginTmpl:   parseTmpl("login", loginTmplSrc),
-		apidocsTmpl: parseTmpl("apidocs", apidocsTmplSrc),
-		successTmpl: parseTmpl("success", successTmplSrc),
-		errorTmpl:   parseTmpl("error", errorTmplSrc),
+		manager:      manager,
+		log:          log,
+		noteTmpl:     parseTmpl("note", noteTmplSrc),
+		indexTmpl:    parseTmpl("index", indexTmplSrc),
+		loginTmpl:    parseTmpl("login", loginTmplSrc),
+		setupTmpl:    parseTmpl("setup", setupTmplSrc),
+		adminTmpl:    parseTmpl("admin", adminTmplSrc),
+		changePwTmpl: parseTmpl("change_password", changePwTmplSrc),
+		apidocsTmpl:  parseTmpl("apidocs", apidocsTmplSrc),
+		successTmpl:  parseTmpl("success", successTmplSrc),
+		errorTmpl:    parseTmpl("error", errorTmplSrc),
 	}
 
 	if len(tokens) > 0 {
@@ -123,16 +148,57 @@ func (h *Handler) WithRevealStore(store RevealTokenStore) *Handler {
 	return h
 }
 
-// isAuthenticated reports whether the request carries a valid server auth token.
-// When no auth tokens are configured (h.allowedTokens is nil) all requests are
-// considered authenticated, so private notes are never locked.
+// WithAuthManager attaches a TOTP AuthManager enabling session-based authentication.
+func (h *Handler) WithAuthManager(mgr AuthManager) *Handler {
+	h.authMgr = mgr
+
+	return h
+}
+
+// WithCSRFSecret sets the HMAC key used to sign and verify CSRF tokens.
+// Called by NewRouter before any request is served; do not call after the server starts.
+func (h *Handler) WithCSRFSecret(secret []byte) *Handler {
+	h.csrfSecret = secret
+
+	return h
+}
+
+// WithTrustedProxies sets the CIDR blocks whose X-Forwarded-Proto header is trusted.
+// Called by NewRouter; do not call after the server starts.
+func (h *Handler) WithTrustedProxies(proxies []*net.IPNet) *Handler {
+	h.trustedProxies = proxies
+
+	return h
+}
+
+// AllowedTokens returns a defensive copy of the bearer-token set.
+// The copy prevents callers from mutating the handler's internal state.
+func (h *Handler) AllowedTokens() map[string]struct{} {
+	return maps.Clone(h.allowedTokens)
+}
+
+// isAuthenticated reports whether the request carries a valid auth credential.
+// Accepts a TOTP session cookie, a bearer token, or no auth when allowedTokens is nil.
 func (h *Handler) isAuthenticated(r *http.Request) bool {
-	if h.allowedTokens == nil {
+	if h.allowedTokens == nil && h.authMgr == nil {
 		return true
 	}
 
-	token := extractToken(r)
-	_, ok := h.allowedTokens[token]
+	if h.authMgr != nil {
+		if sessID := extractSessionID(r); sessID != "" {
+			_, err := h.authMgr.GetSession(r.Context(), sessID)
+			if err == nil {
+				return true
+			}
+		}
+	}
 
-	return ok
+	if h.allowedTokens != nil {
+		token := extractToken(r)
+		_, ok := h.allowedTokens[token]
+
+		return ok
+	}
+
+	return false
 }

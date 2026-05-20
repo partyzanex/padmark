@@ -1,6 +1,8 @@
 package http
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"html/template"
@@ -12,6 +14,14 @@ import (
 
 	"github.com/partyzanex/padmark/internal/domain"
 )
+
+// slugHash returns sha256(slug) as hex — used as the reveal_tokens.note_id
+// so the plaintext slug is not persisted in any DB column.
+func slugHash(slug string) string {
+	sum := sha256.Sum256([]byte(slug))
+
+	return hex.EncodeToString(sum[:])
+}
 
 //go:embed templates/note.html
 var noteTmplSrc string
@@ -230,7 +240,7 @@ func (h *Handler) handleBurnInterstitial(
 		return false
 	}
 
-	tok, err := h.revealStore.Issue(r.Context(), note.ID)
+	tok, err := h.revealStore.Issue(r.Context(), slugHash(note.ID))
 	if err != nil {
 		h.writeErrorPage(w, r, err)
 
@@ -293,7 +303,7 @@ func (h *Handler) HandleReveal(w http.ResponseWriter, r *http.Request) {
 
 	tok := r.FormValue("token")
 
-	if !h.revealStore.Consume(r.Context(), tok, id) {
+	if !h.revealStore.Consume(r.Context(), tok, slugHash(id)) {
 		h.writeErrorPage(w, r, domain.ErrForbidden)
 
 		return

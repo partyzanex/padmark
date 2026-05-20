@@ -13,11 +13,14 @@ import (
 	"github.com/partyzanex/shutdown/compat"
 	"github.com/urfave/cli/v3"
 
+	"github.com/uptrace/bun"
+
 	adaptershttp "github.com/partyzanex/padmark/internal/adapters/http"
 	"github.com/partyzanex/padmark/internal/infra/crypto"
 	"github.com/partyzanex/padmark/internal/infra/render"
 	"github.com/partyzanex/padmark/internal/infra/storage/postgres"
 	"github.com/partyzanex/padmark/internal/infra/storage/sqlite"
+	"github.com/partyzanex/padmark/internal/usecases/auth"
 	"github.com/partyzanex/padmark/internal/usecases/notes"
 )
 
@@ -65,7 +68,7 @@ func buildRouter(
 		TrustedProxies: trustedProxies,
 	}
 
-	return adaptershttp.NewRouter(handler, ogenHandler, opts), nil
+	return adaptershttp.NewRouter(handler, ogenHandler, &opts), nil
 }
 
 func httpRedirectHandler() http.Handler {
@@ -155,6 +158,24 @@ func runServer(ctx context.Context, cmd *cli.Command, router http.Handler) error
 	return nil
 }
 
+//nolint:ireturn // factory: returns different concrete impls (postgres vs sqlite) behind common interfaces
+func buildAuthRepos(
+	storage string, db *bun.DB,
+) (auth.UserStore, auth.InviteStore, auth.SessionStore, adaptershttp.RevealTokenStore) {
+	switch storage {
+	case "postgres":
+		return postgres.NewUserRepository(db),
+			postgres.NewInviteRepository(db),
+			postgres.NewSessionRepository(db),
+			postgres.NewRevealRepository(db)
+	default:
+		return sqlite.NewUserRepository(db),
+			sqlite.NewInviteRepository(db),
+			sqlite.NewSessionRepository(db),
+			sqlite.NewRevealRepository(db)
+	}
+}
+
 func serverAction(ctx context.Context, cmd *cli.Command) error {
 	log := newLogger(cmd.String(FlagLogLevel), cmd.String(FlagLogFormat))
 
@@ -181,17 +202,22 @@ func serverAction(ctx context.Context, cmd *cli.Command) error {
 	authTokens := parseTokens(cmd.String(FlagAuthTokens))
 	manager := notes.NewManager(repo, render.NewRenderer(), crypto.New(), crypto.NewEditCodeHasher(), log)
 
-	var revealStore adaptershttp.RevealTokenStore
+	userRepo, inviteRepo, sessionRepo, revealStore := buildAuthRepos(storage, db)
+	sessionTTL := time.Duration(cmd.Int(FlagSessionTTL)) * time.Second
+	authMgr := auth.NewManager(
+		userRepo, inviteRepo, sessionRepo, crypto.New(), log, cmd.String(FlagTOTPIssuer), sessionTTL,
+	)
 
-	switch storage {
-	case "postgres":
-		revealStore = postgres.NewRevealRepository(db)
-	default:
-		revealStore = sqlite.NewRevealRepository(db)
+	empty, emptyErr := authMgr.IsEmpty(ctx)
+	if emptyErr != nil {
+		log.WarnContext(ctx, "check users empty", "err", emptyErr)
+	} else if empty {
+		log.InfoContext(ctx, "No users found. Open /setup to create the first admin.")
 	}
 
 	handler := adaptershttp.NewHandler(manager, log, authTokens).
-		WithRevealStore(revealStore)
+		WithRevealStore(revealStore).
+		WithAuthManager(authMgr)
 	ogenHandler := adaptershttp.NewOgenHandler(manager, db.DB, log)
 
 	router, err := buildRouter(cmd, handler, ogenHandler)

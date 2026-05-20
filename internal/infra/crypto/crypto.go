@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -69,7 +70,8 @@ func (e *Encryptor) Decrypt(ciphertext, slug string) (string, error) {
 	return string(plaintext), nil
 }
 
-func newGCM(slug string) (cipher.AEAD, error) { //nolint:ireturn
+//nolint:ireturn // stdlib cipher.AEAD; callers hold it only as cipher.AEAD
+func newGCM(slug string) (cipher.AEAD, error) {
 	key, err := deriveKey(slug)
 	if err != nil {
 		return nil, err
@@ -86,6 +88,15 @@ func newGCM(slug string) (cipher.AEAD, error) { //nolint:ireturn
 	}
 
 	return gcm, nil
+}
+
+// HashSlug returns the SHA-256 hex digest of slug used as the database primary key.
+// The plaintext slug (which is also the AES key material) is never stored at rest;
+// only this hash is persisted so a DB exfil alone cannot derive the decryption key.
+func HashSlug(slug string) string {
+	sum := sha256.Sum256([]byte(slug))
+
+	return hex.EncodeToString(sum[:])
 }
 
 func deriveKey(slug string) ([]byte, error) {

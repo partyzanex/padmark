@@ -75,3 +75,73 @@ func TestIsTrustedProxy_NotContained(t *testing.T) {
 func TestIsTrustedProxy_InvalidIP(t *testing.T) {
 	assert.False(t, isTrustedProxy("not-an-ip", []*net.IPNet{parseCIDR(t, "10.0.0.0/8")}))
 }
+
+// withTOTPRateLimit
+
+func TestWithTOTPRateLimit_AllowsUnderLimit(t *testing.T) {
+	calls := 0
+	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+
+		w.WriteHeader(http.StatusOK)
+	})
+	handler := withTOTPRateLimit(nil, inner)
+
+	for range totpRatePerMin {
+		req := httptest.NewRequest(http.MethodPost, "/totp-login", nil)
+		req.RemoteAddr = "1.2.3.4:9000"
+
+		rec := httptest.NewRecorder()
+		handler(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+	}
+
+	assert.Equal(t, totpRatePerMin, calls)
+}
+
+func TestWithTOTPRateLimit_BlocksOverLimit(t *testing.T) {
+	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	handler := withTOTPRateLimit(nil, inner)
+
+	for range totpRatePerMin {
+		req := httptest.NewRequest(http.MethodPost, "/totp-login", nil)
+		req.RemoteAddr = "5.5.5.5:9000"
+
+		handler(httptest.NewRecorder(), req)
+	}
+
+	// one more must be rate-limited
+	req := httptest.NewRequest(http.MethodPost, "/totp-login", nil)
+	req.RemoteAddr = "5.5.5.5:9000"
+
+	rec := httptest.NewRecorder()
+	handler(rec, req)
+
+	assert.Equal(t, http.StatusTooManyRequests, rec.Code)
+}
+
+func TestWithTOTPRateLimit_DifferentIPs_IndependentBuckets(t *testing.T) {
+	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	handler := withTOTPRateLimit(nil, inner)
+
+	// exhaust bucket for IP A
+	for range totpRatePerMin {
+		req := httptest.NewRequest(http.MethodPost, "/totp-login", nil)
+		req.RemoteAddr = "9.9.9.9:1000"
+		handler(httptest.NewRecorder(), req)
+	}
+
+	// IP B must still be allowed
+	req := httptest.NewRequest(http.MethodPost, "/totp-login", nil)
+	req.RemoteAddr = "8.8.8.8:1000"
+
+	rec := httptest.NewRecorder()
+	handler(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+}

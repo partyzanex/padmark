@@ -13,4 +13,12 @@ var (
 	ErrSlugConflict       = errors.New("slug is already taken")
 	ErrForbidden          = errors.New("invalid edit code")
 	ErrDecryptionFailed   = errors.New("content decryption failed")
+
+	ErrInvalidTOTP     = errors.New("invalid or expired TOTP code")
+	ErrInviteExpired   = errors.New("invite link has expired")
+	ErrInviteUsed      = errors.New("invite link has already been used")
+	ErrUserExists      = errors.New("username is already taken")
+	ErrSessionExpired  = errors.New("session has expired")
+	ErrInvalidPassword = errors.New("invalid password")
+	ErrWeakPassword    = errors.New("password does not meet complexity requirements")
 )

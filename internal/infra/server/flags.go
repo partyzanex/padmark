@@ -21,6 +21,8 @@ const (
 	FlagTLSKey           = "tls-key"
 	FlagHTTPRedirectAddr = "http-redirect-addr"
 	FlagTrustedProxies   = "trusted-proxies"
+	FlagTOTPIssuer       = "totp-issuer"
+	FlagSessionTTL       = "session-ttl"
 )
 
 // Env vars used to configure the service (prefix: PADMARK_*).
@@ -42,6 +44,8 @@ const (
 	EnvTLSKey           = "PADMARK_TLS_KEY"
 	EnvHTTPRedirectAddr = "PADMARK_HTTP_REDIRECT_ADDR"
 	EnvTrustedProxies   = "PADMARK_TRUSTED_PROXIES"
+	EnvTOTPIssuer       = "PADMARK_TOTP_ISSUER"
+	EnvSessionTTL       = "PADMARK_SESSION_TTL"
 )
 
 // Default values for all flags.
@@ -58,6 +62,8 @@ const (
 	DefaultMaxBodyBytes   = 4 * 1024 * 1024   // 4 MB
 	DefaultRateLimit      = 10                // requests per second per IP
 	DefaultRateBurst      = 20                // max burst size per IP
+	DefaultTOTPIssuer     = "padmark"
+	DefaultSessionTTL     = 30 * 24 * 60 * 60 // 30 days in seconds
 )
 
 // appFlags returns the full flag set for the serve subcommand.
@@ -160,6 +166,18 @@ func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
 			Sources: cli.EnvVars(EnvTrustedProxies),
 			Usage: "Comma-separated list of trusted proxy CIDRs or IPs (e.g. 10.0.0.0/8,127.0.0.1); " +
 				"X-Forwarded-For and X-Real-IP are only trusted from these addresses",
+		},
+		&cli.StringFlag{
+			Name:    FlagTOTPIssuer,
+			Sources: cli.EnvVars(EnvTOTPIssuer),
+			Value:   DefaultTOTPIssuer,
+			Usage:   "TOTP issuer name shown in the authenticator app (default: padmark)",
+		},
+		&cli.IntFlag{
+			Name:    FlagSessionTTL,
+			Sources: cli.EnvVars(EnvSessionTTL),
+			Value:   DefaultSessionTTL,
+			Usage:   "TOTP session TTL in seconds (default: 30 days)",
 		},
 	}
 }

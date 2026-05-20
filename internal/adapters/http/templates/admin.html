@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dim">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Padmark — Admin</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="stylesheet" href="/static/style.css?p={{styleVersion}}">
+    <style nonce="{{.Nonce}}">
+        .admin-wrap {
+            max-width: 720px;
+            margin: 48px auto;
+            padding: 0 24px;
+        }
+        .admin-title {
+            font-family: var(--font-display);
+            font-size: 1.3rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 8px;
+        }
+        .admin-section {
+            background: var(--bg-surface);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-lg);
+            padding: 24px;
+            margin-bottom: 24px;
+        }
+        .admin-section-title {
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            margin-bottom: 16px;
+        }
+        .user-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid var(--border-subtle);
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+        }
+        .user-row:last-child { border-bottom: none; }
+        .user-name { color: var(--text-primary); }
+        .user-badge {
+            font-size: 0.65rem;
+            background: var(--accent-dim);
+            color: var(--accent);
+            border-radius: 4px;
+            padding: 2px 6px;
+            margin-left: 8px;
+        }
+        .user-meta { color: var(--text-muted); font-size: 0.7rem; }
+        .btn-revoke {
+            font-family: var(--font-mono);
+            font-size: 0.72rem;
+            color: var(--err-red);
+            background: none;
+            border: 1px solid var(--err-red);
+            border-radius: var(--radius-sm);
+            padding: 3px 10px;
+            cursor: pointer;
+        }
+        .btn-revoke:hover { background: var(--err-red); color: var(--bg-base); }
+        .invite-link {
+            font-family: var(--font-mono);
+            font-size: 0.72rem;
+            color: var(--accent);
+            word-break: break-all;
+            background: var(--bg-base);
+            border-radius: var(--radius-sm);
+            padding: 10px;
+            margin-top: 12px;
+        }
+        .msg-ok {
+            font-family: var(--font-mono);
+            font-size: 0.72rem;
+            color: var(--success-green, #4caf50);
+            margin-bottom: 12px;
+        }
+        .msg-err {
+            font-family: var(--font-mono);
+            font-size: 0.72rem;
+            color: var(--err-red);
+            margin-bottom: 12px;
+        }
+    </style>
+</head>
+<body>
+<div class="wrapper">
+
+    {{template "header"}}
+
+    <div class="admin-wrap">
+        <div class="admin-title">Admin panel</div>
+
+        <div class="admin-section">
+            <div class="admin-section-title">Generate invite link</div>
+            {{if .InviteURL}}
+            <div class="msg-ok">Invite link generated:</div>
+            <div class="invite-link">{{.InviteURL}}</div>
+            {{end}}
+            {{if .InviteError}}
+            <div class="msg-err">{{.InviteError}}</div>
+            {{end}}
+            <form method="POST" action="/admin/invite" style="margin-top:16px;">
+                <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+                <button type="submit" class="btn-publish">Generate invite</button>
+            </form>
+        </div>
+
+        <div class="admin-section">
+            <div class="admin-section-title">Users</div>
+            {{if .RevokeError}}
+            <div class="msg-err">{{.RevokeError}}</div>
+            {{end}}
+            {{range .Users}}
+            <div class="user-row">
+                <div>
+                    <span class="user-name">{{.Username}}</span>
+                    {{if .IsAdmin}}<span class="user-badge">admin</span>{{end}}
+                    <div class="user-meta">{{.ID}}</div>
+                </div>
+                {{if not .IsAdmin}}
+                <form method="POST" action="/admin/users/{{.ID}}/revoke">
+                    <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+                    <button type="submit" class="btn-revoke">Revoke</button>
+                </form>
+                {{end}}
+            </div>
+            {{else}}
+            <div style="font-family:var(--font-mono);font-size:0.75rem;color:var(--text-muted);">No users.</div>
+            {{end}}
+        </div>
+    </div>
+
+</div>
+
+<script nonce="{{.Nonce}}">
+    {{template "theme-js"}}
+</script>
+</body>
+</html>

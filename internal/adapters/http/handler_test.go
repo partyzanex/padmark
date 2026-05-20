@@ -2,11 +2,14 @@ package http_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +20,16 @@ import (
 	adhttp "github.com/partyzanex/padmark/internal/adapters/http"
 	"github.com/partyzanex/padmark/internal/domain"
 )
+
+// testCSRFSecret is a fixed 32-byte CSRF secret shared across all handler tests.
+// Must match the secret set in newRouter's RouterOptions.
+var testCSRFSecret = []byte("padmark-test-csrf-secret-32bytes") //nolint:gochecknoglobals // test fixture
+
+func slugHash(slug string) string {
+	sum := sha256.Sum256([]byte(slug))
+
+	return hex.EncodeToString(sum[:])
+}
 
 // testNoteResponse mirrors noteResponse for decoding test responses.
 type testNoteResponse struct {
@@ -61,9 +74,13 @@ func (s *HandlerSuite) newRouter(tokens []string) http.Handler {
 	handler := adhttp.NewHandler(s.manager, discardLog, tokens)
 	ogen := adhttp.NewOgenHandler(s.manager, s.pinger, discardLog)
 
-	opts := adhttp.RouterOptions{CookieMaxAge: 90 * 24 * 60 * 60, MaxBodyBytes: 256 * 1024}
+	opts := adhttp.RouterOptions{
+		CookieMaxAge: 90 * 24 * 60 * 60,
+		MaxBodyBytes: 256 * 1024,
+		CSRFSecret:   testCSRFSecret,
+	}
 
-	return adhttp.NewRouter(handler, ogen, opts)
+	return adhttp.NewRouter(handler, ogen, &opts)
 }
 
 // newRouterWithReveal builds a router with RevealStore and auth configured so that
@@ -73,9 +90,18 @@ func (s *HandlerSuite) newRouterWithReveal() http.Handler {
 		WithRevealStore(s.revealStore)
 	ogen := adhttp.NewOgenHandler(s.manager, s.pinger, discardLog)
 
-	opts := adhttp.RouterOptions{CookieMaxAge: 90 * 24 * 60 * 60, MaxBodyBytes: 256 * 1024}
+	opts := adhttp.RouterOptions{
+		CookieMaxAge: 90 * 24 * 60 * 60,
+		MaxBodyBytes: 256 * 1024,
+		CSRFSecret:   testCSRFSecret,
+	}
 
-	return adhttp.NewRouter(handler, ogen, opts)
+	return adhttp.NewRouter(handler, ogen, &opts)
+}
+
+// csrf generates a valid HMAC-signed CSRF token using the fixed test secret.
+func (s *HandlerSuite) csrf() string {
+	return adhttp.GenerateCSRFTokenForTest(testCSRFSecret)
 }
 
 func (s *HandlerSuite) TearDownTest() {
@@ -886,7 +912,7 @@ func (s *HandlerSuite) TestReadyz_NoPinger() {
 	handler := adhttp.NewHandler(s.manager, discardLog, nil)
 	ogen := adhttp.NewOgenHandler(s.manager, adhttp.NoPinger{}, discardLog)
 	opts := adhttp.RouterOptions{CookieMaxAge: 90 * 24 * 60 * 60, MaxBodyBytes: 256 * 1024}
-	router := adhttp.NewRouter(handler, ogen, opts)
+	router := adhttp.NewRouter(handler, ogen, &opts)
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/readyz", nil)
@@ -1032,7 +1058,7 @@ func (s *HandlerSuite) TestRateLimit_Exceeded() {
 		RateLimit:    1,
 		RateBurst:    1,
 	}
-	router := adhttp.NewRouter(handler, ogen, opts)
+	router := adhttp.NewRouter(handler, ogen, &opts)
 
 	send := func() int {
 		w := httptest.NewRecorder()
@@ -1056,7 +1082,7 @@ func (s *HandlerSuite) TestRateLimit_DifferentIPs() {
 		RateLimit:    1,
 		RateBurst:    1,
 	}
-	router := adhttp.NewRouter(handler, ogen, opts)
+	router := adhttp.NewRouter(handler, ogen, &opts)
 
 	send := func(ip string) int {
 		w := httptest.NewRecorder()
@@ -1465,31 +1491,43 @@ func (s *HandlerSuite) TestLoginPage_Error() {
 
 func (s *HandlerSuite) TestLogin_OK() {
 	router := s.newRouter([]string{"valid-token"})
+	csrf := s.csrf()
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPost, "/login",
-		strings.NewReader("token=valid-token"))
+		strings.NewReader("token=valid-token&csrf_token="+url.QueryEscape(csrf)))
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	r.AddCookie(&http.Cookie{Name: "padmark_csrf", Value: csrf})
 
 	router.ServeHTTP(w, r)
 
 	s.Equal(http.StatusSeeOther, w.Code)
 	s.Equal("/", w.Header().Get("Location"))
 
-	cookies := w.Result().Cookies()
-	s.Require().NotEmpty(cookies)
-	s.Equal("padmark_token", cookies[0].Name)
-	s.Equal("valid-token", cookies[0].Value)
-	s.True(cookies[0].HttpOnly)
+	var tokenCookie *http.Cookie
+
+	for _, ck := range w.Result().Cookies() {
+		if ck.Name == "padmark_token" {
+			tokenCookie = ck
+
+			break
+		}
+	}
+
+	s.Require().NotNil(tokenCookie, "padmark_token cookie must be set")
+	s.Equal("valid-token", tokenCookie.Value)
+	s.True(tokenCookie.HttpOnly)
 }
 
 func (s *HandlerSuite) TestLogin_InvalidToken() {
 	router := s.newRouter([]string{"valid-token"})
+	csrf := s.csrf()
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPost, "/login",
-		strings.NewReader("token=wrong"))
+		strings.NewReader("token=wrong&csrf_token="+url.QueryEscape(csrf)))
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	r.AddCookie(&http.Cookie{Name: "padmark_csrf", Value: csrf})
 
 	router.ServeHTTP(w, r)
 
@@ -1499,11 +1537,13 @@ func (s *HandlerSuite) TestLogin_InvalidToken() {
 
 func (s *HandlerSuite) TestLogin_EmptyToken() {
 	router := s.newRouter([]string{"valid-token"})
+	csrf := s.csrf()
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPost, "/login",
-		strings.NewReader("token="))
+		strings.NewReader("token=&csrf_token="+url.QueryEscape(csrf)))
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	r.AddCookie(&http.Cookie{Name: "padmark_csrf", Value: csrf})
 
 	router.ServeHTTP(w, r)
 
@@ -1536,11 +1576,13 @@ func (s *HandlerSuite) TestLoginPage_WithNext() {
 
 func (s *HandlerSuite) TestLogin_OK_WithNext() {
 	router := s.newRouter([]string{"valid-token"})
+	csrf := s.csrf()
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPost, "/login",
-		strings.NewReader("token=valid-token&next=%2Fnotes%2Fabc"))
+		strings.NewReader("token=valid-token&next=%2Fnotes%2Fabc&csrf_token="+url.QueryEscape(csrf)))
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	r.AddCookie(&http.Cookie{Name: "padmark_csrf", Value: csrf})
 
 	router.ServeHTTP(w, r)
 
@@ -1550,11 +1592,13 @@ func (s *HandlerSuite) TestLogin_OK_WithNext() {
 
 func (s *HandlerSuite) TestLogin_InvalidToken_PreservesNext() {
 	router := s.newRouter([]string{"valid-token"})
+	csrf := s.csrf()
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPost, "/login",
-		strings.NewReader("token=wrong&next=%2Fnotes%2Fabc"))
+		strings.NewReader("token=wrong&next=%2Fnotes%2Fabc&csrf_token="+url.QueryEscape(csrf)))
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	r.AddCookie(&http.Cookie{Name: "padmark_csrf", Value: csrf})
 
 	router.ServeHTTP(w, r)
 
@@ -1566,11 +1610,47 @@ func (s *HandlerSuite) TestLogin_InvalidToken_PreservesNext() {
 
 func (s *HandlerSuite) TestLogin_Next_OpenRedirectBlocked() {
 	router := s.newRouter([]string{"valid-token"})
+	csrf := s.csrf()
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPost, "/login",
-		strings.NewReader("token=valid-token&next=https%3A%2F%2Fevil.com"))
+		strings.NewReader("token=valid-token&next=https%3A%2F%2Fevil.com&csrf_token="+url.QueryEscape(csrf)))
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	r.AddCookie(&http.Cookie{Name: "padmark_csrf", Value: csrf})
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusSeeOther, w.Code)
+	s.Equal("/", w.Header().Get("Location"))
+}
+
+func (s *HandlerSuite) TestLogin_Next_BackslashOpenRedirectBlocked() {
+	router := s.newRouter([]string{"valid-token"})
+	csrf := s.csrf()
+
+	w := httptest.NewRecorder()
+	// /\evil.com — browsers treat backslash as slash, making this //evil.com
+	r := httptest.NewRequest(http.MethodPost, "/login",
+		strings.NewReader("token=valid-token&next=%2F%5Cevil.com&csrf_token="+url.QueryEscape(csrf)))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	r.AddCookie(&http.Cookie{Name: "padmark_csrf", Value: csrf})
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusSeeOther, w.Code)
+	s.Equal("/", w.Header().Get("Location"))
+}
+
+func (s *HandlerSuite) TestLogin_Next_DoubleSlashOpenRedirectBlocked() {
+	router := s.newRouter([]string{"valid-token"})
+	csrf := s.csrf()
+
+	w := httptest.NewRecorder()
+	// //evil.com — protocol-relative redirect
+	r := httptest.NewRequest(http.MethodPost, "/login",
+		strings.NewReader("token=valid-token&next=%2F%2Fevil.com&csrf_token="+url.QueryEscape(csrf)))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	r.AddCookie(&http.Cookie{Name: "padmark_csrf", Value: csrf})
 
 	router.ServeHTTP(w, r)
 
@@ -1591,6 +1671,31 @@ func (s *HandlerSuite) TestAuth_MissingToken_NextContainsOriginalURL() {
 	loc := w.Header().Get("Location")
 	s.True(strings.HasPrefix(loc, "/login?next="), "must redirect to login with next")
 	s.Contains(loc, "%2Fsuccess")
+}
+
+func (s *HandlerSuite) TestAuth_APIClient_NoHeaders_Returns401() {
+	router := s.newRouter([]string{"secret-token"})
+
+	w := httptest.NewRecorder()
+	// No Accept, no Sec-Fetch-Dest — typical API client (curl)
+	r := httptest.NewRequest(http.MethodGet, "/success", nil)
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusUnauthorized, w.Code)
+}
+
+func (s *HandlerSuite) TestAuth_Browser_SecFetchDestDocument_Returns303() {
+	router := s.newRouter([]string{"secret-token"})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/success", nil)
+	r.Header.Set("Sec-Fetch-Dest", "document")
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusSeeOther, w.Code)
+	s.True(strings.HasPrefix(w.Header().Get("Location"), "/login"))
 }
 
 // ── API docs ──
@@ -1643,7 +1748,7 @@ func (s *HandlerSuite) TestAPIDocsPage_Public() {
 	handler := adhttp.NewHandler(s.manager, discardLog, []string{"secret"})
 	ogen := adhttp.NewOgenHandler(s.manager, s.pinger, discardLog)
 	opts := adhttp.RouterOptions{CookieMaxAge: 90 * 24 * 60 * 60, MaxBodyBytes: 256 * 1024}
-	router := adhttp.NewRouter(handler, ogen, opts)
+	router := adhttp.NewRouter(handler, ogen, &opts)
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/api", nil)
@@ -1660,7 +1765,7 @@ func (s *HandlerSuite) TestGetNote_BurnInterstitial_ShowsConfirmPage() {
 	note.BurnAfterReading = true
 
 	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
-	s.revealStore.EXPECT().Issue(gomock.Any(), testID).Return("tok-abc", nil)
+	s.revealStore.EXPECT().Issue(gomock.Any(), slugHash(testID)).Return("tok-abc", nil)
 
 	router := s.newRouterWithReveal()
 
@@ -1719,7 +1824,7 @@ func (s *HandlerSuite) TestGetNote_BurnInterstitial_IssueError_Returns500() {
 	note.BurnAfterReading = true
 
 	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
-	s.revealStore.EXPECT().Issue(gomock.Any(), testID).Return("", errors.New("storage down"))
+	s.revealStore.EXPECT().Issue(gomock.Any(), slugHash(testID)).Return("", errors.New("storage down"))
 
 	router := s.newRouterWithReveal()
 
@@ -1740,7 +1845,7 @@ func (s *HandlerSuite) TestHandleReveal_OK() {
 
 	// handlePrivateAuth calls Peek; renderNoteHTML uses GetRenderedPreloaded with preloaded note.
 	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
-	s.revealStore.EXPECT().Consume(gomock.Any(), "tok-abc", testID).Return(true)
+	s.revealStore.EXPECT().Consume(gomock.Any(), "tok-abc", slugHash(testID)).Return(true)
 	s.manager.EXPECT().GetRenderedPreloaded(gomock.Any(), testID, note).
 		Return(note, "<p>burn me</p>", nil)
 
@@ -1773,7 +1878,7 @@ func (s *HandlerSuite) TestHandleReveal_NoRevealStore_Forbidden() {
 func (s *HandlerSuite) TestHandleReveal_InvalidToken_Forbidden() {
 	note := newTestNote("secret", "burn me")
 	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
-	s.revealStore.EXPECT().Consume(gomock.Any(), "bad-tok", testID).Return(false)
+	s.revealStore.EXPECT().Consume(gomock.Any(), "bad-tok", slugHash(testID)).Return(false)
 
 	router := s.newRouterWithReveal()
 
@@ -1796,7 +1901,7 @@ func (s *HandlerSuite) TestHandleReveal_TokenForWrongNote_Forbidden() {
 	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
 	// Consume is called with testID (URL note); token was issued for another note →
 	// DB WHERE note_id = testID finds no row → returns false, token untouched.
-	s.revealStore.EXPECT().Consume(gomock.Any(), "tok-other", testID).Return(false)
+	s.revealStore.EXPECT().Consume(gomock.Any(), "tok-other", slugHash(testID)).Return(false)
 
 	router := s.newRouterWithReveal()
 
@@ -1814,7 +1919,7 @@ func (s *HandlerSuite) TestHandleReveal_TokenForWrongNote_Forbidden() {
 func (s *HandlerSuite) TestHandleReveal_MissingToken_Forbidden() {
 	note := newTestNote("secret", "burn me")
 	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
-	s.revealStore.EXPECT().Consume(gomock.Any(), "", testID).Return(false)
+	s.revealStore.EXPECT().Consume(gomock.Any(), "", slugHash(testID)).Return(false)
 
 	router := s.newRouterWithReveal()
 
@@ -1845,7 +1950,7 @@ func (s *HandlerSuite) TestHandleReveal_CrossNoteToken_TokenNotBurned() {
 
 	s.manager.EXPECT().Peek(gomock.Any(), "wrong-note").Return(wrongNote, nil)
 	// Consume called with "wrong-note" as noteID — DB rejects mismatch, token preserved.
-	s.revealStore.EXPECT().Consume(gomock.Any(), "tok-for-abc123", "wrong-note").Return(false)
+	s.revealStore.EXPECT().Consume(gomock.Any(), "tok-for-abc123", slugHash("wrong-note")).Return(false)
 
 	router := s.newRouterWithReveal()
 

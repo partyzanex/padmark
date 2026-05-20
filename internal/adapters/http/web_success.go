@@ -30,7 +30,7 @@ func (h *Handler) SuccessPage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	scheme := "http"
-	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == protoHTTPS {
+	if isHTTPS(r, h.trustedProxies) {
 		scheme = protoHTTPS
 	}
 

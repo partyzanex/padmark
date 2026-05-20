@@ -1,28 +1,40 @@
 package http
 
 import (
+	"context"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/partyzanex/padmark/internal/domain"
 )
 
 const tokenCookieName = "padmark_token"
 
-// newAuthMiddleware wraps the entire handler tree with token-based auth.
-// If tokenSet is empty, auth is disabled and all requests pass through.
-// Browser requests without a valid cookie are redirected to /login.
+// sessionChecker resolves a session ID to a User; used by the auth middleware.
+type sessionChecker interface {
+	GetSession(ctx context.Context, sessionID string) (*domain.User, error)
+}
+
+// newAuthMiddleware wraps the entire handler tree with token and/or session auth.
+// If tokenSet is empty and checker is nil, auth is disabled and all requests pass through.
+// Browser requests without a valid credential are redirected to /login.
 // API requests without a valid Bearer token receive 401.
 // namedRoutes is the set of single-segment path names that are named page routes,
 // not note IDs — maintained in NewRouter alongside route registrations.
-func newAuthMiddleware(tokenSet, namedRoutes map[string]struct{}, next http.Handler) http.Handler {
-	if len(tokenSet) == 0 {
+func newAuthMiddleware(
+	tokenSet, namedRoutes map[string]struct{}, checker sessionChecker, next http.Handler,
+) http.Handler {
+	if len(tokenSet) == 0 && checker == nil {
 		return next
 	}
 
-	return &authMiddleware{allowed: tokenSet, namedRoutes: namedRoutes, next: next}
+	return &authMiddleware{allowed: tokenSet, namedRoutes: namedRoutes, checker: checker, next: next}
 }
 
 type authMiddleware struct {
+	checker     sessionChecker
 	allowed     map[string]struct{}
 	namedRoutes map[string]struct{}
 	next        http.Handler
@@ -35,15 +47,37 @@ func (am *authMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token := extractToken(r)
-	if _, ok := am.allowed[token]; ok {
-		am.next.ServeHTTP(w, r)
+	// TOTP session cookie check — puts user in context on success.
+	if am.checker != nil {
+		if sessID := extractSessionID(r); sessID != "" {
+			usr, err := am.checker.GetSession(r.Context(), sessID)
+			if err == nil {
+				ctx := context.WithValue(r.Context(), keyUser, usr)
+				am.next.ServeHTTP(w, r.WithContext(ctx))
 
-		return
+				return
+			}
+		}
 	}
 
-	accept := r.Header.Get("Accept")
-	if accept == "" || strings.Contains(accept, "text/html") {
+	// Bearer token / padmark_token cookie check.
+	if len(am.allowed) > 0 {
+		token := extractToken(r)
+		if _, ok := am.allowed[token]; ok {
+			am.next.ServeHTTP(w, r)
+
+			return
+		}
+	}
+
+	// Sec-Fetch-Dest: document is set by browsers on top-level navigation;
+	// API clients don't set it. Use it as the primary signal for whether to
+	// redirect vs. return 401 to avoid sending HTML redirects to API callers.
+	sfDest := r.Header.Get("Sec-Fetch-Dest")
+	isBrowser := sfDest == "document" ||
+		(sfDest == "" && strings.Contains(r.Header.Get("Accept"), "text/html"))
+
+	if isBrowser {
 		loginURL := "/login?next=" + url.QueryEscape(r.URL.RequestURI())
 		http.Redirect(w, r, loginURL, http.StatusSeeOther)
 
@@ -70,6 +104,8 @@ func extractToken(r *http.Request) string {
 
 func isPublicPath(path string) bool {
 	return path == "/login" ||
+		path == "/setup" ||
+		path == "/logout" ||
 		strings.HasPrefix(path, "/static/") ||
 		path == "/api" || path == "/api/openapi.yaml" ||
 		path == "/healthz" || path == "/readyz"
@@ -126,7 +162,7 @@ func isNoteIDPath(trimmed string, namedRoutes map[string]struct{}) bool {
 }
 
 // loginHandler validates the token from a form POST and sets a session cookie.
-func loginHandler(tokens map[string]struct{}, cookieMaxAge int) http.HandlerFunc {
+func loginHandler(tokens map[string]struct{}, cookieMaxAge int, trustedProxies []*net.IPNet) http.HandlerFunc {
 	const maxLoginBody = 1024
 
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -152,7 +188,7 @@ func loginHandler(tokens map[string]struct{}, cookieMaxAge int) http.HandlerFunc
 			Path:     "/",
 			MaxAge:   cookieMaxAge,
 			HttpOnly: true,
-			Secure:   r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == protoHTTPS,
+			Secure:   isHTTPS(r, trustedProxies),
 			SameSite: http.SameSiteStrictMode,
 		})
 
@@ -169,6 +205,16 @@ func loginHandler(tokens map[string]struct{}, cookieMaxAge int) http.HandlerFunc
 // Returns empty string if the value is absent or unsafe.
 func safeNextURL(next string) string {
 	if next == "" {
+		return ""
+	}
+
+	// Reject backslash: browsers treat /\evil.com as //evil.com (open redirect).
+	if strings.ContainsRune(next, '\\') {
+		return ""
+	}
+
+	// Reject protocol-relative //evil.com (belt-and-suspenders; url.Parse also catches host).
+	if strings.HasPrefix(next, "//") {
 		return ""
 	}
 

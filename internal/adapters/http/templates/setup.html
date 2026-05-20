@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Padmark — Login</title>
+    <title>Padmark — Setup</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
@@ -17,7 +17,7 @@
         }
         .login-card {
             width: 100%;
-            max-width: 380px;
+            max-width: 420px;
             background: var(--bg-surface);
             border: 1px solid var(--border-subtle);
             border-radius: var(--radius-lg);
@@ -47,6 +47,21 @@
             width: 100%;
             margin-top: 16px;
         }
+        .qr-section {
+            text-align: center;
+            margin-top: 20px;
+        }
+        .qr-section img {
+            border: 4px solid var(--bg-base);
+            border-radius: var(--radius-md);
+        }
+        .qr-instruction {
+            font-family: var(--font-mono);
+            font-size: 0.72rem;
+            color: var(--text-muted);
+            margin-top: 12px;
+            line-height: 1.6;
+        }
     </style>
 </head>
 <body>
@@ -56,52 +71,40 @@
 
     <div class="login-center">
         <div class="login-card">
-            {{if .TOTPMode}}
-            <div class="login-title">Sign in with TOTP</div>
-            <div class="login-desc">Enter your username and the 6-digit code from your authenticator app.</div>
+            {{if .QRCode}}
+            <div class="login-title">Scan QR code</div>
+            <div class="login-desc">Open your authenticator app and scan the code below.</div>
+            <div class="qr-section">
+                <img src="{{.QRCode}}" alt="TOTP QR code" width="200" height="200">
+                <div class="qr-instruction">After scanning, use the generated code to log in at <a href="/login">/login</a>.</div>
+            </div>
+            {{else}}
+            <div class="login-title">{{if .IsFirstAdmin}}Create admin account{{else}}Create account{{end}}</div>
+            <div class="login-desc">{{if .IsFirstAdmin}}No users yet. Set up the first admin.{{else}}You have been invited. Choose a username.{{end}}</div>
 
             {{if .Error}}
-            <div class="login-error">Invalid credentials. Please try again.</div>
+            <div class="login-error">{{.Error}}</div>
             {{end}}
 
-            <form method="POST" action="/totp-login">
+            <form method="POST" action="/setup">
                 <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
-                {{if .Next}}<input type="hidden" name="next" value="{{.Next}}">{{end}}
+                {{if .Token}}<input type="hidden" name="invite" value="{{.Token}}">{{end}}
                 <div class="field-group">
                     <label class="field-label" for="username">Username</label>
                     <input type="text" class="field-input" name="username" id="username"
-                           placeholder="Your username" autofocus required autocomplete="username">
+                           placeholder="Choose a username" autofocus required autocomplete="username">
                 </div>
                 <div class="field-group" style="margin-top:12px;">
                     <label class="field-label" for="password">Password</label>
                     <input type="password" class="field-input" name="password" id="password"
-                           placeholder="Your password" required autocomplete="current-password">
+                           placeholder="Min 12 chars, upper+lower+digit+special" required autocomplete="new-password">
                 </div>
                 <div class="field-group" style="margin-top:12px;">
-                    <label class="field-label" for="code">TOTP code</label>
-                    <input type="text" class="field-input" name="code" id="code"
-                           placeholder="6-digit code" inputmode="numeric" pattern="[0-9]{6}"
-                           required autocomplete="one-time-code">
+                    <label class="field-label" for="password_confirm">Confirm password</label>
+                    <input type="password" class="field-input" name="password_confirm" id="password_confirm"
+                           placeholder="Repeat password" required autocomplete="new-password">
                 </div>
-                <button type="submit" class="btn-publish login-btn">Sign in</button>
-            </form>
-            {{else}}
-            <div class="login-title">Authentication required</div>
-            <div class="login-desc">Enter your access token to continue.</div>
-
-            {{if .Error}}
-            <div class="login-error">Invalid token. Please try again.</div>
-            {{end}}
-
-            <form method="POST" action="/login">
-                <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
-                {{if .Next}}<input type="hidden" name="next" value="{{.Next}}">{{end}}
-                <div class="field-group">
-                    <label class="field-label" for="token">Token</label>
-                    <input type="password" class="field-input" name="token" id="token"
-                           placeholder="Paste your token" autofocus required>
-                </div>
-                <button type="submit" class="btn-publish login-btn">Sign in</button>
+                <button type="submit" class="btn-publish login-btn">Create account</button>
             </form>
             {{end}}
         </div>
