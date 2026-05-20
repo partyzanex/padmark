@@ -17,17 +17,19 @@ import (
 var noteTmplSrc string
 
 type noteViewData struct {
-	Body         template.HTML
-	Title        string
-	ID           string
-	CreatedAt    string
-	ExpiresLabel string
-	ExpiresISO   string // RFC 3339 timestamp for JS client-side formatting; empty when never expires
-	RawContent   string
-	Nonce        string
-	Views        int
-	Private      bool
-	CanEdit      bool
+	Body              template.HTML
+	Title             string
+	ID                string
+	CreatedAt         string
+	ExpiresLabel      string
+	ExpiresISO        string // RFC 3339 timestamp for JS client-side formatting; empty when never expires
+	RawContent        string
+	Nonce             string
+	ConfirmToken      string
+	Views             int
+	Private           bool
+	CanEdit           bool
+	NeedsConfirmation bool
 }
 
 func toNoteViewData(note *domain.Note, rendered string) noteViewData {
@@ -156,6 +158,10 @@ func (h *Handler) GetNote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if h.handleBurnInterstitial(w, r, id, preloaded) {
+		return
+	}
+
 	switch negotiate(r) {
 	case formatHTML:
 		h.renderNoteHTML(w, r, id, preloaded)
@@ -197,6 +203,103 @@ func (h *Handler) GetNote(w http.ResponseWriter, r *http.Request) {
 			h.log.ErrorContext(r.Context(), "encode get response", "err", err)
 		}
 	}
+}
+
+// handleBurnInterstitial renders the burn confirmation state via noteTmpl for unauthenticated
+// browser requests to burn-after-reading notes. Returns true if the response was written.
+func (h *Handler) handleBurnInterstitial(
+	w http.ResponseWriter, r *http.Request, id string, preloaded *domain.Note,
+) bool {
+	if h.revealStore == nil || negotiate(r) != formatHTML || h.isAuthenticated(r) {
+		return false
+	}
+
+	note := preloaded
+	if note == nil {
+		var err error
+
+		note, err = h.manager.Peek(r.Context(), id)
+		if err != nil {
+			h.writeErrorPage(w, r, err)
+
+			return true
+		}
+	}
+
+	if !note.BurnAfterReading {
+		return false
+	}
+
+	tok, err := h.revealStore.Issue(r.Context(), note.ID)
+	if err != nil {
+		h.writeErrorPage(w, r, err)
+
+		return true
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+
+	data := toBurnInterstitialViewData(note, tok)
+	data.Nonce = nonceFromContext(r.Context())
+
+	execErr := h.noteTmpl.Execute(w, data)
+	if execErr != nil {
+		h.log.ErrorContext(r.Context(), "render burn interstitial", "id", id, "err", execErr)
+	}
+
+	return true
+}
+
+func toBurnInterstitialViewData(note *domain.Note, tok string) noteViewData {
+	return noteViewData{
+		ID:                note.ID,
+		Title:             note.Title,
+		CreatedAt:         note.CreatedAt.Format("Jan 2, 2006, 3:04 PM"),
+		Views:             note.Views,
+		ExpiresLabel:      "Burns after reading",
+		NeedsConfirmation: true,
+		ConfirmToken:      tok,
+	}
+}
+
+// HandleReveal handles POST /{id} for burn-after-reading confirmation.
+// It validates the one-time token issued by the GET interstitial, then burns and renders the note.
+func (h *Handler) HandleReveal(w http.ResponseWriter, r *http.Request) {
+	if h.revealStore == nil {
+		h.writeErrorPage(w, r, domain.ErrForbidden)
+
+		return
+	}
+
+	id := r.PathValue("id")
+
+	// Auth check must happen before consuming the token to prevent token-based
+	// bypass of private note access control.
+	preloaded, handled := h.handlePrivateAuth(w, r, id)
+	if handled {
+		return
+	}
+
+	const maxRevealBody = 1024
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxRevealBody)
+
+	err := r.ParseForm()
+	if err != nil {
+		h.writeErrorPage(w, r, domain.ErrForbidden)
+
+		return
+	}
+
+	tok := r.FormValue("token")
+
+	if !h.revealStore.Consume(r.Context(), tok, id) {
+		h.writeErrorPage(w, r, domain.ErrForbidden)
+
+		return
+	}
+
+	h.renderNoteHTML(w, r, id, preloaded)
 }
 
 func (h *Handler) viewNote(r *http.Request, id string, preloaded *domain.Note) (*domain.Note, error) {

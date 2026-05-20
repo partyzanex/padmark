@@ -39,6 +39,15 @@ func staticAssetVersion(path string) string {
 	return hex.EncodeToString(sum[:])[:12]
 }
 
+// RevealTokenStore issues and consumes one-time reveal tokens for burn-after-reading notes.
+type RevealTokenStore interface {
+	Issue(ctx context.Context, noteID string) (string, error)
+	// Consume atomically marks tok as used only when it is bound to noteID,
+	// is unused, and has not expired. Returns false if any condition is unmet,
+	// leaving the token intact so the legitimate owner can still use it.
+	Consume(ctx context.Context, tok, noteID string) bool
+}
+
 // NoteManager is the interface the HTTP adapter requires from the business logic layer.
 type NoteManager interface {
 	Create(ctx context.Context, note *domain.Note) (*domain.Note, error)
@@ -64,6 +73,7 @@ func (NoPinger) PingContext(_ context.Context) error { return nil }
 // Handler holds dependencies for all HTTP handlers.
 type Handler struct {
 	manager       NoteManager
+	revealStore   RevealTokenStore
 	log           *slog.Logger
 	noteTmpl      *template.Template
 	indexTmpl     *template.Template
@@ -102,6 +112,15 @@ func NewHandler(manager NoteManager, log *slog.Logger, tokens []string) *Handler
 	}
 
 	return handler
+}
+
+// WithRevealStore attaches a RevealTokenStore so that burn-after-reading notes
+// show a confirmation interstitial before being consumed.
+// When not set, burn notes are served immediately (backward-compatible).
+func (h *Handler) WithRevealStore(store RevealTokenStore) *Handler {
+	h.revealStore = store
+
+	return h
 }
 
 // isAuthenticated reports whether the request carries a valid server auth token.

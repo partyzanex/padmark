@@ -2,7 +2,6 @@ package sqlite
 
 import (
 	"database/sql"
-	"errors"
 	"testing"
 	"time"
 
@@ -18,7 +17,7 @@ type RepositoryTestSuite struct {
 	suite.Suite
 
 	db   *bun.DB
-	repo *Repository
+	repo *NoteRepository
 }
 
 func (s *RepositoryTestSuite) SetupTest() {
@@ -31,7 +30,7 @@ func (s *RepositoryTestSuite) SetupTest() {
 	_, err = s.db.NewCreateTable().Model((*note)(nil)).IfNotExists().Exec(s.T().Context())
 	s.Require().NoError(err)
 
-	s.repo = NewRepository(s.db)
+	s.repo = NewNoteRepository(s.db)
 }
 
 func (s *RepositoryTestSuite) TearDownTest() {

@@ -76,7 +76,7 @@ func initPostgresStorage(ctx context.Context, db *bun.DB, log *slog.Logger) (not
 
 	logMigrations(ctx, log, results)
 
-	return postgres.NewRepository(db), nil
+	return postgres.NewNoteRepository(db), nil
 }
 
 //nolint:ireturn // multiple implementations (sqlite, postgres) require interface return
@@ -88,7 +88,7 @@ func initSQLiteStorage(ctx context.Context, db *bun.DB, log *slog.Logger) (notes
 
 	logMigrations(ctx, log, results)
 
-	return sqlite.NewRepository(db), nil
+	return sqlite.NewNoteRepository(db), nil
 }
 
 //nolint:ireturn // multiple implementations (sqlite, postgres) require interface return

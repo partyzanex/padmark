@@ -75,17 +75,22 @@ func isPublicPath(path string) bool {
 		path == "/healthz" || path == "/readyz"
 }
 
-// isPublicRoute allows GET requests for note view paths through the auth middleware.
+// isPublicRoute allows note-view and burn-reveal requests through the auth middleware.
 // namedRoutes is the set of single-segment path names registered as named page routes
 // in NewRouter; they must not be treated as public note IDs.
 // The handler checks the per-note private flag and requires auth when the note is private.
 func isPublicRoute(r *http.Request, namedRoutes map[string]struct{}) bool {
+	path := r.URL.Path
+	trimmed := strings.TrimPrefix(path, "/")
+
+	// POST /{id} and POST /notes/{id} — burn-after-reading confirmation
+	if r.Method == http.MethodPost {
+		return isNoteIDPath(trimmed, namedRoutes)
+	}
+
 	if r.Method != http.MethodGet {
 		return false
 	}
-
-	path := r.URL.Path
-	trimmed := strings.TrimPrefix(path, "/")
 
 	// GET /notes/{id} — single segment after "notes/"
 	if after, ok := strings.CutPrefix(trimmed, "notes/"); ok {
@@ -93,6 +98,24 @@ func isPublicRoute(r *http.Request, namedRoutes map[string]struct{}) bool {
 	}
 
 	// Catch-all GET /{id} — single path segment that is not a named page route
+	if trimmed == "" || strings.Contains(trimmed, "/") {
+		return false
+	}
+
+	_, isNamed := namedRoutes[trimmed]
+
+	return !isNamed
+}
+
+// isNoteIDPath reports whether trimmed (path without leading slash) matches
+// /{id} or /notes/{id} for POST requests.
+func isNoteIDPath(trimmed string, namedRoutes map[string]struct{}) bool {
+	// /notes/{id}
+	if after, ok := strings.CutPrefix(trimmed, "notes/"); ok {
+		return after != "" && !strings.Contains(after, "/")
+	}
+
+	// /{id}
 	if trimmed == "" || strings.Contains(trimmed, "/") {
 		return false
 	}

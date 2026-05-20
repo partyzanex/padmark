@@ -31,14 +31,14 @@ type note struct {
 	Private          bool       `bun:"private"`
 }
 
-// Repository implements notes.Storage using PostgreSQL.
-type Repository struct {
+// NoteRepository implements notes.Storage using PostgreSQL.
+type NoteRepository struct {
 	db *bun.DB
 }
 
-// NewRepository creates a new PostgreSQL-backed Repository.
-func NewRepository(db *bun.DB) *Repository {
-	return &Repository{db: db}
+// NewNoteRepository creates a new PostgreSQL-backed Repository.
+func NewNoteRepository(db *bun.DB) *NoteRepository {
+	return &NoteRepository{db: db}
 }
 
 func toDomain(dbNote *note) *domain.Note {
@@ -75,7 +75,7 @@ func contentTypeVal(ct *domain.ContentType) string {
 }
 
 // Create inserts a new note.
-func (r *Repository) Create(ctx context.Context, domNote *domain.Note) error {
+func (r *NoteRepository) Create(ctx context.Context, domNote *domain.Note) error {
 	dbNote := &note{
 		ID:               domNote.ID,
 		Title:            domNote.Title,
@@ -104,7 +104,7 @@ func (r *Repository) Create(ctx context.Context, domNote *domain.Note) error {
 }
 
 // Get retrieves a note by ID.
-func (r *Repository) Get(ctx context.Context, id string) (*domain.Note, error) {
+func (r *NoteRepository) Get(ctx context.Context, id string) (*domain.Note, error) {
 	var dbNote note
 
 	err := r.db.NewSelect().Model(&dbNote).Where("id = ?", id).Scan(ctx)
@@ -122,7 +122,7 @@ func (r *Repository) Get(ctx context.Context, id string) (*domain.Note, error) {
 // Consume atomically deletes a note and returns it, but only if the note is eligible for deletion:
 // burn_after_reading is set (with no grace period), or expires_at has passed.
 // Returns domain.ErrNotFound otherwise.
-func (r *Repository) Consume(ctx context.Context, id string) (*domain.Note, error) {
+func (r *NoteRepository) Consume(ctx context.Context, id string) (*domain.Note, error) {
 	var dbNote note
 
 	err := r.db.NewDelete().
@@ -144,7 +144,7 @@ func (r *Repository) Consume(ctx context.Context, id string) (*domain.Note, erro
 
 // SetBurnExpiry atomically sets expires_at and clears burn_after_reading on first read
 // for notes with a burn grace period. Returns domain.ErrNotFound if no eligible row is found.
-func (r *Repository) SetBurnExpiry(ctx context.Context, id string, expiresAt time.Time) (*domain.Note, error) {
+func (r *NoteRepository) SetBurnExpiry(ctx context.Context, id string, expiresAt time.Time) (*domain.Note, error) {
 	var dbNote note
 
 	err := r.db.NewUpdate().
@@ -167,7 +167,7 @@ func (r *Repository) SetBurnExpiry(ctx context.Context, id string, expiresAt tim
 }
 
 // Update modifies an existing note.
-func (r *Repository) Update(ctx context.Context, id string, domNote *domain.Note) error {
+func (r *NoteRepository) Update(ctx context.Context, id string, domNote *domain.Note) error {
 	dbNote := &note{
 		ID:               id,
 		Title:            domNote.Title,
@@ -209,7 +209,7 @@ func (r *Repository) Update(ctx context.Context, id string, domNote *domain.Note
 }
 
 // IncrementViews atomically increments the view counter for a note.
-func (r *Repository) IncrementViews(ctx context.Context, id string) error {
+func (r *NoteRepository) IncrementViews(ctx context.Context, id string) error {
 	result, err := r.db.NewUpdate().
 		TableExpr("notes").
 		Set("views = views + 1").
@@ -232,7 +232,7 @@ func (r *Repository) IncrementViews(ctx context.Context, id string) error {
 }
 
 // Delete removes a note by ID.
-func (r *Repository) Delete(ctx context.Context, id string) error {
+func (r *NoteRepository) Delete(ctx context.Context, id string) error {
 	result, err := r.db.NewDelete().Model((*note)(nil)).Where("id = ?", id).Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("postgres delete: %w", err)

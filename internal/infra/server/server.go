@@ -16,6 +16,8 @@ import (
 	adaptershttp "github.com/partyzanex/padmark/internal/adapters/http"
 	"github.com/partyzanex/padmark/internal/infra/crypto"
 	"github.com/partyzanex/padmark/internal/infra/render"
+	"github.com/partyzanex/padmark/internal/infra/storage/postgres"
+	"github.com/partyzanex/padmark/internal/infra/storage/sqlite"
 	"github.com/partyzanex/padmark/internal/usecases/notes"
 )
 
@@ -34,15 +36,15 @@ func serveCommand() *cli.Command {
 }
 
 func parseTokens(raw string) []string {
-	var tokens []string
+	var result []string
 
 	for part := range strings.SplitSeq(raw, ",") {
 		if tok := strings.TrimSpace(part); tok != "" {
-			tokens = append(tokens, tok)
+			result = append(result, tok)
 		}
 	}
 
-	return tokens
+	return result
 }
 
 func buildRouter(
@@ -176,9 +178,20 @@ func serverAction(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	tokens := parseTokens(cmd.String(FlagAuthTokens))
+	authTokens := parseTokens(cmd.String(FlagAuthTokens))
 	manager := notes.NewManager(repo, render.NewRenderer(), crypto.New(), crypto.NewEditCodeHasher(), log)
-	handler := adaptershttp.NewHandler(manager, log, tokens)
+
+	var revealStore adaptershttp.RevealTokenStore
+
+	switch storage {
+	case "postgres":
+		revealStore = postgres.NewRevealRepository(db)
+	default:
+		revealStore = sqlite.NewRevealRepository(db)
+	}
+
+	handler := adaptershttp.NewHandler(manager, log, authTokens).
+		WithRevealStore(revealStore)
 	ogenHandler := adaptershttp.NewOgenHandler(manager, db.DB, log)
 
 	router, err := buildRouter(cmd, handler, ogenHandler)

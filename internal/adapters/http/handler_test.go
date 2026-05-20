@@ -35,10 +35,11 @@ type testNoteResponse struct {
 type HandlerSuite struct {
 	suite.Suite
 
-	ctrl    *gomock.Controller
-	manager *MockNoteManager
-	pinger  *MockPinger
-	router  http.Handler
+	ctrl        *gomock.Controller
+	manager     *MockNoteManager
+	pinger      *MockPinger
+	revealStore *MockRevealTokenStore
+	router      http.Handler
 }
 
 func TestHandler(t *testing.T) {
@@ -51,12 +52,25 @@ func (s *HandlerSuite) SetupTest() {
 	s.ctrl = gomock.NewController(s.T())
 	s.manager = NewMockNoteManager(s.ctrl)
 	s.pinger = NewMockPinger(s.ctrl)
+	s.revealStore = NewMockRevealTokenStore(s.ctrl)
 
 	s.router = s.newRouter(nil)
 }
 
 func (s *HandlerSuite) newRouter(tokens []string) http.Handler {
 	handler := adhttp.NewHandler(s.manager, discardLog, tokens)
+	ogen := adhttp.NewOgenHandler(s.manager, s.pinger, discardLog)
+
+	opts := adhttp.RouterOptions{CookieMaxAge: 90 * 24 * 60 * 60, MaxBodyBytes: 256 * 1024}
+
+	return adhttp.NewRouter(handler, ogen, opts)
+}
+
+// newRouterWithReveal builds a router with RevealStore and auth configured so that
+// unauthenticated HTML requests trigger the burn interstitial.
+func (s *HandlerSuite) newRouterWithReveal() http.Handler {
+	handler := adhttp.NewHandler(s.manager, discardLog, []string{"server-secret"}).
+		WithRevealStore(s.revealStore)
 	ogen := adhttp.NewOgenHandler(s.manager, s.pinger, discardLog)
 
 	opts := adhttp.RouterOptions{CookieMaxAge: 90 * 24 * 60 * 60, MaxBodyBytes: 256 * 1024}
@@ -1637,4 +1651,213 @@ func (s *HandlerSuite) TestAPIDocsPage_Public() {
 	router.ServeHTTP(w, r)
 
 	s.Equal(http.StatusOK, w.Code, "/api should be public")
+}
+
+// ── BurnInterstitial (GET /{id} + revealStore) ──
+
+func (s *HandlerSuite) TestGetNote_BurnInterstitial_ShowsConfirmPage() {
+	note := newTestNote("secret", "burn me")
+	note.BurnAfterReading = true
+
+	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
+	s.revealStore.EXPECT().Issue(gomock.Any(), testID).Return("tok-abc", nil)
+
+	router := s.newRouterWithReveal()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
+	r.Header.Set("Accept", "text/html")
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusOK, w.Code)
+	body := w.Body.String()
+	s.Contains(body, "tok-abc", "token must appear in the confirmation form")
+	s.Contains(body, "Burns after reading")
+}
+
+func (s *HandlerSuite) TestGetNote_BurnInterstitial_NoRevealStore_ServesDirectly() {
+	note := newTestNote("secret", "burn me")
+	note.BurnAfterReading = true
+
+	s.manager.EXPECT().GetRendered(gomock.Any(), testID).
+		Return(note, "<p>burn me</p>", nil)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
+	r.Header.Set("Accept", "text/html")
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusOK, w.Code)
+	s.Contains(w.Body.String(), "burn me")
+}
+
+func (s *HandlerSuite) TestGetNote_BurnInterstitial_NonBurnNote_SkipsInterstitial() {
+	note := newTestNote("plain", "body")
+
+	// handlePrivateAuth calls Peek (allowedTokens != nil), passes note as preloaded.
+	// renderNoteHTML then calls GetRenderedPreloaded, not GetRendered.
+	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
+	s.manager.EXPECT().GetRenderedPreloaded(gomock.Any(), testID, note).
+		Return(note, "<p>body</p>", nil)
+
+	router := s.newRouterWithReveal()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
+	r.Header.Set("Accept", "text/html")
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusOK, w.Code)
+	s.NotContains(w.Body.String(), "Burns after reading")
+}
+
+func (s *HandlerSuite) TestGetNote_BurnInterstitial_IssueError_Returns500() {
+	note := newTestNote("secret", "burn me")
+	note.BurnAfterReading = true
+
+	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
+	s.revealStore.EXPECT().Issue(gomock.Any(), testID).Return("", errors.New("storage down"))
+
+	router := s.newRouterWithReveal()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
+	r.Header.Set("Accept", "text/html")
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusInternalServerError, w.Code)
+}
+
+// ── HandleReveal (POST /{id}) ──
+
+func (s *HandlerSuite) TestHandleReveal_OK() {
+	note := newTestNote("secret", "burn me")
+	note.BurnAfterReading = true
+
+	// handlePrivateAuth calls Peek; renderNoteHTML uses GetRenderedPreloaded with preloaded note.
+	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
+	s.revealStore.EXPECT().Consume(gomock.Any(), "tok-abc", testID).Return(true)
+	s.manager.EXPECT().GetRenderedPreloaded(gomock.Any(), testID, note).
+		Return(note, "<p>burn me</p>", nil)
+
+	router := s.newRouterWithReveal()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/notes/"+testID,
+		strings.NewReader("token=tok-abc"))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	r.Header.Set("Accept", "text/html")
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusOK, w.Code)
+	s.Contains(w.Body.String(), "burn me")
+}
+
+func (s *HandlerSuite) TestHandleReveal_NoRevealStore_Forbidden() {
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/notes/"+testID,
+		strings.NewReader("token=tok-abc"))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	r.Header.Set("Accept", "text/html")
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusForbidden, w.Code)
+}
+
+func (s *HandlerSuite) TestHandleReveal_InvalidToken_Forbidden() {
+	note := newTestNote("secret", "burn me")
+	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
+	s.revealStore.EXPECT().Consume(gomock.Any(), "bad-tok", testID).Return(false)
+
+	router := s.newRouterWithReveal()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/notes/"+testID,
+		strings.NewReader("token=bad-tok"))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	r.Header.Set("Accept", "text/html")
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusForbidden, w.Code)
+}
+
+// TestHandleReveal_TokenForWrongNote_Forbidden verifies that posting a token issued
+// for a different note returns 403 AND does not burn the token (fix for DoS bug).
+// Consume receives the URL's noteID and returns false — the DB rejects the mismatch.
+func (s *HandlerSuite) TestHandleReveal_TokenForWrongNote_Forbidden() {
+	note := newTestNote("secret", "burn me")
+	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
+	// Consume is called with testID (URL note); token was issued for another note →
+	// DB WHERE note_id = testID finds no row → returns false, token untouched.
+	s.revealStore.EXPECT().Consume(gomock.Any(), "tok-other", testID).Return(false)
+
+	router := s.newRouterWithReveal()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/notes/"+testID,
+		strings.NewReader("token=tok-other"))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	r.Header.Set("Accept", "text/html")
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusForbidden, w.Code)
+}
+
+func (s *HandlerSuite) TestHandleReveal_MissingToken_Forbidden() {
+	note := newTestNote("secret", "burn me")
+	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
+	s.revealStore.EXPECT().Consume(gomock.Any(), "", testID).Return(false)
+
+	router := s.newRouterWithReveal()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/notes/"+testID,
+		strings.NewReader(""))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	r.Header.Set("Accept", "text/html")
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusForbidden, w.Code)
+}
+
+// TestHandleReveal_CrossNoteToken_TokenNotBurned verifies the fix for the DoS bug:
+// posting note-A's token to note-B's endpoint must return 403 WITHOUT burning the token.
+// Consume is called with note-B's ID; the DB WHERE note_id = 'wrong-note' finds no row
+// and returns false — the token for testID remains intact.
+func (s *HandlerSuite) TestHandleReveal_CrossNoteToken_TokenNotBurned() {
+	wrongNote := &domain.Note{
+		ID:          "wrong-note",
+		Title:       "wrong",
+		Content:     "body",
+		ContentType: new(domain.ContentTypeMarkdown),
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}
+
+	s.manager.EXPECT().Peek(gomock.Any(), "wrong-note").Return(wrongNote, nil)
+	// Consume called with "wrong-note" as noteID — DB rejects mismatch, token preserved.
+	s.revealStore.EXPECT().Consume(gomock.Any(), "tok-for-abc123", "wrong-note").Return(false)
+
+	router := s.newRouterWithReveal()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/notes/wrong-note",
+		strings.NewReader("token=tok-for-abc123"))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	r.Header.Set("Accept", "text/html")
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusForbidden, w.Code)
+	// gomock TearDown verifies Consume(_, "tok-for-abc123", "wrong-note") was called —
+	// confirming the handler passed the URL noteID to Consume, not a blind token burn.
 }

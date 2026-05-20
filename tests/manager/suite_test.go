@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"context"
 	"log/slog"
 	"time"
 
@@ -14,12 +15,18 @@ import (
 
 var discardLog = slog.New(slog.DiscardHandler) //nolint:gochecknoglobals // test helper
 
+type revealStore interface {
+	Issue(ctx context.Context, noteID string) (string, error)
+	Consume(ctx context.Context, tok, noteID string) bool
+}
+
 // ManagerSuite is the storage-agnostic business-logic integration suite.
-// Embed it in a storage-specific suite that sets Manager in SetupTest.
+// Embed it in a storage-specific suite that sets Manager and RevealStore in SetupTest.
 type ManagerSuite struct {
 	suite.Suite
 
-	Manager *notes.Manager
+	Manager     *notes.Manager
+	RevealStore revealStore
 }
 
 func newManager(storage notes.Storage) *notes.Manager {
@@ -312,4 +319,119 @@ func (s *ManagerSuite) TestGetRendered_PlainText_HTMLEscaped() {
 	s.Contains(rendered, "<pre>")
 	s.Contains(rendered, "&lt;b&gt;")
 	s.NotContains(rendered, "<b>")
+}
+
+// ── RevealStore ──
+
+func (s *ManagerSuite) TestReveal_Issue_ReturnsNonEmptyToken() {
+	ctx := s.T().Context()
+
+	created, err := s.Manager.Create(ctx, &domain.Note{Title: "t", Content: "c", BurnAfterReading: true})
+	s.Require().NoError(err)
+
+	tok, err := s.RevealStore.Issue(ctx, created.ID)
+
+	s.Require().NoError(err)
+	s.NotEmpty(tok)
+}
+
+func (s *ManagerSuite) TestReveal_Consume_ReturnsNoteID() {
+	ctx := s.T().Context()
+
+	created, err := s.Manager.Create(ctx, &domain.Note{Title: "t", Content: "c", BurnAfterReading: true})
+	s.Require().NoError(err)
+
+	tok, err := s.RevealStore.Issue(ctx, created.ID)
+	s.Require().NoError(err)
+
+	ok := s.RevealStore.Consume(ctx, tok, created.ID)
+
+	s.True(ok)
+}
+
+func (s *ManagerSuite) TestReveal_EndToEnd_BurnAfterReading() {
+	ctx := s.T().Context()
+
+	created, err := s.Manager.Create(ctx, &domain.Note{Title: "burn", Content: "secret", BurnAfterReading: true})
+	s.Require().NoError(err)
+
+	tok, err := s.RevealStore.Issue(ctx, created.ID)
+	s.Require().NoError(err)
+
+	ok := s.RevealStore.Consume(ctx, tok, created.ID)
+	s.Require().True(ok)
+
+	// Token unlocked access — note is readable and then burns.
+	got, err := s.Manager.Get(ctx, created.ID)
+	s.Require().NoError(err)
+	s.Equal(created.ID, got.ID)
+
+	_, err = s.Manager.Get(ctx, created.ID)
+	s.ErrorIs(err, domain.ErrNotFound)
+}
+
+// ── RevealStore edge cases ──
+
+func (s *ManagerSuite) TestReveal_Consume_UnknownToken() {
+	ok := s.RevealStore.Consume(s.T().Context(), "no-such-token", "any-note")
+
+	s.False(ok)
+}
+
+func (s *ManagerSuite) TestReveal_Consume_AlreadyUsed() {
+	ctx := s.T().Context()
+
+	created, err := s.Manager.Create(ctx, &domain.Note{Title: "t", Content: "c", BurnAfterReading: true})
+	s.Require().NoError(err)
+
+	tok, err := s.RevealStore.Issue(ctx, created.ID)
+	s.Require().NoError(err)
+
+	ok := s.RevealStore.Consume(ctx, tok, created.ID)
+	s.Require().True(ok)
+
+	ok = s.RevealStore.Consume(ctx, tok, created.ID)
+	s.False(ok, "second Consume must fail")
+}
+
+func (s *ManagerSuite) TestReveal_Consume_TokenNotReusableAfterNoteBurned() {
+	ctx := s.T().Context()
+
+	created, err := s.Manager.Create(ctx, &domain.Note{Title: "t", Content: "c", BurnAfterReading: true})
+	s.Require().NoError(err)
+
+	tok, err := s.RevealStore.Issue(ctx, created.ID)
+	s.Require().NoError(err)
+
+	consumed := s.RevealStore.Consume(ctx, tok, created.ID)
+	s.Require().True(consumed)
+
+	// Burn the note.
+	_, err = s.Manager.Get(ctx, created.ID)
+	s.Require().NoError(err)
+
+	// Token already used — second Consume must fail.
+	consumed = s.RevealStore.Consume(ctx, tok, created.ID)
+	s.False(consumed)
+}
+
+func (s *ManagerSuite) TestReveal_IssueMultiple_EachConsumedOnce() {
+	ctx := s.T().Context()
+
+	created, err := s.Manager.Create(ctx, &domain.Note{Title: "t", Content: "c", BurnAfterReading: true})
+	s.Require().NoError(err)
+
+	tok1, err := s.RevealStore.Issue(ctx, created.ID)
+	s.Require().NoError(err)
+
+	tok2, err := s.RevealStore.Issue(ctx, created.ID)
+	s.Require().NoError(err)
+
+	s.NotEqual(tok1, tok2, "each Issue must produce a unique token")
+
+	ok := s.RevealStore.Consume(ctx, tok1, created.ID)
+	s.True(ok)
+
+	ok = s.RevealStore.Consume(ctx, tok2, created.ID)
+	s.True(ok, "second independent token must still be consumable")
 }

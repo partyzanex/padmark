@@ -69,8 +69,10 @@ func NewRouter(
 	mux.HandleFunc("GET /success", handler.SuccessPage)
 	mux.Handle("GET /static/", withStaticCacheControl(StaticHandler))
 	mux.HandleFunc("GET /notes/{id}", handler.GetNote)
+	mux.HandleFunc("POST /notes/{id}", handler.HandleReveal)
 	mux.HandleFunc("GET /edit/{id}", handler.EditPage)
 	mux.HandleFunc("GET /{id}", handler.GetNote)
+	mux.HandleFunc("POST /{id}", handler.HandleReveal)
 
 	// namedRoutes lists single-segment GET paths that are named page routes, not note IDs.
 	// The auth middleware uses this set to block access when auth is enabled.
@@ -81,6 +83,8 @@ func NewRouter(
 		"success": {},
 		"healthz": {},
 		"readyz":  {},
+		"notes":   {},
+		"edit":    {},
 	}
 
 	stack := withRecovery(handler.log, mux)

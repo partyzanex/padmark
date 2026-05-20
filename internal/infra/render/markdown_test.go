@@ -1,7 +1,6 @@
 package render_test
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/suite"

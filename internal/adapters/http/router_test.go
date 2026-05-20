@@ -132,6 +132,7 @@ func TestSafeNextURL(t *testing.T) {
 func TestIsPublicRoute(t *testing.T) {
 	named := map[string]struct{}{
 		"login": {}, "api": {}, "success": {}, "healthz": {}, "readyz": {},
+		"notes": {}, "edit": {},
 	}
 
 	tests := []struct {
@@ -141,7 +142,9 @@ func TestIsPublicRoute(t *testing.T) {
 	}{
 		{net_http.MethodGet, "/notes/abc123", true},
 		{net_http.MethodGet, "/notes/abc/extra", false},
-		{net_http.MethodPost, "/notes/abc123", false},
+		{net_http.MethodPost, "/notes/abc123", true},
+		{net_http.MethodPost, "/abc123", true},
+		{net_http.MethodPost, "/notes", false},
 		{net_http.MethodGet, "/abc123", true},
 		{net_http.MethodGet, "/success", false},
 		{net_http.MethodGet, "/a/b", false},

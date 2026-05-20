@@ -2,7 +2,6 @@ package postgres
 
 import (
 	"database/sql"
-	"errors"
 	"testing"
 	"time"
 
@@ -21,7 +20,7 @@ type RepositoryTestSuite struct {
 
 	container *tcpostgres.PostgresContainer
 	db        *bun.DB
-	repo      *Repository
+	repo      *NoteRepository
 }
 
 func (s *RepositoryTestSuite) SetupSuite() {
@@ -47,7 +46,7 @@ func (s *RepositoryTestSuite) SetupSuite() {
 	_, migrateErr := Migrate(ctx, s.db)
 	s.Require().NoError(migrateErr)
 
-	s.repo = NewRepository(s.db)
+	s.repo = NewNoteRepository(s.db)
 }
 
 func (s *RepositoryTestSuite) TearDownSuite() {
