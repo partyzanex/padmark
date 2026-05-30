@@ -64,7 +64,7 @@ func csrfFromContext(ctx context.Context) string {
 }
 
 func setCSRFCookie(w http.ResponseWriter, r *http.Request, token string, trustedProxies []*net.IPNet) {
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: all security attributes are set; Secure follows TLS detection
 		Name:     csrfCookieName,
 		Value:    token,
 		Path:     "/",
@@ -89,7 +89,7 @@ func rotateCSRFToken(w http.ResponseWriter, r *http.Request, secret []byte, trus
 
 // clearCSRFCookie removes the CSRF cookie on logout.
 func clearCSRFCookie(w http.ResponseWriter, r *http.Request, trustedProxies []*net.IPNet) {
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: all security attributes are set; Secure follows TLS detection
 		Name:     csrfCookieName,
 		Value:    "",
 		Path:     "/",
@@ -143,7 +143,7 @@ func csrfGuard(secret []byte, next http.HandlerFunc) http.HandlerFunc {
 			}
 
 			// Body size is already capped by withBodyLimit middleware upstream.
-			field := r.FormValue(csrfFieldName) //nolint:gosec // G120: body limited by withBodyLimit
+			field := r.FormValue(csrfFieldName)
 
 			if !hmac.Equal([]byte(cookie.Value), []byte(field)) {
 				http.Error(w, "forbidden", http.StatusForbidden)

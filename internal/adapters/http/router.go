@@ -79,8 +79,9 @@ func registerRoutes(
 
 	mux.HandleFunc("GET /login", handler.LoginPage)
 
-	legacyLogin := withTOTPRateLimit(trustedProxies, loginHandler(tokenSet, cookieMaxAge, trustedProxies))
-	mux.HandleFunc("POST /login", guard(legacyLogin))
+	// POST /login is the legacy bearer-token login — no TOTP brute-force concern,
+	// so the TOTP-tuned 10 req/min rate limit is not applied here.
+	mux.HandleFunc("POST /login", guard(loginHandler(tokenSet, cookieMaxAge, trustedProxies)))
 	mux.HandleFunc("POST /totp-login", guard(withTOTPRateLimit(trustedProxies, handler.TOTPLoginHandler)))
 	mux.HandleFunc("POST /logout", guard(handler.LogoutHandler))
 	mux.HandleFunc("GET /setup", handler.SetupPage)

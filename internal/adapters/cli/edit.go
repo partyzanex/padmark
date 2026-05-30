@@ -16,7 +16,7 @@ func editCommand() *urcli.Command {
 	return &urcli.Command{
 		Name:      "edit",
 		Usage:     "Update an existing note",
-		ArgsUsage: "<id>",
+		ArgsUsage: argsUsageID,
 		Flags: []urcli.Flag{
 			&urcli.StringFlag{
 				Name:    FlagEditCode,

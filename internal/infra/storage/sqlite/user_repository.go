@@ -16,26 +16,28 @@ import (
 type userRow struct {
 	bun.BaseModel `bun:"table:users"`
 
-	CreatedAt    time.Time  `bun:"created_at,notnull"`
-	LastLoginAt  *time.Time `bun:"last_login_at"`
-	ID           string     `bun:"id,pk"`
-	Username     string     `bun:"username,notnull"`
-	TOTPSecret   string     `bun:"totp_secret,notnull"`
-	PasswordHash string     `bun:"password_hash,notnull"`
-	KDFSalt      string     `bun:"kdf_salt,notnull"`
-	IsAdmin      bool       `bun:"is_admin,notnull"`
+	CreatedAt       time.Time  `bun:"created_at,notnull"`
+	LastLoginAt     *time.Time `bun:"last_login_at"`
+	ID              string     `bun:"id,pk"`
+	Username        string     `bun:"username,notnull"`
+	TOTPSecret      string     `bun:"totp_secret,notnull"`
+	PasswordHash    string     `bun:"password_hash,notnull"`
+	KDFSalt         string     `bun:"kdf_salt,notnull"`
+	LastTOTPCounter int64      `bun:"last_totp_counter,notnull"`
+	IsAdmin         bool       `bun:"is_admin,notnull"`
 }
 
 func toUserRow(usr *domain.User) *userRow {
 	return &userRow{
-		ID:           usr.ID,
-		Username:     usr.Username,
-		TOTPSecret:   usr.TOTPSecret,
-		PasswordHash: usr.PasswordHash,
-		KDFSalt:      base64.RawURLEncoding.EncodeToString(usr.KDFSalt),
-		IsAdmin:      usr.IsAdmin,
-		CreatedAt:    usr.CreatedAt,
-		LastLoginAt:  usr.LastLoginAt,
+		ID:              usr.ID,
+		Username:        usr.Username,
+		TOTPSecret:      usr.TOTPSecret,
+		PasswordHash:    usr.PasswordHash,
+		KDFSalt:         base64.RawURLEncoding.EncodeToString(usr.KDFSalt),
+		IsAdmin:         usr.IsAdmin,
+		LastTOTPCounter: usr.LastTOTPCounter,
+		CreatedAt:       usr.CreatedAt,
+		LastLoginAt:     usr.LastLoginAt,
 	}
 }
 
@@ -52,10 +54,11 @@ func (r *userRow) toDomain() *domain.User {
 		Username:     r.Username,
 		TOTPSecret:   r.TOTPSecret,
 		PasswordHash: r.PasswordHash,
-		KDFSalt:      kdfSalt,
-		IsAdmin:      r.IsAdmin,
-		CreatedAt:    r.CreatedAt,
-		LastLoginAt:  r.LastLoginAt,
+		KDFSalt:         kdfSalt,
+		IsAdmin:         r.IsAdmin,
+		LastTOTPCounter: r.LastTOTPCounter,
+		CreatedAt:       r.CreatedAt,
+		LastLoginAt:     r.LastLoginAt,
 	}
 }
 
@@ -71,7 +74,14 @@ func NewUserRepository(db *bun.DB) *UserRepository {
 
 // Create inserts a new user. Returns domain.ErrUserExists on duplicate username.
 func (r *UserRepository) Create(ctx context.Context, u *domain.User) error {
-	_, err := r.db.NewInsert().Model(toUserRow(u)).Exec(ctx)
+	return insertUser(ctx, r.db, u)
+}
+
+// insertUser inserts a user via conn (a *bun.DB or bun.Tx), mapping a unique-constraint
+// violation to domain.ErrUserExists. Shared by Create and InviteRepository.RedeemInvite
+// so both paths classify duplicate users identically inside or outside a transaction.
+func insertUser(ctx context.Context, conn bun.IDB, u *domain.User) error {
+	_, err := conn.NewInsert().Model(toUserRow(u)).Exec(ctx)
 	if err != nil {
 		// SQLite unique constraint violation: error string contains "UNIQUE constraint failed"
 		if isUniqueViolation(err) {
@@ -155,6 +165,28 @@ func (r *UserRepository) Revoke(ctx context.Context, id string) error {
 	}
 
 	return nil
+}
+
+// UpdateTOTPCounter atomically advances last_totp_counter only when counter is
+// strictly greater than the stored value. Returns true when the update applied
+// (code accepted) and false when it was a replay (stored counter >= counter).
+func (r *UserRepository) UpdateTOTPCounter(ctx context.Context, id string, counter int64) (bool, error) {
+	res, err := r.db.NewUpdate().
+		TableExpr("users").
+		Set("last_totp_counter = ?", counter).
+		Where("id = ?", id).
+		Where("last_totp_counter < ?", counter).
+		Exec(ctx)
+	if err != nil {
+		return false, fmt.Errorf("update totp counter: %w", err)
+	}
+
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("rows affected: %w", err)
+	}
+
+	return affected > 0, nil
 }
 
 // UpdatePassword atomically replaces password_hash, kdf_salt, and totp_secret.

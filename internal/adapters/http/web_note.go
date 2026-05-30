@@ -31,6 +31,7 @@ type noteViewData struct {
 	Title             string
 	ID                string
 	CreatedAt         string
+	CreatedISO        string // RFC 3339 timestamp for JS client-side (browser-local) formatting
 	ExpiresLabel      string
 	ExpiresISO        string // RFC 3339 timestamp for JS client-side formatting; empty when never expires
 	RawContent        string
@@ -44,6 +45,7 @@ type noteViewData struct {
 
 func toNoteViewData(note *domain.Note, rendered string) noteViewData {
 	created := note.CreatedAt.Format("Jan 2, 2006, 3:04 PM")
+	createdISO := note.CreatedAt.UTC().Format(time.RFC3339)
 
 	expires := "Never expires"
 	expiresISO := ""
@@ -59,6 +61,7 @@ func toNoteViewData(note *domain.Note, rendered string) noteViewData {
 		Body:         template.HTML(rendered), //nolint:gosec // content is bluemonday-sanitized
 		RawContent:   note.Content,
 		CreatedAt:    created,
+		CreatedISO:   createdISO,
 		Views:        note.Views,
 		ExpiresLabel: expires,
 		ExpiresISO:   expiresISO,
@@ -98,7 +101,10 @@ func toNoteJSON(note *domain.Note) noteJSON {
 // Returns the preloaded note (when auth is configured) and false when the request may proceed.
 // Returns nil and true when the response has been written (auth failed or note not found).
 func (h *Handler) handlePrivateAuth(w http.ResponseWriter, r *http.Request, id string) (*domain.Note, bool) {
-	if h.allowedTokens == nil {
+	// When there is no auth at all, every request is implicitly authorised.
+	// In TOTP-only mode (authMgr set, allowedTokens nil) we must still check
+	// the session before deciding to serve a private note.
+	if h.allowedTokens == nil && h.authMgr == nil {
 		return nil, false
 	}
 
@@ -148,7 +154,10 @@ func (h *Handler) renderNoteHTML(w http.ResponseWriter, r *http.Request, id stri
 
 	data := toNoteViewData(note, rendered)
 	data.Nonce = nonceFromContext(r.Context())
-	data.CanEdit = h.allowedTokens == nil || h.isAuthenticated(r)
+	// isAuthenticated already returns true when neither allowedTokens nor authMgr
+	// is configured, so the old "allowedTokens == nil" short-circuit is redundant
+	// and harmful: it made CanEdit always true in TOTP-only deployments.
+	data.CanEdit = h.isAuthenticated(r)
 
 	err = h.noteTmpl.Execute(w, data)
 	if err != nil {
@@ -265,6 +274,7 @@ func toBurnInterstitialViewData(note *domain.Note, tok string) noteViewData {
 		ID:                note.ID,
 		Title:             note.Title,
 		CreatedAt:         note.CreatedAt.Format("Jan 2, 2006, 3:04 PM"),
+		CreatedISO:        note.CreatedAt.UTC().Format(time.RFC3339),
 		Views:             note.Views,
 		ExpiresLabel:      "Burns after reading",
 		NeedsConfirmation: true,

@@ -21,8 +21,11 @@ import (
 var slugRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,99}$`)
 
 const (
-	slugChars  = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-	slugLength = 32
+	slugChars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	// slugLength balances short, friendly URLs against the fact that the slug doubles
+	// as the content encryption key. 10 chars over a 62-char alphabet ≈ 60 bits: safe
+	// against online URL-guessing and a meaningful offline brute-force cost (years).
+	slugLength = 10
 
 	editCodeChars  = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
 	editCodeLength = 12
@@ -376,15 +379,13 @@ func (m *Manager) applyNotePolicy(ctx context.Context, id string, note *domain.N
 	return note, nil
 }
 
-// applyViewIncrement increments the view counter unless the note is in a burn state.
-// After SetBurnExpiry the storage flips burn_after_reading=false, so the note
-// comes back with BurnAfterReading=false. Checking only BurnAfterReading
-// would incorrectly increment views during the burn grace period.
-// BurnTTL>0 && ExpiresAt!=nil is the unique signature of a note whose burn
-// timer has been started but has not yet expired.
+// applyViewIncrement increments the view counter unless the note was just consumed by a
+// pure burn-after-reading (no TTL) — that note no longer exists, so a view count is moot.
+// A burn-after-reading note with a TTL survives its grace period and IS counted on every
+// read: SetBurnExpiry flips burn_after_reading off on the timer-start read, so by the time
+// this runs BurnAfterReading is true only for the deleted pure-burn case.
 func (m *Manager) applyViewIncrement(ctx context.Context, id string, note *domain.Note) {
-	inBurnGrace := note.BurnTTL > 0 && note.ExpiresAt != nil
-	if note.BurnAfterReading || inBurnGrace {
+	if note.BurnAfterReading {
 		return
 	}
 

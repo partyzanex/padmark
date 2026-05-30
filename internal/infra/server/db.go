@@ -22,6 +22,8 @@ import (
 	"github.com/partyzanex/padmark/internal/usecases/notes"
 )
 
+const storagePostgres = "postgres"
+
 // dbOpener creates a *bun.DB from a DSN without connecting.
 type dbOpener func(dsn string) (*bun.DB, error)
 
@@ -32,7 +34,7 @@ func openPostgresDB(dsn string) (*bun.DB, error) {
 }
 
 func openSQLiteDB(dsn string) (*bun.DB, error) {
-	sqldb, err := sql.Open(sqliteshim.DriverName(), dsn)
+	sqldb, err := sql.Open(sqliteshim.DriverName(), withForeignKeys(dsn))
 	if err != nil {
 		return nil, fmt.Errorf("sql open sqlite: %w", err)
 	}
@@ -40,10 +42,28 @@ func openSQLiteDB(dsn string) (*bun.DB, error) {
 	return bun.NewDB(sqldb, sqlitedialect.New()), nil
 }
 
+// withForeignKeys appends the modernc pragma that enables foreign-key enforcement
+// on every pooled connection. SQLite defaults to foreign_keys=OFF, so the
+// ON DELETE CASCADE constraints would otherwise be silent no-ops.
+func withForeignKeys(dsn string) string {
+	const pragma = "_pragma=foreign_keys(1)"
+
+	if strings.Contains(dsn, "_pragma=foreign_keys") {
+		return dsn
+	}
+
+	sep := "?"
+	if strings.Contains(dsn, "?") {
+		sep = "&"
+	}
+
+	return dsn + sep + pragma
+}
+
 func openDB(ctx context.Context, storage, dsn string) (*bun.DB, error) {
 	openers := map[string]dbOpener{
-		"postgres": openPostgresDB,
-		"sqlite":   openSQLiteDB,
+		storagePostgres: openPostgresDB,
+		"sqlite":        openSQLiteDB,
 	}
 
 	opener, ok := openers[storage]

@@ -181,3 +181,110 @@ func (mr *MockRendererMockRecorder) Render(content any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Render", reflect.TypeOf((*MockRenderer)(nil).Render), content)
 }
+
+// MockEncryptor is a mock of Encryptor interface.
+type MockEncryptor struct {
+	ctrl     *gomock.Controller
+	recorder *MockEncryptorMockRecorder
+	isgomock struct{}
+}
+
+// MockEncryptorMockRecorder is the mock recorder for MockEncryptor.
+type MockEncryptorMockRecorder struct {
+	mock *MockEncryptor
+}
+
+// NewMockEncryptor creates a new mock instance.
+func NewMockEncryptor(ctrl *gomock.Controller) *MockEncryptor {
+	mock := &MockEncryptor{ctrl: ctrl}
+	mock.recorder = &MockEncryptorMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockEncryptor) EXPECT() *MockEncryptorMockRecorder {
+	return m.recorder
+}
+
+// Decrypt mocks base method.
+func (m *MockEncryptor) Decrypt(ciphertext, key string) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Decrypt", ciphertext, key)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Decrypt indicates an expected call of Decrypt.
+func (mr *MockEncryptorMockRecorder) Decrypt(ciphertext, key any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Decrypt", reflect.TypeOf((*MockEncryptor)(nil).Decrypt), ciphertext, key)
+}
+
+// Encrypt mocks base method.
+func (m *MockEncryptor) Encrypt(plaintext, key string) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Encrypt", plaintext, key)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Encrypt indicates an expected call of Encrypt.
+func (mr *MockEncryptorMockRecorder) Encrypt(plaintext, key any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Encrypt", reflect.TypeOf((*MockEncryptor)(nil).Encrypt), plaintext, key)
+}
+
+// MockEditCodeHasher is a mock of EditCodeHasher interface.
+type MockEditCodeHasher struct {
+	ctrl     *gomock.Controller
+	recorder *MockEditCodeHasherMockRecorder
+	isgomock struct{}
+}
+
+// MockEditCodeHasherMockRecorder is the mock recorder for MockEditCodeHasher.
+type MockEditCodeHasherMockRecorder struct {
+	mock *MockEditCodeHasher
+}
+
+// NewMockEditCodeHasher creates a new mock instance.
+func NewMockEditCodeHasher(ctrl *gomock.Controller) *MockEditCodeHasher {
+	mock := &MockEditCodeHasher{ctrl: ctrl}
+	mock.recorder = &MockEditCodeHasherMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockEditCodeHasher) EXPECT() *MockEditCodeHasherMockRecorder {
+	return m.recorder
+}
+
+// Hash mocks base method.
+func (m *MockEditCodeHasher) Hash(code string) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Hash", code)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Hash indicates an expected call of Hash.
+func (mr *MockEditCodeHasherMockRecorder) Hash(code any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Hash", reflect.TypeOf((*MockEditCodeHasher)(nil).Hash), code)
+}
+
+// Verify mocks base method.
+func (m *MockEditCodeHasher) Verify(storedHash, code string) bool {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Verify", storedHash, code)
+	ret0, _ := ret[0].(bool)
+	return ret0
+}
+
+// Verify indicates an expected call of Verify.
+func (mr *MockEditCodeHasherMockRecorder) Verify(storedHash, code any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Verify", reflect.TypeOf((*MockEditCodeHasher)(nil).Verify), storedHash, code)
+}

@@ -100,6 +100,33 @@ func (r *SessionRepository) Delete(ctx context.Context, sessionID string) error 
 	return nil
 }
 
+// DeleteByUserIDExcept removes all sessions for the user except the specified one.
+func (r *SessionRepository) DeleteByUserIDExcept(ctx context.Context, userID, exceptSessionID string) error {
+	_, err := r.db.NewDelete().
+		TableExpr("sessions").
+		Where("user_id = ?", userID).
+		Where("session_id != ?", exceptSessionID).
+		Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("delete sessions by user except: %w", err)
+	}
+
+	return nil
+}
+
+// DeleteByUserID removes all sessions belonging to the given user.
+func (r *SessionRepository) DeleteByUserID(ctx context.Context, userID string) error {
+	_, err := r.db.NewDelete().
+		TableExpr("sessions").
+		Where("user_id = ?", userID).
+		Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("delete sessions by user: %w", err)
+	}
+
+	return nil
+}
+
 // DeleteExpired removes all sessions whose expiry time is in the past.
 func (r *SessionRepository) DeleteExpired(ctx context.Context) error {
 	_, err := r.db.NewDelete().

@@ -535,7 +535,57 @@ body::before {
     box-shadow: 0 0 0 3px var(--accent-glow);
 }
 
+/* Browser autofill: keep the theme's surface/text instead of the forced light-yellow
+   background and dark text Chrome/Safari/Edge apply. The 1000px inset shadow masks the
+   autofill background; text-fill-color + caret-color restore readable text on dark themes.
+   Values use theme variables, so light/dim/dark all stay consistent. */
+.field-input:-webkit-autofill,
+.field-input:-webkit-autofill:hover,
+.field-input:-webkit-autofill:active,
+.field-input:autofill {
+    -webkit-box-shadow: 0 0 0 1000px var(--bg-surface) inset;
+    -webkit-text-fill-color: var(--text-primary);
+    caret-color: var(--text-primary);
+    /* Re-assert the border so an autofilled field is visually identical to an empty one;
+       otherwise only the autofilled fields (username/password, not confirm) keep a border.
+       Note: do NOT freeze background-color here (the common `transition: background-color
+       9999s` trick) — it would keep the old theme's color under the semi-transparent border
+       after a theme switch, making autofilled fields' borders mismatch the rest. */
+    border: 1px solid var(--border-subtle);
+}
+
+.field-input:-webkit-autofill:focus {
+    -webkit-box-shadow: 0 0 0 1000px var(--bg-surface) inset, 0 0 0 3px var(--accent-glow);
+    -webkit-text-fill-color: var(--text-primary);
+    caret-color: var(--text-primary);
+    border-color: var(--border-focus);
+}
+
 .field-input::placeholder { color: var(--text-muted); }
+
+/* Password show/hide (eye) toggle — injected by /static/password-toggle.js */
+.pw-field { position: relative; display: block; }
+.pw-field .field-input { padding-right: 42px; }
+.pw-toggle {
+    position: absolute;
+    top: 50%;
+    right: 6px;
+    transform: translateY(-50%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    border-radius: var(--radius-sm);
+    transition: color 0.2s ease;
+}
+.pw-toggle:hover { color: var(--text-primary); }
+.pw-toggle:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 2px; }
 
 /* Custom select */
 .select-wrap { position: relative; }

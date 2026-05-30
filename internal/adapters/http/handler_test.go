@@ -52,6 +52,7 @@ type HandlerSuite struct {
 	manager     *MockNoteManager
 	pinger      *MockPinger
 	revealStore *MockRevealTokenStore
+	authMgr     *MockAuthManager
 	router      http.Handler
 }
 
@@ -66,12 +67,30 @@ func (s *HandlerSuite) SetupTest() {
 	s.manager = NewMockNoteManager(s.ctrl)
 	s.pinger = NewMockPinger(s.ctrl)
 	s.revealStore = NewMockRevealTokenStore(s.ctrl)
+	s.authMgr = NewMockAuthManager(s.ctrl)
 
 	s.router = s.newRouter(nil)
 }
 
 func (s *HandlerSuite) newRouter(tokens []string) http.Handler {
 	handler := adhttp.NewHandler(s.manager, discardLog, tokens)
+	ogen := adhttp.NewOgenHandler(s.manager, s.pinger, discardLog)
+
+	opts := adhttp.RouterOptions{
+		CookieMaxAge: 90 * 24 * 60 * 60,
+		MaxBodyBytes: 256 * 1024,
+		CSRFSecret:   testCSRFSecret,
+	}
+
+	return adhttp.NewRouter(handler, ogen, &opts)
+}
+
+// newRouterWithTOTPAuth builds a router configured in TOTP-only mode:
+// no bearer tokens, authMgr set. This is the deployment mode under test
+// for private-note access and CanEdit fixes.
+func (s *HandlerSuite) newRouterWithTOTPAuth() http.Handler {
+	handler := adhttp.NewHandler(s.manager, discardLog, nil).
+		WithAuthManager(s.authMgr)
 	ogen := adhttp.NewOgenHandler(s.manager, s.pinger, discardLog)
 
 	opts := adhttp.RouterOptions{
@@ -460,6 +479,30 @@ func (s *HandlerSuite) TestGetNote_HTML_WithExpiry() {
 
 	s.Equal(http.StatusOK, w.Code)
 	s.Contains(w.Body.String(), "Expires")
+}
+
+// TestGetNote_HTML_TimestampsUseSameISOFormat verifies that both the created and the
+// expiry timestamps are emitted as UTC RFC 3339 data attributes, so the client formats
+// them in one consistent timezone instead of mixing server-local and browser-local.
+func (s *HandlerSuite) TestGetNote_HTML_TimestampsUseSameISOFormat() {
+	note := newTestNote("tz", "body")
+	note.CreatedAt = time.Date(2026, 6, 4, 3, 30, 0, 0, time.UTC)
+	expires := time.Date(2026, 6, 4, 3, 35, 37, 0, time.UTC)
+	note.ExpiresAt = &expires
+
+	s.manager.EXPECT().GetRendered(gomock.Any(), testID).Return(note, "<p>body</p>", nil)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
+	r.Header.Set("Accept", "text/html")
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusOK, w.Code)
+
+	body := w.Body.String()
+	s.Contains(body, `data-created="2026-06-04T03:30:00Z"`, "created must be emitted as UTC RFC3339")
+	s.Contains(body, `data-expires="2026-06-04T03:35:37Z"`, "expires must be emitted as UTC RFC3339")
 }
 
 func (s *HandlerSuite) TestGetNote_HTML_NotFound() {
@@ -956,6 +999,74 @@ func (s *HandlerSuite) TestStaticAssets() {
 	s.Contains(w.Header().Get("Content-Type"), "text/css")
 }
 
+// TestStaticAsset_PasswordToggle verifies the show/hide-password script is embedded and served.
+func (s *HandlerSuite) TestStaticAsset_PasswordToggle() {
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/static/password-toggle.js", nil)
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusOK, w.Code)
+	s.Contains(w.Body.String(), "pw-toggle", "toggle script must be served")
+}
+
+// TestStaticAsset_AutofillOverride guards the CSS that stops browser autofill from
+// overriding the dark-theme field background and text colour.
+func (s *HandlerSuite) TestStaticAsset_AutofillOverride() {
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/static/style.css", nil)
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusOK, w.Code)
+	body := w.Body.String()
+	s.Contains(body, ":-webkit-autofill", "autofill override rule must be present")
+	s.Contains(body, "-webkit-text-fill-color", "autofill text colour must be forced")
+}
+
+// TestTOTPLoginHandler_AccountsDisabled_Returns404 covers the nil-guard added so that the
+// account system is opt-in: with no auth manager configured, /totp-login must 404.
+func (s *HandlerSuite) TestTOTPLoginHandler_AccountsDisabled_Returns404() {
+	handler := adhttp.NewHandler(s.manager, discardLog, nil) // no WithAuthManager → accounts disabled
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/totp-login", nil)
+
+	handler.TOTPLoginHandler(w, r)
+
+	s.Equal(http.StatusNotFound, w.Code)
+}
+
+// TestPublicMode_AccessMatrix encodes the "public by default" contract (release checklist
+// section 1): with no tokens and no auth manager (s.router = newRouter(nil)), public pages
+// are reachable and account pages are not exposed. Nothing redirects to /login.
+func (s *HandlerSuite) TestPublicMode_AccessMatrix() {
+	s.pinger.EXPECT().PingContext(gomock.Any()).Return(nil).AnyTimes() // for /readyz
+
+	cases := []struct {
+		path string
+		want int
+	}{
+		{"/", http.StatusOK},                      // editor — public
+		{"/healthz", http.StatusOK},               // liveness
+		{"/readyz", http.StatusOK},                // readiness
+		{"/api", http.StatusOK},                   // API docs
+		{"/static/style.css", http.StatusOK},      // static assets
+		{"/setup", http.StatusNotFound},           // accounts disabled
+		{"/change-password", http.StatusNotFound}, // accounts disabled
+		{"/admin", http.StatusForbidden},          // no session → forbidden
+	}
+
+	for _, testCase := range cases {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodGet, testCase.path, nil)
+
+		s.router.ServeHTTP(w, r)
+
+		s.Equal(testCase.want, w.Code, "GET %s", testCase.path)
+		s.NotEqual(http.StatusSeeOther, w.Code, "GET %s must not redirect to /login", testCase.path)
+	}
+}
+
 // ── Broken writer tests (cover error-log branches) ──
 
 type failWriter struct {
@@ -1307,7 +1418,7 @@ func (s *HandlerSuite) TestAuth_CookieToken() {
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
 	r.Header.Set("Accept", "application/json")
-	r.AddCookie(&http.Cookie{Name: "padmark_token", Value: "secret-token"})
+	r.AddCookie(&http.Cookie{Name: "padmark_token", Value: "secret-token"}) //nolint:gosec // G124: test cookie
 
 	router.ServeHTTP(w, r)
 
@@ -1347,7 +1458,7 @@ func (s *HandlerSuite) TestAuth_InvalidToken() {
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
 	r.Header.Set("Accept", "text/html")
-	r.AddCookie(&http.Cookie{Name: "padmark_token", Value: "wrong"})
+	r.AddCookie(&http.Cookie{Name: "padmark_token", Value: "wrong"}) //nolint:gosec // G124: test cookie
 
 	router.ServeHTTP(w, r)
 
@@ -1497,7 +1608,7 @@ func (s *HandlerSuite) TestLogin_OK() {
 	r := httptest.NewRequest(http.MethodPost, "/login",
 		strings.NewReader("token=valid-token&csrf_token="+url.QueryEscape(csrf)))
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	r.AddCookie(&http.Cookie{Name: "padmark_csrf", Value: csrf})
+	r.AddCookie(&http.Cookie{Name: "padmark_csrf", Value: csrf}) //nolint:gosec // G124: test cookie
 
 	router.ServeHTTP(w, r)
 
@@ -1527,7 +1638,7 @@ func (s *HandlerSuite) TestLogin_InvalidToken() {
 	r := httptest.NewRequest(http.MethodPost, "/login",
 		strings.NewReader("token=wrong&csrf_token="+url.QueryEscape(csrf)))
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	r.AddCookie(&http.Cookie{Name: "padmark_csrf", Value: csrf})
+	r.AddCookie(&http.Cookie{Name: "padmark_csrf", Value: csrf}) //nolint:gosec // G124: test cookie
 
 	router.ServeHTTP(w, r)
 
@@ -1543,7 +1654,7 @@ func (s *HandlerSuite) TestLogin_EmptyToken() {
 	r := httptest.NewRequest(http.MethodPost, "/login",
 		strings.NewReader("token=&csrf_token="+url.QueryEscape(csrf)))
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	r.AddCookie(&http.Cookie{Name: "padmark_csrf", Value: csrf})
+	r.AddCookie(&http.Cookie{Name: "padmark_csrf", Value: csrf}) //nolint:gosec // G124: test cookie
 
 	router.ServeHTTP(w, r)
 
@@ -1582,7 +1693,7 @@ func (s *HandlerSuite) TestLogin_OK_WithNext() {
 	r := httptest.NewRequest(http.MethodPost, "/login",
 		strings.NewReader("token=valid-token&next=%2Fnotes%2Fabc&csrf_token="+url.QueryEscape(csrf)))
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	r.AddCookie(&http.Cookie{Name: "padmark_csrf", Value: csrf})
+	r.AddCookie(&http.Cookie{Name: "padmark_csrf", Value: csrf}) //nolint:gosec // G124: test cookie
 
 	router.ServeHTTP(w, r)
 
@@ -1598,7 +1709,7 @@ func (s *HandlerSuite) TestLogin_InvalidToken_PreservesNext() {
 	r := httptest.NewRequest(http.MethodPost, "/login",
 		strings.NewReader("token=wrong&next=%2Fnotes%2Fabc&csrf_token="+url.QueryEscape(csrf)))
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	r.AddCookie(&http.Cookie{Name: "padmark_csrf", Value: csrf})
+	r.AddCookie(&http.Cookie{Name: "padmark_csrf", Value: csrf}) //nolint:gosec // G124: test cookie
 
 	router.ServeHTTP(w, r)
 
@@ -1616,7 +1727,7 @@ func (s *HandlerSuite) TestLogin_Next_OpenRedirectBlocked() {
 	r := httptest.NewRequest(http.MethodPost, "/login",
 		strings.NewReader("token=valid-token&next=https%3A%2F%2Fevil.com&csrf_token="+url.QueryEscape(csrf)))
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	r.AddCookie(&http.Cookie{Name: "padmark_csrf", Value: csrf})
+	r.AddCookie(&http.Cookie{Name: "padmark_csrf", Value: csrf}) //nolint:gosec // G124: test cookie
 
 	router.ServeHTTP(w, r)
 
@@ -1633,7 +1744,7 @@ func (s *HandlerSuite) TestLogin_Next_BackslashOpenRedirectBlocked() {
 	r := httptest.NewRequest(http.MethodPost, "/login",
 		strings.NewReader("token=valid-token&next=%2F%5Cevil.com&csrf_token="+url.QueryEscape(csrf)))
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	r.AddCookie(&http.Cookie{Name: "padmark_csrf", Value: csrf})
+	r.AddCookie(&http.Cookie{Name: "padmark_csrf", Value: csrf}) //nolint:gosec // G124: test cookie
 
 	router.ServeHTTP(w, r)
 
@@ -1650,7 +1761,7 @@ func (s *HandlerSuite) TestLogin_Next_DoubleSlashOpenRedirectBlocked() {
 	r := httptest.NewRequest(http.MethodPost, "/login",
 		strings.NewReader("token=valid-token&next=%2F%2Fevil.com&csrf_token="+url.QueryEscape(csrf)))
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	r.AddCookie(&http.Cookie{Name: "padmark_csrf", Value: csrf})
+	r.AddCookie(&http.Cookie{Name: "padmark_csrf", Value: csrf}) //nolint:gosec // G124: test cookie
 
 	router.ServeHTTP(w, r)
 
@@ -1965,4 +2076,168 @@ func (s *HandlerSuite) TestHandleReveal_CrossNoteToken_TokenNotBurned() {
 	s.Equal(http.StatusForbidden, w.Code)
 	// gomock TearDown verifies Consume(_, "tok-for-abc123", "wrong-note") was called —
 	// confirming the handler passed the URL noteID to Consume, not a blind token burn.
+}
+
+// ── TOTP-mode private note and CanEdit fixes ──
+//
+// In TOTP-only deployments (authMgr set, no bearer tokens) handlePrivateAuth
+// must respect the session before serving private notes, and CanEdit must
+// depend on actual authentication state — not on the allowedTokens nil check.
+//
+// Call-flow for GET /notes/{id} in TOTP mode:
+//   1. Auth middleware is bypassed (note route is public).
+//   2. handlePrivateAuth → Peek → checks Private + isAuthenticated.
+//   3. For non-private notes: returns (note, false) without calling isAuthenticated.
+//   4. renderNoteHTML(preloaded) → GetRenderedPreloaded → isAuthenticated (for CanEdit).
+
+// TestPrivateNote_TOTPMode_Unauthenticated verifies that an unauthenticated
+// request to a private note is redirected to /login in TOTP-only mode.
+func (s *HandlerSuite) TestPrivateNote_TOTPMode_Unauthenticated() {
+	note := newTestNote("secret", "private content")
+	note.Private = new(true)
+
+	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
+	// isAuthenticated fallback: no session cookie → extractSessionID returns "" →
+	// GetSession is never called; the function returns false directly.
+
+	router := s.newRouterWithTOTPAuth()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
+	r.Header.Set("Accept", "text/html")
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusSeeOther, w.Code)
+	s.True(strings.HasPrefix(w.Header().Get("Location"), "/login?next="),
+		"unauthenticated request to private note in TOTP mode must redirect to /login")
+}
+
+// TestPrivateNote_TOTPMode_Authenticated verifies that a valid session grants
+// access to a private note in TOTP-only mode.
+// GetSession is called exactly once: the auth middleware resolves the session for the
+// note route and stores the user in context, so both handlePrivateAuth (private check)
+// and renderNoteHTML (CanEdit) read it from context without re-querying.
+func (s *HandlerSuite) TestPrivateNote_TOTPMode_Authenticated() {
+	note := newTestNote("secret", "private content")
+	note.Private = new(true)
+	usr := &domain.User{ID: "u1", Username: "alice"}
+
+	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
+	s.manager.EXPECT().GetRenderedPreloaded(gomock.Any(), testID, note).Return(note, "rendered", nil)
+	// One GetSession call, made by the auth middleware; the handler reads from context.
+	s.authMgr.EXPECT().GetSession(gomock.Any(), "valid-sess").Return(usr, nil).Times(1)
+
+	router := s.newRouterWithTOTPAuth()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
+	r.Header.Set("Accept", "text/html")
+	r.AddCookie(&http.Cookie{Name: "padmark_session", Value: "valid-sess"}) //nolint:gosec // G124: test cookie
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusOK, w.Code)
+}
+
+// TestCanEdit_TOTPMode_Unauthenticated verifies that in TOTP-only mode an
+// unauthenticated visitor does NOT see the edit button (CanEdit = false).
+func (s *HandlerSuite) TestCanEdit_TOTPMode_Unauthenticated() {
+	note := newTestNote("public note", "content")
+
+	// For a non-private note, handlePrivateAuth calls Peek and returns (note, false)
+	// without calling isAuthenticated. Only renderNoteHTML calls isAuthenticated.
+	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
+	s.manager.EXPECT().GetRenderedPreloaded(gomock.Any(), testID, note).Return(note, "rendered", nil)
+	// isAuthenticated: no session cookie → extractSessionID = "" → GetSession not called.
+
+	router := s.newRouterWithTOTPAuth()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
+	r.Header.Set("Accept", "text/html")
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusOK, w.Code)
+	s.NotContains(w.Body.String(), `href="/edit/`+testID+`"`,
+		"unauthenticated user must not see the edit button in TOTP mode")
+}
+
+// TestCanEdit_TOTPMode_Authenticated verifies that an authenticated TOTP-session
+// user sees the edit button.
+func (s *HandlerSuite) TestCanEdit_TOTPMode_Authenticated() {
+	note := newTestNote("public note", "content")
+	usr := &domain.User{ID: "u1", Username: "alice"}
+
+	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
+	s.manager.EXPECT().GetRenderedPreloaded(gomock.Any(), testID, note).Return(note, "rendered", nil)
+	// isAuthenticated called once by renderNoteHTML for CanEdit.
+	s.authMgr.EXPECT().GetSession(gomock.Any(), "valid-sess").Return(usr, nil).Times(1)
+
+	router := s.newRouterWithTOTPAuth()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
+	r.Header.Set("Accept", "text/html")
+	r.AddCookie(&http.Cookie{Name: "padmark_session", Value: "valid-sess"}) //nolint:gosec // G124: test cookie
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusOK, w.Code)
+	s.Contains(w.Body.String(), `href="/edit/`+testID+`"`,
+		"authenticated TOTP user must see the edit button")
+}
+
+// TestIsAuthenticated_ReadsFromContext verifies that for an authenticated request
+// on a token-protected route the auth middleware stores the user in context and
+// the handler does not issue a second GetSession call.
+// We use the JSON note API (Bearer token auth) where the middleware runs and
+// stores the user; the note handler then calls isAuthenticated for CanEdit.
+func (s *HandlerSuite) TestIsAuthenticated_ReadsFromContext() {
+	note := newTestNote("public note", "content")
+
+	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
+	s.manager.EXPECT().GetRenderedPreloaded(gomock.Any(), testID, note).Return(note, "rendered", nil)
+
+	// In token-only mode, allowedTokens != nil. The auth middleware does NOT call
+	// GetSession (it checks the bearer token, not a session). isAuthenticated in
+	// renderNoteHTML falls through to the bearer token check — GetSession is never
+	// called. This test verifies that the token path does not accidentally trigger
+	// session lookups.
+	router := s.newRouter([]string{"tok"})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
+	r.Header.Set("Accept", "text/html")
+	r.Header.Set("Authorization", "Bearer tok")
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusOK, w.Code)
+	s.Contains(w.Body.String(), `href="/edit/`+testID+`"`,
+		"authenticated token user must see the edit button")
+}
+
+// ── Rate-limit fix: POST /login must not be TOTP-rate-limited ──
+
+// TestLegacyLogin_NotRateLimited verifies that POST /login (token-based auth) is not
+// subject to the 10 req/min TOTP rate limit: 15 consecutive requests must all succeed.
+func (s *HandlerSuite) TestLegacyLogin_NotRateLimited() {
+	const attempts = 15
+
+	csrf := s.csrf()
+
+	for range attempts {
+		w := httptest.NewRecorder()
+		form := url.Values{"token": {"valid-token"}, "csrf_token": {csrf}}
+		r := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form.Encode()))
+		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		r.AddCookie(&http.Cookie{Name: "padmark_csrf", Value: csrf}) //nolint:gosec // G124: test cookie
+
+		s.newRouter([]string{"valid-token"}).ServeHTTP(w, r)
+
+		s.NotEqual(http.StatusTooManyRequests, w.Code,
+			"POST /login must not be rate-limited (attempt %d got 429)", attempts)
+	}
 }

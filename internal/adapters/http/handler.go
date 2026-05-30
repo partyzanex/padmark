@@ -24,7 +24,7 @@ type AuthManager interface {
 	GenerateInvite(ctx context.Context, adminUserID string) (string, error)
 	AcceptInvite(ctx context.Context, token, username, password string) (string, error)
 	AcceptFirstAdmin(ctx context.Context, username, password string) (string, error)
-	ChangePassword(ctx context.Context, sessionID, oldPassword, newPassword string) error
+	ChangePassword(ctx context.Context, sessionID, oldPassword, newPassword, totpCode string) (string, error)
 	IsEmpty(ctx context.Context) (bool, error)
 	ListUsers(ctx context.Context, adminUserID string) ([]*domain.User, error)
 	RevokeUser(ctx context.Context, adminUserID, targetUserID string) error
@@ -178,12 +178,19 @@ func (h *Handler) AllowedTokens() map[string]struct{} {
 }
 
 // isAuthenticated reports whether the request carries a valid auth credential.
-// Accepts a TOTP session cookie, a bearer token, or no auth when allowedTokens is nil.
+// Accepts a TOTP session cookie, a bearer token, or no auth when both are unconfigured.
 func (h *Handler) isAuthenticated(r *http.Request) bool {
 	if h.allowedTokens == nil && h.authMgr == nil {
 		return true
 	}
 
+	// The auth middleware already resolved the session and stored the user in context.
+	// Reading from context avoids a redundant DB round-trip for auth-protected routes.
+	if userFromContext(r) != nil {
+		return true
+	}
+
+	// For public routes the middleware does not run, so fall back to a direct session check.
 	if h.authMgr != nil {
 		if sessID := extractSessionID(r); sessID != "" {
 			_, err := h.authMgr.GetSession(r.Context(), sessID)

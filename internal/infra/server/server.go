@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 	"syscall"
@@ -71,16 +73,54 @@ func buildRouter(
 	return adaptershttp.NewRouter(handler, ogenHandler, &opts), nil
 }
 
-func httpRedirectHandler() http.Handler {
+// httpRedirectHandler redirects HTTP requests to their HTTPS equivalent.
+// When allowedHosts is non-empty, a request whose Host is not in the set is rejected with
+// 400 rather than redirected — this prevents Host-header injection from making the listener
+// emit a redirect to an attacker-chosen host (open redirect / shared-cache poisoning).
+// When empty, the request Host is used as-is (legacy behaviour for single-host deployments).
+func httpRedirectHandler(allowedHosts map[string]struct{}) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "https://"+r.Host+r.URL.RequestURI(), http.StatusMovedPermanently)
+		if len(allowedHosts) > 0 {
+			hostname := r.Host
+
+			host, _, splitErr := net.SplitHostPort(r.Host)
+			if splitErr == nil {
+				hostname = host
+			}
+
+			if _, ok := allowedHosts[hostname]; !ok {
+				http.Error(w, "unknown host", http.StatusBadRequest)
+
+				return
+			}
+		}
+
+		target := "https://" + r.Host + r.URL.RequestURI()
+		//nolint:gosec // G710: Host allowlisted above when configured
+		http.Redirect(w, r, target, http.StatusMovedPermanently)
 	})
 }
 
-func startRedirectServer(addr string, cancel context.CancelCauseFunc) {
+// allowedHostSet parses a comma-separated host list into a set for the redirect allowlist.
+// Returns nil when raw is empty, which disables enforcement.
+func allowedHostSet(raw string) map[string]struct{} {
+	hosts := parseTokens(raw)
+	if len(hosts) == 0 {
+		return nil
+	}
+
+	set := make(map[string]struct{}, len(hosts))
+	for _, host := range hosts {
+		set[host] = struct{}{}
+	}
+
+	return set
+}
+
+func startRedirectServer(addr string, allowedHosts map[string]struct{}, cancel context.CancelCauseFunc) {
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           httpRedirectHandler(),
+		Handler:           httpRedirectHandler(allowedHosts),
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 
@@ -138,7 +178,7 @@ func runServer(ctx context.Context, cmd *cli.Command, router http.Handler) error
 
 	if tlsCert != "" {
 		if redirectAddr := cmd.String(FlagHTTPRedirectAddr); redirectAddr != "" {
-			startRedirectServer(redirectAddr, cancelServer)
+			startRedirectServer(redirectAddr, allowedHostSet(cmd.String(FlagAllowedHosts)), cancelServer)
 		}
 	}
 
@@ -158,12 +198,40 @@ func runServer(ctx context.Context, cmd *cli.Command, router http.Handler) error
 	return nil
 }
 
+// attachAccountSystem wires the opt-in TOTP account manager onto the handler when
+// --enable-accounts is set; otherwise it leaves the handler public (no authMgr → the auth
+// middleware passes everything through unless --auth-tokens is set).
+func attachAccountSystem(
+	ctx context.Context, cmd *cli.Command, handler *adaptershttp.Handler,
+	users auth.UserStore, invites auth.InviteStore, sessions auth.SessionStore, log *slog.Logger,
+) *adaptershttp.Handler {
+	if !cmd.Bool(FlagEnableAccounts) {
+		log.InfoContext(ctx, "account system disabled (public mode); set --enable-accounts to enable login/admin")
+
+		return handler
+	}
+
+	sessionTTL := time.Duration(cmd.Int(FlagSessionTTL)) * time.Second
+	authMgr := auth.NewManager(
+		users, invites, sessions, crypto.New(), log, cmd.String(FlagTOTPIssuer), sessionTTL,
+	)
+
+	empty, emptyErr := authMgr.IsEmpty(ctx)
+	if emptyErr != nil {
+		log.WarnContext(ctx, "check users empty", "err", emptyErr)
+	} else if empty {
+		log.InfoContext(ctx, "No users found. Open /setup to create the first admin.")
+	}
+
+	return handler.WithAuthManager(authMgr)
+}
+
 //nolint:ireturn // factory: returns different concrete impls (postgres vs sqlite) behind common interfaces
 func buildAuthRepos(
 	storage string, db *bun.DB,
 ) (auth.UserStore, auth.InviteStore, auth.SessionStore, adaptershttp.RevealTokenStore) {
 	switch storage {
-	case "postgres":
+	case storagePostgres:
 		return postgres.NewUserRepository(db),
 			postgres.NewInviteRepository(db),
 			postgres.NewSessionRepository(db),
@@ -203,21 +271,11 @@ func serverAction(ctx context.Context, cmd *cli.Command) error {
 	manager := notes.NewManager(repo, render.NewRenderer(), crypto.New(), crypto.NewEditCodeHasher(), log)
 
 	userRepo, inviteRepo, sessionRepo, revealStore := buildAuthRepos(storage, db)
-	sessionTTL := time.Duration(cmd.Int(FlagSessionTTL)) * time.Second
-	authMgr := auth.NewManager(
-		userRepo, inviteRepo, sessionRepo, crypto.New(), log, cmd.String(FlagTOTPIssuer), sessionTTL,
-	)
-
-	empty, emptyErr := authMgr.IsEmpty(ctx)
-	if emptyErr != nil {
-		log.WarnContext(ctx, "check users empty", "err", emptyErr)
-	} else if empty {
-		log.InfoContext(ctx, "No users found. Open /setup to create the first admin.")
-	}
 
 	handler := adaptershttp.NewHandler(manager, log, authTokens).
-		WithRevealStore(revealStore).
-		WithAuthManager(authMgr)
+		WithRevealStore(revealStore)
+	handler = attachAccountSystem(ctx, cmd, handler, userRepo, inviteRepo, sessionRepo, log)
+
 	ogenHandler := adaptershttp.NewOgenHandler(manager, db.DB, log)
 
 	router, err := buildRouter(cmd, handler, ogenHandler)

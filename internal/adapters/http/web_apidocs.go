@@ -1,6 +1,6 @@
 //go:generate cp -f ../../../openapi.yaml spec/openapi.yaml
-//go:generate ../../../bin/ogen --target ogenapi --package ogenapi --clean ../../../openapi.yaml
-//go:generate ../../../bin/ogen --target ../../../pkg/client --package client --clean ../../../openapi.yaml
+//go:generate ../../../bin/ogen --loglevel warn --target ogenapi --package ogenapi --clean ../../../openapi.yaml
+//go:generate ../../../bin/ogen --loglevel warn --target ../../../pkg/client --package client --clean ../../../openapi.yaml
 
 package http
 

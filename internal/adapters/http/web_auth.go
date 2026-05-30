@@ -74,8 +74,38 @@ type loginViewData struct {
 	TOTPMode  bool // show TOTP form instead of token form
 }
 
+// hasValidSession reports whether the request carries a valid TOTP session cookie.
+// Used to skip auth pages (login/setup) for already-signed-in users. /login is a public
+// path, so the auth middleware does not populate the context — resolve the session here.
+func (h *Handler) hasValidSession(r *http.Request) bool {
+	if h.authMgr == nil {
+		return false
+	}
+
+	sessID := extractSessionID(r)
+	if sessID == "" {
+		return false
+	}
+
+	_, err := h.authMgr.GetSession(r.Context(), sessID)
+
+	return err == nil
+}
+
 // LoginPage handles GET /login.
 func (h *Handler) LoginPage(w http.ResponseWriter, r *http.Request) {
+	// Already signed in → don't show the form again; go where the user intended (or home).
+	if h.hasValidSession(r) {
+		dest := "/"
+		if next := safeNextURL(r.URL.Query().Get("next")); next != "" {
+			dest = next
+		}
+
+		http.Redirect(w, r, dest, http.StatusSeeOther) //nolint:gosec // G710: dest validated by safeNextURL
+
+		return
+	}
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
 	err := h.loginTmpl.Execute(w, loginViewData{
@@ -94,6 +124,12 @@ func (h *Handler) LoginPage(w http.ResponseWriter, r *http.Request) {
 
 // TOTPLoginHandler handles POST /totp-login — username + password + TOTP code → session cookie.
 func (h *Handler) TOTPLoginHandler(w http.ResponseWriter, r *http.Request) {
+	if h.authMgr == nil {
+		http.Error(w, "not found", http.StatusNotFound)
+
+		return
+	}
+
 	const maxBody = 4096
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxBody)
@@ -115,7 +151,7 @@ func (h *Handler) TOTPLoginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: all security attributes are set; Secure follows TLS detection
 		Name:     sessionCookieName,
 		Value:    sessID,
 		Path:     "/",
@@ -132,7 +168,7 @@ func (h *Handler) TOTPLoginHandler(w http.ResponseWriter, r *http.Request) {
 		dest = next
 	}
 
-	http.Redirect(w, r, dest, http.StatusSeeOther)
+	http.Redirect(w, r, dest, http.StatusSeeOther) //nolint:gosec // G710: dest validated by safeNextURL
 }
 
 // ── logout (POST /logout) ──
@@ -152,7 +188,7 @@ func (h *Handler) LogoutHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: all security attributes are set; Secure follows TLS detection
 		Name:     sessionCookieName,
 		Value:    "",
 		Path:     "/",
@@ -188,20 +224,10 @@ func (h *Handler) SetupPage(w http.ResponseWriter, r *http.Request) {
 
 	token := r.URL.Query().Get("invite")
 
-	if token == "" {
-		empty, err := h.authMgr.IsEmpty(r.Context())
-		if err != nil {
-			h.log.ErrorContext(r.Context(), "check empty", "err", err)
-			http.Error(w, "internal server error", http.StatusInternalServerError)
-
-			return
-		}
-
-		if !empty {
-			http.Redirect(w, r, "/login", http.StatusSeeOther)
-
-			return
-		}
+	// Without an invite, /setup only works while bootstrapping the first admin.
+	// Once an admin exists it is closed (403) — extra accounts come via invite links.
+	if token == "" && !h.bootstrapOpen(w, r) {
+		return
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -251,34 +277,75 @@ func (h *Handler) SetupHandler(w http.ResponseWriter, r *http.Request) {
 	passwordConfirm := r.FormValue("password_confirm")
 	token := r.FormValue("invite")
 
-	var qrURL string
+	data := setupViewData{
+		Nonce:        nonceFromContext(r.Context()),
+		CSRFToken:    csrfFromContext(r.Context()),
+		Token:        token,
+		IsFirstAdmin: token == "",
+	}
 
-	var setupErr error
+	if password != passwordConfirm {
+		data.Error = "Passwords do not match."
+		h.renderSetup(w, r, &data)
 
-	switch {
-	case password != passwordConfirm:
-		setupErr = domain.ErrWeakPassword
-	case token != "":
+		return
+	}
+
+	// Without an invite, creating an account is only allowed while bootstrapping the
+	// first admin; once one exists the endpoint is closed (403).
+	if token == "" && !h.bootstrapOpen(w, r) {
+		return
+	}
+
+	var (
+		qrURL    string
+		setupErr error
+	)
+
+	if token != "" {
 		qrURL, setupErr = h.authMgr.AcceptInvite(r.Context(), token, username, password)
-	default:
+	} else {
 		qrURL, setupErr = h.authMgr.AcceptFirstAdmin(r.Context(), username, password)
 	}
 
-	data := setupViewData{Nonce: nonceFromContext(r.Context()), CSRFToken: csrfFromContext(r.Context())}
-
 	if setupErr != nil {
-		data.Token = token
 		data.Error = setupErrMsg(setupErr)
-		data.IsFirstAdmin = token == ""
 	} else {
 		data.QRCode = template.URL(qrURL) //nolint:gosec // data: URL from internal crypto, not user input
 	}
 
+	h.renderSetup(w, r, &data)
+}
+
+// bootstrapOpen reports whether first-admin setup is still allowed (no users yet).
+// When closed (an admin already exists) it writes the 403 "setup closed" page and returns
+// false; on a lookup error it writes 500 and returns false.
+func (h *Handler) bootstrapOpen(w http.ResponseWriter, r *http.Request) bool {
+	empty, err := h.authMgr.IsEmpty(r.Context())
+	if err != nil {
+		h.log.ErrorContext(r.Context(), "check empty", "err", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+
+		return false
+	}
+
+	if !empty {
+		data := setupClosedPageData()
+		h.writeErrorPageData(w, r, &data)
+
+		return false
+	}
+
+	return true
+}
+
+// renderSetup renders the setup template, logging any render error.
+func (h *Handler) renderSetup(w http.ResponseWriter, r *http.Request, data *setupViewData) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
-	renderErr := h.setupTmpl.Execute(w, data)
-	if renderErr != nil {
-		h.log.ErrorContext(r.Context(), "render setup template", "err", renderErr)
+	err := h.setupTmpl.Execute(w, data)
+	if err != nil {
+		h.log.ErrorContext(r.Context(), "render setup template", "err", err)
 	}
 }
 
@@ -313,7 +380,7 @@ func (h *Handler) ChangePasswordPage(w http.ResponseWriter, r *http.Request) {
 // doChangePassword performs the password change and returns an error string (empty on success).
 // When the session is expired it writes a redirect and returns a sentinel ("redirect").
 func (h *Handler) doChangePassword(
-	w http.ResponseWriter, r *http.Request, oldPassword, newPassword, confirm string,
+	w http.ResponseWriter, r *http.Request, oldPassword, newPassword, confirm, totpCode string,
 ) string {
 	if newPassword != confirm {
 		return "New passwords do not match."
@@ -321,8 +388,19 @@ func (h *Handler) doChangePassword(
 
 	sessID := extractSessionID(r)
 
-	changeErr := h.authMgr.ChangePassword(r.Context(), sessID, oldPassword, newPassword)
+	newSessID, changeErr := h.authMgr.ChangePassword(r.Context(), sessID, oldPassword, newPassword, totpCode)
 	if changeErr == nil {
+		// Replace the session cookie: all old sessions were invalidated; use the fresh one.
+		http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: all security attributes are set; Secure follows TLS detection
+			Name:     sessionCookieName,
+			Value:    newSessID,
+			Path:     "/",
+			MaxAge:   int(defaultSessionMaxAge.Seconds()),
+			HttpOnly: true,
+			Secure:   isHTTPS(r, h.trustedProxies),
+			SameSite: http.SameSiteStrictMode,
+		})
+
 		rotateCSRFToken(w, r, h.csrfSecret, h.trustedProxies)
 
 		return ""
@@ -337,6 +415,8 @@ func (h *Handler) doChangePassword(
 	switch {
 	case errors.Is(changeErr, domain.ErrInvalidPassword):
 		return "Current password is incorrect."
+	case errors.Is(changeErr, domain.ErrInvalidTOTP):
+		return "TOTP code is invalid or has expired."
 	case errors.Is(changeErr, domain.ErrWeakPassword):
 		return "Password must be at least 12 characters with upper, lower, digit, and special character."
 	default:
@@ -359,10 +439,11 @@ func (h *Handler) ChangePasswordHandler(w http.ResponseWriter, r *http.Request) 
 	oldPassword := r.FormValue("old_password")
 	newPassword := r.FormValue("new_password")
 	newPasswordConfirm := r.FormValue("new_password_confirm")
+	totpCode := r.FormValue("totp_code")
 
 	data := changePwViewData{Nonce: nonceFromContext(r.Context()), CSRFToken: csrfFromContext(r.Context())}
 
-	errMsg := h.doChangePassword(w, r, oldPassword, newPassword, newPasswordConfirm)
+	errMsg := h.doChangePassword(w, r, oldPassword, newPassword, newPasswordConfirm, totpCode)
 	if errMsg == "redirect" {
 		return
 	}

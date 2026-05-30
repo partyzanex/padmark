@@ -105,21 +105,78 @@ func (r *InviteRepository) Consume(ctx context.Context, token, username string) 
 		return nil, fmt.Errorf("consume invite: %w", err)
 	}
 
-	// Disambiguate: fetch the row regardless of state to classify the failure.
+	return nil, classifyInviteMiss(ctx, r.db, token)
+}
+
+// classifyInviteMiss reads the invite row via conn (a *bun.DB or bun.Tx) and returns
+// the sentinel explaining why a consume matched zero rows: ErrNotFound, ErrInviteUsed,
+// or ErrInviteExpired.
+func classifyInviteMiss(ctx context.Context, conn bun.IDB, token string) error {
 	var existing inviteRow
 
-	selectErr := r.db.NewSelect().Model(&existing).Where("token = ?", token).Scan(ctx)
-	if selectErr != nil {
-		if errors.Is(selectErr, sql.ErrNoRows) {
-			return nil, domain.ErrNotFound
+	err := conn.NewSelect().Model(&existing).Where("token = ?", token).Scan(ctx)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.ErrNotFound
 		}
 
-		return nil, fmt.Errorf("fetch invite after miss: %w", selectErr)
+		return fmt.Errorf("fetch invite after miss: %w", err)
 	}
 
 	if existing.UsedAt != nil {
-		return nil, domain.ErrInviteUsed
+		return domain.ErrInviteUsed
 	}
 
-	return nil, domain.ErrInviteExpired
+	return domain.ErrInviteExpired
+}
+
+// RedeemInvite atomically consumes the invite and inserts usr in one transaction.
+// If the user insert fails (e.g. a username race → ErrUserExists), the whole tx rolls
+// back and the invite stays unconsumed, so a failed registration never burns the token.
+// Returns invite sentinels (ErrNotFound/ErrInviteUsed/ErrInviteExpired) or ErrUserExists.
+func (r *InviteRepository) RedeemInvite(ctx context.Context, token, username string, usr *domain.User) error {
+	err := r.db.RunInTx(ctx, nil, func(ctx context.Context, btx bun.Tx) error {
+		now := time.Now()
+
+		res, updErr := btx.NewUpdate().
+			TableExpr("invites").
+			Set("used_at = ?", now).
+			Set("used_by = ?", username).
+			Where("token = ?", token).
+			Where("used_at IS NULL").
+			Where("expires_at > ?", now).
+			Exec(ctx)
+		if updErr != nil {
+			return fmt.Errorf("consume invite: %w", updErr)
+		}
+
+		affected, affErr := res.RowsAffected()
+		if affErr != nil {
+			return fmt.Errorf("rows affected: %w", affErr)
+		}
+
+		if affected == 0 {
+			return classifyInviteMiss(ctx, btx, token)
+		}
+
+		return insertUser(ctx, btx, usr)
+	})
+	if err != nil {
+		if isInviteSentinel(err) {
+			return err //nolint:wrapcheck // domain sentinel, must stay unwrapped for errors.Is
+		}
+
+		return fmt.Errorf("redeem invite: %w", err)
+	}
+
+	return nil
+}
+
+// isInviteSentinel reports whether err is a domain sentinel that must pass through
+// RunInTx unwrapped so callers can errors.Is it.
+func isInviteSentinel(err error) bool {
+	return errors.Is(err, domain.ErrNotFound) ||
+		errors.Is(err, domain.ErrInviteUsed) ||
+		errors.Is(err, domain.ErrInviteExpired) ||
+		errors.Is(err, domain.ErrUserExists)
 }

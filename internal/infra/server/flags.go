@@ -10,6 +10,7 @@ const (
 	FlagLogLevel         = "log-level"
 	FlagLogFormat        = "log-format"
 	FlagAuthTokens       = "auth-tokens" //nolint:gosec // flag name, not a credential
+	FlagEnableAccounts   = "enable-accounts"
 	FlagCookieMaxAge     = "cookie-max-age"
 	FlagReadTimeout      = "read-timeout"
 	FlagWriteTimeout     = "write-timeout"
@@ -20,6 +21,7 @@ const (
 	FlagTLSCert          = "tls-cert"
 	FlagTLSKey           = "tls-key"
 	FlagHTTPRedirectAddr = "http-redirect-addr"
+	FlagAllowedHosts     = "allowed-hosts"
 	FlagTrustedProxies   = "trusted-proxies"
 	FlagTOTPIssuer       = "totp-issuer"
 	FlagSessionTTL       = "session-ttl"
@@ -33,6 +35,7 @@ const (
 	EnvLogLevel         = "PADMARK_LOG_LEVEL"
 	EnvLogFormat        = "PADMARK_LOG_FORMAT"
 	EnvAuthTokens       = "PADMARK_AUTH_TOKENS" //nolint:gosec // env var name, not a credential
+	EnvEnableAccounts   = "PADMARK_ENABLE_ACCOUNTS"
 	EnvCookieMaxAge     = "PADMARK_COOKIE_MAX_AGE"
 	EnvReadTimeout      = "PADMARK_READ_TIMEOUT"
 	EnvWriteTimeout     = "PADMARK_WRITE_TIMEOUT"
@@ -43,6 +46,7 @@ const (
 	EnvTLSCert          = "PADMARK_TLS_CERT"
 	EnvTLSKey           = "PADMARK_TLS_KEY"
 	EnvHTTPRedirectAddr = "PADMARK_HTTP_REDIRECT_ADDR"
+	EnvAllowedHosts     = "PADMARK_ALLOWED_HOSTS"
 	EnvTrustedProxies   = "PADMARK_TRUSTED_PROXIES"
 	EnvTOTPIssuer       = "PADMARK_TOTP_ISSUER"
 	EnvSessionTTL       = "PADMARK_SESSION_TTL"
@@ -104,6 +108,13 @@ func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
 			Sources: cli.EnvVars(EnvAuthTokens),
 			Usage:   "Comma-separated Bearer tokens for write endpoints (empty = no auth)",
 		},
+		&cli.BoolFlag{
+			Name:    FlagEnableAccounts,
+			Sources: cli.EnvVars(EnvEnableAccounts),
+			Value:   false,
+			Usage: "Enable the user-account system (TOTP login, /setup, /admin, private-note gating). " +
+				"Off by default: the site is fully public unless this is set",
+		},
 		&cli.IntFlag{
 			Name:    FlagCookieMaxAge,
 			Sources: cli.EnvVars(EnvCookieMaxAge),
@@ -160,6 +171,13 @@ func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
 			Name:    FlagHTTPRedirectAddr,
 			Sources: cli.EnvVars(EnvHTTPRedirectAddr),
 			Usage:   "Address for the HTTP→HTTPS redirect listener (e.g. :80); only active when TLS is enabled",
+		},
+		&cli.StringFlag{
+			Name:    FlagAllowedHosts,
+			Sources: cli.EnvVars(EnvAllowedHosts),
+			Usage: "Comma-separated host allowlist for the HTTP→HTTPS redirect (e.g. example.com,www.example.com); " +
+				"when set, requests with any other Host get 400 instead of a redirect (anti Host-header injection); " +
+				"empty = redirect to the request Host (legacy behaviour)",
 		},
 		&cli.StringFlag{
 			Name:    FlagTrustedProxies,

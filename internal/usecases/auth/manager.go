@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -31,13 +30,19 @@ type UserStore interface {
 	List(ctx context.Context) ([]*domain.User, error)
 	UpdateLastLogin(ctx context.Context, id string, t time.Time) error
 	UpdatePassword(ctx context.Context, id, passwordHash string, kdfSalt []byte, totpSecret string) error
+	// UpdateTOTPCounter atomically advances the user's last accepted TOTP counter,
+	// returning false when counter is not strictly greater (replay). The conditional
+	// update is the cross-instance, restart-safe guard against TOTP code reuse.
+	UpdateTOTPCounter(ctx context.Context, id string, counter int64) (bool, error)
 	Revoke(ctx context.Context, id string) error
 }
 
 // InviteStore persists single-use invite links.
 type InviteStore interface {
 	Issue(ctx context.Context, createdByID string) (string, error)
-	Consume(ctx context.Context, token, username string) (*domain.Invite, error)
+	// RedeemInvite atomically consumes the invite and inserts usr in one transaction,
+	// so a failed user creation (e.g. a username race) never burns the token.
+	RedeemInvite(ctx context.Context, token, username string, usr *domain.User) error
 }
 
 // SessionStore persists authenticated browser sessions.
@@ -45,6 +50,10 @@ type SessionStore interface {
 	Create(ctx context.Context, s *domain.Session) error
 	Get(ctx context.Context, sessionID string) (*domain.Session, error)
 	Delete(ctx context.Context, sessionID string) error
+	// DeleteByUserID removes all sessions for a given user (e.g. after password change).
+	DeleteByUserID(ctx context.Context, userID string) error
+	// DeleteByUserIDExcept removes all sessions for the user except the one with the given session ID.
+	DeleteByUserIDExcept(ctx context.Context, userID, exceptSessionID string) error
 }
 
 // Encryptor encrypts and decrypts TOTP secrets at rest.
@@ -58,13 +67,11 @@ type Manager struct {
 	users        UserStore
 	invites      InviteStore
 	sessions     SessionStore
-	enc          Encryptor
-	log          *slog.Logger
-	totpCounters sync.Map
-	issuer       string
-	dummyPwHash  string
-	ttl          time.Duration
-	firstAdminMu sync.Mutex
+	enc         Encryptor
+	log         *slog.Logger
+	issuer      string
+	dummyPwHash string
+	ttl         time.Duration
 }
 
 // NewManager returns a new auth Manager.
@@ -122,22 +129,9 @@ func (m *Manager) Login(
 		return "", fmt.Errorf("get user: %w", err)
 	}
 
-	if !crypto.VerifyPassword(usr.PasswordHash, password) {
-		return "", domain.ErrInvalidTOTP
-	}
-
-	derivedKey, keyErr := crypto.DeriveUserKey([]byte(password), usr.KDFSalt)
-	if keyErr != nil {
-		return "", fmt.Errorf("derive user key: %w", keyErr)
-	}
-
-	secret, decErr := m.enc.Decrypt(usr.TOTPSecret, derivedKey)
-	if decErr != nil {
-		return "", fmt.Errorf("decrypt totp secret: %w", decErr)
-	}
-
-	if !m.validateAndRecordTOTP(usr.ID, secret, totpCode) {
-		return "", domain.ErrInvalidTOTP
+	factorErr := m.verifyLoginFactors(ctx, usr, password, totpCode)
+	if factorErr != nil {
+		return "", factorErr
 	}
 
 	sessionID, err := newSessionID()
@@ -215,14 +209,16 @@ func (m *Manager) GenerateInvite(ctx context.Context, adminUserID string) (strin
 }
 
 // AcceptInvite consumes the invite token, creates a new user with a fresh TOTP secret,
-// and returns the QR code data URL the user should scan.
+// and returns the QR code data URL the user should scan. The consume and the user
+// insert happen in a single transaction, so a failed registration never burns the token.
 func (m *Manager) AcceptInvite(ctx context.Context, token, username, password string) (string, error) {
 	err := domain.ValidatePassword(password)
 	if err != nil {
 		return "", err //nolint:wrapcheck // ErrWeakPassword sentinel passes through for errors.Is
 	}
 
-	// Check username uniqueness before consuming the invite so a collision does not burn the token.
+	// Fast pre-check to reject an obviously-taken username before doing any work.
+	// The authoritative guard is the unique constraint inside RedeemInvite's transaction.
 	_, lookupErr := m.users.GetByUsername(ctx, username)
 	if lookupErr == nil {
 		return "", domain.ErrUserExists
@@ -232,24 +228,30 @@ func (m *Manager) AcceptInvite(ctx context.Context, token, username, password st
 		return "", fmt.Errorf("check username: %w", lookupErr)
 	}
 
-	_, err = m.invites.Consume(ctx, token, username)
+	usr, qrURL, err := m.buildUser(username, password, false)
 	if err != nil {
-		return "", err //nolint:wrapcheck // domain sentinels (ErrInviteExpired/Used/NotFound) pass through for errors.Is
+		return "", err
 	}
 
-	return m.createUser(ctx, username, password, false)
+	err = m.invites.RedeemInvite(ctx, token, username, usr)
+	if err != nil {
+		return "", err //nolint:wrapcheck // domain sentinels pass through for errors.Is
+	}
+
+	return qrURL, nil
 }
 
 // AcceptFirstAdmin creates the first admin user without requiring an invite token.
 // Returns domain.ErrForbidden when users already exist (not empty DB).
+//
+// The List check is a best-effort gate; the hard guarantee against a concurrent
+// double-bootstrap (e.g. two instances racing on an empty DB) is the partial
+// unique index on users.is_admin: the second writer loses with domain.ErrUserExists.
 func (m *Manager) AcceptFirstAdmin(ctx context.Context, username, password string) (string, error) {
 	err := domain.ValidatePassword(password)
 	if err != nil {
 		return "", err //nolint:wrapcheck // ErrWeakPassword sentinel passes through for errors.Is
 	}
-
-	m.firstAdminMu.Lock()
-	defer m.firstAdminMu.Unlock()
 
 	users, err := m.users.List(ctx)
 	if err != nil {
@@ -260,69 +262,91 @@ func (m *Manager) AcceptFirstAdmin(ctx context.Context, username, password strin
 		return "", domain.ErrForbidden
 	}
 
-	return m.createUser(ctx, username, password, true)
+	usr, qrURL, err := m.buildUser(username, password, true)
+	if err != nil {
+		return "", err
+	}
+
+	err = m.users.Create(ctx, usr)
+	if err != nil {
+		return "", err //nolint:wrapcheck // ErrUserExists sentinel passes through for errors.Is
+	}
+
+	return qrURL, nil
 }
 
-// ChangePassword re-encrypts the TOTP secret under a new derived key.
-// Verifies the session and old password before applying the change.
+// ChangePassword verifies the current password and TOTP code, then re-encrypts the
+// TOTP secret under a new derived key. All existing sessions are invalidated after the
+// new session is safely persisted, so the caller never loses access on a transient error.
+// Returns the new session ID on success.
 func (m *Manager) ChangePassword(
-	ctx context.Context, sessionID, oldPassword, newPassword string,
-) error {
+	ctx context.Context, sessionID, oldPassword, newPassword, totpCode string,
+) (string, error) {
 	sess, err := m.sessions.Get(ctx, sessionID)
 	if err != nil {
-		return err //nolint:wrapcheck // ErrSessionExpired passes through for errors.Is
+		return "", err //nolint:wrapcheck // ErrSessionExpired passes through for errors.Is
 	}
 
 	usr, err := m.users.GetByID(ctx, sess.UserID)
 	if err != nil {
-		return fmt.Errorf("get user: %w", err)
+		return "", fmt.Errorf("get user: %w", err)
 	}
 
 	if !crypto.VerifyPassword(usr.PasswordHash, oldPassword) {
-		return domain.ErrInvalidPassword
+		return "", domain.ErrInvalidPassword
 	}
 
-	err = domain.ValidatePassword(newPassword)
+	// TOTP step-up: changing a password is account-critical — require the second factor
+	// so a stolen session + known password alone cannot lock out the legitimate owner.
+	// The decrypted secret is reused below, so it is decrypted only once.
+	rawSecret, err := m.verifyTOTPStepUp(ctx, oldPassword, usr, totpCode)
 	if err != nil {
-		return err //nolint:wrapcheck // ErrWeakPassword sentinel passes through for errors.Is
+		return "", err
 	}
 
-	oldKey, err := crypto.DeriveUserKey([]byte(oldPassword), usr.KDFSalt)
+	newHash, newSalt, encSecret, err := m.buildNewCredentials(newPassword, rawSecret)
 	if err != nil {
-		return fmt.Errorf("derive old key: %w", err)
-	}
-
-	rawSecret, err := m.enc.Decrypt(usr.TOTPSecret, oldKey)
-	if err != nil {
-		return fmt.Errorf("decrypt totp secret: %w", err)
-	}
-
-	newSalt, err := crypto.GenerateKDFSalt()
-	if err != nil {
-		return fmt.Errorf("generate kdf salt: %w", err)
-	}
-
-	newKey, err := crypto.DeriveUserKey([]byte(newPassword), newSalt)
-	if err != nil {
-		return fmt.Errorf("derive new key: %w", err)
-	}
-
-	encSecret, err := m.enc.Encrypt(rawSecret, newKey)
-	if err != nil {
-		return fmt.Errorf("encrypt totp secret: %w", err)
-	}
-
-	newHash, err := crypto.HashPassword(newPassword)
-	if err != nil {
-		return fmt.Errorf("hash password: %w", err)
+		return "", err
 	}
 
 	err = m.users.UpdatePassword(ctx, usr.ID, newHash, newSalt, encSecret)
 	if err != nil {
-		return fmt.Errorf("update password: %w", err)
+		return "", fmt.Errorf("update password: %w", err)
 	}
 
-	return nil
+	// Create the replacement session BEFORE invalidating old ones.
+	// If Create fails, old sessions remain intact and the user can retry.
+	// If DeleteByUserID subsequently fails, we log a warning; the new session is
+	// already returned to the client and old sessions will expire at their TTL.
+	newID, err := newSessionID()
+	if err != nil {
+		return "", err
+	}
+
+	now := time.Now()
+	newSess := &domain.Session{
+		SessionID: newID,
+		UserID:    usr.ID,
+		CreatedAt: now,
+		ExpiresAt: now.Add(m.ttl),
+		UserAgent: sess.UserAgent,
+		IP:        sess.IP,
+	}
+
+	err = m.sessions.Create(ctx, newSess)
+	if err != nil {
+		return "", fmt.Errorf("create session: %w", err)
+	}
+
+	// Invalidate all old sessions except the one just created.
+	// The new session must survive so the caller stays logged in.
+	err = m.sessions.DeleteByUserIDExcept(ctx, usr.ID, newID)
+	if err != nil {
+		m.log.WarnContext(ctx, "invalidate old sessions after password change",
+			"user_id", usr.ID, "err", err)
+	}
+
+	return newID, nil
 }
 
 // IsEmpty returns true when no users are registered (bootstrap state).
@@ -405,37 +429,131 @@ func (m *Manager) RevokeUser(ctx context.Context, adminUserID, targetUserID stri
 	return nil
 }
 
-// createUser generates TOTP secret, encrypts it with a password-derived key, and creates the user record.
-func (m *Manager) createUser(ctx context.Context, username, password string, isAdmin bool) (string, error) {
-	rawSecret, err := crypto.GenerateTOTPSecret()
+// buildNewCredentials validates newPassword complexity, derives a fresh KDF key, and
+// re-encrypts the already-decrypted TOTP secret so it can be stored under the new password.
+// rawSecret comes from verifyTOTPStepUp, so the secret is decrypted only once per change.
+// Returns the new password hash, KDF salt, and encrypted TOTP secret.
+func (m *Manager) buildNewCredentials(
+	newPassword, rawSecret string,
+) (hash string, salt []byte, encSecret string, err error) {
+	err = domain.ValidatePassword(newPassword)
 	if err != nil {
-		return "", fmt.Errorf("generate totp secret: %w", err)
+		return "", nil, "", err //nolint:wrapcheck // ErrWeakPassword sentinel passes through for errors.Is
 	}
 
-	kdfSalt, err := crypto.GenerateKDFSalt()
+	newSalt, err := crypto.GenerateKDFSalt()
 	if err != nil {
-		return "", fmt.Errorf("generate kdf salt: %w", err)
+		return "", nil, "", fmt.Errorf("generate kdf salt: %w", err)
 	}
 
-	derivedKey, err := crypto.DeriveUserKey([]byte(password), kdfSalt)
+	newKey, err := crypto.DeriveUserKey([]byte(newPassword), newSalt)
+	if err != nil {
+		return "", nil, "", fmt.Errorf("derive new key: %w", err)
+	}
+
+	encSecret, err = m.enc.Encrypt(rawSecret, newKey)
+	if err != nil {
+		return "", nil, "", fmt.Errorf("encrypt totp secret: %w", err)
+	}
+
+	hash, err = crypto.HashPassword(newPassword)
+	if err != nil {
+		return "", nil, "", fmt.Errorf("hash password: %w", err)
+	}
+
+	return hash, newSalt, encSecret, nil
+}
+
+// verifyLoginFactors checks the password and the TOTP second factor for usr.
+// Returns domain.ErrInvalidTOTP on any factor mismatch so the caller cannot learn
+// which factor failed (no username/password enumeration oracle).
+func (m *Manager) verifyLoginFactors(ctx context.Context, usr *domain.User, password, totpCode string) error {
+	if !crypto.VerifyPassword(usr.PasswordHash, password) {
+		return domain.ErrInvalidTOTP
+	}
+
+	derivedKey, err := crypto.DeriveUserKey([]byte(password), usr.KDFSalt)
+	if err != nil {
+		return fmt.Errorf("derive user key: %w", err)
+	}
+
+	secret, err := m.enc.Decrypt(usr.TOTPSecret, derivedKey)
+	if err != nil {
+		return fmt.Errorf("decrypt totp secret: %w", err)
+	}
+
+	ok, err := m.validateAndRecordTOTP(ctx, usr.ID, secret, totpCode)
+	if err != nil {
+		return err
+	}
+
+	if !ok {
+		return domain.ErrInvalidTOTP
+	}
+
+	return nil
+}
+
+// verifyTOTPStepUp decrypts the TOTP secret using the old password key, validates the
+// provided code, and returns the decrypted secret so the caller can re-encrypt it under a
+// new key without a second HKDF + AES-GCM pass. Second-factor gate for account-critical ops.
+func (m *Manager) verifyTOTPStepUp(
+	ctx context.Context, oldPassword string, usr *domain.User, totpCode string,
+) (string, error) {
+	oldKey, err := crypto.DeriveUserKey([]byte(oldPassword), usr.KDFSalt)
 	if err != nil {
 		return "", fmt.Errorf("derive user key: %w", err)
 	}
 
+	rawSecret, err := m.enc.Decrypt(usr.TOTPSecret, oldKey)
+	if err != nil {
+		return "", fmt.Errorf("decrypt totp secret: %w", err)
+	}
+
+	ok, err := m.validateAndRecordTOTP(ctx, usr.ID, rawSecret, totpCode)
+	if err != nil {
+		return "", err
+	}
+
+	if !ok {
+		return "", domain.ErrInvalidTOTP
+	}
+
+	return rawSecret, nil
+}
+
+// buildUser generates a fresh TOTP secret, encrypts it with a password-derived key, and
+// assembles the user record together with its QR code data URL — without touching the DB.
+// The caller persists the returned user (directly or via RedeemInvite); generating the QR
+// here, before any insert, keeps the insert the last fallible step so it can be rolled back.
+func (m *Manager) buildUser(username, password string, isAdmin bool) (*domain.User, string, error) {
+	rawSecret, err := crypto.GenerateTOTPSecret()
+	if err != nil {
+		return nil, "", fmt.Errorf("generate totp secret: %w", err)
+	}
+
+	kdfSalt, err := crypto.GenerateKDFSalt()
+	if err != nil {
+		return nil, "", fmt.Errorf("generate kdf salt: %w", err)
+	}
+
+	derivedKey, err := crypto.DeriveUserKey([]byte(password), kdfSalt)
+	if err != nil {
+		return nil, "", fmt.Errorf("derive user key: %w", err)
+	}
+
 	encSecret, err := m.enc.Encrypt(rawSecret, derivedKey)
 	if err != nil {
-		return "", fmt.Errorf("encrypt totp secret: %w", err)
+		return nil, "", fmt.Errorf("encrypt totp secret: %w", err)
 	}
 
 	pwHash, err := crypto.HashPassword(password)
 	if err != nil {
-		return "", fmt.Errorf("hash password: %w", err)
+		return nil, "", fmt.Errorf("hash password: %w", err)
 	}
 
-	userID := uuid.New().String()
-
 	usr := &domain.User{
-		ID:           userID,
+		ID:           uuid.New().String(),
 		Username:     username,
 		TOTPSecret:   encSecret,
 		PasswordHash: pwHash,
@@ -444,36 +562,30 @@ func (m *Manager) createUser(ctx context.Context, username, password string, isA
 		CreatedAt:    time.Now(),
 	}
 
-	createErr := m.users.Create(ctx, usr)
-	if createErr != nil {
-		return "", createErr //nolint:wrapcheck // ErrUserExists sentinel passes through for errors.Is
-	}
-
 	qrURL, err := crypto.GenerateQRCodeDataURL(m.issuer, username, rawSecret)
 	if err != nil {
-		return "", fmt.Errorf("generate qr code: %w", err)
+		return nil, "", fmt.Errorf("generate qr code: %w", err)
 	}
 
-	return qrURL, nil
+	return usr, qrURL, nil
 }
 
-// validateAndRecordTOTP validates the TOTP code and stores the counter on success.
+// validateAndRecordTOTP validates the TOTP code and persists the accepted counter.
 // Returns false when the code is invalid or has already been used (replay).
-func (m *Manager) validateAndRecordTOTP(userID, secret, code string) bool {
+// Replay protection is enforced by an atomic conditional update in the store, so it
+// survives process restarts and is consistent across instances.
+func (m *Manager) validateAndRecordTOTP(ctx context.Context, userID, secret, code string) (bool, error) {
 	valid, counter := crypto.ValidateTOTPWithCounter(secret, code)
 	if !valid {
-		return false
+		return false, nil
 	}
 
-	if lastVal, loaded := m.totpCounters.Load(userID); loaded {
-		if lastCounter, ok := lastVal.(int64); ok && counter <= lastCounter {
-			return false
-		}
+	accepted, err := m.users.UpdateTOTPCounter(ctx, userID, counter)
+	if err != nil {
+		return false, fmt.Errorf("record totp counter: %w", err)
 	}
 
-	m.totpCounters.Store(userID, counter)
-
-	return true
+	return accepted, nil
 }
 
 func newSessionID() (string, error) {

@@ -41,23 +41,28 @@ type authMiddleware struct {
 }
 
 func (am *authMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if isPublicPath(r.URL.Path) || isPublicRoute(r, am.namedRoutes) {
+	switch {
+	case isPublicPath(r.URL.Path):
+		// Static assets, health checks, /login etc. never need the user — pass straight
+		// through without a session lookup (avoids a query per static asset).
 		am.next.ServeHTTP(w, r)
+
+		return
+	case isPublicRoute(r, am.namedRoutes):
+		// Note view/burn routes: auth is not required, but resolve the session when a
+		// cookie is present so the handler's private-note and CanEdit checks read the
+		// user from context instead of repeating the lookup. No cookie ⇒ no query.
+		rr, _ := am.resolveSessionUser(r)
+		am.next.ServeHTTP(w, rr)
 
 		return
 	}
 
 	// TOTP session cookie check — puts user in context on success.
-	if am.checker != nil {
-		if sessID := extractSessionID(r); sessID != "" {
-			usr, err := am.checker.GetSession(r.Context(), sessID)
-			if err == nil {
-				ctx := context.WithValue(r.Context(), keyUser, usr)
-				am.next.ServeHTTP(w, r.WithContext(ctx))
+	if rr, ok := am.resolveSessionUser(r); ok {
+		am.next.ServeHTTP(w, rr)
 
-				return
-			}
-		}
+		return
 	}
 
 	// Bearer token / padmark_token cookie check.
@@ -85,6 +90,28 @@ func (am *authMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.Error(w, "unauthorized", http.StatusUnauthorized)
+}
+
+// resolveSessionUser returns r enriched with the authenticated user in context when a
+// valid session cookie is present, and whether a user was resolved. A missing cookie or a
+// failed lookup returns the original request and false — so an anonymous request (no
+// cookie) costs no query.
+func (am *authMiddleware) resolveSessionUser(r *http.Request) (*http.Request, bool) {
+	if am.checker == nil {
+		return r, false
+	}
+
+	sessID := extractSessionID(r)
+	if sessID == "" {
+		return r, false
+	}
+
+	usr, err := am.checker.GetSession(r.Context(), sessID)
+	if err != nil {
+		return r, false
+	}
+
+	return r.WithContext(context.WithValue(r.Context(), keyUser, usr)), true
 }
 
 func extractToken(r *http.Request) string {
@@ -182,7 +209,7 @@ func loginHandler(tokens map[string]struct{}, cookieMaxAge int, trustedProxies [
 			return
 		}
 
-		http.SetCookie(w, &http.Cookie{
+		http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: all security attributes are set; Secure follows TLS detection
 			Name:     tokenCookieName,
 			Value:    token,
 			Path:     "/",

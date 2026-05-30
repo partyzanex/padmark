@@ -68,11 +68,11 @@ var authTestCSRFSecret = []byte("padmark-test-csrf-secret-32bytes") //nolint:goc
 var testCSRFToken = adhttp.GenerateCSRFTokenForTest(authTestCSRFSecret) //nolint:gochecknoglobals // test fixture
 
 func (s *AuthHandlerSuite) sessionCookie(value string) *http.Cookie {
-	return &http.Cookie{Name: "padmark_session", Value: value}
+	return &http.Cookie{Name: "padmark_session", Value: value} //nolint:gosec // G124: test cookie
 }
 
 func (s *AuthHandlerSuite) csrfCookie() *http.Cookie {
-	return &http.Cookie{Name: "padmark_csrf", Value: testCSRFToken}
+	return &http.Cookie{Name: "padmark_csrf", Value: testCSRFToken} //nolint:gosec // G124: test cookie
 }
 
 func withCSRF(form url.Values) url.Values {
@@ -91,6 +91,37 @@ func (s *AuthHandlerSuite) TestLoginPage_TOTP_Mode() {
 
 	s.Equal(http.StatusOK, rec.Code)
 	s.Contains(rec.Body.String(), "totp-login") // TOTP form action
+}
+
+// TestLoginPage_AlreadyAuthenticated_RedirectsHome verifies a signed-in user is not asked
+// to log in again — /login redirects home instead of rendering the form.
+func (s *AuthHandlerSuite) TestLoginPage_AlreadyAuthenticated_RedirectsHome() {
+	s.auth.EXPECT().GetSession(gomock.Any(), "sess-ok").Return(&domain.User{ID: "u1"}, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/login", nil)
+	req.AddCookie(s.sessionCookie("sess-ok"))
+
+	rec := httptest.NewRecorder()
+
+	s.router.ServeHTTP(rec, req)
+
+	s.Equal(http.StatusSeeOther, rec.Code)
+	s.Equal("/", rec.Header().Get("Location"))
+}
+
+// TestLoginPage_AlreadyAuthenticated_RedirectsToNext honours a safe ?next= target.
+func (s *AuthHandlerSuite) TestLoginPage_AlreadyAuthenticated_RedirectsToNext() {
+	s.auth.EXPECT().GetSession(gomock.Any(), "sess-ok").Return(&domain.User{ID: "u1"}, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/login?next=/edit/abc", nil)
+	req.AddCookie(s.sessionCookie("sess-ok"))
+
+	rec := httptest.NewRecorder()
+
+	s.router.ServeHTTP(rec, req)
+
+	s.Equal(http.StatusSeeOther, rec.Code)
+	s.Equal("/edit/abc", rec.Header().Get("Location"))
 }
 
 // ── TOTP login ──
@@ -247,7 +278,7 @@ func (s *AuthHandlerSuite) TestSetupPage_NoToken_EmptyDB_RendersFirstAdmin() {
 	s.Contains(rec.Body.String(), "first admin")
 }
 
-func (s *AuthHandlerSuite) TestSetupPage_NoToken_NotEmpty_RedirectsToLogin() {
+func (s *AuthHandlerSuite) TestSetupPage_NoToken_NotEmpty_Returns403() {
 	s.auth.EXPECT().IsEmpty(gomock.Any()).Return(false, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/setup", nil)
@@ -255,8 +286,10 @@ func (s *AuthHandlerSuite) TestSetupPage_NoToken_NotEmpty_RedirectsToLogin() {
 
 	s.router.ServeHTTP(rec, req)
 
-	s.Equal(http.StatusSeeOther, rec.Code)
-	s.Equal("/login", rec.Header().Get("Location"))
+	// Bootstrap is closed once an admin exists: /setup without an invite must error,
+	// not redirect to login.
+	s.Equal(http.StatusForbidden, rec.Code)
+	s.Contains(rec.Body.String(), "Setup is closed")
 }
 
 // ── Setup handler ──
@@ -286,6 +319,7 @@ func (s *AuthHandlerSuite) TestSetupHandler_WithInvite_ShowsQR() {
 }
 
 func (s *AuthHandlerSuite) TestSetupHandler_FirstAdmin_ShowsQR() {
+	s.auth.EXPECT().IsEmpty(gomock.Any()).Return(true, nil) // bootstrap allowed: empty DB
 	s.auth.EXPECT().AcceptFirstAdmin(gomock.Any(), "root", gomock.Any()).
 		Return("data:image/png;base64,xyz", nil)
 
@@ -306,6 +340,29 @@ func (s *AuthHandlerSuite) TestSetupHandler_FirstAdmin_ShowsQR() {
 	s.Contains(rec.Body.String(), "Scan QR code")
 }
 
+// TestSetupHandler_NoInvite_NotEmpty_Returns403 verifies POST /setup without an invite is
+// rejected once an admin exists (closed bootstrap), instead of attempting first-admin creation.
+func (s *AuthHandlerSuite) TestSetupHandler_NoInvite_NotEmpty_Returns403() {
+	s.auth.EXPECT().IsEmpty(gomock.Any()).Return(false, nil)
+	// AcceptFirstAdmin must NOT be called.
+
+	form := withCSRF(url.Values{
+		"username":         {"intruder"},
+		"password":         {testPw},
+		"password_confirm": {testPw},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/setup", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(s.csrfCookie())
+
+	rec := httptest.NewRecorder()
+
+	s.router.ServeHTTP(rec, req)
+
+	s.Equal(http.StatusForbidden, rec.Code)
+	s.Contains(rec.Body.String(), "Setup is closed")
+}
+
 func (s *AuthHandlerSuite) TestSetupHandler_PasswordMismatch_ShowsError() {
 	form := withCSRF(url.Values{
 		"invite":           {"tok"},
@@ -322,7 +379,7 @@ func (s *AuthHandlerSuite) TestSetupHandler_PasswordMismatch_ShowsError() {
 	s.router.ServeHTTP(rec, req)
 
 	s.Equal(http.StatusOK, rec.Code)
-	s.Contains(rec.Body.String(), "Password must be")
+	s.Contains(rec.Body.String(), "do not match")
 }
 
 func (s *AuthHandlerSuite) TestSetupHandler_ExpiredInvite_ShowsError() {
@@ -513,12 +570,13 @@ func (s *AuthHandlerSuite) TestSessionAuth_ExpiredSession_RedirectsToLogin() {
 func (s *AuthHandlerSuite) TestChangePasswordHandler_Success_ShowsSuccessMessage() {
 	usr := &domain.User{ID: "u1", Username: "alice"}
 	s.auth.EXPECT().GetSession(gomock.Any(), "sess1").Return(usr, nil).Times(1)
-	s.auth.EXPECT().ChangePassword(gomock.Any(), "sess1", "OldP@ss12!", "NewP@ss12!").Return(nil)
+	s.auth.EXPECT().ChangePassword(gomock.Any(), "sess1", "OldP@ss12!", "NewP@ss12!", "123456").Return("new-sess-id", nil)
 
 	form := withCSRF(url.Values{
 		"old_password":         {"OldP@ss12!"},
 		"new_password":         {"NewP@ss12!"},
 		"new_password_confirm": {"NewP@ss12!"},
+		"totp_code":            {"123456"},
 	})
 	req := httptest.NewRequest(http.MethodPost, "/change-password", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -531,6 +589,18 @@ func (s *AuthHandlerSuite) TestChangePasswordHandler_Success_ShowsSuccessMessage
 
 	s.Equal(http.StatusOK, rec.Code)
 	s.Contains(rec.Body.String(), "Password changed successfully")
+
+	// New session cookie must be set so old stolen cookies stop working.
+	var newCookie *http.Cookie
+
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == "padmark_session" {
+			newCookie = c
+		}
+	}
+
+	s.Require().NotNil(newCookie, "session cookie must be rotated after password change")
+	s.Equal("new-sess-id", newCookie.Value)
 }
 
 func (s *AuthHandlerSuite) TestChangePasswordHandler_Mismatch_ShowsError() {
@@ -558,13 +628,14 @@ func (s *AuthHandlerSuite) TestChangePasswordHandler_Mismatch_ShowsError() {
 func (s *AuthHandlerSuite) TestChangePasswordHandler_WrongOldPassword_ShowsError() {
 	usr := &domain.User{ID: "u1", Username: "alice"}
 	s.auth.EXPECT().GetSession(gomock.Any(), "sess1").Return(usr, nil).Times(1)
-	s.auth.EXPECT().ChangePassword(gomock.Any(), "sess1", "WrongP@ss12!", "NewP@ss12!").
-		Return(domain.ErrInvalidPassword)
+	s.auth.EXPECT().ChangePassword(gomock.Any(), "sess1", "WrongP@ss12!", "NewP@ss12!", "123456").
+		Return("", domain.ErrInvalidPassword)
 
 	form := withCSRF(url.Values{
 		"old_password":         {"WrongP@ss12!"},
 		"new_password":         {"NewP@ss12!"},
 		"new_password_confirm": {"NewP@ss12!"},
+		"totp_code":            {"123456"},
 	})
 	req := httptest.NewRequest(http.MethodPost, "/change-password", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -577,6 +648,51 @@ func (s *AuthHandlerSuite) TestChangePasswordHandler_WrongOldPassword_ShowsError
 
 	s.Equal(http.StatusOK, rec.Code)
 	s.Contains(rec.Body.String(), "incorrect")
+}
+
+func (s *AuthHandlerSuite) TestChangePasswordHandler_InvalidTOTP_ShowsError() {
+	usr := &domain.User{ID: "u1", Username: "alice"}
+	s.auth.EXPECT().GetSession(gomock.Any(), "sess1").Return(usr, nil).Times(1)
+	s.auth.EXPECT().ChangePassword(gomock.Any(), "sess1", "OldP@ss12!", "NewP@ss12!", "badcode").
+		Return("", domain.ErrInvalidTOTP)
+
+	form := withCSRF(url.Values{
+		"old_password":         {"OldP@ss12!"},
+		"new_password":         {"NewP@ss12!"},
+		"new_password_confirm": {"NewP@ss12!"},
+		"totp_code":            {"badcode"},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/change-password", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(s.sessionCookie("sess1"))
+	req.AddCookie(s.csrfCookie())
+
+	rec := httptest.NewRecorder()
+
+	s.router.ServeHTTP(rec, req)
+
+	s.Equal(http.StatusOK, rec.Code)
+	s.Contains(rec.Body.String(), "TOTP code is invalid")
+}
+
+func (s *AuthHandlerSuite) TestSetupHandler_PasswordMismatch_DoesNotCallAuthMgr() {
+	// authMgr must NOT be called when passwords don't match — verify via strict mock.
+	// (No EXPECT() set on s.auth — any unexpected call would fail the test.)
+	form := withCSRF(url.Values{
+		"username":         {"newuser"},
+		"password":         {testPw},
+		"password_confirm": {"DifferentP@ss12!"},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/setup", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(s.csrfCookie())
+
+	rec := httptest.NewRecorder()
+
+	s.router.ServeHTTP(rec, req)
+
+	s.Equal(http.StatusOK, rec.Code)
+	s.Contains(rec.Body.String(), "do not match")
 }
 
 // ── CSRF guard ──

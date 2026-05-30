@@ -16,7 +16,7 @@
 
     <div class="meta-bar">
         <div class="meta-info">
-            <span class="meta-tag">
+            <span class="meta-tag" id="createdTag"{{if .CreatedISO}} data-created="{{.CreatedISO}}"{{end}}>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
                 {{.CreatedAt}}
             </span>
@@ -96,6 +96,21 @@
 
 <script nonce="{{.Nonce}}">
     {{template "theme-js"}}
+
+    // Render the created timestamp in the visitor's local timezone/locale so it is
+    // consistent with the expiry timestamp below (which is also client-formatted).
+    (function () {
+        const tag = document.getElementById('createdTag');
+        const iso = tag && tag.dataset.created;
+        if (!iso) return;
+        const d = new Date(iso);
+        const formatted = d.toLocaleString(undefined, {
+            year: 'numeric', month: 'short', day: 'numeric',
+            hour: '2-digit', minute: '2-digit'
+        });
+        const svg = tag.querySelector('svg').outerHTML;
+        tag.innerHTML = svg + ' ' + formatted;
+    })();
 
     {{if not .NeedsConfirmation}}
     (function () {

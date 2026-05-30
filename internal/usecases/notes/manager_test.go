@@ -86,6 +86,19 @@ func TestRandomString_Entropy(t *testing.T) {
 	assert.NotEqual(t, first, second, "two calls should almost never produce the same string")
 }
 
+// newSlug
+
+func TestNewSlug_LengthAndCharset(t *testing.T) {
+	slug := newSlug()
+
+	assert.Len(t, slug, slugLength, "generated slug must be slugLength chars")
+	assert.Equal(t, 10, slugLength, "slug length is the configured short-URL length")
+
+	for _, ch := range slug {
+		assert.Contains(t, slugChars, string(ch), "slug must only use the slug alphabet")
+	}
+}
+
 // Create
 
 func (s *ManagerTestSuite) TestCreate_OK() {
@@ -317,15 +330,21 @@ func (s *ManagerTestSuite) TestView_BurnAfterReading() {
 }
 
 func (s *ManagerTestSuite) TestView_BurnAfterReading_WithTTL() {
-	want := &domain.Note{ID: "abc-123", Title: "a", BurnAfterReading: true, BurnTTL: 1800}
-	s.storage.EXPECT().Get(gomock.Any(), hashSlug("abc-123")).Return(want, nil)
-	s.storage.EXPECT().SetBurnExpiry(gomock.Any(), hashSlug("abc-123"), gomock.Any()).Return(want, nil)
-	// note stays readable during grace period — IncrementViews must NOT be called
+	future := time.Now().Add(30 * time.Minute)
+	stored := &domain.Note{ID: "abc-123", Title: "a", BurnAfterReading: true, BurnTTL: 1800}
+	// Real storage flips burn_after_reading=false and sets expires_at on the timer-start read.
+	afterBurn := &domain.Note{ID: "abc-123", Title: "a", BurnAfterReading: false, BurnTTL: 1800, ExpiresAt: &future}
+
+	s.storage.EXPECT().Get(gomock.Any(), hashSlug("abc-123")).Return(stored, nil)
+	s.storage.EXPECT().SetBurnExpiry(gomock.Any(), hashSlug("abc-123"), gomock.Any()).Return(afterBurn, nil)
+	// The note stays readable during the grace period, so each read counts.
+	s.storage.EXPECT().IncrementViews(gomock.Any(), hashSlug("abc-123")).Return(nil)
 
 	note, err := s.manager.View(s.T().Context(), "abc-123")
 
 	s.Require().NoError(err)
-	s.Equal(want, note)
+	s.False(note.BurnAfterReading)
+	s.Equal(1, note.Views)
 }
 
 func (s *ManagerTestSuite) TestView_NotFound() {
@@ -552,11 +571,12 @@ func (s *ManagerTestSuite) TestView_BurnAfterReading_NoIncrementViews() {
 	s.Equal(note, result)
 }
 
-// TestView_BurnAfterReading_WithBurnTTL_NoIncrementViews verifies that a burn-after-reading note
-// with BurnTTL > 0 starts a timer on first view and IncrementViews is NOT called.
+// TestView_BurnAfterReading_WithBurnTTL_CountsViews verifies that a burn-after-reading note
+// with BurnTTL > 0 starts a timer on first view and, because it stays readable during the
+// grace period, each read DOES increment the view counter.
 // SetBurnExpiry returns the note with BurnAfterReading=false (as the real storage does after
 // flipping the column), so the test exercises the actual production code path.
-func (s *ManagerTestSuite) TestView_BurnAfterReading_WithBurnTTL_NoIncrementViews() {
+func (s *ManagerTestSuite) TestView_BurnAfterReading_WithBurnTTL_CountsViews() {
 	future := time.Now().Add(time.Hour)
 	// Real storage flips burn_after_reading=false and sets expires_at.
 	noteAfterBurn := &domain.Note{ID: "burn-ttl", Title: "t", BurnAfterReading: false, BurnTTL: 3600, ExpiresAt: &future}
@@ -564,12 +584,13 @@ func (s *ManagerTestSuite) TestView_BurnAfterReading_WithBurnTTL_NoIncrementView
 	s.storage.EXPECT().Get(gomock.Any(), hashSlug("burn-ttl")).
 		Return(&domain.Note{ID: "burn-ttl", Title: "t", BurnAfterReading: true, BurnTTL: 3600}, nil)
 	s.storage.EXPECT().SetBurnExpiry(gomock.Any(), hashSlug("burn-ttl"), gomock.Any()).Return(noteAfterBurn, nil)
-	// IncrementViews must NOT be called — note is in burn grace period
+	s.storage.EXPECT().IncrementViews(gomock.Any(), hashSlug("burn-ttl")).Return(nil)
 
 	result, err := s.manager.View(s.T().Context(), "burn-ttl")
 	s.Require().NoError(err)
 	s.False(result.BurnAfterReading)
 	s.NotNil(result.ExpiresAt)
+	s.Equal(1, result.Views)
 }
 
 // TestGet_BurnTTL_Race_SetBurnExpiryNotFound reproduces the race condition where two concurrent

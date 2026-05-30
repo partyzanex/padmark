@@ -143,6 +143,21 @@ func (mr *MockUserStoreMockRecorder) UpdatePassword(ctx, id, passwordHash, kdfSa
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdatePassword", reflect.TypeOf((*MockUserStore)(nil).UpdatePassword), ctx, id, passwordHash, kdfSalt, totpSecret)
 }
 
+// UpdateTOTPCounter mocks base method.
+func (m *MockUserStore) UpdateTOTPCounter(ctx context.Context, id string, counter int64) (bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdateTOTPCounter", ctx, id, counter)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// UpdateTOTPCounter indicates an expected call of UpdateTOTPCounter.
+func (mr *MockUserStoreMockRecorder) UpdateTOTPCounter(ctx, id, counter any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateTOTPCounter", reflect.TypeOf((*MockUserStore)(nil).UpdateTOTPCounter), ctx, id, counter)
+}
+
 // MockInviteStore is a mock of InviteStore interface.
 type MockInviteStore struct {
 	ctrl     *gomock.Controller
@@ -167,21 +182,6 @@ func (m *MockInviteStore) EXPECT() *MockInviteStoreMockRecorder {
 	return m.recorder
 }
 
-// Consume mocks base method.
-func (m *MockInviteStore) Consume(ctx context.Context, token, username string) (*domain.Invite, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Consume", ctx, token, username)
-	ret0, _ := ret[0].(*domain.Invite)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// Consume indicates an expected call of Consume.
-func (mr *MockInviteStoreMockRecorder) Consume(ctx, token, username any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Consume", reflect.TypeOf((*MockInviteStore)(nil).Consume), ctx, token, username)
-}
-
 // Issue mocks base method.
 func (m *MockInviteStore) Issue(ctx context.Context, createdByID string) (string, error) {
 	m.ctrl.T.Helper()
@@ -195,6 +195,20 @@ func (m *MockInviteStore) Issue(ctx context.Context, createdByID string) (string
 func (mr *MockInviteStoreMockRecorder) Issue(ctx, createdByID any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Issue", reflect.TypeOf((*MockInviteStore)(nil).Issue), ctx, createdByID)
+}
+
+// RedeemInvite mocks base method.
+func (m *MockInviteStore) RedeemInvite(ctx context.Context, token, username string, usr *domain.User) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RedeemInvite", ctx, token, username, usr)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// RedeemInvite indicates an expected call of RedeemInvite.
+func (mr *MockInviteStoreMockRecorder) RedeemInvite(ctx, token, username, usr any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RedeemInvite", reflect.TypeOf((*MockInviteStore)(nil).RedeemInvite), ctx, token, username, usr)
 }
 
 // MockSessionStore is a mock of SessionStore interface.
@@ -247,6 +261,34 @@ func (m *MockSessionStore) Delete(ctx context.Context, sessionID string) error {
 func (mr *MockSessionStoreMockRecorder) Delete(ctx, sessionID any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Delete", reflect.TypeOf((*MockSessionStore)(nil).Delete), ctx, sessionID)
+}
+
+// DeleteByUserID mocks base method.
+func (m *MockSessionStore) DeleteByUserID(ctx context.Context, userID string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteByUserID", ctx, userID)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// DeleteByUserID indicates an expected call of DeleteByUserID.
+func (mr *MockSessionStoreMockRecorder) DeleteByUserID(ctx, userID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteByUserID", reflect.TypeOf((*MockSessionStore)(nil).DeleteByUserID), ctx, userID)
+}
+
+// DeleteByUserIDExcept mocks base method.
+func (m *MockSessionStore) DeleteByUserIDExcept(ctx context.Context, userID, exceptSessionID string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteByUserIDExcept", ctx, userID, exceptSessionID)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// DeleteByUserIDExcept indicates an expected call of DeleteByUserIDExcept.
+func (mr *MockSessionStoreMockRecorder) DeleteByUserIDExcept(ctx, userID, exceptSessionID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteByUserIDExcept", reflect.TypeOf((*MockSessionStore)(nil).DeleteByUserIDExcept), ctx, userID, exceptSessionID)
 }
 
 // Get mocks base method.

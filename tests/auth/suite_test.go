@@ -19,18 +19,22 @@ type userRepo interface {
 	List(ctx context.Context) ([]*domain.User, error)
 	UpdateLastLogin(ctx context.Context, id string, t time.Time) error
 	UpdatePassword(ctx context.Context, id, passwordHash string, kdfSalt []byte, totpSecret string) error
+	UpdateTOTPCounter(ctx context.Context, id string, counter int64) (bool, error)
 	Revoke(ctx context.Context, id string) error
 }
 
 type inviteRepo interface {
 	Issue(ctx context.Context, createdByID string) (string, error)
 	Consume(ctx context.Context, token, username string) (*domain.Invite, error)
+	RedeemInvite(ctx context.Context, token, username string, usr *domain.User) error
 }
 
 type sessionRepo interface {
 	Create(ctx context.Context, s *domain.Session) error
 	Get(ctx context.Context, sessionID string) (*domain.Session, error)
 	Delete(ctx context.Context, sessionID string) error
+	DeleteByUserID(ctx context.Context, userID string) error
+	DeleteByUserIDExcept(ctx context.Context, userID, exceptSessionID string) error
 	DeleteExpired(ctx context.Context) error
 }
 
@@ -297,4 +301,97 @@ func (s *AuthSuite) TestSession_DeleteExpired() {
 
 	_, err := s.Sessions.Get(ctx, active.SessionID)
 	s.Require().NoError(err, "active session must survive DeleteExpired")
+}
+
+func (s *AuthSuite) TestSession_DeleteByUserID_RemovesAllUserSessions() {
+	ctx := s.T().Context()
+	usr := s.newUser("session-eve")
+	other := s.newUser("session-frank")
+	s.Require().NoError(s.Users.Create(ctx, usr))
+	s.Require().NoError(s.Users.Create(ctx, other))
+
+	future := time.Now().Add(time.Hour)
+
+	for i, id := range []string{"sess-eve-1", "sess-eve-2", "sess-eve-3"} {
+		s.Require().NoError(s.Sessions.Create(ctx, &domain.Session{
+			SessionID: id,
+			UserID:    usr.ID,
+			CreatedAt: time.Now(),
+			ExpiresAt: future,
+			UserAgent: "ua",
+			IP:        "1.2.3." + string(rune('1'+i)),
+		}))
+	}
+
+	// A session for a different user — must not be touched.
+	s.Require().NoError(s.Sessions.Create(ctx, &domain.Session{
+		SessionID: "sess-frank-1",
+		UserID:    other.ID,
+		CreatedAt: time.Now(),
+		ExpiresAt: future,
+	}))
+
+	s.Require().NoError(s.Sessions.DeleteByUserID(ctx, usr.ID))
+
+	for _, id := range []string{"sess-eve-1", "sess-eve-2", "sess-eve-3"} {
+		_, err := s.Sessions.Get(ctx, id)
+		s.Require().ErrorIs(err, domain.ErrSessionExpired, "session %s must be gone after DeleteByUserID", id)
+	}
+
+	_, err := s.Sessions.Get(ctx, "sess-frank-1")
+	s.Require().NoError(err, "other user's session must not be affected by DeleteByUserID")
+}
+
+func (s *AuthSuite) TestSession_DeleteByUserIDExcept_PreservesExceptedSession() {
+	ctx := s.T().Context()
+	usr := s.newUser("session-henry")
+	s.Require().NoError(s.Users.Create(ctx, usr))
+
+	future := time.Now().Add(time.Hour)
+	keep := &domain.Session{SessionID: "sess-keep", UserID: usr.ID, CreatedAt: time.Now(), ExpiresAt: future}
+	old1 := &domain.Session{SessionID: "sess-old1", UserID: usr.ID, CreatedAt: time.Now(), ExpiresAt: future}
+	old2 := &domain.Session{SessionID: "sess-old2", UserID: usr.ID, CreatedAt: time.Now(), ExpiresAt: future}
+
+	s.Require().NoError(s.Sessions.Create(ctx, keep))
+	s.Require().NoError(s.Sessions.Create(ctx, old1))
+	s.Require().NoError(s.Sessions.Create(ctx, old2))
+
+	s.Require().NoError(s.Sessions.DeleteByUserIDExcept(ctx, usr.ID, keep.SessionID))
+
+	_, err := s.Sessions.Get(ctx, keep.SessionID)
+	s.Require().NoError(err, "excepted session must survive DeleteByUserIDExcept")
+
+	_, err = s.Sessions.Get(ctx, old1.SessionID)
+	s.Require().ErrorIs(err, domain.ErrSessionExpired, "old session 1 must be removed")
+
+	_, err = s.Sessions.Get(ctx, old2.SessionID)
+	s.Require().ErrorIs(err, domain.ErrSessionExpired, "old session 2 must be removed")
+}
+
+func (s *AuthSuite) TestSession_DeleteByUserIDExcept_NoOtherSessions_IsIdempotent() {
+	ctx := s.T().Context()
+	usr := s.newUser("session-igor")
+	s.Require().NoError(s.Users.Create(ctx, usr))
+
+	sess := &domain.Session{
+		SessionID: "sess-only",
+		UserID:    usr.ID,
+		CreatedAt: time.Now(),
+		ExpiresAt: time.Now().Add(time.Hour),
+	}
+	s.Require().NoError(s.Sessions.Create(ctx, sess))
+
+	s.Require().NoError(s.Sessions.DeleteByUserIDExcept(ctx, usr.ID, sess.SessionID))
+
+	_, err := s.Sessions.Get(ctx, sess.SessionID)
+	s.Require().NoError(err, "sole session must survive when it is the excepted one")
+}
+
+func (s *AuthSuite) TestSession_DeleteByUserID_NoSessions_IsIdempotent() {
+	ctx := s.T().Context()
+	usr := s.newUser("session-grace")
+	s.Require().NoError(s.Users.Create(ctx, usr))
+
+	// Calling with no sessions should not error.
+	s.Require().NoError(s.Sessions.DeleteByUserID(ctx, usr.ID))
 }

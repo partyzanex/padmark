@@ -12,8 +12,13 @@ import (
 	padmark "github.com/partyzanex/padmark/pkg/client"
 )
 
-// firstLineScanLimit caps how many lines we inspect when deriving a title from content.
-const firstLineScanLimit = 20
+const (
+	// firstLineScanLimit caps how many lines we inspect when deriving a title from content.
+	firstLineScanLimit = 20
+
+	argsUsageID   = "<id>"
+	untitledTitle = "Untitled"
+)
 
 func createCommand() *urcli.Command {
 	return &urcli.Command{
@@ -167,5 +172,5 @@ func firstLine(content string) string {
 		}
 	}
 
-	return "Untitled"
+	return untitledTitle
 }
