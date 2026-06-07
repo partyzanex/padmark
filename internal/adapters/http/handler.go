@@ -101,7 +101,7 @@ type Handler struct {
 	apidocsTmpl    *template.Template
 	successTmpl    *template.Template
 	errorTmpl      *template.Template
-	allowedTokens  map[string]struct{}
+	allowedTokens  map[string]struct{} // legacy bearer-token auth; deprecated, see NewHandler
 	csrfSecret     []byte
 	trustedProxies []*net.IPNet
 }
@@ -116,7 +116,11 @@ func parseTmpl(name, src string) *template.Template {
 }
 
 // NewHandler creates a Handler with required dependencies.
-// tokens is the list of valid auth tokens; pass nil to disable token auth.
+//
+// tokens is the list of valid bearer auth tokens; pass nil to disable token auth.
+// NOTE: the tokens parameter drives the DEPRECATED legacy bearer-token write auth
+// (PADMARK_AUTH_TOKENS), superseded by the TOTP account system (WithAuthManager /
+// --enable-accounts) and slated for removal. New callers should pass nil and use accounts.
 func NewHandler(manager NoteManager, log *slog.Logger, tokens []string) *Handler {
 	handler := &Handler{
 		manager:      manager,
@@ -173,6 +177,9 @@ func (h *Handler) WithTrustedProxies(proxies []*net.IPNet) *Handler {
 
 // AllowedTokens returns a defensive copy of the bearer-token set.
 // The copy prevents callers from mutating the handler's internal state.
+//
+// Deprecated: part of the legacy bearer-token write auth (PADMARK_AUTH_TOKENS), superseded by
+// the TOTP account system (--enable-accounts). Will be removed in a future release.
 func (h *Handler) AllowedTokens() map[string]struct{} {
 	return maps.Clone(h.allowedTokens)
 }

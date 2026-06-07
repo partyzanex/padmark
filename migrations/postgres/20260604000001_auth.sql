@@ -21,7 +21,9 @@ WHERE expires_at IS NULL OR expires_at > NOW();
 DELETE FROM reveal_tokens WHERE used_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS users (
-    id            UUID        NOT NULL PRIMARY KEY DEFAULT gen_random_uuid(),
+    -- id is always supplied by the application (a UUID string); the UUID column type
+    -- validates it (a non-UUID id fails loudly on PostgreSQL). No DB-side default needed.
+    id            UUID        NOT NULL PRIMARY KEY,
     username      TEXT        NOT NULL UNIQUE,
     totp_secret   TEXT        NOT NULL,
     password_hash TEXT        NOT NULL DEFAULT '',

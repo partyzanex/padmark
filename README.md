@@ -207,9 +207,14 @@ padmark-cli delete abc123def4 --edit-code JmNkn0LdjbMw
 
 # Check server health
 padmark-cli ping
+
+# Bound each request (default 30s; 0 disables)
+padmark-cli --timeout 5s get abc123def4
 ```
 
-Set defaults via environment variables: `PADMARK_URL`, `PADMARK_TOKEN`, `PADMARK_EDIT_CODE`.
+Set defaults via environment variables: `PADMARK_URL`, `PADMARK_TOKEN`, `PADMARK_TIMEOUT`, `PADMARK_EDIT_CODE`.
+
+> A bearer token over a non-HTTPS `--url` is sent in cleartext; the CLI prints a stderr warning. Use an `https://` server URL in production.
 
 ---
 
@@ -325,6 +330,9 @@ Always public regardless of auth config: `/login`, `/setup`, `/logout`, `/static
 | `--enable-accounts` | `PADMARK_ENABLE_ACCOUNTS` | `false` | Enable the TOTP account system (`/setup`, `/login`, `/admin`, private-note gating); off = fully public |
 | `--totp-issuer` | `PADMARK_TOTP_ISSUER` | `padmark` | TOTP issuer shown in the authenticator app |
 | `--session-ttl` | `PADMARK_SESSION_TTL` | `2592000` | Session lifetime in seconds (default 30 days) |
+| `--argon2-memory` | `PADMARK_ARGON2_MEMORY` | `65536` | argon2id memory cost (KiB) for password/edit-code hashing — lower for low-RAM hosts |
+| `--argon2-time` | `PADMARK_ARGON2_TIME` | `2` | argon2id iterations (OWASP minimum at 64 MiB) — raise when lowering memory |
+| `--argon2-threads` | `PADMARK_ARGON2_THREADS` | `1` | argon2id parallelism (CPU threads per hash) |
 | `--cookie-max-age` | `PADMARK_COOKIE_MAX_AGE` | `7776000` | Auth cookie max-age in seconds (default 90 days) |
 | `--rate-limit` | `PADMARK_RATE_LIMIT` | `10` | Requests/sec per IP (`0` = disabled) |
 | `--rate-burst` | `PADMARK_RATE_BURST` | `20` | Burst size per IP |

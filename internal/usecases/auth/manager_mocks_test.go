@@ -359,3 +359,179 @@ func (mr *MockEncryptorMockRecorder) Encrypt(plaintext, key any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Encrypt", reflect.TypeOf((*MockEncryptor)(nil).Encrypt), plaintext, key)
 }
+
+// MockPasswordHasher is a mock of PasswordHasher interface.
+type MockPasswordHasher struct {
+	ctrl     *gomock.Controller
+	recorder *MockPasswordHasherMockRecorder
+	isgomock struct{}
+}
+
+// MockPasswordHasherMockRecorder is the mock recorder for MockPasswordHasher.
+type MockPasswordHasherMockRecorder struct {
+	mock *MockPasswordHasher
+}
+
+// NewMockPasswordHasher creates a new mock instance.
+func NewMockPasswordHasher(ctrl *gomock.Controller) *MockPasswordHasher {
+	mock := &MockPasswordHasher{ctrl: ctrl}
+	mock.recorder = &MockPasswordHasherMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockPasswordHasher) EXPECT() *MockPasswordHasherMockRecorder {
+	return m.recorder
+}
+
+// Hash mocks base method.
+func (m *MockPasswordHasher) Hash(password string) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Hash", password)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Hash indicates an expected call of Hash.
+func (mr *MockPasswordHasherMockRecorder) Hash(password any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Hash", reflect.TypeOf((*MockPasswordHasher)(nil).Hash), password)
+}
+
+// Verify mocks base method.
+func (m *MockPasswordHasher) Verify(storedHash, password string) bool {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Verify", storedHash, password)
+	ret0, _ := ret[0].(bool)
+	return ret0
+}
+
+// Verify indicates an expected call of Verify.
+func (mr *MockPasswordHasherMockRecorder) Verify(storedHash, password any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Verify", reflect.TypeOf((*MockPasswordHasher)(nil).Verify), storedHash, password)
+}
+
+// MockKeyDeriver is a mock of KeyDeriver interface.
+type MockKeyDeriver struct {
+	ctrl     *gomock.Controller
+	recorder *MockKeyDeriverMockRecorder
+	isgomock struct{}
+}
+
+// MockKeyDeriverMockRecorder is the mock recorder for MockKeyDeriver.
+type MockKeyDeriverMockRecorder struct {
+	mock *MockKeyDeriver
+}
+
+// NewMockKeyDeriver creates a new mock instance.
+func NewMockKeyDeriver(ctrl *gomock.Controller) *MockKeyDeriver {
+	mock := &MockKeyDeriver{ctrl: ctrl}
+	mock.recorder = &MockKeyDeriverMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockKeyDeriver) EXPECT() *MockKeyDeriverMockRecorder {
+	return m.recorder
+}
+
+// DeriveKey mocks base method.
+func (m *MockKeyDeriver) DeriveKey(password, salt []byte) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeriveKey", password, salt)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// DeriveKey indicates an expected call of DeriveKey.
+func (mr *MockKeyDeriverMockRecorder) DeriveKey(password, salt any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeriveKey", reflect.TypeOf((*MockKeyDeriver)(nil).DeriveKey), password, salt)
+}
+
+// GenerateSalt mocks base method.
+func (m *MockKeyDeriver) GenerateSalt() ([]byte, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GenerateSalt")
+	ret0, _ := ret[0].([]byte)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GenerateSalt indicates an expected call of GenerateSalt.
+func (mr *MockKeyDeriverMockRecorder) GenerateSalt() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GenerateSalt", reflect.TypeOf((*MockKeyDeriver)(nil).GenerateSalt))
+}
+
+// MockTOTPManager is a mock of TOTPManager interface.
+type MockTOTPManager struct {
+	ctrl     *gomock.Controller
+	recorder *MockTOTPManagerMockRecorder
+	isgomock struct{}
+}
+
+// MockTOTPManagerMockRecorder is the mock recorder for MockTOTPManager.
+type MockTOTPManagerMockRecorder struct {
+	mock *MockTOTPManager
+}
+
+// NewMockTOTPManager creates a new mock instance.
+func NewMockTOTPManager(ctrl *gomock.Controller) *MockTOTPManager {
+	mock := &MockTOTPManager{ctrl: ctrl}
+	mock.recorder = &MockTOTPManagerMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockTOTPManager) EXPECT() *MockTOTPManagerMockRecorder {
+	return m.recorder
+}
+
+// GenerateQRCode mocks base method.
+func (m *MockTOTPManager) GenerateQRCode(issuer, account, secret string) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GenerateQRCode", issuer, account, secret)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GenerateQRCode indicates an expected call of GenerateQRCode.
+func (mr *MockTOTPManagerMockRecorder) GenerateQRCode(issuer, account, secret any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GenerateQRCode", reflect.TypeOf((*MockTOTPManager)(nil).GenerateQRCode), issuer, account, secret)
+}
+
+// GenerateSecret mocks base method.
+func (m *MockTOTPManager) GenerateSecret() (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GenerateSecret")
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GenerateSecret indicates an expected call of GenerateSecret.
+func (mr *MockTOTPManagerMockRecorder) GenerateSecret() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GenerateSecret", reflect.TypeOf((*MockTOTPManager)(nil).GenerateSecret))
+}
+
+// ValidateWithCounter mocks base method.
+func (m *MockTOTPManager) ValidateWithCounter(secret, code string) (bool, int64) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ValidateWithCounter", secret, code)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(int64)
+	return ret0, ret1
+}
+
+// ValidateWithCounter indicates an expected call of ValidateWithCounter.
+func (mr *MockTOTPManagerMockRecorder) ValidateWithCounter(secret, code any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ValidateWithCounter", reflect.TypeOf((*MockTOTPManager)(nil).ValidateWithCounter), secret, code)
+}

@@ -34,6 +34,9 @@ func (h *Handler) SuccessPage(w http.ResponseWriter, r *http.Request) {
 		scheme = protoHTTPS
 	}
 
+	// r.Host may be attacker-controlled (Host header), but this URL is only rendered into the
+	// page via html/template (escaped, no injection) for the user to copy — it is never emailed
+	// or used server-side. Add allowed-host validation here if absolute links ever leave the page.
 	noteURL := scheme + "://" + r.Host + "/" + id
 	burn := query.Get("burn") == "1"
 

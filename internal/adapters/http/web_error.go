@@ -35,12 +35,19 @@ func domainErrToPageData(err error) errorViewData {
 			Title:     "Paste not found",
 			Desc:      "The paste you're looking for doesn't exist, has expired, or was deleted.",
 		}
-	case errors.Is(err, domain.ErrForbidden):
+	case errors.Is(err, domain.ErrInvalidEditCode):
 		return errorViewData{
 			Code:      http.StatusForbidden,
 			ErrorType: errorTypeClient,
 			Title:     "Forbidden",
 			Desc:      "The edit code is invalid or missing.",
+		}
+	case errors.Is(err, domain.ErrForbidden):
+		return errorViewData{
+			Code:      http.StatusForbidden,
+			ErrorType: errorTypeClient,
+			Title:     "Forbidden",
+			Desc:      "You don't have permission to perform this action.",
 		}
 	case errors.Is(err, domain.ErrExpired):
 		return errorViewData{

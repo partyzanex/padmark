@@ -85,12 +85,12 @@ func (r *InviteRepository) Issue(ctx context.Context, createdByID string) (strin
 	return tok, nil
 }
 
-// classifyMiss reads the invite row unconditionally and returns the appropriate
-// sentinel error: ErrNotFound, ErrInviteUsed, or ErrInviteExpired.
-func classifyMiss(ctx context.Context, btx bun.Tx, token string) error {
+// classifyInviteMiss reads the invite row via conn (a *bun.DB or bun.Tx) and returns the
+// sentinel explaining a zero-row consume: ErrNotFound, ErrInviteUsed, or ErrInviteExpired.
+func classifyInviteMiss(ctx context.Context, conn bun.IDB, token string) error {
 	var existing inviteRow
 
-	err := btx.NewSelect().Model(&existing).Where("token = ?", token).Scan(ctx)
+	err := conn.NewSelect().Model(&existing).Where("token = ?", token).Scan(ctx)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.ErrNotFound
@@ -125,7 +125,7 @@ func (r *InviteRepository) Consume(ctx context.Context, token, username string) 
 				return fmt.Errorf("select invite: %w", err)
 			}
 
-			return classifyMiss(ctx, btx, token)
+			return classifyInviteMiss(ctx, btx, token)
 		}
 
 		now := time.Now()
@@ -177,7 +177,7 @@ func (r *InviteRepository) RedeemInvite(ctx context.Context, token, username str
 				return fmt.Errorf("select invite: %w", selErr)
 			}
 
-			return classifyMiss(ctx, btx, token)
+			return classifyInviteMiss(ctx, btx, token)
 		}
 
 		now := time.Now()

@@ -71,18 +71,25 @@ func (s *RevealRepository) Issue(ctx context.Context, noteID string) (string, er
 }
 
 // Consume atomically marks the token as used when it is bound to noteID, unused, and unexpired.
-// Uses UPDATE ... RETURNING to avoid the SELECT+UPDATE race under concurrent requests.
+// A single conditional UPDATE avoids the SELECT+UPDATE race under concurrent requests.
 // Returns false if the token is unknown, expired, already used, or bound to a different noteID —
 // in all these cases the token is left intact.
 func (s *RevealRepository) Consume(ctx context.Context, tok, noteID string) bool {
 	now := time.Now()
 
-	var row revealTokenRow
+	res, err := s.db.NewUpdate().
+		TableExpr("reveal_tokens").
+		Set("used_at = ?", now).
+		Where("token = ?", tok).
+		Where("note_id = ?", noteID).
+		Where("used_at IS NULL").
+		Where("expires_at > ?", now).
+		Exec(ctx)
+	if err != nil {
+		return false
+	}
 
-	const query = `UPDATE reveal_tokens SET used_at = ?` +
-		` WHERE token = ? AND note_id = ? AND used_at IS NULL AND expires_at > ? RETURNING note_id`
+	affected, err := res.RowsAffected()
 
-	err := s.db.NewRaw(query, now, tok, noteID, now).Scan(ctx, &row)
-
-	return err == nil
+	return err == nil && affected > 0
 }

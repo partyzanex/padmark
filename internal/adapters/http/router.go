@@ -22,7 +22,25 @@ const (
 	keyNonce     contextKey = 2
 	keyUser      contextKey = 3
 	keyCSRF      contextKey = 4
+	keyLogUser   contextKey = 5
 )
+
+// logUser is a request-scoped holder the auth layer fills with the resolved identity so the
+// outer logging middleware can report it. A pointer is used because withLogging runs OUTSIDE
+// the auth middleware: the user set via r.WithContext downstream is not visible on the logger's
+// request, but a shared pointer installed before next() is mutated in place and read after.
+type logUser struct {
+	name  string
+	admin bool
+}
+
+// setLogUser records the identity for the request log, if the holder is present.
+func setLogUser(ctx context.Context, name string, admin bool) {
+	if lu, ok := ctx.Value(keyLogUser).(*logUser); ok {
+		lu.name = name
+		lu.admin = admin
+	}
+}
 
 func nonceFromContext(ctx context.Context) string {
 	v, _ := ctx.Value(keyNonce).(string)
@@ -97,10 +115,10 @@ func registerRoutes(
 	mux.HandleFunc("GET /success", handler.SuccessPage)
 	mux.Handle("GET /static/", withStaticCacheControl(StaticHandler))
 	mux.HandleFunc("GET /notes/{id}", handler.GetNote)
-	mux.HandleFunc("POST /notes/{id}", handler.HandleReveal)
+	mux.HandleFunc("POST /notes/{id}", guard(handler.HandleReveal))
 	mux.HandleFunc("GET /edit/{id}", handler.EditPage)
 	mux.HandleFunc("GET /{id}", handler.GetNote)
-	mux.HandleFunc("POST /{id}", handler.HandleReveal)
+	mux.HandleFunc("POST /{id}", guard(handler.HandleReveal))
 }
 
 // NewRouter registers all routes and wraps them with middleware.
@@ -173,6 +191,10 @@ func buildNamedRoutes() map[string]struct{} {
 	}
 }
 
+// makeTokenSet builds a lookup set from the configured bearer tokens.
+//
+// Deprecated: part of the legacy bearer-token write auth (PADMARK_AUTH_TOKENS), superseded by
+// the TOTP account system (--enable-accounts). Will be removed in a future release.
 func makeTokenSet(tokens []string) map[string]struct{} {
 	set := make(map[string]struct{}, len(tokens))
 
@@ -222,18 +244,37 @@ func withLogging(log *slog.Logger, next http.Handler) http.Handler {
 		start := time.Now()
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 
-		next.ServeHTTP(rec, r)
+		// Install the identity holder so the (inner) auth layer can record who the request
+		// resolved to; it stays anonymous when no auth runs or no valid session is present.
+		// Only the request passed downstream carries the holder; the original r.Context() is
+		// kept for logging (inherited context, preserves the request ID).
+		holder := &logUser{}
+		rr := r.WithContext(context.WithValue(r.Context(), keyLogUser, holder))
+
+		next.ServeHTTP(rec, rr)
 
 		level := slog.LevelInfo
 		if strings.HasPrefix(r.URL.Path, "/static/") {
 			level = slog.LevelDebug
 		}
 
+		user := "-"
+		if holder.name != "" {
+			user = holder.name
+		}
+
+		// remote is the immediate peer (the proxy/LB IP when behind one); xff is the
+		// X-Forwarded-For chain the proxy sent; user/admin is the resolved identity ("-" when
+		// anonymous). These make trusted-proxy and auth debugging possible without shell access.
 		log.Log(r.Context(), level, "http",
 			"method", r.Method,
 			"path", r.URL.Path,
 			"status", rec.status,
 			"duration", time.Since(start),
+			"remote", r.RemoteAddr,
+			"xff", r.Header.Get("X-Forwarded-For"),
+			"user", user,
+			"admin", holder.admin,
 		)
 	})
 }
@@ -253,6 +294,25 @@ func withStaticCacheControl(next http.Handler) http.Handler {
 		w.Header().Set("Cache-Control", "public, max-age=86400")
 		next.ServeHTTP(w, r)
 	})
+}
+
+// redocScriptSrc is the external origin Redoc is loaded from. It is added to script-src only on
+// the API docs page (see APIDocsPage), keeping the global CSP free of third-party origins.
+const redocScriptSrc = "https://cdn.redoc.ly"
+
+// buildCSP assembles the Content-Security-Policy for a response. extraScriptSrc adds extra
+// allowed script origins (e.g. the Redoc CDN on the /api page) without widening script-src
+// globally — every other page keeps script-src restricted to 'self' + nonce.
+func buildCSP(nonce string, extraScriptSrc ...string) string {
+	scriptSrcParts := append([]string{"script-src 'self' 'nonce-" + nonce + "'"}, extraScriptSrc...)
+	scriptSrc := strings.Join(scriptSrcParts, " ")
+
+	return "default-src 'self'; " +
+		scriptSrc + "; " +
+		"style-src 'self' 'nonce-" + nonce + "' https://fonts.googleapis.com; " +
+		"font-src 'self' https://fonts.gstatic.com; " +
+		"img-src 'self' data:; " +
+		"connect-src 'self'"
 }
 
 func withSecurityHeaders(trustedProxies []*net.IPNet, next http.Handler) http.Handler {
@@ -275,14 +335,7 @@ func withSecurityHeaders(trustedProxies []*net.IPNet, next http.Handler) http.Ha
 		header.Set("X-Frame-Options", "DENY")
 		header.Set("Referrer-Policy", "strict-origin-when-cross-origin")
 		header.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
-		header.Set("Content-Security-Policy",
-			"default-src 'self'; "+
-				"script-src 'self' 'nonce-"+nonce+"' https://cdn.redoc.ly; "+
-				"style-src 'self' 'nonce-"+nonce+"' https://fonts.googleapis.com; "+
-				"font-src 'self' https://fonts.gstatic.com; "+
-				"img-src 'self' data:; "+
-				"connect-src 'self'",
-		)
+		header.Set("Content-Security-Policy", buildCSP(nonce))
 
 		if isHTTPS(r, trustedProxies) {
 			header.Set("Strict-Transport-Security", "max-age=63072000; includeSubDomains")

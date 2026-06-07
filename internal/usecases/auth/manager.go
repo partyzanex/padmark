@@ -14,7 +14,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/partyzanex/padmark/internal/domain"
-	"github.com/partyzanex/padmark/internal/infra/crypto"
 )
 
 const (
@@ -62,12 +61,37 @@ type Encryptor interface {
 	Decrypt(ciphertext, key string) (string, error)
 }
 
+// PasswordHasher hashes and verifies user passwords (argon2id with configurable cost).
+// Implemented by infra/crypto.PasswordHasher.
+type PasswordHasher interface {
+	Hash(password string) (string, error)
+	Verify(storedHash, password string) bool
+}
+
+// KeyDeriver generates a KDF salt and derives the AES key used to encrypt a user's TOTP secret.
+// Implemented by infra/crypto.KDF.
+type KeyDeriver interface {
+	GenerateSalt() ([]byte, error)
+	DeriveKey(password, salt []byte) (string, error)
+}
+
+// TOTPManager generates TOTP secrets, validates codes (returning the time-step counter used for
+// replay protection), and renders the enrollment QR code. Implemented by infra/crypto.TOTP.
+type TOTPManager interface {
+	GenerateSecret() (string, error)
+	ValidateWithCounter(secret, code string) (valid bool, counter int64)
+	GenerateQRCode(issuer, account, secret string) (string, error)
+}
+
 // Manager orchestrates TOTP-based authentication and invite-link onboarding.
 type Manager struct {
-	users        UserStore
-	invites      InviteStore
-	sessions     SessionStore
+	users       UserStore
+	invites     InviteStore
+	sessions    SessionStore
 	enc         Encryptor
+	pw          PasswordHasher
+	kdf         KeyDeriver
+	totp        TOTPManager
 	log         *slog.Logger
 	issuer      string
 	dummyPwHash string
@@ -75,13 +99,19 @@ type Manager struct {
 }
 
 // NewManager returns a new auth Manager.
-// issuer is the TOTP issuer name shown in the authenticator app.
-// sessionTTL controls how long a session remains valid; pass 0 for the default (30 days).
+// passwordHasher carries the (configurable) argon2 cost used for password hashing/verification.
+// keyDeriver and totp provide the KDF and TOTP primitives (injected so the usecase owns its
+// contracts instead of importing infra/crypto). issuer is the TOTP issuer name shown in the
+// authenticator app. sessionTTL controls how long a session remains valid; pass 0 for the
+// default (30 days).
 func NewManager(
 	users UserStore,
 	invites InviteStore,
 	sessions SessionStore,
 	enc Encryptor,
+	passwordHasher PasswordHasher,
+	keyDeriver KeyDeriver,
+	totp TOTPManager,
 	log *slog.Logger,
 	issuer string,
 	sessionTTL time.Duration,
@@ -92,10 +122,13 @@ func NewManager(
 	}
 
 	// Pre-compute once at startup so the first login attempt is not slower.
-	dummyHash, err := crypto.HashPassword("padmark-dummy-auth-sentinel")
+	// A failure here means crypto/rand is unavailable at boot (fatal), so fail hard rather
+	// than ship a fallback hash whose frozen argon2 params would diverge from the configured
+	// cost and reintroduce a login timing asymmetry. NewManager runs only at the composition
+	// root, so a bootstrap panic is appropriate.
+	dummyHash, err := passwordHasher.Hash("padmark-dummy-auth-sentinel")
 	if err != nil {
-		// crypto/rand failure — fall back to a syntactically valid but un-matchable hash.
-		dummyHash = "v1$65536$1$1$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+		panic("auth: cannot precompute dummy password hash (crypto/rand unavailable): " + err.Error())
 	}
 
 	return &Manager{
@@ -103,6 +136,9 @@ func NewManager(
 		invites:     invites,
 		sessions:    sessions,
 		enc:         enc,
+		pw:          passwordHasher,
+		kdf:         keyDeriver,
+		totp:        totp,
 		log:         log,
 		issuer:      issuer,
 		ttl:         ttl,
@@ -121,7 +157,7 @@ func (m *Manager) Login(
 		if errors.Is(err, domain.ErrNotFound) {
 			// Run the same argon2id work as a real attempt to prevent timing-based
 			// username enumeration. The result is always discarded.
-			crypto.VerifyPassword(m.dummyPwHash, password)
+			m.pw.Verify(m.dummyPwHash, password)
 
 			return "", domain.ErrInvalidTOTP
 		}
@@ -217,8 +253,11 @@ func (m *Manager) AcceptInvite(ctx context.Context, token, username, password st
 		return "", err //nolint:wrapcheck // ErrWeakPassword sentinel passes through for errors.Is
 	}
 
-	// Fast pre-check to reject an obviously-taken username before doing any work.
-	// The authoritative guard is the unique constraint inside RedeemInvite's transaction.
+	// Fast pre-check to reject an already-taken username before the expensive buildUser work
+	// (argon2 hash + TOTP secret + QR). The authoritative guard is the unique constraint inside
+	// RedeemInvite's transaction. Note: revealing "username taken" is an inherent UX trade-off
+	// (the same signal is observable via RedeemInvite, which rolls back without burning the
+	// invite on a collision); the pre-check does not widen that, it only avoids needless argon2.
 	_, lookupErr := m.users.GetByUsername(ctx, username)
 	if lookupErr == nil {
 		return "", domain.ErrUserExists
@@ -292,7 +331,7 @@ func (m *Manager) ChangePassword(
 		return "", fmt.Errorf("get user: %w", err)
 	}
 
-	if !crypto.VerifyPassword(usr.PasswordHash, oldPassword) {
+	if !m.pw.Verify(usr.PasswordHash, oldPassword) {
 		return "", domain.ErrInvalidPassword
 	}
 
@@ -441,12 +480,12 @@ func (m *Manager) buildNewCredentials(
 		return "", nil, "", err //nolint:wrapcheck // ErrWeakPassword sentinel passes through for errors.Is
 	}
 
-	newSalt, err := crypto.GenerateKDFSalt()
+	newSalt, err := m.kdf.GenerateSalt()
 	if err != nil {
 		return "", nil, "", fmt.Errorf("generate kdf salt: %w", err)
 	}
 
-	newKey, err := crypto.DeriveUserKey([]byte(newPassword), newSalt)
+	newKey, err := m.kdf.DeriveKey([]byte(newPassword), newSalt)
 	if err != nil {
 		return "", nil, "", fmt.Errorf("derive new key: %w", err)
 	}
@@ -456,7 +495,7 @@ func (m *Manager) buildNewCredentials(
 		return "", nil, "", fmt.Errorf("encrypt totp secret: %w", err)
 	}
 
-	hash, err = crypto.HashPassword(newPassword)
+	hash, err = m.pw.Hash(newPassword)
 	if err != nil {
 		return "", nil, "", fmt.Errorf("hash password: %w", err)
 	}
@@ -467,12 +506,18 @@ func (m *Manager) buildNewCredentials(
 // verifyLoginFactors checks the password and the TOTP second factor for usr.
 // Returns domain.ErrInvalidTOTP on any factor mismatch so the caller cannot learn
 // which factor failed (no username/password enumeration oracle).
+//
+// Timing note: a wrong password returns after one argon2 verify, while a correct
+// password additionally runs HKDF + AES-GCM + TOTP validation, so the correct-password
+// path is observably longer. This is accepted: it is not an enumeration oracle (exploiting
+// it requires already knowing the password), the argon2 verify dominates the measurable
+// time, and login is rate-limited.
 func (m *Manager) verifyLoginFactors(ctx context.Context, usr *domain.User, password, totpCode string) error {
-	if !crypto.VerifyPassword(usr.PasswordHash, password) {
+	if !m.pw.Verify(usr.PasswordHash, password) {
 		return domain.ErrInvalidTOTP
 	}
 
-	derivedKey, err := crypto.DeriveUserKey([]byte(password), usr.KDFSalt)
+	derivedKey, err := m.kdf.DeriveKey([]byte(password), usr.KDFSalt)
 	if err != nil {
 		return fmt.Errorf("derive user key: %w", err)
 	}
@@ -500,7 +545,7 @@ func (m *Manager) verifyLoginFactors(ctx context.Context, usr *domain.User, pass
 func (m *Manager) verifyTOTPStepUp(
 	ctx context.Context, oldPassword string, usr *domain.User, totpCode string,
 ) (string, error) {
-	oldKey, err := crypto.DeriveUserKey([]byte(oldPassword), usr.KDFSalt)
+	oldKey, err := m.kdf.DeriveKey([]byte(oldPassword), usr.KDFSalt)
 	if err != nil {
 		return "", fmt.Errorf("derive user key: %w", err)
 	}
@@ -527,17 +572,17 @@ func (m *Manager) verifyTOTPStepUp(
 // The caller persists the returned user (directly or via RedeemInvite); generating the QR
 // here, before any insert, keeps the insert the last fallible step so it can be rolled back.
 func (m *Manager) buildUser(username, password string, isAdmin bool) (*domain.User, string, error) {
-	rawSecret, err := crypto.GenerateTOTPSecret()
+	rawSecret, err := m.totp.GenerateSecret()
 	if err != nil {
 		return nil, "", fmt.Errorf("generate totp secret: %w", err)
 	}
 
-	kdfSalt, err := crypto.GenerateKDFSalt()
+	kdfSalt, err := m.kdf.GenerateSalt()
 	if err != nil {
 		return nil, "", fmt.Errorf("generate kdf salt: %w", err)
 	}
 
-	derivedKey, err := crypto.DeriveUserKey([]byte(password), kdfSalt)
+	derivedKey, err := m.kdf.DeriveKey([]byte(password), kdfSalt)
 	if err != nil {
 		return nil, "", fmt.Errorf("derive user key: %w", err)
 	}
@@ -547,7 +592,7 @@ func (m *Manager) buildUser(username, password string, isAdmin bool) (*domain.Us
 		return nil, "", fmt.Errorf("encrypt totp secret: %w", err)
 	}
 
-	pwHash, err := crypto.HashPassword(password)
+	pwHash, err := m.pw.Hash(password)
 	if err != nil {
 		return nil, "", fmt.Errorf("hash password: %w", err)
 	}
@@ -562,7 +607,7 @@ func (m *Manager) buildUser(username, password string, isAdmin bool) (*domain.Us
 		CreatedAt:    time.Now(),
 	}
 
-	qrURL, err := crypto.GenerateQRCodeDataURL(m.issuer, username, rawSecret)
+	qrURL, err := m.totp.GenerateQRCode(m.issuer, username, rawSecret)
 	if err != nil {
 		return nil, "", fmt.Errorf("generate qr code: %w", err)
 	}
@@ -575,7 +620,7 @@ func (m *Manager) buildUser(username, password string, isAdmin bool) (*domain.Us
 // Replay protection is enforced by an atomic conditional update in the store, so it
 // survives process restarts and is consistent across instances.
 func (m *Manager) validateAndRecordTOTP(ctx context.Context, userID, secret, code string) (bool, error) {
-	valid, counter := crypto.ValidateTOTPWithCounter(secret, code)
+	valid, counter := m.totp.ValidateWithCounter(secret, code)
 	if !valid {
 		return false, nil
 	}

@@ -532,6 +532,9 @@ func (h *Handler) AdminInviteHandler(w http.ResponseWriter, r *http.Request) {
 			scheme = "https"
 		}
 
+		// r.Host is attacker-controllable, but this invite link is only displayed (html/template
+		// escaped) for an admin to copy manually — it is not emailed or trusted server-side. If
+		// invites ever become email links, validate r.Host against an allowed-hosts allowlist here.
 		data.InviteURL = scheme + "://" + r.Host + "/setup?invite=" + url.QueryEscape(token)
 	}
 

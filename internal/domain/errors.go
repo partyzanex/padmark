@@ -5,14 +5,18 @@ import "errors"
 var (
 	ErrNotFound           = errors.New("not found")
 	ErrExpired            = errors.New("note has expired")
-	ErrTitleRequired      = errors.New("title is required")
 	ErrTitleTooLong       = errors.New("title exceeds maximum length")
 	ErrContentTooLong     = errors.New("content exceeds maximum length")
 	ErrInvalidContentType = errors.New("unsupported content type")
 	ErrInvalidSlug        = errors.New("invalid slug: use 1-100 alphanumeric/hyphen/underscore, start with alphanumeric")
 	ErrSlugConflict       = errors.New("slug is already taken")
-	ErrForbidden          = errors.New("invalid edit code")
+	ErrForbidden          = errors.New("forbidden")
+	ErrInvalidEditCode    = errors.New("invalid edit code")
 	ErrDecryptionFailed   = errors.New("content decryption failed")
+	// ErrMalformedCiphertext marks stored ciphertext that is structurally invalid (corrupt
+	// base64 / truncated) rather than merely undecryptable with the supplied key. Lets the
+	// usecase log genuine data corruption distinctly from an ordinary wrong-slug miss.
+	ErrMalformedCiphertext = errors.New("malformed ciphertext")
 
 	ErrInvalidTOTP     = errors.New("invalid or expired TOTP code")
 	ErrInviteExpired   = errors.New("invite link has expired")

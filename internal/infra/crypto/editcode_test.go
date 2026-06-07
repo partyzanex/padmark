@@ -10,7 +10,7 @@ import (
 )
 
 func TestEditCodeHasher_Roundtrip(t *testing.T) {
-	hasher := crypto.NewEditCodeHasher()
+	hasher := crypto.NewEditCodeHasher(crypto.DefaultArgon2Params())
 
 	hash, err := hasher.Hash("MySecretCode12")
 	require.NoError(t, err)
@@ -18,7 +18,7 @@ func TestEditCodeHasher_Roundtrip(t *testing.T) {
 }
 
 func TestEditCodeHasher_WrongCodeFails(t *testing.T) {
-	hasher := crypto.NewEditCodeHasher()
+	hasher := crypto.NewEditCodeHasher(crypto.DefaultArgon2Params())
 
 	hash, err := hasher.Hash("correct-code")
 	require.NoError(t, err)
@@ -26,7 +26,7 @@ func TestEditCodeHasher_WrongCodeFails(t *testing.T) {
 }
 
 func TestEditCodeHasher_DifferentSaltsPerHash(t *testing.T) {
-	hasher := crypto.NewEditCodeHasher()
+	hasher := crypto.NewEditCodeHasher(crypto.DefaultArgon2Params())
 
 	hash1, err := hasher.Hash("same-code")
 	require.NoError(t, err)
@@ -41,7 +41,7 @@ func TestEditCodeHasher_DifferentSaltsPerHash(t *testing.T) {
 }
 
 func TestEditCodeHasher_InvalidFormatFails(t *testing.T) {
-	hasher := crypto.NewEditCodeHasher()
+	hasher := crypto.NewEditCodeHasher(crypto.DefaultArgon2Params())
 
 	for _, bad := range []string{
 		"",
@@ -56,7 +56,7 @@ func TestEditCodeHasher_InvalidFormatFails(t *testing.T) {
 }
 
 func TestEditCodeHasher_TamperedHashFails(t *testing.T) {
-	hasher := crypto.NewEditCodeHasher()
+	hasher := crypto.NewEditCodeHasher(crypto.DefaultArgon2Params())
 
 	hash, err := hasher.Hash("code")
 	require.NoError(t, err)

@@ -10,6 +10,8 @@ import (
 	"github.com/partyzanex/padmark/internal/domain"
 )
 
+// Deprecated: tokenCookieName is the cookie for the legacy bearer-token auth
+// (PADMARK_AUTH_TOKENS), superseded by the TOTP session cookie. Will be removed in a future release.
 const tokenCookieName = "padmark_token"
 
 // sessionChecker resolves a session ID to a User; used by the auth middleware.
@@ -69,6 +71,7 @@ func (am *authMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if len(am.allowed) > 0 {
 		token := extractToken(r)
 		if _, ok := am.allowed[token]; ok {
+			setLogUser(r.Context(), "bearer-token", false)
 			am.next.ServeHTTP(w, r)
 
 			return
@@ -110,6 +113,8 @@ func (am *authMiddleware) resolveSessionUser(r *http.Request) (*http.Request, bo
 	if err != nil {
 		return r, false
 	}
+
+	setLogUser(r.Context(), usr.Username, usr.IsAdmin)
 
 	return r.WithContext(context.WithValue(r.Context(), keyUser, usr)), true
 }
@@ -188,7 +193,11 @@ func isNoteIDPath(trimmed string, namedRoutes map[string]struct{}) bool {
 	return !isNamed
 }
 
-// loginHandler validates the token from a form POST and sets a session cookie.
+// loginHandler validates the bearer token from a form POST and sets a session cookie.
+//
+// Deprecated: this is the legacy bearer-token login (POST /login backed by PADMARK_AUTH_TOKENS),
+// superseded by the TOTP account system (POST /totp-login, --enable-accounts). Will be removed
+// in a future release.
 func loginHandler(tokens map[string]struct{}, cookieMaxAge int, trustedProxies []*net.IPNet) http.HandlerFunc {
 	const maxLoginBody = 1024
 
@@ -198,6 +207,9 @@ func loginHandler(tokens map[string]struct{}, cookieMaxAge int, trustedProxies [
 		token := r.FormValue("token")
 		next := safeNextURL(r.FormValue("next"))
 
+		// Token lookup is a map access, not a constant-time compare. This is acceptable: bearer
+		// tokens are high-entropy secrets, so a timing side-channel leaks no practically useful
+		// information (an attacker cannot iterate the keyspace). Login is also rate-limited upstream.
 		if _, ok := tokens[token]; !ok || token == "" {
 			dest := "/login?error=1"
 			if next != "" {

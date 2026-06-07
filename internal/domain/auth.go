@@ -5,14 +5,33 @@ import (
 	"unicode"
 )
 
-const minPasswordLen = 12
+const (
+	minPasswordLen = 12
+	// maxPasswordLen caps the password to keep hashing cheap and bounded. argon2 cost is driven
+	// by its memory/time params, but the input is still pre-hashed, so a multi-megabyte password
+	// is a cheap DoS vector. 1024 bytes is far longer than any human passphrase.
+	maxPasswordLen = 1024
+)
 
-// ValidatePassword checks complexity: min 12 chars, 1 upper, 1 lower, 1 digit, 1 special.
+// ValidatePassword checks complexity: 12–1024 chars, 1 upper, 1 lower, 1 digit, 1 special
+// (punctuation or symbol). Whitespace is allowed and counts toward the length, but does NOT
+// satisfy the special-character requirement. Returns ErrWeakPassword on any violation,
+// including the length bounds.
 func ValidatePassword(password string) error {
-	if len(password) < minPasswordLen {
+	if len(password) < minPasswordLen || len(password) > maxPasswordLen {
 		return ErrWeakPassword
 	}
 
+	if !hasRequiredCharClasses(password) {
+		return ErrWeakPassword
+	}
+
+	return nil
+}
+
+// hasRequiredCharClasses reports whether password contains at least one upper-case, one
+// lower-case, one digit, and one special (punctuation or symbol) character.
+func hasRequiredCharClasses(password string) bool {
 	var hasUpper, hasLower, hasDigit, hasSpecial bool
 
 	for _, char := range password {
@@ -28,11 +47,7 @@ func ValidatePassword(password string) error {
 		}
 	}
 
-	if !hasUpper || !hasLower || !hasDigit || !hasSpecial {
-		return ErrWeakPassword
-	}
-
-	return nil
+	return hasUpper && hasLower && hasDigit && hasSpecial
 }
 
 // User is a registered padmark user with TOTP-based authentication.

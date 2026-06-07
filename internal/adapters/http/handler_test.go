@@ -123,6 +123,27 @@ func (s *HandlerSuite) csrf() string {
 	return adhttp.GenerateCSRFTokenForTest(testCSRFSecret)
 }
 
+// revealPOST builds a POST request for the burn-reveal routes with a valid CSRF cookie+field,
+// since POST /{id} and POST /notes/{id} are now wrapped in csrfGuard. body holds the non-CSRF
+// form fields (may be empty); the matching csrf_token field is appended automatically.
+func (s *HandlerSuite) revealPOST(path, body string) *http.Request {
+	csrf := s.csrf()
+
+	form := body
+	if form != "" {
+		form += "&"
+	}
+
+	form += "csrf_token=" + url.QueryEscape(csrf)
+
+	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "text/html")
+	req.AddCookie(&http.Cookie{Name: "padmark_csrf", Value: csrf}) //nolint:gosec // G124: test cookie
+
+	return req
+}
+
 func (s *HandlerSuite) TearDownTest() {
 	s.ctrl.Finish()
 }
@@ -836,7 +857,7 @@ func (s *HandlerSuite) TestUpdateNote_NotFound() {
 }
 
 func (s *HandlerSuite) TestUpdateNote_Forbidden() {
-	s.manager.EXPECT().Update(gomock.Any(), testID, "wrong", gomock.Any()).Return(nil, domain.ErrForbidden)
+	s.manager.EXPECT().Update(gomock.Any(), testID, "wrong", gomock.Any()).Return(nil, domain.ErrInvalidEditCode)
 
 	body := `{"title":"title","content":"content","edit_code":"wrong"}`
 	w := httptest.NewRecorder()
@@ -918,7 +939,7 @@ func (s *HandlerSuite) TestDeleteNote_NotFound() {
 }
 
 func (s *HandlerSuite) TestDeleteNote_Forbidden() {
-	s.manager.EXPECT().Delete(gomock.Any(), testID, "wrong").Return(domain.ErrForbidden)
+	s.manager.EXPECT().Delete(gomock.Any(), testID, "wrong").Return(domain.ErrInvalidEditCode)
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodDelete, "/notes/"+testID, nil)
@@ -1823,6 +1844,23 @@ func (s *HandlerSuite) TestAPIDocsPage() {
 	s.Contains(w.Body.String(), "redoc")
 }
 
+// TestCSP_RedocScopedToAPIDocs verifies the Redoc CDN origin appears in the CSP only on /api
+// (where Redoc loads) and is absent from the global CSP served on every other page.
+func (s *HandlerSuite) TestCSP_RedocScopedToAPIDocs() {
+	apiRec := httptest.NewRecorder()
+	s.router.ServeHTTP(apiRec, httptest.NewRequest(http.MethodGet, "/api", nil))
+
+	s.Contains(apiRec.Header().Get("Content-Security-Policy"), "https://cdn.redoc.ly",
+		"/api CSP must allow the Redoc CDN")
+
+	homeRec := httptest.NewRecorder()
+	s.router.ServeHTTP(homeRec, httptest.NewRequest(http.MethodGet, "/", nil))
+
+	csp := homeRec.Header().Get("Content-Security-Policy")
+	s.NotEmpty(csp, "global CSP must be set")
+	s.NotContains(csp, "cdn.redoc.ly", "non-docs pages must not allow third-party script origins")
+}
+
 func (s *HandlerSuite) TestAPISpec() {
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/api/openapi.yaml", nil)
@@ -1963,10 +2001,7 @@ func (s *HandlerSuite) TestHandleReveal_OK() {
 	router := s.newRouterWithReveal()
 
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodPost, "/notes/"+testID,
-		strings.NewReader("token=tok-abc"))
-	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	r.Header.Set("Accept", "text/html")
+	r := s.revealPOST("/notes/"+testID, "token=tok-abc")
 
 	router.ServeHTTP(w, r)
 
@@ -1976,12 +2011,26 @@ func (s *HandlerSuite) TestHandleReveal_OK() {
 
 func (s *HandlerSuite) TestHandleReveal_NoRevealStore_Forbidden() {
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodPost, "/notes/"+testID,
-		strings.NewReader("token=tok-abc"))
-	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	r.Header.Set("Accept", "text/html")
+	r := s.revealPOST("/notes/"+testID, "token=tok-abc")
 
 	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusForbidden, w.Code)
+}
+
+// TestHandleReveal_NoCSRF_Forbidden verifies the burn-reveal POST is now CSRF-guarded like
+// every other POST: a request without the CSRF cookie/field is rejected before reaching the
+// handler (no Peek/Consume expectations are set, proving the guard short-circuits first).
+func (s *HandlerSuite) TestHandleReveal_NoCSRF_Forbidden() {
+	router := s.newRouterWithReveal()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/notes/"+testID, strings.NewReader("token=tok-abc"))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	r.Header.Set("Accept", "text/html")
+	// no padmark_csrf cookie / csrf_token field
+
+	router.ServeHTTP(w, r)
 
 	s.Equal(http.StatusForbidden, w.Code)
 }
@@ -1994,10 +2043,7 @@ func (s *HandlerSuite) TestHandleReveal_InvalidToken_Forbidden() {
 	router := s.newRouterWithReveal()
 
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodPost, "/notes/"+testID,
-		strings.NewReader("token=bad-tok"))
-	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	r.Header.Set("Accept", "text/html")
+	r := s.revealPOST("/notes/"+testID, "token=bad-tok")
 
 	router.ServeHTTP(w, r)
 
@@ -2017,10 +2063,7 @@ func (s *HandlerSuite) TestHandleReveal_TokenForWrongNote_Forbidden() {
 	router := s.newRouterWithReveal()
 
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodPost, "/notes/"+testID,
-		strings.NewReader("token=tok-other"))
-	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	r.Header.Set("Accept", "text/html")
+	r := s.revealPOST("/notes/"+testID, "token=tok-other")
 
 	router.ServeHTTP(w, r)
 
@@ -2035,10 +2078,7 @@ func (s *HandlerSuite) TestHandleReveal_MissingToken_Forbidden() {
 	router := s.newRouterWithReveal()
 
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodPost, "/notes/"+testID,
-		strings.NewReader(""))
-	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	r.Header.Set("Accept", "text/html")
+	r := s.revealPOST("/notes/"+testID, "")
 
 	router.ServeHTTP(w, r)
 
@@ -2066,10 +2106,7 @@ func (s *HandlerSuite) TestHandleReveal_CrossNoteToken_TokenNotBurned() {
 	router := s.newRouterWithReveal()
 
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodPost, "/notes/wrong-note",
-		strings.NewReader("token=tok-for-abc123"))
-	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	r.Header.Set("Accept", "text/html")
+	r := s.revealPOST("/notes/wrong-note", "token=tok-for-abc123")
 
 	router.ServeHTTP(w, r)
 

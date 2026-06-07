@@ -725,6 +725,26 @@ func (s *AuthHandlerSuite) TestCSRFGuard_TokenMismatch_Returns403() {
 	s.Equal(http.StatusForbidden, rec.Code)
 }
 
+// TestCSRFGuard_InvalidHMAC_Returns403 covers the branch where cookie and form field match
+// (so the equality check passes) but the token's HMAC signature is invalid — e.g. a token
+// minted with a different secret. The guard must still reject it via verifyCSRFToken.
+func (s *AuthHandlerSuite) TestCSRFGuard_InvalidHMAC_Returns403() {
+	forgedSecret := []byte("a-different-csrf-secret-32bytes!!")
+	forged := adhttp.GenerateCSRFTokenForTest(forgedSecret)
+
+	form := url.Values{"username": {"alice"}, "password": {testPw}, "code": {"123456"}, "csrf_token": {forged}}
+	req := httptest.NewRequest(http.MethodPost, "/totp-login", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	// Cookie == field (equality check passes) but the HMAC was signed with the wrong secret.
+	req.AddCookie(&http.Cookie{Name: "padmark_csrf", Value: forged}) //nolint:gosec // G124: test cookie
+
+	rec := httptest.NewRecorder()
+
+	s.router.ServeHTTP(rec, req)
+
+	s.Equal(http.StatusForbidden, rec.Code)
+}
+
 // ── Session expiry ──
 
 func (s *AuthHandlerSuite) TestTOTPLogin_SessionCookieMaxAge_Is30Days() {

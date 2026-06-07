@@ -22,10 +22,15 @@ type apiDocsViewData struct {
 }
 
 // APIDocsPage handles GET /api — renders the OpenAPI spec with Redoc.
+// Redoc loads from an external CDN, so this page widens its own CSP to allow that origin in
+// script-src; the global CSP (set by withSecurityHeaders) stays free of third-party origins.
 func (h *Handler) APIDocsPage(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	nonce := nonceFromContext(r.Context())
 
-	err := h.apidocsTmpl.Execute(w, apiDocsViewData{Nonce: nonceFromContext(r.Context())})
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Content-Security-Policy", buildCSP(nonce, redocScriptSrc))
+
+	err := h.apidocsTmpl.Execute(w, apiDocsViewData{Nonce: nonce})
 	if err != nil {
 		h.log.ErrorContext(r.Context(), "render apidocs template", "err", err)
 	}

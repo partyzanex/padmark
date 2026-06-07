@@ -1,6 +1,7 @@
 package notes
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"strings"
@@ -33,6 +34,26 @@ func (failingEncryptor) Encrypt(pt, _ string) (string, error) { return pt, nil }
 func (failingEncryptor) Decrypt(_, _ string) (string, error) {
 	return "", errors.New("decryption failed")
 }
+
+// prefixEncryptor transforms content ("enc:"+pt) so the restore-to-plaintext logic is observable.
+type prefixEncryptor struct{}
+
+func (prefixEncryptor) Encrypt(pt, _ string) (string, error) { return "enc:" + pt, nil }
+func (prefixEncryptor) Decrypt(ct, _ string) (string, error) {
+	return strings.TrimPrefix(ct, "enc:"), nil
+}
+
+// prefixHasher transforms edit codes ("hash:"+code) so the restore-to-plaintext logic is observable.
+type prefixHasher struct{}
+
+func (prefixHasher) Hash(code string) (string, error) { return "hash:" + code, nil }
+func (prefixHasher) Verify(hash, code string) bool    { return hash == "hash:"+code }
+
+// errEncryptor fails on Encrypt (Decrypt passes through).
+type errEncryptor struct{}
+
+func (errEncryptor) Encrypt(string, string) (string, error) { return "", errors.New("encrypt boom") }
+func (errEncryptor) Decrypt(ct, _ string) (string, error)   { return ct, nil }
 
 type ManagerTestSuite struct {
 	suite.Suite
@@ -179,7 +200,7 @@ func (s *ManagerTestSuite) TestCreate_CustomEditCodeWrongCodeForbidden() {
 		Content: "new body",
 	})
 
-	s.ErrorIs(err, domain.ErrForbidden)
+	s.ErrorIs(err, domain.ErrInvalidEditCode)
 }
 
 func (s *ManagerTestSuite) TestCreate_EmptyTitle() {
@@ -248,6 +269,99 @@ func (s *ManagerTestSuite) TestCreate_StorageError() {
 
 	s.Require().Error(err)
 	s.ErrorIs(err, storageErr)
+}
+
+// TestCreate_EncryptError_RestoresPlaintext verifies that when content encryption fails,
+// Create returns the error AND leaves the caller's note in plaintext (defer restore),
+// not in the half-hashed state it mutates into. storage.Create must not be reached.
+func (s *ManagerTestSuite) TestCreate_EncryptError_RestoresPlaintext() {
+	mgr := NewManager(s.storage, s.renderer, errEncryptor{}, prefixHasher{}, slog.New(slog.DiscardHandler))
+	note := &domain.Note{Title: "t", Content: "secret body", EditCode: "mycode123456"}
+
+	_, err := mgr.Create(s.T().Context(), note)
+
+	s.Require().Error(err)
+	s.Contains(err.Error(), "encrypt content")
+	s.Equal("secret body", note.Content, "content must be restored to plaintext")
+	s.Equal("mycode123456", note.EditCode, "edit code must be restored to plaintext")
+}
+
+// TestCreate_StorageError_RestoresPlaintextAndPersistsEncrypted verifies that storage receives
+// the encrypted content / hashed edit code / hashed-slug PK, and that on a storage failure the
+// caller's note is restored to plaintext and the slug ID (defer restore).
+func (s *ManagerTestSuite) TestCreate_StorageError_RestoresPlaintextAndPersistsEncrypted() {
+	mgr := NewManager(s.storage, s.renderer, prefixEncryptor{}, prefixHasher{}, slog.New(slog.DiscardHandler))
+	note := &domain.Note{Title: "t", Content: "body", EditCode: "code12345678", ID: "myslug"}
+
+	var atStore domain.Note
+
+	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ context.Context, n *domain.Note) error {
+			atStore = *n // snapshot the row as it is persisted
+
+			return errors.New("db error")
+		})
+
+	_, err := mgr.Create(s.T().Context(), note)
+	s.Require().Error(err)
+
+	// What hit storage: encrypted content, hashed edit code, hashed-slug primary key.
+	s.Equal("enc:body", atStore.Content)
+	s.Equal("hash:code12345678", atStore.EditCode)
+	s.Equal(hashSlug("myslug"), atStore.ID)
+
+	// What the caller is left with: plaintext fields and the slug ID.
+	s.Equal("body", note.Content)
+	s.Equal("code12345678", note.EditCode)
+	s.Equal("myslug", note.ID)
+}
+
+// TestUpdate_PersistsHashedEditCode_NotPlaintext is the parity guard for the Create test: it
+// asserts that the note handed to storage.Update carries the stored argon2 HASH of the edit
+// code, never the plaintext the caller authenticated with. Uses prefixHasher so the hash form
+// ("hash:"+code) is distinguishable from plaintext. This locks in the defense-in-depth fix so a
+// future change to the repository column allow-list cannot silently start persisting plaintext.
+func (s *ManagerTestSuite) TestUpdate_PersistsHashedEditCode_NotPlaintext() {
+	mgr := NewManager(s.storage, s.renderer, prefixEncryptor{}, prefixHasher{}, slog.New(slog.DiscardHandler))
+
+	existing := &domain.Note{ID: "myslug", EditCode: "hash:code12345678", Content: "enc:old"}
+	s.storage.EXPECT().Get(gomock.Any(), hashSlug("myslug")).Return(existing, nil)
+
+	var atStore domain.Note
+
+	s.storage.EXPECT().Update(gomock.Any(), hashSlug("myslug"), gomock.Any()).DoAndReturn(
+		func(_ context.Context, _ string, n *domain.Note) error {
+			atStore = *n // snapshot the row as it is persisted
+
+			return nil
+		})
+
+	updated, err := mgr.Update(s.T().Context(), "myslug", "code12345678", &domain.Note{
+		Title:   "t",
+		Content: "new body",
+	})
+	s.Require().NoError(err)
+
+	// What hits storage: the hashed edit code (NOT the plaintext) and encrypted content.
+	s.Equal("hash:code12345678", atStore.EditCode)
+	s.NotEqual("code12345678", atStore.EditCode)
+	s.Equal("enc:new body", atStore.Content)
+
+	// What the caller gets back: plaintext edit code and plaintext content (defer restore).
+	s.Equal("code12345678", updated.EditCode)
+	s.Equal("new body", updated.Content)
+}
+
+// TestHandleSetBurnExpiryErr_RefetchDecryptFails covers the branch where, after a burn-timer
+// race (SetBurnExpiry → ErrNotFound), the re-fetch succeeds but decryption of the re-fetched
+// note fails — the error must propagate.
+func (s *ManagerTestSuite) TestHandleSetBurnExpiryErr_RefetchDecryptFails() {
+	mgr := NewManager(s.storage, s.renderer, failingEncryptor{}, identityHasher{}, slog.New(slog.DiscardHandler))
+	s.storage.EXPECT().Get(gomock.Any(), hashSlug("burn-x")).Return(&domain.Note{ID: "x", Content: "ct"}, nil)
+
+	_, err := mgr.handleSetBurnExpiryErr(s.T().Context(), "burn-x", domain.ErrNotFound)
+
+	s.Require().Error(err)
 }
 
 // Get
@@ -419,7 +533,7 @@ func (s *ManagerTestSuite) TestUpdate_Forbidden() {
 
 	_, err := s.manager.Update(s.T().Context(), "abc-123", "wrong-code", note)
 
-	s.ErrorIs(err, domain.ErrForbidden)
+	s.ErrorIs(err, domain.ErrInvalidEditCode)
 }
 
 // Delete
@@ -448,7 +562,7 @@ func (s *ManagerTestSuite) TestDelete_Forbidden() {
 
 	err := s.manager.Delete(s.T().Context(), "abc-123", "wrong-code")
 
-	s.ErrorIs(err, domain.ErrForbidden)
+	s.ErrorIs(err, domain.ErrInvalidEditCode)
 }
 
 // GetRendered
@@ -748,7 +862,7 @@ func (s *ManagerTestSuite) TestUpdate_PrivateNote_WrongCode() {
 
 	_, err := s.manager.Update(s.T().Context(), "priv-2", "wrongcode0000", note)
 
-	s.ErrorIs(err, domain.ErrForbidden)
+	s.ErrorIs(err, domain.ErrInvalidEditCode)
 }
 
 // Consume error path

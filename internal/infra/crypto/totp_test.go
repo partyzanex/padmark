@@ -130,6 +130,24 @@ func TestValidateTOTPWithCounter_ValidCode_ReturnsCounterAndTrue(t *testing.T) {
 	assert.InDelta(t, expected, counter, 1)
 }
 
+// TestValidateTOTPWithCounter_SameCode_StableCounter verifies the counter returned for a given
+// code is stable across calls — the property the replay protection relies on (the same code
+// must yield the same counter so a re-use is detected as counter <= lastCounter).
+func TestValidateTOTPWithCounter_SameCode_StableCounter(t *testing.T) {
+	secret, err := crypto.GenerateTOTPSecret()
+	require.NoError(t, err)
+
+	code, err := totp.GenerateCode(secret, time.Now())
+	require.NoError(t, err)
+
+	valid1, c1 := crypto.ValidateTOTPWithCounter(secret, code)
+	valid2, c2 := crypto.ValidateTOTPWithCounter(secret, code)
+
+	require.True(t, valid1)
+	require.True(t, valid2)
+	assert.Equal(t, c1, c2, "same code must yield the same counter")
+}
+
 func TestValidateTOTPWithCounter_WrongCode_ReturnsFalseZeroCounter(t *testing.T) {
 	secret, err := crypto.GenerateTOTPSecret()
 	require.NoError(t, err)

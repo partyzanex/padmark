@@ -69,7 +69,7 @@ func mapUpdateError(err error, log *slog.Logger) ogenapi.UpdateNoteRes {
 	r := errResp(err)
 
 	switch {
-	case errors.Is(err, domain.ErrForbidden):
+	case errors.Is(err, domain.ErrInvalidEditCode), errors.Is(err, domain.ErrForbidden):
 		v := ogenapi.UpdateNoteForbidden(r)
 
 		return &v
@@ -96,7 +96,7 @@ func mapDeleteError(err error, log *slog.Logger) ogenapi.DeleteNoteRes {
 	r := errResp(err)
 
 	switch {
-	case errors.Is(err, domain.ErrForbidden):
+	case errors.Is(err, domain.ErrInvalidEditCode), errors.Is(err, domain.ErrForbidden):
 		v := ogenapi.DeleteNoteForbidden(r)
 
 		return &v

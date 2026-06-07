@@ -37,6 +37,7 @@ type noteViewData struct {
 	RawContent        string
 	Nonce             string
 	ConfirmToken      string
+	CSRFToken         string
 	Views             int
 	Private           bool
 	CanEdit           bool
@@ -260,6 +261,7 @@ func (h *Handler) handleBurnInterstitial(
 
 	data := toBurnInterstitialViewData(note, tok)
 	data.Nonce = nonceFromContext(r.Context())
+	data.CSRFToken = csrfFromContext(r.Context())
 
 	execErr := h.noteTmpl.Execute(w, data)
 	if execErr != nil {

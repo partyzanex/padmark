@@ -117,7 +117,11 @@ func allowedHostSet(raw string) map[string]struct{} {
 	return set
 }
 
-func startRedirectServer(addr string, allowedHosts map[string]struct{}, cancel context.CancelCauseFunc) {
+// startRedirectServer launches the optional plain-HTTP→HTTPS redirect listener. Its failure is
+// non-fatal: the redirect listener is a convenience, so a bind error (e.g. :80 already in use)
+// is logged and swallowed rather than cancelling the main server's context — a healthy HTTPS
+// server must not be torn down because the auxiliary redirector could not start.
+func startRedirectServer(ctx context.Context, addr string, allowedHosts map[string]struct{}, log *slog.Logger) {
 	srv := &http.Server{
 		Addr:              addr,
 		Handler:           httpRedirectHandler(allowedHosts),
@@ -129,7 +133,8 @@ func startRedirectServer(addr string, allowedHosts map[string]struct{}, cancel c
 	go func() {
 		err := srv.ListenAndServe()
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			cancel(err)
+			log.ErrorContext(ctx, "http redirect listener stopped (main server unaffected)",
+				"addr", addr, "err", err)
 		}
 	}()
 }
@@ -150,7 +155,7 @@ func listenAndServe(srv *http.Server, tlsCert, tlsKey string, cancel context.Can
 	}
 }
 
-func runServer(ctx context.Context, cmd *cli.Command, router http.Handler) error {
+func runServer(ctx context.Context, cmd *cli.Command, router http.Handler, log *slog.Logger) error {
 	tlsCert := cmd.String(FlagTLSCert)
 	tlsKey := cmd.String(FlagTLSKey)
 
@@ -178,7 +183,7 @@ func runServer(ctx context.Context, cmd *cli.Command, router http.Handler) error
 
 	if tlsCert != "" {
 		if redirectAddr := cmd.String(FlagHTTPRedirectAddr); redirectAddr != "" {
-			startRedirectServer(redirectAddr, allowedHostSet(cmd.String(FlagAllowedHosts)), cancelServer)
+			startRedirectServer(ctx, redirectAddr, allowedHostSet(cmd.String(FlagAllowedHosts)), log)
 		}
 	}
 
@@ -213,7 +218,10 @@ func attachAccountSystem(
 
 	sessionTTL := time.Duration(cmd.Int(FlagSessionTTL)) * time.Second
 	authMgr := auth.NewManager(
-		users, invites, sessions, crypto.New(), log, cmd.String(FlagTOTPIssuer), sessionTTL,
+		users, invites, sessions, crypto.New(),
+		crypto.NewPasswordHasher(argon2ParamsFromFlags(cmd)),
+		crypto.NewKDF(), crypto.NewTOTP(),
+		log, cmd.String(FlagTOTPIssuer), sessionTTL,
 	)
 
 	empty, emptyErr := authMgr.IsEmpty(ctx)
@@ -244,6 +252,16 @@ func buildAuthRepos(
 	}
 }
 
+// argon2ParamsFromFlags reads the configurable argon2id cost from flags/env.
+// Zero values fall back to the built-in defaults inside the crypto constructors.
+func argon2ParamsFromFlags(cmd *cli.Command) crypto.Argon2Params {
+	return crypto.Argon2Params{
+		Memory:  uint32(cmd.Int(FlagArgon2Memory)), //nolint:gosec // G115: operator-set small cost value
+		Time:    uint32(cmd.Int(FlagArgon2Time)),   //nolint:gosec // G115: operator-set small cost value
+		Threads: uint8(cmd.Int(FlagArgon2Threads)), //nolint:gosec // G115: operator-set small cost value
+	}
+}
+
 func serverAction(ctx context.Context, cmd *cli.Command) error {
 	log := newLogger(cmd.String(FlagLogLevel), cmd.String(FlagLogFormat))
 
@@ -268,7 +286,8 @@ func serverAction(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	authTokens := parseTokens(cmd.String(FlagAuthTokens))
-	manager := notes.NewManager(repo, render.NewRenderer(), crypto.New(), crypto.NewEditCodeHasher(), log)
+	manager := notes.NewManager(repo, render.NewRenderer(), crypto.New(),
+		crypto.NewEditCodeHasher(argon2ParamsFromFlags(cmd)), log)
 
 	userRepo, inviteRepo, sessionRepo, revealStore := buildAuthRepos(storage, db)
 
@@ -288,5 +307,5 @@ func serverAction(ctx context.Context, cmd *cli.Command) error {
 		"tls", cmd.String(FlagTLSCert) != "",
 	)
 
-	return runServer(ctx, cmd, router)
+	return runServer(ctx, cmd, router, log)
 }
