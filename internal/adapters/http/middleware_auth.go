@@ -221,7 +221,7 @@ func loginHandler(tokens map[string]struct{}, cookieMaxAge int, trustedProxies [
 			return
 		}
 
-		http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: all security attributes are set; Secure follows TLS detection
+		http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: HttpOnly/SameSite set; Secure follows TLS detection
 			Name:     tokenCookieName,
 			Value:    token,
 			Path:     "/",

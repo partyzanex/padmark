@@ -15,6 +15,10 @@ const (
 	csrfCookieName = "padmark_csrf"
 	csrfFieldName  = "csrf_token"
 	csrfNonceBytes = 32
+	// maxCSRFFormBytes caps the body parsed by csrfGuard. The guarded endpoints are small auth
+	// forms, so 1 MiB is generous; the explicit cap satisfies gosec G120 (the global body limit
+	// already applies upstream, but gosec wants a bound at the parse site).
+	maxCSRFFormBytes = 1 << 20
 )
 
 // generateCSRFToken creates a signed CSRF token: base64url(nonce) + "." + base64url(HMAC(nonce, secret)).
@@ -64,7 +68,7 @@ func csrfFromContext(ctx context.Context) string {
 }
 
 func setCSRFCookie(w http.ResponseWriter, r *http.Request, token string, trustedProxies []*net.IPNet) {
-	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: all security attributes are set; Secure follows TLS detection
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: HttpOnly/SameSite set; Secure follows TLS detection
 		Name:     csrfCookieName,
 		Value:    token,
 		Path:     "/",
@@ -89,7 +93,7 @@ func rotateCSRFToken(w http.ResponseWriter, r *http.Request, secret []byte, trus
 
 // clearCSRFCookie removes the CSRF cookie on logout.
 func clearCSRFCookie(w http.ResponseWriter, r *http.Request, trustedProxies []*net.IPNet) {
-	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: all security attributes are set; Secure follows TLS detection
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: HttpOnly/SameSite set; Secure follows TLS detection
 		Name:     csrfCookieName,
 		Value:    "",
 		Path:     "/",
@@ -142,7 +146,9 @@ func csrfGuard(secret []byte, next http.HandlerFunc) http.HandlerFunc {
 				return
 			}
 
-			// Body size is already capped by withBodyLimit middleware upstream.
+			// Cap the body before parsing the form (gosec G120); the global limit also applies
+			// upstream, and guarded forms are tiny.
+			r.Body = http.MaxBytesReader(w, r.Body, maxCSRFFormBytes)
 			field := r.FormValue(csrfFieldName)
 
 			if !hmac.Equal([]byte(cookie.Value), []byte(field)) {

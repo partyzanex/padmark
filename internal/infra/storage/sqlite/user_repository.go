@@ -50,10 +50,10 @@ func (r *userRow) toDomain() *domain.User {
 	}
 
 	return &domain.User{
-		ID:           r.ID,
-		Username:     r.Username,
-		TOTPSecret:   r.TOTPSecret,
-		PasswordHash: r.PasswordHash,
+		ID:              r.ID,
+		Username:        r.Username,
+		TOTPSecret:      r.TOTPSecret,
+		PasswordHash:    r.PasswordHash,
 		KDFSalt:         kdfSalt,
 		IsAdmin:         r.IsAdmin,
 		LastTOTPCounter: r.LastTOTPCounter,

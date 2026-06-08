@@ -1440,7 +1440,6 @@ func (s *HandlerSuite) TestAuth_CookieToken() {
 	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
 	r.Header.Set("Accept", "application/json")
 	r.AddCookie(&http.Cookie{Name: "padmark_token", Value: "secret-token"}) //nolint:gosec // G124: test cookie
-
 	router.ServeHTTP(w, r)
 
 	s.Equal(http.StatusOK, w.Code)
@@ -1480,7 +1479,6 @@ func (s *HandlerSuite) TestAuth_InvalidToken() {
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
 	r.Header.Set("Accept", "text/html")
 	r.AddCookie(&http.Cookie{Name: "padmark_token", Value: "wrong"}) //nolint:gosec // G124: test cookie
-
 	router.ServeHTTP(w, r)
 
 	s.Equal(http.StatusSeeOther, w.Code)
@@ -1630,7 +1628,6 @@ func (s *HandlerSuite) TestLogin_OK() {
 		strings.NewReader("token=valid-token&csrf_token="+url.QueryEscape(csrf)))
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	r.AddCookie(&http.Cookie{Name: "padmark_csrf", Value: csrf}) //nolint:gosec // G124: test cookie
-
 	router.ServeHTTP(w, r)
 
 	s.Equal(http.StatusSeeOther, w.Code)
@@ -1660,7 +1657,6 @@ func (s *HandlerSuite) TestLogin_InvalidToken() {
 		strings.NewReader("token=wrong&csrf_token="+url.QueryEscape(csrf)))
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	r.AddCookie(&http.Cookie{Name: "padmark_csrf", Value: csrf}) //nolint:gosec // G124: test cookie
-
 	router.ServeHTTP(w, r)
 
 	s.Equal(http.StatusSeeOther, w.Code)
@@ -1676,7 +1672,6 @@ func (s *HandlerSuite) TestLogin_EmptyToken() {
 		strings.NewReader("token=&csrf_token="+url.QueryEscape(csrf)))
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	r.AddCookie(&http.Cookie{Name: "padmark_csrf", Value: csrf}) //nolint:gosec // G124: test cookie
-
 	router.ServeHTTP(w, r)
 
 	s.Equal(http.StatusSeeOther, w.Code)
@@ -1715,7 +1710,6 @@ func (s *HandlerSuite) TestLogin_OK_WithNext() {
 		strings.NewReader("token=valid-token&next=%2Fnotes%2Fabc&csrf_token="+url.QueryEscape(csrf)))
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	r.AddCookie(&http.Cookie{Name: "padmark_csrf", Value: csrf}) //nolint:gosec // G124: test cookie
-
 	router.ServeHTTP(w, r)
 
 	s.Equal(http.StatusSeeOther, w.Code)
@@ -1731,7 +1725,6 @@ func (s *HandlerSuite) TestLogin_InvalidToken_PreservesNext() {
 		strings.NewReader("token=wrong&next=%2Fnotes%2Fabc&csrf_token="+url.QueryEscape(csrf)))
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	r.AddCookie(&http.Cookie{Name: "padmark_csrf", Value: csrf}) //nolint:gosec // G124: test cookie
-
 	router.ServeHTTP(w, r)
 
 	s.Equal(http.StatusSeeOther, w.Code)
@@ -1749,7 +1742,6 @@ func (s *HandlerSuite) TestLogin_Next_OpenRedirectBlocked() {
 		strings.NewReader("token=valid-token&next=https%3A%2F%2Fevil.com&csrf_token="+url.QueryEscape(csrf)))
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	r.AddCookie(&http.Cookie{Name: "padmark_csrf", Value: csrf}) //nolint:gosec // G124: test cookie
-
 	router.ServeHTTP(w, r)
 
 	s.Equal(http.StatusSeeOther, w.Code)
@@ -1766,7 +1758,6 @@ func (s *HandlerSuite) TestLogin_Next_BackslashOpenRedirectBlocked() {
 		strings.NewReader("token=valid-token&next=%2F%5Cevil.com&csrf_token="+url.QueryEscape(csrf)))
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	r.AddCookie(&http.Cookie{Name: "padmark_csrf", Value: csrf}) //nolint:gosec // G124: test cookie
-
 	router.ServeHTTP(w, r)
 
 	s.Equal(http.StatusSeeOther, w.Code)
@@ -1783,7 +1774,6 @@ func (s *HandlerSuite) TestLogin_Next_DoubleSlashOpenRedirectBlocked() {
 		strings.NewReader("token=valid-token&next=%2F%2Fevil.com&csrf_token="+url.QueryEscape(csrf)))
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	r.AddCookie(&http.Cookie{Name: "padmark_csrf", Value: csrf}) //nolint:gosec // G124: test cookie
-
 	router.ServeHTTP(w, r)
 
 	s.Equal(http.StatusSeeOther, w.Code)
@@ -2171,7 +2161,6 @@ func (s *HandlerSuite) TestPrivateNote_TOTPMode_Authenticated() {
 	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
 	r.Header.Set("Accept", "text/html")
 	r.AddCookie(&http.Cookie{Name: "padmark_session", Value: "valid-sess"}) //nolint:gosec // G124: test cookie
-
 	router.ServeHTTP(w, r)
 
 	s.Equal(http.StatusOK, w.Code)
@@ -2218,7 +2207,6 @@ func (s *HandlerSuite) TestCanEdit_TOTPMode_Authenticated() {
 	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
 	r.Header.Set("Accept", "text/html")
 	r.AddCookie(&http.Cookie{Name: "padmark_session", Value: "valid-sess"}) //nolint:gosec // G124: test cookie
-
 	router.ServeHTTP(w, r)
 
 	s.Equal(http.StatusOK, w.Code)
@@ -2271,7 +2259,6 @@ func (s *HandlerSuite) TestLegacyLogin_NotRateLimited() {
 		r := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form.Encode()))
 		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		r.AddCookie(&http.Cookie{Name: "padmark_csrf", Value: csrf}) //nolint:gosec // G124: test cookie
-
 		s.newRouter([]string{"valid-token"}).ServeHTTP(w, r)
 
 		s.NotEqual(http.StatusTooManyRequests, w.Code,

@@ -30,10 +30,10 @@ type userRow struct {
 
 func toUserRow(usr *domain.User) *userRow {
 	return &userRow{
-		ID:           usr.ID,
-		Username:     usr.Username,
-		TOTPSecret:   usr.TOTPSecret,
-		PasswordHash: usr.PasswordHash,
+		ID:              usr.ID,
+		Username:        usr.Username,
+		TOTPSecret:      usr.TOTPSecret,
+		PasswordHash:    usr.PasswordHash,
 		KDFSalt:         base64.RawURLEncoding.EncodeToString(usr.KDFSalt),
 		IsAdmin:         usr.IsAdmin,
 		LastTOTPCounter: usr.LastTOTPCounter,
@@ -51,10 +51,10 @@ func (r *userRow) toDomain() *domain.User {
 	}
 
 	return &domain.User{
-		ID:           r.ID,
-		Username:     r.Username,
-		TOTPSecret:   r.TOTPSecret,
-		PasswordHash: r.PasswordHash,
+		ID:              r.ID,
+		Username:        r.Username,
+		TOTPSecret:      r.TOTPSecret,
+		PasswordHash:    r.PasswordHash,
 		KDFSalt:         kdfSalt,
 		IsAdmin:         r.IsAdmin,
 		LastTOTPCounter: r.LastTOTPCounter,

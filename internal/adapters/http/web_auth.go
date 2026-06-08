@@ -151,7 +151,7 @@ func (h *Handler) TOTPLoginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: all security attributes are set; Secure follows TLS detection
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: HttpOnly/SameSite set; Secure follows TLS detection
 		Name:     sessionCookieName,
 		Value:    sessID,
 		Path:     "/",
@@ -188,7 +188,7 @@ func (h *Handler) LogoutHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: all security attributes are set; Secure follows TLS detection
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: HttpOnly/SameSite set; Secure follows TLS detection
 		Name:     sessionCookieName,
 		Value:    "",
 		Path:     "/",
@@ -391,7 +391,7 @@ func (h *Handler) doChangePassword(
 	newSessID, changeErr := h.authMgr.ChangePassword(r.Context(), sessID, oldPassword, newPassword, totpCode)
 	if changeErr == nil {
 		// Replace the session cookie: all old sessions were invalidated; use the fresh one.
-		http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: all security attributes are set; Secure follows TLS detection
+		http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: HttpOnly/SameSite set; Secure follows TLS detection
 			Name:     sessionCookieName,
 			Value:    newSessID,
 			Path:     "/",
