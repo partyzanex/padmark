@@ -30,7 +30,10 @@ type ManagerSuite struct {
 }
 
 func newManager(storage notes.Storage) *notes.Manager {
-	return notes.NewManager(storage, render.NewRenderer(), crypto.New(), crypto.NewEditCodeHasher(), discardLog)
+	return notes.NewManager(
+		storage, render.NewRenderer(), crypto.New(),
+		crypto.NewEditCodeHasher(crypto.DefaultArgon2Params()), discardLog,
+	)
 }
 
 // ── Create ──
@@ -224,7 +227,7 @@ func (s *ManagerSuite) TestUpdate_Forbidden() {
 
 	_, err = s.Manager.Update(ctx, created.ID, "wrong-code", &domain.Note{Title: "hijack", Content: "x"})
 
-	s.ErrorIs(err, domain.ErrForbidden)
+	s.ErrorIs(err, domain.ErrInvalidEditCode)
 }
 
 func (s *ManagerSuite) TestUpdate_NotFound() {
@@ -255,7 +258,7 @@ func (s *ManagerSuite) TestDelete_Forbidden() {
 
 	err = s.Manager.Delete(ctx, created.ID, "wrong-code")
 
-	s.ErrorIs(err, domain.ErrForbidden)
+	s.ErrorIs(err, domain.ErrInvalidEditCode)
 }
 
 // ── GetRendered ──
@@ -303,6 +306,25 @@ func (s *ManagerSuite) TestUpdate_ClearsBurnExpiryWhenBurnDisabled() {
 	peek, err := s.Manager.Peek(ctx, created.ID)
 	s.Require().NoError(err)
 	s.Nil(peek.ExpiresAt, "expires_at must be cleared when burn is disabled on update")
+}
+
+// TestUpdate_PreservesEditCode verifies the edit code (its argon2 hash) is left untouched by
+// Update against a real DB: the same code must keep working for subsequent edits. If Update
+// ever stored the plaintext code, the second Verify would fail and this Update would 403.
+func (s *ManagerSuite) TestUpdate_PreservesEditCode() {
+	ctx := s.T().Context()
+
+	created, err := s.Manager.Create(ctx, &domain.Note{Title: "v1", Content: "c1"})
+	s.Require().NoError(err)
+
+	code := created.EditCode
+
+	_, err = s.Manager.Update(ctx, created.ID, code, &domain.Note{Title: "v2", Content: "c2"})
+	s.Require().NoError(err)
+
+	// The edit code's stored hash must be unchanged, so it still verifies on a second update.
+	_, err = s.Manager.Update(ctx, created.ID, code, &domain.Note{Title: "v3", Content: "c3"})
+	s.Require().NoError(err, "edit code must remain valid after an update (hash unchanged)")
 }
 
 func (s *ManagerSuite) TestGetRendered_PlainText_HTMLEscaped() {

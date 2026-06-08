@@ -22,6 +22,8 @@ import (
 	"github.com/partyzanex/padmark/internal/usecases/notes"
 )
 
+const storagePostgres = "postgres"
+
 // dbOpener creates a *bun.DB from a DSN without connecting.
 type dbOpener func(dsn string) (*bun.DB, error)
 
@@ -32,7 +34,7 @@ func openPostgresDB(dsn string) (*bun.DB, error) {
 }
 
 func openSQLiteDB(dsn string) (*bun.DB, error) {
-	sqldb, err := sql.Open(sqliteshim.DriverName(), dsn)
+	sqldb, err := sql.Open(sqliteshim.DriverName(), withSQLitePragmas(dsn))
 	if err != nil {
 		return nil, fmt.Errorf("sql open sqlite: %w", err)
 	}
@@ -40,10 +42,40 @@ func openSQLiteDB(dsn string) (*bun.DB, error) {
 	return bun.NewDB(sqldb, sqlitedialect.New()), nil
 }
 
+// withSQLitePragmas appends the connection pragmas padmark relies on (modernc syntax),
+// each only when not already present in the DSN:
+//   - foreign_keys(1):    enforce FK constraints (off by default) so ON DELETE CASCADE works.
+//   - busy_timeout(5000): wait up to 5s for a lock instead of failing immediately with
+//     SQLITE_BUSY, so the SELECT+UPDATE transactions (invite/reveal consume, redeem) don't
+//     spuriously fail under concurrent writes.
+//   - journal_mode(WAL):  readers don't block the writer (better read-heavy concurrency).
+//     Ignored for in-memory databases.
+func withSQLitePragmas(dsn string) string {
+	pragmas := []struct{ key, value string }{
+		{"_pragma=foreign_keys", "_pragma=foreign_keys(1)"},
+		{"_pragma=busy_timeout", "_pragma=busy_timeout(5000)"},
+		{"_pragma=journal_mode", "_pragma=journal_mode(WAL)"},
+	}
+
+	for i := range pragmas {
+		if strings.Contains(dsn, pragmas[i].key) {
+			continue
+		}
+
+		if strings.Contains(dsn, "?") {
+			dsn += "&" + pragmas[i].value
+		} else {
+			dsn += "?" + pragmas[i].value
+		}
+	}
+
+	return dsn
+}
+
 func openDB(ctx context.Context, storage, dsn string) (*bun.DB, error) {
 	openers := map[string]dbOpener{
-		"postgres": openPostgresDB,
-		"sqlite":   openSQLiteDB,
+		storagePostgres: openPostgresDB,
+		"sqlite":        openSQLiteDB,
 	}
 
 	opener, ok := openers[storage]

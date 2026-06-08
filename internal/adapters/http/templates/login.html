@@ -56,6 +56,36 @@
 
     <div class="login-center">
         <div class="login-card">
+            {{if .TOTPMode}}
+            <div class="login-title">Sign in with TOTP</div>
+            <div class="login-desc">Enter your username and the 6-digit code from your authenticator app.</div>
+
+            {{if .Error}}
+            <div class="login-error">Invalid credentials. Please try again.</div>
+            {{end}}
+
+            <form method="POST" action="/totp-login">
+                <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+                {{if .Next}}<input type="hidden" name="next" value="{{.Next}}">{{end}}
+                <div class="field-group">
+                    <label class="field-label" for="username">Username</label>
+                    <input type="text" class="field-input" name="username" id="username"
+                           placeholder="Your username" autofocus required autocomplete="username">
+                </div>
+                <div class="field-group" style="margin-top:12px;">
+                    <label class="field-label" for="password">Password</label>
+                    <input type="password" class="field-input" name="password" id="password"
+                           placeholder="Your password" required autocomplete="current-password">
+                </div>
+                <div class="field-group" style="margin-top:12px;">
+                    <label class="field-label" for="code">TOTP code</label>
+                    <input type="text" class="field-input" name="code" id="code"
+                           placeholder="6-digit code" inputmode="numeric" pattern="[0-9]{6}"
+                           required autocomplete="one-time-code">
+                </div>
+                <button type="submit" class="btn-publish login-btn">Sign in</button>
+            </form>
+            {{else}}
             <div class="login-title">Authentication required</div>
             <div class="login-desc">Enter your access token to continue.</div>
 
@@ -64,6 +94,7 @@
             {{end}}
 
             <form method="POST" action="/login">
+                <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
                 {{if .Next}}<input type="hidden" name="next" value="{{.Next}}">{{end}}
                 <div class="field-group">
                     <label class="field-label" for="token">Token</label>
@@ -72,6 +103,7 @@
                 </div>
                 <button type="submit" class="btn-publish login-btn">Sign in</button>
             </form>
+            {{end}}
         </div>
     </div>
 
@@ -80,5 +112,6 @@
 <script nonce="{{.Nonce}}">
     {{template "theme-js"}}
 </script>
+<script src="/static/password-toggle.js" defer></script>
 </body>
 </html>

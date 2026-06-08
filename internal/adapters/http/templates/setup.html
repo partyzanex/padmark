@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dim">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Padmark — Setup</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="stylesheet" href="/static/style.css?p={{styleVersion}}">
+    <style nonce="{{.Nonce}}">
+        .login-center {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .login-card {
+            width: 100%;
+            max-width: 420px;
+            background: var(--bg-surface);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-lg);
+            padding: 36px 32px;
+            animation: fade-up 0.5s ease both;
+        }
+        .login-title {
+            font-family: var(--font-display);
+            font-size: 1.15rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 6px;
+        }
+        .login-desc {
+            font-family: var(--font-mono);
+            font-size: 0.72rem;
+            color: var(--text-muted);
+            margin-bottom: 24px;
+        }
+        .login-error {
+            font-family: var(--font-mono);
+            font-size: 0.72rem;
+            color: var(--err-red);
+            margin-bottom: 16px;
+        }
+        .login-btn {
+            width: 100%;
+            margin-top: 16px;
+        }
+        .qr-section {
+            text-align: center;
+            margin-top: 20px;
+        }
+        .qr-section img {
+            border: 4px solid var(--bg-base);
+            border-radius: var(--radius-md);
+        }
+        .qr-instruction {
+            font-family: var(--font-mono);
+            font-size: 0.72rem;
+            color: var(--text-muted);
+            margin-top: 12px;
+            line-height: 1.6;
+        }
+    </style>
+</head>
+<body>
+<div class="wrapper wrapper--centered">
+
+    {{template "header"}}
+
+    <div class="login-center">
+        <div class="login-card">
+            {{if .QRCode}}
+            <div class="login-title">Scan QR code</div>
+            <div class="login-desc">Open your authenticator app and scan the code below.</div>
+            <div class="qr-section">
+                <img src="{{.QRCode}}" alt="TOTP QR code" width="200" height="200">
+                <div class="qr-instruction">After scanning, use the generated code to log in at <a href="/login">/login</a>.</div>
+            </div>
+            {{else}}
+            <div class="login-title">{{if .IsFirstAdmin}}Create admin account{{else}}Create account{{end}}</div>
+            <div class="login-desc">{{if .IsFirstAdmin}}No users yet. Set up the first admin.{{else}}You have been invited. Choose a username.{{end}}</div>
+
+            {{if .Error}}
+            <div class="login-error">{{.Error}}</div>
+            {{end}}
+
+            <form method="POST" action="/setup">
+                <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+                {{if .Token}}<input type="hidden" name="invite" value="{{.Token}}">{{end}}
+                <div class="field-group">
+                    <label class="field-label" for="username">Username</label>
+                    <input type="text" class="field-input" name="username" id="username"
+                           placeholder="Choose a username" autofocus required autocomplete="username">
+                </div>
+                <div class="field-group" style="margin-top:12px;">
+                    <label class="field-label" for="password">Password</label>
+                    <input type="password" class="field-input" name="password" id="password"
+                           placeholder="Min 12 chars, upper+lower+digit+special" required autocomplete="new-password">
+                </div>
+                <div class="field-group" style="margin-top:12px;">
+                    <label class="field-label" for="password_confirm">Confirm password</label>
+                    <input type="password" class="field-input" name="password_confirm" id="password_confirm"
+                           placeholder="Repeat password" required autocomplete="new-password">
+                </div>
+                <button type="submit" class="btn-publish login-btn">Create account</button>
+            </form>
+            {{end}}
+        </div>
+    </div>
+
+</div>
+
+<script nonce="{{.Nonce}}">
+    {{template "theme-js"}}
+</script>
+<script src="/static/password-toggle.js" defer></script>
+</body>
+</html>

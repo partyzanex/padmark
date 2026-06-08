@@ -14,7 +14,7 @@ func getCommand() *urcli.Command {
 	return &urcli.Command{
 		Name:      "get",
 		Usage:     "Get a note by ID",
-		ArgsUsage: "<id>",
+		ArgsUsage: argsUsageID,
 		Flags: []urcli.Flag{
 			&urcli.BoolFlag{
 				Name:  FlagRaw,

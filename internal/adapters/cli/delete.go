@@ -15,7 +15,7 @@ func deleteCommand() *urcli.Command {
 	return &urcli.Command{
 		Name:      "delete",
 		Usage:     "Delete a note",
-		ArgsUsage: "<id>",
+		ArgsUsage: argsUsageID,
 		Flags: []urcli.Flag{
 			&urcli.StringFlag{
 				Name:    FlagEditCode,

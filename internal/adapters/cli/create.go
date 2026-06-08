@@ -12,8 +12,13 @@ import (
 	padmark "github.com/partyzanex/padmark/pkg/client"
 )
 
-// firstLineScanLimit caps how many lines we inspect when deriving a title from content.
-const firstLineScanLimit = 20
+const (
+	// firstLineScanLimit caps how many lines we inspect when deriving a title from content.
+	firstLineScanLimit = 20
+
+	argsUsageID   = "<id>"
+	untitledTitle = "Untitled"
+)
 
 func createCommand() *urcli.Command {
 	return &urcli.Command{
@@ -63,7 +68,23 @@ func createCommand() *urcli.Command {
 	}
 }
 
+// validateBurnTTL enforces the documented contract that --ttl (a grace period after the first
+// read) is only meaningful together with --burn. Without this, `create` silently dropped a
+// lone --ttl while `edit` silently sent it — an inconsistency. Both now reject it explicitly.
+func validateBurnTTL(cmd *urcli.Command) error {
+	if cmd.IsSet(FlagTTL) && !cmd.Bool(FlagBurn) {
+		return errors.New("--ttl requires --burn (it sets the grace period after the first read)")
+	}
+
+	return nil
+}
+
 func createAction(ctx context.Context, cmd *urcli.Command) error {
+	err := validateBurnTTL(cmd)
+	if err != nil {
+		return err
+	}
+
 	content, err := readContent(cmd)
 	if err != nil {
 		return err
@@ -167,5 +188,5 @@ func firstLine(content string) string {
 		}
 	}
 
-	return "Untitled"
+	return untitledTitle
 }

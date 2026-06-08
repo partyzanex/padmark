@@ -7,8 +7,39 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/infra/crypto"
 )
+
+// TestDecrypt_MalformedCiphertext_IsTagged verifies structurally-invalid ciphertext is
+// reported as domain.ErrMalformedCiphertext, so the usecase can log corruption distinctly.
+func TestDecrypt_MalformedCiphertext_IsTagged(t *testing.T) {
+	enc := crypto.New()
+
+	// Invalid base64.
+	_, err := enc.Decrypt("not valid base64 !!!", "slug")
+	require.Error(t, err)
+	require.ErrorIs(t, err, domain.ErrMalformedCiphertext)
+
+	// Valid base64 but shorter than the GCM nonce.
+	_, err = enc.Decrypt("YWI=", "slug") // "ab"
+	require.Error(t, err)
+	require.ErrorIs(t, err, domain.ErrMalformedCiphertext)
+}
+
+// TestDecrypt_WrongKey_NotMalformed verifies a wrong-slug (wrong key) decrypt failure is NOT
+// tagged as malformed — it is an ordinary undecryptable miss, logged at warn level upstream.
+func TestDecrypt_WrongKey_NotMalformed(t *testing.T) {
+	enc := crypto.New()
+
+	ciphertext, err := enc.Encrypt("secret", "slug-A")
+	require.NoError(t, err)
+
+	_, err = enc.Decrypt(ciphertext, "slug-B")
+	require.Error(t, err)
+	require.NotErrorIs(t, err, domain.ErrMalformedCiphertext,
+		"wrong-key failure must not be tagged as malformed ciphertext")
+}
 
 func TestEncryptor_Roundtrip(t *testing.T) {
 	enc := crypto.New()

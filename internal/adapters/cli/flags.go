@@ -1,9 +1,12 @@
 package cli
 
+import "time"
+
 // CLI flag names.
 const (
 	FlagURL      = "url"
 	FlagToken    = "token"
+	FlagTimeout  = "timeout"
 	FlagTitle    = "title"
 	FlagContent  = "content"
 	FlagFile     = "file"
@@ -20,8 +23,13 @@ const (
 const (
 	EnvURL      = "PADMARK_URL"
 	EnvToken    = "PADMARK_TOKEN"
+	EnvTimeout  = "PADMARK_TIMEOUT"
 	EnvEditCode = "PADMARK_EDIT_CODE"
 )
 
 // DefaultURL is the default padmark server address.
 const DefaultURL = "http://localhost:8080"
+
+// DefaultTimeout bounds each request so commands fail fast instead of hanging on a slow or
+// unresponsive server. Override with --timeout (0 disables the bound).
+const DefaultTimeout = 30 * time.Second

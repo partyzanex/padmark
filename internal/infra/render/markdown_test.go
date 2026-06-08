@@ -72,3 +72,31 @@ func (s *RendererSuite) TestEmptyInput() {
 	s.Require().NoError(err)
 	s.Empty(out)
 }
+
+// TestSyntaxHighlightingUsesPrefixedClasses verifies fenced code blocks are highlighted with
+// chroma-* prefixed classes, which the sanitizer allowlist and style.css both depend on.
+func (s *RendererSuite) TestSyntaxHighlightingUsesPrefixedClasses() {
+	out, err := s.r.Render("```go\nfunc main() {}\n```\n")
+	s.Require().NoError(err)
+	s.Contains(out, `class="chroma-chroma chroma-dark"`, "wrapper must carry prefixed classes")
+	s.Contains(out, "chroma-kd", "keyword token must be highlighted with a prefixed class")
+	s.NotContains(out, `class="chroma"`, "unprefixed chroma class must not appear")
+}
+
+// TestStripsArbitraryClassAttribute verifies that a user-supplied class outside the chroma-*
+// vocabulary is removed (cosmetic UI-spoofing protection), since the sanitizer only allows
+// class values matching the chroma allowlist.
+func (s *RendererSuite) TestStripsArbitraryClassAttribute() {
+	out, err := s.r.Render(`<span class="admin-banner">x</span>`)
+	s.Require().NoError(err)
+	s.NotContains(out, "admin-banner", "arbitrary class must be stripped")
+}
+
+// TestStripsChromaLookalikeClass verifies that a class merely starting like chroma but mixed
+// with a forbidden token is rejected as a whole (the regex anchors the full attribute value).
+func (s *RendererSuite) TestStripsChromaLookalikeClass() {
+	out, err := s.r.Render(`<span class="chroma-k evil-class">x</span>`)
+	s.Require().NoError(err)
+	s.NotContains(out, "evil-class", "mixed class value must be rejected as a whole")
+	s.NotContains(out, "chroma-k", "the whole attribute is dropped when any token is invalid")
+}

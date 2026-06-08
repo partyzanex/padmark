@@ -19,7 +19,7 @@ run: build
 
 .PHONY: test
 test:
-	go test -v -count=1 -race ./... -coverprofile=cover.out
+	go test -v -count=1 -race -tags=integration ./... -coverprofile=cover.out
 
 .PHONY: cover
 cover: test

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 
@@ -45,7 +46,9 @@ func pingAction(ctx context.Context, cmd *urcli.Command) error {
 		return fmt.Errorf("write output: %w", erw.err)
 	}
 
-	return readyErr
+	// Both probes contribute to the exit code: a liveness failure must not be masked by a
+	// passing readiness check. errors.Join returns nil only when both checks succeeded.
+	return errors.Join(liveErr, readyErr)
 }
 
 func checkLiveness(ctx context.Context, cl *padmark.Client) error {

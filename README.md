@@ -40,6 +40,8 @@ Those tools are built for humans. padmark is built for agents — and humans who
 - Edit or delete notes using a secret `edit_code` — no login required
 - Make notes disappear after the first read (burn-after-reading)
 - Keep notes private so only authenticated users can see them
+- Gate access with user accounts protected by TOTP two-factor auth, or with API Bearer tokens
+- Store note content encrypted at rest
 - Script everything from the terminal or another service
 
 **What it doesn't do:** team wikis, collaborative editing, document management. Intentionally lightweight.
@@ -205,9 +207,14 @@ padmark-cli delete abc123def4 --edit-code JmNkn0LdjbMw
 
 # Check server health
 padmark-cli ping
+
+# Bound each request (default 30s; 0 disables)
+padmark-cli --timeout 5s get abc123def4
 ```
 
-Set defaults via environment variables: `PADMARK_URL`, `PADMARK_TOKEN`, `PADMARK_EDIT_CODE`.
+Set defaults via environment variables: `PADMARK_URL`, `PADMARK_TOKEN`, `PADMARK_TIMEOUT`, `PADMARK_EDIT_CODE`.
+
+> A bearer token over a non-HTTPS `--url` is sent in cleartext; the CLI prints a stderr warning. Use an `https://` server URL in production.
 
 ---
 
@@ -260,21 +267,53 @@ Interactive API docs live at `/api`. Raw OpenAPI spec at `/api/openapi.yaml`.
 
 ---
 
-## Authentication
+## Authentication & accounts
 
-Authentication is **off by default**. Enable it by setting `--auth-tokens` or `PADMARK_AUTH_TOKENS`:
+padmark has two independent auth mechanisms. Use either, both, or neither.
+
+### Bearer tokens (API / CLI)
+
+Token auth for write operations is **off by default**. Enable it with `--auth-tokens` / `PADMARK_AUTH_TOKENS`:
 
 ```bash
 PADMARK_AUTH_TOKENS="token-a,token-b" go run ./cmd/padmark-server serve
 ```
 
-Once enabled:
+Once enabled, **write operations** (create, update, delete) require `Authorization: Bearer <token>`. Public notes stay readable without a token.
 
-- **Public notes** are still readable without a token
-- **Private notes** require a valid session (browsers are redirected to `/login`, API clients get `401`)
-- **Write operations** (create, update, delete) require `Authorization: Bearer <token>`
+### User accounts with TOTP 2FA (web)
 
-Always public regardless of token config: `/login`, `/static/*`, `/api`, `/api/openapi.yaml`, `/healthz`, `/readyz`.
+**Off by default — the site is fully public** (read and create notes, no login). Enable the account system with `--enable-accounts` / `PADMARK_ENABLE_ACCOUNTS=true`:
+
+```bash
+PADMARK_ENABLE_ACCOUNTS=true go run ./cmd/padmark-server serve
+```
+
+Once enabled, on first run (no users yet) padmark logs:
+
+```
+No users found. Open /setup to create the first admin.
+```
+
+When **disabled**, none of the routes below are gated and `/setup`, `/admin`, etc. return `404`.
+
+- **`/setup`** — create the first admin (username + password). A TOTP QR code is shown **once** — scan it into your authenticator app.
+- **`/login`** — sign in with username + password + a 6-digit TOTP code.
+- **`/admin`** — admins issue single-use **invite links** and revoke users. Revoking a user also clears their sessions and invites.
+- New users onboard via an invite link, choose their own password, and scan their own TOTP QR.
+- **`/change-password`** — rotate the password (requires the current password **and** a TOTP code).
+- Sessions are cookie-based; lifetime via `--session-ttl` (default 30 days).
+
+**Private notes** require either a valid session (browsers are redirected to `/login`) or a Bearer token (API clients get `401`).
+
+Always public regardless of auth config: `/login`, `/setup`, `/logout`, `/static/*`, `/api`, `/api/openapi.yaml`, `/healthz`, `/readyz`.
+
+### Security at rest
+
+- Note content is **encrypted at rest**.
+- Passwords and `edit_code`s are hashed with **argon2id**.
+- Each user's TOTP secret is encrypted under a key derived from their password.
+- TOTP codes are **single-use** (replay-protected) and the protection survives server restarts.
 
 ---
 
@@ -288,11 +327,23 @@ Always public regardless of token config: `/login`, `/static/*`, `/api`, `/api/o
 | `--storage` | `PADMARK_STORAGE` | `sqlite` | `sqlite` or `postgres` |
 | `--dsn` | `PADMARK_DSN` | `padmark.db` | DB path or connection string |
 | `--auth-tokens` | `PADMARK_AUTH_TOKENS` | — | Comma-separated Bearer tokens |
+| `--enable-accounts` | `PADMARK_ENABLE_ACCOUNTS` | `false` | Enable the TOTP account system (`/setup`, `/login`, `/admin`, private-note gating); off = fully public |
+| `--totp-issuer` | `PADMARK_TOTP_ISSUER` | `padmark` | TOTP issuer shown in the authenticator app |
+| `--session-ttl` | `PADMARK_SESSION_TTL` | `2592000` | Session lifetime in seconds (default 30 days) |
+| `--argon2-memory` | `PADMARK_ARGON2_MEMORY` | `65536` | argon2id memory cost (KiB) for password/edit-code hashing — lower for low-RAM hosts |
+| `--argon2-time` | `PADMARK_ARGON2_TIME` | `2` | argon2id iterations (OWASP minimum at 64 MiB) — raise when lowering memory |
+| `--argon2-threads` | `PADMARK_ARGON2_THREADS` | `1` | argon2id parallelism (CPU threads per hash) |
+| `--cookie-max-age` | `PADMARK_COOKIE_MAX_AGE` | `7776000` | Auth cookie max-age in seconds (default 90 days) |
 | `--rate-limit` | `PADMARK_RATE_LIMIT` | `10` | Requests/sec per IP (`0` = disabled) |
 | `--rate-burst` | `PADMARK_RATE_BURST` | `20` | Burst size per IP |
+| `--read-timeout` | `PADMARK_READ_TIMEOUT` | `30` | HTTP read timeout in seconds |
+| `--write-timeout` | `PADMARK_WRITE_TIMEOUT` | `60` | HTTP write timeout in seconds |
+| `--max-header-bytes` | `PADMARK_MAX_HEADER_BYTES` | `65536` | Max request header size in bytes (64 KB) |
+| `--max-body-bytes` | `PADMARK_MAX_BODY_BYTES` | `4194304` | Max request body size in bytes (4 MB) |
 | `--tls-cert` | `PADMARK_TLS_CERT` | — | TLS certificate path |
 | `--tls-key` | `PADMARK_TLS_KEY` | — | TLS private key path |
-| `--http-redirect-addr` | `PADMARK_HTTP_REDIRECT_ADDR` | — | HTTP → HTTPS redirect listener |
+| `--http-redirect-addr` | `PADMARK_HTTP_REDIRECT_ADDR` | — | HTTP → HTTPS redirect listener (TLS only) |
+| `--allowed-hosts` | `PADMARK_ALLOWED_HOSTS` | — | Host allowlist for the HTTP→HTTPS redirect; non-listed hosts get `400` (empty = redirect to request Host) |
 | `--log-level` | `PADMARK_LOG_LEVEL` | `info` | `debug` / `info` / `warn` / `error` |
 | `--log-format` | `PADMARK_LOG_FORMAT` | `json` | `json` or `text` |
 | `--trusted-proxies` | `PADMARK_TRUSTED_PROXIES` | — | Proxy CIDRs/IPs for real client IPs |

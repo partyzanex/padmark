@@ -20,6 +20,10 @@ const maxTrackedIPs = 100_000
 // the next request.
 const limiterTTL = 10 * time.Minute
 
+// totpRatePerMin is the per-IP request cap on POST /totp-login.
+// 10 attempts/min means a 6-digit brute force takes ~16 hours per IP.
+const totpRatePerMin = 10
+
 type rateLimitMiddleware struct {
 	cache          gcache.Cache
 	next           http.Handler
@@ -91,6 +95,45 @@ func clientIP(req *http.Request, trustedProxies []*net.IPNet) string {
 	}
 
 	return remoteHost
+}
+
+// withTOTPRateLimit returns a HandlerFunc wrapper that caps POST /totp-login at
+// totpRatePerMin attempts per minute per client IP. The burst equals the rate cap
+// so an attacker can make at most 10 attempts before being throttled.
+func withTOTPRateLimit(trustedProxies []*net.IPNet, next http.HandlerFunc) http.HandlerFunc {
+	cache := gcache.New(maxTrackedIPs).
+		ARC().
+		Expiration(limiterTTL).
+		LoaderFunc(func(_ any) (any, error) {
+			return rate.NewLimiter(rate.Every(time.Minute/totpRatePerMin), totpRatePerMin), nil
+		}).
+		Build()
+
+	return func(w http.ResponseWriter, r *http.Request) {
+		ip := clientIP(r, trustedProxies)
+
+		cached, err := cache.Get(ip)
+		if err != nil {
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+
+			return
+		}
+
+		limiter, ok := cached.(*rate.Limiter)
+		if !ok {
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+
+			return
+		}
+
+		if !limiter.Allow() {
+			http.Error(w, "too many requests", http.StatusTooManyRequests)
+
+			return
+		}
+
+		next(w, r)
+	}
 }
 
 func isTrustedProxy(ip string, proxies []*net.IPNet) bool {

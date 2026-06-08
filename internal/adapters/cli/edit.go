@@ -16,7 +16,7 @@ func editCommand() *urcli.Command {
 	return &urcli.Command{
 		Name:      "edit",
 		Usage:     "Update an existing note",
-		ArgsUsage: "<id>",
+		ArgsUsage: argsUsageID,
 		Flags: []urcli.Flag{
 			&urcli.StringFlag{
 				Name:    FlagEditCode,
@@ -57,6 +57,11 @@ func editCommand() *urcli.Command {
 }
 
 func editAction(ctx context.Context, cmd *urcli.Command) error {
+	err := validateBurnTTL(cmd)
+	if err != nil {
+		return err
+	}
+
 	id, editCode, err := editActionArgs(cmd)
 	if err != nil {
 		return err
@@ -126,8 +131,11 @@ func buildUpdateReq(cmd *urcli.Command, content, editCode string) *padmark.Updat
 		req.BurnAfterReading = padmark.NewOptBool(cmd.Bool(FlagBurn))
 	}
 
-	if ttl := cmd.Int64(FlagTTL); ttl > 0 {
-		req.TTL = padmark.NewOptInt64(ttl)
+	// TTL only with --burn (enforced by validateBurnTTL), matching `create`'s contract.
+	if cmd.Bool(FlagBurn) {
+		if ttl := cmd.Int64(FlagTTL); ttl > 0 {
+			req.TTL = padmark.NewOptInt64(ttl)
+		}
 	}
 
 	return req

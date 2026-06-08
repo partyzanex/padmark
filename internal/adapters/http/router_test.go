@@ -121,6 +121,11 @@ func TestSafeNextURL(t *testing.T) {
 		{"evil.com/path", ""},
 		{"javascript:alert(1)", ""},
 		{"/valid/../path", "/valid/../path"},
+		// Backslash variants: browsers normalise "\" to "/", so these are open-redirect vectors.
+		{`/\evil.com`, ""},
+		{`/\/evil.com`, ""},
+		{`\\evil.com`, ""},
+		{`/path\to\file`, ""},
 	}
 
 	for _, tc := range tests {

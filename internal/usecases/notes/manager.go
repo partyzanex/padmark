@@ -5,6 +5,8 @@ package notes
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"html"
@@ -19,8 +21,11 @@ import (
 var slugRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,99}$`)
 
 const (
-	slugChars  = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-	slugLength = 32
+	slugChars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	// slugLength balances short, friendly URLs against the fact that the slug doubles
+	// as the content encryption key. 10 chars over a 62-char alphabet ≈ 60 bits: safe
+	// against online URL-guessing and a meaningful offline brute-force cost (years).
+	slugLength = 10
 
 	editCodeChars  = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
 	editCodeLength = 12
@@ -28,6 +33,29 @@ const (
 
 func newSlug() string     { return randomString(slugChars, slugLength) }
 func newEditCode() string { return randomString(editCodeChars, editCodeLength) }
+
+// resolveSlug validates or generates the note's slug, returning it.
+func resolveSlug(note *domain.Note) (string, error) {
+	if note.ID == "" {
+		note.ID = newSlug()
+
+		return note.ID, nil
+	}
+
+	if !slugRe.MatchString(note.ID) {
+		return "", domain.ErrInvalidSlug
+	}
+
+	return note.ID, nil
+}
+
+// hashSlug returns sha256(slug) as hex — the DB primary key.
+// The plaintext slug (the AES key material) is never stored at rest.
+func hashSlug(slug string) string {
+	sum := sha256.Sum256([]byte(slug))
+
+	return hex.EncodeToString(sum[:])
+}
 
 func randomString(chars string, length int) string {
 	size := big.NewInt(int64(len(chars)))
@@ -101,19 +129,26 @@ func (m *Manager) Create(ctx context.Context, note *domain.Note) (*domain.Note, 
 		return nil, fmt.Errorf("validate: %w", err)
 	}
 
-	if note.ID != "" {
-		if !slugRe.MatchString(note.ID) {
-			return nil, domain.ErrInvalidSlug
-		}
-	} else {
-		note.ID = newSlug()
+	slug, err := resolveSlug(note)
+	if err != nil {
+		return nil, err
 	}
 
 	if note.EditCode == "" {
 		note.EditCode = newEditCode()
 	}
 
+	// Create mutates note in place for persistence (hash the edit code, encrypt the content,
+	// store the hashed slug as the PK). The defer restores the caller-facing plaintext fields
+	// and the slug ID on every return path, so no branch can leave note in an encrypted state.
+	plaintextContent := note.Content
 	plaintextCode := note.EditCode
+
+	defer func() {
+		note.Content = plaintextContent
+		note.EditCode = plaintextCode
+		note.ID = slug
+	}()
 
 	hashedCode, hashErr := m.hasher.Hash(note.EditCode)
 	if hashErr != nil {
@@ -126,29 +161,20 @@ func (m *Manager) Create(ctx context.Context, note *domain.Note) (*domain.Note, 
 	note.CreatedAt = now
 	note.UpdatedAt = now
 
-	plaintextContent := note.Content
-
-	encrypted, encErr := m.encryptor.Encrypt(note.Content, note.ID)
+	encrypted, encErr := m.encryptor.Encrypt(note.Content, slug)
 	if encErr != nil {
-		note.EditCode = plaintextCode
-
 		return nil, fmt.Errorf("encrypt content: %w", encErr)
 	}
 
 	note.Content = encrypted
+	note.ID = hashSlug(slug) // store hash, not slug
 
 	err = m.storage.Create(ctx, note)
 	if err != nil {
-		note.Content = plaintextContent
-		note.EditCode = plaintextCode
-
 		return nil, fmt.Errorf("create note: %w", err)
 	}
 
-	note.Content = plaintextContent
-	note.EditCode = plaintextCode
-
-	m.log.DebugContext(ctx, "note created", "id", note.ID)
+	m.log.DebugContext(ctx, "note created", "id", slug)
 
 	return note, nil
 }
@@ -157,12 +183,14 @@ func (m *Manager) Create(ctx context.Context, note *domain.Note) (*domain.Note, 
 // or applying expiry policy. Intentionally returns expired notes as-is — callers that
 // need expiry enforcement should use Get or View instead.
 func (m *Manager) Peek(ctx context.Context, id string) (*domain.Note, error) {
-	note, err := m.storage.Get(ctx, id)
+	note, err := m.storage.Get(ctx, hashSlug(id))
 	if err != nil {
 		return nil, fmt.Errorf("peek note: %w", err)
 	}
 
-	err = m.decryptNote(note)
+	note.ID = id
+
+	err = m.decryptNote(ctx, note)
 	if err != nil {
 		return nil, fmt.Errorf("peek note: %w", err)
 	}
@@ -173,12 +201,14 @@ func (m *Manager) Peek(ctx context.Context, id string) (*domain.Note, error) {
 // Get returns a note by ID. If the note has expired it is deleted and ErrExpired is returned.
 // Burn-after-reading notes are atomically consumed (deleted and returned) to prevent races.
 func (m *Manager) Get(ctx context.Context, id string) (*domain.Note, error) {
-	note, err := m.storage.Get(ctx, id)
+	note, err := m.storage.Get(ctx, hashSlug(id))
 	if err != nil {
 		return nil, fmt.Errorf("get note: %w", err)
 	}
 
-	err = m.decryptNote(note)
+	note.ID = id
+
+	err = m.decryptNote(ctx, note)
 	if err != nil {
 		return nil, fmt.Errorf("get note: %w", err)
 	}
@@ -222,19 +252,20 @@ func (m *Manager) Update(
 		return nil, fmt.Errorf("validate: %w", err)
 	}
 
-	existing, err := m.storage.Get(ctx, id)
+	dbID := hashSlug(id)
+
+	existing, err := m.storage.Get(ctx, dbID)
 	if err != nil {
 		return nil, fmt.Errorf("update note: %w", err)
 	}
 
 	if !m.hasher.Verify(existing.EditCode, editCode) {
-		return nil, domain.ErrForbidden
+		return nil, domain.ErrInvalidEditCode
 	}
 
 	note.ID = id
 	note.CreatedAt = existing.CreatedAt
 	note.UpdatedAt = time.Now().UTC()
-	note.EditCode = editCode
 
 	if note.ExpiresAt == nil {
 		// When burn is being disabled (BurnTTL cleared) but the existing note has a
@@ -250,7 +281,21 @@ func (m *Manager) Update(
 		note.ContentType = existing.ContentType
 	}
 
-	plaintext := note.Content
+	// Update mutates note in place for persistence (encrypt content, carry the stored edit-code
+	// hash). The defer restores the caller-facing plaintext fields on every return path, so the
+	// returned note never exposes ciphertext and the caller still sees the plaintext edit code.
+	plaintextContent := note.Content
+
+	defer func() {
+		note.Content = plaintextContent
+		note.EditCode = editCode
+	}()
+
+	// Persist the stored hash, never the plaintext the caller supplied. The repository Update
+	// writes a fixed column allow-list that excludes edit_code, so today this is not persisted
+	// at all — but if that list ever changes, this rewrites the column with the existing hash
+	// instead of leaking the plaintext code.
+	note.EditCode = existing.EditCode
 
 	encrypted, encErr := m.encryptor.Encrypt(note.Content, id)
 	if encErr != nil {
@@ -259,14 +304,10 @@ func (m *Manager) Update(
 
 	note.Content = encrypted
 
-	err = m.storage.Update(ctx, id, note)
+	err = m.storage.Update(ctx, dbID, note)
 	if err != nil {
-		note.Content = plaintext
-
 		return nil, fmt.Errorf("update note: %w", err)
 	}
-
-	note.Content = plaintext
 
 	m.log.DebugContext(ctx, "note updated", "id", id)
 
@@ -275,16 +316,18 @@ func (m *Manager) Update(
 
 // Delete removes a note by ID after verifying the edit code.
 func (m *Manager) Delete(ctx context.Context, id, editCode string) error {
-	existing, err := m.storage.Get(ctx, id)
+	dbID := hashSlug(id)
+
+	existing, err := m.storage.Get(ctx, dbID)
 	if err != nil {
 		return fmt.Errorf("delete note: %w", err)
 	}
 
 	if !m.hasher.Verify(existing.EditCode, editCode) {
-		return domain.ErrForbidden
+		return domain.ErrInvalidEditCode
 	}
 
-	err = m.storage.Delete(ctx, id)
+	err = m.storage.Delete(ctx, dbID)
 	if err != nil {
 		return fmt.Errorf("delete note: %w", err)
 	}
@@ -328,7 +371,7 @@ func (m *Manager) GetRenderedPreloaded(
 // applyNotePolicy applies expiry and burn-after-reading logic to an already-fetched note.
 func (m *Manager) applyNotePolicy(ctx context.Context, id string, note *domain.Note) (*domain.Note, error) {
 	if note.ExpiresAt != nil && time.Now().After(*note.ExpiresAt) {
-		delErr := m.storage.Delete(ctx, id)
+		delErr := m.storage.Delete(ctx, hashSlug(id))
 		if delErr != nil {
 			m.log.ErrorContext(ctx, "delete expired note", "id", id, "err", delErr)
 		}
@@ -343,19 +386,17 @@ func (m *Manager) applyNotePolicy(ctx context.Context, id string, note *domain.N
 	return note, nil
 }
 
-// applyViewIncrement increments the view counter unless the note is in a burn state.
-// After SetBurnExpiry the storage flips burn_after_reading=false, so the note
-// comes back with BurnAfterReading=false. Checking only BurnAfterReading
-// would incorrectly increment views during the burn grace period.
-// BurnTTL>0 && ExpiresAt!=nil is the unique signature of a note whose burn
-// timer has been started but has not yet expired.
+// applyViewIncrement increments the view counter unless the note was just consumed by a
+// pure burn-after-reading (no TTL) — that note no longer exists, so a view count is moot.
+// A burn-after-reading note with a TTL survives its grace period and IS counted on every
+// read: SetBurnExpiry flips burn_after_reading off on the timer-start read, so by the time
+// this runs BurnAfterReading is true only for the deleted pure-burn case.
 func (m *Manager) applyViewIncrement(ctx context.Context, id string, note *domain.Note) {
-	inBurnGrace := note.BurnTTL > 0 && note.ExpiresAt != nil
-	if note.BurnAfterReading || inBurnGrace {
+	if note.BurnAfterReading {
 		return
 	}
 
-	incErr := m.storage.IncrementViews(ctx, id)
+	incErr := m.storage.IncrementViews(ctx, hashSlug(id))
 	if incErr != nil {
 		m.log.ErrorContext(ctx, "increment views", "id", id, "err", incErr)
 	} else {
@@ -378,12 +419,22 @@ func (m *Manager) renderNote(id string, note *domain.Note) (string, error) {
 	return rendered, nil
 }
 
-func (m *Manager) decryptNote(note *domain.Note) error {
+// decryptNote decrypts note.Content in place using the slug (note.ID) as the key.
+// The content key is derived from the slug, so any decryption failure means the caller
+// lacks the correct slug (or the stored data is corrupt) — either way the note is
+// inaccessible, so it is collapsed to domain.ErrNotFound (also avoids an existence oracle).
+// Genuine data corruption (malformed ciphertext) is logged at error level to distinguish it
+// from an ordinary wrong-slug miss, which is expected and logged at warn level.
+func (m *Manager) decryptNote(ctx context.Context, note *domain.Note) error {
 	plaintext, err := m.encryptor.Decrypt(note.Content, note.ID)
 	if err != nil {
-		m.log.Warn("content decryption failed", "id", note.ID, "err", err)
+		if errors.Is(err, domain.ErrMalformedCiphertext) {
+			m.log.ErrorContext(ctx, "stored content is corrupt", "id", note.ID, "err", err)
+		} else {
+			m.log.WarnContext(ctx, "content decryption failed (likely wrong slug)", "id", note.ID, "err", err)
+		}
 
-		return domain.ErrDecryptionFailed
+		return domain.ErrNotFound
 	}
 
 	note.Content = plaintext
@@ -396,12 +447,14 @@ func (m *Manager) burnNote(ctx context.Context, id string, note *domain.Note) (*
 		return m.startBurnTimer(ctx, id, note)
 	}
 
-	consumed, consumeErr := m.storage.Consume(ctx, id)
+	consumed, consumeErr := m.storage.Consume(ctx, hashSlug(id))
 	if consumeErr != nil {
 		return nil, fmt.Errorf("burn after reading: %w", consumeErr)
 	}
 
-	decErr := m.decryptNote(consumed)
+	consumed.ID = id
+
+	decErr := m.decryptNote(ctx, consumed)
 	if decErr != nil {
 		return nil, fmt.Errorf("burn after reading: %w", decErr)
 	}
@@ -414,12 +467,14 @@ func (m *Manager) burnNote(ctx context.Context, id string, note *domain.Note) (*
 func (m *Manager) startBurnTimer(ctx context.Context, id string, note *domain.Note) (*domain.Note, error) {
 	expiresAt := time.Now().UTC().Add(time.Duration(note.BurnTTL) * time.Second)
 
-	updated, burnErr := m.storage.SetBurnExpiry(ctx, id, expiresAt)
+	updated, burnErr := m.storage.SetBurnExpiry(ctx, hashSlug(id), expiresAt)
 	if burnErr != nil {
 		return m.handleSetBurnExpiryErr(ctx, id, burnErr)
 	}
 
-	decErr := m.decryptNote(updated)
+	updated.ID = id
+
+	decErr := m.decryptNote(ctx, updated)
 	if decErr != nil {
 		return nil, fmt.Errorf("burn after reading: %w", decErr)
 	}
@@ -434,12 +489,14 @@ func (m *Manager) handleSetBurnExpiryErr(ctx context.Context, id string, burnErr
 		return nil, fmt.Errorf("burn after reading: %w", burnErr)
 	}
 
-	current, getErr := m.storage.Get(ctx, id)
+	current, getErr := m.storage.Get(ctx, hashSlug(id))
 	if getErr != nil {
 		return nil, fmt.Errorf("burn after reading (re-fetch): %w", getErr)
 	}
 
-	decErr := m.decryptNote(current)
+	current.ID = id
+
+	decErr := m.decryptNote(ctx, current)
 	if decErr != nil {
 		return nil, fmt.Errorf("burn after reading (re-fetch): %w", decErr)
 	}

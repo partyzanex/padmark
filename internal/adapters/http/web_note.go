@@ -1,6 +1,8 @@
 package http
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"html/template"
@@ -13,6 +15,14 @@ import (
 	"github.com/partyzanex/padmark/internal/domain"
 )
 
+// slugHash returns sha256(slug) as hex — used as the reveal_tokens.note_id
+// so the plaintext slug is not persisted in any DB column.
+func slugHash(slug string) string {
+	sum := sha256.Sum256([]byte(slug))
+
+	return hex.EncodeToString(sum[:])
+}
+
 //go:embed templates/note.html
 var noteTmplSrc string
 
@@ -21,11 +31,13 @@ type noteViewData struct {
 	Title             string
 	ID                string
 	CreatedAt         string
+	CreatedISO        string // RFC 3339 timestamp for JS client-side (browser-local) formatting
 	ExpiresLabel      string
 	ExpiresISO        string // RFC 3339 timestamp for JS client-side formatting; empty when never expires
 	RawContent        string
 	Nonce             string
 	ConfirmToken      string
+	CSRFToken         string
 	Views             int
 	Private           bool
 	CanEdit           bool
@@ -34,6 +46,7 @@ type noteViewData struct {
 
 func toNoteViewData(note *domain.Note, rendered string) noteViewData {
 	created := note.CreatedAt.Format("Jan 2, 2006, 3:04 PM")
+	createdISO := note.CreatedAt.UTC().Format(time.RFC3339)
 
 	expires := "Never expires"
 	expiresISO := ""
@@ -49,6 +62,7 @@ func toNoteViewData(note *domain.Note, rendered string) noteViewData {
 		Body:         template.HTML(rendered), //nolint:gosec // content is bluemonday-sanitized
 		RawContent:   note.Content,
 		CreatedAt:    created,
+		CreatedISO:   createdISO,
 		Views:        note.Views,
 		ExpiresLabel: expires,
 		ExpiresISO:   expiresISO,
@@ -88,7 +102,10 @@ func toNoteJSON(note *domain.Note) noteJSON {
 // Returns the preloaded note (when auth is configured) and false when the request may proceed.
 // Returns nil and true when the response has been written (auth failed or note not found).
 func (h *Handler) handlePrivateAuth(w http.ResponseWriter, r *http.Request, id string) (*domain.Note, bool) {
-	if h.allowedTokens == nil {
+	// When there is no auth at all, every request is implicitly authorised.
+	// In TOTP-only mode (authMgr set, allowedTokens nil) we must still check
+	// the session before deciding to serve a private note.
+	if h.allowedTokens == nil && h.authMgr == nil {
 		return nil, false
 	}
 
@@ -138,7 +155,10 @@ func (h *Handler) renderNoteHTML(w http.ResponseWriter, r *http.Request, id stri
 
 	data := toNoteViewData(note, rendered)
 	data.Nonce = nonceFromContext(r.Context())
-	data.CanEdit = h.allowedTokens == nil || h.isAuthenticated(r)
+	// isAuthenticated already returns true when neither allowedTokens nor authMgr
+	// is configured, so the old "allowedTokens == nil" short-circuit is redundant
+	// and harmful: it made CanEdit always true in TOTP-only deployments.
+	data.CanEdit = h.isAuthenticated(r)
 
 	err = h.noteTmpl.Execute(w, data)
 	if err != nil {
@@ -230,7 +250,7 @@ func (h *Handler) handleBurnInterstitial(
 		return false
 	}
 
-	tok, err := h.revealStore.Issue(r.Context(), note.ID)
+	tok, err := h.revealStore.Issue(r.Context(), slugHash(note.ID))
 	if err != nil {
 		h.writeErrorPage(w, r, err)
 
@@ -241,6 +261,7 @@ func (h *Handler) handleBurnInterstitial(
 
 	data := toBurnInterstitialViewData(note, tok)
 	data.Nonce = nonceFromContext(r.Context())
+	data.CSRFToken = csrfFromContext(r.Context())
 
 	execErr := h.noteTmpl.Execute(w, data)
 	if execErr != nil {
@@ -255,6 +276,7 @@ func toBurnInterstitialViewData(note *domain.Note, tok string) noteViewData {
 		ID:                note.ID,
 		Title:             note.Title,
 		CreatedAt:         note.CreatedAt.Format("Jan 2, 2006, 3:04 PM"),
+		CreatedISO:        note.CreatedAt.UTC().Format(time.RFC3339),
 		Views:             note.Views,
 		ExpiresLabel:      "Burns after reading",
 		NeedsConfirmation: true,
@@ -293,7 +315,7 @@ func (h *Handler) HandleReveal(w http.ResponseWriter, r *http.Request) {
 
 	tok := r.FormValue("token")
 
-	if !h.revealStore.Consume(r.Context(), tok, id) {
+	if !h.revealStore.Consume(r.Context(), tok, slugHash(id)) {
 		h.writeErrorPage(w, r, domain.ErrForbidden)
 
 		return
