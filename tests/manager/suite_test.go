@@ -32,7 +32,7 @@ type ManagerSuite struct {
 func newManager(storage notes.Storage) *notes.Manager {
 	return notes.NewManager(
 		storage, render.NewRenderer(), crypto.New(),
-		crypto.NewEditCodeHasher(crypto.DefaultArgon2Params()), discardLog,
+		crypto.NewEditCodeHasher(), discardLog,
 	)
 }
 
