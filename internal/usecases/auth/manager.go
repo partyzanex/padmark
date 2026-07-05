@@ -83,6 +83,20 @@ type TOTPManager interface {
 	GenerateQRCode(issuer, account, secret string) (string, error)
 }
 
+// APITokenStore persists CLI API tokens keyed by their SHA-256 hash. The plain key is never stored.
+type APITokenStore interface {
+	// Create persists a newly issued API token.
+	Create(ctx context.Context, t *domain.APIToken) error
+	// GetByHash resolves a token by its SHA-256 hash. Returns domain.ErrNotFound when absent.
+	GetByHash(ctx context.Context, tokenHash string) (*domain.APIToken, error)
+	// List returns all tokens for the admin panel.
+	List(ctx context.Context) ([]*domain.APIToken, error)
+	// RevokeByID deletes a token by its public ID. Returns domain.ErrNotFound when absent.
+	RevokeByID(ctx context.Context, id string) error
+	// UpdateLastUsed records the time of the most recent successful token check.
+	UpdateLastUsed(ctx context.Context, id string, t time.Time) error
+}
+
 // Manager orchestrates TOTP-based authentication and invite-link onboarding.
 type Manager struct {
 	users       UserStore
@@ -96,6 +110,8 @@ type Manager struct {
 	issuer      string
 	dummyPwHash string
 	ttl         time.Duration
+	apiTokens   APITokenStore
+	linkSecret  []byte
 }
 
 // NewManager returns a new auth Manager.
