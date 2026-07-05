@@ -12,6 +12,7 @@ linters:
     - paralleltest
     - tparallel
     - err113
+    - gomodguard_v2
 
   # Linters configuration (migrated from `linters-settings` in v1).
   settings:

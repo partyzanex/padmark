@@ -38,7 +38,8 @@ type CreateNoteRequest struct {
 	BurnAfterReading OptBool `json:"burn_after_reading"`
 	// Grace period in seconds after the first read before the note expires.
 	// Only meaningful when `burn_after_reading` is `true`.
-	// `0` (or omitted) means the note is deleted on the first read with no grace period.
+	// `0` means the note is deleted immediately when it is first revealed.
+	// Omitted means the same as `0` (immediate burn after reading).
 	TTL OptInt64 `json:"ttl"`
 	// Optional custom edit code. If omitted a random 12-character code is generated.
 	// Intended for CLI and automation use; the web UI does not expose this field.
@@ -951,6 +952,7 @@ type UpdateNoteRequest struct {
 	BurnAfterReading OptBool `json:"burn_after_reading"`
 	// New TTL in seconds (grace period after first read).
 	// Only meaningful when `burn_after_reading` is `true`.
+	// `0` means the note is deleted immediately when it is first revealed.
 	TTL OptInt64 `json:"ttl"`
 	// Update the private flag.
 	Private OptBool `json:"private"`

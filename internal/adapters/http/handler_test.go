@@ -333,6 +333,35 @@ func (s *HandlerSuite) TestCreateNote_WithTTL() {
 	s.True(resp.BurnAfterReading)
 }
 
+func (s *HandlerSuite) TestCreateNote_ImmediateBurn() {
+	note := newTestNote("burn", "content")
+	note.BurnAfterReading = true
+	note.BurnTTL = 0
+
+	s.manager.EXPECT().Create(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, n *domain.Note) (*domain.Note, error) {
+			s.True(n.BurnAfterReading)
+			s.Equal(int64(0), n.BurnTTL)
+			s.Nil(n.ExpiresAt)
+			note.ID = n.ID
+
+			return note, nil
+		})
+
+	body := `{"title":"burn","content":"content","burn_after_reading":true,"ttl":0}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/notes", strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusCreated, w.Code)
+
+	var resp testNoteResponse
+	s.Require().NoError(json.NewDecoder(w.Body).Decode(&resp))
+	s.True(resp.BurnAfterReading)
+}
+
 func (s *HandlerSuite) TestCreateNote_EmptyTitle() {
 	note := newTestNote("", "body")
 	s.manager.EXPECT().Create(gomock.Any(), gomock.Any()).Return(note, nil)
@@ -814,6 +843,28 @@ func (s *HandlerSuite) TestUpdateNote_WithTTL() {
 		})
 
 	body := `{"title":"updated","content":"body","edit_code":"code","burn_after_reading":true,"ttl":3600}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPut, "/notes/"+testID, strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusOK, w.Code)
+}
+
+func (s *HandlerSuite) TestUpdateNote_ImmediateBurn() {
+	updated := newTestNote("updated", "body")
+
+	s.manager.EXPECT().Update(gomock.Any(), testID, "code", gomock.Any()).
+		DoAndReturn(func(_ context.Context, _ string, _ string, n *domain.Note) (*domain.Note, error) {
+			s.True(n.BurnAfterReading)
+			s.Equal(int64(0), n.BurnTTL)
+			s.Nil(n.ExpiresAt)
+
+			return updated, nil
+		})
+
+	body := `{"title":"updated","content":"body","edit_code":"code","burn_after_reading":true,"ttl":0}`
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPut, "/notes/"+testID, strings.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")
@@ -1974,6 +2025,27 @@ func (s *HandlerSuite) TestGetNote_BurnInterstitial_IssueError_Returns500() {
 	router.ServeHTTP(w, r)
 
 	s.Equal(http.StatusInternalServerError, w.Code)
+}
+
+func (s *HandlerSuite) TestGetNote_BurnInterstitial_GracePeriod_SkipsInterstitial() {
+	note := newTestNote("secret", "burn me")
+	note.BurnAfterReading = true
+	note.BurnTTL = 300
+
+	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
+	s.manager.EXPECT().GetRenderedPreloaded(gomock.Any(), testID, note).
+		Return(note, "<p>burn me</p>", nil)
+
+	router := s.newRouterWithReveal()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
+	r.Header.Set("Accept", "text/html")
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusOK, w.Code)
+	s.Contains(w.Body.String(), "burn me")
 }
 
 // ── HandleReveal (POST /{id}) ──

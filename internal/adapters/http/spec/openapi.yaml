@@ -260,7 +260,8 @@ components:
           description: |
             Grace period in seconds after the first read before the note expires.
             Only meaningful when `burn_after_reading` is `true`.
-            `0` (or omitted) means the note is deleted on the first read with no grace period.
+            `0` means the note is deleted immediately when it is first revealed.
+            Omitted means the same as `0` (immediate burn after reading).
           example: 3600
         edit_code:
           type: string
@@ -305,6 +306,7 @@ components:
           description: |
             New TTL in seconds (grace period after first read).
             Only meaningful when `burn_after_reading` is `true`.
+            `0` means the note is deleted immediately when it is first revealed.
           example: 3600
         private:
           type: boolean

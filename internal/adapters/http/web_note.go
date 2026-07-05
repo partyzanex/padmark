@@ -225,12 +225,14 @@ func (h *Handler) GetNote(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleBurnInterstitial renders the burn confirmation state via noteTmpl for unauthenticated
-// browser requests to burn-after-reading notes. Returns true if the response was written.
+// handleBurnInterstitial renders the burn confirmation state via noteTmpl for browser
+// requests to immediate-burn notes (burn_after_reading=true with no TTL). Notes that
+// burn after a grace period are served directly; the timer starts on the first read.
+// Returns true if the response was written.
 func (h *Handler) handleBurnInterstitial(
 	w http.ResponseWriter, r *http.Request, id string, preloaded *domain.Note,
 ) bool {
-	if h.revealStore == nil || negotiate(r) != formatHTML || h.isAuthenticated(r) {
+	if h.revealStore == nil || negotiate(r) != formatHTML {
 		return false
 	}
 
@@ -246,7 +248,8 @@ func (h *Handler) handleBurnInterstitial(
 		}
 	}
 
-	if !note.BurnAfterReading {
+	// Interstitial is only for immediate burn. Grace-period notes keep the old behaviour.
+	if !note.BurnAfterReading || note.BurnTTL > 0 {
 		return false
 	}
 

@@ -43,7 +43,10 @@ func (h *Handler) SuccessPage(w http.ResponseWriter, r *http.Request) {
 	expiresLabel := "never expires"
 
 	raw := query.Get("expires")
-	if raw != "" {
+	switch {
+	case raw == "immediately":
+		expiresLabel = "burns immediately after reading"
+	case raw != "":
 		parsed, err := time.Parse(time.RFC3339, raw)
 		if err == nil {
 			expiresLabel = "expires " + parsed.Format("Jan 2, 2006")
