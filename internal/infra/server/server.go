@@ -287,7 +287,7 @@ func serverAction(ctx context.Context, cmd *cli.Command) error {
 
 	authTokens := parseTokens(cmd.String(FlagAuthTokens))
 	manager := notes.NewManager(repo, render.NewRenderer(), crypto.New(),
-		crypto.NewEditCodeHasher(argon2ParamsFromFlags(cmd)), log)
+		crypto.NewEditCodeHasher(), log)
 
 	userRepo, inviteRepo, sessionRepo, revealStore := buildAuthRepos(storage, db)
 

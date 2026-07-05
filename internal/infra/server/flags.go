@@ -215,7 +215,8 @@ func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
 			Name:    FlagArgon2Memory,
 			Sources: cli.EnvVars(EnvArgon2Memory),
 			Value:   DefaultArgon2Memory,
-			Usage:   "argon2id memory cost in KiB for password/edit-code hashing (default: 65536 = 64 MiB)",
+			Usage: "argon2id memory cost in KiB for account password hashing (default: 24576 = 24 MiB); " +
+				"edit codes use a fast hash and are unaffected",
 		},
 		&cli.IntFlag{
 			Name:    FlagArgon2Time,
