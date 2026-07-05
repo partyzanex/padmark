@@ -18,8 +18,9 @@ func (h *Handler) EditPage(w http.ResponseWriter, r *http.Request) {
 
 	// For burn-after-reading notes the TTL is stored as BurnTTL (a duration set at creation).
 	// ExpiresAt is only set after the first read, so we prefer BurnTTL when available.
+	// BurnTTL == 0 means immediate burn after reading.
 	var ttl int64
-	if note.BurnTTL > 0 {
+	if note.BurnAfterReading || note.BurnTTL > 0 {
 		ttl = note.BurnTTL
 	} else if note.ExpiresAt != nil {
 		if remaining := int64(time.Until(*note.ExpiresAt).Seconds()); remaining > 0 {

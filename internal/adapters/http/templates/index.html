@@ -63,10 +63,11 @@
             <div class="burn-time-wrap{{if .BurnAfterReading}} active{{end}}" id="burnTimeWrap">
                 <div class="select-wrap">
                     <select class="field-select burn-select" id="burnTime"{{if not .BurnAfterReading}} disabled{{end}}>
+                        <option value="0"{{if and .BurnAfterReading (eq .TTL 0)}} selected{{end}}>Immediately</option>
                         <option value="300"{{if eq .TTL 300}} selected{{end}}>5 minutes</option>
                         <option value="600"{{if eq .TTL 600}} selected{{end}}>10 minutes</option>
                         <option value="1800"{{if eq .TTL 1800}} selected{{end}}>30 minutes</option>
-                        <option value="3600"{{if or (eq .TTL 3600) (eq .TTL 0)}} selected{{end}}>1 hour</option>
+                        <option value="3600"{{if eq .TTL 3600}} selected{{end}}>1 hour</option>
                         <option value="14400"{{if eq .TTL 14400}} selected{{end}}>4 hours</option>
                         <option value="43200"{{if eq .TTL 43200}} selected{{end}}>12 hours</option>
                         <option value="86400"{{if eq .TTL 86400}} selected{{end}}>24 hours</option>
@@ -162,7 +163,7 @@
         const privateNote = getPrivate();
         const payload = { title, content, burn_after_reading: burnAfterReading, private: privateNote };
         if (slug) payload.slug = slug;
-        if (ttl > 0) payload.ttl = ttl;
+        if (burnAfterReading) payload.ttl = ttl;
 
         try {
             const resp = await fetch('/notes', {
@@ -179,7 +180,11 @@
             }
             const params = new URLSearchParams({ id: note.id });
             if (note.burn_after_reading) params.set('burn', '1');
-            if (note.expires_at) params.set('expires', note.expires_at);
+            if (note.expires_at) {
+                params.set('expires', note.expires_at);
+            } else if (burnAfterReading) {
+                params.set('expires', 'immediately');
+            }
             window.location.href = '/success?' + params.toString();
         } catch (err) {
             btn.textContent = 'Error — try again';
@@ -207,7 +212,7 @@
         const burn = document.getElementById('burnCheck').checked;
         const privateNote = getPrivate();
         const payload = { title: title || 'Untitled', content, edit_code: editCode, burn_after_reading: burn, private: privateNote };
-        if (ttl > 0) payload.ttl = ttl;
+        if (burn) payload.ttl = ttl;
 
         try {
             const resp = await fetch('/notes/' + noteID, {

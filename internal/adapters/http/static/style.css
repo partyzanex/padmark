@@ -900,6 +900,69 @@ kbd {
     animation: fade-up 0.5s ease 0.1s both;
 }
 
+.article-card--warning {
+    border-color: var(--warn-border);
+    background: var(--warn-bg);
+}
+
+.confirm-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 24px 28px 16px;
+    border-bottom: 1px solid var(--warn-border);
+}
+
+.confirm-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: var(--warn);
+    color: var(--bg-deep);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    box-shadow: 0 0 16px var(--warn-border);
+}
+
+.confirm-icon svg { width: 18px; height: 18px; }
+
+.confirm-title {
+    font-family: var(--font-display);
+    font-size: 1.15rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.confirm-body {
+    padding: 22px 28px 0;
+}
+
+.confirm-body p {
+    font-family: var(--font-serif);
+    font-size: 1.02rem;
+    line-height: 1.7;
+    color: var(--text-prose);
+    margin-bottom: 14px;
+}
+
+.confirm-hint {
+    font-size: 0.8rem !important;
+    color: var(--text-secondary) !important;
+    font-family: var(--font-mono) !important;
+}
+
+.confirm-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 12px;
+    padding: 8px 28px 28px;
+}
+
+.confirm-form { display: inline-flex; }
+
 /* ================================================================
    github-markdown-css — markdown-body styles + theme variables
    ================================================================ */

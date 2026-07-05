@@ -29,7 +29,7 @@ func (h *OgenHandler) CreateNote(
 	burnAfterReading := req.BurnAfterReading.Or(false)
 
 	var burnTTL int64
-	if burnAfterReading && req.TTL.IsSet() && req.TTL.Value > 0 {
+	if burnAfterReading && req.TTL.IsSet() && req.TTL.Value >= 0 {
 		burnTTL = req.TTL.Value
 	}
 
@@ -76,7 +76,7 @@ func (h *OgenHandler) UpdateNote(
 	burnAfterReading := req.BurnAfterReading.Or(false)
 
 	var burnTTL int64
-	if burnAfterReading && req.TTL.IsSet() && req.TTL.Value > 0 {
+	if burnAfterReading && req.TTL.IsSet() && req.TTL.Value >= 0 {
 		burnTTL = req.TTL.Value
 	}
 
