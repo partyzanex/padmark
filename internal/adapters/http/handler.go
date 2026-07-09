@@ -14,20 +14,55 @@ import (
 	"net/http"
 
 	"github.com/partyzanex/padmark/internal/domain"
+	"github.com/partyzanex/padmark/internal/usecases/auth"
 )
 
-// AuthManager performs TOTP-based authentication and user management.
-type AuthManager interface {
+// SessionManager authenticates a user and manages their login session lifecycle.
+type SessionManager interface {
 	Login(ctx context.Context, username, password, totpCode, userAgent, clientIP string) (string, error)
 	Logout(ctx context.Context, sessionID string) error
 	GetSession(ctx context.Context, sessionID string) (*domain.User, error)
+	ChangePassword(ctx context.Context, sessionID, oldPassword, newPassword, totpCode string) (string, error)
+}
+
+// OnboardingManager creates the first admin account and enrolls new users via invite tokens.
+type OnboardingManager interface {
+	IsEmpty(ctx context.Context) (bool, error)
 	GenerateInvite(ctx context.Context, adminUserID string) (string, error)
 	AcceptInvite(ctx context.Context, token, username, password string) (string, error)
 	AcceptFirstAdmin(ctx context.Context, username, password string) (string, error)
-	ChangePassword(ctx context.Context, sessionID, oldPassword, newPassword, totpCode string) (string, error)
-	IsEmpty(ctx context.Context) (bool, error)
+}
+
+// UserAdminManager lists and revokes user accounts for the admin panel.
+type UserAdminManager interface {
 	ListUsers(ctx context.Context, adminUserID string) ([]*domain.User, error)
 	RevokeUser(ctx context.Context, adminUserID, targetUserID string) error
+}
+
+// APITokenManager issues, resolves, lists, and revokes long-lived API tokens.
+type APITokenManager interface {
+	// ResolveAPIToken maps a bearer API key to its owning user (used by the auth middleware),
+	// recording last-used. Returns domain.ErrNotFound when the key is unknown, revoked, or expired.
+	ResolveAPIToken(ctx context.Context, plainToken string) (*domain.User, error)
+	// CreateAPIToken issues a long-lived API key for userID, returning the plain key exactly once.
+	CreateAPIToken(ctx context.Context, userID string) (string, error)
+	// ListAPITokens returns all API tokens with owning usernames for the admin panel.
+	ListAPITokens(ctx context.Context, adminUserID string) ([]*auth.APITokenInfo, error)
+	// RevokeAPIToken deletes an API token by its public ID (the token hash).
+	RevokeAPIToken(ctx context.Context, adminUserID, tokenID string) error
+}
+
+// AuthManager performs TOTP-based authentication, user management, and API-token issuance.
+//
+// It is the single seam from the HTTP layer onto the auth Manager — session, onboarding,
+// user-admin and API-token operations the handlers consume through one field. It is composed
+// of four narrower interfaces (SessionManager, OnboardingManager, UserAdminManager,
+// APITokenManager) so each concern is independently readable and mockable per ISP.
+type AuthManager interface {
+	SessionManager
+	OnboardingManager
+	UserAdminManager
+	APITokenManager
 }
 
 //go:embed static

@@ -43,7 +43,7 @@ func globalFlags() []urcli.Flag {
 		&urcli.StringFlag{
 			Name:    FlagToken,
 			Sources: urcli.EnvVars(EnvToken),
-			Usage:   "Bearer token for authentication (env: PADMARK_TOKEN)",
+			Usage:   "Bearer token for authentication (env: PADMARK_TOKEN; falls back to ~/.config/padmark/token)",
 		},
 		&urcli.DurationFlag{
 			Name:    FlagTimeout,
@@ -55,8 +55,10 @@ func globalFlags() []urcli.Flag {
 }
 
 func newPadmarkClient(cmd *urcli.Command) (*padmark.Client, error) {
-	serverURL := cmd.String(FlagURL)
-	token := cmd.String(FlagToken)
+	token, embeddedURL := splitToken(resolveToken(cmd))
+
+	// An envelope token carries its own server URL; an explicit --url/PADMARK_URL still wins.
+	serverURL := pickServerURL(cmd, embeddedURL)
 
 	warnInsecureToken(commandErrWriter(cmd), serverURL, token)
 

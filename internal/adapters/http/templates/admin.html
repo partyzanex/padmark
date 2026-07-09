@@ -41,6 +41,7 @@
             display: flex;
             align-items: center;
             justify-content: space-between;
+            gap: 16px;
             padding: 10px 0;
             border-bottom: 1px solid var(--border-subtle);
             font-family: var(--font-mono);
@@ -90,6 +91,9 @@
             color: var(--err-red);
             margin-bottom: 12px;
         }
+        .btn-row {
+            margin: 12px 0 0;
+        }
     </style>
 </head>
 <body>
@@ -103,8 +107,14 @@
         <div class="admin-section">
             <div class="admin-section-title">Generate invite link</div>
             {{if .InviteURL}}
-            <div class="msg-ok">Invite link generated:</div>
-            <div class="invite-link">{{.InviteURL}}</div>
+            <div class="msg-ok">Invite link generated — copy it now, it will not be shown again:</div>
+            <div class="copy-row">
+                <span class="copy-value" id="inviteLinkValue">{{.InviteURL}}</span>
+                <button type="button" class="copy-btn" id="inviteLinkCopyBtn">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                    Copy
+                </button>
+            </div>
             {{end}}
             {{if .InviteError}}
             <div class="msg-err">{{.InviteError}}</div>
@@ -138,12 +148,84 @@
             <div style="font-family:var(--font-mono);font-size:0.75rem;color:var(--text-muted);">No users.</div>
             {{end}}
         </div>
+
+        <div class="admin-section">
+            <div class="admin-section-title">API keys</div>
+            {{if .NewKey}}
+            <div class="msg-ok">API key created — copy it now, it will not be shown again:</div>
+            <div class="copy-row">
+                <span class="copy-value" id="apiKeyValue">{{.NewKey}}</span>
+                <button type="button" class="copy-btn" id="apiKeyCopyBtn">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                    Copy
+                </button>
+            </div>
+            {{end}}
+            {{if .KeyError}}
+            <div class="msg-err">{{.KeyError}}</div>
+            {{end}}
+            {{range .APITokens}}
+            <div class="user-row">
+                <div>
+                    <span class="user-name">{{slice .ID 0 12}}…</span>
+                    <div class="user-meta">
+                        {{.Username}} · created {{.CreatedAt.Format "2006-01-02 15:04"}} ·
+                        {{if .LastUsedAt}}used {{.LastUsedAt.Format "2006-01-02 15:04"}}{{else}}never used{{end}}
+                    </div>
+                </div>
+                <form method="POST" action="/admin/api-keys/{{.ID}}/revoke">
+                    <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+                    <button type="submit" class="btn-revoke">Revoke</button>
+                </form>
+            </div>
+            {{else}}
+            <div class="user-row">No API keys.</div>
+            {{end}}
+            <div class="btn-row">
+                <form method="POST" action="/admin/api-keys" style="margin-top:24px;">
+                    <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+                    <button type="submit" class="btn-publish">Create key</button>
+                </form>
+            </div>
+        </div>
     </div>
 
 </div>
 
 <script nonce="{{.Nonce}}">
     {{template "theme-js"}}
+
+    // Copy-to-clipboard for one-time secrets (API key, invite link).
+    // Each pair (copy-btn + copy-value with matching id prefix) is wired up independently.
+    function wireCopyBtn(btnId, valueId) {
+        const btn = document.getElementById(btnId);
+        if (!btn) return;
+        const value = document.getElementById(valueId).textContent;
+        const orig = btn.innerHTML;
+
+        function flashCopied() {
+            btn.classList.add('copied');
+            btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> Copied';
+            setTimeout(function () { btn.innerHTML = orig; btn.classList.remove('copied'); }, 2000);
+        }
+
+        btn.addEventListener('click', function () {
+            if (navigator.clipboard) {
+                navigator.clipboard.writeText(value).then(flashCopied);
+            } else {
+                const el = document.createElement('textarea');
+                el.value = value;
+                document.body.appendChild(el);
+                el.select();
+                document.execCommand('copy');
+                document.body.removeChild(el);
+                flashCopied();
+            }
+        });
+    }
+
+    wireCopyBtn('apiKeyCopyBtn', 'apiKeyValue');
+    wireCopyBtn('inviteLinkCopyBtn', 'inviteLinkValue');
 </script>
 </body>
 </html>

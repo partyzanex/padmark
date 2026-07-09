@@ -1,13 +1,16 @@
-include go.mk
-
 GOOSE_VERSION ?= v3.27.0
 GOOSE        := $(CURDIR)/bin/goose
 DB_SQLITE    ?= ./padmark.db
+POSTGRES_DSN := postgres://padmark:padmark@localhost:5432/padmark?sslmode=disable
+
+include go.mk
 
 go.mk:
 	@tmpdir=$$(mktemp -d) && \
 	git clone --depth 1 --single-branch https://github.com/partyzanex/go-makefile.git $$tmpdir && \
 	cp $$tmpdir/go.mk $(CURDIR)/go.mk
+
+GOOSE := $(CURDIR)/bin/goose
 
 $(GOOSE):
 	@echo "Installing goose $(GOOSE_VERSION)..."
@@ -43,3 +46,6 @@ migrate-sqlite-down: $(GOOSE)
 .PHONY: migrate-sqlite-status
 migrate-sqlite-status: $(GOOSE)
 	$(GOOSE) -dir migrations/sqlite sqlite3 $(DB_SQLITE) status
+
+migrate-postgres-up: $(GOOSE)
+	$(GOOSE) -dir migrations/postgres postgres "$(POSTGRES_DSN)" up

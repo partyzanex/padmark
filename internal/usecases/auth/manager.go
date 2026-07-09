@@ -83,15 +83,33 @@ type TOTPManager interface {
 	GenerateQRCode(issuer, account, secret string) (string, error)
 }
 
+// APITokenStore persists CLI API tokens keyed by their SHA-256 hash. The plain key is never stored.
+type APITokenStore interface {
+	// Create persists a newly issued API token.
+	Create(ctx context.Context, t *domain.APIToken) error
+	// CountByUser returns how many tokens the given user already holds, so issuance can be capped.
+	CountByUser(ctx context.Context, userID string) (int, error)
+	// GetByHash resolves a token by its SHA-256 hash. Returns domain.ErrNotFound when absent.
+	GetByHash(ctx context.Context, tokenHash string) (*domain.APIToken, error)
+	// List returns all tokens for the admin panel.
+	List(ctx context.Context) ([]*domain.APIToken, error)
+	// RevokeByHash deletes a token by its SHA-256 hash (the public identifier). Returns
+	// domain.ErrNotFound when absent.
+	RevokeByHash(ctx context.Context, tokenHash string) error
+	// UpdateLastUsed records the time of the most recent successful token check, keyed by hash.
+	UpdateLastUsed(ctx context.Context, tokenHash string, t time.Time) error
+}
+
 // Manager orchestrates TOTP-based authentication and invite-link onboarding.
 type Manager struct {
-	users       UserStore
+	totp        TOTPManager
 	invites     InviteStore
 	sessions    SessionStore
 	enc         Encryptor
 	pw          PasswordHasher
 	kdf         KeyDeriver
-	totp        TOTPManager
+	users       UserStore
+	apiTokens   APITokenStore
 	log         *slog.Logger
 	issuer      string
 	dummyPwHash string
@@ -104,10 +122,13 @@ type Manager struct {
 // contracts instead of importing infra/crypto). issuer is the TOTP issuer name shown in the
 // authenticator app. sessionTTL controls how long a session remains valid; pass 0 for the
 // default (30 days).
+// apiTokens enables the CLI API-token flow (issue/resolve/list/revoke). Pass nil to disable it:
+// the token methods then return domain.ErrFeatureNotSupported.
 func NewManager(
 	users UserStore,
 	invites InviteStore,
 	sessions SessionStore,
+	apiTokens APITokenStore,
 	enc Encryptor,
 	passwordHasher PasswordHasher,
 	keyDeriver KeyDeriver,
@@ -135,6 +156,7 @@ func NewManager(
 		users:       users,
 		invites:     invites,
 		sessions:    sessions,
+		apiTokens:   apiTokens,
 		enc:         enc,
 		pw:          passwordHasher,
 		kdf:         keyDeriver,

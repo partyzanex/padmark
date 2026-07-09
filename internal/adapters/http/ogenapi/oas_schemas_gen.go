@@ -44,8 +44,11 @@ type CreateNoteRequest struct {
 	// Optional custom edit code. If omitted a random 12-character code is generated.
 	// Intended for CLI and automation use; the web UI does not expose this field.
 	EditCode OptString `json:"edit_code"`
-	// When `true` the note requires a valid server auth token to view.
-	// Only meaningful when the server is started with `--auth-tokens`.
+	// When `true` the note requires a valid credential (bearer token or authenticated
+	// session) to view. This gates access to "any authenticated caller", not just the
+	// note's creator — notes have no owner, so it does not isolate the note from other
+	// users on a multi-user instance. Meaningful when the server is started with
+	// `--auth-tokens` and/or `--enable-accounts`.
 	Private OptBool `json:"private"`
 }
 
@@ -192,8 +195,9 @@ type CreateNoteResponse struct {
 	// After the first read of a note with a TTL this becomes `false` and `expires_at`
 	// is set.
 	BurnAfterReading bool `json:"burn_after_reading"`
-	// `true` when the note requires a valid server auth token to view.
-	// `false` for publicly accessible notes.
+	// `true` when the note requires a valid credential (bearer token or authenticated
+	// session) to view — any authenticated caller, not just the note's creator (notes
+	// have no owner). `false` for publicly accessible notes.
 	Private OptBool `json:"private"`
 	// ISO 8601 timestamp after which the note is inaccessible.
 	// Set on the first read for burn-after-reading notes that have a TTL.
@@ -466,8 +470,9 @@ type NoteResponse struct {
 	// After the first read of a note with a TTL this becomes `false` and `expires_at`
 	// is set.
 	BurnAfterReading bool `json:"burn_after_reading"`
-	// `true` when the note requires a valid server auth token to view.
-	// `false` for publicly accessible notes.
+	// `true` when the note requires a valid credential (bearer token or authenticated
+	// session) to view — any authenticated caller, not just the note's creator (notes
+	// have no owner). `false` for publicly accessible notes.
 	Private OptBool `json:"private"`
 	// ISO 8601 timestamp after which the note is inaccessible.
 	// Set on the first read for burn-after-reading notes that have a TTL.
@@ -954,7 +959,8 @@ type UpdateNoteRequest struct {
 	// Only meaningful when `burn_after_reading` is `true`.
 	// `0` means the note is deleted immediately when it is first revealed.
 	TTL OptInt64 `json:"ttl"`
-	// Update the private flag.
+	// Update the private flag. See `CreateNoteRequest.private` for the exact semantics
+	// (requires login, not owner-only).
 	Private OptBool `json:"private"`
 }
 

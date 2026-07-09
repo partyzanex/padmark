@@ -33,7 +33,7 @@ func (s *ManagerSuite) SetupTest() {
 	s.users = NewMockUserStore(s.ctrl)
 	s.invites = NewMockInviteStore(s.ctrl)
 	s.sessions = NewMockSessionStore(s.ctrl)
-	s.mgr = NewManager(s.users, s.invites, s.sessions, crypto.New(),
+	s.mgr = NewManager(s.users, s.invites, s.sessions, nil, crypto.New(),
 		crypto.NewPasswordHasher(crypto.DefaultArgon2Params()),
 		crypto.NewKDF(), crypto.NewTOTP(), discardLog, "padmark", 0)
 }

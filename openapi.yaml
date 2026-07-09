@@ -6,9 +6,17 @@ info:
 
     ## Authentication
 
-    When the server is started with `--auth-tokens`, all write endpoints (`POST`, `PUT`, `DELETE`)
-    require a Bearer token in the `Authorization` header.  Read endpoints (`GET`) are public by
-    default; notes with `private: true` require a valid token to view.
+    Two independent mechanisms can gate access:
+
+    - `--auth-tokens` (deprecated, superseded by `--enable-accounts`): write endpoints (`POST`,
+      `PUT`, `DELETE`) require a Bearer token in the `Authorization` header.
+    - `--enable-accounts`: TOTP-based user accounts with session cookies.
+
+    Read endpoints (`GET`) are public by default. Notes with `private: true` require *some* valid
+    credential (a bearer token or an authenticated session) to view — **any** authenticated caller
+    can read them, not just the note's creator. Notes have no owner column, so `private` means
+    "requires login", not "visible only to the author"; on a multi-user instance it does not
+    isolate notes between different users.
 
     ## Burn-after-reading
 
@@ -274,8 +282,11 @@ components:
           type: boolean
           default: false
           description: |
-            When `true` the note requires a valid server auth token to view.
-            Only meaningful when the server is started with `--auth-tokens`.
+            When `true` the note requires a valid credential (bearer token or authenticated
+            session) to view. This gates access to "any authenticated caller", not just the
+            note's creator — notes have no owner, so it does not isolate the note from other
+            users on a multi-user instance. Meaningful when the server is started with
+            `--auth-tokens` and/or `--enable-accounts`.
 
     UpdateNoteRequest:
       type: object
@@ -310,7 +321,9 @@ components:
           example: 3600
         private:
           type: boolean
-          description: Update the private flag
+          description: |
+            Update the private flag. See `CreateNoteRequest.private` for the exact semantics
+            (requires login, not owner-only).
 
     NoteResponse:
       type: object
@@ -344,8 +357,9 @@ components:
         private:
           type: boolean
           description: |
-            `true` when the note requires a valid server auth token to view.
-            `false` for publicly accessible notes.
+            `true` when the note requires a valid credential (bearer token or authenticated
+            session) to view — any authenticated caller, not just the note's creator (notes
+            have no owner). `false` for publicly accessible notes.
         expires_at:
           type: string
           format: date-time

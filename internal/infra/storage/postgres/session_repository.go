@@ -55,12 +55,16 @@ func NewSessionRepository(db *bun.DB) *SessionRepository {
 	return &SessionRepository{db: db}
 }
 
-// Create inserts a new session record.
+// Create inserts a new session record. Expired sessions are lazily swept on each call
+// (mirroring the invite/reveal-token pattern) since there is no background sweep worker.
 func (r *SessionRepository) Create(ctx context.Context, s *domain.Session) error {
 	_, err := r.db.NewInsert().Model(toSessionRow(s)).Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("insert session: %w", err)
 	}
+
+	//nolint:errcheck // best-effort sweep; stale sessions persist until next Create
+	_ = r.DeleteExpired(ctx)
 
 	return nil
 }

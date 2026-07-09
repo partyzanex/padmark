@@ -2,6 +2,7 @@ package http
 
 import (
 	"errors"
+	"fmt"
 	"html/template"
 	"net"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	_ "embed"
 
 	"github.com/partyzanex/padmark/internal/domain"
+	"github.com/partyzanex/padmark/internal/usecases/auth"
 )
 
 //go:embed templates/change_password.html
@@ -466,11 +468,48 @@ type adminViewData struct {
 	InviteURL   string
 	InviteError string
 	RevokeError string
+	KeyError    string
+	NewKey      string
 	CSRFToken   string
 	Users       []*domain.User
+	APITokens   []*auth.APITokenInfo
 }
 
-// AdminPage handles GET /admin — lists users for admin.
+// adminData assembles the shared admin-page view model — signed-in nonce/CSRF plus the user
+// and API-token lists. Both lists require admin rights, already verified by the caller.
+func (h *Handler) adminData(r *http.Request, adminID string) (adminViewData, error) {
+	data := adminViewData{
+		Nonce:     nonceFromContext(r.Context()),
+		CSRFToken: csrfFromContext(r.Context()),
+	}
+
+	users, err := h.authMgr.ListUsers(r.Context(), adminID)
+	if err != nil {
+		return data, fmt.Errorf("list users: %w", err)
+	}
+
+	tokens, err := h.authMgr.ListAPITokens(r.Context(), adminID)
+	if err != nil {
+		return data, fmt.Errorf("list api tokens: %w", err)
+	}
+
+	data.Users = users
+	data.APITokens = tokens
+
+	return data, nil
+}
+
+// renderAdmin renders the admin template, logging any render error.
+func (h *Handler) renderAdmin(w http.ResponseWriter, r *http.Request, data *adminViewData) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+
+	err := h.adminTmpl.Execute(w, data)
+	if err != nil {
+		h.log.ErrorContext(r.Context(), "render admin template", "err", err)
+	}
+}
+
+// AdminPage handles GET /admin — lists users and API tokens for admin.
 func (h *Handler) AdminPage(w http.ResponseWriter, r *http.Request) {
 	usr := userFromContext(r)
 	if usr == nil || !usr.IsAdmin {
@@ -479,25 +518,18 @@ func (h *Handler) AdminPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	users, err := h.authMgr.ListUsers(r.Context(), usr.ID)
+	data, err := h.adminData(r, usr.ID)
 	if err != nil {
-		h.log.ErrorContext(r.Context(), "list users", "err", err)
+		h.log.ErrorContext(r.Context(), "load admin data", "err", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 
 		return
 	}
 
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	data.RevokeError = r.URL.Query().Get("revoke_error")
+	data.KeyError = r.URL.Query().Get("key_error")
 
-	renderErr := h.adminTmpl.Execute(w, adminViewData{
-		Nonce:       nonceFromContext(r.Context()),
-		Users:       users,
-		CSRFToken:   csrfFromContext(r.Context()),
-		RevokeError: r.URL.Query().Get("revoke_error"),
-	})
-	if renderErr != nil {
-		h.log.ErrorContext(r.Context(), "render admin template", "err", renderErr)
-	}
+	h.renderAdmin(w, r, &data)
 }
 
 // ── admin: generate invite (POST /admin/invite) ──
@@ -511,26 +543,19 @@ func (h *Handler) AdminInviteHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := h.authMgr.GenerateInvite(r.Context(), usr.ID)
-
-	users, listErr := h.authMgr.ListUsers(r.Context(), usr.ID)
-	if listErr != nil {
-		h.log.ErrorContext(r.Context(), "list users after invite", "err", listErr)
-	}
-
-	data := adminViewData{
-		Nonce:     nonceFromContext(r.Context()),
-		Users:     users,
-		CSRFToken: csrfFromContext(r.Context()),
-	}
-
+	data, err := h.adminData(r, usr.ID)
 	if err != nil {
+		h.log.ErrorContext(r.Context(), "load admin data", "err", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+
+		return
+	}
+
+	token, genErr := h.authMgr.GenerateInvite(r.Context(), usr.ID)
+	if genErr != nil {
 		data.InviteError = "Failed to generate invite link."
 	} else {
-		scheme := "http"
-		if isHTTPS(r, h.trustedProxies) {
-			scheme = "https"
-		}
+		scheme := requestScheme(r, h.trustedProxies)
 
 		// r.Host is attacker-controllable, but this invite link is only displayed (html/template
 		// escaped) for an admin to copy manually — it is not emailed or trusted server-side. If
@@ -538,12 +563,7 @@ func (h *Handler) AdminInviteHandler(w http.ResponseWriter, r *http.Request) {
 		data.InviteURL = scheme + "://" + r.Host + "/setup?invite=" + url.QueryEscape(token)
 	}
 
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-
-	renderErr := h.adminTmpl.Execute(w, data)
-	if renderErr != nil {
-		h.log.ErrorContext(r.Context(), "render admin template", "err", renderErr)
-	}
+	h.renderAdmin(w, r, &data)
 }
 
 // ── admin: revoke user (POST /admin/users/{id}/revoke) ──
@@ -574,6 +594,87 @@ func (h *Handler) AdminRevokeHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		http.Redirect(w, r, "/admin?revoke_error="+url.QueryEscape(msg), http.StatusSeeOther)
+
+		return
+	}
+
+	http.Redirect(w, r, "/admin", http.StatusSeeOther)
+}
+
+// ── admin: create API key (POST /admin/api-keys) ──
+
+// AdminCreateKeyHandler handles POST /admin/api-keys — issues an API key for the signed-in admin
+// and re-renders the admin page with the plain key shown exactly once. The plain key is never
+// logged nor placed in a URL: it lives only in the rendered page.
+func (h *Handler) AdminCreateKeyHandler(w http.ResponseWriter, r *http.Request) {
+	usr := userFromContext(r)
+	if usr == nil || !usr.IsAdmin {
+		http.Error(w, "forbidden", http.StatusForbidden)
+
+		return
+	}
+
+	plain, createErr := h.authMgr.CreateAPIToken(r.Context(), usr.ID)
+
+	data, err := h.adminData(r, usr.ID)
+	if err != nil {
+		h.log.ErrorContext(r.Context(), "load admin data", "err", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+
+		return
+	}
+
+	switch {
+	case createErr != nil:
+		h.log.ErrorContext(r.Context(), "create api token", "err", createErr)
+
+		data.KeyError = "Failed to create API key."
+		if errors.Is(createErr, domain.ErrAPITokenLimit) {
+			data.KeyError = "This user already holds the maximum number of API keys; revoke one first."
+		}
+	default:
+		scheme := requestScheme(r, h.trustedProxies)
+
+		// r.Host is attacker-controllable, but this envelope is only displayed (html/template
+		// escaped) for an admin to copy manually — it is never trusted server-side. The server
+		// authenticates on the raw key inside the envelope, not on the URL. Same threat model as
+		// the invite link above; if that ever changes, validate r.Host against an allowlist here.
+		envelope, encErr := domain.EncodeAPITokenEnvelope(scheme+"://"+r.Host, plain)
+		if encErr != nil {
+			h.log.ErrorContext(r.Context(), "encode api token envelope", "err", encErr)
+
+			data.KeyError = "Failed to create API key."
+		} else {
+			data.NewKey = envelope
+		}
+	}
+
+	h.renderAdmin(w, r, &data)
+}
+
+// ── admin: revoke API key (POST /admin/api-keys/{id}/revoke) ──
+
+// AdminRevokeKeyHandler handles POST /admin/api-keys/{id}/revoke — deletes an API key by its
+// public ID (the token hash) and redirects back to /admin.
+func (h *Handler) AdminRevokeKeyHandler(w http.ResponseWriter, r *http.Request) {
+	usr := userFromContext(r)
+	if usr == nil || !usr.IsAdmin {
+		http.Error(w, "forbidden", http.StatusForbidden)
+
+		return
+	}
+
+	tokenID := r.PathValue("id")
+	if tokenID == "" {
+		http.Error(w, "bad request", http.StatusBadRequest)
+
+		return
+	}
+
+	revokeErr := h.authMgr.RevokeAPIToken(r.Context(), usr.ID, tokenID)
+	if revokeErr != nil {
+		h.log.ErrorContext(r.Context(), "revoke api token", "err", revokeErr)
+		http.Redirect(w, r, "/admin?key_error="+url.QueryEscape("Failed to revoke API key."), http.StatusSeeOther)
 
 		return
 	}

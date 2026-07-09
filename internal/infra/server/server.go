@@ -208,7 +208,8 @@ func runServer(ctx context.Context, cmd *cli.Command, router http.Handler, log *
 // middleware passes everything through unless --auth-tokens is set).
 func attachAccountSystem(
 	ctx context.Context, cmd *cli.Command, handler *adaptershttp.Handler,
-	users auth.UserStore, invites auth.InviteStore, sessions auth.SessionStore, log *slog.Logger,
+	users auth.UserStore, invites auth.InviteStore, sessions auth.SessionStore,
+	apiTokens auth.APITokenStore, log *slog.Logger,
 ) *adaptershttp.Handler {
 	if !cmd.Bool(FlagEnableAccounts) {
 		log.InfoContext(ctx, "account system disabled (public mode); set --enable-accounts to enable login/admin")
@@ -218,7 +219,7 @@ func attachAccountSystem(
 
 	sessionTTL := time.Duration(cmd.Int(FlagSessionTTL)) * time.Second
 	authMgr := auth.NewManager(
-		users, invites, sessions, crypto.New(),
+		users, invites, sessions, apiTokens, crypto.New(),
 		crypto.NewPasswordHasher(argon2ParamsFromFlags(cmd)),
 		crypto.NewKDF(), crypto.NewTOTP(),
 		log, cmd.String(FlagTOTPIssuer), sessionTTL,
@@ -237,17 +238,19 @@ func attachAccountSystem(
 //nolint:ireturn // factory: returns different concrete impls (postgres vs sqlite) behind common interfaces
 func buildAuthRepos(
 	storage string, db *bun.DB,
-) (auth.UserStore, auth.InviteStore, auth.SessionStore, adaptershttp.RevealTokenStore) {
+) (auth.UserStore, auth.InviteStore, auth.SessionStore, auth.APITokenStore, adaptershttp.RevealTokenStore) {
 	switch storage {
 	case storagePostgres:
 		return postgres.NewUserRepository(db),
 			postgres.NewInviteRepository(db),
 			postgres.NewSessionRepository(db),
+			postgres.NewAPITokenRepository(db),
 			postgres.NewRevealRepository(db)
 	default:
 		return sqlite.NewUserRepository(db),
 			sqlite.NewInviteRepository(db),
 			sqlite.NewSessionRepository(db),
+			sqlite.NewAPITokenRepository(db),
 			sqlite.NewRevealRepository(db)
 	}
 }
@@ -289,11 +292,11 @@ func serverAction(ctx context.Context, cmd *cli.Command) error {
 	manager := notes.NewManager(repo, render.NewRenderer(), crypto.New(),
 		crypto.NewEditCodeHasher(), log)
 
-	userRepo, inviteRepo, sessionRepo, revealStore := buildAuthRepos(storage, db)
+	userRepo, inviteRepo, sessionRepo, apiTokenRepo, revealStore := buildAuthRepos(storage, db)
 
 	handler := adaptershttp.NewHandler(manager, log, authTokens).
 		WithRevealStore(revealStore)
-	handler = attachAccountSystem(ctx, cmd, handler, userRepo, inviteRepo, sessionRepo, log)
+	handler = attachAccountSystem(ctx, cmd, handler, userRepo, inviteRepo, sessionRepo, apiTokenRepo, log)
 
 	ogenHandler := adaptershttp.NewOgenHandler(manager, db.DB, log)
 

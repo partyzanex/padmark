@@ -535,3 +535,114 @@ func (mr *MockTOTPManagerMockRecorder) ValidateWithCounter(secret, code any) *go
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ValidateWithCounter", reflect.TypeOf((*MockTOTPManager)(nil).ValidateWithCounter), secret, code)
 }
+
+// MockAPITokenStore is a mock of APITokenStore interface.
+type MockAPITokenStore struct {
+	ctrl     *gomock.Controller
+	recorder *MockAPITokenStoreMockRecorder
+	isgomock struct{}
+}
+
+// MockAPITokenStoreMockRecorder is the mock recorder for MockAPITokenStore.
+type MockAPITokenStoreMockRecorder struct {
+	mock *MockAPITokenStore
+}
+
+// NewMockAPITokenStore creates a new mock instance.
+func NewMockAPITokenStore(ctrl *gomock.Controller) *MockAPITokenStore {
+	mock := &MockAPITokenStore{ctrl: ctrl}
+	mock.recorder = &MockAPITokenStoreMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockAPITokenStore) EXPECT() *MockAPITokenStoreMockRecorder {
+	return m.recorder
+}
+
+// CountByUser mocks base method.
+func (m *MockAPITokenStore) CountByUser(ctx context.Context, userID string) (int, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CountByUser", ctx, userID)
+	ret0, _ := ret[0].(int)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// CountByUser indicates an expected call of CountByUser.
+func (mr *MockAPITokenStoreMockRecorder) CountByUser(ctx, userID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CountByUser", reflect.TypeOf((*MockAPITokenStore)(nil).CountByUser), ctx, userID)
+}
+
+// Create mocks base method.
+func (m *MockAPITokenStore) Create(ctx context.Context, t *domain.APIToken) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Create", ctx, t)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// Create indicates an expected call of Create.
+func (mr *MockAPITokenStoreMockRecorder) Create(ctx, t any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Create", reflect.TypeOf((*MockAPITokenStore)(nil).Create), ctx, t)
+}
+
+// GetByHash mocks base method.
+func (m *MockAPITokenStore) GetByHash(ctx context.Context, tokenHash string) (*domain.APIToken, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetByHash", ctx, tokenHash)
+	ret0, _ := ret[0].(*domain.APIToken)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetByHash indicates an expected call of GetByHash.
+func (mr *MockAPITokenStoreMockRecorder) GetByHash(ctx, tokenHash any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetByHash", reflect.TypeOf((*MockAPITokenStore)(nil).GetByHash), ctx, tokenHash)
+}
+
+// List mocks base method.
+func (m *MockAPITokenStore) List(ctx context.Context) ([]*domain.APIToken, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "List", ctx)
+	ret0, _ := ret[0].([]*domain.APIToken)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// List indicates an expected call of List.
+func (mr *MockAPITokenStoreMockRecorder) List(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "List", reflect.TypeOf((*MockAPITokenStore)(nil).List), ctx)
+}
+
+// RevokeByHash mocks base method.
+func (m *MockAPITokenStore) RevokeByHash(ctx context.Context, tokenHash string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RevokeByHash", ctx, tokenHash)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// RevokeByHash indicates an expected call of RevokeByHash.
+func (mr *MockAPITokenStoreMockRecorder) RevokeByHash(ctx, tokenHash any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RevokeByHash", reflect.TypeOf((*MockAPITokenStore)(nil).RevokeByHash), ctx, tokenHash)
+}
+
+// UpdateLastUsed mocks base method.
+func (m *MockAPITokenStore) UpdateLastUsed(ctx context.Context, tokenHash string, t time.Time) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdateLastUsed", ctx, tokenHash, t)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// UpdateLastUsed indicates an expected call of UpdateLastUsed.
+func (mr *MockAPITokenStoreMockRecorder) UpdateLastUsed(ctx, tokenHash, t any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateLastUsed", reflect.TypeOf((*MockAPITokenStore)(nil).UpdateLastUsed), ctx, tokenHash, t)
+}

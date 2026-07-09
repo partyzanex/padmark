@@ -1,33 +1,57 @@
 package http
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 
 	"github.com/partyzanex/padmark/internal/domain"
 )
 
-func writeError(w http.ResponseWriter, err error) {
+// errorJSON is the API error body matching the OpenAPI ErrorResponse schema ({"message": ...}).
+type errorJSON struct {
+	Message string `json:"message"`
+}
+
+// errorStatusMessage maps a domain error to the HTTP status and the client-facing message used in
+// JSON API error responses.
+func errorStatusMessage(err error) (status int, message string) {
 	switch {
 	case errors.Is(err, domain.ErrNotFound):
-		http.Error(w, domain.ErrNotFound.Error(), http.StatusNotFound)
+		return http.StatusNotFound, domain.ErrNotFound.Error()
 	case errors.Is(err, domain.ErrExpired):
-		http.Error(w, domain.ErrExpired.Error(), http.StatusGone)
+		return http.StatusGone, domain.ErrExpired.Error()
 	case errors.Is(err, domain.ErrTitleTooLong):
-		http.Error(w, domain.ErrTitleTooLong.Error(), http.StatusUnprocessableEntity)
+		return http.StatusUnprocessableEntity, domain.ErrTitleTooLong.Error()
 	case errors.Is(err, domain.ErrInvalidContentType):
-		http.Error(w, domain.ErrInvalidContentType.Error(), http.StatusUnprocessableEntity)
+		return http.StatusUnprocessableEntity, domain.ErrInvalidContentType.Error()
 	case errors.Is(err, domain.ErrContentTooLong):
-		http.Error(w, domain.ErrContentTooLong.Error(), http.StatusRequestEntityTooLarge)
+		return http.StatusRequestEntityTooLarge, domain.ErrContentTooLong.Error()
 	case errors.Is(err, domain.ErrInvalidSlug):
-		http.Error(w, domain.ErrInvalidSlug.Error(), http.StatusUnprocessableEntity)
+		return http.StatusUnprocessableEntity, domain.ErrInvalidSlug.Error()
 	case errors.Is(err, domain.ErrSlugConflict):
-		http.Error(w, domain.ErrSlugConflict.Error(), http.StatusConflict)
+		return http.StatusConflict, domain.ErrSlugConflict.Error()
 	case errors.Is(err, domain.ErrInvalidEditCode):
-		http.Error(w, domain.ErrInvalidEditCode.Error(), http.StatusForbidden)
+		return http.StatusForbidden, domain.ErrInvalidEditCode.Error()
 	case errors.Is(err, domain.ErrForbidden):
-		http.Error(w, domain.ErrForbidden.Error(), http.StatusForbidden)
+		return http.StatusForbidden, domain.ErrForbidden.Error()
 	default:
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return http.StatusInternalServerError, "internal server error"
+	}
+}
+
+// writeError writes a JSON error response ({"message": ...}) matching the OpenAPI ErrorResponse
+// schema, so the generated ogen client decodes it into a typed error (e.g. GetNoteNotFound)
+// instead of failing on an unexpected content type. Used for non-HTML (API/CLI) clients; browser
+// requests get the HTML error page via writeErrorPage / writeNoteError.
+func (h *Handler) writeError(w http.ResponseWriter, r *http.Request, err error) {
+	status, msg := errorStatusMessage(err)
+
+	w.Header().Set("Content-Type", mimeJSON)
+	w.WriteHeader(status)
+
+	encErr := json.NewEncoder(w).Encode(errorJSON{Message: msg})
+	if encErr != nil {
+		h.log.ErrorContext(r.Context(), "write error response", "err", encErr)
 	}
 }

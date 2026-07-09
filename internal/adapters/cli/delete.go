@@ -78,7 +78,7 @@ func handleDeleteNoteRes(res padmark.DeleteNoteRes) error {
 	case *padmark.DeleteNoteForbidden:
 		return errors.New("forbidden: wrong edit code")
 	case *padmark.DeleteNoteNotFound:
-		return fmt.Errorf("not found: %s", typed.Message)
+		return errors.New("note not found")
 	case *padmark.DeleteNoteInternalServerError:
 		return fmt.Errorf("server error: %s", typed.Message)
 	default:

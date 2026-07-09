@@ -14,9 +14,13 @@ import (
 // (PADMARK_AUTH_TOKENS), superseded by the TOTP session cookie. Will be removed in a future release.
 const tokenCookieName = "padmark_token"
 
-// sessionChecker resolves a session ID to a User; used by the auth middleware.
+// sessionChecker resolves a session ID or an API-token bearer key to a User; used by the
+// auth middleware.
 type sessionChecker interface {
 	GetSession(ctx context.Context, sessionID string) (*domain.User, error)
+	// ResolveAPIToken maps a bearer API key to its owning user, recording last-used.
+	// Returns domain.ErrNotFound when the key is unknown, revoked, or expired.
+	ResolveAPIToken(ctx context.Context, plainToken string) (*domain.User, error)
 }
 
 // newAuthMiddleware wraps the entire handler tree with token and/or session auth.
@@ -51,10 +55,16 @@ func (am *authMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		return
 	case isPublicRoute(r, am.namedRoutes):
-		// Note view/burn routes: auth is not required, but resolve the session when a
-		// cookie is present so the handler's private-note and CanEdit checks read the
-		// user from context instead of repeating the lookup. No cookie ⇒ no query.
-		rr, _ := am.resolveSessionUser(r)
+		// Note view/burn routes: auth is not required, but resolve the caller when a
+		// credential is present so the handler's private-note and CanEdit checks read the
+		// user from context. A session cookie (browser) or an API-token Bearer key (CLI)
+		// both count; a request with neither costs no query (each resolver short-circuits
+		// when its credential is absent).
+		rr, ok := am.resolveSessionUser(r)
+		if !ok {
+			rr, _ = am.resolveAPITokenUser(rr)
+		}
+
 		am.next.ServeHTTP(w, rr)
 
 		return
@@ -76,6 +86,15 @@ func (am *authMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 			return
 		}
+	}
+
+	// API-token Bearer check — resolve the key to its owning user (DB-backed).
+	// ResolveAPIToken records last-used internally; an unknown/expired key falls
+	// through to the 401/redirect decision below.
+	if rr, ok := am.resolveAPITokenUser(r); ok {
+		am.next.ServeHTTP(w, rr)
+
+		return
 	}
 
 	// Sec-Fetch-Dest: document is set by browsers on top-level navigation;
@@ -110,6 +129,30 @@ func (am *authMiddleware) resolveSessionUser(r *http.Request) (*http.Request, bo
 	}
 
 	usr, err := am.checker.GetSession(r.Context(), sessID)
+	if err != nil {
+		return r, false
+	}
+
+	setLogUser(r.Context(), usr.Username, usr.IsAdmin)
+
+	return r.WithContext(context.WithValue(r.Context(), keyUser, usr)), true
+}
+
+// resolveAPITokenUser returns r enriched with the authenticated user in context when the
+// request carries a valid API-token Bearer key, and whether one was resolved. A missing
+// Authorization: Bearer header or an unknown/expired key returns the original request and
+// false — so a request without a Bearer header costs no database query.
+func (am *authMiddleware) resolveAPITokenUser(r *http.Request) (*http.Request, bool) {
+	if am.checker == nil {
+		return r, false
+	}
+
+	token, found := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if !found || token == "" {
+		return r, false
+	}
+
+	usr, err := am.checker.ResolveAPIToken(r.Context(), token)
 	if err != nil {
 		return r, false
 	}

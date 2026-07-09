@@ -50,6 +50,19 @@ func nonceFromContext(ctx context.Context) string {
 
 const protoHTTPS = "https"
 
+// protoHTTP is the non-TLS URL scheme, paired with protoHTTPS when building absolute links.
+const protoHTTP = "http"
+
+// requestScheme returns the URL scheme ("http" or "https") to use when building absolute links
+// back to this server, honouring the trusted-proxy handling in isHTTPS.
+func requestScheme(r *http.Request, trustedProxies []*net.IPNet) string {
+	if isHTTPS(r, trustedProxies) {
+		return protoHTTPS
+	}
+
+	return protoHTTP
+}
+
 // isHTTPS reports whether the request arrived over HTTPS.
 // X-Forwarded-Proto is only trusted when the remote address belongs to a trusted proxy;
 // spoofed headers from untrusted clients are ignored.
@@ -107,6 +120,8 @@ func registerRoutes(
 	mux.HandleFunc("GET /admin", handler.AdminPage)
 	mux.HandleFunc("POST /admin/invite", guard(handler.AdminInviteHandler))
 	mux.HandleFunc("POST /admin/users/{id}/revoke", guard(handler.AdminRevokeHandler))
+	mux.HandleFunc("POST /admin/api-keys", guard(handler.AdminCreateKeyHandler))
+	mux.HandleFunc("POST /admin/api-keys/{id}/revoke", guard(handler.AdminRevokeKeyHandler))
 	mux.HandleFunc("GET /change-password", handler.ChangePasswordPage)
 	mux.HandleFunc("POST /change-password", guard(handler.ChangePasswordHandler))
 	mux.HandleFunc("GET /api", handler.APIDocsPage)
@@ -170,6 +185,12 @@ func NewRouter(
 	stack = withSecurityHeaders(opts.TrustedProxies, stack)
 	stack = withLogging(handler.log, stack)
 	stack = withRequestID(stack)
+
+	// Second, outermost recovery layer: the inner withRecovery above only covers mux, so a
+	// panic in any middleware between it and here (auth, CSRF, rate-limit, security-headers,
+	// logging, request-ID) would otherwise fall through to net/http's bare per-connection
+	// recovery, which drops the response body and skips structured logging entirely.
+	stack = withRecovery(handler.log, stack)
 
 	return stack
 }
