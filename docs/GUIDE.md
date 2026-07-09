@@ -556,6 +556,40 @@ go generate ./...                  # Regenerate mocks
 - Never hardcode secrets in code, tests, or committed configs
 - Local secrets in `.env.local` (add to `.gitignore`)
 
+### CLI API tokens
+
+Long-lived bearer keys for the CLI (and automation like `hermes-bot`). Requires the account
+system (`--enable-accounts`).
+
+**Issuance (admin, in the browser).** A key is minted by an admin from `/admin` → "API keys" →
+"Create key". It is shown **once** in plaintext on that page; only its SHA-256 hash is stored
+(`api_tokens.token_hash`, the primary key). The plaintext is never logged and never placed in a
+URL. Keys are listed (hash prefix, owner, created / last-used) and revoked from the same page.
+
+**Distribution.** There is no CLI login command and no anonymous endpoint. The admin copies the
+key out of the page and hands it to the user, who stores it (see precedence below).
+
+**CLI consumption.** `newPadmarkClient` resolves the token in this order (first non-empty wins):
+
+1. `--token` flag
+2. `PADMARK_TOKEN` env var
+3. `~/.config/padmark/token` (honours `XDG_CONFIG_HOME`; contents are trimmed)
+
+The resolved token is sent as `Authorization: Bearer <token>` on every request. On the server,
+the auth middleware resolves it via `Manager.ResolveAPIToken` (after session-cookie and legacy
+bearer checks); an unknown, revoked, or expired key falls through to 401 / login redirect.
+
+**Handling the token file.**
+
+- Create the directory `0700` and the file `0600` (the CLI only reads it — set the modes yourself):
+  ```sh
+  mkdir -m 700 -p ~/.config/padmark
+  printf '%s' "<paste-key>" > ~/.config/padmark/token && chmod 600 ~/.config/padmark/token
+  ```
+- Sending a token to a non-HTTPS server logs a cleartext-exposure warning (advisory, not blocking);
+  use an `https://` server URL in production.
+- To rotate or revoke, delete the key in `/admin` and issue a new one; the old hash stops resolving.
+
 ---
 
 ## 14. Modern Go

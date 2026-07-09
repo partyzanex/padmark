@@ -1,8 +1,8 @@
 -- +goose Up
--- API tokens issued through the browser-based CLI login flow.
--- A token is created only when an authenticated browser session confirms the request
--- on /login/cli. The link shown by the CLI is a signed, time-limited URL and does not
--- require any unauthenticated write to the database.
+-- API tokens for the CLI. A token is issued by an admin from /admin (never anonymously) and
+-- copied by the user into ~/.config/padmark/token or PADMARK_TOKEN; the CLI then sends it as a
+-- Bearer credential. Only the SHA-256 hash is stored — the plain key is shown once and never
+-- persisted.
 --
 -- IMPORTANT: token_hash IS the primary key. Do NOT add a separate "id" column.
 -- The token hash serves as both the identifier and the unique constraint.

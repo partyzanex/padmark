@@ -46,10 +46,11 @@ func newAuthManagerWithTokens(
 	users *MockUserStore,
 	apiTokens *MockAPITokenStore,
 ) *Manager {
-	mgr := NewManager(
+	return NewManager(
 		users,
 		NewMockInviteStore(suite.ctrl),
 		NewMockSessionStore(suite.ctrl),
+		apiTokens,
 		crypto.New(),
 		crypto.NewPasswordHasher(crypto.DefaultArgon2Params()),
 		crypto.NewKDF(),
@@ -58,9 +59,6 @@ func newAuthManagerWithTokens(
 		"padmark",
 		0,
 	)
-	mgr.apiTokens = apiTokens
-
-	return mgr
 }
 
 // disabledMgr returns a Manager whose API-token flow is not enabled; used to assert
@@ -70,6 +68,7 @@ func (suite *APITokenSuite) disabledMgr() *Manager {
 		suite.users,
 		NewMockInviteStore(suite.ctrl),
 		NewMockSessionStore(suite.ctrl),
+		nil, // API-token flow disabled → methods return domain.ErrFeatureNotSupported
 		crypto.New(),
 		crypto.NewPasswordHasher(crypto.DefaultArgon2Params()),
 		crypto.NewKDF(),

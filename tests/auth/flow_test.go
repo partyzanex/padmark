@@ -37,6 +37,7 @@ func (s *AuthFlowSuite) SetupTest() {
 		s.Users,
 		s.Invites,
 		s.Sessions,
+		nil, // this suite exercises TOTP/session flows, not API tokens
 		crypto.New(),
 		crypto.NewPasswordHasher(crypto.DefaultArgon2Params()),
 		crypto.NewKDF(),

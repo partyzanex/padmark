@@ -13,6 +13,7 @@ import (
 
 	adhttp "github.com/partyzanex/padmark/internal/adapters/http"
 	"github.com/partyzanex/padmark/internal/domain"
+	"github.com/partyzanex/padmark/internal/usecases/auth"
 )
 
 type AuthHandlerSuite struct {
@@ -460,6 +461,7 @@ func (s *AuthHandlerSuite) TestAdminPage_Admin_ListsUsers() {
 
 	s.auth.EXPECT().GetSession(gomock.Any(), "admin-sess").Return(usr, nil).Times(1)
 	s.auth.EXPECT().ListUsers(gomock.Any(), "admin-id").Return(users, nil)
+	s.auth.EXPECT().ListAPITokens(gomock.Any(), "admin-id").Return([]*auth.APITokenInfo{}, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/admin", nil)
 	req.AddCookie(s.sessionCookie("admin-sess"))
@@ -472,6 +474,28 @@ func (s *AuthHandlerSuite) TestAdminPage_Admin_ListsUsers() {
 	s.Contains(rec.Body.String(), "bob")
 }
 
+func (s *AuthHandlerSuite) TestAdminPage_Admin_ListsAPIKeys() {
+	usr := s.adminUser()
+	tokens := []*auth.APITokenInfo{
+		{ID: "abcdef0123456789deadbeef", UserID: "admin-id", Username: "admin", CreatedAt: time.Now()},
+	}
+
+	s.auth.EXPECT().GetSession(gomock.Any(), "admin-sess").Return(usr, nil).Times(1)
+	s.auth.EXPECT().ListUsers(gomock.Any(), "admin-id").Return([]*domain.User{usr}, nil)
+	s.auth.EXPECT().ListAPITokens(gomock.Any(), "admin-id").Return(tokens, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin", nil)
+	req.AddCookie(s.sessionCookie("admin-sess"))
+
+	rec := httptest.NewRecorder()
+
+	s.router.ServeHTTP(rec, req)
+
+	s.Equal(http.StatusOK, rec.Code)
+	s.Contains(rec.Body.String(), "abcdef012345", "token hash prefix (first 12 chars) is shown")
+	s.Contains(rec.Body.String(), "never used", "unused token renders 'never used'")
+}
+
 // ── Admin invite ──
 
 func (s *AuthHandlerSuite) TestAdminInvite_GeneratesLink() {
@@ -479,6 +503,7 @@ func (s *AuthHandlerSuite) TestAdminInvite_GeneratesLink() {
 	s.auth.EXPECT().GetSession(gomock.Any(), "admin-sess").Return(usr, nil).Times(1)
 	s.auth.EXPECT().GenerateInvite(gomock.Any(), "admin-id").Return("tok-xyz", nil)
 	s.auth.EXPECT().ListUsers(gomock.Any(), "admin-id").Return([]*domain.User{usr}, nil)
+	s.auth.EXPECT().ListAPITokens(gomock.Any(), "admin-id").Return([]*auth.APITokenInfo{}, nil)
 
 	form := withCSRF(url.Values{})
 	req := httptest.NewRequest(http.MethodPost, "/admin/invite", strings.NewReader(form.Encode()))
@@ -532,6 +557,122 @@ func (s *AuthHandlerSuite) TestAdminRevoke_NonAdmin_Returns403() {
 	s.Equal(http.StatusForbidden, rec.Code)
 }
 
+// ── Admin API keys ──
+
+func (s *AuthHandlerSuite) TestAdminCreateKey_CreatesAndShowsKey() {
+	usr := s.adminUser()
+	s.auth.EXPECT().GetSession(gomock.Any(), "admin-sess").Return(usr, nil).Times(1)
+	s.auth.EXPECT().CreateAPIToken(gomock.Any(), "admin-id").Return("plain-secret-key", nil)
+	s.auth.EXPECT().ListUsers(gomock.Any(), "admin-id").Return([]*domain.User{usr}, nil)
+	s.auth.EXPECT().ListAPITokens(gomock.Any(), "admin-id").Return([]*auth.APITokenInfo{}, nil)
+
+	form := withCSRF(url.Values{})
+	req := httptest.NewRequest(http.MethodPost, "/admin/keys", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(s.sessionCookie("admin-sess"))
+	req.AddCookie(s.csrfCookie())
+
+	rec := httptest.NewRecorder()
+
+	s.router.ServeHTTP(rec, req)
+
+	s.Equal(http.StatusOK, rec.Code)
+	s.Contains(rec.Body.String(), "plain-secret-key", "plain key is shown exactly once on the page")
+}
+
+func (s *AuthHandlerSuite) TestAdminCreateKey_NonAdmin_Returns403() {
+	nonAdmin := &domain.User{ID: "u1", Username: "alice", IsAdmin: false}
+	s.auth.EXPECT().GetSession(gomock.Any(), "sess1").Return(nonAdmin, nil).Times(1)
+
+	form := withCSRF(url.Values{})
+	req := httptest.NewRequest(http.MethodPost, "/admin/keys", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(s.sessionCookie("sess1"))
+	req.AddCookie(s.csrfCookie())
+
+	rec := httptest.NewRecorder()
+
+	s.router.ServeHTTP(rec, req)
+
+	s.Equal(http.StatusForbidden, rec.Code)
+}
+
+func (s *AuthHandlerSuite) TestAdminRevokeKey_RevokesAndRedirects() {
+	usr := s.adminUser()
+	s.auth.EXPECT().GetSession(gomock.Any(), "admin-sess").Return(usr, nil).Times(1)
+	s.auth.EXPECT().RevokeAPIToken(gomock.Any(), "admin-id", "hash-123").Return(nil)
+
+	form := withCSRF(url.Values{})
+	req := httptest.NewRequest(http.MethodPost, "/admin/keys/hash-123/revoke", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(s.sessionCookie("admin-sess"))
+	req.AddCookie(s.csrfCookie())
+
+	rec := httptest.NewRecorder()
+
+	s.router.ServeHTTP(rec, req)
+
+	s.Equal(http.StatusSeeOther, rec.Code)
+	s.Equal("/admin", rec.Header().Get("Location"))
+}
+
+func (s *AuthHandlerSuite) TestAdminRevokeKey_NonAdmin_Returns403() {
+	nonAdmin := &domain.User{ID: "u1", Username: "alice", IsAdmin: false}
+	s.auth.EXPECT().GetSession(gomock.Any(), "sess1").Return(nonAdmin, nil).Times(1)
+
+	form := withCSRF(url.Values{})
+	req := httptest.NewRequest(http.MethodPost, "/admin/keys/hash-123/revoke", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(s.sessionCookie("sess1"))
+	req.AddCookie(s.csrfCookie())
+
+	rec := httptest.NewRecorder()
+
+	s.router.ServeHTTP(rec, req)
+
+	s.Equal(http.StatusForbidden, rec.Code)
+}
+
+func (s *AuthHandlerSuite) TestAdminCreateKey_CreateFails_ShowsError() {
+	usr := s.adminUser()
+	s.auth.EXPECT().GetSession(gomock.Any(), "admin-sess").Return(usr, nil).Times(1)
+	s.auth.EXPECT().CreateAPIToken(gomock.Any(), "admin-id").Return("", domain.ErrFeatureNotSupported)
+	s.auth.EXPECT().ListUsers(gomock.Any(), "admin-id").Return([]*domain.User{usr}, nil)
+	s.auth.EXPECT().ListAPITokens(gomock.Any(), "admin-id").Return([]*auth.APITokenInfo{}, nil)
+
+	form := withCSRF(url.Values{})
+	req := httptest.NewRequest(http.MethodPost, "/admin/keys", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(s.sessionCookie("admin-sess"))
+	req.AddCookie(s.csrfCookie())
+
+	rec := httptest.NewRecorder()
+
+	s.router.ServeHTTP(rec, req)
+
+	s.Equal(http.StatusOK, rec.Code)
+	s.Contains(rec.Body.String(), "Failed to create API key.", "create failure renders an inline error")
+}
+
+func (s *AuthHandlerSuite) TestAdminRevokeKey_RevokeFails_RedirectsWithError() {
+	usr := s.adminUser()
+	s.auth.EXPECT().GetSession(gomock.Any(), "admin-sess").Return(usr, nil).Times(1)
+	s.auth.EXPECT().RevokeAPIToken(gomock.Any(), "admin-id", "hash-123").Return(domain.ErrNotFound)
+
+	form := withCSRF(url.Values{})
+	req := httptest.NewRequest(http.MethodPost, "/admin/keys/hash-123/revoke", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(s.sessionCookie("admin-sess"))
+	req.AddCookie(s.csrfCookie())
+
+	rec := httptest.NewRecorder()
+
+	s.router.ServeHTTP(rec, req)
+
+	s.Equal(http.StatusSeeOther, rec.Code)
+	s.Contains(rec.Header().Get("Location"), "key_error")
+}
+
 // ── Session auth middleware ──
 
 func (s *AuthHandlerSuite) TestSessionAuth_ValidSession_PassesThrough() {
@@ -563,6 +704,54 @@ func (s *AuthHandlerSuite) TestSessionAuth_ExpiredSession_RedirectsToLogin() {
 
 	s.Equal(http.StatusSeeOther, rec.Code)
 	s.Contains(rec.Header().Get("Location"), "/login")
+}
+
+// ── API-token auth middleware ──
+
+func (s *AuthHandlerSuite) TestAPITokenAuth_ValidBearer_PassesThrough() {
+	usr := &domain.User{ID: "u1", Username: "alice"}
+	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "good-api-key").Return(usr, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Authorization", "Bearer good-api-key")
+
+	rec := httptest.NewRecorder()
+
+	s.router.ServeHTTP(rec, req)
+
+	s.Equal(http.StatusOK, rec.Code)
+}
+
+func (s *AuthHandlerSuite) TestAPITokenAuth_UnknownBearer_Returns401() {
+	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "bad-key").Return(nil, domain.ErrNotFound)
+
+	// No Sec-Fetch-Dest / text-html Accept ⇒ treated as an API client ⇒ 401, not a redirect.
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Authorization", "Bearer bad-key")
+
+	rec := httptest.NewRecorder()
+
+	s.router.ServeHTTP(rec, req)
+
+	s.Equal(http.StatusUnauthorized, rec.Code)
+}
+
+// TestAPITokenAuth_AdminBearer_ReachesAdminPage proves the user resolved from the API token is
+// injected into the request context: an admin key reaches the admin-only page and renders it.
+func (s *AuthHandlerSuite) TestAPITokenAuth_AdminBearer_ReachesAdminPage() {
+	admin := s.adminUser()
+	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "admin-key").Return(admin, nil)
+	s.auth.EXPECT().ListUsers(gomock.Any(), "admin-id").Return([]*domain.User{admin}, nil)
+	s.auth.EXPECT().ListAPITokens(gomock.Any(), "admin-id").Return([]*auth.APITokenInfo{}, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin", nil)
+	req.Header.Set("Authorization", "Bearer admin-key")
+
+	rec := httptest.NewRecorder()
+
+	s.router.ServeHTTP(rec, req)
+
+	s.Equal(http.StatusOK, rec.Code)
 }
 
 // ── Change password ──

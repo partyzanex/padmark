@@ -206,6 +206,21 @@ func (mr *MockAuthManagerMockRecorder) Logout(ctx, sessionID any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Logout", reflect.TypeOf((*MockAuthManager)(nil).Logout), ctx, sessionID)
 }
 
+// ResolveAPIToken mocks base method.
+func (m *MockAuthManager) ResolveAPIToken(ctx context.Context, plainToken string) (*domain.User, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ResolveAPIToken", ctx, plainToken)
+	ret0, _ := ret[0].(*domain.User)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ResolveAPIToken indicates an expected call of ResolveAPIToken.
+func (mr *MockAuthManagerMockRecorder) ResolveAPIToken(ctx, plainToken any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ResolveAPIToken", reflect.TypeOf((*MockAuthManager)(nil).ResolveAPIToken), ctx, plainToken)
+}
+
 // RevokeAPIToken mocks base method.
 func (m *MockAuthManager) RevokeAPIToken(ctx context.Context, adminUserID, tokenID string) error {
 	m.ctrl.T.Helper()

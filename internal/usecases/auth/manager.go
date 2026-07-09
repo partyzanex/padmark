@@ -120,10 +120,13 @@ type Manager struct {
 // contracts instead of importing infra/crypto). issuer is the TOTP issuer name shown in the
 // authenticator app. sessionTTL controls how long a session remains valid; pass 0 for the
 // default (30 days).
+// apiTokens enables the CLI API-token flow (issue/resolve/list/revoke). Pass nil to disable it:
+// the token methods then return domain.ErrFeatureNotSupported.
 func NewManager(
 	users UserStore,
 	invites InviteStore,
 	sessions SessionStore,
+	apiTokens APITokenStore,
 	enc Encryptor,
 	passwordHasher PasswordHasher,
 	keyDeriver KeyDeriver,
@@ -151,6 +154,7 @@ func NewManager(
 		users:       users,
 		invites:     invites,
 		sessions:    sessions,
+		apiTokens:   apiTokens,
 		enc:         enc,
 		pw:          passwordHasher,
 		kdf:         keyDeriver,

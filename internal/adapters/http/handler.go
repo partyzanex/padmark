@@ -18,6 +18,13 @@ import (
 )
 
 // AuthManager performs TOTP-based authentication, user management, and API-token issuance.
+//
+// It is the single seam from the HTTP layer onto the auth Manager — session, onboarding,
+// user-admin and API-token operations the handlers consume through one field. Splitting it
+// would not lower the linter's count (embedded methods still count) and would fragment a
+// cohesive, single-implementation dependency, so interfacebloat is suppressed here.
+//
+//nolint:interfacebloat // cohesive single-implementation seam; rationale in the doc comment above.
 type AuthManager interface {
 	Login(ctx context.Context, username, password, totpCode, userAgent, clientIP string) (string, error)
 	Logout(ctx context.Context, sessionID string) error
@@ -29,6 +36,9 @@ type AuthManager interface {
 	IsEmpty(ctx context.Context) (bool, error)
 	ListUsers(ctx context.Context, adminUserID string) ([]*domain.User, error)
 	RevokeUser(ctx context.Context, adminUserID, targetUserID string) error
+	// ResolveAPIToken maps a bearer API key to its owning user (used by the auth middleware),
+	// recording last-used. Returns domain.ErrNotFound when the key is unknown, revoked, or expired.
+	ResolveAPIToken(ctx context.Context, plainToken string) (*domain.User, error)
 	// CreateAPIToken issues a long-lived API key for userID, returning the plain key exactly once.
 	CreateAPIToken(ctx context.Context, userID string) (string, error)
 	// ListAPITokens returns all API tokens with owning usernames for the admin panel.

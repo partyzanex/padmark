@@ -107,6 +107,8 @@ func registerRoutes(
 	mux.HandleFunc("GET /admin", handler.AdminPage)
 	mux.HandleFunc("POST /admin/invite", guard(handler.AdminInviteHandler))
 	mux.HandleFunc("POST /admin/users/{id}/revoke", guard(handler.AdminRevokeHandler))
+	mux.HandleFunc("POST /admin/keys", guard(handler.AdminCreateKeyHandler))
+	mux.HandleFunc("POST /admin/keys/{id}/revoke", guard(handler.AdminRevokeKeyHandler))
 	mux.HandleFunc("GET /change-password", handler.ChangePasswordPage)
 	mux.HandleFunc("POST /change-password", guard(handler.ChangePasswordHandler))
 	mux.HandleFunc("GET /api", handler.APIDocsPage)

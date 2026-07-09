@@ -138,6 +138,38 @@
             <div style="font-family:var(--font-mono);font-size:0.75rem;color:var(--text-muted);">No users.</div>
             {{end}}
         </div>
+
+        <div class="admin-section">
+            <div class="admin-section-title">API keys</div>
+            {{if .NewKey}}
+            <div class="msg-ok">API key created — copy it now, it will not be shown again:</div>
+            <div class="invite-link">{{.NewKey}}</div>
+            {{end}}
+            {{if .KeyError}}
+            <div class="msg-err">{{.KeyError}}</div>
+            {{end}}
+            {{range .APITokens}}
+            <div class="user-row">
+                <div>
+                    <span class="user-name">{{slice .ID 0 12}}…</span>
+                    <div class="user-meta">
+                        {{.Username}} · created {{.CreatedAt.Format "2006-01-02 15:04"}} ·
+                        {{if .LastUsedAt}}used {{.LastUsedAt.Format "2006-01-02 15:04"}}{{else}}never used{{end}}
+                    </div>
+                </div>
+                <form method="POST" action="/admin/keys/{{.ID}}/revoke">
+                    <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+                    <button type="submit" class="btn-revoke">Revoke</button>
+                </form>
+            </div>
+            {{else}}
+            <div style="font-family:var(--font-mono);font-size:0.75rem;color:var(--text-muted);">No API keys.</div>
+            {{end}}
+            <form method="POST" action="/admin/keys" style="margin-top:16px;">
+                <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+                <button type="submit" class="btn-publish">Create key</button>
+            </form>
+        </div>
     </div>
 
 </div>
