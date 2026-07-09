@@ -50,6 +50,10 @@ func createCommand() *urcli.Command {
 				Usage: "Use text/plain content type instead of text/markdown",
 			},
 			&urcli.BoolFlag{
+				Name:  FlagPrivate,
+				Usage: "Require authentication (any bearer token or session) to read the note",
+			},
+			&urcli.BoolFlag{
 				Name:  FlagBurn,
 				Usage: "Burn after reading: delete on first read (add --ttl for a grace period)",
 			},
@@ -133,6 +137,10 @@ func buildCreateReq(cmd *urcli.Command, content string) *padmark.CreateNoteReque
 
 	if slug := cmd.String(FlagSlug); slug != "" {
 		req.Slug = padmark.NewOptString(slug)
+	}
+
+	if cmd.Bool(FlagPrivate) {
+		req.Private = padmark.NewOptBool(true)
 	}
 
 	if ec := cmd.String(FlagEditCode); ec != "" {

@@ -44,6 +44,10 @@ func editCommand() *urcli.Command {
 				Usage: "Set content type to text/plain",
 			},
 			&urcli.BoolFlag{
+				Name:  FlagPrivate,
+				Usage: "Require authentication (any bearer token or session) to read the note",
+			},
+			&urcli.BoolFlag{
 				Name:  FlagBurn,
 				Usage: "Enable burn-after-reading",
 			},
@@ -125,6 +129,10 @@ func buildUpdateReq(cmd *urcli.Command, content, editCode string) *padmark.Updat
 		req.ContentType = padmark.NewOptUpdateNoteRequestContentType(
 			padmark.UpdateNoteRequestContentTypeTextPlain,
 		)
+	}
+
+	if cmd.IsSet(FlagPrivate) {
+		req.Private = padmark.NewOptBool(cmd.Bool(FlagPrivate))
 	}
 
 	if cmd.IsSet(FlagBurn) {

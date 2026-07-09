@@ -1,9 +1,14 @@
 package cli
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	urcli "github.com/urfave/cli/v3"
+
+	padmark "github.com/partyzanex/padmark/pkg/client"
 )
 
 func TestFirstLine(t *testing.T) {
@@ -72,4 +77,41 @@ func TestFirstLine(t *testing.T) {
 			assert.Equal(t, tt.want, firstLine(tt.content))
 		})
 	}
+}
+
+// buildCreateReqFor runs createCommand's flag set with args and returns the resulting request,
+// exercising the same flag parsing a real `create` invocation would.
+func buildCreateReqFor(t *testing.T, args ...string) *padmark.CreateNoteRequest {
+	t.Helper()
+
+	var req *padmark.CreateNoteRequest
+
+	app := &urcli.Command{
+		Flags: createCommand().Flags,
+		Action: func(_ context.Context, cmd *urcli.Command) error {
+			req = buildCreateReq(cmd, "content")
+
+			return nil
+		},
+	}
+	require.NoError(t, app.Run(t.Context(), append([]string{testBin}, args...)))
+
+	return req
+}
+
+func TestBuildCreateReq_Private_SetsPrivateTrue(t *testing.T) {
+	t.Parallel()
+
+	req := buildCreateReqFor(t, "--private")
+
+	assert.True(t, req.Private.IsSet())
+	assert.True(t, req.Private.Value)
+}
+
+func TestBuildCreateReq_NoPrivateFlag_OmitsField(t *testing.T) {
+	t.Parallel()
+
+	req := buildCreateReqFor(t)
+
+	assert.False(t, req.Private.IsSet(), "private must be omitted, not sent as false")
 }
