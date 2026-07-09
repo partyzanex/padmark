@@ -12,6 +12,7 @@ const (
 	FlagFile     = "file"
 	FlagSlug     = "slug"
 	FlagPlain    = "plain"
+	FlagPrivate  = "private"
 	FlagBurn     = "burn"
 	FlagTTL      = "ttl"
 	FlagEditCode = "edit-code"

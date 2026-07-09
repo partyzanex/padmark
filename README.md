@@ -194,6 +194,10 @@ padmark-cli create --title "Runbook" --content "..." --slug deploy-notes
 # Burn-after-reading with a 1-hour window after first read
 padmark-cli create --title "Secret" --content "eyes only" --burn --ttl 3600
 
+# Private note: reading it requires a bearer token or an authenticated session
+# (any signed-in caller, not just the creator — see "API keys" below)
+padmark-cli create --title "Internal" --content "..." --private
+
 # Fetch a note (JSON, raw, or default)
 padmark-cli get abc123def4
 padmark-cli get --raw abc123def4
