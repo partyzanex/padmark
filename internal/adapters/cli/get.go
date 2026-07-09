@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 
@@ -72,9 +73,9 @@ func handleGetNoteRes(res padmark.GetNoteRes) (*padmark.NoteResponse, error) {
 	case *padmark.NoteResponse:
 		return typed, nil
 	case *padmark.GetNoteNotFound:
-		return nil, fmt.Errorf("not found: %s", typed.Message)
+		return nil, errors.New("note not found")
 	case *padmark.GetNoteGone:
-		return nil, fmt.Errorf("gone (note has been consumed or expired): %s", typed.Message)
+		return nil, errors.New("note has expired or was already consumed")
 	case *padmark.GetNoteInternalServerError:
 		return nil, fmt.Errorf("server error: %s", typed.Message)
 	default:

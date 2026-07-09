@@ -72,6 +72,21 @@ func (h *Handler) writeErrorPage(w http.ResponseWriter, r *http.Request, err err
 	h.writeErrorPageData(w, r, &data)
 }
 
+// writeNoteError renders an error respecting content negotiation: browsers get the HTML error
+// page, while API/CLI clients (JSON or plain) get a machine-readable status via writeError. Used
+// on the note-view path, where handlePrivateAuth runs before the format switch and so must not
+// assume HTML — otherwise a CLI reading e.g. an already-burned note receives an undecodable
+// text/html body instead of a clean 404.
+func (h *Handler) writeNoteError(w http.ResponseWriter, r *http.Request, err error) {
+	if negotiate(r) == formatHTML {
+		h.writeErrorPage(w, r, err)
+
+		return
+	}
+
+	h.writeError(w, r, err)
+}
+
 // writeErrorPageData renders the HTML error template from explicit view data,
 // for cases that need a tailored title/description rather than a domain sentinel.
 func (h *Handler) writeErrorPageData(w http.ResponseWriter, r *http.Request, data *errorViewData) {

@@ -111,7 +111,7 @@ func createAction(ctx context.Context, cmd *urcli.Command) error {
 		return apiErr
 	}
 
-	return printCreateResult(os.Stdout, cmd.String(FlagURL), note)
+	return printCreateResult(os.Stdout, resolveServerURL(cmd), note)
 }
 
 func buildCreateReq(cmd *urcli.Command, content string) *padmark.CreateNoteRequest {

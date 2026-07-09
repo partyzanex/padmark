@@ -555,10 +555,7 @@ func (h *Handler) AdminInviteHandler(w http.ResponseWriter, r *http.Request) {
 	if genErr != nil {
 		data.InviteError = "Failed to generate invite link."
 	} else {
-		scheme := "http"
-		if isHTTPS(r, h.trustedProxies) {
-			scheme = "https"
-		}
+		scheme := requestScheme(r, h.trustedProxies)
 
 		// r.Host is attacker-controllable, but this invite link is only displayed (html/template
 		// escaped) for an admin to copy manually — it is not emailed or trusted server-side. If
@@ -604,9 +601,9 @@ func (h *Handler) AdminRevokeHandler(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/admin", http.StatusSeeOther)
 }
 
-// ── admin: create API key (POST /admin/keys) ──
+// ── admin: create API key (POST /admin/api-keys) ──
 
-// AdminCreateKeyHandler handles POST /admin/keys — issues an API key for the signed-in admin
+// AdminCreateKeyHandler handles POST /admin/api-keys — issues an API key for the signed-in admin
 // and re-renders the admin page with the plain key shown exactly once. The plain key is never
 // logged nor placed in a URL: it lives only in the rendered page.
 func (h *Handler) AdminCreateKeyHandler(w http.ResponseWriter, r *http.Request) {
@@ -627,20 +624,34 @@ func (h *Handler) AdminCreateKeyHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if createErr != nil {
+	switch {
+	case createErr != nil:
 		h.log.ErrorContext(r.Context(), "create api token", "err", createErr)
 
 		data.KeyError = "Failed to create API key."
-	} else {
-		data.NewKey = plain
+	default:
+		scheme := requestScheme(r, h.trustedProxies)
+
+		// r.Host is attacker-controllable, but this envelope is only displayed (html/template
+		// escaped) for an admin to copy manually — it is never trusted server-side. The server
+		// authenticates on the raw key inside the envelope, not on the URL. Same threat model as
+		// the invite link above; if that ever changes, validate r.Host against an allowlist here.
+		envelope, encErr := domain.EncodeAPITokenEnvelope(scheme+"://"+r.Host, plain)
+		if encErr != nil {
+			h.log.ErrorContext(r.Context(), "encode api token envelope", "err", encErr)
+
+			data.KeyError = "Failed to create API key."
+		} else {
+			data.NewKey = envelope
+		}
 	}
 
 	h.renderAdmin(w, r, &data)
 }
 
-// ── admin: revoke API key (POST /admin/keys/{id}/revoke) ──
+// ── admin: revoke API key (POST /admin/api-keys/{id}/revoke) ──
 
-// AdminRevokeKeyHandler handles POST /admin/keys/{id}/revoke — deletes an API key by its
+// AdminRevokeKeyHandler handles POST /admin/api-keys/{id}/revoke — deletes an API key by its
 // public ID (the token hash) and redirects back to /admin.
 func (h *Handler) AdminRevokeKeyHandler(w http.ResponseWriter, r *http.Request) {
 	usr := userFromContext(r)

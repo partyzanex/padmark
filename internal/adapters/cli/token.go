@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	urcli "github.com/urfave/cli/v3"
+
+	"github.com/partyzanex/padmark/internal/domain"
 )
 
 // tokenConfigSubdir is the per-application directory under the XDG config home holding the token.
@@ -52,4 +54,34 @@ func tokenFilePath() (string, error) {
 	}
 
 	return filepath.Join(home, ".config", tokenConfigSubdir, "token"), nil
+}
+
+// splitToken separates a configured token value into the bearer key sent to the server and any
+// server base URL embedded in it. It is the CLI-side counterpart of
+// domain.EncodeAPITokenEnvelope: an envelope token yields its key and URL, while a legacy bare
+// key yields itself as the bearer and an empty URL.
+func splitToken(raw string) (bearer, baseURL string) {
+	if url, key, ok := domain.DecodeAPITokenEnvelope(raw); ok {
+		return key, url
+	}
+
+	return raw, ""
+}
+
+// pickServerURL chooses the base server URL: an explicit --url/PADMARK_URL wins, otherwise the URL
+// embedded in an envelope token, otherwise the --url default.
+func pickServerURL(cmd *urcli.Command, embeddedURL string) string {
+	if embeddedURL != "" && !cmd.IsSet(FlagURL) {
+		return embeddedURL
+	}
+
+	return cmd.String(FlagURL)
+}
+
+// resolveServerURL returns the base server URL the client will actually use — for display in
+// ping/create output as well as for requests — so what the user sees matches where requests go.
+func resolveServerURL(cmd *urcli.Command) string {
+	_, embeddedURL := splitToken(resolveToken(cmd))
+
+	return pickServerURL(cmd, embeddedURL)
 }

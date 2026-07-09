@@ -19,3 +19,6 @@ padmark-server
 !.graphify/GRAPH_REPORT.md
 !.graphify/wiki/
 graphify-out/
+
+padmark.db-shm
+padmark.db-wal

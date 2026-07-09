@@ -111,7 +111,7 @@ func (h *Handler) handlePrivateAuth(w http.ResponseWriter, r *http.Request, id s
 
 	note, err := h.manager.Peek(r.Context(), id)
 	if err != nil {
-		h.writeErrorPage(w, r, err)
+		h.writeNoteError(w, r, err)
 
 		return nil, true
 	}
@@ -189,7 +189,7 @@ func (h *Handler) GetNote(w http.ResponseWriter, r *http.Request) {
 	case formatPlain:
 		note, err := h.viewNote(r, id, preloaded)
 		if err != nil {
-			writeError(w, err)
+			h.writeError(w, r, err)
 
 			return
 		}
@@ -211,7 +211,7 @@ func (h *Handler) GetNote(w http.ResponseWriter, r *http.Request) {
 	default:
 		note, err := h.viewNote(r, id, preloaded)
 		if err != nil {
-			writeError(w, err)
+			h.writeError(w, r, err)
 
 			return
 		}

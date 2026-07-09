@@ -55,8 +55,10 @@ func globalFlags() []urcli.Flag {
 }
 
 func newPadmarkClient(cmd *urcli.Command) (*padmark.Client, error) {
-	serverURL := cmd.String(FlagURL)
-	token := resolveToken(cmd)
+	token, embeddedURL := splitToken(resolveToken(cmd))
+
+	// An envelope token carries its own server URL; an explicit --url/PADMARK_URL still wins.
+	serverURL := pickServerURL(cmd, embeddedURL)
 
 	warnInsecureToken(commandErrWriter(cmd), serverURL, token)
 

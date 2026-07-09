@@ -1,6 +1,7 @@
 package http_test
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -567,7 +568,7 @@ func (s *AuthHandlerSuite) TestAdminCreateKey_CreatesAndShowsKey() {
 	s.auth.EXPECT().ListAPITokens(gomock.Any(), "admin-id").Return([]*auth.APITokenInfo{}, nil)
 
 	form := withCSRF(url.Values{})
-	req := httptest.NewRequest(http.MethodPost, "/admin/keys", strings.NewReader(form.Encode()))
+	req := httptest.NewRequest(http.MethodPost, "/admin/api-keys", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(s.sessionCookie("admin-sess"))
 	req.AddCookie(s.csrfCookie())
@@ -577,7 +578,19 @@ func (s *AuthHandlerSuite) TestAdminCreateKey_CreatesAndShowsKey() {
 	s.router.ServeHTTP(rec, req)
 
 	s.Equal(http.StatusOK, rec.Code)
-	s.Contains(rec.Body.String(), "plain-secret-key", "plain key is shown exactly once on the page")
+
+	// The page shows a self-contained envelope (base URL + key), not the bare key: the raw key is
+	// base64-packed inside it, so it must not leak verbatim, and the envelope must decode back to
+	// the key plus the request's own URL (httptest defaults r.Host to example.com over http).
+	envelope, err := domain.EncodeAPITokenEnvelope("http://example.com", "plain-secret-key")
+	s.Require().NoError(err)
+	s.Contains(rec.Body.String(), envelope, "envelope token is shown exactly once on the page")
+	s.NotContains(rec.Body.String(), ">plain-secret-key<", "raw key must not appear outside the envelope")
+
+	gotURL, gotKey, ok := domain.DecodeAPITokenEnvelope(envelope)
+	s.True(ok)
+	s.Equal("http://example.com", gotURL)
+	s.Equal("plain-secret-key", gotKey)
 }
 
 func (s *AuthHandlerSuite) TestAdminCreateKey_NonAdmin_Returns403() {
@@ -585,7 +598,7 @@ func (s *AuthHandlerSuite) TestAdminCreateKey_NonAdmin_Returns403() {
 	s.auth.EXPECT().GetSession(gomock.Any(), "sess1").Return(nonAdmin, nil).Times(1)
 
 	form := withCSRF(url.Values{})
-	req := httptest.NewRequest(http.MethodPost, "/admin/keys", strings.NewReader(form.Encode()))
+	req := httptest.NewRequest(http.MethodPost, "/admin/api-keys", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(s.sessionCookie("sess1"))
 	req.AddCookie(s.csrfCookie())
@@ -603,7 +616,7 @@ func (s *AuthHandlerSuite) TestAdminRevokeKey_RevokesAndRedirects() {
 	s.auth.EXPECT().RevokeAPIToken(gomock.Any(), "admin-id", "hash-123").Return(nil)
 
 	form := withCSRF(url.Values{})
-	req := httptest.NewRequest(http.MethodPost, "/admin/keys/hash-123/revoke", strings.NewReader(form.Encode()))
+	req := httptest.NewRequest(http.MethodPost, "/admin/api-keys/hash-123/revoke", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(s.sessionCookie("admin-sess"))
 	req.AddCookie(s.csrfCookie())
@@ -621,7 +634,7 @@ func (s *AuthHandlerSuite) TestAdminRevokeKey_NonAdmin_Returns403() {
 	s.auth.EXPECT().GetSession(gomock.Any(), "sess1").Return(nonAdmin, nil).Times(1)
 
 	form := withCSRF(url.Values{})
-	req := httptest.NewRequest(http.MethodPost, "/admin/keys/hash-123/revoke", strings.NewReader(form.Encode()))
+	req := httptest.NewRequest(http.MethodPost, "/admin/api-keys/hash-123/revoke", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(s.sessionCookie("sess1"))
 	req.AddCookie(s.csrfCookie())
@@ -641,7 +654,7 @@ func (s *AuthHandlerSuite) TestAdminCreateKey_CreateFails_ShowsError() {
 	s.auth.EXPECT().ListAPITokens(gomock.Any(), "admin-id").Return([]*auth.APITokenInfo{}, nil)
 
 	form := withCSRF(url.Values{})
-	req := httptest.NewRequest(http.MethodPost, "/admin/keys", strings.NewReader(form.Encode()))
+	req := httptest.NewRequest(http.MethodPost, "/admin/api-keys", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(s.sessionCookie("admin-sess"))
 	req.AddCookie(s.csrfCookie())
@@ -660,7 +673,7 @@ func (s *AuthHandlerSuite) TestAdminRevokeKey_RevokeFails_RedirectsWithError() {
 	s.auth.EXPECT().RevokeAPIToken(gomock.Any(), "admin-id", "hash-123").Return(domain.ErrNotFound)
 
 	form := withCSRF(url.Values{})
-	req := httptest.NewRequest(http.MethodPost, "/admin/keys/hash-123/revoke", strings.NewReader(form.Encode()))
+	req := httptest.NewRequest(http.MethodPost, "/admin/api-keys/hash-123/revoke", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(s.sessionCookie("admin-sess"))
 	req.AddCookie(s.csrfCookie())
@@ -752,6 +765,95 @@ func (s *AuthHandlerSuite) TestAPITokenAuth_AdminBearer_ReachesAdminPage() {
 	s.router.ServeHTTP(rec, req)
 
 	s.Equal(http.StatusOK, rec.Code)
+}
+
+// TestAPITokenAuth_PrivateNote_ValidBearer_Served is a regression test: GET /notes/{id} is a
+// "public" route (auth not required), so the middleware must still resolve an API-token Bearer
+// key there — otherwise the CLI, whose only credential is that key, gets 401 on a private note.
+func (s *AuthHandlerSuite) TestAPITokenAuth_PrivateNote_ValidBearer_Served() {
+	usr := &domain.User{ID: "u1", Username: "alice"}
+	priv := true
+	note := newTestNote("secret", "# private")
+	note.Private = &priv
+
+	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "good-api-key").Return(usr, nil)
+	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
+	s.manager.EXPECT().ViewPreloaded(gomock.Any(), testID, gomock.Any()).Return(note, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
+	req.Header.Set("Authorization", "Bearer good-api-key")
+	req.Header.Set("Accept", "application/json")
+
+	rec := httptest.NewRecorder()
+
+	s.router.ServeHTTP(rec, req)
+
+	s.Equal(http.StatusOK, rec.Code, "a valid API token must unlock a private note on the public GET route")
+}
+
+// TestAPITokenAuth_PrivateNote_UnknownBearer_Returns401 is the negative counterpart: an unknown
+// API key must not reach a private note.
+func (s *AuthHandlerSuite) TestAPITokenAuth_PrivateNote_UnknownBearer_Returns401() {
+	priv := true
+	note := newTestNote("secret", "# private")
+	note.Private = &priv
+
+	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "bad-key").Return(nil, domain.ErrNotFound)
+	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
+	req.Header.Set("Authorization", "Bearer bad-key")
+	req.Header.Set("Accept", "application/json")
+
+	rec := httptest.NewRecorder()
+
+	s.router.ServeHTTP(rec, req)
+
+	s.Equal(http.StatusUnauthorized, rec.Code)
+}
+
+// TestGetNote_NotFound_JSONClient_GetsJSONError is a regression test: a not-found note (e.g. an
+// already-burned one) requested by an API/CLI client must return a JSON ErrorResponse
+// ({"message": ...}) matching the OpenAPI spec, so the ogen client decodes it into a typed error
+// instead of failing on an unexpected content type (was: text/plain, then text/html).
+func (s *AuthHandlerSuite) TestGetNote_NotFound_JSONClient_GetsJSONError() {
+	usr := &domain.User{ID: "u1", Username: "alice"}
+	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "good-api-key").Return(usr, nil)
+	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(nil, domain.ErrNotFound)
+
+	req := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
+	req.Header.Set("Authorization", "Bearer good-api-key")
+	req.Header.Set("Accept", "application/json")
+
+	rec := httptest.NewRecorder()
+
+	s.router.ServeHTTP(rec, req)
+
+	s.Equal(http.StatusNotFound, rec.Code)
+	s.Contains(rec.Header().Get("Content-Type"), "application/json",
+		"an API client must get a JSON error body per the OpenAPI ErrorResponse schema")
+
+	var body struct {
+		Message string `json:"message"`
+	}
+	s.Require().NoError(json.Unmarshal(rec.Body.Bytes(), &body))
+	s.Equal("not found", body.Message)
+}
+
+// TestGetNote_NotFound_BrowserClient_GetsHTMLPage locks in the other half of the negotiation:
+// a browser still gets the styled HTML error page.
+func (s *AuthHandlerSuite) TestGetNote_NotFound_BrowserClient_GetsHTMLPage() {
+	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(nil, domain.ErrNotFound)
+
+	req := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
+	req.Header.Set("Accept", "text/html")
+
+	rec := httptest.NewRecorder()
+
+	s.router.ServeHTTP(rec, req)
+
+	s.Equal(http.StatusNotFound, rec.Code)
+	s.Contains(rec.Header().Get("Content-Type"), "text/html")
 }
 
 // ── Change password ──

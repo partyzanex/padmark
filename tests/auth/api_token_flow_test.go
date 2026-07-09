@@ -17,6 +17,7 @@ import (
 
 	clicmd "github.com/partyzanex/padmark/internal/adapters/cli"
 	adaptershttp "github.com/partyzanex/padmark/internal/adapters/http"
+	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/infra/crypto"
 	"github.com/partyzanex/padmark/internal/infra/render"
 	sqliterepo "github.com/partyzanex/padmark/internal/infra/storage/sqlite"
@@ -93,12 +94,17 @@ func TestAPITokenFlow_AdminIssuesKey_CLICreatesNote(t *testing.T) {
 	require.NoError(t, err, "admin must be able to issue an API key — the store must be wired into auth.Manager")
 	require.NotEmpty(t, apiKey)
 
-	// ── CLI creates a note authenticating only with the Bearer key ──
+	// The admin panel hands the user an envelope token: the raw key packed together with the
+	// server URL. Exercising that exact string proves the whole feature end-to-end.
+	envelope, err := domain.EncodeAPITokenEnvelope(srv.URL, apiKey)
+	require.NoError(t, err)
+
+	// ── CLI creates a note with only the envelope token — no --url, the URL comes from the token ──
 	runErr := clicmd.NewApp().Run(ctx, []string{
-		"padmark-cli", "--url", srv.URL, "--token", apiKey,
+		"padmark-cli", "--token", envelope,
 		"create", "--title", "hello", "--content", "world from cli",
 	})
-	require.NoError(t, runErr, "CLI must create a note when authenticated with a valid API key")
+	require.NoError(t, runErr, "CLI must create a note using the URL and key packed into the envelope token")
 
 	count, err := db.NewSelect().TableExpr("notes").Count(ctx)
 	require.NoError(t, err)
@@ -114,4 +120,32 @@ func TestAPITokenFlow_AdminIssuesKey_CLICreatesNote(t *testing.T) {
 	count, err = db.NewSelect().TableExpr("notes").Count(ctx)
 	require.NoError(t, err)
 	require.Equal(t, 1, count, "an invalid API key must not create a note")
+
+	// ── regression: a PRIVATE note must be readable via the CLI's API token ──
+	// GET /notes/{id} is a "public" route (auth not required), so the auth middleware must still
+	// resolve the API-token Bearer key there — otherwise a private-note read returns 401.
+	priv := true
+	created, err := notesMgr.Create(ctx, &domain.Note{
+		Title:   "secret",
+		Content: "private body",
+		Private: &priv,
+	})
+	require.NoError(t, err)
+
+	getErr := clicmd.NewApp().Run(ctx, []string{
+		"padmark-cli", "--token", envelope, "get", created.ID,
+	})
+	require.NoError(t, getErr,
+		"CLI must read a PRIVATE note with its API token (regression: 401 on the public GET route)")
+
+	// ── regression: a missing note must surface as a clean typed "not found" error, not a
+	// content-type decode failure — the API error body must be JSON per the OpenAPI spec ──
+	missingErr := clicmd.NewApp().Run(ctx, []string{
+		"padmark-cli", "--token", envelope, "get", "no-such-note",
+	})
+	require.Error(t, missingErr)
+	require.Contains(t, missingErr.Error(), "not found",
+		"the ogen client must decode the JSON 404 into a typed not-found error")
+	require.NotContains(t, missingErr.Error(), "Content-Type",
+		"a missing note must not surface as an undecodable-response error")
 }

@@ -26,7 +26,7 @@ func pingAction(ctx context.Context, cmd *urcli.Command) error {
 	}
 
 	erw := &errWriter{w: os.Stdout}
-	erw.printf("server: %s\n", cmd.String(FlagURL))
+	erw.printf("server: %s\n", resolveServerURL(cmd))
 
 	liveErr := checkLiveness(ctx, padmarkClient)
 	if liveErr != nil {

@@ -152,7 +152,7 @@ func handleUpdateNoteRes(res padmark.UpdateNoteRes) (*padmark.NoteResponse, erro
 	case *padmark.UpdateNoteForbidden:
 		return nil, errors.New("forbidden: wrong edit code")
 	case *padmark.UpdateNoteNotFound:
-		return nil, fmt.Errorf("not found: %s", typed.Message)
+		return nil, errors.New("note not found")
 	case *padmark.UpdateNoteUnprocessableEntity:
 		return nil, fmt.Errorf("validation error: %s", typed.Message)
 	case *padmark.UpdateNoteInternalServerError:

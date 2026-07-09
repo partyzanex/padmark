@@ -562,12 +562,28 @@ Long-lived bearer keys for the CLI (and automation like `hermes-bot`). Requires 
 system (`--enable-accounts`).
 
 **Issuance (admin, in the browser).** A key is minted by an admin from `/admin` → "API keys" →
-"Create key". It is shown **once** in plaintext on that page; only its SHA-256 hash is stored
-(`api_tokens.token_hash`, the primary key). The plaintext is never logged and never placed in a
-URL. Keys are listed (hash prefix, owner, created / last-used) and revoked from the same page.
+"Create key". It is shown **once** on that page as an *envelope token* (see below); only the raw
+key's SHA-256 hash is stored (`api_tokens.token_hash`, the primary key). The raw key is never
+logged and never placed in a URL. Keys are listed (hash prefix, owner, created / last-used) and
+revoked from the same page.
+
+**Envelope token format.** The value handed to the user is self-contained: it packs both the
+server base URL and the raw key so the user configures a single string. It is
+`pmk_` + base64url(no padding) of a JSON object:
+
+```
+pmk_<base64url({"url":"https://notes.example.com","token":"<raw-key>"})>
+```
+
+The codec lives in `domain` (`EncodeAPITokenEnvelope` / `DecodeAPITokenEnvelope`) — the only layer
+both the HTTP adapter (which encodes on issuance) and the CLI adapter (which decodes) may import.
+The base URL is derived from the issuing request (`scheme + "://" + r.Host`, same as invite links).
+The envelope is transport convenience only: **the server authenticates on the raw key alone**, so
+encoding is a presentation concern, not a security boundary. A legacy bare key (no `pmk_` prefix)
+still works — it is used verbatim as the bearer.
 
 **Distribution.** There is no CLI login command and no anonymous endpoint. The admin copies the
-key out of the page and hands it to the user, who stores it (see precedence below).
+envelope token out of the page and hands it to the user, who stores it (see precedence below).
 
 **CLI consumption.** `newPadmarkClient` resolves the token in this order (first non-empty wins):
 
@@ -575,17 +591,22 @@ key out of the page and hands it to the user, who stores it (see precedence belo
 2. `PADMARK_TOKEN` env var
 3. `~/.config/padmark/token` (honours `XDG_CONFIG_HOME`; contents are trimmed)
 
-The resolved token is sent as `Authorization: Bearer <token>` on every request. On the server,
-the auth middleware resolves it via `Manager.ResolveAPIToken` (after session-cookie and legacy
-bearer checks); an unknown, revoked, or expired key falls through to 401 / login redirect.
+`splitToken` then unpacks the resolved value: for an envelope token it extracts the raw key and the
+embedded URL; a legacy bare key yields itself and no URL. The raw key is sent as
+`Authorization: Bearer <raw-key>` on every request — the envelope itself is never transmitted. The
+embedded URL becomes the server base URL **unless** `--url` / `PADMARK_URL` is set explicitly
+(`cmd.IsSet`), in which case the explicit value wins. On the server, the auth middleware resolves
+the key via `Manager.ResolveAPIToken` (after session-cookie and legacy bearer checks); an unknown,
+revoked, or expired key falls through to 401 / login redirect.
 
 **Handling the token file.**
 
 - Create the directory `0700` and the file `0600` (the CLI only reads it — set the modes yourself):
   ```sh
   mkdir -m 700 -p ~/.config/padmark
-  printf '%s' "<paste-key>" > ~/.config/padmark/token && chmod 600 ~/.config/padmark/token
+  printf '%s' "<paste-envelope-token>" > ~/.config/padmark/token && chmod 600 ~/.config/padmark/token
   ```
+  With an envelope token the URL is already baked in, so `--url` / `PADMARK_URL` can be omitted.
 - Sending a token to a non-HTTPS server logs a cleartext-exposure warning (advisory, not blocking);
   use an `https://` server URL in production.
 - To rotate or revoke, delete the key in `/admin` and issue a new one; the old hash stops resolving.

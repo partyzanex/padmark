@@ -273,13 +273,34 @@ padmark has two independent auth mechanisms. Use either, both, or neither.
 
 ### Bearer tokens (API / CLI)
 
-Token auth for write operations is **off by default**. Enable it with `--auth-tokens` / `PADMARK_AUTH_TOKENS`:
+> **Deprecated.** `--auth-tokens` / `PADMARK_AUTH_TOKENS` is the legacy bearer-token write auth.
+> Use the **TOTP account system** (`--enable-accounts`) and issue per-user **API keys** from
+> `/admin` instead. The flag is kept for backwards compatibility and will be removed in a future
+> release.
+>
+> When set, **write operations** (create, update, delete) require `Authorization: Bearer <token>`.
+> Public notes stay readable without a token.
 
-```bash
-PADMARK_AUTH_TOKENS="token-a,token-b" go run ./cmd/padmark-server serve
-```
+### API keys (TOTP account system)
 
-Once enabled, **write operations** (create, update, delete) require `Authorization: Bearer <token>`. Public notes stay readable without a token.
+With `--enable-accounts=true`, an admin can issue long-lived API keys from `/admin` → **API keys** →
+**Create key** for any user (including the admin's own account, e.g. a service account like
+`hermes-bot`). The key is shown **once** in plaintext on that page; only its SHA-256 hash is
+stored (`api_tokens.token_hash`, primary key). The same page lists all keys (hash prefix, owner,
+created / last-used) and lets the admin revoke them.
+
+The CLI (`padmark-cli`) resolves the bearer token in this order (first non-empty wins):
+
+1. `--token` flag
+2. `PADMARK_TOKEN` env var
+3. `~/.config/padmark/token` (honours `XDG_CONFIG_HOME`; contents are trimmed)
+
+The token is sent as `Authorization: Bearer <token>` on every request. On the server, the auth
+middleware resolves it via `Manager.ResolveAPIToken` after the session-cookie check; an unknown,
+revoked, or expired key falls through to 401 / login redirect.
+
+> Sending a token to a non-HTTPS server logs a cleartext-exposure warning (advisory, not blocking);
+> use an `https://` server URL in production.
 
 ### User accounts with TOTP 2FA (web)
 
@@ -299,7 +320,7 @@ When **disabled**, none of the routes below are gated and `/setup`, `/admin`, et
 
 - **`/setup`** — create the first admin (username + password). A TOTP QR code is shown **once** — scan it into your authenticator app.
 - **`/login`** — sign in with username + password + a 6-digit TOTP code.
-- **`/admin`** — admins issue single-use **invite links** and revoke users. Revoking a user also clears their sessions and invites.
+- **`/admin`** — admins issue single-use **invite links**, issue/revoke **API keys** (Bearer tokens for the CLI), and revoke users. Revoking a user also clears their sessions, invites, and API keys.
 - New users onboard via an invite link, choose their own password, and scan their own TOTP QR.
 - **`/change-password`** — rotate the password (requires the current password **and** a TOTP code).
 - Sessions are cookie-based; lifetime via `--session-ttl` (default 30 days).
@@ -326,11 +347,11 @@ Always public regardless of auth config: `/login`, `/setup`, `/logout`, `/static
 | `--addr` | `PADMARK_ADDR` | `:8080` | Listen address |
 | `--storage` | `PADMARK_STORAGE` | `sqlite` | `sqlite` or `postgres` |
 | `--dsn` | `PADMARK_DSN` | `padmark.db` | DB path or connection string |
-| `--auth-tokens` | `PADMARK_AUTH_TOKENS` | — | Comma-separated Bearer tokens |
+| `--auth-tokens` | `PADMARK_AUTH_TOKENS` | — | **Deprecated.** Legacy comma-separated Bearer tokens for write endpoints; superseded by the TOTP account system + per-user API keys. Will be removed in a future release |
 | `--enable-accounts` | `PADMARK_ENABLE_ACCOUNTS` | `false` | Enable the TOTP account system (`/setup`, `/login`, `/admin`, private-note gating); off = fully public |
 | `--totp-issuer` | `PADMARK_TOTP_ISSUER` | `padmark` | TOTP issuer shown in the authenticator app |
 | `--session-ttl` | `PADMARK_SESSION_TTL` | `2592000` | Session lifetime in seconds (default 30 days) |
-| `--argon2-memory` | `PADMARK_ARGON2_MEMORY` | `65536` | argon2id memory cost (KiB) for password/edit-code hashing — lower for low-RAM hosts |
+| `--argon2-memory` | `PADMARK_ARGON2_MEMORY` | `24576` | argon2id memory cost in KiB for **account password** hashing (default 24 MiB); lower for low-RAM hosts. Edit codes use a fast hash and are unaffected |
 | `--argon2-time` | `PADMARK_ARGON2_TIME` | `2` | argon2id iterations (OWASP minimum at 64 MiB) — raise when lowering memory |
 | `--argon2-threads` | `PADMARK_ARGON2_THREADS` | `1` | argon2id parallelism (CPU threads per hash) |
 | `--cookie-max-age` | `PADMARK_COOKIE_MAX_AGE` | `7776000` | Auth cookie max-age in seconds (default 90 days) |
@@ -352,8 +373,9 @@ Always public regardless of auth config: `/login`, `/setup`, `/logout`, `/static
 
 | Flag | Description |
 |---|---|
-| `--url`, `-u` | Padmark server URL |
-| `--token` | Bearer token |
+| `--url`, `-u` | Padmark server URL (env: `PADMARK_URL`, default `http://localhost:8080`) |
+| `--token` | Bearer token for authentication (env: `PADMARK_TOKEN`; falls back to `~/.config/padmark/token`) |
+| `--timeout` | Per-request HTTP timeout; `0` disables it (env: `PADMARK_TIMEOUT`, default `30s`) |
 
 ---
 

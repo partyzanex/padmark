@@ -55,10 +55,16 @@ func (am *authMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		return
 	case isPublicRoute(r, am.namedRoutes):
-		// Note view/burn routes: auth is not required, but resolve the session when a
-		// cookie is present so the handler's private-note and CanEdit checks read the
-		// user from context instead of repeating the lookup. No cookie ⇒ no query.
-		rr, _ := am.resolveSessionUser(r)
+		// Note view/burn routes: auth is not required, but resolve the caller when a
+		// credential is present so the handler's private-note and CanEdit checks read the
+		// user from context. A session cookie (browser) or an API-token Bearer key (CLI)
+		// both count; a request with neither costs no query (each resolver short-circuits
+		// when its credential is absent).
+		rr, ok := am.resolveSessionUser(r)
+		if !ok {
+			rr, _ = am.resolveAPITokenUser(rr)
+		}
+
 		am.next.ServeHTTP(w, rr)
 
 		return

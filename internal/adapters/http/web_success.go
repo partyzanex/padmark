@@ -29,10 +29,7 @@ func (h *Handler) SuccessPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	scheme := "http"
-	if isHTTPS(r, h.trustedProxies) {
-		scheme = protoHTTPS
-	}
+	scheme := requestScheme(r, h.trustedProxies)
 
 	// r.Host may be attacker-controlled (Host header), but this URL is only rendered into the
 	// page via html/template (escaped, no injection) for the user to copy — it is never emailed
