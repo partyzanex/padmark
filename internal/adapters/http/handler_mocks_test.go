@@ -18,6 +18,309 @@ import (
 	gomock "go.uber.org/mock/gomock"
 )
 
+// MockSessionManager is a mock of SessionManager interface.
+type MockSessionManager struct {
+	ctrl     *gomock.Controller
+	recorder *MockSessionManagerMockRecorder
+	isgomock struct{}
+}
+
+// MockSessionManagerMockRecorder is the mock recorder for MockSessionManager.
+type MockSessionManagerMockRecorder struct {
+	mock *MockSessionManager
+}
+
+// NewMockSessionManager creates a new mock instance.
+func NewMockSessionManager(ctrl *gomock.Controller) *MockSessionManager {
+	mock := &MockSessionManager{ctrl: ctrl}
+	mock.recorder = &MockSessionManagerMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockSessionManager) EXPECT() *MockSessionManagerMockRecorder {
+	return m.recorder
+}
+
+// ChangePassword mocks base method.
+func (m *MockSessionManager) ChangePassword(ctx context.Context, sessionID, oldPassword, newPassword, totpCode string) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ChangePassword", ctx, sessionID, oldPassword, newPassword, totpCode)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ChangePassword indicates an expected call of ChangePassword.
+func (mr *MockSessionManagerMockRecorder) ChangePassword(ctx, sessionID, oldPassword, newPassword, totpCode any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ChangePassword", reflect.TypeOf((*MockSessionManager)(nil).ChangePassword), ctx, sessionID, oldPassword, newPassword, totpCode)
+}
+
+// GetSession mocks base method.
+func (m *MockSessionManager) GetSession(ctx context.Context, sessionID string) (*domain.User, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetSession", ctx, sessionID)
+	ret0, _ := ret[0].(*domain.User)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetSession indicates an expected call of GetSession.
+func (mr *MockSessionManagerMockRecorder) GetSession(ctx, sessionID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetSession", reflect.TypeOf((*MockSessionManager)(nil).GetSession), ctx, sessionID)
+}
+
+// Login mocks base method.
+func (m *MockSessionManager) Login(ctx context.Context, username, password, totpCode, userAgent, clientIP string) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Login", ctx, username, password, totpCode, userAgent, clientIP)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Login indicates an expected call of Login.
+func (mr *MockSessionManagerMockRecorder) Login(ctx, username, password, totpCode, userAgent, clientIP any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Login", reflect.TypeOf((*MockSessionManager)(nil).Login), ctx, username, password, totpCode, userAgent, clientIP)
+}
+
+// Logout mocks base method.
+func (m *MockSessionManager) Logout(ctx context.Context, sessionID string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Logout", ctx, sessionID)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// Logout indicates an expected call of Logout.
+func (mr *MockSessionManagerMockRecorder) Logout(ctx, sessionID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Logout", reflect.TypeOf((*MockSessionManager)(nil).Logout), ctx, sessionID)
+}
+
+// MockOnboardingManager is a mock of OnboardingManager interface.
+type MockOnboardingManager struct {
+	ctrl     *gomock.Controller
+	recorder *MockOnboardingManagerMockRecorder
+	isgomock struct{}
+}
+
+// MockOnboardingManagerMockRecorder is the mock recorder for MockOnboardingManager.
+type MockOnboardingManagerMockRecorder struct {
+	mock *MockOnboardingManager
+}
+
+// NewMockOnboardingManager creates a new mock instance.
+func NewMockOnboardingManager(ctrl *gomock.Controller) *MockOnboardingManager {
+	mock := &MockOnboardingManager{ctrl: ctrl}
+	mock.recorder = &MockOnboardingManagerMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockOnboardingManager) EXPECT() *MockOnboardingManagerMockRecorder {
+	return m.recorder
+}
+
+// AcceptFirstAdmin mocks base method.
+func (m *MockOnboardingManager) AcceptFirstAdmin(ctx context.Context, username, password string) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "AcceptFirstAdmin", ctx, username, password)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// AcceptFirstAdmin indicates an expected call of AcceptFirstAdmin.
+func (mr *MockOnboardingManagerMockRecorder) AcceptFirstAdmin(ctx, username, password any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AcceptFirstAdmin", reflect.TypeOf((*MockOnboardingManager)(nil).AcceptFirstAdmin), ctx, username, password)
+}
+
+// AcceptInvite mocks base method.
+func (m *MockOnboardingManager) AcceptInvite(ctx context.Context, token, username, password string) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "AcceptInvite", ctx, token, username, password)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// AcceptInvite indicates an expected call of AcceptInvite.
+func (mr *MockOnboardingManagerMockRecorder) AcceptInvite(ctx, token, username, password any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AcceptInvite", reflect.TypeOf((*MockOnboardingManager)(nil).AcceptInvite), ctx, token, username, password)
+}
+
+// GenerateInvite mocks base method.
+func (m *MockOnboardingManager) GenerateInvite(ctx context.Context, adminUserID string) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GenerateInvite", ctx, adminUserID)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GenerateInvite indicates an expected call of GenerateInvite.
+func (mr *MockOnboardingManagerMockRecorder) GenerateInvite(ctx, adminUserID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GenerateInvite", reflect.TypeOf((*MockOnboardingManager)(nil).GenerateInvite), ctx, adminUserID)
+}
+
+// IsEmpty mocks base method.
+func (m *MockOnboardingManager) IsEmpty(ctx context.Context) (bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "IsEmpty", ctx)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// IsEmpty indicates an expected call of IsEmpty.
+func (mr *MockOnboardingManagerMockRecorder) IsEmpty(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsEmpty", reflect.TypeOf((*MockOnboardingManager)(nil).IsEmpty), ctx)
+}
+
+// MockUserAdminManager is a mock of UserAdminManager interface.
+type MockUserAdminManager struct {
+	ctrl     *gomock.Controller
+	recorder *MockUserAdminManagerMockRecorder
+	isgomock struct{}
+}
+
+// MockUserAdminManagerMockRecorder is the mock recorder for MockUserAdminManager.
+type MockUserAdminManagerMockRecorder struct {
+	mock *MockUserAdminManager
+}
+
+// NewMockUserAdminManager creates a new mock instance.
+func NewMockUserAdminManager(ctrl *gomock.Controller) *MockUserAdminManager {
+	mock := &MockUserAdminManager{ctrl: ctrl}
+	mock.recorder = &MockUserAdminManagerMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockUserAdminManager) EXPECT() *MockUserAdminManagerMockRecorder {
+	return m.recorder
+}
+
+// ListUsers mocks base method.
+func (m *MockUserAdminManager) ListUsers(ctx context.Context, adminUserID string) ([]*domain.User, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListUsers", ctx, adminUserID)
+	ret0, _ := ret[0].([]*domain.User)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListUsers indicates an expected call of ListUsers.
+func (mr *MockUserAdminManagerMockRecorder) ListUsers(ctx, adminUserID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListUsers", reflect.TypeOf((*MockUserAdminManager)(nil).ListUsers), ctx, adminUserID)
+}
+
+// RevokeUser mocks base method.
+func (m *MockUserAdminManager) RevokeUser(ctx context.Context, adminUserID, targetUserID string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RevokeUser", ctx, adminUserID, targetUserID)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// RevokeUser indicates an expected call of RevokeUser.
+func (mr *MockUserAdminManagerMockRecorder) RevokeUser(ctx, adminUserID, targetUserID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RevokeUser", reflect.TypeOf((*MockUserAdminManager)(nil).RevokeUser), ctx, adminUserID, targetUserID)
+}
+
+// MockAPITokenManager is a mock of APITokenManager interface.
+type MockAPITokenManager struct {
+	ctrl     *gomock.Controller
+	recorder *MockAPITokenManagerMockRecorder
+	isgomock struct{}
+}
+
+// MockAPITokenManagerMockRecorder is the mock recorder for MockAPITokenManager.
+type MockAPITokenManagerMockRecorder struct {
+	mock *MockAPITokenManager
+}
+
+// NewMockAPITokenManager creates a new mock instance.
+func NewMockAPITokenManager(ctrl *gomock.Controller) *MockAPITokenManager {
+	mock := &MockAPITokenManager{ctrl: ctrl}
+	mock.recorder = &MockAPITokenManagerMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockAPITokenManager) EXPECT() *MockAPITokenManagerMockRecorder {
+	return m.recorder
+}
+
+// CreateAPIToken mocks base method.
+func (m *MockAPITokenManager) CreateAPIToken(ctx context.Context, userID string) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CreateAPIToken", ctx, userID)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// CreateAPIToken indicates an expected call of CreateAPIToken.
+func (mr *MockAPITokenManagerMockRecorder) CreateAPIToken(ctx, userID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateAPIToken", reflect.TypeOf((*MockAPITokenManager)(nil).CreateAPIToken), ctx, userID)
+}
+
+// ListAPITokens mocks base method.
+func (m *MockAPITokenManager) ListAPITokens(ctx context.Context, adminUserID string) ([]*auth.APITokenInfo, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListAPITokens", ctx, adminUserID)
+	ret0, _ := ret[0].([]*auth.APITokenInfo)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListAPITokens indicates an expected call of ListAPITokens.
+func (mr *MockAPITokenManagerMockRecorder) ListAPITokens(ctx, adminUserID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListAPITokens", reflect.TypeOf((*MockAPITokenManager)(nil).ListAPITokens), ctx, adminUserID)
+}
+
+// ResolveAPIToken mocks base method.
+func (m *MockAPITokenManager) ResolveAPIToken(ctx context.Context, plainToken string) (*domain.User, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ResolveAPIToken", ctx, plainToken)
+	ret0, _ := ret[0].(*domain.User)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ResolveAPIToken indicates an expected call of ResolveAPIToken.
+func (mr *MockAPITokenManagerMockRecorder) ResolveAPIToken(ctx, plainToken any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ResolveAPIToken", reflect.TypeOf((*MockAPITokenManager)(nil).ResolveAPIToken), ctx, plainToken)
+}
+
+// RevokeAPIToken mocks base method.
+func (m *MockAPITokenManager) RevokeAPIToken(ctx context.Context, adminUserID, tokenID string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RevokeAPIToken", ctx, adminUserID, tokenID)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// RevokeAPIToken indicates an expected call of RevokeAPIToken.
+func (mr *MockAPITokenManagerMockRecorder) RevokeAPIToken(ctx, adminUserID, tokenID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RevokeAPIToken", reflect.TypeOf((*MockAPITokenManager)(nil).RevokeAPIToken), ctx, adminUserID, tokenID)
+}
+
 // MockAuthManager is a mock of AuthManager interface.
 type MockAuthManager struct {
 	ctrl     *gomock.Controller

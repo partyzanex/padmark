@@ -1,11 +1,14 @@
 package cli
 
 import (
+	"bytes"
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -29,14 +32,65 @@ func writeTokenFile(t *testing.T, contents string) {
 func TestReadTokenFile_ReadsAndTrimsWhitespace(t *testing.T) {
 	writeTokenFile(t, "  secret-key\n\n")
 
-	assert.Equal(t, "secret-key", readTokenFile())
+	assert.Equal(t, "secret-key", readTokenFile(io.Discard))
 }
 
 func TestReadTokenFile_Missing_ReturnsEmpty(t *testing.T) {
 	// A config dir with no token file present.
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 
-	assert.Empty(t, readTokenFile())
+	assert.Empty(t, readTokenFile(io.Discard))
+}
+
+// writeTokenFileMode writes the token file with an explicit permission mode and returns its path,
+// so tests can assert that readTokenFile tightens an over-permissive file to 0600.
+func writeTokenFileMode(t *testing.T, contents string, mode os.FileMode) string {
+	t.Helper()
+
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "padmark"), 0o700))
+
+	path := filepath.Join(dir, "padmark", "token")
+	require.NoError(t, os.WriteFile(path, []byte(contents), mode))
+	// WriteFile respects the umask, so force the exact mode we want to test against.
+	require.NoError(t, os.Chmod(path, mode))
+	t.Setenv("XDG_CONFIG_HOME", dir)
+
+	return path
+}
+
+func TestReadTokenFile_TightensGroupOtherReadableFile(t *testing.T) {
+	if runtime.GOOS == osWindows {
+		t.Skip("POSIX permission bits are not meaningful on Windows")
+	}
+
+	var errBuf bytes.Buffer
+
+	path := writeTokenFileMode(t, "secret-key\n", 0o644)
+
+	assert.Equal(t, "secret-key", readTokenFile(&errBuf), "token is still returned after tightening")
+
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm(), "over-permissive token file is tightened to 0600")
+	assert.Contains(t, errBuf.String(), "tightened to 600", "a warning is emitted when perms are fixed")
+}
+
+func TestReadTokenFile_LeavesOwnerOnlyFileUntouched(t *testing.T) {
+	if runtime.GOOS == osWindows {
+		t.Skip("POSIX permission bits are not meaningful on Windows")
+	}
+
+	var errBuf bytes.Buffer
+
+	path := writeTokenFileMode(t, "secret-key\n", 0o600)
+
+	assert.Equal(t, "secret-key", readTokenFile(&errBuf))
+
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+	assert.Empty(t, errBuf.String(), "no warning for an already-secure token file")
 }
 
 func TestTokenFilePath_XDGConfigHome(t *testing.T) {

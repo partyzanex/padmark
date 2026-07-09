@@ -186,6 +186,12 @@ func NewRouter(
 	stack = withLogging(handler.log, stack)
 	stack = withRequestID(stack)
 
+	// Second, outermost recovery layer: the inner withRecovery above only covers mux, so a
+	// panic in any middleware between it and here (auth, CSRF, rate-limit, security-headers,
+	// logging, request-ID) would otherwise fall through to net/http's bare per-connection
+	// recovery, which drops the response body and skips structured logging entirely.
+	stack = withRecovery(handler.log, stack)
+
 	return stack
 }
 

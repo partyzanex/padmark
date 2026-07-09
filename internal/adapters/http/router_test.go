@@ -3,6 +3,7 @@ package http
 import (
 	"bytes"
 	"context"
+	"log/slog"
 	net_http "net/http"
 	"net/http/httptest"
 	"os"
@@ -165,4 +166,58 @@ func TestIsPublicRoute(t *testing.T) {
 		got := isPublicRoute(req, named)
 		assert.Equal(t, tc.want, got, "%s %s", tc.method, tc.path)
 	}
+}
+
+// TestWithRecovery_RecoversPanicAndLogs verifies the base case: a panic in the wrapped
+// handler is turned into a 500 and a structured log entry, rather than propagating up.
+func TestWithRecovery_RecoversPanicAndLogs(t *testing.T) {
+	var buf bytes.Buffer
+
+	log := slog.New(slog.NewJSONHandler(&buf, nil))
+	panicking := net_http.HandlerFunc(func(net_http.ResponseWriter, *net_http.Request) {
+		panic("boom")
+	})
+
+	handler := withRecovery(log, panicking)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, httptest.NewRequest(net_http.MethodGet, "/", nil))
+
+	assert.Equal(t, net_http.StatusInternalServerError, rec.Code)
+	assert.Contains(t, buf.String(), "panic recovered")
+}
+
+// TestWithRecovery_OutermostLayerCoversMiddlewarePanic guards the fix for a panic occurring
+// in a middleware sitting between the router's two withRecovery layers (auth, CSRF,
+// rate-limit, security-headers, logging, request-ID in NewRouter). Without the outermost
+// recovery layer added in NewRouter, such a panic would bypass recovery entirely and fall
+// through to net/http's bare per-connection recovery (no response body, no structured log).
+func TestWithRecovery_OutermostLayerCoversMiddlewarePanic(t *testing.T) {
+	var buf bytes.Buffer
+
+	log := slog.New(slog.NewJSONHandler(&buf, nil))
+	mux := net_http.HandlerFunc(func(w net_http.ResponseWriter, _ *net_http.Request) {
+		w.WriteHeader(net_http.StatusOK)
+	})
+
+	// panicMiddleware stands in for a middleware sitting between the two recovery layers
+	// in NewRouter (auth, CSRF, rate-limit, security-headers, logging, request-ID) that
+	// panics before ever delegating to the inner handler.
+	panicMiddleware := func(net_http.Handler) net_http.Handler {
+		return net_http.HandlerFunc(func(net_http.ResponseWriter, *net_http.Request) {
+			panic("middleware boom")
+		})
+	}
+
+	// Mirrors NewRouter's shape: inner recovery around mux, a middleware layer that can
+	// panic, then the outermost recovery layer added to fix this finding.
+	stack := withRecovery(log, mux)
+	stack = panicMiddleware(stack)
+	stack = withRecovery(log, stack)
+
+	rec := httptest.NewRecorder()
+	stack.ServeHTTP(rec, httptest.NewRequest(net_http.MethodGet, "/", nil))
+
+	assert.Equal(t, net_http.StatusInternalServerError, rec.Code)
+	assert.Contains(t, buf.String(), "panic recovered")
 }
