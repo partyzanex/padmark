@@ -10,6 +10,8 @@ go.mk:
 	git clone --depth 1 --single-branch https://github.com/partyzanex/go-makefile.git $$tmpdir && \
 	cp $$tmpdir/go.mk $(CURDIR)/go.mk
 
+GOOSE := $(CURDIR)/bin/goose
+
 $(GOOSE):
 	@echo "Installing goose $(GOOSE_VERSION)..."
 	GOBIN=$(CURDIR)/bin go install github.com/pressly/goose/v3/cmd/goose@$(GOOSE_VERSION)

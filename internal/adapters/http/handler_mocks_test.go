@@ -14,6 +14,7 @@ import (
 	reflect "reflect"
 
 	domain "github.com/partyzanex/padmark/internal/domain"
+	auth "github.com/partyzanex/padmark/internal/usecases/auth"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -86,6 +87,21 @@ func (mr *MockAuthManagerMockRecorder) ChangePassword(ctx, sessionID, oldPasswor
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ChangePassword", reflect.TypeOf((*MockAuthManager)(nil).ChangePassword), ctx, sessionID, oldPassword, newPassword, totpCode)
 }
 
+// CreateAPIToken mocks base method.
+func (m *MockAuthManager) CreateAPIToken(ctx context.Context, userID string) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CreateAPIToken", ctx, userID)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// CreateAPIToken indicates an expected call of CreateAPIToken.
+func (mr *MockAuthManagerMockRecorder) CreateAPIToken(ctx, userID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateAPIToken", reflect.TypeOf((*MockAuthManager)(nil).CreateAPIToken), ctx, userID)
+}
+
 // GenerateInvite mocks base method.
 func (m *MockAuthManager) GenerateInvite(ctx context.Context, adminUserID string) (string, error) {
 	m.ctrl.T.Helper()
@@ -131,6 +147,21 @@ func (mr *MockAuthManagerMockRecorder) IsEmpty(ctx any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsEmpty", reflect.TypeOf((*MockAuthManager)(nil).IsEmpty), ctx)
 }
 
+// ListAPITokens mocks base method.
+func (m *MockAuthManager) ListAPITokens(ctx context.Context, adminUserID string) ([]*auth.APITokenInfo, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListAPITokens", ctx, adminUserID)
+	ret0, _ := ret[0].([]*auth.APITokenInfo)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListAPITokens indicates an expected call of ListAPITokens.
+func (mr *MockAuthManagerMockRecorder) ListAPITokens(ctx, adminUserID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListAPITokens", reflect.TypeOf((*MockAuthManager)(nil).ListAPITokens), ctx, adminUserID)
+}
+
 // ListUsers mocks base method.
 func (m *MockAuthManager) ListUsers(ctx context.Context, adminUserID string) ([]*domain.User, error) {
 	m.ctrl.T.Helper()
@@ -173,6 +204,20 @@ func (m *MockAuthManager) Logout(ctx context.Context, sessionID string) error {
 func (mr *MockAuthManagerMockRecorder) Logout(ctx, sessionID any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Logout", reflect.TypeOf((*MockAuthManager)(nil).Logout), ctx, sessionID)
+}
+
+// RevokeAPIToken mocks base method.
+func (m *MockAuthManager) RevokeAPIToken(ctx context.Context, adminUserID, tokenID string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RevokeAPIToken", ctx, adminUserID, tokenID)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// RevokeAPIToken indicates an expected call of RevokeAPIToken.
+func (mr *MockAuthManagerMockRecorder) RevokeAPIToken(ctx, adminUserID, tokenID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RevokeAPIToken", reflect.TypeOf((*MockAuthManager)(nil).RevokeAPIToken), ctx, adminUserID, tokenID)
 }
 
 // RevokeUser mocks base method.

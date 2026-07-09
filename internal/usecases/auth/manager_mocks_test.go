@@ -604,30 +604,30 @@ func (mr *MockAPITokenStoreMockRecorder) List(ctx any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "List", reflect.TypeOf((*MockAPITokenStore)(nil).List), ctx)
 }
 
-// RevokeByID mocks base method.
-func (m *MockAPITokenStore) RevokeByID(ctx context.Context, id string) error {
+// RevokeByHash mocks base method.
+func (m *MockAPITokenStore) RevokeByHash(ctx context.Context, tokenHash string) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "RevokeByID", ctx, id)
+	ret := m.ctrl.Call(m, "RevokeByHash", ctx, tokenHash)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
-// RevokeByID indicates an expected call of RevokeByID.
-func (mr *MockAPITokenStoreMockRecorder) RevokeByID(ctx, id any) *gomock.Call {
+// RevokeByHash indicates an expected call of RevokeByHash.
+func (mr *MockAPITokenStoreMockRecorder) RevokeByHash(ctx, tokenHash any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RevokeByID", reflect.TypeOf((*MockAPITokenStore)(nil).RevokeByID), ctx, id)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RevokeByHash", reflect.TypeOf((*MockAPITokenStore)(nil).RevokeByHash), ctx, tokenHash)
 }
 
 // UpdateLastUsed mocks base method.
-func (m *MockAPITokenStore) UpdateLastUsed(ctx context.Context, id string, t time.Time) error {
+func (m *MockAPITokenStore) UpdateLastUsed(ctx context.Context, tokenHash string, t time.Time) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "UpdateLastUsed", ctx, id, t)
+	ret := m.ctrl.Call(m, "UpdateLastUsed", ctx, tokenHash, t)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // UpdateLastUsed indicates an expected call of UpdateLastUsed.
-func (mr *MockAPITokenStoreMockRecorder) UpdateLastUsed(ctx, id, t any) *gomock.Call {
+func (mr *MockAPITokenStoreMockRecorder) UpdateLastUsed(ctx, tokenHash, t any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateLastUsed", reflect.TypeOf((*MockAPITokenStore)(nil).UpdateLastUsed), ctx, id, t)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateLastUsed", reflect.TypeOf((*MockAPITokenStore)(nil).UpdateLastUsed), ctx, tokenHash, t)
 }

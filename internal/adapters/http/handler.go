@@ -14,9 +14,10 @@ import (
 	"net/http"
 
 	"github.com/partyzanex/padmark/internal/domain"
+	"github.com/partyzanex/padmark/internal/usecases/auth"
 )
 
-// AuthManager performs TOTP-based authentication and user management.
+// AuthManager performs TOTP-based authentication, user management, and API-token issuance.
 type AuthManager interface {
 	Login(ctx context.Context, username, password, totpCode, userAgent, clientIP string) (string, error)
 	Logout(ctx context.Context, sessionID string) error
@@ -28,6 +29,12 @@ type AuthManager interface {
 	IsEmpty(ctx context.Context) (bool, error)
 	ListUsers(ctx context.Context, adminUserID string) ([]*domain.User, error)
 	RevokeUser(ctx context.Context, adminUserID, targetUserID string) error
+	// CreateAPIToken issues a long-lived API key for userID, returning the plain key exactly once.
+	CreateAPIToken(ctx context.Context, userID string) (string, error)
+	// ListAPITokens returns all API tokens with owning usernames for the admin panel.
+	ListAPITokens(ctx context.Context, adminUserID string) ([]*auth.APITokenInfo, error)
+	// RevokeAPIToken deletes an API token by its public ID (the token hash).
+	RevokeAPIToken(ctx context.Context, adminUserID, tokenID string) error
 }
 
 //go:embed static

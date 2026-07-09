@@ -4,13 +4,13 @@ import "time"
 
 // APIToken is a long-lived bearer key issued through the browser-based CLI login flow.
 // The plain key is shown to the user exactly once; only its SHA-256 hash is persisted.
-// ID identifies the token in the admin UI and revoke URLs so the raw hash never appears
-// in a URL or a log line. TokenHash is looked up on every authenticated API request.
+// TokenHash is both the primary key and the public identifier used in admin URLs, since the
+// CLI flow does not issue a separate opaque ID (see docs/plan-padmark-cli-improvements.md,
+// option b). It is looked up on every authenticated API request.
 type APIToken struct {
-	ID         string
-	UserID     string
-	TokenHash  string
 	CreatedAt  time.Time
 	ExpiresAt  *time.Time
 	LastUsedAt *time.Time
+	UserID     string
+	TokenHash  string
 }

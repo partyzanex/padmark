@@ -91,27 +91,27 @@ type APITokenStore interface {
 	GetByHash(ctx context.Context, tokenHash string) (*domain.APIToken, error)
 	// List returns all tokens for the admin panel.
 	List(ctx context.Context) ([]*domain.APIToken, error)
-	// RevokeByID deletes a token by its public ID. Returns domain.ErrNotFound when absent.
-	RevokeByID(ctx context.Context, id string) error
-	// UpdateLastUsed records the time of the most recent successful token check.
-	UpdateLastUsed(ctx context.Context, id string, t time.Time) error
+	// RevokeByHash deletes a token by its SHA-256 hash (the public identifier). Returns
+	// domain.ErrNotFound when absent.
+	RevokeByHash(ctx context.Context, tokenHash string) error
+	// UpdateLastUsed records the time of the most recent successful token check, keyed by hash.
+	UpdateLastUsed(ctx context.Context, tokenHash string, t time.Time) error
 }
 
 // Manager orchestrates TOTP-based authentication and invite-link onboarding.
 type Manager struct {
-	users       UserStore
+	totp        TOTPManager
 	invites     InviteStore
 	sessions    SessionStore
 	enc         Encryptor
 	pw          PasswordHasher
 	kdf         KeyDeriver
-	totp        TOTPManager
+	users       UserStore
+	apiTokens   APITokenStore
 	log         *slog.Logger
 	issuer      string
 	dummyPwHash string
 	ttl         time.Duration
-	apiTokens   APITokenStore
-	linkSecret  []byte
 }
 
 // NewManager returns a new auth Manager.

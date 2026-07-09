@@ -25,7 +25,5 @@ var (
 	ErrSessionExpired      = errors.New("session has expired")
 	ErrInvalidPassword     = errors.New("invalid password")
 	ErrWeakPassword        = errors.New("password does not meet complexity requirements")
-	ErrLoginLinkInvalid    = errors.New("login link is invalid")
-	ErrLoginLinkExpired    = errors.New("login link has expired")
 	ErrFeatureNotSupported = errors.New("feature is not enabled")
 )

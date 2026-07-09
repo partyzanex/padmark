@@ -14,6 +14,8 @@ CREATE TABLE IF NOT EXISTS api_tokens (
     expires_at   TIMESTAMPTZ,
     last_used_at TIMESTAMPTZ
 );
+CREATE INDEX IF NOT EXISTS idx_api_tokens_user_id ON api_tokens(user_id);
 
 -- +goose Down
+DROP INDEX IF EXISTS idx_api_tokens_user_id;
 DROP TABLE IF EXISTS api_tokens;
