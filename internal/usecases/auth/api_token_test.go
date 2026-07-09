@@ -115,10 +115,31 @@ func (suite *APITokenSuite) TestCreateAPIToken_StoreCreateFails_WrapsError() {
 	ctx := suite.T().Context()
 	usr := suite.adminUser()
 	suite.users.EXPECT().GetByID(gomock.Any(), usr.ID).Return(usr, nil)
+	suite.apiTokens.EXPECT().CountByUser(gomock.Any(), usr.ID).Return(0, nil)
 	suite.apiTokens.EXPECT().Create(gomock.Any(), gomock.Any()).Return(errors.New("db down"))
 
 	_, err := suite.mgr.CreateAPIToken(ctx, usr.ID)
 	suite.ErrorContains(err, "create api token")
+}
+
+func (suite *APITokenSuite) TestCreateAPIToken_CountFails_WrapsError() {
+	ctx := suite.T().Context()
+	usr := suite.adminUser()
+	suite.users.EXPECT().GetByID(gomock.Any(), usr.ID).Return(usr, nil)
+	suite.apiTokens.EXPECT().CountByUser(gomock.Any(), usr.ID).Return(0, errors.New("db down"))
+
+	_, err := suite.mgr.CreateAPIToken(ctx, usr.ID)
+	suite.ErrorContains(err, "count api tokens")
+}
+
+func (suite *APITokenSuite) TestCreateAPIToken_LimitReached_ReturnsErrAPITokenLimit() {
+	ctx := suite.T().Context()
+	usr := suite.adminUser()
+	suite.users.EXPECT().GetByID(gomock.Any(), usr.ID).Return(usr, nil)
+	suite.apiTokens.EXPECT().CountByUser(gomock.Any(), usr.ID).Return(maxAPITokensPerUser, nil)
+
+	_, err := suite.mgr.CreateAPIToken(ctx, usr.ID)
+	suite.ErrorIs(err, domain.ErrAPITokenLimit)
 }
 
 func (suite *APITokenSuite) TestCreateAPIToken_Success_ReturnsPlainKeyAndPersistsHash() {
@@ -128,6 +149,7 @@ func (suite *APITokenSuite) TestCreateAPIToken_Success_ReturnsPlainKeyAndPersist
 	var stored *domain.APIToken
 
 	suite.users.EXPECT().GetByID(gomock.Any(), usr.ID).Return(usr, nil)
+	suite.apiTokens.EXPECT().CountByUser(gomock.Any(), usr.ID).Return(0, nil)
 	suite.apiTokens.EXPECT().Create(gomock.Any(), gomock.Any()).DoAndReturn(
 		func(_ context.Context, tk *domain.APIToken) error {
 			stored = tk

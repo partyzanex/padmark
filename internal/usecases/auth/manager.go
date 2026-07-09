@@ -87,6 +87,8 @@ type TOTPManager interface {
 type APITokenStore interface {
 	// Create persists a newly issued API token.
 	Create(ctx context.Context, t *domain.APIToken) error
+	// CountByUser returns how many tokens the given user already holds, so issuance can be capped.
+	CountByUser(ctx context.Context, userID string) (int, error)
 	// GetByHash resolves a token by its SHA-256 hash. Returns domain.ErrNotFound when absent.
 	GetByHash(ctx context.Context, tokenHash string) (*domain.APIToken, error)
 	// List returns all tokens for the admin panel.

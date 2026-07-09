@@ -26,4 +26,5 @@ var (
 	ErrInvalidPassword     = errors.New("invalid password")
 	ErrWeakPassword        = errors.New("password does not meet complexity requirements")
 	ErrFeatureNotSupported = errors.New("feature is not enabled")
+	ErrAPITokenLimit       = errors.New("api token limit reached")
 )

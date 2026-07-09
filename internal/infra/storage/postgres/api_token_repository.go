@@ -62,6 +62,19 @@ func (r *APITokenRepository) Create(ctx context.Context, t *domain.APIToken) err
 	return nil
 }
 
+// CountByUser returns how many tokens the given user already holds, so issuance can be capped.
+func (r *APITokenRepository) CountByUser(ctx context.Context, userID string) (int, error) {
+	count, err := r.db.NewSelect().
+		Model((*apiTokenRow)(nil)).
+		Where("user_id = ?", userID).
+		Count(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("count api tokens: %w", err)
+	}
+
+	return count, nil
+}
+
 // GetByHash resolves a token by its SHA-256 hash. Returns domain.ErrNotFound when absent.
 func (r *APITokenRepository) GetByHash(ctx context.Context, tokenHash string) (*domain.APIToken, error) {
 	var row apiTokenRow

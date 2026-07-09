@@ -14,6 +14,9 @@ import (
 const (
 	// apiTokenBytes is the entropy of a freshly generated API key (256 bits).
 	apiTokenBytes = 32
+	// maxAPITokensPerUser caps how many live API keys a single user may hold, so an admin
+	// (or a compromised admin session) cannot mint an unbounded number of bearer credentials.
+	maxAPITokensPerUser = 20
 )
 
 // APITokenInfo is the admin-facing projection of an API token: identifying and audit metadata
@@ -31,7 +34,8 @@ type APITokenInfo struct {
 // returned exactly once; only its SHA-256 hash is stored. The caller is responsible for any
 // authorisation check (admin gate, target-user gate) — this method authenticates the *issuance*
 // flow, not the resulting bearer.
-// Returns domain.ErrFeatureNotSupported when the API-token flow is not enabled on the Manager.
+// Returns domain.ErrFeatureNotSupported when the API-token flow is not enabled on the Manager, and
+// domain.ErrAPITokenLimit when userID already holds maxAPITokensPerUser keys.
 func (m *Manager) CreateAPIToken(ctx context.Context, userID string) (string, error) {
 	if m.apiTokens == nil {
 		return "", domain.ErrFeatureNotSupported
@@ -40,6 +44,15 @@ func (m *Manager) CreateAPIToken(ctx context.Context, userID string) (string, er
 	usr, err := m.users.GetByID(ctx, userID)
 	if err != nil {
 		return "", fmt.Errorf("get user: %w", err)
+	}
+
+	count, err := m.apiTokens.CountByUser(ctx, usr.ID)
+	if err != nil {
+		return "", fmt.Errorf("count api tokens: %w", err)
+	}
+
+	if count >= maxAPITokensPerUser {
+		return "", domain.ErrAPITokenLimit
 	}
 
 	plain, err := newAPIToken()

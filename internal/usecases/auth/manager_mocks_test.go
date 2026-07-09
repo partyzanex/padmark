@@ -560,6 +560,21 @@ func (m *MockAPITokenStore) EXPECT() *MockAPITokenStoreMockRecorder {
 	return m.recorder
 }
 
+// CountByUser mocks base method.
+func (m *MockAPITokenStore) CountByUser(ctx context.Context, userID string) (int, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CountByUser", ctx, userID)
+	ret0, _ := ret[0].(int)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// CountByUser indicates an expected call of CountByUser.
+func (mr *MockAPITokenStoreMockRecorder) CountByUser(ctx, userID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CountByUser", reflect.TypeOf((*MockAPITokenStore)(nil).CountByUser), ctx, userID)
+}
+
 // Create mocks base method.
 func (m *MockAPITokenStore) Create(ctx context.Context, t *domain.APIToken) error {
 	m.ctrl.T.Helper()

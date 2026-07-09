@@ -629,6 +629,9 @@ func (h *Handler) AdminCreateKeyHandler(w http.ResponseWriter, r *http.Request) 
 		h.log.ErrorContext(r.Context(), "create api token", "err", createErr)
 
 		data.KeyError = "Failed to create API key."
+		if errors.Is(createErr, domain.ErrAPITokenLimit) {
+			data.KeyError = "This user already holds the maximum number of API keys; revoke one first."
+		}
 	default:
 		scheme := requestScheme(r, h.trustedProxies)
 

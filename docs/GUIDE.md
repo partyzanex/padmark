@@ -558,14 +558,13 @@ go generate ./...                  # Regenerate mocks
 
 ### CLI API tokens
 
-Long-lived bearer keys for the CLI (and automation like `hermes-bot`). Requires the account
-system (`--enable-accounts`).
+Long-lived bearer keys for the CLI. Requires the account system (`--enable-accounts`).
 
-**Issuance (admin, in the browser).** A key is minted by an admin from `/admin` → "API keys" →
-"Create key". It is shown **once** on that page as an *envelope token* (see below); only the raw
-key's SHA-256 hash is stored (`api_tokens.token_hash`, the primary key). The raw key is never
-logged and never placed in a URL. Keys are listed (hash prefix, owner, created / last-used) and
-revoked from the same page.
+**Issuance (admin, in the browser).** An admin mints a key for their own account from `/admin` →
+"API keys" → "Create key" — there is no way to issue a key for a different account. It is shown
+**once** on that page as an *envelope token* (see below); only the raw key's SHA-256 hash is
+stored (`api_tokens.token_hash`, the primary key). The raw key is never logged and never placed in
+a URL. Keys are listed (hash prefix, owner, created / last-used) and revoked from the same page.
 
 **Envelope token format.** The value handed to the user is self-contained: it packs both the
 server base URL and the raw key so the user configures a single string. It is

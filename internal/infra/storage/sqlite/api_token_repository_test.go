@@ -140,6 +140,30 @@ func (s *APITokenRepositoryTestSuite) TestList_Empty_ReturnsEmpty() {
 	s.Empty(tokens)
 }
 
+// ── CountByUser ──
+
+func (s *APITokenRepositoryTestSuite) TestCountByUser_CountsOnlyThatUsersTokens() {
+	ctx := s.T().Context()
+	s.createUser("count-a")
+	s.createUser("count-b")
+
+	s.Require().NoError(s.repo.Create(ctx, s.newToken("count-a", "count-a-1")))
+	s.Require().NoError(s.repo.Create(ctx, s.newToken("count-a", "count-a-2")))
+	s.Require().NoError(s.repo.Create(ctx, s.newToken("count-b", "count-b-1")))
+
+	count, err := s.repo.CountByUser(ctx, "count-a")
+	s.Require().NoError(err)
+	s.Equal(2, count)
+}
+
+func (s *APITokenRepositoryTestSuite) TestCountByUser_NoTokens_ReturnsZero() {
+	s.createUser("count-none")
+
+	count, err := s.repo.CountByUser(s.T().Context(), "count-none")
+	s.Require().NoError(err)
+	s.Equal(0, count)
+}
+
 // ── RevokeByHash ──
 
 func (s *APITokenRepositoryTestSuite) TestRevokeByHash_RemovesToken() {

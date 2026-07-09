@@ -274,7 +274,7 @@ padmark has two independent auth mechanisms. Use either, both, or neither.
 ### Bearer tokens (API / CLI)
 
 > **Deprecated.** `--auth-tokens` / `PADMARK_AUTH_TOKENS` is the legacy bearer-token write auth.
-> Use the **TOTP account system** (`--enable-accounts`) and issue per-user **API keys** from
+> Use the **TOTP account system** (`--enable-accounts`) and issue an admin **API key** from
 > `/admin` instead. The flag is kept for backwards compatibility and will be removed in a future
 > release.
 >
@@ -283,11 +283,10 @@ padmark has two independent auth mechanisms. Use either, both, or neither.
 
 ### API keys (TOTP account system)
 
-With `--enable-accounts=true`, an admin can issue long-lived API keys from `/admin` → **API keys** →
-**Create key** for any user (including the admin's own account, e.g. a service account like
-`hermes-bot`). The key is shown **once** in plaintext on that page; only its SHA-256 hash is
-stored (`api_tokens.token_hash`, primary key). The same page lists all keys (hash prefix, owner,
-created / last-used) and lets the admin revoke them.
+With `--enable-accounts=true`, an admin can issue a long-lived API key for their own account from
+`/admin` → **API keys** → **Create key**. The key is shown **once** in plaintext on that page; only
+its SHA-256 hash is stored (`api_tokens.token_hash`, primary key). The same page lists all keys
+(hash prefix, owner, created / last-used) and lets the admin revoke them.
 
 The CLI (`padmark-cli`) resolves the bearer token in this order (first non-empty wins):
 
@@ -347,7 +346,7 @@ Always public regardless of auth config: `/login`, `/setup`, `/logout`, `/static
 | `--addr` | `PADMARK_ADDR` | `:8080` | Listen address |
 | `--storage` | `PADMARK_STORAGE` | `sqlite` | `sqlite` or `postgres` |
 | `--dsn` | `PADMARK_DSN` | `padmark.db` | DB path or connection string |
-| `--auth-tokens` | `PADMARK_AUTH_TOKENS` | — | **Deprecated.** Legacy comma-separated Bearer tokens for write endpoints; superseded by the TOTP account system + per-user API keys. Will be removed in a future release |
+| `--auth-tokens` | `PADMARK_AUTH_TOKENS` | — | **Deprecated.** Legacy comma-separated Bearer tokens for write endpoints; superseded by the TOTP account system + admin API keys. Will be removed in a future release |
 | `--enable-accounts` | `PADMARK_ENABLE_ACCOUNTS` | `false` | Enable the TOTP account system (`/setup`, `/login`, `/admin`, private-note gating); off = fully public |
 | `--totp-issuer` | `PADMARK_TOTP_ISSUER` | `padmark` | TOTP issuer shown in the authenticator app |
 | `--session-ttl` | `PADMARK_SESSION_TTL` | `2592000` | Session lifetime in seconds (default 30 days) |
