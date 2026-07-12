@@ -181,6 +181,7 @@ func isPublicPath(path string) bool {
 	return path == "/login" ||
 		path == "/setup" ||
 		path == "/logout" ||
+		path == "/totp-login" ||
 		strings.HasPrefix(path, "/static/") ||
 		path == "/api" || path == "/api/openapi.yaml" ||
 		path == "/healthz" || path == "/readyz"
@@ -191,47 +192,37 @@ func isPublicPath(path string) bool {
 // in NewRouter; they must not be treated as public note IDs.
 // The handler checks the per-note private flag and requires auth when the note is private.
 func isPublicRoute(r *http.Request, namedRoutes map[string]struct{}) bool {
-	path := r.URL.Path
-	trimmed := strings.TrimPrefix(path, "/")
-
-	// POST /{id} and POST /notes/{id} — burn-after-reading confirmation
-	if r.Method == http.MethodPost {
-		return isNoteIDPath(trimmed, namedRoutes)
-	}
-
-	if r.Method != http.MethodGet {
+	// GET note view and POST burn-reveal are the only public note routes; every other method
+	// (create/update/delete) requires auth.
+	switch r.Method {
+	case http.MethodGet, http.MethodPost:
+		return isNoteIDPath(strings.TrimPrefix(r.URL.Path, "/"), namedRoutes)
+	default:
 		return false
 	}
-
-	// GET /notes/{id} — single segment after "notes/"
-	if after, ok := strings.CutPrefix(trimmed, "notes/"); ok {
-		return after != "" && !strings.Contains(after, "/")
-	}
-
-	// Catch-all GET /{id} — single path segment that is not a named page route
-	if trimmed == "" || strings.Contains(trimmed, "/") {
-		return false
-	}
-
-	_, isNamed := namedRoutes[trimmed]
-
-	return !isNamed
 }
 
-// isNoteIDPath reports whether trimmed (path without leading slash) matches
-// /{id} or /notes/{id} for POST requests.
+// isNoteIDPath reports whether trimmed (the request path without its leading slash) addresses a
+// note for public viewing/revealing — the root catch-all /{id...} or the API-style /notes/{id...},
+// where the slug may span multiple segments (e.g. project/GUIDE.md). A path whose first segment
+// names a built-in route (namedRoutes) is never a public note: those keep requiring auth, so
+// /edit/{id}, /admin/... and friends are not opened up by the multi-segment slug support.
 func isNoteIDPath(trimmed string, namedRoutes map[string]struct{}) bool {
-	// /notes/{id}
-	if after, ok := strings.CutPrefix(trimmed, "notes/"); ok {
-		return after != "" && !strings.Contains(after, "/")
-	}
-
-	// /{id}
-	if trimmed == "" || strings.Contains(trimmed, "/") {
+	if trimmed == "" {
 		return false
 	}
 
-	_, isNamed := namedRoutes[trimmed]
+	// /notes/{id...} — strip the API prefix, then apply the same first-segment guard to the rest.
+	if after, ok := strings.CutPrefix(trimmed, "notes/"); ok {
+		trimmed = after
+		if trimmed == "" {
+			return false
+		}
+	}
+
+	first, _, _ := strings.Cut(trimmed, "/")
+
+	_, isNamed := namedRoutes[first]
 
 	return !isNamed
 }

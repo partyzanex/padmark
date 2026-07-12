@@ -125,14 +125,20 @@ func registerRoutes(
 	mux.HandleFunc("POST /change-password", guard(handler.ChangePasswordHandler))
 	mux.HandleFunc("GET /api", handler.APIDocsPage)
 	mux.HandleFunc("GET /api/openapi.yaml", APISpec)
-	mux.HandleFunc("GET /", handler.IndexPage)
+	mux.HandleFunc("GET /{$}", handler.IndexPage)
 	mux.HandleFunc("GET /success", handler.SuccessPage)
 	mux.Handle("GET /static/", withStaticCacheControl(StaticHandler))
-	mux.HandleFunc("GET /notes/{id}", handler.GetNote)
-	mux.HandleFunc("POST /notes/{id}", guard(handler.HandleReveal))
-	mux.HandleFunc("GET /edit/{id}", handler.EditPage)
-	mux.HandleFunc("GET /{id}", handler.GetNote)
-	mux.HandleFunc("POST /{id}", guard(handler.HandleReveal))
+	// {id...} wildcards let a note slug span multiple path segments (e.g. project/GUIDE.md).
+	// The ogen PUT/DELETE /notes/{id} routes above stay single-segment (generated router
+	// limitation); native {id...} handlers below bridge update/delete for path-like slugs, so
+	// by ServeMux specificity single-segment IDs keep going to ogen and multi-segment to these.
+	mux.Handle("PUT /notes/{id...}", withFailLockout(lockout, http.HandlerFunc(handler.UpdateNoteByPath)))
+	mux.Handle("DELETE /notes/{id...}", withFailLockout(lockout, http.HandlerFunc(handler.DeleteNoteByPath)))
+	mux.HandleFunc("GET /notes/{id...}", handler.GetNote)
+	mux.HandleFunc("POST /notes/{id...}", guard(handler.HandleReveal))
+	mux.HandleFunc("GET /edit/{id...}", handler.EditPage)
+	mux.HandleFunc("GET /{id...}", handler.GetNote)
+	mux.HandleFunc("POST /{id...}", guard(handler.HandleReveal))
 }
 
 // NewRouter registers all routes and wraps them with middleware.
@@ -195,12 +201,16 @@ func NewRouter(
 	return stack
 }
 
-// buildNamedRoutes returns the set of single-segment GET path names that are registered
-// page routes (not note IDs). Keep in sync with route registrations in NewRouter.
+// buildNamedRoutes returns the set of first path segments that name built-in routes rather than
+// notes. The auth middleware treats any request whose first segment is in this set as a non-note
+// route (so it keeps requiring auth); everything else may be a public note view. Keep in sync with
+// the route registrations in NewRouter and with reservedSlugPrefixes in internal/usecases/notes.
 func buildNamedRoutes() map[string]struct{} {
 	return map[string]struct{}{
 		"login":           {},
 		"setup":           {},
+		"logout":          {},
+		"totp-login":      {},
 		"admin":           {},
 		"api":             {},
 		"success":         {},
@@ -209,6 +219,7 @@ func buildNamedRoutes() map[string]struct{} {
 		"notes":           {},
 		"edit":            {},
 		"change-password": {},
+		"static":          {},
 	}
 }
 
@@ -287,16 +298,23 @@ func withLogging(log *slog.Logger, next http.Handler) http.Handler {
 		// remote is the immediate peer (the proxy/LB IP when behind one); xff is the
 		// X-Forwarded-For chain the proxy sent; user/admin is the resolved identity ("-" when
 		// anonymous). These make trusted-proxy and auth debugging possible without shell access.
-		log.Log(r.Context(), level, "http",
+		attrs := []any{
 			"method", r.Method,
-			"path", r.URL.Path,
 			"status", rec.status,
 			"duration", time.Since(start),
 			"remote", r.RemoteAddr,
 			"xff", r.Header.Get("X-Forwarded-For"),
 			"user", user,
 			"admin", holder.admin,
-		)
+		}
+
+		// The request path can embed a note slug, which is the note's content-encryption key
+		// material. Keep it out of info-level access logs; include it only when debug is enabled.
+		if log.Enabled(r.Context(), slog.LevelDebug) {
+			attrs = append(attrs, "path", r.URL.Path)
+		}
+
+		log.Log(r.Context(), level, "http", attrs...)
 	})
 }
 

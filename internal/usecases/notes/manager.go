@@ -13,12 +13,31 @@ import (
 	"log/slog"
 	"math/big"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/partyzanex/padmark/internal/domain"
 )
 
-var slugRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,99}$`)
+// slugRe matches a custom slug: one or more path segments joined by "/", each starting with an
+// alphanumeric and otherwise containing alphanumerics, dot, hyphen or underscore. This allows
+// path-like slugs such as "project/GUIDE.md" while rejecting "..", "//", leading/trailing "/"
+// and dotfiles (path-traversal-ish shapes). Overall length is bounded separately by slugMaxLen.
+var slugRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*$`)
+
+// slugMaxLen bounds the total slug length (a slug doubles as the content encryption key material).
+const slugMaxLen = 100
+
+// reservedSlugPrefixes returns the first path segments that name built-in routes. A custom slug
+// must not start with one, or its URL would resolve to that route (e.g. "edit/foo" → the editor)
+// instead of the note. Keep in sync with buildNamedRoutes in internal/adapters/http.
+func reservedSlugPrefixes() map[string]struct{} {
+	return map[string]struct{}{
+		"login": {}, "setup": {}, "logout": {}, "totp-login": {},
+		"admin": {}, "api": {}, "success": {}, "healthz": {}, "readyz": {},
+		"notes": {}, "edit": {}, "change-password": {}, "static": {},
+	}
+}
 
 const (
 	slugChars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
@@ -34,19 +53,43 @@ const (
 func newSlug() string     { return randomString(slugChars, slugLength) }
 func newEditCode() string { return randomString(editCodeChars, editCodeLength) }
 
-// resolveSlug validates or generates the note's slug, returning it.
-func resolveSlug(note *domain.Note) (string, error) {
+// resolveSlug validates or generates the note's slug, returning it. A user-supplied slug is only
+// accepted when allowCustom is true; otherwise it is rejected so callers cannot pick low-entropy,
+// guessable key material.
+func resolveSlug(note *domain.Note, allowCustom bool) (string, error) {
 	if note.ID == "" {
 		note.ID = newSlug()
 
 		return note.ID, nil
 	}
 
-	if !slugRe.MatchString(note.ID) {
+	if !allowCustom {
+		return "", domain.ErrCustomSlugDisabled
+	}
+
+	if !validCustomSlug(note.ID) {
 		return "", domain.ErrInvalidSlug
 	}
 
 	return note.ID, nil
+}
+
+// validCustomSlug reports whether a user-supplied slug is acceptable: bounded length, path-like
+// shape (see slugRe), and a first segment that does not collide with a reserved route name.
+func validCustomSlug(slug string) bool {
+	if slug == "" || len(slug) > slugMaxLen {
+		return false
+	}
+
+	if !slugRe.MatchString(slug) {
+		return false
+	}
+
+	first, _, _ := strings.Cut(slug, "/")
+
+	_, reserved := reservedSlugPrefixes()[first]
+
+	return !reserved
 }
 
 // hashSlug returns sha256(slug) as hex — the DB primary key.
@@ -108,13 +151,26 @@ type Manager struct {
 	encryptor Encryptor
 	hasher    EditCodeHasher
 	log       *slog.Logger
+	// allowCustomSlugs gates user-supplied (human-readable) slugs. When false, custom slugs are
+	// rejected and only server-generated random slugs are issued.
+	allowCustomSlugs bool
 }
 
-// NewManager creates a new Manager with required dependencies.
+// NewManager creates a new Manager with required dependencies. allowCustomSlugs enables
+// user-supplied slugs; when false, a create request carrying a slug is rejected with
+// domain.ErrCustomSlugDisabled (a custom slug is low-entropy content-encryption key material).
 func NewManager(
-	storage Storage, renderer Renderer, encryptor Encryptor, hasher EditCodeHasher, log *slog.Logger,
+	storage Storage, renderer Renderer, encryptor Encryptor, hasher EditCodeHasher,
+	log *slog.Logger, allowCustomSlugs bool,
 ) *Manager {
-	return &Manager{storage: storage, renderer: renderer, encryptor: encryptor, hasher: hasher, log: log}
+	return &Manager{
+		storage:          storage,
+		renderer:         renderer,
+		encryptor:        encryptor,
+		hasher:           hasher,
+		log:              log,
+		allowCustomSlugs: allowCustomSlugs,
+	}
 }
 
 // Create validates and persists a new note.
@@ -129,7 +185,7 @@ func (m *Manager) Create(ctx context.Context, note *domain.Note) (*domain.Note, 
 		return nil, fmt.Errorf("validate: %w", err)
 	}
 
-	slug, err := resolveSlug(note)
+	slug, err := resolveSlug(note, m.allowCustomSlugs)
 	if err != nil {
 		return nil, err
 	}

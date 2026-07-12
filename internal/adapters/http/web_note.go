@@ -225,6 +225,95 @@ func (h *Handler) GetNote(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// updateNoteByPathBody mirrors ogenapi.UpdateNoteRequest for the native multi-segment update
+// route. Pointer fields distinguish an omitted value from a zero one where the update semantics
+// depend on it (title, content_type, private).
+type updateNoteByPathBody struct {
+	Title            *string `json:"title"`
+	ContentType      *string `json:"content_type"`
+	TTL              *int64  `json:"ttl"`
+	Private          *bool   `json:"private"`
+	Content          string  `json:"content"`
+	EditCode         string  `json:"edit_code"`
+	BurnAfterReading bool    `json:"burn_after_reading"`
+}
+
+// UpdateNoteByPath handles PUT /notes/{id...} for notes whose slug spans multiple path segments
+// (e.g. project/GUIDE.md). Single-segment IDs keep going to the ogen route PUT /notes/{id}; this
+// native handler mirrors that contract — same JSON body, 200 + note JSON, same domain-error
+// mapping — for the multi-segment case the generated single-segment router cannot match.
+func (h *Handler) UpdateNoteByPath(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	var body updateNoteByPathBody
+
+	err := json.NewDecoder(r.Body).Decode(&body)
+	if err != nil {
+		h.writeDecodeError(w, r, err)
+
+		return
+	}
+
+	var burnTTL int64
+	if body.BurnAfterReading && body.TTL != nil && *body.TTL >= 0 {
+		burnTTL = *body.TTL
+	}
+
+	var contentType *domain.ContentType
+
+	if body.ContentType != nil {
+		ct := domain.ContentType(*body.ContentType)
+		contentType = &ct
+	}
+
+	title := ""
+	if body.Title != nil {
+		title = *body.Title
+	}
+
+	note, err := h.manager.Update(r.Context(), id, body.EditCode, &domain.Note{
+		Title:            title,
+		Content:          body.Content,
+		ContentType:      contentType,
+		BurnTTL:          burnTTL,
+		BurnAfterReading: body.BurnAfterReading,
+		Private:          body.Private,
+	})
+	if err != nil {
+		h.writeError(w, r, err)
+
+		return
+	}
+
+	w.Header().Set("Content-Type", mimeJSON)
+
+	encErr := json.NewEncoder(w).Encode(toNoteJSON(note))
+	if encErr != nil {
+		h.log.ErrorContext(r.Context(), "encode update response", "id", id, "err", encErr)
+	}
+}
+
+// DeleteNoteByPath handles DELETE /notes/{id...} for path-like slugs, mirroring the ogen
+// DELETE /notes/{id} contract: the edit code comes from the X-Edit-Code header or the edit_code
+// query parameter, and a successful delete returns 204 No Content.
+func (h *Handler) DeleteNoteByPath(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	editCode := r.Header.Get("X-Edit-Code")
+	if editCode == "" {
+		editCode = r.URL.Query().Get("edit_code")
+	}
+
+	err := h.manager.Delete(r.Context(), id, editCode)
+	if err != nil {
+		h.writeError(w, r, err)
+
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // handleBurnInterstitial renders the burn confirmation state via noteTmpl for browser
 // requests to immediate-burn notes (burn_after_reading=true with no TTL). Notes that
 // burn after a grace period are served directly; the timer starts on the first read.

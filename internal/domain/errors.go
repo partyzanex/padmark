@@ -7,8 +7,13 @@ var (
 	ErrExpired            = errors.New("note has expired")
 	ErrTitleTooLong       = errors.New("title exceeds maximum length")
 	ErrInvalidContentType = errors.New("unsupported content type")
-	ErrInvalidSlug        = errors.New("invalid slug: use 1-100 alphanumeric/hyphen/underscore, start with alphanumeric")
-	ErrSlugConflict       = errors.New("slug is already taken")
+	ErrInvalidSlug        = errors.New("invalid slug: 1-100 chars, path-like " +
+		"segments of alphanumeric/dot/hyphen/underscore joined by '/', each starting with " +
+		"alphanumeric; must not start with a reserved route name")
+	ErrSlugConflict = errors.New("slug is already taken")
+	// ErrCustomSlugDisabled is returned when a create request supplies a custom slug but the
+	// server has human-readable (custom) slugs turned off (--custom-slugs=false, the default).
+	ErrCustomSlugDisabled = errors.New("custom slugs are disabled on this server")
 	ErrForbidden          = errors.New("forbidden")
 	ErrInvalidEditCode    = errors.New("invalid edit code")
 	ErrDecryptionFailed   = errors.New("content decryption failed")

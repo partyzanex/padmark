@@ -866,6 +866,66 @@ func (s *HandlerSuite) TestGetNote_Private_Authorized() {
 	s.Equal(http.StatusOK, w.Code)
 }
 
+// ── Multi-segment (path-like) slug support ──
+
+func (s *HandlerSuite) TestGetNote_MultiSegmentSlug_PublicServed() {
+	// A path-like slug (project/GUIDE.md) is a public note: served without auth even though the
+	// URL contains slashes. Proves the auth middleware treats a non-reserved first segment as a
+	// note route rather than a protected one.
+	const mid = "project/GUIDE.md"
+
+	note := newTestNote("Guide", "# body")
+	s.manager.EXPECT().Peek(gomock.Any(), mid).Return(note, nil)
+	s.manager.EXPECT().ViewPreloaded(gomock.Any(), mid, note).Return(note, nil)
+
+	router := s.newRouter([]string{"secret-token"})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/"+mid, nil)
+	r.Header.Set("Accept", "application/json")
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusOK, w.Code)
+}
+
+func (s *HandlerSuite) TestGetNote_MultiSegmentSlug_PrivateRequiresAuth() {
+	// Per-note privacy still applies to path-like slugs: a private multi-segment note is not
+	// served to an unauthenticated caller.
+	const mid = "project/secret.md"
+
+	note := newTestNote("secret", "private")
+	note.Private = new(true)
+	s.manager.EXPECT().Peek(gomock.Any(), mid).Return(note, nil)
+
+	router := s.newRouter([]string{"secret-token"})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/"+mid, nil)
+	r.Header.Set("Accept", "application/json")
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusUnauthorized, w.Code)
+}
+
+func (s *HandlerSuite) TestEditPage_MultiSegmentPath_RequiresAuth() {
+	// Regression guard: multi-segment slug support must NOT open up reserved routes. A GET to
+	// /edit/<path> is redirected to /login before reaching the edit page — it is not mistaken for
+	// a public note view just because it now spans multiple segments.
+	router := s.newRouter([]string{"secret-token"})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/edit/project/GUIDE.md", nil)
+	r.Header.Set("Accept", "text/html")
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusSeeOther, w.Code)
+	s.True(strings.HasPrefix(w.Header().Get("Location"), "/login?next="),
+		"reserved /edit/{id...} must redirect to login, not be treated as a public note")
+}
+
 func (s *HandlerSuite) TestGetNote_Private_NotFound() {
 	s.manager.EXPECT().Peek(gomock.Any(), "missing").Return(nil, domain.ErrNotFound)
 
@@ -999,6 +1059,43 @@ func (s *HandlerSuite) TestUpdateNote_Forbidden() {
 	s.router.ServeHTTP(w, r)
 
 	s.Equal(http.StatusForbidden, w.Code)
+}
+
+// ── ACCEPTANCE: edit/delete a path-like slug by its URL ──
+//
+// The web editor saves with PUT /notes/{id} and deletes with DELETE /notes/{id}. For a slug that
+// spans path segments (project/GUIDE.md) these become multi-segment paths that ogen's
+// single-segment /notes/{id} route cannot match, so a note with such a slug cannot currently be
+// edited or deleted by its address (405 Method Not Allowed). These acceptance tests assert the
+// intended behaviour and MUST FAIL until the update/delete API accepts multi-segment note IDs.
+
+func (s *HandlerSuite) TestUpdateNote_MultiSegmentSlug_ByURL_Acceptance() {
+	const mid = "project/GUIDE.md"
+
+	updated := newTestNote("Guide", "new body")
+	s.manager.EXPECT().Update(gomock.Any(), mid, "code", gomock.Any()).Return(updated, nil)
+
+	body := `{"title":"Guide","content":"new body","edit_code":"code"}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPut, "/notes/"+mid, strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusOK, w.Code, "editing a path-like slug via PUT /notes/{id...} must succeed")
+}
+
+func (s *HandlerSuite) TestDeleteNote_MultiSegmentSlug_ByURL_Acceptance() {
+	const mid = "project/GUIDE.md"
+
+	s.manager.EXPECT().Delete(gomock.Any(), mid, "code").Return(nil)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodDelete, "/notes/"+mid+"?edit_code=code", nil)
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusNoContent, w.Code, "deleting a path-like slug via DELETE /notes/{id...} must succeed")
 }
 
 // TestUpdateNote_OmittedPrivate_PreservesPrivacy verifies that when "private" is absent

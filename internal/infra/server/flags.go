@@ -26,6 +26,7 @@ const (
 	FlagAllowedHosts     = "allowed-hosts"
 	FlagTrustedProxies   = "trusted-proxies"
 	FlagPublicScheme     = "public-scheme"
+	FlagCustomSlugs      = "custom-slugs"
 	FlagTOTPIssuer       = "totp-issuer"
 	FlagSessionTTL       = "session-ttl"
 	FlagArgon2Memory     = "argon2-memory"
@@ -57,6 +58,7 @@ const (
 	EnvAllowedHosts     = "PADMARK_ALLOWED_HOSTS"
 	EnvTrustedProxies   = "PADMARK_TRUSTED_PROXIES"
 	EnvPublicScheme     = "PADMARK_PUBLIC_SCHEME"
+	EnvCustomSlugs      = "PADMARK_CUSTOM_SLUGS"
 	EnvTOTPIssuer       = "PADMARK_TOTP_ISSUER"
 	EnvSessionTTL       = "PADMARK_SESSION_TTL"
 	EnvArgon2Memory     = "PADMARK_ARGON2_MEMORY"
@@ -130,6 +132,14 @@ func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
 			Value:   false,
 			Usage: "Enable the user-account system (TOTP login, /setup, /admin, private-note gating). " +
 				"Off by default: the site is fully public unless this is set",
+		},
+		&cli.BoolFlag{
+			Name:    FlagCustomSlugs,
+			Sources: cli.EnvVars(EnvCustomSlugs),
+			Value:   false,
+			Usage: "Allow user-supplied human-readable slugs (e.g. project/GUIDE.md) at note creation. " +
+				"Off by default: only random slugs are issued, since a custom slug is low-entropy " +
+				"content-encryption key material. Enable for internal/trusted deployments",
 		},
 		&cli.IntFlag{
 			Name:    FlagCookieMaxAge,

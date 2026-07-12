@@ -68,7 +68,8 @@ func (s *ManagerTestSuite) SetupTest() {
 	s.ctrl = gomock.NewController(s.T())
 	s.storage = NewMockStorage(s.ctrl)
 	s.renderer = NewMockRenderer(s.ctrl)
-	s.manager = NewManager(s.storage, s.renderer, passthroughEncryptor{}, identityHasher{}, slog.New(slog.DiscardHandler))
+	s.manager = NewManager(s.storage, s.renderer, passthroughEncryptor{}, identityHasher{},
+		slog.New(slog.DiscardHandler), true)
 }
 
 func (s *ManagerTestSuite) TearDownTest() {
@@ -117,6 +118,42 @@ func TestNewSlug_LengthAndCharset(t *testing.T) {
 
 	for _, ch := range slug {
 		assert.Contains(t, slugChars, string(ch), "slug must only use the slug alphabet")
+	}
+}
+
+// validCustomSlug
+
+func TestValidCustomSlug(t *testing.T) {
+	cases := []struct {
+		slug string
+		want bool
+	}{
+		// single segment (legacy shapes still valid)
+		{"my-slug", true},
+		{"a_b-C9", true},
+		{"file.name.md", true},
+		// path-like multi-segment
+		{"project/GUIDE.md", true},
+		{"protocol-v1/README.md", true},
+		{"a/b/c/d.txt", true},
+		{strings.Repeat("a", 100), true}, // at length limit
+		// rejected
+		{"", false},
+		{"bad slug!", false},              // space / punctuation
+		{"admin/x", false},                // reserved first segment
+		{"edit/note", false},              // reserved first segment
+		{"notes/x", false},                // reserved first segment
+		{"../etc", false},                 // segment starts with dot (traversal-ish)
+		{".hidden", false},                // dotfile
+		{"a/.hidden", false},              // dotfile in a later segment
+		{"a//b", false},                   // empty segment
+		{"/leading", false},               // leading slash
+		{"trailing/", false},              // trailing slash
+		{strings.Repeat("a", 101), false}, // over length limit
+	}
+
+	for _, tc := range cases {
+		assert.Equal(t, tc.want, validCustomSlug(tc.slug), "slug %q", tc.slug)
 	}
 }
 
@@ -260,6 +297,29 @@ func (s *ManagerTestSuite) TestCreate_InvalidSlug() {
 	s.ErrorIs(err, domain.ErrInvalidSlug)
 }
 
+func (s *ManagerTestSuite) TestCreate_CustomSlugDisabled() {
+	// With custom slugs off (allowCustomSlugs=false, the default), a create request that supplies
+	// a slug is rejected — the server issues only random slugs.
+	mgr := NewManager(s.storage, s.renderer, passthroughEncryptor{}, identityHasher{},
+		slog.New(slog.DiscardHandler), false)
+
+	_, err := mgr.Create(s.T().Context(), &domain.Note{ID: "my-slug", Title: "hello", Content: "world"})
+
+	s.ErrorIs(err, domain.ErrCustomSlugDisabled)
+}
+
+func (s *ManagerTestSuite) TestCreate_CustomSlugDisabled_AutoSlugStillWorks() {
+	// With custom slugs off, a create request without a slug still succeeds with a generated one.
+	mgr := NewManager(s.storage, s.renderer, passthroughEncryptor{}, identityHasher{},
+		slog.New(slog.DiscardHandler), false)
+	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
+
+	result, err := mgr.Create(s.T().Context(), &domain.Note{Title: "hello", Content: "world"})
+
+	s.Require().NoError(err)
+	s.Len(result.ID, slugLength)
+}
+
 func (s *ManagerTestSuite) TestCreate_StorageError() {
 	storageErr := errors.New("db error")
 	note := &domain.Note{Title: "hi"}
@@ -275,7 +335,7 @@ func (s *ManagerTestSuite) TestCreate_StorageError() {
 // Create returns the error AND leaves the caller's note in plaintext (defer restore),
 // not in the half-hashed state it mutates into. storage.Create must not be reached.
 func (s *ManagerTestSuite) TestCreate_EncryptError_RestoresPlaintext() {
-	mgr := NewManager(s.storage, s.renderer, errEncryptor{}, prefixHasher{}, slog.New(slog.DiscardHandler))
+	mgr := NewManager(s.storage, s.renderer, errEncryptor{}, prefixHasher{}, slog.New(slog.DiscardHandler), true)
 	note := &domain.Note{Title: "t", Content: "secret body", EditCode: "mycode123456"}
 
 	_, err := mgr.Create(s.T().Context(), note)
@@ -290,7 +350,7 @@ func (s *ManagerTestSuite) TestCreate_EncryptError_RestoresPlaintext() {
 // the encrypted content / hashed edit code / hashed-slug PK, and that on a storage failure the
 // caller's note is restored to plaintext and the slug ID (defer restore).
 func (s *ManagerTestSuite) TestCreate_StorageError_RestoresPlaintextAndPersistsEncrypted() {
-	mgr := NewManager(s.storage, s.renderer, prefixEncryptor{}, prefixHasher{}, slog.New(slog.DiscardHandler))
+	mgr := NewManager(s.storage, s.renderer, prefixEncryptor{}, prefixHasher{}, slog.New(slog.DiscardHandler), true)
 	note := &domain.Note{Title: "t", Content: "body", EditCode: "code12345678", ID: "myslug"}
 
 	var atStore domain.Note
@@ -322,7 +382,7 @@ func (s *ManagerTestSuite) TestCreate_StorageError_RestoresPlaintextAndPersistsE
 // ("hash:"+code) is distinguishable from plaintext. This locks in the defense-in-depth fix so a
 // future change to the repository column allow-list cannot silently start persisting plaintext.
 func (s *ManagerTestSuite) TestUpdate_PersistsHashedEditCode_NotPlaintext() {
-	mgr := NewManager(s.storage, s.renderer, prefixEncryptor{}, prefixHasher{}, slog.New(slog.DiscardHandler))
+	mgr := NewManager(s.storage, s.renderer, prefixEncryptor{}, prefixHasher{}, slog.New(slog.DiscardHandler), true)
 
 	existing := &domain.Note{ID: "myslug", EditCode: "hash:code12345678", Content: "enc:old"}
 	s.storage.EXPECT().Get(gomock.Any(), hashSlug("myslug")).Return(existing, nil)
@@ -356,7 +416,7 @@ func (s *ManagerTestSuite) TestUpdate_PersistsHashedEditCode_NotPlaintext() {
 // race (SetBurnExpiry → ErrNotFound), the re-fetch succeeds but decryption of the re-fetched
 // note fails — the error must propagate.
 func (s *ManagerTestSuite) TestHandleSetBurnExpiryErr_RefetchDecryptFails() {
-	mgr := NewManager(s.storage, s.renderer, failingEncryptor{}, identityHasher{}, slog.New(slog.DiscardHandler))
+	mgr := NewManager(s.storage, s.renderer, failingEncryptor{}, identityHasher{}, slog.New(slog.DiscardHandler), true)
 	s.storage.EXPECT().Get(gomock.Any(), hashSlug("burn-x")).Return(&domain.Note{ID: "x", Content: "ct"}, nil)
 
 	_, err := mgr.handleSetBurnExpiryErr(s.T().Context(), "burn-x", domain.ErrNotFound)
@@ -897,7 +957,7 @@ func TestGet_DecryptionFailure(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	storage := NewMockStorage(ctrl)
 	renderer := NewMockRenderer(ctrl)
-	mgr := NewManager(storage, renderer, failingEncryptor{}, identityHasher{}, slog.New(slog.DiscardHandler))
+	mgr := NewManager(storage, renderer, failingEncryptor{}, identityHasher{}, slog.New(slog.DiscardHandler), true)
 
 	note := &domain.Note{ID: "enc-fail", Title: "t", Content: "ciphertext"}
 	storage.EXPECT().Get(gomock.Any(), hashSlug("enc-fail")).Return(note, nil)
@@ -911,7 +971,7 @@ func TestPeek_DecryptionFailure(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	storage := NewMockStorage(ctrl)
 	renderer := NewMockRenderer(ctrl)
-	mgr := NewManager(storage, renderer, failingEncryptor{}, identityHasher{}, slog.New(slog.DiscardHandler))
+	mgr := NewManager(storage, renderer, failingEncryptor{}, identityHasher{}, slog.New(slog.DiscardHandler), true)
 
 	note := &domain.Note{ID: "enc-fail-peek", Title: "t", Content: "ciphertext"}
 	storage.EXPECT().Get(gomock.Any(), hashSlug("enc-fail-peek")).Return(note, nil)
@@ -927,7 +987,7 @@ func TestGet_BurnAfterReading_DecryptionFailure(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	storage := NewMockStorage(ctrl)
 	renderer := NewMockRenderer(ctrl)
-	mgr := NewManager(storage, renderer, failingEncryptor{}, identityHasher{}, slog.New(slog.DiscardHandler))
+	mgr := NewManager(storage, renderer, failingEncryptor{}, identityHasher{}, slog.New(slog.DiscardHandler), true)
 
 	// decryptNote runs before applyNotePolicy, so Consume is never reached.
 	raw := &domain.Note{ID: "burn-enc-fail", Title: "t", BurnAfterReading: true, Content: "ciphertext"}
@@ -944,7 +1004,7 @@ func TestGet_BurnTTL_DecryptionFailure(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	storage := NewMockStorage(ctrl)
 	renderer := NewMockRenderer(ctrl)
-	mgr := NewManager(storage, renderer, failingEncryptor{}, identityHasher{}, slog.New(slog.DiscardHandler))
+	mgr := NewManager(storage, renderer, failingEncryptor{}, identityHasher{}, slog.New(slog.DiscardHandler), true)
 
 	// decryptNote runs before applyNotePolicy, so SetBurnExpiry is never reached.
 	raw := &domain.Note{ID: "burn-ttl-enc-fail", Title: "t", BurnAfterReading: true, BurnTTL: 3600, Content: "ciphertext"}

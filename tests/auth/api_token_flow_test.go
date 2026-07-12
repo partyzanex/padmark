@@ -69,6 +69,7 @@ func TestAPITokenFlow_AdminIssuesKey_CLICreatesNote(t *testing.T) {
 		crypto.New(),
 		crypto.NewEditCodeHasher(),
 		log,
+		false,
 	)
 
 	handler := adaptershttp.NewHandler(notesMgr, log, nil).WithAuthManager(authMgr)

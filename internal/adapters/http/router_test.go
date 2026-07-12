@@ -136,10 +136,7 @@ func TestSafeNextURL(t *testing.T) {
 }
 
 func TestIsPublicRoute(t *testing.T) {
-	named := map[string]struct{}{
-		"login": {}, "api": {}, "success": {}, "healthz": {}, "readyz": {},
-		"notes": {}, "edit": {},
-	}
+	named := buildNamedRoutes()
 
 	tests := []struct {
 		method string
@@ -147,18 +144,27 @@ func TestIsPublicRoute(t *testing.T) {
 		want   bool
 	}{
 		{net_http.MethodGet, "/notes/abc123", true},
-		{net_http.MethodGet, "/notes/abc/extra", false},
+		// Multi-segment slugs are now public note paths (non-reserved first segment).
+		{net_http.MethodGet, "/notes/abc/extra", true},
+		{net_http.MethodGet, "/a/b", true},
+		{net_http.MethodGet, "/project/GUIDE.md", true},
+		{net_http.MethodPost, "/project/GUIDE.md", true},
 		{net_http.MethodPost, "/notes/abc123", true},
 		{net_http.MethodPost, "/abc123", true},
 		{net_http.MethodPost, "/notes", false},
 		{net_http.MethodGet, "/abc123", true},
+		{net_http.MethodGet, "/unknown-page", true},
+		// Reserved first segments stay non-public even when multi-segment — regression guard so
+		// path-like slugs don't open up protected routes.
+		{net_http.MethodGet, "/edit/abc", false},
+		{net_http.MethodGet, "/edit/a/b", false},
+		{net_http.MethodGet, "/admin/users", false},
+		{net_http.MethodGet, "/notes/edit/x", false},
 		{net_http.MethodGet, "/success", false},
-		{net_http.MethodGet, "/a/b", false},
 		{net_http.MethodGet, "/", false},
 		{net_http.MethodGet, "/login", false},
 		{net_http.MethodGet, "/api", false},
 		{net_http.MethodGet, "/healthz", false},
-		{net_http.MethodGet, "/unknown-page", true},
 	}
 
 	for _, tc := range tests {

@@ -53,7 +53,8 @@ func mapCreateError(err error, log *slog.Logger) ogenapi.CreateNoteRes {
 	switch {
 	case errors.Is(err, domain.ErrTitleTooLong),
 		errors.Is(err, domain.ErrInvalidContentType),
-		errors.Is(err, domain.ErrInvalidSlug):
+		errors.Is(err, domain.ErrInvalidSlug),
+		errors.Is(err, domain.ErrCustomSlugDisabled):
 		v := ogenapi.CreateNoteUnprocessableEntity(r)
 
 		return &v
