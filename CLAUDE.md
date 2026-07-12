@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-**padmark** — a Go HTTP service for creating, storing, and rendering Markdown notes with content negotiation (JSON, rendered HTML, raw markdown). See `docs/TODO.md` for the roadmap and `docs/GUIDE.md` for full architectural conventions.
+**padmark** — a Go HTTP service for creating, storing, and rendering Markdown notes with content negotiation (JSON, rendered HTML, raw markdown). See `docs/GUIDE.md` for full architectural conventions.
 
 ## Commands
 

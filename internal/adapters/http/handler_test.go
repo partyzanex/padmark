@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -80,6 +81,23 @@ func (s *HandlerSuite) newRouter(tokens []string) http.Handler {
 		CookieMaxAge: 90 * 24 * 60 * 60,
 		MaxBodyBytes: 256 * 1024,
 		CSRFSecret:   testCSRFSecret,
+	}
+
+	return adhttp.NewRouter(handler, ogen, &opts)
+}
+
+// newRouterWithOptions builds a router with the given trusted proxies and forced scheme,
+// used to exercise scheme-detection precedence (auto-detect vs --public-scheme override).
+func (s *HandlerSuite) newRouterWithOptions(trustedProxies []*net.IPNet, forcedScheme string) http.Handler {
+	handler := adhttp.NewHandler(s.manager, discardLog, nil)
+	ogen := adhttp.NewOgenHandler(s.manager, s.pinger, discardLog)
+
+	opts := adhttp.RouterOptions{
+		CookieMaxAge:   90 * 24 * 60 * 60,
+		MaxBodyBytes:   256 * 1024,
+		CSRFSecret:     testCSRFSecret,
+		TrustedProxies: trustedProxies,
+		ForcedScheme:   forcedScheme,
 	}
 
 	return adhttp.NewRouter(handler, ogen, &opts)
@@ -258,6 +276,26 @@ func (s *HandlerSuite) TestSuccessPage_WithBurnAndExpires() {
 }
 
 func (s *HandlerSuite) TestSuccessPage_HTTPS() {
+	_, trustedNet, err := net.ParseCIDR("192.0.2.1/32")
+	s.Require().NoError(err)
+
+	router := s.newRouterWithOptions([]*net.IPNet{trustedNet}, "")
+
+	w := httptest.NewRecorder()
+	// httptest.NewRequest defaults RemoteAddr to 192.0.2.1:1234, matching trustedNet above.
+	r := httptest.NewRequest(http.MethodGet, "/success?id=abc", nil)
+	r.Header.Set("X-Forwarded-Proto", "https")
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusOK, w.Code)
+	s.Contains(w.Body.String(), "https://example.com/abc")
+	s.NotContains(w.Body.String(), "http://example.com/abc")
+}
+
+func (s *HandlerSuite) TestSuccessPage_UntrustedProxyIsIgnored() {
+	// No trusted proxies configured: X-Forwarded-Proto must be ignored even though it claims
+	// https, since RemoteAddr (192.0.2.1, the httptest default) is not in any trusted CIDR.
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/success?id=abc", nil)
 	r.Header.Set("X-Forwarded-Proto", "https")
@@ -265,7 +303,39 @@ func (s *HandlerSuite) TestSuccessPage_HTTPS() {
 	s.router.ServeHTTP(w, r)
 
 	s.Equal(http.StatusOK, w.Code)
-	s.Contains(w.Body.String(), "https://")
+	s.Contains(w.Body.String(), "http://example.com/abc")
+}
+
+func (s *HandlerSuite) TestSuccessPage_ForcedScheme() {
+	// --public-scheme=https forces the scheme with no TLS, no trusted proxies, and no
+	// X-Forwarded-Proto header at all — the override needs no signal from the request.
+	router := s.newRouterWithOptions(nil, "https")
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/success?id=abc", nil)
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusOK, w.Code)
+	s.Contains(w.Body.String(), "https://example.com/abc")
+}
+
+func (s *HandlerSuite) TestSuccessPage_ForcedSchemeOverridesXForwardedProto() {
+	// The forced scheme takes precedence even when a trusted proxy's X-Forwarded-Proto
+	// disagrees, so a misconfigured proxy can't undermine an explicit operator override.
+	_, trustedNet, err := net.ParseCIDR("192.0.2.1/32")
+	s.Require().NoError(err)
+
+	router := s.newRouterWithOptions([]*net.IPNet{trustedNet}, "http")
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/success?id=abc", nil)
+	r.Header.Set("X-Forwarded-Proto", "https")
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusOK, w.Code)
+	s.Contains(w.Body.String(), "http://example.com/abc")
 }
 
 func (s *HandlerSuite) TestSuccessPage_InvalidExpires() {

@@ -57,6 +57,23 @@ func (s *AuthHandlerSuite) newRouterWithAuth() http.Handler {
 	return adhttp.NewRouter(handler, ogen, &opts)
 }
 
+// newRouterWithAuthAndScheme is newRouterWithAuth with --public-scheme forced, used to verify
+// that invite links and API-token envelopes honour the override behind a TLS-terminating proxy.
+func (s *AuthHandlerSuite) newRouterWithAuthAndScheme(forcedScheme string) http.Handler {
+	handler := adhttp.NewHandler(s.manager, discardLog, nil).
+		WithAuthManager(s.auth)
+	ogen := adhttp.NewOgenHandler(s.manager, s.pinger, discardLog)
+
+	opts := adhttp.RouterOptions{
+		CookieMaxAge: 90 * 24 * 60 * 60,
+		MaxBodyBytes: 256 * 1024,
+		CSRFSecret:   authTestCSRFSecret,
+		ForcedScheme: forcedScheme,
+	}
+
+	return adhttp.NewRouter(handler, ogen, &opts)
+}
+
 func (s *AuthHandlerSuite) adminUser() *domain.User {
 	return &domain.User{ID: "admin-id", Username: "admin", IsAdmin: true}
 }
@@ -520,6 +537,34 @@ func (s *AuthHandlerSuite) TestAdminInvite_GeneratesLink() {
 	s.Contains(rec.Body.String(), "tok-xyz")
 }
 
+func (s *AuthHandlerSuite) TestAdminInvite_ForcedSchemeEmbedsHTTPS() {
+	// Behind a TLS-terminating proxy the request arrives as plain HTTP, but --public-scheme=https
+	// is forced, so the invite link the admin copies must use https regardless — otherwise the
+	// invitee is sent to an http:// setup URL that the proxy may not even serve.
+	s.router = s.newRouterWithAuthAndScheme("https")
+
+	usr := s.adminUser()
+	s.auth.EXPECT().GetSession(gomock.Any(), "admin-sess").Return(usr, nil).Times(1)
+	s.auth.EXPECT().GenerateInvite(gomock.Any(), "admin-id").Return("tok-xyz", nil)
+	s.auth.EXPECT().ListUsers(gomock.Any(), "admin-id").Return([]*domain.User{usr}, nil)
+	s.auth.EXPECT().ListAPITokens(gomock.Any(), "admin-id").Return([]*auth.APITokenInfo{}, nil)
+
+	form := withCSRF(url.Values{})
+	req := httptest.NewRequest(http.MethodPost, "/admin/invite", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(s.sessionCookie("admin-sess"))
+	req.AddCookie(s.csrfCookie())
+
+	rec := httptest.NewRecorder()
+
+	s.router.ServeHTTP(rec, req)
+
+	s.Equal(http.StatusOK, rec.Code)
+	// httptest.NewRequest defaults r.Host to example.com; the link is scheme://host/setup?invite=<token>.
+	s.Contains(rec.Body.String(), "https://example.com/setup?invite=tok-xyz")
+	s.NotContains(rec.Body.String(), "http://example.com/setup")
+}
+
 // ── Admin revoke ──
 
 func (s *AuthHandlerSuite) TestAdminRevoke_RevokesAndRedirects() {
@@ -591,6 +636,39 @@ func (s *AuthHandlerSuite) TestAdminCreateKey_CreatesAndShowsKey() {
 	s.True(ok)
 	s.Equal("http://example.com", gotURL)
 	s.Equal("plain-secret-key", gotKey)
+}
+
+func (s *AuthHandlerSuite) TestAdminCreateKey_ForcedSchemeEmbedsHTTPS() {
+	// Behind a TLS-terminating proxy the request itself still arrives as plain HTTP, but the
+	// operator has forced --public-scheme=https, so the envelope embedded in the page must use
+	// https regardless — otherwise the CLI decodes an http:// URL from a key meant for https.
+	s.router = s.newRouterWithAuthAndScheme("https")
+
+	usr := s.adminUser()
+	s.auth.EXPECT().GetSession(gomock.Any(), "admin-sess").Return(usr, nil).Times(1)
+	s.auth.EXPECT().CreateAPIToken(gomock.Any(), "admin-id").Return("plain-secret-key", nil)
+	s.auth.EXPECT().ListUsers(gomock.Any(), "admin-id").Return([]*domain.User{usr}, nil)
+	s.auth.EXPECT().ListAPITokens(gomock.Any(), "admin-id").Return([]*auth.APITokenInfo{}, nil)
+
+	form := withCSRF(url.Values{})
+	req := httptest.NewRequest(http.MethodPost, "/admin/api-keys", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(s.sessionCookie("admin-sess"))
+	req.AddCookie(s.csrfCookie())
+
+	rec := httptest.NewRecorder()
+
+	s.router.ServeHTTP(rec, req)
+
+	s.Equal(http.StatusOK, rec.Code)
+
+	envelope, err := domain.EncodeAPITokenEnvelope("https://example.com", "plain-secret-key")
+	s.Require().NoError(err)
+	s.Contains(rec.Body.String(), envelope)
+
+	gotURL, _, ok := domain.DecodeAPITokenEnvelope(envelope)
+	s.True(ok)
+	s.Equal("https://example.com", gotURL)
 }
 
 func (s *AuthHandlerSuite) TestAdminCreateKey_NonAdmin_Returns403() {

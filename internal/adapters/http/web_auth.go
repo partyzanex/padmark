@@ -555,7 +555,7 @@ func (h *Handler) AdminInviteHandler(w http.ResponseWriter, r *http.Request) {
 	if genErr != nil {
 		data.InviteError = "Failed to generate invite link."
 	} else {
-		scheme := requestScheme(r, h.trustedProxies)
+		scheme := h.scheme(r)
 
 		// r.Host is attacker-controllable, but this invite link is only displayed (html/template
 		// escaped) for an admin to copy manually — it is not emailed or trusted server-side. If
@@ -633,7 +633,7 @@ func (h *Handler) AdminCreateKeyHandler(w http.ResponseWriter, r *http.Request) 
 			data.KeyError = "This user already holds the maximum number of API keys; revoke one first."
 		}
 	default:
-		scheme := requestScheme(r, h.trustedProxies)
+		scheme := h.scheme(r)
 
 		// r.Host is attacker-controllable, but this envelope is only displayed (html/template
 		// escaped) for an admin to copy manually — it is never trusted server-side. The server
