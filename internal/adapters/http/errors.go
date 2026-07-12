@@ -25,8 +25,6 @@ func errorStatusMessage(err error) (status int, message string) {
 		return http.StatusUnprocessableEntity, domain.ErrTitleTooLong.Error()
 	case errors.Is(err, domain.ErrInvalidContentType):
 		return http.StatusUnprocessableEntity, domain.ErrInvalidContentType.Error()
-	case errors.Is(err, domain.ErrContentTooLong):
-		return http.StatusRequestEntityTooLarge, domain.ErrContentTooLong.Error()
 	case errors.Is(err, domain.ErrInvalidSlug):
 		return http.StatusUnprocessableEntity, domain.ErrInvalidSlug.Error()
 	case errors.Is(err, domain.ErrSlugConflict):

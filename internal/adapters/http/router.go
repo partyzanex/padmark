@@ -139,7 +139,7 @@ func registerRoutes(
 func NewRouter(
 	handler *Handler, ogenHandler *OgenHandler, opts *RouterOptions,
 ) http.Handler {
-	ogenSrv, err := ogenapi.NewServer(ogenHandler)
+	ogenSrv, err := ogenapi.NewServer(ogenHandler, ogenapi.WithErrorHandler(newMaxBodyErrorHandler(handler.log)))
 	if err != nil {
 		panic("ogen server: " + err.Error())
 	}

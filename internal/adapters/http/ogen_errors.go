@@ -1,8 +1,13 @@
 package http
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
+	"net/http"
+
+	"github.com/ogen-go/ogen/ogenerrors"
 
 	"github.com/partyzanex/padmark/internal/adapters/http/ogenapi"
 	"github.com/partyzanex/padmark/internal/domain"
@@ -10,8 +15,35 @@ import (
 
 const internalErrorMessage = "internal server error"
 
+// maxBodyErrorMessage is returned with HTTP 413 when a request body exceeds MaxBodyBytes.
+const maxBodyErrorMessage = "request body exceeds the server limit"
+
 func errResp(err error) ogenapi.ErrorResponse {
 	return ogenapi.ErrorResponse{Message: err.Error()}
+}
+
+// newMaxBodyErrorHandler builds an ogen error handler that intercepts request-body-size violations
+// (http.MaxBytesReader, wired via withBodyLimit from MaxBodyBytes) surfacing during ogen request
+// decoding, and answers with a clean 413 matching the OpenAPI ErrorResponse schema — so an
+// oversized note body reads as a documented "request entity too large" rather than an opaque
+// decode error. Every other error falls through to ogen's default handler.
+func newMaxBodyErrorHandler(log *slog.Logger) ogenapi.ErrorHandler {
+	return func(ctx context.Context, w http.ResponseWriter, r *http.Request, err error) {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			w.Header().Set("Content-Type", mimeJSON)
+			w.WriteHeader(http.StatusRequestEntityTooLarge)
+
+			encErr := json.NewEncoder(w).Encode(errorJSON{Message: maxBodyErrorMessage})
+			if encErr != nil {
+				log.ErrorContext(ctx, "write 413 response", "err", encErr)
+			}
+
+			return
+		}
+
+		ogenerrors.DefaultErrorHandler(ctx, w, r, err)
+	}
 }
 
 //nolint:ireturn // ogen response union types are interfaces by design
@@ -23,10 +55,6 @@ func mapCreateError(err error, log *slog.Logger) ogenapi.CreateNoteRes {
 		errors.Is(err, domain.ErrInvalidContentType),
 		errors.Is(err, domain.ErrInvalidSlug):
 		v := ogenapi.CreateNoteUnprocessableEntity(r)
-
-		return &v
-	case errors.Is(err, domain.ErrContentTooLong):
-		v := ogenapi.CreateNoteRequestEntityTooLarge(r)
 
 		return &v
 	case errors.Is(err, domain.ErrSlugConflict):
