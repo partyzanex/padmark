@@ -79,7 +79,7 @@ paths:
           description: A note with the requested slug already exists
           $ref: "#/components/responses/Error"
         "413":
-          description: Request body exceeds the server limit (default 256 KB)
+          description: Request body exceeds the server limit (configurable, default 4 MB)
           $ref: "#/components/responses/Error"
         "422":
           $ref: "#/components/responses/Error"

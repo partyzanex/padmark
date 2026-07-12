@@ -499,15 +499,26 @@ func (s *HandlerSuite) TestCreateNote_InvalidContentType() {
 	s.Equal(http.StatusBadRequest, w.Code)
 }
 
-func (s *HandlerSuite) TestCreateNote_ContentTooLong() {
-	s.manager.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil, domain.ErrContentTooLong)
+func (s *HandlerSuite) TestCreateNote_BodyExceedsLimit_Returns413() {
+	// The 1 MiB domain content cap is gone; the only size limit is now the configurable
+	// MaxBodyBytes, enforced at the transport layer (http.MaxBytesReader). A body over that limit
+	// must surface as a clean 413, not an opaque decode error — checked here with a tiny limit.
+	// Manager.Create is never reached (no EXPECT): the body is rejected during ogen decoding.
+	handler := adhttp.NewHandler(s.manager, discardLog, nil)
+	ogen := adhttp.NewOgenHandler(s.manager, s.pinger, discardLog)
+	opts := adhttp.RouterOptions{
+		CookieMaxAge: 90 * 24 * 60 * 60,
+		MaxBodyBytes: 64,
+		CSRFSecret:   testCSRFSecret,
+	}
+	router := adhttp.NewRouter(handler, ogen, &opts)
 
-	body := `{"title":"t","content":"c"}`
+	body := `{"title":"t","content":"` + strings.Repeat("x", 512) + `"}`
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPost, "/notes", strings.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")
 
-	s.router.ServeHTTP(w, r)
+	router.ServeHTTP(w, r)
 
 	s.Equal(http.StatusRequestEntityTooLarge, w.Code)
 }

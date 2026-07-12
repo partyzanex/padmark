@@ -4,8 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Padmark — Admin</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <link rel="stylesheet" href="/static/style.css?p={{styleVersion}}">
     <style nonce="{{.Nonce}}">
@@ -119,10 +117,12 @@
             {{if .InviteError}}
             <div class="msg-err">{{.InviteError}}</div>
             {{end}}
-            <form method="POST" action="/admin/invite" style="margin-top:16px;">
-                <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
-                <button type="submit" class="btn-publish">Generate invite</button>
-            </form>
+            <div class="btn-row">
+                <form method="POST" action="/admin/invite" style="margin-top:16px;">
+                    <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+                    <button type="submit" class="btn-publish">Generate invite</button>
+                </form>
+            </div>
         </div>
 
         <div class="admin-section">

@@ -22,11 +22,6 @@ func (ct ContentType) Valid() bool {
 
 const MaxTitleLength = 500
 
-// MaxContentLength bounds the note body in bytes. It is well below the server's request-body
-// limit so an oversized body is rejected with a clear ErrContentTooLong (HTTP 413) at the
-// domain layer rather than as a generic transport read error. 1 MiB holds a very large note.
-const MaxContentLength = 1 << 20
-
 type Note struct {
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
@@ -46,10 +41,6 @@ type Note struct {
 func (n *Note) Validate() error {
 	if len([]rune(n.Title)) > MaxTitleLength {
 		return ErrTitleTooLong
-	}
-
-	if len(n.Content) > MaxContentLength {
-		return ErrContentTooLong
 	}
 
 	if n.ContentType != nil && !n.ContentType.Valid() {

@@ -139,7 +139,7 @@ func registerRoutes(
 func NewRouter(
 	handler *Handler, ogenHandler *OgenHandler, opts *RouterOptions,
 ) http.Handler {
-	ogenSrv, err := ogenapi.NewServer(ogenHandler)
+	ogenSrv, err := ogenapi.NewServer(ogenHandler, ogenapi.WithErrorHandler(newMaxBodyErrorHandler(handler.log)))
 	if err != nil {
 		panic("ogen server: " + err.Error())
 	}
@@ -330,8 +330,8 @@ func buildCSP(nonce string, extraScriptSrc ...string) string {
 
 	return "default-src 'self'; " +
 		scriptSrc + "; " +
-		"style-src 'self' 'nonce-" + nonce + "' https://fonts.googleapis.com; " +
-		"font-src 'self' https://fonts.gstatic.com; " +
+		"style-src 'self' 'nonce-" + nonce + "'; " +
+		"font-src 'self'; " +
 		"img-src 'self' data:; " +
 		"connect-src 'self'"
 }

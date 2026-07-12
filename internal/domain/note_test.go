@@ -34,15 +34,3 @@ func TestNote_Validate_InvalidContentType(t *testing.T) {
 
 	require.ErrorIs(t, note.Validate(), ErrInvalidContentType)
 }
-
-func TestNote_Validate_ContentAtLimitOK(t *testing.T) {
-	note := &Note{Content: strings.Repeat("a", MaxContentLength)}
-
-	require.NoError(t, note.Validate())
-}
-
-func TestNote_Validate_ContentTooLong(t *testing.T) {
-	note := &Note{Content: strings.Repeat("a", MaxContentLength+1)}
-
-	require.ErrorIs(t, note.Validate(), ErrContentTooLong)
-}
