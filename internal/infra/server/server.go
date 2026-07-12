@@ -62,12 +62,18 @@ func buildRouter(
 		return nil, err
 	}
 
+	publicScheme, err := parsePublicScheme(cmd.String(FlagPublicScheme))
+	if err != nil {
+		return nil, err
+	}
+
 	opts := adaptershttp.RouterOptions{
 		CookieMaxAge:   cmd.Int(FlagCookieMaxAge),
 		MaxBodyBytes:   cmd.Int(FlagMaxBodyBytes),
 		RateLimit:      cmd.Int(FlagRateLimit),
 		RateBurst:      cmd.Int(FlagRateBurst),
 		TrustedProxies: trustedProxies,
+		ForcedScheme:   publicScheme,
 	}
 
 	return adaptershttp.NewRouter(handler, ogenHandler, &opts), nil

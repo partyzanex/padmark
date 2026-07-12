@@ -85,14 +85,13 @@ func isHTTPS(r *http.Request, trustedProxies []*net.IPNet) bool {
 
 // RouterOptions holds configurable parameters for the middleware stack.
 type RouterOptions struct {
+	ForcedScheme   string
 	TrustedProxies []*net.IPNet
-	// CSRFSecret is used to HMAC-sign CSRF tokens. When empty a random 32-byte key is generated
-	// at startup (tokens are invalidated on restart, which is acceptable for a single-process deploy).
-	CSRFSecret   []byte
-	CookieMaxAge int
-	MaxBodyBytes int
-	RateLimit    int
-	RateBurst    int
+	CSRFSecret     []byte
+	CookieMaxAge   int
+	MaxBodyBytes   int
+	RateLimit      int
+	RateBurst      int
 }
 
 func registerRoutes(
@@ -159,6 +158,7 @@ func NewRouter(
 
 	handler.WithCSRFSecret(csrfSecret)
 	handler.WithTrustedProxies(opts.TrustedProxies)
+	handler.WithForcedScheme(opts.ForcedScheme)
 
 	tokenSet := handler.AllowedTokens()
 	mux := http.NewServeMux()

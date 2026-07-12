@@ -126,17 +126,18 @@ type Handler struct {
 	manager        NoteManager
 	authMgr        AuthManager
 	revealStore    RevealTokenStore
-	log            *slog.Logger
-	noteTmpl       *template.Template
+	adminTmpl      *template.Template
+	apidocsTmpl    *template.Template
 	indexTmpl      *template.Template
 	loginTmpl      *template.Template
 	setupTmpl      *template.Template
-	adminTmpl      *template.Template
+	log            *slog.Logger
 	changePwTmpl   *template.Template
-	apidocsTmpl    *template.Template
+	noteTmpl       *template.Template
 	successTmpl    *template.Template
 	errorTmpl      *template.Template
-	allowedTokens  map[string]struct{} // legacy bearer-token auth; deprecated, see NewHandler
+	allowedTokens  map[string]struct{}
+	forcedScheme   string
 	csrfSecret     []byte
 	trustedProxies []*net.IPNet
 }
@@ -210,6 +211,15 @@ func (h *Handler) WithTrustedProxies(proxies []*net.IPNet) *Handler {
 	return h
 }
 
+// WithForcedScheme overrides the scheme ("http" or "https") used when building absolute links
+// back to this server, bypassing TLS/X-Forwarded-Proto auto-detection entirely. Pass an empty
+// string to keep auto-detection. Called by NewRouter; do not call after the server starts.
+func (h *Handler) WithForcedScheme(scheme string) *Handler {
+	h.forcedScheme = scheme
+
+	return h
+}
+
 // AllowedTokens returns a defensive copy of the bearer-token set.
 // The copy prevents callers from mutating the handler's internal state.
 //
@@ -217,6 +227,17 @@ func (h *Handler) WithTrustedProxies(proxies []*net.IPNet) *Handler {
 // the TOTP account system (--enable-accounts). Will be removed in a future release.
 func (h *Handler) AllowedTokens() map[string]struct{} {
 	return maps.Clone(h.allowedTokens)
+}
+
+// scheme returns the scheme ("http" or "https") to use when building absolute links back to
+// this server: the operator-forced override when set (--public-scheme), otherwise the
+// auto-detected value from TLS/X-Forwarded-Proto (see requestScheme).
+func (h *Handler) scheme(r *http.Request) string {
+	if h.forcedScheme != "" {
+		return h.forcedScheme
+	}
+
+	return requestScheme(r, h.trustedProxies)
 }
 
 // isAuthenticated reports whether the request carries a valid auth credential.

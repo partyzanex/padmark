@@ -25,6 +25,7 @@ const (
 	FlagHTTPRedirectAddr = "http-redirect-addr"
 	FlagAllowedHosts     = "allowed-hosts"
 	FlagTrustedProxies   = "trusted-proxies"
+	FlagPublicScheme     = "public-scheme"
 	FlagTOTPIssuer       = "totp-issuer"
 	FlagSessionTTL       = "session-ttl"
 	FlagArgon2Memory     = "argon2-memory"
@@ -55,6 +56,7 @@ const (
 	EnvHTTPRedirectAddr = "PADMARK_HTTP_REDIRECT_ADDR"
 	EnvAllowedHosts     = "PADMARK_ALLOWED_HOSTS"
 	EnvTrustedProxies   = "PADMARK_TRUSTED_PROXIES"
+	EnvPublicScheme     = "PADMARK_PUBLIC_SCHEME"
 	EnvTOTPIssuer       = "PADMARK_TOTP_ISSUER"
 	EnvSessionTTL       = "PADMARK_SESSION_TTL"
 	EnvArgon2Memory     = "PADMARK_ARGON2_MEMORY"
@@ -198,6 +200,14 @@ func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
 			Sources: cli.EnvVars(EnvTrustedProxies),
 			Usage: "Comma-separated list of trusted proxy CIDRs or IPs (e.g. 10.0.0.0/8,127.0.0.1); " +
 				"X-Forwarded-For and X-Real-IP are only trusted from these addresses",
+		},
+		&cli.StringFlag{
+			Name:    FlagPublicScheme,
+			Sources: cli.EnvVars(EnvPublicScheme),
+			Usage: "Force the scheme (http or https) used when building absolute links back to this " +
+				"server (note URLs, invite links, API-token envelopes), instead of auto-detecting it " +
+				"from TLS/X-Forwarded-Proto; set this when the reverse proxy's IP is not stable enough " +
+				"for --trusted-proxies (e.g. cloud load balancers, k8s ingress)",
 		},
 		&cli.StringFlag{
 			Name:    FlagTOTPIssuer,
