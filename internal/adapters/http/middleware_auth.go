@@ -207,6 +207,10 @@ func isPublicRoute(r *http.Request, namedRoutes map[string]struct{}) bool {
 // where the slug may span multiple segments (e.g. project/GUIDE.md). A path whose first segment
 // names a built-in route (namedRoutes) is never a public note: those keep requiring auth, so
 // /edit/{id}, /admin/... and friends are not opened up by the multi-segment slug support.
+// Any other single-segment path is a candidate public note by design — slugs and route names
+// share one flat namespace, kept apart only by reservedSlugPrefixes (internal/usecases/notes) —
+// and whether the matched note is actually served publicly is decided downstream, per-note, by
+// handlePrivateAuth.
 func isNoteIDPath(trimmed string, namedRoutes map[string]struct{}) bool {
 	if trimmed == "" {
 		return false

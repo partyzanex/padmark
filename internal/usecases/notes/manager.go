@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"math/big"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -28,10 +29,16 @@ var slugRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za
 // slugMaxLen bounds the total slug length (a slug doubles as the content encryption key material).
 const slugMaxLen = 100
 
-// reservedSlugPrefixes returns the first path segments that name built-in routes. A custom slug
+// slugMaxSegments bounds the number of "/"-separated path segments in a custom slug. Generous
+// enough for realistic paths (e.g. "docs/api/v2/reference.md") while ruling out pathologically
+// deep slugs that stay under slugMaxLen only by using many single-character segments.
+const slugMaxSegments = 10
+
+// ReservedSlugPrefixes returns the first path segments that name built-in routes. A custom slug
 // must not start with one, or its URL would resolve to that route (e.g. "edit/foo" → the editor)
-// instead of the note. Keep in sync with buildNamedRoutes in internal/adapters/http.
-func reservedSlugPrefixes() map[string]struct{} {
+// instead of the note. internal/adapters/http.buildNamedRoutes uses this as the single source of
+// truth for which first segments are routes rather than note slugs.
+func ReservedSlugPrefixes() map[string]struct{} {
 	return map[string]struct{}{
 		"login": {}, "setup": {}, "logout": {}, "totp-login": {},
 		"admin": {}, "api": {}, "success": {}, "healthz": {}, "readyz": {},
@@ -68,6 +75,11 @@ func resolveSlug(note *domain.Note, allowCustom bool) (string, error) {
 	}
 
 	if !validCustomSlug(note.ID) {
+		if first, reserved := firstSegmentReserved(note.ID); reserved {
+			return "", fmt.Errorf("slug starts with reserved route name %q (reserved: %s): %w",
+				first, strings.Join(sortedReservedSlugPrefixes(), ", "), domain.ErrInvalidSlug)
+		}
+
 		return "", domain.ErrInvalidSlug
 	}
 
@@ -75,7 +87,8 @@ func resolveSlug(note *domain.Note, allowCustom bool) (string, error) {
 }
 
 // validCustomSlug reports whether a user-supplied slug is acceptable: bounded length, path-like
-// shape (see slugRe), and a first segment that does not collide with a reserved route name.
+// shape (see slugRe), a bounded number of path segments (slugMaxSegments), and a first segment
+// that does not collide with a reserved route name.
 func validCustomSlug(slug string) bool {
 	if slug == "" || len(slug) > slugMaxLen {
 		return false
@@ -85,11 +98,37 @@ func validCustomSlug(slug string) bool {
 		return false
 	}
 
-	first, _, _ := strings.Cut(slug, "/")
+	if strings.Count(slug, "/")+1 > slugMaxSegments {
+		return false
+	}
 
-	_, reserved := reservedSlugPrefixes()[first]
+	_, reserved := firstSegmentReserved(slug)
 
 	return !reserved
+}
+
+// firstSegmentReserved reports whether slug's first path segment collides with a reserved route
+// name, returning that segment so callers can name it in error messages.
+func firstSegmentReserved(slug string) (string, bool) {
+	first, _, _ := strings.Cut(slug, "/")
+
+	_, reserved := ReservedSlugPrefixes()[first]
+
+	return first, reserved
+}
+
+// sortedReservedSlugPrefixes returns ReservedSlugPrefixes' keys sorted, for stable error messages.
+func sortedReservedSlugPrefixes() []string {
+	prefixes := ReservedSlugPrefixes()
+	names := make([]string, 0, len(prefixes))
+
+	for name := range prefixes {
+		names = append(names, name)
+	}
+
+	sort.Strings(names)
+
+	return names
 }
 
 // hashSlug returns sha256(slug) as hex — the DB primary key.

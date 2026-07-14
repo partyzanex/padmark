@@ -7,7 +7,7 @@ var (
 	ErrExpired            = errors.New("note has expired")
 	ErrTitleTooLong       = errors.New("title exceeds maximum length")
 	ErrInvalidContentType = errors.New("unsupported content type")
-	ErrInvalidSlug        = errors.New("invalid slug: 1-100 chars, path-like " +
+	ErrInvalidSlug        = errors.New("invalid slug: 1-100 chars, up to 10 path-like " +
 		"segments of alphanumeric/dot/hyphen/underscore joined by '/', each starting with " +
 		"alphanumeric; must not start with a reserved route name")
 	ErrSlugConflict = errors.New("slug is already taken")

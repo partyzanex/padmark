@@ -52,7 +52,7 @@ func newAuthManagerWithTokens(
 		NewMockSessionStore(suite.ctrl),
 		apiTokens,
 		crypto.New(),
-		crypto.NewPasswordHasher(crypto.DefaultArgon2Params()),
+		crypto.NewPasswordHasher(testArgon2Params),
 		crypto.NewKDF(),
 		crypto.NewTOTP(),
 		discardLog,
@@ -70,7 +70,7 @@ func (suite *APITokenSuite) disabledMgr() *Manager {
 		NewMockSessionStore(suite.ctrl),
 		nil, // API-token flow disabled → methods return domain.ErrFeatureNotSupported
 		crypto.New(),
-		crypto.NewPasswordHasher(crypto.DefaultArgon2Params()),
+		crypto.NewPasswordHasher(testArgon2Params),
 		crypto.NewKDF(),
 		crypto.NewTOTP(),
 		discardLog,

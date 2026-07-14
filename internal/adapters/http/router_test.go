@@ -153,11 +153,13 @@ func TestIsPublicRoute(t *testing.T) {
 		{net_http.MethodPost, "/abc123", true},
 		{net_http.MethodPost, "/notes", false},
 		{net_http.MethodGet, "/abc123", true},
-		{net_http.MethodGet, "/unknown-page", true},
+		{net_http.MethodGet, "/unknown-page", true}, // any non-reserved single segment is a candidate note slug by design
 		// Reserved first segments stay non-public even when multi-segment — regression guard so
 		// path-like slugs don't open up protected routes.
 		{net_http.MethodGet, "/edit/abc", false},
 		{net_http.MethodGet, "/edit/a/b", false},
+		{net_http.MethodPost, "/edit/abc", false},
+		{net_http.MethodPost, "/edit/project/GUIDE.md", false},
 		{net_http.MethodGet, "/admin/users", false},
 		{net_http.MethodGet, "/notes/edit/x", false},
 		{net_http.MethodGet, "/success", false},
@@ -226,4 +228,67 @@ func TestWithRecovery_OutermostLayerCoversMiddlewarePanic(t *testing.T) {
 
 	assert.Equal(t, net_http.StatusInternalServerError, rec.Code)
 	assert.Contains(t, buf.String(), "panic recovered")
+}
+
+// TestFirstPathSegment covers the helper used by withLogging to derive a leak-safe
+// "route" attr from the request path (see TestWithLogging_RouteAttrExcludesSlug).
+func TestFirstPathSegment(t *testing.T) {
+	tests := []struct {
+		path string
+		want string
+	}{
+		{"", ""},
+		{"/", ""},
+		{"/ping", "ping"},
+		{"/notes/project/GUIDE.md", "notes"},
+	}
+
+	for _, tc := range tests {
+		assert.Equal(t, tc.want, firstPathSegment(tc.path), "firstPathSegment(%q)", tc.path)
+	}
+}
+
+// TestWithLogging_RouteAttrExcludesSlug verifies that withLogging emits a "route" attr
+// at info level containing only the first path segment (safe: identifies the endpoint) while
+// the full "path" attr — which can embed a note slug, i.e. content-encryption key material —
+// stays absent unless debug logging is enabled.
+func TestWithLogging_RouteAttrExcludesSlug(t *testing.T) {
+	var buf bytes.Buffer
+
+	log := slog.New(slog.NewJSONHandler(&buf, nil))
+	next := net_http.HandlerFunc(func(w net_http.ResponseWriter, _ *net_http.Request) {
+		w.WriteHeader(net_http.StatusOK)
+	})
+
+	handler := withLogging(log, next)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(net_http.MethodGet, "/notes/project/GUIDE.md", nil)
+
+	handler.ServeHTTP(rec, req)
+
+	out := buf.String()
+	assert.Contains(t, out, `"route":"notes"`)
+	assert.NotContains(t, out, "GUIDE.md",
+		"info-level log must not leak the note slug via the full path")
+	assert.NotContains(t, out, `"path"`,
+		"path attr must be absent at info level (debug disabled)")
+}
+
+// TestWithLogging_RouteAttrForSingleSegment covers a non-note, single-segment route to
+// confirm the first segment is derived correctly regardless of path depth.
+func TestWithLogging_RouteAttrForSingleSegment(t *testing.T) {
+	var buf bytes.Buffer
+
+	log := slog.New(slog.NewJSONHandler(&buf, nil))
+	next := net_http.HandlerFunc(func(w net_http.ResponseWriter, _ *net_http.Request) {
+		w.WriteHeader(net_http.StatusOK)
+	})
+
+	handler := withLogging(log, next)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(net_http.MethodGet, "/ping", nil)
+
+	handler.ServeHTTP(rec, req)
+
+	assert.Contains(t, buf.String(), `"route":"ping"`)
 }

@@ -16,6 +16,14 @@ import (
 
 var discardLog = slog.New(slog.DiscardHandler) //nolint:gochecknoglobals // test helper
 
+// testArgon2Params uses minimal argon2id cost so these tests exercise real hash/verify logic
+// without paying crypto.DefaultArgon2Params' production-strength (64 MiB) cost on every one of
+// them; that cost is deliberate for brute-force resistance in production, not something these
+// business-logic tests need to pay, and is covered on its own in internal/infra/crypto's tests.
+//
+//nolint:gochecknoglobals // test helper
+var testArgon2Params = crypto.Argon2Params{Memory: 8 * 1024, Time: 1, Threads: 1}
+
 const testPassword = "ValidP@ss12!"
 
 type ManagerSuite struct {
@@ -34,7 +42,7 @@ func (s *ManagerSuite) SetupTest() {
 	s.invites = NewMockInviteStore(s.ctrl)
 	s.sessions = NewMockSessionStore(s.ctrl)
 	s.mgr = NewManager(s.users, s.invites, s.sessions, nil, crypto.New(),
-		crypto.NewPasswordHasher(crypto.DefaultArgon2Params()),
+		crypto.NewPasswordHasher(testArgon2Params),
 		crypto.NewKDF(), crypto.NewTOTP(), discardLog, "padmark", 0)
 }
 
@@ -69,7 +77,10 @@ func (s *ManagerSuite) testUser() (*domain.User, string) {
 	encSecret, err := crypto.New().Encrypt(rawSecret, derivedKey)
 	s.Require().NoError(err)
 
-	pwHash, err := crypto.HashPassword(testPassword)
+	// verifyArgon2 reads its cost parameters from the stored hash itself, so hashing the
+	// fixture with testArgon2Params (cheap) verifies identically to crypto.HashPassword's
+	// production cost — just without paying it on every test.
+	pwHash, err := crypto.NewPasswordHasher(testArgon2Params).Hash(testPassword)
 	s.Require().NoError(err)
 
 	usr := &domain.User{

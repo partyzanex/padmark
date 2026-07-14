@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/mock/gomock"
 
@@ -137,6 +138,7 @@ func TestValidCustomSlug(t *testing.T) {
 		{"protocol-v1/README.md", true},
 		{"a/b/c/d.txt", true},
 		{strings.Repeat("a", 100), true}, // at length limit
+		{"a/b/c/d/e/f/g/h/i/j", true},    // at segment limit (10 segments)
 		// rejected
 		{"", false},
 		{"bad slug!", false},              // space / punctuation
@@ -150,11 +152,34 @@ func TestValidCustomSlug(t *testing.T) {
 		{"/leading", false},               // leading slash
 		{"trailing/", false},              // trailing slash
 		{strings.Repeat("a", 101), false}, // over length limit
+		{"a/b/c/d/e/f/g/h/i/j/k", false},  // over segment limit (11 segments, well under 100 chars)
 	}
 
 	for _, tc := range cases {
 		assert.Equal(t, tc.want, validCustomSlug(tc.slug), "slug %q", tc.slug)
 	}
+}
+
+// resolveSlug
+
+func TestResolveSlug_ReservedPrefix_ErrorNamesReservedPrefixes(t *testing.T) {
+	note := &domain.Note{ID: "admin/x"}
+
+	_, err := resolveSlug(note, true)
+
+	require.ErrorIs(t, err, domain.ErrInvalidSlug)
+	assert.Contains(t, err.Error(), `reserved route name "admin"`)
+	assert.Contains(t, err.Error(), "notes", "the reserved-name list should be spelled out")
+}
+
+func TestResolveSlug_InvalidShape_GenericMessage(t *testing.T) {
+	note := &domain.Note{ID: "bad slug!"}
+
+	_, err := resolveSlug(note, true)
+
+	require.ErrorIs(t, err, domain.ErrInvalidSlug)
+	assert.Equal(t, domain.ErrInvalidSlug.Error(), err.Error(),
+		"a shape violation unrelated to reserved prefixes should keep the generic message")
 }
 
 // Create

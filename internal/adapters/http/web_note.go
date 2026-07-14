@@ -227,7 +227,11 @@ func (h *Handler) GetNote(w http.ResponseWriter, r *http.Request) {
 
 // updateNoteByPathBody mirrors ogenapi.UpdateNoteRequest for the native multi-segment update
 // route. Pointer fields distinguish an omitted value from a zero one where the update semantics
-// depend on it (title, content_type, private).
+// depend on it (title, content_type, private). The remaining fields stay plain values because
+// omitted-vs-zero carries no extra meaning for them: Content always fully replaces the stored
+// body (there is no partial update), EditCode is a required credential where an empty string
+// already fails verification the same way a wrong code does, and BurnAfterReading is a plain
+// on/off toggle with no "leave as is" state.
 type updateNoteByPathBody struct {
 	Title            *string `json:"title"`
 	ContentType      *string `json:"content_type"`
@@ -299,6 +303,12 @@ func (h *Handler) UpdateNoteByPath(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) DeleteNoteByPath(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
+	// The query-param fallback mirrors the documented ogen DELETE /notes/{id} contract (see
+	// openapi.yaml); dropping it here only would break parity between the two routes. Our own
+	// access logging never records the query string (withLogging in router.go logs r.URL.Path
+	// only, and only at debug level), so the residual leak surface — reverse-proxy/CDN logs,
+	// Referer on same-origin follow-up requests — is inherent to any query-param secret and
+	// outside this handler's control.
 	editCode := r.Header.Get("X-Edit-Code")
 	if editCode == "" {
 		editCode = r.URL.Query().Get("edit_code")

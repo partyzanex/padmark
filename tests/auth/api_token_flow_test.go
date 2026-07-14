@@ -55,7 +55,7 @@ func TestAPITokenFlow_AdminIssuesKey_CLICreatesNote(t *testing.T) {
 		sqliterepo.NewSessionRepository(db),
 		sqliterepo.NewAPITokenRepository(db),
 		crypto.New(),
-		crypto.NewPasswordHasher(crypto.DefaultArgon2Params()),
+		crypto.NewPasswordHasher(testArgon2Params),
 		crypto.NewKDF(),
 		crypto.NewTOTP(),
 		log,

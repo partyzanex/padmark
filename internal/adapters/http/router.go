@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/partyzanex/padmark/internal/adapters/http/ogenapi"
+	"github.com/partyzanex/padmark/internal/usecases/notes"
 )
 
 type contextKey uint8
@@ -203,24 +204,15 @@ func NewRouter(
 
 // buildNamedRoutes returns the set of first path segments that name built-in routes rather than
 // notes. The auth middleware treats any request whose first segment is in this set as a non-note
-// route (so it keeps requiring auth); everything else may be a public note view. Keep in sync with
-// the route registrations in NewRouter and with reservedSlugPrefixes in internal/usecases/notes.
+// route (so it keeps requiring auth); everything else may be a public note view. Sourced from
+// notes.ReservedSlugPrefixes, the single source of truth also used to reject colliding custom
+// slugs; keep the route registrations in NewRouter in sync with it.
+// login/setup/logout/totp-login/healthz/readyz are also special-cased by exact path in
+// isPublicPath, but stay listed here too: notes.ReservedSlugPrefixes blocks the whole
+// first-segment namespace from custom-slug collisions (e.g. "healthz/status"), not just those
+// literal paths.
 func buildNamedRoutes() map[string]struct{} {
-	return map[string]struct{}{
-		"login":           {},
-		"setup":           {},
-		"logout":          {},
-		"totp-login":      {},
-		"admin":           {},
-		"api":             {},
-		"success":         {},
-		"healthz":         {},
-		"readyz":          {},
-		"notes":           {},
-		"edit":            {},
-		"change-password": {},
-		"static":          {},
-	}
+	return notes.ReservedSlugPrefixes()
 }
 
 // makeTokenSet builds a lookup set from the configured bearer tokens.
@@ -298,6 +290,9 @@ func withLogging(log *slog.Logger, next http.Handler) http.Handler {
 		// remote is the immediate peer (the proxy/LB IP when behind one); xff is the
 		// X-Forwarded-For chain the proxy sent; user/admin is the resolved identity ("-" when
 		// anonymous). These make trusted-proxy and auth debugging possible without shell access.
+		// route is the first path segment only (e.g. "notes", "healthz") — it identifies which
+		// endpoint was hit for traffic/error debugging without exposing further segments, which
+		// for note routes can be the note slug itself (the content-encryption key material).
 		attrs := []any{
 			"method", r.Method,
 			"status", rec.status,
@@ -306,6 +301,7 @@ func withLogging(log *slog.Logger, next http.Handler) http.Handler {
 			"xff", r.Header.Get("X-Forwarded-For"),
 			"user", user,
 			"admin", holder.admin,
+			"route", firstPathSegment(r.URL.Path),
 		}
 
 		// The request path can embed a note slug, which is the note's content-encryption key
@@ -316,6 +312,17 @@ func withLogging(log *slog.Logger, next http.Handler) http.Handler {
 
 		log.Log(r.Context(), level, "http", attrs...)
 	})
+}
+
+// firstPathSegment returns the first non-empty segment of path, without the leading slash
+// and without anything from the next slash onward. It returns "" for "" and "/".
+func firstPathSegment(path string) string {
+	trimmed := strings.TrimPrefix(path, "/")
+	if before, _, ok := strings.Cut(trimmed, "/"); ok {
+		return before
+	}
+
+	return trimmed
 }
 
 func withBodyLimit(maxBytes int64, next http.Handler) http.Handler {

@@ -1065,9 +1065,9 @@ func (s *HandlerSuite) TestUpdateNote_Forbidden() {
 //
 // The web editor saves with PUT /notes/{id} and deletes with DELETE /notes/{id}. For a slug that
 // spans path segments (project/GUIDE.md) these become multi-segment paths that ogen's
-// single-segment /notes/{id} route cannot match, so a note with such a slug cannot currently be
-// edited or deleted by its address (405 Method Not Allowed). These acceptance tests assert the
-// intended behaviour and MUST FAIL until the update/delete API accepts multi-segment note IDs.
+// single-segment /notes/{id} route cannot match. The native UpdateNoteByPath / DeleteNoteByPath
+// handlers bridge PUT/DELETE /notes/{id...} for exactly this case; these tests assert that a
+// path-like slug can be edited and deleted by its address (single-segment IDs still go to ogen).
 
 func (s *HandlerSuite) TestUpdateNote_MultiSegmentSlug_ByURL_Acceptance() {
 	const mid = "project/GUIDE.md"
