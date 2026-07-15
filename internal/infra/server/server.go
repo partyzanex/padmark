@@ -74,9 +74,17 @@ func buildRouter(
 		RateBurst:      cmd.Int(FlagRateBurst),
 		TrustedProxies: trustedProxies,
 		ForcedScheme:   publicScheme,
+		// Same flag attachAccountSystem feeds into auth.NewManager's sessionTTL, so the TOTP
+		// session cookie's Max-Age always matches the actual server-side session lifetime.
+		SessionTTL: time.Duration(cmd.Int(FlagSessionTTL)) * time.Second,
 	}
 
-	return adaptershttp.NewRouter(handler, ogenHandler, &opts), nil
+	router, err := adaptershttp.NewRouter(handler, ogenHandler, &opts)
+	if err != nil {
+		return nil, fmt.Errorf("new router: %w", err)
+	}
+
+	return router, nil
 }
 
 // httpRedirectHandler redirects HTTP requests to their HTTPS equivalent.
@@ -212,24 +220,31 @@ func runServer(ctx context.Context, cmd *cli.Command, router http.Handler, log *
 // attachAccountSystem wires the opt-in TOTP account manager onto the handler when
 // --enable-accounts is set; otherwise it leaves the handler public (no authMgr → the auth
 // middleware passes everything through unless --auth-tokens is set).
+//
+// Returns an error when auth.NewManager's bootstrap-time crypto precompute fails — this only
+// runs once at startup, so the caller should treat it as fatal.
 func attachAccountSystem(
 	ctx context.Context, cmd *cli.Command, handler *adaptershttp.Handler,
 	users auth.UserStore, invites auth.InviteStore, sessions auth.SessionStore,
 	apiTokens auth.APITokenStore, log *slog.Logger,
-) *adaptershttp.Handler {
+) (*adaptershttp.Handler, error) {
 	if !cmd.Bool(FlagEnableAccounts) {
 		log.InfoContext(ctx, "account system disabled (public mode); set --enable-accounts to enable login/admin")
 
-		return handler
+		return handler, nil
 	}
 
 	sessionTTL := time.Duration(cmd.Int(FlagSessionTTL)) * time.Second
-	authMgr := auth.NewManager(
+
+	authMgr, err := auth.NewManager(
 		users, invites, sessions, apiTokens, crypto.New(),
 		crypto.NewPasswordHasher(argon2ParamsFromFlags(cmd)),
 		crypto.NewKDF(), crypto.NewTOTP(),
 		log, cmd.String(FlagTOTPIssuer), sessionTTL,
 	)
+	if err != nil {
+		return nil, fmt.Errorf("new auth manager: %w", err)
+	}
 
 	empty, emptyErr := authMgr.IsEmpty(ctx)
 	if emptyErr != nil {
@@ -238,7 +253,7 @@ func attachAccountSystem(
 		log.InfoContext(ctx, "No users found. Open /setup to create the first admin.")
 	}
 
-	return handler.WithAuthManager(authMgr)
+	return handler.WithAuthManager(authMgr), nil
 }
 
 //nolint:ireturn // factory: returns different concrete impls (postgres vs sqlite) behind common interfaces
@@ -302,7 +317,11 @@ func serverAction(ctx context.Context, cmd *cli.Command) error {
 
 	handler := adaptershttp.NewHandler(manager, log, authTokens).
 		WithRevealStore(revealStore)
-	handler = attachAccountSystem(ctx, cmd, handler, userRepo, inviteRepo, sessionRepo, apiTokenRepo, log)
+
+	handler, err = attachAccountSystem(ctx, cmd, handler, userRepo, inviteRepo, sessionRepo, apiTokenRepo, log)
+	if err != nil {
+		return err
+	}
 
 	ogenHandler := adaptershttp.NewOgenHandler(manager, db.DB, log)
 

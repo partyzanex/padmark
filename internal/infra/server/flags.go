@@ -1,6 +1,10 @@
 package server
 
-import "github.com/urfave/cli/v3"
+import (
+	"github.com/urfave/cli/v3"
+
+	"github.com/partyzanex/padmark/internal/usecases/auth"
+)
 
 // Flag names used in CLI flags.
 const (
@@ -81,11 +85,17 @@ const (
 	DefaultRateLimit      = 10                // requests per second per IP
 	DefaultRateBurst      = 20                // max burst size per IP
 	DefaultTOTPIssuer     = "padmark"
-	DefaultSessionTTL     = 30 * 24 * 60 * 60 // 30 days in seconds
-	DefaultArgon2Memory   = 24 * 1024         // argon2id memory in KiB (24 MiB)
-	DefaultArgon2Time     = 2                 // argon2id iterations (OWASP minimum at 64 MiB)
-	DefaultArgon2Threads  = 1                 // argon2id parallelism
+	DefaultArgon2Memory   = 24 * 1024 // argon2id memory in KiB (24 MiB)
+	DefaultArgon2Time     = 2         // argon2id iterations (OWASP minimum at 64 MiB)
+	DefaultArgon2Threads  = 1         // argon2id parallelism
 )
+
+// DefaultSessionTTL is the --session-ttl flag default, in seconds — derived from
+// auth.DefaultSessionTTL (the single source of truth for the session lifetime default) instead
+// of a separately maintained literal that could silently drift out of sync with it.
+//
+//nolint:gochecknoglobals // computed flag default, effectively constant
+var DefaultSessionTTL = int(auth.DefaultSessionTTL.Seconds())
 
 // appFlags returns the full flag set for the serve subcommand.
 func appFlags() []cli.Flag { //nolint:funlen // declarative flag list

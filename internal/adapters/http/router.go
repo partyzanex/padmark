@@ -4,12 +4,14 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/bluele/gcache"
 	"github.com/google/uuid"
 
 	"github.com/partyzanex/padmark/internal/adapters/http/ogenapi"
@@ -93,62 +95,62 @@ type RouterOptions struct {
 	MaxBodyBytes   int
 	RateLimit      int
 	RateBurst      int
+	// SessionTTL sets the TOTP session cookie's Max-Age (see AuthHandler), matching the
+	// server-side session lifetime configured via auth.NewManager's sessionTTL — both should be
+	// fed the same --session-ttl value so the cookie never outlives (or expires before) the
+	// session it represents. Zero falls back to auth.DefaultSessionTTL.
+	SessionTTL time.Duration
 }
 
-func registerRoutes(
-	mux *http.ServeMux, handler *Handler, ogenSrv http.Handler,
-	tokenSet map[string]struct{}, cookieMaxAge int, trustedProxies []*net.IPNet, csrfSecret []byte,
-) {
-	lockout := newFailLockoutCache()
-	guard := func(next http.HandlerFunc) http.HandlerFunc { return csrfGuard(csrfSecret, next) }
+// RouteRegistrar registers one concern's HTTP routes on mux. Each concern-specific handler
+// (NoteHandler, AuthHandler, AdminHandler, PageHandler) implements it, so adding a route to an
+// existing concern only touches that concern's own file, and adding a new concern handler means
+// implementing this interface and appending it to the registrars slice in NewRouter — neither
+// requires editing a shared, ever-growing route-registration function.
+type RouteRegistrar interface {
+	RegisterRoutes(mux *http.ServeMux)
+}
 
+// registerOgenRoutes registers the generated REST API routes (note CRUD, health checks) served
+// directly by ogenSrv. These aren't owned by any concern handler — ogenSrv wraps the separate
+// OgenHandler — so they're registered here rather than via a RouteRegistrar. lockout is shared
+// with NoteHandler's native {id...} routes (see NoteHandler.RegisterRoutes) so fail-lockout
+// tracking is consistent for a note regardless of which route variant a client hits.
+func registerOgenRoutes(mux *http.ServeMux, ogenSrv http.Handler, lockout gcache.Cache) {
 	mux.Handle("POST /notes", ogenSrv)
 	mux.Handle("PUT /notes/{id}", withFailLockout(lockout, ogenSrv))
 	mux.Handle("DELETE /notes/{id}", withFailLockout(lockout, ogenSrv))
 	mux.Handle("GET /healthz", ogenSrv)
 	mux.Handle("GET /readyz", ogenSrv)
+}
 
-	mux.HandleFunc("GET /login", handler.LoginPage)
+// registerAllRoutes registers the ogen-served REST API routes plus every concern handler's own
+// routes (see RouteRegistrar) on mux.
+func registerAllRoutes(mux *http.ServeMux, handler *Handler, ogenSrv http.Handler) {
+	registerOgenRoutes(mux, ogenSrv, handler.lockout)
 
-	// POST /login is the legacy bearer-token login — no TOTP brute-force concern,
-	// so the TOTP-tuned 10 req/min rate limit is not applied here.
-	mux.HandleFunc("POST /login", guard(loginHandler(tokenSet, cookieMaxAge, trustedProxies)))
-	mux.HandleFunc("POST /totp-login", guard(withTOTPRateLimit(trustedProxies, handler.TOTPLoginHandler)))
-	mux.HandleFunc("POST /logout", guard(handler.LogoutHandler))
-	mux.HandleFunc("GET /setup", handler.SetupPage)
-	mux.HandleFunc("POST /setup", guard(handler.SetupHandler))
-	mux.HandleFunc("GET /admin", handler.AdminPage)
-	mux.HandleFunc("POST /admin/invite", guard(handler.AdminInviteHandler))
-	mux.HandleFunc("POST /admin/users/{id}/revoke", guard(handler.AdminRevokeHandler))
-	mux.HandleFunc("POST /admin/api-keys", guard(handler.AdminCreateKeyHandler))
-	mux.HandleFunc("POST /admin/api-keys/{id}/revoke", guard(handler.AdminRevokeKeyHandler))
-	mux.HandleFunc("GET /change-password", handler.ChangePasswordPage)
-	mux.HandleFunc("POST /change-password", guard(handler.ChangePasswordHandler))
-	mux.HandleFunc("GET /api", handler.APIDocsPage)
-	mux.HandleFunc("GET /api/openapi.yaml", APISpec)
-	mux.HandleFunc("GET /{$}", handler.IndexPage)
-	mux.HandleFunc("GET /success", handler.SuccessPage)
-	mux.Handle("GET /static/", withStaticCacheControl(StaticHandler))
-	// {id...} wildcards let a note slug span multiple path segments (e.g. project/GUIDE.md).
-	// The ogen PUT/DELETE /notes/{id} routes above stay single-segment (generated router
-	// limitation); native {id...} handlers below bridge update/delete for path-like slugs, so
-	// by ServeMux specificity single-segment IDs keep going to ogen and multi-segment to these.
-	mux.Handle("PUT /notes/{id...}", withFailLockout(lockout, http.HandlerFunc(handler.UpdateNoteByPath)))
-	mux.Handle("DELETE /notes/{id...}", withFailLockout(lockout, http.HandlerFunc(handler.DeleteNoteByPath)))
-	mux.HandleFunc("GET /notes/{id...}", handler.GetNote)
-	mux.HandleFunc("POST /notes/{id...}", guard(handler.HandleReveal))
-	mux.HandleFunc("GET /edit/{id...}", handler.EditPage)
-	mux.HandleFunc("GET /{id...}", handler.GetNote)
-	mux.HandleFunc("POST /{id...}", guard(handler.HandleReveal))
+	registrars := []RouteRegistrar{
+		handler.NoteHandler,
+		handler.AuthHandler,
+		handler.AdminHandler,
+		handler.PageHandler,
+	}
+	for _, registrar := range registrars {
+		registrar.RegisterRoutes(mux)
+	}
 }
 
 // NewRouter registers all routes and wraps them with middleware.
+//
+// Returns an error when building the generated ogen server fails, or when crypto/rand is
+// unavailable to generate a CSRF secret (only when opts.CSRFSecret is empty). NewRouter runs
+// only at the composition root, so the caller should treat either as a fatal startup error.
 func NewRouter(
 	handler *Handler, ogenHandler *OgenHandler, opts *RouterOptions,
-) http.Handler {
+) (http.Handler, error) {
 	ogenSrv, err := ogenapi.NewServer(ogenHandler, ogenapi.WithErrorHandler(newMaxBodyErrorHandler(handler.log)))
 	if err != nil {
-		panic("ogen server: " + err.Error())
+		return nil, fmt.Errorf("new ogen server: %w", err)
 	}
 
 	const csrfSecretSize = 32
@@ -159,18 +161,20 @@ func NewRouter(
 
 		_, randErr := rand.Read(csrfSecret)
 		if randErr != nil {
-			panic("generate csrf secret: " + randErr.Error())
+			return nil, fmt.Errorf("generate csrf secret: %w", randErr)
 		}
 	}
 
 	handler.WithCSRFSecret(csrfSecret)
 	handler.WithTrustedProxies(opts.TrustedProxies)
 	handler.WithForcedScheme(opts.ForcedScheme)
+	handler.WithCookieMaxAge(opts.CookieMaxAge)
+	handler.WithSessionTTL(opts.SessionTTL)
 
 	tokenSet := handler.AllowedTokens()
 	mux := http.NewServeMux()
 
-	registerRoutes(mux, handler, ogenSrv, tokenSet, opts.CookieMaxAge, opts.TrustedProxies, csrfSecret)
+	registerAllRoutes(mux, handler, ogenSrv)
 
 	namedRoutes := buildNamedRoutes()
 
@@ -199,7 +203,7 @@ func NewRouter(
 	// recovery, which drops the response body and skips structured logging entirely.
 	stack = withRecovery(handler.log, stack)
 
-	return stack
+	return stack, nil
 }
 
 // buildNamedRoutes returns the set of first path segments that name built-in routes rather than

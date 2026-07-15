@@ -12,6 +12,7 @@ import (
 	"maps"
 	"net"
 	"net/http"
+	"time"
 
 	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/usecases/auth"
@@ -121,25 +122,91 @@ type NoPinger struct{}
 
 func (NoPinger) PingContext(_ context.Context) error { return nil }
 
-// Handler holds dependencies for all HTTP handlers.
-type Handler struct {
-	manager        NoteManager
-	authMgr        AuthManager
-	revealStore    RevealTokenStore
-	adminTmpl      *template.Template
-	apidocsTmpl    *template.Template
-	indexTmpl      *template.Template
-	loginTmpl      *template.Template
-	setupTmpl      *template.Template
+// common holds the collaborators and config shared by every concern-specific handler
+// (NoteHandler, AuthHandler, AdminHandler, PageHandler): logging, error-page rendering,
+// auth-manager access, and the request-scheme/proxy/CSRF config set once at startup via the
+// Handler facade's With* methods. A single *common instance is embedded (by pointer) in the
+// facade and in each concern handler, so a With* call is visible everywhere immediately.
+type common struct {
 	log            *slog.Logger
-	changePwTmpl   *template.Template
-	noteTmpl       *template.Template
-	successTmpl    *template.Template
 	errorTmpl      *template.Template
+	authMgr        AuthManager
 	allowedTokens  map[string]struct{}
 	forcedScheme   string
 	csrfSecret     []byte
 	trustedProxies []*net.IPNet
+	cookieMaxAge   int
+	sessionTTL     time.Duration
+}
+
+// AllowedTokens returns a defensive copy of the bearer-token set.
+// The copy prevents callers from mutating the handler's internal state.
+//
+// Deprecated: part of the legacy bearer-token write auth (PADMARK_AUTH_TOKENS), superseded by
+// the TOTP account system (--enable-accounts). Will be removed in a future release.
+func (c *common) AllowedTokens() map[string]struct{} {
+	return maps.Clone(c.allowedTokens)
+}
+
+// sessionMaxAge returns the TOTP session cookie's Max-Age: the configured SessionTTL (see
+// RouterOptions.SessionTTL), or auth.DefaultSessionTTL when unset — the same fallback
+// auth.NewSessionManager applies to the actual server-side session lifetime, so an unconfigured
+// deployment still gets a cookie that matches how long its sessions really live.
+func (c *common) sessionMaxAge() time.Duration {
+	if c.sessionTTL > 0 {
+		return c.sessionTTL
+	}
+
+	return auth.DefaultSessionTTL
+}
+
+// guard wraps next with CSRF verification using the secret set via Handler.WithCSRFSecret.
+func (c *common) guard(next http.HandlerFunc) http.HandlerFunc {
+	return csrfGuard(c.csrfSecret, next)
+}
+
+// scheme returns the scheme ("http" or "https") to use when building absolute links back to
+// this server: the operator-forced override when set (--public-scheme), otherwise the
+// auto-detected value from TLS/X-Forwarded-Proto (see requestScheme).
+func (c *common) scheme(r *http.Request) string {
+	if c.forcedScheme != "" {
+		return c.forcedScheme
+	}
+
+	return requestScheme(r, c.trustedProxies)
+}
+
+// isAuthenticated reports whether the request carries a valid auth credential.
+// Accepts a TOTP session cookie, a bearer token, or no auth when both are unconfigured.
+func (c *common) isAuthenticated(r *http.Request) bool {
+	if c.allowedTokens == nil && c.authMgr == nil {
+		return true
+	}
+
+	// The auth middleware already resolved the session and stored the user in context.
+	// Reading from context avoids a redundant DB round-trip for auth-protected routes.
+	if userFromContext(r) != nil {
+		return true
+	}
+
+	// For public routes the middleware does not run, so fall back to a direct session check.
+	if c.authMgr != nil {
+		if sessID := extractSessionID(r); sessID != "" {
+			_, err := c.authMgr.GetSession(r.Context(), sessID)
+			if err == nil {
+				return true
+			}
+		}
+	}
+
+	if c.allowedTokens != nil {
+		token := extractToken(r)
+		_, ok := c.allowedTokens[token]
+
+		return ok
+	}
+
+	return false
 }
 
 // parseTmpl parses a page template together with the shared header partial.
@@ -151,6 +218,20 @@ func parseTmpl(name, src string) *template.Template {
 	)
 }
 
+// Handler composes the four concern-specific handlers — NoteHandler (web_note.go, web_edit.go),
+// AuthHandler (web_auth.go), AdminHandler (web_admin.go), and PageHandler (web_index.go,
+// web_success.go, web_apidocs.go) — into the single value routing and the composition root
+// consume. Each concern owns only the collaborators and templates it needs; common (this file)
+// holds what is genuinely cross-cutting. Go embedding promotes each concern's methods, so
+// Handler needs no methods of its own beyond construction and the With* wiring below.
+type Handler struct {
+	*common
+	*NoteHandler
+	*AuthHandler
+	*AdminHandler
+	*PageHandler
+}
+
 // NewHandler creates a Handler with required dependencies.
 //
 // tokens is the list of valid bearer auth tokens; pass nil to disable token auth.
@@ -158,25 +239,28 @@ func parseTmpl(name, src string) *template.Template {
 // (PADMARK_AUTH_TOKENS), superseded by the TOTP account system (WithAuthManager /
 // --enable-accounts) and slated for removal. New callers should pass nil and use accounts.
 func NewHandler(manager NoteManager, log *slog.Logger, tokens []string) *Handler {
-	handler := &Handler{
-		manager:      manager,
-		log:          log,
-		noteTmpl:     parseTmpl("note", noteTmplSrc),
-		indexTmpl:    parseTmpl("index", indexTmplSrc),
-		loginTmpl:    parseTmpl("login", loginTmplSrc),
-		setupTmpl:    parseTmpl("setup", setupTmplSrc),
-		adminTmpl:    parseTmpl("admin", adminTmplSrc),
-		changePwTmpl: parseTmpl("change_password", changePwTmplSrc),
-		apidocsTmpl:  parseTmpl("apidocs", apidocsTmplSrc),
-		successTmpl:  parseTmpl("success", successTmplSrc),
-		errorTmpl:    parseTmpl("error", errorTmplSrc),
-	}
+	noteTmpl := parseTmpl("note", noteTmplSrc)
+	indexTmpl := parseTmpl("index", indexTmplSrc)
+	loginTmpl := parseTmpl("login", loginTmplSrc)
+	setupTmpl := parseTmpl("setup", setupTmplSrc)
+	adminTmpl := parseTmpl("admin", adminTmplSrc)
+	changePwTmpl := parseTmpl("change_password", changePwTmplSrc)
+	apidocsTmpl := parseTmpl("apidocs", apidocsTmplSrc)
+	successTmpl := parseTmpl("success", successTmplSrc)
+	errorTmpl := parseTmpl("error", errorTmplSrc)
 
+	cmn := &common{log: log, errorTmpl: errorTmpl}
 	if len(tokens) > 0 {
-		handler.allowedTokens = makeTokenSet(tokens)
+		cmn.allowedTokens = makeTokenSet(tokens)
 	}
 
-	return handler
+	return &Handler{
+		common:       cmn,
+		NoteHandler:  newNoteHandler(cmn, manager, noteTmpl, indexTmpl),
+		AuthHandler:  newAuthHandler(cmn, loginTmpl, setupTmpl, changePwTmpl),
+		AdminHandler: newAdminHandler(cmn, adminTmpl),
+		PageHandler:  newPageHandler(cmn, indexTmpl, successTmpl, apidocsTmpl),
+	}
 }
 
 // WithRevealStore attaches a RevealTokenStore so that burn-after-reading notes
@@ -220,55 +304,22 @@ func (h *Handler) WithForcedScheme(scheme string) *Handler {
 	return h
 }
 
-// AllowedTokens returns a defensive copy of the bearer-token set.
-// The copy prevents callers from mutating the handler's internal state.
-//
-// Deprecated: part of the legacy bearer-token write auth (PADMARK_AUTH_TOKENS), superseded by
-// the TOTP account system (--enable-accounts). Will be removed in a future release.
-func (h *Handler) AllowedTokens() map[string]struct{} {
-	return maps.Clone(h.allowedTokens)
+// WithCookieMaxAge sets the Max-Age (in seconds) used by the legacy bearer-token login's session
+// cookie (POST /login). The modern TOTP login's cookie is controlled separately, by
+// WithSessionTTL, so it always matches the actual server-side session lifetime. Called by
+// NewRouter; do not call after the server starts.
+func (h *Handler) WithCookieMaxAge(seconds int) *Handler {
+	h.cookieMaxAge = seconds
+
+	return h
 }
 
-// scheme returns the scheme ("http" or "https") to use when building absolute links back to
-// this server: the operator-forced override when set (--public-scheme), otherwise the
-// auto-detected value from TLS/X-Forwarded-Proto (see requestScheme).
-func (h *Handler) scheme(r *http.Request) string {
-	if h.forcedScheme != "" {
-		return h.forcedScheme
-	}
+// WithSessionTTL sets the Max-Age used by the TOTP session cookie (see RouterOptions.SessionTTL
+// for why this must be kept in sync with auth.NewManager's sessionTTL). Zero or negative falls
+// back to auth.DefaultSessionTTL at read time (see common.sessionMaxAge), matching
+// auth.NewSessionManager's own fallback. Called by NewRouter; do not call after the server starts.
+func (h *Handler) WithSessionTTL(ttl time.Duration) *Handler {
+	h.sessionTTL = ttl
 
-	return requestScheme(r, h.trustedProxies)
-}
-
-// isAuthenticated reports whether the request carries a valid auth credential.
-// Accepts a TOTP session cookie, a bearer token, or no auth when both are unconfigured.
-func (h *Handler) isAuthenticated(r *http.Request) bool {
-	if h.allowedTokens == nil && h.authMgr == nil {
-		return true
-	}
-
-	// The auth middleware already resolved the session and stored the user in context.
-	// Reading from context avoids a redundant DB round-trip for auth-protected routes.
-	if userFromContext(r) != nil {
-		return true
-	}
-
-	// For public routes the middleware does not run, so fall back to a direct session check.
-	if h.authMgr != nil {
-		if sessID := extractSessionID(r); sessID != "" {
-			_, err := h.authMgr.GetSession(r.Context(), sessID)
-			if err == nil {
-				return true
-			}
-		}
-	}
-
-	if h.allowedTokens != nil {
-		token := extractToken(r)
-		_, ok := h.allowedTokens[token]
-
-		return ok
-	}
-
-	return false
+	return h
 }

@@ -5,11 +5,8 @@ package notes
 import (
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
-	"html"
 	"log/slog"
 	"math/big"
 	"regexp"
@@ -57,15 +54,20 @@ const (
 	editCodeLength = 12
 )
 
-func newSlug() string     { return randomString(slugChars, slugLength) }
-func newEditCode() string { return randomString(editCodeChars, editCodeLength) }
+func newSlug() (string, error)     { return randomString(slugChars, slugLength) }
+func newEditCode() (string, error) { return randomString(editCodeChars, editCodeLength) }
 
 // resolveSlug validates or generates the note's slug, returning it. A user-supplied slug is only
 // accepted when allowCustom is true; otherwise it is rejected so callers cannot pick low-entropy,
 // guessable key material.
 func resolveSlug(note *domain.Note, allowCustom bool) (string, error) {
 	if note.ID == "" {
-		note.ID = newSlug()
+		slug, err := newSlug()
+		if err != nil {
+			return "", fmt.Errorf("generate slug: %w", err)
+		}
+
+		note.ID = slug
 
 		return note.ID, nil
 	}
@@ -131,28 +133,23 @@ func sortedReservedSlugPrefixes() []string {
 	return names
 }
 
-// hashSlug returns sha256(slug) as hex — the DB primary key.
-// The plaintext slug (the AES key material) is never stored at rest.
-func hashSlug(slug string) string {
-	sum := sha256.Sum256([]byte(slug))
-
-	return hex.EncodeToString(sum[:])
-}
-
-func randomString(chars string, length int) string {
+// randomString runs on every note create (via newSlug/newEditCode), not just at startup, so a
+// crypto/rand failure here must propagate as an error like any other request-time failure —
+// not panic. See Create's fail-hard-with-error handling of the returned error.
+func randomString(chars string, length int) (string, error) {
 	size := big.NewInt(int64(len(chars)))
 	buf := make([]byte, length)
 
 	for idx := range length {
 		nn, err := rand.Int(rand.Reader, size)
 		if err != nil {
-			panic("crypto/rand unavailable: " + err.Error())
+			return "", fmt.Errorf("crypto/rand unavailable: %w", err)
 		}
 
 		buf[idx] = chars[nn.Int64()]
 	}
 
-	return string(buf)
+	return string(buf), nil
 }
 
 // Storage defines persistence operations for notes.
@@ -166,9 +163,13 @@ type Storage interface {
 	IncrementViews(ctx context.Context, id string) error
 }
 
-// Renderer defines markdown-to-HTML rendering.
+// Renderer converts note content to safe HTML. Render handles markdown; RenderPlain handles
+// domain.ContentTypePlain notes (escape + wrap, no markdown parsing). Both live behind this one
+// port so the HTML-specific mechanics (escaping, sanitizing, wrapping) stay in the adapter that
+// implements it (internal/infra/render) — Manager only decides which content type calls for which.
 type Renderer interface {
 	Render(content string) (string, error)
+	RenderPlain(content string) (string, error)
 }
 
 // Encryptor encrypts and decrypts note content using the note's ID as key material.
@@ -183,13 +184,16 @@ type EditCodeHasher interface {
 	Verify(storedHash, code string) bool
 }
 
-// Manager implements note business logic.
+// Manager implements note business logic: CRUD, slug resolution, and encryption coordination.
+// Burn-after-reading / on-read expiry policy is delegated to burn (see burn.go) so that state
+// machine stays independently readable and testable instead of growing inline here.
 type Manager struct {
 	storage   Storage
 	renderer  Renderer
 	encryptor Encryptor
 	hasher    EditCodeHasher
 	log       *slog.Logger
+	burn      *burner
 	// allowCustomSlugs gates user-supplied (human-readable) slugs. When false, custom slugs are
 	// rejected and only server-generated random slugs are issued.
 	allowCustomSlugs bool
@@ -208,6 +212,7 @@ func NewManager(
 		encryptor:        encryptor,
 		hasher:           hasher,
 		log:              log,
+		burn:             newBurner(storage, encryptor, log),
 		allowCustomSlugs: allowCustomSlugs,
 	}
 }
@@ -230,7 +235,12 @@ func (m *Manager) Create(ctx context.Context, note *domain.Note) (*domain.Note, 
 	}
 
 	if note.EditCode == "" {
-		note.EditCode = newEditCode()
+		editCode, editCodeErr := newEditCode()
+		if editCodeErr != nil {
+			return nil, fmt.Errorf("generate edit code: %w", editCodeErr)
+		}
+
+		note.EditCode = editCode
 	}
 
 	// Create mutates note in place for persistence (hash the edit code, encrypt the content,
@@ -262,7 +272,7 @@ func (m *Manager) Create(ctx context.Context, note *domain.Note) (*domain.Note, 
 	}
 
 	note.Content = encrypted
-	note.ID = hashSlug(slug) // store hash, not slug
+	note.ID = domain.HashSlug(slug) // store hash, not slug
 
 	err = m.storage.Create(ctx, note)
 	if err != nil {
@@ -278,14 +288,14 @@ func (m *Manager) Create(ctx context.Context, note *domain.Note) (*domain.Note, 
 // or applying expiry policy. Intentionally returns expired notes as-is — callers that
 // need expiry enforcement should use Get or View instead.
 func (m *Manager) Peek(ctx context.Context, id string) (*domain.Note, error) {
-	note, err := m.storage.Get(ctx, hashSlug(id))
+	note, err := m.storage.Get(ctx, domain.HashSlug(id))
 	if err != nil {
 		return nil, fmt.Errorf("peek note: %w", err)
 	}
 
 	note.ID = id
 
-	err = m.decryptNote(ctx, note)
+	err = decryptContent(ctx, m.encryptor, m.log, note)
 	if err != nil {
 		return nil, fmt.Errorf("peek note: %w", err)
 	}
@@ -296,19 +306,19 @@ func (m *Manager) Peek(ctx context.Context, id string) (*domain.Note, error) {
 // Get returns a note by ID. If the note has expired it is deleted and ErrExpired is returned.
 // Burn-after-reading notes are atomically consumed (deleted and returned) to prevent races.
 func (m *Manager) Get(ctx context.Context, id string) (*domain.Note, error) {
-	note, err := m.storage.Get(ctx, hashSlug(id))
+	note, err := m.storage.Get(ctx, domain.HashSlug(id))
 	if err != nil {
 		return nil, fmt.Errorf("get note: %w", err)
 	}
 
 	note.ID = id
 
-	err = m.decryptNote(ctx, note)
+	err = decryptContent(ctx, m.encryptor, m.log, note)
 	if err != nil {
 		return nil, fmt.Errorf("get note: %w", err)
 	}
 
-	return m.applyNotePolicy(ctx, id, note)
+	return m.burn.applyPolicy(ctx, id, note)
 }
 
 // View returns a note by ID and increments its view counter.
@@ -319,7 +329,7 @@ func (m *Manager) View(ctx context.Context, id string) (*domain.Note, error) {
 		return nil, err
 	}
 
-	m.applyViewIncrement(ctx, id, note)
+	m.burn.applyViewIncrement(ctx, id, note)
 
 	return note, nil
 }
@@ -327,12 +337,12 @@ func (m *Manager) View(ctx context.Context, id string) (*domain.Note, error) {
 // ViewPreloaded is like View but skips the initial storage.Get by reusing an already-fetched note.
 // Use this when the caller has already loaded the note (e.g. during auth checks) to avoid a second SELECT.
 func (m *Manager) ViewPreloaded(ctx context.Context, id string, preloaded *domain.Note) (*domain.Note, error) {
-	note, err := m.applyNotePolicy(ctx, id, preloaded)
+	note, err := m.burn.applyPolicy(ctx, id, preloaded)
 	if err != nil {
 		return nil, err
 	}
 
-	m.applyViewIncrement(ctx, id, note)
+	m.burn.applyViewIncrement(ctx, id, note)
 
 	return note, nil
 }
@@ -347,7 +357,7 @@ func (m *Manager) Update(
 		return nil, fmt.Errorf("validate: %w", err)
 	}
 
-	dbID := hashSlug(id)
+	dbID := domain.HashSlug(id)
 
 	existing, err := m.storage.Get(ctx, dbID)
 	if err != nil {
@@ -411,7 +421,7 @@ func (m *Manager) Update(
 
 // Delete removes a note by ID after verifying the edit code.
 func (m *Manager) Delete(ctx context.Context, id, editCode string) error {
-	dbID := hashSlug(id)
+	dbID := domain.HashSlug(id)
 
 	existing, err := m.storage.Get(ctx, dbID)
 	if err != nil {
@@ -463,47 +473,17 @@ func (m *Manager) GetRenderedPreloaded(
 	return note, rendered, nil
 }
 
-// applyNotePolicy applies expiry and burn-after-reading logic to an already-fetched note.
-func (m *Manager) applyNotePolicy(ctx context.Context, id string, note *domain.Note) (*domain.Note, error) {
-	if note.ExpiresAt != nil && time.Now().After(*note.ExpiresAt) {
-		delErr := m.storage.Delete(ctx, hashSlug(id))
-		if delErr != nil {
-			m.log.ErrorContext(ctx, "delete expired note", "id", id, "err", delErr)
-		}
-
-		return nil, domain.ErrExpired
-	}
-
-	if note.BurnAfterReading {
-		return m.burnNote(ctx, id, note)
-	}
-
-	return note, nil
-}
-
-// applyViewIncrement increments the view counter unless the note was just consumed by a
-// pure burn-after-reading (no TTL) — that note no longer exists, so a view count is moot.
-// A burn-after-reading note with a TTL survives its grace period and IS counted on every
-// read: SetBurnExpiry flips burn_after_reading off on the timer-start read, so by the time
-// this runs BurnAfterReading is true only for the deleted pure-burn case.
-func (m *Manager) applyViewIncrement(ctx context.Context, id string, note *domain.Note) {
-	if note.BurnAfterReading {
-		return
-	}
-
-	incErr := m.storage.IncrementViews(ctx, hashSlug(id))
-	if incErr != nil {
-		m.log.ErrorContext(ctx, "increment views", "id", id, "err", incErr)
-	} else {
-		note.Views++
-	}
-}
-
 // renderNote converts note content to safe HTML.
-// Plain-text notes are HTML-escaped and wrapped in <pre>; markdown notes are rendered.
+// Plain-text notes are escaped and wrapped in <pre> (Renderer.RenderPlain); markdown notes are
+// parsed and sanitized (Renderer.Render). Manager only picks which strategy the content type calls for.
 func (m *Manager) renderNote(id string, note *domain.Note) (string, error) {
 	if note.ContentType != nil && *note.ContentType == domain.ContentTypePlain {
-		return "<pre>" + html.EscapeString(note.Content) + "</pre>", nil
+		rendered, err := m.renderer.RenderPlain(note.Content)
+		if err != nil {
+			return "", fmt.Errorf("render note %s: %w", id, err)
+		}
+
+		return rendered, nil
 	}
 
 	rendered, err := m.renderer.Render(note.Content)
@@ -514,19 +494,23 @@ func (m *Manager) renderNote(id string, note *domain.Note) (string, error) {
 	return rendered, nil
 }
 
-// decryptNote decrypts note.Content in place using the slug (note.ID) as the key.
+// decryptContent decrypts note.Content in place using the slug (note.ID) as the key.
 // The content key is derived from the slug, so any decryption failure means the caller
 // lacks the correct slug (or the stored data is corrupt) — either way the note is
 // inaccessible, so it is collapsed to domain.ErrNotFound (also avoids an existence oracle).
 // Genuine data corruption (malformed ciphertext) is logged at error level to distinguish it
 // from an ordinary wrong-slug miss, which is expected and logged at warn level.
-func (m *Manager) decryptNote(ctx context.Context, note *domain.Note) error {
-	plaintext, err := m.encryptor.Decrypt(note.Content, note.ID)
+//
+// A free function rather than a Manager method so both Manager and burner (burn.go) — which
+// hold separate copies of the same encryptor/log collaborators — can decrypt without one
+// depending on the other.
+func decryptContent(ctx context.Context, enc Encryptor, log *slog.Logger, note *domain.Note) error {
+	plaintext, err := enc.Decrypt(note.Content, note.ID)
 	if err != nil {
 		if errors.Is(err, domain.ErrMalformedCiphertext) {
-			m.log.ErrorContext(ctx, "stored content is corrupt", "id", note.ID, "err", err)
+			log.ErrorContext(ctx, "stored content is corrupt", "id", note.ID, "err", err)
 		} else {
-			m.log.WarnContext(ctx, "content decryption failed (likely wrong slug)", "id", note.ID, "err", err)
+			log.WarnContext(ctx, "content decryption failed (likely wrong slug)", "id", note.ID, "err", err)
 		}
 
 		return domain.ErrNotFound
@@ -535,66 +519,4 @@ func (m *Manager) decryptNote(ctx context.Context, note *domain.Note) error {
 	note.Content = plaintext
 
 	return nil
-}
-
-func (m *Manager) burnNote(ctx context.Context, id string, note *domain.Note) (*domain.Note, error) {
-	if note.BurnTTL > 0 {
-		return m.startBurnTimer(ctx, id, note)
-	}
-
-	consumed, consumeErr := m.storage.Consume(ctx, hashSlug(id))
-	if consumeErr != nil {
-		return nil, fmt.Errorf("burn after reading: %w", consumeErr)
-	}
-
-	consumed.ID = id
-
-	decErr := m.decryptNote(ctx, consumed)
-	if decErr != nil {
-		return nil, fmt.Errorf("burn after reading: %w", decErr)
-	}
-
-	m.log.DebugContext(ctx, "note burned", "id", id)
-
-	return consumed, nil
-}
-
-func (m *Manager) startBurnTimer(ctx context.Context, id string, note *domain.Note) (*domain.Note, error) {
-	expiresAt := time.Now().UTC().Add(time.Duration(note.BurnTTL) * time.Second)
-
-	updated, burnErr := m.storage.SetBurnExpiry(ctx, hashSlug(id), expiresAt)
-	if burnErr != nil {
-		return m.handleSetBurnExpiryErr(ctx, id, burnErr)
-	}
-
-	updated.ID = id
-
-	decErr := m.decryptNote(ctx, updated)
-	if decErr != nil {
-		return nil, fmt.Errorf("burn after reading: %w", decErr)
-	}
-
-	m.log.DebugContext(ctx, "burn timer started", "id", id, "expires_at", expiresAt)
-
-	return updated, nil
-}
-
-func (m *Manager) handleSetBurnExpiryErr(ctx context.Context, id string, burnErr error) (*domain.Note, error) {
-	if !errors.Is(burnErr, domain.ErrNotFound) {
-		return nil, fmt.Errorf("burn after reading: %w", burnErr)
-	}
-
-	current, getErr := m.storage.Get(ctx, hashSlug(id))
-	if getErr != nil {
-		return nil, fmt.Errorf("burn after reading (re-fetch): %w", getErr)
-	}
-
-	current.ID = id
-
-	decErr := m.decryptNote(ctx, current)
-	if decErr != nil {
-		return nil, fmt.Errorf("burn after reading (re-fetch): %w", decErr)
-	}
-
-	return current, nil
 }

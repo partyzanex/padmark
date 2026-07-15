@@ -6,7 +6,6 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -92,26 +91,11 @@ func newGCM(slug string) (cipher.AEAD, error) {
 	return gcm, nil
 }
 
-// HashSlug returns the SHA-256 hex digest of slug, used as the database primary key.
-// The plaintext slug (which is also the AES key material) is never stored at rest.
-//
-// Security note: this is a FAST hash, so a stolen database lets an attacker brute-force the
-// slug offline against this column and then derive the content key. The slug is therefore
-// the real strength parameter (~log2(62)*len bits; ~60 bits at the default 10-char length),
-// not a substitute for it. A DB dump alone is breakable in roughly days-to-months on serious
-// GPU hardware at 60 bits — raise the slug length for stronger at-rest protection, or
-// introduce a server-side pepper if "DB exfil alone is useless" is a required property.
-func HashSlug(slug string) string {
-	sum := sha256.Sum256([]byte(slug))
-
-	return hex.EncodeToString(sum[:])
-}
-
 // deriveKey derives the AES-256 content key from the slug via HKDF-SHA256.
 // Domain separation is provided by the info parameter (hkdfInfo, distinct from the user-key
 // info in DeriveUserKey), so content keys and user keys never collide. The salt is nil: HKDF
 // adds no entropy beyond the IKM, so for the low-entropy slug a static salt would be
-// pointless — only a secret server-side pepper would help (see HashSlug security note).
+// pointless — only a secret server-side pepper would help (see domain.HashSlug's security note).
 func deriveKey(slug string) ([]byte, error) {
 	reader := hkdf.New(sha256.New, []byte(slug), nil, []byte(hkdfInfo))
 

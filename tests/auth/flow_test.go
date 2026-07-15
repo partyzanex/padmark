@@ -33,7 +33,7 @@ type AuthFlowSuite struct {
 func (s *AuthFlowSuite) SetupTest() {
 	s.SQLiteAuthSuite.SetupTest()
 
-	s.mgr = auth.NewManager(
+	mgr, err := auth.NewManager(
 		s.Users,
 		s.Invites,
 		s.Sessions,
@@ -46,6 +46,8 @@ func (s *AuthFlowSuite) SetupTest() {
 		"padmark-test",
 		time.Hour,
 	)
+	s.Require().NoError(err)
+	s.mgr = mgr
 }
 
 func (s *AuthFlowSuite) TearDownTest() {

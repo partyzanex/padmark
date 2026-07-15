@@ -2,8 +2,6 @@ package http_test
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -25,12 +23,6 @@ import (
 // testCSRFSecret is a fixed 32-byte CSRF secret shared across all handler tests.
 // Must match the secret set in newRouter's RouterOptions.
 var testCSRFSecret = []byte("padmark-test-csrf-secret-32bytes") //nolint:gochecknoglobals // test fixture
-
-func slugHash(slug string) string {
-	sum := sha256.Sum256([]byte(slug))
-
-	return hex.EncodeToString(sum[:])
-}
 
 // testNoteResponse mirrors noteResponse for decoding test responses.
 type testNoteResponse struct {
@@ -83,7 +75,10 @@ func (s *HandlerSuite) newRouter(tokens []string) http.Handler {
 		CSRFSecret:   testCSRFSecret,
 	}
 
-	return adhttp.NewRouter(handler, ogen, &opts)
+	router, err := adhttp.NewRouter(handler, ogen, &opts)
+	s.Require().NoError(err)
+
+	return router
 }
 
 // newRouterWithOptions builds a router with the given trusted proxies and forced scheme,
@@ -100,7 +95,10 @@ func (s *HandlerSuite) newRouterWithOptions(trustedProxies []*net.IPNet, forcedS
 		ForcedScheme:   forcedScheme,
 	}
 
-	return adhttp.NewRouter(handler, ogen, &opts)
+	router, err := adhttp.NewRouter(handler, ogen, &opts)
+	s.Require().NoError(err)
+
+	return router
 }
 
 // newRouterWithTOTPAuth builds a router configured in TOTP-only mode:
@@ -117,7 +115,10 @@ func (s *HandlerSuite) newRouterWithTOTPAuth() http.Handler {
 		CSRFSecret:   testCSRFSecret,
 	}
 
-	return adhttp.NewRouter(handler, ogen, &opts)
+	router, err := adhttp.NewRouter(handler, ogen, &opts)
+	s.Require().NoError(err)
+
+	return router
 }
 
 // newRouterWithReveal builds a router with RevealStore and auth configured so that
@@ -133,7 +134,10 @@ func (s *HandlerSuite) newRouterWithReveal() http.Handler {
 		CSRFSecret:   testCSRFSecret,
 	}
 
-	return adhttp.NewRouter(handler, ogen, &opts)
+	router, err := adhttp.NewRouter(handler, ogen, &opts)
+	s.Require().NoError(err)
+
+	return router
 }
 
 // csrf generates a valid HMAC-signed CSRF token using the fixed test secret.
@@ -511,7 +515,8 @@ func (s *HandlerSuite) TestCreateNote_BodyExceedsLimit_Returns413() {
 		MaxBodyBytes: 64,
 		CSRFSecret:   testCSRFSecret,
 	}
-	router := adhttp.NewRouter(handler, ogen, &opts)
+	router, err := adhttp.NewRouter(handler, ogen, &opts)
+	s.Require().NoError(err)
 
 	body := `{"title":"t","content":"` + strings.Repeat("x", 512) + `"}`
 	w := httptest.NewRecorder()
@@ -1205,7 +1210,8 @@ func (s *HandlerSuite) TestReadyz_NoPinger() {
 	handler := adhttp.NewHandler(s.manager, discardLog, nil)
 	ogen := adhttp.NewOgenHandler(s.manager, adhttp.NoPinger{}, discardLog)
 	opts := adhttp.RouterOptions{CookieMaxAge: 90 * 24 * 60 * 60, MaxBodyBytes: 256 * 1024}
-	router := adhttp.NewRouter(handler, ogen, &opts)
+	router, err := adhttp.NewRouter(handler, ogen, &opts)
+	s.Require().NoError(err)
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/readyz", nil)
@@ -1282,6 +1288,18 @@ func (s *HandlerSuite) TestTOTPLoginHandler_AccountsDisabled_Returns404() {
 	r := httptest.NewRequest(http.MethodPost, "/totp-login", nil)
 
 	handler.TOTPLoginHandler(w, r)
+
+	s.Equal(http.StatusNotFound, w.Code)
+}
+
+// TestChangePasswordPage_AccountsDisabled_Returns404 mirrors the TOTPLoginHandler nil-guard
+// test above for the GET /change-password page.
+func (s *HandlerSuite) TestChangePasswordPage_AccountsDisabled_Returns404() {
+	handler := adhttp.NewHandler(s.manager, discardLog, nil) // no WithAuthManager → accounts disabled
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/change-password", nil)
+
+	handler.ChangePasswordPage(w, r)
 
 	s.Equal(http.StatusNotFound, w.Code)
 }
@@ -1419,7 +1437,8 @@ func (s *HandlerSuite) TestRateLimit_Exceeded() {
 		RateLimit:    1,
 		RateBurst:    1,
 	}
-	router := adhttp.NewRouter(handler, ogen, &opts)
+	router, err := adhttp.NewRouter(handler, ogen, &opts)
+	s.Require().NoError(err)
 
 	send := func() int {
 		w := httptest.NewRecorder()
@@ -1443,7 +1462,8 @@ func (s *HandlerSuite) TestRateLimit_DifferentIPs() {
 		RateLimit:    1,
 		RateBurst:    1,
 	}
-	router := adhttp.NewRouter(handler, ogen, &opts)
+	router, err := adhttp.NewRouter(handler, ogen, &opts)
+	s.Require().NoError(err)
 
 	send := func(ip string) int {
 		w := httptest.NewRecorder()
@@ -2116,7 +2136,8 @@ func (s *HandlerSuite) TestAPIDocsPage_Public() {
 	handler := adhttp.NewHandler(s.manager, discardLog, []string{"secret"})
 	ogen := adhttp.NewOgenHandler(s.manager, s.pinger, discardLog)
 	opts := adhttp.RouterOptions{CookieMaxAge: 90 * 24 * 60 * 60, MaxBodyBytes: 256 * 1024}
-	router := adhttp.NewRouter(handler, ogen, &opts)
+	router, err := adhttp.NewRouter(handler, ogen, &opts)
+	s.Require().NoError(err)
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/api", nil)
@@ -2133,7 +2154,7 @@ func (s *HandlerSuite) TestGetNote_BurnInterstitial_ShowsConfirmPage() {
 	note.BurnAfterReading = true
 
 	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
-	s.revealStore.EXPECT().Issue(gomock.Any(), slugHash(testID)).Return("tok-abc", nil)
+	s.revealStore.EXPECT().Issue(gomock.Any(), domain.HashSlug(testID)).Return("tok-abc", nil)
 
 	router := s.newRouterWithReveal()
 
@@ -2192,7 +2213,7 @@ func (s *HandlerSuite) TestGetNote_BurnInterstitial_IssueError_Returns500() {
 	note.BurnAfterReading = true
 
 	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
-	s.revealStore.EXPECT().Issue(gomock.Any(), slugHash(testID)).Return("", errors.New("storage down"))
+	s.revealStore.EXPECT().Issue(gomock.Any(), domain.HashSlug(testID)).Return("", errors.New("storage down"))
 
 	router := s.newRouterWithReveal()
 
@@ -2234,7 +2255,7 @@ func (s *HandlerSuite) TestHandleReveal_OK() {
 
 	// handlePrivateAuth calls Peek; renderNoteHTML uses GetRenderedPreloaded with preloaded note.
 	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
-	s.revealStore.EXPECT().Consume(gomock.Any(), "tok-abc", slugHash(testID)).Return(true)
+	s.revealStore.EXPECT().Consume(gomock.Any(), "tok-abc", domain.HashSlug(testID)).Return(true)
 	s.manager.EXPECT().GetRenderedPreloaded(gomock.Any(), testID, note).
 		Return(note, "<p>burn me</p>", nil)
 
@@ -2278,7 +2299,7 @@ func (s *HandlerSuite) TestHandleReveal_NoCSRF_Forbidden() {
 func (s *HandlerSuite) TestHandleReveal_InvalidToken_Forbidden() {
 	note := newTestNote("secret", "burn me")
 	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
-	s.revealStore.EXPECT().Consume(gomock.Any(), "bad-tok", slugHash(testID)).Return(false)
+	s.revealStore.EXPECT().Consume(gomock.Any(), "bad-tok", domain.HashSlug(testID)).Return(false)
 
 	router := s.newRouterWithReveal()
 
@@ -2298,7 +2319,7 @@ func (s *HandlerSuite) TestHandleReveal_TokenForWrongNote_Forbidden() {
 	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
 	// Consume is called with testID (URL note); token was issued for another note →
 	// DB WHERE note_id = testID finds no row → returns false, token untouched.
-	s.revealStore.EXPECT().Consume(gomock.Any(), "tok-other", slugHash(testID)).Return(false)
+	s.revealStore.EXPECT().Consume(gomock.Any(), "tok-other", domain.HashSlug(testID)).Return(false)
 
 	router := s.newRouterWithReveal()
 
@@ -2313,7 +2334,7 @@ func (s *HandlerSuite) TestHandleReveal_TokenForWrongNote_Forbidden() {
 func (s *HandlerSuite) TestHandleReveal_MissingToken_Forbidden() {
 	note := newTestNote("secret", "burn me")
 	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
-	s.revealStore.EXPECT().Consume(gomock.Any(), "", slugHash(testID)).Return(false)
+	s.revealStore.EXPECT().Consume(gomock.Any(), "", domain.HashSlug(testID)).Return(false)
 
 	router := s.newRouterWithReveal()
 
@@ -2341,7 +2362,7 @@ func (s *HandlerSuite) TestHandleReveal_CrossNoteToken_TokenNotBurned() {
 
 	s.manager.EXPECT().Peek(gomock.Any(), "wrong-note").Return(wrongNote, nil)
 	// Consume called with "wrong-note" as noteID — DB rejects mismatch, token preserved.
-	s.revealStore.EXPECT().Consume(gomock.Any(), "tok-for-abc123", slugHash("wrong-note")).Return(false)
+	s.revealStore.EXPECT().Consume(gomock.Any(), "tok-for-abc123", domain.HashSlug("wrong-note")).Return(false)
 
 	router := s.newRouterWithReveal()
 

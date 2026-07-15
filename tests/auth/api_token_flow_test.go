@@ -49,7 +49,7 @@ func TestAPITokenFlow_AdminIssuesKey_CLICreatesNote(t *testing.T) {
 	log := slog.New(slog.DiscardHandler)
 	users := sqliterepo.NewUserRepository(db)
 
-	authMgr := auth.NewManager(
+	authMgr, err := auth.NewManager(
 		users,
 		sqliterepo.NewInviteRepository(db),
 		sqliterepo.NewSessionRepository(db),
@@ -62,6 +62,7 @@ func TestAPITokenFlow_AdminIssuesKey_CLICreatesNote(t *testing.T) {
 		"padmark-test",
 		time.Hour,
 	)
+	require.NoError(t, err)
 
 	notesMgr := notes.NewManager(
 		sqliterepo.NewNoteRepository(db),
@@ -74,11 +75,12 @@ func TestAPITokenFlow_AdminIssuesKey_CLICreatesNote(t *testing.T) {
 
 	handler := adaptershttp.NewHandler(notesMgr, log, nil).WithAuthManager(authMgr)
 	ogen := adaptershttp.NewOgenHandler(notesMgr, adaptershttp.NoPinger{}, log)
-	router := adaptershttp.NewRouter(handler, ogen, &adaptershttp.RouterOptions{
+	router, err := adaptershttp.NewRouter(handler, ogen, &adaptershttp.RouterOptions{
 		CookieMaxAge: 3600,
 		MaxBodyBytes: 256 * 1024,
 		CSRFSecret:   []byte("padmark-test-csrf-secret-32bytes"),
 	})
+	require.NoError(t, err)
 
 	srv := httptest.NewServer(router)
 	t.Cleanup(srv.Close)

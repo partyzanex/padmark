@@ -28,6 +28,18 @@ func (s *RendererSuite) TestParagraph() {
 	s.Contains(out, "hello world")
 }
 
+func (s *RendererSuite) TestRenderPlain_EscapesAndWraps() {
+	out, err := s.r.RenderPlain("<script>alert(1)</script>")
+	s.Require().NoError(err)
+	s.Equal("<pre>&lt;script&gt;alert(1)&lt;/script&gt;</pre>", out)
+}
+
+func (s *RendererSuite) TestRenderPlain_DoesNotParseMarkdown() {
+	out, err := s.r.RenderPlain("# not a heading\n**not bold**")
+	s.Require().NoError(err)
+	s.Equal("<pre># not a heading\n**not bold**</pre>", out)
+}
+
 func (s *RendererSuite) TestHeadings() {
 	out, err := s.r.Render("# Title\n## Sub")
 	s.Require().NoError(err)

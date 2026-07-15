@@ -24,7 +24,7 @@ type apiDocsViewData struct {
 // APIDocsPage handles GET /api — renders the OpenAPI spec with Redoc.
 // Redoc loads from an external CDN, so this page widens its own CSP to allow that origin in
 // script-src; the global CSP (set by withSecurityHeaders) stays free of third-party origins.
-func (h *Handler) APIDocsPage(w http.ResponseWriter, r *http.Request) {
+func (h *PageHandler) APIDocsPage(w http.ResponseWriter, r *http.Request) {
 	nonce := nonceFromContext(r.Context())
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

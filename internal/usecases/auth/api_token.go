@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/partyzanex/padmark/internal/domain"
@@ -30,13 +31,29 @@ type APITokenInfo struct {
 	Username   string
 }
 
+// APITokenManager issues, resolves, lists, and revokes long-lived API tokens.
+//
+// apiTokens may be nil to disable the flow entirely: every method then returns
+// domain.ErrFeatureNotSupported instead of touching a store.
+type APITokenManager struct {
+	apiTokens APITokenStore
+	users     UserStore
+	log       *slog.Logger
+}
+
+// NewAPITokenManager returns a new APITokenManager. Pass a nil apiTokens to disable the
+// API-token flow (all methods then return domain.ErrFeatureNotSupported).
+func NewAPITokenManager(apiTokens APITokenStore, users UserStore, log *slog.Logger) *APITokenManager {
+	return &APITokenManager{apiTokens: apiTokens, users: users, log: log}
+}
+
 // CreateAPIToken issues a long-lived API key for the user identified by userID. The plain key is
 // returned exactly once; only its SHA-256 hash is stored. The caller is responsible for any
 // authorisation check (admin gate, target-user gate) — this method authenticates the *issuance*
 // flow, not the resulting bearer.
 // Returns domain.ErrFeatureNotSupported when the API-token flow is not enabled on the Manager, and
 // domain.ErrAPITokenLimit when userID already holds maxAPITokensPerUser keys.
-func (m *Manager) CreateAPIToken(ctx context.Context, userID string) (string, error) {
+func (m *APITokenManager) CreateAPIToken(ctx context.Context, userID string) (string, error) {
 	if m.apiTokens == nil {
 		return "", domain.ErrFeatureNotSupported
 	}
@@ -78,7 +95,7 @@ func (m *Manager) CreateAPIToken(ctx context.Context, userID string) (string, er
 // ResolveAPIToken maps a bearer API key to its owning user, recording last-used.
 // Returns domain.ErrNotFound when the key is unknown, revoked, or expired so the caller cannot
 // distinguish those cases (no token enumeration oracle).
-func (m *Manager) ResolveAPIToken(ctx context.Context, plainToken string) (*domain.User, error) {
+func (m *APITokenManager) ResolveAPIToken(ctx context.Context, plainToken string) (*domain.User, error) {
 	if m.apiTokens == nil {
 		return nil, domain.ErrFeatureNotSupported
 	}
@@ -110,7 +127,7 @@ func (m *Manager) ResolveAPIToken(ctx context.Context, plainToken string) (*doma
 
 // ListAPITokens returns all API tokens with owning usernames for the admin panel.
 // Returns domain.ErrForbidden when the caller is not an admin.
-func (m *Manager) ListAPITokens(ctx context.Context, adminUserID string) ([]*APITokenInfo, error) {
+func (m *APITokenManager) ListAPITokens(ctx context.Context, adminUserID string) ([]*APITokenInfo, error) {
 	if m.apiTokens == nil {
 		return nil, domain.ErrFeatureNotSupported
 	}
@@ -157,7 +174,7 @@ func (m *Manager) ListAPITokens(ctx context.Context, adminUserID string) ([]*API
 
 // RevokeAPIToken deletes an API token by its public ID.
 // Returns domain.ErrForbidden when the caller is not an admin.
-func (m *Manager) RevokeAPIToken(ctx context.Context, adminUserID, tokenID string) error {
+func (m *APITokenManager) RevokeAPIToken(ctx context.Context, adminUserID, tokenID string) error {
 	if m.apiTokens == nil {
 		return domain.ErrFeatureNotSupported
 	}

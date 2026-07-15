@@ -87,7 +87,8 @@ func TestRandomString_Length(t *testing.T) {
 	const chars = "abc"
 
 	for _, length := range []int{1, 5, 10, 32} {
-		got := randomString(chars, length)
+		got, err := randomString(chars, length)
+		require.NoError(t, err)
 		assert.Len(t, got, length, "length=%d", length)
 	}
 }
@@ -95,7 +96,8 @@ func TestRandomString_Length(t *testing.T) {
 func TestRandomString_OnlyUsesCharset(t *testing.T) {
 	const chars = "xyz"
 
-	got := randomString(chars, 100)
+	got, err := randomString(chars, 100)
+	require.NoError(t, err)
 
 	for _, ch := range got {
 		assert.Contains(t, chars, string(ch))
@@ -103,8 +105,11 @@ func TestRandomString_OnlyUsesCharset(t *testing.T) {
 }
 
 func TestRandomString_Entropy(t *testing.T) {
-	first := randomString(slugChars, slugLength)
-	second := randomString(slugChars, slugLength)
+	first, err := randomString(slugChars, slugLength)
+	require.NoError(t, err)
+
+	second, err := randomString(slugChars, slugLength)
+	require.NoError(t, err)
 
 	assert.NotEqual(t, first, second, "two calls should almost never produce the same string")
 }
@@ -112,7 +117,8 @@ func TestRandomString_Entropy(t *testing.T) {
 // newSlug
 
 func TestNewSlug_LengthAndCharset(t *testing.T) {
-	slug := newSlug()
+	slug, err := newSlug()
+	require.NoError(t, err)
 
 	assert.Len(t, slug, slugLength, "generated slug must be slugLength chars")
 	assert.Equal(t, 10, slugLength, "slug length is the configured short-URL length")
@@ -232,8 +238,8 @@ func (s *ManagerTestSuite) TestCreate_CustomEditCodeUsedForUpdate() {
 	s.Equal(customCode, created.EditCode)
 
 	// Update with the custom code must succeed
-	s.storage.EXPECT().Get(gomock.Any(), hashSlug(created.ID)).Return(created, nil)
-	s.storage.EXPECT().Update(gomock.Any(), hashSlug(created.ID), gomock.Any()).Return(nil)
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug(created.ID)).Return(created, nil)
+	s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug(created.ID), gomock.Any()).Return(nil)
 
 	updated, err := s.manager.Update(s.T().Context(), created.ID, customCode, &domain.Note{
 		Title:   "updated",
@@ -255,7 +261,7 @@ func (s *ManagerTestSuite) TestCreate_CustomEditCodeWrongCodeForbidden() {
 	s.Require().NoError(err)
 
 	// Update with wrong code must fail
-	s.storage.EXPECT().Get(gomock.Any(), hashSlug(created.ID)).Return(created, nil)
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug(created.ID)).Return(created, nil)
 
 	_, err = s.manager.Update(s.T().Context(), created.ID, "WrongCode1234", &domain.Note{
 		Title:   "updated",
@@ -393,7 +399,7 @@ func (s *ManagerTestSuite) TestCreate_StorageError_RestoresPlaintextAndPersistsE
 	// What hit storage: encrypted content, hashed edit code, hashed-slug primary key.
 	s.Equal("enc:body", atStore.Content)
 	s.Equal("hash:code12345678", atStore.EditCode)
-	s.Equal(hashSlug("myslug"), atStore.ID)
+	s.Equal(domain.HashSlug("myslug"), atStore.ID)
 
 	// What the caller is left with: plaintext fields and the slug ID.
 	s.Equal("body", note.Content)
@@ -410,11 +416,11 @@ func (s *ManagerTestSuite) TestUpdate_PersistsHashedEditCode_NotPlaintext() {
 	mgr := NewManager(s.storage, s.renderer, prefixEncryptor{}, prefixHasher{}, slog.New(slog.DiscardHandler), true)
 
 	existing := &domain.Note{ID: "myslug", EditCode: "hash:code12345678", Content: "enc:old"}
-	s.storage.EXPECT().Get(gomock.Any(), hashSlug("myslug")).Return(existing, nil)
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("myslug")).Return(existing, nil)
 
 	var atStore domain.Note
 
-	s.storage.EXPECT().Update(gomock.Any(), hashSlug("myslug"), gomock.Any()).DoAndReturn(
+	s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("myslug"), gomock.Any()).DoAndReturn(
 		func(_ context.Context, _ string, n *domain.Note) error {
 			atStore = *n // snapshot the row as it is persisted
 
@@ -442,9 +448,9 @@ func (s *ManagerTestSuite) TestUpdate_PersistsHashedEditCode_NotPlaintext() {
 // note fails — the error must propagate.
 func (s *ManagerTestSuite) TestHandleSetBurnExpiryErr_RefetchDecryptFails() {
 	mgr := NewManager(s.storage, s.renderer, failingEncryptor{}, identityHasher{}, slog.New(slog.DiscardHandler), true)
-	s.storage.EXPECT().Get(gomock.Any(), hashSlug("burn-x")).Return(&domain.Note{ID: "x", Content: "ct"}, nil)
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("burn-x")).Return(&domain.Note{ID: "x", Content: "ct"}, nil)
 
-	_, err := mgr.handleSetBurnExpiryErr(s.T().Context(), "burn-x", domain.ErrNotFound)
+	_, err := mgr.burn.handleSetExpiryErr(s.T().Context(), "burn-x", domain.ErrNotFound)
 
 	s.Require().Error(err)
 }
@@ -453,7 +459,7 @@ func (s *ManagerTestSuite) TestHandleSetBurnExpiryErr_RefetchDecryptFails() {
 
 func (s *ManagerTestSuite) TestGet_OK() {
 	want := &domain.Note{ID: "abc-123", Title: "a"}
-	s.storage.EXPECT().Get(gomock.Any(), hashSlug("abc-123")).Return(want, nil)
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(want, nil)
 
 	note, err := s.manager.Get(s.T().Context(), "abc-123")
 
@@ -463,8 +469,8 @@ func (s *ManagerTestSuite) TestGet_OK() {
 
 func (s *ManagerTestSuite) TestGet_BurnAfterReading() {
 	note := &domain.Note{ID: "abc-123", Title: "a", BurnAfterReading: true}
-	s.storage.EXPECT().Get(gomock.Any(), hashSlug("abc-123")).Return(note, nil)
-	s.storage.EXPECT().Consume(gomock.Any(), hashSlug("abc-123")).Return(note, nil)
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(note, nil)
+	s.storage.EXPECT().Consume(gomock.Any(), domain.HashSlug("abc-123")).Return(note, nil)
 
 	result, err := s.manager.Get(s.T().Context(), "abc-123")
 
@@ -474,8 +480,8 @@ func (s *ManagerTestSuite) TestGet_BurnAfterReading() {
 
 func (s *ManagerTestSuite) TestGet_BurnAfterReading_WithTTL() {
 	note := &domain.Note{ID: "abc-123", Title: "a", BurnAfterReading: true, BurnTTL: 3600}
-	s.storage.EXPECT().Get(gomock.Any(), hashSlug("abc-123")).Return(note, nil)
-	s.storage.EXPECT().SetBurnExpiry(gomock.Any(), hashSlug("abc-123"), gomock.Any()).Return(note, nil)
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(note, nil)
+	s.storage.EXPECT().SetBurnExpiry(gomock.Any(), domain.HashSlug("abc-123"), gomock.Any()).Return(note, nil)
 
 	result, err := s.manager.Get(s.T().Context(), "abc-123")
 
@@ -486,8 +492,8 @@ func (s *ManagerTestSuite) TestGet_BurnAfterReading_WithTTL() {
 func (s *ManagerTestSuite) TestGet_Expired() {
 	past := time.Now().Add(-time.Minute)
 	note := &domain.Note{ID: "abc-123", Title: "a", ExpiresAt: &past}
-	s.storage.EXPECT().Get(gomock.Any(), hashSlug("abc-123")).Return(note, nil)
-	s.storage.EXPECT().Delete(gomock.Any(), hashSlug("abc-123")).Return(nil)
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(note, nil)
+	s.storage.EXPECT().Delete(gomock.Any(), domain.HashSlug("abc-123")).Return(nil)
 
 	_, err := s.manager.Get(s.T().Context(), "abc-123")
 
@@ -495,7 +501,7 @@ func (s *ManagerTestSuite) TestGet_Expired() {
 }
 
 func (s *ManagerTestSuite) TestGet_NotFound() {
-	s.storage.EXPECT().Get(gomock.Any(), hashSlug("missing")).Return(nil, domain.ErrNotFound)
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("missing")).Return(nil, domain.ErrNotFound)
 
 	_, err := s.manager.Get(s.T().Context(), "missing")
 
@@ -506,8 +512,8 @@ func (s *ManagerTestSuite) TestGet_NotFound() {
 
 func (s *ManagerTestSuite) TestView_OK() {
 	want := &domain.Note{ID: "abc-123", Title: "a", Views: 5}
-	s.storage.EXPECT().Get(gomock.Any(), hashSlug("abc-123")).Return(want, nil)
-	s.storage.EXPECT().IncrementViews(gomock.Any(), hashSlug("abc-123")).Return(nil)
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(want, nil)
+	s.storage.EXPECT().IncrementViews(gomock.Any(), domain.HashSlug("abc-123")).Return(nil)
 
 	note, err := s.manager.View(s.T().Context(), "abc-123")
 
@@ -518,8 +524,8 @@ func (s *ManagerTestSuite) TestView_OK() {
 
 func (s *ManagerTestSuite) TestView_BurnAfterReading() {
 	want := &domain.Note{ID: "abc-123", Title: "a", BurnAfterReading: true}
-	s.storage.EXPECT().Get(gomock.Any(), hashSlug("abc-123")).Return(want, nil)
-	s.storage.EXPECT().Consume(gomock.Any(), hashSlug("abc-123")).Return(want, nil)
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(want, nil)
+	s.storage.EXPECT().Consume(gomock.Any(), domain.HashSlug("abc-123")).Return(want, nil)
 
 	note, err := s.manager.View(s.T().Context(), "abc-123")
 
@@ -534,10 +540,10 @@ func (s *ManagerTestSuite) TestView_BurnAfterReading_WithTTL() {
 	// Real storage flips burn_after_reading=false and sets expires_at on the timer-start read.
 	afterBurn := &domain.Note{ID: "abc-123", Title: "a", BurnAfterReading: false, BurnTTL: 1800, ExpiresAt: &future}
 
-	s.storage.EXPECT().Get(gomock.Any(), hashSlug("abc-123")).Return(stored, nil)
-	s.storage.EXPECT().SetBurnExpiry(gomock.Any(), hashSlug("abc-123"), gomock.Any()).Return(afterBurn, nil)
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(stored, nil)
+	s.storage.EXPECT().SetBurnExpiry(gomock.Any(), domain.HashSlug("abc-123"), gomock.Any()).Return(afterBurn, nil)
 	// The note stays readable during the grace period, so each read counts.
-	s.storage.EXPECT().IncrementViews(gomock.Any(), hashSlug("abc-123")).Return(nil)
+	s.storage.EXPECT().IncrementViews(gomock.Any(), domain.HashSlug("abc-123")).Return(nil)
 
 	note, err := s.manager.View(s.T().Context(), "abc-123")
 
@@ -547,7 +553,7 @@ func (s *ManagerTestSuite) TestView_BurnAfterReading_WithTTL() {
 }
 
 func (s *ManagerTestSuite) TestView_NotFound() {
-	s.storage.EXPECT().Get(gomock.Any(), hashSlug("missing")).Return(nil, domain.ErrNotFound)
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("missing")).Return(nil, domain.ErrNotFound)
 
 	_, err := s.manager.View(s.T().Context(), "missing")
 
@@ -566,8 +572,8 @@ func (s *ManagerTestSuite) TestUpdate_OK() {
 	}
 	note := &domain.Note{Title: "updated", Content: "body"}
 
-	s.storage.EXPECT().Get(gomock.Any(), hashSlug("abc-123")).Return(existing, nil)
-	s.storage.EXPECT().Update(gomock.Any(), hashSlug("abc-123"), note).Return(nil)
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(existing, nil)
+	s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("abc-123"), note).Return(nil)
 
 	result, err := s.manager.Update(s.T().Context(), "abc-123", "secret123456", note)
 
@@ -587,7 +593,7 @@ func (s *ManagerTestSuite) TestUpdate_EmptyTitle() {
 		EditCode: "code",
 	}
 
-	s.storage.EXPECT().Get(gomock.Any(), hashSlug("abc-123")).Return(existing, nil)
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(existing, nil)
 	s.storage.EXPECT().Update(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
 
 	result, err := s.manager.Update(s.T().Context(), "abc-123", "code", &domain.Note{})
@@ -599,7 +605,7 @@ func (s *ManagerTestSuite) TestUpdate_EmptyTitle() {
 func (s *ManagerTestSuite) TestUpdate_NotFound() {
 	note := &domain.Note{Title: "updated"}
 
-	s.storage.EXPECT().Get(gomock.Any(), hashSlug("missing")).Return(nil, domain.ErrNotFound)
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("missing")).Return(nil, domain.ErrNotFound)
 
 	_, err := s.manager.Update(s.T().Context(), "missing", "code", note)
 
@@ -614,7 +620,7 @@ func (s *ManagerTestSuite) TestUpdate_Forbidden() {
 	}
 	note := &domain.Note{Title: "updated"}
 
-	s.storage.EXPECT().Get(gomock.Any(), hashSlug("abc-123")).Return(existing, nil)
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(existing, nil)
 
 	_, err := s.manager.Update(s.T().Context(), "abc-123", "wrong-code", note)
 
@@ -625,8 +631,8 @@ func (s *ManagerTestSuite) TestUpdate_Forbidden() {
 
 func (s *ManagerTestSuite) TestDelete_OK() {
 	existing := &domain.Note{ID: "abc-123", EditCode: "secret123456"}
-	s.storage.EXPECT().Get(gomock.Any(), hashSlug("abc-123")).Return(existing, nil)
-	s.storage.EXPECT().Delete(gomock.Any(), hashSlug("abc-123")).Return(nil)
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(existing, nil)
+	s.storage.EXPECT().Delete(gomock.Any(), domain.HashSlug("abc-123")).Return(nil)
 
 	err := s.manager.Delete(s.T().Context(), "abc-123", "secret123456")
 
@@ -634,7 +640,7 @@ func (s *ManagerTestSuite) TestDelete_OK() {
 }
 
 func (s *ManagerTestSuite) TestDelete_NotFound() {
-	s.storage.EXPECT().Get(gomock.Any(), hashSlug("missing")).Return(nil, domain.ErrNotFound)
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("missing")).Return(nil, domain.ErrNotFound)
 
 	err := s.manager.Delete(s.T().Context(), "missing", "code")
 
@@ -643,7 +649,7 @@ func (s *ManagerTestSuite) TestDelete_NotFound() {
 
 func (s *ManagerTestSuite) TestDelete_Forbidden() {
 	existing := &domain.Note{ID: "abc-123", EditCode: "secret123456"}
-	s.storage.EXPECT().Get(gomock.Any(), hashSlug("abc-123")).Return(existing, nil)
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(existing, nil)
 
 	err := s.manager.Delete(s.T().Context(), "abc-123", "wrong-code")
 
@@ -654,8 +660,8 @@ func (s *ManagerTestSuite) TestDelete_Forbidden() {
 
 func (s *ManagerTestSuite) TestGetRendered_OK() {
 	note := &domain.Note{ID: "abc-123", Content: "# Hello"}
-	s.storage.EXPECT().Get(gomock.Any(), hashSlug("abc-123")).Return(note, nil)
-	s.storage.EXPECT().IncrementViews(gomock.Any(), hashSlug("abc-123")).Return(nil)
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(note, nil)
+	s.storage.EXPECT().IncrementViews(gomock.Any(), domain.HashSlug("abc-123")).Return(nil)
 	s.renderer.EXPECT().Render("# Hello").Return("<h1>Hello</h1>", nil)
 
 	result, html, err := s.manager.GetRendered(s.T().Context(), "abc-123")
@@ -667,8 +673,8 @@ func (s *ManagerTestSuite) TestGetRendered_OK() {
 
 func (s *ManagerTestSuite) TestGetRendered_BurnAfterReading() {
 	note := &domain.Note{ID: "abc-123", Content: "# Hello", BurnAfterReading: true}
-	s.storage.EXPECT().Get(gomock.Any(), hashSlug("abc-123")).Return(note, nil)
-	s.storage.EXPECT().Consume(gomock.Any(), hashSlug("abc-123")).Return(note, nil)
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(note, nil)
+	s.storage.EXPECT().Consume(gomock.Any(), domain.HashSlug("abc-123")).Return(note, nil)
 	s.renderer.EXPECT().Render("# Hello").Return("<h1>Hello</h1>", nil)
 
 	result, rendered, err := s.manager.GetRendered(s.T().Context(), "abc-123")
@@ -681,8 +687,8 @@ func (s *ManagerTestSuite) TestGetRendered_BurnAfterReading() {
 func (s *ManagerTestSuite) TestGetRendered_Expired() {
 	past := time.Now().Add(-time.Minute)
 	note := &domain.Note{ID: "abc-123", Content: "# Hello", ExpiresAt: &past}
-	s.storage.EXPECT().Get(gomock.Any(), hashSlug("abc-123")).Return(note, nil)
-	s.storage.EXPECT().Delete(gomock.Any(), hashSlug("abc-123")).Return(nil)
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(note, nil)
+	s.storage.EXPECT().Delete(gomock.Any(), domain.HashSlug("abc-123")).Return(nil)
 
 	_, _, err := s.manager.GetRendered(s.T().Context(), "abc-123")
 
@@ -690,7 +696,7 @@ func (s *ManagerTestSuite) TestGetRendered_Expired() {
 }
 
 func (s *ManagerTestSuite) TestGetRendered_StorageError() {
-	s.storage.EXPECT().Get(gomock.Any(), hashSlug("abc-123")).Return(nil, domain.ErrNotFound)
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(nil, domain.ErrNotFound)
 
 	_, _, err := s.manager.GetRendered(s.T().Context(), "abc-123")
 
@@ -700,9 +706,36 @@ func (s *ManagerTestSuite) TestGetRendered_StorageError() {
 func (s *ManagerTestSuite) TestGetRendered_RenderError() {
 	renderErr := errors.New("render failed")
 	note := &domain.Note{ID: "abc-123", Content: "bad"}
-	s.storage.EXPECT().Get(gomock.Any(), hashSlug("abc-123")).Return(note, nil)
-	s.storage.EXPECT().IncrementViews(gomock.Any(), hashSlug("abc-123")).Return(nil)
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(note, nil)
+	s.storage.EXPECT().IncrementViews(gomock.Any(), domain.HashSlug("abc-123")).Return(nil)
 	s.renderer.EXPECT().Render("bad").Return("", renderErr)
+
+	_, _, err := s.manager.GetRendered(s.T().Context(), "abc-123")
+
+	s.ErrorIs(err, renderErr)
+}
+
+func (s *ManagerTestSuite) TestGetRendered_PlainText_UsesRenderPlain() {
+	plain := domain.ContentTypePlain
+	note := &domain.Note{ID: "abc-123", Content: "<script>", ContentType: &plain}
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(note, nil)
+	s.storage.EXPECT().IncrementViews(gomock.Any(), domain.HashSlug("abc-123")).Return(nil)
+	s.renderer.EXPECT().RenderPlain("<script>").Return("<pre>&lt;script&gt;</pre>", nil)
+
+	result, rendered, err := s.manager.GetRendered(s.T().Context(), "abc-123")
+
+	s.Require().NoError(err)
+	s.Equal(note, result)
+	s.Equal("<pre>&lt;script&gt;</pre>", rendered)
+}
+
+func (s *ManagerTestSuite) TestGetRendered_PlainText_RenderPlainError() {
+	renderErr := errors.New("render failed")
+	plain := domain.ContentTypePlain
+	note := &domain.Note{ID: "abc-123", Content: "text", ContentType: &plain}
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(note, nil)
+	s.storage.EXPECT().IncrementViews(gomock.Any(), domain.HashSlug("abc-123")).Return(nil)
+	s.renderer.EXPECT().RenderPlain("text").Return("", renderErr)
 
 	_, _, err := s.manager.GetRendered(s.T().Context(), "abc-123")
 
@@ -713,7 +746,7 @@ func (s *ManagerTestSuite) TestGetRendered_RenderError() {
 
 func (s *ManagerTestSuite) TestPeek_OK() {
 	note := &domain.Note{ID: "peek-id", Title: "t", Content: "c"}
-	s.storage.EXPECT().Get(gomock.Any(), hashSlug("peek-id")).Return(note, nil)
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("peek-id")).Return(note, nil)
 
 	result, err := s.manager.Peek(s.T().Context(), "peek-id")
 
@@ -722,7 +755,7 @@ func (s *ManagerTestSuite) TestPeek_OK() {
 }
 
 func (s *ManagerTestSuite) TestPeek_NotFound() {
-	s.storage.EXPECT().Get(gomock.Any(), hashSlug("missing")).Return(nil, domain.ErrNotFound)
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("missing")).Return(nil, domain.ErrNotFound)
 
 	_, err := s.manager.Peek(s.T().Context(), "missing")
 
@@ -740,8 +773,8 @@ func (s *ManagerTestSuite) TestView_WithTTL_SecondViewSucceeds() {
 	note := &domain.Note{ID: "ttl-note", Title: "t", Views: 0, ExpiresAt: &future}
 
 	// First view
-	s.storage.EXPECT().Get(gomock.Any(), hashSlug("ttl-note")).Return(note, nil)
-	s.storage.EXPECT().IncrementViews(gomock.Any(), hashSlug("ttl-note")).Return(nil)
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("ttl-note")).Return(note, nil)
+	s.storage.EXPECT().IncrementViews(gomock.Any(), domain.HashSlug("ttl-note")).Return(nil)
 
 	result, err := s.manager.View(s.T().Context(), "ttl-note")
 	s.Require().NoError(err)
@@ -749,8 +782,8 @@ func (s *ManagerTestSuite) TestView_WithTTL_SecondViewSucceeds() {
 
 	// Second view — must NOT return ErrNotFound
 	note2 := &domain.Note{ID: "ttl-note", Title: "t", Views: 1, ExpiresAt: &future}
-	s.storage.EXPECT().Get(gomock.Any(), hashSlug("ttl-note")).Return(note2, nil)
-	s.storage.EXPECT().IncrementViews(gomock.Any(), hashSlug("ttl-note")).Return(nil)
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("ttl-note")).Return(note2, nil)
+	s.storage.EXPECT().IncrementViews(gomock.Any(), domain.HashSlug("ttl-note")).Return(nil)
 
 	result2, err := s.manager.View(s.T().Context(), "ttl-note")
 	s.Require().NoError(err)
@@ -761,8 +794,8 @@ func (s *ManagerTestSuite) TestView_WithTTL_SecondViewSucceeds() {
 // are consumed (deleted) and IncrementViews is NOT called on the already-deleted note.
 func (s *ManagerTestSuite) TestView_BurnAfterReading_NoIncrementViews() {
 	note := &domain.Note{ID: "burn-note", Title: "t", BurnAfterReading: true}
-	s.storage.EXPECT().Get(gomock.Any(), hashSlug("burn-note")).Return(note, nil)
-	s.storage.EXPECT().Consume(gomock.Any(), hashSlug("burn-note")).Return(note, nil)
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("burn-note")).Return(note, nil)
+	s.storage.EXPECT().Consume(gomock.Any(), domain.HashSlug("burn-note")).Return(note, nil)
 	// IncrementViews must NOT be called
 
 	result, err := s.manager.View(s.T().Context(), "burn-note")
@@ -780,10 +813,10 @@ func (s *ManagerTestSuite) TestView_BurnAfterReading_WithBurnTTL_CountsViews() {
 	// Real storage flips burn_after_reading=false and sets expires_at.
 	noteAfterBurn := &domain.Note{ID: "burn-ttl", Title: "t", BurnAfterReading: false, BurnTTL: 3600, ExpiresAt: &future}
 
-	s.storage.EXPECT().Get(gomock.Any(), hashSlug("burn-ttl")).
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("burn-ttl")).
 		Return(&domain.Note{ID: "burn-ttl", Title: "t", BurnAfterReading: true, BurnTTL: 3600}, nil)
-	s.storage.EXPECT().SetBurnExpiry(gomock.Any(), hashSlug("burn-ttl"), gomock.Any()).Return(noteAfterBurn, nil)
-	s.storage.EXPECT().IncrementViews(gomock.Any(), hashSlug("burn-ttl")).Return(nil)
+	s.storage.EXPECT().SetBurnExpiry(gomock.Any(), domain.HashSlug("burn-ttl"), gomock.Any()).Return(noteAfterBurn, nil)
+	s.storage.EXPECT().IncrementViews(gomock.Any(), domain.HashSlug("burn-ttl")).Return(nil)
 
 	result, err := s.manager.View(s.T().Context(), "burn-ttl")
 	s.Require().NoError(err)
@@ -808,9 +841,9 @@ func (s *ManagerTestSuite) TestGet_BurnTTL_Race_SetBurnExpiryNotFound() {
 	note := &domain.Note{ID: "burn-ttl-race", Title: "t", BurnAfterReading: true, BurnTTL: 3600}
 
 	// Request B's perspective: it read the note before A's SetBurnExpiry committed.
-	s.storage.EXPECT().Get(gomock.Any(), hashSlug("burn-ttl-race")).Return(note, nil)
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("burn-ttl-race")).Return(note, nil)
 	// A already flipped burn_after_reading=false; B's conditional UPDATE matches 0 rows.
-	s.storage.EXPECT().SetBurnExpiry(gomock.Any(), hashSlug("burn-ttl-race"), gomock.Any()).
+	s.storage.EXPECT().SetBurnExpiry(gomock.Any(), domain.HashSlug("burn-ttl-race"), gomock.Any()).
 		Return(nil, domain.ErrNotFound)
 
 	// The fix must re-fetch the note to return its current state (BurnAfterReading=false, ExpiresAt set).
@@ -822,7 +855,7 @@ func (s *ManagerTestSuite) TestGet_BurnTTL_Race_SetBurnExpiryNotFound() {
 		BurnTTL:          3600,
 		ExpiresAt:        &future,
 	}
-	s.storage.EXPECT().Get(gomock.Any(), hashSlug("burn-ttl-race")).Return(noteAfterBurn, nil)
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("burn-ttl-race")).Return(noteAfterBurn, nil)
 
 	// The note exists and its burn timer is running — Get must succeed, not return ErrNotFound.
 	result, err := s.manager.Get(s.T().Context(), "burn-ttl-race")
@@ -837,7 +870,7 @@ func (s *ManagerTestSuite) TestGet_BurnTTL_Race_SetBurnExpiryNotFound() {
 func (s *ManagerTestSuite) TestViewPreloaded_OK() {
 	note := &domain.Note{ID: "pre-1", Title: "a", Views: 2}
 
-	s.storage.EXPECT().IncrementViews(gomock.Any(), hashSlug("pre-1")).Return(nil)
+	s.storage.EXPECT().IncrementViews(gomock.Any(), domain.HashSlug("pre-1")).Return(nil)
 
 	result, err := s.manager.ViewPreloaded(s.T().Context(), "pre-1", note)
 
@@ -848,7 +881,7 @@ func (s *ManagerTestSuite) TestViewPreloaded_OK() {
 
 func (s *ManagerTestSuite) TestViewPreloaded_BurnAfterReading() {
 	note := &domain.Note{ID: "pre-2", BurnAfterReading: true}
-	s.storage.EXPECT().Consume(gomock.Any(), hashSlug("pre-2")).Return(note, nil)
+	s.storage.EXPECT().Consume(gomock.Any(), domain.HashSlug("pre-2")).Return(note, nil)
 
 	result, err := s.manager.ViewPreloaded(s.T().Context(), "pre-2", note)
 
@@ -861,7 +894,7 @@ func (s *ManagerTestSuite) TestViewPreloaded_Expired() {
 	past := time.Now().Add(-time.Minute)
 	note := &domain.Note{ID: "pre-3", ExpiresAt: &past}
 
-	s.storage.EXPECT().Delete(gomock.Any(), hashSlug("pre-3")).Return(nil)
+	s.storage.EXPECT().Delete(gomock.Any(), domain.HashSlug("pre-3")).Return(nil)
 
 	_, err := s.manager.ViewPreloaded(s.T().Context(), "pre-3", note)
 
@@ -873,7 +906,7 @@ func (s *ManagerTestSuite) TestViewPreloaded_Expired() {
 func (s *ManagerTestSuite) TestGetRenderedPreloaded_OK() {
 	note := &domain.Note{ID: "rp-1", Content: "# Hello"}
 
-	s.storage.EXPECT().IncrementViews(gomock.Any(), hashSlug("rp-1")).Return(nil)
+	s.storage.EXPECT().IncrementViews(gomock.Any(), domain.HashSlug("rp-1")).Return(nil)
 	s.renderer.EXPECT().Render("# Hello").Return("<h1>Hello</h1>", nil)
 
 	result, rendered, err := s.manager.GetRenderedPreloaded(s.T().Context(), "rp-1", note)
@@ -887,7 +920,7 @@ func (s *ManagerTestSuite) TestGetRenderedPreloaded_Expired() {
 	past := time.Now().Add(-time.Minute)
 	note := &domain.Note{ID: "rp-2", ExpiresAt: &past, Content: "x"}
 
-	s.storage.EXPECT().Delete(gomock.Any(), hashSlug("rp-2")).Return(nil)
+	s.storage.EXPECT().Delete(gomock.Any(), domain.HashSlug("rp-2")).Return(nil)
 
 	_, _, err := s.manager.GetRenderedPreloaded(s.T().Context(), "rp-2", note)
 
@@ -903,7 +936,7 @@ func (s *ManagerTestSuite) TestPeek_ReturnsExpiredNote() {
 	past := time.Now().Add(-time.Minute)
 	note := &domain.Note{ID: "expired-peek", Title: "t", ExpiresAt: &past}
 
-	s.storage.EXPECT().Get(gomock.Any(), hashSlug("expired-peek")).Return(note, nil)
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("expired-peek")).Return(note, nil)
 	// Delete must NOT be called — Peek does not enforce expiry.
 
 	result, err := s.manager.Peek(s.T().Context(), "expired-peek")
@@ -924,8 +957,8 @@ func (s *ManagerTestSuite) TestUpdate_PrivateNote_CorrectCode() {
 	}
 	note := &domain.Note{Title: "updated secret"}
 
-	s.storage.EXPECT().Get(gomock.Any(), hashSlug("priv-1")).Return(existing, nil)
-	s.storage.EXPECT().Update(gomock.Any(), hashSlug("priv-1"), note).Return(nil)
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("priv-1")).Return(existing, nil)
+	s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("priv-1"), note).Return(nil)
 
 	result, err := s.manager.Update(s.T().Context(), "priv-1", "rightcode1234", note)
 
@@ -943,7 +976,7 @@ func (s *ManagerTestSuite) TestUpdate_PrivateNote_WrongCode() {
 	}
 	note := &domain.Note{Title: "hijacked"}
 
-	s.storage.EXPECT().Get(gomock.Any(), hashSlug("priv-2")).Return(existing, nil)
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("priv-2")).Return(existing, nil)
 
 	_, err := s.manager.Update(s.T().Context(), "priv-2", "wrongcode0000", note)
 
@@ -956,8 +989,8 @@ func (s *ManagerTestSuite) TestGet_BurnAfterReading_ConsumeError() {
 	consumeErr := errors.New("storage unavailable")
 	note := &domain.Note{ID: "burn-err", Title: "t", BurnAfterReading: true}
 
-	s.storage.EXPECT().Get(gomock.Any(), hashSlug("burn-err")).Return(note, nil)
-	s.storage.EXPECT().Consume(gomock.Any(), hashSlug("burn-err")).Return(nil, consumeErr)
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("burn-err")).Return(note, nil)
+	s.storage.EXPECT().Consume(gomock.Any(), domain.HashSlug("burn-err")).Return(nil, consumeErr)
 
 	_, err := s.manager.Get(s.T().Context(), "burn-err")
 
@@ -968,8 +1001,8 @@ func (s *ManagerTestSuite) TestView_BurnAfterReading_ConsumeError() {
 	consumeErr := errors.New("storage unavailable")
 	note := &domain.Note{ID: "burn-err-view", Title: "t", BurnAfterReading: true}
 
-	s.storage.EXPECT().Get(gomock.Any(), hashSlug("burn-err-view")).Return(note, nil)
-	s.storage.EXPECT().Consume(gomock.Any(), hashSlug("burn-err-view")).Return(nil, consumeErr)
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("burn-err-view")).Return(note, nil)
+	s.storage.EXPECT().Consume(gomock.Any(), domain.HashSlug("burn-err-view")).Return(nil, consumeErr)
 
 	_, err := s.manager.View(s.T().Context(), "burn-err-view")
 
@@ -985,7 +1018,7 @@ func TestGet_DecryptionFailure(t *testing.T) {
 	mgr := NewManager(storage, renderer, failingEncryptor{}, identityHasher{}, slog.New(slog.DiscardHandler), true)
 
 	note := &domain.Note{ID: "enc-fail", Title: "t", Content: "ciphertext"}
-	storage.EXPECT().Get(gomock.Any(), hashSlug("enc-fail")).Return(note, nil)
+	storage.EXPECT().Get(gomock.Any(), domain.HashSlug("enc-fail")).Return(note, nil)
 
 	_, err := mgr.Get(t.Context(), "enc-fail")
 
@@ -999,7 +1032,7 @@ func TestPeek_DecryptionFailure(t *testing.T) {
 	mgr := NewManager(storage, renderer, failingEncryptor{}, identityHasher{}, slog.New(slog.DiscardHandler), true)
 
 	note := &domain.Note{ID: "enc-fail-peek", Title: "t", Content: "ciphertext"}
-	storage.EXPECT().Get(gomock.Any(), hashSlug("enc-fail-peek")).Return(note, nil)
+	storage.EXPECT().Get(gomock.Any(), domain.HashSlug("enc-fail-peek")).Return(note, nil)
 
 	_, err := mgr.Peek(t.Context(), "enc-fail-peek")
 
@@ -1014,9 +1047,9 @@ func TestGet_BurnAfterReading_DecryptionFailure(t *testing.T) {
 	renderer := NewMockRenderer(ctrl)
 	mgr := NewManager(storage, renderer, failingEncryptor{}, identityHasher{}, slog.New(slog.DiscardHandler), true)
 
-	// decryptNote runs before applyNotePolicy, so Consume is never reached.
+	// decryptContent runs before burn.applyPolicy, so Consume is never reached.
 	raw := &domain.Note{ID: "burn-enc-fail", Title: "t", BurnAfterReading: true, Content: "ciphertext"}
-	storage.EXPECT().Get(gomock.Any(), hashSlug("burn-enc-fail")).Return(raw, nil)
+	storage.EXPECT().Get(gomock.Any(), domain.HashSlug("burn-enc-fail")).Return(raw, nil)
 
 	_, err := mgr.Get(t.Context(), "burn-enc-fail")
 
@@ -1031,9 +1064,9 @@ func TestGet_BurnTTL_DecryptionFailure(t *testing.T) {
 	renderer := NewMockRenderer(ctrl)
 	mgr := NewManager(storage, renderer, failingEncryptor{}, identityHasher{}, slog.New(slog.DiscardHandler), true)
 
-	// decryptNote runs before applyNotePolicy, so SetBurnExpiry is never reached.
+	// decryptContent runs before burn.applyPolicy, so SetBurnExpiry is never reached.
 	raw := &domain.Note{ID: "burn-ttl-enc-fail", Title: "t", BurnAfterReading: true, BurnTTL: 3600, Content: "ciphertext"}
-	storage.EXPECT().Get(gomock.Any(), hashSlug("burn-ttl-enc-fail")).Return(raw, nil)
+	storage.EXPECT().Get(gomock.Any(), domain.HashSlug("burn-ttl-enc-fail")).Return(raw, nil)
 
 	_, err := mgr.Get(t.Context(), "burn-ttl-enc-fail")
 

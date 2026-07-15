@@ -19,7 +19,7 @@ type successViewData struct {
 
 // SuccessPage handles GET /success and renders the post-create confirmation page.
 // Data is passed via query parameters set by the frontend after a successful POST /notes.
-func (h *Handler) SuccessPage(w http.ResponseWriter, r *http.Request) {
+func (h *PageHandler) SuccessPage(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 
 	id := query.Get("id")

@@ -30,14 +30,55 @@ type rateLimitMiddleware struct {
 	trustedProxies []*net.IPNet
 }
 
-func withRateLimit(rps, burst int, trustedProxies []*net.IPNet, next http.Handler) http.Handler {
-	limiterCache := gcache.New(maxTrackedIPs).
+// newIPRateLimiterCache builds an ARC cache mapping client IP to a *rate.Limiter, evicting
+// idle entries after limiterTTL. newLimiter is called once per IP, the first time it's seen —
+// used by both withRateLimit (general per-request limit) and withTOTPRateLimit (POST
+// /totp-login-specific limit), which need independent per-IP buckets since they track
+// unrelated concerns and must not share state.
+//
+//nolint:ireturn // gcache.Cache is an interface by design; no concrete type is exposed by the library
+func newIPRateLimiterCache(newLimiter func() *rate.Limiter) gcache.Cache {
+	return gcache.New(maxTrackedIPs).
 		ARC().
 		Expiration(limiterTTL).
 		LoaderFunc(func(_ any) (any, error) {
-			return rate.NewLimiter(rate.Limit(rps), burst), nil
+			return newLimiter(), nil
 		}).
 		Build()
+}
+
+// allowRequest reports whether ip is currently under its rate limit in cache. On false it has
+// already written the appropriate error response (500 on cache lookup failure — unreachable in
+// practice since LoaderFunc never errors; 429 when the limit is exceeded), so the caller must
+// stop handling the request.
+func allowRequest(w http.ResponseWriter, cache gcache.Cache, ip string) bool {
+	cached, err := cache.Get(ip)
+	if err != nil {
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+
+		return false
+	}
+
+	limiter, ok := cached.(*rate.Limiter)
+	if !ok {
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+
+		return false
+	}
+
+	if !limiter.Allow() {
+		http.Error(w, "too many requests", http.StatusTooManyRequests)
+
+		return false
+	}
+
+	return true
+}
+
+func withRateLimit(rps, burst int, trustedProxies []*net.IPNet, next http.Handler) http.Handler {
+	limiterCache := newIPRateLimiterCache(func() *rate.Limiter {
+		return rate.NewLimiter(rate.Limit(rps), burst)
+	})
 
 	return &rateLimitMiddleware{cache: limiterCache, trustedProxies: trustedProxies, next: next}
 }
@@ -45,24 +86,7 @@ func withRateLimit(rps, burst int, trustedProxies []*net.IPNet, next http.Handle
 func (rl *rateLimitMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ip := clientIP(r, rl.trustedProxies)
 
-	cached, err := rl.cache.Get(ip)
-	if err != nil {
-		// LoaderFunc never errors; this path is unreachable in practice.
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-
-		return
-	}
-
-	limiter, ok := cached.(*rate.Limiter)
-	if !ok {
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-
-		return
-	}
-
-	if !limiter.Allow() {
-		http.Error(w, "too many requests", http.StatusTooManyRequests)
-
+	if !allowRequest(w, rl.cache, ip) {
 		return
 	}
 
@@ -101,34 +125,14 @@ func clientIP(req *http.Request, trustedProxies []*net.IPNet) string {
 // totpRatePerMin attempts per minute per client IP. The burst equals the rate cap
 // so an attacker can make at most 10 attempts before being throttled.
 func withTOTPRateLimit(trustedProxies []*net.IPNet, next http.HandlerFunc) http.HandlerFunc {
-	cache := gcache.New(maxTrackedIPs).
-		ARC().
-		Expiration(limiterTTL).
-		LoaderFunc(func(_ any) (any, error) {
-			return rate.NewLimiter(rate.Every(time.Minute/totpRatePerMin), totpRatePerMin), nil
-		}).
-		Build()
+	cache := newIPRateLimiterCache(func() *rate.Limiter {
+		return rate.NewLimiter(rate.Every(time.Minute/totpRatePerMin), totpRatePerMin)
+	})
 
 	return func(w http.ResponseWriter, r *http.Request) {
 		ip := clientIP(r, trustedProxies)
 
-		cached, err := cache.Get(ip)
-		if err != nil {
-			http.Error(w, "internal server error", http.StatusInternalServerError)
-
-			return
-		}
-
-		limiter, ok := cached.(*rate.Limiter)
-		if !ok {
-			http.Error(w, "internal server error", http.StatusInternalServerError)
-
-			return
-		}
-
-		if !limiter.Allow() {
-			http.Error(w, "too many requests", http.StatusTooManyRequests)
-
+		if !allowRequest(w, cache, ip) {
 			return
 		}
 

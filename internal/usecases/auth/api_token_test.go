@@ -46,7 +46,7 @@ func newAuthManagerWithTokens(
 	users *MockUserStore,
 	apiTokens *MockAPITokenStore,
 ) *Manager {
-	return NewManager(
+	mgr, err := NewManager(
 		users,
 		NewMockInviteStore(suite.ctrl),
 		NewMockSessionStore(suite.ctrl),
@@ -59,12 +59,15 @@ func newAuthManagerWithTokens(
 		"padmark",
 		0,
 	)
+	suite.Require().NoError(err)
+
+	return mgr
 }
 
 // disabledMgr returns a Manager whose API-token flow is not enabled; used to assert
 // domain.ErrFeatureNotSupported on every public entry point.
 func (suite *APITokenSuite) disabledMgr() *Manager {
-	return NewManager(
+	mgr, err := NewManager(
 		suite.users,
 		NewMockInviteStore(suite.ctrl),
 		NewMockSessionStore(suite.ctrl),
@@ -77,6 +80,9 @@ func (suite *APITokenSuite) disabledMgr() *Manager {
 		"padmark",
 		0,
 	)
+	suite.Require().NoError(err)
+
+	return mgr
 }
 
 // ── helpers ──

@@ -182,6 +182,21 @@ func (mr *MockRendererMockRecorder) Render(content any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Render", reflect.TypeOf((*MockRenderer)(nil).Render), content)
 }
 
+// RenderPlain mocks base method.
+func (m *MockRenderer) RenderPlain(content string) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RenderPlain", content)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// RenderPlain indicates an expected call of RenderPlain.
+func (mr *MockRendererMockRecorder) RenderPlain(content any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RenderPlain", reflect.TypeOf((*MockRenderer)(nil).RenderPlain), content)
+}
+
 // MockEncryptor is a mock of Encryptor interface.
 type MockEncryptor struct {
 	ctrl     *gomock.Controller
