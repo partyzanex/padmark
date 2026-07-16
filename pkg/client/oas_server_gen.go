@@ -19,7 +19,9 @@ type Handler interface {
 	// DeleteNote implements deleteNote operation.
 	//
 	// Permanently deletes the note.  The edit code must be supplied either as the
-	// `X-Edit-Code` request header or the `edit_code` query parameter.
+	// `X-Edit-Code` request header or the `edit_code` query parameter — unless the request is
+	// authenticated (bearer token or session) as the exact user who created the note, in which
+	// case no edit code is needed. See "Edit codes and ownership" above.
 	//
 	// DELETE /notes/{id}
 	DeleteNote(ctx context.Context, params DeleteNoteParams) (DeleteNoteRes, error)
@@ -48,7 +50,9 @@ type Handler interface {
 	// UpdateNote implements updateNote operation.
 	//
 	// Replaces the note's title, content, content type, and burn settings.
-	// The `edit_code` must match the one returned when the note was created.
+	// The `edit_code` must match the one returned when the note was created — unless the
+	// request is authenticated (bearer token or session) as the exact user who created the
+	// note, in which case `edit_code` may be omitted. See "Edit codes and ownership" above.
 	// Returns the updated note.
 	//
 	// PUT /notes/{id}

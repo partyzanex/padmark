@@ -21,11 +21,12 @@ type note struct {
 	CreatedAt        time.Time  `bun:"created_at"`
 	UpdatedAt        time.Time  `bun:"updated_at"`
 	ExpiresAt        *time.Time `bun:"expires_at"`
-	ID               string     `bun:"id,pk"`
-	Title            string     `bun:"title"`
+	OwnerID          *string    `bun:"owner_id"`
 	Content          string     `bun:"content"`
+	Title            string     `bun:"title"`
 	ContentType      string     `bun:"content_type"`
 	EditCode         string     `bun:"edit_code"`
+	ID               string     `bun:"id,pk"`
 	Views            int        `bun:"views"`
 	BurnTTL          int64      `bun:"burn_ttl"`
 	BurnAfterReading bool       `bun:"burn_after_reading"`
@@ -56,6 +57,7 @@ func toDomain(dbNote *note) *domain.Note {
 		BurnTTL:          dbNote.BurnTTL,
 		BurnAfterReading: dbNote.BurnAfterReading,
 		Private:          new(dbNote.Private),
+		OwnerID:          dbNote.OwnerID,
 	}
 }
 
@@ -89,6 +91,7 @@ func (r *NoteRepository) Create(ctx context.Context, domNote *domain.Note) error
 		BurnTTL:          domNote.BurnTTL,
 		BurnAfterReading: domNote.BurnAfterReading,
 		Private:          boolVal(domNote.Private),
+		OwnerID:          domNote.OwnerID,
 	}
 
 	_, err := r.db.NewInsert().Model(dbNote).Exec(ctx)

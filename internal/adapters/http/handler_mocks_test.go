@@ -645,17 +645,17 @@ func (mr *MockNoteManagerMockRecorder) Create(ctx, note any) *gomock.Call {
 }
 
 // Delete mocks base method.
-func (m *MockNoteManager) Delete(ctx context.Context, id, editCode string) error {
+func (m *MockNoteManager) Delete(ctx context.Context, id, editCode, callerID string) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Delete", ctx, id, editCode)
+	ret := m.ctrl.Call(m, "Delete", ctx, id, editCode, callerID)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // Delete indicates an expected call of Delete.
-func (mr *MockNoteManagerMockRecorder) Delete(ctx, id, editCode any) *gomock.Call {
+func (mr *MockNoteManagerMockRecorder) Delete(ctx, id, editCode, callerID any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Delete", reflect.TypeOf((*MockNoteManager)(nil).Delete), ctx, id, editCode)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Delete", reflect.TypeOf((*MockNoteManager)(nil).Delete), ctx, id, editCode, callerID)
 }
 
 // GetRendered mocks base method.
@@ -706,18 +706,18 @@ func (mr *MockNoteManagerMockRecorder) Peek(ctx, id any) *gomock.Call {
 }
 
 // Update mocks base method.
-func (m *MockNoteManager) Update(ctx context.Context, id, editCode string, note *domain.Note) (*domain.Note, error) {
+func (m *MockNoteManager) Update(ctx context.Context, id, editCode, callerID string, note *domain.Note) (*domain.Note, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Update", ctx, id, editCode, note)
+	ret := m.ctrl.Call(m, "Update", ctx, id, editCode, callerID, note)
 	ret0, _ := ret[0].(*domain.Note)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // Update indicates an expected call of Update.
-func (mr *MockNoteManagerMockRecorder) Update(ctx, id, editCode, note any) *gomock.Call {
+func (mr *MockNoteManagerMockRecorder) Update(ctx, id, editCode, callerID, note any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Update", reflect.TypeOf((*MockNoteManager)(nil).Update), ctx, id, editCode, note)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Update", reflect.TypeOf((*MockNoteManager)(nil).Update), ctx, id, editCode, callerID, note)
 }
 
 // View mocks base method.

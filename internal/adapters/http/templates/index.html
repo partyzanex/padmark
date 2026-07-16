@@ -39,7 +39,7 @@
         </div>
         {{if .EditMode}}
         <div class="field-group">
-            <label class="field-label">Edit code <span class="optional">· required</span></label>
+            <label class="field-label">Edit code <span class="optional">· {{if .IsOwner}}optional, you created this note{{else}}required{{end}}</span></label>
             <input type="text" class="field-input" placeholder="Paste your edit code" id="editCodeInput">
         </div>
         {{else}}
@@ -98,6 +98,7 @@
 <script nonce="{{.Nonce}}">
     const editMode = {{.EditMode}};
     const noteID = {{.ID | js}};
+    const isOwner = {{.IsOwner}};
 
     function updateCount() {
         const len = document.getElementById('editor').value.length;
@@ -201,7 +202,7 @@
         const ttl = getTTL();
 
         if (!content) { showError(btn, 'Save', 'Enter some text first'); return; }
-        if (!editCode) { showError(btn, 'Save', 'Edit code required'); return; }
+        if (!editCode && !isOwner) { showError(btn, 'Save', 'Edit code required'); return; }
 
         btn.textContent = 'Saving…';
         btn.style.opacity = '0.7';

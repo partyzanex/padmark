@@ -181,7 +181,9 @@ func (s *Server) handleCreateNoteRequest(args [0]string, argsEscaped bool, w htt
 // handleDeleteNoteRequest handles deleteNote operation.
 //
 // Permanently deletes the note.  The edit code must be supplied either as the
-// `X-Edit-Code` request header or the `edit_code` query parameter.
+// `X-Edit-Code` request header or the `edit_code` query parameter — unless the request is
+// authenticated (bearer token or session) as the exact user who created the note, in which
+// case no edit code is needed. See "Edit codes and ownership" above.
 //
 // DELETE /notes/{id}
 func (s *Server) handleDeleteNoteRequest(args [1]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -728,7 +730,9 @@ func (s *Server) handleReadyzRequest(args [0]string, argsEscaped bool, w http.Re
 // handleUpdateNoteRequest handles updateNote operation.
 //
 // Replaces the note's title, content, content type, and burn settings.
-// The `edit_code` must match the one returned when the note was created.
+// The `edit_code` must match the one returned when the note was created — unless the
+// request is authenticated (bearer token or session) as the exact user who created the
+// note, in which case `edit_code` may be omitted. See "Edit codes and ownership" above.
 // Returns the updated note.
 //
 // PUT /notes/{id}

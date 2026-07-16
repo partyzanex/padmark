@@ -38,7 +38,9 @@ type Invoker interface {
 	// DeleteNote invokes deleteNote operation.
 	//
 	// Permanently deletes the note.  The edit code must be supplied either as the
-	// `X-Edit-Code` request header or the `edit_code` query parameter.
+	// `X-Edit-Code` request header or the `edit_code` query parameter — unless the request is
+	// authenticated (bearer token or session) as the exact user who created the note, in which
+	// case no edit code is needed. See "Edit codes and ownership" above.
 	//
 	// DELETE /notes/{id}
 	DeleteNote(ctx context.Context, params DeleteNoteParams) (DeleteNoteRes, error)
@@ -67,7 +69,9 @@ type Invoker interface {
 	// UpdateNote invokes updateNote operation.
 	//
 	// Replaces the note's title, content, content type, and burn settings.
-	// The `edit_code` must match the one returned when the note was created.
+	// The `edit_code` must match the one returned when the note was created — unless the
+	// request is authenticated (bearer token or session) as the exact user who created the
+	// note, in which case `edit_code` may be omitted. See "Edit codes and ownership" above.
 	// Returns the updated note.
 	//
 	// PUT /notes/{id}
@@ -195,7 +199,9 @@ func (c *Client) sendCreateNote(ctx context.Context, request *CreateNoteRequest)
 // DeleteNote invokes deleteNote operation.
 //
 // Permanently deletes the note.  The edit code must be supplied either as the
-// `X-Edit-Code` request header or the `edit_code` query parameter.
+// `X-Edit-Code` request header or the `edit_code` query parameter — unless the request is
+// authenticated (bearer token or session) as the exact user who created the note, in which
+// case no edit code is needed. See "Edit codes and ownership" above.
 //
 // DELETE /notes/{id}
 func (c *Client) DeleteNote(ctx context.Context, params DeleteNoteParams) (DeleteNoteRes, error) {
@@ -570,7 +576,9 @@ func (c *Client) sendReadyz(ctx context.Context) (res ReadyzRes, err error) {
 // UpdateNote invokes updateNote operation.
 //
 // Replaces the note's title, content, content type, and burn settings.
-// The `edit_code` must match the one returned when the note was created.
+// The `edit_code` must match the one returned when the note was created — unless the
+// request is authenticated (bearer token or session) as the exact user who created the
+// note, in which case `edit_code` may be omitted. See "Edit codes and ownership" above.
 // Returns the updated note.
 //
 // PUT /notes/{id}

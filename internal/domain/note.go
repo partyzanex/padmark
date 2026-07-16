@@ -27,10 +27,14 @@ func (ct ContentType) Valid() bool {
 const MaxTitleLength = 500
 
 type Note struct {
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
-	ExpiresAt        *time.Time
-	Private          *bool
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	ExpiresAt *time.Time
+	Private   *bool
+	// OwnerID is the ID of the user who created the note while authenticated (session or API
+	// token); nil for anonymous notes. Lets Update/Delete bypass EditCode for the exact creator
+	// — see notes.Manager.Update/Delete.
+	OwnerID          *string
 	ID               string
 	Title            string
 	Content          string

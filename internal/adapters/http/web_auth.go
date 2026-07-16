@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"errors"
 	"html/template"
 	"net"
@@ -53,9 +54,39 @@ func extractSessionID(r *http.Request) string {
 }
 
 func userFromContext(r *http.Request) *domain.User {
-	usr, _ := r.Context().Value(keyUser).(*domain.User)
+	return userFromCtx(r.Context())
+}
+
+// userFromCtx is the context-only counterpart of userFromContext, for ogen handlers (OgenHandler
+// methods receive only a context.Context, not *http.Request) — see NewRouter for why the
+// auth-middleware-enriched context still reaches them: ogen dispatches using r.Context().
+func userFromCtx(ctx context.Context) *domain.User {
+	usr, _ := ctx.Value(keyUser).(*domain.User)
 
 	return usr
+}
+
+// ownerIDFromCtx returns the authenticated caller's user ID for stamping domain.Note.OwnerID at
+// creation, or nil for an anonymous caller (note stays unowned, exactly like before this field
+// existed).
+func ownerIDFromCtx(ctx context.Context) *string {
+	usr := userFromCtx(ctx)
+	if usr == nil {
+		return nil
+	}
+
+	return &usr.ID
+}
+
+// callerIDFromCtx returns the authenticated caller's user ID for the owner-bypass check in
+// notes.Manager.Update/Delete, or "" for an anonymous caller (never matches an owner).
+func callerIDFromCtx(ctx context.Context) string {
+	usr := userFromCtx(ctx)
+	if usr == nil {
+		return ""
+	}
+
+	return usr.ID
 }
 
 // AuthHandler serves login, logout, account setup, and password-change endpoints.

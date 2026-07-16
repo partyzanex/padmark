@@ -316,6 +316,7 @@ func (s *RepositoryTestSuite) TestCreate_AllFields() {
 		ExpiresAt:        &future,
 		BurnAfterReading: true,
 		BurnTTL:          3600,
+		OwnerID:          new("user-1"),
 		CreatedAt:        time.Now(),
 		UpdatedAt:        time.Now(),
 	}
@@ -328,6 +329,42 @@ func (s *RepositoryTestSuite) TestCreate_AllFields() {
 	s.Equal(int64(3600), got.BurnTTL)
 	s.Equal(new(domain.ContentTypePlain), got.ContentType)
 	s.NotNil(got.ExpiresAt)
+	s.Require().NotNil(got.OwnerID)
+	s.Equal("user-1", *got.OwnerID)
+}
+
+// TestCreate_NoOwnerID verifies an anonymously-created note (no authenticated caller) persists
+// OwnerID as nil, not an empty string — Manager.isOwner relies on this nil check.
+func (s *RepositoryTestSuite) TestCreate_NoOwnerID() {
+	ctx := s.T().Context()
+
+	note := &domain.Note{ID: "anon", Title: "t", Content: "c", CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	s.Require().NoError(s.repo.Create(ctx, note))
+
+	got, err := s.repo.Get(ctx, "anon")
+	s.Require().NoError(err)
+	s.Nil(got.OwnerID)
+}
+
+// TestUpdate_PreservesOwnerID verifies Update never changes owner_id — ownership is fixed at
+// creation and is excluded from Update's column list, mirroring edit_code.
+func (s *RepositoryTestSuite) TestUpdate_PreservesOwnerID() {
+	ctx := s.T().Context()
+
+	note := &domain.Note{
+		ID: "owned", Title: "t", Content: "c", OwnerID: new("user-1"),
+		CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	s.Require().NoError(s.repo.Create(ctx, note))
+
+	s.Require().NoError(s.repo.Update(ctx, "owned", &domain.Note{
+		Title: "updated", Content: "new", OwnerID: new("attacker"),
+	}))
+
+	got, err := s.repo.Get(ctx, "owned")
+	s.Require().NoError(err)
+	s.Require().NotNil(got.OwnerID)
+	s.Equal("user-1", *got.OwnerID, "owner_id must be immutable via Update, even if a caller sets it")
 }
 
 // IncrementViews

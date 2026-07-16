@@ -1295,3 +1295,96 @@ func (s *AuthHandlerSuite) TestTOTPLogin_SessionCookieMaxAge_TracksConfiguredSes
 
 	s.True(found, "session cookie must be set")
 }
+
+// ── Owner bypass for edit_code (session and API-token callers) ──
+
+// TestUpdateNote_SessionOwner_BypassesEditCode verifies that a browser session (the ogen
+// single-segment PUT /notes/{id} route) resolves the caller and lets the note's owner update it
+// with no edit_code.
+func (s *AuthHandlerSuite) TestUpdateNote_SessionOwner_BypassesEditCode() {
+	s.auth.EXPECT().GetSession(gomock.Any(), "sess-owner").Return(&domain.User{ID: "u1"}, nil)
+	s.manager.EXPECT().Update(gomock.Any(), testID, "", "u1", gomock.Any()).
+		Return(newTestNote("t", "c"), nil)
+
+	body := `{"title":"t","content":"c"}`
+	req := httptest.NewRequest(http.MethodPut, "/notes/"+testID, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(s.sessionCookie("sess-owner"))
+
+	rec := httptest.NewRecorder()
+	s.router.ServeHTTP(rec, req)
+
+	s.Equal(http.StatusOK, rec.Code)
+}
+
+// TestUpdateNote_APITokenOwner_BypassesEditCode is the CLI/API-client counterpart: a Bearer API
+// token resolves to its owning user the same way a session does.
+func (s *AuthHandlerSuite) TestUpdateNote_APITokenOwner_BypassesEditCode() {
+	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "valid-key").Return(&domain.User{ID: "u1"}, nil)
+	s.manager.EXPECT().Update(gomock.Any(), testID, "", "u1", gomock.Any()).
+		Return(newTestNote("t", "c"), nil)
+
+	body := `{"title":"t","content":"c"}`
+	req := httptest.NewRequest(http.MethodPut, "/notes/"+testID, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer valid-key")
+
+	rec := httptest.NewRecorder()
+	s.router.ServeHTTP(rec, req)
+
+	s.Equal(http.StatusOK, rec.Code)
+}
+
+// TestDeleteNote_SessionOwner_BypassesEditCode mirrors TestUpdateNote_SessionOwner_BypassesEditCode
+// for DELETE.
+func (s *AuthHandlerSuite) TestDeleteNote_SessionOwner_BypassesEditCode() {
+	s.auth.EXPECT().GetSession(gomock.Any(), "sess-owner").Return(&domain.User{ID: "u1"}, nil)
+	s.manager.EXPECT().Delete(gomock.Any(), testID, "", "u1").Return(nil)
+
+	req := httptest.NewRequest(http.MethodDelete, "/notes/"+testID, nil)
+	req.AddCookie(s.sessionCookie("sess-owner"))
+
+	rec := httptest.NewRecorder()
+	s.router.ServeHTTP(rec, req)
+
+	s.Equal(http.StatusNoContent, rec.Code)
+}
+
+// TestUpdateNote_SessionNonOwner_StillNeedsEditCode verifies the owner bypass never extends to
+// another signed-in user: without the correct edit_code, a non-owner session gets the same
+// domain.ErrInvalidEditCode → 403 as an anonymous caller.
+func (s *AuthHandlerSuite) TestUpdateNote_SessionNonOwner_StillNeedsEditCode() {
+	s.auth.EXPECT().GetSession(gomock.Any(), "sess-other").Return(&domain.User{ID: "u2"}, nil)
+	s.manager.EXPECT().Update(gomock.Any(), testID, "", "u2", gomock.Any()).
+		Return(nil, domain.ErrInvalidEditCode)
+
+	body := `{"title":"t","content":"c"}`
+	req := httptest.NewRequest(http.MethodPut, "/notes/"+testID, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(s.sessionCookie("sess-other"))
+
+	rec := httptest.NewRecorder()
+	s.router.ServeHTTP(rec, req)
+
+	s.Equal(http.StatusForbidden, rec.Code)
+}
+
+// TestUpdateNoteByPath_SessionOwner_BypassesEditCode is the native multi-segment-slug
+// counterpart of TestUpdateNote_SessionOwner_BypassesEditCode (PUT /notes/{id...}).
+func (s *AuthHandlerSuite) TestUpdateNoteByPath_SessionOwner_BypassesEditCode() {
+	const mid = "project/GUIDE.md"
+
+	s.auth.EXPECT().GetSession(gomock.Any(), "sess-owner").Return(&domain.User{ID: "u1"}, nil)
+	s.manager.EXPECT().Update(gomock.Any(), mid, "", "u1", gomock.Any()).
+		Return(newTestNote("Guide", "new body"), nil)
+
+	body := `{"title":"Guide","content":"new body"}`
+	req := httptest.NewRequest(http.MethodPut, "/notes/"+mid, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(s.sessionCookie("sess-owner"))
+
+	rec := httptest.NewRecorder()
+	s.router.ServeHTTP(rec, req)
+
+	s.Equal(http.StatusOK, rec.Code)
+}

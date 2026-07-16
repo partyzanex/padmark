@@ -44,6 +44,10 @@ type editorViewData struct {
 	EditMode         bool
 	BurnAfterReading bool
 	Private          bool
+	// IsOwner is true when the signed-in caller (session or API token) created this note —
+	// see notes.Manager.Update's callerID bypass. Lets the editor accept an empty edit code
+	// for its owner instead of hard-requiring one; always false outside EditMode.
+	IsOwner bool
 }
 
 // IndexPage handles GET / — serves the note editor.

@@ -241,7 +241,7 @@ func (s *ManagerTestSuite) TestCreate_CustomEditCodeUsedForUpdate() {
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug(created.ID)).Return(created, nil)
 	s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug(created.ID), gomock.Any()).Return(nil)
 
-	updated, err := s.manager.Update(s.T().Context(), created.ID, customCode, &domain.Note{
+	updated, err := s.manager.Update(s.T().Context(), created.ID, customCode, "", &domain.Note{
 		Title:   "updated",
 		Content: "new body",
 	})
@@ -263,7 +263,7 @@ func (s *ManagerTestSuite) TestCreate_CustomEditCodeWrongCodeForbidden() {
 	// Update with wrong code must fail
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug(created.ID)).Return(created, nil)
 
-	_, err = s.manager.Update(s.T().Context(), created.ID, "WrongCode1234", &domain.Note{
+	_, err = s.manager.Update(s.T().Context(), created.ID, "WrongCode1234", "", &domain.Note{
 		Title:   "updated",
 		Content: "new body",
 	})
@@ -427,7 +427,7 @@ func (s *ManagerTestSuite) TestUpdate_PersistsHashedEditCode_NotPlaintext() {
 			return nil
 		})
 
-	updated, err := mgr.Update(s.T().Context(), "myslug", "code12345678", &domain.Note{
+	updated, err := mgr.Update(s.T().Context(), "myslug", "code12345678", "", &domain.Note{
 		Title:   "t",
 		Content: "new body",
 	})
@@ -575,7 +575,7 @@ func (s *ManagerTestSuite) TestUpdate_OK() {
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(existing, nil)
 	s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("abc-123"), note).Return(nil)
 
-	result, err := s.manager.Update(s.T().Context(), "abc-123", "secret123456", note)
+	result, err := s.manager.Update(s.T().Context(), "abc-123", "secret123456", "", note)
 
 	s.Require().NoError(err)
 	s.Equal("abc-123", result.ID)
@@ -596,7 +596,7 @@ func (s *ManagerTestSuite) TestUpdate_EmptyTitle() {
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(existing, nil)
 	s.storage.EXPECT().Update(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
 
-	result, err := s.manager.Update(s.T().Context(), "abc-123", "code", &domain.Note{})
+	result, err := s.manager.Update(s.T().Context(), "abc-123", "code", "", &domain.Note{})
 
 	s.Require().NoError(err)
 	s.NotNil(result)
@@ -607,7 +607,7 @@ func (s *ManagerTestSuite) TestUpdate_NotFound() {
 
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("missing")).Return(nil, domain.ErrNotFound)
 
-	_, err := s.manager.Update(s.T().Context(), "missing", "code", note)
+	_, err := s.manager.Update(s.T().Context(), "missing", "code", "", note)
 
 	s.ErrorIs(err, domain.ErrNotFound)
 }
@@ -622,7 +622,62 @@ func (s *ManagerTestSuite) TestUpdate_Forbidden() {
 
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(existing, nil)
 
-	_, err := s.manager.Update(s.T().Context(), "abc-123", "wrong-code", note)
+	_, err := s.manager.Update(s.T().Context(), "abc-123", "wrong-code", "", note)
+
+	s.ErrorIs(err, domain.ErrInvalidEditCode)
+}
+
+// TestUpdate_OwnerBypassesEditCode verifies that the exact user who created the note (callerID
+// matches existing.OwnerID) may update it with an empty or wrong edit_code.
+func (s *ManagerTestSuite) TestUpdate_OwnerBypassesEditCode() {
+	existing := &domain.Note{
+		ID:       "abc-123",
+		Title:    "old",
+		EditCode: "secret123456",
+		OwnerID:  new("user-1"),
+	}
+	note := &domain.Note{Title: "updated", Content: "body"}
+
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(existing, nil)
+	s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("abc-123"), gomock.Any()).Return(nil)
+
+	result, err := s.manager.Update(s.T().Context(), "abc-123", "", "user-1", note)
+
+	s.Require().NoError(err)
+	s.Equal("updated", result.Title)
+}
+
+// TestUpdate_NonOwnerCallerStillNeedsEditCode verifies that an authenticated caller who is NOT
+// the note's owner does not bypass edit_code — the owner check never extends to other users.
+func (s *ManagerTestSuite) TestUpdate_NonOwnerCallerStillNeedsEditCode() {
+	existing := &domain.Note{
+		ID:       "abc-123",
+		Title:    "old",
+		EditCode: "secret123456",
+		OwnerID:  new("user-1"),
+	}
+	note := &domain.Note{Title: "hijacked"}
+
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(existing, nil)
+
+	_, err := s.manager.Update(s.T().Context(), "abc-123", "wrong-code", "user-2", note)
+
+	s.ErrorIs(err, domain.ErrInvalidEditCode)
+}
+
+// TestUpdate_AnonymousNoteAlwaysNeedsEditCode verifies that a note with no owner (created
+// anonymously, or accounts disabled) never bypasses edit_code, even for an authenticated caller.
+func (s *ManagerTestSuite) TestUpdate_AnonymousNoteAlwaysNeedsEditCode() {
+	existing := &domain.Note{
+		ID:       "abc-123",
+		Title:    "old",
+		EditCode: "secret123456",
+	}
+	note := &domain.Note{Title: "hijacked"}
+
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(existing, nil)
+
+	_, err := s.manager.Update(s.T().Context(), "abc-123", "", "user-1", note)
 
 	s.ErrorIs(err, domain.ErrInvalidEditCode)
 }
@@ -634,7 +689,7 @@ func (s *ManagerTestSuite) TestDelete_OK() {
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(existing, nil)
 	s.storage.EXPECT().Delete(gomock.Any(), domain.HashSlug("abc-123")).Return(nil)
 
-	err := s.manager.Delete(s.T().Context(), "abc-123", "secret123456")
+	err := s.manager.Delete(s.T().Context(), "abc-123", "secret123456", "")
 
 	s.Require().NoError(err)
 }
@@ -642,7 +697,7 @@ func (s *ManagerTestSuite) TestDelete_OK() {
 func (s *ManagerTestSuite) TestDelete_NotFound() {
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("missing")).Return(nil, domain.ErrNotFound)
 
-	err := s.manager.Delete(s.T().Context(), "missing", "code")
+	err := s.manager.Delete(s.T().Context(), "missing", "code", "")
 
 	s.ErrorIs(err, domain.ErrNotFound)
 }
@@ -651,7 +706,29 @@ func (s *ManagerTestSuite) TestDelete_Forbidden() {
 	existing := &domain.Note{ID: "abc-123", EditCode: "secret123456"}
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(existing, nil)
 
-	err := s.manager.Delete(s.T().Context(), "abc-123", "wrong-code")
+	err := s.manager.Delete(s.T().Context(), "abc-123", "wrong-code", "")
+
+	s.ErrorIs(err, domain.ErrInvalidEditCode)
+}
+
+// TestDelete_OwnerBypassesEditCode mirrors TestUpdate_OwnerBypassesEditCode for Delete.
+func (s *ManagerTestSuite) TestDelete_OwnerBypassesEditCode() {
+	existing := &domain.Note{ID: "abc-123", EditCode: "secret123456", OwnerID: new("user-1")}
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(existing, nil)
+	s.storage.EXPECT().Delete(gomock.Any(), domain.HashSlug("abc-123")).Return(nil)
+
+	err := s.manager.Delete(s.T().Context(), "abc-123", "", "user-1")
+
+	s.Require().NoError(err)
+}
+
+// TestDelete_NonOwnerCallerStillNeedsEditCode mirrors TestUpdate_NonOwnerCallerStillNeedsEditCode
+// for Delete.
+func (s *ManagerTestSuite) TestDelete_NonOwnerCallerStillNeedsEditCode() {
+	existing := &domain.Note{ID: "abc-123", EditCode: "secret123456", OwnerID: new("user-1")}
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(existing, nil)
+
+	err := s.manager.Delete(s.T().Context(), "abc-123", "wrong-code", "user-2")
 
 	s.ErrorIs(err, domain.ErrInvalidEditCode)
 }
@@ -960,7 +1037,7 @@ func (s *ManagerTestSuite) TestUpdate_PrivateNote_CorrectCode() {
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("priv-1")).Return(existing, nil)
 	s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("priv-1"), note).Return(nil)
 
-	result, err := s.manager.Update(s.T().Context(), "priv-1", "rightcode1234", note)
+	result, err := s.manager.Update(s.T().Context(), "priv-1", "rightcode1234", "", note)
 
 	s.Require().NoError(err)
 	s.Equal("updated secret", result.Title)
@@ -978,7 +1055,7 @@ func (s *ManagerTestSuite) TestUpdate_PrivateNote_WrongCode() {
 
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("priv-2")).Return(existing, nil)
 
-	_, err := s.manager.Update(s.T().Context(), "priv-2", "wrongcode0000", note)
+	_, err := s.manager.Update(s.T().Context(), "priv-2", "wrongcode0000", "", note)
 
 	s.ErrorIs(err, domain.ErrInvalidEditCode)
 }

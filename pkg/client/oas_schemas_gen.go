@@ -46,7 +46,8 @@ type CreateNoteRequest struct {
 	EditCode OptString `json:"edit_code"`
 	// When `true` the note requires a valid credential (bearer token or authenticated
 	// session) to view. This gates access to "any authenticated caller", not just the
-	// note's creator — notes have no owner, so it does not isolate the note from other
+	// note's creator — unlike the `edit_code` bypass (see "Edit codes and ownership"
+	// above), `private` is not owner-scoped, so it does not isolate the note from other
 	// users on a multi-user instance. Meaningful when the server is started with
 	// `--auth-tokens` and/or `--enable-accounts`.
 	Private OptBool `json:"private"`
@@ -951,8 +952,10 @@ type UpdateNoteRequest struct {
 	Content string `json:"content"`
 	// New content type; defaults to the note's current type when omitted.
 	ContentType OptUpdateNoteRequestContentType `json:"content_type"`
-	// The edit code returned when the note was created.
-	EditCode string `json:"edit_code"`
+	// The edit code returned when the note was created. May be omitted when the request is
+	// authenticated (bearer token or session) as the note's owner — see
+	// "Edit codes and ownership" above.
+	EditCode OptString `json:"edit_code"`
 	// Update the burn-after-reading flag.
 	BurnAfterReading OptBool `json:"burn_after_reading"`
 	// New TTL in seconds (grace period after first read).
@@ -980,7 +983,7 @@ func (s *UpdateNoteRequest) GetContentType() OptUpdateNoteRequestContentType {
 }
 
 // GetEditCode returns the value of EditCode.
-func (s *UpdateNoteRequest) GetEditCode() string {
+func (s *UpdateNoteRequest) GetEditCode() OptString {
 	return s.EditCode
 }
 
@@ -1015,7 +1018,7 @@ func (s *UpdateNoteRequest) SetContentType(val OptUpdateNoteRequestContentType) 
 }
 
 // SetEditCode sets the value of EditCode.
-func (s *UpdateNoteRequest) SetEditCode(val string) {
+func (s *UpdateNoteRequest) SetEditCode(val OptString) {
 	s.EditCode = val
 }
 

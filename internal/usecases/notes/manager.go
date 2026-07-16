@@ -349,8 +349,12 @@ func (m *Manager) ViewPreloaded(ctx context.Context, id string, preloaded *domai
 
 // Update validates and updates an existing note, preserving immutable metadata.
 // The caller must supply the correct edit code.
+// Update replaces a note's editable fields. The caller must either supply the note's edit_code,
+// or be the note's owner (callerID matches existing.OwnerID) — the latter lets an authenticated
+// creator (session or API token) edit without the edit_code. callerID is "" for an anonymous
+// caller, which never matches an owner and falls back to the edit_code check unconditionally.
 func (m *Manager) Update(
-	ctx context.Context, id, editCode string, note *domain.Note,
+	ctx context.Context, id, editCode, callerID string, note *domain.Note,
 ) (*domain.Note, error) {
 	err := note.Validate()
 	if err != nil {
@@ -364,7 +368,7 @@ func (m *Manager) Update(
 		return nil, fmt.Errorf("update note: %w", err)
 	}
 
-	if !m.hasher.Verify(existing.EditCode, editCode) {
+	if !isOwner(existing, callerID) && !m.hasher.Verify(existing.EditCode, editCode) {
 		return nil, domain.ErrInvalidEditCode
 	}
 
@@ -419,8 +423,9 @@ func (m *Manager) Update(
 	return note, nil
 }
 
-// Delete removes a note by ID after verifying the edit code.
-func (m *Manager) Delete(ctx context.Context, id, editCode string) error {
+// Delete removes a note by ID after verifying the edit code, or that the caller is the note's
+// owner — see Update for the exact bypass semantics.
+func (m *Manager) Delete(ctx context.Context, id, editCode, callerID string) error {
 	dbID := domain.HashSlug(id)
 
 	existing, err := m.storage.Get(ctx, dbID)
@@ -428,7 +433,7 @@ func (m *Manager) Delete(ctx context.Context, id, editCode string) error {
 		return fmt.Errorf("delete note: %w", err)
 	}
 
-	if !m.hasher.Verify(existing.EditCode, editCode) {
+	if !isOwner(existing, callerID) && !m.hasher.Verify(existing.EditCode, editCode) {
 		return domain.ErrInvalidEditCode
 	}
 
@@ -438,6 +443,12 @@ func (m *Manager) Delete(ctx context.Context, id, editCode string) error {
 	}
 
 	return nil
+}
+
+// isOwner reports whether callerID is the authenticated user who created note. An anonymous
+// caller (callerID == "") or an anonymously-created note (note.OwnerID == nil) never matches.
+func isOwner(note *domain.Note, callerID string) bool {
+	return callerID != "" && note.OwnerID != nil && *note.OwnerID == callerID
 }
 
 // GetRendered fetches a note, increments its view counter, and returns it with content as safe HTML.

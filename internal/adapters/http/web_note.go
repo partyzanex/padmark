@@ -205,8 +205,9 @@ func (h *NoteHandler) GetNote(w http.ResponseWriter, r *http.Request) {
 // route. Pointer fields distinguish an omitted value from a zero one where the update semantics
 // depend on it (title, content_type, private). The remaining fields stay plain values because
 // omitted-vs-zero carries no extra meaning for them: Content always fully replaces the stored
-// body (there is no partial update), EditCode is a required credential where an empty string
-// already fails verification the same way a wrong code does, and BurnAfterReading is a plain
+// body (there is no partial update), EditCode need not be a pointer since an omitted or wrong
+// code are handled identically by Manager.Update (both fail verification, unless the caller is
+// the note's owner — see manager.Update's callerID bypass), and BurnAfterReading is a plain
 // on/off toggle with no "leave as is" state.
 type updateNoteByPathBody struct {
 	Title            *string `json:"title"`
@@ -251,7 +252,7 @@ func (h *NoteHandler) UpdateNoteByPath(w http.ResponseWriter, r *http.Request) {
 		title = *body.Title
 	}
 
-	note, err := h.manager.Update(r.Context(), id, body.EditCode, &domain.Note{
+	note, err := h.manager.Update(r.Context(), id, body.EditCode, callerIDFromCtx(r.Context()), &domain.Note{
 		Title:            title,
 		Content:          body.Content,
 		ContentType:      contentType,
@@ -290,7 +291,7 @@ func (h *NoteHandler) DeleteNoteByPath(w http.ResponseWriter, r *http.Request) {
 		editCode = r.URL.Query().Get("edit_code")
 	}
 
-	err := h.manager.Delete(r.Context(), id, editCode)
+	err := h.manager.Delete(r.Context(), id, editCode, callerIDFromCtx(r.Context()))
 	if err != nil {
 		h.writeError(w, r, err)
 

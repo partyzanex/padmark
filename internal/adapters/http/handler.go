@@ -108,8 +108,10 @@ type NoteManager interface {
 	ViewPreloaded(ctx context.Context, id string, preloaded *domain.Note) (*domain.Note, error)
 	GetRendered(ctx context.Context, id string) (*domain.Note, string, error)
 	GetRenderedPreloaded(ctx context.Context, id string, preloaded *domain.Note) (*domain.Note, string, error)
-	Update(ctx context.Context, id, editCode string, note *domain.Note) (*domain.Note, error)
-	Delete(ctx context.Context, id, editCode string) error
+	// Update and Delete accept callerID — the authenticated caller's user ID ("" if anonymous) —
+	// so the note's owner can bypass editCode. See notes.Manager.Update/Delete.
+	Update(ctx context.Context, id, editCode, callerID string, note *domain.Note) (*domain.Note, error)
+	Delete(ctx context.Context, id, editCode, callerID string) error
 }
 
 // Pinger checks database connectivity.

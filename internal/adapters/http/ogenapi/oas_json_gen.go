@@ -1852,8 +1852,10 @@ func (s *UpdateNoteRequest) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
-		e.FieldStart("edit_code")
-		e.Str(s.EditCode)
+		if s.EditCode.Set {
+			e.FieldStart("edit_code")
+			s.EditCode.Encode(e)
+		}
 	}
 	{
 		if s.BurnAfterReading.Set {
@@ -1927,11 +1929,9 @@ func (s *UpdateNoteRequest) Decode(d *jx.Decoder) error {
 				return errors.Wrap(err, "decode field \"content_type\"")
 			}
 		case "edit_code":
-			requiredBitSet[0] |= 1 << 3
 			if err := func() error {
-				v, err := d.Str()
-				s.EditCode = string(v)
-				if err != nil {
+				s.EditCode.Reset()
+				if err := s.EditCode.Decode(d); err != nil {
 					return err
 				}
 				return nil
@@ -1978,7 +1978,7 @@ func (s *UpdateNoteRequest) Decode(d *jx.Decoder) error {
 	// Validate required fields.
 	var failures []validate.FieldError
 	for i, mask := range [1]uint8{
-		0b00001010,
+		0b00000010,
 	} {
 		if result := (requiredBitSet[i] & mask) ^ mask; result != 0 {
 			// Mask only required fields and check equality to mask using XOR.

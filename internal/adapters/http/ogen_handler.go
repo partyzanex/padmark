@@ -42,6 +42,7 @@ func (h *OgenHandler) CreateNote(
 		BurnTTL:          burnTTL,
 		BurnAfterReading: burnAfterReading,
 		Private:          optBoolPtr(req.Private),
+		OwnerID:          ownerIDFromCtx(ctx),
 	})
 	if err != nil {
 		return mapCreateError(err, h.log), nil
@@ -80,7 +81,7 @@ func (h *OgenHandler) UpdateNote(
 		burnTTL = req.TTL.Value
 	}
 
-	note, err := h.manager.Update(ctx, params.ID, req.EditCode, &domain.Note{
+	note, err := h.manager.Update(ctx, params.ID, req.EditCode.Or(""), callerIDFromCtx(ctx), &domain.Note{
 		Title:            req.Title.Or(""),
 		Content:          req.Content,
 		ContentType:      optUpdateContentTypePtr(req.ContentType),
@@ -104,7 +105,7 @@ func (h *OgenHandler) DeleteNote(
 		editCode = params.EditCode.Or("")
 	}
 
-	err := h.manager.Delete(ctx, params.ID, editCode)
+	err := h.manager.Delete(ctx, params.ID, editCode, callerIDFromCtx(ctx))
 	if err != nil {
 		return mapDeleteError(err, h.log), nil
 	}

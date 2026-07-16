@@ -1,10 +1,12 @@
 package postgres
 
 import (
+	"context"
 	"database/sql"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/suite"
 	"github.com/testcontainers/testcontainers-go"
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
@@ -118,6 +120,58 @@ func (s *RepositoryTestSuite) TestCreate_AllFields() {
 	s.True(got.BurnAfterReading)
 	s.Require().NotNil(got.ExpiresAt)
 	s.WithinDuration(future, *got.ExpiresAt, time.Second)
+}
+
+// createTestUser inserts a minimal user row so notes.owner_id (a real FK on PostgreSQL) can
+// reference it, and returns the generated ID.
+func (s *RepositoryTestSuite) createTestUser(ctx context.Context) string {
+	s.T().Helper()
+
+	id := uuid.New().String()
+	err := NewUserRepository(s.db).Create(ctx, &domain.User{
+		ID: id, Username: "owner-" + id, TOTPSecret: "secret", PasswordHash: "hash",
+		CreatedAt: time.Now(),
+	})
+	s.Require().NoError(err)
+
+	return id
+}
+
+// TestCreate_WithOwnerID verifies OwnerID round-trips through Create/Get — see
+// notes.Manager.isOwner, which relies on this to bypass edit_code for the note's creator.
+func (s *RepositoryTestSuite) TestCreate_WithOwnerID() {
+	ctx := s.T().Context()
+	ownerID := s.createTestUser(ctx)
+
+	n := newNote("owned", "title", "content")
+	n.OwnerID = &ownerID
+	s.Require().NoError(s.repo.Create(ctx, n))
+
+	got, err := s.repo.Get(ctx, "owned")
+	s.Require().NoError(err)
+	s.Require().NotNil(got.OwnerID)
+	s.Equal(ownerID, *got.OwnerID)
+}
+
+// TestUpdate_PreservesOwnerID verifies Update never changes owner_id — ownership is fixed at
+// creation and excluded from Update's column list, mirroring edit_code.
+func (s *RepositoryTestSuite) TestUpdate_PreservesOwnerID() {
+	ctx := s.T().Context()
+	ownerID := s.createTestUser(ctx)
+	attackerID := s.createTestUser(ctx)
+
+	n := newNote("owned-update", "title", "content")
+	n.OwnerID = &ownerID
+	s.Require().NoError(s.repo.Create(ctx, n))
+
+	updated := newNote("owned-update", "new title", "new content")
+	updated.OwnerID = &attackerID
+	s.Require().NoError(s.repo.Update(ctx, "owned-update", updated))
+
+	got, err := s.repo.Get(ctx, "owned-update")
+	s.Require().NoError(err)
+	s.Require().NotNil(got.OwnerID)
+	s.Equal(ownerID, *got.OwnerID, "owner_id must be immutable via Update, even if a caller sets it")
 }
 
 // ── Get ──

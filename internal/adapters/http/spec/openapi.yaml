@@ -14,9 +14,9 @@ info:
 
     Read endpoints (`GET`) are public by default. Notes with `private: true` require *some* valid
     credential (a bearer token or an authenticated session) to view — **any** authenticated caller
-    can read them, not just the note's creator. Notes have no owner column, so `private` means
-    "requires login", not "visible only to the author"; on a multi-user instance it does not
-    isolate notes between different users.
+    can read them, not just the note's creator; `private` means "requires login", not "visible
+    only to the author", so on a multi-user instance it does not by itself isolate notes between
+    different users.
 
     ## Burn-after-reading
 
@@ -26,11 +26,15 @@ info:
     - **With TTL** (`burn_after_reading: true, ttl: N`): the note stays accessible for *N* seconds
       after the first read, then expires.  The exact expiry timestamp is returned in `expires_at`.
 
-    ## Edit codes
+    ## Edit codes and ownership
 
     Every note is created with a randomly generated 12-character `edit_code`.  It is returned
     **once** in the `CreateNoteResponse` and is never exposed again.  Store it — it is required
-    for `PUT` and `DELETE`.
+    for `PUT` and `DELETE`, **unless** the note was created while authenticated (a bearer token or
+    a session): the exact same credential that created it may then edit or delete it without the
+    `edit_code`. This owner check is strict — it never extends to other authenticated users or to
+    admins, and it does not apply to notes created anonymously (no owner is recorded, so
+    `edit_code` is always required for them, from everyone).
   version: 1.0.0
 
 servers:
@@ -122,7 +126,9 @@ paths:
       summary: Update an existing note
       description: |
         Replaces the note's title, content, content type, and burn settings.
-        The `edit_code` must match the one returned when the note was created.
+        The `edit_code` must match the one returned when the note was created — unless the
+        request is authenticated (bearer token or session) as the exact user who created the
+        note, in which case `edit_code` may be omitted. See "Edit codes and ownership" above.
         Returns the updated note.
       tags: [notes]
       parameters:
@@ -160,7 +166,9 @@ paths:
       summary: Delete a note
       description: |
         Permanently deletes the note.  The edit code must be supplied either as the
-        `X-Edit-Code` request header or the `edit_code` query parameter.
+        `X-Edit-Code` request header or the `edit_code` query parameter — unless the request is
+        authenticated (bearer token or session) as the exact user who created the note, in which
+        case no edit code is needed. See "Edit codes and ownership" above.
       tags: [notes]
       parameters:
         - $ref: "#/components/parameters/noteId"
@@ -284,13 +292,14 @@ components:
           description: |
             When `true` the note requires a valid credential (bearer token or authenticated
             session) to view. This gates access to "any authenticated caller", not just the
-            note's creator — notes have no owner, so it does not isolate the note from other
+            note's creator — unlike the `edit_code` bypass (see "Edit codes and ownership"
+            above), `private` is not owner-scoped, so it does not isolate the note from other
             users on a multi-user instance. Meaningful when the server is started with
             `--auth-tokens` and/or `--enable-accounts`.
 
     UpdateNoteRequest:
       type: object
-      required: [content, edit_code]
+      required: [content]
       properties:
         title:
           type: string
@@ -306,7 +315,10 @@ components:
           description: New content type; defaults to the note's current type when omitted
         edit_code:
           type: string
-          description: The edit code returned when the note was created
+          description: |
+            The edit code returned when the note was created. May be omitted when the request is
+            authenticated (bearer token or session) as the note's owner — see
+            "Edit codes and ownership" above.
           example: JmNkn0LdjbMw
         burn_after_reading:
           type: boolean

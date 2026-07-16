@@ -30,6 +30,9 @@ func (h *NoteHandler) EditPage(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
+	usr := userFromContext(r)
+	isOwner := usr != nil && note.OwnerID != nil && *note.OwnerID == usr.ID
+
 	err = h.indexTmpl.Execute(w, editorViewData{
 		ID:               note.ID,
 		Title:            note.Title,
@@ -39,6 +42,7 @@ func (h *NoteHandler) EditPage(w http.ResponseWriter, r *http.Request) {
 		BurnAfterReading: note.BurnAfterReading || note.BurnTTL > 0,
 		Private:          note.Private != nil && *note.Private,
 		Nonce:            nonceFromContext(r.Context()),
+		IsOwner:          isOwner,
 	})
 	if err != nil {
 		h.log.ErrorContext(r.Context(), "render edit template", "id", id, "err", err)
