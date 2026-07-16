@@ -8,6 +8,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestHashSlug_DeterministicHex64(t *testing.T) {
+	first := HashSlug("my-slug")
+	second := HashSlug("my-slug")
+
+	require.Equal(t, first, second, "HashSlug must be deterministic")
+	require.Len(t, first, 64, "sha256 hex digest is 64 chars")
+	require.NotEqual(t, HashSlug("my-slug"), HashSlug("other-slug"))
+
+	for _, ch := range first {
+		require.Contains(t, "0123456789abcdef", string(ch), "must be lowercase hex")
+	}
+}
+
 func TestContentType_Valid(t *testing.T) {
 	assert.True(t, ContentTypeMarkdown.Valid())
 	assert.True(t, ContentTypePlain.Valid())

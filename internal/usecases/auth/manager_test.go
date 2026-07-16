@@ -16,6 +16,14 @@ import (
 
 var discardLog = slog.New(slog.DiscardHandler) //nolint:gochecknoglobals // test helper
 
+// testArgon2Params uses minimal argon2id cost so these tests exercise real hash/verify logic
+// without paying crypto.DefaultArgon2Params' production-strength (64 MiB) cost on every one of
+// them; that cost is deliberate for brute-force resistance in production, not something these
+// business-logic tests need to pay, and is covered on its own in internal/infra/crypto's tests.
+//
+//nolint:gochecknoglobals // test helper
+var testArgon2Params = crypto.Argon2Params{Memory: 8 * 1024, Time: 1, Threads: 1}
+
 const testPassword = "ValidP@ss12!"
 
 type ManagerSuite struct {
@@ -33,9 +41,11 @@ func (s *ManagerSuite) SetupTest() {
 	s.users = NewMockUserStore(s.ctrl)
 	s.invites = NewMockInviteStore(s.ctrl)
 	s.sessions = NewMockSessionStore(s.ctrl)
-	s.mgr = NewManager(s.users, s.invites, s.sessions, nil, crypto.New(),
-		crypto.NewPasswordHasher(crypto.DefaultArgon2Params()),
+	mgr, err := NewManager(s.users, s.invites, s.sessions, nil, crypto.New(),
+		crypto.NewPasswordHasher(testArgon2Params),
 		crypto.NewKDF(), crypto.NewTOTP(), discardLog, "padmark", 0)
+	s.Require().NoError(err)
+	s.mgr = mgr
 }
 
 func (s *ManagerSuite) TearDownTest() {
@@ -69,7 +79,10 @@ func (s *ManagerSuite) testUser() (*domain.User, string) {
 	encSecret, err := crypto.New().Encrypt(rawSecret, derivedKey)
 	s.Require().NoError(err)
 
-	pwHash, err := crypto.HashPassword(testPassword)
+	// verifyArgon2 reads its cost parameters from the stored hash itself, so hashing the
+	// fixture with testArgon2Params (cheap) verifies identically to crypto.HashPassword's
+	// production cost — just without paying it on every test.
+	pwHash, err := crypto.NewPasswordHasher(testArgon2Params).Hash(testPassword)
 	s.Require().NoError(err)
 
 	usr := &domain.User{
@@ -189,6 +202,26 @@ func (s *ManagerSuite) TestGenerateInvite_Admin_ReturnsToken() {
 	tok, err := s.mgr.GenerateInvite(s.T().Context(), "admin-uuid")
 	s.Require().NoError(err)
 	s.Equal("tok-abc", tok)
+}
+
+func (s *ManagerSuite) TestGenerateInvite_AdminLookupFails_WrapsError() {
+	boom := errors.New("boom")
+	s.users.EXPECT().GetByID(gomock.Any(), "admin-uuid").Return(nil, boom)
+
+	_, err := s.mgr.GenerateInvite(s.T().Context(), "admin-uuid")
+	s.Require().Error(err)
+	s.ErrorIs(err, boom)
+}
+
+func (s *ManagerSuite) TestGenerateInvite_IssueFails_WrapsError() {
+	boom := errors.New("boom")
+
+	s.users.EXPECT().GetByID(gomock.Any(), "admin-uuid").Return(s.adminUser(), nil)
+	s.invites.EXPECT().Issue(gomock.Any(), "admin-uuid").Return("", boom)
+
+	_, err := s.mgr.GenerateInvite(s.T().Context(), "admin-uuid")
+	s.Require().Error(err)
+	s.ErrorIs(err, boom)
 }
 
 // ── AcceptInvite ──
@@ -388,6 +421,47 @@ func (s *ManagerSuite) TestIsEmpty_HasUsers_ReturnsFalse() {
 	s.False(empty)
 }
 
+// ── ListUsers ──
+
+func (s *ManagerSuite) TestListUsers_Admin_ReturnsUsers() {
+	users := []*domain.User{s.adminUser(), {ID: "u2", Username: "bob"}}
+
+	s.users.EXPECT().GetByID(gomock.Any(), "admin-uuid").Return(s.adminUser(), nil)
+	s.users.EXPECT().List(gomock.Any()).Return(users, nil)
+
+	got, err := s.mgr.ListUsers(s.T().Context(), "admin-uuid")
+	s.Require().NoError(err)
+	s.Equal(users, got)
+}
+
+func (s *ManagerSuite) TestListUsers_NonAdmin_ReturnsErrForbidden() {
+	nonAdmin := &domain.User{ID: "caller", IsAdmin: false}
+	s.users.EXPECT().GetByID(gomock.Any(), "caller").Return(nonAdmin, nil)
+
+	_, err := s.mgr.ListUsers(s.T().Context(), "caller")
+	s.ErrorIs(err, domain.ErrForbidden)
+}
+
+func (s *ManagerSuite) TestListUsers_AdminLookupFails_WrapsError() {
+	boom := errors.New("boom")
+	s.users.EXPECT().GetByID(gomock.Any(), "admin-uuid").Return(nil, boom)
+
+	_, err := s.mgr.ListUsers(s.T().Context(), "admin-uuid")
+	s.Require().Error(err)
+	s.ErrorIs(err, boom)
+}
+
+func (s *ManagerSuite) TestListUsers_ListFails_WrapsError() {
+	boom := errors.New("boom")
+
+	s.users.EXPECT().GetByID(gomock.Any(), "admin-uuid").Return(s.adminUser(), nil)
+	s.users.EXPECT().List(gomock.Any()).Return(nil, boom)
+
+	_, err := s.mgr.ListUsers(s.T().Context(), "admin-uuid")
+	s.Require().Error(err)
+	s.ErrorIs(err, boom)
+}
+
 // ── RevokeUser ──
 
 func (s *ManagerSuite) TestRevokeUser_SelfRevoke_ReturnsErrForbidden() {
@@ -400,6 +474,52 @@ func (s *ManagerSuite) TestRevokeUser_NonAdmin_ReturnsErrForbidden() {
 	s.users.EXPECT().GetByID(gomock.Any(), "caller").Return(nonAdmin, nil)
 
 	s.ErrorIs(s.mgr.RevokeUser(s.T().Context(), "caller", "target"), domain.ErrForbidden)
+}
+
+func (s *ManagerSuite) TestRevokeUser_AdminLookupFails_WrapsError() {
+	boom := errors.New("boom")
+	s.users.EXPECT().GetByID(gomock.Any(), "admin-uuid").Return(nil, boom)
+
+	err := s.mgr.RevokeUser(s.T().Context(), "admin-uuid", "target-uuid")
+	s.Require().Error(err)
+	s.ErrorIs(err, boom)
+}
+
+func (s *ManagerSuite) TestRevokeUser_TargetLookupFails_WrapsError() {
+	boom := errors.New("boom")
+
+	s.users.EXPECT().GetByID(gomock.Any(), "admin-uuid").Return(s.adminUser(), nil)
+	s.users.EXPECT().GetByID(gomock.Any(), "target-uuid").Return(nil, boom)
+
+	err := s.mgr.RevokeUser(s.T().Context(), "admin-uuid", "target-uuid")
+	s.Require().Error(err)
+	s.ErrorIs(err, boom)
+}
+
+func (s *ManagerSuite) TestRevokeUser_LastAdminListFails_WrapsError() {
+	target := &domain.User{ID: "target-uuid", IsAdmin: true}
+	boom := errors.New("boom")
+
+	s.users.EXPECT().GetByID(gomock.Any(), "admin-uuid").Return(s.adminUser(), nil)
+	s.users.EXPECT().GetByID(gomock.Any(), "target-uuid").Return(target, nil)
+	s.users.EXPECT().List(gomock.Any()).Return(nil, boom)
+
+	err := s.mgr.RevokeUser(s.T().Context(), "admin-uuid", "target-uuid")
+	s.Require().Error(err)
+	s.ErrorIs(err, boom)
+}
+
+func (s *ManagerSuite) TestRevokeUser_RevokeFails_WrapsError() {
+	nonAdminTarget := &domain.User{ID: "target-uuid", IsAdmin: false}
+	boom := errors.New("boom")
+
+	s.users.EXPECT().GetByID(gomock.Any(), "admin-uuid").Return(s.adminUser(), nil)
+	s.users.EXPECT().GetByID(gomock.Any(), "target-uuid").Return(nonAdminTarget, nil)
+	s.users.EXPECT().Revoke(gomock.Any(), "target-uuid").Return(boom)
+
+	err := s.mgr.RevokeUser(s.T().Context(), "admin-uuid", "target-uuid")
+	s.Require().Error(err)
+	s.ErrorIs(err, boom)
 }
 
 func (s *ManagerSuite) TestRevokeUser_LastAdmin_ReturnsErrForbidden() {

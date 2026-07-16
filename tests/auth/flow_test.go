@@ -33,19 +33,21 @@ type AuthFlowSuite struct {
 func (s *AuthFlowSuite) SetupTest() {
 	s.SQLiteAuthSuite.SetupTest()
 
-	s.mgr = auth.NewManager(
+	mgr, err := auth.NewManager(
 		s.Users,
 		s.Invites,
 		s.Sessions,
 		nil, // this suite exercises TOTP/session flows, not API tokens
 		crypto.New(),
-		crypto.NewPasswordHasher(crypto.DefaultArgon2Params()),
+		crypto.NewPasswordHasher(testArgon2Params),
 		crypto.NewKDF(),
 		crypto.NewTOTP(),
 		slog.New(slog.DiscardHandler),
 		"padmark-test",
 		time.Hour,
 	)
+	s.Require().NoError(err)
+	s.mgr = mgr
 }
 
 func (s *AuthFlowSuite) TearDownTest() {

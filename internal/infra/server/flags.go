@@ -1,6 +1,10 @@
 package server
 
-import "github.com/urfave/cli/v3"
+import (
+	"github.com/urfave/cli/v3"
+
+	"github.com/partyzanex/padmark/internal/usecases/auth"
+)
 
 // Flag names used in CLI flags.
 const (
@@ -26,6 +30,7 @@ const (
 	FlagAllowedHosts     = "allowed-hosts"
 	FlagTrustedProxies   = "trusted-proxies"
 	FlagPublicScheme     = "public-scheme"
+	FlagCustomSlugs      = "custom-slugs"
 	FlagTOTPIssuer       = "totp-issuer"
 	FlagSessionTTL       = "session-ttl"
 	FlagArgon2Memory     = "argon2-memory"
@@ -57,6 +62,7 @@ const (
 	EnvAllowedHosts     = "PADMARK_ALLOWED_HOSTS"
 	EnvTrustedProxies   = "PADMARK_TRUSTED_PROXIES"
 	EnvPublicScheme     = "PADMARK_PUBLIC_SCHEME"
+	EnvCustomSlugs      = "PADMARK_CUSTOM_SLUGS"
 	EnvTOTPIssuer       = "PADMARK_TOTP_ISSUER"
 	EnvSessionTTL       = "PADMARK_SESSION_TTL"
 	EnvArgon2Memory     = "PADMARK_ARGON2_MEMORY"
@@ -79,11 +85,17 @@ const (
 	DefaultRateLimit      = 10                // requests per second per IP
 	DefaultRateBurst      = 20                // max burst size per IP
 	DefaultTOTPIssuer     = "padmark"
-	DefaultSessionTTL     = 30 * 24 * 60 * 60 // 30 days in seconds
-	DefaultArgon2Memory   = 24 * 1024         // argon2id memory in KiB (24 MiB)
-	DefaultArgon2Time     = 2                 // argon2id iterations (OWASP minimum at 64 MiB)
-	DefaultArgon2Threads  = 1                 // argon2id parallelism
+	DefaultArgon2Memory   = 24 * 1024 // argon2id memory in KiB (24 MiB)
+	DefaultArgon2Time     = 2         // argon2id iterations (OWASP minimum at 64 MiB)
+	DefaultArgon2Threads  = 1         // argon2id parallelism
 )
+
+// DefaultSessionTTL is the --session-ttl flag default, in seconds — derived from
+// auth.DefaultSessionTTL (the single source of truth for the session lifetime default) instead
+// of a separately maintained literal that could silently drift out of sync with it.
+//
+//nolint:gochecknoglobals // computed flag default, effectively constant
+var DefaultSessionTTL = int(auth.DefaultSessionTTL.Seconds())
 
 // appFlags returns the full flag set for the serve subcommand.
 func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
@@ -130,6 +142,14 @@ func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
 			Value:   false,
 			Usage: "Enable the user-account system (TOTP login, /setup, /admin, private-note gating). " +
 				"Off by default: the site is fully public unless this is set",
+		},
+		&cli.BoolFlag{
+			Name:    FlagCustomSlugs,
+			Sources: cli.EnvVars(EnvCustomSlugs),
+			Value:   false,
+			Usage: "Allow user-supplied human-readable slugs (e.g. project/GUIDE.md) at note creation. " +
+				"Off by default: only random slugs are issued, since a custom slug is low-entropy " +
+				"content-encryption key material. Enable for internal/trusted deployments",
 		},
 		&cli.IntFlag{
 			Name:    FlagCookieMaxAge,

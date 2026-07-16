@@ -6,7 +6,7 @@ import (
 )
 
 // EditPage handles GET /edit/{id} and renders the note editor pre-filled with existing content.
-func (h *Handler) EditPage(w http.ResponseWriter, r *http.Request) {
+func (h *NoteHandler) EditPage(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
 	note, err := h.manager.Peek(r.Context(), id)

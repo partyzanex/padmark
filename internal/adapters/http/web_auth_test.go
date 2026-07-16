@@ -2,6 +2,7 @@ package http_test
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -54,7 +55,10 @@ func (s *AuthHandlerSuite) newRouterWithAuth() http.Handler {
 		CSRFSecret:   authTestCSRFSecret,
 	}
 
-	return adhttp.NewRouter(handler, ogen, &opts)
+	router, err := adhttp.NewRouter(handler, ogen, &opts)
+	s.Require().NoError(err)
+
+	return router
 }
 
 // newRouterWithAuthAndScheme is newRouterWithAuth with --public-scheme forced, used to verify
@@ -71,7 +75,30 @@ func (s *AuthHandlerSuite) newRouterWithAuthAndScheme(forcedScheme string) http.
 		ForcedScheme: forcedScheme,
 	}
 
-	return adhttp.NewRouter(handler, ogen, &opts)
+	router, err := adhttp.NewRouter(handler, ogen, &opts)
+	s.Require().NoError(err)
+
+	return router
+}
+
+// newRouterWithAuthAndSessionTTL is newRouterWithAuth with a custom SessionTTL, used to verify
+// the TOTP session cookie's Max-Age tracks the configured --session-ttl instead of a fixed value.
+func (s *AuthHandlerSuite) newRouterWithAuthAndSessionTTL(ttl time.Duration) http.Handler {
+	handler := adhttp.NewHandler(s.manager, discardLog, nil).
+		WithAuthManager(s.auth)
+	ogen := adhttp.NewOgenHandler(s.manager, s.pinger, discardLog)
+
+	opts := adhttp.RouterOptions{
+		CookieMaxAge: 90 * 24 * 60 * 60,
+		MaxBodyBytes: 256 * 1024,
+		CSRFSecret:   authTestCSRFSecret,
+		SessionTTL:   ttl,
+	}
+
+	router, err := adhttp.NewRouter(handler, ogen, &opts)
+	s.Require().NoError(err)
+
+	return router
 }
 
 func (s *AuthHandlerSuite) adminUser() *domain.User {
@@ -565,6 +592,45 @@ func (s *AuthHandlerSuite) TestAdminInvite_ForcedSchemeEmbedsHTTPS() {
 	s.NotContains(rec.Body.String(), "http://example.com/setup")
 }
 
+func (s *AuthHandlerSuite) TestAdminInvite_GenerateInviteFails_ShowsError() {
+	usr := s.adminUser()
+	s.auth.EXPECT().GetSession(gomock.Any(), "admin-sess").Return(usr, nil).Times(1)
+	s.auth.EXPECT().GenerateInvite(gomock.Any(), "admin-id").Return("", errors.New("boom"))
+	s.auth.EXPECT().ListUsers(gomock.Any(), "admin-id").Return([]*domain.User{usr}, nil)
+	s.auth.EXPECT().ListAPITokens(gomock.Any(), "admin-id").Return([]*auth.APITokenInfo{}, nil)
+
+	form := withCSRF(url.Values{})
+	req := httptest.NewRequest(http.MethodPost, "/admin/invite", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(s.sessionCookie("admin-sess"))
+	req.AddCookie(s.csrfCookie())
+
+	rec := httptest.NewRecorder()
+
+	s.router.ServeHTTP(rec, req)
+
+	s.Equal(http.StatusOK, rec.Code)
+	s.Contains(rec.Body.String(), "Failed to generate invite link")
+}
+
+func (s *AuthHandlerSuite) TestAdminInvite_AdminDataFails_Returns500() {
+	usr := s.adminUser()
+	s.auth.EXPECT().GetSession(gomock.Any(), "admin-sess").Return(usr, nil).Times(1)
+	s.auth.EXPECT().ListUsers(gomock.Any(), "admin-id").Return(nil, errors.New("boom"))
+
+	form := withCSRF(url.Values{})
+	req := httptest.NewRequest(http.MethodPost, "/admin/invite", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(s.sessionCookie("admin-sess"))
+	req.AddCookie(s.csrfCookie())
+
+	rec := httptest.NewRecorder()
+
+	s.router.ServeHTTP(rec, req)
+
+	s.Equal(http.StatusInternalServerError, rec.Code)
+}
+
 // ── Admin revoke ──
 
 func (s *AuthHandlerSuite) TestAdminRevoke_RevokesAndRedirects() {
@@ -601,6 +667,48 @@ func (s *AuthHandlerSuite) TestAdminRevoke_NonAdmin_Returns403() {
 	s.router.ServeHTTP(rec, req)
 
 	s.Equal(http.StatusForbidden, rec.Code)
+}
+
+func (s *AuthHandlerSuite) TestAdminRevoke_Forbidden_RedirectsWithSpecificMessage() {
+	usr := s.adminUser()
+	s.auth.EXPECT().GetSession(gomock.Any(), "admin-sess").Return(usr, nil).Times(1)
+	s.auth.EXPECT().RevokeUser(gomock.Any(), "admin-id", "target-id").Return(domain.ErrForbidden)
+
+	form := withCSRF(url.Values{})
+	req := httptest.NewRequest(http.MethodPost, "/admin/users/target-id/revoke", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(s.sessionCookie("admin-sess"))
+	req.AddCookie(s.csrfCookie())
+
+	rec := httptest.NewRecorder()
+
+	s.router.ServeHTTP(rec, req)
+
+	s.Equal(http.StatusSeeOther, rec.Code)
+	loc := rec.Header().Get("Location")
+	s.Contains(loc, "revoke_error=")
+	s.Contains(loc, url.QueryEscape("self-revoke or last admin"))
+}
+
+func (s *AuthHandlerSuite) TestAdminRevoke_GenericError_RedirectsWithGenericMessage() {
+	usr := s.adminUser()
+	s.auth.EXPECT().GetSession(gomock.Any(), "admin-sess").Return(usr, nil).Times(1)
+	s.auth.EXPECT().RevokeUser(gomock.Any(), "admin-id", "target-id").Return(errors.New("boom"))
+
+	form := withCSRF(url.Values{})
+	req := httptest.NewRequest(http.MethodPost, "/admin/users/target-id/revoke", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(s.sessionCookie("admin-sess"))
+	req.AddCookie(s.csrfCookie())
+
+	rec := httptest.NewRecorder()
+
+	s.router.ServeHTTP(rec, req)
+
+	s.Equal(http.StatusSeeOther, rec.Code)
+	loc := rec.Header().Get("Location")
+	s.Contains(loc, "revoke_error=")
+	s.Contains(loc, url.QueryEscape("Failed to revoke user."))
 }
 
 // ── Admin API keys ──
@@ -936,6 +1044,21 @@ func (s *AuthHandlerSuite) TestGetNote_NotFound_BrowserClient_GetsHTMLPage() {
 
 // ── Change password ──
 
+func (s *AuthHandlerSuite) TestChangePasswordPage_Authenticated_RendersForm() {
+	usr := &domain.User{ID: "u1", Username: "alice"}
+	s.auth.EXPECT().GetSession(gomock.Any(), "sess1").Return(usr, nil).Times(1)
+
+	req := httptest.NewRequest(http.MethodGet, "/change-password", nil)
+	req.AddCookie(s.sessionCookie("sess1"))
+
+	rec := httptest.NewRecorder()
+
+	s.router.ServeHTTP(rec, req)
+
+	s.Equal(http.StatusOK, rec.Code)
+	s.Contains(rec.Body.String(), "old_password")
+}
+
 func (s *AuthHandlerSuite) TestChangePasswordHandler_Success_ShowsSuccessMessage() {
 	usr := &domain.User{ID: "u1", Username: "alice"}
 	s.auth.EXPECT().GetSession(gomock.Any(), "sess1").Return(usr, nil).Times(1)
@@ -1136,4 +1259,39 @@ func (s *AuthHandlerSuite) TestTOTPLogin_SessionCookieMaxAge_Is30Days() {
 			s.Equal(expectedMaxAge, ck.MaxAge)
 		}
 	}
+}
+
+// TestTOTPLogin_SessionCookieMaxAge_TracksConfiguredSessionTTL covers RouterOptions.SessionTTL:
+// the cookie's Max-Age must match whatever --session-ttl is configured to, not a value
+// independent of it — otherwise the browser could drop the cookie before the server-side
+// session actually expires (or keep sending it long after), see common.sessionMaxAge.
+func (s *AuthHandlerSuite) TestTOTPLogin_SessionCookieMaxAge_TracksConfiguredSessionTTL() {
+	const configuredTTL = 2 * time.Hour
+
+	s.router = s.newRouterWithAuthAndSessionTTL(configuredTTL)
+
+	s.auth.EXPECT().Login(gomock.Any(), "alice", gomock.Any(), "123456", gomock.Any(), gomock.Any()).
+		Return("sess-id", nil)
+
+	form := withCSRF(url.Values{"username": {"alice"}, "password": {testPw}, "code": {"123456"}})
+	req := httptest.NewRequest(http.MethodPost, "/totp-login", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(s.csrfCookie())
+
+	rec := httptest.NewRecorder()
+
+	s.router.ServeHTTP(rec, req)
+
+	expectedMaxAge := int(configuredTTL / time.Second)
+	found := false
+
+	for _, ck := range rec.Result().Cookies() {
+		if ck.Name == "padmark_session" {
+			s.Equal(expectedMaxAge, ck.MaxAge)
+
+			found = true
+		}
+	}
+
+	s.True(found, "session cookie must be set")
 }

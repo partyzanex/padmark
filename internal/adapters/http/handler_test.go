@@ -2,8 +2,6 @@ package http_test
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -25,12 +23,6 @@ import (
 // testCSRFSecret is a fixed 32-byte CSRF secret shared across all handler tests.
 // Must match the secret set in newRouter's RouterOptions.
 var testCSRFSecret = []byte("padmark-test-csrf-secret-32bytes") //nolint:gochecknoglobals // test fixture
-
-func slugHash(slug string) string {
-	sum := sha256.Sum256([]byte(slug))
-
-	return hex.EncodeToString(sum[:])
-}
 
 // testNoteResponse mirrors noteResponse for decoding test responses.
 type testNoteResponse struct {
@@ -83,7 +75,10 @@ func (s *HandlerSuite) newRouter(tokens []string) http.Handler {
 		CSRFSecret:   testCSRFSecret,
 	}
 
-	return adhttp.NewRouter(handler, ogen, &opts)
+	router, err := adhttp.NewRouter(handler, ogen, &opts)
+	s.Require().NoError(err)
+
+	return router
 }
 
 // newRouterWithOptions builds a router with the given trusted proxies and forced scheme,
@@ -100,7 +95,10 @@ func (s *HandlerSuite) newRouterWithOptions(trustedProxies []*net.IPNet, forcedS
 		ForcedScheme:   forcedScheme,
 	}
 
-	return adhttp.NewRouter(handler, ogen, &opts)
+	router, err := adhttp.NewRouter(handler, ogen, &opts)
+	s.Require().NoError(err)
+
+	return router
 }
 
 // newRouterWithTOTPAuth builds a router configured in TOTP-only mode:
@@ -117,7 +115,10 @@ func (s *HandlerSuite) newRouterWithTOTPAuth() http.Handler {
 		CSRFSecret:   testCSRFSecret,
 	}
 
-	return adhttp.NewRouter(handler, ogen, &opts)
+	router, err := adhttp.NewRouter(handler, ogen, &opts)
+	s.Require().NoError(err)
+
+	return router
 }
 
 // newRouterWithReveal builds a router with RevealStore and auth configured so that
@@ -133,7 +134,10 @@ func (s *HandlerSuite) newRouterWithReveal() http.Handler {
 		CSRFSecret:   testCSRFSecret,
 	}
 
-	return adhttp.NewRouter(handler, ogen, &opts)
+	router, err := adhttp.NewRouter(handler, ogen, &opts)
+	s.Require().NoError(err)
+
+	return router
 }
 
 // csrf generates a valid HMAC-signed CSRF token using the fixed test secret.
@@ -511,7 +515,8 @@ func (s *HandlerSuite) TestCreateNote_BodyExceedsLimit_Returns413() {
 		MaxBodyBytes: 64,
 		CSRFSecret:   testCSRFSecret,
 	}
-	router := adhttp.NewRouter(handler, ogen, &opts)
+	router, err := adhttp.NewRouter(handler, ogen, &opts)
+	s.Require().NoError(err)
 
 	body := `{"title":"t","content":"` + strings.Repeat("x", 512) + `"}`
 	w := httptest.NewRecorder()
@@ -866,6 +871,66 @@ func (s *HandlerSuite) TestGetNote_Private_Authorized() {
 	s.Equal(http.StatusOK, w.Code)
 }
 
+// ── Multi-segment (path-like) slug support ──
+
+func (s *HandlerSuite) TestGetNote_MultiSegmentSlug_PublicServed() {
+	// A path-like slug (project/GUIDE.md) is a public note: served without auth even though the
+	// URL contains slashes. Proves the auth middleware treats a non-reserved first segment as a
+	// note route rather than a protected one.
+	const mid = "project/GUIDE.md"
+
+	note := newTestNote("Guide", "# body")
+	s.manager.EXPECT().Peek(gomock.Any(), mid).Return(note, nil)
+	s.manager.EXPECT().ViewPreloaded(gomock.Any(), mid, note).Return(note, nil)
+
+	router := s.newRouter([]string{"secret-token"})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/"+mid, nil)
+	r.Header.Set("Accept", "application/json")
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusOK, w.Code)
+}
+
+func (s *HandlerSuite) TestGetNote_MultiSegmentSlug_PrivateRequiresAuth() {
+	// Per-note privacy still applies to path-like slugs: a private multi-segment note is not
+	// served to an unauthenticated caller.
+	const mid = "project/secret.md"
+
+	note := newTestNote("secret", "private")
+	note.Private = new(true)
+	s.manager.EXPECT().Peek(gomock.Any(), mid).Return(note, nil)
+
+	router := s.newRouter([]string{"secret-token"})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/"+mid, nil)
+	r.Header.Set("Accept", "application/json")
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusUnauthorized, w.Code)
+}
+
+func (s *HandlerSuite) TestEditPage_MultiSegmentPath_RequiresAuth() {
+	// Regression guard: multi-segment slug support must NOT open up reserved routes. A GET to
+	// /edit/<path> is redirected to /login before reaching the edit page — it is not mistaken for
+	// a public note view just because it now spans multiple segments.
+	router := s.newRouter([]string{"secret-token"})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/edit/project/GUIDE.md", nil)
+	r.Header.Set("Accept", "text/html")
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusSeeOther, w.Code)
+	s.True(strings.HasPrefix(w.Header().Get("Location"), "/login?next="),
+		"reserved /edit/{id...} must redirect to login, not be treated as a public note")
+}
+
 func (s *HandlerSuite) TestGetNote_Private_NotFound() {
 	s.manager.EXPECT().Peek(gomock.Any(), "missing").Return(nil, domain.ErrNotFound)
 
@@ -1001,6 +1066,43 @@ func (s *HandlerSuite) TestUpdateNote_Forbidden() {
 	s.Equal(http.StatusForbidden, w.Code)
 }
 
+// ── ACCEPTANCE: edit/delete a path-like slug by its URL ──
+//
+// The web editor saves with PUT /notes/{id} and deletes with DELETE /notes/{id}. For a slug that
+// spans path segments (project/GUIDE.md) these become multi-segment paths that ogen's
+// single-segment /notes/{id} route cannot match. The native UpdateNoteByPath / DeleteNoteByPath
+// handlers bridge PUT/DELETE /notes/{id...} for exactly this case; these tests assert that a
+// path-like slug can be edited and deleted by its address (single-segment IDs still go to ogen).
+
+func (s *HandlerSuite) TestUpdateNote_MultiSegmentSlug_ByURL_Acceptance() {
+	const mid = "project/GUIDE.md"
+
+	updated := newTestNote("Guide", "new body")
+	s.manager.EXPECT().Update(gomock.Any(), mid, "code", gomock.Any()).Return(updated, nil)
+
+	body := `{"title":"Guide","content":"new body","edit_code":"code"}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPut, "/notes/"+mid, strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusOK, w.Code, "editing a path-like slug via PUT /notes/{id...} must succeed")
+}
+
+func (s *HandlerSuite) TestDeleteNote_MultiSegmentSlug_ByURL_Acceptance() {
+	const mid = "project/GUIDE.md"
+
+	s.manager.EXPECT().Delete(gomock.Any(), mid, "code").Return(nil)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodDelete, "/notes/"+mid+"?edit_code=code", nil)
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusNoContent, w.Code, "deleting a path-like slug via DELETE /notes/{id...} must succeed")
+}
+
 // TestUpdateNote_OmittedPrivate_PreservesPrivacy verifies that when "private" is absent
 // from a PUT request body, the handler passes Private=nil to manager.Update so that the
 // storage layer can COALESCE(NULL, private) and preserve the existing DB value.
@@ -1108,7 +1210,8 @@ func (s *HandlerSuite) TestReadyz_NoPinger() {
 	handler := adhttp.NewHandler(s.manager, discardLog, nil)
 	ogen := adhttp.NewOgenHandler(s.manager, adhttp.NoPinger{}, discardLog)
 	opts := adhttp.RouterOptions{CookieMaxAge: 90 * 24 * 60 * 60, MaxBodyBytes: 256 * 1024}
-	router := adhttp.NewRouter(handler, ogen, &opts)
+	router, err := adhttp.NewRouter(handler, ogen, &opts)
+	s.Require().NoError(err)
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/readyz", nil)
@@ -1185,6 +1288,18 @@ func (s *HandlerSuite) TestTOTPLoginHandler_AccountsDisabled_Returns404() {
 	r := httptest.NewRequest(http.MethodPost, "/totp-login", nil)
 
 	handler.TOTPLoginHandler(w, r)
+
+	s.Equal(http.StatusNotFound, w.Code)
+}
+
+// TestChangePasswordPage_AccountsDisabled_Returns404 mirrors the TOTPLoginHandler nil-guard
+// test above for the GET /change-password page.
+func (s *HandlerSuite) TestChangePasswordPage_AccountsDisabled_Returns404() {
+	handler := adhttp.NewHandler(s.manager, discardLog, nil) // no WithAuthManager → accounts disabled
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/change-password", nil)
+
+	handler.ChangePasswordPage(w, r)
 
 	s.Equal(http.StatusNotFound, w.Code)
 }
@@ -1322,7 +1437,8 @@ func (s *HandlerSuite) TestRateLimit_Exceeded() {
 		RateLimit:    1,
 		RateBurst:    1,
 	}
-	router := adhttp.NewRouter(handler, ogen, &opts)
+	router, err := adhttp.NewRouter(handler, ogen, &opts)
+	s.Require().NoError(err)
 
 	send := func() int {
 		w := httptest.NewRecorder()
@@ -1346,7 +1462,8 @@ func (s *HandlerSuite) TestRateLimit_DifferentIPs() {
 		RateLimit:    1,
 		RateBurst:    1,
 	}
-	router := adhttp.NewRouter(handler, ogen, &opts)
+	router, err := adhttp.NewRouter(handler, ogen, &opts)
+	s.Require().NoError(err)
 
 	send := func(ip string) int {
 		w := httptest.NewRecorder()
@@ -2019,7 +2136,8 @@ func (s *HandlerSuite) TestAPIDocsPage_Public() {
 	handler := adhttp.NewHandler(s.manager, discardLog, []string{"secret"})
 	ogen := adhttp.NewOgenHandler(s.manager, s.pinger, discardLog)
 	opts := adhttp.RouterOptions{CookieMaxAge: 90 * 24 * 60 * 60, MaxBodyBytes: 256 * 1024}
-	router := adhttp.NewRouter(handler, ogen, &opts)
+	router, err := adhttp.NewRouter(handler, ogen, &opts)
+	s.Require().NoError(err)
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/api", nil)
@@ -2036,7 +2154,7 @@ func (s *HandlerSuite) TestGetNote_BurnInterstitial_ShowsConfirmPage() {
 	note.BurnAfterReading = true
 
 	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
-	s.revealStore.EXPECT().Issue(gomock.Any(), slugHash(testID)).Return("tok-abc", nil)
+	s.revealStore.EXPECT().Issue(gomock.Any(), domain.HashSlug(testID)).Return("tok-abc", nil)
 
 	router := s.newRouterWithReveal()
 
@@ -2095,7 +2213,7 @@ func (s *HandlerSuite) TestGetNote_BurnInterstitial_IssueError_Returns500() {
 	note.BurnAfterReading = true
 
 	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
-	s.revealStore.EXPECT().Issue(gomock.Any(), slugHash(testID)).Return("", errors.New("storage down"))
+	s.revealStore.EXPECT().Issue(gomock.Any(), domain.HashSlug(testID)).Return("", errors.New("storage down"))
 
 	router := s.newRouterWithReveal()
 
@@ -2137,7 +2255,7 @@ func (s *HandlerSuite) TestHandleReveal_OK() {
 
 	// handlePrivateAuth calls Peek; renderNoteHTML uses GetRenderedPreloaded with preloaded note.
 	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
-	s.revealStore.EXPECT().Consume(gomock.Any(), "tok-abc", slugHash(testID)).Return(true)
+	s.revealStore.EXPECT().Consume(gomock.Any(), "tok-abc", domain.HashSlug(testID)).Return(true)
 	s.manager.EXPECT().GetRenderedPreloaded(gomock.Any(), testID, note).
 		Return(note, "<p>burn me</p>", nil)
 
@@ -2181,7 +2299,7 @@ func (s *HandlerSuite) TestHandleReveal_NoCSRF_Forbidden() {
 func (s *HandlerSuite) TestHandleReveal_InvalidToken_Forbidden() {
 	note := newTestNote("secret", "burn me")
 	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
-	s.revealStore.EXPECT().Consume(gomock.Any(), "bad-tok", slugHash(testID)).Return(false)
+	s.revealStore.EXPECT().Consume(gomock.Any(), "bad-tok", domain.HashSlug(testID)).Return(false)
 
 	router := s.newRouterWithReveal()
 
@@ -2201,7 +2319,7 @@ func (s *HandlerSuite) TestHandleReveal_TokenForWrongNote_Forbidden() {
 	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
 	// Consume is called with testID (URL note); token was issued for another note →
 	// DB WHERE note_id = testID finds no row → returns false, token untouched.
-	s.revealStore.EXPECT().Consume(gomock.Any(), "tok-other", slugHash(testID)).Return(false)
+	s.revealStore.EXPECT().Consume(gomock.Any(), "tok-other", domain.HashSlug(testID)).Return(false)
 
 	router := s.newRouterWithReveal()
 
@@ -2216,7 +2334,7 @@ func (s *HandlerSuite) TestHandleReveal_TokenForWrongNote_Forbidden() {
 func (s *HandlerSuite) TestHandleReveal_MissingToken_Forbidden() {
 	note := newTestNote("secret", "burn me")
 	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
-	s.revealStore.EXPECT().Consume(gomock.Any(), "", slugHash(testID)).Return(false)
+	s.revealStore.EXPECT().Consume(gomock.Any(), "", domain.HashSlug(testID)).Return(false)
 
 	router := s.newRouterWithReveal()
 
@@ -2244,7 +2362,7 @@ func (s *HandlerSuite) TestHandleReveal_CrossNoteToken_TokenNotBurned() {
 
 	s.manager.EXPECT().Peek(gomock.Any(), "wrong-note").Return(wrongNote, nil)
 	// Consume called with "wrong-note" as noteID — DB rejects mismatch, token preserved.
-	s.revealStore.EXPECT().Consume(gomock.Any(), "tok-for-abc123", slugHash("wrong-note")).Return(false)
+	s.revealStore.EXPECT().Consume(gomock.Any(), "tok-for-abc123", domain.HashSlug("wrong-note")).Return(false)
 
 	router := s.newRouterWithReveal()
 

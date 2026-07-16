@@ -8,19 +8,6 @@ import (
 	"github.com/partyzanex/padmark/internal/infra/crypto"
 )
 
-func TestHashSlug_DeterministicHex64(t *testing.T) {
-	first := crypto.HashSlug("my-slug")
-	second := crypto.HashSlug("my-slug")
-
-	require.Equal(t, first, second, "HashSlug must be deterministic")
-	require.Len(t, first, 64, "sha256 hex digest is 64 chars")
-	require.NotEqual(t, crypto.HashSlug("my-slug"), crypto.HashSlug("other-slug"))
-
-	for _, ch := range first {
-		require.Contains(t, "0123456789abcdef", string(ch), "must be lowercase hex")
-	}
-}
-
 func TestGenerateKDFSalt_LengthAndRandomness(t *testing.T) {
 	salt1, err := crypto.GenerateKDFSalt()
 	require.NoError(t, err)

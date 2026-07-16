@@ -10,7 +10,6 @@ import (
 	"github.com/ogen-go/ogen/ogenerrors"
 
 	"github.com/partyzanex/padmark/internal/adapters/http/ogenapi"
-	"github.com/partyzanex/padmark/internal/domain"
 )
 
 const internalErrorMessage = "internal server error"
@@ -46,18 +45,22 @@ func newMaxBodyErrorHandler(log *slog.Logger) ogenapi.ErrorHandler {
 	}
 }
 
+// mapCreateError, mapGetError, mapUpdateError, and mapDeleteError each switch on the status from
+// the shared domainErrStatus table (errors.go) rather than repeating their own errors.Is chain.
+// The switch itself can't be unified further: ogen generates a distinct response-union type per
+// operation (CreateNoteRes, GetNoteRes, ...), so each function still has to name its own
+// operation-specific variant constructor for every status it can produce.
+
 //nolint:ireturn // ogen response union types are interfaces by design
 func mapCreateError(err error, log *slog.Logger) ogenapi.CreateNoteRes {
 	r := errResp(err)
 
-	switch {
-	case errors.Is(err, domain.ErrTitleTooLong),
-		errors.Is(err, domain.ErrInvalidContentType),
-		errors.Is(err, domain.ErrInvalidSlug):
+	switch status, _ := domainErrStatus(err); status {
+	case http.StatusUnprocessableEntity:
 		v := ogenapi.CreateNoteUnprocessableEntity(r)
 
 		return &v
-	case errors.Is(err, domain.ErrSlugConflict):
+	case http.StatusConflict:
 		v := ogenapi.CreateNoteConflict(r)
 
 		return &v
@@ -74,12 +77,12 @@ func mapCreateError(err error, log *slog.Logger) ogenapi.CreateNoteRes {
 func mapGetError(err error, log *slog.Logger) ogenapi.GetNoteRes {
 	r := errResp(err)
 
-	switch {
-	case errors.Is(err, domain.ErrNotFound):
+	switch status, _ := domainErrStatus(err); status {
+	case http.StatusNotFound:
 		v := ogenapi.GetNoteNotFound(r)
 
 		return &v
-	case errors.Is(err, domain.ErrExpired):
+	case http.StatusGone:
 		v := ogenapi.GetNoteGone(r)
 
 		return &v
@@ -96,17 +99,16 @@ func mapGetError(err error, log *slog.Logger) ogenapi.GetNoteRes {
 func mapUpdateError(err error, log *slog.Logger) ogenapi.UpdateNoteRes {
 	r := errResp(err)
 
-	switch {
-	case errors.Is(err, domain.ErrInvalidEditCode), errors.Is(err, domain.ErrForbidden):
+	switch status, _ := domainErrStatus(err); status {
+	case http.StatusForbidden:
 		v := ogenapi.UpdateNoteForbidden(r)
 
 		return &v
-	case errors.Is(err, domain.ErrNotFound):
+	case http.StatusNotFound:
 		v := ogenapi.UpdateNoteNotFound(r)
 
 		return &v
-	case errors.Is(err, domain.ErrTitleTooLong),
-		errors.Is(err, domain.ErrInvalidContentType):
+	case http.StatusUnprocessableEntity:
 		v := ogenapi.UpdateNoteUnprocessableEntity(r)
 
 		return &v
@@ -123,12 +125,12 @@ func mapUpdateError(err error, log *slog.Logger) ogenapi.UpdateNoteRes {
 func mapDeleteError(err error, log *slog.Logger) ogenapi.DeleteNoteRes {
 	r := errResp(err)
 
-	switch {
-	case errors.Is(err, domain.ErrInvalidEditCode), errors.Is(err, domain.ErrForbidden):
+	switch status, _ := domainErrStatus(err); status {
+	case http.StatusForbidden:
 		v := ogenapi.DeleteNoteForbidden(r)
 
 		return &v
-	case errors.Is(err, domain.ErrNotFound):
+	case http.StatusNotFound:
 		v := ogenapi.DeleteNoteNotFound(r)
 
 		return &v
