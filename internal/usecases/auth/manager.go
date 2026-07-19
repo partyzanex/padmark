@@ -77,10 +77,12 @@ type TOTPManager interface {
 
 // APITokenStore persists CLI API tokens keyed by their SHA-256 hash. The plain key is never stored.
 type APITokenStore interface {
-	// Create persists a newly issued API token.
-	Create(ctx context.Context, t *domain.APIToken) error
-	// CountByUser returns how many tokens the given user already holds, so issuance can be capped.
-	CountByUser(ctx context.Context, userID uuid.UUID) (int, error)
+	// CreateIfUnderLimit atomically counts t.UserID's existing tokens and inserts t only if that
+	// count is below limit, reporting false (no error) when the limit is already reached. The
+	// count-then-insert must be a single atomic operation — two concurrent issuance requests each
+	// doing a separate count check followed by an unconditional insert could both pass the check
+	// before either insert lands, letting the user exceed the limit.
+	CreateIfUnderLimit(ctx context.Context, t *domain.APIToken, limit int) (bool, error)
 	// GetByHash resolves a token by its SHA-256 hash. Returns domain.ErrNotFound when absent.
 	GetByHash(ctx context.Context, tokenHash string) (*domain.APIToken, error)
 	// List returns all tokens for the admin panel.

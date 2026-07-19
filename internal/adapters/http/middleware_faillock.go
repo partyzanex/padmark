@@ -46,7 +46,8 @@ func withFailLockout(cache gcache.Cache, next http.Handler) http.Handler {
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(rec, r)
 
-		if rec.status == http.StatusForbidden {
+		switch {
+		case rec.status == http.StatusForbidden:
 			count := 0
 
 			prev, getErr := cache.Get(id)
@@ -61,6 +62,11 @@ func withFailLockout(cache gcache.Cache, next http.Handler) http.Handler {
 				// ARC SetWithExpire never returns an error in practice; skip silently.
 				return
 			}
+		case rec.status < http.StatusBadRequest:
+			// A successful request (200/204) clears any accumulated failure count for this
+			// note — an owner who mistyped the edit code a few times before getting it right
+			// must not carry a stale near-threshold counter into their next legitimate edit.
+			cache.Remove(id)
 		}
 	})
 }

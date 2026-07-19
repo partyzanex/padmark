@@ -119,32 +119,25 @@ func (suite *APITokenSuite) TestCreateAPIToken_UserNotFound_ReturnsErrNotFound()
 	suite.ErrorIs(err, domain.ErrNotFound)
 }
 
-func (suite *APITokenSuite) TestCreateAPIToken_StoreCreateFails_WrapsError() {
+func (suite *APITokenSuite) TestCreateAPIToken_StoreFails_WrapsError() {
 	ctx := suite.T().Context()
 	usr := suite.adminUser()
 	suite.users.EXPECT().GetByID(gomock.Any(), usr.ID).Return(usr, nil)
-	suite.apiTokens.EXPECT().CountByUser(gomock.Any(), usr.ID).Return(0, nil)
-	suite.apiTokens.EXPECT().Create(gomock.Any(), gomock.Any()).Return(errors.New("db down"))
+	suite.apiTokens.EXPECT().
+		CreateIfUnderLimit(gomock.Any(), gomock.Any(), maxAPITokensPerUser).
+		Return(false, errors.New("db down"))
 
 	_, err := suite.mgr.CreateAPIToken(ctx, usr.ID)
 	suite.ErrorContains(err, "create api token")
-}
-
-func (suite *APITokenSuite) TestCreateAPIToken_CountFails_WrapsError() {
-	ctx := suite.T().Context()
-	usr := suite.adminUser()
-	suite.users.EXPECT().GetByID(gomock.Any(), usr.ID).Return(usr, nil)
-	suite.apiTokens.EXPECT().CountByUser(gomock.Any(), usr.ID).Return(0, errors.New("db down"))
-
-	_, err := suite.mgr.CreateAPIToken(ctx, usr.ID)
-	suite.ErrorContains(err, "count api tokens")
 }
 
 func (suite *APITokenSuite) TestCreateAPIToken_LimitReached_ReturnsErrAPITokenLimit() {
 	ctx := suite.T().Context()
 	usr := suite.adminUser()
 	suite.users.EXPECT().GetByID(gomock.Any(), usr.ID).Return(usr, nil)
-	suite.apiTokens.EXPECT().CountByUser(gomock.Any(), usr.ID).Return(maxAPITokensPerUser, nil)
+	suite.apiTokens.EXPECT().
+		CreateIfUnderLimit(gomock.Any(), gomock.Any(), maxAPITokensPerUser).
+		Return(false, nil)
 
 	_, err := suite.mgr.CreateAPIToken(ctx, usr.ID)
 	suite.ErrorIs(err, domain.ErrAPITokenLimit)
@@ -157,15 +150,15 @@ func (suite *APITokenSuite) TestCreateAPIToken_Success_ReturnsPlainKeyAndPersist
 	var stored *domain.APIToken
 
 	suite.users.EXPECT().GetByID(gomock.Any(), usr.ID).Return(usr, nil)
-	suite.apiTokens.EXPECT().CountByUser(gomock.Any(), usr.ID).Return(0, nil)
-	suite.apiTokens.EXPECT().Create(gomock.Any(), gomock.Any()).DoAndReturn(
-		func(_ context.Context, tk *domain.APIToken) error {
+	suite.apiTokens.EXPECT().
+		CreateIfUnderLimit(gomock.Any(), gomock.Any(), maxAPITokensPerUser).
+		DoAndReturn(func(_ context.Context, tk *domain.APIToken, _ int) (bool, error) {
 			stored = tk
 			suite.Equal(usr.ID, tk.UserID)
 			suite.NotEmpty(tk.TokenHash)
 			suite.False(tk.CreatedAt.IsZero())
 
-			return nil
+			return true, nil
 		})
 
 	plain, err := suite.mgr.CreateAPIToken(ctx, usr.ID)

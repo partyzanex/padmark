@@ -561,33 +561,19 @@ func (m *MockAPITokenStore) EXPECT() *MockAPITokenStoreMockRecorder {
 	return m.recorder
 }
 
-// CountByUser mocks base method.
-func (m *MockAPITokenStore) CountByUser(ctx context.Context, userID uuid.UUID) (int, error) {
+// CreateIfUnderLimit mocks base method.
+func (m *MockAPITokenStore) CreateIfUnderLimit(ctx context.Context, t *domain.APIToken, limit int) (bool, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "CountByUser", ctx, userID)
-	ret0, _ := ret[0].(int)
+	ret := m.ctrl.Call(m, "CreateIfUnderLimit", ctx, t, limit)
+	ret0, _ := ret[0].(bool)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
-// CountByUser indicates an expected call of CountByUser.
-func (mr *MockAPITokenStoreMockRecorder) CountByUser(ctx, userID any) *gomock.Call {
+// CreateIfUnderLimit indicates an expected call of CreateIfUnderLimit.
+func (mr *MockAPITokenStoreMockRecorder) CreateIfUnderLimit(ctx, t, limit any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CountByUser", reflect.TypeOf((*MockAPITokenStore)(nil).CountByUser), ctx, userID)
-}
-
-// Create mocks base method.
-func (m *MockAPITokenStore) Create(ctx context.Context, t *domain.APIToken) error {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Create", ctx, t)
-	ret0, _ := ret[0].(error)
-	return ret0
-}
-
-// Create indicates an expected call of Create.
-func (mr *MockAPITokenStoreMockRecorder) Create(ctx, t any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Create", reflect.TypeOf((*MockAPITokenStore)(nil).Create), ctx, t)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateIfUnderLimit", reflect.TypeOf((*MockAPITokenStore)(nil).CreateIfUnderLimit), ctx, t, limit)
 }
 
 // GetByHash mocks base method.

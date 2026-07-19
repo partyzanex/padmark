@@ -53,27 +53,48 @@ func NewAPITokenRepository(db *bun.DB) *APITokenRepository {
 	return &APITokenRepository{db: db}
 }
 
-// Create persists a newly issued API token. The plain key is never stored.
-func (r *APITokenRepository) Create(ctx context.Context, t *domain.APIToken) error {
-	_, err := r.db.NewInsert().Model(toAPITokenRow(t)).Exec(ctx)
+// CreateIfUnderLimit persists token only if token.UserID currently holds fewer than limit
+// tokens, atomically. A plain count-then-insert — even inside one transaction — is not race-free
+// under PostgreSQL's default READ COMMITTED isolation: two concurrent transactions can both read
+// the same count before either commits its insert. A transaction-scoped advisory lock keyed on
+// the user serializes concurrent calls for the same user (auto-released at commit/rollback, no
+// schema changes needed), making the count-then-insert that follows race-free. Returns false (no
+// error) when the limit is already reached; the plain key is never stored either way.
+func (r *APITokenRepository) CreateIfUnderLimit(ctx context.Context, token *domain.APIToken, limit int) (bool, error) {
+	var created bool
+
+	err := r.db.RunInTx(ctx, nil, func(ctx context.Context, btx bun.Tx) error {
+		_, lockErr := btx.NewRaw("SELECT pg_advisory_xact_lock(hashtext(?))", token.UserID.String()).Exec(ctx)
+		if lockErr != nil {
+			return fmt.Errorf("acquire advisory lock: %w", lockErr)
+		}
+
+		count, countErr := btx.NewSelect().
+			Model((*apiTokenRow)(nil)).
+			Where("user_id = ?", token.UserID).
+			Count(ctx)
+		if countErr != nil {
+			return fmt.Errorf("count api tokens: %w", countErr)
+		}
+
+		if count >= limit {
+			return nil
+		}
+
+		_, insErr := btx.NewInsert().Model(toAPITokenRow(token)).Exec(ctx)
+		if insErr != nil {
+			return fmt.Errorf("insert api token: %w", insErr)
+		}
+
+		created = true
+
+		return nil
+	})
 	if err != nil {
-		return fmt.Errorf("insert api token: %w", err)
+		return false, fmt.Errorf("create api token if under limit: %w", err)
 	}
 
-	return nil
-}
-
-// CountByUser returns how many tokens the given user already holds, so issuance can be capped.
-func (r *APITokenRepository) CountByUser(ctx context.Context, userID uuid.UUID) (int, error) {
-	count, err := r.db.NewSelect().
-		Model((*apiTokenRow)(nil)).
-		Where("user_id = ?", userID).
-		Count(ctx)
-	if err != nil {
-		return 0, fmt.Errorf("count api tokens: %w", err)
-	}
-
-	return count, nil
+	return created, nil
 }
 
 // GetByHash resolves a token by its SHA-256 hash. Returns domain.ErrNotFound when absent.

@@ -65,15 +65,6 @@ func (m *APITokenManager) CreateAPIToken(ctx context.Context, userID uuid.UUID) 
 		return "", fmt.Errorf("get user: %w", err)
 	}
 
-	count, err := m.apiTokens.CountByUser(ctx, usr.ID)
-	if err != nil {
-		return "", fmt.Errorf("count api tokens: %w", err)
-	}
-
-	if count >= maxAPITokensPerUser {
-		return "", domain.ErrAPITokenLimit
-	}
-
 	plain, err := newAPIToken()
 	if err != nil {
 		return "", err
@@ -86,9 +77,13 @@ func (m *APITokenManager) CreateAPIToken(ctx context.Context, userID uuid.UUID) 
 		CreatedAt: time.Now(),
 	}
 
-	err = m.apiTokens.Create(ctx, token)
+	ok, err := m.apiTokens.CreateIfUnderLimit(ctx, token, maxAPITokensPerUser)
 	if err != nil {
 		return "", fmt.Errorf("create api token: %w", err)
+	}
+
+	if !ok {
+		return "", domain.ErrAPITokenLimit
 	}
 
 	return plain, nil

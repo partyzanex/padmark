@@ -2,6 +2,8 @@ package postgres
 
 import (
 	"database/sql"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -15,6 +17,10 @@ import (
 
 	"github.com/partyzanex/padmark/internal/domain"
 )
+
+// testAPITokenLimit is a generous cap used by tests that aren't exercising limit enforcement
+// itself, so an ordinary sequence of Creates never trips it.
+const testAPITokenLimit = 1000
 
 type APITokenRepositoryTestSuite struct {
 	suite.Suite
@@ -108,6 +114,17 @@ func (s *APITokenRepositoryTestSuite) newToken(userID uuid.UUID, hash string) *d
 	}
 }
 
+// create is a test helper wrapping CreateIfUnderLimit with the generous testAPITokenLimit and
+// asserting the token was actually created — for tests that only care about the round trip, not
+// limit enforcement itself.
+func (s *APITokenRepositoryTestSuite) create(tok *domain.APIToken) {
+	s.T().Helper()
+
+	created, err := s.repo.CreateIfUnderLimit(s.T().Context(), tok, testAPITokenLimit)
+	s.Require().NoError(err)
+	s.Require().True(created)
+}
+
 // ── Create / GetByHash ──
 
 func (s *APITokenRepositoryTestSuite) TestCreate_GetByHash_RoundTrip() {
@@ -115,7 +132,7 @@ func (s *APITokenRepositoryTestSuite) TestCreate_GetByHash_RoundTrip() {
 	userID := s.createUser("u1")
 
 	tok := s.newToken(userID, "hash-1")
-	s.Require().NoError(s.repo.Create(ctx, tok))
+	s.create(tok)
 
 	got, err := s.repo.GetByHash(ctx, "hash-1")
 	s.Require().NoError(err)
@@ -138,7 +155,7 @@ func (s *APITokenRepositoryTestSuite) TestCreate_WithExpiresAt_RoundTrip() {
 	exp := time.Now().Add(time.Hour).Truncate(time.Second)
 	tok := s.newToken(userID, "hash-exp")
 	tok.ExpiresAt = &exp
-	s.Require().NoError(s.repo.Create(ctx, tok))
+	s.create(tok)
 
 	got, err := s.repo.GetByHash(ctx, "hash-exp")
 	s.Require().NoError(err)
@@ -164,9 +181,9 @@ func (s *APITokenRepositoryTestSuite) TestList_ReturnsNewestFirst() {
 	oldest.CreatedAt = now.Add(-2 * time.Hour)
 
 	// Insert out of chronological order to prove ordering is by created_at, not insertion.
-	s.Require().NoError(s.repo.Create(ctx, middle))
-	s.Require().NoError(s.repo.Create(ctx, oldest))
-	s.Require().NoError(s.repo.Create(ctx, newest))
+	s.create(middle)
+	s.create(oldest)
+	s.create(newest)
 
 	tokens, err := s.repo.List(ctx)
 	s.Require().NoError(err)
@@ -182,28 +199,87 @@ func (s *APITokenRepositoryTestSuite) TestList_Empty_ReturnsEmpty() {
 	s.Empty(tokens)
 }
 
-// ── CountByUser ──
+// ── CreateIfUnderLimit ──
 
-func (s *APITokenRepositoryTestSuite) TestCountByUser_CountsOnlyThatUsersTokens() {
+func (s *APITokenRepositoryTestSuite) TestCreateIfUnderLimit_CountsOnlyThatUsersTokens() {
 	ctx := s.T().Context()
 	userA := s.createUser("count-a")
 	userB := s.createUser("count-b")
 
-	s.Require().NoError(s.repo.Create(ctx, s.newToken(userA, "count-a-1")))
-	s.Require().NoError(s.repo.Create(ctx, s.newToken(userA, "count-a-2")))
-	s.Require().NoError(s.repo.Create(ctx, s.newToken(userB, "count-b-1")))
+	s.create(s.newToken(userA, "count-a-1"))
 
-	count, err := s.repo.CountByUser(ctx, userA)
+	// userB's token must not count against userA's limit.
+	s.create(s.newToken(userB, "count-b-1"))
+
+	created, err := s.repo.CreateIfUnderLimit(ctx, s.newToken(userA, "count-a-2"), 2)
 	s.Require().NoError(err)
-	s.Equal(2, count)
+	s.True(created, "userA has 1 token, limit 2 — must succeed")
+
+	created, err = s.repo.CreateIfUnderLimit(ctx, s.newToken(userA, "count-a-3"), 2)
+	s.Require().NoError(err)
+	s.False(created, "userA now has 2 tokens, limit 2 — must be refused")
+
+	count, err := s.db.NewSelect().TableExpr("api_tokens").Where("user_id = ?", userA).Count(ctx)
+	s.Require().NoError(err)
+	s.Equal(2, count, "the refused call must not have inserted a row")
 }
 
-func (s *APITokenRepositoryTestSuite) TestCountByUser_NoTokens_ReturnsZero() {
-	userID := s.createUser("count-none")
+func (s *APITokenRepositoryTestSuite) TestCreateIfUnderLimit_AtLimit_Refuses() {
+	ctx := s.T().Context()
+	userID := s.createUser("at-limit")
 
-	count, err := s.repo.CountByUser(s.T().Context(), userID)
+	s.create(s.newToken(userID, "at-limit-1"))
+
+	created, err := s.repo.CreateIfUnderLimit(ctx, s.newToken(userID, "at-limit-2"), 1)
 	s.Require().NoError(err)
-	s.Equal(0, count)
+	s.False(created)
+
+	_, err = s.repo.GetByHash(ctx, "at-limit-2")
+	s.ErrorIs(err, domain.ErrNotFound, "a refused create must not persist a row")
+}
+
+// TestCreateIfUnderLimit_ConcurrentRace_NeverExceedsLimit is the regression test for the fix:
+// firing more concurrent CreateIfUnderLimit calls than the limit allows must still leave exactly
+// `limit` rows stored, never more. Without the transaction-scoped advisory lock in
+// CreateIfUnderLimit, PostgreSQL's default READ COMMITTED isolation lets concurrent transactions
+// each read the same pre-insert count and all pass the limit check.
+func (s *APITokenRepositoryTestSuite) TestCreateIfUnderLimit_ConcurrentRace_NeverExceedsLimit() {
+	ctx := s.T().Context()
+	owner := s.createUser("race-owner")
+
+	const (
+		limit    = 5
+		attempts = 20
+	)
+
+	created := make([]bool, attempts)
+	errs := make([]error, attempts)
+
+	var wg sync.WaitGroup
+
+	for i := range attempts {
+		wg.Go(func() {
+			created[i], errs[i] = s.repo.CreateIfUnderLimit(ctx, s.newToken(owner, fmt.Sprintf("race-%d", i)), limit)
+		})
+	}
+
+	wg.Wait()
+
+	successCount := 0
+
+	for i, err := range errs {
+		s.Require().NoError(err)
+
+		if created[i] {
+			successCount++
+		}
+	}
+
+	s.Equal(limit, successCount, "exactly `limit` concurrent calls must succeed, no more")
+
+	stored, err := s.db.NewSelect().TableExpr("api_tokens").Where("user_id = ?", owner).Count(ctx)
+	s.Require().NoError(err)
+	s.Equal(limit, stored, "the stored row count must never exceed the limit under concurrency")
 }
 
 // ── RevokeByHash ──
@@ -213,7 +289,7 @@ func (s *APITokenRepositoryTestSuite) TestRevokeByHash_RemovesToken() {
 	userID := s.createUser("u4")
 
 	tok := s.newToken(userID, "hash-del")
-	s.Require().NoError(s.repo.Create(ctx, tok))
+	s.create(tok)
 	s.Require().NoError(s.repo.RevokeByHash(ctx, "hash-del"))
 
 	_, err := s.repo.GetByHash(ctx, "hash-del")
@@ -232,7 +308,7 @@ func (s *APITokenRepositoryTestSuite) TestUpdateLastUsed_SetsTimestamp() {
 	userID := s.createUser("u5")
 
 	tok := s.newToken(userID, "hash-lu")
-	s.Require().NoError(s.repo.Create(ctx, tok))
+	s.create(tok)
 
 	used := time.Now().Add(time.Minute).Truncate(time.Second)
 	s.Require().NoError(s.repo.UpdateLastUsed(ctx, "hash-lu", used))
@@ -259,7 +335,7 @@ func (s *APITokenRepositoryTestSuite) TestCreate_CascadesWithUser() {
 	ctx := s.T().Context()
 	userID := s.createUser("owner")
 
-	s.Require().NoError(s.repo.Create(ctx, s.newToken(userID, "hash-cascade")))
+	s.create(s.newToken(userID, "hash-cascade"))
 	s.Require().NoError(s.users.Revoke(ctx, userID))
 
 	count, err := s.db.NewSelect().

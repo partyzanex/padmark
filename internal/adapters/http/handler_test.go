@@ -1504,6 +1504,51 @@ func (s *HandlerSuite) TestFailLockout_Lockout() {
 	s.Equal(http.StatusTooManyRequests, w.Code)
 }
 
+// TestFailLockout_ResetsOnSuccess verifies a successful request clears the accumulated failure
+// count: an owner who mistypes the edit code a few times before getting it right must not carry
+// a stale near-threshold counter into their next legitimate edit.
+func (s *HandlerSuite) TestFailLockout_ResetsOnSuccess() {
+	note := newTestNote("t", "c")
+
+	s.manager.EXPECT().
+		Update(gomock.Any(), testID, "wrong", uuid.Nil, gomock.Any()).
+		Return(nil, domain.ErrForbidden).
+		Times(9)
+	s.manager.EXPECT().
+		Update(gomock.Any(), testID, "valid", uuid.Nil, gomock.Any()).
+		Return(note, nil)
+
+	wrongBody := `{"title":"t","content":"c","edit_code":"wrong"}`
+	validBody := `{"title":"t","content":"c","edit_code":"valid"}`
+
+	// 9 failures — one short of the 10-attempt lockout threshold.
+	for range 9 {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodPut, "/notes/"+testID, strings.NewReader(wrongBody))
+		r.Header.Set("Content-Type", "application/json")
+		s.router.ServeHTTP(w, r)
+		s.Equal(http.StatusForbidden, w.Code)
+	}
+
+	// The 10th request succeeds — this must clear the counter, not just avoid incrementing it.
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPut, "/notes/"+testID, strings.NewReader(validBody))
+	r.Header.Set("Content-Type", "application/json")
+	s.router.ServeHTTP(w, r)
+	s.Equal(http.StatusOK, w.Code)
+
+	// A further wrong attempt must be treated as failure #1, not #10 — no lockout yet.
+	s.manager.EXPECT().
+		Update(gomock.Any(), testID, "wrong", uuid.Nil, gomock.Any()).
+		Return(nil, domain.ErrForbidden)
+
+	w = httptest.NewRecorder()
+	r = httptest.NewRequest(http.MethodPut, "/notes/"+testID, strings.NewReader(wrongBody))
+	r.Header.Set("Content-Type", "application/json")
+	s.router.ServeHTTP(w, r)
+	s.Equal(http.StatusForbidden, w.Code, "counter must have reset on the earlier success, not carried toward lockout")
+}
+
 func (s *HandlerSuite) TestFailLockout_NoIncrementOnSuccess() {
 	note := newTestNote("t", "c")
 	s.manager.EXPECT().
@@ -1732,6 +1777,25 @@ func (s *HandlerSuite) TestAuth_InvalidToken() {
 	router.ServeHTTP(w, r)
 
 	s.Equal(http.StatusSeeOther, w.Code)
+}
+
+// TestAuth_InvalidToken_JSONError verifies a non-browser 401 (missing/invalid bearer token) is a
+// JSON body matching the same {"message": ...} shape as every other API error, not http.Error's
+// plain text — the generated ogen client (used by the CLI) decodes API errors as JSON, so a
+// plain-text body would surface as an opaque decode failure instead of a clean "unauthorized".
+func (s *HandlerSuite) TestAuth_InvalidToken_JSONError() {
+	router := s.newRouter([]string{"secret-token"})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/notes", strings.NewReader(`{}`))
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("Accept", "application/json")
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusUnauthorized, w.Code)
+	s.Equal("application/json", w.Header().Get("Content-Type"))
+	s.JSONEq(`{"message":"unauthorized"}`, w.Body.String())
 }
 
 func (s *HandlerSuite) TestAuth_PublicPaths() {
