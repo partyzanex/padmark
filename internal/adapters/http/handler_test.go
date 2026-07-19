@@ -2574,6 +2574,29 @@ func (s *HandlerSuite) TestOwnerOnlyNote_Anonymous_Unauthorized() {
 	s.Equal(http.StatusUnauthorized, w.Code)
 }
 
+// TestOwnerOnlyNote_Anonymous_HTML_RedirectToLogin is the HTML-negotiated counterpart to
+// TestOwnerOnlyNote_Anonymous_Unauthorized: a browser request (Accept: text/html) to a
+// privacy: owner note from an anonymous caller must redirect to /login, not 401.
+func (s *HandlerSuite) TestOwnerOnlyNote_Anonymous_HTML_RedirectToLogin() {
+	owner := &domain.User{ID: uuid.New(), Username: "alice"}
+
+	note := newTestNote("secret", "owner-only content")
+	note.Privacy = new(domain.PrivacyOwner)
+	note.OwnerID = &owner.ID
+
+	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
+
+	router := s.newRouterWithTOTPAuth()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
+	r.Header.Set("Accept", "text/html")
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusSeeOther, w.Code)
+	s.True(strings.HasPrefix(w.Header().Get("Location"), "/login?next="))
+}
+
 // TestEditPage_OwnerOnly_NonOwner_Forbidden verifies that GET /edit/{id} for a privacy: owner
 // note is gated exactly like GET /notes/{id} — a different authenticated caller must not see the
 // note's plaintext content in the editor form, even though they are logged in.
@@ -2673,6 +2696,30 @@ func (s *HandlerSuite) TestCanEdit_TOTPMode_Authenticated() {
 	s.Equal(http.StatusOK, w.Code)
 	s.Contains(w.Body.String(), `href="/edit/`+testID+`"`,
 		"authenticated TOTP user must see the edit button")
+}
+
+// TestCanEdit_NoAuthConfigured_OwnerOnlyNote_HidesEditButton verifies CanEdit's VisibleTo gate
+// directly: when no auth is configured at all, handlePrivateAuth's blanket bypass still lets the
+// page render for everyone (200), but a privacy: owner note (e.g. left over from when accounts
+// were enabled) must not show the Edit link — isAuthenticated() is unconditionally true in this
+// mode, yet nobody can prove ownership of a note without a real caller identity.
+func (s *HandlerSuite) TestCanEdit_NoAuthConfigured_OwnerOnlyNote_HidesEditButton() {
+	owner := uuid.New()
+	note := newTestNote("secret", "owner-only content")
+	note.Privacy = new(domain.PrivacyOwner)
+	note.OwnerID = &owner
+
+	s.manager.EXPECT().GetRendered(gomock.Any(), testID).Return(note, "rendered", nil)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
+	r.Header.Set("Accept", "text/html")
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusOK, w.Code)
+	s.NotContains(w.Body.String(), `href="/edit/`+testID+`"`,
+		"no caller identity can prove ownership when auth isn't configured, so no Edit button")
 }
 
 // TestIsAuthenticated_ReadsFromContext verifies that for an authenticated request
