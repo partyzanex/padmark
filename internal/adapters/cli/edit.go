@@ -44,9 +44,9 @@ func editCommand() *urcli.Command {
 				Name:  FlagPlain,
 				Usage: "Set content type to text/plain",
 			},
-			&urcli.BoolFlag{
-				Name:  FlagPrivate,
-				Usage: "Require authentication (any bearer token or session) to read the note",
+			&urcli.StringFlag{
+				Name:  FlagPrivacy,
+				Usage: "Privacy level: public, authenticated, or owner",
 			},
 			&urcli.BoolFlag{
 				Name:  FlagBurn,
@@ -135,8 +135,8 @@ func buildUpdateReq(cmd *urcli.Command, content, editCode string) *padmark.Updat
 		)
 	}
 
-	if cmd.IsSet(FlagPrivate) {
-		req.Private = padmark.NewOptBool(cmd.Bool(FlagPrivate))
+	if cmd.IsSet(FlagPrivacy) {
+		req.Privacy = padmark.NewOptUpdateNoteRequestPrivacy(padmark.UpdateNoteRequestPrivacy(cmd.String(FlagPrivacy)))
 	}
 
 	if cmd.IsSet(FlagBurn) {

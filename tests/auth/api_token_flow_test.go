@@ -124,14 +124,14 @@ func TestAPITokenFlow_AdminIssuesKey_CLICreatesNote(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, count, "an invalid API key must not create a note")
 
-	// ── regression: a PRIVATE note must be readable via the CLI's API token ──
-	// GET /notes/{id} is a "public" route (auth not required), so the auth middleware must still
-	// resolve the API-token Bearer key there — otherwise a private-note read returns 401.
-	priv := true
+	// ── regression: a PRIVATE (authenticated-level) note must be readable via the CLI's API
+	// token ── GET /notes/{id} is a "public" route (auth not required), so the auth middleware
+	// must still resolve the API-token Bearer key there — otherwise a private-note read returns 401.
+	priv := domain.PrivacyAuthenticated
 	created, err := notesMgr.Create(ctx, &domain.Note{
 		Title:   "secret",
 		Content: "private body",
-		Private: &priv,
+		Privacy: &priv,
 	})
 	require.NoError(t, err)
 

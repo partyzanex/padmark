@@ -21,30 +21,34 @@ type errorJSON struct {
 // This is the single source of truth for "what status does this error deserve": errorStatusMessage
 // (JSON API errors), domainErrToPageData (HTML error page), and the ogen response mappers
 // (ogen_errors.go) all derive their status from this table instead of each repeating the same
-// errors.Is chain.
+// errors.Is chain. A slice (checked in order) rather than a switch keeps this a flat,
+// O(1)-complexity lookup as entries are added — none of these sentinels wrap one another, so
+// match order never affects the result.
 func domainErrStatus(err error) (status int, message string) {
-	switch {
-	case errors.Is(err, domain.ErrNotFound):
-		return http.StatusNotFound, domain.ErrNotFound.Error()
-	case errors.Is(err, domain.ErrExpired):
-		return http.StatusGone, domain.ErrExpired.Error()
-	case errors.Is(err, domain.ErrTitleTooLong):
-		return http.StatusUnprocessableEntity, domain.ErrTitleTooLong.Error()
-	case errors.Is(err, domain.ErrInvalidContentType):
-		return http.StatusUnprocessableEntity, domain.ErrInvalidContentType.Error()
-	case errors.Is(err, domain.ErrInvalidSlug):
-		return http.StatusUnprocessableEntity, domain.ErrInvalidSlug.Error()
-	case errors.Is(err, domain.ErrCustomSlugDisabled):
-		return http.StatusUnprocessableEntity, domain.ErrCustomSlugDisabled.Error()
-	case errors.Is(err, domain.ErrSlugConflict):
-		return http.StatusConflict, domain.ErrSlugConflict.Error()
-	case errors.Is(err, domain.ErrInvalidEditCode):
-		return http.StatusForbidden, domain.ErrInvalidEditCode.Error()
-	case errors.Is(err, domain.ErrForbidden):
-		return http.StatusForbidden, domain.ErrForbidden.Error()
-	default:
-		return http.StatusInternalServerError, ""
+	entries := []struct {
+		err    error
+		status int
+	}{
+		{domain.ErrNotFound, http.StatusNotFound},
+		{domain.ErrExpired, http.StatusGone},
+		{domain.ErrTitleTooLong, http.StatusUnprocessableEntity},
+		{domain.ErrInvalidContentType, http.StatusUnprocessableEntity},
+		{domain.ErrInvalidPrivacy, http.StatusUnprocessableEntity},
+		{domain.ErrOwnerPrivacyRequiresOwner, http.StatusUnprocessableEntity},
+		{domain.ErrInvalidSlug, http.StatusUnprocessableEntity},
+		{domain.ErrCustomSlugDisabled, http.StatusUnprocessableEntity},
+		{domain.ErrSlugConflict, http.StatusConflict},
+		{domain.ErrInvalidEditCode, http.StatusForbidden},
+		{domain.ErrForbidden, http.StatusForbidden},
 	}
+
+	for _, entry := range entries {
+		if errors.Is(err, entry.err) {
+			return entry.status, entry.err.Error()
+		}
+	}
+
+	return http.StatusInternalServerError, ""
 }
 
 // errorStatusMessage maps a domain error to the HTTP status and the client-facing message used in

@@ -973,9 +973,9 @@ func (s *AuthHandlerSuite) TestAPITokenAuth_AdminBearer_ReachesAdminPage() {
 // key there — otherwise the CLI, whose only credential is that key, gets 401 on a private note.
 func (s *AuthHandlerSuite) TestAPITokenAuth_PrivateNote_ValidBearer_Served() {
 	usr := &domain.User{ID: testUserID1, Username: "alice"}
-	priv := true
+	priv := domain.PrivacyAuthenticated
 	note := newTestNote("secret", "# private")
-	note.Private = &priv
+	note.Privacy = &priv
 
 	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "good-api-key").Return(usr, nil)
 	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
@@ -995,9 +995,9 @@ func (s *AuthHandlerSuite) TestAPITokenAuth_PrivateNote_ValidBearer_Served() {
 // TestAPITokenAuth_PrivateNote_UnknownBearer_Returns401 is the negative counterpart: an unknown
 // API key must not reach a private note.
 func (s *AuthHandlerSuite) TestAPITokenAuth_PrivateNote_UnknownBearer_Returns401() {
-	priv := true
+	priv := domain.PrivacyAuthenticated
 	note := newTestNote("secret", "# private")
-	note.Private = &priv
+	note.Privacy = &priv
 
 	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "bad-key").Return(nil, domain.ErrNotFound)
 	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)

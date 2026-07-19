@@ -5,6 +5,8 @@ import (
 	"net/http"
 
 	_ "embed"
+
+	"github.com/partyzanex/padmark/internal/domain"
 )
 
 //go:embed templates/index.html
@@ -40,21 +42,21 @@ type editorViewData struct {
 	Title            string
 	Content          string
 	Nonce            string
-	TTL              int64 // remaining seconds, for pre-selecting the burn time option
+	Privacy          string
+	TTL              int64
 	EditMode         bool
 	BurnAfterReading bool
-	Private          bool
-	// IsOwner is true when the signed-in caller (session or API token) created this note —
-	// see notes.Manager.Update's callerID bypass. Lets the editor accept an empty edit code
-	// for its owner instead of hard-requiring one; always false outside EditMode.
-	IsOwner bool
+	IsOwner          bool
 }
 
 // IndexPage handles GET / — serves the note editor.
 func (h *PageHandler) IndexPage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
-	err := h.indexTmpl.Execute(w, editorViewData{Nonce: nonceFromContext(r.Context())})
+	err := h.indexTmpl.Execute(w, editorViewData{
+		Nonce:   nonceFromContext(r.Context()),
+		Privacy: string(domain.PrivacyPublic),
+	})
 	if err != nil {
 		h.log.ErrorContext(r.Context(), "render index template", "err", err)
 	}

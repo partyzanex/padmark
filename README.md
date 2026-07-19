@@ -26,7 +26,7 @@ Those tools are built for humans. padmark is built for agents — and humans who
 | REST API + OpenAPI spec | ✓ | partial | ✗ | ✗ | ✗ |
 | Content negotiation (HTML / JSON / plain from same URL) | ✓ | ✗ | ✗ | ✗ | ✗ |
 | Burn-after-reading with grace period TTL | ✓ | ✗ | ✓ | ✓ | partial |
-| Per-note private flag | ✓ | ✗ | ✗ | ✗ | ✗ |
+| Per-note privacy levels (public / login required / owner only) | ✓ | ✗ | ✗ | ✗ | ✗ |
 | Built-in CLI + stdin | ✓ | partial | ✗ | ✗ | ✗ |
 | Single binary, SQLite by default | ✓ | — | — | ✗ | — |
 
@@ -40,7 +40,7 @@ Those tools are built for humans. padmark is built for agents — and humans who
 - Edit or delete notes using a secret `edit_code` — no login required
 - If you were signed in (session or API token) when you created a note, edit or delete it later with that same credential — no `edit_code` needed
 - Make notes disappear after the first read (burn-after-reading)
-- Keep notes private so only authenticated users can see them
+- Choose who can read a note: anyone, any logged-in user, or only its owner
 - Gate access with user accounts protected by TOTP two-factor auth, or with API Bearer tokens
 - Store note content encrypted at rest
 - Script everything from the terminal or another service
@@ -61,7 +61,7 @@ Every note has:
 | `edit_code` | Your one-time secret for editing and deleting |
 | `burn_after_reading` | Delete the note on first read |
 | `ttl` | Seconds to live *after* the first read (optional) |
-| `private` | Require authentication to read |
+| `privacy` | Who can read it: `public` (default), `authenticated`, or `owner` |
 
 > **Keep your `edit_code` safe.** It's shown once at creation and cannot be recovered. Exception:
 > if you created the note while authenticated (session or API token), that same credential edits
@@ -197,9 +197,11 @@ padmark-cli create --title "Runbook" --content "..." --slug deploy-notes
 # Burn-after-reading with a 1-hour window after first read
 padmark-cli create --title "Secret" --content "eyes only" --burn --ttl 3600
 
-# Private note: reading it requires a bearer token or an authenticated session
-# (any signed-in caller, not just the creator — see "API keys" below)
-padmark-cli create --title "Internal" --content "..." --private
+# Requires login to read (any signed-in caller, not just the creator — see "API keys" below)
+padmark-cli create --title "Internal" --content "..." --privacy authenticated
+
+# Owner-only: only the exact credential that created it can ever read it
+padmark-cli create --title "Just for me" --content "..." --privacy owner
 
 # Plain text instead of markdown
 padmark-cli create --title "Log dump" --content "..." --plain
@@ -366,7 +368,11 @@ When **disabled**, none of the routes below are gated and `/setup`, `/admin`, et
 - **`/change-password`** — rotate the password (requires the current password **and** a TOTP code).
 - Sessions are cookie-based; lifetime via `--session-ttl` (default 30 days).
 
-**Private notes** require either a valid session (browsers are redirected to `/login`) or a Bearer token (API clients get `401`).
+**`privacy: authenticated`** notes require either a valid session (browsers are redirected to
+`/login`) or a Bearer token (API clients get `401`) — any signed-in caller, not just the creator.
+**`privacy: owner`** notes go further: only the exact credential that created the note may read
+it (see "Editing without `edit_code`" below for the same owner-scoping applied to writes) —
+meaningless without `--enable-accounts`, since a note has no recorded owner otherwise.
 
 Always public regardless of auth config: `/login`, `/setup`, `/logout`, `/totp-login`, `/static/*`, `/api`, `/api/openapi.yaml`, `/healthz`, `/readyz`.
 
@@ -374,12 +380,12 @@ Always public regardless of auth config: `/login`, `/setup`, `/logout`, `/totp-l
 
 If you were authenticated — a session cookie (web UI) or an API Bearer token (CLI/API) — at the
 moment you **created** a note, that exact same credential can edit or delete it later with no
-`edit_code` at all. This only requires `--enable-accounts=true`; it works whether the note is
-public or `private`.
+`edit_code` at all. This only requires `--enable-accounts=true`; it works regardless of the
+note's `privacy` level.
 
 - **Strictly owner-scoped.** The bypass checks the exact user who created the note — not "any
-  signed-in user" (unlike `private`, see above), and not admins either. A different authenticated
-  user still needs the `edit_code`, exactly like an anonymous caller.
+  signed-in user" (unlike `privacy: authenticated`, see above), and not admins either. A different
+  authenticated user still needs the `edit_code`, exactly like an anonymous caller.
 - **Anonymous notes are unaffected.** A note created without being signed in has no recorded
   owner, so `edit_code` is always required for it, from everyone — this matches the behavior
   before this feature existed.
@@ -407,7 +413,7 @@ public or `private`.
 | `--storage` | `PADMARK_STORAGE` | `sqlite` | `sqlite` or `postgres` |
 | `--dsn` | `PADMARK_DSN` | `padmark.db` | DB path or connection string |
 | `--auth-tokens` | `PADMARK_AUTH_TOKENS` | — | **Deprecated.** Legacy comma-separated Bearer tokens for write endpoints; superseded by the TOTP account system + admin API keys. Will be removed in a future release |
-| `--enable-accounts` | `PADMARK_ENABLE_ACCOUNTS` | `false` | Enable the TOTP account system (`/setup`, `/login`, `/admin`, private-note gating); off = fully public |
+| `--enable-accounts` | `PADMARK_ENABLE_ACCOUNTS` | `false` | Enable the TOTP account system (`/setup`, `/login`, `/admin`, privacy-level gating); off = fully public |
 | `--disable-api` | `PADMARK_DISABLE_API` | `false` | Disable the REST/JSON API (`/notes*`, `/api`, `/api/openapi.yaml`): every request to it gets `503` with `{"message": "До свидания"}`, before auth or any handler runs. The web UI and `/healthz`, `/readyz` keep working |
 | `--totp-issuer` | `PADMARK_TOTP_ISSUER` | `padmark` | TOTP issuer shown in the authenticator app |
 | `--session-ttl` | `PADMARK_SESSION_TTL` | `2592000` | Session lifetime in seconds (default 30 days) |

@@ -203,7 +203,7 @@ func (s *HandlerSuite) TestIndexPage() {
 func (s *HandlerSuite) TestEditPage_OK() {
 	note := newTestNote("edit me", "# hello")
 	note.BurnAfterReading = true
-	note.Private = new(true)
+	note.Privacy = new(domain.PrivacyAuthenticated)
 
 	future := time.Now().Add(time.Hour)
 	note.ExpiresAt = &future
@@ -223,7 +223,7 @@ func (s *HandlerSuite) TestEditPage_OK() {
 	s.Contains(body, "# hello")
 	s.Contains(body, "Save")
 	s.Contains(body, "checked")
-	s.Contains(body, `id="privateCheck" checked`)
+	s.Contains(body, `value="authenticated" selected`)
 }
 
 func (s *HandlerSuite) TestEditPage_NotFound() {
@@ -822,7 +822,7 @@ func (s *HandlerSuite) TestGetNote_ShortURL() {
 
 func (s *HandlerSuite) TestGetNote_Private_HTML_Unauthorized() {
 	note := newTestNote("secret", "private content")
-	note.Private = new(true)
+	note.Privacy = new(domain.PrivacyAuthenticated)
 	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
 
 	router := s.newRouter([]string{"secret-token"})
@@ -840,7 +840,7 @@ func (s *HandlerSuite) TestGetNote_Private_HTML_Unauthorized() {
 
 func (s *HandlerSuite) TestGetNote_Private_JSON_Unauthorized() {
 	note := newTestNote("secret", "private content")
-	note.Private = new(true)
+	note.Privacy = new(domain.PrivacyAuthenticated)
 	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
 
 	router := s.newRouter([]string{"secret-token"})
@@ -856,7 +856,7 @@ func (s *HandlerSuite) TestGetNote_Private_JSON_Unauthorized() {
 
 func (s *HandlerSuite) TestGetNote_Private_Authorized() {
 	note := newTestNote("secret", "private content")
-	note.Private = new(true)
+	note.Privacy = new(domain.PrivacyAuthenticated)
 	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
 	s.manager.EXPECT().ViewPreloaded(gomock.Any(), testID, note).Return(note, nil)
 
@@ -901,7 +901,7 @@ func (s *HandlerSuite) TestGetNote_MultiSegmentSlug_PrivateRequiresAuth() {
 	const mid = "project/secret.md"
 
 	note := newTestNote("secret", "private")
-	note.Private = new(true)
+	note.Privacy = new(domain.PrivacyAuthenticated)
 	s.manager.EXPECT().Peek(gomock.Any(), mid).Return(note, nil)
 
 	router := s.newRouter([]string{"secret-token"})
@@ -1026,12 +1026,12 @@ func (s *HandlerSuite) TestUpdateNote_WithPrivate() {
 
 	s.manager.EXPECT().Update(gomock.Any(), testID, "code", uuid.Nil, gomock.Any()).
 		DoAndReturn(func(_ context.Context, _, _ string, _ uuid.UUID, n *domain.Note) (*domain.Note, error) {
-			s.True(n.Private != nil && *n.Private)
+			s.Equal(domain.PrivacyAuthenticated, n.EffectivePrivacy())
 
 			return updated, nil
 		})
 
-	body := `{"title":"updated","content":"body","edit_code":"code","private":true}`
+	body := `{"title":"updated","content":"body","edit_code":"code","privacy":"authenticated"}`
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPut, "/notes/"+testID, strings.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")
@@ -1104,19 +1104,19 @@ func (s *HandlerSuite) TestDeleteNote_MultiSegmentSlug_ByURL_Acceptance() {
 	s.Equal(http.StatusNoContent, w.Code, "deleting a path-like slug via DELETE /notes/{id...} must succeed")
 }
 
-// TestUpdateNote_OmittedPrivate_PreservesPrivacy verifies that when "private" is absent
-// from a PUT request body, the handler passes Private=nil to manager.Update so that the
-// storage layer can COALESCE(NULL, private) and preserve the existing DB value.
+// TestUpdateNote_OmittedPrivate_PreservesPrivacy verifies that when "privacy" is absent
+// from a PUT request body, the handler passes Privacy=nil to manager.Update so that the
+// storage layer can COALESCE(NULL, privacy) and preserve the existing DB value.
 func (s *HandlerSuite) TestUpdateNote_OmittedPrivate_PreservesPrivacy() {
 	s.manager.EXPECT().Update(gomock.Any(), testID, "code", uuid.Nil, gomock.Any()).
 		DoAndReturn(func(_ context.Context, _, _ string, _ uuid.UUID, n *domain.Note) (*domain.Note, error) {
-			// nil means "don't change" — storage will COALESCE(NULL, private).
-			s.Nil(n.Private, "Private must be nil when omitted from the request, not defaulted to false")
+			// nil means "don't change" — storage will COALESCE(NULL, privacy).
+			s.Nil(n.Privacy, "Privacy must be nil when omitted from the request, not defaulted to public")
 
 			return newTestNote("updated", "new content"), nil
 		})
 
-	// No "private" field in the body.
+	// No "privacy" field in the body.
 	body := `{"title":"updated","content":"new content","edit_code":"code"}`
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPut, "/notes/"+testID, strings.NewReader(body))
@@ -2457,7 +2457,7 @@ func (s *HandlerSuite) TestHandleReveal_CrossNoteToken_TokenNotBurned() {
 // request to a private note is redirected to /login in TOTP-only mode.
 func (s *HandlerSuite) TestPrivateNote_TOTPMode_Unauthenticated() {
 	note := newTestNote("secret", "private content")
-	note.Private = new(true)
+	note.Privacy = new(domain.PrivacyAuthenticated)
 
 	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
 	// isAuthenticated fallback: no session cookie → extractSessionID returns "" →
@@ -2483,7 +2483,7 @@ func (s *HandlerSuite) TestPrivateNote_TOTPMode_Unauthenticated() {
 // and renderNoteHTML (CanEdit) read it from context without re-querying.
 func (s *HandlerSuite) TestPrivateNote_TOTPMode_Authenticated() {
 	note := newTestNote("secret", "private content")
-	note.Private = new(true)
+	note.Privacy = new(domain.PrivacyAuthenticated)
 	usr := &domain.User{ID: uuid.New(), Username: "alice"}
 
 	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
@@ -2500,6 +2500,78 @@ func (s *HandlerSuite) TestPrivateNote_TOTPMode_Authenticated() {
 	router.ServeHTTP(w, r)
 
 	s.Equal(http.StatusOK, w.Code)
+}
+
+// TestOwnerOnlyNote_Owner_Authorized verifies that a note with privacy: owner is readable by
+// the exact authenticated session that created it.
+func (s *HandlerSuite) TestOwnerOnlyNote_Owner_Authorized() {
+	owner := &domain.User{ID: uuid.New(), Username: "alice"}
+
+	note := newTestNote("secret", "owner-only content")
+	note.Privacy = new(domain.PrivacyOwner)
+	note.OwnerID = &owner.ID
+
+	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
+	s.manager.EXPECT().GetRenderedPreloaded(gomock.Any(), testID, note).Return(note, "rendered", nil)
+	s.authMgr.EXPECT().GetSession(gomock.Any(), "valid-sess").Return(owner, nil).Times(1)
+
+	router := s.newRouterWithTOTPAuth()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
+	r.Header.Set("Accept", "text/html")
+	r.AddCookie(&http.Cookie{Name: "padmark_session", Value: "valid-sess"}) //nolint:gosec // G124: test cookie
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusOK, w.Code)
+}
+
+// TestOwnerOnlyNote_OtherAuthenticatedUser_Unauthorized verifies that a note with
+// privacy: owner is NOT readable by a different authenticated caller, even though they are
+// logged in — owner-only is scoped to the exact creator, unlike privacy: authenticated.
+func (s *HandlerSuite) TestOwnerOnlyNote_OtherAuthenticatedUser_Unauthorized() {
+	owner := &domain.User{ID: uuid.New(), Username: "alice"}
+	other := &domain.User{ID: uuid.New(), Username: "bob"}
+
+	note := newTestNote("secret", "owner-only content")
+	note.Privacy = new(domain.PrivacyOwner)
+	note.OwnerID = &owner.ID
+
+	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
+	s.authMgr.EXPECT().GetSession(gomock.Any(), "valid-sess").Return(other, nil).Times(1)
+
+	router := s.newRouterWithTOTPAuth()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
+	r.Header.Set("Accept", "text/html")
+	r.AddCookie(&http.Cookie{Name: "padmark_session", Value: "valid-sess"}) //nolint:gosec // G124: test cookie
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusSeeOther, w.Code)
+	s.True(strings.HasPrefix(w.Header().Get("Location"), "/login?next="),
+		"a different authenticated caller must not read an owner-only note")
+}
+
+// TestOwnerOnlyNote_Anonymous_Unauthorized verifies that a note with privacy: owner is not
+// readable by an unauthenticated caller.
+func (s *HandlerSuite) TestOwnerOnlyNote_Anonymous_Unauthorized() {
+	owner := &domain.User{ID: uuid.New(), Username: "alice"}
+
+	note := newTestNote("secret", "owner-only content")
+	note.Privacy = new(domain.PrivacyOwner)
+	note.OwnerID = &owner.ID
+
+	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
+
+	router := s.newRouterWithTOTPAuth()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
+	r.Header.Set("Accept", "application/json")
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusUnauthorized, w.Code)
 }
 
 // TestCanEdit_TOTPMode_Unauthenticated verifies that in TOTP-only mode an

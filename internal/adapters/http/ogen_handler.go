@@ -41,7 +41,7 @@ func (h *OgenHandler) CreateNote(
 		EditCode:         req.EditCode.Or(""),
 		BurnTTL:          burnTTL,
 		BurnAfterReading: burnAfterReading,
-		Private:          optBoolPtr(req.Private),
+		Privacy:          optCreatePrivacyPtr(req.Privacy),
 		OwnerID:          ownerIDFromCtx(ctx),
 	})
 	if err != nil {
@@ -87,7 +87,7 @@ func (h *OgenHandler) UpdateNote(
 		ContentType:      optUpdateContentTypePtr(req.ContentType),
 		BurnTTL:          burnTTL,
 		BurnAfterReading: burnAfterReading,
-		Private:          optBoolPtr(req.Private),
+		Privacy:          optUpdatePrivacyPtr(req.Privacy),
 	})
 	if err != nil {
 		return mapUpdateError(err, h.log), nil
@@ -122,16 +122,28 @@ func derefContentType(ct *domain.ContentType) domain.ContentType {
 	return *ct
 }
 
-// optBoolPtr converts an OptBool to *bool: nil when not set, pointer to value otherwise.
-// Passing nil to storage.Update causes COALESCE(NULL, private) to keep the existing DB value.
-func optBoolPtr(o ogenapi.OptBool) *bool {
+// optCreatePrivacyPtr converts an optional create-request privacy level to *domain.Privacy.
+// nil means "not set" — manager.Create will default to public.
+func optCreatePrivacyPtr(o ogenapi.OptCreateNoteRequestPrivacy) *domain.Privacy {
 	if !o.IsSet() {
 		return nil
 	}
 
-	v := o.Value
+	p := domain.Privacy(o.Value)
 
-	return &v
+	return &p
+}
+
+// optUpdatePrivacyPtr converts an optional update-request privacy level to *domain.Privacy.
+// nil means "not set" — storage.Update will COALESCE to keep the existing DB value.
+func optUpdatePrivacyPtr(o ogenapi.OptUpdateNoteRequestPrivacy) *domain.Privacy {
+	if !o.IsSet() {
+		return nil
+	}
+
+	p := domain.Privacy(o.Value)
+
+	return &p
 }
 
 // optCreateContentTypePtr converts an optional create-request content type to *domain.ContentType.

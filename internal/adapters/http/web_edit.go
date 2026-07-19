@@ -40,7 +40,7 @@ func (h *NoteHandler) EditPage(w http.ResponseWriter, r *http.Request) {
 		TTL:              ttl,
 		EditMode:         true,
 		BurnAfterReading: note.BurnAfterReading || note.BurnTTL > 0,
-		Private:          note.Private != nil && *note.Private,
+		Privacy:          string(note.EffectivePrivacy()),
 		Nonce:            nonceFromContext(r.Context()),
 		IsOwner:          isOwner,
 	})

@@ -307,6 +307,31 @@ func (s *ManagerTestSuite) TestCreate_InvalidContentType() {
 	s.ErrorIs(err, domain.ErrInvalidContentType)
 }
 
+// TestCreate_OwnerPrivacy_NoOwnerID_Rejected verifies that a note cannot be created with
+// privacy=owner and no OwnerID (e.g. an anonymous caller) — such a note could never be read
+// back by anyone, including its own creator.
+func (s *ManagerTestSuite) TestCreate_OwnerPrivacy_NoOwnerID_Rejected() {
+	priv := domain.PrivacyOwner
+	note := &domain.Note{Title: "hi", Content: "body", Privacy: &priv}
+
+	_, err := s.manager.Create(s.T().Context(), note)
+
+	s.ErrorIs(err, domain.ErrOwnerPrivacyRequiresOwner)
+}
+
+// TestCreate_OwnerPrivacy_WithOwnerID_OK verifies that privacy=owner is accepted when the note
+// actually has an OwnerID (the HTTP layer sets this from the authenticated caller before Create).
+func (s *ManagerTestSuite) TestCreate_OwnerPrivacy_WithOwnerID_OK() {
+	priv := domain.PrivacyOwner
+	note := &domain.Note{Title: "hi", Content: "body", Privacy: &priv, OwnerID: new(testUserID1)}
+	s.storage.EXPECT().Create(gomock.Any(), note).Return(nil)
+
+	result, err := s.manager.Create(s.T().Context(), note)
+
+	s.Require().NoError(err)
+	s.Equal(domain.PrivacyOwner, result.EffectivePrivacy())
+}
+
 func (s *ManagerTestSuite) TestCreate_WithBurnTTL() {
 	note := &domain.Note{Title: "hello", Content: "world", BurnAfterReading: true, BurnTTL: 3600}
 	s.storage.EXPECT().Create(gomock.Any(), note).Return(nil)
@@ -1034,12 +1059,12 @@ func (s *ManagerTestSuite) TestPeek_ReturnsExpiredNote() {
 // Update — private notes
 
 func (s *ManagerTestSuite) TestUpdate_PrivateNote_CorrectCode() {
-	priv := true
+	priv := domain.PrivacyAuthenticated
 	existing := &domain.Note{
 		ID:       "priv-1",
 		Title:    "secret",
 		EditCode: "rightcode1234",
-		Private:  &priv,
+		Privacy:  &priv,
 	}
 	note := &domain.Note{Title: "updated secret"}
 
@@ -1052,13 +1077,53 @@ func (s *ManagerTestSuite) TestUpdate_PrivateNote_CorrectCode() {
 	s.Equal("updated secret", result.Title)
 }
 
+// TestUpdate_OwnerPrivacy_AnonymousExistingNote_Rejected verifies that a caller with a valid
+// edit_code cannot flip an anonymously-created (ownerless) note to privacy=owner — such a note
+// could never be read back by anyone afterward.
+func (s *ManagerTestSuite) TestUpdate_OwnerPrivacy_AnonymousExistingNote_Rejected() {
+	priv := domain.PrivacyOwner
+	existing := &domain.Note{
+		ID:       "anon-1",
+		Title:    "old",
+		EditCode: "rightcode1234",
+	}
+	note := &domain.Note{Title: "updated", Privacy: &priv}
+
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("anon-1")).Return(existing, nil)
+
+	_, err := s.manager.Update(s.T().Context(), "anon-1", "rightcode1234", uuid.Nil, note)
+
+	s.ErrorIs(err, domain.ErrOwnerPrivacyRequiresOwner)
+}
+
+// TestUpdate_OwnerPrivacy_AlreadyOwnedNote_OK verifies that setting privacy=owner on a note that
+// already has a real owner is accepted.
+func (s *ManagerTestSuite) TestUpdate_OwnerPrivacy_AlreadyOwnedNote_OK() {
+	priv := domain.PrivacyOwner
+	existing := &domain.Note{
+		ID:       "owned-1",
+		Title:    "old",
+		EditCode: "rightcode1234",
+		OwnerID:  new(testUserID1),
+	}
+	note := &domain.Note{Title: "updated", Privacy: &priv}
+
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("owned-1")).Return(existing, nil)
+	s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("owned-1"), gomock.Any()).Return(nil)
+
+	result, err := s.manager.Update(s.T().Context(), "owned-1", "rightcode1234", uuid.Nil, note)
+
+	s.Require().NoError(err)
+	s.Equal(domain.PrivacyOwner, result.EffectivePrivacy())
+}
+
 func (s *ManagerTestSuite) TestUpdate_PrivateNote_WrongCode() {
-	priv := true
+	priv := domain.PrivacyAuthenticated
 	existing := &domain.Note{
 		ID:       "priv-2",
 		Title:    "secret",
 		EditCode: "rightcode1234",
-		Private:  &priv,
+		Privacy:  &priv,
 	}
 	note := &domain.Note{Title: "hijacked"}
 

@@ -7,7 +7,12 @@ var (
 	ErrExpired            = errors.New("note has expired")
 	ErrTitleTooLong       = errors.New("title exceeds maximum length")
 	ErrInvalidContentType = errors.New("unsupported content type")
-	ErrInvalidSlug        = errors.New("invalid slug: 1-100 chars, up to 10 path-like " +
+	ErrInvalidPrivacy     = errors.New("invalid privacy level")
+	// ErrOwnerPrivacyRequiresOwner is returned when privacy=owner would be set on a note with no
+	// OwnerID (created anonymously, or by a caller with no session/API-token identity) — such a
+	// note could never be read back by anyone, including its own creator. See Note.ValidateOwnership.
+	ErrOwnerPrivacyRequiresOwner = errors.New("owner-only privacy requires an authenticated owner")
+	ErrInvalidSlug               = errors.New("invalid slug: 1-100 chars, up to 10 path-like " +
 		"segments of alphanumeric/dot/hyphen/underscore joined by '/', each starting with " +
 		"alphanumeric; must not start with a reserved route name")
 	ErrSlugConflict = errors.New("slug is already taken")

@@ -273,20 +273,20 @@ func (s *RepositoryTestSuite) TestUpdate_NotFound() {
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
-// TestUpdate_Private_Nil_PreservesExistingValue verifies that passing Private=nil to Update
-// keeps the existing private value in the DB (via COALESCE(NULL, private)).
-func (s *RepositoryTestSuite) TestUpdate_Private_Nil_PreservesExistingValue() {
+// TestUpdate_Privacy_Nil_PreservesExistingValue verifies that passing Privacy=nil to Update
+// keeps the existing privacy value in the DB (via COALESCE(NULL, privacy)).
+func (s *RepositoryTestSuite) TestUpdate_Privacy_Nil_PreservesExistingValue() {
 	ctx := s.T().Context()
 
 	note := newNote("priv-nil-1", "t", "c")
-	note.Private = new(true)
+	note.Privacy = new(domain.PrivacyAuthenticated)
 	s.Require().NoError(s.repo.Create(ctx, note))
 
-	// Update with Private=nil — must not touch the private column.
+	// Update with Privacy=nil — must not touch the privacy column.
 	updated := &domain.Note{
 		Title:     "t2",
 		Content:   "c2",
-		Private:   nil,
+		Privacy:   nil,
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
@@ -294,22 +294,23 @@ func (s *RepositoryTestSuite) TestUpdate_Private_Nil_PreservesExistingValue() {
 
 	got, err := s.repo.Get(ctx, "priv-nil-1")
 	s.Require().NoError(err)
-	s.True(got.Private != nil && *got.Private, "private must be preserved when Update receives Private=nil")
+	s.Equal(domain.PrivacyAuthenticated, got.EffectivePrivacy(),
+		"privacy must be preserved when Update receives Privacy=nil")
 }
 
-// TestUpdate_Private_ExplicitFalse_ClearsPrivacy verifies that passing Private=&false
-// explicitly sets the column to false, even if the note was previously private.
-func (s *RepositoryTestSuite) TestUpdate_Private_ExplicitFalse_ClearsPrivacy() {
+// TestUpdate_Privacy_ExplicitPublic_ClearsPrivacy verifies that passing Privacy=&public
+// explicitly sets the column to public, even if the note was previously authenticated-only.
+func (s *RepositoryTestSuite) TestUpdate_Privacy_ExplicitPublic_ClearsPrivacy() {
 	ctx := s.T().Context()
 
 	note := newNote("priv-false-1", "t", "c")
-	note.Private = new(true)
+	note.Privacy = new(domain.PrivacyAuthenticated)
 	s.Require().NoError(s.repo.Create(ctx, note))
 
 	updated := &domain.Note{
 		Title:     "t2",
 		Content:   "c2",
-		Private:   new(false),
+		Privacy:   new(domain.PrivacyPublic),
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
@@ -317,7 +318,7 @@ func (s *RepositoryTestSuite) TestUpdate_Private_ExplicitFalse_ClearsPrivacy() {
 
 	got, err := s.repo.Get(ctx, "priv-false-1")
 	s.Require().NoError(err)
-	s.False(got.Private != nil && *got.Private, "private must be cleared when Update receives Private=&false")
+	s.Equal(domain.PrivacyPublic, got.EffectivePrivacy(), "privacy must be cleared when Update receives Privacy=&public")
 }
 
 // TestUpdate_ContentType_Nil_PreservesExistingValue verifies that passing ContentType=nil to Update

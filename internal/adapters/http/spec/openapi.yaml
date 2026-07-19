@@ -12,11 +12,16 @@ info:
       `PUT`, `DELETE`) require a Bearer token in the `Authorization` header.
     - `--enable-accounts`: TOTP-based user accounts with session cookies.
 
-    Read endpoints (`GET`) are public by default. Notes with `private: true` require *some* valid
-    credential (a bearer token or an authenticated session) to view — **any** authenticated caller
-    can read them, not just the note's creator; `private` means "requires login", not "visible
-    only to the author", so on a multi-user instance it does not by itself isolate notes between
-    different users.
+    Read endpoints (`GET`) are gated by each note's `privacy` level:
+
+    - `public` (default): anyone can read it.
+    - `authenticated`: **any** valid credential (a bearer token or an authenticated session) may
+      read it — not just the note's creator.
+    - `owner`: only the credential that created the note (see "Edit codes and ownership" below)
+      may read it. Requires `--enable-accounts` and an authenticated session or API token at
+      creation time — a request that would produce an ownerless note (anonymous, or under
+      `--auth-tokens` alone, which has no notion of "owner") is rejected with `422` instead of
+      silently creating a note nobody, including its creator, could ever read again.
 
     ## Burn-after-reading
 
@@ -296,16 +301,17 @@ components:
             Intended for CLI and automation use; the web UI does not expose this field.
           example: MySecretCode1
 
-        private:
-          type: boolean
-          default: false
+        privacy:
+          type: string
+          enum: ["public", "authenticated", "owner"]
+          default: "public"
           description: |
-            When `true` the note requires a valid credential (bearer token or authenticated
-            session) to view. This gates access to "any authenticated caller", not just the
-            note's creator — unlike the `edit_code` bypass (see "Edit codes and ownership"
-            above), `private` is not owner-scoped, so it does not isolate the note from other
-            users on a multi-user instance. Meaningful when the server is started with
-            `--auth-tokens` and/or `--enable-accounts`.
+            Who may read the note: `public` (anyone), `authenticated` (any valid bearer token or
+            session, not just the creator), or `owner` (only the exact credential that created
+            it — see "Edit codes and ownership" above). Meaningful when the server is started
+            with `--auth-tokens` and/or `--enable-accounts`; `owner` additionally requires the
+            note to actually have an owner, i.e. `--enable-accounts` and an authenticated caller
+            — otherwise the request is rejected with `422`.
 
     UpdateNoteRequest:
       type: object
@@ -341,11 +347,12 @@ components:
             Only meaningful when `burn_after_reading` is `true`.
             `0` means the note is deleted immediately when it is first revealed.
           example: 3600
-        private:
-          type: boolean
+        privacy:
+          type: string
+          enum: ["public", "authenticated", "owner"]
           description: |
-            Update the private flag. See `CreateNoteRequest.private` for the exact semantics
-            (requires login, not owner-only).
+            Update the privacy level. See `CreateNoteRequest.privacy` for the exact semantics of
+            each value. Omitted keeps the note's current privacy level.
 
     NoteResponse:
       type: object
@@ -376,12 +383,12 @@ components:
             `true` until the first read (or permanently `false` for non-burn notes).
             After the first read of a note with a TTL this becomes `false` and `expires_at`
             is set.
-        private:
-          type: boolean
+        privacy:
+          type: string
+          enum: ["public", "authenticated", "owner"]
           description: |
-            `true` when the note requires a valid credential (bearer token or authenticated
-            session) to view — any authenticated caller, not just the note's creator (notes
-            have no owner). `false` for publicly accessible notes.
+            Who may read the note. See `CreateNoteRequest.privacy` for the exact semantics of
+            each value.
         expires_at:
           type: string
           format: date-time

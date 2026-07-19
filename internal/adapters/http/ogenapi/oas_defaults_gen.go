@@ -13,7 +13,7 @@ func (s *CreateNoteRequest) setDefaults() {
 		s.BurnAfterReading.SetTo(val)
 	}
 	{
-		val := bool(false)
-		s.Private.SetTo(val)
+		val := CreateNoteRequestPrivacy("public")
+		s.Privacy.SetTo(val)
 	}
 }
