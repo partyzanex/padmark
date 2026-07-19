@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/suite"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/sqlitedialect"
@@ -307,6 +308,7 @@ func (s *RepositoryTestSuite) TestCreate_AllFields() {
 	ctx := s.T().Context()
 
 	future := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
+	owner := uuid.New()
 	note := &domain.Note{
 		ID:               "all-fields",
 		Title:            "title",
@@ -316,7 +318,7 @@ func (s *RepositoryTestSuite) TestCreate_AllFields() {
 		ExpiresAt:        &future,
 		BurnAfterReading: true,
 		BurnTTL:          3600,
-		OwnerID:          new("user-1"),
+		OwnerID:          &owner,
 		CreatedAt:        time.Now(),
 		UpdatedAt:        time.Now(),
 	}
@@ -330,7 +332,7 @@ func (s *RepositoryTestSuite) TestCreate_AllFields() {
 	s.Equal(new(domain.ContentTypePlain), got.ContentType)
 	s.NotNil(got.ExpiresAt)
 	s.Require().NotNil(got.OwnerID)
-	s.Equal("user-1", *got.OwnerID)
+	s.Equal(owner, *got.OwnerID)
 }
 
 // TestCreate_NoOwnerID verifies an anonymously-created note (no authenticated caller) persists
@@ -351,20 +353,22 @@ func (s *RepositoryTestSuite) TestCreate_NoOwnerID() {
 func (s *RepositoryTestSuite) TestUpdate_PreservesOwnerID() {
 	ctx := s.T().Context()
 
+	owner := uuid.New()
+	attacker := uuid.New()
 	note := &domain.Note{
-		ID: "owned", Title: "t", Content: "c", OwnerID: new("user-1"),
+		ID: "owned", Title: "t", Content: "c", OwnerID: &owner,
 		CreatedAt: time.Now(), UpdatedAt: time.Now(),
 	}
 	s.Require().NoError(s.repo.Create(ctx, note))
 
 	s.Require().NoError(s.repo.Update(ctx, "owned", &domain.Note{
-		Title: "updated", Content: "new", OwnerID: new("attacker"),
+		Title: "updated", Content: "new", OwnerID: &attacker,
 	}))
 
 	got, err := s.repo.Get(ctx, "owned")
 	s.Require().NoError(err)
 	s.Require().NotNil(got.OwnerID)
-	s.Equal("user-1", *got.OwnerID, "owner_id must be immutable via Update, even if a caller sets it")
+	s.Equal(owner, *got.OwnerID, "owner_id must be immutable via Update, even if a caller sets it")
 }
 
 // IncrementViews

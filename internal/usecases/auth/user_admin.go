@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/google/uuid"
+
 	"github.com/partyzanex/padmark/internal/domain"
 )
 
@@ -19,7 +21,7 @@ func NewUserAdminManager(users UserStore) *UserAdminManager {
 
 // ListUsers returns all registered users for the admin panel.
 // Returns domain.ErrForbidden when the caller is not an admin.
-func (m *UserAdminManager) ListUsers(ctx context.Context, adminUserID string) ([]*domain.User, error) {
+func (m *UserAdminManager) ListUsers(ctx context.Context, adminUserID uuid.UUID) ([]*domain.User, error) {
 	admin, err := m.users.GetByID(ctx, adminUserID)
 	if err != nil {
 		return nil, fmt.Errorf("get admin user: %w", err)
@@ -41,7 +43,7 @@ func (m *UserAdminManager) ListUsers(ctx context.Context, adminUserID string) ([
 //   - the caller is not an admin
 //   - the caller tries to revoke themselves
 //   - the target is the last admin (would open the bootstrap hole)
-func (m *UserAdminManager) RevokeUser(ctx context.Context, adminUserID, targetUserID string) error {
+func (m *UserAdminManager) RevokeUser(ctx context.Context, adminUserID, targetUserID uuid.UUID) error {
 	if adminUserID == targetUserID {
 		return domain.ErrForbidden
 	}

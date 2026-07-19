@@ -4,6 +4,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // ContentType represents the content format of a note.
@@ -34,7 +36,7 @@ type Note struct {
 	// OwnerID is the ID of the user who created the note while authenticated (session or API
 	// token); nil for anonymous notes. Lets Update/Delete bypass EditCode for the exact creator
 	// — see notes.Manager.Update/Delete.
-	OwnerID          *string
+	OwnerID          *uuid.UUID
 	ID               string
 	Title            string
 	Content          string
@@ -75,4 +77,10 @@ func (n *Note) Validate() error {
 	}
 
 	return nil
+}
+
+// OwnedBy reports whether userID is the authenticated user who created n — see OwnerID. A nil
+// userID (anonymous caller, uuid.Nil) or an unowned note (created anonymously) never match.
+func (n *Note) OwnedBy(userID uuid.UUID) bool {
+	return userID != uuid.Nil && n.OwnerID != nil && *n.OwnerID == userID
 }

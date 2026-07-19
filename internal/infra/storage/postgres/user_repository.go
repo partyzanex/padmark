@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/driver/pgdriver"
 
@@ -19,12 +20,12 @@ type userRow struct {
 
 	CreatedAt       time.Time  `bun:"created_at,notnull"`
 	LastLoginAt     *time.Time `bun:"last_login_at"`
-	ID              string     `bun:"id,pk"`
 	Username        string     `bun:"username,notnull"`
 	TOTPSecret      string     `bun:"totp_secret,notnull"`
 	PasswordHash    string     `bun:"password_hash,notnull"`
 	KDFSalt         string     `bun:"kdf_salt,notnull"`
 	LastTOTPCounter int64      `bun:"last_totp_counter,notnull"`
+	ID              uuid.UUID  `bun:"id,pk"`
 	IsAdmin         bool       `bun:"is_admin,notnull"`
 }
 
@@ -112,7 +113,7 @@ func (r *UserRepository) GetByUsername(ctx context.Context, username string) (*d
 }
 
 // GetByID fetches a user by primary key. Returns domain.ErrNotFound when absent.
-func (r *UserRepository) GetByID(ctx context.Context, id string) (*domain.User, error) {
+func (r *UserRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.User, error) {
 	var row userRow
 
 	err := r.db.NewSelect().Model(&row).Where("id = ?", id).Scan(ctx)
@@ -128,7 +129,7 @@ func (r *UserRepository) GetByID(ctx context.Context, id string) (*domain.User, 
 }
 
 // UpdateLastLogin sets last_login_at for the given user ID.
-func (r *UserRepository) UpdateLastLogin(ctx context.Context, id string, t time.Time) error {
+func (r *UserRepository) UpdateLastLogin(ctx context.Context, id uuid.UUID, t time.Time) error {
 	_, err := r.db.NewUpdate().
 		TableExpr("users").
 		Set("last_login_at = ?", t).
@@ -159,7 +160,7 @@ func (r *UserRepository) List(ctx context.Context) ([]*domain.User, error) {
 }
 
 // Revoke deletes the user record by ID.
-func (r *UserRepository) Revoke(ctx context.Context, id string) error {
+func (r *UserRepository) Revoke(ctx context.Context, id uuid.UUID) error {
 	_, err := r.db.NewDelete().TableExpr("users").Where("id = ?", id).Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("revoke user: %w", err)
@@ -171,7 +172,7 @@ func (r *UserRepository) Revoke(ctx context.Context, id string) error {
 // UpdateTOTPCounter atomically advances last_totp_counter only when counter is
 // strictly greater than the stored value. Returns true when the update applied
 // (code accepted) and false when it was a replay (stored counter >= counter).
-func (r *UserRepository) UpdateTOTPCounter(ctx context.Context, id string, counter int64) (bool, error) {
+func (r *UserRepository) UpdateTOTPCounter(ctx context.Context, id uuid.UUID, counter int64) (bool, error) {
 	res, err := r.db.NewUpdate().
 		TableExpr("users").
 		Set("last_totp_counter = ?", counter).
@@ -193,7 +194,7 @@ func (r *UserRepository) UpdateTOTPCounter(ctx context.Context, id string, count
 // UpdatePassword atomically replaces password_hash, kdf_salt, and totp_secret.
 // kdfSalt is raw bytes; the repository encodes it as base64url before storage.
 func (r *UserRepository) UpdatePassword(
-	ctx context.Context, id, passwordHash string, kdfSalt []byte, totpSecret string,
+	ctx context.Context, id uuid.UUID, passwordHash string, kdfSalt []byte, totpSecret string,
 ) error {
 	_, err := r.db.NewUpdate().
 		TableExpr("users").

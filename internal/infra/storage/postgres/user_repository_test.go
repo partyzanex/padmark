@@ -82,7 +82,7 @@ func TestUserRepositoryTestSuite(t *testing.T) {
 
 func (s *UserRepositoryTestSuite) newUser(username string) *domain.User {
 	return &domain.User{
-		ID:           uuid.New().String(),
+		ID:           uuid.New(),
 		Username:     username,
 		TOTPSecret:   "totp-secret",
 		PasswordHash: "hash",
@@ -153,7 +153,7 @@ func (s *UserRepositoryTestSuite) TestGetByID_Found() {
 }
 
 func (s *UserRepositoryTestSuite) TestGetByID_NotFound_ReturnsErrNotFound() {
-	_, err := s.repo.GetByID(s.T().Context(), uuid.New().String())
+	_, err := s.repo.GetByID(s.T().Context(), uuid.New())
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
@@ -201,7 +201,7 @@ func (s *UserRepositoryTestSuite) TestUpdateLastLogin_SetsField() {
 }
 
 func (s *UserRepositoryTestSuite) TestUpdateLastLogin_NonExistentUser_NoError() {
-	err := s.repo.UpdateLastLogin(s.T().Context(), uuid.New().String(), time.Now())
+	err := s.repo.UpdateLastLogin(s.T().Context(), uuid.New(), time.Now())
 	s.Require().NoError(err)
 }
 
@@ -219,7 +219,7 @@ func (s *UserRepositoryTestSuite) TestRevoke_RemovesUser() {
 }
 
 func (s *UserRepositoryTestSuite) TestRevoke_NonExistentUser_NoError() {
-	err := s.repo.Revoke(s.T().Context(), uuid.New().String())
+	err := s.repo.Revoke(s.T().Context(), uuid.New())
 	s.Require().NoError(err)
 }
 
@@ -265,6 +265,6 @@ func (s *UserRepositoryTestSuite) TestUpdatePassword_KDFSalt_Base64RoundTrip() {
 }
 
 func (s *UserRepositoryTestSuite) TestUpdatePassword_NonExistentUser_NoError() {
-	err := s.repo.UpdatePassword(s.T().Context(), uuid.New().String(), "h", []byte("s"), "t")
+	err := s.repo.UpdatePassword(s.T().Context(), uuid.New(), "h", []byte("s"), "t")
 	s.Require().NoError(err)
 }

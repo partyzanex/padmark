@@ -10,6 +10,8 @@ import (
 
 	_ "embed"
 
+	"github.com/google/uuid"
+
 	"github.com/partyzanex/padmark/internal/domain"
 )
 
@@ -69,7 +71,7 @@ func userFromCtx(ctx context.Context) *domain.User {
 // ownerIDFromCtx returns the authenticated caller's user ID for stamping domain.Note.OwnerID at
 // creation, or nil for an anonymous caller (note stays unowned, exactly like before this field
 // existed).
-func ownerIDFromCtx(ctx context.Context) *string {
+func ownerIDFromCtx(ctx context.Context) *uuid.UUID {
 	usr := userFromCtx(ctx)
 	if usr == nil {
 		return nil
@@ -79,11 +81,11 @@ func ownerIDFromCtx(ctx context.Context) *string {
 }
 
 // callerIDFromCtx returns the authenticated caller's user ID for the owner-bypass check in
-// notes.Manager.Update/Delete, or "" for an anonymous caller (never matches an owner).
-func callerIDFromCtx(ctx context.Context) string {
+// notes.Manager.Update/Delete, or uuid.Nil for an anonymous caller (never matches an owner).
+func callerIDFromCtx(ctx context.Context) uuid.UUID {
 	usr := userFromCtx(ctx)
 	if usr == nil {
-		return ""
+		return uuid.Nil
 	}
 
 	return usr.ID

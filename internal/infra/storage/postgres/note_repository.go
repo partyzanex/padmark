@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/driver/pgdriver"
 
@@ -20,7 +21,7 @@ type note struct {
 	CreatedAt        time.Time  `bun:"created_at"`
 	UpdatedAt        time.Time  `bun:"updated_at"`
 	ExpiresAt        *time.Time `bun:"expires_at"`
-	OwnerID          *string    `bun:"owner_id"`
+	OwnerID          *uuid.UUID `bun:"owner_id"`
 	Content          string     `bun:"content"`
 	Title            string     `bun:"title"`
 	ContentType      string     `bun:"content_type"`

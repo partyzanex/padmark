@@ -51,7 +51,7 @@ func (m *OnboardingManager) IsEmpty(ctx context.Context) (bool, error) {
 
 // GenerateInvite creates a single-use invite link for adminUserID.
 // Returns domain.ErrForbidden when the caller is not an admin.
-func (m *OnboardingManager) GenerateInvite(ctx context.Context, adminUserID string) (string, error) {
+func (m *OnboardingManager) GenerateInvite(ctx context.Context, adminUserID uuid.UUID) (string, error) {
 	admin, err := m.users.GetByID(ctx, adminUserID)
 	if err != nil {
 		return "", fmt.Errorf("get admin user: %w", err)
@@ -170,7 +170,7 @@ func (m *OnboardingManager) buildUser(username, password string, isAdmin bool) (
 	}
 
 	usr := &domain.User{
-		ID:           uuid.New().String(),
+		ID:           uuid.New(),
 		Username:     username,
 		TOTPSecret:   encSecret,
 		PasswordHash: pwHash,

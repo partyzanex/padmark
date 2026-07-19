@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/uptrace/bun"
 
 	"github.com/partyzanex/padmark/internal/domain"
@@ -25,8 +26,8 @@ type inviteRow struct {
 	ExpiresAt time.Time  `bun:"expires_at,notnull"`
 	UsedAt    *time.Time `bun:"used_at"`
 	Token     string     `bun:"token,pk"`
-	CreatedBy string     `bun:"created_by,notnull"`
 	UsedBy    string     `bun:"used_by"`
+	CreatedBy uuid.UUID  `bun:"created_by,notnull"`
 }
 
 func (r *inviteRow) toDomain() *domain.Invite {
@@ -54,7 +55,7 @@ func NewInviteRepository(db *bun.DB) *InviteRepository {
 // Expired and consumed tokens are lazily swept on each call.
 //
 //nolint:dupl // token-issuing pattern is identical across token table types by design
-func (r *InviteRepository) Issue(ctx context.Context, createdByID string) (string, error) {
+func (r *InviteRepository) Issue(ctx context.Context, createdByID uuid.UUID) (string, error) {
 	buf := make([]byte, inviteTokenBytes)
 
 	_, err := rand.Read(buf)

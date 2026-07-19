@@ -25,16 +25,16 @@ var testArgon2Params = crypto.Argon2Params{Memory: 8 * 1024, Time: 1, Threads: 1
 type userRepo interface {
 	Create(ctx context.Context, u *domain.User) error
 	GetByUsername(ctx context.Context, username string) (*domain.User, error)
-	GetByID(ctx context.Context, id string) (*domain.User, error)
+	GetByID(ctx context.Context, id uuid.UUID) (*domain.User, error)
 	List(ctx context.Context) ([]*domain.User, error)
-	UpdateLastLogin(ctx context.Context, id string, t time.Time) error
-	UpdatePassword(ctx context.Context, id, passwordHash string, kdfSalt []byte, totpSecret string) error
-	UpdateTOTPCounter(ctx context.Context, id string, counter int64) (bool, error)
-	Revoke(ctx context.Context, id string) error
+	UpdateLastLogin(ctx context.Context, id uuid.UUID, t time.Time) error
+	UpdatePassword(ctx context.Context, id uuid.UUID, passwordHash string, kdfSalt []byte, totpSecret string) error
+	UpdateTOTPCounter(ctx context.Context, id uuid.UUID, counter int64) (bool, error)
+	Revoke(ctx context.Context, id uuid.UUID) error
 }
 
 type inviteRepo interface {
-	Issue(ctx context.Context, createdByID string) (string, error)
+	Issue(ctx context.Context, createdByID uuid.UUID) (string, error)
 	Consume(ctx context.Context, token, username string) (*domain.Invite, error)
 	RedeemInvite(ctx context.Context, token, username string, usr *domain.User) error
 }
@@ -43,8 +43,8 @@ type sessionRepo interface {
 	Create(ctx context.Context, s *domain.Session) error
 	Get(ctx context.Context, sessionID string) (*domain.Session, error)
 	Delete(ctx context.Context, sessionID string) error
-	DeleteByUserID(ctx context.Context, userID string) error
-	DeleteByUserIDExcept(ctx context.Context, userID, exceptSessionID string) error
+	DeleteByUserID(ctx context.Context, userID uuid.UUID) error
+	DeleteByUserIDExcept(ctx context.Context, userID uuid.UUID, exceptSessionID string) error
 	DeleteExpired(ctx context.Context) error
 }
 
@@ -67,7 +67,7 @@ const testTOTPSecret = "JBSWY3DPEHPK3PXP"
 
 func (s *AuthSuite) newUser(username string) *domain.User {
 	return &domain.User{
-		ID:         uuid.New().String(),
+		ID:         uuid.New(),
 		Username:   username,
 		TOTPSecret: testTOTPSecret,
 		IsAdmin:    false,
@@ -121,7 +121,7 @@ func (s *AuthSuite) TestUser_GetByID() {
 }
 
 func (s *AuthSuite) TestUser_GetByID_NotFound() {
-	_, err := s.Users.GetByID(s.T().Context(), uuid.New().String())
+	_, err := s.Users.GetByID(s.T().Context(), uuid.New())
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 

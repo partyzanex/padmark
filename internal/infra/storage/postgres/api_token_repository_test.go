@@ -83,10 +83,10 @@ func TestAPITokenRepositoryTestSuite(t *testing.T) {
 }
 
 // createUser inserts a test user and returns the generated UUID (user_id is UUID in Postgres).
-func (s *APITokenRepositoryTestSuite) createUser(suffix string) string {
+func (s *APITokenRepositoryTestSuite) createUser(suffix string) uuid.UUID {
 	s.T().Helper()
 
-	id := uuid.New().String()
+	id := uuid.New()
 	err := s.users.Create(s.T().Context(), &domain.User{
 		ID:           id,
 		Username:     "user-" + suffix,
@@ -100,7 +100,7 @@ func (s *APITokenRepositoryTestSuite) createUser(suffix string) string {
 	return id
 }
 
-func (s *APITokenRepositoryTestSuite) newToken(userID, hash string) *domain.APIToken {
+func (s *APITokenRepositoryTestSuite) newToken(userID uuid.UUID, hash string) *domain.APIToken {
 	return &domain.APIToken{
 		UserID:    userID,
 		TokenHash: hash,

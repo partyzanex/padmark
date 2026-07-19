@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/uptrace/bun"
@@ -44,12 +45,12 @@ func TestAPITokenRepositoryTestSuite(t *testing.T) {
 	suite.Run(t, new(APITokenRepositoryTestSuite))
 }
 
-func (s *APITokenRepositoryTestSuite) createUser(id string) {
+func (s *APITokenRepositoryTestSuite) createUser(id uuid.UUID) {
 	s.T().Helper()
 
 	err := s.users.Create(s.T().Context(), &domain.User{
 		ID:           id,
-		Username:     "user-" + id,
+		Username:     "user-" + id.String(),
 		TOTPSecret:   "secret",
 		PasswordHash: "hash",
 		KDFSalt:      []byte("saltsaltsalt1234"),
@@ -58,7 +59,7 @@ func (s *APITokenRepositoryTestSuite) createUser(id string) {
 	s.Require().NoError(err)
 }
 
-func (s *APITokenRepositoryTestSuite) newToken(userID, hash string) *domain.APIToken {
+func (s *APITokenRepositoryTestSuite) newToken(userID uuid.UUID, hash string) *domain.APIToken {
 	return &domain.APIToken{
 		UserID:    userID,
 		TokenHash: hash,
@@ -70,9 +71,10 @@ func (s *APITokenRepositoryTestSuite) newToken(userID, hash string) *domain.APIT
 
 func (s *APITokenRepositoryTestSuite) TestCreate_GetByHash_RoundTrip() {
 	ctx := s.T().Context()
-	s.createUser("u1")
+	u1 := uuid.New()
+	s.createUser(u1)
 
-	tok := s.newToken("u1", "hash-1")
+	tok := s.newToken(u1, "hash-1")
 	s.Require().NoError(s.repo.Create(ctx, tok))
 
 	got, err := s.repo.GetByHash(ctx, "hash-1")
@@ -91,10 +93,11 @@ func (s *APITokenRepositoryTestSuite) TestGetByHash_Unknown_ReturnsErrNotFound()
 
 func (s *APITokenRepositoryTestSuite) TestCreate_WithExpiresAt_RoundTrip() {
 	ctx := s.T().Context()
-	s.createUser("u2")
+	u2 := uuid.New()
+	s.createUser(u2)
 
 	exp := time.Now().Add(time.Hour).Truncate(time.Second)
-	tok := s.newToken("u2", "hash-exp")
+	tok := s.newToken(u2, "hash-exp")
 	tok.ExpiresAt = &exp
 	s.Require().NoError(s.repo.Create(ctx, tok))
 
@@ -108,17 +111,18 @@ func (s *APITokenRepositoryTestSuite) TestCreate_WithExpiresAt_RoundTrip() {
 
 func (s *APITokenRepositoryTestSuite) TestList_ReturnsNewestFirst() {
 	ctx := s.T().Context()
-	s.createUser("u3")
+	tokenOwner := uuid.New()
+	s.createUser(tokenOwner)
 
 	now := time.Now().Truncate(time.Second)
 
-	newest := s.newToken("u3", "h-new")
+	newest := s.newToken(tokenOwner, "h-new")
 	newest.CreatedAt = now
 
-	middle := s.newToken("u3", "h-mid")
+	middle := s.newToken(tokenOwner, "h-mid")
 	middle.CreatedAt = now.Add(-time.Hour)
 
-	oldest := s.newToken("u3", "h-old")
+	oldest := s.newToken(tokenOwner, "h-old")
 	oldest.CreatedAt = now.Add(-2 * time.Hour)
 
 	// Insert out of chronological order to prove ordering is by created_at, not insertion.
@@ -144,22 +148,26 @@ func (s *APITokenRepositoryTestSuite) TestList_Empty_ReturnsEmpty() {
 
 func (s *APITokenRepositoryTestSuite) TestCountByUser_CountsOnlyThatUsersTokens() {
 	ctx := s.T().Context()
-	s.createUser("count-a")
-	s.createUser("count-b")
+	countA := uuid.New()
+	countB := uuid.New()
 
-	s.Require().NoError(s.repo.Create(ctx, s.newToken("count-a", "count-a-1")))
-	s.Require().NoError(s.repo.Create(ctx, s.newToken("count-a", "count-a-2")))
-	s.Require().NoError(s.repo.Create(ctx, s.newToken("count-b", "count-b-1")))
+	s.createUser(countA)
+	s.createUser(countB)
 
-	count, err := s.repo.CountByUser(ctx, "count-a")
+	s.Require().NoError(s.repo.Create(ctx, s.newToken(countA, "count-a-1")))
+	s.Require().NoError(s.repo.Create(ctx, s.newToken(countA, "count-a-2")))
+	s.Require().NoError(s.repo.Create(ctx, s.newToken(countB, "count-b-1")))
+
+	count, err := s.repo.CountByUser(ctx, countA)
 	s.Require().NoError(err)
 	s.Equal(2, count)
 }
 
 func (s *APITokenRepositoryTestSuite) TestCountByUser_NoTokens_ReturnsZero() {
-	s.createUser("count-none")
+	countNone := uuid.New()
+	s.createUser(countNone)
 
-	count, err := s.repo.CountByUser(s.T().Context(), "count-none")
+	count, err := s.repo.CountByUser(s.T().Context(), countNone)
 	s.Require().NoError(err)
 	s.Equal(0, count)
 }
@@ -168,9 +176,10 @@ func (s *APITokenRepositoryTestSuite) TestCountByUser_NoTokens_ReturnsZero() {
 
 func (s *APITokenRepositoryTestSuite) TestRevokeByHash_RemovesToken() {
 	ctx := s.T().Context()
-	s.createUser("u4")
+	u4 := uuid.New()
+	s.createUser(u4)
 
-	tok := s.newToken("u4", "hash-del")
+	tok := s.newToken(u4, "hash-del")
 	s.Require().NoError(s.repo.Create(ctx, tok))
 	s.Require().NoError(s.repo.RevokeByHash(ctx, "hash-del"))
 
@@ -187,9 +196,10 @@ func (s *APITokenRepositoryTestSuite) TestRevokeByHash_Unknown_ReturnsErrNotFoun
 
 func (s *APITokenRepositoryTestSuite) TestUpdateLastUsed_SetsTimestamp() {
 	ctx := s.T().Context()
-	s.createUser("u5")
+	u5 := uuid.New()
+	s.createUser(u5)
 
-	tok := s.newToken("u5", "hash-lu")
+	tok := s.newToken(u5, "hash-lu")
 	s.Require().NoError(s.repo.Create(ctx, tok))
 
 	used := time.Now().Add(time.Minute).Truncate(time.Second)
@@ -233,7 +243,7 @@ func TestCreate_CascadesWithUser(t *testing.T) {
 	tokens := NewAPITokenRepository(db)
 
 	usr := &domain.User{
-		ID: "owner-id", Username: "owner", TOTPSecret: "s", PasswordHash: "h",
+		ID: uuid.New(), Username: "owner", TOTPSecret: "s", PasswordHash: "h",
 		KDFSalt: []byte("saltsaltsalt1234"), CreatedAt: time.Now().Truncate(time.Second),
 	}
 	require.NoError(t, users.Create(ctx, usr))

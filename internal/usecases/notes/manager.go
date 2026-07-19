@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/partyzanex/padmark/internal/domain"
 )
 
@@ -351,10 +353,11 @@ func (m *Manager) ViewPreloaded(ctx context.Context, id string, preloaded *domai
 // The caller must supply the correct edit code.
 // Update replaces a note's editable fields. The caller must either supply the note's edit_code,
 // or be the note's owner (callerID matches existing.OwnerID) — the latter lets an authenticated
-// creator (session or API token) edit without the edit_code. callerID is "" for an anonymous
-// caller, which never matches an owner and falls back to the edit_code check unconditionally.
+// creator (session or API token) edit without the edit_code. callerID is uuid.Nil for an
+// anonymous caller, which never matches an owner and falls back to the edit_code check
+// unconditionally.
 func (m *Manager) Update(
-	ctx context.Context, id, editCode, callerID string, note *domain.Note,
+	ctx context.Context, id, editCode string, callerID uuid.UUID, note *domain.Note,
 ) (*domain.Note, error) {
 	err := note.Validate()
 	if err != nil {
@@ -368,7 +371,7 @@ func (m *Manager) Update(
 		return nil, fmt.Errorf("update note: %w", err)
 	}
 
-	if !isOwner(existing, callerID) && !m.hasher.Verify(existing.EditCode, editCode) {
+	if !existing.OwnedBy(callerID) && !m.hasher.Verify(existing.EditCode, editCode) {
 		return nil, domain.ErrInvalidEditCode
 	}
 
@@ -406,6 +409,12 @@ func (m *Manager) Update(
 	// instead of leaking the plaintext code.
 	note.EditCode = existing.EditCode
 
+	// Ownership is fixed at creation and Update must never let a caller-supplied OwnerID change
+	// it — pin it to the existing value (not nil) for the same reason EditCode is pinned above:
+	// the repository Update column list excludes owner_id today, but if that ever changes this
+	// keeps the real owner instead of nil silently disabling the bypass for the note's own owner.
+	note.OwnerID = existing.OwnerID
+
 	encrypted, encErr := m.encryptor.Encrypt(note.Content, id)
 	if encErr != nil {
 		return nil, fmt.Errorf("encrypt content: %w", encErr)
@@ -425,7 +434,7 @@ func (m *Manager) Update(
 
 // Delete removes a note by ID after verifying the edit code, or that the caller is the note's
 // owner — see Update for the exact bypass semantics.
-func (m *Manager) Delete(ctx context.Context, id, editCode, callerID string) error {
+func (m *Manager) Delete(ctx context.Context, id, editCode string, callerID uuid.UUID) error {
 	dbID := domain.HashSlug(id)
 
 	existing, err := m.storage.Get(ctx, dbID)
@@ -433,7 +442,7 @@ func (m *Manager) Delete(ctx context.Context, id, editCode, callerID string) err
 		return fmt.Errorf("delete note: %w", err)
 	}
 
-	if !isOwner(existing, callerID) && !m.hasher.Verify(existing.EditCode, editCode) {
+	if !existing.OwnedBy(callerID) && !m.hasher.Verify(existing.EditCode, editCode) {
 		return domain.ErrInvalidEditCode
 	}
 
@@ -443,12 +452,6 @@ func (m *Manager) Delete(ctx context.Context, id, editCode, callerID string) err
 	}
 
 	return nil
-}
-
-// isOwner reports whether callerID is the authenticated user who created note. An anonymous
-// caller (callerID == "") or an anonymously-created note (note.OwnerID == nil) never matches.
-func isOwner(note *domain.Note, callerID string) bool {
-	return callerID != "" && note.OwnerID != nil && *note.OwnerID == callerID
 }
 
 // GetRendered fetches a note, increments its view counter, and returns it with content as safe HTML.

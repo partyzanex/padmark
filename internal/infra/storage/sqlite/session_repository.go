@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/uptrace/bun"
 
 	"github.com/partyzanex/padmark/internal/domain"
@@ -18,9 +19,9 @@ type sessionRow struct {
 	CreatedAt time.Time `bun:"created_at,notnull"`
 	ExpiresAt time.Time `bun:"expires_at,notnull"`
 	SessionID string    `bun:"session_id,pk"`
-	UserID    string    `bun:"user_id,notnull"`
 	UserAgent string    `bun:"user_agent"`
 	IP        string    `bun:"ip"`
+	UserID    uuid.UUID `bun:"user_id,notnull"`
 }
 
 func toSessionRow(sess *domain.Session) *sessionRow {
@@ -105,7 +106,7 @@ func (r *SessionRepository) Delete(ctx context.Context, sessionID string) error 
 }
 
 // DeleteByUserIDExcept removes all sessions for the user except the specified one.
-func (r *SessionRepository) DeleteByUserIDExcept(ctx context.Context, userID, exceptSessionID string) error {
+func (r *SessionRepository) DeleteByUserIDExcept(ctx context.Context, userID uuid.UUID, exceptSessionID string) error {
 	_, err := r.db.NewDelete().
 		TableExpr("sessions").
 		Where("user_id = ?", userID).
@@ -119,7 +120,7 @@ func (r *SessionRepository) DeleteByUserIDExcept(ctx context.Context, userID, ex
 }
 
 // DeleteByUserID removes all sessions belonging to the given user.
-func (r *SessionRepository) DeleteByUserID(ctx context.Context, userID string) error {
+func (r *SessionRepository) DeleteByUserID(ctx context.Context, userID uuid.UUID) error {
 	_, err := r.db.NewDelete().
 		TableExpr("sessions").
 		Where("user_id = ?", userID).

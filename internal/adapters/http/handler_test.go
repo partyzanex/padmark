@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/mock/gomock"
 
@@ -957,7 +958,7 @@ func (s *HandlerSuite) TestUpdateNote_OK() {
 		CreatedAt:   createdAt,
 		UpdatedAt:   time.Now(),
 	}
-	s.manager.EXPECT().Update(gomock.Any(), testID, "editcode1234", "", gomock.Any()).Return(updated, nil)
+	s.manager.EXPECT().Update(gomock.Any(), testID, "editcode1234", uuid.Nil, gomock.Any()).Return(updated, nil)
 
 	body := `{"title":"new title","content":"new content","edit_code":"editcode1234"}`
 	w := httptest.NewRecorder()
@@ -979,8 +980,8 @@ func (s *HandlerSuite) TestUpdateNote_OK() {
 func (s *HandlerSuite) TestUpdateNote_WithTTL() {
 	updated := newTestNote("updated", "body")
 
-	s.manager.EXPECT().Update(gomock.Any(), testID, "code", "", gomock.Any()).
-		DoAndReturn(func(_ context.Context, _, _, _ string, n *domain.Note) (*domain.Note, error) {
+	s.manager.EXPECT().Update(gomock.Any(), testID, "code", uuid.Nil, gomock.Any()).
+		DoAndReturn(func(_ context.Context, _, _ string, _ uuid.UUID, n *domain.Note) (*domain.Note, error) {
 			s.True(n.BurnAfterReading)
 			s.Equal(int64(3600), n.BurnTTL)
 			s.Nil(n.ExpiresAt) // expiry is set on first read, not at update time
@@ -1001,8 +1002,8 @@ func (s *HandlerSuite) TestUpdateNote_WithTTL() {
 func (s *HandlerSuite) TestUpdateNote_ImmediateBurn() {
 	updated := newTestNote("updated", "body")
 
-	s.manager.EXPECT().Update(gomock.Any(), testID, "code", "", gomock.Any()).
-		DoAndReturn(func(_ context.Context, _, _, _ string, n *domain.Note) (*domain.Note, error) {
+	s.manager.EXPECT().Update(gomock.Any(), testID, "code", uuid.Nil, gomock.Any()).
+		DoAndReturn(func(_ context.Context, _, _ string, _ uuid.UUID, n *domain.Note) (*domain.Note, error) {
 			s.True(n.BurnAfterReading)
 			s.Equal(int64(0), n.BurnTTL)
 			s.Nil(n.ExpiresAt)
@@ -1023,8 +1024,8 @@ func (s *HandlerSuite) TestUpdateNote_ImmediateBurn() {
 func (s *HandlerSuite) TestUpdateNote_WithPrivate() {
 	updated := newTestNote("updated", "body")
 
-	s.manager.EXPECT().Update(gomock.Any(), testID, "code", "", gomock.Any()).
-		DoAndReturn(func(_ context.Context, _, _, _ string, n *domain.Note) (*domain.Note, error) {
+	s.manager.EXPECT().Update(gomock.Any(), testID, "code", uuid.Nil, gomock.Any()).
+		DoAndReturn(func(_ context.Context, _, _ string, _ uuid.UUID, n *domain.Note) (*domain.Note, error) {
 			s.True(n.Private != nil && *n.Private)
 
 			return updated, nil
@@ -1041,7 +1042,7 @@ func (s *HandlerSuite) TestUpdateNote_WithPrivate() {
 }
 
 func (s *HandlerSuite) TestUpdateNote_NotFound() {
-	s.manager.EXPECT().Update(gomock.Any(), "missing", "", "", gomock.Any()).Return(nil, domain.ErrNotFound)
+	s.manager.EXPECT().Update(gomock.Any(), "missing", "", uuid.Nil, gomock.Any()).Return(nil, domain.ErrNotFound)
 
 	body := `{"title":"title","content":"content","edit_code":""}`
 	w := httptest.NewRecorder()
@@ -1054,7 +1055,7 @@ func (s *HandlerSuite) TestUpdateNote_NotFound() {
 }
 
 func (s *HandlerSuite) TestUpdateNote_Forbidden() {
-	s.manager.EXPECT().Update(gomock.Any(), testID, "wrong", "", gomock.Any()).Return(nil, domain.ErrInvalidEditCode)
+	s.manager.EXPECT().Update(gomock.Any(), testID, "wrong", uuid.Nil, gomock.Any()).Return(nil, domain.ErrInvalidEditCode)
 
 	body := `{"title":"title","content":"content","edit_code":"wrong"}`
 	w := httptest.NewRecorder()
@@ -1078,7 +1079,7 @@ func (s *HandlerSuite) TestUpdateNote_MultiSegmentSlug_ByURL_Acceptance() {
 	const mid = "project/GUIDE.md"
 
 	updated := newTestNote("Guide", "new body")
-	s.manager.EXPECT().Update(gomock.Any(), mid, "code", "", gomock.Any()).Return(updated, nil)
+	s.manager.EXPECT().Update(gomock.Any(), mid, "code", uuid.Nil, gomock.Any()).Return(updated, nil)
 
 	body := `{"title":"Guide","content":"new body","edit_code":"code"}`
 	w := httptest.NewRecorder()
@@ -1093,7 +1094,7 @@ func (s *HandlerSuite) TestUpdateNote_MultiSegmentSlug_ByURL_Acceptance() {
 func (s *HandlerSuite) TestDeleteNote_MultiSegmentSlug_ByURL_Acceptance() {
 	const mid = "project/GUIDE.md"
 
-	s.manager.EXPECT().Delete(gomock.Any(), mid, "code", "").Return(nil)
+	s.manager.EXPECT().Delete(gomock.Any(), mid, "code", uuid.Nil).Return(nil)
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodDelete, "/notes/"+mid+"?edit_code=code", nil)
@@ -1107,8 +1108,8 @@ func (s *HandlerSuite) TestDeleteNote_MultiSegmentSlug_ByURL_Acceptance() {
 // from a PUT request body, the handler passes Private=nil to manager.Update so that the
 // storage layer can COALESCE(NULL, private) and preserve the existing DB value.
 func (s *HandlerSuite) TestUpdateNote_OmittedPrivate_PreservesPrivacy() {
-	s.manager.EXPECT().Update(gomock.Any(), testID, "code", "", gomock.Any()).
-		DoAndReturn(func(_ context.Context, _, _, _ string, n *domain.Note) (*domain.Note, error) {
+	s.manager.EXPECT().Update(gomock.Any(), testID, "code", uuid.Nil, gomock.Any()).
+		DoAndReturn(func(_ context.Context, _, _ string, _ uuid.UUID, n *domain.Note) (*domain.Note, error) {
 			// nil means "don't change" — storage will COALESCE(NULL, private).
 			s.Nil(n.Private, "Private must be nil when omitted from the request, not defaulted to false")
 
@@ -1138,7 +1139,7 @@ func (s *HandlerSuite) TestUpdateNote_InvalidBody() {
 // ── DeleteNote ──
 
 func (s *HandlerSuite) TestDeleteNote_OK() {
-	s.manager.EXPECT().Delete(gomock.Any(), testID, "editcode1234", "").Return(nil)
+	s.manager.EXPECT().Delete(gomock.Any(), testID, "editcode1234", uuid.Nil).Return(nil)
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodDelete, "/notes/"+testID, nil)
@@ -1150,7 +1151,7 @@ func (s *HandlerSuite) TestDeleteNote_OK() {
 }
 
 func (s *HandlerSuite) TestDeleteNote_QueryParam() {
-	s.manager.EXPECT().Delete(gomock.Any(), testID, "fromquery", "").Return(nil)
+	s.manager.EXPECT().Delete(gomock.Any(), testID, "fromquery", uuid.Nil).Return(nil)
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodDelete, "/notes/"+testID+"?edit_code=fromquery", nil)
@@ -1161,7 +1162,7 @@ func (s *HandlerSuite) TestDeleteNote_QueryParam() {
 }
 
 func (s *HandlerSuite) TestDeleteNote_NotFound() {
-	s.manager.EXPECT().Delete(gomock.Any(), "nonexistent", "code", "").Return(domain.ErrNotFound)
+	s.manager.EXPECT().Delete(gomock.Any(), "nonexistent", "code", uuid.Nil).Return(domain.ErrNotFound)
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodDelete, "/notes/nonexistent", nil)
@@ -1173,7 +1174,7 @@ func (s *HandlerSuite) TestDeleteNote_NotFound() {
 }
 
 func (s *HandlerSuite) TestDeleteNote_Forbidden() {
-	s.manager.EXPECT().Delete(gomock.Any(), testID, "wrong", "").Return(domain.ErrInvalidEditCode)
+	s.manager.EXPECT().Delete(gomock.Any(), testID, "wrong", uuid.Nil).Return(domain.ErrInvalidEditCode)
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodDelete, "/notes/"+testID, nil)
@@ -1482,7 +1483,7 @@ func (s *HandlerSuite) TestRateLimit_DifferentIPs() {
 
 func (s *HandlerSuite) TestFailLockout_Lockout() {
 	s.manager.EXPECT().
-		Update(gomock.Any(), testID, "wrong", "", gomock.Any()).
+		Update(gomock.Any(), testID, "wrong", uuid.Nil, gomock.Any()).
 		Return(nil, domain.ErrForbidden).
 		Times(10)
 
@@ -1506,7 +1507,7 @@ func (s *HandlerSuite) TestFailLockout_Lockout() {
 func (s *HandlerSuite) TestFailLockout_NoIncrementOnSuccess() {
 	note := newTestNote("t", "c")
 	s.manager.EXPECT().
-		Update(gomock.Any(), testID, "valid", "", gomock.Any()).
+		Update(gomock.Any(), testID, "valid", uuid.Nil, gomock.Any()).
 		Return(note, nil).
 		Times(11)
 
@@ -1523,7 +1524,7 @@ func (s *HandlerSuite) TestFailLockout_NoIncrementOnSuccess() {
 
 func (s *HandlerSuite) TestFailLockout_NoIncrementOnNonForbiddenError() {
 	s.manager.EXPECT().
-		Update(gomock.Any(), testID, "wrong", "", gomock.Any()).
+		Update(gomock.Any(), testID, "wrong", uuid.Nil, gomock.Any()).
 		Return(nil, domain.ErrNotFound).
 		Times(11)
 
@@ -1540,7 +1541,7 @@ func (s *HandlerSuite) TestFailLockout_NoIncrementOnNonForbiddenError() {
 
 func (s *HandlerSuite) TestFailLockout_DeleteAlsoLocked() {
 	s.manager.EXPECT().
-		Delete(gomock.Any(), testID, "wrong", "").
+		Delete(gomock.Any(), testID, "wrong", uuid.Nil).
 		Return(domain.ErrForbidden).
 		Times(10)
 
@@ -1563,7 +1564,7 @@ func (s *HandlerSuite) TestFailLockout_IndependentPerNoteID() {
 	body := `{"title":"t","content":"c","edit_code":"wrong"}`
 
 	s.manager.EXPECT().
-		Update(gomock.Any(), testID, "wrong", "", gomock.Any()).
+		Update(gomock.Any(), testID, "wrong", uuid.Nil, gomock.Any()).
 		Return(nil, domain.ErrForbidden).
 		Times(10)
 
@@ -1583,7 +1584,7 @@ func (s *HandlerSuite) TestFailLockout_IndependentPerNoteID() {
 	const otherID = "other-note"
 
 	s.manager.EXPECT().
-		Update(gomock.Any(), otherID, "wrong", "", gomock.Any()).
+		Update(gomock.Any(), otherID, "wrong", uuid.Nil, gomock.Any()).
 		Return(nil, domain.ErrForbidden)
 
 	w = httptest.NewRecorder()
@@ -2419,7 +2420,7 @@ func (s *HandlerSuite) TestPrivateNote_TOTPMode_Unauthenticated() {
 func (s *HandlerSuite) TestPrivateNote_TOTPMode_Authenticated() {
 	note := newTestNote("secret", "private content")
 	note.Private = new(true)
-	usr := &domain.User{ID: "u1", Username: "alice"}
+	usr := &domain.User{ID: uuid.New(), Username: "alice"}
 
 	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
 	s.manager.EXPECT().GetRenderedPreloaded(gomock.Any(), testID, note).Return(note, "rendered", nil)
@@ -2465,7 +2466,7 @@ func (s *HandlerSuite) TestCanEdit_TOTPMode_Unauthenticated() {
 // user sees the edit button.
 func (s *HandlerSuite) TestCanEdit_TOTPMode_Authenticated() {
 	note := newTestNote("public note", "content")
-	usr := &domain.User{ID: "u1", Username: "alice"}
+	usr := &domain.User{ID: uuid.New(), Username: "alice"}
 
 	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
 	s.manager.EXPECT().GetRenderedPreloaded(gomock.Any(), testID, note).Return(note, "rendered", nil)

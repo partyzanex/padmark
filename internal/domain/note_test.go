@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -46,4 +47,21 @@ func TestNote_Validate_InvalidContentType(t *testing.T) {
 	note := &Note{Title: "ok", ContentType: &ct}
 
 	require.ErrorIs(t, note.Validate(), ErrInvalidContentType)
+}
+
+func TestNote_OwnedBy(t *testing.T) {
+	owner := uuid.New()
+	other := uuid.New()
+	note := &Note{OwnerID: &owner}
+
+	assert.True(t, note.OwnedBy(owner), "the exact owner must match")
+	assert.False(t, note.OwnedBy(other), "a different user must not match")
+	assert.False(t, note.OwnedBy(uuid.Nil), "an anonymous caller must never match")
+}
+
+func TestNote_OwnedBy_AnonymousNote(t *testing.T) {
+	note := &Note{} // OwnerID nil: created anonymously, or accounts disabled
+
+	assert.False(t, note.OwnedBy(uuid.New()), "an unowned note must never match, even an authenticated caller")
+	assert.False(t, note.OwnedBy(uuid.Nil))
 }

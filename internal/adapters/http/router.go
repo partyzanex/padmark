@@ -100,6 +100,10 @@ type RouterOptions struct {
 	// fed the same --session-ttl value so the cookie never outlives (or expires before) the
 	// session it represents. Zero falls back to auth.DefaultSessionTTL.
 	SessionTTL time.Duration
+	// DisableAPI turns off the REST/JSON API surface (/notes*, /api, /api/openapi.yaml): every
+	// request to it gets a fixed 503 before auth or any handler runs. The web UI and
+	// /healthz, /readyz keep working — see withAPIDisabled.
+	DisableAPI bool
 }
 
 // RouteRegistrar registers one concern's HTTP routes on mux. Each concern-specific handler
@@ -184,6 +188,11 @@ func NewRouter(
 	}
 
 	stack := withRecovery(handler.log, mux)
+
+	if opts.DisableAPI {
+		stack = withAPIDisabled(handler.log, stack)
+	}
+
 	stack = newAuthMiddleware(tokenSet, namedRoutes, checker, stack)
 	stack = withCSRFToken(csrfSecret, opts.TrustedProxies, stack)
 

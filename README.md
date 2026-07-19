@@ -263,6 +263,11 @@ curl -X DELETE http://localhost:4000/notes/{id} \
   -H "X-Edit-Code: JmNkn0LdjbMw"
 ```
 
+> `DELETE` also accepts `edit_code` as a `?edit_code=` query parameter (documented in the OpenAPI
+> spec, for manual/curl convenience). Prefer the `X-Edit-Code` header when you can — a query
+> string is more likely to end up in reverse-proxy/CDN access logs or a same-origin `Referer`
+> header. The CLI always uses the header, never the query parameter.
+
 **Update or delete without `edit_code`** — if the note was created by this same authenticated
 caller, `edit_code` can be omitted entirely; a Bearer token or session cookie is enough (see
 [Editing without `edit_code`](#editing-without-edit_code-owners)):
@@ -403,6 +408,7 @@ public or `private`.
 | `--dsn` | `PADMARK_DSN` | `padmark.db` | DB path or connection string |
 | `--auth-tokens` | `PADMARK_AUTH_TOKENS` | — | **Deprecated.** Legacy comma-separated Bearer tokens for write endpoints; superseded by the TOTP account system + admin API keys. Will be removed in a future release |
 | `--enable-accounts` | `PADMARK_ENABLE_ACCOUNTS` | `false` | Enable the TOTP account system (`/setup`, `/login`, `/admin`, private-note gating); off = fully public |
+| `--disable-api` | `PADMARK_DISABLE_API` | `false` | Disable the REST/JSON API (`/notes*`, `/api`, `/api/openapi.yaml`): every request to it gets `503` with `{"message": "До свидания"}`, before auth or any handler runs. The web UI and `/healthz`, `/readyz` keep working |
 | `--totp-issuer` | `PADMARK_TOTP_ISSUER` | `padmark` | TOTP issuer shown in the authenticator app |
 | `--session-ttl` | `PADMARK_SESSION_TTL` | `2592000` | Session lifetime in seconds (default 30 days) |
 | `--argon2-memory` | `PADMARK_ARGON2_MEMORY` | `24576` | argon2id memory cost in KiB for **account password** hashing (default 24 MiB); lower for low-RAM hosts. Edit codes use a fast hash and are unaffected |

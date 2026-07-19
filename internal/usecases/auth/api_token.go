@@ -9,6 +9,8 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/partyzanex/padmark/internal/domain"
 )
 
@@ -27,8 +29,8 @@ type APITokenInfo struct {
 	ExpiresAt  *time.Time
 	LastUsedAt *time.Time
 	ID         string
-	UserID     string
 	Username   string
+	UserID     uuid.UUID
 }
 
 // APITokenManager issues, resolves, lists, and revokes long-lived API tokens.
@@ -53,7 +55,7 @@ func NewAPITokenManager(apiTokens APITokenStore, users UserStore, log *slog.Logg
 // flow, not the resulting bearer.
 // Returns domain.ErrFeatureNotSupported when the API-token flow is not enabled on the Manager, and
 // domain.ErrAPITokenLimit when userID already holds maxAPITokensPerUser keys.
-func (m *APITokenManager) CreateAPIToken(ctx context.Context, userID string) (string, error) {
+func (m *APITokenManager) CreateAPIToken(ctx context.Context, userID uuid.UUID) (string, error) {
 	if m.apiTokens == nil {
 		return "", domain.ErrFeatureNotSupported
 	}
@@ -127,7 +129,7 @@ func (m *APITokenManager) ResolveAPIToken(ctx context.Context, plainToken string
 
 // ListAPITokens returns all API tokens with owning usernames for the admin panel.
 // Returns domain.ErrForbidden when the caller is not an admin.
-func (m *APITokenManager) ListAPITokens(ctx context.Context, adminUserID string) ([]*APITokenInfo, error) {
+func (m *APITokenManager) ListAPITokens(ctx context.Context, adminUserID uuid.UUID) ([]*APITokenInfo, error) {
 	if m.apiTokens == nil {
 		return nil, domain.ErrFeatureNotSupported
 	}
@@ -152,7 +154,7 @@ func (m *APITokenManager) ListAPITokens(ctx context.Context, adminUserID string)
 		return nil, fmt.Errorf("list users: %w", err)
 	}
 
-	usernames := make(map[string]string, len(users))
+	usernames := make(map[uuid.UUID]string, len(users))
 	for _, usr := range users {
 		usernames[usr.ID] = usr.Username
 	}
@@ -174,7 +176,7 @@ func (m *APITokenManager) ListAPITokens(ctx context.Context, adminUserID string)
 
 // RevokeAPIToken deletes an API token by its public ID.
 // Returns domain.ErrForbidden when the caller is not an admin.
-func (m *APITokenManager) RevokeAPIToken(ctx context.Context, adminUserID, tokenID string) error {
+func (m *APITokenManager) RevokeAPIToken(ctx context.Context, adminUserID uuid.UUID, tokenID string) error {
 	if m.apiTokens == nil {
 		return domain.ErrFeatureNotSupported
 	}

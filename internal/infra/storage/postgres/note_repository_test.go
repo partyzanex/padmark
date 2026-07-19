@@ -124,12 +124,12 @@ func (s *RepositoryTestSuite) TestCreate_AllFields() {
 
 // createTestUser inserts a minimal user row so notes.owner_id (a real FK on PostgreSQL) can
 // reference it, and returns the generated ID.
-func (s *RepositoryTestSuite) createTestUser(ctx context.Context) string {
+func (s *RepositoryTestSuite) createTestUser(ctx context.Context) uuid.UUID {
 	s.T().Helper()
 
-	id := uuid.New().String()
+	id := uuid.New()
 	err := NewUserRepository(s.db).Create(ctx, &domain.User{
-		ID: id, Username: "owner-" + id, TOTPSecret: "secret", PasswordHash: "hash",
+		ID: id, Username: "owner-" + id.String(), TOTPSecret: "secret", PasswordHash: "hash",
 		CreatedAt: time.Now(),
 	})
 	s.Require().NoError(err)

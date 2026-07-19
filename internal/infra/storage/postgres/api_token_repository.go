@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/uptrace/bun"
 
 	"github.com/partyzanex/padmark/internal/domain"
@@ -18,8 +19,8 @@ type apiTokenRow struct {
 	CreatedAt  time.Time  `bun:"created_at,notnull"`
 	ExpiresAt  *time.Time `bun:"expires_at"`
 	LastUsedAt *time.Time `bun:"last_used_at"`
-	UserID     string     `bun:"user_id,notnull"`
 	TokenHash  string     `bun:"token_hash,pk"`
+	UserID     uuid.UUID  `bun:"user_id,notnull"`
 }
 
 func toAPITokenRow(token *domain.APIToken) *apiTokenRow {
@@ -63,7 +64,7 @@ func (r *APITokenRepository) Create(ctx context.Context, t *domain.APIToken) err
 }
 
 // CountByUser returns how many tokens the given user already holds, so issuance can be capped.
-func (r *APITokenRepository) CountByUser(ctx context.Context, userID string) (int, error) {
+func (r *APITokenRepository) CountByUser(ctx context.Context, userID uuid.UUID) (int, error) {
 	count, err := r.db.NewSelect().
 		Model((*apiTokenRow)(nil)).
 		Where("user_id = ?", userID).

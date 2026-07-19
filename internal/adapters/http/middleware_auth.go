@@ -177,13 +177,20 @@ func extractToken(r *http.Request) string {
 	return ""
 }
 
+// apiDocsPath and apiSpecPath are always public (see isPublicPath) and are also part of the
+// REST/JSON API surface that --disable-api turns off (see isDisabledAPIPath).
+const (
+	apiDocsPath = "/api"
+	apiSpecPath = "/api/openapi.yaml"
+)
+
 func isPublicPath(path string) bool {
 	return path == "/login" ||
 		path == "/setup" ||
 		path == "/logout" ||
 		path == "/totp-login" ||
 		strings.HasPrefix(path, "/static/") ||
-		path == "/api" || path == "/api/openapi.yaml" ||
+		path == apiDocsPath || path == apiSpecPath ||
 		path == "/healthz" || path == "/readyz"
 }
 

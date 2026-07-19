@@ -31,7 +31,7 @@ func (h *NoteHandler) EditPage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
 	usr := userFromContext(r)
-	isOwner := usr != nil && note.OwnerID != nil && *note.OwnerID == usr.ID
+	isOwner := usr != nil && note.OwnedBy(usr.ID)
 
 	err = h.indexTmpl.Execute(w, editorViewData{
 		ID:               note.ID,
