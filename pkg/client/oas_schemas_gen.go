@@ -555,6 +555,10 @@ type GetNoteNotFound ErrorResponse
 
 func (*GetNoteNotFound) getNoteRes() {}
 
+type GetNoteUnauthorized ErrorResponse
+
+func (*GetNoteUnauthorized) getNoteRes() {}
+
 // HealthzOK is response for Healthz operation.
 type HealthzOK struct{}
 

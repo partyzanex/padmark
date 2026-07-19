@@ -117,6 +117,11 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/NoteResponse"
+        "401":
+          description: |
+            The note's privacy level requires a credential this request didn't supply — see the
+            `privacy` field semantics above (`authenticated` or `owner`).
+          $ref: "#/components/responses/Error"
         "404":
           description: Note not found
           $ref: "#/components/responses/Error"

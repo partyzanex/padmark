@@ -213,17 +213,18 @@ func (r *NoteRepository) Update(ctx context.Context, id string, domNote *domain.
 		ctVal = &sv
 	}
 
-	var privacyVal *string
+	// Named pVal, not privacyVal, to avoid shadowing the package-level privacyVal helper above.
+	var pVal *string
 
 	if domNote.Privacy != nil {
 		sv := string(*domNote.Privacy)
-		privacyVal = &sv
+		pVal = &sv
 	}
 
 	result, err := r.db.NewUpdate().Model(dbNote).
 		Column("title", "content", "expires_at", "burn_ttl", "burn_after_reading", "updated_at").
 		Set("content_type = COALESCE(?, content_type)", ctVal).
-		Set("privacy = COALESCE(?, privacy)", privacyVal).
+		Set("privacy = COALESCE(?, privacy)", pVal).
 		Where("id = ?", id).
 		Exec(ctx)
 	if err != nil {

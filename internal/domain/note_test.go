@@ -89,6 +89,7 @@ func TestNote_VisibleTo(t *testing.T) {
 	other := uuid.New()
 
 	public, authenticated, ownerOnly := PrivacyPublic, PrivacyAuthenticated, PrivacyOwner
+	garbage := Privacy("corrupted-value")
 
 	tests := []struct {
 		name          string
@@ -108,6 +109,15 @@ func TestNote_VisibleTo(t *testing.T) {
 		{"owner hides from anonymous", &Note{Privacy: &ownerOnly, OwnerID: &owner}, uuid.Nil, false, false},
 		{"owner hides from other authenticated caller", &Note{Privacy: &ownerOnly, OwnerID: &owner}, other, true, false},
 		{"owner visible to the owner", &Note{Privacy: &ownerOnly, OwnerID: &owner}, owner, true, true},
+		// A note that ended up privacy=owner with no OwnerID (should be unreachable through
+		// ValidateOwnership, but VisibleTo must not rely on that as its only guard) hides from
+		// everyone, including an authenticated caller with no way to prove ownership of nothing.
+		{"owner with nil OwnerID hides from anonymous", &Note{Privacy: &ownerOnly}, uuid.Nil, false, false},
+		{"owner with nil OwnerID hides from authenticated caller", &Note{Privacy: &ownerOnly}, other, true, false},
+		{"owner with nil OwnerID hides from a caller matching uuid.Nil", &Note{Privacy: &ownerOnly}, uuid.Nil, true, false},
+		// A corrupted/unrecognized privacy value (unreachable through Validate(), only possible
+		// via direct DB tampering) must fail closed, not open.
+		{"unrecognized privacy value fails closed", &Note{Privacy: &garbage, OwnerID: &owner}, owner, true, false},
 	}
 
 	for _, tt := range tests {

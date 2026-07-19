@@ -109,7 +109,7 @@ type noteJSON struct {
 	Title            string             `json:"title"`
 	Content          string             `json:"content"`
 	ContentType      domain.ContentType `json:"content_type"`
-	Privacy          string             `json:"privacy"`
+	Privacy          domain.Privacy     `json:"privacy"`
 	Views            int                `json:"views"`
 	BurnAfterReading bool               `json:"burn_after_reading"`
 }
@@ -125,7 +125,7 @@ func toNoteJSON(note *domain.Note) noteJSON {
 		ExpiresAt:        note.ExpiresAt,
 		Views:            note.Views,
 		BurnAfterReading: note.BurnAfterReading,
-		Privacy:          string(note.EffectivePrivacy()),
+		Privacy:          note.EffectivePrivacy(),
 	}
 }
 
@@ -378,7 +378,7 @@ func (h *NoteHandler) handlePrivateAuth(w http.ResponseWriter, r *http.Request, 
 		return nil, true
 	}
 
-	http.Error(w, "unauthorized", http.StatusUnauthorized)
+	writeUnauthorized(w)
 
 	return nil, true
 }
@@ -409,7 +409,11 @@ func (h *NoteHandler) renderNoteHTML(w http.ResponseWriter, r *http.Request, id 
 	// isAuthenticated already returns true when neither allowedTokens nor authMgr
 	// is configured, so the old "allowedTokens == nil" short-circuit is redundant
 	// and harmful: it made CanEdit always true in TOTP-only deployments.
-	data.CanEdit = h.isAuthenticated(r)
+	// Also gated on VisibleTo: without it, a privacy=owner note would show the Edit link (and
+	// let EditPage render its plaintext, see EditPage's doc comment) to any authenticated
+	// caller, not just its owner.
+	authenticated := h.isAuthenticated(r)
+	data.CanEdit = authenticated && note.VisibleTo(callerIDFromCtx(r.Context()), authenticated)
 
 	err = h.noteTmpl.Execute(w, data)
 	if err != nil {

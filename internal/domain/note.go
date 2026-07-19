@@ -136,14 +136,19 @@ func (n *Note) EffectivePrivacy() Privacy {
 
 // VisibleTo reports whether a caller may read n given its privacy level: PrivacyOwner requires
 // callerID to match OwnerID (see OwnedBy), PrivacyAuthenticated requires any authenticated
-// caller, and PrivacyPublic (the default) always allows it.
+// caller, and PrivacyPublic (the default) always allows it. A stored value outside these three —
+// unreachable through Validate()+ValidateOwnership(), only possible via direct DB tampering —
+// fails closed (denies) rather than open: safer to wrongly deny than to wrongly grant access to a
+// note whose intended privacy level can't be determined.
 func (n *Note) VisibleTo(callerID uuid.UUID, authenticated bool) bool {
 	switch n.EffectivePrivacy() {
-	case PrivacyOwner:
-		return n.OwnedBy(callerID)
+	case PrivacyPublic:
+		return true
 	case PrivacyAuthenticated:
 		return authenticated
+	case PrivacyOwner:
+		return n.OwnedBy(callerID)
 	default:
-		return true
+		return false
 	}
 }

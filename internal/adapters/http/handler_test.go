@@ -1021,7 +1021,7 @@ func (s *HandlerSuite) TestUpdateNote_ImmediateBurn() {
 	s.Equal(http.StatusOK, w.Code)
 }
 
-func (s *HandlerSuite) TestUpdateNote_WithPrivate() {
+func (s *HandlerSuite) TestUpdateNote_WithPrivacy() {
 	updated := newTestNote("updated", "body")
 
 	s.manager.EXPECT().Update(gomock.Any(), testID, "code", uuid.Nil, gomock.Any()).
@@ -2449,9 +2449,9 @@ func (s *HandlerSuite) TestHandleReveal_CrossNoteToken_TokenNotBurned() {
 //
 // Call-flow for GET /notes/{id} in TOTP mode:
 //   1. Auth middleware is bypassed (note route is public).
-//   2. handlePrivateAuth → Peek → checks Private + isAuthenticated.
-//   3. For non-private notes: returns (note, false) without calling isAuthenticated.
-//   4. renderNoteHTML(preloaded) → GetRenderedPreloaded → isAuthenticated (for CanEdit).
+//   2. handlePrivateAuth → Peek → checks Privacy (VisibleTo) + isAuthenticated.
+//   3. For public notes: returns (note, false) without calling isAuthenticated.
+//   4. renderNoteHTML(preloaded) → GetRenderedPreloaded → isAuthenticated + VisibleTo (for CanEdit).
 
 // TestPrivateNote_TOTPMode_Unauthenticated verifies that an unauthenticated
 // request to a private note is redirected to /login in TOTP-only mode.
@@ -2572,6 +2572,59 @@ func (s *HandlerSuite) TestOwnerOnlyNote_Anonymous_Unauthorized() {
 	router.ServeHTTP(w, r)
 
 	s.Equal(http.StatusUnauthorized, w.Code)
+}
+
+// TestEditPage_OwnerOnly_NonOwner_Forbidden verifies that GET /edit/{id} for a privacy: owner
+// note is gated exactly like GET /notes/{id} — a different authenticated caller must not see the
+// note's plaintext content in the editor form, even though they are logged in.
+func (s *HandlerSuite) TestEditPage_OwnerOnly_NonOwner_Forbidden() {
+	owner := &domain.User{ID: uuid.New(), Username: "alice"}
+	other := &domain.User{ID: uuid.New(), Username: "bob"}
+
+	note := newTestNote("secret", "owner-only content")
+	note.Privacy = new(domain.PrivacyOwner)
+	note.OwnerID = &owner.ID
+
+	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
+	s.authMgr.EXPECT().GetSession(gomock.Any(), "valid-sess").Return(other, nil).Times(1)
+
+	router := s.newRouterWithTOTPAuth()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/edit/"+testID, nil)
+	r.Header.Set("Accept", "text/html")
+	r.AddCookie(&http.Cookie{Name: "padmark_session", Value: "valid-sess"}) //nolint:gosec // G124: test cookie
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusSeeOther, w.Code)
+	s.True(strings.HasPrefix(w.Header().Get("Location"), "/login?next="),
+		"a different authenticated caller must not read an owner-only note via /edit")
+	s.NotContains(w.Body.String(), "owner-only content",
+		"the note's plaintext must never reach a non-owner's response body")
+}
+
+// TestEditPage_OwnerOnly_Owner_OK verifies that GET /edit/{id} for a privacy: owner note still
+// works normally for the exact authenticated session that created it.
+func (s *HandlerSuite) TestEditPage_OwnerOnly_Owner_OK() {
+	owner := &domain.User{ID: uuid.New(), Username: "alice"}
+
+	note := newTestNote("secret", "owner-only content")
+	note.Privacy = new(domain.PrivacyOwner)
+	note.OwnerID = &owner.ID
+
+	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
+	s.authMgr.EXPECT().GetSession(gomock.Any(), "valid-sess").Return(owner, nil).Times(1)
+
+	router := s.newRouterWithTOTPAuth()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/edit/"+testID, nil)
+	r.Header.Set("Accept", "text/html")
+	r.AddCookie(&http.Cookie{Name: "padmark_session", Value: "valid-sess"}) //nolint:gosec // G124: test cookie
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusOK, w.Code)
+	s.Contains(w.Body.String(), "owner-only content")
 }
 
 // TestCanEdit_TOTPMode_Unauthenticated verifies that in TOTP-only mode an
