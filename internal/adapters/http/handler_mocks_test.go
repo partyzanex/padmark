@@ -13,6 +13,7 @@ import (
 	context "context"
 	reflect "reflect"
 
+	uuid "github.com/google/uuid"
 	domain "github.com/partyzanex/padmark/internal/domain"
 	auth "github.com/partyzanex/padmark/internal/usecases/auth"
 	gomock "go.uber.org/mock/gomock"
@@ -156,7 +157,7 @@ func (mr *MockOnboardingManagerMockRecorder) AcceptInvite(ctx, token, username, 
 }
 
 // GenerateInvite mocks base method.
-func (m *MockOnboardingManager) GenerateInvite(ctx context.Context, adminUserID string) (string, error) {
+func (m *MockOnboardingManager) GenerateInvite(ctx context.Context, adminUserID uuid.UUID) (string, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "GenerateInvite", ctx, adminUserID)
 	ret0, _ := ret[0].(string)
@@ -210,7 +211,7 @@ func (m *MockUserAdminManager) EXPECT() *MockUserAdminManagerMockRecorder {
 }
 
 // ListUsers mocks base method.
-func (m *MockUserAdminManager) ListUsers(ctx context.Context, adminUserID string) ([]*domain.User, error) {
+func (m *MockUserAdminManager) ListUsers(ctx context.Context, adminUserID uuid.UUID) ([]*domain.User, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "ListUsers", ctx, adminUserID)
 	ret0, _ := ret[0].([]*domain.User)
@@ -225,7 +226,7 @@ func (mr *MockUserAdminManagerMockRecorder) ListUsers(ctx, adminUserID any) *gom
 }
 
 // RevokeUser mocks base method.
-func (m *MockUserAdminManager) RevokeUser(ctx context.Context, adminUserID, targetUserID string) error {
+func (m *MockUserAdminManager) RevokeUser(ctx context.Context, adminUserID, targetUserID uuid.UUID) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "RevokeUser", ctx, adminUserID, targetUserID)
 	ret0, _ := ret[0].(error)
@@ -263,7 +264,7 @@ func (m *MockAPITokenManager) EXPECT() *MockAPITokenManagerMockRecorder {
 }
 
 // CreateAPIToken mocks base method.
-func (m *MockAPITokenManager) CreateAPIToken(ctx context.Context, userID string) (string, error) {
+func (m *MockAPITokenManager) CreateAPIToken(ctx context.Context, userID uuid.UUID) (string, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "CreateAPIToken", ctx, userID)
 	ret0, _ := ret[0].(string)
@@ -278,7 +279,7 @@ func (mr *MockAPITokenManagerMockRecorder) CreateAPIToken(ctx, userID any) *gomo
 }
 
 // ListAPITokens mocks base method.
-func (m *MockAPITokenManager) ListAPITokens(ctx context.Context, adminUserID string) ([]*auth.APITokenInfo, error) {
+func (m *MockAPITokenManager) ListAPITokens(ctx context.Context, adminUserID uuid.UUID) ([]*auth.APITokenInfo, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "ListAPITokens", ctx, adminUserID)
 	ret0, _ := ret[0].([]*auth.APITokenInfo)
@@ -308,7 +309,7 @@ func (mr *MockAPITokenManagerMockRecorder) ResolveAPIToken(ctx, plainToken any) 
 }
 
 // RevokeAPIToken mocks base method.
-func (m *MockAPITokenManager) RevokeAPIToken(ctx context.Context, adminUserID, tokenID string) error {
+func (m *MockAPITokenManager) RevokeAPIToken(ctx context.Context, adminUserID uuid.UUID, tokenID string) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "RevokeAPIToken", ctx, adminUserID, tokenID)
 	ret0, _ := ret[0].(error)
@@ -391,7 +392,7 @@ func (mr *MockAuthManagerMockRecorder) ChangePassword(ctx, sessionID, oldPasswor
 }
 
 // CreateAPIToken mocks base method.
-func (m *MockAuthManager) CreateAPIToken(ctx context.Context, userID string) (string, error) {
+func (m *MockAuthManager) CreateAPIToken(ctx context.Context, userID uuid.UUID) (string, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "CreateAPIToken", ctx, userID)
 	ret0, _ := ret[0].(string)
@@ -406,7 +407,7 @@ func (mr *MockAuthManagerMockRecorder) CreateAPIToken(ctx, userID any) *gomock.C
 }
 
 // GenerateInvite mocks base method.
-func (m *MockAuthManager) GenerateInvite(ctx context.Context, adminUserID string) (string, error) {
+func (m *MockAuthManager) GenerateInvite(ctx context.Context, adminUserID uuid.UUID) (string, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "GenerateInvite", ctx, adminUserID)
 	ret0, _ := ret[0].(string)
@@ -451,7 +452,7 @@ func (mr *MockAuthManagerMockRecorder) IsEmpty(ctx any) *gomock.Call {
 }
 
 // ListAPITokens mocks base method.
-func (m *MockAuthManager) ListAPITokens(ctx context.Context, adminUserID string) ([]*auth.APITokenInfo, error) {
+func (m *MockAuthManager) ListAPITokens(ctx context.Context, adminUserID uuid.UUID) ([]*auth.APITokenInfo, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "ListAPITokens", ctx, adminUserID)
 	ret0, _ := ret[0].([]*auth.APITokenInfo)
@@ -466,7 +467,7 @@ func (mr *MockAuthManagerMockRecorder) ListAPITokens(ctx, adminUserID any) *gomo
 }
 
 // ListUsers mocks base method.
-func (m *MockAuthManager) ListUsers(ctx context.Context, adminUserID string) ([]*domain.User, error) {
+func (m *MockAuthManager) ListUsers(ctx context.Context, adminUserID uuid.UUID) ([]*domain.User, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "ListUsers", ctx, adminUserID)
 	ret0, _ := ret[0].([]*domain.User)
@@ -525,7 +526,7 @@ func (mr *MockAuthManagerMockRecorder) ResolveAPIToken(ctx, plainToken any) *gom
 }
 
 // RevokeAPIToken mocks base method.
-func (m *MockAuthManager) RevokeAPIToken(ctx context.Context, adminUserID, tokenID string) error {
+func (m *MockAuthManager) RevokeAPIToken(ctx context.Context, adminUserID uuid.UUID, tokenID string) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "RevokeAPIToken", ctx, adminUserID, tokenID)
 	ret0, _ := ret[0].(error)
@@ -539,7 +540,7 @@ func (mr *MockAuthManagerMockRecorder) RevokeAPIToken(ctx, adminUserID, tokenID 
 }
 
 // RevokeUser mocks base method.
-func (m *MockAuthManager) RevokeUser(ctx context.Context, adminUserID, targetUserID string) error {
+func (m *MockAuthManager) RevokeUser(ctx context.Context, adminUserID, targetUserID uuid.UUID) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "RevokeUser", ctx, adminUserID, targetUserID)
 	ret0, _ := ret[0].(error)
@@ -645,17 +646,17 @@ func (mr *MockNoteManagerMockRecorder) Create(ctx, note any) *gomock.Call {
 }
 
 // Delete mocks base method.
-func (m *MockNoteManager) Delete(ctx context.Context, id, editCode string) error {
+func (m *MockNoteManager) Delete(ctx context.Context, id, editCode string, callerID uuid.UUID) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Delete", ctx, id, editCode)
+	ret := m.ctrl.Call(m, "Delete", ctx, id, editCode, callerID)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // Delete indicates an expected call of Delete.
-func (mr *MockNoteManagerMockRecorder) Delete(ctx, id, editCode any) *gomock.Call {
+func (mr *MockNoteManagerMockRecorder) Delete(ctx, id, editCode, callerID any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Delete", reflect.TypeOf((*MockNoteManager)(nil).Delete), ctx, id, editCode)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Delete", reflect.TypeOf((*MockNoteManager)(nil).Delete), ctx, id, editCode, callerID)
 }
 
 // GetRendered mocks base method.
@@ -706,18 +707,18 @@ func (mr *MockNoteManagerMockRecorder) Peek(ctx, id any) *gomock.Call {
 }
 
 // Update mocks base method.
-func (m *MockNoteManager) Update(ctx context.Context, id, editCode string, note *domain.Note) (*domain.Note, error) {
+func (m *MockNoteManager) Update(ctx context.Context, id, editCode string, callerID uuid.UUID, note *domain.Note) (*domain.Note, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Update", ctx, id, editCode, note)
+	ret := m.ctrl.Call(m, "Update", ctx, id, editCode, callerID, note)
 	ret0, _ := ret[0].(*domain.Note)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // Update indicates an expected call of Update.
-func (mr *MockNoteManagerMockRecorder) Update(ctx, id, editCode, note any) *gomock.Call {
+func (mr *MockNoteManagerMockRecorder) Update(ctx, id, editCode, callerID, note any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Update", reflect.TypeOf((*MockNoteManager)(nil).Update), ctx, id, editCode, note)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Update", reflect.TypeOf((*MockNoteManager)(nil).Update), ctx, id, editCode, callerID, note)
 }
 
 // View mocks base method.

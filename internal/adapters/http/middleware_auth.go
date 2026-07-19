@@ -2,6 +2,7 @@ package http
 
 import (
 	"context"
+	"encoding/json"
 	"net"
 	"net/http"
 	"net/url"
@@ -111,7 +112,24 @@ func (am *authMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	http.Error(w, "unauthorized", http.StatusUnauthorized)
+	writeUnauthorized(w)
+}
+
+// writeUnauthorized answers a non-browser request with the same JSON shape as every other API
+// error (errorJSON, matching the OpenAPI ErrorResponse schema) instead of the plain-text body
+// http.Error would produce — the generated ogen client (used by the CLI) decodes API errors as
+// JSON, so a plain-text 401 here surfaces as an opaque decode failure instead of a clean message.
+func writeUnauthorized(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", mimeJSON)
+	w.WriteHeader(http.StatusUnauthorized)
+
+	// Encoding a fixed two-field struct only fails on a broken connection, which is
+	// unactionable here — not worth threading a logger into this otherwise stateless
+	// middleware just to report it.
+	err := json.NewEncoder(w).Encode(errorJSON{Message: "unauthorized"})
+	if err != nil {
+		return
+	}
 }
 
 // resolveSessionUser returns r enriched with the authenticated user in context when a
@@ -177,13 +195,20 @@ func extractToken(r *http.Request) string {
 	return ""
 }
 
+// apiDocsPath and apiSpecPath are always public (see isPublicPath) and are also part of the
+// REST/JSON API surface that --disable-api turns off (see isDisabledAPIPath).
+const (
+	apiDocsPath = "/api"
+	apiSpecPath = "/api/openapi.yaml"
+)
+
 func isPublicPath(path string) bool {
 	return path == "/login" ||
 		path == "/setup" ||
 		path == "/logout" ||
 		path == "/totp-login" ||
 		strings.HasPrefix(path, "/static/") ||
-		path == "/api" || path == "/api/openapi.yaml" ||
+		path == apiDocsPath || path == apiSpecPath ||
 		path == "/healthz" || path == "/readyz"
 }
 

@@ -39,7 +39,7 @@
         </div>
         {{if .EditMode}}
         <div class="field-group">
-            <label class="field-label">Edit code <span class="optional">· required</span></label>
+            <label class="field-label">Edit code <span class="optional">· {{if .IsOwner}}optional, you created this note{{else}}required{{end}}</span></label>
             <input type="text" class="field-input" placeholder="Paste your edit code" id="editCodeInput">
         </div>
         {{else}}
@@ -79,12 +79,15 @@
         </div>
 
         <div class="burn-row private-row">
-            <label class="burn-checkbox" id="privateLabel">
-                <input type="checkbox" id="privateCheck"{{if .Private}} checked{{end}}>
-                <span class="checkmark"></span>
-                <span class="burn-text">Private note</span>
-            </label>
-            <span class="shortcut-hint">Requires server auth token to view</span>
+            <span class="burn-text">Privacy</span>
+            <div class="select-wrap">
+                <select class="field-select" id="privacySelect">
+                    <option value="public"{{if eq .Privacy "public"}} selected{{end}}>Public</option>
+                    <option value="authenticated"{{if eq .Privacy "authenticated"}} selected{{end}}>Requires login</option>
+                    <option value="owner"{{if eq .Privacy "owner"}} selected{{end}}>Owner only</option>
+                </select>
+            </div>
+            <span class="shortcut-hint" id="privacyHint">Anyone can view</span>
         </div>
     </div>
 
@@ -98,6 +101,7 @@
 <script nonce="{{.Nonce}}">
     const editMode = {{.EditMode}};
     const noteID = {{.ID | js}};
+    const isOwner = {{.IsOwner}};
 
     function updateCount() {
         const len = document.getElementById('editor').value.length;
@@ -130,8 +134,18 @@
         sel.disabled = !checked;
     }
 
-    function getPrivate() {
-        return document.getElementById('privateCheck').checked;
+    const privacyHints = {
+        public: 'Anyone can view',
+        authenticated: 'Requires login to view',
+        owner: 'Only you can view',
+    };
+
+    function getPrivacy() {
+        return document.getElementById('privacySelect').value;
+    }
+
+    function updatePrivacyHint() {
+        document.getElementById('privacyHint').textContent = privacyHints[getPrivacy()] || privacyHints.public;
     }
 
     function getTTL() {
@@ -158,8 +172,7 @@
         btn.style.opacity = '0.7';
         btn.disabled = true;
 
-        const privateNote = getPrivate();
-        const payload = { title, content, burn_after_reading: burnAfterReading, private: privateNote };
+        const payload = { title, content, burn_after_reading: burnAfterReading, privacy: getPrivacy() };
         if (slug) payload.slug = slug;
         if (burnAfterReading) payload.ttl = ttl;
 
@@ -201,15 +214,14 @@
         const ttl = getTTL();
 
         if (!content) { showError(btn, 'Save', 'Enter some text first'); return; }
-        if (!editCode) { showError(btn, 'Save', 'Edit code required'); return; }
+        if (!editCode && !isOwner) { showError(btn, 'Save', 'Edit code required'); return; }
 
         btn.textContent = 'Saving…';
         btn.style.opacity = '0.7';
         btn.disabled = true;
 
         const burn = document.getElementById('burnCheck').checked;
-        const privateNote = getPrivate();
-        const payload = { title: title || 'Untitled', content, edit_code: editCode, burn_after_reading: burn, private: privateNote };
+        const payload = { title: title || 'Untitled', content, edit_code: editCode, burn_after_reading: burn, privacy: getPrivacy() };
         if (burn) payload.ttl = ttl;
 
         try {
@@ -232,8 +244,11 @@
         }
     }
 
+    updatePrivacyHint();
+
     document.getElementById('editor').addEventListener('input', updateCount);
     document.getElementById('burnCheck').addEventListener('change', toggleBurn);
+    document.getElementById('privacySelect').addEventListener('change', updatePrivacyHint);
     document.getElementById('submitBtn').addEventListener('click', editMode ? save : publish);
     document.getElementById('mdBold').addEventListener('click', () => insertMd('**', '**'));
     document.getElementById('mdItalic').addEventListener('click', () => insertMd('_', '_'));

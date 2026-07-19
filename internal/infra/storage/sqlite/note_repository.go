@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/uptrace/bun"
 	sqlite "modernc.org/sqlite"
 	sqlite3 "modernc.org/sqlite/lib"
@@ -21,15 +22,16 @@ type note struct {
 	CreatedAt        time.Time  `bun:"created_at"`
 	UpdatedAt        time.Time  `bun:"updated_at"`
 	ExpiresAt        *time.Time `bun:"expires_at"`
-	ID               string     `bun:"id,pk"`
+	OwnerID          *uuid.UUID `bun:"owner_id"`
 	Title            string     `bun:"title"`
 	Content          string     `bun:"content"`
 	ContentType      string     `bun:"content_type"`
 	EditCode         string     `bun:"edit_code"`
+	ID               string     `bun:"id,pk"`
+	Privacy          string     `bun:"privacy"`
 	Views            int        `bun:"views"`
 	BurnTTL          int64      `bun:"burn_ttl"`
 	BurnAfterReading bool       `bun:"burn_after_reading"`
-	Private          bool       `bun:"private"`
 }
 
 // NoteRepository implements notes.Storage using SQLite.
@@ -55,11 +57,24 @@ func toDomain(dbNote *note) *domain.Note {
 		Views:            dbNote.Views,
 		BurnTTL:          dbNote.BurnTTL,
 		BurnAfterReading: dbNote.BurnAfterReading,
-		Private:          new(dbNote.Private),
+		Privacy:          privacyPtr(dbNote.Privacy),
+		OwnerID:          dbNote.OwnerID,
 	}
 }
 
-func boolVal(b *bool) bool { return b != nil && *b }
+func privacyPtr(s string) *domain.Privacy {
+	p := domain.Privacy(s)
+
+	return &p
+}
+
+func privacyVal(p *domain.Privacy) string {
+	if p == nil {
+		return string(domain.PrivacyPublic)
+	}
+
+	return string(*p)
+}
 
 func contentTypePtr(s string) *domain.ContentType {
 	ct := domain.ContentType(s)
@@ -88,7 +103,8 @@ func (r *NoteRepository) Create(ctx context.Context, domNote *domain.Note) error
 		ExpiresAt:        domNote.ExpiresAt,
 		BurnTTL:          domNote.BurnTTL,
 		BurnAfterReading: domNote.BurnAfterReading,
-		Private:          boolVal(domNote.Private),
+		Privacy:          privacyVal(domNote.Privacy),
+		OwnerID:          domNote.OwnerID,
 	}
 
 	_, err := r.db.NewInsert().Model(dbNote).Exec(ctx)
@@ -132,7 +148,11 @@ func (r *NoteRepository) Consume(ctx context.Context, id string) (*domain.Note, 
 		Model(&dbNote).
 		Where("id = ?", id).
 		Where("burn_after_reading OR (expires_at IS NOT NULL AND expires_at <= ?)", time.Now()).
-		Returning("*").
+		// Explicit column list, not "*": the notes table still has the deprecated `private`
+		// column (see migrations/sqlite/20260720000001_notes_privacy.sql), which the note
+		// struct no longer maps — RETURNING * would try to scan it and fail.
+		Returning("id, created_at, updated_at, expires_at, owner_id, content, title, " +
+			"content_type, edit_code, views, burn_ttl, burn_after_reading, privacy").
 		Scan(ctx)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -156,7 +176,11 @@ func (r *NoteRepository) SetBurnExpiry(ctx context.Context, id string, expiresAt
 		Set("burn_after_reading = 0").
 		Where("id = ?", id).
 		Where("burn_after_reading").
-		Returning("*").
+		// Explicit column list, not "*": the notes table still has the deprecated `private`
+		// column (see migrations/sqlite/20260720000001_notes_privacy.sql), which the note
+		// struct no longer maps — RETURNING * would try to scan it and fail.
+		Returning("id, created_at, updated_at, expires_at, owner_id, content, title, " +
+			"content_type, edit_code, views, burn_ttl, burn_after_reading, privacy").
 		Scan(ctx)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -189,10 +213,18 @@ func (r *NoteRepository) Update(ctx context.Context, id string, domNote *domain.
 		ctVal = &sv
 	}
 
+	// Named pVal, not privacyVal, to avoid shadowing the package-level privacyVal helper above.
+	var pVal *string
+
+	if domNote.Privacy != nil {
+		sv := string(*domNote.Privacy)
+		pVal = &sv
+	}
+
 	result, err := r.db.NewUpdate().Model(dbNote).
 		Column("title", "content", "expires_at", "burn_ttl", "burn_after_reading", "updated_at").
 		Set("content_type = COALESCE(?, content_type)", ctVal).
-		Set("private = COALESCE(?, private)", domNote.Private).
+		Set("privacy = COALESCE(?, privacy)", pVal).
 		Where("id = ?", id).
 		Exec(ctx)
 	if err != nil {

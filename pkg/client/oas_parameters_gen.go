@@ -18,9 +18,12 @@ import (
 type DeleteNoteParams struct {
 	// Note ID (slug) — 10-char random string or the custom slug chosen at creation.
 	ID string
-	// Edit code returned at note creation (alternative to `edit_code` query param).
+	// Edit code returned at note creation (alternative to `edit_code` query param). Preferred over the
+	// query parameter — see the operation description.
 	XEditCode OptString `json:",omitempty,omitzero"`
-	// Edit code returned at note creation (alternative to `X-Edit-Code` header).
+	// Edit code returned at note creation (alternative to `X-Edit-Code` header). Prefer the
+	// header: a query string is more likely to be captured in proxy/CDN access logs or a
+	// same-origin `Referer` header. Provided for manual/curl convenience only.
 	EditCode OptString `json:",omitempty,omitzero"`
 }
 

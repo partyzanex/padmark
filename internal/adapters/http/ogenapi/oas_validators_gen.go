@@ -31,6 +31,24 @@ func (s *CreateNoteRequest) Validate() error {
 			Error: err,
 		})
 	}
+	if err := func() error {
+		if value, ok := s.Privacy.Get(); ok {
+			if err := func() error {
+				if err := value.Validate(); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "privacy",
+			Error: err,
+		})
+	}
 	if len(failures) > 0 {
 		return &validate.Error{Fields: failures}
 	}
@@ -42,6 +60,19 @@ func (s CreateNoteRequestContentType) Validate() error {
 	case "text/markdown":
 		return nil
 	case "text/plain":
+		return nil
+	default:
+		return errors.Errorf("invalid value: %v", s)
+	}
+}
+
+func (s CreateNoteRequestPrivacy) Validate() error {
+	switch s {
+	case "public":
+		return nil
+	case "authenticated":
+		return nil
+	case "owner":
 		return nil
 	default:
 		return errors.Errorf("invalid value: %v", s)
@@ -62,6 +93,24 @@ func (s *CreateNoteResponse) Validate() error {
 	}(); err != nil {
 		failures = append(failures, validate.FieldError{
 			Name:  "content_type",
+			Error: err,
+		})
+	}
+	if err := func() error {
+		if value, ok := s.Privacy.Get(); ok {
+			if err := func() error {
+				if err := value.Validate(); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "privacy",
 			Error: err,
 		})
 	}
@@ -105,6 +154,19 @@ func (s *CreateNoteResponseHeaders) Validate() error {
 	return nil
 }
 
+func (s CreateNoteResponsePrivacy) Validate() error {
+	switch s {
+	case "public":
+		return nil
+	case "authenticated":
+		return nil
+	case "owner":
+		return nil
+	default:
+		return errors.Errorf("invalid value: %v", s)
+	}
+}
+
 func (s *NoteResponse) Validate() error {
 	if s == nil {
 		return validate.ErrNilPointer
@@ -122,6 +184,24 @@ func (s *NoteResponse) Validate() error {
 			Error: err,
 		})
 	}
+	if err := func() error {
+		if value, ok := s.Privacy.Get(); ok {
+			if err := func() error {
+				if err := value.Validate(); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "privacy",
+			Error: err,
+		})
+	}
 	if len(failures) > 0 {
 		return &validate.Error{Fields: failures}
 	}
@@ -133,6 +213,19 @@ func (s NoteResponseContentType) Validate() error {
 	case "text/markdown":
 		return nil
 	case "text/plain":
+		return nil
+	default:
+		return errors.Errorf("invalid value: %v", s)
+	}
+}
+
+func (s NoteResponsePrivacy) Validate() error {
+	switch s {
+	case "public":
+		return nil
+	case "authenticated":
+		return nil
+	case "owner":
 		return nil
 	default:
 		return errors.Errorf("invalid value: %v", s)
@@ -163,6 +256,24 @@ func (s *UpdateNoteRequest) Validate() error {
 			Error: err,
 		})
 	}
+	if err := func() error {
+		if value, ok := s.Privacy.Get(); ok {
+			if err := func() error {
+				if err := value.Validate(); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "privacy",
+			Error: err,
+		})
+	}
 	if len(failures) > 0 {
 		return &validate.Error{Fields: failures}
 	}
@@ -174,6 +285,19 @@ func (s UpdateNoteRequestContentType) Validate() error {
 	case "text/markdown":
 		return nil
 	case "text/plain":
+		return nil
+	default:
+		return errors.Errorf("invalid value: %v", s)
+	}
+}
+
+func (s UpdateNoteRequestPrivacy) Validate() error {
+	switch s {
+	case "public":
+		return nil
+	case "authenticated":
+		return nil
+	case "owner":
 		return nil
 	default:
 		return errors.Errorf("invalid value: %v", s)

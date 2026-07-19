@@ -21,22 +21,21 @@ func deleteCommand() *urcli.Command {
 				Name:    FlagEditCode,
 				Aliases: []string{"e"},
 				Sources: urcli.EnvVars(EnvEditCode),
-				Usage:   "Edit code returned at note creation (env: PADMARK_EDIT_CODE)",
+				Usage: "Edit code returned at note creation (env: PADMARK_EDIT_CODE). Optional if " +
+					"--token identifies the note's owner",
 			},
 		},
 		Action: deleteAction,
 	}
 }
 
+// deleteAction does not require --edit-code: the server also accepts the request when --token
+// identifies the note's owner, and otherwise rejects an empty/wrong edit code with a clear API
+// error — the CLI does not pre-validate which credential the caller intends to rely on.
 func deleteAction(ctx context.Context, cmd *urcli.Command) error {
 	id, err := noteIDArg(cmd)
 	if err != nil {
 		return err
-	}
-
-	editCode := cmd.String(FlagEditCode)
-	if editCode == "" {
-		return errors.New("--edit-code is required (or set PADMARK_EDIT_CODE)")
 	}
 
 	padmarkClient, err := newPadmarkClient(cmd)
@@ -44,9 +43,10 @@ func deleteAction(ctx context.Context, cmd *urcli.Command) error {
 		return err
 	}
 
-	params := padmark.DeleteNoteParams{
-		ID:        id,
-		XEditCode: padmark.NewOptString(editCode),
+	params := padmark.DeleteNoteParams{ID: id}
+
+	if editCode := cmd.String(FlagEditCode); editCode != "" {
+		params.XEditCode = padmark.NewOptString(editCode)
 	}
 
 	res, err := padmarkClient.DeleteNote(ctx, params)

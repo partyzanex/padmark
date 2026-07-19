@@ -177,9 +177,9 @@ func (s *CreateNoteRequest) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
-		if s.Private.Set {
-			e.FieldStart("private")
-			s.Private.Encode(e)
+		if s.Privacy.Set {
+			e.FieldStart("privacy")
+			s.Privacy.Encode(e)
 		}
 	}
 }
@@ -192,7 +192,7 @@ var jsonFieldsNameOfCreateNoteRequest = [8]string{
 	4: "burn_after_reading",
 	5: "ttl",
 	6: "edit_code",
-	7: "private",
+	7: "privacy",
 }
 
 // Decode decodes CreateNoteRequest from json.
@@ -277,15 +277,15 @@ func (s *CreateNoteRequest) Decode(d *jx.Decoder) error {
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"edit_code\"")
 			}
-		case "private":
+		case "privacy":
 			if err := func() error {
-				s.Private.Reset()
-				if err := s.Private.Decode(d); err != nil {
+				s.Privacy.Reset()
+				if err := s.Privacy.Decode(d); err != nil {
 					return err
 				}
 				return nil
 			}(); err != nil {
-				return errors.Wrap(err, "decode field \"private\"")
+				return errors.Wrap(err, "decode field \"privacy\"")
 			}
 		default:
 			return d.Skip()
@@ -421,6 +421,48 @@ func (s *CreateNoteRequestEntityTooLarge) UnmarshalJSON(data []byte) error {
 	return s.Decode(d)
 }
 
+// Encode encodes CreateNoteRequestPrivacy as json.
+func (s CreateNoteRequestPrivacy) Encode(e *jx.Encoder) {
+	e.Str(string(s))
+}
+
+// Decode decodes CreateNoteRequestPrivacy from json.
+func (s *CreateNoteRequestPrivacy) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode CreateNoteRequestPrivacy to nil")
+	}
+	v, err := d.StrBytes()
+	if err != nil {
+		return err
+	}
+	// Try to use constant string.
+	switch CreateNoteRequestPrivacy(v) {
+	case CreateNoteRequestPrivacyPublic:
+		*s = CreateNoteRequestPrivacyPublic
+	case CreateNoteRequestPrivacyAuthenticated:
+		*s = CreateNoteRequestPrivacyAuthenticated
+	case CreateNoteRequestPrivacyOwner:
+		*s = CreateNoteRequestPrivacyOwner
+	default:
+		*s = CreateNoteRequestPrivacy(v)
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s CreateNoteRequestPrivacy) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *CreateNoteRequestPrivacy) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
 // Encode implements json.Marshaler.
 func (s *CreateNoteResponse) Encode(e *jx.Encoder) {
 	e.ObjStart()
@@ -455,9 +497,9 @@ func (s *CreateNoteResponse) encodeFields(e *jx.Encoder) {
 		e.Bool(s.BurnAfterReading)
 	}
 	{
-		if s.Private.Set {
-			e.FieldStart("private")
-			s.Private.Encode(e)
+		if s.Privacy.Set {
+			e.FieldStart("privacy")
+			s.Privacy.Encode(e)
 		}
 	}
 	{
@@ -487,7 +529,7 @@ var jsonFieldsNameOfCreateNoteResponse = [11]string{
 	3:  "content_type",
 	4:  "views",
 	5:  "burn_after_reading",
-	6:  "private",
+	6:  "privacy",
 	7:  "expires_at",
 	8:  "created_at",
 	9:  "updated_at",
@@ -573,15 +615,15 @@ func (s *CreateNoteResponse) Decode(d *jx.Decoder) error {
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"burn_after_reading\"")
 			}
-		case "private":
+		case "privacy":
 			if err := func() error {
-				s.Private.Reset()
-				if err := s.Private.Decode(d); err != nil {
+				s.Privacy.Reset()
+				if err := s.Privacy.Decode(d); err != nil {
 					return err
 				}
 				return nil
 			}(); err != nil {
-				return errors.Wrap(err, "decode field \"private\"")
+				return errors.Wrap(err, "decode field \"privacy\"")
 			}
 		case "expires_at":
 			if err := func() error {
@@ -722,6 +764,48 @@ func (s CreateNoteResponseContentType) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON implements stdjson.Unmarshaler.
 func (s *CreateNoteResponseContentType) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes CreateNoteResponsePrivacy as json.
+func (s CreateNoteResponsePrivacy) Encode(e *jx.Encoder) {
+	e.Str(string(s))
+}
+
+// Decode decodes CreateNoteResponsePrivacy from json.
+func (s *CreateNoteResponsePrivacy) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode CreateNoteResponsePrivacy to nil")
+	}
+	v, err := d.StrBytes()
+	if err != nil {
+		return err
+	}
+	// Try to use constant string.
+	switch CreateNoteResponsePrivacy(v) {
+	case CreateNoteResponsePrivacyPublic:
+		*s = CreateNoteResponsePrivacyPublic
+	case CreateNoteResponsePrivacyAuthenticated:
+		*s = CreateNoteResponsePrivacyAuthenticated
+	case CreateNoteResponsePrivacyOwner:
+		*s = CreateNoteResponsePrivacyOwner
+	default:
+		*s = CreateNoteResponsePrivacy(v)
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s CreateNoteResponsePrivacy) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *CreateNoteResponsePrivacy) UnmarshalJSON(data []byte) error {
 	d := jx.DecodeBytes(data)
 	return s.Decode(d)
 }
@@ -1164,6 +1248,44 @@ func (s *GetNoteNotFound) UnmarshalJSON(data []byte) error {
 	return s.Decode(d)
 }
 
+// Encode encodes GetNoteUnauthorized as json.
+func (s *GetNoteUnauthorized) Encode(e *jx.Encoder) {
+	unwrapped := (*ErrorResponse)(s)
+
+	unwrapped.Encode(e)
+}
+
+// Decode decodes GetNoteUnauthorized from json.
+func (s *GetNoteUnauthorized) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode GetNoteUnauthorized to nil")
+	}
+	var unwrapped ErrorResponse
+	if err := func() error {
+		if err := unwrapped.Decode(d); err != nil {
+			return err
+		}
+		return nil
+	}(); err != nil {
+		return errors.Wrap(err, "alias")
+	}
+	*s = GetNoteUnauthorized(unwrapped)
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s *GetNoteUnauthorized) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *GetNoteUnauthorized) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
 // Encode implements json.Marshaler.
 func (s *NoteResponse) Encode(e *jx.Encoder) {
 	e.ObjStart()
@@ -1198,9 +1320,9 @@ func (s *NoteResponse) encodeFields(e *jx.Encoder) {
 		e.Bool(s.BurnAfterReading)
 	}
 	{
-		if s.Private.Set {
-			e.FieldStart("private")
-			s.Private.Encode(e)
+		if s.Privacy.Set {
+			e.FieldStart("privacy")
+			s.Privacy.Encode(e)
 		}
 	}
 	{
@@ -1226,7 +1348,7 @@ var jsonFieldsNameOfNoteResponse = [10]string{
 	3: "content_type",
 	4: "views",
 	5: "burn_after_reading",
-	6: "private",
+	6: "privacy",
 	7: "expires_at",
 	8: "created_at",
 	9: "updated_at",
@@ -1311,15 +1433,15 @@ func (s *NoteResponse) Decode(d *jx.Decoder) error {
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"burn_after_reading\"")
 			}
-		case "private":
+		case "privacy":
 			if err := func() error {
-				s.Private.Reset()
-				if err := s.Private.Decode(d); err != nil {
+				s.Privacy.Reset()
+				if err := s.Privacy.Decode(d); err != nil {
 					return err
 				}
 				return nil
 			}(); err != nil {
-				return errors.Wrap(err, "decode field \"private\"")
+				return errors.Wrap(err, "decode field \"privacy\"")
 			}
 		case "expires_at":
 			if err := func() error {
@@ -1452,6 +1574,48 @@ func (s *NoteResponseContentType) UnmarshalJSON(data []byte) error {
 	return s.Decode(d)
 }
 
+// Encode encodes NoteResponsePrivacy as json.
+func (s NoteResponsePrivacy) Encode(e *jx.Encoder) {
+	e.Str(string(s))
+}
+
+// Decode decodes NoteResponsePrivacy from json.
+func (s *NoteResponsePrivacy) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode NoteResponsePrivacy to nil")
+	}
+	v, err := d.StrBytes()
+	if err != nil {
+		return err
+	}
+	// Try to use constant string.
+	switch NoteResponsePrivacy(v) {
+	case NoteResponsePrivacyPublic:
+		*s = NoteResponsePrivacyPublic
+	case NoteResponsePrivacyAuthenticated:
+		*s = NoteResponsePrivacyAuthenticated
+	case NoteResponsePrivacyOwner:
+		*s = NoteResponsePrivacyOwner
+	default:
+		*s = NoteResponsePrivacy(v)
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s NoteResponsePrivacy) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *NoteResponsePrivacy) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
 // Encode encodes bool as json.
 func (o OptBool) Encode(e *jx.Encoder) {
 	if !o.Set {
@@ -1516,6 +1680,72 @@ func (s OptCreateNoteRequestContentType) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON implements stdjson.Unmarshaler.
 func (s *OptCreateNoteRequestContentType) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes CreateNoteRequestPrivacy as json.
+func (o OptCreateNoteRequestPrivacy) Encode(e *jx.Encoder) {
+	if !o.Set {
+		return
+	}
+	e.Str(string(o.Value))
+}
+
+// Decode decodes CreateNoteRequestPrivacy from json.
+func (o *OptCreateNoteRequestPrivacy) Decode(d *jx.Decoder) error {
+	if o == nil {
+		return errors.New("invalid: unable to decode OptCreateNoteRequestPrivacy to nil")
+	}
+	o.Set = true
+	if err := o.Value.Decode(d); err != nil {
+		return err
+	}
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s OptCreateNoteRequestPrivacy) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *OptCreateNoteRequestPrivacy) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes CreateNoteResponsePrivacy as json.
+func (o OptCreateNoteResponsePrivacy) Encode(e *jx.Encoder) {
+	if !o.Set {
+		return
+	}
+	e.Str(string(o.Value))
+}
+
+// Decode decodes CreateNoteResponsePrivacy from json.
+func (o *OptCreateNoteResponsePrivacy) Decode(d *jx.Decoder) error {
+	if o == nil {
+		return errors.New("invalid: unable to decode OptCreateNoteResponsePrivacy to nil")
+	}
+	o.Set = true
+	if err := o.Value.Decode(d); err != nil {
+		return err
+	}
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s OptCreateNoteResponsePrivacy) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *OptCreateNoteResponsePrivacy) UnmarshalJSON(data []byte) error {
 	d := jx.DecodeBytes(data)
 	return s.Decode(d)
 }
@@ -1606,6 +1836,39 @@ func (s *OptNilDateTime) UnmarshalJSON(data []byte) error {
 	return s.Decode(d, json.DecodeDateTime)
 }
 
+// Encode encodes NoteResponsePrivacy as json.
+func (o OptNoteResponsePrivacy) Encode(e *jx.Encoder) {
+	if !o.Set {
+		return
+	}
+	e.Str(string(o.Value))
+}
+
+// Decode decodes NoteResponsePrivacy from json.
+func (o *OptNoteResponsePrivacy) Decode(d *jx.Decoder) error {
+	if o == nil {
+		return errors.New("invalid: unable to decode OptNoteResponsePrivacy to nil")
+	}
+	o.Set = true
+	if err := o.Value.Decode(d); err != nil {
+		return err
+	}
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s OptNoteResponsePrivacy) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *OptNoteResponsePrivacy) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
 // Encode encodes string as json.
 func (o OptString) Encode(e *jx.Encoder) {
 	if !o.Set {
@@ -1670,6 +1933,39 @@ func (s OptUpdateNoteRequestContentType) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON implements stdjson.Unmarshaler.
 func (s *OptUpdateNoteRequestContentType) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes UpdateNoteRequestPrivacy as json.
+func (o OptUpdateNoteRequestPrivacy) Encode(e *jx.Encoder) {
+	if !o.Set {
+		return
+	}
+	e.Str(string(o.Value))
+}
+
+// Decode decodes UpdateNoteRequestPrivacy from json.
+func (o *OptUpdateNoteRequestPrivacy) Decode(d *jx.Decoder) error {
+	if o == nil {
+		return errors.New("invalid: unable to decode OptUpdateNoteRequestPrivacy to nil")
+	}
+	o.Set = true
+	if err := o.Value.Decode(d); err != nil {
+		return err
+	}
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s OptUpdateNoteRequestPrivacy) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *OptUpdateNoteRequestPrivacy) UnmarshalJSON(data []byte) error {
 	d := jx.DecodeBytes(data)
 	return s.Decode(d)
 }
@@ -1852,8 +2148,10 @@ func (s *UpdateNoteRequest) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
-		e.FieldStart("edit_code")
-		e.Str(s.EditCode)
+		if s.EditCode.Set {
+			e.FieldStart("edit_code")
+			s.EditCode.Encode(e)
+		}
 	}
 	{
 		if s.BurnAfterReading.Set {
@@ -1868,9 +2166,9 @@ func (s *UpdateNoteRequest) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
-		if s.Private.Set {
-			e.FieldStart("private")
-			s.Private.Encode(e)
+		if s.Privacy.Set {
+			e.FieldStart("privacy")
+			s.Privacy.Encode(e)
 		}
 	}
 }
@@ -1882,7 +2180,7 @@ var jsonFieldsNameOfUpdateNoteRequest = [7]string{
 	3: "edit_code",
 	4: "burn_after_reading",
 	5: "ttl",
-	6: "private",
+	6: "privacy",
 }
 
 // Decode decodes UpdateNoteRequest from json.
@@ -1927,11 +2225,9 @@ func (s *UpdateNoteRequest) Decode(d *jx.Decoder) error {
 				return errors.Wrap(err, "decode field \"content_type\"")
 			}
 		case "edit_code":
-			requiredBitSet[0] |= 1 << 3
 			if err := func() error {
-				v, err := d.Str()
-				s.EditCode = string(v)
-				if err != nil {
+				s.EditCode.Reset()
+				if err := s.EditCode.Decode(d); err != nil {
 					return err
 				}
 				return nil
@@ -1958,15 +2254,15 @@ func (s *UpdateNoteRequest) Decode(d *jx.Decoder) error {
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"ttl\"")
 			}
-		case "private":
+		case "privacy":
 			if err := func() error {
-				s.Private.Reset()
-				if err := s.Private.Decode(d); err != nil {
+				s.Privacy.Reset()
+				if err := s.Privacy.Decode(d); err != nil {
 					return err
 				}
 				return nil
 			}(); err != nil {
-				return errors.Wrap(err, "decode field \"private\"")
+				return errors.Wrap(err, "decode field \"privacy\"")
 			}
 		default:
 			return d.Skip()
@@ -1978,7 +2274,7 @@ func (s *UpdateNoteRequest) Decode(d *jx.Decoder) error {
 	// Validate required fields.
 	var failures []validate.FieldError
 	for i, mask := range [1]uint8{
-		0b00001010,
+		0b00000010,
 	} {
 		if result := (requiredBitSet[i] & mask) ^ mask; result != 0 {
 			// Mask only required fields and check equality to mask using XOR.
@@ -2060,6 +2356,48 @@ func (s UpdateNoteRequestContentType) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON implements stdjson.Unmarshaler.
 func (s *UpdateNoteRequestContentType) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes UpdateNoteRequestPrivacy as json.
+func (s UpdateNoteRequestPrivacy) Encode(e *jx.Encoder) {
+	e.Str(string(s))
+}
+
+// Decode decodes UpdateNoteRequestPrivacy from json.
+func (s *UpdateNoteRequestPrivacy) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode UpdateNoteRequestPrivacy to nil")
+	}
+	v, err := d.StrBytes()
+	if err != nil {
+		return err
+	}
+	// Try to use constant string.
+	switch UpdateNoteRequestPrivacy(v) {
+	case UpdateNoteRequestPrivacyPublic:
+		*s = UpdateNoteRequestPrivacyPublic
+	case UpdateNoteRequestPrivacyAuthenticated:
+		*s = UpdateNoteRequestPrivacyAuthenticated
+	case UpdateNoteRequestPrivacyOwner:
+		*s = UpdateNoteRequestPrivacyOwner
+	default:
+		*s = UpdateNoteRequestPrivacy(v)
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s UpdateNoteRequestPrivacy) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *UpdateNoteRequestPrivacy) UnmarshalJSON(data []byte) error {
 	d := jx.DecodeBytes(data)
 	return s.Decode(d)
 }

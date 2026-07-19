@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/mock/gomock"
 
@@ -88,11 +89,11 @@ func (suite *APITokenSuite) disabledMgr() *Manager {
 // ── helpers ──
 
 func (suite *APITokenSuite) adminUser() *domain.User {
-	return &domain.User{ID: "admin-uuid", Username: "admin", IsAdmin: true}
+	return &domain.User{ID: uuid.New(), Username: "admin", IsAdmin: true}
 }
 
 func (suite *APITokenSuite) regularUser() *domain.User {
-	return &domain.User{ID: "user-uuid", Username: "alice", IsAdmin: false}
+	return &domain.User{ID: uuid.New(), Username: "alice", IsAdmin: false}
 }
 
 // hashToken mirrors the usecase's token hashing so tests can wire GetByHash expectations.
@@ -105,44 +106,38 @@ func hashToken(plain string) string {
 // ── CreateAPIToken ──
 
 func (suite *APITokenSuite) TestCreateAPIToken_Disabled_ReturnsErrFeatureNotSupported() {
-	_, err := suite.disabledMgr().CreateAPIToken(suite.T().Context(), "user-uuid")
+	_, err := suite.disabledMgr().CreateAPIToken(suite.T().Context(), uuid.New())
 	suite.ErrorIs(err, domain.ErrFeatureNotSupported)
 }
 
 func (suite *APITokenSuite) TestCreateAPIToken_UserNotFound_ReturnsErrNotFound() {
 	ctx := suite.T().Context()
-	suite.users.EXPECT().GetByID(gomock.Any(), "ghost").Return(nil, domain.ErrNotFound)
+	ghost := uuid.New()
+	suite.users.EXPECT().GetByID(gomock.Any(), ghost).Return(nil, domain.ErrNotFound)
 
-	_, err := suite.mgr.CreateAPIToken(ctx, "ghost")
+	_, err := suite.mgr.CreateAPIToken(ctx, ghost)
 	suite.ErrorIs(err, domain.ErrNotFound)
 }
 
-func (suite *APITokenSuite) TestCreateAPIToken_StoreCreateFails_WrapsError() {
+func (suite *APITokenSuite) TestCreateAPIToken_StoreFails_WrapsError() {
 	ctx := suite.T().Context()
 	usr := suite.adminUser()
 	suite.users.EXPECT().GetByID(gomock.Any(), usr.ID).Return(usr, nil)
-	suite.apiTokens.EXPECT().CountByUser(gomock.Any(), usr.ID).Return(0, nil)
-	suite.apiTokens.EXPECT().Create(gomock.Any(), gomock.Any()).Return(errors.New("db down"))
+	suite.apiTokens.EXPECT().
+		CreateIfUnderLimit(gomock.Any(), gomock.Any(), maxAPITokensPerUser).
+		Return(false, errors.New("db down"))
 
 	_, err := suite.mgr.CreateAPIToken(ctx, usr.ID)
 	suite.ErrorContains(err, "create api token")
-}
-
-func (suite *APITokenSuite) TestCreateAPIToken_CountFails_WrapsError() {
-	ctx := suite.T().Context()
-	usr := suite.adminUser()
-	suite.users.EXPECT().GetByID(gomock.Any(), usr.ID).Return(usr, nil)
-	suite.apiTokens.EXPECT().CountByUser(gomock.Any(), usr.ID).Return(0, errors.New("db down"))
-
-	_, err := suite.mgr.CreateAPIToken(ctx, usr.ID)
-	suite.ErrorContains(err, "count api tokens")
 }
 
 func (suite *APITokenSuite) TestCreateAPIToken_LimitReached_ReturnsErrAPITokenLimit() {
 	ctx := suite.T().Context()
 	usr := suite.adminUser()
 	suite.users.EXPECT().GetByID(gomock.Any(), usr.ID).Return(usr, nil)
-	suite.apiTokens.EXPECT().CountByUser(gomock.Any(), usr.ID).Return(maxAPITokensPerUser, nil)
+	suite.apiTokens.EXPECT().
+		CreateIfUnderLimit(gomock.Any(), gomock.Any(), maxAPITokensPerUser).
+		Return(false, nil)
 
 	_, err := suite.mgr.CreateAPIToken(ctx, usr.ID)
 	suite.ErrorIs(err, domain.ErrAPITokenLimit)
@@ -155,15 +150,15 @@ func (suite *APITokenSuite) TestCreateAPIToken_Success_ReturnsPlainKeyAndPersist
 	var stored *domain.APIToken
 
 	suite.users.EXPECT().GetByID(gomock.Any(), usr.ID).Return(usr, nil)
-	suite.apiTokens.EXPECT().CountByUser(gomock.Any(), usr.ID).Return(0, nil)
-	suite.apiTokens.EXPECT().Create(gomock.Any(), gomock.Any()).DoAndReturn(
-		func(_ context.Context, tk *domain.APIToken) error {
+	suite.apiTokens.EXPECT().
+		CreateIfUnderLimit(gomock.Any(), gomock.Any(), maxAPITokensPerUser).
+		DoAndReturn(func(_ context.Context, tk *domain.APIToken, _ int) (bool, error) {
 			stored = tk
 			suite.Equal(usr.ID, tk.UserID)
 			suite.NotEmpty(tk.TokenHash)
 			suite.False(tk.CreatedAt.IsZero())
 
-			return nil
+			return true, nil
 		})
 
 	plain, err := suite.mgr.CreateAPIToken(ctx, usr.ID)
@@ -196,7 +191,7 @@ func (suite *APITokenSuite) TestResolveAPIToken_UnknownHash_ReturnsErrNotFound()
 func (suite *APITokenSuite) TestResolveAPIToken_ExpiredToken_ReturnsErrNotFound() {
 	exp := time.Now().Add(-time.Minute)
 	tok := &domain.APIToken{
-		UserID:    "user-uuid",
+		UserID:    uuid.New(),
 		TokenHash: hashToken("plain"),
 		CreatedAt: time.Now(),
 		ExpiresAt: &exp,
@@ -243,11 +238,12 @@ func (suite *APITokenSuite) TestResolveAPIToken_Success_ReturnsUserAndRecordsLas
 // no longer be loaded: the error is wrapped and last-used is never touched.
 func (suite *APITokenSuite) TestResolveAPIToken_UserLookupFails_WrapsError() {
 	ctx := suite.T().Context()
-	tok := &domain.APIToken{UserID: "user-uuid", TokenHash: hashToken("plain"), CreatedAt: time.Now()}
+	userID := uuid.New()
+	tok := &domain.APIToken{UserID: userID, TokenHash: hashToken("plain"), CreatedAt: time.Now()}
 
 	gomock.InOrder(
 		suite.apiTokens.EXPECT().GetByHash(gomock.Any(), hashToken("plain")).Return(tok, nil),
-		suite.users.EXPECT().GetByID(gomock.Any(), "user-uuid").Return(nil, errors.New("db down")),
+		suite.users.EXPECT().GetByID(gomock.Any(), userID).Return(nil, errors.New("db down")),
 	)
 
 	_, err := suite.mgr.ResolveAPIToken(ctx, "plain")
@@ -257,7 +253,7 @@ func (suite *APITokenSuite) TestResolveAPIToken_UserLookupFails_WrapsError() {
 // ── ListAPITokens ──
 
 func (suite *APITokenSuite) TestListAPITokens_Disabled_ReturnsErrFeatureNotSupported() {
-	_, err := suite.disabledMgr().ListAPITokens(suite.T().Context(), "admin-uuid")
+	_, err := suite.disabledMgr().ListAPITokens(suite.T().Context(), uuid.New())
 	suite.ErrorIs(err, domain.ErrFeatureNotSupported)
 }
 
@@ -272,12 +268,13 @@ func (suite *APITokenSuite) TestListAPITokens_NonAdmin_ReturnsErrForbidden() {
 func (suite *APITokenSuite) TestListAPITokens_Admin_ReturnsTokensWithUsernames() {
 	ctx := suite.T().Context()
 	admin := suite.adminUser()
+	aliceID := uuid.New()
 	tokens := []*domain.APIToken{
-		{TokenHash: "tok-1", UserID: "user-uuid", CreatedAt: time.Now()},
-		{TokenHash: "tok-2", UserID: "ghost-uuid", CreatedAt: time.Now()},
+		{TokenHash: "tok-1", UserID: aliceID, CreatedAt: time.Now()},
+		{TokenHash: "tok-2", UserID: uuid.New(), CreatedAt: time.Now()},
 	}
 	users := []*domain.User{
-		{ID: "user-uuid", Username: "alice"},
+		{ID: aliceID, Username: "alice"},
 	}
 
 	gomock.InOrder(
@@ -297,9 +294,10 @@ func (suite *APITokenSuite) TestListAPITokens_Admin_ReturnsTokensWithUsernames()
 
 func (suite *APITokenSuite) TestListAPITokens_AdminLookupFails_WrapsError() {
 	ctx := suite.T().Context()
-	suite.users.EXPECT().GetByID(gomock.Any(), "admin-uuid").Return(nil, errors.New("db down"))
+	adminID := uuid.New()
+	suite.users.EXPECT().GetByID(gomock.Any(), adminID).Return(nil, errors.New("db down"))
 
-	_, err := suite.mgr.ListAPITokens(ctx, "admin-uuid")
+	_, err := suite.mgr.ListAPITokens(ctx, adminID)
 	suite.ErrorContains(err, "get admin user")
 }
 
@@ -333,7 +331,7 @@ func (suite *APITokenSuite) TestListAPITokens_UsersListFails_WrapsError() {
 // ── RevokeAPIToken ──
 
 func (suite *APITokenSuite) TestRevokeAPIToken_Disabled_ReturnsErrFeatureNotSupported() {
-	err := suite.disabledMgr().RevokeAPIToken(suite.T().Context(), "admin-uuid", "tok-1")
+	err := suite.disabledMgr().RevokeAPIToken(suite.T().Context(), uuid.New(), "tok-1")
 	suite.ErrorIs(err, domain.ErrFeatureNotSupported)
 }
 
@@ -367,8 +365,9 @@ func (suite *APITokenSuite) TestRevokeAPIToken_StoreError_WrapsError() {
 
 func (suite *APITokenSuite) TestRevokeAPIToken_AdminLookupFails_WrapsError() {
 	ctx := suite.T().Context()
-	suite.users.EXPECT().GetByID(gomock.Any(), "admin-uuid").Return(nil, errors.New("db down"))
+	adminID := uuid.New()
+	suite.users.EXPECT().GetByID(gomock.Any(), adminID).Return(nil, errors.New("db down"))
 
-	err := suite.mgr.RevokeAPIToken(ctx, "admin-uuid", "tok-1")
+	err := suite.mgr.RevokeAPIToken(ctx, adminID, "tok-1")
 	suite.ErrorContains(err, "get admin user")
 }

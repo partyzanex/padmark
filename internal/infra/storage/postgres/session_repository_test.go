@@ -83,10 +83,10 @@ func TestSessionRepositoryTestSuite(t *testing.T) {
 }
 
 // createUser inserts a test user and returns the generated UUID.
-func (s *SessionRepositoryTestSuite) createUser(suffix string) string {
+func (s *SessionRepositoryTestSuite) createUser(suffix string) uuid.UUID {
 	s.T().Helper()
 
-	id := uuid.New().String()
+	id := uuid.New()
 	err := s.users.Create(s.T().Context(), &domain.User{
 		ID:           id,
 		Username:     "user-" + suffix,
@@ -100,7 +100,7 @@ func (s *SessionRepositoryTestSuite) createUser(suffix string) string {
 	return id
 }
 
-func (s *SessionRepositoryTestSuite) newSession(id, userID string, ttl time.Duration) *domain.Session {
+func (s *SessionRepositoryTestSuite) newSession(id string, userID uuid.UUID, ttl time.Duration) *domain.Session {
 	return &domain.Session{
 		SessionID: id,
 		UserID:    userID,

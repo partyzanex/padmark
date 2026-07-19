@@ -44,12 +44,13 @@ type CreateNoteRequest struct {
 	// Optional custom edit code. If omitted a random 12-character code is generated.
 	// Intended for CLI and automation use; the web UI does not expose this field.
 	EditCode OptString `json:"edit_code"`
-	// When `true` the note requires a valid credential (bearer token or authenticated
-	// session) to view. This gates access to "any authenticated caller", not just the
-	// note's creator — notes have no owner, so it does not isolate the note from other
-	// users on a multi-user instance. Meaningful when the server is started with
-	// `--auth-tokens` and/or `--enable-accounts`.
-	Private OptBool `json:"private"`
+	// Who may read the note: `public` (anyone), `authenticated` (any valid bearer token or
+	// session, not just the creator), or `owner` (only the exact credential that created
+	// it — see "Edit codes and ownership" above). Meaningful when the server is started
+	// with `--auth-tokens` and/or `--enable-accounts`; `owner` additionally requires the
+	// note to actually have an owner, i.e. `--enable-accounts` and an authenticated caller
+	// — otherwise the request is rejected with `422`.
+	Privacy OptCreateNoteRequestPrivacy `json:"privacy"`
 }
 
 // GetTitle returns the value of Title.
@@ -87,9 +88,9 @@ func (s *CreateNoteRequest) GetEditCode() OptString {
 	return s.EditCode
 }
 
-// GetPrivate returns the value of Private.
-func (s *CreateNoteRequest) GetPrivate() OptBool {
-	return s.Private
+// GetPrivacy returns the value of Privacy.
+func (s *CreateNoteRequest) GetPrivacy() OptCreateNoteRequestPrivacy {
+	return s.Privacy
 }
 
 // SetTitle sets the value of Title.
@@ -127,9 +128,9 @@ func (s *CreateNoteRequest) SetEditCode(val OptString) {
 	s.EditCode = val
 }
 
-// SetPrivate sets the value of Private.
-func (s *CreateNoteRequest) SetPrivate(val OptBool) {
-	s.Private = val
+// SetPrivacy sets the value of Privacy.
+func (s *CreateNoteRequest) SetPrivacy(val OptCreateNoteRequestPrivacy) {
+	s.Privacy = val
 }
 
 // MIME type of `content`; controls rendering on the view page.
@@ -178,6 +179,60 @@ type CreateNoteRequestEntityTooLarge ErrorResponse
 
 func (*CreateNoteRequestEntityTooLarge) createNoteRes() {}
 
+// Who may read the note: `public` (anyone), `authenticated` (any valid bearer token or
+// session, not just the creator), or `owner` (only the exact credential that created
+// it — see "Edit codes and ownership" above). Meaningful when the server is started
+// with `--auth-tokens` and/or `--enable-accounts`; `owner` additionally requires the
+// note to actually have an owner, i.e. `--enable-accounts` and an authenticated caller
+// — otherwise the request is rejected with `422`.
+type CreateNoteRequestPrivacy string
+
+const (
+	CreateNoteRequestPrivacyPublic        CreateNoteRequestPrivacy = "public"
+	CreateNoteRequestPrivacyAuthenticated CreateNoteRequestPrivacy = "authenticated"
+	CreateNoteRequestPrivacyOwner         CreateNoteRequestPrivacy = "owner"
+)
+
+// AllValues returns all CreateNoteRequestPrivacy values.
+func (CreateNoteRequestPrivacy) AllValues() []CreateNoteRequestPrivacy {
+	return []CreateNoteRequestPrivacy{
+		CreateNoteRequestPrivacyPublic,
+		CreateNoteRequestPrivacyAuthenticated,
+		CreateNoteRequestPrivacyOwner,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s CreateNoteRequestPrivacy) MarshalText() ([]byte, error) {
+	switch s {
+	case CreateNoteRequestPrivacyPublic:
+		return []byte(s), nil
+	case CreateNoteRequestPrivacyAuthenticated:
+		return []byte(s), nil
+	case CreateNoteRequestPrivacyOwner:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *CreateNoteRequestPrivacy) UnmarshalText(data []byte) error {
+	switch CreateNoteRequestPrivacy(data) {
+	case CreateNoteRequestPrivacyPublic:
+		*s = CreateNoteRequestPrivacyPublic
+		return nil
+	case CreateNoteRequestPrivacyAuthenticated:
+		*s = CreateNoteRequestPrivacyAuthenticated
+		return nil
+	case CreateNoteRequestPrivacyOwner:
+		*s = CreateNoteRequestPrivacyOwner
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
 // Merged schema.
 // Ref: #/components/schemas/CreateNoteResponse
 type CreateNoteResponse struct {
@@ -195,10 +250,9 @@ type CreateNoteResponse struct {
 	// After the first read of a note with a TTL this becomes `false` and `expires_at`
 	// is set.
 	BurnAfterReading bool `json:"burn_after_reading"`
-	// `true` when the note requires a valid credential (bearer token or authenticated
-	// session) to view — any authenticated caller, not just the note's creator (notes
-	// have no owner). `false` for publicly accessible notes.
-	Private OptBool `json:"private"`
+	// Who may read the note. See `CreateNoteRequest.privacy` for the exact semantics of
+	// each value.
+	Privacy OptCreateNoteResponsePrivacy `json:"privacy"`
 	// ISO 8601 timestamp after which the note is inaccessible.
 	// Set on the first read for burn-after-reading notes that have a TTL.
 	// `null` for notes that are not expiring.
@@ -242,9 +296,9 @@ func (s *CreateNoteResponse) GetBurnAfterReading() bool {
 	return s.BurnAfterReading
 }
 
-// GetPrivate returns the value of Private.
-func (s *CreateNoteResponse) GetPrivate() OptBool {
-	return s.Private
+// GetPrivacy returns the value of Privacy.
+func (s *CreateNoteResponse) GetPrivacy() OptCreateNoteResponsePrivacy {
+	return s.Privacy
 }
 
 // GetExpiresAt returns the value of ExpiresAt.
@@ -297,9 +351,9 @@ func (s *CreateNoteResponse) SetBurnAfterReading(val bool) {
 	s.BurnAfterReading = val
 }
 
-// SetPrivate sets the value of Private.
-func (s *CreateNoteResponse) SetPrivate(val OptBool) {
-	s.Private = val
+// SetPrivacy sets the value of Privacy.
+func (s *CreateNoteResponse) SetPrivacy(val OptCreateNoteResponsePrivacy) {
+	s.Privacy = val
 }
 
 // SetExpiresAt sets the value of ExpiresAt.
@@ -392,6 +446,56 @@ func (s *CreateNoteResponseHeaders) SetResponse(val CreateNoteResponse) {
 
 func (*CreateNoteResponseHeaders) createNoteRes() {}
 
+// Who may read the note. See `CreateNoteRequest.privacy` for the exact semantics of
+// each value.
+type CreateNoteResponsePrivacy string
+
+const (
+	CreateNoteResponsePrivacyPublic        CreateNoteResponsePrivacy = "public"
+	CreateNoteResponsePrivacyAuthenticated CreateNoteResponsePrivacy = "authenticated"
+	CreateNoteResponsePrivacyOwner         CreateNoteResponsePrivacy = "owner"
+)
+
+// AllValues returns all CreateNoteResponsePrivacy values.
+func (CreateNoteResponsePrivacy) AllValues() []CreateNoteResponsePrivacy {
+	return []CreateNoteResponsePrivacy{
+		CreateNoteResponsePrivacyPublic,
+		CreateNoteResponsePrivacyAuthenticated,
+		CreateNoteResponsePrivacyOwner,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s CreateNoteResponsePrivacy) MarshalText() ([]byte, error) {
+	switch s {
+	case CreateNoteResponsePrivacyPublic:
+		return []byte(s), nil
+	case CreateNoteResponsePrivacyAuthenticated:
+		return []byte(s), nil
+	case CreateNoteResponsePrivacyOwner:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *CreateNoteResponsePrivacy) UnmarshalText(data []byte) error {
+	switch CreateNoteResponsePrivacy(data) {
+	case CreateNoteResponsePrivacyPublic:
+		*s = CreateNoteResponsePrivacyPublic
+		return nil
+	case CreateNoteResponsePrivacyAuthenticated:
+		*s = CreateNoteResponsePrivacyAuthenticated
+		return nil
+	case CreateNoteResponsePrivacyOwner:
+		*s = CreateNoteResponsePrivacyOwner
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
 type CreateNoteUnauthorized ErrorResponse
 
 func (*CreateNoteUnauthorized) createNoteRes() {}
@@ -451,6 +555,10 @@ type GetNoteNotFound ErrorResponse
 
 func (*GetNoteNotFound) getNoteRes() {}
 
+type GetNoteUnauthorized ErrorResponse
+
+func (*GetNoteUnauthorized) getNoteRes() {}
+
 // HealthzOK is response for Healthz operation.
 type HealthzOK struct{}
 
@@ -470,10 +578,9 @@ type NoteResponse struct {
 	// After the first read of a note with a TTL this becomes `false` and `expires_at`
 	// is set.
 	BurnAfterReading bool `json:"burn_after_reading"`
-	// `true` when the note requires a valid credential (bearer token or authenticated
-	// session) to view — any authenticated caller, not just the note's creator (notes
-	// have no owner). `false` for publicly accessible notes.
-	Private OptBool `json:"private"`
+	// Who may read the note. See `CreateNoteRequest.privacy` for the exact semantics of
+	// each value.
+	Privacy OptNoteResponsePrivacy `json:"privacy"`
 	// ISO 8601 timestamp after which the note is inaccessible.
 	// Set on the first read for burn-after-reading notes that have a TTL.
 	// `null` for notes that are not expiring.
@@ -514,9 +621,9 @@ func (s *NoteResponse) GetBurnAfterReading() bool {
 	return s.BurnAfterReading
 }
 
-// GetPrivate returns the value of Private.
-func (s *NoteResponse) GetPrivate() OptBool {
-	return s.Private
+// GetPrivacy returns the value of Privacy.
+func (s *NoteResponse) GetPrivacy() OptNoteResponsePrivacy {
+	return s.Privacy
 }
 
 // GetExpiresAt returns the value of ExpiresAt.
@@ -564,9 +671,9 @@ func (s *NoteResponse) SetBurnAfterReading(val bool) {
 	s.BurnAfterReading = val
 }
 
-// SetPrivate sets the value of Private.
-func (s *NoteResponse) SetPrivate(val OptBool) {
-	s.Private = val
+// SetPrivacy sets the value of Privacy.
+func (s *NoteResponse) SetPrivacy(val OptNoteResponsePrivacy) {
+	s.Privacy = val
 }
 
 // SetExpiresAt sets the value of ExpiresAt.
@@ -623,6 +730,56 @@ func (s *NoteResponseContentType) UnmarshalText(data []byte) error {
 		return nil
 	case NoteResponseContentTypeTextPlain:
 		*s = NoteResponseContentTypeTextPlain
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
+// Who may read the note. See `CreateNoteRequest.privacy` for the exact semantics of
+// each value.
+type NoteResponsePrivacy string
+
+const (
+	NoteResponsePrivacyPublic        NoteResponsePrivacy = "public"
+	NoteResponsePrivacyAuthenticated NoteResponsePrivacy = "authenticated"
+	NoteResponsePrivacyOwner         NoteResponsePrivacy = "owner"
+)
+
+// AllValues returns all NoteResponsePrivacy values.
+func (NoteResponsePrivacy) AllValues() []NoteResponsePrivacy {
+	return []NoteResponsePrivacy{
+		NoteResponsePrivacyPublic,
+		NoteResponsePrivacyAuthenticated,
+		NoteResponsePrivacyOwner,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s NoteResponsePrivacy) MarshalText() ([]byte, error) {
+	switch s {
+	case NoteResponsePrivacyPublic:
+		return []byte(s), nil
+	case NoteResponsePrivacyAuthenticated:
+		return []byte(s), nil
+	case NoteResponsePrivacyOwner:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *NoteResponsePrivacy) UnmarshalText(data []byte) error {
+	switch NoteResponsePrivacy(data) {
+	case NoteResponsePrivacyPublic:
+		*s = NoteResponsePrivacyPublic
+		return nil
+	case NoteResponsePrivacyAuthenticated:
+		*s = NoteResponsePrivacyAuthenticated
+		return nil
+	case NoteResponsePrivacyOwner:
+		*s = NoteResponsePrivacyOwner
 		return nil
 	default:
 		return errors.Errorf("invalid value: %q", data)
@@ -715,6 +872,98 @@ func (o OptCreateNoteRequestContentType) Get() (v CreateNoteRequestContentType, 
 
 // Or returns value if set, or given parameter if does not.
 func (o OptCreateNoteRequestContentType) Or(d CreateNoteRequestContentType) CreateNoteRequestContentType {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptCreateNoteRequestPrivacy returns new OptCreateNoteRequestPrivacy with value set to v.
+func NewOptCreateNoteRequestPrivacy(v CreateNoteRequestPrivacy) OptCreateNoteRequestPrivacy {
+	return OptCreateNoteRequestPrivacy{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptCreateNoteRequestPrivacy is optional CreateNoteRequestPrivacy.
+type OptCreateNoteRequestPrivacy struct {
+	Value CreateNoteRequestPrivacy
+	Set   bool
+}
+
+// IsSet returns true if OptCreateNoteRequestPrivacy was set.
+func (o OptCreateNoteRequestPrivacy) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptCreateNoteRequestPrivacy) Reset() {
+	var v CreateNoteRequestPrivacy
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptCreateNoteRequestPrivacy) SetTo(v CreateNoteRequestPrivacy) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptCreateNoteRequestPrivacy) Get() (v CreateNoteRequestPrivacy, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptCreateNoteRequestPrivacy) Or(d CreateNoteRequestPrivacy) CreateNoteRequestPrivacy {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptCreateNoteResponsePrivacy returns new OptCreateNoteResponsePrivacy with value set to v.
+func NewOptCreateNoteResponsePrivacy(v CreateNoteResponsePrivacy) OptCreateNoteResponsePrivacy {
+	return OptCreateNoteResponsePrivacy{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptCreateNoteResponsePrivacy is optional CreateNoteResponsePrivacy.
+type OptCreateNoteResponsePrivacy struct {
+	Value CreateNoteResponsePrivacy
+	Set   bool
+}
+
+// IsSet returns true if OptCreateNoteResponsePrivacy was set.
+func (o OptCreateNoteResponsePrivacy) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptCreateNoteResponsePrivacy) Reset() {
+	var v CreateNoteResponsePrivacy
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptCreateNoteResponsePrivacy) SetTo(v CreateNoteResponsePrivacy) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptCreateNoteResponsePrivacy) Get() (v CreateNoteResponsePrivacy, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptCreateNoteResponsePrivacy) Or(d CreateNoteResponsePrivacy) CreateNoteResponsePrivacy {
 	if v, ok := o.Get(); ok {
 		return v
 	}
@@ -830,6 +1079,52 @@ func (o OptNilDateTime) Or(d time.Time) time.Time {
 	return d
 }
 
+// NewOptNoteResponsePrivacy returns new OptNoteResponsePrivacy with value set to v.
+func NewOptNoteResponsePrivacy(v NoteResponsePrivacy) OptNoteResponsePrivacy {
+	return OptNoteResponsePrivacy{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptNoteResponsePrivacy is optional NoteResponsePrivacy.
+type OptNoteResponsePrivacy struct {
+	Value NoteResponsePrivacy
+	Set   bool
+}
+
+// IsSet returns true if OptNoteResponsePrivacy was set.
+func (o OptNoteResponsePrivacy) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptNoteResponsePrivacy) Reset() {
+	var v NoteResponsePrivacy
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptNoteResponsePrivacy) SetTo(v NoteResponsePrivacy) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptNoteResponsePrivacy) Get() (v NoteResponsePrivacy, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptNoteResponsePrivacy) Or(d NoteResponsePrivacy) NoteResponsePrivacy {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
 // NewOptString returns new OptString with value set to v.
 func NewOptString(v string) OptString {
 	return OptString{
@@ -922,6 +1217,52 @@ func (o OptUpdateNoteRequestContentType) Or(d UpdateNoteRequestContentType) Upda
 	return d
 }
 
+// NewOptUpdateNoteRequestPrivacy returns new OptUpdateNoteRequestPrivacy with value set to v.
+func NewOptUpdateNoteRequestPrivacy(v UpdateNoteRequestPrivacy) OptUpdateNoteRequestPrivacy {
+	return OptUpdateNoteRequestPrivacy{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptUpdateNoteRequestPrivacy is optional UpdateNoteRequestPrivacy.
+type OptUpdateNoteRequestPrivacy struct {
+	Value UpdateNoteRequestPrivacy
+	Set   bool
+}
+
+// IsSet returns true if OptUpdateNoteRequestPrivacy was set.
+func (o OptUpdateNoteRequestPrivacy) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptUpdateNoteRequestPrivacy) Reset() {
+	var v UpdateNoteRequestPrivacy
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptUpdateNoteRequestPrivacy) SetTo(v UpdateNoteRequestPrivacy) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptUpdateNoteRequestPrivacy) Get() (v UpdateNoteRequestPrivacy, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptUpdateNoteRequestPrivacy) Or(d UpdateNoteRequestPrivacy) UpdateNoteRequestPrivacy {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
 // ReadyzOK is response for Readyz operation.
 type ReadyzOK struct{}
 
@@ -951,17 +1292,19 @@ type UpdateNoteRequest struct {
 	Content string `json:"content"`
 	// New content type; defaults to the note's current type when omitted.
 	ContentType OptUpdateNoteRequestContentType `json:"content_type"`
-	// The edit code returned when the note was created.
-	EditCode string `json:"edit_code"`
+	// The edit code returned when the note was created. May be omitted when the request is
+	// authenticated (bearer token or session) as the note's owner — see
+	// "Edit codes and ownership" above.
+	EditCode OptString `json:"edit_code"`
 	// Update the burn-after-reading flag.
 	BurnAfterReading OptBool `json:"burn_after_reading"`
 	// New TTL in seconds (grace period after first read).
 	// Only meaningful when `burn_after_reading` is `true`.
 	// `0` means the note is deleted immediately when it is first revealed.
 	TTL OptInt64 `json:"ttl"`
-	// Update the private flag. See `CreateNoteRequest.private` for the exact semantics
-	// (requires login, not owner-only).
-	Private OptBool `json:"private"`
+	// Update the privacy level. See `CreateNoteRequest.privacy` for the exact semantics of
+	// each value. Omitted keeps the note's current privacy level.
+	Privacy OptUpdateNoteRequestPrivacy `json:"privacy"`
 }
 
 // GetTitle returns the value of Title.
@@ -980,7 +1323,7 @@ func (s *UpdateNoteRequest) GetContentType() OptUpdateNoteRequestContentType {
 }
 
 // GetEditCode returns the value of EditCode.
-func (s *UpdateNoteRequest) GetEditCode() string {
+func (s *UpdateNoteRequest) GetEditCode() OptString {
 	return s.EditCode
 }
 
@@ -994,9 +1337,9 @@ func (s *UpdateNoteRequest) GetTTL() OptInt64 {
 	return s.TTL
 }
 
-// GetPrivate returns the value of Private.
-func (s *UpdateNoteRequest) GetPrivate() OptBool {
-	return s.Private
+// GetPrivacy returns the value of Privacy.
+func (s *UpdateNoteRequest) GetPrivacy() OptUpdateNoteRequestPrivacy {
+	return s.Privacy
 }
 
 // SetTitle sets the value of Title.
@@ -1015,7 +1358,7 @@ func (s *UpdateNoteRequest) SetContentType(val OptUpdateNoteRequestContentType) 
 }
 
 // SetEditCode sets the value of EditCode.
-func (s *UpdateNoteRequest) SetEditCode(val string) {
+func (s *UpdateNoteRequest) SetEditCode(val OptString) {
 	s.EditCode = val
 }
 
@@ -1029,9 +1372,9 @@ func (s *UpdateNoteRequest) SetTTL(val OptInt64) {
 	s.TTL = val
 }
 
-// SetPrivate sets the value of Private.
-func (s *UpdateNoteRequest) SetPrivate(val OptBool) {
-	s.Private = val
+// SetPrivacy sets the value of Privacy.
+func (s *UpdateNoteRequest) SetPrivacy(val OptUpdateNoteRequestPrivacy) {
+	s.Privacy = val
 }
 
 // New content type; defaults to the note's current type when omitted.
@@ -1070,6 +1413,56 @@ func (s *UpdateNoteRequestContentType) UnmarshalText(data []byte) error {
 		return nil
 	case UpdateNoteRequestContentTypeTextPlain:
 		*s = UpdateNoteRequestContentTypeTextPlain
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
+// Update the privacy level. See `CreateNoteRequest.privacy` for the exact semantics of
+// each value. Omitted keeps the note's current privacy level.
+type UpdateNoteRequestPrivacy string
+
+const (
+	UpdateNoteRequestPrivacyPublic        UpdateNoteRequestPrivacy = "public"
+	UpdateNoteRequestPrivacyAuthenticated UpdateNoteRequestPrivacy = "authenticated"
+	UpdateNoteRequestPrivacyOwner         UpdateNoteRequestPrivacy = "owner"
+)
+
+// AllValues returns all UpdateNoteRequestPrivacy values.
+func (UpdateNoteRequestPrivacy) AllValues() []UpdateNoteRequestPrivacy {
+	return []UpdateNoteRequestPrivacy{
+		UpdateNoteRequestPrivacyPublic,
+		UpdateNoteRequestPrivacyAuthenticated,
+		UpdateNoteRequestPrivacyOwner,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s UpdateNoteRequestPrivacy) MarshalText() ([]byte, error) {
+	switch s {
+	case UpdateNoteRequestPrivacyPublic:
+		return []byte(s), nil
+	case UpdateNoteRequestPrivacyAuthenticated:
+		return []byte(s), nil
+	case UpdateNoteRequestPrivacyOwner:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *UpdateNoteRequestPrivacy) UnmarshalText(data []byte) error {
+	switch UpdateNoteRequestPrivacy(data) {
+	case UpdateNoteRequestPrivacyPublic:
+		*s = UpdateNoteRequestPrivacyPublic
+		return nil
+	case UpdateNoteRequestPrivacyAuthenticated:
+		*s = UpdateNoteRequestPrivacyAuthenticated
+		return nil
+	case UpdateNoteRequestPrivacyOwner:
+		*s = UpdateNoteRequestPrivacyOwner
 		return nil
 	default:
 		return errors.Errorf("invalid value: %q", data)

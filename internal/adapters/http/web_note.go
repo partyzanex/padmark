@@ -58,19 +58,19 @@ func (h *NoteHandler) RegisterRoutes(mux *http.ServeMux) {
 }
 
 type noteViewData struct {
-	Body              template.HTML
-	Title             string
+	ExpiresISO        string
+	CSRFToken         string
 	ID                string
 	CreatedAt         string
-	CreatedISO        string // RFC 3339 timestamp for JS client-side (browser-local) formatting
+	CreatedISO        string
 	ExpiresLabel      string
-	ExpiresISO        string // RFC 3339 timestamp for JS client-side formatting; empty when never expires
-	RawContent        string
+	Title             string
 	Nonce             string
+	Body              template.HTML
 	ConfirmToken      string
-	CSRFToken         string
+	RawContent        string
+	Privacy           string
 	Views             int
-	Private           bool
 	CanEdit           bool
 	NeedsConfirmation bool
 }
@@ -97,7 +97,7 @@ func toNoteViewData(note *domain.Note, rendered string) noteViewData {
 		Views:        note.Views,
 		ExpiresLabel: expires,
 		ExpiresISO:   expiresISO,
-		Private:      note.Private != nil && *note.Private,
+		Privacy:      string(note.EffectivePrivacy()),
 	}
 }
 
@@ -109,9 +109,9 @@ type noteJSON struct {
 	Title            string             `json:"title"`
 	Content          string             `json:"content"`
 	ContentType      domain.ContentType `json:"content_type"`
+	Privacy          domain.Privacy     `json:"privacy"`
 	Views            int                `json:"views"`
 	BurnAfterReading bool               `json:"burn_after_reading"`
-	Private          bool               `json:"private"`
 }
 
 func toNoteJSON(note *domain.Note) noteJSON {
@@ -125,7 +125,7 @@ func toNoteJSON(note *domain.Note) noteJSON {
 		ExpiresAt:        note.ExpiresAt,
 		Views:            note.Views,
 		BurnAfterReading: note.BurnAfterReading,
-		Private:          note.Private != nil && *note.Private,
+		Privacy:          note.EffectivePrivacy(),
 	}
 }
 
@@ -139,6 +139,7 @@ func toBurnInterstitialViewData(note *domain.Note, tok string) noteViewData {
 		ExpiresLabel:      "Burns after reading",
 		NeedsConfirmation: true,
 		ConfirmToken:      tok,
+		Privacy:           string(domain.PrivacyPublic),
 	}
 }
 
@@ -203,16 +204,17 @@ func (h *NoteHandler) GetNote(w http.ResponseWriter, r *http.Request) {
 
 // updateNoteByPathBody mirrors ogenapi.UpdateNoteRequest for the native multi-segment update
 // route. Pointer fields distinguish an omitted value from a zero one where the update semantics
-// depend on it (title, content_type, private). The remaining fields stay plain values because
+// depend on it (title, content_type, privacy). The remaining fields stay plain values because
 // omitted-vs-zero carries no extra meaning for them: Content always fully replaces the stored
-// body (there is no partial update), EditCode is a required credential where an empty string
-// already fails verification the same way a wrong code does, and BurnAfterReading is a plain
+// body (there is no partial update), EditCode need not be a pointer since an omitted or wrong
+// code are handled identically by Manager.Update (both fail verification, unless the caller is
+// the note's owner — see manager.Update's callerID bypass), and BurnAfterReading is a plain
 // on/off toggle with no "leave as is" state.
 type updateNoteByPathBody struct {
 	Title            *string `json:"title"`
 	ContentType      *string `json:"content_type"`
 	TTL              *int64  `json:"ttl"`
-	Private          *bool   `json:"private"`
+	Privacy          *string `json:"privacy"`
 	Content          string  `json:"content"`
 	EditCode         string  `json:"edit_code"`
 	BurnAfterReading bool    `json:"burn_after_reading"`
@@ -251,13 +253,20 @@ func (h *NoteHandler) UpdateNoteByPath(w http.ResponseWriter, r *http.Request) {
 		title = *body.Title
 	}
 
-	note, err := h.manager.Update(r.Context(), id, body.EditCode, &domain.Note{
+	var privacy *domain.Privacy
+
+	if body.Privacy != nil {
+		p := domain.Privacy(*body.Privacy)
+		privacy = &p
+	}
+
+	note, err := h.manager.Update(r.Context(), id, body.EditCode, callerIDFromCtx(r.Context()), &domain.Note{
 		Title:            title,
 		Content:          body.Content,
 		ContentType:      contentType,
 		BurnTTL:          burnTTL,
 		BurnAfterReading: body.BurnAfterReading,
-		Private:          body.Private,
+		Privacy:          privacy,
 	})
 	if err != nil {
 		h.writeError(w, r, err)
@@ -290,7 +299,7 @@ func (h *NoteHandler) DeleteNoteByPath(w http.ResponseWriter, r *http.Request) {
 		editCode = r.URL.Query().Get("edit_code")
 	}
 
-	err := h.manager.Delete(r.Context(), id, editCode)
+	err := h.manager.Delete(r.Context(), id, editCode, callerIDFromCtx(r.Context()))
 	if err != nil {
 		h.writeError(w, r, err)
 
@@ -340,7 +349,7 @@ func (h *NoteHandler) HandleReveal(w http.ResponseWriter, r *http.Request) {
 	h.renderNoteHTML(w, r, id, preloaded)
 }
 
-// handlePrivateAuth checks whether a note is private and the caller is authenticated.
+// handlePrivateAuth checks the note's privacy level against the caller (see Note.VisibleTo).
 // Returns the preloaded note (when auth is configured) and false when the request may proceed.
 // Returns nil and true when the response has been written (auth failed or note not found).
 func (h *NoteHandler) handlePrivateAuth(w http.ResponseWriter, r *http.Request, id string) (*domain.Note, bool) {
@@ -358,7 +367,7 @@ func (h *NoteHandler) handlePrivateAuth(w http.ResponseWriter, r *http.Request, 
 		return nil, true
 	}
 
-	if (note.Private == nil || !*note.Private) || h.isAuthenticated(r) {
+	if note.VisibleTo(callerIDFromCtx(r.Context()), h.isAuthenticated(r)) {
 		return note, false
 	}
 
@@ -369,7 +378,7 @@ func (h *NoteHandler) handlePrivateAuth(w http.ResponseWriter, r *http.Request, 
 		return nil, true
 	}
 
-	http.Error(w, "unauthorized", http.StatusUnauthorized)
+	writeUnauthorized(w)
 
 	return nil, true
 }
@@ -400,7 +409,11 @@ func (h *NoteHandler) renderNoteHTML(w http.ResponseWriter, r *http.Request, id 
 	// isAuthenticated already returns true when neither allowedTokens nor authMgr
 	// is configured, so the old "allowedTokens == nil" short-circuit is redundant
 	// and harmful: it made CanEdit always true in TOTP-only deployments.
-	data.CanEdit = h.isAuthenticated(r)
+	// Also gated on VisibleTo: without it, a privacy=owner note would show the Edit link (and
+	// let EditPage render its plaintext, see EditPage's doc comment) to any authenticated
+	// caller, not just its owner.
+	authenticated := h.isAuthenticated(r)
+	data.CanEdit = authenticated && note.VisibleTo(callerIDFromCtx(r.Context()), authenticated)
 
 	err = h.noteTmpl.Execute(w, data)
 	if err != nil {

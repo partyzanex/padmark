@@ -14,6 +14,7 @@ import (
 	reflect "reflect"
 	time "time"
 
+	uuid "github.com/google/uuid"
 	domain "github.com/partyzanex/padmark/internal/domain"
 	gomock "go.uber.org/mock/gomock"
 )
@@ -57,7 +58,7 @@ func (mr *MockUserStoreMockRecorder) Create(ctx, u any) *gomock.Call {
 }
 
 // GetByID mocks base method.
-func (m *MockUserStore) GetByID(ctx context.Context, id string) (*domain.User, error) {
+func (m *MockUserStore) GetByID(ctx context.Context, id uuid.UUID) (*domain.User, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "GetByID", ctx, id)
 	ret0, _ := ret[0].(*domain.User)
@@ -102,7 +103,7 @@ func (mr *MockUserStoreMockRecorder) List(ctx any) *gomock.Call {
 }
 
 // Revoke mocks base method.
-func (m *MockUserStore) Revoke(ctx context.Context, id string) error {
+func (m *MockUserStore) Revoke(ctx context.Context, id uuid.UUID) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "Revoke", ctx, id)
 	ret0, _ := ret[0].(error)
@@ -116,7 +117,7 @@ func (mr *MockUserStoreMockRecorder) Revoke(ctx, id any) *gomock.Call {
 }
 
 // UpdateLastLogin mocks base method.
-func (m *MockUserStore) UpdateLastLogin(ctx context.Context, id string, t time.Time) error {
+func (m *MockUserStore) UpdateLastLogin(ctx context.Context, id uuid.UUID, t time.Time) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "UpdateLastLogin", ctx, id, t)
 	ret0, _ := ret[0].(error)
@@ -130,7 +131,7 @@ func (mr *MockUserStoreMockRecorder) UpdateLastLogin(ctx, id, t any) *gomock.Cal
 }
 
 // UpdatePassword mocks base method.
-func (m *MockUserStore) UpdatePassword(ctx context.Context, id, passwordHash string, kdfSalt []byte, totpSecret string) error {
+func (m *MockUserStore) UpdatePassword(ctx context.Context, id uuid.UUID, passwordHash string, kdfSalt []byte, totpSecret string) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "UpdatePassword", ctx, id, passwordHash, kdfSalt, totpSecret)
 	ret0, _ := ret[0].(error)
@@ -144,7 +145,7 @@ func (mr *MockUserStoreMockRecorder) UpdatePassword(ctx, id, passwordHash, kdfSa
 }
 
 // UpdateTOTPCounter mocks base method.
-func (m *MockUserStore) UpdateTOTPCounter(ctx context.Context, id string, counter int64) (bool, error) {
+func (m *MockUserStore) UpdateTOTPCounter(ctx context.Context, id uuid.UUID, counter int64) (bool, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "UpdateTOTPCounter", ctx, id, counter)
 	ret0, _ := ret[0].(bool)
@@ -183,7 +184,7 @@ func (m *MockInviteStore) EXPECT() *MockInviteStoreMockRecorder {
 }
 
 // Issue mocks base method.
-func (m *MockInviteStore) Issue(ctx context.Context, createdByID string) (string, error) {
+func (m *MockInviteStore) Issue(ctx context.Context, createdByID uuid.UUID) (string, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "Issue", ctx, createdByID)
 	ret0, _ := ret[0].(string)
@@ -264,7 +265,7 @@ func (mr *MockSessionStoreMockRecorder) Delete(ctx, sessionID any) *gomock.Call 
 }
 
 // DeleteByUserID mocks base method.
-func (m *MockSessionStore) DeleteByUserID(ctx context.Context, userID string) error {
+func (m *MockSessionStore) DeleteByUserID(ctx context.Context, userID uuid.UUID) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "DeleteByUserID", ctx, userID)
 	ret0, _ := ret[0].(error)
@@ -278,7 +279,7 @@ func (mr *MockSessionStoreMockRecorder) DeleteByUserID(ctx, userID any) *gomock.
 }
 
 // DeleteByUserIDExcept mocks base method.
-func (m *MockSessionStore) DeleteByUserIDExcept(ctx context.Context, userID, exceptSessionID string) error {
+func (m *MockSessionStore) DeleteByUserIDExcept(ctx context.Context, userID uuid.UUID, exceptSessionID string) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "DeleteByUserIDExcept", ctx, userID, exceptSessionID)
 	ret0, _ := ret[0].(error)
@@ -560,33 +561,19 @@ func (m *MockAPITokenStore) EXPECT() *MockAPITokenStoreMockRecorder {
 	return m.recorder
 }
 
-// CountByUser mocks base method.
-func (m *MockAPITokenStore) CountByUser(ctx context.Context, userID string) (int, error) {
+// CreateIfUnderLimit mocks base method.
+func (m *MockAPITokenStore) CreateIfUnderLimit(ctx context.Context, t *domain.APIToken, limit int) (bool, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "CountByUser", ctx, userID)
-	ret0, _ := ret[0].(int)
+	ret := m.ctrl.Call(m, "CreateIfUnderLimit", ctx, t, limit)
+	ret0, _ := ret[0].(bool)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
-// CountByUser indicates an expected call of CountByUser.
-func (mr *MockAPITokenStoreMockRecorder) CountByUser(ctx, userID any) *gomock.Call {
+// CreateIfUnderLimit indicates an expected call of CreateIfUnderLimit.
+func (mr *MockAPITokenStoreMockRecorder) CreateIfUnderLimit(ctx, t, limit any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CountByUser", reflect.TypeOf((*MockAPITokenStore)(nil).CountByUser), ctx, userID)
-}
-
-// Create mocks base method.
-func (m *MockAPITokenStore) Create(ctx context.Context, t *domain.APIToken) error {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Create", ctx, t)
-	ret0, _ := ret[0].(error)
-	return ret0
-}
-
-// Create indicates an expected call of Create.
-func (mr *MockAPITokenStoreMockRecorder) Create(ctx, t any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Create", reflect.TypeOf((*MockAPITokenStore)(nil).Create), ctx, t)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateIfUnderLimit", reflect.TypeOf((*MockAPITokenStore)(nil).CreateIfUnderLimit), ctx, t, limit)
 }
 
 // GetByHash mocks base method.

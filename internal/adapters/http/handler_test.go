@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/mock/gomock"
 
@@ -202,7 +203,7 @@ func (s *HandlerSuite) TestIndexPage() {
 func (s *HandlerSuite) TestEditPage_OK() {
 	note := newTestNote("edit me", "# hello")
 	note.BurnAfterReading = true
-	note.Private = new(true)
+	note.Privacy = new(domain.PrivacyAuthenticated)
 
 	future := time.Now().Add(time.Hour)
 	note.ExpiresAt = &future
@@ -222,7 +223,7 @@ func (s *HandlerSuite) TestEditPage_OK() {
 	s.Contains(body, "# hello")
 	s.Contains(body, "Save")
 	s.Contains(body, "checked")
-	s.Contains(body, `id="privateCheck" checked`)
+	s.Contains(body, `value="authenticated" selected`)
 }
 
 func (s *HandlerSuite) TestEditPage_NotFound() {
@@ -821,7 +822,7 @@ func (s *HandlerSuite) TestGetNote_ShortURL() {
 
 func (s *HandlerSuite) TestGetNote_Private_HTML_Unauthorized() {
 	note := newTestNote("secret", "private content")
-	note.Private = new(true)
+	note.Privacy = new(domain.PrivacyAuthenticated)
 	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
 
 	router := s.newRouter([]string{"secret-token"})
@@ -839,7 +840,7 @@ func (s *HandlerSuite) TestGetNote_Private_HTML_Unauthorized() {
 
 func (s *HandlerSuite) TestGetNote_Private_JSON_Unauthorized() {
 	note := newTestNote("secret", "private content")
-	note.Private = new(true)
+	note.Privacy = new(domain.PrivacyAuthenticated)
 	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
 
 	router := s.newRouter([]string{"secret-token"})
@@ -855,7 +856,7 @@ func (s *HandlerSuite) TestGetNote_Private_JSON_Unauthorized() {
 
 func (s *HandlerSuite) TestGetNote_Private_Authorized() {
 	note := newTestNote("secret", "private content")
-	note.Private = new(true)
+	note.Privacy = new(domain.PrivacyAuthenticated)
 	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
 	s.manager.EXPECT().ViewPreloaded(gomock.Any(), testID, note).Return(note, nil)
 
@@ -900,7 +901,7 @@ func (s *HandlerSuite) TestGetNote_MultiSegmentSlug_PrivateRequiresAuth() {
 	const mid = "project/secret.md"
 
 	note := newTestNote("secret", "private")
-	note.Private = new(true)
+	note.Privacy = new(domain.PrivacyAuthenticated)
 	s.manager.EXPECT().Peek(gomock.Any(), mid).Return(note, nil)
 
 	router := s.newRouter([]string{"secret-token"})
@@ -957,7 +958,7 @@ func (s *HandlerSuite) TestUpdateNote_OK() {
 		CreatedAt:   createdAt,
 		UpdatedAt:   time.Now(),
 	}
-	s.manager.EXPECT().Update(gomock.Any(), testID, "editcode1234", gomock.Any()).Return(updated, nil)
+	s.manager.EXPECT().Update(gomock.Any(), testID, "editcode1234", uuid.Nil, gomock.Any()).Return(updated, nil)
 
 	body := `{"title":"new title","content":"new content","edit_code":"editcode1234"}`
 	w := httptest.NewRecorder()
@@ -979,8 +980,8 @@ func (s *HandlerSuite) TestUpdateNote_OK() {
 func (s *HandlerSuite) TestUpdateNote_WithTTL() {
 	updated := newTestNote("updated", "body")
 
-	s.manager.EXPECT().Update(gomock.Any(), testID, "code", gomock.Any()).
-		DoAndReturn(func(_ context.Context, _ string, _ string, n *domain.Note) (*domain.Note, error) {
+	s.manager.EXPECT().Update(gomock.Any(), testID, "code", uuid.Nil, gomock.Any()).
+		DoAndReturn(func(_ context.Context, _, _ string, _ uuid.UUID, n *domain.Note) (*domain.Note, error) {
 			s.True(n.BurnAfterReading)
 			s.Equal(int64(3600), n.BurnTTL)
 			s.Nil(n.ExpiresAt) // expiry is set on first read, not at update time
@@ -1001,8 +1002,8 @@ func (s *HandlerSuite) TestUpdateNote_WithTTL() {
 func (s *HandlerSuite) TestUpdateNote_ImmediateBurn() {
 	updated := newTestNote("updated", "body")
 
-	s.manager.EXPECT().Update(gomock.Any(), testID, "code", gomock.Any()).
-		DoAndReturn(func(_ context.Context, _ string, _ string, n *domain.Note) (*domain.Note, error) {
+	s.manager.EXPECT().Update(gomock.Any(), testID, "code", uuid.Nil, gomock.Any()).
+		DoAndReturn(func(_ context.Context, _, _ string, _ uuid.UUID, n *domain.Note) (*domain.Note, error) {
 			s.True(n.BurnAfterReading)
 			s.Equal(int64(0), n.BurnTTL)
 			s.Nil(n.ExpiresAt)
@@ -1020,17 +1021,17 @@ func (s *HandlerSuite) TestUpdateNote_ImmediateBurn() {
 	s.Equal(http.StatusOK, w.Code)
 }
 
-func (s *HandlerSuite) TestUpdateNote_WithPrivate() {
+func (s *HandlerSuite) TestUpdateNote_WithPrivacy() {
 	updated := newTestNote("updated", "body")
 
-	s.manager.EXPECT().Update(gomock.Any(), testID, "code", gomock.Any()).
-		DoAndReturn(func(_ context.Context, _ string, _ string, n *domain.Note) (*domain.Note, error) {
-			s.True(n.Private != nil && *n.Private)
+	s.manager.EXPECT().Update(gomock.Any(), testID, "code", uuid.Nil, gomock.Any()).
+		DoAndReturn(func(_ context.Context, _, _ string, _ uuid.UUID, n *domain.Note) (*domain.Note, error) {
+			s.Equal(domain.PrivacyAuthenticated, n.EffectivePrivacy())
 
 			return updated, nil
 		})
 
-	body := `{"title":"updated","content":"body","edit_code":"code","private":true}`
+	body := `{"title":"updated","content":"body","edit_code":"code","privacy":"authenticated"}`
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPut, "/notes/"+testID, strings.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")
@@ -1041,7 +1042,7 @@ func (s *HandlerSuite) TestUpdateNote_WithPrivate() {
 }
 
 func (s *HandlerSuite) TestUpdateNote_NotFound() {
-	s.manager.EXPECT().Update(gomock.Any(), "missing", "", gomock.Any()).Return(nil, domain.ErrNotFound)
+	s.manager.EXPECT().Update(gomock.Any(), "missing", "", uuid.Nil, gomock.Any()).Return(nil, domain.ErrNotFound)
 
 	body := `{"title":"title","content":"content","edit_code":""}`
 	w := httptest.NewRecorder()
@@ -1054,7 +1055,7 @@ func (s *HandlerSuite) TestUpdateNote_NotFound() {
 }
 
 func (s *HandlerSuite) TestUpdateNote_Forbidden() {
-	s.manager.EXPECT().Update(gomock.Any(), testID, "wrong", gomock.Any()).Return(nil, domain.ErrInvalidEditCode)
+	s.manager.EXPECT().Update(gomock.Any(), testID, "wrong", uuid.Nil, gomock.Any()).Return(nil, domain.ErrInvalidEditCode)
 
 	body := `{"title":"title","content":"content","edit_code":"wrong"}`
 	w := httptest.NewRecorder()
@@ -1078,7 +1079,7 @@ func (s *HandlerSuite) TestUpdateNote_MultiSegmentSlug_ByURL_Acceptance() {
 	const mid = "project/GUIDE.md"
 
 	updated := newTestNote("Guide", "new body")
-	s.manager.EXPECT().Update(gomock.Any(), mid, "code", gomock.Any()).Return(updated, nil)
+	s.manager.EXPECT().Update(gomock.Any(), mid, "code", uuid.Nil, gomock.Any()).Return(updated, nil)
 
 	body := `{"title":"Guide","content":"new body","edit_code":"code"}`
 	w := httptest.NewRecorder()
@@ -1093,7 +1094,7 @@ func (s *HandlerSuite) TestUpdateNote_MultiSegmentSlug_ByURL_Acceptance() {
 func (s *HandlerSuite) TestDeleteNote_MultiSegmentSlug_ByURL_Acceptance() {
 	const mid = "project/GUIDE.md"
 
-	s.manager.EXPECT().Delete(gomock.Any(), mid, "code").Return(nil)
+	s.manager.EXPECT().Delete(gomock.Any(), mid, "code", uuid.Nil).Return(nil)
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodDelete, "/notes/"+mid+"?edit_code=code", nil)
@@ -1103,19 +1104,19 @@ func (s *HandlerSuite) TestDeleteNote_MultiSegmentSlug_ByURL_Acceptance() {
 	s.Equal(http.StatusNoContent, w.Code, "deleting a path-like slug via DELETE /notes/{id...} must succeed")
 }
 
-// TestUpdateNote_OmittedPrivate_PreservesPrivacy verifies that when "private" is absent
-// from a PUT request body, the handler passes Private=nil to manager.Update so that the
-// storage layer can COALESCE(NULL, private) and preserve the existing DB value.
+// TestUpdateNote_OmittedPrivate_PreservesPrivacy verifies that when "privacy" is absent
+// from a PUT request body, the handler passes Privacy=nil to manager.Update so that the
+// storage layer can COALESCE(NULL, privacy) and preserve the existing DB value.
 func (s *HandlerSuite) TestUpdateNote_OmittedPrivate_PreservesPrivacy() {
-	s.manager.EXPECT().Update(gomock.Any(), testID, "code", gomock.Any()).
-		DoAndReturn(func(_ context.Context, _, _ string, n *domain.Note) (*domain.Note, error) {
-			// nil means "don't change" — storage will COALESCE(NULL, private).
-			s.Nil(n.Private, "Private must be nil when omitted from the request, not defaulted to false")
+	s.manager.EXPECT().Update(gomock.Any(), testID, "code", uuid.Nil, gomock.Any()).
+		DoAndReturn(func(_ context.Context, _, _ string, _ uuid.UUID, n *domain.Note) (*domain.Note, error) {
+			// nil means "don't change" — storage will COALESCE(NULL, privacy).
+			s.Nil(n.Privacy, "Privacy must be nil when omitted from the request, not defaulted to public")
 
 			return newTestNote("updated", "new content"), nil
 		})
 
-	// No "private" field in the body.
+	// No "privacy" field in the body.
 	body := `{"title":"updated","content":"new content","edit_code":"code"}`
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPut, "/notes/"+testID, strings.NewReader(body))
@@ -1138,7 +1139,7 @@ func (s *HandlerSuite) TestUpdateNote_InvalidBody() {
 // ── DeleteNote ──
 
 func (s *HandlerSuite) TestDeleteNote_OK() {
-	s.manager.EXPECT().Delete(gomock.Any(), testID, "editcode1234").Return(nil)
+	s.manager.EXPECT().Delete(gomock.Any(), testID, "editcode1234", uuid.Nil).Return(nil)
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodDelete, "/notes/"+testID, nil)
@@ -1150,7 +1151,7 @@ func (s *HandlerSuite) TestDeleteNote_OK() {
 }
 
 func (s *HandlerSuite) TestDeleteNote_QueryParam() {
-	s.manager.EXPECT().Delete(gomock.Any(), testID, "fromquery").Return(nil)
+	s.manager.EXPECT().Delete(gomock.Any(), testID, "fromquery", uuid.Nil).Return(nil)
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodDelete, "/notes/"+testID+"?edit_code=fromquery", nil)
@@ -1161,7 +1162,7 @@ func (s *HandlerSuite) TestDeleteNote_QueryParam() {
 }
 
 func (s *HandlerSuite) TestDeleteNote_NotFound() {
-	s.manager.EXPECT().Delete(gomock.Any(), "nonexistent", "code").Return(domain.ErrNotFound)
+	s.manager.EXPECT().Delete(gomock.Any(), "nonexistent", "code", uuid.Nil).Return(domain.ErrNotFound)
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodDelete, "/notes/nonexistent", nil)
@@ -1173,7 +1174,7 @@ func (s *HandlerSuite) TestDeleteNote_NotFound() {
 }
 
 func (s *HandlerSuite) TestDeleteNote_Forbidden() {
-	s.manager.EXPECT().Delete(gomock.Any(), testID, "wrong").Return(domain.ErrInvalidEditCode)
+	s.manager.EXPECT().Delete(gomock.Any(), testID, "wrong", uuid.Nil).Return(domain.ErrInvalidEditCode)
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodDelete, "/notes/"+testID, nil)
@@ -1482,7 +1483,7 @@ func (s *HandlerSuite) TestRateLimit_DifferentIPs() {
 
 func (s *HandlerSuite) TestFailLockout_Lockout() {
 	s.manager.EXPECT().
-		Update(gomock.Any(), testID, "wrong", gomock.Any()).
+		Update(gomock.Any(), testID, "wrong", uuid.Nil, gomock.Any()).
 		Return(nil, domain.ErrForbidden).
 		Times(10)
 
@@ -1503,10 +1504,55 @@ func (s *HandlerSuite) TestFailLockout_Lockout() {
 	s.Equal(http.StatusTooManyRequests, w.Code)
 }
 
+// TestFailLockout_ResetsOnSuccess verifies a successful request clears the accumulated failure
+// count: an owner who mistypes the edit code a few times before getting it right must not carry
+// a stale near-threshold counter into their next legitimate edit.
+func (s *HandlerSuite) TestFailLockout_ResetsOnSuccess() {
+	note := newTestNote("t", "c")
+
+	s.manager.EXPECT().
+		Update(gomock.Any(), testID, "wrong", uuid.Nil, gomock.Any()).
+		Return(nil, domain.ErrForbidden).
+		Times(9)
+	s.manager.EXPECT().
+		Update(gomock.Any(), testID, "valid", uuid.Nil, gomock.Any()).
+		Return(note, nil)
+
+	wrongBody := `{"title":"t","content":"c","edit_code":"wrong"}`
+	validBody := `{"title":"t","content":"c","edit_code":"valid"}`
+
+	// 9 failures — one short of the 10-attempt lockout threshold.
+	for range 9 {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodPut, "/notes/"+testID, strings.NewReader(wrongBody))
+		r.Header.Set("Content-Type", "application/json")
+		s.router.ServeHTTP(w, r)
+		s.Equal(http.StatusForbidden, w.Code)
+	}
+
+	// The 10th request succeeds — this must clear the counter, not just avoid incrementing it.
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPut, "/notes/"+testID, strings.NewReader(validBody))
+	r.Header.Set("Content-Type", "application/json")
+	s.router.ServeHTTP(w, r)
+	s.Equal(http.StatusOK, w.Code)
+
+	// A further wrong attempt must be treated as failure #1, not #10 — no lockout yet.
+	s.manager.EXPECT().
+		Update(gomock.Any(), testID, "wrong", uuid.Nil, gomock.Any()).
+		Return(nil, domain.ErrForbidden)
+
+	w = httptest.NewRecorder()
+	r = httptest.NewRequest(http.MethodPut, "/notes/"+testID, strings.NewReader(wrongBody))
+	r.Header.Set("Content-Type", "application/json")
+	s.router.ServeHTTP(w, r)
+	s.Equal(http.StatusForbidden, w.Code, "counter must have reset on the earlier success, not carried toward lockout")
+}
+
 func (s *HandlerSuite) TestFailLockout_NoIncrementOnSuccess() {
 	note := newTestNote("t", "c")
 	s.manager.EXPECT().
-		Update(gomock.Any(), testID, "valid", gomock.Any()).
+		Update(gomock.Any(), testID, "valid", uuid.Nil, gomock.Any()).
 		Return(note, nil).
 		Times(11)
 
@@ -1523,7 +1569,7 @@ func (s *HandlerSuite) TestFailLockout_NoIncrementOnSuccess() {
 
 func (s *HandlerSuite) TestFailLockout_NoIncrementOnNonForbiddenError() {
 	s.manager.EXPECT().
-		Update(gomock.Any(), testID, "wrong", gomock.Any()).
+		Update(gomock.Any(), testID, "wrong", uuid.Nil, gomock.Any()).
 		Return(nil, domain.ErrNotFound).
 		Times(11)
 
@@ -1540,7 +1586,7 @@ func (s *HandlerSuite) TestFailLockout_NoIncrementOnNonForbiddenError() {
 
 func (s *HandlerSuite) TestFailLockout_DeleteAlsoLocked() {
 	s.manager.EXPECT().
-		Delete(gomock.Any(), testID, "wrong").
+		Delete(gomock.Any(), testID, "wrong", uuid.Nil).
 		Return(domain.ErrForbidden).
 		Times(10)
 
@@ -1563,7 +1609,7 @@ func (s *HandlerSuite) TestFailLockout_IndependentPerNoteID() {
 	body := `{"title":"t","content":"c","edit_code":"wrong"}`
 
 	s.manager.EXPECT().
-		Update(gomock.Any(), testID, "wrong", gomock.Any()).
+		Update(gomock.Any(), testID, "wrong", uuid.Nil, gomock.Any()).
 		Return(nil, domain.ErrForbidden).
 		Times(10)
 
@@ -1583,7 +1629,7 @@ func (s *HandlerSuite) TestFailLockout_IndependentPerNoteID() {
 	const otherID = "other-note"
 
 	s.manager.EXPECT().
-		Update(gomock.Any(), otherID, "wrong", gomock.Any()).
+		Update(gomock.Any(), otherID, "wrong", uuid.Nil, gomock.Any()).
 		Return(nil, domain.ErrForbidden)
 
 	w = httptest.NewRecorder()
@@ -1731,6 +1777,25 @@ func (s *HandlerSuite) TestAuth_InvalidToken() {
 	router.ServeHTTP(w, r)
 
 	s.Equal(http.StatusSeeOther, w.Code)
+}
+
+// TestAuth_InvalidToken_JSONError verifies a non-browser 401 (missing/invalid bearer token) is a
+// JSON body matching the same {"message": ...} shape as every other API error, not http.Error's
+// plain text — the generated ogen client (used by the CLI) decodes API errors as JSON, so a
+// plain-text body would surface as an opaque decode failure instead of a clean "unauthorized".
+func (s *HandlerSuite) TestAuth_InvalidToken_JSONError() {
+	router := s.newRouter([]string{"secret-token"})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/notes", strings.NewReader(`{}`))
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("Accept", "application/json")
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusUnauthorized, w.Code)
+	s.Equal("application/json", w.Header().Get("Content-Type"))
+	s.JSONEq(`{"message":"unauthorized"}`, w.Body.String())
 }
 
 func (s *HandlerSuite) TestAuth_PublicPaths() {
@@ -2384,15 +2449,15 @@ func (s *HandlerSuite) TestHandleReveal_CrossNoteToken_TokenNotBurned() {
 //
 // Call-flow for GET /notes/{id} in TOTP mode:
 //   1. Auth middleware is bypassed (note route is public).
-//   2. handlePrivateAuth → Peek → checks Private + isAuthenticated.
-//   3. For non-private notes: returns (note, false) without calling isAuthenticated.
-//   4. renderNoteHTML(preloaded) → GetRenderedPreloaded → isAuthenticated (for CanEdit).
+//   2. handlePrivateAuth → Peek → checks Privacy (VisibleTo) + isAuthenticated.
+//   3. For public notes: returns (note, false) without calling isAuthenticated.
+//   4. renderNoteHTML(preloaded) → GetRenderedPreloaded → isAuthenticated + VisibleTo (for CanEdit).
 
 // TestPrivateNote_TOTPMode_Unauthenticated verifies that an unauthenticated
 // request to a private note is redirected to /login in TOTP-only mode.
 func (s *HandlerSuite) TestPrivateNote_TOTPMode_Unauthenticated() {
 	note := newTestNote("secret", "private content")
-	note.Private = new(true)
+	note.Privacy = new(domain.PrivacyAuthenticated)
 
 	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
 	// isAuthenticated fallback: no session cookie → extractSessionID returns "" →
@@ -2418,8 +2483,8 @@ func (s *HandlerSuite) TestPrivateNote_TOTPMode_Unauthenticated() {
 // and renderNoteHTML (CanEdit) read it from context without re-querying.
 func (s *HandlerSuite) TestPrivateNote_TOTPMode_Authenticated() {
 	note := newTestNote("secret", "private content")
-	note.Private = new(true)
-	usr := &domain.User{ID: "u1", Username: "alice"}
+	note.Privacy = new(domain.PrivacyAuthenticated)
+	usr := &domain.User{ID: uuid.New(), Username: "alice"}
 
 	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
 	s.manager.EXPECT().GetRenderedPreloaded(gomock.Any(), testID, note).Return(note, "rendered", nil)
@@ -2435,6 +2500,154 @@ func (s *HandlerSuite) TestPrivateNote_TOTPMode_Authenticated() {
 	router.ServeHTTP(w, r)
 
 	s.Equal(http.StatusOK, w.Code)
+}
+
+// TestOwnerOnlyNote_Owner_Authorized verifies that a note with privacy: owner is readable by
+// the exact authenticated session that created it.
+func (s *HandlerSuite) TestOwnerOnlyNote_Owner_Authorized() {
+	owner := &domain.User{ID: uuid.New(), Username: "alice"}
+
+	note := newTestNote("secret", "owner-only content")
+	note.Privacy = new(domain.PrivacyOwner)
+	note.OwnerID = &owner.ID
+
+	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
+	s.manager.EXPECT().GetRenderedPreloaded(gomock.Any(), testID, note).Return(note, "rendered", nil)
+	s.authMgr.EXPECT().GetSession(gomock.Any(), "valid-sess").Return(owner, nil).Times(1)
+
+	router := s.newRouterWithTOTPAuth()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
+	r.Header.Set("Accept", "text/html")
+	r.AddCookie(&http.Cookie{Name: "padmark_session", Value: "valid-sess"}) //nolint:gosec // G124: test cookie
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusOK, w.Code)
+}
+
+// TestOwnerOnlyNote_OtherAuthenticatedUser_Unauthorized verifies that a note with
+// privacy: owner is NOT readable by a different authenticated caller, even though they are
+// logged in — owner-only is scoped to the exact creator, unlike privacy: authenticated.
+func (s *HandlerSuite) TestOwnerOnlyNote_OtherAuthenticatedUser_Unauthorized() {
+	owner := &domain.User{ID: uuid.New(), Username: "alice"}
+	other := &domain.User{ID: uuid.New(), Username: "bob"}
+
+	note := newTestNote("secret", "owner-only content")
+	note.Privacy = new(domain.PrivacyOwner)
+	note.OwnerID = &owner.ID
+
+	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
+	s.authMgr.EXPECT().GetSession(gomock.Any(), "valid-sess").Return(other, nil).Times(1)
+
+	router := s.newRouterWithTOTPAuth()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
+	r.Header.Set("Accept", "text/html")
+	r.AddCookie(&http.Cookie{Name: "padmark_session", Value: "valid-sess"}) //nolint:gosec // G124: test cookie
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusSeeOther, w.Code)
+	s.True(strings.HasPrefix(w.Header().Get("Location"), "/login?next="),
+		"a different authenticated caller must not read an owner-only note")
+}
+
+// TestOwnerOnlyNote_Anonymous_Unauthorized verifies that a note with privacy: owner is not
+// readable by an unauthenticated caller.
+func (s *HandlerSuite) TestOwnerOnlyNote_Anonymous_Unauthorized() {
+	owner := &domain.User{ID: uuid.New(), Username: "alice"}
+
+	note := newTestNote("secret", "owner-only content")
+	note.Privacy = new(domain.PrivacyOwner)
+	note.OwnerID = &owner.ID
+
+	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
+
+	router := s.newRouterWithTOTPAuth()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
+	r.Header.Set("Accept", "application/json")
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusUnauthorized, w.Code)
+}
+
+// TestOwnerOnlyNote_Anonymous_HTML_RedirectToLogin is the HTML-negotiated counterpart to
+// TestOwnerOnlyNote_Anonymous_Unauthorized: a browser request (Accept: text/html) to a
+// privacy: owner note from an anonymous caller must redirect to /login, not 401.
+func (s *HandlerSuite) TestOwnerOnlyNote_Anonymous_HTML_RedirectToLogin() {
+	owner := &domain.User{ID: uuid.New(), Username: "alice"}
+
+	note := newTestNote("secret", "owner-only content")
+	note.Privacy = new(domain.PrivacyOwner)
+	note.OwnerID = &owner.ID
+
+	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
+
+	router := s.newRouterWithTOTPAuth()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
+	r.Header.Set("Accept", "text/html")
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusSeeOther, w.Code)
+	s.True(strings.HasPrefix(w.Header().Get("Location"), "/login?next="))
+}
+
+// TestEditPage_OwnerOnly_NonOwner_Forbidden verifies that GET /edit/{id} for a privacy: owner
+// note is gated exactly like GET /notes/{id} — a different authenticated caller must not see the
+// note's plaintext content in the editor form, even though they are logged in.
+func (s *HandlerSuite) TestEditPage_OwnerOnly_NonOwner_Forbidden() {
+	owner := &domain.User{ID: uuid.New(), Username: "alice"}
+	other := &domain.User{ID: uuid.New(), Username: "bob"}
+
+	note := newTestNote("secret", "owner-only content")
+	note.Privacy = new(domain.PrivacyOwner)
+	note.OwnerID = &owner.ID
+
+	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
+	s.authMgr.EXPECT().GetSession(gomock.Any(), "valid-sess").Return(other, nil).Times(1)
+
+	router := s.newRouterWithTOTPAuth()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/edit/"+testID, nil)
+	r.Header.Set("Accept", "text/html")
+	r.AddCookie(&http.Cookie{Name: "padmark_session", Value: "valid-sess"}) //nolint:gosec // G124: test cookie
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusSeeOther, w.Code)
+	s.True(strings.HasPrefix(w.Header().Get("Location"), "/login?next="),
+		"a different authenticated caller must not read an owner-only note via /edit")
+	s.NotContains(w.Body.String(), "owner-only content",
+		"the note's plaintext must never reach a non-owner's response body")
+}
+
+// TestEditPage_OwnerOnly_Owner_OK verifies that GET /edit/{id} for a privacy: owner note still
+// works normally for the exact authenticated session that created it.
+func (s *HandlerSuite) TestEditPage_OwnerOnly_Owner_OK() {
+	owner := &domain.User{ID: uuid.New(), Username: "alice"}
+
+	note := newTestNote("secret", "owner-only content")
+	note.Privacy = new(domain.PrivacyOwner)
+	note.OwnerID = &owner.ID
+
+	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
+	s.authMgr.EXPECT().GetSession(gomock.Any(), "valid-sess").Return(owner, nil).Times(1)
+
+	router := s.newRouterWithTOTPAuth()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/edit/"+testID, nil)
+	r.Header.Set("Accept", "text/html")
+	r.AddCookie(&http.Cookie{Name: "padmark_session", Value: "valid-sess"}) //nolint:gosec // G124: test cookie
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusOK, w.Code)
+	s.Contains(w.Body.String(), "owner-only content")
 }
 
 // TestCanEdit_TOTPMode_Unauthenticated verifies that in TOTP-only mode an
@@ -2465,7 +2678,7 @@ func (s *HandlerSuite) TestCanEdit_TOTPMode_Unauthenticated() {
 // user sees the edit button.
 func (s *HandlerSuite) TestCanEdit_TOTPMode_Authenticated() {
 	note := newTestNote("public note", "content")
-	usr := &domain.User{ID: "u1", Username: "alice"}
+	usr := &domain.User{ID: uuid.New(), Username: "alice"}
 
 	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
 	s.manager.EXPECT().GetRenderedPreloaded(gomock.Any(), testID, note).Return(note, "rendered", nil)
@@ -2483,6 +2696,30 @@ func (s *HandlerSuite) TestCanEdit_TOTPMode_Authenticated() {
 	s.Equal(http.StatusOK, w.Code)
 	s.Contains(w.Body.String(), `href="/edit/`+testID+`"`,
 		"authenticated TOTP user must see the edit button")
+}
+
+// TestCanEdit_NoAuthConfigured_OwnerOnlyNote_HidesEditButton verifies CanEdit's VisibleTo gate
+// directly: when no auth is configured at all, handlePrivateAuth's blanket bypass still lets the
+// page render for everyone (200), but a privacy: owner note (e.g. left over from when accounts
+// were enabled) must not show the Edit link — isAuthenticated() is unconditionally true in this
+// mode, yet nobody can prove ownership of a note without a real caller identity.
+func (s *HandlerSuite) TestCanEdit_NoAuthConfigured_OwnerOnlyNote_HidesEditButton() {
+	owner := uuid.New()
+	note := newTestNote("secret", "owner-only content")
+	note.Privacy = new(domain.PrivacyOwner)
+	note.OwnerID = &owner
+
+	s.manager.EXPECT().GetRendered(gomock.Any(), testID).Return(note, "rendered", nil)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
+	r.Header.Set("Accept", "text/html")
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusOK, w.Code)
+	s.NotContains(w.Body.String(), `href="/edit/`+testID+`"`,
+		"no caller identity can prove ownership when auth isn't configured, so no Edit button")
 }
 
 // TestIsAuthenticated_ReadsFromContext verifies that for an authenticated request

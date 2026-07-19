@@ -12,11 +12,16 @@ info:
       `PUT`, `DELETE`) require a Bearer token in the `Authorization` header.
     - `--enable-accounts`: TOTP-based user accounts with session cookies.
 
-    Read endpoints (`GET`) are public by default. Notes with `private: true` require *some* valid
-    credential (a bearer token or an authenticated session) to view — **any** authenticated caller
-    can read them, not just the note's creator. Notes have no owner column, so `private` means
-    "requires login", not "visible only to the author"; on a multi-user instance it does not
-    isolate notes between different users.
+    Read endpoints (`GET`) are gated by each note's `privacy` level:
+
+    - `public` (default): anyone can read it.
+    - `authenticated`: **any** valid credential (a bearer token or an authenticated session) may
+      read it — not just the note's creator.
+    - `owner`: only the credential that created the note (see "Edit codes and ownership" below)
+      may read it. Requires `--enable-accounts` and an authenticated session or API token at
+      creation time — a request that would produce an ownerless note (anonymous, or under
+      `--auth-tokens` alone, which has no notion of "owner") is rejected with `422` instead of
+      silently creating a note nobody, including its creator, could ever read again.
 
     ## Burn-after-reading
 
@@ -26,11 +31,15 @@ info:
     - **With TTL** (`burn_after_reading: true, ttl: N`): the note stays accessible for *N* seconds
       after the first read, then expires.  The exact expiry timestamp is returned in `expires_at`.
 
-    ## Edit codes
+    ## Edit codes and ownership
 
     Every note is created with a randomly generated 12-character `edit_code`.  It is returned
     **once** in the `CreateNoteResponse` and is never exposed again.  Store it — it is required
-    for `PUT` and `DELETE`.
+    for `PUT` and `DELETE`, **unless** the note was created while authenticated (a bearer token or
+    a session): the exact same credential that created it may then edit or delete it without the
+    `edit_code`. This owner check is strict — it never extends to other authenticated users or to
+    admins, and it does not apply to notes created anonymously (no owner is recorded, so
+    `edit_code` is always required for them, from everyone).
   version: 1.0.0
 
 servers:
@@ -108,6 +117,11 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/NoteResponse"
+        "401":
+          description: |
+            The note's privacy level requires a credential this request didn't supply — see the
+            `privacy` field semantics above (`authenticated` or `owner`).
+          $ref: "#/components/responses/Error"
         "404":
           description: Note not found
           $ref: "#/components/responses/Error"
@@ -122,7 +136,9 @@ paths:
       summary: Update an existing note
       description: |
         Replaces the note's title, content, content type, and burn settings.
-        The `edit_code` must match the one returned when the note was created.
+        The `edit_code` must match the one returned when the note was created — unless the
+        request is authenticated (bearer token or session) as the exact user who created the
+        note, in which case `edit_code` may be omitted. See "Edit codes and ownership" above.
         Returns the updated note.
       tags: [notes]
       parameters:
@@ -160,18 +176,30 @@ paths:
       summary: Delete a note
       description: |
         Permanently deletes the note.  The edit code must be supplied either as the
-        `X-Edit-Code` request header or the `edit_code` query parameter.
+        `X-Edit-Code` request header or the `edit_code` query parameter — unless the request is
+        authenticated (bearer token or session) as the exact user who created the note, in which
+        case no edit code is needed. See "Edit codes and ownership" above.
+
+        Prefer the `X-Edit-Code` header over the `edit_code` query parameter: a query string can
+        end up in reverse-proxy/CDN access logs or in the `Referer` header of a same-origin
+        follow-up request, while padmark's own logging never records it (see openapi.yaml's
+        `edit_code` query parameter description). The query parameter exists only for manual/curl
+        convenience — the CLI always uses the header. Better still, sign in (session or API
+        token) before creating the note and skip the edit code entirely.
       tags: [notes]
       parameters:
         - $ref: "#/components/parameters/noteId"
         - name: X-Edit-Code
           in: header
-          description: Edit code returned at note creation (alternative to `edit_code` query param)
+          description: Edit code returned at note creation (alternative to `edit_code` query param). Preferred over the query parameter — see the operation description.
           schema:
             type: string
         - name: edit_code
           in: query
-          description: Edit code returned at note creation (alternative to `X-Edit-Code` header)
+          description: |
+            Edit code returned at note creation (alternative to `X-Edit-Code` header). Prefer the
+            header: a query string is more likely to be captured in proxy/CDN access logs or a
+            same-origin `Referer` header. Provided for manual/curl convenience only.
           schema:
             type: string
       responses:
@@ -278,19 +306,21 @@ components:
             Intended for CLI and automation use; the web UI does not expose this field.
           example: MySecretCode1
 
-        private:
-          type: boolean
-          default: false
+        privacy:
+          type: string
+          enum: ["public", "authenticated", "owner"]
+          default: "public"
           description: |
-            When `true` the note requires a valid credential (bearer token or authenticated
-            session) to view. This gates access to "any authenticated caller", not just the
-            note's creator — notes have no owner, so it does not isolate the note from other
-            users on a multi-user instance. Meaningful when the server is started with
-            `--auth-tokens` and/or `--enable-accounts`.
+            Who may read the note: `public` (anyone), `authenticated` (any valid bearer token or
+            session, not just the creator), or `owner` (only the exact credential that created
+            it — see "Edit codes and ownership" above). Meaningful when the server is started
+            with `--auth-tokens` and/or `--enable-accounts`; `owner` additionally requires the
+            note to actually have an owner, i.e. `--enable-accounts` and an authenticated caller
+            — otherwise the request is rejected with `422`.
 
     UpdateNoteRequest:
       type: object
-      required: [content, edit_code]
+      required: [content]
       properties:
         title:
           type: string
@@ -306,7 +336,10 @@ components:
           description: New content type; defaults to the note's current type when omitted
         edit_code:
           type: string
-          description: The edit code returned when the note was created
+          description: |
+            The edit code returned when the note was created. May be omitted when the request is
+            authenticated (bearer token or session) as the note's owner — see
+            "Edit codes and ownership" above.
           example: JmNkn0LdjbMw
         burn_after_reading:
           type: boolean
@@ -319,11 +352,12 @@ components:
             Only meaningful when `burn_after_reading` is `true`.
             `0` means the note is deleted immediately when it is first revealed.
           example: 3600
-        private:
-          type: boolean
+        privacy:
+          type: string
+          enum: ["public", "authenticated", "owner"]
           description: |
-            Update the private flag. See `CreateNoteRequest.private` for the exact semantics
-            (requires login, not owner-only).
+            Update the privacy level. See `CreateNoteRequest.privacy` for the exact semantics of
+            each value. Omitted keeps the note's current privacy level.
 
     NoteResponse:
       type: object
@@ -354,12 +388,12 @@ components:
             `true` until the first read (or permanently `false` for non-burn notes).
             After the first read of a note with a TTL this becomes `false` and `expires_at`
             is set.
-        private:
-          type: boolean
+        privacy:
+          type: string
+          enum: ["public", "authenticated", "owner"]
           description: |
-            `true` when the note requires a valid credential (bearer token or authenticated
-            session) to view — any authenticated caller, not just the note's creator (notes
-            have no owner). `false` for publicly accessible notes.
+            Who may read the note. See `CreateNoteRequest.privacy` for the exact semantics of
+            each value.
         expires_at:
           type: string
           format: date-time

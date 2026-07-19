@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // APIToken is a long-lived bearer key issued through the browser-based CLI login flow.
@@ -16,8 +18,8 @@ type APIToken struct {
 	CreatedAt  time.Time
 	ExpiresAt  *time.Time
 	LastUsedAt *time.Time
-	UserID     string
 	TokenHash  string
+	UserID     uuid.UUID
 }
 
 // apiTokenEnvelopePrefix marks a value produced by EncodeAPITokenEnvelope so the CLI can tell a

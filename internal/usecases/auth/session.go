@@ -9,6 +9,8 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/partyzanex/padmark/internal/domain"
 )
 
@@ -326,7 +328,9 @@ func (m *SessionManager) verifyTOTPStepUp(
 // Returns false when the code is invalid or has already been used (replay).
 // Replay protection is enforced by an atomic conditional update in the store, so it
 // survives process restarts and is consistent across instances.
-func (m *SessionManager) validateAndRecordTOTP(ctx context.Context, userID, secret, code string) (bool, error) {
+func (m *SessionManager) validateAndRecordTOTP(
+	ctx context.Context, userID uuid.UUID, secret, code string,
+) (bool, error) {
 	valid, counter := m.totp.ValidateWithCounter(secret, code)
 	if !valid {
 		return false, nil

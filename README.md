@@ -16,19 +16,19 @@ Self-hosted Markdown graveyard for AI agents and beyond.
 
 ---
 
-## Why not GitHub Gist / Pastebin / PrivateBin?
+## Why not GitHub Gist / Pastebin / PrivateBin / Privnote?
 
 Those tools are built for humans. padmark is built for agents — and humans who script things.
 
-| | padmark | Gist | Pastebin | PrivateBin |
-|---|---|---|---|---|
-| Self-hosted | ✓ | ✗ | ✗ | ✓ |
-| REST API + OpenAPI spec | ✓ | partial | ✗ | ✗ |
-| Content negotiation (HTML / JSON / plain from same URL) | ✓ | ✗ | ✗ | ✗ |
-| Burn-after-reading with grace period TTL | ✓ | ✗ | ✓ | ✓ |
-| Per-note private flag | ✓ | ✗ | ✗ | ✗ |
-| Built-in CLI + stdin | ✓ | partial | ✗ | ✗ |
-| Single binary, SQLite by default | ✓ | — | — | ✗ |
+| | padmark | Gist | Pastebin | PrivateBin | Privnote |
+|---|---|---|---|---|---|
+| Self-hosted | ✓ | ✗ | ✗ | ✓ | ✗ |
+| REST API + OpenAPI spec | ✓ | partial | ✗ | ✗ | ✗ |
+| Content negotiation (HTML / JSON / plain from same URL) | ✓ | ✗ | ✗ | ✗ | ✗ |
+| Burn-after-reading with grace period TTL | ✓ | ✗ | ✓ | ✓ | partial |
+| Per-note privacy levels (public / login required / owner only) | ✓ | ✗ | ✗ | ✗ | ✗ |
+| Built-in CLI + stdin | ✓ | partial | ✗ | ✗ | ✗ |
+| Single binary, SQLite by default | ✓ | — | — | ✗ | — |
 
 **The key feature:** one URL, many consumers. An AI agent hits `/notes/{id}` with `Accept: application/json` and gets structured data. A browser hits the same URL and gets rendered HTML. A shell script pipes to `padmark-cli` from stdin. No adapters, no glue.
 
@@ -38,8 +38,9 @@ Those tools are built for humans. padmark is built for agents — and humans who
 
 - Share Markdown (or plain text) notes via a short URL
 - Edit or delete notes using a secret `edit_code` — no login required
+- If you were signed in (session or API token) when you created a note, edit or delete it later with that same credential — no `edit_code` needed
 - Make notes disappear after the first read (burn-after-reading)
-- Keep notes private so only authenticated users can see them
+- Choose who can read a note: anyone, any logged-in user, or only its owner
 - Gate access with user accounts protected by TOTP two-factor auth, or with API Bearer tokens
 - Store note content encrypted at rest
 - Script everything from the terminal or another service
@@ -60,9 +61,11 @@ Every note has:
 | `edit_code` | Your one-time secret for editing and deleting |
 | `burn_after_reading` | Delete the note on first read |
 | `ttl` | Seconds to live *after* the first read (optional) |
-| `private` | Require authentication to read |
+| `privacy` | Who can read it: `public` (default), `authenticated`, or `owner` |
 
-> **Keep your `edit_code` safe.** It's shown once at creation and cannot be recovered.
+> **Keep your `edit_code` safe.** It's shown once at creation and cannot be recovered. Exception:
+> if you created the note while authenticated (session or API token), that same credential edits
+> and deletes it without the `edit_code` — see [Editing without `edit_code`](#editing-without-edit_code-owners).
 
 ### Burn-after-reading modes
 
@@ -188,15 +191,20 @@ padmark-cli create --file note.md
 # Create from stdin
 echo "# Hello" | padmark-cli create
 
-# Custom slug and title
+# Custom slug and title (server must run with --custom-slugs; see Configuration reference)
 padmark-cli create --title "Runbook" --content "..." --slug deploy-notes
 
 # Burn-after-reading with a 1-hour window after first read
 padmark-cli create --title "Secret" --content "eyes only" --burn --ttl 3600
 
-# Private note: reading it requires a bearer token or an authenticated session
-# (any signed-in caller, not just the creator — see "API keys" below)
-padmark-cli create --title "Internal" --content "..." --private
+# Requires login to read (any signed-in caller, not just the creator — see "API keys" below)
+padmark-cli create --title "Internal" --content "..." --privacy authenticated
+
+# Owner-only: only the exact credential that created it can ever read it
+padmark-cli create --title "Just for me" --content "..." --privacy owner
+
+# Plain text instead of markdown
+padmark-cli create --title "Log dump" --content "..." --plain
 
 # Fetch a note (JSON, raw, or default)
 padmark-cli get abc123def4
@@ -208,6 +216,11 @@ padmark-cli edit abc123def4 --edit-code JmNkn0LdjbMw --file updated.md
 
 # Delete a note
 padmark-cli delete abc123def4 --edit-code JmNkn0LdjbMw
+
+# Edit/delete WITHOUT --edit-code: works if --token identifies the note's creator
+# (see "Editing without edit_code" below) — no --edit-code needed at all
+padmark-cli --token <envelope-token> edit abc123def4 --file updated.md
+padmark-cli --token <envelope-token> delete abc123def4
 
 # Check server health
 padmark-cli ping
@@ -252,6 +265,24 @@ curl -X DELETE http://localhost:4000/notes/{id} \
   -H "X-Edit-Code: JmNkn0LdjbMw"
 ```
 
+> `DELETE` also accepts `edit_code` as a `?edit_code=` query parameter (documented in the OpenAPI
+> spec, for manual/curl convenience). Prefer the `X-Edit-Code` header when you can — a query
+> string is more likely to end up in reverse-proxy/CDN access logs or a same-origin `Referer`
+> header. The CLI always uses the header, never the query parameter.
+
+**Update or delete without `edit_code`** — if the note was created by this same authenticated
+caller, `edit_code` can be omitted entirely; a Bearer token or session cookie is enough (see
+[Editing without `edit_code`](#editing-without-edit_code-owners)):
+```bash
+curl -X PUT http://localhost:4000/notes/{id} \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <api-key>" \
+  -d '{"title": "Updated", "content": "# New content"}'
+
+curl -X DELETE http://localhost:4000/notes/{id} \
+  -H "Authorization: Bearer <api-key>"
+```
+
 **Burn-after-reading**
 ```bash
 # Delete on first read
@@ -266,8 +297,6 @@ curl -X POST http://localhost:4000/notes \
 ```
 
 Interactive API docs live at `/api`. Raw OpenAPI spec at `/api/openapi.yaml`.
-
-> **Note:** `private: true` is available in the API and OpenAPI spec but is not exposed as a CLI flag.
 
 ---
 
@@ -292,15 +321,26 @@ With `--enable-accounts=true`, an admin can issue a long-lived API key for their
 its SHA-256 hash is stored (`api_tokens.token_hash`, primary key). The same page lists all keys
 (hash prefix, owner, created / last-used) and lets the admin revoke them.
 
-The CLI (`padmark-cli`) resolves the bearer token in this order (first non-empty wins):
+The value shown on that page is an **envelope token**: the raw key packed together with the
+server's own base URL (scheme + host). Pass it straight to `--token` / `PADMARK_TOKEN` and the CLI
+picks up the server URL from the token itself — no `--url` needed:
+
+```bash
+padmark-cli --token <envelope-token> create --title "hello" --content "world"
+```
+
+An explicit `--url` (or `PADMARK_URL`) always overrides the URL embedded in the token. A bare
+bearer key (no embedded URL) still works exactly as before — just pair it with `--url`.
+
+The CLI resolves the bearer token in this order (first non-empty wins):
 
 1. `--token` flag
 2. `PADMARK_TOKEN` env var
 3. `~/.config/padmark/token` (honours `XDG_CONFIG_HOME`; contents are trimmed)
 
-The token is sent as `Authorization: Bearer <token>` on every request. On the server, the auth
-middleware resolves it via `Manager.ResolveAPIToken` after the session-cookie check; an unknown,
-revoked, or expired key falls through to 401 / login redirect.
+Only the raw key (never the envelope wrapper) is sent as `Authorization: Bearer <key>` on every
+request. On the server, the auth middleware resolves it via `Manager.ResolveAPIToken` after the
+session-cookie check; an unknown, revoked, or expired key falls through to 401 / login redirect.
 
 > Sending a token to a non-HTTPS server logs a cleartext-exposure warning (advisory, not blocking);
 > use an `https://` server URL in production.
@@ -328,9 +368,31 @@ When **disabled**, none of the routes below are gated and `/setup`, `/admin`, et
 - **`/change-password`** — rotate the password (requires the current password **and** a TOTP code).
 - Sessions are cookie-based; lifetime via `--session-ttl` (default 30 days).
 
-**Private notes** require either a valid session (browsers are redirected to `/login`) or a Bearer token (API clients get `401`).
+**`privacy: authenticated`** notes require either a valid session (browsers are redirected to
+`/login`) or a Bearer token (API clients get `401`) — any signed-in caller, not just the creator.
+**`privacy: owner`** notes go further: only the exact credential that created the note may read
+it (see "Editing without `edit_code`" below for the same owner-scoping applied to writes) —
+meaningless without `--enable-accounts`, since a note has no recorded owner otherwise.
 
-Always public regardless of auth config: `/login`, `/setup`, `/logout`, `/static/*`, `/api`, `/api/openapi.yaml`, `/healthz`, `/readyz`.
+Always public regardless of auth config: `/login`, `/setup`, `/logout`, `/totp-login`, `/static/*`, `/api`, `/api/openapi.yaml`, `/healthz`, `/readyz`.
+
+### Editing without `edit_code` (owners)
+
+If you were authenticated — a session cookie (web UI) or an API Bearer token (CLI/API) — at the
+moment you **created** a note, that exact same credential can edit or delete it later with no
+`edit_code` at all. This only requires `--enable-accounts=true`; it works regardless of the
+note's `privacy` level.
+
+- **Strictly owner-scoped.** The bypass checks the exact user who created the note — not "any
+  signed-in user" (unlike `privacy: authenticated`, see above), and not admins either. A different
+  authenticated user still needs the `edit_code`, exactly like an anonymous caller.
+- **Anonymous notes are unaffected.** A note created without being signed in has no recorded
+  owner, so `edit_code` is always required for it, from everyone — this matches the behavior
+  before this feature existed.
+- **Web UI:** the edit page ([`/edit/{id}`](#1-web-ui)) still shows the edit-code field, but
+  leaves it optional for the note's owner — save without filling it in.
+- **CLI/API:** just omit `--edit-code` / the `edit_code` field; the Bearer token or session does
+  the rest (see the CLI and REST API examples above).
 
 ### Security at rest
 
@@ -351,7 +413,8 @@ Always public regardless of auth config: `/login`, `/setup`, `/logout`, `/static
 | `--storage` | `PADMARK_STORAGE` | `sqlite` | `sqlite` or `postgres` |
 | `--dsn` | `PADMARK_DSN` | `padmark.db` | DB path or connection string |
 | `--auth-tokens` | `PADMARK_AUTH_TOKENS` | — | **Deprecated.** Legacy comma-separated Bearer tokens for write endpoints; superseded by the TOTP account system + admin API keys. Will be removed in a future release |
-| `--enable-accounts` | `PADMARK_ENABLE_ACCOUNTS` | `false` | Enable the TOTP account system (`/setup`, `/login`, `/admin`, private-note gating); off = fully public |
+| `--enable-accounts` | `PADMARK_ENABLE_ACCOUNTS` | `false` | Enable the TOTP account system (`/setup`, `/login`, `/admin`, privacy-level gating); off = fully public |
+| `--disable-api` | `PADMARK_DISABLE_API` | `false` | Disable the REST/JSON API (`/notes*`, `/api`, `/api/openapi.yaml`): every request to it gets `503` with `{"message": "До свидания"}`, before auth or any handler runs. The web UI and `/healthz`, `/readyz` keep working |
 | `--totp-issuer` | `PADMARK_TOTP_ISSUER` | `padmark` | TOTP issuer shown in the authenticator app |
 | `--session-ttl` | `PADMARK_SESSION_TTL` | `2592000` | Session lifetime in seconds (default 30 days) |
 | `--argon2-memory` | `PADMARK_ARGON2_MEMORY` | `24576` | argon2id memory cost in KiB for **account password** hashing (default 24 MiB); lower for low-RAM hosts. Edit codes use a fast hash and are unaffected |

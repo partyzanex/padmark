@@ -10,12 +10,23 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/mock/gomock"
 
 	adhttp "github.com/partyzanex/padmark/internal/adapters/http"
 	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/usecases/auth"
+)
+
+// Fixed fake user IDs shared across this file's tests: each gomock EXPECT() that checks a
+// caller/target ID must see the same value the test's session/token resolves to, so these are
+// vars (not inline uuid.New() calls, which would never compare equal to themselves).
+var (
+	testAdminID  = uuid.New() //nolint:gochecknoglobals // test fixture
+	testUserID1  = uuid.New() //nolint:gochecknoglobals // test fixture
+	testUserID2  = uuid.New() //nolint:gochecknoglobals // test fixture
+	testTargetID = uuid.New() //nolint:gochecknoglobals // test fixture
 )
 
 type AuthHandlerSuite struct {
@@ -102,7 +113,7 @@ func (s *AuthHandlerSuite) newRouterWithAuthAndSessionTTL(ttl time.Duration) htt
 }
 
 func (s *AuthHandlerSuite) adminUser() *domain.User {
-	return &domain.User{ID: "admin-id", Username: "admin", IsAdmin: true}
+	return &domain.User{ID: testAdminID, Username: "admin", IsAdmin: true}
 }
 
 // authTestCSRFSecret is a fixed 32-byte secret for auth handler tests.
@@ -142,7 +153,7 @@ func (s *AuthHandlerSuite) TestLoginPage_TOTP_Mode() {
 // TestLoginPage_AlreadyAuthenticated_RedirectsHome verifies a signed-in user is not asked
 // to log in again — /login redirects home instead of rendering the form.
 func (s *AuthHandlerSuite) TestLoginPage_AlreadyAuthenticated_RedirectsHome() {
-	s.auth.EXPECT().GetSession(gomock.Any(), "sess-ok").Return(&domain.User{ID: "u1"}, nil)
+	s.auth.EXPECT().GetSession(gomock.Any(), "sess-ok").Return(&domain.User{ID: testUserID1}, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/login", nil)
 	req.AddCookie(s.sessionCookie("sess-ok"))
@@ -157,7 +168,7 @@ func (s *AuthHandlerSuite) TestLoginPage_AlreadyAuthenticated_RedirectsHome() {
 
 // TestLoginPage_AlreadyAuthenticated_RedirectsToNext honours a safe ?next= target.
 func (s *AuthHandlerSuite) TestLoginPage_AlreadyAuthenticated_RedirectsToNext() {
-	s.auth.EXPECT().GetSession(gomock.Any(), "sess-ok").Return(&domain.User{ID: "u1"}, nil)
+	s.auth.EXPECT().GetSession(gomock.Any(), "sess-ok").Return(&domain.User{ID: testUserID1}, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/login?next=/edit/abc", nil)
 	req.AddCookie(s.sessionCookie("sess-ok"))
@@ -487,7 +498,7 @@ func (s *AuthHandlerSuite) TestAdminPage_NoSession_Returns303() {
 }
 
 func (s *AuthHandlerSuite) TestAdminPage_NonAdmin_Returns403() {
-	nonAdmin := &domain.User{ID: "u1", Username: "alice", IsAdmin: false}
+	nonAdmin := &domain.User{ID: testUserID1, Username: "alice", IsAdmin: false}
 	s.auth.EXPECT().GetSession(gomock.Any(), "sess1").Return(nonAdmin, nil).Times(1)
 
 	req := httptest.NewRequest(http.MethodGet, "/admin", nil)
@@ -502,11 +513,11 @@ func (s *AuthHandlerSuite) TestAdminPage_NonAdmin_Returns403() {
 
 func (s *AuthHandlerSuite) TestAdminPage_Admin_ListsUsers() {
 	usr := s.adminUser()
-	users := []*domain.User{usr, {ID: "u2", Username: "bob"}}
+	users := []*domain.User{usr, {ID: testUserID2, Username: "bob"}}
 
 	s.auth.EXPECT().GetSession(gomock.Any(), "admin-sess").Return(usr, nil).Times(1)
-	s.auth.EXPECT().ListUsers(gomock.Any(), "admin-id").Return(users, nil)
-	s.auth.EXPECT().ListAPITokens(gomock.Any(), "admin-id").Return([]*auth.APITokenInfo{}, nil)
+	s.auth.EXPECT().ListUsers(gomock.Any(), testAdminID).Return(users, nil)
+	s.auth.EXPECT().ListAPITokens(gomock.Any(), testAdminID).Return([]*auth.APITokenInfo{}, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/admin", nil)
 	req.AddCookie(s.sessionCookie("admin-sess"))
@@ -522,12 +533,12 @@ func (s *AuthHandlerSuite) TestAdminPage_Admin_ListsUsers() {
 func (s *AuthHandlerSuite) TestAdminPage_Admin_ListsAPIKeys() {
 	usr := s.adminUser()
 	tokens := []*auth.APITokenInfo{
-		{ID: "abcdef0123456789deadbeef", UserID: "admin-id", Username: "admin", CreatedAt: time.Now()},
+		{ID: "abcdef0123456789deadbeef", UserID: testAdminID, Username: "admin", CreatedAt: time.Now()},
 	}
 
 	s.auth.EXPECT().GetSession(gomock.Any(), "admin-sess").Return(usr, nil).Times(1)
-	s.auth.EXPECT().ListUsers(gomock.Any(), "admin-id").Return([]*domain.User{usr}, nil)
-	s.auth.EXPECT().ListAPITokens(gomock.Any(), "admin-id").Return(tokens, nil)
+	s.auth.EXPECT().ListUsers(gomock.Any(), testAdminID).Return([]*domain.User{usr}, nil)
+	s.auth.EXPECT().ListAPITokens(gomock.Any(), testAdminID).Return(tokens, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/admin", nil)
 	req.AddCookie(s.sessionCookie("admin-sess"))
@@ -546,9 +557,9 @@ func (s *AuthHandlerSuite) TestAdminPage_Admin_ListsAPIKeys() {
 func (s *AuthHandlerSuite) TestAdminInvite_GeneratesLink() {
 	usr := s.adminUser()
 	s.auth.EXPECT().GetSession(gomock.Any(), "admin-sess").Return(usr, nil).Times(1)
-	s.auth.EXPECT().GenerateInvite(gomock.Any(), "admin-id").Return("tok-xyz", nil)
-	s.auth.EXPECT().ListUsers(gomock.Any(), "admin-id").Return([]*domain.User{usr}, nil)
-	s.auth.EXPECT().ListAPITokens(gomock.Any(), "admin-id").Return([]*auth.APITokenInfo{}, nil)
+	s.auth.EXPECT().GenerateInvite(gomock.Any(), testAdminID).Return("tok-xyz", nil)
+	s.auth.EXPECT().ListUsers(gomock.Any(), testAdminID).Return([]*domain.User{usr}, nil)
+	s.auth.EXPECT().ListAPITokens(gomock.Any(), testAdminID).Return([]*auth.APITokenInfo{}, nil)
 
 	form := withCSRF(url.Values{})
 	req := httptest.NewRequest(http.MethodPost, "/admin/invite", strings.NewReader(form.Encode()))
@@ -572,9 +583,9 @@ func (s *AuthHandlerSuite) TestAdminInvite_ForcedSchemeEmbedsHTTPS() {
 
 	usr := s.adminUser()
 	s.auth.EXPECT().GetSession(gomock.Any(), "admin-sess").Return(usr, nil).Times(1)
-	s.auth.EXPECT().GenerateInvite(gomock.Any(), "admin-id").Return("tok-xyz", nil)
-	s.auth.EXPECT().ListUsers(gomock.Any(), "admin-id").Return([]*domain.User{usr}, nil)
-	s.auth.EXPECT().ListAPITokens(gomock.Any(), "admin-id").Return([]*auth.APITokenInfo{}, nil)
+	s.auth.EXPECT().GenerateInvite(gomock.Any(), testAdminID).Return("tok-xyz", nil)
+	s.auth.EXPECT().ListUsers(gomock.Any(), testAdminID).Return([]*domain.User{usr}, nil)
+	s.auth.EXPECT().ListAPITokens(gomock.Any(), testAdminID).Return([]*auth.APITokenInfo{}, nil)
 
 	form := withCSRF(url.Values{})
 	req := httptest.NewRequest(http.MethodPost, "/admin/invite", strings.NewReader(form.Encode()))
@@ -595,9 +606,9 @@ func (s *AuthHandlerSuite) TestAdminInvite_ForcedSchemeEmbedsHTTPS() {
 func (s *AuthHandlerSuite) TestAdminInvite_GenerateInviteFails_ShowsError() {
 	usr := s.adminUser()
 	s.auth.EXPECT().GetSession(gomock.Any(), "admin-sess").Return(usr, nil).Times(1)
-	s.auth.EXPECT().GenerateInvite(gomock.Any(), "admin-id").Return("", errors.New("boom"))
-	s.auth.EXPECT().ListUsers(gomock.Any(), "admin-id").Return([]*domain.User{usr}, nil)
-	s.auth.EXPECT().ListAPITokens(gomock.Any(), "admin-id").Return([]*auth.APITokenInfo{}, nil)
+	s.auth.EXPECT().GenerateInvite(gomock.Any(), testAdminID).Return("", errors.New("boom"))
+	s.auth.EXPECT().ListUsers(gomock.Any(), testAdminID).Return([]*domain.User{usr}, nil)
+	s.auth.EXPECT().ListAPITokens(gomock.Any(), testAdminID).Return([]*auth.APITokenInfo{}, nil)
 
 	form := withCSRF(url.Values{})
 	req := httptest.NewRequest(http.MethodPost, "/admin/invite", strings.NewReader(form.Encode()))
@@ -616,7 +627,7 @@ func (s *AuthHandlerSuite) TestAdminInvite_GenerateInviteFails_ShowsError() {
 func (s *AuthHandlerSuite) TestAdminInvite_AdminDataFails_Returns500() {
 	usr := s.adminUser()
 	s.auth.EXPECT().GetSession(gomock.Any(), "admin-sess").Return(usr, nil).Times(1)
-	s.auth.EXPECT().ListUsers(gomock.Any(), "admin-id").Return(nil, errors.New("boom"))
+	s.auth.EXPECT().ListUsers(gomock.Any(), testAdminID).Return(nil, errors.New("boom"))
 
 	form := withCSRF(url.Values{})
 	req := httptest.NewRequest(http.MethodPost, "/admin/invite", strings.NewReader(form.Encode()))
@@ -636,10 +647,11 @@ func (s *AuthHandlerSuite) TestAdminInvite_AdminDataFails_Returns500() {
 func (s *AuthHandlerSuite) TestAdminRevoke_RevokesAndRedirects() {
 	usr := s.adminUser()
 	s.auth.EXPECT().GetSession(gomock.Any(), "admin-sess").Return(usr, nil).Times(1)
-	s.auth.EXPECT().RevokeUser(gomock.Any(), "admin-id", "target-id").Return(nil)
+	s.auth.EXPECT().RevokeUser(gomock.Any(), testAdminID, testTargetID).Return(nil)
 
 	form := withCSRF(url.Values{})
-	req := httptest.NewRequest(http.MethodPost, "/admin/users/target-id/revoke", strings.NewReader(form.Encode()))
+	req := httptest.NewRequest(http.MethodPost,
+		"/admin/users/"+testTargetID.String()+"/revoke", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(s.sessionCookie("admin-sess"))
 	req.AddCookie(s.csrfCookie())
@@ -653,11 +665,12 @@ func (s *AuthHandlerSuite) TestAdminRevoke_RevokesAndRedirects() {
 }
 
 func (s *AuthHandlerSuite) TestAdminRevoke_NonAdmin_Returns403() {
-	nonAdmin := &domain.User{ID: "u1", Username: "alice", IsAdmin: false}
+	nonAdmin := &domain.User{ID: testUserID1, Username: "alice", IsAdmin: false}
 	s.auth.EXPECT().GetSession(gomock.Any(), "sess1").Return(nonAdmin, nil).Times(1)
 
 	form := withCSRF(url.Values{})
-	req := httptest.NewRequest(http.MethodPost, "/admin/users/target-id/revoke", strings.NewReader(form.Encode()))
+	req := httptest.NewRequest(http.MethodPost,
+		"/admin/users/"+testTargetID.String()+"/revoke", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(s.sessionCookie("sess1"))
 	req.AddCookie(s.csrfCookie())
@@ -672,10 +685,11 @@ func (s *AuthHandlerSuite) TestAdminRevoke_NonAdmin_Returns403() {
 func (s *AuthHandlerSuite) TestAdminRevoke_Forbidden_RedirectsWithSpecificMessage() {
 	usr := s.adminUser()
 	s.auth.EXPECT().GetSession(gomock.Any(), "admin-sess").Return(usr, nil).Times(1)
-	s.auth.EXPECT().RevokeUser(gomock.Any(), "admin-id", "target-id").Return(domain.ErrForbidden)
+	s.auth.EXPECT().RevokeUser(gomock.Any(), testAdminID, testTargetID).Return(domain.ErrForbidden)
 
 	form := withCSRF(url.Values{})
-	req := httptest.NewRequest(http.MethodPost, "/admin/users/target-id/revoke", strings.NewReader(form.Encode()))
+	req := httptest.NewRequest(http.MethodPost,
+		"/admin/users/"+testTargetID.String()+"/revoke", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(s.sessionCookie("admin-sess"))
 	req.AddCookie(s.csrfCookie())
@@ -693,10 +707,11 @@ func (s *AuthHandlerSuite) TestAdminRevoke_Forbidden_RedirectsWithSpecificMessag
 func (s *AuthHandlerSuite) TestAdminRevoke_GenericError_RedirectsWithGenericMessage() {
 	usr := s.adminUser()
 	s.auth.EXPECT().GetSession(gomock.Any(), "admin-sess").Return(usr, nil).Times(1)
-	s.auth.EXPECT().RevokeUser(gomock.Any(), "admin-id", "target-id").Return(errors.New("boom"))
+	s.auth.EXPECT().RevokeUser(gomock.Any(), testAdminID, testTargetID).Return(errors.New("boom"))
 
 	form := withCSRF(url.Values{})
-	req := httptest.NewRequest(http.MethodPost, "/admin/users/target-id/revoke", strings.NewReader(form.Encode()))
+	req := httptest.NewRequest(http.MethodPost,
+		"/admin/users/"+testTargetID.String()+"/revoke", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(s.sessionCookie("admin-sess"))
 	req.AddCookie(s.csrfCookie())
@@ -716,9 +731,9 @@ func (s *AuthHandlerSuite) TestAdminRevoke_GenericError_RedirectsWithGenericMess
 func (s *AuthHandlerSuite) TestAdminCreateKey_CreatesAndShowsKey() {
 	usr := s.adminUser()
 	s.auth.EXPECT().GetSession(gomock.Any(), "admin-sess").Return(usr, nil).Times(1)
-	s.auth.EXPECT().CreateAPIToken(gomock.Any(), "admin-id").Return("plain-secret-key", nil)
-	s.auth.EXPECT().ListUsers(gomock.Any(), "admin-id").Return([]*domain.User{usr}, nil)
-	s.auth.EXPECT().ListAPITokens(gomock.Any(), "admin-id").Return([]*auth.APITokenInfo{}, nil)
+	s.auth.EXPECT().CreateAPIToken(gomock.Any(), testAdminID).Return("plain-secret-key", nil)
+	s.auth.EXPECT().ListUsers(gomock.Any(), testAdminID).Return([]*domain.User{usr}, nil)
+	s.auth.EXPECT().ListAPITokens(gomock.Any(), testAdminID).Return([]*auth.APITokenInfo{}, nil)
 
 	form := withCSRF(url.Values{})
 	req := httptest.NewRequest(http.MethodPost, "/admin/api-keys", strings.NewReader(form.Encode()))
@@ -754,9 +769,9 @@ func (s *AuthHandlerSuite) TestAdminCreateKey_ForcedSchemeEmbedsHTTPS() {
 
 	usr := s.adminUser()
 	s.auth.EXPECT().GetSession(gomock.Any(), "admin-sess").Return(usr, nil).Times(1)
-	s.auth.EXPECT().CreateAPIToken(gomock.Any(), "admin-id").Return("plain-secret-key", nil)
-	s.auth.EXPECT().ListUsers(gomock.Any(), "admin-id").Return([]*domain.User{usr}, nil)
-	s.auth.EXPECT().ListAPITokens(gomock.Any(), "admin-id").Return([]*auth.APITokenInfo{}, nil)
+	s.auth.EXPECT().CreateAPIToken(gomock.Any(), testAdminID).Return("plain-secret-key", nil)
+	s.auth.EXPECT().ListUsers(gomock.Any(), testAdminID).Return([]*domain.User{usr}, nil)
+	s.auth.EXPECT().ListAPITokens(gomock.Any(), testAdminID).Return([]*auth.APITokenInfo{}, nil)
 
 	form := withCSRF(url.Values{})
 	req := httptest.NewRequest(http.MethodPost, "/admin/api-keys", strings.NewReader(form.Encode()))
@@ -780,7 +795,7 @@ func (s *AuthHandlerSuite) TestAdminCreateKey_ForcedSchemeEmbedsHTTPS() {
 }
 
 func (s *AuthHandlerSuite) TestAdminCreateKey_NonAdmin_Returns403() {
-	nonAdmin := &domain.User{ID: "u1", Username: "alice", IsAdmin: false}
+	nonAdmin := &domain.User{ID: testUserID1, Username: "alice", IsAdmin: false}
 	s.auth.EXPECT().GetSession(gomock.Any(), "sess1").Return(nonAdmin, nil).Times(1)
 
 	form := withCSRF(url.Values{})
@@ -799,7 +814,7 @@ func (s *AuthHandlerSuite) TestAdminCreateKey_NonAdmin_Returns403() {
 func (s *AuthHandlerSuite) TestAdminRevokeKey_RevokesAndRedirects() {
 	usr := s.adminUser()
 	s.auth.EXPECT().GetSession(gomock.Any(), "admin-sess").Return(usr, nil).Times(1)
-	s.auth.EXPECT().RevokeAPIToken(gomock.Any(), "admin-id", "hash-123").Return(nil)
+	s.auth.EXPECT().RevokeAPIToken(gomock.Any(), testAdminID, "hash-123").Return(nil)
 
 	form := withCSRF(url.Values{})
 	req := httptest.NewRequest(http.MethodPost, "/admin/api-keys/hash-123/revoke", strings.NewReader(form.Encode()))
@@ -816,7 +831,7 @@ func (s *AuthHandlerSuite) TestAdminRevokeKey_RevokesAndRedirects() {
 }
 
 func (s *AuthHandlerSuite) TestAdminRevokeKey_NonAdmin_Returns403() {
-	nonAdmin := &domain.User{ID: "u1", Username: "alice", IsAdmin: false}
+	nonAdmin := &domain.User{ID: testUserID1, Username: "alice", IsAdmin: false}
 	s.auth.EXPECT().GetSession(gomock.Any(), "sess1").Return(nonAdmin, nil).Times(1)
 
 	form := withCSRF(url.Values{})
@@ -835,9 +850,9 @@ func (s *AuthHandlerSuite) TestAdminRevokeKey_NonAdmin_Returns403() {
 func (s *AuthHandlerSuite) TestAdminCreateKey_CreateFails_ShowsError() {
 	usr := s.adminUser()
 	s.auth.EXPECT().GetSession(gomock.Any(), "admin-sess").Return(usr, nil).Times(1)
-	s.auth.EXPECT().CreateAPIToken(gomock.Any(), "admin-id").Return("", domain.ErrFeatureNotSupported)
-	s.auth.EXPECT().ListUsers(gomock.Any(), "admin-id").Return([]*domain.User{usr}, nil)
-	s.auth.EXPECT().ListAPITokens(gomock.Any(), "admin-id").Return([]*auth.APITokenInfo{}, nil)
+	s.auth.EXPECT().CreateAPIToken(gomock.Any(), testAdminID).Return("", domain.ErrFeatureNotSupported)
+	s.auth.EXPECT().ListUsers(gomock.Any(), testAdminID).Return([]*domain.User{usr}, nil)
+	s.auth.EXPECT().ListAPITokens(gomock.Any(), testAdminID).Return([]*auth.APITokenInfo{}, nil)
 
 	form := withCSRF(url.Values{})
 	req := httptest.NewRequest(http.MethodPost, "/admin/api-keys", strings.NewReader(form.Encode()))
@@ -856,7 +871,7 @@ func (s *AuthHandlerSuite) TestAdminCreateKey_CreateFails_ShowsError() {
 func (s *AuthHandlerSuite) TestAdminRevokeKey_RevokeFails_RedirectsWithError() {
 	usr := s.adminUser()
 	s.auth.EXPECT().GetSession(gomock.Any(), "admin-sess").Return(usr, nil).Times(1)
-	s.auth.EXPECT().RevokeAPIToken(gomock.Any(), "admin-id", "hash-123").Return(domain.ErrNotFound)
+	s.auth.EXPECT().RevokeAPIToken(gomock.Any(), testAdminID, "hash-123").Return(domain.ErrNotFound)
 
 	form := withCSRF(url.Values{})
 	req := httptest.NewRequest(http.MethodPost, "/admin/api-keys/hash-123/revoke", strings.NewReader(form.Encode()))
@@ -875,7 +890,7 @@ func (s *AuthHandlerSuite) TestAdminRevokeKey_RevokeFails_RedirectsWithError() {
 // ── Session auth middleware ──
 
 func (s *AuthHandlerSuite) TestSessionAuth_ValidSession_PassesThrough() {
-	usr := &domain.User{ID: "u1", Username: "alice"}
+	usr := &domain.User{ID: testUserID1, Username: "alice"}
 	// GetSession called twice: once by middleware, once by handler (isAuthenticated check inside GetNote may differ)
 	// For GET / (IndexPage) which is always served — just once by middleware
 	s.auth.EXPECT().GetSession(gomock.Any(), "sess1").Return(usr, nil)
@@ -908,7 +923,7 @@ func (s *AuthHandlerSuite) TestSessionAuth_ExpiredSession_RedirectsToLogin() {
 // ── API-token auth middleware ──
 
 func (s *AuthHandlerSuite) TestAPITokenAuth_ValidBearer_PassesThrough() {
-	usr := &domain.User{ID: "u1", Username: "alice"}
+	usr := &domain.User{ID: testUserID1, Username: "alice"}
 	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "good-api-key").Return(usr, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -940,8 +955,8 @@ func (s *AuthHandlerSuite) TestAPITokenAuth_UnknownBearer_Returns401() {
 func (s *AuthHandlerSuite) TestAPITokenAuth_AdminBearer_ReachesAdminPage() {
 	admin := s.adminUser()
 	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "admin-key").Return(admin, nil)
-	s.auth.EXPECT().ListUsers(gomock.Any(), "admin-id").Return([]*domain.User{admin}, nil)
-	s.auth.EXPECT().ListAPITokens(gomock.Any(), "admin-id").Return([]*auth.APITokenInfo{}, nil)
+	s.auth.EXPECT().ListUsers(gomock.Any(), testAdminID).Return([]*domain.User{admin}, nil)
+	s.auth.EXPECT().ListAPITokens(gomock.Any(), testAdminID).Return([]*auth.APITokenInfo{}, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/admin", nil)
 	req.Header.Set("Authorization", "Bearer admin-key")
@@ -957,10 +972,10 @@ func (s *AuthHandlerSuite) TestAPITokenAuth_AdminBearer_ReachesAdminPage() {
 // "public" route (auth not required), so the middleware must still resolve an API-token Bearer
 // key there — otherwise the CLI, whose only credential is that key, gets 401 on a private note.
 func (s *AuthHandlerSuite) TestAPITokenAuth_PrivateNote_ValidBearer_Served() {
-	usr := &domain.User{ID: "u1", Username: "alice"}
-	priv := true
+	usr := &domain.User{ID: testUserID1, Username: "alice"}
+	priv := domain.PrivacyAuthenticated
 	note := newTestNote("secret", "# private")
-	note.Private = &priv
+	note.Privacy = &priv
 
 	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "good-api-key").Return(usr, nil)
 	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
@@ -980,9 +995,9 @@ func (s *AuthHandlerSuite) TestAPITokenAuth_PrivateNote_ValidBearer_Served() {
 // TestAPITokenAuth_PrivateNote_UnknownBearer_Returns401 is the negative counterpart: an unknown
 // API key must not reach a private note.
 func (s *AuthHandlerSuite) TestAPITokenAuth_PrivateNote_UnknownBearer_Returns401() {
-	priv := true
+	priv := domain.PrivacyAuthenticated
 	note := newTestNote("secret", "# private")
-	note.Private = &priv
+	note.Privacy = &priv
 
 	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "bad-key").Return(nil, domain.ErrNotFound)
 	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
@@ -1003,7 +1018,7 @@ func (s *AuthHandlerSuite) TestAPITokenAuth_PrivateNote_UnknownBearer_Returns401
 // ({"message": ...}) matching the OpenAPI spec, so the ogen client decodes it into a typed error
 // instead of failing on an unexpected content type (was: text/plain, then text/html).
 func (s *AuthHandlerSuite) TestGetNote_NotFound_JSONClient_GetsJSONError() {
-	usr := &domain.User{ID: "u1", Username: "alice"}
+	usr := &domain.User{ID: testUserID1, Username: "alice"}
 	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "good-api-key").Return(usr, nil)
 	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(nil, domain.ErrNotFound)
 
@@ -1045,7 +1060,7 @@ func (s *AuthHandlerSuite) TestGetNote_NotFound_BrowserClient_GetsHTMLPage() {
 // ── Change password ──
 
 func (s *AuthHandlerSuite) TestChangePasswordPage_Authenticated_RendersForm() {
-	usr := &domain.User{ID: "u1", Username: "alice"}
+	usr := &domain.User{ID: testUserID1, Username: "alice"}
 	s.auth.EXPECT().GetSession(gomock.Any(), "sess1").Return(usr, nil).Times(1)
 
 	req := httptest.NewRequest(http.MethodGet, "/change-password", nil)
@@ -1060,7 +1075,7 @@ func (s *AuthHandlerSuite) TestChangePasswordPage_Authenticated_RendersForm() {
 }
 
 func (s *AuthHandlerSuite) TestChangePasswordHandler_Success_ShowsSuccessMessage() {
-	usr := &domain.User{ID: "u1", Username: "alice"}
+	usr := &domain.User{ID: testUserID1, Username: "alice"}
 	s.auth.EXPECT().GetSession(gomock.Any(), "sess1").Return(usr, nil).Times(1)
 	s.auth.EXPECT().ChangePassword(gomock.Any(), "sess1", "OldP@ss12!", "NewP@ss12!", "123456").Return("new-sess-id", nil)
 
@@ -1096,7 +1111,7 @@ func (s *AuthHandlerSuite) TestChangePasswordHandler_Success_ShowsSuccessMessage
 }
 
 func (s *AuthHandlerSuite) TestChangePasswordHandler_Mismatch_ShowsError() {
-	usr := &domain.User{ID: "u1", Username: "alice"}
+	usr := &domain.User{ID: testUserID1, Username: "alice"}
 	s.auth.EXPECT().GetSession(gomock.Any(), "sess1").Return(usr, nil).Times(1)
 
 	form := withCSRF(url.Values{
@@ -1118,7 +1133,7 @@ func (s *AuthHandlerSuite) TestChangePasswordHandler_Mismatch_ShowsError() {
 }
 
 func (s *AuthHandlerSuite) TestChangePasswordHandler_WrongOldPassword_ShowsError() {
-	usr := &domain.User{ID: "u1", Username: "alice"}
+	usr := &domain.User{ID: testUserID1, Username: "alice"}
 	s.auth.EXPECT().GetSession(gomock.Any(), "sess1").Return(usr, nil).Times(1)
 	s.auth.EXPECT().ChangePassword(gomock.Any(), "sess1", "WrongP@ss12!", "NewP@ss12!", "123456").
 		Return("", domain.ErrInvalidPassword)
@@ -1143,7 +1158,7 @@ func (s *AuthHandlerSuite) TestChangePasswordHandler_WrongOldPassword_ShowsError
 }
 
 func (s *AuthHandlerSuite) TestChangePasswordHandler_InvalidTOTP_ShowsError() {
-	usr := &domain.User{ID: "u1", Username: "alice"}
+	usr := &domain.User{ID: testUserID1, Username: "alice"}
 	s.auth.EXPECT().GetSession(gomock.Any(), "sess1").Return(usr, nil).Times(1)
 	s.auth.EXPECT().ChangePassword(gomock.Any(), "sess1", "OldP@ss12!", "NewP@ss12!", "badcode").
 		Return("", domain.ErrInvalidTOTP)
@@ -1294,4 +1309,97 @@ func (s *AuthHandlerSuite) TestTOTPLogin_SessionCookieMaxAge_TracksConfiguredSes
 	}
 
 	s.True(found, "session cookie must be set")
+}
+
+// ── Owner bypass for edit_code (session and API-token callers) ──
+
+// TestUpdateNote_SessionOwner_BypassesEditCode verifies that a browser session (the ogen
+// single-segment PUT /notes/{id} route) resolves the caller and lets the note's owner update it
+// with no edit_code.
+func (s *AuthHandlerSuite) TestUpdateNote_SessionOwner_BypassesEditCode() {
+	s.auth.EXPECT().GetSession(gomock.Any(), "sess-owner").Return(&domain.User{ID: testUserID1}, nil)
+	s.manager.EXPECT().Update(gomock.Any(), testID, "", testUserID1, gomock.Any()).
+		Return(newTestNote("t", "c"), nil)
+
+	body := `{"title":"t","content":"c"}`
+	req := httptest.NewRequest(http.MethodPut, "/notes/"+testID, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(s.sessionCookie("sess-owner"))
+
+	rec := httptest.NewRecorder()
+	s.router.ServeHTTP(rec, req)
+
+	s.Equal(http.StatusOK, rec.Code)
+}
+
+// TestUpdateNote_APITokenOwner_BypassesEditCode is the CLI/API-client counterpart: a Bearer API
+// token resolves to its owning user the same way a session does.
+func (s *AuthHandlerSuite) TestUpdateNote_APITokenOwner_BypassesEditCode() {
+	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "valid-key").Return(&domain.User{ID: testUserID1}, nil)
+	s.manager.EXPECT().Update(gomock.Any(), testID, "", testUserID1, gomock.Any()).
+		Return(newTestNote("t", "c"), nil)
+
+	body := `{"title":"t","content":"c"}`
+	req := httptest.NewRequest(http.MethodPut, "/notes/"+testID, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer valid-key")
+
+	rec := httptest.NewRecorder()
+	s.router.ServeHTTP(rec, req)
+
+	s.Equal(http.StatusOK, rec.Code)
+}
+
+// TestDeleteNote_SessionOwner_BypassesEditCode mirrors TestUpdateNote_SessionOwner_BypassesEditCode
+// for DELETE.
+func (s *AuthHandlerSuite) TestDeleteNote_SessionOwner_BypassesEditCode() {
+	s.auth.EXPECT().GetSession(gomock.Any(), "sess-owner").Return(&domain.User{ID: testUserID1}, nil)
+	s.manager.EXPECT().Delete(gomock.Any(), testID, "", testUserID1).Return(nil)
+
+	req := httptest.NewRequest(http.MethodDelete, "/notes/"+testID, nil)
+	req.AddCookie(s.sessionCookie("sess-owner"))
+
+	rec := httptest.NewRecorder()
+	s.router.ServeHTTP(rec, req)
+
+	s.Equal(http.StatusNoContent, rec.Code)
+}
+
+// TestUpdateNote_SessionNonOwner_StillNeedsEditCode verifies the owner bypass never extends to
+// another signed-in user: without the correct edit_code, a non-owner session gets the same
+// domain.ErrInvalidEditCode → 403 as an anonymous caller.
+func (s *AuthHandlerSuite) TestUpdateNote_SessionNonOwner_StillNeedsEditCode() {
+	s.auth.EXPECT().GetSession(gomock.Any(), "sess-other").Return(&domain.User{ID: testUserID2}, nil)
+	s.manager.EXPECT().Update(gomock.Any(), testID, "", testUserID2, gomock.Any()).
+		Return(nil, domain.ErrInvalidEditCode)
+
+	body := `{"title":"t","content":"c"}`
+	req := httptest.NewRequest(http.MethodPut, "/notes/"+testID, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(s.sessionCookie("sess-other"))
+
+	rec := httptest.NewRecorder()
+	s.router.ServeHTTP(rec, req)
+
+	s.Equal(http.StatusForbidden, rec.Code)
+}
+
+// TestUpdateNoteByPath_SessionOwner_BypassesEditCode is the native multi-segment-slug
+// counterpart of TestUpdateNote_SessionOwner_BypassesEditCode (PUT /notes/{id...}).
+func (s *AuthHandlerSuite) TestUpdateNoteByPath_SessionOwner_BypassesEditCode() {
+	const mid = "project/GUIDE.md"
+
+	s.auth.EXPECT().GetSession(gomock.Any(), "sess-owner").Return(&domain.User{ID: testUserID1}, nil)
+	s.manager.EXPECT().Update(gomock.Any(), mid, "", testUserID1, gomock.Any()).
+		Return(newTestNote("Guide", "new body"), nil)
+
+	body := `{"title":"Guide","content":"new body"}`
+	req := httptest.NewRequest(http.MethodPut, "/notes/"+mid, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(s.sessionCookie("sess-owner"))
+
+	rec := httptest.NewRecorder()
+	s.router.ServeHTTP(rec, req)
+
+	s.Equal(http.StatusOK, rec.Code)
 }

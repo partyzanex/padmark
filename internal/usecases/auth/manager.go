@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/partyzanex/padmark/internal/domain"
 )
 
@@ -15,20 +17,20 @@ import (
 type UserStore interface {
 	Create(ctx context.Context, u *domain.User) error
 	GetByUsername(ctx context.Context, username string) (*domain.User, error)
-	GetByID(ctx context.Context, id string) (*domain.User, error)
+	GetByID(ctx context.Context, id uuid.UUID) (*domain.User, error)
 	List(ctx context.Context) ([]*domain.User, error)
-	UpdateLastLogin(ctx context.Context, id string, t time.Time) error
-	UpdatePassword(ctx context.Context, id, passwordHash string, kdfSalt []byte, totpSecret string) error
+	UpdateLastLogin(ctx context.Context, id uuid.UUID, t time.Time) error
+	UpdatePassword(ctx context.Context, id uuid.UUID, passwordHash string, kdfSalt []byte, totpSecret string) error
 	// UpdateTOTPCounter atomically advances the user's last accepted TOTP counter,
 	// returning false when counter is not strictly greater (replay). The conditional
 	// update is the cross-instance, restart-safe guard against TOTP code reuse.
-	UpdateTOTPCounter(ctx context.Context, id string, counter int64) (bool, error)
-	Revoke(ctx context.Context, id string) error
+	UpdateTOTPCounter(ctx context.Context, id uuid.UUID, counter int64) (bool, error)
+	Revoke(ctx context.Context, id uuid.UUID) error
 }
 
 // InviteStore persists single-use invite links.
 type InviteStore interface {
-	Issue(ctx context.Context, createdByID string) (string, error)
+	Issue(ctx context.Context, createdByID uuid.UUID) (string, error)
 	// RedeemInvite atomically consumes the invite and inserts usr in one transaction,
 	// so a failed user creation (e.g. a username race) never burns the token.
 	RedeemInvite(ctx context.Context, token, username string, usr *domain.User) error
@@ -40,9 +42,9 @@ type SessionStore interface {
 	Get(ctx context.Context, sessionID string) (*domain.Session, error)
 	Delete(ctx context.Context, sessionID string) error
 	// DeleteByUserID removes all sessions for a given user (e.g. after password change).
-	DeleteByUserID(ctx context.Context, userID string) error
+	DeleteByUserID(ctx context.Context, userID uuid.UUID) error
 	// DeleteByUserIDExcept removes all sessions for the user except the one with the given session ID.
-	DeleteByUserIDExcept(ctx context.Context, userID, exceptSessionID string) error
+	DeleteByUserIDExcept(ctx context.Context, userID uuid.UUID, exceptSessionID string) error
 }
 
 // Encryptor encrypts and decrypts TOTP secrets at rest.
@@ -75,10 +77,12 @@ type TOTPManager interface {
 
 // APITokenStore persists CLI API tokens keyed by their SHA-256 hash. The plain key is never stored.
 type APITokenStore interface {
-	// Create persists a newly issued API token.
-	Create(ctx context.Context, t *domain.APIToken) error
-	// CountByUser returns how many tokens the given user already holds, so issuance can be capped.
-	CountByUser(ctx context.Context, userID string) (int, error)
+	// CreateIfUnderLimit atomically counts t.UserID's existing tokens and inserts t only if that
+	// count is below limit, reporting false (no error) when the limit is already reached. The
+	// count-then-insert must be a single atomic operation — two concurrent issuance requests each
+	// doing a separate count check followed by an unconditional insert could both pass the check
+	// before either insert lands, letting the user exceed the limit.
+	CreateIfUnderLimit(ctx context.Context, t *domain.APIToken, limit int) (bool, error)
 	// GetByHash resolves a token by its SHA-256 hash. Returns domain.ErrNotFound when absent.
 	GetByHash(ctx context.Context, tokenHash string) (*domain.APIToken, error)
 	// List returns all tokens for the admin panel.

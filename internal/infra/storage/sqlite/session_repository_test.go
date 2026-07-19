@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/suite"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/sqlitedialect"
@@ -43,12 +44,12 @@ func TestSessionRepositoryTestSuite(t *testing.T) {
 	suite.Run(t, new(SessionRepositoryTestSuite))
 }
 
-func (s *SessionRepositoryTestSuite) createUser(id string) {
+func (s *SessionRepositoryTestSuite) createUser(id uuid.UUID) {
 	s.T().Helper()
 
 	err := s.users.Create(s.T().Context(), &domain.User{
 		ID:           id,
-		Username:     "user-" + id,
+		Username:     "user-" + id.String(),
 		TOTPSecret:   "secret",
 		PasswordHash: "hash",
 		KDFSalt:      []byte("saltsaltsalt1234"),
@@ -57,7 +58,7 @@ func (s *SessionRepositoryTestSuite) createUser(id string) {
 	s.Require().NoError(err)
 }
 
-func (s *SessionRepositoryTestSuite) newSession(id, userID string, ttl time.Duration) *domain.Session {
+func (s *SessionRepositoryTestSuite) newSession(id string, userID uuid.UUID, ttl time.Duration) *domain.Session {
 	return &domain.Session{
 		SessionID: id,
 		UserID:    userID,
@@ -72,9 +73,10 @@ func (s *SessionRepositoryTestSuite) newSession(id, userID string, ttl time.Dura
 
 func (s *SessionRepositoryTestSuite) TestCreate_Get_RoundTrip() {
 	ctx := s.T().Context()
-	s.createUser("u1")
+	u1 := uuid.New()
+	s.createUser(u1)
 
-	sess := s.newSession("sess-1", "u1", time.Hour)
+	sess := s.newSession("sess-1", u1, time.Hour)
 	s.Require().NoError(s.repo.Create(ctx, sess))
 
 	got, err := s.repo.Get(ctx, sess.SessionID)
@@ -87,9 +89,10 @@ func (s *SessionRepositoryTestSuite) TestCreate_Get_RoundTrip() {
 
 func (s *SessionRepositoryTestSuite) TestGet_Expired_ReturnsErrSessionExpired() {
 	ctx := s.T().Context()
-	s.createUser("u2")
+	u2 := uuid.New()
+	s.createUser(u2)
 
-	expired := s.newSession("sess-expired", "u2", -time.Minute)
+	expired := s.newSession("sess-expired", u2, -time.Minute)
 	s.Require().NoError(s.repo.Create(ctx, expired))
 
 	_, err := s.repo.Get(ctx, expired.SessionID)
@@ -105,11 +108,12 @@ func (s *SessionRepositoryTestSuite) TestGet_Unknown_ReturnsErrSessionExpired() 
 // strict greater-than (expires_at > now), so a session at the exact boundary is rejected.
 func (s *SessionRepositoryTestSuite) TestGet_ExactExpiryBoundary_ReturnsErrSessionExpired() {
 	ctx := s.T().Context()
-	s.createUser("u3")
+	u3 := uuid.New()
+	s.createUser(u3)
 
 	boundary := &sessionRow{
 		SessionID: "sess-boundary",
-		UserID:    "u3",
+		UserID:    u3,
 		CreatedAt: time.Now(),
 		ExpiresAt: time.Now(), // exactly now — must be rejected
 		UserAgent: "",
@@ -126,9 +130,10 @@ func (s *SessionRepositoryTestSuite) TestGet_ExactExpiryBoundary_ReturnsErrSessi
 
 func (s *SessionRepositoryTestSuite) TestDelete_RemovesSession() {
 	ctx := s.T().Context()
-	s.createUser("u4")
+	u4 := uuid.New()
+	s.createUser(u4)
 
-	sess := s.newSession("sess-del", "u4", time.Hour)
+	sess := s.newSession("sess-del", u4, time.Hour)
 	s.Require().NoError(s.repo.Create(ctx, sess))
 	s.Require().NoError(s.repo.Delete(ctx, sess.SessionID))
 
@@ -145,19 +150,22 @@ func (s *SessionRepositoryTestSuite) TestDelete_NonExistentSession_NoError() {
 
 func (s *SessionRepositoryTestSuite) TestDeleteByUserID_RemovesAllUserSessions() {
 	ctx := s.T().Context()
-	s.createUser("owner")
-	s.createUser("other")
+	owner := uuid.New()
+	other := uuid.New()
+
+	s.createUser(owner)
+	s.createUser(other)
 
 	for i, id := range []string{"sess-a", "sess-b", "sess-c"} {
-		sess := s.newSession(id, "owner", time.Hour)
+		sess := s.newSession(id, owner, time.Hour)
 		sess.IP = "1.2.3." + string(rune('1'+i))
 		s.Require().NoError(s.repo.Create(ctx, sess))
 	}
 
 	// Session belonging to a different user — must survive.
-	s.Require().NoError(s.repo.Create(ctx, s.newSession("sess-other", "other", time.Hour)))
+	s.Require().NoError(s.repo.Create(ctx, s.newSession("sess-other", other, time.Hour)))
 
-	s.Require().NoError(s.repo.DeleteByUserID(ctx, "owner"))
+	s.Require().NoError(s.repo.DeleteByUserID(ctx, owner))
 
 	for _, id := range []string{"sess-a", "sess-b", "sess-c"} {
 		_, err := s.repo.Get(ctx, id)
@@ -170,17 +178,20 @@ func (s *SessionRepositoryTestSuite) TestDeleteByUserID_RemovesAllUserSessions()
 
 func (s *SessionRepositoryTestSuite) TestDeleteByUserIDExcept_PreservesExceptedSession() {
 	ctx := s.T().Context()
-	s.createUser("owner")
-	s.createUser("other")
+	owner := uuid.New()
+	other := uuid.New()
 
-	keep := s.newSession("sess-keep", "owner", time.Hour)
-	old1 := s.newSession("sess-old1", "owner", time.Hour)
+	s.createUser(owner)
+	s.createUser(other)
+
+	keep := s.newSession("sess-keep", owner, time.Hour)
+	old1 := s.newSession("sess-old1", owner, time.Hour)
 	s.Require().NoError(s.repo.Create(ctx, keep))
 	s.Require().NoError(s.repo.Create(ctx, old1))
 	// Another user's session must not be touched.
-	s.Require().NoError(s.repo.Create(ctx, s.newSession("sess-other", "other", time.Hour)))
+	s.Require().NoError(s.repo.Create(ctx, s.newSession("sess-other", other, time.Hour)))
 
-	s.Require().NoError(s.repo.DeleteByUserIDExcept(ctx, "owner", keep.SessionID))
+	s.Require().NoError(s.repo.DeleteByUserIDExcept(ctx, owner, keep.SessionID))
 
 	_, err := s.repo.Get(ctx, keep.SessionID)
 	s.Require().NoError(err, "excepted session must survive")
@@ -194,19 +205,21 @@ func (s *SessionRepositoryTestSuite) TestDeleteByUserIDExcept_PreservesExceptedS
 
 func (s *SessionRepositoryTestSuite) TestDeleteByUserIDExcept_NoOtherSessions_IsIdempotent() {
 	ctx := s.T().Context()
-	s.createUser("sole-user")
-	sess := s.newSession("sole-sess", "sole-user", time.Hour)
+	soleUser := uuid.New()
+	s.createUser(soleUser)
+	sess := s.newSession("sole-sess", soleUser, time.Hour)
 	s.Require().NoError(s.repo.Create(ctx, sess))
 
-	s.Require().NoError(s.repo.DeleteByUserIDExcept(ctx, "sole-user", sess.SessionID))
+	s.Require().NoError(s.repo.DeleteByUserIDExcept(ctx, soleUser, sess.SessionID))
 
 	_, err := s.repo.Get(ctx, sess.SessionID)
 	s.Require().NoError(err, "sole session must survive when it is the excepted one")
 }
 
 func (s *SessionRepositoryTestSuite) TestDeleteByUserID_NoSessions_IsIdempotent() {
-	s.createUser("empty-user")
-	err := s.repo.DeleteByUserID(s.T().Context(), "empty-user")
+	emptyUser := uuid.New()
+	s.createUser(emptyUser)
+	err := s.repo.DeleteByUserID(s.T().Context(), emptyUser)
 	s.Require().NoError(err)
 }
 
@@ -214,10 +227,11 @@ func (s *SessionRepositoryTestSuite) TestDeleteByUserID_NoSessions_IsIdempotent(
 
 func (s *SessionRepositoryTestSuite) TestDeleteExpired_RemovesExpiredKeepsActive() {
 	ctx := s.T().Context()
-	s.createUser("u5")
+	u5 := uuid.New()
+	s.createUser(u5)
 
-	expired := s.newSession("sess-old", "u5", -time.Minute)
-	active := s.newSession("sess-live", "u5", time.Hour)
+	expired := s.newSession("sess-old", u5, -time.Minute)
+	active := s.newSession("sess-live", u5, time.Hour)
 
 	s.Require().NoError(s.repo.Create(ctx, expired))
 	s.Require().NoError(s.repo.Create(ctx, active))

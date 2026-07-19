@@ -17,6 +17,7 @@ const (
 	// the TOTP account system (--enable-accounts). It will be removed in a future release.
 	FlagAuthTokens       = "auth-tokens" //nolint:gosec // flag name, not a credential
 	FlagEnableAccounts   = "enable-accounts"
+	FlagDisableAPI       = "disable-api"
 	FlagCookieMaxAge     = "cookie-max-age"
 	FlagReadTimeout      = "read-timeout"
 	FlagWriteTimeout     = "write-timeout"
@@ -49,6 +50,7 @@ const (
 	// (PADMARK_ENABLE_ACCOUNTS) instead. PADMARK_AUTH_TOKENS will be removed in a future release.
 	EnvAuthTokens       = "PADMARK_AUTH_TOKENS" //nolint:gosec // env var name, not a credential
 	EnvEnableAccounts   = "PADMARK_ENABLE_ACCOUNTS"
+	EnvDisableAPI       = "PADMARK_DISABLE_API"
 	EnvCookieMaxAge     = "PADMARK_COOKIE_MAX_AGE"
 	EnvReadTimeout      = "PADMARK_READ_TIMEOUT"
 	EnvWriteTimeout     = "PADMARK_WRITE_TIMEOUT"
@@ -142,6 +144,13 @@ func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
 			Value:   false,
 			Usage: "Enable the user-account system (TOTP login, /setup, /admin, private-note gating). " +
 				"Off by default: the site is fully public unless this is set",
+		},
+		&cli.BoolFlag{
+			Name:    FlagDisableAPI,
+			Sources: cli.EnvVars(EnvDisableAPI),
+			Value:   false,
+			Usage: "Disable the REST/JSON API (/notes*, /api, /api/openapi.yaml): every request " +
+				"to it gets 503 with a fixed message. The web UI and /healthz, /readyz keep working",
 		},
 		&cli.BoolFlag{
 			Name:    FlagCustomSlugs,

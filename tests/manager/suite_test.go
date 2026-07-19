@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/partyzanex/padmark/internal/domain"
@@ -210,7 +211,7 @@ func (s *ManagerSuite) TestUpdate_PreservesMetadata() {
 	created, err := s.Manager.Create(ctx, &domain.Note{Title: "old", Content: "c"})
 	s.Require().NoError(err)
 
-	updated, err := s.Manager.Update(ctx, created.ID, created.EditCode, &domain.Note{
+	updated, err := s.Manager.Update(ctx, created.ID, created.EditCode, uuid.Nil, &domain.Note{
 		Title: "new", Content: "new content",
 	})
 
@@ -225,13 +226,13 @@ func (s *ManagerSuite) TestUpdate_Forbidden() {
 	created, err := s.Manager.Create(ctx, &domain.Note{Title: "t", Content: "c"})
 	s.Require().NoError(err)
 
-	_, err = s.Manager.Update(ctx, created.ID, "wrong-code", &domain.Note{Title: "hijack", Content: "x"})
+	_, err = s.Manager.Update(ctx, created.ID, "wrong-code", uuid.Nil, &domain.Note{Title: "hijack", Content: "x"})
 
 	s.ErrorIs(err, domain.ErrInvalidEditCode)
 }
 
 func (s *ManagerSuite) TestUpdate_NotFound() {
-	_, err := s.Manager.Update(s.T().Context(), "nonexistent", "code",
+	_, err := s.Manager.Update(s.T().Context(), "nonexistent", "code", uuid.Nil,
 		&domain.Note{Title: "t", Content: "c"})
 
 	s.ErrorIs(err, domain.ErrNotFound)
@@ -244,7 +245,7 @@ func (s *ManagerSuite) TestDelete_OK() {
 	created, err := s.Manager.Create(ctx, &domain.Note{Title: "t", Content: "c"})
 	s.Require().NoError(err)
 
-	err = s.Manager.Delete(ctx, created.ID, created.EditCode)
+	err = s.Manager.Delete(ctx, created.ID, created.EditCode, uuid.Nil)
 	s.Require().NoError(err)
 
 	_, err = s.Manager.Peek(ctx, created.ID)
@@ -256,7 +257,7 @@ func (s *ManagerSuite) TestDelete_Forbidden() {
 	created, err := s.Manager.Create(ctx, &domain.Note{Title: "t", Content: "c"})
 	s.Require().NoError(err)
 
-	err = s.Manager.Delete(ctx, created.ID, "wrong-code")
+	err = s.Manager.Delete(ctx, created.ID, "wrong-code", uuid.Nil)
 
 	s.ErrorIs(err, domain.ErrInvalidEditCode)
 }
@@ -294,7 +295,7 @@ func (s *ManagerSuite) TestUpdate_ClearsBurnExpiryWhenBurnDisabled() {
 	s.Require().NotNil(got.ExpiresAt, "precondition: burn timer must have set expires_at")
 
 	// User unchecks burn_after_reading in the editor.
-	_, err = s.Manager.Update(ctx, created.ID, created.EditCode, &domain.Note{
+	_, err = s.Manager.Update(ctx, created.ID, created.EditCode, uuid.Nil, &domain.Note{
 		Title:            "burn-edit",
 		Content:          "c",
 		BurnAfterReading: false,
@@ -319,11 +320,11 @@ func (s *ManagerSuite) TestUpdate_PreservesEditCode() {
 
 	code := created.EditCode
 
-	_, err = s.Manager.Update(ctx, created.ID, code, &domain.Note{Title: "v2", Content: "c2"})
+	_, err = s.Manager.Update(ctx, created.ID, code, uuid.Nil, &domain.Note{Title: "v2", Content: "c2"})
 	s.Require().NoError(err)
 
 	// The edit code's stored hash must be unchanged, so it still verifies on a second update.
-	_, err = s.Manager.Update(ctx, created.ID, code, &domain.Note{Title: "v3", Content: "c3"})
+	_, err = s.Manager.Update(ctx, created.ID, code, uuid.Nil, &domain.Note{Title: "v3", Content: "c3"})
 	s.Require().NoError(err, "edit code must remain valid after an update (hash unchanged)")
 }
 

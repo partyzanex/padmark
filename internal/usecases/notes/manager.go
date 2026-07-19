@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/partyzanex/padmark/internal/domain"
 )
 
@@ -217,6 +219,24 @@ func NewManager(
 	}
 }
 
+// validateForCreate runs Note.Validate and the ownership invariant (Note.ValidateOwnership).
+// OwnerID is already final at this point (set by the HTTP layer before Create is called), unlike
+// Update, where the same ownership check must wait until after OwnerID is pinned from the
+// existing note — see the call site in Update for why it cannot share this helper.
+func validateForCreate(note *domain.Note) error {
+	err := note.Validate()
+	if err != nil {
+		return fmt.Errorf("validate: %w", err)
+	}
+
+	err = note.ValidateOwnership()
+	if err != nil {
+		return fmt.Errorf("validate: %w", err)
+	}
+
+	return nil
+}
+
 // Create validates and persists a new note.
 func (m *Manager) Create(ctx context.Context, note *domain.Note) (*domain.Note, error) {
 	if note.ContentType == nil {
@@ -224,9 +244,9 @@ func (m *Manager) Create(ctx context.Context, note *domain.Note) (*domain.Note, 
 		note.ContentType = &ct
 	}
 
-	err := note.Validate()
+	err := validateForCreate(note)
 	if err != nil {
-		return nil, fmt.Errorf("validate: %w", err)
+		return nil, err
 	}
 
 	slug, err := resolveSlug(note, m.allowCustomSlugs)
@@ -347,10 +367,35 @@ func (m *Manager) ViewPreloaded(ctx context.Context, id string, preloaded *domai
 	return note, nil
 }
 
+// pinImmutableFields carries forward two fields Update must never let the caller change: the
+// stored edit-code hash (never the plaintext the caller supplied — the repository's Update
+// column list excludes edit_code today, but if that ever changes this avoids leaking it) and
+// OwnerID (fixed at creation — excluded from the same column list today, kept here so it isn't
+// silently nilled out if that changes). Only once OwnerID is pinned to its real value does
+// ValidateOwnership's check become meaningful: the upfront Validate() call in Update runs before
+// this pin, when the caller-supplied OwnerID is always nil regardless of actual ownership, so it
+// cannot reject privacy=owner on a note that never had one — this can.
+func pinImmutableFields(note, existing *domain.Note) error {
+	note.EditCode = existing.EditCode
+	note.OwnerID = existing.OwnerID
+
+	err := note.ValidateOwnership()
+	if err != nil {
+		return fmt.Errorf("validate: %w", err)
+	}
+
+	return nil
+}
+
 // Update validates and updates an existing note, preserving immutable metadata.
 // The caller must supply the correct edit code.
+// Update replaces a note's editable fields. The caller must either supply the note's edit_code,
+// or be the note's owner (callerID matches existing.OwnerID) — the latter lets an authenticated
+// creator (session or API token) edit without the edit_code. callerID is uuid.Nil for an
+// anonymous caller, which never matches an owner and falls back to the edit_code check
+// unconditionally.
 func (m *Manager) Update(
-	ctx context.Context, id, editCode string, note *domain.Note,
+	ctx context.Context, id, editCode string, callerID uuid.UUID, note *domain.Note,
 ) (*domain.Note, error) {
 	err := note.Validate()
 	if err != nil {
@@ -364,7 +409,7 @@ func (m *Manager) Update(
 		return nil, fmt.Errorf("update note: %w", err)
 	}
 
-	if !m.hasher.Verify(existing.EditCode, editCode) {
+	if !existing.OwnedBy(callerID) && !m.hasher.Verify(existing.EditCode, editCode) {
 		return nil, domain.ErrInvalidEditCode
 	}
 
@@ -396,18 +441,15 @@ func (m *Manager) Update(
 		note.EditCode = editCode
 	}()
 
-	// Persist the stored hash, never the plaintext the caller supplied. The repository Update
-	// writes a fixed column allow-list that excludes edit_code, so today this is not persisted
-	// at all — but if that list ever changes, this rewrites the column with the existing hash
-	// instead of leaking the plaintext code.
-	note.EditCode = existing.EditCode
-
-	encrypted, encErr := m.encryptor.Encrypt(note.Content, id)
-	if encErr != nil {
-		return nil, fmt.Errorf("encrypt content: %w", encErr)
+	err = pinImmutableFields(note, existing)
+	if err != nil {
+		return nil, err
 	}
 
-	note.Content = encrypted
+	note.Content, err = m.encryptor.Encrypt(note.Content, id)
+	if err != nil {
+		return nil, fmt.Errorf("encrypt content: %w", err)
+	}
 
 	err = m.storage.Update(ctx, dbID, note)
 	if err != nil {
@@ -419,8 +461,9 @@ func (m *Manager) Update(
 	return note, nil
 }
 
-// Delete removes a note by ID after verifying the edit code.
-func (m *Manager) Delete(ctx context.Context, id, editCode string) error {
+// Delete removes a note by ID after verifying the edit code, or that the caller is the note's
+// owner — see Update for the exact bypass semantics.
+func (m *Manager) Delete(ctx context.Context, id, editCode string, callerID uuid.UUID) error {
 	dbID := domain.HashSlug(id)
 
 	existing, err := m.storage.Get(ctx, dbID)
@@ -428,7 +471,7 @@ func (m *Manager) Delete(ctx context.Context, id, editCode string) error {
 		return fmt.Errorf("delete note: %w", err)
 	}
 
-	if !m.hasher.Verify(existing.EditCode, editCode) {
+	if !existing.OwnedBy(callerID) && !m.hasher.Verify(existing.EditCode, editCode) {
 		return domain.ErrInvalidEditCode
 	}
 

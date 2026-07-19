@@ -77,6 +77,7 @@ func buildRouter(
 		// Same flag attachAccountSystem feeds into auth.NewManager's sessionTTL, so the TOTP
 		// session cookie's Max-Age always matches the actual server-side session lifetime.
 		SessionTTL: time.Duration(cmd.Int(FlagSessionTTL)) * time.Second,
+		DisableAPI: cmd.Bool(FlagDisableAPI),
 	}
 
 	router, err := adaptershttp.NewRouter(handler, ogenHandler, &opts)

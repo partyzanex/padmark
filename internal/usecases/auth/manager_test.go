@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/pquerna/otp/totp"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/mock/gomock"
@@ -34,6 +35,12 @@ type ManagerSuite struct {
 	invites  *MockInviteStore
 	sessions *MockSessionStore
 	mgr      *Manager
+
+	// adminID and userID are fixed per-test identities (fresh each SetupTest) reused by the
+	// adminUser/testUser helpers and referenced directly by tests that need to assert the exact
+	// ID a mock call was made with.
+	adminID uuid.UUID
+	userID  uuid.UUID
 }
 
 func (s *ManagerSuite) SetupTest() {
@@ -46,6 +53,8 @@ func (s *ManagerSuite) SetupTest() {
 		crypto.NewKDF(), crypto.NewTOTP(), discardLog, "padmark", 0)
 	s.Require().NoError(err)
 	s.mgr = mgr
+	s.adminID = uuid.New()
+	s.userID = uuid.New()
 }
 
 func (s *ManagerSuite) TearDownTest() {
@@ -56,7 +65,7 @@ func (s *ManagerSuite) TearDownTest() {
 
 func (s *ManagerSuite) adminUser() *domain.User {
 	return &domain.User{
-		ID:       "admin-uuid",
+		ID:       s.adminID,
 		Username: "admin",
 		IsAdmin:  true,
 	}
@@ -86,7 +95,7 @@ func (s *ManagerSuite) testUser() (*domain.User, string) {
 	s.Require().NoError(err)
 
 	usr := &domain.User{
-		ID:           "user-id",
+		ID:           s.userID,
 		Username:     "alice",
 		TOTPSecret:   encSecret,
 		PasswordHash: pwHash,
@@ -130,9 +139,9 @@ func (s *ManagerSuite) TestLogin_ValidTOTP_CreatesSession() {
 	s.Require().NoError(codeErr)
 
 	s.users.EXPECT().GetByUsername(gomock.Any(), "alice").Return(usr, nil)
-	s.users.EXPECT().UpdateTOTPCounter(gomock.Any(), "user-id", gomock.Any()).Return(true, nil)
+	s.users.EXPECT().UpdateTOTPCounter(gomock.Any(), s.userID, gomock.Any()).Return(true, nil)
 	s.sessions.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
-	s.users.EXPECT().UpdateLastLogin(gomock.Any(), "user-id", gomock.Any()).Return(nil)
+	s.users.EXPECT().UpdateLastLogin(gomock.Any(), s.userID, gomock.Any()).Return(nil)
 
 	sessID, err := s.mgr.Login(s.T().Context(), "alice", testPassword, totpCode, "UA", "127.0.0.1")
 	s.Require().NoError(err)
@@ -148,7 +157,7 @@ func (s *ManagerSuite) TestLogin_ReplayedTOTP_ReturnsErrInvalidTOTP() {
 	// The store's conditional counter update reports the code as already used.
 	// This guard lives in the DB, so it holds across restarts and instances.
 	s.users.EXPECT().GetByUsername(gomock.Any(), "alice").Return(usr, nil)
-	s.users.EXPECT().UpdateTOTPCounter(gomock.Any(), "user-id", gomock.Any()).Return(false, nil)
+	s.users.EXPECT().UpdateTOTPCounter(gomock.Any(), s.userID, gomock.Any()).Return(false, nil)
 
 	_, err := s.mgr.Login(s.T().Context(), "alice", testPassword, totpCode, "UA", "127.0.0.1")
 	s.ErrorIs(err, domain.ErrInvalidTOTP)
@@ -174,11 +183,11 @@ func (s *ManagerSuite) TestGetSession_ExpiredSession_ReturnsErrSessionExpired() 
 }
 
 func (s *ManagerSuite) TestGetSession_ValidSession_ReturnsUser() {
-	sess := &domain.Session{SessionID: "s1", UserID: "user-id", ExpiresAt: time.Now().Add(time.Hour)}
-	usr := &domain.User{ID: "user-id", Username: "alice"}
+	sess := &domain.Session{SessionID: "s1", UserID: s.userID, ExpiresAt: time.Now().Add(time.Hour)}
+	usr := &domain.User{ID: s.userID, Username: "alice"}
 
 	s.sessions.EXPECT().Get(gomock.Any(), "s1").Return(sess, nil)
-	s.users.EXPECT().GetByID(gomock.Any(), "user-id").Return(usr, nil)
+	s.users.EXPECT().GetByID(gomock.Any(), s.userID).Return(usr, nil)
 
 	got, err := s.mgr.GetSession(s.T().Context(), "s1")
 	s.Require().NoError(err)
@@ -188,27 +197,27 @@ func (s *ManagerSuite) TestGetSession_ValidSession_ReturnsUser() {
 // ── GenerateInvite ──
 
 func (s *ManagerSuite) TestGenerateInvite_NonAdmin_ReturnsErrForbidden() {
-	nonAdmin := &domain.User{ID: "user-id", IsAdmin: false}
-	s.users.EXPECT().GetByID(gomock.Any(), "user-id").Return(nonAdmin, nil)
+	nonAdmin := &domain.User{ID: s.userID, IsAdmin: false}
+	s.users.EXPECT().GetByID(gomock.Any(), s.userID).Return(nonAdmin, nil)
 
-	_, err := s.mgr.GenerateInvite(s.T().Context(), "user-id")
+	_, err := s.mgr.GenerateInvite(s.T().Context(), s.userID)
 	s.ErrorIs(err, domain.ErrForbidden)
 }
 
 func (s *ManagerSuite) TestGenerateInvite_Admin_ReturnsToken() {
-	s.users.EXPECT().GetByID(gomock.Any(), "admin-uuid").Return(s.adminUser(), nil)
-	s.invites.EXPECT().Issue(gomock.Any(), "admin-uuid").Return("tok-abc", nil)
+	s.users.EXPECT().GetByID(gomock.Any(), s.adminID).Return(s.adminUser(), nil)
+	s.invites.EXPECT().Issue(gomock.Any(), s.adminID).Return("tok-abc", nil)
 
-	tok, err := s.mgr.GenerateInvite(s.T().Context(), "admin-uuid")
+	tok, err := s.mgr.GenerateInvite(s.T().Context(), s.adminID)
 	s.Require().NoError(err)
 	s.Equal("tok-abc", tok)
 }
 
 func (s *ManagerSuite) TestGenerateInvite_AdminLookupFails_WrapsError() {
 	boom := errors.New("boom")
-	s.users.EXPECT().GetByID(gomock.Any(), "admin-uuid").Return(nil, boom)
+	s.users.EXPECT().GetByID(gomock.Any(), s.adminID).Return(nil, boom)
 
-	_, err := s.mgr.GenerateInvite(s.T().Context(), "admin-uuid")
+	_, err := s.mgr.GenerateInvite(s.T().Context(), s.adminID)
 	s.Require().Error(err)
 	s.ErrorIs(err, boom)
 }
@@ -216,10 +225,10 @@ func (s *ManagerSuite) TestGenerateInvite_AdminLookupFails_WrapsError() {
 func (s *ManagerSuite) TestGenerateInvite_IssueFails_WrapsError() {
 	boom := errors.New("boom")
 
-	s.users.EXPECT().GetByID(gomock.Any(), "admin-uuid").Return(s.adminUser(), nil)
-	s.invites.EXPECT().Issue(gomock.Any(), "admin-uuid").Return("", boom)
+	s.users.EXPECT().GetByID(gomock.Any(), s.adminID).Return(s.adminUser(), nil)
+	s.invites.EXPECT().Issue(gomock.Any(), s.adminID).Return("", boom)
 
-	_, err := s.mgr.GenerateInvite(s.T().Context(), "admin-uuid")
+	_, err := s.mgr.GenerateInvite(s.T().Context(), s.adminID)
 	s.Require().Error(err)
 	s.ErrorIs(err, boom)
 }
@@ -268,7 +277,7 @@ func (s *ManagerSuite) TestAcceptInvite_DuplicateUsername_ReturnsErrUserExistsWi
 	// GetByUsername finds existing user → ErrUserExists returned before RedeemInvite is called.
 	s.users.EXPECT().
 		GetByUsername(gomock.Any(), "existing").
-		Return(&domain.User{ID: "x", Username: "existing"}, nil)
+		Return(&domain.User{ID: uuid.New(), Username: "existing"}, nil)
 	// RedeemInvite must NOT be called.
 
 	_, err := s.mgr.AcceptInvite(s.T().Context(), "tok", "existing", testPassword)
@@ -283,7 +292,7 @@ func (s *ManagerSuite) TestAcceptFirstAdmin_WeakPassword_ReturnsErrWeakPassword(
 }
 
 func (s *ManagerSuite) TestAcceptFirstAdmin_NonEmptyDB_ReturnsErrForbidden() {
-	s.users.EXPECT().List(gomock.Any()).Return([]*domain.User{{ID: "existing"}}, nil)
+	s.users.EXPECT().List(gomock.Any()).Return([]*domain.User{{ID: uuid.New()}}, nil)
 
 	_, err := s.mgr.AcceptFirstAdmin(s.T().Context(), "admin", testPassword)
 	s.ErrorIs(err, domain.ErrForbidden)
@@ -322,10 +331,10 @@ func (s *ManagerSuite) TestAcceptFirstAdmin_RaceLoser_PropagatesErrUserExists() 
 
 func (s *ManagerSuite) TestChangePassword_WrongOldPassword_ReturnsErrInvalidPassword() {
 	usr, _ := s.testUser()
-	sess := &domain.Session{SessionID: "sess", UserID: "user-id"}
+	sess := &domain.Session{SessionID: "sess", UserID: s.userID}
 
 	s.sessions.EXPECT().Get(gomock.Any(), "sess").Return(sess, nil)
-	s.users.EXPECT().GetByID(gomock.Any(), "user-id").Return(usr, nil)
+	s.users.EXPECT().GetByID(gomock.Any(), s.userID).Return(usr, nil)
 
 	_, err := s.mgr.ChangePassword(s.T().Context(), "sess", "WrongP@ss12!", "NewP@ssw0rd!", "000000")
 	s.ErrorIs(err, domain.ErrInvalidPassword)
@@ -333,10 +342,10 @@ func (s *ManagerSuite) TestChangePassword_WrongOldPassword_ReturnsErrInvalidPass
 
 func (s *ManagerSuite) TestChangePassword_InvalidTOTP_ReturnsErrInvalidTOTP() {
 	usr, _ := s.testUser()
-	sess := &domain.Session{SessionID: "sess", UserID: "user-id"}
+	sess := &domain.Session{SessionID: "sess", UserID: s.userID}
 
 	s.sessions.EXPECT().Get(gomock.Any(), "sess").Return(sess, nil)
-	s.users.EXPECT().GetByID(gomock.Any(), "user-id").Return(usr, nil)
+	s.users.EXPECT().GetByID(gomock.Any(), s.userID).Return(usr, nil)
 
 	_, err := s.mgr.ChangePassword(s.T().Context(), "sess", testPassword, "NewP@ssw0rd!", "000000")
 	s.ErrorIs(err, domain.ErrInvalidTOTP)
@@ -344,14 +353,14 @@ func (s *ManagerSuite) TestChangePassword_InvalidTOTP_ReturnsErrInvalidTOTP() {
 
 func (s *ManagerSuite) TestChangePassword_WeakNewPassword_ReturnsErrWeakPassword() {
 	usr, rawSecret := s.testUser()
-	sess := &domain.Session{SessionID: "sess", UserID: "user-id"}
+	sess := &domain.Session{SessionID: "sess", UserID: s.userID}
 
 	code, err := totp.GenerateCode(rawSecret, time.Now())
 	s.Require().NoError(err)
 
 	s.sessions.EXPECT().Get(gomock.Any(), "sess").Return(sess, nil)
-	s.users.EXPECT().GetByID(gomock.Any(), "user-id").Return(usr, nil)
-	s.users.EXPECT().UpdateTOTPCounter(gomock.Any(), "user-id", gomock.Any()).Return(true, nil)
+	s.users.EXPECT().GetByID(gomock.Any(), s.userID).Return(usr, nil)
+	s.users.EXPECT().UpdateTOTPCounter(gomock.Any(), s.userID, gomock.Any()).Return(true, nil)
 
 	_, err = s.mgr.ChangePassword(s.T().Context(), "sess", testPassword, "weak", code)
 	s.ErrorIs(err, domain.ErrWeakPassword)
@@ -359,21 +368,21 @@ func (s *ManagerSuite) TestChangePassword_WeakNewPassword_ReturnsErrWeakPassword
 
 func (s *ManagerSuite) TestChangePassword_Success_UpdatesPasswordAndRotatesSession() {
 	usr, rawSecret := s.testUser()
-	sess := &domain.Session{SessionID: "sess", UserID: "user-id", UserAgent: "ua", IP: "1.2.3.4"}
+	sess := &domain.Session{SessionID: "sess", UserID: s.userID, UserAgent: "ua", IP: "1.2.3.4"}
 
 	code, err := totp.GenerateCode(rawSecret, time.Now())
 	s.Require().NoError(err)
 
 	s.sessions.EXPECT().Get(gomock.Any(), "sess").Return(sess, nil)
-	s.users.EXPECT().GetByID(gomock.Any(), "user-id").Return(usr, nil)
-	s.users.EXPECT().UpdateTOTPCounter(gomock.Any(), "user-id", gomock.Any()).Return(true, nil)
-	s.users.EXPECT().UpdatePassword(gomock.Any(), "user-id", gomock.Any(), gomock.Any(), gomock.Any()).
+	s.users.EXPECT().GetByID(gomock.Any(), s.userID).Return(usr, nil)
+	s.users.EXPECT().UpdateTOTPCounter(gomock.Any(), s.userID, gomock.Any()).Return(true, nil)
+	s.users.EXPECT().UpdatePassword(gomock.Any(), s.userID, gomock.Any(), gomock.Any(), gomock.Any()).
 		Return(nil)
 	// Create must be called BEFORE DeleteByUserIDExcept (atomicity fix).
 	// DeleteByUserIDExcept preserves the new session while wiping old ones.
 	gomock.InOrder(
 		s.sessions.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil),
-		s.sessions.EXPECT().DeleteByUserIDExcept(gomock.Any(), "user-id", gomock.Any()).Return(nil),
+		s.sessions.EXPECT().DeleteByUserIDExcept(gomock.Any(), s.userID, gomock.Any()).Return(nil),
 	)
 
 	newSessID, err := s.mgr.ChangePassword(s.T().Context(), "sess", testPassword, "NewP@ssw0rd!", code)
@@ -384,18 +393,18 @@ func (s *ManagerSuite) TestChangePassword_Success_UpdatesPasswordAndRotatesSessi
 
 func (s *ManagerSuite) TestChangePassword_DeleteByUserIDFails_ReturnsNewSessionID() {
 	usr, rawSecret := s.testUser()
-	sess := &domain.Session{SessionID: "sess", UserID: "user-id", UserAgent: "ua", IP: "1.2.3.4"}
+	sess := &domain.Session{SessionID: "sess", UserID: s.userID, UserAgent: "ua", IP: "1.2.3.4"}
 
 	code, err := totp.GenerateCode(rawSecret, time.Now())
 	s.Require().NoError(err)
 
 	s.sessions.EXPECT().Get(gomock.Any(), "sess").Return(sess, nil)
-	s.users.EXPECT().GetByID(gomock.Any(), "user-id").Return(usr, nil)
-	s.users.EXPECT().UpdateTOTPCounter(gomock.Any(), "user-id", gomock.Any()).Return(true, nil)
-	s.users.EXPECT().UpdatePassword(gomock.Any(), "user-id", gomock.Any(), gomock.Any(), gomock.Any()).
+	s.users.EXPECT().GetByID(gomock.Any(), s.userID).Return(usr, nil)
+	s.users.EXPECT().UpdateTOTPCounter(gomock.Any(), s.userID, gomock.Any()).Return(true, nil)
+	s.users.EXPECT().UpdatePassword(gomock.Any(), s.userID, gomock.Any(), gomock.Any(), gomock.Any()).
 		Return(nil)
 	s.sessions.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
-	s.sessions.EXPECT().DeleteByUserIDExcept(gomock.Any(), "user-id", gomock.Any()).Return(errors.New("db timeout"))
+	s.sessions.EXPECT().DeleteByUserIDExcept(gomock.Any(), s.userID, gomock.Any()).Return(errors.New("db timeout"))
 
 	// DeleteByUserIDExcept failure should warn but not fail the caller — new session was created.
 	newSessID, err := s.mgr.ChangePassword(s.T().Context(), "sess", testPassword, "NewP@ssw0rd!", code)
@@ -414,7 +423,7 @@ func (s *ManagerSuite) TestIsEmpty_NoUsers_ReturnsTrue() {
 }
 
 func (s *ManagerSuite) TestIsEmpty_HasUsers_ReturnsFalse() {
-	s.users.EXPECT().List(gomock.Any()).Return([]*domain.User{{ID: "u1"}}, nil)
+	s.users.EXPECT().List(gomock.Any()).Return([]*domain.User{{ID: uuid.New()}}, nil)
 
 	empty, err := s.mgr.IsEmpty(s.T().Context())
 	s.Require().NoError(err)
@@ -424,29 +433,30 @@ func (s *ManagerSuite) TestIsEmpty_HasUsers_ReturnsFalse() {
 // ── ListUsers ──
 
 func (s *ManagerSuite) TestListUsers_Admin_ReturnsUsers() {
-	users := []*domain.User{s.adminUser(), {ID: "u2", Username: "bob"}}
+	users := []*domain.User{s.adminUser(), {ID: uuid.New(), Username: "bob"}}
 
-	s.users.EXPECT().GetByID(gomock.Any(), "admin-uuid").Return(s.adminUser(), nil)
+	s.users.EXPECT().GetByID(gomock.Any(), s.adminID).Return(s.adminUser(), nil)
 	s.users.EXPECT().List(gomock.Any()).Return(users, nil)
 
-	got, err := s.mgr.ListUsers(s.T().Context(), "admin-uuid")
+	got, err := s.mgr.ListUsers(s.T().Context(), s.adminID)
 	s.Require().NoError(err)
 	s.Equal(users, got)
 }
 
 func (s *ManagerSuite) TestListUsers_NonAdmin_ReturnsErrForbidden() {
-	nonAdmin := &domain.User{ID: "caller", IsAdmin: false}
-	s.users.EXPECT().GetByID(gomock.Any(), "caller").Return(nonAdmin, nil)
+	caller := uuid.New()
+	nonAdmin := &domain.User{ID: caller, IsAdmin: false}
+	s.users.EXPECT().GetByID(gomock.Any(), caller).Return(nonAdmin, nil)
 
-	_, err := s.mgr.ListUsers(s.T().Context(), "caller")
+	_, err := s.mgr.ListUsers(s.T().Context(), caller)
 	s.ErrorIs(err, domain.ErrForbidden)
 }
 
 func (s *ManagerSuite) TestListUsers_AdminLookupFails_WrapsError() {
 	boom := errors.New("boom")
-	s.users.EXPECT().GetByID(gomock.Any(), "admin-uuid").Return(nil, boom)
+	s.users.EXPECT().GetByID(gomock.Any(), s.adminID).Return(nil, boom)
 
-	_, err := s.mgr.ListUsers(s.T().Context(), "admin-uuid")
+	_, err := s.mgr.ListUsers(s.T().Context(), s.adminID)
 	s.Require().Error(err)
 	s.ErrorIs(err, boom)
 }
@@ -454,10 +464,10 @@ func (s *ManagerSuite) TestListUsers_AdminLookupFails_WrapsError() {
 func (s *ManagerSuite) TestListUsers_ListFails_WrapsError() {
 	boom := errors.New("boom")
 
-	s.users.EXPECT().GetByID(gomock.Any(), "admin-uuid").Return(s.adminUser(), nil)
+	s.users.EXPECT().GetByID(gomock.Any(), s.adminID).Return(s.adminUser(), nil)
 	s.users.EXPECT().List(gomock.Any()).Return(nil, boom)
 
-	_, err := s.mgr.ListUsers(s.T().Context(), "admin-uuid")
+	_, err := s.mgr.ListUsers(s.T().Context(), s.adminID)
 	s.Require().Error(err)
 	s.ErrorIs(err, boom)
 }
@@ -466,93 +476,103 @@ func (s *ManagerSuite) TestListUsers_ListFails_WrapsError() {
 
 func (s *ManagerSuite) TestRevokeUser_SelfRevoke_ReturnsErrForbidden() {
 	// Self-revoke rejected before any DB call.
-	s.ErrorIs(s.mgr.RevokeUser(s.T().Context(), "admin-uuid", "admin-uuid"), domain.ErrForbidden)
+	s.ErrorIs(s.mgr.RevokeUser(s.T().Context(), s.adminID, s.adminID), domain.ErrForbidden)
 }
 
 func (s *ManagerSuite) TestRevokeUser_NonAdmin_ReturnsErrForbidden() {
-	nonAdmin := &domain.User{ID: "caller", IsAdmin: false}
-	s.users.EXPECT().GetByID(gomock.Any(), "caller").Return(nonAdmin, nil)
+	caller := uuid.New()
+	target := uuid.New()
+	nonAdmin := &domain.User{ID: caller, IsAdmin: false}
+	s.users.EXPECT().GetByID(gomock.Any(), caller).Return(nonAdmin, nil)
 
-	s.ErrorIs(s.mgr.RevokeUser(s.T().Context(), "caller", "target"), domain.ErrForbidden)
+	s.ErrorIs(s.mgr.RevokeUser(s.T().Context(), caller, target), domain.ErrForbidden)
 }
 
 func (s *ManagerSuite) TestRevokeUser_AdminLookupFails_WrapsError() {
 	boom := errors.New("boom")
-	s.users.EXPECT().GetByID(gomock.Any(), "admin-uuid").Return(nil, boom)
+	target := uuid.New()
 
-	err := s.mgr.RevokeUser(s.T().Context(), "admin-uuid", "target-uuid")
+	s.users.EXPECT().GetByID(gomock.Any(), s.adminID).Return(nil, boom)
+
+	err := s.mgr.RevokeUser(s.T().Context(), s.adminID, target)
 	s.Require().Error(err)
 	s.ErrorIs(err, boom)
 }
 
 func (s *ManagerSuite) TestRevokeUser_TargetLookupFails_WrapsError() {
 	boom := errors.New("boom")
+	target := uuid.New()
 
-	s.users.EXPECT().GetByID(gomock.Any(), "admin-uuid").Return(s.adminUser(), nil)
-	s.users.EXPECT().GetByID(gomock.Any(), "target-uuid").Return(nil, boom)
+	s.users.EXPECT().GetByID(gomock.Any(), s.adminID).Return(s.adminUser(), nil)
+	s.users.EXPECT().GetByID(gomock.Any(), target).Return(nil, boom)
 
-	err := s.mgr.RevokeUser(s.T().Context(), "admin-uuid", "target-uuid")
+	err := s.mgr.RevokeUser(s.T().Context(), s.adminID, target)
 	s.Require().Error(err)
 	s.ErrorIs(err, boom)
 }
 
 func (s *ManagerSuite) TestRevokeUser_LastAdminListFails_WrapsError() {
-	target := &domain.User{ID: "target-uuid", IsAdmin: true}
+	targetID := uuid.New()
+	target := &domain.User{ID: targetID, IsAdmin: true}
 	boom := errors.New("boom")
 
-	s.users.EXPECT().GetByID(gomock.Any(), "admin-uuid").Return(s.adminUser(), nil)
-	s.users.EXPECT().GetByID(gomock.Any(), "target-uuid").Return(target, nil)
+	s.users.EXPECT().GetByID(gomock.Any(), s.adminID).Return(s.adminUser(), nil)
+	s.users.EXPECT().GetByID(gomock.Any(), targetID).Return(target, nil)
 	s.users.EXPECT().List(gomock.Any()).Return(nil, boom)
 
-	err := s.mgr.RevokeUser(s.T().Context(), "admin-uuid", "target-uuid")
+	err := s.mgr.RevokeUser(s.T().Context(), s.adminID, targetID)
 	s.Require().Error(err)
 	s.ErrorIs(err, boom)
 }
 
 func (s *ManagerSuite) TestRevokeUser_RevokeFails_WrapsError() {
-	nonAdminTarget := &domain.User{ID: "target-uuid", IsAdmin: false}
+	targetID := uuid.New()
+	nonAdminTarget := &domain.User{ID: targetID, IsAdmin: false}
 	boom := errors.New("boom")
 
-	s.users.EXPECT().GetByID(gomock.Any(), "admin-uuid").Return(s.adminUser(), nil)
-	s.users.EXPECT().GetByID(gomock.Any(), "target-uuid").Return(nonAdminTarget, nil)
-	s.users.EXPECT().Revoke(gomock.Any(), "target-uuid").Return(boom)
+	s.users.EXPECT().GetByID(gomock.Any(), s.adminID).Return(s.adminUser(), nil)
+	s.users.EXPECT().GetByID(gomock.Any(), targetID).Return(nonAdminTarget, nil)
+	s.users.EXPECT().Revoke(gomock.Any(), targetID).Return(boom)
 
-	err := s.mgr.RevokeUser(s.T().Context(), "admin-uuid", "target-uuid")
+	err := s.mgr.RevokeUser(s.T().Context(), s.adminID, targetID)
 	s.Require().Error(err)
 	s.ErrorIs(err, boom)
 }
 
 func (s *ManagerSuite) TestRevokeUser_LastAdmin_ReturnsErrForbidden() {
-	target := &domain.User{ID: "target-uuid", IsAdmin: true}
+	targetID := uuid.New()
+	target := &domain.User{ID: targetID, IsAdmin: true}
 
-	s.users.EXPECT().GetByID(gomock.Any(), "admin-uuid").Return(s.adminUser(), nil)
-	s.users.EXPECT().GetByID(gomock.Any(), "target-uuid").Return(target, nil)
+	s.users.EXPECT().GetByID(gomock.Any(), s.adminID).Return(s.adminUser(), nil)
+	s.users.EXPECT().GetByID(gomock.Any(), targetID).Return(target, nil)
 	// Only admin in the system is the target — no others remain.
 	s.users.EXPECT().List(gomock.Any()).Return([]*domain.User{target}, nil)
 
-	s.ErrorIs(s.mgr.RevokeUser(s.T().Context(), "admin-uuid", "target-uuid"), domain.ErrForbidden)
+	s.ErrorIs(s.mgr.RevokeUser(s.T().Context(), s.adminID, targetID), domain.ErrForbidden)
 }
 
 func (s *ManagerSuite) TestRevokeUser_Admin_RevokesNonAdminTarget() {
-	nonAdminTarget := &domain.User{ID: "target-uuid", IsAdmin: false}
+	targetID := uuid.New()
+	nonAdminTarget := &domain.User{ID: targetID, IsAdmin: false}
 
-	s.users.EXPECT().GetByID(gomock.Any(), "admin-uuid").Return(s.adminUser(), nil)
-	s.users.EXPECT().GetByID(gomock.Any(), "target-uuid").Return(nonAdminTarget, nil)
-	s.users.EXPECT().Revoke(gomock.Any(), "target-uuid").Return(nil)
+	s.users.EXPECT().GetByID(gomock.Any(), s.adminID).Return(s.adminUser(), nil)
+	s.users.EXPECT().GetByID(gomock.Any(), targetID).Return(nonAdminTarget, nil)
+	s.users.EXPECT().Revoke(gomock.Any(), targetID).Return(nil)
 
-	s.Require().NoError(s.mgr.RevokeUser(s.T().Context(), "admin-uuid", "target-uuid"))
+	s.Require().NoError(s.mgr.RevokeUser(s.T().Context(), s.adminID, targetID))
 }
 
 func (s *ManagerSuite) TestRevokeUser_Admin_RevokesSecondAdmin() {
-	secondAdmin := &domain.User{ID: "admin2", IsAdmin: true}
+	admin2ID := uuid.New()
+	secondAdmin := &domain.User{ID: admin2ID, IsAdmin: true}
 
-	s.users.EXPECT().GetByID(gomock.Any(), "admin-uuid").Return(s.adminUser(), nil)
-	s.users.EXPECT().GetByID(gomock.Any(), "admin2").Return(secondAdmin, nil)
+	s.users.EXPECT().GetByID(gomock.Any(), s.adminID).Return(s.adminUser(), nil)
+	s.users.EXPECT().GetByID(gomock.Any(), admin2ID).Return(secondAdmin, nil)
 	// Two admins exist; after revoke one remains → allowed.
 	s.users.EXPECT().List(gomock.Any()).Return([]*domain.User{s.adminUser(), secondAdmin}, nil)
-	s.users.EXPECT().Revoke(gomock.Any(), "admin2").Return(nil)
+	s.users.EXPECT().Revoke(gomock.Any(), admin2ID).Return(nil)
 
-	s.Require().NoError(s.mgr.RevokeUser(s.T().Context(), "admin-uuid", "admin2"))
+	s.Require().NoError(s.mgr.RevokeUser(s.T().Context(), s.adminID, admin2ID))
 }
 
 func TestAuthManager(t *testing.T) {

@@ -9,6 +9,8 @@ import (
 
 	_ "embed"
 
+	"github.com/google/uuid"
+
 	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/usecases/auth"
 )
@@ -124,9 +126,11 @@ func (h *AdminHandler) AdminInviteHandler(w http.ResponseWriter, r *http.Request
 func (h *AdminHandler) AdminRevokeHandler(w http.ResponseWriter, r *http.Request) {
 	usr := userFromContext(r)
 
-	targetID := r.PathValue("id")
-	if targetID == "" {
-		http.Error(w, "bad request", http.StatusBadRequest)
+	targetID, parseErr := uuid.Parse(r.PathValue("id"))
+	if parseErr != nil {
+		// A malformed ID could never have matched a real user anyway — same outcome as a failed
+		// RevokeUser call below, just caught one step earlier.
+		http.Redirect(w, r, "/admin?revoke_error="+url.QueryEscape("Failed to revoke user."), http.StatusSeeOther)
 
 		return
 	}
@@ -223,7 +227,7 @@ func (h *AdminHandler) AdminRevokeKeyHandler(w http.ResponseWriter, r *http.Requ
 
 // adminData assembles the shared admin-page view model — signed-in nonce/CSRF plus the user
 // and API-token lists. Both lists require admin rights, already verified by the caller.
-func (h *AdminHandler) adminData(r *http.Request, adminID string) (adminViewData, error) {
+func (h *AdminHandler) adminData(r *http.Request, adminID uuid.UUID) (adminViewData, error) {
 	data := adminViewData{
 		Nonce:     nonceFromContext(r.Context()),
 		CSRFToken: csrfFromContext(r.Context()),

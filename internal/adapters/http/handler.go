@@ -14,6 +14,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/usecases/auth"
 )
@@ -29,15 +31,15 @@ type SessionManager interface {
 // OnboardingManager creates the first admin account and enrolls new users via invite tokens.
 type OnboardingManager interface {
 	IsEmpty(ctx context.Context) (bool, error)
-	GenerateInvite(ctx context.Context, adminUserID string) (string, error)
+	GenerateInvite(ctx context.Context, adminUserID uuid.UUID) (string, error)
 	AcceptInvite(ctx context.Context, token, username, password string) (string, error)
 	AcceptFirstAdmin(ctx context.Context, username, password string) (string, error)
 }
 
 // UserAdminManager lists and revokes user accounts for the admin panel.
 type UserAdminManager interface {
-	ListUsers(ctx context.Context, adminUserID string) ([]*domain.User, error)
-	RevokeUser(ctx context.Context, adminUserID, targetUserID string) error
+	ListUsers(ctx context.Context, adminUserID uuid.UUID) ([]*domain.User, error)
+	RevokeUser(ctx context.Context, adminUserID, targetUserID uuid.UUID) error
 }
 
 // APITokenManager issues, resolves, lists, and revokes long-lived API tokens.
@@ -46,11 +48,11 @@ type APITokenManager interface {
 	// recording last-used. Returns domain.ErrNotFound when the key is unknown, revoked, or expired.
 	ResolveAPIToken(ctx context.Context, plainToken string) (*domain.User, error)
 	// CreateAPIToken issues a long-lived API key for userID, returning the plain key exactly once.
-	CreateAPIToken(ctx context.Context, userID string) (string, error)
+	CreateAPIToken(ctx context.Context, userID uuid.UUID) (string, error)
 	// ListAPITokens returns all API tokens with owning usernames for the admin panel.
-	ListAPITokens(ctx context.Context, adminUserID string) ([]*auth.APITokenInfo, error)
+	ListAPITokens(ctx context.Context, adminUserID uuid.UUID) ([]*auth.APITokenInfo, error)
 	// RevokeAPIToken deletes an API token by its public ID (the token hash).
-	RevokeAPIToken(ctx context.Context, adminUserID, tokenID string) error
+	RevokeAPIToken(ctx context.Context, adminUserID uuid.UUID, tokenID string) error
 }
 
 // AuthManager performs TOTP-based authentication, user management, and API-token issuance.
@@ -108,8 +110,10 @@ type NoteManager interface {
 	ViewPreloaded(ctx context.Context, id string, preloaded *domain.Note) (*domain.Note, error)
 	GetRendered(ctx context.Context, id string) (*domain.Note, string, error)
 	GetRenderedPreloaded(ctx context.Context, id string, preloaded *domain.Note) (*domain.Note, string, error)
-	Update(ctx context.Context, id, editCode string, note *domain.Note) (*domain.Note, error)
-	Delete(ctx context.Context, id, editCode string) error
+	// Update and Delete accept callerID — the authenticated caller's user ID ("" if anonymous) —
+	// so the note's owner can bypass editCode. See notes.Manager.Update/Delete.
+	Update(ctx context.Context, id, editCode string, callerID uuid.UUID, note *domain.Note) (*domain.Note, error)
+	Delete(ctx context.Context, id, editCode string, callerID uuid.UUID) error
 }
 
 // Pinger checks database connectivity.

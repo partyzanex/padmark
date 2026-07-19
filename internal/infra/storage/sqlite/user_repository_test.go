@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/uptrace/bun"
@@ -44,7 +45,7 @@ func TestUserRepositoryTestSuite(t *testing.T) {
 
 func (s *UserRepositoryTestSuite) newUser(username string) *domain.User {
 	return &domain.User{
-		ID:           "id-" + username,
+		ID:           uuid.New(),
 		Username:     username,
 		TOTPSecret:   "totp-secret",
 		PasswordHash: "hash",
@@ -132,7 +133,7 @@ func (s *UserRepositoryTestSuite) TestGetByID_Found() {
 }
 
 func (s *UserRepositoryTestSuite) TestGetByID_NotFound_ReturnsErrNotFound() {
-	_, err := s.repo.GetByID(s.T().Context(), "no-such-id")
+	_, err := s.repo.GetByID(s.T().Context(), uuid.New())
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
@@ -180,7 +181,7 @@ func (s *UserRepositoryTestSuite) TestUpdateLastLogin_SetsField() {
 }
 
 func (s *UserRepositoryTestSuite) TestUpdateLastLogin_NonExistentUser_NoError() {
-	err := s.repo.UpdateLastLogin(s.T().Context(), "ghost-id", time.Now())
+	err := s.repo.UpdateLastLogin(s.T().Context(), uuid.New(), time.Now())
 	s.Require().NoError(err)
 }
 
@@ -198,7 +199,7 @@ func (s *UserRepositoryTestSuite) TestRevoke_RemovesUser() {
 }
 
 func (s *UserRepositoryTestSuite) TestRevoke_NonExistentUser_NoError() {
-	err := s.repo.Revoke(s.T().Context(), "ghost-id")
+	err := s.repo.Revoke(s.T().Context(), uuid.New())
 	s.Require().NoError(err)
 }
 
@@ -227,7 +228,7 @@ func TestRevoke_CascadesSessionsAndInvites(t *testing.T) {
 	invites := NewInviteRepository(db)
 
 	admin := &domain.User{
-		ID: "admin-id", Username: "admin", TOTPSecret: "s", PasswordHash: "h",
+		ID: uuid.New(), Username: "admin", TOTPSecret: "s", PasswordHash: "h",
 		KDFSalt: []byte("saltsaltsalt1234"), IsAdmin: true, CreatedAt: time.Now().Truncate(time.Second),
 	}
 	require.NoError(t, users.Create(ctx, admin))
@@ -268,7 +269,7 @@ func (s *UserRepositoryTestSuite) TestRedeemInvite_UsernameCollision_RollsBackIn
 	// Redeeming for an already-taken username hits the unique constraint inside the
 	// transaction → the whole tx rolls back with ErrUserExists.
 	dup := s.newUser("taken")
-	dup.ID = "id-dup"
+	dup.ID = uuid.New()
 	s.Require().ErrorIs(invites.RedeemInvite(ctx, tok, "taken", dup), domain.ErrUserExists)
 
 	// The invite must NOT have been burned: a retry with a free username succeeds.
@@ -351,6 +352,6 @@ func (s *UserRepositoryTestSuite) TestUpdatePassword_KDFSalt_Base64RoundTrip() {
 }
 
 func (s *UserRepositoryTestSuite) TestUpdatePassword_NonExistentUser_NoError() {
-	err := s.repo.UpdatePassword(s.T().Context(), "ghost-id", "h", []byte("s"), "t")
+	err := s.repo.UpdatePassword(s.T().Context(), uuid.New(), "h", []byte("s"), "t")
 	s.Require().NoError(err)
 }

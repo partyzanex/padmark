@@ -22,7 +22,8 @@ func editCommand() *urcli.Command {
 				Name:    FlagEditCode,
 				Aliases: []string{"e"},
 				Sources: urcli.EnvVars(EnvEditCode),
-				Usage:   "Edit code returned at note creation (env: PADMARK_EDIT_CODE)",
+				Usage: "Edit code returned at note creation (env: PADMARK_EDIT_CODE). Optional if " +
+					"--token identifies the note's owner",
 			},
 			&urcli.StringFlag{
 				Name:    FlagTitle,
@@ -43,9 +44,9 @@ func editCommand() *urcli.Command {
 				Name:  FlagPlain,
 				Usage: "Set content type to text/plain",
 			},
-			&urcli.BoolFlag{
-				Name:  FlagPrivate,
-				Usage: "Require authentication (any bearer token or session) to read the note",
+			&urcli.StringFlag{
+				Name:  FlagPrivacy,
+				Usage: "Privacy level: public, authenticated, or owner",
 			},
 			&urcli.BoolFlag{
 				Name:  FlagBurn,
@@ -100,18 +101,17 @@ func editAction(ctx context.Context, cmd *urcli.Command) error {
 	return printNote(os.Stdout, note)
 }
 
+// editActionArgs resolves the note ID and edit code. editCode may come back empty: the server
+// still accepts the request when --token identifies the note's owner (see buildUpdateReq), and
+// otherwise rejects it with a clear "invalid edit code" API error — the CLI does not pre-validate
+// which credential the caller intends to rely on.
 func editActionArgs(cmd *urcli.Command) (id, editCode string, err error) {
 	id, err = noteIDArg(cmd)
 	if err != nil {
 		return "", "", err
 	}
 
-	editCode = cmd.String(FlagEditCode)
-	if editCode == "" {
-		return "", "", errors.New("--edit-code is required (or set PADMARK_EDIT_CODE)")
-	}
-
-	return id, editCode, nil
+	return id, cmd.String(FlagEditCode), nil
 }
 
 func buildUpdateReq(cmd *urcli.Command, content, editCode string) *padmark.UpdateNoteRequest {
@@ -120,7 +120,11 @@ func buildUpdateReq(cmd *urcli.Command, content, editCode string) *padmark.Updat
 		title = firstLine(content)
 	}
 
-	req := &padmark.UpdateNoteRequest{Content: content, EditCode: editCode}
+	req := &padmark.UpdateNoteRequest{Content: content}
+	if editCode != "" {
+		req.EditCode = padmark.NewOptString(editCode)
+	}
+
 	if title != "" {
 		req.Title = padmark.NewOptString(title)
 	}
@@ -131,8 +135,8 @@ func buildUpdateReq(cmd *urcli.Command, content, editCode string) *padmark.Updat
 		)
 	}
 
-	if cmd.IsSet(FlagPrivate) {
-		req.Private = padmark.NewOptBool(cmd.Bool(FlagPrivate))
+	if cmd.IsSet(FlagPrivacy) {
+		req.Privacy = padmark.NewOptUpdateNoteRequestPrivacy(padmark.UpdateNoteRequestPrivacy(cmd.String(FlagPrivacy)))
 	}
 
 	if cmd.IsSet(FlagBurn) {
