@@ -354,9 +354,7 @@ func (h *NoteHandler) HandleReveal(w http.ResponseWriter, r *http.Request) {
 // Returns nil and true when the response has been written (auth failed or note not found).
 func (h *NoteHandler) handlePrivateAuth(w http.ResponseWriter, r *http.Request, id string) (*domain.Note, bool) {
 	// When there is no auth at all, every request is implicitly authorised.
-	// In TOTP-only mode (authMgr set, allowedTokens nil) we must still check
-	// the session before deciding to serve a private note.
-	if h.allowedTokens == nil && h.authMgr == nil {
+	if h.authMgr == nil {
 		return nil, false
 	}
 
@@ -406,9 +404,6 @@ func (h *NoteHandler) renderNoteHTML(w http.ResponseWriter, r *http.Request, id 
 
 	data := toNoteViewData(note, rendered)
 	data.Nonce = nonceFromContext(r.Context())
-	// isAuthenticated already returns true when neither allowedTokens nor authMgr
-	// is configured, so the old "allowedTokens == nil" short-circuit is redundant
-	// and harmful: it made CanEdit always true in TOTP-only deployments.
 	// Also gated on VisibleTo: without it, a privacy=owner note would show the Edit link (and
 	// let EditPage render its plaintext, see EditPage's doc comment) to any authenticated
 	// caller, not just its owner.

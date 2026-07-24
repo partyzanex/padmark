@@ -3,17 +3,12 @@ package http
 import (
 	"context"
 	"encoding/json"
-	"net"
 	"net/http"
 	"net/url"
 	"strings"
 
 	"github.com/partyzanex/padmark/internal/domain"
 )
-
-// Deprecated: tokenCookieName is the cookie for the legacy bearer-token auth
-// (PADMARK_AUTH_TOKENS), superseded by the TOTP session cookie. Will be removed in a future release.
-const tokenCookieName = "padmark_token"
 
 // sessionChecker resolves a session ID or an API-token bearer key to a User; used by the
 // auth middleware.
@@ -24,25 +19,22 @@ type sessionChecker interface {
 	ResolveAPIToken(ctx context.Context, plainToken string) (*domain.User, error)
 }
 
-// newAuthMiddleware wraps the entire handler tree with token and/or session auth.
-// If tokenSet is empty and checker is nil, auth is disabled and all requests pass through.
+// newAuthMiddleware wraps the entire handler tree with session auth.
+// If checker is nil, auth is disabled and all requests pass through.
 // Browser requests without a valid credential are redirected to /login.
 // API requests without a valid Bearer token receive 401.
 // namedRoutes is the set of single-segment path names that are named page routes,
 // not note IDs — maintained in NewRouter alongside route registrations.
-func newAuthMiddleware(
-	tokenSet, namedRoutes map[string]struct{}, checker sessionChecker, next http.Handler,
-) http.Handler {
-	if len(tokenSet) == 0 && checker == nil {
+func newAuthMiddleware(namedRoutes map[string]struct{}, checker sessionChecker, next http.Handler) http.Handler {
+	if checker == nil {
 		return next
 	}
 
-	return &authMiddleware{allowed: tokenSet, namedRoutes: namedRoutes, checker: checker, next: next}
+	return &authMiddleware{namedRoutes: namedRoutes, checker: checker, next: next}
 }
 
 type authMiddleware struct {
 	checker     sessionChecker
-	allowed     map[string]struct{}
 	namedRoutes map[string]struct{}
 	next        http.Handler
 }
@@ -76,17 +68,6 @@ func (am *authMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		am.next.ServeHTTP(w, rr)
 
 		return
-	}
-
-	// Bearer token / padmark_token cookie check.
-	if len(am.allowed) > 0 {
-		token := extractToken(r)
-		if _, ok := am.allowed[token]; ok {
-			setLogUser(r.Context(), "bearer-token", false)
-			am.next.ServeHTTP(w, r)
-
-			return
-		}
 	}
 
 	// API-token Bearer check — resolve the key to its owning user (DB-backed).
@@ -180,21 +161,6 @@ func (am *authMiddleware) resolveAPITokenUser(r *http.Request) (*http.Request, b
 	return r.WithContext(context.WithValue(r.Context(), keyUser, usr)), true
 }
 
-func extractToken(r *http.Request) string {
-	hdr := r.Header.Get("Authorization")
-
-	if token, found := strings.CutPrefix(hdr, "Bearer "); found {
-		return token
-	}
-
-	cookie, err := r.Cookie(tokenCookieName)
-	if err == nil {
-		return cookie.Value
-	}
-
-	return ""
-}
-
 // apiDocsPath and apiSpecPath are always public (see isPublicPath) and are also part of the
 // REST/JSON API surface that --disable-api turns off (see isDisabledAPIPath).
 const (
@@ -212,19 +178,40 @@ func isPublicPath(path string) bool {
 		path == "/healthz" || path == "/readyz"
 }
 
-// isPublicRoute allows note-view and burn-reveal requests through the auth middleware.
-// namedRoutes is the set of single-segment path names registered as named page routes
-// in NewRouter; they must not be treated as public note IDs.
-// The handler checks the per-note private flag and requires auth when the note is private.
+// isPublicRoute allows note-view, burn-reveal, and link-read requests through the auth
+// middleware. namedRoutes is the set of single-segment path names registered as named page
+// routes in NewRouter; they must not be treated as public note IDs.
+// The handler checks the per-note/per-link privacy level and requires auth when it demands one.
 func isPublicRoute(r *http.Request, namedRoutes map[string]struct{}) bool {
-	// GET note view and POST burn-reveal are the only public note routes; every other method
-	// (create/update/delete) requires auth.
-	switch r.Method {
-	case http.MethodGet, http.MethodPost:
-		return isNoteIDPath(strings.TrimPrefix(r.URL.Path, "/"), namedRoutes)
+	path := strings.TrimPrefix(r.URL.Path, "/")
+
+	switch {
+	case r.Method == http.MethodGet && isLinkPath(path):
+		// GET /r/{id} (redirect) and GET /links/{id} (JSON metadata) — the per-link privacy
+		// check happens downstream (LinkHandler.handlePrivateAuth / OgenHandler.GetLink),
+		// mirroring notes below. Unlike note paths these have a fixed, unambiguous prefix, so
+		// no namedRoutes disambiguation is needed.
+		return true
+	case r.Method == http.MethodGet, r.Method == http.MethodPost:
+		// GET note view and POST burn-reveal are the only other public note routes; every
+		// other method (create/update/delete) requires auth.
+		return isNoteIDPath(path, namedRoutes)
 	default:
 		return false
 	}
+}
+
+// isLinkPath reports whether trimmed (the request path without its leading slash) addresses a
+// link for public GET access — GET /r/{id} or GET /links/{id}. Whether the matched link is
+// actually served to this caller is decided downstream, per-link, by VisibleTo.
+func isLinkPath(trimmed string) bool {
+	if after, ok := strings.CutPrefix(trimmed, "r/"); ok {
+		return after != ""
+	}
+
+	after, ok := strings.CutPrefix(trimmed, "links/")
+
+	return ok && after != ""
 }
 
 // isNoteIDPath reports whether trimmed (the request path without its leading slash) addresses a
@@ -254,53 +241,6 @@ func isNoteIDPath(trimmed string, namedRoutes map[string]struct{}) bool {
 	_, isNamed := namedRoutes[first]
 
 	return !isNamed
-}
-
-// loginHandler validates the bearer token from a form POST and sets a session cookie.
-//
-// Deprecated: this is the legacy bearer-token login (POST /login backed by PADMARK_AUTH_TOKENS),
-// superseded by the TOTP account system (POST /totp-login, --enable-accounts). Will be removed
-// in a future release.
-func loginHandler(tokens map[string]struct{}, cookieMaxAge int, trustedProxies []*net.IPNet) http.HandlerFunc {
-	const maxLoginBody = 1024
-
-	return func(w http.ResponseWriter, r *http.Request) {
-		r.Body = http.MaxBytesReader(w, r.Body, maxLoginBody)
-
-		token := r.FormValue("token")
-		next := safeNextURL(r.FormValue("next"))
-
-		// Token lookup is a map access, not a constant-time compare. This is acceptable: bearer
-		// tokens are high-entropy secrets, so a timing side-channel leaks no practically useful
-		// information (an attacker cannot iterate the keyspace). Login is also rate-limited upstream.
-		if _, ok := tokens[token]; !ok || token == "" {
-			dest := "/login?error=1"
-			if next != "" {
-				dest += "&next=" + url.QueryEscape(next)
-			}
-
-			http.Redirect(w, r, dest, http.StatusSeeOther)
-
-			return
-		}
-
-		http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: HttpOnly/SameSite set; Secure follows TLS detection
-			Name:     tokenCookieName,
-			Value:    token,
-			Path:     "/",
-			MaxAge:   cookieMaxAge,
-			HttpOnly: true,
-			Secure:   isHTTPS(r, trustedProxies),
-			SameSite: http.SameSiteStrictMode,
-		})
-
-		dest := "/"
-		if next != "" {
-			dest = next
-		}
-
-		http.Redirect(w, r, dest, http.StatusSeeOther)
-	}
 }
 
 // safeNextURL validates that the redirect target is a local path to prevent open redirects.

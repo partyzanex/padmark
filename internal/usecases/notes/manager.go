@@ -4,155 +4,15 @@ package notes
 
 import (
 	"context"
-	"crypto/rand"
 	"errors"
 	"fmt"
 	"log/slog"
-	"math/big"
-	"regexp"
-	"sort"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/partyzanex/padmark/internal/domain"
 )
-
-// slugRe matches a custom slug: one or more path segments joined by "/", each starting with an
-// alphanumeric and otherwise containing alphanumerics, dot, hyphen or underscore. This allows
-// path-like slugs such as "project/GUIDE.md" while rejecting "..", "//", leading/trailing "/"
-// and dotfiles (path-traversal-ish shapes). Overall length is bounded separately by slugMaxLen.
-var slugRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*$`)
-
-// slugMaxLen bounds the total slug length (a slug doubles as the content encryption key material).
-const slugMaxLen = 100
-
-// slugMaxSegments bounds the number of "/"-separated path segments in a custom slug. Generous
-// enough for realistic paths (e.g. "docs/api/v2/reference.md") while ruling out pathologically
-// deep slugs that stay under slugMaxLen only by using many single-character segments.
-const slugMaxSegments = 10
-
-// ReservedSlugPrefixes returns the first path segments that name built-in routes. A custom slug
-// must not start with one, or its URL would resolve to that route (e.g. "edit/foo" → the editor)
-// instead of the note. internal/adapters/http.buildNamedRoutes uses this as the single source of
-// truth for which first segments are routes rather than note slugs.
-func ReservedSlugPrefixes() map[string]struct{} {
-	return map[string]struct{}{
-		"login": {}, "setup": {}, "logout": {}, "totp-login": {},
-		"admin": {}, "api": {}, "success": {}, "healthz": {}, "readyz": {},
-		"notes": {}, "edit": {}, "change-password": {}, "static": {},
-	}
-}
-
-const (
-	slugChars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-	// slugLength balances short, friendly URLs against the fact that the slug doubles
-	// as the content encryption key. 10 chars over a 62-char alphabet ≈ 60 bits: safe
-	// against online URL-guessing and a meaningful offline brute-force cost (years).
-	slugLength = 10
-
-	editCodeChars  = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
-	editCodeLength = 12
-)
-
-func newSlug() (string, error)     { return randomString(slugChars, slugLength) }
-func newEditCode() (string, error) { return randomString(editCodeChars, editCodeLength) }
-
-// resolveSlug validates or generates the note's slug, returning it. A user-supplied slug is only
-// accepted when allowCustom is true; otherwise it is rejected so callers cannot pick low-entropy,
-// guessable key material.
-func resolveSlug(note *domain.Note, allowCustom bool) (string, error) {
-	if note.ID == "" {
-		slug, err := newSlug()
-		if err != nil {
-			return "", fmt.Errorf("generate slug: %w", err)
-		}
-
-		note.ID = slug
-
-		return note.ID, nil
-	}
-
-	if !allowCustom {
-		return "", domain.ErrCustomSlugDisabled
-	}
-
-	if !validCustomSlug(note.ID) {
-		if first, reserved := firstSegmentReserved(note.ID); reserved {
-			return "", fmt.Errorf("slug starts with reserved route name %q (reserved: %s): %w",
-				first, strings.Join(sortedReservedSlugPrefixes(), ", "), domain.ErrInvalidSlug)
-		}
-
-		return "", domain.ErrInvalidSlug
-	}
-
-	return note.ID, nil
-}
-
-// validCustomSlug reports whether a user-supplied slug is acceptable: bounded length, path-like
-// shape (see slugRe), a bounded number of path segments (slugMaxSegments), and a first segment
-// that does not collide with a reserved route name.
-func validCustomSlug(slug string) bool {
-	if slug == "" || len(slug) > slugMaxLen {
-		return false
-	}
-
-	if !slugRe.MatchString(slug) {
-		return false
-	}
-
-	if strings.Count(slug, "/")+1 > slugMaxSegments {
-		return false
-	}
-
-	_, reserved := firstSegmentReserved(slug)
-
-	return !reserved
-}
-
-// firstSegmentReserved reports whether slug's first path segment collides with a reserved route
-// name, returning that segment so callers can name it in error messages.
-func firstSegmentReserved(slug string) (string, bool) {
-	first, _, _ := strings.Cut(slug, "/")
-
-	_, reserved := ReservedSlugPrefixes()[first]
-
-	return first, reserved
-}
-
-// sortedReservedSlugPrefixes returns ReservedSlugPrefixes' keys sorted, for stable error messages.
-func sortedReservedSlugPrefixes() []string {
-	prefixes := ReservedSlugPrefixes()
-	names := make([]string, 0, len(prefixes))
-
-	for name := range prefixes {
-		names = append(names, name)
-	}
-
-	sort.Strings(names)
-
-	return names
-}
-
-// randomString runs on every note create (via newSlug/newEditCode), not just at startup, so a
-// crypto/rand failure here must propagate as an error like any other request-time failure —
-// not panic. See Create's fail-hard-with-error handling of the returned error.
-func randomString(chars string, length int) (string, error) {
-	size := big.NewInt(int64(len(chars)))
-	buf := make([]byte, length)
-
-	for idx := range length {
-		nn, err := rand.Int(rand.Reader, size)
-		if err != nil {
-			return "", fmt.Errorf("crypto/rand unavailable: %w", err)
-		}
-
-		buf[idx] = chars[nn.Int64()]
-	}
-
-	return string(buf), nil
-}
 
 // Storage defines persistence operations for notes.
 type Storage interface {
@@ -163,6 +23,13 @@ type Storage interface {
 	Update(ctx context.Context, id string, note *domain.Note) error
 	Delete(ctx context.Context, id string) error
 	IncrementViews(ctx context.Context, id string) error
+}
+
+// LinksChecker lets notes.Manager verify a candidate slug isn't already taken by a link — slugs
+// are globally unique across notes and links. See links.Manager's mirrored NotesChecker, which
+// enforces the same rule in the other direction.
+type LinksChecker interface {
+	Exists(ctx context.Context, id string) (bool, error)
 }
 
 // Renderer converts note content to safe HTML. Render handles markdown; RenderPlain handles
@@ -191,6 +58,7 @@ type EditCodeHasher interface {
 // machine stays independently readable and testable instead of growing inline here.
 type Manager struct {
 	storage   Storage
+	links     LinksChecker
 	renderer  Renderer
 	encryptor Encryptor
 	hasher    EditCodeHasher
@@ -205,11 +73,12 @@ type Manager struct {
 // user-supplied slugs; when false, a create request carrying a slug is rejected with
 // domain.ErrCustomSlugDisabled (a custom slug is low-entropy content-encryption key material).
 func NewManager(
-	storage Storage, renderer Renderer, encryptor Encryptor, hasher EditCodeHasher,
+	storage Storage, links LinksChecker, renderer Renderer, encryptor Encryptor, hasher EditCodeHasher,
 	log *slog.Logger, allowCustomSlugs bool,
 ) *Manager {
 	return &Manager{
 		storage:          storage,
+		links:            links,
 		renderer:         renderer,
 		encryptor:        encryptor,
 		hasher:           hasher,
@@ -249,13 +118,13 @@ func (m *Manager) Create(ctx context.Context, note *domain.Note) (*domain.Note, 
 		return nil, err
 	}
 
-	slug, err := resolveSlug(note, m.allowCustomSlugs)
+	slug, err := m.resolveUniqueSlug(ctx, note)
 	if err != nil {
 		return nil, err
 	}
 
 	if note.EditCode == "" {
-		editCode, editCodeErr := newEditCode()
+		editCode, editCodeErr := domain.NewEditCode()
 		if editCodeErr != nil {
 			return nil, fmt.Errorf("generate edit code: %w", editCodeErr)
 		}
@@ -535,6 +404,30 @@ func (m *Manager) renderNote(id string, note *domain.Note) (string, error) {
 	}
 
 	return rendered, nil
+}
+
+// resolveUniqueSlug resolves note.ID into a concrete slug and confirms no link already claims it.
+// Slugs are globally unique across notes and links (see links.Manager.Create's mirrored
+// notes.Exists check). Unlike links.Manager.Create, this never retries on collision — notes never
+// retried on a same-table collision either (the DB's own PK constraint on storage.Create was
+// always the sole backstop), so a cross-table hit is treated the same way: an immediate
+// domain.ErrSlugConflict, not a silently-generated different slug.
+func (m *Manager) resolveUniqueSlug(ctx context.Context, note *domain.Note) (string, error) {
+	slug, err := domain.ResolveSlug(note.ID, m.allowCustomSlugs)
+	if err != nil {
+		return "", fmt.Errorf("resolve slug: %w", err)
+	}
+
+	linkTaken, linksErr := m.links.Exists(ctx, domain.HashSlug(slug))
+	if linksErr != nil {
+		return "", fmt.Errorf("check link slug: %w", linksErr)
+	}
+
+	if linkTaken {
+		return "", domain.ErrSlugConflict
+	}
+
+	return slug, nil
 }
 
 // decryptContent decrypts note.Content in place using the slug (note.ID) as the key.

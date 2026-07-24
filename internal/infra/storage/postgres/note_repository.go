@@ -135,6 +135,17 @@ func (r *NoteRepository) Get(ctx context.Context, id string) (*domain.Note, erro
 	return toDomain(&dbNote), nil
 }
 
+// Exists reports whether a note with the given ID exists — used for the cross-table slug
+// uniqueness check shared with links (see notes.Manager.Create / links.Manager.Create).
+func (r *NoteRepository) Exists(ctx context.Context, id string) (bool, error) {
+	exists, err := r.db.NewSelect().Model((*note)(nil)).Where("id = ?", id).Exists(ctx)
+	if err != nil {
+		return false, fmt.Errorf("postgres note exists: %w", err)
+	}
+
+	return exists, nil
+}
+
 // Consume atomically deletes a note and returns it, but only if the note is eligible for deletion:
 // burn_after_reading is set (with no grace period), or expires_at has passed.
 // Returns domain.ErrNotFound otherwise.
@@ -145,11 +156,7 @@ func (r *NoteRepository) Consume(ctx context.Context, id string) (*domain.Note, 
 		Model(&dbNote).
 		Where("id = ?", id).
 		Where("burn_after_reading OR (expires_at IS NOT NULL AND expires_at <= ?)", time.Now()).
-		// Explicit column list, not "*": the notes table still has the deprecated `private`
-		// column (see migrations/postgres/20260720000001_notes_privacy.sql), which the note
-		// struct no longer maps — RETURNING * would try to scan it and fail.
-		Returning("id, created_at, updated_at, expires_at, owner_id, content, title, " +
-			"content_type, edit_code, views, burn_ttl, burn_after_reading, privacy").
+		Returning("*").
 		Scan(ctx)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -173,11 +180,7 @@ func (r *NoteRepository) SetBurnExpiry(ctx context.Context, id string, expiresAt
 		Set("burn_after_reading = FALSE").
 		Where("id = ?", id).
 		Where("burn_after_reading").
-		// Explicit column list, not "*": the notes table still has the deprecated `private`
-		// column (see migrations/postgres/20260720000001_notes_privacy.sql), which the note
-		// struct no longer maps — RETURNING * would try to scan it and fail.
-		Returning("id, created_at, updated_at, expires_at, owner_id, content, title, " +
-			"content_type, edit_code, views, burn_ttl, burn_after_reading, privacy").
+		Returning("*").
 		Scan(ctx)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {

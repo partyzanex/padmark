@@ -43,6 +43,7 @@ Those tools are built for humans. padmark is built for agents — and humans who
 - Choose who can read a note: anyone, any logged-in user, or only its owner
 - Gate access with user accounts protected by TOTP two-factor auth, or with API Bearer tokens
 - Store note content encrypted at rest
+- Shorten URLs too — the same edit_code/ownership/privacy/burn model as notes, redirecting either instantly or through a transparency interstitial
 - Script everything from the terminal or another service
 
 **What it doesn't do:** team wikis, collaborative editing, document management. Intentionally lightweight.
@@ -75,6 +76,40 @@ Every note has:
 | `burn_after_reading: true` + `ttl: 3600` | First read starts a 1-hour countdown, then it's gone |
 
 The timer starts on first read, not on creation.
+
+---
+
+## How short links work
+
+Every short link has:
+
+| Field | Description |
+|---|---|
+| `id` | Short URL identifier, auto-generated or custom — shares one global namespace with note slugs (a note and a link can never collide on the same identifier) |
+| `target_url` | Destination URL. Only `http` and `https` schemes are accepted |
+| `edit_code` | Your one-time secret for deleting the link |
+| `burn_after_click` | Delete the link the moment it's first followed |
+| `ttl` | Seconds until the link expires, counted from creation (a plain hard expiry — unlike notes' `ttl`, unrelated to `burn_after_click`; the two may be combined freely) |
+| `privacy` | Who can follow it: `public` (default), `authenticated`, or `owner` |
+| `direct_redirect` | Per-link override of the server's `--direct-redirect` default; omitted inherits it |
+
+Visiting `GET /r/{id}` either redirects immediately (`301`, the default) or shows a brief
+transparency interstitial with the destination and a manual continue link first — controlled
+server-wide by `--direct-redirect` (see [Configuration reference](#server)), or per link via
+`direct_redirect` at creation time, which always wins over the server default. In both modes an
+expired link answers `410 Gone`, a missing one `404`, and a link denied by its `privacy` level
+`401` (or a login redirect for a browser), exactly like notes.
+
+> Same rule as `edit_code` for notes: shown once at creation, cannot be recovered. The same
+> owner-bypass also applies — a link created while authenticated can be deleted later by that same
+> credential with no `edit_code` needed.
+
+Frequently-followed ("hot") links are served from a small in-memory cache to skip the storage
+round-trip and decryption on repeat requests — always on, no configuration needed. The trade-off:
+`views` in a `GET /links/{id}` response, or in the value returned from a redirect, can lag the
+true stored count by a few seconds; the stored count itself is always accurate. A link is deleted
+from the cache immediately when it's explicitly deleted, and burn-after-click links are never
+cached at all (so the "exactly once" guarantee is never affected by caching).
 
 ---
 
@@ -229,6 +264,25 @@ padmark-cli ping
 padmark-cli --timeout 5s get abc123def4
 ```
 
+Short links:
+
+```bash
+# Create a short link
+padmark-cli shorten --target-url https://example.com/some/long/path
+
+# Custom slug, burn after first click, expires in 1 hour
+padmark-cli shorten --target-url https://example.com --slug my-link --burn --ttl 3600
+
+# Force this one link to always show the interstitial, even if the server default is --direct-redirect=true
+padmark-cli shorten --target-url https://example.com --direct-redirect=false
+
+# Get a link's metadata (does not follow it or consume burn-after-click)
+padmark-cli expand my-link
+
+# Delete a link
+padmark-cli delete-link my-link --edit-code MySecretCode1
+```
+
 Set defaults via environment variables: `PADMARK_URL`, `PADMARK_TOKEN`, `PADMARK_TIMEOUT`, `PADMARK_EDIT_CODE`.
 
 > A bearer token over a non-HTTPS `--url` is sent in cleartext; the CLI prints a stderr warning. Use an `https://` server URL in production.
@@ -298,21 +352,39 @@ curl -X POST http://localhost:4000/notes \
 
 Interactive API docs live at `/api`. Raw OpenAPI spec at `/api/openapi.yaml`.
 
+**Short links**
+```bash
+# Create a short link
+curl -X POST http://localhost:4000/links \
+  -H "Content-Type: application/json" \
+  -d '{"target_url": "https://example.com/some/long/path"}'
+
+# Create up to 100 at once — best-effort, not transactional: one item failing (bad scheme, slug
+# conflict, ...) doesn't stop the rest; check each result for an "error" field
+curl -X POST http://localhost:4000/links/bulk \
+  -H "Content-Type: application/json" \
+  -d '{"links": [{"target_url": "https://example.com/a"}, {"target_url": "https://example.com/b"}]}'
+
+# Get a link's metadata (JSON, does not follow it)
+curl http://localhost:4000/links/{id}
+
+# Follow it — 301 (default) or an HTML transparency interstitial, per --direct-redirect
+curl -i http://localhost:4000/r/{id}
+
+# Delete a link
+curl -X DELETE http://localhost:4000/links/{id} \
+  -H "X-Edit-Code: MySecretCode1"
+```
+
+`GET /r/{id}` is a browser-facing redirect, not part of the JSON API spec — the same reason bare
+`GET /{id}` (the note-view shortcut) isn't documented in `/api/openapi.yaml` either.
+
 ---
 
 ## Authentication & accounts
 
-padmark has two independent auth mechanisms. Use either, both, or neither.
-
-### Bearer tokens (API / CLI)
-
-> **Deprecated.** `--auth-tokens` / `PADMARK_AUTH_TOKENS` is the legacy bearer-token write auth.
-> Use the **TOTP account system** (`--enable-accounts`) and issue an admin **API key** from
-> `/admin` instead. The flag is kept for backwards compatibility and will be removed in a future
-> release.
->
-> When set, **write operations** (create, update, delete) require `Authorization: Bearer <token>`.
-> Public notes stay readable without a token.
+padmark's auth is gated entirely behind the TOTP account system (`--enable-accounts`): off by
+default (fully public), on enables sessions for the web UI and long-lived API keys for the CLI.
 
 ### API keys (TOTP account system)
 
@@ -396,7 +468,7 @@ note's `privacy` level.
 
 ### Security at rest
 
-- Note content is **encrypted at rest**.
+- Note content and short-link target URLs are **encrypted at rest**.
 - Passwords and `edit_code`s are hashed with **argon2id**.
 - Each user's TOTP secret is encrypted under a key derived from their password.
 - TOTP codes are **single-use** (replay-protected) and the protection survives server restarts.
@@ -412,7 +484,6 @@ note's `privacy` level.
 | `--addr` | `PADMARK_ADDR` | `:8080` | Listen address |
 | `--storage` | `PADMARK_STORAGE` | `sqlite` | `sqlite` or `postgres` |
 | `--dsn` | `PADMARK_DSN` | `padmark.db` | DB path or connection string |
-| `--auth-tokens` | `PADMARK_AUTH_TOKENS` | — | **Deprecated.** Legacy comma-separated Bearer tokens for write endpoints; superseded by the TOTP account system + admin API keys. Will be removed in a future release |
 | `--enable-accounts` | `PADMARK_ENABLE_ACCOUNTS` | `false` | Enable the TOTP account system (`/setup`, `/login`, `/admin`, privacy-level gating); off = fully public |
 | `--disable-api` | `PADMARK_DISABLE_API` | `false` | Disable the REST/JSON API (`/notes*`, `/api`, `/api/openapi.yaml`): every request to it gets `503` with `{"message": "До свидания"}`, before auth or any handler runs. The web UI and `/healthz`, `/readyz` keep working |
 | `--totp-issuer` | `PADMARK_TOTP_ISSUER` | `padmark` | TOTP issuer shown in the authenticator app |
@@ -420,7 +491,6 @@ note's `privacy` level.
 | `--argon2-memory` | `PADMARK_ARGON2_MEMORY` | `24576` | argon2id memory cost in KiB for **account password** hashing (default 24 MiB); lower for low-RAM hosts. Edit codes use a fast hash and are unaffected |
 | `--argon2-time` | `PADMARK_ARGON2_TIME` | `2` | argon2id iterations (OWASP minimum at 64 MiB) — raise when lowering memory |
 | `--argon2-threads` | `PADMARK_ARGON2_THREADS` | `1` | argon2id parallelism (CPU threads per hash) |
-| `--cookie-max-age` | `PADMARK_COOKIE_MAX_AGE` | `7776000` | Auth cookie max-age in seconds (default 90 days) |
 | `--rate-limit` | `PADMARK_RATE_LIMIT` | `10` | Requests/sec per IP (`0` = disabled) |
 | `--rate-burst` | `PADMARK_RATE_BURST` | `20` | Burst size per IP |
 | `--read-timeout` | `PADMARK_READ_TIMEOUT` | `30` | HTTP read timeout in seconds |
@@ -435,7 +505,9 @@ note's `privacy` level.
 | `--log-format` | `PADMARK_LOG_FORMAT` | `json` | `json` or `text` |
 | `--trusted-proxies` | `PADMARK_TRUSTED_PROXIES` | — | Proxy CIDRs/IPs for real client IPs; also the addresses whose `X-Forwarded-Proto` is trusted when building absolute links (note URLs, invite links, API-token envelopes) |
 | `--public-scheme` | `PADMARK_PUBLIC_SCHEME` | — | Force `http` or `https` for absolute links back to this server, bypassing TLS/`X-Forwarded-Proto` detection; use this instead of `--trusted-proxies` when the proxy's IP isn't stable (cloud load balancers, k8s ingress) |
-| `--custom-slugs` | `PADMARK_CUSTOM_SLUGS` | `false` | Allow user-supplied human-readable slugs (e.g. `project/GUIDE.md`) at creation. Off by default: only random slugs are issued, since a custom slug is low-entropy content-encryption key material. Enable for internal/trusted deployments. A slug's first path segment must not be a reserved route name: `login`, `setup`, `logout`, `totp-login`, `admin`, `api`, `success`, `healthz`, `readyz`, `notes`, `edit`, `change-password`, `static` |
+| `--custom-slugs` | `PADMARK_CUSTOM_SLUGS` | `false` | Allow user-supplied human-readable slugs/link aliases (e.g. `project/GUIDE.md`) at creation. Off by default: only random slugs are issued, since a custom slug is low-entropy content-encryption key material. Enable for internal/trusted deployments. A slug's first path segment must not be a reserved route name: `login`, `setup`, `logout`, `totp-login`, `admin`, `api`, `success`, `healthz`, `readyz`, `notes`, `edit`, `change-password`, `static`, `links`, `r` |
+| `--direct-redirect` | `PADMARK_DIRECT_REDIRECT` | `true` | `GET /r/{id}` behavior for short links: `true` issues an immediate `301` to the target URL; `false` renders an interstitial page (meta-refresh + `<noscript>` fallback) showing the destination before redirecting |
+| `--metrics-addr` | `PADMARK_METRICS_ADDR` | — | Address for a separate internal Prometheus `/metrics` listener (e.g. `:9090`); empty (default) disables it entirely. Exposes `padmark_links_created_total`, `padmark_links_redirects_total`, `padmark_links_collisions_total`, plus standard Go/process collectors. Bind this to a private interface only — metrics are never served on the main, public-facing listener |
 
 ### CLI global flags
 

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -26,6 +27,9 @@ func NewApp() *urcli.Command {
 			getCommand(),
 			editCommand(),
 			deleteCommand(),
+			shortenCommand(),
+			expandCommand(),
+			deleteLinkCommand(),
 			pingCommand(),
 		},
 	}
@@ -169,4 +173,47 @@ func noteIDArg(cmd *urcli.Command) (string, error) {
 	}
 
 	return id, nil
+}
+
+// linkIDArg returns the link ID from the first positional argument or an error.
+func linkIDArg(cmd *urcli.Command) (string, error) {
+	id := cmd.Args().Get(0)
+	if id == "" {
+		return "", errors.New("link ID is required as the first argument")
+	}
+
+	return id, nil
+}
+
+// runDeleteCommand implements the "resolve ID → delete → print confirmation" flow shared by
+// `delete` (notes) and `delete-link` (links). Only this skeleton is shared: ogen generates
+// distinct params/response-union/client-method types per operation, so the resource-specific
+// request-building and response-mapping stay in doDelete, supplied by each command's own action.
+func runDeleteCommand(
+	ctx context.Context, cmd *urcli.Command, idArg func(*urcli.Command) (string, error),
+	doDelete func(ctx context.Context, cl *padmark.Client, id, editCode string) error,
+) error {
+	id, err := idArg(cmd)
+	if err != nil {
+		return err
+	}
+
+	cl, err := newPadmarkClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	err = doDelete(ctx, cl, id, cmd.String(FlagEditCode))
+	if err != nil {
+		return err
+	}
+
+	ew := &errWriter{w: os.Stdout}
+	ew.printf("deleted %s\n", id)
+
+	if ew.err != nil {
+		return fmt.Errorf("write output: %w", ew.err)
+	}
+
+	return nil
 }

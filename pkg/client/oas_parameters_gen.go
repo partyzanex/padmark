@@ -14,6 +14,179 @@ import (
 	"github.com/ogen-go/ogen/validate"
 )
 
+// DeleteLinkParams is parameters of deleteLink operation.
+type DeleteLinkParams struct {
+	// Link ID (slug) — 10-char random string or the custom slug chosen at creation.
+	ID string
+	// Edit code returned at link creation (alternative to `edit_code` query param). Preferred over the
+	// query parameter — see the operation description.
+	XEditCode OptString `json:",omitempty,omitzero"`
+	// Edit code returned at link creation (alternative to `X-Edit-Code` header). Prefer the
+	// header: a query string is more likely to be captured in proxy/CDN access logs or a
+	// same-origin `Referer` header. Provided for manual/curl convenience only.
+	EditCode OptString `json:",omitempty,omitzero"`
+}
+
+func unpackDeleteLinkParams(packed middleware.Parameters) (params DeleteLinkParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "id",
+			In:   "path",
+		}
+		params.ID = packed[key].(string)
+	}
+	{
+		key := middleware.ParameterKey{
+			Name: "X-Edit-Code",
+			In:   "header",
+		}
+		if v, ok := packed[key]; ok {
+			params.XEditCode = v.(OptString)
+		}
+	}
+	{
+		key := middleware.ParameterKey{
+			Name: "edit_code",
+			In:   "query",
+		}
+		if v, ok := packed[key]; ok {
+			params.EditCode = v.(OptString)
+		}
+	}
+	return params
+}
+
+func decodeDeleteLinkParams(args [1]string, argsEscaped bool, r *http.Request) (params DeleteLinkParams, _ error) {
+	q := uri.NewQueryDecoder(r.URL.Query())
+	h := uri.NewHeaderDecoder(r.Header)
+	// Decode path: id.
+	if err := func() error {
+		param := args[0]
+		if argsEscaped {
+			unescaped, err := url.PathUnescape(args[0])
+			if err != nil {
+				return errors.Wrap(err, "unescape path")
+			}
+			param = unescaped
+		}
+		if len(param) > 0 {
+			d := uri.NewPathDecoder(uri.PathDecoderConfig{
+				Param:   "id",
+				Value:   param,
+				Style:   uri.PathStyleSimple,
+				Explode: false,
+			})
+
+			if err := func() error {
+				val, err := d.DecodeValue()
+				if err != nil {
+					return err
+				}
+
+				c, err := conv.ToString(val)
+				if err != nil {
+					return err
+				}
+
+				params.ID = c
+				return nil
+			}(); err != nil {
+				return err
+			}
+		} else {
+			return validate.ErrFieldRequired
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "id",
+			In:   "path",
+			Err:  err,
+		}
+	}
+	// Decode header: X-Edit-Code.
+	if err := func() error {
+		cfg := uri.HeaderParameterDecodingConfig{
+			Name:    "X-Edit-Code",
+			Explode: false,
+		}
+		if err := h.HasParam(cfg); err == nil {
+			if err := h.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotXEditCodeVal string
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToString(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotXEditCodeVal = c
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.XEditCode.SetTo(paramsDotXEditCodeVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "X-Edit-Code",
+			In:   "header",
+			Err:  err,
+		}
+	}
+	// Decode query: edit_code.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "edit_code",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotEditCodeVal string
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToString(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotEditCodeVal = c
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.EditCode.SetTo(paramsDotEditCodeVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "edit_code",
+			In:   "query",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
 // DeleteNoteParams is parameters of deleteNote operation.
 type DeleteNoteParams struct {
 	// Note ID (slug) — 10-char random string or the custom slug chosen at creation.
@@ -181,6 +354,72 @@ func decodeDeleteNoteParams(args [1]string, argsEscaped bool, r *http.Request) (
 		return params, &ogenerrors.DecodeParamError{
 			Name: "edit_code",
 			In:   "query",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
+// GetLinkParams is parameters of getLink operation.
+type GetLinkParams struct {
+	// Link ID (slug) — 10-char random string or the custom slug chosen at creation.
+	ID string
+}
+
+func unpackGetLinkParams(packed middleware.Parameters) (params GetLinkParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "id",
+			In:   "path",
+		}
+		params.ID = packed[key].(string)
+	}
+	return params
+}
+
+func decodeGetLinkParams(args [1]string, argsEscaped bool, r *http.Request) (params GetLinkParams, _ error) {
+	// Decode path: id.
+	if err := func() error {
+		param := args[0]
+		if argsEscaped {
+			unescaped, err := url.PathUnescape(args[0])
+			if err != nil {
+				return errors.Wrap(err, "unescape path")
+			}
+			param = unescaped
+		}
+		if len(param) > 0 {
+			d := uri.NewPathDecoder(uri.PathDecoderConfig{
+				Param:   "id",
+				Value:   param,
+				Style:   uri.PathStyleSimple,
+				Explode: false,
+			})
+
+			if err := func() error {
+				val, err := d.DecodeValue()
+				if err != nil {
+					return err
+				}
+
+				c, err := conv.ToString(val)
+				if err != nil {
+					return err
+				}
+
+				params.ID = c
+				return nil
+			}(); err != nil {
+				return err
+			}
+		} else {
+			return validate.ErrFieldRequired
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "id",
+			In:   "path",
 			Err:  err,
 		}
 	}

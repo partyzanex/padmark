@@ -3,10 +3,620 @@
 package client
 
 import (
+	"net/url"
 	"time"
 
 	"github.com/go-faster/errors"
 )
+
+// Ref: #/components/schemas/BulkCreateLinksRequest
+type BulkCreateLinksRequest struct {
+	// Each item has the exact same shape and semantics as `CreateLinkRequest`.
+	Links []CreateLinkRequest `json:"links"`
+}
+
+// GetLinks returns the value of Links.
+func (s *BulkCreateLinksRequest) GetLinks() []CreateLinkRequest {
+	return s.Links
+}
+
+// SetLinks sets the value of Links.
+func (s *BulkCreateLinksRequest) SetLinks(val []CreateLinkRequest) {
+	s.Links = val
+}
+
+// Ref: #/components/schemas/BulkCreateLinksResponse
+type BulkCreateLinksResponse struct {
+	// Same length and order as the request's `links` array.
+	Results []BulkLinkResult `json:"results"`
+}
+
+// GetResults returns the value of Results.
+func (s *BulkCreateLinksResponse) GetResults() []BulkLinkResult {
+	return s.Results
+}
+
+// SetResults sets the value of Results.
+func (s *BulkCreateLinksResponse) SetResults(val []BulkLinkResult) {
+	s.Results = val
+}
+
+func (*BulkCreateLinksResponse) createLinksBulkRes() {}
+
+// The outcome for one item of a `POST /links/bulk` request. Either the created link's
+// fields are present (success) or `error` is (failure) — never both. `target_url` always
+// echoes the corresponding request item's `target_url`, even on failure, so a caller can
+// match `results[i]` back to `links[i]` without relying on array position alone.
+// Ref: #/components/schemas/BulkLinkResult
+type BulkLinkResult struct {
+	// Echoes the corresponding request item's target_url.
+	TargetURL url.URL `json:"target_url"`
+	// Present only when this item failed to create; human-readable.
+	Error OptString `json:"error"`
+	// Present only on success.
+	ID OptString `json:"id"`
+	// Present only on success.
+	EditCode OptString `json:"edit_code"`
+	// Present only on success.
+	Views OptInt `json:"views"`
+	// Present only on success.
+	BurnAfterClick OptBool `json:"burn_after_click"`
+	// Present only on success.
+	Privacy OptBulkLinkResultPrivacy `json:"privacy"`
+	// Present only on success.
+	ExpiresAt OptNilDateTime `json:"expires_at"`
+	// Present only on success.
+	DirectRedirect OptNilBool `json:"direct_redirect"`
+	// Present only on success.
+	CreatedAt OptDateTime `json:"created_at"`
+}
+
+// GetTargetURL returns the value of TargetURL.
+func (s *BulkLinkResult) GetTargetURL() url.URL {
+	return s.TargetURL
+}
+
+// GetError returns the value of Error.
+func (s *BulkLinkResult) GetError() OptString {
+	return s.Error
+}
+
+// GetID returns the value of ID.
+func (s *BulkLinkResult) GetID() OptString {
+	return s.ID
+}
+
+// GetEditCode returns the value of EditCode.
+func (s *BulkLinkResult) GetEditCode() OptString {
+	return s.EditCode
+}
+
+// GetViews returns the value of Views.
+func (s *BulkLinkResult) GetViews() OptInt {
+	return s.Views
+}
+
+// GetBurnAfterClick returns the value of BurnAfterClick.
+func (s *BulkLinkResult) GetBurnAfterClick() OptBool {
+	return s.BurnAfterClick
+}
+
+// GetPrivacy returns the value of Privacy.
+func (s *BulkLinkResult) GetPrivacy() OptBulkLinkResultPrivacy {
+	return s.Privacy
+}
+
+// GetExpiresAt returns the value of ExpiresAt.
+func (s *BulkLinkResult) GetExpiresAt() OptNilDateTime {
+	return s.ExpiresAt
+}
+
+// GetDirectRedirect returns the value of DirectRedirect.
+func (s *BulkLinkResult) GetDirectRedirect() OptNilBool {
+	return s.DirectRedirect
+}
+
+// GetCreatedAt returns the value of CreatedAt.
+func (s *BulkLinkResult) GetCreatedAt() OptDateTime {
+	return s.CreatedAt
+}
+
+// SetTargetURL sets the value of TargetURL.
+func (s *BulkLinkResult) SetTargetURL(val url.URL) {
+	s.TargetURL = val
+}
+
+// SetError sets the value of Error.
+func (s *BulkLinkResult) SetError(val OptString) {
+	s.Error = val
+}
+
+// SetID sets the value of ID.
+func (s *BulkLinkResult) SetID(val OptString) {
+	s.ID = val
+}
+
+// SetEditCode sets the value of EditCode.
+func (s *BulkLinkResult) SetEditCode(val OptString) {
+	s.EditCode = val
+}
+
+// SetViews sets the value of Views.
+func (s *BulkLinkResult) SetViews(val OptInt) {
+	s.Views = val
+}
+
+// SetBurnAfterClick sets the value of BurnAfterClick.
+func (s *BulkLinkResult) SetBurnAfterClick(val OptBool) {
+	s.BurnAfterClick = val
+}
+
+// SetPrivacy sets the value of Privacy.
+func (s *BulkLinkResult) SetPrivacy(val OptBulkLinkResultPrivacy) {
+	s.Privacy = val
+}
+
+// SetExpiresAt sets the value of ExpiresAt.
+func (s *BulkLinkResult) SetExpiresAt(val OptNilDateTime) {
+	s.ExpiresAt = val
+}
+
+// SetDirectRedirect sets the value of DirectRedirect.
+func (s *BulkLinkResult) SetDirectRedirect(val OptNilBool) {
+	s.DirectRedirect = val
+}
+
+// SetCreatedAt sets the value of CreatedAt.
+func (s *BulkLinkResult) SetCreatedAt(val OptDateTime) {
+	s.CreatedAt = val
+}
+
+// Present only on success.
+type BulkLinkResultPrivacy string
+
+const (
+	BulkLinkResultPrivacyPublic        BulkLinkResultPrivacy = "public"
+	BulkLinkResultPrivacyAuthenticated BulkLinkResultPrivacy = "authenticated"
+	BulkLinkResultPrivacyOwner         BulkLinkResultPrivacy = "owner"
+)
+
+// AllValues returns all BulkLinkResultPrivacy values.
+func (BulkLinkResultPrivacy) AllValues() []BulkLinkResultPrivacy {
+	return []BulkLinkResultPrivacy{
+		BulkLinkResultPrivacyPublic,
+		BulkLinkResultPrivacyAuthenticated,
+		BulkLinkResultPrivacyOwner,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s BulkLinkResultPrivacy) MarshalText() ([]byte, error) {
+	switch s {
+	case BulkLinkResultPrivacyPublic:
+		return []byte(s), nil
+	case BulkLinkResultPrivacyAuthenticated:
+		return []byte(s), nil
+	case BulkLinkResultPrivacyOwner:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *BulkLinkResultPrivacy) UnmarshalText(data []byte) error {
+	switch BulkLinkResultPrivacy(data) {
+	case BulkLinkResultPrivacyPublic:
+		*s = BulkLinkResultPrivacyPublic
+		return nil
+	case BulkLinkResultPrivacyAuthenticated:
+		*s = BulkLinkResultPrivacyAuthenticated
+		return nil
+	case BulkLinkResultPrivacyOwner:
+		*s = BulkLinkResultPrivacyOwner
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
+type CreateLinkBadRequest ErrorResponse
+
+func (*CreateLinkBadRequest) createLinkRes() {}
+
+type CreateLinkConflict ErrorResponse
+
+func (*CreateLinkConflict) createLinkRes() {}
+
+type CreateLinkInternalServerError ErrorResponse
+
+func (*CreateLinkInternalServerError) createLinkRes() {}
+
+// Ref: #/components/schemas/CreateLinkRequest
+type CreateLinkRequest struct {
+	// Destination URL. Only `http` and `https` schemes are accepted.
+	TargetURL url.URL `json:"target_url"`
+	// Custom URL-friendly identifier. Must match `[a-zA-Z0-9_-]+`.
+	// If omitted a 10-character random slug is generated.
+	// Returns `409` if the slug is already taken by a note or another link.
+	Slug OptString `json:"slug"`
+	// When `true` the link is deleted the moment it is first followed via `GET /r/{id}`.
+	BurnAfterClick OptBool `json:"burn_after_click"`
+	// Seconds until the link expires, counted from creation. Omitted means the link never
+	// expires. Unlike notes' `ttl` (a burn-after-reading grace period), this is a plain hard
+	// expiry with no relation to `burn_after_click`; the two may be combined freely.
+	TTL OptInt64 `json:"ttl"`
+	// Optional custom edit code. If omitted a random 12-character code is generated.
+	// Intended for CLI and automation use.
+	EditCode OptString `json:"edit_code"`
+	// Who may follow the link: `public` (anyone), `authenticated` (any valid session or API
+	// token, not just the creator), or `owner` (only the exact credential that created it
+	// — see "Edit codes and ownership" above). `owner` additionally requires the link to
+	// actually have an owner, i.e. `--enable-accounts` and an authenticated caller —
+	// otherwise the request is rejected with `422`.
+	Privacy OptCreateLinkRequestPrivacy `json:"privacy"`
+	// Per-link override of the server's `--direct-redirect` flag for `GET /r/{id}`: `true`
+	// forces an immediate `301`, `false` forces the transparency interstitial, omitted (or
+	// explicit `null`) inherits the server-wide default.
+	DirectRedirect OptNilBool `json:"direct_redirect"`
+}
+
+// GetTargetURL returns the value of TargetURL.
+func (s *CreateLinkRequest) GetTargetURL() url.URL {
+	return s.TargetURL
+}
+
+// GetSlug returns the value of Slug.
+func (s *CreateLinkRequest) GetSlug() OptString {
+	return s.Slug
+}
+
+// GetBurnAfterClick returns the value of BurnAfterClick.
+func (s *CreateLinkRequest) GetBurnAfterClick() OptBool {
+	return s.BurnAfterClick
+}
+
+// GetTTL returns the value of TTL.
+func (s *CreateLinkRequest) GetTTL() OptInt64 {
+	return s.TTL
+}
+
+// GetEditCode returns the value of EditCode.
+func (s *CreateLinkRequest) GetEditCode() OptString {
+	return s.EditCode
+}
+
+// GetPrivacy returns the value of Privacy.
+func (s *CreateLinkRequest) GetPrivacy() OptCreateLinkRequestPrivacy {
+	return s.Privacy
+}
+
+// GetDirectRedirect returns the value of DirectRedirect.
+func (s *CreateLinkRequest) GetDirectRedirect() OptNilBool {
+	return s.DirectRedirect
+}
+
+// SetTargetURL sets the value of TargetURL.
+func (s *CreateLinkRequest) SetTargetURL(val url.URL) {
+	s.TargetURL = val
+}
+
+// SetSlug sets the value of Slug.
+func (s *CreateLinkRequest) SetSlug(val OptString) {
+	s.Slug = val
+}
+
+// SetBurnAfterClick sets the value of BurnAfterClick.
+func (s *CreateLinkRequest) SetBurnAfterClick(val OptBool) {
+	s.BurnAfterClick = val
+}
+
+// SetTTL sets the value of TTL.
+func (s *CreateLinkRequest) SetTTL(val OptInt64) {
+	s.TTL = val
+}
+
+// SetEditCode sets the value of EditCode.
+func (s *CreateLinkRequest) SetEditCode(val OptString) {
+	s.EditCode = val
+}
+
+// SetPrivacy sets the value of Privacy.
+func (s *CreateLinkRequest) SetPrivacy(val OptCreateLinkRequestPrivacy) {
+	s.Privacy = val
+}
+
+// SetDirectRedirect sets the value of DirectRedirect.
+func (s *CreateLinkRequest) SetDirectRedirect(val OptNilBool) {
+	s.DirectRedirect = val
+}
+
+type CreateLinkRequestEntityTooLarge ErrorResponse
+
+func (*CreateLinkRequestEntityTooLarge) createLinkRes() {}
+
+// Who may follow the link: `public` (anyone), `authenticated` (any valid session or API
+// token, not just the creator), or `owner` (only the exact credential that created it
+// — see "Edit codes and ownership" above). `owner` additionally requires the link to
+// actually have an owner, i.e. `--enable-accounts` and an authenticated caller —
+// otherwise the request is rejected with `422`.
+type CreateLinkRequestPrivacy string
+
+const (
+	CreateLinkRequestPrivacyPublic        CreateLinkRequestPrivacy = "public"
+	CreateLinkRequestPrivacyAuthenticated CreateLinkRequestPrivacy = "authenticated"
+	CreateLinkRequestPrivacyOwner         CreateLinkRequestPrivacy = "owner"
+)
+
+// AllValues returns all CreateLinkRequestPrivacy values.
+func (CreateLinkRequestPrivacy) AllValues() []CreateLinkRequestPrivacy {
+	return []CreateLinkRequestPrivacy{
+		CreateLinkRequestPrivacyPublic,
+		CreateLinkRequestPrivacyAuthenticated,
+		CreateLinkRequestPrivacyOwner,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s CreateLinkRequestPrivacy) MarshalText() ([]byte, error) {
+	switch s {
+	case CreateLinkRequestPrivacyPublic:
+		return []byte(s), nil
+	case CreateLinkRequestPrivacyAuthenticated:
+		return []byte(s), nil
+	case CreateLinkRequestPrivacyOwner:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *CreateLinkRequestPrivacy) UnmarshalText(data []byte) error {
+	switch CreateLinkRequestPrivacy(data) {
+	case CreateLinkRequestPrivacyPublic:
+		*s = CreateLinkRequestPrivacyPublic
+		return nil
+	case CreateLinkRequestPrivacyAuthenticated:
+		*s = CreateLinkRequestPrivacyAuthenticated
+		return nil
+	case CreateLinkRequestPrivacyOwner:
+		*s = CreateLinkRequestPrivacyOwner
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
+// Merged schema.
+// Ref: #/components/schemas/CreateLinkResponse
+type CreateLinkResponse struct {
+	// Unique slug identifying the link.
+	ID string `json:"id"`
+	// Destination URL.
+	TargetURL url.URL `json:"target_url"`
+	// Number of times the link has been followed via `GET /r/{id}`. May lag the true count
+	// by a few seconds for a "hot" (frequently followed) link, since the server may serve
+	// this read from a short-lived in-memory cache rather than storage.
+	Views int `json:"views"`
+	// `true` until the link is first followed (then it no longer exists — a subsequent read
+	// returns `404`), permanently `false` for links without this flag.
+	BurnAfterClick bool `json:"burn_after_click"`
+	// Who may follow the link. See `CreateLinkRequest.privacy` for the exact semantics of
+	// each value.
+	Privacy OptCreateLinkResponsePrivacy `json:"privacy"`
+	// ISO 8601 timestamp after which the link is inaccessible. `null` for links that never expire.
+	ExpiresAt OptNilDateTime `json:"expires_at"`
+	// Per-link override of the server's `--direct-redirect` flag. See
+	// `CreateLinkRequest.direct_redirect`. `null` means this link inherits the server-wide
+	// default.
+	DirectRedirect OptNilBool `json:"direct_redirect"`
+	// Creation timestamp (UTC).
+	CreatedAt time.Time `json:"created_at"`
+	// One-time secret required for future `DELETE` requests.
+	// This is the only time `edit_code` is returned — store it securely.
+	EditCode string `json:"edit_code"`
+}
+
+// GetID returns the value of ID.
+func (s *CreateLinkResponse) GetID() string {
+	return s.ID
+}
+
+// GetTargetURL returns the value of TargetURL.
+func (s *CreateLinkResponse) GetTargetURL() url.URL {
+	return s.TargetURL
+}
+
+// GetViews returns the value of Views.
+func (s *CreateLinkResponse) GetViews() int {
+	return s.Views
+}
+
+// GetBurnAfterClick returns the value of BurnAfterClick.
+func (s *CreateLinkResponse) GetBurnAfterClick() bool {
+	return s.BurnAfterClick
+}
+
+// GetPrivacy returns the value of Privacy.
+func (s *CreateLinkResponse) GetPrivacy() OptCreateLinkResponsePrivacy {
+	return s.Privacy
+}
+
+// GetExpiresAt returns the value of ExpiresAt.
+func (s *CreateLinkResponse) GetExpiresAt() OptNilDateTime {
+	return s.ExpiresAt
+}
+
+// GetDirectRedirect returns the value of DirectRedirect.
+func (s *CreateLinkResponse) GetDirectRedirect() OptNilBool {
+	return s.DirectRedirect
+}
+
+// GetCreatedAt returns the value of CreatedAt.
+func (s *CreateLinkResponse) GetCreatedAt() time.Time {
+	return s.CreatedAt
+}
+
+// GetEditCode returns the value of EditCode.
+func (s *CreateLinkResponse) GetEditCode() string {
+	return s.EditCode
+}
+
+// SetID sets the value of ID.
+func (s *CreateLinkResponse) SetID(val string) {
+	s.ID = val
+}
+
+// SetTargetURL sets the value of TargetURL.
+func (s *CreateLinkResponse) SetTargetURL(val url.URL) {
+	s.TargetURL = val
+}
+
+// SetViews sets the value of Views.
+func (s *CreateLinkResponse) SetViews(val int) {
+	s.Views = val
+}
+
+// SetBurnAfterClick sets the value of BurnAfterClick.
+func (s *CreateLinkResponse) SetBurnAfterClick(val bool) {
+	s.BurnAfterClick = val
+}
+
+// SetPrivacy sets the value of Privacy.
+func (s *CreateLinkResponse) SetPrivacy(val OptCreateLinkResponsePrivacy) {
+	s.Privacy = val
+}
+
+// SetExpiresAt sets the value of ExpiresAt.
+func (s *CreateLinkResponse) SetExpiresAt(val OptNilDateTime) {
+	s.ExpiresAt = val
+}
+
+// SetDirectRedirect sets the value of DirectRedirect.
+func (s *CreateLinkResponse) SetDirectRedirect(val OptNilBool) {
+	s.DirectRedirect = val
+}
+
+// SetCreatedAt sets the value of CreatedAt.
+func (s *CreateLinkResponse) SetCreatedAt(val time.Time) {
+	s.CreatedAt = val
+}
+
+// SetEditCode sets the value of EditCode.
+func (s *CreateLinkResponse) SetEditCode(val string) {
+	s.EditCode = val
+}
+
+// CreateLinkResponseHeaders wraps CreateLinkResponse with response headers.
+type CreateLinkResponseHeaders struct {
+	Location OptString
+	Response CreateLinkResponse
+}
+
+// GetLocation returns the value of Location.
+func (s *CreateLinkResponseHeaders) GetLocation() OptString {
+	return s.Location
+}
+
+// GetResponse returns the value of Response.
+func (s *CreateLinkResponseHeaders) GetResponse() CreateLinkResponse {
+	return s.Response
+}
+
+// SetLocation sets the value of Location.
+func (s *CreateLinkResponseHeaders) SetLocation(val OptString) {
+	s.Location = val
+}
+
+// SetResponse sets the value of Response.
+func (s *CreateLinkResponseHeaders) SetResponse(val CreateLinkResponse) {
+	s.Response = val
+}
+
+func (*CreateLinkResponseHeaders) createLinkRes() {}
+
+// Who may follow the link. See `CreateLinkRequest.privacy` for the exact semantics of
+// each value.
+type CreateLinkResponsePrivacy string
+
+const (
+	CreateLinkResponsePrivacyPublic        CreateLinkResponsePrivacy = "public"
+	CreateLinkResponsePrivacyAuthenticated CreateLinkResponsePrivacy = "authenticated"
+	CreateLinkResponsePrivacyOwner         CreateLinkResponsePrivacy = "owner"
+)
+
+// AllValues returns all CreateLinkResponsePrivacy values.
+func (CreateLinkResponsePrivacy) AllValues() []CreateLinkResponsePrivacy {
+	return []CreateLinkResponsePrivacy{
+		CreateLinkResponsePrivacyPublic,
+		CreateLinkResponsePrivacyAuthenticated,
+		CreateLinkResponsePrivacyOwner,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s CreateLinkResponsePrivacy) MarshalText() ([]byte, error) {
+	switch s {
+	case CreateLinkResponsePrivacyPublic:
+		return []byte(s), nil
+	case CreateLinkResponsePrivacyAuthenticated:
+		return []byte(s), nil
+	case CreateLinkResponsePrivacyOwner:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *CreateLinkResponsePrivacy) UnmarshalText(data []byte) error {
+	switch CreateLinkResponsePrivacy(data) {
+	case CreateLinkResponsePrivacyPublic:
+		*s = CreateLinkResponsePrivacyPublic
+		return nil
+	case CreateLinkResponsePrivacyAuthenticated:
+		*s = CreateLinkResponsePrivacyAuthenticated
+		return nil
+	case CreateLinkResponsePrivacyOwner:
+		*s = CreateLinkResponsePrivacyOwner
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
+type CreateLinkTooManyRequests ErrorResponse
+
+func (*CreateLinkTooManyRequests) createLinkRes() {}
+
+type CreateLinkUnauthorized ErrorResponse
+
+func (*CreateLinkUnauthorized) createLinkRes() {}
+
+type CreateLinkUnprocessableEntity ErrorResponse
+
+func (*CreateLinkUnprocessableEntity) createLinkRes() {}
+
+type CreateLinksBulkBadRequest ErrorResponse
+
+func (*CreateLinksBulkBadRequest) createLinksBulkRes() {}
+
+type CreateLinksBulkInternalServerError ErrorResponse
+
+func (*CreateLinksBulkInternalServerError) createLinksBulkRes() {}
+
+type CreateLinksBulkRequestEntityTooLarge ErrorResponse
+
+func (*CreateLinksBulkRequestEntityTooLarge) createLinksBulkRes() {}
+
+type CreateLinksBulkTooManyRequests ErrorResponse
+
+func (*CreateLinksBulkTooManyRequests) createLinksBulkRes() {}
+
+type CreateLinksBulkUnauthorized ErrorResponse
+
+func (*CreateLinksBulkUnauthorized) createLinksBulkRes() {}
 
 type CreateNoteBadRequest ErrorResponse
 
@@ -44,12 +654,12 @@ type CreateNoteRequest struct {
 	// Optional custom edit code. If omitted a random 12-character code is generated.
 	// Intended for CLI and automation use; the web UI does not expose this field.
 	EditCode OptString `json:"edit_code"`
-	// Who may read the note: `public` (anyone), `authenticated` (any valid bearer token or
-	// session, not just the creator), or `owner` (only the exact credential that created
+	// Who may read the note: `public` (anyone), `authenticated` (any valid session or API
+	// token, not just the creator), or `owner` (only the exact credential that created
 	// it — see "Edit codes and ownership" above). Meaningful when the server is started
-	// with `--auth-tokens` and/or `--enable-accounts`; `owner` additionally requires the
-	// note to actually have an owner, i.e. `--enable-accounts` and an authenticated caller
-	// — otherwise the request is rejected with `422`.
+	// with `--enable-accounts`; `owner` additionally requires the note to actually have an
+	// owner, i.e. an authenticated caller at creation time — otherwise the request is
+	// rejected with `422`.
 	Privacy OptCreateNoteRequestPrivacy `json:"privacy"`
 }
 
@@ -179,12 +789,12 @@ type CreateNoteRequestEntityTooLarge ErrorResponse
 
 func (*CreateNoteRequestEntityTooLarge) createNoteRes() {}
 
-// Who may read the note: `public` (anyone), `authenticated` (any valid bearer token or
-// session, not just the creator), or `owner` (only the exact credential that created
+// Who may read the note: `public` (anyone), `authenticated` (any valid session or API
+// token, not just the creator), or `owner` (only the exact credential that created
 // it — see "Edit codes and ownership" above). Meaningful when the server is started
-// with `--auth-tokens` and/or `--enable-accounts`; `owner` additionally requires the
-// note to actually have an owner, i.e. `--enable-accounts` and an authenticated caller
-// — otherwise the request is rejected with `422`.
+// with `--enable-accounts`; `owner` additionally requires the note to actually have an
+// owner, i.e. an authenticated caller at creation time — otherwise the request is
+// rejected with `422`.
 type CreateNoteRequestPrivacy string
 
 const (
@@ -504,6 +1114,27 @@ type CreateNoteUnprocessableEntity ErrorResponse
 
 func (*CreateNoteUnprocessableEntity) createNoteRes() {}
 
+type DeleteLinkForbidden ErrorResponse
+
+func (*DeleteLinkForbidden) deleteLinkRes() {}
+
+type DeleteLinkInternalServerError ErrorResponse
+
+func (*DeleteLinkInternalServerError) deleteLinkRes() {}
+
+// DeleteLinkNoContent is response for DeleteLink operation.
+type DeleteLinkNoContent struct{}
+
+func (*DeleteLinkNoContent) deleteLinkRes() {}
+
+type DeleteLinkNotFound ErrorResponse
+
+func (*DeleteLinkNotFound) deleteLinkRes() {}
+
+type DeleteLinkUnauthorized ErrorResponse
+
+func (*DeleteLinkUnauthorized) deleteLinkRes() {}
+
 type DeleteNoteForbidden ErrorResponse
 
 func (*DeleteNoteForbidden) deleteNoteRes() {}
@@ -543,6 +1174,22 @@ func (s *ErrorResponse) SetMessage(val string) {
 
 func (*ErrorResponse) readyzRes() {}
 
+type GetLinkGone ErrorResponse
+
+func (*GetLinkGone) getLinkRes() {}
+
+type GetLinkInternalServerError ErrorResponse
+
+func (*GetLinkInternalServerError) getLinkRes() {}
+
+type GetLinkNotFound ErrorResponse
+
+func (*GetLinkNotFound) getLinkRes() {}
+
+type GetLinkUnauthorized ErrorResponse
+
+func (*GetLinkUnauthorized) getLinkRes() {}
+
 type GetNoteGone ErrorResponse
 
 func (*GetNoteGone) getNoteRes() {}
@@ -561,6 +1208,164 @@ func (*GetNoteUnauthorized) getNoteRes() {}
 
 // HealthzOK is response for Healthz operation.
 type HealthzOK struct{}
+
+// Ref: #/components/schemas/LinkResponse
+type LinkResponse struct {
+	// Unique slug identifying the link.
+	ID string `json:"id"`
+	// Destination URL.
+	TargetURL url.URL `json:"target_url"`
+	// Number of times the link has been followed via `GET /r/{id}`. May lag the true count
+	// by a few seconds for a "hot" (frequently followed) link, since the server may serve
+	// this read from a short-lived in-memory cache rather than storage.
+	Views int `json:"views"`
+	// `true` until the link is first followed (then it no longer exists — a subsequent read
+	// returns `404`), permanently `false` for links without this flag.
+	BurnAfterClick bool `json:"burn_after_click"`
+	// Who may follow the link. See `CreateLinkRequest.privacy` for the exact semantics of
+	// each value.
+	Privacy OptLinkResponsePrivacy `json:"privacy"`
+	// ISO 8601 timestamp after which the link is inaccessible. `null` for links that never expire.
+	ExpiresAt OptNilDateTime `json:"expires_at"`
+	// Per-link override of the server's `--direct-redirect` flag. See
+	// `CreateLinkRequest.direct_redirect`. `null` means this link inherits the server-wide
+	// default.
+	DirectRedirect OptNilBool `json:"direct_redirect"`
+	// Creation timestamp (UTC).
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// GetID returns the value of ID.
+func (s *LinkResponse) GetID() string {
+	return s.ID
+}
+
+// GetTargetURL returns the value of TargetURL.
+func (s *LinkResponse) GetTargetURL() url.URL {
+	return s.TargetURL
+}
+
+// GetViews returns the value of Views.
+func (s *LinkResponse) GetViews() int {
+	return s.Views
+}
+
+// GetBurnAfterClick returns the value of BurnAfterClick.
+func (s *LinkResponse) GetBurnAfterClick() bool {
+	return s.BurnAfterClick
+}
+
+// GetPrivacy returns the value of Privacy.
+func (s *LinkResponse) GetPrivacy() OptLinkResponsePrivacy {
+	return s.Privacy
+}
+
+// GetExpiresAt returns the value of ExpiresAt.
+func (s *LinkResponse) GetExpiresAt() OptNilDateTime {
+	return s.ExpiresAt
+}
+
+// GetDirectRedirect returns the value of DirectRedirect.
+func (s *LinkResponse) GetDirectRedirect() OptNilBool {
+	return s.DirectRedirect
+}
+
+// GetCreatedAt returns the value of CreatedAt.
+func (s *LinkResponse) GetCreatedAt() time.Time {
+	return s.CreatedAt
+}
+
+// SetID sets the value of ID.
+func (s *LinkResponse) SetID(val string) {
+	s.ID = val
+}
+
+// SetTargetURL sets the value of TargetURL.
+func (s *LinkResponse) SetTargetURL(val url.URL) {
+	s.TargetURL = val
+}
+
+// SetViews sets the value of Views.
+func (s *LinkResponse) SetViews(val int) {
+	s.Views = val
+}
+
+// SetBurnAfterClick sets the value of BurnAfterClick.
+func (s *LinkResponse) SetBurnAfterClick(val bool) {
+	s.BurnAfterClick = val
+}
+
+// SetPrivacy sets the value of Privacy.
+func (s *LinkResponse) SetPrivacy(val OptLinkResponsePrivacy) {
+	s.Privacy = val
+}
+
+// SetExpiresAt sets the value of ExpiresAt.
+func (s *LinkResponse) SetExpiresAt(val OptNilDateTime) {
+	s.ExpiresAt = val
+}
+
+// SetDirectRedirect sets the value of DirectRedirect.
+func (s *LinkResponse) SetDirectRedirect(val OptNilBool) {
+	s.DirectRedirect = val
+}
+
+// SetCreatedAt sets the value of CreatedAt.
+func (s *LinkResponse) SetCreatedAt(val time.Time) {
+	s.CreatedAt = val
+}
+
+func (*LinkResponse) getLinkRes() {}
+
+// Who may follow the link. See `CreateLinkRequest.privacy` for the exact semantics of
+// each value.
+type LinkResponsePrivacy string
+
+const (
+	LinkResponsePrivacyPublic        LinkResponsePrivacy = "public"
+	LinkResponsePrivacyAuthenticated LinkResponsePrivacy = "authenticated"
+	LinkResponsePrivacyOwner         LinkResponsePrivacy = "owner"
+)
+
+// AllValues returns all LinkResponsePrivacy values.
+func (LinkResponsePrivacy) AllValues() []LinkResponsePrivacy {
+	return []LinkResponsePrivacy{
+		LinkResponsePrivacyPublic,
+		LinkResponsePrivacyAuthenticated,
+		LinkResponsePrivacyOwner,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s LinkResponsePrivacy) MarshalText() ([]byte, error) {
+	switch s {
+	case LinkResponsePrivacyPublic:
+		return []byte(s), nil
+	case LinkResponsePrivacyAuthenticated:
+		return []byte(s), nil
+	case LinkResponsePrivacyOwner:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *LinkResponsePrivacy) UnmarshalText(data []byte) error {
+	switch LinkResponsePrivacy(data) {
+	case LinkResponsePrivacyPublic:
+		*s = LinkResponsePrivacyPublic
+		return nil
+	case LinkResponsePrivacyAuthenticated:
+		*s = LinkResponsePrivacyAuthenticated
+		return nil
+	case LinkResponsePrivacyOwner:
+		*s = LinkResponsePrivacyOwner
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
 
 // Ref: #/components/schemas/NoteResponse
 type NoteResponse struct {
@@ -832,6 +1637,144 @@ func (o OptBool) Or(d bool) bool {
 	return d
 }
 
+// NewOptBulkLinkResultPrivacy returns new OptBulkLinkResultPrivacy with value set to v.
+func NewOptBulkLinkResultPrivacy(v BulkLinkResultPrivacy) OptBulkLinkResultPrivacy {
+	return OptBulkLinkResultPrivacy{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptBulkLinkResultPrivacy is optional BulkLinkResultPrivacy.
+type OptBulkLinkResultPrivacy struct {
+	Value BulkLinkResultPrivacy
+	Set   bool
+}
+
+// IsSet returns true if OptBulkLinkResultPrivacy was set.
+func (o OptBulkLinkResultPrivacy) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptBulkLinkResultPrivacy) Reset() {
+	var v BulkLinkResultPrivacy
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptBulkLinkResultPrivacy) SetTo(v BulkLinkResultPrivacy) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptBulkLinkResultPrivacy) Get() (v BulkLinkResultPrivacy, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptBulkLinkResultPrivacy) Or(d BulkLinkResultPrivacy) BulkLinkResultPrivacy {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptCreateLinkRequestPrivacy returns new OptCreateLinkRequestPrivacy with value set to v.
+func NewOptCreateLinkRequestPrivacy(v CreateLinkRequestPrivacy) OptCreateLinkRequestPrivacy {
+	return OptCreateLinkRequestPrivacy{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptCreateLinkRequestPrivacy is optional CreateLinkRequestPrivacy.
+type OptCreateLinkRequestPrivacy struct {
+	Value CreateLinkRequestPrivacy
+	Set   bool
+}
+
+// IsSet returns true if OptCreateLinkRequestPrivacy was set.
+func (o OptCreateLinkRequestPrivacy) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptCreateLinkRequestPrivacy) Reset() {
+	var v CreateLinkRequestPrivacy
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptCreateLinkRequestPrivacy) SetTo(v CreateLinkRequestPrivacy) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptCreateLinkRequestPrivacy) Get() (v CreateLinkRequestPrivacy, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptCreateLinkRequestPrivacy) Or(d CreateLinkRequestPrivacy) CreateLinkRequestPrivacy {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptCreateLinkResponsePrivacy returns new OptCreateLinkResponsePrivacy with value set to v.
+func NewOptCreateLinkResponsePrivacy(v CreateLinkResponsePrivacy) OptCreateLinkResponsePrivacy {
+	return OptCreateLinkResponsePrivacy{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptCreateLinkResponsePrivacy is optional CreateLinkResponsePrivacy.
+type OptCreateLinkResponsePrivacy struct {
+	Value CreateLinkResponsePrivacy
+	Set   bool
+}
+
+// IsSet returns true if OptCreateLinkResponsePrivacy was set.
+func (o OptCreateLinkResponsePrivacy) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptCreateLinkResponsePrivacy) Reset() {
+	var v CreateLinkResponsePrivacy
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptCreateLinkResponsePrivacy) SetTo(v CreateLinkResponsePrivacy) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptCreateLinkResponsePrivacy) Get() (v CreateLinkResponsePrivacy, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptCreateLinkResponsePrivacy) Or(d CreateLinkResponsePrivacy) CreateLinkResponsePrivacy {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
 // NewOptCreateNoteRequestContentType returns new OptCreateNoteRequestContentType with value set to v.
 func NewOptCreateNoteRequestContentType(v CreateNoteRequestContentType) OptCreateNoteRequestContentType {
 	return OptCreateNoteRequestContentType{
@@ -970,6 +1913,98 @@ func (o OptCreateNoteResponsePrivacy) Or(d CreateNoteResponsePrivacy) CreateNote
 	return d
 }
 
+// NewOptDateTime returns new OptDateTime with value set to v.
+func NewOptDateTime(v time.Time) OptDateTime {
+	return OptDateTime{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptDateTime is optional time.Time.
+type OptDateTime struct {
+	Value time.Time
+	Set   bool
+}
+
+// IsSet returns true if OptDateTime was set.
+func (o OptDateTime) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptDateTime) Reset() {
+	var v time.Time
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptDateTime) SetTo(v time.Time) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptDateTime) Get() (v time.Time, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptDateTime) Or(d time.Time) time.Time {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptInt returns new OptInt with value set to v.
+func NewOptInt(v int) OptInt {
+	return OptInt{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptInt is optional int.
+type OptInt struct {
+	Value int
+	Set   bool
+}
+
+// IsSet returns true if OptInt was set.
+func (o OptInt) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptInt) Reset() {
+	var v int
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptInt) SetTo(v int) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptInt) Get() (v int, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptInt) Or(d int) int {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
 // NewOptInt64 returns new OptInt64 with value set to v.
 func NewOptInt64(v int64) OptInt64 {
 	return OptInt64{
@@ -1010,6 +2045,115 @@ func (o OptInt64) Get() (v int64, ok bool) {
 
 // Or returns value if set, or given parameter if does not.
 func (o OptInt64) Or(d int64) int64 {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptLinkResponsePrivacy returns new OptLinkResponsePrivacy with value set to v.
+func NewOptLinkResponsePrivacy(v LinkResponsePrivacy) OptLinkResponsePrivacy {
+	return OptLinkResponsePrivacy{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptLinkResponsePrivacy is optional LinkResponsePrivacy.
+type OptLinkResponsePrivacy struct {
+	Value LinkResponsePrivacy
+	Set   bool
+}
+
+// IsSet returns true if OptLinkResponsePrivacy was set.
+func (o OptLinkResponsePrivacy) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptLinkResponsePrivacy) Reset() {
+	var v LinkResponsePrivacy
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptLinkResponsePrivacy) SetTo(v LinkResponsePrivacy) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptLinkResponsePrivacy) Get() (v LinkResponsePrivacy, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptLinkResponsePrivacy) Or(d LinkResponsePrivacy) LinkResponsePrivacy {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptNilBool returns new OptNilBool with value set to v.
+func NewOptNilBool(v bool) OptNilBool {
+	return OptNilBool{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptNilBool is optional nullable bool.
+type OptNilBool struct {
+	Value bool
+	Set   bool
+	Null  bool
+}
+
+// IsSet returns true if OptNilBool was set.
+func (o OptNilBool) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptNilBool) Reset() {
+	var v bool
+	o.Value = v
+	o.Set = false
+	o.Null = false
+}
+
+// SetTo sets value to v.
+func (o *OptNilBool) SetTo(v bool) {
+	o.Set = true
+	o.Null = false
+	o.Value = v
+}
+
+// IsNull returns true if value is Null.
+func (o OptNilBool) IsNull() bool { return o.Null }
+
+// SetToNull sets value to null.
+func (o *OptNilBool) SetToNull() {
+	o.Set = true
+	o.Null = true
+	var v bool
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptNilBool) Get() (v bool, ok bool) {
+	if o.Null {
+		return v, false
+	}
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptNilBool) Or(d bool) bool {
 	if v, ok := o.Get(); ok {
 		return v
 	}

@@ -9,7 +9,6 @@ import (
 	"encoding/hex"
 	"html/template"
 	"log/slog"
-	"maps"
 	"net"
 	"net/http"
 	"time"
@@ -18,6 +17,7 @@ import (
 
 	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/usecases/auth"
+	"github.com/partyzanex/padmark/internal/usecases/links"
 )
 
 // SessionManager authenticates a user and manages their login session lifecycle.
@@ -116,6 +116,16 @@ type NoteManager interface {
 	Delete(ctx context.Context, id, editCode string, callerID uuid.UUID) error
 }
 
+// LinkManager is the interface the HTTP adapter requires from the short-link business logic
+// layer — the links analogue of NoteManager. Shared by OgenHandler (JSON API: POST /links,
+// GET/DELETE /links/{id}) and LinkHandler (browser-facing GET /r/{id}).
+type LinkManager interface {
+	Create(ctx context.Context, targetURL string, opts links.CreateOptions) (*domain.Link, error)
+	Peek(ctx context.Context, slug string) (*domain.Link, error)
+	Redirect(ctx context.Context, slug string) (*domain.Link, error)
+	Delete(ctx context.Context, slug, editCode string, callerID uuid.UUID) error
+}
+
 // Pinger checks database connectivity.
 type Pinger interface {
 	PingContext(ctx context.Context) error
@@ -135,21 +145,10 @@ type common struct {
 	log            *slog.Logger
 	errorTmpl      *template.Template
 	authMgr        AuthManager
-	allowedTokens  map[string]struct{}
 	forcedScheme   string
 	csrfSecret     []byte
 	trustedProxies []*net.IPNet
-	cookieMaxAge   int
 	sessionTTL     time.Duration
-}
-
-// AllowedTokens returns a defensive copy of the bearer-token set.
-// The copy prevents callers from mutating the handler's internal state.
-//
-// Deprecated: part of the legacy bearer-token write auth (PADMARK_AUTH_TOKENS), superseded by
-// the TOTP account system (--enable-accounts). Will be removed in a future release.
-func (c *common) AllowedTokens() map[string]struct{} {
-	return maps.Clone(c.allowedTokens)
 }
 
 // sessionMaxAge returns the TOTP session cookie's Max-Age: the configured SessionTTL (see
@@ -181,9 +180,9 @@ func (c *common) scheme(r *http.Request) string {
 }
 
 // isAuthenticated reports whether the request carries a valid auth credential.
-// Accepts a TOTP session cookie, a bearer token, or no auth when both are unconfigured.
+// Accepts a TOTP session cookie, or no auth when the account system is unconfigured.
 func (c *common) isAuthenticated(r *http.Request) bool {
-	if c.allowedTokens == nil && c.authMgr == nil {
+	if c.authMgr == nil {
 		return true
 	}
 
@@ -194,20 +193,11 @@ func (c *common) isAuthenticated(r *http.Request) bool {
 	}
 
 	// For public routes the middleware does not run, so fall back to a direct session check.
-	if c.authMgr != nil {
-		if sessID := extractSessionID(r); sessID != "" {
-			_, err := c.authMgr.GetSession(r.Context(), sessID)
-			if err == nil {
-				return true
-			}
+	if sessID := extractSessionID(r); sessID != "" {
+		_, err := c.authMgr.GetSession(r.Context(), sessID)
+		if err == nil {
+			return true
 		}
-	}
-
-	if c.allowedTokens != nil {
-		token := extractToken(r)
-		_, ok := c.allowedTokens[token]
-
-		return ok
 	}
 
 	return false
@@ -222,27 +212,23 @@ func parseTmpl(name, src string) *template.Template {
 	)
 }
 
-// Handler composes the four concern-specific handlers — NoteHandler (web_note.go, web_edit.go),
-// AuthHandler (web_auth.go), AdminHandler (web_admin.go), and PageHandler (web_index.go,
-// web_success.go, web_apidocs.go) — into the single value routing and the composition root
-// consume. Each concern owns only the collaborators and templates it needs; common (this file)
-// holds what is genuinely cross-cutting. Go embedding promotes each concern's methods, so
-// Handler needs no methods of its own beyond construction and the With* wiring below.
+// Handler composes the five concern-specific handlers — NoteHandler (web_note.go, web_edit.go),
+// LinkHandler (link_handler.go), AuthHandler (web_auth.go), AdminHandler (web_admin.go), and
+// PageHandler (web_index.go, web_success.go, web_apidocs.go) — into the single value routing and
+// the composition root consume. Each concern owns only the collaborators and templates it needs;
+// common (this file) holds what is genuinely cross-cutting. Go embedding promotes each concern's
+// methods, so Handler needs no methods of its own beyond construction and the With* wiring below.
 type Handler struct {
 	*common
 	*NoteHandler
+	*LinkHandler
 	*AuthHandler
 	*AdminHandler
 	*PageHandler
 }
 
 // NewHandler creates a Handler with required dependencies.
-//
-// tokens is the list of valid bearer auth tokens; pass nil to disable token auth.
-// NOTE: the tokens parameter drives the DEPRECATED legacy bearer-token write auth
-// (PADMARK_AUTH_TOKENS), superseded by the TOTP account system (WithAuthManager /
-// --enable-accounts) and slated for removal. New callers should pass nil and use accounts.
-func NewHandler(manager NoteManager, log *slog.Logger, tokens []string) *Handler {
+func NewHandler(manager NoteManager, linkManager LinkManager, log *slog.Logger) *Handler {
 	noteTmpl := parseTmpl("note", noteTmplSrc)
 	indexTmpl := parseTmpl("index", indexTmplSrc)
 	loginTmpl := parseTmpl("login", loginTmplSrc)
@@ -252,15 +238,14 @@ func NewHandler(manager NoteManager, log *slog.Logger, tokens []string) *Handler
 	apidocsTmpl := parseTmpl("apidocs", apidocsTmplSrc)
 	successTmpl := parseTmpl("success", successTmplSrc)
 	errorTmpl := parseTmpl("error", errorTmplSrc)
+	redirectTmpl := parseTmpl("redirect", redirectTmplSrc)
 
 	cmn := &common{log: log, errorTmpl: errorTmpl}
-	if len(tokens) > 0 {
-		cmn.allowedTokens = makeTokenSet(tokens)
-	}
 
 	return &Handler{
 		common:       cmn,
 		NoteHandler:  newNoteHandler(cmn, manager, noteTmpl, indexTmpl),
+		LinkHandler:  newLinkHandler(cmn, linkManager, redirectTmpl),
 		AuthHandler:  newAuthHandler(cmn, loginTmpl, setupTmpl, changePwTmpl),
 		AdminHandler: newAdminHandler(cmn, adminTmpl),
 		PageHandler:  newPageHandler(cmn, indexTmpl, successTmpl, apidocsTmpl),
@@ -304,16 +289,6 @@ func (h *Handler) WithTrustedProxies(proxies []*net.IPNet) *Handler {
 // string to keep auto-detection. Called by NewRouter; do not call after the server starts.
 func (h *Handler) WithForcedScheme(scheme string) *Handler {
 	h.forcedScheme = scheme
-
-	return h
-}
-
-// WithCookieMaxAge sets the Max-Age (in seconds) used by the legacy bearer-token login's session
-// cookie (POST /login). The modern TOTP login's cookie is controlled separately, by
-// WithSessionTTL, so it always matches the actual server-side session lifetime. Called by
-// NewRouter; do not call after the server starts.
-func (h *Handler) WithCookieMaxAge(seconds int) *Handler {
-	h.cookieMaxAge = seconds
 
 	return h
 }

@@ -15,7 +15,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/partyzanex/padmark/internal/adapters/http/ogenapi"
-	"github.com/partyzanex/padmark/internal/usecases/notes"
+	"github.com/partyzanex/padmark/internal/domain"
 )
 
 type contextKey uint8
@@ -91,7 +91,6 @@ type RouterOptions struct {
 	ForcedScheme   string
 	TrustedProxies []*net.IPNet
 	CSRFSecret     []byte
-	CookieMaxAge   int
 	MaxBodyBytes   int
 	RateLimit      int
 	RateBurst      int
@@ -104,6 +103,9 @@ type RouterOptions struct {
 	// request to it gets a fixed 503 before auth or any handler runs. The web UI and
 	// /healthz, /readyz keep working — see withAPIDisabled.
 	DisableAPI bool
+	// DirectRedirect selects GET /r/{id}'s response mode: true issues an immediate 301 to the
+	// short link's target URL, false renders a transparency interstitial. See LinkHandler.Redirect.
+	DirectRedirect bool
 }
 
 // RouteRegistrar registers one concern's HTTP routes on mux. Each concern-specific handler
@@ -115,15 +117,21 @@ type RouteRegistrar interface {
 	RegisterRoutes(mux *http.ServeMux)
 }
 
-// registerOgenRoutes registers the generated REST API routes (note CRUD, health checks) served
-// directly by ogenSrv. These aren't owned by any concern handler — ogenSrv wraps the separate
-// OgenHandler — so they're registered here rather than via a RouteRegistrar. lockout is shared
-// with NoteHandler's native {id...} routes (see NoteHandler.RegisterRoutes) so fail-lockout
-// tracking is consistent for a note regardless of which route variant a client hits.
+// registerOgenRoutes registers the generated REST API routes (note and link CRUD, health checks)
+// served directly by ogenSrv. These aren't owned by any concern handler — ogenSrv wraps the
+// separate OgenHandler — so they're registered here rather than via a RouteRegistrar. lockout is
+// shared with NoteHandler's native {id...} routes (see NoteHandler.RegisterRoutes) so fail-lockout
+// tracking is consistent for a note or link regardless of which route variant a client hits — a
+// single cache keyed by path ID works for both since notes and links share one global slug
+// namespace (a note and a link can never have the same ID, see domain.HashSlug/ErrSlugConflict).
 func registerOgenRoutes(mux *http.ServeMux, ogenSrv http.Handler, lockout gcache.Cache) {
 	mux.Handle("POST /notes", ogenSrv)
 	mux.Handle("PUT /notes/{id}", withFailLockout(lockout, ogenSrv))
 	mux.Handle("DELETE /notes/{id}", withFailLockout(lockout, ogenSrv))
+	mux.Handle("POST /links", ogenSrv)
+	mux.Handle("POST /links/bulk", ogenSrv)
+	mux.Handle("GET /links/{id}", ogenSrv)
+	mux.Handle("DELETE /links/{id}", withFailLockout(lockout, ogenSrv))
 	mux.Handle("GET /healthz", ogenSrv)
 	mux.Handle("GET /readyz", ogenSrv)
 }
@@ -135,6 +143,7 @@ func registerAllRoutes(mux *http.ServeMux, handler *Handler, ogenSrv http.Handle
 
 	registrars := []RouteRegistrar{
 		handler.NoteHandler,
+		handler.LinkHandler,
 		handler.AuthHandler,
 		handler.AdminHandler,
 		handler.PageHandler,
@@ -172,10 +181,9 @@ func NewRouter(
 	handler.WithCSRFSecret(csrfSecret)
 	handler.WithTrustedProxies(opts.TrustedProxies)
 	handler.WithForcedScheme(opts.ForcedScheme)
-	handler.WithCookieMaxAge(opts.CookieMaxAge)
 	handler.WithSessionTTL(opts.SessionTTL)
+	handler.WithDirectRedirect(opts.DirectRedirect)
 
-	tokenSet := handler.AllowedTokens()
 	mux := http.NewServeMux()
 
 	registerAllRoutes(mux, handler, ogenSrv)
@@ -193,7 +201,7 @@ func NewRouter(
 		stack = withAPIDisabled(handler.log, stack)
 	}
 
-	stack = newAuthMiddleware(tokenSet, namedRoutes, checker, stack)
+	stack = newAuthMiddleware(namedRoutes, checker, stack)
 	stack = withCSRFToken(csrfSecret, opts.TrustedProxies, stack)
 
 	stack = withBodyLimit(int64(opts.MaxBodyBytes), stack)
@@ -216,30 +224,18 @@ func NewRouter(
 }
 
 // buildNamedRoutes returns the set of first path segments that name built-in routes rather than
-// notes. The auth middleware treats any request whose first segment is in this set as a non-note
-// route (so it keeps requiring auth); everything else may be a public note view. Sourced from
-// notes.ReservedSlugPrefixes, the single source of truth also used to reject colliding custom
-// slugs; keep the route registrations in NewRouter in sync with it.
+// notes or links. The auth middleware treats any request whose first segment is in this set as
+// a non-note route (so it keeps requiring auth); everything else may be a public note view.
+// Sourced from domain.ReservedSlugPrefixes, the single source of truth also used to reject
+// colliding custom slugs (shared by notes.Manager and links.Manager — a usecase package may not
+// import another usecase package, so this can't live in either directly); keep the route
+// registrations in NewRouter in sync with it.
 // login/setup/logout/totp-login/healthz/readyz are also special-cased by exact path in
-// isPublicPath, but stay listed here too: notes.ReservedSlugPrefixes blocks the whole
+// isPublicPath, but stay listed here too: domain.ReservedSlugPrefixes blocks the whole
 // first-segment namespace from custom-slug collisions (e.g. "healthz/status"), not just those
 // literal paths.
 func buildNamedRoutes() map[string]struct{} {
-	return notes.ReservedSlugPrefixes()
-}
-
-// makeTokenSet builds a lookup set from the configured bearer tokens.
-//
-// Deprecated: part of the legacy bearer-token write auth (PADMARK_AUTH_TOKENS), superseded by
-// the TOTP account system (--enable-accounts). Will be removed in a future release.
-func makeTokenSet(tokens []string) map[string]struct{} {
-	set := make(map[string]struct{}, len(tokens))
-
-	for _, tok := range tokens {
-		set[tok] = struct{}{}
-	}
-
-	return set
+	return domain.ReservedSlugPrefixes()
 }
 
 func withRequestID(next http.Handler) http.Handler {

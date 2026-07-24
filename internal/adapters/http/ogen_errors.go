@@ -95,7 +95,12 @@ func mapGetError(err error, log *slog.Logger) ogenapi.GetNoteRes {
 	}
 }
 
-//nolint:ireturn // ogen response union types are interfaces by design
+// mapUpdateError is structurally similar to mapCreateLinkError (both have 3 status cases +
+// default) but each names its own operation-specific variant constructor — ogen generates a
+// distinct type per operation, so this can't be unified further without generics obscuring more
+// than they'd save for 2 call sites.
+//
+//nolint:ireturn,dupl // ogen response union types are interfaces by design; see comment above
 func mapUpdateError(err error, log *slog.Logger) ogenapi.UpdateNoteRes {
 	r := errResp(err)
 
@@ -138,6 +143,81 @@ func mapDeleteError(err error, log *slog.Logger) ogenapi.DeleteNoteRes {
 		log.Error("delete note failed", slog.String("error", err.Error()))
 
 		v := ogenapi.DeleteNoteInternalServerError(ogenapi.ErrorResponse{Message: internalErrorMessage})
+
+		return &v
+	}
+}
+
+// mapCreateLinkError, mapGetLinkError, and mapDeleteLinkError mirror mapCreateError/mapGetError/
+// mapDeleteError, for the links operations' own distinct ogen response-union types. See
+// mapUpdateError's comment for why mapCreateLinkError's structural similarity to it isn't
+// unified further.
+//
+//nolint:ireturn,dupl // ogen response union types are interfaces by design; see comment above
+func mapCreateLinkError(err error, log *slog.Logger) ogenapi.CreateLinkRes {
+	r := errResp(err)
+
+	switch status, _ := domainErrStatus(err); status {
+	case http.StatusBadRequest:
+		v := ogenapi.CreateLinkBadRequest(r)
+
+		return &v
+	case http.StatusUnprocessableEntity:
+		v := ogenapi.CreateLinkUnprocessableEntity(r)
+
+		return &v
+	case http.StatusConflict:
+		v := ogenapi.CreateLinkConflict(r)
+
+		return &v
+	default:
+		log.Error("create link failed", slog.String("error", err.Error()))
+
+		v := ogenapi.CreateLinkInternalServerError(ogenapi.ErrorResponse{Message: internalErrorMessage})
+
+		return &v
+	}
+}
+
+//nolint:ireturn // ogen response union types are interfaces by design
+func mapGetLinkError(err error, log *slog.Logger) ogenapi.GetLinkRes {
+	r := errResp(err)
+
+	switch status, _ := domainErrStatus(err); status {
+	case http.StatusNotFound:
+		v := ogenapi.GetLinkNotFound(r)
+
+		return &v
+	case http.StatusGone:
+		v := ogenapi.GetLinkGone(r)
+
+		return &v
+	default:
+		log.Error("get link failed", slog.String("error", err.Error()))
+
+		v := ogenapi.GetLinkInternalServerError(ogenapi.ErrorResponse{Message: internalErrorMessage})
+
+		return &v
+	}
+}
+
+//nolint:ireturn // ogen response union types are interfaces by design
+func mapDeleteLinkError(err error, log *slog.Logger) ogenapi.DeleteLinkRes {
+	r := errResp(err)
+
+	switch status, _ := domainErrStatus(err); status {
+	case http.StatusForbidden:
+		v := ogenapi.DeleteLinkForbidden(r)
+
+		return &v
+	case http.StatusNotFound:
+		v := ogenapi.DeleteLinkNotFound(r)
+
+		return &v
+	default:
+		log.Error("delete link failed", slog.String("error", err.Error()))
+
+		v := ogenapi.DeleteLinkInternalServerError(ogenapi.ErrorResponse{Message: internalErrorMessage})
 
 		return &v
 	}

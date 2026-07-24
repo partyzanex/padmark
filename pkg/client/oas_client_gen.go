@@ -27,6 +27,25 @@ func trimTrailingSlashes(u *url.URL) {
 
 // Invoker invokes operations described by OpenAPI v3 specification.
 type Invoker interface {
+	// CreateLink invokes createLink operation.
+	//
+	// Creates a short link and returns it together with the one-time `edit_code`.
+	// If `slug` is omitted a 10-character random slug is generated.
+	// Responds `409 Conflict` when the requested slug is already taken by a note or a link.
+	//
+	// POST /links
+	CreateLink(ctx context.Context, request *CreateLinkRequest) (CreateLinkRes, error)
+	// CreateLinksBulk invokes createLinksBulk operation.
+	//
+	// Creates up to 100 links in a single request. Best-effort, not transactional: each item is
+	// created independently, so one item failing (e.g. a disallowed URL scheme, or a slug
+	// conflict) does not stop the others from succeeding. `results` is the same length and order
+	// as the request's `links` array — `results[i]` is always the outcome for `links[i]`, and
+	// carries either the created link's fields (mirroring `CreateLinkResponse`) or an `error`
+	// message, never both.
+	//
+	// POST /links/bulk
+	CreateLinksBulk(ctx context.Context, request *BulkCreateLinksRequest) (CreateLinksBulkRes, error)
 	// CreateNote invokes createNote operation.
 	//
 	// Creates a note and returns it together with the one-time `edit_code`.
@@ -35,6 +54,15 @@ type Invoker interface {
 	//
 	// POST /notes
 	CreateNote(ctx context.Context, request *CreateNoteRequest) (CreateNoteRes, error)
+	// DeleteLink invokes deleteLink operation.
+	//
+	// Permanently deletes the link. The edit code must be supplied either as the `X-Edit-Code`
+	// request header or the `edit_code` query parameter — unless the request is authenticated
+	// (bearer token or session) as the exact user who created the link, in which case no edit
+	// code is needed. See "Edit codes and ownership" above.
+	//
+	// DELETE /links/{id}
+	DeleteLink(ctx context.Context, params DeleteLinkParams) (DeleteLinkRes, error)
 	// DeleteNote invokes deleteNote operation.
 	//
 	// Permanently deletes the note.  The edit code must be supplied either as the
@@ -50,6 +78,15 @@ type Invoker interface {
 	//
 	// DELETE /notes/{id}
 	DeleteNote(ctx context.Context, params DeleteNoteParams) (DeleteNoteRes, error)
+	// GetLink invokes getLink operation.
+	//
+	// Returns the link as JSON, including its decrypted `target_url`. This is a metadata-only
+	// read: it does not increment `views`, does not consume a `burn_after_click` link, and does
+	// not follow the redirect — visiting `GET /r/{id}` does all of that. See the "Short links"
+	// section above.
+	//
+	// GET /links/{id}
+	GetLink(ctx context.Context, params GetLinkParams) (GetLinkRes, error)
 	// GetNote invokes getNote operation.
 	//
 	// Returns the note as JSON.  Increments the view counter on every call.
@@ -121,6 +158,167 @@ func (c *Client) requestURL(ctx context.Context) *url.URL {
 		return c.serverURL
 	}
 	return u
+}
+
+// CreateLink invokes createLink operation.
+//
+// Creates a short link and returns it together with the one-time `edit_code`.
+// If `slug` is omitted a 10-character random slug is generated.
+// Responds `409 Conflict` when the requested slug is already taken by a note or a link.
+//
+// POST /links
+func (c *Client) CreateLink(ctx context.Context, request *CreateLinkRequest) (CreateLinkRes, error) {
+	res, err := c.sendCreateLink(ctx, request)
+	return res, err
+}
+
+func (c *Client) sendCreateLink(ctx context.Context, request *CreateLinkRequest) (res CreateLinkRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("createLink"),
+		semconv.HTTPRequestMethodKey.String("POST"),
+		semconv.URLTemplateKey.String("/links"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, CreateLinkOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [1]string
+	pathParts[0] = "/links"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "POST", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+	if err := encodeCreateLinkRequest(request, r); err != nil {
+		return res, errors.Wrap(err, "encode request")
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeCreateLinkResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
+// CreateLinksBulk invokes createLinksBulk operation.
+//
+// Creates up to 100 links in a single request. Best-effort, not transactional: each item is
+// created independently, so one item failing (e.g. a disallowed URL scheme, or a slug
+// conflict) does not stop the others from succeeding. `results` is the same length and order
+// as the request's `links` array — `results[i]` is always the outcome for `links[i]`, and
+// carries either the created link's fields (mirroring `CreateLinkResponse`) or an `error`
+// message, never both.
+//
+// POST /links/bulk
+func (c *Client) CreateLinksBulk(ctx context.Context, request *BulkCreateLinksRequest) (CreateLinksBulkRes, error) {
+	res, err := c.sendCreateLinksBulk(ctx, request)
+	return res, err
+}
+
+func (c *Client) sendCreateLinksBulk(ctx context.Context, request *BulkCreateLinksRequest) (res CreateLinksBulkRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("createLinksBulk"),
+		semconv.HTTPRequestMethodKey.String("POST"),
+		semconv.URLTemplateKey.String("/links/bulk"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, CreateLinksBulkOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [1]string
+	pathParts[0] = "/links/bulk"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "POST", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+	if err := encodeCreateLinksBulkRequest(request, r); err != nil {
+		return res, errors.Wrap(err, "encode request")
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeCreateLinksBulkResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
 }
 
 // CreateNote invokes createNote operation.
@@ -195,6 +393,139 @@ func (c *Client) sendCreateNote(ctx context.Context, request *CreateNoteRequest)
 
 	stage = "DecodeResponse"
 	result, err := decodeCreateNoteResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
+// DeleteLink invokes deleteLink operation.
+//
+// Permanently deletes the link. The edit code must be supplied either as the `X-Edit-Code`
+// request header or the `edit_code` query parameter — unless the request is authenticated
+// (bearer token or session) as the exact user who created the link, in which case no edit
+// code is needed. See "Edit codes and ownership" above.
+//
+// DELETE /links/{id}
+func (c *Client) DeleteLink(ctx context.Context, params DeleteLinkParams) (DeleteLinkRes, error) {
+	res, err := c.sendDeleteLink(ctx, params)
+	return res, err
+}
+
+func (c *Client) sendDeleteLink(ctx context.Context, params DeleteLinkParams) (res DeleteLinkRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("deleteLink"),
+		semconv.HTTPRequestMethodKey.String("DELETE"),
+		semconv.URLTemplateKey.String("/links/{id}"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, DeleteLinkOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [2]string
+	pathParts[0] = "/links/"
+	{
+		// Encode "id" parameter.
+		e := uri.NewPathEncoder(uri.PathEncoderConfig{
+			Param:   "id",
+			Style:   uri.PathStyleSimple,
+			Explode: false,
+		})
+		if err := func() error {
+			return e.EncodeValue(conv.StringToString(params.ID))
+		}(); err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		encoded, err := e.Result()
+		if err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		pathParts[1] = encoded
+	}
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeQueryParams"
+	q := uri.NewQueryEncoder()
+	{
+		// Encode "edit_code" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "edit_code",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.EditCode.Get(); ok {
+				return e.EncodeValue(conv.StringToString(val))
+			}
+			return nil
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	u.RawQuery = q.Values().Encode()
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "DELETE", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	stage = "EncodeHeaderParams"
+	h := uri.NewHeaderEncoder(r.Header)
+	{
+		cfg := uri.HeaderParameterEncodingConfig{
+			Name:    "X-Edit-Code",
+			Explode: false,
+		}
+		if err := h.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.XEditCode.Get(); ok {
+				return e.EncodeValue(conv.StringToString(val))
+			}
+			return nil
+		}); err != nil {
+			return res, errors.Wrap(err, "encode header")
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeDeleteLinkResponse(resp)
 	if err != nil {
 		return res, errors.Wrap(err, "decode response")
 	}
@@ -334,6 +665,101 @@ func (c *Client) sendDeleteNote(ctx context.Context, params DeleteNoteParams) (r
 
 	stage = "DecodeResponse"
 	result, err := decodeDeleteNoteResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
+// GetLink invokes getLink operation.
+//
+// Returns the link as JSON, including its decrypted `target_url`. This is a metadata-only
+// read: it does not increment `views`, does not consume a `burn_after_click` link, and does
+// not follow the redirect — visiting `GET /r/{id}` does all of that. See the "Short links"
+// section above.
+//
+// GET /links/{id}
+func (c *Client) GetLink(ctx context.Context, params GetLinkParams) (GetLinkRes, error) {
+	res, err := c.sendGetLink(ctx, params)
+	return res, err
+}
+
+func (c *Client) sendGetLink(ctx context.Context, params GetLinkParams) (res GetLinkRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("getLink"),
+		semconv.HTTPRequestMethodKey.String("GET"),
+		semconv.URLTemplateKey.String("/links/{id}"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, GetLinkOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [2]string
+	pathParts[0] = "/links/"
+	{
+		// Encode "id" parameter.
+		e := uri.NewPathEncoder(uri.PathEncoderConfig{
+			Param:   "id",
+			Style:   uri.PathStyleSimple,
+			Explode: false,
+		})
+		if err := func() error {
+			return e.EncodeValue(conv.StringToString(params.ID))
+		}(); err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		encoded, err := e.Result()
+		if err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		pathParts[1] = encoded
+	}
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "GET", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeGetLinkResponse(resp)
 	if err != nil {
 		return res, errors.Wrap(err, "decode response")
 	}

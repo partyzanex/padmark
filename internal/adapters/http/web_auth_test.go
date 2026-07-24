@@ -32,11 +32,12 @@ var (
 type AuthHandlerSuite struct {
 	suite.Suite
 
-	ctrl    *gomock.Controller
-	manager *MockNoteManager
-	pinger  *MockPinger
-	auth    *MockAuthManager
-	router  http.Handler
+	ctrl        *gomock.Controller
+	manager     *MockNoteManager
+	linkManager *MockLinkManager
+	pinger      *MockPinger
+	auth        *MockAuthManager
+	router      http.Handler
 }
 
 func TestAuthHandler(t *testing.T) {
@@ -46,6 +47,7 @@ func TestAuthHandler(t *testing.T) {
 func (s *AuthHandlerSuite) SetupTest() {
 	s.ctrl = gomock.NewController(s.T())
 	s.manager = NewMockNoteManager(s.ctrl)
+	s.linkManager = NewMockLinkManager(s.ctrl)
 	s.pinger = NewMockPinger(s.ctrl)
 	s.auth = NewMockAuthManager(s.ctrl)
 	s.router = s.newRouterWithAuth()
@@ -56,12 +58,11 @@ func (s *AuthHandlerSuite) TearDownTest() {
 }
 
 func (s *AuthHandlerSuite) newRouterWithAuth() http.Handler {
-	handler := adhttp.NewHandler(s.manager, discardLog, nil).
+	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog).
 		WithAuthManager(s.auth)
-	ogen := adhttp.NewOgenHandler(s.manager, s.pinger, discardLog)
+	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog)
 
 	opts := adhttp.RouterOptions{
-		CookieMaxAge: 90 * 24 * 60 * 60,
 		MaxBodyBytes: 256 * 1024,
 		CSRFSecret:   authTestCSRFSecret,
 	}
@@ -75,12 +76,11 @@ func (s *AuthHandlerSuite) newRouterWithAuth() http.Handler {
 // newRouterWithAuthAndScheme is newRouterWithAuth with --public-scheme forced, used to verify
 // that invite links and API-token envelopes honour the override behind a TLS-terminating proxy.
 func (s *AuthHandlerSuite) newRouterWithAuthAndScheme(forcedScheme string) http.Handler {
-	handler := adhttp.NewHandler(s.manager, discardLog, nil).
+	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog).
 		WithAuthManager(s.auth)
-	ogen := adhttp.NewOgenHandler(s.manager, s.pinger, discardLog)
+	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog)
 
 	opts := adhttp.RouterOptions{
-		CookieMaxAge: 90 * 24 * 60 * 60,
 		MaxBodyBytes: 256 * 1024,
 		CSRFSecret:   authTestCSRFSecret,
 		ForcedScheme: forcedScheme,
@@ -95,12 +95,11 @@ func (s *AuthHandlerSuite) newRouterWithAuthAndScheme(forcedScheme string) http.
 // newRouterWithAuthAndSessionTTL is newRouterWithAuth with a custom SessionTTL, used to verify
 // the TOTP session cookie's Max-Age tracks the configured --session-ttl instead of a fixed value.
 func (s *AuthHandlerSuite) newRouterWithAuthAndSessionTTL(ttl time.Duration) http.Handler {
-	handler := adhttp.NewHandler(s.manager, discardLog, nil).
+	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog).
 		WithAuthManager(s.auth)
-	ogen := adhttp.NewOgenHandler(s.manager, s.pinger, discardLog)
+	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog)
 
 	opts := adhttp.RouterOptions{
-		CookieMaxAge: 90 * 24 * 60 * 60,
 		MaxBodyBytes: 256 * 1024,
 		CSRFSecret:   authTestCSRFSecret,
 		SessionTTL:   ttl,

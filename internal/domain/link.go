@@ -1,0 +1,91 @@
+package domain
+
+import (
+	"time"
+
+	"github.com/google/uuid"
+)
+
+// Link is a short URL redirect. Like Note, its slug is never persisted — TargetURL is encrypted
+// at rest with the slug as key material, and ID is HashSlug(slug), so a DB dump alone cannot
+// recover either the slug or the target URL it protects.
+type Link struct {
+	CreatedAt time.Time
+	ExpiresAt *time.Time
+	Privacy   *Privacy
+	// OwnerID is the ID of the user who created the link while authenticated (session or API
+	// token); nil for anonymous links. Lets Delete bypass EditCode for the exact creator — see
+	// links.Manager.Delete, mirroring notes.Manager.Update/Delete.
+	OwnerID *uuid.UUID
+	// DirectRedirect overrides the server-wide --direct-redirect default for this one link: nil
+	// means "inherit the server default", non-nil forces GET /r/{id} into 301 mode (true) or
+	// interstitial mode (false) regardless of the server flag. See EffectiveDirectRedirect.
+	DirectRedirect *bool
+	ID             string
+	TargetURL      string // ciphertext in storage, plaintext in domain after Decrypt
+	EditCode       string
+	Views          int
+	BurnAfterClick bool
+}
+
+// Validate checks that the link fields satisfy business rules.
+func (l *Link) Validate() error {
+	if l.Privacy != nil && !l.Privacy.Valid() {
+		return ErrInvalidPrivacy
+	}
+
+	return nil
+}
+
+// ValidateOwnership checks that PrivacyOwner is only used on a link that actually has an owner —
+// otherwise no caller, including the creator, could ever use it again (see VisibleTo/OwnedBy).
+// Deliberately NOT part of Validate() — see Note.ValidateOwnership's doc comment for why: OwnerID
+// is only in its final state immediately for Create, and in links.Manager.Delete (if Delete ever
+// grows an owner-only-aware path) only after OwnerID is pinned from the existing link.
+func (l *Link) ValidateOwnership() error {
+	if l.EffectivePrivacy() == PrivacyOwner && l.OwnerID == nil {
+		return ErrOwnerPrivacyRequiresOwner
+	}
+
+	return nil
+}
+
+// OwnedBy reports whether userID is the authenticated user who created l — see OwnerID. A nil
+// userID (anonymous caller, uuid.Nil) or an unowned link (created anonymously) never match.
+func (l *Link) OwnedBy(userID uuid.UUID) bool {
+	return userID != uuid.Nil && l.OwnerID != nil && *l.OwnerID == userID
+}
+
+// EffectivePrivacy returns l.Privacy, defaulting to PrivacyPublic when unset.
+func (l *Link) EffectivePrivacy() Privacy {
+	if l.Privacy == nil {
+		return PrivacyPublic
+	}
+
+	return *l.Privacy
+}
+
+// EffectiveDirectRedirect returns l.DirectRedirect, falling back to serverDefault (the
+// server-wide --direct-redirect flag) when the link didn't set its own override.
+func (l *Link) EffectiveDirectRedirect(serverDefault bool) bool {
+	if l.DirectRedirect == nil {
+		return serverDefault
+	}
+
+	return *l.DirectRedirect
+}
+
+// VisibleTo reports whether a caller may resolve l given its privacy level — identical semantics
+// to Note.VisibleTo, including the fail-closed default for an unrecognized stored value.
+func (l *Link) VisibleTo(callerID uuid.UUID, authenticated bool) bool {
+	switch l.EffectivePrivacy() {
+	case PrivacyPublic:
+		return true
+	case PrivacyAuthenticated:
+		return authenticated
+	case PrivacyOwner:
+		return l.OwnedBy(callerID)
+	default:
+		return false
+	}
+}

@@ -6,22 +6,20 @@ info:
 
     ## Authentication
 
-    Two independent mechanisms can gate access:
-
-    - `--auth-tokens` (deprecated, superseded by `--enable-accounts`): write endpoints (`POST`,
-      `PUT`, `DELETE`) require a Bearer token in the `Authorization` header.
-    - `--enable-accounts`: TOTP-based user accounts with session cookies.
+    `--enable-accounts` gates access: TOTP-based user accounts with session cookies, plus
+    long-lived API tokens issued to a user for CLI/programmatic access. When it is off, the site
+    is fully public and every request is treated as anonymous.
 
     Read endpoints (`GET`) are gated by each note's `privacy` level:
 
     - `public` (default): anyone can read it.
-    - `authenticated`: **any** valid credential (a bearer token or an authenticated session) may
-      read it — not just the note's creator.
+    - `authenticated`: **any** valid credential (a session or an API token) may read it — not just
+      the note's creator.
     - `owner`: only the credential that created the note (see "Edit codes and ownership" below)
       may read it. Requires `--enable-accounts` and an authenticated session or API token at
-      creation time — a request that would produce an ownerless note (anonymous, or under
-      `--auth-tokens` alone, which has no notion of "owner") is rejected with `422` instead of
-      silently creating a note nobody, including its creator, could ever read again.
+      creation time — a request that would produce an ownerless note (anonymous) is rejected with
+      `422` instead of silently creating a note nobody, including its creator, could ever read
+      again.
 
     ## Burn-after-reading
 
@@ -35,11 +33,38 @@ info:
 
     Every note is created with a randomly generated 12-character `edit_code`.  It is returned
     **once** in the `CreateNoteResponse` and is never exposed again.  Store it — it is required
-    for `PUT` and `DELETE`, **unless** the note was created while authenticated (a bearer token or
-    a session): the exact same credential that created it may then edit or delete it without the
+    for `PUT` and `DELETE`, **unless** the note was created while authenticated (a session or an
+    API token): the exact same credential that created it may then edit or delete it without the
     `edit_code`. This owner check is strict — it never extends to other authenticated users or to
     admins, and it does not apply to notes created anonymously (no owner is recorded, so
     `edit_code` is always required for them, from everyone).
+
+    ## Short links
+
+    `POST /links` creates a short link that redirects to `target_url` when visited at
+    `GET /r/{id}`. Short links share the same slug namespace as notes — a note and a link can
+    never have the same `id`, in either creation order — and use the same `privacy` levels,
+    `edit_code`/ownership rules, and edit-code/owner-bypass semantics described above for notes.
+    Only `http` and `https` target URLs are accepted; anything else (`javascript:`, `data:`,
+    `file:`, ...) is rejected with `400`.
+
+    `GET /r/{id}` is a browser-facing redirect, not a JSON API operation, so it is intentionally
+    not part of this spec's `paths` (the same convention already applies to notes' own bare
+    `GET /{id}` view route). Its behaviour is controlled by the server's `--direct-redirect` flag:
+
+    - `--direct-redirect=true` (default): `301 Moved Permanently` straight to `target_url`.
+    - `--direct-redirect=false`: `200` HTML interstitial (meta-refresh + `<noscript>` fallback)
+      showing `target_url` before redirecting — for transparency, so a visitor can see the
+      destination before following it.
+
+    Any individual link may override this server-wide default via `direct_redirect` at creation
+    time (see `CreateLinkRequest.direct_redirect`) — `true`/`false` forces that link's own mode
+    regardless of the flag, omitted (or `null`) inherits it.
+
+    In both modes an expired link responds `410 Gone`, a missing link `404`, and a link denied by
+    its `privacy` level `401` (or a login redirect for a browser request) — mirroring notes'
+    `handlePrivateAuth`. A `burn_after_click` link is deleted atomically on the redirect that
+    consumes it; every request after that gets `404`, in either response mode.
   version: 1.0.0
 
 servers:
@@ -48,6 +73,8 @@ servers:
 tags:
   - name: notes
     description: CRUD operations on notes
+  - name: links
+    description: Short-link creation, lookup, and deletion (see the "Short links" section above)
   - name: health
     description: Liveness and readiness probes
 
@@ -216,6 +243,165 @@ paths:
         "500":
           $ref: "#/components/responses/Error"
 
+  /links:
+    post:
+      operationId: createLink
+      summary: Create a new short link
+      description: |
+        Creates a short link and returns it together with the one-time `edit_code`.
+        If `slug` is omitted a 10-character random slug is generated.
+        Responds `409 Conflict` when the requested slug is already taken by a note or a link.
+      tags: [links]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateLinkRequest"
+      responses:
+        "201":
+          description: Link created successfully
+          headers:
+            Location:
+              description: Canonical redirect URL of the created link (`/r/{id}`)
+              schema:
+                type: string
+                example: /r/abcde12345
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateLinkResponse"
+        "400":
+          description: Invalid target URL (missing/disallowed scheme, e.g. `javascript:`)
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "409":
+          description: A note or link with the requested slug already exists
+          $ref: "#/components/responses/Error"
+        "413":
+          description: Request body exceeds the server limit (configurable, default 4 MB)
+          $ref: "#/components/responses/Error"
+        "422":
+          $ref: "#/components/responses/Error"
+        "429":
+          description: Rate limit exceeded
+          $ref: "#/components/responses/Error"
+        "500":
+          $ref: "#/components/responses/Error"
+
+  /links/bulk:
+    post:
+      operationId: createLinksBulk
+      summary: Create multiple short links in one request
+      description: |
+        Creates up to 100 links in a single request. Best-effort, not transactional: each item is
+        created independently, so one item failing (e.g. a disallowed URL scheme, or a slug
+        conflict) does not stop the others from succeeding. `results` is the same length and order
+        as the request's `links` array — `results[i]` is always the outcome for `links[i]`, and
+        carries either the created link's fields (mirroring `CreateLinkResponse`) or an `error`
+        message, never both.
+      tags: [links]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BulkCreateLinksRequest"
+      responses:
+        "200":
+          description: |
+            Processed (some items may still have failed individually — check each `results[i]`
+            for an `error` field rather than relying on this status alone)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BulkCreateLinksResponse"
+        "400":
+          description: Malformed request, or more than 100 items in `links`
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "413":
+          description: Request body exceeds the server limit (configurable, default 4 MB)
+          $ref: "#/components/responses/Error"
+        "429":
+          description: Rate limit exceeded
+          $ref: "#/components/responses/Error"
+        "500":
+          $ref: "#/components/responses/Error"
+
+  /links/{id}:
+    get:
+      operationId: getLink
+      summary: Get a link's metadata by ID
+      description: |
+        Returns the link as JSON, including its decrypted `target_url`. This is a metadata-only
+        read: it does not increment `views`, does not consume a `burn_after_click` link, and does
+        not follow the redirect — visiting `GET /r/{id}` does all of that. See the "Short links"
+        section above.
+      tags: [links]
+      parameters:
+        - $ref: "#/components/parameters/linkId"
+      responses:
+        "200":
+          description: Link found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LinkResponse"
+        "401":
+          description: |
+            The link's privacy level requires a credential this request didn't supply — see the
+            `privacy` field semantics in the "Authentication" section above.
+          $ref: "#/components/responses/Error"
+        "404":
+          description: Link not found
+          $ref: "#/components/responses/Error"
+        "410":
+          description: Link has expired
+          $ref: "#/components/responses/Error"
+        "500":
+          $ref: "#/components/responses/Error"
+
+    delete:
+      operationId: deleteLink
+      summary: Delete a link
+      description: |
+        Permanently deletes the link. The edit code must be supplied either as the `X-Edit-Code`
+        request header or the `edit_code` query parameter — unless the request is authenticated
+        (bearer token or session) as the exact user who created the link, in which case no edit
+        code is needed. See "Edit codes and ownership" above.
+      tags: [links]
+      parameters:
+        - $ref: "#/components/parameters/linkId"
+        - name: X-Edit-Code
+          in: header
+          description: Edit code returned at link creation (alternative to `edit_code` query param). Preferred over the query parameter — see the operation description.
+          schema:
+            type: string
+        - name: edit_code
+          in: query
+          description: |
+            Edit code returned at link creation (alternative to `X-Edit-Code` header). Prefer the
+            header: a query string is more likely to be captured in proxy/CDN access logs or a
+            same-origin `Referer` header. Provided for manual/curl convenience only.
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Link deleted
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          description: Wrong edit code
+          $ref: "#/components/responses/Error"
+        "404":
+          description: Link not found
+          $ref: "#/components/responses/Error"
+        "500":
+          $ref: "#/components/responses/Error"
+
   /healthz:
     get:
       operationId: healthz
@@ -245,8 +431,8 @@ components:
       type: http
       scheme: bearer
       description: |
-        Static Bearer token configured via `--auth-tokens` / `PADMARK_AUTH_TOKENS`.
-        Required for write operations when the server is started with tokens configured.
+        A long-lived API token issued to a user account (see `--enable-accounts`), presented as
+        `Authorization: Bearer <token>`.
 
   parameters:
     noteId:
@@ -254,6 +440,15 @@ components:
       in: path
       required: true
       description: Note ID (slug) — 10-char random string or the custom slug chosen at creation
+      schema:
+        type: string
+        example: abcde12345
+
+    linkId:
+      name: id
+      in: path
+      required: true
+      description: Link ID (slug) — 10-char random string or the custom slug chosen at creation
       schema:
         type: string
         example: abcde12345
@@ -311,12 +506,12 @@ components:
           enum: ["public", "authenticated", "owner"]
           default: "public"
           description: |
-            Who may read the note: `public` (anyone), `authenticated` (any valid bearer token or
-            session, not just the creator), or `owner` (only the exact credential that created
+            Who may read the note: `public` (anyone), `authenticated` (any valid session or API
+            token, not just the creator), or `owner` (only the exact credential that created
             it — see "Edit codes and ownership" above). Meaningful when the server is started
-            with `--auth-tokens` and/or `--enable-accounts`; `owner` additionally requires the
-            note to actually have an owner, i.e. `--enable-accounts` and an authenticated caller
-            — otherwise the request is rejected with `422`.
+            with `--enable-accounts`; `owner` additionally requires the note to actually have an
+            owner, i.e. an authenticated caller at creation time — otherwise the request is
+            rejected with `422`.
 
     UpdateNoteRequest:
       type: object
@@ -423,6 +618,188 @@ components:
                 One-time secret required for future `PUT` and `DELETE` requests.
                 This is the only time `edit_code` is returned — store it securely.
               example: JmNkn0LdjbMw
+
+    CreateLinkRequest:
+      type: object
+      required: [target_url]
+      properties:
+        target_url:
+          type: string
+          format: uri
+          description: Destination URL. Only `http` and `https` schemes are accepted
+          example: https://example.com/some/long/path?query=1
+        slug:
+          type: string
+          description: |
+            Custom URL-friendly identifier. Must match `[a-zA-Z0-9_-]+`.
+            If omitted a 10-character random slug is generated.
+            Returns `409` if the slug is already taken by a note or another link.
+          example: my-link
+        burn_after_click:
+          type: boolean
+          default: false
+          description: When `true` the link is deleted the moment it is first followed via `GET /r/{id}`
+        ttl:
+          type: integer
+          format: int64
+          description: |
+            Seconds until the link expires, counted from creation. Omitted means the link never
+            expires. Unlike notes' `ttl` (a burn-after-reading grace period), this is a plain hard
+            expiry with no relation to `burn_after_click`; the two may be combined freely.
+          example: 86400
+        edit_code:
+          type: string
+          description: |
+            Optional custom edit code. If omitted a random 12-character code is generated.
+            Intended for CLI and automation use.
+          example: MySecretCode1
+        privacy:
+          type: string
+          enum: ["public", "authenticated", "owner"]
+          default: "public"
+          description: |
+            Who may follow the link: `public` (anyone), `authenticated` (any valid session or API
+            token, not just the creator), or `owner` (only the exact credential that created it
+            — see "Edit codes and ownership" above). `owner` additionally requires the link to
+            actually have an owner, i.e. `--enable-accounts` and an authenticated caller —
+            otherwise the request is rejected with `422`.
+        direct_redirect:
+          type: boolean
+          nullable: true
+          description: |
+            Per-link override of the server's `--direct-redirect` flag for `GET /r/{id}`: `true`
+            forces an immediate `301`, `false` forces the transparency interstitial, omitted (or
+            explicit `null`) inherits the server-wide default.
+
+    LinkResponse:
+      type: object
+      required: [id, target_url, views, burn_after_click, created_at]
+      properties:
+        id:
+          type: string
+          description: Unique slug identifying the link
+          example: abcde12345
+        target_url:
+          type: string
+          format: uri
+          description: Destination URL
+          example: https://example.com/some/long/path?query=1
+        views:
+          type: integer
+          description: |
+            Number of times the link has been followed via `GET /r/{id}`. May lag the true count
+            by a few seconds for a "hot" (frequently followed) link, since the server may serve
+            this read from a short-lived in-memory cache rather than storage.
+          example: 3
+        burn_after_click:
+          type: boolean
+          description: |
+            `true` until the link is first followed (then it no longer exists — a subsequent read
+            returns `404`), permanently `false` for links without this flag.
+        privacy:
+          type: string
+          enum: ["public", "authenticated", "owner"]
+          description: |
+            Who may follow the link. See `CreateLinkRequest.privacy` for the exact semantics of
+            each value.
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: ISO 8601 timestamp after which the link is inaccessible. `null` for links that never expire
+        direct_redirect:
+          type: boolean
+          nullable: true
+          description: |
+            Per-link override of the server's `--direct-redirect` flag. See
+            `CreateLinkRequest.direct_redirect`. `null` means this link inherits the server-wide
+            default.
+        created_at:
+          type: string
+          format: date-time
+          description: Creation timestamp (UTC)
+
+    CreateLinkResponse:
+      allOf:
+        - $ref: "#/components/schemas/LinkResponse"
+        - type: object
+          required: [edit_code]
+          properties:
+            edit_code:
+              type: string
+              description: |
+                One-time secret required for future `DELETE` requests.
+                This is the only time `edit_code` is returned — store it securely.
+              example: JmNkn0LdjbMw
+
+    BulkCreateLinksRequest:
+      type: object
+      required: [links]
+      properties:
+        links:
+          type: array
+          minItems: 1
+          maxItems: 100
+          description: Each item has the exact same shape and semantics as `CreateLinkRequest`
+          items:
+            $ref: "#/components/schemas/CreateLinkRequest"
+
+    BulkLinkResult:
+      type: object
+      required: [target_url]
+      description: |
+        The outcome for one item of a `POST /links/bulk` request. Either the created link's
+        fields are present (success) or `error` is (failure) — never both. `target_url` always
+        echoes the corresponding request item's `target_url`, even on failure, so a caller can
+        match `results[i]` back to `links[i]` without relying on array position alone.
+      properties:
+        target_url:
+          type: string
+          format: uri
+          description: Echoes the corresponding request item's target_url
+        error:
+          type: string
+          description: Present only when this item failed to create; human-readable
+          example: "invalid target url: only http and https schemes are allowed"
+        id:
+          type: string
+          description: Present only on success
+        edit_code:
+          type: string
+          description: Present only on success
+        views:
+          type: integer
+          description: Present only on success
+        burn_after_click:
+          type: boolean
+          description: Present only on success
+        privacy:
+          type: string
+          enum: ["public", "authenticated", "owner"]
+          description: Present only on success
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Present only on success
+        direct_redirect:
+          type: boolean
+          nullable: true
+          description: Present only on success
+        created_at:
+          type: string
+          format: date-time
+          description: Present only on success
+
+    BulkCreateLinksResponse:
+      type: object
+      required: [results]
+      properties:
+        results:
+          type: array
+          description: Same length and order as the request's `links` array
+          items:
+            $ref: "#/components/schemas/BulkLinkResult"
 
     ErrorResponse:
       type: object

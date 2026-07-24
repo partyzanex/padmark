@@ -13,16 +13,22 @@ import (
 
 	"github.com/partyzanex/shutdown"
 	"github.com/partyzanex/shutdown/compat"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/urfave/cli/v3"
 
 	"github.com/uptrace/bun"
 
 	adaptershttp "github.com/partyzanex/padmark/internal/adapters/http"
 	"github.com/partyzanex/padmark/internal/infra/crypto"
+	"github.com/partyzanex/padmark/internal/infra/linkcache"
+	"github.com/partyzanex/padmark/internal/infra/linkmetrics"
 	"github.com/partyzanex/padmark/internal/infra/render"
 	"github.com/partyzanex/padmark/internal/infra/storage/postgres"
 	"github.com/partyzanex/padmark/internal/infra/storage/sqlite"
 	"github.com/partyzanex/padmark/internal/usecases/auth"
+	"github.com/partyzanex/padmark/internal/usecases/links"
 	"github.com/partyzanex/padmark/internal/usecases/notes"
 )
 
@@ -68,7 +74,6 @@ func buildRouter(
 	}
 
 	opts := adaptershttp.RouterOptions{
-		CookieMaxAge:   cmd.Int(FlagCookieMaxAge),
 		MaxBodyBytes:   cmd.Int(FlagMaxBodyBytes),
 		RateLimit:      cmd.Int(FlagRateLimit),
 		RateBurst:      cmd.Int(FlagRateBurst),
@@ -76,8 +81,9 @@ func buildRouter(
 		ForcedScheme:   publicScheme,
 		// Same flag attachAccountSystem feeds into auth.NewManager's sessionTTL, so the TOTP
 		// session cookie's Max-Age always matches the actual server-side session lifetime.
-		SessionTTL: time.Duration(cmd.Int(FlagSessionTTL)) * time.Second,
-		DisableAPI: cmd.Bool(FlagDisableAPI),
+		SessionTTL:     time.Duration(cmd.Int(FlagSessionTTL)) * time.Second,
+		DisableAPI:     cmd.Bool(FlagDisableAPI),
+		DirectRedirect: cmd.Bool(FlagDirectRedirect),
 	}
 
 	router, err := adaptershttp.NewRouter(handler, ogenHandler, &opts)
@@ -154,6 +160,30 @@ func startRedirectServer(ctx context.Context, addr string, allowedHosts map[stri
 	}()
 }
 
+// startMetricsServer launches the optional Prometheus /metrics listener on its own address,
+// separate from the main public-facing router — see ~/.claude/docs/observability.md's "separate
+// internal port" recommendation. Mirrors startRedirectServer's shape and non-fatal-failure
+// handling exactly: a bind error here must not tear down an otherwise healthy main server.
+func startMetricsServer(ctx context.Context, addr string, reg *prometheus.Registry, log *slog.Logger) {
+	mux := http.NewServeMux()
+	mux.Handle("GET /metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
+
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           mux,
+		ReadHeaderTimeout: readHeaderTimeout,
+	}
+
+	compat.Append(shutdown.ContextFn(srv.Shutdown))
+
+	go func() {
+		err := srv.ListenAndServe()
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.ErrorContext(ctx, "metrics listener stopped (main server unaffected)", "addr", addr, "err", err)
+		}
+	}()
+}
+
 func listenAndServe(srv *http.Server, tlsCert, tlsKey string, cancel context.CancelCauseFunc) {
 	var serveErr error
 
@@ -220,7 +250,7 @@ func runServer(ctx context.Context, cmd *cli.Command, router http.Handler, log *
 
 // attachAccountSystem wires the opt-in TOTP account manager onto the handler when
 // --enable-accounts is set; otherwise it leaves the handler public (no authMgr → the auth
-// middleware passes everything through unless --auth-tokens is set).
+// middleware passes everything through).
 //
 // Returns an error when auth.NewManager's bootstrap-time crypto precompute fails — this only
 // runs once at startup, so the caller should treat it as fatal.
@@ -287,6 +317,52 @@ func argon2ParamsFromFlags(cmd *cli.Command) crypto.Argon2Params {
 	}
 }
 
+// newMetricsRegistry builds the Prometheus registry backing the optional /metrics listener,
+// pre-registered with the standard Go/process collectors plus the links.Metrics counters.
+func newMetricsRegistry() (*prometheus.Registry, *linkmetrics.Metrics, error) {
+	reg := prometheus.NewRegistry()
+	reg.MustRegister(
+		collectors.NewGoCollector(),
+		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
+	)
+
+	linkMetrics, err := linkmetrics.NewRegistered(reg)
+	if err != nil {
+		return nil, nil, fmt.Errorf("register link metrics: %w", err)
+	}
+
+	return reg, linkMetrics, nil
+}
+
+// buildHandlers assembles the notes/links business-logic managers and wires them into the
+// JSON/HTML handler and the ogen-generated handler, including the optional account system and
+// link cache/metrics collaborators.
+func buildHandlers(
+	ctx context.Context, cmd *cli.Command, storage string, db *bun.DB,
+	repo notes.Storage, linkRepo links.Storage, log *slog.Logger, linkMetrics *linkmetrics.Metrics,
+) (*adaptershttp.Handler, *adaptershttp.OgenHandler, error) {
+	manager := notes.NewManager(repo, linkRepo, render.NewRenderer(), crypto.New(),
+		crypto.NewEditCodeHasher(), log, cmd.Bool(FlagCustomSlugs))
+	linkManager := links.NewManager(linkRepo, newNotesChecker(storage, db), crypto.New(),
+		crypto.NewEditCodeHasher(), log, cmd.Bool(FlagCustomSlugs)).
+		WithCache(linkcache.NewDefault()).
+		WithMetrics(linkMetrics)
+
+	userRepo, inviteRepo, sessionRepo, apiTokenRepo, revealStore := buildAuthRepos(storage, db)
+
+	handler := adaptershttp.NewHandler(manager, linkManager, log).
+		WithRevealStore(revealStore)
+
+	handler, err := attachAccountSystem(ctx, cmd, handler, userRepo, inviteRepo, sessionRepo, apiTokenRepo, log)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	ogenHandler := adaptershttp.NewOgenHandler(manager, linkManager, db.DB, log)
+
+	return handler, ogenHandler, nil
+}
+
 func serverAction(ctx context.Context, cmd *cli.Command) error {
 	log := newLogger(cmd.String(FlagLogLevel), cmd.String(FlagLogFormat))
 
@@ -310,25 +386,25 @@ func serverAction(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	authTokens := parseTokens(cmd.String(FlagAuthTokens))
-	manager := notes.NewManager(repo, render.NewRenderer(), crypto.New(),
-		crypto.NewEditCodeHasher(), log, cmd.Bool(FlagCustomSlugs))
+	linkRepo := newLinkRepository(storage, db)
 
-	userRepo, inviteRepo, sessionRepo, apiTokenRepo, revealStore := buildAuthRepos(storage, db)
-
-	handler := adaptershttp.NewHandler(manager, log, authTokens).
-		WithRevealStore(revealStore)
-
-	handler, err = attachAccountSystem(ctx, cmd, handler, userRepo, inviteRepo, sessionRepo, apiTokenRepo, log)
+	metricsRegistry, linkMetrics, err := newMetricsRegistry()
 	if err != nil {
 		return err
 	}
 
-	ogenHandler := adaptershttp.NewOgenHandler(manager, db.DB, log)
+	handler, ogenHandler, err := buildHandlers(ctx, cmd, storage, db, repo, linkRepo, log, linkMetrics)
+	if err != nil {
+		return err
+	}
 
 	router, err := buildRouter(cmd, handler, ogenHandler)
 	if err != nil {
 		return err
+	}
+
+	if metricsAddr := cmd.String(FlagMetricsAddr); metricsAddr != "" {
+		startMetricsServer(ctx, metricsAddr, metricsRegistry, log)
 	}
 
 	log.InfoContext(ctx, "server started",

@@ -40,6 +40,10 @@ func domainErrStatus(err error) (status int, message string) {
 		{domain.ErrSlugConflict, http.StatusConflict},
 		{domain.ErrInvalidEditCode, http.StatusForbidden},
 		{domain.ErrForbidden, http.StatusForbidden},
+		// javascript:/data:/file:/etc. target URLs are a malformed request, not an
+		// otherwise-valid-but-unprocessable one — matches the acceptance criteria's literal 400
+		// (see TODO.md's Bug-class checklist, old C4), unlike the 422s above.
+		{domain.ErrInvalidURL, http.StatusBadRequest},
 	}
 
 	for _, entry := range entries {

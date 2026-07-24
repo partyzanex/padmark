@@ -16,6 +16,7 @@ import (
 	uuid "github.com/google/uuid"
 	domain "github.com/partyzanex/padmark/internal/domain"
 	auth "github.com/partyzanex/padmark/internal/usecases/auth"
+	links "github.com/partyzanex/padmark/internal/usecases/links"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -749,6 +750,89 @@ func (m *MockNoteManager) ViewPreloaded(ctx context.Context, id string, preloade
 func (mr *MockNoteManagerMockRecorder) ViewPreloaded(ctx, id, preloaded any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ViewPreloaded", reflect.TypeOf((*MockNoteManager)(nil).ViewPreloaded), ctx, id, preloaded)
+}
+
+// MockLinkManager is a mock of LinkManager interface.
+type MockLinkManager struct {
+	ctrl     *gomock.Controller
+	recorder *MockLinkManagerMockRecorder
+	isgomock struct{}
+}
+
+// MockLinkManagerMockRecorder is the mock recorder for MockLinkManager.
+type MockLinkManagerMockRecorder struct {
+	mock *MockLinkManager
+}
+
+// NewMockLinkManager creates a new mock instance.
+func NewMockLinkManager(ctrl *gomock.Controller) *MockLinkManager {
+	mock := &MockLinkManager{ctrl: ctrl}
+	mock.recorder = &MockLinkManagerMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockLinkManager) EXPECT() *MockLinkManagerMockRecorder {
+	return m.recorder
+}
+
+// Create mocks base method.
+func (m *MockLinkManager) Create(ctx context.Context, targetURL string, opts links.CreateOptions) (*domain.Link, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Create", ctx, targetURL, opts)
+	ret0, _ := ret[0].(*domain.Link)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Create indicates an expected call of Create.
+func (mr *MockLinkManagerMockRecorder) Create(ctx, targetURL, opts any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Create", reflect.TypeOf((*MockLinkManager)(nil).Create), ctx, targetURL, opts)
+}
+
+// Delete mocks base method.
+func (m *MockLinkManager) Delete(ctx context.Context, slug, editCode string, callerID uuid.UUID) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Delete", ctx, slug, editCode, callerID)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// Delete indicates an expected call of Delete.
+func (mr *MockLinkManagerMockRecorder) Delete(ctx, slug, editCode, callerID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Delete", reflect.TypeOf((*MockLinkManager)(nil).Delete), ctx, slug, editCode, callerID)
+}
+
+// Peek mocks base method.
+func (m *MockLinkManager) Peek(ctx context.Context, slug string) (*domain.Link, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Peek", ctx, slug)
+	ret0, _ := ret[0].(*domain.Link)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Peek indicates an expected call of Peek.
+func (mr *MockLinkManagerMockRecorder) Peek(ctx, slug any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Peek", reflect.TypeOf((*MockLinkManager)(nil).Peek), ctx, slug)
+}
+
+// Redirect mocks base method.
+func (m *MockLinkManager) Redirect(ctx context.Context, slug string) (*domain.Link, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Redirect", ctx, slug)
+	ret0, _ := ret[0].(*domain.Link)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Redirect indicates an expected call of Redirect.
+func (mr *MockLinkManagerMockRecorder) Redirect(ctx, slug any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Redirect", reflect.TypeOf((*MockLinkManager)(nil).Redirect), ctx, slug)
 }
 
 // MockPinger is a mock of Pinger interface.

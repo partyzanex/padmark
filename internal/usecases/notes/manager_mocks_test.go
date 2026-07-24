@@ -143,6 +143,45 @@ func (mr *MockStorageMockRecorder) Update(ctx, id, note any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Update", reflect.TypeOf((*MockStorage)(nil).Update), ctx, id, note)
 }
 
+// MockLinksChecker is a mock of LinksChecker interface.
+type MockLinksChecker struct {
+	ctrl     *gomock.Controller
+	recorder *MockLinksCheckerMockRecorder
+	isgomock struct{}
+}
+
+// MockLinksCheckerMockRecorder is the mock recorder for MockLinksChecker.
+type MockLinksCheckerMockRecorder struct {
+	mock *MockLinksChecker
+}
+
+// NewMockLinksChecker creates a new mock instance.
+func NewMockLinksChecker(ctrl *gomock.Controller) *MockLinksChecker {
+	mock := &MockLinksChecker{ctrl: ctrl}
+	mock.recorder = &MockLinksCheckerMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockLinksChecker) EXPECT() *MockLinksCheckerMockRecorder {
+	return m.recorder
+}
+
+// Exists mocks base method.
+func (m *MockLinksChecker) Exists(ctx context.Context, id string) (bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Exists", ctx, id)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Exists indicates an expected call of Exists.
+func (mr *MockLinksCheckerMockRecorder) Exists(ctx, id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Exists", reflect.TypeOf((*MockLinksChecker)(nil).Exists), ctx, id)
+}
+
 // MockRenderer is a mock of Renderer interface.
 type MockRenderer struct {
 	ctrl     *gomock.Controller

@@ -57,13 +57,15 @@ func (s *PostgresManagerSuite) TearDownSuite() {
 func (s *PostgresManagerSuite) SetupTest() {
 	ctx := s.T().Context()
 
-	for _, tbl := range []string{"notes", "reveal_tokens"} {
+	for _, tbl := range []string{"notes", "links", "reveal_tokens"} {
 		_, err := s.db.NewTruncateTable().TableExpr(tbl).Cascade().Exec(ctx)
 		s.Require().NoError(err)
 	}
 
-	s.Manager = newManager(pgrepo.NewNoteRepository(s.db))
+	s.Manager = newManager(pgrepo.NewNoteRepository(s.db), pgrepo.NewLinkRepository(s.db))
+	s.LinkManager = newLinkManager(pgrepo.NewLinkRepository(s.db), pgrepo.NewNoteRepository(s.db))
 	s.RevealStore = pgrepo.NewRevealRepository(s.db)
+	s.DB = s.db
 }
 
 func TestPostgresManager(t *testing.T) {

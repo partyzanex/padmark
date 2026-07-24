@@ -10,6 +10,34 @@ import (
 	ht "github.com/ogen-go/ogen/http"
 )
 
+func encodeCreateLinkRequest(
+	req *CreateLinkRequest,
+	r *http.Request,
+) error {
+	const contentType = "application/json"
+	e := new(jx.Encoder)
+	{
+		req.Encode(e)
+	}
+	encoded := e.Bytes()
+	ht.SetBody(r, bytes.NewReader(encoded), contentType)
+	return nil
+}
+
+func encodeCreateLinksBulkRequest(
+	req *BulkCreateLinksRequest,
+	r *http.Request,
+) error {
+	const contentType = "application/json"
+	e := new(jx.Encoder)
+	{
+		req.Encode(e)
+	}
+	encoded := e.Bytes()
+	ht.SetBody(r, bytes.NewReader(encoded), contentType)
+	return nil
+}
+
 func encodeCreateNoteRequest(
 	req *CreateNoteRequest,
 	r *http.Request,

@@ -31,8 +31,10 @@ func (s *SQLiteManagerSuite) SetupTest() {
 	s.db = bun.NewDB(sqldb, sqlitedialect.New())
 	_, migrateErr := sqliterepo.Migrate(s.T().Context(), s.db)
 	s.Require().NoError(migrateErr)
-	s.Manager = newManager(sqliterepo.NewNoteRepository(s.db))
+	s.Manager = newManager(sqliterepo.NewNoteRepository(s.db), sqliterepo.NewLinkRepository(s.db))
+	s.LinkManager = newLinkManager(sqliterepo.NewLinkRepository(s.db), sqliterepo.NewNoteRepository(s.db))
 	s.RevealStore = sqliterepo.NewRevealRepository(s.db)
+	s.DB = s.db
 }
 
 func (s *SQLiteManagerSuite) TearDownTest() {

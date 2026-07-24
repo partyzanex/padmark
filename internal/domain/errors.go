@@ -3,8 +3,10 @@ package domain
 import "errors"
 
 var (
-	ErrNotFound           = errors.New("not found")
-	ErrExpired            = errors.New("note has expired")
+	ErrNotFound = errors.New("not found")
+	// ErrExpired is shared by notes and links — both expire the same way (hard TTL, deleted on
+	// next access) — so its message stays resource-neutral rather than saying "note".
+	ErrExpired            = errors.New("expired")
 	ErrTitleTooLong       = errors.New("title exceeds maximum length")
 	ErrInvalidContentType = errors.New("unsupported content type")
 	ErrInvalidPrivacy     = errors.New("invalid privacy level")
@@ -22,6 +24,12 @@ var (
 	ErrForbidden          = errors.New("forbidden")
 	ErrInvalidEditCode    = errors.New("invalid edit code")
 	ErrDecryptionFailed   = errors.New("content decryption failed")
+	// ErrInvalidURL is returned when a link's target URL fails the scheme whitelist
+	// (http/https only) — see links.Manager.Create.
+	ErrInvalidURL = errors.New("invalid target url: only http and https schemes are allowed")
+	// ErrHashCollision is returned when random slug generation exhausts its retry budget without
+	// finding a free slug — see links.Manager.Create's maxHashRetries.
+	ErrHashCollision = errors.New("could not generate a unique slug")
 	// ErrMalformedCiphertext marks stored ciphertext that is structurally invalid (corrupt
 	// base64 / truncated) rather than merely undecryptable with the supplied key. Lets the
 	// usecase log genuine data corruption distinctly from an ordinary wrong-slug miss.

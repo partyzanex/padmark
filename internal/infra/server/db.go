@@ -19,6 +19,7 @@ import (
 
 	"github.com/partyzanex/padmark/internal/infra/storage/postgres"
 	"github.com/partyzanex/padmark/internal/infra/storage/sqlite"
+	"github.com/partyzanex/padmark/internal/usecases/links"
 	"github.com/partyzanex/padmark/internal/usecases/notes"
 )
 
@@ -121,6 +122,35 @@ func initSQLiteStorage(ctx context.Context, db *bun.DB, log *slog.Logger) (notes
 	logMigrations(ctx, log, results)
 
 	return sqlite.NewNoteRepository(db), nil
+}
+
+// newLinkRepository returns a ready-to-use links.Storage for the given backend. Migrations for
+// the links table already ran as part of initStorage (same db handle, same migration set), so
+// this only needs to construct the repository, not migrate again.
+//
+//nolint:ireturn // multiple implementations (sqlite, postgres) require interface return
+func newLinkRepository(storage string, db *bun.DB) links.Storage {
+	if storage == storagePostgres {
+		return postgres.NewLinkRepository(db)
+	}
+
+	return sqlite.NewLinkRepository(db)
+}
+
+// newNotesChecker returns a links.NotesChecker for the given backend — the same note repository
+// initStorage already built, reconstructed here typed to expose Exists. notes.Storage (initStorage's
+// return type) deliberately doesn't declare Exists — it's not something notes.Manager itself needs
+// — so links.Manager's cross-table check needs its own, separately typed handle onto the same
+// underlying table rather than widening notes.Storage for a consumer it doesn't otherwise serve.
+// Repositories are stateless wrappers over *bun.DB, so constructing a second one is free.
+//
+//nolint:ireturn // multiple implementations (sqlite, postgres) require interface return
+func newNotesChecker(storage string, db *bun.DB) links.NotesChecker {
+	if storage == storagePostgres {
+		return postgres.NewNoteRepository(db)
+	}
+
+	return sqlite.NewNoteRepository(db)
 }
 
 //nolint:ireturn // multiple implementations (sqlite, postgres) require interface return

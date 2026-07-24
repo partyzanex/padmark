@@ -15,9 +15,10 @@ import (
 type DisableAPISuite struct {
 	suite.Suite
 
-	ctrl    *gomock.Controller
-	manager *MockNoteManager
-	pinger  *MockPinger
+	ctrl        *gomock.Controller
+	manager     *MockNoteManager
+	linkManager *MockLinkManager
+	pinger      *MockPinger
 }
 
 func TestDisableAPI(t *testing.T) {
@@ -27,6 +28,7 @@ func TestDisableAPI(t *testing.T) {
 func (s *DisableAPISuite) SetupTest() {
 	s.ctrl = gomock.NewController(s.T())
 	s.manager = NewMockNoteManager(s.ctrl)
+	s.linkManager = NewMockLinkManager(s.ctrl)
 	s.pinger = NewMockPinger(s.ctrl)
 }
 
@@ -35,11 +37,10 @@ func (s *DisableAPISuite) TearDownTest() {
 }
 
 func (s *DisableAPISuite) newRouter(disableAPI bool) http.Handler {
-	handler := adhttp.NewHandler(s.manager, discardLog, nil)
-	ogen := adhttp.NewOgenHandler(s.manager, s.pinger, discardLog)
+	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog)
+	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog)
 
 	opts := adhttp.RouterOptions{
-		CookieMaxAge: 90 * 24 * 60 * 60,
 		MaxBodyBytes: 256 * 1024,
 		CSRFSecret:   testCSRFSecret,
 		DisableAPI:   disableAPI,

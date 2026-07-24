@@ -13,6 +13,31 @@ type UnimplementedHandler struct{}
 
 var _ Handler = UnimplementedHandler{}
 
+// CreateLink implements createLink operation.
+//
+// Creates a short link and returns it together with the one-time `edit_code`.
+// If `slug` is omitted a 10-character random slug is generated.
+// Responds `409 Conflict` when the requested slug is already taken by a note or a link.
+//
+// POST /links
+func (UnimplementedHandler) CreateLink(ctx context.Context, req *CreateLinkRequest) (r CreateLinkRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
+// CreateLinksBulk implements createLinksBulk operation.
+//
+// Creates up to 100 links in a single request. Best-effort, not transactional: each item is
+// created independently, so one item failing (e.g. a disallowed URL scheme, or a slug
+// conflict) does not stop the others from succeeding. `results` is the same length and order
+// as the request's `links` array — `results[i]` is always the outcome for `links[i]`, and
+// carries either the created link's fields (mirroring `CreateLinkResponse`) or an `error`
+// message, never both.
+//
+// POST /links/bulk
+func (UnimplementedHandler) CreateLinksBulk(ctx context.Context, req *BulkCreateLinksRequest) (r CreateLinksBulkRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
 // CreateNote implements createNote operation.
 //
 // Creates a note and returns it together with the one-time `edit_code`.
@@ -21,6 +46,18 @@ var _ Handler = UnimplementedHandler{}
 //
 // POST /notes
 func (UnimplementedHandler) CreateNote(ctx context.Context, req *CreateNoteRequest) (r CreateNoteRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
+// DeleteLink implements deleteLink operation.
+//
+// Permanently deletes the link. The edit code must be supplied either as the `X-Edit-Code`
+// request header or the `edit_code` query parameter — unless the request is authenticated
+// (bearer token or session) as the exact user who created the link, in which case no edit
+// code is needed. See "Edit codes and ownership" above.
+//
+// DELETE /links/{id}
+func (UnimplementedHandler) DeleteLink(ctx context.Context, params DeleteLinkParams) (r DeleteLinkRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 
@@ -39,6 +76,18 @@ func (UnimplementedHandler) CreateNote(ctx context.Context, req *CreateNoteReque
 //
 // DELETE /notes/{id}
 func (UnimplementedHandler) DeleteNote(ctx context.Context, params DeleteNoteParams) (r DeleteNoteRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
+// GetLink implements getLink operation.
+//
+// Returns the link as JSON, including its decrypted `target_url`. This is a metadata-only
+// read: it does not increment `views`, does not consume a `burn_after_click` link, and does
+// not follow the redirect — visiting `GET /r/{id}` does all of that. See the "Short links"
+// section above.
+//
+// GET /links/{id}
+func (UnimplementedHandler) GetLink(ctx context.Context, params GetLinkParams) (r GetLinkRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 

@@ -8,17 +8,13 @@ import (
 
 // Flag names used in CLI flags.
 const (
-	FlagAddr      = "addr"
-	FlagStorage   = "storage"
-	FlagDSN       = "dsn"
-	FlagLogLevel  = "log-level"
-	FlagLogFormat = "log-format"
-	// Deprecated: the PADMARK_AUTH_TOKENS bearer-token write auth is legacy and superseded by
-	// the TOTP account system (--enable-accounts). It will be removed in a future release.
-	FlagAuthTokens       = "auth-tokens" //nolint:gosec // flag name, not a credential
+	FlagAddr             = "addr"
+	FlagStorage          = "storage"
+	FlagDSN              = "dsn"
+	FlagLogLevel         = "log-level"
+	FlagLogFormat        = "log-format"
 	FlagEnableAccounts   = "enable-accounts"
 	FlagDisableAPI       = "disable-api"
-	FlagCookieMaxAge     = "cookie-max-age"
 	FlagReadTimeout      = "read-timeout"
 	FlagWriteTimeout     = "write-timeout"
 	FlagMaxHeaderBytes   = "max-header-bytes"
@@ -37,21 +33,19 @@ const (
 	FlagArgon2Memory     = "argon2-memory"
 	FlagArgon2Time       = "argon2-time"
 	FlagArgon2Threads    = "argon2-threads"
+	FlagDirectRedirect   = "direct-redirect"
+	FlagMetricsAddr      = "metrics-addr"
 )
 
 // Env vars used to configure the service (prefix: PADMARK_*).
 const (
-	EnvAddr      = "PADMARK_ADDR"
-	EnvStorage   = "PADMARK_STORAGE"
-	EnvDSN       = "PADMARK_DSN"
-	EnvLogLevel  = "PADMARK_LOG_LEVEL"
-	EnvLogFormat = "PADMARK_LOG_FORMAT"
-	// Deprecated: bearer-token write auth is legacy; use the TOTP account system
-	// (PADMARK_ENABLE_ACCOUNTS) instead. PADMARK_AUTH_TOKENS will be removed in a future release.
-	EnvAuthTokens       = "PADMARK_AUTH_TOKENS" //nolint:gosec // env var name, not a credential
+	EnvAddr             = "PADMARK_ADDR"
+	EnvStorage          = "PADMARK_STORAGE"
+	EnvDSN              = "PADMARK_DSN"
+	EnvLogLevel         = "PADMARK_LOG_LEVEL"
+	EnvLogFormat        = "PADMARK_LOG_FORMAT"
 	EnvEnableAccounts   = "PADMARK_ENABLE_ACCOUNTS"
 	EnvDisableAPI       = "PADMARK_DISABLE_API"
-	EnvCookieMaxAge     = "PADMARK_COOKIE_MAX_AGE"
 	EnvReadTimeout      = "PADMARK_READ_TIMEOUT"
 	EnvWriteTimeout     = "PADMARK_WRITE_TIMEOUT"
 	EnvMaxHeaderBytes   = "PADMARK_MAX_HEADER_BYTES"
@@ -70,6 +64,8 @@ const (
 	EnvArgon2Memory     = "PADMARK_ARGON2_MEMORY"
 	EnvArgon2Time       = "PADMARK_ARGON2_TIME"
 	EnvArgon2Threads    = "PADMARK_ARGON2_THREADS"
+	EnvDirectRedirect   = "PADMARK_DIRECT_REDIRECT"
+	EnvMetricsAddr      = "PADMARK_METRICS_ADDR"
 )
 
 // Default values for all flags.
@@ -79,13 +75,12 @@ const (
 	DefaultDSN            = "padmark.db"
 	DefaultLogLevel       = "info"
 	DefaultLogFormat      = "json"
-	DefaultCookieMaxAge   = 90 * 24 * 60 * 60 // 3 months in seconds
-	DefaultReadTimeout    = 30                // seconds
-	DefaultWriteTimeout   = 60                // seconds
-	DefaultMaxHeaderBytes = 64 * 1024         // 64 KB
-	DefaultMaxBodyBytes   = 4 * 1024 * 1024   // 4 MB
-	DefaultRateLimit      = 10                // requests per second per IP
-	DefaultRateBurst      = 20                // max burst size per IP
+	DefaultReadTimeout    = 30              // seconds
+	DefaultWriteTimeout   = 60              // seconds
+	DefaultMaxHeaderBytes = 64 * 1024       // 64 KB
+	DefaultMaxBodyBytes   = 4 * 1024 * 1024 // 4 MB
+	DefaultRateLimit      = 10              // requests per second per IP
+	DefaultRateBurst      = 20              // max burst size per IP
 	DefaultTOTPIssuer     = "padmark"
 	DefaultArgon2Memory   = 24 * 1024 // argon2id memory in KiB (24 MiB)
 	DefaultArgon2Time     = 2         // argon2id iterations (OWASP minimum at 64 MiB)
@@ -132,12 +127,6 @@ func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
 			Value:   DefaultLogFormat,
 			Usage:   "Log format: json, text",
 		},
-		&cli.StringFlag{
-			Name:    FlagAuthTokens,
-			Sources: cli.EnvVars(EnvAuthTokens),
-			Usage: "DEPRECATED (use --enable-accounts / TOTP instead): comma-separated Bearer " +
-				"tokens for write endpoints (empty = no auth). Will be removed in a future release",
-		},
 		&cli.BoolFlag{
 			Name:    FlagEnableAccounts,
 			Sources: cli.EnvVars(EnvEnableAccounts),
@@ -159,12 +148,6 @@ func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
 			Usage: "Allow user-supplied human-readable slugs (e.g. project/GUIDE.md) at note creation. " +
 				"Off by default: only random slugs are issued, since a custom slug is low-entropy " +
 				"content-encryption key material. Enable for internal/trusted deployments",
-		},
-		&cli.IntFlag{
-			Name:    FlagCookieMaxAge,
-			Sources: cli.EnvVars(EnvCookieMaxAge),
-			Value:   DefaultCookieMaxAge,
-			Usage:   "Auth cookie max-age in seconds (default: 3 months)",
 		},
 		&cli.IntFlag{
 			Name:    FlagReadTimeout,
@@ -268,6 +251,21 @@ func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
 			Sources: cli.EnvVars(EnvArgon2Threads),
 			Value:   DefaultArgon2Threads,
 			Usage:   "argon2id parallelism (CPU threads per hash)",
+		},
+		&cli.BoolFlag{
+			Name:    FlagDirectRedirect,
+			Sources: cli.EnvVars(EnvDirectRedirect),
+			Value:   true,
+			Usage: "GET /r/{hash} behaviour for short links: true issues an immediate 301 to the " +
+				"target URL; false renders an interstitial page (meta-refresh + noscript fallback) " +
+				"showing the destination before redirecting",
+		},
+		&cli.StringFlag{
+			Name:    FlagMetricsAddr,
+			Sources: cli.EnvVars(EnvMetricsAddr),
+			Usage: "Address for a separate internal Prometheus /metrics listener (e.g. :9090); " +
+				"empty (default) disables it entirely. Bind this to a private interface only — " +
+				"metrics are never served on the main, public-facing listener",
 		},
 	}
 }

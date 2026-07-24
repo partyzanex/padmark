@@ -22,6 +22,7 @@ import (
 	"github.com/partyzanex/padmark/internal/infra/render"
 	sqliterepo "github.com/partyzanex/padmark/internal/infra/storage/sqlite"
 	"github.com/partyzanex/padmark/internal/usecases/auth"
+	"github.com/partyzanex/padmark/internal/usecases/links"
 	"github.com/partyzanex/padmark/internal/usecases/notes"
 )
 
@@ -66,17 +67,25 @@ func TestAPITokenFlow_AdminIssuesKey_CLICreatesNote(t *testing.T) {
 
 	notesMgr := notes.NewManager(
 		sqliterepo.NewNoteRepository(db),
+		sqliterepo.NewLinkRepository(db),
 		render.NewRenderer(),
 		crypto.New(),
 		crypto.NewEditCodeHasher(),
 		log,
 		false,
 	)
+	linksMgr := links.NewManager(
+		sqliterepo.NewLinkRepository(db),
+		sqliterepo.NewNoteRepository(db),
+		crypto.New(),
+		crypto.NewEditCodeHasher(),
+		log,
+		false,
+	)
 
-	handler := adaptershttp.NewHandler(notesMgr, log, nil).WithAuthManager(authMgr)
-	ogen := adaptershttp.NewOgenHandler(notesMgr, adaptershttp.NoPinger{}, log)
+	handler := adaptershttp.NewHandler(notesMgr, linksMgr, log).WithAuthManager(authMgr)
+	ogen := adaptershttp.NewOgenHandler(notesMgr, linksMgr, adaptershttp.NoPinger{}, log)
 	router, err := adaptershttp.NewRouter(handler, ogen, &adaptershttp.RouterOptions{
-		CookieMaxAge: 3600,
 		MaxBodyBytes: 256 * 1024,
 		CSRFSecret:   []byte("padmark-test-csrf-secret-32bytes"),
 	})

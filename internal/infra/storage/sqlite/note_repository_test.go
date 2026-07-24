@@ -102,6 +102,24 @@ func (s *RepositoryTestSuite) TestGet_NotFound() {
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
+func (s *RepositoryTestSuite) TestExists_True() {
+	ctx := s.T().Context()
+
+	n := &domain.Note{ID: "exists-1", Title: "t", Content: "c", CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	s.Require().NoError(s.repo.Create(ctx, n))
+
+	exists, err := s.repo.Exists(ctx, "exists-1")
+	s.Require().NoError(err)
+	s.True(exists)
+}
+
+func (s *RepositoryTestSuite) TestExists_False() {
+	exists, err := s.repo.Exists(s.T().Context(), "missing")
+
+	s.Require().NoError(err)
+	s.False(exists)
+}
+
 // Update
 
 func (s *RepositoryTestSuite) TestUpdate_OK() {

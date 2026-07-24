@@ -85,6 +85,90 @@ func printNoteJSON(w io.Writer, note *padmark.NoteResponse) error {
 	return nil
 }
 
+// printLink prints a link's metadata (expand). Mirrors printNote's shape, minus the note-only
+// fields (title, content) — a link's only "content" is its target URL.
+func printLink(w io.Writer, link *padmark.LinkResponse) error {
+	twr := tabwriter.NewWriter(w, twMinWidth, twTabWidth, twPadding, ' ', 0)
+	ewr := &errWriter{w: twr}
+
+	ewr.printf("id:\t%s\n", link.ID)
+	ewr.printf("target_url:\t%s\n", link.TargetURL.String())
+	ewr.printf("views:\t%d\n", link.Views)
+
+	if link.BurnAfterClick {
+		ewr.printf("burn:\tyes\n")
+	}
+
+	if exp, ok := link.ExpiresAt.Get(); ok {
+		//nolint:gosmopolitan // CLI tool: show local time for readability
+		ewr.printf("expires:\t%s\n", exp.Local().Format(time.DateTime))
+	}
+
+	if dr, ok := link.DirectRedirect.Get(); ok {
+		ewr.printf("direct-redirect:\t%t (overrides the server default)\n", dr)
+	}
+
+	//nolint:gosmopolitan // CLI tool: show local time for readability
+	ewr.printf("created:\t%s\n", link.CreatedAt.Local().Format(time.DateTime))
+
+	if ewr.err != nil {
+		return fmt.Errorf("write link: %w", ewr.err)
+	}
+
+	flushErr := twr.Flush()
+	if flushErr != nil {
+		return fmt.Errorf("flush: %w", flushErr)
+	}
+
+	return nil
+}
+
+func printLinkJSON(w io.Writer, link *padmark.LinkResponse) error {
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+
+	err := enc.Encode(link)
+	if err != nil {
+		return fmt.Errorf("encode JSON: %w", err)
+	}
+
+	return nil
+}
+
+func printCreateLinkResult(w io.Writer, serverURL string, link *padmark.CreateLinkResponse) error {
+	twr := tabwriter.NewWriter(w, twMinWidth, twTabWidth, twPadding, ' ', 0)
+	erw := &errWriter{w: twr}
+
+	erw.printf("short_link:\t%s\n", link.ID)
+	erw.printf("url:\t%s/r/%s\n", serverURL, link.ID)
+	erw.printf("target_url:\t%s\n", link.TargetURL.String())
+	erw.printf("edit-code:\t%s\n", link.EditCode)
+
+	if link.BurnAfterClick {
+		erw.printf("burn:\tyes\n")
+	}
+
+	if exp, ok := link.ExpiresAt.Get(); ok {
+		//nolint:gosmopolitan // CLI tool: show local time for readability
+		erw.printf("expires:\t%s\n", exp.Local().Format(time.DateTime))
+	}
+
+	if dr, ok := link.DirectRedirect.Get(); ok {
+		erw.printf("direct-redirect:\t%t (overrides the server default)\n", dr)
+	}
+
+	if erw.err != nil {
+		return fmt.Errorf("write result: %w", erw.err)
+	}
+
+	flushErr := twr.Flush()
+	if flushErr != nil {
+		return fmt.Errorf("flush: %w", flushErr)
+	}
+
+	return nil
+}
+
 func printCreateResult(w io.Writer, serverURL string, note *padmark.CreateNoteResponse) error {
 	twr := tabwriter.NewWriter(w, twMinWidth, twTabWidth, twPadding, ' ', 0)
 	erw := &errWriter{w: twr}

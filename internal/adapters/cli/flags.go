@@ -18,6 +18,14 @@ const (
 	FlagEditCode = "edit-code"
 	FlagRaw      = "raw"
 	FlagJSON     = "json"
+	// FlagTargetURL is the short link's destination. Named "target-url", not "url" — the global
+	// --url flag already means the padmark server address; reusing it for the link destination
+	// would collide (see the CLI section in TODO.md for this deviation from the original draft).
+	FlagTargetURL = "target-url"
+	// FlagDirectRedirect is a per-link override of the server's --direct-redirect default. A
+	// plain BoolFlag: cmd.IsSet distinguishes "not passed" (inherit the server default, omit the
+	// field entirely) from an explicit --direct-redirect=false (force the interstitial).
+	FlagDirectRedirect = "direct-redirect"
 )
 
 // Environment variable names.

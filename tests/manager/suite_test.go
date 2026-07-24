@@ -7,10 +7,12 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/suite"
+	"github.com/uptrace/bun"
 
 	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/infra/crypto"
 	"github.com/partyzanex/padmark/internal/infra/render"
+	"github.com/partyzanex/padmark/internal/usecases/links"
 	"github.com/partyzanex/padmark/internal/usecases/notes"
 )
 
@@ -22,18 +24,29 @@ type revealStore interface {
 }
 
 // ManagerSuite is the storage-agnostic business-logic integration suite.
-// Embed it in a storage-specific suite that sets Manager and RevealStore in SetupTest.
+// Embed it in a storage-specific suite that sets Manager, LinkManager, RevealStore, and DB in
+// SetupTest. DB is the raw handle, exposed only for tests that need to bypass the repository's
+// decrypt path and inspect exactly what ended up on disk (e.g. the encryption-at-rest check
+// below) — everyday business-logic tests should go through Manager/LinkManager instead.
 type ManagerSuite struct {
 	suite.Suite
 
 	Manager     *notes.Manager
+	LinkManager *links.Manager
 	RevealStore revealStore
+	DB          *bun.DB
 }
 
-func newManager(storage notes.Storage) *notes.Manager {
+func newManager(storage notes.Storage, linkChecker notes.LinksChecker) *notes.Manager {
 	return notes.NewManager(
-		storage, render.NewRenderer(), crypto.New(),
+		storage, linkChecker, render.NewRenderer(), crypto.New(),
 		crypto.NewEditCodeHasher(), discardLog, true,
+	)
+}
+
+func newLinkManager(storage links.Storage, notesChecker links.NotesChecker) *links.Manager {
+	return links.NewManager(
+		storage, notesChecker, crypto.New(), crypto.NewEditCodeHasher(), discardLog, true,
 	)
 }
 
@@ -457,4 +470,87 @@ func (s *ManagerSuite) TestReveal_IssueMultiple_EachConsumedOnce() {
 
 	ok = s.RevealStore.Consume(ctx, tok2, created.ID)
 	s.True(ok, "second independent token must still be consumable")
+}
+
+// ── Cross-table slug uniqueness (notes vs links) ──
+//
+// Notes and links share one global slug namespace (see the project checklist's "Cross-table slug
+// uniqueness" entry): a note and a link can never have the same ID, in either creation order.
+// Enforced at the application level — links.Manager.Create checks notes.Exists, notes.Manager.
+// Create checks links.Exists — not via a unified `slugs` table, a deliberate trade-off already
+// written down elsewhere (keeps notes and links as independently owned tables/repositories per
+// this project's onion-architecture layering, at the cost of two application-level existence
+// checks instead of one DB-level unique constraint). These tests are the concrete verification
+// that both directions are actually wired, not just documented — exercised against a real
+// database (SQLite or Postgres, via ManagerSuite's two embedders), not mocks.
+
+func (s *ManagerSuite) TestCrossTableSlugUniqueness_NoteFirst_ThenLinkConflicts() {
+	ctx := s.T().Context()
+
+	_, err := s.Manager.Create(ctx, &domain.Note{ID: "shared-slug", Title: "t", Content: "c"})
+	s.Require().NoError(err)
+
+	_, err = s.LinkManager.Create(ctx, "https://example.com", links.CreateOptions{CustomHash: "shared-slug"})
+	s.ErrorIs(err, domain.ErrSlugConflict)
+}
+
+func (s *ManagerSuite) TestCrossTableSlugUniqueness_LinkFirst_ThenNoteConflicts() {
+	ctx := s.T().Context()
+
+	_, err := s.LinkManager.Create(ctx, "https://example.com", links.CreateOptions{CustomHash: "shared-slug"})
+	s.Require().NoError(err)
+
+	_, err = s.Manager.Create(ctx, &domain.Note{ID: "shared-slug", Title: "t", Content: "c"})
+	s.ErrorIs(err, domain.ErrSlugConflict)
+}
+
+// TestLink_TargetURLIsEncryptedAtRest is the concrete verification behind the acceptance
+// criteria's "DB dump of the links table contains no plaintext target URLs" — it bypasses
+// LinkManager's own decrypt path (Peek/Redirect always decrypt) and reads the raw stored column
+// directly via DB, using the real crypto.New() encryptor (not a passthrough test double, unlike
+// links.Manager's own unit tests).
+func (s *ManagerSuite) TestLink_TargetURLIsEncryptedAtRest() {
+	ctx := s.T().Context()
+
+	const plaintext = "https://example.com/secret/path?token=abc123"
+
+	created, err := s.LinkManager.Create(ctx, plaintext, links.CreateOptions{CustomHash: "encrypted-check"})
+	s.Require().NoError(err)
+	s.Equal(plaintext, created.TargetURL, "Create must still hand back the plaintext to the caller")
+
+	var stored string
+
+	err = s.DB.NewSelect().
+		Table("links").
+		Column("target_url").
+		Where("id = ?", domain.HashSlug(created.ID)).
+		Scan(ctx, &stored)
+	s.Require().NoError(err)
+
+	s.NotEqual(plaintext, stored, "target_url must not be stored in plaintext")
+	s.NotContains(stored, "example.com", "ciphertext must not leak any substring of the plaintext URL")
+}
+
+// TestLink_CreateThenRedirect_RealCrypto_RoundTrips is a Create→Peek→Redirect round trip against
+// real encryption (crypto.New(), not the unit tests' passthroughEncryptor). links.Manager.Peek
+// and Redirect decrypt using the slug as key material, and the slug must be pinned onto the
+// fetched row (link.ID = slug) BEFORE decrypting, not after — a passthrough encryptor can't catch
+// getting that order wrong (it ignores the key entirely), so this is the one place in the test
+// suite that actually exercises the real key derivation end to end.
+func (s *ManagerSuite) TestLink_CreateThenRedirect_RealCrypto_RoundTrips() {
+	ctx := s.T().Context()
+
+	const plaintext = "https://example.com/round-trip"
+
+	created, err := s.LinkManager.Create(ctx, plaintext, links.CreateOptions{})
+	s.Require().NoError(err)
+
+	peeked, err := s.LinkManager.Peek(ctx, created.ID)
+	s.Require().NoError(err)
+	s.Equal(plaintext, peeked.TargetURL)
+
+	redirected, err := s.LinkManager.Redirect(ctx, created.ID)
+	s.Require().NoError(err)
+	s.Equal(plaintext, redirected.TargetURL)
+	s.Equal(1, redirected.Views)
 }

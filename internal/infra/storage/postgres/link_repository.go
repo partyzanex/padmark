@@ -1,0 +1,192 @@
+package postgres
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/driver/pgdriver"
+
+	"github.com/partyzanex/padmark/internal/domain"
+)
+
+// link is the database model for a short link.
+type link struct {
+	bun.BaseModel `bun:"table:links"`
+
+	CreatedAt      time.Time  `bun:"created_at"`
+	ExpiresAt      *time.Time `bun:"expires_at"`
+	OwnerID        *uuid.UUID `bun:"owner_id"`
+	DirectRedirect *bool      `bun:"direct_redirect"`
+	TargetURL      string     `bun:"target_url"`
+	EditCode       string     `bun:"edit_code"`
+	ID             string     `bun:"id,pk"`
+	Privacy        string     `bun:"privacy"`
+	Views          int        `bun:"views"`
+	BurnAfterClick bool       `bun:"burn_after_click"`
+}
+
+// LinkRepository implements links.Storage using PostgreSQL.
+type LinkRepository struct {
+	db *bun.DB
+}
+
+// NewLinkRepository creates a new PostgreSQL-backed LinkRepository.
+func NewLinkRepository(db *bun.DB) *LinkRepository {
+	return &LinkRepository{db: db}
+}
+
+// linkToDomain converts a db link row to a domain.Link. privacyPtr is shared with
+// note_repository.go (same package).
+func linkToDomain(dbLink *link) *domain.Link {
+	return &domain.Link{
+		ID:             dbLink.ID,
+		TargetURL:      dbLink.TargetURL,
+		CreatedAt:      dbLink.CreatedAt,
+		ExpiresAt:      dbLink.ExpiresAt,
+		OwnerID:        dbLink.OwnerID,
+		DirectRedirect: dbLink.DirectRedirect,
+		Privacy:        privacyPtr(dbLink.Privacy),
+		EditCode:       dbLink.EditCode,
+		Views:          dbLink.Views,
+		BurnAfterClick: dbLink.BurnAfterClick,
+	}
+}
+
+// Create inserts a new link. Expired links are lazily swept on each call (mirroring the
+// session/invite/reveal-token pattern — see session_repository.go) since there is no background
+// sweep worker in this codebase. This is the "nobody ever revisits it" gap Redirect's own
+// delete-on-read (links.Manager.Redirect) can't close on its own: a link that expires and is
+// never followed again would otherwise linger in the table forever.
+func (r *LinkRepository) Create(ctx context.Context, domLink *domain.Link) error {
+	dbLink := &link{
+		ID:             domLink.ID,
+		TargetURL:      domLink.TargetURL,
+		CreatedAt:      domLink.CreatedAt,
+		ExpiresAt:      domLink.ExpiresAt,
+		OwnerID:        domLink.OwnerID,
+		DirectRedirect: domLink.DirectRedirect,
+		EditCode:       domLink.EditCode,
+		Views:          domLink.Views,
+		BurnAfterClick: domLink.BurnAfterClick,
+		Privacy:        privacyVal(domLink.Privacy),
+	}
+
+	_, err := r.db.NewInsert().Model(dbLink).Exec(ctx)
+	if err != nil {
+		var pgErr pgdriver.Error
+		if errors.As(err, &pgErr) && pgErr.Field('C') == "23505" {
+			return domain.ErrSlugConflict
+		}
+
+		return fmt.Errorf("postgres create link: %w", err)
+	}
+
+	// id != ? excludes the row just inserted above: a caller-supplied ExpiresAt in the past (e.g.
+	// ttl=0, matching notes' "immediate" semantics) must not vanish before Create even returns —
+	// the sweep is for cleaning up old abandoned links, not undoing this call's own insert.
+	//nolint:errcheck // best-effort sweep; stale links persist until next Create
+	_, _ = r.db.NewDelete().
+		TableExpr("links").
+		Where("id != ? AND expires_at IS NOT NULL AND expires_at < ?", dbLink.ID, time.Now()).
+		Exec(ctx)
+
+	return nil
+}
+
+// GetByID retrieves a link by ID (HashSlug(slug)).
+func (r *LinkRepository) GetByID(ctx context.Context, id string) (*domain.Link, error) {
+	var dbLink link
+
+	err := r.db.NewSelect().Model(&dbLink).Where("id = ?", id).Scan(ctx)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, domain.ErrNotFound
+		}
+
+		return nil, fmt.Errorf("postgres get link: %w", err)
+	}
+
+	return linkToDomain(&dbLink), nil
+}
+
+// Exists reports whether a link with the given ID exists — used for the cross-table slug
+// uniqueness check shared with notes (see links.Manager.Create / notes.Manager.Create).
+func (r *LinkRepository) Exists(ctx context.Context, id string) (bool, error) {
+	exists, err := r.db.NewSelect().Model((*link)(nil)).Where("id = ?", id).Exists(ctx)
+	if err != nil {
+		return false, fmt.Errorf("postgres link exists: %w", err)
+	}
+
+	return exists, nil
+}
+
+// Consume atomically deletes a link and returns it, but only if the link is eligible for
+// deletion: burn_after_click is set, or expires_at has passed. Returns domain.ErrNotFound
+// otherwise. Mirrors note_repository.go:Consume. Unlike notes, links has no deprecated column
+// the Go struct doesn't map, so a plain Returning("*") is safe here.
+func (r *LinkRepository) Consume(ctx context.Context, id string) (*domain.Link, error) {
+	var dbLink link
+
+	err := r.db.NewDelete().
+		Model(&dbLink).
+		Where("id = ?", id).
+		Where("burn_after_click OR (expires_at IS NOT NULL AND expires_at <= ?)", time.Now()).
+		Returning("*").
+		Scan(ctx)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, domain.ErrNotFound
+		}
+
+		return nil, fmt.Errorf("postgres consume link: %w", err)
+	}
+
+	return linkToDomain(&dbLink), nil
+}
+
+// IncrementViews atomically increments the click counter for a link.
+func (r *LinkRepository) IncrementViews(ctx context.Context, id string) error {
+	result, err := r.db.NewUpdate().
+		TableExpr("links").
+		Set("views = views + 1").
+		Where("id = ?", id).
+		Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("postgres increment link views: %w", err)
+	}
+
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("postgres rowsaffected: %w", err)
+	}
+
+	if affected == 0 {
+		return domain.ErrNotFound
+	}
+
+	return nil
+}
+
+// Delete removes a link by ID.
+func (r *LinkRepository) Delete(ctx context.Context, id string) error {
+	result, err := r.db.NewDelete().Model((*link)(nil)).Where("id = ?", id).Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("postgres delete link: %w", err)
+	}
+
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("postgres rowsaffected: %w", err)
+	}
+
+	if affected == 0 {
+		return domain.ErrNotFound
+	}
+
+	return nil
+}

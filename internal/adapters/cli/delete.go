@@ -1,10 +1,9 @@
-package cli
+package cli //nolint:dupl // whole-file shape mirrors delete_link.go; see deleteAction's comment
 
 import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 
 	urcli "github.com/urfave/cli/v3"
 
@@ -31,42 +30,28 @@ func deleteCommand() *urcli.Command {
 
 // deleteAction does not require --edit-code: the server also accepts the request when --token
 // identifies the note's owner, and otherwise rejects an empty/wrong edit code with a clear API
-// error — the CLI does not pre-validate which credential the caller intends to rely on.
+// error — the CLI does not pre-validate which credential the caller intends to rely on. The
+// shared "resolve ID → delete → print confirmation" skeleton lives in runDeleteCommand; only the
+// ogen-forced per-operation bits (params/response types, client method) stay here and in
+// delete_link.go, which is why the two files still read as near-duplicates to the dupl linter —
+// see the package-level nolint above.
 func deleteAction(ctx context.Context, cmd *urcli.Command) error {
-	id, err := noteIDArg(cmd)
-	if err != nil {
-		return err
+	deleteNote := func(ctx context.Context, padmarkClient *padmark.Client, id, editCode string) error {
+		params := padmark.DeleteNoteParams{ID: id}
+
+		if editCode != "" {
+			params.XEditCode = padmark.NewOptString(editCode)
+		}
+
+		res, err := padmarkClient.DeleteNote(ctx, params)
+		if err != nil {
+			return fmt.Errorf("delete note: %w", err)
+		}
+
+		return handleDeleteNoteRes(res)
 	}
 
-	padmarkClient, err := newPadmarkClient(cmd)
-	if err != nil {
-		return err
-	}
-
-	params := padmark.DeleteNoteParams{ID: id}
-
-	if editCode := cmd.String(FlagEditCode); editCode != "" {
-		params.XEditCode = padmark.NewOptString(editCode)
-	}
-
-	res, err := padmarkClient.DeleteNote(ctx, params)
-	if err != nil {
-		return fmt.Errorf("delete note: %w", err)
-	}
-
-	apiErr := handleDeleteNoteRes(res)
-	if apiErr != nil {
-		return apiErr
-	}
-
-	ew := &errWriter{w: os.Stdout}
-	ew.printf("deleted %s\n", id)
-
-	if ew.err != nil {
-		return fmt.Errorf("write output: %w", ew.err)
-	}
-
-	return nil
+	return runDeleteCommand(ctx, cmd, noteIDArg, deleteNote)
 }
 
 func handleDeleteNoteRes(res padmark.DeleteNoteRes) error {

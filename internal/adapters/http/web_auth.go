@@ -91,6 +91,16 @@ func callerIDFromCtx(ctx context.Context) uuid.UUID {
 	return usr.ID
 }
 
+// authenticatedFromCtx reports whether the request resolved to a TOTP session or API-token user
+// — the context-only counterpart of common.isAuthenticated's context check, for ogen handlers
+// (see userFromCtx). Unlike common.isAuthenticated, it does NOT special-case "no auth configured
+// at all" (context has no way to know that). Callers that need that must use
+// common.isAuthenticated instead; this exists for handlers that only see a context.Context,
+// e.g. OgenHandler.GetLink.
+func authenticatedFromCtx(ctx context.Context) bool {
+	return userFromCtx(ctx) != nil
+}
+
 // AuthHandler serves login, logout, account setup, and password-change endpoints.
 type AuthHandler struct {
 	*common
@@ -107,10 +117,6 @@ func newAuthHandler(c *common, loginTmpl, setupTmpl, changePwTmpl *template.Temp
 // RegisterRoutes registers login, logout, account setup, and password-change routes.
 func (h *AuthHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /login", h.LoginPage)
-
-	// POST /login is the legacy bearer-token login — no TOTP brute-force concern,
-	// so the TOTP-tuned 10 req/min rate limit is not applied here.
-	mux.HandleFunc("POST /login", h.guard(loginHandler(h.allowedTokens, h.cookieMaxAge, h.trustedProxies)))
 	mux.HandleFunc("POST /totp-login", h.guard(withTOTPRateLimit(h.trustedProxies, h.TOTPLoginHandler)))
 	mux.HandleFunc("POST /logout", h.guard(h.LogoutHandler))
 	mux.HandleFunc("GET /setup", h.SetupPage)
@@ -126,7 +132,6 @@ type loginViewData struct {
 	Next      string
 	CSRFToken string
 	Error     bool
-	TOTPMode  bool // show TOTP form instead of token form
 }
 
 // LoginPage handles GET /login.
@@ -149,7 +154,6 @@ func (h *AuthHandler) LoginPage(w http.ResponseWriter, r *http.Request) {
 		Error:     r.URL.Query().Get("error") == "1",
 		Nonce:     nonceFromContext(r.Context()),
 		Next:      safeNextURL(r.URL.Query().Get("next")),
-		TOTPMode:  h.authMgr != nil,
 		CSRFToken: csrfFromContext(r.Context()),
 	})
 	if err != nil {
@@ -157,7 +161,7 @@ func (h *AuthHandler) LoginPage(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// ── TOTP login (POST /login when authMgr is set) ──
+// ── TOTP login (POST /totp-login) ──
 
 // TOTPLoginHandler handles POST /totp-login — username + password + TOTP code → session cookie.
 func (h *AuthHandler) TOTPLoginHandler(w http.ResponseWriter, r *http.Request) {
