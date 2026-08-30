@@ -107,7 +107,7 @@ func writeUnauthorized(w http.ResponseWriter) {
 	// Encoding a fixed two-field struct only fails on a broken connection, which is
 	// unactionable here — not worth threading a logger into this otherwise stateless
 	// middleware just to report it.
-	err := json.NewEncoder(w).Encode(errorJSON{Message: "unauthorized"})
+	err := json.NewEncoder(w).Encode(errorJSON{Message: msgUnauthorized})
 	if err != nil {
 		return
 	}
@@ -166,6 +166,16 @@ func (am *authMiddleware) resolveAPITokenUser(r *http.Request) (*http.Request, b
 const (
 	apiDocsPath = "/api"
 	apiSpecPath = "/api/openapi.yaml"
+
+	// linkCreatePath and notesCreatePath are the collection roots (POST create); isPublicRoute
+	// admits them alongside the resource paths below. editPathPrefix covers GET /edit/{id},
+	// whose per-note privacy check lives in EditPage.
+	linkCreatePath  = "links"
+	editPathPrefix  = "edit/"
+	notesCreatePath = "notes"
+
+	// msgUnauthorized is the shared client-facing message for every 401 the adapter writes.
+	msgUnauthorized = "unauthorized"
 )
 
 func isPublicPath(path string) bool {
@@ -178,24 +188,37 @@ func isPublicPath(path string) bool {
 		path == "/healthz" || path == "/readyz"
 }
 
-// isPublicRoute allows note-view, burn-reveal, and link-read requests through the auth
-// middleware. namedRoutes is the set of single-segment path names registered as named page
-// routes in NewRouter; they must not be treated as public note IDs.
-// The handler checks the per-note/per-link privacy level and requires auth when it demands one.
+// isPublicRoute lets note and link resource requests through the auth middleware — reads
+// (GET view, POST burn-reveal, GET /edit) and edit-code mutations (POST create, PUT/DELETE)
+// alike, regardless of method. Whether the matched resource may actually be served to this
+// caller is decided downstream, per resource: read privacy by handlePrivateAuth (with the
+// mutation counterparts in the ogen/native write handlers), and mutation ownership by the
+// edit-code/OwnedBy check inside the usecases. The auth middleware only enforces identity for
+// the named page routes (namedRoutes — /admin, /login, change-password, ...), which keep
+// requiring a signed-in session. Restoring the documented edit_code workflow
+// ("no login required"): blocking these paths at the middleware would 401 an anonymous caller
+// before the usecase ever gets to verify the code.
 func isPublicRoute(r *http.Request, namedRoutes map[string]struct{}) bool {
 	path := strings.TrimPrefix(r.URL.Path, "/")
 
 	switch {
-	case r.Method == http.MethodGet && isLinkPath(path):
-		// GET /r/{id} (redirect) and GET /links/{id} (JSON metadata) — the per-link privacy
-		// check happens downstream (LinkHandler.handlePrivateAuth / OgenHandler.GetLink),
-		// mirroring notes below. Unlike note paths these have a fixed, unambiguous prefix, so
-		// no namedRoutes disambiguation is needed.
+	case isLinkPath(path) || path == linkCreatePath:
+		// GET /r/{id}, GET/DELETE /links/{id}, POST /links, POST /links/bulk — per-link
+		// privacy and per-link ownership are enforced downstream. Unlike note paths these
+		// have a fixed, unambiguous prefix, so no namedRoutes disambiguation is needed.
 		return true
-	case r.Method == http.MethodGet, r.Method == http.MethodPost:
-		// GET note view and POST burn-reveal are the only other public note routes; every
-		// other method (create/update/delete) requires auth.
-		return isNoteIDPath(path, namedRoutes)
+	case r.Method == http.MethodGet && strings.HasPrefix(path, editPathPrefix):
+		// GET /edit/{id} (the only method the route serves): the editor re-runs the same
+		// per-note privacy check as GET view (EditPage → handlePrivateAuth), so anonymous
+		// access to a public note's edit form is safe — saving still requires the edit code
+		// on the PUT.
+		return true
+	case path == notesCreatePath || isNoteIDPath(path, namedRoutes):
+		// Note resource routes, any method: GET view, POST reveal, PUT/DELETE /notes/{id...}
+		// and multi-segment /{id...}. POST /notes (create) is anonymous on purpose — a new
+		// note has no privacy to check yet, and privacy=owner for an anonymous caller is
+		// rejected by domain validation (ValidateOwnership).
+		return true
 	default:
 		return false
 	}

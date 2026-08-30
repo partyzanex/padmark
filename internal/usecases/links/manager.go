@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -219,22 +220,10 @@ func (m *Manager) Create(ctx context.Context, targetURL string, opts CreateOptio
 		return nil, err
 	}
 
-	encrypted, encErr := m.encryptor.Encrypt(validURL, slug)
-	if encErr != nil {
-		return nil, fmt.Errorf("encrypt target url: %w", encErr)
-	}
-
-	link.TargetURL = encrypted
-	link.ID = domain.HashSlug(slug)
-
-	err = m.storage.Create(ctx, link)
+	err = m.persistLink(ctx, link, slug, validURL, plaintextCode)
 	if err != nil {
-		return nil, fmt.Errorf("create link: %w", err)
+		return nil, err
 	}
-
-	link.ID = slug
-	link.TargetURL = validURL
-	link.EditCode = plaintextCode
 
 	m.log.DebugContext(ctx, "link created", "id", slug)
 
@@ -359,6 +348,35 @@ func (m *Manager) Delete(ctx context.Context, slug, editCode string, callerID uu
 	return nil
 }
 
+// persistLink mutates link in place for persistence (encrypt the target URL, store the hashed
+// slug as the PK) and writes it to storage. The defer restores the caller-facing plaintext
+// fields and the slug ID on every return path, so no branch — including a failed storage.Create
+// — can leave the link in an encrypted state.
+func (m *Manager) persistLink(
+	ctx context.Context, link *domain.Link, slug, validURL, plaintextCode string,
+) error {
+	defer func() {
+		link.ID = slug
+		link.TargetURL = validURL
+		link.EditCode = plaintextCode
+	}()
+
+	encrypted, encErr := m.encryptor.Encrypt(validURL, slug)
+	if encErr != nil {
+		return fmt.Errorf("encrypt target url: %w", encErr)
+	}
+
+	link.TargetURL = encrypted
+	link.ID = domain.HashSlug(slug)
+
+	err := m.storage.Create(ctx, link)
+	if err != nil {
+		return fmt.Errorf("create link: %w", err)
+	}
+
+	return nil
+}
+
 // resolveLink fetches and decrypts a link by dbID, consulting the optional Cache first — a hit
 // skips both the storage round-trip and the decrypt. Only a link that is neither burn-after-click
 // nor already expired is cached (the Set call below):
@@ -443,6 +461,16 @@ func (m *Manager) resolveAndHashEditCode(link *domain.Link) (string, error) {
 // there is nothing to retry. A random-slug collision retries up to maxHashRetries before giving
 // up with ErrHashCollision.
 func (m *Manager) resolveUniqueSlug(ctx context.Context, customHash string) (string, error) {
+	// Unlike notes, links are only served at single-segment routes (GET /r/{id} plus the ogen
+	// GET /links/{id} / DELETE /links/{id}), so a multi-segment custom alias would be created
+	// successfully yet unroutable and unreachable through the API. Reject it here, at the
+	// resource that owns the routing constraint, rather than narrowing the shared
+	// domain.ValidCustomSlug that multi-segment notes legitimately rely on.
+	if strings.Contains(customHash, "/") {
+		return "", fmt.Errorf("custom link slug %q must be a single path segment (links are served at /r/{id}): %w",
+			customHash, domain.ErrInvalidSlug)
+	}
+
 	for range maxHashRetries {
 		ctxErr := ctx.Err()
 		if ctxErr != nil {

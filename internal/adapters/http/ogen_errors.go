@@ -28,8 +28,10 @@ func errResp(err error) ogenapi.ErrorResponse {
 // decode error. Every other error falls through to ogen's default handler.
 func newMaxBodyErrorHandler(log *slog.Logger) ogenapi.ErrorHandler {
 	return func(ctx context.Context, w http.ResponseWriter, r *http.Request, err error) {
-		var maxErr *http.MaxBytesError
-		if errors.As(err, &maxErr) {
+		// Consume the typed result (not the ok flag) so errcheck sees the error-typed return used.
+		// Plain assignment (not an if-init) keeps noinlineerr happy.
+		maxBytes, _ := errors.AsType[*http.MaxBytesError](err)
+		if maxBytes != nil {
 			w.Header().Set("Content-Type", mimeJSON)
 			w.WriteHeader(http.StatusRequestEntityTooLarge)
 

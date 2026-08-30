@@ -12,11 +12,13 @@ import (
 const disabledAPIMessage = "До свидания"
 
 // isDisabledAPIPath reports whether path belongs to the REST/JSON API surface that
-// --disable-api turns off: note CRUD (/notes and everything under it) and the API docs/spec.
-// The web UI's short note URL (/{id}), /edit/{id}, and operational endpoints (/healthz,
-// /readyz, /static/*) are deliberately not matched here — they keep working.
+// --disable-api turns off: note CRUD (/notes and everything under it), short-link CRUD
+// (/links and everything under it), and the API docs/spec. The web UI's short note URL
+// (/{id}), /edit/{id}, /r/{id}, and operational endpoints (/healthz, /readyz, /static/*)
+// are deliberately not matched here — they keep working.
 func isDisabledAPIPath(path string) bool {
 	return path == "/notes" || strings.HasPrefix(path, "/notes/") ||
+		path == "/links" || strings.HasPrefix(path, "/links/") ||
 		path == apiDocsPath || path == apiSpecPath
 }
 

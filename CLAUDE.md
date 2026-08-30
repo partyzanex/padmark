@@ -25,7 +25,7 @@ domain  <--  usecases  <--  infra
                         <--> adapters
 ```
 
-- **domain** (`internal/domain/`) — entities and sentinel errors. Stdlib only, **no interfaces**.
+- **domain** (`internal/domain/`) — entities and sentinel errors. Stdlib plus `github.com/google/uuid` for user-keyed IDs (the single recorded exception — `uuid.Nil` is woven through `OwnedBy`/`VisibleTo`, a string migration would churn the ownership-comparison code where a slip is an authz bug), **no interfaces**.
 - **usecases** (`internal/usecases/notes/`) — business logic. Dependency interfaces defined **here**, next to consumer (DIP). Struct named `Manager`.
 - **infra** (`internal/infra/`) — implementations: storage (`sqlite`, `postgres`), markdown renderer, CLI/config (`infra/cmd/`).
 - **adapters** (`internal/adapters/http/`) — HTTP handlers, content negotiation, error translation.
@@ -43,8 +43,8 @@ Manual DI in `internal/infra/server/server.go`, `serverAction()` function. Order
 1. Logger → 2. Infrastructure (storage, renderer) → 3. Business logic → 4. HTTP handler/router → 5. Server + graceful shutdown
 
 Key constructor rules:
-- `NewHandler(manager NoteManager, log *slog.Logger, tokens []string)` — token set is built inside the constructor; never mutate `handler.allowedTokens` after construction.
-- `NewRouter(handler *Handler, ogenHandler *OgenHandler, opts RouterOptions)` — reads `handler.allowedTokens` directly; does not accept tokens separately.
+- `NewHandler(manager NoteManager, linkManager LinkManager, log *slog.Logger) *Handler` — both managers are required; adapters never reach into each other.
+- `NewRouter(handler *Handler, ogenHandler *OgenHandler, opts *RouterOptions) (http.Handler, error)` — options (CSRF secret, body limit, session TTL, `direct-redirect`, `disable-api`) travel via `RouterOptions`, not separate parameters.
 - Use `NoPinger{}` when no DB pinger is available (e.g. in-memory or test setups) instead of passing `nil`.
 
 ### Configuration (`flags.go`)
@@ -60,7 +60,8 @@ Three constant groups: flag names (`Flag*`), env vars (`Env*`), defaults (`Defau
 
 ### Auth middleware
 
-- `namedRoutes` set is defined inline in `NewRouter`, next to the `mux.Handle*` calls. Add a new entry here whenever a new single-segment named GET route is registered.
+- `buildNamedRoutes()` mirrors `domain.ReservedSlugPrefixes()` — the single source of truth for first-segment route names. When registering a new first-segment route, add its name there (in `internal/domain/slug.go`); a missing entry makes `isNoteIDPath` classify the route as a public note ID.
+- `isPublicRoute` allows GET `/{id}` and `GET /notes/{id}` through for public notes. Private-note access control happens inside the handler via `handlePrivateAuth`.
 - `isPublicRoute` allows GET `/{id}` and `GET /notes/{id}` through for public notes. Private-note access control happens inside the handler via `handlePrivateAuth`.
 - Browser redirect on auth failure: `/login?next=<encoded-original-url>`. `safeNextURL` validates the value — rejects any URL with a host or scheme (open-redirect protection).
 

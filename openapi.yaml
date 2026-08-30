@@ -21,6 +21,12 @@ info:
       `422` instead of silently creating a note nobody, including its creator, could ever read
       again.
 
+    Mutations follow the same rule as reads: a caller who may read a note (or link) may also
+    attempt to mutate it with an `edit_code`. `PUT`/`DELETE` on a resource whose `privacy` level
+    requires a credential (`authenticated` or `owner`) answer `401` to an anonymous caller before
+    the edit code is even checked; anonymous callers can always create (`POST`) and, with the
+    correct `edit_code`, edit or delete anything `public`.
+
     ## Burn-after-reading
 
     Notes can be configured to self-destruct after the first read:
@@ -53,9 +59,9 @@ info:
     `GET /{id}` view route). Its behaviour is controlled by the server's `--direct-redirect` flag:
 
     - `--direct-redirect=true` (default): `301 Moved Permanently` straight to `target_url`.
-    - `--direct-redirect=false`: `200` HTML interstitial (meta-refresh + `<noscript>` fallback)
-      showing `target_url` before redirecting — for transparency, so a visitor can see the
-      destination before following it.
+    - `--direct-redirect=false`: `200` HTML interstitial (meta-refresh with a 5-second delay +
+      `<noscript>` fallback) showing `target_url` before redirecting — for transparency, so a
+      visitor has time to see the destination before following it.
 
     Any individual link may override this server-wide default via `direct_redirect` at creation
     time (see `CreateLinkRequest.direct_redirect`) — `true`/`false` forces that link's own mode
@@ -163,10 +169,11 @@ paths:
       summary: Update an existing note
       description: |
         Replaces the note's title, content, content type, and burn settings.
-        The `edit_code` must match the one returned when the note was created — unless the
-        request is authenticated (bearer token or session) as the exact user who created the
-        note, in which case `edit_code` may be omitted. See "Edit codes and ownership" above.
-        Returns the updated note.
+        Anonymous callers may update any note whose `privacy` level would also let them read it
+        (see "Authentication" above); the `edit_code` must match the one returned when the note
+        was created — unless the request is authenticated (bearer token or session) as the exact
+        user who created the note, in which case `edit_code` may be omitted. See "Edit codes and
+        ownership" above. Returns the updated note.
       tags: [notes]
       parameters:
         - $ref: "#/components/parameters/noteId"
@@ -186,9 +193,12 @@ paths:
         "400":
           $ref: "#/components/responses/Error"
         "401":
-          $ref: "#/components/responses/Error"
+          description: |
+            Anonymous callers may only mutate notes they could read: the note's `privacy` level
+            requires a credential (`authenticated` or `owner`) this request didn't supply — see
+            the `privacy` field semantics above. A wrong edit code is `403`, not `401`.
         "403":
-          description: Wrong edit code
+          description: Wrong edit code, or the authenticated user is not the owner
           $ref: "#/components/responses/Error"
         "404":
           description: Note not found
@@ -202,10 +212,12 @@ paths:
       operationId: deleteNote
       summary: Delete a note
       description: |
-        Permanently deletes the note.  The edit code must be supplied either as the
-        `X-Edit-Code` request header or the `edit_code` query parameter — unless the request is
-        authenticated (bearer token or session) as the exact user who created the note, in which
-        case no edit code is needed. See "Edit codes and ownership" above.
+        Permanently deletes the note. Anonymous callers may delete any note whose `privacy`
+        level would also let them read it (see "Authentication" above). The edit code must be
+        supplied either as the `X-Edit-Code` request header or the `edit_code` query parameter —
+        unless the request is authenticated (bearer token or session) as the exact user who
+        created the note, in which case no edit code is needed. See "Edit codes and ownership"
+        above.
 
         Prefer the `X-Edit-Code` header over the `edit_code` query parameter: a query string can
         end up in reverse-proxy/CDN access logs or in the `Referer` header of a same-origin
@@ -233,9 +245,12 @@ paths:
         "204":
           description: Note deleted
         "401":
-          $ref: "#/components/responses/Error"
+          description: |
+            Anonymous callers may only mutate notes they could read: the note's `privacy` level
+            requires a credential (`authenticated` or `owner`) this request didn't supply — see
+            the `privacy` field semantics above. A wrong edit code is `403`, not `401`.
         "403":
-          description: Wrong edit code
+          description: Wrong edit code, or the authenticated user is not the owner
           $ref: "#/components/responses/Error"
         "404":
           description: Note not found
@@ -392,9 +407,13 @@ paths:
         "204":
           description: Link deleted
         "401":
-          $ref: "#/components/responses/Error"
+          description: |
+            Anonymous callers may only mutate links they could read: the link's `privacy` level
+            requires a credential (`authenticated` or `owner`) this request didn't supply — see
+            the `privacy` field semantics in the "Authentication" section above. A wrong edit
+            code is `403`, not `401`.
         "403":
-          description: Wrong edit code
+          description: Wrong edit code, or the authenticated user is not the owner
           $ref: "#/components/responses/Error"
         "404":
           description: Link not found
@@ -474,7 +493,11 @@ components:
         slug:
           type: string
           description: |
-            Custom URL-friendly identifier. Must match `[a-zA-Z0-9_-]+`.
+            Custom URL-friendly identifier: one or more path segments joined by `/` (up to 10
+            segments, 100 characters total). Each segment must match
+            `[A-Za-z0-9][A-Za-z0-9._-]*` and the first segment must not be a reserved route
+            name (e.g. `login`, `admin`, `notes`, `links`, `r`, `edit`, `api`, `static`).
+            Returns `422` for an invalid slug.
             If omitted a 10-character random slug is generated.
             Returns `409` if the slug is already taken.
           example: my-snippet
@@ -631,7 +654,9 @@ components:
         slug:
           type: string
           description: |
-            Custom URL-friendly identifier. Must match `[a-zA-Z0-9_-]+`.
+            Custom URL-friendly identifier. Must be a single path segment matching
+            `[a-zA-Z0-9_-]+` — multi-segment slugs (containing `/`) return `422`, since short
+            links are only served at `GET /r/{id}` and `/links/{id}`.
             If omitted a 10-character random slug is generated.
             Returns `409` if the slug is already taken by a note or another link.
           example: my-link

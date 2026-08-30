@@ -80,6 +80,12 @@ func validateBurnTTL(cmd *urcli.Command) error {
 		return errors.New("--ttl requires --burn (it sets the grace period after the first read)")
 	}
 
+	// Explicitly negative or zero TTL is a user error (an unset one legitimately means "no
+	// grace period"); silently dropping it would create a non-expiring burn note.
+	if ttl := cmd.Int64(FlagTTL); cmd.IsSet(FlagTTL) && ttl <= 0 {
+		return errors.New("--ttl must be a positive number of seconds")
+	}
+
 	return nil
 }
 

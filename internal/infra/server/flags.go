@@ -138,14 +138,15 @@ func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
 			Name:    FlagDisableAPI,
 			Sources: cli.EnvVars(EnvDisableAPI),
 			Value:   false,
-			Usage: "Disable the REST/JSON API (/notes*, /api, /api/openapi.yaml): every request " +
-				"to it gets 503 with a fixed message. The web UI and /healthz, /readyz keep working",
+			Usage: "Disable the REST/JSON API (/notes*, /links*, /api, /api/openapi.yaml): every request " +
+				"to it gets 503 with a fixed message. The web UI (incl. /r/{id}) and /healthz, /readyz keep working",
 		},
 		&cli.BoolFlag{
 			Name:    FlagCustomSlugs,
 			Sources: cli.EnvVars(EnvCustomSlugs),
 			Value:   false,
-			Usage: "Allow user-supplied human-readable slugs (e.g. project/GUIDE.md) at note creation. " +
+			Usage: "Allow user-supplied human-readable slugs at note creation (e.g. project/GUIDE.md) " +
+				"and at short-link creation (e.g. launch-2026, single segment only). " +
 				"Off by default: only random slugs are issued, since a custom slug is low-entropy " +
 				"content-encryption key material. Enable for internal/trusted deployments",
 		},

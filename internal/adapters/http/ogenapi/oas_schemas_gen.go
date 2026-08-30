@@ -236,7 +236,9 @@ func (*CreateLinkInternalServerError) createLinkRes() {}
 type CreateLinkRequest struct {
 	// Destination URL. Only `http` and `https` schemes are accepted.
 	TargetURL url.URL `json:"target_url"`
-	// Custom URL-friendly identifier. Must match `[a-zA-Z0-9_-]+`.
+	// Custom URL-friendly identifier. Must be a single path segment matching
+	// `[a-zA-Z0-9_-]+` — multi-segment slugs (containing `/`) return `422`, since short
+	// links are only served at `GET /r/{id}` and `/links/{id}`.
 	// If omitted a 10-character random slug is generated.
 	// Returns `409` if the slug is already taken by a note or another link.
 	Slug OptString `json:"slug"`
@@ -638,7 +640,11 @@ type CreateNoteRequest struct {
 	Content string `json:"content"`
 	// MIME type of `content`; controls rendering on the view page.
 	ContentType OptCreateNoteRequestContentType `json:"content_type"`
-	// Custom URL-friendly identifier. Must match `[a-zA-Z0-9_-]+`.
+	// Custom URL-friendly identifier: one or more path segments joined by `/` (up to 10
+	// segments, 100 characters total). Each segment must match
+	// `[A-Za-z0-9][A-Za-z0-9._-]*` and the first segment must not be a reserved route
+	// name (e.g. `login`, `admin`, `notes`, `links`, `r`, `edit`, `api`, `static`).
+	// Returns `422` for an invalid slug.
 	// If omitted a 10-character random slug is generated.
 	// Returns `409` if the slug is already taken.
 	Slug OptString `json:"slug"`

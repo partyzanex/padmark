@@ -22,7 +22,7 @@ func TestHandleDeleteLinkRes_Forbidden_CleanMessage(t *testing.T) {
 
 	err := handleDeleteLinkRes(&padmark.DeleteLinkForbidden{Message: "invalid edit code"})
 	require.Error(t, err)
-	assert.Equal(t, "forbidden: wrong edit code", err.Error())
+	assert.Equal(t, "forbidden: wrong edit code or --token is not the link's owner", err.Error())
 }
 
 func TestHandleDeleteLinkRes_Success(t *testing.T) {

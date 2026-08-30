@@ -256,6 +256,33 @@ func pinImmutableFields(note, existing *domain.Note) error {
 	return nil
 }
 
+// backfillPersistedState copies the storage-persisted privacy and view count into the working
+// note before the update is written.
+func backfillPersistedState(note, existing *domain.Note) {
+	if note.Privacy == nil {
+		note.Privacy = existing.Privacy
+	}
+
+	note.Views = existing.Views
+}
+
+// resolveExpiryTime fills in note.ExpiresAt when the caller omitted it. When burn is being
+// disabled (BurnTTL cleared) but the existing note has a burn-timer expiry, the stale expiry
+// must be dropped rather than inherited.
+func resolveExpiryTime(note, existing *domain.Note) {
+	if note.ExpiresAt != nil {
+		return
+	}
+
+	if note.BurnTTL == 0 && existing.BurnTTL > 0 {
+		note.ExpiresAt = nil
+
+		return
+	}
+
+	note.ExpiresAt = existing.ExpiresAt
+}
+
 // Update validates and updates an existing note, preserving immutable metadata.
 // The caller must supply the correct edit code.
 // Update replaces a note's editable fields. The caller must either supply the note's edit_code,
@@ -286,19 +313,19 @@ func (m *Manager) Update(
 	note.CreatedAt = existing.CreatedAt
 	note.UpdatedAt = time.Now().UTC()
 
-	if note.ExpiresAt == nil {
-		// When burn is being disabled (BurnTTL cleared) but the existing note has a
-		// burn-timer expiry, do not inherit it — the stale expiry must be dropped.
-		if note.BurnTTL == 0 && existing.BurnTTL > 0 {
-			note.ExpiresAt = nil
-		} else {
-			note.ExpiresAt = existing.ExpiresAt
-		}
-	}
+	resolveExpiryTime(note, existing)
 
 	if note.ContentType == nil {
 		note.ContentType = existing.ContentType
 	}
+
+	// Privacy is intentionally absent from the UPDATE column list (COALESCE keeps the stored
+	// value when the caller omitted it) and views are never writable — so the response must
+	// backfill both from the existing note to report the persisted state, not the caller's
+	// defaults. Without this, a PUT on a privacy=owner note would answer "public" with
+	// "views": 0. Doing it here (before pinImmutableFields) also lets ValidateOwnership judge
+	// the note's real inherited privacy.
+	backfillPersistedState(note, existing)
 
 	// Update mutates note in place for persistence (encrypt content, carry the stored edit-code
 	// hash). The defer restores the caller-facing plaintext fields on every return path, so the

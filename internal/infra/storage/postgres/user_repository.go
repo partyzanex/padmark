@@ -159,9 +159,45 @@ func (r *UserRepository) List(ctx context.Context) ([]*domain.User, error) {
 	return users, nil
 }
 
-// Revoke deletes the user record by ID.
+// revokeAdminLockKey keys the transaction-scoped advisory lock guarding the last-admin
+// invariant in Revoke.
+const revokeAdminLockKey = "padmark:user-revoke"
+
+// Revoke deletes the user record by ID. The delete refuses to remove the last remaining admin.
+// The EXISTS guard lives in the DELETE, but under PostgreSQL's READ COMMITTED a conditional
+// statement alone is not race-free: two concurrent transactions each evaluate the subquery
+// before the other commits its delete (the statement re-check only covers the deleted row, not
+// the subquery). The same advisory-lock pattern as APITokenRepository.CreateIfUnderLimit
+// (auto-released at commit/rollback) serializes revocations cross-instance, so the guard always
+// sees the state after the previously committed one. Zero affected rows means the target does
+// not exist or is the last admin — both map to domain.ErrForbidden; callers pre-check GetByID
+// for a friendlier ErrNotFound.
 func (r *UserRepository) Revoke(ctx context.Context, id uuid.UUID) error {
-	_, err := r.db.NewDelete().TableExpr("users").Where("id = ?", id).Exec(ctx)
+	err := r.db.RunInTx(ctx, nil, func(ctx context.Context, btx bun.Tx) error {
+		_, lockErr := btx.NewRaw("SELECT pg_advisory_xact_lock(hashtext(?))", revokeAdminLockKey).Exec(ctx)
+		if lockErr != nil {
+			return fmt.Errorf("acquire advisory lock: %w", lockErr)
+		}
+
+		res, execErr := btx.NewDelete().TableExpr("users").
+			Where("id = ?", id).
+			Where("is_admin = FALSE OR EXISTS (SELECT 1 FROM users AS u WHERE u.is_admin AND u.id != ?)", id).
+			Exec(ctx)
+		if execErr != nil {
+			return fmt.Errorf("revoke user: %w", execErr)
+		}
+
+		affected, affectedErr := res.RowsAffected()
+		if affectedErr != nil {
+			return fmt.Errorf("revoke user rows affected: %w", affectedErr)
+		}
+
+		if affected == 0 {
+			return domain.ErrForbidden
+		}
+
+		return nil
+	})
 	if err != nil {
 		return fmt.Errorf("revoke user: %w", err)
 	}

@@ -550,6 +550,47 @@ func (s *ManagerTestSuite) TestUpdate_OK() {
 	s.Equal("secret123456", result.EditCode)
 }
 
+// TestUpdate_ResponseReportsPersistedPrivacyAndViews verifies the PUT response backfills
+// privacy (when the caller omitted it) and views from the existing note — the repository's
+// UPDATE persists privacy via COALESCE and never writes views, so the response must report the
+// stored state rather than the caller's zero-value defaults (a privacy=owner note would
+// otherwise answer "public" with "views": 0, contradicting the next GET).
+func (s *ManagerTestSuite) TestUpdate_ResponseReportsPersistedPrivacyAndViews() {
+	ownerPrivacy := domain.PrivacyOwner
+	existing := &domain.Note{
+		ID:       "abc-123",
+		Title:    "old",
+		Privacy:  &ownerPrivacy,
+		Views:    7,
+		OwnerID:  new(uuid.UUID),
+		EditCode: "secret123456",
+	}
+
+	// Caller omits privacy; it must be inherited, not defaulted to public.
+	note := &domain.Note{Title: "updated", Content: "body"}
+
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(existing, nil)
+	s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("abc-123"), note).Return(nil)
+
+	result, err := s.manager.Update(s.T().Context(), "abc-123", "secret123456", *existing.OwnerID, note)
+
+	s.Require().NoError(err)
+	s.Equal(ownerPrivacy, *result.Privacy)
+	s.Equal(7, result.Views)
+
+	// Explicit privacy still wins over the stored value.
+	newPrivacy := domain.PrivacyAuthenticated
+	explicit := &domain.Note{Title: "updated", Privacy: &newPrivacy}
+
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(existing, nil)
+	s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("abc-123"), explicit).Return(nil)
+
+	result, err = s.manager.Update(s.T().Context(), "abc-123", "secret123456", *existing.OwnerID, explicit)
+
+	s.Require().NoError(err)
+	s.Equal(newPrivacy, *result.Privacy)
+}
+
 func (s *ManagerTestSuite) TestUpdate_EmptyTitle() {
 	existing := &domain.Note{
 		ID:       "abc-123",

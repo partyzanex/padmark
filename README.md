@@ -446,6 +446,12 @@ When **disabled**, none of the routes below are gated and `/setup`, `/admin`, et
 it (see "Editing without `edit_code`" below for the same owner-scoping applied to writes) —
 meaningless without `--enable-accounts`, since a note has no recorded owner otherwise.
 
+**The `edit_code` workflow works without signing in.** Anonymous callers may create notes/links
+and, with the correct `edit_code`, edit or delete anything whose `privacy` level lets them read
+it (`public`) — exactly as on a no-accounts instance. Mutations on `privacy: authenticated` or
+`privacy: owner` notes answer `401` to an anonymous caller — the same rule reads follow — before
+the edit code is even checked; a wrong code on a readable note is `403`.
+
 Always public regardless of auth config: `/login`, `/setup`, `/logout`, `/totp-login`, `/static/*`, `/api`, `/api/openapi.yaml`, `/healthz`, `/readyz`.
 
 ### Editing without `edit_code` (owners)
@@ -485,7 +491,7 @@ note's `privacy` level.
 | `--storage` | `PADMARK_STORAGE` | `sqlite` | `sqlite` or `postgres` |
 | `--dsn` | `PADMARK_DSN` | `padmark.db` | DB path or connection string |
 | `--enable-accounts` | `PADMARK_ENABLE_ACCOUNTS` | `false` | Enable the TOTP account system (`/setup`, `/login`, `/admin`, privacy-level gating); off = fully public |
-| `--disable-api` | `PADMARK_DISABLE_API` | `false` | Disable the REST/JSON API (`/notes*`, `/api`, `/api/openapi.yaml`): every request to it gets `503` with `{"message": "До свидания"}`, before auth or any handler runs. The web UI and `/healthz`, `/readyz` keep working |
+| `--disable-api` | `PADMARK_DISABLE_API` | `false` | Disable the REST/JSON API (`/notes*`, `/links*`, `/api`, `/api/openapi.yaml`): every request to it gets `503` with `{"message": "До свидания"}`, before auth or any handler runs. The web UI (incl. `/r/{id}`) and `/healthz`, `/readyz` keep working |
 | `--totp-issuer` | `PADMARK_TOTP_ISSUER` | `padmark` | TOTP issuer shown in the authenticator app |
 | `--session-ttl` | `PADMARK_SESSION_TTL` | `2592000` | Session lifetime in seconds (default 30 days) |
 | `--argon2-memory` | `PADMARK_ARGON2_MEMORY` | `24576` | argon2id memory cost in KiB for **account password** hashing (default 24 MiB); lower for low-RAM hosts. Edit codes use a fast hash and are unaffected |

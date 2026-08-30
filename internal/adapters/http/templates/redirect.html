@@ -3,7 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="refresh" content="0;url={{.TargetURL}}">
+    <!-- Meta refresh navigates without any script — html/template context-filters the URL in
+         this attribute (a javascript:/data: target degenerates to a dead link, it cannot run).
+         The 5-second delay is the point of the interstitial: it gives the visitor time to read
+         the destination before being sent there (links with direct_redirect=false). -->
+    <meta http-equiv="refresh" content="5;url={{.TargetURL}}">
     <title>Padmark — Redirecting…</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <link rel="stylesheet" href="/static/style.css?p={{styleVersion}}">
@@ -53,7 +57,7 @@
             <div class="card-divider"></div>
             <div class="warning-block">
                 <span class="warning-icon">🔗</span>
-                <span class="warning-text">JavaScript is disabled. If you are not redirected automatically, use the Continue link above.</span>
+                <span class="warning-text">If you are not redirected automatically in a few seconds, use the Continue link above.</span>
             </div>
         </noscript>
     </div>
@@ -62,10 +66,6 @@
 
 <script nonce="{{.Nonce}}">
     {{template "theme-js"}}
-
-    setTimeout(function () {
-        window.location.replace("{{.TargetURL}}");
-    }, 500);
 </script>
 </body>
 </html>

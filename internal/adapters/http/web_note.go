@@ -11,6 +11,7 @@ import (
 	_ "embed"
 
 	"github.com/bluele/gcache"
+	"github.com/google/uuid"
 
 	"github.com/partyzanex/padmark/internal/domain"
 )
@@ -227,6 +228,10 @@ type updateNoteByPathBody struct {
 func (h *NoteHandler) UpdateNoteByPath(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
+	if h.gateAnonymousMutation(w, r, id) {
+		return
+	}
+
 	var body updateNoteByPathBody
 
 	err := json.NewDecoder(r.Body).Decode(&body)
@@ -288,6 +293,10 @@ func (h *NoteHandler) UpdateNoteByPath(w http.ResponseWriter, r *http.Request) {
 func (h *NoteHandler) DeleteNoteByPath(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
+	if h.gateAnonymousMutation(w, r, id) {
+		return
+	}
+
 	// The query-param fallback mirrors the documented ogen DELETE /notes/{id} contract (see
 	// openapi.yaml); dropping it here only would break parity between the two routes. Our own
 	// access logging never records the query string (withLogging in router.go logs r.URL.Path
@@ -347,6 +356,36 @@ func (h *NoteHandler) HandleReveal(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.renderNoteHTML(w, r, id, preloaded)
+}
+
+// gateAnonymousMutation enforces the note's read-level privacy for anonymous write callers
+// (PUT/DELETE): someone who could not read the note may not mutate it via edit code either —
+// the mutation counterpart of handlePrivateAuth, applied by UpdateNoteByPath and
+// DeleteNoteByPath. Authenticated callers always proceed; their ownership still decides inside
+// the usecase (OwnedBy / ValidateOwnership). A failed Peek defers to the real mutation so the
+// caller sees the same error (404) a read would produce. Reports whether the response has been
+// written (gate refused the request).
+func (h *NoteHandler) gateAnonymousMutation(w http.ResponseWriter, r *http.Request, id string) bool {
+	if h.authMgr == nil {
+		return false
+	}
+
+	if callerIDFromCtx(r.Context()) != uuid.Nil || h.isAuthenticated(r) {
+		return false
+	}
+
+	note, err := h.manager.Peek(r.Context(), id)
+	if err != nil {
+		return false
+	}
+
+	if note.VisibleTo(uuid.Nil, false) {
+		return false
+	}
+
+	writeUnauthorized(w)
+
+	return true
 }
 
 // handlePrivateAuth checks the note's privacy level against the caller (see Note.VisibleTo).

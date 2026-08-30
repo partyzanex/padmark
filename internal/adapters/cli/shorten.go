@@ -25,7 +25,7 @@ func shortenCommand() *urcli.Command {
 			},
 			&urcli.StringFlag{
 				Name:  FlagSlug,
-				Usage: "Custom URL slug (letters, digits, hyphens, underscores)",
+				Usage: "Custom URL slug (letters, digits, hyphens, underscores; single segment — links are served at /r/{id})",
 			},
 			&urcli.StringFlag{
 				Name:  FlagPrivacy,
@@ -37,7 +37,7 @@ func shortenCommand() *urcli.Command {
 			},
 			&urcli.Int64Flag{
 				Name:  FlagTTL,
-				Usage: "Seconds until the link expires, counted from creation",
+				Usage: "Seconds until the link expires, counted from creation (omit for no expiry)",
 			},
 			&urcli.StringFlag{
 				Name:    FlagEditCode,
@@ -83,6 +83,12 @@ func buildShortenReq(cmd *urcli.Command) (*padmark.CreateLinkRequest, error) {
 	target, err := url.Parse(cmd.String(FlagTargetURL))
 	if err != nil {
 		return nil, fmt.Errorf("invalid --%s: %w", FlagTargetURL, err)
+	}
+
+	// Only an explicitly set non-positive TTL is a user error — an unset TTL legitimately means
+	// "no expiry", and flag zero values must never fail.
+	if ttl := cmd.Int64(FlagTTL); cmd.IsSet(FlagTTL) && ttl <= 0 {
+		return nil, fmt.Errorf("invalid --%s: must be a positive number of seconds (omit for no expiry)", FlagTTL)
 	}
 
 	req := &padmark.CreateLinkRequest{TargetURL: *target}

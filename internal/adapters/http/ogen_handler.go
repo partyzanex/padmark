@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/partyzanex/padmark/internal/adapters/http/ogenapi"
 	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/usecases/links"
@@ -82,6 +84,12 @@ func (h *OgenHandler) GetNote(
 func (h *OgenHandler) UpdateNote(
 	ctx context.Context, req *ogenapi.UpdateNoteRequest, params ogenapi.UpdateNoteParams,
 ) (ogenapi.UpdateNoteRes, error) {
+	if !h.anonymousNoteMutationAllowed(ctx, params.ID) {
+		v := ogenapi.UpdateNoteUnauthorized(ogenapi.ErrorResponse{Message: msgUnauthorized})
+
+		return &v, nil
+	}
+
 	burnAfterReading := req.BurnAfterReading.Or(false)
 
 	var burnTTL int64
@@ -105,9 +113,17 @@ func (h *OgenHandler) UpdateNote(
 }
 
 // DeleteNote implements ogenapi.Handler.
+//
+//nolint:dupl // ogen's per-operation response-union types make the PUT/DELETE bodies textually near-identical
 func (h *OgenHandler) DeleteNote(
 	ctx context.Context, params ogenapi.DeleteNoteParams,
 ) (ogenapi.DeleteNoteRes, error) {
+	if !h.anonymousNoteMutationAllowed(ctx, params.ID) {
+		v := ogenapi.DeleteNoteUnauthorized(ogenapi.ErrorResponse{Message: msgUnauthorized})
+
+		return &v, nil
+	}
+
 	editCode := params.XEditCode.Or("")
 	if editCode == "" {
 		editCode = params.EditCode.Or("")
@@ -171,7 +187,7 @@ func (h *OgenHandler) GetLink(
 	}
 
 	if !link.VisibleTo(callerIDFromCtx(ctx), authenticatedFromCtx(ctx)) {
-		v := ogenapi.GetLinkUnauthorized(ogenapi.ErrorResponse{Message: "unauthorized"})
+		v := ogenapi.GetLinkUnauthorized(ogenapi.ErrorResponse{Message: msgUnauthorized})
 
 		return &v, nil
 	}
@@ -180,9 +196,17 @@ func (h *OgenHandler) GetLink(
 }
 
 // DeleteLink implements ogenapi.Handler.
+//
+//nolint:dupl // ogen's per-operation response-union types make the PUT/DELETE bodies textually near-identical
 func (h *OgenHandler) DeleteLink(
 	ctx context.Context, params ogenapi.DeleteLinkParams,
 ) (ogenapi.DeleteLinkRes, error) {
+	if !h.anonymousLinkMutationAllowed(ctx, params.ID) {
+		v := ogenapi.DeleteLinkUnauthorized(ogenapi.ErrorResponse{Message: msgUnauthorized})
+
+		return &v, nil
+	}
+
 	editCode := params.XEditCode.Or("")
 	if editCode == "" {
 		editCode = params.EditCode.Or("")
@@ -363,4 +387,38 @@ func (h *OgenHandler) Readyz(ctx context.Context) (ogenapi.ReadyzRes, error) {
 	}
 
 	return &ogenapi.ReadyzOK{}, nil
+}
+
+// anonymousNoteMutationAllowed reports whether an anonymous caller may attempt to mutate a
+// note (PUT/DELETE): the note's read-level privacy must admit anonymous callers, mirroring
+// the read gate (handlePrivateAuth → Note.VisibleTo) — someone who could not read the note
+// may not edit it via edit code either. Authenticated callers always pass; their ownership
+// still decides inside the usecase (OwnedBy / ValidateOwnership). A failed Peek defers to the
+// real mutation so the caller sees the same error (404) a read would produce, unchanged.
+func (h *OgenHandler) anonymousNoteMutationAllowed(ctx context.Context, id string) bool {
+	if callerIDFromCtx(ctx) != uuid.Nil {
+		return true
+	}
+
+	note, err := h.manager.Peek(ctx, id)
+	if err != nil {
+		return true
+	}
+
+	return note.VisibleTo(uuid.Nil, false)
+}
+
+// anonymousLinkMutationAllowed is the links counterpart of anonymousNoteMutationAllowed
+// (see GetLink's VisibleTo check for the read-path symmetry).
+func (h *OgenHandler) anonymousLinkMutationAllowed(ctx context.Context, id string) bool {
+	if callerIDFromCtx(ctx) != uuid.Nil {
+		return true
+	}
+
+	link, err := h.linkManager.Peek(ctx, id)
+	if err != nil {
+		return true
+	}
+
+	return link.VisibleTo(uuid.Nil, false)
 }

@@ -218,9 +218,27 @@ func (s *UserRepositoryTestSuite) TestRevoke_RemovesUser() {
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
-func (s *UserRepositoryTestSuite) TestRevoke_NonExistentUser_NoError() {
+// TestRevoke_LastAdminRefused verifies the atomic last-admin guard: the advisory-locked
+// conditional delete must refuse to remove the only admin with domain.ErrForbidden and leave
+// the user in place — two concurrent revocations would otherwise leave the server permanently
+// admin-less.
+func (s *UserRepositoryTestSuite) TestRevoke_LastAdminRefused() {
+	ctx := s.T().Context()
+	admin := s.newUser("admin")
+	admin.IsAdmin = true
+	s.Require().NoError(s.repo.Create(ctx, admin))
+
+	err := s.repo.Revoke(ctx, admin.ID)
+
+	s.Require().ErrorIs(err, domain.ErrForbidden)
+
+	_, getErr := s.repo.GetByID(ctx, admin.ID)
+	s.Require().NoError(getErr, "the last admin must survive a refused revocation")
+}
+
+func (s *UserRepositoryTestSuite) TestRevoke_NonExistentUser_ReturnsErrForbidden() {
 	err := s.repo.Revoke(s.T().Context(), uuid.New())
-	s.Require().NoError(err)
+	s.ErrorIs(err, domain.ErrForbidden)
 }
 
 // ── UpdatePassword ──

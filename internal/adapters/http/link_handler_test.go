@@ -247,6 +247,7 @@ func (s *HandlerSuite) TestGetLink_OwnerOnly_NonOwner_Unauthorized() {
 // ── DELETE /links/{id} ──
 
 func (s *HandlerSuite) TestDeleteLink_OK() {
+	s.expectLinkMutationGate()
 	s.linkManager.EXPECT().Delete(gomock.Any(), testLinkID, "editcode1234", uuid.Nil).Return(nil)
 
 	w := httptest.NewRecorder()
@@ -259,6 +260,7 @@ func (s *HandlerSuite) TestDeleteLink_OK() {
 }
 
 func (s *HandlerSuite) TestDeleteLink_Forbidden() {
+	s.expectLinkMutationGate()
 	s.linkManager.EXPECT().Delete(gomock.Any(), testLinkID, "wrong", uuid.Nil).
 		Return(domain.ErrInvalidEditCode)
 
@@ -267,6 +269,46 @@ func (s *HandlerSuite) TestDeleteLink_Forbidden() {
 	r.Header.Set("X-Edit-Code", "wrong")
 
 	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusForbidden, w.Code)
+}
+
+// TestDeleteLink_Gated_PrivateLink verifies the anonymous link-mutation gate: with auth
+// configured, an anonymous DELETE of a privacy=authenticated link is refused with 401 before
+// the usecase runs (Delete having no EXPECT guarantees that) — an anonymous caller could not
+// read the link, so they may not mutate it via an edit code either.
+func (s *HandlerSuite) TestDeleteLink_Gated_PrivateLink() {
+	router := s.newLinkRouterWithTOTPAuth()
+	link := newTestLink()
+	link.Privacy = new(domain.PrivacyAuthenticated)
+	s.linkManager.EXPECT().Peek(gomock.Any(), testLinkID).Return(link, nil)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodDelete, "/links/"+testLinkID, nil)
+	r.Header.Set("X-Edit-Code", "editcode1234")
+	r.Header.Set("Accept", "application/json")
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusUnauthorized, w.Code)
+	s.JSONEq(`{"message":"unauthorized"}`, w.Body.String())
+}
+
+// TestDeleteLink_Gated_PublicLink_WrongEditCode verifies the gate passes for a link an
+// anonymous caller could read: the wrong edit code then surfaces as the usecase's 403 —
+// never the middleware-level 401.
+func (s *HandlerSuite) TestDeleteLink_Gated_PublicLink_WrongEditCode() {
+	router := s.newLinkRouterWithTOTPAuth()
+	s.expectLinkMutationGate()
+	s.linkManager.EXPECT().Delete(gomock.Any(), testLinkID, "wrong", uuid.Nil).
+		Return(domain.ErrInvalidEditCode)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodDelete, "/links/"+testLinkID, nil)
+	r.Header.Set("X-Edit-Code", "wrong")
+	r.Header.Set("Accept", "application/json")
+
+	router.ServeHTTP(w, r)
 
 	s.Equal(http.StatusForbidden, w.Code)
 }

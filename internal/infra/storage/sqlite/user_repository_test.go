@@ -198,9 +198,26 @@ func (s *UserRepositoryTestSuite) TestRevoke_RemovesUser() {
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
-func (s *UserRepositoryTestSuite) TestRevoke_NonExistentUser_NoError() {
+// TestRevoke_LastAdminRefused verifies the atomic last-admin guard: deleting the only admin
+// must fail with domain.ErrForbidden and leave the user in place — otherwise two concurrent
+// revocations could leave the server permanently admin-less.
+func (s *UserRepositoryTestSuite) TestRevoke_LastAdminRefused() {
+	ctx := s.T().Context()
+	admin := s.newUser("admin")
+	admin.IsAdmin = true
+	s.Require().NoError(s.repo.Create(ctx, admin))
+
+	err := s.repo.Revoke(ctx, admin.ID)
+
+	s.Require().ErrorIs(err, domain.ErrForbidden)
+
+	_, getErr := s.repo.GetByID(ctx, admin.ID)
+	s.Require().NoError(getErr, "the last admin must survive a refused revocation")
+}
+
+func (s *UserRepositoryTestSuite) TestRevoke_NonExistentUser_ReturnsErrForbidden() {
 	err := s.repo.Revoke(s.T().Context(), uuid.New())
-	s.Require().NoError(err)
+	s.ErrorIs(err, domain.ErrForbidden)
 }
 
 // TestRevoke_CascadesSessionsAndInvites verifies that with foreign_keys enabled
@@ -227,27 +244,27 @@ func TestRevoke_CascadesSessionsAndInvites(t *testing.T) {
 	sessions := NewSessionRepository(db)
 	invites := NewInviteRepository(db)
 
-	admin := &domain.User{
-		ID: uuid.New(), Username: "admin", TOTPSecret: "s", PasswordHash: "h",
-		KDFSalt: []byte("saltsaltsalt1234"), IsAdmin: true, CreatedAt: time.Now().Truncate(time.Second),
+	usr := &domain.User{
+		ID: uuid.New(), Username: "usr", TOTPSecret: "s", PasswordHash: "h",
+		KDFSalt: []byte("saltsaltsalt1234"), IsAdmin: false, CreatedAt: time.Now().Truncate(time.Second),
 	}
-	require.NoError(t, users.Create(ctx, admin))
+	require.NoError(t, users.Create(ctx, usr))
 
 	require.NoError(t, sessions.Create(ctx, &domain.Session{
-		SessionID: "sess-1", UserID: admin.ID,
+		SessionID: "sess-1", UserID: usr.ID,
 		CreatedAt: time.Now(), ExpiresAt: time.Now().Add(time.Hour),
 	}))
 
-	_, err = invites.Issue(ctx, admin.ID)
+	_, err = invites.Issue(ctx, usr.ID)
 	require.NoError(t, err)
 
-	require.NoError(t, users.Revoke(ctx, admin.ID))
+	require.NoError(t, users.Revoke(ctx, usr.ID))
 
-	sessCount, err := db.NewSelect().TableExpr("sessions").Where("user_id = ?", admin.ID).Count(ctx)
+	sessCount, err := db.NewSelect().TableExpr("sessions").Where("user_id = ?", usr.ID).Count(ctx)
 	require.NoError(t, err)
 	require.Zero(t, sessCount, "sessions must cascade-delete with the user")
 
-	invCount, err := db.NewSelect().TableExpr("invites").Where("created_by = ?", admin.ID).Count(ctx)
+	invCount, err := db.NewSelect().TableExpr("invites").Where("created_by = ?", usr.ID).Count(ctx)
 	require.NoError(t, err)
 	require.Zero(t, invCount, "invites must cascade-delete with the issuing user")
 }

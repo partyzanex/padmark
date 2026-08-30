@@ -64,7 +64,7 @@ func handleDeleteLinkRes(res padmark.DeleteLinkRes) error {
 	case *padmark.DeleteLinkUnauthorized:
 		return fmt.Errorf("unauthorized: %s", typed.Message)
 	case *padmark.DeleteLinkForbidden:
-		return errors.New("forbidden: wrong edit code")
+		return errors.New("forbidden: wrong edit code or --token is not the link's owner")
 	case *padmark.DeleteLinkNotFound:
 		return errors.New("link not found")
 	case *padmark.DeleteLinkInternalServerError:

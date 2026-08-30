@@ -184,6 +184,46 @@ func newTestNote(title, content string) *domain.Note {
 	}
 }
 
+// newTestUser builds a minimal user fixture: only the identity fields the auth context carries.
+func newTestUser(name string) *domain.User {
+	usr := new(domain.User)
+	usr.ID = uuid.New()
+	usr.Username = name
+
+	return usr
+}
+
+// sessioned adds a valid session cookie to r for tests that need an authenticated caller; pair
+// it with s.authMgr.EXPECT().GetSession(...).Return(user, nil).
+func sessioned(r *http.Request) *http.Request {
+	cookie := new(http.Cookie) //nolint:gosec // G124: test cookie; Secure/HttpOnly are response-only attrs
+	cookie.Name = "padmark_session"
+	cookie.Value = "valid-sess"
+	r.AddCookie(cookie)
+
+	return r
+}
+
+// expectMutationGate installs the Peek expectation that the anonymous mutation gate performs
+// before a mocked PUT/DELETE reaches the usecase: it returns a public (nil privacy) note, so
+// the gate lets the request through. The returned ID mirrors the requested one so per-ID
+// assertions stay possible.
+func (s *HandlerSuite) expectMutationGate() {
+	s.manager.EXPECT().Peek(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ context.Context, id string) (*domain.Note, error) {
+			note := newTestNote("gate", "c") // nil privacy → public
+			note.ID = id
+
+			return note, nil
+		},
+	).AnyTimes()
+}
+
+// expectLinkMutationGate is the links counterpart of expectMutationGate.
+func (s *HandlerSuite) expectLinkMutationGate() {
+	s.linkManager.EXPECT().Peek(gomock.Any(), gomock.Any()).Return(newTestLink(), nil).AnyTimes()
+}
+
 // ── IndexPage ──
 
 func (s *HandlerSuite) TestIndexPage() {
@@ -896,11 +936,19 @@ func (s *HandlerSuite) TestGetNote_MultiSegmentSlug_PrivateRequiresAuth() {
 	s.Equal(http.StatusUnauthorized, w.Code)
 }
 
-func (s *HandlerSuite) TestEditPage_MultiSegmentPath_RequiresAuth() {
-	// Regression guard: multi-segment slug support must NOT open up reserved routes. A GET to
-	// /edit/<path> is redirected to /login before reaching the edit page — it is not mistaken for
-	// a public note view just because it now spans multiple segments.
+// TestEditPage_MultiSegmentPath_GatedByPrivacy verifies the /edit/{id...} route's gating: GET
+// /edit/<multi-segment-slug> is admitted by isPublicRoute (the editor's save still requires the
+// edit code on the PUT), but per-note privacy is enforced inside EditPage via handlePrivateAuth —
+// a public note renders the form, a privacy=owner note redirects an anonymous caller to /login.
+func (s *HandlerSuite) TestEditPage_MultiSegmentPath_GatedByPrivacy() {
 	router := s.newRouterWithTOTPAuth()
+
+	public := newTestNote("guide", "# guide")
+	private := newTestNote("secret", "hidden")
+	private.Privacy = new(domain.PrivacyOwner)
+
+	s.manager.EXPECT().Peek(gomock.Any(), "project/GUIDE.md").Return(public, nil)
+	s.manager.EXPECT().Peek(gomock.Any(), "project/secret.md").Return(private, nil)
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/edit/project/GUIDE.md", nil)
@@ -908,9 +956,18 @@ func (s *HandlerSuite) TestEditPage_MultiSegmentPath_RequiresAuth() {
 
 	router.ServeHTTP(w, r)
 
+	s.Equal(http.StatusOK, w.Code)
+	s.Contains(w.Body.String(), `const noteID = "abc-123"`)
+
+	w = httptest.NewRecorder()
+	r = httptest.NewRequest(http.MethodGet, "/edit/project/secret.md", nil)
+	r.Header.Set("Accept", "text/html")
+
+	router.ServeHTTP(w, r)
+
 	s.Equal(http.StatusSeeOther, w.Code)
 	s.True(strings.HasPrefix(w.Header().Get("Location"), "/login?next="),
-		"reserved /edit/{id...} must redirect to login, not be treated as a public note")
+		"privacy=owner note must redirect an anonymous caller to login, not render the editor")
 }
 
 func (s *HandlerSuite) TestGetNote_Private_NotFound() {
@@ -930,6 +987,8 @@ func (s *HandlerSuite) TestGetNote_Private_NotFound() {
 // ── UpdateNote ──
 
 func (s *HandlerSuite) TestUpdateNote_OK() {
+	s.expectMutationGate()
+
 	createdAt := time.Now().Add(-time.Hour)
 	updated := &domain.Note{
 		ID:          testID,
@@ -959,6 +1018,8 @@ func (s *HandlerSuite) TestUpdateNote_OK() {
 }
 
 func (s *HandlerSuite) TestUpdateNote_WithTTL() {
+	s.expectMutationGate()
+
 	updated := newTestNote("updated", "body")
 
 	s.manager.EXPECT().Update(gomock.Any(), testID, "code", uuid.Nil, gomock.Any()).
@@ -981,6 +1042,8 @@ func (s *HandlerSuite) TestUpdateNote_WithTTL() {
 }
 
 func (s *HandlerSuite) TestUpdateNote_ImmediateBurn() {
+	s.expectMutationGate()
+
 	updated := newTestNote("updated", "body")
 
 	s.manager.EXPECT().Update(gomock.Any(), testID, "code", uuid.Nil, gomock.Any()).
@@ -1003,6 +1066,8 @@ func (s *HandlerSuite) TestUpdateNote_ImmediateBurn() {
 }
 
 func (s *HandlerSuite) TestUpdateNote_WithPrivacy() {
+	s.expectMutationGate()
+
 	updated := newTestNote("updated", "body")
 
 	s.manager.EXPECT().Update(gomock.Any(), testID, "code", uuid.Nil, gomock.Any()).
@@ -1023,6 +1088,7 @@ func (s *HandlerSuite) TestUpdateNote_WithPrivacy() {
 }
 
 func (s *HandlerSuite) TestUpdateNote_NotFound() {
+	s.expectMutationGate()
 	s.manager.EXPECT().Update(gomock.Any(), "missing", "", uuid.Nil, gomock.Any()).Return(nil, domain.ErrNotFound)
 
 	body := `{"title":"title","content":"content","edit_code":""}`
@@ -1036,6 +1102,7 @@ func (s *HandlerSuite) TestUpdateNote_NotFound() {
 }
 
 func (s *HandlerSuite) TestUpdateNote_Forbidden() {
+	s.expectMutationGate()
 	s.manager.EXPECT().Update(gomock.Any(), testID, "wrong", uuid.Nil, gomock.Any()).Return(nil, domain.ErrInvalidEditCode)
 
 	body := `{"title":"title","content":"content","edit_code":"wrong"}`
@@ -1057,6 +1124,8 @@ func (s *HandlerSuite) TestUpdateNote_Forbidden() {
 // path-like slug can be edited and deleted by its address (single-segment IDs still go to ogen).
 
 func (s *HandlerSuite) TestUpdateNote_MultiSegmentSlug_ByURL_Acceptance() {
+	s.expectMutationGate()
+
 	const mid = "project/GUIDE.md"
 
 	updated := newTestNote("Guide", "new body")
@@ -1073,6 +1142,8 @@ func (s *HandlerSuite) TestUpdateNote_MultiSegmentSlug_ByURL_Acceptance() {
 }
 
 func (s *HandlerSuite) TestDeleteNote_MultiSegmentSlug_ByURL_Acceptance() {
+	s.expectMutationGate()
+
 	const mid = "project/GUIDE.md"
 
 	s.manager.EXPECT().Delete(gomock.Any(), mid, "code", uuid.Nil).Return(nil)
@@ -1089,6 +1160,7 @@ func (s *HandlerSuite) TestDeleteNote_MultiSegmentSlug_ByURL_Acceptance() {
 // from a PUT request body, the handler passes Privacy=nil to manager.Update so that the
 // storage layer can COALESCE(NULL, privacy) and preserve the existing DB value.
 func (s *HandlerSuite) TestUpdateNote_OmittedPrivate_PreservesPrivacy() {
+	s.expectMutationGate()
 	s.manager.EXPECT().Update(gomock.Any(), testID, "code", uuid.Nil, gomock.Any()).
 		DoAndReturn(func(_ context.Context, _, _ string, _ uuid.UUID, n *domain.Note) (*domain.Note, error) {
 			// nil means "don't change" — storage will COALESCE(NULL, privacy).
@@ -1120,6 +1192,7 @@ func (s *HandlerSuite) TestUpdateNote_InvalidBody() {
 // ── DeleteNote ──
 
 func (s *HandlerSuite) TestDeleteNote_OK() {
+	s.expectMutationGate()
 	s.manager.EXPECT().Delete(gomock.Any(), testID, "editcode1234", uuid.Nil).Return(nil)
 
 	w := httptest.NewRecorder()
@@ -1132,6 +1205,7 @@ func (s *HandlerSuite) TestDeleteNote_OK() {
 }
 
 func (s *HandlerSuite) TestDeleteNote_QueryParam() {
+	s.expectMutationGate()
 	s.manager.EXPECT().Delete(gomock.Any(), testID, "fromquery", uuid.Nil).Return(nil)
 
 	w := httptest.NewRecorder()
@@ -1143,6 +1217,7 @@ func (s *HandlerSuite) TestDeleteNote_QueryParam() {
 }
 
 func (s *HandlerSuite) TestDeleteNote_NotFound() {
+	s.expectMutationGate()
 	s.manager.EXPECT().Delete(gomock.Any(), "nonexistent", "code", uuid.Nil).Return(domain.ErrNotFound)
 
 	w := httptest.NewRecorder()
@@ -1155,6 +1230,7 @@ func (s *HandlerSuite) TestDeleteNote_NotFound() {
 }
 
 func (s *HandlerSuite) TestDeleteNote_Forbidden() {
+	s.expectMutationGate()
 	s.manager.EXPECT().Delete(gomock.Any(), testID, "wrong", uuid.Nil).Return(domain.ErrInvalidEditCode)
 
 	w := httptest.NewRecorder()
@@ -1493,6 +1569,7 @@ func (s *HandlerSuite) TestRateLimit_DifferentIPs() {
 // ── Fail lockout ──
 
 func (s *HandlerSuite) TestFailLockout_Lockout() {
+	s.expectMutationGate()
 	s.manager.EXPECT().
 		Update(gomock.Any(), testID, "wrong", uuid.Nil, gomock.Any()).
 		Return(nil, domain.ErrForbidden).
@@ -1519,6 +1596,8 @@ func (s *HandlerSuite) TestFailLockout_Lockout() {
 // count: an owner who mistypes the edit code a few times before getting it right must not carry
 // a stale near-threshold counter into their next legitimate edit.
 func (s *HandlerSuite) TestFailLockout_ResetsOnSuccess() {
+	s.expectMutationGate()
+
 	note := newTestNote("t", "c")
 
 	s.manager.EXPECT().
@@ -1561,6 +1640,8 @@ func (s *HandlerSuite) TestFailLockout_ResetsOnSuccess() {
 }
 
 func (s *HandlerSuite) TestFailLockout_NoIncrementOnSuccess() {
+	s.expectMutationGate()
+
 	note := newTestNote("t", "c")
 	s.manager.EXPECT().
 		Update(gomock.Any(), testID, "valid", uuid.Nil, gomock.Any()).
@@ -1579,6 +1660,7 @@ func (s *HandlerSuite) TestFailLockout_NoIncrementOnSuccess() {
 }
 
 func (s *HandlerSuite) TestFailLockout_NoIncrementOnNonForbiddenError() {
+	s.expectMutationGate()
 	s.manager.EXPECT().
 		Update(gomock.Any(), testID, "wrong", uuid.Nil, gomock.Any()).
 		Return(nil, domain.ErrNotFound).
@@ -1596,6 +1678,7 @@ func (s *HandlerSuite) TestFailLockout_NoIncrementOnNonForbiddenError() {
 }
 
 func (s *HandlerSuite) TestFailLockout_DeleteAlsoLocked() {
+	s.expectMutationGate()
 	s.manager.EXPECT().
 		Delete(gomock.Any(), testID, "wrong", uuid.Nil).
 		Return(domain.ErrForbidden).
@@ -1617,6 +1700,8 @@ func (s *HandlerSuite) TestFailLockout_DeleteAlsoLocked() {
 }
 
 func (s *HandlerSuite) TestFailLockout_IndependentPerNoteID() {
+	s.expectMutationGate()
+
 	body := `{"title":"t","content":"c","edit_code":"wrong"}`
 
 	s.manager.EXPECT().
@@ -1719,19 +1804,6 @@ func (s *HandlerSuite) TestAuth_NoTokensConfigured() {
 	s.Equal(http.StatusCreated, w.Code)
 }
 
-func (s *HandlerSuite) TestAuth_MissingToken_API() {
-	router := s.newRouterWithTOTPAuth()
-
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodPost, "/notes", strings.NewReader(`{"title":"t","content":"c"}`))
-	r.Header.Set("Content-Type", "application/json")
-	r.Header.Set("Accept", "application/json")
-
-	router.ServeHTTP(w, r)
-
-	s.Equal(http.StatusUnauthorized, w.Code)
-}
-
 func (s *HandlerSuite) TestAuth_MissingToken_Browser() {
 	router := s.newRouterWithTOTPAuth()
 
@@ -1746,17 +1818,18 @@ func (s *HandlerSuite) TestAuth_MissingToken_Browser() {
 		"should redirect to /login with ?next= param")
 }
 
-// TestAuth_InvalidToken_JSONError verifies a non-browser 401 (missing/invalid bearer token) is a
-// JSON body matching the same {"message": ...} shape as every other API error, not http.Error's
+// TestAuth_InvalidToken_JSONError verifies a non-browser 401 (invalid bearer token) is a JSON
+// body matching the same {"message": ...} shape as every other API error, not http.Error's
 // plain text — the generated ogen client (used by the CLI) decodes API errors as JSON, so a
 // plain-text body would surface as an opaque decode failure instead of a clean "unauthorized".
+// /admin is a named route, so it is gated by the middleware itself, before any handler runs.
 func (s *HandlerSuite) TestAuth_InvalidToken_JSONError() {
 	router := s.newRouterWithTOTPAuth()
+	s.authMgr.EXPECT().ResolveAPIToken(gomock.Any(), "bogus-token").Return(nil, domain.ErrForbidden)
 
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodPost, "/notes", strings.NewReader(`{}`))
-	r.Header.Set("Content-Type", "application/json")
-	r.Header.Set("Accept", "application/json")
+	r := httptest.NewRequest(http.MethodGet, "/admin", nil)
+	r.Header.Set("Authorization", "Bearer bogus-token")
 
 	router.ServeHTTP(w, r)
 
@@ -1795,8 +1868,14 @@ func (s *HandlerSuite) TestAuth_PublicNoteView() {
 	s.Equal(http.StatusOK, w.Code)
 }
 
-func (s *HandlerSuite) TestAuth_CreateRequiresAuth() {
+// TestAuth_Create_AnonymousAllowed verifies that with auth configured, an anonymous caller can
+// still create a note: POST /notes is admitted by isPublicRoute, and the usecase itself rejects
+// an owner-only privacy requested by an anonymous caller (tested via ValidateOwnership, not
+// middleware).
+func (s *HandlerSuite) TestAuth_Create_AnonymousAllowed() {
 	router := s.newRouterWithTOTPAuth()
+	note := newTestNote("t", "c")
+	s.manager.EXPECT().Create(gomock.Any(), gomock.Any()).Return(note, nil)
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPost, "/notes", strings.NewReader(`{"title":"t","content":"c"}`))
@@ -1805,11 +1884,19 @@ func (s *HandlerSuite) TestAuth_CreateRequiresAuth() {
 
 	router.ServeHTTP(w, r)
 
-	s.Equal(http.StatusUnauthorized, w.Code)
+	s.Equal(http.StatusCreated, w.Code)
 }
 
-func (s *HandlerSuite) TestAuth_UpdateRequiresAuth() {
+// TestAuth_Update_Anonymous_PublicNote_WrongEditCode verifies the restored edit_code workflow:
+// with auth configured, an anonymous caller hitting PUT on a public note passes the middleware
+// and the mutation privacy gate (a public note admits anonymous callers), then the usecase's
+// edit-code verification decides the outcome — a wrong code yields 403, not the middleware's 401.
+func (s *HandlerSuite) TestAuth_Update_Anonymous_PublicNote_WrongEditCode() {
 	router := s.newRouterWithTOTPAuth()
+	s.expectMutationGate()
+	s.manager.EXPECT().
+		Update(gomock.Any(), testID, "x", uuid.Nil, gomock.Any()).
+		Return(nil, domain.ErrInvalidEditCode)
 
 	w := httptest.NewRecorder()
 	body := `{"title":"t","content":"c","edit_code":"x"}`
@@ -1819,19 +1906,48 @@ func (s *HandlerSuite) TestAuth_UpdateRequiresAuth() {
 
 	router.ServeHTTP(w, r)
 
-	s.Equal(http.StatusUnauthorized, w.Code)
+	s.Equal(http.StatusForbidden, w.Code)
 }
 
-func (s *HandlerSuite) TestAuth_DeleteRequiresAuth() {
+// TestAuth_Delete_Anonymous_PublicNote_WrongEditCode is the DELETE counterpart of
+// TestAuth_Update_Anonymous_PublicNote_WrongEditCode: a wrong edit code is a usecase-level 403,
+// never a middleware-level 401.
+func (s *HandlerSuite) TestAuth_Delete_Anonymous_PublicNote_WrongEditCode() {
 	router := s.newRouterWithTOTPAuth()
+	s.expectMutationGate()
+	s.manager.EXPECT().
+		Delete(gomock.Any(), testID, "wrong", uuid.Nil).
+		Return(domain.ErrInvalidEditCode)
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodDelete, "/notes/"+testID, nil)
+	r.Header.Set("X-Edit-Code", "wrong")
+	r.Header.Set("Accept", "application/json")
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusForbidden, w.Code)
+}
+
+// TestAuth_MissingToken_API verifies the mutation privacy gate on the API path: with auth
+// configured, an anonymous PUT against a privacy=owner note is refused with 401 by the gate —
+// someone who could not read the note may not attempt to mutate it via an edit code either.
+// Update having no EXPECT guarantees the usecase is never reached.
+func (s *HandlerSuite) TestAuth_MissingToken_API() {
+	router := s.newRouterWithTOTPAuth()
+	private := newTestNote("t", "c")
+	private.Privacy = new(domain.PrivacyOwner)
+	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(private, nil)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPut, "/notes/"+testID, strings.NewReader(`{"title":"t","content":"c"}`))
+	r.Header.Set("Content-Type", "application/json")
 	r.Header.Set("Accept", "application/json")
 
 	router.ServeHTTP(w, r)
 
 	s.Equal(http.StatusUnauthorized, w.Code)
+	s.JSONEq(`{"message":"unauthorized"}`, w.Body.String())
 }
 
 func (s *HandlerSuite) TestGetNote_OpenInstance_ShowsEditButtons() {
@@ -2298,6 +2414,151 @@ func (s *HandlerSuite) TestPrivateNote_TOTPMode_Unauthenticated() {
 	s.Equal(http.StatusSeeOther, w.Code)
 	s.True(strings.HasPrefix(w.Header().Get("Location"), "/login?next="),
 		"unauthenticated request to private note in TOTP mode must redirect to /login")
+}
+
+// ── Anonymous mutation privacy gate (PUT/DELETE) ──
+//
+// The gate (anonymousNoteMutationAllowed / gateAnonymousMutation) implements the restored
+// semantics: an anonymous caller may mutate a note with an edit code if and only if they could
+// also read it. The tests below exercise every branch: refused (private), deferred (Peek error),
+// passed for an authenticated caller, and no interaction with the fail-lockout.
+
+// TestMutationGate_AnonymousDelete_PrivateNote verifies the ogen DELETE gate: with auth
+// configured, an anonymous DELETE against a privacy=authenticated note is refused with a JSON
+// 401 before the usecase is ever reached (Delete having no EXPECT guarantees that).
+func (s *HandlerSuite) TestMutationGate_AnonymousDelete_PrivateNote() {
+	router := s.newRouterWithTOTPAuth()
+	note := newTestNote("secret", "nope")
+	note.Privacy = new(domain.PrivacyAuthenticated)
+	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodDelete, "/notes/"+testID, nil)
+	r.Header.Set("X-Edit-Code", "whatever")
+	r.Header.Set("Accept", "application/json")
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusUnauthorized, w.Code)
+	s.Contains(w.Header().Get("Content-Type"), "application/json")
+	s.JSONEq(`{"message":"unauthorized"}`, w.Body.String())
+}
+
+// TestMutationGate_AnonymousDelete_OwnerNote is the same branch for privacy=owner — the strictest
+// level (even a signed-in non-owner may not read it, let alone mutate it anonymously).
+func (s *HandlerSuite) TestMutationGate_AnonymousDelete_OwnerNote() {
+	router := s.newRouterWithTOTPAuth()
+	note := newTestNote("secret", "nope")
+	note.Privacy = new(domain.PrivacyOwner)
+	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodDelete, "/notes/"+testID, nil)
+	r.Header.Set("X-Edit-Code", "whatever")
+	r.Header.Set("Accept", "application/json")
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusUnauthorized, w.Code)
+}
+
+// TestMutationGate_AuthenticatedCaller_PassesGate verifies that a signed-in caller is never
+// refused by the gate — even on a privacy=owner note they do not own. The gate short-circuits
+// on the caller ID without a Peek and steps aside; ownership is decided inside the usecase (a
+// non-owner without the edit code gets 403 there).
+func (s *HandlerSuite) TestMutationGate_AuthenticatedCaller_PassesGate_PersonalNote() {
+	usr := newTestUser("bob")
+
+	note := newTestNote("secret", "someone else's")
+	note.Privacy = new(domain.PrivacyOwner)
+	note.OwnerID = new(uuid.UUID) // owned by a user who is not in this request
+
+	router := s.newRouterWithTOTPAuth()
+	s.manager.EXPECT().
+		Update(gomock.Any(), testID, "", usr.ID, gomock.Any()).
+		Return(nil, domain.ErrForbidden)
+	s.authMgr.EXPECT().GetSession(gomock.Any(), "valid-sess").Return(usr, nil).Times(1)
+
+	w := httptest.NewRecorder()
+	body := `{"title":"t","content":"c"}`
+	r := sessioned(httptest.NewRequest(http.MethodPut, "/notes/"+testID, strings.NewReader(body)))
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("Accept", "application/json")
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusForbidden, w.Code)
+}
+
+// TestMutationGate_PeekError_DefersToMutation verifies the gate's fail-open behaviour on a
+// Peek error: the request proceeds to the real mutation, so the caller sees the same 404 a read
+// of a missing note would produce — never a spurious 401 (and never silent success).
+func (s *HandlerSuite) TestMutationGate_PeekError_DefersToMutation() {
+	router := s.newRouterWithTOTPAuth()
+	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(nil, domain.ErrNotFound)
+	s.manager.EXPECT().
+		Delete(gomock.Any(), testID, "whatever", uuid.Nil).
+		Return(domain.ErrNotFound)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodDelete, "/notes/"+testID, nil)
+	r.Header.Set("X-Edit-Code", "whatever")
+	r.Header.Set("Accept", "application/json")
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusNotFound, w.Code)
+}
+
+// TestMutationGate_Note401DoesNotTriggerFailLockout verifies the gate/lockout interplay: the
+// fail-lockout counts consecutive 403s (wrong edit codes), while the mutation gate's 401 is a
+// pre-check that never reaches the counter — repeated gated attempts stay 401 and never
+// escalate to 429.
+func (s *HandlerSuite) TestMutationGate_Note401DoesNotTriggerFailLockout() {
+	router := s.newRouterWithTOTPAuth()
+	note := newTestNote("secret", "nope")
+	note.Privacy = new(domain.PrivacyOwner)
+	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil).Times(12)
+
+	for range 12 {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodPut, "/notes/"+testID, strings.NewReader(`{"title":"t","content":"c"}`))
+		r.Header.Set("Content-Type", "application/json")
+		r.Header.Set("Accept", "application/json")
+
+		router.ServeHTTP(w, r)
+
+		s.Equal(http.StatusUnauthorized, w.Code, "each gated attempt must be 401")
+	}
+}
+
+// TestMutationGate_MultiSegmentPaths verifies the native {id...} routes are gated too: an
+// anonymous PUT and DELETE of a privacy=multi-segment-slug note whose privacy refuses anonymous
+// callers are refused with 401 (Update/Delete having no EXPECT guarantees the usecase is
+// never reached).
+func (s *HandlerSuite) TestMutationGate_MultiSegmentPaths() {
+	router := s.newRouterWithTOTPAuth()
+	note := newTestNote("guide", "internal")
+	note.Privacy = new(domain.PrivacyAuthenticated)
+	s.manager.EXPECT().Peek(gomock.Any(), "project/GUIDE.md").Return(note, nil).Times(2)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPut, "/notes/project/GUIDE.md", strings.NewReader(`{"title":"t","content":"c"}`))
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("Accept", "application/json")
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusUnauthorized, w.Code)
+
+	w = httptest.NewRecorder()
+	r = httptest.NewRequest(http.MethodDelete, "/notes/project/GUIDE.md", nil)
+	r.Header.Set("X-Edit-Code", "whatever")
+	r.Header.Set("Accept", "application/json")
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusUnauthorized, w.Code)
 }
 
 // TestPrivateNote_TOTPMode_Authenticated verifies that a valid session grants

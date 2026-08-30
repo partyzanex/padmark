@@ -37,7 +37,7 @@ domain  <--  usecases  <--  infra
 
 | Layer | Responsibility | Dependencies |
 |-------|----------------|--------------|
-| **Domain** | Entities, domain errors | stdlib only |
+| **Domain** | Entities, domain errors | stdlib only (+ `github.com/google/uuid` for user-keyed IDs — recorded exception) |
 | **Usecases** | Business logic, dependency interfaces | Domain only |
 | **Infra** | Implementations: DB, cache, HTTP clients, CLI | Implements usecases interfaces |
 | **Adapters** | Protocol translation: HTTP handlers | Converts between domain and protocol |
@@ -48,7 +48,7 @@ domain  <--  usecases  <--  infra
 |-----------|----------------|
 | Dependencies point inward only | infra/adapters → usecases → domain |
 | Interfaces next to consumer | `Repository` in usecases, not in domain or infra |
-| Zero dependencies in domain | stdlib only, no interfaces |
+| Zero dependencies in domain | stdlib only (exception: `github.com/google/uuid` for user-keyed IDs), no interfaces |
 | SQL-first | uptrace/bun + goose migrations |
 | Mock generation | `//go:generate` with `go.uber.org/mock/mockgen` |
 | Vendor | `go mod vendor`, committed to the repo |
@@ -112,7 +112,7 @@ import "errors"
 var (
     ErrNotFound      = errors.New("not found")
     ErrTitleRequired = errors.New("title is required")
-    ErrContentTooLong = errors.New("content exceeds maximum length")
+    ErrInvalidSlug   = errors.New("invalid slug")
 )
 ```
 
@@ -133,7 +133,7 @@ type Note struct {
 
 **Rules:**
 - No `interface` in domain — they belong in usecases
-- Stdlib only
+- Stdlib only (exception: `github.com/google/uuid` for user-keyed IDs)
 - Sentinel errors via `errors.New`
 - Business rules as methods on entities (if needed)
 

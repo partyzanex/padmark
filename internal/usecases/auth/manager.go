@@ -25,6 +25,11 @@ type UserStore interface {
 	// returning false when counter is not strictly greater (replay). The conditional
 	// update is the cross-instance, restart-safe guard against TOTP code reuse.
 	UpdateTOTPCounter(ctx context.Context, id uuid.UUID, counter int64) (bool, error)
+	// Revoke deletes the user record by ID. The delete itself refuses to remove the last
+	// remaining admin (a cross-instance TOCTOU on a read-side count would still let two
+	// concurrent revocations take all admins out), returning domain.ErrForbidden in that case
+	// or when the target does not exist — callers pre-check GetByID to surface a friendlier
+	// ErrNotFound.
 	Revoke(ctx context.Context, id uuid.UUID) error
 }
 

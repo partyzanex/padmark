@@ -155,6 +155,19 @@ func (s *ManagerTestSuite) TestCreate_RandomSlugCollision_ExhaustsRetries() {
 	s.ErrorIs(err, domain.ErrHashCollision)
 }
 
+func (s *ManagerTestSuite) TestCreate_CustomSlugRejectsMultiSegment() {
+	// Links are only served at single-segment routes (/r/{id}, /links/{id}); a path-like alias
+	// would be created but unroutable, so Create must reject it up front. No repo call
+	// expectations are set — gomock fails the test if the guard ever lets a slug through.
+	_, err := s.manager.Create(s.T().Context(), "https://example.com", CreateOptions{CustomHash: "docs/guide"})
+
+	s.Require().ErrorIs(err, domain.ErrInvalidSlug)
+
+	_, err = s.manager.Create(s.T().Context(), "https://example.com", CreateOptions{CustomHash: "a/b/c"})
+
+	s.ErrorIs(err, domain.ErrInvalidSlug)
+}
+
 func (s *ManagerTestSuite) TestCreate_CustomSlugDisabled() {
 	s.manager = NewManager(s.storage, s.notes, passthroughEncryptor{}, identityHasher{},
 		slog.New(slog.DiscardHandler), false)

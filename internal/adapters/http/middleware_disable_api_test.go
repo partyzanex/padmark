@@ -72,6 +72,10 @@ func (s *DisableAPISuite) TestAPIPaths_Return503WithFixedMessage() {
 		{"read single-segment", http.MethodGet, "/notes/" + testID, ""},
 		{"update multi-segment", http.MethodPut, "/notes/project/GUIDE.md", `{"title":"t","content":"c"}`},
 		{"delete multi-segment", http.MethodDelete, "/notes/project/GUIDE.md", ""},
+		{"link create", http.MethodPost, "/links", `{"target_url":"https://example.com"}`},
+		{"link bulk create", http.MethodPost, "/links/bulk", `{"target_urls":["https://example.com"]}`},
+		{"link read single-segment", http.MethodGet, "/links/" + testID, ""},
+		{"link delete single-segment", http.MethodDelete, "/links/" + testID, ""},
 		{"api docs", http.MethodGet, "/api", ""},
 		{"openapi spec", http.MethodGet, "/api/openapi.yaml", ""},
 	}
@@ -106,6 +110,7 @@ func (s *DisableAPISuite) TestWebUI_Unaffected() {
 
 	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(newTestNote("t", "c"), nil)
 	s.manager.EXPECT().View(gomock.Any(), testID).Return(newTestNote("t", "c"), nil)
+	s.linkManager.EXPECT().Redirect(gomock.Any(), testID).Return(newTestLink(), nil)
 	s.pinger.EXPECT().PingContext(gomock.Any()).Return(nil)
 
 	cases := []struct {
@@ -117,6 +122,7 @@ func (s *DisableAPISuite) TestWebUI_Unaffected() {
 		{"short URL note view", http.MethodGet, "/" + testID},
 		{"edit page", http.MethodGet, "/edit/" + testID},
 		{"login page", http.MethodGet, "/login"},
+		{"short link redirect", http.MethodGet, "/r/" + testID},
 		{"healthz", http.MethodGet, "/healthz"},
 		{"readyz", http.MethodGet, "/readyz"},
 	}

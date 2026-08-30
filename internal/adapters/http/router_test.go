@@ -151,15 +151,26 @@ func TestIsPublicRoute(t *testing.T) {
 		{net_http.MethodPost, "/project/GUIDE.md", true},
 		{net_http.MethodPost, "/notes/abc123", true},
 		{net_http.MethodPost, "/abc123", true},
-		{net_http.MethodPost, "/notes", false},
+		// Mutations pass the middleware too: per-note privacy (reads) and edit-code
+		// ownership (writes) are enforced downstream, per resource — see isPublicRoute's doc.
+		{net_http.MethodPost, "/notes", true},
+		{net_http.MethodPut, "/notes/abc123", true},
+		{net_http.MethodDelete, "/notes/abc123", true},
+		{net_http.MethodDelete, "/project/GUIDE.md", true},
+		{net_http.MethodGet, "/edit/abc", true},
+		{net_http.MethodPost, "/links", true},
+		{net_http.MethodPost, "/links/bulk", true},
+		{net_http.MethodDelete, "/links/abc123", true},
+		{net_http.MethodGet, "/r/abc123", true},
 		{net_http.MethodGet, "/abc123", true},
 		{net_http.MethodGet, "/unknown-page", true}, // any non-reserved single segment is a candidate note slug by design
 		// Reserved first segments stay non-public even when multi-segment — regression guard so
-		// path-like slugs don't open up protected routes.
-		{net_http.MethodGet, "/edit/abc", false},
-		{net_http.MethodGet, "/edit/a/b", false},
+		// path-like slugs don't open up protected routes. /edit/{id} is the named route opened
+		// up (GET only — EditPage re-checks per-note privacy); non-GET methods on it are not.
+		{net_http.MethodGet, "/edit/a/b", true},
 		{net_http.MethodPost, "/edit/abc", false},
 		{net_http.MethodPost, "/edit/project/GUIDE.md", false},
+		{net_http.MethodPut, "/edit/abc", false},
 		{net_http.MethodGet, "/admin/users", false},
 		{net_http.MethodGet, "/notes/edit/x", false},
 		{net_http.MethodGet, "/success", false},

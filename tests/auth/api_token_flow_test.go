@@ -122,16 +122,27 @@ func TestAPITokenFlow_AdminIssuesKey_CLICreatesNote(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, count, "exactly one note created through the API-token-authenticated path")
 
-	// ── negative: a bogus key is rejected and creates nothing ──
+	// ── negative: a bogus key is rejected when the operation requires a credential ──
+	// POST /notes is anonymous-allowed by design (an invalid key does not block creating a
+	// public note), so the negative case targets a mutation on a privacy=authenticated note —
+	// the mutation privacy gate answers 401 before the note is touched.
+	gatedPrv := domain.PrivacyAuthenticated
+	gated, err := notesMgr.Create(ctx, &domain.Note{
+		Title:   "gated",
+		Content: "requires login",
+		Privacy: &gatedPrv,
+	})
+	require.NoError(t, err)
+
 	badErr := clicmd.NewApp().Run(ctx, []string{
 		"padmark-cli", "--url", srv.URL, "--token", "not-a-real-key",
-		"create", "--title", "nope", "--content", "should be rejected",
+		"delete", gated.ID,
 	})
 	require.Error(t, badErr, "CLI must fail when the API key is invalid")
 
 	count, err = db.NewSelect().TableExpr("notes").Count(ctx)
 	require.NoError(t, err)
-	require.Equal(t, 1, count, "an invalid API key must not create a note")
+	require.Equal(t, 2, count, "an invalid API key must not mutate the privacy-gated note")
 
 	// ── regression: a PRIVATE (authenticated-level) note must be readable via the CLI's API
 	// token ── GET /notes/{id} is a "public" route (auth not required), so the auth middleware

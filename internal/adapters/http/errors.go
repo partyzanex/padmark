@@ -74,8 +74,10 @@ func errorStatusMessage(err error) (status int, message string) {
 func (h *common) writeDecodeError(w http.ResponseWriter, r *http.Request, err error) {
 	status, msg := http.StatusBadRequest, "invalid request body"
 
-	var maxErr *http.MaxBytesError
-	if errors.As(err, &maxErr) {
+	// Consume the typed result (not the ok flag) so errcheck sees the error-typed return used.
+	// Plain assignment (not an if-init) keeps noinlineerr happy.
+	maxBytes, _ := errors.AsType[*http.MaxBytesError](err)
+	if maxBytes != nil {
 		status, msg = http.StatusRequestEntityTooLarge, maxBodyErrorMessage
 	}
 

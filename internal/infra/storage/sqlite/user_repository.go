@@ -158,11 +158,28 @@ func (r *UserRepository) UpdateLastLogin(ctx context.Context, id uuid.UUID, t ti
 	return nil
 }
 
-// Revoke deletes the user record by ID.
+// Revoke deletes the user record by ID. The delete refuses to remove the last remaining admin:
+// the EXISTS guard lives in the DELETE itself, so the check and the delete are one atomic
+// statement — two concurrent revocations of the only two admins cannot both succeed, which
+// would otherwise leave the server permanently admin-less (the bootstrap hole accept-first-admin
+// is meant to close). Zero affected rows means the target does not exist or is the last admin —
+// both map to domain.ErrForbidden; callers pre-check GetByID for a friendlier ErrNotFound.
 func (r *UserRepository) Revoke(ctx context.Context, id uuid.UUID) error {
-	_, err := r.db.NewDelete().TableExpr("users").Where("id = ?", id).Exec(ctx)
+	res, err := r.db.NewDelete().TableExpr("users").
+		Where("id = ?", id).
+		Where("is_admin = 0 OR EXISTS (SELECT 1 FROM users AS u WHERE u.is_admin = 1 AND u.id != ?)", id).
+		Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("revoke user: %w", err)
+	}
+
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("revoke user rows affected: %w", err)
+	}
+
+	if affected == 0 {
+		return fmt.Errorf("revoke user: %w", domain.ErrForbidden)
 	}
 
 	return nil
