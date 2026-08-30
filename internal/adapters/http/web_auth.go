@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"time"
 
 	_ "embed"
 
@@ -200,6 +201,14 @@ func (h *AuthHandler) TOTPLoginHandler(w http.ResponseWriter, r *http.Request) {
 		HttpOnly: true,
 		Secure:   isHTTPS(r, h.trustedProxies),
 		SameSite: http.SameSiteStrictMode,
+		// Unused optional fields zeroed: no Raw, RawExpires, Unparsed, Quoted, Domain, Expires, Partitioned.
+		Raw:         "",
+		RawExpires:  "",
+		Unparsed:    nil,
+		Quoted:      false,
+		Domain:      "",
+		Expires:     time.Time{},
+		Partitioned: false,
 	})
 
 	rotateCSRFToken(w, r, h.csrfSecret, h.trustedProxies)
@@ -237,6 +246,14 @@ func (h *AuthHandler) LogoutHandler(w http.ResponseWriter, r *http.Request) {
 		HttpOnly: true,
 		Secure:   isHTTPS(r, h.trustedProxies),
 		SameSite: http.SameSiteStrictMode,
+		// Unused optional fields zeroed: no Raw, RawExpires, Unparsed, Quoted, Domain, Expires, Partitioned.
+		Raw:         "",
+		RawExpires:  "",
+		Unparsed:    nil,
+		Quoted:      false,
+		Domain:      "",
+		Expires:     time.Time{},
+		Partitioned: false,
 	})
 
 	clearCSRFCookie(w, r, h.trustedProxies)
@@ -278,6 +295,9 @@ func (h *AuthHandler) SetupPage(w http.ResponseWriter, r *http.Request) {
 		Token:        token,
 		IsFirstAdmin: token == "",
 		CSRFToken:    csrfFromContext(r.Context()),
+		// Error/QRCode unset on initial GET render; populated on POST failure or QR display.
+		Error:  "",
+		QRCode: "",
 	})
 	if renderErr != nil {
 		h.log.ErrorContext(r.Context(), "render setup template", "err", renderErr)
@@ -323,6 +343,9 @@ func (h *AuthHandler) SetupHandler(w http.ResponseWriter, r *http.Request) {
 		CSRFToken:    csrfFromContext(r.Context()),
 		Token:        token,
 		IsFirstAdmin: token == "",
+		// Error/QRCode populated below in the failure/success branches; zero on initial render.
+		Error:  "",
+		QRCode: "",
 	}
 
 	if password != passwordConfirm {
@@ -380,6 +403,9 @@ func (h *AuthHandler) ChangePasswordPage(w http.ResponseWriter, r *http.Request)
 	renderErr := h.changePwTmpl.Execute(w, changePwViewData{
 		Nonce:     nonceFromContext(r.Context()),
 		CSRFToken: csrfFromContext(r.Context()),
+		// Error/Success populated by the caller before re-render on failure; zero on GET.
+		Error:   "",
+		Success: false,
 	})
 	if renderErr != nil {
 		h.log.ErrorContext(r.Context(), "render change password template", "err", renderErr)
@@ -403,7 +429,13 @@ func (h *AuthHandler) ChangePasswordHandler(w http.ResponseWriter, r *http.Reque
 	newPasswordConfirm := r.FormValue("new_password_confirm")
 	totpCode := r.FormValue("totp_code")
 
-	data := changePwViewData{Nonce: nonceFromContext(r.Context()), CSRFToken: csrfFromContext(r.Context())}
+	data := changePwViewData{
+		Nonce:     nonceFromContext(r.Context()),
+		CSRFToken: csrfFromContext(r.Context()),
+		// Error/Success populated below on failure/success branches; zero on initial render.
+		Error:   "",
+		Success: false,
+	}
 
 	errMsg := h.doChangePassword(w, r, oldPassword, newPassword, newPasswordConfirm, totpCode)
 	if errMsg == "redirect" {
@@ -493,6 +525,14 @@ func (h *AuthHandler) doChangePassword(
 			HttpOnly: true,
 			Secure:   isHTTPS(r, h.trustedProxies),
 			SameSite: http.SameSiteStrictMode,
+			// Unused optional fields zeroed: no Raw, RawExpires, Unparsed, Quoted, Domain, Expires, Partitioned.
+			Raw:         "",
+			RawExpires:  "",
+			Unparsed:    nil,
+			Quoted:      false,
+			Domain:      "",
+			Expires:     time.Time{},
+			Partitioned: false,
 		})
 
 		rotateCSRFToken(w, r, h.csrfSecret, h.trustedProxies)

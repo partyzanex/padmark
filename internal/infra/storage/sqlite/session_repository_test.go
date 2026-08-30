@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"database/sql"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -32,7 +33,7 @@ func (s *SessionRepositoryTestSuite) SetupTest() {
 	_, err = Migrate(s.T().Context(), s.db)
 	s.Require().NoError(err)
 
-	s.repo = NewSessionRepository(s.db)
+	s.repo = NewSessionRepository(s.db, slog.Default())
 	s.users = NewUserRepository(s.db)
 }
 

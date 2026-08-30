@@ -12,7 +12,8 @@ linters:
     - paralleltest
     - tparallel
     - err113
-    - gomodguard_v2
+    - gomodguard
+    - exhaustruct
 
   # Linters configuration (migrated from `linters-settings` in v1).
   settings:
@@ -226,6 +227,10 @@ linters:
           - lll
         source: "^//go:generate "
 
+      - linters:
+          - exhaustruct_v5
+        source: "Flag|urcli.Command"
+
       - path: _test\.go
         linters:
           - err113
@@ -239,6 +244,7 @@ linters:
           - noctx
           - errcheck
           - goconst
+          - exhaustruct_v5
 
       - path: testutils/*
         linters:

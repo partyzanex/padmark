@@ -40,7 +40,11 @@ func deleteLinkCommand() *urcli.Command {
 // the package-level nolint above.
 func deleteLinkAction(ctx context.Context, cmd *urcli.Command) error {
 	deleteLink := func(ctx context.Context, padmarkClient *padmark.Client, id, editCode string) error {
-		params := padmark.DeleteLinkParams{ID: id}
+		params := padmark.DeleteLinkParams{
+			ID:        id,
+			XEditCode: padmark.OptString{Value: "", Set: false},
+			EditCode:  padmark.OptString{Value: "", Set: false},
+		}
 
 		if editCode != "" {
 			params.XEditCode = padmark.NewOptString(editCode)
@@ -62,7 +66,7 @@ func handleDeleteLinkRes(res padmark.DeleteLinkRes) error {
 	case *padmark.DeleteLinkNoContent:
 		return nil
 	case *padmark.DeleteLinkUnauthorized:
-		return fmt.Errorf("unauthorized: %s", typed.Message)
+		return errors.New("unauthorized")
 	case *padmark.DeleteLinkForbidden:
 		return errors.New("forbidden: wrong edit code or --token is not the link's owner")
 	case *padmark.DeleteLinkNotFound:

@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"database/sql"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -31,7 +32,7 @@ func (s *LinkRepositoryTestSuite) SetupTest() {
 	_, err = s.db.NewCreateTable().Model((*link)(nil)).IfNotExists().Exec(s.T().Context())
 	s.Require().NoError(err)
 
-	s.repo = NewLinkRepository(s.db)
+	s.repo = NewLinkRepository(s.db, slog.Default())
 }
 
 func (s *LinkRepositoryTestSuite) TearDownTest() {

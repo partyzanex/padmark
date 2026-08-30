@@ -25,6 +25,7 @@ type apiTokenRow struct {
 
 func toAPITokenRow(token *domain.APIToken) *apiTokenRow {
 	return &apiTokenRow{
+		BaseModel:  bun.BaseModel{},
 		UserID:     token.UserID,
 		TokenHash:  token.TokenHash,
 		CreatedAt:  token.CreatedAt,

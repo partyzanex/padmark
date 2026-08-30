@@ -240,7 +240,20 @@ func NewHandler(manager NoteManager, linkManager LinkManager, log *slog.Logger) 
 	errorTmpl := parseTmpl("error", errorTmplSrc)
 	redirectTmpl := parseTmpl("redirect", redirectTmplSrc)
 
-	cmn := &common{log: log, errorTmpl: errorTmpl}
+	cmn := &common{
+		log:       log,
+		errorTmpl: errorTmpl,
+		// authMgr, forcedScheme, csrfSecret, trustedProxies, sessionTTL are zero-valued here
+		// and attached later via WithAuthManager / WithForcedScheme / WithCSRFSecret /
+		// WithTrustedProxies / WithSessionTTL from the composition root. NewRouter calls all
+		// of them before the server starts serving requests — missing one is a startup bug,
+		// caught at first request (csrfSecret=nil → csrfGuard short-circuits to safe 400).
+		authMgr:        nil,
+		forcedScheme:   "",
+		csrfSecret:     nil,
+		trustedProxies: nil,
+		sessionTTL:     0,
+	}
 
 	return &Handler{
 		common:       cmn,

@@ -19,7 +19,12 @@ func newLogger(level, format string) *slog.Logger {
 		lvl = slog.LevelInfo
 	}
 
-	opts := &slog.HandlerOptions{Level: lvl}
+	opts := &slog.HandlerOptions{
+		Level: lvl,
+		// AddSource / ReplaceAttr zero = no source-file annotations and no attribute rewriting.
+		AddSource:   false,
+		ReplaceAttr: nil,
+	}
 
 	if format == "text" {
 		return slog.New(slog.NewTextHandler(os.Stderr, opts))

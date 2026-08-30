@@ -14,6 +14,51 @@ func migrateCommand() *cli.Command {
 		Usage:  "Apply pending database migrations and exit",
 		Flags:  migrateFlags(),
 		Action: migrateAction,
+		// Zero values for every unused optional field — see app.go's comment on the same pattern.
+		Aliases:                         nil,
+		UsageText:                       "",
+		ArgsUsage:                       "",
+		Version:                         "",
+		Description:                     "",
+		DefaultCommand:                  "",
+		Category:                        "",
+		Commands:                        nil,
+		HideHelp:                        false,
+		HideHelpCommand:                 false,
+		HideVersion:                     false,
+		EnableShellCompletion:           false,
+		ShellCompletionCommandName:      "",
+		ShellComplete:                   nil,
+		ConfigureShellCompletionCommand: nil,
+		Before:                          nil,
+		After:                           nil,
+		CommandNotFound:                 nil,
+		OnUsageError:                    nil,
+		InvalidFlagAccessHandler:        nil,
+		Hidden:                          false,
+		Authors:                         nil,
+		Copyright:                       "",
+		Reader:                          nil,
+		Writer:                          nil,
+		ErrWriter:                       nil,
+		ExitErrHandler:                  nil,
+		Metadata:                        nil,
+		ExtraInfo:                       nil,
+		CustomRootCommandHelpTemplate:   "",
+		SliceFlagSeparator:              "",
+		DisableSliceFlagSeparator:       false,
+		MapFlagKeyValueSeparator:        "",
+		UseShortOptionHandling:          false,
+		Suggest:                         false,
+		AllowExtFlags:                   false,
+		SkipFlagParsing:                 false,
+		CustomHelpTemplate:              "",
+		PrefixMatchCommands:             false,
+		SuggestCommandFunc:              nil,
+		MutuallyExclusiveFlags:          nil,
+		Arguments:                       nil,
+		ReadArgsFromStdin:               false,
+		StopOnNthArg:                    nil,
 	}
 }
 
@@ -54,7 +99,12 @@ func migrateAction(ctx context.Context, cmd *cli.Command) error {
 
 	log.InfoContext(ctx, "running migrations", "storage", storage)
 
-	_, err = initStorage(ctx, storage, db, log)
+	if storage == storagePostgres {
+		_, err = initPostgresStorage(ctx, db, log)
+	} else {
+		_, err = initSQLiteStorage(ctx, db, log)
+	}
+
 	if err != nil {
 		return err
 	}

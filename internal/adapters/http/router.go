@@ -269,19 +269,24 @@ func (sr *statusRecorder) Write(b []byte) (int, error) {
 		sr.written = true
 	}
 
-	return sr.ResponseWriter.Write(b) //nolint:wrapcheck // pass-through implementation of io.Writer
+	n, err := sr.ResponseWriter.Write(b)
+	if err != nil {
+		return n, fmt.Errorf("write response: %w", err)
+	}
+
+	return n, nil
 }
 
 func withLogging(log *slog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK, written: false}
 
 		// Install the identity holder so the (inner) auth layer can record who the request
 		// resolved to; it stays anonymous when no auth runs or no valid session is present.
 		// Only the request passed downstream carries the holder; the original r.Context() is
 		// kept for logging (inherited context, preserves the request ID).
-		holder := &logUser{}
+		holder := &logUser{name: "", admin: false}
 		rr := r.WithContext(context.WithValue(r.Context(), keyLogUser, holder))
 
 		next.ServeHTTP(rec, rr)

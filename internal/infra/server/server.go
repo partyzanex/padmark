@@ -38,12 +38,7 @@ const (
 )
 
 func serveCommand() *cli.Command {
-	return &cli.Command{
-		Name:   "serve",
-		Usage:  "Start the HTTP server",
-		Flags:  appFlags(),
-		Action: serverAction,
-	}
+	return newCommand("serve", "Start the HTTP server", appFlags(), serverAction)
 }
 
 func parseTokens(raw string) []string {
@@ -84,6 +79,8 @@ func buildRouter(
 		SessionTTL:     time.Duration(cmd.Int(FlagSessionTTL)) * time.Second,
 		DisableAPI:     cmd.Bool(FlagDisableAPI),
 		DirectRedirect: cmd.Bool(FlagDirectRedirect),
+		// Nil lets NewRouter generate a fresh CSRF secret instead of accepting an injected one.
+		CSRFSecret: nil,
 	}
 
 	router, err := adaptershttp.NewRouter(handler, ogenHandler, &opts)
@@ -143,7 +140,7 @@ func allowedHostSet(raw string) map[string]struct{} {
 // is logged and swallowed rather than cancelling the main server's context — a healthy HTTPS
 // server must not be torn down because the auxiliary redirector could not start.
 func startRedirectServer(ctx context.Context, addr string, allowedHosts map[string]struct{}, log *slog.Logger) {
-	srv := &http.Server{
+	srv := &http.Server{ //nolint:exhaustruct_v5 // unset stdlib fields stay at zero = stdlib defaults apply
 		Addr:              addr,
 		Handler:           httpRedirectHandler(allowedHosts),
 		ReadHeaderTimeout: readHeaderTimeout,
@@ -166,9 +163,11 @@ func startRedirectServer(ctx context.Context, addr string, allowedHosts map[stri
 // handling exactly: a bind error here must not tear down an otherwise healthy main server.
 func startMetricsServer(ctx context.Context, addr string, reg *prometheus.Registry, log *slog.Logger) {
 	mux := http.NewServeMux()
-	mux.Handle("GET /metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
 
-	srv := &http.Server{
+	metricsOpts := promhttp.HandlerOpts{} //nolint:exhaustruct_v5 // promhttp defaults apply
+	mux.Handle("GET /metrics", promhttp.HandlerFor(reg, metricsOpts))
+
+	srv := &http.Server{ //nolint:exhaustruct_v5 // unset stdlib fields stay at zero = stdlib defaults apply
 		Addr:              addr,
 		Handler:           mux,
 		ReadHeaderTimeout: readHeaderTimeout,
@@ -208,7 +207,7 @@ func runServer(ctx context.Context, cmd *cli.Command, router http.Handler, log *
 		return errors.New("--tls-cert and --tls-key must both be set to enable TLS")
 	}
 
-	srv := &http.Server{
+	srv := &http.Server{ //nolint:exhaustruct_v5 // unset stdlib fields stay at zero = stdlib defaults apply
 		Addr:              cmd.String(FlagAddr),
 		Handler:           router,
 		ReadTimeout:       time.Duration(cmd.Int(FlagReadTimeout)) * time.Second,
@@ -270,7 +269,7 @@ func attachAccountSystem(
 	authMgr, err := auth.NewManager(
 		users, invites, sessions, apiTokens, crypto.New(),
 		crypto.NewPasswordHasher(argon2ParamsFromFlags(cmd)),
-		crypto.NewKDF(), crypto.NewTOTP(),
+		crypto.NewKDF(argon2ParamsFromFlags(cmd)), crypto.NewTOTP(),
 		log, cmd.String(FlagTOTPIssuer), sessionTTL,
 	)
 	if err != nil {
@@ -294,16 +293,16 @@ func buildAuthRepos(
 	switch storage {
 	case storagePostgres:
 		return postgres.NewUserRepository(db),
-			postgres.NewInviteRepository(db),
-			postgres.NewSessionRepository(db),
+			postgres.NewInviteRepository(db, slog.Default()),
+			postgres.NewSessionRepository(db, slog.Default()),
 			postgres.NewAPITokenRepository(db),
-			postgres.NewRevealRepository(db)
+			postgres.NewRevealRepository(db, slog.Default())
 	default:
 		return sqlite.NewUserRepository(db),
-			sqlite.NewInviteRepository(db),
-			sqlite.NewSessionRepository(db),
+			sqlite.NewInviteRepository(db, slog.Default()),
+			sqlite.NewSessionRepository(db, slog.Default()),
 			sqlite.NewAPITokenRepository(db),
-			sqlite.NewRevealRepository(db)
+			sqlite.NewRevealRepository(db, slog.Default())
 	}
 }
 
@@ -321,9 +320,11 @@ func argon2ParamsFromFlags(cmd *cli.Command) crypto.Argon2Params {
 // pre-registered with the standard Go/process collectors plus the links.Metrics counters.
 func newMetricsRegistry() (*prometheus.Registry, *linkmetrics.Metrics, error) {
 	reg := prometheus.NewRegistry()
+
+	procOpts := collectors.ProcessCollectorOpts{} //nolint:exhaustruct_v5 // collector defaults apply
 	reg.MustRegister(
 		collectors.NewGoCollector(),
-		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
+		collectors.NewProcessCollector(procOpts),
 	)
 
 	linkMetrics, err := linkmetrics.NewRegistered(reg)
@@ -341,11 +342,20 @@ func buildHandlers(
 	ctx context.Context, cmd *cli.Command, storage string, db *bun.DB,
 	repo notes.Storage, linkRepo links.Storage, log *slog.Logger, linkMetrics *linkmetrics.Metrics,
 ) (*adaptershttp.Handler, *adaptershttp.OgenHandler, error) {
+	var checker links.NotesChecker
+
+	switch storage {
+	case storagePostgres:
+		checker = newPostgresNotesChecker(db)
+	default:
+		checker = newSQLiteNotesChecker(db)
+	}
+
 	manager := notes.NewManager(repo, linkRepo, render.NewRenderer(), crypto.New(),
 		crypto.NewEditCodeHasher(), log, cmd.Bool(FlagCustomSlugs))
-	linkManager := links.NewManager(linkRepo, newNotesChecker(storage, db), crypto.New(),
+	linkManager := links.NewManager(linkRepo, checker, crypto.New(),
 		crypto.NewEditCodeHasher(), log, cmd.Bool(FlagCustomSlugs)).
-		WithCache(linkcache.NewDefault()).
+		WithCache(linkcache.NewDefault(log)).
 		WithMetrics(linkMetrics)
 
 	userRepo, inviteRepo, sessionRepo, apiTokenRepo, revealStore := buildAuthRepos(storage, db)
@@ -361,6 +371,33 @@ func buildHandlers(
 	ogenHandler := adaptershttp.NewOgenHandler(manager, linkManager, db.DB, log)
 
 	return handler, ogenHandler, nil
+}
+
+// initRepos runs migrations and builds the note and link repositories for the chosen backend.
+// openDB already validated the backend name, so unknown values cannot reach the default branch.
+//
+//nolint:ireturn // dispatches by backend behind the notes/links usecase Storage interfaces
+func initRepos(
+	ctx context.Context, storage string, db *bun.DB, log *slog.Logger,
+) (repo notes.Storage, linkRepo links.Storage, err error) {
+	switch storage {
+	case storagePostgres:
+		repo, err = initPostgresStorage(ctx, db, log)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		linkRepo = newPostgresLinkRepository(db)
+	default:
+		repo, err = initSQLiteStorage(ctx, db, log)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		linkRepo = newSQLiteLinkRepository(db)
+	}
+
+	return repo, linkRepo, nil
 }
 
 func serverAction(ctx context.Context, cmd *cli.Command) error {
@@ -381,12 +418,10 @@ func serverAction(ctx context.Context, cmd *cli.Command) error {
 		}
 	}()
 
-	repo, err := initStorage(ctx, storage, db, log)
+	repo, linkRepo, err := initRepos(ctx, storage, db, log)
 	if err != nil {
 		return err
 	}
-
-	linkRepo := newLinkRepository(storage, db)
 
 	metricsRegistry, linkMetrics, err := newMetricsRegistry()
 	if err != nil {

@@ -31,6 +31,7 @@ type userRow struct {
 
 func toUserRow(usr *domain.User) *userRow {
 	return &userRow{
+		BaseModel:       bun.BaseModel{},
 		ID:              usr.ID,
 		Username:        usr.Username,
 		TOTPSecret:      usr.TOTPSecret,

@@ -39,6 +39,9 @@ func newNoteHandler(c *common, manager NoteManager, noteTmpl, indexTmpl *templat
 	return &NoteHandler{
 		common: c, manager: manager, noteTmpl: noteTmpl, indexTmpl: indexTmpl,
 		lockout: newFailLockoutCache(),
+		// revealStore zero = nil — Handler.WithRevealStore attaches one at router build; nil-checks
+		// in the burn routes short-circuit so tests/CLI builds that skip the option still work.
+		revealStore: nil,
 	}
 }
 
@@ -99,6 +102,13 @@ func toNoteViewData(note *domain.Note, rendered string) noteViewData {
 		ExpiresLabel: expires,
 		ExpiresISO:   expiresISO,
 		Privacy:      string(note.EffectivePrivacy()),
+		// CSRFToken populated by the wrap middleware at render time; Nonce from the request scope.
+		// CanEdit/NeedsConfirmation false here (regular view path, not burn interstitial).
+		CSRFToken:         "",
+		Nonce:             "",
+		ConfirmToken:      "",
+		CanEdit:           false,
+		NeedsConfirmation: false,
 	}
 }
 
@@ -141,6 +151,14 @@ func toBurnInterstitialViewData(note *domain.Note, tok string) noteViewData {
 		NeedsConfirmation: true,
 		ConfirmToken:      tok,
 		Privacy:           string(domain.PrivacyPublic),
+		// CSRFToken/Nonce populated by the wrap middleware; Body/RawContent/ExpiresISO not used on the
+		// interstitial (confirmation page, not the read view). CanEdit false (no edit affordance).
+		CSRFToken:  "",
+		Nonce:      "",
+		Body:       "",
+		RawContent: "",
+		ExpiresISO: "",
+		CanEdit:    false,
 	}
 }
 
@@ -241,6 +259,28 @@ func (h *NoteHandler) UpdateNoteByPath(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	note, err := h.manager.Update(
+		r.Context(), id, body.EditCode, callerIDFromCtx(r.Context()), updateNoteFromPathBody(body),
+	)
+	if err != nil {
+		h.writeError(w, r, err)
+
+		return
+	}
+
+	w.Header().Set("Content-Type", mimeJSON)
+
+	encErr := json.NewEncoder(w).Encode(toNoteJSON(note))
+	if encErr != nil {
+		h.log.ErrorContext(r.Context(), "encode update response", "id", id, "err", encErr)
+	}
+}
+
+// updateNoteFromPathBody maps the multi-segment PUT body onto a domain.Note update payload.
+// CreatedAt/UpdatedAt are re-stamped by the usecase; ExpiresAt is derived from the existing
+// note + TTL; OwnerID/ID/EditCode are pinned from the existing row inside the usecase (the
+// caller-supplied edit code travels through Manager.Update's argument). Views not settable.
+func updateNoteFromPathBody(body updateNoteByPathBody) *domain.Note {
 	var burnTTL int64
 	if body.BurnAfterReading && body.TTL != nil && *body.TTL >= 0 {
 		burnTTL = *body.TTL
@@ -265,25 +305,20 @@ func (h *NoteHandler) UpdateNoteByPath(w http.ResponseWriter, r *http.Request) {
 		privacy = &p
 	}
 
-	note, err := h.manager.Update(r.Context(), id, body.EditCode, callerIDFromCtx(r.Context()), &domain.Note{
+	return &domain.Note{
+		CreatedAt:        time.Time{},
+		UpdatedAt:        time.Time{},
+		ExpiresAt:        nil,
+		Privacy:          privacy,
+		OwnerID:          nil,
+		ID:               "",
 		Title:            title,
 		Content:          body.Content,
 		ContentType:      contentType,
+		EditCode:         "",
+		Views:            0,
 		BurnTTL:          burnTTL,
 		BurnAfterReading: body.BurnAfterReading,
-		Privacy:          privacy,
-	})
-	if err != nil {
-		h.writeError(w, r, err)
-
-		return
-	}
-
-	w.Header().Set("Content-Type", mimeJSON)
-
-	encErr := json.NewEncoder(w).Encode(toNoteJSON(note))
-	if encErr != nil {
-		h.log.ErrorContext(r.Context(), "encode update response", "id", id, "err", encErr)
 	}
 }
 

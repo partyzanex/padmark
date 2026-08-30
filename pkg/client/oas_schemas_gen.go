@@ -1137,7 +1137,8 @@ type DeleteLinkNotFound ErrorResponse
 
 func (*DeleteLinkNotFound) deleteLinkRes() {}
 
-type DeleteLinkUnauthorized ErrorResponse
+// DeleteLinkUnauthorized is response for DeleteLink operation.
+type DeleteLinkUnauthorized struct{}
 
 func (*DeleteLinkUnauthorized) deleteLinkRes() {}
 
@@ -1158,7 +1159,8 @@ type DeleteNoteNotFound ErrorResponse
 
 func (*DeleteNoteNotFound) deleteNoteRes() {}
 
-type DeleteNoteUnauthorized ErrorResponse
+// DeleteNoteUnauthorized is response for DeleteNote operation.
+type DeleteNoteUnauthorized struct{}
 
 func (*DeleteNoteUnauthorized) deleteNoteRes() {}
 
@@ -2619,7 +2621,8 @@ func (s *UpdateNoteRequestPrivacy) UnmarshalText(data []byte) error {
 	}
 }
 
-type UpdateNoteUnauthorized ErrorResponse
+// UpdateNoteUnauthorized is response for UpdateNote operation.
+type UpdateNoteUnauthorized struct{}
 
 func (*UpdateNoteUnauthorized) updateNoteRes() {}
 

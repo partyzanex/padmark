@@ -34,6 +34,9 @@ func domainErrToPageData(err error) errorViewData {
 			ErrorType: errorTypeClient,
 			Title:     "Paste not found",
 			Desc:      "The paste you're looking for doesn't exist, has expired, or was deleted.",
+			// Detail/Nonce unset on a not-found page (no extra context, no CSRF-bound form).
+			Detail: "",
+			Nonce:  "",
 		}
 	case errors.Is(err, domain.ErrInvalidEditCode):
 		return errorViewData{
@@ -41,6 +44,8 @@ func domainErrToPageData(err error) errorViewData {
 			ErrorType: errorTypeClient,
 			Title:     "Forbidden",
 			Desc:      "The edit code is invalid or missing.",
+			Detail:    "",
+			Nonce:     "",
 		}
 	case errors.Is(err, domain.ErrForbidden):
 		return errorViewData{
@@ -48,13 +53,17 @@ func domainErrToPageData(err error) errorViewData {
 			ErrorType: errorTypeClient,
 			Title:     "Forbidden",
 			Desc:      "You don't have permission to perform this action.",
+			Detail:    "",
+			Nonce:     "",
 		}
 	case errors.Is(err, domain.ErrExpired):
 		return errorViewData{
-			Code:      http.StatusGone,
-			ErrorType: errorTypeClient,
 			Title:     "Paste expired",
 			Desc:      "This paste had a limited lifetime and has been automatically deleted after expiration.",
+			Detail:    "",
+			ErrorType: errorTypeClient,
+			Nonce:     "",
+			Code:      http.StatusGone,
 		}
 	default:
 		return domainErrToDefaultPageData(err)
@@ -75,6 +84,8 @@ func domainErrToDefaultPageData(err error) errorViewData {
 			ErrorType: errorTypeServer,
 			Title:     "Internal server error",
 			Desc:      "Something went wrong on our end. Please try again later.",
+			Detail:    "",
+			Nonce:     "",
 		}
 	}
 
@@ -83,6 +94,8 @@ func domainErrToDefaultPageData(err error) errorViewData {
 		ErrorType: errorTypeClient,
 		Title:     "Request rejected",
 		Desc:      message,
+		Detail:    "",
+		Nonce:     "",
 	}
 }
 
@@ -129,5 +142,7 @@ func setupClosedPageData() errorViewData {
 		ErrorType: errorTypeClient,
 		Title:     "Setup is closed",
 		Desc:      "The first admin already exists. New accounts can only be created via an invite link.",
+		Detail:    "",
+		Nonce:     "",
 	}
 }

@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -48,7 +49,7 @@ func (s *LinkRepositoryTestSuite) SetupSuite() {
 	_, migrateErr := Migrate(ctx, s.db)
 	s.Require().NoError(migrateErr)
 
-	s.repo = NewLinkRepository(s.db)
+	s.repo = NewLinkRepository(s.db, slog.Default())
 }
 
 func (s *LinkRepositoryTestSuite) TearDownSuite() {

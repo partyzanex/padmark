@@ -130,7 +130,19 @@ func buildCreateReq(cmd *urcli.Command, content string) *padmark.CreateNoteReque
 		title = firstLine(content)
 	}
 
-	req := &padmark.CreateNoteRequest{Content: content}
+	req := &padmark.CreateNoteRequest{
+		// OptString/OptBool/OptInt64 ContentType/Slug/BurnAfterReading/TTL/EditCode/Privacy are
+		// zero (Set=false) — the server applies its defaults; only fields the CLI explicitly sets
+		// (Title, Slug via --slug, etc.) get a populated Opt.
+		Title:            padmark.OptString{Value: "", Set: false},
+		Content:          content,
+		ContentType:      padmark.OptCreateNoteRequestContentType{Value: "", Set: false},
+		Slug:             padmark.OptString{Value: "", Set: false},
+		BurnAfterReading: padmark.OptBool{Value: false, Set: false},
+		TTL:              padmark.OptInt64{Value: 0, Set: false},
+		EditCode:         padmark.OptString{Value: "", Set: false},
+		Privacy:          padmark.OptCreateNoteRequestPrivacy{Value: "", Set: false},
+	}
 	if title != "" {
 		req.Title = padmark.NewOptString(title)
 	}

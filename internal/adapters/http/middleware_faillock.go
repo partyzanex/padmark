@@ -43,7 +43,7 @@ func withFailLockout(cache gcache.Cache, next http.Handler) http.Handler {
 			}
 		}
 
-		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK, written: false}
 		next.ServeHTTP(rec, r)
 
 		switch {

@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"database/sql"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -28,7 +29,7 @@ func (s *RevealRepositoryTestSuite) SetupTest() {
 	_, err = s.db.NewCreateTable().Model((*revealTokenRow)(nil)).IfNotExists().Exec(s.T().Context())
 	s.Require().NoError(err)
 
-	s.repo = NewRevealRepository(s.db)
+	s.repo = NewRevealRepository(s.db, slog.Default())
 }
 
 func (s *RevealRepositoryTestSuite) TearDownTest() {

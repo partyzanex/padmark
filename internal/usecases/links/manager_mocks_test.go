@@ -326,15 +326,15 @@ func (mr *MockCacheMockRecorder) Get(id any) *gomock.Call {
 }
 
 // Set mocks base method.
-func (m *MockCache) Set(id string, link *domain.Link) {
+func (m *MockCache) Set(ctx context.Context, id string, link *domain.Link) {
 	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "Set", id, link)
+	m.ctrl.Call(m, "Set", ctx, id, link)
 }
 
 // Set indicates an expected call of Set.
-func (mr *MockCacheMockRecorder) Set(id, link any) *gomock.Call {
+func (mr *MockCacheMockRecorder) Set(ctx, id, link any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Set", reflect.TypeOf((*MockCache)(nil).Set), id, link)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Set", reflect.TypeOf((*MockCache)(nil).Set), ctx, id, link)
 }
 
 // MockMetrics is a mock of Metrics interface.

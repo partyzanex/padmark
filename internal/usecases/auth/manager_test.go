@@ -50,7 +50,7 @@ func (s *ManagerSuite) SetupTest() {
 	s.sessions = NewMockSessionStore(s.ctrl)
 	mgr, err := NewManager(s.users, s.invites, s.sessions, nil, crypto.New(),
 		crypto.NewPasswordHasher(testArgon2Params),
-		crypto.NewKDF(), crypto.NewTOTP(), discardLog, "padmark", 0)
+		crypto.NewKDF(testArgon2Params), crypto.NewTOTP(), discardLog, "padmark", 0)
 	s.Require().NoError(err)
 	s.mgr = mgr
 	s.adminID = uuid.New()
@@ -79,7 +79,7 @@ func (s *ManagerSuite) testUser() (*domain.User, string) {
 	kdfSalt, err := crypto.GenerateKDFSalt()
 	s.Require().NoError(err)
 
-	derivedKey, err := crypto.DeriveUserKey([]byte(testPassword), kdfSalt)
+	derivedKey, err := crypto.DeriveUserKey([]byte(testPassword), kdfSalt, testArgon2Params)
 	s.Require().NoError(err)
 
 	rawSecret, err := crypto.GenerateTOTPSecret()

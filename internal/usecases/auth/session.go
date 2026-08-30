@@ -140,7 +140,7 @@ func (m *SessionManager) Logout(ctx context.Context, sessionID string) error {
 func (m *SessionManager) GetSession(ctx context.Context, sessionID string) (*domain.User, error) {
 	sess, err := m.sessions.Get(ctx, sessionID)
 	if err != nil {
-		return nil, err //nolint:wrapcheck // ErrSessionExpired sentinel passes through unwrapped for errors.Is
+		return nil, fmt.Errorf("get session: %w", err)
 	}
 
 	usr, err := m.users.GetByID(ctx, sess.UserID)
@@ -160,7 +160,7 @@ func (m *SessionManager) ChangePassword(
 ) (string, error) {
 	sess, err := m.sessions.Get(ctx, sessionID)
 	if err != nil {
-		return "", err //nolint:wrapcheck // ErrSessionExpired passes through for errors.Is
+		return "", fmt.Errorf("get session: %w", err)
 	}
 
 	usr, err := m.users.GetByID(ctx, sess.UserID)
@@ -234,7 +234,7 @@ func (m *SessionManager) buildNewCredentials(
 ) (hash string, salt []byte, encSecret string, err error) {
 	err = domain.ValidatePassword(newPassword)
 	if err != nil {
-		return "", nil, "", err //nolint:wrapcheck // ErrWeakPassword sentinel passes through for errors.Is
+		return "", nil, "", fmt.Errorf("validate new password: %w", err)
 	}
 
 	newSalt, err := m.kdf.GenerateSalt()

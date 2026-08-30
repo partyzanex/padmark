@@ -40,7 +40,7 @@ func (s *AuthFlowSuite) SetupTest() {
 		nil, // this suite exercises TOTP/session flows, not API tokens
 		crypto.New(),
 		crypto.NewPasswordHasher(testArgon2Params),
-		crypto.NewKDF(),
+		crypto.NewKDF(testArgon2Params),
 		crypto.NewTOTP(),
 		slog.New(slog.DiscardHandler),
 		"padmark-test",
@@ -58,7 +58,9 @@ func (s *AuthFlowSuite) TearDownTest() {
 func (s *AuthFlowSuite) decryptTOTPSecret(usr *domain.User) string {
 	s.T().Helper()
 
-	derivedKey, err := crypto.DeriveUserKey([]byte(flowPassword), usr.KDFSalt)
+	// Must match the cost the suite-configured KDF used to encrypt the secret — a mismatch
+	// derives a different key and decryption fails.
+	derivedKey, err := crypto.DeriveUserKey([]byte(flowPassword), usr.KDFSalt, testArgon2Params)
 	s.Require().NoError(err)
 
 	rawSecret, err := crypto.New().Decrypt(usr.TOTPSecret, derivedKey)

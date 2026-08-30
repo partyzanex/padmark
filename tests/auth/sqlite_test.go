@@ -5,6 +5,7 @@ package integration
 import (
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"strings"
 	"testing"
 
@@ -35,8 +36,8 @@ func (s *SQLiteAuthSuite) SetupTest() {
 	s.Require().NoError(migrateErr)
 
 	s.Users = sqliterepo.NewUserRepository(s.db)
-	s.Invites = sqliterepo.NewInviteRepository(s.db)
-	s.Sessions = sqliterepo.NewSessionRepository(s.db)
+	s.Invites = sqliterepo.NewInviteRepository(s.db, slog.Default())
+	s.Sessions = sqliterepo.NewSessionRepository(s.db, slog.Default())
 }
 
 func (s *SQLiteAuthSuite) TearDownTest() {

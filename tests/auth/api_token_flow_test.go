@@ -52,12 +52,12 @@ func TestAPITokenFlow_AdminIssuesKey_CLICreatesNote(t *testing.T) {
 
 	authMgr, err := auth.NewManager(
 		users,
-		sqliterepo.NewInviteRepository(db),
-		sqliterepo.NewSessionRepository(db),
+		sqliterepo.NewInviteRepository(db, slog.Default()),
+		sqliterepo.NewSessionRepository(db, slog.Default()),
 		sqliterepo.NewAPITokenRepository(db),
 		crypto.New(),
 		crypto.NewPasswordHasher(testArgon2Params),
-		crypto.NewKDF(),
+		crypto.NewKDF(testArgon2Params),
 		crypto.NewTOTP(),
 		log,
 		"padmark-test",
@@ -67,7 +67,7 @@ func TestAPITokenFlow_AdminIssuesKey_CLICreatesNote(t *testing.T) {
 
 	notesMgr := notes.NewManager(
 		sqliterepo.NewNoteRepository(db),
-		sqliterepo.NewLinkRepository(db),
+		sqliterepo.NewLinkRepository(db, slog.Default()),
 		render.NewRenderer(),
 		crypto.New(),
 		crypto.NewEditCodeHasher(),
@@ -75,7 +75,7 @@ func TestAPITokenFlow_AdminIssuesKey_CLICreatesNote(t *testing.T) {
 		false,
 	)
 	linksMgr := links.NewManager(
-		sqliterepo.NewLinkRepository(db),
+		sqliterepo.NewLinkRepository(db, slog.Default()),
 		sqliterepo.NewNoteRepository(db),
 		crypto.New(),
 		crypto.NewEditCodeHasher(),

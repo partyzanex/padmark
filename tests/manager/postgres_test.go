@@ -2,6 +2,7 @@ package integration
 
 import (
 	"database/sql"
+	"log/slog"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -62,9 +63,9 @@ func (s *PostgresManagerSuite) SetupTest() {
 		s.Require().NoError(err)
 	}
 
-	s.Manager = newManager(pgrepo.NewNoteRepository(s.db), pgrepo.NewLinkRepository(s.db))
-	s.LinkManager = newLinkManager(pgrepo.NewLinkRepository(s.db), pgrepo.NewNoteRepository(s.db))
-	s.RevealStore = pgrepo.NewRevealRepository(s.db)
+	s.Manager = newManager(pgrepo.NewNoteRepository(s.db), pgrepo.NewLinkRepository(s.db, slog.Default()))
+	s.LinkManager = newLinkManager(pgrepo.NewLinkRepository(s.db, slog.Default()), pgrepo.NewNoteRepository(s.db))
+	s.RevealStore = pgrepo.NewRevealRepository(s.db, slog.Default())
 	s.DB = s.db
 }
 

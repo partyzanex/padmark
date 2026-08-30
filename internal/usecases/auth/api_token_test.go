@@ -54,7 +54,7 @@ func newAuthManagerWithTokens(
 		apiTokens,
 		crypto.New(),
 		crypto.NewPasswordHasher(testArgon2Params),
-		crypto.NewKDF(),
+		crypto.NewKDF(testArgon2Params),
 		crypto.NewTOTP(),
 		discardLog,
 		"padmark",
@@ -75,7 +75,7 @@ func (suite *APITokenSuite) disabledMgr() *Manager {
 		nil, // API-token flow disabled → methods return domain.ErrFeatureNotSupported
 		crypto.New(),
 		crypto.NewPasswordHasher(testArgon2Params),
-		crypto.NewKDF(),
+		crypto.NewKDF(testArgon2Params),
 		crypto.NewTOTP(),
 		discardLog,
 		"padmark",

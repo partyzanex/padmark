@@ -33,12 +33,17 @@ func New() *Metrics {
 			Subsystem: subsystem,
 			Name:      "created_total",
 			Help:      "Total number of short links created.",
+			// Unit / ConstLabels zero = no custom unit annotation, no static labels.
+			Unit:        "",
+			ConstLabels: nil,
 		}),
 		redirects: prometheus.NewCounter(prometheus.CounterOpts{
-			Namespace: namespace,
-			Subsystem: subsystem,
-			Name:      "redirects_total",
-			Help:      "Total number of successful short-link redirects served via GET /r/{id}.",
+			Namespace:   namespace,
+			Subsystem:   subsystem,
+			Name:        "redirects_total",
+			Help:        "Total number of successful short-link redirects served via GET /r/{id}.",
+			Unit:        "",
+			ConstLabels: nil,
 		}),
 		collisions: prometheus.NewCounter(prometheus.CounterOpts{
 			Namespace: namespace,
@@ -46,6 +51,8 @@ func New() *Metrics {
 			Name:      "collisions_total",
 			Help: "Total number of random-slug generation collisions during link creation " +
 				"(a rejected custom alias does not count — see links.Metrics' doc comment).",
+			Unit:        "",
+			ConstLabels: nil,
 		}),
 	}
 }

@@ -4,17 +4,24 @@ package crypto
 // auth usecase can depend on interfaces it owns (DIP) instead of importing this infra package
 // directly. The structural interfaces live next to their consumer in usecases/auth.
 
-// KDF derives encryption keys from passwords. It implements the auth usecase's KeyDeriver.
-type KDF struct{}
+// KDF derives encryption keys from passwords using argon2id at the configured cost.
+// It implements the auth usecase's KeyDeriver.
+type KDF struct {
+	params Argon2Params
+}
 
-// NewKDF returns a KDF adapter.
-func NewKDF() *KDF { return &KDF{} }
+// NewKDF returns a KDF adapter that uses the given argon2 cost (matches the password hasher).
+func NewKDF(params Argon2Params) *KDF {
+	return &KDF{params: params.withDefaults()}
+}
 
-// GenerateSalt returns a fresh random HKDF salt.
-func (KDF) GenerateSalt() ([]byte, error) { return GenerateKDFSalt() }
+// GenerateSalt returns a fresh random argon2 salt (16 bytes).
+func (k KDF) GenerateSalt() ([]byte, error) { return GenerateKDFSalt() }
 
-// DeriveKey derives the AES key used to encrypt a user's TOTP secret.
-func (KDF) DeriveKey(password, salt []byte) (string, error) { return DeriveUserKey(password, salt) }
+// DeriveKey derives the AES key used to encrypt a user's TOTP secret via argon2id.
+func (k KDF) DeriveKey(password, salt []byte) (string, error) {
+	return DeriveUserKey(password, salt, k.params)
+}
 
 // TOTP generates and validates TOTP secrets/codes. It implements the auth usecase's TOTPManager.
 type TOTP struct{}

@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/uptrace/bun"
@@ -27,18 +28,20 @@ type revealTokenRow struct {
 // RevealRepository issues and consumes one-time reveal tokens for burn-after-reading notes.
 // SQLite is single-writer, so the transaction approach is safe in practice.
 type RevealRepository struct {
-	db *bun.DB
+	db  *bun.DB
+	log *slog.Logger
 }
 
-// NewRevealRepository returns a new SQLite-backed RevealStore.
-func NewRevealRepository(db *bun.DB) *RevealRepository {
-	return &RevealRepository{db: db}
+// NewRevealRepository returns a new SQLite-backed RevealStore. log is used to surface
+// lazy-sweep failures.
+func NewRevealRepository(db *bun.DB, log *slog.Logger) *RevealRepository {
+	return &RevealRepository{db: db, log: log}
 }
 
 // Issue generates a one-time token bound to noteID with a 10-minute TTL.
 // Expired and consumed tokens are lazily cleaned up on each call.
 //
-//nolint:dupl // token-issuing pattern is identical across token table types by design
+
 func (s *RevealRepository) Issue(ctx context.Context, noteID string) (string, error) {
 	buf := make([]byte, revealTokenBytes)
 
@@ -50,9 +53,12 @@ func (s *RevealRepository) Issue(ctx context.Context, noteID string) (string, er
 	tok := base64.RawURLEncoding.EncodeToString(buf)
 
 	row := &revealTokenRow{
+		BaseModel: bun.BaseModel{},
 		Token:     tok,
 		NoteID:    noteID,
 		ExpiresAt: time.Now().Add(revealTokenTTL),
+		// UsedAt zero = nil until Consume sets it; preserves the "unused" invariant on insert.
+		UsedAt: nil,
 	}
 
 	_, err = s.db.NewInsert().Model(row).Exec(ctx)
@@ -60,12 +66,16 @@ func (s *RevealRepository) Issue(ctx context.Context, noteID string) (string, er
 		return "", fmt.Errorf("insert reveal token: %w", err)
 	}
 
-	//nolint:errcheck // best-effort sweep; stale tokens persist until next Issue
-	_, _ = s.db.NewDelete().
+	// Best-effort sweep of expired reveal tokens; a failure here does not block token issuance —
+	// stale rows simply persist until the next Issue call.
+	_, sweepErr := s.db.NewDelete().
 		TableExpr("reveal_tokens").
 		Where("expires_at < ?", time.Now()).
 		WhereOr("used_at IS NOT NULL").
 		Exec(ctx)
+	if sweepErr != nil {
+		s.log.WarnContext(ctx, "reveal token sweep failed", "err", sweepErr)
+	}
 
 	return tok, nil
 }

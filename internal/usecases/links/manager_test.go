@@ -343,7 +343,7 @@ func (s *ManagerTestSuite) TestRedirect_CacheMiss_PopulatesCacheForNonBurnLink()
 
 	cache.EXPECT().Get(gomock.Any()).Return(nil, false)
 	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(link, nil)
-	cache.EXPECT().Set(gomock.Any(), link)
+	cache.EXPECT().Set(gomock.Any(), gomock.Any(), link)
 	s.storage.EXPECT().IncrementViews(gomock.Any(), gomock.Any()).Return(nil)
 
 	_, err := s.manager.Redirect(s.T().Context(), "the-slug")

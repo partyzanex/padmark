@@ -29,7 +29,13 @@ type OgenHandler struct {
 
 // NewOgenHandler creates an OgenHandler with required dependencies.
 func NewOgenHandler(manager NoteManager, linkManager LinkManager, pinger Pinger, log *slog.Logger) *OgenHandler {
-	return &OgenHandler{manager: manager, linkManager: linkManager, pinger: pinger, log: log}
+	return &OgenHandler{
+		UnimplementedHandler: ogenapi.UnimplementedHandler{},
+		manager:              manager,
+		linkManager:          linkManager,
+		pinger:               pinger,
+		log:                  log,
+	}
 }
 
 // CreateNote implements ogenapi.Handler.
@@ -44,15 +50,21 @@ func (h *OgenHandler) CreateNote(
 	}
 
 	note, err := h.manager.Create(ctx, &domain.Note{
+		// CreateNote fills CreatedAt/UpdatedAt; ExpiresAt is server-derived (--ttl on the CLI)
+		// and Views starts at 0. Privacy/OwnerID/EditCode/ContentType carry through from the request.
+		CreatedAt:        time.Time{},
+		UpdatedAt:        time.Time{},
+		ExpiresAt:        nil,
+		Privacy:          optCreatePrivacyPtr(req.Privacy),
+		OwnerID:          ownerIDFromCtx(ctx),
 		ID:               req.Slug.Or(""),
 		Title:            req.Title.Or(""),
 		Content:          req.Content,
 		ContentType:      optCreateContentTypePtr(req.ContentType),
 		EditCode:         req.EditCode.Or(""),
+		Views:            0,
 		BurnTTL:          burnTTL,
 		BurnAfterReading: burnAfterReading,
-		Privacy:          optCreatePrivacyPtr(req.Privacy),
-		OwnerID:          ownerIDFromCtx(ctx),
 	})
 	if err != nil {
 		return mapCreateError(err, h.log), nil
@@ -85,7 +97,7 @@ func (h *OgenHandler) UpdateNote(
 	ctx context.Context, req *ogenapi.UpdateNoteRequest, params ogenapi.UpdateNoteParams,
 ) (ogenapi.UpdateNoteRes, error) {
 	if !h.anonymousNoteMutationAllowed(ctx, params.ID) {
-		v := ogenapi.UpdateNoteUnauthorized(ogenapi.ErrorResponse{Message: msgUnauthorized})
+		v := ogenapi.UpdateNoteUnauthorized{}
 
 		return &v, nil
 	}
@@ -98,12 +110,21 @@ func (h *OgenHandler) UpdateNote(
 	}
 
 	note, err := h.manager.Update(ctx, params.ID, req.EditCode.Or(""), callerIDFromCtx(ctx), &domain.Note{
+		// UpdatePath/Update semantics: CreatedAt/UpdatedAt/Views are not caller-set; OwnerID/ID are
+		// pinned from the existing note inside the usecase; EditCode is the caller-supplied credential.
+		CreatedAt:        time.Time{},
+		UpdatedAt:        time.Time{},
+		ExpiresAt:        nil,
+		Privacy:          optUpdatePrivacyPtr(req.Privacy),
+		OwnerID:          nil,
+		ID:               "",
 		Title:            req.Title.Or(""),
 		Content:          req.Content,
 		ContentType:      optUpdateContentTypePtr(req.ContentType),
+		EditCode:         "",
+		Views:            0,
 		BurnTTL:          burnTTL,
 		BurnAfterReading: burnAfterReading,
-		Privacy:          optUpdatePrivacyPtr(req.Privacy),
 	})
 	if err != nil {
 		return mapUpdateError(err, h.log), nil
@@ -119,9 +140,7 @@ func (h *OgenHandler) DeleteNote(
 	ctx context.Context, params ogenapi.DeleteNoteParams,
 ) (ogenapi.DeleteNoteRes, error) {
 	if !h.anonymousNoteMutationAllowed(ctx, params.ID) {
-		v := ogenapi.DeleteNoteUnauthorized(ogenapi.ErrorResponse{Message: msgUnauthorized})
-
-		return &v, nil
+		return &ogenapi.DeleteNoteUnauthorized{}, nil
 	}
 
 	editCode := params.XEditCode.Or("")
@@ -202,9 +221,7 @@ func (h *OgenHandler) DeleteLink(
 	ctx context.Context, params ogenapi.DeleteLinkParams,
 ) (ogenapi.DeleteLinkRes, error) {
 	if !h.anonymousLinkMutationAllowed(ctx, params.ID) {
-		v := ogenapi.DeleteLinkUnauthorized(ogenapi.ErrorResponse{Message: msgUnauthorized})
-
-		return &v, nil
+		return &ogenapi.DeleteLinkUnauthorized{}, nil
 	}
 
 	editCode := params.XEditCode.Or("")
@@ -255,6 +272,15 @@ func createOneBulkLink(
 		return ogenapi.BulkLinkResult{
 			TargetURL: item.TargetURL,
 			Error:     ogenapi.NewOptString(message),
+			// Successful fields stay zero — invariant: never both link fields and Error in the same item.
+			ID:             ogenapi.OptString{Value: "", Set: false},
+			EditCode:       ogenapi.OptString{Value: "", Set: false},
+			Views:          ogenapi.OptInt{Value: 0, Set: false},
+			BurnAfterClick: ogenapi.OptBool{Value: false, Set: false},
+			Privacy:        ogenapi.OptBulkLinkResultPrivacy{Value: "", Set: false},
+			ExpiresAt:      ogenapi.OptNilDateTime{Value: time.Time{}, Set: false, Null: false},
+			DirectRedirect: ogenapi.OptNilBool{Value: false, Set: false, Null: false},
+			CreatedAt:      ogenapi.OptDateTime{Value: time.Time{}, Set: false},
 		}
 	}
 
@@ -265,7 +291,11 @@ func createOneBulkLink(
 		Views:          ogenapi.NewOptInt(link.Views),
 		BurnAfterClick: ogenapi.NewOptBool(link.BurnAfterClick),
 		Privacy:        ogenapi.NewOptBulkLinkResultPrivacy(ogenapi.BulkLinkResultPrivacy(link.EffectivePrivacy())),
+		ExpiresAt:      ogenapi.OptNilDateTime{Value: time.Time{}, Set: false, Null: false},
+		DirectRedirect: ogenapi.OptNilBool{Value: false, Set: false, Null: false},
 		CreatedAt:      ogenapi.NewOptDateTime(link.CreatedAt),
+		// Error is unset on success — invariant: never both link fields and Error in the same item.
+		Error: ogenapi.OptString{Value: "", Set: false},
 	}
 
 	if link.ExpiresAt != nil {

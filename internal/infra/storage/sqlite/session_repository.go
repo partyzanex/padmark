@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -26,6 +27,7 @@ type sessionRow struct {
 
 func toSessionRow(sess *domain.Session) *sessionRow {
 	return &sessionRow{
+		BaseModel: bun.BaseModel{},
 		SessionID: sess.SessionID,
 		UserID:    sess.UserID,
 		CreatedAt: sess.CreatedAt,
@@ -48,12 +50,14 @@ func (r *sessionRow) toDomain() *domain.Session {
 
 // SessionRepository is a SQLite-backed store for authenticated browser sessions.
 type SessionRepository struct {
-	db *bun.DB
+	db  *bun.DB
+	log *slog.Logger
 }
 
-// NewSessionRepository returns a new SQLite-backed SessionRepository.
-func NewSessionRepository(db *bun.DB) *SessionRepository {
-	return &SessionRepository{db: db}
+// NewSessionRepository returns a new SQLite-backed SessionRepository. log is used to surface
+// lazy-sweep failures.
+func NewSessionRepository(db *bun.DB, log *slog.Logger) *SessionRepository {
+	return &SessionRepository{db: db, log: log}
 }
 
 // Create inserts a new session record. Expired sessions are lazily swept on each call
@@ -64,8 +68,12 @@ func (r *SessionRepository) Create(ctx context.Context, s *domain.Session) error
 		return fmt.Errorf("insert session: %w", err)
 	}
 
-	//nolint:errcheck // best-effort sweep; stale sessions persist until next Create
-	_ = r.DeleteExpired(ctx)
+	// Best-effort sweep of expired sessions; a failure here does not block session creation —
+	// stale rows simply persist until the next Create call.
+	sweepErr := r.DeleteExpired(ctx)
+	if sweepErr != nil {
+		r.log.WarnContext(ctx, "session sweep failed", "err", sweepErr)
+	}
 
 	return nil
 }

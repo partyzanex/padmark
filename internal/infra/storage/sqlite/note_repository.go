@@ -93,6 +93,7 @@ func contentTypeVal(ct *domain.ContentType) string {
 // Create inserts a new note.
 func (r *NoteRepository) Create(ctx context.Context, domNote *domain.Note) error {
 	dbNote := &note{
+		BaseModel:        bun.BaseModel{},
 		ID:               domNote.ID,
 		Title:            domNote.Title,
 		Content:          domNote.Content,
@@ -105,6 +106,7 @@ func (r *NoteRepository) Create(ctx context.Context, domNote *domain.Note) error
 		BurnAfterReading: domNote.BurnAfterReading,
 		Privacy:          privacyVal(domNote.Privacy),
 		OwnerID:          domNote.OwnerID,
+		Views:            domNote.Views,
 	}
 
 	_, err := r.db.NewInsert().Model(dbNote).Exec(ctx)
@@ -199,6 +201,7 @@ func (r *NoteRepository) SetBurnExpiry(ctx context.Context, id string, expiresAt
 // Update modifies an existing note.
 func (r *NoteRepository) Update(ctx context.Context, id string, domNote *domain.Note) error {
 	dbNote := &note{
+		BaseModel:        bun.BaseModel{},
 		ID:               id,
 		Title:            domNote.Title,
 		Content:          domNote.Content,
@@ -207,6 +210,11 @@ func (r *NoteRepository) Update(ctx context.Context, id string, domNote *domain.
 		BurnAfterReading: domNote.BurnAfterReading,
 		CreatedAt:        domNote.CreatedAt,
 		UpdatedAt:        domNote.UpdatedAt,
+		OwnerID:          domNote.OwnerID,
+		ContentType:      contentTypeVal(domNote.ContentType),
+		EditCode:         domNote.EditCode,
+		Privacy:          privacyVal(domNote.Privacy),
+		Views:            domNote.Views,
 	}
 
 	var ctVal *string

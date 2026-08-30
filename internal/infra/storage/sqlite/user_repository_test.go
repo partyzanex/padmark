@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"database/sql"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -241,8 +242,8 @@ func TestRevoke_CascadesSessionsAndInvites(t *testing.T) {
 	require.NoError(t, err)
 
 	users := NewUserRepository(db)
-	sessions := NewSessionRepository(db)
-	invites := NewInviteRepository(db)
+	sessions := NewSessionRepository(db, slog.Default())
+	invites := NewInviteRepository(db, slog.Default())
 
 	usr := &domain.User{
 		ID: uuid.New(), Username: "usr", TOTPSecret: "s", PasswordHash: "h",
@@ -273,7 +274,7 @@ func TestRevoke_CascadesSessionsAndInvites(t *testing.T) {
 
 func (s *UserRepositoryTestSuite) TestRedeemInvite_UsernameCollision_RollsBackInvite() {
 	ctx := s.T().Context()
-	invites := NewInviteRepository(s.db)
+	invites := NewInviteRepository(s.db, slog.Default())
 
 	creator := s.newUser("creator")
 	s.Require().NoError(s.repo.Create(ctx, creator))

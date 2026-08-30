@@ -61,7 +61,7 @@ type EditCodeHasher interface {
 // internal/infra/linkcache's implementation, which clones on both Get and Set for this reason.
 type Cache interface {
 	Get(id string) (*domain.Link, bool)
-	Set(id string, link *domain.Link)
+	Set(ctx context.Context, id string, link *domain.Link)
 	Delete(id string)
 }
 
@@ -97,14 +97,24 @@ type Manager struct {
 // NewManager creates a new Manager with required dependencies. allowCustomSlugs enables
 // user-supplied slugs (aliases); when false, a create request carrying one is rejected with
 // domain.ErrCustomSlugDisabled — mirrors notes.NewManager, and both share the same server-wide
-// --custom-slugs flag.
+// --custom-slugs flag. cache and metrics are optional collaborators that default to nil and must
+// be attached via WithCache/WithMetrics at composition time; every code path nil-checks them, so a
+// missed attachment leaves caching/metrics disabled (never a nil deref). All fields of Manager are
+// explicitly initialised here so a future field added to the struct cannot silently land in an
+// undefined state — the compiler forces every caller through this constructor.
 func NewManager(
 	storage Storage, notes NotesChecker, encryptor Encryptor, hasher EditCodeHasher,
 	log *slog.Logger, allowCustomSlugs bool,
 ) *Manager {
 	return &Manager{
-		storage: storage, notes: notes, encryptor: encryptor, hasher: hasher,
-		log: log, allowCustomSlugs: allowCustomSlugs,
+		storage:          storage,
+		notes:            notes,
+		encryptor:        encryptor,
+		hasher:           hasher,
+		cache:            nil,
+		metrics:          nil,
+		log:              log,
+		allowCustomSlugs: allowCustomSlugs,
 	}
 }
 
@@ -195,11 +205,15 @@ func (m *Manager) Create(ctx context.Context, targetURL string, opts CreateOptio
 	}
 
 	link := &domain.Link{
+		CreatedAt:      time.Time{},
 		ExpiresAt:      opts.ExpiresAt,
 		Privacy:        opts.Privacy,
 		OwnerID:        opts.OwnerID,
 		DirectRedirect: opts.DirectRedirect,
+		ID:             "",
+		TargetURL:      "",
 		EditCode:       opts.EditCode,
+		Views:          0,
 		BurnAfterClick: opts.BurnAfterClick,
 	}
 
@@ -415,7 +429,7 @@ func (m *Manager) resolveLink(ctx context.Context, slug string) (*domain.Link, e
 
 	expired := link.ExpiresAt != nil && time.Now().After(*link.ExpiresAt)
 	if m.cache != nil && !link.BurnAfterClick && !expired {
-		m.cache.Set(dbID, link)
+		m.cache.Set(ctx, dbID, link)
 	}
 
 	return link, nil

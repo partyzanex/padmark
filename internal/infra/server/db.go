@@ -19,8 +19,6 @@ import (
 
 	"github.com/partyzanex/padmark/internal/infra/storage/postgres"
 	"github.com/partyzanex/padmark/internal/infra/storage/sqlite"
-	"github.com/partyzanex/padmark/internal/usecases/links"
-	"github.com/partyzanex/padmark/internal/usecases/notes"
 )
 
 const storagePostgres = "postgres"
@@ -97,11 +95,8 @@ func openDB(ctx context.Context, storage, dsn string) (*bun.DB, error) {
 	return db, nil
 }
 
-// storageInit runs migrations and returns a ready-to-use repository.
-type storageInit func(ctx context.Context, db *bun.DB, log *slog.Logger) (notes.Storage, error)
-
-//nolint:ireturn // multiple implementations (sqlite, postgres) require interface return
-func initPostgresStorage(ctx context.Context, db *bun.DB, log *slog.Logger) (notes.Storage, error) {
+// initPostgresStorage runs postgres migrations and returns a ready-to-use note repository.
+func initPostgresStorage(ctx context.Context, db *bun.DB, log *slog.Logger) (*postgres.NoteRepository, error) {
 	results, err := postgres.Migrate(ctx, db)
 	if err != nil {
 		return nil, fmt.Errorf("postgres migrate: %w", err)
@@ -112,8 +107,8 @@ func initPostgresStorage(ctx context.Context, db *bun.DB, log *slog.Logger) (not
 	return postgres.NewNoteRepository(db), nil
 }
 
-//nolint:ireturn // multiple implementations (sqlite, postgres) require interface return
-func initSQLiteStorage(ctx context.Context, db *bun.DB, log *slog.Logger) (notes.Storage, error) {
+// initSQLiteStorage runs sqlite migrations and returns a ready-to-use note repository.
+func initSQLiteStorage(ctx context.Context, db *bun.DB, log *slog.Logger) (*sqlite.NoteRepository, error) {
 	results, err := sqlite.Migrate(ctx, db)
 	if err != nil {
 		return nil, fmt.Errorf("sqlite migrate: %w", err)
@@ -124,48 +119,31 @@ func initSQLiteStorage(ctx context.Context, db *bun.DB, log *slog.Logger) (notes
 	return sqlite.NewNoteRepository(db), nil
 }
 
-// newLinkRepository returns a ready-to-use links.Storage for the given backend. Migrations for
-// the links table already ran as part of initStorage (same db handle, same migration set), so
-// this only needs to construct the repository, not migrate again.
-//
-//nolint:ireturn // multiple implementations (sqlite, postgres) require interface return
-func newLinkRepository(storage string, db *bun.DB) links.Storage {
-	if storage == storagePostgres {
-		return postgres.NewLinkRepository(db)
-	}
-
-	return sqlite.NewLinkRepository(db)
+// newPostgresLinkRepository returns a ready-to-use links repository for the postgres backend.
+// Migrations for the links table already ran as part of the storage init (same db handle, same
+// migration set), so this only needs to construct the repository, not migrate again.
+func newPostgresLinkRepository(db *bun.DB) *postgres.LinkRepository {
+	return postgres.NewLinkRepository(db, slog.Default())
 }
 
-// newNotesChecker returns a links.NotesChecker for the given backend — the same note repository
-// initStorage already built, reconstructed here typed to expose Exists. notes.Storage (initStorage's
-// return type) deliberately doesn't declare Exists — it's not something notes.Manager itself needs
-// — so links.Manager's cross-table check needs its own, separately typed handle onto the same
-// underlying table rather than widening notes.Storage for a consumer it doesn't otherwise serve.
-// Repositories are stateless wrappers over *bun.DB, so constructing a second one is free.
-//
-//nolint:ireturn // multiple implementations (sqlite, postgres) require interface return
-func newNotesChecker(storage string, db *bun.DB) links.NotesChecker {
-	if storage == storagePostgres {
-		return postgres.NewNoteRepository(db)
-	}
+// newSQLiteLinkRepository returns a ready-to-use links repository for the sqlite backend.
+func newSQLiteLinkRepository(db *bun.DB) *sqlite.LinkRepository {
+	return sqlite.NewLinkRepository(db, slog.Default())
+}
 
+// newPostgresNotesChecker returns a links.NotesChecker for the postgres backend — the same note
+// repository the storage init built, reconstructed here typed to expose Exists. notes.Storage
+// deliberately doesn't declare Exists — it's not something notes.Manager itself needs — so
+// links.Manager's cross-table check needs its own, separately typed handle onto the same underlying
+// table rather than widening notes.Storage for a consumer it doesn't otherwise serve. Repositories
+// are stateless wrappers over *bun.DB, so constructing a second one is free.
+func newPostgresNotesChecker(db *bun.DB) *postgres.NoteRepository {
+	return postgres.NewNoteRepository(db)
+}
+
+// newSQLiteNotesChecker returns a links.NotesChecker for the sqlite backend — see newPostgresNotesChecker.
+func newSQLiteNotesChecker(db *bun.DB) *sqlite.NoteRepository {
 	return sqlite.NewNoteRepository(db)
-}
-
-//nolint:ireturn // multiple implementations (sqlite, postgres) require interface return
-func initStorage(ctx context.Context, storage string, db *bun.DB, log *slog.Logger) (notes.Storage, error) {
-	inits := map[string]storageInit{
-		"postgres": initPostgresStorage,
-		"sqlite":   initSQLiteStorage,
-	}
-
-	fn, ok := inits[storage]
-	if !ok {
-		return nil, fmt.Errorf("unknown storage backend %q: supported backends: postgres, sqlite", storage)
-	}
-
-	return fn(ctx, db, log)
 }
 
 // parseTrustedProxies parses a comma-separated list of CIDRs or bare IP addresses.

@@ -91,7 +91,17 @@ func buildShortenReq(cmd *urcli.Command) (*padmark.CreateLinkRequest, error) {
 		return nil, fmt.Errorf("invalid --%s: must be a positive number of seconds (omit for no expiry)", FlagTTL)
 	}
 
-	req := &padmark.CreateLinkRequest{TargetURL: *target}
+	req := &padmark.CreateLinkRequest{
+		TargetURL: *target,
+		// Opt fields zeroed: the server applies its defaults. Only the flags the CLI explicitly
+		// reads (--slug, --burn, --ttl, --edit-code, --privacy, --direct) populate these later.
+		Slug:           padmark.OptString{Value: "", Set: false},
+		BurnAfterClick: padmark.OptBool{Value: false, Set: false},
+		TTL:            padmark.OptInt64{Value: 0, Set: false},
+		EditCode:       padmark.OptString{Value: "", Set: false},
+		Privacy:        padmark.OptCreateLinkRequestPrivacy{Value: "", Set: false},
+		DirectRedirect: padmark.OptNilBool{Value: false, Set: false, Null: false},
+	}
 
 	if slug := cmd.String(FlagSlug); slug != "" {
 		req.Slug = padmark.NewOptString(slug)

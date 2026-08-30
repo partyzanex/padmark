@@ -3,6 +3,7 @@ package http
 import (
 	"log/slog"
 	"net/url"
+	"time"
 
 	"github.com/partyzanex/padmark/internal/adapters/http/ogenapi"
 	"github.com/partyzanex/padmark/internal/domain"
@@ -19,6 +20,8 @@ func domainToResponse(note *domain.Note) *ogenapi.NoteResponse {
 		CreatedAt:        note.CreatedAt,
 		UpdatedAt:        note.UpdatedAt,
 		Privacy:          ogenapi.NewOptNoteResponsePrivacy(ogenapi.NoteResponsePrivacy(note.EffectivePrivacy())),
+		// ExpiresAt populated below when note.ExpiresAt is non-nil; zero OptNilDateTime otherwise.
+		ExpiresAt: ogenapi.OptNilDateTime{Value: time.Time{}, Set: false, Null: false},
 	}
 
 	if note.ExpiresAt != nil {
@@ -38,7 +41,12 @@ func linkTargetURL(raw string, log *slog.Logger) url.URL {
 	if err != nil {
 		log.Error("parse stored link target url", slog.String("error", err.Error()))
 
-		return url.URL{}
+		return url.URL{
+			// Empty url.URL: every component zero. Used as a safe fallback when a stored target URL
+			// fails to re-parse — ogen/JSON marshals it as "{}" instead of an erroneous redirect.
+			Scheme: "", Opaque: "", User: nil, Host: "", Path: "", Fragment: "",
+			RawQuery: "", RawPath: "", RawFragment: "", ForceQuery: false, OmitHost: false,
+		}
 	}
 
 	return *parsed
@@ -52,6 +60,9 @@ func domainLinkToResponse(link *domain.Link, log *slog.Logger) *ogenapi.LinkResp
 		BurnAfterClick: link.BurnAfterClick,
 		CreatedAt:      link.CreatedAt,
 		Privacy:        ogenapi.NewOptLinkResponsePrivacy(ogenapi.LinkResponsePrivacy(link.EffectivePrivacy())),
+		// ExpiresAt / DirectRedirect populated below when non-nil; zero Opt types otherwise.
+		ExpiresAt:      ogenapi.OptNilDateTime{Value: time.Time{}, Set: false, Null: false},
+		DirectRedirect: ogenapi.OptNilBool{Value: false, Set: false, Null: false},
 	}
 
 	if link.ExpiresAt != nil {
@@ -76,6 +87,9 @@ func domainLinkToCreateResponse(link *domain.Link, log *slog.Logger) ogenapi.Cre
 		Privacy: ogenapi.NewOptCreateLinkResponsePrivacy(
 			ogenapi.CreateLinkResponsePrivacy(link.EffectivePrivacy()),
 		),
+		// ExpiresAt / DirectRedirect populated below when non-nil; zero Opt types otherwise.
+		ExpiresAt:      ogenapi.OptNilDateTime{Value: time.Time{}, Set: false, Null: false},
+		DirectRedirect: ogenapi.OptNilBool{Value: false, Set: false, Null: false},
 	}
 
 	if link.ExpiresAt != nil {
@@ -103,6 +117,8 @@ func domainToCreateResponse(note *domain.Note) ogenapi.CreateNoteResponse {
 		Privacy: ogenapi.NewOptCreateNoteResponsePrivacy(
 			ogenapi.CreateNoteResponsePrivacy(note.EffectivePrivacy()),
 		),
+		// ExpiresAt populated below when note.ExpiresAt is non-nil; zero OptNilDateTime otherwise.
+		ExpiresAt: ogenapi.OptNilDateTime{Value: time.Time{}, Set: false, Null: false},
 	}
 
 	if note.ExpiresAt != nil {

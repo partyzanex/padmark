@@ -2,18 +2,15 @@ package crypto
 
 import (
 	"crypto/rand"
-	"crypto/sha256"
-	"encoding/hex"
+	"encoding/base64"
 	"fmt"
-	"io"
 
-	"golang.org/x/crypto/hkdf"
+	"golang.org/x/crypto/argon2"
 )
 
 const (
-	pwKeyLen   uint32 = 32
-	pwKDFLen          = 16
-	pwHKDFInfo        = "padmark-user-key-v1"
+	pwKeyLen uint32 = 32
+	pwKDFLen int    = 16
 )
 
 // PasswordHasher hashes and verifies user passwords using argon2id with configurable cost.
@@ -48,7 +45,7 @@ func VerifyPassword(storedHash, password string) bool {
 	return verifyArgon2(storedHash, password)
 }
 
-// GenerateKDFSalt returns 16 random bytes to use as HKDF salt for user key derivation.
+// GenerateKDFSalt returns 16 random bytes to use as the argon2 salt for user key derivation.
 func GenerateKDFSalt() ([]byte, error) {
 	salt := make([]byte, pwKDFLen)
 
@@ -60,17 +57,17 @@ func GenerateKDFSalt() ([]byte, error) {
 	return salt, nil
 }
 
-// DeriveUserKey derives a 32-byte hex-encoded key from password and kdfSalt via HKDF-SHA256.
-// Use this as the AES encryption key for the user's TOTP secret.
-func DeriveUserKey(password, kdfSalt []byte) (string, error) {
-	reader := hkdf.New(sha256.New, password, kdfSalt, []byte(pwHKDFInfo))
+// DeriveUserKey derives a 32-byte base64url-encoded key from password and kdfSalt via
+// argon2id at the given cost. The result is the AES-GCM key used to wrap a user's TOTP
+// secret. Cost params must match the PasswordHasher config: a stolen DB then forces the
+// attacker through the same memory-hard work as the password column, instead of a
+// single-pass SHA-256 (HKDF) that would yield SHA-256 brute-force speeds.
+//
+// Use GenerateKDFSalt to produce a fresh salt; do not reuse salts across users.
+func DeriveUserKey(password, kdfSalt []byte, params Argon2Params) (string, error) {
+	params = params.withDefaults()
 
-	key := make([]byte, pwKeyLen)
+	key := argon2.IDKey(password, kdfSalt, params.Time, params.Memory, params.Threads, pwKeyLen)
 
-	_, err := io.ReadFull(reader, key)
-	if err != nil {
-		return "", fmt.Errorf("hkdf: %w", err)
-	}
-
-	return hex.EncodeToString(key), nil
+	return base64.RawURLEncoding.EncodeToString(key), nil
 }

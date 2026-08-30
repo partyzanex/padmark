@@ -37,7 +37,11 @@ func deleteCommand() *urcli.Command {
 // see the package-level nolint above.
 func deleteAction(ctx context.Context, cmd *urcli.Command) error {
 	deleteNote := func(ctx context.Context, padmarkClient *padmark.Client, id, editCode string) error {
-		params := padmark.DeleteNoteParams{ID: id}
+		params := padmark.DeleteNoteParams{
+			ID:        id,
+			XEditCode: padmark.OptString{Value: "", Set: false},
+			EditCode:  padmark.OptString{Value: "", Set: false},
+		}
 
 		if editCode != "" {
 			params.XEditCode = padmark.NewOptString(editCode)
@@ -59,7 +63,7 @@ func handleDeleteNoteRes(res padmark.DeleteNoteRes) error {
 	case *padmark.DeleteNoteNoContent:
 		return nil
 	case *padmark.DeleteNoteUnauthorized:
-		return fmt.Errorf("unauthorized: %s", typed.Message)
+		return errors.New("unauthorized")
 	case *padmark.DeleteNoteForbidden:
 		return errors.New("forbidden: wrong edit code or --token is not the note's owner")
 	case *padmark.DeleteNoteNotFound:

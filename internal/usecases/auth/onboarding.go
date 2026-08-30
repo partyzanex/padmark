@@ -75,7 +75,7 @@ func (m *OnboardingManager) GenerateInvite(ctx context.Context, adminUserID uuid
 func (m *OnboardingManager) AcceptInvite(ctx context.Context, token, username, password string) (string, error) {
 	err := domain.ValidatePassword(password)
 	if err != nil {
-		return "", err //nolint:wrapcheck // ErrWeakPassword sentinel passes through for errors.Is
+		return "", fmt.Errorf("validate password: %w", err)
 	}
 
 	// Fast pre-check to reject an already-taken username before the expensive buildUser work
@@ -99,7 +99,7 @@ func (m *OnboardingManager) AcceptInvite(ctx context.Context, token, username, p
 
 	err = m.invites.RedeemInvite(ctx, token, username, usr)
 	if err != nil {
-		return "", err //nolint:wrapcheck // domain sentinels pass through for errors.Is
+		return "", fmt.Errorf("redeem invite: %w", err)
 	}
 
 	return qrURL, nil
@@ -114,7 +114,7 @@ func (m *OnboardingManager) AcceptInvite(ctx context.Context, token, username, p
 func (m *OnboardingManager) AcceptFirstAdmin(ctx context.Context, username, password string) (string, error) {
 	err := domain.ValidatePassword(password)
 	if err != nil {
-		return "", err //nolint:wrapcheck // ErrWeakPassword sentinel passes through for errors.Is
+		return "", fmt.Errorf("validate password: %w", err)
 	}
 
 	users, err := m.users.List(ctx)
@@ -133,7 +133,7 @@ func (m *OnboardingManager) AcceptFirstAdmin(ctx context.Context, username, pass
 
 	err = m.users.Create(ctx, usr)
 	if err != nil {
-		return "", err //nolint:wrapcheck // ErrUserExists sentinel passes through for errors.Is
+		return "", fmt.Errorf("create first admin user: %w", err)
 	}
 
 	return qrURL, nil
@@ -177,6 +177,10 @@ func (m *OnboardingManager) buildUser(username, password string, isAdmin bool) (
 		KDFSalt:      kdfSalt,
 		IsAdmin:      isAdmin,
 		CreatedAt:    time.Now(),
+		// LastLoginAt:    — no previous login on a freshly created account; nil pointer signals "never".
+		// LastTOTPCounter: counter starts at 0; first TOTP code validates against this baseline.
+		LastLoginAt:     nil,
+		LastTOTPCounter: 0,
 	}
 
 	qrURL, err := m.totp.GenerateQRCode(m.issuer, username, rawSecret)

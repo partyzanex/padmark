@@ -56,6 +56,15 @@ func (h *PageHandler) IndexPage(w http.ResponseWriter, r *http.Request) {
 	err := h.indexTmpl.Execute(w, editorViewData{
 		Nonce:   nonceFromContext(r.Context()),
 		Privacy: string(domain.PrivacyPublic),
+		// ID/Title/Content blank — fresh editor. TTL/EditMode/BurnAfterReading/IsOwner are zero defaults
+		// (Create form, not owner view).
+		ID:               "",
+		Title:            "",
+		Content:          "",
+		TTL:              0,
+		EditMode:         false,
+		BurnAfterReading: false,
+		IsOwner:          false,
 	})
 	if err != nil {
 		h.log.ErrorContext(r.Context(), "render index template", "err", err)

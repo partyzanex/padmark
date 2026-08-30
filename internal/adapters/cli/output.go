@@ -33,7 +33,7 @@ func (ew *errWriter) printf(format string, args ...any) {
 
 func printNote(w io.Writer, note *padmark.NoteResponse) error {
 	twr := tabwriter.NewWriter(w, twMinWidth, twTabWidth, twPadding, ' ', 0)
-	ewr := &errWriter{w: twr}
+	ewr := &errWriter{w: twr, err: nil}
 
 	ewr.printf("id:\t%s\n", note.ID)
 	ewr.printf("title:\t%s\n", note.Title)
@@ -63,7 +63,7 @@ func printNote(w io.Writer, note *padmark.NoteResponse) error {
 		return fmt.Errorf("flush: %w", flushErr)
 	}
 
-	content := &errWriter{w: w}
+	content := &errWriter{w: w, err: nil}
 	content.printf("\n%s\n", note.Content)
 
 	if content.err != nil {
@@ -89,7 +89,7 @@ func printNoteJSON(w io.Writer, note *padmark.NoteResponse) error {
 // fields (title, content) — a link's only "content" is its target URL.
 func printLink(w io.Writer, link *padmark.LinkResponse) error {
 	twr := tabwriter.NewWriter(w, twMinWidth, twTabWidth, twPadding, ' ', 0)
-	ewr := &errWriter{w: twr}
+	ewr := &errWriter{w: twr, err: nil}
 
 	ewr.printf("id:\t%s\n", link.ID)
 	ewr.printf("target_url:\t%s\n", link.TargetURL.String())
@@ -137,7 +137,7 @@ func printLinkJSON(w io.Writer, link *padmark.LinkResponse) error {
 
 func printCreateLinkResult(w io.Writer, serverURL string, link *padmark.CreateLinkResponse) error {
 	twr := tabwriter.NewWriter(w, twMinWidth, twTabWidth, twPadding, ' ', 0)
-	erw := &errWriter{w: twr}
+	erw := &errWriter{w: twr, err: nil}
 
 	erw.printf("id:\t%s\n", link.ID)
 	erw.printf("url:\t%s/r/%s\n", serverURL, link.ID)
@@ -171,7 +171,7 @@ func printCreateLinkResult(w io.Writer, serverURL string, link *padmark.CreateLi
 
 func printCreateResult(w io.Writer, serverURL string, note *padmark.CreateNoteResponse) error {
 	twr := tabwriter.NewWriter(w, twMinWidth, twTabWidth, twPadding, ' ', 0)
-	erw := &errWriter{w: twr}
+	erw := &errWriter{w: twr, err: nil}
 
 	erw.printf("id:\t%s\n", note.ID)
 	erw.printf("url:\t%s/%s\n", serverURL, note.ID)

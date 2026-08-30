@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -33,12 +34,14 @@ type link struct {
 
 // LinkRepository implements links.Storage using SQLite.
 type LinkRepository struct {
-	db *bun.DB
+	db  *bun.DB
+	log *slog.Logger
 }
 
-// NewLinkRepository creates a new SQLite-backed LinkRepository.
-func NewLinkRepository(db *bun.DB) *LinkRepository {
-	return &LinkRepository{db: db}
+// NewLinkRepository creates a new SQLite-backed LinkRepository. log is used to surface
+// lazy-sweep failures.
+func NewLinkRepository(db *bun.DB, log *slog.Logger) *LinkRepository {
+	return &LinkRepository{db: db, log: log}
 }
 
 // linkToDomain converts a db link row to a domain.Link. privacyPtr is shared with
@@ -65,6 +68,7 @@ func linkToDomain(dbLink *link) *domain.Link {
 // never followed again would otherwise linger in the table forever.
 func (r *LinkRepository) Create(ctx context.Context, domLink *domain.Link) error {
 	dbLink := &link{
+		BaseModel:      bun.BaseModel{},
 		ID:             domLink.ID,
 		TargetURL:      domLink.TargetURL,
 		CreatedAt:      domLink.CreatedAt,
@@ -92,11 +96,15 @@ func (r *LinkRepository) Create(ctx context.Context, domLink *domain.Link) error
 	// id != ? excludes the row just inserted above: a caller-supplied ExpiresAt in the past (e.g.
 	// ttl=0, matching notes' "immediate" semantics) must not vanish before Create even returns —
 	// the sweep is for cleaning up old abandoned links, not undoing this call's own insert.
-	//nolint:errcheck // best-effort sweep; stale links persist until next Create
-	_, _ = r.db.NewDelete().
+	// Best-effort sweep of stale links; a failure here does not block link creation —
+	// stale rows simply persist until the next Create call.
+	_, sweepErr := r.db.NewDelete().
 		TableExpr("links").
 		Where("id != ? AND expires_at IS NOT NULL AND expires_at < ?", dbLink.ID, time.Now()).
 		Exec(ctx)
+	if sweepErr != nil {
+		r.log.WarnContext(ctx, "link sweep failed", "err", sweepErr)
+	}
 
 	return nil
 }

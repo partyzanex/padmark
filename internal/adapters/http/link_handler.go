@@ -28,7 +28,13 @@ type LinkHandler struct {
 }
 
 func newLinkHandler(c *common, manager LinkManager, tmpl *template.Template) *LinkHandler {
-	return &LinkHandler{common: c, manager: manager, tmpl: tmpl}
+	return &LinkHandler{
+		common:  c,
+		manager: manager,
+		tmpl:    tmpl,
+		// directRedirect zero = false = interstitial mode; WithDirectRedirect overrides at router build.
+		directRedirect: false,
+	}
 }
 
 // RegisterRoutes registers the short-link redirect route.

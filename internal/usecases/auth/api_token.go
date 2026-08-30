@@ -75,6 +75,10 @@ func (m *APITokenManager) CreateAPIToken(ctx context.Context, userID uuid.UUID) 
 		UserID:    usr.ID,
 		TokenHash: base64.RawURLEncoding.EncodeToString(hash[:]),
 		CreatedAt: time.Now(),
+		// ExpiresAt:  — TTL=0 means "never expires"; zero value carries that semantics for this column.
+		// LastUsedAt: — unused until the first authenticated request resolves the token.
+		ExpiresAt:  nil,
+		LastUsedAt: nil,
 	}
 
 	ok, err := m.apiTokens.CreateIfUnderLimit(ctx, token, maxAPITokensPerUser)
@@ -101,7 +105,7 @@ func (m *APITokenManager) ResolveAPIToken(ctx context.Context, plainToken string
 
 	token, err := m.apiTokens.GetByHash(ctx, base64.RawURLEncoding.EncodeToString(hash[:]))
 	if err != nil {
-		return nil, err //nolint:wrapcheck // domain.ErrNotFound sentinel passes through for errors.Is
+		return nil, fmt.Errorf("get api token by hash: %w", err)
 	}
 
 	if token.ExpiresAt != nil && time.Now().After(*token.ExpiresAt) {

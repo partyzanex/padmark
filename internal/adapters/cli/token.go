@@ -89,7 +89,7 @@ func secureTokenFile(path string, errOut io.Writer) {
 			path, perm, chmodErr, path)
 	}
 
-	ewr := &errWriter{w: errOut}
+	ewr := &errWriter{w: errOut, err: nil}
 	ewr.printf("%s", msg)
 }
 

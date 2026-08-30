@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -43,18 +44,20 @@ func (r *inviteRow) toDomain() *domain.Invite {
 // InviteRepository is a PostgreSQL-backed store for single-use registration invites.
 // Consume is atomic: a single UPDATE ... RETURNING eliminates the SELECT+UPDATE race.
 type InviteRepository struct {
-	db *bun.DB
+	db  *bun.DB
+	log *slog.Logger
 }
 
-// NewInviteRepository returns a new PostgreSQL-backed InviteRepository.
-func NewInviteRepository(db *bun.DB) *InviteRepository {
-	return &InviteRepository{db: db}
+// NewInviteRepository returns a new PostgreSQL-backed InviteRepository. log is used to surface
+// lazy-sweep failures.
+func NewInviteRepository(db *bun.DB, log *slog.Logger) *InviteRepository {
+	return &InviteRepository{db: db, log: log}
 }
 
 // Issue generates a single-use invite token with a 24-hour TTL.
 // Expired and consumed tokens are lazily swept on each call.
 //
-//nolint:dupl // token-issuing pattern is identical across token table types by design
+
 func (r *InviteRepository) Issue(ctx context.Context, createdByID uuid.UUID) (string, error) {
 	buf := make([]byte, inviteTokenBytes)
 
@@ -66,9 +69,13 @@ func (r *InviteRepository) Issue(ctx context.Context, createdByID uuid.UUID) (st
 	tok := base64.RawURLEncoding.EncodeToString(buf)
 
 	row := &inviteRow{
+		BaseModel: bun.BaseModel{},
 		Token:     tok,
 		CreatedBy: createdByID,
 		ExpiresAt: time.Now().Add(inviteTTL),
+		// UsedAt/UsedBy zero = nil/empty until a redemption records the consuming user.
+		UsedAt: nil,
+		UsedBy: "",
 	}
 
 	_, err = r.db.NewInsert().Model(row).Exec(ctx)
@@ -76,12 +83,16 @@ func (r *InviteRepository) Issue(ctx context.Context, createdByID uuid.UUID) (st
 		return "", fmt.Errorf("insert invite: %w", err)
 	}
 
-	//nolint:errcheck // best-effort sweep; stale invites persist until next Issue
-	_, _ = r.db.NewDelete().
+	// Best-effort sweep of stale invites; a failure here does not block token issuance —
+	// stale rows simply persist until the next Issue call.
+	_, sweepErr := r.db.NewDelete().
 		TableExpr("invites").
 		Where("expires_at < ?", time.Now()).
 		WhereOr("used_at IS NOT NULL").
 		Exec(ctx)
+	if sweepErr != nil {
+		r.log.WarnContext(ctx, "invite sweep failed", "err", sweepErr)
+	}
 
 	return tok, nil
 }
@@ -164,7 +175,7 @@ func (r *InviteRepository) RedeemInvite(ctx context.Context, token, username str
 	})
 	if err != nil {
 		if isInviteSentinel(err) {
-			return err //nolint:wrapcheck // domain sentinel, must stay unwrapped for errors.Is
+			return fmt.Errorf("redeem invite: %w", err)
 		}
 
 		return fmt.Errorf("redeem invite: %w", err)

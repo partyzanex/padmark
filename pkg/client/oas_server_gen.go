@@ -46,10 +46,12 @@ type Handler interface {
 	DeleteLink(ctx context.Context, params DeleteLinkParams) (DeleteLinkRes, error)
 	// DeleteNote implements deleteNote operation.
 	//
-	// Permanently deletes the note.  The edit code must be supplied either as the
-	// `X-Edit-Code` request header or the `edit_code` query parameter — unless the request is
-	// authenticated (bearer token or session) as the exact user who created the note, in which
-	// case no edit code is needed. See "Edit codes and ownership" above.
+	// Permanently deletes the note. Anonymous callers may delete any note whose `privacy`
+	// level would also let them read it (see "Authentication" above). The edit code must be
+	// supplied either as the `X-Edit-Code` request header or the `edit_code` query parameter —
+	// unless the request is authenticated (bearer token or session) as the exact user who
+	// created the note, in which case no edit code is needed. See "Edit codes and ownership"
+	// above.
 	// Prefer the `X-Edit-Code` header over the `edit_code` query parameter: a query string can
 	// end up in reverse-proxy/CDN access logs or in the `Referer` header of a same-origin
 	// follow-up request, while padmark's own logging never records it (see openapi.yaml's
@@ -93,10 +95,11 @@ type Handler interface {
 	// UpdateNote implements updateNote operation.
 	//
 	// Replaces the note's title, content, content type, and burn settings.
-	// The `edit_code` must match the one returned when the note was created — unless the
-	// request is authenticated (bearer token or session) as the exact user who created the
-	// note, in which case `edit_code` may be omitted. See "Edit codes and ownership" above.
-	// Returns the updated note.
+	// Anonymous callers may update any note whose `privacy` level would also let them read it
+	// (see "Authentication" above); the `edit_code` must match the one returned when the note
+	// was created — unless the request is authenticated (bearer token or session) as the exact
+	// user who created the note, in which case `edit_code` may be omitted. See "Edit codes and
+	// ownership" above. Returns the updated note.
 	//
 	// PUT /notes/{id}
 	UpdateNote(ctx context.Context, req *UpdateNoteRequest, params UpdateNoteParams) (UpdateNoteRes, error)

@@ -101,7 +101,7 @@ func warnInsecureToken(errOut io.Writer, serverURL, token string) {
 
 	// Best-effort advisory write (errWriter swallows the error); a failed warning must not
 	// abort the command.
-	ew := &errWriter{w: errOut}
+	ew := &errWriter{w: errOut, err: nil}
 	ew.printf(
 		"warning: bearer token will be sent in cleartext over a non-HTTPS URL (%s); use an https:// server URL\n",
 		serverURL)
@@ -208,7 +208,7 @@ func runDeleteCommand(
 		return err
 	}
 
-	ew := &errWriter{w: os.Stdout}
+	ew := &errWriter{w: os.Stdout, err: nil}
 	ew.printf("deleted %s\n", id)
 
 	if ew.err != nil {

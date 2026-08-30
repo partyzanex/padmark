@@ -1947,7 +1947,9 @@ func (s *HandlerSuite) TestAuth_MissingToken_API() {
 	router.ServeHTTP(w, r)
 
 	s.Equal(http.StatusUnauthorized, w.Code)
-	s.JSONEq(`{"message":"unauthorized"}`, w.Body.String())
+	// The ogen spec declares PUT /notes/{id} 401 without a schema, so the gate returns
+	// the empty UpdateNoteUnauthorized — no JSON body to decode on the client side.
+	s.Empty(w.Body.String())
 }
 
 func (s *HandlerSuite) TestGetNote_OpenInstance_ShowsEditButtons() {
@@ -2424,8 +2426,8 @@ func (s *HandlerSuite) TestPrivateNote_TOTPMode_Unauthenticated() {
 // passed for an authenticated caller, and no interaction with the fail-lockout.
 
 // TestMutationGate_AnonymousDelete_PrivateNote verifies the ogen DELETE gate: with auth
-// configured, an anonymous DELETE against a privacy=authenticated note is refused with a JSON
-// 401 before the usecase is ever reached (Delete having no EXPECT guarantees that).
+// configured, an anonymous DELETE against a privacy=authenticated note is refused with a
+// bodyless 401 before the usecase is ever reached (Delete having no EXPECT guarantees that).
 func (s *HandlerSuite) TestMutationGate_AnonymousDelete_PrivateNote() {
 	router := s.newRouterWithTOTPAuth()
 	note := newTestNote("secret", "nope")
@@ -2440,8 +2442,8 @@ func (s *HandlerSuite) TestMutationGate_AnonymousDelete_PrivateNote() {
 	router.ServeHTTP(w, r)
 
 	s.Equal(http.StatusUnauthorized, w.Code)
-	s.Contains(w.Header().Get("Content-Type"), "application/json")
-	s.JSONEq(`{"message":"unauthorized"}`, w.Body.String())
+	// DELETE /notes/{id} 401 has no schema in the ogen spec → empty DeleteNoteUnauthorized.
+	s.Empty(w.Body.String())
 }
 
 // TestMutationGate_AnonymousDelete_OwnerNote is the same branch for privacy=owner — the strictest

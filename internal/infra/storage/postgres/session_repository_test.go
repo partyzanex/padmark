@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"database/sql"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -48,7 +49,7 @@ func (s *SessionRepositoryTestSuite) SetupSuite() {
 	_, err = Migrate(ctx, s.db)
 	s.Require().NoError(err)
 
-	s.repo = NewSessionRepository(s.db)
+	s.repo = NewSessionRepository(s.db, slog.Default())
 	s.users = NewUserRepository(s.db)
 }
 

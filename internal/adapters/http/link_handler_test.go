@@ -291,7 +291,8 @@ func (s *HandlerSuite) TestDeleteLink_Gated_PrivateLink() {
 	router.ServeHTTP(w, r)
 
 	s.Equal(http.StatusUnauthorized, w.Code)
-	s.JSONEq(`{"message":"unauthorized"}`, w.Body.String())
+	// DELETE /links/{id} 401 has no schema in the ogen spec → empty DeleteLinkUnauthorized.
+	s.Empty(w.Body.String())
 }
 
 // TestDeleteLink_Gated_PublicLink_WrongEditCode verifies the gate passes for a link an

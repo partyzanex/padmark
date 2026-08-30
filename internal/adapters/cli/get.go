@@ -53,7 +53,7 @@ func getAction(ctx context.Context, cmd *urcli.Command) error {
 
 	switch {
 	case cmd.Bool(FlagRaw):
-		ew := &errWriter{w: os.Stdout}
+		ew := &errWriter{w: os.Stdout, err: nil}
 		ew.printf("%s\n", note.Content)
 
 		if ew.err != nil {

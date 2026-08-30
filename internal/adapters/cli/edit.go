@@ -120,7 +120,17 @@ func buildUpdateReq(cmd *urcli.Command, content, editCode string) *padmark.Updat
 		title = firstLine(content)
 	}
 
-	req := &padmark.UpdateNoteRequest{Content: content}
+	req := &padmark.UpdateNoteRequest{
+		// Opt fields zeroed: the server applies its defaults. Only the flags the CLI explicitly
+		// reads (--title, --edit-code, --burn, --ttl, --privacy) populate these later.
+		Title:            padmark.OptString{Value: "", Set: false},
+		Content:          content,
+		ContentType:      padmark.OptUpdateNoteRequestContentType{Value: "", Set: false},
+		EditCode:         padmark.OptString{Value: "", Set: false},
+		BurnAfterReading: padmark.OptBool{Value: false, Set: false},
+		TTL:              padmark.OptInt64{Value: 0, Set: false},
+		Privacy:          padmark.OptUpdateNoteRequestPrivacy{Value: "", Set: false},
+	}
 	if editCode != "" {
 		req.EditCode = padmark.NewOptString(editCode)
 	}
@@ -160,7 +170,7 @@ func handleUpdateNoteRes(res padmark.UpdateNoteRes) (*padmark.NoteResponse, erro
 	case *padmark.UpdateNoteBadRequest:
 		return nil, fmt.Errorf("bad request: %s", typed.Message)
 	case *padmark.UpdateNoteUnauthorized:
-		return nil, fmt.Errorf("unauthorized: %s", typed.Message)
+		return nil, errors.New("unauthorized")
 	case *padmark.UpdateNoteForbidden:
 		return nil, errors.New("forbidden: wrong edit code")
 	case *padmark.UpdateNoteNotFound:

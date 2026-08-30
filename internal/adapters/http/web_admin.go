@@ -231,6 +231,15 @@ func (h *AdminHandler) adminData(r *http.Request, adminID uuid.UUID) (adminViewD
 	data := adminViewData{
 		Nonce:     nonceFromContext(r.Context()),
 		CSRFToken: csrfFromContext(r.Context()),
+		// Status/action fields zeroed: populated by the per-action POST handler before re-render on failure
+		// (e.g. InviteURL after a successful invite issuance, KeyError on revoke failure). Zero on initial GET.
+		InviteURL:   "",
+		InviteError: "",
+		RevokeError: "",
+		KeyError:    "",
+		NewKey:      "",
+		Users:       nil,
+		APITokens:   nil,
 	}
 
 	users, err := h.authMgr.ListUsers(r.Context(), adminID)

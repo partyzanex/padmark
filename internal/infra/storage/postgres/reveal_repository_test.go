@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"database/sql"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -44,7 +45,7 @@ func (s *RevealRepositoryTestSuite) SetupSuite() {
 	_, migrateErr := Migrate(ctx, s.db)
 	s.Require().NoError(migrateErr)
 
-	s.repo = NewRevealRepository(s.db)
+	s.repo = NewRevealRepository(s.db, slog.Default())
 }
 
 func (s *RevealRepositoryTestSuite) TearDownSuite() {

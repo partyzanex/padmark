@@ -6,9 +6,11 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"fmt"
 	"net"
 	"net/http"
 	"strings"
+	"time"
 )
 
 const (
@@ -28,7 +30,7 @@ func generateCSRFToken(secret []byte) (string, error) {
 
 	_, err := rand.Read(nonce)
 	if err != nil {
-		return "", err //nolint:wrapcheck // rand.Read error is self-explanatory
+		return "", fmt.Errorf("read csrf nonce: %w", err)
 	}
 
 	nonceB64 := base64.RawURLEncoding.EncodeToString(nonce)
@@ -75,6 +77,16 @@ func setCSRFCookie(w http.ResponseWriter, r *http.Request, token string, trusted
 		HttpOnly: true,
 		Secure:   isHTTPS(r, trustedProxies),
 		SameSite: http.SameSiteStrictMode,
+		// Unused optional fields zeroed: no Raw, RawExpires, Unparsed, Quoted, Domain, Expires,
+		// Partitioned. MaxAge=0 means session cookie (cleared on browser close).
+		Raw:         "",
+		RawExpires:  "",
+		Unparsed:    nil,
+		Quoted:      false,
+		Domain:      "",
+		Expires:     time.Time{},
+		MaxAge:      0,
+		Partitioned: false,
 	})
 }
 
@@ -101,6 +113,14 @@ func clearCSRFCookie(w http.ResponseWriter, r *http.Request, trustedProxies []*n
 		HttpOnly: true,
 		Secure:   isHTTPS(r, trustedProxies),
 		SameSite: http.SameSiteStrictMode,
+		// Unused optional fields zeroed: no Raw, RawExpires, Unparsed, Quoted, Domain, Expires, Partitioned.
+		Raw:         "",
+		RawExpires:  "",
+		Unparsed:    nil,
+		Quoted:      false,
+		Domain:      "",
+		Expires:     time.Time{},
+		Partitioned: false,
 	})
 }
 
