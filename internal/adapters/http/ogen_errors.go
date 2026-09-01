@@ -21,29 +21,38 @@ func errResp(err error) ogenapi.ErrorResponse {
 	return ogenapi.ErrorResponse{Message: err.Error()}
 }
 
-// newMaxBodyErrorHandler builds an ogen error handler that intercepts request-body-size violations
-// (http.MaxBytesReader, wired via withBodyLimit from MaxBodyBytes) surfacing during ogen request
-// decoding, and answers with a clean 413 matching the OpenAPI ErrorResponse schema — so an
-// oversized note body reads as a documented "request entity too large" rather than an opaque
-// decode error. Every other error falls through to ogen's default handler.
-func newMaxBodyErrorHandler(log *slog.Logger) ogenapi.ErrorHandler {
-	return func(ctx context.Context, w http.ResponseWriter, r *http.Request, err error) {
+// newOgenErrorHandler builds the handler for every failure ogen raises before a request ever
+// reaches a handler method: an oversized body, malformed JSON, a missing required field, a field
+// of the wrong type, an unsupported Content-Type.
+//
+// It replaces ogen's DefaultErrorHandler rather than delegating to it, because that handler
+// writes {"error_message": ...} while the spec's ErrorResponse defines message — and defines it
+// as required. Delegating therefore produced, on exactly the inputs a client is most likely to
+// get wrong, a body missing the one field the contract guarantees. Every response this server
+// emits carries {"message": ...}; this was the sole exception.
+//
+// Status classification is unchanged: ogenerrors.ErrorCode is the same mapping the default
+// handler used (400 for a malformed or invalid body, 415 for an unsupported Content-Type, 501
+// for an unimplemented operation, 500 otherwise). Only the body-size case is reclassified, from
+// the 400 ogen infers for a truncated read to the 413 the limit actually means.
+func newOgenErrorHandler(log *slog.Logger) ogenapi.ErrorHandler {
+	return func(ctx context.Context, w http.ResponseWriter, _ *http.Request, err error) {
+		status, msg := ogenerrors.ErrorCode(err), err.Error()
+
 		// Consume the typed result (not the ok flag) so errcheck sees the error-typed return used.
 		// Plain assignment (not an if-init) keeps noinlineerr happy.
 		maxBytes, _ := errors.AsType[*http.MaxBytesError](err)
 		if maxBytes != nil {
-			w.Header().Set("Content-Type", mimeJSON)
-			w.WriteHeader(http.StatusRequestEntityTooLarge)
-
-			encErr := json.NewEncoder(w).Encode(errorJSON{Message: maxBodyErrorMessage})
-			if encErr != nil {
-				log.ErrorContext(ctx, "write 413 response", "err", encErr)
-			}
-
-			return
+			status, msg = http.StatusRequestEntityTooLarge, maxBodyErrorMessage
 		}
 
-		ogenerrors.DefaultErrorHandler(ctx, w, r, err)
+		w.Header().Set("Content-Type", mimeJSON)
+		w.WriteHeader(status)
+
+		encErr := json.NewEncoder(w).Encode(errorJSON{Message: msg})
+		if encErr != nil {
+			log.ErrorContext(ctx, "write ogen error response", "status", status, "err", encErr)
+		}
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"go.uber.org/mock/gomock"
@@ -211,8 +212,20 @@ func (s *HandlerSuite) TestGetLink_NotFound() {
 	s.Equal(http.StatusNotFound, w.Code)
 }
 
+// TestGetLink_Expired exercises the real expiry path. links.Manager.Peek deliberately returns
+// an expired link as-is — it is the pre-auth metadata read and applies no policy — so the
+// handler is the only place that can turn it into the 410 the OpenAPI spec documents.
+//
+// The previous version of this test mocked Peek returning domain.ErrExpired, an outcome Peek's
+// contract rules out. It passed while GET /links/{id} actually answered 200 for expired links,
+// out of step with GET /r/{id}: coverage of a branch nothing reaches reads exactly like coverage
+// of the real one.
 func (s *HandlerSuite) TestGetLink_Expired() {
-	s.linkManager.EXPECT().Peek(gomock.Any(), testLinkID).Return(nil, domain.ErrExpired)
+	link := newTestLink()
+	expired := time.Now().Add(-time.Hour)
+	link.ExpiresAt = &expired
+
+	s.linkManager.EXPECT().Peek(gomock.Any(), testLinkID).Return(link, nil)
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/links/"+testLinkID, nil)
@@ -220,6 +233,52 @@ func (s *HandlerSuite) TestGetLink_Expired() {
 	s.router.ServeHTTP(w, r)
 
 	s.Equal(http.StatusGone, w.Code)
+
+	var resp struct {
+		Message string `json:"message"`
+	}
+
+	s.Require().NoError(json.NewDecoder(w.Body).Decode(&resp))
+	s.Equal(domain.ErrExpired.Error(), resp.Message, "410 body must follow the ErrorResponse contract")
+}
+
+// TestGetLink_NotYetExpired_OK guards the boundary from the other side: a link with a future TTL
+// must still resolve. A comparison slipped the wrong way would report every dated link as gone.
+func (s *HandlerSuite) TestGetLink_NotYetExpired_OK() {
+	link := newTestLink()
+	future := time.Now().Add(time.Hour)
+	link.ExpiresAt = &future
+
+	s.linkManager.EXPECT().Peek(gomock.Any(), testLinkID).Return(link, nil)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/links/"+testLinkID, nil)
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusOK, w.Code)
+}
+
+// TestGetLink_ExpiredAndPrivate_Anonymous_Unauthorized pins the order of the two gates: privacy
+// is decided before expiry, mirroring LinkHandler.Redirect. A stranger asking about an expired
+// owner-only link gets 401, not 410 — a 410 would confirm the link had existed.
+func (s *HandlerSuite) TestGetLink_ExpiredAndPrivate_Anonymous_Unauthorized() {
+	owner := uuid.New()
+
+	link := newTestLink()
+	link.Privacy = new(domain.PrivacyOwner)
+	link.OwnerID = &owner
+	expired := time.Now().Add(-time.Hour)
+	link.ExpiresAt = &expired
+
+	s.linkManager.EXPECT().Peek(gomock.Any(), testLinkID).Return(link, nil)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/links/"+testLinkID, nil)
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusUnauthorized, w.Code)
 }
 
 func (s *HandlerSuite) TestGetLink_OwnerOnly_NonOwner_Unauthorized() {

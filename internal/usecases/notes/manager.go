@@ -32,6 +32,16 @@ type LinksChecker interface {
 	Exists(ctx context.Context, id string) (bool, error)
 }
 
+// SlugLock serializes the check-then-create window in resolveUniqueSlug. Notes and links live
+// in separate tables (see LinksChecker's doc comment), so the database's own PK constraint only
+// protects a same-table collision — a concurrent notes.Create and links.Create targeting the
+// same slug would otherwise both observe "not taken" and both write. The concrete
+// implementation must be the exact same instance links.Manager locks against (see links.
+// SlugLock), or this protects nothing.
+type SlugLock interface {
+	Lock(ctx context.Context, key string) (unlock func(), err error)
+}
+
 // Renderer converts note content to safe HTML. Render handles markdown; RenderPlain handles
 // domain.ContentTypePlain notes (escape + wrap, no markdown parsing). Both live behind this one
 // port so the HTML-specific mechanics (escaping, sanitizing, wrapping) stay in the adapter that
@@ -59,6 +69,7 @@ type EditCodeHasher interface {
 type Manager struct {
 	storage   Storage
 	links     LinksChecker
+	slugLock  SlugLock
 	renderer  Renderer
 	encryptor Encryptor
 	hasher    EditCodeHasher
@@ -72,13 +83,16 @@ type Manager struct {
 // NewManager creates a new Manager with required dependencies. allowCustomSlugs enables
 // user-supplied slugs; when false, a create request carrying a slug is rejected with
 // domain.ErrCustomSlugDisabled (a custom slug is low-entropy content-encryption key material).
+// slugLock must be the same instance passed to the paired links.Manager — see SlugLock's doc
+// comment for why.
 func NewManager(
-	storage Storage, links LinksChecker, renderer Renderer, encryptor Encryptor, hasher EditCodeHasher,
-	log *slog.Logger, allowCustomSlugs bool,
+	storage Storage, links LinksChecker, slugLock SlugLock, renderer Renderer, encryptor Encryptor,
+	hasher EditCodeHasher, log *slog.Logger, allowCustomSlugs bool,
 ) *Manager {
 	return &Manager{
 		storage:          storage,
 		links:            links,
+		slugLock:         slugLock,
 		renderer:         renderer,
 		encryptor:        encryptor,
 		hasher:           hasher,
@@ -118,10 +132,11 @@ func (m *Manager) Create(ctx context.Context, note *domain.Note) (*domain.Note, 
 		return nil, err
 	}
 
-	slug, err := m.resolveUniqueSlug(ctx, note)
+	slug, unlock, err := m.resolveUniqueSlug(ctx, note)
 	if err != nil {
 		return nil, err
 	}
+	defer unlock()
 
 	if note.EditCode == "" {
 		editCode, editCodeErr := domain.NewEditCode()
@@ -439,22 +454,38 @@ func (m *Manager) renderNote(id string, note *domain.Note) (string, error) {
 // retried on a same-table collision either (the DB's own PK constraint on storage.Create was
 // always the sole backstop), so a cross-table hit is treated the same way: an immediate
 // domain.ErrSlugConflict, not a silently-generated different slug.
-func (m *Manager) resolveUniqueSlug(ctx context.Context, note *domain.Note) (string, error) {
-	slug, err := domain.ResolveSlug(note.ID, m.allowCustomSlugs)
+//
+// The returned unlock must be called exactly once (by the caller, after storage.Create — see
+// SlugLock's doc comment for why the lock has to stay held past this check) — including on
+// every error path after the lock is acquired, so this never returns a non-nil unlock alongside
+// a non-nil error.
+func (m *Manager) resolveUniqueSlug(
+	ctx context.Context, note *domain.Note,
+) (slug string, unlock func(), err error) {
+	slug, err = domain.ResolveSlug(note.ID, m.allowCustomSlugs)
 	if err != nil {
-		return "", fmt.Errorf("resolve slug: %w", err)
+		return "", nil, fmt.Errorf("resolve slug: %w", err)
 	}
 
-	linkTaken, linksErr := m.links.Exists(ctx, domain.HashSlug(slug))
-	if linksErr != nil {
-		return "", fmt.Errorf("check link slug: %w", linksErr)
+	unlock, err = m.slugLock.Lock(ctx, domain.HashSlug(slug))
+	if err != nil {
+		return "", nil, fmt.Errorf("lock slug: %w", err)
+	}
+
+	linkTaken, err := m.links.Exists(ctx, domain.HashSlug(slug))
+	if err != nil {
+		unlock()
+
+		return "", nil, fmt.Errorf("check link slug: %w", err)
 	}
 
 	if linkTaken {
-		return "", domain.ErrSlugConflict
+		unlock()
+
+		return "", nil, domain.ErrSlugConflict
 	}
 
-	return slug, nil
+	return slug, unlock, nil
 }
 
 // decryptContent decrypts note.Content in place using the slug (note.ID) as the key.

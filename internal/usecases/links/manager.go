@@ -38,6 +38,17 @@ type NotesChecker interface {
 	Exists(ctx context.Context, id string) (bool, error)
 }
 
+// SlugLock serializes the check-then-create window in resolveUniqueSlug. Notes and links live
+// in separate tables (see NotesChecker's doc comment), so the database's own PK constraint only
+// protects a same-table collision — a concurrent links.Create and notes.Create targeting the
+// same slug would otherwise both observe "not taken" and both write. The concrete
+// implementation must be the exact same instance notes.Manager locks against (see notes.
+// SlugLock), or this protects nothing. Declared here rather than imported from notes, for the
+// same reason as Encryptor above: a usecase package may only import domain + stdlib.
+type SlugLock interface {
+	Lock(ctx context.Context, key string) (unlock func(), err error)
+}
+
 // Encryptor encrypts and decrypts a link's target URL using the slug as key material. Declared
 // here, not imported from the notes usecase package: a usecase package may only import domain +
 // stdlib, never another usecase package. crypto.New() already satisfies this interface by
@@ -86,6 +97,7 @@ type Metrics interface {
 type Manager struct {
 	storage          Storage
 	notes            NotesChecker
+	slugLock         SlugLock
 	encryptor        Encryptor
 	hasher           EditCodeHasher
 	cache            Cache
@@ -97,18 +109,21 @@ type Manager struct {
 // NewManager creates a new Manager with required dependencies. allowCustomSlugs enables
 // user-supplied slugs (aliases); when false, a create request carrying one is rejected with
 // domain.ErrCustomSlugDisabled — mirrors notes.NewManager, and both share the same server-wide
-// --custom-slugs flag. cache and metrics are optional collaborators that default to nil and must
-// be attached via WithCache/WithMetrics at composition time; every code path nil-checks them, so a
-// missed attachment leaves caching/metrics disabled (never a nil deref). All fields of Manager are
-// explicitly initialised here so a future field added to the struct cannot silently land in an
-// undefined state — the compiler forces every caller through this constructor.
+// --custom-slugs flag. slugLock must be the same instance passed to the paired notes.Manager —
+// see SlugLock's doc comment for why. cache and metrics are optional collaborators that default
+// to nil and must be attached via WithCache/WithMetrics at composition time; every code path
+// nil-checks them, so a missed attachment leaves caching/metrics disabled (never a nil deref).
+// All fields of Manager are explicitly initialised here so a future field added to the struct
+// cannot silently land in an undefined state — the compiler forces every caller through this
+// constructor.
 func NewManager(
-	storage Storage, notes NotesChecker, encryptor Encryptor, hasher EditCodeHasher,
+	storage Storage, notes NotesChecker, slugLock SlugLock, encryptor Encryptor, hasher EditCodeHasher,
 	log *slog.Logger, allowCustomSlugs bool,
 ) *Manager {
 	return &Manager{
 		storage:          storage,
 		notes:            notes,
+		slugLock:         slugLock,
 		encryptor:        encryptor,
 		hasher:           hasher,
 		cache:            nil,
@@ -229,10 +244,11 @@ func (m *Manager) Create(ctx context.Context, targetURL string, opts CreateOptio
 
 	link.CreatedAt = time.Now().UTC()
 
-	slug, err := m.resolveUniqueSlug(ctx, opts.CustomHash)
+	slug, unlock, err := m.resolveUniqueSlug(ctx, opts.CustomHash)
 	if err != nil {
 		return nil, err
 	}
+	defer unlock()
 
 	err = m.persistLink(ctx, link, slug, validURL, plaintextCode)
 	if err != nil {
@@ -309,7 +325,7 @@ func (m *Manager) Redirect(ctx context.Context, slug string) (*domain.Link, erro
 		return nil, fmt.Errorf("redirect: %w", err)
 	}
 
-	if link.ExpiresAt != nil && time.Now().After(*link.ExpiresAt) {
+	if link.Expired(time.Now()) {
 		delErr := m.storage.Delete(ctx, dbID)
 		if delErr != nil {
 			m.log.ErrorContext(ctx, "delete expired link", "id", slug, "err", delErr)
@@ -474,39 +490,55 @@ func (m *Manager) resolveAndHashEditCode(link *domain.Link) (string, error) {
 // custom-alias collision is an immediate ErrSlugConflict — the caller chose that exact value,
 // there is nothing to retry. A random-slug collision retries up to maxHashRetries before giving
 // up with ErrHashCollision.
-func (m *Manager) resolveUniqueSlug(ctx context.Context, customHash string) (string, error) {
+//
+// On success the returned unlock holds m.slugLock for the winning candidate — the caller must
+// call it exactly once, after persistLink (see SlugLock's doc comment for why the lock has to
+// stay held past the check). Every candidate rejected during a retry releases its own lock
+// before the next attempt, so at most one lock is ever held at a time.
+func (m *Manager) resolveUniqueSlug(
+	ctx context.Context, customHash string,
+) (slug string, unlock func(), err error) {
 	// Unlike notes, links are only served at single-segment routes (GET /r/{id} plus the ogen
 	// GET /links/{id} / DELETE /links/{id}), so a multi-segment custom alias would be created
 	// successfully yet unroutable and unreachable through the API. Reject it here, at the
 	// resource that owns the routing constraint, rather than narrowing the shared
 	// domain.ValidCustomSlug that multi-segment notes legitimately rely on.
 	if strings.Contains(customHash, "/") {
-		return "", fmt.Errorf("custom link slug %q must be a single path segment (links are served at /r/{id}): %w",
+		return "", nil, fmt.Errorf("custom link slug %q must be a single path segment (links are served at /r/{id}): %w",
 			customHash, domain.ErrInvalidSlug)
 	}
 
 	for range maxHashRetries {
 		ctxErr := ctx.Err()
 		if ctxErr != nil {
-			return "", fmt.Errorf("resolve unique slug: %w", ctxErr)
+			return "", nil, fmt.Errorf("resolve unique slug: %w", ctxErr)
 		}
 
 		slug, err := domain.ResolveSlug(customHash, m.allowCustomSlugs)
 		if err != nil {
-			return "", fmt.Errorf("resolve slug: %w", err)
+			return "", nil, fmt.Errorf("resolve slug: %w", err)
+		}
+
+		unlock, lockErr := m.slugLock.Lock(ctx, domain.HashSlug(slug))
+		if lockErr != nil {
+			return "", nil, fmt.Errorf("lock slug: %w", lockErr)
 		}
 
 		taken, err := m.slugTaken(ctx, domain.HashSlug(slug))
 		if err != nil {
-			return "", err
+			unlock()
+
+			return "", nil, err
 		}
 
 		if !taken {
-			return slug, nil
+			return slug, unlock, nil
 		}
 
+		unlock()
+
 		if customHash != "" {
-			return "", domain.ErrSlugConflict
+			return "", nil, domain.ErrSlugConflict
 		}
 
 		// Reached only for a random-slug retry collision, never a rejected custom alias (that
@@ -516,7 +548,7 @@ func (m *Manager) resolveUniqueSlug(ctx context.Context, customHash string) (str
 		}
 	}
 
-	return "", domain.ErrHashCollision
+	return "", nil, domain.ErrHashCollision
 }
 
 // slugTaken reports whether dbID (HashSlug(slug)) already names a note or a link.

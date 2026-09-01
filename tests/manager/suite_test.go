@@ -2,6 +2,7 @@ package integration
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/infra/crypto"
+	"github.com/partyzanex/padmark/internal/infra/lock"
 	"github.com/partyzanex/padmark/internal/infra/render"
 	"github.com/partyzanex/padmark/internal/usecases/links"
 	"github.com/partyzanex/padmark/internal/usecases/notes"
@@ -36,47 +38,22 @@ type ManagerSuite struct {
 	LinkManager *links.Manager
 	RevealStore revealStore
 	DB          *bun.DB
-
-	// NewRacingManagers builds a fresh notes.Manager/links.Manager pair against the same
-	// backend as Manager/LinkManager, but with their cross-table Exists() checks routed
-	// through barrier — see TestCrossTableSlugUniqueness_ConcurrentCreate. Set by each
-	// storage-specific SetupTest; nil skips the race test on backends that don't wire it up.
-	NewRacingManagers func(barrier *sync.WaitGroup) (*notes.Manager, *links.Manager)
 }
 
-func newManager(storage notes.Storage, linkChecker notes.LinksChecker) *notes.Manager {
+// newManager and newLinkManager take the same slugLock instance for a Manager/LinkManager pair
+// constructed together — see notes.SlugLock's doc comment for why sharing it (not one Locker
+// per manager) is what actually closes the cross-table race.
+func newManager(storage notes.Storage, linkChecker notes.LinksChecker, slugLock *lock.Locker) *notes.Manager {
 	return notes.NewManager(
-		storage, linkChecker, render.NewRenderer(), crypto.New(),
+		storage, linkChecker, slugLock, render.NewRenderer(), crypto.New(),
 		crypto.NewEditCodeHasher(), discardLog, true,
 	)
 }
 
-func newLinkManager(storage links.Storage, notesChecker links.NotesChecker) *links.Manager {
+func newLinkManager(storage links.Storage, notesChecker links.NotesChecker, slugLock *lock.Locker) *links.Manager {
 	return links.NewManager(
-		storage, notesChecker, crypto.New(), crypto.NewEditCodeHasher(), discardLog, true,
+		storage, notesChecker, slugLock, crypto.New(), crypto.NewEditCodeHasher(), discardLog, true,
 	)
-}
-
-// existsChecker is the shape both notes.LinksChecker and links.NotesChecker reduce to — a
-// single Exists lookup against the other resource's table.
-type existsChecker interface {
-	Exists(ctx context.Context, id string) (bool, error)
-}
-
-// barrierChecker wraps an existsChecker so Exists blocks until a peer barrierChecker sharing
-// the same barrier has also entered its own Exists call, then proceeds. With two peers this
-// deterministically forces both cross-table checks to run before either side's write —
-// reproducing the TOCTOU window on every run instead of depending on scheduler/DB timing luck.
-type barrierChecker struct {
-	inner   existsChecker
-	barrier *sync.WaitGroup
-}
-
-func (b *barrierChecker) Exists(ctx context.Context, id string) (bool, error) {
-	b.barrier.Done()
-	b.barrier.Wait()
-
-	return b.inner.Exists(ctx, id)
 }
 
 // ── Create ──
@@ -534,64 +511,52 @@ func (s *ManagerSuite) TestCrossTableSlugUniqueness_LinkFirst_ThenNoteConflicts(
 }
 
 // TestCrossTableSlugUniqueness_ConcurrentCreate is the sequential tests above run at the same
-// time instead of one after another. Sequentially the invariant holds because whichever side
-// runs second observes the first side's already-committed row through its Exists() check. But
-// notes and links are separate tables (see the comment block above) with no shared unique
-// constraint, so nothing stops two concurrent creates from both passing their Exists() check
-// before either has written — a plain TOCTOU race, distinct from a same-table collision (which
-// the PK constraint still catches even under concurrency, see storage.Create's ErrSlugConflict
-// mapping).
-//
-// A real goroutine race against a real backend would only reproduce this intermittently — the
-// window between Exists() and Create() is short. Instead this test forces the race
-// deterministically: NewRacingManagers wires both sides' cross-table checkers through a shared
-// barrier (barrierChecker) that blocks each Exists() call until *both* have entered it,
-// guaranteeing neither side has written yet when both checks run. This is not a synthetic
-// scenario — it is the same interleaving two real concurrent HTTP requests can hit, just made
-// to happen every time instead of occasionally.
+// time instead of one after another, guarding the fix for the cross-table TOCTOU race: notes
+// and links are separate tables (see the comment block above) with no shared unique constraint,
+// so without notes.SlugLock/links.SlugLock nothing would stop two concurrent creates from both
+// passing their Exists() check before either has written. s.Manager and s.LinkManager are wired
+// (by each backend's SetupTest) against the same underlying *lock.Locker, so the race is closed
+// structurally — this test runs many concurrent attempts against real goroutines and a real
+// backend rather than forcing one specific interleaving, since correctness here must hold
+// regardless of scheduling, not just under one contrived ordering.
 func (s *ManagerSuite) TestCrossTableSlugUniqueness_ConcurrentCreate() {
-	if s.NewRacingManagers == nil {
-		s.T().Skip("backend does not wire NewRacingManagers")
-	}
-
 	ctx := s.T().Context()
 
-	var barrier sync.WaitGroup
+	const attempts = 20
 
-	barrier.Add(2)
+	for i := range attempts {
+		slug := fmt.Sprintf("shared-race-slug-%d", i)
 
-	noteManager, linkManager := s.NewRacingManagers(&barrier)
+		var wg sync.WaitGroup
 
-	var wg sync.WaitGroup
+		var noteErr, linkErr error
 
-	var noteErr, linkErr error
+		wg.Add(2)
 
-	wg.Add(2)
+		go func() {
+			defer wg.Done()
 
-	go func() {
-		defer wg.Done()
+			_, noteErr = s.Manager.Create(ctx, &domain.Note{ID: slug, Title: "t", Content: "c"})
+		}()
 
-		_, noteErr = noteManager.Create(ctx, &domain.Note{ID: "shared-race-slug", Title: "t", Content: "c"})
-	}()
+		go func() {
+			defer wg.Done()
 
-	go func() {
-		defer wg.Done()
+			_, linkErr = s.LinkManager.Create(ctx, "https://example.com", links.CreateOptions{CustomHash: slug})
+		}()
 
-		_, linkErr = linkManager.Create(ctx, "https://example.com",
-			links.CreateOptions{CustomHash: "shared-race-slug"})
-	}()
+		wg.Wait()
 
-	wg.Wait()
+		// Documented invariant: a note and a link can never share a slug, regardless of
+		// creation order or timing. Exactly one of these two creates must have succeeded.
+		noteOK := noteErr == nil
+		linkOK := linkErr == nil
 
-	// Documented invariant: a note and a link can never share a slug, regardless of creation
-	// order or timing. Exactly one of these two creates must have succeeded.
-	noteOK := noteErr == nil
-	linkOK := linkErr == nil
-
-	s.NotEqualf(noteOK, linkOK,
-		"expected exactly one of the two concurrent creates to succeed (global slug uniqueness), "+
-			"got note err=%v, link err=%v — both succeeding means the cross-table TOCTOU race let "+
-			"two different resources claim the same slug", noteErr, linkErr)
+		s.NotEqualf(noteOK, linkOK,
+			"attempt %d: expected exactly one of the two concurrent creates to succeed (global slug "+
+				"uniqueness), got note err=%v, link err=%v — both succeeding means the cross-table "+
+				"TOCTOU race let two different resources claim the same slug", i, noteErr, linkErr)
+	}
 }
 
 // TestLink_TargetURLIsEncryptedAtRest is the concrete verification behind the acceptance

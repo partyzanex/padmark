@@ -3,7 +3,6 @@ package integration
 import (
 	"database/sql"
 	"log/slog"
-	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -13,9 +12,8 @@ import (
 	"github.com/uptrace/bun/dialect/pgdialect"
 	"github.com/uptrace/bun/driver/pgdriver"
 
+	"github.com/partyzanex/padmark/internal/infra/lock"
 	pgrepo "github.com/partyzanex/padmark/internal/infra/storage/postgres"
-	"github.com/partyzanex/padmark/internal/usecases/links"
-	"github.com/partyzanex/padmark/internal/usecases/notes"
 )
 
 type PostgresManagerSuite struct {
@@ -66,19 +64,14 @@ func (s *PostgresManagerSuite) SetupTest() {
 		s.Require().NoError(err)
 	}
 
-	s.Manager = newManager(pgrepo.NewNoteRepository(s.db), pgrepo.NewLinkRepository(s.db, slog.Default()))
-	s.LinkManager = newLinkManager(pgrepo.NewLinkRepository(s.db, slog.Default()), pgrepo.NewNoteRepository(s.db))
+	slugLock := lock.NewLocker()
+
+	s.Manager = newManager(pgrepo.NewNoteRepository(s.db), pgrepo.NewLinkRepository(s.db, slog.Default()), slugLock)
+	s.LinkManager = newLinkManager(
+		pgrepo.NewLinkRepository(s.db, slog.Default()), pgrepo.NewNoteRepository(s.db), slugLock,
+	)
 	s.RevealStore = pgrepo.NewRevealRepository(s.db, slog.Default())
 	s.DB = s.db
-	s.NewRacingManagers = func(barrier *sync.WaitGroup) (*notes.Manager, *links.Manager) {
-		noteRepo := pgrepo.NewNoteRepository(s.db)
-		linkRepo := pgrepo.NewLinkRepository(s.db, slog.Default())
-
-		nm := newManager(noteRepo, &barrierChecker{inner: linkRepo, barrier: barrier})
-		lm := newLinkManager(linkRepo, &barrierChecker{inner: noteRepo, barrier: barrier})
-
-		return nm, lm
-	}
 }
 
 func TestPostgresManager(t *testing.T) {

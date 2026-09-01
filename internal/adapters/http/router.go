@@ -161,7 +161,7 @@ func registerAllRoutes(mux *http.ServeMux, handler *Handler, ogenSrv http.Handle
 func NewRouter(
 	handler *Handler, ogenHandler *OgenHandler, opts *RouterOptions,
 ) (http.Handler, error) {
-	ogenSrv, err := ogenapi.NewServer(ogenHandler, ogenapi.WithErrorHandler(newMaxBodyErrorHandler(handler.log)))
+	ogenSrv, err := ogenapi.NewServer(ogenHandler, ogenapi.WithErrorHandler(newOgenErrorHandler(handler.log)))
 	if err != nil {
 		return nil, fmt.Errorf("new ogen server: %w", err)
 	}

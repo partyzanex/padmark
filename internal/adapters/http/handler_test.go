@@ -568,6 +568,84 @@ func (s *HandlerSuite) TestCreateNote_BodyExceedsLimit_Returns413() {
 	s.Equal(http.StatusRequestEntityTooLarge, w.Code)
 }
 
+// ── ogen decode errors (pre-handler failures) ──
+
+// decodeErrorBody posts body to /notes with the given Content-Type and returns the status and
+// the decoded error envelope. It reads into a map rather than a typed struct so an absent
+// "message" is visible as an absent key instead of an empty string, which is the exact defect
+// these tests guard: ogen's DefaultErrorHandler wrote "error_message" and left "message" unset.
+func (s *HandlerSuite) decodeErrorBody(contentType, body string) (int, map[string]any) {
+	s.T().Helper()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/notes", strings.NewReader(body))
+	r.Header.Set("Content-Type", contentType)
+
+	s.router.ServeHTTP(w, r)
+
+	var decoded map[string]any
+	s.Require().NoError(json.NewDecoder(w.Body).Decode(&decoded))
+
+	return w.Code, decoded
+}
+
+// TestOgenDecodeErrors_UseErrorResponseShape covers every failure ogen raises before a request
+// reaches a handler method. None of them may reply in ogen's native {"error_message": ...}
+// shape: ErrorResponse declares "message" required, so that body is off-contract for a client
+// validating against the spec. Manager.Create is never reached in any case (no EXPECT) — each
+// request dies during decoding.
+func (s *HandlerSuite) TestOgenDecodeErrors_UseErrorResponseShape() {
+	cases := map[string]struct {
+		contentType string
+		body        string
+		wantStatus  int
+	}{
+		"malformed json":         {"application/json", `{"content":`, http.StatusBadRequest},
+		"missing required field": {"application/json", `{}`, http.StatusBadRequest},
+		"wrong field type":       {"application/json", `{"content": 12345}`, http.StatusBadRequest},
+		"unsupported media type": {"text/plain", `hello`, http.StatusUnsupportedMediaType},
+	}
+
+	for name, tc := range cases {
+		s.Run(name, func() {
+			status, decoded := s.decodeErrorBody(tc.contentType, tc.body)
+
+			s.Equal(tc.wantStatus, status)
+			s.Contains(decoded, "message", "ErrorResponse requires a message field")
+			s.NotEmpty(decoded["message"])
+			s.NotContains(decoded, "error_message", "ogen's native error shape must not leak through")
+		})
+	}
+}
+
+// TestCreateNote_BodyExceedsLimit_UsesErrorResponseShape is the 413 counterpart: that branch
+// already wrote the right shape before the handler was replaced, so this pins it against a
+// regression while the surrounding code changes.
+func (s *HandlerSuite) TestCreateNote_BodyExceedsLimit_UsesErrorResponseShape() {
+	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog)
+	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog)
+	opts := adhttp.RouterOptions{
+		MaxBodyBytes: 64,
+		CSRFSecret:   testCSRFSecret,
+	}
+	router, err := adhttp.NewRouter(handler, ogen, &opts)
+	s.Require().NoError(err)
+
+	body := `{"title":"t","content":"` + strings.Repeat("x", 512) + `"}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/notes", strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusRequestEntityTooLarge, w.Code)
+
+	var decoded map[string]any
+	s.Require().NoError(json.NewDecoder(w.Body).Decode(&decoded))
+	s.Contains(decoded, "message")
+	s.NotContains(decoded, "error_message")
+}
+
 func (s *HandlerSuite) TestCreateNote_InvalidSlug() {
 	s.manager.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil, domain.ErrInvalidSlug)
 

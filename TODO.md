@@ -108,49 +108,95 @@
       `TestOverlyBroadProxyCIDRs` отдельно фиксирует отсутствие ложных срабатываний на приватных
       диапазонах и CDN-префиксах
 
-### 6. TOCTOU cross-table slug между notes и links — CONFIRMED
-- [ ] Файл: `internal/usecases/notes/manager.go:442-458` (`resolveUniqueSlug`) и
-      `internal/usecases/links/manager.go:509`
-- [ ] `notes.Manager.resolveUniqueSlug` проверяет занятость slug только через `links.Exists`;
-      занятость в самой таблице `notes` полагается только на PK constraint внутри
-      `storage.Create`
-- [ ] Риск: параллельные `POST /notes` с одинаковым custom slug (при `--custom-slugs=true`)
-      оба проходят проверку `links.Exists`, и падают друг на друга уже на уровне БД — не
-      контролируемая доменная ошибка, а голая race
-- [ ] Действие: добавить симметричную проверку `notes.Exists` в `resolveUniqueSlug` рядом с
-      уже существующей `links.Exists`
-- [ ] Действие: рассмотреть storage-level advisory lock или retry-on-conflict на уникальном
-      индексе как финальный уровень защиты (проверка на уровне usecase сама по себе race не
-      устраняет)
-- [ ] Тест: конкурентные `POST /notes` с одинаковым custom slug — ровно один успех, остальные —
-      корректная доменная ошибка (не паника, не голый 500 от constraint violation)
+### 6. TOCTOU cross-table slug между notes и links — DONE
+- [x] Перепроверено дважды против кода — исходная формулировка была неточной:
+      `storage.Create` в sqlite/postgres **уже** маппит PK/unique-constraint violation в
+      `domain.ErrSlugConflict` (`note_repository.go` обоих бэкендов) — same-table гонка
+      (notes-vs-notes, links-vs-links) была защищена и раньше, «голого 500» там нет
+- [x] Реальная дыра — только **cross-table**: `notes` и `links` это две разные SQL-таблицы с
+      независимыми PK (`migrations/*/20260327173334_init.sql`,
+      `migrations/*/20260721000001_links.sql`), общего constraint между ними нет и быть не
+      может — уникальность slug между note и link держится только на двух независимых
+      `Exists()`-проверках (`notes.Manager.resolveUniqueSlug` → `links.Exists`,
+      `links.Manager.slugTaken` → `notes.Exists`), без блокировки между check и write
+- [x] Находка подтверждена детерминированным тестом до фикса — `barrierChecker` в
+      `tests/manager/suite_test.go` форсировал оба `Exists()` в одну точку (`sync.WaitGroup`
+      на 2 участника), тест падал: `POST /notes` и `POST /links` с одинаковым custom slug оба
+      успешны одновременно — инвариант «глобально уникальный slug» из PRODUCT.md нарушался на
+      практике, не только в теории
+- [x] Реализован вариант 1 (advisory lock, in-process): новый пакет `internal/infra/lock`
+      (`Locker` — keyed mutex с refcounting, `Lock(ctx, key) (unlock func(), error)`)
+- [x] `notes.SlugLock`/`links.SlugLock` — новые seam-интерфейсы у потребителя (по конвенции
+      DIP), обе реализации структурно совпадают (`Lock(ctx, key) (func(), error)`),
+      единственный конкретный тип — `*lock.Locker`
+- [x] `notes.Manager.resolveUniqueSlug` и `links.Manager.resolveUniqueSlug` теперь держат
+      `slugLock` от resolve до `storage.Create` включительно (у links — с учётом retry-цикла
+      на случайный slug: каждая отклонённая попытка снимает свой лок перед следующей)
+- [x] `server.go`: **один общий** `lock.NewLocker()` передаётся в оба конструктора
+      (`notes.NewManager`, `links.NewManager`) — лок на каждый менеджер по отдельности не
+      защищал бы ничего, т.к. они не контендились бы друг с другом
+- [x] Ограничение задокументировано явно: `Locker` — single-process. Multi-replica деплой с
+      общей БД по-прежнему не защищён (нужен Postgres advisory lock) — не входит в этот фикс
+- [x] Regression-тест переписан: `TestCrossTableSlugUniqueness_ConcurrentCreate`
+      (`tests/manager/suite_test.go`) теперь гоняет 20 итераций настоящей конкурентности через
+      `s.Manager`/`s.LinkManager` (без искусственного барьера — с реальным логом гонка
+      закрыта структурно, не зависит от таймингов), проверяет «ровно один успех». Зелёный с
+      `-race` на sqlite и postgres
+- [x] Юнит-тест самого примитива: `internal/infra/lock/locker_test.go`
+      (`TestLocker_SerializesSameKey`, `TestLocker_DifferentKeysDoNotBlockEachOther`)
+- [x] Полный прогон: `go build ./...`, `go vet ./...` (+ `-tags=integration`),
+      `go test -race -count=1 ./...` и `go test -tags=integration -race -count=1 ./tests/...`
+      — всё зелёное; `golangci-lint run` без новых замечаний
 
-### 7. GET /links/{id} не отдаёт 410 для expired — CONFIRMED
-- [ ] Файл: `internal/adapters/http/ogen_handler.go:181-196` (`GetLink`)
-- [ ] `links.Manager.Peek` контрактно возвращает expired-ссылки как есть (документированное
-      поведение самого `Peek`), но `GetLink` не проверяет `link.ExpiresAt` перед ответом и
-      всегда отдаёт 200
-- [ ] Расхождение: браузерный редирект `/r/{id}` (`link_handler.go`) делает эту проверку и
-      корректно отдаёт 410 — API и браузерный путь ведут себя по-разному для одной и той же
-      ссылки
-- [ ] Действие: добавить проверку `ExpiresAt` в `GetLink` перед формированием ответа, вернуть
-      410 при истёкшей ссылке
-- [ ] Тест: `GET /links/{id}` для заведомо истёкшей ссылки → 410, тело ответа соответствует
-      контракту ошибок
+### 7. GET /links/{id} не отдаёт 410 для expired — DONE
+- [x] Файл: `internal/adapters/http/ogen_handler.go` (`GetLink`)
+- [x] `links.Manager.Peek` контрактно возвращает expired-ссылки как есть, `GetLink` не проверял
+      `ExpiresAt` и всегда отдавал 200
+- [x] Расхождение шире, чем описано: `openapi.yaml` **уже документирует** `410 Link has expired`
+      для `GET /links/{id}`, и `mapGetLinkError` уже умеет `StatusGone` — то есть это было
+      нарушение собственного контракта, а не только несогласованность с браузерным путём.
+      Уточнение: проверку делает не `link_handler.go`, а `links.Manager.Redirect`, куда
+      браузерный путь заходит
+- [x] Найдено попутно: старый `TestGetLink_Expired` мокал `Peek` → `domain.ErrExpired` — исход,
+      исключённый контрактом `Peek`. Тест проходил, покрывая недостижимую ветку, и ровно этим
+      маскировал баг
+- [x] Действие: проверка добавлена после privacy-гейта (порядок как в `LinkHandler.Redirect`:
+      истёкшая приватная ссылка отвечает чужому 401, а не 410 — 410 подтвердил бы факт её
+      существования). Ответ строится через тот же `mapGetLinkError`, что и остальные ошибки.
+      Строку не удаляем, в отличие от redirect-пути: `GET /links/{id}` задокументирован как
+      метаданные без side-effects, чистка происходит при следующем `GET /r/{id}`
+- [x] Условие вынесено в `domain.Link.Expired(now)` и используется обоими путями — дублирование
+      inline-сравнения и было причиной расхождения
+- [x] Тесты: `TestGetLink_Expired` (410 + тело `{"message":"expired"}`),
+      `TestGetLink_NotYetExpired_OK` (граница с другой стороны),
+      `TestGetLink_ExpiredAndPrivate_Anonymous_Unauthorized` (порядок гейтов). Проверено, что
+      без фикса `TestGetLink_Expired` падает с `expected 410, actual 200`
 
-### 8. Тело ошибок ogen-декодирования не соответствует ErrorResponse — CONFIRMED
-- [ ] Файл: `internal/adapters/http/ogen_errors.go:29-48` (`newMaxBodyErrorHandler`) и
-      vendor `ogenerrors/handler.go:48`
-- [ ] `newMaxBodyErrorHandler` корректно оборачивает 413 (`MaxBytesError`) в
-      `ErrorResponse{Message: ...}`, но для остальных decode-ошибок (битый JSON, missing
-      required field, неверный тип) делегирует в `ogenerrors.DefaultErrorHandler`, который
-      пишет поле `error_message` — не совпадает с задокументированным `ErrorResponse{message}`
-- [ ] Следствие: клиент, ожидающий контрактный `{"message": ...}`, на decode-ошибках получит
-      `{"error_message": ...}`
-- [ ] Действие: написать собственный `ErrorHandler`, оборачивающий все ogen decode-ошибки в
-      `ErrorResponse{Message: ...}`, вместо делегирования в `DefaultErrorHandler`
-- [ ] Тест: отправить битый JSON / отсутствующее обязательное поле / неверный тип на
-      произвольный ogen-эндпоинт, проверить формат тела ответа
+### 8. Тело ошибок ogen-декодирования не соответствует ErrorResponse — DONE
+- [x] Файл: `internal/adapters/http/ogen_errors.go` (`newMaxBodyErrorHandler` →
+      `newOgenErrorHandler`) и vendor `ogenerrors/handler.go:48`
+- [x] Подтверждено вживую на запущенном сервере: битый JSON, missing required field, неверный
+      тип → `400 {"error_message": ...}`; сюда же попадал и **415** (неверный `Content-Type`),
+      о котором в заявке не сказано
+- [x] Строже, чем «не совпадает»: в `openapi.yaml` `message` — **required** поле
+      `ErrorResponse`, то есть клиент со строгой валидацией по контракту видел тело без
+      обязательного поля. И ровно на тех входах, которые клиент чаще всего портит
+- [x] Действие: `newOgenErrorHandler` больше не делегирует в `DefaultErrorHandler`, а пишет
+      `errorJSON{Message: ...}` сам. Классификация статусов не менялась — тот же
+      `ogenerrors.ErrorCode`, что использовал дефолтный хендлер; отдельно остаётся только 413
+      для превышения лимита тела (ogen сам считает это 400)
+- [x] Тест: `TestOgenDecodeErrors_UseErrorResponseShape` (4 подкейса: битый JSON, missing
+      required, неверный тип, неверный Content-Type) + `TestCreateNote_BodyExceedsLimit_
+      UsesErrorResponseShape`. Тело декодируется в `map[string]any`, а не в структуру, — иначе
+      отсутствие `message` выглядело бы как пустая строка, а это ровно проверяемый дефект.
+      Проверено, что при возврате делегирования тесты падают
+- [ ] Осталось (отдельно): 415 отдаётся, но не задокументирован в `openapi.yaml` ни на одном
+      эндпоинте (`grep -c '"415"'` = 0). Тело теперь контрактное, статус — нет
+- [ ] Осталось (отдельно): текст сообщения протекает наружу внутренними именами —
+      `operation CreateNote: decode request: decode application/json: decode CreateNoteRequest:
+      callback: decode field "content": unexpected byte 49 '1' at 12`. Полезная часть
+      (`content (field required)`, `unexpected Content-Type: text/plain`) тонет в ogen-овской
+      цепочке вызовов и раскрывает имена сгенерированных типов
 
 ### 9. 429/500 отдаются через http.Error (text/plain) — CONFIRMED
 - [ ] Файл: `internal/adapters/http/middleware_faillock.go:40` —

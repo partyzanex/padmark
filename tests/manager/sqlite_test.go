@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -13,9 +12,8 @@ import (
 	"github.com/uptrace/bun/dialect/sqlitedialect"
 	"github.com/uptrace/bun/driver/sqliteshim"
 
+	"github.com/partyzanex/padmark/internal/infra/lock"
 	sqliterepo "github.com/partyzanex/padmark/internal/infra/storage/sqlite"
-	"github.com/partyzanex/padmark/internal/usecases/links"
-	"github.com/partyzanex/padmark/internal/usecases/notes"
 )
 
 type SQLiteManagerSuite struct {
@@ -35,19 +33,17 @@ func (s *SQLiteManagerSuite) SetupTest() {
 	s.db = bun.NewDB(sqldb, sqlitedialect.New())
 	_, migrateErr := sqliterepo.Migrate(s.T().Context(), s.db)
 	s.Require().NoError(migrateErr)
-	s.Manager = newManager(sqliterepo.NewNoteRepository(s.db), sqliterepo.NewLinkRepository(s.db, slog.Default()))
-	s.LinkManager = newLinkManager(sqliterepo.NewLinkRepository(s.db, slog.Default()), sqliterepo.NewNoteRepository(s.db))
+
+	slugLock := lock.NewLocker()
+
+	s.Manager = newManager(
+		sqliterepo.NewNoteRepository(s.db), sqliterepo.NewLinkRepository(s.db, slog.Default()), slugLock,
+	)
+	s.LinkManager = newLinkManager(
+		sqliterepo.NewLinkRepository(s.db, slog.Default()), sqliterepo.NewNoteRepository(s.db), slugLock,
+	)
 	s.RevealStore = sqliterepo.NewRevealRepository(s.db, slog.Default())
 	s.DB = s.db
-	s.NewRacingManagers = func(barrier *sync.WaitGroup) (*notes.Manager, *links.Manager) {
-		noteRepo := sqliterepo.NewNoteRepository(s.db)
-		linkRepo := sqliterepo.NewLinkRepository(s.db, slog.Default())
-
-		nm := newManager(noteRepo, &barrierChecker{inner: linkRepo, barrier: barrier})
-		lm := newLinkManager(linkRepo, &barrierChecker{inner: noteRepo, barrier: barrier})
-
-		return nm, lm
-	}
 }
 
 func (s *SQLiteManagerSuite) TearDownTest() {

@@ -75,6 +75,17 @@ func (l *Link) EffectiveDirectRedirect(serverDefault bool) bool {
 	return *l.DirectRedirect
 }
 
+// Expired reports whether l's TTL has elapsed as of now. A nil ExpiresAt means the link never
+// expires.
+//
+// Every path that surfaces a link to a caller must consult this, because links.Manager.Peek
+// deliberately returns expired links as-is (it is the pre-auth metadata read, and must not apply
+// policy). Keeping the comparison here rather than repeating it per call site is what stops the
+// redirect path and the API path from drifting apart on when a link counts as gone.
+func (l *Link) Expired(now time.Time) bool {
+	return l.ExpiresAt != nil && now.After(*l.ExpiresAt)
+}
+
 // VisibleTo reports whether a caller may resolve l given its privacy level — identical semantics
 // to Note.VisibleTo, including the fail-closed default for an unrecognized stored value.
 func (l *Link) VisibleTo(callerID uuid.UUID, authenticated bool) bool {

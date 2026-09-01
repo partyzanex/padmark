@@ -64,6 +64,13 @@ type errEncryptor struct{}
 func (errEncryptor) Encrypt(string, string) (string, error) { return "", errors.New("encrypt boom") }
 func (errEncryptor) Decrypt(ct, _ string) (string, error)   { return ct, nil }
 
+// noopSlugLock is a test double that grants every lock immediately — these tests exercise
+// business logic in isolation, never two concurrent Create calls, so nothing here needs the
+// real cross-manager serialization internal/infra/lock.Locker provides in production.
+type noopSlugLock struct{}
+
+func (noopSlugLock) Lock(context.Context, string) (func(), error) { return func() {}, nil }
+
 type ManagerTestSuite struct {
 	suite.Suite
 
@@ -79,7 +86,7 @@ func (s *ManagerTestSuite) SetupTest() {
 	s.storage = NewMockStorage(s.ctrl)
 	s.links = NewMockLinksChecker(s.ctrl)
 	s.renderer = NewMockRenderer(s.ctrl)
-	s.manager = NewManager(s.storage, s.links, s.renderer, passthroughEncryptor{}, identityHasher{},
+	s.manager = NewManager(s.storage, s.links, noopSlugLock{}, s.renderer, passthroughEncryptor{}, identityHasher{},
 		slog.New(slog.DiscardHandler), true)
 }
 
@@ -283,7 +290,7 @@ func (s *ManagerTestSuite) TestCreate_InvalidSlug() {
 func (s *ManagerTestSuite) TestCreate_CustomSlugDisabled() {
 	// With custom slugs off (allowCustomSlugs=false, the default), a create request that supplies
 	// a slug is rejected — the server issues only random slugs.
-	mgr := NewManager(s.storage, s.links, s.renderer, passthroughEncryptor{}, identityHasher{},
+	mgr := NewManager(s.storage, s.links, noopSlugLock{}, s.renderer, passthroughEncryptor{}, identityHasher{},
 		slog.New(slog.DiscardHandler), false)
 
 	_, err := mgr.Create(s.T().Context(), &domain.Note{ID: "my-slug", Title: "hello", Content: "world"})
@@ -293,7 +300,7 @@ func (s *ManagerTestSuite) TestCreate_CustomSlugDisabled() {
 
 func (s *ManagerTestSuite) TestCreate_CustomSlugDisabled_AutoSlugStillWorks() {
 	// With custom slugs off, a create request without a slug still succeeds with a generated one.
-	mgr := NewManager(s.storage, s.links, s.renderer, passthroughEncryptor{}, identityHasher{},
+	mgr := NewManager(s.storage, s.links, noopSlugLock{}, s.renderer, passthroughEncryptor{}, identityHasher{},
 		slog.New(slog.DiscardHandler), false)
 	s.expectSlugFree()
 	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
@@ -323,7 +330,7 @@ func (s *ManagerTestSuite) TestCreate_StorageError() {
 // Create returns the error AND leaves the caller's note in plaintext (defer restore),
 // not in the half-hashed state it mutates into. storage.Create must not be reached.
 func (s *ManagerTestSuite) TestCreate_EncryptError_RestoresPlaintext() {
-	mgr := NewManager(s.storage, s.links, s.renderer, errEncryptor{}, prefixHasher{},
+	mgr := NewManager(s.storage, s.links, noopSlugLock{}, s.renderer, errEncryptor{}, prefixHasher{},
 		slog.New(slog.DiscardHandler), true)
 	note := &domain.Note{Title: "t", Content: "secret body", EditCode: "mycode123456"}
 
@@ -341,7 +348,7 @@ func (s *ManagerTestSuite) TestCreate_EncryptError_RestoresPlaintext() {
 // the encrypted content / hashed edit code / hashed-slug PK, and that on a storage failure the
 // caller's note is restored to plaintext and the slug ID (defer restore).
 func (s *ManagerTestSuite) TestCreate_StorageError_RestoresPlaintextAndPersistsEncrypted() {
-	mgr := NewManager(s.storage, s.links, s.renderer, prefixEncryptor{}, prefixHasher{},
+	mgr := NewManager(s.storage, s.links, noopSlugLock{}, s.renderer, prefixEncryptor{}, prefixHasher{},
 		slog.New(slog.DiscardHandler), true)
 	note := &domain.Note{Title: "t", Content: "body", EditCode: "code12345678", ID: "myslug"}
 
@@ -376,7 +383,7 @@ func (s *ManagerTestSuite) TestCreate_StorageError_RestoresPlaintextAndPersistsE
 // ("hash:"+code) is distinguishable from plaintext. This locks in the defense-in-depth fix so a
 // future change to the repository column allow-list cannot silently start persisting plaintext.
 func (s *ManagerTestSuite) TestUpdate_PersistsHashedEditCode_NotPlaintext() {
-	mgr := NewManager(s.storage, s.links, s.renderer, prefixEncryptor{}, prefixHasher{},
+	mgr := NewManager(s.storage, s.links, noopSlugLock{}, s.renderer, prefixEncryptor{}, prefixHasher{},
 		slog.New(slog.DiscardHandler), true)
 
 	existing := &domain.Note{ID: "myslug", EditCode: "hash:code12345678", Content: "enc:old"}
@@ -411,7 +418,7 @@ func (s *ManagerTestSuite) TestUpdate_PersistsHashedEditCode_NotPlaintext() {
 // race (SetBurnExpiry → ErrNotFound), the re-fetch succeeds but decryption of the re-fetched
 // note fails — the error must propagate.
 func (s *ManagerTestSuite) TestHandleSetBurnExpiryErr_RefetchDecryptFails() {
-	mgr := NewManager(s.storage, s.links, s.renderer, failingEncryptor{}, identityHasher{},
+	mgr := NewManager(s.storage, s.links, noopSlugLock{}, s.renderer, failingEncryptor{}, identityHasher{},
 		slog.New(slog.DiscardHandler), true)
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("burn-x")).Return(&domain.Note{ID: "x", Content: "ct"}, nil)
 
@@ -1139,7 +1146,8 @@ func TestGet_DecryptionFailure(t *testing.T) {
 	storage := NewMockStorage(ctrl)
 	links := NewMockLinksChecker(ctrl)
 	renderer := NewMockRenderer(ctrl)
-	mgr := NewManager(storage, links, renderer, failingEncryptor{}, identityHasher{}, slog.New(slog.DiscardHandler), true)
+	mgr := NewManager(storage, links, noopSlugLock{}, renderer, failingEncryptor{}, identityHasher{},
+		slog.New(slog.DiscardHandler), true)
 
 	note := &domain.Note{ID: "enc-fail", Title: "t", Content: "ciphertext"}
 	storage.EXPECT().Get(gomock.Any(), domain.HashSlug("enc-fail")).Return(note, nil)
@@ -1154,7 +1162,8 @@ func TestPeek_DecryptionFailure(t *testing.T) {
 	storage := NewMockStorage(ctrl)
 	links := NewMockLinksChecker(ctrl)
 	renderer := NewMockRenderer(ctrl)
-	mgr := NewManager(storage, links, renderer, failingEncryptor{}, identityHasher{}, slog.New(slog.DiscardHandler), true)
+	mgr := NewManager(storage, links, noopSlugLock{}, renderer, failingEncryptor{}, identityHasher{},
+		slog.New(slog.DiscardHandler), true)
 
 	note := &domain.Note{ID: "enc-fail-peek", Title: "t", Content: "ciphertext"}
 	storage.EXPECT().Get(gomock.Any(), domain.HashSlug("enc-fail-peek")).Return(note, nil)
@@ -1171,7 +1180,8 @@ func TestGet_BurnAfterReading_DecryptionFailure(t *testing.T) {
 	storage := NewMockStorage(ctrl)
 	links := NewMockLinksChecker(ctrl)
 	renderer := NewMockRenderer(ctrl)
-	mgr := NewManager(storage, links, renderer, failingEncryptor{}, identityHasher{}, slog.New(slog.DiscardHandler), true)
+	mgr := NewManager(storage, links, noopSlugLock{}, renderer, failingEncryptor{}, identityHasher{},
+		slog.New(slog.DiscardHandler), true)
 
 	// decryptContent runs before burn.applyPolicy, so Consume is never reached.
 	raw := &domain.Note{ID: "burn-enc-fail", Title: "t", BurnAfterReading: true, Content: "ciphertext"}
@@ -1189,7 +1199,8 @@ func TestGet_BurnTTL_DecryptionFailure(t *testing.T) {
 	storage := NewMockStorage(ctrl)
 	links := NewMockLinksChecker(ctrl)
 	renderer := NewMockRenderer(ctrl)
-	mgr := NewManager(storage, links, renderer, failingEncryptor{}, identityHasher{}, slog.New(slog.DiscardHandler), true)
+	mgr := NewManager(storage, links, noopSlugLock{}, renderer, failingEncryptor{}, identityHasher{},
+		slog.New(slog.DiscardHandler), true)
 
 	// decryptContent runs before burn.applyPolicy, so SetBurnExpiry is never reached.
 	raw := &domain.Note{ID: "burn-ttl-enc-fail", Title: "t", BurnAfterReading: true, BurnTTL: 3600, Content: "ciphertext"}

@@ -182,6 +182,45 @@ func (mr *MockLinksCheckerMockRecorder) Exists(ctx, id any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Exists", reflect.TypeOf((*MockLinksChecker)(nil).Exists), ctx, id)
 }
 
+// MockSlugLock is a mock of SlugLock interface.
+type MockSlugLock struct {
+	ctrl     *gomock.Controller
+	recorder *MockSlugLockMockRecorder
+	isgomock struct{}
+}
+
+// MockSlugLockMockRecorder is the mock recorder for MockSlugLock.
+type MockSlugLockMockRecorder struct {
+	mock *MockSlugLock
+}
+
+// NewMockSlugLock creates a new mock instance.
+func NewMockSlugLock(ctrl *gomock.Controller) *MockSlugLock {
+	mock := &MockSlugLock{ctrl: ctrl}
+	mock.recorder = &MockSlugLockMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockSlugLock) EXPECT() *MockSlugLockMockRecorder {
+	return m.recorder
+}
+
+// Lock mocks base method.
+func (m *MockSlugLock) Lock(ctx context.Context, key string) (func(), error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Lock", ctx, key)
+	ret0, _ := ret[0].(func())
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Lock indicates an expected call of Lock.
+func (mr *MockSlugLockMockRecorder) Lock(ctx, key any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Lock", reflect.TypeOf((*MockSlugLock)(nil).Lock), ctx, key)
+}
+
 // MockRenderer is a mock of Renderer interface.
 type MockRenderer struct {
 	ctrl     *gomock.Controller

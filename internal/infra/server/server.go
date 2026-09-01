@@ -24,6 +24,7 @@ import (
 	"github.com/partyzanex/padmark/internal/infra/crypto"
 	"github.com/partyzanex/padmark/internal/infra/linkcache"
 	"github.com/partyzanex/padmark/internal/infra/linkmetrics"
+	"github.com/partyzanex/padmark/internal/infra/lock"
 	"github.com/partyzanex/padmark/internal/infra/render"
 	"github.com/partyzanex/padmark/internal/infra/storage/postgres"
 	"github.com/partyzanex/padmark/internal/infra/storage/sqlite"
@@ -405,9 +406,15 @@ func buildHandlers(
 		checker = newSQLiteNotesChecker(db)
 	}
 
-	manager := notes.NewManager(repo, linkRepo, render.NewRenderer(), crypto.New(),
+	// One Locker instance shared by both managers: it closes the cross-table TOCTOU race
+	// between notes.Manager.Create and links.Manager.Create (see notes.SlugLock's doc comment)
+	// — a Locker per manager would each serialize its own calls but never contend with the
+	// other's, protecting nothing.
+	slugLock := lock.NewLocker()
+
+	manager := notes.NewManager(repo, linkRepo, slugLock, render.NewRenderer(), crypto.New(),
 		crypto.NewEditCodeHasher(), log, cmd.Bool(FlagCustomSlugs))
-	linkManager := links.NewManager(linkRepo, checker, crypto.New(),
+	linkManager := links.NewManager(linkRepo, checker, slugLock, crypto.New(),
 		crypto.NewEditCodeHasher(), log, cmd.Bool(FlagCustomSlugs)).
 		WithCache(linkcache.NewDefault(log)).
 		WithMetrics(linkMetrics)

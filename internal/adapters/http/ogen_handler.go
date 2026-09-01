@@ -211,6 +211,15 @@ func (h *OgenHandler) GetLink(
 		return &v, nil
 	}
 
+	// Peek does not apply expiry policy, so this path has to. Checked after the privacy gate,
+	// matching LinkHandler.Redirect's order, so an expired private link answers a stranger with
+	// 401 rather than confirming it once existed. Unlike the redirect path this only reports the
+	// expiry and does not delete the row: GET /links/{id} is documented as a side-effect-free
+	// metadata read, and the expired link is cleaned up on its next GET /r/{id}.
+	if link.Expired(time.Now()) {
+		return mapGetLinkError(domain.ErrExpired, h.log), nil
+	}
+
 	return domainLinkToResponse(link, h.log), nil
 }
 

@@ -19,6 +19,7 @@ import (
 	adaptershttp "github.com/partyzanex/padmark/internal/adapters/http"
 	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/infra/crypto"
+	"github.com/partyzanex/padmark/internal/infra/lock"
 	"github.com/partyzanex/padmark/internal/infra/render"
 	sqliterepo "github.com/partyzanex/padmark/internal/infra/storage/sqlite"
 	"github.com/partyzanex/padmark/internal/usecases/auth"
@@ -64,9 +65,12 @@ func TestAPITokenFlow_AdminIssuesKey_CLICreatesNote(t *testing.T) {
 	)
 	require.NoError(t, err)
 
+	slugLock := lock.NewLocker()
+
 	notesMgr := notes.NewManager(
 		sqliterepo.NewNoteRepository(db),
 		sqliterepo.NewLinkRepository(db, slog.Default()),
+		slugLock,
 		render.NewRenderer(),
 		crypto.New(),
 		crypto.NewEditCodeHasher(),
@@ -76,6 +80,7 @@ func TestAPITokenFlow_AdminIssuesKey_CLICreatesNote(t *testing.T) {
 	linksMgr := links.NewManager(
 		sqliterepo.NewLinkRepository(db, slog.Default()),
 		sqliterepo.NewNoteRepository(db),
+		slugLock,
 		crypto.New(),
 		crypto.NewEditCodeHasher(),
 		log,
