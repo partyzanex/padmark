@@ -185,6 +185,45 @@ func parseTrustedProxies(raw string) ([]*net.IPNet, error) {
 	return result, nil
 }
 
+// minIPv4TrustedPrefix / minIPv6TrustedPrefix are the shortest prefix lengths a trusted-proxy
+// entry may have before overlyBroadProxyCIDRs flags it. They are set to the shortest prefixes
+// with a real-world use: 10.0.0.0/8 is the standard private IPv4 range, and fc00::/7 is the
+// IPv6 unique-local range. Anything shorter spans a slice of the public internet no proxy
+// fleet occupies, so it can only be a mistake.
+const (
+	minIPv4TrustedPrefix = 8
+	minIPv6TrustedPrefix = 7
+)
+
+// overlyBroadProxyCIDRs returns the trusted-proxy entries wide enough to be a configuration
+// error, formatted for logging. Trusting an address means trusting the X-Forwarded-For and
+// X-Real-IP headers it sends; trusting a range that covers arbitrary clients therefore lets
+// any client name its own address. X-Forwarded-For survives this (an all-trusted chain
+// collapses back to RemoteAddr), but X-Real-IP is a single value with no chain to walk, so it
+// is taken verbatim — which lets a client pick a fresh rate-limit bucket per request and slip
+// the TOTP login cap entirely.
+//
+// The threshold is deliberately far below any legitimate proxy range (published CDN ranges run
+// /12 and narrower) so a correct configuration never trips it.
+func overlyBroadProxyCIDRs(proxies []*net.IPNet) []string {
+	var broad []string
+
+	for _, cidr := range proxies {
+		ones, bits := cidr.Mask.Size()
+
+		limit := minIPv6TrustedPrefix
+		if bits == net.IPv4len*8 {
+			limit = minIPv4TrustedPrefix
+		}
+
+		if ones < limit {
+			broad = append(broad, cidr.String())
+		}
+	}
+
+	return broad
+}
+
 // redactDSN removes credentials from a DSN before logging.
 // URL-format DSNs (postgres://user:pass@host/db) have the password replaced with "***".
 // Key-value DSNs containing "password=" are replaced entirely with "<redacted>".

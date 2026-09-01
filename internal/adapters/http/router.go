@@ -188,8 +188,14 @@ func NewRouter(
 
 	registerAllRoutes(mux, handler, ogenSrv)
 
-	namedRoutes := buildNamedRoutes()
+	return wrapMiddleware(mux, handler, opts, csrfSecret), nil
+}
 
+// wrapMiddleware wraps the routed mux in the server's middleware chain. The listing order is
+// innermost-first: the last wrapper applied is the one that sees a request first.
+func wrapMiddleware(
+	mux http.Handler, handler *Handler, opts *RouterOptions, csrfSecret []byte,
+) http.Handler {
 	var checker sessionChecker
 	if handler.authMgr != nil {
 		checker = handler.authMgr
@@ -201,13 +207,18 @@ func NewRouter(
 		stack = withAPIDisabled(handler.log, stack)
 	}
 
-	stack = newAuthMiddleware(namedRoutes, checker, stack)
+	stack = newAuthMiddleware(buildNamedRoutes(), checker, stack)
 	stack = withCSRFToken(csrfSecret, opts.TrustedProxies, stack)
 
 	stack = withBodyLimit(int64(opts.MaxBodyBytes), stack)
 
 	if opts.RateLimit > 0 {
 		stack = withRateLimit(opts.RateLimit, opts.RateBurst, opts.TrustedProxies, stack)
+	}
+
+	// Only meaningful when nothing is trusted — see warnUnconfiguredProxy.
+	if len(opts.TrustedProxies) == 0 {
+		stack = warnUnconfiguredProxy(handler.log, stack)
 	}
 
 	stack = withSecurityHeaders(opts.TrustedProxies, stack)
@@ -218,9 +229,7 @@ func NewRouter(
 	// panic in any middleware between it and here (auth, CSRF, rate-limit, security-headers,
 	// logging, request-ID) would otherwise fall through to net/http's bare per-connection
 	// recovery, which drops the response body and skips structured logging entirely.
-	stack = withRecovery(handler.log, stack)
-
-	return stack, nil
+	return withRecovery(handler.log, stack)
 }
 
 // buildNamedRoutes returns the set of first path segments that name built-in routes rather than

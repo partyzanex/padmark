@@ -75,22 +75,38 @@
       реальному порядку
 - [ ] Действие: не требуется. Утверждение ревью о «врут в 4 местах» — ложно, проверять не нужно
 
-### 5. clientIP берёт первый элемент X-Forwarded-For — PARTIAL
-- [ ] Файл: `internal/adapters/http/middleware_ratelimit.go:100-122` (`clientIP`, `isTrustedProxy`)
-- [ ] Код действительно берёт первый элемент через `strings.Cut(forwarded, ",")`, но только
-      **после** проверки `isTrustedProxy(remoteHost, trustedProxies)` — XFF используется только
-      если реальный remote host входит в доверенный CIDR
-- [ ] Риск реален только при неверной конфигурации: `--trusted-proxies` пуст (тогда XFF от
-      клиента напрямую не используется — используется RemoteAddr, это ок) либо настроен
-      слишком широко (тогда XFF-спуфинг возможен)
-- [ ] TOTP rate-limit (10/мин) также работает через тот же `clientIP` — не «безлимитный
-      брутфорс», а per-IP-bucketed лимит, который можно обойти только при misconfigured proxy
-- [ ] Действие: добавить warning-лог при старте, если `--trusted-proxies` не задан, но сервис
-      слушает не на loopback
-- [ ] Действие: задокументировать в README последствия неправильной настройки
-      `--trusted-proxies`
-- [ ] (Опционально) явная санити-проверка/warning на слишком широкий CIDR (например `0.0.0.0/0`)
-      в списке доверенных прокси
+### 5. clientIP берёт первый элемент X-Forwarded-For — DONE (исходный диагноз неверен)
+- [x] Файл: `internal/adapters/http/middleware_ratelimit.go` (`clientIP`, `clientIPFromForwarded`,
+      `isTrustedProxy`)
+- [x] ~~Код берёт первый элемент через `strings.Cut(forwarded, ",")`~~ — **неверно**:
+      `strings.Cut` в коде нет, `clientIPFromForwarded` идёт по списку справа налево
+      (`slices.Backward`), пропускает записи доверенных прокси и обрывает обход на невалидной
+      записи. Покрыто `TestClientIP_TrustedProxy_SpoofedLeftmostXFFIgnored` и
+      `..._PlantedTrustedEntryDoesNotUnmaskAttackerValue`
+- [x] ~~При слишком широком CIDR возможен XFF-спуфинг~~ — **неверно**: при `0.0.0.0/0` все
+      записи XFF считаются прокси-хопами, обход не находит клиентскую и откатывается на
+      `RemoteAddr` (`TestClientIP_WideOpenProxies_XForwardedForStillFallsBackToRemoteAddr`)
+- [x] **Реальный вектор — `X-Real-IP`**: у него нет цепочки, значение берётся как есть, как
+      только `RemoteAddr` признан доверенным. При широком CIDR доверенный — любой клиент, и он
+      выбирает себе ведро сам. Подтверждено `TestClientIP_WideOpenProxies_XRealIPIsSpoofable` и
+      end-to-end `TestWithTOTPRateLimit_WideOpenProxies_SpoofedXRealIPDefeatsLimit` (30 попыток
+      TOTP-логина подряд, лимит 10/мин не срабатывает)
+- [x] Верно: XFF/X-Real-IP читаются только после `isTrustedProxy`; пустой `--trusted-proxies` →
+      заголовки игнорируются; TOTP-лимит идёт через тот же `clientIP`
+- [x] Не замечено в ревью — обратная misconfiguration: прокси есть, флаг пуст → все клиенты в
+      одном ведре, один шумный клиент выбивает TOTP-логин остальным
+      (`TestWithTOTPRateLimit_ProxyPresentButUntrusted_ClientsShareOneBucket`)
+- [x] Действие: warning при незаданном `--trusted-proxies` — реализован не по адресу
+      прослушивания (прямое выставление наружу легитимно, был бы постоянный ложный сигнал), а по
+      факту прихода forwarding-заголовка: `warnUnconfiguredProxy` пишет один раз за процесс
+      (`sync.Once`), тесты `TestWarnUnconfiguredProxy_*`, включая guard на тишину без заголовка
+- [x] Действие: README — раздел «Getting `--trusted-proxies` wrong» с обоими направлениями
+      ошибки; строка флага в таблице; `.env.example` дополнен причиной запрета `0.0.0.0/0`
+- [x] Санити-проверка широкого CIDR: `overlyBroadProxyCIDRs` (`internal/infra/server/db.go`),
+      WARN при старте. Порог — префикс короче /8 для IPv4 и /7 для IPv6, т.е. короче самых
+      широких реально используемых диапазонов (`10.0.0.0/8`, `fc00::/7`); тест
+      `TestOverlyBroadProxyCIDRs` отдельно фиксирует отсутствие ложных срабатываний на приватных
+      диапазонах и CDN-префиксах
 
 ### 6. TOCTOU cross-table slug между notes и links — CONFIRMED
 - [ ] Файл: `internal/usecases/notes/manager.go:442-458` (`resolveUniqueSlug`) и

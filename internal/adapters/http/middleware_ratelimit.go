@@ -1,10 +1,12 @@
 package http
 
 import (
+	"log/slog"
 	"net"
 	"net/http"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/bluele/gcache"
@@ -166,6 +168,37 @@ func withTOTPRateLimit(trustedProxies []*net.IPNet, next http.HandlerFunc) http.
 
 		next(w, r)
 	}
+}
+
+// warnUnconfiguredProxy logs once, on the first request that arrives with a forwarding header
+// while no proxy is trusted. That combination is evidence that a proxy really does sit in front
+// of the server but --trusted-proxies was left empty: the headers are then ignored, every
+// request is attributed to the proxy's own address, and all clients collapse into a single
+// rate-limit bucket — one noisy client throttles everyone else, including on TOTP login.
+//
+// The signal is the header, not the listen address: a server exposed directly with no proxy is
+// a perfectly good configuration and must stay silent. A client can of course send the header
+// to a directly-exposed server and trigger the warning, which is why this is one log line and
+// not an error. Install only when len(trustedProxies) == 0; wrap nothing otherwise.
+func warnUnconfiguredProxy(log *slog.Logger, next http.Handler) http.Handler {
+	var once sync.Once
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Forwarded-For") != "" || r.Header.Get("X-Real-IP") != "" {
+			ctx := r.Context()
+
+			once.Do(func() {
+				log.WarnContext(ctx,
+					"request carries a forwarding header but no proxy is trusted: "+
+						"the header is ignored and every client shares one rate-limit bucket; "+
+						"set --trusted-proxies to the proxy's address if it is in front of this server",
+					"remote_addr", r.RemoteAddr,
+				)
+			})
+		}
+
+		next.ServeHTTP(w, r)
+	})
 }
 
 func isTrustedProxy(ip string, proxies []*net.IPNet) bool {

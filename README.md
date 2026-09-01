@@ -515,11 +515,32 @@ note's `privacy` level.
 | `--allowed-hosts` | `PADMARK_ALLOWED_HOSTS` | — | Host allowlist for the HTTP→HTTPS redirect; non-listed hosts get `400` (empty = redirect to request Host) |
 | `--log-level` | `PADMARK_LOG_LEVEL` | `info` | `debug` / `info` / `warn` / `error` |
 | `--log-format` | `PADMARK_LOG_FORMAT` | `json` | `json` or `text` |
-| `--trusted-proxies` | `PADMARK_TRUSTED_PROXIES` | — | Proxy CIDRs/IPs for real client IPs; also the addresses whose `X-Forwarded-Proto` is trusted when building absolute links (note URLs, invite links, API-token envelopes) |
+| `--trusted-proxies` | `PADMARK_TRUSTED_PROXIES` | — | Proxy CIDRs/IPs whose `X-Forwarded-For` / `X-Real-IP` is believed when resolving the real client IP; also the addresses whose `X-Forwarded-Proto` is trusted when building absolute links (note URLs, invite links, API-token envelopes). Set it to the proxy's own addresses and nothing wider — see [Getting `--trusted-proxies` wrong](#getting---trusted-proxies-wrong) |
 | `--public-scheme` | `PADMARK_PUBLIC_SCHEME` | — | Force `http` or `https` for absolute links back to this server, bypassing TLS/`X-Forwarded-Proto` detection; use this instead of `--trusted-proxies` when the proxy's IP isn't stable (cloud load balancers, k8s ingress) |
 | `--custom-slugs` | `PADMARK_CUSTOM_SLUGS` | `false` | Allow user-supplied human-readable slugs/link aliases (e.g. `project/GUIDE.md`) at creation. Off by default: only random slugs are issued, since a custom slug is low-entropy content-encryption key material. Enable for internal/trusted deployments. A slug's first path segment must not be a reserved route name: `login`, `setup`, `logout`, `totp-login`, `admin`, `api`, `success`, `healthz`, `readyz`, `notes`, `edit`, `change-password`, `static`, `links`, `r` |
 | `--direct-redirect` | `PADMARK_DIRECT_REDIRECT` | `true` | `GET /r/{id}` behavior for short links: `true` issues an immediate `301` to the target URL; `false` renders an interstitial page (meta-refresh + `<noscript>` fallback) showing the destination before redirecting |
 | `--metrics-addr` | `PADMARK_METRICS_ADDR` | — | Address for a separate internal Prometheus `/metrics` listener (e.g. `:9090`); empty (default) disables it entirely. Exposes `padmark_links_created_total`, `padmark_links_redirects_total`, `padmark_links_collisions_total`, plus standard Go/process collectors. Bind this to a private interface only — metrics are never served on the main, public-facing listener |
+
+#### Getting `--trusted-proxies` wrong
+
+The per-IP rate limits (`--rate-limit`, and the fixed 10/min cap on TOTP login) are only as
+good as the client IP they bucket by, and this flag is what decides where that IP comes from.
+Both directions of misconfiguration have a cost, and neither surfaces as an error:
+
+- **Set too wide** (`0.0.0.0/0`, or any range covering arbitrary clients) — every client is
+  treated as a proxy, so its `X-Real-IP` header is believed verbatim. A client can then pick a
+  fresh bucket for every request and the per-IP limits stop applying at all, TOTP login
+  included. `X-Forwarded-For` happens to survive this (a chain of entirely trusted entries
+  collapses back to the real peer address), but `X-Real-IP` is a single value with no chain to
+  fall back on. The server logs a warning at startup for ranges this broad.
+- **Left empty while a proxy is in front** — the forwarding headers are ignored, so every
+  request is attributed to the proxy's own address and all clients share one bucket. Nothing
+  is spoofable, but one noisy client throttles everyone else. The server logs a warning the
+  first time a request arrives carrying a forwarding header while no proxy is trusted.
+
+Leaving it empty when the server really is exposed directly is correct and stays silent. If the
+proxy's address is not stable (cloud load balancers, k8s ingress), prefer `--public-scheme` for
+the link-building half of the flag's job rather than widening the trusted range.
 
 `--csrf-secret` is the one flag a multi-replica deployment must set: without it each process
 signs form tokens with its own random key, so a form rendered by one replica is rejected by the

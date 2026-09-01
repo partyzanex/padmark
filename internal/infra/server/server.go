@@ -86,6 +86,19 @@ func buildRouter(
 		return nil, err
 	}
 
+	// A warning rather than a startup error: the flag is still parseable and the operator may
+	// have a reason we cannot see (a lab, a closed network). But an entry this wide trusts
+	// arbitrary clients to name their own address via X-Real-IP, which retires the per-IP rate
+	// limit — including the TOTP login cap — so it must never pass unremarked.
+	if broad := overlyBroadProxyCIDRs(trustedProxies); len(broad) > 0 {
+		log.WarnContext(ctx,
+			"trusted proxy range covers arbitrary clients: any client can then set its own "+
+				"X-Real-IP and get a fresh rate-limit bucket per request, defeating the per-IP "+
+				"limits; narrow this to the proxy's actual addresses",
+			"cidrs", strings.Join(broad, ","), "flag", "--"+FlagTrustedProxies,
+		)
+	}
+
 	publicScheme, err := parsePublicScheme(cmd.String(FlagPublicScheme))
 	if err != nil {
 		return nil, err
