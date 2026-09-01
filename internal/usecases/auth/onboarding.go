@@ -15,9 +15,8 @@ import (
 type OnboardingManager struct {
 	totp    TOTPManager
 	invites InviteStore
-	enc     Encryptor
+	sealer  SecretSealer
 	pw      PasswordHasher
-	kdf     KeyDeriver
 	users   UserStore
 	issuer  string
 }
@@ -25,15 +24,14 @@ type OnboardingManager struct {
 // NewOnboardingManager returns a new OnboardingManager. issuer is the TOTP issuer name shown
 // in the authenticator app when a new user enrolls.
 func NewOnboardingManager(
-	users UserStore, invites InviteStore, passwordHasher PasswordHasher, kdf KeyDeriver,
-	enc Encryptor, totp TOTPManager, issuer string,
+	users UserStore, invites InviteStore, passwordHasher PasswordHasher,
+	sealer SecretSealer, totp TOTPManager, issuer string,
 ) *OnboardingManager {
 	return &OnboardingManager{
 		users:   users,
 		invites: invites,
 		pw:      passwordHasher,
-		kdf:     kdf,
-		enc:     enc,
+		sealer:  sealer,
 		totp:    totp,
 		issuer:  issuer,
 	}
@@ -139,7 +137,7 @@ func (m *OnboardingManager) AcceptFirstAdmin(ctx context.Context, username, pass
 	return qrURL, nil
 }
 
-// buildUser generates a fresh TOTP secret, encrypts it with a password-derived key, and
+// buildUser generates a fresh TOTP secret, seals it under a password-derived key, and
 // assembles the user record together with its QR code data URL — without touching the DB.
 // The caller persists the returned user (directly or via RedeemInvite); generating the QR
 // here, before any insert, keeps the insert the last fallible step so it can be rolled back.
@@ -149,19 +147,14 @@ func (m *OnboardingManager) buildUser(username, password string, isAdmin bool) (
 		return nil, "", fmt.Errorf("generate totp secret: %w", err)
 	}
 
-	kdfSalt, err := m.kdf.GenerateSalt()
+	kdfSalt, err := m.sealer.GenerateSalt()
 	if err != nil {
 		return nil, "", fmt.Errorf("generate kdf salt: %w", err)
 	}
 
-	derivedKey, err := m.kdf.DeriveKey([]byte(password), kdfSalt)
+	encSecret, err := m.sealer.Seal(rawSecret, []byte(password), kdfSalt)
 	if err != nil {
-		return nil, "", fmt.Errorf("derive user key: %w", err)
-	}
-
-	encSecret, err := m.enc.Encrypt(rawSecret, derivedKey)
-	if err != nil {
-		return nil, "", fmt.Errorf("encrypt totp secret: %w", err)
+		return nil, "", fmt.Errorf("seal totp secret: %w", err)
 	}
 
 	pwHash, err := m.pw.Hash(password)

@@ -38,9 +38,8 @@ func (s *AuthFlowSuite) SetupTest() {
 		s.Invites,
 		s.Sessions,
 		nil, // this suite exercises TOTP/session flows, not API tokens
-		crypto.New(),
 		crypto.NewPasswordHasher(testArgon2Params),
-		crypto.NewKDF(testArgon2Params),
+		crypto.NewSealer(testArgon2Params),
 		crypto.NewTOTP(),
 		slog.New(slog.DiscardHandler),
 		"padmark-test",
@@ -54,16 +53,15 @@ func (s *AuthFlowSuite) TearDownTest() {
 	s.SQLiteAuthSuite.TearDownTest()
 }
 
-// decryptTOTPSecret derives the user key from flowPassword + kdfSalt and decrypts the TOTP secret.
+// decryptTOTPSecret opens the user's sealed TOTP secret with flowPassword.
+//
+// The sealer cost passed here need not match the one that sealed the secret: the envelope
+// records its own parameters. It matters only for the stale flag, which this helper ignores.
 func (s *AuthFlowSuite) decryptTOTPSecret(usr *domain.User) string {
 	s.T().Helper()
 
-	// Must match the cost the suite-configured KDF used to encrypt the secret — a mismatch
-	// derives a different key and decryption fails.
-	derivedKey, err := crypto.DeriveUserKey([]byte(flowPassword), usr.KDFSalt, testArgon2Params)
-	s.Require().NoError(err)
-
-	rawSecret, err := crypto.New().Decrypt(usr.TOTPSecret, derivedKey)
+	rawSecret, _, err := crypto.NewSealer(testArgon2Params).
+		Open(usr.TOTPSecret, []byte(flowPassword), usr.KDFSalt)
 	s.Require().NoError(err)
 
 	return rawSecret
@@ -95,6 +93,51 @@ func (s *AuthFlowSuite) TestFlow_AcceptFirstAdmin_Login_GetSession() {
 	s.Require().NoError(err)
 	s.Equal("root", got.Username)
 	s.True(got.IsAdmin)
+}
+
+// TestFlow_LegacySealedSecret_MigratesOnLogin walks the upgrade path for an account whose TOTP
+// secret was written before the sealed envelope carried its argon2 parameters: it must still be
+// able to log in, and the stored secret must be rewritten in place so a later change to the
+// configured cost cannot orphan it. Runs against the real repository so the UpdateTOTPSecret
+// write is exercised end to end.
+func (s *AuthFlowSuite) TestFlow_LegacySealedSecret_MigratesOnLogin() {
+	ctx := s.T().Context()
+
+	_, err := s.mgr.AcceptFirstAdmin(ctx, "root", flowPassword)
+	s.Require().NoError(err)
+
+	usr, err := s.Users.GetByUsername(ctx, "root")
+	s.Require().NoError(err)
+
+	rawSecret := s.decryptTOTPSecret(usr)
+
+	// Rewrite the stored secret in the pre-envelope layout: a bare ciphertext under an
+	// argon2id-derived key, with nothing recording the cost it was derived at.
+	derivedKey, err := crypto.DeriveUserKey([]byte(flowPassword), usr.KDFSalt, testArgon2Params)
+	s.Require().NoError(err)
+
+	legacySealed, err := crypto.New().Encrypt(rawSecret, derivedKey)
+	s.Require().NoError(err)
+
+	err = s.Users.UpdateTOTPSecret(ctx, usr.ID, legacySealed)
+	s.Require().NoError(err)
+
+	code, err := totp.GenerateCode(rawSecret, time.Now())
+	s.Require().NoError(err)
+
+	sessID, err := s.mgr.Login(ctx, "root", flowPassword, code, "Mozilla/5.0", "127.0.0.1")
+	s.Require().NoError(err, "a legacy-sealed secret must not lock the account out")
+	s.NotEmpty(sessID)
+
+	migrated, err := s.Users.GetByUsername(ctx, "root")
+	s.Require().NoError(err)
+	s.NotEqual(legacySealed, migrated.TOTPSecret, "login must have rewritten the stored secret")
+
+	got, stale, err := crypto.NewSealer(testArgon2Params).
+		Open(migrated.TOTPSecret, []byte(flowPassword), migrated.KDFSalt)
+	s.Require().NoError(err)
+	s.Equal(rawSecret, got)
+	s.False(stale, "the migrated secret is sealed at the current cost")
 }
 
 // TestFlow_AcceptInvite_Login_GetSession exercises the invite-link onboarding flow.

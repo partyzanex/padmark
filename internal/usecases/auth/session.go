@@ -27,9 +27,8 @@ const DefaultSessionTTL = 30 * 24 * time.Hour
 type SessionManager struct {
 	totp        TOTPManager
 	sessions    SessionStore
-	enc         Encryptor
+	sealer      SecretSealer
 	pw          PasswordHasher
-	kdf         KeyDeriver
 	users       UserStore
 	log         *slog.Logger
 	dummyPwHash string
@@ -43,8 +42,8 @@ type SessionManager struct {
 // NewSessionManager runs only at the composition root, so the caller is expected to treat this
 // as a fatal startup error rather than retry.
 func NewSessionManager(
-	users UserStore, sessions SessionStore, passwordHasher PasswordHasher, kdf KeyDeriver,
-	enc Encryptor, totp TOTPManager, log *slog.Logger, sessionTTL time.Duration,
+	users UserStore, sessions SessionStore, passwordHasher PasswordHasher,
+	sealer SecretSealer, totp TOTPManager, log *slog.Logger, sessionTTL time.Duration,
 ) (*SessionManager, error) {
 	ttl := sessionTTL
 	if ttl <= 0 {
@@ -64,8 +63,7 @@ func NewSessionManager(
 		users:       users,
 		sessions:    sessions,
 		pw:          passwordHasher,
-		kdf:         kdf,
-		enc:         enc,
+		sealer:      sealer,
 		totp:        totp,
 		log:         log,
 		ttl:         ttl,
@@ -237,19 +235,14 @@ func (m *SessionManager) buildNewCredentials(
 		return "", nil, "", fmt.Errorf("validate new password: %w", err)
 	}
 
-	newSalt, err := m.kdf.GenerateSalt()
+	newSalt, err := m.sealer.GenerateSalt()
 	if err != nil {
 		return "", nil, "", fmt.Errorf("generate kdf salt: %w", err)
 	}
 
-	newKey, err := m.kdf.DeriveKey([]byte(newPassword), newSalt)
+	encSecret, err = m.sealer.Seal(rawSecret, []byte(newPassword), newSalt)
 	if err != nil {
-		return "", nil, "", fmt.Errorf("derive new key: %w", err)
-	}
-
-	encSecret, err = m.enc.Encrypt(rawSecret, newKey)
-	if err != nil {
-		return "", nil, "", fmt.Errorf("encrypt totp secret: %w", err)
+		return "", nil, "", fmt.Errorf("seal totp secret: %w", err)
 	}
 
 	hash, err = m.pw.Hash(newPassword)
@@ -264,24 +257,18 @@ func (m *SessionManager) buildNewCredentials(
 // Returns domain.ErrInvalidTOTP on any factor mismatch so the caller cannot learn
 // which factor failed (no username/password enumeration oracle).
 //
-// Timing note: a wrong password returns after one argon2 verify, while a correct
-// password additionally runs HKDF + AES-GCM + TOTP validation, so the correct-password
-// path is observably longer. This is accepted: it is not an enumeration oracle (exploiting
-// it requires already knowing the password), the argon2 verify dominates the measurable
-// time, and login is rate-limited.
+// Timing note: a wrong password returns after one argon2 verify, while a correct password
+// additionally runs the sealer's own argon2 pass + AES-GCM + TOTP validation, so the
+// correct-password path is observably longer. This is accepted: it is not an enumeration oracle
+// (exploiting it requires already knowing the password), and login is rate-limited.
 func (m *SessionManager) verifyLoginFactors(ctx context.Context, usr *domain.User, password, totpCode string) error {
 	if !m.pw.Verify(usr.PasswordHash, password) {
 		return domain.ErrInvalidTOTP
 	}
 
-	derivedKey, err := m.kdf.DeriveKey([]byte(password), usr.KDFSalt)
+	secret, stale, err := m.sealer.Open(usr.TOTPSecret, []byte(password), usr.KDFSalt)
 	if err != nil {
-		return fmt.Errorf("derive user key: %w", err)
-	}
-
-	secret, err := m.enc.Decrypt(usr.TOTPSecret, derivedKey)
-	if err != nil {
-		return fmt.Errorf("decrypt totp secret: %w", err)
+		return fmt.Errorf("open totp secret: %w", err)
 	}
 
 	ok, err := m.validateAndRecordTOTP(ctx, usr.ID, secret, totpCode)
@@ -293,23 +280,52 @@ func (m *SessionManager) verifyLoginFactors(ctx context.Context, usr *domain.Use
 		return domain.ErrInvalidTOTP
 	}
 
+	// Login is the only place holding both the plaintext password and the opened secret, so it
+	// is where an outdated seal can be rewritten. Done after the TOTP check so a wrong code
+	// never triggers a write.
+	if stale {
+		m.resealTOTPSecret(ctx, usr, password, secret)
+	}
+
 	return nil
 }
 
-// verifyTOTPStepUp decrypts the TOTP secret using the old password key, validates the
-// provided code, and returns the decrypted secret so the caller can re-encrypt it under a
-// new key without a second HKDF + AES-GCM pass. Second-factor gate for account-critical ops.
+// resealTOTPSecret rewrites usr's TOTP secret under the sealer's current parameters, migrating
+// a legacy or outdated-cost seal in place. The KDF salt is unchanged, so only totp_secret moves.
+//
+// Fail-soft: the login it runs inside has already succeeded on both factors, and the old seal
+// stays perfectly usable, so a failure here is logged and the login proceeds. The next login
+// retries the migration.
+func (m *SessionManager) resealTOTPSecret(ctx context.Context, usr *domain.User, password, secret string) {
+	sealed, err := m.sealer.Seal(secret, []byte(password), usr.KDFSalt)
+	if err != nil {
+		m.log.WarnContext(ctx, "reseal totp secret", "user_id", usr.ID, "err", err)
+
+		return
+	}
+
+	err = m.users.UpdateTOTPSecret(ctx, usr.ID, sealed)
+	if err != nil {
+		m.log.WarnContext(ctx, "persist resealed totp secret", "user_id", usr.ID, "err", err)
+
+		return
+	}
+
+	m.log.InfoContext(ctx, "totp secret resealed under current kdf parameters", "user_id", usr.ID)
+}
+
+// verifyTOTPStepUp opens the TOTP secret with the old password, validates the provided code,
+// and returns the plaintext secret so the caller can re-seal it under a new key without a second
+// derive + AES-GCM pass. Second-factor gate for account-critical ops.
+//
+// A stale seal is ignored here: every caller re-seals the secret under a fresh salt and the
+// current parameters anyway, which supersedes the migration login would have performed.
 func (m *SessionManager) verifyTOTPStepUp(
 	ctx context.Context, oldPassword string, usr *domain.User, totpCode string,
 ) (string, error) {
-	oldKey, err := m.kdf.DeriveKey([]byte(oldPassword), usr.KDFSalt)
+	rawSecret, _, err := m.sealer.Open(usr.TOTPSecret, []byte(oldPassword), usr.KDFSalt)
 	if err != nil {
-		return "", fmt.Errorf("derive user key: %w", err)
-	}
-
-	rawSecret, err := m.enc.Decrypt(usr.TOTPSecret, oldKey)
-	if err != nil {
-		return "", fmt.Errorf("decrypt totp secret: %w", err)
+		return "", fmt.Errorf("open totp secret: %w", err)
 	}
 
 	ok, err := m.validateAndRecordTOTP(ctx, usr.ID, rawSecret, totpCode)

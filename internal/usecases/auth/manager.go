@@ -21,6 +21,11 @@ type UserStore interface {
 	List(ctx context.Context) ([]*domain.User, error)
 	UpdateLastLogin(ctx context.Context, id uuid.UUID, t time.Time) error
 	UpdatePassword(ctx context.Context, id uuid.UUID, passwordHash string, kdfSalt []byte, totpSecret string) error
+	// UpdateTOTPSecret replaces only the sealed TOTP secret, leaving the password hash and KDF
+	// salt untouched. It exists for the re-seal-on-login migration (see
+	// SessionManager.resealTOTPSecret), where the secret is rewritten under the current argon2
+	// cost but the credentials themselves do not change.
+	UpdateTOTPSecret(ctx context.Context, id uuid.UUID, totpSecret string) error
 	// UpdateTOTPCounter atomically advances the user's last accepted TOTP counter,
 	// returning false when counter is not strictly greater (replay). The conditional
 	// update is the cross-instance, restart-safe guard against TOTP code reuse.
@@ -52,12 +57,6 @@ type SessionStore interface {
 	DeleteByUserIDExcept(ctx context.Context, userID uuid.UUID, exceptSessionID string) error
 }
 
-// Encryptor encrypts and decrypts TOTP secrets at rest.
-type Encryptor interface {
-	Encrypt(plaintext, key string) (string, error)
-	Decrypt(ciphertext, key string) (string, error)
-}
-
 // PasswordHasher hashes and verifies user passwords (argon2id with configurable cost).
 // Implemented by infra/crypto.PasswordHasher.
 type PasswordHasher interface {
@@ -65,11 +64,21 @@ type PasswordHasher interface {
 	Verify(storedHash, password string) bool
 }
 
-// KeyDeriver generates a KDF salt and derives the AES key used to encrypt a user's TOTP secret.
-// Implemented by infra/crypto.KDF.
-type KeyDeriver interface {
+// SecretSealer seals a user's TOTP secret at rest under a key derived from their password.
+// Implemented by infra/crypto.Sealer.
+//
+// Key derivation and encryption are one contract rather than two because the derivation
+// parameters are recorded inside the sealed value: only the sealer can read them back, so a
+// caller holding a bare "derive key, then decrypt" pair could not open a secret sealed under a
+// cost different from the one currently configured.
+//
+// Open reports stale when the secret was sealed under an outdated cost or a legacy scheme. The
+// value still opens; stale only asks the caller to re-Seal it and persist the result, which is
+// how existing secrets migrate to the current parameters.
+type SecretSealer interface {
 	GenerateSalt() ([]byte, error)
-	DeriveKey(password, salt []byte) (string, error)
+	Seal(secret string, password, salt []byte) (string, error)
+	Open(sealed string, password, salt []byte) (secret string, stale bool, err error)
 }
 
 // TOTPManager generates TOTP secrets, validates codes (returning the time-step counter used for
@@ -114,8 +123,8 @@ type Manager struct {
 
 // NewManager returns a new auth Manager.
 // passwordHasher carries the (configurable) argon2 cost used for password hashing/verification.
-// keyDeriver and totp provide the KDF and TOTP primitives (injected so the usecase owns its
-// contracts instead of importing infra/crypto). issuer is the TOTP issuer name shown in the
+// sealer and totp provide the secret-sealing and TOTP primitives (injected so the usecase owns
+// its contracts instead of importing infra/crypto). issuer is the TOTP issuer name shown in the
 // authenticator app. sessionTTL controls how long a session remains valid; pass 0 for the
 // default (30 days).
 // apiTokens enables the CLI API-token flow (issue/resolve/list/revoke). Pass nil to disable it:
@@ -128,16 +137,15 @@ func NewManager(
 	invites InviteStore,
 	sessions SessionStore,
 	apiTokens APITokenStore,
-	enc Encryptor,
 	passwordHasher PasswordHasher,
-	keyDeriver KeyDeriver,
+	sealer SecretSealer,
 	totp TOTPManager,
 	log *slog.Logger,
 	issuer string,
 	sessionTTL time.Duration,
 ) (*Manager, error) {
 	sessionMgr, err := NewSessionManager(
-		users, sessions, passwordHasher, keyDeriver, enc, totp, log, sessionTTL,
+		users, sessions, passwordHasher, sealer, totp, log, sessionTTL,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("new session manager: %w", err)
@@ -146,7 +154,7 @@ func NewManager(
 	return &Manager{
 		SessionManager: sessionMgr,
 		OnboardingManager: NewOnboardingManager(
-			users, invites, passwordHasher, keyDeriver, enc, totp, issuer,
+			users, invites, passwordHasher, sealer, totp, issuer,
 		),
 		UserAdminManager: NewUserAdminManager(users),
 		APITokenManager:  NewAPITokenManager(apiTokens, users, log),

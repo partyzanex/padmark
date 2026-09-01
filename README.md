@@ -476,7 +476,12 @@ note's `privacy` level.
 
 - Note content and short-link target URLs are **encrypted at rest**.
 - Passwords and `edit_code`s are hashed with **argon2id**.
-- Each user's TOTP secret is encrypted under a key derived from their password.
+- Each user's TOTP secret is encrypted under an argon2id key derived from their password, and
+  the stored value records the cost it was derived at (`v1$<memory>$<time>$<threads>$…`). That
+  is what makes `--argon2-*` safe to retune on a live deployment: decryption uses the parameters
+  saved with each secret, not the ones currently configured. Secrets written under an older cost
+  (or the pre-argon2id scheme) are re-encrypted at the current cost on the owner's next
+  successful login — no manual migration, and a failed rewrite never blocks the login.
 - TOTP codes are **single-use** (replay-protected) and the protection survives server restarts.
 
 ---
@@ -494,7 +499,8 @@ note's `privacy` level.
 | `--disable-api` | `PADMARK_DISABLE_API` | `false` | Disable the REST/JSON API (`/notes*`, `/links*`, `/api`, `/api/openapi.yaml`): every request to it gets `503` with `{"message": "До свидания"}`, before auth or any handler runs. The web UI (incl. `/r/{id}`) and `/healthz`, `/readyz` keep working |
 | `--totp-issuer` | `PADMARK_TOTP_ISSUER` | `padmark` | TOTP issuer shown in the authenticator app |
 | `--session-ttl` | `PADMARK_SESSION_TTL` | `2592000` | Session lifetime in seconds (default 30 days) |
-| `--argon2-memory` | `PADMARK_ARGON2_MEMORY` | `24576` | argon2id memory cost in KiB for **account password** hashing (default 24 MiB); lower for low-RAM hosts. Edit codes use a fast hash and are unaffected |
+| `--csrf-secret` | `PADMARK_CSRF_SECRET` | — | HMAC key signing CSRF form tokens; raw bytes, **at least 32 characters** (a shorter value is rejected at startup). Empty (default) mints a fresh random secret per process — fine for a single instance, but restarts then invalidate open forms and multiple replicas `403` each other's form submits. Generate with `openssl rand -base64 32` and share the same value across replicas |
+| `--argon2-memory` | `PADMARK_ARGON2_MEMORY` | `24576` | argon2id memory cost in KiB for **account passwords** and the key wrapping each user's TOTP secret (default 24 MiB); lower for low-RAM hosts. Edit codes use a fast hash and are unaffected |
 | `--argon2-time` | `PADMARK_ARGON2_TIME` | `2` | argon2id iterations (OWASP minimum at 64 MiB) — raise when lowering memory |
 | `--argon2-threads` | `PADMARK_ARGON2_THREADS` | `1` | argon2id parallelism (CPU threads per hash) |
 | `--rate-limit` | `PADMARK_RATE_LIMIT` | `10` | Requests/sec per IP (`0` = disabled) |
@@ -514,6 +520,19 @@ note's `privacy` level.
 | `--custom-slugs` | `PADMARK_CUSTOM_SLUGS` | `false` | Allow user-supplied human-readable slugs/link aliases (e.g. `project/GUIDE.md`) at creation. Off by default: only random slugs are issued, since a custom slug is low-entropy content-encryption key material. Enable for internal/trusted deployments. A slug's first path segment must not be a reserved route name: `login`, `setup`, `logout`, `totp-login`, `admin`, `api`, `success`, `healthz`, `readyz`, `notes`, `edit`, `change-password`, `static`, `links`, `r` |
 | `--direct-redirect` | `PADMARK_DIRECT_REDIRECT` | `true` | `GET /r/{id}` behavior for short links: `true` issues an immediate `301` to the target URL; `false` renders an interstitial page (meta-refresh + `<noscript>` fallback) showing the destination before redirecting |
 | `--metrics-addr` | `PADMARK_METRICS_ADDR` | — | Address for a separate internal Prometheus `/metrics` listener (e.g. `:9090`); empty (default) disables it entirely. Exposes `padmark_links_created_total`, `padmark_links_redirects_total`, `padmark_links_collisions_total`, plus standard Go/process collectors. Bind this to a private interface only — metrics are never served on the main, public-facing listener |
+
+`--csrf-secret` is the one flag a multi-replica deployment must set: without it each process
+signs form tokens with its own random key, so a form rendered by one replica is rejected by the
+next one that receives the POST. Leaving it empty logs a warning at startup rather than failing,
+because a single instance works fine that way — the only cost is that forms opened before a
+restart have to be reloaded.
+
+Changing any `--argon2-*` value on a running deployment is safe: password hashes and encrypted
+TOTP secrets each carry the cost they were written with, so existing accounts keep working. The
+new cost applies to everything written from then on; an existing TOTP secret is rewritten at it
+on its owner's next login, while an existing password hash keeps verifying under its recorded
+cost until the password is changed. The change costs RAM and CPU per login, not access — see
+[Security at rest](#security-at-rest).
 
 ### CLI global flags
 

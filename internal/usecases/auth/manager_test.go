@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"testing"
@@ -48,9 +49,9 @@ func (s *ManagerSuite) SetupTest() {
 	s.users = NewMockUserStore(s.ctrl)
 	s.invites = NewMockInviteStore(s.ctrl)
 	s.sessions = NewMockSessionStore(s.ctrl)
-	mgr, err := NewManager(s.users, s.invites, s.sessions, nil, crypto.New(),
+	mgr, err := NewManager(s.users, s.invites, s.sessions, nil,
 		crypto.NewPasswordHasher(testArgon2Params),
-		crypto.NewKDF(testArgon2Params), crypto.NewTOTP(), discardLog, "padmark", 0)
+		crypto.NewSealer(testArgon2Params), crypto.NewTOTP(), discardLog, "padmark", 0)
 	s.Require().NoError(err)
 	s.mgr = mgr
 	s.adminID = uuid.New()
@@ -71,22 +72,49 @@ func (s *ManagerSuite) adminUser() *domain.User {
 	}
 }
 
-// testUser builds a domain.User whose TOTP secret is encrypted with a key derived from testPassword.
-// Returns the user and the raw (unencrypted) TOTP secret.
+// testUser builds a domain.User whose TOTP secret is sealed under testPassword at the suite's
+// argon2 cost — i.e. an already-current seal, so login never triggers the re-seal migration.
+// Returns the user and the raw (unsealed) TOTP secret.
 func (s *ManagerSuite) testUser() (*domain.User, string) {
+	s.T().Helper()
+
+	return s.userWithSealedSecret(func(rawSecret string, kdfSalt []byte) string {
+		sealed, err := crypto.NewSealer(testArgon2Params).Seal(rawSecret, []byte(testPassword), kdfSalt)
+		s.Require().NoError(err)
+
+		return sealed
+	})
+}
+
+// legacyTestUser builds a user whose TOTP secret uses the pre-versioning layout: a bare base64
+// ciphertext keyed by argon2id, with no envelope recording the cost. Logging in as this user
+// must still work and must migrate the secret forward.
+func (s *ManagerSuite) legacyTestUser() (*domain.User, string) {
+	s.T().Helper()
+
+	return s.userWithSealedSecret(func(rawSecret string, kdfSalt []byte) string {
+		derivedKey, err := crypto.DeriveUserKey([]byte(testPassword), kdfSalt, testArgon2Params)
+		s.Require().NoError(err)
+
+		ciphertext, err := crypto.New().Encrypt(rawSecret, derivedKey)
+		s.Require().NoError(err)
+
+		return ciphertext
+	})
+}
+
+// userWithSealedSecret assembles the shared user fixture, delegating only the on-disk
+// representation of the TOTP secret to seal, so each fixture differs in exactly that one field.
+func (s *ManagerSuite) userWithSealedSecret(seal func(rawSecret string, kdfSalt []byte) string) (*domain.User, string) {
 	s.T().Helper()
 
 	kdfSalt, err := crypto.GenerateKDFSalt()
 	s.Require().NoError(err)
 
-	derivedKey, err := crypto.DeriveUserKey([]byte(testPassword), kdfSalt, testArgon2Params)
-	s.Require().NoError(err)
-
 	rawSecret, err := crypto.GenerateTOTPSecret()
 	s.Require().NoError(err)
 
-	encSecret, err := crypto.New().Encrypt(rawSecret, derivedKey)
-	s.Require().NoError(err)
+	encSecret := seal(rawSecret, kdfSalt)
 
 	// verifyArgon2 reads its cost parameters from the stored hash itself, so hashing the
 	// fixture with testArgon2Params (cheap) verifies identically to crypto.HashPassword's
@@ -160,6 +188,97 @@ func (s *ManagerSuite) TestLogin_ReplayedTOTP_ReturnsErrInvalidTOTP() {
 	s.users.EXPECT().UpdateTOTPCounter(gomock.Any(), s.userID, gomock.Any()).Return(false, nil)
 
 	_, err := s.mgr.Login(s.T().Context(), "alice", testPassword, totpCode, "UA", "127.0.0.1")
+	s.ErrorIs(err, domain.ErrInvalidTOTP)
+}
+
+// ── TOTP secret migration on login ──
+
+// TestLogin_LegacySeal_MigratesSecret pins the migration path for accounts whose TOTP secret
+// predates the versioned envelope: the login succeeds and the secret is rewritten in the
+// current format, so the account survives a later change to the configured argon2 cost.
+func (s *ManagerSuite) TestLogin_LegacySeal_MigratesSecret() {
+	usr, rawSecret := s.legacyTestUser()
+	legacySealed := usr.TOTPSecret
+
+	totpCode, codeErr := totp.GenerateCode(rawSecret, time.Now())
+	s.Require().NoError(codeErr)
+
+	var resealed string
+
+	s.users.EXPECT().GetByUsername(gomock.Any(), "alice").Return(usr, nil)
+	s.users.EXPECT().UpdateTOTPCounter(gomock.Any(), s.userID, gomock.Any()).Return(true, nil)
+	s.users.EXPECT().
+		UpdateTOTPSecret(gomock.Any(), s.userID, gomock.Any()).
+		DoAndReturn(func(_ context.Context, _ uuid.UUID, secret string) error {
+			resealed = secret
+
+			return nil
+		})
+	s.sessions.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
+	s.users.EXPECT().UpdateLastLogin(gomock.Any(), s.userID, gomock.Any()).Return(nil)
+
+	sessID, err := s.mgr.Login(s.T().Context(), "alice", testPassword, totpCode, "UA", "127.0.0.1")
+	s.Require().NoError(err)
+	s.NotEmpty(sessID)
+
+	s.NotEqual(legacySealed, resealed, "the stored secret must have been rewritten")
+
+	// The rewritten value must still yield the same TOTP secret, now under a versioned envelope
+	// that no longer reports itself stale.
+	got, stale, openErr := crypto.NewSealer(testArgon2Params).
+		Open(resealed, []byte(testPassword), usr.KDFSalt)
+	s.Require().NoError(openErr)
+	s.Equal(rawSecret, got)
+	s.False(stale)
+}
+
+// TestLogin_CurrentSeal_DoesNotRewrite guards against a needless write on every single login:
+// an up-to-date secret must not touch the store. The suite's strict mock has no
+// UpdateTOTPSecret expectation, so any call fails the test.
+func (s *ManagerSuite) TestLogin_CurrentSeal_DoesNotRewrite() {
+	usr, rawSecret := s.testUser()
+
+	totpCode, codeErr := totp.GenerateCode(rawSecret, time.Now())
+	s.Require().NoError(codeErr)
+
+	s.users.EXPECT().GetByUsername(gomock.Any(), "alice").Return(usr, nil)
+	s.users.EXPECT().UpdateTOTPCounter(gomock.Any(), s.userID, gomock.Any()).Return(true, nil)
+	s.sessions.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
+	s.users.EXPECT().UpdateLastLogin(gomock.Any(), s.userID, gomock.Any()).Return(nil)
+
+	_, err := s.mgr.Login(s.T().Context(), "alice", testPassword, totpCode, "UA", "127.0.0.1")
+	s.Require().NoError(err)
+}
+
+// TestLogin_LegacySeal_ResealFailureDoesNotFailLogin pins the fail-soft contract: both factors
+// have already passed and the old secret is still perfectly usable, so a failed migration write
+// must not cost the user their login. The next login retries it.
+func (s *ManagerSuite) TestLogin_LegacySeal_ResealFailureDoesNotFailLogin() {
+	usr, rawSecret := s.legacyTestUser()
+
+	totpCode, codeErr := totp.GenerateCode(rawSecret, time.Now())
+	s.Require().NoError(codeErr)
+
+	s.users.EXPECT().GetByUsername(gomock.Any(), "alice").Return(usr, nil)
+	s.users.EXPECT().UpdateTOTPCounter(gomock.Any(), s.userID, gomock.Any()).Return(true, nil)
+	s.users.EXPECT().
+		UpdateTOTPSecret(gomock.Any(), s.userID, gomock.Any()).
+		Return(errors.New("db down"))
+	s.sessions.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
+	s.users.EXPECT().UpdateLastLogin(gomock.Any(), s.userID, gomock.Any()).Return(nil)
+
+	sessID, err := s.mgr.Login(s.T().Context(), "alice", testPassword, totpCode, "UA", "127.0.0.1")
+	s.Require().NoError(err)
+	s.NotEmpty(sessID)
+}
+
+// TestLogin_WrongTOTP_DoesNotMigrate keeps the migration behind the second factor: a correct
+// password with a wrong code must not trigger a write. The strict mock enforces this.
+func (s *ManagerSuite) TestLogin_WrongTOTP_DoesNotMigrate() {
+	usr, _ := s.legacyTestUser()
+	s.users.EXPECT().GetByUsername(gomock.Any(), "alice").Return(usr, nil)
+
+	_, err := s.mgr.Login(s.T().Context(), "alice", testPassword, "000000", "", "")
 	s.ErrorIs(err, domain.ErrInvalidTOTP)
 }
 

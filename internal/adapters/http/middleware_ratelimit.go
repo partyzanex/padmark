@@ -3,6 +3,7 @@ package http
 import (
 	"net"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -103,22 +104,49 @@ func clientIP(req *http.Request, trustedProxies []*net.IPNet) string {
 		remoteHost = req.RemoteAddr
 	}
 
-	if len(trustedProxies) > 0 && isTrustedProxy(remoteHost, trustedProxies) {
-		if forwarded := req.Header.Get("X-Forwarded-For"); forwarded != "" {
-			// X-Forwarded-For may be a comma-separated list; the leftmost entry
-			// is the original client IP as set by the first proxy in the chain.
-			first, _, _ := strings.Cut(forwarded, ",")
-			if ip := strings.TrimSpace(first); ip != "" {
-				return ip
-			}
-		}
+	if len(trustedProxies) == 0 || !isTrustedProxy(remoteHost, trustedProxies) {
+		return remoteHost
+	}
 
-		if realIP := strings.TrimSpace(req.Header.Get("X-Real-IP")); realIP != "" {
-			return realIP
-		}
+	if ip := clientIPFromForwarded(req.Header.Get("X-Forwarded-For"), trustedProxies); ip != "" {
+		return ip
+	}
+
+	if realIP := net.ParseIP(strings.TrimSpace(req.Header.Get("X-Real-IP"))); realIP != nil {
+		return realIP.String()
 	}
 
 	return remoteHost
+}
+
+// clientIPFromForwarded extracts the client IP from an X-Forwarded-For list by walking it
+// right to left: proxies append entries, they do not rewrite the list, so a client can plant
+// arbitrary values at the left end — trusting the leftmost entry would let it rotate a fresh
+// rate-limit bucket per request. Each entry the trusted chain itself appended is a trusted
+// proxy IP and is skipped; the first valid non-trusted entry to its left is the client.
+// A malformed entry breaks the chain — entries left of it were set by an unknown party —
+// so a parse failure aborts the walk instead of skipping ahead, and the caller falls back to
+// RemoteAddr. An empty result means no usable client IP was found.
+func clientIPFromForwarded(forwarded string, trustedProxies []*net.IPNet) string {
+	if forwarded == "" {
+		return ""
+	}
+
+	parts := strings.Split(forwarded, ",")
+	for _, part := range slices.Backward(parts) {
+		candidate := strings.TrimSpace(part)
+		if net.ParseIP(candidate) == nil {
+			return ""
+		}
+
+		if isTrustedProxy(candidate, trustedProxies) {
+			continue
+		}
+
+		return candidate
+	}
+
+	return ""
 }
 
 // withTOTPRateLimit returns a HandlerFunc wrapper that caps POST /totp-login at

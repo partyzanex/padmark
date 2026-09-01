@@ -1251,6 +1251,108 @@ func (s *AuthHandlerSuite) TestCSRFGuard_InvalidHMAC_Returns403() {
 	s.Equal(http.StatusForbidden, rec.Code)
 }
 
+// ── CSRF secret sharing across processes ──
+
+// newRouterWithCSRFSecret builds an independent router instance with the given CSRF secret. Two
+// of them stand in for two replicas, or for the same server before and after a restart.
+func (s *AuthHandlerSuite) newRouterWithCSRFSecret(secret []byte) http.Handler {
+	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog).
+		WithAuthManager(s.auth)
+	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog)
+
+	opts := adhttp.RouterOptions{
+		MaxBodyBytes: 256 * 1024,
+		CSRFSecret:   secret,
+	}
+
+	router, err := adhttp.NewRouter(handler, ogen, &opts)
+	s.Require().NoError(err)
+
+	return router
+}
+
+// issuedCSRFCookie drives a page load through router so it mints and sets its own CSRF cookie,
+// then returns that cookie — the token a browser would carry into the next form POST. Taking it
+// from the router rather than minting one locally is the point: it proves the value the server
+// actually hands out is portable, not just one the test could construct.
+func (s *AuthHandlerSuite) issuedCSRFCookie(router http.Handler) *http.Cookie {
+	s.T().Helper()
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/login", nil))
+
+	for _, cookie := range rec.Result().Cookies() {
+		if cookie.Name == "padmark_csrf" {
+			return cookie
+		}
+	}
+
+	s.FailNow("router did not set a padmark_csrf cookie")
+
+	return nil
+}
+
+// postTOTPLoginWithCSRF replays a form POST carrying cookie as both the CSRF cookie and the
+// matching form field, the way a browser submits a page rendered earlier.
+func (s *AuthHandlerSuite) postTOTPLoginWithCSRF(router http.Handler, cookie *http.Cookie) int {
+	s.T().Helper()
+
+	form := url.Values{
+		"username":   {"alice"},
+		"password":   {testPw},
+		"code":       {"123456"},
+		"csrf_token": {cookie.Value},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/totp-login", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(cookie)
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	return rec.Code
+}
+
+// TestCSRF_SharedSecret_TokenSurvivesInstanceChange is the regression guard for
+// --csrf-secret / PADMARK_CSRF_SECRET: a token minted by one process must still validate in
+// another one configured with the same secret. That covers a restart (same secret, new process)
+// and a multi-replica deployment where the form POST lands on a different replica than the GET
+// that rendered the form.
+func (s *AuthHandlerSuite) TestCSRF_SharedSecret_TokenSurvivesInstanceChange() {
+	s.auth.EXPECT().
+		Login(gomock.Any(), "alice", gomock.Any(), "123456", gomock.Any(), gomock.Any()).
+		Return("sess-id", nil)
+
+	before := s.newRouterWithCSRFSecret(authTestCSRFSecret)
+	after := s.newRouterWithCSRFSecret(authTestCSRFSecret)
+
+	cookie := s.issuedCSRFCookie(before)
+
+	s.NotEqual(http.StatusForbidden, s.postTOTPLoginWithCSRF(after, cookie),
+		"a shared csrf secret must make form tokens portable across instances")
+}
+
+// TestCSRF_NoSecret_TokenRejectedByOtherInstance pins the failure the flag exists to remove:
+// with no configured secret every process invents its own, so a token from one is worthless to
+// the next. This is what a restart or a second replica looks like without --csrf-secret — and
+// it is why leaving the flag empty logs a warning at startup.
+func (s *AuthHandlerSuite) TestCSRF_NoSecret_TokenRejectedByOtherInstance() {
+	s.auth.EXPECT().
+		Login(gomock.Any(), "alice", gomock.Any(), "123456", gomock.Any(), gomock.Any()).
+		Return("sess-id", nil)
+
+	before := s.newRouterWithCSRFSecret(nil)
+	after := s.newRouterWithCSRFSecret(nil)
+
+	cookie := s.issuedCSRFCookie(before)
+
+	s.Equal(http.StatusForbidden, s.postTOTPLoginWithCSRF(after, cookie),
+		"without a shared secret the other instance must reject the token")
+	s.NotEqual(http.StatusForbidden, s.postTOTPLoginWithCSRF(before, cookie),
+		"the minting instance must still accept its own token")
+}
+
 // ── Session expiry ──
 
 func (s *AuthHandlerSuite) TestTOTPLogin_SessionCookieMaxAge_Is30Days() {

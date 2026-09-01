@@ -29,6 +29,7 @@ type userRepo interface {
 	List(ctx context.Context) ([]*domain.User, error)
 	UpdateLastLogin(ctx context.Context, id uuid.UUID, t time.Time) error
 	UpdatePassword(ctx context.Context, id uuid.UUID, passwordHash string, kdfSalt []byte, totpSecret string) error
+	UpdateTOTPSecret(ctx context.Context, id uuid.UUID, totpSecret string) error
 	UpdateTOTPCounter(ctx context.Context, id uuid.UUID, counter int64) (bool, error)
 	Revoke(ctx context.Context, id uuid.UUID) error
 }

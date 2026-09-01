@@ -226,3 +226,19 @@ func (r *UserRepository) UpdatePassword(
 
 	return nil
 }
+
+// UpdateTOTPSecret replaces only the sealed TOTP secret for the given user ID. The password hash
+// and KDF salt are deliberately left alone: this is the re-seal-on-login migration path, where
+// the secret is rewritten under the current argon2 cost while the credentials stay as they are.
+func (r *UserRepository) UpdateTOTPSecret(ctx context.Context, id uuid.UUID, totpSecret string) error {
+	_, err := r.db.NewUpdate().
+		TableExpr("users").
+		Set("totp_secret = ?", totpSecret).
+		Where("id = ?", id).
+		Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("update totp secret: %w", err)
+	}
+
+	return nil
+}

@@ -35,6 +35,7 @@ const (
 	FlagArgon2Threads    = "argon2-threads"
 	FlagDirectRedirect   = "direct-redirect"
 	FlagMetricsAddr      = "metrics-addr"
+	FlagCSRFSecret       = "csrf-secret"
 )
 
 // Env vars used to configure the service (prefix: PADMARK_*).
@@ -66,6 +67,7 @@ const (
 	EnvArgon2Threads    = "PADMARK_ARGON2_THREADS"
 	EnvDirectRedirect   = "PADMARK_DIRECT_REDIRECT"
 	EnvMetricsAddr      = "PADMARK_METRICS_ADDR"
+	EnvCSRFSecret       = "PADMARK_CSRF_SECRET" //nolint:gosec // G101: env var name, not an inline credential
 )
 
 // Default values for all flags.
@@ -267,6 +269,15 @@ func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
 			Usage: "Address for a separate internal Prometheus /metrics listener (e.g. :9090); " +
 				"empty (default) disables it entirely. Bind this to a private interface only — " +
 				"metrics are never served on the main, public-facing listener",
+		},
+		&cli.StringFlag{
+			Name:    FlagCSRFSecret,
+			Sources: cli.EnvVars(EnvCSRFSecret),
+			Usage: "HMAC key for signing CSRF tokens (raw bytes, at least 32 characters). " +
+				"Empty (default) generates a fresh random secret per process: forms survive only " +
+				"within one process lifetime, so restarts invalidate outstanding tokens and " +
+				"multi-replica deployments 403 on every form. Set to a fixed random value " +
+				"(e.g. `openssl rand -base64 32`) shared across replicas to avoid that",
 		},
 	}
 }

@@ -159,6 +159,20 @@ func (mr *MockUserStoreMockRecorder) UpdateTOTPCounter(ctx, id, counter any) *go
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateTOTPCounter", reflect.TypeOf((*MockUserStore)(nil).UpdateTOTPCounter), ctx, id, counter)
 }
 
+// UpdateTOTPSecret mocks base method.
+func (m *MockUserStore) UpdateTOTPSecret(ctx context.Context, id uuid.UUID, totpSecret string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdateTOTPSecret", ctx, id, totpSecret)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// UpdateTOTPSecret indicates an expected call of UpdateTOTPSecret.
+func (mr *MockUserStoreMockRecorder) UpdateTOTPSecret(ctx, id, totpSecret any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateTOTPSecret", reflect.TypeOf((*MockUserStore)(nil).UpdateTOTPSecret), ctx, id, totpSecret)
+}
+
 // MockInviteStore is a mock of InviteStore interface.
 type MockInviteStore struct {
 	ctrl     *gomock.Controller
@@ -307,60 +321,6 @@ func (mr *MockSessionStoreMockRecorder) Get(ctx, sessionID any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Get", reflect.TypeOf((*MockSessionStore)(nil).Get), ctx, sessionID)
 }
 
-// MockEncryptor is a mock of Encryptor interface.
-type MockEncryptor struct {
-	ctrl     *gomock.Controller
-	recorder *MockEncryptorMockRecorder
-	isgomock struct{}
-}
-
-// MockEncryptorMockRecorder is the mock recorder for MockEncryptor.
-type MockEncryptorMockRecorder struct {
-	mock *MockEncryptor
-}
-
-// NewMockEncryptor creates a new mock instance.
-func NewMockEncryptor(ctrl *gomock.Controller) *MockEncryptor {
-	mock := &MockEncryptor{ctrl: ctrl}
-	mock.recorder = &MockEncryptorMockRecorder{mock}
-	return mock
-}
-
-// EXPECT returns an object that allows the caller to indicate expected use.
-func (m *MockEncryptor) EXPECT() *MockEncryptorMockRecorder {
-	return m.recorder
-}
-
-// Decrypt mocks base method.
-func (m *MockEncryptor) Decrypt(ciphertext, key string) (string, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Decrypt", ciphertext, key)
-	ret0, _ := ret[0].(string)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// Decrypt indicates an expected call of Decrypt.
-func (mr *MockEncryptorMockRecorder) Decrypt(ciphertext, key any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Decrypt", reflect.TypeOf((*MockEncryptor)(nil).Decrypt), ciphertext, key)
-}
-
-// Encrypt mocks base method.
-func (m *MockEncryptor) Encrypt(plaintext, key string) (string, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Encrypt", plaintext, key)
-	ret0, _ := ret[0].(string)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// Encrypt indicates an expected call of Encrypt.
-func (mr *MockEncryptorMockRecorder) Encrypt(plaintext, key any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Encrypt", reflect.TypeOf((*MockEncryptor)(nil).Encrypt), plaintext, key)
-}
-
 // MockPasswordHasher is a mock of PasswordHasher interface.
 type MockPasswordHasher struct {
 	ctrl     *gomock.Controller
@@ -414,47 +374,32 @@ func (mr *MockPasswordHasherMockRecorder) Verify(storedHash, password any) *gomo
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Verify", reflect.TypeOf((*MockPasswordHasher)(nil).Verify), storedHash, password)
 }
 
-// MockKeyDeriver is a mock of KeyDeriver interface.
-type MockKeyDeriver struct {
+// MockSecretSealer is a mock of SecretSealer interface.
+type MockSecretSealer struct {
 	ctrl     *gomock.Controller
-	recorder *MockKeyDeriverMockRecorder
+	recorder *MockSecretSealerMockRecorder
 	isgomock struct{}
 }
 
-// MockKeyDeriverMockRecorder is the mock recorder for MockKeyDeriver.
-type MockKeyDeriverMockRecorder struct {
-	mock *MockKeyDeriver
+// MockSecretSealerMockRecorder is the mock recorder for MockSecretSealer.
+type MockSecretSealerMockRecorder struct {
+	mock *MockSecretSealer
 }
 
-// NewMockKeyDeriver creates a new mock instance.
-func NewMockKeyDeriver(ctrl *gomock.Controller) *MockKeyDeriver {
-	mock := &MockKeyDeriver{ctrl: ctrl}
-	mock.recorder = &MockKeyDeriverMockRecorder{mock}
+// NewMockSecretSealer creates a new mock instance.
+func NewMockSecretSealer(ctrl *gomock.Controller) *MockSecretSealer {
+	mock := &MockSecretSealer{ctrl: ctrl}
+	mock.recorder = &MockSecretSealerMockRecorder{mock}
 	return mock
 }
 
 // EXPECT returns an object that allows the caller to indicate expected use.
-func (m *MockKeyDeriver) EXPECT() *MockKeyDeriverMockRecorder {
+func (m *MockSecretSealer) EXPECT() *MockSecretSealerMockRecorder {
 	return m.recorder
 }
 
-// DeriveKey mocks base method.
-func (m *MockKeyDeriver) DeriveKey(password, salt []byte) (string, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "DeriveKey", password, salt)
-	ret0, _ := ret[0].(string)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// DeriveKey indicates an expected call of DeriveKey.
-func (mr *MockKeyDeriverMockRecorder) DeriveKey(password, salt any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeriveKey", reflect.TypeOf((*MockKeyDeriver)(nil).DeriveKey), password, salt)
-}
-
 // GenerateSalt mocks base method.
-func (m *MockKeyDeriver) GenerateSalt() ([]byte, error) {
+func (m *MockSecretSealer) GenerateSalt() ([]byte, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "GenerateSalt")
 	ret0, _ := ret[0].([]byte)
@@ -463,9 +408,40 @@ func (m *MockKeyDeriver) GenerateSalt() ([]byte, error) {
 }
 
 // GenerateSalt indicates an expected call of GenerateSalt.
-func (mr *MockKeyDeriverMockRecorder) GenerateSalt() *gomock.Call {
+func (mr *MockSecretSealerMockRecorder) GenerateSalt() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GenerateSalt", reflect.TypeOf((*MockKeyDeriver)(nil).GenerateSalt))
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GenerateSalt", reflect.TypeOf((*MockSecretSealer)(nil).GenerateSalt))
+}
+
+// Open mocks base method.
+func (m *MockSecretSealer) Open(sealed string, password, salt []byte) (string, bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Open", sealed, password, salt)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(bool)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
+}
+
+// Open indicates an expected call of Open.
+func (mr *MockSecretSealerMockRecorder) Open(sealed, password, salt any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Open", reflect.TypeOf((*MockSecretSealer)(nil).Open), sealed, password, salt)
+}
+
+// Seal mocks base method.
+func (m *MockSecretSealer) Seal(secret string, password, salt []byte) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Seal", secret, password, salt)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Seal indicates an expected call of Seal.
+func (mr *MockSecretSealerMockRecorder) Seal(secret, password, salt any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Seal", reflect.TypeOf((*MockSecretSealer)(nil).Seal), secret, password, salt)
 }
 
 // MockTOTPManager is a mock of TOTPManager interface.

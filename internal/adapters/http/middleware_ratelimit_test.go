@@ -62,6 +62,38 @@ func TestClientIP_MalformedRemoteAddr(t *testing.T) {
 	assert.Equal(t, "not-valid", clientIP(req, nil))
 }
 
+func TestClientIP_TrustedProxy_SpoofedLeftmostXFFIgnored(t *testing.T) {
+	// A client behind the trusted proxy plants "1.2.3.4" in XFF; the proxy appends the real
+	// client IP "198.51.100.9". The rightmost non-trusted entry must win, otherwise rotating
+	// the leftmost value grants a fresh rate-limit bucket per request.
+	req := newReq("10.0.0.2:5000", "1.2.3.4, 198.51.100.9", "")
+	assert.Equal(t, "198.51.100.9", clientIP(req, []*net.IPNet{parseCIDR(t, "10.0.0.0/8")}))
+}
+
+func TestClientIP_TrustedProxy_PlantedTrustedEntryDoesNotUnmaskAttackerValue(t *testing.T) {
+	// The client lists a fake trusted-proxy IP to the left; the walk stops at the entry the
+	// real proxy appended and never reaches the planted one.
+	req := newReq("10.0.0.2:5000", "203.0.113.5, 10.0.0.2, 198.51.100.9", "")
+	assert.Equal(t, "198.51.100.9", clientIP(req, []*net.IPNet{parseCIDR(t, "10.0.0.0/8")}))
+}
+
+func TestClientIP_TrustedProxy_MalformedXFEntryFallsBackToRemoteAddr(t *testing.T) {
+	// A malformed entry breaks the append chain, so nothing in the list is trustworthy;
+	// RemoteAddr (the proxy's own IP) is the only safe bucket key.
+	req := newReq("10.0.0.2:5000", "8.8.8.8, junk", "")
+	assert.Equal(t, "10.0.0.2", clientIP(req, []*net.IPNet{parseCIDR(t, "10.0.0.0/8")}))
+}
+
+func TestClientIP_TrustedProxy_AllXFFEntriesTrustedFallsBackToRemoteAddr(t *testing.T) {
+	req := newReq("10.0.0.2:5000", "10.0.0.3, 10.0.0.2", "")
+	assert.Equal(t, "10.0.0.2", clientIP(req, []*net.IPNet{parseCIDR(t, "10.0.0.0/8")}))
+}
+
+func TestClientIP_TrustedProxy_InvalidXRealIPFallsBackToRemoteAddr(t *testing.T) {
+	req := newReq("10.0.0.2:5000", "", "not-an-ip")
+	assert.Equal(t, "10.0.0.2", clientIP(req, []*net.IPNet{parseCIDR(t, "10.0.0.0/8")}))
+}
+
 // isTrustedProxy
 
 func TestIsTrustedProxy_Contained(t *testing.T) {

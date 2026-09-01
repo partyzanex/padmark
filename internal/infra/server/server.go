@@ -35,7 +35,28 @@ import (
 const (
 	shutdownTimeout   = 10 * time.Second
 	readHeaderTimeout = 5 * time.Second
+	// minCSRFSecretLen is the minimum accepted length for --csrf-secret; it matches the
+	// 32-byte secret NewRouter generates when the flag is empty.
+	minCSRFSecretLen = 32
 )
+
+// parseCSRFSecret converts the --csrf-secret flag value into an HMAC key. An empty value is
+// valid and yields nil, meaning "generate a fresh random secret per process" (the legacy
+// behaviour): single-instance deployments rely on it to avoid secret management, and the
+// restart-invalidates-tokens tradeoff is acceptable there. A configured secret must be long
+// enough to serve as an HMAC-SHA256 key; a short one would make the CSRF token forgeable in
+// principle, so this fails at startup rather than weakening protection silently.
+func parseCSRFSecret(raw string) ([]byte, error) {
+	if raw == "" {
+		return nil, nil
+	}
+
+	if len(raw) < minCSRFSecretLen {
+		return nil, fmt.Errorf("csrf secret must be at least %d characters, got %d", minCSRFSecretLen, len(raw))
+	}
+
+	return []byte(raw), nil
+}
 
 func serveCommand() *cli.Command {
 	return newCommand("serve", "Start the HTTP server", appFlags(), serverAction)
@@ -54,9 +75,11 @@ func parseTokens(raw string) []string {
 }
 
 func buildRouter(
+	ctx context.Context,
 	cmd *cli.Command,
 	handler *adaptershttp.Handler,
 	ogenHandler *adaptershttp.OgenHandler,
+	log *slog.Logger,
 ) (http.Handler, error) {
 	trustedProxies, err := parseTrustedProxies(cmd.String(FlagTrustedProxies))
 	if err != nil {
@@ -66,6 +89,23 @@ func buildRouter(
 	publicScheme, err := parsePublicScheme(cmd.String(FlagPublicScheme))
 	if err != nil {
 		return nil, err
+	}
+
+	csrfSecret, err := parseCSRFSecret(cmd.String(FlagCSRFSecret))
+	if err != nil {
+		return nil, err
+	}
+
+	// The per-process fallback is a deliberate, documented default rather than a startup failure:
+	// a single instance works out of the box with no secret to manage, and its only cost is that
+	// forms opened before a restart must be reloaded. It is silently wrong for anything larger,
+	// though — every replica would reject the others' form tokens — so say so once at startup.
+	if len(csrfSecret) == 0 {
+		log.WarnContext(ctx,
+			"no csrf secret configured: using a random one for this process only; "+
+				"restarts invalidate open forms and multiple replicas reject each other's forms",
+			"flag", "--"+FlagCSRFSecret, "env", EnvCSRFSecret,
+		)
 	}
 
 	opts := adaptershttp.RouterOptions{
@@ -79,8 +119,9 @@ func buildRouter(
 		SessionTTL:     time.Duration(cmd.Int(FlagSessionTTL)) * time.Second,
 		DisableAPI:     cmd.Bool(FlagDisableAPI),
 		DirectRedirect: cmd.Bool(FlagDirectRedirect),
-		// Nil lets NewRouter generate a fresh CSRF secret instead of accepting an injected one.
-		CSRFSecret: nil,
+		// Nil (flag empty) lets NewRouter generate a fresh CSRF secret instead of accepting
+		// an injected one — the legacy single-instance behaviour.
+		CSRFSecret: csrfSecret,
 	}
 
 	router, err := adaptershttp.NewRouter(handler, ogenHandler, &opts)
@@ -267,9 +308,9 @@ func attachAccountSystem(
 	sessionTTL := time.Duration(cmd.Int(FlagSessionTTL)) * time.Second
 
 	authMgr, err := auth.NewManager(
-		users, invites, sessions, apiTokens, crypto.New(),
+		users, invites, sessions, apiTokens,
 		crypto.NewPasswordHasher(argon2ParamsFromFlags(cmd)),
-		crypto.NewKDF(argon2ParamsFromFlags(cmd)), crypto.NewTOTP(),
+		crypto.NewSealer(argon2ParamsFromFlags(cmd)), crypto.NewTOTP(),
 		log, cmd.String(FlagTOTPIssuer), sessionTTL,
 	)
 	if err != nil {
@@ -433,7 +474,7 @@ func serverAction(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	router, err := buildRouter(cmd, handler, ogenHandler)
+	router, err := buildRouter(ctx, cmd, handler, ogenHandler, log)
 	if err != nil {
 		return err
 	}
