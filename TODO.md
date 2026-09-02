@@ -271,33 +271,57 @@
       `nolintlint`-срабатывания на `//nolint:ireturn` в `middleware_faillock.go`/
       `middleware_ratelimit.go`, не воспроизводится канонической командой) — везде чисто
 
-### 10. SQLite RunInTx и SQLITE_BUSY_SNAPSHOT — PARTIAL
-- [ ] Файл: `internal/infra/storage/sqlite/db.go:46-74` (`withSQLitePragmas`)
-- [ ] Ревью утверждало «невозвратный SQLITE_BUSY_SNAPSHOT → 500» — преувеличение:
-      `busy_timeout=5000` уже стоит (5 секунд ожидания лока, не «fail immediately»), WAL-режим
-      снижает конкуренцию reader/writer
-- [ ] Остаточный риск: deferred BEGIN внутри bun-транзакции при высокой конкурентности
-      писателей теоретически всё ещё может давать `BUSY_SNAPSHOT` в узком race-window (не
-      «невозвратный сбой», а редкий кейс)
-- [ ] Действие (hardening, не блокер): оценить и, при необходимости, добавить
-      `_txlock=immediate` к DSN
-- [ ] Если добавляется — прогнать конкурентный/нагрузочный тест с несколькими параллельными
-      writer'ами до и после, чтобы подтвердить эффект
+### 10. SQLite RunInTx и SQLITE_BUSY_SNAPSHOT — DONE (переоценка вниз была ошибочной)
+- [x] Файл — не `internal/infra/storage/sqlite/db.go`, а **`internal/infra/server/db.go`**
+      (`withSQLitePragmas`, `openSQLiteDB`)
+- [x] ~~«busy_timeout=5000 уже стоит, значит не fail immediately»~~ — **неверно для этого
+      случая**. Прагма действительно применяется (проверено `PRAGMA busy_timeout` = 5000), но
+      SQLite **не вызывает busy handler**, когда транзакция уже держит read-лок и пытается его
+      повысить до write: повышение под read-локом грозит дедлоком, поэтому возвращается
+      `SQLITE_BUSY` немедленно — либо `SQLITE_BUSY_SNAPSHOT`, если другой писатель успел
+      закоммитить дальше снапшота. `busy_timeout` бессилен ровно там, где выглядит нужнее всего
+- [x] ~~«теоретически, узкий race-window, редкий кейс»~~ — **не редкий**. Замер на реальной
+      форме транзакций (read-then-write, как во всех `RunInTx` в `storage/sqlite`: count+insert
+      для API-токенов, select+update для consume инвайта и reveal), 8 писателей × 200 итераций:
 
-### 11. vendor не закоммичен, .dockerignore отсутствует — CONFIRMED
-- [ ] `git ls-files vendor/` → 0 файлов
-- [ ] `.gitignore:3` содержит `vendor/`
-- [ ] `CLAUDE.md` утверждает «vendor is committed (`go mod vendor`)» — расхождение с реальным
-      состоянием репозитория
+      | режим | успешно | SQLITE_BUSY (5) | SQLITE_BUSY_SNAPSHOT (517) |
+      |---|---|---|---|
+      | deferred (было) | 120 / 1600 | 1186 | 294 |
+      | immediate | 1600 / 1600 | 0 | 0 |
+
+      Потеря 92.5% транзакций. Данные при этом не бились — счётчик сходился с числом успешных,
+      то есть это чистые откаты, а не потерянные апдейты
+- [x] Действие: `_txlock=immediate` добавлен в `withSQLitePragmas` (поддержка драйвера
+      проверена: `modernc.org/sqlite` разбирает `_txlock` в `deferred|immediate|exclusive`).
+      Идемпотентность как у прагм — явно заданный оператором `_txlock` сохраняется
+- [x] Цена задокументирована в комментарии: read-only транзакция теперь тоже встала бы в
+      очередь за писателями. Сейчас таких нет — `RunInTx` используется только для
+      read-modify-write; будущая read-only должна брать обычный запрос, а не откатывать эту
+      настройку
+- [x] Тесты: `TestSQLiteConcurrentWriters_NoLockContention` (ноль ошибок + счётчик равен числу
+      транзакций), `TestSQLiteConcurrentWriters_DeferredIsTheProblem` (фиксирует причину: на
+      явном `_txlock=deferred` тот же профиль всё ещё падает — если однажды перестанет, тест
+      покраснеет и настройку можно будет пересмотреть), `TestWithSQLitePragmas` расширен.
+      Прогнано `-count=5 -race`, нестабильности нет
+- [ ] Замечено попутно, отдельно: интеграционные тесты в `tests/` открывают SQLite своим
+      `sql.Open(sqliteshim.DriverName(), uri)` в обход `openSQLiteDB`, то есть боевой DSN
+      (прагмы + `_txlock`) ими не покрывается вообще
+
+### 11. vendor не закоммичен, .dockerignore отсутствует — PARTIAL DONE
+- [x] `git ls-files vendor/` → 0 файлов — подтверждено
+- [x] `.gitignore:3` содержит `vendor/` — подтверждено
+- [x] `CLAUDE.md` утверждал «vendor is committed (`go mod vendor`)» — расхождение с реальным
+      состоянием репозитория, подтверждено
+- [x] Действие: выбран вариант (б) — исправлен `CLAUDE.md` (`## Infrastructure Notes`):
+      теперь явно сказано, что `vendor/` тоже в `.gitignore` и сборка тянет зависимости из
+      Go module proxy, а не из закоммиченного vendor-дерева. Вариант (а) (`git add -f vendor/`)
+      не выбирался — коммит vendor-дерева это отдельное, более тяжёлое решение с последствиями
+      для размера репозитория и ревью диффов, не для automated-doc-fix
 - [ ] `.dockerignore` отсутствует в корне репозитория — Docker build кладёт `.env`,
-      `padmark.db`, `.git`, `bin/` в слой образа
-- [ ] Действие: решить — либо (а) `git add -f vendor/`, убрать `vendor/` из `.gitignore`,
-      привести репозиторий в соответствие с `CLAUDE.md`; либо (б) исправить `CLAUDE.md`, явно
-      описав, что vendor не коммитится и сборка требует доступа к go-proxy
-  - [ ] Если выбран вариант (а): прогнать `go mod vendor`, проверить `go build ./...` офлайн
-        после коммита vendor
-- [ ] Действие: создать `.dockerignore`, исключить как минимум `.env`, `*.db`, `.git`, `bin/`,
-      `*.log`, тестовые артефакты
+      `padmark.db`, `.git`, `bin/` в слой образа. Не сделано — отдельная задача, не про
+      документацию
+  - [ ] Действие: создать `.dockerignore`, исключить как минимум `.env`, `*.db`, `.git`, `bin/`,
+        `*.log`, тестовые артефакты
   - [ ] Проверить `docker build .` — итоговый образ не должен содержать секретов и локальных БД
 
 ---

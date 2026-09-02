@@ -32,7 +32,7 @@ type Locker struct {
 
 // NewLocker creates a Locker ready for use.
 func NewLocker() *Locker {
-	return &Locker{locks: make(map[string]*entry)}
+	return &Locker{locks: make(map[string]*entry), mu: sync.Mutex{}}
 }
 
 // Lock blocks until key is exclusively held, then returns a function that releases it. The
@@ -45,7 +45,7 @@ func (l *Locker) Lock(_ context.Context, key string) (func(), error) {
 
 	ent, ok := l.locks[key]
 	if !ok {
-		ent = &entry{}
+		ent = &entry{mu: sync.Mutex{}, refs: 0}
 		l.locks[key] = ent
 	}
 
