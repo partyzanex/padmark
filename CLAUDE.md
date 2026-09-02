@@ -111,7 +111,7 @@ golangci-lint v2, nearly all linters enabled:
 ## Infrastructure Notes
 
 - `*.mk` files are auto-generated from `github.com/partyzanex/go-makefile` — do not edit manually
-- Binaries go to `bin/` (gitignored); vendor is committed (`go mod vendor`)
+- Binaries go to `bin/` (gitignored); `vendor/` is gitignored too — builds fetch deps from the Go module proxy, not from a committed vendor tree
 - `cmd/padmark-server/main.go` is 10–15 lines; all logic lives in `internal/infra/server/`
 - Dockerfile: multi-stage build → scratch image
 
