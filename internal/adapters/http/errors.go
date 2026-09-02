@@ -3,6 +3,7 @@ package http
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/partyzanex/padmark/internal/domain"
@@ -11,6 +12,22 @@ import (
 // errorJSON is the API error body matching the OpenAPI ErrorResponse schema ({"message": ...}).
 type errorJSON struct {
 	Message string `json:"message"`
+}
+
+// writeJSONErrorStatus writes a JSON error response ({"message": msg}) for a status the caller
+// already decided on directly, rather than one derived from a domain.error — used by
+// middleware whose response describes its own decision (rate limit exceeded, cache lookup
+// failed, too many failed edit-code attempts), not a usecase outcome. See writeError for the
+// domain-error-driven counterpart with the same wire format (net/http's own http.Error writes
+// text/plain, which the OpenAPI ErrorResponse schema never promised).
+func writeJSONErrorStatus(w http.ResponseWriter, r *http.Request, log *slog.Logger, status int, msg string) {
+	w.Header().Set("Content-Type", mimeJSON)
+	w.WriteHeader(status)
+
+	err := json.NewEncoder(w).Encode(errorJSON{Message: msg})
+	if err != nil {
+		log.ErrorContext(r.Context(), "write error response", "err", err)
+	}
 }
 
 // domainErrStatus maps a domain error to its canonical HTTP status code and the matched
@@ -72,7 +89,7 @@ func errorStatusMessage(err error) (status int, message string) {
 // Stays a single small method rather than shared middleware since it has one caller today
 // (UpdateNoteByPath); future native handlers with a JSON body should call this method directly.
 func (h *common) writeDecodeError(w http.ResponseWriter, r *http.Request, err error) {
-	status, msg := http.StatusBadRequest, "invalid request body"
+	status, msg := http.StatusBadRequest, decodeErrorMessage
 
 	// Consume the typed result (not the ok flag) so errcheck sees the error-typed return used.
 	// Plain assignment (not an if-init) keeps noinlineerr happy.

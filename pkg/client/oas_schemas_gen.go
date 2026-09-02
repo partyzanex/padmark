@@ -600,6 +600,10 @@ type CreateLinkUnprocessableEntity ErrorResponse
 
 func (*CreateLinkUnprocessableEntity) createLinkRes() {}
 
+type CreateLinkUnsupportedMediaType ErrorResponse
+
+func (*CreateLinkUnsupportedMediaType) createLinkRes() {}
+
 type CreateLinksBulkBadRequest ErrorResponse
 
 func (*CreateLinksBulkBadRequest) createLinksBulkRes() {}
@@ -619,6 +623,10 @@ func (*CreateLinksBulkTooManyRequests) createLinksBulkRes() {}
 type CreateLinksBulkUnauthorized ErrorResponse
 
 func (*CreateLinksBulkUnauthorized) createLinksBulkRes() {}
+
+type CreateLinksBulkUnsupportedMediaType ErrorResponse
+
+func (*CreateLinksBulkUnsupportedMediaType) createLinksBulkRes() {}
 
 type CreateNoteBadRequest ErrorResponse
 
@@ -1120,6 +1128,10 @@ type CreateNoteUnprocessableEntity ErrorResponse
 
 func (*CreateNoteUnprocessableEntity) createNoteRes() {}
 
+type CreateNoteUnsupportedMediaType ErrorResponse
+
+func (*CreateNoteUnsupportedMediaType) createNoteRes() {}
+
 type DeleteLinkForbidden ErrorResponse
 
 func (*DeleteLinkForbidden) deleteLinkRes() {}
@@ -1136,6 +1148,10 @@ func (*DeleteLinkNoContent) deleteLinkRes() {}
 type DeleteLinkNotFound ErrorResponse
 
 func (*DeleteLinkNotFound) deleteLinkRes() {}
+
+type DeleteLinkTooManyRequests ErrorResponse
+
+func (*DeleteLinkTooManyRequests) deleteLinkRes() {}
 
 // DeleteLinkUnauthorized is response for DeleteLink operation.
 type DeleteLinkUnauthorized struct{}
@@ -1158,6 +1174,10 @@ func (*DeleteNoteNoContent) deleteNoteRes() {}
 type DeleteNoteNotFound ErrorResponse
 
 func (*DeleteNoteNotFound) deleteNoteRes() {}
+
+type DeleteNoteTooManyRequests ErrorResponse
+
+func (*DeleteNoteTooManyRequests) deleteNoteRes() {}
 
 // DeleteNoteUnauthorized is response for DeleteNote operation.
 type DeleteNoteUnauthorized struct{}
@@ -2571,6 +2591,10 @@ func (s *UpdateNoteRequestContentType) UnmarshalText(data []byte) error {
 	}
 }
 
+type UpdateNoteRequestEntityTooLarge ErrorResponse
+
+func (*UpdateNoteRequestEntityTooLarge) updateNoteRes() {}
+
 // Update the privacy level. See `CreateNoteRequest.privacy` for the exact semantics of
 // each value. Omitted keeps the note's current privacy level.
 type UpdateNoteRequestPrivacy string
@@ -2621,6 +2645,10 @@ func (s *UpdateNoteRequestPrivacy) UnmarshalText(data []byte) error {
 	}
 }
 
+type UpdateNoteTooManyRequests ErrorResponse
+
+func (*UpdateNoteTooManyRequests) updateNoteRes() {}
+
 // UpdateNoteUnauthorized is response for UpdateNote operation.
 type UpdateNoteUnauthorized struct{}
 
@@ -2629,3 +2657,7 @@ func (*UpdateNoteUnauthorized) updateNoteRes() {}
 type UpdateNoteUnprocessableEntity ErrorResponse
 
 func (*UpdateNoteUnprocessableEntity) updateNoteRes() {}
+
+type UpdateNoteUnsupportedMediaType ErrorResponse
+
+func (*UpdateNoteUnsupportedMediaType) updateNoteRes() {}

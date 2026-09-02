@@ -52,8 +52,8 @@ func newNoteHandler(c *common, manager NoteManager, noteTmpl, indexTmpl *templat
 // limitation); these native {id...} handlers bridge update/delete for path-like slugs, so by
 // ServeMux specificity single-segment IDs keep going to ogen and multi-segment to these.
 func (h *NoteHandler) RegisterRoutes(mux *http.ServeMux) {
-	mux.Handle("PUT /notes/{id...}", withFailLockout(h.lockout, http.HandlerFunc(h.UpdateNoteByPath)))
-	mux.Handle("DELETE /notes/{id...}", withFailLockout(h.lockout, http.HandlerFunc(h.DeleteNoteByPath)))
+	mux.Handle("PUT /notes/{id...}", withFailLockout(h.lockout, h.log, http.HandlerFunc(h.UpdateNoteByPath)))
+	mux.Handle("DELETE /notes/{id...}", withFailLockout(h.lockout, h.log, http.HandlerFunc(h.DeleteNoteByPath)))
 	mux.HandleFunc("GET /notes/{id...}", h.GetNote)
 	mux.HandleFunc("POST /notes/{id...}", h.guard(h.HandleReveal))
 	mux.HandleFunc("GET /edit/{id...}", h.EditPage)

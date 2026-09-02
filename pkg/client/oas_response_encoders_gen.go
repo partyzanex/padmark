@@ -100,6 +100,19 @@ func encodeCreateLinkResponse(response CreateLinkRes, w http.ResponseWriter, spa
 
 		return nil
 
+	case *CreateLinkUnsupportedMediaType:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(415)
+		span.SetStatus(codes.Error, http.StatusText(415))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
 	case *CreateLinkUnprocessableEntity:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(422)
@@ -189,6 +202,19 @@ func encodeCreateLinksBulkResponse(response CreateLinksBulkRes, w http.ResponseW
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(413)
 		span.SetStatus(codes.Error, http.StatusText(413))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	case *CreateLinksBulkUnsupportedMediaType:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(415)
+		span.SetStatus(codes.Error, http.StatusText(415))
 
 		e := new(jx.Encoder)
 		response.Encode(e)
@@ -316,6 +342,19 @@ func encodeCreateNoteResponse(response CreateNoteRes, w http.ResponseWriter, spa
 
 		return nil
 
+	case *CreateNoteUnsupportedMediaType:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(415)
+		span.SetStatus(codes.Error, http.StatusText(415))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
 	case *CreateNoteUnprocessableEntity:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(422)
@@ -387,6 +426,19 @@ func encodeDeleteLinkResponse(response DeleteLinkRes, w http.ResponseWriter, spa
 
 		return nil
 
+	case *DeleteLinkTooManyRequests:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(429)
+		span.SetStatus(codes.Error, http.StatusText(429))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
 	case *DeleteLinkInternalServerError:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(500)
@@ -436,6 +488,19 @@ func encodeDeleteNoteResponse(response DeleteNoteRes, w http.ResponseWriter, spa
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(404)
 		span.SetStatus(codes.Error, http.StatusText(404))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	case *DeleteNoteTooManyRequests:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(429)
+		span.SetStatus(codes.Error, http.StatusText(429))
 
 		e := new(jx.Encoder)
 		response.Encode(e)
@@ -700,10 +765,49 @@ func encodeUpdateNoteResponse(response UpdateNoteRes, w http.ResponseWriter, spa
 
 		return nil
 
+	case *UpdateNoteRequestEntityTooLarge:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(413)
+		span.SetStatus(codes.Error, http.StatusText(413))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	case *UpdateNoteUnsupportedMediaType:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(415)
+		span.SetStatus(codes.Error, http.StatusText(415))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
 	case *UpdateNoteUnprocessableEntity:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(422)
 		span.SetStatus(codes.Error, http.StatusText(422))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	case *UpdateNoteTooManyRequests:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(429)
+		span.SetStatus(codes.Error, http.StatusText(429))
 
 		e := new(jx.Encoder)
 		response.Encode(e)

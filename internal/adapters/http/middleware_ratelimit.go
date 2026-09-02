@@ -30,6 +30,7 @@ const totpRatePerMin = 10
 type rateLimitMiddleware struct {
 	cache          gcache.Cache
 	next           http.Handler
+	log            *slog.Logger
 	trustedProxies []*net.IPNet
 }
 
@@ -54,23 +55,23 @@ func newIPRateLimiterCache(newLimiter func() *rate.Limiter) gcache.Cache {
 // already written the appropriate error response (500 on cache lookup failure — unreachable in
 // practice since LoaderFunc never errors; 429 when the limit is exceeded), so the caller must
 // stop handling the request.
-func allowRequest(w http.ResponseWriter, cache gcache.Cache, ip string) bool {
+func allowRequest(w http.ResponseWriter, r *http.Request, log *slog.Logger, cache gcache.Cache, ip string) bool {
 	cached, err := cache.Get(ip)
 	if err != nil {
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		writeJSONErrorStatus(w, r, log, http.StatusInternalServerError, "internal server error")
 
 		return false
 	}
 
 	limiter, ok := cached.(*rate.Limiter)
 	if !ok {
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		writeJSONErrorStatus(w, r, log, http.StatusInternalServerError, "internal server error")
 
 		return false
 	}
 
 	if !limiter.Allow() {
-		http.Error(w, "too many requests", http.StatusTooManyRequests)
+		writeJSONErrorStatus(w, r, log, http.StatusTooManyRequests, "too many requests")
 
 		return false
 	}
@@ -78,18 +79,18 @@ func allowRequest(w http.ResponseWriter, cache gcache.Cache, ip string) bool {
 	return true
 }
 
-func withRateLimit(rps, burst int, trustedProxies []*net.IPNet, next http.Handler) http.Handler {
+func withRateLimit(rps, burst int, trustedProxies []*net.IPNet, log *slog.Logger, next http.Handler) http.Handler {
 	limiterCache := newIPRateLimiterCache(func() *rate.Limiter {
 		return rate.NewLimiter(rate.Limit(rps), burst)
 	})
 
-	return &rateLimitMiddleware{cache: limiterCache, trustedProxies: trustedProxies, next: next}
+	return &rateLimitMiddleware{cache: limiterCache, trustedProxies: trustedProxies, log: log, next: next}
 }
 
 func (rl *rateLimitMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ip := clientIP(r, rl.trustedProxies)
 
-	if !allowRequest(w, rl.cache, ip) {
+	if !allowRequest(w, r, rl.log, rl.cache, ip) {
 		return
 	}
 
@@ -154,7 +155,7 @@ func clientIPFromForwarded(forwarded string, trustedProxies []*net.IPNet) string
 // withTOTPRateLimit returns a HandlerFunc wrapper that caps POST /totp-login at
 // totpRatePerMin attempts per minute per client IP. The burst equals the rate cap
 // so an attacker can make at most 10 attempts before being throttled.
-func withTOTPRateLimit(trustedProxies []*net.IPNet, next http.HandlerFunc) http.HandlerFunc {
+func withTOTPRateLimit(trustedProxies []*net.IPNet, log *slog.Logger, next http.HandlerFunc) http.HandlerFunc {
 	cache := newIPRateLimiterCache(func() *rate.Limiter {
 		return rate.NewLimiter(rate.Every(time.Minute/totpRatePerMin), totpRatePerMin)
 	})
@@ -162,7 +163,7 @@ func withTOTPRateLimit(trustedProxies []*net.IPNet, next http.HandlerFunc) http.
 	return func(w http.ResponseWriter, r *http.Request) {
 		ip := clientIP(r, trustedProxies)
 
-		if !allowRequest(w, cache, ip) {
+		if !allowRequest(w, r, log, cache, ip) {
 			return
 		}
 

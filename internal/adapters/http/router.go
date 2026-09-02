@@ -124,14 +124,14 @@ type RouteRegistrar interface {
 // tracking is consistent for a note or link regardless of which route variant a client hits — a
 // single cache keyed by path ID works for both since notes and links share one global slug
 // namespace (a note and a link can never have the same ID, see domain.HashSlug/ErrSlugConflict).
-func registerOgenRoutes(mux *http.ServeMux, ogenSrv http.Handler, lockout gcache.Cache) {
+func registerOgenRoutes(mux *http.ServeMux, ogenSrv http.Handler, lockout gcache.Cache, log *slog.Logger) {
 	mux.Handle("POST /notes", ogenSrv)
-	mux.Handle("PUT /notes/{id}", withFailLockout(lockout, ogenSrv))
-	mux.Handle("DELETE /notes/{id}", withFailLockout(lockout, ogenSrv))
+	mux.Handle("PUT /notes/{id}", withFailLockout(lockout, log, ogenSrv))
+	mux.Handle("DELETE /notes/{id}", withFailLockout(lockout, log, ogenSrv))
 	mux.Handle("POST /links", ogenSrv)
 	mux.Handle("POST /links/bulk", ogenSrv)
 	mux.Handle("GET /links/{id}", ogenSrv)
-	mux.Handle("DELETE /links/{id}", withFailLockout(lockout, ogenSrv))
+	mux.Handle("DELETE /links/{id}", withFailLockout(lockout, log, ogenSrv))
 	mux.Handle("GET /healthz", ogenSrv)
 	mux.Handle("GET /readyz", ogenSrv)
 }
@@ -139,7 +139,7 @@ func registerOgenRoutes(mux *http.ServeMux, ogenSrv http.Handler, lockout gcache
 // registerAllRoutes registers the ogen-served REST API routes plus every concern handler's own
 // routes (see RouteRegistrar) on mux.
 func registerAllRoutes(mux *http.ServeMux, handler *Handler, ogenSrv http.Handler) {
-	registerOgenRoutes(mux, ogenSrv, handler.lockout)
+	registerOgenRoutes(mux, ogenSrv, handler.lockout, handler.log)
 
 	registrars := []RouteRegistrar{
 		handler.NoteHandler,
@@ -213,7 +213,7 @@ func wrapMiddleware(
 	stack = withBodyLimit(int64(opts.MaxBodyBytes), stack)
 
 	if opts.RateLimit > 0 {
-		stack = withRateLimit(opts.RateLimit, opts.RateBurst, opts.TrustedProxies, stack)
+		stack = withRateLimit(opts.RateLimit, opts.RateBurst, opts.TrustedProxies, handler.log, stack)
 	}
 
 	// Only meaningful when nothing is trusted — see warnUnconfiguredProxy.

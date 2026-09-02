@@ -14,6 +14,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+var testDiscardLog = slog.New(slog.DiscardHandler) //nolint:gochecknoglobals // test helper
+
 func parseCIDR(tb testing.TB, cidr string) *net.IPNet {
 	tb.Helper()
 
@@ -141,7 +143,7 @@ func TestWithTOTPRateLimit_WideOpenProxies_SpoofedXRealIPDefeatsLimit(t *testing
 
 		w.WriteHeader(http.StatusOK)
 	})
-	handler := withTOTPRateLimit([]*net.IPNet{parseCIDR(t, "0.0.0.0/0")}, inner)
+	handler := withTOTPRateLimit([]*net.IPNet{parseCIDR(t, "0.0.0.0/0")}, testDiscardLog, inner)
 
 	const attempts = totpRatePerMin * 3
 
@@ -166,7 +168,7 @@ func TestWithTOTPRateLimit_NoProxiesConfigured_SpoofedHeadersDoNotDefeatLimit(t 
 	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	handler := withTOTPRateLimit(nil, inner)
+	handler := withTOTPRateLimit(nil, testDiscardLog, inner)
 
 	var lastCode int
 
@@ -195,7 +197,7 @@ func TestWithTOTPRateLimit_ProxyPresentButUntrusted_ClientsShareOneBucket(t *tes
 	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	handler := withTOTPRateLimit(nil, inner)
+	handler := withTOTPRateLimit(nil, testDiscardLog, inner)
 
 	// Distinct real clients, each correctly announced by the proxy in X-Forwarded-For.
 	for i := range totpRatePerMin {
@@ -314,7 +316,7 @@ func TestWithTOTPRateLimit_AllowsUnderLimit(t *testing.T) {
 
 		w.WriteHeader(http.StatusOK)
 	})
-	handler := withTOTPRateLimit(nil, inner)
+	handler := withTOTPRateLimit(nil, testDiscardLog, inner)
 
 	for range totpRatePerMin {
 		req := httptest.NewRequest(http.MethodPost, "/totp-login", nil)
@@ -333,7 +335,7 @@ func TestWithTOTPRateLimit_BlocksOverLimit(t *testing.T) {
 	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	handler := withTOTPRateLimit(nil, inner)
+	handler := withTOTPRateLimit(nil, testDiscardLog, inner)
 
 	for range totpRatePerMin {
 		req := httptest.NewRequest(http.MethodPost, "/totp-login", nil)
@@ -350,13 +352,43 @@ func TestWithTOTPRateLimit_BlocksOverLimit(t *testing.T) {
 	handler(rec, req)
 
 	assert.Equal(t, http.StatusTooManyRequests, rec.Code)
+
+	// The OpenAPI ErrorResponse schema promises JSON ({"message": ...}), not net/http's
+	// default text/plain (see errors.go's writeJSONErrorStatus).
+	//nolint:testifylint // Content-Type header string, not a JSON body; JSONEq suggestion misfires on "mimeJSON"
+	assert.Equal(t, mimeJSON, rec.Header().Get("Content-Type"))
+	assert.JSONEq(t, `{"message":"too many requests"}`, rec.Body.String())
+}
+
+// TestWithRateLimit_Exceeded_ReturnsJSONError is withTOTPRateLimit_BlocksOverLimit's general
+// counterpart: withRateLimit (the whole-stack per-IP limiter, not just POST /totp-login) must
+// answer 429 with the same JSON shape.
+func TestWithRateLimit_Exceeded_ReturnsJSONError(t *testing.T) {
+	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	handler := withRateLimit(1, 1, nil, testDiscardLog, inner)
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "7.7.7.7:9000"
+
+	// First request consumes the single burst token.
+	handler.ServeHTTP(httptest.NewRecorder(), req)
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusTooManyRequests, rec.Code)
+	//nolint:testifylint // Content-Type header string, not a JSON body; JSONEq suggestion misfires on "mimeJSON"
+	assert.Equal(t, mimeJSON, rec.Header().Get("Content-Type"))
+	assert.JSONEq(t, `{"message":"too many requests"}`, rec.Body.String())
 }
 
 func TestWithTOTPRateLimit_DifferentIPs_IndependentBuckets(t *testing.T) {
 	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	handler := withTOTPRateLimit(nil, inner)
+	handler := withTOTPRateLimit(nil, testDiscardLog, inner)
 
 	// exhaust bucket for IP A
 	for range totpRatePerMin {

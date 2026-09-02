@@ -190,27 +190,86 @@
       UsesErrorResponseShape`. Тело декодируется в `map[string]any`, а не в структуру, — иначе
       отсутствие `message` выглядело бы как пустая строка, а это ровно проверяемый дефект.
       Проверено, что при возврате делегирования тесты падают
-- [ ] Осталось (отдельно): 415 отдаётся, но не задокументирован в `openapi.yaml` ни на одном
-      эндпоинте (`grep -c '"415"'` = 0). Тело теперь контрактное, статус — нет
-- [ ] Осталось (отдельно): текст сообщения протекает наружу внутренними именами —
-      `operation CreateNote: decode request: decode application/json: decode CreateNoteRequest:
-      callback: decode field "content": unexpected byte 49 '1' at 12`. Полезная часть
-      (`content (field required)`, `unexpected Content-Type: text/plain`) тонет в ogen-овской
-      цепочке вызовов и раскрывает имена сгенерированных типов
+- [x] 415 задокументирован в `openapi.yaml` для всех четырёх операций с `requestBody`
+      (`POST /notes`, `PUT /notes/{id}`, `POST /links`, `POST /links/bulk`). Попутно нашлось,
+      что `PUT /notes/{id}` не документировал и **413**, хотя лимит тела на него действует, —
+      добавлено. `go generate` прогнан: `spec/openapi.yaml`, `ogenapi/`, `pkg/client/`
+      пересобраны, сгенерированный клиент теперь декодирует 415 в типизированную ошибку вместо
+      падения на неожиданном ответе. `TestOpenAPISpecInSync` зелёный
+- [x] Сообщения санитизированы (`ogenErrorMessage`): наружу идут только структурированные детали,
+      которые ogen отдаёт типизированно, — имя провалившего валидацию поля
+      (`invalid request body: content (field required)`) и отвергнутый Content-Type
+      (`unsupported content type: text/plain`, обрезается до 64 рун, т.к. заголовок ограничен
+      только `MaxHeaderBytes`). Всё остальное схлопывается в фиксированное сообщение по статусу.
+      Исходная ошибка не теряется — уходит в лог: `Debug` для 4xx (ошибка клиента), `Error` для
+      5xx. Константа `decodeErrorMessage` общая с `common.writeDecodeError`, чтобы ogen-путь и
+      нативный путь отвечали одинаково
+- [x] Тесты: `TestOgenDecodeErrors_UseErrorResponseShape` теперь сверяет точный текст,
+      `TestOgenDecodeErrors_DoNotLeakInternals` отдельно проверяет отсутствие `CreateNoteRequest`,
+      `operation CreateNote`, `decode request`, `callback` на пяти вариантах битого тела,
+      `TestOgenDecodeErrors_LongContentTypeIsTruncated` — обрезку эха
 
-### 9. 429/500 отдаются через http.Error (text/plain) — CONFIRMED
-- [ ] Файл: `internal/adapters/http/middleware_faillock.go:40` —
-      `http.Error(w, "too many failed attempts, try again later", http.StatusTooManyRequests)`
-- [ ] Файл: `internal/adapters/http/middleware_ratelimit.go:57,64,70` — три вызова `http.Error`
-      для 500 (internal server error, дважды) и 429 (too many requests)
-- [ ] `http.Error` пишет `Content-Type: text/plain; charset=utf-8` + newline, спецификация
-      обещает JSON `{"message"}` — несоответствие контракту
-- [ ] Дополнительно: 429 не объявлен в `openapi.yaml` для `PUT`/`DELETE /notes`
-- [ ] Действие: заменить все вызовы `http.Error` в этих двух файлах на общий JSON-хелпер
-      (переиспользовать существующий `writeError()`, если применимо)
-- [ ] Действие: добавить 429 в `openapi.yaml` для `PUT`/`DELETE /notes/{id}`
-- [ ] Тест: `Content-Type: application/json` и тело `{"message": ...}` для 429 (rate limit,
-      faillock) и 500 ответов
+### 9. 429/500 отдаются через http.Error (text/plain) — DONE
+- [x] Подтверждено: `middleware_faillock.go:40` и `middleware_ratelimit.go:57,64,70` (3 места)
+      использовали `http.Error`, который пишет `Content-Type: text/plain; charset=utf-8` вместо
+      документированного JSON `{"message"}`
+- [x] Уточнение: выделенного `writeError()`, переиспользуемого «как есть», не нашлось —
+      `(*common).writeError` завязан на маппинг `domain`-ошибок в статус (`errorStatusMessage`),
+      а эти два middleware принимают решение о статусе сами (лимит, cache-miss), без
+      domain-ошибки на входе. Вместо переиспользования `writeError` заведён отдельный
+      низкоуровневый хелпер `writeJSONErrorStatus(w, r, log, status, msg)` в `errors.go`,
+      которым теперь пользуются оба: и middleware (status уже решён), и потенциально
+      `(*common).writeError` (не тронут — работает как раньше, использует ту же
+      `errorJSON`/`mimeJSON` инфраструктуру)
+- [x] `middleware_faillock.go`: `withFailLockout` получил параметр `log *slog.Logger`,
+      единственный `http.Error` заменён на `writeJSONErrorStatus`
+- [x] `middleware_ratelimit.go`: `allowRequest`, `withRateLimit`, `withTOTPRateLimit` получили
+      `log *slog.Logger` (у `withRateLimit` — через новое поле `rateLimitMiddleware.log`); все
+      3 вызова `http.Error` заменены
+- [x] Обновлены все call sites: `router.go` (`registerOgenRoutes`, `wrapMiddleware`),
+      `web_note.go` (`NoteHandler.RegisterRoutes`), `web_auth.go` (`AuthHandler.RegisterRoutes`)
+      — везде прокинут `handler.log`/`h.log`
+- [x] Действие: 429 добавлен в `openapi.yaml` для `PUT /notes/{id}`, `DELETE /notes/{id}` —
+      как и просили — **и дополнительно** для `DELETE /links/{id}`, которая обёрнута тем же
+      `withFailLockout` (`router.go:134`) и была тем же пробелом, просто не названа в находке.
+      Синхронизирована embed-копия `internal/adapters/http/spec/openapi.yaml`
+      (`go generate ./internal/adapters/http/...`, использует существующий
+      `//go:generate cp -f ../../../openapi.yaml spec/openapi.yaml`)
+- [x] Тест: `internal/adapters/http/middleware_faillock_test.go` (новый файл) —
+      `TestWithFailLockout_LockedOut_ReturnsJSONError` (Content-Type + точное тело через
+      `assert.JSONEq`), `TestWithFailLockout_UnderThreshold_ReachesUpstream` (контрольный кейс)
+- [x] Тест: `internal/adapters/http/middleware_ratelimit_test.go` — добавлена JSON-проверка в
+      `TestWithTOTPRateLimit_BlocksOverLimit` + новый `TestWithRateLimit_Exceeded_ReturnsJSONError`
+      для общего `withRateLimit` (не только TOTP-путь)
+- [x] Полный прогон: `go build ./...`, `go vet ./...` (+ `-tags=integration`),
+      `go test -race -count=1 ./...`, `go test -tags=integration -race -count=1 ./tests/...`,
+      `golangci-lint run` — везде чисто (кроме уже существующих, не связанных с этой находкой
+      `nolintlint`-предупреждений в других файлах — `web_auth.go`, `link_handler.go`,
+      `handler_test.go`, `server.go:172`)
+- [x] Уточнение по регенерации ogen (изначально помечено как «не сделано, вне scope» —
+      неверно, сделано в рамках этой же находки): в репозитории действительно нет
+      `go:generate`-директивы для `internal/adapters/http/ogenapi/`/`pkg/client`, но бинарник
+      `bin/ogen` уже стоял в `bin/`, и предыдущая генерация под тот же `openapi.yaml` (для #7/#8)
+      уже лежала в рабочем дереве как ориентир по вызову. Прогнано вручную:
+      `bin/ogen -target internal/adapters/http/ogenapi -package ogenapi -clean openapi.yaml` и
+      аналогично для `-target pkg/client -package client`. Результат: `UpdateNoteTooManyRequests`,
+      `DeleteNoteTooManyRequests`, `DeleteLinkTooManyRequests` появились в
+      `oas_schemas_gen.go`/`oas_json_gen.go`/`oas_response_{decoders,encoders}_gen.go` обоих
+      пакетов; в `pkg/client/oas_response_decoders_gen.go` подтверждён `case 429` в
+      `decodeUpdateNoteResponse` (и парных decoder'ах) — клиент теперь декодирует 429 в
+      типизированный вариант, а не в generic-ошибку
+- [x] `mapUpdateError`/`mapDeleteError`/`mapDeleteLinkError` (`ogen_errors.go`) трогать не
+      потребовалось: 429 для этих операций пишет `withFailLockout`/`withRateLimit` **до** того,
+      как запрос доходит до ogen-хендлера (см. порядок в `router.go`), так что серверу не нужно
+      самому конструировать `*TooManyRequests` — сгенерированные типы нужны только для
+      декодирования на стороне клиента, и это уже подтверждено предыдущим пунктом
+- [x] Полный прогон после регенерации: `go build ./...` (включая `pkg/client`),
+      `go vet ./...` + `-tags=integration`, `go test -race -count=1 ./...`,
+      `go test -tags=integration -race -count=1 ./tests/...`,
+      `golangci-lint run ./...` (канонической командой из `go.mk`, без нестандартных флагов —
+      комбинация `--build-tags=integration` с явным списком пакетов ранее дала ложные
+      `nolintlint`-срабатывания на `//nolint:ireturn` в `middleware_faillock.go`/
+      `middleware_ratelimit.go`, не воспроизводится канонической командой) — везде чисто
 
 ### 10. SQLite RunInTx и SQLITE_BUSY_SNAPSHOT — PARTIAL
 - [ ] Файл: `internal/infra/storage/sqlite/db.go:46-74` (`withSQLitePragmas`)

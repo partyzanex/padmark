@@ -123,6 +123,11 @@ paths:
         "413":
           description: Request body exceeds the server limit (configurable, default 4 MB)
           $ref: "#/components/responses/Error"
+        "415":
+          description: |
+            The request body was not sent as `application/json`. Every operation that takes a
+            body accepts only that media type.
+          $ref: "#/components/responses/Error"
         "422":
           $ref: "#/components/responses/Error"
         "500":
@@ -203,7 +208,21 @@ paths:
         "404":
           description: Note not found
           $ref: "#/components/responses/Error"
+        "413":
+          description: Request body exceeds the server limit (configurable, default 4 MB)
+          $ref: "#/components/responses/Error"
+        "415":
+          description: |
+            The request body was not sent as `application/json`. Every operation that takes a
+            body accepts only that media type.
+          $ref: "#/components/responses/Error"
         "422":
+          $ref: "#/components/responses/Error"
+        "429":
+          description: |
+            Rate limit exceeded — either the server's general per-IP request limit
+            (`--rate-limit`, if enabled), or too many failed edit-code attempts against this
+            specific note ID (10 within a rolling 5-minute lockout window).
           $ref: "#/components/responses/Error"
         "500":
           $ref: "#/components/responses/Error"
@@ -255,6 +274,12 @@ paths:
         "404":
           description: Note not found
           $ref: "#/components/responses/Error"
+        "429":
+          description: |
+            Rate limit exceeded — either the server's general per-IP request limit
+            (`--rate-limit`, if enabled), or too many failed edit-code attempts against this
+            specific note ID (10 within a rolling 5-minute lockout window).
+          $ref: "#/components/responses/Error"
         "500":
           $ref: "#/components/responses/Error"
 
@@ -296,6 +321,11 @@ paths:
           $ref: "#/components/responses/Error"
         "413":
           description: Request body exceeds the server limit (configurable, default 4 MB)
+          $ref: "#/components/responses/Error"
+        "415":
+          description: |
+            The request body was not sent as `application/json`. Every operation that takes a
+            body accepts only that media type.
           $ref: "#/components/responses/Error"
         "422":
           $ref: "#/components/responses/Error"
@@ -339,6 +369,11 @@ paths:
           $ref: "#/components/responses/Error"
         "413":
           description: Request body exceeds the server limit (configurable, default 4 MB)
+          $ref: "#/components/responses/Error"
+        "415":
+          description: |
+            The request body was not sent as `application/json`. Every operation that takes a
+            body accepts only that media type.
           $ref: "#/components/responses/Error"
         "429":
           description: Rate limit exceeded
@@ -417,6 +452,12 @@ paths:
           $ref: "#/components/responses/Error"
         "404":
           description: Link not found
+          $ref: "#/components/responses/Error"
+        "429":
+          description: |
+            Rate limit exceeded — either the server's general per-IP request limit
+            (`--rate-limit`, if enabled), or too many failed edit-code attempts against this
+            specific link ID (10 within a rolling 5-minute lockout window).
           $ref: "#/components/responses/Error"
         "500":
           $ref: "#/components/responses/Error"

@@ -1,6 +1,7 @@
 package http
 
 import (
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -30,14 +31,14 @@ func newFailLockoutCache() gcache.Cache {
 // withFailLockout wraps edit-code-protected routes (PUT /notes/{id},
 // DELETE /notes/{id}). It rejects requests with 429 when the note is locked,
 // and increments the failure counter when the upstream handler responds 403.
-func withFailLockout(cache gcache.Cache, next http.Handler) http.Handler {
+func withFailLockout(cache gcache.Cache, log *slog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
 
 		cached, err := cache.Get(id)
 		if err == nil {
 			if count, ok := cached.(int); ok && count >= maxFailedAttempts {
-				http.Error(w, "too many failed attempts, try again later", http.StatusTooManyRequests)
+				writeJSONErrorStatus(w, r, log, http.StatusTooManyRequests, "too many failed attempts, try again later")
 
 				return
 			}

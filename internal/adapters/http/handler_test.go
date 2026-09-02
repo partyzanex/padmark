@@ -590,32 +590,80 @@ func (s *HandlerSuite) decodeErrorBody(contentType, body string) (int, map[strin
 }
 
 // TestOgenDecodeErrors_UseErrorResponseShape covers every failure ogen raises before a request
-// reaches a handler method. None of them may reply in ogen's native {"error_message": ...}
-// shape: ErrorResponse declares "message" required, so that body is off-contract for a client
-// validating against the spec. Manager.Create is never reached in any case (no EXPECT) — each
-// request dies during decoding.
+// reaches a handler method. Two things are pinned per case: the body uses the contract's
+// ErrorResponse shape (ogen's native {"error_message": ...} declares none of the required
+// "message" field), and the message itself is the sanitised one — ogen's raw string chains its
+// own decode path and names generated request types, which tells a caller nothing it can act on.
+// Manager.Create is never reached in any case (no EXPECT): each request dies during decoding.
 func (s *HandlerSuite) TestOgenDecodeErrors_UseErrorResponseShape() {
 	cases := map[string]struct {
 		contentType string
 		body        string
 		wantStatus  int
+		wantMessage string
 	}{
-		"malformed json":         {"application/json", `{"content":`, http.StatusBadRequest},
-		"missing required field": {"application/json", `{}`, http.StatusBadRequest},
-		"wrong field type":       {"application/json", `{"content": 12345}`, http.StatusBadRequest},
-		"unsupported media type": {"text/plain", `hello`, http.StatusUnsupportedMediaType},
+		"malformed json": {
+			"application/json", `{"content":`, http.StatusBadRequest,
+			"invalid request body",
+		},
+		// The one case carrying detail worth forwarding: the field name is schema-defined, so
+		// naming it helps the caller without exposing anything the spec doesn't already publish.
+		"missing required field": {
+			"application/json", `{}`, http.StatusBadRequest,
+			"invalid request body: content (field required)",
+		},
+		"wrong field type": {
+			"application/json", `{"content": 12345}`, http.StatusBadRequest,
+			"invalid request body",
+		},
+		"unsupported media type": {
+			"text/plain", `hello`, http.StatusUnsupportedMediaType,
+			"unsupported content type: text/plain",
+		},
 	}
 
-	for name, tc := range cases {
+	for name, want := range cases {
 		s.Run(name, func() {
-			status, decoded := s.decodeErrorBody(tc.contentType, tc.body)
+			status, decoded := s.decodeErrorBody(want.contentType, want.body)
 
-			s.Equal(tc.wantStatus, status)
+			s.Equal(want.wantStatus, status)
 			s.Contains(decoded, "message", "ErrorResponse requires a message field")
-			s.NotEmpty(decoded["message"])
 			s.NotContains(decoded, "error_message", "ogen's native error shape must not leak through")
+			s.Equal(want.wantMessage, decoded["message"])
 		})
 	}
+}
+
+// TestOgenDecodeErrors_DoNotLeakInternals is the same surface checked from the other side: no
+// reply may name a generated type, an operation ID, or ogen's decode chain, whatever the input.
+// Stated separately from the exact-message assertions above so that rewording a message later
+// cannot quietly drop this guarantee along with it.
+func (s *HandlerSuite) TestOgenDecodeErrors_DoNotLeakInternals() {
+	bodies := []string{`{"content":`, `{}`, `{"content": 12345}`, `[]`, `{"content": [1,2]}`}
+
+	for _, body := range bodies {
+		_, decoded := s.decodeErrorBody("application/json", body)
+
+		message, _ := decoded["message"].(string)
+		s.NotEmpty(message)
+
+		for _, leak := range []string{"CreateNoteRequest", "operation CreateNote", "decode request", "callback"} {
+			s.NotContains(message, leak, "internal detail %q leaked for body %s", leak, body)
+		}
+	}
+}
+
+// TestOgenDecodeErrors_LongContentTypeIsTruncated bounds what a caller can make the server echo.
+// The Content-Type header is limited only by MaxHeaderBytes, so quoting it back whole would let
+// a caller inflate the error response far beyond the request that caused it.
+func (s *HandlerSuite) TestOgenDecodeErrors_LongContentTypeIsTruncated() {
+	longType := "text/" + strings.Repeat("z", 4096)
+
+	_, decoded := s.decodeErrorBody(longType, `{}`)
+
+	message, _ := decoded["message"].(string)
+	s.Less(len(message), 200, "the echoed content type must be capped, got %d bytes", len(message))
+	s.Contains(message, "unsupported content type")
 }
 
 // TestCreateNote_BodyExceedsLimit_UsesErrorResponseShape is the 413 counterpart: that branch

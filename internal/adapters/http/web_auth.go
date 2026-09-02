@@ -118,7 +118,7 @@ func newAuthHandler(c *common, loginTmpl, setupTmpl, changePwTmpl *template.Temp
 // RegisterRoutes registers login, logout, account setup, and password-change routes.
 func (h *AuthHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /login", h.LoginPage)
-	mux.HandleFunc("POST /totp-login", h.guard(withTOTPRateLimit(h.trustedProxies, h.TOTPLoginHandler)))
+	mux.HandleFunc("POST /totp-login", h.guard(withTOTPRateLimit(h.trustedProxies, h.log, h.TOTPLoginHandler)))
 	mux.HandleFunc("POST /logout", h.guard(h.LogoutHandler))
 	mux.HandleFunc("GET /setup", h.SetupPage)
 	mux.HandleFunc("POST /setup", h.guard(h.SetupHandler))

@@ -6,8 +6,10 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/ogen-go/ogen/ogenerrors"
+	"github.com/ogen-go/ogen/validate"
 
 	"github.com/partyzanex/padmark/internal/adapters/http/ogenapi"
 )
@@ -16,6 +18,24 @@ const internalErrorMessage = "internal server error"
 
 // maxBodyErrorMessage is returned with HTTP 413 when a request body exceeds MaxBodyBytes.
 const maxBodyErrorMessage = "request body exceeds the server limit"
+
+// decodeErrorMessage is returned with HTTP 400 when a request body cannot be decoded and the
+// failure carries no structured detail worth forwarding. Shared with common.writeDecodeError so
+// the ogen and native decode paths answer identically.
+const decodeErrorMessage = "invalid request body"
+
+// unsupportedMediaTypeMessage prefixes the HTTP 415 reply; the refused Content-Type follows it.
+const unsupportedMediaTypeMessage = "unsupported content type"
+
+// notImplementedMessage is returned with HTTP 501 for an operation ogen routed but no handler
+// implements — unreachable while every generated operation is implemented, kept so the status
+// never falls through to a message describing the wrong thing.
+const notImplementedMessage = "not implemented"
+
+// maxEchoedContentType caps how much of the caller's Content-Type is quoted back. The header is
+// only bounded by MaxHeaderBytes (64 KiB by default), and echoing it whole would let a caller
+// inflate an error response at will.
+const maxEchoedContentType = 64
 
 func errResp(err error) ogenapi.ErrorResponse {
 	return ogenapi.ErrorResponse{Message: err.Error()}
@@ -37,13 +57,23 @@ func errResp(err error) ogenapi.ErrorResponse {
 // the 400 ogen infers for a truncated read to the 413 the limit actually means.
 func newOgenErrorHandler(log *slog.Logger) ogenapi.ErrorHandler {
 	return func(ctx context.Context, w http.ResponseWriter, _ *http.Request, err error) {
-		status, msg := ogenerrors.ErrorCode(err), err.Error()
+		status := ogenerrors.ErrorCode(err)
+		msg := ogenErrorMessage(err, status)
 
 		// Consume the typed result (not the ok flag) so errcheck sees the error-typed return used.
 		// Plain assignment (not an if-init) keeps noinlineerr happy.
 		maxBytes, _ := errors.AsType[*http.MaxBytesError](err)
 		if maxBytes != nil {
 			status, msg = http.StatusRequestEntityTooLarge, maxBodyErrorMessage
+		}
+
+		// The reply carries only the sanitised message, so the original — byte offsets, generated
+		// type names, ogen's decode call chain — goes to the log instead of being lost. Debug for
+		// a caller's mistake, error for anything that is the server's.
+		if status < http.StatusInternalServerError {
+			log.DebugContext(ctx, "ogen rejected request", "status", status, "err", err)
+		} else {
+			log.ErrorContext(ctx, "ogen request failed", "status", status, "err", err)
 		}
 
 		w.Header().Set("Content-Type", mimeJSON)
@@ -54,6 +84,64 @@ func newOgenErrorHandler(log *slog.Logger) ogenapi.ErrorHandler {
 			log.ErrorContext(ctx, "write ogen error response", "status", status, "err", encErr)
 		}
 	}
+}
+
+// ogenErrorMessage renders the client-facing message for a failure ogen raised before the
+// request reached a handler method.
+//
+// ogen's own error strings chain its internals — "operation CreateNote: decode request: decode
+// application/json: decode CreateNoteRequest: callback: decode field \"content\": unexpected
+// byte 49 '1' at 12" — naming generated types and its decode call path while burying the one
+// part a caller can act on. Only the structured details ogen also exposes as typed errors are
+// forwarded: which field failed validation, and which Content-Type was refused. Both are already
+// published contract. Everything else collapses to a fixed message per status.
+func ogenErrorMessage(err error, status int) string {
+	contentType, _ := errors.AsType[*validate.InvalidContentTypeError](err)
+	if contentType != nil {
+		return unsupportedMediaTypeMessage + ": " + truncateForMessage(contentType.ContentType)
+	}
+
+	invalid, _ := errors.AsType[*validate.Error](err)
+	if invalid != nil && len(invalid.Fields) > 0 {
+		return decodeErrorMessage + ": " + fieldErrorsMessage(invalid.Fields)
+	}
+
+	switch status {
+	case http.StatusBadRequest:
+		return decodeErrorMessage
+	case http.StatusUnauthorized:
+		return msgUnauthorized
+	case http.StatusNotImplemented:
+		return notImplementedMessage
+	default:
+		return internalErrorMessage
+	}
+}
+
+// fieldErrorsMessage lists the failing fields as "<name> (<reason>)". Field names come from the
+// schema and the reasons from ogen's validators ("field required", "len 3 less than minimum 5"),
+// so every part of this is already something the spec tells the caller.
+func fieldErrorsMessage(fields []validate.FieldError) string {
+	parts := make([]string, 0, len(fields))
+
+	// Indexed rather than ranged by value: validate.FieldError is wide enough that gocritic's
+	// rangeValCopy flags copying it per iteration.
+	for i := range fields {
+		parts = append(parts, fields[i].Name+" ("+fields[i].Error.Error()+")")
+	}
+
+	return strings.Join(parts, ", ")
+}
+
+// truncateForMessage bounds a caller-controlled value quoted back in an error body. Cutting on
+// runes rather than bytes keeps the result valid UTF-8 for the JSON encoder.
+func truncateForMessage(s string) string {
+	runes := []rune(s)
+	if len(runes) <= maxEchoedContentType {
+		return s
+	}
+
+	return string(runes[:maxEchoedContentType]) + "…"
 }
 
 // mapCreateError, mapGetError, mapUpdateError, and mapDeleteError each switch on the status from
