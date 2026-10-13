@@ -27,10 +27,12 @@ func newPageHandler(c *common, indexTmpl, successTmpl, apidocsTmpl *template.Tem
 }
 
 // RegisterRoutes registers the editor landing page, post-create confirmation page, API docs
-// page, and static asset serving — the routes that need no note/auth/admin collaborator.
+// page, the llms.txt agent surface, and static asset serving — the routes that need no
+// note/auth/admin collaborator.
 func (h *PageHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api", h.APIDocsPage)
 	mux.HandleFunc("GET /api/openapi.yaml", APISpec)
+	mux.HandleFunc("GET /llms.txt", LLMsTxt)
 	mux.HandleFunc("GET /{$}", h.IndexPage)
 	mux.HandleFunc("GET /success", h.SuccessPage)
 	mux.Handle("GET /static/", withStaticCacheControl(StaticHandler))

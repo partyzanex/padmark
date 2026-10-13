@@ -66,6 +66,9 @@ func TestValidCustomSlug(t *testing.T) {
 		{"a/b/c/d.txt", true},
 		{strings.Repeat("a", 100), true}, // at length limit
 		{"a/b/c/d/e/f/g/h/i/j", true},    // at segment limit (10 segments)
+		{"llms", true},                   // "llms.txt" is reserved by exact segment, not by prefix
+		{"llms-notes", true},
+		{"llms/tips.md", true},
 		// rejected
 		{"", false},
 		{"bad slug!", false},              // space / punctuation
@@ -74,6 +77,8 @@ func TestValidCustomSlug(t *testing.T) {
 		{"notes/x", false},                // reserved first segment
 		{"links/x", false},                // reserved first segment (links)
 		{"r/x", false},                    // reserved first segment (short-link redirect prefix)
+		{"llms.txt", false},               // reserved first segment (served file, agent docs)
+		{"llms.txt/x", false},             // reserved first segment — exact match also covers subpaths
 		{"../etc", false},                 // segment starts with dot (traversal-ish)
 		{".hidden", false},                // dotfile
 		{"a/.hidden", false},              // dotfile in a later segment

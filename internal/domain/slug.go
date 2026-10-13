@@ -36,6 +36,9 @@ func ReservedSlugPrefixes() map[string]struct{} {
 		"admin": {}, "api": {}, "success": {}, "healthz": {}, "readyz": {},
 		"notes": {}, "edit": {}, "change-password": {}, "static": {},
 		"links": {}, "r": {},
+		// Served file, registered per exact segment ("llms.txt", not "llms") so agent docs
+		// stay reachable without blocking the "llms" segment for note slugs.
+		"llms.txt": {},
 	}
 }
 

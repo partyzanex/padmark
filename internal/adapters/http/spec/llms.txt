@@ -1,0 +1,55 @@
+# padmark
+
+Self-hosted markdown notes and short links. One URL, many consumers: a browser sees the same
+`/{id}` path as a rendered page, a machine client that sends `Accept: application/json` gets
+structured JSON. This document describes the machine surface; the full request/response
+contract is at [`/api/openapi.yaml`](/api/openapi.yaml).
+
+## Notes
+
+- `POST /notes` — create a note. Body: `content` (required), optional `title`, `content_type`
+  (`text/markdown` | `text/plain`), `slug` (custom slugs may be disabled on the instance),
+  `burn_after_reading`, `ttl`, `privacy` (`public` | `authenticated` | `owner`), `edit_code`.
+  Responds `201` with the note and `Location: /{id}`.
+- `GET /notes/{id}` — read a note as JSON (send `Accept: application/json`). Incrementing
+  `views` is a side effect of every read, and burn-after-reading notes are destroyed by the
+  first read. `404` for a wrong id, `410` for an expired note.
+- `PUT /notes/{id}` — replace content (same optional fields); pass the `edit_code` in the
+  body, or omit it when authenticated as the note's owner. `403` on a wrong edit code.
+- `DELETE /notes/{id}` — delete; the `edit_code` goes in the `X-Edit-Code` header or the
+  `edit_code` query parameter, unless authenticated as the owner.
+
+Every new note returns `edit_code` **exactly once, at creation**. Only an argon2id hash is
+stored — a lost edit code cannot be recovered; the only remedies are a saved code or a bearer
+token for the owning account.
+
+## Links
+
+- `POST /links` — create a short link (`target_url`, http/https only; optional `slug`,
+  `burn_after_click`, `ttl`, `privacy`, `edit_code`). Responds `201` with `Location` and
+  `redirect_to`.
+- `POST /links/bulk` — create up to 100 links; best-effort, `results[i]` corresponds to
+  `links[i]` (per-element `error` or success fields).
+- `GET /links/{id}` — link metadata; no `views` increment, no burn-after-click consumption.
+- `DELETE /links/{id}` — same `edit_code` rules as notes.
+- Browsers resolve `/{id}` to `307` and redirect at `/r/{id}` — that path is the redirect
+  endpoint and is deliberately not part of the JSON API.
+
+## Authentication
+
+Public reads depend on each note/link's `privacy` setting; anything else needs a credential.
+An API token is a long-lived key issued by an account holder through the web UI; present it
+as `Authorization: Bearer <key>`. The issued token may be a `pmk_…` envelope
+(`pmk_` + base64url of `{"url": "<base url>", "token": "<key>"}`) — decode it, use `url` as
+the API base and `token` in the Bearer header. Unknown or expired keys get `401`.
+
+## Errors
+
+All machine responses use `{"message": string}` (message required), e.g. `404
+{"message": "not found"}`. `429` means rate limiting or a repeated-failure lockout is active;
+`503` means the instance runs with `--disable-api` and the whole REST surface is off.
+
+## Health
+
+- `GET /healthz` — liveness, `200`.
+- `GET /readyz` — readiness, `200` or `503`.

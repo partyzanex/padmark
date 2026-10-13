@@ -161,11 +161,15 @@ func (am *authMiddleware) resolveAPITokenUser(r *http.Request) (*http.Request, b
 	return r.WithContext(context.WithValue(r.Context(), keyUser, usr)), true
 }
 
-// apiDocsPath and apiSpecPath are always public (see isPublicPath) and are also part of the
-// REST/JSON API surface that --disable-api turns off (see isDisabledAPIPath).
+// apiDocsPath, apiSpecPath and llmsTxtPath are always public (see isPublicPath) and are also
+// part of the REST/JSON API surface that --disable-api turns off (see isDisabledAPIPath).
 const (
 	apiDocsPath = "/api"
 	apiSpecPath = "/api/openapi.yaml"
+
+	// llmsTxtPath is always public (see isPublicPath) and is also part of the
+	// REST/JSON API surface that --disable-api turns off (see isDisabledAPIPath).
+	llmsTxtPath = "/llms.txt"
 
 	// linkCreatePath and notesCreatePath are the collection roots (POST create); isPublicRoute
 	// admits them alongside the resource paths below. editPathPrefix covers GET /edit/{id},
@@ -184,7 +188,7 @@ func isPublicPath(path string) bool {
 		path == "/logout" ||
 		path == "/totp-login" ||
 		strings.HasPrefix(path, "/static/") ||
-		path == apiDocsPath || path == apiSpecPath ||
+		path == apiDocsPath || path == apiSpecPath || path == llmsTxtPath ||
 		path == "/healthz" || path == "/readyz"
 }
 

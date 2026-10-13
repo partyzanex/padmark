@@ -178,6 +178,7 @@ func TestIsPublicRoute(t *testing.T) {
 		{net_http.MethodGet, "/login", false},
 		{net_http.MethodGet, "/api", false},
 		{net_http.MethodGet, "/healthz", false},
+		{net_http.MethodGet, "/llms.txt", false},
 	}
 
 	for _, tc := range tests {

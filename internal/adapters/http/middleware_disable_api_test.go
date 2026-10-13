@@ -78,6 +78,7 @@ func (s *DisableAPISuite) TestAPIPaths_Return503WithFixedMessage() {
 		{"link delete single-segment", http.MethodDelete, "/links/" + testID, ""},
 		{"api docs", http.MethodGet, "/api", ""},
 		{"openapi spec", http.MethodGet, "/api/openapi.yaml", ""},
+		{"llms.txt", http.MethodGet, "/llms.txt", ""},
 	}
 
 	for _, testCase := range cases {
