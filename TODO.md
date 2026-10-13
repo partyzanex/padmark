@@ -1,7 +1,7 @@
 # TODO.md — полный перенос находок из REVIEW.md и PRODUCT.md
 
-> Каждая находка из обоих документов — отдельный пункт ниже, в том же порядке, что и в
-> источнике. Крупные находки разбиты на под-пункты (что именно сделать). Статусы уточнены
+> Находки из обоих документов — отдельные пункты ниже с исходной нумерацией;
+> снятые с плана пункты удалены. Крупные находки разбиты на под-пункты. Статусы уточнены
 > по текущему рабочему дереву, включая незакоммиченные изменения, 2026-10-13.
 > `[x]` — выполненное действие или завершённая проверка; `[ ]` — оставшаяся работа.
 > Описания проблем и постоянные ограничения не считаются невыполненными задачами.
@@ -19,8 +19,9 @@
 | Часть 2 | Все четыре проверки выполнены | `Accept` q-values, единые build-теги и политика `IdleTimeout` |
 | Часть 3, №1 | CLI, Go-клиент, `/llms.txt` и MCP-сервер `padmark-mcp` реализованы | Ревью формулировок README («built for agents» теперь обосновано) |
 | Часть 3, №6 | Потеря `edit_code` описана; owner bypass реализован | Восстановление анонимного кода не предусмотрено осознанно |
-| Часть 3, №2 | Подготовлен проект envelope encryption и миграции | Реализация, тесты, внедрение и обновление README |
-| Часть 3, №3–5, №7–8; Часть 4 | Новых реализаций не найдено | List/search, demo, headless auth, API-disabled code/503, обновление ссылок; шифрование — см. №2 |
+| Часть 3, №2 | Новый формат `pmc2`, keyring, подключение notes/links и тесты реализованы | Массовая миграция legacy, реестр ключей и команды ротации |
+| Часть 3, №5 | Headless auth реализован: `padmark-cli setup`/`create-token`/`create-invite`, JSON-ветка `POST /setup`, `POST /api/tokens` (self-service, cap 429) и `POST /api/invites` (admin), ogen+llms.txt+README | — |
+| Часть 3, №4, №7–8; Часть 4 | Новых реализаций не найдено | Demo, API-disabled code/503, обновление ссылок; шифрование — см. №2 |
 | Части 5–6 | Существующие свойства проверены по коду | Соблюдать ограничения при дальнейших изменениях |
 
 Проверка Docker в этой сессии: `docker build .` успешен; в `/src` стадии `builder`
@@ -495,8 +496,21 @@
       HTTP→HTTPS redirect и metrics. У всех `IdleTimeout` явно не задан (0), но эффективное
       поведение разное: Go использует `ReadTimeout` как fallback. У основного он настраивается,
       у redirect/metrics тоже равен 0; `ReadHeaderTimeout` idle-timeout не заменяет.
-- [ ] Определить и явно задать политику `IdleTimeout` для всех трёх серверов; добавить проверку
-      настроек. Сам факт отсутствия поля проверен, политика ещё не исправлена.
+- [x] Определена и явно задана политика `IdleTimeout` для всех трёх серверов; добавлена
+      проверка настроек. Сам факт отсутствия поля проверен, политика исправлена. Сделано:
+      константа `idleTimeout = 60 * time.Second` рядом с `readHeaderTimeout` (вариант 2
+      без нового флага — 22 флага уже предел) с комментарием «почему явно»; три литерала
+      вынесены в конструкторы `newMainServer` / `newRedirectServer` / `newMetricsServer`,
+      все задают `ReadHeaderTimeout + IdleTimeout` (инлайн-литерал с выпавшим полем не
+      поймает ни компилятор, ни линтер, а конструкторы — то, что закрепляется тестом).
+      Read/Write/MaxHeaderBytes только на main (флаги); на auxiliary не заданы намеренно —
+      один редирект/метрики без тела. Тест `TestServerTimeoutPolicy`
+      (`internal/infra/server/timeouts_test.go`) фиксирует поле на всех трёх. Прогон:
+      `go build ./...`, `go vet ./...`, `gofmt -l`, `golangci-lint run ./...` (0 issues),
+      `go test ./internal/infra/server/` — чисто. Оговорка: без `-race` — cgo-линковка
+      сломана машинным toolchain'ом (SDK `MacOSX27.0.sdk`: arch `arm64e.x1` не знает tapi
+      установленного clang), проверено `CGO_ENABLED=0` — проект pure-Go (modernc sqlite +
+      pgdriver); `-race` на darwin недоступен до обновления LLVM/CommandLineTools.
 
 ---
 
@@ -524,21 +538,56 @@
       (`internal/adapters/mcp/`, mockgen + in-memory MCP-транспорт SDK) и интеграционный
       (`tests/mcp/`, реальный SQLite-стек + боевой роутер + настоящий MCP-клиент).
       README: раздел «MCP server» c примером `mcpServers`-конфига; «Three ways» → «Four ways»
-- [ ] Действие: привести формулировки README в соответствие с реальным состоянием — после
-      появления MCP/llms.txt заявление «built for agents» фактически обосновано; проверка
-      формулировок остаётся на ревью README
+- [x] Действие: формулировки README сверены с реальным состоянием — расхождений нет, правки
+      не потребовались. Проверено по коду: (а) заявление «built for agents» обосновано — MCP
+      (`cmd/padmark-mcp`, 9 tools), `/llms.txt`, CLI, ogen-клиент `pkg/client`; (б) claim
+      «one URL, many consumers»: `Accept: application/json` → JSON, браузер → HTML (совпадает
+      с `negotiate`), CLI читает stdin без `--content`/`--file` (`cli/app.go:131-154`); (в)
+      маршруты `/api` (Redoc), `/api/openapi.yaml`, `/llms.txt` зарегистрированы
+      (`web_index.go`); (г) раздел «MCP server»: путь бинаря, список 9 tools — точное
+      совпадение с `internal/adapters/mcp/`, флаги `--token`/`--base-url`/`--timeout` и
+      env `PADMARK_TOKEN`/`PADMARK_URL`/`PADMARK_TIMEOUT` с дефолтом
+      `http://localhost:8080` — как в `mcp/flags.go`, конверт `pmk_…` несёт server URL
+      (`DecodeAPITokenEnvelope`), `reveal_edit_code` — opt-in печать, по умолчанию код не
+      попадает в результат (не в транскрипт модели); (д) «get_note is not read-only» /
+      «get_link is read-only, burn на редирект-пути» — совпадает с серверной семантикой
+      (Peek против Redirect); (е) «обе доки отдаются без токена и глохнут под
+      `--disable-api`» — `isDisabledAPIPath` покрывает `apiDocsPath`/`apiSpecPath`/
+      `llmsTxtPath`, в auth-whitelist оба пути есть (`middleware_auth.go:168,172`)
 
-### 2. Развязать custom slug и ключ шифрования — PARTIAL (проект готов, реализация TODO)
+### 2. Развязать custom slug и ключ шифрования — PARTIAL (новый формат DONE, массовая миграция TODO)
 
-- Текущий код ещё использует `[]byte(slug)` в HKDF-SHA256 (`crypto.go`, `deriveKey`).
-  Человекочитаемый slug снижает стойкость шифрования при утечке БД.
+- Новые записи notes/links и обновление заметок используют `pmc2$p$…` (`content.go`):
+  случайный 256-битный DEK, AES-256-GCM и обёртка DEK под KEK из keyring. HashSlug и тип
+  ресурса используются только как AAD. HKDF(slug) остался в отдельном legacy-reader
+  для старых строк; механизм шифрования TOTP сохранён.
 - [x] Спроектирована схема с отдельным случайным 256-битным ключом данных (DEK) и
-      мастер-ключом инсталляции, шифрующим DEK (KEK). Проект ниже, реализация ещё не добавлена.
+      мастер-ключом инсталляции, шифрующим DEK (KEK). Основной формат реализован;
+      проект полного перехода и ротации приведён ниже.
 - [x] Продумана миграция с учётом того, что исходные slug отсутствуют в БД.
-- [ ] Реализовать новый формат: slug используется для поиска записи, а не получения DEK/KEK.
+- [x] Реализован новый формат: `ContentCipher.Encrypt/Decrypt` принимают DB-ID, не slug.
+      Ключи от ID не производятся. Адаптер `ContentEncryptor` получает legacy-slug отдельно
+      и использует его только для unversioned ciphertext; для любого versioned-конверта
+      ошибка версии/ключа/tag не запускает legacy-fallback.
+- [x] Сервер подключает новый шифратор к обоим менеджерам; обязательный
+      `--content-keyring-file` / `PADMARK_CONTENT_KEYRING_FILE` проверяется до открытия БД.
+      Файл содержит active kid и 32-байтные ключи в base64; случайного fallback нет.
 - [ ] Реализовать управление ключами, миграцию и ротацию; проверить SQLite и PostgreSQL.
-- [ ] После внедрения обновить README, `.env.example` и Docker-конфигурацию; отдельно
-      пересмотреть default `--custom-slugs`. До этого текущие предупреждения остаются верными.
+- [x] Обновлены README, `.env.example`, Docker Compose и исключения keyring из git/build
+      context. `--custom-slugs=false` сохранён: публичные предсказуемые URL всё ещё угадываются.
+
+**Граница текущей поставки:** новые writes независимы от slug; старые строки читаются,
+но не переписываются на `Peek`. Обычный Update заметки переводит её в новый формат.
+Непосещённые старые заметки и все старые ссылки сохраняют старую защиту. Переходный
+`kind=l`, массовая миграция, metadata/key-check и rewrap ещё не реализованы; ниже описан
+их целевой проект, а не поведение текущего `serve`. Пока keyring проверяется на формат,
+наличие active key и длины ключей, а совпадение с существующим ciphertext — при чтении.
+
+Проверка реализации нового формата: `CGO_ENABLED=0 go test -tags=integration -count=1 ./...`
+прошёл; `go test -race -count=1` для crypto/notes/links прошёл; fuzz декодера (5 секунд)
+прошёл; `CGO_ENABLED=0 bin/golangci-lint run ./...` — 0 замечаний. Docker build прошёл.
+В собранном образе проверены создание заметки/ссылки с custom slug, перезапуск с тем же
+keyring, чтение и обновление; в SQLite обе строки содержат `pmc2$p$k1$…`.
 
 #### Целевая схема
 
@@ -670,18 +719,21 @@ slug для криптографической операции. Legacy-деко
 
 #### Реализация и критерии готовности
 
-- [ ] `internal/infra/crypto`: ContentCipher, строгий codec конверта, keyring loader,
-      rewrap и изолированный legacy-reader. Round-trip, разные DEK/nonce для одинакового
+- [x] `internal/infra/crypto`: ContentCipher, строгий codec `kind=p`, keyring loader
+      и изолированный legacy-reader. Round-trip, разные DEK/nonce для одинакового
       plaintext, неверный KEK, подмена kind/kid/ID/типа ресурса, перемешивание конвертов,
       обрезанные данные, RNG failure и отсутствие fallback проверяются тестами.
-- [ ] `internal/usecases/notes` / `links`: новый порт шифрования, запись `kind=p`, чтение
-      обоих видов; новый формат расшифровывается по DB-ID без исходного slug. Проверить
-      Create/Update/Peek/View/Redirect, кеш и burn/TTL. TOTP-тесты остаются зелёными.
+- [x] `internal/usecases/notes` / `links`: новый порт шифрования, запись `kind=p`, чтение
+      нового формата и raw legacy; новый формат расшифровывается по DB-ID без исходного slug.
+      Общая интеграционная suite переведена на реальные envelope-шифраторы; проверены
+      Create/Update/Peek/View/Redirect и burn/TTL на SQLite/Postgres. TOTP-тесты проходят.
+- [ ] Реализовать `kind=l` и rewrap для массовой миграции и смены KEK без изменения payload.
 - [ ] SQLite/Postgres: метаданные миграции/ключей, пакетный обход и CAS; проверка повторного
       запуска после сбоя, конкурентного update/delete, отсутствия потери счётчиков и
       восстановления удалённых записей. Полная миграция не раскрывает контент в выводе.
 - [ ] Server/CLI: генерация keyring, status/dry-run/migrate/rewrap, проверка keyring до старта,
       остановка при отсутствии/подмене ключей или незавершённой миграции.
+      Проверка наличия и структуры файла уже реализована; проверка ключей по БД и эти команды — нет.
 - [ ] Проверить restore с соответствующим keyring и ротацию на обеих БД, включая `kind=l`;
       отсутствие мастер-ключей в git, Docker build context и слоях образа.
 - [ ] Документация после реализации: новые требования запуска/backup/rotation, пределы
@@ -690,22 +742,7 @@ slug для криптографической операции. Legacy-деко
 Предлагаемый default `--custom-slugs` после первой поставки — **по-прежнему false**:
 новая схема убирает криптографическую причину запрета, но не угадываемость публичных URL.
 Разрешать через явный флаг; изменение default вынести в отдельное продуктовое решение
-после внедрения. Сейчас README не должен обещать ещё не реализованное шифрование.
-
-### 3. Нет list/search — TODO
-
-- После создания заметки для её повторного открытия нужно сохранить slug/URL.
-- `openapi.yaml` не объявляет `GET /notes`; `notes.Manager` не имеет `List`/`Search`;
-  в миграциях SQLite/Postgres нет полнотекстового индекса.
-- Продуктовая гипотеза: отсутствие каталога затрудняет возвращение к старым заметкам.
-  Численный порог и влияние на retention по репозиторию не подтверждаются.
-- [ ] Действие: добавить метод `List`/`Search` в `notes.Manager` (usecases-слой, интерфейс
-      определяется рядом с потребителем)
-- [ ] Действие: FTS5-индекс по title+content в SQLite-хранилище (bun уже в стеке), аналог для
-      Postgres
-- [ ] Действие: фильтры по privacy, created_at
-- [ ] Действие: эндпоинт `GET /notes` в `openapi.yaml`, доступен только владельцу
-      (сессия/API-токен)
+после внедрения. README описывает уже работающий новый формат и отдельно ограничения legacy.
 
 ### 4. Hosted demo — TODO (в репозитории не подтверждено)
 
@@ -718,17 +755,57 @@ slug для криптографической операции. Legacy-деко
 - Это не блокирует остальную разработку — по продуктовому приоритету стоит ниже
       технического ядра (P0–P2 сначала)
 
-### 5. Headless auth setup — TODO
+### 5. Headless auth setup — DONE
 
-- Есть HTML/form-маршруты `GET/POST /setup`, `/admin`, `POST /admin/api-keys`,
-  `POST /admin/invite` с CSRF/session-flow (`web_auth.go`, `web_admin.go`).
-  Браузерный поток теоретически можно скриптовать, поэтому «невозможно завернуть в CI»
-  слишком категорично; готового headless-контракта и CLI-команды нет.
-- Нет `padmark-cli setup`, `POST /api/tokens` и `POST /api/invites` — проверены CLI и OpenAPI.
-- [ ] Действие: `padmark-cli setup` — создание первого администратора с выводом TOTP URI в
-      stdout
-- [ ] Действие: `POST /api/tokens` — выдача API-токенов без похода в `/admin`
-- [ ] Действие: `POST /api/invites` — выдача инвайтов без похода в `/admin`
+- Было: HTML/form-маршруты `GET/POST /setup`, `/admin`, `POST /admin/api-keys`,
+  `POST /admin/invite` с CSRF/session-flow (`web_auth.go`, `web_admin.go`);
+  готового headless-контракта и CLI-команд не было. «Невозможно завести в CI» было
+  категорично (браузерный поток скриптуем), но headless-контракт отсутствовал — это закрыто.
+- [x] Решения пользователя: `POST /api/tokens` — self-service для любого аутентифицированного
+      (токен всегда на себя); bootstrap — JSON-ветка на существующем `POST /setup` (без нового
+      маршрута); `POST /api/invites` — admin-only (зеркало `POST /admin/invite`)
+- [x] Действие: `padmark-cli setup` — реализовано (`cli/setup.go`): JSON-POST на `/setup`
+      с явным `Accept: application/json`, печатает otpauth URI одной строкой в stdout,
+      предупреждения — в stderr. Пароль: `--password` или первая строка пайпнутого stdin;
+      TTY без флага — отказ (`errSetupNoPassword`), visible-echo промпт сознательно не
+      введён (обход позволял бы x/term-зависимость — единственная, что потребовалась бы).
+      `--invite` зачисляет нового не-админа по инвайту
+- [x] Механика JSON-ветки `POST /setup` (`web_setup_json.go`, `setupGuard` в `web_auth.go`):
+      ветка выбирается по `negotiate` (JSON ⟺ не-HTML/не-raw — браузеры всегда на
+      CSRF-guarded HTML-пути, `?raw=1` туда же); JSON-клиент не CSRF-guarded (нет cookie-
+      сессии, инвайт — bearer-эквивалент), хардненинг — отказ на `Sec-Fetch-Site` не в
+      `same-origin|none` (закрывает cross-site fetch с форсированным Accept). Статусы:
+      201, 400, 403 (setup closed), 409 (username), 410 (инвайт потрачен/просрочен),
+      422 (weak password). Ответ: `{"otp_auth_uri", "username", "is_admin"}`
+- [x] Действие: `POST /api/tokens` — реализовано: ogen-операция `createAPIToken`
+      (`openapi.yaml`, тег accounts; регенерированы ogenapi/pkg/client), handler в
+      `ogen_handler.go` (+ `ogen_accounts.go`: WithAuthManager, конверт pmk_ от
+      `requestOrigin`-middleware), self-scoped (`CreateAPIToken(ctx, usr.ID)`), cap 20 → 429
+      (`domain.ErrAPITokenLimit` в `domainErrStatus`), 503 при не подключённом store
+      (`ErrFeatureNotSupported`)
+- [x] Действие: `POST /api/invites` — реализовано: admin-gate в handler (зеркало
+      `requireAdmin`) + re-check в usecase, ответ `{"invite_url"}` с учётом
+      `--public-scheme` (`withRequestOrigin`; тест ForcedScheme). Обе операции добавлены в
+      `registerOgenRoutes`, в `isDisabledAPIPath` (`--disable-api` глушит их до auth) и в
+      `spec/llms.txt` (раздел Account endpoints + JSON-/setup)
+- [x] Use-cases: `AcceptFirstAdmin`/`AcceptInvite` теперь возвращают `*auth.Enrollment
+      {TOTPURI, QRCode}` (URI строится пока raw-секрет в scope — после Seala достать нельзя);
+      `crypto.OTPAuthURI` + `TOTP.TOTPURI` (валидация парсингом otp.NewKeyFromURL).
+      Мок-интерфейсы перегенерированы
+- [x] README: раздел «Headless provisioning (accounts)» (CLI-команды, once-only предупреждения,
+      cap, JSON-/setup, 503)
+- [x] Тесты: юнит `internal/adapters/http/accounts_test.go` (JSON-branch матрица negotiate/
+      Sec-Fetch-Site/raw=1; 429/410/409/422/403-401-503; envelope от origin; ForcedScheme),
+      `internal/adapters/cli/setup_test.go` (пайпнутый пароль, TTY-отказ), интеграционный
+      `tests/auth/accounts_flow_test.go` → `TestAccountsFlow`: CLI setup → otpauth URI →
+      create-token → конверт сразу применим → инвайт через API → CLI setup по инвайту →
+      replay 410 → не-админ 403 → cap 429 (20 токенов), закрытый bootstrap 403
+- [x] Прогон: `go build ./...`, `go vet ./...` (+ `-tags=integration`), `gofmt`,
+      `golangci-lint run ./...` — чисто по всем файлам этой задачи; `go test -count=1 ./...`
+      и `-tags=integration ./...` — 19 пакетов ok, без FAIL (без `-race` — cgo-линкер на
+      машине сломан, см. Часть 2 п.4). Полный lint не содержит новых замечаний; 4 preexisting
+      goconst в файлах параллельной правки (`mcp/app.go`, `mcp/server.go`,
+      `crypto/content.go`, `infra/server/app.go`) — не из этой задачи
 
 ### 6. `edit_code` показывается один раз и невосстановим — DONE (документация + owner bypass)
 
@@ -769,15 +846,13 @@ slug для криптографической операции. Legacy-деко
 
 ---
 
-## Часть 4. Из PRODUCT.md — «Куда это вести» (5 приоритетных направлений, по ROI)
+## Часть 4. Из PRODUCT.md — «Куда это вести» (4 приоритетных направления, по ROI)
 
-- [ ] 1. Развязать slug и content-encryption key (проект готов в Части 3, №2;
-      реализация и полная конвертация legacy ещё не выполнены)
-- [ ] 2. `GET /notes` с FTS5 для владельца — поиск по title+content, фильтр по
-      privacy/created_at (дублирует и детализирует пункт «3» из Части 3)
-- [ ] 3. Hosted sandbox — `padmark.dev` с rate-limit и 1h TTL (дублирует пункт «4» из Части 3)
-- [x] 4. Реальный agent surface — `padmark-mcp` и `/llms.txt` сделаны (см. Часть 3, №1)
-- [ ] 5. Headless auth — `padmark-cli setup`, `POST /api/tokens`, `POST /api/invites`
+- [ ] 1. Развязать slug и content-encryption key (новый формат реализован в Части 3, №2;
+      полная конвертация legacy ещё не выполнена)
+- [ ] 2. Hosted sandbox — `padmark.dev` с rate-limit и 1h TTL (дублирует пункт «4» из Части 3)
+- [x] 3. Реальный agent surface — `padmark-mcp` и `/llms.txt` сделаны (см. Часть 3, №1)
+- [ ] 4. Headless auth — `padmark-cli setup`, `POST /api/tokens`, `POST /api/invites`
       (дублирует пункт «5» из Части 3)
 
 ---
@@ -803,7 +878,6 @@ slug для криптографической операции. Legacy-деко
       тема оформления, не этот код. Сохранить одноразовый показ секретов и UI-warning.
 - [x] `buildNamedRoutes()` = `domain.ReservedSlugPrefixes()` как single source of truth для
       first-segment route names — обязательно обновлять при любом новом первом-сегменте роуте
-      (`notes` для будущего `GET /notes` уже зарезервирован, новый сегмент тут не нужен)
 - [x] Owner-scoping строгий (никаких «admin может всё») — сохранить при доработке
       headless-auth (Часть 3, п.5) и `PUT /links/{id}` (Часть 3, п.8)
 - [x] `goldmark-highlighting` + `chroma` подключены в `internal/infra/render/markdown.go`,
