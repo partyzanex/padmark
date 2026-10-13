@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -134,8 +135,10 @@ func registerOgenRoutes(mux *http.ServeMux, ogenSrv http.Handler, lockout gcache
 	mux.Handle("DELETE /links/{id}", withFailLockout(lockout, log, ogenSrv))
 	mux.Handle("GET /healthz", ogenSrv)
 	mux.Handle("GET /readyz", ogenSrv)
-	mux.Handle("POST /api/tokens", ogenSrv)
-	mux.Handle("POST /api/invites", ogenSrv)
+	// The account endpoints authenticate the session cookie (and embed one-time secrets in
+	// their responses), so they get the origin check the machine-only routes don't need.
+	mux.Handle("POST /api/tokens", requireSameOrigin(log, ogenSrv))
+	mux.Handle("POST /api/invites", requireSameOrigin(log, ogenSrv))
 }
 
 // registerAllRoutes registers the ogen-served REST API routes plus every concern handler's own
@@ -254,6 +257,44 @@ func wrapMiddleware(
 // literal paths.
 func buildNamedRoutes() map[string]struct{} {
 	return domain.ReservedSlugPrefixes()
+}
+
+// requireSameOrigin rejects a request that explicitly announces a foreign origin. Machine
+// clients (CLI, agents, curl) send no Origin header; a browser's cross-site POST always sends
+// one (CORS semantics), so comparing it with the request's own origin closes cookie-CSRF for
+// the session-authenticated account endpoints — SameSite alone admits same-site cross-origin
+// (sibling-subdomain) calls, and these routes authenticate the session cookie. A missing Origin
+// is allowed: machine callers never carry a session the attacker could ride.
+func requireSameOrigin(log *slog.Logger, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if origin := r.Header.Get("Origin"); origin != "" && !sameOrigin(r, origin) {
+			writeJSONErrorStatus(w, r, log, http.StatusForbidden, "cross-origin request rejected")
+
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+// sameOrigin reports whether origin matches the origin the request itself arrived with: hosts
+// must be equal (case-insensitively — Host is the strong gate, a sibling subdomain can never
+// match), and when the requestOrigin middleware has stored a scheme, schemes must match too.
+func sameOrigin(r *http.Request, origin string) bool {
+	parsed, err := url.Parse(origin)
+	if err != nil || parsed.Host == "" || parsed.Scheme == "" {
+		return false
+	}
+
+	if !strings.EqualFold(parsed.Host, r.Host) {
+		return false
+	}
+
+	if ctxOrigin := originFromCtx(r.Context()); ctxOrigin.Host != "" {
+		return strings.EqualFold(parsed.Scheme, ctxOrigin.Scheme)
+	}
+
+	return true
 }
 
 // requestOrigin carries the scheme+host a request arrived with. Ogen handlers receive only a

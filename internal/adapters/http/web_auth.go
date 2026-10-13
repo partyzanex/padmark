@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	_ "embed"
@@ -476,9 +477,21 @@ func (h *AuthHandler) setupGuard(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
+		// The body must be application/json (parameters like charset allowed). Safelisted types
+		// such as text/plain make a cross-site fetch preflight-free; a non-safelisted content
+		// type forces the browser into an OPTIONS preflight it cannot complete without a CORS
+		// approval — this holds even where Fetch Metadata is unavailable.
+		if !isJSONContentType(r.Header.Get("Content-Type")) {
+			writeJSONErrorStatus(w, r, h.log, http.StatusUnsupportedMediaType,
+				"setup requires Content-Type: application/json")
+
+			return
+		}
+
 		// A page can still force Accept: application/json via a cross-site fetch. fetch-metadata
 		// flags that: browsers send Sec-Fetch-Site on every request, plain HTTP clients never do.
-		// "none" (direct address-bar) and "same-origin" are the acceptable values.
+		// "none" (direct address-bar) and "same-origin" are the acceptable values — an absent
+		// header is covered by the two checks below.
 		switch site := r.Header.Get("Sec-Fetch-Site"); site {
 		case "", "same-origin", "none":
 		default:
@@ -487,8 +500,25 @@ func (h *AuthHandler) setupGuard(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
+		// When a browser announced its Origin, it must be this request's own origin: a
+		// cross-site POST always carries Origin, so the host comparison settles it even where
+		// Sec-Fetch-Site is missing. Machine clients send neither header.
+		if origin := r.Header.Get("Origin"); origin != "" && !sameOrigin(r, origin) {
+			writeJSONErrorStatus(w, r, h.log, http.StatusForbidden, "setup requires a same-origin request")
+
+			return
+		}
+
 		next(w, r)
 	}
+}
+
+// isJSONContentType reports whether a Content-Type header value names application/json
+// (parameters such as charset are allowed to follow).
+func isJSONContentType(header string) bool {
+	mime, _, _ := strings.Cut(header, ";")
+
+	return strings.EqualFold(strings.TrimSpace(mime), mimeJSON)
 }
 
 // hasValidSession reports whether the request carries a valid TOTP session cookie.

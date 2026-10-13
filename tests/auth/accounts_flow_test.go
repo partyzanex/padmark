@@ -72,6 +72,28 @@ func bearerPost(t *testing.T, baseURL, path, bearer string) *http.Response {
 	return resp
 }
 
+// bearerPostOrigin is bearerPost plus an explicit Origin header — for the origin-gate checks;
+// an empty origin omits the header the way real machine clients do.
+func bearerPostOrigin(t *testing.T, baseURL, path, bearer, origin string) *http.Response {
+	t.Helper()
+
+	req, err := http.NewRequest(http.MethodPost, baseURL+path, nil)
+	require.NoError(t, err)
+
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+bearer)
+
+	if origin != "" {
+		req.Header.Set("Origin", origin)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+
+	return resp
+}
+
 // setupPost posts the JSON setup body (the headless bootstrap surface).
 func setupPost(t *testing.T, baseURL string, body string) *http.Response {
 	t.Helper()
@@ -258,6 +280,36 @@ func TestAccountsFlow(t *testing.T) {
 	resp = bearerPost(t, srv.URL, "/api/tokens", memberKey)
 	require.Equal(t, http.StatusCreated, resp.StatusCode)
 	_ = resp.Body.Close()
+
+	// ── the origin gate: cross-site mints are refused, same-origin passes (P1/P2 fixes) ──
+	// A page on a sibling subdomain rides the session cookie (SameSite alone admits it);
+	// the Origin header it must declare cannot match, so the mint is refused before it runs.
+	resp = bearerPostOrigin(t, srv.URL, "/api/tokens", memberKey, "https://evil.sibling.example")
+	require.Equal(t, http.StatusForbidden, resp.StatusCode)
+	_ = resp.Body.Close()
+
+	resp = bearerPostOrigin(t, srv.URL, "/api/invites", memberKey, "https://evil.sibling.example")
+	require.Equal(t, http.StatusForbidden, resp.StatusCode)
+	_ = resp.Body.Close()
+
+	// The same-origin browser call keeps working (the browser sends its own origin).
+	resp = bearerPostOrigin(t, srv.URL, "/api/tokens", memberKey, srv.URL)
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
+	_ = resp.Body.Close()
+
+	// JSON setup: a CORS-safelisted text/plain Content-Type (a preflight-free cross-site fetch,
+	// no Fetch Metadata required) is refused — the headless branch exists only for JSON bodies.
+	plainReq, plainNewErr := http.NewRequest(http.MethodPost, srv.URL+"/setup",
+		strings.NewReader(`{"username":"admin3","password":"`+apiFlowPassword+`"}`))
+	require.NoError(t, plainNewErr)
+	plainReq.Header.Set("Accept", "application/json")
+	plainReq.Header.Set("Content-Type", "text/plain")
+
+	plainResp, plainErr := http.DefaultClient.Do(plainReq)
+	require.NoError(t, plainErr)
+	require.Equal(t, http.StatusUnsupportedMediaType, plainResp.StatusCode,
+		"a text/plain JSON smuggle must not reach the setup usecase")
+	_ = plainResp.Body.Close()
 
 	// ── the per-user cap: 20 live tokens max, the 21st answers 429 ──
 	// admin holds 3 issued above (manager, create-token, route); fill to 20, then 429.

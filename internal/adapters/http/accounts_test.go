@@ -316,3 +316,126 @@ func (s *AuthHandlerSuite) TestAccountEndpoints_FeatureNotEnabled_503() {
 	s.Require().Equal(http.StatusServiceUnavailable, rec.Code)
 	s.Contains(rec.Body.String(), "feature is not enabled")
 }
+
+// ── origin/CSRF hardening (P1: JSON setup, P2: account endpoints) ──
+
+// TestSetupJSON_WrongContentType_Rejected415 pins the text/plain smuggle fix: a JSON body under
+// a CORS-safelisted Content-Type made a cross-site fetch preflight-free; requiring the
+// non-safelisted application/json forces every cross-origin browser fetch into an OPTIONS
+// preflight it cannot complete — independent of Fetch Metadata support.
+func (s *AuthHandlerSuite) TestSetupJSON_WrongContentType_Rejected415() {
+	req := httptest.NewRequest(http.MethodPost, "/setup",
+		bytes.NewBufferString(`{"username":"admin","password":"`+testPw+`"}`))
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "text/plain") // safelisted ⇒ no browser preflight
+
+	rec := httptest.NewRecorder()
+
+	s.router.ServeHTTP(rec, req)
+
+	// No manager expectations — the gate must answer before any business logic.
+	s.Equal(http.StatusUnsupportedMediaType, rec.Code)
+	s.Contains(rec.Body.String(), "application/json")
+}
+
+// TestSetupJSON_CrossOriginHeader_Rejected403 reproduces the reported P1 vector without
+// relying on Fetch Metadata: a preflight-free-looking request whose Origin announces a foreign
+// site must be rejected even though Sec-Fetch-Site is absent.
+func (s *AuthHandlerSuite) TestSetupJSON_CrossOriginHeader_Rejected403() {
+	req := httptest.NewRequest(http.MethodPost, "/setup",
+		bytes.NewBufferString(`{"username":"admin","password":"`+testPw+`"}`))
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", "https://evil.example") // no Sec-Fetch-Site at all
+
+	rec := httptest.NewRecorder()
+
+	s.router.ServeHTTP(rec, req)
+
+	s.Equal(http.StatusForbidden, rec.Code)
+	s.Contains(rec.Body.String(), "same-origin")
+}
+
+// TestSetupJSON_SameOriginHeader_OK — a browser fetch on the same host carries its own origin;
+// that must keep working.
+func (s *AuthHandlerSuite) TestSetupJSON_SameOriginHeader_OK() {
+	s.auth.EXPECT().IsEmpty(gomock.Any()).Return(true, nil)
+	s.auth.EXPECT().AcceptFirstAdmin(gomock.Any(), "admin", testPw).
+		Return(s.enrollment(&auth.Enrollment{}), nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/setup",
+		bytes.NewBufferString(`{"username":"admin","password":"`+testPw+`"}`))
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", "http://example.com") // httptest.NewRequest default host
+
+	rec := httptest.NewRecorder()
+
+	s.router.ServeHTTP(rec, req)
+
+	s.Require().Equal(http.StatusCreated, rec.Code)
+}
+
+// TestCreateAPIToken_CrossOriginHeader_Rejected is the P2 regression: a same-site
+// sibling-subdomain page posts to /api/tokens riding the user's session cookie; the request
+// always declares Origin, so a host mismatch answers 403 before ResolveAPIToken runs.
+func (s *AuthHandlerSuite) TestCreateAPIToken_CrossOriginHeader_Rejected() {
+	// The auth middleware resolves the Bearer credential before the handler; only the mint
+	// itself must be blocked (the expectation for CreateAPIToken stays unset on purpose).
+	usr := &domain.User{ID: testUserID1, Username: "alice"}
+	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "good-api-key").Return(usr, nil)
+
+	req := s.postOgenReq("/api/tokens", "good-api-key")
+	req.Header.Set("Origin", "https://evil.sibling.example")
+
+	rec := httptest.NewRecorder()
+
+	s.router.ServeHTTP(rec, req)
+
+	s.Equal(http.StatusForbidden, rec.Code)
+	s.Equal("application/json", rec.Header().Get("Content-Type"))
+	s.Contains(rec.Body.String(), "cross-origin")
+}
+
+// TestCreateAPIToken_SameOriginHeader_OK — the browser-side same-origin call keeps working.
+func (s *AuthHandlerSuite) TestCreateAPIToken_SameOriginHeader_OK() {
+	usr := &domain.User{ID: testUserID1, Username: "alice"}
+	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "good-api-key").Return(usr, nil)
+	s.auth.EXPECT().CreateAPIToken(gomock.Any(), testUserID1).Return("plain-key-1", nil)
+
+	req := s.postOgenReq("/api/tokens", "good-api-key")
+	req.Header.Set("Origin", "http://example.com")
+
+	rec := httptest.NewRecorder()
+
+	s.router.ServeHTTP(rec, req)
+
+	s.Require().Equal(http.StatusCreated, rec.Code)
+}
+
+// TestCreateInvite_CrossOriginHeader_Rejected — the admin-only invite mint is equally
+// cookie-forgeable, so the same origin gate applies.
+func (s *AuthHandlerSuite) TestCreateInvite_CrossOriginHeader_Rejected() {
+	admin := s.adminUser()
+	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "admin-key").Return(admin, nil)
+
+	req := s.postOgenReq("/api/invites", "admin-key")
+	req.Header.Set("Origin", "https://evil.sibling.example")
+
+	rec := httptest.NewRecorder()
+
+	s.router.ServeHTTP(rec, req)
+
+	s.Equal(http.StatusForbidden, rec.Code)
+}
+
+// postOgenReq builds an ogen-route request with the Bearer header set; the caller may add
+// additional headers before serving it.
+func (s *AuthHandlerSuite) postOgenReq(path, bearer string) *http.Request {
+	req := httptest.NewRequest(http.MethodPost, path, nil)
+	if bearer != "" {
+		req.Header.Set("Authorization", "Bearer "+bearer)
+	}
+
+	return req
+}
