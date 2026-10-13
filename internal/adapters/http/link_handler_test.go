@@ -514,11 +514,12 @@ func (s *HandlerSuite) TestRedirectLink_BurnAfterClick_ConsumedOnce() {
 	s.Equal(http.StatusNotFound, second.Code)
 }
 
-// TestRedirectLink_OwnerOnly_NonOwner_HTML_RedirectToLogin mirrors the note-side IDOR regression
-// (TestOwnerOnlyNote_OtherAuthenticatedUser_Unauthorized): a privacy: owner link must deny a
-// different authenticated caller, not just anonymous ones, and — being a browser route — redirect
-// to /login rather than returning a bare 401.
-func (s *HandlerSuite) TestRedirectLink_OwnerOnly_NonOwner_HTML_RedirectToLogin() {
+// TestRedirectLink_OwnerOnly_NonOwner_HTML_Forbidden mirrors the note-side IDOR regression
+// (TestOwnerOnlyNote_OtherAuthenticatedUser_Forbidden): a privacy: owner link must deny a
+// different authenticated caller, not just anonymous ones, and — being a browser route — answer
+// with a page rather than a bare 401. 403 rather than the /login redirect, because this caller is
+// already signed in and logging in again would land them right back here.
+func (s *HandlerSuite) TestRedirectLink_OwnerOnly_NonOwner_HTML_Forbidden() {
 	owner := &domain.User{ID: uuid.New(), Username: "alice"}
 	other := &domain.User{ID: uuid.New(), Username: "bob"}
 
@@ -538,9 +539,10 @@ func (s *HandlerSuite) TestRedirectLink_OwnerOnly_NonOwner_HTML_RedirectToLogin(
 
 	router.ServeHTTP(w, r)
 
-	s.Equal(http.StatusSeeOther, w.Code)
-	s.True(strings.HasPrefix(w.Header().Get("Location"), "/login?next="),
-		"a different authenticated caller must not follow an owner-only link")
+	s.Equal(http.StatusForbidden, w.Code)
+	s.Empty(w.Header().Get("Location"), "a settled 403 must not bounce the caller anywhere")
+	s.NotContains(w.Body.String(), testLinkTargetURL,
+		"the link's target must never reach a non-owner's response body")
 }
 
 // TestRedirectLink_OwnerOnly_Owner_Authorized is the positive counterpart: the link's own owner
@@ -570,7 +572,7 @@ func (s *HandlerSuite) TestRedirectLink_OwnerOnly_Owner_Authorized() {
 // TestRedirectLink_OwnerOnly_Anonymous_Unauthorized mirrors TestOwnerOnlyNote_Anonymous_
 // Unauthorized: a privacy: owner link denies an anonymous (no-credential) caller, distinctly
 // from denying a different authenticated caller — completes the privacy × caller matrix alongside
-// TestRedirectLink_OwnerOnly_NonOwner_HTML_RedirectToLogin and _Owner_Authorized above.
+// TestRedirectLink_OwnerOnly_NonOwner_HTML_Forbidden and _Owner_Authorized above.
 func (s *HandlerSuite) TestRedirectLink_OwnerOnly_Anonymous_Unauthorized() {
 	owner := &domain.User{ID: uuid.New(), Username: "alice"}
 

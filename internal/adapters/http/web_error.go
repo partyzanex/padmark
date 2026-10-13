@@ -134,6 +134,21 @@ func (h *common) writeErrorPageData(w http.ResponseWriter, r *http.Request, data
 	}
 }
 
+// privateToOtherPageData is the error shown to a signed-in caller whose account is not the one a
+// resource's privacy level admits. Separate from the /login redirect an anonymous caller gets:
+// this one is not missing a credential, so the page has to say the request is settled rather than
+// invite an action that would change nothing.
+func privateToOtherPageData() errorViewData {
+	return errorViewData{
+		Code:      http.StatusForbidden,
+		ErrorType: errorTypeClient,
+		Title:     "Not yours",
+		Desc:      "This is private to another account. Signing in again won't change that.",
+		Detail:    "",
+		Nonce:     "",
+	}
+}
+
 // setupClosedPageData is the error shown when /setup is hit without a valid invite
 // after the first admin already exists (the bootstrap endpoint is closed).
 func setupClosedPageData() errorViewData {

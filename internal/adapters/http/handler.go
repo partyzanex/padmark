@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/google/uuid"
@@ -177,6 +178,35 @@ func (c *common) scheme(r *http.Request) string {
 	}
 
 	return requestScheme(r, c.trustedProxies)
+}
+
+// denyPrivate answers a caller that failed a resource's privacy check. Shared by
+// NoteHandler.handlePrivateAuth and LinkHandler.handlePrivateAuth so the two gates cannot drift.
+//
+// An anonymous browser is sent to the login page carrying its original target: signing in is
+// exactly what would grant access. A browser that is already signed in gets 403 instead — it is
+// not missing a credential, it holds the wrong one, and bouncing it to /login is a loop that ends
+// where it started.
+//
+// Non-browser callers keep the machine-readable 401 either way. Splitting that into 403 as well
+// would be an API contract change (401 is what openapi.yaml documents on these paths), not a
+// navigation fix.
+func (c *common) denyPrivate(w http.ResponseWriter, r *http.Request) {
+	if negotiate(r) != formatHTML {
+		writeUnauthorized(w)
+
+		return
+	}
+
+	if c.isAuthenticated(r) {
+		data := privateToOtherPageData()
+		c.writeErrorPageData(w, r, &data)
+
+		return
+	}
+
+	loginURL := "/login?next=" + url.QueryEscape(r.URL.RequestURI())
+	http.Redirect(w, r, loginURL, http.StatusSeeOther)
 }
 
 // isAuthenticated reports whether the request carries a valid auth credential.

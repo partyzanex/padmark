@@ -3,7 +3,6 @@ package http
 import (
 	"html/template"
 	"net/http"
-	"net/url"
 
 	_ "embed"
 )
@@ -88,9 +87,11 @@ func (h *LinkHandler) Redirect(w http.ResponseWriter, r *http.Request) {
 }
 
 // handlePrivateAuth checks the link's privacy level against the caller (see Link.VisibleTo),
-// mirroring NoteHandler.handlePrivateAuth exactly. GET /r/{id} is browser-only (no JSON variant
-// registered for it — see openapi.yaml's "Short links" section), but a non-HTML request is still
-// answered sanely (401 JSON) rather than assumed to be a browser.
+// mirroring NoteHandler.handlePrivateAuth exactly — both now hand a denial to common.denyPrivate,
+// so "exactly" is enforced by the shared code rather than by two copies staying in step. GET
+// /r/{id} is browser-only (no JSON variant registered for it — see openapi.yaml's "Short links"
+// section), but a non-HTML request is still answered sanely (401 JSON) rather than assumed to be
+// a browser.
 //
 // Uses Peek (non-mutating) so a denied caller never triggers Redirect's side effects (view count,
 // burn-after-click consumption) — the same reason NoteHandler.Peek exists.
@@ -110,14 +111,7 @@ func (h *LinkHandler) handlePrivateAuth(w http.ResponseWriter, r *http.Request, 
 		return false
 	}
 
-	if negotiate(r) == formatHTML {
-		loginURL := "/login?next=" + url.QueryEscape(r.URL.RequestURI())
-		http.Redirect(w, r, loginURL, http.StatusSeeOther)
-
-		return true
-	}
-
-	writeUnauthorized(w)
+	h.denyPrivate(w, r)
 
 	return true
 }

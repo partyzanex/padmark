@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
-	"net/url"
 	"time"
 
 	_ "embed"
@@ -426,6 +425,8 @@ func (h *NoteHandler) gateAnonymousMutation(w http.ResponseWriter, r *http.Reque
 // handlePrivateAuth checks the note's privacy level against the caller (see Note.VisibleTo).
 // Returns the preloaded note (when auth is configured) and false when the request may proceed.
 // Returns nil and true when the response has been written (auth failed or note not found).
+// A denial is handed to common.denyPrivate, shared with the link gate, which decides between the
+// login redirect and 403 by whether the caller is already signed in.
 func (h *NoteHandler) handlePrivateAuth(w http.ResponseWriter, r *http.Request, id string) (*domain.Note, bool) {
 	// When there is no auth at all, every request is implicitly authorised.
 	if h.authMgr == nil {
@@ -443,14 +444,7 @@ func (h *NoteHandler) handlePrivateAuth(w http.ResponseWriter, r *http.Request, 
 		return note, false
 	}
 
-	if negotiate(r) == formatHTML {
-		loginURL := "/login?next=" + url.QueryEscape(r.URL.RequestURI())
-		http.Redirect(w, r, loginURL, http.StatusSeeOther)
-
-		return nil, true
-	}
-
-	writeUnauthorized(w)
+	h.denyPrivate(w, r)
 
 	return nil, true
 }

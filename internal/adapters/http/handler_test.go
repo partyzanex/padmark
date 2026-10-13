@@ -2739,10 +2739,13 @@ func (s *HandlerSuite) TestOwnerOnlyNote_Owner_Authorized() {
 	s.Equal(http.StatusOK, w.Code)
 }
 
-// TestOwnerOnlyNote_OtherAuthenticatedUser_Unauthorized verifies that a note with
-// privacy: owner is NOT readable by a different authenticated caller, even though they are
-// logged in — owner-only is scoped to the exact creator, unlike privacy: authenticated.
-func (s *HandlerSuite) TestOwnerOnlyNote_OtherAuthenticatedUser_Unauthorized() {
+// TestOwnerOnlyNote_OtherAuthenticatedUser_Forbidden verifies that a note with privacy: owner is
+// NOT readable by a different authenticated caller, even though they are logged in — owner-only
+// is scoped to the exact creator, unlike privacy: authenticated.
+//
+// The answer is 403, not the /login redirect an anonymous browser gets: this caller already has a
+// credential, just not the right one, so a login page would send them straight back here.
+func (s *HandlerSuite) TestOwnerOnlyNote_OtherAuthenticatedUser_Forbidden() {
 	owner := &domain.User{ID: uuid.New(), Username: "alice"}
 	other := &domain.User{ID: uuid.New(), Username: "bob"}
 
@@ -2761,9 +2764,10 @@ func (s *HandlerSuite) TestOwnerOnlyNote_OtherAuthenticatedUser_Unauthorized() {
 	r.AddCookie(&http.Cookie{Name: "padmark_session", Value: "valid-sess"}) //nolint:gosec // G124: test cookie
 	router.ServeHTTP(w, r)
 
-	s.Equal(http.StatusSeeOther, w.Code)
-	s.True(strings.HasPrefix(w.Header().Get("Location"), "/login?next="),
-		"a different authenticated caller must not read an owner-only note")
+	s.Equal(http.StatusForbidden, w.Code)
+	s.Empty(w.Header().Get("Location"), "a settled 403 must not bounce the caller anywhere")
+	s.NotContains(w.Body.String(), "owner-only content",
+		"the note's plaintext must never reach a non-owner's response body")
 }
 
 // TestOwnerOnlyNote_Anonymous_Unauthorized verifies that a note with privacy: owner is not
@@ -2832,9 +2836,9 @@ func (s *HandlerSuite) TestEditPage_OwnerOnly_NonOwner_Forbidden() {
 	r.AddCookie(&http.Cookie{Name: "padmark_session", Value: "valid-sess"}) //nolint:gosec // G124: test cookie
 	router.ServeHTTP(w, r)
 
-	s.Equal(http.StatusSeeOther, w.Code)
-	s.True(strings.HasPrefix(w.Header().Get("Location"), "/login?next="),
-		"a different authenticated caller must not read an owner-only note via /edit")
+	s.Equal(http.StatusForbidden, w.Code,
+		"a signed-in non-owner is not missing a credential, so /login would be a dead end")
+	s.Empty(w.Header().Get("Location"), "a settled 403 must not bounce the caller anywhere")
 	s.NotContains(w.Body.String(), "owner-only content",
 		"the note's plaintext must never reach a non-owner's response body")
 }
