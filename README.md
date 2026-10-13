@@ -200,7 +200,7 @@ This file is also included in the repo as [`docker-compose.yml`](docker-compose.
 
 ---
 
-## Three ways to use padmark
+## Four ways to use padmark
 
 ### 1. Web UI
 
@@ -350,7 +350,8 @@ curl -X POST http://localhost:4000/notes \
   -d '{"title": "Secret", "content": "eyes only", "burn_after_reading": true, "ttl": 3600}'
 ```
 
-Interactive API docs live at `/api`. Raw OpenAPI spec at `/api/openapi.yaml`.
+Interactive API docs live at `/api`. Raw OpenAPI spec at `/api/openapi.yaml`. A short Markdown
+overview of the machine surface, written for agents in the llms.txt convention, at `/llms.txt`.
 
 **Short links**
 ```bash
@@ -378,6 +379,50 @@ curl -X DELETE http://localhost:4000/links/{id} \
 
 `GET /r/{id}` is a browser-facing redirect, not part of the JSON API spec — the same reason bare
 `GET /{id}` (the note-view shortcut) isn't documented in `/api/openapi.yaml` either.
+
+---
+
+### 4. MCP server
+
+`padmark-mcp` exposes the padmark surface as MCP tools for AI agents (Claude Code, Cursor, …).
+It is a local stdio proxy: the agent spawns the binary, and the binary talks REST to your
+running padmark server — credentials, edit codes, and privacy are enforced by the server, not
+re-implemented here.
+
+```bash
+go install github.com/partyzanex/padmark/cmd/padmark-mcp@latest
+```
+
+Tools: `create_note`, `get_note`, `update_note`, `delete_note`, `create_link`,
+`create_links_bulk`, `get_link`, `delete_link`, `check_server`.
+
+Configure with the same credential and defaults as the CLI: `--token` / `PADMARK_TOKEN`
+(a `pmk_…` envelope works — it carries the server URL too), `--base-url` / `PADMARK_URL`
+(default `http://localhost:8080`), `--timeout` / `PADMARK_TIMEOUT`.
+
+Example `mcpServers` entry (Claude Code / Cursor JSON config):
+
+```json
+{
+  "mcpServers": {
+    "padmark": {
+      "command": "/usr/local/bin/padmark-mcp",
+      "args": ["--token", "pmk_..."]
+    }
+  }
+}
+```
+
+Notes for agents:
+- `create_note`/`create_link` return an `edit_code` exactly once. By default the proxy keeps it
+  for the session and the tool result only says so — pass `reveal_edit_code: true` to print it
+  (it cannot be recovered later).
+- `get_note` is not read-only: reads bump `views`, and the first read of a burn-after-reading
+  note destroys it. `get_link` is read-only — burn-after-click fires on the browser redirect
+  path, not on metadata.
+- Machine-readable docs: `/llms.txt` (overview) and `/api/openapi.yaml` (full contract); both
+  are served even without a token, and both go away with the REST surface under
+  `--disable-api`.
 
 ---
 

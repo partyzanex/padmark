@@ -16,6 +16,7 @@ import (
 	urcli "github.com/urfave/cli/v3"
 
 	"github.com/partyzanex/padmark/internal/domain"
+	"github.com/partyzanex/padmark/internal/infra/tokenfile"
 )
 
 // writeTokenFile points XDG_CONFIG_HOME at a temp dir and writes the given token file contents,
@@ -60,7 +61,7 @@ func writeTokenFileMode(t *testing.T, contents string, mode os.FileMode) string 
 }
 
 func TestReadTokenFile_TightensGroupOtherReadableFile(t *testing.T) {
-	if runtime.GOOS == osWindows {
+	if runtime.GOOS == "windows" {
 		t.Skip("POSIX permission bits are not meaningful on Windows")
 	}
 
@@ -77,7 +78,7 @@ func TestReadTokenFile_TightensGroupOtherReadableFile(t *testing.T) {
 }
 
 func TestReadTokenFile_LeavesOwnerOnlyFileUntouched(t *testing.T) {
-	if runtime.GOOS == osWindows {
+	if runtime.GOOS == "windows" {
 		t.Skip("POSIX permission bits are not meaningful on Windows")
 	}
 
@@ -96,7 +97,7 @@ func TestReadTokenFile_LeavesOwnerOnlyFileUntouched(t *testing.T) {
 func TestTokenFilePath_XDGConfigHome(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "/tmp/xdg-config")
 
-	path, err := tokenFilePath()
+	path, err := tokenfile.Path()
 	require.NoError(t, err)
 	assert.Equal(t, filepath.Join("/tmp/xdg-config", "padmark", "token"), path)
 }
@@ -105,7 +106,7 @@ func TestTokenFilePath_HomeFallback(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "")
 	t.Setenv("HOME", "/home/tester")
 
-	path, err := tokenFilePath()
+	path, err := tokenfile.Path()
 	require.NoError(t, err)
 	assert.Equal(t, filepath.Join("/home/tester", ".config", "padmark", "token"), path)
 }
