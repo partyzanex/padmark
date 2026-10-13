@@ -6,7 +6,6 @@ import (
 
 	"github.com/pressly/goose/v3"
 	"github.com/stretchr/testify/suite"
-	"github.com/uptrace/bun/driver/sqliteshim"
 
 	sqlitemigrations "github.com/partyzanex/padmark/migrations/sqlite"
 )
@@ -33,10 +32,10 @@ func TestMigratePrivacyTestSuite(t *testing.T) {
 }
 
 func (s *MigratePrivacyTestSuite) SetupTest() {
-	sqldb, err := sql.Open(sqliteshim.DriverName(), "file::memory:?cache=shared")
+	db, err := Open("file::memory:?cache=shared")
 	s.Require().NoError(err)
 
-	s.sqldb = sqldb
+	s.sqldb = db.DB
 }
 
 func (s *MigratePrivacyTestSuite) TearDownTest() {

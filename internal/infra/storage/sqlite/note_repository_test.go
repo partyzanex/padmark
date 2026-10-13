@@ -1,15 +1,12 @@
 package sqlite
 
 import (
-	"database/sql"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/suite"
 	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect/sqlitedialect"
-	"github.com/uptrace/bun/driver/sqliteshim"
 
 	"github.com/partyzanex/padmark/internal/domain"
 )
@@ -22,10 +19,10 @@ type RepositoryTestSuite struct {
 }
 
 func (s *RepositoryTestSuite) SetupTest() {
-	sqldb, err := sql.Open(sqliteshim.DriverName(), "file::memory:?cache=shared")
+	db, err := Open("file::memory:?cache=shared")
 	s.Require().NoError(err)
 
-	s.db = bun.NewDB(sqldb, sqlitedialect.New())
+	s.db = db
 	s.Require().NoError(s.db.Ping())
 
 	_, err = s.db.NewCreateTable().Model((*note)(nil)).IfNotExists().Exec(s.T().Context())
@@ -476,10 +473,8 @@ func (s *RepositoryTestSuite) TestConsume_NotFound() {
 func (s *RepositoryTestSuite) TestMigrate_OK() {
 	ctx := s.T().Context()
 
-	sqldb, err := sql.Open(sqliteshim.DriverName(), "file:migrate_ok?mode=memory&cache=shared")
+	db, err := Open("file:migrate_ok?mode=memory&cache=shared")
 	s.Require().NoError(err)
-
-	db := bun.NewDB(sqldb, sqlitedialect.New())
 
 	defer func() { s.Require().NoError(db.Close()) }()
 
@@ -490,10 +485,8 @@ func (s *RepositoryTestSuite) TestMigrate_OK() {
 func (s *RepositoryTestSuite) TestMigrate_Idempotent() {
 	ctx := s.T().Context()
 
-	sqldb, err := sql.Open(sqliteshim.DriverName(), "file:migrate_idem?mode=memory&cache=shared")
+	db, err := Open("file:migrate_idem?mode=memory&cache=shared")
 	s.Require().NoError(err)
-
-	db := bun.NewDB(sqldb, sqlitedialect.New())
 
 	defer func() { s.Require().NoError(db.Close()) }()
 

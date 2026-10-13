@@ -1,7 +1,6 @@
 package sqlite
 
 import (
-	"database/sql"
 	"fmt"
 	"sync"
 	"testing"
@@ -11,8 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect/sqlitedialect"
-	"github.com/uptrace/bun/driver/sqliteshim"
 
 	"github.com/partyzanex/padmark/internal/domain"
 )
@@ -30,7 +27,7 @@ type APITokenRepositoryTestSuite struct {
 }
 
 func (s *APITokenRepositoryTestSuite) SetupTest() {
-	sqldb, err := sql.Open(sqliteshim.DriverName(), "file::memory:?cache=shared&_busy_timeout=5000")
+	db, err := Open("file::memory:?cache=shared&_busy_timeout=5000")
 	s.Require().NoError(err)
 
 	// Shared-cache in-memory SQLite promotes a read lock to a write lock immediately when a
@@ -40,9 +37,9 @@ func (s *APITokenRepositoryTestSuite) SetupTest() {
 	// is what TestCreateIfUnderLimit_ConcurrentRace_NeverExceedsLimit needs to actually exercise
 	// concurrent callers against this test DB. Production doesn't use cache=shared, so this is a
 	// test-only accommodation, not a production behavior change.
-	sqldb.SetMaxOpenConns(1)
+	db.SetMaxOpenConns(1)
 
-	s.db = bun.NewDB(sqldb, sqlitedialect.New())
+	s.db = db
 	s.Require().NoError(s.db.Ping())
 
 	_, err = Migrate(s.T().Context(), s.db)
@@ -305,20 +302,19 @@ func (s *APITokenRepositoryTestSuite) TestUpdateLastUsed_UnknownHash_NoError() {
 
 // ── Cascade ──
 
-// TestCreate_CascadesWithUser verifies that with foreign_keys enabled (as in
-// production), deleting a user also removes their API tokens via ON DELETE CASCADE.
-// Uses a dedicated FK-enabled connection because the suite's shared DSN does not
-// set the pragma.
+// TestCreate_CascadesWithUser verifies that with foreign_keys enabled (as in production —
+// Open applies it via WithPragmas), deleting a user also removes their API tokens via
+// ON DELETE CASCADE. Uses its own dedicated DSN (distinct from the suite's shared one) purely
+// for isolation between this test and the rest of the suite, not to opt into FK enforcement —
+// that's on by default for every Open call now.
 func TestCreate_CascadesWithUser(t *testing.T) {
 	ctx := t.Context()
 
-	sqldb, err := sql.Open(sqliteshim.DriverName(),
-		"file:apitoken_cascade_fk?mode=memory&cache=shared&_busy_timeout=5000&_pragma=foreign_keys(1)")
+	db, err := Open("file:apitoken_cascade_fk?mode=memory&cache=shared")
 	require.NoError(t, err)
 
-	defer func() { require.NoError(t, sqldb.Close()) }()
+	defer func() { require.NoError(t, db.Close()) }()
 
-	db := bun.NewDB(sqldb, sqlitedialect.New())
 	require.NoError(t, db.Ping())
 
 	_, err = Migrate(ctx, db)

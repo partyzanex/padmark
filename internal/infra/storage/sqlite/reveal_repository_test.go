@@ -1,15 +1,12 @@
 package sqlite
 
 import (
-	"database/sql"
 	"log/slog"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/suite"
 	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect/sqlitedialect"
-	"github.com/uptrace/bun/driver/sqliteshim"
 )
 
 type RevealRepositoryTestSuite struct {
@@ -20,10 +17,10 @@ type RevealRepositoryTestSuite struct {
 }
 
 func (s *RevealRepositoryTestSuite) SetupTest() {
-	sqldb, err := sql.Open(sqliteshim.DriverName(), "file::memory:?cache=shared&_busy_timeout=5000")
+	db, err := Open("file::memory:?cache=shared&_busy_timeout=5000")
 	s.Require().NoError(err)
 
-	s.db = bun.NewDB(sqldb, sqlitedialect.New())
+	s.db = db
 	s.Require().NoError(s.db.Ping())
 
 	_, err = s.db.NewCreateTable().Model((*revealTokenRow)(nil)).IfNotExists().Exec(s.T().Context())

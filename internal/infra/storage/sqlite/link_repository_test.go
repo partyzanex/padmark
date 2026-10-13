@@ -1,7 +1,6 @@
 package sqlite
 
 import (
-	"database/sql"
 	"log/slog"
 	"testing"
 	"time"
@@ -9,8 +8,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/suite"
 	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect/sqlitedialect"
-	"github.com/uptrace/bun/driver/sqliteshim"
 
 	"github.com/partyzanex/padmark/internal/domain"
 )
@@ -23,10 +20,10 @@ type LinkRepositoryTestSuite struct {
 }
 
 func (s *LinkRepositoryTestSuite) SetupTest() {
-	sqldb, err := sql.Open(sqliteshim.DriverName(), "file::memory:?cache=shared")
+	db, err := Open("file::memory:?cache=shared")
 	s.Require().NoError(err)
 
-	s.db = bun.NewDB(sqldb, sqlitedialect.New())
+	s.db = db
 	s.Require().NoError(s.db.Ping())
 
 	_, err = s.db.NewCreateTable().Model((*link)(nil)).IfNotExists().Exec(s.T().Context())

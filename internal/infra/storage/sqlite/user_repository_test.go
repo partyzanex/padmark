@@ -1,7 +1,6 @@
 package sqlite
 
 import (
-	"database/sql"
 	"log/slog"
 	"testing"
 	"time"
@@ -10,8 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect/sqlitedialect"
-	"github.com/uptrace/bun/driver/sqliteshim"
 
 	"github.com/partyzanex/padmark/internal/domain"
 )
@@ -24,10 +21,10 @@ type UserRepositoryTestSuite struct {
 }
 
 func (s *UserRepositoryTestSuite) SetupTest() {
-	sqldb, err := sql.Open(sqliteshim.DriverName(), "file::memory:?cache=shared&_busy_timeout=5000")
+	db, err := Open("file::memory:?cache=shared&_busy_timeout=5000")
 	s.Require().NoError(err)
 
-	s.db = bun.NewDB(sqldb, sqlitedialect.New())
+	s.db = db
 	s.Require().NoError(s.db.Ping())
 
 	_, err = Migrate(s.T().Context(), s.db)
@@ -221,21 +218,20 @@ func (s *UserRepositoryTestSuite) TestRevoke_NonExistentUser_ReturnsErrForbidden
 	s.ErrorIs(err, domain.ErrForbidden)
 }
 
-// TestRevoke_CascadesSessionsAndInvites verifies that with foreign_keys enabled
-// (as in production), deleting a user also removes their sessions and the invites
-// they issued. Without ON DELETE CASCADE this DELETE would fail (PostgreSQL) or
-// leave orphan rows (SQLite). Uses a dedicated FK-enabled connection because the
-// suite's shared DSN does not set the pragma.
+// TestRevoke_CascadesSessionsAndInvites verifies that with foreign_keys enabled (as in
+// production — Open applies it via WithPragmas), deleting a user also removes their sessions
+// and the invites they issued. Without ON DELETE CASCADE this DELETE would fail (PostgreSQL) or
+// leave orphan rows (SQLite). Uses its own dedicated DSN (distinct from the suite's shared one)
+// purely for isolation, not to opt into FK enforcement — that's on by default for every Open
+// call now.
 func TestRevoke_CascadesSessionsAndInvites(t *testing.T) {
 	ctx := t.Context()
 
-	sqldb, err := sql.Open(sqliteshim.DriverName(),
-		"file:cascade_fk?mode=memory&cache=shared&_busy_timeout=5000&_pragma=foreign_keys(1)")
+	db, err := Open("file:cascade_fk?mode=memory&cache=shared")
 	require.NoError(t, err)
 
-	defer func() { require.NoError(t, sqldb.Close()) }()
+	defer func() { require.NoError(t, db.Close()) }()
 
-	db := bun.NewDB(sqldb, sqlitedialect.New())
 	require.NoError(t, db.Ping())
 
 	_, err = Migrate(ctx, db)
