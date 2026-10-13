@@ -1,0 +1,35 @@
+# Local environment files and secrets, including nested overrides.
+**/.env
+**/.env.*
+**/content-keys.json
+
+# Local databases and SQLite sidecar files.
+**/*.db
+**/*.db-*
+**/*.sqlite
+**/*.sqlite-*
+**/*.sqlite3
+**/*.sqlite3-*
+
+# Git metadata and locally built binaries.
+**/.git
+bin/
+padmark-cli
+padmark-server
+
+# Logs, test binaries, coverage reports, and profiling artifacts.
+**/*.log
+**/*.test
+**/*.out
+**/*.prof
+**/coverage/
+**/coverage.*
+**/test-results/
+**/test-reports/
+
+# Local caches and editor state.
+.gocache/
+.idea/
+.serena/
+.graphify/
+graphify-out/
