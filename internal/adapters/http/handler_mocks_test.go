@@ -128,10 +128,10 @@ func (m *MockOnboardingManager) EXPECT() *MockOnboardingManagerMockRecorder {
 }
 
 // AcceptFirstAdmin mocks base method.
-func (m *MockOnboardingManager) AcceptFirstAdmin(ctx context.Context, username, password string) (string, error) {
+func (m *MockOnboardingManager) AcceptFirstAdmin(ctx context.Context, username, password string) (*auth.Enrollment, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "AcceptFirstAdmin", ctx, username, password)
-	ret0, _ := ret[0].(string)
+	ret0, _ := ret[0].(*auth.Enrollment)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -143,10 +143,10 @@ func (mr *MockOnboardingManagerMockRecorder) AcceptFirstAdmin(ctx, username, pas
 }
 
 // AcceptInvite mocks base method.
-func (m *MockOnboardingManager) AcceptInvite(ctx context.Context, token, username, password string) (string, error) {
+func (m *MockOnboardingManager) AcceptInvite(ctx context.Context, token, username, password string) (*auth.Enrollment, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "AcceptInvite", ctx, token, username, password)
-	ret0, _ := ret[0].(string)
+	ret0, _ := ret[0].(*auth.Enrollment)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -348,10 +348,10 @@ func (m *MockAuthManager) EXPECT() *MockAuthManagerMockRecorder {
 }
 
 // AcceptFirstAdmin mocks base method.
-func (m *MockAuthManager) AcceptFirstAdmin(ctx context.Context, username, password string) (string, error) {
+func (m *MockAuthManager) AcceptFirstAdmin(ctx context.Context, username, password string) (*auth.Enrollment, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "AcceptFirstAdmin", ctx, username, password)
-	ret0, _ := ret[0].(string)
+	ret0, _ := ret[0].(*auth.Enrollment)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -363,10 +363,10 @@ func (mr *MockAuthManagerMockRecorder) AcceptFirstAdmin(ctx, username, password 
 }
 
 // AcceptInvite mocks base method.
-func (m *MockAuthManager) AcceptInvite(ctx context.Context, token, username, password string) (string, error) {
+func (m *MockAuthManager) AcceptInvite(ctx context.Context, token, username, password string) (*auth.Enrollment, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "AcceptInvite", ctx, token, username, password)
-	ret0, _ := ret[0].(string)
+	ret0, _ := ret[0].(*auth.Enrollment)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }

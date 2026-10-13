@@ -27,6 +27,28 @@ func trimTrailingSlashes(u *url.URL) {
 
 // Invoker invokes operations described by OpenAPI v3 specification.
 type Invoker interface {
+	// CreateAPIToken invokes createAPIToken operation.
+	//
+	// Issues a long-lived API bearer key **for the caller themself** — the operation takes no
+	// request body and cannot mint a token for another user. Any valid credential works: a
+	// TOTP session cookie (browser) or an `Authorization: Bearer <token>` API token.
+	// The returned `token` is a `pmk_…` envelope (`pmk_` + base64url of
+	// `{"url": "<server base url>", "token": "<bearer key>"}`) and is shown **exactly
+	// once** — only its SHA-256 hash is stored server-side. A user may hold at most 20 live
+	// tokens; when that cap is reached the operation answers `429` (revoke one first —
+	// revocation is admin-panel-only today).
+	//
+	// POST /api/tokens
+	CreateAPIToken(ctx context.Context) (CreateAPITokenRes, error)
+	// CreateInvite invokes createInvite operation.
+	//
+	// The JSON counterpart of the admin panel's `POST /admin/invite`. Requires an **admin**
+	// credential (a non-admin authenticated caller gets `403`). The invite is single-use and
+	// expires (24 h); the invitee completes signup through the web setup page or the
+	// machine-readable variant of `POST /setup` (send JSON with `Accept: application/json`).
+	//
+	// POST /api/invites
+	CreateInvite(ctx context.Context) (CreateInviteRes, error)
 	// CreateLink invokes createLink operation.
 	//
 	// Creates a short link and returns it together with the one-time `edit_code`.
@@ -161,6 +183,164 @@ func (c *Client) requestURL(ctx context.Context) *url.URL {
 		return c.serverURL
 	}
 	return u
+}
+
+// CreateAPIToken invokes createAPIToken operation.
+//
+// Issues a long-lived API bearer key **for the caller themself** — the operation takes no
+// request body and cannot mint a token for another user. Any valid credential works: a
+// TOTP session cookie (browser) or an `Authorization: Bearer <token>` API token.
+// The returned `token` is a `pmk_…` envelope (`pmk_` + base64url of
+// `{"url": "<server base url>", "token": "<bearer key>"}`) and is shown **exactly
+// once** — only its SHA-256 hash is stored server-side. A user may hold at most 20 live
+// tokens; when that cap is reached the operation answers `429` (revoke one first —
+// revocation is admin-panel-only today).
+//
+// POST /api/tokens
+func (c *Client) CreateAPIToken(ctx context.Context) (CreateAPITokenRes, error) {
+	res, err := c.sendCreateAPIToken(ctx)
+	return res, err
+}
+
+func (c *Client) sendCreateAPIToken(ctx context.Context) (res CreateAPITokenRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("createAPIToken"),
+		semconv.HTTPRequestMethodKey.String("POST"),
+		semconv.URLTemplateKey.String("/api/tokens"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, CreateAPITokenOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [1]string
+	pathParts[0] = "/api/tokens"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "POST", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeCreateAPITokenResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
+// CreateInvite invokes createInvite operation.
+//
+// The JSON counterpart of the admin panel's `POST /admin/invite`. Requires an **admin**
+// credential (a non-admin authenticated caller gets `403`). The invite is single-use and
+// expires (24 h); the invitee completes signup through the web setup page or the
+// machine-readable variant of `POST /setup` (send JSON with `Accept: application/json`).
+//
+// POST /api/invites
+func (c *Client) CreateInvite(ctx context.Context) (CreateInviteRes, error) {
+	res, err := c.sendCreateInvite(ctx)
+	return res, err
+}
+
+func (c *Client) sendCreateInvite(ctx context.Context) (res CreateInviteRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("createInvite"),
+		semconv.HTTPRequestMethodKey.String("POST"),
+		semconv.URLTemplateKey.String("/api/invites"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, CreateInviteOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [1]string
+	pathParts[0] = "/api/invites"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "POST", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeCreateInviteResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
 }
 
 // CreateLink invokes createLink operation.

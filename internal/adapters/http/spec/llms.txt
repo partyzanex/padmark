@@ -43,6 +43,22 @@ as `Authorization: Bearer <key>`. The issued token may be a `pmk_…` envelope
 (`pmk_` + base64url of `{"url": "<base url>", "token": "<key>"}`) — decode it, use `url` as
 the API base and `token` in the Bearer header. Unknown or expired keys get `401`.
 
+### Account endpoints (require `--enable-accounts`)
+
+- `POST /api/tokens` — issue a new API token **for the calling user themselves** (any valid
+  credential; empty body). `201` → `{"token": "pmk_…"}`, shown once; `429` when the user's
+  20-token cap is reached. Revocation stays admin-panel-only.
+- `POST /api/invites` — admin only. `201` → `{"invite_url": …}`: a single-use signup link
+  (24 h TTL). `403` for a non-admin authenticated caller.
+
+Headless bootstrap: `POST /setup` accepts JSON — send
+`{"username", "password", "invite"?}` with `Accept: application/json` (no CSRF cookie is
+involved on this path; include an `invite` from `POST /api/invites` once the first admin
+exists). `201` → `{"otp_auth_uri": "otpauth://totp/…", "username", "is_admin"}` — the URI (and
+its secret) is shown exactly once. Errors: `403` once any account exists (setup closed),
+`409` taken username, `410` spent/expired invite, `422` weak password (≥ 12 chars with
+upper/lower/digit/special).
+
 ## Errors
 
 All machine responses use `{"message": string}` (message required), e.g. `404

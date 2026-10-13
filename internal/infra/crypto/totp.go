@@ -88,17 +88,36 @@ func ValidateTOTPWithCounter(secret, code string) (valid bool, counter int64) {
 	return false, 0
 }
 
+// OTPAuthURI returns the otpauth:// enrollment URI for issuer/username/secret as plain text —
+// the machine-readable counterpart of GenerateQRCodeDataURL (headless provisioning prints this
+// instead of rendering a QR image). The URI is validated by parsing it back before returning.
+func OTPAuthURI(issuer, username, secret string) (string, error) {
+	var err error
+
+	uri := fmt.Sprintf(
+		"otpauth://totp/%s:%s?secret=%s&issuer=%s&algorithm=SHA1&digits=6&period=%d",
+		issuer, username, secret, issuer, totpPeriod,
+	)
+
+	_, err = otp.NewKeyFromURL(uri)
+	if err != nil {
+		return "", fmt.Errorf("parse otpauth url: %w", err)
+	}
+
+	return uri, nil
+}
+
 // GenerateQRCodeDataURL returns a data URL (image/png;base64) for the otpauth:// URI.
 // issuer is the service name shown in the authenticator app.
 func GenerateQRCodeDataURL(issuer, username, secret string) (string, error) {
-	key, err := otp.NewKeyFromURL(
-		fmt.Sprintf(
-			"otpauth://totp/%s:%s?secret=%s&issuer=%s&algorithm=SHA1&digits=6&period=%d",
-			issuer, username, secret, issuer, totpPeriod,
-		),
-	)
+	uri, err := OTPAuthURI(issuer, username, secret)
 	if err != nil {
-		return "", fmt.Errorf("parse otpauth url: %w", err)
+		return "", err
+	}
+
+	key, keyErr := otp.NewKeyFromURL(uri)
+	if keyErr != nil {
+		return "", fmt.Errorf("parse otpauth url: %w", keyErr)
 	}
 
 	img, err := key.Image(qrImageSize, qrImageSize)

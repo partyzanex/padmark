@@ -498,6 +498,21 @@ func (mr *MockTOTPManagerMockRecorder) GenerateSecret() *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GenerateSecret", reflect.TypeOf((*MockTOTPManager)(nil).GenerateSecret))
 }
 
+// TOTPURI mocks base method.
+func (m *MockTOTPManager) TOTPURI(issuer, account, secret string) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "TOTPURI", issuer, account, secret)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// TOTPURI indicates an expected call of TOTPURI.
+func (mr *MockTOTPManagerMockRecorder) TOTPURI(issuer, account, secret any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TOTPURI", reflect.TypeOf((*MockTOTPManager)(nil).TOTPURI), issuer, account, secret)
+}
+
 // ValidateWithCounter mocks base method.
 func (m *MockTOTPManager) ValidateWithCounter(secret, code string) (bool, int64) {
 	m.ctrl.T.Helper()

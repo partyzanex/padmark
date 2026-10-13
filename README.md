@@ -499,6 +499,27 @@ the edit code is even checked; a wrong code on a readable note is `403`.
 
 Always public regardless of auth config: `/login`, `/setup`, `/logout`, `/totp-login`, `/static/*`, `/api`, `/api/openapi.yaml`, `/healthz`, `/readyz`.
 
+### Headless provisioning (accounts)
+
+Everything the `/admin` page does for the first admin is also available without a browser, for
+CI/agent deployments and scripting:
+
+- **`padmark-cli setup`** — bootstraps the first admin (or enrolls via an invite with
+  `--invite <token>`): sends JSON to `POST /setup` and prints the `otpauth://` enrollment URI
+  **exactly once** to stdout — scan it or save it, it cannot be retrieved later. Pass
+  `--username/--password`, or pipe the password via stdin (an interactive TTY without
+  `--password` is refused rather than echoing what you type).
+- **`padmark-cli create-token`** — `POST /api/tokens`: issues a long-lived API token **for the
+  calling user themselves** (any authenticated caller; session or Bearer). Prints the `pmk_…`
+  envelope once; store it in `~/.config/padmark/token` or `PADMARK_TOKEN` yourself. A user may
+  hold at most 20 live tokens (`429` at the cap); revocation stays admin-panel-only.
+- **`padmark-cli create-invite`** — `POST /api/invites` (admin only): prints the single-use
+  invite URL once; the invite expires after 24 h.
+- The JSON variant of `POST /setup` is also documented for machine callers in `/llms.txt`:
+  send `{"username", "password", "invite"?}` with `Accept: application/json` — `201` with
+  `{"otp_auth_uri"}`, `403` once any account exists, `409` taken username, `410` spent invite,
+  `422` weak password. Without `--enable-accounts` the token/invite operations answer `503`.
+
 ### Editing without `edit_code` (owners)
 
 If you were authenticated — a session cookie (web UI) or an API Bearer token (CLI/API) — at the

@@ -33,8 +33,8 @@ type SessionManager interface {
 type OnboardingManager interface {
 	IsEmpty(ctx context.Context) (bool, error)
 	GenerateInvite(ctx context.Context, adminUserID uuid.UUID) (string, error)
-	AcceptInvite(ctx context.Context, token, username, password string) (string, error)
-	AcceptFirstAdmin(ctx context.Context, username, password string) (string, error)
+	AcceptInvite(ctx context.Context, token, username, password string) (*auth.Enrollment, error)
+	AcceptFirstAdmin(ctx context.Context, username, password string) (*auth.Enrollment, error)
 }
 
 // UserAdminManager lists and revokes user accounts for the admin panel.

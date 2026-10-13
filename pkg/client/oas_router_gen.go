@@ -11,19 +11,19 @@ import (
 )
 
 var (
-	rn1AllowedHeaders = map[string]string{
-		"POST": "Content-Type",
-	}
-	rn2AllowedHeaders = map[string]string{
+	rn5AllowedHeaders = map[string]string{
 		"POST": "Content-Type",
 	}
 	rn6AllowedHeaders = map[string]string{
-		"DELETE": "X-Edit-Code",
-	}
-	rn4AllowedHeaders = map[string]string{
 		"POST": "Content-Type",
 	}
-	rn8AllowedHeaders = map[string]string{
+	rn9AllowedHeaders = map[string]string{
+		"DELETE": "X-Edit-Code",
+	}
+	rn7AllowedHeaders = map[string]string{
+		"POST": "Content-Type",
+	}
+	rn11AllowedHeaders = map[string]string{
 		"DELETE": "X-Edit-Code",
 		"PUT":    "Content-Type",
 	}
@@ -80,6 +80,70 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 			switch elem[0] {
+			case 'a': // Prefix: "api/"
+
+				if l := len("api/"); len(elem) >= l && elem[0:l] == "api/" {
+					elem = elem[l:]
+				} else {
+					break
+				}
+
+				if len(elem) == 0 {
+					break
+				}
+				switch elem[0] {
+				case 'i': // Prefix: "invites"
+
+					if l := len("invites"); len(elem) >= l && elem[0:l] == "invites" {
+						elem = elem[l:]
+					} else {
+						break
+					}
+
+					if len(elem) == 0 {
+						// Leaf node.
+						switch r.Method {
+						case "POST":
+							s.handleCreateInviteRequest([0]string{}, elemIsEscaped, w, r)
+						default:
+							s.notAllowed(w, r, notAllowedParams{
+								allowedMethods: "POST",
+								allowedHeaders: nil,
+								acceptPost:     "",
+								acceptPatch:    "",
+							})
+						}
+
+						return
+					}
+
+				case 't': // Prefix: "tokens"
+
+					if l := len("tokens"); len(elem) >= l && elem[0:l] == "tokens" {
+						elem = elem[l:]
+					} else {
+						break
+					}
+
+					if len(elem) == 0 {
+						// Leaf node.
+						switch r.Method {
+						case "POST":
+							s.handleCreateAPITokenRequest([0]string{}, elemIsEscaped, w, r)
+						default:
+							s.notAllowed(w, r, notAllowedParams{
+								allowedMethods: "POST",
+								allowedHeaders: nil,
+								acceptPost:     "",
+								acceptPatch:    "",
+							})
+						}
+
+						return
+					}
+
+				}
+
 			case 'h': // Prefix: "healthz"
 
 				if l := len("healthz"); len(elem) >= l && elem[0:l] == "healthz" {
@@ -120,7 +184,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					default:
 						s.notAllowed(w, r, notAllowedParams{
 							allowedMethods: "POST",
-							allowedHeaders: rn1AllowedHeaders,
+							allowedHeaders: rn5AllowedHeaders,
 							acceptPost:     "application/json",
 							acceptPatch:    "",
 						})
@@ -157,7 +221,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 							default:
 								s.notAllowed(w, r, notAllowedParams{
 									allowedMethods: "POST",
-									allowedHeaders: rn2AllowedHeaders,
+									allowedHeaders: rn6AllowedHeaders,
 									acceptPost:     "application/json",
 									acceptPatch:    "",
 								})
@@ -191,7 +255,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 						default:
 							s.notAllowed(w, r, notAllowedParams{
 								allowedMethods: "DELETE,GET",
-								allowedHeaders: rn6AllowedHeaders,
+								allowedHeaders: rn9AllowedHeaders,
 								acceptPost:     "",
 								acceptPatch:    "",
 							})
@@ -217,7 +281,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					default:
 						s.notAllowed(w, r, notAllowedParams{
 							allowedMethods: "POST",
-							allowedHeaders: rn4AllowedHeaders,
+							allowedHeaders: rn7AllowedHeaders,
 							acceptPost:     "application/json",
 							acceptPatch:    "",
 						})
@@ -261,7 +325,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 						default:
 							s.notAllowed(w, r, notAllowedParams{
 								allowedMethods: "DELETE,GET,PUT",
-								allowedHeaders: rn8AllowedHeaders,
+								allowedHeaders: rn11AllowedHeaders,
 								acceptPost:     "",
 								acceptPatch:    "",
 							})
@@ -397,6 +461,70 @@ func (s *Server) FindPath(method string, u *url.URL) (r Route, _ bool) {
 				break
 			}
 			switch elem[0] {
+			case 'a': // Prefix: "api/"
+
+				if l := len("api/"); len(elem) >= l && elem[0:l] == "api/" {
+					elem = elem[l:]
+				} else {
+					break
+				}
+
+				if len(elem) == 0 {
+					break
+				}
+				switch elem[0] {
+				case 'i': // Prefix: "invites"
+
+					if l := len("invites"); len(elem) >= l && elem[0:l] == "invites" {
+						elem = elem[l:]
+					} else {
+						break
+					}
+
+					if len(elem) == 0 {
+						// Leaf node.
+						switch method {
+						case "POST":
+							r.name = CreateInviteOperation
+							r.summary = "Issue a single-use signup invite link (admin only)"
+							r.operationID = "createInvite"
+							r.operationGroup = ""
+							r.pathPattern = "/api/invites"
+							r.args = args
+							r.count = 0
+							return r, true
+						default:
+							return
+						}
+					}
+
+				case 't': // Prefix: "tokens"
+
+					if l := len("tokens"); len(elem) >= l && elem[0:l] == "tokens" {
+						elem = elem[l:]
+					} else {
+						break
+					}
+
+					if len(elem) == 0 {
+						// Leaf node.
+						switch method {
+						case "POST":
+							r.name = CreateAPITokenOperation
+							r.summary = "Issue an API token for the authenticated caller"
+							r.operationID = "createAPIToken"
+							r.operationGroup = ""
+							r.pathPattern = "/api/tokens"
+							r.args = args
+							r.count = 0
+							return r, true
+						default:
+							return
+						}
+					}
+
+				}
+
 			case 'h': // Prefix: "healthz"
 
 				if l := len("healthz"); len(elem) >= l && elem[0:l] == "healthz" {

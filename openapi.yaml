@@ -83,6 +83,11 @@ tags:
     description: Short-link creation, lookup, and deletion (see the "Short links" section above)
   - name: health
     description: Liveness and readiness probes
+  - name: accounts
+    description: >
+      API tokens and signup invites for `--enable-accounts` deployments. `POST /api/tokens`
+      is callable by any authenticated caller and always issues for themselves; `POST /api/invites`
+      requires an admin.
 
 paths:
   /notes:
@@ -485,6 +490,72 @@ paths:
           description: Storage backend unreachable
           $ref: "#/components/responses/Error"
 
+  /api/tokens:
+    post:
+      operationId: createAPIToken
+      summary: Issue an API token for the authenticated caller
+      description: |
+        Issues a long-lived API bearer key **for the caller themself** — the operation takes no
+        request body and cannot mint a token for another user. Any valid credential works: a
+        TOTP session cookie (browser) or an `Authorization: Bearer <token>` API token.
+
+        The returned `token` is a `pmk_…` envelope (`pmk_` + base64url of
+        `{"url": "<server base url>", "token": "<bearer key>"}`) and is shown **exactly
+        once** — only its SHA-256 hash is stored server-side. A user may hold at most 20 live
+        tokens; when that cap is reached the operation answers `429` (revoke one first —
+        revocation is admin-panel-only today).
+      tags: [accounts]
+      responses:
+        "201":
+          description: Token issued (envelope shown once)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateAPITokenResponse"
+        "401":
+          description: No or unknown credential
+          $ref: "#/components/responses/Error"
+        "429":
+          description: This user already holds the maximum number (20) of API tokens
+          $ref: "#/components/responses/Error"
+        "503":
+          description: Account features not enabled (start with `--enable-accounts`)
+          $ref: "#/components/responses/Error"
+        "500":
+          $ref: "#/components/responses/Error"
+
+  /api/invites:
+    post:
+      operationId: createInvite
+      summary: Issue a single-use signup invite link (admin only)
+      description: |
+        The JSON counterpart of the admin panel's `POST /admin/invite`. Requires an **admin**
+        credential (a non-admin authenticated caller gets `403`). The invite is single-use and
+        expires (24 h); the invitee completes signup through the web setup page or the
+        machine-readable variant of `POST /setup` (send JSON with `Accept: application/json`).
+      tags: [accounts]
+      responses:
+        "201":
+          description: Invite issued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateInviteResponse"
+        "401":
+          description: No or unknown credential
+          $ref: "#/components/responses/Error"
+        "403":
+          description: The caller is authenticated but not an admin
+          $ref: "#/components/responses/Error"
+        "429":
+          description: Rate limit exceeded
+          $ref: "#/components/responses/Error"
+        "503":
+          description: Account features not enabled (start with `--enable-accounts`)
+          $ref: "#/components/responses/Error"
+        "500":
+          $ref: "#/components/responses/Error"
+
 components:
   securitySchemes:
     bearerAuth:
@@ -875,6 +946,28 @@ components:
           type: string
           description: Human-readable error description
           example: note not found
+
+    CreateAPITokenResponse:
+      type: object
+      required: [token]
+      properties:
+        token:
+          type: string
+          description: |
+            `pmk_…` envelope: `pmk_` + base64url of `{"url": "<base>", "token": "<key>"}` —
+            decode it, use `url` as the API base and `token` in the Bearer header. Returned
+            exactly once; only the hash is stored.
+          example: pmk_aHR0cDovL2xvY2FsaG9zdDo4MDgw
+
+    CreateInviteResponse:
+      type: object
+      required: [invite_url]
+      properties:
+        invite_url:
+          type: string
+          format: uri
+          description: Single-use signup link (`{scheme}://{host}/setup?invite={token}`)
+          example: https://padmark.example.com/setup?invite=JmNkn0LdjbMw
 
   responses:
     Error:

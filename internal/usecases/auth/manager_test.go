@@ -14,6 +14,7 @@ import (
 
 	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/infra/crypto"
+	"github.com/pquerna/otp"
 )
 
 var discardLog = slog.New(slog.DiscardHandler) //nolint:gochecknoglobals // test helper
@@ -375,9 +376,14 @@ func (s *ManagerSuite) TestAcceptInvite_ValidToken_CreatesUserAndReturnsQR() {
 		RedeemInvite(gomock.Any(), "good-tok", "newuser", gomock.Any()).
 		Return(nil)
 
-	qrURL, err := s.mgr.AcceptInvite(s.T().Context(), "good-tok", "newuser", testPassword)
+	enr, err := s.mgr.AcceptInvite(s.T().Context(), "good-tok", "newuser", testPassword)
 	s.Require().NoError(err)
-	s.Contains(qrURL, "data:image/png;base64,")
+	s.Contains(enr.QRCode, "data:image/png;base64,")
+	s.Contains(enr.TOTPURI, "otpauth://totp/")
+
+	// The URI must be a parseable otpauth key — CLI consumers rely on that.
+	_, parseErr := otp.NewKeyFromURL(enr.TOTPURI)
+	s.Require().NoError(parseErr)
 }
 
 func (s *ManagerSuite) TestAcceptInvite_RaceLoser_ReturnsErrUserExistsAndKeepsInvite() {
@@ -429,9 +435,10 @@ func (s *ManagerSuite) TestAcceptFirstAdmin_EmptyDB_CreatesAdminAndReturnsQR() {
 		},
 	)
 
-	qrURL, err := s.mgr.AcceptFirstAdmin(s.T().Context(), "firstadmin", testPassword)
+	enr, err := s.mgr.AcceptFirstAdmin(s.T().Context(), "firstadmin", testPassword)
 	s.Require().NoError(err)
-	s.Contains(qrURL, "data:image/png;base64,")
+	s.Contains(enr.QRCode, "data:image/png;base64,")
+	s.Contains(enr.TOTPURI, "otpauth://totp/")
 }
 
 func (s *ManagerSuite) TestAcceptFirstAdmin_RaceLoser_PropagatesErrUserExists() {

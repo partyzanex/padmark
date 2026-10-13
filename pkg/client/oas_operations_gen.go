@@ -6,6 +6,8 @@ package client
 type OperationName = string
 
 const (
+	CreateAPITokenOperation  OperationName = "CreateAPIToken"
+	CreateInviteOperation    OperationName = "CreateInvite"
 	CreateLinkOperation      OperationName = "CreateLink"
 	CreateLinksBulkOperation OperationName = "CreateLinksBulk"
 	CreateNoteOperation      OperationName = "CreateNote"

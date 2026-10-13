@@ -82,11 +82,13 @@ type SecretSealer interface {
 }
 
 // TOTPManager generates TOTP secrets, validates codes (returning the time-step counter used for
-// replay protection), and renders the enrollment QR code. Implemented by infra/crypto.TOTP.
+// replay protection), and renders enrollment material: a machine-readable otpauth URI and the
+// browser-rendered QR code. Implemented by infra/crypto.TOTP.
 type TOTPManager interface {
 	GenerateSecret() (string, error)
 	ValidateWithCounter(secret, code string) (valid bool, counter int64)
 	GenerateQRCode(issuer, account, secret string) (string, error)
+	TOTPURI(issuer, account, secret string) (string, error)
 }
 
 // APITokenStore persists CLI API tokens keyed by their SHA-256 hash. The plain key is never stored.

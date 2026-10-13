@@ -134,6 +134,8 @@ func registerOgenRoutes(mux *http.ServeMux, ogenSrv http.Handler, lockout gcache
 	mux.Handle("DELETE /links/{id}", withFailLockout(lockout, log, ogenSrv))
 	mux.Handle("GET /healthz", ogenSrv)
 	mux.Handle("GET /readyz", ogenSrv)
+	mux.Handle("POST /api/tokens", ogenSrv)
+	mux.Handle("POST /api/invites", ogenSrv)
 }
 
 // registerAllRoutes registers the ogen-served REST API routes plus every concern handler's own
@@ -161,6 +163,12 @@ func registerAllRoutes(mux *http.ServeMux, handler *Handler, ogenSrv http.Handle
 func NewRouter(
 	handler *Handler, ogenHandler *OgenHandler, opts *RouterOptions,
 ) (http.Handler, error) {
+	// The auth seam is optional on OgenHandler; attach it where it exists so the account
+	// endpoints (POST /api/tokens, /api/invites) serve instead of 503-ing.
+	if handler.authMgr != nil {
+		ogenHandler = ogenHandler.WithAuthManager(handler.authMgr)
+	}
+
 	ogenSrv, err := ogenapi.NewServer(ogenHandler, ogenapi.WithErrorHandler(newOgenErrorHandler(handler.log)))
 	if err != nil {
 		return nil, fmt.Errorf("new ogen server: %w", err)
@@ -202,6 +210,7 @@ func wrapMiddleware(
 	}
 
 	stack := withRecovery(handler.log, mux)
+	stack = withRequestOrigin(handler.forcedScheme, opts.TrustedProxies, stack)
 
 	if opts.DisableAPI {
 		stack = withAPIDisabled(handler.log, stack)
@@ -245,6 +254,42 @@ func wrapMiddleware(
 // literal paths.
 func buildNamedRoutes() map[string]struct{} {
 	return domain.ReservedSlugPrefixes()
+}
+
+// requestOrigin carries the scheme+host a request arrived with. Ogen handlers receive only a
+// context, and two of the account operations embed the server's base URL into their one-time
+// responses — the pmk_… token envelope and the invite link. The HTML admin panel builds the
+// same pair from the request directly (web_admin.go); this middleware is its context-borne
+// counterpart.
+type requestOrigin struct {
+	Scheme string
+	Host   string
+}
+
+type originCtxKey struct{}
+
+// withRequestOrigin stores the request's origin in the context. forcedScheme is the
+// operator-forced override (Handler.WithForcedScheme); an empty value defers to
+// requestScheme's TLS/X-Forwarded-Proto detection — same rules as common.scheme.
+func withRequestOrigin(forcedScheme string, trustedProxies []*net.IPNet, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		scheme := forcedScheme
+		if scheme == "" {
+			scheme = requestScheme(r, trustedProxies)
+		}
+
+		origin := requestOrigin{Scheme: scheme, Host: r.Host}
+
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), originCtxKey{}, origin)))
+	})
+}
+
+// originFromCtx returns the stored request origin; zero-valued when the middleware is not
+// installed (callers treat that as an error rather than minting a URL with a broken base).
+func originFromCtx(ctx context.Context) requestOrigin {
+	origin, _ := ctx.Value(originCtxKey{}).(requestOrigin)
+
+	return origin
 }
 
 func withRequestID(next http.Handler) http.Handler {

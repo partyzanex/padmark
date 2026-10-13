@@ -8,6 +8,28 @@ import (
 
 // Handler handles operations described by OpenAPI v3 specification.
 type Handler interface {
+	// CreateAPIToken implements createAPIToken operation.
+	//
+	// Issues a long-lived API bearer key **for the caller themself** — the operation takes no
+	// request body and cannot mint a token for another user. Any valid credential works: a
+	// TOTP session cookie (browser) or an `Authorization: Bearer <token>` API token.
+	// The returned `token` is a `pmk_…` envelope (`pmk_` + base64url of
+	// `{"url": "<server base url>", "token": "<bearer key>"}`) and is shown **exactly
+	// once** — only its SHA-256 hash is stored server-side. A user may hold at most 20 live
+	// tokens; when that cap is reached the operation answers `429` (revoke one first —
+	// revocation is admin-panel-only today).
+	//
+	// POST /api/tokens
+	CreateAPIToken(ctx context.Context) (CreateAPITokenRes, error)
+	// CreateInvite implements createInvite operation.
+	//
+	// The JSON counterpart of the admin panel's `POST /admin/invite`. Requires an **admin**
+	// credential (a non-admin authenticated caller gets `403`). The invite is single-use and
+	// expires (24 h); the invitee completes signup through the web setup page or the
+	// machine-readable variant of `POST /setup` (send JSON with `Accept: application/json`).
+	//
+	// POST /api/invites
+	CreateInvite(ctx context.Context) (CreateInviteRes, error)
 	// CreateLink implements createLink operation.
 	//
 	// Creates a short link and returns it together with the one-time `edit_code`.

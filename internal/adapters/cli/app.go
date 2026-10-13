@@ -31,6 +31,9 @@ func NewApp() *urcli.Command {
 			expandCommand(),
 			deleteLinkCommand(),
 			pingCommand(),
+			setupCommand(),
+			createTokenCommand(),
+			createInviteCommand(),
 		},
 	}
 }

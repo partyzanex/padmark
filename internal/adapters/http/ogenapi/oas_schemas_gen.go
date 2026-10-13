@@ -220,6 +220,80 @@ func (s *BulkLinkResultPrivacy) UnmarshalText(data []byte) error {
 	}
 }
 
+type CreateAPITokenInternalServerError ErrorResponse
+
+func (*CreateAPITokenInternalServerError) createAPITokenRes() {}
+
+// Ref: #/components/schemas/CreateAPITokenResponse
+type CreateAPITokenResponse struct {
+	// `pmk_…` envelope: `pmk_` + base64url of `{"url": "<base>", "token": "<key>"}` —
+	// decode it, use `url` as the API base and `token` in the Bearer header. Returned
+	// exactly once; only the hash is stored.
+	Token string `json:"token"`
+}
+
+// GetToken returns the value of Token.
+func (s *CreateAPITokenResponse) GetToken() string {
+	return s.Token
+}
+
+// SetToken sets the value of Token.
+func (s *CreateAPITokenResponse) SetToken(val string) {
+	s.Token = val
+}
+
+func (*CreateAPITokenResponse) createAPITokenRes() {}
+
+type CreateAPITokenServiceUnavailable ErrorResponse
+
+func (*CreateAPITokenServiceUnavailable) createAPITokenRes() {}
+
+type CreateAPITokenTooManyRequests ErrorResponse
+
+func (*CreateAPITokenTooManyRequests) createAPITokenRes() {}
+
+type CreateAPITokenUnauthorized ErrorResponse
+
+func (*CreateAPITokenUnauthorized) createAPITokenRes() {}
+
+type CreateInviteForbidden ErrorResponse
+
+func (*CreateInviteForbidden) createInviteRes() {}
+
+type CreateInviteInternalServerError ErrorResponse
+
+func (*CreateInviteInternalServerError) createInviteRes() {}
+
+// Ref: #/components/schemas/CreateInviteResponse
+type CreateInviteResponse struct {
+	// Single-use signup link (`{scheme}://{host}/setup?invite={token}`).
+	InviteURL url.URL `json:"invite_url"`
+}
+
+// GetInviteURL returns the value of InviteURL.
+func (s *CreateInviteResponse) GetInviteURL() url.URL {
+	return s.InviteURL
+}
+
+// SetInviteURL sets the value of InviteURL.
+func (s *CreateInviteResponse) SetInviteURL(val url.URL) {
+	s.InviteURL = val
+}
+
+func (*CreateInviteResponse) createInviteRes() {}
+
+type CreateInviteServiceUnavailable ErrorResponse
+
+func (*CreateInviteServiceUnavailable) createInviteRes() {}
+
+type CreateInviteTooManyRequests ErrorResponse
+
+func (*CreateInviteTooManyRequests) createInviteRes() {}
+
+type CreateInviteUnauthorized ErrorResponse
+
+func (*CreateInviteUnauthorized) createInviteRes() {}
+
 type CreateLinkBadRequest ErrorResponse
 
 func (*CreateLinkBadRequest) createLinkRes() {}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/google/uuid"
@@ -24,7 +25,10 @@ type OgenHandler struct {
 	manager     NoteManager
 	linkManager LinkManager
 	pinger      Pinger
-	log         *slog.Logger
+	// authMgr is optional (WithAuthManager): when unset, POST /api/tokens and
+	// POST /api/invites answer 503 (feature not enabled).
+	authMgr AuthManager
+	log     *slog.Logger
 }
 
 // NewOgenHandler creates an OgenHandler with required dependencies.
@@ -426,6 +430,114 @@ func (h *OgenHandler) Readyz(ctx context.Context) (ogenapi.ReadyzRes, error) {
 	}
 
 	return &ogenapi.ReadyzOK{}, nil
+}
+
+// ── account endpoints (POST /api/tokens, POST /api/invites) ──
+
+// CreateAPIToken implements ogenapi.Handler — POST /api/tokens.
+func (h *OgenHandler) CreateAPIToken(ctx context.Context) (ogenapi.CreateAPITokenRes, error) {
+	if h.authMgr == nil {
+		return mapCreateAPITokenError(domain.ErrFeatureNotSupported, h.log), nil
+	}
+
+	// Unreachable per routing (the path requires a credential in the auth middleware), but
+	// guarded defensively: the handler must never mint a token for an unknown user.
+	usr := userFromCtx(ctx)
+	if usr == nil {
+		v := ogenapi.CreateAPITokenUnauthorized(ogenapi.ErrorResponse{Message: msgUnauthorized})
+
+		return &v, nil
+	}
+
+	plain, err := h.authMgr.CreateAPIToken(ctx, usr.ID)
+	if err != nil {
+		return mapCreateAPITokenError(err, h.log), nil
+	}
+
+	envelope, encErr := h.apiTokenEnvelope(ctx, plain)
+	if encErr != nil {
+		return mapCreateAPITokenError(encErr, h.log), nil
+	}
+
+	return &ogenapi.CreateAPITokenResponse{Token: envelope}, nil
+}
+
+// CreateInvite implements ogenapi.Handler — POST /api/invites.
+func (h *OgenHandler) CreateInvite(ctx context.Context) (ogenapi.CreateInviteRes, error) {
+	if h.authMgr == nil {
+		return mapCreateInviteError(domain.ErrFeatureNotSupported, h.log), nil
+	}
+
+	// The gate mirrors requireAdmin (web_admin.go): admin-only issuance. GenerateInvite
+	// re-checks admin in the usecase, so a context carrying a stale identity cannot mint invites.
+	usr := userFromCtx(ctx)
+	if usr == nil || !usr.IsAdmin {
+		v := ogenapi.CreateInviteForbidden(ogenapi.ErrorResponse{Message: "forbidden"})
+
+		return &v, nil
+	}
+
+	tok, err := h.authMgr.GenerateInvite(ctx, usr.ID)
+	if err != nil {
+		return mapCreateInviteError(err, h.log), nil
+	}
+
+	base, err := requestBaseURL(ctx)
+	if err != nil {
+		return mapCreateInviteError(err, h.log), nil
+	}
+
+	inviteURL, parseErr := url.Parse(base + "/setup?invite=" + url.QueryEscape(tok))
+	if parseErr != nil {
+		return mapCreateInviteError(parseErr, h.log), nil
+	}
+
+	return &ogenapi.CreateInviteResponse{InviteURL: *inviteURL}, nil
+}
+
+// mapCreateAPITokenError translates a CreateAPIToken failure into the generated response
+// union. 429 is the per-user token cap (domain.ErrAPITokenLimit), 503 the not-enabled case.
+func mapCreateAPITokenError(err error, log *slog.Logger) ogenapi.CreateAPITokenRes {
+	r := errResp(err)
+
+	switch status, _ := domainErrStatus(err); status {
+	case http.StatusServiceUnavailable:
+		v := ogenapi.CreateAPITokenServiceUnavailable(r)
+
+		return &v
+	case http.StatusTooManyRequests:
+		v := ogenapi.CreateAPITokenTooManyRequests(r)
+
+		return &v
+	default:
+		log.Error("create api token failed", slog.String("error", err.Error()))
+
+		v := ogenapi.CreateAPITokenInternalServerError(ogenapi.ErrorResponse{Message: internalErrorMessage})
+
+		return &v
+	}
+}
+
+// mapCreateInviteError translates a CreateInvite failure into the generated response union.
+func mapCreateInviteError(err error, log *slog.Logger) ogenapi.CreateInviteRes {
+	r := errResp(err)
+
+	switch status, _ := domainErrStatus(err); status {
+	case http.StatusServiceUnavailable:
+		v := ogenapi.CreateInviteServiceUnavailable(r)
+
+		return &v
+	case http.StatusForbidden:
+		v := ogenapi.CreateInviteForbidden(r)
+
+		return &v
+	default:
+		log.Error("create invite failed", slog.String("error", err.Error()))
+
+		v := ogenapi.CreateInviteInternalServerError(ogenapi.ErrorResponse{Message: internalErrorMessage})
+
+		return &v
+	}
 }
 
 // anonymousNoteMutationAllowed reports whether an anonymous caller may attempt to mutate a

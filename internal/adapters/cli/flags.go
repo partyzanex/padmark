@@ -26,6 +26,13 @@ const (
 	// plain BoolFlag: cmd.IsSet distinguishes "not passed" (inherit the server default, omit the
 	// field entirely) from an explicit --direct-redirect=false (force the interstitial).
 	FlagDirectRedirect = "direct-redirect"
+	// FlagUsername (and the account-provisioning flags below) name setup-command inputs.
+	FlagUsername = "username"
+	// FlagPassword is the account password for `setup`. Deliberately no echo-hiding terminal
+	// machinery (that would pull in a TTY dependency): pass the flag, or pipe the password to
+	// stdin — a TTY stdin without the flag is an error, not a visible-echo prompt.
+	FlagPassword = "password"
+	FlagInvite   = "invite"
 )
 
 // Environment variable names.

@@ -24,3 +24,9 @@ func (TOTP) ValidateWithCounter(secret, code string) (valid bool, counter int64)
 func (TOTP) GenerateQRCode(issuer, account, secret string) (string, error) {
 	return GenerateQRCodeDataURL(issuer, account, secret)
 }
+
+// TOTPURI returns the enrollment URI as plain text — the machine-readable variant of
+// GenerateQRCode used by headless provisioning.
+func (TOTP) TOTPURI(issuer, account, secret string) (string, error) {
+	return OTPAuthURI(issuer, account, secret)
+}

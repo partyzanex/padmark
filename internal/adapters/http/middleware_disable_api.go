@@ -20,7 +20,12 @@ const disabledAPIMessage = "До свидания"
 func isDisabledAPIPath(path string) bool {
 	return path == "/notes" || strings.HasPrefix(path, "/notes/") ||
 		path == "/links" || strings.HasPrefix(path, "/links/") ||
-		path == apiDocsPath || path == apiSpecPath || path == llmsTxtPath
+		path == apiDocsPath || path == apiSpecPath || path == llmsTxtPath ||
+		// Account provisioning (self-service token issuance, invite minting) is part of the
+		// same machine surface: --disable-api is the operator's "headless off" switch, and the
+		// middleware runs outside auth, so these reachable-only-with-a-token paths must be
+		// short-circuited like the rest.
+		path == "/api/tokens" || path == "/api/invites"
 }
 
 // withAPIDisabled short-circuits every request under isDisabledAPIPath with a fixed 503 before

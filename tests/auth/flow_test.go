@@ -72,9 +72,9 @@ func (s *AuthFlowSuite) decryptTOTPSecret(usr *domain.User) string {
 func (s *AuthFlowSuite) TestFlow_AcceptFirstAdmin_Login_GetSession() {
 	ctx := s.T().Context()
 
-	qrURL, err := s.mgr.AcceptFirstAdmin(ctx, "root", flowPassword)
+	enr, err := s.mgr.AcceptFirstAdmin(ctx, "root", flowPassword)
 	s.Require().NoError(err)
-	s.Contains(qrURL, "data:image/png;base64,")
+	s.Contains(enr.QRCode, "data:image/png;base64,")
 
 	usr, err := s.Users.GetByUsername(ctx, "root")
 	s.Require().NoError(err)
@@ -144,9 +144,9 @@ func (s *AuthFlowSuite) TestFlow_LegacySealedSecret_MigratesOnLogin() {
 func (s *AuthFlowSuite) TestFlow_AcceptInvite_Login_GetSession() {
 	ctx := s.T().Context()
 
-	qrURL, err := s.mgr.AcceptFirstAdmin(ctx, "admin", flowPassword)
+	enr, err := s.mgr.AcceptFirstAdmin(ctx, "admin", flowPassword)
 	s.Require().NoError(err)
-	s.NotEmpty(qrURL)
+	s.NotEmpty(enr.QRCode)
 
 	admin, err := s.Users.GetByUsername(ctx, "admin")
 	s.Require().NoError(err)
@@ -155,9 +155,10 @@ func (s *AuthFlowSuite) TestFlow_AcceptInvite_Login_GetSession() {
 	s.Require().NoError(err)
 	s.NotEmpty(tok)
 
-	newQR, err := s.mgr.AcceptInvite(ctx, tok, "newuser", flowPassword)
+	inviteEnr, err := s.mgr.AcceptInvite(ctx, tok, "newuser", flowPassword)
 	s.Require().NoError(err)
-	s.Contains(newQR, "data:image/png;base64,")
+	s.Contains(inviteEnr.QRCode, "data:image/png;base64,")
+	s.Contains(inviteEnr.TOTPURI, "otpauth://totp/")
 
 	newUsr, err := s.Users.GetByUsername(ctx, "newuser")
 	s.Require().NoError(err)

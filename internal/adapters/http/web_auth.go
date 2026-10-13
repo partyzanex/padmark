@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/partyzanex/padmark/internal/domain"
+	"github.com/partyzanex/padmark/internal/usecases/auth"
 )
 
 //go:embed templates/change_password.html
@@ -121,7 +122,7 @@ func (h *AuthHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /totp-login", h.guard(withTOTPRateLimit(h.trustedProxies, h.log, h.TOTPLoginHandler)))
 	mux.HandleFunc("POST /logout", h.guard(h.LogoutHandler))
 	mux.HandleFunc("GET /setup", h.SetupPage)
-	mux.HandleFunc("POST /setup", h.guard(h.SetupHandler))
+	mux.HandleFunc("POST /setup", h.setupGuard(h.SetupHandler))
 	mux.HandleFunc("GET /change-password", h.ChangePasswordPage)
 	mux.HandleFunc("POST /change-password", h.guard(h.ChangePasswordHandler))
 }
@@ -321,10 +322,17 @@ func setupErrMsg(err error) string {
 	}
 }
 
-// SetupHandler handles POST /setup — creates user and returns QR code.
+// SetupHandler handles POST /setup — creates user and returns QR code (HTML) or the otpauth
+// enrollment URI (JSON, headless provisioning).
 func (h *AuthHandler) SetupHandler(w http.ResponseWriter, r *http.Request) {
 	if h.authMgr == nil {
 		http.Error(w, "not found", http.StatusNotFound)
+
+		return
+	}
+
+	if negotiate(r) == formatJSON {
+		h.setupJSON(w, r)
 
 		return
 	}
@@ -362,20 +370,20 @@ func (h *AuthHandler) SetupHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var (
-		qrURL    string
-		setupErr error
+		enrollment *auth.Enrollment
+		setupErr   error
 	)
 
 	if token != "" {
-		qrURL, setupErr = h.authMgr.AcceptInvite(r.Context(), token, username, password)
+		enrollment, setupErr = h.authMgr.AcceptInvite(r.Context(), token, username, password)
 	} else {
-		qrURL, setupErr = h.authMgr.AcceptFirstAdmin(r.Context(), username, password)
+		enrollment, setupErr = h.authMgr.AcceptFirstAdmin(r.Context(), username, password)
 	}
 
 	if setupErr != nil {
 		data.Error = setupErrMsg(setupErr)
 	} else {
-		data.QRCode = template.URL(qrURL) //nolint:gosec // data: URL from internal crypto, not user input
+		data.QRCode = template.URL(enrollment.QRCode) //nolint:gosec // data: URL from internal crypto, not user input
 	}
 
 	h.renderSetup(w, r, &data)
@@ -450,6 +458,36 @@ func (h *AuthHandler) ChangePasswordHandler(w http.ResponseWriter, r *http.Reque
 	renderErr := h.changePwTmpl.Execute(w, data)
 	if renderErr != nil {
 		h.log.ErrorContext(r.Context(), "render change password template", "err", renderErr)
+	}
+}
+
+// setupGuard enforces CSRF only for the HTML branch of POST /setup. A JSON client carries no
+// cookie session, and an invite token — when present — is itself the bearer-equivalent
+// credential, so there is no session to forge. The branch is chosen by content negotiation:
+// browsers list text/html first and ?raw=1 resolves to formatPlain, so only machine callers
+// (Accept: application/json, */*, or no Accept header) reach the unguarded JSON path. A
+// scripted caller that previously posted the HTML form with */* never worked anyway — CSRF
+// rejected it — so no working client crosses the branch boundary.
+func (h *AuthHandler) setupGuard(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if negotiate(r) != formatJSON {
+			h.guard(next)(w, r)
+
+			return
+		}
+
+		// A page can still force Accept: application/json via a cross-site fetch. fetch-metadata
+		// flags that: browsers send Sec-Fetch-Site on every request, plain HTTP clients never do.
+		// "none" (direct address-bar) and "same-origin" are the acceptable values.
+		switch site := r.Header.Get("Sec-Fetch-Site"); site {
+		case "", "same-origin", "none":
+		default:
+			writeJSONErrorStatus(w, r, h.log, http.StatusForbidden, "setup requires a same-origin request")
+
+			return
+		}
+
+		next(w, r)
 	}
 }
 

@@ -61,6 +61,8 @@ func domainErrStatus(err error) (status int, message string) {
 		// otherwise-valid-but-unprocessable one — matches the acceptance criteria's literal 400
 		// (see TODO.md's Bug-class checklist, old C4), unlike the 422s above.
 		{domain.ErrInvalidURL, http.StatusBadRequest},
+		{domain.ErrAPITokenLimit, http.StatusTooManyRequests},
+		{domain.ErrFeatureNotSupported, http.StatusServiceUnavailable},
 	}
 
 	for _, entry := range entries {

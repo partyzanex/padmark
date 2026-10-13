@@ -189,6 +189,7 @@ func (s *AuthHandlerSuite) TestTOTPLogin_Success_SetsCookieAndRedirects() {
 	form := withCSRF(url.Values{"username": {"alice"}, "password": {"ValidP@ss12!"}, "code": {"123456"}})
 	req := httptest.NewRequest(http.MethodPost, "/totp-login", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "text/html")
 	req.AddCookie(s.csrfCookie())
 
 	rec := httptest.NewRecorder()
@@ -216,6 +217,7 @@ func (s *AuthHandlerSuite) TestTOTPLogin_Invalid_RedirectsWithError() {
 	form := withCSRF(url.Values{"username": {"alice"}, "password": {"ValidP@ss12!"}, "code": {"000000"}})
 	req := httptest.NewRequest(http.MethodPost, "/totp-login", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "text/html")
 	req.AddCookie(s.csrfCookie())
 
 	rec := httptest.NewRecorder()
@@ -236,6 +238,7 @@ func (s *AuthHandlerSuite) TestTOTPLogin_WithNext_RedirectsToNext() {
 	})
 	req := httptest.NewRequest(http.MethodPost, "/totp-login?next="+next, strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "text/html")
 	req.AddCookie(s.csrfCookie())
 
 	rec := httptest.NewRecorder()
@@ -300,6 +303,7 @@ func (s *AuthHandlerSuite) TestLogout_NoSession_StillRedirects() {
 	form := withCSRF(url.Values{})
 	req := httptest.NewRequest(http.MethodPost, "/logout", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "text/html")
 	req.AddCookie(s.csrfCookie())
 
 	rec := httptest.NewRecorder()
@@ -354,7 +358,7 @@ const testPw = "ValidP@ss12!"
 
 func (s *AuthHandlerSuite) TestSetupHandler_WithInvite_ShowsQR() {
 	s.auth.EXPECT().AcceptInvite(gomock.Any(), "good-tok", "newuser", gomock.Any()).
-		Return("data:image/png;base64,abc123", nil)
+		Return(&auth.Enrollment{QRCode: "data:image/png;base64,abc123"}, nil)
 
 	form := withCSRF(url.Values{
 		"invite":           {"good-tok"},
@@ -364,6 +368,7 @@ func (s *AuthHandlerSuite) TestSetupHandler_WithInvite_ShowsQR() {
 	})
 	req := httptest.NewRequest(http.MethodPost, "/setup", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "text/html")
 	req.AddCookie(s.csrfCookie())
 
 	rec := httptest.NewRecorder()
@@ -377,7 +382,7 @@ func (s *AuthHandlerSuite) TestSetupHandler_WithInvite_ShowsQR() {
 func (s *AuthHandlerSuite) TestSetupHandler_FirstAdmin_ShowsQR() {
 	s.auth.EXPECT().IsEmpty(gomock.Any()).Return(true, nil) // bootstrap allowed: empty DB
 	s.auth.EXPECT().AcceptFirstAdmin(gomock.Any(), "root", gomock.Any()).
-		Return("data:image/png;base64,xyz", nil)
+		Return(&auth.Enrollment{QRCode: "data:image/png;base64,xyz"}, nil)
 
 	form := withCSRF(url.Values{
 		"username":         {"root"},
@@ -386,6 +391,7 @@ func (s *AuthHandlerSuite) TestSetupHandler_FirstAdmin_ShowsQR() {
 	})
 	req := httptest.NewRequest(http.MethodPost, "/setup", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "text/html")
 	req.AddCookie(s.csrfCookie())
 
 	rec := httptest.NewRecorder()
@@ -409,6 +415,7 @@ func (s *AuthHandlerSuite) TestSetupHandler_NoInvite_NotEmpty_Returns403() {
 	})
 	req := httptest.NewRequest(http.MethodPost, "/setup", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "text/html")
 	req.AddCookie(s.csrfCookie())
 
 	rec := httptest.NewRecorder()
@@ -428,6 +435,7 @@ func (s *AuthHandlerSuite) TestSetupHandler_PasswordMismatch_ShowsError() {
 	})
 	req := httptest.NewRequest(http.MethodPost, "/setup", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "text/html")
 	req.AddCookie(s.csrfCookie())
 
 	rec := httptest.NewRecorder()
@@ -440,7 +448,7 @@ func (s *AuthHandlerSuite) TestSetupHandler_PasswordMismatch_ShowsError() {
 
 func (s *AuthHandlerSuite) TestSetupHandler_ExpiredInvite_ShowsError() {
 	s.auth.EXPECT().AcceptInvite(gomock.Any(), "expired", "user", gomock.Any()).
-		Return("", domain.ErrInviteExpired)
+		Return(nil, domain.ErrInviteExpired)
 
 	form := withCSRF(url.Values{
 		"invite":           {"expired"},
@@ -450,6 +458,7 @@ func (s *AuthHandlerSuite) TestSetupHandler_ExpiredInvite_ShowsError() {
 	})
 	req := httptest.NewRequest(http.MethodPost, "/setup", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "text/html")
 	req.AddCookie(s.csrfCookie())
 
 	rec := httptest.NewRecorder()
@@ -462,7 +471,7 @@ func (s *AuthHandlerSuite) TestSetupHandler_ExpiredInvite_ShowsError() {
 
 func (s *AuthHandlerSuite) TestSetupHandler_DuplicateUsername_ShowsError() {
 	s.auth.EXPECT().AcceptInvite(gomock.Any(), "tok", "taken", gomock.Any()).
-		Return("", domain.ErrUserExists)
+		Return(nil, domain.ErrUserExists)
 
 	form := withCSRF(url.Values{
 		"invite":           {"tok"},
@@ -472,6 +481,7 @@ func (s *AuthHandlerSuite) TestSetupHandler_DuplicateUsername_ShowsError() {
 	})
 	req := httptest.NewRequest(http.MethodPost, "/setup", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "text/html")
 	req.AddCookie(s.csrfCookie())
 
 	rec := httptest.NewRecorder()
@@ -1191,6 +1201,7 @@ func (s *AuthHandlerSuite) TestSetupHandler_PasswordMismatch_DoesNotCallAuthMgr(
 	})
 	req := httptest.NewRequest(http.MethodPost, "/setup", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "text/html")
 	req.AddCookie(s.csrfCookie())
 
 	rec := httptest.NewRecorder()
@@ -1222,6 +1233,7 @@ func (s *AuthHandlerSuite) TestCSRFGuard_TokenMismatch_Returns403() {
 	form := url.Values{"username": {"alice"}, "password": {testPw}, "code": {"123456"}, "csrf_token": {"wrong-token"}}
 	req := httptest.NewRequest(http.MethodPost, "/totp-login", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "text/html")
 	req.AddCookie(s.csrfCookie()) // cookie = testCSRFToken, field = "wrong-token"
 
 	rec := httptest.NewRecorder()
@@ -1362,6 +1374,7 @@ func (s *AuthHandlerSuite) TestTOTPLogin_SessionCookieMaxAge_Is30Days() {
 	form := withCSRF(url.Values{"username": {"alice"}, "password": {testPw}, "code": {"123456"}})
 	req := httptest.NewRequest(http.MethodPost, "/totp-login", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "text/html")
 	req.AddCookie(s.csrfCookie())
 
 	rec := httptest.NewRecorder()
@@ -1392,6 +1405,7 @@ func (s *AuthHandlerSuite) TestTOTPLogin_SessionCookieMaxAge_TracksConfiguredSes
 	form := withCSRF(url.Values{"username": {"alice"}, "password": {testPw}, "code": {"123456"}})
 	req := httptest.NewRequest(http.MethodPost, "/totp-login", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "text/html")
 	req.AddCookie(s.csrfCookie())
 
 	rec := httptest.NewRecorder()
