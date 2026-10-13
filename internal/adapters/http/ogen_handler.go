@@ -38,6 +38,7 @@ func NewOgenHandler(manager NoteManager, linkManager LinkManager, pinger Pinger,
 		manager:              manager,
 		linkManager:          linkManager,
 		pinger:               pinger,
+		authMgr:              nil, // optional (WithAuthManager); /api/tokens and /api/invites answer 503 until attached
 		log:                  log,
 	}
 }
