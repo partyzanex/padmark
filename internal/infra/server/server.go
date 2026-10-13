@@ -36,6 +36,13 @@ import (
 const (
 	shutdownTimeout   = 10 * time.Second
 	readHeaderTimeout = 5 * time.Second
+
+	// idleTimeout bounds keep-alive idle time and is set explicitly on every listener.
+	// With the field unset the stdlib falls back to ReadTimeout, which would leave the
+	// auxiliary redirect and metrics listeners (ReadTimeout unset) with no idle limit at
+	// all while the main server silently uses --read-timeout — two different policies by
+	// accident rather than by choice.
+	idleTimeout = 60 * time.Second
 	// minCSRFSecretLen is the minimum accepted length for --csrf-secret; it matches the
 	// 32-byte secret NewRouter generates when the flag is empty.
 	minCSRFSecretLen = 32
@@ -194,12 +201,20 @@ func allowedHostSet(raw string) map[string]struct{} {
 // non-fatal: the redirect listener is a convenience, so a bind error (e.g. :80 already in use)
 // is logged and swallowed rather than cancelling the main server's context — a healthy HTTPS
 // server must not be torn down because the auxiliary redirector could not start.
-func startRedirectServer(ctx context.Context, addr string, allowedHosts map[string]struct{}, log *slog.Logger) {
-	srv := &http.Server{ //nolint:exhaustruct_v5 // unset stdlib fields stay at zero = stdlib defaults apply
+// newRedirectServer builds the plain-HTTP→HTTPS redirect listener. Read and Write timeouts
+// stay unset: the handler writes one redirect line per request and never reads a body, while
+// the shared ReadHeaderTimeout/IdleTimeout constants still bound headers and keep-alive.
+func newRedirectServer(addr string, allowedHosts map[string]struct{}) *http.Server {
+	return &http.Server{ //nolint:exhaustruct_v5 // unset stdlib fields stay at zero = stdlib defaults apply
 		Addr:              addr,
 		Handler:           httpRedirectHandler(allowedHosts),
 		ReadHeaderTimeout: readHeaderTimeout,
+		IdleTimeout:       idleTimeout,
 	}
+}
+
+func startRedirectServer(ctx context.Context, addr string, allowedHosts map[string]struct{}, log *slog.Logger) {
+	srv := newRedirectServer(addr, allowedHosts)
 
 	compat.Append(shutdown.ContextFn(srv.Shutdown))
 
@@ -216,17 +231,25 @@ func startRedirectServer(ctx context.Context, addr string, allowedHosts map[stri
 // separate from the main public-facing router — see ~/.claude/docs/observability.md's "separate
 // internal port" recommendation. Mirrors startRedirectServer's shape and non-fatal-failure
 // handling exactly: a bind error here must not tear down an otherwise healthy main server.
-func startMetricsServer(ctx context.Context, addr string, reg *prometheus.Registry, log *slog.Logger) {
+// newMetricsServer builds the internal Prometheus /metrics listener — same timeout policy as
+// the redirect listener: the shared ReadHeaderTimeout/IdleTimeout constants and no Read/Write
+// timeouts (single small response, no request body).
+func newMetricsServer(addr string, reg *prometheus.Registry) *http.Server {
 	mux := http.NewServeMux()
 
 	metricsOpts := promhttp.HandlerOpts{} //nolint:exhaustruct_v5 // promhttp defaults apply
 	mux.Handle("GET /metrics", promhttp.HandlerFor(reg, metricsOpts))
 
-	srv := &http.Server{ //nolint:exhaustruct_v5 // unset stdlib fields stay at zero = stdlib defaults apply
+	return &http.Server{ //nolint:exhaustruct_v5 // unset stdlib fields stay at zero = stdlib defaults apply
 		Addr:              addr,
 		Handler:           mux,
 		ReadHeaderTimeout: readHeaderTimeout,
+		IdleTimeout:       idleTimeout,
 	}
+}
+
+func startMetricsServer(ctx context.Context, addr string, reg *prometheus.Registry, log *slog.Logger) {
+	srv := newMetricsServer(addr, reg)
 
 	compat.Append(shutdown.ContextFn(srv.Shutdown))
 
@@ -254,6 +277,21 @@ func listenAndServe(srv *http.Server, tlsCert, tlsKey string, cancel context.Can
 	}
 }
 
+// newMainServer builds the primary public-facing server. Read/Write timeouts and the header
+// limit come from operator flags; ReadHeaderTimeout and IdleTimeout are shared constants so
+// the main listener enforces the same policy as the auxiliary redirect and metrics listeners.
+func newMainServer(addr string, router http.Handler, readTimeout, writeTimeout, maxHeaderBytes int) *http.Server {
+	return &http.Server{ //nolint:exhaustruct_v5 // unset stdlib fields stay at zero = stdlib defaults apply
+		Addr:              addr,
+		Handler:           router,
+		ReadTimeout:       time.Duration(readTimeout) * time.Second,
+		WriteTimeout:      time.Duration(writeTimeout) * time.Second,
+		ReadHeaderTimeout: readHeaderTimeout,
+		IdleTimeout:       idleTimeout,
+		MaxHeaderBytes:    maxHeaderBytes,
+	}
+}
+
 func runServer(ctx context.Context, cmd *cli.Command, router http.Handler, log *slog.Logger) error {
 	tlsCert := cmd.String(FlagTLSCert)
 	tlsKey := cmd.String(FlagTLSKey)
@@ -262,14 +300,10 @@ func runServer(ctx context.Context, cmd *cli.Command, router http.Handler, log *
 		return errors.New("--tls-cert and --tls-key must both be set to enable TLS")
 	}
 
-	srv := &http.Server{ //nolint:exhaustruct_v5 // unset stdlib fields stay at zero = stdlib defaults apply
-		Addr:              cmd.String(FlagAddr),
-		Handler:           router,
-		ReadTimeout:       time.Duration(cmd.Int(FlagReadTimeout)) * time.Second,
-		WriteTimeout:      time.Duration(cmd.Int(FlagWriteTimeout)) * time.Second,
-		ReadHeaderTimeout: readHeaderTimeout,
-		MaxHeaderBytes:    cmd.Int(FlagMaxHeaderBytes),
-	}
+	srv := newMainServer(
+		cmd.String(FlagAddr), router,
+		cmd.Int(FlagReadTimeout), cmd.Int(FlagWriteTimeout), cmd.Int(FlagMaxHeaderBytes),
+	)
 
 	compat.Append(shutdown.ContextFn(srv.Shutdown))
 
