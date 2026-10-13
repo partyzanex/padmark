@@ -430,7 +430,18 @@ func newMetricsRegistry() (*prometheus.Registry, *linkmetrics.Metrics, error) {
 func buildHandlers(
 	ctx context.Context, cmd *cli.Command, storage string, db *bun.DB,
 	repo notes.Storage, linkRepo links.Storage, log *slog.Logger, linkMetrics *linkmetrics.Metrics,
+	keyring *crypto.ContentKeyring,
 ) (*adaptershttp.Handler, *adaptershttp.OgenHandler, error) {
+	noteCipher, err := keyring.ForResource("note")
+	if err != nil {
+		return nil, nil, fmt.Errorf("note content cipher: %w", err)
+	}
+
+	linkCipher, err := keyring.ForResource("link")
+	if err != nil {
+		return nil, nil, fmt.Errorf("link content cipher: %w", err)
+	}
+
 	var checker links.NotesChecker
 
 	switch storage {
@@ -446,9 +457,9 @@ func buildHandlers(
 	// other's, protecting nothing.
 	slugLock := lock.NewLocker()
 
-	manager := notes.NewManager(repo, linkRepo, slugLock, render.NewRenderer(), crypto.New(),
+	manager := notes.NewManager(repo, linkRepo, slugLock, render.NewRenderer(), noteCipher,
 		crypto.NewEditCodeHasher(), log, cmd.Bool(FlagCustomSlugs))
-	linkManager := links.NewManager(linkRepo, checker, slugLock, crypto.New(),
+	linkManager := links.NewManager(linkRepo, checker, slugLock, linkCipher,
 		crypto.NewEditCodeHasher(), log, cmd.Bool(FlagCustomSlugs)).
 		WithCache(linkcache.NewDefault(log)).
 		WithMetrics(linkMetrics)
@@ -458,7 +469,7 @@ func buildHandlers(
 	handler := adaptershttp.NewHandler(manager, linkManager, log).
 		WithRevealStore(revealStore)
 
-	handler, err := attachAccountSystem(ctx, cmd, handler, userRepo, inviteRepo, sessionRepo, apiTokenRepo, log)
+	handler, err = attachAccountSystem(ctx, cmd, handler, userRepo, inviteRepo, sessionRepo, apiTokenRepo, log)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -498,6 +509,11 @@ func initRepos(
 func serverAction(ctx context.Context, cmd *cli.Command) error {
 	log := newLogger(cmd.String(FlagLogLevel), cmd.String(FlagLogFormat))
 
+	keyring, err := crypto.LoadContentKeyring(cmd.String(FlagContentKeyring))
+	if err != nil {
+		return fmt.Errorf("load content encryption keys: %w", err)
+	}
+
 	storage := cmd.String(FlagStorage)
 	dsn := cmd.String(FlagDSN)
 
@@ -523,7 +539,7 @@ func serverAction(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	handler, ogenHandler, err := buildHandlers(ctx, cmd, storage, db, repo, linkRepo, log, linkMetrics)
+	handler, ogenHandler, err := buildHandlers(ctx, cmd, storage, db, repo, linkRepo, log, linkMetrics, keyring)
 	if err != nil {
 		return err
 	}

@@ -6,9 +6,9 @@ import (
 	"github.com/google/uuid"
 )
 
-// Link is a short URL redirect. Like Note, its slug is never persisted — TargetURL is encrypted
-// at rest with the slug as key material, and ID is HashSlug(slug), so a DB dump alone cannot
-// recover either the slug or the target URL it protects.
+// Link is a short URL redirect. ID is HashSlug(slug); the plaintext slug is not persisted.
+// New TargetURL values use an installation-key envelope; old values use slug-derived keys
+// until migrated. Predictable slugs can still be guessed against the ID hash.
 type Link struct {
 	CreatedAt time.Time
 	ExpiresAt *time.Time

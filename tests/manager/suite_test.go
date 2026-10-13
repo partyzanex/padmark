@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
+	"testing"
 	"time"
 
 	"github.com/google/uuid"
@@ -15,6 +17,7 @@ import (
 	"github.com/partyzanex/padmark/internal/infra/crypto"
 	"github.com/partyzanex/padmark/internal/infra/lock"
 	"github.com/partyzanex/padmark/internal/infra/render"
+	"github.com/partyzanex/padmark/internal/testutil"
 	"github.com/partyzanex/padmark/internal/usecases/links"
 	"github.com/partyzanex/padmark/internal/usecases/notes"
 )
@@ -43,16 +46,24 @@ type ManagerSuite struct {
 // newManager and newLinkManager take the same slugLock instance for a Manager/LinkManager pair
 // constructed together — see notes.SlugLock's doc comment for why sharing it (not one Locker
 // per manager) is what actually closes the cross-table race.
-func newManager(storage notes.Storage, linkChecker notes.LinksChecker, slugLock *lock.Locker) *notes.Manager {
+func newManager(
+	t *testing.T, storage notes.Storage, linkChecker notes.LinksChecker, slugLock *lock.Locker,
+) *notes.Manager {
+	t.Helper()
+
 	return notes.NewManager(
-		storage, linkChecker, slugLock, render.NewRenderer(), crypto.New(),
+		storage, linkChecker, slugLock, render.NewRenderer(), testutil.ContentEncryptor(t, "note"),
 		crypto.NewEditCodeHasher(), discardLog, true,
 	)
 }
 
-func newLinkManager(storage links.Storage, notesChecker links.NotesChecker, slugLock *lock.Locker) *links.Manager {
+func newLinkManager(
+	t *testing.T, storage links.Storage, notesChecker links.NotesChecker, slugLock *lock.Locker,
+) *links.Manager {
+	t.Helper()
+
 	return links.NewManager(
-		storage, notesChecker, slugLock, crypto.New(), crypto.NewEditCodeHasher(), discardLog, true,
+		storage, notesChecker, slugLock, testutil.ContentEncryptor(t, "link"), crypto.NewEditCodeHasher(), discardLog, true,
 	)
 }
 
@@ -78,6 +89,71 @@ func (s *ManagerSuite) TestCreate_CustomSlug() {
 
 	s.Require().NoError(err)
 	s.Equal("my-slug", result.ID)
+}
+
+// Exercise the bytes persisted by both SQL backends, not only the cipher in isolation.
+func (s *ManagerSuite) TestContentEnvelope_StoredPayloadNeedsKeyringNotSlug() {
+	ctx := s.T().Context()
+	note, err := s.Manager.Create(ctx, &domain.Note{ID: "oncall-runbook", Content: "private payload"})
+	s.Require().NoError(err)
+	link, err := s.LinkManager.Create(ctx, "https://example.com/private", links.CreateOptions{CustomHash: "docs"})
+	s.Require().NoError(err)
+
+	for _, item := range []struct{ table, column, resource, slug, plaintext string }{
+		{"notes", "content", "note", note.ID, "private payload"},
+		{"links", "target_url", "link", link.ID, "https://example.com/private"},
+	} {
+		var stored string
+
+		id := domain.HashSlug(item.slug)
+		s.Require().NoError(s.DB.NewSelect().Table(item.table).Column(item.column).Where("id = ?", id).Scan(ctx, &stored))
+		s.True(strings.HasPrefix(stored, "pmc2$p$test$"))
+		cipher := testutil.ContentEncryptor(s.T(), item.resource).ContentCipher
+		opened, openErr := cipher.Decrypt(stored, id)
+		s.Require().NoError(openErr)
+		s.Equal(item.plaintext, opened)
+		_, legacyErr := crypto.New().Decrypt(stored, item.slug)
+		s.Require().Error(legacyErr)
+
+		_, wrongIDErr := cipher.Decrypt(stored, domain.HashSlug("different-row"))
+		s.Require().Error(wrongIDErr)
+	}
+}
+
+func (s *ManagerSuite) TestContentEnvelope_LegacyReadAndNoteUpdate() {
+	ctx := s.T().Context()
+	note, err := s.Manager.Create(ctx, &domain.Note{ID: "legacy-note", Content: "old content"})
+	s.Require().NoError(err)
+
+	id := domain.HashSlug(note.ID)
+	legacy, err := crypto.New().Encrypt("old content", note.ID)
+	s.Require().NoError(err)
+	_, err = s.DB.NewUpdate().Table("notes").Set("content = ?", legacy).Where("id = ?", id).Exec(ctx)
+	s.Require().NoError(err)
+	peeked, err := s.Manager.Peek(ctx, note.ID)
+	s.Require().NoError(err)
+	s.Equal("old content", peeked.Content)
+
+	var stored string
+	s.Require().NoError(s.DB.NewSelect().Table("notes").Column("content").Where("id = ?", id).Scan(ctx, &stored))
+	s.Equal(legacy, stored, "Peek must not perform a hidden migration")
+	_, err = s.Manager.Update(ctx, note.ID, note.EditCode, uuid.Nil, &domain.Note{Content: "updated"})
+	s.Require().NoError(err)
+	s.Require().NoError(s.DB.NewSelect().Table("notes").Column("content").Where("id = ?", id).Scan(ctx, &stored))
+	opened, err := testutil.ContentEncryptor(s.T(), "note").ContentCipher.Decrypt(stored, id)
+	s.Require().NoError(err)
+	s.Equal("updated", opened)
+
+	link, err := s.LinkManager.Create(ctx, "https://example.com/legacy", links.CreateOptions{})
+	s.Require().NoError(err)
+	legacyURL, err := crypto.New().Encrypt(link.TargetURL, link.ID)
+	s.Require().NoError(err)
+	_, err = s.DB.NewUpdate().Table("links").Set("target_url = ?", legacyURL).
+		Where("id = ?", domain.HashSlug(link.ID)).Exec(ctx)
+	s.Require().NoError(err)
+	redirect, err := s.LinkManager.Redirect(ctx, link.ID)
+	s.Require().NoError(err)
+	s.Equal("https://example.com/legacy", redirect.TargetURL)
 }
 
 func (s *ManagerSuite) TestCreate_InvalidSlug() {
@@ -562,7 +638,7 @@ func (s *ManagerSuite) TestCrossTableSlugUniqueness_ConcurrentCreate() {
 // TestLink_TargetURLIsEncryptedAtRest is the concrete verification behind the acceptance
 // criteria's "DB dump of the links table contains no plaintext target URLs" — it bypasses
 // LinkManager's own decrypt path (Peek/Redirect always decrypt) and reads the raw stored column
-// directly via DB, using the real crypto.New() encryptor (not a passthrough test double, unlike
+// directly via DB, using the real content envelope encryptor (not a passthrough test double, unlike
 // links.Manager's own unit tests).
 func (s *ManagerSuite) TestLink_TargetURLIsEncryptedAtRest() {
 	ctx := s.T().Context()
@@ -586,12 +662,8 @@ func (s *ManagerSuite) TestLink_TargetURLIsEncryptedAtRest() {
 	s.NotContains(stored, "example.com", "ciphertext must not leak any substring of the plaintext URL")
 }
 
-// TestLink_CreateThenRedirect_RealCrypto_RoundTrips is a Create→Peek→Redirect round trip against
-// real encryption (crypto.New(), not the unit tests' passthroughEncryptor). links.Manager.Peek
-// and Redirect decrypt using the slug as key material, and the slug must be pinned onto the
-// fetched row (link.ID = slug) BEFORE decrypting, not after — a passthrough encryptor can't catch
-// getting that order wrong (it ignores the key entirely), so this is the one place in the test
-// suite that actually exercises the real key derivation end to end.
+// TestLink_CreateThenRedirect_RealCrypto_RoundTrips exercises the production cipher,
+// including the ID/type binding that a passthrough test encryptor cannot validate.
 func (s *ManagerSuite) TestLink_CreateThenRedirect_RealCrypto_RoundTrips() {
 	ctx := s.T().Context()
 

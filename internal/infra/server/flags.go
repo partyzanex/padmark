@@ -36,6 +36,7 @@ const (
 	FlagDirectRedirect   = "direct-redirect"
 	FlagMetricsAddr      = "metrics-addr"
 	FlagCSRFSecret       = "csrf-secret"
+	FlagContentKeyring   = "content-keyring-file"
 )
 
 // Env vars used to configure the service (prefix: PADMARK_*).
@@ -68,6 +69,7 @@ const (
 	EnvDirectRedirect   = "PADMARK_DIRECT_REDIRECT"
 	EnvMetricsAddr      = "PADMARK_METRICS_ADDR"
 	EnvCSRFSecret       = "PADMARK_CSRF_SECRET" //nolint:gosec // G101: env var name, not an inline credential
+	EnvContentKeyring   = "PADMARK_CONTENT_KEYRING_FILE"
 )
 
 // Default values for all flags.
@@ -99,6 +101,11 @@ var DefaultSessionTTL = int(auth.DefaultSessionTTL.Seconds())
 // appFlags returns the full flag set for the serve subcommand.
 func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
 	return []cli.Flag{
+		&cli.StringFlag{
+			Name:    FlagContentKeyring,
+			Sources: cli.EnvVars(EnvContentKeyring),
+			Usage:   "Required JSON keyring file for content encryption; persist and back up separately from the database",
+		},
 		&cli.StringFlag{
 			Name:    FlagAddr,
 			Sources: cli.EnvVars(EnvAddr),
@@ -149,8 +156,8 @@ func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
 			Value:   false,
 			Usage: "Allow user-supplied human-readable slugs at note creation (e.g. project/GUIDE.md) " +
 				"and at short-link creation (e.g. launch-2026, single segment only). " +
-				"Off by default: only random slugs are issued, since a custom slug is low-entropy " +
-				"content-encryption key material. Enable for internal/trusted deployments",
+				"Off by default because human-readable public URLs are easier to guess. " +
+				"New content encryption keys are independent of the slug",
 		},
 		&cli.IntFlag{
 			Name:    FlagReadTimeout,

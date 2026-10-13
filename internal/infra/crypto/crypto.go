@@ -19,8 +19,8 @@ const aesKeySize = 32
 
 const hkdfInfo = "padmark-content-v1"
 
-// Encryptor encrypts and decrypts note content using AES-256-GCM.
-// The key is derived from the note slug via HKDF-SHA256.
+// Encryptor is the legacy HKDF-based primitive, retained for old content and the
+// password-keyed TOTP Sealer. New note/link writes must use ContentCipher instead.
 type Encryptor struct{}
 
 // New returns a new Encryptor.

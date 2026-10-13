@@ -4,16 +4,12 @@ package integration
 
 import (
 	"context"
-	"database/sql"
 	"log/slog"
 	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect/sqlitedialect"
-	"github.com/uptrace/bun/driver/sqliteshim"
 
 	clicmd "github.com/partyzanex/padmark/internal/adapters/cli"
 	adaptershttp "github.com/partyzanex/padmark/internal/adapters/http"
@@ -22,6 +18,7 @@ import (
 	"github.com/partyzanex/padmark/internal/infra/lock"
 	"github.com/partyzanex/padmark/internal/infra/render"
 	sqliterepo "github.com/partyzanex/padmark/internal/infra/storage/sqlite"
+	"github.com/partyzanex/padmark/internal/testutil"
 	"github.com/partyzanex/padmark/internal/usecases/auth"
 	"github.com/partyzanex/padmark/internal/usecases/links"
 	"github.com/partyzanex/padmark/internal/usecases/notes"
@@ -37,13 +34,11 @@ const apiFlowPassword = "FlowP@ss123!"
 func TestAPITokenFlow_AdminIssuesKey_CLICreatesNote(t *testing.T) {
 	ctx := context.Background()
 
-	// ── storage: fresh shared-cache in-memory DB with FK enforcement ──
-	sqldb, err := sql.Open(sqliteshim.DriverName(),
-		"file:apitokenflow?mode=memory&cache=shared&_busy_timeout=5000&_pragma=foreign_keys(1)")
+	// ── storage: fresh shared-cache in-memory DB, pragmas (incl. FK enforcement) via Open ──
+	db, err := sqliterepo.Open("file:apitokenflow?mode=memory&cache=shared")
 	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, sqldb.Close()) })
+	t.Cleanup(func() { require.NoError(t, db.Close()) })
 
-	db := bun.NewDB(sqldb, sqlitedialect.New())
 	_, err = sqliterepo.Migrate(ctx, db)
 	require.NoError(t, err)
 
@@ -72,7 +67,7 @@ func TestAPITokenFlow_AdminIssuesKey_CLICreatesNote(t *testing.T) {
 		sqliterepo.NewLinkRepository(db, slog.Default()),
 		slugLock,
 		render.NewRenderer(),
-		crypto.New(),
+		testutil.ContentEncryptor(t, "note"),
 		crypto.NewEditCodeHasher(),
 		log,
 		false,
@@ -81,7 +76,7 @@ func TestAPITokenFlow_AdminIssuesKey_CLICreatesNote(t *testing.T) {
 		sqliterepo.NewLinkRepository(db, slog.Default()),
 		sqliterepo.NewNoteRepository(db),
 		slugLock,
-		crypto.New(),
+		testutil.ContentEncryptor(t, "link"),
 		crypto.NewEditCodeHasher(),
 		log,
 		false,

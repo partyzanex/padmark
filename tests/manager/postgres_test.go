@@ -66,8 +66,8 @@ func (s *PostgresManagerSuite) SetupTest() {
 
 	slugLock := lock.NewLocker()
 
-	s.Manager = newManager(pgrepo.NewNoteRepository(s.db), pgrepo.NewLinkRepository(s.db, slog.Default()), slugLock)
-	s.LinkManager = newLinkManager(
+	s.Manager = newManager(s.T(), pgrepo.NewNoteRepository(s.db), pgrepo.NewLinkRepository(s.db, slog.Default()), slugLock)
+	s.LinkManager = newLinkManager(s.T(),
 		pgrepo.NewLinkRepository(s.db, slog.Default()), pgrepo.NewNoteRepository(s.db), slugLock,
 	)
 	s.RevealStore = pgrepo.NewRevealRepository(s.db, slog.Default())

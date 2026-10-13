@@ -27,8 +27,8 @@ var (
 // passthroughEncryptor is a test double that returns content unchanged.
 type passthroughEncryptor struct{}
 
-func (passthroughEncryptor) Encrypt(pt, _ string) (string, error) { return pt, nil }
-func (passthroughEncryptor) Decrypt(ct, _ string) (string, error) { return ct, nil }
+func (passthroughEncryptor) Encrypt(pt, _ string) (string, error)    { return pt, nil }
+func (passthroughEncryptor) Decrypt(ct, _, _ string) (string, error) { return ct, nil }
 
 // identityHasher is a test double that stores and compares edit codes as plaintext.
 type identityHasher struct{}
@@ -40,7 +40,7 @@ func (identityHasher) Verify(hash, code string) bool    { return hash == code }
 type failingEncryptor struct{}
 
 func (failingEncryptor) Encrypt(pt, _ string) (string, error) { return pt, nil }
-func (failingEncryptor) Decrypt(_, _ string) (string, error) {
+func (failingEncryptor) Decrypt(_, _, _ string) (string, error) {
 	return "", errors.New("decryption failed")
 }
 
@@ -48,7 +48,7 @@ func (failingEncryptor) Decrypt(_, _ string) (string, error) {
 type prefixEncryptor struct{}
 
 func (prefixEncryptor) Encrypt(pt, _ string) (string, error) { return "enc:" + pt, nil }
-func (prefixEncryptor) Decrypt(ct, _ string) (string, error) {
+func (prefixEncryptor) Decrypt(ct, _, _ string) (string, error) {
 	return strings.TrimPrefix(ct, "enc:"), nil
 }
 
@@ -61,8 +61,8 @@ func (prefixHasher) Verify(hash, code string) bool    { return hash == "hash:"+c
 // errEncryptor fails on Encrypt (Decrypt passes through).
 type errEncryptor struct{}
 
-func (errEncryptor) Encrypt(string, string) (string, error) { return "", errors.New("encrypt boom") }
-func (errEncryptor) Decrypt(ct, _ string) (string, error)   { return ct, nil }
+func (errEncryptor) Encrypt(string, string) (string, error)  { return "", errors.New("encrypt boom") }
+func (errEncryptor) Decrypt(ct, _, _ string) (string, error) { return ct, nil }
 
 // noopSlugLock is a test double that grants every lock immediately — these tests exercise
 // business logic in isolation, never two concurrent Create calls, so nothing here needs the

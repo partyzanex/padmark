@@ -115,6 +115,20 @@ cached at all (so the "exactly once" guarantee is never affected by caching).
 
 ## Quick start
 
+Create an installation keyring **once**, outside the repository, before starting the server:
+
+```bash
+install -d -m 700 "$HOME/.config/padmark"
+export PADMARK_CONTENT_KEYRING_FILE="$HOME/.config/padmark/content-keys.json"
+(umask 077; set -C; printf '{"active":"k1","keys":{"k1":"%s"}}\n' \
+  "$(openssl rand -base64 32)" > "$PADMARK_CONTENT_KEYRING_FILE")
+```
+
+The command refuses to overwrite an existing file. Keep this file for subsequent starts and
+back it up separately from the database: losing its keys makes new encrypted content unreadable.
+All replicas sharing a database need the same keyring. You can also pass its path with
+`--content-keyring-file`. The server rejects a missing or malformed keyring before opening the DB.
+
 ### SQLite (simplest)
 
 ```bash
@@ -141,11 +155,18 @@ docker run -d \
   --name padmark \
   -p 8080:8080 \
   -v padmark_data:/data \
+  --mount "type=bind,src=$PADMARK_CONTENT_KEYRING_FILE,dst=/run/secrets/content-keys.json,readonly" \
+  -e PADMARK_CONTENT_KEYRING_FILE=/run/secrets/content-keys.json \
   -e PADMARK_DSN=/data/padmark.db \
   partydev/padmark:latest
 ```
 
 Open `http://localhost:8080`.
+
+The image runs as UID/GID `65534`. Give that UID read access to the mounted key file;
+on Linux, use a dedicated copy owned by `65534:65534` with mode `0400`, and set the host's
+`PADMARK_CONTENT_KEYRING_FILE` to that copy. Keep it outside the build context and never bake
+the key into the image. The same file-permission requirement applies to Compose secrets below.
 
 **PostgreSQL (Compose):**
 
@@ -180,6 +201,9 @@ services:
       PADMARK_DSN: "postgres://padmark:padmark@db:5432/padmark?sslmode=disable"
       PADMARK_ADDR: ":8080"
       PADMARK_LOG_FORMAT: json
+      PADMARK_CONTENT_KEYRING_FILE: /run/secrets/padmark_content_keys
+    secrets:
+      - padmark_content_keys
     depends_on:
       db:
         condition: service_healthy
@@ -192,6 +216,10 @@ networks:
 
 volumes:
   db_data:
+
+secrets:
+  padmark_content_keys:
+    file: ${PADMARK_CONTENT_KEYRING_FILE:?Set the host keyring file path}
 ```
 
 This file is also included in the repo as [`docker-compose.yml`](docker-compose.yml).
@@ -541,6 +569,22 @@ note's `privacy` level.
 ### Security at rest
 
 - Note content and short-link target URLs are **encrypted at rest**.
+- New writes use the `pmc2$p$…` envelope: each write generates a random 256-bit data key,
+  encrypts the payload with AES-256-GCM, and encrypts that data key with the active installation
+  key. The record's hashed ID and resource type authenticate the ciphertext; slugs do not
+  derive either encryption key. Titles and other metadata remain unencrypted.
+- Existing unversioned ciphertext remains readable using its legacy slug-derived key.
+  Updating a note rewrites its content in the new format; reading it does not migrate it.
+  Existing links retain the old format until a separate migration is performed. Bulk migration,
+  key-check metadata and DEK rewrapping commands are not implemented yet. Existing database
+  dumps/backups and untouched legacy rows retain their previous security properties.
+- The keyring JSON has an `active` key ID and a `keys` object mapping IDs to base64-encoded
+  **32-byte random keys**. Retain old keys when changing the active ID, including for backups;
+  distribute new read keys to every replica before switching writers. Unknown or incorrect
+  keys never fall back to legacy decryption for versioned data. Key bytes are validated at
+  startup, but matching them against existing records is currently checked on reads.
+  Never exceed `2^32` GCM encryptions per installation key across all replicas; replace it
+  before that limit. The cipher accepts payloads up to 64 MiB; the HTTP body limit is usually lower.
 - Passwords and `edit_code`s are hashed with **argon2id**.
 - Each user's TOTP secret is encrypted under an argon2id key derived from their password, and
   the stored value records the cost it was derived at (`v1$<memory>$<time>$<threads>$…`). That
@@ -561,6 +605,7 @@ note's `privacy` level.
 | `--addr` | `PADMARK_ADDR` | `:8080` | Listen address |
 | `--storage` | `PADMARK_STORAGE` | `sqlite` | `sqlite` or `postgres` |
 | `--dsn` | `PADMARK_DSN` | `padmark.db` | DB path or connection string |
+| `--content-keyring-file` | `PADMARK_CONTENT_KEYRING_FILE` | required | Path to the persisted JSON keyring for note/link encryption; mount as a secret and back up separately from the DB |
 | `--enable-accounts` | `PADMARK_ENABLE_ACCOUNTS` | `false` | Enable the TOTP account system (`/setup`, `/login`, `/admin`, privacy-level gating); off = fully public |
 | `--disable-api` | `PADMARK_DISABLE_API` | `false` | Disable the REST/JSON API (`/notes*`, `/links*`, `/api`, `/api/openapi.yaml`): every request to it gets `503` with `{"message": "До свидания"}`, before auth or any handler runs. The web UI (incl. `/r/{id}`) and `/healthz`, `/readyz` keep working |
 | `--totp-issuer` | `PADMARK_TOTP_ISSUER` | `padmark` | TOTP issuer shown in the authenticator app |
@@ -583,7 +628,7 @@ note's `privacy` level.
 | `--log-format` | `PADMARK_LOG_FORMAT` | `json` | `json` or `text` |
 | `--trusted-proxies` | `PADMARK_TRUSTED_PROXIES` | — | Proxy CIDRs/IPs whose `X-Forwarded-For` / `X-Real-IP` is believed when resolving the real client IP; also the addresses whose `X-Forwarded-Proto` is trusted when building absolute links (note URLs, invite links, API-token envelopes). Set it to the proxy's own addresses and nothing wider — see [Getting `--trusted-proxies` wrong](#getting---trusted-proxies-wrong) |
 | `--public-scheme` | `PADMARK_PUBLIC_SCHEME` | — | Force `http` or `https` for absolute links back to this server, bypassing TLS/`X-Forwarded-Proto` detection; use this instead of `--trusted-proxies` when the proxy's IP isn't stable (cloud load balancers, k8s ingress) |
-| `--custom-slugs` | `PADMARK_CUSTOM_SLUGS` | `false` | Allow user-supplied human-readable slugs/link aliases (e.g. `project/GUIDE.md`) at creation. Off by default: only random slugs are issued, since a custom slug is low-entropy content-encryption key material. Enable for internal/trusted deployments. A slug's first path segment must not be a reserved route name: `login`, `setup`, `logout`, `totp-login`, `admin`, `api`, `success`, `healthz`, `readyz`, `notes`, `edit`, `change-password`, `static`, `links`, `r` |
+| `--custom-slugs` | `PADMARK_CUSTOM_SLUGS` | `false` | Allow user-supplied human-readable slugs/link aliases (e.g. `project/GUIDE.md`) at creation. Off by default because public human-readable URLs are easy to guess. New content keys are independent of the slug; existing legacy ciphertext keeps its old protection until migrated. A slug's first path segment must not be a reserved route name: `login`, `setup`, `logout`, `totp-login`, `admin`, `api`, `success`, `healthz`, `readyz`, `notes`, `edit`, `change-password`, `static`, `links`, `r` |
 | `--direct-redirect` | `PADMARK_DIRECT_REDIRECT` | `true` | `GET /r/{id}` behavior for short links: `true` issues an immediate `301` to the target URL; `false` renders an interstitial page (meta-refresh + `<noscript>` fallback) showing the destination before redirecting |
 | `--metrics-addr` | `PADMARK_METRICS_ADDR` | — | Address for a separate internal Prometheus `/metrics` listener (e.g. `:9090`); empty (default) disables it entirely. Exposes `padmark_links_created_total`, `padmark_links_redirects_total`, `padmark_links_collisions_total`, plus standard Go/process collectors. Bind this to a private interface only — metrics are never served on the main, public-facing listener |
 

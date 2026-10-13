@@ -10,6 +10,7 @@ coverage.txt
 coverage.xml
 padmark.db
 .env
+content-keys.json
 padmark-cli
 padmark-server
 .serena/

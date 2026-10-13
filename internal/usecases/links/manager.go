@@ -49,13 +49,12 @@ type SlugLock interface {
 	Lock(ctx context.Context, key string) (unlock func(), err error)
 }
 
-// Encryptor encrypts and decrypts a link's target URL using the slug as key material. Declared
-// here, not imported from the notes usecase package: a usecase package may only import domain +
-// stdlib, never another usecase package. crypto.New() already satisfies this interface by
-// structural typing, so no infra changes are needed to share the one concrete implementation.
+// Encryptor writes content using installation keys and the stored record ID as authenticated
+// context. legacySlug is only for reading old records; new ciphertext needs no slug to decrypt.
+// The interface lives at its consumer to keep the usecase independent of crypto infrastructure.
 type Encryptor interface {
-	Encrypt(plaintext, key string) (string, error)
-	Decrypt(ciphertext, key string) (string, error)
+	Encrypt(plaintext, recordID string) (string, error)
+	Decrypt(ciphertext, recordID, legacySlug string) (string, error)
 }
 
 // EditCodeHasher hashes and verifies link edit codes.
@@ -264,18 +263,16 @@ func (m *Manager) Create(ctx context.Context, targetURL string, opts CreateOptio
 	return link, nil
 }
 
-// decryptTargetURL decrypts link.TargetURL in place using the slug (link.ID) as the key. Any
-// decryption failure means the caller lacks the correct slug (or the stored data is corrupt) —
-// either way the link is inaccessible, so it is collapsed to domain.ErrNotFound (avoids an
-// existence oracle). Mirrors notes' decryptContent exactly, including the corrupt-vs-wrong-slug
-// log-level split.
+// decryptTargetURL authenticates the record ID and resource type before decrypting.
+// The slug is supplied separately only for legacy records. Errors map to ErrNotFound
+// as on the note path, so callers cannot use key failures as an existence oracle.
 func decryptTargetURL(ctx context.Context, enc Encryptor, log *slog.Logger, link *domain.Link) error {
-	plaintext, err := enc.Decrypt(link.TargetURL, link.ID)
+	plaintext, err := enc.Decrypt(link.TargetURL, domain.HashSlug(link.ID), link.ID)
 	if err != nil {
 		if errors.Is(err, domain.ErrMalformedCiphertext) {
 			log.ErrorContext(ctx, "stored target url is corrupt", "id", link.ID, "err", err)
 		} else {
-			log.WarnContext(ctx, "target url decryption failed (likely wrong slug)", "id", link.ID, "err", err)
+			log.WarnContext(ctx, "target url decryption failed", "id", link.ID, "err", err)
 		}
 
 		return domain.ErrNotFound
@@ -391,7 +388,7 @@ func (m *Manager) persistLink(
 		link.EditCode = plaintextCode
 	}()
 
-	encrypted, encErr := m.encryptor.Encrypt(validURL, slug)
+	encrypted, encErr := m.encryptor.Encrypt(validURL, domain.HashSlug(slug))
 	if encErr != nil {
 		return fmt.Errorf("encrypt target url: %w", encErr)
 	}

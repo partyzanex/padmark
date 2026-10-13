@@ -18,8 +18,8 @@ import (
 // notes.passthroughEncryptor.
 type passthroughEncryptor struct{}
 
-func (passthroughEncryptor) Encrypt(pt, _ string) (string, error) { return pt, nil }
-func (passthroughEncryptor) Decrypt(ct, _ string) (string, error) { return ct, nil }
+func (passthroughEncryptor) Encrypt(pt, _ string) (string, error)    { return pt, nil }
+func (passthroughEncryptor) Decrypt(ct, _, _ string) (string, error) { return ct, nil }
 
 // identityHasher is a test double that stores and compares edit codes as plaintext.
 type identityHasher struct{}
@@ -31,7 +31,7 @@ func (identityHasher) Verify(hash, code string) bool    { return hash == code }
 type failingEncryptor struct{}
 
 func (failingEncryptor) Encrypt(pt, _ string) (string, error) { return pt, nil }
-func (failingEncryptor) Decrypt(_, _ string) (string, error) {
+func (failingEncryptor) Decrypt(_, _, _ string) (string, error) {
 	return "", errors.New("decryption failed")
 }
 

@@ -51,10 +51,12 @@ type Renderer interface {
 	RenderPlain(content string) (string, error)
 }
 
-// Encryptor encrypts and decrypts note content using the note's ID as key material.
+// Encryptor writes content using installation keys and the stored record ID as authenticated
+// context. legacySlug is only for reading old records; new ciphertext needs no slug to decrypt.
+// The interface lives at its consumer to keep the usecase independent of crypto infrastructure.
 type Encryptor interface {
-	Encrypt(plaintext, key string) (string, error)
-	Decrypt(ciphertext, key string) (string, error)
+	Encrypt(plaintext, recordID string) (string, error)
+	Decrypt(ciphertext, recordID, legacySlug string) (string, error)
 }
 
 // EditCodeHasher hashes and verifies note edit codes.
@@ -82,7 +84,7 @@ type Manager struct {
 
 // NewManager creates a new Manager with required dependencies. allowCustomSlugs enables
 // user-supplied slugs; when false, a create request carrying a slug is rejected with
-// domain.ErrCustomSlugDisabled (a custom slug is low-entropy content-encryption key material).
+// domain.ErrCustomSlugDisabled (custom public URLs are easier to guess).
 // slugLock must be the same instance passed to the paired links.Manager — see SlugLock's doc
 // comment for why.
 func NewManager(
@@ -170,7 +172,7 @@ func (m *Manager) Create(ctx context.Context, note *domain.Note) (*domain.Note, 
 	note.CreatedAt = now
 	note.UpdatedAt = now
 
-	encrypted, encErr := m.encryptor.Encrypt(note.Content, slug)
+	encrypted, encErr := m.encryptor.Encrypt(note.Content, domain.HashSlug(slug))
 	if encErr != nil {
 		return nil, fmt.Errorf("encrypt content: %w", encErr)
 	}
@@ -357,7 +359,7 @@ func (m *Manager) Update(
 		return nil, err
 	}
 
-	note.Content, err = m.encryptor.Encrypt(note.Content, id)
+	note.Content, err = m.encryptor.Encrypt(note.Content, dbID)
 	if err != nil {
 		return nil, fmt.Errorf("encrypt content: %w", err)
 	}
@@ -488,23 +490,20 @@ func (m *Manager) resolveUniqueSlug(
 	return slug, unlock, nil
 }
 
-// decryptContent decrypts note.Content in place using the slug (note.ID) as the key.
-// The content key is derived from the slug, so any decryption failure means the caller
-// lacks the correct slug (or the stored data is corrupt) — either way the note is
-// inaccessible, so it is collapsed to domain.ErrNotFound (also avoids an existence oracle).
-// Genuine data corruption (malformed ciphertext) is logged at error level to distinguish it
-// from an ordinary wrong-slug miss, which is expected and logged at warn level.
+// decryptContent authenticates the stored record ID and decrypts content. The original
+// slug is passed separately only for legacy rows. Failed authentication/key lookup is
+// collapsed to ErrNotFound to preserve the existing non-disclosure contract.
 //
 // A free function rather than a Manager method so both Manager and burner (burn.go) — which
 // hold separate copies of the same encryptor/log collaborators — can decrypt without one
 // depending on the other.
 func decryptContent(ctx context.Context, enc Encryptor, log *slog.Logger, note *domain.Note) error {
-	plaintext, err := enc.Decrypt(note.Content, note.ID)
+	plaintext, err := enc.Decrypt(note.Content, domain.HashSlug(note.ID), note.ID)
 	if err != nil {
 		if errors.Is(err, domain.ErrMalformedCiphertext) {
 			log.ErrorContext(ctx, "stored content is corrupt", "id", note.ID, "err", err)
 		} else {
-			log.WarnContext(ctx, "content decryption failed (likely wrong slug)", "id", note.ID, "err", err)
+			log.WarnContext(ctx, "content decryption failed", "id", note.ID, "err", err)
 		}
 
 		return domain.ErrNotFound

@@ -70,17 +70,15 @@ type Note struct {
 
 // HashSlug returns the SHA-256 hex digest of slug, used as the database primary key (for notes)
 // and as the reveal-token note identifier (for burn-after-reading confirmation) — anywhere the
-// plaintext slug, which doubles as content-encryption key material, must not be persisted.
+// plaintext URL identifier must not be persisted. New content envelopes authenticate this
+// identifier as AAD but derive no encryption keys from it.
 // It lives here rather than in internal/infra/crypto because both internal/usecases/notes and
 // internal/adapters/http need it and neither may import infra (onion architecture); domain is
 // the one layer both may import.
 //
-// Security note: this is a FAST hash, so a stolen database lets an attacker brute-force the
-// slug offline against this column and then derive the content key. The slug is therefore
-// the real strength parameter (~log2(62)*len bits; ~60 bits at the default 10-char length),
-// not a substitute for it. A DB dump alone is breakable in roughly days-to-months on serious
-// GPU hardware at 60 bits — raise the slug length for stronger at-rest protection, or
-// introduce a server-side pepper if "DB exfil alone is useless" is a required property.
+// Security note: this fast hash still permits offline guessing of human-readable URLs.
+// For legacy ciphertext a guessed slug also derives the old content key. New envelopes
+// additionally require the installation keyring, regardless of how predictable the slug is.
 func HashSlug(slug string) string {
 	sum := sha256.Sum256([]byte(slug))
 
