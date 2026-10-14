@@ -31,6 +31,11 @@ token for the owning account.
 - `POST /links/bulk` — create up to 100 links; best-effort, `results[i]` corresponds to
   `links[i]` (per-element `error` or success fields).
 - `GET /links/{id}` — link metadata; no `views` increment, no burn-after-click consumption.
+- `PUT /links/{id}` — replace `target_url` (required, http/https only); pass `edit_code` in
+  the body or omit it as the exact authenticated owner. Optional `ttl`, `privacy`, and
+  `direct_redirect` preserve current values when omitted. TTL counts from this update;
+  `ttl: null` removes expiry, `ttl: 0` expires immediately. `direct_redirect: null` restores
+  the server default. Preserves slug, views, edit code, owner, creation time and burn setting.
 - `DELETE /links/{id}` — same `edit_code` rules as notes.
 - Browsers resolve `/{id}` to `307` and redirect at `/r/{id}` — that path is the redirect
   endpoint and is deliberately not part of the JSON API.
@@ -63,7 +68,8 @@ upper/lower/digit/special).
 
 All machine responses use `{"message": string}` (message required), e.g. `404
 {"message": "not found"}`. `429` means rate limiting or a repeated-failure lockout is active;
-`503` means the instance runs with `--disable-api` and the whole REST surface is off.
+`503` with `code: "api_disabled"` means the instance runs with `--disable-api` and the
+REST surface is off. Match `code`, not `message`; other `503` responses have other causes.
 
 ## Health
 

@@ -148,7 +148,8 @@ func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
 			Sources: cli.EnvVars(EnvDisableAPI),
 			Value:   false,
 			Usage: "Disable the REST/JSON API (/notes*, /links*, /api, /api/openapi.yaml): every request " +
-				"to it gets 503 with a fixed message. The web UI (incl. /r/{id}) and /healthz, /readyz keep working",
+				"reaching the disabling middleware gets 503 with code=api_disabled. " +
+				"The web UI (incl. /r/{id}) and /healthz, /readyz keep working",
 		},
 		&cli.BoolFlag{
 			Name:    FlagCustomSlugs,

@@ -188,6 +188,10 @@ func TestContentEncryptor_LegacyReadOnly(t *testing.T) {
 	require.NoError(t, err)
 	enc := &ContentEncryptor{ContentCipher: contentTestCipher(t, "note")}
 	id := domain.HashSlug("legacy-slug")
+	_, err = enc.Decrypt(legacy, id, "legacy-slug")
+	require.Error(t, err, "normal reads must reject raw legacy")
+	legacy, err = enc.WrapLegacy(legacy, id)
+	require.NoError(t, err)
 	opened, err := enc.Decrypt(legacy, id, "legacy-slug")
 	require.NoError(t, err)
 	require.Equal(t, "existing note", opened)

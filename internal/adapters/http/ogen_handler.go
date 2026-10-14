@@ -211,7 +211,7 @@ func (h *OgenHandler) GetLink(
 	}
 
 	if !link.VisibleTo(callerIDFromCtx(ctx), authenticatedFromCtx(ctx)) {
-		v := ogenapi.GetLinkUnauthorized(ogenapi.ErrorResponse{Message: msgUnauthorized})
+		v := ogenapi.GetLinkUnauthorized(errorResponse(msgUnauthorized))
 
 		return &v, nil
 	}
@@ -427,7 +427,9 @@ func (h *OgenHandler) Healthz(_ context.Context) error {
 func (h *OgenHandler) Readyz(ctx context.Context) (ogenapi.ReadyzRes, error) {
 	pingErr := h.pinger.PingContext(ctx)
 	if pingErr != nil {
-		return &ogenapi.ErrorResponse{Message: "db unavailable"}, nil //nolint:nilerr // intentional: map ping error to 503
+		response := errorResponse("db unavailable")
+
+		return &response, nil //nolint:nilerr // intentional: map ping error to 503
 	}
 
 	return &ogenapi.ReadyzOK{}, nil
@@ -445,7 +447,7 @@ func (h *OgenHandler) CreateAPIToken(ctx context.Context) (ogenapi.CreateAPIToke
 	// guarded defensively: the handler must never mint a token for an unknown user.
 	usr := userFromCtx(ctx)
 	if usr == nil {
-		v := ogenapi.CreateAPITokenUnauthorized(ogenapi.ErrorResponse{Message: msgUnauthorized})
+		v := ogenapi.CreateAPITokenUnauthorized(errorResponse(msgUnauthorized))
 
 		return &v, nil
 	}
@@ -473,7 +475,7 @@ func (h *OgenHandler) CreateInvite(ctx context.Context) (ogenapi.CreateInviteRes
 	// re-checks admin in the usecase, so a context carrying a stale identity cannot mint invites.
 	usr := userFromCtx(ctx)
 	if usr == nil || !usr.IsAdmin {
-		v := ogenapi.CreateInviteForbidden(ogenapi.ErrorResponse{Message: "forbidden"})
+		v := ogenapi.CreateInviteForbidden(errorResponse("forbidden"))
 
 		return &v, nil
 	}
@@ -513,7 +515,7 @@ func mapCreateAPITokenError(err error, log *slog.Logger) ogenapi.CreateAPITokenR
 	default:
 		log.Error("create api token failed", slog.String("error", err.Error()))
 
-		v := ogenapi.CreateAPITokenInternalServerError(ogenapi.ErrorResponse{Message: internalErrorMessage})
+		v := ogenapi.CreateAPITokenInternalServerError(errorResponse(internalErrorMessage))
 
 		return &v
 	}
@@ -535,7 +537,7 @@ func mapCreateInviteError(err error, log *slog.Logger) ogenapi.CreateInviteRes {
 	default:
 		log.Error("create invite failed", slog.String("error", err.Error()))
 
-		v := ogenapi.CreateInviteInternalServerError(ogenapi.ErrorResponse{Message: internalErrorMessage})
+		v := ogenapi.CreateInviteInternalServerError(errorResponse(internalErrorMessage))
 
 		return &v
 	}

@@ -101,7 +101,7 @@ type RouterOptions struct {
 	// session it represents. Zero falls back to auth.DefaultSessionTTL.
 	SessionTTL time.Duration
 	// DisableAPI turns off the REST/JSON API surface (/notes*, /api, /api/openapi.yaml): every
-	// request to it gets a fixed 503 before auth or any handler runs. The web UI and
+	// request reaching the disabling middleware gets 503 with code=api_disabled. The web UI and
 	// /healthz, /readyz keep working — see withAPIDisabled.
 	DisableAPI bool
 	// DirectRedirect selects GET /r/{id}'s response mode: true issues an immediate 301 to the
@@ -132,6 +132,7 @@ func registerOgenRoutes(mux *http.ServeMux, ogenSrv http.Handler, lockout gcache
 	mux.Handle("POST /links", ogenSrv)
 	mux.Handle("POST /links/bulk", ogenSrv)
 	mux.Handle("GET /links/{id}", ogenSrv)
+	mux.Handle("PUT /links/{id}", withFailLockout(lockout, log, ogenSrv))
 	mux.Handle("DELETE /links/{id}", withFailLockout(lockout, log, ogenSrv))
 	mux.Handle("GET /healthz", ogenSrv)
 	mux.Handle("GET /readyz", ogenSrv)

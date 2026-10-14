@@ -17,5 +17,6 @@ const (
 	GetNoteOperation         OperationName = "GetNote"
 	HealthzOperation         OperationName = "Healthz"
 	ReadyzOperation          OperationName = "Readyz"
+	UpdateLinkOperation      OperationName = "UpdateLink"
 	UpdateNoteOperation      OperationName = "UpdateNote"
 )

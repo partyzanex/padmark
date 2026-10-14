@@ -87,7 +87,7 @@ Every short link has:
 |---|---|
 | `id` | Short URL identifier, auto-generated or custom — shares one global namespace with note slugs (a note and a link can never collide on the same identifier) |
 | `target_url` | Destination URL. Only `http` and `https` schemes are accepted |
-| `edit_code` | Your one-time secret for deleting the link |
+| `edit_code` | Your one-time secret for updating or deleting the link |
 | `burn_after_click` | Delete the link the moment it's first followed |
 | `ttl` | Seconds until the link expires, counted from creation (a plain hard expiry — unlike notes' `ttl`, unrelated to `burn_after_click`; the two may be combined freely) |
 | `privacy` | Who can follow it: `public` (default), `authenticated`, or `owner` |
@@ -96,19 +96,19 @@ Every short link has:
 Visiting `GET /r/{id}` either redirects immediately (`301`, the default) or shows a brief
 transparency interstitial with the destination and a manual continue link first — controlled
 server-wide by `--direct-redirect` (see [Configuration reference](#server)), or per link via
-`direct_redirect` at creation time, which always wins over the server default. In both modes an
+`direct_redirect` at creation or update time, which always wins over the server default. In both modes an
 expired link answers `410 Gone`, a missing one `404`, and a link denied by its `privacy` level
 `401` (or a login redirect for a browser), exactly like notes.
 
 > Same rule as `edit_code` for notes: shown once at creation, cannot be recovered. The same
-> owner-bypass also applies — a link created while authenticated can be deleted later by that same
+> owner-bypass also applies — a link created while authenticated can be updated or deleted later by that same
 > credential with no `edit_code` needed.
 
 Frequently-followed ("hot") links are served from a small in-memory cache to skip the storage
 round-trip and decryption on repeat requests — always on, no configuration needed. The trade-off:
 `views` in a `GET /links/{id}` response, or in the value returned from a redirect, can lag the
 true stored count by a few seconds; the stored count itself is always accurate. A link is deleted
-from the cache immediately when it's explicitly deleted, and burn-after-click links are never
+from the cache immediately when it's updated or explicitly deleted, and burn-after-click links are never
 cached at all (so the "exactly once" guarantee is never affected by caching).
 
 ---
@@ -120,8 +120,8 @@ Create an installation keyring **once**, outside the repository, before starting
 ```bash
 install -d -m 700 "$HOME/.config/padmark"
 export PADMARK_CONTENT_KEYRING_FILE="$HOME/.config/padmark/content-keys.json"
-(umask 077; set -C; printf '{"active":"k1","keys":{"k1":"%s"}}\n' \
-  "$(openssl rand -base64 32)" > "$PADMARK_CONTENT_KEYRING_FILE")
+go run ./cmd/padmark-server encryption keygen \
+  --key-id k1 --output "$PADMARK_CONTENT_KEYRING_FILE"
 ```
 
 The command refuses to overwrite an existing file. Keep this file for subsequent starts and
@@ -397,6 +397,11 @@ curl -X POST http://localhost:4000/links/bulk \
 # Get a link's metadata (JSON, does not follow it)
 curl http://localhost:4000/links/{id}
 
+# Update its destination without changing the slug, views, or edit code
+curl -X PUT http://localhost:4000/links/{id} \
+  -H "Content-Type: application/json" \
+  -d '{"target_url":"https://example.com/new","edit_code":"MySecretCode1","ttl":3600}'
+
 # Follow it — 301 (default) or an HTML transparency interstitial, per --direct-redirect
 curl -i http://localhost:4000/r/{id}
 
@@ -407,6 +412,12 @@ curl -X DELETE http://localhost:4000/links/{id} \
 
 `GET /r/{id}` is a browser-facing redirect, not part of the JSON API spec — the same reason bare
 `GET /{id}` (the note-view shortcut) isn't documented in `/api/openapi.yaml` either.
+
+`PUT /links/{id}` requires `target_url`; an authenticated owner may omit `edit_code`.
+Omitted `ttl`, `privacy`, and `direct_redirect` keep their current values. TTL is counted from
+the update (`0` expires immediately, `null` removes expiry); `direct_redirect: null` restores
+the server default. The slug, views, original edit code, owner, creation time, and
+`burn_after_click` are preserved.
 
 ---
 
@@ -573,18 +584,21 @@ note's `privacy` level.
   encrypts the payload with AES-256-GCM, and encrypts that data key with the active installation
   key. The record's hashed ID and resource type authenticate the ciphertext; slugs do not
   derive either encryption key. Titles and other metadata remain unencrypted.
-- Existing unversioned ciphertext remains readable using its legacy slug-derived key.
-  Updating a note rewrites its content in the new format; reading it does not migrate it.
-  Existing links retain the old format until a separate migration is performed. Bulk migration,
-  key-check metadata and DEK rewrapping commands are not implemented yet. Existing database
-  dumps/backups and untouched legacy rows retain their previous security properties.
+- Existing unversioned ciphertext requires the explicit migration below before `serve` starts.
+  Migration protects it with an outer `pmc2$l$…` envelope. Its inner legacy layer still needs
+  the original slug; `convert` replaces that layer with native `kind=p` when the slug is known.
+  Reads/Peek never migrate records. Updating a note writes native `kind=p`.
 - The keyring JSON has an `active` key ID and a `keys` object mapping IDs to base64-encoded
-  **32-byte random keys**. Retain old keys when changing the active ID, including for backups;
-  distribute new read keys to every replica before switching writers. Unknown or incorrect
-  keys never fall back to legacy decryption for versioned data. Key bytes are validated at
-  startup, but matching them against existing records is currently checked on reads.
-  Never exceed `2^32` GCM encryptions per installation key across all replicas; replace it
-  before that limit. The cipher accepts payloads up to 64 MiB; the HTTP body limit is usually lower.
+  **32-byte random keys**. The DB holds an installation UUID and authenticated key checks,
+  never raw keys. Before opening listeners, `serve` verifies the registry, active key and
+  every current envelope; missing/substituted keys, raw rows, corrupt envelopes and incomplete
+  migrations block startup. Scans use bounded batches, so startup time grows with the DB size.
+  Native-only existing databases are registered after their envelopes are authenticated.
+- Never exceed `2^32` GCM encryptions per installation key across replicas, migrations,
+  key checks and rewraps; rotate beforehand. This operational limit is not automatically counted.
+  Native plaintext is limited to 64 MiB; legacy wrappers allow the additional base64 overhead.
+  Existing dumps, WAL, freed pages and backups retain their old security properties; migration
+  does not securely erase those copies. Titles and record metadata remain readable in the DB.
 - Passwords and `edit_code`s are hashed with **argon2id**.
 - Each user's TOTP secret is encrypted under an argon2id key derived from their password, and
   the stored value records the cost it was derived at (`v1$<memory>$<time>$<threads>$…`). That
@@ -595,6 +609,87 @@ note's `privacy` level.
 - TOTP codes are **single-use** (replay-protected) and the protection survives server restarts.
 
 ---
+
+## Content key management, migration and rotation
+
+Build the current server with `go build -o bin/padmark-server ./cmd/padmark-server`.
+Commands use `PADMARK_STORAGE`, `PADMARK_DSN` and `PADMARK_CONTENT_KEYRING_FILE`, or the
+corresponding flags before the encryption subcommand. SQLite and PostgreSQL use the same
+workflow. Key bytes are never CLI arguments or command output.
+
+**Maintenance window:** stop every server replica and other database writer before schema/data
+migration, registration, activation, rewrap, conversion or retirement. Run one administrative
+operation at a time. CAS protects individual rows against a racing update/delete, but these
+commands do not acquire a deployment-wide maintenance lock. Running replicas keep their
+in-memory keys and must be restarted with the resulting keyring before accepting writes.
+
+For an existing installation, preserve a consistent database backup and its current keyring
+separately. Generate a keyring once if the old installation has none, then:
+
+```bash
+bin/padmark-server migrate
+bin/padmark-server encryption status
+bin/padmark-server encryption migrate --dry-run
+bin/padmark-server encryption migrate
+bin/padmark-server encryption status
+```
+
+Schema migrations create the registry tables; `status` and `--dry-run` never initialize or
+change that registry. The schema must already exist for those commands. The data migration is
+resumable: it only changes `content`/`target_url`, uses compare-and-swap, and leaves counters,
+TTL/burn settings, ownership, edit codes and timestamps unchanged. It never recreates deleted
+rows. Any error exits nonzero; incomplete migrations block `serve` until a successful rerun.
+JSON reports contain `raw`, `wrapped`, `native`, `failed`, `changed`, `conflicts`, `missing`
+and counts by key ID, without slugs or plaintext. Raw validation checks structure only; the
+old encryption tag cannot be authenticated without the original slug.
+
+When original slugs are available, feed one per line from a protected file or pipe:
+
+```bash
+bin/padmark-server encryption convert --dry-run < /secure/known-slugs.txt
+bin/padmark-server encryption convert < /secure/known-slugs.txt
+```
+
+Both notes and links are checked. Missing records, decryption errors and CAS conflicts produce
+counts and a nonzero exit; retrying is safe. Unknown slugs cannot be recovered from their stored
+hashes: those records remain `wrapped`, protected by the installation key, until converted,
+updated, expired or deleted through their normal lifecycle.
+
+To rotate from `k1` to `k2`, keep all generated files outside the repository:
+
+```bash
+bin/padmark-server encryption key-add --key-id k2 \
+  --output "$HOME/.config/padmark/content-keys.next.json"
+export PADMARK_CONTENT_KEYRING_FILE="$HOME/.config/padmark/content-keys.next.json"
+bin/padmark-server encryption register --key-id k2
+# Distribute this file (both keys, k1 active) to every replica before switching writers.
+bin/padmark-server encryption key-activate --key-id k2 \
+  --output "$HOME/.config/padmark/content-keys.active.json"
+export PADMARK_CONTENT_KEYRING_FILE="$HOME/.config/padmark/content-keys.active.json"
+bin/padmark-server encryption rewrap --dry-run
+bin/padmark-server encryption rewrap
+bin/padmark-server encryption status
+bin/padmark-server encryption key-remove --key-id k1 \
+  --output "$HOME/.config/padmark/content-keys.current.json"
+export PADMARK_CONTENT_KEYRING_FILE="$HOME/.config/padmark/content-keys.current.json"
+# Distribute this final file and restart every replica with the same configuration.
+```
+
+`rewrap` preserves encrypted payload bytes and their nonces for both native and wrapped legacy
+records; only the DEK wrapper changes. An interrupted rewrap is readable with both keys and can
+be rerun. `key-remove` refuses the active key or a key referenced by live rows. Registry checks
+for retired IDs remain, preventing silent reuse of an old ID with different key material.
+Every key-file command creates a complete **0600** file without overwriting an existing path.
+Container deployments must also grant their UID read access, as described under Docker.
+
+Retain old keyrings separately for **old backups**, even after live records stop referencing
+those keys. To verify restore, restore the database (including both encryption metadata tables)
+and its matching keyring into an isolated installation, run schema migration if necessary,
+then `encryption status` and a read of a known record. Wrong/missing keys must fail validation.
+Do not delete registry rows to bypass that failure. SQLite file backups must include a consistent
+WAL state (use the backup API or `VACUUM INTO`); PostgreSQL can use `pg_dump`/`pg_restore`.
+Restoring a pre-migration backup also requires running `encryption migrate` before serving.
+There is no destructive encryption down-migration, and older binaries cannot read the new data.
 
 ## Configuration reference
 
@@ -607,7 +702,7 @@ note's `privacy` level.
 | `--dsn` | `PADMARK_DSN` | `padmark.db` | DB path or connection string |
 | `--content-keyring-file` | `PADMARK_CONTENT_KEYRING_FILE` | required | Path to the persisted JSON keyring for note/link encryption; mount as a secret and back up separately from the DB |
 | `--enable-accounts` | `PADMARK_ENABLE_ACCOUNTS` | `false` | Enable the TOTP account system (`/setup`, `/login`, `/admin`, privacy-level gating); off = fully public |
-| `--disable-api` | `PADMARK_DISABLE_API` | `false` | Disable the REST/JSON API (`/notes*`, `/links*`, `/api`, `/api/openapi.yaml`): every request to it gets `503` with `{"message": "До свидания"}`, before auth or any handler runs. The web UI (incl. `/r/{id}`) and `/healthz`, `/readyz` keep working |
+| `--disable-api` | `PADMARK_DISABLE_API` | `false` | Disable the REST/JSON API (`/notes*`, `/links*`, `/api`, `/api/openapi.yaml`, `/llms.txt`, `/api/tokens`, `/api/invites`): the middleware returns `503` with `{"message":"API is disabled","code":"api_disabled"}`. Match `code` to identify the cause; outer middleware may reject a request first. The web UI (incl. `/r/{id}`) and `/healthz`, `/readyz` keep working |
 | `--totp-issuer` | `PADMARK_TOTP_ISSUER` | `padmark` | TOTP issuer shown in the authenticator app |
 | `--session-ttl` | `PADMARK_SESSION_TTL` | `2592000` | Session lifetime in seconds (default 30 days) |
 | `--csrf-secret` | `PADMARK_CSRF_SECRET` | — | HMAC key signing CSRF form tokens; raw bytes, **at least 32 characters** (a shorter value is rejected at startup). Empty (default) mints a fresh random secret per process — fine for a single instance, but restarts then invalidate open forms and multiple replicas `403` each other's form submits. Generate with `openssl rand -base64 32` and share the same value across replicas |

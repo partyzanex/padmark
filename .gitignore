@@ -10,7 +10,7 @@ coverage.txt
 coverage.xml
 padmark.db
 .env
-content-keys.json
+content-keys*.json
 padmark-cli
 padmark-server
 .serena/
@@ -23,3 +23,6 @@ graphify-out/
 
 padmark.db-shm
 padmark.db-wal
+
+# Interrupted keyring generation must never enter version control or image layers.
+**/.padmark-keyring-*

@@ -295,3 +295,38 @@ func (s *LinkRepositoryTestSuite) TestDelete_NotFound() {
 
 	s.ErrorIs(err, domain.ErrNotFound)
 }
+
+// TestUpdate_EditableColumnsOnly verifies a stale update cannot reset views or
+// overwrite immutable fields; nullable overrides can be cleared explicitly.
+func (s *LinkRepositoryTestSuite) TestUpdate_EditableColumnsOnly() {
+	ctx := s.T().Context()
+	expiry := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
+	direct := true
+	original := &domain.Link{
+		ID: "update-link", TargetURL: "old ciphertext", CreatedAt: time.Now().UTC().Truncate(time.Second),
+		EditCode: "original hash", Views: 5, BurnAfterClick: true, ExpiresAt: &expiry, DirectRedirect: &direct,
+	}
+	s.Require().NoError(s.repo.Create(ctx, original))
+	s.Require().NoError(s.repo.IncrementViews(ctx, original.ID))
+
+	privacy := domain.PrivacyAuthenticated
+	updated, err := s.repo.Update(ctx, original.ID, &domain.Link{
+		TargetURL: "new ciphertext", Privacy: &privacy,
+		// Everything else is intentionally zero, including immutable fields and counters.
+	})
+	s.Require().NoError(err)
+	s.Equal("new ciphertext", updated.TargetURL)
+	s.Equal(6, updated.Views)
+	s.Equal(original.ID, updated.ID)
+	s.Equal(original.EditCode, updated.EditCode)
+	s.WithinDuration(original.CreatedAt, updated.CreatedAt, time.Second)
+	s.True(updated.BurnAfterClick)
+	s.Nil(updated.ExpiresAt)
+	s.Nil(updated.DirectRedirect)
+	s.Equal(privacy, updated.EffectivePrivacy())
+	stored, err := s.repo.GetByID(ctx, original.ID)
+	s.Require().NoError(err)
+	s.Equal(updated, stored)
+	_, err = s.repo.Update(ctx, "missing-link", &domain.Link{TargetURL: "unused"})
+	s.ErrorIs(err, domain.ErrNotFound)
+}

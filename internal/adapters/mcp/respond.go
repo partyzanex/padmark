@@ -27,6 +27,8 @@ func mapCreateNoteRes(res padmark.CreateNoteRes) (*padmark.CreateNoteResponse, e
 		return nil, unsupportedErr()
 	case *padmark.CreateNoteUnprocessableEntity:
 		return nil, apiStatus("rejected", typed.Message)
+	case *padmark.CreateNoteServiceUnavailable:
+		return nil, serviceUnavailableError(padmark.ErrorResponse(*typed))
 	case *padmark.CreateNoteInternalServerError:
 		return nil, serverErr()
 	default:
@@ -44,6 +46,8 @@ func mapGetNoteRes(res padmark.GetNoteRes) (*padmark.NoteResponse, error) {
 		return nil, notFoundErr("note")
 	case *padmark.GetNoteGone:
 		return nil, goneErr("note")
+	case *padmark.GetNoteServiceUnavailable:
+		return nil, serviceUnavailableError(padmark.ErrorResponse(*typed))
 	case *padmark.GetNoteInternalServerError:
 		return nil, serverErr()
 	default:
@@ -51,6 +55,7 @@ func mapGetNoteRes(res padmark.GetNoteRes) (*padmark.NoteResponse, error) {
 	}
 }
 
+//nolint:cyclop // one branch per generated HTTP response variant
 func mapUpdateNoteRes(res padmark.UpdateNoteRes) (*padmark.NoteResponse, error) {
 	switch typed := res.(type) {
 	case *padmark.NoteResponse:
@@ -71,6 +76,8 @@ func mapUpdateNoteRes(res padmark.UpdateNoteRes) (*padmark.NoteResponse, error) 
 		return nil, apiStatus("rejected", typed.Message)
 	case *padmark.UpdateNoteTooManyRequests:
 		return nil, rateLimitedErr("note updates")
+	case *padmark.UpdateNoteServiceUnavailable:
+		return nil, serviceUnavailableError(padmark.ErrorResponse(*typed))
 	case *padmark.UpdateNoteInternalServerError:
 		return nil, serverErr()
 	default:
@@ -79,7 +86,7 @@ func mapUpdateNoteRes(res padmark.UpdateNoteRes) (*padmark.NoteResponse, error) 
 }
 
 func mapDeleteNoteRes(res padmark.DeleteNoteRes) error {
-	switch res.(type) {
+	switch typed := res.(type) {
 	case *padmark.DeleteNoteNoContent:
 		return nil
 	case *padmark.DeleteNoteUnauthorized:
@@ -90,6 +97,8 @@ func mapDeleteNoteRes(res padmark.DeleteNoteRes) error {
 		return notFoundErr("note")
 	case *padmark.DeleteNoteTooManyRequests:
 		return rateLimitedErr("note deletes")
+	case *padmark.DeleteNoteServiceUnavailable:
+		return serviceUnavailableError(padmark.ErrorResponse(*typed))
 	case *padmark.DeleteNoteInternalServerError:
 		return serverErr()
 	default:
@@ -115,6 +124,8 @@ func mapCreateLinkRes(res padmark.CreateLinkRes) (*padmark.CreateLinkResponseHea
 		return nil, apiStatus("rejected", typed.Message)
 	case *padmark.CreateLinkTooManyRequests:
 		return nil, rateLimitedErr("link creations")
+	case *padmark.CreateLinkServiceUnavailable:
+		return nil, serviceUnavailableError(padmark.ErrorResponse(*typed))
 	case *padmark.CreateLinkInternalServerError:
 		return nil, serverErr()
 	default:
@@ -136,6 +147,8 @@ func mapCreateLinksBulkRes(res padmark.CreateLinksBulkRes) (*padmark.BulkCreateL
 		return nil, unsupportedErr()
 	case *padmark.CreateLinksBulkTooManyRequests:
 		return nil, rateLimitedErr("bulk link creations")
+	case *padmark.CreateLinksBulkServiceUnavailable:
+		return nil, serviceUnavailableError(padmark.ErrorResponse(*typed))
 	case *padmark.CreateLinksBulkInternalServerError:
 		return nil, serverErr()
 	default:
@@ -153,6 +166,8 @@ func mapGetLinkRes(res padmark.GetLinkRes) (*padmark.LinkResponse, error) {
 		return nil, notFoundErr("link")
 	case *padmark.GetLinkGone:
 		return nil, goneErr("link")
+	case *padmark.GetLinkServiceUnavailable:
+		return nil, serviceUnavailableError(padmark.ErrorResponse(*typed))
 	case *padmark.GetLinkInternalServerError:
 		return nil, serverErr()
 	default:
@@ -161,7 +176,7 @@ func mapGetLinkRes(res padmark.GetLinkRes) (*padmark.LinkResponse, error) {
 }
 
 func mapDeleteLinkRes(res padmark.DeleteLinkRes) error {
-	switch res.(type) {
+	switch typed := res.(type) {
 	case *padmark.DeleteLinkNoContent:
 		return nil
 	case *padmark.DeleteLinkUnauthorized:
@@ -172,6 +187,8 @@ func mapDeleteLinkRes(res padmark.DeleteLinkRes) error {
 		return notFoundErr("link")
 	case *padmark.DeleteLinkTooManyRequests:
 		return rateLimitedErr("link deletes")
+	case *padmark.DeleteLinkServiceUnavailable:
+		return serviceUnavailableError(padmark.ErrorResponse(*typed))
 	case *padmark.DeleteLinkInternalServerError:
 		return serverErr()
 	default:

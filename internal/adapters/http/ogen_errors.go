@@ -38,7 +38,12 @@ const notImplementedMessage = "not implemented"
 const maxEchoedContentType = 64
 
 func errResp(err error) ogenapi.ErrorResponse {
-	return ogenapi.ErrorResponse{Message: err.Error()}
+	return errorResponse(err.Error())
+}
+
+// errorResponse leaves the optional machine-readable code absent for ordinary errors.
+func errorResponse(message string) ogenapi.ErrorResponse {
+	return ogenapi.ErrorResponse{Message: message, Code: ogenapi.OptString{Value: "", Set: false}}
 }
 
 // newOgenErrorHandler builds the handler for every failure ogen raises before a request ever
@@ -79,7 +84,7 @@ func newOgenErrorHandler(log *slog.Logger) ogenapi.ErrorHandler {
 		w.Header().Set("Content-Type", mimeJSON)
 		w.WriteHeader(status)
 
-		encErr := json.NewEncoder(w).Encode(errorJSON{Message: msg})
+		encErr := json.NewEncoder(w).Encode(errorJSON{Message: msg, Code: ""})
 		if encErr != nil {
 			log.ErrorContext(ctx, "write ogen error response", "status", status, "err", encErr)
 		}
@@ -166,7 +171,7 @@ func mapCreateError(err error, log *slog.Logger) ogenapi.CreateNoteRes {
 	default:
 		log.Error("create note failed", slog.String("error", err.Error()))
 
-		v := ogenapi.CreateNoteInternalServerError(ogenapi.ErrorResponse{Message: internalErrorMessage})
+		v := ogenapi.CreateNoteInternalServerError(errorResponse(internalErrorMessage))
 
 		return &v
 	}
@@ -188,7 +193,7 @@ func mapGetError(err error, log *slog.Logger) ogenapi.GetNoteRes {
 	default:
 		log.Error("get note failed", slog.String("error", err.Error()))
 
-		v := ogenapi.GetNoteInternalServerError(ogenapi.ErrorResponse{Message: internalErrorMessage})
+		v := ogenapi.GetNoteInternalServerError(errorResponse(internalErrorMessage))
 
 		return &v
 	}
@@ -219,7 +224,7 @@ func mapUpdateError(err error, log *slog.Logger) ogenapi.UpdateNoteRes {
 	default:
 		log.Error("update note failed", slog.String("error", err.Error()))
 
-		v := ogenapi.UpdateNoteInternalServerError(ogenapi.ErrorResponse{Message: internalErrorMessage})
+		v := ogenapi.UpdateNoteInternalServerError(errorResponse(internalErrorMessage))
 
 		return &v
 	}
@@ -241,7 +246,7 @@ func mapDeleteError(err error, log *slog.Logger) ogenapi.DeleteNoteRes {
 	default:
 		log.Error("delete note failed", slog.String("error", err.Error()))
 
-		v := ogenapi.DeleteNoteInternalServerError(ogenapi.ErrorResponse{Message: internalErrorMessage})
+		v := ogenapi.DeleteNoteInternalServerError(errorResponse(internalErrorMessage))
 
 		return &v
 	}
@@ -272,7 +277,7 @@ func mapCreateLinkError(err error, log *slog.Logger) ogenapi.CreateLinkRes {
 	default:
 		log.Error("create link failed", slog.String("error", err.Error()))
 
-		v := ogenapi.CreateLinkInternalServerError(ogenapi.ErrorResponse{Message: internalErrorMessage})
+		v := ogenapi.CreateLinkInternalServerError(errorResponse(internalErrorMessage))
 
 		return &v
 	}
@@ -294,7 +299,7 @@ func mapGetLinkError(err error, log *slog.Logger) ogenapi.GetLinkRes {
 	default:
 		log.Error("get link failed", slog.String("error", err.Error()))
 
-		v := ogenapi.GetLinkInternalServerError(ogenapi.ErrorResponse{Message: internalErrorMessage})
+		v := ogenapi.GetLinkInternalServerError(errorResponse(internalErrorMessage))
 
 		return &v
 	}
@@ -316,7 +321,7 @@ func mapDeleteLinkError(err error, log *slog.Logger) ogenapi.DeleteLinkRes {
 	default:
 		log.Error("delete link failed", slog.String("error", err.Error()))
 
-		v := ogenapi.DeleteLinkInternalServerError(ogenapi.ErrorResponse{Message: internalErrorMessage})
+		v := ogenapi.DeleteLinkInternalServerError(errorResponse(internalErrorMessage))
 
 		return &v
 	}

@@ -19,6 +19,7 @@ var (
 	}
 	rn9AllowedHeaders = map[string]string{
 		"DELETE": "X-Edit-Code",
+		"PUT":    "Content-Type",
 	}
 	rn7AllowedHeaders = map[string]string{
 		"POST": "Content-Type",
@@ -252,9 +253,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 							s.handleGetLinkRequest([1]string{
 								args[0],
 							}, elemIsEscaped, w, r)
+						case "PUT":
+							s.handleUpdateLinkRequest([1]string{
+								args[0],
+							}, elemIsEscaped, w, r)
 						default:
 							s.notAllowed(w, r, notAllowedParams{
-								allowedMethods: "DELETE,GET",
+								allowedMethods: "DELETE,GET,PUT",
 								allowedHeaders: rn9AllowedHeaders,
 								acceptPost:     "",
 								acceptPatch:    "",
@@ -638,6 +643,15 @@ func (s *Server) FindPath(method string, u *url.URL) (r Route, _ bool) {
 							r.name = GetLinkOperation
 							r.summary = "Get a link's metadata by ID"
 							r.operationID = "getLink"
+							r.operationGroup = ""
+							r.pathPattern = "/links/{id}"
+							r.args = args
+							r.count = 1
+							return r, true
+						case "PUT":
+							r.name = UpdateLinkOperation
+							r.summary = "Update an existing link"
+							r.operationID = "updateLink"
 							r.operationGroup = ""
 							r.pathPattern = "/links/{id}"
 							r.args = args

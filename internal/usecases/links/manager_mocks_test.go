@@ -128,6 +128,21 @@ func (mr *MockStorageMockRecorder) IncrementViews(ctx, id any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IncrementViews", reflect.TypeOf((*MockStorage)(nil).IncrementViews), ctx, id)
 }
 
+// Update mocks base method.
+func (m *MockStorage) Update(ctx context.Context, id string, link *domain.Link) (*domain.Link, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Update", ctx, id, link)
+	ret0, _ := ret[0].(*domain.Link)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Update indicates an expected call of Update.
+func (mr *MockStorageMockRecorder) Update(ctx, id, link any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Update", reflect.TypeOf((*MockStorage)(nil).Update), ctx, id, link)
+}
+
 // MockNotesChecker is a mock of NotesChecker interface.
 type MockNotesChecker struct {
 	ctrl     *gomock.Controller

@@ -534,6 +534,11 @@ func serverAction(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
+	err = validateContentEncryption(ctx, db, keyring)
+	if err != nil {
+		return fmt.Errorf("validate content encryption: %w", err)
+	}
+
 	metricsRegistry, linkMetrics, err := newMetricsRegistry()
 	if err != nil {
 		return err

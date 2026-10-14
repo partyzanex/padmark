@@ -12,6 +12,7 @@ func NewApp() *cli.Command {
 		Commands: []*cli.Command{
 			serveCommand(),
 			migrateCommand(),
+			encryptionCommand(),
 		},
 		// Run serve when no subcommand is given for backwards compatibility.
 		Action: serverAction,

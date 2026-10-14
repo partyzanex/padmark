@@ -64,6 +64,8 @@ func handleGetLinkRes(res padmark.GetLinkRes) (*padmark.LinkResponse, error) {
 		return nil, errors.New("link not found")
 	case *padmark.GetLinkGone:
 		return nil, errors.New("link has expired")
+	case *padmark.GetLinkServiceUnavailable:
+		return nil, serviceUnavailableError(padmark.ErrorResponse(*typed))
 	case *padmark.GetLinkInternalServerError:
 		return nil, fmt.Errorf("server error: %s", typed.Message)
 	default:

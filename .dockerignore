@@ -1,7 +1,7 @@
 # Local environment files and secrets, including nested overrides.
 **/.env
 **/.env.*
-**/content-keys.json
+**/content-keys*.json
 
 # Local databases and SQLite sidecar files.
 **/*.db
@@ -33,3 +33,6 @@ padmark-server
 .serena/
 .graphify/
 graphify-out/
+
+# Interrupted keyring generation must never enter version control or image layers.
+**/.padmark-keyring-*

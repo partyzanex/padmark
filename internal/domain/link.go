@@ -14,8 +14,8 @@ type Link struct {
 	ExpiresAt *time.Time
 	Privacy   *Privacy
 	// OwnerID is the ID of the user who created the link while authenticated (session or API
-	// token); nil for anonymous links. Lets Delete bypass EditCode for the exact creator — see
-	// links.Manager.Delete, mirroring notes.Manager.Update/Delete.
+	// token); nil for anonymous links. Lets Update/Delete bypass EditCode for the exact
+	// creator — see links.Manager.Update/Delete, mirroring notes.Manager.Update/Delete.
 	OwnerID *uuid.UUID
 	// DirectRedirect overrides the server-wide --direct-redirect default for this one link: nil
 	// means "inherit the server default", non-nil forces GET /r/{id} into 301 mode (true) or
@@ -40,8 +40,8 @@ func (l *Link) Validate() error {
 // ValidateOwnership checks that PrivacyOwner is only used on a link that actually has an owner —
 // otherwise no caller, including the creator, could ever use it again (see VisibleTo/OwnedBy).
 // Deliberately NOT part of Validate() — see Note.ValidateOwnership's doc comment for why: OwnerID
-// is only in its final state immediately for Create, and in links.Manager.Delete (if Delete ever
-// grows an owner-only-aware path) only after OwnerID is pinned from the existing link.
+// is only in its final state immediately for Create, and in links.Manager.Update only after
+// OwnerID is pinned from the existing link.
 func (l *Link) ValidateOwnership() error {
 	if l.EffectivePrivacy() == PrivacyOwner && l.OwnerID == nil {
 		return ErrOwnerPrivacyRequiresOwner

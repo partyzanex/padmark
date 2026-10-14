@@ -24,6 +24,7 @@ const maxHashRetries = 5
 // Storage defines persistence operations for links.
 type Storage interface {
 	Create(ctx context.Context, link *domain.Link) error
+	Update(ctx context.Context, id string, link *domain.Link) (*domain.Link, error)
 	GetByID(ctx context.Context, id string) (*domain.Link, error)
 	Exists(ctx context.Context, id string) (bool, error)
 	IncrementViews(ctx context.Context, id string) error
@@ -45,6 +46,8 @@ type NotesChecker interface {
 // implementation must be the exact same instance notes.Manager locks against (see notes.
 // SlugLock), or this protects nothing. Declared here rather than imported from notes, for the
 // same reason as Encryptor above: a usecase package may only import domain + stdlib.
+// Updates and cache fills also share this lock, preventing a concurrent read from
+// caching the old URL or privacy after Update has persisted and evicted it.
 type SlugLock interface {
 	Lock(ctx context.Context, key string) (unlock func(), err error)
 }
@@ -188,11 +191,9 @@ func validateTargetURL(raw string) (string, error) {
 	return parsed.String(), nil
 }
 
-// validateForCreate runs Link.Validate and the ownership invariant (Link.ValidateOwnership).
-// OwnerID is already final at this point (set by the HTTP layer before Create is called) —
-// mirrors notes' validateForCreate exactly, including why this check is safe here specifically
-// (see domain.Link.ValidateOwnership's doc comment for the general timing rule).
-func validateForCreate(link *domain.Link) error {
+// validateLink checks fields and ownership after OwnerID has been fixed by Create
+// or inherited from the existing record by Update.
+func validateLink(link *domain.Link) error {
 	err := link.Validate()
 	if err != nil {
 		return fmt.Errorf("validate: %w", err)
@@ -231,7 +232,7 @@ func (m *Manager) Create(ctx context.Context, targetURL string, opts CreateOptio
 		BurnAfterClick: opts.BurnAfterClick,
 	}
 
-	err = validateForCreate(link)
+	err = validateLink(link)
 	if err != nil {
 		return nil, err
 	}
@@ -423,6 +424,14 @@ func (m *Manager) resolveLink(ctx context.Context, slug string) (*domain.Link, e
 	dbID := domain.HashSlug(slug)
 
 	if m.cache != nil {
+		// Update holds the same lock through persistence and eviction, so an
+		// in-flight cache miss cannot refill old destination/privacy afterwards.
+		unlock, err := m.slugLock.Lock(ctx, dbID)
+		if err != nil {
+			return nil, fmt.Errorf("lock link: %w", err)
+		}
+		defer unlock()
+
 		if cached, ok := m.cache.Get(dbID); ok {
 			return cached, nil
 		}
@@ -448,7 +457,7 @@ func (m *Manager) resolveLink(ctx context.Context, slug string) (*domain.Link, e
 	return link, nil
 }
 
-// evictCache removes dbID from the optional Cache, if one is attached. Called after Delete and
+// evictCache removes dbID from the optional Cache, if one is attached. Called after Update/Delete and
 // after Redirect deletes an expired link, so a subsequent request can never be served a stale hit
 // for a link that no longer exists in storage.
 func (m *Manager) evictCache(dbID string) {

@@ -106,6 +106,31 @@ func (r *LinkRepository) Create(ctx context.Context, domLink *domain.Link) error
 	return nil
 }
 
+// Update changes only editable fields. RETURNING reports the persisted counters and
+// immutable fields without overwriting clicks recorded since the caller's read.
+func (r *LinkRepository) Update(ctx context.Context, id string, domLink *domain.Link) (*domain.Link, error) {
+	var dbLink link
+
+	err := r.db.NewUpdate().
+		Model(&dbLink).
+		Set("target_url = ?", domLink.TargetURL).
+		Set("expires_at = ?", domLink.ExpiresAt).
+		Set("privacy = ?", privacyVal(domLink.Privacy)).
+		Set("direct_redirect = ?", domLink.DirectRedirect).
+		Where("id = ?", id).
+		Returning("*").
+		Scan(ctx)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, domain.ErrNotFound
+		}
+
+		return nil, fmt.Errorf("postgres update link: %w", err)
+	}
+
+	return linkToDomain(&dbLink), nil
+}
+
 // GetByID retrieves a link by ID (HashSlug(slug)).
 func (r *LinkRepository) GetByID(ctx context.Context, id string) (*domain.Link, error) {
 	var dbLink link

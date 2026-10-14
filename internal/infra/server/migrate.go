@@ -10,7 +10,7 @@ import (
 
 func migrateCommand() *cli.Command {
 	return &cli.Command{
-		Name:   "migrate",
+		Name:   encryptionMigrate,
 		Usage:  "Apply pending database migrations and exit",
 		Flags:  migrateFlags(),
 		Action: migrateAction,

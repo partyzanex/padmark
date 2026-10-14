@@ -9,9 +9,10 @@ import (
 	"github.com/partyzanex/padmark/internal/domain"
 )
 
-// errorJSON is the API error body matching the OpenAPI ErrorResponse schema ({"message": ...}).
+// errorJSON matches the OpenAPI ErrorResponse schema; Code is optional for existing errors.
 type errorJSON struct {
 	Message string `json:"message"`
+	Code    string `json:"code,omitempty"`
 }
 
 // writeJSONErrorStatus writes a JSON error response ({"message": msg}) for a status the caller
@@ -24,7 +25,7 @@ func writeJSONErrorStatus(w http.ResponseWriter, r *http.Request, log *slog.Logg
 	w.Header().Set("Content-Type", mimeJSON)
 	w.WriteHeader(status)
 
-	err := json.NewEncoder(w).Encode(errorJSON{Message: msg})
+	err := json.NewEncoder(w).Encode(errorJSON{Message: msg, Code: ""})
 	if err != nil {
 		log.ErrorContext(r.Context(), "write error response", "err", err)
 	}
@@ -103,7 +104,7 @@ func (h *common) writeDecodeError(w http.ResponseWriter, r *http.Request, err er
 	w.Header().Set("Content-Type", mimeJSON)
 	w.WriteHeader(status)
 
-	encErr := json.NewEncoder(w).Encode(errorJSON{Message: msg})
+	encErr := json.NewEncoder(w).Encode(errorJSON{Message: msg, Code: ""})
 	if encErr != nil {
 		h.log.ErrorContext(r.Context(), "write decode error response", "err", encErr)
 	}
@@ -119,7 +120,7 @@ func (h *common) writeError(w http.ResponseWriter, r *http.Request, err error) {
 	w.Header().Set("Content-Type", mimeJSON)
 	w.WriteHeader(status)
 
-	encErr := json.NewEncoder(w).Encode(errorJSON{Message: msg})
+	encErr := json.NewEncoder(w).Encode(errorJSON{Message: msg, Code: ""})
 	if encErr != nil {
 		h.log.ErrorContext(r.Context(), "write error response", "err", encErr)
 	}

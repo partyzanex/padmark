@@ -152,6 +152,20 @@ func (UnimplementedHandler) Readyz(ctx context.Context) (r ReadyzRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 
+// UpdateLink implements updateLink operation.
+//
+// Replaces the destination URL, preserving the slug, edit code, click count, owner,
+// creation time, and burn-after-click setting. Optional fields omitted from the request
+// retain their current values. TTL is counted from this update; null removes expiry.
+// Anonymous callers may update links they could read with the original edit_code.
+// The exact authenticated owner may omit edit_code, as with PUT /notes/{id}.
+// Returns the updated link; the edit code is never returned again.
+//
+// PUT /links/{id}
+func (UnimplementedHandler) UpdateLink(ctx context.Context, req *UpdateLinkRequest, params UpdateLinkParams) (r UpdateLinkRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
 // UpdateNote implements updateNote operation.
 //
 // Replaces the note's title, content, content type, and burn settings.

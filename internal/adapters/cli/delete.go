@@ -68,6 +68,8 @@ func handleDeleteNoteRes(res padmark.DeleteNoteRes) error {
 		return errors.New("forbidden: wrong edit code or --token is not the note's owner")
 	case *padmark.DeleteNoteNotFound:
 		return errors.New("note not found")
+	case *padmark.DeleteNoteServiceUnavailable:
+		return serviceUnavailableError(padmark.ErrorResponse(*typed))
 	case *padmark.DeleteNoteInternalServerError:
 		return fmt.Errorf("server error: %s", typed.Message)
 	default:

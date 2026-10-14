@@ -19,14 +19,17 @@ import (
 const (
 	contentVersion   = "pmc2"
 	contentKind      = "p"
+	legacyKind       = "l"
 	contentParts     = 5
 	contentNonceSize = 12
 	contentTagSize   = 16
 	wrappedKeySize   = contentNonceSize + aesKeySize + contentTagSize
 	maxKeyIDSize     = 64
 	// MaxContentSize bounds allocations when opening untrusted stored envelopes.
-	MaxContentSize         = 64 << 20
-	maxContentEnvelopeSize = 256 + 2*(MaxContentSize+contentNonceSize+contentTagSize) // conservative base64 bound
+	MaxContentSize = 64 << 20
+	//nolint:mnd // padded base64 length
+	maxLegacyContentSize   = (MaxContentSize + contentNonceSize + contentTagSize + 2) / 3 * 4
+	maxContentEnvelopeSize = 256 + 2*(maxLegacyContentSize+contentNonceSize+contentTagSize) // conservative base64 bound
 )
 
 // ContentCipher encrypts content with a fresh random DEK on every write, wrapping that DEK
@@ -112,11 +115,65 @@ func wrappedKeyAAD(aad []byte, keyID string, payload []byte) []byte {
 // Encrypt writes pmc2$p$kid$wrappedDEK$payload. The supplied ID is the stored HashSlug ID,
 // not the original slug. Empty content is valid and still gets an authenticated ciphertext.
 func (enc *ContentCipher) Encrypt(plaintext, recordID string) (string, error) {
-	if len(plaintext) > MaxContentSize {
+	return enc.encrypt(plaintext, recordID, contentKind)
+}
+
+func parseContentEnvelope(value string) (keyID string, wrapped, payload []byte, err error) {
+	if len(value) > maxContentEnvelopeSize {
+		return "", nil, nil, domain.ErrMalformedCiphertext
+	}
+
+	parts := strings.SplitN(value, "$", contentParts+1)
+	if len(parts) != contentParts || parts[0] != contentVersion ||
+		(parts[1] != contentKind && parts[1] != legacyKind) || !validKeyID(parts[2]) {
+		return "", nil, nil, domain.ErrMalformedCiphertext
+	}
+
+	wrapped, err = decodeContentField(parts[3], wrappedKeySize, wrappedKeySize)
+	if err != nil {
+		return "", nil, nil, err
+	}
+
+	limit := MaxContentSize
+	if parts[1] == legacyKind {
+		limit = maxLegacyContentSize
+	}
+
+	payload, err = decodeContentField(parts[4], contentNonceSize+contentTagSize,
+		limit+contentNonceSize+contentTagSize)
+	if err != nil {
+		return "", nil, nil, err
+	}
+
+	return parts[2], wrapped, payload, nil
+}
+
+// Decrypt opens only the new format, using the DB ID and resource type as authenticated
+// context. It needs no slug. Unknown versions, kinds or keys fail closed, without fallback.
+func (enc *ContentCipher) Decrypt(value, recordID string) (string, error) {
+	plaintext, kind, err := enc.open(value, recordID)
+	if err != nil {
+		return "", err
+	}
+
+	if kind != contentKind {
+		return "", domain.ErrMalformedCiphertext
+	}
+
+	return plaintext, nil
+}
+
+func (enc *ContentCipher) encrypt(plaintext, recordID, kind string) (string, error) {
+	limit := MaxContentSize
+	if kind == legacyKind {
+		limit = maxLegacyContentSize
+	}
+
+	if len(plaintext) > limit {
 		return "", errors.New("content exceeds encryption size limit")
 	}
 
-	aad, err := enc.contentAAD(recordID)
+	aad, err := enc.contentAADForKind(recordID, kind)
 	if err != nil {
 		return "", err
 	}
@@ -144,78 +201,78 @@ func (enc *ContentCipher) Encrypt(plaintext, recordID string) (string, error) {
 		return "", err
 	}
 
-	return strings.Join([]string{contentVersion, contentKind, enc.activeID,
+	return strings.Join([]string{contentVersion, kind, enc.activeID,
 		base64.RawURLEncoding.EncodeToString(wrapped), base64.RawURLEncoding.EncodeToString(payload)}, "$"), nil
 }
 
-func parseContentEnvelope(value string) (keyID string, wrapped, payload []byte, err error) {
-	if len(value) > maxContentEnvelopeSize {
-		return "", nil, nil, domain.ErrMalformedCiphertext
-	}
-
-	parts := strings.SplitN(value, "$", contentParts+1)
-	if len(parts) != contentParts || parts[0] != contentVersion || parts[1] != contentKind || !validKeyID(parts[2]) {
-		return "", nil, nil, domain.ErrMalformedCiphertext
-	}
-
-	wrapped, err = decodeContentField(parts[3], wrappedKeySize, wrappedKeySize)
+func (enc *ContentCipher) open(value, recordID string) (plaintext, kind string, err error) {
+	envelope, err := enc.unwrap(value, recordID)
 	if err != nil {
-		return "", nil, nil, err
+		return "", "", err
 	}
+	defer clear(envelope.dek)
 
-	payload, err = decodeContentField(parts[4], contentNonceSize+contentTagSize,
-		MaxContentSize+contentNonceSize+contentTagSize)
+	gcm, err := contentGCM(envelope.dek)
 	if err != nil {
-		return "", nil, nil, err
+		return "", "", err
 	}
 
-	return parts[2], wrapped, payload, nil
+	data, err := gcm.Open(nil, envelope.payload[:contentNonceSize], envelope.payload[contentNonceSize:], envelope.aad)
+	if err != nil {
+		return "", "", domain.ErrDecryptionFailed
+	}
+
+	return string(data), envelope.kind, nil
 }
 
-// Decrypt opens only the new format, using the DB ID and resource type as authenticated
-// context. It needs no slug. Unknown versions, kinds or keys fail closed, without fallback.
-func (enc *ContentCipher) Decrypt(value, recordID string) (string, error) {
+type unwrappedEnvelope struct {
+	kind    string
+	keyID   string
+	dek     []byte
+	payload []byte
+	aad     []byte
+}
+
+// unwrap authenticates the complete payload digest and context without decrypting content.
+func (enc *ContentCipher) unwrap(value, recordID string) (*unwrappedEnvelope, error) {
 	keyID, wrapped, payload, err := parseContentEnvelope(value)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
+
+	kind := strings.SplitN(value, "$", contentParts)[1]
 
 	kek, ok := enc.keys[keyID]
 	if !ok {
-		return "", domain.ErrDecryptionFailed
+		return nil, domain.ErrDecryptionFailed
 	}
 
-	aad, err := enc.contentAAD(recordID)
+	aad, err := enc.contentAADForKind(recordID, kind)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	dek, err := kek.Open(nil, wrapped[:contentNonceSize], wrapped[contentNonceSize:], wrappedKeyAAD(aad, keyID, payload))
 	if err != nil {
-		return "", domain.ErrDecryptionFailed
+		return nil, domain.ErrDecryptionFailed
 	}
-	defer clear(dek)
 
 	if len(dek) != aesKeySize {
-		return "", domain.ErrMalformedCiphertext
+		clear(dek)
+
+		return nil, domain.ErrMalformedCiphertext
 	}
 
-	gcm, err := contentGCM(dek)
-	if err != nil {
-		return "", err
-	}
-
-	plaintext, err := gcm.Open(nil, payload[:contentNonceSize], payload[contentNonceSize:], aad)
-	if err != nil {
-		return "", domain.ErrDecryptionFailed
-	}
-
-	return string(plaintext), nil
+	return &unwrappedEnvelope{dek: dek, payload: payload, aad: aad, kind: kind, keyID: keyID}, nil
 }
 
 // contentAAD has fixed-size fields: a purpose/version prefix, kind, resource byte, and
 // the 32-byte database ID. Neither the human-readable slug nor a key derivation is involved.
 func (enc *ContentCipher) contentAAD(recordID string) ([]byte, error) {
+	return enc.contentAADForKind(recordID, contentKind)
+}
+
+func (enc *ContentCipher) contentAADForKind(recordID, kind string) ([]byte, error) {
 	if len(recordID) != sha256.Size*2 {
 		return nil, errors.New("content record ID must be a SHA-256 digest")
 	}
@@ -230,7 +287,7 @@ func (enc *ContentCipher) contentAAD(recordID string) ([]byte, error) {
 		resource = 2
 	}
 
-	aad := append([]byte("padmark-content-v2\x00p"), resource)
+	aad := append([]byte("padmark-content-v2\x00"+kind), resource)
 
 	return append(aad, id...), nil
 }
@@ -246,24 +303,25 @@ func (enc *ContentCipher) seal(gcm cipher.AEAD, plaintext, aad []byte) ([]byte, 
 	return gcm.Seal(nonce, nonce, plaintext, aad), nil
 }
 
-// ContentEncryptor adapts ContentCipher to the usecase ports during the legacy transition.
-// Writes always use the new format. Only an unversioned, base64 legacy value uses legacySlug;
-// even a malformed/unknown versioned envelope can never enter the legacy decoder.
-type ContentEncryptor struct {
-	*ContentCipher
-}
+// ContentEncryptor adapts the envelope cipher to the notes/links usecase ports.
+// Raw legacy ciphertext is only accepted by the explicit migration API, never by normal reads.
+type ContentEncryptor struct{ *ContentCipher }
 
 func (enc *ContentEncryptor) Decrypt(value, recordID, legacySlug string) (string, error) {
-	if strings.Contains(value, "$") {
-		return enc.ContentCipher.Decrypt(value, recordID)
+	plaintext, kind, err := enc.open(value, recordID)
+	if err != nil {
+		return "", err
 	}
 
-	if domain.HashSlug(legacySlug) != recordID ||
-		len(value) > base64.StdEncoding.EncodedLen(MaxContentSize+contentNonceSize+contentTagSize) {
-		return "", domain.ErrMalformedCiphertext
+	if kind == contentKind {
+		return plaintext, nil
 	}
 
-	return New().Decrypt(value, legacySlug)
+	if domain.HashSlug(legacySlug) != recordID {
+		return "", domain.ErrDecryptionFailed
+	}
+
+	return New().Decrypt(plaintext, legacySlug)
 }
 
 // decodeContentField checks bounds before allocation and requires canonical unpadded base64url.

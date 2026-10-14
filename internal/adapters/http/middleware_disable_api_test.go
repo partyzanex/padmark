@@ -1,6 +1,7 @@
 package http_test
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"go.uber.org/mock/gomock"
 
 	adhttp "github.com/partyzanex/padmark/internal/adapters/http"
+	padmark "github.com/partyzanex/padmark/pkg/client"
 )
 
 type DisableAPISuite struct {
@@ -52,12 +54,11 @@ func (s *DisableAPISuite) newRouter(disableAPI bool) http.Handler {
 	return router
 }
 
-// TestAPIPaths_Return503WithNoMessage covers every REST/JSON API route (ogen single-segment and
+// TestAPIPaths_Return503WithCode covers every REST/JSON API route (ogen single-segment and
 // native multi-segment) with --disable-api set. No mock expectation is set on s.manager for any
 // of these — if the request reached a real handler, the mock would fail the test on the
-// unexpected call, which is exactly what proves the middleware short-circuits before auth or
-// business logic run.
-func (s *DisableAPISuite) TestAPIPaths_Return503WithFixedMessage() {
+// unexpected call, which proves the middleware prevents business logic from running.
+func (s *DisableAPISuite) TestAPIPaths_Return503WithCode() {
 	router := s.newRouter(true)
 
 	cases := []struct {
@@ -75,7 +76,10 @@ func (s *DisableAPISuite) TestAPIPaths_Return503WithFixedMessage() {
 		{"link create", http.MethodPost, "/links", `{"target_url":"https://example.com"}`},
 		{"link bulk create", http.MethodPost, "/links/bulk", `{"target_urls":["https://example.com"]}`},
 		{"link read single-segment", http.MethodGet, "/links/" + testID, ""},
+		{"link update single-segment", http.MethodPut, "/links/" + testID, `{"target_url":"https://example.com"}`},
 		{"link delete single-segment", http.MethodDelete, "/links/" + testID, ""},
+		{"token create", http.MethodPost, "/api/tokens", ""},
+		{"invite create", http.MethodPost, "/api/invites", ""},
 		{"api docs", http.MethodGet, "/api", ""},
 		{"openapi spec", http.MethodGet, "/api/openapi.yaml", ""},
 		{"llms.txt", http.MethodGet, "/llms.txt", ""},
@@ -99,7 +103,7 @@ func (s *DisableAPISuite) TestAPIPaths_Return503WithFixedMessage() {
 
 			s.Equal(http.StatusServiceUnavailable, w.Code)
 			s.Equal("application/json", w.Header().Get("Content-Type"))
-			s.JSONEq(`{"message":"До свидания"}`, w.Body.String())
+			s.JSONEq(`{"message":"API is disabled","code":"api_disabled"}`, w.Body.String())
 		})
 	}
 }
@@ -156,4 +160,31 @@ func (s *DisableAPISuite) TestDisableAPI_Off_APIStillWorks() {
 	router.ServeHTTP(w, r)
 
 	s.Equal(http.StatusCreated, w.Code)
+}
+
+// Exercise the generated decoder against the real middleware, not a synthetic 503 body.
+func (s *DisableAPISuite) TestGeneratedClient_DistinguishesDisabledAPIFromReadinessFailure() {
+	server := httptest.NewServer(s.newRouter(true))
+	defer server.Close()
+
+	client, err := padmark.NewClient(server.URL)
+	s.Require().NoError(err)
+
+	result, err := client.GetNote(s.T().Context(), padmark.GetNoteParams{ID: testID})
+	s.Require().NoError(err)
+
+	disabled, isDisabled := result.(*padmark.GetNoteServiceUnavailable)
+	s.Require().True(isDisabled, "expected a typed 503, got %T", result)
+	s.Equal("api_disabled", disabled.Code.Or(""))
+	s.Equal("API is disabled", disabled.Message)
+
+	s.pinger.EXPECT().PingContext(gomock.Any()).Return(errors.New("database offline"))
+
+	readiness, err := client.Readyz(s.T().Context())
+	s.Require().NoError(err)
+
+	unavailable, isUnavailable := readiness.(*padmark.ErrorResponse)
+	s.Require().True(isUnavailable, "expected readiness error, got %T", readiness)
+	s.False(unavailable.Code.IsSet(), "a database failure must not look like a disabled API")
+	s.Equal("db unavailable", unavailable.Message)
 }

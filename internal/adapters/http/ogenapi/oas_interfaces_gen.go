@@ -41,6 +41,10 @@ type ReadyzRes interface {
 	readyzRes()
 }
 
+type UpdateLinkRes interface {
+	updateLinkRes()
+}
+
 type UpdateNoteRes interface {
 	updateNoteRes()
 }

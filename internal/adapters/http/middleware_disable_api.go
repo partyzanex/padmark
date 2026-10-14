@@ -9,7 +9,10 @@ import (
 
 // disabledAPIMessage is the fixed body of every REST/JSON API response while --disable-api is
 // set. It carries no operational detail on purpose — the API is off, not erroring.
-const disabledAPIMessage = "До свидания"
+const (
+	disabledAPIMessage = "API is disabled"
+	disabledAPICode    = "api_disabled"
+)
 
 // isDisabledAPIPath reports whether path belongs to the REST/JSON API surface that
 // --disable-api turns off: note CRUD (/notes and everything under it), short-link CRUD
@@ -23,14 +26,13 @@ func isDisabledAPIPath(path string) bool {
 		path == apiDocsPath || path == apiSpecPath || path == llmsTxtPath ||
 		// Account provisioning (self-service token issuance, invite minting) is part of the
 		// same machine surface: --disable-api is the operator's "headless off" switch, and the
-		// middleware runs outside auth, so these reachable-only-with-a-token paths must be
-		// short-circuited like the rest.
+		// middleware blocks them when reached, like the rest of the API.
 		path == "/api/tokens" || path == "/api/invites"
 }
 
-// withAPIDisabled short-circuits every request under isDisabledAPIPath with a fixed 503 before
-// it reaches auth, CSRF, rate-limiting, or any handler — see NewRouter for where this sits in
-// the middleware stack. Only wired in when RouterOptions.DisableAPI is set.
+// withAPIDisabled responds with 503 and a stable code without calling the API handler.
+// Outer middleware may respond first; see NewRouter for the current stack order.
+// Only wired in when RouterOptions.DisableAPI is set.
 func withAPIDisabled(log *slog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !isDisabledAPIPath(r.URL.Path) {
@@ -42,7 +44,7 @@ func withAPIDisabled(log *slog.Logger, next http.Handler) http.Handler {
 		w.Header().Set("Content-Type", mimeJSON)
 		w.WriteHeader(http.StatusServiceUnavailable)
 
-		err := json.NewEncoder(w).Encode(errorJSON{Message: disabledAPIMessage})
+		err := json.NewEncoder(w).Encode(errorJSON{Message: disabledAPIMessage, Code: disabledAPICode})
 		if err != nil {
 			log.ErrorContext(r.Context(), "write api-disabled response", "err", err)
 		}

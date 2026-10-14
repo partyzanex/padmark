@@ -76,6 +76,8 @@ func handleGetNoteRes(res padmark.GetNoteRes) (*padmark.NoteResponse, error) {
 		return nil, errors.New("note not found")
 	case *padmark.GetNoteGone:
 		return nil, errors.New("note has expired or was already consumed")
+	case *padmark.GetNoteServiceUnavailable:
+		return nil, serviceUnavailableError(padmark.ErrorResponse(*typed))
 	case *padmark.GetNoteInternalServerError:
 		return nil, fmt.Errorf("server error: %s", typed.Message)
 	default:

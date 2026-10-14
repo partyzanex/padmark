@@ -119,9 +119,12 @@ type NoteManager interface {
 
 // LinkManager is the interface the HTTP adapter requires from the short-link business logic
 // layer — the links analogue of NoteManager. Shared by OgenHandler (JSON API: POST /links,
-// GET/DELETE /links/{id}) and LinkHandler (browser-facing GET /r/{id}).
+// GET/PUT/DELETE /links/{id}) and LinkHandler (browser-facing GET /r/{id}).
 type LinkManager interface {
 	Create(ctx context.Context, targetURL string, opts links.CreateOptions) (*domain.Link, error)
+	Update(
+		ctx context.Context, slug, editCode string, callerID uuid.UUID, targetURL string, opts links.UpdateOptions,
+	) (*domain.Link, error)
 	Peek(ctx context.Context, slug string) (*domain.Link, error)
 	Redirect(ctx context.Context, slug string) (*domain.Link, error)
 	Delete(ctx context.Context, slug, editCode string, callerID uuid.UUID) error

@@ -192,6 +192,8 @@ func handleCreateNoteRes(res padmark.CreateNoteRes) (*padmark.CreateNoteResponse
 		return nil, fmt.Errorf("content too large: %s", typed.Message)
 	case *padmark.CreateNoteUnprocessableEntity:
 		return nil, fmt.Errorf("validation error: %s", typed.Message)
+	case *padmark.CreateNoteServiceUnavailable:
+		return nil, serviceUnavailableError(padmark.ErrorResponse(*typed))
 	case *padmark.CreateNoteInternalServerError:
 		return nil, fmt.Errorf("server error: %s", typed.Message)
 	default:

@@ -133,6 +133,17 @@ type Invoker interface {
 	//
 	// GET /readyz
 	Readyz(ctx context.Context) (ReadyzRes, error)
+	// UpdateLink invokes updateLink operation.
+	//
+	// Replaces the destination URL, preserving the slug, edit code, click count, owner,
+	// creation time, and burn-after-click setting. Optional fields omitted from the request
+	// retain their current values. TTL is counted from this update; null removes expiry.
+	// Anonymous callers may update links they could read with the original edit_code.
+	// The exact authenticated owner may omit edit_code, as with PUT /notes/{id}.
+	// Returns the updated link; the edit code is never returned again.
+	//
+	// PUT /links/{id}
+	UpdateLink(ctx context.Context, request *UpdateLinkRequest, params UpdateLinkParams) (UpdateLinkRes, error)
 	// UpdateNote invokes updateNote operation.
 	//
 	// Replaces the note's title, content, content type, and burn settings.
@@ -1189,6 +1200,106 @@ func (c *Client) sendReadyz(ctx context.Context) (res ReadyzRes, err error) {
 
 	stage = "DecodeResponse"
 	result, err := decodeReadyzResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
+// UpdateLink invokes updateLink operation.
+//
+// Replaces the destination URL, preserving the slug, edit code, click count, owner,
+// creation time, and burn-after-click setting. Optional fields omitted from the request
+// retain their current values. TTL is counted from this update; null removes expiry.
+// Anonymous callers may update links they could read with the original edit_code.
+// The exact authenticated owner may omit edit_code, as with PUT /notes/{id}.
+// Returns the updated link; the edit code is never returned again.
+//
+// PUT /links/{id}
+func (c *Client) UpdateLink(ctx context.Context, request *UpdateLinkRequest, params UpdateLinkParams) (UpdateLinkRes, error) {
+	res, err := c.sendUpdateLink(ctx, request, params)
+	return res, err
+}
+
+func (c *Client) sendUpdateLink(ctx context.Context, request *UpdateLinkRequest, params UpdateLinkParams) (res UpdateLinkRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("updateLink"),
+		semconv.HTTPRequestMethodKey.String("PUT"),
+		semconv.URLTemplateKey.String("/links/{id}"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, UpdateLinkOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [2]string
+	pathParts[0] = "/links/"
+	{
+		// Encode "id" parameter.
+		e := uri.NewPathEncoder(uri.PathEncoderConfig{
+			Param:   "id",
+			Style:   uri.PathStyleSimple,
+			Explode: false,
+		})
+		if err := func() error {
+			return e.EncodeValue(conv.StringToString(params.ID))
+		}(); err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		encoded, err := e.Result()
+		if err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		pathParts[1] = encoded
+	}
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "PUT", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+	if err := encodeUpdateLinkRequest(request, r); err != nil {
+		return res, errors.Wrap(err, "encode request")
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeUpdateLinkResponse(resp)
 	if err != nil {
 		return res, errors.Wrap(err, "decode response")
 	}

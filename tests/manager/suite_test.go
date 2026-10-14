@@ -130,6 +130,8 @@ func (s *ManagerSuite) TestContentEnvelope_LegacyReadAndNoteUpdate() {
 	id := domain.HashSlug(note.ID)
 	legacy, err := crypto.New().Encrypt("old content", note.ID)
 	s.Require().NoError(err)
+	legacy, err = testutil.ContentEncryptor(s.T(), "note").WrapLegacy(legacy, id)
+	s.Require().NoError(err)
 	_, err = s.DB.NewUpdate().Table("notes").Set("content = ?", legacy).Where("id = ?", id).Exec(ctx)
 	s.Require().NoError(err)
 	peeked, err := s.Manager.Peek(ctx, note.ID)
@@ -149,6 +151,8 @@ func (s *ManagerSuite) TestContentEnvelope_LegacyReadAndNoteUpdate() {
 	link, err := s.LinkManager.Create(ctx, "https://example.com/legacy", links.CreateOptions{})
 	s.Require().NoError(err)
 	legacyURL, err := crypto.New().Encrypt(link.TargetURL, link.ID)
+	s.Require().NoError(err)
+	legacyURL, err = testutil.ContentEncryptor(s.T(), "link").WrapLegacy(legacyURL, domain.HashSlug(link.ID))
 	s.Require().NoError(err)
 	_, err = s.DB.NewUpdate().Table("links").Set("target_url = ?", legacyURL).
 		Where("id = ?", domain.HashSlug(link.ID)).Exec(ctx)
@@ -682,4 +686,44 @@ func (s *ManagerSuite) TestLink_CreateThenRedirect_RealCrypto_RoundTrips() {
 	s.Require().NoError(err)
 	s.Equal(plaintext, redirected.TargetURL)
 	s.Equal(1, redirected.Views)
+}
+
+// Updating a destination preserves the original encrypted edit-code hash and slug,
+// and the next redirect decrypts the new ciphertext with the same record identity.
+func (s *ManagerSuite) TestLink_Update_RealCrypto() {
+	ctx := s.T().Context()
+	link, err := s.LinkManager.Create(ctx, "https://example.com/old", links.CreateOptions{})
+	s.Require().NoError(err)
+	_, err = s.LinkManager.Redirect(ctx, link.ID)
+	s.Require().NoError(err)
+
+	var originalHash string
+
+	err = s.DB.NewSelect().TableExpr("links").Column("edit_code").
+		Where("id = ?", domain.HashSlug(link.ID)).Scan(ctx, &originalHash)
+	s.Require().NoError(err)
+	updated, err := s.LinkManager.Update(ctx, link.ID, link.EditCode, uuid.Nil,
+		"https://example.com/new", links.UpdateOptions{})
+	s.Require().NoError(err)
+	s.Equal(link.ID, updated.ID)
+
+	s.Equal(1, updated.Views)
+	s.Empty(updated.EditCode)
+
+	var stored struct {
+		TargetURL string `bun:"target_url"`
+		EditCode  string `bun:"edit_code"`
+	}
+
+	err = s.DB.NewSelect().TableExpr("links").Column("target_url", "edit_code").
+		Where("id = ?", domain.HashSlug(link.ID)).Scan(ctx, &stored)
+	s.Require().NoError(err)
+	s.True(strings.HasPrefix(stored.TargetURL, "pmc2$p$"))
+	s.NotContains(stored.TargetURL, "https://example.com/new")
+	s.Equal(originalHash, stored.EditCode)
+	redirected, err := s.LinkManager.Redirect(ctx, link.ID)
+	s.Require().NoError(err)
+	s.Equal("https://example.com/new", redirected.TargetURL)
+	// The original edit code still authorizes a subsequent mutation.
+	s.NoError(s.LinkManager.Delete(ctx, link.ID, link.EditCode, uuid.Nil))
 }

@@ -835,6 +835,21 @@ func (mr *MockLinkManagerMockRecorder) Redirect(ctx, slug any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Redirect", reflect.TypeOf((*MockLinkManager)(nil).Redirect), ctx, slug)
 }
 
+// Update mocks base method.
+func (m *MockLinkManager) Update(ctx context.Context, slug, editCode string, callerID uuid.UUID, targetURL string, opts links.UpdateOptions) (*domain.Link, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Update", ctx, slug, editCode, callerID, targetURL, opts)
+	ret0, _ := ret[0].(*domain.Link)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Update indicates an expected call of Update.
+func (mr *MockLinkManagerMockRecorder) Update(ctx, slug, editCode, callerID, targetURL, opts any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Update", reflect.TypeOf((*MockLinkManager)(nil).Update), ctx, slug, editCode, callerID, targetURL, opts)
+}
+
 // MockPinger is a mock of Pinger interface.
 type MockPinger struct {
 	ctrl     *gomock.Controller

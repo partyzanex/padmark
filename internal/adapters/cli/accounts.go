@@ -67,7 +67,7 @@ func handleCreateAPITokenRes(res padmark.CreateAPITokenRes) (string, error) {
 	case *padmark.CreateAPITokenTooManyRequests:
 		return "", fmt.Errorf("token cap reached (revoke one via /admin): %s", typed.Message)
 	case *padmark.CreateAPITokenServiceUnavailable:
-		return "", fmt.Errorf("feature not enabled: %s", typed.Message)
+		return "", serviceUnavailableError(padmark.ErrorResponse(*typed))
 	case *padmark.CreateAPITokenInternalServerError:
 		return "", fmt.Errorf("server error: %s", typed.Message)
 	default:
@@ -128,7 +128,7 @@ func handleCreateInviteRes(res padmark.CreateInviteRes) (string, error) {
 	case *padmark.CreateInviteForbidden:
 		return "", fmt.Errorf("admin required: %s", typed.Message)
 	case *padmark.CreateInviteServiceUnavailable:
-		return "", fmt.Errorf("feature not enabled: %s", typed.Message)
+		return "", serviceUnavailableError(padmark.ErrorResponse(*typed))
 	case *padmark.CreateInviteInternalServerError:
 		return "", fmt.Errorf("server error: %s", typed.Message)
 	default:

@@ -176,11 +176,24 @@ func (s *ToolsSuite) TestDeleteNote_MapsNotFoundToRemediation() {
 	s.Contains(s.errorTextOf(res), "not found")
 }
 
+func (s *ToolsSuite) TestGetNote_DisabledAPIUsesCode() {
+	s.cl.EXPECT().GetNote(gomock.Any(), padmark.GetNoteParams{ID: "example"}).
+		Return(&padmark.GetNoteServiceUnavailable{
+			Message: "translated text", Code: padmark.NewOptString("api_disabled"),
+		}, nil)
+
+	res := s.callTool(s.T().Context(), "get_note", map[string]any{"id": "example"})
+
+	s.Contains(s.errorTextOf(res), "API is disabled on this server (api_disabled)")
+}
+
 func (s *ToolsSuite) TestCheckServer_AggregatesBothProbes() {
 	ctx := s.T().Context()
 
 	s.cl.EXPECT().Healthz(gomock.Any()).Return(nil)
-	s.cl.EXPECT().Readyz(gomock.Any()).Return(&padmark.ErrorResponse{Message: "warming up"}, nil)
+	s.cl.EXPECT().Readyz(gomock.Any()).Return(&padmark.ErrorResponse{
+		Message: "warming up", Code: padmark.OptString{Value: "", Set: false},
+	}, nil)
 
 	res := s.callTool(ctx, "check_server", map[string]any{})
 

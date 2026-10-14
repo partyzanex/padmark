@@ -107,7 +107,7 @@ func writeUnauthorized(w http.ResponseWriter) {
 	// Encoding a fixed two-field struct only fails on a broken connection, which is
 	// unactionable here — not worth threading a logger into this otherwise stateless
 	// middleware just to report it.
-	err := json.NewEncoder(w).Encode(errorJSON{Message: msgUnauthorized})
+	err := json.NewEncoder(w).Encode(errorJSON{Message: msgUnauthorized, Code: ""})
 	if err != nil {
 		return
 	}
@@ -207,7 +207,7 @@ func isPublicRoute(r *http.Request, namedRoutes map[string]struct{}) bool {
 
 	switch {
 	case isLinkPath(path) || path == linkCreatePath:
-		// GET /r/{id}, GET/DELETE /links/{id}, POST /links, POST /links/bulk — per-link
+		// GET /r/{id}, GET/PUT/DELETE /links/{id}, POST /links, POST /links/bulk — per-link
 		// privacy and per-link ownership are enforced downstream. Unlike note paths these
 		// have a fixed, unambiguous prefix, so no namedRoutes disambiguation is needed.
 		return true

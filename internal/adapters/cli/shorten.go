@@ -148,6 +148,8 @@ func handleCreateLinkRes(res padmark.CreateLinkRes) (*padmark.CreateLinkResponse
 		return nil, fmt.Errorf("validation error: %s", typed.Message)
 	case *padmark.CreateLinkTooManyRequests:
 		return nil, errors.New("rate limit exceeded, try again later")
+	case *padmark.CreateLinkServiceUnavailable:
+		return nil, serviceUnavailableError(padmark.ErrorResponse(*typed))
 	case *padmark.CreateLinkInternalServerError:
 		return nil, fmt.Errorf("server error: %s", typed.Message)
 	default:
