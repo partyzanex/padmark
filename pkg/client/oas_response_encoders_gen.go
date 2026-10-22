@@ -18,7 +18,6 @@ func encodeCreateAPITokenResponse(response CreateAPITokenRes, w http.ResponseWri
 	case *CreateAPITokenResponse:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(201)
-		span.SetStatus(codes.Ok, http.StatusText(201))
 
 		e := new(jx.Encoder)
 		response.Encode(e)
@@ -31,7 +30,6 @@ func encodeCreateAPITokenResponse(response CreateAPITokenRes, w http.ResponseWri
 	case *CreateAPITokenUnauthorized:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(401)
-		span.SetStatus(codes.Error, http.StatusText(401))
 
 		e := new(jx.Encoder)
 		response.Encode(e)
@@ -44,7 +42,6 @@ func encodeCreateAPITokenResponse(response CreateAPITokenRes, w http.ResponseWri
 	case *CreateAPITokenTooManyRequests:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(429)
-		span.SetStatus(codes.Error, http.StatusText(429))
 
 		e := new(jx.Encoder)
 		response.Encode(e)
@@ -90,7 +87,6 @@ func encodeCreateInviteResponse(response CreateInviteRes, w http.ResponseWriter,
 	case *CreateInviteResponse:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(201)
-		span.SetStatus(codes.Ok, http.StatusText(201))
 
 		e := new(jx.Encoder)
 		response.Encode(e)
@@ -103,7 +99,6 @@ func encodeCreateInviteResponse(response CreateInviteRes, w http.ResponseWriter,
 	case *CreateInviteUnauthorized:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(401)
-		span.SetStatus(codes.Error, http.StatusText(401))
 
 		e := new(jx.Encoder)
 		response.Encode(e)
@@ -116,7 +111,6 @@ func encodeCreateInviteResponse(response CreateInviteRes, w http.ResponseWriter,
 	case *CreateInviteForbidden:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(403)
-		span.SetStatus(codes.Error, http.StatusText(403))
 
 		e := new(jx.Encoder)
 		response.Encode(e)
@@ -129,7 +123,6 @@ func encodeCreateInviteResponse(response CreateInviteRes, w http.ResponseWriter,
 	case *CreateInviteTooManyRequests:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(429)
-		span.SetStatus(codes.Error, http.StatusText(429))
 
 		e := new(jx.Encoder)
 		response.Encode(e)
@@ -195,7 +188,6 @@ func encodeCreateLinkResponse(response CreateLinkRes, w http.ResponseWriter, spa
 			}
 		}
 		w.WriteHeader(201)
-		span.SetStatus(codes.Ok, http.StatusText(201))
 
 		e := new(jx.Encoder)
 		response.Response.Encode(e)
@@ -208,7 +200,6 @@ func encodeCreateLinkResponse(response CreateLinkRes, w http.ResponseWriter, spa
 	case *CreateLinkBadRequest:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(400)
-		span.SetStatus(codes.Error, http.StatusText(400))
 
 		e := new(jx.Encoder)
 		response.Encode(e)
@@ -221,7 +212,6 @@ func encodeCreateLinkResponse(response CreateLinkRes, w http.ResponseWriter, spa
 	case *CreateLinkUnauthorized:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(401)
-		span.SetStatus(codes.Error, http.StatusText(401))
 
 		e := new(jx.Encoder)
 		response.Encode(e)
@@ -234,7 +224,6 @@ func encodeCreateLinkResponse(response CreateLinkRes, w http.ResponseWriter, spa
 	case *CreateLinkConflict:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(409)
-		span.SetStatus(codes.Error, http.StatusText(409))
 
 		e := new(jx.Encoder)
 		response.Encode(e)
@@ -247,7 +236,6 @@ func encodeCreateLinkResponse(response CreateLinkRes, w http.ResponseWriter, spa
 	case *CreateLinkRequestEntityTooLarge:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(413)
-		span.SetStatus(codes.Error, http.StatusText(413))
 
 		e := new(jx.Encoder)
 		response.Encode(e)
@@ -260,7 +248,6 @@ func encodeCreateLinkResponse(response CreateLinkRes, w http.ResponseWriter, spa
 	case *CreateLinkUnsupportedMediaType:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(415)
-		span.SetStatus(codes.Error, http.StatusText(415))
 
 		e := new(jx.Encoder)
 		response.Encode(e)
@@ -273,7 +260,6 @@ func encodeCreateLinkResponse(response CreateLinkRes, w http.ResponseWriter, spa
 	case *CreateLinkUnprocessableEntity:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(422)
-		span.SetStatus(codes.Error, http.StatusText(422))
 
 		e := new(jx.Encoder)
 		response.Encode(e)
@@ -286,7 +272,6 @@ func encodeCreateLinkResponse(response CreateLinkRes, w http.ResponseWriter, spa
 	case *CreateLinkTooManyRequests:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(429)
-		span.SetStatus(codes.Error, http.StatusText(429))
 
 		e := new(jx.Encoder)
 		response.Encode(e)
@@ -332,7 +317,6 @@ func encodeCreateLinksBulkResponse(response CreateLinksBulkRes, w http.ResponseW
 	case *BulkCreateLinksResponse:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(200)
-		span.SetStatus(codes.Ok, http.StatusText(200))
 
 		e := new(jx.Encoder)
 		response.Encode(e)
@@ -345,7 +329,6 @@ func encodeCreateLinksBulkResponse(response CreateLinksBulkRes, w http.ResponseW
 	case *CreateLinksBulkBadRequest:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(400)
-		span.SetStatus(codes.Error, http.StatusText(400))
 
 		e := new(jx.Encoder)
 		response.Encode(e)
@@ -358,7 +341,6 @@ func encodeCreateLinksBulkResponse(response CreateLinksBulkRes, w http.ResponseW
 	case *CreateLinksBulkUnauthorized:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(401)
-		span.SetStatus(codes.Error, http.StatusText(401))
 
 		e := new(jx.Encoder)
 		response.Encode(e)
@@ -371,7 +353,6 @@ func encodeCreateLinksBulkResponse(response CreateLinksBulkRes, w http.ResponseW
 	case *CreateLinksBulkRequestEntityTooLarge:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(413)
-		span.SetStatus(codes.Error, http.StatusText(413))
 
 		e := new(jx.Encoder)
 		response.Encode(e)
@@ -384,7 +365,6 @@ func encodeCreateLinksBulkResponse(response CreateLinksBulkRes, w http.ResponseW
 	case *CreateLinksBulkUnsupportedMediaType:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(415)
-		span.SetStatus(codes.Error, http.StatusText(415))
 
 		e := new(jx.Encoder)
 		response.Encode(e)
@@ -397,7 +377,6 @@ func encodeCreateLinksBulkResponse(response CreateLinksBulkRes, w http.ResponseW
 	case *CreateLinksBulkTooManyRequests:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(429)
-		span.SetStatus(codes.Error, http.StatusText(429))
 
 		e := new(jx.Encoder)
 		response.Encode(e)
@@ -463,7 +442,6 @@ func encodeCreateNoteResponse(response CreateNoteRes, w http.ResponseWriter, spa
 			}
 		}
 		w.WriteHeader(201)
-		span.SetStatus(codes.Ok, http.StatusText(201))
 
 		e := new(jx.Encoder)
 		response.Response.Encode(e)
@@ -476,7 +454,6 @@ func encodeCreateNoteResponse(response CreateNoteRes, w http.ResponseWriter, spa
 	case *CreateNoteBadRequest:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(400)
-		span.SetStatus(codes.Error, http.StatusText(400))
 
 		e := new(jx.Encoder)
 		response.Encode(e)
@@ -489,7 +466,6 @@ func encodeCreateNoteResponse(response CreateNoteRes, w http.ResponseWriter, spa
 	case *CreateNoteUnauthorized:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(401)
-		span.SetStatus(codes.Error, http.StatusText(401))
 
 		e := new(jx.Encoder)
 		response.Encode(e)
@@ -502,7 +478,6 @@ func encodeCreateNoteResponse(response CreateNoteRes, w http.ResponseWriter, spa
 	case *CreateNoteConflict:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(409)
-		span.SetStatus(codes.Error, http.StatusText(409))
 
 		e := new(jx.Encoder)
 		response.Encode(e)
@@ -515,7 +490,6 @@ func encodeCreateNoteResponse(response CreateNoteRes, w http.ResponseWriter, spa
 	case *CreateNoteRequestEntityTooLarge:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(413)
-		span.SetStatus(codes.Error, http.StatusText(413))
 
 		e := new(jx.Encoder)
 		response.Encode(e)
@@ -528,7 +502,6 @@ func encodeCreateNoteResponse(response CreateNoteRes, w http.ResponseWriter, spa
 	case *CreateNoteUnsupportedMediaType:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(415)
-		span.SetStatus(codes.Error, http.StatusText(415))
 
 		e := new(jx.Encoder)
 		response.Encode(e)
@@ -541,7 +514,6 @@ func encodeCreateNoteResponse(response CreateNoteRes, w http.ResponseWriter, spa
 	case *CreateNoteUnprocessableEntity:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(422)
-		span.SetStatus(codes.Error, http.StatusText(422))
 
 		e := new(jx.Encoder)
 		response.Encode(e)
@@ -586,20 +558,17 @@ func encodeDeleteLinkResponse(response DeleteLinkRes, w http.ResponseWriter, spa
 	switch response := response.(type) {
 	case *DeleteLinkNoContent:
 		w.WriteHeader(204)
-		span.SetStatus(codes.Ok, http.StatusText(204))
 
 		return nil
 
 	case *DeleteLinkUnauthorized:
 		w.WriteHeader(401)
-		span.SetStatus(codes.Error, http.StatusText(401))
 
 		return nil
 
 	case *DeleteLinkForbidden:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(403)
-		span.SetStatus(codes.Error, http.StatusText(403))
 
 		e := new(jx.Encoder)
 		response.Encode(e)
@@ -612,7 +581,6 @@ func encodeDeleteLinkResponse(response DeleteLinkRes, w http.ResponseWriter, spa
 	case *DeleteLinkNotFound:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(404)
-		span.SetStatus(codes.Error, http.StatusText(404))
 
 		e := new(jx.Encoder)
 		response.Encode(e)
@@ -625,7 +593,6 @@ func encodeDeleteLinkResponse(response DeleteLinkRes, w http.ResponseWriter, spa
 	case *DeleteLinkTooManyRequests:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(429)
-		span.SetStatus(codes.Error, http.StatusText(429))
 
 		e := new(jx.Encoder)
 		response.Encode(e)
@@ -670,20 +637,17 @@ func encodeDeleteNoteResponse(response DeleteNoteRes, w http.ResponseWriter, spa
 	switch response := response.(type) {
 	case *DeleteNoteNoContent:
 		w.WriteHeader(204)
-		span.SetStatus(codes.Ok, http.StatusText(204))
 
 		return nil
 
 	case *DeleteNoteUnauthorized:
 		w.WriteHeader(401)
-		span.SetStatus(codes.Error, http.StatusText(401))
 
 		return nil
 
 	case *DeleteNoteForbidden:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(403)
-		span.SetStatus(codes.Error, http.StatusText(403))
 
 		e := new(jx.Encoder)
 		response.Encode(e)
@@ -696,7 +660,6 @@ func encodeDeleteNoteResponse(response DeleteNoteRes, w http.ResponseWriter, spa
 	case *DeleteNoteNotFound:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(404)
-		span.SetStatus(codes.Error, http.StatusText(404))
 
 		e := new(jx.Encoder)
 		response.Encode(e)
@@ -709,7 +672,6 @@ func encodeDeleteNoteResponse(response DeleteNoteRes, w http.ResponseWriter, spa
 	case *DeleteNoteTooManyRequests:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(429)
-		span.SetStatus(codes.Error, http.StatusText(429))
 
 		e := new(jx.Encoder)
 		response.Encode(e)
@@ -755,7 +717,6 @@ func encodeGetLinkResponse(response GetLinkRes, w http.ResponseWriter, span trac
 	case *LinkResponse:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(200)
-		span.SetStatus(codes.Ok, http.StatusText(200))
 
 		e := new(jx.Encoder)
 		response.Encode(e)
@@ -768,7 +729,6 @@ func encodeGetLinkResponse(response GetLinkRes, w http.ResponseWriter, span trac
 	case *GetLinkUnauthorized:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(401)
-		span.SetStatus(codes.Error, http.StatusText(401))
 
 		e := new(jx.Encoder)
 		response.Encode(e)
@@ -781,7 +741,6 @@ func encodeGetLinkResponse(response GetLinkRes, w http.ResponseWriter, span trac
 	case *GetLinkNotFound:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(404)
-		span.SetStatus(codes.Error, http.StatusText(404))
 
 		e := new(jx.Encoder)
 		response.Encode(e)
@@ -794,7 +753,6 @@ func encodeGetLinkResponse(response GetLinkRes, w http.ResponseWriter, span trac
 	case *GetLinkGone:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(410)
-		span.SetStatus(codes.Error, http.StatusText(410))
 
 		e := new(jx.Encoder)
 		response.Encode(e)
@@ -840,7 +798,6 @@ func encodeGetNoteResponse(response GetNoteRes, w http.ResponseWriter, span trac
 	case *NoteResponse:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(200)
-		span.SetStatus(codes.Ok, http.StatusText(200))
 
 		e := new(jx.Encoder)
 		response.Encode(e)
@@ -853,7 +810,6 @@ func encodeGetNoteResponse(response GetNoteRes, w http.ResponseWriter, span trac
 	case *GetNoteUnauthorized:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(401)
-		span.SetStatus(codes.Error, http.StatusText(401))
 
 		e := new(jx.Encoder)
 		response.Encode(e)
@@ -866,7 +822,6 @@ func encodeGetNoteResponse(response GetNoteRes, w http.ResponseWriter, span trac
 	case *GetNoteNotFound:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(404)
-		span.SetStatus(codes.Error, http.StatusText(404))
 
 		e := new(jx.Encoder)
 		response.Encode(e)
@@ -879,7 +834,6 @@ func encodeGetNoteResponse(response GetNoteRes, w http.ResponseWriter, span trac
 	case *GetNoteConflict:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(409)
-		span.SetStatus(codes.Error, http.StatusText(409))
 
 		e := new(jx.Encoder)
 		response.Encode(e)
@@ -892,7 +846,6 @@ func encodeGetNoteResponse(response GetNoteRes, w http.ResponseWriter, span trac
 	case *GetNoteGone:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(410)
-		span.SetStatus(codes.Error, http.StatusText(410))
 
 		e := new(jx.Encoder)
 		response.Encode(e)
@@ -935,7 +888,6 @@ func encodeGetNoteResponse(response GetNoteRes, w http.ResponseWriter, span trac
 
 func encodeHealthzResponse(response *HealthzOK, w http.ResponseWriter, span trace.Span) error {
 	w.WriteHeader(200)
-	span.SetStatus(codes.Ok, http.StatusText(200))
 
 	return nil
 }
@@ -944,7 +896,6 @@ func encodeReadyzResponse(response ReadyzRes, w http.ResponseWriter, span trace.
 	switch response := response.(type) {
 	case *ReadyzOK:
 		w.WriteHeader(200)
-		span.SetStatus(codes.Ok, http.StatusText(200))
 
 		return nil
 
@@ -971,7 +922,6 @@ func encodeUpdateLinkResponse(response UpdateLinkRes, w http.ResponseWriter, spa
 	case *LinkResponse:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(200)
-		span.SetStatus(codes.Ok, http.StatusText(200))
 
 		e := new(jx.Encoder)
 		response.Encode(e)
@@ -984,7 +934,6 @@ func encodeUpdateLinkResponse(response UpdateLinkRes, w http.ResponseWriter, spa
 	case *UpdateLinkBadRequest:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(400)
-		span.SetStatus(codes.Error, http.StatusText(400))
 
 		e := new(jx.Encoder)
 		response.Encode(e)
@@ -996,14 +945,12 @@ func encodeUpdateLinkResponse(response UpdateLinkRes, w http.ResponseWriter, spa
 
 	case *UpdateLinkUnauthorized:
 		w.WriteHeader(401)
-		span.SetStatus(codes.Error, http.StatusText(401))
 
 		return nil
 
 	case *UpdateLinkForbidden:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(403)
-		span.SetStatus(codes.Error, http.StatusText(403))
 
 		e := new(jx.Encoder)
 		response.Encode(e)
@@ -1016,7 +963,6 @@ func encodeUpdateLinkResponse(response UpdateLinkRes, w http.ResponseWriter, spa
 	case *UpdateLinkNotFound:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(404)
-		span.SetStatus(codes.Error, http.StatusText(404))
 
 		e := new(jx.Encoder)
 		response.Encode(e)
@@ -1029,7 +975,6 @@ func encodeUpdateLinkResponse(response UpdateLinkRes, w http.ResponseWriter, spa
 	case *UpdateLinkRequestEntityTooLarge:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(413)
-		span.SetStatus(codes.Error, http.StatusText(413))
 
 		e := new(jx.Encoder)
 		response.Encode(e)
@@ -1042,7 +987,6 @@ func encodeUpdateLinkResponse(response UpdateLinkRes, w http.ResponseWriter, spa
 	case *UpdateLinkUnsupportedMediaType:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(415)
-		span.SetStatus(codes.Error, http.StatusText(415))
 
 		e := new(jx.Encoder)
 		response.Encode(e)
@@ -1055,7 +999,6 @@ func encodeUpdateLinkResponse(response UpdateLinkRes, w http.ResponseWriter, spa
 	case *UpdateLinkUnprocessableEntity:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(422)
-		span.SetStatus(codes.Error, http.StatusText(422))
 
 		e := new(jx.Encoder)
 		response.Encode(e)
@@ -1068,7 +1011,6 @@ func encodeUpdateLinkResponse(response UpdateLinkRes, w http.ResponseWriter, spa
 	case *UpdateLinkTooManyRequests:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(429)
-		span.SetStatus(codes.Error, http.StatusText(429))
 
 		e := new(jx.Encoder)
 		response.Encode(e)
@@ -1114,7 +1056,6 @@ func encodeUpdateNoteResponse(response UpdateNoteRes, w http.ResponseWriter, spa
 	case *NoteResponse:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(200)
-		span.SetStatus(codes.Ok, http.StatusText(200))
 
 		e := new(jx.Encoder)
 		response.Encode(e)
@@ -1127,7 +1068,6 @@ func encodeUpdateNoteResponse(response UpdateNoteRes, w http.ResponseWriter, spa
 	case *UpdateNoteBadRequest:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(400)
-		span.SetStatus(codes.Error, http.StatusText(400))
 
 		e := new(jx.Encoder)
 		response.Encode(e)
@@ -1139,14 +1079,12 @@ func encodeUpdateNoteResponse(response UpdateNoteRes, w http.ResponseWriter, spa
 
 	case *UpdateNoteUnauthorized:
 		w.WriteHeader(401)
-		span.SetStatus(codes.Error, http.StatusText(401))
 
 		return nil
 
 	case *UpdateNoteForbidden:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(403)
-		span.SetStatus(codes.Error, http.StatusText(403))
 
 		e := new(jx.Encoder)
 		response.Encode(e)
@@ -1159,7 +1097,6 @@ func encodeUpdateNoteResponse(response UpdateNoteRes, w http.ResponseWriter, spa
 	case *UpdateNoteNotFound:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(404)
-		span.SetStatus(codes.Error, http.StatusText(404))
 
 		e := new(jx.Encoder)
 		response.Encode(e)
@@ -1172,7 +1109,6 @@ func encodeUpdateNoteResponse(response UpdateNoteRes, w http.ResponseWriter, spa
 	case *UpdateNoteRequestEntityTooLarge:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(413)
-		span.SetStatus(codes.Error, http.StatusText(413))
 
 		e := new(jx.Encoder)
 		response.Encode(e)
@@ -1185,7 +1121,6 @@ func encodeUpdateNoteResponse(response UpdateNoteRes, w http.ResponseWriter, spa
 	case *UpdateNoteUnsupportedMediaType:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(415)
-		span.SetStatus(codes.Error, http.StatusText(415))
 
 		e := new(jx.Encoder)
 		response.Encode(e)
@@ -1198,7 +1133,6 @@ func encodeUpdateNoteResponse(response UpdateNoteRes, w http.ResponseWriter, spa
 	case *UpdateNoteUnprocessableEntity:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(422)
-		span.SetStatus(codes.Error, http.StatusText(422))
 
 		e := new(jx.Encoder)
 		response.Encode(e)
@@ -1211,7 +1145,6 @@ func encodeUpdateNoteResponse(response UpdateNoteRes, w http.ResponseWriter, spa
 	case *UpdateNoteTooManyRequests:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(429)
-		span.SetStatus(codes.Error, http.StatusText(429))
 
 		e := new(jx.Encoder)
 		response.Encode(e)

@@ -165,8 +165,6 @@ func noteUpdatePayload(req *ogenapi.UpdateNoteRequest) *domain.Note {
 }
 
 // DeleteNote implements ogenapi.Handler.
-//
-//nolint:dupl // ogen's per-operation response-union types make the PUT/DELETE bodies textually near-identical
 func (h *OgenHandler) DeleteNote(
 	ctx context.Context, params ogenapi.DeleteNoteParams,
 ) (ogenapi.DeleteNoteRes, error) {
@@ -174,12 +172,7 @@ func (h *OgenHandler) DeleteNote(
 		return &ogenapi.DeleteNoteUnauthorized{}, nil
 	}
 
-	editCode := params.XEditCode.Or("")
-	if editCode == "" {
-		editCode = params.EditCode.Or("")
-	}
-
-	err := h.manager.Delete(ctx, params.ID, editCode, callerIDFromCtx(ctx))
+	err := h.manager.Delete(ctx, params.ID, params.XEditCode.Or(""), callerIDFromCtx(ctx))
 	if err != nil {
 		return mapDeleteError(err, h.log), nil
 	}
@@ -255,8 +248,6 @@ func (h *OgenHandler) GetLink(
 }
 
 // DeleteLink implements ogenapi.Handler.
-//
-//nolint:dupl // ogen's per-operation response-union types make the PUT/DELETE bodies textually near-identical
 func (h *OgenHandler) DeleteLink(
 	ctx context.Context, params ogenapi.DeleteLinkParams,
 ) (ogenapi.DeleteLinkRes, error) {
@@ -264,12 +255,7 @@ func (h *OgenHandler) DeleteLink(
 		return &ogenapi.DeleteLinkUnauthorized{}, nil
 	}
 
-	editCode := params.XEditCode.Or("")
-	if editCode == "" {
-		editCode = params.EditCode.Or("")
-	}
-
-	err := h.linkManager.Delete(ctx, params.ID, editCode, callerIDFromCtx(ctx))
+	err := h.linkManager.Delete(ctx, params.ID, params.XEditCode.Or(""), callerIDFromCtx(ctx))
 	if err != nil {
 		return mapDeleteLinkError(err, h.log), nil
 	}

@@ -203,7 +203,6 @@ func (m *Manager) deleteLink(
 	params := padmark.DeleteLinkParams{
 		ID:        input.ID,
 		XEditCode: padmark.OptString{Value: "", Set: false},
-		EditCode:  padmark.OptString{Value: "", Set: false},
 	}
 	if code := editCodeFor(m.vault, input.ID, input.EditCode); code != "" {
 		// The header, not the query parameter — query strings land in access logs.

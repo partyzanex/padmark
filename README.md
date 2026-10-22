@@ -376,10 +376,10 @@ curl -X DELETE http://localhost:4000/notes/{id} \
   -H "X-Edit-Code: JmNkn0LdjbMw"
 ```
 
-> `DELETE` also accepts `edit_code` as a `?edit_code=` query parameter (documented in the OpenAPI
-> spec, for manual/curl convenience). Prefer the `X-Edit-Code` header when you can — a query
-> string is more likely to end up in reverse-proxy/CDN access logs or a same-origin `Referer`
-> header. The CLI always uses the header, never the query parameter.
+> `DELETE` reads the edit code from the `X-Edit-Code` header only. A `?edit_code=` query parameter
+> is **ignored** (the request counts as having no edit code): a query string ends up in
+> reverse-proxy/CDN access logs and `Referer` headers. Clients that used the query form must
+> switch to the header.
 
 **Update or delete without `edit_code`** — if the note was created by this same authenticated
 caller, `edit_code` can be omitted entirely; a Bearer token or session cookie is enough (see

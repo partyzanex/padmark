@@ -1404,7 +1404,8 @@ func (s *HandlerSuite) TestDeleteNote_MultiSegmentSlug_ByURL_Acceptance() {
 	s.manager.EXPECT().Delete(gomock.Any(), mid, "code", uuid.Nil).Return(nil)
 
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodDelete, "/notes/"+mid+"?edit_code=code", nil)
+	r := httptest.NewRequest(http.MethodDelete, "/notes/"+mid, nil)
+	r.Header.Set("X-Edit-Code", "code")
 
 	s.router.ServeHTTP(w, r)
 
@@ -1459,16 +1460,21 @@ func (s *HandlerSuite) TestDeleteNote_OK() {
 	s.Equal(http.StatusNoContent, w.Code)
 }
 
-func (s *HandlerSuite) TestDeleteNote_QueryParam() {
-	s.expectMutationGate()
-	s.manager.EXPECT().Delete(gomock.Any(), testID, "fromquery", uuid.Nil).Return(nil)
+// TestDeleteNote_QueryParamIgnored pins that the edit code is never read from the query string
+// (it would leak through proxy/CDN access logs and Referer): the manager sees an empty code and
+// the missing-code rejection surfaces as 403, for single-segment and path-like slugs alike.
+func (s *HandlerSuite) TestDeleteNote_QueryParamIgnored() {
+	for _, id := range []string{testID, "project/GUIDE.md"} {
+		s.expectMutationGate()
+		s.manager.EXPECT().Delete(gomock.Any(), id, "", uuid.Nil).Return(domain.ErrInvalidEditCode)
 
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodDelete, "/notes/"+testID+"?edit_code=fromquery", nil)
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodDelete, "/notes/"+id+"?edit_code=fromquery", nil)
 
-	s.router.ServeHTTP(w, r)
+		s.router.ServeHTTP(w, r)
 
-	s.Equal(http.StatusNoContent, w.Code)
+		s.Equal(http.StatusForbidden, w.Code, "edit_code in the query string must be ignored for %q", id)
+	}
 }
 
 func (s *HandlerSuite) TestDeleteNote_NotFound() {

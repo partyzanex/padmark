@@ -15,14 +15,14 @@ var _ Handler = UnimplementedHandler{}
 
 // CreateAPIToken implements createAPIToken operation.
 //
-// Issues a long-lived API bearer key **for the caller themself** — the operation takes no
-// request body and cannot mint a token for another user. Any valid credential works: a
-// TOTP session cookie (browser) or an `Authorization: Bearer <token>` API token.
+// Issues a long-lived API bearer key for the caller themself — the operation takes no request body
+// and cannot mint a token for another user. Any valid credential works: a TOTP session cookie
+// (browser) or an `Authorization: Bearer <token>` API token.
+//
 // The returned `token` is a `pmk_…` envelope (`pmk_` + base64url of
-// `{"url": "<server base url>", "token": "<bearer key>"}`) and is shown **exactly
-// once** — only its SHA-256 hash is stored server-side. A user may hold at most 20 live
-// tokens; when that cap is reached the operation answers `429` (revoke one first —
-// revocation is admin-panel-only today).
+// `{"url": "<server base url>", "token": "<bearer key>"}`) and is shown exactly once — only its
+// SHA-256 hash is stored server-side. A user may hold at most 20 live tokens; when that cap is reached
+// the operation answers `429` (revoke one first — revocation is admin-panel-only today).
 //
 // POST /api/tokens
 func (UnimplementedHandler) CreateAPIToken(ctx context.Context) (r CreateAPITokenRes, _ error) {
@@ -31,10 +31,10 @@ func (UnimplementedHandler) CreateAPIToken(ctx context.Context) (r CreateAPIToke
 
 // CreateInvite implements createInvite operation.
 //
-// The JSON counterpart of the admin panel's `POST /admin/invite`. Requires an **admin**
-// credential (a non-admin authenticated caller gets `403`). The invite is single-use and
-// expires (24 h); the invitee completes signup through the web setup page or the
-// machine-readable variant of `POST /setup` (send JSON with `Accept: application/json`).
+// The JSON counterpart of the admin panel's `POST /admin/invite`. Requires an admin credential (a
+// non-admin authenticated caller gets `403`). The invite is single-use and expires (24 h); the invitee
+// completes signup through the web setup page or the machine-readable variant of `POST /setup` (send
+// JSON with `Accept: application/json`).
 //
 // POST /api/invites
 func (UnimplementedHandler) CreateInvite(ctx context.Context) (r CreateInviteRes, _ error) {
@@ -43,9 +43,9 @@ func (UnimplementedHandler) CreateInvite(ctx context.Context) (r CreateInviteRes
 
 // CreateLink implements createLink operation.
 //
-// Creates a short link and returns it together with the one-time `edit_code`.
-// If `slug` is omitted a 10-character random slug is generated.
-// Responds `409 Conflict` when the requested slug is already taken by a note or a link.
+// Creates a short link and returns it together with the one-time `edit_code`. If `slug` is omitted a
+// 10-character random slug is generated. Responds `409 Conflict` when the requested slug is already
+// taken by a note or a link.
 //
 // POST /links
 func (UnimplementedHandler) CreateLink(ctx context.Context, req *CreateLinkRequest) (r CreateLinkRes, _ error) {
@@ -54,12 +54,11 @@ func (UnimplementedHandler) CreateLink(ctx context.Context, req *CreateLinkReque
 
 // CreateLinksBulk implements createLinksBulk operation.
 //
-// Creates up to 100 links in a single request. Best-effort, not transactional: each item is
-// created independently, so one item failing (e.g. a disallowed URL scheme, or a slug
-// conflict) does not stop the others from succeeding. `results` is the same length and order
-// as the request's `links` array — `results[i]` is always the outcome for `links[i]`, and
-// carries either the created link's fields (mirroring `CreateLinkResponse`) or an `error`
-// message, never both.
+// Creates up to 100 links in a single request. Best-effort, not transactional: each item is created
+// independently, so one item failing (e.g. a disallowed URL scheme, or a slug conflict) does not stop
+// the others from succeeding. `results` is the same length and order as the request's `links` array
+// — `results[i]` is always the outcome for `links[i]`, and carries either the created link's fields
+// (mirroring `CreateLinkResponse`) or an `error` message, never both.
 //
 // POST /links/bulk
 func (UnimplementedHandler) CreateLinksBulk(ctx context.Context, req *BulkCreateLinksRequest) (r CreateLinksBulkRes, _ error) {
@@ -68,9 +67,9 @@ func (UnimplementedHandler) CreateLinksBulk(ctx context.Context, req *BulkCreate
 
 // CreateNote implements createNote operation.
 //
-// Creates a note and returns it together with the one-time `edit_code`.
-// If `slug` is omitted a 10-character random slug is generated.
-// Responds `409 Conflict` when the requested slug is already taken.
+// Creates a note and returns it together with the one-time `edit_code`. If `slug` is omitted a
+// 10-character random slug is generated. Responds `409 Conflict` when the requested slug is already
+// taken.
 //
 // POST /notes
 func (UnimplementedHandler) CreateNote(ctx context.Context, req *CreateNoteRequest) (r CreateNoteRes, _ error) {
@@ -79,10 +78,10 @@ func (UnimplementedHandler) CreateNote(ctx context.Context, req *CreateNoteReque
 
 // DeleteLink implements deleteLink operation.
 //
-// Permanently deletes the link. The edit code must be supplied either as the `X-Edit-Code`
-// request header or the `edit_code` query parameter — unless the request is authenticated
-// (bearer token or session) as the exact user who created the link, in which case no edit
-// code is needed. See "Edit codes and ownership" above.
+// Permanently deletes the link. The edit code must be supplied as the `X-Edit-Code` request header (a
+// `?edit_code=` query parameter is ignored: query strings leak into proxy logs and `Referer`) —
+// unless the request is authenticated (bearer token or session) as the exact user who created the
+// link, in which case no edit code is needed. See "Edit codes and ownership" above.
 //
 // DELETE /links/{id}
 func (UnimplementedHandler) DeleteLink(ctx context.Context, params DeleteLinkParams) (r DeleteLinkRes, _ error) {
@@ -91,18 +90,15 @@ func (UnimplementedHandler) DeleteLink(ctx context.Context, params DeleteLinkPar
 
 // DeleteNote implements deleteNote operation.
 //
-// Permanently deletes the note. Anonymous callers may delete any note whose `privacy`
-// level would also let them read it (see "Authentication" above). The edit code must be
-// supplied either as the `X-Edit-Code` request header or the `edit_code` query parameter —
-// unless the request is authenticated (bearer token or session) as the exact user who
-// created the note, in which case no edit code is needed. See "Edit codes and ownership"
-// above.
-// Prefer the `X-Edit-Code` header over the `edit_code` query parameter: a query string can
-// end up in reverse-proxy/CDN access logs or in the `Referer` header of a same-origin
-// follow-up request, while padmark's own logging never records it (see openapi.yaml's
-// `edit_code` query parameter description). The query parameter exists only for manual/curl
-// convenience — the CLI always uses the header. Better still, sign in (session or API
-// token) before creating the note and skip the edit code entirely.
+// Permanently deletes the note. Anonymous callers may delete any note whose `privacy` level would also
+// let them read it (see "Authentication" above). The edit code must be supplied in the `X-Edit-Code`
+// request header — unless the request is authenticated (bearer token or session) as the exact user
+// who created the note, in which case no edit code is needed. See "Edit codes and ownership" above.
+//
+// The edit code is deliberately not accepted as a query parameter: a query string can end up in
+// reverse-proxy/CDN access logs or in the `Referer` header of a same-origin follow-up request. A stray
+// `?edit_code=` is ignored, so the request is treated as having no edit code. Better still, sign in
+// (session or API token) before creating the note and skip the edit code entirely.
 //
 // DELETE /notes/{id}
 func (UnimplementedHandler) DeleteNote(ctx context.Context, params DeleteNoteParams) (r DeleteNoteRes, _ error) {
@@ -111,10 +107,9 @@ func (UnimplementedHandler) DeleteNote(ctx context.Context, params DeleteNotePar
 
 // GetLink implements getLink operation.
 //
-// Returns the link as JSON, including its decrypted `target_url`. This is a metadata-only
-// read: it does not increment `views`, does not consume a `burn_after_click` link, and does
-// not follow the redirect — visiting `GET /r/{id}` does all of that. See the "Short links"
-// section above.
+// Returns the link as JSON, including its decrypted `target_url`. This is a metadata-only read: it
+// does not increment `views`, does not consume a `burn_after_click` link, and does not follow the
+// redirect — visiting `GET /r/{id}` does all of that. See the "Short links" section above.
 //
 // GET /links/{id}
 func (UnimplementedHandler) GetLink(ctx context.Context, params GetLinkParams) (r GetLinkRes, _ error) {
@@ -123,18 +118,20 @@ func (UnimplementedHandler) GetLink(ctx context.Context, params GetLinkParams) (
 
 // GetNote implements getNote operation.
 //
-// Returns the note as JSON.  Increments the view counter on every call.
-// For burn-after-reading notes **without TTL** the note is deleted on this request and
-// the response body is the last snapshot of the note before deletion.
-// For burn-after-reading notes **with TTL** `expires_at` is set on the first read to
-// `now + ttl` and the note expires automatically when that timestamp is reached.
-// Because such a read destroys the note (or starts its timer), it must be explicit: send
-// an `Accept` header naming `application/json` (or `text/markdown`, `text/plain`,
-// `text/html`) exactly. A burn-after-reading note requested without `Accept`, with only
-// wildcards (`*/*`, `text/*`), with `HEAD`, or as a browser subresource
-// (`Sec-Fetch-Dest` other than `document`/`empty`, e.g. an `<img>`) is answered `409`
-// with code `burn_read_not_explicit` and stays intact — link unfurlers and mail scanners
-// can no longer burn it. Other notes are unaffected.
+// Returns the note as JSON. Increments the view counter on every call.
+//
+// For burn-after-reading notes without TTL the note is deleted on this request and the response body
+// is the last snapshot of the note before deletion.
+//
+// For burn-after-reading notes with TTL `expires_at` is set on the first read to `now + ttl` and the
+// note expires automatically when that timestamp is reached.
+//
+// Because such a read destroys the note (or starts its timer), it must be explicit: send an `Accept`
+// header naming `application/json` (or `text/markdown`, `text/plain`, `text/html`) exactly. A
+// burn-after-reading note requested without `Accept`, with only wildcards (`*/*`, `text/*`), with
+// `HEAD`, or as a browser subresource (`Sec-Fetch-Dest` other than `document`/`empty`, e.g. an
+// `<img>`) is answered `409` with code `burn_read_not_explicit` and stays intact — link unfurlers
+// and mail scanners can no longer burn it. Other notes are unaffected.
 //
 // GET /notes/{id}
 func (UnimplementedHandler) GetNote(ctx context.Context, params GetNoteParams) (r GetNoteRes, _ error) {
@@ -161,12 +158,11 @@ func (UnimplementedHandler) Readyz(ctx context.Context) (r ReadyzRes, _ error) {
 
 // UpdateLink implements updateLink operation.
 //
-// Replaces the destination URL, preserving the slug, edit code, click count, owner,
-// creation time, and burn-after-click setting. Optional fields omitted from the request
-// retain their current values. TTL is counted from this update; null removes expiry.
-// Anonymous callers may update links they could read with the original edit_code.
-// The exact authenticated owner may omit edit_code, as with PUT /notes/{id}.
-// Returns the updated link; the edit code is never returned again.
+// Replaces the destination URL, preserving the slug, edit code, click count, owner, creation time, and
+// burn-after-click setting. Optional fields omitted from the request retain their current values. TTL
+// is counted from this update; null removes expiry. Anonymous callers may update links they could read
+// with the original edit_code. The exact authenticated owner may omit edit_code, as with PUT
+// /notes/{id}. Returns the updated link; the edit code is never returned again.
 //
 // PUT /links/{id}
 func (UnimplementedHandler) UpdateLink(ctx context.Context, req *UpdateLinkRequest, params UpdateLinkParams) (r UpdateLinkRes, _ error) {
@@ -175,12 +171,11 @@ func (UnimplementedHandler) UpdateLink(ctx context.Context, req *UpdateLinkReque
 
 // UpdateNote implements updateNote operation.
 //
-// Replaces the note's title, content, content type, and burn settings.
-// Anonymous callers may update any note whose `privacy` level would also let them read it
-// (see "Authentication" above); the `edit_code` must match the one returned when the note
-// was created — unless the request is authenticated (bearer token or session) as the exact
-// user who created the note, in which case `edit_code` may be omitted. See "Edit codes and
-// ownership" above. Returns the updated note.
+// Replaces the note's title, content, content type, and burn settings. Anonymous callers may update
+// any note whose `privacy` level would also let them read it (see "Authentication" above); the
+// `edit_code` must match the one returned when the note was created — unless the request is
+// authenticated (bearer token or session) as the exact user who created the note, in which case
+// `edit_code` may be omitted. See "Edit codes and ownership" above. Returns the updated note.
 //
 // PUT /notes/{id}
 func (UnimplementedHandler) UpdateNote(ctx context.Context, req *UpdateNoteRequest, params UpdateNoteParams) (r UpdateNoteRes, _ error) {

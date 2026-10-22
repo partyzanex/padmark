@@ -43,10 +43,10 @@ func (s *BulkCreateLinksResponse) SetResults(val []BulkLinkResult) {
 
 func (*BulkCreateLinksResponse) createLinksBulkRes() {}
 
-// The outcome for one item of a `POST /links/bulk` request. Either the created link's
-// fields are present (success) or `error` is (failure) — never both. `target_url` always
-// echoes the corresponding request item's `target_url`, even on failure, so a caller can
-// match `results[i]` back to `links[i]` without relying on array position alone.
+// The outcome for one item of a `POST /links/bulk` request. Either the created link's fields are
+// present (success) or `error` is (failure) — never both. `target_url` always echoes the
+// corresponding request item's `target_url`, even on failure, so a caller can match `results[i]` back
+// to `links[i]` without relying on array position alone.
 // Ref: #/components/schemas/BulkLinkResult
 type BulkLinkResult struct {
 	// Echoes the corresponding request item's target_url.
@@ -226,9 +226,9 @@ func (*CreateAPITokenInternalServerError) createAPITokenRes() {}
 
 // Ref: #/components/schemas/CreateAPITokenResponse
 type CreateAPITokenResponse struct {
-	// `pmk_…` envelope: `pmk_` + base64url of `{"url": "<base>", "token": "<key>"}` —
-	// decode it, use `url` as the API base and `token` in the Bearer header. Returned
-	// exactly once; only the hash is stored.
+	// `pmk_…` envelope: `pmk_` + base64url of `{"url": "<base>", "token": "<key>"}` — decode it, use
+	// `url` as the API base and `token` in the Bearer header. Returned exactly once; only the hash is
+	// stored.
 	Token string `json:"token"`
 }
 
@@ -310,32 +310,29 @@ func (*CreateLinkInternalServerError) createLinkRes() {}
 type CreateLinkRequest struct {
 	// Destination URL. Only `http` and `https` schemes are accepted.
 	TargetURL url.URL `json:"target_url"`
-	// Custom URL-friendly identifier. Must be a single path segment matching
-	// `[a-zA-Z0-9_-]+` — multi-segment slugs (containing `/`) return `422`, since short
-	// links are only served at `GET /r/{id}` and `/links/{id}`.
-	// If omitted a 10-character random slug is generated.
-	// Returns `409` if the slug is already taken by a note or another link.
+	// Custom URL-friendly identifier. Must be a single path segment matching `[a-zA-Z0-9_-]+` —
+	// multi-segment slugs (containing `/`) return `422`, since short links are only served at
+	// `GET /r/{id}` and `/links/{id}`. If omitted a 10-character random slug is generated. Returns `409`
+	// if the slug is already taken by a note or another link.
 	Slug OptString `json:"slug"`
-	// When `true` the link is deleted the moment it is first deliberately followed via
-	// `GET /r/{id}` (a browser navigation or an explicit `Accept`; previews, scanners,
-	// `HEAD` and embeds get `409` and leave it intact — see "Short links").
+	// When `true` the link is deleted the moment it is first deliberately followed via `GET /r/{id}` (a
+	// browser navigation or an explicit `Accept`; previews, scanners, `HEAD` and embeds get `409` and
+	// leave it intact — see "Short links").
 	BurnAfterClick OptBool `json:"burn_after_click"`
-	// Seconds until the link expires, counted from creation. Omitted means the link never
-	// expires. This is a hard expiry with no relation to `burn_after_click`;
-	// the two may be combined freely.
+	// Seconds until the link expires, counted from creation. Omitted means the link never expires. This is
+	// a hard expiry with no relation to `burn_after_click`; the two may be combined freely.
 	TTL OptInt64 `json:"ttl"`
-	// Optional custom edit code. If omitted a random 12-character code is generated.
-	// Intended for CLI and automation use.
+	// Optional custom edit code. If omitted a random 12-character code is generated. Intended for CLI and
+	// automation use.
 	EditCode OptString `json:"edit_code"`
-	// Who may follow the link: `public` (anyone), `authenticated` (any valid session or API
-	// token, not just the creator), or `owner` (only the exact credential that created it
-	// — see "Edit codes and ownership" above). `owner` additionally requires the link to
-	// actually have an owner, i.e. `--enable-accounts` and an authenticated caller —
-	// otherwise the request is rejected with `422`.
+	// Who may follow the link: `public` (anyone), `authenticated` (any valid session or API token, not
+	// just the creator), or `owner` (only the exact credential that created it — see "Edit codes and
+	// ownership" above). `owner` additionally requires the link to actually have an owner, i.e.
+	// `--enable-accounts` and an authenticated caller — otherwise the request is rejected with `422`.
 	Privacy OptCreateLinkRequestPrivacy `json:"privacy"`
-	// Per-link override of the server's `--direct-redirect` flag for `GET /r/{id}`: `true`
-	// forces an immediate `301`, `false` forces the transparency interstitial, omitted (or
-	// explicit `null`) inherits the server-wide default.
+	// Per-link override of the server's `--direct-redirect` flag for `GET /r/{id}`: `true` forces an
+	// immediate `301`, `false` forces the transparency interstitial, omitted (or explicit `null`) inherits
+	// the server-wide default.
 	DirectRedirect OptNilBool `json:"direct_redirect"`
 }
 
@@ -413,11 +410,10 @@ type CreateLinkRequestEntityTooLarge ErrorResponse
 
 func (*CreateLinkRequestEntityTooLarge) createLinkRes() {}
 
-// Who may follow the link: `public` (anyone), `authenticated` (any valid session or API
-// token, not just the creator), or `owner` (only the exact credential that created it
-// — see "Edit codes and ownership" above). `owner` additionally requires the link to
-// actually have an owner, i.e. `--enable-accounts` and an authenticated caller —
-// otherwise the request is rejected with `422`.
+// Who may follow the link: `public` (anyone), `authenticated` (any valid session or API token, not
+// just the creator), or `owner` (only the exact credential that created it — see "Edit codes and
+// ownership" above). `owner` additionally requires the link to actually have an owner, i.e.
+// `--enable-accounts` and an authenticated caller — otherwise the request is rejected with `422`.
 type CreateLinkRequestPrivacy string
 
 const (
@@ -473,26 +469,24 @@ type CreateLinkResponse struct {
 	ID string `json:"id"`
 	// Destination URL.
 	TargetURL url.URL `json:"target_url"`
-	// Number of times the link has been followed via `GET /r/{id}`, as read from storage.
-	// Concurrent redirects may increment the count after this read. The decrypted-target
-	// cache never supplies counters or authorization metadata.
+	// Number of times the link has been followed via `GET /r/{id}`, as read from storage. Concurrent
+	// redirects may increment the count after this read. The decrypted-target cache never supplies
+	// counters or authorization metadata.
 	Views int `json:"views"`
-	// `true` until the link is first followed (then it no longer exists — a subsequent read
-	// returns `404`), permanently `false` for links without this flag.
+	// `true` until the link is first followed (then it no longer exists — a subsequent read returns
+	// `404`), permanently `false` for links without this flag.
 	BurnAfterClick bool `json:"burn_after_click"`
-	// Who may follow the link. See `CreateLinkRequest.privacy` for the exact semantics of
-	// each value.
+	// Who may follow the link. See `CreateLinkRequest.privacy` for the exact semantics of each value.
 	Privacy OptCreateLinkResponsePrivacy `json:"privacy"`
 	// ISO 8601 timestamp after which the link is inaccessible. `null` for links that never expire.
 	ExpiresAt OptNilDateTime `json:"expires_at"`
-	// Per-link override of the server's `--direct-redirect` flag. See
-	// `CreateLinkRequest.direct_redirect`. `null` means this link inherits the server-wide
-	// default.
+	// Per-link override of the server's `--direct-redirect` flag. See `CreateLinkRequest.direct_redirect`.
+	// `null` means this link inherits the server-wide default.
 	DirectRedirect OptNilBool `json:"direct_redirect"`
 	// Creation timestamp (UTC).
 	CreatedAt time.Time `json:"created_at"`
-	// One-time secret required for future `DELETE` requests.
-	// This is the only time `edit_code` is returned — store it securely.
+	// One-time secret required for future `DELETE` requests. This is the only time `edit_code` is returned
+	// — store it securely.
 	EditCode string `json:"edit_code"`
 }
 
@@ -614,8 +608,7 @@ func (s *CreateLinkResponseHeaders) SetResponse(val CreateLinkResponse) {
 
 func (*CreateLinkResponseHeaders) createLinkRes() {}
 
-// Who may follow the link. See `CreateLinkRequest.privacy` for the exact semantics of
-// each value.
+// Who may follow the link. See `CreateLinkRequest.privacy` for the exact semantics of each value.
 type CreateLinkResponsePrivacy string
 
 const (
@@ -732,32 +725,27 @@ type CreateNoteRequest struct {
 	Content string `json:"content"`
 	// MIME type of `content`; controls rendering on the view page.
 	ContentType OptCreateNoteRequestContentType `json:"content_type"`
-	// Custom URL-friendly identifier: one or more path segments joined by `/` (up to 10
-	// segments, 100 characters total). Each segment must match
-	// `[A-Za-z0-9][A-Za-z0-9._-]*` and the first segment must not be a reserved route
-	// name (e.g. `login`, `admin`, `notes`, `links`, `r`, `edit`, `api`, `static`).
-	// Returns `422` for an invalid slug.
-	// If omitted a 10-character random slug is generated.
+	// Custom URL-friendly identifier: one or more path segments joined by `/` (up to 10 segments, 100
+	// characters total). Each segment must match `[A-Za-z0-9][A-Za-z0-9._-]*` and the first segment must
+	// not be a reserved route name (e.g. `login`, `admin`, `notes`, `links`, `r`, `edit`, `api`,
+	// `static`). Returns `422` for an invalid slug. If omitted a 10-character random slug is generated.
 	// Returns `409` if the slug is already taken.
 	Slug OptString `json:"slug"`
-	// When `true` the note self-destructs after the first read.
-	// If `ttl` is also provided the note is not deleted immediately but expires `ttl`
-	// seconds after the first read.
+	// When `true` the note self-destructs after the first read. If `ttl` is also provided the note is not
+	// deleted immediately but expires `ttl` seconds after the first read.
 	BurnAfterReading OptBool `json:"burn_after_reading"`
-	// Grace period in seconds after the first read before the note expires.
-	// Only meaningful when `burn_after_reading` is `true`.
-	// `0` means the note is deleted immediately when it is first revealed.
+	// Grace period in seconds after the first read before the note expires. Only meaningful when
+	// `burn_after_reading` is `true`. `0` means the note is deleted immediately when it is first revealed.
 	// Omitted means the same as `0` (immediate burn after reading).
 	TTL OptInt64 `json:"ttl"`
-	// Optional custom edit code. If omitted a random 12-character code is generated.
-	// Intended for CLI and automation use; the web UI does not expose this field.
+	// Optional custom edit code. If omitted a random 12-character code is generated. Intended for CLI and
+	// automation use; the web UI does not expose this field.
 	EditCode OptString `json:"edit_code"`
-	// Who may read the note: `public` (anyone), `authenticated` (any valid session or API
-	// token, not just the creator), or `owner` (only the exact credential that created
-	// it — see "Edit codes and ownership" above). Meaningful when the server is started
-	// with `--enable-accounts`; `owner` additionally requires the note to actually have an
-	// owner, i.e. an authenticated caller at creation time — otherwise the request is
-	// rejected with `422`.
+	// Who may read the note: `public` (anyone), `authenticated` (any valid session or API token, not just
+	// the creator), or `owner` (only the exact credential that created it — see "Edit codes and
+	// ownership" above). Meaningful when the server is started with `--enable-accounts`; `owner`
+	// additionally requires the note to actually have an owner, i.e. an authenticated caller at creation
+	// time — otherwise the request is rejected with `422`.
 	Privacy OptCreateNoteRequestPrivacy `json:"privacy"`
 }
 
@@ -887,12 +875,11 @@ type CreateNoteRequestEntityTooLarge ErrorResponse
 
 func (*CreateNoteRequestEntityTooLarge) createNoteRes() {}
 
-// Who may read the note: `public` (anyone), `authenticated` (any valid session or API
-// token, not just the creator), or `owner` (only the exact credential that created
-// it — see "Edit codes and ownership" above). Meaningful when the server is started
-// with `--enable-accounts`; `owner` additionally requires the note to actually have an
-// owner, i.e. an authenticated caller at creation time — otherwise the request is
-// rejected with `422`.
+// Who may read the note: `public` (anyone), `authenticated` (any valid session or API token, not just
+// the creator), or `owner` (only the exact credential that created it — see "Edit codes and
+// ownership" above). Meaningful when the server is started with `--enable-accounts`; `owner`
+// additionally requires the note to actually have an owner, i.e. an authenticated caller at creation
+// time — otherwise the request is rejected with `422`.
 type CreateNoteRequestPrivacy string
 
 const (
@@ -954,23 +941,20 @@ type CreateNoteResponse struct {
 	ContentType CreateNoteResponseContentType `json:"content_type"`
 	// Number of times the note has been fetched via GET.
 	Views int `json:"views"`
-	// `true` until the first read (or permanently `false` for non-burn notes).
-	// After the first read of a note with a TTL this becomes `false` and `expires_at`
-	// is set.
+	// `true` until the first read (or permanently `false` for non-burn notes). After the first read of a
+	// note with a TTL this becomes `false` and `expires_at` is set.
 	BurnAfterReading bool `json:"burn_after_reading"`
-	// Who may read the note. See `CreateNoteRequest.privacy` for the exact semantics of
-	// each value.
+	// Who may read the note. See `CreateNoteRequest.privacy` for the exact semantics of each value.
 	Privacy OptCreateNoteResponsePrivacy `json:"privacy"`
-	// ISO 8601 timestamp after which the note is inaccessible.
-	// Set on the first read for burn-after-reading notes that have a TTL.
-	// `null` for notes that are not expiring.
+	// ISO 8601 timestamp after which the note is inaccessible. Set on the first read for
+	// burn-after-reading notes that have a TTL. `null` for notes that are not expiring.
 	ExpiresAt OptNilDateTime `json:"expires_at"`
 	// Creation timestamp (UTC).
 	CreatedAt time.Time `json:"created_at"`
 	// Last-update timestamp (UTC).
 	UpdatedAt time.Time `json:"updated_at"`
-	// One-time secret required for future `PUT` and `DELETE` requests.
-	// This is the only time `edit_code` is returned — store it securely.
+	// One-time secret required for future `PUT` and `DELETE` requests. This is the only time `edit_code`
+	// is returned — store it securely.
 	EditCode string `json:"edit_code"`
 }
 
@@ -1154,8 +1138,7 @@ func (s *CreateNoteResponseHeaders) SetResponse(val CreateNoteResponse) {
 
 func (*CreateNoteResponseHeaders) createNoteRes() {}
 
-// Who may read the note. See `CreateNoteRequest.privacy` for the exact semantics of
-// each value.
+// Who may read the note. See `CreateNoteRequest.privacy` for the exact semantics of each value.
 type CreateNoteResponsePrivacy string
 
 const (
@@ -1284,8 +1267,8 @@ func (*DeleteNoteUnauthorized) deleteNoteRes() {}
 type ErrorResponse struct {
 	// Human-readable error description.
 	Message string `json:"message"`
-	// Optional machine-readable error code. The --disable-api middleware always
-	// returns api_disabled; other errors may omit this field.
+	// Optional machine-readable error code. The --disable-api middleware always returns api_disabled;
+	// other errors may omit this field.
 	Code OptString `json:"code"`
 }
 
@@ -1364,21 +1347,19 @@ type LinkResponse struct {
 	ID string `json:"id"`
 	// Destination URL.
 	TargetURL url.URL `json:"target_url"`
-	// Number of times the link has been followed via `GET /r/{id}`, as read from storage.
-	// Concurrent redirects may increment the count after this read. The decrypted-target
-	// cache never supplies counters or authorization metadata.
+	// Number of times the link has been followed via `GET /r/{id}`, as read from storage. Concurrent
+	// redirects may increment the count after this read. The decrypted-target cache never supplies
+	// counters or authorization metadata.
 	Views int `json:"views"`
-	// `true` until the link is first followed (then it no longer exists — a subsequent read
-	// returns `404`), permanently `false` for links without this flag.
+	// `true` until the link is first followed (then it no longer exists — a subsequent read returns
+	// `404`), permanently `false` for links without this flag.
 	BurnAfterClick bool `json:"burn_after_click"`
-	// Who may follow the link. See `CreateLinkRequest.privacy` for the exact semantics of
-	// each value.
+	// Who may follow the link. See `CreateLinkRequest.privacy` for the exact semantics of each value.
 	Privacy OptLinkResponsePrivacy `json:"privacy"`
 	// ISO 8601 timestamp after which the link is inaccessible. `null` for links that never expire.
 	ExpiresAt OptNilDateTime `json:"expires_at"`
-	// Per-link override of the server's `--direct-redirect` flag. See
-	// `CreateLinkRequest.direct_redirect`. `null` means this link inherits the server-wide
-	// default.
+	// Per-link override of the server's `--direct-redirect` flag. See `CreateLinkRequest.direct_redirect`.
+	// `null` means this link inherits the server-wide default.
 	DirectRedirect OptNilBool `json:"direct_redirect"`
 	// Creation timestamp (UTC).
 	CreatedAt time.Time `json:"created_at"`
@@ -1467,8 +1448,7 @@ func (s *LinkResponse) SetCreatedAt(val time.Time) {
 func (*LinkResponse) getLinkRes()    {}
 func (*LinkResponse) updateLinkRes() {}
 
-// Who may follow the link. See `CreateLinkRequest.privacy` for the exact semantics of
-// each value.
+// Who may follow the link. See `CreateLinkRequest.privacy` for the exact semantics of each value.
 type LinkResponsePrivacy string
 
 const (
@@ -1529,16 +1509,13 @@ type NoteResponse struct {
 	ContentType NoteResponseContentType `json:"content_type"`
 	// Number of times the note has been fetched via GET.
 	Views int `json:"views"`
-	// `true` until the first read (or permanently `false` for non-burn notes).
-	// After the first read of a note with a TTL this becomes `false` and `expires_at`
-	// is set.
+	// `true` until the first read (or permanently `false` for non-burn notes). After the first read of a
+	// note with a TTL this becomes `false` and `expires_at` is set.
 	BurnAfterReading bool `json:"burn_after_reading"`
-	// Who may read the note. See `CreateNoteRequest.privacy` for the exact semantics of
-	// each value.
+	// Who may read the note. See `CreateNoteRequest.privacy` for the exact semantics of each value.
 	Privacy OptNoteResponsePrivacy `json:"privacy"`
-	// ISO 8601 timestamp after which the note is inaccessible.
-	// Set on the first read for burn-after-reading notes that have a TTL.
-	// `null` for notes that are not expiring.
+	// ISO 8601 timestamp after which the note is inaccessible. Set on the first read for
+	// burn-after-reading notes that have a TTL. `null` for notes that are not expiring.
 	ExpiresAt OptNilDateTime `json:"expires_at"`
 	// Creation timestamp (UTC).
 	CreatedAt time.Time `json:"created_at"`
@@ -1691,8 +1668,7 @@ func (s *NoteResponseContentType) UnmarshalText(data []byte) error {
 	}
 }
 
-// Who may read the note. See `CreateNoteRequest.privacy` for the exact semantics of
-// each value.
+// Who may read the note. See `CreateNoteRequest.privacy` for the exact semantics of each value.
 type NoteResponsePrivacy string
 
 const (
@@ -2291,6 +2267,11 @@ func (o *OptNilBool) SetToNull() {
 	o.Value = v
 }
 
+// IsEmpty returns true if the field was omitted from the payload (not Set and not Null).
+func (o OptNilBool) IsEmpty() bool {
+	return !o.Set && !o.Null
+}
+
 // Get returns value and boolean that denotes whether value was set.
 func (o OptNilBool) Get() (v bool, ok bool) {
 	if o.Null {
@@ -2354,6 +2335,11 @@ func (o *OptNilDateTime) SetToNull() {
 	o.Value = v
 }
 
+// IsEmpty returns true if the field was omitted from the payload (not Set and not Null).
+func (o OptNilDateTime) IsEmpty() bool {
+	return !o.Set && !o.Null
+}
+
 // Get returns value and boolean that denotes whether value was set.
 func (o OptNilDateTime) Get() (v time.Time, ok bool) {
 	if o.Null {
@@ -2415,6 +2401,11 @@ func (o *OptNilInt64) SetToNull() {
 	o.Null = true
 	var v int64
 	o.Value = v
+}
+
+// IsEmpty returns true if the field was omitted from the payload (not Set and not Null).
+func (o OptNilInt64) IsEmpty() bool {
+	return !o.Set && !o.Null
 }
 
 // Get returns value and boolean that denotes whether value was set.
@@ -2693,14 +2684,14 @@ type UpdateLinkRequest struct {
 	TargetURL url.URL `json:"target_url"`
 	// Original edit code; may be omitted by the exact authenticated owner.
 	EditCode OptString `json:"edit_code"`
-	// Seconds until expiry, counted from this update. Omitted preserves the current
-	// expiry, null removes it, and 0 expires immediately.
+	// Seconds until expiry, counted from this update. Omitted preserves the current expiry, null removes
+	// it, and 0 expires immediately.
 	TTL OptNilInt64 `json:"ttl"`
-	// New privacy level; omitted preserves the current level. owner requires an
-	// existing owner on the link, otherwise the request is rejected with 422.
+	// New privacy level; omitted preserves the current level. owner requires an existing owner on the
+	// link, otherwise the request is rejected with 422.
 	Privacy OptUpdateLinkRequestPrivacy `json:"privacy"`
-	// New redirect override. Omitted preserves the current value; null resets it
-	// to inherit the server's direct-redirect default.
+	// New redirect override. Omitted preserves the current value; null resets it to inherit the server's
+	// direct-redirect default.
 	DirectRedirect OptNilBool `json:"direct_redirect"`
 }
 
@@ -2758,8 +2749,8 @@ type UpdateLinkRequestEntityTooLarge ErrorResponse
 
 func (*UpdateLinkRequestEntityTooLarge) updateLinkRes() {}
 
-// New privacy level; omitted preserves the current level. owner requires an
-// existing owner on the link, otherwise the request is rejected with 422.
+// New privacy level; omitted preserves the current level. owner requires an existing owner on the
+// link, otherwise the request is rejected with 422.
 type UpdateLinkRequestPrivacy string
 
 const (
@@ -2853,19 +2844,18 @@ type UpdateNoteRequest struct {
 	Content string `json:"content"`
 	// New content type; defaults to the note's current type when omitted.
 	ContentType OptUpdateNoteRequestContentType `json:"content_type"`
-	// The edit code returned when the note was created. May be omitted when the request is
-	// authenticated (bearer token or session) as the note's owner — see
-	// "Edit codes and ownership" above.
+	// The edit code returned when the note was created. May be omitted when the request is authenticated
+	// (bearer token or session) as the note's owner — see "Edit codes and ownership" above.
 	EditCode OptString `json:"edit_code"`
 	// Update the burn-after-reading flag.
 	BurnAfterReading OptBool `json:"burn_after_reading"`
-	// With `burn_after_reading: true`, the grace period in seconds after first read;
-	// omitted, null or 0 means immediate burn. Otherwise this is a hard expiry counted
-	// from the update: omitted preserves the current expiry (except when disabling
-	// an existing burn timer), null removes it, and 0 expires immediately.
+	// With `burn_after_reading: true`, the grace period in seconds after first read; omitted, null or 0
+	// means immediate burn. Otherwise this is a hard expiry counted from the update: omitted preserves the
+	// current expiry (except when disabling an existing burn timer), null removes it, and 0 expires
+	// immediately.
 	TTL OptNilInt64 `json:"ttl"`
-	// Update the privacy level. See `CreateNoteRequest.privacy` for the exact semantics of
-	// each value. Omitted keeps the note's current privacy level.
+	// Update the privacy level. See `CreateNoteRequest.privacy` for the exact semantics of each value.
+	// Omitted keeps the note's current privacy level.
 	Privacy OptUpdateNoteRequestPrivacy `json:"privacy"`
 }
 
@@ -2985,8 +2975,8 @@ type UpdateNoteRequestEntityTooLarge ErrorResponse
 
 func (*UpdateNoteRequestEntityTooLarge) updateNoteRes() {}
 
-// Update the privacy level. See `CreateNoteRequest.privacy` for the exact semantics of
-// each value. Omitted keeps the note's current privacy level.
+// Update the privacy level. See `CreateNoteRequest.privacy` for the exact semantics of each value.
+// Omitted keeps the note's current privacy level.
 type UpdateNoteRequestPrivacy string
 
 const (

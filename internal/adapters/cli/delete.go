@@ -40,7 +40,6 @@ func deleteAction(ctx context.Context, cmd *urcli.Command) error {
 		params := padmark.DeleteNoteParams{
 			ID:        id,
 			XEditCode: padmark.OptString{Value: "", Set: false},
-			EditCode:  padmark.OptString{Value: "", Set: false},
 		}
 
 		if editCode != "" {

@@ -43,7 +43,6 @@ func deleteLinkAction(ctx context.Context, cmd *urcli.Command) error {
 		params := padmark.DeleteLinkParams{
 			ID:        id,
 			XEditCode: padmark.OptString{Value: "", Set: false},
-			EditCode:  padmark.OptString{Value: "", Set: false},
 		}
 
 		if editCode != "" {

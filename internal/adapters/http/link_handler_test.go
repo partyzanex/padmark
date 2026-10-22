@@ -319,6 +319,20 @@ func (s *HandlerSuite) TestDeleteLink_OK() {
 	s.Equal(http.StatusNoContent, w.Code)
 }
 
+// TestDeleteLink_QueryParamIgnored pins that the edit code is read from the X-Edit-Code header
+// only: a ?edit_code= query string (which leaks into proxy logs and Referer) counts as no code.
+func (s *HandlerSuite) TestDeleteLink_QueryParamIgnored() {
+	s.expectLinkMutationGate()
+	s.linkManager.EXPECT().Delete(gomock.Any(), testLinkID, "", uuid.Nil).Return(domain.ErrInvalidEditCode)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodDelete, "/links/"+testLinkID+"?edit_code=fromquery", nil)
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusForbidden, w.Code)
+}
+
 func (s *HandlerSuite) TestDeleteLink_Forbidden() {
 	s.expectLinkMutationGate()
 	s.linkManager.EXPECT().Delete(gomock.Any(), testLinkID, "wrong", uuid.Nil).
