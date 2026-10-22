@@ -168,9 +168,9 @@ func withCSRFToken(secret []byte, forcedScheme string, trustedProxies []*net.IPN
 		sessionID := extractSessionID(r)
 
 		token := func() string {
-			cookie, err := r.Cookie(csrfCookieName)
-			if err == nil && cookie.Value != "" && verifyCSRFToken(cookie.Value, secret, sessionID) {
-				return cookie.Value
+			value, ok := singleCookieValue(r, csrfCookieName)
+			if ok && value != "" && verifyCSRFToken(value, secret, sessionID) {
+				return value
 			}
 
 			return ""
@@ -224,8 +224,10 @@ func csrfGuard(secret []byte, next http.HandlerFunc) http.HandlerFunc {
 				return
 			}
 
-			cookie, cookieErr := r.Cookie(csrfCookieName)
-			if cookieErr != nil || cookie.Value == "" {
+			// Several same-name cookies are ambiguous (cookie tossing from a sibling subdomain):
+			// Request.Cookie would return the first, which the attacker can order, so refuse.
+			cookieValue, cookieOK := singleCookieValue(r, csrfCookieName)
+			if !cookieOK || cookieValue == "" {
 				http.Error(w, "forbidden", http.StatusForbidden)
 
 				return
@@ -236,13 +238,13 @@ func csrfGuard(secret []byte, next http.HandlerFunc) http.HandlerFunc {
 			r.Body = http.MaxBytesReader(w, r.Body, maxCSRFFormBytes)
 			field := r.FormValue(csrfFieldName)
 
-			if !hmac.Equal([]byte(cookie.Value), []byte(field)) {
+			if !hmac.Equal([]byte(cookieValue), []byte(field)) {
 				http.Error(w, "forbidden", http.StatusForbidden)
 
 				return
 			}
 
-			if !verifyCSRFToken(cookie.Value, secret, extractSessionID(r)) {
+			if !verifyCSRFToken(cookieValue, secret, extractSessionID(r)) {
 				http.Error(w, "forbidden", http.StatusForbidden)
 
 				return

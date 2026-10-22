@@ -53,12 +53,36 @@ var setupTmplSrc string
 const sessionCookieName = "padmark_session"
 
 func extractSessionID(r *http.Request) string {
-	cookie, err := r.Cookie(sessionCookieName)
-	if err != nil {
+	value, ok := singleCookieValue(r, sessionCookieName)
+	if !ok {
 		return ""
 	}
 
-	return cookie.Value
+	return value
+}
+
+// singleCookieValue returns the value of the named cookie only when exactly one such cookie was
+// sent. A sibling subdomain can plant a same-name cookie (Domain=parent, longer Path) that the
+// browser orders before the legitimate host-only one, and Request.Cookie would silently pick the
+// first; several same-name cookies are therefore treated as ambiguous and yield no value.
+func singleCookieValue(r *http.Request, name string) (string, bool) {
+	var (
+		value string
+		found int
+	)
+
+	for _, cookie := range r.Cookies() {
+		if cookie.Name == name {
+			value = cookie.Value
+			found++
+		}
+	}
+
+	if found != 1 {
+		return "", false
+	}
+
+	return value, true
 }
 
 func userFromContext(r *http.Request) *domain.User {
