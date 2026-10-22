@@ -6,6 +6,7 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"fmt"
+	"log/slog"
 	"strings"
 )
 
@@ -35,16 +36,31 @@ const (
 // Verify accepts both stored formats (plus the legacy argon2id "v1$" hashes) so existing
 // codes remain valid and no data migration is needed.
 type EditCodeHasher struct {
+	log *slog.Logger
 	// params is the argon2id cost HashUserProvided applies, the same --argon2-* configuration
-	// the password hasher uses. Verify never reads it: the cost is embedded in each stored hash.
-	params Argon2Params
+	// the password hasher uses. Verify derives with the cost embedded in each stored hash and
+	// only consults ceiling, the most it will accept from a stored row.
+	params  Argon2Params
+	ceiling Argon2Params
 }
 
 // NewEditCodeHasher returns an EditCodeHasher whose HashUserProvided uses the given argon2id
 // cost. The fast generated-code hash has no cost parameters. Zero-valued fields fall back to
 // DefaultArgon2Params, like NewPasswordHasher.
 func NewEditCodeHasher(params Argon2Params) *EditCodeHasher {
-	return &EditCodeHasher{params: params.withDefaults()}
+	return &EditCodeHasher{
+		log:     slog.New(slog.DiscardHandler),
+		params:  params.withDefaults(),
+		ceiling: params.acceptedCeiling(),
+	}
+}
+
+// WithLogger sets the logger that records stored hashes refused for an excessive cost (WARN).
+// The default discards them.
+func (h *EditCodeHasher) WithLogger(log *slog.Logger) *EditCodeHasher {
+	h.log = log
+
+	return h
 }
 
 // Hash returns a salted SHA-256 of code in the format "s1$<base64url_salt>$<base64url_digest>".
@@ -79,7 +95,7 @@ func (h *EditCodeHasher) HashUserProvided(code string) (string, error) {
 // Legacy argon2id hashes ("v1$…") are delegated to the argon2 verifier for backward compatibility.
 func (h *EditCodeHasher) Verify(storedHash, code string) bool {
 	if strings.HasPrefix(storedHash, legacyArgon2Prefix) {
-		return verifyArgon2(storedHash, code)
+		return verifyLogged(h.log, "edit code", storedHash, code, h.ceiling)
 	}
 
 	parts := strings.Split(storedHash, "$")

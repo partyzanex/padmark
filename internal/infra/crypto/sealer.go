@@ -40,14 +40,17 @@ const legacyHKDFInfo = "padmark-user-key-v1"
 // the configured cost, and one keyed by HKDF-SHA256 — both reported stale so a successful login
 // migrates them forward. Sealer never writes either.
 type Sealer struct {
-	enc    *Encryptor
-	params Argon2Params
+	enc *Encryptor
+	// params is the cost Seal writes; ceiling (derived from it) is the most an envelope may
+	// demand before Open refuses with ErrArgon2CostTooHigh.
+	params  Argon2Params
+	ceiling Argon2Params
 }
 
 // NewSealer returns a Sealer that seals at the given argon2id cost; pass the same cost as the
 // password hasher. Zero-valued fields fall back to DefaultArgon2Params.
 func NewSealer(params Argon2Params) *Sealer {
-	return &Sealer{enc: New(), params: params.withDefaults()}
+	return &Sealer{enc: New(), params: params.withDefaults(), ceiling: params.acceptedCeiling()}
 }
 
 // GenerateSalt returns a fresh random per-user KDF salt (16 bytes).
@@ -88,6 +91,10 @@ func (s *Sealer) Open(sealed string, password, salt []byte) (secret string, stal
 		}
 
 		return s.openLegacy(sealed, password, salt)
+	}
+
+	if params.exceeds(s.ceiling) {
+		return "", false, fmt.Errorf("open sealed secret: %w", ErrArgon2CostTooHigh)
 	}
 
 	key, err := DeriveUserKey(password, salt, params)

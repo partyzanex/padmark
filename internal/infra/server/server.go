@@ -393,7 +393,7 @@ func attachAccountSystem(
 
 	authMgr, err := auth.NewManager(
 		users, invites, sessions, apiTokens,
-		crypto.NewPasswordHasher(argon2ParamsFromFlags(cmd)),
+		crypto.NewPasswordHasher(argon2ParamsFromFlags(cmd)).WithLogger(log),
 		crypto.NewSealer(argon2ParamsFromFlags(cmd)), crypto.NewTOTP(),
 		log, cmd.String(FlagTOTPIssuer), sessionTTL,
 	)
@@ -501,9 +501,9 @@ func buildHandlers(
 	slugLock := lock.NewLocker()
 
 	manager := notes.NewManager(repo, linkRepo, slugLock, render.NewRenderer(), noteCipher,
-		crypto.NewEditCodeHasher(argon2ParamsFromFlags(cmd)), log, cmd.Bool(FlagCustomSlugs))
+		crypto.NewEditCodeHasher(argon2ParamsFromFlags(cmd)).WithLogger(log), log, cmd.Bool(FlagCustomSlugs))
 	linkManager := links.NewManager(linkRepo, checker, slugLock, linkCipher,
-		crypto.NewEditCodeHasher(argon2ParamsFromFlags(cmd)), log, cmd.Bool(FlagCustomSlugs)).
+		crypto.NewEditCodeHasher(argon2ParamsFromFlags(cmd)).WithLogger(log), log, cmd.Bool(FlagCustomSlugs)).
 		WithCache(linkcache.NewDefault(log)).
 		WithMetrics(linkMetrics)
 
