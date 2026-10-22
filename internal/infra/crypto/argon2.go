@@ -9,8 +9,6 @@ import (
 	"math"
 	"strconv"
 	"strings"
-
-	"golang.org/x/crypto/argon2"
 )
 
 const argon2KeyLen uint32 = 32
@@ -95,7 +93,11 @@ func hashArgon2(secret string, params Argon2Params) (string, error) {
 		return "", fmt.Errorf("read salt: %w", err)
 	}
 
-	key := argon2.IDKey([]byte(secret), salt, params.Time, params.Memory, params.Threads, argon2KeyLen)
+	key, err := deriveArgon2Key([]byte(secret), salt, params, argon2KeyLen)
+	if err != nil {
+		return "", err
+	}
+
 	enc := base64.RawURLEncoding
 
 	return fmt.Sprintf("v1$%d$%d$%d$%s$%s",
@@ -137,7 +139,10 @@ func verifyArgon2(storedHash, secret string) bool {
 		return false
 	}
 
-	actual := argon2.IDKey([]byte(secret), salt, params.Time, params.Memory, params.Threads, argon2KeyLen)
+	actual, err := deriveArgon2Key([]byte(secret), salt, params, argon2KeyLen)
+	if err != nil {
+		return false
+	}
 
 	return subtle.ConstantTimeCompare(expected, actual) == 1
 }

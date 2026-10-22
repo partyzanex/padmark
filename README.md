@@ -190,6 +190,11 @@ Keyrings under `/run/secrets/` are exempt from the owner-only mode check (Compos
 file secret with the host file's mode and Swarm defaults to `0444`); startup logs a warning
 instead of refusing, so still restrict the host file yourself.
 
+When you give the container a memory limit (`--memory 256m`), also set `GOMEMLIMIT` to about
+75–80% of it (`-e GOMEMLIMIT=200MiB`) and size `PADMARK_ARGON2_MEMORY_BUDGET` to match. The
+image sets no `GOMEMLIMIT` because it cannot know your limit; see
+[Memory sizing](#memory-sizing-argon2id).
+
 **PostgreSQL (Compose):**
 
 Save the file below as `docker-compose.yml`, set `POSTGRES_PASSWORD` and the host
@@ -876,9 +881,10 @@ There is no destructive encryption down-migration, and older binaries cannot rea
 | `--totp-issuer` | `PADMARK_TOTP_ISSUER` | `padmark` | TOTP issuer shown in the authenticator app |
 | `--session-ttl` | `PADMARK_SESSION_TTL` | `2592000` | Session lifetime in seconds (default 30 days) |
 | `--csrf-secret` | `PADMARK_CSRF_SECRET` | — | HMAC key signing CSRF form tokens; raw bytes, **at least 32 characters** (a shorter value is rejected at startup). Empty (default) mints a fresh random secret per process — fine for a single instance, but restarts then invalidate open forms and multiple replicas `403` each other's form submits. Generate with `openssl rand -base64 32` and share the same value across replicas |
-| `--argon2-memory` | `PADMARK_ARGON2_MEMORY` | `24576` | argon2id memory cost in KiB for **account passwords** and the key wrapping each user's TOTP secret (default 24 MiB); lower for low-RAM hosts. Edit codes use a fast hash and are unaffected |
+| `--argon2-memory` | `PADMARK_ARGON2_MEMORY` | `24576` | argon2id memory cost in KiB for **account passwords** and the key wrapping each user's TOTP secret (default 24 MiB); lower for low-RAM hosts. Every derivation allocates this much; see [Memory sizing](#memory-sizing-argon2id). Caller-chosen edit codes are hashed with argon2id at a fixed 64 MiB regardless of this flag; only generated edit codes use a fast salted SHA-256 |
 | `--argon2-time` | `PADMARK_ARGON2_TIME` | `2` | argon2id iterations (OWASP minimum at 64 MiB) — raise when lowering memory |
 | `--argon2-threads` | `PADMARK_ARGON2_THREADS` | `1` | argon2id parallelism (CPU threads per hash) |
+| `--argon2-memory-budget` | `PADMARK_ARGON2_MEMORY_BUDGET` | `131072` | Total argon2id memory in KiB that concurrent password, edit-code and TOTP-key derivations may hold at once (default 128 MiB); further requests queue in FIFO order. Must be at least `--argon2-memory` (startup fails otherwise); a single derivation larger than the budget still runs, alone. See [Memory sizing](#memory-sizing-argon2id) |
 | `--rate-limit` | `PADMARK_RATE_LIMIT` | `10` | Requests/sec per IP (`0` = disabled) |
 | `--rate-burst` | `PADMARK_RATE_BURST` | `20` | Burst size per IP |
 | `--read-timeout` | `PADMARK_READ_TIMEOUT` | `30` | HTTP read timeout in seconds |
@@ -896,6 +902,38 @@ There is no destructive encryption down-migration, and older binaries cannot rea
 | `--custom-slugs` | `PADMARK_CUSTOM_SLUGS` | `false` | Allow user-supplied human-readable slugs/link aliases (e.g. `project/GUIDE.md`) at creation. Off by default because public human-readable URLs are easy to guess. New content keys are independent of the slug; existing legacy ciphertext keeps its old protection until migrated. A slug's first path segment must not be a reserved route name: `login`, `setup`, `logout`, `totp-login`, `admin`, `api`, `success`, `healthz`, `readyz`, `notes`, `edit`, `change-password`, `static`, `links`, `r` |
 | `--direct-redirect` | `PADMARK_DIRECT_REDIRECT` | `true` | `GET /r/{id}` behavior for short links: `true` issues an immediate `301` to the target URL; `false` renders an interstitial page (meta-refresh + `<noscript>` fallback) showing the destination before redirecting |
 | `--metrics-addr` | `PADMARK_METRICS_ADDR` | — | Address for a separate internal Prometheus `/metrics` listener (e.g. `:9090`); empty (default) disables it entirely. Exposes `padmark_links_created_total`, `padmark_links_redirects_total`, `padmark_links_collisions_total`, plus standard Go/process collectors. Bind this to a private interface only — metrics are never served on the main, public-facing listener |
+
+#### Memory sizing (argon2id)
+
+Every argon2id derivation allocates its full memory cost up front: `--argon2-memory` (24 MiB by
+default) for a password hash, a login check, or the per-user TOTP key derived on every
+successful login; a fixed 64 MiB for a caller-chosen edit code on create, update or delete.
+Unknown usernames still pay for a dummy check. None of these need an account, and the per-IP
+rate limiter does not serialise them, so a handful of concurrent requests can allocate
+hundreds of MiB.
+
+`--argon2-memory-budget` caps the argon2id memory held by concurrent derivations; requests
+beyond it wait their turn (bounded by the HTTP server timeouts). The default 128 MiB fits two
+64 MiB or five 24 MiB derivations at once. Also set `GOMEMLIMIT` to about **75–80% of the
+container memory limit**. You need both:
+
+- **The budget alone is not enough.** A finished derivation's memory becomes garbage, and with
+  the default `GOGC=100` the Go runtime lets the heap grow to about twice the live set before
+  collecting it, so a 128 MiB budget can still reach ~256 MiB of heap during a burst.
+- **`GOMEMLIMIT` alone is not enough.** It is a soft limit: the GC can only free memory that is
+  no longer referenced. Without the budget, every concurrent derivation is live, the heap grows
+  past the limit regardless, and the kernel OOM-kills the process.
+
+Example for a 256 MB container (`docker run --memory 256m`, or a Kubernetes limit of `256Mi`):
+
+```bash
+GOMEMLIMIT=200MiB
+PADMARK_ARGON2_MEMORY=19456         # 19 MiB (OWASP: m=19456, t=2); 24576 also fits
+PADMARK_ARGON2_MEMORY_BUDGET=65536  # 64 MiB; up to 131072 leaves less headroom for the rest
+```
+
+A smaller budget queues logins and edit-code requests sooner under load; a larger one needs a
+correspondingly larger container. Keep the budget comfortably below `GOMEMLIMIT`.
 
 #### Getting `--trusted-proxies` wrong
 

@@ -4,8 +4,6 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
-
-	"golang.org/x/crypto/argon2"
 )
 
 const (
@@ -72,7 +70,10 @@ func DeriveUserKey(password, kdfSalt []byte, params Argon2Params) (string, error
 		return "", err
 	}
 
-	key := argon2.IDKey(password, kdfSalt, params.Time, params.Memory, params.Threads, pwKeyLen)
+	key, err := deriveArgon2Key(password, kdfSalt, params, pwKeyLen)
+	if err != nil {
+		return "", err
+	}
 
 	return base64.RawURLEncoding.EncodeToString(key), nil
 }

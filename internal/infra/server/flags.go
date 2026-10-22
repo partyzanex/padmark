@@ -38,6 +38,7 @@ const (
 	FlagArgon2Memory       = "argon2-memory"
 	FlagArgon2Time         = "argon2-time"
 	FlagArgon2Threads      = "argon2-threads"
+	FlagArgon2MemoryBudget = "argon2-memory-budget"
 	FlagDirectRedirect     = "direct-redirect"
 	FlagMetricsAddr        = "metrics-addr"
 	FlagCSRFSecret         = "csrf-secret"
@@ -72,6 +73,7 @@ const (
 	EnvArgon2Memory       = "PADMARK_ARGON2_MEMORY"
 	EnvArgon2Time         = "PADMARK_ARGON2_TIME"
 	EnvArgon2Threads      = "PADMARK_ARGON2_THREADS"
+	EnvArgon2MemoryBudget = "PADMARK_ARGON2_MEMORY_BUDGET"
 	EnvDirectRedirect     = "PADMARK_DIRECT_REDIRECT"
 	EnvMetricsAddr        = "PADMARK_METRICS_ADDR"
 	EnvCSRFSecret         = "PADMARK_CSRF_SECRET" //nolint:gosec // G101: env var name, not an inline credential
@@ -96,10 +98,11 @@ const (
 	DefaultRateLimit          = 10              // requests per second per IP
 	DefaultRateBurst          = 20              // max burst size per IP
 	DefaultTOTPIssuer         = "padmark"
-	DefaultArgon2Memory       = 24 * 1024 // argon2id memory in KiB (24 MiB)
-	DefaultArgon2Time         = 2         // argon2id iterations (OWASP minimum at 64 MiB)
-	DefaultArgon2Threads      = 1         // argon2id parallelism
-	DefaultAllowSharedKeyring = false     // refuse group/other-readable keyrings outside /run/secrets/
+	DefaultArgon2Memory       = 24 * 1024  // argon2id memory in KiB (24 MiB)
+	DefaultArgon2Time         = 2          // argon2id iterations (OWASP minimum at 64 MiB)
+	DefaultArgon2Threads      = 1          // argon2id parallelism
+	DefaultArgon2MemoryBudget = 128 * 1024 // KiB of argon2id workspace all concurrent derivations may hold (128 MiB)
+	DefaultAllowSharedKeyring = false      // refuse group/other-readable keyrings outside /run/secrets/
 )
 
 // DefaultSessionTTL is the --session-ttl flag default, in seconds — derived from
@@ -267,8 +270,10 @@ func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
 			Validator: boundedCost(int(crypto.MaxArgon2Memory)),
 			Sources:   cli.EnvVars(EnvArgon2Memory),
 			Value:     DefaultArgon2Memory,
-			Usage: "argon2id memory cost in KiB for account password hashing (default: 24576 = 24 MiB); " +
-				"edit codes use a fast hash and are unaffected",
+			Usage: "argon2id memory cost in KiB for account passwords and the per-user TOTP key " +
+				"(default: 24576 = 24 MiB); every derivation allocates this much, bounded overall by " +
+				"--argon2-memory-budget. Caller-chosen edit codes are hashed with argon2id at a fixed " +
+				"64 MiB regardless of this flag; only generated edit codes use a fast hash",
 		},
 		&cli.IntFlag{
 			Name:      FlagArgon2Time,
@@ -283,6 +288,16 @@ func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
 			Sources:   cli.EnvVars(EnvArgon2Threads),
 			Value:     DefaultArgon2Threads,
 			Usage:     "argon2id parallelism (CPU threads per hash)",
+		},
+		&cli.IntFlag{
+			Name:      FlagArgon2MemoryBudget,
+			Validator: boundedCost(maxArgon2MemoryBudget),
+			Sources:   cli.EnvVars(EnvArgon2MemoryBudget),
+			Value:     DefaultArgon2MemoryBudget,
+			Usage: "total argon2id memory in KiB that concurrent password, edit-code and TOTP-key " +
+				"derivations may hold at once (default: 131072 = 128 MiB); further requests queue. " +
+				"Must be at least --argon2-memory. Size it below the container memory limit and set " +
+				"GOMEMLIMIT to about 75-80% of that limit",
 		},
 		&cli.BoolFlag{
 			Name:    FlagDirectRedirect,
@@ -324,6 +339,10 @@ func allowSharedKeyringFlag() *cli.BoolFlag {
 			"(Docker/Compose secrets) are already exempt",
 	}
 }
+
+// maxArgon2MemoryBudget caps --argon2-memory-budget at 64 GiB (in KiB): it rejects typos and keeps
+// the value inside uint32 on every platform's int.
+const maxArgon2MemoryBudget = 64 * 1024 * 1024
 
 // boundedCost rejects negative and overflowing flag values before narrowing to uint32/uint8.
 func boundedCost(maximum int) func(int) error {

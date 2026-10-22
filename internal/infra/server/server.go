@@ -553,6 +553,9 @@ func serverAction(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
+	// Bound concurrent argon2id workspace before any hasher can run (validated above).
+	crypto.SetArgon2MemoryBudget(uint32(cmd.Int(FlagArgon2MemoryBudget))) //nolint:gosec // G115: bounded flag
+
 	log := newLogger(cmd.String(FlagLogLevel), cmd.String(FlagLogFormat))
 
 	keyring, err := loadContentKeyring(cmd.String(FlagContentKeyring), false, log)
@@ -608,11 +611,17 @@ func serverAction(ctx context.Context, cmd *cli.Command) error {
 }
 
 // validateStartupSecrets checks the security configuration that must be sound before anything
-// is opened: the argon2 cost bounds and the bootstrap token. It returns the validated token.
+// is opened: the argon2 cost bounds, the argon2 memory budget and the bootstrap token. It returns
+// the validated token.
 func validateStartupSecrets(cmd *cli.Command) (string, error) {
 	costErr := argon2ParamsFromFlags(cmd).Validate()
 	if costErr != nil {
 		return "", fmt.Errorf("validate argon2 configuration: %w", costErr)
+	}
+
+	budgetErr := validateArgon2MemoryBudget(cmd)
+	if budgetErr != nil {
+		return "", fmt.Errorf("validate argon2 configuration: %w", budgetErr)
 	}
 
 	bootstrapToken, tokenErr := parseBootstrapToken(os.Getenv(EnvBootstrapToken))
@@ -621,6 +630,18 @@ func validateStartupSecrets(cmd *cli.Command) (string, error) {
 	}
 
 	return bootstrapToken, nil
+}
+
+// validateArgon2MemoryBudget checks that the concurrency budget can hold at least one
+// derivation at the configured password cost.
+func validateArgon2MemoryBudget(cmd *cli.Command) error {
+	budget, memory := cmd.Int(FlagArgon2MemoryBudget), cmd.Int(FlagArgon2Memory)
+	if budget < memory {
+		return fmt.Errorf("--%s (%d KiB) must be at least --%s (%d KiB)",
+			FlagArgon2MemoryBudget, budget, FlagArgon2Memory, memory)
+	}
+
+	return nil
 }
 
 func closeServerDB(ctx context.Context, db *bun.DB, log *slog.Logger) {

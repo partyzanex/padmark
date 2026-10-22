@@ -33,6 +33,11 @@ ENV PADMARK_DSN=/data/padmark.db \
     PADMARK_LOG_LEVEL=info \
     PADMARK_LOG_FORMAT=json
 
+# No GOMEMLIMIT here: it must match the container's memory limit, which the image cannot know.
+# Set it at run time to ~75-80% of that limit, e.g. `docker run --memory 256m -e GOMEMLIMIT=200MiB`,
+# together with PADMARK_ARGON2_MEMORY_BUDGET (README: "Memory sizing (argon2id)").
+# ENV GOMEMLIMIT=200MiB
+
 EXPOSE 8080
 
 ENTRYPOINT ["padmark-server"]
