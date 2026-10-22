@@ -263,8 +263,8 @@ func (s *AuthHandlerSuite) postOgen(path, bearer string) *httptest.ResponseRecor
 // the generated route: the envelope decodes to the request's own base URL and the plain key.
 func (s *AuthHandlerSuite) TestCreateAPIToken_ValidBearer_ReturnsEnvelope() {
 	usr := &domain.User{ID: testUserID1, Username: "alice"}
-	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "good-api-key").Return(usr, nil)
-	s.auth.EXPECT().CreateAPIToken(gomock.Any(), testUserID1).Return("plain-key-1", nil)
+	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "good-api-key").Return(usr, "token-hash", nil)
+	s.auth.EXPECT().CreateAPIToken(gomock.Any(), testUserID1, gomock.Any(), gomock.Any()).Return("plain-key-1", nil)
 
 	rec := s.postOgen("/api/tokens", "good-api-key")
 
@@ -285,8 +285,9 @@ func (s *AuthHandlerSuite) TestCreateAPIToken_ValidBearer_ReturnsEnvelope() {
 // TestCreateAPIToken_TokenCap_429 — the 20-token cap maps to the documented quota status.
 func (s *AuthHandlerSuite) TestCreateAPIToken_TokenCap_429() {
 	usr := &domain.User{ID: testUserID1, Username: "alice"}
-	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "good-api-key").Return(usr, nil)
-	s.auth.EXPECT().CreateAPIToken(gomock.Any(), testUserID1).Return("", domain.ErrAPITokenLimit)
+	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "good-api-key").Return(usr, "token-hash", nil)
+	s.auth.EXPECT().CreateAPIToken(gomock.Any(), testUserID1, gomock.Any(), gomock.Any()).
+		Return("", domain.ErrAPITokenLimit)
 
 	rec := s.postOgen("/api/tokens", "good-api-key")
 
@@ -297,8 +298,8 @@ func (s *AuthHandlerSuite) TestCreateAPIToken_TokenCap_429() {
 // TestCreateInvite_AdminBearer_ReturnsSetupLink — admin issuance over the ogen route.
 func (s *AuthHandlerSuite) TestCreateInvite_AdminBearer_ReturnsSetupLink() {
 	admin := s.adminUser()
-	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "admin-key").Return(admin, nil)
-	s.auth.EXPECT().GenerateInvite(gomock.Any(), testAdminID).Return("inv-token", nil)
+	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "admin-key").Return(admin, "token-hash", nil)
+	s.auth.EXPECT().GenerateInvite(gomock.Any(), testAdminID, gomock.Any()).Return("inv-token", nil)
 
 	rec := s.postOgen("/api/invites", "admin-key")
 
@@ -317,8 +318,8 @@ func (s *AuthHandlerSuite) TestCreateInvite_ForcedScheme_Honoured() {
 	router := s.newRouterWithAuthAndScheme("https")
 
 	admin := s.adminUser()
-	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "admin-key").Return(admin, nil)
-	s.auth.EXPECT().GenerateInvite(gomock.Any(), testAdminID).Return("inv-token", nil)
+	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "admin-key").Return(admin, "token-hash", nil)
+	s.auth.EXPECT().GenerateInvite(gomock.Any(), testAdminID, gomock.Any()).Return("inv-token", nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/invites", nil)
 	req.Header.Set("Authorization", "Bearer admin-key")
@@ -334,7 +335,7 @@ func (s *AuthHandlerSuite) TestCreateInvite_ForcedScheme_Honoured() {
 // TestCreateInvite_NonAdmin_403 — a non-admin bearer gets the admin gate answered as JSON.
 func (s *AuthHandlerSuite) TestCreateInvite_NonAdmin_403() {
 	usr := &domain.User{ID: testUserID1, Username: "alice"}
-	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "good-api-key").Return(usr, nil)
+	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "good-api-key").Return(usr, "token-hash", nil)
 
 	rec := s.postOgen("/api/invites", "good-api-key")
 
@@ -385,8 +386,9 @@ func (s *AuthHandlerSuite) TestAccountEndpoints_DisabledAPI_503() {
 // not wired (auth.NewManager with a nil store), issuance fails the documented 503.
 func (s *AuthHandlerSuite) TestAccountEndpoints_FeatureNotEnabled_503() {
 	usr := &domain.User{ID: testUserID1, Username: "alice"}
-	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "good-api-key").Return(usr, nil)
-	s.auth.EXPECT().CreateAPIToken(gomock.Any(), testUserID1).Return("", domain.ErrFeatureNotSupported)
+	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "good-api-key").Return(usr, "token-hash", nil)
+	s.auth.EXPECT().CreateAPIToken(gomock.Any(), testUserID1, gomock.Any(), gomock.Any()).
+		Return("", domain.ErrFeatureNotSupported)
 
 	rec := s.postOgen("/api/tokens", "good-api-key")
 
@@ -460,7 +462,7 @@ func (s *AuthHandlerSuite) TestCreateAPIToken_CrossOriginHeader_Rejected() {
 	// The auth middleware resolves the Bearer credential before the handler; only the mint
 	// itself must be blocked (the expectation for CreateAPIToken stays unset on purpose).
 	usr := &domain.User{ID: testUserID1, Username: "alice"}
-	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "good-api-key").Return(usr, nil)
+	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "good-api-key").Return(usr, "token-hash", nil)
 
 	req := s.postOgenReq("/api/tokens", "good-api-key")
 	req.Header.Set("Origin", "https://evil.sibling.example")
@@ -477,8 +479,8 @@ func (s *AuthHandlerSuite) TestCreateAPIToken_CrossOriginHeader_Rejected() {
 // TestCreateAPIToken_SameOriginHeader_OK — the browser-side same-origin call keeps working.
 func (s *AuthHandlerSuite) TestCreateAPIToken_SameOriginHeader_OK() {
 	usr := &domain.User{ID: testUserID1, Username: "alice"}
-	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "good-api-key").Return(usr, nil)
-	s.auth.EXPECT().CreateAPIToken(gomock.Any(), testUserID1).Return("plain-key-1", nil)
+	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "good-api-key").Return(usr, "token-hash", nil)
+	s.auth.EXPECT().CreateAPIToken(gomock.Any(), testUserID1, gomock.Any(), gomock.Any()).Return("plain-key-1", nil)
 
 	req := s.postOgenReq("/api/tokens", "good-api-key")
 	req.Header.Set("Origin", "http://example.com")
@@ -494,7 +496,7 @@ func (s *AuthHandlerSuite) TestCreateAPIToken_SameOriginHeader_OK() {
 // cookie-forgeable, so the same origin gate applies.
 func (s *AuthHandlerSuite) TestCreateInvite_CrossOriginHeader_Rejected() {
 	admin := s.adminUser()
-	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "admin-key").Return(admin, nil)
+	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "admin-key").Return(admin, "token-hash", nil)
 
 	req := s.postOgenReq("/api/invites", "admin-key")
 	req.Header.Set("Origin", "https://evil.sibling.example")
@@ -515,4 +517,108 @@ func (s *AuthHandlerSuite) postOgenReq(path, bearer string) *http.Request {
 	}
 
 	return req
+}
+
+// ── step-up and lifetime on the issuing endpoints (M-6) ──
+
+// postOgenJSON posts a JSON body to an ogen route with an optional bearer key or session cookie.
+func (s *AuthHandlerSuite) postOgenJSON(path, bearer, session, body string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodPost, path, bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+
+	if bearer != "" {
+		req.Header.Set("Authorization", "Bearer "+bearer)
+	}
+
+	if session != "" {
+		req.AddCookie(s.sessionCookie(session))
+	}
+
+	rec := httptest.NewRecorder()
+
+	s.router.ServeHTTP(rec, req)
+
+	return rec
+}
+
+// TestCreateAPIToken_Bearer_PassesIssuerStepUpAndLifetime: a bearer caller is identified to the
+// usecase by its key's ID, together with the body's step-up and lifetime.
+func (s *AuthHandlerSuite) TestCreateAPIToken_Bearer_PassesIssuerStepUpAndLifetime() {
+	usr := &domain.User{ID: testUserID1, Username: "alice"}
+	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "good-api-key").Return(usr, "parent-hash", nil)
+	s.auth.EXPECT().CreateAPIToken(gomock.Any(), testUserID1, auth.Issuer{
+		APITokenHash: "parent-hash",
+		StepUp:       auth.StepUp{Password: "pw", TOTPCode: "123456"},
+	}, 30).Return("plain-key-1", nil)
+
+	rec := s.postOgenJSON("/api/tokens", "good-api-key", "",
+		`{"ttl_days":30,"password":"pw","totp_code":"123456"}`)
+
+	s.Equal(http.StatusCreated, rec.Code, rec.Body.String())
+}
+
+// TestCreateAPIToken_Session_IssuesWithoutBearer: a browser session is not a bearer — the usecase
+// sees no issuing key, so no step-up is demanded.
+func (s *AuthHandlerSuite) TestCreateAPIToken_Session_IssuesWithoutBearer() {
+	usr := &domain.User{ID: testUserID1, Username: "alice"}
+	s.auth.EXPECT().GetSession(gomock.Any(), "sess").Return(usr, nil)
+	s.auth.EXPECT().CreateAPIToken(gomock.Any(), testUserID1, auth.Issuer{}, 7).Return("plain-key-1", nil)
+
+	rec := s.postOgenJSON("/api/tokens", "", "sess", `{"ttl_days":7}`)
+
+	s.Equal(http.StatusCreated, rec.Code, rec.Body.String())
+}
+
+// TestCreateAPIToken_Refusals: step-up refusals are 403 with a machine-readable code, an
+// out-of-range lifetime is 422 (ogen's schema bounds catch it before the handler, too).
+func (s *AuthHandlerSuite) TestCreateAPIToken_Refusals() {
+	cases := []struct {
+		err    error
+		status int
+		code   string
+	}{
+		{domain.ErrStepUpRequired, http.StatusForbidden, "step_up_required"},
+		{domain.ErrStepUpFailed, http.StatusForbidden, "step_up_failed"},
+		{domain.ErrInvalidAPITokenTTL, http.StatusUnprocessableEntity, ""},
+	}
+
+	for _, testCase := range cases {
+		s.Run(testCase.err.Error(), func() {
+			usr := &domain.User{ID: testUserID1, Username: "alice"}
+			s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "good-api-key").Return(usr, "parent-hash", nil)
+			s.auth.EXPECT().CreateAPIToken(gomock.Any(), testUserID1, gomock.Any(), gomock.Any()).
+				Return("", fmt.Errorf("wrapped: %w", testCase.err))
+
+			rec := s.postOgenJSON("/api/tokens", "good-api-key", "", `{}`)
+
+			s.Equal(testCase.status, rec.Code)
+
+			if testCase.code != "" {
+				s.Contains(rec.Body.String(), `"code":"`+testCase.code+`"`)
+			}
+		})
+	}
+
+	rec := s.postOgenJSON("/api/tokens", "", "", `{"ttl_days":3651}`)
+	s.NotEqual(http.StatusCreated, rec.Code, "the schema bounds ttl_days")
+}
+
+// TestCreateInvite_Bearer_StepUp: the invite endpoint forwards the bearer and step-up the same
+// way and reports a missing step-up as 403 step_up_required.
+func (s *AuthHandlerSuite) TestCreateInvite_Bearer_StepUp() {
+	admin := s.adminUser()
+	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "admin-key").Return(admin, "parent-hash", nil).Times(2)
+	s.auth.EXPECT().GenerateInvite(gomock.Any(), testAdminID, auth.Issuer{APITokenHash: "parent-hash"}).
+		Return("", domain.ErrStepUpRequired)
+	s.auth.EXPECT().GenerateInvite(gomock.Any(), testAdminID, auth.Issuer{
+		APITokenHash: "parent-hash",
+		StepUp:       auth.StepUp{Password: "pw", TOTPCode: "123456"},
+	}).Return("inv-token", nil)
+
+	rec := s.postOgenJSON("/api/invites", "admin-key", "", ``)
+	s.Equal(http.StatusForbidden, rec.Code)
+	s.Contains(rec.Body.String(), `"code":"step_up_required"`)
+
+	rec = s.postOgenJSON("/api/invites", "admin-key", "", `{"password":"pw","totp_code":"123456"}`)
+	s.Equal(http.StatusCreated, rec.Code, rec.Body.String())
 }

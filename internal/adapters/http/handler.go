@@ -32,7 +32,8 @@ type SessionManager interface {
 // OnboardingManager creates the first admin account and enrolls new users via invite tokens.
 type OnboardingManager interface {
 	IsEmpty(ctx context.Context) (bool, error)
-	GenerateInvite(ctx context.Context, adminUserID uuid.UUID) (string, error)
+	// GenerateInvite issues an invite; issuer carries the bearer key and step-up, if any.
+	GenerateInvite(ctx context.Context, adminUserID uuid.UUID, issuer auth.Issuer) (string, error)
 	AcceptInvite(ctx context.Context, token, username, password string) (*auth.Enrollment, error)
 	AcceptFirstAdmin(ctx context.Context, username, password string) (*auth.Enrollment, error)
 }
@@ -45,11 +46,13 @@ type UserAdminManager interface {
 
 // APITokenManager issues, resolves, lists, and revokes long-lived API tokens.
 type APITokenManager interface {
-	// ResolveAPIToken maps a bearer API key to its owning user (used by the auth middleware),
-	// recording last-used. Returns domain.ErrNotFound when the key is unknown, revoked, or expired.
-	ResolveAPIToken(ctx context.Context, plainToken string) (*domain.User, error)
-	// CreateAPIToken issues a long-lived API key for userID, returning the plain key exactly once.
-	CreateAPIToken(ctx context.Context, userID uuid.UUID) (string, error)
+	// ResolveAPIToken maps a bearer API key to its owning user and the key's public ID (used by
+	// the auth middleware), recording last-used. Returns domain.ErrNotFound when the key is
+	// unknown, revoked, or expired.
+	ResolveAPIToken(ctx context.Context, plainToken string) (*domain.User, string, error)
+	// CreateAPIToken issues an API key for userID expiring after ttlDays (0 = never), returning
+	// the plain key exactly once; a bearer issuer must carry a step-up and becomes the key's issuer.
+	CreateAPIToken(ctx context.Context, userID uuid.UUID, issuer auth.Issuer, ttlDays int) (string, error)
 	// ListAPITokens returns all API tokens with owning usernames for the admin panel.
 	ListAPITokens(ctx context.Context, adminUserID uuid.UUID) ([]*auth.APITokenInfo, error)
 	// RevokeAPIToken deletes an API token by its public ID (the token hash).

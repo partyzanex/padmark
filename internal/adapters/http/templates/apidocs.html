@@ -8,7 +8,7 @@
 </head>
 <body>
     <div id="redoc-container"></div>
-    <script src="https://cdn.redoc.ly/redoc/latest/bundles/redoc.standalone.js" nonce="{{.Nonce}}"></script>
+    <script src="/static/redoc.standalone.js?p={{.RedocVersion}}" nonce="{{.Nonce}}"></script>
     <script nonce="{{.Nonce}}">
         Redoc.init('/api/openapi.yaml', {nonce: '{{.Nonce}}'}, document.getElementById('redoc-container'));
     </script>

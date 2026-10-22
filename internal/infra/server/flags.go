@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+
 	"github.com/urfave/cli/v3"
 
 	"github.com/partyzanex/padmark/internal/infra/crypto"
@@ -12,68 +13,70 @@ import (
 
 // Flag names used in CLI flags.
 const (
-	FlagAddr             = "addr"
-	FlagStorage          = "storage"
-	FlagDSN              = "dsn"
-	FlagLogLevel         = "log-level"
-	FlagLogFormat        = "log-format"
-	FlagEnableAccounts   = "enable-accounts"
-	FlagDisableAPI       = "disable-api"
-	FlagReadTimeout      = "read-timeout"
-	FlagWriteTimeout     = "write-timeout"
-	FlagMaxHeaderBytes   = "max-header-bytes"
-	FlagMaxBodyBytes     = "max-body-bytes"
-	FlagRateLimit        = "rate-limit"
-	FlagRateBurst        = "rate-burst"
-	FlagTLSCert          = "tls-cert"
-	FlagTLSKey           = "tls-key"
-	FlagHTTPRedirectAddr = "http-redirect-addr"
-	FlagAllowedHosts     = "allowed-hosts"
-	FlagTrustedProxies   = "trusted-proxies"
-	FlagPublicScheme     = "public-scheme"
-	FlagCustomSlugs      = "custom-slugs"
-	FlagTOTPIssuer       = "totp-issuer"
-	FlagSessionTTL       = "session-ttl"
-	FlagArgon2Memory     = "argon2-memory"
-	FlagArgon2Time       = "argon2-time"
-	FlagArgon2Threads    = "argon2-threads"
-	FlagDirectRedirect   = "direct-redirect"
-	FlagMetricsAddr      = "metrics-addr"
-	FlagCSRFSecret       = "csrf-secret"
-	FlagContentKeyring   = "content-keyring-file"
+	FlagAddr               = "addr"
+	FlagStorage            = "storage"
+	FlagDSN                = "dsn"
+	FlagLogLevel           = "log-level"
+	FlagLogFormat          = "log-format"
+	FlagEnableAccounts     = "enable-accounts"
+	FlagDisableAPI         = "disable-api"
+	FlagReadTimeout        = "read-timeout"
+	FlagWriteTimeout       = "write-timeout"
+	FlagMaxHeaderBytes     = "max-header-bytes"
+	FlagMaxBodyBytes       = "max-body-bytes"
+	FlagRateLimit          = "rate-limit"
+	FlagRateBurst          = "rate-burst"
+	FlagTLSCert            = "tls-cert"
+	FlagTLSKey             = "tls-key"
+	FlagHTTPRedirectAddr   = "http-redirect-addr"
+	FlagAllowedHosts       = "allowed-hosts"
+	FlagTrustedProxies     = "trusted-proxies"
+	FlagPublicScheme       = "public-scheme"
+	FlagCustomSlugs        = "custom-slugs"
+	FlagTOTPIssuer         = "totp-issuer"
+	FlagSessionTTL         = "session-ttl"
+	FlagArgon2Memory       = "argon2-memory"
+	FlagArgon2Time         = "argon2-time"
+	FlagArgon2Threads      = "argon2-threads"
+	FlagDirectRedirect     = "direct-redirect"
+	FlagMetricsAddr        = "metrics-addr"
+	FlagCSRFSecret         = "csrf-secret"
+	FlagContentKeyring     = "content-keyring-file"
+	FlagAllowSharedKeyring = "allow-shared-keyring"
 )
 
 // Env vars used to configure the service (prefix: PADMARK_*).
 const (
-	EnvAddr             = "PADMARK_ADDR"
-	EnvStorage          = "PADMARK_STORAGE"
-	EnvDSN              = "PADMARK_DSN"
-	EnvLogLevel         = "PADMARK_LOG_LEVEL"
-	EnvLogFormat        = "PADMARK_LOG_FORMAT"
-	EnvEnableAccounts   = "PADMARK_ENABLE_ACCOUNTS"
-	EnvDisableAPI       = "PADMARK_DISABLE_API"
-	EnvReadTimeout      = "PADMARK_READ_TIMEOUT"
-	EnvWriteTimeout     = "PADMARK_WRITE_TIMEOUT"
-	EnvMaxHeaderBytes   = "PADMARK_MAX_HEADER_BYTES"
-	EnvMaxBodyBytes     = "PADMARK_MAX_BODY_BYTES"
-	EnvRateLimit        = "PADMARK_RATE_LIMIT"
-	EnvRateBurst        = "PADMARK_RATE_BURST"
-	EnvTLSCert          = "PADMARK_TLS_CERT"
-	EnvTLSKey           = "PADMARK_TLS_KEY"
-	EnvHTTPRedirectAddr = "PADMARK_HTTP_REDIRECT_ADDR"
-	EnvAllowedHosts     = "PADMARK_ALLOWED_HOSTS"
-	EnvTrustedProxies   = "PADMARK_TRUSTED_PROXIES"
-	EnvPublicScheme     = "PADMARK_PUBLIC_SCHEME"
-	EnvCustomSlugs      = "PADMARK_CUSTOM_SLUGS"
-	EnvTOTPIssuer       = "PADMARK_TOTP_ISSUER"
-	EnvSessionTTL       = "PADMARK_SESSION_TTL"
-	EnvArgon2Memory     = "PADMARK_ARGON2_MEMORY"
-	EnvArgon2Time       = "PADMARK_ARGON2_TIME"
-	EnvArgon2Threads    = "PADMARK_ARGON2_THREADS"
-	EnvDirectRedirect   = "PADMARK_DIRECT_REDIRECT"
-	EnvMetricsAddr      = "PADMARK_METRICS_ADDR"
-	EnvCSRFSecret       = "PADMARK_CSRF_SECRET" //nolint:gosec // G101: env var name, not an inline credential
-	EnvContentKeyring   = "PADMARK_CONTENT_KEYRING_FILE"
+	EnvAddr               = "PADMARK_ADDR"
+	EnvStorage            = "PADMARK_STORAGE"
+	EnvDSN                = "PADMARK_DSN"
+	EnvLogLevel           = "PADMARK_LOG_LEVEL"
+	EnvLogFormat          = "PADMARK_LOG_FORMAT"
+	EnvEnableAccounts     = "PADMARK_ENABLE_ACCOUNTS"
+	EnvDisableAPI         = "PADMARK_DISABLE_API"
+	EnvReadTimeout        = "PADMARK_READ_TIMEOUT"
+	EnvWriteTimeout       = "PADMARK_WRITE_TIMEOUT"
+	EnvMaxHeaderBytes     = "PADMARK_MAX_HEADER_BYTES"
+	EnvMaxBodyBytes       = "PADMARK_MAX_BODY_BYTES"
+	EnvRateLimit          = "PADMARK_RATE_LIMIT"
+	EnvRateBurst          = "PADMARK_RATE_BURST"
+	EnvTLSCert            = "PADMARK_TLS_CERT"
+	EnvTLSKey             = "PADMARK_TLS_KEY"
+	EnvHTTPRedirectAddr   = "PADMARK_HTTP_REDIRECT_ADDR"
+	EnvAllowedHosts       = "PADMARK_ALLOWED_HOSTS"
+	EnvTrustedProxies     = "PADMARK_TRUSTED_PROXIES"
+	EnvPublicScheme       = "PADMARK_PUBLIC_SCHEME"
+	EnvCustomSlugs        = "PADMARK_CUSTOM_SLUGS"
+	EnvTOTPIssuer         = "PADMARK_TOTP_ISSUER"
+	EnvSessionTTL         = "PADMARK_SESSION_TTL"
+	EnvArgon2Memory       = "PADMARK_ARGON2_MEMORY"
+	EnvArgon2Time         = "PADMARK_ARGON2_TIME"
+	EnvArgon2Threads      = "PADMARK_ARGON2_THREADS"
+	EnvDirectRedirect     = "PADMARK_DIRECT_REDIRECT"
+	EnvMetricsAddr        = "PADMARK_METRICS_ADDR"
+	EnvCSRFSecret         = "PADMARK_CSRF_SECRET" //nolint:gosec // G101: env var name, not an inline credential
+	EnvContentKeyring     = "PADMARK_CONTENT_KEYRING_FILE"
+	EnvAllowSharedKeyring = "PADMARK_ALLOW_SHARED_KEYRING"
 	// EnvBootstrapToken authorises creating the first admin via /setup without an invite. It is
 	// read from the environment only — never a flag, so it cannot show up in process listings.
 	EnvBootstrapToken = "PADMARK_BOOTSTRAP_TOKEN" //nolint:gosec // G101: env var name, not an inline credential
@@ -81,21 +84,22 @@ const (
 
 // Default values for all flags.
 const (
-	DefaultAddr           = ":8080"
-	DefaultStorage        = "sqlite"
-	DefaultDSN            = "padmark.db"
-	DefaultLogLevel       = "info"
-	DefaultLogFormat      = "json"
-	DefaultReadTimeout    = 30              // seconds
-	DefaultWriteTimeout   = 60              // seconds
-	DefaultMaxHeaderBytes = 64 * 1024       // 64 KB
-	DefaultMaxBodyBytes   = 4 * 1024 * 1024 // 4 MB
-	DefaultRateLimit      = 10              // requests per second per IP
-	DefaultRateBurst      = 20              // max burst size per IP
-	DefaultTOTPIssuer     = "padmark"
-	DefaultArgon2Memory   = 24 * 1024 // argon2id memory in KiB (24 MiB)
-	DefaultArgon2Time     = 2         // argon2id iterations (OWASP minimum at 64 MiB)
-	DefaultArgon2Threads  = 1         // argon2id parallelism
+	DefaultAddr               = ":8080"
+	DefaultStorage            = "sqlite"
+	DefaultDSN                = "padmark.db"
+	DefaultLogLevel           = "info"
+	DefaultLogFormat          = "json"
+	DefaultReadTimeout        = 30              // seconds
+	DefaultWriteTimeout       = 60              // seconds
+	DefaultMaxHeaderBytes     = 64 * 1024       // 64 KB
+	DefaultMaxBodyBytes       = 4 * 1024 * 1024 // 4 MB
+	DefaultRateLimit          = 10              // requests per second per IP
+	DefaultRateBurst          = 20              // max burst size per IP
+	DefaultTOTPIssuer         = "padmark"
+	DefaultArgon2Memory       = 24 * 1024 // argon2id memory in KiB (24 MiB)
+	DefaultArgon2Time         = 2         // argon2id iterations (OWASP minimum at 64 MiB)
+	DefaultArgon2Threads      = 1         // argon2id parallelism
+	DefaultAllowSharedKeyring = false     // refuse group/other-readable keyrings outside /run/secrets/
 )
 
 // DefaultSessionTTL is the --session-ttl flag default, in seconds — derived from
@@ -113,6 +117,7 @@ func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
 			Sources: cli.EnvVars(EnvContentKeyring),
 			Usage:   "Required JSON keyring file for content encryption; persist and back up separately from the database",
 		},
+		allowSharedKeyringFlag(),
 		&cli.StringFlag{
 			Name:    FlagAddr,
 			Sources: cli.EnvVars(EnvAddr),
@@ -304,6 +309,19 @@ func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
 				"multi-replica deployments 403 on every form. Set to a fixed random value " +
 				"(e.g. `openssl rand -base64 32`) shared across replicas to avoid that",
 		},
+	}
+}
+
+// allowSharedKeyringFlag is shared by serve and the encryption commands, which load the same keyring.
+func allowSharedKeyringFlag() *cli.BoolFlag {
+	return &cli.BoolFlag{
+		Name:    FlagAllowSharedKeyring,
+		Sources: cli.EnvVars(EnvAllowSharedKeyring),
+		Value:   DefaultAllowSharedKeyring,
+		Usage: "Accept a content keyring file readable by group or other users (logged as a warning). " +
+			"Startup otherwise refuses such a file; restrict it to 0600 or 0400 instead whenever possible. " +
+			"Only for secret managers that cannot provide an owner-only file; keyrings under /run/secrets/ " +
+			"(Docker/Compose secrets) are already exempt",
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"log/slog"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -65,7 +66,7 @@ func TestEncryptionCommands_KeyLifecycle(t *testing.T) {
 	require.NoError(t, err)
 	output, err = run(active, "key-remove", "--key-id", "first", "--output", retired)
 	require.NoError(t, err)
-	ring, err := crypto.LoadContentKeyring(retired)
+	ring, err := loadContentKeyring(retired, false, slog.New(slog.DiscardHandler))
 	require.NoError(t, err)
 	require.Equal(t, "next", ring.Active)
 	require.Len(t, ring.Keys, 1)
@@ -186,7 +187,7 @@ func assertEncryptionPruneRecovery(t *testing.T, dsn, keyfile string) {
 	report = encryptionTestReport(t, output)
 	require.Equal(t, contentkeys.Ready, report.State)
 
-	ring, err := crypto.LoadContentKeyring(keyfile)
+	ring, err := loadContentKeyring(keyfile, false, slog.New(slog.DiscardHandler))
 	require.NoError(t, err)
 	db, err := openDB(t.Context(), "sqlite", dsn)
 	require.NoError(t, err)

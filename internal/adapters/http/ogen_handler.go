@@ -2,6 +2,7 @@ package http
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/partyzanex/padmark/internal/adapters/http/ogenapi"
 	"github.com/partyzanex/padmark/internal/domain"
+	"github.com/partyzanex/padmark/internal/usecases/auth"
 	"github.com/partyzanex/padmark/internal/usecases/links"
 )
 
@@ -464,7 +466,9 @@ func (h *OgenHandler) Readyz(ctx context.Context) (ogenapi.ReadyzRes, error) {
 // ── account endpoints (POST /api/tokens, POST /api/invites) ──
 
 // CreateAPIToken implements ogenapi.Handler — POST /api/tokens.
-func (h *OgenHandler) CreateAPIToken(ctx context.Context) (ogenapi.CreateAPITokenRes, error) {
+func (h *OgenHandler) CreateAPIToken(
+	ctx context.Context, req ogenapi.OptCreateAPITokenRequest,
+) (ogenapi.CreateAPITokenRes, error) {
 	if h.authMgr == nil {
 		return mapCreateAPITokenError(domain.ErrFeatureNotSupported, h.log), nil
 	}
@@ -478,7 +482,14 @@ func (h *OgenHandler) CreateAPIToken(ctx context.Context) (ogenapi.CreateAPIToke
 		return &v, nil
 	}
 
-	plain, err := h.authMgr.CreateAPIToken(ctx, usr.ID)
+	body := req.Or(ogenapi.CreateAPITokenRequest{
+		TTLDays:  ogenapi.OptInt{Value: 0, Set: false},
+		Password: ogenapi.OptString{Value: "", Set: false},
+		TotpCode: ogenapi.OptString{Value: "", Set: false},
+	})
+	issuer := issuerFromCtx(ctx, body.Password.Or(""), body.TotpCode.Or(""))
+
+	plain, err := h.authMgr.CreateAPIToken(ctx, usr.ID, issuer, body.TTLDays.Or(0))
 	if err != nil {
 		return mapCreateAPITokenError(err, h.log), nil
 	}
@@ -492,7 +503,7 @@ func (h *OgenHandler) CreateAPIToken(ctx context.Context) (ogenapi.CreateAPIToke
 }
 
 // CreateInvite implements ogenapi.Handler — POST /api/invites.
-func (h *OgenHandler) CreateInvite(ctx context.Context) (ogenapi.CreateInviteRes, error) {
+func (h *OgenHandler) CreateInvite(ctx context.Context, req ogenapi.OptStepUpRequest) (ogenapi.CreateInviteRes, error) {
 	if h.authMgr == nil {
 		return mapCreateInviteError(domain.ErrFeatureNotSupported, h.log), nil
 	}
@@ -506,7 +517,12 @@ func (h *OgenHandler) CreateInvite(ctx context.Context) (ogenapi.CreateInviteRes
 		return &v, nil
 	}
 
-	tok, err := h.authMgr.GenerateInvite(ctx, usr.ID)
+	stepUp := req.Or(ogenapi.StepUpRequest{
+		Password: ogenapi.OptString{Value: "", Set: false},
+		TotpCode: ogenapi.OptString{Value: "", Set: false},
+	})
+
+	tok, err := h.authMgr.GenerateInvite(ctx, usr.ID, issuerFromCtx(ctx, stepUp.Password.Or(""), stepUp.TotpCode.Or("")))
 	if err != nil {
 		return mapCreateInviteError(err, h.log), nil
 	}
@@ -525,13 +541,24 @@ func (h *OgenHandler) CreateInvite(ctx context.Context) (ogenapi.CreateInviteRes
 }
 
 // mapCreateAPITokenError translates a CreateAPIToken failure into the generated response
-// union. 429 is the per-user token cap (domain.ErrAPITokenLimit), 503 the not-enabled case.
+// union. 429 is the per-user token cap (domain.ErrAPITokenLimit), 503 the not-enabled case,
+// 403 a missing/failed step-up (with its code), 422 an out-of-range lifetime.
+//
+//nolint:dupl // ogen's per-operation response-union types make the status mappers textually near-identical
 func mapCreateAPITokenError(err error, log *slog.Logger) ogenapi.CreateAPITokenRes {
-	r := errResp(err)
+	r := stepUpErrResp(err)
 
 	switch status, _ := domainErrStatus(err); status {
 	case http.StatusServiceUnavailable:
 		v := ogenapi.CreateAPITokenServiceUnavailable(r)
+
+		return &v
+	case http.StatusForbidden:
+		v := ogenapi.CreateAPITokenForbidden(r)
+
+		return &v
+	case http.StatusUnprocessableEntity:
+		v := ogenapi.CreateAPITokenUnprocessableEntity(r)
 
 		return &v
 	case http.StatusTooManyRequests:
@@ -547,9 +574,40 @@ func mapCreateAPITokenError(err error, log *slog.Logger) ogenapi.CreateAPITokenR
 	}
 }
 
+// issuerFromCtx describes how the caller of a credential-issuing operation authenticated: the
+// bearer API token the auth middleware resolved (none for a browser session) plus the step-up
+// the request body carried. The usecase decides whether the step-up is needed and valid.
+func issuerFromCtx(ctx context.Context, password, totpCode string) auth.Issuer {
+	return auth.Issuer{
+		APITokenHash: apiTokenHashFromCtx(ctx),
+		StepUp:       auth.StepUp{Password: password, TOTPCode: totpCode},
+	}
+}
+
+// Stable `code` values of the step-up refusals on the issuing endpoints.
+const (
+	stepUpRequiredCode = "step_up_required"
+	stepUpFailedCode   = "step_up_failed"
+)
+
+// stepUpErrResp is errResp plus the machine-readable code a client branches on for a step-up
+// refusal (prompt for the password/TOTP code vs. report a wrong one).
+func stepUpErrResp(err error) ogenapi.ErrorResponse {
+	resp := errResp(err)
+
+	switch {
+	case errors.Is(err, domain.ErrStepUpRequired):
+		resp.Code = ogenapi.NewOptString(stepUpRequiredCode)
+	case errors.Is(err, domain.ErrStepUpFailed):
+		resp.Code = ogenapi.NewOptString(stepUpFailedCode)
+	}
+
+	return resp
+}
+
 // mapCreateInviteError translates a CreateInvite failure into the generated response union.
 func mapCreateInviteError(err error, log *slog.Logger) ogenapi.CreateInviteRes {
-	r := errResp(err)
+	r := stepUpErrResp(err)
 
 	switch status, _ := domainErrStatus(err); status {
 	case http.StatusServiceUnavailable:

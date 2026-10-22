@@ -90,6 +90,68 @@ func (s *APITokenRepositoryTestSuite) create(tok *domain.APIToken) {
 	s.Require().True(created)
 }
 
+// ── IssuedBy cascade / DeleteByUserID (M-6) ──
+
+// TestRevokeByHash_CascadesToIssuedTokens: a token records the bearer that issued it; revoking
+// the issuer revokes the whole chain it minted, and nothing else.
+func (s *APITokenRepositoryTestSuite) TestRevokeByHash_CascadesToIssuedTokens() {
+	id := uuid.New()
+	s.createUser(id)
+
+	parent := "hash-parent"
+	child := "hash-child"
+	grandchild := "hash-grandchild"
+
+	s.create(s.newToken(id, parent))
+
+	childTok := s.newToken(id, child)
+	childTok.IssuedBy = &parent
+	s.create(childTok)
+
+	grandchildTok := s.newToken(id, grandchild)
+	grandchildTok.IssuedBy = &child
+	s.create(grandchildTok)
+
+	s.create(s.newToken(id, "hash-session"))
+
+	got, err := s.repo.GetByHash(s.T().Context(), child)
+	s.Require().NoError(err)
+	s.Require().NotNil(got.IssuedBy)
+	s.Equal(parent, *got.IssuedBy, "issued_by round-trips")
+
+	s.Require().NoError(s.repo.RevokeByHash(s.T().Context(), parent))
+
+	for _, hash := range []string{child, grandchild} {
+		_, err = s.repo.GetByHash(s.T().Context(), hash)
+		s.Require().ErrorIs(err, domain.ErrNotFound, hash)
+	}
+
+	_, err = s.repo.GetByHash(s.T().Context(), "hash-session")
+	s.Require().NoError(err, "a token issued from a session is unrelated and survives")
+}
+
+// TestDeleteByUserID_RemovesOnlyThatUsersTokens backs the password-change revocation.
+func (s *APITokenRepositoryTestSuite) TestDeleteByUserID_RemovesOnlyThatUsersTokens() {
+	id := uuid.New()
+	s.createUser(id)
+
+	other := uuid.New()
+	s.createUser(other)
+
+	s.create(s.newToken(id, "hash-mine-1"))
+	s.create(s.newToken(id, "hash-mine-2"))
+	s.create(s.newToken(other, "hash-other"))
+
+	s.Require().NoError(s.repo.DeleteByUserID(s.T().Context(), id))
+	s.Require().NoError(s.repo.DeleteByUserID(s.T().Context(), id), "a user without tokens is not an error")
+
+	_, err := s.repo.GetByHash(s.T().Context(), "hash-mine-1")
+	s.Require().ErrorIs(err, domain.ErrNotFound)
+
+	_, err = s.repo.GetByHash(s.T().Context(), "hash-other")
+	s.Require().NoError(err)
+}
+
 // ── Create / GetByHash ──
 
 func (s *APITokenRepositoryTestSuite) TestCreate_GetByHash_RoundTrip() {

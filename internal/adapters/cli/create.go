@@ -64,7 +64,7 @@ func createCommand() *urcli.Command {
 			&urcli.StringFlag{
 				Name:    FlagEditCode,
 				Aliases: []string{"e"},
-				Usage:   "Custom edit code (random 12-char code generated if omitted). " + psWarnEditCode,
+				Usage:   "Custom edit code, 8-128 chars (random 12-char code generated if omitted). " + psWarnEditCode,
 				Sources: urcli.EnvVars(EnvEditCode),
 			},
 		},

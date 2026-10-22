@@ -27,6 +27,7 @@ const (
 	keyUser      contextKey = 3
 	keyCSRF      contextKey = 4
 	keyLogUser   contextKey = 5
+	keyAPIToken  contextKey = 6
 )
 
 // logUser is a request-scoped holder the auth layer fills with the resolved identity so the
@@ -139,15 +140,21 @@ type RouteRegistrar interface {
 // tracking is consistent for a note or link regardless of which route variant a client hits — a
 // single cache keyed by path ID plus caller works since notes and links share one global slug
 // namespace (a note and a link can never have the same ID, see domain.HashSlug/ErrSlugConflict).
-func registerOgenRoutes(mux *http.ServeMux, ogenSrv http.Handler, lockout gcache.Cache, log *slog.Logger) {
+func registerOgenRoutes(
+	mux *http.ServeMux, ogenSrv http.Handler, lockout gcache.Cache, trustedProxies []*net.IPNet, log *slog.Logger,
+) {
+	locked := func(next http.Handler) http.Handler {
+		return requireSameOrigin(log, withFailLockout(lockout, trustedProxies, log, next))
+	}
+
 	mux.Handle("POST /notes", ogenSrv)
-	mux.Handle("PUT /notes/{id}", requireSameOrigin(log, withFailLockout(lockout, log, ogenSrv)))
-	mux.Handle("DELETE /notes/{id}", requireSameOrigin(log, withFailLockout(lockout, log, ogenSrv)))
+	mux.Handle("PUT /notes/{id}", locked(ogenSrv))
+	mux.Handle("DELETE /notes/{id}", locked(ogenSrv))
 	mux.Handle("POST /links", ogenSrv)
 	mux.Handle("POST /links/bulk", ogenSrv)
 	mux.Handle("GET /links/{id}", ogenSrv)
-	mux.Handle("PUT /links/{id}", requireSameOrigin(log, withFailLockout(lockout, log, ogenSrv)))
-	mux.Handle("DELETE /links/{id}", requireSameOrigin(log, withFailLockout(lockout, log, ogenSrv)))
+	mux.Handle("PUT /links/{id}", locked(ogenSrv))
+	mux.Handle("DELETE /links/{id}", locked(ogenSrv))
 	mux.Handle("GET /healthz", ogenSrv)
 	mux.Handle("GET /readyz", ogenSrv)
 	// Account endpoints and note/link PUT/DELETE accept browser session cookies, so they enforce
@@ -161,7 +168,7 @@ func registerOgenRoutes(mux *http.ServeMux, ogenSrv http.Handler, lockout gcache
 // registerAllRoutes registers the ogen-served REST API routes plus every concern handler's own
 // routes (see RouteRegistrar) on mux.
 func registerAllRoutes(mux *http.ServeMux, handler *Handler, ogenSrv http.Handler) {
-	registerOgenRoutes(mux, ogenSrv, handler.lockout, handler.log)
+	registerOgenRoutes(mux, ogenSrv, handler.lockout, handler.trustedProxies, handler.log)
 
 	registrars := []RouteRegistrar{
 		handler.NoteHandler,
@@ -467,19 +474,12 @@ func withStaticCacheControl(next http.Handler) http.Handler {
 	})
 }
 
-// redocScriptSrc is the external origin Redoc is loaded from. It is added to script-src only on
-// the API docs page (see APIDocsPage), keeping the global CSP free of third-party origins.
-const redocScriptSrc = "https://cdn.redoc.ly"
-
-// buildCSP assembles the Content-Security-Policy for a response. extraScriptSrc adds extra
-// allowed script origins (e.g. the Redoc CDN on the /api page) without widening script-src
-// globally — every other page keeps script-src restricted to 'self' + nonce.
-func buildCSP(nonce string, extraScriptSrc ...string) string {
-	scriptSrcParts := append([]string{"script-src 'self' 'nonce-" + nonce + "'"}, extraScriptSrc...)
-	scriptSrc := strings.Join(scriptSrcParts, " ")
-
+// buildCSP assembles the Content-Security-Policy applied to every response, the /api docs page
+// included: scripts come only from the app origin ('self', e.g. the vendored Redoc bundle under
+// /static/) or carry the per-request nonce — no third-party origin is ever allowed.
+func buildCSP(nonce string) string {
 	return "default-src 'self'; " +
-		scriptSrc + "; " +
+		"script-src 'self' 'nonce-" + nonce + "'; " +
 		"style-src 'self' 'nonce-" + nonce + "'; " +
 		"font-src 'self'; " +
 		"img-src 'self' data:; " +

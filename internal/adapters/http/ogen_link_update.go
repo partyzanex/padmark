@@ -48,7 +48,9 @@ func (h *OgenHandler) UpdateLink(
 	return domainLinkToResponse(link, h.log), nil
 }
 
-//nolint:ireturn // ogen response unions are interfaces by design
+// Per-operation ogen union types make the status mappers textually near-identical (dupl).
+//
+//nolint:ireturn,dupl // ogen response unions are interfaces by design
 func mapUpdateLinkError(err error, log *slog.Logger) ogenapi.UpdateLinkRes {
 	r := errResp(err)
 	switch status, _ := domainErrStatus(err); status {

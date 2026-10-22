@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -205,12 +206,17 @@ func TestContentEncryptor_LegacyReadOnly(t *testing.T) {
 	require.True(t, strings.HasPrefix(updated, "pmc2$p$"))
 }
 
+// loadStrictKeyring loads with the production default: owner-only permissions, discarded warnings.
+func loadStrictKeyring(path string) (*ContentKeyring, error) {
+	return LoadContentKeyring(path, slog.New(slog.DiscardHandler), KeyringLoadOptions{AllowSharedPermissions: false})
+}
+
 func TestLoadContentKeyring(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "keys.json")
 	data, err := json.Marshal(ContentKeyring{Active: "key1", Keys: map[string][]byte{"key1": bytes.Repeat([]byte{7}, 32)}})
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(path, data, 0o600))
-	keyring, err := LoadContentKeyring(path)
+	keyring, err := loadStrictKeyring(path)
 	require.NoError(t, err)
 	_, err = keyring.ForResource("link")
 	require.NoError(t, err)
@@ -221,14 +227,14 @@ func TestLoadContentKeyring(t *testing.T) {
 		`{"active":"missing","keys":{}}`, `{"active":"key1","keys":{},"typo":true}`,
 	} {
 		require.NoError(t, os.WriteFile(path, []byte(bad), 0o600))
-		_, err = LoadContentKeyring(path)
+		_, err = loadStrictKeyring(path)
 		require.Error(t, err)
 		require.NotContains(t, err.Error(), "secret-should-not-appear-in-errors")
 	}
 
-	_, err = LoadContentKeyring("")
+	_, err = loadStrictKeyring("")
 	require.Error(t, err)
-	_, err = LoadContentKeyring(filepath.Join(t.TempDir(), "missing"))
+	_, err = loadStrictKeyring(filepath.Join(t.TempDir(), "missing"))
 	require.Error(t, err)
 }
 

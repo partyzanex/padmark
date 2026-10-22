@@ -237,6 +237,15 @@ func (m *Manager) Create(ctx context.Context, targetURL string, opts CreateOptio
 		return nil, err
 	}
 
+	// A caller-chosen code must meet the edit-code policy before it is hashed; an empty one is
+	// generated below. Update never accepts a replacement code, so this is the only check site.
+	if link.EditCode != "" {
+		err = domain.ValidateEditCode(link.EditCode)
+		if err != nil {
+			return nil, fmt.Errorf("validate edit code: %w", err)
+		}
+	}
+
 	plaintextCode, err := m.resolveAndHashEditCode(link)
 	if err != nil {
 		return nil, err

@@ -651,7 +651,7 @@ func (s *AuthHandlerSuite) TestAdminPage_Admin_ListsAPIKeys() {
 func (s *AuthHandlerSuite) TestAdminInvite_GeneratesLink() {
 	usr := s.adminUser()
 	s.auth.EXPECT().GetSession(gomock.Any(), "admin-sess").Return(usr, nil).Times(1)
-	s.auth.EXPECT().GenerateInvite(gomock.Any(), testAdminID).Return("tok-xyz", nil)
+	s.auth.EXPECT().GenerateInvite(gomock.Any(), testAdminID, gomock.Any()).Return("tok-xyz", nil)
 	s.auth.EXPECT().ListUsers(gomock.Any(), testAdminID).Return([]*domain.User{usr}, nil)
 	s.auth.EXPECT().ListAPITokens(gomock.Any(), testAdminID).Return([]*auth.APITokenInfo{}, nil)
 
@@ -677,7 +677,7 @@ func (s *AuthHandlerSuite) TestAdminInvite_ForcedSchemeEmbedsHTTPS() {
 
 	usr := s.adminUser()
 	s.auth.EXPECT().GetSession(gomock.Any(), "admin-sess").Return(usr, nil).Times(1)
-	s.auth.EXPECT().GenerateInvite(gomock.Any(), testAdminID).Return("tok-xyz", nil)
+	s.auth.EXPECT().GenerateInvite(gomock.Any(), testAdminID, gomock.Any()).Return("tok-xyz", nil)
 	s.auth.EXPECT().ListUsers(gomock.Any(), testAdminID).Return([]*domain.User{usr}, nil)
 	s.auth.EXPECT().ListAPITokens(gomock.Any(), testAdminID).Return([]*auth.APITokenInfo{}, nil)
 
@@ -700,7 +700,7 @@ func (s *AuthHandlerSuite) TestAdminInvite_ForcedSchemeEmbedsHTTPS() {
 func (s *AuthHandlerSuite) TestAdminInvite_GenerateInviteFails_ShowsError() {
 	usr := s.adminUser()
 	s.auth.EXPECT().GetSession(gomock.Any(), "admin-sess").Return(usr, nil).Times(1)
-	s.auth.EXPECT().GenerateInvite(gomock.Any(), testAdminID).Return("", errors.New("boom"))
+	s.auth.EXPECT().GenerateInvite(gomock.Any(), testAdminID, gomock.Any()).Return("", errors.New("boom"))
 	s.auth.EXPECT().ListUsers(gomock.Any(), testAdminID).Return([]*domain.User{usr}, nil)
 	s.auth.EXPECT().ListAPITokens(gomock.Any(), testAdminID).Return([]*auth.APITokenInfo{}, nil)
 
@@ -822,10 +822,50 @@ func (s *AuthHandlerSuite) TestAdminRevoke_GenericError_RedirectsWithGenericMess
 
 // ── Admin API keys ──
 
+// TestAdminCreateKey_Lifetime: the admin form's lifetime reaches the usecase as a session issue;
+// an unparsable value is passed on as invalid and the refusal is shown on the page.
+func (s *AuthHandlerSuite) TestAdminCreateKey_Lifetime() {
+	usr := s.adminUser()
+
+	for _, testCase := range []struct {
+		form string
+		ttl  int
+		err  error
+	}{
+		{"90", 90, nil},
+		{"", 0, nil},
+		{"abc", -1, domain.ErrInvalidAPITokenTTL},
+	} {
+		s.Run("ttl_days="+testCase.form, func() {
+			s.auth.EXPECT().GetSession(gomock.Any(), "admin-sess").Return(usr, nil)
+			s.auth.EXPECT().CreateAPIToken(gomock.Any(), testAdminID, auth.Issuer{}, testCase.ttl).
+				Return("plain-secret-key", testCase.err)
+			s.auth.EXPECT().ListUsers(gomock.Any(), testAdminID).Return([]*domain.User{usr}, nil)
+			s.auth.EXPECT().ListAPITokens(gomock.Any(), testAdminID).Return([]*auth.APITokenInfo{}, nil)
+
+			form := withCSRF(url.Values{"ttl_days": {testCase.form}})
+			req := httptest.NewRequest(http.MethodPost, "/admin/api-keys", strings.NewReader(form.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			req.AddCookie(s.sessionCookie("admin-sess"))
+			req.AddCookie(s.csrfCookie())
+
+			rec := httptest.NewRecorder()
+
+			s.router.ServeHTTP(rec, req)
+
+			s.Equal(http.StatusOK, rec.Code)
+
+			if testCase.err != nil {
+				s.Contains(rec.Body.String(), "Lifetime must be 0 (never expires) to 3650 days.")
+			}
+		})
+	}
+}
+
 func (s *AuthHandlerSuite) TestAdminCreateKey_CreatesAndShowsKey() {
 	usr := s.adminUser()
 	s.auth.EXPECT().GetSession(gomock.Any(), "admin-sess").Return(usr, nil).Times(1)
-	s.auth.EXPECT().CreateAPIToken(gomock.Any(), testAdminID).Return("plain-secret-key", nil)
+	s.auth.EXPECT().CreateAPIToken(gomock.Any(), testAdminID, gomock.Any(), gomock.Any()).Return("plain-secret-key", nil)
 	s.auth.EXPECT().ListUsers(gomock.Any(), testAdminID).Return([]*domain.User{usr}, nil)
 	s.auth.EXPECT().ListAPITokens(gomock.Any(), testAdminID).Return([]*auth.APITokenInfo{}, nil)
 
@@ -863,7 +903,7 @@ func (s *AuthHandlerSuite) TestAdminCreateKey_ForcedSchemeEmbedsHTTPS() {
 
 	usr := s.adminUser()
 	s.auth.EXPECT().GetSession(gomock.Any(), "admin-sess").Return(usr, nil).Times(1)
-	s.auth.EXPECT().CreateAPIToken(gomock.Any(), testAdminID).Return("plain-secret-key", nil)
+	s.auth.EXPECT().CreateAPIToken(gomock.Any(), testAdminID, gomock.Any(), gomock.Any()).Return("plain-secret-key", nil)
 	s.auth.EXPECT().ListUsers(gomock.Any(), testAdminID).Return([]*domain.User{usr}, nil)
 	s.auth.EXPECT().ListAPITokens(gomock.Any(), testAdminID).Return([]*auth.APITokenInfo{}, nil)
 
@@ -944,7 +984,8 @@ func (s *AuthHandlerSuite) TestAdminRevokeKey_NonAdmin_Returns403() {
 func (s *AuthHandlerSuite) TestAdminCreateKey_CreateFails_ShowsError() {
 	usr := s.adminUser()
 	s.auth.EXPECT().GetSession(gomock.Any(), "admin-sess").Return(usr, nil).Times(1)
-	s.auth.EXPECT().CreateAPIToken(gomock.Any(), testAdminID).Return("", domain.ErrFeatureNotSupported)
+	s.auth.EXPECT().CreateAPIToken(gomock.Any(), testAdminID, gomock.Any(), gomock.Any()).
+		Return("", domain.ErrFeatureNotSupported)
 	s.auth.EXPECT().ListUsers(gomock.Any(), testAdminID).Return([]*domain.User{usr}, nil)
 	s.auth.EXPECT().ListAPITokens(gomock.Any(), testAdminID).Return([]*auth.APITokenInfo{}, nil)
 
@@ -1018,7 +1059,7 @@ func (s *AuthHandlerSuite) TestSessionAuth_ExpiredSession_RedirectsToLogin() {
 
 func (s *AuthHandlerSuite) TestAPITokenAuth_ValidBearer_PassesThrough() {
 	usr := &domain.User{ID: testUserID1, Username: "alice"}
-	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "good-api-key").Return(usr, nil)
+	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "good-api-key").Return(usr, "token-hash", nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set("Authorization", "Bearer good-api-key")
@@ -1031,7 +1072,7 @@ func (s *AuthHandlerSuite) TestAPITokenAuth_ValidBearer_PassesThrough() {
 }
 
 func (s *AuthHandlerSuite) TestAPITokenAuth_UnknownBearer_Returns401() {
-	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "bad-key").Return(nil, domain.ErrNotFound)
+	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "bad-key").Return(nil, "", domain.ErrNotFound)
 
 	// No Sec-Fetch-Dest / text-html Accept ⇒ treated as an API client ⇒ 401, not a redirect.
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -1046,20 +1087,34 @@ func (s *AuthHandlerSuite) TestAPITokenAuth_UnknownBearer_Returns401() {
 
 // TestAPITokenAuth_AdminBearer_ReachesAdminPage proves the user resolved from the API token is
 // injected into the request context: an admin key reaches the admin-only page and renders it.
-func (s *AuthHandlerSuite) TestAPITokenAuth_AdminBearer_ReachesAdminPage() {
+// TestAPITokenAuth_AdminBearer_RefusedByAdminPanel: the admin panel is a browser UI — an admin's
+// bearer API token must not reach it, or a leaked key could mint keys and invites through its
+// forms without the step-up the JSON endpoints demand (M-6).
+func (s *AuthHandlerSuite) TestAPITokenAuth_AdminBearer_RefusedByAdminPanel() {
 	admin := s.adminUser()
-	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "admin-key").Return(admin, nil)
-	s.auth.EXPECT().ListUsers(gomock.Any(), testAdminID).Return([]*domain.User{admin}, nil)
-	s.auth.EXPECT().ListAPITokens(gomock.Any(), testAdminID).Return([]*auth.APITokenInfo{}, nil)
 
-	req := httptest.NewRequest(http.MethodGet, "/admin", nil)
-	req.Header.Set("Authorization", "Bearer admin-key")
+	for _, route := range []struct{ method, path string }{
+		{http.MethodGet, "/admin"},
+		{http.MethodPost, "/admin/api-keys"},
+		{http.MethodPost, "/admin/invite"},
+	} {
+		s.Run(route.method+" "+route.path, func() {
+			s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "admin-key").Return(admin, "token-hash", nil)
+			// No ListUsers / CreateAPIToken / GenerateInvite: the handler is never reached.
 
-	rec := httptest.NewRecorder()
+			form := withCSRF(url.Values{"ttl_days": {"0"}})
+			req := httptest.NewRequest(route.method, route.path, strings.NewReader(form.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			req.Header.Set("Authorization", "Bearer admin-key")
+			req.AddCookie(s.csrfCookie())
 
-	s.router.ServeHTTP(rec, req)
+			rec := httptest.NewRecorder()
 
-	s.Equal(http.StatusOK, rec.Code)
+			s.router.ServeHTTP(rec, req)
+
+			s.Equal(http.StatusForbidden, rec.Code)
+		})
+	}
 }
 
 // TestAPITokenAuth_PrivateNote_ValidBearer_Served is a regression test: GET /notes/{id} is a
@@ -1071,7 +1126,7 @@ func (s *AuthHandlerSuite) TestAPITokenAuth_PrivateNote_ValidBearer_Served() {
 	note := newTestNote("secret", "# private")
 	note.Privacy = &priv
 
-	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "good-api-key").Return(usr, nil)
+	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "good-api-key").Return(usr, "token-hash", nil)
 	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
 	s.manager.EXPECT().ViewPreloaded(gomock.Any(), testID, gomock.Any()).Return(note, nil)
 
@@ -1093,7 +1148,7 @@ func (s *AuthHandlerSuite) TestAPITokenAuth_PrivateNote_UnknownBearer_Returns401
 	note := newTestNote("secret", "# private")
 	note.Privacy = &priv
 
-	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "bad-key").Return(nil, domain.ErrNotFound)
+	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "bad-key").Return(nil, "", domain.ErrNotFound)
 	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
@@ -1113,7 +1168,7 @@ func (s *AuthHandlerSuite) TestAPITokenAuth_PrivateNote_UnknownBearer_Returns401
 // instead of failing on an unexpected content type (was: text/plain, then text/html).
 func (s *AuthHandlerSuite) TestGetNote_NotFound_JSONClient_GetsJSONError() {
 	usr := &domain.User{ID: testUserID1, Username: "alice"}
-	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "good-api-key").Return(usr, nil)
+	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "good-api-key").Return(usr, "token-hash", nil)
 	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(nil, domain.ErrNotFound)
 
 	req := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
@@ -1535,7 +1590,7 @@ func (s *AuthHandlerSuite) TestUpdateNote_SessionOwner_BypassesEditCode() {
 // TestUpdateNote_APITokenOwner_BypassesEditCode is the CLI/API-client counterpart: a Bearer API
 // token resolves to its owning user the same way a session does.
 func (s *AuthHandlerSuite) TestUpdateNote_APITokenOwner_BypassesEditCode() {
-	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "valid-key").Return(&domain.User{ID: testUserID1}, nil)
+	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "valid-key").Return(&domain.User{ID: testUserID1}, "token-hash", nil)
 	s.manager.EXPECT().Update(gomock.Any(), testID, "", testUserID1, gomock.Any()).
 		Return(newTestNote("t", "c"), nil)
 
@@ -1622,7 +1677,7 @@ func (s *AuthHandlerSuite) TestChangePasswordRevocationWarningKeepsReplacementSe
 	rec := httptest.NewRecorder()
 	s.router.ServeHTTP(rec, req)
 	s.Equal(http.StatusOK, rec.Code)
-	s.Contains(rec.Body.String(), "Password changed, but older sessions could not be revoked")
+	s.Contains(rec.Body.String(), "Password changed, but older sessions or API tokens could not be revoked")
 	s.NotContains(rec.Body.String(), "Password changed successfully")
 
 	found := false

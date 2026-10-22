@@ -2,13 +2,51 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	urcli "github.com/urfave/cli/v3"
 
 	padmark "github.com/partyzanex/padmark/pkg/client"
 )
+
+// errStepUpNoTOTPCode: issuing with a bearer token always needs the step-up, so the CLI fails
+// before sending a request the server would refuse anyway.
+var errStepUpNoTOTPCode = errors.New("--" + FlagTOTPCode + " is required: issuing with an API token " +
+	"needs a re-authentication (account password + current TOTP code)")
+
+// stepUpFlags are the re-authentication inputs every credential-issuing command takes: the CLI
+// always authenticates with a bearer token, which the server lets issue only with a step-up.
+func stepUpFlags() []urcli.Flag {
+	return []urcli.Flag{
+		&urcli.StringFlag{
+			Name: FlagPassword,
+			Usage: "Account password for the step-up. Flag values are visible in process listings (ps); " +
+				"prefer piping the password to stdin",
+		},
+		&urcli.StringFlag{
+			Name:  FlagTOTPCode,
+			Usage: "Current 6-digit TOTP code from your authenticator (step-up; each code works once)",
+		},
+	}
+}
+
+// readStepUp resolves the step-up: the TOTP code flag, and the password from --password or stdin.
+func readStepUp(cmd *urcli.Command) (password, totpCode string, err error) {
+	totpCode = strings.TrimSpace(cmd.String(FlagTOTPCode))
+	if totpCode == "" {
+		return "", "", errStepUpNoTOTPCode
+	}
+
+	password, err = setupPassword(cmd)
+	if err != nil {
+		return "", "", err
+	}
+
+	return password, totpCode, nil
+}
 
 // createTokenCommand and createInviteCommand are intentionally symmetric: one-time secret,
 // stderr advice, single-line stdout. ogen per-operation unions make shared extraction awkward.
@@ -18,19 +56,34 @@ func createTokenCommand() *urcli.Command {
 		Usage: "Issue an API token for your own account and print it once",
 		Description: "POST /api/tokens: the returned pmk_… envelope is shown exactly once — " +
 			"put it into ~/.config/padmark/token or PADMARK_TOKEN yourself; the CLI never writes " +
-			"the token file automatically. A user may hold at most 20 live tokens (revoke via /admin).",
+			"the token file automatically. A user may hold at most 20 live tokens (revoke via /admin). " +
+			"Issuing with an API token requires a step-up: the account password (stdin or --password) " +
+			"and --totp-code. The new token is linked to the one used: revoking that one revokes it too.",
+		Flags: append(stepUpFlags(), &urcli.IntFlag{
+			Name:  FlagTTLDays,
+			Usage: "Lifetime of the new token in days; 0 = never expires",
+			Value: 0,
+		}),
 		Action: createTokenAction,
 	}
 }
 
-//nolint:dupl // deliberately symmetric (see file comment)
 func createTokenAction(ctx context.Context, cmd *urcli.Command) error {
-	cl, err := newPadmarkClient(cmd)
+	apiClient, err := newPadmarkClient(cmd)
 	if err != nil {
 		return err
 	}
 
-	res, clientErr := cl.CreateAPIToken(ctx)
+	password, totpCode, err := readStepUp(cmd)
+	if err != nil {
+		return err
+	}
+
+	res, clientErr := apiClient.CreateAPIToken(ctx, padmark.NewOptCreateAPITokenRequest(padmark.CreateAPITokenRequest{
+		TTLDays:  padmark.NewOptInt(cmd.Int(FlagTTLDays)),
+		Password: padmark.NewOptString(password),
+		TotpCode: padmark.NewOptString(totpCode),
+	}))
 	if clientErr != nil {
 		return fmt.Errorf("create token: %w", clientErr)
 	}
@@ -64,6 +117,10 @@ func handleCreateAPITokenRes(res padmark.CreateAPITokenRes) (string, error) {
 		return typed.Token, nil
 	case *padmark.CreateAPITokenUnauthorized:
 		return "", fmt.Errorf("unauthorized: %s", typed.Message)
+	case *padmark.CreateAPITokenForbidden:
+		return "", fmt.Errorf("step-up refused: %s", typed.Message)
+	case *padmark.CreateAPITokenUnprocessableEntity:
+		return "", fmt.Errorf("invalid request: %s", typed.Message)
 	case *padmark.CreateAPITokenTooManyRequests:
 		return "", fmt.Errorf("token cap reached (revoke one via /admin): %s", typed.Message)
 	case *padmark.CreateAPITokenServiceUnavailable:
@@ -80,19 +137,29 @@ func createInviteCommand() *urcli.Command {
 		Name:  "create-invite",
 		Usage: "Issue a single-use signup invite link (admin only)",
 		Description: "POST /api/invites: returns the invite URL shown once — the link expires " +
-			"and is single-use. The invitee signs up with `padmark-cli setup --invite <token>`.",
+			"and is single-use. The invitee signs up with `padmark-cli setup --invite <token>`. " +
+			"Issuing with an API token requires a step-up: the account password (stdin or --password) " +
+			"and --totp-code.",
+		Flags:  stepUpFlags(),
 		Action: createInviteAction,
 	}
 }
 
-//nolint:dupl // deliberately symmetric (see file comment)
 func createInviteAction(ctx context.Context, cmd *urcli.Command) error {
-	cl, err := newPadmarkClient(cmd)
+	apiClient, err := newPadmarkClient(cmd)
 	if err != nil {
 		return err
 	}
 
-	res, clientErr := cl.CreateInvite(ctx)
+	password, totpCode, err := readStepUp(cmd)
+	if err != nil {
+		return err
+	}
+
+	res, clientErr := apiClient.CreateInvite(ctx, padmark.NewOptStepUpRequest(padmark.StepUpRequest{
+		Password: padmark.NewOptString(password),
+		TotpCode: padmark.NewOptString(totpCode),
+	}))
 	if clientErr != nil {
 		return fmt.Errorf("create invite: %w", clientErr)
 	}
@@ -126,7 +193,7 @@ func handleCreateInviteRes(res padmark.CreateInviteRes) (string, error) {
 	case *padmark.CreateInviteUnauthorized:
 		return "", fmt.Errorf("unauthorized: %s", typed.Message)
 	case *padmark.CreateInviteForbidden:
-		return "", fmt.Errorf("admin required: %s", typed.Message)
+		return "", fmt.Errorf("forbidden (admin and a valid step-up required): %s", typed.Message)
 	case *padmark.CreateInviteServiceUnavailable:
 		return "", serviceUnavailableError(padmark.ErrorResponse(*typed))
 	case *padmark.CreateInviteInternalServerError:

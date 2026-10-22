@@ -27,6 +27,7 @@ const DefaultSessionTTL = 30 * 24 * time.Hour
 type SessionManager struct {
 	totp        TOTPManager
 	sessions    SessionStore
+	apiTokens   APITokenStore
 	sealer      SecretSealer
 	pw          PasswordHasher
 	users       UserStore
@@ -36,13 +37,14 @@ type SessionManager struct {
 }
 
 // NewSessionManager returns a new SessionManager. sessionTTL controls how long a session
-// remains valid; pass 0 for the default (30 days).
+// remains valid; pass 0 for the default (30 days). apiTokens (nil when the API-token flow is
+// disabled) lets a password change revoke the account's API tokens.
 //
 // Returns an error when crypto/rand is unavailable (see the dummy-hash precompute below) —
 // NewSessionManager runs only at the composition root, so the caller is expected to treat this
 // as a fatal startup error rather than retry.
 func NewSessionManager(
-	users UserStore, sessions SessionStore, passwordHasher PasswordHasher,
+	users UserStore, sessions SessionStore, apiTokens APITokenStore, passwordHasher PasswordHasher,
 	sealer SecretSealer, totp TOTPManager, log *slog.Logger, sessionTTL time.Duration,
 ) (*SessionManager, error) {
 	ttl := sessionTTL
@@ -62,6 +64,7 @@ func NewSessionManager(
 	return &SessionManager{
 		users:       users,
 		sessions:    sessions,
+		apiTokens:   apiTokens,
 		pw:          passwordHasher,
 		sealer:      sealer,
 		totp:        totp,
@@ -215,17 +218,67 @@ func (m *SessionManager) ChangePassword(
 		return "", fmt.Errorf("create session: %w", err)
 	}
 
-	// Invalidate all old sessions except the one just created.
-	// The new session must survive so the caller stays logged in.
-	err = m.sessions.DeleteByUserIDExcept(ctx, usr.ID, hashToken(newID))
+	err = m.revokeOldCredentials(ctx, usr.ID, newID)
 	if err != nil {
-		m.log.ErrorContext(ctx, "invalidate old sessions after password change",
-			"user_id", usr.ID, "err", err)
-
-		return newID, fmt.Errorf("%w: %w", domain.ErrSessionRevocation, err)
+		return newID, err
 	}
 
 	return newID, nil
+}
+
+// VerifyStepUp re-authenticates userID with the account password and a fresh TOTP code, exactly
+// like the login factors: the code is replay-protected, and an outdated seal is migrated on
+// success. Implements StepUpVerifier. Returns domain.ErrStepUpFailed for a wrong password or a
+// wrong/replayed code.
+func (m *SessionManager) VerifyStepUp(ctx context.Context, userID uuid.UUID, stepUp StepUp) error {
+	usr, err := m.users.GetByID(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("get user: %w", err)
+	}
+
+	err = m.verifyLoginFactors(ctx, usr, stepUp.Password, stepUp.TOTPCode)
+	if errors.Is(err, domain.ErrInvalidTOTP) {
+		return domain.ErrStepUpFailed
+	}
+
+	if err != nil {
+		return fmt.Errorf("verify login factors: %w", err)
+	}
+
+	return nil
+}
+
+// revokeOldCredentials invalidates everything the old password vouched for: every session but
+// keepSessionID (the replacement — it must survive so the caller stays logged in), and every API
+// token of the account — a leaked key, and whatever it minted, must not outlive the change. Both
+// are attempted even when one fails; a failure is ErrSessionRevocation (partial success).
+func (m *SessionManager) revokeOldCredentials(ctx context.Context, userID uuid.UUID, keepSessionID string) error {
+	err := errors.Join(
+		m.sessions.DeleteByUserIDExcept(ctx, userID, hashToken(keepSessionID)),
+		m.revokeAPITokens(ctx, userID),
+	)
+	if err != nil {
+		m.log.ErrorContext(ctx, "invalidate old sessions and api tokens after password change",
+			"user_id", userID, "err", err)
+
+		return fmt.Errorf("%w: %w", domain.ErrSessionRevocation, err)
+	}
+
+	return nil
+}
+
+// revokeAPITokens deletes every API token of userID; a no-op when the API-token flow is disabled.
+func (m *SessionManager) revokeAPITokens(ctx context.Context, userID uuid.UUID) error {
+	if m.apiTokens == nil {
+		return nil
+	}
+
+	err := m.apiTokens.DeleteByUserID(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("revoke api tokens: %w", err)
+	}
+
+	return nil
 }
 
 // buildNewCredentials validates newPassword complexity, derives a fresh KDF key, and

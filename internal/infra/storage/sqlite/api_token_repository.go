@@ -19,6 +19,7 @@ type apiTokenRow struct {
 	CreatedAt  time.Time  `bun:"created_at,notnull"`
 	ExpiresAt  *time.Time `bun:"expires_at"`
 	LastUsedAt *time.Time `bun:"last_used_at"`
+	IssuedBy   *string    `bun:"issued_by"`
 	TokenHash  string     `bun:"token_hash,pk"`
 	UserID     uuid.UUID  `bun:"user_id,notnull"`
 }
@@ -31,6 +32,7 @@ func toAPITokenRow(token *domain.APIToken) *apiTokenRow {
 		CreatedAt:  token.CreatedAt,
 		ExpiresAt:  token.ExpiresAt,
 		LastUsedAt: token.LastUsedAt,
+		IssuedBy:   token.IssuedBy,
 	}
 }
 
@@ -41,6 +43,7 @@ func (r *apiTokenRow) toDomain() *domain.APIToken {
 		CreatedAt:  r.CreatedAt,
 		ExpiresAt:  r.ExpiresAt,
 		LastUsedAt: r.LastUsedAt,
+		IssuedBy:   r.IssuedBy,
 	}
 }
 
@@ -146,6 +149,20 @@ func (r *APITokenRepository) RevokeByHash(ctx context.Context, tokenHash string)
 
 	if affected == 0 {
 		return domain.ErrNotFound
+	}
+
+	return nil
+}
+
+// DeleteByUserID revokes every API token of the user (e.g. after a password change). A user
+// without tokens is not an error.
+func (r *APITokenRepository) DeleteByUserID(ctx context.Context, userID uuid.UUID) error {
+	_, err := r.db.NewDelete().
+		TableExpr("api_tokens").
+		Where("user_id = ?", userID).
+		Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("delete api tokens of user: %w", err)
 	}
 
 	return nil

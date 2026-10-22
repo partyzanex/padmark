@@ -321,7 +321,7 @@ func (s *ManagerSuite) TestGenerateInvite_NonAdmin_ReturnsErrForbidden() {
 	nonAdmin := &domain.User{ID: s.userID, IsAdmin: false}
 	s.users.EXPECT().GetByID(gomock.Any(), s.userID).Return(nonAdmin, nil)
 
-	_, err := s.mgr.GenerateInvite(s.T().Context(), s.userID)
+	_, err := s.mgr.GenerateInvite(s.T().Context(), s.userID, Issuer{})
 	s.ErrorIs(err, domain.ErrForbidden)
 }
 
@@ -329,7 +329,7 @@ func (s *ManagerSuite) TestGenerateInvite_Admin_ReturnsToken() {
 	s.users.EXPECT().GetByID(gomock.Any(), s.adminID).Return(s.adminUser(), nil)
 	s.invites.EXPECT().Issue(gomock.Any(), s.adminID).Return("tok-abc", nil)
 
-	tok, err := s.mgr.GenerateInvite(s.T().Context(), s.adminID)
+	tok, err := s.mgr.GenerateInvite(s.T().Context(), s.adminID, Issuer{})
 	s.Require().NoError(err)
 	s.Equal("tok-abc", tok)
 }
@@ -338,7 +338,7 @@ func (s *ManagerSuite) TestGenerateInvite_AdminLookupFails_WrapsError() {
 	boom := errors.New("boom")
 	s.users.EXPECT().GetByID(gomock.Any(), s.adminID).Return(nil, boom)
 
-	_, err := s.mgr.GenerateInvite(s.T().Context(), s.adminID)
+	_, err := s.mgr.GenerateInvite(s.T().Context(), s.adminID, Issuer{})
 	s.Require().Error(err)
 	s.ErrorIs(err, boom)
 }
@@ -349,7 +349,7 @@ func (s *ManagerSuite) TestGenerateInvite_IssueFails_WrapsError() {
 	s.users.EXPECT().GetByID(gomock.Any(), s.adminID).Return(s.adminUser(), nil)
 	s.invites.EXPECT().Issue(gomock.Any(), s.adminID).Return("", boom)
 
-	_, err := s.mgr.GenerateInvite(s.T().Context(), s.adminID)
+	_, err := s.mgr.GenerateInvite(s.T().Context(), s.adminID, Issuer{})
 	s.Require().Error(err)
 	s.ErrorIs(err, boom)
 }
@@ -537,6 +537,81 @@ func (s *ManagerSuite) TestChangePassword_RevocationFailureReturnsSessionAndWarn
 	newSessID, err := s.mgr.ChangePassword(s.T().Context(), "sess", testPassword, "NewP@ssw0rd!", code)
 	s.Require().ErrorIs(err, domain.ErrSessionRevocation)
 	s.NotEmpty(newSessID)
+}
+
+// TestChangePassword_RevokesAPITokens: a password change also revokes every API token of the
+// account (M-6), and a failure there is reported like a session-revocation failure.
+func (s *ManagerSuite) TestChangePassword_RevokesAPITokens() {
+	for _, revokeErr := range []error{nil, errors.New("db timeout")} {
+		apiTokens := NewMockAPITokenStore(s.ctrl)
+		mgr, err := NewManager(s.users, s.invites, s.sessions, apiTokens,
+			crypto.NewPasswordHasher(testArgon2Params),
+			crypto.NewSealer(testArgon2Params), crypto.NewTOTP(), discardLog, "padmark", 0)
+		s.Require().NoError(err)
+
+		usr, rawSecret := s.testUser()
+		sess := &domain.Session{SessionHash: "sess", UserID: s.userID}
+
+		code, err := totp.GenerateCode(rawSecret, time.Now())
+		s.Require().NoError(err)
+
+		s.sessions.EXPECT().Get(gomock.Any(), hashToken("sess")).Return(sess, nil)
+		s.users.EXPECT().GetByID(gomock.Any(), s.userID).Return(usr, nil)
+		s.users.EXPECT().UpdateTOTPCounter(gomock.Any(), s.userID, gomock.Any()).Return(true, nil)
+		s.users.EXPECT().UpdatePassword(gomock.Any(), s.userID, gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
+		s.sessions.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
+		s.sessions.EXPECT().DeleteByUserIDExcept(gomock.Any(), s.userID, gomock.Any()).Return(nil)
+		apiTokens.EXPECT().DeleteByUserID(gomock.Any(), s.userID).Return(revokeErr)
+
+		newSessID, err := mgr.ChangePassword(s.T().Context(), "sess", testPassword, "NewP@ssw0rd!", code)
+		s.NotEmpty(newSessID)
+
+		if revokeErr == nil {
+			s.Require().NoError(err)
+		} else {
+			s.Require().ErrorIs(err, domain.ErrSessionRevocation)
+		}
+	}
+}
+
+// ── VerifyStepUp / GenerateInvite step-up (M-6) ──
+
+func (s *ManagerSuite) TestVerifyStepUp() {
+	usr, rawSecret := s.testUser()
+
+	code, err := totp.GenerateCode(rawSecret, time.Now())
+	s.Require().NoError(err)
+
+	s.users.EXPECT().GetByID(gomock.Any(), s.userID).Return(usr, nil).Times(3)
+
+	s.Require().ErrorIs(s.mgr.VerifyStepUp(s.T().Context(), s.userID, StepUp{Password: "WrongP@ss12!", TOTPCode: code}),
+		domain.ErrStepUpFailed, "wrong password")
+	s.Require().ErrorIs(s.mgr.VerifyStepUp(s.T().Context(), s.userID, StepUp{Password: testPassword, TOTPCode: "000000"}),
+		domain.ErrStepUpFailed, "wrong code")
+
+	s.users.EXPECT().UpdateTOTPCounter(gomock.Any(), s.userID, gomock.Any()).Return(true, nil)
+	s.Require().NoError(s.mgr.VerifyStepUp(s.T().Context(), s.userID, StepUp{Password: testPassword, TOTPCode: code}))
+}
+
+func (s *ManagerSuite) TestGenerateInvite_Bearer_RequiresStepUp() {
+	admin, rawSecret := s.testUser()
+	admin.IsAdmin = true
+
+	s.users.EXPECT().GetByID(gomock.Any(), s.userID).Return(admin, nil).AnyTimes()
+
+	_, err := s.mgr.GenerateInvite(s.T().Context(), s.userID, Issuer{APITokenHash: "parent"})
+	s.Require().ErrorIs(err, domain.ErrStepUpRequired, "a bearer without step-up mints no invite")
+
+	code, err := totp.GenerateCode(rawSecret, time.Now())
+	s.Require().NoError(err)
+
+	s.users.EXPECT().UpdateTOTPCounter(gomock.Any(), s.userID, gomock.Any()).Return(true, nil)
+	s.invites.EXPECT().Issue(gomock.Any(), s.userID).Return("tok-abc", nil)
+
+	tok, err := s.mgr.GenerateInvite(s.T().Context(), s.userID,
+		Issuer{APITokenHash: "parent", StepUp: StepUp{Password: testPassword, TOTPCode: code}})
+	s.Require().NoError(err)
+	s.Equal("tok-abc", tok)
 }
 
 // ── IsEmpty ──

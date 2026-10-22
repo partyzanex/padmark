@@ -4,6 +4,7 @@ package integration
 
 import (
 	"encoding/json"
+	"github.com/partyzanex/padmark/internal/usecases/auth"
 	"io"
 	"net/http"
 	"net/url"
@@ -23,15 +24,15 @@ func TestLinkUpdateFlow(t *testing.T) {
 	require.NoError(t, err)
 	admin, err := env.users.GetByUsername(ctx, "admin")
 	require.NoError(t, err)
-	adminKey, err := env.authMgr.CreateAPIToken(ctx, admin.ID)
+	adminKey, err := env.authMgr.CreateAPIToken(ctx, admin.ID, auth.Issuer{}, 0)
 	require.NoError(t, err)
-	invite, err := env.authMgr.GenerateInvite(ctx, admin.ID)
+	invite, err := env.authMgr.GenerateInvite(ctx, admin.ID, auth.Issuer{})
 	require.NoError(t, err)
 	_, err = env.authMgr.AcceptInvite(ctx, invite, "owner", ownerFlowPassword)
 	require.NoError(t, err)
 	owner, err := env.users.GetByUsername(ctx, "owner")
 	require.NoError(t, err)
-	ownerKey, err := env.authMgr.CreateAPIToken(ctx, owner.ID)
+	ownerKey, err := env.authMgr.CreateAPIToken(ctx, owner.ID, auth.Issuer{}, 0)
 	require.NoError(t, err)
 
 	request := func(method, path, key, body string, status int) []byte {

@@ -17,20 +17,26 @@ var openapiSpec []byte
 //go:embed templates/apidocs.html
 var apidocsTmplSrc string
 
+// redocVersion is the cache-busting query for the vendored Redoc bundle (see
+// static/redoc.standalone.js.LICENSE.txt for its provenance), mirroring styleVersion.
+//
+//nolint:gochecknoglobals // computed once from embedded static content
+var redocVersion = staticAssetVersion("static/redoc.standalone.js")
+
 type apiDocsViewData struct {
-	Nonce string
+	Nonce        string
+	RedocVersion string
 }
 
 // APIDocsPage handles GET /api — renders the OpenAPI spec with Redoc.
-// Redoc loads from an external CDN, so this page widens its own CSP to allow that origin in
-// script-src; the global CSP (set by withSecurityHeaders) stays free of third-party origins.
+// Redoc is vendored under /static/ and served from the app origin, so the page runs under the
+// unmodified global CSP set by withSecurityHeaders — no third-party script origin is allowed.
 func (h *PageHandler) APIDocsPage(w http.ResponseWriter, r *http.Request) {
 	nonce := nonceFromContext(r.Context())
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Content-Security-Policy", buildCSP(nonce, redocScriptSrc))
 
-	err := h.apidocsTmpl.Execute(w, apiDocsViewData{Nonce: nonce})
+	err := h.apidocsTmpl.Execute(w, apiDocsViewData{Nonce: nonce, RedocVersion: redocVersion})
 	if err != nil {
 		h.log.ErrorContext(r.Context(), "render apidocs template", "err", err)
 	}

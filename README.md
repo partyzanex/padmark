@@ -138,7 +138,8 @@ go run ./cmd/padmark-server encryption keygen \
 The command refuses to overwrite an existing file. Keep this file for subsequent starts and
 back it up separately from the database: losing its keys makes new encrypted content unreadable.
 All replicas sharing a database need the same keyring. You can also pass its path with
-`--content-keyring-file`. The server rejects a missing or malformed keyring before opening the DB.
+`--content-keyring-file`. The server rejects a missing or malformed keyring, or one readable by
+group or other users, before opening the DB; keep the file at mode `0600` or `0400`.
 
 ### SQLite (simplest)
 
@@ -185,6 +186,9 @@ The image runs as UID/GID `65534`. Give that UID read access to the mounted key 
 on Linux, use a dedicated copy owned by `65534:65534` with mode `0400`, and set the host's
 `PADMARK_CONTENT_KEYRING_FILE` to that copy. Keep it outside the build context and never bake
 the key into the image. The same file-permission requirement applies to Compose secrets below.
+Keyrings under `/run/secrets/` are exempt from the owner-only mode check (Compose bind-mounts a
+file secret with the host file's mode and Swarm defaults to `0444`); startup logs a warning
+instead of refusing, so still restrict the host file yourself.
 
 **PostgreSQL (Compose):**
 
@@ -410,7 +414,8 @@ curl -X POST http://localhost:4000/notes \
   -d '{"title": "Secret", "content": "eyes only", "burn_after_reading": true, "ttl": 3600}'
 ```
 
-Interactive API docs live at `/api`. Raw OpenAPI spec at `/api/openapi.yaml`. A short Markdown
+Interactive API docs live at `/api` (Redoc, vendored into the binary and served from `/static/` — no
+CDN fetch, works offline). Raw OpenAPI spec at `/api/openapi.yaml`. A short Markdown
 overview of the machine surface, written for agents in the llms.txt convention, at `/llms.txt`.
 
 **Short links**
@@ -512,10 +517,20 @@ default (fully public), on enables sessions for the web UI and long-lived API ke
 
 ### API keys (TOTP account system)
 
-With `--enable-accounts=true`, an admin can issue a long-lived API key for their own account from
-`/admin` → **API keys** → **Create key**. The key is shown **once** in plaintext on that page; only
-its SHA-256 hash is stored (`api_tokens.token_hash`, primary key). The same page lists all keys
-(hash prefix, owner, created / last-used) and lets the admin revoke them.
+With `--enable-accounts=true`, an admin can issue an API key for their own account from
+`/admin` → **API keys** → **Create key**, choosing its lifetime in days (`0` = never expires). The
+key is shown **once** in plaintext on that page; only its SHA-256 hash is stored
+(`api_tokens.token_hash`, primary key). The same page lists all keys (hash prefix, owner,
+created / expiry / issued-by / last-used) and lets the admin revoke them.
+
+A leaked key must not be able to outlive the remedies, so:
+
+- **A bearer key cannot multiply itself.** `POST /api/tokens` and `POST /api/invites` called with
+  a key (not a browser session) require a step-up: the account password and a current TOTP code,
+  replay-protected like a login. The admin panel (`/admin*`) accepts browser sessions only.
+- **Issued keys follow their issuer.** A key minted with another key records it as its issuer;
+  revoking a key revokes everything it issued, recursively.
+- **Changing the password revokes every API key of the account** (and all other sessions).
 
 The value shown on that page is an **envelope token**: the raw key packed together with the
 server's own base URL (scheme + host). Pass it straight to `--token` / `PADMARK_TOKEN` and the CLI
@@ -571,9 +586,9 @@ When **disabled**, none of the routes below are gated and `/setup`, `/admin`, et
 
 - **`/setup`** — create the first admin (username + password + the bootstrap token). A TOTP QR code is shown **once** — scan it into your authenticator app.
 - **`/login`** — sign in with username + password + a 6-digit TOTP code.
-- **`/admin`** — admins issue single-use **invite links**, issue/revoke **API keys** (Bearer tokens for the CLI), and revoke users. Revoking a user also clears their sessions, invites, and API keys.
+- **`/admin`** — admins issue single-use **invite links**, issue/revoke **API keys** (Bearer tokens for the CLI), and revoke users. Revoking a user also clears their sessions, invites, and API keys. Browser sessions only — an API key cannot open the admin panel.
 - New users onboard via an invite link, choose their own password, and scan their own TOTP QR.
-- **`/change-password`** — rotate the password (requires the current password **and** a TOTP code).
+- **`/change-password`** — rotate the password (requires the current password **and** a TOTP code). Signs out every other session and revokes all of the account's API keys.
 - Sessions are cookie-based; lifetime via `--session-ttl` (default 30 days).
 
 Invite links expire after 24 hours and can be used once. Only the base64url-encoded SHA-256
@@ -611,12 +626,15 @@ CI/agent deployments and scripting:
   `--password` is refused rather than echoing what you type). Bootstrapping the first admin
   forwards the server's bootstrap token from `PADMARK_BOOTSTRAP_TOKEN` in the CLI's
   environment; an invite enrollment needs none.
-- **`padmark-cli create-token`** — `POST /api/tokens`: issues a long-lived API token **for the
-  calling user themselves** (any authenticated caller; session or Bearer). Prints the `pmk_…`
-  envelope once; store it in `~/.config/padmark/token` or `PADMARK_TOKEN` yourself. A user may
-  hold at most 20 live tokens (`429` at the cap); revocation stays admin-panel-only.
-- **`padmark-cli create-invite`** — `POST /api/invites` (admin only): prints the single-use
-  invite URL once; the invite expires after 24 h.
+- **`padmark-cli create-token`** — `POST /api/tokens`: issues an API token **for the calling user
+  themselves**. Because the CLI authenticates with a key, issuing needs a step-up: the account
+  password (piped to stdin, or `--password`) and `--totp-code <current code>`. `--ttl-days N`
+  sets the lifetime (`0`, the default, = never expires). Prints the `pmk_…` envelope once; store
+  it in `~/.config/padmark/token` or `PADMARK_TOKEN` yourself. The new token is linked to the key
+  used: revoking that key revokes it too. A user may hold at most 20 live tokens (`429` at the
+  cap); revocation stays admin-panel-only.
+- **`padmark-cli create-invite`** — `POST /api/invites` (admin only, same step-up): prints the
+  single-use invite URL once; the invite expires after 24 h.
 - The JSON variant of `POST /setup` is also documented for machine callers in `/llms.txt`:
   send `{"username", "password", "invite"?}` with `Accept: application/json` — `201` with
   `{"otp_auth_uri"}`, `403` once any account exists, `409` taken username, `410` spent invite,
@@ -642,8 +660,19 @@ note's `privacy` level.
 
 Failed edit-code attempts are tracked per resource and authenticated user ID, shared across
 that user's sessions and API tokens. Ten failures lock that pair for five minutes. Anonymous
-callers share a separate bucket per resource. Successful updates or deletes reset only the
-calling user's bucket, so another caller's failures cannot block the authenticated owner.
+callers are tracked per resource and client IP (IPv6 grouped per /64), so an anonymous attacker
+locks only their own address, not the resource's anonymous editor elsewhere. The client IP is
+resolved like the rate limiter's: behind a proxy not listed in `--trusted-proxies`, every
+anonymous caller appears as the proxy and they share one bucket again. Successful updates or
+deletes reset only the calling bucket, so another caller's failures cannot block the
+authenticated owner. The counters live in process memory; replicas do not share them.
+
+Because the lockout throttles guessing per bucket (an attacker with many addresses gets many
+buckets), a caller-chosen `edit_code` (`edit_code` on `POST /notes`/`POST /links`,
+`--edit-code` on `create`/`shorten`, `edit_code` in the MCP create tools) must be 8–128
+characters with no leading or trailing whitespace or control characters — shorter or longer is
+rejected with `400`, the rest with `422`. Omit it to get a random 12-character code. Only newly
+chosen codes are checked: notes and links created earlier with a shorter code keep working.
 
 Sign-in (`POST /totp-login`) has two independent brute-force limits. Each client IP gets
 10 attempts per minute, and each username gets 10 unsuccessful attempts, counted across all
@@ -700,9 +729,15 @@ after they stop, and existing sessions and API tokens keep working throughout.
 - A password-change revocation failure is logged at error level and shown explicitly in the
   browser. The replacement session remains usable, but older sessions may still exist;
   the administrator must revoke them. The page does not report full success in this case.
-- Keyring files should be owner-readable only (0400/0600). Loading warns about group/other
-  permissions and symlinks, while allowing managed secret mounts; it checks the actual opened
-  file and never logs keys. Protect both the target and its parent directories.
+- The keyring is the root of trust for content at rest: anyone who can read it and the
+  database can decrypt every note and link. Keyring files must be owner-only (`0600`/`0400`);
+  a keyring readable by group or other users **refuses startup** (`serve` and the
+  `encryption` commands). Keyrings under `/run/secrets/` (Docker/Compose secrets) are exempt.
+  For other secret managers that cannot provide an owner-only file, pass
+  `--allow-shared-keyring` (`PADMARK_ALLOW_SHARED_KEYRING=true`). Each exemption is logged at
+  WARN through the configured logger, with the path and mode. Symlinks are allowed for
+  managed secret mounts and are logged too. The check uses the opened file, never changes
+  its mode and never logs keys. Protect both the target and its parent directories.
 - At-rest GCM authenticates the resource, kind and record ID, **not freshness**: a database
   writer can restore an older valid ciphertext for the same record. Preventing rollback
   requires a trusted monotonic state outside that database. Database readers without the
@@ -834,6 +869,7 @@ There is no destructive encryption down-migration, and older binaries cannot rea
 | `--storage` | `PADMARK_STORAGE` | `sqlite` | `sqlite` or `postgres` |
 | `--dsn` | `PADMARK_DSN` | `padmark.db` | DB path or connection string. A Postgres DSN carries the password, and a command-line flag is visible to every local user in the process listing (`ps`) — pass it via `PADMARK_DSN` instead |
 | `--content-keyring-file` | `PADMARK_CONTENT_KEYRING_FILE` | required | Path to the persisted JSON keyring for note/link encryption; mount as a secret and back up separately from the DB |
+| `--allow-shared-keyring` | `PADMARK_ALLOW_SHARED_KEYRING` | `false` | Accept a keyring file readable by group or other users (logged at WARN) instead of refusing startup. Only for secret managers that cannot provide an owner-only file; keyrings under `/run/secrets/` are already exempt. Prefer mode `0600`/`0400` |
 | `--enable-accounts` | `PADMARK_ENABLE_ACCOUNTS` | `false` | Enable the TOTP account system (`/setup`, `/login`, `/admin`, privacy-level gating); off = fully public |
 | — | `PADMARK_BOOTSTRAP_TOKEN` | — | Environment only (never a flag). Required to create the first admin via `/setup` without an invite; at least 32 characters (shorter fails startup). Unset = first-admin setup disabled. Never logged; unset it once the admin exists |
 | `--disable-api` | `PADMARK_DISABLE_API` | `false` | Disable the REST/JSON API (`/notes*`, `/links*`, `/api`, `/api/openapi.yaml`, `/llms.txt`, `/api/tokens`, `/api/invites`): the middleware returns `503` with `{"message":"API is disabled","code":"api_disabled"}`. Match `code` to identify the cause; outer middleware may reject a request first. The web UI becomes **read-only**: viewing `/{id}` (including JSON/raw reads), `/r/{id}`, the login/admin pages and health checks keep working, but publishing or saving from the editor fails with the API-disabled error, because the editor calls `POST /notes` and `PUT /notes/{id}` |

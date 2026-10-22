@@ -43,7 +43,7 @@ func (s *HandlerSuite) TestFailLockout_AnonymousAttackDoesNotBlockOwner() {
 			}
 
 			s.authMgr.EXPECT().GetSession(gomock.Any(), "owner-session").Return(owner, nil)
-			s.authMgr.EXPECT().ResolveAPIToken(gomock.Any(), "owner-key").Return(owner, nil)
+			s.authMgr.EXPECT().ResolveAPIToken(gomock.Any(), "owner-key").Return(owner, "token-hash", nil)
 			router := s.newRouterWithTOTPAuth()
 			path := "/" + testCase.resource + "/" + testCase.id
 			send := func(method, body, credential string) int {

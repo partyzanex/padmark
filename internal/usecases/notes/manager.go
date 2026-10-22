@@ -107,10 +107,13 @@ func NewManager(
 	}
 }
 
-// validateForCreate runs Note.Validate and the ownership invariant (Note.ValidateOwnership).
+// validateForCreate runs Note.Validate, the ownership invariant (Note.ValidateOwnership) and,
+// when the caller chose one, the edit-code policy (domain.ValidateEditCode) — before anything is
+// resolved, hashed or persisted. An empty EditCode is not validated: Create generates it.
 // OwnerID is already final at this point (set by the HTTP layer before Create is called), unlike
 // Update, where the same ownership check must wait until after OwnerID is pinned from the
-// existing note — see the call site in Update for why it cannot share this helper.
+// existing note — see the call site in Update for why it cannot share this helper. Update never
+// accepts a replacement code, so the edit-code policy only ever applies here.
 func validateForCreate(note *domain.Note) error {
 	err := note.Validate()
 	if err != nil {
@@ -120,6 +123,13 @@ func validateForCreate(note *domain.Note) error {
 	err = note.ValidateOwnership()
 	if err != nil {
 		return fmt.Errorf("validate: %w", err)
+	}
+
+	if note.EditCode != "" {
+		err = domain.ValidateEditCode(note.EditCode)
+		if err != nil {
+			return fmt.Errorf("validate edit code: %w", err)
+		}
 	}
 
 	return nil

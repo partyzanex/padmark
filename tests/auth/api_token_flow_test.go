@@ -103,7 +103,7 @@ func TestAPITokenFlow_AdminIssuesKey_CLICreatesNote(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, admin.IsAdmin)
 
-	apiKey, err := authMgr.CreateAPIToken(ctx, admin.ID)
+	apiKey, err := authMgr.CreateAPIToken(ctx, admin.ID, auth.Issuer{}, 0)
 	require.NoError(t, err, "admin must be able to issue an API key — the store must be wired into auth.Manager")
 	require.NotEmpty(t, apiKey)
 

@@ -4,6 +4,7 @@ package integration
 
 import (
 	"encoding/json"
+	"github.com/partyzanex/padmark/internal/usecases/auth"
 	"io"
 	"log/slog"
 	"net/http"
@@ -24,7 +25,7 @@ func TestLinkCacheReplicas(t *testing.T) {
 	require.NoError(t, err)
 	owner, err := env.users.GetByUsername(t.Context(), "owner")
 	require.NoError(t, err)
-	key, err := env.authMgr.CreateAPIToken(t.Context(), owner.ID)
+	key, err := env.authMgr.CreateAPIToken(t.Context(), owner.ID, auth.Issuer{}, 0)
 	require.NoError(t, err)
 
 	log := slog.New(slog.DiscardHandler)

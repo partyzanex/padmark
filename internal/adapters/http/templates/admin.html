@@ -170,6 +170,8 @@
                     <span class="user-name">{{slice .ID 0 12}}…</span>
                     <div class="user-meta">
                         {{.Username}} · created {{.CreatedAt.Format "2006-01-02 15:04"}} ·
+                        {{if .ExpiresAt}}expires {{.ExpiresAt.Format "2006-01-02 15:04"}}{{else}}never expires{{end}} ·
+                        {{if .IssuedBy}}issued by key {{slice .IssuedBy 0 12}}…{{else}}issued from a browser session{{end}} ·
                         {{if .LastUsedAt}}used {{.LastUsedAt.Format "2006-01-02 15:04"}}{{else}}never used{{end}}
                     </div>
                 </div>
@@ -184,6 +186,8 @@
             <div class="btn-row">
                 <form method="POST" action="/admin/api-keys" class="admin-key-form">
                     <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+                    <label class="field-label" for="ttl_days">Lifetime, days (0 = never expires)</label>
+                    <input type="number" class="field-input" name="ttl_days" id="ttl_days" min="0" max="3650" value="0" required>
                     <button type="submit" class="btn-publish">Create key</button>
                 </form>
             </div>

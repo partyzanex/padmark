@@ -137,10 +137,10 @@ func TestOwnerEditFlow_APITokenOwner_EditsAndDeletesWithoutEditCode(t *testing.T
 	owner, err := users.GetByUsername(ctx, "owner")
 	require.NoError(t, err)
 
-	ownerKey, err := authMgr.CreateAPIToken(ctx, owner.ID)
+	ownerKey, err := authMgr.CreateAPIToken(ctx, owner.ID, auth.Issuer{}, 0)
 	require.NoError(t, err)
 
-	inviteTok, err := authMgr.GenerateInvite(ctx, owner.ID)
+	inviteTok, err := authMgr.GenerateInvite(ctx, owner.ID, auth.Issuer{})
 	require.NoError(t, err)
 
 	_, err = authMgr.AcceptInvite(ctx, inviteTok, "other", ownerFlowPassword)
@@ -149,7 +149,7 @@ func TestOwnerEditFlow_APITokenOwner_EditsAndDeletesWithoutEditCode(t *testing.T
 	other, err := users.GetByUsername(ctx, "other")
 	require.NoError(t, err)
 
-	otherKey, err := authMgr.CreateAPIToken(ctx, other.ID)
+	otherKey, err := authMgr.CreateAPIToken(ctx, other.ID, auth.Issuer{}, 0)
 	require.NoError(t, err)
 
 	// ── owner creates a note over the API-token-authenticated path ──
@@ -289,10 +289,10 @@ func TestOwnerEditFlow_EditPage_PrivacyGate(t *testing.T) {
 	owner, err := env.users.GetByUsername(ctx, "owner")
 	require.NoError(t, err)
 
-	ownerKey, err := env.authMgr.CreateAPIToken(ctx, owner.ID)
+	ownerKey, err := env.authMgr.CreateAPIToken(ctx, owner.ID, auth.Issuer{}, 0)
 	require.NoError(t, err)
 
-	inviteTok, err := env.authMgr.GenerateInvite(ctx, owner.ID)
+	inviteTok, err := env.authMgr.GenerateInvite(ctx, owner.ID, auth.Issuer{})
 	require.NoError(t, err)
 
 	_, err = env.authMgr.AcceptInvite(ctx, inviteTok, "other", ownerFlowPassword)
@@ -301,7 +301,7 @@ func TestOwnerEditFlow_EditPage_PrivacyGate(t *testing.T) {
 	other, err := env.users.GetByUsername(ctx, "other")
 	require.NoError(t, err)
 
-	otherKey, err := env.authMgr.CreateAPIToken(ctx, other.ID)
+	otherKey, err := env.authMgr.CreateAPIToken(ctx, other.ID, auth.Issuer{}, 0)
 	require.NoError(t, err)
 
 	anonBrowser := editPageCaller{name: "anonymous browser", accept: "text/html", bearer: ""}

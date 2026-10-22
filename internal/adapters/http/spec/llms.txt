@@ -36,7 +36,9 @@ contract is at [`/api/openapi.yaml`](/api/openapi.yaml).
 
 Every new note returns `edit_code` **exactly once, at creation**. Only an argon2id hash is
 stored — a lost edit code cannot be recovered; the only remedies are a saved code or a bearer
-token for the owning account.
+token for the owning account. Omit `edit_code` on create to get a random 12-character code; a
+chosen one (notes and links alike) must be 8–128 characters with no leading/trailing whitespace
+or control characters (`400` if too short/long, `422` otherwise).
 
 ## Links
 
@@ -76,11 +78,17 @@ the edit code is checked.
 
 ### Account endpoints (require `--enable-accounts`)
 
-- `POST /api/tokens` — issue a new API token **for the calling user themselves** (any valid
-  credential; empty body). `201` → `{"token": "pmk_…"}`, shown once; `429` when the user's
-  20-token cap is reached. Revocation stays admin-panel-only.
-- `POST /api/invites` — admin only. `201` → `{"invite_url": …}`: a single-use signup link
-  (24 h TTL). `403` for a non-admin authenticated caller.
+- `POST /api/tokens` — issue a new API token **for the calling user themselves**; optional body
+  `{"ttl_days"?, "password"?, "totp_code"?}` — `ttl_days` is the lifetime in days (0 or omitted
+  = never expires, max 3650, else `422`). A browser session issues directly; a **bearer token
+  must re-authenticate** with the account `password` and a current `totp_code` (each code works
+  once), else `403` with `code: step_up_required` / `step_up_failed`. A key issued by a bearer is
+  revoked together with that bearer. `201` → `{"token": "pmk_…"}`, shown once; `429` when the
+  user's 20-token cap is reached. Revocation stays admin-panel-only; changing the account
+  password revokes all of the user's keys.
+- `POST /api/invites` — admin only. Optional body `{"password"?, "totp_code"?}`: the same
+  step-up rule for bearer callers. `201` → `{"invite_url": …}`: a single-use signup link
+  (24 h TTL). `403` for a non-admin authenticated caller or a missing/wrong step-up.
 
 Both answer `401` without a valid credential and `503` when accounts are not enabled.
 

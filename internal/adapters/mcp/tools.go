@@ -17,7 +17,7 @@ type createNoteInput struct {
 	Slug             *string `json:"slug,omitempty"               jsonschema:"Custom URL slug, may be disabled"`
 	BurnAfterReading *bool   `json:"burn_after_reading,omitempty" jsonschema:"Destroy the note on first read"`
 	TTL              *int64  `json:"ttl,omitempty"                jsonschema:"Post-read TTL in seconds (with burn)"`
-	EditCode         *string `json:"edit_code,omitempty"          jsonschema:"Specific edit code instead of random"`
+	EditCode         *string `json:"edit_code,omitempty"          jsonschema:"8-128 char edit code, else random"`
 	Privacy          *string `json:"privacy,omitempty"            jsonschema:"public, authenticated, or owner"`
 	Content          string  `json:"content"                      jsonschema:"Note body; Markdown or plain text"`
 	RevealEditCode   bool    `json:"reveal_edit_code,omitempty"   jsonschema:"Reveal the one-time edit code"`
@@ -69,7 +69,7 @@ type createLinkInput struct {
 	TTL            *int64  `json:"ttl,omitempty"              jsonschema:"Post-redirect TTL in seconds"`
 	Privacy        *string `json:"privacy,omitempty"          jsonschema:"public, authenticated, or owner"`
 	DirectRedirect *bool   `json:"direct_redirect,omitempty"  jsonschema:"Instant redirect or interstitial"`
-	EditCode       *string `json:"edit_code,omitempty"        jsonschema:"Specific edit code instead of random"`
+	EditCode       *string `json:"edit_code,omitempty"        jsonschema:"8-128 char edit code, else random"`
 	TargetURL      string  `json:"target_url"                 jsonschema:"Only http/https accepted"`
 	RevealEditCode bool    `json:"reveal_edit_code,omitempty" jsonschema:"Reveal the one-time edit code"`
 }

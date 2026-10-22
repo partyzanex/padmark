@@ -41,6 +41,32 @@ func encodeCreateAPITokenResponse(response CreateAPITokenRes, w http.ResponseWri
 
 		return nil
 
+	case *CreateAPITokenForbidden:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(403)
+		span.SetStatus(codes.Error, http.StatusText(403))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	case *CreateAPITokenUnprocessableEntity:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(422)
+		span.SetStatus(codes.Error, http.StatusText(422))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
 	case *CreateAPITokenTooManyRequests:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(429)

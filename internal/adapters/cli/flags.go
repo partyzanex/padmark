@@ -33,6 +33,12 @@ const (
 	// stdin — a TTY stdin without the flag is an error, not a visible-echo prompt.
 	FlagPassword = "password"
 	FlagInvite   = "invite"
+	// FlagTOTPCode is the current TOTP code a bearer caller must present (with the password) to
+	// issue a token or invite. One-time and replay-protected, so a process listing exposes nothing
+	// reusable.
+	FlagTOTPCode = "totp-code"
+	// FlagTTLDays is the lifetime of a new API token in days; 0 = never expires.
+	FlagTTLDays = "ttl-days"
 )
 
 // Environment variable names.

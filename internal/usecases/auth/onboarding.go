@@ -18,14 +18,16 @@ type OnboardingManager struct {
 	sealer  SecretSealer
 	pw      PasswordHasher
 	users   UserStore
+	stepUp  StepUpVerifier
 	issuer  string
 }
 
 // NewOnboardingManager returns a new OnboardingManager. issuer is the TOTP issuer name shown
-// in the authenticator app when a new user enrolls.
+// in the authenticator app when a new user enrolls; stepUp re-authenticates a bearer-token
+// caller before it may issue an invite.
 func NewOnboardingManager(
 	users UserStore, invites InviteStore, passwordHasher PasswordHasher,
-	sealer SecretSealer, totp TOTPManager, issuer string,
+	sealer SecretSealer, totp TOTPManager, stepUp StepUpVerifier, issuer string,
 ) *OnboardingManager {
 	return &OnboardingManager{
 		users:   users,
@@ -33,6 +35,7 @@ func NewOnboardingManager(
 		pw:      passwordHasher,
 		sealer:  sealer,
 		totp:    totp,
+		stepUp:  stepUp,
 		issuer:  issuer,
 	}
 }
@@ -47,9 +50,11 @@ func (m *OnboardingManager) IsEmpty(ctx context.Context) (bool, error) {
 	return len(users) == 0, nil
 }
 
-// GenerateInvite creates a single-use invite link for adminUserID.
-// Returns domain.ErrForbidden when the caller is not an admin.
-func (m *OnboardingManager) GenerateInvite(ctx context.Context, adminUserID uuid.UUID) (string, error) {
+// GenerateInvite creates a single-use invite link for adminUserID. issuer says how the caller
+// authenticated: a bearer-token caller must pass a step-up.
+// Returns domain.ErrForbidden when the caller is not an admin, and domain.ErrStepUpRequired /
+// domain.ErrStepUpFailed for a bearer without a valid step-up.
+func (m *OnboardingManager) GenerateInvite(ctx context.Context, adminUserID uuid.UUID, issuer Issuer) (string, error) {
 	admin, err := m.users.GetByID(ctx, adminUserID)
 	if err != nil {
 		return "", fmt.Errorf("get admin user: %w", err)
@@ -57,6 +62,11 @@ func (m *OnboardingManager) GenerateInvite(ctx context.Context, adminUserID uuid
 
 	if !admin.IsAdmin {
 		return "", domain.ErrForbidden
+	}
+
+	err = authorizeIssuer(ctx, m.stepUp, admin.ID, issuer)
+	if err != nil {
+		return "", err
 	}
 
 	tok, err := m.invites.Issue(ctx, adminUserID)

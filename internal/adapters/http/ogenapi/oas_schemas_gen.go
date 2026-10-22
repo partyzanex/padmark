@@ -220,9 +220,54 @@ func (s *BulkLinkResultPrivacy) UnmarshalText(data []byte) error {
 	}
 }
 
+type CreateAPITokenForbidden ErrorResponse
+
+func (*CreateAPITokenForbidden) createAPITokenRes() {}
+
 type CreateAPITokenInternalServerError ErrorResponse
 
 func (*CreateAPITokenInternalServerError) createAPITokenRes() {}
+
+// Optional issuance parameters; see StepUpRequest for `password` / `totp_code`.
+// Ref: #/components/schemas/CreateAPITokenRequest
+type CreateAPITokenRequest struct {
+	// Lifetime in days; `0` (default) = never expires.
+	TTLDays OptInt `json:"ttl_days"`
+	// The account password (step-up, bearer callers only).
+	Password OptString `json:"password"`
+	// A current 6-digit TOTP code (step-up, bearer callers only).
+	TotpCode OptString `json:"totp_code"`
+}
+
+// GetTTLDays returns the value of TTLDays.
+func (s *CreateAPITokenRequest) GetTTLDays() OptInt {
+	return s.TTLDays
+}
+
+// GetPassword returns the value of Password.
+func (s *CreateAPITokenRequest) GetPassword() OptString {
+	return s.Password
+}
+
+// GetTotpCode returns the value of TotpCode.
+func (s *CreateAPITokenRequest) GetTotpCode() OptString {
+	return s.TotpCode
+}
+
+// SetTTLDays sets the value of TTLDays.
+func (s *CreateAPITokenRequest) SetTTLDays(val OptInt) {
+	s.TTLDays = val
+}
+
+// SetPassword sets the value of Password.
+func (s *CreateAPITokenRequest) SetPassword(val OptString) {
+	s.Password = val
+}
+
+// SetTotpCode sets the value of TotpCode.
+func (s *CreateAPITokenRequest) SetTotpCode(val OptString) {
+	s.TotpCode = val
+}
 
 // Ref: #/components/schemas/CreateAPITokenResponse
 type CreateAPITokenResponse struct {
@@ -255,6 +300,10 @@ func (*CreateAPITokenTooManyRequests) createAPITokenRes() {}
 type CreateAPITokenUnauthorized ErrorResponse
 
 func (*CreateAPITokenUnauthorized) createAPITokenRes() {}
+
+type CreateAPITokenUnprocessableEntity ErrorResponse
+
+func (*CreateAPITokenUnprocessableEntity) createAPITokenRes() {}
 
 type CreateInviteForbidden ErrorResponse
 
@@ -324,7 +373,9 @@ type CreateLinkRequest struct {
 	// expires. This is a hard expiry with no relation to `burn_after_click`;
 	// the two may be combined freely.
 	TTL OptInt64 `json:"ttl"`
-	// Optional custom edit code. If omitted a random 12-character code is generated.
+	// Optional custom edit code: 8–128 characters, without leading or trailing whitespace
+	// or control characters. Omit it to receive a random server-generated 12-character
+	// code. Same rules and status codes as `CreateNoteRequest.edit_code`.
 	// Intended for CLI and automation use.
 	EditCode OptString `json:"edit_code"`
 	// Who may follow the link: `public` (anyone), `authenticated` (any valid session or API
@@ -749,7 +800,11 @@ type CreateNoteRequest struct {
 	// `0` means the note is deleted immediately when it is first revealed.
 	// Omitted means the same as `0` (immediate burn after reading).
 	TTL OptInt64 `json:"ttl"`
-	// Optional custom edit code. If omitted a random 12-character code is generated.
+	// Optional custom edit code: 8–128 characters, without leading or trailing whitespace
+	// or control characters. Omit it to receive a random server-generated 12-character
+	// code. A code shorter than 8 or longer than 128 characters is rejected with `400`; one
+	// with surrounding whitespace or control characters with `422`. Codes chosen before
+	// this rule existed keep working for `PUT`/`DELETE` — only new codes are checked.
 	// Intended for CLI and automation use; the web UI does not expose this field.
 	EditCode OptString `json:"edit_code"`
 	// Who may read the note: `public` (anyone), `authenticated` (any valid session or API
@@ -1833,6 +1888,52 @@ func (o OptBulkLinkResultPrivacy) Or(d BulkLinkResultPrivacy) BulkLinkResultPriv
 	return d
 }
 
+// NewOptCreateAPITokenRequest returns new OptCreateAPITokenRequest with value set to v.
+func NewOptCreateAPITokenRequest(v CreateAPITokenRequest) OptCreateAPITokenRequest {
+	return OptCreateAPITokenRequest{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptCreateAPITokenRequest is optional CreateAPITokenRequest.
+type OptCreateAPITokenRequest struct {
+	Value CreateAPITokenRequest
+	Set   bool
+}
+
+// IsSet returns true if OptCreateAPITokenRequest was set.
+func (o OptCreateAPITokenRequest) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptCreateAPITokenRequest) Reset() {
+	var v CreateAPITokenRequest
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptCreateAPITokenRequest) SetTo(v CreateAPITokenRequest) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptCreateAPITokenRequest) Get() (v CreateAPITokenRequest, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptCreateAPITokenRequest) Or(d CreateAPITokenRequest) CreateAPITokenRequest {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
 // NewOptCreateLinkRequestPrivacy returns new OptCreateLinkRequestPrivacy with value set to v.
 func NewOptCreateLinkRequestPrivacy(v CreateLinkRequestPrivacy) OptCreateLinkRequestPrivacy {
 	return OptCreateLinkRequestPrivacy{
@@ -2482,6 +2583,52 @@ func (o OptNoteResponsePrivacy) Or(d NoteResponsePrivacy) NoteResponsePrivacy {
 	return d
 }
 
+// NewOptStepUpRequest returns new OptStepUpRequest with value set to v.
+func NewOptStepUpRequest(v StepUpRequest) OptStepUpRequest {
+	return OptStepUpRequest{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptStepUpRequest is optional StepUpRequest.
+type OptStepUpRequest struct {
+	Value StepUpRequest
+	Set   bool
+}
+
+// IsSet returns true if OptStepUpRequest was set.
+func (o OptStepUpRequest) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptStepUpRequest) Reset() {
+	var v StepUpRequest
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptStepUpRequest) SetTo(v StepUpRequest) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptStepUpRequest) Get() (v StepUpRequest, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptStepUpRequest) Or(d StepUpRequest) StepUpRequest {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
 // NewOptString returns new OptString with value set to v.
 func NewOptString(v string) OptString {
 	return OptString{
@@ -2670,6 +2817,36 @@ func (o OptUpdateNoteRequestPrivacy) Or(d UpdateNoteRequestPrivacy) UpdateNoteRe
 type ReadyzOK struct{}
 
 func (*ReadyzOK) readyzRes() {}
+
+// Re-authentication a bearer-token caller must present to issue a credential; ignored for
+// a browser session.
+// Ref: #/components/schemas/StepUpRequest
+type StepUpRequest struct {
+	// The account password.
+	Password OptString `json:"password"`
+	// A current 6-digit TOTP code (each code is accepted once).
+	TotpCode OptString `json:"totp_code"`
+}
+
+// GetPassword returns the value of Password.
+func (s *StepUpRequest) GetPassword() OptString {
+	return s.Password
+}
+
+// GetTotpCode returns the value of TotpCode.
+func (s *StepUpRequest) GetTotpCode() OptString {
+	return s.TotpCode
+}
+
+// SetPassword sets the value of Password.
+func (s *StepUpRequest) SetPassword(val OptString) {
+	s.Password = val
+}
+
+// SetTotpCode sets the value of TotpCode.
+func (s *StepUpRequest) SetTotpCode(val OptString) {
+	s.TotpCode = val
+}
 
 type UpdateLinkBadRequest ErrorResponse
 

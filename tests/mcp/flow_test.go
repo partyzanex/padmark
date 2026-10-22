@@ -241,7 +241,7 @@ func issueEnvelopeToken(
 	admin, err := users.GetByUsername(ctx, "admin")
 	require.NoError(t, err)
 
-	apiKey, err := authMgr.CreateAPIToken(ctx, admin.ID)
+	apiKey, err := authMgr.CreateAPIToken(ctx, admin.ID, auth.Issuer{}, 0)
 	require.NoError(t, err)
 
 	envelope, err := domain.EncodeAPITokenEnvelope(baseURL, apiKey)

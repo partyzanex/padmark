@@ -3,6 +3,7 @@
 package crypto_test
 
 import (
+	"log/slog"
 	"path/filepath"
 	"syscall"
 	"testing"
@@ -21,7 +22,7 @@ func TestLoadContentKeyring_RejectsFIFOWithoutBlocking(t *testing.T) {
 	done := make(chan error, 1)
 
 	go func() {
-		_, err := crypto.LoadContentKeyring(path)
+		_, err := crypto.LoadContentKeyring(path, slog.New(slog.DiscardHandler), strictLoad())
 		done <- err
 	}()
 
@@ -34,6 +35,6 @@ func TestLoadContentKeyring_RejectsFIFOWithoutBlocking(t *testing.T) {
 }
 
 func TestLoadContentKeyring_RejectsDirectory(t *testing.T) {
-	_, err := crypto.LoadContentKeyring(t.TempDir())
+	_, err := crypto.LoadContentKeyring(t.TempDir(), slog.New(slog.DiscardHandler), strictLoad())
 	require.ErrorContains(t, err, "regular file")
 }

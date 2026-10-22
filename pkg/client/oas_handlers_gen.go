@@ -35,9 +35,14 @@ func (c *codeRecorder) Unwrap() http.ResponseWriter {
 
 // handleCreateAPITokenRequest handles createAPIToken operation.
 //
-// Issues a long-lived API bearer key **for the caller themself** — the operation takes no
-// request body and cannot mint a token for another user. Any valid credential works: a
-// TOTP session cookie (browser) or an `Authorization: Bearer <token>` API token.
+// Issues an API bearer key **for the caller themself** — it cannot mint a token for another
+// user. `ttl_days` sets its lifetime in days (`0` or omitted = never expires).
+// A TOTP session cookie (browser) issues directly. An `Authorization: Bearer <token>` caller
+// must re-authenticate with the account `password` and a fresh `totp_code` (step-up,
+// replay-protected like a login) — otherwise `403` (`code: step_up_required`, or
+// `step_up_failed` for a wrong password/code) — so a leaked key alone cannot multiply
+// itself. A key issued by a bearer records that bearer as its issuer: revoking the issuer
+// revokes it too. Changing the account password revokes all of the user's keys.
 // The returned `token` is a `pmk_…` envelope (`pmk_` + base64url of
 // `{"url": "<server base url>", "token": "<bearer key>"}`) and is shown **exactly
 // once** — only its SHA-256 hash is stored server-side. A user may hold at most 20 live
@@ -110,10 +115,29 @@ func (s *Server) handleCreateAPITokenRequest(args [0]string, argsEscaped bool, w
 
 			s.errors.Add(ctx, 1, metric.WithAttributes(attrs...))
 		}
-		err error
+		err          error
+		opErrContext = ogenerrors.OperationContext{
+			Name: CreateAPITokenOperation,
+			ID:   "createAPIToken",
+		}
 	)
 
 	var rawBody []byte
+	request, rawBody, close, err := s.decodeCreateAPITokenRequest(r)
+	if err != nil {
+		err = &ogenerrors.DecodeRequestError{
+			OperationContext: opErrContext,
+			Err:              err,
+		}
+		defer recordError("DecodeRequest", err)
+		s.cfg.ErrorHandler(ctx, w, r, err)
+		return
+	}
+	defer func() {
+		if err := close(); err != nil {
+			recordError("CloseRequest", err)
+		}
+	}()
 
 	var response CreateAPITokenRes
 	if m := s.cfg.Middleware; m != nil {
@@ -122,14 +146,14 @@ func (s *Server) handleCreateAPITokenRequest(args [0]string, argsEscaped bool, w
 			OperationName:    CreateAPITokenOperation,
 			OperationSummary: "Issue an API token for the authenticated caller",
 			OperationID:      "createAPIToken",
-			Body:             nil,
+			Body:             request,
 			RawBody:          rawBody,
 			Params:           middleware.Parameters{},
 			Raw:              r,
 		}
 
 		type (
-			Request  = struct{}
+			Request  = OptCreateAPITokenRequest
 			Params   = struct{}
 			Response = CreateAPITokenRes
 		)
@@ -142,12 +166,12 @@ func (s *Server) handleCreateAPITokenRequest(args [0]string, argsEscaped bool, w
 			mreq,
 			nil,
 			func(ctx context.Context, request Request, params Params) (response Response, err error) {
-				response, err = s.h.CreateAPIToken(ctx)
+				response, err = s.h.CreateAPIToken(ctx, request)
 				return response, err
 			},
 		)
 	} else {
-		response, err = s.h.CreateAPIToken(ctx)
+		response, err = s.h.CreateAPIToken(ctx, request)
 	}
 	if err != nil {
 		defer recordError("Internal", err)
@@ -170,6 +194,9 @@ func (s *Server) handleCreateAPITokenRequest(args [0]string, argsEscaped bool, w
 // credential (a non-admin authenticated caller gets `403`). The invite is single-use and
 // expires (24 h); the invitee completes signup through the web setup page or the
 // machine-readable variant of `POST /setup` (send JSON with `Accept: application/json`).
+// Like `POST /api/tokens`, a bearer caller must re-authenticate with `password` and
+// `totp_code` (`403`, `code: step_up_required` / `step_up_failed`); a session issues
+// directly.
 //
 // POST /api/invites
 func (s *Server) handleCreateInviteRequest(args [0]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -237,10 +264,29 @@ func (s *Server) handleCreateInviteRequest(args [0]string, argsEscaped bool, w h
 
 			s.errors.Add(ctx, 1, metric.WithAttributes(attrs...))
 		}
-		err error
+		err          error
+		opErrContext = ogenerrors.OperationContext{
+			Name: CreateInviteOperation,
+			ID:   "createInvite",
+		}
 	)
 
 	var rawBody []byte
+	request, rawBody, close, err := s.decodeCreateInviteRequest(r)
+	if err != nil {
+		err = &ogenerrors.DecodeRequestError{
+			OperationContext: opErrContext,
+			Err:              err,
+		}
+		defer recordError("DecodeRequest", err)
+		s.cfg.ErrorHandler(ctx, w, r, err)
+		return
+	}
+	defer func() {
+		if err := close(); err != nil {
+			recordError("CloseRequest", err)
+		}
+	}()
 
 	var response CreateInviteRes
 	if m := s.cfg.Middleware; m != nil {
@@ -249,14 +295,14 @@ func (s *Server) handleCreateInviteRequest(args [0]string, argsEscaped bool, w h
 			OperationName:    CreateInviteOperation,
 			OperationSummary: "Issue a single-use signup invite link (admin only)",
 			OperationID:      "createInvite",
-			Body:             nil,
+			Body:             request,
 			RawBody:          rawBody,
 			Params:           middleware.Parameters{},
 			Raw:              r,
 		}
 
 		type (
-			Request  = struct{}
+			Request  = OptStepUpRequest
 			Params   = struct{}
 			Response = CreateInviteRes
 		)
@@ -269,12 +315,12 @@ func (s *Server) handleCreateInviteRequest(args [0]string, argsEscaped bool, w h
 			mreq,
 			nil,
 			func(ctx context.Context, request Request, params Params) (response Response, err error) {
-				response, err = s.h.CreateInvite(ctx)
+				response, err = s.h.CreateInvite(ctx, request)
 				return response, err
 			},
 		)
 	} else {
-		response, err = s.h.CreateInvite(ctx)
+		response, err = s.h.CreateInvite(ctx, request)
 	}
 	if err != nil {
 		defer recordError("Internal", err)

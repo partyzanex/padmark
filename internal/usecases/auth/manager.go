@@ -111,6 +111,8 @@ type APITokenStore interface {
 	RevokeByHash(ctx context.Context, tokenHash string) error
 	// UpdateLastUsed records the time of the most recent successful token check, keyed by hash.
 	UpdateLastUsed(ctx context.Context, tokenHash string, t time.Time) error
+	// DeleteByUserID revokes every token of the user (e.g. after a password change).
+	DeleteByUserID(ctx context.Context, userID uuid.UUID) error
 }
 
 // Manager composes the four narrower auth managers — SessionManager (session.go),
@@ -150,18 +152,19 @@ func NewManager(
 	sessionTTL time.Duration,
 ) (*Manager, error) {
 	sessionMgr, err := NewSessionManager(
-		users, sessions, passwordHasher, sealer, totp, log, sessionTTL,
+		users, sessions, apiTokens, passwordHasher, sealer, totp, log, sessionTTL,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("new session manager: %w", err)
 	}
 
+	// SessionManager owns the login factors, so it is the step-up verifier for both issuers.
 	return &Manager{
 		SessionManager: sessionMgr,
 		OnboardingManager: NewOnboardingManager(
-			users, invites, passwordHasher, sealer, totp, issuer,
+			users, invites, passwordHasher, sealer, totp, sessionMgr, issuer,
 		),
 		UserAdminManager: NewUserAdminManager(users),
-		APITokenManager:  NewAPITokenManager(apiTokens, users, log),
+		APITokenManager:  NewAPITokenManager(apiTokens, users, sessionMgr, log),
 	}, nil
 }

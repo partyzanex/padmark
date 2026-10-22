@@ -6,7 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/uptrace/bun"
 	"github.com/urfave/cli/v3"
@@ -33,7 +36,7 @@ const (
 func encryptionCommand() *cli.Command {
 	flags := append(migrateFlags(), &cli.StringFlag{
 		Name: FlagContentKeyring, Sources: cli.EnvVars(EnvContentKeyring), Usage: "Persisted content keyring JSON file",
-	})
+	}, allowSharedKeyringFlag())
 
 	items := []struct{ name, usage string }{
 		{"keygen", "Generate a keyring in a new 0600 file"},
@@ -122,7 +125,8 @@ func encryptionAction(ctx context.Context, cmd *cli.Command) error {
 		return generateKeyring(cmd)
 	}
 
-	keyring, err := crypto.LoadContentKeyring(cmd.String(FlagContentKeyring))
+	keyring, err := loadContentKeyring(cmd.String(FlagContentKeyring), cmd.Bool(FlagAllowSharedKeyring),
+		newLogger(DefaultLogLevel, DefaultLogFormat))
 	if err != nil {
 		//nolint:wrapcheck // WrapError adds shared encryption context.
 		return contentkeys.WrapError(err)
@@ -293,4 +297,35 @@ func validateContentEncryption(ctx context.Context, db *bun.DB, keyring *crypto.
 
 	//nolint:wrapcheck // WrapError adds shared encryption context.
 	return contentkeys.WrapError(manager.PrepareServe(ctx))
+}
+
+// managedSecretsDir is where Docker and Compose mount secrets. Compose bind-mounts a
+// file-based secret with the host file's mode and swarm defaults to 0444, so the server
+// cannot insist on an owner-only mode there; the directory itself is not world-listable.
+const managedSecretsDir = "/run/secrets/"
+
+// allowSharedKeyring reports whether a keyring at path may be accessible to group or other
+// users: the operator passed --allow-shared-keyring, or the cleaned path lies inside the
+// managed secrets directory. Cleaning first stops "/run/secrets/../" from escaping it.
+func allowSharedKeyring(path string, allowFlag bool) bool {
+	return allowFlag || strings.HasPrefix(filepath.Clean(path), managedSecretsDir)
+}
+
+// loadContentKeyring applies the server's keyring permission policy. Fail-hard: a keyring
+// readable by other users stops startup unless allowSharedKeyring grants the exception, in
+// which case the loader logs a warning through log, never the process-wide default logger.
+func loadContentKeyring(path string, allowFlag bool, log *slog.Logger) (*crypto.ContentKeyring, error) {
+	keyring, err := crypto.LoadContentKeyring(path, log, crypto.KeyringLoadOptions{
+		AllowSharedPermissions: allowSharedKeyring(path, allowFlag),
+	})
+	if errors.Is(err, crypto.ErrKeyringPermissions) {
+		return nil, fmt.Errorf("%w; if a secret manager cannot provide an owner-only file, pass --%s (%s=true)",
+			err, FlagAllowSharedKeyring, EnvAllowSharedKeyring)
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("load content keyring: %w", err)
+	}
+
+	return keyring, nil
 }

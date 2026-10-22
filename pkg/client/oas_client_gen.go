@@ -29,9 +29,14 @@ func trimTrailingSlashes(u *url.URL) {
 type Invoker interface {
 	// CreateAPIToken invokes createAPIToken operation.
 	//
-	// Issues a long-lived API bearer key **for the caller themself** — the operation takes no
-	// request body and cannot mint a token for another user. Any valid credential works: a
-	// TOTP session cookie (browser) or an `Authorization: Bearer <token>` API token.
+	// Issues an API bearer key **for the caller themself** — it cannot mint a token for another
+	// user. `ttl_days` sets its lifetime in days (`0` or omitted = never expires).
+	// A TOTP session cookie (browser) issues directly. An `Authorization: Bearer <token>` caller
+	// must re-authenticate with the account `password` and a fresh `totp_code` (step-up,
+	// replay-protected like a login) — otherwise `403` (`code: step_up_required`, or
+	// `step_up_failed` for a wrong password/code) — so a leaked key alone cannot multiply
+	// itself. A key issued by a bearer records that bearer as its issuer: revoking the issuer
+	// revokes it too. Changing the account password revokes all of the user's keys.
 	// The returned `token` is a `pmk_…` envelope (`pmk_` + base64url of
 	// `{"url": "<server base url>", "token": "<bearer key>"}`) and is shown **exactly
 	// once** — only its SHA-256 hash is stored server-side. A user may hold at most 20 live
@@ -39,16 +44,19 @@ type Invoker interface {
 	// revocation is admin-panel-only today).
 	//
 	// POST /api/tokens
-	CreateAPIToken(ctx context.Context) (CreateAPITokenRes, error)
+	CreateAPIToken(ctx context.Context, request OptCreateAPITokenRequest) (CreateAPITokenRes, error)
 	// CreateInvite invokes createInvite operation.
 	//
 	// The JSON counterpart of the admin panel's `POST /admin/invite`. Requires an **admin**
 	// credential (a non-admin authenticated caller gets `403`). The invite is single-use and
 	// expires (24 h); the invitee completes signup through the web setup page or the
 	// machine-readable variant of `POST /setup` (send JSON with `Accept: application/json`).
+	// Like `POST /api/tokens`, a bearer caller must re-authenticate with `password` and
+	// `totp_code` (`403`, `code: step_up_required` / `step_up_failed`); a session issues
+	// directly.
 	//
 	// POST /api/invites
-	CreateInvite(ctx context.Context) (CreateInviteRes, error)
+	CreateInvite(ctx context.Context, request OptStepUpRequest) (CreateInviteRes, error)
 	// CreateLink invokes createLink operation.
 	//
 	// Creates a short link and returns it together with the one-time `edit_code`.
@@ -205,9 +213,14 @@ func (c *Client) requestURL(ctx context.Context) *url.URL {
 
 // CreateAPIToken invokes createAPIToken operation.
 //
-// Issues a long-lived API bearer key **for the caller themself** — the operation takes no
-// request body and cannot mint a token for another user. Any valid credential works: a
-// TOTP session cookie (browser) or an `Authorization: Bearer <token>` API token.
+// Issues an API bearer key **for the caller themself** — it cannot mint a token for another
+// user. `ttl_days` sets its lifetime in days (`0` or omitted = never expires).
+// A TOTP session cookie (browser) issues directly. An `Authorization: Bearer <token>` caller
+// must re-authenticate with the account `password` and a fresh `totp_code` (step-up,
+// replay-protected like a login) — otherwise `403` (`code: step_up_required`, or
+// `step_up_failed` for a wrong password/code) — so a leaked key alone cannot multiply
+// itself. A key issued by a bearer records that bearer as its issuer: revoking the issuer
+// revokes it too. Changing the account password revokes all of the user's keys.
 // The returned `token` is a `pmk_…` envelope (`pmk_` + base64url of
 // `{"url": "<server base url>", "token": "<bearer key>"}`) and is shown **exactly
 // once** — only its SHA-256 hash is stored server-side. A user may hold at most 20 live
@@ -215,12 +228,12 @@ func (c *Client) requestURL(ctx context.Context) *url.URL {
 // revocation is admin-panel-only today).
 //
 // POST /api/tokens
-func (c *Client) CreateAPIToken(ctx context.Context) (CreateAPITokenRes, error) {
-	res, err := c.sendCreateAPIToken(ctx)
+func (c *Client) CreateAPIToken(ctx context.Context, request OptCreateAPITokenRequest) (CreateAPITokenRes, error) {
+	res, err := c.sendCreateAPIToken(ctx, request)
 	return res, err
 }
 
-func (c *Client) sendCreateAPIToken(ctx context.Context) (res CreateAPITokenRes, err error) {
+func (c *Client) sendCreateAPIToken(ctx context.Context, request OptCreateAPITokenRequest) (res CreateAPITokenRes, err error) {
 	otelAttrs := []attribute.KeyValue{
 		otelogen.OperationID("createAPIToken"),
 		semconv.HTTPRequestMethodKey.String("POST"),
@@ -266,6 +279,9 @@ func (c *Client) sendCreateAPIToken(ctx context.Context) (res CreateAPITokenRes,
 	if err != nil {
 		return res, errors.Wrap(err, "create request")
 	}
+	if err := encodeCreateAPITokenRequest(request, r); err != nil {
+		return res, errors.Wrap(err, "encode request")
+	}
 
 	stage = "SendRequest"
 	resp, err := c.cfg.Client.Do(r)
@@ -290,14 +306,17 @@ func (c *Client) sendCreateAPIToken(ctx context.Context) (res CreateAPITokenRes,
 // credential (a non-admin authenticated caller gets `403`). The invite is single-use and
 // expires (24 h); the invitee completes signup through the web setup page or the
 // machine-readable variant of `POST /setup` (send JSON with `Accept: application/json`).
+// Like `POST /api/tokens`, a bearer caller must re-authenticate with `password` and
+// `totp_code` (`403`, `code: step_up_required` / `step_up_failed`); a session issues
+// directly.
 //
 // POST /api/invites
-func (c *Client) CreateInvite(ctx context.Context) (CreateInviteRes, error) {
-	res, err := c.sendCreateInvite(ctx)
+func (c *Client) CreateInvite(ctx context.Context, request OptStepUpRequest) (CreateInviteRes, error) {
+	res, err := c.sendCreateInvite(ctx, request)
 	return res, err
 }
 
-func (c *Client) sendCreateInvite(ctx context.Context) (res CreateInviteRes, err error) {
+func (c *Client) sendCreateInvite(ctx context.Context, request OptStepUpRequest) (res CreateInviteRes, err error) {
 	otelAttrs := []attribute.KeyValue{
 		otelogen.OperationID("createInvite"),
 		semconv.HTTPRequestMethodKey.String("POST"),
@@ -342,6 +361,9 @@ func (c *Client) sendCreateInvite(ctx context.Context) (res CreateInviteRes, err
 	r, err := ht.NewRequest(ctx, "POST", u)
 	if err != nil {
 		return res, errors.Wrap(err, "create request")
+	}
+	if err := encodeCreateInviteRequest(request, r); err != nil {
+		return res, errors.Wrap(err, "encode request")
 	}
 
 	stage = "SendRequest"

@@ -555,7 +555,7 @@ func serverAction(ctx context.Context, cmd *cli.Command) error {
 
 	log := newLogger(cmd.String(FlagLogLevel), cmd.String(FlagLogFormat))
 
-	keyring, err := crypto.LoadContentKeyring(cmd.String(FlagContentKeyring))
+	keyring, err := loadContentKeyring(cmd.String(FlagContentKeyring), false, log)
 	if err != nil {
 		return fmt.Errorf("load content encryption keys: %w", err)
 	}

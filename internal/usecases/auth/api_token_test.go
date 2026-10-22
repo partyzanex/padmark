@@ -96,7 +96,7 @@ func (suite *APITokenSuite) regularUser() *domain.User {
 // ── CreateAPIToken ──
 
 func (suite *APITokenSuite) TestCreateAPIToken_Disabled_ReturnsErrFeatureNotSupported() {
-	_, err := suite.disabledMgr().CreateAPIToken(suite.T().Context(), uuid.New())
+	_, err := suite.disabledMgr().CreateAPIToken(suite.T().Context(), uuid.New(), Issuer{}, 0)
 	suite.ErrorIs(err, domain.ErrFeatureNotSupported)
 }
 
@@ -105,7 +105,7 @@ func (suite *APITokenSuite) TestCreateAPIToken_UserNotFound_ReturnsErrNotFound()
 	ghost := uuid.New()
 	suite.users.EXPECT().GetByID(gomock.Any(), ghost).Return(nil, domain.ErrNotFound)
 
-	_, err := suite.mgr.CreateAPIToken(ctx, ghost)
+	_, err := suite.mgr.CreateAPIToken(ctx, ghost, Issuer{}, 0)
 	suite.ErrorIs(err, domain.ErrNotFound)
 }
 
@@ -117,7 +117,7 @@ func (suite *APITokenSuite) TestCreateAPIToken_StoreFails_WrapsError() {
 		CreateIfUnderLimit(gomock.Any(), gomock.Any(), maxAPITokensPerUser).
 		Return(false, errors.New("db down"))
 
-	_, err := suite.mgr.CreateAPIToken(ctx, usr.ID)
+	_, err := suite.mgr.CreateAPIToken(ctx, usr.ID, Issuer{}, 0)
 	suite.ErrorContains(err, "create api token")
 }
 
@@ -129,7 +129,7 @@ func (suite *APITokenSuite) TestCreateAPIToken_LimitReached_ReturnsErrAPITokenLi
 		CreateIfUnderLimit(gomock.Any(), gomock.Any(), maxAPITokensPerUser).
 		Return(false, nil)
 
-	_, err := suite.mgr.CreateAPIToken(ctx, usr.ID)
+	_, err := suite.mgr.CreateAPIToken(ctx, usr.ID, Issuer{}, 0)
 	suite.ErrorIs(err, domain.ErrAPITokenLimit)
 }
 
@@ -151,7 +151,7 @@ func (suite *APITokenSuite) TestCreateAPIToken_Success_ReturnsPlainKeyAndPersist
 			return true, nil
 		})
 
-	plain, err := suite.mgr.CreateAPIToken(ctx, usr.ID)
+	plain, err := suite.mgr.CreateAPIToken(ctx, usr.ID, Issuer{}, 0)
 	suite.Require().NoError(err)
 	suite.NotEmpty(plain)
 
@@ -167,14 +167,14 @@ func (suite *APITokenSuite) TestCreateAPIToken_Success_ReturnsPlainKeyAndPersist
 // ── ResolveAPIToken ──
 
 func (suite *APITokenSuite) TestResolveAPIToken_Disabled_ReturnsErrFeatureNotSupported() {
-	_, err := suite.disabledMgr().ResolveAPIToken(suite.T().Context(), "plain")
+	_, _, err := suite.disabledMgr().ResolveAPIToken(suite.T().Context(), "plain")
 	suite.ErrorIs(err, domain.ErrFeatureNotSupported)
 }
 
 func (suite *APITokenSuite) TestResolveAPIToken_UnknownHash_ReturnsErrNotFound() {
 	suite.apiTokens.EXPECT().GetByHash(gomock.Any(), hashToken("bogus")).Return(nil, domain.ErrNotFound)
 
-	_, err := suite.mgr.ResolveAPIToken(suite.T().Context(), "bogus")
+	_, _, err := suite.mgr.ResolveAPIToken(suite.T().Context(), "bogus")
 	suite.ErrorIs(err, domain.ErrNotFound)
 }
 
@@ -188,7 +188,7 @@ func (suite *APITokenSuite) TestResolveAPIToken_ExpiredToken_ReturnsErrNotFound(
 	}
 	suite.apiTokens.EXPECT().GetByHash(gomock.Any(), hashToken("plain")).Return(tok, nil)
 
-	_, err := suite.mgr.ResolveAPIToken(suite.T().Context(), "plain")
+	_, _, err := suite.mgr.ResolveAPIToken(suite.T().Context(), "plain")
 	suite.ErrorIs(err, domain.ErrNotFound)
 }
 
@@ -203,7 +203,7 @@ func (suite *APITokenSuite) TestResolveAPIToken_UpdateLastUsedFails_StillReturns
 		suite.apiTokens.EXPECT().UpdateLastUsed(gomock.Any(), hashToken("plain"), gomock.Any()).Return(errors.New("boom")),
 	)
 
-	resolved, err := suite.mgr.ResolveAPIToken(ctx, "plain")
+	resolved, _, err := suite.mgr.ResolveAPIToken(ctx, "plain")
 	suite.Require().NoError(err)
 	suite.Equal(usr, resolved)
 }
@@ -219,9 +219,10 @@ func (suite *APITokenSuite) TestResolveAPIToken_Success_ReturnsUserAndRecordsLas
 		suite.apiTokens.EXPECT().UpdateLastUsed(gomock.Any(), hashToken("plain"), gomock.Any()).Return(nil),
 	)
 
-	resolved, err := suite.mgr.ResolveAPIToken(ctx, "plain")
+	resolved, tokenID, err := suite.mgr.ResolveAPIToken(ctx, "plain")
 	suite.Require().NoError(err)
 	suite.Equal(usr, resolved)
+	suite.Equal(hashToken("plain"), tokenID, "the resolved key's public ID is its hash")
 }
 
 // TestResolveAPIToken_UserLookupFails_WrapsError covers a resolved token whose owning user can
@@ -236,7 +237,7 @@ func (suite *APITokenSuite) TestResolveAPIToken_UserLookupFails_WrapsError() {
 		suite.users.EXPECT().GetByID(gomock.Any(), userID).Return(nil, errors.New("db down")),
 	)
 
-	_, err := suite.mgr.ResolveAPIToken(ctx, "plain")
+	_, _, err := suite.mgr.ResolveAPIToken(ctx, "plain")
 	suite.ErrorContains(err, "get token user")
 }
 
@@ -360,4 +361,113 @@ func (suite *APITokenSuite) TestRevokeAPIToken_AdminLookupFails_WrapsError() {
 
 	err := suite.mgr.RevokeAPIToken(ctx, adminID, "tok-1")
 	suite.ErrorContains(err, "get admin user")
+}
+
+// ── issuance rules (M-6): step-up for bearer issuers, lifetime, issued_by ──
+
+// stepUpMgr wires an APITokenManager whose step-up verifier is a mock, so the issuance rule is
+// tested on its own (SessionManager.VerifyStepUp has its own tests in ManagerSuite).
+func (suite *APITokenSuite) stepUpMgr() (*APITokenManager, *MockStepUpVerifier) {
+	verifier := NewMockStepUpVerifier(suite.ctrl)
+
+	return NewAPITokenManager(suite.apiTokens, suite.users, verifier, discardLog), verifier
+}
+
+func (suite *APITokenSuite) TestCreateAPIToken_Bearer_WithoutStepUp_ReturnsErrStepUpRequired() {
+	mgr, _ := suite.stepUpMgr()
+	usr := suite.adminUser()
+	suite.users.EXPECT().GetByID(gomock.Any(), usr.ID).Return(usr, nil).Times(3)
+	// No verifier call and no store call: nothing may be minted.
+
+	for _, stepUp := range []StepUp{{}, {Password: "pw"}, {TOTPCode: "123456"}} {
+		_, err := mgr.CreateAPIToken(suite.T().Context(), usr.ID, Issuer{APITokenHash: "parent", StepUp: stepUp}, 0)
+		suite.Require().ErrorIs(err, domain.ErrStepUpRequired)
+	}
+}
+
+func (suite *APITokenSuite) TestCreateAPIToken_Bearer_StepUpFails_NothingMinted() {
+	mgr, verifier := suite.stepUpMgr()
+	usr := suite.adminUser()
+	stepUp := StepUp{Password: "pw", TOTPCode: "123456"}
+
+	suite.users.EXPECT().GetByID(gomock.Any(), usr.ID).Return(usr, nil)
+	verifier.EXPECT().VerifyStepUp(gomock.Any(), usr.ID, stepUp).Return(domain.ErrStepUpFailed)
+
+	_, err := mgr.CreateAPIToken(suite.T().Context(), usr.ID, Issuer{APITokenHash: "parent", StepUp: stepUp}, 0)
+	suite.Require().ErrorIs(err, domain.ErrStepUpFailed)
+}
+
+func (suite *APITokenSuite) TestCreateAPIToken_Bearer_ValidStepUp_RecordsIssuer() {
+	mgr, verifier := suite.stepUpMgr()
+	usr := suite.adminUser()
+	stepUp := StepUp{Password: "pw", TOTPCode: "123456"}
+
+	var stored *domain.APIToken
+
+	suite.users.EXPECT().GetByID(gomock.Any(), usr.ID).Return(usr, nil)
+	verifier.EXPECT().VerifyStepUp(gomock.Any(), usr.ID, stepUp).Return(nil)
+	suite.apiTokens.EXPECT().CreateIfUnderLimit(gomock.Any(), gomock.Any(), maxAPITokensPerUser).
+		DoAndReturn(func(_ context.Context, tk *domain.APIToken, _ int) (bool, error) {
+			stored = tk
+
+			return true, nil
+		})
+
+	_, err := mgr.CreateAPIToken(suite.T().Context(), usr.ID, Issuer{APITokenHash: "parent", StepUp: stepUp}, 0)
+	suite.Require().NoError(err)
+	suite.Require().NotNil(stored.IssuedBy)
+	suite.Equal("parent", *stored.IssuedBy, "the new key must point at the bearer that minted it")
+}
+
+func (suite *APITokenSuite) TestCreateAPIToken_Session_NoStepUpAndNoIssuer() {
+	mgr, _ := suite.stepUpMgr()
+	usr := suite.adminUser()
+
+	var stored *domain.APIToken
+
+	suite.users.EXPECT().GetByID(gomock.Any(), usr.ID).Return(usr, nil)
+	suite.apiTokens.EXPECT().CreateIfUnderLimit(gomock.Any(), gomock.Any(), maxAPITokensPerUser).
+		DoAndReturn(func(_ context.Context, tk *domain.APIToken, _ int) (bool, error) {
+			stored = tk
+
+			return true, nil
+		})
+
+	_, err := mgr.CreateAPIToken(suite.T().Context(), usr.ID, Issuer{}, 0)
+	suite.Require().NoError(err)
+	suite.Nil(stored.IssuedBy, "a browser session issues without step-up and without an issuer token")
+}
+
+func (suite *APITokenSuite) TestCreateAPIToken_Lifetime() {
+	mgr, _ := suite.stepUpMgr()
+	usr := suite.adminUser()
+
+	for _, ttlDays := range []int{0, 7, MaxAPITokenTTLDays} {
+		var stored *domain.APIToken
+
+		suite.users.EXPECT().GetByID(gomock.Any(), usr.ID).Return(usr, nil)
+		suite.apiTokens.EXPECT().CreateIfUnderLimit(gomock.Any(), gomock.Any(), maxAPITokensPerUser).
+			DoAndReturn(func(_ context.Context, tk *domain.APIToken, _ int) (bool, error) {
+				stored = tk
+
+				return true, nil
+			})
+
+		_, err := mgr.CreateAPIToken(suite.T().Context(), usr.ID, Issuer{}, ttlDays)
+		suite.Require().NoError(err)
+
+		if ttlDays == 0 {
+			suite.Nil(stored.ExpiresAt, "ttl 0 means the key never expires")
+
+			continue
+		}
+
+		suite.Require().NotNil(stored.ExpiresAt)
+		suite.WithinDuration(stored.CreatedAt.AddDate(0, 0, ttlDays), *stored.ExpiresAt, time.Second)
+	}
+
+	for _, ttlDays := range []int{-1, MaxAPITokenTTLDays + 1} {
+		_, err := mgr.CreateAPIToken(suite.T().Context(), usr.ID, Issuer{}, ttlDays)
+		suite.Require().ErrorIs(err, domain.ErrInvalidAPITokenTTL)
+	}
 }

@@ -14,6 +14,17 @@ const maxKeyringSize = 64 << 10
 
 var errContentKeyringNotRegular = errors.New("content keyring must be a regular file")
 
+// ErrKeyringPermissions reports a keyring file that group or other users may access. The
+// keyring is the root of trust for content at rest, so the loader refuses it by default.
+var ErrKeyringPermissions = errors.New("content keyring is accessible to group or other users")
+
+// KeyringLoadOptions tunes how LoadContentKeyring vets the keyring file.
+type KeyringLoadOptions struct {
+	// AllowSharedPermissions accepts a keyring that group or other users may access and only
+	// logs a warning. Use it for secret managers that cannot provide an owner-only file.
+	AllowSharedPermissions bool
+}
+
 // ContentKeyring holds installation keys loaded from a secret file, never from the database.
 // JSON byte slices use standard base64. Keep the file outside the Docker build context.
 type ContentKeyring struct {
@@ -23,8 +34,10 @@ type ContentKeyring struct {
 
 // LoadContentKeyring fails on missing, malformed or invalid keys. It never generates a key
 // or prints input values in an error; the same persisted keyring is required after restart.
-// Warns on shared file permissions or symlinks without changing managed secret mounts.
-func LoadContentKeyring(path string) (*ContentKeyring, error) {
+// A file accessible to group or other users fails with ErrKeyringPermissions unless
+// opts.AllowSharedPermissions is set; that exception and symlinks are logged through log
+// at WARN. The loader never changes the permissions of the operator's file.
+func LoadContentKeyring(path string, log *slog.Logger, opts KeyringLoadOptions) (*ContentKeyring, error) {
 	if path == "" {
 		return nil, errors.New("content keyring file is required")
 	}
@@ -39,7 +52,7 @@ func LoadContentKeyring(path string) (*ContentKeyring, error) {
 		return nil, fmt.Errorf("open content keyring: %w", err)
 	}
 
-	permissionErr := warnKeyringPermissions(path, file)
+	permissionErr := checkKeyringPermissions(path, file, log, opts)
 	if permissionErr != nil {
 		file.Close() //nolint:errcheck,gosec // preserve the primary file validation error
 
@@ -78,7 +91,7 @@ func LoadContentKeyring(path string) (*ContentKeyring, error) {
 
 // requireRegularKeyring rejects FIFOs, devices and directories before opening: opening
 // a FIFO blocks until a writer appears. The post-open fstat check in
-// warnKeyringPermissions still guards the opened descriptor against a swap between
+// checkKeyringPermissions still guards the opened descriptor against a swap between
 // this lookup and the open. Stat follows symlinks, so managed secret mounts still work.
 func requireRegularKeyring(path string) error {
 	target, err := os.Stat(path)
@@ -93,10 +106,10 @@ func requireRegularKeyring(path string) error {
 	return nil
 }
 
-// Inspect the opened file, not a second lookup of the target. Symlinks remain
-// supported for managed secret mounts, but their use and weak target permissions
-// are visible; no contents or key bytes enter the warning.
-func warnKeyringPermissions(path string, file *os.File) error {
+// checkKeyringPermissions inspects the opened file, not a second lookup of the target.
+// Symlinks remain supported for managed secret mounts, but their use is logged; no
+// contents or key bytes enter the log or the error.
+func checkKeyringPermissions(path string, file *os.File, log *slog.Logger, opts KeyringLoadOptions) error {
 	info, err := file.Stat()
 	if err != nil {
 		return fmt.Errorf("stat opened content keyring: %w", err)
@@ -106,9 +119,15 @@ func warnKeyringPermissions(path string, file *os.File) error {
 		return errContentKeyringNotRegular
 	}
 
-	if info.Mode().Perm()&0o077 != 0 {
-		slog.Warn("content keyring is readable by other users; restrict to 0600 or 0400",
-			"path", path, "mode", info.Mode().Perm())
+	perm := info.Mode().Perm()
+	if perm&0o077 != 0 {
+		if !opts.AllowSharedPermissions {
+			return fmt.Errorf("content keyring %s has mode %04o, readable by other users; restrict it to 0600 or 0400: %w",
+				path, uint32(perm), ErrKeyringPermissions)
+		}
+
+		log.Warn("content keyring is readable by other users; shared permissions explicitly allowed",
+			"path", path, "mode", fmt.Sprintf("%04o", uint32(perm)))
 	}
 
 	entry, err := os.Lstat(path)
@@ -117,7 +136,7 @@ func warnKeyringPermissions(path string, file *os.File) error {
 	}
 
 	if entry.Mode()&os.ModeSymlink != 0 {
-		slog.Warn("content keyring uses a symlink; ensure its directory and target are trusted", "path", path)
+		log.Warn("content keyring uses a symlink; ensure its directory and target are trusted", "path", path)
 	}
 
 	return nil

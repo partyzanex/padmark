@@ -74,6 +74,15 @@ func userFromCtx(ctx context.Context) *domain.User {
 	return usr
 }
 
+// apiTokenHashFromCtx returns the public ID (hash) of the bearer API token the request
+// authenticated with, or "" for a browser session or an anonymous caller. Credential-issuing
+// operations use it to demand a step-up from a bearer and to record it as the new key's issuer.
+func apiTokenHashFromCtx(ctx context.Context) string {
+	hash, _ := ctx.Value(keyAPIToken).(string)
+
+	return hash
+}
+
 // ownerIDFromCtx returns the authenticated caller's user ID for stamping domain.Note.OwnerID at
 // creation, or nil for an anonymous caller (note stays unowned, exactly like before this field
 // existed).
@@ -673,8 +682,9 @@ func (h *AuthHandler) doChangePassword(
 		rotatedCSRF = rotateCSRFToken(w, r, h.csrfSecret, h.forcedScheme, h.trustedProxies)
 
 		if errors.Is(changeErr, domain.ErrSessionRevocation) {
-			return "Password changed, but older sessions could not be revoked. " +
-				"You are signed in with a new session. Contact an administrator to revoke older sessions.", rotatedCSRF
+			return "Password changed, but older sessions or API tokens could not be revoked. " +
+				"You are signed in with a new session. Contact an administrator to revoke older sessions " +
+				"and API tokens.", rotatedCSRF
 		}
 
 		return "", rotatedCSRF

@@ -11,6 +11,12 @@ import (
 )
 
 var (
+	rn3AllowedHeaders = map[string]string{
+		"POST": "Content-Type",
+	}
+	rn1AllowedHeaders = map[string]string{
+		"POST": "Content-Type",
+	}
 	rn5AllowedHeaders = map[string]string{
 		"POST": "Content-Type",
 	}
@@ -109,8 +115,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 						default:
 							s.notAllowed(w, r, notAllowedParams{
 								allowedMethods: "POST",
-								allowedHeaders: nil,
-								acceptPost:     "",
+								allowedHeaders: rn3AllowedHeaders,
+								acceptPost:     "application/json",
 								acceptPatch:    "",
 							})
 						}
@@ -134,8 +140,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 						default:
 							s.notAllowed(w, r, notAllowedParams{
 								allowedMethods: "POST",
-								allowedHeaders: nil,
-								acceptPost:     "",
+								allowedHeaders: rn1AllowedHeaders,
+								acceptPost:     "application/json",
 								acceptPatch:    "",
 							})
 						}

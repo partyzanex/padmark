@@ -100,7 +100,7 @@ func TestKeyringCreation_ExclusiveAndPrivate(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, os.FileMode(0o600), info.Mode().Perm())
 
-	loaded, err := LoadContentKeyring(path)
+	loaded, err := loadStrictKeyring(path)
 	require.NoError(t, err)
 	require.Equal(t, ring, loaded)
 	require.Error(t, WriteContentKeyring(path, ring), "must not overwrite an existing keyring")

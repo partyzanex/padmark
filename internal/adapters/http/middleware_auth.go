@@ -14,9 +14,9 @@ import (
 // auth middleware.
 type sessionChecker interface {
 	GetSession(ctx context.Context, sessionID string) (*domain.User, error)
-	// ResolveAPIToken maps a bearer API key to its owning user, recording last-used.
-	// Returns domain.ErrNotFound when the key is unknown, revoked, or expired.
-	ResolveAPIToken(ctx context.Context, plainToken string) (*domain.User, error)
+	// ResolveAPIToken maps a bearer API key to its owning user and the key's public ID,
+	// recording last-used. Returns domain.ErrNotFound when the key is unknown, revoked, or expired.
+	ResolveAPIToken(ctx context.Context, plainToken string) (*domain.User, string, error)
 }
 
 // newAuthMiddleware wraps the entire handler tree with session auth.
@@ -151,14 +151,19 @@ func (am *authMiddleware) resolveAPITokenUser(r *http.Request) (*http.Request, b
 		return r, false
 	}
 
-	usr, err := am.checker.ResolveAPIToken(r.Context(), token)
+	usr, tokenHash, err := am.checker.ResolveAPIToken(r.Context(), token)
 	if err != nil {
 		return r, false
 	}
 
 	setLogUser(r.Context(), usr.Username, usr.IsAdmin)
 
-	return r.WithContext(context.WithValue(r.Context(), keyUser, usr)), true
+	// The key's ID travels with the user: issuing operations demand a step-up from a bearer
+	// and record it as the issuer, and the admin panel refuses bearers outright.
+	ctx := context.WithValue(r.Context(), keyUser, usr)
+	ctx = context.WithValue(ctx, keyAPIToken, tokenHash)
+
+	return r.WithContext(ctx), true
 }
 
 // apiDocsPath, apiSpecPath and llmsTxtPath are always public (see isPublicPath) and are also

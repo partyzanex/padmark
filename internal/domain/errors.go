@@ -24,6 +24,14 @@ var (
 	ErrForbidden          = errors.New("forbidden")
 	ErrInvalidEditCode    = errors.New("invalid edit code")
 	ErrDecryptionFailed   = errors.New("content decryption failed")
+	// ErrEditCodeTooShort is returned when a caller-chosen edit code is shorter than
+	// MinEditCodeLength runes. Only creation is validated — see ValidateEditCode.
+	ErrEditCodeTooShort = errors.New("edit code must be at least 8 characters")
+	// ErrEditCodeMalformed is returned when a caller-chosen edit code is longer than
+	// MaxEditCodeLength runes, has leading/trailing whitespace or contains control characters —
+	// any of which would make it impossible to present reliably later (see ValidateEditCode).
+	ErrEditCodeMalformed = errors.New("edit code must be at most 128 characters, without leading or " +
+		"trailing whitespace or control characters")
 	// ErrInvalidURL is returned when a link's target URL fails the scheme whitelist
 	// (http/https only) — see links.Manager.Create.
 	ErrInvalidURL = errors.New("invalid target url: only http and https schemes are allowed")
@@ -44,11 +52,19 @@ var (
 	ErrWeakPassword    = errors.New("password does not meet complexity requirements")
 	ErrInvalidUsername = errors.New("username must be 1–64 characters: letters, digits, dot, underscore, @ or hyphen; " +
 		"start with a letter or digit")
-	ErrSessionRevocation   = errors.New("password changed, but older sessions could not be revoked")
+	ErrSessionRevocation   = errors.New("password changed, but older sessions or API tokens could not be revoked")
 	ErrFeatureNotSupported = errors.New("feature is not enabled")
 	ErrAPITokenLimit       = errors.New("api token limit reached")
 	// ErrBurnIntentRequired: a burn-after-click link (or burn-after-reading note) is destroyed by
 	// the access that reads it, so an access without deliberate intent — a preview fetch, a
 	// scanner, an embedded resource — must leave it intact instead.
 	ErrBurnIntentRequired = errors.New("burn resource requires a deliberate access")
+	// ErrStepUpRequired: issuing a credential (API token, invite) with a bearer API token needs a
+	// re-authentication — the account password and a fresh TOTP code — so a leaked key alone
+	// cannot multiply itself.
+	ErrStepUpRequired = errors.New("re-authentication required: send the account password and a TOTP code")
+	// ErrStepUpFailed: the step-up password or TOTP code was wrong (or the code was already used).
+	ErrStepUpFailed = errors.New("re-authentication failed: invalid password or TOTP code")
+	// ErrInvalidAPITokenTTL: an API token lifetime outside 0 (never expires) … MaxAPITokenTTLDays.
+	ErrInvalidAPITokenTTL = errors.New("api token lifetime out of range")
 )

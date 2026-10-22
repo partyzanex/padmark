@@ -2082,7 +2082,7 @@ func (s *HandlerSuite) TestAuth_MissingToken_Browser() {
 // /admin is a named route, so it is gated by the middleware itself, before any handler runs.
 func (s *HandlerSuite) TestAuth_InvalidToken_JSONError() {
 	router := s.newRouterWithTOTPAuth()
-	s.authMgr.EXPECT().ResolveAPIToken(gomock.Any(), "bogus-token").Return(nil, domain.ErrForbidden)
+	s.authMgr.EXPECT().ResolveAPIToken(gomock.Any(), "bogus-token").Return(nil, "", domain.ErrForbidden)
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/admin", nil)
@@ -2346,23 +2346,6 @@ func (s *HandlerSuite) TestAPIDocsPage() {
 	s.Contains(w.Header().Get("Content-Type"), "text/html")
 	s.Contains(w.Body.String(), "openapi.yaml")
 	s.Contains(w.Body.String(), "redoc")
-}
-
-// TestCSP_RedocScopedToAPIDocs verifies the Redoc CDN origin appears in the CSP only on /api
-// (where Redoc loads) and is absent from the global CSP served on every other page.
-func (s *HandlerSuite) TestCSP_RedocScopedToAPIDocs() {
-	apiRec := httptest.NewRecorder()
-	s.router.ServeHTTP(apiRec, httptest.NewRequest(http.MethodGet, "/api", nil))
-
-	s.Contains(apiRec.Header().Get("Content-Security-Policy"), "https://cdn.redoc.ly",
-		"/api CSP must allow the Redoc CDN")
-
-	homeRec := httptest.NewRecorder()
-	s.router.ServeHTTP(homeRec, httptest.NewRequest(http.MethodGet, "/", nil))
-
-	csp := homeRec.Header().Get("Content-Security-Policy")
-	s.NotEmpty(csp, "global CSP must be set")
-	s.NotContains(csp, "cdn.redoc.ly", "non-docs pages must not allow third-party script origins")
 }
 
 func (s *HandlerSuite) TestAPISpec() {

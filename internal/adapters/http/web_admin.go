@@ -6,6 +6,8 @@ import (
 	"html/template"
 	"net/http"
 	"net/url"
+	"strconv"
+	"strings"
 
 	_ "embed"
 
@@ -48,6 +50,15 @@ func requireAdmin(next http.HandlerFunc) http.HandlerFunc {
 		usr := userFromContext(r)
 		if usr == nil || !usr.IsAdmin {
 			http.Error(w, "forbidden", http.StatusForbidden)
+
+			return
+		}
+
+		// The admin panel is a browser UI: a bearer API token must not reach it. Its forms mint
+		// keys and invites and revoke users, and a CSRF token is available to anyone, so a leaked
+		// key would otherwise bypass the step-up the JSON issuance endpoints demand.
+		if apiTokenHashFromCtx(r.Context()) != "" {
+			http.Error(w, "the admin panel requires a browser session", http.StatusForbidden)
 
 			return
 		}
@@ -104,7 +115,8 @@ func (h *AdminHandler) AdminInviteHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	token, genErr := h.authMgr.GenerateInvite(r.Context(), usr.ID)
+	// requireAdmin admits only browser sessions, which issue without a step-up.
+	token, genErr := h.authMgr.GenerateInvite(r.Context(), usr.ID, auth.SessionIssuer())
 	if genErr != nil {
 		data.InviteError = "Failed to generate invite link."
 	} else {
@@ -161,7 +173,21 @@ func (h *AdminHandler) AdminRevokeHandler(w http.ResponseWriter, r *http.Request
 func (h *AdminHandler) AdminCreateKeyHandler(w http.ResponseWriter, r *http.Request) {
 	usr := userFromContext(r)
 
-	plain, createErr := h.authMgr.CreateAPIToken(r.Context(), usr.ID)
+	// requireAdmin admits only browser sessions, which issue without a step-up. An empty lifetime
+	// means 0 (never expires); an unparsable or out-of-range one is refused by the usecase
+	// (ErrInvalidAPITokenTTL).
+	ttlDays := 0
+
+	if raw := strings.TrimSpace(r.FormValue("ttl_days")); raw != "" {
+		parsed, ttlErr := strconv.Atoi(raw)
+		if ttlErr != nil {
+			parsed = -1
+		}
+
+		ttlDays = parsed
+	}
+
+	plain, createErr := h.authMgr.CreateAPIToken(r.Context(), usr.ID, auth.SessionIssuer(), ttlDays)
 
 	data, err := h.adminData(r, usr.ID)
 	if err != nil {
@@ -176,8 +202,12 @@ func (h *AdminHandler) AdminCreateKeyHandler(w http.ResponseWriter, r *http.Requ
 		h.log.ErrorContext(r.Context(), "create api token", "err", createErr)
 
 		data.KeyError = "Failed to create API key."
-		if errors.Is(createErr, domain.ErrAPITokenLimit) {
+
+		switch {
+		case errors.Is(createErr, domain.ErrAPITokenLimit):
 			data.KeyError = "This user already holds the maximum number of API keys; revoke one first."
+		case errors.Is(createErr, domain.ErrInvalidAPITokenTTL):
+			data.KeyError = fmt.Sprintf("Lifetime must be 0 (never expires) to %d days.", auth.MaxAPITokenTTLDays)
 		}
 	default:
 		scheme := h.scheme(r)

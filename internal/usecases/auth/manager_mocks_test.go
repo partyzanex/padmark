@@ -567,6 +567,20 @@ func (mr *MockAPITokenStoreMockRecorder) CreateIfUnderLimit(ctx, t, limit any) *
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateIfUnderLimit", reflect.TypeOf((*MockAPITokenStore)(nil).CreateIfUnderLimit), ctx, t, limit)
 }
 
+// DeleteByUserID mocks base method.
+func (m *MockAPITokenStore) DeleteByUserID(ctx context.Context, userID uuid.UUID) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteByUserID", ctx, userID)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// DeleteByUserID indicates an expected call of DeleteByUserID.
+func (mr *MockAPITokenStoreMockRecorder) DeleteByUserID(ctx, userID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteByUserID", reflect.TypeOf((*MockAPITokenStore)(nil).DeleteByUserID), ctx, userID)
+}
+
 // GetByHash mocks base method.
 func (m *MockAPITokenStore) GetByHash(ctx context.Context, tokenHash string) (*domain.APIToken, error) {
 	m.ctrl.T.Helper()

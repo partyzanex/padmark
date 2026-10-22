@@ -3,6 +3,14 @@
 package ogenapi
 
 // setDefaults set default value of fields.
+func (s *CreateAPITokenRequest) setDefaults() {
+	{
+		val := int(0)
+		s.TTLDays.SetTo(val)
+	}
+}
+
+// setDefaults set default value of fields.
 func (s *CreateLinkRequest) setDefaults() {
 	{
 		val := bool(false)

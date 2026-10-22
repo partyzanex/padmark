@@ -158,18 +158,18 @@ func (mr *MockOnboardingManagerMockRecorder) AcceptInvite(ctx, token, username, 
 }
 
 // GenerateInvite mocks base method.
-func (m *MockOnboardingManager) GenerateInvite(ctx context.Context, adminUserID uuid.UUID) (string, error) {
+func (m *MockOnboardingManager) GenerateInvite(ctx context.Context, adminUserID uuid.UUID, issuer auth.Issuer) (string, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GenerateInvite", ctx, adminUserID)
+	ret := m.ctrl.Call(m, "GenerateInvite", ctx, adminUserID, issuer)
 	ret0, _ := ret[0].(string)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // GenerateInvite indicates an expected call of GenerateInvite.
-func (mr *MockOnboardingManagerMockRecorder) GenerateInvite(ctx, adminUserID any) *gomock.Call {
+func (mr *MockOnboardingManagerMockRecorder) GenerateInvite(ctx, adminUserID, issuer any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GenerateInvite", reflect.TypeOf((*MockOnboardingManager)(nil).GenerateInvite), ctx, adminUserID)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GenerateInvite", reflect.TypeOf((*MockOnboardingManager)(nil).GenerateInvite), ctx, adminUserID, issuer)
 }
 
 // IsEmpty mocks base method.
@@ -265,18 +265,18 @@ func (m *MockAPITokenManager) EXPECT() *MockAPITokenManagerMockRecorder {
 }
 
 // CreateAPIToken mocks base method.
-func (m *MockAPITokenManager) CreateAPIToken(ctx context.Context, userID uuid.UUID) (string, error) {
+func (m *MockAPITokenManager) CreateAPIToken(ctx context.Context, userID uuid.UUID, issuer auth.Issuer, ttlDays int) (string, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "CreateAPIToken", ctx, userID)
+	ret := m.ctrl.Call(m, "CreateAPIToken", ctx, userID, issuer, ttlDays)
 	ret0, _ := ret[0].(string)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // CreateAPIToken indicates an expected call of CreateAPIToken.
-func (mr *MockAPITokenManagerMockRecorder) CreateAPIToken(ctx, userID any) *gomock.Call {
+func (mr *MockAPITokenManagerMockRecorder) CreateAPIToken(ctx, userID, issuer, ttlDays any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateAPIToken", reflect.TypeOf((*MockAPITokenManager)(nil).CreateAPIToken), ctx, userID)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateAPIToken", reflect.TypeOf((*MockAPITokenManager)(nil).CreateAPIToken), ctx, userID, issuer, ttlDays)
 }
 
 // ListAPITokens mocks base method.
@@ -295,12 +295,13 @@ func (mr *MockAPITokenManagerMockRecorder) ListAPITokens(ctx, adminUserID any) *
 }
 
 // ResolveAPIToken mocks base method.
-func (m *MockAPITokenManager) ResolveAPIToken(ctx context.Context, plainToken string) (*domain.User, error) {
+func (m *MockAPITokenManager) ResolveAPIToken(ctx context.Context, plainToken string) (*domain.User, string, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "ResolveAPIToken", ctx, plainToken)
 	ret0, _ := ret[0].(*domain.User)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
+	ret1, _ := ret[1].(string)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
 }
 
 // ResolveAPIToken indicates an expected call of ResolveAPIToken.
@@ -393,33 +394,33 @@ func (mr *MockAuthManagerMockRecorder) ChangePassword(ctx, sessionID, oldPasswor
 }
 
 // CreateAPIToken mocks base method.
-func (m *MockAuthManager) CreateAPIToken(ctx context.Context, userID uuid.UUID) (string, error) {
+func (m *MockAuthManager) CreateAPIToken(ctx context.Context, userID uuid.UUID, issuer auth.Issuer, ttlDays int) (string, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "CreateAPIToken", ctx, userID)
+	ret := m.ctrl.Call(m, "CreateAPIToken", ctx, userID, issuer, ttlDays)
 	ret0, _ := ret[0].(string)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // CreateAPIToken indicates an expected call of CreateAPIToken.
-func (mr *MockAuthManagerMockRecorder) CreateAPIToken(ctx, userID any) *gomock.Call {
+func (mr *MockAuthManagerMockRecorder) CreateAPIToken(ctx, userID, issuer, ttlDays any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateAPIToken", reflect.TypeOf((*MockAuthManager)(nil).CreateAPIToken), ctx, userID)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateAPIToken", reflect.TypeOf((*MockAuthManager)(nil).CreateAPIToken), ctx, userID, issuer, ttlDays)
 }
 
 // GenerateInvite mocks base method.
-func (m *MockAuthManager) GenerateInvite(ctx context.Context, adminUserID uuid.UUID) (string, error) {
+func (m *MockAuthManager) GenerateInvite(ctx context.Context, adminUserID uuid.UUID, issuer auth.Issuer) (string, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GenerateInvite", ctx, adminUserID)
+	ret := m.ctrl.Call(m, "GenerateInvite", ctx, adminUserID, issuer)
 	ret0, _ := ret[0].(string)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // GenerateInvite indicates an expected call of GenerateInvite.
-func (mr *MockAuthManagerMockRecorder) GenerateInvite(ctx, adminUserID any) *gomock.Call {
+func (mr *MockAuthManagerMockRecorder) GenerateInvite(ctx, adminUserID, issuer any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GenerateInvite", reflect.TypeOf((*MockAuthManager)(nil).GenerateInvite), ctx, adminUserID)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GenerateInvite", reflect.TypeOf((*MockAuthManager)(nil).GenerateInvite), ctx, adminUserID, issuer)
 }
 
 // GetSession mocks base method.
@@ -512,12 +513,13 @@ func (mr *MockAuthManagerMockRecorder) Logout(ctx, sessionID any) *gomock.Call {
 }
 
 // ResolveAPIToken mocks base method.
-func (m *MockAuthManager) ResolveAPIToken(ctx context.Context, plainToken string) (*domain.User, error) {
+func (m *MockAuthManager) ResolveAPIToken(ctx context.Context, plainToken string) (*domain.User, string, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "ResolveAPIToken", ctx, plainToken)
 	ret0, _ := ret[0].(*domain.User)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
+	ret1, _ := ret[1].(string)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
 }
 
 // ResolveAPIToken indicates an expected call of ResolveAPIToken.

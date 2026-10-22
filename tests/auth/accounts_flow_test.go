@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pquerna/otp/totp"
 	"github.com/stretchr/testify/require"
 
 	clicmd "github.com/partyzanex/padmark/internal/adapters/cli"
@@ -205,7 +206,7 @@ func TestAccountsFlow(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, admin.IsAdmin)
 
-	apiKey, err := authMgr.CreateAPIToken(ctx, admin.ID)
+	apiKey, err := authMgr.CreateAPIToken(ctx, admin.ID, auth.Issuer{}, 0)
 	require.NoError(t, err)
 
 	adminEnvelope, err := domain.EncodeAPITokenEnvelope(srv.URL, apiKey)
@@ -213,9 +214,24 @@ func TestAccountsFlow(t *testing.T) {
 
 	require.NoError(t, clicmd.NewApp().Run(ctx, []string{"padmark-cli", "--token", adminEnvelope, "trust"}))
 
+	// Issuing with a bearer key needs a step-up: the password (here a flag) and a current TOTP
+	// code from the secret the setup printed once. Each code is accepted once, so every step-up
+	// below uses the next 30-second window.
+	enrollURI, err := url.Parse(totpURI)
+	require.NoError(t, err)
+
+	totpCodeAt := func(step int) string {
+		code, codeErr := totp.GenerateCode(enrollURI.Query().Get("secret"),
+			time.Now().Add(time.Duration(step)*30*time.Second))
+		require.NoError(t, codeErr)
+
+		return code
+	}
+
 	out = captureStdout(t, func() error {
 		return clicmd.NewApp().Run(ctx, []string{
 			"padmark-cli", "--token", adminEnvelope, "create-token",
+			"--password", apiFlowPassword, "--totp-code", totpCodeAt(0), "--ttl-days", "30",
 		})
 	})
 
@@ -224,34 +240,22 @@ func TestAccountsFlow(t *testing.T) {
 	require.True(t, first, "create-token must print a pmk_ envelope, got: %q", selfIssued)
 	require.Equal(t, srv.URL, base)
 
-	// The issued envelope must be immediately usable: another self-issued token (2/20 cap).
-	resp = bearerPost(t, srv.URL, "/api/tokens", bearer)
-	require.Equal(t, http.StatusCreated, resp.StatusCode)
+	// The issued envelope is immediately usable, but a key alone cannot multiply itself.
+	status, body := hardeningDo(t, srv.URL, http.MethodPost, "/api/tokens", bearer, "", "")
+	require.Equal(t, http.StatusForbidden, status, body)
+	require.Contains(t, body, `"code":"step_up_required"`)
 
-	var tokenOut struct {
-		Token string `json:"token"`
-	}
-
-	err = json.NewDecoder(resp.Body).Decode(&tokenOut)
-	require.NoError(t, err)
-
-	_ = resp.Body.Close()
-
-	_, _, decoded := domain.DecodeAPITokenEnvelope(tokenOut.Token)
-	require.True(t, decoded)
-
-	// ── invites: admin issues, member enrolls via CLI setup, replay is 410 ──
-	resp = bearerPost(t, srv.URL, "/api/invites", bearer)
-	require.Equal(t, http.StatusCreated, resp.StatusCode)
+	// ── invites: admin issues (with step-up), member enrolls via CLI setup, replay is 410 ──
+	status, body = hardeningDo(t, srv.URL, http.MethodPost, "/api/invites", bearer, "",
+		`{"password":"`+apiFlowPassword+`","totp_code":"`+totpCodeAt(1)+`"}`)
+	require.Equal(t, http.StatusCreated, status, body)
 
 	var inviteOut struct {
 		InviteURL string `json:"invite_url"`
 	}
 
-	err = json.NewDecoder(resp.Body).Decode(&inviteOut)
+	err = json.Unmarshal([]byte(body), &inviteOut)
 	require.NoError(t, err)
-
-	_ = resp.Body.Close()
 
 	inviteURL, parseErr := url.Parse(inviteOut.InviteURL)
 	require.NoError(t, parseErr)
@@ -269,6 +273,9 @@ func TestAccountsFlow(t *testing.T) {
 	})
 	require.True(t, strings.HasPrefix(strings.TrimSpace(out), "otpauth://totp/"))
 
+	memberURI, err := url.Parse(strings.TrimSpace(out))
+	require.NoError(t, err)
+
 	// Replay of the spent invite is 410 — the token is single-use.
 	resp = setupPost(t, srv.URL,
 		`{"username":"other","password":"`+apiFlowPassword+`","invite":"`+inviteToken+`"}`)
@@ -280,17 +287,21 @@ func TestAccountsFlow(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, member.IsAdmin)
 
-	memberKey, err := authMgr.CreateAPIToken(ctx, member.ID)
+	memberKey, err := authMgr.CreateAPIToken(ctx, member.ID, auth.Issuer{}, 0)
 	require.NoError(t, err)
 
 	resp = bearerPost(t, srv.URL, "/api/invites", memberKey)
 	require.Equal(t, http.StatusForbidden, resp.StatusCode)
 	_ = resp.Body.Close()
 
-	// Member's self-service token issuance works — any authenticated caller, self only.
-	resp = bearerPost(t, srv.URL, "/api/tokens", memberKey)
-	require.Equal(t, http.StatusCreated, resp.StatusCode)
-	_ = resp.Body.Close()
+	// Member's self-service token issuance works — any authenticated caller, self only — once
+	// the bearer re-authenticates with the member's own password and TOTP code.
+	memberCode, err := totp.GenerateCode(memberURI.Query().Get("secret"), time.Now())
+	require.NoError(t, err)
+
+	status, body = hardeningDo(t, srv.URL, http.MethodPost, "/api/tokens", memberKey, "",
+		`{"password":"`+apiFlowPassword+`","totp_code":"`+memberCode+`"}`)
+	require.Equal(t, http.StatusCreated, status, body)
 
 	// ── the origin gate: cross-site mints are refused, same-origin passes (P1/P2 fixes) ──
 	// A page on a sibling subdomain rides the session cookie (SameSite alone admits it);
@@ -303,10 +314,17 @@ func TestAccountsFlow(t *testing.T) {
 	require.Equal(t, http.StatusForbidden, resp.StatusCode)
 	_ = resp.Body.Close()
 
-	// The same-origin browser call keeps working (the browser sends its own origin).
+	// The same-origin call passes the origin gate (the browser sends its own origin) and reaches
+	// the issuing rule, which wants the bearer's step-up — not the cross-origin refusal.
 	resp = bearerPostOrigin(t, srv.URL, "/api/tokens", memberKey, srv.URL)
-	require.Equal(t, http.StatusCreated, resp.StatusCode)
+
+	sameOrigin, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+
 	_ = resp.Body.Close()
+
+	require.Equal(t, http.StatusForbidden, resp.StatusCode)
+	require.Contains(t, string(sameOrigin), `"code":"step_up_required"`)
 
 	// JSON setup: a CORS-safelisted text/plain Content-Type (a preflight-free cross-site fetch,
 	// no Fetch Metadata required) is refused — the headless branch exists only for JSON bodies.
@@ -322,14 +340,15 @@ func TestAccountsFlow(t *testing.T) {
 		"a text/plain JSON smuggle must not reach the setup usecase")
 	_ = plainResp.Body.Close()
 
-	// ── the per-user cap: 20 live tokens max, the 21st answers 429 ──
-	// admin holds 3 issued above (manager, create-token, route); fill to 20, then 429.
-	for range 17 {
-		_, err = authMgr.CreateAPIToken(ctx, admin.ID)
+	// ── the per-user cap: 20 live tokens max, the 21st is refused ──
+	// admin holds 2 issued above (manager, create-token); fill to 20. Over HTTP the refusal is
+	// 429 (unit-tested); here it is checked at the usecase, since every further bearer issue
+	// would need another TOTP window.
+	for range 18 {
+		_, err = authMgr.CreateAPIToken(ctx, admin.ID, auth.Issuer{}, 0)
 		require.NoError(t, err)
 	}
 
-	resp = bearerPost(t, srv.URL, "/api/tokens", bearer)
-	require.Equal(t, http.StatusTooManyRequests, resp.StatusCode)
-	_ = resp.Body.Close()
+	_, err = authMgr.CreateAPIToken(ctx, admin.ID, auth.Issuer{}, 0)
+	require.ErrorIs(t, err, domain.ErrAPITokenLimit)
 }

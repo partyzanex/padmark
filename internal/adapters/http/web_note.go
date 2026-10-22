@@ -29,9 +29,9 @@ type NoteHandler struct {
 	noteTmpl    *template.Template
 	indexTmpl   *template.Template // shared with PageHandler.IndexPage; EditPage reuses the editor template.
 
-	// lockout tracks consecutive wrong-edit-code failures per (resource ID, verified caller ID)
-	// pair — see failLockoutKey: an authenticated user's sessions and API tokens share one
-	// bucket, and uuid.Nil is the single shared anonymous bucket per resource. It is shared with
+	// lockout tracks consecutive wrong-edit-code failures per bucket — see failLockoutKey: an
+	// authenticated user's sessions and API tokens share one bucket per resource, and anonymous
+	// callers get one bucket per resource and client IP. It is shared with
 	// the ogen-served single-segment PUT/DELETE /notes/{id} routes (see registerOgenRoutes in
 	// router.go) so fail-lockout tracking is consistent for a note regardless of which route
 	// variant a client hits.
@@ -56,9 +56,9 @@ func newNoteHandler(c *common, manager NoteManager, noteTmpl, indexTmpl *templat
 // ServeMux specificity single-segment IDs keep going to ogen and multi-segment to these.
 func (h *NoteHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.Handle("PUT /notes/{id...}",
-		requireSameOrigin(h.log, withFailLockout(h.lockout, h.log, http.HandlerFunc(h.UpdateNoteByPath))))
+		requireSameOrigin(h.log, withFailLockout(h.lockout, h.trustedProxies, h.log, http.HandlerFunc(h.UpdateNoteByPath))))
 	mux.Handle("DELETE /notes/{id...}",
-		requireSameOrigin(h.log, withFailLockout(h.lockout, h.log, http.HandlerFunc(h.DeleteNoteByPath))))
+		requireSameOrigin(h.log, withFailLockout(h.lockout, h.trustedProxies, h.log, http.HandlerFunc(h.DeleteNoteByPath))))
 	mux.HandleFunc("GET /notes/{id...}", h.GetNote)
 	mux.HandleFunc("POST /notes/{id...}", h.guard(h.HandleReveal))
 	mux.HandleFunc("GET /edit/{id...}", h.EditPage)

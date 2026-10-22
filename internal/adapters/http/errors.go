@@ -61,8 +61,16 @@ func domainErrStatus(err error) (status int, message string) {
 		{domain.ErrOwnerPrivacyRequiresOwner, http.StatusUnprocessableEntity},
 		{domain.ErrInvalidSlug, http.StatusUnprocessableEntity},
 		{domain.ErrCustomSlugDisabled, http.StatusUnprocessableEntity},
+		// Usually caught earlier by the schema's minLength/maxLength (ogen answers 400); what
+		// reaches the usecase (surrounding whitespace, control characters) is a 422 like the
+		// other create-time validation errors above.
+		{domain.ErrEditCodeTooShort, http.StatusUnprocessableEntity},
+		{domain.ErrEditCodeMalformed, http.StatusUnprocessableEntity},
 		{domain.ErrSlugConflict, http.StatusConflict},
 		{domain.ErrBurnIntentRequired, http.StatusConflict},
+		{domain.ErrStepUpRequired, http.StatusForbidden},
+		{domain.ErrStepUpFailed, http.StatusForbidden},
+		{domain.ErrInvalidAPITokenTTL, http.StatusUnprocessableEntity},
 		{domain.ErrInvalidEditCode, http.StatusForbidden},
 		{domain.ErrForbidden, http.StatusForbidden},
 		// javascript:/data:/file:/etc. target URLs are a malformed request, not an

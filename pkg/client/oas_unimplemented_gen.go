@@ -15,9 +15,14 @@ var _ Handler = UnimplementedHandler{}
 
 // CreateAPIToken implements createAPIToken operation.
 //
-// Issues a long-lived API bearer key **for the caller themself** — the operation takes no
-// request body and cannot mint a token for another user. Any valid credential works: a
-// TOTP session cookie (browser) or an `Authorization: Bearer <token>` API token.
+// Issues an API bearer key **for the caller themself** — it cannot mint a token for another
+// user. `ttl_days` sets its lifetime in days (`0` or omitted = never expires).
+// A TOTP session cookie (browser) issues directly. An `Authorization: Bearer <token>` caller
+// must re-authenticate with the account `password` and a fresh `totp_code` (step-up,
+// replay-protected like a login) — otherwise `403` (`code: step_up_required`, or
+// `step_up_failed` for a wrong password/code) — so a leaked key alone cannot multiply
+// itself. A key issued by a bearer records that bearer as its issuer: revoking the issuer
+// revokes it too. Changing the account password revokes all of the user's keys.
 // The returned `token` is a `pmk_…` envelope (`pmk_` + base64url of
 // `{"url": "<server base url>", "token": "<bearer key>"}`) and is shown **exactly
 // once** — only its SHA-256 hash is stored server-side. A user may hold at most 20 live
@@ -25,7 +30,7 @@ var _ Handler = UnimplementedHandler{}
 // revocation is admin-panel-only today).
 //
 // POST /api/tokens
-func (UnimplementedHandler) CreateAPIToken(ctx context.Context) (r CreateAPITokenRes, _ error) {
+func (UnimplementedHandler) CreateAPIToken(ctx context.Context, req OptCreateAPITokenRequest) (r CreateAPITokenRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 
@@ -35,9 +40,12 @@ func (UnimplementedHandler) CreateAPIToken(ctx context.Context) (r CreateAPIToke
 // credential (a non-admin authenticated caller gets `403`). The invite is single-use and
 // expires (24 h); the invitee completes signup through the web setup page or the
 // machine-readable variant of `POST /setup` (send JSON with `Accept: application/json`).
+// Like `POST /api/tokens`, a bearer caller must re-authenticate with `password` and
+// `totp_code` (`403`, `code: step_up_required` / `step_up_failed`); a session issues
+// directly.
 //
 // POST /api/invites
-func (UnimplementedHandler) CreateInvite(ctx context.Context) (r CreateInviteRes, _ error) {
+func (UnimplementedHandler) CreateInvite(ctx context.Context, req OptStepUpRequest) (r CreateInviteRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 

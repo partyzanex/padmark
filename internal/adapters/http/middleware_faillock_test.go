@@ -18,7 +18,7 @@ import (
 func TestWithFailLockout_LockedOut_ReturnsJSONError(t *testing.T) {
 	cache := newFailLockoutCache()
 
-	setErr := cache.Set(failLockoutKey{ID: "locked-note", CallerID: uuid.Nil}, maxFailedAttempts)
+	setErr := cache.Set(failLockoutKey{ID: "locked-note", IP: httptestRemoteIP, CallerID: uuid.Nil}, maxFailedAttempts)
 	require.NoError(t, setErr)
 
 	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -26,7 +26,7 @@ func TestWithFailLockout_LockedOut_ReturnsJSONError(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	handler := withFailLockout(cache, testDiscardLog, inner)
+	handler := withFailLockout(cache, nil, testDiscardLog, inner)
 
 	req := httptest.NewRequest(http.MethodPut, "/notes/locked-note", nil)
 	req.SetPathValue("id", "locked-note")
@@ -50,7 +50,7 @@ func TestWithFailLockout_CallerSuccessDoesNotResetOthers(t *testing.T) {
 			w.WriteHeader(http.StatusForbidden)
 		}
 	})
-	handler := withFailLockout(cache, testDiscardLog, inner)
+	handler := withFailLockout(cache, nil, testDiscardLog, inner)
 	send := func(caller uuid.UUID, success bool) int {
 		req := httptest.NewRequest(http.MethodPut, "/notes/resource", nil)
 		req.SetPathValue("id", "resource")
@@ -89,7 +89,7 @@ func TestWithFailLockout_CallerSuccessDoesNotResetOthers(t *testing.T) {
 func TestWithFailLockout_UnderThreshold_ReachesUpstream(t *testing.T) {
 	cache := newFailLockoutCache()
 
-	setErr := cache.Set(failLockoutKey{ID: "almost-locked", CallerID: uuid.Nil}, maxFailedAttempts-1)
+	setErr := cache.Set(failLockoutKey{ID: "almost-locked", IP: httptestRemoteIP, CallerID: uuid.Nil}, maxFailedAttempts-1)
 	require.NoError(t, setErr)
 
 	called := false
@@ -99,7 +99,7 @@ func TestWithFailLockout_UnderThreshold_ReachesUpstream(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	handler := withFailLockout(cache, testDiscardLog, inner)
+	handler := withFailLockout(cache, nil, testDiscardLog, inner)
 
 	req := httptest.NewRequest(http.MethodPut, "/notes/almost-locked", nil)
 	req.SetPathValue("id", "almost-locked")
