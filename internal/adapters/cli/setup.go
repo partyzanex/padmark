@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"strings"
 
@@ -89,8 +88,11 @@ func setupAction(ctx context.Context, cmd *urcli.Command) error {
 
 	endpoint := serverURL + "/setup"
 
-	// Same advisory as the token flow: secrets must not travel in cleartext silently.
-	warnInsecureSetup(commandErrWriter(cmd), endpoint)
+	// Same policy as the token flow: secrets must not travel in cleartext silently.
+	insecureErr := checkInsecureSetup(commandErrWriter(cmd), endpoint, cmd.Bool(FlagAllowInsecureHTTP))
+	if insecureErr != nil {
+		return insecureErr
+	}
 
 	httpClient := &http.Client{Timeout: cmd.Duration(FlagTimeout)}
 
@@ -112,21 +114,10 @@ func setupAction(ctx context.Context, cmd *urcli.Command) error {
 	return handleSetupRes(commandErrWriter(cmd), resp)
 }
 
-// warnInsecureSetup prints a stderr warning when the initial admin's password (and the returned
-// TOTP secret, an equivalent credential) would travel in cleartext over a non-HTTPS URL.
-// Advisory only and does not block the request, mirroring warnInsecureToken.
-func warnInsecureSetup(errOut io.Writer, serverURL string) {
-	parsed, parseErr := url.Parse(serverURL)
-	if parseErr == nil && parsed.Scheme == "https" {
-		return
-	}
-
-	// Best-effort advisory write (errWriter swallows the error); a failed warning must not
-	// abort the command.
-	ew := &errWriter{w: errOut, err: nil}
-	ew.printf(
-		"warning: the initial admin password and TOTP secret travel in cleartext over a "+
-			"non-HTTPS URL (%s); use an https:// server URL\n", serverURL)
+// checkInsecureSetup guards the initial admin's password (and the returned TOTP secret, an
+// equivalent credential) against cleartext transport with the same policy as checkInsecureToken.
+func checkInsecureSetup(errOut io.Writer, serverURL string, allowInsecure bool) error {
+	return checkInsecureTransport(errOut, serverURL, "the initial admin password and TOTP secret", allowInsecure)
 }
 
 // setupJSONHeaders marks the request as the machine-readable setup variant: application/json

@@ -9,6 +9,8 @@ const (
 	FlagToken   = "token" // same flag name and semantics as padmark-cli
 	FlagBaseURL = "base-url"
 	FlagTimeout = "timeout" // same flag name and semantics as padmark-cli
+	// FlagAllowInsecureHTTP permits sending the token over plain HTTP to a non-loopback host.
+	FlagAllowInsecureHTTP = "allow-insecure-http"
 	// FlagLogLevel selects the minimum slog level; logs go to stderr only (stdout is the protocol).
 	FlagLogLevel = "log-level"
 )
@@ -19,6 +21,8 @@ const (
 	EnvToken   = "PADMARK_TOKEN"
 	EnvBaseURL = "PADMARK_URL"
 	EnvTimeout = "PADMARK_TIMEOUT"
+	// EnvAllowInsecureHTTP is the environment source of --allow-insecure-http.
+	EnvAllowInsecureHTTP = "PADMARK_ALLOW_INSECURE_HTTP"
 	// EnvLogLevel is the same variable the padmark server reads for its log level.
 	EnvLogLevel = "PADMARK_LOG_LEVEL"
 )

@@ -338,7 +338,10 @@ padmark-cli delete-link my-link --edit-code MySecretCode1
 
 Set defaults via environment variables: `PADMARK_URL`, `PADMARK_TOKEN`, `PADMARK_TIMEOUT`, `PADMARK_EDIT_CODE`.
 
-> A bearer token over a non-HTTPS `--url` is sent in cleartext; the CLI prints a stderr warning. Use an `https://` server URL in production.
+> A bearer token (or the `setup` password) over a non-HTTPS `--url` travels in cleartext. For a
+> loopback host (`localhost`, `127.0.0.0/8`, `::1`) the CLI only prints a stderr warning; for any
+> other host it **refuses** unless you pass `--allow-insecure-http` / `PADMARK_ALLOW_INSECURE_HTTP=true`.
+> Use an `https://` server URL in production.
 
 ---
 
@@ -471,7 +474,8 @@ Tools: `create_note`, `get_note`, `update_note`, `delete_note`, `create_link`,
 
 Configure with the same credential and defaults as the CLI: `--token` / `PADMARK_TOKEN`
 (a `pmk_…` envelope works — it carries the server URL too), `--base-url` / `PADMARK_URL`
-(default `http://localhost:8080`), `--timeout` / `PADMARK_TIMEOUT`.
+(default `http://localhost:8080`), `--timeout` / `PADMARK_TIMEOUT`, `--allow-insecure-http` /
+`PADMARK_ALLOW_INSECURE_HTTP` (the token is refused over plain HTTP to a non-loopback host unless set).
 
 MCP logging uses `--log-level` / `PADMARK_LOG_LEVEL` (`debug`, `info`, `warn`, `error`);
 logs go to stderr so stdout stays reserved for the protocol. Unknown levels fail startup.
@@ -486,7 +490,7 @@ Example `mcpServers` entry (Claude Code / Cursor JSON config):
   "mcpServers": {
     "padmark": {
       "command": "/usr/local/bin/padmark-mcp",
-      "args": ["--token", "pmk_..."]
+      "env": { "PADMARK_TOKEN": "pmk_..." }
     }
   }
 }
@@ -538,8 +542,9 @@ Only the raw key (never the envelope wrapper) is sent as `Authorization: Bearer 
 request. On the server, the auth middleware resolves it via `Manager.ResolveAPIToken` after the
 session-cookie check; an unknown, revoked, or expired key falls through to 401 / login redirect.
 
-> Sending a token to a non-HTTPS server logs a cleartext-exposure warning (advisory, not blocking);
-> use an `https://` server URL in production.
+> Sending a token to a non-HTTPS, non-loopback server is refused unless `--allow-insecure-http`
+> (`PADMARK_ALLOW_INSECURE_HTTP`) is set; loopback hosts only log a cleartext-exposure warning.
+> Use an `https://` server URL in production.
 
 ### User accounts with TOTP 2FA (web)
 
@@ -915,6 +920,7 @@ cost until the password is changed. The change costs RAM and CPU per login, not 
 | `--url`, `-u` | Padmark server URL (env: `PADMARK_URL`, default `http://localhost:8080`) |
 | `--token` | Bearer token for authentication (env: `PADMARK_TOKEN`; falls back to `~/.config/padmark/token`) |
 | `--timeout` | Per-request HTTP timeout; `0` disables it (env: `PADMARK_TIMEOUT`, default `30s`) |
+| `--allow-insecure-http` | Permit a token or setup password over plain HTTP to a non-loopback host (env: `PADMARK_ALLOW_INSECURE_HTTP`, default `false`) |
 
 ---
 
