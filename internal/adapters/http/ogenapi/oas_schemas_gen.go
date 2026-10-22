@@ -722,7 +722,8 @@ func (*CreateNoteInternalServerError) createNoteRes() {}
 type CreateNoteRequest struct {
 	// Human-readable title shown in the note header.
 	Title OptString `json:"title"`
-	// Note body. Interpreted as Markdown unless `content_type` is `text/plain`.
+	// Note body, at most 1048576 characters (1 MiB of text). Interpreted as Markdown unless `content_type`
+	// is `text/plain`. A longer body is rejected before the note is stored.
 	Content string `json:"content"`
 	// MIME type of `content`; controls rendering on the view page.
 	ContentType OptCreateNoteRequestContentType `json:"content_type"`
@@ -2841,7 +2842,7 @@ func (*UpdateNoteNotFound) updateNoteRes() {}
 type UpdateNoteRequest struct {
 	// New title.
 	Title OptString `json:"title"`
-	// New body.
+	// New body, at most 1048576 characters (see `CreateNoteRequest.content`).
 	Content string `json:"content"`
 	// New content type; defaults to the note's current type when omitted.
 	ContentType OptUpdateNoteRequestContentType `json:"content_type"`

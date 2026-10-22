@@ -817,6 +817,178 @@ func (s *ManagerTestSuite) TestGetRendered_OK() {
 	s.Equal("<h1>Hello</h1>", html)
 }
 
+// ── content size cap ──
+
+func (s *ManagerTestSuite) TestCreate_ContentOverCap_Rejected() {
+	note := &domain.Note{Content: strings.Repeat("a", domain.MaxContentLength+1)}
+
+	_, err := s.manager.Create(s.T().Context(), note)
+
+	s.ErrorIs(err, domain.ErrContentTooLarge)
+}
+
+func (s *ManagerTestSuite) TestCreate_ContentAtCap_Accepted() {
+	s.expectSlugFree()
+	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
+
+	note := &domain.Note{Content: strings.Repeat("a", domain.MaxContentLength)}
+
+	_, err := s.manager.Create(s.T().Context(), note)
+
+	s.Require().NoError(err)
+}
+
+func (s *ManagerTestSuite) TestUpdate_ContentOverCap_Rejected() {
+	note := &domain.Note{Content: strings.Repeat("é", domain.MaxContentLength+1)}
+
+	_, err := s.manager.Update(s.T().Context(), "abc-123", "secret123456", uuid.Nil, note)
+
+	s.ErrorIs(err, domain.ErrContentTooLarge)
+}
+
+// ── render cache ──
+
+// statefulRenderCache backs the generated MockRenderCache with a map so the tests observe real
+// get/set/delete behaviour rather than a script of calls.
+func (s *ManagerTestSuite) statefulRenderCache() *MockRenderCache {
+	type entry struct {
+		updatedAt time.Time
+		html      string
+	}
+
+	store := map[string]entry{}
+	cache := NewMockRenderCache(s.ctrl)
+
+	cache.EXPECT().Get(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(id string, updatedAt time.Time) (string, bool) {
+			cached, ok := store[id]
+			if !ok || !cached.updatedAt.Equal(updatedAt) {
+				return "", false
+			}
+
+			return cached.html, true
+		}).AnyTimes()
+	cache.EXPECT().Set(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+		func(id string, updatedAt time.Time, html string) { store[id] = entry{updatedAt, html} }).AnyTimes()
+	cache.EXPECT().Delete(gomock.Any()).DoAndReturn(func(id string) { delete(store, id) }).AnyTimes()
+
+	return cache
+}
+
+// TestGetRendered_UnchangedNoteIsRenderedOnce: two views of an unchanged note cost one render.
+func (s *ManagerTestSuite) TestGetRendered_UnchangedNoteIsRenderedOnce() {
+	s.manager.WithRenderCache(s.statefulRenderCache())
+
+	stamp := time.Now().Add(-time.Hour)
+
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).
+		DoAndReturn(func(context.Context, string) (*domain.Note, error) {
+			return &domain.Note{ID: "abc-123", Content: "# Hello", UpdatedAt: stamp}, nil
+		}).Times(2)
+	s.storage.EXPECT().IncrementViews(gomock.Any(), domain.HashSlug("abc-123")).Return(nil).Times(2)
+	s.renderer.EXPECT().Render("# Hello").Return("<h1>Hello</h1>", nil).Times(1)
+
+	for range 2 {
+		_, html, err := s.manager.GetRendered(s.T().Context(), "abc-123")
+		s.Require().NoError(err)
+		s.Equal("<h1>Hello</h1>", html)
+	}
+}
+
+// TestGetRendered_ReRendersAfterUpdate: Update invalidates the entry, so the next view renders
+// the new content instead of serving stale HTML.
+func (s *ManagerTestSuite) TestGetRendered_ReRendersAfterUpdate() {
+	s.manager.WithRenderCache(s.statefulRenderCache())
+
+	stamp := time.Now().Add(-time.Hour)
+	current := &domain.Note{ID: "abc-123", Content: "old", UpdatedAt: stamp, EditCode: "secret123456"}
+
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).
+		DoAndReturn(func(context.Context, string) (*domain.Note, error) {
+			clone := *current
+
+			return &clone, nil
+		}).AnyTimes()
+	s.storage.EXPECT().IncrementViews(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
+	s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("abc-123"), gomock.Any()).
+		DoAndReturn(func(_ context.Context, _ string, note *domain.Note) error {
+			// Stored state after the update; keep the old UpdatedAt to prove the explicit
+			// invalidation (not just the changed key) drops the entry.
+			current = &domain.Note{ID: "abc-123", Content: "new", UpdatedAt: stamp, EditCode: "secret123456"}
+
+			return nil
+		})
+	s.renderer.EXPECT().Render("old").Return("<p>old</p>", nil).Times(1)
+	s.renderer.EXPECT().Render("new").Return("<p>new</p>", nil).Times(1)
+
+	_, html, err := s.manager.GetRendered(s.T().Context(), "abc-123")
+	s.Require().NoError(err)
+	s.Equal("<p>old</p>", html)
+
+	_, err = s.manager.Update(s.T().Context(), "abc-123", "secret123456", uuid.Nil, &domain.Note{Content: "new"})
+	s.Require().NoError(err)
+
+	_, html, err = s.manager.GetRendered(s.T().Context(), "abc-123")
+	s.Require().NoError(err)
+	s.Equal("<p>new</p>", html)
+}
+
+// TestGetRendered_ReRendersWhenUpdatedAtChanges covers an update made through another replica:
+// no local invalidation happens, but the new updated_at misses the cached entry.
+func (s *ManagerTestSuite) TestGetRendered_ReRendersWhenUpdatedAtChanges() {
+	s.manager.WithRenderCache(s.statefulRenderCache())
+
+	first := &domain.Note{ID: "abc-123", Content: "v1", UpdatedAt: time.Now().Add(-time.Hour)}
+	second := &domain.Note{ID: "abc-123", Content: "v2", UpdatedAt: time.Now()}
+
+	gomock.InOrder(
+		s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(first, nil),
+		s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(second, nil),
+	)
+	s.storage.EXPECT().IncrementViews(gomock.Any(), gomock.Any()).Return(nil).Times(2)
+	s.renderer.EXPECT().Render("v1").Return("<p>v1</p>", nil)
+	s.renderer.EXPECT().Render("v2").Return("<p>v2</p>", nil)
+
+	_, html, err := s.manager.GetRendered(s.T().Context(), "abc-123")
+	s.Require().NoError(err)
+	s.Equal("<p>v1</p>", html)
+
+	_, html, err = s.manager.GetRendered(s.T().Context(), "abc-123")
+	s.Require().NoError(err)
+	s.Equal("<p>v2</p>", html)
+}
+
+// TestGetRendered_BurnNotesAreNeverCached: reading a burn-after-reading note destroys it, and a
+// cached copy would outlive the burn in memory.
+func (s *ManagerTestSuite) TestGetRendered_BurnNotesAreNeverCached() {
+	cache := NewMockRenderCache(s.ctrl)
+	cache.EXPECT().Get(gomock.Any(), gomock.Any()).Times(0)
+	cache.EXPECT().Set(gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
+	s.manager.WithRenderCache(cache)
+
+	note := &domain.Note{ID: "abc-123", Content: "# Hello", BurnAfterReading: true}
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(note, nil)
+	s.storage.EXPECT().Consume(gomock.Any(), domain.HashSlug("abc-123")).Return(note, nil)
+	s.renderer.EXPECT().Render("# Hello").Return("<h1>Hello</h1>", nil)
+
+	_, _, err := s.manager.GetRendered(s.T().Context(), "abc-123")
+
+	s.Require().NoError(err)
+}
+
+// TestDelete_DropsCachedRender: a deleted note's rendered content must not linger in memory.
+func (s *ManagerTestSuite) TestDelete_DropsCachedRender() {
+	cache := NewMockRenderCache(s.ctrl)
+	s.manager.WithRenderCache(cache)
+
+	existing := &domain.Note{ID: "abc-123", EditCode: "secret123456"}
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(existing, nil)
+	s.storage.EXPECT().Delete(gomock.Any(), domain.HashSlug("abc-123")).Return(nil)
+	cache.EXPECT().Delete(domain.HashSlug("abc-123"))
+
+	s.Require().NoError(s.manager.Delete(s.T().Context(), "abc-123", "secret123456", uuid.Nil))
+}
+
 func (s *ManagerTestSuite) TestGetRendered_BurnAfterReading() {
 	note := &domain.Note{ID: "abc-123", Content: "# Hello", BurnAfterReading: true}
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(note, nil)

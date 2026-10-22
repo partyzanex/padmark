@@ -27,6 +27,7 @@ import (
 	"github.com/partyzanex/padmark/internal/infra/linkmetrics"
 	"github.com/partyzanex/padmark/internal/infra/lock"
 	"github.com/partyzanex/padmark/internal/infra/render"
+	"github.com/partyzanex/padmark/internal/infra/rendercache"
 	"github.com/partyzanex/padmark/internal/infra/storage/postgres"
 	"github.com/partyzanex/padmark/internal/infra/storage/sqlite"
 	"github.com/partyzanex/padmark/internal/usecases/auth"
@@ -501,7 +502,8 @@ func buildHandlers(
 	slugLock := lock.NewLocker()
 
 	manager := notes.NewManager(repo, linkRepo, slugLock, render.NewRenderer(), noteCipher,
-		crypto.NewEditCodeHasher(argon2ParamsFromFlags(cmd)).WithLogger(log), log, cmd.Bool(FlagCustomSlugs))
+		crypto.NewEditCodeHasher(argon2ParamsFromFlags(cmd)).WithLogger(log), log, cmd.Bool(FlagCustomSlugs)).
+		WithRenderCache(rendercache.NewDefault(log))
 	linkManager := links.NewManager(linkRepo, checker, slugLock, linkCipher,
 		crypto.NewEditCodeHasher(argon2ParamsFromFlags(cmd)).WithLogger(log), log, cmd.Bool(FlagCustomSlugs)).
 		WithCache(linkcache.NewDefault(log)).

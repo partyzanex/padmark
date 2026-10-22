@@ -8,6 +8,7 @@ var (
 	// next access) — so its message stays resource-neutral rather than saying "note".
 	ErrExpired            = errors.New("expired")
 	ErrTitleTooLong       = errors.New("title exceeds maximum length")
+	ErrContentTooLarge    = errors.New("content exceeds maximum length")
 	ErrInvalidContentType = errors.New("unsupported content type")
 	ErrInvalidPrivacy     = errors.New("invalid privacy level")
 	// ErrOwnerPrivacyRequiresOwner is returned when privacy=owner would be set on a note with no

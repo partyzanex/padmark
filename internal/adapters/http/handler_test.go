@@ -500,6 +500,45 @@ func (s *HandlerSuite) TestCreateNote_OK() {
 	s.Equal("editcode1234", resp.EditCode)
 }
 
+// TestCreateNote_ContentOverCap_RejectedBeforeStorage: the OpenAPI maxLength on content is
+// enforced by the generated request validation, so an oversized body (well inside the 4 MiB
+// request limit) never reaches the manager.
+func (s *HandlerSuite) TestCreateNote_ContentOverCap_RejectedBeforeStorage() {
+	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog)
+	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog)
+
+	router, err := adhttp.NewRouter(handler, ogen, &adhttp.RouterOptions{
+		MaxBodyBytes: 4 * 1024 * 1024,
+		CSRFSecret:   testCSRFSecret,
+	})
+	s.Require().NoError(err)
+
+	body := `{"content":"` + strings.Repeat("a", domain.MaxContentLength+1) + `"}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/notes", strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusBadRequest, w.Code)
+	s.Contains(w.Body.String(), "content")
+}
+
+// TestCreateNote_ContentTooLargeFromManager_Is422 pins the domain sentinel's status for the
+// routes that reach the usecase check (native handlers, or a body the spec validation let by).
+func (s *HandlerSuite) TestCreateNote_ContentTooLargeFromManager_Is422() {
+	s.manager.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil, domain.ErrContentTooLarge)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/notes", strings.NewReader(`{"content":"x"}`))
+	r.Header.Set("Content-Type", "application/json")
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusUnprocessableEntity, w.Code)
+	s.Contains(w.Body.String(), domain.ErrContentTooLarge.Error())
+}
+
 func (s *HandlerSuite) TestCreateNote_WithTTL() {
 	note := newTestNote("burn", "content")
 	note.BurnAfterReading = true

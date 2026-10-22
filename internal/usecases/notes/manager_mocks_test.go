@@ -275,6 +275,69 @@ func (mr *MockRendererMockRecorder) RenderPlain(content any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RenderPlain", reflect.TypeOf((*MockRenderer)(nil).RenderPlain), content)
 }
 
+// MockRenderCache is a mock of RenderCache interface.
+type MockRenderCache struct {
+	ctrl     *gomock.Controller
+	recorder *MockRenderCacheMockRecorder
+	isgomock struct{}
+}
+
+// MockRenderCacheMockRecorder is the mock recorder for MockRenderCache.
+type MockRenderCacheMockRecorder struct {
+	mock *MockRenderCache
+}
+
+// NewMockRenderCache creates a new mock instance.
+func NewMockRenderCache(ctrl *gomock.Controller) *MockRenderCache {
+	mock := &MockRenderCache{ctrl: ctrl}
+	mock.recorder = &MockRenderCacheMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockRenderCache) EXPECT() *MockRenderCacheMockRecorder {
+	return m.recorder
+}
+
+// Delete mocks base method.
+func (m *MockRenderCache) Delete(id string) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "Delete", id)
+}
+
+// Delete indicates an expected call of Delete.
+func (mr *MockRenderCacheMockRecorder) Delete(id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Delete", reflect.TypeOf((*MockRenderCache)(nil).Delete), id)
+}
+
+// Get mocks base method.
+func (m *MockRenderCache) Get(id string, updatedAt time.Time) (string, bool) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Get", id, updatedAt)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(bool)
+	return ret0, ret1
+}
+
+// Get indicates an expected call of Get.
+func (mr *MockRenderCacheMockRecorder) Get(id, updatedAt any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Get", reflect.TypeOf((*MockRenderCache)(nil).Get), id, updatedAt)
+}
+
+// Set mocks base method.
+func (m *MockRenderCache) Set(id string, updatedAt time.Time, html string) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "Set", id, updatedAt, html)
+}
+
+// Set indicates an expected call of Set.
+func (mr *MockRenderCacheMockRecorder) Set(id, updatedAt, html any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Set", reflect.TypeOf((*MockRenderCache)(nil).Set), id, updatedAt, html)
+}
+
 // MockEncryptor is a mock of Encryptor interface.
 type MockEncryptor struct {
 	ctrl     *gomock.Controller

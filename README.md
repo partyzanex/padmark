@@ -590,6 +590,13 @@ hash of each invite token is stored in the database. Migration `20261014000002` 
 previously issued invites on both SQLite and PostgreSQL; admins must issue new links.
 Rolling back this migration also revokes invites, since raw tokens cannot be recovered.
 
+Note content is capped at 1,048,576 characters (`MaxContentLength`, published as `maxLength` in
+the OpenAPI spec); a longer body is rejected with `400` by the generated request validation, or
+`422` on the routes that decode the body by hand. The request-body limit (`--max-body-bytes`, 4 MB)
+is unchanged and still bounds JSON overhead and bulk requests. Rendered HTML of repeatedly viewed
+notes is cached in memory for up to two minutes (128 entries, never for burn-after-reading notes)
+and dropped on update and delete.
+
 Usernames are unique case-insensitively (`Admin` cannot be registered next to `admin`) and sign-in
 matches them case-insensitively; accounts keep the spelling they registered with. Migration
 `20261021000002` adds the unique index on `lower(username)`. If two existing accounts already

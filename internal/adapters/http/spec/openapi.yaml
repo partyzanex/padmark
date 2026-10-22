@@ -696,7 +696,10 @@ components:
           example: My snippet
         content:
           type: string
-          description: Note body. Interpreted as Markdown unless `content_type` is `text/plain`
+          maxLength: 1048576
+          description: |
+            Note body, at most 1048576 characters (1 MiB of text). Interpreted as Markdown unless
+            `content_type` is `text/plain`. A longer body is rejected before the note is stored.
           example: "# Hello\n\nThis is **padmark**."
         content_type:
           type: string
@@ -761,7 +764,8 @@ components:
           example: Updated title
         content:
           type: string
-          description: New body
+          maxLength: 1048576
+          description: New body, at most 1048576 characters (see `CreateNoteRequest.content`)
           example: "# Updated\n\nNew content."
         content_type:
           type: string

@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 )
@@ -27,6 +28,13 @@ func (ct ContentType) Valid() bool {
 }
 
 const MaxTitleLength = 500
+
+// MaxContentLength caps a note's content in characters (runes), checked by Note.Validate and
+// published as maxLength in the OpenAPI spec. It is deliberately well below the 4 MiB default
+// request-body limit, which stays sized for JSON overhead and bulk requests: markdown rendering
+// and sanitizing cost grows with content size, so an unbounded note is a CPU/memory lever for
+// anyone allowed to create or view one.
+const MaxContentLength = 1 << 20
 
 // Privacy controls who may read a note. The zero value is never used directly — nil on Note
 // means "not set" (defaults to PrivacyPublic on create, keeps the existing value on update),
@@ -92,6 +100,10 @@ func HashSlug(slug string) string {
 func (n *Note) Validate() error {
 	if len([]rune(n.Title)) > MaxTitleLength {
 		return ErrTitleTooLong
+	}
+
+	if utf8.RuneCountInString(n.Content) > MaxContentLength {
+		return ErrContentTooLarge
 	}
 
 	if n.ContentType != nil && !n.ContentType.Valid() {

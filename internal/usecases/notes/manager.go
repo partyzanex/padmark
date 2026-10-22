@@ -51,6 +51,27 @@ type Renderer interface {
 	RenderPlain(content string) (string, error)
 }
 
+// RenderCache memoizes rendered HTML so repeat views of an unchanged note skip markdown parsing
+// and sanitizing. Entries are keyed by the hashed note id (domain.HashSlug) and valid only for the
+// UpdatedAt they were rendered at, so a note changed anywhere — including through another replica —
+// misses instead of serving stale HTML. Strategy: fail-soft; the cache is an optimisation, so a
+// miss, an eviction or an implementation that stores nothing only costs a re-render.
+type RenderCache interface {
+	// Get returns the HTML cached for id at updatedAt, if any.
+	Get(id string, updatedAt time.Time) (string, bool)
+	// Set stores html as the render of id at updatedAt; an implementation may decline.
+	Set(id string, updatedAt time.Time, html string)
+	// Delete drops whatever is cached for id.
+	Delete(id string)
+}
+
+// noRenderCache is the default RenderCache: it caches nothing.
+type noRenderCache struct{}
+
+func (noRenderCache) Get(string, time.Time) (string, bool) { return "", false }
+func (noRenderCache) Set(string, time.Time, string)        {}
+func (noRenderCache) Delete(string)                        {}
+
 // Encryptor writes content using installation keys and the stored record ID as authenticated
 // context. legacySlug is only for reading old records; new ciphertext needs no slug to decrypt.
 // The interface lives at its consumer to keep the usecase independent of crypto infrastructure.
@@ -80,6 +101,8 @@ type Manager struct {
 	hasher    EditCodeHasher
 	log       *slog.Logger
 	burn      *burner
+	// renderCache defaults to noRenderCache; attach a real one with WithRenderCache.
+	renderCache RenderCache
 	// allowCustomSlugs gates user-supplied (human-readable) slugs. When false, custom slugs are
 	// rejected and only server-generated random slugs are issued.
 	allowCustomSlugs bool
@@ -103,8 +126,18 @@ func NewManager(
 		hasher:           hasher,
 		log:              log,
 		burn:             newBurner(storage, encryptor, log),
+		renderCache:      noRenderCache{},
 		allowCustomSlugs: allowCustomSlugs,
 	}
+}
+
+// WithRenderCache attaches a RenderCache for rendered note HTML. The default caches nothing, so
+// behaviour is identical without one. Called by the composition root; do not call after the
+// server starts serving requests.
+func (m *Manager) WithRenderCache(cache RenderCache) *Manager {
+	m.renderCache = cache
+
+	return m
 }
 
 // validateForCreate runs Note.Validate and the ownership invariant (Note.ValidateOwnership).
@@ -377,6 +410,8 @@ func (m *Manager) Update(
 		return nil, fmt.Errorf("update note: %w", err)
 	}
 
+	m.renderCache.Delete(dbID)
+
 	m.log.DebugContext(ctx, "note updated", "id", domain.HashSlug(id))
 
 	return note, nil
@@ -400,6 +435,8 @@ func (m *Manager) Delete(ctx context.Context, id, editCode string, callerID uuid
 	if err != nil {
 		return fmt.Errorf("delete note: %w", err)
 	}
+
+	m.renderCache.Delete(dbID)
 
 	return nil
 }
@@ -466,24 +503,49 @@ func (m *Manager) resolveEditCodeHash(note *domain.Note) (string, error) {
 	return hashed, nil
 }
 
-// renderNote converts note content to safe HTML.
-// Plain-text notes are escaped and wrapped in <pre> (Renderer.RenderPlain); markdown notes are
-// parsed and sanitized (Renderer.Render). Manager only picks which strategy the content type calls for.
+// maxCachedRenderBytes keeps one huge note from pinning megabytes of HTML in the cache.
+const maxCachedRenderBytes = 256 * 1024
+
+// renderNote converts note content to safe HTML, going through the render cache for notes that
+// can be re-read: a burn-after-reading note is destroyed by the read that renders it, so a cached
+// copy would only keep its plaintext alive in memory after the burn.
 // The error names the note by domain.HashSlug(id), never the plaintext slug: the slug is the
 // note's capability URL and this error ends up in server logs.
 func (m *Manager) renderNote(id string, note *domain.Note) (string, error) {
-	if note.ContentType != nil && *note.ContentType == domain.ContentTypePlain {
-		rendered, err := m.renderer.RenderPlain(note.Content)
-		if err != nil {
-			return "", fmt.Errorf("render note %s: %w", domain.HashSlug(id), err)
-		}
+	dbID := domain.HashSlug(id)
+	cacheable := !note.BurnAfterReading && note.BurnTTL == 0
 
-		return rendered, nil
+	if cacheable {
+		cached, ok := m.renderCache.Get(dbID, note.UpdatedAt)
+		if ok {
+			return cached, nil
+		}
 	}
 
-	rendered, err := m.renderer.Render(note.Content)
+	rendered, err := m.renderContent(dbID, note)
 	if err != nil {
-		return "", fmt.Errorf("render note %s: %w", domain.HashSlug(id), err)
+		return "", err
+	}
+
+	if cacheable && len(rendered) <= maxCachedRenderBytes {
+		m.renderCache.Set(dbID, note.UpdatedAt, rendered)
+	}
+
+	return rendered, nil
+}
+
+// renderContent picks the strategy the content type calls for: plain-text notes are escaped and
+// wrapped in <pre> (Renderer.RenderPlain), markdown notes are parsed and sanitized (Renderer.Render).
+// Errors name the note by dbID (its hash), never the plaintext slug.
+func (m *Manager) renderContent(dbID string, note *domain.Note) (string, error) {
+	render := m.renderer.Render
+	if note.ContentType != nil && *note.ContentType == domain.ContentTypePlain {
+		render = m.renderer.RenderPlain
+	}
+
+	rendered, err := render(note.Content)
+	if err != nil {
+		return "", fmt.Errorf("render note %s: %w", dbID, err)
 	}
 
 	return rendered, nil
