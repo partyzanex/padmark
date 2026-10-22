@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -24,10 +25,54 @@ const storagePostgres = "postgres"
 // dbOpener creates a *bun.DB from a DSN without connecting.
 type dbOpener func(dsn string) (*bun.DB, error)
 
-func openPostgresDB(dsn string) (*bun.DB, error) {
+// errInvalidPostgresDSN is returned for any DSN the driver cannot parse. Its text is fixed:
+// url.Parse errors and pgdriver panics echo the raw DSN, password included, so no part of the
+// underlying failure may reach the message. Startup is fail-hard: a bad DSN is never tolerated.
+var errInvalidPostgresDSN = errors.New("invalid postgres dsn")
+
+// openPostgresDB creates a connector from a postgres:// (or unix://) URL DSN without connecting.
+// pgdriver.WithDSN panics on a parse error, so the DSN is validated first and the connector is
+// built under a recover as a backstop; neither path ever includes the DSN in the returned error.
+func openPostgresDB(dsn string) (db *bun.DB, err error) {
+	err = validatePostgresDSN(dsn)
+	if err != nil {
+		return nil, err
+	}
+
+	defer func() {
+		if recover() != nil {
+			db, err = nil, fmt.Errorf("%w: unsupported or malformed parameter "+
+				"(check sslmode, timeouts and other query options)", errInvalidPostgresDSN)
+		}
+	}()
+
 	sqldb := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
 
 	return bun.NewDB(sqldb, pgdialect.New()), nil
+}
+
+// validatePostgresDSN rejects DSNs that are not well-formed URLs. Errors name the problem and,
+// where safe, the host; they never contain the password or the raw string.
+func validatePostgresDSN(dsn string) error {
+	parsedURL, err := url.Parse(dsn)
+	if err != nil {
+		// The url.Error text embeds the full raw URL, so it is deliberately dropped.
+		return fmt.Errorf("%w: malformed URL (check percent-encoding of user, password and host, "+
+			"and that the port is numeric)", errInvalidPostgresDSN)
+	}
+
+	switch parsedURL.Scheme {
+	case storagePostgres, "postgresql", "unix":
+	default:
+		return fmt.Errorf("%w: expected a postgres:// URL, key=value DSNs are not supported",
+			errInvalidPostgresDSN)
+	}
+
+	if parsedURL.Scheme == "unix" && parsedURL.Path == "" {
+		return fmt.Errorf("%w: unix socket DSN requires a socket path", errInvalidPostgresDSN)
+	}
+
+	return nil
 }
 
 func openDB(ctx context.Context, storage, dsn string) (*bun.DB, error) {
@@ -193,7 +238,12 @@ func overlyBroadProxyCIDRs(proxies []*net.IPNet) []string {
 // Plain file paths (sqlite) are returned as-is.
 func redactDSN(dsn string) string {
 	parsedURL, parseErr := url.Parse(dsn)
-	if parseErr == nil && parsedURL.User != nil {
+	if parseErr != nil {
+		// Never echo a string that failed to parse: it may hold an unredacted password.
+		return "<unparseable dsn>"
+	}
+
+	if parsedURL.User != nil {
 		if _, hasPassword := parsedURL.User.Password(); hasPassword {
 			parsedURL.User = url.UserPassword(parsedURL.User.Username(), "***")
 		}
