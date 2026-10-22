@@ -60,7 +60,7 @@ func TestStoredArgon2CostsFailClosed(t *testing.T) {
 	} {
 		stored := "v1$" + cost + "$" + salt + "$" + digest
 		require.False(t, crypto.VerifyPassword(stored, "password"), cost)
-		require.False(t, crypto.NewEditCodeHasher().Verify(stored, "edit-code"), cost)
+		require.False(t, crypto.NewEditCodeHasher(crypto.DefaultArgon2Params()).Verify(stored, "edit-code"), cost)
 		_, _, err := crypto.NewSealer(sealTestParams).Open("v1$"+cost+"$AAAA", []byte("password"), sealTestSalt)
 		require.Error(t, err, cost)
 	}

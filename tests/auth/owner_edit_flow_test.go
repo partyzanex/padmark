@@ -56,7 +56,7 @@ func newOwnerFlowManagers(t *testing.T, db *bun.DB, log *slog.Logger) (*notes.Ma
 		slugLock,
 		render.NewRenderer(),
 		testutil.ContentEncryptor(t, "note"),
-		crypto.NewEditCodeHasher(),
+		crypto.NewEditCodeHasher(crypto.DefaultArgon2Params()),
 		log,
 		false,
 	)
@@ -65,7 +65,7 @@ func newOwnerFlowManagers(t *testing.T, db *bun.DB, log *slog.Logger) (*notes.Ma
 		sqliterepo.NewNoteRepository(db),
 		slugLock,
 		testutil.ContentEncryptor(t, "link"),
-		crypto.NewEditCodeHasher(),
+		crypto.NewEditCodeHasher(crypto.DefaultArgon2Params()),
 		log,
 		false,
 	).WithCache(linkcache.NewDefault(log))

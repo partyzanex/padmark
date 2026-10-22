@@ -501,9 +501,9 @@ func buildHandlers(
 	slugLock := lock.NewLocker()
 
 	manager := notes.NewManager(repo, linkRepo, slugLock, render.NewRenderer(), noteCipher,
-		crypto.NewEditCodeHasher(), log, cmd.Bool(FlagCustomSlugs))
+		crypto.NewEditCodeHasher(argon2ParamsFromFlags(cmd)), log, cmd.Bool(FlagCustomSlugs))
 	linkManager := links.NewManager(linkRepo, checker, slugLock, linkCipher,
-		crypto.NewEditCodeHasher(), log, cmd.Bool(FlagCustomSlugs)).
+		crypto.NewEditCodeHasher(argon2ParamsFromFlags(cmd)), log, cmd.Bool(FlagCustomSlugs)).
 		WithCache(linkcache.NewDefault(log)).
 		WithMetrics(linkMetrics)
 
