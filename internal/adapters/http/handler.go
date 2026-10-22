@@ -23,7 +23,9 @@ import (
 
 // SessionManager authenticates a user and manages their login session lifecycle.
 type SessionManager interface {
-	Login(ctx context.Context, username, password, totpCode, userAgent, clientIP string) (string, error)
+	Login(
+		ctx context.Context, username, password, totpCode, userAgent, clientIP, previousSessionID string,
+	) (string, error)
 	Logout(ctx context.Context, sessionID string) error
 	GetSession(ctx context.Context, sessionID string) (*domain.User, error)
 	ChangePassword(ctx context.Context, sessionID, oldPassword, newPassword, totpCode string) (string, error)

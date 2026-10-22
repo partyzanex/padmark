@@ -190,7 +190,10 @@ func (h *AuthHandler) TOTPLoginHandler(w http.ResponseWriter, r *http.Request) {
 	code := r.FormValue("code")
 	next := safeNextURL(r.FormValue("next"))
 
-	sessID, err := h.authMgr.Login(r.Context(), username, password, code, truncateUA(r.UserAgent()), remoteIP(r))
+	// The session cookie the browser presented, if any, is revoked by the usecase on success.
+	sessID, err := h.authMgr.Login(
+		r.Context(), username, password, code, truncateUA(r.UserAgent()), remoteIP(r), extractSessionID(r),
+	)
 	if err != nil {
 		dest := "/login?error=1"
 		if next != "" {

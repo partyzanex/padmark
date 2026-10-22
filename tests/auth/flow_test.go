@@ -85,7 +85,7 @@ func (s *AuthFlowSuite) TestFlow_AcceptFirstAdmin_Login_GetSession() {
 	code, err := totp.GenerateCode(rawSecret, time.Now())
 	s.Require().NoError(err)
 
-	sessID, err := s.mgr.Login(ctx, "root", flowPassword, code, "Mozilla/5.0", "127.0.0.1")
+	sessID, err := s.mgr.Login(ctx, "root", flowPassword, code, "Mozilla/5.0", "127.0.0.1", "")
 	s.Require().NoError(err)
 	s.NotEmpty(sessID)
 
@@ -125,7 +125,7 @@ func (s *AuthFlowSuite) TestFlow_LegacySealedSecret_MigratesOnLogin() {
 	code, err := totp.GenerateCode(rawSecret, time.Now())
 	s.Require().NoError(err)
 
-	sessID, err := s.mgr.Login(ctx, "root", flowPassword, code, "Mozilla/5.0", "127.0.0.1")
+	sessID, err := s.mgr.Login(ctx, "root", flowPassword, code, "Mozilla/5.0", "127.0.0.1", "")
 	s.Require().NoError(err, "a legacy-sealed secret must not lock the account out")
 	s.NotEmpty(sessID)
 
@@ -168,7 +168,7 @@ func (s *AuthFlowSuite) TestFlow_AcceptInvite_Login_GetSession() {
 	code, err := totp.GenerateCode(rawSecret, time.Now())
 	s.Require().NoError(err)
 
-	sessID, err := s.mgr.Login(ctx, "newuser", flowPassword, code, "UA", "10.0.0.1")
+	sessID, err := s.mgr.Login(ctx, "newuser", flowPassword, code, "UA", "10.0.0.1", "")
 	s.Require().NoError(err)
 
 	got, err := s.mgr.GetSession(ctx, sessID)
@@ -184,7 +184,7 @@ func (s *AuthFlowSuite) TestFlow_Login_WrongTOTP_Rejected() {
 	_, err := s.mgr.AcceptFirstAdmin(ctx, "root2", flowPassword)
 	s.Require().NoError(err)
 
-	_, err = s.mgr.Login(ctx, "root2", flowPassword, "000000", "", "")
+	_, err = s.mgr.Login(ctx, "root2", flowPassword, "000000", "", "", "")
 	s.ErrorIs(err, domain.ErrInvalidTOTP)
 }
 
@@ -195,7 +195,7 @@ func (s *AuthFlowSuite) TestFlow_Login_WrongPassword_Rejected() {
 	_, err := s.mgr.AcceptFirstAdmin(ctx, "root4", flowPassword)
 	s.Require().NoError(err)
 
-	_, err = s.mgr.Login(ctx, "root4", "WrongP@ss12!", "000000", "", "")
+	_, err = s.mgr.Login(ctx, "root4", "WrongP@ss12!", "000000", "", "", "")
 	s.ErrorIs(err, domain.ErrInvalidTOTP)
 }
 
@@ -214,7 +214,7 @@ func (s *AuthFlowSuite) TestFlow_Logout_SessionExpires() {
 	code, err := totp.GenerateCode(rawSecret, time.Now())
 	s.Require().NoError(err)
 
-	sessID, err := s.mgr.Login(ctx, "root3", flowPassword, code, "", "")
+	sessID, err := s.mgr.Login(ctx, "root3", flowPassword, code, "", "", "")
 	s.Require().NoError(err)
 
 	s.Require().NoError(s.mgr.Logout(ctx, sessID))
@@ -241,7 +241,7 @@ func (s *AuthFlowSuite) TestFlow_ChangePassword_InvalidatesOldSessions() {
 	code, err := totp.GenerateCode(rawSecret, time.Now())
 	s.Require().NoError(err)
 
-	sess1, err := s.mgr.Login(ctx, "pwchange-user", flowPassword, code, "UA1", "1.1.1.1")
+	sess1, err := s.mgr.Login(ctx, "pwchange-user", flowPassword, code, "UA1", "1.1.1.1", "")
 	s.Require().NoError(err)
 
 	// Simulate a second active session (e.g., stolen cookie) inserted directly.
@@ -304,7 +304,7 @@ func (s *AuthFlowSuite) TestFlow_ChangePassword_WrongTOTP_Rejected() {
 	code, err := totp.GenerateCode(rawSecret, time.Now())
 	s.Require().NoError(err)
 
-	sessID, err := s.mgr.Login(ctx, "totp-stepup-user", flowPassword, code, "UA", "1.1.1.1")
+	sessID, err := s.mgr.Login(ctx, "totp-stepup-user", flowPassword, code, "UA", "1.1.1.1", "")
 	s.Require().NoError(err)
 
 	_, err = s.mgr.ChangePassword(ctx, sessID, flowPassword, "N3wP@ssw0rd!", "000000")
@@ -329,7 +329,7 @@ func (s *AuthFlowSuite) TestFlow_ChangePassword_NewSessionValidBeforeOldExpire()
 	code, err := totp.GenerateCode(rawSecret, time.Now())
 	s.Require().NoError(err)
 
-	sessID, err := s.mgr.Login(ctx, "atomic-cp-user", flowPassword, code, "UA", "1.1.1.1")
+	sessID, err := s.mgr.Login(ctx, "atomic-cp-user", flowPassword, code, "UA", "1.1.1.1", "")
 	s.Require().NoError(err)
 
 	// Use the next 30-second window's code to avoid the replay guard rejecting a

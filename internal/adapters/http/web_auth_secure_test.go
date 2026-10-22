@@ -45,7 +45,7 @@ func (s *AuthHandlerSuite) loginRequest(router http.Handler) *httptest.ResponseR
 }
 
 func (s *AuthHandlerSuite) TestTOTPLogin_ForcedHTTPS_SessionCookieIsSecure() {
-	s.auth.EXPECT().Login(gomock.Any(), "alice", gomock.Any(), "123456", gomock.Any(), gomock.Any()).
+	s.auth.EXPECT().Login(gomock.Any(), "alice", gomock.Any(), "123456", gomock.Any(), gomock.Any(), gomock.Any()).
 		Return("sess-id-abc", nil)
 
 	router := s.newRouterWithAuthAndScheme("https")
@@ -92,7 +92,7 @@ func (s *AuthHandlerSuite) TestSecurityHeaders_ForcedHTTPS_SendsHSTS() {
 func (s *AuthHandlerSuite) TestForcedScheme_Unset_PlainHTTPStaysInsecure() {
 	for _, scheme := range []string{"", "http"} {
 		s.Run("scheme="+scheme, func() {
-			s.auth.EXPECT().Login(gomock.Any(), "alice", gomock.Any(), "123456", gomock.Any(), gomock.Any()).
+			s.auth.EXPECT().Login(gomock.Any(), "alice", gomock.Any(), "123456", gomock.Any(), gomock.Any(), gomock.Any()).
 				Return("sess-id-abc", nil)
 
 			router := s.newRouterWithAuthAndScheme(scheme)

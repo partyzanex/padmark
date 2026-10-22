@@ -74,8 +74,14 @@ func NewSessionManager(
 // Login authenticates username+password+totpCode and creates a new session.
 // Returns the opaque session ID on success.
 // All authentication failures return ErrInvalidTOTP to avoid leaking which factor failed.
+//
+// previousSessionID is the session the client presented when it signed in (empty if none). It is
+// revoked once the new session exists, so re-authenticating never leaves the old cookie valid
+// (session-fixation hygiene, and a forgotten or stolen cookie cannot outlive a re-login).
+// Revocation is fail-soft: the new session is already valid, so a store error is logged, not
+// returned.
 func (m *SessionManager) Login(
-	ctx context.Context, username, password, totpCode, userAgent, clientIP string,
+	ctx context.Context, username, password, totpCode, userAgent, clientIP, previousSessionID string,
 ) (string, error) {
 	usr, err := m.users.GetByUsername(ctx, username)
 	if err != nil {
@@ -116,6 +122,8 @@ func (m *SessionManager) Login(
 	if createErr != nil {
 		return "", fmt.Errorf("create session: %w", createErr)
 	}
+
+	m.revokePreviousSession(ctx, usr.ID, previousSessionID)
 
 	updateErr := m.users.UpdateLastLogin(ctx, usr.ID, now)
 	if updateErr != nil {
@@ -374,4 +382,17 @@ func newSessionID() (string, error) {
 	}
 
 	return base64.RawURLEncoding.EncodeToString(buf), nil
+}
+
+// revokePreviousSession deletes the session a client held before signing in again; no-op when it
+// held none. See Login for why a failure is only logged.
+func (m *SessionManager) revokePreviousSession(ctx context.Context, userID uuid.UUID, previousSessionID string) {
+	if previousSessionID == "" {
+		return
+	}
+
+	err := m.sessions.Delete(ctx, hashToken(previousSessionID))
+	if err != nil {
+		m.log.WarnContext(ctx, "revoke previous session on login failed", "user_id", userID, "err", err)
+	}
 }

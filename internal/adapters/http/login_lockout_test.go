@@ -89,14 +89,14 @@ func (s *LoginLockoutSuite) login(remoteAddr, username, code string) *httptest.R
 // answers an unknown username with the very same ErrInvalidTOTP, so this also models "nobody".
 func (s *LoginLockoutSuite) expectFailures(username string, times int) {
 	s.auth.EXPECT().
-		Login(gomock.Any(), username, lockTestPassword, lockTestBadCode, gomock.Any(), gomock.Any()).
+		Login(gomock.Any(), username, lockTestPassword, lockTestBadCode, gomock.Any(), gomock.Any(), gomock.Any()).
 		Return("", domain.ErrInvalidTOTP).
 		Times(times)
 }
 
 func (s *LoginLockoutSuite) expectSuccess(username string) {
 	s.auth.EXPECT().
-		Login(gomock.Any(), username, lockTestPassword, lockTestGoodCode, gomock.Any(), gomock.Any()).
+		Login(gomock.Any(), username, lockTestPassword, lockTestGoodCode, gomock.Any(), gomock.Any(), gomock.Any()).
 		Return("sess-"+username, nil)
 }
 
@@ -117,7 +117,7 @@ func (s *LoginLockoutSuite) attemptWhileLocked(remoteAddr, username string) (*ht
 	leaks := new(int)
 
 	s.auth.EXPECT().
-		Login(gomock.Any(), username, lockTestPassword, lockTestGoodCode, gomock.Any(), gomock.Any()).
+		Login(gomock.Any(), username, lockTestPassword, lockTestGoodCode, gomock.Any(), gomock.Any(), gomock.Any()).
 		DoAndReturn(func(_, _, _, _, _, _ any) (string, error) {
 			*leaks++
 

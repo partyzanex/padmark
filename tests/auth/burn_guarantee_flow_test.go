@@ -178,7 +178,7 @@ func burnOwnerSession(t *testing.T, env ownerFlowEnv) (sessionID, apiToken strin
 	code, err := totp.GenerateCode(rawSecret, time.Now())
 	require.NoError(t, err)
 
-	sessionID, err = env.authMgr.Login(ctx, "owner", ownerFlowPassword, code, "Mozilla/5.0", "127.0.0.1")
+	sessionID, err = env.authMgr.Login(ctx, "owner", ownerFlowPassword, code, "Mozilla/5.0", "127.0.0.1", "")
 	require.NoError(t, err)
 
 	apiToken, err = env.authMgr.CreateAPIToken(ctx, owner.ID)

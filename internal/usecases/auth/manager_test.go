@@ -142,7 +142,7 @@ func (s *ManagerSuite) TestLogin_InvalidUsername_ReturnsErrInvalidTOTP() {
 		GetByUsername(gomock.Any(), "unknown").
 		Return(nil, domain.ErrNotFound)
 
-	_, err := s.mgr.Login(s.T().Context(), "unknown", testPassword, "123456", "", "")
+	_, err := s.mgr.Login(s.T().Context(), "unknown", testPassword, "123456", "", "", "")
 	s.ErrorIs(err, domain.ErrInvalidTOTP)
 }
 
@@ -150,7 +150,7 @@ func (s *ManagerSuite) TestLogin_WrongPassword_ReturnsErrInvalidTOTP() {
 	usr, _ := s.testUser()
 	s.users.EXPECT().GetByUsername(gomock.Any(), "alice").Return(usr, nil)
 
-	_, err := s.mgr.Login(s.T().Context(), "alice", "WrongP@ss12!", "000000", "", "")
+	_, err := s.mgr.Login(s.T().Context(), "alice", "WrongP@ss12!", "000000", "", "", "")
 	s.ErrorIs(err, domain.ErrInvalidTOTP)
 }
 
@@ -158,7 +158,7 @@ func (s *ManagerSuite) TestLogin_WrongTOTP_ReturnsErrInvalidTOTP() {
 	usr, _ := s.testUser()
 	s.users.EXPECT().GetByUsername(gomock.Any(), "alice").Return(usr, nil)
 
-	_, err := s.mgr.Login(s.T().Context(), "alice", testPassword, "000000", "", "")
+	_, err := s.mgr.Login(s.T().Context(), "alice", testPassword, "000000", "", "", "")
 	s.ErrorIs(err, domain.ErrInvalidTOTP)
 }
 
@@ -173,7 +173,50 @@ func (s *ManagerSuite) TestLogin_ValidTOTP_CreatesSession() {
 	s.sessions.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
 	s.users.EXPECT().UpdateLastLogin(gomock.Any(), s.userID, gomock.Any()).Return(nil)
 
-	sessID, err := s.mgr.Login(s.T().Context(), "alice", testPassword, totpCode, "UA", "127.0.0.1")
+	sessID, err := s.mgr.Login(s.T().Context(), "alice", testPassword, totpCode, "UA", "127.0.0.1", "")
+	s.Require().NoError(err)
+	s.NotEmpty(sessID)
+}
+
+// TestLogin_RevokesPreviousSession pins that signing in again does not leave the session the
+// browser presented behind: it is deleted right after the new one is created, so a stolen or
+// forgotten cookie cannot outlive a re-login.
+func (s *ManagerSuite) TestLogin_RevokesPreviousSession() {
+	usr, rawSecret := s.testUser()
+
+	totpCode, codeErr := totp.GenerateCode(rawSecret, time.Now())
+	s.Require().NoError(codeErr)
+
+	s.users.EXPECT().GetByUsername(gomock.Any(), "alice").Return(usr, nil)
+	s.users.EXPECT().UpdateTOTPCounter(gomock.Any(), s.userID, gomock.Any()).Return(true, nil)
+
+	gomock.InOrder(
+		s.sessions.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil),
+		s.sessions.EXPECT().Delete(gomock.Any(), hashToken("old-session")).Return(nil),
+	)
+	s.users.EXPECT().UpdateLastLogin(gomock.Any(), s.userID, gomock.Any()).Return(nil)
+
+	sessID, err := s.mgr.Login(s.T().Context(), "alice", testPassword, totpCode, "UA", "127.0.0.1", "old-session")
+	s.Require().NoError(err)
+	s.NotEmpty(sessID)
+	s.NotEqual("old-session", sessID)
+}
+
+// TestLogin_PreviousSessionDeleteFailure_DoesNotFailLogin — revoking the old session is
+// best-effort (fail-soft): the new session is already valid and the caller holds a working login.
+func (s *ManagerSuite) TestLogin_PreviousSessionDeleteFailure_DoesNotFailLogin() {
+	usr, rawSecret := s.testUser()
+
+	totpCode, codeErr := totp.GenerateCode(rawSecret, time.Now())
+	s.Require().NoError(codeErr)
+
+	s.users.EXPECT().GetByUsername(gomock.Any(), "alice").Return(usr, nil)
+	s.users.EXPECT().UpdateTOTPCounter(gomock.Any(), s.userID, gomock.Any()).Return(true, nil)
+	s.sessions.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
+	s.sessions.EXPECT().Delete(gomock.Any(), hashToken("old-session")).Return(errors.New("db down"))
+	s.users.EXPECT().UpdateLastLogin(gomock.Any(), s.userID, gomock.Any()).Return(nil)
+
+	sessID, err := s.mgr.Login(s.T().Context(), "alice", testPassword, totpCode, "UA", "127.0.0.1", "old-session")
 	s.Require().NoError(err)
 	s.NotEmpty(sessID)
 }
@@ -189,7 +232,7 @@ func (s *ManagerSuite) TestLogin_ReplayedTOTP_ReturnsErrInvalidTOTP() {
 	s.users.EXPECT().GetByUsername(gomock.Any(), "alice").Return(usr, nil)
 	s.users.EXPECT().UpdateTOTPCounter(gomock.Any(), s.userID, gomock.Any()).Return(false, nil)
 
-	_, err := s.mgr.Login(s.T().Context(), "alice", testPassword, totpCode, "UA", "127.0.0.1")
+	_, err := s.mgr.Login(s.T().Context(), "alice", testPassword, totpCode, "UA", "127.0.0.1", "")
 	s.ErrorIs(err, domain.ErrInvalidTOTP)
 }
 
@@ -219,7 +262,7 @@ func (s *ManagerSuite) TestLogin_LegacySeal_MigratesSecret() {
 	s.sessions.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
 	s.users.EXPECT().UpdateLastLogin(gomock.Any(), s.userID, gomock.Any()).Return(nil)
 
-	sessID, err := s.mgr.Login(s.T().Context(), "alice", testPassword, totpCode, "UA", "127.0.0.1")
+	sessID, err := s.mgr.Login(s.T().Context(), "alice", testPassword, totpCode, "UA", "127.0.0.1", "")
 	s.Require().NoError(err)
 	s.NotEmpty(sessID)
 
@@ -248,7 +291,7 @@ func (s *ManagerSuite) TestLogin_CurrentSeal_DoesNotRewrite() {
 	s.sessions.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
 	s.users.EXPECT().UpdateLastLogin(gomock.Any(), s.userID, gomock.Any()).Return(nil)
 
-	_, err := s.mgr.Login(s.T().Context(), "alice", testPassword, totpCode, "UA", "127.0.0.1")
+	_, err := s.mgr.Login(s.T().Context(), "alice", testPassword, totpCode, "UA", "127.0.0.1", "")
 	s.Require().NoError(err)
 }
 
@@ -269,7 +312,7 @@ func (s *ManagerSuite) TestLogin_LegacySeal_ResealFailureDoesNotFailLogin() {
 	s.sessions.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
 	s.users.EXPECT().UpdateLastLogin(gomock.Any(), s.userID, gomock.Any()).Return(nil)
 
-	sessID, err := s.mgr.Login(s.T().Context(), "alice", testPassword, totpCode, "UA", "127.0.0.1")
+	sessID, err := s.mgr.Login(s.T().Context(), "alice", testPassword, totpCode, "UA", "127.0.0.1", "")
 	s.Require().NoError(err)
 	s.NotEmpty(sessID)
 }
@@ -280,7 +323,7 @@ func (s *ManagerSuite) TestLogin_WrongTOTP_DoesNotMigrate() {
 	usr, _ := s.legacyTestUser()
 	s.users.EXPECT().GetByUsername(gomock.Any(), "alice").Return(usr, nil)
 
-	_, err := s.mgr.Login(s.T().Context(), "alice", testPassword, "000000", "", "")
+	_, err := s.mgr.Login(s.T().Context(), "alice", testPassword, "000000", "", "", "")
 	s.ErrorIs(err, domain.ErrInvalidTOTP)
 }
 
