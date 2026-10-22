@@ -111,6 +111,9 @@ type NoteManager interface {
 	ViewPreloaded(ctx context.Context, id string, preloaded *domain.Note) (*domain.Note, error)
 	GetRendered(ctx context.Context, id string) (*domain.Note, string, error)
 	GetRenderedPreloaded(ctx context.Context, id string, preloaded *domain.Note) (*domain.Note, string, error)
+	// EnforceExpiry deletes an expired, already-fetched note and returns ErrExpired, without
+	// consuming a burn note or starting its timer. See notes.Manager.EnforceExpiry.
+	EnforceExpiry(ctx context.Context, id string, note *domain.Note) error
 	// Update and Delete accept callerID — the authenticated caller's user ID ("" if anonymous) —
 	// so the note's owner can bypass editCode. See notes.Manager.Update/Delete.
 	Update(ctx context.Context, id, editCode string, callerID uuid.UUID, note *domain.Note) (*domain.Note, error)
@@ -127,6 +130,9 @@ type LinkManager interface {
 	) (*domain.Link, error)
 	Peek(ctx context.Context, slug string) (*domain.Link, error)
 	Redirect(ctx context.Context, slug string) (*domain.Link, error)
+	// RedirectWithoutBurn follows a link like Redirect but never consumes a burn_after_click
+	// link (domain.ErrBurnIntentRequired). See links.Manager.RedirectWithoutBurn.
+	RedirectWithoutBurn(ctx context.Context, slug string) (*domain.Link, error)
 	Delete(ctx context.Context, slug, editCode string, callerID uuid.UUID) error
 }
 
@@ -176,11 +182,14 @@ func (c *common) guard(next http.HandlerFunc) http.HandlerFunc {
 // this server: the operator-forced override when set (--public-scheme), otherwise the
 // auto-detected value from TLS/X-Forwarded-Proto (see requestScheme).
 func (c *common) scheme(r *http.Request) string {
-	if c.forcedScheme != "" {
-		return c.forcedScheme
-	}
+	return requestScheme(r, c.forcedScheme, c.trustedProxies)
+}
 
-	return requestScheme(r, c.trustedProxies)
+// isHTTPS reports whether cookies issued for this request must carry the Secure attribute:
+// the operator-forced "https" scheme counts, as do direct TLS and a trusted proxy's
+// X-Forwarded-Proto (see the package-level isHTTPS for the precedence rules).
+func (c *common) isHTTPS(r *http.Request) bool {
+	return isHTTPS(r, c.forcedScheme, c.trustedProxies)
 }
 
 // denyPrivate answers a caller that failed a resource's privacy check. Shared by
@@ -331,8 +340,10 @@ func (h *Handler) WithTrustedProxies(proxies []*net.IPNet) *Handler {
 }
 
 // WithForcedScheme overrides the scheme ("http" or "https") used when building absolute links
-// back to this server, bypassing TLS/X-Forwarded-Proto auto-detection entirely. Pass an empty
-// string to keep auto-detection. Called by NewRouter; do not call after the server starts.
+// back to this server, bypassing TLS/X-Forwarded-Proto auto-detection entirely. "https" also
+// marks every request as HTTPS for the session/CSRF cookie Secure attribute and HSTS (see
+// isHTTPS), since behind a TLS-terminating proxy that is the only signal the server has. Pass an
+// empty string to keep auto-detection. Called by NewRouter; do not call after the server starts.
 func (h *Handler) WithForcedScheme(scheme string) *Handler {
 	h.forcedScheme = scheme
 

@@ -77,6 +77,16 @@ Every note has:
 
 The timer starts on first read, not on creation.
 
+Only an intentional read burns a note. Browsers get a "reveal" confirmation page first; API
+clients must name the format in `Accept` (`application/json`, `text/markdown`, `text/plain`).
+A burn-after-reading note requested without `Accept`, with only `*/*`, with `HEAD`, or as a
+browser subresource (`<img src>`, `<iframe>`) is answered `409` (`code: burn_read_not_explicit`)
+and stays intact — so link unfurlers, mail scanners and embeds in other notes cannot destroy it.
+The editor (`/edit/{id}`) never shows a burn-after-reading note's content and answers `410` for
+an expired note. `padmark-cli` and `padmark-mcp` always send `Accept: application/json`. The
+same rule protects `burn_after_click` links on `GET /r/{id}`: only a browser navigation or an
+explicit `Accept` follows (and burns) one; previews, scanners, `HEAD` and embeds get `409`.
+
 ---
 
 ## How short links work
@@ -336,7 +346,8 @@ curl -X POST http://localhost:4000/notes \
 
 **Read a note** — content negotiation based on `Accept` header:
 ```bash
-curl http://localhost:4000/notes/{id}                        # JSON (default)
+curl http://localhost:4000/notes/{id}                        # JSON (default; 409 for burn notes)
+curl -H "Accept: application/json" http://localhost:4000/notes/{id}  # JSON, explicit
 curl -H "Accept: text/html"  http://localhost:4000/notes/{id}  # Rendered HTML
 curl -H "Accept: text/plain" http://localhost:4000/notes/{id}  # Raw Markdown
 curl http://localhost:4000/{id}                              # Short URL for browsers
@@ -418,6 +429,8 @@ curl -X PUT http://localhost:4000/links/{id} \
 
 # Follow it — 301 (default) or an HTML transparency interstitial, per --direct-redirect
 curl -i http://localhost:4000/r/{id}
+# A burn_after_click link needs a deliberate access (otherwise 409, link intact):
+curl -i -H "Accept: text/html" http://localhost:4000/r/{id}
 
 # Delete a link
 curl -X DELETE http://localhost:4000/links/{id} \
@@ -811,7 +824,7 @@ There is no destructive encryption down-migration, and older binaries cannot rea
 | `--log-level` | `PADMARK_LOG_LEVEL` | `info` | `debug` / `info` / `warn` / `error` |
 | `--log-format` | `PADMARK_LOG_FORMAT` | `json` | `json` or `text` |
 | `--trusted-proxies` | `PADMARK_TRUSTED_PROXIES` | — | Proxy CIDRs/IPs whose `X-Forwarded-For` / `X-Real-IP` is believed when resolving the real client IP; also the addresses whose `X-Forwarded-Proto` is trusted when building absolute links (note URLs, invite links, API-token envelopes). Set it to the proxy's own addresses and nothing wider — see [Getting `--trusted-proxies` wrong](#getting---trusted-proxies-wrong) |
-| `--public-scheme` | `PADMARK_PUBLIC_SCHEME` | — | Force `http` or `https` for absolute links back to this server, bypassing TLS/`X-Forwarded-Proto` detection; use this instead of `--trusted-proxies` when the proxy's IP isn't stable (cloud load balancers, k8s ingress) |
+| `--public-scheme` | `PADMARK_PUBLIC_SCHEME` | — | Force `http` or `https` for absolute links back to this server, bypassing TLS/`X-Forwarded-Proto` detection; `https` also marks session/CSRF cookies `Secure` and enables HSTS. Use this instead of `--trusted-proxies` when the proxy's IP isn't stable (cloud load balancers, k8s ingress) |
 | `--custom-slugs` | `PADMARK_CUSTOM_SLUGS` | `false` | Allow user-supplied human-readable slugs/link aliases (e.g. `project/GUIDE.md`) at creation. Off by default because public human-readable URLs are easy to guess. New content keys are independent of the slug; existing legacy ciphertext keeps its old protection until migrated. A slug's first path segment must not be a reserved route name: `login`, `setup`, `logout`, `totp-login`, `admin`, `api`, `success`, `healthz`, `readyz`, `notes`, `edit`, `change-password`, `static`, `links`, `r` |
 | `--direct-redirect` | `PADMARK_DIRECT_REDIRECT` | `true` | `GET /r/{id}` behavior for short links: `true` issues an immediate `301` to the target URL; `false` renders an interstitial page (meta-refresh + `<noscript>` fallback) showing the destination before redirecting |
 | `--metrics-addr` | `PADMARK_METRICS_ADDR` | — | Address for a separate internal Prometheus `/metrics` listener (e.g. `:9090`); empty (default) disables it entirely. Exposes `padmark_links_created_total`, `padmark_links_redirects_total`, `padmark_links_collisions_total`, plus standard Go/process collectors. Bind this to a private interface only — metrics are never served on the main, public-facing listener |
@@ -834,8 +847,9 @@ Both directions of misconfiguration have a cost, and neither surfaces as an erro
   first time a request arrives carrying a forwarding header while no proxy is trusted.
 
 Leaving it empty when the server really is exposed directly is correct and stays silent. If the
-proxy's address is not stable (cloud load balancers, k8s ingress), prefer `--public-scheme` for
-the link-building half of the flag's job rather than widening the trusted range.
+proxy's address is not stable (cloud load balancers, k8s ingress), prefer `--public-scheme https`
+for the scheme half of the flag's job (links, `Secure` cookies, HSTS) rather than widening the
+trusted range.
 
 **Behind a TLS-terminating reverse proxy** the server itself sees plain HTTP, so it must be told
 the public scheme: set `--trusted-proxies` to the proxy's addresses (so its `X-Forwarded-Proto`
@@ -843,8 +857,8 @@ is honoured) or `--public-scheme https`, and configure the proxy to preserve the
 header. Otherwise the same-origin check rejects browser `PUT`/`DELETE` on notes and links and the
 account endpoints (`POST /api/tokens`, `POST /api/invites`) with `403`, because the browser's
 `https://` `Origin` does not match the scheme/host the server derived. Session and CSRF cookies
-get the `Secure` attribute only for direct TLS or a trusted proxy's `X-Forwarded-Proto: https` —
-`--public-scheme` alone does not set it.
+get the `Secure` attribute, and responses carry HSTS, under any of the three: direct TLS, a
+trusted proxy's `X-Forwarded-Proto: https`, or `--public-scheme https`.
 
 `--csrf-secret` is the one flag a multi-replica deployment must set: without it each process
 signs form tokens with its own random key, so a form rendered by one replica is rejected by the

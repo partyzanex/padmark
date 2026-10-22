@@ -16,8 +16,12 @@ contract is at [`/api/openapi.yaml`](/api/openapi.yaml).
   when the slug is taken, `422` for an invalid slug or `privacy: owner` without a credential.
 - `GET /notes/{id}` — read a note as JSON (send `Accept: application/json`). Incrementing
   `views` is a side effect of every read, and burn-after-reading notes are destroyed by the
-  first read. `401` when the note's `privacy` requires a credential the request didn't
-  supply, `404` for a wrong id, `410` for an expired note.
+  first read. That burning read must be explicit: name the format in `Accept`
+  (`application/json`, `text/markdown`, `text/plain` or `text/html`); a burn-after-reading note
+  requested without `Accept`, with only wildcards (`*/*`), with `HEAD` or as a browser
+  subresource gets `409` (`code: burn_read_not_explicit`) and stays intact. `401` when the
+  note's `privacy` requires a credential the request didn't supply, `404` for a wrong id, `410`
+  for an expired note.
 - `PUT /notes/{id}` — replace a note. Body: `content` (required), optional `title`,
   `content_type`, `burn_after_reading`, `ttl`, `privacy`, `edit_code`; the slug cannot be
   changed. Pass the `edit_code` in the body, or omit it when authenticated as the note's
@@ -55,7 +59,10 @@ token for the owning account.
 - `DELETE /links/{id}` — same `edit_code` rules as notes.
 - `GET /r/{id}` follows a link: an immediate `301` when direct redirect is enabled, otherwise
   an HTML transparency page with a link to the destination. It is outside the JSON API.
-  `/{id}` serves notes.
+  `/{id}` serves notes. A `burn_after_click` link is consumed only by a deliberate access (a
+  browser navigation, or an `Accept` naming e.g. `text/html` exactly); without `Accept`, with
+  `*/*`, with `HEAD` or as an embedded subresource it answers `409`
+  (`code: burn_read_not_explicit`) and stays intact.
 
 ## Authentication
 

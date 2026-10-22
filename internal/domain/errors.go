@@ -47,4 +47,8 @@ var (
 	ErrSessionRevocation   = errors.New("password changed, but older sessions could not be revoked")
 	ErrFeatureNotSupported = errors.New("feature is not enabled")
 	ErrAPITokenLimit       = errors.New("api token limit reached")
+	// ErrBurnIntentRequired: a burn-after-click link (or burn-after-reading note) is destroyed by
+	// the access that reads it, so an access without deliberate intent — a preview fetch, a
+	// scanner, an embedded resource — must leave it intact instead.
+	ErrBurnIntentRequired = errors.New("burn resource requires a deliberate access")
 )

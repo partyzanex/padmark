@@ -73,13 +73,17 @@ func csrfFromContext(ctx context.Context) string {
 	return v
 }
 
-func setCSRFCookie(w http.ResponseWriter, r *http.Request, token string, trustedProxies []*net.IPNet) {
-	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: HttpOnly/SameSite set; Secure follows TLS detection
+// setCSRFCookie writes the CSRF cookie; forcedScheme and trustedProxies feed isHTTPS for the
+// Secure attribute.
+func setCSRFCookie(
+	w http.ResponseWriter, r *http.Request, token, forcedScheme string, trustedProxies []*net.IPNet,
+) {
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: HttpOnly/SameSite set; Secure follows isHTTPS
 		Name:     csrfCookieName,
 		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   isHTTPS(r, trustedProxies),
+		Secure:   isHTTPS(r, forcedScheme, trustedProxies),
 		SameSite: http.SameSiteStrictMode,
 		// Unused optional fields zeroed: no Raw, RawExpires, Unparsed, Quoted, Domain, Expires,
 		// Partitioned. MaxAge=0 means session cookie (cleared on browser close).
@@ -96,26 +100,28 @@ func setCSRFCookie(w http.ResponseWriter, r *http.Request, token string, trusted
 
 // rotateCSRFToken generates a fresh signed token, sets it as the cookie, and returns the token
 // for embedding in any form rendered in the same response.
-func rotateCSRFToken(w http.ResponseWriter, r *http.Request, secret []byte, trustedProxies []*net.IPNet) string {
+func rotateCSRFToken(
+	w http.ResponseWriter, r *http.Request, secret []byte, forcedScheme string, trustedProxies []*net.IPNet,
+) string {
 	token, err := generateCSRFToken(secret)
 	if err != nil {
 		return ""
 	}
 
-	setCSRFCookie(w, r, token, trustedProxies)
+	setCSRFCookie(w, r, token, forcedScheme, trustedProxies)
 
 	return token
 }
 
 // clearCSRFCookie removes the CSRF cookie on logout.
-func clearCSRFCookie(w http.ResponseWriter, r *http.Request, trustedProxies []*net.IPNet) {
-	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: HttpOnly/SameSite set; Secure follows TLS detection
+func clearCSRFCookie(w http.ResponseWriter, r *http.Request, forcedScheme string, trustedProxies []*net.IPNet) {
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: HttpOnly/SameSite set; Secure follows isHTTPS
 		Name:     csrfCookieName,
 		Value:    "",
 		Path:     "/",
 		MaxAge:   -1,
 		HttpOnly: true,
-		Secure:   isHTTPS(r, trustedProxies),
+		Secure:   isHTTPS(r, forcedScheme, trustedProxies),
 		SameSite: http.SameSiteStrictMode,
 		// Unused optional fields zeroed: no Raw, RawExpires, Unparsed, Quoted, Domain, Expires, Partitioned.
 		Raw:         "",
@@ -131,7 +137,7 @@ func clearCSRFCookie(w http.ResponseWriter, r *http.Request, trustedProxies []*n
 // withCSRFToken reads the CSRF cookie if it is present and carries a valid HMAC signature;
 // otherwise generates a fresh signed token and sets the cookie.
 // The token is injected into the request context so handlers can embed it in forms.
-func withCSRFToken(secret []byte, trustedProxies []*net.IPNet, next http.Handler) http.Handler {
+func withCSRFToken(secret []byte, forcedScheme string, trustedProxies []*net.IPNet, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token := func() string {
 			cookie, err := r.Cookie(csrfCookieName)
@@ -143,7 +149,7 @@ func withCSRFToken(secret []byte, trustedProxies []*net.IPNet, next http.Handler
 		}()
 
 		if token == "" {
-			token = rotateCSRFToken(w, r, secret, trustedProxies)
+			token = rotateCSRFToken(w, r, secret, forcedScheme, trustedProxies)
 			if token == "" {
 				http.Error(w, "internal server error", http.StatusInternalServerError)
 

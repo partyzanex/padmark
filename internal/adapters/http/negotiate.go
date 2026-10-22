@@ -80,6 +80,41 @@ func negotiate(r *http.Request) format {
 	return selectFormat(entries)
 }
 
+// explicitRead reports whether a GET states the intent to read the note itself, which is what a
+// read with a destructive side effect (burn-after-reading consume, burn-timer start) requires.
+// A missing Accept, a wildcard-only Accept (*/*, text/*), a HEAD request or a browser
+// subresource fetch (an <img src> sends Sec-Fetch-Dest: image and an Accept ending in */*) is
+// what link unfurlers, mail scanners and cross-note embeds produce — none of them must burn a
+// note. Explicit means: GET, Sec-Fetch-Dest absent, "document" or "empty" (fetch), and an
+// Accept media range with q>0 that names a format padmark serves exactly (no wildcard).
+// ?raw=1 alone is not intent: it is part of the URL, so an embed can carry it too.
+func explicitRead(r *http.Request) bool {
+	if r.Method != http.MethodGet {
+		return false
+	}
+
+	switch r.Header.Get("Sec-Fetch-Dest") {
+	case "", "document", "empty":
+	default:
+		return false
+	}
+
+	entries := parseAccept(r.Header.Get("Accept"))
+	for idx := range entries {
+		entry := &entries[idx]
+		if entry.q <= 0 || entry.spec != specExact {
+			continue
+		}
+
+		switch entry.mime {
+		case mimeJSON, mimeHTML, mimePlain, mimeMarkdown:
+			return true
+		}
+	}
+
+	return false
+}
+
 // parseAccept extracts one acceptEntry per comma-separated media range. Unparseable garbage is
 // skipped rather than failing the request: Accept is advisory.
 func parseAccept(accept string) []acceptEntry {

@@ -29,13 +29,9 @@ func newBurner(storage Storage, encryptor Encryptor, log *slog.Logger) *burner {
 // TTL expiry and burn-timer expiry share the same ExpiresAt field, so both are enforced here
 // in one pass rather than split across two call sites.
 func (b *burner) applyPolicy(ctx context.Context, id string, note *domain.Note) (*domain.Note, error) {
-	if note.ExpiresAt != nil && time.Now().After(*note.ExpiresAt) {
-		delErr := b.storage.Delete(ctx, domain.HashSlug(id))
-		if delErr != nil {
-			b.log.ErrorContext(ctx, "delete expired note", "id", domain.HashSlug(id), "err", delErr)
-		}
-
-		return nil, domain.ErrExpired
+	err := b.enforceExpiry(ctx, id, note)
+	if err != nil {
+		return nil, err
 	}
 
 	if note.BurnAfterReading {
@@ -43,6 +39,21 @@ func (b *burner) applyPolicy(ctx context.Context, id string, note *domain.Note) 
 	}
 
 	return note, nil
+}
+
+// enforceExpiry is the expiry half of applyPolicy: an expired note (plain TTL or a started burn
+// timer) is deleted and ErrExpired returned. It never consumes a note or starts a burn timer.
+func (b *burner) enforceExpiry(ctx context.Context, id string, note *domain.Note) error {
+	if note.ExpiresAt == nil || !time.Now().After(*note.ExpiresAt) {
+		return nil
+	}
+
+	delErr := b.storage.Delete(ctx, domain.HashSlug(id))
+	if delErr != nil {
+		b.log.ErrorContext(ctx, "delete expired note", "id", domain.HashSlug(id), "err", delErr)
+	}
+
+	return domain.ErrExpired
 }
 
 // applyViewIncrement increments the view counter unless the note was just consumed by a

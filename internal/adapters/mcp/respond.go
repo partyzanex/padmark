@@ -46,6 +46,8 @@ func mapGetNoteRes(res padmark.GetNoteRes) (*padmark.NoteResponse, error) {
 		return nil, notFoundErr("note")
 	case *padmark.GetNoteGone:
 		return nil, goneErr("note")
+	case *padmark.GetNoteConflict:
+		return nil, burnReadRefusedErr(typed.Message)
 	case *padmark.GetNoteServiceUnavailable:
 		return nil, serviceUnavailableError(padmark.ErrorResponse(*typed))
 	case *padmark.GetNoteInternalServerError:
@@ -239,6 +241,13 @@ func rateLimitedErr(op string) error {
 
 func unsupportedErr() error {
 	return errors.New("unsupported content type — send JSON (Content-Type: application/json)")
+}
+
+// burnReadRefusedErr reports a burn-after-reading read the server refused as not explicit
+// (409). The client always sends Accept: application/json, so this means a misbehaving proxy
+// stripped the header; the note is still intact.
+func burnReadRefusedErr(message string) error {
+	return fmt.Errorf("refused: %s — the note is still intact", message)
 }
 
 func serverErr() error {

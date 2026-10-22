@@ -310,40 +310,16 @@ func (m *Manager) Peek(ctx context.Context, slug string) (*domain.Link, error) {
 // The initial fetch always reads current storage metadata. For public links the
 // optional Cache can skip decryption after verifying the current ciphertext.
 func (m *Manager) Redirect(ctx context.Context, slug string) (*domain.Link, error) {
-	dbID := domain.HashSlug(slug)
+	return m.redirect(ctx, slug, true)
+}
 
-	link, err := m.resolveLink(ctx, slug)
-	if err != nil {
-		return nil, fmt.Errorf("redirect: %w", err)
-	}
-
-	if link.Expired(time.Now()) {
-		delErr := m.storage.Delete(ctx, dbID)
-		if delErr != nil {
-			m.log.ErrorContext(ctx, "delete expired link", "id", domain.HashSlug(slug), "err", delErr)
-		}
-
-		m.evictCache(dbID)
-
-		return nil, domain.ErrExpired
-	}
-
-	if link.BurnAfterClick {
-		return m.consumeLink(ctx, slug, dbID)
-	}
-
-	incErr := m.storage.IncrementViews(ctx, dbID)
-	if incErr != nil {
-		m.log.ErrorContext(ctx, "increment link views", "id", domain.HashSlug(slug), "err", incErr)
-	} else {
-		link.Views++
-	}
-
-	if m.metrics != nil {
-		m.metrics.IncRedirects()
-	}
-
-	return link, nil
+// RedirectWithoutBurn is Redirect for an access that did not deliberately follow the link (a
+// link-preview fetch, a mail scanner, a HEAD probe, an embedded resource): a burn_after_click
+// link is left intact and domain.ErrBurnIntentRequired is returned, decided on the same row
+// snapshot the rest of the policy uses, so a concurrent switch to burn cannot slip through. Any
+// other link is followed exactly as by Redirect.
+func (m *Manager) RedirectWithoutBurn(ctx context.Context, slug string) (*domain.Link, error) {
+	return m.redirect(ctx, slug, false)
 }
 
 // Delete removes a link by slug after verifying the edit code, or that the caller is the link's
@@ -397,6 +373,49 @@ func (m *Manager) persistLink(
 	}
 
 	return nil
+}
+
+// redirect is Redirect/RedirectWithoutBurn's shared body; allowBurn says whether this access may
+// consume a burn_after_click link.
+func (m *Manager) redirect(ctx context.Context, slug string, allowBurn bool) (*domain.Link, error) {
+	dbID := domain.HashSlug(slug)
+
+	link, err := m.resolveLink(ctx, slug)
+	if err != nil {
+		return nil, fmt.Errorf("redirect: %w", err)
+	}
+
+	if link.Expired(time.Now()) {
+		delErr := m.storage.Delete(ctx, dbID)
+		if delErr != nil {
+			m.log.ErrorContext(ctx, "delete expired link", "id", domain.HashSlug(slug), "err", delErr)
+		}
+
+		m.evictCache(dbID)
+
+		return nil, domain.ErrExpired
+	}
+
+	if link.BurnAfterClick {
+		if !allowBurn {
+			return nil, fmt.Errorf("redirect: %w", domain.ErrBurnIntentRequired)
+		}
+
+		return m.consumeLink(ctx, slug, dbID)
+	}
+
+	incErr := m.storage.IncrementViews(ctx, dbID)
+	if incErr != nil {
+		m.log.ErrorContext(ctx, "increment link views", "id", domain.HashSlug(slug), "err", incErr)
+	} else {
+		link.Views++
+	}
+
+	if m.metrics != nil {
+		m.metrics.IncRedirects()
+	}
+
+	return link, nil
 }
 
 // resolveLink reads the current row before consulting the decrypted-target cache.

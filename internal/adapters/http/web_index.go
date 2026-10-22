@@ -49,6 +49,9 @@ type editorViewData struct {
 	EditMode         bool
 	BurnAfterReading bool
 	IsOwner          bool
+	// ContentWithheld marks a burn-after-reading note opened in the editor: its content is not
+	// pre-filled (the editor must not read it without burning it), and saving replaces it.
+	ContentWithheld bool
 }
 
 // IndexPage handles GET / — serves the note editor.
@@ -67,6 +70,7 @@ func (h *PageHandler) IndexPage(w http.ResponseWriter, r *http.Request) {
 		EditMode:         false,
 		BurnAfterReading: false,
 		IsOwner:          false,
+		ContentWithheld:  false,
 	})
 	if err != nil {
 		h.log.ErrorContext(r.Context(), "render index template", "err", err)

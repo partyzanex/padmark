@@ -316,7 +316,9 @@ type CreateLinkRequest struct {
 	// If omitted a 10-character random slug is generated.
 	// Returns `409` if the slug is already taken by a note or another link.
 	Slug OptString `json:"slug"`
-	// When `true` the link is deleted the moment it is first followed via `GET /r/{id}`.
+	// When `true` the link is deleted the moment it is first deliberately followed via
+	// `GET /r/{id}` (a browser navigation or an explicit `Accept`; previews, scanners,
+	// `HEAD` and embeds get `409` and leave it intact — see "Short links").
 	BurnAfterClick OptBool `json:"burn_after_click"`
 	// Seconds until the link expires, counted from creation. Omitted means the link never
 	// expires. This is a hard expiry with no relation to `burn_after_click`;
@@ -1328,6 +1330,10 @@ func (*GetLinkServiceUnavailable) getLinkRes() {}
 type GetLinkUnauthorized ErrorResponse
 
 func (*GetLinkUnauthorized) getLinkRes() {}
+
+type GetNoteConflict ErrorResponse
+
+func (*GetNoteConflict) getNoteRes() {}
 
 type GetNoteGone ErrorResponse
 

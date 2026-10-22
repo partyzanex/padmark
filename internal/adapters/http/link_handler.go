@@ -1,6 +1,8 @@
 package http
 
 import (
+	"errors"
+	"fmt"
 	"html/template"
 	"net/http"
 
@@ -60,7 +62,13 @@ func (h *LinkHandler) Redirect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	link, err := h.manager.Redirect(r.Context(), id)
+	link, err := h.followLink(r, id)
+	if errors.Is(err, domain.ErrBurnIntentRequired) {
+		writeBurnReadNotExplicit(w, r, h.log)
+
+		return
+	}
+
 	if err != nil {
 		h.writeErrorPage(w, r, err)
 
@@ -68,12 +76,12 @@ func (h *LinkHandler) Redirect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if link.EffectiveDirectRedirect(h.directRedirect) {
-		// G710: taint analysis flags this as an open redirect, but it's the feature, not a bug —
+		// Not an open redirect (gosec G710 territory), but the feature —
 		// links.Manager.Create already restricted link.TargetURL to http/https via
 		// validateTargetURL (domain.ErrInvalidURL rejects javascript:/data:/file:/etc at creation
 		// time), and redirecting to a URL its own creator chose is a short-link service's entire
 		// purpose, the same category as any commercial URL shortener.
-		http.Redirect(w, r, link.TargetURL, http.StatusMovedPermanently) //nolint:gosec
+		http.Redirect(w, r, link.TargetURL, http.StatusMovedPermanently)
 
 		return
 	}
@@ -86,6 +94,27 @@ func (h *LinkHandler) Redirect(w http.ResponseWriter, r *http.Request) {
 	if execErr != nil {
 		h.log.ErrorContext(r.Context(), "render redirect template", "id", domain.HashSlug(id), "err", execErr)
 	}
+}
+
+// followLink follows the link only as far as the request's intent allows: a deliberate access
+// (explicitRead — a browser navigation or a client naming the format) may consume a
+// burn_after_click link; anything else (preview fetch, scanner, HEAD, <img src="/r/…">) may not.
+func (h *LinkHandler) followLink(r *http.Request, id string) (*domain.Link, error) {
+	if explicitRead(r) {
+		link, err := h.manager.Redirect(r.Context(), id)
+		if err != nil {
+			return nil, fmt.Errorf("follow link: %w", err)
+		}
+
+		return link, nil
+	}
+
+	link, err := h.manager.RedirectWithoutBurn(r.Context(), id)
+	if err != nil {
+		return nil, fmt.Errorf("follow link: %w", err)
+	}
+
+	return link, nil
 }
 
 // handlePrivateAuth checks the link's privacy level against the caller (see Link.VisibleTo),

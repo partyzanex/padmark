@@ -125,3 +125,44 @@ func TestNegotiate_RawQueryWins(t *testing.T) {
 
 	require.Equal(t, formatPlain, negotiate(req))
 }
+
+// TestExplicitRead: only a GET that names a served format exactly, from a document navigation,
+// a fetch or a non-browser client, carries the intent a burn-after-reading read needs.
+func TestExplicitRead(t *testing.T) {
+	cases := []struct {
+		name   string
+		method string
+		accept string
+		dest   string
+		want   bool
+	}{
+		{"json", http.MethodGet, "application/json", "", true},
+		{"markdown", http.MethodGet, "text/markdown", "", true},
+		{"plain with params", http.MethodGet, "text/plain; charset=utf-8", "", true},
+		{"browser navigation", http.MethodGet, "text/html,application/xhtml+xml,*/*;q=0.8", "document", true},
+		{"fetch with json", http.MethodGet, "application/json", "empty", true},
+		{"missing Accept", http.MethodGet, "", "", false},
+		{"match-all", http.MethodGet, "*/*", "", false},
+		{"partial wildcard", http.MethodGet, "text/*", "", false},
+		{"refused exact type", http.MethodGet, "application/json;q=0, */*", "", false},
+		{"unserved exact type", http.MethodGet, "image/png", "", false},
+		{"img subresource", http.MethodGet, "image/avif,image/webp,*/*;q=0.8", "image", false},
+		{"iframe even with text/html", http.MethodGet, "text/html", "iframe", false},
+		{"HEAD", http.MethodHead, "application/json", "", false},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			req := httptest.NewRequest(testCase.method, "/notes/some-id", nil)
+			if testCase.accept != "" {
+				req.Header.Set("Accept", testCase.accept)
+			}
+
+			if testCase.dest != "" {
+				req.Header.Set("Sec-Fetch-Dest", testCase.dest)
+			}
+
+			require.Equal(t, testCase.want, explicitRead(req))
+		})
+	}
+}

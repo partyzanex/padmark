@@ -78,6 +78,10 @@ func handleGetNoteRes(res padmark.GetNoteRes) (*padmark.NoteResponse, error) {
 		return nil, errors.New("note not found")
 	case *padmark.GetNoteGone:
 		return nil, errors.New("note has expired or was already consumed")
+	case *padmark.GetNoteConflict:
+		// The client always sends Accept: application/json; a 409 means something on the way
+		// stripped it. The burn-after-reading note was not consumed.
+		return nil, fmt.Errorf("refused: %s — the note is still intact", typed.Message)
 	case *padmark.GetNoteServiceUnavailable:
 		return nil, serviceUnavailableError(padmark.ErrorResponse(*typed))
 	case *padmark.GetNoteInternalServerError:

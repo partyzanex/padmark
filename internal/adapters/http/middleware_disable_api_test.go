@@ -113,9 +113,12 @@ func (s *DisableAPISuite) TestAPIPaths_Return503WithCode() {
 func (s *DisableAPISuite) TestWebUI_Unaffected() {
 	router := s.newRouter(true)
 
-	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(newTestNote("t", "c"), nil)
-	s.manager.EXPECT().View(gomock.Any(), testID).Return(newTestNote("t", "c"), nil)
-	s.linkManager.EXPECT().Redirect(gomock.Any(), testID).Return(newTestLink(), nil)
+	// The note view (no explicit Accept) and the editor each load the note via Peek; the view
+	// then applies the read policy to that snapshot, the editor only enforces expiry.
+	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(newTestNote("t", "c"), nil).Times(2)
+	s.manager.EXPECT().ViewPreloaded(gomock.Any(), testID, gomock.Any()).Return(newTestNote("t", "c"), nil)
+	s.manager.EXPECT().EnforceExpiry(gomock.Any(), testID, gomock.Any()).Return(nil)
+	s.linkManager.EXPECT().RedirectWithoutBurn(gomock.Any(), testID).Return(newTestLink(), nil)
 	s.pinger.EXPECT().PingContext(gomock.Any()).Return(nil)
 
 	cases := []struct {

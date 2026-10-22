@@ -660,6 +660,20 @@ func (mr *MockNoteManagerMockRecorder) Delete(ctx, id, editCode, callerID any) *
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Delete", reflect.TypeOf((*MockNoteManager)(nil).Delete), ctx, id, editCode, callerID)
 }
 
+// EnforceExpiry mocks base method.
+func (m *MockNoteManager) EnforceExpiry(ctx context.Context, id string, note *domain.Note) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "EnforceExpiry", ctx, id, note)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// EnforceExpiry indicates an expected call of EnforceExpiry.
+func (mr *MockNoteManagerMockRecorder) EnforceExpiry(ctx, id, note any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "EnforceExpiry", reflect.TypeOf((*MockNoteManager)(nil).EnforceExpiry), ctx, id, note)
+}
+
 // GetRendered mocks base method.
 func (m *MockNoteManager) GetRendered(ctx context.Context, id string) (*domain.Note, string, error) {
 	m.ctrl.T.Helper()
@@ -833,6 +847,21 @@ func (m *MockLinkManager) Redirect(ctx context.Context, slug string) (*domain.Li
 func (mr *MockLinkManagerMockRecorder) Redirect(ctx, slug any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Redirect", reflect.TypeOf((*MockLinkManager)(nil).Redirect), ctx, slug)
+}
+
+// RedirectWithoutBurn mocks base method.
+func (m *MockLinkManager) RedirectWithoutBurn(ctx context.Context, slug string) (*domain.Link, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RedirectWithoutBurn", ctx, slug)
+	ret0, _ := ret[0].(*domain.Link)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// RedirectWithoutBurn indicates an expected call of RedirectWithoutBurn.
+func (mr *MockLinkManagerMockRecorder) RedirectWithoutBurn(ctx, slug any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RedirectWithoutBurn", reflect.TypeOf((*MockLinkManager)(nil).RedirectWithoutBurn), ctx, slug)
 }
 
 // Update mocks base method.

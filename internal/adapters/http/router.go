@@ -58,20 +58,30 @@ const protoHTTPS = "https"
 const protoHTTP = "http"
 
 // requestScheme returns the URL scheme ("http" or "https") to use when building absolute links
-// back to this server, honouring the trusted-proxy handling in isHTTPS.
-func requestScheme(r *http.Request, trustedProxies []*net.IPNet) string {
-	if isHTTPS(r, trustedProxies) {
+// back to this server: the operator-forced override when set (--public-scheme, see
+// Handler.WithForcedScheme), otherwise the auto-detected value from isHTTPS.
+func requestScheme(r *http.Request, forcedScheme string, trustedProxies []*net.IPNet) string {
+	if forcedScheme != "" {
+		return forcedScheme
+	}
+
+	if isHTTPS(r, "", trustedProxies) {
 		return protoHTTPS
 	}
 
 	return protoHTTP
 }
 
-// isHTTPS reports whether the request arrived over HTTPS.
-// X-Forwarded-Proto is only trusted when the remote address belongs to a trusted proxy;
-// spoofed headers from untrusted clients are ignored.
-func isHTTPS(r *http.Request, trustedProxies []*net.IPNet) bool {
-	if r.TLS != nil {
+// isHTTPS reports whether the request must be treated as HTTPS — the decision behind the
+// cookie Secure attribute and HSTS. An operator-forced "https" (--public-scheme) is honoured
+// unconditionally: that flag is the recommended setup behind a TLS-terminating load balancer
+// whose address is not stable enough for --trusted-proxies, so the request itself arrives as
+// plain HTTP with no trustworthy X-Forwarded-Proto. Any other forcedScheme falls back to
+// detection — a forced "http" only affects link building and never strips Secure from a
+// cookie that really is travelling over TLS. X-Forwarded-Proto is only trusted when the remote
+// address belongs to a trusted proxy; spoofed headers from untrusted clients are ignored.
+func isHTTPS(r *http.Request, forcedScheme string, trustedProxies []*net.IPNet) bool {
+	if forcedScheme == protoHTTPS || r.TLS != nil {
 		return true
 	}
 
@@ -216,14 +226,14 @@ func wrapMiddleware(
 	}
 
 	stack := withRecovery(handler.log, mux)
-	stack = withRequestOrigin(handler.forcedScheme, opts.TrustedProxies, stack)
+	stack = withRequestOrigin(opts.ForcedScheme, opts.TrustedProxies, stack)
 
 	if opts.DisableAPI {
 		stack = withAPIDisabled(handler.log, stack)
 	}
 
 	stack = newAuthMiddleware(buildNamedRoutes(), checker, stack)
-	stack = withCSRFToken(csrfSecret, opts.TrustedProxies, stack)
+	stack = withCSRFToken(csrfSecret, opts.ForcedScheme, opts.TrustedProxies, stack)
 
 	stack = withBodyLimit(int64(opts.MaxBodyBytes), stack)
 
@@ -236,7 +246,7 @@ func wrapMiddleware(
 		stack = warnUnconfiguredProxy(handler.log, stack)
 	}
 
-	stack = withSecurityHeaders(opts.TrustedProxies, stack)
+	stack = withSecurityHeaders(opts.ForcedScheme, opts.TrustedProxies, stack)
 	stack = withLogging(handler.log, stack)
 	stack = withRequestID(stack)
 
@@ -319,12 +329,7 @@ type originCtxKey struct{}
 // requestScheme's TLS/X-Forwarded-Proto detection — same rules as common.scheme.
 func withRequestOrigin(forcedScheme string, trustedProxies []*net.IPNet, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		scheme := forcedScheme
-		if scheme == "" {
-			scheme = requestScheme(r, trustedProxies)
-		}
-
-		origin := requestOrigin{Scheme: scheme, Host: r.Host}
+		origin := requestOrigin{Scheme: requestScheme(r, forcedScheme, trustedProxies), Host: r.Host}
 
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), originCtxKey{}, origin)))
 	})
@@ -476,7 +481,10 @@ func buildCSP(nonce string, extraScriptSrc ...string) string {
 		"connect-src 'self'"
 }
 
-func withSecurityHeaders(trustedProxies []*net.IPNet, next http.Handler) http.Handler {
+// withSecurityHeaders sets the hardening headers on every response. HSTS is emitted only when
+// the request counts as HTTPS (see isHTTPS: direct TLS, a trusted proxy's X-Forwarded-Proto, or
+// a forced "https" scheme) — sending it over plain HTTP would be ignored by browsers anyway.
+func withSecurityHeaders(forcedScheme string, trustedProxies []*net.IPNet, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var b [16]byte
 
@@ -498,7 +506,7 @@ func withSecurityHeaders(trustedProxies []*net.IPNet, next http.Handler) http.Ha
 		header.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
 		header.Set("Content-Security-Policy", buildCSP(nonce))
 
-		if isHTTPS(r, trustedProxies) {
+		if isHTTPS(r, forcedScheme, trustedProxies) {
 			header.Set("Strict-Transport-Security", "max-age=63072000; includeSubDomains")
 		}
 

@@ -195,13 +195,13 @@ func (h *AuthHandler) TOTPLoginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: HttpOnly/SameSite set; Secure follows TLS detection
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: HttpOnly/SameSite set; Secure follows isHTTPS
 		Name:     sessionCookieName,
 		Value:    sessID,
 		Path:     "/",
 		MaxAge:   int(h.sessionMaxAge().Seconds()),
 		HttpOnly: true,
-		Secure:   isHTTPS(r, h.trustedProxies),
+		Secure:   h.isHTTPS(r),
 		SameSite: http.SameSiteStrictMode,
 		// Unused optional fields zeroed: no Raw, RawExpires, Unparsed, Quoted, Domain, Expires, Partitioned.
 		Raw:         "",
@@ -213,7 +213,7 @@ func (h *AuthHandler) TOTPLoginHandler(w http.ResponseWriter, r *http.Request) {
 		Partitioned: false,
 	})
 
-	rotateCSRFToken(w, r, h.csrfSecret, h.trustedProxies)
+	rotateCSRFToken(w, r, h.csrfSecret, h.forcedScheme, h.trustedProxies)
 
 	dest := "/"
 	if next != "" {
@@ -240,13 +240,13 @@ func (h *AuthHandler) LogoutHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: HttpOnly/SameSite set; Secure follows TLS detection
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: HttpOnly/SameSite set; Secure follows isHTTPS
 		Name:     sessionCookieName,
 		Value:    "",
 		Path:     "/",
 		MaxAge:   -1,
 		HttpOnly: true,
-		Secure:   isHTTPS(r, h.trustedProxies),
+		Secure:   h.isHTTPS(r),
 		SameSite: http.SameSiteStrictMode,
 		// Unused optional fields zeroed: no Raw, RawExpires, Unparsed, Quoted, Domain, Expires, Partitioned.
 		Raw:         "",
@@ -258,7 +258,7 @@ func (h *AuthHandler) LogoutHandler(w http.ResponseWriter, r *http.Request) {
 		Partitioned: false,
 	})
 
-	clearCSRFCookie(w, r, h.trustedProxies)
+	clearCSRFCookie(w, r, h.forcedScheme, h.trustedProxies)
 
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }
@@ -595,13 +595,13 @@ func (h *AuthHandler) doChangePassword(
 	newSessID, changeErr := h.authMgr.ChangePassword(r.Context(), sessID, oldPassword, newPassword, totpCode)
 	if changeErr == nil || errors.Is(changeErr, domain.ErrSessionRevocation) {
 		// Replace the session cookie: all old sessions were invalidated; use the fresh one.
-		http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: HttpOnly/SameSite set; Secure follows TLS detection
+		http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: HttpOnly/SameSite set; Secure follows isHTTPS
 			Name:     sessionCookieName,
 			Value:    newSessID,
 			Path:     "/",
 			MaxAge:   int(h.sessionMaxAge().Seconds()),
 			HttpOnly: true,
-			Secure:   isHTTPS(r, h.trustedProxies),
+			Secure:   h.isHTTPS(r),
 			SameSite: http.SameSiteStrictMode,
 			// Unused optional fields zeroed: no Raw, RawExpires, Unparsed, Quoted, Domain, Expires, Partitioned.
 			Raw:         "",
@@ -613,7 +613,7 @@ func (h *AuthHandler) doChangePassword(
 			Partitioned: false,
 		})
 
-		rotatedCSRF = rotateCSRFToken(w, r, h.csrfSecret, h.trustedProxies)
+		rotatedCSRF = rotateCSRFToken(w, r, h.csrfSecret, h.forcedScheme, h.trustedProxies)
 
 		if errors.Is(changeErr, domain.ErrSessionRevocation) {
 			return "Password changed, but older sessions could not be revoked. " +

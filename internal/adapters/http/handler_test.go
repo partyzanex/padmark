@@ -242,13 +242,13 @@ func (s *HandlerSuite) TestIndexPage() {
 
 func (s *HandlerSuite) TestEditPage_OK() {
 	note := newTestNote("edit me", "# hello")
-	note.BurnAfterReading = true
 	note.Privacy = new(domain.PrivacyAuthenticated)
 
 	future := time.Now().Add(time.Hour)
 	note.ExpiresAt = &future
 
 	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
+	s.manager.EXPECT().EnforceExpiry(gomock.Any(), testID, note).Return(nil)
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/edit/"+testID, nil)
@@ -262,8 +262,47 @@ func (s *HandlerSuite) TestEditPage_OK() {
 	s.Contains(body, "edit me")
 	s.Contains(body, "# hello")
 	s.Contains(body, "Save")
-	s.Contains(body, "checked")
 	s.Contains(body, `value="authenticated" selected`)
+}
+
+// TestEditPage_BurnNote_ContentWithheld: the editor never burns, so it must not pre-fill a
+// burn-after-reading note's content — otherwise /edit/{id} reads it any number of times (H-1).
+func (s *HandlerSuite) TestEditPage_BurnNote_ContentWithheld() {
+	note := newTestNote("edit me", "# burn-only-once")
+	note.BurnAfterReading = true
+
+	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
+	s.manager.EXPECT().EnforceExpiry(gomock.Any(), testID, note).Return(nil)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/edit/"+testID, nil)
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusOK, w.Code)
+
+	body := w.Body.String()
+	s.Contains(body, "edit me")
+	s.NotContains(body, "burn-only-once")
+	s.Contains(body, "Burn-after-reading content is not shown here")
+	s.Contains(body, "checked")
+}
+
+// TestEditPage_Expired_Gone: Peek ignores expiry, so the editor enforces it itself — an expired
+// note is deleted (by the usecase) and answered 410 instead of being served (H-1).
+func (s *HandlerSuite) TestEditPage_Expired_Gone() {
+	note := newTestNote("old", "# stale-content")
+
+	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
+	s.manager.EXPECT().EnforceExpiry(gomock.Any(), testID, note).Return(domain.ErrExpired)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/edit/"+testID, nil)
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusGone, w.Code)
+	s.NotContains(w.Body.String(), "stale-content")
 }
 
 func (s *HandlerSuite) TestEditPage_NotFound() {
@@ -920,7 +959,8 @@ func (s *HandlerSuite) TestGetNote_RawQuery() {
 
 func (s *HandlerSuite) TestGetNote_UnknownAccept() {
 	note := newTestNote("unknown", "body")
-	s.manager.EXPECT().View(gomock.Any(), testID).Return(note, nil)
+	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
+	s.manager.EXPECT().ViewPreloaded(gomock.Any(), testID, note).Return(note, nil)
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
@@ -934,7 +974,8 @@ func (s *HandlerSuite) TestGetNote_UnknownAccept() {
 
 func (s *HandlerSuite) TestGetNote_AcceptWildcard() {
 	note := newTestNote("wildcard", "body")
-	s.manager.EXPECT().View(gomock.Any(), testID).Return(note, nil)
+	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
+	s.manager.EXPECT().ViewPreloaded(gomock.Any(), testID, note).Return(note, nil)
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
@@ -946,11 +987,97 @@ func (s *HandlerSuite) TestGetNote_AcceptWildcard() {
 	s.Contains(w.Header().Get("Content-Type"), "application/json")
 }
 
+// TestGetNote_ImplicitBurnRead_Refused: a burn-after-reading note read without explicit intent
+// (no Accept, wildcards only, HEAD, an <img> subresource) is answered 409 and never reaches
+// View — the note is neither consumed nor its timer started (H-1).
+func (s *HandlerSuite) TestGetNote_ImplicitBurnRead_Refused() {
+	cases := []struct {
+		name    string
+		method  string
+		headers map[string]string
+		burnTTL int64
+	}{
+		{"no Accept", http.MethodGet, map[string]string{}, 0},
+		{"wildcard", http.MethodGet, map[string]string{"Accept": "*/*"}, 0},
+		{"partial wildcard", http.MethodGet, map[string]string{"Accept": "text/*"}, 0},
+		{"HEAD with explicit Accept", http.MethodHead, map[string]string{"Accept": "application/json"}, 0},
+		{"img subresource", http.MethodGet, map[string]string{
+			"Accept": "image/avif,image/webp,*/*;q=0.8", "Sec-Fetch-Dest": "image",
+		}, 0},
+		{"iframe with text/html", http.MethodGet, map[string]string{
+			"Accept": "text/html", "Sec-Fetch-Dest": "iframe",
+		}, 0},
+		{"grace-period timer not started", http.MethodGet, map[string]string{"Accept": "*/*"}, 3600},
+	}
+
+	for _, testCase := range cases {
+		s.Run(testCase.name, func() {
+			note := newTestNote("burn", "burn-body")
+			note.BurnAfterReading = true
+			note.BurnTTL = testCase.burnTTL
+
+			s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
+
+			w := httptest.NewRecorder()
+			r := httptest.NewRequest(testCase.method, "/"+testID, nil)
+
+			for name, value := range testCase.headers {
+				r.Header.Set(name, value)
+			}
+
+			s.router.ServeHTTP(w, r)
+
+			s.Equal(http.StatusConflict, w.Code)
+			s.NotContains(w.Body.String(), "burn-body")
+
+			if testCase.method == http.MethodGet {
+				s.Contains(w.Body.String(), `"code":"burn_read_not_explicit"`)
+			}
+		})
+	}
+}
+
+// TestGetNote_ExplicitBurnRead_Consumes: naming the format exactly is the intent a burning read
+// needs — the request goes straight to View, which consumes the note.
+func (s *HandlerSuite) TestGetNote_ExplicitBurnRead_Consumes() {
+	for _, accept := range []string{"application/json", "text/markdown", "application/json, */*;q=0.1"} {
+		s.Run(accept, func() {
+			note := newTestNote("burn", "burn-body")
+			note.BurnAfterReading = true
+
+			s.manager.EXPECT().View(gomock.Any(), testID).Return(note, nil)
+
+			w := httptest.NewRecorder()
+			r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
+			r.Header.Set("Accept", accept)
+			r.Header.Set("Sec-Fetch-Dest", "empty")
+
+			s.router.ServeHTTP(w, r)
+
+			s.Equal(http.StatusOK, w.Code)
+			s.Contains(w.Body.String(), "burn-body")
+		})
+	}
+}
+
+// TestGetNote_ImplicitRead_PeekNotFound: the implicit-read gate surfaces Peek's error as is.
+func (s *HandlerSuite) TestGetNote_ImplicitRead_PeekNotFound() {
+	s.manager.EXPECT().Peek(gomock.Any(), "nonexistent").Return(nil, domain.ErrNotFound)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/notes/nonexistent", nil)
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusNotFound, w.Code)
+}
+
 func (s *HandlerSuite) TestGetNote_NotFound() {
 	s.manager.EXPECT().View(gomock.Any(), "nonexistent").Return(nil, domain.ErrNotFound)
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/notes/nonexistent", nil)
+	r.Header.Set("Accept", "application/json")
 
 	s.router.ServeHTTP(w, r)
 
@@ -962,6 +1089,7 @@ func (s *HandlerSuite) TestGetNote_Expired() {
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
+	r.Header.Set("Accept", "application/json")
 
 	s.router.ServeHTTP(w, r)
 
@@ -1074,6 +1202,7 @@ func (s *HandlerSuite) TestEditPage_MultiSegmentPath_GatedByPrivacy() {
 	private.Privacy = new(domain.PrivacyOwner)
 
 	s.manager.EXPECT().Peek(gomock.Any(), "project/GUIDE.md").Return(public, nil)
+	s.manager.EXPECT().EnforceExpiry(gomock.Any(), "project/GUIDE.md", public).Return(nil)
 	s.manager.EXPECT().Peek(gomock.Any(), "project/secret.md").Return(private, nil)
 
 	w := httptest.NewRecorder()
@@ -1423,6 +1552,7 @@ func (s *HandlerSuite) TestRequestIDHeader() {
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
+	r.Header.Set("Accept", "application/json")
 
 	s.router.ServeHTTP(w, r)
 
@@ -1544,6 +1674,7 @@ func (s *HandlerSuite) TestIndexPage_WriteFail() {
 func (s *HandlerSuite) TestEditPage_WriteFail() {
 	note := newTestNote("edit", "body")
 	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
+	s.manager.EXPECT().EnforceExpiry(gomock.Any(), testID, note).Return(nil)
 
 	handler := adhttp.NewHandler(s.manager, s.linkManager, slog.New(slog.DiscardHandler))
 	fwr := newFailWriter()
@@ -2853,6 +2984,7 @@ func (s *HandlerSuite) TestEditPage_OwnerOnly_Owner_OK() {
 	note.OwnerID = &owner.ID
 
 	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
+	s.manager.EXPECT().EnforceExpiry(gomock.Any(), testID, note).Return(nil)
 	s.authMgr.EXPECT().GetSession(gomock.Any(), "valid-sess").Return(owner, nil).Times(1)
 
 	router := s.newRouterWithTOTPAuth()

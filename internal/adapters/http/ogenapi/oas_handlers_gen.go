@@ -1198,6 +1198,13 @@ func (s *Server) handleGetLinkRequest(args [1]string, argsEscaped bool, w http.R
 // the response body is the last snapshot of the note before deletion.
 // For burn-after-reading notes **with TTL** `expires_at` is set on the first read to
 // `now + ttl` and the note expires automatically when that timestamp is reached.
+// Because such a read destroys the note (or starts its timer), it must be explicit: send
+// an `Accept` header naming `application/json` (or `text/markdown`, `text/plain`,
+// `text/html`) exactly. A burn-after-reading note requested without `Accept`, with only
+// wildcards (`*/*`, `text/*`), with `HEAD`, or as a browser subresource
+// (`Sec-Fetch-Dest` other than `document`/`empty`, e.g. an `<img>`) is answered `409`
+// with code `burn_read_not_explicit` and stays intact — link unfurlers and mail scanners
+// can no longer burn it. Other notes are unaffected.
 //
 // GET /notes/{id}
 func (s *Server) handleGetNoteRequest(args [1]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {

@@ -22,7 +22,7 @@
                 <button class="toolbar-btn" id="mdBlock">block</button>
             </div>
         </div>
-        <textarea class="editor-textarea" id="editor" placeholder="Paste or write your Markdown…" spellcheck="false">{{.Content}}</textarea>
+        <textarea class="editor-textarea" id="editor" placeholder="{{if .ContentWithheld}}Burn-after-reading content is not shown here — write the replacement content{{else}}Paste or write your Markdown…{{end}}" spellcheck="false">{{.Content}}</textarea>
         <div class="editor-footer">
             <span class="char-count" id="charCount">0 characters</span>
             <span class="format-hint">

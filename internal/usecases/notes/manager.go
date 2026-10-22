@@ -247,6 +247,14 @@ func (m *Manager) ViewPreloaded(ctx context.Context, id string, preloaded *domai
 	return note, nil
 }
 
+// EnforceExpiry applies only the expiry half of the read policy to an already-fetched note (from
+// Peek): an expired note — plain TTL or a started burn timer — is deleted and ErrExpired is
+// returned. It never consumes a burn-after-reading note, starts its timer or counts a view, so a
+// caller that must not trigger burn (the editor) still cannot serve an expired note.
+func (m *Manager) EnforceExpiry(ctx context.Context, id string, note *domain.Note) error {
+	return m.burn.enforceExpiry(ctx, id, note)
+}
+
 // pinImmutableFields carries forward two fields Update must never let the caller change: the
 // stored edit-code hash (never the plaintext the caller supplied — the repository's Update
 // column list excludes edit_code today, but if that ever changes this avoids leaking it) and

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -173,12 +174,8 @@ func (h *NoteHandler) GetNote(w http.ResponseWriter, r *http.Request) {
 	// Check auth for private notes before any side effects (view count, burn).
 	// When auth is configured, preloaded holds the already-fetched note so the
 	// subsequent View/GetRendered can skip a second SELECT.
-	preloaded, handled := h.handlePrivateAuth(w, r, id)
+	preloaded, handled := h.gateNoteRead(w, r, id)
 	if handled {
-		return
-	}
-
-	if h.handleBurnInterstitial(w, r, id, preloaded) {
 		return
 	}
 
@@ -436,6 +433,73 @@ func (h *NoteHandler) renderNoteHTML(w http.ResponseWriter, r *http.Request, id 
 	if err != nil {
 		h.log.ErrorContext(r.Context(), "render note template", "id", domain.HashSlug(id), "err", err)
 	}
+}
+
+// gateNoteRead runs every check that may answer a note read before the read policy applies, in
+// order: privacy, the implicit-read refusal for burn notes, and the HTML burn interstitial. It
+// returns the note already loaded on the way (nil if none was needed) and whether the response
+// has been written.
+func (h *NoteHandler) gateNoteRead(w http.ResponseWriter, r *http.Request, id string) (*domain.Note, bool) {
+	preloaded, handled := h.handlePrivateAuth(w, r, id)
+	if handled {
+		return nil, true
+	}
+
+	preloaded, handled = h.refuseImplicitBurnRead(w, r, id, preloaded)
+	if handled {
+		return nil, true
+	}
+
+	if h.handleBurnInterstitial(w, r, id, preloaded) {
+		return nil, true
+	}
+
+	return preloaded, false
+}
+
+// burnReadNotExplicitCode is the stable `code` of the 409 refusing an implicit burn read.
+const burnReadNotExplicitCode = "burn_read_not_explicit"
+
+// refuseImplicitBurnRead keeps reads without explicit intent (see explicitRead) from burning a
+// note: a burn-after-reading note — immediate or with a grace-period timer not yet started — is
+// answered 409 and stays intact. Otherwise it returns the note it had to load as the preloaded
+// snapshot, so the caller applies the read policy to exactly the note that was checked, with
+// no second SELECT. Explicit reads pass through untouched.
+func (h *NoteHandler) refuseImplicitBurnRead(
+	w http.ResponseWriter, r *http.Request, id string, preloaded *domain.Note,
+) (*domain.Note, bool) {
+	if explicitRead(r) {
+		return preloaded, false
+	}
+
+	note := preloaded
+	if note == nil {
+		var err error
+
+		note, err = h.manager.Peek(r.Context(), id)
+		if err != nil {
+			h.writeError(w, r, err)
+
+			return nil, true
+		}
+	}
+
+	if !note.BurnAfterReading {
+		return note, false
+	}
+
+	writeBurnReadNotExplicit(w, r, h.log)
+
+	return nil, true
+}
+
+// writeBurnReadNotExplicit answers an access to a burn resource (burn-after-reading note,
+// burn_after_click link) that lacked deliberate intent: 409 with a stable code; nothing burned.
+func writeBurnReadNotExplicit(w http.ResponseWriter, r *http.Request, log *slog.Logger) {
+	writeJSONErrorCode(w, r, log, http.StatusConflict,
+		"burn resource: accessing it destroys it, so the request must be a deliberate one — a browser "+
+			"navigation, or an Accept naming application/json, text/markdown, text/plain or text/html",
+		burnReadNotExplicitCode)
 }
 
 // handleBurnInterstitial renders the burn confirmation state via noteTmpl for browser

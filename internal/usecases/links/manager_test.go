@@ -321,6 +321,45 @@ func (s *ManagerTestSuite) TestRedirect_BurnAfterClick_ConsumedOnce() {
 	s.Equal("https://example.com", got.TargetURL)
 }
 
+// TestRedirectWithoutBurn_BurnLinkLeftIntact: an access without deliberate intent must neither
+// consume a burn_after_click link nor count a view — it gets ErrBurnIntentRequired.
+func (s *ManagerTestSuite) TestRedirectWithoutBurn_BurnLinkLeftIntact() {
+	link := &domain.Link{TargetURL: "https://example.com", BurnAfterClick: true}
+	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(link, nil)
+	// No Consume, no IncrementViews.
+
+	got, err := s.manager.RedirectWithoutBurn(s.T().Context(), "burn-slug")
+
+	s.Require().ErrorIs(err, domain.ErrBurnIntentRequired)
+	s.Nil(got)
+}
+
+// TestRedirectWithoutBurn_OrdinaryLinkFollowed: any other link is followed exactly as by Redirect.
+func (s *ManagerTestSuite) TestRedirectWithoutBurn_OrdinaryLinkFollowed() {
+	link := &domain.Link{TargetURL: "https://example.com"}
+	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(link, nil)
+	s.storage.EXPECT().IncrementViews(gomock.Any(), gomock.Any()).Return(nil)
+
+	got, err := s.manager.RedirectWithoutBurn(s.T().Context(), "plain-slug")
+
+	s.Require().NoError(err)
+	s.Equal("https://example.com", got.TargetURL)
+	s.Equal(1, got.Views)
+}
+
+// TestRedirectWithoutBurn_ExpiredLinkStillExpires: expiry is not a burn — an expired link is
+// deleted and ErrExpired returned on either path.
+func (s *ManagerTestSuite) TestRedirectWithoutBurn_ExpiredLinkStillExpires() {
+	past := time.Now().Add(-time.Minute)
+	link := &domain.Link{TargetURL: "https://example.com", BurnAfterClick: true, ExpiresAt: &past}
+	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(link, nil)
+	s.storage.EXPECT().Delete(gomock.Any(), gomock.Any()).Return(nil)
+
+	_, err := s.manager.RedirectWithoutBurn(s.T().Context(), "old-slug")
+
+	s.ErrorIs(err, domain.ErrExpired)
+}
+
 // TestRedirect_BurnAfterClick_SecondCallNotFound verifies burn-after-click is exactly-once: a
 // second Redirect for the same slug, after the row was consumed, gets ErrNotFound.
 func (s *ManagerTestSuite) TestRedirect_BurnAfterClick_SecondCallNotFound() {

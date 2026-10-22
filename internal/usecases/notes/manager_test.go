@@ -1052,6 +1052,34 @@ func (s *ManagerTestSuite) TestViewPreloaded_Expired() {
 	s.ErrorIs(err, domain.ErrExpired)
 }
 
+// EnforceExpiry — expiry only, never burn
+
+func (s *ManagerTestSuite) TestEnforceExpiry_ExpiredNoteIsDeleted() {
+	past := time.Now().Add(-time.Minute)
+	note := &domain.Note{ID: "ee-1", ExpiresAt: &past, BurnAfterReading: true}
+
+	s.storage.EXPECT().Delete(gomock.Any(), domain.HashSlug("ee-1")).Return(nil)
+
+	err := s.manager.EnforceExpiry(s.T().Context(), "ee-1", note)
+
+	s.ErrorIs(err, domain.ErrExpired)
+}
+
+func (s *ManagerTestSuite) TestEnforceExpiry_LiveBurnNoteIsNotConsumed() {
+	future := time.Now().Add(time.Hour)
+
+	for _, note := range []*domain.Note{
+		{ID: "ee-2", BurnAfterReading: true},
+		{ID: "ee-3", BurnAfterReading: true, BurnTTL: 60},
+		{ID: "ee-4", ExpiresAt: &future},
+	} {
+		// No storage call at all: no Consume, no SetBurnExpiry, no Delete, no IncrementViews.
+		err := s.manager.EnforceExpiry(s.T().Context(), note.ID, note)
+
+		s.Require().NoError(err, note.ID)
+	}
+}
+
 // GetRenderedPreloaded
 
 func (s *ManagerTestSuite) TestGetRenderedPreloaded_OK() {

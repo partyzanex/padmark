@@ -2,6 +2,7 @@ package http_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -392,6 +393,77 @@ func (s *HandlerSuite) TestDeleteLink_OwnerBypass_NoEditCode() {
 
 // ── GET /r/{id} ──
 
+// newLinkClickRequest builds GET /r/{id} the way a browser sends a deliberate link click — the
+// intent a burn_after_click link requires (see explicitRead).
+func newLinkClickRequest(path string) *http.Request {
+	r := httptest.NewRequest(http.MethodGet, path, nil)
+	r.Header.Set("Accept", "text/html,application/xhtml+xml,*/*;q=0.8")
+	r.Header.Set("Sec-Fetch-Dest", "document")
+
+	return r
+}
+
+// TestRedirectLink_ImplicitAccess_BurnLinkRefused: a preview fetch, scanner, HEAD probe or
+// embedded <img> goes through RedirectWithoutBurn; for a burn link that is a 409 and the link
+// stays intact — no target leaks.
+func (s *HandlerSuite) TestRedirectLink_ImplicitAccess_BurnLinkRefused() {
+	cases := []struct {
+		name    string
+		method  string
+		headers map[string]string
+	}{
+		{"no Accept", http.MethodGet, map[string]string{}},
+		{"wildcard", http.MethodGet, map[string]string{"Accept": "*/*"}},
+		{"HEAD", http.MethodHead, map[string]string{"Accept": "text/html"}},
+		{"img subresource", http.MethodGet, map[string]string{
+			"Accept": "image/avif,image/webp,*/*;q=0.8", "Sec-Fetch-Dest": "image",
+		}},
+	}
+
+	router := s.newLinkRouter(true)
+
+	for _, testCase := range cases {
+		s.Run(testCase.name, func() {
+			s.linkManager.EXPECT().RedirectWithoutBurn(gomock.Any(), testLinkID).
+				Return(nil, fmt.Errorf("redirect: %w", domain.ErrBurnIntentRequired))
+
+			w := httptest.NewRecorder()
+			r := httptest.NewRequest(testCase.method, "/r/"+testLinkID, nil)
+
+			for name, value := range testCase.headers {
+				r.Header.Set(name, value)
+			}
+
+			router.ServeHTTP(w, r)
+
+			s.Equal(http.StatusConflict, w.Code)
+			s.Empty(w.Header().Get("Location"))
+			s.NotContains(w.Body.String(), testLinkTargetURL)
+
+			if testCase.method == http.MethodGet {
+				s.Contains(w.Body.String(), `"code":"burn_read_not_explicit"`)
+			}
+		})
+	}
+}
+
+// TestRedirectLink_ImplicitAccess_OrdinaryLinkFollowed: an ordinary link keeps redirecting any
+// client, curl included — only burn links need deliberate intent.
+func (s *HandlerSuite) TestRedirectLink_ImplicitAccess_OrdinaryLinkFollowed() {
+	s.linkManager.EXPECT().RedirectWithoutBurn(gomock.Any(), testLinkID).Return(newTestLink(), nil)
+
+	router := s.newLinkRouter(true)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/r/"+testLinkID, nil)
+	r.Header.Set("Accept", "*/*")
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusMovedPermanently, w.Code)
+	s.Equal(testLinkTargetURL, w.Header().Get("Location"))
+}
+
 func (s *HandlerSuite) TestRedirectLink_DirectMode_301() {
 	link := newTestLink()
 	s.linkManager.EXPECT().Redirect(gomock.Any(), testLinkID).Return(link, nil)
@@ -399,7 +471,7 @@ func (s *HandlerSuite) TestRedirectLink_DirectMode_301() {
 	router := s.newLinkRouter(true)
 
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet, "/r/"+testLinkID, nil)
+	r := newLinkClickRequest("/r/" + testLinkID)
 
 	router.ServeHTTP(w, r)
 
@@ -414,7 +486,7 @@ func (s *HandlerSuite) TestRedirectLink_InterstitialMode_200() {
 	router := s.newLinkRouter(false)
 
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet, "/r/"+testLinkID, nil)
+	r := newLinkClickRequest("/r/" + testLinkID)
 
 	router.ServeHTTP(w, r)
 
@@ -437,7 +509,7 @@ func (s *HandlerSuite) TestRedirectLink_PerLinkOverride_ForcesDirectDespiteServe
 	router := s.newLinkRouter(false)
 
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet, "/r/"+testLinkID, nil)
+	r := newLinkClickRequest("/r/" + testLinkID)
 
 	router.ServeHTTP(w, r)
 
@@ -456,7 +528,7 @@ func (s *HandlerSuite) TestRedirectLink_PerLinkOverride_ForcesInterstitialDespit
 	router := s.newLinkRouter(true)
 
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet, "/r/"+testLinkID, nil)
+	r := newLinkClickRequest("/r/" + testLinkID)
 
 	router.ServeHTTP(w, r)
 
@@ -470,7 +542,7 @@ func (s *HandlerSuite) TestRedirectLink_Expired() {
 	router := s.newLinkRouter(true)
 
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet, "/r/"+testLinkID, nil)
+	r := newLinkClickRequest("/r/" + testLinkID)
 
 	router.ServeHTTP(w, r)
 
@@ -483,7 +555,7 @@ func (s *HandlerSuite) TestRedirectLink_NotFound() {
 	router := s.newLinkRouter(true)
 
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet, "/r/missing", nil)
+	r := newLinkClickRequest("/r/missing")
 
 	router.ServeHTTP(w, r)
 
@@ -506,11 +578,11 @@ func (s *HandlerSuite) TestRedirectLink_BurnAfterClick_ConsumedOnce() {
 	router := s.newLinkRouter(true)
 
 	first := httptest.NewRecorder()
-	router.ServeHTTP(first, httptest.NewRequest(http.MethodGet, "/r/"+testLinkID, nil))
+	router.ServeHTTP(first, newLinkClickRequest("/r/"+testLinkID))
 	s.Equal(http.StatusMovedPermanently, first.Code)
 
 	second := httptest.NewRecorder()
-	router.ServeHTTP(second, httptest.NewRequest(http.MethodGet, "/r/"+testLinkID, nil))
+	router.ServeHTTP(second, newLinkClickRequest("/r/"+testLinkID))
 	s.Equal(http.StatusNotFound, second.Code)
 }
 
@@ -533,7 +605,7 @@ func (s *HandlerSuite) TestRedirectLink_OwnerOnly_NonOwner_HTML_Forbidden() {
 	router := s.newLinkRouterWithTOTPAuth()
 
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet, "/r/"+testLinkID, nil)
+	r := newLinkClickRequest("/r/" + testLinkID)
 	r.Header.Set("Accept", "text/html")
 	r.AddCookie(&http.Cookie{Name: "padmark_session", Value: "valid-sess"}) //nolint:gosec // G124: test cookie
 
@@ -561,7 +633,7 @@ func (s *HandlerSuite) TestRedirectLink_OwnerOnly_Owner_Authorized() {
 	router := s.newLinkRouterWithTOTPAuth()
 
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet, "/r/"+testLinkID, nil)
+	r := newLinkClickRequest("/r/" + testLinkID)
 	r.AddCookie(&http.Cookie{Name: "padmark_session", Value: "valid-sess"}) //nolint:gosec // G124: test cookie
 
 	router.ServeHTTP(w, r)
@@ -585,7 +657,7 @@ func (s *HandlerSuite) TestRedirectLink_OwnerOnly_Anonymous_Unauthorized() {
 	router := s.newLinkRouterWithTOTPAuth()
 
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet, "/r/"+testLinkID, nil)
+	r := newLinkClickRequest("/r/" + testLinkID)
 	r.Header.Set("Accept", "application/json")
 
 	router.ServeHTTP(w, r)
@@ -607,7 +679,7 @@ func (s *HandlerSuite) TestRedirectLink_OwnerOnly_Anonymous_HTML_RedirectToLogin
 	router := s.newLinkRouterWithTOTPAuth()
 
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet, "/r/"+testLinkID, nil)
+	r := newLinkClickRequest("/r/" + testLinkID)
 	r.Header.Set("Accept", "text/html")
 
 	router.ServeHTTP(w, r)
@@ -629,7 +701,7 @@ func (s *HandlerSuite) TestRedirectLink_PrivacyAuthenticated_Unauthenticated() {
 	router := s.newLinkRouterWithTOTPAuth()
 
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet, "/r/"+testLinkID, nil)
+	r := newLinkClickRequest("/r/" + testLinkID)
 	r.Header.Set("Accept", "text/html")
 
 	router.ServeHTTP(w, r)
@@ -654,7 +726,7 @@ func (s *HandlerSuite) TestRedirectLink_PrivacyAuthenticated_Authenticated() {
 	router := s.newLinkRouterWithTOTPAuth()
 
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet, "/r/"+testLinkID, nil)
+	r := newLinkClickRequest("/r/" + testLinkID)
 	r.AddCookie(&http.Cookie{Name: "padmark_session", Value: "valid-sess"}) //nolint:gosec // G124: test cookie
 
 	router.ServeHTTP(w, r)

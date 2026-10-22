@@ -22,10 +22,16 @@ type errorJSON struct {
 // domain-error-driven counterpart with the same wire format (net/http's own http.Error writes
 // text/plain, which the OpenAPI ErrorResponse schema never promised).
 func writeJSONErrorStatus(w http.ResponseWriter, r *http.Request, log *slog.Logger, status int, msg string) {
+	writeJSONErrorCode(w, r, log, status, msg, "")
+}
+
+// writeJSONErrorCode is writeJSONErrorStatus plus the optional machine-readable `code` field,
+// for decisions a client is expected to branch on rather than show.
+func writeJSONErrorCode(w http.ResponseWriter, r *http.Request, log *slog.Logger, status int, msg, code string) {
 	w.Header().Set("Content-Type", mimeJSON)
 	w.WriteHeader(status)
 
-	err := json.NewEncoder(w).Encode(errorJSON{Message: msg, Code: ""})
+	err := json.NewEncoder(w).Encode(errorJSON{Message: msg, Code: code})
 	if err != nil {
 		log.ErrorContext(r.Context(), "write error response", "err", err)
 	}
@@ -56,6 +62,7 @@ func domainErrStatus(err error) (status int, message string) {
 		{domain.ErrInvalidSlug, http.StatusUnprocessableEntity},
 		{domain.ErrCustomSlugDisabled, http.StatusUnprocessableEntity},
 		{domain.ErrSlugConflict, http.StatusConflict},
+		{domain.ErrBurnIntentRequired, http.StatusConflict},
 		{domain.ErrInvalidEditCode, http.StatusForbidden},
 		{domain.ErrForbidden, http.StatusForbidden},
 		// javascript:/data:/file:/etc. target URLs are a malformed request, not an

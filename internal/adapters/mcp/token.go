@@ -91,7 +91,9 @@ func warnInsecureToken(errOut io.Writer, serverURL, token string) {
 		serverURL)
 }
 
-// bearerTransport injects an Authorization: Bearer header when a token is configured.
+// bearerTransport injects an Authorization: Bearer header when a token is configured, and
+// Accept: application/json when the request names none: the generated client sends no Accept,
+// and the server refuses a burn-after-reading read that does not state its format explicitly.
 // base is listed first to group pointer-sized fields contiguously (govet fieldalignment).
 type bearerTransport struct {
 	base  http.RoundTripper
@@ -99,9 +101,14 @@ type bearerTransport struct {
 }
 
 func (tr *bearerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	req = req.Clone(req.Context())
+
 	if tr.token != "" {
-		req = req.Clone(req.Context())
 		req.Header.Set("Authorization", "Bearer "+tr.token)
+	}
+
+	if req.Header.Get("Accept") == "" {
+		req.Header.Set("Accept", "application/json")
 	}
 
 	resp, err := tr.base.RoundTrip(req)

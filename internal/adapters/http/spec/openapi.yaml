@@ -78,7 +78,12 @@ info:
     In both modes an expired link responds `410 Gone`, a missing link `404`, and a link denied by
     its `privacy` level `401` (or a login redirect for a browser request) — mirroring notes'
     `handlePrivateAuth`. A `burn_after_click` link is deleted atomically on the redirect that
-    consumes it; every request after that gets `404`, in either response mode.
+    consumes it; every request after that gets `404`, in either response mode. Only a deliberate
+    access consumes it — a browser navigation, or a request whose `Accept` names a served type
+    exactly. A request without `Accept`, with only `*/*`, a `HEAD`, or a browser subresource
+    fetch (`Sec-Fetch-Dest` other than `document`/`empty`, e.g. `<img src="/r/{id}">`) gets
+    `409` (`code: burn_read_not_explicit`) and leaves the link intact, so link unfurlers and
+    mail scanners cannot burn it. Ordinary links redirect any client as before.
   version: 1.0.0
 
 servers:
@@ -160,6 +165,14 @@ paths:
 
         For burn-after-reading notes **with TTL** `expires_at` is set on the first read to
         `now + ttl` and the note expires automatically when that timestamp is reached.
+
+        Because such a read destroys the note (or starts its timer), it must be explicit: send
+        an `Accept` header naming `application/json` (or `text/markdown`, `text/plain`,
+        `text/html`) exactly. A burn-after-reading note requested without `Accept`, with only
+        wildcards (`*/*`, `text/*`), with `HEAD`, or as a browser subresource
+        (`Sec-Fetch-Dest` other than `document`/`empty`, e.g. an `<img>`) is answered `409`
+        with code `burn_read_not_explicit` and stays intact — link unfurlers and mail scanners
+        can no longer burn it. Other notes are unaffected.
       tags: [notes]
       parameters:
         - $ref: "#/components/parameters/noteId"
@@ -177,6 +190,11 @@ paths:
           $ref: "#/components/responses/Error"
         "404":
           description: Note not found
+          $ref: "#/components/responses/Error"
+        "409":
+          description: |
+            Burn-after-reading note requested without explicit read intent (code
+            `burn_read_not_explicit`); the note is left intact. Retry with an explicit `Accept`.
           $ref: "#/components/responses/Error"
         "410":
           description: Note has expired or was already consumed (burn-after-reading)
@@ -877,7 +895,10 @@ components:
         burn_after_click:
           type: boolean
           default: false
-          description: When `true` the link is deleted the moment it is first followed via `GET /r/{id}`
+          description: |
+            When `true` the link is deleted the moment it is first deliberately followed via
+            `GET /r/{id}` (a browser navigation or an explicit `Accept`; previews, scanners,
+            `HEAD` and embeds get `409` and leave it intact — see "Short links").
         ttl:
           type: integer
           format: int64

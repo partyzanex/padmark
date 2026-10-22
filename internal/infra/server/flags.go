@@ -238,8 +238,9 @@ func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
 			Sources: cli.EnvVars(EnvPublicScheme),
 			Usage: "Force the scheme (http or https) used when building absolute links back to this " +
 				"server (note URLs, invite links, API-token envelopes), instead of auto-detecting it " +
-				"from TLS/X-Forwarded-Proto; set this when the reverse proxy's IP is not stable enough " +
-				"for --trusted-proxies (e.g. cloud load balancers, k8s ingress)",
+				"from TLS/X-Forwarded-Proto; https also marks session/CSRF cookies Secure and enables " +
+				"HSTS; set this when the reverse proxy's IP is not stable enough for --trusted-proxies " +
+				"(e.g. cloud load balancers, k8s ingress)",
 		},
 		&cli.StringFlag{
 			Name:    FlagTOTPIssuer,
