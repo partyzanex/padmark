@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bluele/gcache"
 	"github.com/google/uuid"
 
 	"github.com/partyzanex/padmark/internal/adapters/http/ogenapi"
@@ -145,7 +144,7 @@ type RouteRegistrar interface {
 // single cache keyed by path ID plus caller works since notes and links share one global slug
 // namespace (a note and a link can never have the same ID, see domain.HashSlug/ErrSlugConflict).
 func registerOgenRoutes(
-	mux *http.ServeMux, ogenSrv http.Handler, lockout gcache.Cache, trustedProxies []*net.IPNet, log *slog.Logger,
+	mux *http.ServeMux, ogenSrv http.Handler, lockout *failLockoutCache, trustedProxies []*net.IPNet, log *slog.Logger,
 ) {
 	locked := func(next http.Handler) http.Handler {
 		return requireSameOrigin(log, withFailLockout(lockout, trustedProxies, log, next))

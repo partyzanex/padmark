@@ -19,8 +19,9 @@ const (
 	// Requests rejected with 429 do not extend the lockout.
 	failLockoutDur = 5 * time.Minute
 
-	// maxTrackedFailures bounds the number of buckets tracked at once.
-	// ARC evicts the least-recently-used entry when the cache is full.
+	// maxTrackedFailures bounds the number of failure counters tracked at once.
+	// ARC evicts the least-recently-used entry when the cache is full, so counters below the
+	// threshold are best-effort; buckets that reached it are pinned in lockedSet instead.
 	maxTrackedFailures = 10_000
 )
 
@@ -66,9 +67,22 @@ func newFailLockoutKey(r *http.Request, trustedProxies []*net.IPNet) failLockout
 	return key
 }
 
-//nolint:ireturn // gcache.Cache is an interface by design; no concrete type is exposed by the library
-func newFailLockoutCache() gcache.Cache {
-	return gcache.New(maxTrackedFailures).ARC().Build()
+// failLockoutCache holds the per-bucket failure counters (the embedded ARC cache) and the
+// buckets that reached maxFailedAttempts. A locked bucket is pinned in locked until failLockoutDur
+// passes, because ARC would otherwise evict it once an attacker touches maxTrackedFailures other
+// buckets twice each, restarting its counter at zero. Memory is bounded: counters by
+// maxTrackedFailures, locks by maxLockedBuckets (and in practice by the failures per duration).
+type failLockoutCache struct {
+	gcache.Cache
+
+	locked *lockedSet[failLockoutKey]
+}
+
+func newFailLockoutCache() *failLockoutCache {
+	return &failLockoutCache{
+		Cache:  gcache.New(maxTrackedFailures).ARC().Build(),
+		locked: newLockedSet[failLockoutKey](),
+	}
 }
 
 // withFailLockout wraps note/link PUT and DELETE routes after authentication.
@@ -81,18 +95,15 @@ func newFailLockoutCache() gcache.Cache {
 // one bucket per address (per /64 for IPv6), which is why caller-chosen edit codes must meet
 // domain.MinEditCodeLength. The state is in-process, so replicas do not share it.
 func withFailLockout(
-	cache gcache.Cache, trustedProxies []*net.IPNet, log *slog.Logger, next http.Handler,
+	cache *failLockoutCache, trustedProxies []*net.IPNet, log *slog.Logger, next http.Handler,
 ) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		key := newFailLockoutKey(r, trustedProxies)
 
-		cached, err := cache.Get(key)
-		if err == nil {
-			if count, ok := cached.(int); ok && count >= maxFailedAttempts {
-				writeJSONErrorStatus(w, r, log, http.StatusTooManyRequests, "too many failed attempts, try again later")
+		if isFailLocked(cache, key) {
+			writeJSONErrorStatus(w, r, log, http.StatusTooManyRequests, "too many failed attempts, try again later")
 
-				return
-			}
+			return
 		}
 
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK, written: false}
@@ -109,7 +120,14 @@ func withFailLockout(
 				}
 			}
 
-			setErr := cache.SetWithExpire(key, count+1, failLockoutDur)
+			count++
+
+			if count >= maxFailedAttempts {
+				// Pin the lock outside the evictable counter cache.
+				cache.locked.lock(key, time.Now(), time.Now().Add(failLockoutDur))
+			}
+
+			setErr := cache.SetWithExpire(key, count, failLockoutDur)
 			if setErr != nil {
 				// ARC SetWithExpire never returns an error in practice; skip silently.
 				return
@@ -117,6 +135,24 @@ func withFailLockout(
 		case rec.status < http.StatusBadRequest:
 			// Success resets only this caller's failures, preserving other buckets.
 			cache.Remove(key)
+			cache.locked.unlock(key)
 		}
 	})
+}
+
+// isFailLocked reports whether key is locked, either pinned in the lock set or by a counter
+// that already reached the threshold.
+func isFailLocked(cache *failLockoutCache, key failLockoutKey) bool {
+	if _, locked := cache.locked.remaining(key, time.Now()); locked {
+		return true
+	}
+
+	cached, err := cache.Get(key)
+	if err != nil {
+		return false
+	}
+
+	count, ok := cached.(int)
+
+	return ok && count >= maxFailedAttempts
 }
