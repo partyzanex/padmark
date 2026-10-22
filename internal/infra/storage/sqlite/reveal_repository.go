@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/uptrace/bun"
+
+	"github.com/partyzanex/padmark/internal/domain"
 )
 
 const (
@@ -21,8 +23,10 @@ type revealTokenRow struct {
 
 	ExpiresAt time.Time  `bun:"expires_at,notnull"`
 	UsedAt    *time.Time `bun:"used_at"`
-	Token     string     `bun:"token,pk"`
-	NoteID    string     `bun:"note_id,notnull"`
+	// TokenHash is the base64url SHA-256 of the bearer handed to the client; the raw token is
+	// never persisted, so a database leak yields no redeemable reveal tokens.
+	TokenHash string `bun:"token_hash,pk"`
+	NoteID    string `bun:"note_id,notnull"`
 }
 
 // RevealRepository issues and consumes one-time reveal tokens for burn-after-reading notes.
@@ -54,7 +58,7 @@ func (s *RevealRepository) Issue(ctx context.Context, noteID string) (string, er
 
 	row := &revealTokenRow{
 		BaseModel: bun.BaseModel{},
-		Token:     tok,
+		TokenHash: domain.HashRevealToken(tok),
 		NoteID:    noteID,
 		ExpiresAt: time.Now().Add(revealTokenTTL),
 		// UsedAt zero = nil until Consume sets it; preserves the "unused" invariant on insert.
@@ -89,7 +93,7 @@ func (s *RevealRepository) Consume(ctx context.Context, tok, noteID string) bool
 		var row revealTokenRow
 
 		err := btx.NewSelect().Model(&row).
-			Where("token = ?", tok).
+			Where("token_hash = ?", domain.HashRevealToken(tok)).
 			Where("note_id = ?", noteID).
 			Where("used_at IS NULL").
 			Where("expires_at > ?", time.Now()).
@@ -100,7 +104,7 @@ func (s *RevealRepository) Consume(ctx context.Context, tok, noteID string) bool
 
 		_, err = btx.NewUpdate().Model(&row).
 			Set("used_at = ?", time.Now()).
-			Where("token = ?", tok).
+			Where("token_hash = ?", domain.HashRevealToken(tok)).
 			Exec(ctx)
 		if err != nil {
 			return fmt.Errorf("mark reveal token used: %w", err)

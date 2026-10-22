@@ -586,6 +586,12 @@ hash of each invite token is stored in the database. Migration `20261014000002` 
 previously issued invites on both SQLite and PostgreSQL; admins must issue new links.
 Rolling back this migration also revokes invites, since raw tokens cannot be recovered.
 
+Burn-after-reading reveal tokens (the one-time confirmation token behind the "Reveal" button)
+are stored the same way, as a SHA-256 digest only. Migration `20261021000001` deletes the
+outstanding plaintext-era tokens on both backends, since their raw values cannot be recovered;
+they live at most 10 minutes, so a reader mid-flow just reloads the note. The notes themselves
+are untouched. Rolling back also drops the rows.
+
 **`privacy: authenticated`** notes require either a valid session (browsers are redirected to
 `/login`) or a Bearer token (API clients get `401`) — any signed-in caller, not just the creator.
 **`privacy: owner`** notes go further: only the exact credential that created the note may read

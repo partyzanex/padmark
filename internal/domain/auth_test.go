@@ -61,3 +61,14 @@ func TestValidateUsername(t *testing.T) {
 		require.ErrorIs(t, ValidateUsername(username), ErrInvalidUsername, username)
 	}
 }
+
+func TestHashRevealToken(t *testing.T) {
+	t.Parallel()
+
+	first := HashRevealToken("raw-reveal-token")
+
+	require.Equal(t, first, HashRevealToken("raw-reveal-token"), "deterministic")
+	require.NotEqual(t, first, HashRevealToken("other-token"))
+	require.NotContains(t, first, "raw-reveal-token")
+	require.Len(t, first, 43, "base64url SHA-256 without padding")
+}
