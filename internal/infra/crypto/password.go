@@ -3,7 +3,9 @@ package crypto
 import (
 	"crypto/rand"
 	"encoding/base64"
+	"errors"
 	"fmt"
+	"log/slog"
 )
 
 const (
@@ -13,13 +15,29 @@ const (
 
 // PasswordHasher hashes and verifies user passwords using argon2id with configurable cost.
 type PasswordHasher struct {
-	params Argon2Params
+	log *slog.Logger
+	// params is the cost Hash writes; ceiling (derived from it) is the most a stored hash may
+	// demand before Verify refuses to run the derivation.
+	params  Argon2Params
+	ceiling Argon2Params
 }
 
 // NewPasswordHasher returns a PasswordHasher using the given argon2 cost parameters.
 // Zero-valued fields fall back to DefaultArgon2Params.
 func NewPasswordHasher(params Argon2Params) *PasswordHasher {
-	return &PasswordHasher{params: params.withDefaults()}
+	return &PasswordHasher{
+		log:     slog.New(slog.DiscardHandler),
+		params:  params.withDefaults(),
+		ceiling: params.acceptedCeiling(),
+	}
+}
+
+// WithLogger sets the logger that records stored hashes refused for an excessive cost (WARN).
+// The default discards them.
+func (h *PasswordHasher) WithLogger(log *slog.Logger) *PasswordHasher {
+	h.log = log
+
+	return h
 }
 
 // Hash derives an argon2id hash from password (cost parameters embedded in the result).
@@ -28,8 +46,22 @@ func (h *PasswordHasher) Hash(password string) (string, error) {
 }
 
 // Verify reports whether password matches storedHash, reading params from the stored hash.
+// Fail-closed: a hash whose cost exceeds the accepted ceiling never verifies and is logged.
 func (h *PasswordHasher) Verify(storedHash, password string) bool {
-	return verifyArgon2(storedHash, password)
+	return verifyLogged(h.log, "password", storedHash, password, h.ceiling)
+}
+
+// verifyLogged runs verifyArgon2 and logs a refused cost at WARN, naming what was being checked
+// but never the stored hash itself.
+func verifyLogged(log *slog.Logger, what, storedHash, secret string, ceiling Argon2Params) bool {
+	matched, err := verifyArgon2(storedHash, secret, ceiling)
+	if errors.Is(err, ErrArgon2CostTooHigh) {
+		log.Warn("refusing stored argon2 hash above the accepted cost ceiling",
+			"kind", what, "ceiling_memory_kib", ceiling.Memory, "ceiling_time", ceiling.Time,
+			"ceiling_threads", ceiling.Threads)
+	}
+
+	return matched
 }
 
 // HashPassword hashes a password with the default argon2 cost. Convenience helper for
@@ -40,7 +72,11 @@ func HashPassword(password string) (string, error) {
 
 // VerifyPassword reports whether password matches storedHash (reads embedded params).
 func VerifyPassword(storedHash, password string) bool {
-	return verifyArgon2(storedHash, password)
+	// A cost above the ceiling is just a non-match for this config-less helper.
+	ceiling := DefaultArgon2Params().acceptedCeiling()
+	matched, _ := verifyArgon2(storedHash, password, ceiling) //nolint:errcheck // cost-too-high is a non-match here
+
+	return matched
 }
 
 // GenerateKDFSalt returns 16 random bytes to use as the argon2 salt for user key derivation.

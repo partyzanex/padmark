@@ -103,6 +103,8 @@ const (
 	DefaultArgon2Threads      = 1          // argon2id parallelism
 	DefaultArgon2MemoryBudget = 128 * 1024 // KiB of argon2id workspace all concurrent derivations may hold (128 MiB)
 	DefaultAllowSharedKeyring = false      // refuse group/other-readable keyrings outside /run/secrets/
+	// DefaultDirectRedirect is off: an anonymous link must not be a free open redirector.
+	DefaultDirectRedirect = false
 )
 
 // DefaultSessionTTL is the --session-ttl flag default, in seconds — derived from
@@ -234,9 +236,10 @@ func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
 		&cli.StringFlag{
 			Name:    FlagAllowedHosts,
 			Sources: cli.EnvVars(EnvAllowedHosts),
-			Usage: "Comma-separated host allowlist for the HTTP→HTTPS redirect (e.g. example.com,www.example.com); " +
-				"when set, requests with any other Host get 400 instead of a redirect (anti Host-header injection); " +
-				"empty = redirect to the request Host (legacy behaviour)",
+			Usage: "Comma-separated Host allowlist (e.g. example.com,www.example.com), compared case-insensitively " +
+				"without the port; applies to the main listener (other Hosts get 421 Misdirected Request, " +
+				"/healthz and /readyz exempt) and to the HTTP→HTTPS redirect listener (400); " +
+				"empty = no Host check (legacy behaviour)",
 		},
 		&cli.StringFlag{
 			Name:    FlagTrustedProxies,
@@ -270,10 +273,9 @@ func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
 			Validator: boundedCost(int(crypto.MaxArgon2Memory)),
 			Sources:   cli.EnvVars(EnvArgon2Memory),
 			Value:     DefaultArgon2Memory,
-			Usage: "argon2id memory cost in KiB for account passwords and the per-user TOTP key " +
-				"(default: 24576 = 24 MiB); every derivation allocates this much, bounded overall by " +
-				"--argon2-memory-budget. Caller-chosen edit codes are hashed with argon2id at a fixed " +
-				"64 MiB regardless of this flag; only generated edit codes use a fast hash",
+			Usage: "argon2id memory cost in KiB for account passwords, caller-chosen edit codes and the " +
+				"per-user TOTP key (default: 24576 = 24 MiB); every derivation allocates this much, bounded " +
+				"overall by --argon2-memory-budget. Server-generated edit codes use a fast hash instead",
 		},
 		&cli.IntFlag{
 			Name:      FlagArgon2Time,
@@ -302,10 +304,11 @@ func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
 		&cli.BoolFlag{
 			Name:    FlagDirectRedirect,
 			Sources: cli.EnvVars(EnvDirectRedirect),
-			Value:   true,
+			Value:   DefaultDirectRedirect,
 			Usage: "GET /r/{hash} behaviour for short links: true issues an immediate 301 to the " +
-				"target URL; false renders an interstitial page (meta-refresh + noscript fallback) " +
-				"showing the destination before redirecting",
+				"target URL for every link; false (default) renders an interstitial page (meta-refresh + " +
+				"noscript fallback) showing the destination for links created anonymously, while links " +
+				"created by a signed-in owner still redirect directly (open-redirect/phishing hardening)",
 		},
 		&cli.StringFlag{
 			Name:    FlagMetricsAddr,

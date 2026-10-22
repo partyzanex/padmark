@@ -143,3 +143,17 @@ func TestNote_OwnedBy_AnonymousNote(t *testing.T) {
 	assert.False(t, note.OwnedBy(uuid.New()), "an unowned note must never match, even an authenticated caller")
 	assert.False(t, note.OwnedBy(uuid.Nil))
 }
+
+func TestNote_Validate_ContentLength(t *testing.T) {
+	t.Parallel()
+
+	atCap := &Note{Content: strings.Repeat("a", MaxContentLength)}
+	require.NoError(t, atCap.Validate())
+
+	over := &Note{Content: strings.Repeat("a", MaxContentLength+1)}
+	require.ErrorIs(t, over.Validate(), ErrContentTooLarge)
+
+	// The cap counts characters, not bytes: a body of two-byte runes at the cap is valid.
+	multibyte := &Note{Content: strings.Repeat("é", MaxContentLength)}
+	require.NoError(t, multibyte.Validate())
+}

@@ -217,7 +217,7 @@ func (s *ParseGuardsSuite) TestHeadingIDsAreUniquePerRender() {
 	second, err := s.guarded.Render("# Same\n")
 	s.Require().NoError(err)
 
-	s.Contains(first, `id="same-1"`)
-	s.Contains(second, `id="same"`)
-	s.NotContains(second, `id="same-1"`)
+	s.Contains(first, `id="user-content-same-1"`)
+	s.Contains(second, `id="user-content-same"`)
+	s.NotContains(second, `id="user-content-same-1"`)
 }

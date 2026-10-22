@@ -4,20 +4,22 @@ import "time"
 
 // CLI flag names.
 const (
-	FlagURL      = "url"
-	FlagToken    = "token"
-	FlagTimeout  = "timeout"
-	FlagTitle    = "title"
-	FlagContent  = "content"
-	FlagFile     = "file"
-	FlagSlug     = "slug"
-	FlagPlain    = "plain"
-	FlagPrivacy  = "privacy"
-	FlagBurn     = "burn"
-	FlagTTL      = "ttl"
-	FlagEditCode = "edit-code"
-	FlagRaw      = "raw"
-	FlagJSON     = "json"
+	FlagURL     = "url"
+	FlagToken   = "token"
+	FlagTimeout = "timeout"
+	// FlagAllowInsecureHTTP permits sending credentials over plain HTTP to a non-loopback host.
+	FlagAllowInsecureHTTP = "allow-insecure-http"
+	FlagTitle             = "title"
+	FlagContent           = "content"
+	FlagFile              = "file"
+	FlagSlug              = "slug"
+	FlagPlain             = "plain"
+	FlagPrivacy           = "privacy"
+	FlagBurn              = "burn"
+	FlagTTL               = "ttl"
+	FlagEditCode          = "edit-code"
+	FlagRaw               = "raw"
+	FlagJSON              = "json"
 	// FlagTargetURL is the short link's destination. Named "target-url", not "url" — the global
 	// --url flag already means the padmark server address; reusing it for the link destination
 	// would collide (see the CLI section in TODO.md for this deviation from the original draft).
@@ -43,10 +45,12 @@ const (
 
 // Environment variable names.
 const (
-	EnvURL      = "PADMARK_URL"
-	EnvToken    = "PADMARK_TOKEN"
-	EnvTimeout  = "PADMARK_TIMEOUT"
-	EnvEditCode = "PADMARK_EDIT_CODE"
+	EnvURL     = "PADMARK_URL"
+	EnvToken   = "PADMARK_TOKEN"
+	EnvTimeout = "PADMARK_TIMEOUT"
+	// EnvAllowInsecureHTTP is the environment source of --allow-insecure-http.
+	EnvAllowInsecureHTTP = "PADMARK_ALLOW_INSECURE_HTTP"
+	EnvEditCode          = "PADMARK_EDIT_CODE"
 	// EnvBootstrapToken carries the server's first-admin bootstrap token to `setup` (no invite).
 	// Environment only: a flag value would show up in process listings.
 	EnvBootstrapToken = "PADMARK_BOOTSTRAP_TOKEN" //nolint:gosec // G101: env var name, not an inline credential

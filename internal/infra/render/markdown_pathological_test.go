@@ -38,6 +38,13 @@ const linearWorstCaseBudget = 75 * time.Second
 // raceSlowdown scales budgets when the binary is built with -race (roughly 5–10× slower).
 const raceSlowdown = 10
 
+// coverSlowdown scales budgets when coverage instrumentation is on: counters in the parser's hot
+// loops make each render several times slower, and the budget only has to catch a change in
+// complexity, not in constant. With -race as well (make test) the counters are atomic and
+// contended across the parallel renders — measured 30–40 s for a 100 ms render — so the budget
+// test is skipped there, like TestRenderLinearWorstCaseAtMaxSize.
+const coverSlowdown = 10
+
 type pathoCase struct {
 	name string
 	gen  func(size int) string
@@ -286,9 +293,17 @@ func renderWithin(rnd *render.Renderer, input string, budget time.Duration) (tim
 func TestRenderSuperLinearInputsWithinBudget(t *testing.T) {
 	t.Parallel()
 
+	if testing.CoverMode() != "" && raceEnabled() {
+		t.Skip("atomic coverage counters under -race make render timing meaningless")
+	}
+
 	budget := superLinearBudget
 	if raceEnabled() {
 		budget *= raceSlowdown
+	}
+
+	if testing.CoverMode() != "" {
+		budget *= coverSlowdown
 	}
 
 	rnd := render.NewRenderer()
@@ -304,6 +319,9 @@ func TestRenderSuperLinearInputsWithinBudget(t *testing.T) {
 			input := testCase.gen(testCase.probe)
 
 			elapsed, ok := renderWithin(rnd, input, budget)
+			t.Logf("%s: %d KiB rendered in %s (budget %s)", testCase.name, len(input)>>10,
+				elapsed.Round(time.Millisecond), budget)
+
 			if !ok {
 				t.Errorf("rendering %d KiB of %s took >= %s (budget %s); content cap is %d KiB, "+
 					"so render cost is unbounded by the body limit", len(input)>>10, testCase.name,

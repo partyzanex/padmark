@@ -149,17 +149,19 @@ func (s *ParitySuite) TestUser_UpdateTOTPSecretLeavesCredentialsAlone() {
 	s.Equal(usr.KDFSalt, got.KDFSalt)
 }
 
-// TestUser_UsernameIsCaseSensitive pins SQLite's behaviour (TEXT UNIQUE, BINARY collation):
-// usernames differing only in case are distinct, and lookups are exact.
-func (s *ParitySuite) TestUser_UsernameIsCaseSensitive() {
+// TestUser_UsernameIsCaseInsensitive pins the behaviour the SQLite tests establish: usernames
+// are unique under lower(username), so a case variant is a duplicate, and any spelling finds the
+// stored row (the per-username login lockout folds case the same way).
+func (s *ParitySuite) TestUser_UsernameIsCaseInsensitive() {
 	ctx := s.T().Context()
 	repo := NewUserRepository(s.db)
 	s.createParityUser("alice", false)
 
-	s.Require().NoError(repo.Create(ctx, s.parityUser("Alice")))
+	s.Require().ErrorIs(repo.Create(ctx, s.parityUser("Alice")), domain.ErrUserExists)
 
-	_, err := repo.GetByUsername(ctx, "ALICE")
-	s.Require().ErrorIs(err, domain.ErrNotFound)
+	got, err := repo.GetByUsername(ctx, "ALICE")
+	s.Require().NoError(err)
+	s.Equal("alice", got.Username)
 }
 
 // TestUser_RevokeClearsCredentialsAndOwnership: revoking a user must cascade-delete every

@@ -86,10 +86,11 @@ type Invoker interface {
 	CreateNote(ctx context.Context, request *CreateNoteRequest) (CreateNoteRes, error)
 	// DeleteLink invokes deleteLink operation.
 	//
-	// Permanently deletes the link. The edit code must be supplied either as the `X-Edit-Code`
-	// request header or the `edit_code` query parameter — unless the request is authenticated
-	// (bearer token or session) as the exact user who created the link, in which case no edit
-	// code is needed. See "Edit codes and ownership" above.
+	// Permanently deletes the link. The edit code must be supplied as the `X-Edit-Code`
+	// request header (a `?edit_code=` query parameter is ignored: query strings leak into proxy
+	// logs and `Referer`) — unless the request is authenticated (bearer token or session) as the
+	// exact user who created the link, in which case no edit code is needed. See "Edit codes
+	// and ownership" above.
 	//
 	// DELETE /links/{id}
 	DeleteLink(ctx context.Context, params DeleteLinkParams) (DeleteLinkRes, error)
@@ -97,16 +98,14 @@ type Invoker interface {
 	//
 	// Permanently deletes the note. Anonymous callers may delete any note whose `privacy`
 	// level would also let them read it (see "Authentication" above). The edit code must be
-	// supplied either as the `X-Edit-Code` request header or the `edit_code` query parameter —
-	// unless the request is authenticated (bearer token or session) as the exact user who
-	// created the note, in which case no edit code is needed. See "Edit codes and ownership"
-	// above.
-	// Prefer the `X-Edit-Code` header over the `edit_code` query parameter: a query string can
-	// end up in reverse-proxy/CDN access logs or in the `Referer` header of a same-origin
-	// follow-up request, while padmark's own logging never records it (see openapi.yaml's
-	// `edit_code` query parameter description). The query parameter exists only for manual/curl
-	// convenience — the CLI always uses the header. Better still, sign in (session or API
-	// token) before creating the note and skip the edit code entirely.
+	// supplied in the `X-Edit-Code` request header — unless the request is authenticated
+	// (bearer token or session) as the exact user who created the note, in which case no edit
+	// code is needed. See "Edit codes and ownership" above.
+	// The edit code is deliberately not accepted as a query parameter: a query string can end
+	// up in reverse-proxy/CDN access logs or in the `Referer` header of a same-origin
+	// follow-up request. A stray `?edit_code=` is ignored, so the request is treated as having
+	// no edit code. Better still, sign in (session or API token) before creating the note and
+	// skip the edit code entirely.
 	//
 	// DELETE /notes/{id}
 	DeleteNote(ctx context.Context, params DeleteNoteParams) (DeleteNoteRes, error)
@@ -625,10 +624,11 @@ func (c *Client) sendCreateNote(ctx context.Context, request *CreateNoteRequest)
 
 // DeleteLink invokes deleteLink operation.
 //
-// Permanently deletes the link. The edit code must be supplied either as the `X-Edit-Code`
-// request header or the `edit_code` query parameter — unless the request is authenticated
-// (bearer token or session) as the exact user who created the link, in which case no edit
-// code is needed. See "Edit codes and ownership" above.
+// Permanently deletes the link. The edit code must be supplied as the `X-Edit-Code`
+// request header (a `?edit_code=` query parameter is ignored: query strings leak into proxy
+// logs and `Referer`) — unless the request is authenticated (bearer token or session) as the
+// exact user who created the link, in which case no edit code is needed. See "Edit codes
+// and ownership" above.
 //
 // DELETE /links/{id}
 func (c *Client) DeleteLink(ctx context.Context, params DeleteLinkParams) (DeleteLinkRes, error) {
@@ -695,27 +695,6 @@ func (c *Client) sendDeleteLink(ctx context.Context, params DeleteLinkParams) (r
 	}
 	uri.AddPathParts(u, pathParts[:]...)
 
-	stage = "EncodeQueryParams"
-	q := uri.NewQueryEncoder()
-	{
-		// Encode "edit_code" parameter.
-		cfg := uri.QueryParameterEncodingConfig{
-			Name:    "edit_code",
-			Style:   uri.QueryStyleForm,
-			Explode: true,
-		}
-
-		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
-			if val, ok := params.EditCode.Get(); ok {
-				return e.EncodeValue(conv.StringToString(val))
-			}
-			return nil
-		}); err != nil {
-			return res, errors.Wrap(err, "encode query")
-		}
-	}
-	u.RawQuery = q.Values().Encode()
-
 	stage = "EncodeRequest"
 	r, err := ht.NewRequest(ctx, "DELETE", u)
 	if err != nil {
@@ -760,16 +739,14 @@ func (c *Client) sendDeleteLink(ctx context.Context, params DeleteLinkParams) (r
 //
 // Permanently deletes the note. Anonymous callers may delete any note whose `privacy`
 // level would also let them read it (see "Authentication" above). The edit code must be
-// supplied either as the `X-Edit-Code` request header or the `edit_code` query parameter —
-// unless the request is authenticated (bearer token or session) as the exact user who
-// created the note, in which case no edit code is needed. See "Edit codes and ownership"
-// above.
-// Prefer the `X-Edit-Code` header over the `edit_code` query parameter: a query string can
-// end up in reverse-proxy/CDN access logs or in the `Referer` header of a same-origin
-// follow-up request, while padmark's own logging never records it (see openapi.yaml's
-// `edit_code` query parameter description). The query parameter exists only for manual/curl
-// convenience — the CLI always uses the header. Better still, sign in (session or API
-// token) before creating the note and skip the edit code entirely.
+// supplied in the `X-Edit-Code` request header — unless the request is authenticated
+// (bearer token or session) as the exact user who created the note, in which case no edit
+// code is needed. See "Edit codes and ownership" above.
+// The edit code is deliberately not accepted as a query parameter: a query string can end
+// up in reverse-proxy/CDN access logs or in the `Referer` header of a same-origin
+// follow-up request. A stray `?edit_code=` is ignored, so the request is treated as having
+// no edit code. Better still, sign in (session or API token) before creating the note and
+// skip the edit code entirely.
 //
 // DELETE /notes/{id}
 func (c *Client) DeleteNote(ctx context.Context, params DeleteNoteParams) (DeleteNoteRes, error) {
@@ -835,27 +812,6 @@ func (c *Client) sendDeleteNote(ctx context.Context, params DeleteNoteParams) (r
 		pathParts[1] = encoded
 	}
 	uri.AddPathParts(u, pathParts[:]...)
-
-	stage = "EncodeQueryParams"
-	q := uri.NewQueryEncoder()
-	{
-		// Encode "edit_code" parameter.
-		cfg := uri.QueryParameterEncodingConfig{
-			Name:    "edit_code",
-			Style:   uri.QueryStyleForm,
-			Explode: true,
-		}
-
-		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
-			if val, ok := params.EditCode.Get(); ok {
-				return e.EncodeValue(conv.StringToString(val))
-			}
-			return nil
-		}); err != nil {
-			return res, errors.Wrap(err, "encode query")
-		}
-	}
-	u.RawQuery = q.Values().Encode()
 
 	stage = "EncodeRequest"
 	r, err := ht.NewRequest(ctx, "DELETE", u)

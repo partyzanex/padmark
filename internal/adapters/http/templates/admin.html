@@ -103,6 +103,10 @@
         <div class="admin-title">Admin panel</div>
 
         <div class="admin-section">
+            {{template "signout" .}}
+        </div>
+
+        <div class="admin-section">
             <div class="admin-section-title">Generate invite link</div>
             {{if .InviteURL}}
             <div class="msg-ok">Invite link generated — copy it now, it will not be shown again:</div>

@@ -56,6 +56,7 @@ func domainErrStatus(err error) (status int, message string) {
 		{domain.ErrNotFound, http.StatusNotFound},
 		{domain.ErrExpired, http.StatusGone},
 		{domain.ErrTitleTooLong, http.StatusUnprocessableEntity},
+		{domain.ErrContentTooLarge, http.StatusUnprocessableEntity},
 		{domain.ErrInvalidContentType, http.StatusUnprocessableEntity},
 		{domain.ErrInvalidPrivacy, http.StatusUnprocessableEntity},
 		{domain.ErrOwnerPrivacyRequiresOwner, http.StatusUnprocessableEntity},

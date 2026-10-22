@@ -47,6 +47,12 @@ func NewApp() *urcli.Command {
 				Value:   DefaultTimeout,
 				Usage:   "Per-request HTTP timeout; 0 disables it (env: PADMARK_TIMEOUT)",
 			},
+			&urcli.BoolFlag{
+				Name:    FlagAllowInsecureHTTP,
+				Sources: urcli.EnvVars(EnvAllowInsecureHTTP),
+				Usage: "Allow sending the bearer token over plain HTTP to a non-loopback host " +
+					"(loopback hosts only warn); default refuses (env: PADMARK_ALLOW_INSECURE_HTTP)",
+			},
 		},
 		Action: runAction,
 	}

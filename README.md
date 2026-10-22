@@ -101,12 +101,15 @@ Every short link has:
 | `burn_after_click` | Delete the link the moment it's first followed |
 | `ttl` | Seconds until the link expires, counted from creation (a plain hard expiry — unlike notes' `ttl`, unrelated to `burn_after_click`; the two may be combined freely) |
 | `privacy` | Who can follow it: `public` (default), `authenticated`, or `owner` |
-| `direct_redirect` | Per-link override of the server's `--direct-redirect` default; omitted inherits it |
+| `direct_redirect` | Per-link override of the redirect mode; omitted inherits the default below. Ignored for anonymously created links unless the operator enabled `--direct-redirect` |
 
-Visiting `GET /r/{id}` either redirects immediately (`301`, the default) or shows a brief
-transparency interstitial with the destination and a manual continue link first — controlled
-server-wide by `--direct-redirect` (see [Configuration reference](#server)), or per link via
-`direct_redirect` at creation or update time, which always wins over the server default. In both modes an
+Visiting `GET /r/{id}` either redirects immediately (`301`) or shows a brief transparency
+interstitial with the destination and a manual continue link first. **By default a link created
+anonymously gets the interstitial** (so the instance cannot be used as a free open redirector),
+while a link created by a signed-in owner (session or API token) redirects directly. The operator
+can restore the old behaviour — `301` for every link — with `--direct-redirect=true` (see
+[Configuration reference](#server)); a link's `direct_redirect` at creation or update time then
+overrides that, and for an owner's links it can opt back into the interstitial. In every mode an
 expired link answers `410 Gone`, a missing one `404`, and a link denied by its `privacy` level
 `401` (or a login redirect for a browser), exactly like notes.
 
@@ -335,7 +338,7 @@ padmark-cli shorten --target-url https://example.com/some/long/path
 # Custom slug, burn after first click, expires in 1 hour
 padmark-cli shorten --target-url https://example.com --slug my-link --burn --ttl 3600
 
-# Force this one link to always show the interstitial, even if the server default is --direct-redirect=true
+# Force this one link to always show the interstitial, even when it would redirect directly
 padmark-cli shorten --target-url https://example.com --direct-redirect=false
 
 # Get a link's metadata (does not follow it or consume burn-after-click)
@@ -347,7 +350,10 @@ padmark-cli delete-link my-link --edit-code MySecretCode1
 
 Set defaults via environment variables: `PADMARK_URL`, `PADMARK_TOKEN`, `PADMARK_TIMEOUT`, `PADMARK_EDIT_CODE`.
 
-> A bearer token over a non-HTTPS `--url` is sent in cleartext; the CLI prints a stderr warning. Use an `https://` server URL in production.
+> A bearer token (or the `setup` password) over a non-HTTPS `--url` travels in cleartext. For a
+> loopback host (`localhost`, `127.0.0.0/8`, `::1`) the CLI only prints a stderr warning; for any
+> other host it **refuses** unless you pass `--allow-insecure-http` / `PADMARK_ALLOW_INSECURE_HTTP=true`.
+> Use an `https://` server URL in production.
 
 ---
 
@@ -382,10 +388,10 @@ curl -X DELETE http://localhost:4000/notes/{id} \
   -H "X-Edit-Code: JmNkn0LdjbMw"
 ```
 
-> `DELETE` also accepts `edit_code` as a `?edit_code=` query parameter (documented in the OpenAPI
-> spec, for manual/curl convenience). Prefer the `X-Edit-Code` header when you can — a query
-> string is more likely to end up in reverse-proxy/CDN access logs or a same-origin `Referer`
-> header. The CLI always uses the header, never the query parameter.
+> `DELETE` reads the edit code from the `X-Edit-Code` header only. A `?edit_code=` query parameter
+> is **ignored** (the request counts as having no edit code): a query string ends up in
+> reverse-proxy/CDN access logs and `Referer` headers. Clients that used the query form must
+> switch to the header.
 
 **Update or delete without `edit_code`** — if the note was created by this same authenticated
 caller, `edit_code` can be omitted entirely; a Bearer token or session cookie is enough (see
@@ -444,7 +450,8 @@ curl -X PUT http://localhost:4000/links/{id} \
   -H "Content-Type: application/json" \
   -d '{"target_url":"https://example.com/new","edit_code":"MySecretCode1","ttl":3600}'
 
-# Follow it — 301 (default) or an HTML transparency interstitial, per --direct-redirect
+# Follow it — an HTML transparency interstitial for an anonymously created link (default),
+# 301 for an owner's link or when the server runs with --direct-redirect=true
 curl -i http://localhost:4000/r/{id}
 # A burn_after_click link needs a deliberate access (otherwise 409, link intact):
 curl -i -H "Accept: text/html" http://localhost:4000/r/{id}
@@ -481,7 +488,8 @@ Tools: `create_note`, `get_note`, `update_note`, `delete_note`, `create_link`,
 
 Configure with the same credential and defaults as the CLI: `--token` / `PADMARK_TOKEN`
 (a `pmk_…` envelope works — it carries the server URL too), `--base-url` / `PADMARK_URL`
-(default `http://localhost:8080`), `--timeout` / `PADMARK_TIMEOUT`.
+(default `http://localhost:8080`), `--timeout` / `PADMARK_TIMEOUT`, `--allow-insecure-http` /
+`PADMARK_ALLOW_INSECURE_HTTP` (the token is refused over plain HTTP to a non-loopback host unless set).
 
 MCP logging uses `--log-level` / `PADMARK_LOG_LEVEL` (`debug`, `info`, `warn`, `error`);
 logs go to stderr so stdout stays reserved for the protocol. Unknown levels fail startup.
@@ -496,7 +504,7 @@ Example `mcpServers` entry (Claude Code / Cursor JSON config):
   "mcpServers": {
     "padmark": {
       "command": "/usr/local/bin/padmark-mcp",
-      "args": ["--token", "pmk_..."]
+      "env": { "PADMARK_TOKEN": "pmk_..." }
     }
   }
 }
@@ -558,8 +566,9 @@ Only the raw key (never the envelope wrapper) is sent as `Authorization: Bearer 
 request. On the server, the auth middleware resolves it via `Manager.ResolveAPIToken` after the
 session-cookie check; an unknown, revoked, or expired key falls through to 401 / login redirect.
 
-> Sending a token to a non-HTTPS server logs a cleartext-exposure warning (advisory, not blocking);
-> use an `https://` server URL in production.
+> Sending a token to a non-HTTPS, non-loopback server is refused unless `--allow-insecure-http`
+> (`PADMARK_ALLOW_INSECURE_HTTP`) is set; loopback hosts only log a cleartext-exposure warning.
+> Use an `https://` server URL in production.
 
 ### User accounts with TOTP 2FA (web)
 
@@ -600,6 +609,26 @@ Invite links expire after 24 hours and can be used once. Only the base64url-enco
 hash of each invite token is stored in the database. Migration `20261014000002` revokes
 previously issued invites on both SQLite and PostgreSQL; admins must issue new links.
 Rolling back this migration also revokes invites, since raw tokens cannot be recovered.
+
+Note content is capped at 1,048,576 characters (`MaxContentLength`, published as `maxLength` in
+the OpenAPI spec); a longer body is rejected with `400` by the generated request validation, or
+`422` on the routes that decode the body by hand. The request-body limit (`--max-body-bytes`, 4 MB)
+is unchanged and still bounds JSON overhead and bulk requests. Rendered HTML of repeatedly viewed
+notes is cached in memory for up to two minutes (128 entries, never for burn-after-reading notes)
+and dropped on update and delete.
+
+Usernames are unique case-insensitively (`Admin` cannot be registered next to `admin`) and sign-in
+matches them case-insensitively; accounts keep the spelling they registered with. Migration
+`20261021000002` adds the unique index on `lower(username)`. If two existing accounts already
+differ only by case, the migration **fails and changes nothing** — rename or remove one of them
+(the error names the colliding usernames on PostgreSQL) and restart. Case folding follows the
+database: SQLite folds ASCII only, PostgreSQL follows the database collation.
+
+Burn-after-reading reveal tokens (the one-time confirmation token behind the "Reveal" button)
+are stored the same way, as a SHA-256 digest only. Migration `20261021000001` deletes the
+outstanding plaintext-era tokens on both backends, since their raw values cannot be recovered;
+they live at most 10 minutes, so a reader mid-flow just reloads the note. The notes themselves
+are untouched. Rolling back also drops the rows.
 
 **`privacy: authenticated`** notes require either a valid session (browsers are redirected to
 `/login`) or a Bearer token (API clients get `401`) — any signed-in caller, not just the creator.
@@ -881,7 +910,7 @@ There is no destructive encryption down-migration, and older binaries cannot rea
 | `--totp-issuer` | `PADMARK_TOTP_ISSUER` | `padmark` | TOTP issuer shown in the authenticator app |
 | `--session-ttl` | `PADMARK_SESSION_TTL` | `2592000` | Session lifetime in seconds (default 30 days) |
 | `--csrf-secret` | `PADMARK_CSRF_SECRET` | — | HMAC key signing CSRF form tokens; raw bytes, **at least 32 characters** (a shorter value is rejected at startup). Empty (default) mints a fresh random secret per process — fine for a single instance, but restarts then invalidate open forms and multiple replicas `403` each other's form submits. Generate with `openssl rand -base64 32` and share the same value across replicas |
-| `--argon2-memory` | `PADMARK_ARGON2_MEMORY` | `24576` | argon2id memory cost in KiB for **account passwords** and the key wrapping each user's TOTP secret (default 24 MiB); lower for low-RAM hosts. Every derivation allocates this much; see [Memory sizing](#memory-sizing-argon2id). Caller-chosen edit codes are hashed with argon2id at a fixed 64 MiB regardless of this flag; only generated edit codes use a fast salted SHA-256 |
+| `--argon2-memory` | `PADMARK_ARGON2_MEMORY` | `24576` | argon2id memory cost in KiB for **account passwords**, caller-chosen edit codes and the key wrapping each user's TOTP secret (default 24 MiB); lower for low-RAM hosts. Every derivation allocates this much; see [Memory sizing](#memory-sizing-argon2id). Server-generated edit codes use a fast salted SHA-256 instead |
 | `--argon2-time` | `PADMARK_ARGON2_TIME` | `2` | argon2id iterations (OWASP minimum at 64 MiB) — raise when lowering memory |
 | `--argon2-threads` | `PADMARK_ARGON2_THREADS` | `1` | argon2id parallelism (CPU threads per hash) |
 | `--argon2-memory-budget` | `PADMARK_ARGON2_MEMORY_BUDGET` | `131072` | Total argon2id memory in KiB that concurrent password, edit-code and TOTP-key derivations may hold at once (default 128 MiB); further requests queue in FIFO order. Must be at least `--argon2-memory` (startup fails otherwise); a single derivation larger than the budget still runs, alone. See [Memory sizing](#memory-sizing-argon2id) |
@@ -894,13 +923,13 @@ There is no destructive encryption down-migration, and older binaries cannot rea
 | `--tls-cert` | `PADMARK_TLS_CERT` | — | TLS certificate path |
 | `--tls-key` | `PADMARK_TLS_KEY` | — | TLS private key path |
 | `--http-redirect-addr` | `PADMARK_HTTP_REDIRECT_ADDR` | — | HTTP → HTTPS redirect listener (TLS only) |
-| `--allowed-hosts` | `PADMARK_ALLOWED_HOSTS` | — | Host allowlist for the HTTP→HTTPS redirect; non-listed hosts get `400` (empty = redirect to request Host) |
+| `--allowed-hosts` | `PADMARK_ALLOWED_HOSTS` | — | Host allowlist, case-insensitive and port-less. On the main listener non-listed hosts get `421`, before any handler (`/healthz` and `/readyz` are exempt so IP-addressed probes keep working); on the HTTP→HTTPS redirect listener they get `400`. Empty = no Host check |
 | `--log-level` | `PADMARK_LOG_LEVEL` | `info` | `debug` / `info` / `warn` / `error` |
 | `--log-format` | `PADMARK_LOG_FORMAT` | `json` | `json` or `text` |
 | `--trusted-proxies` | `PADMARK_TRUSTED_PROXIES` | — | Proxy CIDRs/IPs whose `X-Forwarded-For` / `X-Real-IP` is believed when resolving the real client IP; also the addresses whose `X-Forwarded-Proto` is trusted when building absolute links (note URLs, invite links, API-token envelopes). Set it to the proxy's own addresses and nothing wider — see [Getting `--trusted-proxies` wrong](#getting---trusted-proxies-wrong) |
 | `--public-scheme` | `PADMARK_PUBLIC_SCHEME` | — | Force `http` or `https` for absolute links back to this server, bypassing TLS/`X-Forwarded-Proto` detection; `https` also marks session/CSRF cookies `Secure` and enables HSTS. Use this instead of `--trusted-proxies` when the proxy's IP isn't stable (cloud load balancers, k8s ingress) |
 | `--custom-slugs` | `PADMARK_CUSTOM_SLUGS` | `false` | Allow user-supplied human-readable slugs/link aliases (e.g. `project/GUIDE.md`) at creation. Off by default because public human-readable URLs are easy to guess. New content keys are independent of the slug; existing legacy ciphertext keeps its old protection until migrated. A slug's first path segment must not be a reserved route name: `login`, `setup`, `logout`, `totp-login`, `admin`, `api`, `success`, `healthz`, `readyz`, `notes`, `edit`, `change-password`, `static`, `links`, `r` |
-| `--direct-redirect` | `PADMARK_DIRECT_REDIRECT` | `true` | `GET /r/{id}` behavior for short links: `true` issues an immediate `301` to the target URL; `false` renders an interstitial page (meta-refresh + `<noscript>` fallback) showing the destination before redirecting |
+| `--direct-redirect` | `PADMARK_DIRECT_REDIRECT` | `false` | `GET /r/{id}` behavior for short links. **Default changed from `true` to `false`:** links created anonymously now render an interstitial page (meta-refresh + `<noscript>` fallback) showing the destination, so the instance is not an open redirector; links created by a signed-in owner still get an immediate `301`. Set `true` to restore the `301` for every link |
 | `--metrics-addr` | `PADMARK_METRICS_ADDR` | — | Address for a separate internal Prometheus `/metrics` listener (e.g. `:9090`); empty (default) disables it entirely. Exposes `padmark_links_created_total`, `padmark_links_redirects_total`, `padmark_links_collisions_total`, plus standard Go/process collectors. Bind this to a private interface only — metrics are never served on the main, public-facing listener |
 
 #### Memory sizing (argon2id)
@@ -963,9 +992,13 @@ trusted range.
 **Behind a TLS-terminating reverse proxy** the server itself sees plain HTTP, so it must be told
 the public scheme: set `--trusted-proxies` to the proxy's addresses (so its `X-Forwarded-Proto`
 is honoured) or `--public-scheme https`, and configure the proxy to preserve the original `Host`
-header. Otherwise the same-origin check rejects browser `PUT`/`DELETE` on notes and links and the
-account endpoints (`POST /api/tokens`, `POST /api/invites`) with `403`, because the browser's
-`https://` `Origin` does not match the scheme/host the server derived. Session and CSRF cookies
+header. Otherwise the same-origin check rejects browser `PUT`/`DELETE` on notes and links, the
+account endpoints (`POST /api/tokens`, `POST /api/invites`) and every HTML form `POST` (login,
+logout, change-password, admin, setup, burn-after-reading confirmation) with `403`, because the
+browser's `https://` `Origin` does not match the scheme/host the server derived. Form `POST`s are
+also refused when the browser reports `Sec-Fetch-Site` other than `same-origin`/`none`.
+CSRF tokens are bound to the session cookie (a token minted before sign-in does not validate
+for a signed-in `POST`; it is re-issued automatically on login, logout and password change). Session and CSRF cookies
 get the `Secure` attribute, and responses carry HSTS, under any of the three: direct TLS, a
 trusted proxy's `X-Forwarded-Proto: https`, or `--public-scheme https`.
 
@@ -989,6 +1022,7 @@ cost until the password is changed. The change costs RAM and CPU per login, not 
 | `--url`, `-u` | Padmark server URL (env: `PADMARK_URL`, default `http://localhost:8080`) |
 | `--token` | Bearer token for authentication (env: `PADMARK_TOKEN`; falls back to `~/.config/padmark/token`) |
 | `--timeout` | Per-request HTTP timeout; `0` disables it (env: `PADMARK_TIMEOUT`, default `30s`) |
+| `--allow-insecure-http` | Permit a token or setup password over plain HTTP to a non-loopback host (env: `PADMARK_ALLOW_INSECURE_HTTP`, default `false`) |
 
 ---
 

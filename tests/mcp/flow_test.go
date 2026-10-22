@@ -210,7 +210,7 @@ func newTestManagers(t *testing.T, db *bun.DB, slugLock *lock.Locker) (*notes.Ma
 		slugLock,
 		render.NewRenderer(),
 		testutil.ContentEncryptor(t, "note"),
-		crypto.NewEditCodeHasher(),
+		crypto.NewEditCodeHasher(crypto.DefaultArgon2Params()),
 		discardTestLogger(),
 		false,
 	)
@@ -219,7 +219,7 @@ func newTestManagers(t *testing.T, db *bun.DB, slugLock *lock.Locker) (*notes.Ma
 		sqliterepo.NewNoteRepository(db),
 		slugLock,
 		testutil.ContentEncryptor(t, "link"),
-		crypto.NewEditCodeHasher(),
+		crypto.NewEditCodeHasher(crypto.DefaultArgon2Params()),
 		discardTestLogger(),
 		false,
 	)

@@ -67,7 +67,7 @@ func newHardeningOwner(t *testing.T, env ownerFlowEnv) *hardeningOwner {
 	owner := &hardeningOwner{totpSecret: secret, userID: usr.ID}
 
 	owner.session, err = env.authMgr.Login(ctx, "owner", ownerFlowPassword, owner.totpCodeAt(t, 0),
-		"Mozilla/5.0", "127.0.0.1")
+		"Mozilla/5.0", "127.0.0.1", "")
 	require.NoError(t, err)
 
 	status, body := hardeningDo(t, env.baseURL, http.MethodPost, "/api/tokens", "", owner.session, `{}`)

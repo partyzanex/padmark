@@ -384,9 +384,11 @@ type CreateLinkRequest struct {
 	// actually have an owner, i.e. `--enable-accounts` and an authenticated caller —
 	// otherwise the request is rejected with `422`.
 	Privacy OptCreateLinkRequestPrivacy `json:"privacy"`
-	// Per-link override of the server's `--direct-redirect` flag for `GET /r/{id}`: `true`
-	// forces an immediate `301`, `false` forces the transparency interstitial, omitted (or
-	// explicit `null`) inherits the server-wide default.
+	// Per-link override of the redirect mode for `GET /r/{id}`: `false` forces the
+	// transparency interstitial; `true` forces an immediate `301`, but only for a link
+	// created by an authenticated owner or on a server running `--direct-redirect=true`
+	// (otherwise ignored). Omitted (or explicit `null`) inherits the default: interstitial
+	// for anonymous links, `301` for an owner's links.
 	DirectRedirect OptNilBool `json:"direct_redirect"`
 }
 
@@ -779,7 +781,8 @@ func (*CreateNoteInternalServerError) createNoteRes() {}
 type CreateNoteRequest struct {
 	// Human-readable title shown in the note header.
 	Title OptString `json:"title"`
-	// Note body. Interpreted as Markdown unless `content_type` is `text/plain`.
+	// Note body, at most 1048576 characters (1 MiB of text). Interpreted as Markdown unless
+	// `content_type` is `text/plain`. A longer body is rejected before the note is stored.
 	Content string `json:"content"`
 	// MIME type of `content`; controls rendering on the view page.
 	ContentType OptCreateNoteRequestContentType `json:"content_type"`
@@ -3026,7 +3029,7 @@ func (*UpdateNoteNotFound) updateNoteRes() {}
 type UpdateNoteRequest struct {
 	// New title.
 	Title OptString `json:"title"`
-	// New body.
+	// New body, at most 1048576 characters (see `CreateNoteRequest.content`).
 	Content string `json:"content"`
 	// New content type; defaults to the note's current type when omitted.
 	ContentType OptUpdateNoteRequestContentType `json:"content_type"`

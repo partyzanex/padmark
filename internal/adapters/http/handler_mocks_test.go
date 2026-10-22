@@ -75,18 +75,18 @@ func (mr *MockSessionManagerMockRecorder) GetSession(ctx, sessionID any) *gomock
 }
 
 // Login mocks base method.
-func (m *MockSessionManager) Login(ctx context.Context, username, password, totpCode, userAgent, clientIP string) (string, error) {
+func (m *MockSessionManager) Login(ctx context.Context, username, password, totpCode, userAgent, clientIP, previousSessionID string) (string, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Login", ctx, username, password, totpCode, userAgent, clientIP)
+	ret := m.ctrl.Call(m, "Login", ctx, username, password, totpCode, userAgent, clientIP, previousSessionID)
 	ret0, _ := ret[0].(string)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // Login indicates an expected call of Login.
-func (mr *MockSessionManagerMockRecorder) Login(ctx, username, password, totpCode, userAgent, clientIP any) *gomock.Call {
+func (mr *MockSessionManagerMockRecorder) Login(ctx, username, password, totpCode, userAgent, clientIP, previousSessionID any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Login", reflect.TypeOf((*MockSessionManager)(nil).Login), ctx, username, password, totpCode, userAgent, clientIP)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Login", reflect.TypeOf((*MockSessionManager)(nil).Login), ctx, username, password, totpCode, userAgent, clientIP, previousSessionID)
 }
 
 // Logout mocks base method.
@@ -484,18 +484,18 @@ func (mr *MockAuthManagerMockRecorder) ListUsers(ctx, adminUserID any) *gomock.C
 }
 
 // Login mocks base method.
-func (m *MockAuthManager) Login(ctx context.Context, username, password, totpCode, userAgent, clientIP string) (string, error) {
+func (m *MockAuthManager) Login(ctx context.Context, username, password, totpCode, userAgent, clientIP, previousSessionID string) (string, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Login", ctx, username, password, totpCode, userAgent, clientIP)
+	ret := m.ctrl.Call(m, "Login", ctx, username, password, totpCode, userAgent, clientIP, previousSessionID)
 	ret0, _ := ret[0].(string)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // Login indicates an expected call of Login.
-func (mr *MockAuthManagerMockRecorder) Login(ctx, username, password, totpCode, userAgent, clientIP any) *gomock.Call {
+func (mr *MockAuthManagerMockRecorder) Login(ctx, username, password, totpCode, userAgent, clientIP, previousSessionID any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Login", reflect.TypeOf((*MockAuthManager)(nil).Login), ctx, username, password, totpCode, userAgent, clientIP)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Login", reflect.TypeOf((*MockAuthManager)(nil).Login), ctx, username, password, totpCode, userAgent, clientIP, previousSessionID)
 }
 
 // Logout mocks base method.

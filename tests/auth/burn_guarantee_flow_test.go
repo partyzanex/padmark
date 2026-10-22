@@ -74,6 +74,10 @@ func newBurnGuaranteeEnv(t *testing.T, dbName string) ownerFlowEnv {
 	router, err := adaptershttp.NewRouter(handler, ogen, &adaptershttp.RouterOptions{
 		MaxBodyBytes: 256 * 1024,
 		CSRFSecret:   []byte("padmark-test-csrf-secret-32bytes"),
+		// The burn-link flows create their links anonymously and follow them with a 301; anonymous
+		// links get the interstitial by default, so this models an operator running
+		// --direct-redirect=true.
+		DirectRedirect: true,
 	})
 	require.NoError(t, err)
 
@@ -178,7 +182,7 @@ func burnOwnerSession(t *testing.T, env ownerFlowEnv) (sessionID, apiToken strin
 	code, err := totp.GenerateCode(rawSecret, time.Now())
 	require.NoError(t, err)
 
-	sessionID, err = env.authMgr.Login(ctx, "owner", ownerFlowPassword, code, "Mozilla/5.0", "127.0.0.1")
+	sessionID, err = env.authMgr.Login(ctx, "owner", ownerFlowPassword, code, "Mozilla/5.0", "127.0.0.1", "")
 	require.NoError(t, err)
 
 	apiToken, err = env.authMgr.CreateAPIToken(ctx, owner.ID, auth.Issuer{}, 0)

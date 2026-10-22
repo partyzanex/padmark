@@ -157,7 +157,7 @@ func TestAccountsFlow(t *testing.T) {
 		slugLock,
 		render.NewRenderer(),
 		testutil.ContentEncryptor(t, "note"),
-		crypto.NewEditCodeHasher(),
+		crypto.NewEditCodeHasher(crypto.DefaultArgon2Params()),
 		log,
 		false,
 	)
@@ -166,7 +166,7 @@ func TestAccountsFlow(t *testing.T) {
 		sqliterepo.NewNoteRepository(db),
 		slugLock,
 		testutil.ContentEncryptor(t, "link"),
-		crypto.NewEditCodeHasher(),
+		crypto.NewEditCodeHasher(crypto.DefaultArgon2Params()),
 		log,
 		false,
 	)

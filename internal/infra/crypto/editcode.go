@@ -6,6 +6,7 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"fmt"
+	"log/slog"
 	"strings"
 )
 
@@ -34,11 +35,33 @@ const (
 //
 // Verify accepts both stored formats (plus the legacy argon2id "v1$" hashes) so existing
 // codes remain valid and no data migration is needed.
-type EditCodeHasher struct{}
+type EditCodeHasher struct {
+	log *slog.Logger
+	// params is the argon2id cost HashUserProvided applies, the same --argon2-* configuration
+	// the password hasher uses. Verify derives with the cost embedded in each stored hash and
+	// only consults ceiling, the most it will accept from a stored row.
+	params  Argon2Params
+	ceiling Argon2Params
+}
 
-// NewEditCodeHasher returns an EditCodeHasher. It takes no cost parameters: the fast hash
-// has none, and HashUserProvided uses DefaultArgon2Params.
-func NewEditCodeHasher() *EditCodeHasher { return &EditCodeHasher{} }
+// NewEditCodeHasher returns an EditCodeHasher whose HashUserProvided uses the given argon2id
+// cost. The fast generated-code hash has no cost parameters. Zero-valued fields fall back to
+// DefaultArgon2Params, like NewPasswordHasher.
+func NewEditCodeHasher(params Argon2Params) *EditCodeHasher {
+	return &EditCodeHasher{
+		log:     slog.New(slog.DiscardHandler),
+		params:  params.withDefaults(),
+		ceiling: params.acceptedCeiling(),
+	}
+}
+
+// WithLogger sets the logger that records stored hashes refused for an excessive cost (WARN).
+// The default discards them.
+func (h *EditCodeHasher) WithLogger(log *slog.Logger) *EditCodeHasher {
+	h.log = log
+
+	return h
+}
 
 // Hash returns a salted SHA-256 of code in the format "s1$<base64url_salt>$<base64url_digest>".
 func (h *EditCodeHasher) Hash(code string) (string, error) {
@@ -55,12 +78,12 @@ func (h *EditCodeHasher) Hash(code string) (string, error) {
 		enc.EncodeToString(editCodeDigest(salt, code)), nil
 }
 
-// HashUserProvided hashes a caller-supplied edit code with argon2id (DefaultArgon2Params).
+// HashUserProvided hashes a caller-supplied edit code with argon2id at the configured cost.
 // Unlike Hash, this path must assume low-entropy, human-chosen values, so a leaked hash must
 // not be crackable at salted-SHA-256 speeds. The output keeps the "v1$" envelope that Verify
 // already dispatches to the argon2 verifier, so verification needs no extra plumbing.
 func (h *EditCodeHasher) HashUserProvided(code string) (string, error) {
-	hashed, err := hashArgon2(code, DefaultArgon2Params())
+	hashed, err := hashArgon2(code, h.params)
 	if err != nil {
 		return "", fmt.Errorf("hash user edit code: %w", err)
 	}
@@ -72,7 +95,7 @@ func (h *EditCodeHasher) HashUserProvided(code string) (string, error) {
 // Legacy argon2id hashes ("v1$…") are delegated to the argon2 verifier for backward compatibility.
 func (h *EditCodeHasher) Verify(storedHash, code string) bool {
 	if strings.HasPrefix(storedHash, legacyArgon2Prefix) {
-		return verifyArgon2(storedHash, code)
+		return verifyLogged(h.log, "edit code", storedHash, code, h.ceiling)
 	}
 
 	parts := strings.Split(storedHash, "$")

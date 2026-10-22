@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"strings"
@@ -60,6 +61,12 @@ func globalFlags() []urcli.Flag {
 			Value:   DefaultTimeout,
 			Usage:   "Per-request HTTP timeout; 0 disables it (env: PADMARK_TIMEOUT)",
 		},
+		&urcli.BoolFlag{
+			Name:    FlagAllowInsecureHTTP,
+			Sources: urcli.EnvVars(EnvAllowInsecureHTTP),
+			Usage: "Allow sending a bearer token or setup password over plain HTTP to a non-loopback host " +
+				"(loopback hosts only warn); default refuses (env: PADMARK_ALLOW_INSECURE_HTTP)",
+		},
 	}
 }
 
@@ -70,7 +77,10 @@ func newPadmarkClient(cmd *urcli.Command) (*padmark.Client, error) {
 		return nil, trustErr
 	}
 
-	warnInsecureToken(commandErrWriter(cmd), serverURL, token)
+	insecureErr := checkInsecureToken(commandErrWriter(cmd), serverURL, token, cmd.Bool(FlagAllowInsecureHTTP))
+	if insecureErr != nil {
+		return nil, insecureErr
+	}
 
 	transport := &bearerTransport{base: http.DefaultTransport, token: token}
 	httpClient := &http.Client{Transport: transport, Timeout: cmd.Duration(FlagTimeout)}
@@ -92,25 +102,61 @@ func commandErrWriter(cmd *urcli.Command) io.Writer {
 	return os.Stderr
 }
 
-// warnInsecureToken prints a stderr warning when a bearer token would be sent over a non-HTTPS
-// connection, where it travels in cleartext and can be intercepted. It is advisory only and
-// does not block the request. No token is set, or HTTPS in use → no warning.
-func warnInsecureToken(errOut io.Writer, serverURL, token string) {
-	if token == "" {
-		return
+// errInsecureTransport is returned when a credential would travel in cleartext to a non-loopback
+// host and the operator did not opt in with --allow-insecure-http.
+var errInsecureTransport = errors.New("refusing to send credentials over non-HTTPS to a non-loopback host")
+
+// isLoopbackHost reports whether the URL's host is localhost or a loopback IP (127.0.0.0/8, ::1).
+// An unparsable URL or empty host is not loopback, so the check fails closed.
+func isLoopbackHost(serverURL string) bool {
+	parsed, err := url.Parse(serverURL)
+	if err != nil {
+		return false
 	}
 
+	host := parsed.Hostname()
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+
+	addr, err := netip.ParseAddr(host)
+
+	return err == nil && addr.IsLoopback()
+}
+
+// checkInsecureToken guards a bearer token against cleartext transport. HTTPS or no token → nil.
+// Plain HTTP to a loopback host only warns on stderr, keeping local development working. Plain
+// HTTP to any other host is an error unless allowInsecure (--allow-insecure-http) is set, in
+// which case it warns and proceeds.
+func checkInsecureToken(errOut io.Writer, serverURL, token string, allowInsecure bool) error {
+	if token == "" {
+		return nil
+	}
+
+	return checkInsecureTransport(errOut, serverURL, "bearer token", allowInsecure)
+}
+
+// checkInsecureTransport implements the shared policy for checkInsecureToken and
+// checkInsecureSetup; what names the credential in the message.
+func checkInsecureTransport(errOut io.Writer, serverURL, what string, allowInsecure bool) error {
 	parsed, err := url.Parse(serverURL)
 	if err == nil && parsed.Scheme == "https" {
-		return
+		return nil
+	}
+
+	if !allowInsecure && !isLoopbackHost(serverURL) {
+		return fmt.Errorf("%w: %s to %s; use an https:// URL or pass --%s",
+			errInsecureTransport, what, serverURL, FlagAllowInsecureHTTP)
 	}
 
 	// Best-effort advisory write (errWriter swallows the error); a failed warning must not
 	// abort the command.
 	ew := &errWriter{w: errOut, err: nil}
 	ew.printf(
-		"warning: bearer token will be sent in cleartext over a non-HTTPS URL (%s); use an https:// server URL\n",
-		serverURL)
+		"warning: %s will be sent in cleartext over a non-HTTPS URL (%s); use an https:// server URL\n",
+		what, serverURL)
+
+	return nil
 }
 
 // bearerTransport injects an Authorization: Bearer header when a token is configured, and

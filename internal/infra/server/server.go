@@ -27,6 +27,7 @@ import (
 	"github.com/partyzanex/padmark/internal/infra/linkmetrics"
 	"github.com/partyzanex/padmark/internal/infra/lock"
 	"github.com/partyzanex/padmark/internal/infra/render"
+	"github.com/partyzanex/padmark/internal/infra/rendercache"
 	"github.com/partyzanex/padmark/internal/infra/storage/postgres"
 	"github.com/partyzanex/padmark/internal/infra/storage/sqlite"
 	"github.com/partyzanex/padmark/internal/usecases/auth"
@@ -158,6 +159,8 @@ func buildRouter(
 		SessionTTL:     time.Duration(cmd.Int(FlagSessionTTL)) * time.Second,
 		DisableAPI:     cmd.Bool(FlagDisableAPI),
 		DirectRedirect: cmd.Bool(FlagDirectRedirect),
+		// The same allow-list guards the redirect listener and, here, the main one.
+		AllowedHosts: parseTokens(cmd.String(FlagAllowedHosts)),
 		// Nil (flag empty) lets NewRouter generate a fresh CSRF secret instead of accepting
 		// an injected one — the legacy single-instance behaviour.
 		CSRFSecret: csrfSecret,
@@ -391,7 +394,7 @@ func attachAccountSystem(
 
 	authMgr, err := auth.NewManager(
 		users, invites, sessions, apiTokens,
-		crypto.NewPasswordHasher(argon2ParamsFromFlags(cmd)),
+		crypto.NewPasswordHasher(argon2ParamsFromFlags(cmd)).WithLogger(log),
 		crypto.NewSealer(argon2ParamsFromFlags(cmd)), crypto.NewTOTP(),
 		log, cmd.String(FlagTOTPIssuer), sessionTTL,
 	)
@@ -499,9 +502,10 @@ func buildHandlers(
 	slugLock := lock.NewLocker()
 
 	manager := notes.NewManager(repo, linkRepo, slugLock, render.NewRenderer(), noteCipher,
-		crypto.NewEditCodeHasher(), log, cmd.Bool(FlagCustomSlugs))
+		crypto.NewEditCodeHasher(argon2ParamsFromFlags(cmd)).WithLogger(log), log, cmd.Bool(FlagCustomSlugs)).
+		WithRenderCache(rendercache.NewDefault(log))
 	linkManager := links.NewManager(linkRepo, checker, slugLock, linkCipher,
-		crypto.NewEditCodeHasher(), log, cmd.Bool(FlagCustomSlugs)).
+		crypto.NewEditCodeHasher(argon2ParamsFromFlags(cmd)).WithLogger(log), log, cmd.Bool(FlagCustomSlugs)).
 		WithCache(linkcache.NewDefault(log)).
 		WithMetrics(linkMetrics)
 

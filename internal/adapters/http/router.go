@@ -107,9 +107,13 @@ type RouterOptions struct {
 	BootstrapToken string
 	TrustedProxies []*net.IPNet
 	CSRFSecret     []byte
-	MaxBodyBytes   int
-	RateLimit      int
-	RateBurst      int
+	// AllowedHosts is the Host header allow-list for the main listener (--allowed-hosts). When
+	// non-empty, any other Host is refused with 421 before a handler runs; empty disables the
+	// check. See withAllowedHosts.
+	AllowedHosts []string
+	MaxBodyBytes int
+	RateLimit    int
+	RateBurst    int
 	// SessionTTL sets the TOTP session cookie's Max-Age (see AuthHandler), matching the
 	// server-side session lifetime configured via auth.NewManager's sessionTTL — both should be
 	// fed the same --session-ttl value so the cookie never outlives (or expires before) the
@@ -257,6 +261,11 @@ func wrapMiddleware(
 	if len(opts.TrustedProxies) == 0 {
 		stack = warnUnconfiguredProxy(handler.log, stack)
 	}
+
+	// Outside every stateful layer (auth, CSRF, rate limit) so a forged Host is refused before
+	// any of them runs, yet inside security headers, logging and the request ID so the refusal
+	// is still logged and carries them.
+	stack = withAllowedHosts(opts.AllowedHosts, stack)
 
 	stack = withSecurityHeaders(opts.ForcedScheme, opts.TrustedProxies, stack)
 	stack = withLogging(handler.log, stack)
@@ -483,7 +492,10 @@ func buildCSP(nonce string) string {
 		"style-src 'self' 'nonce-" + nonce + "'; " +
 		"font-src 'self'; " +
 		"img-src 'self' data:; " +
-		"connect-src 'self'"
+		"connect-src 'self'; " +
+		// default-src does not cover these: block <base> hijacking of relative URLs, forms posting
+		// off-origin, framing (clickjacking; supersedes X-Frame-Options) and plugin content.
+		"base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'"
 }
 
 // withSecurityHeaders sets the hardening headers on every response. HSTS is emitted only when

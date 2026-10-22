@@ -199,7 +199,10 @@ func (h *AuthHandler) TOTPLoginHandler(w http.ResponseWriter, r *http.Request) {
 	code := r.FormValue("code")
 	next := safeNextURL(r.FormValue("next"))
 
-	sessID, err := h.authMgr.Login(r.Context(), username, password, code, truncateUA(r.UserAgent()), remoteIP(r))
+	// The session cookie the browser presented, if any, is revoked by the usecase on success.
+	sessID, err := h.authMgr.Login(
+		r.Context(), username, password, code, truncateUA(r.UserAgent()), remoteIP(r), extractSessionID(r),
+	)
 	if err != nil {
 		dest := "/login?error=1"
 		if next != "" {
@@ -229,7 +232,8 @@ func (h *AuthHandler) TOTPLoginHandler(w http.ResponseWriter, r *http.Request) {
 		Partitioned: false,
 	})
 
-	rotateCSRFToken(w, r, h.csrfSecret, h.forcedScheme, h.trustedProxies)
+	// The CSRF token is bound to the session: re-mint it for the session just issued.
+	rotateCSRFToken(w, r, h.csrfSecret, sessID, h.forcedScheme, h.trustedProxies)
 
 	dest := "/"
 	if next != "" {
@@ -679,7 +683,7 @@ func (h *AuthHandler) doChangePassword(
 			Partitioned: false,
 		})
 
-		rotatedCSRF = rotateCSRFToken(w, r, h.csrfSecret, h.forcedScheme, h.trustedProxies)
+		rotatedCSRF = rotateCSRFToken(w, r, h.csrfSecret, newSessID, h.forcedScheme, h.trustedProxies)
 
 		if errors.Is(changeErr, domain.ErrSessionRevocation) {
 			return "Password changed, but older sessions or API tokens could not be revoked. " +

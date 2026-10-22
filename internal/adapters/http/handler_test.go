@@ -102,6 +102,48 @@ func (s *HandlerSuite) newRouterWithOptions(trustedProxies []*net.IPNet, forcedS
 	return router
 }
 
+// newRouterWithAllowedHosts builds a router whose main listener only serves the given Hosts.
+func (s *HandlerSuite) newRouterWithAllowedHosts(hosts ...string) http.Handler {
+	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog)
+	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog)
+
+	opts := adhttp.RouterOptions{
+		MaxBodyBytes: 256 * 1024,
+		CSRFSecret:   testCSRFSecret,
+		AllowedHosts: hosts,
+	}
+
+	router, err := adhttp.NewRouter(handler, ogen, &opts)
+	s.Require().NoError(err)
+
+	return router
+}
+
+// TestAllowedHosts_EnforcedOnMainListener verifies RouterOptions.AllowedHosts is wired into the
+// middleware chain: a foreign Host is refused with 421 before any handler, a listed one is
+// served, and with no list configured every Host passes (the default).
+func (s *HandlerSuite) TestAllowedHosts_EnforcedOnMainListener() {
+	restricted := s.newRouterWithAllowedHosts("notes.example.com")
+
+	foreign := httptest.NewRecorder()
+	foreignReq := httptest.NewRequest(http.MethodGet, "/", nil)
+	foreignReq.Host = "evil.test"
+	restricted.ServeHTTP(foreign, foreignReq)
+	s.Equal(http.StatusMisdirectedRequest, foreign.Code)
+
+	listed := httptest.NewRecorder()
+	listedReq := httptest.NewRequest(http.MethodGet, "/", nil)
+	listedReq.Host = "Notes.Example.com:8443"
+	restricted.ServeHTTP(listed, listedReq)
+	s.Equal(http.StatusOK, listed.Code)
+
+	open := httptest.NewRecorder()
+	openReq := httptest.NewRequest(http.MethodGet, "/", nil)
+	openReq.Host = "evil.test"
+	s.router.ServeHTTP(open, openReq)
+	s.Equal(http.StatusOK, open.Code, "no allow-list configured: every Host passes")
+}
+
 // newRouterWithTOTPAuth builds a router configured in TOTP-only mode: authMgr set.
 // This is the deployment mode under test for private-note access and CanEdit fixes, and is
 // also the standard way to force "auth is configured" for tests that only need an anonymous
@@ -456,6 +498,45 @@ func (s *HandlerSuite) TestCreateNote_OK() {
 	s.Equal("# world", resp.Content)
 	s.NotEmpty(resp.ID)
 	s.Equal("editcode1234", resp.EditCode)
+}
+
+// TestCreateNote_ContentOverCap_RejectedBeforeStorage: the OpenAPI maxLength on content is
+// enforced by the generated request validation, so an oversized body (well inside the 4 MiB
+// request limit) never reaches the manager.
+func (s *HandlerSuite) TestCreateNote_ContentOverCap_RejectedBeforeStorage() {
+	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog)
+	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog)
+
+	router, err := adhttp.NewRouter(handler, ogen, &adhttp.RouterOptions{
+		MaxBodyBytes: 4 * 1024 * 1024,
+		CSRFSecret:   testCSRFSecret,
+	})
+	s.Require().NoError(err)
+
+	body := `{"content":"` + strings.Repeat("a", domain.MaxContentLength+1) + `"}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/notes", strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusBadRequest, w.Code)
+	s.Contains(w.Body.String(), "content")
+}
+
+// TestCreateNote_ContentTooLargeFromManager_Is422 pins the domain sentinel's status for the
+// routes that reach the usecase check (native handlers, or a body the spec validation let by).
+func (s *HandlerSuite) TestCreateNote_ContentTooLargeFromManager_Is422() {
+	s.manager.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil, domain.ErrContentTooLarge)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/notes", strings.NewReader(`{"content":"x"}`))
+	r.Header.Set("Content-Type", "application/json")
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusUnprocessableEntity, w.Code)
+	s.Contains(w.Body.String(), domain.ErrContentTooLarge.Error())
 }
 
 func (s *HandlerSuite) TestCreateNote_WithTTL() {
@@ -1404,7 +1485,8 @@ func (s *HandlerSuite) TestDeleteNote_MultiSegmentSlug_ByURL_Acceptance() {
 	s.manager.EXPECT().Delete(gomock.Any(), mid, "code", uuid.Nil).Return(nil)
 
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodDelete, "/notes/"+mid+"?edit_code=code", nil)
+	r := httptest.NewRequest(http.MethodDelete, "/notes/"+mid, nil)
+	r.Header.Set("X-Edit-Code", "code")
 
 	s.router.ServeHTTP(w, r)
 
@@ -1459,16 +1541,21 @@ func (s *HandlerSuite) TestDeleteNote_OK() {
 	s.Equal(http.StatusNoContent, w.Code)
 }
 
-func (s *HandlerSuite) TestDeleteNote_QueryParam() {
-	s.expectMutationGate()
-	s.manager.EXPECT().Delete(gomock.Any(), testID, "fromquery", uuid.Nil).Return(nil)
+// TestDeleteNote_QueryParamIgnored pins that the edit code is never read from the query string
+// (it would leak through proxy/CDN access logs and Referer): the manager sees an empty code and
+// the missing-code rejection surfaces as 403, for single-segment and path-like slugs alike.
+func (s *HandlerSuite) TestDeleteNote_QueryParamIgnored() {
+	for _, id := range []string{testID, "project/GUIDE.md"} {
+		s.expectMutationGate()
+		s.manager.EXPECT().Delete(gomock.Any(), id, "", uuid.Nil).Return(domain.ErrInvalidEditCode)
 
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodDelete, "/notes/"+testID+"?edit_code=fromquery", nil)
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodDelete, "/notes/"+id+"?edit_code=fromquery", nil)
 
-	s.router.ServeHTTP(w, r)
+		s.router.ServeHTTP(w, r)
 
-	s.Equal(http.StatusNoContent, w.Code)
+		s.Equal(http.StatusForbidden, w.Code, "edit_code in the query string must be ignored for %q", id)
+	}
 }
 
 func (s *HandlerSuite) TestDeleteNote_NotFound() {
@@ -2346,6 +2433,24 @@ func (s *HandlerSuite) TestAPIDocsPage() {
 	s.Contains(w.Header().Get("Content-Type"), "text/html")
 	s.Contains(w.Body.String(), "openapi.yaml")
 	s.Contains(w.Body.String(), "redoc")
+}
+
+// TestCSP_NonFetchDirectivesHardened verifies the directives that default-src does not cover are
+// pinned on every page, including the API docs page: no <base> injection, forms posting only to
+// the same origin, no framing and no plugin content.
+func (s *HandlerSuite) TestCSP_NonFetchDirectivesHardened() {
+	for _, path := range []string{"/", "/api"} {
+		rec := httptest.NewRecorder()
+		s.router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+
+		csp := rec.Header().Get("Content-Security-Policy")
+
+		for _, directive := range []string{
+			"base-uri 'none'", "form-action 'self'", "frame-ancestors 'none'", "object-src 'none'",
+		} {
+			s.Contains(csp, directive, "CSP on %s must contain %q", path, directive)
+		}
+	}
 }
 
 func (s *HandlerSuite) TestAPISpec() {

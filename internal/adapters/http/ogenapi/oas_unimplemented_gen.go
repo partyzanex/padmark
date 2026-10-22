@@ -87,10 +87,11 @@ func (UnimplementedHandler) CreateNote(ctx context.Context, req *CreateNoteReque
 
 // DeleteLink implements deleteLink operation.
 //
-// Permanently deletes the link. The edit code must be supplied either as the `X-Edit-Code`
-// request header or the `edit_code` query parameter — unless the request is authenticated
-// (bearer token or session) as the exact user who created the link, in which case no edit
-// code is needed. See "Edit codes and ownership" above.
+// Permanently deletes the link. The edit code must be supplied as the `X-Edit-Code`
+// request header (a `?edit_code=` query parameter is ignored: query strings leak into proxy
+// logs and `Referer`) — unless the request is authenticated (bearer token or session) as the
+// exact user who created the link, in which case no edit code is needed. See "Edit codes
+// and ownership" above.
 //
 // DELETE /links/{id}
 func (UnimplementedHandler) DeleteLink(ctx context.Context, params DeleteLinkParams) (r DeleteLinkRes, _ error) {
@@ -101,16 +102,14 @@ func (UnimplementedHandler) DeleteLink(ctx context.Context, params DeleteLinkPar
 //
 // Permanently deletes the note. Anonymous callers may delete any note whose `privacy`
 // level would also let them read it (see "Authentication" above). The edit code must be
-// supplied either as the `X-Edit-Code` request header or the `edit_code` query parameter —
-// unless the request is authenticated (bearer token or session) as the exact user who
-// created the note, in which case no edit code is needed. See "Edit codes and ownership"
-// above.
-// Prefer the `X-Edit-Code` header over the `edit_code` query parameter: a query string can
-// end up in reverse-proxy/CDN access logs or in the `Referer` header of a same-origin
-// follow-up request, while padmark's own logging never records it (see openapi.yaml's
-// `edit_code` query parameter description). The query parameter exists only for manual/curl
-// convenience — the CLI always uses the header. Better still, sign in (session or API
-// token) before creating the note and skip the edit code entirely.
+// supplied in the `X-Edit-Code` request header — unless the request is authenticated
+// (bearer token or session) as the exact user who created the note, in which case no edit
+// code is needed. See "Edit codes and ownership" above.
+// The edit code is deliberately not accepted as a query parameter: a query string can end
+// up in reverse-proxy/CDN access logs or in the `Referer` header of a same-origin
+// follow-up request. A stray `?edit_code=` is ignored, so the request is treated as having
+// no edit code. Better still, sign in (session or API token) before creating the note and
+// skip the edit code entirely.
 //
 // DELETE /notes/{id}
 func (UnimplementedHandler) DeleteNote(ctx context.Context, params DeleteNoteParams) (r DeleteNoteRes, _ error) {

@@ -40,14 +40,34 @@ func TestLink_EffectivePrivacy(t *testing.T) {
 }
 
 func TestLink_EffectiveDirectRedirect(t *testing.T) {
-	assert.True(t, (&Link{}).EffectiveDirectRedirect(true), "nil override falls back to server default (true)")
-	assert.False(t, (&Link{}).EffectiveDirectRedirect(false), "nil override falls back to server default (false)")
+	t.Parallel()
 
+	owner := uuid.New()
 	forceTrue, forceFalse := true, false
-	assert.True(t, (&Link{DirectRedirect: &forceTrue}).EffectiveDirectRedirect(false),
-		"link override wins over a false server default")
-	assert.False(t, (&Link{DirectRedirect: &forceFalse}).EffectiveDirectRedirect(true),
-		"link override wins over a true server default")
+
+	cases := []struct {
+		name          string
+		link          Link
+		serverDefault bool
+		want          bool
+	}{
+		// Server default off (the default): only an authenticated owner earns the direct 301.
+		{"anonymous link follows a false default", Link{}, false, false},
+		{"anonymous override true is ignored without the flag", Link{DirectRedirect: &forceTrue}, false, false},
+		{"owned link redirects directly", Link{OwnerID: &owner}, false, true},
+		{"owned link may opt back into the interstitial", Link{OwnerID: &owner, DirectRedirect: &forceFalse}, false, false},
+		{"owned override true stays direct", Link{OwnerID: &owner, DirectRedirect: &forceTrue}, false, true},
+		// Operator turned the flag on: the old behaviour for everyone, per-link override included.
+		{"anonymous link follows a true default", Link{}, true, true},
+		{"anonymous override false wins over a true default", Link{DirectRedirect: &forceFalse}, true, false},
+		{"anonymous override true with the flag on", Link{DirectRedirect: &forceTrue}, true, true},
+		{"owned link with the flag on", Link{OwnerID: &owner}, true, true},
+		{"owned override false wins over a true default", Link{OwnerID: &owner, DirectRedirect: &forceFalse}, true, false},
+	}
+
+	for _, testCase := range cases {
+		assert.Equal(t, testCase.want, testCase.link.EffectiveDirectRedirect(testCase.serverDefault), testCase.name)
+	}
 }
 
 func TestLink_VisibleTo(t *testing.T) {

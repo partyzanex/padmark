@@ -104,6 +104,18 @@ type Invite struct {
 // HashInviteToken derives the at-rest key for a high-entropy invitation bearer.
 // The digest uses the same base64url SHA-256 representation as API/session keys.
 func HashInviteToken(token string) string {
+	return hashBearer(token)
+}
+
+// HashRevealToken derives the at-rest key for a burn-after-reading reveal bearer. Reveal tokens
+// are 256-bit random values, so an unsalted SHA-256 is sufficient (no brute-force surface) and
+// keeps lookups indexable, exactly like invite, session and API tokens.
+func HashRevealToken(token string) string {
+	return hashBearer(token)
+}
+
+// hashBearer is the shared base64url-encoded SHA-256 of a high-entropy bearer value.
+func hashBearer(token string) string {
 	digest := sha256.Sum256([]byte(token))
 
 	return base64.RawURLEncoding.EncodeToString(digest[:])

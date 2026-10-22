@@ -273,8 +273,8 @@ func (h *NoteHandler) UpdateNoteByPath(w http.ResponseWriter, r *http.Request) {
 }
 
 // DeleteNoteByPath handles DELETE /notes/{id...} for path-like slugs, mirroring the ogen
-// DELETE /notes/{id} contract: the edit code comes from the X-Edit-Code header or the edit_code
-// query parameter, and a successful delete returns 204 No Content.
+// DELETE /notes/{id} contract: the edit code comes from the X-Edit-Code header only (never the
+// query string, which leaks into proxy logs and Referer), and a successful delete returns 204.
 func (h *NoteHandler) DeleteNoteByPath(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
@@ -282,16 +282,7 @@ func (h *NoteHandler) DeleteNoteByPath(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The query-param fallback mirrors the documented ogen DELETE /notes/{id} contract (see
-	// openapi.yaml); dropping it here only would break parity between the two routes. Our own
-	// access logging never records the query string (withLogging only logs a digest of the
-	// path at debug level), so the residual leak surface — reverse-proxy/CDN logs,
-	// Referer on same-origin follow-up requests — is inherent to any query-param secret and
-	// outside this handler's control.
 	editCode := r.Header.Get("X-Edit-Code")
-	if editCode == "" {
-		editCode = r.URL.Query().Get("edit_code")
-	}
 
 	err := h.manager.Delete(r.Context(), id, editCode, callerIDFromCtx(r.Context()))
 	if err != nil {
