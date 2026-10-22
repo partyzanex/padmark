@@ -101,12 +101,15 @@ Every short link has:
 | `burn_after_click` | Delete the link the moment it's first followed |
 | `ttl` | Seconds until the link expires, counted from creation (a plain hard expiry — unlike notes' `ttl`, unrelated to `burn_after_click`; the two may be combined freely) |
 | `privacy` | Who can follow it: `public` (default), `authenticated`, or `owner` |
-| `direct_redirect` | Per-link override of the server's `--direct-redirect` default; omitted inherits it |
+| `direct_redirect` | Per-link override of the redirect mode; omitted inherits the default below. Ignored for anonymously created links unless the operator enabled `--direct-redirect` |
 
-Visiting `GET /r/{id}` either redirects immediately (`301`, the default) or shows a brief
-transparency interstitial with the destination and a manual continue link first — controlled
-server-wide by `--direct-redirect` (see [Configuration reference](#server)), or per link via
-`direct_redirect` at creation or update time, which always wins over the server default. In both modes an
+Visiting `GET /r/{id}` either redirects immediately (`301`) or shows a brief transparency
+interstitial with the destination and a manual continue link first. **By default a link created
+anonymously gets the interstitial** (so the instance cannot be used as a free open redirector),
+while a link created by a signed-in owner (session or API token) redirects directly. The operator
+can restore the old behaviour — `301` for every link — with `--direct-redirect=true` (see
+[Configuration reference](#server)); a link's `direct_redirect` at creation or update time then
+overrides that, and for an owner's links it can opt back into the interstitial. In every mode an
 expired link answers `410 Gone`, a missing one `404`, and a link denied by its `privacy` level
 `401` (or a login redirect for a browser), exactly like notes.
 
@@ -326,7 +329,7 @@ padmark-cli shorten --target-url https://example.com/some/long/path
 # Custom slug, burn after first click, expires in 1 hour
 padmark-cli shorten --target-url https://example.com --slug my-link --burn --ttl 3600
 
-# Force this one link to always show the interstitial, even if the server default is --direct-redirect=true
+# Force this one link to always show the interstitial, even when it would redirect directly
 padmark-cli shorten --target-url https://example.com --direct-redirect=false
 
 # Get a link's metadata (does not follow it or consume burn-after-click)
@@ -437,7 +440,8 @@ curl -X PUT http://localhost:4000/links/{id} \
   -H "Content-Type: application/json" \
   -d '{"target_url":"https://example.com/new","edit_code":"MySecretCode1","ttl":3600}'
 
-# Follow it — 301 (default) or an HTML transparency interstitial, per --direct-redirect
+# Follow it — an HTML transparency interstitial for an anonymously created link (default),
+# 301 for an owner's link or when the server runs with --direct-redirect=true
 curl -i http://localhost:4000/r/{id}
 # A burn_after_click link needs a deliberate access (otherwise 409, link intact):
 curl -i -H "Accept: text/html" http://localhost:4000/r/{id}
@@ -876,7 +880,7 @@ There is no destructive encryption down-migration, and older binaries cannot rea
 | `--trusted-proxies` | `PADMARK_TRUSTED_PROXIES` | — | Proxy CIDRs/IPs whose `X-Forwarded-For` / `X-Real-IP` is believed when resolving the real client IP; also the addresses whose `X-Forwarded-Proto` is trusted when building absolute links (note URLs, invite links, API-token envelopes). Set it to the proxy's own addresses and nothing wider — see [Getting `--trusted-proxies` wrong](#getting---trusted-proxies-wrong) |
 | `--public-scheme` | `PADMARK_PUBLIC_SCHEME` | — | Force `http` or `https` for absolute links back to this server, bypassing TLS/`X-Forwarded-Proto` detection; `https` also marks session/CSRF cookies `Secure` and enables HSTS. Use this instead of `--trusted-proxies` when the proxy's IP isn't stable (cloud load balancers, k8s ingress) |
 | `--custom-slugs` | `PADMARK_CUSTOM_SLUGS` | `false` | Allow user-supplied human-readable slugs/link aliases (e.g. `project/GUIDE.md`) at creation. Off by default because public human-readable URLs are easy to guess. New content keys are independent of the slug; existing legacy ciphertext keeps its old protection until migrated. A slug's first path segment must not be a reserved route name: `login`, `setup`, `logout`, `totp-login`, `admin`, `api`, `success`, `healthz`, `readyz`, `notes`, `edit`, `change-password`, `static`, `links`, `r` |
-| `--direct-redirect` | `PADMARK_DIRECT_REDIRECT` | `true` | `GET /r/{id}` behavior for short links: `true` issues an immediate `301` to the target URL; `false` renders an interstitial page (meta-refresh + `<noscript>` fallback) showing the destination before redirecting |
+| `--direct-redirect` | `PADMARK_DIRECT_REDIRECT` | `false` | `GET /r/{id}` behavior for short links. **Default changed from `true` to `false`:** links created anonymously now render an interstitial page (meta-refresh + `<noscript>` fallback) showing the destination, so the instance is not an open redirector; links created by a signed-in owner still get an immediate `301`. Set `true` to restore the `301` for every link |
 | `--metrics-addr` | `PADMARK_METRICS_ADDR` | — | Address for a separate internal Prometheus `/metrics` listener (e.g. `:9090`); empty (default) disables it entirely. Exposes `padmark_links_created_total`, `padmark_links_redirects_total`, `padmark_links_collisions_total`, plus standard Go/process collectors. Bind this to a private interface only — metrics are never served on the main, public-facing listener |
 
 #### Getting `--trusted-proxies` wrong

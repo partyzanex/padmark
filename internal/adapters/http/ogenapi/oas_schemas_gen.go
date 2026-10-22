@@ -330,9 +330,10 @@ type CreateLinkRequest struct {
 	// ownership" above). `owner` additionally requires the link to actually have an owner, i.e.
 	// `--enable-accounts` and an authenticated caller — otherwise the request is rejected with `422`.
 	Privacy OptCreateLinkRequestPrivacy `json:"privacy"`
-	// Per-link override of the server's `--direct-redirect` flag for `GET /r/{id}`: `true` forces an
-	// immediate `301`, `false` forces the transparency interstitial, omitted (or explicit `null`) inherits
-	// the server-wide default.
+	// Per-link override of the redirect mode for `GET /r/{id}`: `false` forces the transparency
+	// interstitial; `true` forces an immediate `301`, but only for a link created by an authenticated
+	// owner or on a server running `--direct-redirect=true` (otherwise ignored). Omitted (or explicit
+	// `null`) inherits the default: interstitial for anonymous links, `301` for an owner's links.
 	DirectRedirect OptNilBool `json:"direct_redirect"`
 }
 

@@ -17,9 +17,10 @@ type Link struct {
 	// token); nil for anonymous links. Lets Update/Delete bypass EditCode for the exact
 	// creator — see links.Manager.Update/Delete, mirroring notes.Manager.Update/Delete.
 	OwnerID *uuid.UUID
-	// DirectRedirect overrides the server-wide --direct-redirect default for this one link: nil
-	// means "inherit the server default", non-nil forces GET /r/{id} into 301 mode (true) or
-	// interstitial mode (false) regardless of the server flag. See EffectiveDirectRedirect.
+	// DirectRedirect overrides the redirect mode for this one link: nil means "inherit" (the
+	// server flag, or direct for an owned link), non-nil forces GET /r/{id} into 301 mode (true) or
+	// interstitial mode (false). An anonymous link's true is ignored unless the operator enabled
+	// --direct-redirect. See EffectiveDirectRedirect.
 	DirectRedirect *bool
 	ID             string
 	TargetURL      string // ciphertext in storage, plaintext in domain after Decrypt
@@ -65,14 +66,25 @@ func (l *Link) EffectivePrivacy() Privacy {
 	return *l.Privacy
 }
 
-// EffectiveDirectRedirect returns l.DirectRedirect, falling back to serverDefault (the
-// server-wide --direct-redirect flag) when the link didn't set its own override.
+// EffectiveDirectRedirect reports whether GET /r/{id} should answer with an immediate 301 rather
+// than the transparency interstitial.
+//
+// serverDefault is the operator's --direct-redirect flag, which defaults to false so that an
+// anonymously created link cannot turn the instance into an open redirector with the operator's
+// domain reputation. The rules:
+//
+//   - flag on: the link's own override wins when set, otherwise 301 (the original behaviour);
+//   - flag off: a link created by an authenticated owner (OwnerID set) is accountable, so it
+//     redirects directly unless its own override says otherwise; an anonymous link always gets
+//     the interstitial, whatever override its creator asked for.
 func (l *Link) EffectiveDirectRedirect(serverDefault bool) bool {
-	if l.DirectRedirect == nil {
-		return serverDefault
+	owned := l.OwnerID != nil
+
+	if l.DirectRedirect != nil && (serverDefault || owned) {
+		return *l.DirectRedirect
 	}
 
-	return *l.DirectRedirect
+	return serverDefault || owned
 }
 
 // Expired reports whether l's TTL has elapsed as of now. A nil ExpiresAt means the link never

@@ -512,9 +512,10 @@ func (s *HandlerSuite) TestRedirectLink_InterstitialMode_200() {
 	s.Contains(body, "Redirecting")
 }
 
-// TestRedirectLink_PerLinkOverride_ForcesDirectDespiteServerDefault verifies a link's own
-// DirectRedirect=true wins even when the server default (RouterOptions.DirectRedirect) is false.
-func (s *HandlerSuite) TestRedirectLink_PerLinkOverride_ForcesDirectDespiteServerDefault() {
+// TestRedirectLink_AnonymousLink_DefaultConfig_Interstitial pins the open-redirect hardening: with
+// the default configuration (--direct-redirect off) a link created anonymously is shown behind the
+// transparency interstitial, even when its creator asked for direct_redirect=true.
+func (s *HandlerSuite) TestRedirectLink_AnonymousLink_DefaultConfig_Interstitial() {
 	forceDirect := true
 	link := newTestLink()
 	link.DirectRedirect = &forceDirect
@@ -523,9 +524,39 @@ func (s *HandlerSuite) TestRedirectLink_PerLinkOverride_ForcesDirectDespiteServe
 	router := s.newLinkRouter(false)
 
 	w := httptest.NewRecorder()
-	r := newLinkClickRequest("/r/" + testLinkID)
+	router.ServeHTTP(w, newLinkClickRequest("/r/"+testLinkID))
 
-	router.ServeHTTP(w, r)
+	s.Equal(http.StatusOK, w.Code)
+	s.Empty(w.Header().Get("Location"))
+	s.Contains(w.Body.String(), testLinkTargetURL)
+}
+
+// TestRedirectLink_OwnedLink_DefaultConfig_Direct: a link created by an authenticated owner is
+// accountable, so it keeps the immediate 301 without any operator opt-in.
+func (s *HandlerSuite) TestRedirectLink_OwnedLink_DefaultConfig_Direct() {
+	ownerID := uuid.New()
+	link := newTestLink()
+	link.OwnerID = &ownerID
+	s.linkManager.EXPECT().Redirect(gomock.Any(), testLinkID).Return(link, nil)
+
+	router := s.newLinkRouter(false)
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, newLinkClickRequest("/r/"+testLinkID))
+
+	s.Equal(http.StatusMovedPermanently, w.Code)
+	s.Equal(testLinkTargetURL, w.Header().Get("Location"))
+}
+
+// TestRedirectLink_AnonymousLink_FlagOn_Direct: an operator who sets --direct-redirect explicitly
+// gets the old behaviour back for every link, anonymous ones included.
+func (s *HandlerSuite) TestRedirectLink_AnonymousLink_FlagOn_Direct() {
+	s.linkManager.EXPECT().Redirect(gomock.Any(), testLinkID).Return(newTestLink(), nil)
+
+	router := s.newLinkRouter(true)
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, newLinkClickRequest("/r/"+testLinkID))
 
 	s.Equal(http.StatusMovedPermanently, w.Code)
 	s.Equal(testLinkTargetURL, w.Header().Get("Location"))

@@ -52,8 +52,9 @@ type redirectViewData struct {
 
 // Redirect handles GET /r/{id}: resolves the link, applies its privacy gate (mirrors
 // NoteHandler.handlePrivateAuth), then either issues a 301 to the target URL or renders the
-// transparency interstitial. The mode is link.EffectiveDirectRedirect(h.directRedirect): the
-// link's own per-link override if it set one, otherwise the server-wide --direct-redirect default.
+// transparency interstitial. The mode is link.EffectiveDirectRedirect(h.directRedirect): anonymous
+// links get the interstitial unless the operator enabled --direct-redirect; links created by an
+// authenticated owner redirect directly; a per-link override applies within those limits.
 func (h *LinkHandler) Redirect(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 

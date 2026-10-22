@@ -64,16 +64,20 @@ info:
 
     `GET /r/{id}` is a browser-facing redirect, not a JSON API operation, so it is intentionally
     not part of this spec's `paths` (the same convention already applies to notes' own bare
-    `GET /{id}` view route). Its behaviour is controlled by the server's `--direct-redirect` flag:
+    `GET /{id}` view route). Its behaviour depends on who created the link and on the server's
+    `--direct-redirect` flag (default `false`):
 
-    - `--direct-redirect=true` (default): `301 Moved Permanently` straight to `target_url`.
-    - `--direct-redirect=false`: `200` HTML interstitial (meta-refresh with a 5-second delay +
+    - a link created by an authenticated owner (session or API token): `301 Moved Permanently`
+      straight to `target_url`;
+    - a link created anonymously: `200` HTML interstitial (meta-refresh with a 5-second delay +
       `<noscript>` fallback) showing `target_url` before redirecting — for transparency, so a
-      visitor has time to see the destination before following it.
+      visitor has time to see the destination, and so the instance is not a free open redirector;
+    - `--direct-redirect=true`: `301` for every link, anonymous ones included.
 
-    Any individual link may override this server-wide default via `direct_redirect` at creation
-    time (see `CreateLinkRequest.direct_redirect`) — `true`/`false` forces that link's own mode
-    regardless of the flag, omitted (or `null`) inherits it.
+    An individual link may override this via `direct_redirect` at creation time (see
+    `CreateLinkRequest.direct_redirect`): `false` forces the interstitial; `true` forces `301` only
+    for an owner's link, or on a server running with `--direct-redirect=true` — an anonymous
+    link's `true` is ignored otherwise. Omitted (or `null`) inherits the rules above.
 
     In both modes an expired link responds `410 Gone`, a missing link `404`, and a link denied by
     its `privacy` level `401` (or a login redirect for a browser request) — mirroring notes'
@@ -912,9 +916,11 @@ components:
           type: boolean
           nullable: true
           description: |
-            Per-link override of the server's `--direct-redirect` flag for `GET /r/{id}`: `true`
-            forces an immediate `301`, `false` forces the transparency interstitial, omitted (or
-            explicit `null`) inherits the server-wide default.
+            Per-link override of the redirect mode for `GET /r/{id}`: `false` forces the
+            transparency interstitial; `true` forces an immediate `301`, but only for a link
+            created by an authenticated owner or on a server running `--direct-redirect=true`
+            (otherwise ignored). Omitted (or explicit `null`) inherits the default: interstitial
+            for anonymous links, `301` for an owner's links.
 
     UpdateLinkRequest:
       type: object

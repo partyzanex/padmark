@@ -96,6 +96,8 @@ const (
 	DefaultArgon2Memory   = 24 * 1024 // argon2id memory in KiB (24 MiB)
 	DefaultArgon2Time     = 2         // argon2id iterations (OWASP minimum at 64 MiB)
 	DefaultArgon2Threads  = 1         // argon2id parallelism
+	// DefaultDirectRedirect is off: an anonymous link must not be a free open redirector.
+	DefaultDirectRedirect = false
 )
 
 // DefaultSessionTTL is the --session-ttl flag default, in seconds — derived from
@@ -283,10 +285,11 @@ func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
 		&cli.BoolFlag{
 			Name:    FlagDirectRedirect,
 			Sources: cli.EnvVars(EnvDirectRedirect),
-			Value:   true,
+			Value:   DefaultDirectRedirect,
 			Usage: "GET /r/{hash} behaviour for short links: true issues an immediate 301 to the " +
-				"target URL; false renders an interstitial page (meta-refresh + noscript fallback) " +
-				"showing the destination before redirecting",
+				"target URL for every link; false (default) renders an interstitial page (meta-refresh + " +
+				"noscript fallback) showing the destination for links created anonymously, while links " +
+				"created by a signed-in owner still redirect directly (open-redirect/phishing hardening)",
 		},
 		&cli.StringFlag{
 			Name:    FlagMetricsAddr,
