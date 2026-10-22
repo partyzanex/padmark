@@ -34,10 +34,12 @@ type Renderer struct {
 // NewRenderer returns a Renderer with tables, strikethrough, autolinks and syntax highlighting enabled.
 func NewRenderer() *Renderer {
 	gmd := goldmark.New(
+		// Guarded default parsers: render time stays linear in note size (see parse_guards.go).
+		goldmark.WithParser(parser.NewParser(guardedParserOptions()...)),
 		goldmark.WithExtensions(
 			extension.Table,
-			extension.Strikethrough,
-			extension.Linkify,
+			strikethroughExtension{},
+			linkifyExtension{},
 			highlighting.NewHighlighting(
 				highlighting.WithStyle("github-dark"),
 				highlighting.WithFormatOptions(
@@ -73,7 +75,10 @@ func NewRenderer() *Renderer {
 func (r *Renderer) Render(content string) (string, error) {
 	var buf bytes.Buffer
 
-	err := r.md.Convert([]byte(content), &buf)
+	// A fresh context per call: heading IDs are unique per document, generated in linear time.
+	pctx := parser.NewContext(parser.WithIDs(newHeadingIDs()))
+
+	err := r.md.Convert([]byte(content), &buf, parser.WithContext(pctx))
 	if err != nil {
 		return "", fmt.Errorf("render markdown: %w", err)
 	}
