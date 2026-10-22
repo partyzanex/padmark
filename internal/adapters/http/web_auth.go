@@ -220,7 +220,8 @@ func (h *AuthHandler) TOTPLoginHandler(w http.ResponseWriter, r *http.Request) {
 		Partitioned: false,
 	})
 
-	rotateCSRFToken(w, r, h.csrfSecret, h.forcedScheme, h.trustedProxies)
+	// The CSRF token is bound to the session: re-mint it for the session just issued.
+	rotateCSRFToken(w, r, h.csrfSecret, sessID, h.forcedScheme, h.trustedProxies)
 
 	dest := "/"
 	if next != "" {
@@ -670,7 +671,7 @@ func (h *AuthHandler) doChangePassword(
 			Partitioned: false,
 		})
 
-		rotatedCSRF = rotateCSRFToken(w, r, h.csrfSecret, h.forcedScheme, h.trustedProxies)
+		rotatedCSRF = rotateCSRFToken(w, r, h.csrfSecret, newSessID, h.forcedScheme, h.trustedProxies)
 
 		if errors.Is(changeErr, domain.ErrSessionRevocation) {
 			return "Password changed, but older sessions could not be revoked. " +

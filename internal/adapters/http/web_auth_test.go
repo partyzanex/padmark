@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -149,6 +150,33 @@ func withCSRF(form url.Values) url.Values {
 	return form
 }
 
+// csrfTokens caches the per-session CSRF tokens: the token is bound to the session cookie value,
+// so a signed-in POST needs one minted for that session (the anonymous testCSRFToken is, by
+// design, rejected there).
+var csrfTokens sync.Map //nolint:gochecknoglobals // test fixture cache
+
+func csrfTokenFor(sessionID string) string {
+	if tok, ok := csrfTokens.Load(sessionID); ok {
+		return tok.(string) //nolint:forcetypeassert // only strings are stored
+	}
+
+	tok, _ := csrfTokens.LoadOrStore(sessionID, adhttp.GenerateSessionCSRFTokenForTest(authTestCSRFSecret, sessionID))
+
+	return tok.(string) //nolint:forcetypeassert // only strings are stored
+}
+
+// csrfCookieFor is csrfCookie for a request that also carries sessionCookie(sessionID).
+func (s *AuthHandlerSuite) csrfCookieFor(sessionID string) *http.Cookie {
+	return &http.Cookie{Name: "padmark_csrf", Value: csrfTokenFor(sessionID)} //nolint:gosec // G124: test cookie
+}
+
+// withCSRFFor is withCSRF for a request that also carries sessionCookie(sessionID).
+func withCSRFFor(form url.Values, sessionID string) url.Values {
+	form.Set("csrf_token", csrfTokenFor(sessionID))
+
+	return form
+}
+
 // ── Login page ──
 
 func (s *AuthHandlerSuite) TestLoginPage_TOTP_Mode() {
@@ -268,11 +296,11 @@ func (s *AuthHandlerSuite) TestLogout_DeletesSessionAndClears() {
 	// LogoutHandler reads the cookie directly and calls Logout.
 	s.auth.EXPECT().Logout(gomock.Any(), "sess-xyz").Return(nil)
 
-	form := withCSRF(url.Values{})
+	form := withCSRFFor(url.Values{}, "sess-xyz")
 	req := httptest.NewRequest(http.MethodPost, "/logout", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(s.sessionCookie("sess-xyz"))
-	req.AddCookie(s.csrfCookie())
+	req.AddCookie(s.csrfCookieFor("sess-xyz"))
 
 	rec := httptest.NewRecorder()
 
@@ -291,11 +319,11 @@ func (s *AuthHandlerSuite) TestLogout_DeletesSessionAndClears() {
 func (s *AuthHandlerSuite) TestLogout_SessionDeleteFails_Returns500() {
 	s.auth.EXPECT().Logout(gomock.Any(), "sess-xyz").Return(domain.ErrSessionExpired)
 
-	form := withCSRF(url.Values{})
+	form := withCSRFFor(url.Values{}, "sess-xyz")
 	req := httptest.NewRequest(http.MethodPost, "/logout", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(s.sessionCookie("sess-xyz"))
-	req.AddCookie(s.csrfCookie())
+	req.AddCookie(s.csrfCookieFor("sess-xyz"))
 
 	rec := httptest.NewRecorder()
 
@@ -655,11 +683,11 @@ func (s *AuthHandlerSuite) TestAdminInvite_GeneratesLink() {
 	s.auth.EXPECT().ListUsers(gomock.Any(), testAdminID).Return([]*domain.User{usr}, nil)
 	s.auth.EXPECT().ListAPITokens(gomock.Any(), testAdminID).Return([]*auth.APITokenInfo{}, nil)
 
-	form := withCSRF(url.Values{})
+	form := withCSRFFor(url.Values{}, "admin-sess")
 	req := httptest.NewRequest(http.MethodPost, "/admin/invite", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(s.sessionCookie("admin-sess"))
-	req.AddCookie(s.csrfCookie())
+	req.AddCookie(s.csrfCookieFor("admin-sess"))
 
 	rec := httptest.NewRecorder()
 
@@ -667,6 +695,65 @@ func (s *AuthHandlerSuite) TestAdminInvite_GeneratesLink() {
 
 	s.Equal(http.StatusOK, rec.Code)
 	s.Contains(rec.Body.String(), "tok-xyz")
+}
+
+// adminInviteRequest builds a POST /admin/invite carrying admin-sess and a CSRF cookie/field pair
+// minted for csrfSession ("" = the anonymous fixture), plus optional extra headers.
+func (s *AuthHandlerSuite) adminInviteRequest(csrfSession string, headers map[string]string) *http.Request {
+	token := testCSRFToken
+	if csrfSession != "" {
+		token = csrfTokenFor(csrfSession)
+	}
+
+	form := url.Values{"csrf_token": {token}}
+	req := httptest.NewRequest(http.MethodPost, "/admin/invite", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(s.sessionCookie("admin-sess"))
+	req.AddCookie(&http.Cookie{Name: "padmark_csrf", Value: token}) //nolint:gosec // G124: test cookie
+
+	for key, value := range headers {
+		req.Header.Set(key, value)
+	}
+
+	return req
+}
+
+// TestAdminInvite_CSRFTokenFromBeforeSignInIsRejected — a cookie/field pair minted for an
+// anonymous visitor (what a cookie-tossing attacker can produce) must not authorise a POST made
+// with a real session cookie.
+func (s *AuthHandlerSuite) TestAdminInvite_CSRFTokenFromBeforeSignInIsRejected() {
+	s.auth.EXPECT().GetSession(gomock.Any(), "admin-sess").Return(s.adminUser(), nil).AnyTimes()
+
+	rec := httptest.NewRecorder()
+	s.router.ServeHTTP(rec, s.adminInviteRequest("", nil))
+
+	s.Equal(http.StatusForbidden, rec.Code)
+}
+
+// TestAdminInvite_CrossSiteOriginIsRejected — a valid session-bound pair is still refused when
+// the browser says the request came from another site; the same pair passes same-origin.
+func (s *AuthHandlerSuite) TestAdminInvite_CrossSiteOriginIsRejected() {
+	usr := s.adminUser()
+	s.auth.EXPECT().GetSession(gomock.Any(), "admin-sess").Return(usr, nil).AnyTimes()
+	s.auth.EXPECT().GenerateInvite(gomock.Any(), testAdminID).Return("tok-xyz", nil).Times(1)
+	s.auth.EXPECT().ListUsers(gomock.Any(), testAdminID).Return([]*domain.User{usr}, nil).Times(1)
+	s.auth.EXPECT().ListAPITokens(gomock.Any(), testAdminID).Return([]*auth.APITokenInfo{}, nil).Times(1)
+
+	for name, headers := range map[string]map[string]string{
+		"foreign Origin":       {"Origin": "http://evil.test"},
+		"cross-site fetch":     {"Sec-Fetch-Site": "cross-site"},
+		"sibling-site fetch":   {"Sec-Fetch-Site": "same-site"},
+		"opaque (null) Origin": {"Origin": "null"},
+	} {
+		rec := httptest.NewRecorder()
+		s.router.ServeHTTP(rec, s.adminInviteRequest("admin-sess", headers))
+		s.Equal(http.StatusForbidden, rec.Code, name)
+	}
+
+	rec := httptest.NewRecorder()
+	s.router.ServeHTTP(rec, s.adminInviteRequest("admin-sess",
+		map[string]string{"Origin": "http://example.com", "Sec-Fetch-Site": "same-origin"}))
+	s.Equal(http.StatusOK, rec.Code, "same-origin request with a session-bound token must pass")
 }
 
 func (s *AuthHandlerSuite) TestAdminInvite_ForcedSchemeEmbedsHTTPS() {
@@ -681,11 +768,11 @@ func (s *AuthHandlerSuite) TestAdminInvite_ForcedSchemeEmbedsHTTPS() {
 	s.auth.EXPECT().ListUsers(gomock.Any(), testAdminID).Return([]*domain.User{usr}, nil)
 	s.auth.EXPECT().ListAPITokens(gomock.Any(), testAdminID).Return([]*auth.APITokenInfo{}, nil)
 
-	form := withCSRF(url.Values{})
+	form := withCSRFFor(url.Values{}, "admin-sess")
 	req := httptest.NewRequest(http.MethodPost, "/admin/invite", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(s.sessionCookie("admin-sess"))
-	req.AddCookie(s.csrfCookie())
+	req.AddCookie(s.csrfCookieFor("admin-sess"))
 
 	rec := httptest.NewRecorder()
 
@@ -704,11 +791,11 @@ func (s *AuthHandlerSuite) TestAdminInvite_GenerateInviteFails_ShowsError() {
 	s.auth.EXPECT().ListUsers(gomock.Any(), testAdminID).Return([]*domain.User{usr}, nil)
 	s.auth.EXPECT().ListAPITokens(gomock.Any(), testAdminID).Return([]*auth.APITokenInfo{}, nil)
 
-	form := withCSRF(url.Values{})
+	form := withCSRFFor(url.Values{}, "admin-sess")
 	req := httptest.NewRequest(http.MethodPost, "/admin/invite", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(s.sessionCookie("admin-sess"))
-	req.AddCookie(s.csrfCookie())
+	req.AddCookie(s.csrfCookieFor("admin-sess"))
 
 	rec := httptest.NewRecorder()
 
@@ -723,11 +810,11 @@ func (s *AuthHandlerSuite) TestAdminInvite_AdminDataFails_Returns500() {
 	s.auth.EXPECT().GetSession(gomock.Any(), "admin-sess").Return(usr, nil).Times(1)
 	s.auth.EXPECT().ListUsers(gomock.Any(), testAdminID).Return(nil, errors.New("boom"))
 
-	form := withCSRF(url.Values{})
+	form := withCSRFFor(url.Values{}, "admin-sess")
 	req := httptest.NewRequest(http.MethodPost, "/admin/invite", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(s.sessionCookie("admin-sess"))
-	req.AddCookie(s.csrfCookie())
+	req.AddCookie(s.csrfCookieFor("admin-sess"))
 
 	rec := httptest.NewRecorder()
 
@@ -743,12 +830,12 @@ func (s *AuthHandlerSuite) TestAdminRevoke_RevokesAndRedirects() {
 	s.auth.EXPECT().GetSession(gomock.Any(), "admin-sess").Return(usr, nil).Times(1)
 	s.auth.EXPECT().RevokeUser(gomock.Any(), testAdminID, testTargetID).Return(nil)
 
-	form := withCSRF(url.Values{})
+	form := withCSRFFor(url.Values{}, "admin-sess")
 	req := httptest.NewRequest(http.MethodPost,
 		"/admin/users/"+testTargetID.String()+"/revoke", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(s.sessionCookie("admin-sess"))
-	req.AddCookie(s.csrfCookie())
+	req.AddCookie(s.csrfCookieFor("admin-sess"))
 
 	rec := httptest.NewRecorder()
 
@@ -762,12 +849,12 @@ func (s *AuthHandlerSuite) TestAdminRevoke_NonAdmin_Returns403() {
 	nonAdmin := &domain.User{ID: testUserID1, Username: "alice", IsAdmin: false}
 	s.auth.EXPECT().GetSession(gomock.Any(), "sess1").Return(nonAdmin, nil).Times(1)
 
-	form := withCSRF(url.Values{})
+	form := withCSRFFor(url.Values{}, "sess1")
 	req := httptest.NewRequest(http.MethodPost,
 		"/admin/users/"+testTargetID.String()+"/revoke", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(s.sessionCookie("sess1"))
-	req.AddCookie(s.csrfCookie())
+	req.AddCookie(s.csrfCookieFor("sess1"))
 
 	rec := httptest.NewRecorder()
 
@@ -781,12 +868,12 @@ func (s *AuthHandlerSuite) TestAdminRevoke_Forbidden_RedirectsWithSpecificMessag
 	s.auth.EXPECT().GetSession(gomock.Any(), "admin-sess").Return(usr, nil).Times(1)
 	s.auth.EXPECT().RevokeUser(gomock.Any(), testAdminID, testTargetID).Return(domain.ErrForbidden)
 
-	form := withCSRF(url.Values{})
+	form := withCSRFFor(url.Values{}, "admin-sess")
 	req := httptest.NewRequest(http.MethodPost,
 		"/admin/users/"+testTargetID.String()+"/revoke", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(s.sessionCookie("admin-sess"))
-	req.AddCookie(s.csrfCookie())
+	req.AddCookie(s.csrfCookieFor("admin-sess"))
 
 	rec := httptest.NewRecorder()
 
@@ -803,12 +890,12 @@ func (s *AuthHandlerSuite) TestAdminRevoke_GenericError_RedirectsWithGenericMess
 	s.auth.EXPECT().GetSession(gomock.Any(), "admin-sess").Return(usr, nil).Times(1)
 	s.auth.EXPECT().RevokeUser(gomock.Any(), testAdminID, testTargetID).Return(errors.New("boom"))
 
-	form := withCSRF(url.Values{})
+	form := withCSRFFor(url.Values{}, "admin-sess")
 	req := httptest.NewRequest(http.MethodPost,
 		"/admin/users/"+testTargetID.String()+"/revoke", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(s.sessionCookie("admin-sess"))
-	req.AddCookie(s.csrfCookie())
+	req.AddCookie(s.csrfCookieFor("admin-sess"))
 
 	rec := httptest.NewRecorder()
 
@@ -829,11 +916,11 @@ func (s *AuthHandlerSuite) TestAdminCreateKey_CreatesAndShowsKey() {
 	s.auth.EXPECT().ListUsers(gomock.Any(), testAdminID).Return([]*domain.User{usr}, nil)
 	s.auth.EXPECT().ListAPITokens(gomock.Any(), testAdminID).Return([]*auth.APITokenInfo{}, nil)
 
-	form := withCSRF(url.Values{})
+	form := withCSRFFor(url.Values{}, "admin-sess")
 	req := httptest.NewRequest(http.MethodPost, "/admin/api-keys", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(s.sessionCookie("admin-sess"))
-	req.AddCookie(s.csrfCookie())
+	req.AddCookie(s.csrfCookieFor("admin-sess"))
 
 	rec := httptest.NewRecorder()
 
@@ -867,11 +954,11 @@ func (s *AuthHandlerSuite) TestAdminCreateKey_ForcedSchemeEmbedsHTTPS() {
 	s.auth.EXPECT().ListUsers(gomock.Any(), testAdminID).Return([]*domain.User{usr}, nil)
 	s.auth.EXPECT().ListAPITokens(gomock.Any(), testAdminID).Return([]*auth.APITokenInfo{}, nil)
 
-	form := withCSRF(url.Values{})
+	form := withCSRFFor(url.Values{}, "admin-sess")
 	req := httptest.NewRequest(http.MethodPost, "/admin/api-keys", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(s.sessionCookie("admin-sess"))
-	req.AddCookie(s.csrfCookie())
+	req.AddCookie(s.csrfCookieFor("admin-sess"))
 
 	rec := httptest.NewRecorder()
 
@@ -892,11 +979,11 @@ func (s *AuthHandlerSuite) TestAdminCreateKey_NonAdmin_Returns403() {
 	nonAdmin := &domain.User{ID: testUserID1, Username: "alice", IsAdmin: false}
 	s.auth.EXPECT().GetSession(gomock.Any(), "sess1").Return(nonAdmin, nil).Times(1)
 
-	form := withCSRF(url.Values{})
+	form := withCSRFFor(url.Values{}, "sess1")
 	req := httptest.NewRequest(http.MethodPost, "/admin/api-keys", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(s.sessionCookie("sess1"))
-	req.AddCookie(s.csrfCookie())
+	req.AddCookie(s.csrfCookieFor("sess1"))
 
 	rec := httptest.NewRecorder()
 
@@ -910,11 +997,11 @@ func (s *AuthHandlerSuite) TestAdminRevokeKey_RevokesAndRedirects() {
 	s.auth.EXPECT().GetSession(gomock.Any(), "admin-sess").Return(usr, nil).Times(1)
 	s.auth.EXPECT().RevokeAPIToken(gomock.Any(), testAdminID, "hash-123").Return(nil)
 
-	form := withCSRF(url.Values{})
+	form := withCSRFFor(url.Values{}, "admin-sess")
 	req := httptest.NewRequest(http.MethodPost, "/admin/api-keys/hash-123/revoke", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(s.sessionCookie("admin-sess"))
-	req.AddCookie(s.csrfCookie())
+	req.AddCookie(s.csrfCookieFor("admin-sess"))
 
 	rec := httptest.NewRecorder()
 
@@ -928,11 +1015,11 @@ func (s *AuthHandlerSuite) TestAdminRevokeKey_NonAdmin_Returns403() {
 	nonAdmin := &domain.User{ID: testUserID1, Username: "alice", IsAdmin: false}
 	s.auth.EXPECT().GetSession(gomock.Any(), "sess1").Return(nonAdmin, nil).Times(1)
 
-	form := withCSRF(url.Values{})
+	form := withCSRFFor(url.Values{}, "sess1")
 	req := httptest.NewRequest(http.MethodPost, "/admin/api-keys/hash-123/revoke", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(s.sessionCookie("sess1"))
-	req.AddCookie(s.csrfCookie())
+	req.AddCookie(s.csrfCookieFor("sess1"))
 
 	rec := httptest.NewRecorder()
 
@@ -948,11 +1035,11 @@ func (s *AuthHandlerSuite) TestAdminCreateKey_CreateFails_ShowsError() {
 	s.auth.EXPECT().ListUsers(gomock.Any(), testAdminID).Return([]*domain.User{usr}, nil)
 	s.auth.EXPECT().ListAPITokens(gomock.Any(), testAdminID).Return([]*auth.APITokenInfo{}, nil)
 
-	form := withCSRF(url.Values{})
+	form := withCSRFFor(url.Values{}, "admin-sess")
 	req := httptest.NewRequest(http.MethodPost, "/admin/api-keys", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(s.sessionCookie("admin-sess"))
-	req.AddCookie(s.csrfCookie())
+	req.AddCookie(s.csrfCookieFor("admin-sess"))
 
 	rec := httptest.NewRecorder()
 
@@ -967,11 +1054,11 @@ func (s *AuthHandlerSuite) TestAdminRevokeKey_RevokeFails_RedirectsWithError() {
 	s.auth.EXPECT().GetSession(gomock.Any(), "admin-sess").Return(usr, nil).Times(1)
 	s.auth.EXPECT().RevokeAPIToken(gomock.Any(), testAdminID, "hash-123").Return(domain.ErrNotFound)
 
-	form := withCSRF(url.Values{})
+	form := withCSRFFor(url.Values{}, "admin-sess")
 	req := httptest.NewRequest(http.MethodPost, "/admin/api-keys/hash-123/revoke", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(s.sessionCookie("admin-sess"))
-	req.AddCookie(s.csrfCookie())
+	req.AddCookie(s.csrfCookieFor("admin-sess"))
 
 	rec := httptest.NewRecorder()
 
@@ -1173,16 +1260,16 @@ func (s *AuthHandlerSuite) TestChangePasswordHandler_Success_ShowsSuccessMessage
 	s.auth.EXPECT().GetSession(gomock.Any(), "sess1").Return(usr, nil).Times(1)
 	s.auth.EXPECT().ChangePassword(gomock.Any(), "sess1", "OldP@ss12!", "NewP@ss12!", "123456").Return("new-sess-id", nil)
 
-	form := withCSRF(url.Values{
+	form := withCSRFFor(url.Values{
 		"old_password":         {"OldP@ss12!"},
 		"new_password":         {"NewP@ss12!"},
 		"new_password_confirm": {"NewP@ss12!"},
 		"totp_code":            {"123456"},
-	})
+	}, "sess1")
 	req := httptest.NewRequest(http.MethodPost, "/change-password", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(s.sessionCookie("sess1"))
-	req.AddCookie(s.csrfCookie())
+	req.AddCookie(s.csrfCookieFor("sess1"))
 
 	rec := httptest.NewRecorder()
 
@@ -1208,15 +1295,15 @@ func (s *AuthHandlerSuite) TestChangePasswordHandler_Mismatch_ShowsError() {
 	usr := &domain.User{ID: testUserID1, Username: "alice"}
 	s.auth.EXPECT().GetSession(gomock.Any(), "sess1").Return(usr, nil).Times(1)
 
-	form := withCSRF(url.Values{
+	form := withCSRFFor(url.Values{
 		"old_password":         {"OldP@ss12!"},
 		"new_password":         {"NewP@ss12!"},
 		"new_password_confirm": {"DifferentP@ss12!"},
-	})
+	}, "sess1")
 	req := httptest.NewRequest(http.MethodPost, "/change-password", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(s.sessionCookie("sess1"))
-	req.AddCookie(s.csrfCookie())
+	req.AddCookie(s.csrfCookieFor("sess1"))
 
 	rec := httptest.NewRecorder()
 
@@ -1232,16 +1319,16 @@ func (s *AuthHandlerSuite) TestChangePasswordHandler_WrongOldPassword_ShowsError
 	s.auth.EXPECT().ChangePassword(gomock.Any(), "sess1", "WrongP@ss12!", "NewP@ss12!", "123456").
 		Return("", domain.ErrInvalidPassword)
 
-	form := withCSRF(url.Values{
+	form := withCSRFFor(url.Values{
 		"old_password":         {"WrongP@ss12!"},
 		"new_password":         {"NewP@ss12!"},
 		"new_password_confirm": {"NewP@ss12!"},
 		"totp_code":            {"123456"},
-	})
+	}, "sess1")
 	req := httptest.NewRequest(http.MethodPost, "/change-password", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(s.sessionCookie("sess1"))
-	req.AddCookie(s.csrfCookie())
+	req.AddCookie(s.csrfCookieFor("sess1"))
 
 	rec := httptest.NewRecorder()
 
@@ -1257,16 +1344,16 @@ func (s *AuthHandlerSuite) TestChangePasswordHandler_InvalidTOTP_ShowsError() {
 	s.auth.EXPECT().ChangePassword(gomock.Any(), "sess1", "OldP@ss12!", "NewP@ss12!", "badcode").
 		Return("", domain.ErrInvalidTOTP)
 
-	form := withCSRF(url.Values{
+	form := withCSRFFor(url.Values{
 		"old_password":         {"OldP@ss12!"},
 		"new_password":         {"NewP@ss12!"},
 		"new_password_confirm": {"NewP@ss12!"},
 		"totp_code":            {"badcode"},
-	})
+	}, "sess1")
 	req := httptest.NewRequest(http.MethodPost, "/change-password", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(s.sessionCookie("sess1"))
-	req.AddCookie(s.csrfCookie())
+	req.AddCookie(s.csrfCookieFor("sess1"))
 
 	rec := httptest.NewRecorder()
 
@@ -1610,14 +1697,14 @@ func (s *AuthHandlerSuite) TestChangePasswordRevocationWarningKeepsReplacementSe
 	s.auth.EXPECT().ChangePassword(gomock.Any(), "sess1", "OldP@ss12!", "NewP@ss12!", "123456").
 		Return("replacement-session", domain.ErrSessionRevocation)
 
-	form := withCSRF(url.Values{
+	form := withCSRFFor(url.Values{
 		"old_password": {"OldP@ss12!"}, "new_password": {"NewP@ss12!"},
 		"new_password_confirm": {"NewP@ss12!"}, "totp_code": {"123456"},
-	})
+	}, "sess1")
 	req := httptest.NewRequest(http.MethodPost, "/change-password", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(s.sessionCookie("sess1"))
-	req.AddCookie(s.csrfCookie())
+	req.AddCookie(s.csrfCookieFor("sess1"))
 
 	rec := httptest.NewRecorder()
 	s.router.ServeHTTP(rec, req)
@@ -1658,14 +1745,14 @@ func (s *AuthHandlerSuite) TestChangePasswordHandler_RerenderCarriesRotatedCSRFT
 			s.auth.EXPECT().ChangePassword(gomock.Any(), "sess1", "OldP@ss12!", "NewP@ss12!", "123456").
 				Return("new-sess-id", changeErr)
 
-			form := withCSRF(url.Values{
+			form := withCSRFFor(url.Values{
 				"old_password": {"OldP@ss12!"}, "new_password": {"NewP@ss12!"},
 				"new_password_confirm": {"NewP@ss12!"}, "totp_code": {"123456"},
-			})
+			}, "sess1")
 			req := httptest.NewRequest(http.MethodPost, "/change-password", strings.NewReader(form.Encode()))
 			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 			req.AddCookie(s.sessionCookie("sess1"))
-			req.AddCookie(s.csrfCookie())
+			req.AddCookie(s.csrfCookieFor("sess1"))
 
 			rec := httptest.NewRecorder()
 			s.router.ServeHTTP(rec, req)
@@ -1680,11 +1767,12 @@ func (s *AuthHandlerSuite) TestChangePasswordHandler_RerenderCarriesRotatedCSRFT
 			}
 
 			s.Require().NotNil(csrfCookie, "password change must rotate the CSRF cookie")
-			s.NotEqual(testCSRFToken, csrfCookie.Value)
+			s.NotEqual(csrfTokenFor("sess1"), csrfCookie.Value)
 
 			field := s.renderedCSRFField(rec.Body.String())
 			s.Equal(csrfCookie.Value, field, "re-rendered form must carry the rotated token")
-			s.True(adhttp.VerifyCSRFTokenForTest(field, authTestCSRFSecret))
+			s.True(adhttp.VerifyCSRFTokenForTest(field, authTestCSRFSecret, "new-sess-id"),
+				"the rotated token must be bound to the new session")
 		})
 	}
 }
@@ -1697,14 +1785,14 @@ func (s *AuthHandlerSuite) TestChangePasswordHandler_FailureKeepsRequestCSRFToke
 	s.auth.EXPECT().ChangePassword(gomock.Any(), "sess1", "WrongP@ss12!", "NewP@ss12!", "123456").
 		Return("", domain.ErrInvalidPassword)
 
-	form := withCSRF(url.Values{
+	form := withCSRFFor(url.Values{
 		"old_password": {"WrongP@ss12!"}, "new_password": {"NewP@ss12!"},
 		"new_password_confirm": {"NewP@ss12!"}, "totp_code": {"123456"},
-	})
+	}, "sess1")
 	req := httptest.NewRequest(http.MethodPost, "/change-password", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(s.sessionCookie("sess1"))
-	req.AddCookie(s.csrfCookie())
+	req.AddCookie(s.csrfCookieFor("sess1"))
 
 	rec := httptest.NewRecorder()
 	s.router.ServeHTTP(rec, req)
@@ -1714,7 +1802,7 @@ func (s *AuthHandlerSuite) TestChangePasswordHandler_FailureKeepsRequestCSRFToke
 		s.NotEqual("padmark_csrf", cookie.Name, "a failed change must not rotate the CSRF cookie")
 	}
 
-	s.Equal(testCSRFToken, s.renderedCSRFField(rec.Body.String()))
+	s.Equal(csrfTokenFor("sess1"), s.renderedCSRFField(rec.Body.String()))
 }
 
 // TestSetupHandler_InvalidUsername_ShowsValidationMessage — the HTML branch renders the

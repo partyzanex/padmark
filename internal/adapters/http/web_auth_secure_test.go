@@ -116,11 +116,11 @@ func (s *AuthHandlerSuite) TestLogout_ForcedHTTPS_ClearedCookiesAreSecure() {
 
 	router := s.newRouterWithAuthAndScheme("https")
 
-	form := withCSRF(url.Values{})
+	form := withCSRFFor(url.Values{}, "sess-xyz")
 	req := httptest.NewRequest(http.MethodPost, "/logout", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(s.sessionCookie("sess-xyz"))
-	req.AddCookie(s.csrfCookie())
+	req.AddCookie(s.csrfCookieFor("sess-xyz"))
 
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
@@ -146,16 +146,16 @@ func (s *AuthHandlerSuite) TestChangePassword_ForcedHTTPS_RotatedCookiesAreSecur
 
 	router := s.newRouterWithAuthAndScheme("https")
 
-	form := withCSRF(url.Values{
+	form := withCSRFFor(url.Values{
 		"old_password":         {"OldP@ss12!"},
 		"new_password":         {"NewP@ss12!"},
 		"new_password_confirm": {"NewP@ss12!"},
 		"totp_code":            {"123456"},
-	})
+	}, "sess1")
 	req := httptest.NewRequest(http.MethodPost, "/change-password", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(s.sessionCookie("sess1"))
-	req.AddCookie(s.csrfCookie())
+	req.AddCookie(s.csrfCookieFor("sess1"))
 
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)

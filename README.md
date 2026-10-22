@@ -907,9 +907,13 @@ trusted range.
 **Behind a TLS-terminating reverse proxy** the server itself sees plain HTTP, so it must be told
 the public scheme: set `--trusted-proxies` to the proxy's addresses (so its `X-Forwarded-Proto`
 is honoured) or `--public-scheme https`, and configure the proxy to preserve the original `Host`
-header. Otherwise the same-origin check rejects browser `PUT`/`DELETE` on notes and links and the
-account endpoints (`POST /api/tokens`, `POST /api/invites`) with `403`, because the browser's
-`https://` `Origin` does not match the scheme/host the server derived. Session and CSRF cookies
+header. Otherwise the same-origin check rejects browser `PUT`/`DELETE` on notes and links, the
+account endpoints (`POST /api/tokens`, `POST /api/invites`) and every HTML form `POST` (login,
+logout, change-password, admin, setup, burn-after-reading confirmation) with `403`, because the
+browser's `https://` `Origin` does not match the scheme/host the server derived. Form `POST`s are
+also refused when the browser reports `Sec-Fetch-Site` other than `same-origin`/`none`.
+CSRF tokens are bound to the session cookie (a token minted before sign-in does not validate
+for a signed-in `POST`; it is re-issued automatically on login, logout and password change). Session and CSRF cookies
 get the `Secure` attribute, and responses carry HSTS, under any of the three: direct TLS, a
 trusted proxy's `X-Forwarded-Proto: https`, or `--public-scheme https`.
 

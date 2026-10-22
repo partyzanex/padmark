@@ -15,23 +15,23 @@ func TestVerifyCSRFToken_RejectsEmptySecret(t *testing.T) {
 	// This signature is known to anyone without a server secret. It matched the
 	// verifier's deterministic empty-key HMAC before the fail-closed check.
 	nonce := "chosen-nonce"
-	forged := nonce + "." + base64.RawURLEncoding.EncodeToString(csrfHMAC(nonce, nil))
-	require.False(t, verifyCSRFToken(forged, nil))
-	require.False(t, verifyCSRFToken(forged, []byte{}))
+	forged := nonce + "." + base64.RawURLEncoding.EncodeToString(csrfHMAC(nonce, csrfAnonymousBinding, nil))
+	require.False(t, verifyCSRFToken(forged, nil, ""))
+	require.False(t, verifyCSRFToken(forged, []byte{}, ""))
 
 	secret := []byte("padmark-test-csrf-secret-32bytes")
-	valid, err := generateCSRFToken(secret)
+	valid, err := generateCSRFToken(secret, "")
 	require.NoError(t, err)
-	require.True(t, verifyCSRFToken(valid, secret))
-	require.False(t, verifyCSRFToken(valid, nil))
-	require.False(t, verifyCSRFToken(valid, []byte("different-secret")))
-	require.False(t, verifyCSRFToken(forged, secret))
+	require.True(t, verifyCSRFToken(valid, secret, ""))
+	require.False(t, verifyCSRFToken(valid, nil, ""))
+	require.False(t, verifyCSRFToken(valid, []byte("different-secret"), ""))
+	require.False(t, verifyCSRFToken(forged, secret, ""))
 }
 
 func TestCSRFGuard_EmptySecretCannotAuthorizePOST(t *testing.T) {
 	for _, secret := range [][]byte{nil, {}} {
 		nonce := "attacker-nonce"
-		forged := nonce + "." + base64.RawURLEncoding.EncodeToString(csrfHMAC(nonce, secret))
+		forged := nonce + "." + base64.RawURLEncoding.EncodeToString(csrfHMAC(nonce, csrfAnonymousBinding, secret))
 		form := url.Values{csrfFieldName: {forged}}
 		req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form.Encode()))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
