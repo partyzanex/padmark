@@ -158,6 +158,8 @@ func buildRouter(
 		SessionTTL:     time.Duration(cmd.Int(FlagSessionTTL)) * time.Second,
 		DisableAPI:     cmd.Bool(FlagDisableAPI),
 		DirectRedirect: cmd.Bool(FlagDirectRedirect),
+		// The same allow-list guards the redirect listener and, here, the main one.
+		AllowedHosts: parseTokens(cmd.String(FlagAllowedHosts)),
 		// Nil (flag empty) lets NewRouter generate a fresh CSRF secret instead of accepting
 		// an injected one — the legacy single-instance behaviour.
 		CSRFSecret: csrfSecret,

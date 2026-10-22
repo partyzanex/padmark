@@ -226,9 +226,10 @@ func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
 		&cli.StringFlag{
 			Name:    FlagAllowedHosts,
 			Sources: cli.EnvVars(EnvAllowedHosts),
-			Usage: "Comma-separated host allowlist for the HTTP→HTTPS redirect (e.g. example.com,www.example.com); " +
-				"when set, requests with any other Host get 400 instead of a redirect (anti Host-header injection); " +
-				"empty = redirect to the request Host (legacy behaviour)",
+			Usage: "Comma-separated Host allowlist (e.g. example.com,www.example.com), compared case-insensitively " +
+				"without the port; applies to the main listener (other Hosts get 421 Misdirected Request, " +
+				"/healthz and /readyz exempt) and to the HTTP→HTTPS redirect listener (400); " +
+				"empty = no Host check (legacy behaviour)",
 		},
 		&cli.StringFlag{
 			Name:    FlagTrustedProxies,

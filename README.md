@@ -857,7 +857,7 @@ There is no destructive encryption down-migration, and older binaries cannot rea
 | `--tls-cert` | `PADMARK_TLS_CERT` | — | TLS certificate path |
 | `--tls-key` | `PADMARK_TLS_KEY` | — | TLS private key path |
 | `--http-redirect-addr` | `PADMARK_HTTP_REDIRECT_ADDR` | — | HTTP → HTTPS redirect listener (TLS only) |
-| `--allowed-hosts` | `PADMARK_ALLOWED_HOSTS` | — | Host allowlist for the HTTP→HTTPS redirect; non-listed hosts get `400` (empty = redirect to request Host) |
+| `--allowed-hosts` | `PADMARK_ALLOWED_HOSTS` | — | Host allowlist, case-insensitive and port-less. On the main listener non-listed hosts get `421`, before any handler (`/healthz` and `/readyz` are exempt so IP-addressed probes keep working); on the HTTP→HTTPS redirect listener they get `400`. Empty = no Host check |
 | `--log-level` | `PADMARK_LOG_LEVEL` | `info` | `debug` / `info` / `warn` / `error` |
 | `--log-format` | `PADMARK_LOG_FORMAT` | `json` | `json` or `text` |
 | `--trusted-proxies` | `PADMARK_TRUSTED_PROXIES` | — | Proxy CIDRs/IPs whose `X-Forwarded-For` / `X-Real-IP` is believed when resolving the real client IP; also the addresses whose `X-Forwarded-Proto` is trusted when building absolute links (note URLs, invite links, API-token envelopes). Set it to the proxy's own addresses and nothing wider — see [Getting `--trusted-proxies` wrong](#getting---trusted-proxies-wrong) |

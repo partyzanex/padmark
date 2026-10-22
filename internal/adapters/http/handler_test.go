@@ -102,6 +102,48 @@ func (s *HandlerSuite) newRouterWithOptions(trustedProxies []*net.IPNet, forcedS
 	return router
 }
 
+// newRouterWithAllowedHosts builds a router whose main listener only serves the given Hosts.
+func (s *HandlerSuite) newRouterWithAllowedHosts(hosts ...string) http.Handler {
+	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog)
+	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog)
+
+	opts := adhttp.RouterOptions{
+		MaxBodyBytes: 256 * 1024,
+		CSRFSecret:   testCSRFSecret,
+		AllowedHosts: hosts,
+	}
+
+	router, err := adhttp.NewRouter(handler, ogen, &opts)
+	s.Require().NoError(err)
+
+	return router
+}
+
+// TestAllowedHosts_EnforcedOnMainListener verifies RouterOptions.AllowedHosts is wired into the
+// middleware chain: a foreign Host is refused with 421 before any handler, a listed one is
+// served, and with no list configured every Host passes (the default).
+func (s *HandlerSuite) TestAllowedHosts_EnforcedOnMainListener() {
+	restricted := s.newRouterWithAllowedHosts("notes.example.com")
+
+	foreign := httptest.NewRecorder()
+	foreignReq := httptest.NewRequest(http.MethodGet, "/", nil)
+	foreignReq.Host = "evil.test"
+	restricted.ServeHTTP(foreign, foreignReq)
+	s.Equal(http.StatusMisdirectedRequest, foreign.Code)
+
+	listed := httptest.NewRecorder()
+	listedReq := httptest.NewRequest(http.MethodGet, "/", nil)
+	listedReq.Host = "Notes.Example.com:8443"
+	restricted.ServeHTTP(listed, listedReq)
+	s.Equal(http.StatusOK, listed.Code)
+
+	open := httptest.NewRecorder()
+	openReq := httptest.NewRequest(http.MethodGet, "/", nil)
+	openReq.Host = "evil.test"
+	s.router.ServeHTTP(open, openReq)
+	s.Equal(http.StatusOK, open.Code, "no allow-list configured: every Host passes")
+}
+
 // newRouterWithTOTPAuth builds a router configured in TOTP-only mode: authMgr set.
 // This is the deployment mode under test for private-note access and CanEdit fixes, and is
 // also the standard way to force "auth is configured" for tests that only need an anonymous
