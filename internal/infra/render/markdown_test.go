@@ -48,6 +48,29 @@ func (s *RendererSuite) TestHeadings() {
 	s.Contains(out, "<h2")
 }
 
+// TestHeadingIDsArePrefixed pins DOM-clobbering protection: auto heading IDs live in the
+// user-content- namespace, so a heading can never shadow an application element ID.
+func (s *RendererSuite) TestHeadingIDsArePrefixed() {
+	out, err := s.r.Render("# raw-content\n\n## createdTag\n\n## createdTag")
+	s.Require().NoError(err)
+	s.Contains(out, `id="user-content-raw-content"`)
+	s.Contains(out, `id="user-content-createdtag"`)
+	s.Contains(out, `id="user-content-createdtag-1"`, "duplicate headings still get unique IDs")
+	s.NotContains(out, `id="raw-content"`)
+	s.NotContains(out, `id="createdtag`)
+}
+
+// TestRawHTMLIDsAreRestricted verifies a user-supplied id outside the user-content- namespace is
+// dropped, while one inside it survives, and that name attributes cannot clobber either.
+func (s *RendererSuite) TestRawHTMLIDsAreRestricted() {
+	out, err := s.r.Render(`<div id="raw-content">a</div><p id="user-content-ok">b</p>` +
+		`<a name="copyRawBtn" href="/x">c</a><img name="createdTag" src="/i.png">`)
+	s.Require().NoError(err)
+	s.NotContains(out, `id="raw-content"`, "application element IDs must not be user-controllable")
+	s.Contains(out, `id="user-content-ok"`)
+	s.NotContains(out, `name="`, "name attributes can clobber document properties")
+}
+
 func (s *RendererSuite) TestTable() {
 	md := "| A | B |\n|---|---|\n| 1 | 2 |"
 	out, err := s.r.Render(md)
