@@ -41,6 +41,9 @@ const (
 	EnvToken    = "PADMARK_TOKEN"
 	EnvTimeout  = "PADMARK_TIMEOUT"
 	EnvEditCode = "PADMARK_EDIT_CODE"
+	// EnvBootstrapToken carries the server's first-admin bootstrap token to `setup` (no invite).
+	// Environment only: a flag value would show up in process listings.
+	EnvBootstrapToken = "PADMARK_BOOTSTRAP_TOKEN" //nolint:gosec // G101: env var name, not an inline credential
 )
 
 // psWarnEditCode is appended to every --edit-code usage text: an edit code is a credential for

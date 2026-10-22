@@ -78,7 +78,7 @@
             </div>
             {{else}}
             <div class="login-title">{{if .IsFirstAdmin}}Create admin account{{else}}Create account{{end}}</div>
-            <div class="login-desc">{{if .IsFirstAdmin}}No users yet. Set up the first admin.{{else}}You have been invited. Choose a username.{{end}}</div>
+            <div class="login-desc">{{if .IsFirstAdmin}}No users yet. Set up the first admin with the server's bootstrap token.{{else}}You have been invited. Choose a username.{{end}}</div>
 
             {{if .Error}}
             <div class="login-error">{{.Error}}</div>
@@ -102,6 +102,13 @@
                     <input type="password" class="field-input" name="password_confirm" id="password_confirm"
                            placeholder="Repeat password" required autocomplete="new-password">
                 </div>
+                {{if .IsFirstAdmin}}
+                <div class="field-group field-group-spaced">
+                    <label class="field-label" for="bootstrap_token">Bootstrap token</label>
+                    <input type="password" class="field-input" name="bootstrap_token" id="bootstrap_token"
+                           placeholder="Value of PADMARK_BOOTSTRAP_TOKEN on the server" required autocomplete="off">
+                </div>
+                {{end}}
                 <button type="submit" class="btn-publish login-btn">Create account</button>
             </form>
             {{end}}

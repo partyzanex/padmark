@@ -161,3 +161,17 @@ func setupClosedPageData() errorViewData {
 		Nonce:     "",
 	}
 }
+
+// setupDisabledPageData explains why first-admin setup is unavailable: the operator configured no
+// bootstrap token, so nobody can prove ownership of the server.
+func setupDisabledPageData() errorViewData {
+	return errorViewData{
+		Code:      http.StatusForbidden,
+		ErrorType: errorTypeClient,
+		Title:     "Setup is disabled",
+		Desc: "Creating the first admin requires a bootstrap token. Set PADMARK_BOOTSTRAP_TOKEN " +
+			"(at least 32 characters) on the server, restart it, and enter the token here.",
+		Detail: "",
+		Nonce:  "",
+	}
+}

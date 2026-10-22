@@ -2,7 +2,11 @@ package sqlite
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
+	"io/fs"
+	"net/url"
+	"os"
 	"strings"
 
 	"github.com/uptrace/bun"
@@ -16,13 +20,138 @@ import (
 // DSN silently runs without foreign-key enforcement, WAL, or the immediate-transaction-lock
 // setting WithPragmas documents, so a test built that way can pass or fail for reasons that have
 // nothing to do with what actually happens against the pragma-tuned production connection.
+//
+// For a file-backed dsn Open also makes sure the database file is owner-only (0600) before the
+// driver touches it; see restrictDBFile for why. In-memory and temporary databases are left alone.
 func Open(dsn string) (*bun.DB, error) {
+	path, create := dbFilePath(dsn)
+	if path != "" {
+		err := restrictDBFile(path, create)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	sqldb, err := sql.Open(sqliteshim.DriverName(), WithPragmas(dsn))
 	if err != nil {
 		return nil, fmt.Errorf("sql open sqlite: %w", err)
 	}
 
 	return bun.NewDB(sqldb, sqlitedialect.New()), nil
+}
+
+// dbFilePerm is the mode of the database file and its sidecars: owner read/write, nothing else.
+const dbFilePerm fs.FileMode = 0o600
+
+// restrictDBFile makes the database file at path, and any sidecar already next to it, readable and
+// writable by the owner only. The file holds argon2 password hashes, sealed TOTP secrets, session,
+// API-token and invite hashes, reveal tokens, session IP/UA and every encrypted content envelope;
+// on a shared host the driver's default (SQLITE_DEFAULT_FILE_PERMISSIONS, 0644) would hand all of
+// that to every other local account.
+//
+// When create is set and the file does not exist yet it is created here with 0600, so the driver
+// only ever opens an existing file and never applies its own default. A pre-existing file — left
+// by an older version or a restore — is chmod-ed to 0600, since the create mode does not apply to
+// it. Sidecars need no create step: SQLite's unix VFS creates -wal, -shm and -journal with the
+// main file's mode, so only leftovers from a previous run are tightened here.
+//
+// A failure is fatal (fail-hard): the database is a critical dependency, and starting on a file
+// whose confidentiality cannot be guaranteed is worse than not starting. The wrapped
+// *fs.PathError names the resolved file path only, never the rest of the DSN.
+func restrictDBFile(path string, create bool) error {
+	if create {
+		file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, dbFilePerm) //nolint:gosec // operator-configured DSN path
+		if err != nil {
+			return fmt.Errorf("create sqlite database file: %w", err)
+		}
+
+		err = file.Close()
+		if err != nil {
+			return fmt.Errorf("close sqlite database file: %w", err)
+		}
+	}
+
+	for _, name := range append([]string{path}, sidecarPaths(path)...) {
+		err := os.Chmod(name, dbFilePerm)
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("restrict sqlite database file permissions: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// sidecarPaths returns the paths of the sidecar files SQLite may keep next to the database at
+// path: the WAL and its shared-memory index (journal_mode(WAL), which WithPragmas sets) and the
+// rollback journal (any other journal mode).
+func sidecarPaths(path string) []string {
+	return []string{path + "-wal", path + "-shm", path + "-journal"}
+}
+
+// dbFilePath resolves the on-disk database path a DSN opens, mirroring how the modernc driver and
+// SQLite interpret it. It returns "" for databases with no file — ":memory:", "file::memory:",
+// "file:name?mode=memory", the memdb VFS and the empty name (a private temporary database) — and
+// for DSN shapes it cannot resolve with confidence, which are then left to the driver unchanged.
+// create reports whether the DSN lets SQLite create the file: a "file:" URI with mode=ro or
+// mode=rw must keep failing on a missing file rather than silently getting an empty one.
+//
+// Bare DSNs ("padmark.db", "/var/lib/padmark/padmark.db?_pragma=...") are a path with an optional
+// query string, which the driver strips before opening. "file:" URIs follow SQLite's URI rules:
+// an optional "//" authority that must be empty or "localhost", a percent-encoded path, then an
+// optional query and fragment.
+func dbFilePath(dsn string) (path string, create bool) {
+	uri, isURI := strings.CutPrefix(dsn, "file:")
+	if isURI {
+		return fileURIPath(uri)
+	}
+
+	path, _, _ = strings.Cut(dsn, "?")
+	if path == "" || path == ":memory:" {
+		return "", false
+	}
+
+	return path, true
+}
+
+// fileURIPath is dbFilePath for a "file:" URI, given with the "file:" scheme already removed.
+func fileURIPath(uri string) (path string, create bool) {
+	rest, _, _ := strings.Cut(uri, "#")
+	rest, query, _ := strings.Cut(rest, "?")
+
+	mode, vfs := uriParam(query, "mode"), uriParam(query, "vfs")
+	if mode == "memory" || vfs == "memdb" {
+		return "", false
+	}
+
+	if after, ok := strings.CutPrefix(rest, "//"); ok {
+		authority, tail, _ := strings.Cut(after, "/")
+		if authority != "" && authority != "localhost" {
+			return "", false
+		}
+
+		rest = "/" + tail
+	}
+
+	path, err := url.PathUnescape(rest)
+	if err != nil || path == "" || path == ":memory:" {
+		return "", false
+	}
+
+	return path, mode != "ro" && mode != "rw"
+}
+
+// uriParam returns the value of key in a SQLite URI query string, or "" when it is absent. It
+// splits by hand rather than with url.ParseQuery so one malformed parameter elsewhere in the DSN
+// does not hide the one asked for.
+func uriParam(query, key string) string {
+	for pair := range strings.SplitSeq(query, "&") {
+		name, value, _ := strings.Cut(pair, "=")
+		if name == key {
+			return value
+		}
+	}
+
+	return ""
 }
 
 // WithPragmas appends the connection settings padmark relies on (modernc syntax), each only when

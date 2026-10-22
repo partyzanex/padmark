@@ -74,6 +74,9 @@ const (
 	EnvMetricsAddr      = "PADMARK_METRICS_ADDR"
 	EnvCSRFSecret       = "PADMARK_CSRF_SECRET" //nolint:gosec // G101: env var name, not an inline credential
 	EnvContentKeyring   = "PADMARK_CONTENT_KEYRING_FILE"
+	// EnvBootstrapToken authorises creating the first admin via /setup without an invite. It is
+	// read from the environment only — never a flag, so it cannot show up in process listings.
+	EnvBootstrapToken = "PADMARK_BOOTSTRAP_TOKEN" //nolint:gosec // G101: env var name, not an inline credential
 )
 
 // Default values for all flags.

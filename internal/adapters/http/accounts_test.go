@@ -52,7 +52,7 @@ func (s *AuthHandlerSuite) TestSetupJSON_NoAccept_IsTheJSONBranch() {
 	s.auth.EXPECT().AcceptFirstAdmin(gomock.Any(), "admin", testPw).
 		Return(s.enrollment(&auth.Enrollment{}), nil)
 
-	rec := s.postSetup("", `{"username":"admin","password":"`+testPw+`"}`, "")
+	rec := s.postSetup("", `{"username":"admin","password":"`+testPw+`","bootstrap_token":"`+testBootstrapToken+`"}`, "")
 
 	s.Require().Equal(http.StatusCreated, rec.Code)
 	s.Equal("application/json", rec.Header().Get("Content-Type"))
@@ -90,7 +90,7 @@ func (s *AuthHandlerSuite) TestSetupJSON_ExplicitJSONAccepted_CreatesWithInvite(
 // crosses into the unguarded JSON path: without CSRF material the request is rejected there.
 func (s *AuthHandlerSuite) TestSetupJSON_BrowserStayOnGuardedHTMLPath() {
 	rec := s.postSetup("text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-		`{"username":"admin","password":"`+testPw+`"}`, "")
+		`{"username":"admin","password":"`+testPw+`","bootstrap_token":"`+testBootstrapToken+`"}`, "")
 
 	s.Equal(http.StatusForbidden, rec.Code)
 }
@@ -99,7 +99,7 @@ func (s *AuthHandlerSuite) TestSetupJSON_BrowserStayOnGuardedHTMLPath() {
 // Accept: application/json in a cross-site fetch, and fetch-metadata flags it as not same-origin.
 func (s *AuthHandlerSuite) TestSetupJSON_CrossSiteFetch_Rejected() {
 	rec := s.postSetup("application/json",
-		`{"username":"admin","password":"`+testPw+`"}`, "cross-site")
+		`{"username":"admin","password":"`+testPw+`","bootstrap_token":"`+testBootstrapToken+`"}`, "cross-site")
 
 	s.Equal(http.StatusForbidden, rec.Code)
 	s.Contains(rec.Body.String(), "same-origin")
@@ -125,10 +125,61 @@ func (s *AuthHandlerSuite) TestSetupJSON_SetupClosed_403OnceAccountsExist() {
 	s.auth.EXPECT().IsEmpty(gomock.Any()).Return(false, nil)
 
 	rec := s.postSetup("application/json",
-		`{"username":"admin","password":"`+testPw+`"}`, "")
+		`{"username":"admin","password":"`+testPw+`","bootstrap_token":"`+testBootstrapToken+`"}`, "")
 
 	s.Require().Equal(http.StatusForbidden, rec.Code)
 	s.Contains(rec.Body.String(), "invite")
+}
+
+// TestSetupJSON_BootstrapToken_Refusals: the headless first-admin bootstrap is refused with a
+// stable code when no token is configured, or the presented one is missing or wrong (M-2).
+func (s *AuthHandlerSuite) TestSetupJSON_BootstrapToken_Refusals() {
+	cases := []struct {
+		name, configured, body, code string
+	}{
+		{"none configured", "", `{"username":"admin","password":"` + testPw +
+			`","bootstrap_token":"` + testBootstrapToken + `"}`, "bootstrap_disabled"},
+		{"missing", testBootstrapToken, `{"username":"admin","password":"` + testPw + `"}`,
+			"bootstrap_token_invalid"},
+		{"wrong", testBootstrapToken, `{"username":"admin","password":"` + testPw +
+			`","bootstrap_token":"guess"}`, "bootstrap_token_invalid"},
+	}
+
+	for _, testCase := range cases {
+		s.Run(testCase.name, func() {
+			s.auth.EXPECT().IsEmpty(gomock.Any()).Return(true, nil)
+			// AcceptFirstAdmin must NOT be called.
+
+			req := httptest.NewRequest(http.MethodPost, "/setup", bytes.NewBufferString(testCase.body))
+			req.Header.Set("Accept", "application/json")
+			req.Header.Set("Content-Type", "application/json")
+
+			rec := httptest.NewRecorder()
+
+			s.newRouterWithBootstrapToken(testCase.configured).ServeHTTP(rec, req)
+
+			s.Equal(http.StatusForbidden, rec.Code)
+			s.Contains(rec.Body.String(), `"code":"`+testCase.code+`"`)
+		})
+	}
+}
+
+// TestSetupJSON_InviteNeedsNoBootstrapToken: the bootstrap token gates only the invite-less
+// first-admin path — an invite is its own credential, even with no token configured.
+func (s *AuthHandlerSuite) TestSetupJSON_InviteNeedsNoBootstrapToken() {
+	s.auth.EXPECT().AcceptInvite(gomock.Any(), "tok", "bob", testPw).
+		Return(s.enrollment(&auth.Enrollment{}), nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/setup",
+		bytes.NewBufferString(`{"username":"bob","password":"`+testPw+`","invite":"tok"}`))
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
+
+	rec := httptest.NewRecorder()
+
+	s.newRouterWithBootstrapToken("").ServeHTTP(rec, req)
+
+	s.Equal(http.StatusCreated, rec.Code)
 }
 
 // TestSetupJSON_WeakPassword_422 — the weak-password sentinel maps to a machine status with
@@ -139,7 +190,7 @@ func (s *AuthHandlerSuite) TestSetupJSON_WeakPassword_422() {
 		Return(nil, domain.ErrWeakPassword)
 
 	rec := s.postSetup("application/json",
-		`{"username":"admin","password":"short"}`, "")
+		`{"username":"admin","password":"short","bootstrap_token":"`+testBootstrapToken+`"}`, "")
 
 	s.Require().Equal(http.StatusUnprocessableEntity, rec.Code)
 	s.Contains(rec.Body.String(), "12 characters")
@@ -186,7 +237,7 @@ func (s *AuthHandlerSuite) TestSetupJSON_InvalidUsername_422() {
 func (s *AuthHandlerSuite) TestSetupJSON_EmptyUsername_400() {
 	for _, username := range []string{"", "   "} {
 		rec := s.postSetup("application/json",
-			`{"username":"`+username+`","password":"`+testPw+`"}`, "")
+			`{"username":"`+username+`","password":"`+testPw+`","bootstrap_token":"`+testBootstrapToken+`"}`, "")
 
 		s.Equal(http.StatusBadRequest, rec.Code, "username %q", username)
 		s.Contains(rec.Body.String(), "username is required")
@@ -351,7 +402,7 @@ func (s *AuthHandlerSuite) TestAccountEndpoints_FeatureNotEnabled_503() {
 // preflight it cannot complete — independent of Fetch Metadata support.
 func (s *AuthHandlerSuite) TestSetupJSON_WrongContentType_Rejected415() {
 	req := httptest.NewRequest(http.MethodPost, "/setup",
-		bytes.NewBufferString(`{"username":"admin","password":"`+testPw+`"}`))
+		bytes.NewBufferString(`{"username":"admin","password":"`+testPw+`","bootstrap_token":"`+testBootstrapToken+`"}`))
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "text/plain") // safelisted ⇒ no browser preflight
 
@@ -369,7 +420,7 @@ func (s *AuthHandlerSuite) TestSetupJSON_WrongContentType_Rejected415() {
 // site must be rejected even though Sec-Fetch-Site is absent.
 func (s *AuthHandlerSuite) TestSetupJSON_CrossOriginHeader_Rejected403() {
 	req := httptest.NewRequest(http.MethodPost, "/setup",
-		bytes.NewBufferString(`{"username":"admin","password":"`+testPw+`"}`))
+		bytes.NewBufferString(`{"username":"admin","password":"`+testPw+`","bootstrap_token":"`+testBootstrapToken+`"}`))
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Origin", "https://evil.example") // no Sec-Fetch-Site at all
@@ -390,7 +441,7 @@ func (s *AuthHandlerSuite) TestSetupJSON_SameOriginHeader_OK() {
 		Return(s.enrollment(&auth.Enrollment{}), nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/setup",
-		bytes.NewBufferString(`{"username":"admin","password":"`+testPw+`"}`))
+		bytes.NewBufferString(`{"username":"admin","password":"`+testPw+`","bootstrap_token":"`+testBootstrapToken+`"}`))
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Origin", "http://example.com") // httptest.NewRequest default host

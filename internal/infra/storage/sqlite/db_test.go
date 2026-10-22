@@ -1,6 +1,9 @@
 package sqlite
 
 import (
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -28,4 +31,177 @@ func TestWithPragmas(t *testing.T) {
 	deferred := WithPragmas("db?_txlock=deferred")
 	require.Equal(t, 1, strings.Count(deferred, "_txlock="), "_txlock must not be duplicated")
 	require.NotContains(t, deferred, "_txlock=immediate")
+}
+
+// skipWithoutPOSIXPerms skips permission tests on Windows, where the POSIX mode bits these tests
+// assert on are not how file access is controlled.
+func skipWithoutPOSIXPerms(t *testing.T) {
+	t.Helper()
+
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permission bits do not apply on windows")
+	}
+}
+
+// touchDB opens dsn, runs a write so the database file (and, in WAL mode, its -wal/-shm
+// sidecars) exist on disk, and returns the still-open handle's closer.
+func touchDB(t *testing.T, dsn string) func() {
+	t.Helper()
+
+	db, err := Open(dsn)
+	require.NoError(t, err)
+
+	_, err = db.ExecContext(t.Context(), `CREATE TABLE IF NOT EXISTS perm_probe (id INTEGER PRIMARY KEY)`)
+	require.NoError(t, err)
+
+	_, err = db.ExecContext(t.Context(), `INSERT INTO perm_probe DEFAULT VALUES`)
+	require.NoError(t, err)
+
+	return func() { require.NoError(t, db.Close()) }
+}
+
+// requireOwnerOnly asserts the database file at path is exactly 0600 and that every sidecar
+// SQLite may have created next to it grants nothing to group or other.
+func requireOwnerOnly(t *testing.T, path string) {
+	t.Helper()
+
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	require.Equal(t, os.FileMode(0o600), info.Mode().Perm(), "database file %s must be owner-only", path)
+
+	for _, suffix := range []string{"-wal", "-shm", "-journal"} {
+		sidecar, statErr := os.Stat(path + suffix)
+		if os.IsNotExist(statErr) {
+			continue
+		}
+
+		require.NoError(t, statErr)
+		require.Zero(t, sidecar.Mode().Perm()&0o077, "sidecar %s must be owner-only, got %v",
+			path+suffix, sidecar.Mode().Perm())
+	}
+}
+
+// TestOpen_CreatesDatabaseFileOwnerOnly pins that a fresh database is not world-readable: the
+// file holds password hashes, sealed TOTP secrets, token hashes and content envelopes, and the
+// driver's default (SQLITE_DEFAULT_FILE_PERMISSIONS, 0644) would hand all of it to every other
+// local account on the host.
+func TestOpen_CreatesDatabaseFileOwnerOnly(t *testing.T) {
+	skipWithoutPOSIXPerms(t)
+
+	path := filepath.Join(t.TempDir(), "padmark.db")
+
+	closeDB := touchDB(t, path)
+	defer closeDB()
+
+	// WAL is on, so the sidecars exist while the handle is open: the sidecar check is not vacuous.
+	require.FileExists(t, path+"-wal")
+	require.FileExists(t, path+"-shm")
+
+	requireOwnerOnly(t, path)
+}
+
+// TestOpen_FileURICreatesDatabaseFileOwnerOnly covers the "file:" URI DSN shape with a query
+// string, which must resolve to the same on-disk path as the bare form.
+func TestOpen_FileURICreatesDatabaseFileOwnerOnly(t *testing.T) {
+	skipWithoutPOSIXPerms(t)
+
+	path := filepath.Join(t.TempDir(), "padmark.db")
+
+	closeDB := touchDB(t, "file:"+path+"?cache=shared")
+	defer closeDB()
+
+	requireOwnerOnly(t, path)
+}
+
+// TestOpen_TightensExistingWorldReadableFile pins that a database left world-readable by an
+// earlier version (or a careless restore) is tightened on the next start, sidecars included.
+func TestOpen_TightensExistingWorldReadableFile(t *testing.T) {
+	skipWithoutPOSIXPerms(t)
+
+	path := filepath.Join(t.TempDir(), "padmark.db")
+
+	// Hold the first handle open so the WAL sidecars survive; loosen everything it left behind.
+	closeFirst := touchDB(t, path)
+
+	for _, name := range []string{path, path + "-wal", path + "-shm"} {
+		chmodErr := os.Chmod(name, 0o644) //nolint:gosec // deliberately loosened to reproduce the old default
+		if !os.IsNotExist(chmodErr) {
+			require.NoError(t, chmodErr)
+		}
+	}
+
+	closeSecond := touchDB(t, path)
+
+	requireOwnerOnly(t, path)
+
+	closeSecond()
+	closeFirst()
+}
+
+// TestOpen_InMemoryCreatesNoFile pins that in-memory DSNs never touch the filesystem: a named
+// shared-cache memory database ("file:name?mode=memory") must not leave a file called name in
+// the working directory.
+func TestOpen_InMemoryCreatesNoFile(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+
+	for _, dsn := range []string{
+		":memory:",
+		"file::memory:?cache=shared",
+		"file:permmem?mode=memory&cache=shared",
+	} {
+		closeDB := touchDB(t, dsn)
+		closeDB()
+	}
+
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	require.Empty(t, entries, "in-memory DSNs must not create files")
+}
+
+// TestOpen_ReadOnlyURIDoesNotCreateFile pins that mode=ro keeps failing on a missing database
+// instead of being handed an empty file by the permission pre-create.
+func TestOpen_ReadOnlyURIDoesNotCreateFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "missing.db")
+
+	db, err := Open("file:" + path + "?mode=ro")
+	require.NoError(t, err)
+
+	defer func() { require.NoError(t, db.Close()) }()
+
+	require.Error(t, db.PingContext(t.Context()))
+	require.NoFileExists(t, path)
+}
+
+func TestDBFilePath(t *testing.T) {
+	cases := []struct {
+		dsn    string
+		path   string
+		create bool
+	}{
+		{dsn: "padmark.db", path: "padmark.db", create: true},
+		{dsn: "/var/lib/padmark/padmark.db?_pragma=foreign_keys(1)", path: "/var/lib/padmark/padmark.db", create: true},
+		{dsn: "file:padmark.db", path: "padmark.db", create: true},
+		{dsn: "file:/var/lib/p.db?cache=shared&_txlock=immediate", path: "/var/lib/p.db", create: true},
+		{dsn: "file:///var/lib/p.db", path: "/var/lib/p.db", create: true},
+		{dsn: "file://localhost/var/lib/p.db", path: "/var/lib/p.db", create: true},
+		{dsn: "file:/var/lib/my%20notes.db#frag", path: "/var/lib/my notes.db", create: true},
+		{dsn: "file:/var/lib/p.db?mode=rwc", path: "/var/lib/p.db", create: true},
+		{dsn: "file:/var/lib/p.db?mode=ro", path: "/var/lib/p.db", create: false},
+		{dsn: "file:/var/lib/p.db?mode=rw", path: "/var/lib/p.db", create: false},
+		{dsn: ""},
+		{dsn: ":memory:"},
+		{dsn: "file::memory:"},
+		{dsn: "file::memory:?cache=shared"},
+		{dsn: "file:named?mode=memory&cache=shared"},
+		{dsn: "file:/p.db?vfs=memdb"},
+		{dsn: "file:"},
+		{dsn: "file://otherhost/p.db"},
+	}
+
+	for _, tc := range cases {
+		path, create := dbFilePath(tc.dsn)
+		require.Equal(t, tc.path, path, "path for %q", tc.dsn)
+		require.Equal(t, tc.create, create, "create for %q", tc.dsn)
+	}
 }

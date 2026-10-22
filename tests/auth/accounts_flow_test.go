@@ -112,8 +112,14 @@ func setupPost(t *testing.T, baseURL string, body string) *http.Response {
 
 // TestAccountsFlow is the headless-accounts end-to-end: CLI setup → create-token →
 // create-invite → member enrollment → the 403/409/410/429 edges.
+// accountsFlowBootstrapToken is the first-admin bootstrap token TestAccountsFlow's server runs with.
+const accountsFlowBootstrapToken = "accounts-flow-bootstrap-token-0123456789"
+
 func TestAccountsFlow(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	// The operator's bootstrap token: the server is configured with it, and padmark-cli setup
+	// forwards it from the same environment variable.
+	t.Setenv("PADMARK_BOOTSTRAP_TOKEN", accountsFlowBootstrapToken)
 
 	ctx := context.Background()
 
@@ -167,8 +173,9 @@ func TestAccountsFlow(t *testing.T) {
 	handler := adaptershttp.NewHandler(notesMgr, linksMgr, log).WithAuthManager(authMgr)
 	ogen := adaptershttp.NewOgenHandler(notesMgr, linksMgr, adaptershttp.NoPinger{}, log)
 	router, err := adaptershttp.NewRouter(handler, ogen, &adaptershttp.RouterOptions{
-		MaxBodyBytes: 256 * 1024,
-		CSRFSecret:   []byte("padmark-test-csrf-secret-32bytes"),
+		MaxBodyBytes:   256 * 1024,
+		CSRFSecret:     []byte("padmark-test-csrf-secret-32bytes"),
+		BootstrapToken: accountsFlowBootstrapToken,
 	})
 	require.NoError(t, err)
 

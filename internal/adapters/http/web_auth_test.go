@@ -60,13 +60,20 @@ func (s *AuthHandlerSuite) TearDownTest() {
 }
 
 func (s *AuthHandlerSuite) newRouterWithAuth() http.Handler {
+	return s.newRouterWithBootstrapToken(testBootstrapToken)
+}
+
+// newRouterWithBootstrapToken is newRouterWithAuth with an explicit bootstrap token; "" models an
+// operator who configured none (first-admin setup closed).
+func (s *AuthHandlerSuite) newRouterWithBootstrapToken(token string) http.Handler {
 	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog).
 		WithAuthManager(s.auth)
 	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog)
 
 	opts := adhttp.RouterOptions{
-		MaxBodyBytes: 256 * 1024,
-		CSRFSecret:   authTestCSRFSecret,
+		MaxBodyBytes:   256 * 1024,
+		CSRFSecret:     authTestCSRFSecret,
+		BootstrapToken: token,
 	}
 
 	router, err := adhttp.NewRouter(handler, ogen, &opts)
@@ -120,6 +127,9 @@ func (s *AuthHandlerSuite) adminUser() *domain.User {
 // authTestCSRFSecret is a fixed 32-byte secret for auth handler tests.
 // Must match the CSRFSecret set in newRouterWithAuth's RouterOptions.
 var authTestCSRFSecret = []byte("padmark-test-csrf-secret-32bytes") //nolint:gochecknoglobals // test fixture
+
+// testBootstrapToken is the suite router's first-admin bootstrap token (RouterOptions.BootstrapToken).
+const testBootstrapToken = "padmark-test-bootstrap-token-32chars"
 
 // testCSRFToken is a valid HMAC-signed CSRF token generated from authTestCSRFSecret.
 // Generated once at test-binary init; all auth tests share it via csrfCookie/withCSRF.
@@ -338,6 +348,78 @@ func (s *AuthHandlerSuite) TestSetupPage_NoToken_EmptyDB_RendersFirstAdmin() {
 
 	s.Equal(http.StatusOK, rec.Code)
 	s.Contains(rec.Body.String(), "first admin")
+	s.Contains(rec.Body.String(), `name="bootstrap_token"`)
+}
+
+// TestSetupPage_NoBootstrapToken_ShowsDisabled: with no bootstrap token configured the first-admin
+// form is not offered at all — nobody could prove ownership of the server (M-2).
+func (s *AuthHandlerSuite) TestSetupPage_NoBootstrapToken_ShowsDisabled() {
+	s.auth.EXPECT().IsEmpty(gomock.Any()).Return(true, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/setup", nil)
+	req.Header.Set("Accept", "text/html")
+
+	rec := httptest.NewRecorder()
+
+	s.newRouterWithBootstrapToken("").ServeHTTP(rec, req)
+
+	s.Equal(http.StatusForbidden, rec.Code)
+	s.Contains(rec.Body.String(), "PADMARK_BOOTSTRAP_TOKEN")
+	s.NotContains(rec.Body.String(), `name="bootstrap_token"`)
+}
+
+// TestSetupHandler_FirstAdmin_BootstrapTokenRequired: a first-admin form post with a missing or
+// wrong bootstrap token re-renders the form with 403 and never reaches AcceptFirstAdmin (M-2).
+func (s *AuthHandlerSuite) TestSetupHandler_FirstAdmin_BootstrapTokenRequired() {
+	for _, presented := range []string{"", "wrong-token", testBootstrapToken + "x"} {
+		s.Run("token="+presented, func() {
+			s.auth.EXPECT().IsEmpty(gomock.Any()).Return(true, nil)
+			// AcceptFirstAdmin must NOT be called.
+
+			form := withCSRF(url.Values{
+				"username":         {"root"},
+				"password":         {testPw},
+				"password_confirm": {testPw},
+				"bootstrap_token":  {presented},
+			})
+			req := httptest.NewRequest(http.MethodPost, "/setup", strings.NewReader(form.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			req.Header.Set("Accept", "text/html")
+			req.AddCookie(s.csrfCookie())
+
+			rec := httptest.NewRecorder()
+
+			s.router.ServeHTTP(rec, req)
+
+			s.Equal(http.StatusForbidden, rec.Code)
+			s.Contains(rec.Header().Get("Content-Type"), "text/html")
+			s.Contains(rec.Body.String(), "Invalid bootstrap token.")
+		})
+	}
+}
+
+// TestSetupHandler_FirstAdmin_NoBootstrapTokenConfigured: with none configured even a form post
+// carrying some token is refused with the disabled page.
+func (s *AuthHandlerSuite) TestSetupHandler_FirstAdmin_NoBootstrapTokenConfigured() {
+	s.auth.EXPECT().IsEmpty(gomock.Any()).Return(true, nil)
+
+	form := withCSRF(url.Values{
+		"username":         {"root"},
+		"password":         {testPw},
+		"password_confirm": {testPw},
+		"bootstrap_token":  {testBootstrapToken},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/setup", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "text/html")
+	req.AddCookie(s.csrfCookie())
+
+	rec := httptest.NewRecorder()
+
+	s.newRouterWithBootstrapToken("").ServeHTTP(rec, req)
+
+	s.Equal(http.StatusForbidden, rec.Code)
+	s.Contains(rec.Body.String(), "Setup is disabled")
 }
 
 func (s *AuthHandlerSuite) TestSetupPage_NoToken_NotEmpty_Returns403() {
@@ -390,6 +472,7 @@ func (s *AuthHandlerSuite) TestSetupHandler_FirstAdmin_ShowsQR() {
 		"username":         {"root"},
 		"password":         {testPw},
 		"password_confirm": {testPw},
+		"bootstrap_token":  {testBootstrapToken},
 	})
 	req := httptest.NewRequest(http.MethodPost, "/setup", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")

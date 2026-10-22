@@ -85,9 +85,11 @@ the edit code is checked.
 Both answer `401` without a valid credential and `503` when accounts are not enabled.
 
 Headless bootstrap: `POST /setup` accepts JSON — send
-`{"username", "password", "invite"?}` with `Accept: application/json` (no CSRF cookie is
-involved on this path; include an `invite` from `POST /api/invites` once the first admin
-exists). `201` → `{"otp_auth_uri": "otpauth://totp/…", "username", "is_admin"}` — the URI (and
+`{"username", "password", "invite"?, "bootstrap_token"?}` with `Accept: application/json` (no
+CSRF cookie is involved on this path; include an `invite` from `POST /api/invites` once the
+first admin exists). Creating the first admin (no invite) requires `bootstrap_token` equal to
+the server's `PADMARK_BOOTSTRAP_TOKEN`; without one configured that setup is disabled (`403`,
+`code: bootstrap_disabled`), a missing or wrong token is `403` (`code: bootstrap_token_invalid`). `201` → `{"otp_auth_uri": "otpauth://totp/…", "username", "is_admin"}` — the URI (and
 its secret) is shown exactly once. Errors: `400` for a malformed body or an empty
 `username`, `415` unless the body is `Content-Type: application/json`, `403` for a
 cross-site browser request or once any account exists without an invite (setup closed),

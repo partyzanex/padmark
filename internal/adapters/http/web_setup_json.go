@@ -16,6 +16,8 @@ type setupJSONRequest struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
 	Invite   string `json:"invite"`
+	// BootstrapToken proves ownership of the server when creating the first admin (no invite).
+	BootstrapToken string `json:"bootstrap_token"`
 }
 
 // setupJSONResponse is returned once with the enrollment URI. The TOTP secret inside the URI
@@ -87,7 +89,7 @@ func (h *AuthHandler) setupJSON(w http.ResponseWriter, r *http.Request) {
 
 	// Empty username/password validation beyond that is left to the usecase: ValidatePassword
 	// is authoritative (422 below), and a missing password is just a weak one.
-	if req.Invite == "" && !h.setupGateOpenJSON(w, r) {
+	if req.Invite == "" && !h.setupGateOpenJSON(w, r, req.BootstrapToken) {
 		return
 	}
 
@@ -115,9 +117,16 @@ func (h *AuthHandler) setupJSON(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// Stable `code` values of the first-admin bootstrap refusals.
+const (
+	bootstrapDisabledCode     = "bootstrap_disabled"
+	bootstrapTokenInvalidCode = "bootstrap_token_invalid"
+)
+
 // setupGateOpenJSON answers the bootstrap gate (no users yet) as JSON: 500 on lookup failure,
-// 403 with the invite hint when the first admin already exists.
-func (h *AuthHandler) setupGateOpenJSON(w http.ResponseWriter, r *http.Request) bool {
+// 403 with the invite hint when the first admin already exists, and 403 when the bootstrap token
+// is not configured on the server or presented does not match it.
+func (h *AuthHandler) setupGateOpenJSON(w http.ResponseWriter, r *http.Request, presented string) bool {
 	empty, gateErr := h.authMgr.IsEmpty(r.Context())
 	if gateErr != nil {
 		h.log.ErrorContext(r.Context(), "check empty", "err", gateErr)
@@ -129,6 +138,21 @@ func (h *AuthHandler) setupGateOpenJSON(w http.ResponseWriter, r *http.Request) 
 	if !empty {
 		writeJSONErrorStatus(w, r, h.log, http.StatusForbidden,
 			"The first admin already exists. New accounts require an invite.")
+
+		return false
+	}
+
+	if len(h.bootstrapDigest) == 0 {
+		writeJSONErrorCode(w, r, h.log, http.StatusForbidden,
+			"First-admin setup is disabled: set PADMARK_BOOTSTRAP_TOKEN (at least 32 characters) "+
+				"on the server and send it as bootstrap_token.", bootstrapDisabledCode)
+
+		return false
+	}
+
+	if !h.bootstrapTokenValid(presented) {
+		writeJSONErrorCode(w, r, h.log, http.StatusForbidden, "Invalid bootstrap token.",
+			bootstrapTokenInvalidCode)
 
 		return false
 	}

@@ -148,6 +148,13 @@ go run ./cmd/padmark-server --addr :4000
 
 Open `http://localhost:4000`.
 
+The database file (`padmark.db` in the working directory by default) holds password hashes,
+sealed TOTP secrets, token hashes and every encrypted note. The server creates it with mode
+`0600` and tightens an existing file, and any leftover `-wal`/`-shm`/`-journal` sidecar, to
+`0600` on every start; SQLite creates new sidecars with the same mode. Still run the service
+under `umask 077` and keep the database in a directory only the service account can enter.
+Windows ACLs are not managed.
+
 ### PostgreSQL
 
 ```bash
@@ -542,15 +549,27 @@ session-cookie check; an unknown, revoked, or expired key falls through to 401 /
 PADMARK_ENABLE_ACCOUNTS=true go run ./cmd/padmark-server serve
 ```
 
-Once enabled, on first run (no users yet) padmark logs:
+Creating the first admin requires proof that you own the server: set
+**`PADMARK_BOOTSTRAP_TOKEN`** (at least 32 characters, environment only — never a flag; shorter
+fails startup) and enter it in the `/setup` form. Without it, first-admin setup is **disabled**:
+otherwise whoever reached `/setup` first — say an internet scanner, a minute before you — would
+become the single, permanent admin. The token is never logged; unset it once the admin exists.
+
+```bash
+export PADMARK_BOOTSTRAP_TOKEN="$(openssl rand -hex 32)"
+PADMARK_ENABLE_ACCOUNTS=true go run ./cmd/padmark-server serve
+```
+
+Once enabled, on first run (no users yet) padmark logs one of:
 
 ```
-No users found. Open /setup to create the first admin.
+No users found. Open /setup and enter the bootstrap token to create the first admin; unset it afterwards
+No users found, but first-admin setup is disabled: set the bootstrap token env (at least 32 characters) and restart, then open /setup
 ```
 
 When **disabled**, none of the routes below are gated and `/setup`, `/admin`, etc. return `404`.
 
-- **`/setup`** — create the first admin (username + password). A TOTP QR code is shown **once** — scan it into your authenticator app.
+- **`/setup`** — create the first admin (username + password + the bootstrap token). A TOTP QR code is shown **once** — scan it into your authenticator app.
 - **`/login`** — sign in with username + password + a 6-digit TOTP code.
 - **`/admin`** — admins issue single-use **invite links**, issue/revoke **API keys** (Bearer tokens for the CLI), and revoke users. Revoking a user also clears their sessions, invites, and API keys.
 - New users onboard via an invite link, choose their own password, and scan their own TOTP QR.
@@ -589,7 +608,9 @@ CI/agent deployments and scripting:
   `--invite <token>`): sends JSON to `POST /setup` and prints the `otpauth://` enrollment URI
   **exactly once** to stdout — scan it or save it, it cannot be retrieved later. Pass
   `--username/--password`, or pipe the password via stdin (an interactive TTY without
-  `--password` is refused rather than echoing what you type).
+  `--password` is refused rather than echoing what you type). Bootstrapping the first admin
+  forwards the server's bootstrap token from `PADMARK_BOOTSTRAP_TOKEN` in the CLI's
+  environment; an invite enrollment needs none.
 - **`padmark-cli create-token`** — `POST /api/tokens`: issues a long-lived API token **for the
   calling user themselves** (any authenticated caller; session or Bearer). Prints the `pmk_…`
   envelope once; store it in `~/.config/padmark/token` or `PADMARK_TOKEN` yourself. A user may
@@ -623,6 +644,16 @@ Failed edit-code attempts are tracked per resource and authenticated user ID, sh
 that user's sessions and API tokens. Ten failures lock that pair for five minutes. Anonymous
 callers share a separate bucket per resource. Successful updates or deletes reset only the
 calling user's bucket, so another caller's failures cannot block the authenticated owner.
+
+Sign-in (`POST /totp-login`) has two independent brute-force limits. Each client IP gets
+10 attempts per minute, and each username gets 10 unsuccessful attempts, counted across all
+IPs, before it is locked for five minutes from the last counted attempt. While locked, every
+attempt for that name, including one with the correct password and code, gets `429` with
+`Retry-After` and never reaches the password check. Usernames are matched after trimming
+whitespace and ignoring case. Unknown usernames lock the same way, so the `429` does not reveal
+whether an account exists. A successful sign-in resets the counter. Anyone who knows a username
+can keep it locked by sending ten failures every five minutes. The lock lifts five minutes
+after they stop, and existing sessions and API tokens keep working throughout.
 
 ### Security at rest
 
@@ -678,8 +709,8 @@ calling user's bucket, so another caller's failures cannot block the authenticat
   installation keyring cannot decrypt native content; this is not protection against a
   compromised server or changes to unencrypted metadata.
 - Login still takes extra work after a correct password (secret opening and TOTP validation).
-  The dummy password hash, common factor-error message and per-IP login limit reduce exposure;
-  no constant-time end-to-end login guarantee is claimed.
+  The dummy password hash, common factor-error message and per-IP and per-username login limits
+  reduce exposure; no constant-time end-to-end login guarantee is claimed.
 - The HTTP-to-HTTPS redirect uses the request Host when `--allowed-hosts` is empty for
   backwards compatibility. Set an explicit allowlist (and a trusted proxy Host policy)
   on deployments where clients can reach that listener directly.
@@ -804,6 +835,7 @@ There is no destructive encryption down-migration, and older binaries cannot rea
 | `--dsn` | `PADMARK_DSN` | `padmark.db` | DB path or connection string. A Postgres DSN carries the password, and a command-line flag is visible to every local user in the process listing (`ps`) — pass it via `PADMARK_DSN` instead |
 | `--content-keyring-file` | `PADMARK_CONTENT_KEYRING_FILE` | required | Path to the persisted JSON keyring for note/link encryption; mount as a secret and back up separately from the DB |
 | `--enable-accounts` | `PADMARK_ENABLE_ACCOUNTS` | `false` | Enable the TOTP account system (`/setup`, `/login`, `/admin`, privacy-level gating); off = fully public |
+| — | `PADMARK_BOOTSTRAP_TOKEN` | — | Environment only (never a flag). Required to create the first admin via `/setup` without an invite; at least 32 characters (shorter fails startup). Unset = first-admin setup disabled. Never logged; unset it once the admin exists |
 | `--disable-api` | `PADMARK_DISABLE_API` | `false` | Disable the REST/JSON API (`/notes*`, `/links*`, `/api`, `/api/openapi.yaml`, `/llms.txt`, `/api/tokens`, `/api/invites`): the middleware returns `503` with `{"message":"API is disabled","code":"api_disabled"}`. Match `code` to identify the cause; outer middleware may reject a request first. The web UI becomes **read-only**: viewing `/{id}` (including JSON/raw reads), `/r/{id}`, the login/admin pages and health checks keep working, but publishing or saving from the editor fails with the API-disabled error, because the editor calls `POST /notes` and `PUT /notes/{id}` |
 | `--totp-issuer` | `PADMARK_TOTP_ISSUER` | `padmark` | TOTP issuer shown in the authenticator app |
 | `--session-ttl` | `PADMARK_SESSION_TTL` | `2592000` | Session lifetime in seconds (default 30 days) |
@@ -845,6 +877,9 @@ Both directions of misconfiguration have a cost, and neither surfaces as an erro
   request is attributed to the proxy's own address and all clients share one bucket. Nothing
   is spoofable, but one noisy client throttles everyone else. The server logs a warning the
   first time a request arrives carrying a forwarding header while no proxy is trusted.
+
+The per-username sign-in lock (10 failures per name per five minutes) does not depend on the
+client IP, so it still holds under either misconfiguration.
 
 Leaving it empty when the server really is exposed directly is correct and stays silent. If the
 proxy's address is not stable (cloud load balancers, k8s ingress), prefer `--public-scheme https`

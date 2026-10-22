@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -179,4 +180,46 @@ func TestSetup_TrustedEnvelopeProceeds(t *testing.T) {
 	require.NoError(t, runCLI(t.Context(), append([]string{"--token", token}, setupArgs()...)...))
 	assert.Equal(t, int32(1), hits.Load(), "setup must reach the trusted pinned server")
 	assert.False(t, sawAuth.Load(), "setup is unauthenticated and must not send the bearer key")
+}
+
+// TestSetup_SendsBootstrapTokenFromEnv: bootstrapping the first admin forwards the server's
+// bootstrap token from the environment (never a flag); an invite enrollment does not send it.
+func TestSetup_SendsBootstrapTokenFromEnv(t *testing.T) {
+	const bootstrap = "operator-bootstrap-token-0123456789abcdef"
+
+	for _, testCase := range []struct {
+		name  string
+		extra []string
+		want  string
+	}{
+		{"first admin", nil, bootstrap},
+		{"invite enrollment", []string{"--invite", "inv-123"}, ""},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			isolateEnv(t)
+			t.Setenv(EnvBootstrapToken, bootstrap)
+
+			var got struct {
+				BootstrapToken *string `json:"bootstrap_token"`
+			}
+
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				assert.NoError(t, json.NewDecoder(r.Body).Decode(&got))
+
+				w.WriteHeader(http.StatusCreated)
+				_, _ = w.Write([]byte(`{"otp_auth_uri":"otpauth://totp/padmark:root"}`))
+			}))
+			defer srv.Close()
+
+			args := append(append([]string{"--url", srv.URL}, setupArgs()...), testCase.extra...)
+			require.NoError(t, runCLI(t.Context(), args...))
+
+			if testCase.want == "" {
+				assert.Nil(t, got.BootstrapToken, "an invite enrollment must not send the bootstrap token")
+			} else {
+				require.NotNil(t, got.BootstrapToken)
+				assert.Equal(t, testCase.want, *got.BootstrapToken)
+			}
+		})
+	}
 }

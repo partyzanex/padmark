@@ -99,7 +99,11 @@ func isHTTPS(r *http.Request, forcedScheme string, trustedProxies []*net.IPNet) 
 
 // RouterOptions holds configurable parameters for the middleware stack.
 type RouterOptions struct {
-	ForcedScheme   string
+	ForcedScheme string
+	// BootstrapToken is the operator's proof of server ownership for creating the first admin
+	// via /setup without an invite (PADMARK_BOOTSTRAP_TOKEN). Empty keeps that bootstrap closed:
+	// otherwise whoever reached /setup first would become the single, permanent admin.
+	BootstrapToken string
 	TrustedProxies []*net.IPNet
 	CSRFSecret     []byte
 	MaxBodyBytes   int
@@ -207,6 +211,7 @@ func NewRouter(
 	handler.WithForcedScheme(opts.ForcedScheme)
 	handler.WithSessionTTL(opts.SessionTTL)
 	handler.WithDirectRedirect(opts.DirectRedirect)
+	handler.WithBootstrapToken(opts.BootstrapToken)
 
 	mux := http.NewServeMux()
 

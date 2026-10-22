@@ -158,7 +158,10 @@ type common struct {
 	forcedScheme   string
 	csrfSecret     []byte
 	trustedProxies []*net.IPNet
-	sessionTTL     time.Duration
+	// bootstrapDigest is the SHA-256 of the configured bootstrap token; nil keeps first-admin
+	// setup closed (see RouterOptions.BootstrapToken and bootstrapTokenValid).
+	bootstrapDigest []byte
+	sessionTTL      time.Duration
 }
 
 // sessionMaxAge returns the TOTP session cookie's Max-Age: the configured SessionTTL (see
@@ -295,6 +298,8 @@ func NewHandler(manager NoteManager, linkManager LinkManager, log *slog.Logger) 
 		csrfSecret:     nil,
 		trustedProxies: nil,
 		sessionTTL:     0,
+		// Set by WithBootstrapToken; nil keeps first-admin setup closed.
+		bootstrapDigest: nil,
 	}
 
 	return &Handler{
@@ -319,6 +324,20 @@ func (h *Handler) WithRevealStore(store RevealTokenStore) *Handler {
 // WithAuthManager attaches a TOTP AuthManager enabling session-based authentication.
 func (h *Handler) WithAuthManager(mgr AuthManager) *Handler {
 	h.authMgr = mgr
+
+	return h
+}
+
+// WithBootstrapToken sets the token that authorises creating the first admin via /setup without an
+// invite (RouterOptions.BootstrapToken). Only its digest is kept; empty leaves that setup closed.
+// Called by NewRouter before any request is served; do not call after the server starts.
+func (h *Handler) WithBootstrapToken(token string) *Handler {
+	h.bootstrapDigest = nil
+
+	if token != "" {
+		sum := sha256.Sum256([]byte(token))
+		h.bootstrapDigest = sum[:]
+	}
 
 	return h
 }

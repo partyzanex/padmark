@@ -2,6 +2,8 @@ package http
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
 	"errors"
 	"html/template"
 	"net"
@@ -12,6 +14,7 @@ import (
 
 	_ "embed"
 
+	"github.com/bluele/gcache"
 	"github.com/google/uuid"
 
 	"github.com/partyzanex/padmark/internal/domain"
@@ -120,7 +123,11 @@ func newAuthHandler(c *common, loginTmpl, setupTmpl, changePwTmpl *template.Temp
 // RegisterRoutes registers login, logout, account setup, and password-change routes.
 func (h *AuthHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /login", h.LoginPage)
-	mux.HandleFunc("POST /totp-login", h.guard(withTOTPRateLimit(h.trustedProxies, h.log, h.TOTPLoginHandler)))
+	// Per-IP limiter first (cheapest, and every attempt spends the caller's IP budget, including
+	// ones the account lock then rejects), then the per-username lock — see withLoginLockout.
+	loginLock := newLoginLockout(gcache.NewRealClock())
+	mux.HandleFunc("POST /totp-login", h.guard(withTOTPRateLimit(h.trustedProxies, h.log,
+		withLoginLockout(loginLock, h.log, h.TOTPLoginHandler))))
 	mux.HandleFunc("POST /logout", h.guard(h.LogoutHandler))
 	mux.HandleFunc("GET /setup", h.SetupPage)
 	mux.HandleFunc("POST /setup", h.setupGuard(h.SetupHandler))
@@ -290,6 +297,10 @@ func (h *AuthHandler) SetupPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if token == "" && !h.bootstrapEnabled(w, r) {
+		return
+	}
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
 	renderErr := h.setupTmpl.Execute(w, setupViewData{
@@ -367,8 +378,9 @@ func (h *AuthHandler) SetupHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Without an invite, creating an account is only allowed while bootstrapping the
-	// first admin; once one exists the endpoint is closed (403).
-	if token == "" && !h.bootstrapOpen(w, r) {
+	// first admin; once one exists the endpoint is closed (403). Bootstrapping itself demands
+	// the operator's bootstrap token, so the first visitor cannot claim the server.
+	if token == "" && (!h.bootstrapOpen(w, r) || !h.bootstrapProven(w, r, &data)) {
 		return
 	}
 
@@ -567,6 +579,51 @@ func (h *AuthHandler) bootstrapOpen(w http.ResponseWriter, r *http.Request) bool
 	}
 
 	return true
+}
+
+// bootstrapEnabled renders the "setup is disabled" page when no bootstrap token is configured.
+func (h *AuthHandler) bootstrapEnabled(w http.ResponseWriter, r *http.Request) bool {
+	if len(h.bootstrapDigest) > 0 {
+		return true
+	}
+
+	data := setupDisabledPageData()
+	h.writeErrorPageData(w, r, &data)
+
+	return false
+}
+
+// bootstrapProven checks the form's bootstrap token for a first-admin setup: with none configured
+// the disabled page is shown, a wrong or missing one re-renders the form with 403.
+func (h *AuthHandler) bootstrapProven(w http.ResponseWriter, r *http.Request, data *setupViewData) bool {
+	if !h.bootstrapEnabled(w, r) {
+		return false
+	}
+
+	if h.bootstrapTokenValid(r.FormValue("bootstrap_token")) {
+		return true
+	}
+
+	data.Error = "Invalid bootstrap token."
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusForbidden)
+	h.renderSetup(w, r, data)
+
+	return false
+}
+
+// bootstrapTokenValid reports whether presented equals the configured bootstrap token. Digests
+// are compared in constant time, so neither the token's content nor its length leaks through
+// timing; with no token configured nothing is valid.
+func (c *common) bootstrapTokenValid(presented string) bool {
+	if len(c.bootstrapDigest) == 0 || presented == "" {
+		return false
+	}
+
+	sum := sha256.Sum256([]byte(presented))
+
+	return subtle.ConstantTimeCompare(sum[:], c.bootstrapDigest) == 1
 }
 
 // renderSetup renders the setup template, logging any render error.

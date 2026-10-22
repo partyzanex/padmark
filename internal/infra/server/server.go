@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"syscall"
 	"time"
@@ -46,7 +47,23 @@ const (
 	// minCSRFSecretLen is the minimum accepted length for --csrf-secret; it matches the
 	// 32-byte secret NewRouter generates when the flag is empty.
 	minCSRFSecretLen = 32
+	// minBootstrapTokenLen is the minimum accepted length for PADMARK_BOOTSTRAP_TOKEN: the token
+	// alone decides who becomes the single admin, so it must not be guessable.
+	minBootstrapTokenLen = 32
 )
+
+// parseBootstrapToken validates the PADMARK_BOOTSTRAP_TOKEN value. Empty is valid and keeps
+// first-admin setup closed (fail-closed: without proof of server ownership the first visitor of
+// /setup would become the permanent admin). A configured token shorter than the minimum fails
+// startup rather than leaving the bootstrap guessable. The value never appears in errors or logs.
+func parseBootstrapToken(raw string) (string, error) {
+	if raw != "" && len(raw) < minBootstrapTokenLen {
+		return "", fmt.Errorf("%s must be at least %d characters, got %d",
+			EnvBootstrapToken, minBootstrapTokenLen, len(raw))
+	}
+
+	return raw, nil
+}
 
 // parseCSRFSecret converts the --csrf-secret flag value into an HMAC key. An empty value is
 // valid and yields nil, meaning "generate a fresh random secret per process" (the legacy
@@ -88,6 +105,7 @@ func buildRouter(
 	handler *adaptershttp.Handler,
 	ogenHandler *adaptershttp.OgenHandler,
 	log *slog.Logger,
+	bootstrapToken string,
 ) (http.Handler, error) {
 	trustedProxies, err := parseTrustedProxies(cmd.String(FlagTrustedProxies))
 	if err != nil {
@@ -143,6 +161,8 @@ func buildRouter(
 		// Nil (flag empty) lets NewRouter generate a fresh CSRF secret instead of accepting
 		// an injected one — the legacy single-instance behaviour.
 		CSRFSecret: csrfSecret,
+		// Validated by serverAction before the DB opens; empty keeps first-admin setup closed.
+		BootstrapToken: bootstrapToken,
 	}
 
 	router, err := adaptershttp.NewRouter(handler, ogenHandler, &opts)
@@ -383,7 +403,14 @@ func attachAccountSystem(
 	if emptyErr != nil {
 		log.WarnContext(ctx, "check users empty", "err", emptyErr)
 	} else if empty {
-		log.InfoContext(ctx, "No users found. Open /setup to create the first admin.")
+		// Presence only — the token itself is a secret and never logged.
+		if os.Getenv(EnvBootstrapToken) == "" {
+			log.WarnContext(ctx, "No users found, but first-admin setup is disabled: set the bootstrap "+
+				"token env (at least 32 characters) and restart, then open /setup", "env", EnvBootstrapToken)
+		} else {
+			log.InfoContext(ctx, "No users found. Open /setup and enter the bootstrap token to create "+
+				"the first admin; unset it afterwards", "env", EnvBootstrapToken)
+		}
 	}
 
 	return handler.WithAuthManager(authMgr), nil
@@ -521,9 +548,9 @@ func initRepos(
 }
 
 func serverAction(ctx context.Context, cmd *cli.Command) error {
-	costErr := argon2ParamsFromFlags(cmd).Validate()
-	if costErr != nil {
-		return fmt.Errorf("validate argon2 configuration: %w", costErr)
+	bootstrapToken, err := validateStartupSecrets(cmd)
+	if err != nil {
+		return err
 	}
 
 	log := newLogger(cmd.String(FlagLogLevel), cmd.String(FlagLogFormat))
@@ -563,7 +590,7 @@ func serverAction(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	router, err := buildRouter(ctx, cmd, handler, ogenHandler, log)
+	router, err := buildRouter(ctx, cmd, handler, ogenHandler, log, bootstrapToken)
 	if err != nil {
 		return err
 	}
@@ -578,6 +605,22 @@ func serverAction(ctx context.Context, cmd *cli.Command) error {
 	)
 
 	return runServer(ctx, cmd, router, log)
+}
+
+// validateStartupSecrets checks the security configuration that must be sound before anything
+// is opened: the argon2 cost bounds and the bootstrap token. It returns the validated token.
+func validateStartupSecrets(cmd *cli.Command) (string, error) {
+	costErr := argon2ParamsFromFlags(cmd).Validate()
+	if costErr != nil {
+		return "", fmt.Errorf("validate argon2 configuration: %w", costErr)
+	}
+
+	bootstrapToken, tokenErr := parseBootstrapToken(os.Getenv(EnvBootstrapToken))
+	if tokenErr != nil {
+		return "", fmt.Errorf("validate bootstrap token: %w", tokenErr)
+	}
+
+	return bootstrapToken, nil
 }
 
 func closeServerDB(ctx context.Context, db *bun.DB, log *slog.Logger) {

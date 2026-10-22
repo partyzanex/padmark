@@ -22,7 +22,9 @@ func setupCommand() *urcli.Command {
 		Description: "Headless account bootstrap: POSTs JSON to the server's /setup and prints " +
 			"the otpauth:// enrollment URI exactly once — scan it or save it, it cannot be " +
 			"recovered. Pass --username and --password; the password may also be piped to stdin " +
-			"(first line). A non-empty --invite enrolls a new (non-admin) user instead.",
+			"(first line). Bootstrapping the first admin requires the server's bootstrap token in " +
+			"the " + EnvBootstrapToken + " environment variable. A non-empty --invite enrolls a new " +
+			"(non-admin) user instead and needs no bootstrap token.",
 		Flags: []urcli.Flag{
 			&urcli.StringFlag{
 				Name:  FlagUsername,
@@ -64,11 +66,20 @@ func setupAction(ctx context.Context, cmd *urcli.Command) error {
 		return err
 	}
 
+	invite := cmd.String(FlagInvite)
+
+	// The bootstrap token only matters for the first admin; an invite is its own credential.
+	var bootstrapToken string
+	if invite == "" {
+		bootstrapToken = os.Getenv(EnvBootstrapToken)
+	}
+
 	body := struct {
-		Username string `json:"username"`
-		Password string `json:"password"`
-		Invite   string `json:"invite,omitempty"`
-	}{username, password, cmd.String(FlagInvite)}
+		Username       string `json:"username"`
+		Password       string `json:"password"`
+		Invite         string `json:"invite,omitempty"`
+		BootstrapToken string `json:"bootstrap_token,omitempty"`
+	}{username, password, invite, bootstrapToken}
 
 	//nolint:gosec // G117: the password must reach the server; transport secrecy is HTTPS job
 	payload, err := json.Marshal(body)
