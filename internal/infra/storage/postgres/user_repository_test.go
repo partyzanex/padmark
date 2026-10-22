@@ -288,3 +288,36 @@ func (s *UserRepositoryTestSuite) TestUpdatePassword_NonExistentUser_NoError() {
 	err := s.repo.UpdatePassword(s.T().Context(), uuid.New(), "h", []byte("s"), "t")
 	s.Require().NoError(err)
 }
+
+// ── Case-insensitive usernames ──
+
+// TestCreate_DuplicateUsernameDifferentCase_ReturnsErrUserExists pins that "Admin" cannot be
+// registered next to "admin": otherwise two accounts would differ only by case, which is an
+// impersonation/phishing aid and splits one person's lockout bucket from their account.
+func (s *UserRepositoryTestSuite) TestCreate_DuplicateUsernameDifferentCase_ReturnsErrUserExists() {
+	ctx := s.T().Context()
+
+	s.Require().NoError(s.repo.Create(ctx, s.newUser("admin")))
+
+	err := s.repo.Create(ctx, s.newUser("Admin"))
+	s.ErrorIs(err, domain.ErrUserExists)
+}
+
+// TestGetByUsername_IsCaseInsensitive verifies the lookup finds the stored row whatever case the
+// login form used, and returns the username as it was registered.
+func (s *UserRepositoryTestSuite) TestGetByUsername_IsCaseInsensitive() {
+	ctx := s.T().Context()
+
+	stored := s.newUser("Alice")
+	s.Require().NoError(s.repo.Create(ctx, stored))
+
+	for _, query := range []string{"Alice", "alice", "ALICE"} {
+		got, err := s.repo.GetByUsername(ctx, query)
+		s.Require().NoError(err, query)
+		s.Equal(stored.ID, got.ID, query)
+		s.Equal("Alice", got.Username, "the stored spelling is preserved")
+	}
+
+	_, err := s.repo.GetByUsername(ctx, "alic")
+	s.ErrorIs(err, domain.ErrNotFound)
+}

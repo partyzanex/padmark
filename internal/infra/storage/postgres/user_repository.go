@@ -101,7 +101,7 @@ func insertUser(ctx context.Context, conn bun.IDB, u *domain.User) error {
 func (r *UserRepository) GetByUsername(ctx context.Context, username string) (*domain.User, error) {
 	var row userRow
 
-	err := r.db.NewSelect().Model(&row).Where("username = ?", username).Scan(ctx)
+	err := r.db.NewSelect().Model(&row).Where("lower(username) = lower(?)", username).Scan(ctx)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, domain.ErrNotFound

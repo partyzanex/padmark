@@ -586,6 +586,13 @@ hash of each invite token is stored in the database. Migration `20261014000002` 
 previously issued invites on both SQLite and PostgreSQL; admins must issue new links.
 Rolling back this migration also revokes invites, since raw tokens cannot be recovered.
 
+Usernames are unique case-insensitively (`Admin` cannot be registered next to `admin`) and sign-in
+matches them case-insensitively; accounts keep the spelling they registered with. Migration
+`20261021000002` adds the unique index on `lower(username)`. If two existing accounts already
+differ only by case, the migration **fails and changes nothing** — rename or remove one of them
+(the error names the colliding usernames on PostgreSQL) and restart. Case folding follows the
+database: SQLite folds ASCII only, PostgreSQL follows the database collation.
+
 Burn-after-reading reveal tokens (the one-time confirmation token behind the "Reveal" button)
 are stored the same way, as a SHA-256 digest only. Migration `20261021000001` deletes the
 outstanding plaintext-era tokens on both backends, since their raw values cannot be recovered;
