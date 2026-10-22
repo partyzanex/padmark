@@ -2365,6 +2365,24 @@ func (s *HandlerSuite) TestCSP_RedocScopedToAPIDocs() {
 	s.NotContains(csp, "cdn.redoc.ly", "non-docs pages must not allow third-party script origins")
 }
 
+// TestCSP_NonFetchDirectivesHardened verifies the directives that default-src does not cover are
+// pinned on every page, including the API docs page: no <base> injection, forms posting only to
+// the same origin, no framing and no plugin content.
+func (s *HandlerSuite) TestCSP_NonFetchDirectivesHardened() {
+	for _, path := range []string{"/", "/api"} {
+		rec := httptest.NewRecorder()
+		s.router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+
+		csp := rec.Header().Get("Content-Security-Policy")
+
+		for _, directive := range []string{
+			"base-uri 'none'", "form-action 'self'", "frame-ancestors 'none'", "object-src 'none'",
+		} {
+			s.Contains(csp, directive, "CSP on %s must contain %q", path, directive)
+		}
+	}
+}
+
 func (s *HandlerSuite) TestAPISpec() {
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/api/openapi.yaml", nil)

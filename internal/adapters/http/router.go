@@ -483,7 +483,10 @@ func buildCSP(nonce string, extraScriptSrc ...string) string {
 		"style-src 'self' 'nonce-" + nonce + "'; " +
 		"font-src 'self'; " +
 		"img-src 'self' data:; " +
-		"connect-src 'self'"
+		"connect-src 'self'; " +
+		// default-src does not cover these: block <base> hijacking of relative URLs, forms posting
+		// off-origin, framing (clickjacking; supersedes X-Frame-Options) and plugin content.
+		"base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'"
 }
 
 // withSecurityHeaders sets the hardening headers on every response. HSTS is emitted only when
