@@ -35,13 +35,16 @@ var (
 	// usecase log genuine data corruption distinctly from an ordinary wrong-slug miss.
 	ErrMalformedCiphertext = errors.New("malformed ciphertext")
 
-	ErrInvalidTOTP         = errors.New("invalid or expired TOTP code")
-	ErrInviteExpired       = errors.New("invite link has expired")
-	ErrInviteUsed          = errors.New("invite link has already been used")
-	ErrUserExists          = errors.New("username is already taken")
-	ErrSessionExpired      = errors.New("session has expired")
-	ErrInvalidPassword     = errors.New("invalid password")
-	ErrWeakPassword        = errors.New("password does not meet complexity requirements")
+	ErrInvalidTOTP     = errors.New("invalid or expired TOTP code")
+	ErrInviteExpired   = errors.New("invite link has expired")
+	ErrInviteUsed      = errors.New("invite link has already been used")
+	ErrUserExists      = errors.New("username is already taken")
+	ErrSessionExpired  = errors.New("session has expired")
+	ErrInvalidPassword = errors.New("invalid password")
+	ErrWeakPassword    = errors.New("password does not meet complexity requirements")
+	ErrInvalidUsername = errors.New("username must be 1–64 characters: letters, digits, dot, underscore, @ or hyphen; " +
+		"start with a letter or digit")
+	ErrSessionRevocation   = errors.New("password changed, but older sessions could not be revoked")
 	ErrFeatureNotSupported = errors.New("feature is not enabled")
 	ErrAPITokenLimit       = errors.New("api token limit reached")
 )

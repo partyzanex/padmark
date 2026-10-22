@@ -8,6 +8,11 @@ import (
 	"github.com/partyzanex/padmark/internal/domain"
 )
 
+// Versioned classifies value with IsVersionedContent; see its godoc for the exact rule.
+func (enc *ContentCipher) Versioned(value string) bool {
+	return IsVersionedContent(value)
+}
+
 // ValidateLegacy checks structure only: the original slug is required to authenticate legacy data.
 func (enc *ContentCipher) ValidateLegacy(value string) error {
 	if len(value) > maxLegacyContentSize {

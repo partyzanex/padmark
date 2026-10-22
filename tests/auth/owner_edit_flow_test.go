@@ -18,6 +18,7 @@ import (
 
 	adaptershttp "github.com/partyzanex/padmark/internal/adapters/http"
 	"github.com/partyzanex/padmark/internal/infra/crypto"
+	"github.com/partyzanex/padmark/internal/infra/linkcache"
 	"github.com/partyzanex/padmark/internal/infra/lock"
 	"github.com/partyzanex/padmark/internal/infra/render"
 	sqliterepo "github.com/partyzanex/padmark/internal/infra/storage/sqlite"
@@ -32,6 +33,7 @@ const ownerFlowPassword = "OwnerP@ss123!"
 // ownerFlowEnv is the fully wired stack an owner-flow test runs against: a real SQLite database
 // with migrations applied, real managers, and the production router behind an httptest server.
 type ownerFlowEnv struct {
+	db      *bun.DB
 	authMgr *auth.Manager
 	users   *sqliterepo.UserRepository
 	baseURL string
@@ -66,7 +68,7 @@ func newOwnerFlowManagers(t *testing.T, db *bun.DB, log *slog.Logger) (*notes.Ma
 		crypto.NewEditCodeHasher(),
 		log,
 		false,
-	)
+	).WithCache(linkcache.NewDefault(log))
 
 	return notesMgr, linksMgr
 }
@@ -113,7 +115,7 @@ func newOwnerFlowEnv(t *testing.T, dbName string) ownerFlowEnv {
 	srv := httptest.NewServer(router)
 	t.Cleanup(srv.Close)
 
-	return ownerFlowEnv{authMgr: authMgr, users: users, baseURL: srv.URL}
+	return ownerFlowEnv{db: db, authMgr: authMgr, users: users, baseURL: srv.URL}
 }
 
 // TestOwnerEditFlow_APITokenOwner_EditsAndDeletesWithoutEditCode is the end-to-end regression for

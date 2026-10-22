@@ -319,8 +319,8 @@ type CreateLinkRequest struct {
 	// When `true` the link is deleted the moment it is first followed via `GET /r/{id}`.
 	BurnAfterClick OptBool `json:"burn_after_click"`
 	// Seconds until the link expires, counted from creation. Omitted means the link never
-	// expires. Unlike notes' `ttl` (a burn-after-reading grace period), this is a plain hard
-	// expiry with no relation to `burn_after_click`; the two may be combined freely.
+	// expires. This is a hard expiry with no relation to `burn_after_click`;
+	// the two may be combined freely.
 	TTL OptInt64 `json:"ttl"`
 	// Optional custom edit code. If omitted a random 12-character code is generated.
 	// Intended for CLI and automation use.
@@ -471,9 +471,9 @@ type CreateLinkResponse struct {
 	ID string `json:"id"`
 	// Destination URL.
 	TargetURL url.URL `json:"target_url"`
-	// Number of times the link has been followed via `GET /r/{id}`. May lag the true count
-	// by a few seconds for a "hot" (frequently followed) link, since the server may serve
-	// this read from a short-lived in-memory cache rather than storage.
+	// Number of times the link has been followed via `GET /r/{id}`, as read from storage.
+	// Concurrent redirects may increment the count after this read. The decrypted-target
+	// cache never supplies counters or authorization metadata.
 	Views int `json:"views"`
 	// `true` until the link is first followed (then it no longer exists — a subsequent read
 	// returns `404`), permanently `false` for links without this flag.
@@ -1358,9 +1358,9 @@ type LinkResponse struct {
 	ID string `json:"id"`
 	// Destination URL.
 	TargetURL url.URL `json:"target_url"`
-	// Number of times the link has been followed via `GET /r/{id}`. May lag the true count
-	// by a few seconds for a "hot" (frequently followed) link, since the server may serve
-	// this read from a short-lived in-memory cache rather than storage.
+	// Number of times the link has been followed via `GET /r/{id}`, as read from storage.
+	// Concurrent redirects may increment the count after this read. The decrypted-target
+	// cache never supplies counters or authorization metadata.
 	Views int `json:"views"`
 	// `true` until the link is first followed (then it no longer exists — a subsequent read
 	// returns `404`), permanently `false` for links without this flag.
@@ -2853,10 +2853,11 @@ type UpdateNoteRequest struct {
 	EditCode OptString `json:"edit_code"`
 	// Update the burn-after-reading flag.
 	BurnAfterReading OptBool `json:"burn_after_reading"`
-	// New TTL in seconds (grace period after first read).
-	// Only meaningful when `burn_after_reading` is `true`.
-	// `0` means the note is deleted immediately when it is first revealed.
-	TTL OptInt64 `json:"ttl"`
+	// With `burn_after_reading: true`, the grace period in seconds after first read;
+	// omitted, null or 0 means immediate burn. Otherwise this is a hard expiry counted
+	// from the update: omitted preserves the current expiry (except when disabling
+	// an existing burn timer), null removes it, and 0 expires immediately.
+	TTL OptNilInt64 `json:"ttl"`
 	// Update the privacy level. See `CreateNoteRequest.privacy` for the exact semantics of
 	// each value. Omitted keeps the note's current privacy level.
 	Privacy OptUpdateNoteRequestPrivacy `json:"privacy"`
@@ -2888,7 +2889,7 @@ func (s *UpdateNoteRequest) GetBurnAfterReading() OptBool {
 }
 
 // GetTTL returns the value of TTL.
-func (s *UpdateNoteRequest) GetTTL() OptInt64 {
+func (s *UpdateNoteRequest) GetTTL() OptNilInt64 {
 	return s.TTL
 }
 
@@ -2923,7 +2924,7 @@ func (s *UpdateNoteRequest) SetBurnAfterReading(val OptBool) {
 }
 
 // SetTTL sets the value of TTL.
-func (s *UpdateNoteRequest) SetTTL(val OptInt64) {
+func (s *UpdateNoteRequest) SetTTL(val OptNilInt64) {
 	s.TTL = val
 }
 

@@ -1,7 +1,11 @@
 package server
 
 import (
+	"fmt"
 	"github.com/urfave/cli/v3"
+
+	"github.com/partyzanex/padmark/internal/infra/crypto"
+	"github.com/partyzanex/padmark/internal/infra/logging"
 
 	"github.com/partyzanex/padmark/internal/usecases/auth"
 )
@@ -122,13 +126,16 @@ func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
 			Name:    FlagDSN,
 			Sources: cli.EnvVars(EnvDSN),
 			Value:   DefaultDSN,
-			Usage:   "Database DSN (file path for sqlite, connection string for postgres)",
+			Usage: "Database DSN (file path for sqlite, connection string for postgres). " +
+				"A postgres DSN carries the password and a command-line flag is visible to every local " +
+				"user in the process listing (ps); set it via PADMARK_DSN instead",
 		},
 		&cli.StringFlag{
-			Name:    FlagLogLevel,
-			Sources: cli.EnvVars(EnvLogLevel),
-			Value:   DefaultLogLevel,
-			Usage:   "Log level: debug, info, warn, error",
+			Name:      FlagLogLevel,
+			Validator: logging.ValidateLevel,
+			Sources:   cli.EnvVars(EnvLogLevel),
+			Value:     DefaultLogLevel,
+			Usage:     "Log level: debug, info, warn, error",
 		},
 		&cli.StringFlag{
 			Name:    FlagLogFormat,
@@ -147,9 +154,11 @@ func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
 			Name:    FlagDisableAPI,
 			Sources: cli.EnvVars(EnvDisableAPI),
 			Value:   false,
-			Usage: "Disable the REST/JSON API (/notes*, /links*, /api, /api/openapi.yaml): every request " +
-				"reaching the disabling middleware gets 503 with code=api_disabled. " +
-				"The web UI (incl. /r/{id}) and /healthz, /readyz keep working",
+			Usage: "Disable the REST/JSON API (/notes*, /links*, /api, /api/openapi.yaml, /llms.txt, " +
+				"/api/tokens, /api/invites): every request reaching the disabling middleware gets 503 with " +
+				"code=api_disabled. The web UI becomes read-only: viewing /{id} (incl. JSON/raw reads), " +
+				"/r/{id}, login/admin pages and health checks keep working, but publishing or saving from " +
+				"the editor fails with the API-disabled error (it calls POST /notes and PUT /notes/{id})",
 		},
 		&cli.BoolFlag{
 			Name:    FlagCustomSlugs,
@@ -245,23 +254,26 @@ func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
 			Usage:   "TOTP session TTL in seconds (default: 30 days)",
 		},
 		&cli.IntFlag{
-			Name:    FlagArgon2Memory,
-			Sources: cli.EnvVars(EnvArgon2Memory),
-			Value:   DefaultArgon2Memory,
+			Name:      FlagArgon2Memory,
+			Validator: boundedCost(int(crypto.MaxArgon2Memory)),
+			Sources:   cli.EnvVars(EnvArgon2Memory),
+			Value:     DefaultArgon2Memory,
 			Usage: "argon2id memory cost in KiB for account password hashing (default: 24576 = 24 MiB); " +
 				"edit codes use a fast hash and are unaffected",
 		},
 		&cli.IntFlag{
-			Name:    FlagArgon2Time,
-			Sources: cli.EnvVars(EnvArgon2Time),
-			Value:   DefaultArgon2Time,
-			Usage:   "argon2id time cost (iterations); raise when lowering memory to keep strength",
+			Name:      FlagArgon2Time,
+			Validator: boundedCost(int(crypto.MaxArgon2Time)),
+			Sources:   cli.EnvVars(EnvArgon2Time),
+			Value:     DefaultArgon2Time,
+			Usage:     "argon2id time cost (iterations); raise when lowering memory to keep strength",
 		},
 		&cli.IntFlag{
-			Name:    FlagArgon2Threads,
-			Sources: cli.EnvVars(EnvArgon2Threads),
-			Value:   DefaultArgon2Threads,
-			Usage:   "argon2id parallelism (CPU threads per hash)",
+			Name:      FlagArgon2Threads,
+			Validator: boundedCost(int(crypto.MaxArgon2Threads)),
+			Sources:   cli.EnvVars(EnvArgon2Threads),
+			Value:     DefaultArgon2Threads,
+			Usage:     "argon2id parallelism (CPU threads per hash)",
 		},
 		&cli.BoolFlag{
 			Name:    FlagDirectRedirect,
@@ -282,10 +294,22 @@ func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
 			Name:    FlagCSRFSecret,
 			Sources: cli.EnvVars(EnvCSRFSecret),
 			Usage: "HMAC key for signing CSRF tokens (raw bytes, at least 32 characters). " +
+				"Flag values are visible in process listings (ps); prefer PADMARK_CSRF_SECRET. " +
 				"Empty (default) generates a fresh random secret per process: forms survive only " +
 				"within one process lifetime, so restarts invalidate outstanding tokens and " +
 				"multi-replica deployments 403 on every form. Set to a fixed random value " +
 				"(e.g. `openssl rand -base64 32`) shared across replicas to avoid that",
 		},
+	}
+}
+
+// boundedCost rejects negative and overflowing flag values before narrowing to uint32/uint8.
+func boundedCost(maximum int) func(int) error {
+	return func(value int) error {
+		if value < 1 || value > maximum {
+			return fmt.Errorf("cost must be between 1 and %d", maximum)
+		}
+
+		return nil
 	}
 }

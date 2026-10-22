@@ -49,3 +49,15 @@ func TestValidatePassword_MissingClasses(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateUsername(t *testing.T) {
+	for _, username := range []string{"a", "alice", "alice@example.com", "Иван_42", strings.Repeat("a", 64)} {
+		require.NoError(t, ValidateUsername(username), username)
+	}
+
+	invalid := []string{"", " alice", "alice ", ".alice", "a/b", "a:b", "a?x", "a\n", "a\x00", "a b", "a#b", "a&b",
+		"a%20b", string([]byte{0xff}), strings.Repeat("a", 65)}
+	for _, username := range invalid {
+		require.ErrorIs(t, ValidateUsername(username), ErrInvalidUsername, username)
+	}
+}

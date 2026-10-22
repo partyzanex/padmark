@@ -17,14 +17,16 @@ import (
 )
 
 const (
-	contentVersion   = "pmc2"
-	contentKind      = "p"
-	legacyKind       = "l"
-	contentParts     = 5
-	contentNonceSize = 12
-	contentTagSize   = 16
-	wrappedKeySize   = contentNonceSize + aesKeySize + contentTagSize
-	maxKeyIDSize     = 64
+	// contentVersionTag prefixes every envelope version tag ("pmc" + decimal digits).
+	contentVersionTag = "pmc"
+	contentVersion    = contentVersionTag + "2"
+	contentKind       = "p"
+	legacyKind        = "l"
+	contentParts      = 5
+	contentNonceSize  = 12
+	contentTagSize    = 16
+	wrappedKeySize    = contentNonceSize + aesKeySize + contentTagSize
+	maxKeyIDSize      = 64
 	// MaxContentSize bounds allocations when opening untrusted stored envelopes.
 	MaxContentSize = 64 << 20
 	//nolint:mnd // padded base64 length
@@ -71,6 +73,32 @@ func NewContentCipher(activeID string, keys map[string][]byte, resource string) 
 	}
 
 	return enc, nil
+}
+
+// IsVersionedContent reports whether value claims to be a versioned content envelope: the
+// segment before the first "$" is a version tag "pmc" followed by decimal digits ("pmc2$…",
+// or an unknown future "pmc9$…"). Legacy raw ciphertext is canonical standard base64 and can
+// never contain "$", so any other value — including old plaintext rows with "$" in them —
+// is unversioned raw data. Classification is purely syntactic: a versioned value may still
+// fail authentication, and such values must never be treated as malformed raw records.
+func IsVersionedContent(value string) bool {
+	tag, _, found := strings.Cut(value, "$")
+	if !found {
+		return false
+	}
+
+	digits, ok := strings.CutPrefix(tag, contentVersionTag)
+	if !ok || digits == "" {
+		return false
+	}
+
+	for _, char := range digits {
+		if char < '0' || char > '9' {
+			return false
+		}
+	}
+
+	return true
 }
 
 func validKeyID(id string) bool {
@@ -272,6 +300,9 @@ func (enc *ContentCipher) contentAAD(recordID string) ([]byte, error) {
 	return enc.contentAADForKind(recordID, contentKind)
 }
 
+// AAD prevents swaps between IDs/resources/kinds, but has no monotonic revision.
+// A database writer can replay an older valid envelope for the same record; at-rest
+// encryption does not provide freshness without a trusted version store outside the DB.
 func (enc *ContentCipher) contentAADForKind(recordID, kind string) ([]byte, error) {
 	if len(recordID) != sha256.Size*2 {
 		return nil, errors.New("content record ID must be a SHA-256 digest")
@@ -292,6 +323,11 @@ func (enc *ContentCipher) contentAADForKind(recordID, kind string) ([]byte, erro
 	return append(aad, id...), nil
 }
 
+// seal uses random 96-bit GCM nonces. KEKs are reused across wrapped DEKs/key checks:
+// collision probability grows quadratically with aggregate seals on all replicas.
+// This format targets low-volume installations; keep the aggregate number of seals
+// per KEK well below 2^32 and rotate KEKs before approaching that bound.
+// A future format for high-volume use needs per-record wrapping subkeys.
 func (enc *ContentCipher) seal(gcm cipher.AEAD, plaintext, aad []byte) ([]byte, error) {
 	nonce := make([]byte, gcm.NonceSize())
 
@@ -317,6 +353,9 @@ func (enc *ContentEncryptor) Decrypt(value, recordID, legacySlug string) (string
 		return plaintext, nil
 	}
 
+	// Normal reads derive recordID from the same slug: GCM with the slug-derived
+	// key is the actual authentication. The explicit check also protects migration
+	// callers that can supply the record ID and original slug independently.
 	if domain.HashSlug(legacySlug) != recordID {
 		return "", domain.ErrDecryptionFailed
 	}

@@ -7,25 +7,24 @@ package linkcache
 
 import (
 	"context"
+	"crypto/sha256"
 	"log/slog"
 	"time"
 
 	"github.com/bluele/gcache"
-
-	"github.com/partyzanex/padmark/internal/domain"
 )
 
 const (
 	// DefaultSize bounds how many links are cached simultaneously; LRU evicts the
 	// least-recently-followed entry once full.
 	DefaultSize = 10_000
-	// DefaultTTL bounds how long a cached link may be served without checking storage again —
-	// the window in which an out-of-band delete (not through links.Manager.Delete, which
-	// invalidates explicitly) could be served stale.
+	// DefaultTTL bounds retention of decrypted public URLs. It is not a privacy
+	// staleness window: the manager reads storage metadata and checks ciphertext
+	// before each reuse, including on other replicas.
 	DefaultTTL = 30 * time.Second
 )
 
-// Cache is a gcache-backed LRU cache of decrypted links, keyed by domain.HashSlug(id).
+// Cache stores decrypted public targets by hashed record ID and ciphertext fingerprint.
 type Cache struct {
 	gc  gcache.Cache
 	log *slog.Logger
@@ -43,35 +42,35 @@ func NewDefault(log *slog.Logger) *Cache {
 	return New(DefaultSize, DefaultTTL, log)
 }
 
-// Get returns a clone of the cached link for id, or (nil, false) on a miss (absent or expired).
-// A clone, not the stored pointer, is returned so a caller's in-place mutation (e.g.
-// links.Manager.Redirect incrementing its local copy's Views) can never corrupt the cached entry.
-func (c *Cache) Get(id string) (*domain.Link, bool) {
-	v, err := c.gc.Get(id)
-	if err != nil {
-		return nil, false
-	}
-
-	link, ok := v.(*domain.Link)
-	if !ok {
-		return nil, false
-	}
-
-	clone := *link
-
-	return &clone, true
+type entry struct {
+	targetURL   string
+	fingerprint [sha256.Size]byte
 }
 
-// Set stores a clone of link under id — see Get's doc comment for why a clone, not the caller's
-// own pointer, is stored.
+// Get returns a target only for the ciphertext read from storage by this caller.
+// An update on another replica changes the fingerprint and forces a miss.
+func (c *Cache) Get(id, ciphertext string) (string, bool) {
+	v, err := c.gc.Get(id)
+	if err != nil {
+		return "", false
+	}
+
+	cached, ok := v.(entry)
+	if !ok || cached.fingerprint != sha256.Sum256([]byte(ciphertext)) {
+		return "", false
+	}
+
+	return cached.targetURL, true
+}
+
+// Set stores an immutable target plus fingerprint, without authorization metadata
+// or another full copy of the ciphertext.
 //
 // Set only fails when the cache was built with a LoaderFunc that itself errors — this Cache
 // never configures one, so the error is unreachable in practice. We log it anyway so a future
 // change to gcache cannot silently swallow the failure.
-func (c *Cache) Set(ctx context.Context, id string, link *domain.Link) {
-	clone := *link
-
-	err := c.gc.Set(id, &clone)
+func (c *Cache) Set(ctx context.Context, id, ciphertext, targetURL string) {
+	err := c.gc.Set(id, entry{targetURL: targetURL, fingerprint: sha256.Sum256([]byte(ciphertext))})
 	if err != nil {
 		c.log.WarnContext(ctx, "link cache set failed", "id", id, "err", err)
 	}

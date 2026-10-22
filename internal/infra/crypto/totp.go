@@ -6,6 +6,8 @@ import (
 	"encoding/base64"
 	"fmt"
 	"image/png"
+	"net/url"
+	"strconv"
 	"time"
 
 	"github.com/pquerna/otp"
@@ -94,10 +96,11 @@ func ValidateTOTPWithCounter(secret, code string) (valid bool, counter int64) {
 func OTPAuthURI(issuer, username, secret string) (string, error) {
 	var err error
 
-	uri := fmt.Sprintf(
-		"otpauth://totp/%s:%s?secret=%s&issuer=%s&algorithm=SHA1&digits=6&period=%d",
-		issuer, username, secret, issuer, totpPeriod,
-	)
+	query := url.Values{
+		"secret": {secret}, "issuer": {issuer}, "algorithm": {"SHA1"},
+		"digits": {"6"}, "period": {strconv.Itoa(totpPeriod)},
+	}
+	uri := "otpauth://totp/" + url.PathEscape(issuer) + ":" + url.PathEscape(username) + "?" + query.Encode()
 
 	_, err = otp.NewKeyFromURL(uri)
 	if err != nil {

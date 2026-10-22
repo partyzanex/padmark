@@ -29,8 +29,14 @@ const (
 
 // Path resolves ~/.config/padmark/token, honouring XDG_CONFIG_HOME when set.
 func Path() (string, error) {
+	return configPath("token")
+}
+
+// configPath resolves a file inside ~/.config/padmark (XDG_CONFIG_HOME-aware) — the shared
+// location for the token and the trust-on-first-use hosts record (see hosts.go).
+func configPath(filename string) (string, error) {
 	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
-		return filepath.Join(xdg, configSubdir, "token"), nil
+		return filepath.Join(xdg, configSubdir, filename), nil
 	}
 
 	home, err := os.UserHomeDir()
@@ -38,7 +44,7 @@ func Path() (string, error) {
 		return "", fmt.Errorf("resolve home dir: %w", err)
 	}
 
-	return filepath.Join(home, ".config", configSubdir, "token"), nil
+	return filepath.Join(home, ".config", configSubdir, filename), nil
 }
 
 // Read reads and trims the token from the config file, returning "" when the file is

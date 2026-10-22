@@ -1,3 +1,5 @@
+//go:build integration
+
 package postgres
 
 import (
@@ -221,7 +223,7 @@ func (s *APITokenRepositoryTestSuite) TestCreateIfUnderLimit_CountsOnlyThatUsers
 
 	count, err := s.db.NewSelect().TableExpr("api_tokens").Where("user_id = ?", userA).Count(ctx)
 	s.Require().NoError(err)
-	s.Equal(2, count, "the refused call must not have inserted a row")
+	s.Equal(int64(2), count, "the refused call must not have inserted a row")
 }
 
 func (s *APITokenRepositoryTestSuite) TestCreateIfUnderLimit_AtLimit_Refuses() {
@@ -279,7 +281,7 @@ func (s *APITokenRepositoryTestSuite) TestCreateIfUnderLimit_ConcurrentRace_Neve
 
 	stored, err := s.db.NewSelect().TableExpr("api_tokens").Where("user_id = ?", owner).Count(ctx)
 	s.Require().NoError(err)
-	s.Equal(limit, stored, "the stored row count must never exceed the limit under concurrency")
+	s.Equal(int64(limit), stored, "the stored row count must never exceed the limit under concurrency")
 }
 
 // ── RevokeByHash ──

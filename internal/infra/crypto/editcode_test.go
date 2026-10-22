@@ -41,6 +41,35 @@ func TestEditCodeHasher_VerifiesLegacyArgon2Hash(t *testing.T) {
 	assert.False(t, hasher.Verify(legacy, "wrong-code"))
 }
 
+// TestEditCodeHasher_UserProvidedRoundtrip pins that caller-supplied codes take the
+// memory-hard argon2id path and remain verifiable through the same Verify dispatcher.
+func TestEditCodeHasher_UserProvidedRoundtrip(t *testing.T) {
+	hasher := crypto.NewEditCodeHasher()
+
+	hash, err := hasher.HashUserProvided("MySecretCode12")
+	require.NoError(t, err)
+	assert.True(t, strings.HasPrefix(hash, "v1$"), "user-supplied codes must use the argon2id format, got %q", hash)
+	assert.True(t, hasher.Verify(hash, "MySecretCode12"))
+	assert.False(t, hasher.Verify(hash, "wrong-code"))
+}
+
+// TestEditCodeHasher_UserProvidedSaltsDiffer ensures two hashes of the same caller-supplied
+// code differ (random salt), so identical weak codes are not visible in a DB dump.
+func TestEditCodeHasher_UserProvidedSaltsDiffer(t *testing.T) {
+	hasher := crypto.NewEditCodeHasher()
+
+	hash1, err := hasher.HashUserProvided("password123")
+	require.NoError(t, err)
+
+	hash2, err := hasher.HashUserProvided("password123")
+	require.NoError(t, err)
+
+	assert.NotEqual(t, hash1, hash2)
+	assert.True(t, hasher.Verify(hash1, "password123"))
+	assert.True(t, hasher.Verify(hash2, "password123"))
+}
+
+// TestEditCodeHasher_WrongCodeFails verifies the negative branch of the fast path.
 func TestEditCodeHasher_WrongCodeFails(t *testing.T) {
 	hasher := crypto.NewEditCodeHasher()
 

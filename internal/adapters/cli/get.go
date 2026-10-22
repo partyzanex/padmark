@@ -72,6 +72,8 @@ func handleGetNoteRes(res padmark.GetNoteRes) (*padmark.NoteResponse, error) {
 	switch typed := res.(type) {
 	case *padmark.NoteResponse:
 		return typed, nil
+	case *padmark.GetNoteUnauthorized:
+		return nil, errors.New("unauthorized: authenticate with a credential allowed to read this note")
 	case *padmark.GetNoteNotFound:
 		return nil, errors.New("note not found")
 	case *padmark.GetNoteGone:

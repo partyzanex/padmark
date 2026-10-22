@@ -7,8 +7,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-
-	"github.com/partyzanex/padmark/internal/domain"
 )
 
 func discardLogger() *slog.Logger {
@@ -19,13 +17,11 @@ func TestCache_SetGet_RoundTrip(t *testing.T) {
 	t.Parallel()
 
 	cache := New(10, time.Minute, discardLogger())
-	link := &domain.Link{ID: "abc", TargetURL: "https://example.com"}
+	cache.Set(context.Background(), "abc", "ciphertext", "https://example.com")
 
-	cache.Set(context.Background(), "abc", link)
-
-	got, found := cache.Get("abc")
+	got, found := cache.Get("abc", "ciphertext")
 	require.True(t, found)
-	require.Equal(t, "https://example.com", got.TargetURL)
+	require.Equal(t, "https://example.com", got)
 }
 
 func TestCache_Get_Miss(t *testing.T) {
@@ -33,7 +29,7 @@ func TestCache_Get_Miss(t *testing.T) {
 
 	cache := New(10, time.Minute, discardLogger())
 
-	_, found := cache.Get("missing")
+	_, found := cache.Get("missing", "ciphertext")
 	require.False(t, found)
 }
 
@@ -41,11 +37,11 @@ func TestCache_Delete(t *testing.T) {
 	t.Parallel()
 
 	cache := New(10, time.Minute, discardLogger())
-	cache.Set(context.Background(), "abc", &domain.Link{TargetURL: "https://example.com"})
+	cache.Set(context.Background(), "abc", "ciphertext", "https://example.com")
 
 	cache.Delete("abc")
 
-	_, found := cache.Get("abc")
+	_, found := cache.Get("abc", "ciphertext")
 	require.False(t, found)
 }
 
@@ -57,55 +53,36 @@ func TestCache_Delete_MissingKey_NoPanic(t *testing.T) {
 	require.NotPanics(t, func() { cache.Delete("never-set") })
 }
 
-// TestCache_Get_MutatingReturnedValue_DoesNotCorruptCache verifies Get returns a clone: a caller
-// mutating its own copy (e.g. links.Manager.Redirect incrementing Views) must never leak back
-// into the cached entry, or a later hit would return a wrong, already-mutated value.
-func TestCache_Get_MutatingReturnedValue_DoesNotCorruptCache(t *testing.T) {
+// Even if an old snapshot is refilled after a remote update, it must miss
+// when the manager supplies the current ciphertext from storage.
+func TestCache_RejectsDifferentCiphertext(t *testing.T) {
 	t.Parallel()
 
 	cache := New(10, time.Minute, discardLogger())
-	cache.Set(context.Background(), "abc", &domain.Link{TargetURL: "https://example.com", Views: 0})
-
-	first, found := cache.Get("abc")
+	cache.Set(t.Context(), "id", "old ciphertext", "https://example.com/old")
+	_, found := cache.Get("id", "new ciphertext")
+	require.False(t, found)
+	cache.Set(t.Context(), "id", "new ciphertext", "https://example.com/new")
+	target, found := cache.Get("id", "new ciphertext")
 	require.True(t, found)
+	require.Equal(t, "https://example.com/new", target)
 
-	first.Views = 999
-	first.TargetURL = "mutated"
-
-	second, found := cache.Get("abc")
-	require.True(t, found)
-	require.Equal(t, 0, second.Views, "mutating the first Get's result must not affect later Gets")
-	require.Equal(t, "https://example.com", second.TargetURL)
-}
-
-// TestCache_Set_MutatingCallersValue_DoesNotCorruptCache is Set's side of the same guarantee:
-// mutating the caller's own link after Set must not affect what's stored.
-func TestCache_Set_MutatingCallersValue_DoesNotCorruptCache(t *testing.T) {
-	t.Parallel()
-
-	cache := New(10, time.Minute, discardLogger())
-	link := &domain.Link{TargetURL: "https://example.com"}
-
-	cache.Set(context.Background(), "abc", link)
-	link.TargetURL = "mutated-after-set"
-
-	got, found := cache.Get("abc")
-	require.True(t, found)
-	require.Equal(t, "https://example.com", got.TargetURL)
+	_, found = cache.Get("id", "old ciphertext")
+	require.False(t, found)
 }
 
 func TestCache_TTLExpiry(t *testing.T) {
 	t.Parallel()
 
 	cache := New(10, 10*time.Millisecond, discardLogger())
-	cache.Set(context.Background(), "abc", &domain.Link{TargetURL: "https://example.com"})
+	cache.Set(context.Background(), "abc", "ciphertext", "https://example.com")
 
-	_, found := cache.Get("abc")
+	_, found := cache.Get("abc", "ciphertext")
 	require.True(t, found, "entry must be present immediately after Set")
 
 	time.Sleep(30 * time.Millisecond)
 
-	_, found = cache.Get("abc")
+	_, found = cache.Get("abc", "ciphertext")
 	require.False(t, found, "entry must be gone once its TTL has elapsed")
 }
 
@@ -113,18 +90,18 @@ func TestCache_LRUEviction_WhenFull(t *testing.T) {
 	t.Parallel()
 
 	cache := New(2, time.Minute, discardLogger())
-	cache.Set(context.Background(), "a", &domain.Link{TargetURL: "a"})
-	cache.Set(context.Background(), "b", &domain.Link{TargetURL: "b"})
+	cache.Set(context.Background(), "a", "ciphertext", "a")
+	cache.Set(context.Background(), "b", "ciphertext", "b")
 	// Over capacity: this third insert must evict the least-recently-used entry ("a").
-	cache.Set(context.Background(), "c", &domain.Link{TargetURL: "c"})
+	cache.Set(context.Background(), "c", "ciphertext", "c")
 
-	_, found := cache.Get("a")
+	_, found := cache.Get("a", "ciphertext")
 	require.False(t, found, "least-recently-used entry must be evicted once the cache is full")
 
-	_, found = cache.Get("b")
+	_, found = cache.Get("b", "ciphertext")
 	require.True(t, found)
 
-	_, found = cache.Get("c")
+	_, found = cache.Get("c", "ciphertext")
 	require.True(t, found)
 }
 
@@ -132,9 +109,9 @@ func TestNewDefault_UsableCache(t *testing.T) {
 	t.Parallel()
 
 	cache := NewDefault(discardLogger())
-	cache.Set(context.Background(), "abc", &domain.Link{TargetURL: "https://example.com"})
+	cache.Set(context.Background(), "abc", "ciphertext", "https://example.com")
 
-	got, found := cache.Get("abc")
+	got, found := cache.Get("abc", "ciphertext")
 	require.True(t, found)
-	require.Equal(t, "https://example.com", got.TargetURL)
+	require.Equal(t, "https://example.com", got)
 }

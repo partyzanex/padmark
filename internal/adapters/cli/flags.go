@@ -43,6 +43,10 @@ const (
 	EnvEditCode = "PADMARK_EDIT_CODE"
 )
 
+// psWarnEditCode is appended to every --edit-code usage text: an edit code is a credential for
+// the note or link, and flag values are visible to other local users in process listings.
+const psWarnEditCode = "Flag values are visible in process listings (ps); prefer the " + EnvEditCode + " env var"
+
 // DefaultURL is the default padmark server address.
 const DefaultURL = "http://localhost:8080"
 

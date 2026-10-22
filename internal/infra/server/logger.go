@@ -3,20 +3,14 @@ package server
 import (
 	"log/slog"
 	"os"
+
+	"github.com/partyzanex/padmark/internal/infra/logging"
 )
 
 func newLogger(level, format string) *slog.Logger {
-	var lvl slog.Level
-
-	switch level {
-	case "debug":
-		lvl = slog.LevelDebug
-	case "warn":
-		lvl = slog.LevelWarn
-	case "error":
-		lvl = slog.LevelError
-	default:
-		lvl = slog.LevelInfo
+	lvl, err := logging.ParseLevel(level)
+	if err != nil {
+		slog.Warn("invalid log level; falling back to info", "err", err)
 	}
 
 	opts := &slog.HandlerOptions{

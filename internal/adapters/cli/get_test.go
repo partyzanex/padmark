@@ -37,3 +37,10 @@ func TestHandleDeleteNoteRes_NotFound_CleanMessage(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, "note not found", err.Error())
 }
+
+func TestHandleGetNoteRes_Unauthorized(t *testing.T) {
+	note, err := handleGetNoteRes(&padmark.GetNoteUnauthorized{Message: "unauthorized"})
+	require.Nil(t, note)
+	require.ErrorContains(t, err, "unauthorized")
+	require.NotContains(t, err.Error(), "unexpected response")
+}

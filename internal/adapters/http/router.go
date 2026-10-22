@@ -123,21 +123,23 @@ type RouteRegistrar interface {
 // separate OgenHandler — so they're registered here rather than via a RouteRegistrar. lockout is
 // shared with NoteHandler's native {id...} routes (see NoteHandler.RegisterRoutes) so fail-lockout
 // tracking is consistent for a note or link regardless of which route variant a client hits — a
-// single cache keyed by path ID works for both since notes and links share one global slug
+// single cache keyed by path ID plus caller works since notes and links share one global slug
 // namespace (a note and a link can never have the same ID, see domain.HashSlug/ErrSlugConflict).
 func registerOgenRoutes(mux *http.ServeMux, ogenSrv http.Handler, lockout gcache.Cache, log *slog.Logger) {
 	mux.Handle("POST /notes", ogenSrv)
-	mux.Handle("PUT /notes/{id}", withFailLockout(lockout, log, ogenSrv))
-	mux.Handle("DELETE /notes/{id}", withFailLockout(lockout, log, ogenSrv))
+	mux.Handle("PUT /notes/{id}", requireSameOrigin(log, withFailLockout(lockout, log, ogenSrv)))
+	mux.Handle("DELETE /notes/{id}", requireSameOrigin(log, withFailLockout(lockout, log, ogenSrv)))
 	mux.Handle("POST /links", ogenSrv)
 	mux.Handle("POST /links/bulk", ogenSrv)
 	mux.Handle("GET /links/{id}", ogenSrv)
-	mux.Handle("PUT /links/{id}", withFailLockout(lockout, log, ogenSrv))
-	mux.Handle("DELETE /links/{id}", withFailLockout(lockout, log, ogenSrv))
+	mux.Handle("PUT /links/{id}", requireSameOrigin(log, withFailLockout(lockout, log, ogenSrv)))
+	mux.Handle("DELETE /links/{id}", requireSameOrigin(log, withFailLockout(lockout, log, ogenSrv)))
 	mux.Handle("GET /healthz", ogenSrv)
 	mux.Handle("GET /readyz", ogenSrv)
-	// The account endpoints authenticate the session cookie (and embed one-time secrets in
-	// their responses), so they get the origin check the machine-only routes don't need.
+	// Account endpoints and note/link PUT/DELETE accept browser session cookies, so they enforce
+	// same-origin requests. POST /notes, POST /links and POST /links/bulk are deliberately not
+	// wrapped: they accept only JSON bodies (a cross-site JSON POST forces a CORS preflight the
+	// server never answers) and the session cookie is SameSite=Strict.
 	mux.Handle("POST /api/tokens", requireSameOrigin(log, ogenSrv))
 	mux.Handle("POST /api/invites", requireSameOrigin(log, ogenSrv))
 }
@@ -263,9 +265,11 @@ func buildNamedRoutes() map[string]struct{} {
 // requireSameOrigin rejects a request that explicitly announces a foreign origin. Machine
 // clients (CLI, agents, curl) send no Origin header; a browser's cross-site POST always sends
 // one (CORS semantics), so comparing it with the request's own origin closes cookie-CSRF for
-// the session-authenticated account endpoints — SameSite alone admits same-site cross-origin
-// (sibling-subdomain) calls, and these routes authenticate the session cookie. A missing Origin
-// is allowed: machine callers never carry a session the attacker could ride.
+// the routes it wraps — session-authenticated account endpoints and note/link PUT/DELETE;
+// SameSite alone admits sibling-subdomain calls. It is not applied to every mutation: the
+// JSON-only creation routes (POST /notes, /links, /links/bulk) rely on the CORS preflight a
+// cross-site JSON POST triggers plus the SameSite=Strict session cookie instead (see
+// registerOgenRoutes). A missing Origin is allowed for non-browser clients.
 func requireSameOrigin(log *slog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if origin := r.Header.Get("Origin"); origin != "" && !sameOrigin(r, origin) {
@@ -400,9 +404,8 @@ func withLogging(log *slog.Logger, next http.Handler) http.Handler {
 		// remote is the immediate peer (the proxy/LB IP when behind one); xff is the
 		// X-Forwarded-For chain the proxy sent; user/admin is the resolved identity ("-" when
 		// anonymous). These make trusted-proxy and auth debugging possible without shell access.
-		// route is the first path segment only (e.g. "notes", "healthz") — it identifies which
-		// endpoint was hit for traffic/error debugging without exposing further segments, which
-		// for note routes can be the note slug itself (the content-encryption key material).
+		// Only built-in route names are safe to log; the first segment of /{slug}
+		// is itself secret key material for legacy content.
 		attrs := []any{
 			"method", r.Method,
 			"status", rec.status,
@@ -411,28 +414,30 @@ func withLogging(log *slog.Logger, next http.Handler) http.Handler {
 			"xff", r.Header.Get("X-Forwarded-For"),
 			"user", user,
 			"admin", holder.admin,
-			"route", firstPathSegment(r.URL.Path),
+			"route", logRoute(r.URL.Path),
 		}
 
-		// The request path can embed a note slug, which is the note's content-encryption key
-		// material. Keep it out of info-level access logs; include it only when debug is enabled.
+		// Debug correlation also uses a digest, never the plaintext path or query string.
 		if log.Enabled(r.Context(), slog.LevelDebug) {
-			attrs = append(attrs, "path", r.URL.Path)
+			attrs = append(attrs, "path_hash", domain.HashSlug(r.URL.Path))
 		}
 
 		log.Log(r.Context(), level, "http", attrs...)
 	})
 }
 
-// firstPathSegment returns the first non-empty segment of path, without the leading slash
-// and without anything from the next slash onward. It returns "" for "" and "/".
-func firstPathSegment(path string) string {
+// logRoute reports a built-in route name or a constant label for note slug paths.
+func logRoute(path string) string {
 	trimmed := strings.TrimPrefix(path, "/")
-	if before, _, ok := strings.Cut(trimmed, "/"); ok {
-		return before
+	if trimmed == "" {
+		return ""
 	}
 
-	return trimmed
+	if first, reserved := domain.FirstSegmentReserved(trimmed); reserved {
+		return first
+	}
+
+	return "note"
 }
 
 func withBodyLimit(maxBytes int64, next http.Handler) http.Handler {

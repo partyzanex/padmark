@@ -2,7 +2,6 @@ package auth
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/base64"
 	"errors"
 	"testing"
@@ -92,13 +91,6 @@ func (suite *APITokenSuite) adminUser() *domain.User {
 
 func (suite *APITokenSuite) regularUser() *domain.User {
 	return &domain.User{ID: uuid.New(), Username: "alice", IsAdmin: false}
-}
-
-// hashToken mirrors the usecase's token hashing so tests can wire GetByHash expectations.
-func hashToken(plain string) string {
-	sum := sha256.Sum256([]byte(plain))
-
-	return base64.RawURLEncoding.EncodeToString(sum[:])
 }
 
 // ── CreateAPIToken ──

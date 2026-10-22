@@ -318,6 +318,8 @@ func setupErrMsg(err error) string {
 		return "Setup is only available when no users exist."
 	case errors.Is(err, domain.ErrWeakPassword):
 		return "Password must be at least 12 characters with upper, lower, digit, and special character."
+	case errors.Is(err, domain.ErrInvalidUsername):
+		return domain.ErrInvalidUsername.Error()
 	default:
 		return "Something went wrong. Please try again."
 	}
@@ -446,9 +448,15 @@ func (h *AuthHandler) ChangePasswordHandler(w http.ResponseWriter, r *http.Reque
 		Success: false,
 	}
 
-	errMsg := h.doChangePassword(w, r, oldPassword, newPassword, newPasswordConfirm, totpCode)
+	errMsg, rotatedCSRF := h.doChangePassword(w, r, oldPassword, newPassword, newPasswordConfirm, totpCode)
 	if errMsg == "redirect" {
 		return
+	}
+
+	// A password change (full or partial) rotates the CSRF cookie; the re-rendered form must
+	// carry the new token or resubmitting from this page fails the double-submit check (403).
+	if rotatedCSRF != "" {
+		data.CSRFToken = rotatedCSRF
 	}
 
 	data.Error = errMsg
@@ -571,19 +579,21 @@ func (h *AuthHandler) renderSetup(w http.ResponseWriter, r *http.Request, data *
 	}
 }
 
-// doChangePassword performs the password change and returns an error string (empty on success).
-// When the session is expired it writes a redirect and returns a sentinel ("redirect").
+// doChangePassword performs the password change and returns an error string (empty on success)
+// plus the rotated CSRF token when the change went through (empty when no rotation happened or
+// token generation failed — the request's existing token then stays valid). When the session is
+// expired it writes a redirect and returns a sentinel ("redirect").
 func (h *AuthHandler) doChangePassword(
 	w http.ResponseWriter, r *http.Request, oldPassword, newPassword, confirm, totpCode string,
-) string {
+) (errMsg, rotatedCSRF string) {
 	if newPassword != confirm {
-		return "New passwords do not match."
+		return "New passwords do not match.", ""
 	}
 
 	sessID := extractSessionID(r)
 
 	newSessID, changeErr := h.authMgr.ChangePassword(r.Context(), sessID, oldPassword, newPassword, totpCode)
-	if changeErr == nil {
+	if changeErr == nil || errors.Is(changeErr, domain.ErrSessionRevocation) {
 		// Replace the session cookie: all old sessions were invalidated; use the fresh one.
 		http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: HttpOnly/SameSite set; Secure follows TLS detection
 			Name:     sessionCookieName,
@@ -603,23 +613,33 @@ func (h *AuthHandler) doChangePassword(
 			Partitioned: false,
 		})
 
-		rotateCSRFToken(w, r, h.csrfSecret, h.trustedProxies)
+		rotatedCSRF = rotateCSRFToken(w, r, h.csrfSecret, h.trustedProxies)
 
-		return ""
+		if errors.Is(changeErr, domain.ErrSessionRevocation) {
+			return "Password changed, but older sessions could not be revoked. " +
+				"You are signed in with a new session. Contact an administrator to revoke older sessions.", rotatedCSRF
+		}
+
+		return "", rotatedCSRF
 	}
 
 	if errors.Is(changeErr, domain.ErrSessionExpired) {
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 
-		return "redirect"
+		return "redirect", ""
 	}
 
+	return changePasswordErrMsg(changeErr), ""
+}
+
+// changePasswordErrMsg maps a failed (non-rotating) password change onto the form's message.
+func changePasswordErrMsg(err error) string {
 	switch {
-	case errors.Is(changeErr, domain.ErrInvalidPassword):
+	case errors.Is(err, domain.ErrInvalidPassword):
 		return "Current password is incorrect."
-	case errors.Is(changeErr, domain.ErrInvalidTOTP):
+	case errors.Is(err, domain.ErrInvalidTOTP):
 		return "TOTP code is invalid or has expired."
-	case errors.Is(changeErr, domain.ErrWeakPassword):
+	case errors.Is(err, domain.ErrWeakPassword):
 		return "Password must be at least 12 characters with upper, lower, digit, and special character."
 	default:
 		return "Something went wrong. Please try again."

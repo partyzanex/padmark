@@ -246,19 +246,19 @@ func (s *AuthFlowSuite) TestFlow_ChangePassword_InvalidatesOldSessions() {
 
 	// Simulate a second active session (e.g., stolen cookie) inserted directly.
 	stolenSess := &domain.Session{
-		SessionID: "stolen-session-id",
-		UserID:    usr.ID,
-		CreatedAt: time.Now(),
-		ExpiresAt: time.Now().Add(30 * 24 * time.Hour),
-		UserAgent: "attacker-ua",
-		IP:        "9.9.9.9",
+		SessionHash: "stolen-session-id",
+		UserID:      usr.ID,
+		CreatedAt:   time.Now(),
+		ExpiresAt:   time.Now().Add(30 * 24 * time.Hour),
+		UserAgent:   "attacker-ua",
+		IP:          "9.9.9.9",
 	}
 	s.Require().NoError(s.Sessions.Create(ctx, stolenSess))
 
 	// Both sessions must be valid before the password change.
 	_, err = s.mgr.GetSession(ctx, sess1)
 	s.Require().NoError(err, "sess1 must be valid before password change")
-	_, err = s.Sessions.Get(ctx, stolenSess.SessionID)
+	_, err = s.Sessions.Get(ctx, stolenSess.SessionHash)
 	s.Require().NoError(err, "stolen session must exist before password change")
 
 	const newPassword = "N3wP@ssw0rd!"
@@ -272,14 +272,14 @@ func (s *AuthFlowSuite) TestFlow_ChangePassword_InvalidatesOldSessions() {
 	s.Require().NoError(err)
 	s.NotEmpty(newSessID)
 	s.NotEqual(sess1, newSessID, "returned session must be a fresh ID")
-	s.NotEqual(stolenSess.SessionID, newSessID)
+	s.NotEqual(stolenSess.SessionHash, newSessID)
 
 	// The original login session must now be rejected.
 	_, err = s.mgr.GetSession(ctx, sess1)
 	s.Require().ErrorIs(err, domain.ErrSessionExpired, "original session must be invalidated after password change")
 
 	// The stolen session must also be rejected.
-	_, err = s.Sessions.Get(ctx, stolenSess.SessionID)
+	_, err = s.Sessions.Get(ctx, stolenSess.SessionHash)
 	s.Require().ErrorIs(err, domain.ErrSessionExpired, "stolen session must be invalidated after password change")
 
 	// The newly issued session must be valid and resolve to the correct user.

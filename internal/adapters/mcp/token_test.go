@@ -32,9 +32,7 @@ func newTestCmd(t *testing.T, args ...string) *urcli.Command {
 }
 
 func TestSplitToken_EnvelopeUnpacksURLAndKey(t *testing.T) {
-	t.Setenv(EnvToken, "")
-	t.Setenv(EnvBaseURL, "")
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	isolateEnv(t)
 
 	envelope, err := domain.EncodeAPITokenEnvelope("https://notes.example.com", "the-key")
 	require.NoError(t, err)
@@ -51,9 +49,7 @@ func TestSplitToken_BareKeyHasNoURL(t *testing.T) {
 }
 
 func TestPickServerURL_ExplicitFlagBeatsEnvelope(t *testing.T) {
-	t.Setenv(EnvToken, "")
-	t.Setenv(EnvBaseURL, "")
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	isolateEnv(t)
 
 	envelope, err := domain.EncodeAPITokenEnvelope("http://embedded:4000", "k")
 	require.NoError(t, err)
@@ -65,8 +61,7 @@ func TestPickServerURL_ExplicitFlagBeatsEnvelope(t *testing.T) {
 }
 
 func TestPickServerURL_DefaultWithoutFlagAndEnvelope(t *testing.T) {
-	t.Setenv(EnvToken, "")
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	isolateEnv(t)
 
 	cmd := newTestCmd(t)
 
@@ -74,9 +69,8 @@ func TestPickServerURL_DefaultWithoutFlagAndEnvelope(t *testing.T) {
 }
 
 func TestPickServerURL_EnvBaseURL(t *testing.T) {
-	t.Setenv(EnvToken, "")
+	isolateEnv(t)
 	t.Setenv(EnvBaseURL, "http://from-env:7000")
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 
 	cmd := newTestCmd(t)
 

@@ -13,22 +13,31 @@ const (
 	editCodeSaltLen = 16
 	// editCodeVersion tags the fast salted-SHA-256 edit-code format ("s1$salt$key").
 	editCodeVersion = "s1"
-	// legacyArgon2Prefix marks edit codes hashed with the old argon2id scheme; Verify still
-	// accepts them so notes created before the switch keep working.
+	// legacyArgon2Prefix marks argon2id edit-code hashes ("v1$…"). The name is historical:
+	// it is both the format of codes hashed before the switch to "s1$" and the current
+	// format HashUserProvided writes for caller-supplied codes. Verify accepts it either way.
 	legacyArgon2Prefix = "v1$"
 	editCodeParts      = 3
 )
 
 // EditCodeHasher hashes and verifies note edit codes.
 //
-// Edit codes are high-entropy random strings (see notes.newEditCode), so — unlike passwords —
-// they cannot be brute-forced and do NOT need a memory-hard KDF. A fast salted SHA-256 gives the
-// same at-rest protection (a DB leak still reveals no usable code) without argon2's per-call
-// memory/CPU cost, which was being paid on every note create/update/delete. Verify additionally
-// accepts the legacy argon2id format so existing hashes remain valid.
+// There are two kinds of edit codes with opposite brute-force economics:
+//
+//   - generated codes (domain.NewEditCode): 12 chars of high-entropy random material, so a
+//     fast salted SHA-256 ("s1$…") gives the same at-rest protection as a memory-hard KDF —
+//     a DB leak still reveals no usable code — without paying argon2's per-call memory/CPU
+//     cost on every create.
+//   - user-supplied codes (caller-chosen via the API): potentially low-entropy, human-chosen
+//     values ("password123"), so a leaked fast hash would be brute-forceable at billions of
+//     guesses per second. HashUserProvided hashes these with argon2id instead.
+//
+// Verify accepts both stored formats (plus the legacy argon2id "v1$" hashes) so existing
+// codes remain valid and no data migration is needed.
 type EditCodeHasher struct{}
 
-// NewEditCodeHasher returns an EditCodeHasher. It takes no cost parameters: the fast hash has none.
+// NewEditCodeHasher returns an EditCodeHasher. It takes no cost parameters: the fast hash
+// has none, and HashUserProvided uses DefaultArgon2Params.
 func NewEditCodeHasher() *EditCodeHasher { return &EditCodeHasher{} }
 
 // Hash returns a salted SHA-256 of code in the format "s1$<base64url_salt>$<base64url_digest>".
@@ -44,6 +53,19 @@ func (h *EditCodeHasher) Hash(code string) (string, error) {
 
 	return editCodeVersion + "$" + enc.EncodeToString(salt) + "$" +
 		enc.EncodeToString(editCodeDigest(salt, code)), nil
+}
+
+// HashUserProvided hashes a caller-supplied edit code with argon2id (DefaultArgon2Params).
+// Unlike Hash, this path must assume low-entropy, human-chosen values, so a leaked hash must
+// not be crackable at salted-SHA-256 speeds. The output keeps the "v1$" envelope that Verify
+// already dispatches to the argon2 verifier, so verification needs no extra plumbing.
+func (h *EditCodeHasher) HashUserProvided(code string) (string, error) {
+	hashed, err := hashArgon2(code, DefaultArgon2Params())
+	if err != nil {
+		return "", fmt.Errorf("hash user edit code: %w", err)
+	}
+
+	return hashed, nil
 }
 
 // Verify reports whether code matches storedHash using a constant-time comparison.

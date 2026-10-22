@@ -70,10 +70,9 @@ func (m *APITokenManager) CreateAPIToken(ctx context.Context, userID uuid.UUID) 
 		return "", err
 	}
 
-	hash := sha256.Sum256([]byte(plain))
 	token := &domain.APIToken{
 		UserID:    usr.ID,
-		TokenHash: base64.RawURLEncoding.EncodeToString(hash[:]),
+		TokenHash: hashToken(plain),
 		CreatedAt: time.Now(),
 		// ExpiresAt:  — TTL=0 means "never expires"; zero value carries that semantics for this column.
 		// LastUsedAt: — unused until the first authenticated request resolves the token.
@@ -101,9 +100,7 @@ func (m *APITokenManager) ResolveAPIToken(ctx context.Context, plainToken string
 		return nil, domain.ErrFeatureNotSupported
 	}
 
-	hash := sha256.Sum256([]byte(plainToken))
-
-	token, err := m.apiTokens.GetByHash(ctx, base64.RawURLEncoding.EncodeToString(hash[:]))
+	token, err := m.apiTokens.GetByHash(ctx, hashToken(plainToken))
 	if err != nil {
 		return nil, fmt.Errorf("get api token by hash: %w", err)
 	}
@@ -206,4 +203,13 @@ func newAPIToken() (string, error) {
 	}
 
 	return base64.RawURLEncoding.EncodeToString(buf), nil
+}
+
+// hashToken derives the at-rest primary key for a plaintext bearer credential: the SHA-256
+// digest base64url-encoded. APIToken.TokenHash and Session.SessionHash share this scheme, so
+// the raw credential value is never persisted; it lives only in the client cookie.
+func hashToken(plain string) string {
+	hash := sha256.Sum256([]byte(plain))
+
+	return base64.RawURLEncoding.EncodeToString(hash[:])
 }

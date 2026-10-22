@@ -61,7 +61,7 @@ Every note has:
 | `content` | Markdown or plain text body |
 | `edit_code` | Your one-time secret for editing and deleting |
 | `burn_after_reading` | Delete the note on first read |
-| `ttl` | Seconds to live *after* the first read (optional) |
+| `ttl` | On create: post-read grace period with burn. On update without burn: seconds until hard expiry |
 | `privacy` | Who can read it: `public` (default), `authenticated`, or `owner` |
 
 > **Keep your `edit_code` safe.** It's shown once at creation and cannot be recovered. Exception:
@@ -104,12 +104,13 @@ expired link answers `410 Gone`, a missing one `404`, and a link denied by its `
 > owner-bypass also applies — a link created while authenticated can be updated or deleted later by that same
 > credential with no `edit_code` needed.
 
-Frequently-followed ("hot") links are served from a small in-memory cache to skip the storage
-round-trip and decryption on repeat requests — always on, no configuration needed. The trade-off:
-`views` in a `GET /links/{id}` response, or in the value returned from a redirect, can lag the
-true stored count by a few seconds; the stored count itself is always accurate. A link is deleted
-from the cache immediately when it's updated or explicitly deleted, and burn-after-click links are never
-cached at all (so the "exactly once" guarantee is never affected by caching).
+Frequently-followed public links use a small in-memory cache of decrypted destination URLs.
+Every read still fetches current metadata from the shared database: privacy, ownership, expiry,
+burn settings and counters are never cached. A cached target is reused only when its ciphertext
+fingerprint matches that database read. Updates and deletes therefore take effect on the next
+read by any replica, without waiting for the cache's 30-second TTL. Private, expired and
+burn-after-click links bypass the cache. The cache saves decryption work; it does not remove
+the database read or cache authorization decisions.
 
 ---
 
@@ -158,7 +159,7 @@ docker run -d \
   --mount "type=bind,src=$PADMARK_CONTENT_KEYRING_FILE,dst=/run/secrets/content-keys.json,readonly" \
   -e PADMARK_CONTENT_KEYRING_FILE=/run/secrets/content-keys.json \
   -e PADMARK_DSN=/data/padmark.db \
-  partydev/padmark:latest
+  partyzanex/padmark:latest
 ```
 
 Open `http://localhost:8080`.
@@ -170,19 +171,25 @@ the key into the image. The same file-permission requirement applies to Compose 
 
 **PostgreSQL (Compose):**
 
-Save the file below as `docker-compose.yml` and run `docker compose up -d`.
+Save the file below as `docker-compose.yml`, set `POSTGRES_PASSWORD` and the host
+`PADMARK_CONTENT_KEYRING_FILE` path in `.env`, then run `docker compose up -d`.
+The default image matches CI; override `DOCKER_IMAGE`/`DOCKER_TAG` for your own build.
 
 ```yaml
 services:
   db:
-    image: postgres:18-alpine
+    image: postgres:17-alpine
     restart: unless-stopped
     environment:
       POSTGRES_DB: padmark
       POSTGRES_USER: padmark
-      POSTGRES_PASSWORD: padmark
+      # Compose fails fast when unset; the same variable feeds the padmark DSN below.
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env or the environment}"
     volumes:
       - db_data:/var/lib/postgresql/data
+    # Loopback-only: reachable for local debugging from the host, never from other machines.
+    ports:
+      - "127.0.0.1:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U padmark -d padmark"]
       interval: 5s
@@ -192,13 +199,13 @@ services:
       - padmark
 
   padmark:
-    image: partydev/padmark:latest
+    image: ${DOCKER_IMAGE:-partyzanex/padmark}:${DOCKER_TAG:-latest}
     command: serve
     ports:
       - "8080:8080"
     environment:
       PADMARK_STORAGE: postgres
-      PADMARK_DSN: "postgres://padmark:padmark@db:5432/padmark?sslmode=disable"
+      PADMARK_DSN: "postgres://padmark:${POSTGRES_PASSWORD}@db:5432/padmark?sslmode=disable"
       PADMARK_ADDR: ":8080"
       PADMARK_LOG_FORMAT: json
       PADMARK_CONTENT_KEYRING_FILE: /run/secrets/padmark_content_keys
@@ -214,17 +221,18 @@ services:
 networks:
   padmark:
 
-volumes:
-  db_data:
-
 secrets:
   padmark_content_keys:
     file: ${PADMARK_CONTENT_KEYRING_FILE:?Set the host keyring file path}
+
+volumes:
+  db_data:
 ```
 
 This file is also included in the repo as [`docker-compose.yml`](docker-compose.yml).
 
-> **Change the database password** before deploying to a non-local environment — replace `padmark` in both `POSTGRES_PASSWORD` and the DSN string.
+Compose requires `POSTGRES_PASSWORD`; that value is used for both PostgreSQL and the app DSN.
+The named `db_data` volume preserves database files when containers are recreated.
 
 ---
 
@@ -365,6 +373,12 @@ curl -X DELETE http://localhost:4000/notes/{id} \
   -H "Authorization: Bearer <api-key>"
 ```
 
+For `PUT /notes/{id}` without `burn_after_reading`, `ttl: N` sets a hard expiry N seconds
+from the update, `ttl: null` removes expiry, and an omitted TTL preserves it. Disabling an
+existing burn timer clears that timer's expiry. With `burn_after_reading: true`, TTL remains
+a post-read grace period; omitted, null or 0 means immediate burn. All API TTLs are bounded
+to 0–9223372036 seconds.
+
 **Burn-after-reading**
 ```bash
 # Delete on first read
@@ -438,6 +452,12 @@ Tools: `create_note`, `get_note`, `update_note`, `delete_note`, `create_link`,
 Configure with the same credential and defaults as the CLI: `--token` / `PADMARK_TOKEN`
 (a `pmk_…` envelope works — it carries the server URL too), `--base-url` / `PADMARK_URL`
 (default `http://localhost:8080`), `--timeout` / `PADMARK_TIMEOUT`.
+
+MCP logging uses `--log-level` / `PADMARK_LOG_LEVEL` (`debug`, `info`, `warn`, `error`);
+logs go to stderr so stdout stays reserved for the protocol. Unknown levels fail startup.
+Tool descriptions label note text, titles and destination URLs as untrusted data. That
+framing is guidance to the consuming agent, not a sandbox: retrieved content never grants
+permission to expose credentials, switch servers or perform unrelated operations.
 
 Example `mcpServers` entry (Claude Code / Cursor JSON config):
 
@@ -524,11 +544,20 @@ When **disabled**, none of the routes below are gated and `/setup`, `/admin`, et
 - **`/change-password`** — rotate the password (requires the current password **and** a TOTP code).
 - Sessions are cookie-based; lifetime via `--session-ttl` (default 30 days).
 
+Invite links expire after 24 hours and can be used once. Only the base64url-encoded SHA-256
+hash of each invite token is stored in the database. Migration `20261014000002` revokes
+previously issued invites on both SQLite and PostgreSQL; admins must issue new links.
+Rolling back this migration also revokes invites, since raw tokens cannot be recovered.
+
 **`privacy: authenticated`** notes require either a valid session (browsers are redirected to
 `/login`) or a Bearer token (API clients get `401`) — any signed-in caller, not just the creator.
 **`privacy: owner`** notes go further: only the exact credential that created the note may read
 it (see "Editing without `edit_code`" below for the same owner-scoping applied to writes) —
 meaningless without `--enable-accounts`, since a note has no recorded owner otherwise.
+
+Secret CLI flag values (`--password`, `--token`, `--csrf-secret`) are visible in process
+listings such as `ps`. Pipe passwords through stdin; use the token file or `PADMARK_TOKEN`
+for tokens and `PADMARK_CSRF_SECRET` for the CSRF secret.
 
 **The `edit_code` workflow works without signing in.** Anonymous callers may create notes/links
 and, with the correct `edit_code`, edit or delete anything whose `privacy` level lets them read
@@ -577,6 +606,11 @@ note's `privacy` level.
 - **CLI/API:** just omit `--edit-code` / the `edit_code` field; the Bearer token or session does
   the rest (see the CLI and REST API examples above).
 
+Failed edit-code attempts are tracked per resource and authenticated user ID, shared across
+that user's sessions and API tokens. Ten failures lock that pair for five minutes. Anonymous
+callers share a separate bucket per resource. Successful updates or deletes reset only the
+calling user's bucket, so another caller's failures cannot block the authenticated owner.
+
 ### Security at rest
 
 - Note content and short-link target URLs are **encrypted at rest**.
@@ -594,19 +628,49 @@ note's `privacy` level.
   every current envelope; missing/substituted keys, raw rows, corrupt envelopes and incomplete
   migrations block startup. Scans use bounded batches, so startup time grows with the DB size.
   Native-only existing databases are registered after their envelopes are authenticated.
-- Never exceed `2^32` GCM encryptions per installation key across replicas, migrations,
-  key checks and rewraps; rotate beforehand. This operational limit is not automatically counted.
+- GCM nonces are random 96-bit values, so collision probability grows with every seal under
+  one key: keep the aggregate number of seals per installation key (across replicas,
+  migrations, key checks and rewraps) well below `2^32`, and rotate keys before approaching
+  that bound. This operational limit is not automatically counted.
   Native plaintext is limited to 64 MiB; legacy wrappers allow the additional base64 overhead.
   Existing dumps, WAL, freed pages and backups retain their old security properties; migration
   does not securely erase those copies. Titles and record metadata remain readable in the DB.
-- Passwords and `edit_code`s are hashed with **argon2id**.
+- Passwords and caller-chosen `edit_code`s use **argon2id**. Server-generated random
+  edit codes retain salted SHA-256; existing fast hashes remain readable.
 - Each user's TOTP secret is encrypted under an argon2id key derived from their password, and
   the stored value records the cost it was derived at (`v1$<memory>$<time>$<threads>$…`). That
   is what makes `--argon2-*` safe to retune on a live deployment: decryption uses the parameters
   saved with each secret, not the ones currently configured. Secrets written under an older cost
   (or the pre-argon2id scheme) are re-encrypted at the current cost on the owner's next
   successful login — no manual migration, and a failed rewrite never blocks the login.
+- Stored Argon2 costs and operator configuration are bounded **before** any KDF allocation:
+  at most 262144 KiB (256 MiB), 10 iterations and 16 threads, with positive values and
+  memory >= 8 × threads. Stored password/edit-code hashes also require the expected salt
+  and digest sizes. Malformed versioned TOTP envelopes fail without legacy fallback.
+  Costs are rejected, never clamped; existing legitimate costs above these limits need a
+  planned password/secret reset with a trusted older installation before upgrading.
 - TOTP codes are **single-use** (replay-protected) and the protection survives server restarts.
+- New usernames are case-sensitive, 1–64 Unicode letters/digits or `._@-`, starting with a
+  letter/digit. Whitespace, control characters, path/query delimiters and invalid UTF-8 are
+  rejected before any account or invite write. Existing usernames still work for login.
+- A password-change revocation failure is logged at error level and shown explicitly in the
+  browser. The replacement session remains usable, but older sessions may still exist;
+  the administrator must revoke them. The page does not report full success in this case.
+- Keyring files should be owner-readable only (0400/0600). Loading warns about group/other
+  permissions and symlinks, while allowing managed secret mounts; it checks the actual opened
+  file and never logs keys. Protect both the target and its parent directories.
+- At-rest GCM authenticates the resource, kind and record ID, **not freshness**: a database
+  writer can restore an older valid ciphertext for the same record. Preventing rollback
+  requires a trusted monotonic state outside that database. Database readers without the
+  installation keyring cannot decrypt native content; this is not protection against a
+  compromised server or changes to unencrypted metadata.
+- Login still takes extra work after a correct password (secret opening and TOTP validation).
+  The dummy password hash, common factor-error message and per-IP login limit reduce exposure;
+  no constant-time end-to-end login guarantee is claimed.
+- The HTTP-to-HTTPS redirect uses the request Host when `--allowed-hosts` is empty for
+  backwards compatibility. Set an explicit allowlist (and a trusted proxy Host policy)
+  on deployments where clients can reach that listener directly.
+
 
 ---
 
@@ -639,9 +703,34 @@ change that registry. The schema must already exist for those commands. The data
 resumable: it only changes `content`/`target_url`, uses compare-and-swap, and leaves counters,
 TTL/burn settings, ownership, edit codes and timestamps unchanged. It never recreates deleted
 rows. Any error exits nonzero; incomplete migrations block `serve` until a successful rerun.
-JSON reports contain `raw`, `wrapped`, `native`, `failed`, `changed`, `conflicts`, `missing`
+JSON reports contain `raw`, `wrapped`, `native`, `failed`, `corrupt_raw`, `pruned`, `changed`, `conflicts`, `missing`
 and counts by key ID, without slugs or plaintext. Raw validation checks structure only; the
 old encryption tag cannot be authenticated without the original slug.
+
+Old databases may still contain expired plaintext from the era before content encryption.
+Structurally invalid raw records are counted in both `failed` and `corrupt_raw`. Migration
+initializes the registry as `pending` and wraps valid legacy records, but exits nonzero until
+these invalid records are handled; `serve` stays blocked. After stopping all writers and
+backing up the database, explicitly preview and remove these records:
+
+```bash
+bin/padmark-server encryption prune --corrupt --dry-run
+bin/padmark-server encryption prune --corrupt
+bin/padmark-server encryption migrate
+bin/padmark-server encryption status
+```
+
+`prune --corrupt` permanently deletes corrupt raw values. A value is a versioned envelope only
+if its first `$`-separated segment matches `pmc<digits>`; any other value (with or without `$`)
+that is not structurally valid legacy base64 ciphertext is corrupt raw. It checks both notes and
+links, including expired records; it never deletes structurally valid legacy ciphertext or
+versioned envelopes. Key, registry,
+envelope-authentication and database errors abort the preflight without deletion. Compare-and-delete
+preserves records whose content changed after scanning; conflicts are counted. Dry-run writes
+nothing, including registry state. Pruning does not initialize the registry or finish a pending
+migration; rerun `migrate` before serving. Partial cleanup is resumable; `pruned` counts committed
+deletions. Versioned envelopes — including unknown future versions and malformed `pmc2$…` values —
+are never selected by this command; they keep blocking startup until diagnosed separately.
 
 When original slugs are available, feed one per line from a protected file or pipe:
 
@@ -699,10 +788,10 @@ There is no destructive encryption down-migration, and older binaries cannot rea
 |---|---|---|---|
 | `--addr` | `PADMARK_ADDR` | `:8080` | Listen address |
 | `--storage` | `PADMARK_STORAGE` | `sqlite` | `sqlite` or `postgres` |
-| `--dsn` | `PADMARK_DSN` | `padmark.db` | DB path or connection string |
+| `--dsn` | `PADMARK_DSN` | `padmark.db` | DB path or connection string. A Postgres DSN carries the password, and a command-line flag is visible to every local user in the process listing (`ps`) — pass it via `PADMARK_DSN` instead |
 | `--content-keyring-file` | `PADMARK_CONTENT_KEYRING_FILE` | required | Path to the persisted JSON keyring for note/link encryption; mount as a secret and back up separately from the DB |
 | `--enable-accounts` | `PADMARK_ENABLE_ACCOUNTS` | `false` | Enable the TOTP account system (`/setup`, `/login`, `/admin`, privacy-level gating); off = fully public |
-| `--disable-api` | `PADMARK_DISABLE_API` | `false` | Disable the REST/JSON API (`/notes*`, `/links*`, `/api`, `/api/openapi.yaml`, `/llms.txt`, `/api/tokens`, `/api/invites`): the middleware returns `503` with `{"message":"API is disabled","code":"api_disabled"}`. Match `code` to identify the cause; outer middleware may reject a request first. The web UI (incl. `/r/{id}`) and `/healthz`, `/readyz` keep working |
+| `--disable-api` | `PADMARK_DISABLE_API` | `false` | Disable the REST/JSON API (`/notes*`, `/links*`, `/api`, `/api/openapi.yaml`, `/llms.txt`, `/api/tokens`, `/api/invites`): the middleware returns `503` with `{"message":"API is disabled","code":"api_disabled"}`. Match `code` to identify the cause; outer middleware may reject a request first. The web UI becomes **read-only**: viewing `/{id}` (including JSON/raw reads), `/r/{id}`, the login/admin pages and health checks keep working, but publishing or saving from the editor fails with the API-disabled error, because the editor calls `POST /notes` and `PUT /notes/{id}` |
 | `--totp-issuer` | `PADMARK_TOTP_ISSUER` | `padmark` | TOTP issuer shown in the authenticator app |
 | `--session-ttl` | `PADMARK_SESSION_TTL` | `2592000` | Session lifetime in seconds (default 30 days) |
 | `--csrf-secret` | `PADMARK_CSRF_SECRET` | — | HMAC key signing CSRF form tokens; raw bytes, **at least 32 characters** (a shorter value is rejected at startup). Empty (default) mints a fresh random secret per process — fine for a single instance, but restarts then invalidate open forms and multiple replicas `403` each other's form submits. Generate with `openssl rand -base64 32` and share the same value across replicas |
@@ -747,6 +836,15 @@ Both directions of misconfiguration have a cost, and neither surfaces as an erro
 Leaving it empty when the server really is exposed directly is correct and stays silent. If the
 proxy's address is not stable (cloud load balancers, k8s ingress), prefer `--public-scheme` for
 the link-building half of the flag's job rather than widening the trusted range.
+
+**Behind a TLS-terminating reverse proxy** the server itself sees plain HTTP, so it must be told
+the public scheme: set `--trusted-proxies` to the proxy's addresses (so its `X-Forwarded-Proto`
+is honoured) or `--public-scheme https`, and configure the proxy to preserve the original `Host`
+header. Otherwise the same-origin check rejects browser `PUT`/`DELETE` on notes and links and the
+account endpoints (`POST /api/tokens`, `POST /api/invites`) with `403`, because the browser's
+`https://` `Origin` does not match the scheme/host the server derived. Session and CSRF cookies
+get the `Secure` attribute only for direct TLS or a trusted proxy's `X-Forwarded-Proto: https` —
+`--public-scheme` alone does not set it.
 
 `--csrf-secret` is the one flag a multi-replica deployment must set: without it each process
 signs form tokens with its own random key, so a form rendered by one replica is rejected by the

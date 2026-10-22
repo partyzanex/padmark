@@ -101,13 +101,15 @@ func (m *SessionManager) Login(
 	}
 
 	now := time.Now()
+	// The returned id goes into the client cookie; only its SHA-256 digest is persisted
+	// (SessionHash, see hashToken) so a leaked database carries no replayable sessions.
 	sess := &domain.Session{
-		SessionID: sessionID,
-		UserID:    usr.ID,
-		CreatedAt: now,
-		ExpiresAt: now.Add(m.ttl),
-		UserAgent: userAgent,
-		IP:        clientIP,
+		SessionHash: hashToken(sessionID),
+		UserID:      usr.ID,
+		CreatedAt:   now,
+		ExpiresAt:   now.Add(m.ttl),
+		UserAgent:   userAgent,
+		IP:          clientIP,
 	}
 
 	createErr := m.sessions.Create(ctx, sess)
@@ -125,7 +127,7 @@ func (m *SessionManager) Login(
 
 // Logout deletes the session identified by sessionID.
 func (m *SessionManager) Logout(ctx context.Context, sessionID string) error {
-	err := m.sessions.Delete(ctx, sessionID)
+	err := m.sessions.Delete(ctx, hashToken(sessionID))
 	if err != nil {
 		return fmt.Errorf("delete session: %w", err)
 	}
@@ -136,7 +138,7 @@ func (m *SessionManager) Logout(ctx context.Context, sessionID string) error {
 // GetSession resolves sessionID to the owning User.
 // Returns domain.ErrSessionExpired when the session is absent or expired.
 func (m *SessionManager) GetSession(ctx context.Context, sessionID string) (*domain.User, error) {
-	sess, err := m.sessions.Get(ctx, sessionID)
+	sess, err := m.sessions.Get(ctx, hashToken(sessionID))
 	if err != nil {
 		return nil, fmt.Errorf("get session: %w", err)
 	}
@@ -152,11 +154,13 @@ func (m *SessionManager) GetSession(ctx context.Context, sessionID string) (*dom
 // ChangePassword verifies the current password and TOTP code, then re-encrypts the
 // TOTP secret under a new derived key. All existing sessions are invalidated after the
 // new session is safely persisted, so the caller never loses access on a transient error.
-// Returns the new session ID on success.
+// Returns the new session ID on success. ErrSessionRevocation is partial success:
+// the password and replacement session are persisted, but older sessions may remain.
+// Callers must keep that replacement session and show the revocation warning.
 func (m *SessionManager) ChangePassword(
 	ctx context.Context, sessionID, oldPassword, newPassword, totpCode string,
 ) (string, error) {
-	sess, err := m.sessions.Get(ctx, sessionID)
+	sess, err := m.sessions.Get(ctx, hashToken(sessionID))
 	if err != nil {
 		return "", fmt.Errorf("get session: %w", err)
 	}
@@ -190,8 +194,7 @@ func (m *SessionManager) ChangePassword(
 
 	// Create the replacement session BEFORE invalidating old ones.
 	// If Create fails, old sessions remain intact and the user can retry.
-	// If DeleteByUserID subsequently fails, we log a warning; the new session is
-	// already returned to the client and old sessions will expire at their TTL.
+	// A revocation failure must be surfaced alongside the replacement session.
 	newID, err := newSessionID()
 	if err != nil {
 		return "", err
@@ -199,12 +202,12 @@ func (m *SessionManager) ChangePassword(
 
 	now := time.Now()
 	newSess := &domain.Session{
-		SessionID: newID,
-		UserID:    usr.ID,
-		CreatedAt: now,
-		ExpiresAt: now.Add(m.ttl),
-		UserAgent: sess.UserAgent,
-		IP:        sess.IP,
+		SessionHash: hashToken(newID),
+		UserID:      usr.ID,
+		CreatedAt:   now,
+		ExpiresAt:   now.Add(m.ttl),
+		UserAgent:   sess.UserAgent,
+		IP:          sess.IP,
 	}
 
 	err = m.sessions.Create(ctx, newSess)
@@ -214,10 +217,12 @@ func (m *SessionManager) ChangePassword(
 
 	// Invalidate all old sessions except the one just created.
 	// The new session must survive so the caller stays logged in.
-	err = m.sessions.DeleteByUserIDExcept(ctx, usr.ID, newID)
+	err = m.sessions.DeleteByUserIDExcept(ctx, usr.ID, hashToken(newID))
 	if err != nil {
-		m.log.WarnContext(ctx, "invalidate old sessions after password change",
+		m.log.ErrorContext(ctx, "invalidate old sessions after password change",
 			"user_id", usr.ID, "err", err)
+
+		return newID, fmt.Errorf("%w: %w", domain.ErrSessionRevocation, err)
 	}
 
 	return newID, nil

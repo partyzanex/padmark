@@ -10,7 +10,9 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
@@ -154,6 +156,9 @@ func metadata(t *testing.T, db *bun.DB, table, id string) map[string]any {
 
 func runEncryptionSuite(t *testing.T, db *bun.DB, backup snapshot) {
 	t.Helper()
+	t.Run("concurrent_initialize_preserves_winner", func(t *testing.T) {
+		testConcurrentInitialize(t, db)
+	})
 	t.Run("migration_rotation_restore", func(t *testing.T) {
 		testMigrationRotationRestore(t, db, backup)
 	})
@@ -168,6 +173,15 @@ func runEncryptionSuite(t *testing.T, db *bun.DB, backup snapshot) {
 	})
 	t.Run("missing_substituted_keys_and_corruption", func(t *testing.T) {
 		testKeysAndCorruption(t, db)
+	})
+	t.Run("prune_corrupt_raw_pagination_and_preservation", func(t *testing.T) {
+		testPruneCorruptRaw(t, db)
+	})
+	t.Run("prune_concurrent_update_and_delete", func(t *testing.T) {
+		testPruneConcurrentCAS(t, db)
+	})
+	t.Run("prune_partial_failure_resumes", func(t *testing.T) {
+		testPrunePartialFailure(t, db)
 	})
 }
 
@@ -201,10 +215,177 @@ func testInvalidInitialRecord(t *testing.T, db *bun.DB) {
 	report, err := manager(t, repo, testKeyring()).Migrate(t.Context(), false)
 	require.Error(t, err)
 	require.Equal(t, 1, report.Failed)
-	require.Equal(t, "uninitialized", report.State)
+	require.Equal(t, 1, report.CorruptRaw)
+	require.Equal(t, keys.Pending, report.State)
 	registry, err := repo.Registry(t.Context())
 	require.NoError(t, err)
+	require.NotNil(t, registry)
+	require.Equal(t, keys.Pending, registry.Phase)
+}
+
+func makeCorruptRaw(t *testing.T, db *bun.DB, row keys.Row) {
+	t.Helper()
+
+	makeCorruptRawValue(t, db, row, "old plaintext")
+}
+
+// makeCorruptRawValue stores pre-encryption plaintext; values containing "$" without a
+// "pmc<digits>$" version tag are still malformed raw records, never versioned envelopes.
+func makeCorruptRawValue(t *testing.T, db *bun.DB, row keys.Row, value string) {
+	t.Helper()
+
+	table, column := "notes", "content"
+	if row.Resource == "link" {
+		table, column = "links", "target_url"
+	}
+
+	_, err := db.NewUpdate().Table(table).Set("? = ?", bun.Ident(column), value).
+		Set("expires_at = ?", time.Now().Add(-time.Hour)).Where("id = ?", row.ID).Exec(t.Context())
+	require.NoError(t, err)
+}
+
+//nolint:funlen // exercise cleanup, pagination, preservation and completing the pending migration together
+func testPruneCorruptRaw(t *testing.T, db *bun.DB) {
+	t.Helper()
+
+	reset(t, db)
+	ctx := t.Context()
+	repo := keyrepo.New(db)
+	mgr := manager(t, repo, testKeyring())
+	note := insertLegacy(t, db, "note", "keep-note")
+	link := insertLegacy(t, db, "link", "keep-link")
+	beforeNote := metadata(t, db, "notes", note.ID)
+	beforeLink := metadata(t, db, "links", link.ID)
+
+	for i := range 40 {
+		makeCorruptRaw(t, db, insertLegacy(t, db, "note", fmt.Sprintf("corrupt-note-%d", i)))
+	}
+
+	makeCorruptRaw(t, db, insertLegacy(t, db, "link", "corrupt-link"))
+	makeCorruptRawValue(t, db, insertLegacy(t, db, "note", "corrupt-dollar"), "costs $5; see $HOME and $x^2$")
+
+	report, err := mgr.PruneCorrupt(ctx, true)
+	require.NoError(t, err)
+	require.Equal(t, 42, report.CorruptRaw)
+	require.Zero(t, report.Pruned)
+
+	registry, err := repo.Registry(ctx)
+	require.NoError(t, err)
 	require.Nil(t, registry)
+
+	report, err = mgr.Migrate(ctx, false)
+	require.ErrorContains(t, err, "prune --corrupt --dry-run")
+	require.Equal(t, 2, report.Changed)
+	require.Equal(t, 42, report.Failed)
+	wrappedNote, wrappedLink := readRow(t, repo, note), readRow(t, repo, link)
+	require.Error(t, mgr.PrepareServe(ctx))
+
+	report, err = mgr.PruneCorrupt(ctx, false)
+	require.NoError(t, err)
+	require.Equal(t, 42, report.Pruned)
+	require.Zero(t, report.Failed)
+	require.Zero(t, report.CorruptRaw)
+	require.Equal(t, 2, report.Wrapped)
+	require.Equal(t, keys.Pending, report.State)
+	require.Equal(t, wrappedNote, readRow(t, repo, note))
+	require.Equal(t, wrappedLink, readRow(t, repo, link))
+	require.Equal(t, beforeNote, metadata(t, db, "notes", note.ID))
+	require.Equal(t, beforeLink, metadata(t, db, "links", link.ID))
+	require.Error(t, mgr.PrepareServe(ctx), "prune must not mark a pending migration ready")
+
+	report, err = mgr.PruneCorrupt(ctx, false)
+	require.NoError(t, err)
+	require.Zero(t, report.Pruned)
+
+	_, err = mgr.Migrate(ctx, false)
+	require.NoError(t, err)
+	require.NoError(t, mgr.PrepareServe(ctx))
+}
+
+type interceptDeleteStorage struct {
+	keys.Storage
+
+	before func(context.Context, keys.Row) error
+}
+
+func (s *interceptDeleteStorage) Delete(ctx context.Context, row keys.Row) (bool, error) {
+	err := s.before(ctx, row)
+	if err != nil {
+		return false, err
+	}
+
+	return s.Storage.Delete(ctx, row)
+}
+
+func testPruneConcurrentCAS(t *testing.T, db *bun.DB) {
+	t.Helper()
+
+	reset(t, db)
+	ctx := t.Context()
+	repo := keyrepo.New(db)
+	ring := testKeyring()
+	note := insertLegacy(t, db, "note", "prune-race-note")
+	link := insertLegacy(t, db, "link", "prune-race-link")
+	makeCorruptRaw(t, db, note)
+	makeCorruptRaw(t, db, link)
+
+	cipher, err := ring.ForResource("note")
+	require.NoError(t, err)
+	newer, err := cipher.Encrypt("new content", note.ID)
+	require.NoError(t, err)
+
+	store := &interceptDeleteStorage{Storage: repo, before: func(ctx context.Context, row keys.Row) error {
+		if row.Resource == "note" {
+			_, err := db.NewUpdate().Table("notes").Set("content = ?", newer).Set("views = views + 1").
+				Where("id = ?", row.ID).Exec(ctx)
+
+			return err
+		}
+
+		_, err := db.NewDelete().Table("links").Where("id = ?", row.ID).Exec(ctx)
+
+		return err
+	}}
+
+	report, err := manager(t, store, ring).PruneCorrupt(ctx, false)
+	require.NoError(t, err)
+	require.Zero(t, report.Pruned)
+	require.Equal(t, 2, report.Conflicts)
+	require.Equal(t, newer, readRow(t, repo, note).Value)
+	deleted, err := repo.Get(ctx, "link", link.ID)
+	require.NoError(t, err)
+	require.Nil(t, deleted)
+}
+
+func testPrunePartialFailure(t *testing.T, db *bun.DB) {
+	t.Helper()
+
+	reset(t, db)
+	repo := keyrepo.New(db)
+	ring := testKeyring()
+
+	for _, slug := range []string{"first-corrupt", "second-corrupt"} {
+		makeCorruptRaw(t, db, insertLegacy(t, db, "note", slug))
+	}
+
+	count := 0
+	store := &interceptDeleteStorage{Storage: repo, before: func(context.Context, keys.Row) error {
+		count++
+		if count == 2 {
+			return errors.New("simulated delete failure")
+		}
+
+		return nil
+	}}
+	report, err := manager(t, store, ring).PruneCorrupt(t.Context(), false)
+	require.ErrorContains(t, err, "simulated delete failure")
+	require.Equal(t, 1, report.Pruned)
+	require.Equal(t, 1, report.CorruptRaw)
+
+	report, err = manager(t, repo, ring).PruneCorrupt(t.Context(), false)
+	require.NoError(t, err)
+	require.Equal(t, 1, report.Pruned)
+	require.Zero(t, report.Failed)
 }
 
 //nolint:funlen // complete migration/rotation/restore lifecycle on each backend
@@ -389,6 +570,20 @@ func testConcurrentCAS(t *testing.T, db *bun.DB) {
 	require.Nil(t, deleted)
 }
 
+// requireUnprunableEnvelope checks that a failing versioned envelope is not reported as
+// malformed raw data, is not pointed at prune, and blocks prune before any deletion.
+func requireUnprunableEnvelope(t *testing.T, mgr *keys.Manager, report *keys.Report, err error) {
+	t.Helper()
+
+	require.Equal(t, 1, report.Failed)
+	require.Zero(t, report.CorruptRaw, "an unknown envelope version is never malformed raw data")
+	require.NotContains(t, err.Error(), "prune --corrupt", "prune cannot fix a failing envelope")
+
+	pruned, err := mgr.PruneCorrupt(t.Context(), false)
+	require.Error(t, err)
+	require.Zero(t, pruned.Pruned)
+}
+
 func testKeysAndCorruption(t *testing.T, db *bun.DB) {
 	t.Helper()
 
@@ -417,8 +612,9 @@ func testKeysAndCorruption(t *testing.T, db *bun.DB) {
 	require.Error(t, mgr.PrepareServe(ctx))
 	report, err := mgr.Migrate(ctx, false)
 	require.Error(t, err)
-	require.Equal(t, 1, report.Failed)
 	require.NotContains(t, err.Error(), "sensitive-slug")
+	requireUnprunableEnvelope(t, mgr, &report, err)
+
 	registry, err = repo.Registry(ctx)
 	require.NoError(t, err)
 	require.Equal(t, keys.Pending, registry.Phase)
@@ -432,4 +628,44 @@ func testKeysAndCorruption(t *testing.T, db *bun.DB) {
 	require.Error(t, err)
 	require.Equal(t, 1, report.Missing)
 	require.NotContains(t, err.Error(), "missing-secret-slug")
+}
+
+func testConcurrentInitialize(t *testing.T, db *bun.DB) {
+	t.Helper()
+	reset(t, db)
+	repo := keyrepo.New(db)
+	registries := []*keys.Registry{
+		{InstallationID: "11111111-1111-4111-8111-111111111111", Phase: keys.Pending,
+			Checks: map[string]string{"first": "first-check"}},
+		{InstallationID: "22222222-2222-4222-8222-222222222222", Phase: keys.Ready,
+			Checks: map[string]string{"second": "second-check"}},
+	}
+	results := make([]error, len(registries))
+
+	var group sync.WaitGroup
+	for i, registry := range registries {
+		group.Go(func() { results[i] = repo.Initialize(t.Context(), registry) })
+	}
+
+	group.Wait()
+
+	for _, err := range results {
+		require.NoError(t, err)
+	}
+
+	stored, err := repo.Registry(t.Context())
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+
+	winner := registries[0]
+	if stored.InstallationID == registries[1].InstallationID {
+		winner = registries[1]
+	}
+
+	require.Equal(t, winner, stored, "a losing initializer must not mix its state or key checks into the winner")
+	require.NoError(t, repo.Initialize(t.Context(), registries[0]))
+	require.NoError(t, repo.Initialize(t.Context(), registries[1]))
+	unchanged, err := repo.Registry(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, stored, unchanged)
 }

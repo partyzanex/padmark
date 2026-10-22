@@ -3,9 +3,12 @@ package mcp
 import (
 	"context"
 	"net/url"
+	"os"
+	"path/filepath"
 	"testing"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/stretchr/testify/require"
 
 	padmark "github.com/partyzanex/padmark/pkg/client"
 )
@@ -80,4 +83,22 @@ func testURL(t *testing.T, raw string) url.URL {
 	}
 
 	return *parsed
+}
+
+// isolateEnv detaches a test from the developer's environment: the PADMARK_* variables the
+// binary reads are unset (not merely emptied — urfave treats an empty env var as an explicit
+// value) and HOME/XDG_CONFIG_HOME point at a fresh temp dir, so a run can never read or chmod
+// the real token file or known_hosts. t.Setenv makes the caller incompatible with t.Parallel.
+func isolateEnv(t *testing.T) {
+	t.Helper()
+
+	for _, key := range []string{EnvToken, EnvBaseURL, EnvTimeout, EnvLogLevel} {
+		t.Setenv(key, "") // registers the restore of the original value
+		require.NoError(t, os.Unsetenv(key))
+	}
+
+	home := t.TempDir()
+
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 }

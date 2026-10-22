@@ -32,7 +32,7 @@ func (b *burner) applyPolicy(ctx context.Context, id string, note *domain.Note) 
 	if note.ExpiresAt != nil && time.Now().After(*note.ExpiresAt) {
 		delErr := b.storage.Delete(ctx, domain.HashSlug(id))
 		if delErr != nil {
-			b.log.ErrorContext(ctx, "delete expired note", "id", id, "err", delErr)
+			b.log.ErrorContext(ctx, "delete expired note", "id", domain.HashSlug(id), "err", delErr)
 		}
 
 		return nil, domain.ErrExpired
@@ -57,7 +57,7 @@ func (b *burner) applyViewIncrement(ctx context.Context, id string, note *domain
 
 	incErr := b.storage.IncrementViews(ctx, domain.HashSlug(id))
 	if incErr != nil {
-		b.log.ErrorContext(ctx, "increment views", "id", id, "err", incErr)
+		b.log.ErrorContext(ctx, "increment views", "id", domain.HashSlug(id), "err", incErr)
 	} else {
 		note.Views++
 	}
@@ -80,7 +80,7 @@ func (b *burner) burnNote(ctx context.Context, id string, note *domain.Note) (*d
 		return nil, fmt.Errorf("burn after reading: %w", decErr)
 	}
 
-	b.log.DebugContext(ctx, "note burned", "id", id)
+	b.log.DebugContext(ctx, "note burned", "id", domain.HashSlug(id))
 
 	return consumed, nil
 }
@@ -100,7 +100,7 @@ func (b *burner) startTimer(ctx context.Context, id string, note *domain.Note) (
 		return nil, fmt.Errorf("burn after reading: %w", decErr)
 	}
 
-	b.log.DebugContext(ctx, "burn timer started", "id", id, "expires_at", expiresAt)
+	b.log.DebugContext(ctx, "burn timer started", "id", domain.HashSlug(id), "expires_at", expiresAt)
 
 	return updated, nil
 }

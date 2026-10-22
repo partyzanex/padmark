@@ -47,25 +47,32 @@ func (r *Repository) Registry(ctx context.Context) (*keys.Registry, error) {
 	return reg, nil
 }
 
+// Initialize atomically inserts state and checks, or leaves a winning registry untouched.
+// The caller must reread and validate the registry after a concurrent initializer wins.
 func (r *Repository) Initialize(ctx context.Context, reg *keys.Registry) error {
 	err := r.db.RunInTx(ctx, nil, func(ctx context.Context, transaction bun.Tx) error {
 		result, err := transaction.NewRaw("INSERT INTO content_encryption_state (id, installation_id, phase) "+
 			"VALUES (1, ?, ?) ON CONFLICT (id) DO NOTHING",
 			reg.InstallationID, reg.Phase).Exec(ctx)
 		if err != nil {
-			return encryptionError(err)
+			return keys.WrapError(err)
 		}
 
 		count, err := result.RowsAffected()
-		if err != nil || count == 0 {
-			return encryptionError(err)
+		if err != nil {
+			return keys.WrapError(err)
+		}
+
+		if count == 0 {
+			// Another initializer won. Do not mix our key checks into its registry.
+			return nil
 		}
 
 		for id, check := range reg.Checks {
 			_, err := transaction.NewRaw("INSERT INTO content_encryption_keys (key_id, verification) VALUES (?, ?)",
 				id, check).Exec(ctx)
 			if err != nil {
-				return encryptionError(err)
+				return keys.WrapError(err)
 			}
 		}
 
@@ -128,7 +135,7 @@ func (r *Repository) Batch(ctx context.Context, resource, after string, limit in
 	var stored []storedRow
 
 	err = r.db.NewSelect().Table(table).Column("id").ColumnExpr("? AS value", bun.Ident(column)).
-		Where("id > ?", after).OrderExpr("id ASC").Limit(limit).Scan(ctx, &stored)
+		Where("id > ?", after).OrderExpr("id ASC").Limit(int64(limit)).Scan(ctx, &stored)
 	if err != nil {
 		return nil, fmt.Errorf("read encrypted records: %w", err)
 	}
@@ -178,6 +185,29 @@ func (r *Repository) Replace(ctx context.Context, row keys.Row, value string) (b
 	count, err := result.RowsAffected()
 	if err != nil {
 		return false, errors.New("could not read ciphertext update count")
+	}
+
+	return count == 1, nil
+}
+
+// Delete removes exactly the invalid raw value inspected by the caller. A
+// concurrent replacement or deletion counts as a conflict, never a reason to
+// remove the new record. Errors never expose raw content or SQL parameters.
+func (r *Repository) Delete(ctx context.Context, row keys.Row) (bool, error) {
+	table, column, err := resourceColumns(row.Resource)
+	if err != nil {
+		return false, err
+	}
+
+	result, err := r.db.NewDelete().Table(table).
+		Where("id = ? AND ? = ?", row.ID, bun.Ident(column), row.Value).Exec(ctx)
+	if err != nil {
+		return false, errors.New("corrupt raw compare-and-delete failed")
+	}
+
+	count, err := result.RowsAffected()
+	if err != nil {
+		return false, errors.New("could not read corrupt raw deletion count")
 	}
 
 	return count == 1, nil

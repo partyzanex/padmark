@@ -1,6 +1,7 @@
 package notes
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"log/slog"
@@ -34,7 +35,12 @@ func (passthroughEncryptor) Decrypt(ct, _, _ string) (string, error) { return ct
 type identityHasher struct{}
 
 func (identityHasher) Hash(code string) (string, error) { return code, nil }
-func (identityHasher) Verify(hash, code string) bool    { return hash == code }
+
+// HashUserProvided mirrors Hash but prefixes the code, so tests can assert which hashing
+// variant the usecase picked for caller-supplied codes (see
+// TestCreate_UserSuppliedCodeUsesMemoryHardHash).
+func (identityHasher) HashUserProvided(code string) (string, error) { return "user:" + code, nil }
+func (identityHasher) Verify(hash, code string) bool                { return hash == code || hash == "user:"+code }
 
 // failingEncryptor is a test double whose Decrypt always returns an error.
 type failingEncryptor struct{}
@@ -56,7 +62,12 @@ func (prefixEncryptor) Decrypt(ct, _, _ string) (string, error) {
 type prefixHasher struct{}
 
 func (prefixHasher) Hash(code string) (string, error) { return "hash:" + code, nil }
-func (prefixHasher) Verify(hash, code string) bool    { return hash == "hash:"+code }
+
+func (prefixHasher) HashUserProvided(code string) (string, error) { return "userhash:" + code, nil }
+
+func (prefixHasher) Verify(hash, code string) bool {
+	return hash == "hash:"+code || hash == "userhash:"+code
+}
 
 // errEncryptor fails on Encrypt (Decrypt passes through).
 type errEncryptor struct{}
@@ -134,6 +145,50 @@ func (s *ManagerTestSuite) TestCreate_WithCustomEditCode() {
 
 	s.Require().NoError(err)
 	s.Equal("MyCustomCode1", result.EditCode)
+}
+
+// TestCreate_UserSuppliedCodeUsesMemoryHardHash pins that a caller-chosen edit code is
+// hashed with the memory-hard variant (identityHasher.HashUserProvided → "user:" prefix)
+// because its entropy is not guaranteed.
+func (s *ManagerTestSuite) TestCreate_UserSuppliedCodeUsesMemoryHardHash() {
+	note := &domain.Note{Title: "hello", Content: "world", EditCode: "MyCustomCode1"}
+
+	var storedHash string
+
+	s.expectSlugFree()
+	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, stored *domain.Note) error {
+			storedHash = stored.EditCode
+
+			return nil
+		})
+
+	_, err := s.manager.Create(s.T().Context(), note)
+
+	s.Require().NoError(err)
+	s.Equal("user:MyCustomCode1", storedHash)
+}
+
+// TestCreate_GeneratedCodeUsesFastHash pins the mirror invariant: a server-generated code
+// stays on the fast-hash path (identityHasher.Hash → no prefix).
+func (s *ManagerTestSuite) TestCreate_GeneratedCodeUsesFastHash() {
+	note := &domain.Note{Title: "hello", Content: "world"}
+
+	var storedHash string
+
+	s.expectSlugFree()
+	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, stored *domain.Note) error {
+			storedHash = stored.EditCode
+
+			return nil
+		})
+
+	_, err := s.manager.Create(s.T().Context(), note)
+
+	s.Require().NoError(err)
+	s.Len(storedHash, 12)
+	s.NotContains(storedHash, "user:")
 }
 
 func (s *ManagerTestSuite) TestCreate_EmptyEditCodeIsGenerated() {
@@ -367,8 +422,9 @@ func (s *ManagerTestSuite) TestCreate_StorageError_RestoresPlaintextAndPersistsE
 	s.Require().Error(err)
 
 	// What hit storage: encrypted content, hashed edit code, hashed-slug primary key.
+	// The code is caller-supplied, so it takes the memory-hard variant ("userhash:").
 	s.Equal("enc:body", atStore.Content)
-	s.Equal("hash:code12345678", atStore.EditCode)
+	s.Equal("userhash:code12345678", atStore.EditCode)
 	s.Equal(domain.HashSlug("myslug"), atStore.ID)
 
 	// What the caller is left with: plaintext fields and the slug ID.
@@ -802,7 +858,10 @@ func (s *ManagerTestSuite) TestGetRendered_RenderError() {
 
 	_, _, err := s.manager.GetRendered(s.T().Context(), "abc-123")
 
-	s.ErrorIs(err, renderErr)
+	s.Require().ErrorIs(err, renderErr)
+	// The error is logged server-side: it names the note by hash, never by its capability slug.
+	s.NotContains(err.Error(), "abc-123")
+	s.Contains(err.Error(), domain.HashSlug("abc-123"))
 }
 
 func (s *ManagerTestSuite) TestGetRendered_PlainText_UsesRenderPlain() {
@@ -829,7 +888,9 @@ func (s *ManagerTestSuite) TestGetRendered_PlainText_RenderPlainError() {
 
 	_, _, err := s.manager.GetRendered(s.T().Context(), "abc-123")
 
-	s.ErrorIs(err, renderErr)
+	s.Require().ErrorIs(err, renderErr)
+	s.NotContains(err.Error(), "abc-123")
+	s.Contains(err.Error(), domain.HashSlug("abc-123"))
 }
 
 // Peek
@@ -1209,4 +1270,77 @@ func TestGet_BurnTTL_DecryptionFailure(t *testing.T) {
 	_, err := mgr.Get(t.Context(), "burn-ttl-enc-fail")
 
 	assert.ErrorIs(t, err, domain.ErrNotFound)
+}
+
+func (s *ManagerTestSuite) TestUpdateExplicitExpiry() {
+	future := time.Now().Add(time.Hour)
+	for _, testCase := range []struct {
+		name   string
+		update *domain.Note
+		want   *time.Time
+	}{
+		{"preserve", &domain.Note{Content: "body"}, &future},
+		{"clear", &domain.Note{Content: "body", ClearExpiry: true}, nil},
+		{"replace", &domain.Note{Content: "body", ExpiresAt: &future}, &future},
+	} {
+		s.Run(testCase.name, func() {
+			existing := &domain.Note{ID: domain.HashSlug("slug"), EditCode: "code", ExpiresAt: &future}
+			s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("slug")).Return(existing, nil)
+			s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("slug"), gomock.Any()).
+				DoAndReturn(func(_ context.Context, _ string, note *domain.Note) error {
+					s.Equal(testCase.want, note.ExpiresAt)
+
+					return nil
+				})
+			updated, err := s.manager.Update(s.T().Context(), "slug", "code", uuid.Nil, testCase.update)
+			s.Require().NoError(err)
+			s.Equal(testCase.want, updated.ExpiresAt)
+		})
+	}
+}
+
+// TestUpdateBurnImmediateExpiry pins resolveExpiryTime for the payload the HTTP adapter builds
+// from UpdateNoteRequest with burn_after_reading=true and ttl omitted, null or 0 (all three map
+// to BurnTTL=0, no ExpiresAt, no ClearExpiry): an existing hard expiry is kept, while a stale
+// burn-timer expiry from a previous burn TTL is dropped.
+func (s *ManagerTestSuite) TestUpdateBurnImmediateExpiry() {
+	future := time.Now().Add(time.Hour)
+	for _, testCase := range []struct {
+		name     string
+		existing *domain.Note
+		want     *time.Time
+	}{
+		{"hard expiry kept", &domain.Note{EditCode: "code", ExpiresAt: &future}, &future},
+		{"no expiry stays none", &domain.Note{EditCode: "code"}, nil},
+		{
+			"stale burn timer dropped",
+			&domain.Note{EditCode: "code", BurnAfterReading: true, BurnTTL: 600, ExpiresAt: &future},
+			nil,
+		},
+	} {
+		s.Run(testCase.name, func() {
+			s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("slug")).Return(testCase.existing, nil)
+			s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("slug"), gomock.Any()).
+				DoAndReturn(func(_ context.Context, _ string, note *domain.Note) error {
+					s.Equal(testCase.want, note.ExpiresAt)
+
+					return nil
+				})
+
+			update := &domain.Note{Content: "body", BurnAfterReading: true}
+			_, err := s.manager.Update(s.T().Context(), "slug", "code", uuid.Nil, update)
+			s.Require().NoError(err)
+		})
+	}
+}
+
+func (s *ManagerTestSuite) TestDecryptionFailureLogsOnlyHashedSlug() {
+	var buf bytes.Buffer
+
+	log := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	note := &domain.Note{ID: "secret-slug", Content: "invalid"}
+	err := decryptContent(s.T().Context(), failingEncryptor{}, log, note)
+	s.Require().ErrorIs(err, domain.ErrNotFound)
+	s.Contains(buf.String(), domain.HashSlug(note.ID))
+	s.NotContains(buf.String(), note.ID)
 }

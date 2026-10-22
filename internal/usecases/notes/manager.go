@@ -59,9 +59,12 @@ type Encryptor interface {
 	Decrypt(ciphertext, recordID, legacySlug string) (string, error)
 }
 
-// EditCodeHasher hashes and verifies note edit codes.
+// EditCodeHasher hashes and verifies note edit codes. Hash is for server-generated
+// high-entropy codes; HashUserProvided is for caller-chosen codes, which need a
+// memory-hard hash because their entropy is not guaranteed.
 type EditCodeHasher interface {
 	Hash(code string) (string, error)
+	HashUserProvided(code string) (string, error)
 	Verify(storedHash, code string) bool
 }
 
@@ -140,13 +143,9 @@ func (m *Manager) Create(ctx context.Context, note *domain.Note) (*domain.Note, 
 	}
 	defer unlock()
 
-	if note.EditCode == "" {
-		editCode, editCodeErr := domain.NewEditCode()
-		if editCodeErr != nil {
-			return nil, fmt.Errorf("generate edit code: %w", editCodeErr)
-		}
-
-		note.EditCode = editCode
+	hashedCode, hashErr := m.resolveEditCodeHash(note)
+	if hashErr != nil {
+		return nil, hashErr
 	}
 
 	// Create mutates note in place for persistence (hash the edit code, encrypt the content,
@@ -160,11 +159,6 @@ func (m *Manager) Create(ctx context.Context, note *domain.Note) (*domain.Note, 
 		note.EditCode = plaintextCode
 		note.ID = slug
 	}()
-
-	hashedCode, hashErr := m.hasher.Hash(note.EditCode)
-	if hashErr != nil {
-		return nil, fmt.Errorf("hash edit code: %w", hashErr)
-	}
 
 	note.EditCode = hashedCode
 
@@ -185,7 +179,7 @@ func (m *Manager) Create(ctx context.Context, note *domain.Note) (*domain.Note, 
 		return nil, fmt.Errorf("create note: %w", err)
 	}
 
-	m.log.DebugContext(ctx, "note created", "id", slug)
+	m.log.DebugContext(ctx, "note created", "id", domain.HashSlug(slug))
 
 	return note, nil
 }
@@ -287,6 +281,12 @@ func backfillPersistedState(note, existing *domain.Note) {
 // disabled (BurnTTL cleared) but the existing note has a burn-timer expiry, the stale expiry
 // must be dropped rather than inherited.
 func resolveExpiryTime(note, existing *domain.Note) {
+	if note.ClearExpiry {
+		note.ExpiresAt = nil
+
+		return
+	}
+
 	if note.ExpiresAt != nil {
 		return
 	}
@@ -369,7 +369,7 @@ func (m *Manager) Update(
 		return nil, fmt.Errorf("update note: %w", err)
 	}
 
-	m.log.DebugContext(ctx, "note updated", "id", id)
+	m.log.DebugContext(ctx, "note updated", "id", domain.HashSlug(id))
 
 	return note, nil
 }
@@ -429,14 +429,45 @@ func (m *Manager) GetRenderedPreloaded(
 	return note, rendered, nil
 }
 
+// resolveEditCodeHash fills an empty edit code with a server-generated one and returns its
+// stored-hash form. Generated codes are high-entropy, so they take the fast hash; a
+// caller-supplied code takes the memory-hard variant because its entropy is not guaranteed.
+// On success note.EditCode holds the plaintext code (generated or supplied).
+func (m *Manager) resolveEditCodeHash(note *domain.Note) (string, error) {
+	if note.EditCode == "" {
+		editCode, err := domain.NewEditCode()
+		if err != nil {
+			return "", fmt.Errorf("generate edit code: %w", err)
+		}
+
+		note.EditCode = editCode
+
+		hashed, hashErr := m.hasher.Hash(note.EditCode)
+		if hashErr != nil {
+			return "", fmt.Errorf("hash edit code: %w", hashErr)
+		}
+
+		return hashed, nil
+	}
+
+	hashed, err := m.hasher.HashUserProvided(note.EditCode)
+	if err != nil {
+		return "", fmt.Errorf("hash edit code: %w", err)
+	}
+
+	return hashed, nil
+}
+
 // renderNote converts note content to safe HTML.
 // Plain-text notes are escaped and wrapped in <pre> (Renderer.RenderPlain); markdown notes are
 // parsed and sanitized (Renderer.Render). Manager only picks which strategy the content type calls for.
+// The error names the note by domain.HashSlug(id), never the plaintext slug: the slug is the
+// note's capability URL and this error ends up in server logs.
 func (m *Manager) renderNote(id string, note *domain.Note) (string, error) {
 	if note.ContentType != nil && *note.ContentType == domain.ContentTypePlain {
 		rendered, err := m.renderer.RenderPlain(note.Content)
 		if err != nil {
-			return "", fmt.Errorf("render note %s: %w", id, err)
+			return "", fmt.Errorf("render note %s: %w", domain.HashSlug(id), err)
 		}
 
 		return rendered, nil
@@ -444,7 +475,7 @@ func (m *Manager) renderNote(id string, note *domain.Note) (string, error) {
 
 	rendered, err := m.renderer.Render(note.Content)
 	if err != nil {
-		return "", fmt.Errorf("render note %s: %w", id, err)
+		return "", fmt.Errorf("render note %s: %w", domain.HashSlug(id), err)
 	}
 
 	return rendered, nil
@@ -501,9 +532,9 @@ func decryptContent(ctx context.Context, enc Encryptor, log *slog.Logger, note *
 	plaintext, err := enc.Decrypt(note.Content, domain.HashSlug(note.ID), note.ID)
 	if err != nil {
 		if errors.Is(err, domain.ErrMalformedCiphertext) {
-			log.ErrorContext(ctx, "stored content is corrupt", "id", note.ID, "err", err)
+			log.ErrorContext(ctx, "stored content is corrupt", "id", domain.HashSlug(note.ID), "err", err)
 		} else {
-			log.WarnContext(ctx, "content decryption failed", "id", note.ID, "err", err)
+			log.WarnContext(ctx, "content decryption failed", "id", domain.HashSlug(note.ID), "err", err)
 		}
 
 		return domain.ErrNotFound

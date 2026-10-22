@@ -25,7 +25,7 @@ func deleteLinkCommand() *urcli.Command {
 				Aliases: []string{"e"},
 				Sources: urcli.EnvVars(EnvEditCode),
 				Usage: "Edit code returned at link creation (env: PADMARK_EDIT_CODE). Optional if " +
-					"--token identifies the link's owner",
+					"--token identifies the link's owner. " + psWarnEditCode,
 			},
 		},
 		Action: deleteLinkAction,

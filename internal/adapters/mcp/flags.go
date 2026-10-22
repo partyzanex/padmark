@@ -9,6 +9,8 @@ const (
 	FlagToken   = "token" // same flag name and semantics as padmark-cli
 	FlagBaseURL = "base-url"
 	FlagTimeout = "timeout" // same flag name and semantics as padmark-cli
+	// FlagLogLevel selects the minimum slog level; logs go to stderr only (stdout is the protocol).
+	FlagLogLevel = "log-level"
 )
 
 // Environment variable names, shared with padmark-cli: one .env (PADMARK_TOKEN, PADMARK_URL,
@@ -17,7 +19,12 @@ const (
 	EnvToken   = "PADMARK_TOKEN"
 	EnvBaseURL = "PADMARK_URL"
 	EnvTimeout = "PADMARK_TIMEOUT"
+	// EnvLogLevel is the same variable the padmark server reads for its log level.
+	EnvLogLevel = "PADMARK_LOG_LEVEL"
 )
+
+// DefaultLogLevel keeps per-call debug records out of stderr unless asked for.
+const DefaultLogLevel = "info"
 
 // DefaultBaseURL is the default padmark server address (same default as padmark-cli).
 const DefaultBaseURL = "http://localhost:8080"

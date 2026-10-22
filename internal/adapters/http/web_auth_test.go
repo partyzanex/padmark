@@ -3,9 +3,11 @@ package http_test
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -1517,4 +1519,144 @@ func (s *AuthHandlerSuite) TestUpdateNoteByPath_SessionOwner_BypassesEditCode() 
 	s.router.ServeHTTP(rec, req)
 
 	s.Equal(http.StatusOK, rec.Code)
+}
+
+func (s *AuthHandlerSuite) TestChangePasswordRevocationWarningKeepsReplacementSession() {
+	usr := &domain.User{ID: testUserID1, Username: "alice"}
+	s.auth.EXPECT().GetSession(gomock.Any(), "sess1").Return(usr, nil)
+	s.auth.EXPECT().ChangePassword(gomock.Any(), "sess1", "OldP@ss12!", "NewP@ss12!", "123456").
+		Return("replacement-session", domain.ErrSessionRevocation)
+
+	form := withCSRF(url.Values{
+		"old_password": {"OldP@ss12!"}, "new_password": {"NewP@ss12!"},
+		"new_password_confirm": {"NewP@ss12!"}, "totp_code": {"123456"},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/change-password", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(s.sessionCookie("sess1"))
+	req.AddCookie(s.csrfCookie())
+
+	rec := httptest.NewRecorder()
+	s.router.ServeHTTP(rec, req)
+	s.Equal(http.StatusOK, rec.Code)
+	s.Contains(rec.Body.String(), "Password changed, but older sessions could not be revoked")
+	s.NotContains(rec.Body.String(), "Password changed successfully")
+
+	found := false
+
+	for _, cookie := range rec.Result().Cookies() {
+		if cookie.Name == "padmark_session" {
+			found = true
+
+			s.Equal("replacement-session", cookie.Value)
+		}
+	}
+
+	s.True(found)
+}
+
+// renderedCSRFField extracts the hidden csrf_token value from a rendered HTML form.
+func (s *AuthHandlerSuite) renderedCSRFField(body string) string {
+	match := regexp.MustCompile(`name="csrf_token" value="([^"]+)"`).FindStringSubmatch(body)
+	s.Require().Len(match, 2, "rendered page must carry a csrf_token field")
+
+	return match[1]
+}
+
+// TestChangePasswordHandler_RerenderCarriesRotatedCSRFToken is the regression for the page
+// re-rendering the form with the pre-rotation CSRF token: a full or partial (revocation
+// warning) password change rotates the CSRF cookie, so the re-rendered form must embed that
+// new, verifiable token — otherwise resubmitting from the page fails the double-submit check.
+func (s *AuthHandlerSuite) TestChangePasswordHandler_RerenderCarriesRotatedCSRFToken() {
+	for _, changeErr := range []error{nil, domain.ErrSessionRevocation} {
+		s.Run(fmt.Sprintf("err=%v", changeErr), func() {
+			usr := &domain.User{ID: testUserID1, Username: "alice"}
+			s.auth.EXPECT().GetSession(gomock.Any(), "sess1").Return(usr, nil)
+			s.auth.EXPECT().ChangePassword(gomock.Any(), "sess1", "OldP@ss12!", "NewP@ss12!", "123456").
+				Return("new-sess-id", changeErr)
+
+			form := withCSRF(url.Values{
+				"old_password": {"OldP@ss12!"}, "new_password": {"NewP@ss12!"},
+				"new_password_confirm": {"NewP@ss12!"}, "totp_code": {"123456"},
+			})
+			req := httptest.NewRequest(http.MethodPost, "/change-password", strings.NewReader(form.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			req.AddCookie(s.sessionCookie("sess1"))
+			req.AddCookie(s.csrfCookie())
+
+			rec := httptest.NewRecorder()
+			s.router.ServeHTTP(rec, req)
+			s.Require().Equal(http.StatusOK, rec.Code)
+
+			var csrfCookie *http.Cookie
+
+			for _, cookie := range rec.Result().Cookies() {
+				if cookie.Name == "padmark_csrf" {
+					csrfCookie = cookie
+				}
+			}
+
+			s.Require().NotNil(csrfCookie, "password change must rotate the CSRF cookie")
+			s.NotEqual(testCSRFToken, csrfCookie.Value)
+
+			field := s.renderedCSRFField(rec.Body.String())
+			s.Equal(csrfCookie.Value, field, "re-rendered form must carry the rotated token")
+			s.True(adhttp.VerifyCSRFTokenForTest(field, authTestCSRFSecret))
+		})
+	}
+}
+
+// TestChangePasswordHandler_FailureKeepsRequestCSRFToken — a rejected change does not rotate,
+// so the re-rendered form keeps the request's (still valid) token and sets no new cookie.
+func (s *AuthHandlerSuite) TestChangePasswordHandler_FailureKeepsRequestCSRFToken() {
+	usr := &domain.User{ID: testUserID1, Username: "alice"}
+	s.auth.EXPECT().GetSession(gomock.Any(), "sess1").Return(usr, nil)
+	s.auth.EXPECT().ChangePassword(gomock.Any(), "sess1", "WrongP@ss12!", "NewP@ss12!", "123456").
+		Return("", domain.ErrInvalidPassword)
+
+	form := withCSRF(url.Values{
+		"old_password": {"WrongP@ss12!"}, "new_password": {"NewP@ss12!"},
+		"new_password_confirm": {"NewP@ss12!"}, "totp_code": {"123456"},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/change-password", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(s.sessionCookie("sess1"))
+	req.AddCookie(s.csrfCookie())
+
+	rec := httptest.NewRecorder()
+	s.router.ServeHTTP(rec, req)
+	s.Require().Equal(http.StatusOK, rec.Code)
+
+	for _, cookie := range rec.Result().Cookies() {
+		s.NotEqual("padmark_csrf", cookie.Name, "a failed change must not rotate the CSRF cookie")
+	}
+
+	s.Equal(testCSRFToken, s.renderedCSRFField(rec.Body.String()))
+}
+
+// TestSetupHandler_InvalidUsername_ShowsValidationMessage — the HTML branch renders the
+// username rule from domain.ErrInvalidUsername on the form. The usecase rejects the name before
+// any storage access (pinned in usecases/auth TestOnboardingInvalidUsernameNeverTouchesStorage);
+// the strict mock pins that the handler makes no other AuthManager call after the rejection.
+func (s *AuthHandlerSuite) TestSetupHandler_InvalidUsername_ShowsValidationMessage() {
+	s.auth.EXPECT().AcceptInvite(gomock.Any(), "tok", "bad/name", testPw).
+		Return(nil, fmt.Errorf("accept invite: %w", domain.ErrInvalidUsername))
+
+	form := withCSRF(url.Values{
+		"invite":           {"tok"},
+		"username":         {"bad/name"},
+		"password":         {testPw},
+		"password_confirm": {testPw},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/setup", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "text/html")
+	req.AddCookie(s.csrfCookie())
+
+	rec := httptest.NewRecorder()
+	s.router.ServeHTTP(rec, req)
+
+	s.Equal(http.StatusOK, rec.Code)
+	s.Contains(rec.Body.String(), "username must be 1–64 characters")
+	s.NotContains(rec.Body.String(), "Scan QR code")
 }

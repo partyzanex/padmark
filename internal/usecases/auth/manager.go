@@ -47,6 +47,9 @@ type InviteStore interface {
 }
 
 // SessionStore persists authenticated browser sessions.
+//
+// All key parameters carry the at-rest value domain.Session.SessionHash — the SHA-256 digest
+// of the raw session id (see hashToken) — never the raw cookie value.
 type SessionStore interface {
 	Create(ctx context.Context, s *domain.Session) error
 	Get(ctx context.Context, sessionID string) (*domain.Session, error)

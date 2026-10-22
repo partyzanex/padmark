@@ -280,7 +280,7 @@ func NewHandler(manager NoteManager, linkManager LinkManager, log *slog.Logger) 
 		// and attached later via WithAuthManager / WithForcedScheme / WithCSRFSecret /
 		// WithTrustedProxies / WithSessionTTL from the composition root. NewRouter calls all
 		// of them before the server starts serving requests — missing one is a startup bug,
-		// caught at first request (csrfSecret=nil → csrfGuard short-circuits to safe 400).
+		// caught on guarded POSTs (csrfSecret=nil → csrfGuard rejects with 403).
 		authMgr:        nil,
 		forcedScheme:   "",
 		csrfSecret:     nil,

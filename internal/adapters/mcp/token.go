@@ -55,6 +55,11 @@ func newPadmarkClient(cmd *urcli.Command) (*padmark.Client, error) {
 
 	serverURL := pickServerURL(cmd, embeddedURL)
 
+	trustErr := ensureTrustedServer(cmd, embeddedURL, serverURL)
+	if trustErr != nil {
+		return nil, trustErr
+	}
+
 	warnInsecureToken(stderrWriter(cmd), serverURL, token)
 
 	transport := &bearerTransport{base: http.DefaultTransport, token: token}

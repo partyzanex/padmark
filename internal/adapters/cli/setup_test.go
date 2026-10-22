@@ -1,19 +1,45 @@
 package cli
 
 import (
-	"context"
+	"bytes"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
+	"sync/atomic"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// setupArgs returns the credential flags of a setup run that would otherwise succeed: only
+// the server choice under test decides whether it may proceed.
+func setupArgs() []string {
+	return []string{cmdSetup, "--username", "root", "--password", "FlowP@ss123!"}
+}
+
+// newSetupSrv starts a /setup endpoint answering 201 with an otpauth URI and counts the hits;
+// it also records whether any request carried an Authorization header (setup must not).
+func newSetupSrv(hits *atomic.Int32, sawAuth *atomic.Bool) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+
+		if r.Header.Get("Authorization") != "" {
+			sawAuth.Store(true)
+		}
+
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"otp_auth_uri":"otpauth://totp/padmark:root"}`))
+	}))
+}
 
 // TestSetup_PasswordPipedToStdin verifies the no-dependency password path: without --password,
 // the setup password comes from the first line of piped stdin — visible-echo TTY prompts are
 // deliberately rejected as a footgun instead of allowed.
 func TestSetup_PasswordPipedToStdin(t *testing.T) {
+	isolateEnv(t)
+
 	// Replace stdin with a pipe carrying the password; no --password flag.
 	r, w, err := os.Pipe()
 	require.NoError(t, err)
@@ -38,7 +64,7 @@ func TestSetup_PasswordPipedToStdin(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	err = runCLI(context.Background(), "--url", srv.URL, "setup", "--username", "admin")
+	err = runCLI(t.Context(), "--url", srv.URL, "setup", "--username", "admin")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "The first admin already exists",
 		"piped password must be accepted and reach the server")
@@ -47,6 +73,8 @@ func TestSetup_PasswordPipedToStdin(t *testing.T) {
 // TestSetup_TTYWithoutPassword_FailsFast — an interactive stdin with no --password is an
 // immediate error, not a visible-echo prompt.
 func TestSetup_TTYWithoutPassword_FailsFast(t *testing.T) {
+	isolateEnv(t)
+
 	// os.Stdin in `go test` is not a char device, but the error path is the same: nothing piped
 	// and no flag → the command must refuse rather than block or prompt.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -54,7 +82,101 @@ func TestSetup_TTYWithoutPassword_FailsFast(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	err := runCLI(context.Background(), "--url", srv.URL, "setup", "--username", "admin")
+	err := runCLI(t.Context(), "--url", srv.URL, "setup", "--username", "admin")
 	require.Error(t, err)
 	require.ErrorIs(t, err, errSetupNoPassword)
+}
+
+// TestSetup_UntrustedEnvelope_BlocksBeforeAnyRequest is the R-08 regression for setup: a pmk_
+// envelope pinning an untrusted server, from any token source and with no --url, must fail
+// before the insecure warning and before a single byte reaches the pinned server — otherwise
+// the bootstrap password and the returned TOTP secret go wherever a third-party token points.
+func TestSetup_UntrustedEnvelope_BlocksBeforeAnyRequest(t *testing.T) {
+	cases := []struct {
+		name    string
+		provide func(t *testing.T, configDir, token string) []string
+	}{
+		{"token flag", func(_ *testing.T, _, token string) []string {
+			return []string{"--token", token}
+		}},
+		{"PADMARK_TOKEN env", func(t *testing.T, _, token string) []string {
+			t.Helper()
+			t.Setenv(EnvToken, token)
+
+			return nil
+		}},
+		{"token file", func(t *testing.T, configDir, token string) []string {
+			t.Helper()
+			require.NoError(t, os.MkdirAll(filepath.Join(configDir, "padmark"), 0o700))
+			require.NoError(t, os.WriteFile(filepath.Join(configDir, "padmark", "token"), []byte(token), 0o600))
+
+			return nil
+		}},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			configDir := isolateEnv(t)
+
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				t.Error("setup must not reach a server pinned by an untrusted envelope")
+				w.WriteHeader(http.StatusCreated)
+			}))
+			defer srv.Close()
+
+			args := testCase.provide(t, configDir, envelopeToken(t, srv.URL))
+
+			var errBuf bytes.Buffer
+
+			app := NewApp()
+			app.ErrWriter = &errBuf
+
+			err := app.Run(t.Context(), append(append([]string{testBin}, args...), setupArgs()...))
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "not trusted yet")
+			assert.NotContains(t, errBuf.String(), "cleartext", "the gate must run before the insecure warning")
+		})
+	}
+}
+
+// TestSetup_ExplicitURLOverridesUntrustedEnvelope verifies an explicit --url is its own
+// confirmation for setup too: the envelope no longer decides, so setup proceeds to --url.
+func TestSetup_ExplicitURLOverridesUntrustedEnvelope(t *testing.T) {
+	isolateEnv(t)
+
+	var (
+		hits    atomic.Int32
+		sawAuth atomic.Bool
+	)
+
+	srv := newSetupSrv(&hits, &sawAuth)
+	defer srv.Close()
+
+	token := envelopeToken(t, "https://untrusted.example")
+
+	require.NoError(t, runCLI(t.Context(), append([]string{"--token", token, "--url", srv.URL}, setupArgs()...)...))
+	assert.Equal(t, int32(1), hits.Load(), "setup must reach the explicit --url server")
+	assert.False(t, sawAuth.Load(), "setup is unauthenticated and must not send the bearer key")
+}
+
+// TestSetup_TrustedEnvelopeProceeds verifies the trust-on-first-use cycle for setup: once the
+// pinned origin is recorded with `trust`, setup follows the envelope URL without --url.
+func TestSetup_TrustedEnvelopeProceeds(t *testing.T) {
+	isolateEnv(t)
+
+	var (
+		hits    atomic.Int32
+		sawAuth atomic.Bool
+	)
+
+	srv := newSetupSrv(&hits, &sawAuth)
+	defer srv.Close()
+
+	token := envelopeToken(t, srv.URL)
+
+	require.NoError(t, runCLI(t.Context(), "--token", token, cmdTrust))
+	require.NoError(t, runCLI(t.Context(), append([]string{"--token", token}, setupArgs()...)...))
+	assert.Equal(t, int32(1), hits.Load(), "setup must reach the trusted pinned server")
+	assert.False(t, sawAuth.Load(), "setup is unauthenticated and must not send the bearer key")
 }

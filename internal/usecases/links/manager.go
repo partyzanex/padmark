@@ -46,8 +46,7 @@ type NotesChecker interface {
 // implementation must be the exact same instance notes.Manager locks against (see notes.
 // SlugLock), or this protects nothing. Declared here rather than imported from notes, for the
 // same reason as Encryptor above: a usecase package may only import domain + stdlib.
-// Updates and cache fills also share this lock, preventing a concurrent read from
-// caching the old URL or privacy after Update has persisted and evicted it.
+// Updates and target-cache fills also share this lock to coordinate local eviction.
 type SlugLock interface {
 	Lock(ctx context.Context, key string) (unlock func(), err error)
 }
@@ -60,21 +59,22 @@ type Encryptor interface {
 	Decrypt(ciphertext, recordID, legacySlug string) (string, error)
 }
 
-// EditCodeHasher hashes and verifies link edit codes.
+// EditCodeHasher hashes and verifies link edit codes. Hash is for server-generated
+// high-entropy codes; HashUserProvided is for caller-chosen codes, which need a
+// memory-hard hash because their entropy is not guaranteed.
 type EditCodeHasher interface {
 	Hash(code string) (string, error)
+	HashUserProvided(code string) (string, error)
 	Verify(storedHash, code string) bool
 }
 
-// Cache caches decrypted links by their hashed ID (domain.HashSlug) to skip the storage
-// round-trip and decrypt for frequently-followed ("hot") links — see WithCache and resolveLink.
-// Values passed to Set and returned from Get must be treated as this call's own copy: Manager
-// mutates its working copy in place (e.g. incrementing Views), so an implementation sharing the
-// same pointer across calls would let that mutation corrupt the cached entry — see
-// internal/infra/linkcache's implementation, which clones on both Get and Set for this reason.
+// Cache stores only decrypted targets, bound to the current stored ciphertext.
+// Metadata and authorization always come from storage, including on cache hits.
+// Get must miss when ciphertext differs so a replica never reuses an old target
+// after another replica updates the record.
 type Cache interface {
-	Get(id string) (*domain.Link, bool)
-	Set(ctx context.Context, id string, link *domain.Link)
+	Get(id, ciphertext string) (string, bool)
+	Set(ctx context.Context, id, ciphertext, targetURL string)
 	Delete(id string)
 }
 
@@ -255,7 +255,7 @@ func (m *Manager) Create(ctx context.Context, targetURL string, opts CreateOptio
 		return nil, err
 	}
 
-	m.log.DebugContext(ctx, "link created", "id", slug)
+	m.log.DebugContext(ctx, "link created", "id", domain.HashSlug(slug))
 
 	if m.metrics != nil {
 		m.metrics.IncLinksCreated()
@@ -271,9 +271,9 @@ func decryptTargetURL(ctx context.Context, enc Encryptor, log *slog.Logger, link
 	plaintext, err := enc.Decrypt(link.TargetURL, domain.HashSlug(link.ID), link.ID)
 	if err != nil {
 		if errors.Is(err, domain.ErrMalformedCiphertext) {
-			log.ErrorContext(ctx, "stored target url is corrupt", "id", link.ID, "err", err)
+			log.ErrorContext(ctx, "stored target url is corrupt", "id", domain.HashSlug(link.ID), "err", err)
 		} else {
-			log.WarnContext(ctx, "target url decryption failed", "id", link.ID, "err", err)
+			log.WarnContext(ctx, "target url decryption failed", "id", domain.HashSlug(link.ID), "err", err)
 		}
 
 		return domain.ErrNotFound
@@ -288,11 +288,8 @@ func decryptTargetURL(ctx context.Context, enc Encryptor, log *slog.Logger, link
 // applying expiry policy. Used by the HTTP layer's privacy gate before Redirect's side effects,
 // and directly by OgenHandler.GetLink (GET /links/{id}'s metadata read) — mirrors
 // notes.Manager.Peek exactly, including intentionally returning expired/burn-pending links as-is.
-// May be served from the optional Cache — see resolveLink. Same accepted trade-off as Redirect: a
-// cache hit's Views can lag the true stored count by up to the cache's TTL (see
-// internal/infra/linkcache.DefaultTTL) if other requests incremented it in the meantime — a
-// caller checking GET /links/{id} for an exact live count should not assume it's realtime, the
-// same way any cache-fronted view/click counter (e.g. link shorteners generally) isn't.
+// Every call reads current metadata from storage. Only target decryption may use
+// the optional Cache; cached entries never supply privacy, ownership or lifecycle state.
 func (m *Manager) Peek(ctx context.Context, slug string) (*domain.Link, error) {
 	link, err := m.resolveLink(ctx, slug)
 	if err != nil {
@@ -310,11 +307,8 @@ func (m *Manager) Peek(ctx context.Context, slug string) (*domain.Link, error) {
 // just-consumed burn link, which no longer exists to count) — mirrors notes.Manager.Get/View,
 // simplified for links' single burn mode (no TTL grace period, unlike notes' burn-after-reading).
 //
-// The initial fetch may be served from the optional Cache (see resolveLink) — a hot, frequently
-// followed link skips both the storage round-trip and the decrypt on a cache hit. Views is always
-// incremented against real storage regardless of cache hit/miss, so the stored count is never
-// wrong; only the Views value returned to THIS caller can lag by however many other requests hit
-// the cache in between — an accepted trade-off for a "hot links" cache, not a stored-data bug.
+// The initial fetch always reads current storage metadata. For public links the
+// optional Cache can skip decryption after verifying the current ciphertext.
 func (m *Manager) Redirect(ctx context.Context, slug string) (*domain.Link, error) {
 	dbID := domain.HashSlug(slug)
 
@@ -326,7 +320,7 @@ func (m *Manager) Redirect(ctx context.Context, slug string) (*domain.Link, erro
 	if link.Expired(time.Now()) {
 		delErr := m.storage.Delete(ctx, dbID)
 		if delErr != nil {
-			m.log.ErrorContext(ctx, "delete expired link", "id", slug, "err", delErr)
+			m.log.ErrorContext(ctx, "delete expired link", "id", domain.HashSlug(slug), "err", delErr)
 		}
 
 		m.evictCache(dbID)
@@ -340,7 +334,7 @@ func (m *Manager) Redirect(ctx context.Context, slug string) (*domain.Link, erro
 
 	incErr := m.storage.IncrementViews(ctx, dbID)
 	if incErr != nil {
-		m.log.ErrorContext(ctx, "increment link views", "id", slug, "err", incErr)
+		m.log.ErrorContext(ctx, "increment link views", "id", domain.HashSlug(slug), "err", incErr)
 	} else {
 		link.Views++
 	}
@@ -405,36 +399,26 @@ func (m *Manager) persistLink(
 	return nil
 }
 
-// resolveLink fetches and decrypts a link by dbID, consulting the optional Cache first — a hit
-// skips both the storage round-trip and the decrypt. Only a link that is neither burn-after-click
-// nor already expired is cached (the Set call below):
-//   - caching a burn-after-click link would risk a second, concurrent request being served a
-//     stale "not yet consumed" copy instead of relying on storage.Consume's atomicity;
-//   - caching an already-expired link would be pure churn — Redirect is about to delete it and
-//     evict the cache again (see evictCache) the moment it checks ExpiresAt, so populating the
-//     cache here first just to immediately invalidate it serves no purpose.
-//
-// See the Cache interface's doc comment for the cloning contract this relies on.
-//
-// link.ID must be pinned to the plaintext slug BEFORE decryptTargetURL runs, not after — the
-// slug is the decryption key material (see decryptTargetURL/domain.Link's doc comment), and
-// storage.GetByID returns the row with ID still set to the hashed dbID. Pinning it late would
-// decrypt with the wrong key and every call would collapse to domain.ErrNotFound.
+// resolveLink reads the current row before consulting the decrypted-target cache.
+// Privacy, ownership, deletion, TTL and burn state must be visible across replicas
+// without waiting for local cache expiry. The cache can only reuse a public URL
+// when its ciphertext matches this read's snapshot.
 func (m *Manager) resolveLink(ctx context.Context, slug string) (*domain.Link, error) {
 	dbID := domain.HashSlug(slug)
 
 	if m.cache != nil {
-		// Update holds the same lock through persistence and eviction, so an
-		// in-flight cache miss cannot refill old destination/privacy afterwards.
+		// Freshness, including across replicas, comes from the ciphertext fingerprint:
+		// a stale entry never matches the row read below. This in-process lock is memory
+		// hygiene only — Update holds it through persistence and eviction, so a concurrent
+		// cache miss cannot re-fill the cache with the plaintext target of a link that was
+		// just updated. The cost is serialising reads of one link. (Delete does not take
+		// it: a racing read may re-cache a deleted link's target until TTL eviction, but
+		// that entry is never served because the row lookup below fails first.)
 		unlock, err := m.slugLock.Lock(ctx, dbID)
 		if err != nil {
 			return nil, fmt.Errorf("lock link: %w", err)
 		}
 		defer unlock()
-
-		if cached, ok := m.cache.Get(dbID); ok {
-			return cached, nil
-		}
 	}
 
 	link, err := m.storage.GetByID(ctx, dbID)
@@ -443,23 +427,33 @@ func (m *Manager) resolveLink(ctx context.Context, slug string) (*domain.Link, e
 	}
 
 	link.ID = slug
+	ciphertext := link.TargetURL
+
+	cacheable := m.cache != nil && link.EffectivePrivacy() == domain.PrivacyPublic &&
+		!link.BurnAfterClick && !link.Expired(time.Now())
+	if cacheable {
+		if target, ok := m.cache.Get(dbID, ciphertext); ok {
+			link.TargetURL = target
+
+			return link, nil
+		}
+	}
 
 	err = decryptTargetURL(ctx, m.encryptor, m.log, link)
 	if err != nil {
 		return nil, err
 	}
 
-	expired := link.ExpiresAt != nil && time.Now().After(*link.ExpiresAt)
-	if m.cache != nil && !link.BurnAfterClick && !expired {
-		m.cache.Set(ctx, dbID, link)
+	if cacheable {
+		m.cache.Set(ctx, dbID, ciphertext, link.TargetURL)
 	}
 
 	return link, nil
 }
 
 // evictCache removes dbID from the optional Cache, if one is attached. Called after Update/Delete and
-// after Redirect deletes an expired link, so a subsequent request can never be served a stale hit
-// for a link that no longer exists in storage.
+// after Redirect deletes an expired link. Other replicas also check storage and
+// ciphertext before using their own cache, so correctness does not rely on eviction.
 func (m *Manager) evictCache(dbID string) {
 	if m.cache != nil {
 		m.cache.Delete(dbID)
@@ -469,7 +463,11 @@ func (m *Manager) evictCache(dbID string) {
 // resolveAndHashEditCode generates a random edit code when link.EditCode is empty, then hashes
 // whichever value ends up set (caller-supplied or generated) into link.EditCode in place,
 // returning the plaintext so Create can hand it back to the caller once, like notes.Manager.Create.
+// Caller-supplied codes are hashed with the memory-hard variant: their entropy is not
+// guaranteed, so the stored hash must resist offline brute-force.
 func (m *Manager) resolveAndHashEditCode(link *domain.Link) (string, error) {
+	userSuppliedCode := link.EditCode != ""
+
 	if link.EditCode == "" {
 		editCode, err := domain.NewEditCode()
 		if err != nil {
@@ -481,7 +479,17 @@ func (m *Manager) resolveAndHashEditCode(link *domain.Link) (string, error) {
 
 	plaintext := link.EditCode
 
-	hashed, err := m.hasher.Hash(link.EditCode)
+	var (
+		hashed string
+		err    error
+	)
+
+	if userSuppliedCode {
+		hashed, err = m.hasher.HashUserProvided(link.EditCode)
+	} else {
+		hashed, err = m.hasher.Hash(link.EditCode)
+	}
+
 	if err != nil {
 		return "", fmt.Errorf("hash edit code: %w", err)
 	}
@@ -589,7 +597,7 @@ func (m *Manager) consumeLink(ctx context.Context, slug, dbID string) (*domain.L
 		return nil, fmt.Errorf("redirect: burn after click: %w", err)
 	}
 
-	m.log.DebugContext(ctx, "link burned", "id", slug)
+	m.log.DebugContext(ctx, "link burned", "id", domain.HashSlug(slug))
 
 	if m.metrics != nil {
 		m.metrics.IncRedirects()

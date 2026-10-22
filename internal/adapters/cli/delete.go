@@ -21,7 +21,7 @@ func deleteCommand() *urcli.Command {
 				Aliases: []string{"e"},
 				Sources: urcli.EnvVars(EnvEditCode),
 				Usage: "Edit code returned at note creation (env: PADMARK_EDIT_CODE). Optional if " +
-					"--token identifies the note's owner",
+					"--token identifies the note's owner. " + psWarnEditCode,
 			},
 		},
 		Action: deleteAction,

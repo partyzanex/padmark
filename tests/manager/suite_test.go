@@ -727,3 +727,32 @@ func (s *ManagerSuite) TestLink_Update_RealCrypto() {
 	// The original edit code still authorizes a subsequent mutation.
 	s.NoError(s.LinkManager.Delete(ctx, link.ID, link.EditCode, uuid.Nil))
 }
+
+func (s *ManagerSuite) TestUpdatePlainExpiryPersists() {
+	future := time.Now().Add(time.Hour)
+	created, err := s.Manager.Create(s.T().Context(), &domain.Note{Content: "body", ExpiresAt: &future})
+	s.Require().NoError(err)
+
+	_, err = s.Manager.Update(s.T().Context(), created.ID, created.EditCode, uuid.Nil, &domain.Note{Content: "preserved"})
+	s.Require().NoError(err)
+	stored, err := s.Manager.Peek(s.T().Context(), created.ID)
+	s.Require().NoError(err)
+	s.Require().NotNil(stored.ExpiresAt)
+	s.WithinDuration(future, *stored.ExpiresAt, time.Second)
+
+	later := future.Add(time.Hour)
+	_, err = s.Manager.Update(s.T().Context(), created.ID, created.EditCode, uuid.Nil,
+		&domain.Note{Content: "replaced", ExpiresAt: &later})
+	s.Require().NoError(err)
+	stored, err = s.Manager.Peek(s.T().Context(), created.ID)
+	s.Require().NoError(err)
+	s.Require().NotNil(stored.ExpiresAt)
+	s.WithinDuration(later, *stored.ExpiresAt, time.Second)
+
+	_, err = s.Manager.Update(s.T().Context(), created.ID, created.EditCode, uuid.Nil,
+		&domain.Note{Content: "no expiry", ClearExpiry: true})
+	s.Require().NoError(err)
+	stored, err = s.Manager.Peek(s.T().Context(), created.ID)
+	s.Require().NoError(err)
+	s.Nil(stored.ExpiresAt)
+}

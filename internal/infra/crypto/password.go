@@ -67,6 +67,11 @@ func GenerateKDFSalt() ([]byte, error) {
 func DeriveUserKey(password, kdfSalt []byte, params Argon2Params) (string, error) {
 	params = params.withDefaults()
 
+	err := params.Validate()
+	if err != nil {
+		return "", err
+	}
+
 	key := argon2.IDKey(password, kdfSalt, params.Time, params.Memory, params.Threads, pwKeyLen)
 
 	return base64.RawURLEncoding.EncodeToString(key), nil

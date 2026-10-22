@@ -78,7 +78,7 @@ func (r *APITokenRepository) CreateIfUnderLimit(ctx context.Context, token *doma
 			return fmt.Errorf("count api tokens: %w", countErr)
 		}
 
-		if count >= limit {
+		if count >= int64(limit) {
 			return nil
 		}
 

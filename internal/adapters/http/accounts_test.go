@@ -3,6 +3,7 @@ package http_test
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 
@@ -165,6 +166,31 @@ func (s *AuthHandlerSuite) TestSetupJSON_SpentInvite_410() {
 		`{"username":"member","password":"`+testPw+`","invite":"used"}`, "")
 
 	s.Require().Equal(http.StatusGone, rec.Code)
+}
+
+// TestSetupJSON_InvalidUsername_422 — a non-empty username that fails domain.ValidateUsername
+// is a validation failure (422), like a weak password; the message spells out the rule.
+func (s *AuthHandlerSuite) TestSetupJSON_InvalidUsername_422() {
+	s.auth.EXPECT().AcceptInvite(gomock.Any(), "tok", "bad/name", testPw).
+		Return(nil, fmt.Errorf("accept invite: %w", domain.ErrInvalidUsername))
+
+	rec := s.postSetup("application/json",
+		`{"username":"bad/name","password":"`+testPw+`","invite":"tok"}`, "")
+
+	s.Require().Equal(http.StatusUnprocessableEntity, rec.Code)
+	s.Contains(rec.Body.String(), "username must be")
+}
+
+// TestSetupJSON_EmptyUsername_400 pins the required-field pre-check: an empty or blank username
+// is a malformed request (400) answered before the bootstrap gate or any AuthManager call.
+func (s *AuthHandlerSuite) TestSetupJSON_EmptyUsername_400() {
+	for _, username := range []string{"", "   "} {
+		rec := s.postSetup("application/json",
+			`{"username":"`+username+`","password":"`+testPw+`"}`, "")
+
+		s.Equal(http.StatusBadRequest, rec.Code, "username %q", username)
+		s.Contains(rec.Body.String(), "username is required")
+	}
 }
 
 // ── POST /api/tokens, POST /api/invites ──

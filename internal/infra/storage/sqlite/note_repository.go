@@ -46,6 +46,7 @@ func NewNoteRepository(db *bun.DB) *NoteRepository {
 
 func toDomain(dbNote *note) *domain.Note {
 	return &domain.Note{
+		ClearExpiry:      false,
 		ID:               dbNote.ID,
 		CreatedAt:        dbNote.CreatedAt,
 		UpdatedAt:        dbNote.UpdatedAt,

@@ -33,7 +33,7 @@ func (m *Manager) Update(
 
 	dbID := domain.HashSlug(slug)
 	// Serialize updates and cache fills for this slug so an in-flight read cannot
-	// cache the old privacy or destination after this write evicts it. Updates
+	// cache the old destination after this write evicts it. Updates
 	// also preserve each other's omitted fields within this process.
 	unlock, err := m.slugLock.Lock(ctx, dbID)
 	if err != nil {
@@ -75,7 +75,7 @@ func (m *Manager) Update(
 	// The edit code is a creation-only secret, never an update response field.
 	persisted.EditCode = ""
 
-	m.log.DebugContext(ctx, "link updated", "id", slug)
+	m.log.DebugContext(ctx, "link updated", "id", domain.HashSlug(slug))
 
 	return persisted, nil
 }

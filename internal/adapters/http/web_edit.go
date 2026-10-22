@@ -2,6 +2,8 @@ package http
 
 import (
 	"net/http"
+
+	"github.com/partyzanex/padmark/internal/domain"
 	"time"
 )
 
@@ -58,6 +60,6 @@ func (h *NoteHandler) EditPage(w http.ResponseWriter, r *http.Request) {
 		IsOwner:          isOwner,
 	})
 	if err != nil {
-		h.log.ErrorContext(r.Context(), "render edit template", "id", id, "err", err)
+		h.log.ErrorContext(r.Context(), "render edit template", "id", domain.HashSlug(id), "err", err)
 	}
 }

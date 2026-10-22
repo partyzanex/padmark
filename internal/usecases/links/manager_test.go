@@ -1,6 +1,7 @@
 package links
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"log/slog"
@@ -25,7 +26,11 @@ func (passthroughEncryptor) Decrypt(ct, _, _ string) (string, error) { return ct
 type identityHasher struct{}
 
 func (identityHasher) Hash(code string) (string, error) { return code, nil }
-func (identityHasher) Verify(hash, code string) bool    { return hash == code }
+
+// HashUserProvided prefixes the code so tests can assert which hashing variant the usecase
+// picked for caller-supplied codes (see TestCreate_UserSuppliedCodeUsesMemoryHardHash).
+func (identityHasher) HashUserProvided(code string) (string, error) { return "user:" + code, nil }
+func (identityHasher) Verify(hash, code string) bool                { return hash == code || hash == "user:"+code }
 
 // failingEncryptor is a test double whose Decrypt always returns an error.
 type failingEncryptor struct{}
@@ -81,6 +86,28 @@ func (s *ManagerTestSuite) TestCreate_OK() {
 	s.Equal("https://example.com", link.TargetURL)
 	s.NotEmpty(link.ID)
 	s.NotEmpty(link.EditCode)
+}
+
+// TestCreate_UserSuppliedCodeUsesMemoryHardHash pins that a caller-chosen edit code is
+// hashed with the memory-hard variant (identityHasher.HashUserProvided → "user:" prefix)
+// because its entropy is not guaranteed; the generated-code path stays on the fast hash.
+func (s *ManagerTestSuite) TestCreate_UserSuppliedCodeUsesMemoryHardHash() {
+	s.notes.EXPECT().Exists(gomock.Any(), gomock.Any()).Return(false, nil)
+	s.storage.EXPECT().Exists(gomock.Any(), gomock.Any()).Return(false, nil)
+
+	var storedHash string
+
+	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, stored *domain.Link) error {
+			storedHash = stored.EditCode
+
+			return nil
+		})
+
+	_, err := s.manager.Create(s.T().Context(), "https://example.com", CreateOptions{EditCode: "MyCustomCode1"})
+
+	s.Require().NoError(err)
+	s.Equal("user:MyCustomCode1", storedHash)
 }
 
 // TestCreate_URLSchemeWhitelist is the explicit whitelist test matrix from TODO.md's Phase 2
@@ -326,20 +353,22 @@ func (s *ManagerTestSuite) TestRedirect_DecryptFailure() {
 // Cache (WithCache) — nil by default (see SetupTest); these tests attach a MockCache locally to
 // exercise resolveLink/evictCache without changing every other test's expectations.
 
-func (s *ManagerTestSuite) TestRedirect_CacheHit_SkipsStorageGetByID() {
+func (s *ManagerTestSuite) TestRedirect_CacheHit_ReadsCurrentMetadata() {
 	cache := NewMockCache(s.ctrl)
-	s.manager = NewManager(s.storage, s.notes, noopSlugLock{}, passthroughEncryptor{}, identityHasher{},
+	s.manager = NewManager(s.storage, s.notes, noopSlugLock{}, failingEncryptor{}, identityHasher{},
 		slog.New(slog.DiscardHandler), true).WithCache(cache)
 
-	cached := &domain.Link{TargetURL: "https://example.com"}
-	cache.EXPECT().Get(gomock.Any()).Return(cached, true)
-	// storage.GetByID deliberately has no EXPECT() — a cache hit must never reach storage.
+	stored := &domain.Link{TargetURL: "ciphertext", Views: 8}
+	s.storage.EXPECT().GetByID(gomock.Any(), domain.HashSlug("the-slug")).Return(stored, nil)
+	cache.EXPECT().Get(domain.HashSlug("the-slug"), "ciphertext").Return("https://example.com", true)
 	s.storage.EXPECT().IncrementViews(gomock.Any(), gomock.Any()).Return(nil)
 
 	got, err := s.manager.Redirect(s.T().Context(), "the-slug")
 
 	s.Require().NoError(err)
 	s.Equal("https://example.com", got.TargetURL)
+	s.Equal(9, got.Views)
+	s.Equal("the-slug", got.ID)
 }
 
 func (s *ManagerTestSuite) TestRedirect_CacheMiss_PopulatesCacheForNonBurnLink() {
@@ -349,9 +378,9 @@ func (s *ManagerTestSuite) TestRedirect_CacheMiss_PopulatesCacheForNonBurnLink()
 
 	link := &domain.Link{TargetURL: "https://example.com"}
 
-	cache.EXPECT().Get(gomock.Any()).Return(nil, false)
+	cache.EXPECT().Get(gomock.Any(), "https://example.com").Return("", false)
 	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(link, nil)
-	cache.EXPECT().Set(gomock.Any(), gomock.Any(), link)
+	cache.EXPECT().Set(gomock.Any(), gomock.Any(), "https://example.com", "https://example.com")
 	s.storage.EXPECT().IncrementViews(gomock.Any(), gomock.Any()).Return(nil)
 
 	_, err := s.manager.Redirect(s.T().Context(), "the-slug")
@@ -369,7 +398,6 @@ func (s *ManagerTestSuite) TestRedirect_BurnAfterClick_NeverCached() {
 
 	link := &domain.Link{TargetURL: "https://example.com", BurnAfterClick: true}
 
-	cache.EXPECT().Get(gomock.Any()).Return(nil, false)
 	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(link, nil)
 	// cache.Set deliberately has no EXPECT() — a burn-after-click link must never be cached.
 	s.storage.EXPECT().Consume(gomock.Any(), gomock.Any()).Return(link, nil)
@@ -387,7 +415,6 @@ func (s *ManagerTestSuite) TestRedirect_Expired_EvictsCache() {
 	past := time.Now().Add(-time.Hour)
 	link := &domain.Link{TargetURL: "https://example.com", ExpiresAt: &past}
 
-	cache.EXPECT().Get(gomock.Any()).Return(nil, false)
 	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(link, nil)
 	s.storage.EXPECT().Delete(gomock.Any(), gomock.Any()).Return(nil)
 	cache.EXPECT().Delete(gomock.Any())
@@ -397,18 +424,46 @@ func (s *ManagerTestSuite) TestRedirect_Expired_EvictsCache() {
 	s.ErrorIs(err, domain.ErrExpired)
 }
 
-func (s *ManagerTestSuite) TestPeek_CacheHit_SkipsStorage() {
+func (s *ManagerTestSuite) TestPeek_CacheHit_ReadsCurrentMetadata() {
 	cache := NewMockCache(s.ctrl)
-	s.manager = NewManager(s.storage, s.notes, noopSlugLock{}, passthroughEncryptor{}, identityHasher{},
+	s.manager = NewManager(s.storage, s.notes, noopSlugLock{}, failingEncryptor{}, identityHasher{},
 		slog.New(slog.DiscardHandler), true).WithCache(cache)
 
-	cached := &domain.Link{TargetURL: "https://example.com"}
-	cache.EXPECT().Get(gomock.Any()).Return(cached, true)
+	stored := &domain.Link{TargetURL: "ciphertext", Views: 8}
+	s.storage.EXPECT().GetByID(gomock.Any(), domain.HashSlug("the-slug")).Return(stored, nil)
+	cache.EXPECT().Get(domain.HashSlug("the-slug"), "ciphertext").Return("https://example.com", true)
 
 	got, err := s.manager.Peek(s.T().Context(), "the-slug")
 
 	s.Require().NoError(err)
 	s.Equal("https://example.com", got.TargetURL)
+	s.Equal(8, got.Views)
+	s.Equal("the-slug", got.ID)
+}
+
+func (s *ManagerTestSuite) TestPeek_PrivateRowNeverUsesCache() {
+	cache := NewMockCache(s.ctrl)
+	s.manager.WithCache(cache)
+
+	privacy, owner := domain.PrivacyOwner, uuid.New()
+	stored := &domain.Link{TargetURL: "https://example.com/private", Privacy: &privacy, OwnerID: &owner}
+	s.storage.EXPECT().GetByID(gomock.Any(), domain.HashSlug("the-slug")).Return(stored, nil)
+	// No cache Get/Set is allowed for a private row, even if an older public target
+	// is still present in this replica's cache.
+	got, err := s.manager.Peek(s.T().Context(), "the-slug")
+	s.Require().NoError(err)
+	s.Equal(domain.PrivacyOwner, got.EffectivePrivacy())
+	s.False(got.VisibleTo(uuid.Nil, false))
+}
+
+func (s *ManagerTestSuite) TestPeek_DatabaseFailureNeverFallsBackToCache() {
+	s.manager.WithCache(NewMockCache(s.ctrl))
+
+	for _, cause := range []error{domain.ErrNotFound, errors.New("database unavailable")} {
+		s.storage.EXPECT().GetByID(gomock.Any(), domain.HashSlug("the-slug")).Return(nil, cause)
+		_, err := s.manager.Peek(s.T().Context(), "the-slug")
+		s.ErrorIs(err, cause)
+	}
 }
 
 // Metrics (WithMetrics) — nil by default (see SetupTest); these tests attach a MockMetrics
@@ -584,4 +639,15 @@ func (s *ManagerTestSuite) TestDelete_NotFound() {
 	err := s.manager.Delete(s.T().Context(), "missing", "code", uuid.Nil)
 
 	s.ErrorIs(err, domain.ErrNotFound)
+}
+
+func (s *ManagerTestSuite) TestDecryptionFailureLogsOnlyHashedSlug() {
+	var buf bytes.Buffer
+
+	log := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	note := &domain.Link{ID: "secret-slug", TargetURL: "invalid"}
+	err := decryptTargetURL(s.T().Context(), failingEncryptor{}, log, note)
+	s.Require().ErrorIs(err, domain.ErrNotFound)
+	s.Contains(buf.String(), domain.HashSlug(note.ID))
+	s.NotContains(buf.String(), note.ID)
 }

@@ -17,34 +17,34 @@ import (
 type sessionRow struct {
 	bun.BaseModel `bun:"table:sessions"`
 
-	CreatedAt time.Time `bun:"created_at,notnull"`
-	ExpiresAt time.Time `bun:"expires_at,notnull"`
-	SessionID string    `bun:"session_id,pk"`
-	UserAgent string    `bun:"user_agent"`
-	IP        string    `bun:"ip"`
-	UserID    uuid.UUID `bun:"user_id,notnull"`
+	CreatedAt   time.Time `bun:"created_at,notnull"`
+	ExpiresAt   time.Time `bun:"expires_at,notnull"`
+	SessionHash string    `bun:"session_hash,pk"`
+	UserAgent   string    `bun:"user_agent"`
+	IP          string    `bun:"ip"`
+	UserID      uuid.UUID `bun:"user_id,notnull"`
 }
 
 func toSessionRow(sess *domain.Session) *sessionRow {
 	return &sessionRow{
-		BaseModel: bun.BaseModel{},
-		SessionID: sess.SessionID,
-		UserID:    sess.UserID,
-		CreatedAt: sess.CreatedAt,
-		ExpiresAt: sess.ExpiresAt,
-		UserAgent: sess.UserAgent,
-		IP:        sess.IP,
+		BaseModel:   bun.BaseModel{},
+		SessionHash: sess.SessionHash,
+		UserID:      sess.UserID,
+		CreatedAt:   sess.CreatedAt,
+		ExpiresAt:   sess.ExpiresAt,
+		UserAgent:   sess.UserAgent,
+		IP:          sess.IP,
 	}
 }
 
 func (r *sessionRow) toDomain() *domain.Session {
 	return &domain.Session{
-		SessionID: r.SessionID,
-		UserID:    r.UserID,
-		CreatedAt: r.CreatedAt,
-		ExpiresAt: r.ExpiresAt,
-		UserAgent: r.UserAgent,
-		IP:        r.IP,
+		SessionHash: r.SessionHash,
+		UserID:      r.UserID,
+		CreatedAt:   r.CreatedAt,
+		ExpiresAt:   r.ExpiresAt,
+		UserAgent:   r.UserAgent,
+		IP:          r.IP,
 	}
 }
 
@@ -86,7 +86,7 @@ func (r *SessionRepository) Get(ctx context.Context, sessionID string) (*domain.
 
 	err := r.db.NewSelect().
 		Model(&row).
-		Where("session_id = ?", sessionID).
+		Where("session_hash = ?", sessionID).
 		Where("expires_at > ?", time.Now()).
 		Scan(ctx)
 	if err != nil {
@@ -104,7 +104,7 @@ func (r *SessionRepository) Get(ctx context.Context, sessionID string) (*domain.
 func (r *SessionRepository) Delete(ctx context.Context, sessionID string) error {
 	_, err := r.db.NewDelete().
 		TableExpr("sessions").
-		Where("session_id = ?", sessionID).
+		Where("session_hash = ?", sessionID).
 		Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("delete session: %w", err)
@@ -118,7 +118,7 @@ func (r *SessionRepository) DeleteByUserIDExcept(ctx context.Context, userID uui
 	_, err := r.db.NewDelete().
 		TableExpr("sessions").
 		Where("user_id = ?", userID).
-		Where("session_id != ?", exceptSessionID).
+		Where("session_hash != ?", exceptSessionID).
 		Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("delete sessions by user except: %w", err)

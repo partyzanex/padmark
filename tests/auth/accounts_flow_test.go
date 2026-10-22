@@ -113,6 +113,8 @@ func setupPost(t *testing.T, baseURL string, body string) *http.Response {
 // TestAccountsFlow is the headless-accounts end-to-end: CLI setup → create-token →
 // create-invite → member enrollment → the 403/409/410/429 edges.
 func TestAccountsFlow(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
 	ctx := context.Background()
 
 	// ── storage + wiring (see testAPITokenFlow for the same pattern) ──
@@ -201,6 +203,8 @@ func TestAccountsFlow(t *testing.T) {
 
 	adminEnvelope, err := domain.EncodeAPITokenEnvelope(srv.URL, apiKey)
 	require.NoError(t, err)
+
+	require.NoError(t, clicmd.NewApp().Run(ctx, []string{"padmark-cli", "--token", adminEnvelope, "trust"}))
 
 	out = captureStdout(t, func() error {
 		return clicmd.NewApp().Run(ctx, []string{

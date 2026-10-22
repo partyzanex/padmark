@@ -55,6 +55,7 @@ func (h *OgenHandler) CreateNote(
 	}
 
 	note, err := h.manager.Create(ctx, &domain.Note{
+		ClearExpiry: false,
 		// CreateNote fills CreatedAt/UpdatedAt; ExpiresAt is server-derived (--ttl on the CLI)
 		// and Views starts at 0. Privacy/OwnerID/EditCode/ContentType carry through from the request.
 		CreatedAt:        time.Time{},
@@ -82,14 +83,23 @@ func (h *OgenHandler) CreateNote(
 }
 
 // GetNote implements ogenapi.Handler.
-// NOTE: GET /notes/{id} is intentionally NOT routed to ogenSrv in NewRouter — it is handled
-// by Handler.GetNote, which enforces per-note private auth and HTML/browser redirects.
-// If this route is ever added to ogenSrv, private notes will be publicly accessible via
-// the JSON API without authentication. Implement an auth check here before doing so.
+// The native route handles content negotiation; this JSON implementation also enforces
+// privacy before invoking any view-count or burn-after-reading side effect.
 func (h *OgenHandler) GetNote(
 	ctx context.Context, params ogenapi.GetNoteParams,
 ) (ogenapi.GetNoteRes, error) {
-	note, err := h.manager.View(ctx, params.ID)
+	note, err := h.manager.Peek(ctx, params.ID)
+	if err != nil {
+		return mapGetError(err, h.log), nil
+	}
+
+	if !note.VisibleTo(callerIDFromCtx(ctx), authenticatedFromCtx(ctx)) {
+		v := ogenapi.GetNoteUnauthorized(errorResponse(msgUnauthorized))
+
+		return &v, nil
+	}
+
+	note, err = h.manager.ViewPreloaded(ctx, params.ID, note)
 	if err != nil {
 		return mapGetError(err, h.log), nil
 	}
@@ -107,19 +117,36 @@ func (h *OgenHandler) UpdateNote(
 		return &v, nil
 	}
 
+	note, err := h.manager.Update(ctx, params.ID, req.EditCode.Or(""), callerIDFromCtx(ctx), noteUpdatePayload(req))
+	if err != nil {
+		return mapUpdateError(err, h.log), nil
+	}
+
+	return domainToResponse(note), nil
+}
+
+// noteUpdatePayload is shared by ogen and native multi-segment PUT routes.
+func noteUpdatePayload(req *ogenapi.UpdateNoteRequest) *domain.Note {
 	burnAfterReading := req.BurnAfterReading.Or(false)
 
 	var burnTTL int64
-	if burnAfterReading && req.TTL.IsSet() && req.TTL.Value >= 0 {
-		burnTTL = req.TTL.Value
+
+	var expiresAt *time.Time
+
+	if req.TTL.IsSet() && !req.TTL.IsNull() {
+		if burnAfterReading {
+			burnTTL = req.TTL.Value
+		} else {
+			expiresAt = ttlToExpiresAt(ogenapi.NewOptInt64(req.TTL.Value))
+		}
 	}
 
-	note, err := h.manager.Update(ctx, params.ID, req.EditCode.Or(""), callerIDFromCtx(ctx), &domain.Note{
+	return &domain.Note{
 		// UpdatePath/Update semantics: CreatedAt/UpdatedAt/Views are not caller-set; OwnerID/ID are
 		// pinned from the existing note inside the usecase; EditCode is the caller-supplied credential.
 		CreatedAt:        time.Time{},
 		UpdatedAt:        time.Time{},
-		ExpiresAt:        nil,
+		ExpiresAt:        expiresAt,
 		Privacy:          optUpdatePrivacyPtr(req.Privacy),
 		OwnerID:          nil,
 		ID:               "",
@@ -130,12 +157,11 @@ func (h *OgenHandler) UpdateNote(
 		Views:            0,
 		BurnTTL:          burnTTL,
 		BurnAfterReading: burnAfterReading,
-	})
-	if err != nil {
-		return mapUpdateError(err, h.log), nil
+		// null removes the hard expiry only when burn is off. With burn_after_reading the spec makes
+		// omitted, null and 0 equivalent (immediate burn), so null must not also drop an existing
+		// hard expiry that omitted/0 keep.
+		ClearExpiry: !burnAfterReading && req.TTL.IsSet() && req.TTL.IsNull(),
 	}
-
-	return domainToResponse(note), nil
 }
 
 // DeleteNote implements ogenapi.Handler.

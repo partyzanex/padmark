@@ -46,8 +46,12 @@ func csrfHMAC(nonceB64 string, secret []byte) []byte {
 	return hm.Sum(nil)
 }
 
-// verifyCSRFToken checks the HMAC signature of a full signed token string.
+// verifyCSRFToken checks the HMAC signature and rejects an unconfigured secret.
 func verifyCSRFToken(token string, secret []byte) bool {
+	if len(secret) == 0 {
+		return false
+	}
+
 	nonceB64, macB64, ok := strings.Cut(token, ".")
 	if !ok {
 		return false

@@ -118,7 +118,7 @@
             <div class="msg-err">{{.InviteError}}</div>
             {{end}}
             <div class="btn-row">
-                <form method="POST" action="/admin/invite" style="margin-top:16px;">
+                <form method="POST" action="/admin/invite" class="admin-invite-form">
                     <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
                     <button type="submit" class="btn-publish">Generate invite</button>
                 </form>
@@ -145,7 +145,7 @@
                 {{end}}
             </div>
             {{else}}
-            <div style="font-family:var(--font-mono);font-size:0.75rem;color:var(--text-muted);">No users.</div>
+            <div class="admin-empty">No users.</div>
             {{end}}
         </div>
 
@@ -182,7 +182,7 @@
             <div class="user-row">No API keys.</div>
             {{end}}
             <div class="btn-row">
-                <form method="POST" action="/admin/api-keys" style="margin-top:24px;">
+                <form method="POST" action="/admin/api-keys" class="admin-key-form">
                     <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
                     <button type="submit" class="btn-publish">Create key</button>
                 </form>

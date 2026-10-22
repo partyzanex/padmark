@@ -6,10 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 )
 
 const maxKeyringSize = 64 << 10
+
+var errContentKeyringNotRegular = errors.New("content keyring must be a regular file")
 
 // ContentKeyring holds installation keys loaded from a secret file, never from the database.
 // JSON byte slices use standard base64. Keep the file outside the Docker build context.
@@ -20,14 +23,27 @@ type ContentKeyring struct {
 
 // LoadContentKeyring fails on missing, malformed or invalid keys. It never generates a key
 // or prints input values in an error; the same persisted keyring is required after restart.
+// Warns on shared file permissions or symlinks without changing managed secret mounts.
 func LoadContentKeyring(path string) (*ContentKeyring, error) {
 	if path == "" {
 		return nil, errors.New("content keyring file is required")
 	}
 
+	err := requireRegularKeyring(path)
+	if err != nil {
+		return nil, err
+	}
+
 	file, err := os.Open(path) //nolint:gosec // explicit operator-supplied secret path
 	if err != nil {
 		return nil, fmt.Errorf("open content keyring: %w", err)
+	}
+
+	permissionErr := warnKeyringPermissions(path, file)
+	if permissionErr != nil {
+		file.Close() //nolint:errcheck,gosec // preserve the primary file validation error
+
+		return nil, permissionErr
 	}
 
 	data, err := io.ReadAll(io.LimitReader(file, maxKeyringSize+1))
@@ -58,6 +74,53 @@ func LoadContentKeyring(path string) (*ContentKeyring, error) {
 	}
 
 	return &keyring, nil
+}
+
+// requireRegularKeyring rejects FIFOs, devices and directories before opening: opening
+// a FIFO blocks until a writer appears. The post-open fstat check in
+// warnKeyringPermissions still guards the opened descriptor against a swap between
+// this lookup and the open. Stat follows symlinks, so managed secret mounts still work.
+func requireRegularKeyring(path string) error {
+	target, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("stat content keyring: %w", err)
+	}
+
+	if !target.Mode().IsRegular() {
+		return errContentKeyringNotRegular
+	}
+
+	return nil
+}
+
+// Inspect the opened file, not a second lookup of the target. Symlinks remain
+// supported for managed secret mounts, but their use and weak target permissions
+// are visible; no contents or key bytes enter the warning.
+func warnKeyringPermissions(path string, file *os.File) error {
+	info, err := file.Stat()
+	if err != nil {
+		return fmt.Errorf("stat opened content keyring: %w", err)
+	}
+
+	if !info.Mode().IsRegular() {
+		return errContentKeyringNotRegular
+	}
+
+	if info.Mode().Perm()&0o077 != 0 {
+		slog.Warn("content keyring is readable by other users; restrict to 0600 or 0400",
+			"path", path, "mode", info.Mode().Perm())
+	}
+
+	entry, err := os.Lstat(path)
+	if err != nil {
+		return fmt.Errorf("lstat content keyring: %w", err)
+	}
+
+	if entry.Mode()&os.ModeSymlink != 0 {
+		slog.Warn("content keyring uses a symlink; ensure its directory and target are trusted", "path", path)
+	}
+
+	return nil
 }
 
 // ForResource constructs an independent cipher for a note or link from this keyring.

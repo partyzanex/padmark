@@ -2201,3 +2201,10 @@ a.copy-value:hover {
 /* GenericTraceback */ .chroma-chroma.chroma-dark .chroma-gt { color: #ff7b72 }
 /* GenericUnderline */ .chroma-chroma.chroma-dark .chroma-gl { text-decoration: underline }
 /* TextWhitespace */ .chroma-chroma.chroma-dark .chroma-w { color: #6e7681 }
+
+/* CSP-compatible replacements for inline presentation attributes. */
+.field-group-spaced { margin-top: 12px; }
+.admin-invite-form { margin-top: 16px; }
+.admin-key-form { margin-top: 24px; }
+.admin-empty { font-family: var(--font-mono); font-size: 0.75rem; color: var(--text-muted); }
+.toolbar-italic { font-style: italic; }

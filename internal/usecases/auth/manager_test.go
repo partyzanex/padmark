@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -286,7 +287,7 @@ func (s *ManagerSuite) TestLogin_WrongTOTP_DoesNotMigrate() {
 // ── Logout ──
 
 func (s *ManagerSuite) TestLogout_DeletesSession() {
-	s.sessions.EXPECT().Delete(gomock.Any(), "sess-1").Return(nil)
+	s.sessions.EXPECT().Delete(gomock.Any(), hashToken("sess-1")).Return(nil)
 
 	s.Require().NoError(s.mgr.Logout(s.T().Context(), "sess-1"))
 }
@@ -295,7 +296,7 @@ func (s *ManagerSuite) TestLogout_DeletesSession() {
 
 func (s *ManagerSuite) TestGetSession_ExpiredSession_ReturnsErrSessionExpired() {
 	s.sessions.EXPECT().
-		Get(gomock.Any(), "bad-sess").
+		Get(gomock.Any(), hashToken("bad-sess")).
 		Return(nil, domain.ErrSessionExpired)
 
 	_, err := s.mgr.GetSession(s.T().Context(), "bad-sess")
@@ -303,10 +304,10 @@ func (s *ManagerSuite) TestGetSession_ExpiredSession_ReturnsErrSessionExpired() 
 }
 
 func (s *ManagerSuite) TestGetSession_ValidSession_ReturnsUser() {
-	sess := &domain.Session{SessionID: "s1", UserID: s.userID, ExpiresAt: time.Now().Add(time.Hour)}
+	sess := &domain.Session{SessionHash: "s1", UserID: s.userID, ExpiresAt: time.Now().Add(time.Hour)}
 	usr := &domain.User{ID: s.userID, Username: "alice"}
 
-	s.sessions.EXPECT().Get(gomock.Any(), "s1").Return(sess, nil)
+	s.sessions.EXPECT().Get(gomock.Any(), hashToken("s1")).Return(sess, nil)
 	s.users.EXPECT().GetByID(gomock.Any(), s.userID).Return(usr, nil)
 
 	got, err := s.mgr.GetSession(s.T().Context(), "s1")
@@ -457,9 +458,9 @@ func (s *ManagerSuite) TestAcceptFirstAdmin_RaceLoser_PropagatesErrUserExists() 
 
 func (s *ManagerSuite) TestChangePassword_WrongOldPassword_ReturnsErrInvalidPassword() {
 	usr, _ := s.testUser()
-	sess := &domain.Session{SessionID: "sess", UserID: s.userID}
+	sess := &domain.Session{SessionHash: "sess", UserID: s.userID}
 
-	s.sessions.EXPECT().Get(gomock.Any(), "sess").Return(sess, nil)
+	s.sessions.EXPECT().Get(gomock.Any(), hashToken("sess")).Return(sess, nil)
 	s.users.EXPECT().GetByID(gomock.Any(), s.userID).Return(usr, nil)
 
 	_, err := s.mgr.ChangePassword(s.T().Context(), "sess", "WrongP@ss12!", "NewP@ssw0rd!", "000000")
@@ -468,9 +469,9 @@ func (s *ManagerSuite) TestChangePassword_WrongOldPassword_ReturnsErrInvalidPass
 
 func (s *ManagerSuite) TestChangePassword_InvalidTOTP_ReturnsErrInvalidTOTP() {
 	usr, _ := s.testUser()
-	sess := &domain.Session{SessionID: "sess", UserID: s.userID}
+	sess := &domain.Session{SessionHash: "sess", UserID: s.userID}
 
-	s.sessions.EXPECT().Get(gomock.Any(), "sess").Return(sess, nil)
+	s.sessions.EXPECT().Get(gomock.Any(), hashToken("sess")).Return(sess, nil)
 	s.users.EXPECT().GetByID(gomock.Any(), s.userID).Return(usr, nil)
 
 	_, err := s.mgr.ChangePassword(s.T().Context(), "sess", testPassword, "NewP@ssw0rd!", "000000")
@@ -479,12 +480,12 @@ func (s *ManagerSuite) TestChangePassword_InvalidTOTP_ReturnsErrInvalidTOTP() {
 
 func (s *ManagerSuite) TestChangePassword_WeakNewPassword_ReturnsErrWeakPassword() {
 	usr, rawSecret := s.testUser()
-	sess := &domain.Session{SessionID: "sess", UserID: s.userID}
+	sess := &domain.Session{SessionHash: "sess", UserID: s.userID}
 
 	code, err := totp.GenerateCode(rawSecret, time.Now())
 	s.Require().NoError(err)
 
-	s.sessions.EXPECT().Get(gomock.Any(), "sess").Return(sess, nil)
+	s.sessions.EXPECT().Get(gomock.Any(), hashToken("sess")).Return(sess, nil)
 	s.users.EXPECT().GetByID(gomock.Any(), s.userID).Return(usr, nil)
 	s.users.EXPECT().UpdateTOTPCounter(gomock.Any(), s.userID, gomock.Any()).Return(true, nil)
 
@@ -494,12 +495,12 @@ func (s *ManagerSuite) TestChangePassword_WeakNewPassword_ReturnsErrWeakPassword
 
 func (s *ManagerSuite) TestChangePassword_Success_UpdatesPasswordAndRotatesSession() {
 	usr, rawSecret := s.testUser()
-	sess := &domain.Session{SessionID: "sess", UserID: s.userID, UserAgent: "ua", IP: "1.2.3.4"}
+	sess := &domain.Session{SessionHash: "sess", UserID: s.userID, UserAgent: "ua", IP: "1.2.3.4"}
 
 	code, err := totp.GenerateCode(rawSecret, time.Now())
 	s.Require().NoError(err)
 
-	s.sessions.EXPECT().Get(gomock.Any(), "sess").Return(sess, nil)
+	s.sessions.EXPECT().Get(gomock.Any(), hashToken("sess")).Return(sess, nil)
 	s.users.EXPECT().GetByID(gomock.Any(), s.userID).Return(usr, nil)
 	s.users.EXPECT().UpdateTOTPCounter(gomock.Any(), s.userID, gomock.Any()).Return(true, nil)
 	s.users.EXPECT().UpdatePassword(gomock.Any(), s.userID, gomock.Any(), gomock.Any(), gomock.Any()).
@@ -517,14 +518,14 @@ func (s *ManagerSuite) TestChangePassword_Success_UpdatesPasswordAndRotatesSessi
 	s.NotEqual("sess", newSessID)
 }
 
-func (s *ManagerSuite) TestChangePassword_DeleteByUserIDFails_ReturnsNewSessionID() {
+func (s *ManagerSuite) TestChangePassword_RevocationFailureReturnsSessionAndWarning() {
 	usr, rawSecret := s.testUser()
-	sess := &domain.Session{SessionID: "sess", UserID: s.userID, UserAgent: "ua", IP: "1.2.3.4"}
+	sess := &domain.Session{SessionHash: "sess", UserID: s.userID, UserAgent: "ua", IP: "1.2.3.4"}
 
 	code, err := totp.GenerateCode(rawSecret, time.Now())
 	s.Require().NoError(err)
 
-	s.sessions.EXPECT().Get(gomock.Any(), "sess").Return(sess, nil)
+	s.sessions.EXPECT().Get(gomock.Any(), hashToken("sess")).Return(sess, nil)
 	s.users.EXPECT().GetByID(gomock.Any(), s.userID).Return(usr, nil)
 	s.users.EXPECT().UpdateTOTPCounter(gomock.Any(), s.userID, gomock.Any()).Return(true, nil)
 	s.users.EXPECT().UpdatePassword(gomock.Any(), s.userID, gomock.Any(), gomock.Any(), gomock.Any()).
@@ -532,9 +533,9 @@ func (s *ManagerSuite) TestChangePassword_DeleteByUserIDFails_ReturnsNewSessionI
 	s.sessions.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
 	s.sessions.EXPECT().DeleteByUserIDExcept(gomock.Any(), s.userID, gomock.Any()).Return(errors.New("db timeout"))
 
-	// DeleteByUserIDExcept failure should warn but not fail the caller — new session was created.
+	// A partial result must retain the replacement session and explicitly report revocation failure.
 	newSessID, err := s.mgr.ChangePassword(s.T().Context(), "sess", testPassword, "NewP@ssw0rd!", code)
-	s.Require().NoError(err)
+	s.Require().ErrorIs(err, domain.ErrSessionRevocation)
 	s.NotEmpty(newSessID)
 }
 
@@ -703,4 +704,13 @@ func (s *ManagerSuite) TestRevokeUser_Admin_RevokesSecondAdmin() {
 
 func TestAuthManager(t *testing.T) {
 	suite.Run(t, new(ManagerSuite))
+}
+
+func (s *ManagerSuite) TestOnboardingInvalidUsernameNeverTouchesStorage() {
+	for _, username := range []string{"", "  ", "a/b", "a&secret=x", strings.Repeat("a", 65)} {
+		_, err := s.mgr.AcceptFirstAdmin(s.T().Context(), username, testPassword)
+		s.Require().ErrorIs(err, domain.ErrInvalidUsername)
+		_, err = s.mgr.AcceptInvite(s.T().Context(), "unused-invite", username, testPassword)
+		s.Require().ErrorIs(err, domain.ErrInvalidUsername)
+	}
 }

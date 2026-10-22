@@ -68,8 +68,9 @@ func (m *Manager) Run(ctx context.Context) error {
 // Run). Error semantics match Run.
 func (m *Manager) Serve(ctx context.Context, transport mcpsdk.Transport) error {
 	err := m.srv.Run(ctx, transport)
-	if errors.Is(err, io.EOF) || errors.Is(err, mcpsdk.ErrConnectionClosed) {
-		// The normal way a session ends.
+	if err == nil || errors.Is(err, io.EOF) || errors.Is(err, mcpsdk.ErrConnectionClosed) {
+		// The normal way a session ends. A nil must short-circuit here: fmt.Errorf with %w on
+		// nil still yields a non-nil error, which turned every clean shutdown into exit 1.
 		return nil
 	}
 

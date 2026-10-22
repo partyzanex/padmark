@@ -20,12 +20,14 @@ const (
 	flagKeyID     = "key-id"
 	flagKeyOutput = "output"
 	flagDryRun    = "dry-run"
+	flagCorrupt   = "corrupt"
 )
 
 const (
 	encryptionMigrate = "migrate"
 	encryptionRewrap  = "rewrap"
 	encryptionConvert = "convert"
+	encryptionPrune   = "prune"
 )
 
 func encryptionCommand() *cli.Command {
@@ -43,18 +45,28 @@ func encryptionCommand() *cli.Command {
 		{encryptionMigrate, "Wrap raw legacy ciphertext; resume an interrupted migration"},
 		{encryptionRewrap, "Rotate DEK wrappers to the active KEK, keeping payloads unchanged"},
 		{encryptionConvert, "Convert wrapped legacy records using one original slug per stdin line"},
+		{encryptionPrune, "Permanently remove malformed raw records; preview with --corrupt --dry-run"},
 	}
 
 	commands := make([]*cli.Command, 0, len(items))
 	for i := range items {
 		item := &items[i]
+
+		operationFlags := []cli.Flag{
+			&cli.StringFlag{Name: flagKeyID, Usage: "Public key ID (required for key operations)"},
+			&cli.StringFlag{Name: flagKeyOutput, Usage: "New keyring filename; existing files are never overwritten"},
+			&cli.BoolFlag{Name: flagDryRun, Usage: "Inspect migration, rewrap, conversion or pruning without writes"},
+		}
+
+		if item.name == encryptionPrune {
+			operationFlags = append(operationFlags, &cli.BoolFlag{
+				Name: flagCorrupt, Usage: "Explicitly select malformed raw records for permanent deletion",
+			})
+		}
+
 		commands = append(commands, &cli.Command{ //nolint:exhaustruct_v5 // optional CLI hooks use their zero values
 			Name: item.name, Usage: item.usage, Action: encryptionAction,
-			Flags: []cli.Flag{
-				&cli.StringFlag{Name: flagKeyID, Usage: "Public key ID (required for key operations)"},
-				&cli.StringFlag{Name: flagKeyOutput, Usage: "New keyring filename; existing files are never overwritten"},
-				&cli.BoolFlag{Name: flagDryRun, Usage: "Inspect migration, rewrap or conversion without database writes"},
-			},
+			Flags: operationFlags,
 		})
 	}
 
@@ -70,21 +82,40 @@ func encryptionCommand() *cli.Command {
 func newEncryptionManager(db *bun.DB, keyring *crypto.ContentKeyring) (*contentkeys.Manager, error) {
 	notes, err := keyring.ForResource("note")
 	if err != nil {
-		return nil, encryptionError(err)
+		//nolint:wrapcheck // WrapError adds shared encryption context.
+		return nil, contentkeys.WrapError(err)
 	}
 
 	links, err := keyring.ForResource("link")
 	if err != nil {
-		return nil, encryptionError(err)
+		//nolint:wrapcheck // WrapError adds shared encryption context.
+		return nil, contentkeys.WrapError(err)
 	}
 
 	return contentkeys.New(keyrepo.New(db), keyring, notes, links), nil
 }
 
+func validateEncryptionFlags(cmd *cli.Command) error {
+	if cmd.Name == encryptionPrune && !cmd.Bool(flagCorrupt) {
+		return errors.New("prune requires --corrupt; preview permanent raw-record deletion with --corrupt --dry-run")
+	}
+
+	if !cmd.Bool(flagDryRun) {
+		return nil
+	}
+
+	switch cmd.Name {
+	case encryptionMigrate, encryptionRewrap, encryptionConvert, encryptionPrune:
+		return nil
+	default:
+		return errors.New("--dry-run is supported only by migrate, rewrap, convert and prune; status is always read-only")
+	}
+}
+
 func encryptionAction(ctx context.Context, cmd *cli.Command) error {
-	if cmd.Bool(flagDryRun) && cmd.Name != encryptionMigrate &&
-		cmd.Name != encryptionRewrap && cmd.Name != encryptionConvert {
-		return errors.New("--dry-run is supported only by migrate, rewrap and convert; status is always read-only")
+	flagErr := validateEncryptionFlags(cmd)
+	if flagErr != nil {
+		return flagErr
 	}
 
 	if cmd.Name == "keygen" {
@@ -93,13 +124,15 @@ func encryptionAction(ctx context.Context, cmd *cli.Command) error {
 
 	keyring, err := crypto.LoadContentKeyring(cmd.String(FlagContentKeyring))
 	if err != nil {
-		return encryptionError(err)
+		//nolint:wrapcheck // WrapError adds shared encryption context.
+		return contentkeys.WrapError(err)
 	}
 
 	if cmd.Name == "key-add" {
 		err = keyring.AddKey(cmd.String(flagKeyID))
 		if err != nil {
-			return encryptionError(err)
+			//nolint:wrapcheck // WrapError adds shared encryption context.
+			return contentkeys.WrapError(err)
 		}
 
 		return writeKeyring(cmd, keyring)
@@ -107,13 +140,15 @@ func encryptionAction(ctx context.Context, cmd *cli.Command) error {
 
 	db, err := openDB(ctx, cmd.String(FlagStorage), cmd.String(FlagDSN))
 	if err != nil {
-		return encryptionError(err)
+		//nolint:wrapcheck // WrapError adds shared encryption context.
+		return contentkeys.WrapError(err)
 	}
 	defer db.Close() //nolint:errcheck // all mutations commit before returning
 
 	manager, err := newEncryptionManager(db, keyring)
 	if err != nil {
-		return encryptionError(err)
+		//nolint:wrapcheck // WrapError adds shared encryption context.
+		return contentkeys.WrapError(err)
 	}
 
 	return runEncryptionOperation(ctx, cmd, db, keyring, manager)
@@ -125,11 +160,13 @@ func runEncryptionOperation(ctx context.Context, cmd *cli.Command, db *bun.DB,
 
 	switch cmd.Name {
 	case "register":
-		return encryptionError(manager.Register(ctx, cmd.String(flagKeyID)))
+		//nolint:wrapcheck // WrapError adds shared encryption context.
+		return contentkeys.WrapError(manager.Register(ctx, cmd.String(flagKeyID)))
 	case "key-activate":
 		reg, readErr := keyrepo.New(db).Registry(ctx)
 		if readErr != nil {
-			return encryptionError(readErr)
+			//nolint:wrapcheck // WrapError adds shared encryption context.
+			return contentkeys.WrapError(readErr)
 		}
 
 		if reg == nil {
@@ -140,12 +177,14 @@ func runEncryptionOperation(ctx context.Context, cmd *cli.Command, db *bun.DB,
 
 		manager, err = newEncryptionManager(db, keyring)
 		if err != nil {
-			return encryptionError(err)
+			//nolint:wrapcheck // WrapError adds shared encryption context.
+			return contentkeys.WrapError(err)
 		}
 
 		err := manager.PrepareServe(ctx)
 		if err != nil {
-			return encryptionError(err)
+			//nolint:wrapcheck // WrapError adds shared encryption context.
+			return contentkeys.WrapError(err)
 		}
 
 		return writeKeyring(cmd, keyring)
@@ -157,7 +196,8 @@ func runEncryptionOperation(ctx context.Context, cmd *cli.Command, db *bun.DB,
 
 		err := manager.CanRemove(ctx, id)
 		if err != nil {
-			return encryptionError(err)
+			//nolint:wrapcheck // WrapError adds shared encryption context.
+			return contentkeys.WrapError(err)
 		}
 
 		delete(keyring.Keys, id)
@@ -188,6 +228,8 @@ func runEncryptionData(ctx context.Context, cmd *cli.Command, manager *contentke
 		}
 
 		report, err = manager.ConvertSlugs(ctx, input, cmd.Bool(flagDryRun))
+	case encryptionPrune:
+		report, err = manager.PruneCorrupt(ctx, cmd.Bool(flagDryRun))
 	default:
 		return errors.New("unknown encryption operation")
 	}
@@ -202,7 +244,8 @@ func runEncryptionData(ctx context.Context, cmd *cli.Command, manager *contentke
 		return errors.Join(err, fmt.Errorf("write encryption report: %w", writeErr))
 	}
 
-	return encryptionError(err)
+	//nolint:wrapcheck // WrapError adds shared encryption context.
+	return contentkeys.WrapError(err)
 }
 
 func generateKeyring(cmd *cli.Command) error {
@@ -210,7 +253,8 @@ func generateKeyring(cmd *cli.Command) error {
 
 	err := keyring.AddKey(keyring.Active)
 	if err != nil {
-		return encryptionError(err)
+		//nolint:wrapcheck // WrapError adds shared encryption context.
+		return contentkeys.WrapError(err)
 	}
 
 	return writeKeyring(cmd, keyring)
@@ -224,7 +268,8 @@ func writeKeyring(cmd *cli.Command, keyring *crypto.ContentKeyring) error {
 
 	writeErr := crypto.WriteContentKeyring(path, keyring)
 	if writeErr != nil {
-		return encryptionError(writeErr)
+		//nolint:wrapcheck // WrapError adds shared encryption context.
+		return contentkeys.WrapError(writeErr)
 	}
 
 	output := cmd.Root().Writer
@@ -246,5 +291,6 @@ func validateContentEncryption(ctx context.Context, db *bun.DB, keyring *crypto.
 		return err
 	}
 
-	return encryptionError(manager.PrepareServe(ctx))
+	//nolint:wrapcheck // WrapError adds shared encryption context.
+	return contentkeys.WrapError(manager.PrepareServe(ctx))
 }

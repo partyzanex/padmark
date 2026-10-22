@@ -33,7 +33,7 @@ func setupJSONStatus(err error) int {
 	switch {
 	case errors.Is(err, domain.ErrUserExists):
 		return http.StatusConflict
-	case errors.Is(err, domain.ErrWeakPassword):
+	case errors.Is(err, domain.ErrWeakPassword), errors.Is(err, domain.ErrInvalidUsername):
 		return http.StatusUnprocessableEntity
 	case errors.Is(err, domain.ErrInviteExpired), errors.Is(err, domain.ErrInviteUsed):
 		return http.StatusGone

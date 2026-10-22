@@ -12,6 +12,7 @@ import (
 	"github.com/bluele/gcache"
 	"github.com/google/uuid"
 
+	"github.com/partyzanex/padmark/internal/adapters/http/ogenapi"
 	"github.com/partyzanex/padmark/internal/domain"
 )
 
@@ -27,8 +28,10 @@ type NoteHandler struct {
 	noteTmpl    *template.Template
 	indexTmpl   *template.Template // shared with PageHandler.IndexPage; EditPage reuses the editor template.
 
-	// lockout tracks consecutive wrong-edit-code failures per note ID. It is shared with the
-	// ogen-served single-segment PUT/DELETE /notes/{id} routes (see registerOgenRoutes in
+	// lockout tracks consecutive wrong-edit-code failures per (resource ID, verified caller ID)
+	// pair — see failLockoutKey: an authenticated user's sessions and API tokens share one
+	// bucket, and uuid.Nil is the single shared anonymous bucket per resource. It is shared with
+	// the ogen-served single-segment PUT/DELETE /notes/{id} routes (see registerOgenRoutes in
 	// router.go) so fail-lockout tracking is consistent for a note regardless of which route
 	// variant a client hits.
 	lockout gcache.Cache
@@ -51,8 +54,10 @@ func newNoteHandler(c *common, manager NoteManager, noteTmpl, indexTmpl *templat
 // limitation); these native {id...} handlers bridge update/delete for path-like slugs, so by
 // ServeMux specificity single-segment IDs keep going to ogen and multi-segment to these.
 func (h *NoteHandler) RegisterRoutes(mux *http.ServeMux) {
-	mux.Handle("PUT /notes/{id...}", withFailLockout(h.lockout, h.log, http.HandlerFunc(h.UpdateNoteByPath)))
-	mux.Handle("DELETE /notes/{id...}", withFailLockout(h.lockout, h.log, http.HandlerFunc(h.DeleteNoteByPath)))
+	mux.Handle("PUT /notes/{id...}",
+		requireSameOrigin(h.log, withFailLockout(h.lockout, h.log, http.HandlerFunc(h.UpdateNoteByPath))))
+	mux.Handle("DELETE /notes/{id...}",
+		requireSameOrigin(h.log, withFailLockout(h.lockout, h.log, http.HandlerFunc(h.DeleteNoteByPath))))
 	mux.HandleFunc("GET /notes/{id...}", h.GetNote)
 	mux.HandleFunc("POST /notes/{id...}", h.guard(h.HandleReveal))
 	mux.HandleFunc("GET /edit/{id...}", h.EditPage)
@@ -200,7 +205,7 @@ func (h *NoteHandler) GetNote(w http.ResponseWriter, r *http.Request) {
 
 		_, err = fmt.Fprint(w, note.Content) // raw content is intentional for text/plain and text/markdown
 		if err != nil {
-			h.log.ErrorContext(r.Context(), "write plain content", "id", id, "err", err)
+			h.log.ErrorContext(r.Context(), "write plain content", "id", domain.HashSlug(id), "err", err)
 		}
 
 	default:
@@ -220,36 +225,24 @@ func (h *NoteHandler) GetNote(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// updateNoteByPathBody mirrors ogenapi.UpdateNoteRequest for the native multi-segment update
-// route. Pointer fields distinguish an omitted value from a zero one where the update semantics
-// depend on it (title, content_type, privacy). The remaining fields stay plain values because
-// omitted-vs-zero carries no extra meaning for them: Content always fully replaces the stored
-// body (there is no partial update), EditCode need not be a pointer since an omitted or wrong
-// code are handled identically by Manager.Update (both fail verification, unless the caller is
-// the note's owner — see manager.Update's callerID bypass), and BurnAfterReading is a plain
-// on/off toggle with no "leave as is" state.
-type updateNoteByPathBody struct {
-	Title            *string `json:"title"`
-	ContentType      *string `json:"content_type"`
-	TTL              *int64  `json:"ttl"`
-	Privacy          *string `json:"privacy"`
-	Content          string  `json:"content"`
-	EditCode         string  `json:"edit_code"`
-	BurnAfterReading bool    `json:"burn_after_reading"`
-}
-
 // UpdateNoteByPath handles PUT /notes/{id...} for notes whose slug spans multiple path segments
 // (e.g. project/GUIDE.md). Single-segment IDs keep going to the ogen route PUT /notes/{id}; this
 // native handler mirrors that contract — same JSON body, 200 + note JSON, same domain-error
 // mapping — for the multi-segment case the generated single-segment router cannot match.
 func (h *NoteHandler) UpdateNoteByPath(w http.ResponseWriter, r *http.Request) {
+	if !isJSONContentType(r.Header.Get("Content-Type")) {
+		writeJSONErrorStatus(w, r, h.log, http.StatusUnsupportedMediaType, unsupportedMediaTypeMessage)
+
+		return
+	}
+
 	id := r.PathValue("id")
 
 	if h.gateAnonymousMutation(w, r, id) {
 		return
 	}
 
-	var body updateNoteByPathBody
+	var body ogenapi.UpdateNoteRequest
 
 	err := json.NewDecoder(r.Body).Decode(&body)
 	if err != nil {
@@ -258,8 +251,15 @@ func (h *NoteHandler) UpdateNoteByPath(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	err = body.Validate()
+	if err != nil {
+		h.writeDecodeError(w, r, err)
+
+		return
+	}
+
 	note, err := h.manager.Update(
-		r.Context(), id, body.EditCode, callerIDFromCtx(r.Context()), updateNoteFromPathBody(body),
+		r.Context(), id, body.EditCode.Or(""), callerIDFromCtx(r.Context()), noteUpdatePayload(&body),
 	)
 	if err != nil {
 		h.writeError(w, r, err)
@@ -271,53 +271,7 @@ func (h *NoteHandler) UpdateNoteByPath(w http.ResponseWriter, r *http.Request) {
 
 	encErr := json.NewEncoder(w).Encode(toNoteJSON(note))
 	if encErr != nil {
-		h.log.ErrorContext(r.Context(), "encode update response", "id", id, "err", encErr)
-	}
-}
-
-// updateNoteFromPathBody maps the multi-segment PUT body onto a domain.Note update payload.
-// CreatedAt/UpdatedAt are re-stamped by the usecase; ExpiresAt is derived from the existing
-// note + TTL; OwnerID/ID/EditCode are pinned from the existing row inside the usecase (the
-// caller-supplied edit code travels through Manager.Update's argument). Views not settable.
-func updateNoteFromPathBody(body updateNoteByPathBody) *domain.Note {
-	var burnTTL int64
-	if body.BurnAfterReading && body.TTL != nil && *body.TTL >= 0 {
-		burnTTL = *body.TTL
-	}
-
-	var contentType *domain.ContentType
-
-	if body.ContentType != nil {
-		ct := domain.ContentType(*body.ContentType)
-		contentType = &ct
-	}
-
-	title := ""
-	if body.Title != nil {
-		title = *body.Title
-	}
-
-	var privacy *domain.Privacy
-
-	if body.Privacy != nil {
-		p := domain.Privacy(*body.Privacy)
-		privacy = &p
-	}
-
-	return &domain.Note{
-		CreatedAt:        time.Time{},
-		UpdatedAt:        time.Time{},
-		ExpiresAt:        nil,
-		Privacy:          privacy,
-		OwnerID:          nil,
-		ID:               "",
-		Title:            title,
-		Content:          body.Content,
-		ContentType:      contentType,
-		EditCode:         "",
-		Views:            0,
-		BurnTTL:          burnTTL,
-		BurnAfterReading: body.BurnAfterReading,
+		h.log.ErrorContext(r.Context(), "encode update response", "id", domain.HashSlug(id), "err", encErr)
 	}
 }
 
@@ -333,8 +287,8 @@ func (h *NoteHandler) DeleteNoteByPath(w http.ResponseWriter, r *http.Request) {
 
 	// The query-param fallback mirrors the documented ogen DELETE /notes/{id} contract (see
 	// openapi.yaml); dropping it here only would break parity between the two routes. Our own
-	// access logging never records the query string (withLogging in router.go logs r.URL.Path
-	// only, and only at debug level), so the residual leak surface — reverse-proxy/CDN logs,
+	// access logging never records the query string (withLogging only logs a digest of the
+	// path at debug level), so the residual leak surface — reverse-proxy/CDN logs,
 	// Referer on same-origin follow-up requests — is inherent to any query-param secret and
 	// outside this handler's control.
 	editCode := r.Header.Get("X-Edit-Code")
@@ -480,7 +434,7 @@ func (h *NoteHandler) renderNoteHTML(w http.ResponseWriter, r *http.Request, id 
 
 	err = h.noteTmpl.Execute(w, data)
 	if err != nil {
-		h.log.ErrorContext(r.Context(), "render note template", "id", id, "err", err)
+		h.log.ErrorContext(r.Context(), "render note template", "id", domain.HashSlug(id), "err", err)
 	}
 }
 
@@ -527,7 +481,7 @@ func (h *NoteHandler) handleBurnInterstitial(
 
 	execErr := h.noteTmpl.Execute(w, data)
 	if execErr != nil {
-		h.log.ErrorContext(r.Context(), "render burn interstitial", "id", id, "err", execErr)
+		h.log.ErrorContext(r.Context(), "render burn interstitial", "id", domain.HashSlug(id), "err", execErr)
 	}
 
 	return true

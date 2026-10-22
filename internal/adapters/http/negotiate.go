@@ -192,7 +192,9 @@ func selectFormat(entries []acceptEntry) format {
 		spec   uint8
 	}
 
-	best := score{format: formatJSON, q: -1}
+	// Sentinel: formatCandidate only returns entries with q > 0, so any candidate always
+	// outranks q: -1, and the zero order/spec of the sentinel never win a tie-break.
+	best := score{format: formatJSON, q: -1, order: 0, spec: 0}
 
 	for _, fmtName := range formatOrder {
 		entry, ok := formatCandidate(entries, formatMIMEs[fmtName])

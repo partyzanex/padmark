@@ -3,9 +3,9 @@ package crypto
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
-	"math"
 	"strings"
 
 	"golang.org/x/crypto/hkdf"
@@ -18,6 +18,8 @@ const sealVersion = "v1"
 // version, memory, time, threads, ciphertext.
 const sealFieldCount = 5
 
+const maxSealedSecretLen = 4096
+
 // legacyHKDFInfo is the HKDF info string of the pre-argon2id user-key derivation. It survives
 // only so Open can still read secrets written by that scheme; nothing seals with it.
 const legacyHKDFInfo = "padmark-user-key-v1"
@@ -28,7 +30,7 @@ const legacyHKDFInfo = "padmark-user-key-v1"
 //
 //	v1$<memory>$<time>$<threads>$<base64 ciphertext>
 //
-// so changing the configured cost (--argon2-memory and friends) never locks users out: Open
+// so supported changes to configured cost (--argon2-memory and friends) preserve access: Open
 // derives with the parameters recorded in the envelope rather than the current configuration,
 // and reports stale so the caller can re-seal at the new cost. This mirrors how argon2 password
 // hashes embed their own parameters (see hashArgon2) — without it, raising the cost on a running
@@ -75,8 +77,16 @@ func (s *Sealer) Seal(secret string, password, salt []byte) (string, error) {
 // different argon2id cost or under a legacy scheme, so the caller should re-Seal it and persist
 // the result; stale is meaningful only when err is nil.
 func (s *Sealer) Open(sealed string, password, salt []byte) (secret string, stale bool, err error) {
+	if len(sealed) > maxSealedSecretLen {
+		return "", false, errors.New("sealed secret exceeds size limit")
+	}
+
 	params, ciphertext, ok := parseSealed(sealed)
 	if !ok {
+		if strings.Contains(sealed, "$") {
+			return "", false, errors.New("invalid sealed secret envelope or unsupported argon2 cost")
+		}
+
 		return s.openLegacy(sealed, password, salt)
 	}
 
@@ -135,22 +145,12 @@ func parseSealed(sealed string) (params Argon2Params, ciphertext string, ok bool
 		return none, "", false
 	}
 
-	memory, err := parseU32(parts[1])
+	params, err := parseArgon2Cost(parts[1], parts[2], parts[3])
 	if err != nil {
 		return none, "", false
 	}
 
-	iterations, err := parseU32(parts[2])
-	if err != nil {
-		return none, "", false
-	}
-
-	threads, err := parseU32(parts[3])
-	if err != nil || threads > math.MaxUint8 {
-		return none, "", false
-	}
-
-	return Argon2Params{Memory: memory, Time: iterations, Threads: uint8(threads)}, parts[4], true
+	return params, parts[4], true
 }
 
 // deriveUserKeyHKDF reproduces the pre-argon2id user-key derivation (HKDF-SHA256, hex-encoded).

@@ -136,7 +136,7 @@ func (m *Manager) updateNote(
 		ContentType:      padmark.OptUpdateNoteRequestContentType{Value: "", Set: false},
 		EditCode:         padmark.OptString{Value: "", Set: false},
 		BurnAfterReading: padmark.OptBool{Value: false, Set: false},
-		TTL:              padmark.OptInt64{Value: 0, Set: false},
+		TTL:              padmark.OptNilInt64{Value: 0, Set: false, Null: false},
 		Privacy:          padmark.OptUpdateNoteRequestPrivacy{Value: "", Set: false},
 	}
 	if input.Title != nil {
@@ -153,7 +153,7 @@ func (m *Manager) updateNote(
 	}
 
 	if input.TTL != nil {
-		req.TTL = padmark.NewOptInt64(*input.TTL)
+		req.TTL = padmark.NewOptNilInt64(*input.TTL)
 	}
 
 	if input.Privacy != nil {

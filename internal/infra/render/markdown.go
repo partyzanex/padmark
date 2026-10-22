@@ -42,6 +42,7 @@ func NewRenderer() *Renderer {
 				highlighting.WithStyle("github-dark"),
 				highlighting.WithFormatOptions(
 					chromahtml.WithClasses(true),
+					chromahtml.WithModeClasses(true),
 					chromahtml.ClassPrefix(chromaClassPrefix),
 					chromahtml.WithLineNumbers(false),
 				),

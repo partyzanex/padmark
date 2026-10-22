@@ -242,28 +242,26 @@ func TestWithRecovery_OutermostLayerCoversMiddlewarePanic(t *testing.T) {
 	assert.Contains(t, buf.String(), "panic recovered")
 }
 
-// TestFirstPathSegment covers the helper used by withLogging to derive a leak-safe
-// "route" attr from the request path (see TestWithLogging_RouteAttrExcludesSlug).
-func TestFirstPathSegment(t *testing.T) {
+// TestLogRoute never treats a note slug as a built-in route name.
+func TestLogRoute(t *testing.T) {
 	tests := []struct {
 		path string
 		want string
 	}{
 		{"", ""},
 		{"/", ""},
-		{"/ping", "ping"},
+		{"/healthz", "healthz"},
+		{"/secret-slug", "note"},
+		{"/project/GUIDE.md", "note"},
 		{"/notes/project/GUIDE.md", "notes"},
 	}
 
 	for _, tc := range tests {
-		assert.Equal(t, tc.want, firstPathSegment(tc.path), "firstPathSegment(%q)", tc.path)
+		assert.Equal(t, tc.want, logRoute(tc.path), "logRoute(%q)", tc.path)
 	}
 }
 
-// TestWithLogging_RouteAttrExcludesSlug verifies that withLogging emits a "route" attr
-// at info level containing only the first path segment (safe: identifies the endpoint) while
-// the full "path" attr — which can embed a note slug, i.e. content-encryption key material —
-// stays absent unless debug logging is enabled.
+// TestWithLogging_RouteAttrExcludesSlug checks that access logging omits raw slugs.
 func TestWithLogging_RouteAttrExcludesSlug(t *testing.T) {
 	var buf bytes.Buffer
 
@@ -298,9 +296,30 @@ func TestWithLogging_RouteAttrForSingleSegment(t *testing.T) {
 
 	handler := withLogging(log, next)
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(net_http.MethodGet, "/ping", nil)
+	req := httptest.NewRequest(net_http.MethodGet, "/healthz", nil)
 
 	handler.ServeHTTP(rec, req)
 
-	assert.Contains(t, buf.String(), `"route":"ping"`)
+	assert.Contains(t, buf.String(), `"route":"healthz"`)
+}
+
+func TestWithLoggingNeverRecordsSecretPaths(t *testing.T) {
+	for _, level := range []slog.Level{slog.LevelInfo, slog.LevelDebug} {
+		for _, path := range []string{"/top-secret-slug", "/notes/top-secret-slug", "/r/top-secret-slug"} {
+			var buf bytes.Buffer
+
+			log := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: level}))
+			handler := withLogging(log, net_http.HandlerFunc(func(w net_http.ResponseWriter, _ *net_http.Request) {
+				w.WriteHeader(net_http.StatusOK)
+			}))
+			req := httptest.NewRequest(net_http.MethodGet, path+"?edit_code=secret-code", nil)
+			handler.ServeHTTP(httptest.NewRecorder(), req)
+			assert.NotContains(t, buf.String(), "top-secret-slug")
+			assert.NotContains(t, buf.String(), "secret-code")
+
+			if level == slog.LevelDebug {
+				assert.Contains(t, buf.String(), `"path_hash"`)
+			}
+		}
+	}
 }

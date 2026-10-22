@@ -66,6 +66,9 @@ type Note struct {
 	Views            int
 	BurnTTL          int64
 	BurnAfterReading bool
+	// ClearExpiry is an update instruction: nil ExpiresAt normally preserves expiry.
+	// It is never persisted; an explicit null TTL uses it to remove the stored expiry.
+	ClearExpiry bool
 }
 
 // HashSlug returns the SHA-256 hex digest of slug, used as the database primary key (for notes)

@@ -23,7 +23,7 @@ func editCommand() *urcli.Command {
 				Aliases: []string{"e"},
 				Sources: urcli.EnvVars(EnvEditCode),
 				Usage: "Edit code returned at note creation (env: PADMARK_EDIT_CODE). Optional if " +
-					"--token identifies the note's owner",
+					"--token identifies the note's owner. " + psWarnEditCode,
 			},
 			&urcli.StringFlag{
 				Name:    FlagTitle,
@@ -128,7 +128,7 @@ func buildUpdateReq(cmd *urcli.Command, content, editCode string) *padmark.Updat
 		ContentType:      padmark.OptUpdateNoteRequestContentType{Value: "", Set: false},
 		EditCode:         padmark.OptString{Value: "", Set: false},
 		BurnAfterReading: padmark.OptBool{Value: false, Set: false},
-		TTL:              padmark.OptInt64{Value: 0, Set: false},
+		TTL:              padmark.OptNilInt64{Value: 0, Set: false, Null: false},
 		Privacy:          padmark.OptUpdateNoteRequestPrivacy{Value: "", Set: false},
 	}
 	if editCode != "" {
@@ -156,7 +156,7 @@ func buildUpdateReq(cmd *urcli.Command, content, editCode string) *padmark.Updat
 	// TTL only with --burn (enforced by validateBurnTTL), matching `create`'s contract.
 	if cmd.Bool(FlagBurn) {
 		if ttl := cmd.Int64(FlagTTL); ttl > 0 {
-			req.TTL = padmark.NewOptInt64(ttl)
+			req.TTL = padmark.NewOptNilInt64(ttl)
 		}
 	}
 

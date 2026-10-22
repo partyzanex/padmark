@@ -4,8 +4,8 @@ import (
 	"bufio"
 	"context"
 	"errors"
+	"fmt"
 	"io"
-	"strings"
 
 	"github.com/partyzanex/padmark/internal/domain"
 )
@@ -19,7 +19,7 @@ func (m *Manager) replace(ctx context.Context, row Row, value string, report *Re
 
 	replaced, err := m.store.Replace(ctx, row, value)
 	if err != nil {
-		return encryptionError(err)
+		return WrapError(err)
 	}
 
 	if replaced {
@@ -47,15 +47,16 @@ func (m *Manager) Migrate(ctx context.Context, dryRun bool) (Report, error) {
 
 	pendingErr := m.store.SetPhase(ctx, Pending)
 	if pendingErr != nil {
-		return report, encryptionError(pendingErr)
+		return report, WrapError(pendingErr)
 	}
 
 	err := m.walk(ctx, func(row Row) error {
-		if strings.Contains(row.Value, "$") {
+		cipher := m.ciphers[row.Resource]
+		if cipher.Versioned(row.Value) {
 			return nil
 		}
 
-		value, err := m.ciphers[row.Resource].WrapLegacy(row.Value, row.ID)
+		value, err := cipher.WrapLegacy(row.Value, row.ID)
 		if err != nil {
 			return nil //nolint:nilerr // final validation counts corrupt rows without exposing data
 		}
@@ -70,7 +71,7 @@ func (m *Manager) Migrate(ctx context.Context, dryRun bool) (Report, error) {
 
 	final.Changed, final.Conflicts = report.Changed, report.Conflicts
 	if err != nil {
-		return final, encryptionError(err)
+		return final, WrapError(err)
 	}
 
 	if final.Raw != 0 {
@@ -79,7 +80,7 @@ func (m *Manager) Migrate(ctx context.Context, dryRun bool) (Report, error) {
 
 	readyErr := m.store.SetPhase(ctx, Ready)
 	if readyErr != nil {
-		return final, encryptionError(readyErr)
+		return final, WrapError(readyErr)
 	}
 
 	final.State = Ready
@@ -91,7 +92,7 @@ func (m *Manager) Migrate(ctx context.Context, dryRun bool) (Report, error) {
 func (m *Manager) Rewrap(ctx context.Context, dryRun bool) (Report, error) {
 	report, err := m.readyReport(ctx)
 	if err != nil {
-		return report, encryptionError(err)
+		return report, WrapError(err)
 	}
 
 	if dryRun {
@@ -114,7 +115,7 @@ func (m *Manager) Rewrap(ctx context.Context, dryRun bool) (Report, error) {
 
 	final.Changed, final.Conflicts = report.Changed, report.Conflicts
 	if err != nil {
-		return final, encryptionError(err)
+		return final, WrapError(err)
 	}
 
 	for id, count := range final.Keys {
@@ -131,11 +132,12 @@ func (m *Manager) Rewrap(ctx context.Context, dryRun bool) (Report, error) {
 func (m *Manager) ConvertSlugs(ctx context.Context, input io.Reader, dryRun bool) (Report, error) {
 	report, err := m.readyReport(ctx)
 	if err != nil {
-		return report, encryptionError(err)
+		return report, WrapError(err)
 	}
 
 	scanner := bufio.NewScanner(input)
 	scanner.Buffer(make([]byte, maxSlugLine), maxSlugLine)
+	conversionFailures := make(map[string]struct{})
 
 	for scanner.Scan() {
 		slug := scanner.Text()
@@ -143,9 +145,9 @@ func (m *Manager) ConvertSlugs(ctx context.Context, input io.Reader, dryRun bool
 			continue
 		}
 
-		err = m.convertSlug(ctx, slug, dryRun, &report)
+		err = m.convertSlug(ctx, slug, dryRun, &report, conversionFailures)
 		if err != nil {
-			return report, encryptionError(err)
+			return report, WrapError(err)
 		}
 	}
 
@@ -153,12 +155,14 @@ func (m *Manager) ConvertSlugs(ctx context.Context, input io.Reader, dryRun bool
 		return report, errors.New("could not read slug input (maximum line length 4096 bytes)")
 	}
 
-	final, err := m.Status(ctx)
+	final, err := m.status(ctx, conversionFailures)
 	final.Changed, final.Conflicts, final.Missing = report.Changed, report.Conflicts, report.Missing
 
-	final.Failed += report.Failed
+	// Only failures not already represented by Status remain (e.g. an inner legacy
+	// ciphertext that authenticates structurally but cannot decrypt with its slug).
+	final.Failed += len(conversionFailures)
 	if err != nil {
-		return final, encryptionError(err)
+		return final, WrapError(err)
 	}
 
 	if final.Failed != 0 || final.Missing != 0 || final.Conflicts != 0 {
@@ -168,13 +172,15 @@ func (m *Manager) ConvertSlugs(ctx context.Context, input io.Reader, dryRun bool
 	return final, nil
 }
 
-func (m *Manager) convertSlug(ctx context.Context, slug string, dryRun bool, report *Report) error {
+func (m *Manager) convertSlug(
+	ctx context.Context, slug string, dryRun bool, report *Report, failures map[string]struct{},
+) error {
 	found := false
 
 	for _, resource := range []string{resourceNote, resourceLink} {
 		row, err := m.store.Get(ctx, resource, domain.HashSlug(slug))
 		if err != nil {
-			return encryptionError(err)
+			return WrapError(err)
 		}
 
 		if row == nil {
@@ -184,9 +190,9 @@ func (m *Manager) convertSlug(ctx context.Context, slug string, dryRun bool, rep
 		found = true
 		cipher := m.ciphers[resource]
 
-		kind, _, err := cipher.Inspect(row.Value, row.ID)
+		kind, err := inspectVersioned(cipher, row)
 		if err != nil {
-			report.Failed++
+			recordFailure(failures, report, row)
 
 			continue
 		}
@@ -197,7 +203,7 @@ func (m *Manager) convertSlug(ctx context.Context, slug string, dryRun bool, rep
 
 		plain, err := cipher.Decrypt(row.Value, row.ID, slug)
 		if err != nil {
-			report.Failed++
+			recordFailure(failures, report, row)
 
 			continue
 		}
@@ -213,7 +219,7 @@ func (m *Manager) convertSlug(ctx context.Context, slug string, dryRun bool, rep
 
 		replaceErr := m.replace(ctx, *row, value, report)
 		if replaceErr != nil {
-			return encryptionError(replaceErr)
+			return WrapError(replaceErr)
 		}
 	}
 
@@ -224,15 +230,36 @@ func (m *Manager) convertSlug(ctx context.Context, slug string, dryRun bool, rep
 	return nil
 }
 
+// inspectVersioned authenticates versioned envelopes only. Unversioned values cannot be
+// converted; the final scan reports them as raw or malformed raw records.
+func inspectVersioned(cipher Cipher, row *Row) (string, error) {
+	if !cipher.Versioned(row.Value) {
+		return "", errors.New("record is not a versioned envelope")
+	}
+
+	kind, _, err := cipher.Inspect(row.Value, row.ID)
+	if err != nil {
+		return "", fmt.Errorf("inspect envelope: %w", err)
+	}
+
+	return kind, nil
+}
+
+// recordFailure counts each failed row once, however often its slug is supplied.
+func recordFailure(failures map[string]struct{}, report *Report, row *Row) {
+	failures[row.Resource+"/"+row.ID] = struct{}{}
+	report.Failed = len(failures)
+}
+
 func (m *Manager) readyReport(ctx context.Context) (Report, error) {
 	report, err := m.Status(ctx)
 	if err != nil {
-		return report, encryptionError(err)
+		return report, WrapError(err)
 	}
 
 	reg, err := m.store.Registry(ctx)
 	if err != nil {
-		return report, encryptionError(err)
+		return report, WrapError(err)
 	}
 
 	if reg == nil || report.State != Ready || report.Raw != 0 {
@@ -241,17 +268,18 @@ func (m *Manager) readyReport(ctx context.Context) (Report, error) {
 
 	err = m.validateKeys(reg, true)
 
-	return report, encryptionError(err)
+	return report, WrapError(err)
 }
 
 // Refresh counts after a partial failure when the caller's context still allows reading.
 func (m *Manager) failureReport(ctx context.Context, partial *Report, cause error) (Report, error) {
 	if ctx.Err() != nil {
-		return *partial, encryptionError(cause)
+		return *partial, WrapError(cause)
 	}
 
 	current, statusErr := m.Status(ctx)
 	current.Changed, current.Conflicts = partial.Changed, partial.Conflicts
+	current.Pruned = partial.Pruned
 
-	return current, errors.Join(cause, statusErr)
+	return current, WrapError(errors.Join(unwrapContext(cause), unwrapContext(statusErr)))
 }

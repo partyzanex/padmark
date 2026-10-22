@@ -104,7 +104,7 @@ func (s *ManagerTestSuite) TestUpdate_Validation() {
 }
 
 // A cache fill paused on an old snapshot must finish before the update evicts
-// that snapshot. Otherwise it could restore public privacy after a private PUT.
+// that snapshot. Metadata is always read from storage, even after a cache fill.
 //
 //nolint:funlen // Keep the blocked cache fill and concurrent PUT together to show their ordering.
 func (s *ManagerTestSuite) TestUpdate_ConcurrentCacheFill() {
@@ -177,6 +177,6 @@ func (s *ManagerTestSuite) TestUpdate_ConcurrentCacheFill() {
 	close(releaseRead)
 	s.Require().NoError(<-readDone)
 	s.Require().NoError(<-updateDone)
-	_, cached := s.manager.cache.Get(dbID)
-	s.False(cached, "the old public snapshot must not survive the PUT")
+	_, cached := s.manager.cache.Get(dbID, old.TargetURL)
+	s.False(cached, "the old target must not survive local eviction after PUT")
 }

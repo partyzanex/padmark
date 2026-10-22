@@ -248,7 +248,7 @@ func TestRevoke_CascadesSessionsAndInvites(t *testing.T) {
 	require.NoError(t, users.Create(ctx, usr))
 
 	require.NoError(t, sessions.Create(ctx, &domain.Session{
-		SessionID: "sess-1", UserID: usr.ID,
+		SessionHash: "sess-1", UserID: usr.ID,
 		CreatedAt: time.Now(), ExpiresAt: time.Now().Add(time.Hour),
 	}))
 

@@ -308,7 +308,7 @@ func runServer(ctx context.Context, cmd *cli.Command, router http.Handler, log *
 	compat.Append(shutdown.ContextFn(srv.Shutdown))
 
 	// serverCtx is cancelled with the server error if ListenAndServe fails unexpectedly,
-	// allowing CloseOnSignal to unblock and propagate the cause.
+	// allowing WaitForSignal to unblock and propagate the cause.
 	serverCtx, cancelServer := context.WithCancelCause(ctx)
 	defer cancelServer(nil)
 
@@ -320,20 +320,34 @@ func runServer(ctx context.Context, cmd *cli.Command, router http.Handler, log *
 		}
 	}
 
-	// context.Background() is intentional: shutCtx must outlive serverCtx so that
-	// graceful shutdown can complete even when serverCtx is already cancelled.
-	shutCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	return waitAndShutdown(serverCtx)
+}
+
+// waitAndShutdown blocks until SIGINT/SIGTERM arrives or serverCtx is cancelled (the main
+// listener failed, or the parent context ended), then closes everything registered with the
+// shared shutdown manager — the main, redirect and metrics listeners alike — under a bounded
+// deadline. On the failure path the listener cause is joined with any shutdown error, so both
+// stay reachable through errors.Is.
+func waitAndShutdown(serverCtx context.Context) error {
+	_, waitErr := compat.WaitForSignal(serverCtx, syscall.SIGINT, syscall.SIGTERM)
+
+	// Start the deadline only after the wake-up, not at server startup. WithoutCancel
+	// retains context values while letting shutdown outlive server cancellation.
+	shutCtx, cancel := context.WithTimeout(context.WithoutCancel(serverCtx), shutdownTimeout)
 	defer cancel()
 
-	err := compat.CloseOnSignal(serverCtx, shutCtx, syscall.SIGINT, syscall.SIGTERM)
-	if err != nil {
-		cause := context.Cause(serverCtx)
-		if cause != nil {
-			return fmt.Errorf("server: %w", cause)
-		}
+	var shutdownErr error
+
+	closeErr := compat.CloseContext(shutCtx)
+	if closeErr != nil {
+		shutdownErr = fmt.Errorf("graceful shutdown: %w", closeErr)
 	}
 
-	return nil
+	if waitErr != nil {
+		return errors.Join(fmt.Errorf("server: %w", context.Cause(serverCtx)), shutdownErr)
+	}
+
+	return shutdownErr
 }
 
 // attachAccountSystem wires the opt-in TOTP account manager onto the handler when
@@ -507,6 +521,11 @@ func initRepos(
 }
 
 func serverAction(ctx context.Context, cmd *cli.Command) error {
+	costErr := argon2ParamsFromFlags(cmd).Validate()
+	if costErr != nil {
+		return fmt.Errorf("validate argon2 configuration: %w", costErr)
+	}
+
 	log := newLogger(cmd.String(FlagLogLevel), cmd.String(FlagLogFormat))
 
 	keyring, err := crypto.LoadContentKeyring(cmd.String(FlagContentKeyring))
@@ -522,12 +541,7 @@ func serverAction(ctx context.Context, cmd *cli.Command) error {
 		return fmt.Errorf("open db: %w", err)
 	}
 
-	defer func() {
-		closeErr := db.Close()
-		if closeErr != nil {
-			log.ErrorContext(ctx, "close db", "err", closeErr)
-		}
-	}()
+	defer closeServerDB(ctx, db, log)
 
 	repo, linkRepo, err := initRepos(ctx, storage, db, log)
 	if err != nil {
@@ -564,4 +578,11 @@ func serverAction(ctx context.Context, cmd *cli.Command) error {
 	)
 
 	return runServer(ctx, cmd, router, log)
+}
+
+func closeServerDB(ctx context.Context, db *bun.DB, log *slog.Logger) {
+	err := db.Close()
+	if err != nil {
+		log.ErrorContext(ctx, "close db", "err", err)
+	}
 }

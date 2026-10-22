@@ -108,3 +108,40 @@ func TestKeyringCreation_ExclusiveAndPrivate(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, files)
 }
+
+func TestIsVersionedContent(t *testing.T) {
+	cipher, err := NewContentCipher("key", map[string][]byte{"key": bytes.Repeat([]byte{1}, 32)}, "note")
+	require.NoError(t, err)
+
+	native, err := cipher.Encrypt("costs $5", domain.HashSlug("slug"))
+	require.NoError(t, err)
+
+	legacy, err := New().Encrypt("costs $5 in $HOME", "slug")
+	require.NoError(t, err)
+
+	cases := map[string]bool{
+		native:                      true,
+		contentVersion + "$garbage": true,
+		"pmc9$x$y$z$w":              true,
+		"pmc10$future":              true,
+		"pmc2$":                     true,
+		legacy:                      false,
+		"":                          false,
+		"pmc2":                      false,
+		"pmc$p$key$a$b":             false,
+		"pmcx$p$key$a$b":            false,
+		"PMC2$p$key$a$b":            false,
+		" pmc2$p$key$a$b":           false,
+		"price is $5":               false,
+		"$HOME":                     false,
+		"$x^2$ and pmc2$":           false,
+	}
+
+	for value, want := range cases {
+		require.Equal(t, want, IsVersionedContent(value), "value %q", value)
+		require.Equal(t, want, cipher.Versioned(value), "value %q", value)
+	}
+
+	require.NotContains(t, legacy, "$", "canonical base64 legacy ciphertext never contains $")
+	require.NoError(t, cipher.ValidateLegacy(legacy))
+}

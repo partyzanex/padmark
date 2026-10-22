@@ -32,6 +32,8 @@ const apiFlowPassword = "FlowP@ss123!"
 // storage). It also guards the composition-root wiring: if the api-token store is not injected
 // into auth.Manager, CreateAPIToken returns ErrFeatureNotSupported and this test fails.
 func TestAPITokenFlow_AdminIssuesKey_CLICreatesNote(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
 	ctx := context.Background()
 
 	// ── storage: fresh shared-cache in-memory DB, pragmas (incl. FK enforcement) via Open ──
@@ -110,6 +112,8 @@ func TestAPITokenFlow_AdminIssuesKey_CLICreatesNote(t *testing.T) {
 	envelope, err := domain.EncodeAPITokenEnvelope(srv.URL, apiKey)
 	require.NoError(t, err)
 
+	require.NoError(t, clicmd.NewApp().Run(ctx, []string{"padmark-cli", "--token", envelope, "trust"}))
+
 	// ── CLI creates a note with only the envelope token — no --url, the URL comes from the token ──
 	runErr := clicmd.NewApp().Run(ctx, []string{
 		"padmark-cli", "--token", envelope,
@@ -119,7 +123,7 @@ func TestAPITokenFlow_AdminIssuesKey_CLICreatesNote(t *testing.T) {
 
 	count, err := db.NewSelect().TableExpr("notes").Count(ctx)
 	require.NoError(t, err)
-	require.Equal(t, 1, count, "exactly one note created through the API-token-authenticated path")
+	require.Equal(t, int64(1), count, "exactly one note created through the API-token-authenticated path")
 
 	// ── negative: a bogus key is rejected when the operation requires a credential ──
 	// POST /notes is anonymous-allowed by design (an invalid key does not block creating a
@@ -141,7 +145,7 @@ func TestAPITokenFlow_AdminIssuesKey_CLICreatesNote(t *testing.T) {
 
 	count, err = db.NewSelect().TableExpr("notes").Count(ctx)
 	require.NoError(t, err)
-	require.Equal(t, 2, count, "an invalid API key must not mutate the privacy-gated note")
+	require.Equal(t, int64(2), count, "an invalid API key must not mutate the privacy-gated note")
 
 	// ── regression: a PRIVATE (authenticated-level) note must be readable via the CLI's API
 	// token ── GET /notes/{id} is a "public" route (auth not required), so the auth middleware

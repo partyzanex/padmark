@@ -81,7 +81,12 @@ type Enrollment struct {
 // consume and the user insert happen in a single transaction, so a failed registration
 // never burns the token.
 func (m *OnboardingManager) AcceptInvite(ctx context.Context, token, username, password string) (*Enrollment, error) {
-	err := domain.ValidatePassword(password)
+	err := domain.ValidateUsername(username)
+	if err != nil {
+		return nil, fmt.Errorf("validate username: %w", err)
+	}
+
+	err = domain.ValidatePassword(password)
 	if err != nil {
 		return nil, fmt.Errorf("validate password: %w", err)
 	}
@@ -120,7 +125,12 @@ func (m *OnboardingManager) AcceptInvite(ctx context.Context, token, username, p
 // double-bootstrap (e.g. two instances racing on an empty DB) is the partial
 // unique index on users.is_admin: the second writer loses with domain.ErrUserExists.
 func (m *OnboardingManager) AcceptFirstAdmin(ctx context.Context, username, password string) (*Enrollment, error) {
-	err := domain.ValidatePassword(password)
+	err := domain.ValidateUsername(username)
+	if err != nil {
+		return nil, fmt.Errorf("validate username: %w", err)
+	}
+
+	err = domain.ValidatePassword(password)
 	if err != nil {
 		return nil, fmt.Errorf("validate password: %w", err)
 	}

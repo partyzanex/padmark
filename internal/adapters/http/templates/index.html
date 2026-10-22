@@ -17,7 +17,7 @@
             <span class="toolbar-label">Markdown</span>
             <div class="toolbar-actions">
                 <button class="toolbar-btn" id="mdBold">B</button>
-                <button class="toolbar-btn" id="mdItalic" style="font-style:italic">I</button>
+                <button class="toolbar-btn toolbar-italic" id="mdItalic">I</button>
                 <button class="toolbar-btn" id="mdCode">&lt;/&gt;</button>
                 <button class="toolbar-btn" id="mdBlock">block</button>
             </div>
@@ -126,6 +126,17 @@
         setTimeout(() => { btn.textContent = label; btn.style.background = ''; }, 1800);
     }
 
+    // errorMessage reads the server's JSON error body ({"message": ...}) from a failed response so
+    // the button names the actual cause (cross-origin rejection, API disabled, validation failure)
+    // instead of a guess; fallback covers an empty or non-JSON body.
+    async function errorMessage(resp, fallback) {
+        try {
+            const body = await resp.json();
+            if (body && typeof body.message === 'string' && body.message) return body.message;
+        } catch (_) { /* empty or non-JSON body */ }
+        return fallback;
+    }
+
     function toggleBurn() {
         const checked = document.getElementById('burnCheck').checked;
         const wrap = document.getElementById('burnTimeWrap');
@@ -183,7 +194,7 @@
                 body: JSON.stringify(payload)
             });
 
-            if (!resp.ok) { throw new Error('HTTP ' + resp.status); }
+            if (!resp.ok) { throw new Error(await errorMessage(resp, 'Error — try again')); }
 
             const note = await resp.json();
             if (note.edit_code) {
@@ -198,7 +209,7 @@
             }
             window.location.href = '/success?' + params.toString();
         } catch (err) {
-            btn.textContent = 'Error — try again';
+            btn.textContent = err.message || 'Error — try again';
             btn.style.background = '#ef4444';
             btn.style.opacity = '1';
             btn.disabled = false;
@@ -231,8 +242,13 @@
                 body: JSON.stringify(payload)
             });
 
-            if (resp.status === 403) { throw new Error('Invalid edit code'); }
-            if (!resp.ok) { throw new Error('HTTP ' + resp.status); }
+            if (!resp.ok) {
+                const msg = await errorMessage(resp, 'HTTP ' + resp.status);
+                // Only the edit-code rejection (403 "invalid edit code", domain.ErrInvalidEditCode)
+                // means the code was wrong; other 403s (e.g. "cross-origin request rejected") are not.
+                if (resp.status === 403 && msg === 'invalid edit code') { throw new Error('Invalid edit code'); }
+                throw new Error(msg);
+            }
 
             window.location.href = '/' + noteID;
         } catch (err) {

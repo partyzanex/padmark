@@ -4,6 +4,8 @@ import (
 	"html/template"
 	"net/http"
 
+	"github.com/partyzanex/padmark/internal/domain"
+
 	_ "embed"
 )
 
@@ -82,7 +84,7 @@ func (h *LinkHandler) Redirect(w http.ResponseWriter, r *http.Request) {
 
 	execErr := h.tmpl.Execute(w, data)
 	if execErr != nil {
-		h.log.ErrorContext(r.Context(), "render redirect template", "id", id, "err", execErr)
+		h.log.ErrorContext(r.Context(), "render redirect template", "id", domain.HashSlug(id), "err", execErr)
 	}
 }
 

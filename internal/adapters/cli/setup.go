@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 
@@ -28,13 +29,16 @@ func setupCommand() *urcli.Command {
 				Usage: "Account username",
 			},
 			&urcli.StringFlag{
-				Name:  FlagPassword,
-				Usage: "Account password (or pipe it to stdin; strength rules enforced by the server)",
+				Name: FlagPassword,
+				Usage: "Account password (strength rules enforced by the server). " +
+					"Flag values are visible in process listings (ps); prefer piping the password to stdin",
 			},
 			&urcli.StringFlag{
 				Name:    FlagInvite,
 				Aliases: []string{"i"},
-				Usage:   "Signup invite token (admin-created); empty = bootstrap the first admin",
+				Usage: "Signup invite token (admin-created); empty = bootstrap the first admin. " +
+					"Flag values are visible in process listings (ps) and there is no env/stdin alternative " +
+					"(stdin carries the password); the invite is single-use and this request spends it",
 			},
 		},
 		Action: setupAction,
@@ -45,6 +49,14 @@ func setupAction(ctx context.Context, cmd *urcli.Command) error {
 	username := cmd.String(FlagUsername)
 	if strings.TrimSpace(username) == "" {
 		return errors.New("--username is required")
+	}
+
+	// The trust gate runs before stdin is consumed, before the insecure warning and before any
+	// network I/O: a pmk_ envelope URL must not receive the bootstrap credentials unconfirmed.
+	// Setup is unauthenticated, so the bearer key itself is deliberately not sent.
+	_, serverURL, trustErr := resolveTrustedServer(cmd)
+	if trustErr != nil {
+		return trustErr
 	}
 
 	password, err := setupPassword(cmd)
@@ -64,11 +76,14 @@ func setupAction(ctx context.Context, cmd *urcli.Command) error {
 		return fmt.Errorf("encode setup request: %w", err)
 	}
 
-	url := resolveServerURL(cmd) + "/setup"
+	endpoint := serverURL + "/setup"
+
+	// Same advisory as the token flow: secrets must not travel in cleartext silently.
+	warnInsecureSetup(commandErrWriter(cmd), endpoint)
 
 	httpClient := &http.Client{Timeout: cmd.Duration(FlagTimeout)}
 
-	req, reqErr := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(string(payload)))
+	req, reqErr := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(string(payload)))
 	if reqErr != nil {
 		return fmt.Errorf("build setup request: %w", reqErr)
 	}
@@ -84,6 +99,23 @@ func setupAction(ctx context.Context, cmd *urcli.Command) error {
 	defer func() { _ = resp.Body.Close() }() //nolint:errcheck // see the comment above
 
 	return handleSetupRes(commandErrWriter(cmd), resp)
+}
+
+// warnInsecureSetup prints a stderr warning when the initial admin's password (and the returned
+// TOTP secret, an equivalent credential) would travel in cleartext over a non-HTTPS URL.
+// Advisory only and does not block the request, mirroring warnInsecureToken.
+func warnInsecureSetup(errOut io.Writer, serverURL string) {
+	parsed, parseErr := url.Parse(serverURL)
+	if parseErr == nil && parsed.Scheme == "https" {
+		return
+	}
+
+	// Best-effort advisory write (errWriter swallows the error); a failed warning must not
+	// abort the command.
+	ew := &errWriter{w: errOut, err: nil}
+	ew.printf(
+		"warning: the initial admin password and TOTP secret travel in cleartext over a "+
+			"non-HTTPS URL (%s); use an https:// server URL\n", serverURL)
 }
 
 // setupJSONHeaders marks the request as the machine-readable setup variant: application/json

@@ -10,3 +10,8 @@ func GenerateCSRFTokenForTest(secret []byte) string {
 
 	return tok
 }
+
+// VerifyCSRFTokenForTest reports whether token carries a valid HMAC signature under secret.
+func VerifyCSRFTokenForTest(token string, secret []byte) bool {
+	return verifyCSRFToken(token, secret)
+}
