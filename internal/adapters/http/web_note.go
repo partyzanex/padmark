@@ -10,7 +10,6 @@ import (
 
 	_ "embed"
 
-	"github.com/bluele/gcache"
 	"github.com/google/uuid"
 
 	"github.com/partyzanex/padmark/internal/adapters/http/ogenapi"
@@ -35,7 +34,7 @@ type NoteHandler struct {
 	// the ogen-served single-segment PUT/DELETE /notes/{id} routes (see registerOgenRoutes in
 	// router.go) so fail-lockout tracking is consistent for a note regardless of which route
 	// variant a client hits.
-	lockout gcache.Cache
+	lockout *failLockoutCache
 }
 
 func newNoteHandler(c *common, manager NoteManager, noteTmpl, indexTmpl *template.Template) *NoteHandler {

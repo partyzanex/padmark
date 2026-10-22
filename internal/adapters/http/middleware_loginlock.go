@@ -24,9 +24,10 @@ const (
 	// sprayed regains access at most five minutes after the attacker stops.
 	loginLockoutDur = 5 * time.Minute
 
-	// maxTrackedLogins bounds the number of usernames tracked at once. ARC evicts the
-	// least-recently-used entry when the cache is full, so an attacker cycling random
-	// usernames cannot grow memory without bound.
+	// maxTrackedLogins bounds the number of usernames whose counters are tracked at once. ARC
+	// evicts the least-recently-used entry when the cache is full, so an attacker cycling random
+	// usernames cannot grow memory without bound. Usernames that reached the lock threshold are
+	// pinned in a separate lockedSet and survive that churn until loginLockoutDur passes.
 	maxTrackedLogins = 10_000
 )
 
@@ -61,7 +62,10 @@ type loginAttempts struct {
 // feed it.
 type loginLockout struct {
 	cache gcache.Cache
-	clock gcache.Clock
+	// locked pins usernames that reached maxLoginFailures so that evicting their counter from
+	// the ARC cache (by spraying other usernames) cannot unlock them.
+	locked *lockedSet[loginLockKey]
+	clock  gcache.Clock
 	// mu makes check-and-count atomic so a parallel burst cannot slip more than
 	// maxLoginFailures attempts past the gate. It guards only the in-memory cache.
 	mu sync.Mutex
@@ -69,9 +73,10 @@ type loginLockout struct {
 
 func newLoginLockout(clock gcache.Clock) *loginLockout {
 	return &loginLockout{
-		cache: gcache.New(maxTrackedLogins).ARC().Clock(clock).Build(),
-		clock: clock,
-		mu:    sync.Mutex{},
+		cache:  gcache.New(maxTrackedLogins).ARC().Clock(clock).Build(),
+		locked: newLockedSet[loginLockKey](),
+		clock:  clock,
+		mu:     sync.Mutex{},
 	}
 }
 
@@ -83,6 +88,11 @@ func (l *loginLockout) reserve(key loginLockKey) (time.Duration, bool) {
 	defer l.mu.Unlock()
 
 	now := l.clock.Now()
+
+	if remaining, locked := l.locked.remaining(key, now); locked {
+		return remaining, false
+	}
+
 	state := loginAttempts{expires: time.Time{}, count: 0}
 
 	cached, err := l.cache.Get(key)
@@ -98,6 +108,10 @@ func (l *loginLockout) reserve(key loginLockKey) (time.Duration, bool) {
 
 	state.count++
 	state.expires = now.Add(loginLockoutDur)
+
+	if state.count >= maxLoginFailures {
+		l.locked.lock(key, now, state.expires)
+	}
 
 	setErr := l.cache.SetWithExpire(key, state, loginLockoutDur)
 	if setErr != nil {
@@ -115,6 +129,7 @@ func (l *loginLockout) reset(key loginLockKey) {
 	defer l.mu.Unlock()
 
 	l.cache.Remove(key)
+	l.locked.unlock(key)
 }
 
 // withLoginLockout wraps POST /totp-login with the per-username lock. It must run after the
