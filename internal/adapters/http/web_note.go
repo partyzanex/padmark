@@ -127,6 +127,8 @@ type noteJSON struct {
 	Privacy          domain.Privacy     `json:"privacy"`
 	Views            int                `json:"views"`
 	BurnAfterReading bool               `json:"burn_after_reading"`
+	// Private is the deprecated v0.1.6 flag, true when Privacy is not public.
+	Private bool `json:"private"`
 }
 
 func toNoteJSON(note *domain.Note) noteJSON {
@@ -141,6 +143,7 @@ func toNoteJSON(note *domain.Note) noteJSON {
 		Views:            note.Views,
 		BurnAfterReading: note.BurnAfterReading,
 		Privacy:          note.EffectivePrivacy(),
+		Private:          privateFlag(note),
 	}
 }
 
@@ -254,9 +257,14 @@ func (h *NoteHandler) UpdateNoteByPath(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	note, err := h.manager.Update(
-		r.Context(), id, body.EditCode.Or(""), callerIDFromCtx(r.Context()), noteUpdatePayload(&body),
-	)
+	payload, err := noteUpdatePayload(&body)
+	if err != nil {
+		writeJSONErrorStatus(w, r, h.log, http.StatusBadRequest, err.Error())
+
+		return
+	}
+
+	note, err := h.manager.Update(r.Context(), id, body.EditCode.Or(""), callerIDFromCtx(r.Context()), payload)
 	if err != nil {
 		h.writeError(w, r, err)
 

@@ -2518,9 +2518,15 @@ func (s *CreateNoteRequest) encodeFields(e *jx.Encoder) {
 			s.Privacy.Encode(e)
 		}
 	}
+	{
+		if s.Private.Set {
+			e.FieldStart("private")
+			s.Private.Encode(e)
+		}
+	}
 }
 
-var jsonFieldsNameOfCreateNoteRequest = [8]string{
+var jsonFieldsNameOfCreateNoteRequest = [9]string{
 	0: "title",
 	1: "content",
 	2: "content_type",
@@ -2529,6 +2535,7 @@ var jsonFieldsNameOfCreateNoteRequest = [8]string{
 	5: "ttl",
 	6: "edit_code",
 	7: "privacy",
+	8: "private",
 }
 
 // Decode decodes CreateNoteRequest from json.
@@ -2536,7 +2543,7 @@ func (s *CreateNoteRequest) Decode(d *jx.Decoder) error {
 	if s == nil {
 		return errors.New("invalid: unable to decode CreateNoteRequest to nil")
 	}
-	var requiredBitSet [1]uint8
+	var requiredBitSet [2]uint8
 	s.setDefaults()
 
 	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
@@ -2623,6 +2630,16 @@ func (s *CreateNoteRequest) Decode(d *jx.Decoder) error {
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"privacy\"")
 			}
+		case "private":
+			if err := func() error {
+				s.Private.Reset()
+				if err := s.Private.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"private\"")
+			}
 		default:
 			return d.Skip()
 		}
@@ -2632,8 +2649,9 @@ func (s *CreateNoteRequest) Decode(d *jx.Decoder) error {
 	}
 	// Validate required fields.
 	var failures []validate.FieldError
-	for i, mask := range [1]uint8{
+	for i, mask := range [2]uint8{
 		0b00000010,
+		0b00000000,
 	} {
 		if result := (requiredBitSet[i] & mask) ^ mask; result != 0 {
 			// Mask only required fields and check equality to mask using XOR.
@@ -2839,6 +2857,12 @@ func (s *CreateNoteResponse) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
+		if s.Private.Set {
+			e.FieldStart("private")
+			s.Private.Encode(e)
+		}
+	}
+	{
 		if s.ExpiresAt.Set {
 			e.FieldStart("expires_at")
 			s.ExpiresAt.Encode(e, json.EncodeDateTime)
@@ -2858,7 +2882,7 @@ func (s *CreateNoteResponse) encodeFields(e *jx.Encoder) {
 	}
 }
 
-var jsonFieldsNameOfCreateNoteResponse = [11]string{
+var jsonFieldsNameOfCreateNoteResponse = [12]string{
 	0:  "id",
 	1:  "title",
 	2:  "content",
@@ -2866,10 +2890,11 @@ var jsonFieldsNameOfCreateNoteResponse = [11]string{
 	4:  "views",
 	5:  "burn_after_reading",
 	6:  "privacy",
-	7:  "expires_at",
-	8:  "created_at",
-	9:  "updated_at",
-	10: "edit_code",
+	7:  "private",
+	8:  "expires_at",
+	9:  "created_at",
+	10: "updated_at",
+	11: "edit_code",
 }
 
 // Decode decodes CreateNoteResponse from json.
@@ -2961,6 +2986,16 @@ func (s *CreateNoteResponse) Decode(d *jx.Decoder) error {
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"privacy\"")
 			}
+		case "private":
+			if err := func() error {
+				s.Private.Reset()
+				if err := s.Private.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"private\"")
+			}
 		case "expires_at":
 			if err := func() error {
 				s.ExpiresAt.Reset()
@@ -2972,7 +3007,7 @@ func (s *CreateNoteResponse) Decode(d *jx.Decoder) error {
 				return errors.Wrap(err, "decode field \"expires_at\"")
 			}
 		case "created_at":
-			requiredBitSet[1] |= 1 << 0
+			requiredBitSet[1] |= 1 << 1
 			if err := func() error {
 				v, err := json.DecodeDateTime(d)
 				s.CreatedAt = v
@@ -2984,7 +3019,7 @@ func (s *CreateNoteResponse) Decode(d *jx.Decoder) error {
 				return errors.Wrap(err, "decode field \"created_at\"")
 			}
 		case "updated_at":
-			requiredBitSet[1] |= 1 << 1
+			requiredBitSet[1] |= 1 << 2
 			if err := func() error {
 				v, err := json.DecodeDateTime(d)
 				s.UpdatedAt = v
@@ -2996,7 +3031,7 @@ func (s *CreateNoteResponse) Decode(d *jx.Decoder) error {
 				return errors.Wrap(err, "decode field \"updated_at\"")
 			}
 		case "edit_code":
-			requiredBitSet[1] |= 1 << 2
+			requiredBitSet[1] |= 1 << 3
 			if err := func() error {
 				v, err := d.Str()
 				s.EditCode = string(v)
@@ -3018,7 +3053,7 @@ func (s *CreateNoteResponse) Decode(d *jx.Decoder) error {
 	var failures []validate.FieldError
 	for i, mask := range [2]uint8{
 		0b00111111,
-		0b00000111,
+		0b00001110,
 	} {
 		if result := (requiredBitSet[i] & mask) ^ mask; result != 0 {
 			// Mask only required fields and check equality to mask using XOR.
@@ -4506,6 +4541,12 @@ func (s *NoteResponse) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
+		if s.Private.Set {
+			e.FieldStart("private")
+			s.Private.Encode(e)
+		}
+	}
+	{
 		if s.ExpiresAt.Set {
 			e.FieldStart("expires_at")
 			s.ExpiresAt.Encode(e, json.EncodeDateTime)
@@ -4521,17 +4562,18 @@ func (s *NoteResponse) encodeFields(e *jx.Encoder) {
 	}
 }
 
-var jsonFieldsNameOfNoteResponse = [10]string{
-	0: "id",
-	1: "title",
-	2: "content",
-	3: "content_type",
-	4: "views",
-	5: "burn_after_reading",
-	6: "privacy",
-	7: "expires_at",
-	8: "created_at",
-	9: "updated_at",
+var jsonFieldsNameOfNoteResponse = [11]string{
+	0:  "id",
+	1:  "title",
+	2:  "content",
+	3:  "content_type",
+	4:  "views",
+	5:  "burn_after_reading",
+	6:  "privacy",
+	7:  "private",
+	8:  "expires_at",
+	9:  "created_at",
+	10: "updated_at",
 }
 
 // Decode decodes NoteResponse from json.
@@ -4623,6 +4665,16 @@ func (s *NoteResponse) Decode(d *jx.Decoder) error {
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"privacy\"")
 			}
+		case "private":
+			if err := func() error {
+				s.Private.Reset()
+				if err := s.Private.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"private\"")
+			}
 		case "expires_at":
 			if err := func() error {
 				s.ExpiresAt.Reset()
@@ -4634,7 +4686,7 @@ func (s *NoteResponse) Decode(d *jx.Decoder) error {
 				return errors.Wrap(err, "decode field \"expires_at\"")
 			}
 		case "created_at":
-			requiredBitSet[1] |= 1 << 0
+			requiredBitSet[1] |= 1 << 1
 			if err := func() error {
 				v, err := json.DecodeDateTime(d)
 				s.CreatedAt = v
@@ -4646,7 +4698,7 @@ func (s *NoteResponse) Decode(d *jx.Decoder) error {
 				return errors.Wrap(err, "decode field \"created_at\"")
 			}
 		case "updated_at":
-			requiredBitSet[1] |= 1 << 1
+			requiredBitSet[1] |= 1 << 2
 			if err := func() error {
 				v, err := json.DecodeDateTime(d)
 				s.UpdatedAt = v
@@ -4668,7 +4720,7 @@ func (s *NoteResponse) Decode(d *jx.Decoder) error {
 	var failures []validate.FieldError
 	for i, mask := range [2]uint8{
 		0b00111111,
-		0b00000011,
+		0b00000110,
 	} {
 		if result := (requiredBitSet[i] & mask) ^ mask; result != 0 {
 			// Mask only required fields and check equality to mask using XOR.
@@ -6382,9 +6434,15 @@ func (s *UpdateNoteRequest) encodeFields(e *jx.Encoder) {
 			s.Privacy.Encode(e)
 		}
 	}
+	{
+		if s.Private.Set {
+			e.FieldStart("private")
+			s.Private.Encode(e)
+		}
+	}
 }
 
-var jsonFieldsNameOfUpdateNoteRequest = [7]string{
+var jsonFieldsNameOfUpdateNoteRequest = [8]string{
 	0: "title",
 	1: "content",
 	2: "content_type",
@@ -6392,6 +6450,7 @@ var jsonFieldsNameOfUpdateNoteRequest = [7]string{
 	4: "burn_after_reading",
 	5: "ttl",
 	6: "privacy",
+	7: "private",
 }
 
 // Decode decodes UpdateNoteRequest from json.
@@ -6474,6 +6533,16 @@ func (s *UpdateNoteRequest) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"privacy\"")
+			}
+		case "private":
+			if err := func() error {
+				s.Private.Reset()
+				if err := s.Private.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"private\"")
 			}
 		default:
 			return d.Skip()

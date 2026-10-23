@@ -142,6 +142,7 @@ func buildCreateReq(cmd *urcli.Command, content string) *padmark.CreateNoteReque
 		TTL:              padmark.OptInt64{Value: 0, Set: false},
 		EditCode:         padmark.OptString{Value: "", Set: false},
 		Privacy:          padmark.OptCreateNoteRequestPrivacy{Value: "", Set: false},
+		Private:          padmark.OptBool{Value: false, Set: false}, //nolint:staticcheck // deprecated alias, unused
 	}
 	if title != "" {
 		req.Title = padmark.NewOptString(title)
