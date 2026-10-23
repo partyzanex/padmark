@@ -157,6 +157,12 @@ func dbFilePath(dsn string) (path string, create bool) {
 	return path, true
 }
 
+// DBFilePath exposes dbFilePath so callers can locate the database file a DSN opens, for example to
+// place sibling files next to it. path is "" for in-memory and temporary databases.
+func DBFilePath(dsn string) (path string, create bool) {
+	return dbFilePath(dsn)
+}
+
 // fileURIPath is dbFilePath for a "file:" URI, given with the "file:" scheme already removed.
 func fileURIPath(uri string) (path string, create bool) {
 	rest, _, _ := strings.Cut(uri, "#")

@@ -321,3 +321,13 @@ func TestOpen_ChmodFailureIsSoft(t *testing.T) {
 	require.Contains(t, buf.String(), "operation not permitted")
 	require.NotContains(t, buf.String(), "level=INFO")
 }
+
+func TestDBFilePathExported(t *testing.T) {
+	path, create := DBFilePath("file:/var/lib/p.db?cache=shared")
+	require.Equal(t, "/var/lib/p.db", path)
+	require.True(t, create)
+
+	path, create = DBFilePath(":memory:")
+	require.Empty(t, path)
+	require.False(t, create)
+}
