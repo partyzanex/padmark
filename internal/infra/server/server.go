@@ -105,23 +105,35 @@ func parseTokens(raw string) []string {
 // the deprecated value is ignored with a warning; otherwise a set --cookie-max-age is honoured
 // so an upgrade does not silently change the lifetime operators configured. No extra bounds are
 // applied: --session-ttl itself has none, and auth.NewManager rejects an unusable TTL.
-func sessionTTL(ctx context.Context, cmd *cli.Command, log *slog.Logger) time.Duration {
+// sessionTTL resolves the session lifetime: --session-ttl, or the deprecated v0.1.6
+// --cookie-max-age when only that one is set. It is pure so that both consumers (router options
+// and the auth manager) agree; warnDeprecatedSessionFlags reports the fallback once at startup.
+func sessionTTL(cmd *cli.Command) time.Duration {
 	seconds := cmd.Int(FlagSessionTTL)
 
-	if cmd.IsSet(FlagCookieMaxAge) {
-		if cmd.IsSet(FlagSessionTTL) {
-			log.WarnContext(ctx, "deprecated --cookie-max-age is ignored because --session-ttl is set",
-				"flag", "--"+FlagCookieMaxAge, "env", EnvCookieMaxAge, "use", "--"+FlagSessionTTL)
-		} else {
-			seconds = cmd.Int(FlagCookieMaxAge)
-
-			log.WarnContext(ctx, "--cookie-max-age is deprecated; its value is used as the session TTL, "+
-				"switch to --session-ttl",
-				"flag", "--"+FlagCookieMaxAge, "env", EnvCookieMaxAge, "use", "--"+FlagSessionTTL)
-		}
+	if cmd.IsSet(FlagCookieMaxAge) && !cmd.IsSet(FlagSessionTTL) {
+		seconds = cmd.Int(FlagCookieMaxAge)
 	}
 
 	return time.Duration(seconds) * time.Second
+}
+
+// warnDeprecatedSessionFlags logs, once, how the deprecated --cookie-max-age was treated.
+func warnDeprecatedSessionFlags(ctx context.Context, cmd *cli.Command, log *slog.Logger) {
+	if !cmd.IsSet(FlagCookieMaxAge) {
+		return
+	}
+
+	if cmd.IsSet(FlagSessionTTL) {
+		log.WarnContext(ctx, "deprecated --cookie-max-age is ignored because --session-ttl is set",
+			"flag", "--"+FlagCookieMaxAge, "env", EnvCookieMaxAge, "use", "--"+FlagSessionTTL)
+
+		return
+	}
+
+	log.WarnContext(ctx, "--cookie-max-age is deprecated; its value is used as the session TTL, "+
+		"switch to --session-ttl",
+		"flag", "--"+FlagCookieMaxAge, "env", EnvCookieMaxAge, "use", "--"+FlagSessionTTL)
 }
 
 func buildRouter(
@@ -172,6 +184,7 @@ func buildRouter(
 		)
 	}
 
+	warnDeprecatedSessionFlags(ctx, cmd, log)
 	opts := adaptershttp.RouterOptions{
 		MaxBodyBytes:   cmd.Int(FlagMaxBodyBytes),
 		RateLimit:      cmd.Int(FlagRateLimit),
@@ -180,7 +193,7 @@ func buildRouter(
 		ForcedScheme:   publicScheme,
 		// Same flag attachAccountSystem feeds into auth.NewManager's sessionTTL, so the TOTP
 		// session cookie's Max-Age always matches the actual server-side session lifetime.
-		SessionTTL:     sessionTTL(ctx, cmd, log),
+		SessionTTL:     sessionTTL(cmd),
 		DisableAPI:     cmd.Bool(FlagDisableAPI),
 		DirectRedirect: cmd.Bool(FlagDirectRedirect),
 		// The same allow-list guards the redirect listener and, here, the main one.
@@ -414,7 +427,7 @@ func attachAccountSystem(
 		return handler, nil
 	}
 
-	ttl := sessionTTL(ctx, cmd, log)
+	ttl := sessionTTL(cmd)
 
 	authMgr, err := auth.NewManager(
 		users, invites, sessions, apiTokens,

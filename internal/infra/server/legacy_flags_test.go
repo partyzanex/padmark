@@ -12,7 +12,7 @@ import (
 )
 
 // runWithSessionTTL parses args against the real flag set and returns what sessionTTL resolves
-// together with the captured log output.
+// together with the log output of warnDeprecatedSessionFlags.
 func runWithSessionTTL(t *testing.T, args ...string) (time.Duration, string) {
 	t.Helper()
 
@@ -23,7 +23,8 @@ func runWithSessionTTL(t *testing.T, args ...string) (time.Duration, string) {
 
 	log := slog.New(slog.NewTextHandler(&out, nil))
 	cmd := newCommand("padmark", "test", appFlags(), func(ctx context.Context, cmd *cli.Command) error {
-		got = sessionTTL(ctx, cmd, log)
+		warnDeprecatedSessionFlags(ctx, cmd, log)
+		got = sessionTTL(cmd)
 
 		return nil
 	})

@@ -26,3 +26,4 @@ padmark.db-wal
 
 # Interrupted keyring generation must never enter version control or image layers.
 **/.padmark-keyring-*
+padmark-keys.json
