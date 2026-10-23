@@ -85,7 +85,8 @@ func TestServeRefusesSubstitutedContentKeyBeforeListening(t *testing.T) {
 
 	defer db.Close()
 
-	_, _, err = initRepos(t.Context(), "sqlite", db, newLogger("error", "text"))
+	_, _, err = initRepos(t.Context(), "sqlite", db, newLogger("error", "text"),
+		migrationOptions{dsn: dsn, skipBackup: true})
 	require.NoError(t, err)
 
 	ring := &crypto.ContentKeyring{Active: "key", Keys: map[string][]byte{"key": bytes.Repeat([]byte{1}, 32)}}

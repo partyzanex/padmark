@@ -13,72 +13,74 @@ import (
 
 // Flag names used in CLI flags.
 const (
-	FlagAddr               = "addr"
-	FlagStorage            = "storage"
-	FlagDSN                = "dsn"
-	FlagLogLevel           = "log-level"
-	FlagLogFormat          = "log-format"
-	FlagEnableAccounts     = "enable-accounts"
-	FlagDisableAPI         = "disable-api"
-	FlagReadTimeout        = "read-timeout"
-	FlagWriteTimeout       = "write-timeout"
-	FlagMaxHeaderBytes     = "max-header-bytes"
-	FlagMaxBodyBytes       = "max-body-bytes"
-	FlagRateLimit          = "rate-limit"
-	FlagRateBurst          = "rate-burst"
-	FlagTLSCert            = "tls-cert"
-	FlagTLSKey             = "tls-key"
-	FlagHTTPRedirectAddr   = "http-redirect-addr"
-	FlagAllowedHosts       = "allowed-hosts"
-	FlagTrustedProxies     = "trusted-proxies"
-	FlagPublicScheme       = "public-scheme"
-	FlagCustomSlugs        = "custom-slugs"
-	FlagTOTPIssuer         = "totp-issuer"
-	FlagSessionTTL         = "session-ttl"
-	FlagArgon2Memory       = "argon2-memory"
-	FlagArgon2Time         = "argon2-time"
-	FlagArgon2Threads      = "argon2-threads"
-	FlagArgon2MemoryBudget = "argon2-memory-budget"
-	FlagDirectRedirect     = "direct-redirect"
-	FlagMetricsAddr        = "metrics-addr"
-	FlagCSRFSecret         = "csrf-secret"
-	FlagContentKeyring     = "content-keyring-file"
-	FlagAllowSharedKeyring = "allow-shared-keyring"
+	FlagAddr                = "addr"
+	FlagStorage             = "storage"
+	FlagDSN                 = "dsn"
+	FlagLogLevel            = "log-level"
+	FlagLogFormat           = "log-format"
+	FlagEnableAccounts      = "enable-accounts"
+	FlagDisableAPI          = "disable-api"
+	FlagReadTimeout         = "read-timeout"
+	FlagWriteTimeout        = "write-timeout"
+	FlagMaxHeaderBytes      = "max-header-bytes"
+	FlagMaxBodyBytes        = "max-body-bytes"
+	FlagRateLimit           = "rate-limit"
+	FlagRateBurst           = "rate-burst"
+	FlagTLSCert             = "tls-cert"
+	FlagTLSKey              = "tls-key"
+	FlagHTTPRedirectAddr    = "http-redirect-addr"
+	FlagAllowedHosts        = "allowed-hosts"
+	FlagTrustedProxies      = "trusted-proxies"
+	FlagPublicScheme        = "public-scheme"
+	FlagCustomSlugs         = "custom-slugs"
+	FlagTOTPIssuer          = "totp-issuer"
+	FlagSessionTTL          = "session-ttl"
+	FlagArgon2Memory        = "argon2-memory"
+	FlagArgon2Time          = "argon2-time"
+	FlagArgon2Threads       = "argon2-threads"
+	FlagArgon2MemoryBudget  = "argon2-memory-budget"
+	FlagDirectRedirect      = "direct-redirect"
+	FlagMetricsAddr         = "metrics-addr"
+	FlagCSRFSecret          = "csrf-secret"
+	FlagContentKeyring      = "content-keyring-file"
+	FlagAllowSharedKeyring  = "allow-shared-keyring"
+	FlagSkipMigrationBackup = "skip-migration-backup"
 )
 
 // Env vars used to configure the service (prefix: PADMARK_*).
 const (
-	EnvAddr               = "PADMARK_ADDR"
-	EnvStorage            = "PADMARK_STORAGE"
-	EnvDSN                = "PADMARK_DSN"
-	EnvLogLevel           = "PADMARK_LOG_LEVEL"
-	EnvLogFormat          = "PADMARK_LOG_FORMAT"
-	EnvEnableAccounts     = "PADMARK_ENABLE_ACCOUNTS"
-	EnvDisableAPI         = "PADMARK_DISABLE_API"
-	EnvReadTimeout        = "PADMARK_READ_TIMEOUT"
-	EnvWriteTimeout       = "PADMARK_WRITE_TIMEOUT"
-	EnvMaxHeaderBytes     = "PADMARK_MAX_HEADER_BYTES"
-	EnvMaxBodyBytes       = "PADMARK_MAX_BODY_BYTES"
-	EnvRateLimit          = "PADMARK_RATE_LIMIT"
-	EnvRateBurst          = "PADMARK_RATE_BURST"
-	EnvTLSCert            = "PADMARK_TLS_CERT"
-	EnvTLSKey             = "PADMARK_TLS_KEY"
-	EnvHTTPRedirectAddr   = "PADMARK_HTTP_REDIRECT_ADDR"
-	EnvAllowedHosts       = "PADMARK_ALLOWED_HOSTS"
-	EnvTrustedProxies     = "PADMARK_TRUSTED_PROXIES"
-	EnvPublicScheme       = "PADMARK_PUBLIC_SCHEME"
-	EnvCustomSlugs        = "PADMARK_CUSTOM_SLUGS"
-	EnvTOTPIssuer         = "PADMARK_TOTP_ISSUER"
-	EnvSessionTTL         = "PADMARK_SESSION_TTL"
-	EnvArgon2Memory       = "PADMARK_ARGON2_MEMORY"
-	EnvArgon2Time         = "PADMARK_ARGON2_TIME"
-	EnvArgon2Threads      = "PADMARK_ARGON2_THREADS"
-	EnvArgon2MemoryBudget = "PADMARK_ARGON2_MEMORY_BUDGET"
-	EnvDirectRedirect     = "PADMARK_DIRECT_REDIRECT"
-	EnvMetricsAddr        = "PADMARK_METRICS_ADDR"
-	EnvCSRFSecret         = "PADMARK_CSRF_SECRET" //nolint:gosec // G101: env var name, not an inline credential
-	EnvContentKeyring     = "PADMARK_CONTENT_KEYRING_FILE"
-	EnvAllowSharedKeyring = "PADMARK_ALLOW_SHARED_KEYRING"
+	EnvAddr                = "PADMARK_ADDR"
+	EnvStorage             = "PADMARK_STORAGE"
+	EnvDSN                 = "PADMARK_DSN"
+	EnvLogLevel            = "PADMARK_LOG_LEVEL"
+	EnvLogFormat           = "PADMARK_LOG_FORMAT"
+	EnvEnableAccounts      = "PADMARK_ENABLE_ACCOUNTS"
+	EnvDisableAPI          = "PADMARK_DISABLE_API"
+	EnvReadTimeout         = "PADMARK_READ_TIMEOUT"
+	EnvWriteTimeout        = "PADMARK_WRITE_TIMEOUT"
+	EnvMaxHeaderBytes      = "PADMARK_MAX_HEADER_BYTES"
+	EnvMaxBodyBytes        = "PADMARK_MAX_BODY_BYTES"
+	EnvRateLimit           = "PADMARK_RATE_LIMIT"
+	EnvRateBurst           = "PADMARK_RATE_BURST"
+	EnvTLSCert             = "PADMARK_TLS_CERT"
+	EnvTLSKey              = "PADMARK_TLS_KEY"
+	EnvHTTPRedirectAddr    = "PADMARK_HTTP_REDIRECT_ADDR"
+	EnvAllowedHosts        = "PADMARK_ALLOWED_HOSTS"
+	EnvTrustedProxies      = "PADMARK_TRUSTED_PROXIES"
+	EnvPublicScheme        = "PADMARK_PUBLIC_SCHEME"
+	EnvCustomSlugs         = "PADMARK_CUSTOM_SLUGS"
+	EnvTOTPIssuer          = "PADMARK_TOTP_ISSUER"
+	EnvSessionTTL          = "PADMARK_SESSION_TTL"
+	EnvArgon2Memory        = "PADMARK_ARGON2_MEMORY"
+	EnvArgon2Time          = "PADMARK_ARGON2_TIME"
+	EnvArgon2Threads       = "PADMARK_ARGON2_THREADS"
+	EnvArgon2MemoryBudget  = "PADMARK_ARGON2_MEMORY_BUDGET"
+	EnvDirectRedirect      = "PADMARK_DIRECT_REDIRECT"
+	EnvMetricsAddr         = "PADMARK_METRICS_ADDR"
+	EnvCSRFSecret          = "PADMARK_CSRF_SECRET" //nolint:gosec // G101: env var name, not an inline credential
+	EnvContentKeyring      = "PADMARK_CONTENT_KEYRING_FILE"
+	EnvAllowSharedKeyring  = "PADMARK_ALLOW_SHARED_KEYRING"
+	EnvSkipMigrationBackup = "PADMARK_SKIP_MIGRATION_BACKUP"
 	// EnvBootstrapToken authorises creating the first admin via /setup without an invite. It is
 	// read from the environment only — never a flag, so it cannot show up in process listings.
 	EnvBootstrapToken = "PADMARK_BOOTSTRAP_TOKEN" //nolint:gosec // G101: env var name, not an inline credential
@@ -123,6 +125,7 @@ func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
 			Usage:   "Required JSON keyring file for content encryption; persist and back up separately from the database",
 		},
 		allowSharedKeyringFlag(),
+		skipMigrationBackupFlag(),
 		&cli.StringFlag{
 			Name:    FlagAddr,
 			Sources: cli.EnvVars(EnvAddr),
@@ -327,6 +330,19 @@ func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
 				"multi-replica deployments 403 on every form. Set to a fixed random value " +
 				"(e.g. `openssl rand -base64 32`) shared across replicas to avoid that",
 		},
+	}
+}
+
+// skipMigrationBackupFlag is shared by serve and migrate, which both apply migrations.
+func skipMigrationBackupFlag() *cli.BoolFlag {
+	return &cli.BoolFlag{
+		Name:    FlagSkipMigrationBackup,
+		Sources: cli.EnvVars(EnvSkipMigrationBackup),
+		Value:   false,
+		Usage: "Do not back up the SQLite database before applying pending migrations. By default, when " +
+			"migrations are pending and the database is a file, a copy is written next to it as " +
+			"<db>.bak-<YYYYMMDD-HHMMSS> (mode 0600) first, because some migrations are irreversible. " +
+			"Set only if backups are managed elsewhere; ignored for postgres (use pg_dump)",
 	}
 }
 
