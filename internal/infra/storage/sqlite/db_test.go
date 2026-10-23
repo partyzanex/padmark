@@ -205,3 +205,13 @@ func TestDBFilePath(t *testing.T) {
 		require.Equal(t, tc.create, create, "create for %q", tc.dsn)
 	}
 }
+
+func TestDBFilePathExported(t *testing.T) {
+	path, create := DBFilePath("file:/var/lib/p.db?cache=shared")
+	require.Equal(t, "/var/lib/p.db", path)
+	require.True(t, create)
+
+	path, create = DBFilePath(":memory:")
+	require.Empty(t, path)
+	require.False(t, create)
+}

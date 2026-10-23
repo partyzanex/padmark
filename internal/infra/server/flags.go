@@ -120,7 +120,8 @@ func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
 		&cli.StringFlag{
 			Name:    FlagContentKeyring,
 			Sources: cli.EnvVars(EnvContentKeyring),
-			Usage:   "Required JSON keyring file for content encryption; persist and back up separately from the database",
+			Usage: "JSON keyring file for content encryption; back up separately from the database. " +
+				"Required for postgres; sqlite defaults to <db dir>/padmark-keys.json, created on first serve",
 		},
 		allowSharedKeyringFlag(),
 		&cli.StringFlag{

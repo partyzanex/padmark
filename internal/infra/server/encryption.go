@@ -35,7 +35,8 @@ const (
 
 func encryptionCommand() *cli.Command {
 	flags := append(migrateFlags(), &cli.StringFlag{
-		Name: FlagContentKeyring, Sources: cli.EnvVars(EnvContentKeyring), Usage: "Persisted content keyring JSON file",
+		Name: FlagContentKeyring, Sources: cli.EnvVars(EnvContentKeyring),
+		Usage: "Content keyring JSON file; sqlite defaults to <db dir>/padmark-keys.json (never created here)",
 	}, allowSharedKeyringFlag())
 
 	items := []struct{ name, usage string }{
@@ -125,8 +126,8 @@ func encryptionAction(ctx context.Context, cmd *cli.Command) error {
 		return generateKeyring(cmd)
 	}
 
-	keyring, err := loadContentKeyring(cmd.String(FlagContentKeyring), cmd.Bool(FlagAllowSharedKeyring),
-		newLogger(DefaultLogLevel, DefaultLogFormat))
+	keyring, err := loadToolKeyring(cmd.String(FlagContentKeyring), cmd.String(FlagStorage), cmd.String(FlagDSN),
+		cmd.Bool(FlagAllowSharedKeyring), newLogger(DefaultLogLevel, DefaultLogFormat))
 	if err != nil {
 		//nolint:wrapcheck // WrapError adds shared encryption context.
 		return contentkeys.WrapError(err)
