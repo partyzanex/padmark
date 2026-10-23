@@ -45,6 +45,11 @@ const (
 	FlagContentKeyring      = "content-keyring-file"
 	FlagAllowSharedKeyring  = "allow-shared-keyring"
 	FlagSkipMigrationBackup = "skip-migration-backup"
+	// FlagAuthTokens is the removed v0.1.6 static bearer-token flag; it is still defined (hidden)
+	// so that using it fails startup with a migration hint instead of being ignored.
+	FlagAuthTokens = "auth-tokens" //nolint:gosec // flag name, not a credential
+	// FlagCookieMaxAge is the deprecated v0.1.6 cookie lifetime flag, superseded by --session-ttl.
+	FlagCookieMaxAge = "cookie-max-age"
 )
 
 // Env vars used to configure the service (prefix: PADMARK_*).
@@ -81,6 +86,8 @@ const (
 	EnvContentKeyring      = "PADMARK_CONTENT_KEYRING_FILE"
 	EnvAllowSharedKeyring  = "PADMARK_ALLOW_SHARED_KEYRING"
 	EnvSkipMigrationBackup = "PADMARK_SKIP_MIGRATION_BACKUP"
+	EnvAuthTokens          = "PADMARK_AUTH_TOKENS" //nolint:gosec // env var name, not a credential
+	EnvCookieMaxAge        = "PADMARK_COOKIE_MAX_AGE"
 	// EnvBootstrapToken authorises creating the first admin via /setup without an invite. It is
 	// read from the environment only — never a flag, so it cannot show up in process listings.
 	EnvBootstrapToken = "PADMARK_BOOTSTRAP_TOKEN" //nolint:gosec // G101: env var name, not an inline credential
@@ -265,6 +272,19 @@ func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
 			Sources: cli.EnvVars(EnvTOTPIssuer),
 			Value:   DefaultTOTPIssuer,
 			Usage:   "TOTP issuer name shown in the authenticator app (default: padmark)",
+		},
+		&cli.StringFlag{
+			Name:    FlagAuthTokens,
+			Sources: cli.EnvVars(EnvAuthTokens),
+			Hidden:  true,
+			Usage: "REMOVED: static bearer tokens were replaced by the account system; setting this " +
+				"fails startup (use --enable-accounts, " + EnvBootstrapToken + " and /setup)",
+		},
+		&cli.IntFlag{
+			Name:    FlagCookieMaxAge,
+			Sources: cli.EnvVars(EnvCookieMaxAge),
+			Hidden:  true,
+			Usage:   "DEPRECATED: use --session-ttl; honoured as the session TTL (seconds) when --session-ttl is unset",
 		},
 		&cli.IntFlag{
 			Name:    FlagSessionTTL,
