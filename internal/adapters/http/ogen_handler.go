@@ -56,6 +56,13 @@ func (h *OgenHandler) CreateNote(
 		burnTTL = req.TTL.Value
 	}
 
+	privacy, err := resolvePrivacy(req.Private, optCreatePrivacyPtr(req.Privacy)) //nolint:staticcheck // deprecated alias
+	if err != nil {
+		v := ogenapi.CreateNoteBadRequest(errResp(err))
+
+		return &v, nil
+	}
+
 	note, err := h.manager.Create(ctx, &domain.Note{
 		ClearExpiry: false,
 		// CreateNote fills CreatedAt/UpdatedAt; ExpiresAt is server-derived (--ttl on the CLI)
@@ -63,7 +70,7 @@ func (h *OgenHandler) CreateNote(
 		CreatedAt:        time.Time{},
 		UpdatedAt:        time.Time{},
 		ExpiresAt:        nil,
-		Privacy:          optCreatePrivacyPtr(req.Privacy),
+		Privacy:          privacy,
 		OwnerID:          ownerIDFromCtx(ctx),
 		ID:               req.Slug.Or(""),
 		Title:            req.Title.Or(""),
@@ -113,13 +120,22 @@ func (h *OgenHandler) GetNote(
 func (h *OgenHandler) UpdateNote(
 	ctx context.Context, req *ogenapi.UpdateNoteRequest, params ogenapi.UpdateNoteParams,
 ) (ogenapi.UpdateNoteRes, error) {
+	// Validated before the anonymous gate: a contradictory request is the caller's error whatever
+	// the note's visibility, and must not cost a manager lookup.
+	payload, err := noteUpdatePayload(req)
+	if err != nil {
+		v := ogenapi.UpdateNoteBadRequest(errResp(err))
+
+		return &v, nil
+	}
+
 	if !h.anonymousNoteMutationAllowed(ctx, params.ID) {
 		v := ogenapi.UpdateNoteUnauthorized{}
 
 		return &v, nil
 	}
 
-	note, err := h.manager.Update(ctx, params.ID, req.EditCode.Or(""), callerIDFromCtx(ctx), noteUpdatePayload(req))
+	note, err := h.manager.Update(ctx, params.ID, req.EditCode.Or(""), callerIDFromCtx(ctx), payload)
 	if err != nil {
 		return mapUpdateError(err, h.log), nil
 	}
@@ -127,8 +143,14 @@ func (h *OgenHandler) UpdateNote(
 	return domainToResponse(note), nil
 }
 
-// noteUpdatePayload is shared by ogen and native multi-segment PUT routes.
-func noteUpdatePayload(req *ogenapi.UpdateNoteRequest) *domain.Note {
+// noteUpdatePayload is shared by ogen and native multi-segment PUT routes. It fails with
+// errPrivateConflict when the deprecated `private` alias contradicts `privacy`.
+func noteUpdatePayload(req *ogenapi.UpdateNoteRequest) (*domain.Note, error) {
+	privacy, err := resolvePrivacy(req.Private, optUpdatePrivacyPtr(req.Privacy)) //nolint:staticcheck // deprecated alias
+	if err != nil {
+		return nil, err
+	}
+
 	burnAfterReading := req.BurnAfterReading.Or(false)
 
 	var burnTTL int64
@@ -149,7 +171,7 @@ func noteUpdatePayload(req *ogenapi.UpdateNoteRequest) *domain.Note {
 		CreatedAt:        time.Time{},
 		UpdatedAt:        time.Time{},
 		ExpiresAt:        expiresAt,
-		Privacy:          optUpdatePrivacyPtr(req.Privacy),
+		Privacy:          privacy,
 		OwnerID:          nil,
 		ID:               "",
 		Title:            req.Title.Or(""),
@@ -163,7 +185,7 @@ func noteUpdatePayload(req *ogenapi.UpdateNoteRequest) *domain.Note {
 		// omitted, null and 0 equivalent (immediate burn), so null must not also drop an existing
 		// hard expiry that omitted/0 keep.
 		ClearExpiry: !burnAfterReading && req.TTL.IsSet() && req.TTL.IsNull(),
-	}
+	}, nil
 }
 
 // DeleteNote implements ogenapi.Handler.

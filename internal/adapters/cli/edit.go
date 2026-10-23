@@ -130,6 +130,7 @@ func buildUpdateReq(cmd *urcli.Command, content, editCode string) *padmark.Updat
 		BurnAfterReading: padmark.OptBool{Value: false, Set: false},
 		TTL:              padmark.OptNilInt64{Value: 0, Set: false, Null: false},
 		Privacy:          padmark.OptUpdateNoteRequestPrivacy{Value: "", Set: false},
+		Private:          padmark.OptBool{Value: false, Set: false}, //nolint:staticcheck // deprecated alias, unused
 	}
 	if editCode != "" {
 		req.EditCode = padmark.NewOptString(editCode)

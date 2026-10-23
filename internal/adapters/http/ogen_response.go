@@ -20,6 +20,7 @@ func domainToResponse(note *domain.Note) *ogenapi.NoteResponse {
 		CreatedAt:        note.CreatedAt,
 		UpdatedAt:        note.UpdatedAt,
 		Privacy:          ogenapi.NewOptNoteResponsePrivacy(ogenapi.NoteResponsePrivacy(note.EffectivePrivacy())),
+		Private:          ogenapi.NewOptBool(privateFlag(note)), //nolint:staticcheck // deprecated alias emitted on purpose
 		// ExpiresAt populated below when note.ExpiresAt is non-nil; zero OptNilDateTime otherwise.
 		ExpiresAt: ogenapi.OptNilDateTime{Value: time.Time{}, Set: false, Null: false},
 	}
@@ -117,6 +118,7 @@ func domainToCreateResponse(note *domain.Note) ogenapi.CreateNoteResponse {
 		Privacy: ogenapi.NewOptCreateNoteResponsePrivacy(
 			ogenapi.CreateNoteResponsePrivacy(note.EffectivePrivacy()),
 		),
+		Private: ogenapi.NewOptBool(privateFlag(note)), //nolint:staticcheck // deprecated alias emitted on purpose
 		// ExpiresAt populated below when note.ExpiresAt is non-nil; zero OptNilDateTime otherwise.
 		ExpiresAt: ogenapi.OptNilDateTime{Value: time.Time{}, Set: false, Null: false},
 	}

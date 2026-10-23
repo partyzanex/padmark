@@ -65,6 +65,7 @@ func (m *Manager) createNote(
 		TTL:              padmark.OptInt64{Value: 0, Set: false},
 		EditCode:         padmark.OptString{Value: "", Set: false},
 		Privacy:          padmark.OptCreateNoteRequestPrivacy{Value: "", Set: false},
+		Private:          padmark.OptBool{Value: false, Set: false}, //nolint:staticcheck // deprecated alias, unused
 	}
 	if input.Title != nil {
 		req.Title = padmark.NewOptString(*input.Title)
@@ -138,6 +139,7 @@ func (m *Manager) updateNote(
 		BurnAfterReading: padmark.OptBool{Value: false, Set: false},
 		TTL:              padmark.OptNilInt64{Value: 0, Set: false, Null: false},
 		Privacy:          padmark.OptUpdateNoteRequestPrivacy{Value: "", Set: false},
+		Private:          padmark.OptBool{Value: false, Set: false}, //nolint:staticcheck // deprecated alias, unused
 	}
 	if input.Title != nil {
 		req.Title = padmark.NewOptString(*input.Title)
