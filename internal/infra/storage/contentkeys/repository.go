@@ -143,7 +143,7 @@ func (r *Repository) Batch(ctx context.Context, resource, after string, limit in
 	rows := make([]keys.Row, 0, len(stored))
 	for i := range stored {
 		row := &stored[i]
-		rows = append(rows, keys.Row{Resource: resource, ID: row.ID, Value: row.Value})
+		rows = append(rows, keys.Row{Resource: resource, ID: row.ID, Value: row.Value, Legacy: nil})
 	}
 
 	return rows, nil
@@ -166,7 +166,7 @@ func (r *Repository) Get(ctx context.Context, resource, id string) (*keys.Row, e
 		return nil, fmt.Errorf("read encrypted record: %w", err)
 	}
 
-	return &keys.Row{Resource: resource, ID: id, Value: value}, nil
+	return &keys.Row{Resource: resource, ID: id, Value: value, Legacy: nil}, nil
 }
 
 func (r *Repository) Replace(ctx context.Context, row keys.Row, value string) (bool, error) {
@@ -188,6 +188,11 @@ func (r *Repository) Replace(ctx context.Context, row keys.Row, value string) (b
 	}
 
 	return count == 1, nil
+}
+
+// ConvertLegacy is not implemented yet.
+func (r *Repository) ConvertLegacy(context.Context, keys.Row, string, string, string) (bool, error) {
+	return false, errors.New("legacy note conversion is not implemented")
 }
 
 // Delete removes exactly the invalid raw value inspected by the caller. A

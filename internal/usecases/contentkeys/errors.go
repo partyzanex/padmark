@@ -7,6 +7,10 @@ import (
 
 const errorContext = "content encryption"
 
+// ErrConvertTargetExists reports that a legacy note's hashed ID is already taken by another
+// note. The storage never overwrites that row; the legacy row stays for manual resolution.
+var ErrConvertTargetExists = errors.New("converted legacy note ID already exists")
+
 var errInvalidRecords = errors.New("encrypted records failed validation; check keyring and database integrity")
 
 // invalidRecordsError suggests prune only when every failure is malformed raw data;

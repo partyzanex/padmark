@@ -98,6 +98,7 @@ type ManagerTestSuite struct {
 	keys        *MockKeyring
 	notes       *MockCipher
 	links       *MockCipher
+	hasher      *MockEditCodeHasher
 	manager     *Manager
 	keyIDs      []string
 	substituted map[string]bool
@@ -114,7 +115,8 @@ func (s *ManagerTestSuite) SetupTest() {
 	s.stubKeyring()
 	s.stubCipher(s.notes)
 	s.stubCipher(s.links)
-	s.manager = New(s.store, s.keys, s.notes, s.links)
+	s.hasher = NewMockEditCodeHasher(s.ctrl)
+	s.manager = New(s.store, s.keys, s.notes, s.links, s.hasher)
 }
 
 func (s *ManagerTestSuite) SetupSubTest() { s.SetupTest() }
@@ -142,6 +144,10 @@ func (s *ManagerTestSuite) stubKeyring() {
 }
 
 func (s *ManagerTestSuite) fixture(value string) cipherFixture {
+	if strings.HasPrefix(value, convertedPrefix) {
+		return cipherFixture{versioned: true, kind: "p", key: activeKey}
+	}
+
 	fixture, ok := fixtures[value]
 	s.Require().True(ok, "no cipher fixture for value")
 

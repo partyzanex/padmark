@@ -116,7 +116,7 @@ var DefaultSessionTTL = int(auth.DefaultSessionTTL.Seconds())
 
 // appFlags returns the full flag set for the serve subcommand.
 func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
-	return []cli.Flag{
+	return append([]cli.Flag{
 		&cli.StringFlag{
 			Name:    FlagContentKeyring,
 			Sources: cli.EnvVars(EnvContentKeyring),
@@ -268,6 +268,39 @@ func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
 			Value:   DefaultSessionTTL,
 			Usage:   "TOTP session TTL in seconds (default: 30 days)",
 		},
+		&cli.BoolFlag{
+			Name:    FlagDirectRedirect,
+			Sources: cli.EnvVars(EnvDirectRedirect),
+			Value:   DefaultDirectRedirect,
+			Usage: "GET /r/{hash} behaviour for short links: true issues an immediate 301 to the " +
+				"target URL for every link; false (default) renders an interstitial page (meta-refresh + " +
+				"noscript fallback) showing the destination for links created anonymously, while links " +
+				"created by a signed-in owner still redirect directly (open-redirect/phishing hardening)",
+		},
+		&cli.StringFlag{
+			Name:    FlagMetricsAddr,
+			Sources: cli.EnvVars(EnvMetricsAddr),
+			Usage: "Address for a separate internal Prometheus /metrics listener (e.g. :9090); " +
+				"empty (default) disables it entirely. Bind this to a private interface only — " +
+				"metrics are never served on the main, public-facing listener",
+		},
+		&cli.StringFlag{
+			Name:    FlagCSRFSecret,
+			Sources: cli.EnvVars(EnvCSRFSecret),
+			Usage: "HMAC key for signing CSRF tokens (raw bytes, at least 32 characters). " +
+				"Flag values are visible in process listings (ps); prefer PADMARK_CSRF_SECRET. " +
+				"Empty (default) generates a fresh random secret per process: forms survive only " +
+				"within one process lifetime, so restarts invalidate outstanding tokens and " +
+				"multi-replica deployments 403 on every form. Set to a fixed random value " +
+				"(e.g. `openssl rand -base64 32`) shared across replicas to avoid that",
+		},
+	}, argon2Flags()...)
+}
+
+// argon2Flags is shared by serve and the encryption commands: encryption migrate hashes the
+// caller-chosen edit codes of converted legacy notes with the same argon2id cost as serve.
+func argon2Flags() []cli.Flag {
+	return []cli.Flag{
 		&cli.IntFlag{
 			Name:      FlagArgon2Memory,
 			Validator: boundedCost(int(crypto.MaxArgon2Memory)),
@@ -300,32 +333,6 @@ func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
 				"derivations may hold at once (default: 131072 = 128 MiB); further requests queue. " +
 				"Must be at least --argon2-memory. Size it below the container memory limit and set " +
 				"GOMEMLIMIT to about 75-80% of that limit",
-		},
-		&cli.BoolFlag{
-			Name:    FlagDirectRedirect,
-			Sources: cli.EnvVars(EnvDirectRedirect),
-			Value:   DefaultDirectRedirect,
-			Usage: "GET /r/{hash} behaviour for short links: true issues an immediate 301 to the " +
-				"target URL for every link; false (default) renders an interstitial page (meta-refresh + " +
-				"noscript fallback) showing the destination for links created anonymously, while links " +
-				"created by a signed-in owner still redirect directly (open-redirect/phishing hardening)",
-		},
-		&cli.StringFlag{
-			Name:    FlagMetricsAddr,
-			Sources: cli.EnvVars(EnvMetricsAddr),
-			Usage: "Address for a separate internal Prometheus /metrics listener (e.g. :9090); " +
-				"empty (default) disables it entirely. Bind this to a private interface only — " +
-				"metrics are never served on the main, public-facing listener",
-		},
-		&cli.StringFlag{
-			Name:    FlagCSRFSecret,
-			Sources: cli.EnvVars(EnvCSRFSecret),
-			Usage: "HMAC key for signing CSRF tokens (raw bytes, at least 32 characters). " +
-				"Flag values are visible in process listings (ps); prefer PADMARK_CSRF_SECRET. " +
-				"Empty (default) generates a fresh random secret per process: forms survive only " +
-				"within one process lifetime, so restarts invalidate outstanding tokens and " +
-				"multi-replica deployments 403 on every form. Set to a fixed random value " +
-				"(e.g. `openssl rand -base64 32`) shared across replicas to avoid that",
 		},
 	}
 }

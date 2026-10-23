@@ -23,7 +23,22 @@ const (
 	resourceLink = "link"
 )
 
-type Row struct{ Resource, ID, Value string }
+// Row is one stored record as the migration protocol sees it. Legacy is set only for notes
+// tagged by the legacy_notes schema migration; it is nil for every other note and for all
+// links. Never log or wrap any field but Resource.
+type Row struct {
+	Legacy   *LegacyNote
+	Resource string
+	ID       string
+	Value    string
+}
+
+// LegacyNote carries the plaintext columns of a note written by v0.1.6 or earlier, whose ID
+// is the slug itself and whose content and edit code were stored unencrypted and unhashed.
+type LegacyNote struct {
+	Slug     string
+	EditCode string
+}
 
 type Registry struct {
 	Checks         map[string]string
@@ -42,6 +57,19 @@ type Storage interface {
 	Get(ctx context.Context, resource, id string) (*Row, error)
 	Replace(ctx context.Context, row Row, value string) (bool, error)
 	Delete(ctx context.Context, row Row) (bool, error)
+	// ConvertLegacy rewrites one tagged plaintext note in a single compare-and-swap: it sets
+	// id, content and edit_code and clears legacy_slug only while the row still holds the
+	// inspected id, content and legacy_slug. false means a concurrent change won. A target ID
+	// that already exists is reported as ErrConvertTargetExists, never by replacing that row.
+	ConvertLegacy(ctx context.Context, row Row, newID, value, editCodeHash string) (bool, error)
+}
+
+// EditCodeHasher hashes plaintext edit codes of converted legacy notes. Hash is the fast
+// format for server-generated high-entropy codes; HashUserProvided is the memory-hard format
+// for caller-chosen codes whose entropy is unknown.
+type EditCodeHasher interface {
+	Hash(code string) (string, error)
+	HashUserProvided(code string) (string, error)
 }
 
 type Keyring interface {
@@ -74,6 +102,7 @@ type Report struct {
 	Native     int            `json:"native"`
 	Failed     int            `json:"failed"`
 	CorruptRaw int            `json:"corrupt_raw"`
+	Plaintext  int            `json:"plaintext"`
 	Pruned     int            `json:"pruned"`
 	Changed    int            `json:"changed"`
 	Conflicts  int            `json:"conflicts"`
@@ -83,11 +112,15 @@ type Report struct {
 type Manager struct {
 	store   Storage
 	keys    Keyring
+	hasher  EditCodeHasher
 	ciphers map[string]Cipher
 }
 
-func New(store Storage, keys Keyring, notes, links Cipher) *Manager {
-	return &Manager{store: store, keys: keys, ciphers: map[string]Cipher{resourceNote: notes, resourceLink: links}}
+func New(store Storage, keys Keyring, notes, links Cipher, hasher EditCodeHasher) *Manager {
+	return &Manager{
+		store: store, keys: keys, hasher: hasher,
+		ciphers: map[string]Cipher{resourceNote: notes, resourceLink: links},
+	}
 }
 
 // Status authenticates envelopes and reports the remaining legacy layers without writing.

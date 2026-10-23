@@ -582,7 +582,7 @@ func serverAction(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	err = validateContentEncryption(ctx, db, keyring)
+	err = validateContentEncryption(ctx, db, keyring, encryptionHasher(cmd))
 	if err != nil {
 		return fmt.Errorf("validate content encryption: %w", err)
 	}
@@ -618,14 +618,9 @@ func serverAction(ctx context.Context, cmd *cli.Command) error {
 // is opened: the argon2 cost bounds, the argon2 memory budget and the bootstrap token. It returns
 // the validated token.
 func validateStartupSecrets(cmd *cli.Command) (string, error) {
-	costErr := argon2ParamsFromFlags(cmd).Validate()
-	if costErr != nil {
-		return "", fmt.Errorf("validate argon2 configuration: %w", costErr)
-	}
-
-	budgetErr := validateArgon2MemoryBudget(cmd)
-	if budgetErr != nil {
-		return "", fmt.Errorf("validate argon2 configuration: %w", budgetErr)
+	argonErr := validateArgon2Config(cmd)
+	if argonErr != nil {
+		return "", argonErr
 	}
 
 	bootstrapToken, tokenErr := parseBootstrapToken(os.Getenv(EnvBootstrapToken))
@@ -634,6 +629,21 @@ func validateStartupSecrets(cmd *cli.Command) (string, error) {
 	}
 
 	return bootstrapToken, nil
+}
+
+// validateArgon2Config checks the argon2 cost bounds and the memory budget (fail-hard).
+func validateArgon2Config(cmd *cli.Command) error {
+	costErr := argon2ParamsFromFlags(cmd).Validate()
+	if costErr != nil {
+		return fmt.Errorf("validate argon2 configuration: %w", costErr)
+	}
+
+	budgetErr := validateArgon2MemoryBudget(cmd)
+	if budgetErr != nil {
+		return fmt.Errorf("validate argon2 configuration: %w", budgetErr)
+	}
+
+	return nil
 }
 
 // validateArgon2MemoryBudget checks that the concurrency budget can hold at least one
