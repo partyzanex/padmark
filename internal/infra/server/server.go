@@ -529,7 +529,7 @@ func buildHandlers(
 //
 //nolint:ireturn // dispatches by backend behind the notes/links usecase Storage interfaces
 func initRepos(
-	ctx context.Context, storage string, db *bun.DB, log *slog.Logger,
+	ctx context.Context, storage string, db *bun.DB, log *slog.Logger, opts migrationOptions,
 ) (repo notes.Storage, linkRepo links.Storage, err error) {
 	switch storage {
 	case storagePostgres:
@@ -540,7 +540,7 @@ func initRepos(
 
 		linkRepo = newPostgresLinkRepository(db)
 	default:
-		repo, err = initSQLiteStorage(ctx, db, log)
+		repo, err = initSQLiteStorage(ctx, db, log, opts)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -577,7 +577,8 @@ func serverAction(ctx context.Context, cmd *cli.Command) error {
 
 	defer closeServerDB(ctx, db, log)
 
-	repo, linkRepo, err := initRepos(ctx, storage, db, log)
+	repo, linkRepo, err := initRepos(ctx, storage, db, log,
+		migrationOptions{dsn: dsn, skipBackup: cmd.Bool(FlagSkipMigrationBackup)})
 	if err != nil {
 		return err
 	}

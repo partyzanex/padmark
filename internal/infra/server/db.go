@@ -106,7 +106,7 @@ func openDB(ctx context.Context, storage, dsn string, log *slog.Logger) (*bun.DB
 
 // initPostgresStorage runs postgres migrations and returns a ready-to-use note repository.
 func initPostgresStorage(ctx context.Context, db *bun.DB, log *slog.Logger) (*postgres.NoteRepository, error) {
-	results, err := postgres.Migrate(ctx, db)
+	results, err := postgres.MigrateWithWarning(ctx, db, log)
 	if err != nil {
 		return nil, fmt.Errorf("postgres migrate: %w", err)
 	}
@@ -116,9 +116,30 @@ func initPostgresStorage(ctx context.Context, db *bun.DB, log *slog.Logger) (*po
 	return postgres.NewNoteRepository(db), nil
 }
 
-// initSQLiteStorage runs sqlite migrations and returns a ready-to-use note repository.
-func initSQLiteStorage(ctx context.Context, db *bun.DB, log *slog.Logger) (*sqlite.NoteRepository, error) {
-	results, err := sqlite.Migrate(ctx, db)
+// migrationOptions carries what the sqlite backup-before-migrate step needs.
+type migrationOptions struct {
+	// dsn is the database DSN, from which the file to back up is resolved.
+	dsn string
+	// skipBackup disables the backup (--skip-migration-backup).
+	skipBackup bool
+}
+
+// initSQLiteStorage runs sqlite migrations, backing the database up first when any are pending
+// (unless opts.skipBackup), and returns a ready-to-use note repository.
+func initSQLiteStorage(
+	ctx context.Context, db *bun.DB, log *slog.Logger, opts migrationOptions,
+) (*sqlite.NoteRepository, error) {
+	var (
+		results []*goose.MigrationResult
+		err     error
+	)
+
+	if opts.skipBackup {
+		results, err = sqlite.Migrate(ctx, db)
+	} else {
+		results, err = sqlite.MigrateWithBackup(ctx, db, opts.dsn, log)
+	}
+
 	if err != nil {
 		return nil, fmt.Errorf("sqlite migrate: %w", err)
 	}

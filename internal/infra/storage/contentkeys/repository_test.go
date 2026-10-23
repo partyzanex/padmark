@@ -81,7 +81,7 @@ func insertV016Note(t *testing.T, db *bun.DB, slug, content, editCode string) {
 
 func TestConvertLegacyCASAndTargetConflict(t *testing.T) {
 	ctx := t.Context()
-	db, err := sqlite.Open(filepath.Join(t.TempDir(), "legacy.db"))
+	db, err := sqlite.Open(filepath.Join(t.TempDir(), "legacy.db"), slog.New(slog.DiscardHandler))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, db.Close()) })
 

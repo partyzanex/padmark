@@ -23,13 +23,13 @@ func TestSQLiteUpgradeFromV016(t *testing.T) {
 
 	// The dump switches connection pragmas (foreign_keys=OFF, writable_schema), so it runs on
 	// a throwaway handle; the upgrade then opens the file like the server does.
-	loader, err := sqliterepo.Open(path)
+	loader, err := sqliterepo.Open(path, slog.New(slog.DiscardHandler))
 	require.NoError(t, err)
 	_, err = loader.ExecContext(ctx, string(dump))
 	require.NoError(t, err)
 	require.NoError(t, loader.Close())
 
-	db, err := sqliterepo.Open(path)
+	db, err := sqliterepo.Open(path, slog.New(slog.DiscardHandler))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, db.Close()) })
 

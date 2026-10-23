@@ -86,7 +86,8 @@ func TestServeRefusesSubstitutedContentKeyBeforeListening(t *testing.T) {
 
 	defer db.Close()
 
-	_, _, err = initRepos(t.Context(), "sqlite", db, newLogger("error", "text"))
+	_, _, err = initRepos(t.Context(), "sqlite", db, newLogger("error", "text"),
+		migrationOptions{dsn: dsn, skipBackup: true})
 	require.NoError(t, err)
 
 	ring := &crypto.ContentKeyring{Active: "key", Keys: map[string][]byte{"key": bytes.Repeat([]byte{1}, 32)}}
@@ -139,7 +140,7 @@ func TestEncryptionMigrateConvertsV016Database(t *testing.T) {
 
 	dump, err := os.ReadFile("../../../tests/fixtures/v0.1.6/sqlite.sql")
 	require.NoError(t, err)
-	loader, err := openDB(t.Context(), "sqlite", dsn)
+	loader, err := openDB(t.Context(), "sqlite", dsn, slog.New(slog.DiscardHandler))
 	require.NoError(t, err)
 	_, err = loader.ExecContext(t.Context(), string(dump))
 	require.NoError(t, err)
@@ -160,7 +161,7 @@ func TestEncryptionMigrateConvertsV016Database(t *testing.T) {
 
 	ring, err := loadContentKeyring(keyfile, false, slog.New(slog.DiscardHandler))
 	require.NoError(t, err)
-	db, err := openDB(t.Context(), "sqlite", dsn)
+	db, err := openDB(t.Context(), "sqlite", dsn, slog.New(slog.DiscardHandler))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, db.Close()) })
 	require.NoError(t, validateContentEncryption(t.Context(), db, ring, crypto.NewEditCodeHasher(crypto.Argon2Params{})))
