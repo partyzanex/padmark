@@ -21,7 +21,7 @@ type SessionRepositoryTestSuite struct {
 }
 
 func (s *SessionRepositoryTestSuite) SetupTest() {
-	db, err := Open("file::memory:?cache=shared&_busy_timeout=5000")
+	db, err := Open("file::memory:?cache=shared&_busy_timeout=5000", slog.New(slog.DiscardHandler))
 	s.Require().NoError(err)
 
 	s.db = db

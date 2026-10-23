@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"fmt"
+	"log/slog"
 	"sync"
 	"testing"
 	"time"
@@ -27,7 +28,7 @@ type APITokenRepositoryTestSuite struct {
 }
 
 func (s *APITokenRepositoryTestSuite) SetupTest() {
-	db, err := Open("file::memory:?cache=shared&_busy_timeout=5000")
+	db, err := Open("file::memory:?cache=shared&_busy_timeout=5000", slog.New(slog.DiscardHandler))
 	s.Require().NoError(err)
 
 	// Shared-cache in-memory SQLite promotes a read lock to a write lock immediately when a
@@ -372,7 +373,7 @@ func (s *APITokenRepositoryTestSuite) TestUpdateLastUsed_UnknownHash_NoError() {
 func TestCreate_CascadesWithUser(t *testing.T) {
 	ctx := t.Context()
 
-	db, err := Open("file:apitoken_cascade_fk?mode=memory&cache=shared")
+	db, err := Open("file:apitoken_cascade_fk?mode=memory&cache=shared", slog.New(slog.DiscardHandler))
 	require.NoError(t, err)
 
 	defer func() { require.NoError(t, db.Close()) }()

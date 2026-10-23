@@ -20,7 +20,7 @@ type LinkRepositoryTestSuite struct {
 }
 
 func (s *LinkRepositoryTestSuite) SetupTest() {
-	db, err := Open("file::memory:?cache=shared")
+	db, err := Open("file::memory:?cache=shared", slog.New(slog.DiscardHandler))
 	s.Require().NoError(err)
 
 	s.db = db

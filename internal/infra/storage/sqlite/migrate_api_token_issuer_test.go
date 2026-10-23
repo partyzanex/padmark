@@ -1,6 +1,7 @@
 package sqlite
 
 import (
+	"log/slog"
 	"testing"
 	"time"
 
@@ -15,7 +16,7 @@ import (
 // foreign key, so the down migration rebuilds api_tokens. Every token must survive it (the drop
 // must not cascade along issued_by), the column must be gone, and up must apply again cleanly.
 func TestMigrateAPITokenIssuer_DownKeepsTokens(t *testing.T) {
-	db, err := Open("file:" + t.Name() + "?mode=memory&cache=shared")
+	db, err := Open("file:"+t.Name()+"?mode=memory&cache=shared", slog.New(slog.DiscardHandler))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, db.Close()) })
 

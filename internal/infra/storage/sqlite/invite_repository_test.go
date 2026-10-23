@@ -26,7 +26,7 @@ func inviteTestUser(username string) *domain.User {
 func inviteTestRepository(t *testing.T) (*bun.DB, *InviteRepository, uuid.UUID) {
 	t.Helper()
 
-	db, err := Open(filepath.Join(t.TempDir(), "invites.db"))
+	db, err := Open(filepath.Join(t.TempDir(), "invites.db"), slog.New(slog.DiscardHandler))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, db.Close()) })
 	_, err = Migrate(t.Context(), db)

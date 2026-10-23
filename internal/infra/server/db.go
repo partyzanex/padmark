@@ -22,8 +22,9 @@ import (
 
 const storagePostgres = "postgres"
 
-// dbOpener creates a *bun.DB from a DSN without connecting.
-type dbOpener func(dsn string) (*bun.DB, error)
+// dbOpener creates a *bun.DB from a DSN without connecting. log receives notices about the
+// storage file itself (e.g. SQLite permission changes); openers with nothing to report ignore it.
+type dbOpener func(dsn string, log *slog.Logger) (*bun.DB, error)
 
 // errInvalidPostgresDSN is returned for any DSN the driver cannot parse. Its text is fixed:
 // url.Parse errors and pgdriver panics echo the raw DSN, password included, so no part of the
@@ -33,7 +34,7 @@ var errInvalidPostgresDSN = errors.New("invalid postgres dsn")
 // openPostgresDB creates a connector from a postgres:// (or unix://) URL DSN without connecting.
 // pgdriver.WithDSN panics on a parse error, so the DSN is validated first and the connector is
 // built under a recover as a backstop; neither path ever includes the DSN in the returned error.
-func openPostgresDB(dsn string) (db *bun.DB, err error) {
+func openPostgresDB(dsn string, _ *slog.Logger) (db *bun.DB, err error) {
 	err = validatePostgresDSN(dsn)
 	if err != nil {
 		return nil, err
@@ -75,7 +76,7 @@ func validatePostgresDSN(dsn string) error {
 	return nil
 }
 
-func openDB(ctx context.Context, storage, dsn string) (*bun.DB, error) {
+func openDB(ctx context.Context, storage, dsn string, log *slog.Logger) (*bun.DB, error) {
 	openers := map[string]dbOpener{
 		storagePostgres: openPostgresDB,
 		// sqlite.Open applies sqlite.WithPragmas (foreign keys, busy_timeout, WAL,
@@ -90,7 +91,7 @@ func openDB(ctx context.Context, storage, dsn string) (*bun.DB, error) {
 		return nil, fmt.Errorf("unknown storage backend %q: supported backends: postgres, sqlite", storage)
 	}
 
-	db, err := opener(dsn)
+	db, err := opener(dsn, log)
 	if err != nil {
 		return nil, err
 	}

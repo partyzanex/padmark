@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"net/url"
 	"os"
 	"strings"
@@ -21,12 +22,14 @@ import (
 // setting WithPragmas documents, so a test built that way can pass or fail for reasons that have
 // nothing to do with what actually happens against the pragma-tuned production connection.
 //
-// For a file-backed dsn Open also makes sure the database file is owner-only (0600) before the
-// driver touches it; see restrictDBFile for why. In-memory and temporary databases are left alone.
-func Open(dsn string) (*bun.DB, error) {
+// For a file-backed dsn Open also makes sure the database file is not accessible to group/other
+// before the driver touches it; see restrictDBFile for the policy. In-memory and temporary
+// databases are left alone. Anything Open does to the permissions of an existing file is reported
+// through log, which is required.
+func Open(dsn string, log *slog.Logger) (*bun.DB, error) {
 	path, create := dbFilePath(dsn)
 	if path != "" {
-		err := restrictDBFile(path, create)
+		err := restrictDBFile(path, create, log)
 		if err != nil {
 			return nil, err
 		}
@@ -43,22 +46,35 @@ func Open(dsn string) (*bun.DB, error) {
 // dbFilePerm is the mode of the database file and its sidecars: owner read/write, nothing else.
 const dbFilePerm fs.FileMode = 0o600
 
-// restrictDBFile makes the database file at path, and any sidecar already next to it, readable and
-// writable by the owner only. The file holds argon2 password hashes, sealed TOTP secrets, session,
-// API-token and invite hashes, reveal tokens, session IP/UA and every encrypted content envelope;
-// on a shared host the driver's default (SQLITE_DEFAULT_FILE_PERMISSIONS, 0644) would hand all of
-// that to every other local account.
+// groupOtherBits are the permission bits that expose the database to accounts other than its owner.
+const groupOtherBits fs.FileMode = 0o077
+
+// chmod is a seam so tests can simulate a file whose mode cannot be changed (foreign owner,
+// read-only mount), which a test process cannot reliably produce for real.
+var chmod = os.Chmod //nolint:gochecknoglobals // test seam, never reassigned in production code
+
+// restrictDBFile keeps the database file at path, and any sidecar next to it, owner-only. The file
+// holds argon2 password hashes, sealed TOTP secrets, session, API-token and invite hashes, reveal
+// tokens, session IP/UA and every encrypted content envelope; on a shared host the driver's
+// default (SQLITE_DEFAULT_FILE_PERMISSIONS, 0644) would hand all of that to every other local
+// account.
 //
-// When create is set and the file does not exist yet it is created here with 0600, so the driver
-// only ever opens an existing file and never applies its own default. A pre-existing file — left
-// by an older version or a restore — is chmod-ed to 0600, since the create mode does not apply to
-// it. Sidecars need no create step: SQLite's unix VFS creates -wal, -shm and -journal with the
-// main file's mode, so only leftovers from a previous run are tightened here.
+// Error strategy, split by who owns the file:
+//   - A file created here (create set, path missing) is created with 0600 so the driver only ever
+//     opens an existing file and never applies its own default. Creation failure is fatal
+//     (fail-hard): the database is a critical dependency.
+//   - A pre-existing file is the operator's: its permissions are their decision, and a v0.1.6
+//     installation may legitimately hold it under another uid, on a read-only bind mount, or
+//     shared with a backup user via group read. It is stat-ed first and left alone when it
+//     already has no group/other bits. Otherwise a chmod to 0600 is attempted; success is logged
+//     at INFO (old and new mode, so the operator knows why group/other access vanished), failure
+//     at WARN and startup continues (fail-soft). The mode is never changed silently.
 //
-// A failure is fatal (fail-hard): the database is a critical dependency, and starting on a file
-// whose confidentiality cannot be guaranteed is worse than not starting. The wrapped
-// *fs.PathError names the resolved file path only, never the rest of the DSN.
-func restrictDBFile(path string, create bool) error {
+// Sidecars need no create step: SQLite's unix VFS creates -wal, -shm and -journal with the main
+// file's mode, so only leftovers from a previous run are examined, under the same best-effort
+// policy. Logged errors are *fs.PathError values naming the resolved file path only, never the
+// rest of the DSN.
+func restrictDBFile(path string, create bool, log *slog.Logger) error {
 	if create {
 		file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, dbFilePerm) //nolint:gosec // operator-configured DSN path
 		if err != nil {
@@ -72,13 +88,41 @@ func restrictDBFile(path string, create bool) error {
 	}
 
 	for _, name := range append([]string{path}, sidecarPaths(path)...) {
-		err := os.Chmod(name, dbFilePerm)
-		if err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return fmt.Errorf("restrict sqlite database file permissions: %w", err)
-		}
+		tightenFile(name, log)
 	}
 
 	return nil
+}
+
+// tightenFile applies the pre-existing-file policy of restrictDBFile to one file. It never fails:
+// every problem is logged and startup continues.
+func tightenFile(name string, log *slog.Logger) {
+	info, err := os.Stat(name)
+	if errors.Is(err, fs.ErrNotExist) {
+		return
+	}
+
+	if err != nil {
+		log.Warn("cannot stat sqlite database file to check its permissions", "file", name, "error", err)
+
+		return
+	}
+
+	current := info.Mode().Perm()
+	if current&groupOtherBits == 0 {
+		return
+	}
+
+	err = chmod(name, dbFilePerm)
+	if err != nil {
+		log.Warn("sqlite database file is accessible to group/other and its permissions could not be tightened",
+			"file", name, "mode", fmt.Sprintf("%04o", current), "error", err)
+
+		return
+	}
+
+	log.Info("sqlite database file permissions tightened to owner-only",
+		"file", name, "from", fmt.Sprintf("%04o", current), "to", fmt.Sprintf("%04o", dbFilePerm))
 }
 
 // sidecarPaths returns the paths of the sidecar files SQLite may keep next to the database at

@@ -80,7 +80,7 @@ func TestEncryptionCommands_KeyLifecycle(t *testing.T) {
 
 func TestServeRefusesSubstitutedContentKeyBeforeListening(t *testing.T) {
 	dsn := filepath.Join(t.TempDir(), "test.db")
-	db, err := openDB(t.Context(), "sqlite", dsn)
+	db, err := openDB(t.Context(), "sqlite", dsn, slog.New(slog.DiscardHandler))
 	require.NoError(t, err)
 
 	defer db.Close()
@@ -143,7 +143,7 @@ func TestEncryptionPruneRecoversExpiredPlaintextDatabase(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, NewApp().Run(t.Context(), []string{"padmark", "migrate", "--storage", "sqlite", "--dsn", dsn}))
 
-	db, err := openDB(t.Context(), "sqlite", dsn)
+	db, err := openDB(t.Context(), "sqlite", dsn, slog.New(slog.DiscardHandler))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, db.Close()) })
 
@@ -189,7 +189,7 @@ func assertEncryptionPruneRecovery(t *testing.T, dsn, keyfile string) {
 
 	ring, err := loadContentKeyring(keyfile, false, slog.New(slog.DiscardHandler))
 	require.NoError(t, err)
-	db, err := openDB(t.Context(), "sqlite", dsn)
+	db, err := openDB(t.Context(), "sqlite", dsn, slog.New(slog.DiscardHandler))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, db.Close()) })
 	require.NoError(t, validateContentEncryption(t.Context(), db, ring))
@@ -200,7 +200,7 @@ func assertEncryptionPruneRecovery(t *testing.T, dsn, keyfile string) {
 
 func TestValidateContentEncryptionAddsContextOnce(t *testing.T) {
 	// No schema migration: reading the registry fails inside PrepareServe.
-	db, err := openDB(t.Context(), "sqlite", filepath.Join(t.TempDir(), "empty.db"))
+	db, err := openDB(t.Context(), "sqlite", filepath.Join(t.TempDir(), "empty.db"), slog.New(slog.DiscardHandler))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, db.Close()) })
 

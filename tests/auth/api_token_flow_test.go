@@ -37,7 +37,7 @@ func TestAPITokenFlow_AdminIssuesKey_CLICreatesNote(t *testing.T) {
 	ctx := context.Background()
 
 	// ── storage: fresh shared-cache in-memory DB, pragmas (incl. FK enforcement) via Open ──
-	db, err := sqliterepo.Open("file:apitokenflow?mode=memory&cache=shared")
+	db, err := sqliterepo.Open("file:apitokenflow?mode=memory&cache=shared", slog.New(slog.DiscardHandler))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, db.Close()) })
 

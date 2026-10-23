@@ -1,6 +1,7 @@
 package sqlite
 
 import (
+	"log/slog"
 	"testing"
 	"time"
 
@@ -19,7 +20,7 @@ type RepositoryTestSuite struct {
 }
 
 func (s *RepositoryTestSuite) SetupTest() {
-	db, err := Open("file::memory:?cache=shared")
+	db, err := Open("file::memory:?cache=shared", slog.New(slog.DiscardHandler))
 	s.Require().NoError(err)
 
 	s.db = db
@@ -473,7 +474,7 @@ func (s *RepositoryTestSuite) TestConsume_NotFound() {
 func (s *RepositoryTestSuite) TestMigrate_OK() {
 	ctx := s.T().Context()
 
-	db, err := Open("file:migrate_ok?mode=memory&cache=shared")
+	db, err := Open("file:migrate_ok?mode=memory&cache=shared", slog.New(slog.DiscardHandler))
 	s.Require().NoError(err)
 
 	defer func() { s.Require().NoError(db.Close()) }()
@@ -485,7 +486,7 @@ func (s *RepositoryTestSuite) TestMigrate_OK() {
 func (s *RepositoryTestSuite) TestMigrate_Idempotent() {
 	ctx := s.T().Context()
 
-	db, err := Open("file:migrate_idem?mode=memory&cache=shared")
+	db, err := Open("file:migrate_idem?mode=memory&cache=shared", slog.New(slog.DiscardHandler))
 	s.Require().NoError(err)
 
 	defer func() { s.Require().NoError(db.Close()) }()

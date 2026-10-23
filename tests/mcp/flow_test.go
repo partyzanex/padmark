@@ -150,7 +150,7 @@ func startTestPadmark(t *testing.T) *testStack {
 
 	ctx := context.Background()
 
-	db, err := sqliterepo.Open("file:mcpflow?mode=memory&cache=shared")
+	db, err := sqliterepo.Open("file:mcpflow?mode=memory&cache=shared", slog.New(slog.DiscardHandler))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, db.Close()) })
 

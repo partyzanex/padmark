@@ -1,6 +1,7 @@
 package contentkeys_test
 
 import (
+	"log/slog"
 	"path/filepath"
 	"testing"
 	"time"
@@ -14,7 +15,7 @@ import (
 )
 
 func TestInitializeRollsBackStateWhenKeyCheckInsertFails(t *testing.T) {
-	db, err := sqlite.Open(filepath.Join(t.TempDir(), "registry.db"))
+	db, err := sqlite.Open(filepath.Join(t.TempDir(), "registry.db"), slog.New(slog.DiscardHandler))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, db.Close()) })
 	_, err = sqlite.Migrate(t.Context(), db)
@@ -38,7 +39,7 @@ func TestInitializeRollsBackStateWhenKeyCheckInsertFails(t *testing.T) {
 }
 
 func TestCiphertextCASPreservesConcurrentReplacements(t *testing.T) {
-	db, err := sqlite.Open(filepath.Join(t.TempDir(), "cas.db"))
+	db, err := sqlite.Open(filepath.Join(t.TempDir(), "cas.db"), slog.New(slog.DiscardHandler))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, db.Close()) })
 	_, err = sqlite.Migrate(t.Context(), db)

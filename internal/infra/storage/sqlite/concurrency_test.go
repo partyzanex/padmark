@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"log/slog"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -17,7 +18,7 @@ import (
 func runReadModifyWrite(t *testing.T, dsn string, writers, iters int) (failures map[string]int, final int) {
 	t.Helper()
 
-	db, err := Open(dsn)
+	db, err := Open(dsn, slog.New(slog.DiscardHandler))
 	require.NoError(t, err)
 
 	defer func() { require.NoError(t, db.Close()) }()

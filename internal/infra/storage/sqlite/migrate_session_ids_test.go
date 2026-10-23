@@ -13,7 +13,7 @@ import (
 )
 
 func TestMigrateSessionIDs_InvalidatesOldSessionsAndDowngradeHashes(t *testing.T) {
-	db, err := Open("file:" + t.Name() + "?mode=memory&cache=shared")
+	db, err := Open("file:"+t.Name()+"?mode=memory&cache=shared", slog.New(slog.DiscardHandler))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, db.Close()) })
 

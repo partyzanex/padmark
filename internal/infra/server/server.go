@@ -570,7 +570,7 @@ func serverAction(ctx context.Context, cmd *cli.Command) error {
 	storage := cmd.String(FlagStorage)
 	dsn := cmd.String(FlagDSN)
 
-	db, err := openDB(ctx, storage, dsn)
+	db, err := openDB(ctx, storage, dsn, log)
 	if err != nil {
 		return fmt.Errorf("open db: %w", err)
 	}

@@ -41,7 +41,7 @@ var imgSrcPattern = regexp.MustCompile(`<img[^>]*\ssrc="([^"]*)"`)
 func newBurnGuaranteeEnv(t *testing.T, dbName string) ownerFlowEnv {
 	t.Helper()
 
-	db, err := sqliterepo.Open("file:" + dbName + "?mode=memory&cache=shared")
+	db, err := sqliterepo.Open("file:"+dbName+"?mode=memory&cache=shared", slog.New(slog.DiscardHandler))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, db.Close()) })
 
