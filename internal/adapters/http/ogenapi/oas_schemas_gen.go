@@ -810,7 +810,10 @@ type CreateNoteRequest struct {
 	// this rule existed keep working for `PUT`/`DELETE` — only new codes are checked.
 	// Intended for CLI and automation use; the web UI does not expose this field.
 	EditCode OptString `json:"edit_code"`
-	// Who may read the note: `public` (anyone), `authenticated` (any valid session or API
+	// Who may read the note (default `public` when both this and `private` are omitted;
+	// no schema-level `default` so the server can tell an omitted field from an explicit
+	// `public` when resolving the deprecated `private` alias): `public` (anyone), `authenticated` (any
+	// valid session or API
 	// token, not just the creator), or `owner` (only the exact credential that created
 	// it — see "Edit codes and ownership" above). Meaningful when the server is started
 	// with `--enable-accounts`; `owner` additionally requires the note to actually have an
@@ -962,7 +965,10 @@ type CreateNoteRequestEntityTooLarge ErrorResponse
 
 func (*CreateNoteRequestEntityTooLarge) createNoteRes() {}
 
-// Who may read the note: `public` (anyone), `authenticated` (any valid session or API
+// Who may read the note (default `public` when both this and `private` are omitted;
+// no schema-level `default` so the server can tell an omitted field from an explicit
+// `public` when resolving the deprecated `private` alias): `public` (anyone), `authenticated` (any
+// valid session or API
 // token, not just the creator), or `owner` (only the exact credential that created
 // it — see "Edit codes and ownership" above). Meaningful when the server is started
 // with `--enable-accounts`; `owner` additionally requires the note to actually have an
