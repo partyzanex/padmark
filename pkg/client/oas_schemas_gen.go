@@ -817,6 +817,13 @@ type CreateNoteRequest struct {
 	// owner, i.e. an authenticated caller at creation time — otherwise the request is
 	// rejected with `422`.
 	Privacy OptCreateNoteRequestPrivacy `json:"privacy"`
+	// Deprecated alias of `privacy`, kept for clients written against v0.1.6: `true` means
+	// `authenticated`, `false` means `public`. Sending both `private` and `privacy` is
+	// allowed only when they agree (`true` with `authenticated` or `owner`, `false` with
+	// `public`); a disagreeing pair is rejected with `400`. Omitted leaves `privacy` alone.
+	//
+	// Deprecated: schema marks this property as deprecated.
+	Private OptBool `json:"private"`
 }
 
 // GetTitle returns the value of Title.
@@ -859,6 +866,11 @@ func (s *CreateNoteRequest) GetPrivacy() OptCreateNoteRequestPrivacy {
 	return s.Privacy
 }
 
+// GetPrivate returns the value of Private.
+func (s *CreateNoteRequest) GetPrivate() OptBool {
+	return s.Private
+}
+
 // SetTitle sets the value of Title.
 func (s *CreateNoteRequest) SetTitle(val OptString) {
 	s.Title = val
@@ -897,6 +909,11 @@ func (s *CreateNoteRequest) SetEditCode(val OptString) {
 // SetPrivacy sets the value of Privacy.
 func (s *CreateNoteRequest) SetPrivacy(val OptCreateNoteRequestPrivacy) {
 	s.Privacy = val
+}
+
+// SetPrivate sets the value of Private.
+func (s *CreateNoteRequest) SetPrivate(val OptBool) {
+	s.Private = val
 }
 
 // MIME type of `content`; controls rendering on the view page.
@@ -1019,6 +1036,11 @@ type CreateNoteResponse struct {
 	// Who may read the note. See `CreateNoteRequest.privacy` for the exact semantics of
 	// each value.
 	Privacy OptCreateNoteResponsePrivacy `json:"privacy"`
+	// Deprecated, read-only: `true` when `privacy` is not `public`. Emitted for clients
+	// written against v0.1.6; use `privacy`.
+	//
+	// Deprecated: schema marks this property as deprecated.
+	Private OptBool `json:"private"`
 	// ISO 8601 timestamp after which the note is inaccessible.
 	// Set on the first read for burn-after-reading notes that have a TTL.
 	// `null` for notes that are not expiring.
@@ -1065,6 +1087,11 @@ func (s *CreateNoteResponse) GetBurnAfterReading() bool {
 // GetPrivacy returns the value of Privacy.
 func (s *CreateNoteResponse) GetPrivacy() OptCreateNoteResponsePrivacy {
 	return s.Privacy
+}
+
+// GetPrivate returns the value of Private.
+func (s *CreateNoteResponse) GetPrivate() OptBool {
+	return s.Private
 }
 
 // GetExpiresAt returns the value of ExpiresAt.
@@ -1120,6 +1147,11 @@ func (s *CreateNoteResponse) SetBurnAfterReading(val bool) {
 // SetPrivacy sets the value of Privacy.
 func (s *CreateNoteResponse) SetPrivacy(val OptCreateNoteResponsePrivacy) {
 	s.Privacy = val
+}
+
+// SetPrivate sets the value of Private.
+func (s *CreateNoteResponse) SetPrivate(val OptBool) {
+	s.Private = val
 }
 
 // SetExpiresAt sets the value of ExpiresAt.
@@ -1594,6 +1626,11 @@ type NoteResponse struct {
 	// Who may read the note. See `CreateNoteRequest.privacy` for the exact semantics of
 	// each value.
 	Privacy OptNoteResponsePrivacy `json:"privacy"`
+	// Deprecated, read-only: `true` when `privacy` is not `public`. Emitted for clients
+	// written against v0.1.6; use `privacy`.
+	//
+	// Deprecated: schema marks this property as deprecated.
+	Private OptBool `json:"private"`
 	// ISO 8601 timestamp after which the note is inaccessible.
 	// Set on the first read for burn-after-reading notes that have a TTL.
 	// `null` for notes that are not expiring.
@@ -1637,6 +1674,11 @@ func (s *NoteResponse) GetBurnAfterReading() bool {
 // GetPrivacy returns the value of Privacy.
 func (s *NoteResponse) GetPrivacy() OptNoteResponsePrivacy {
 	return s.Privacy
+}
+
+// GetPrivate returns the value of Private.
+func (s *NoteResponse) GetPrivate() OptBool {
+	return s.Private
 }
 
 // GetExpiresAt returns the value of ExpiresAt.
@@ -1687,6 +1729,11 @@ func (s *NoteResponse) SetBurnAfterReading(val bool) {
 // SetPrivacy sets the value of Privacy.
 func (s *NoteResponse) SetPrivacy(val OptNoteResponsePrivacy) {
 	s.Privacy = val
+}
+
+// SetPrivate sets the value of Private.
+func (s *NoteResponse) SetPrivate(val OptBool) {
+	s.Private = val
 }
 
 // SetExpiresAt sets the value of ExpiresAt.
@@ -3047,6 +3094,13 @@ type UpdateNoteRequest struct {
 	// Update the privacy level. See `CreateNoteRequest.privacy` for the exact semantics of
 	// each value. Omitted keeps the note's current privacy level.
 	Privacy OptUpdateNoteRequestPrivacy `json:"privacy"`
+	// Deprecated alias of `privacy`, kept for clients written against v0.1.6: `true` means
+	// `authenticated`, `false` means `public`. Sending both `private` and `privacy` is
+	// allowed only when they agree (`true` with `authenticated` or `owner`, `false` with
+	// `public`); a disagreeing pair is rejected with `400`. Omitted keeps the current level.
+	//
+	// Deprecated: schema marks this property as deprecated.
+	Private OptBool `json:"private"`
 }
 
 // GetTitle returns the value of Title.
@@ -3084,6 +3138,11 @@ func (s *UpdateNoteRequest) GetPrivacy() OptUpdateNoteRequestPrivacy {
 	return s.Privacy
 }
 
+// GetPrivate returns the value of Private.
+func (s *UpdateNoteRequest) GetPrivate() OptBool {
+	return s.Private
+}
+
 // SetTitle sets the value of Title.
 func (s *UpdateNoteRequest) SetTitle(val OptString) {
 	s.Title = val
@@ -3117,6 +3176,11 @@ func (s *UpdateNoteRequest) SetTTL(val OptNilInt64) {
 // SetPrivacy sets the value of Privacy.
 func (s *UpdateNoteRequest) SetPrivacy(val OptUpdateNoteRequestPrivacy) {
 	s.Privacy = val
+}
+
+// SetPrivate sets the value of Private.
+func (s *UpdateNoteRequest) SetPrivate(val OptBool) {
+	s.Private = val
 }
 
 // New content type; defaults to the note's current type when omitted.

@@ -804,6 +804,14 @@ components:
             with `--enable-accounts`; `owner` additionally requires the note to actually have an
             owner, i.e. an authenticated caller at creation time — otherwise the request is
             rejected with `422`.
+        private:
+          type: boolean
+          deprecated: true
+          description: |
+            Deprecated alias of `privacy`, kept for clients written against v0.1.6: `true` means
+            `authenticated`, `false` means `public`. Sending both `private` and `privacy` is
+            allowed only when they agree (`true` with `authenticated` or `owner`, `false` with
+            `public`); a disagreeing pair is rejected with `400`. Omitted leaves `privacy` alone.
 
     UpdateNoteRequest:
       type: object
@@ -850,6 +858,14 @@ components:
           description: |
             Update the privacy level. See `CreateNoteRequest.privacy` for the exact semantics of
             each value. Omitted keeps the note's current privacy level.
+        private:
+          type: boolean
+          deprecated: true
+          description: |
+            Deprecated alias of `privacy`, kept for clients written against v0.1.6: `true` means
+            `authenticated`, `false` means `public`. Sending both `private` and `privacy` is
+            allowed only when they agree (`true` with `authenticated` or `owner`, `false` with
+            `public`); a disagreeing pair is rejected with `400`. Omitted keeps the current level.
 
     NoteResponse:
       type: object
@@ -886,6 +902,13 @@ components:
           description: |
             Who may read the note. See `CreateNoteRequest.privacy` for the exact semantics of
             each value.
+        private:
+          type: boolean
+          deprecated: true
+          readOnly: true
+          description: |
+            Deprecated, read-only: `true` when `privacy` is not `public`. Emitted for clients
+            written against v0.1.6; use `privacy`.
         expires_at:
           type: string
           format: date-time
