@@ -57,13 +57,28 @@ func versionRows(t *testing.T, path string) int {
 	return count
 }
 
-func TestMigrateWithBackup_FreshDB_TakesBackup(t *testing.T) {
+func TestMigrateWithBackup_FreshDB_NoBackup(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "padmark.db")
 	db := openFileDB(t, dbPath)
 
 	results, err := MigrateWithBackup(t.Context(), db, dbPath, slog.New(slog.DiscardHandler))
 	require.NoError(t, err)
 	require.NotEmpty(t, results)
+	require.Empty(t, listBackups(t, dbPath))
+}
+
+func TestMigrateWithBackup_BackupIsOwnerOnly(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "padmark.db")
+	db := openFileDB(t, dbPath)
+
+	provider, err := goose.NewProvider(goose.DialectSQLite3, db.DB, sqlitemigrations.FS)
+	require.NoError(t, err)
+
+	_, err = provider.UpByOne(t.Context())
+	require.NoError(t, err)
+
+	_, err = MigrateWithBackup(t.Context(), db, dbPath, slog.New(slog.DiscardHandler))
+	require.NoError(t, err)
 
 	backups := listBackups(t, dbPath)
 	require.Len(t, backups, 1)
@@ -71,8 +86,6 @@ func TestMigrateWithBackup_FreshDB_TakesBackup(t *testing.T) {
 	info, err := os.Stat(backups[0])
 	require.NoError(t, err)
 	require.Equal(t, os.FileMode(0o600), info.Mode().Perm())
-
-	// The backup holds the pre-migration state: strictly fewer versions than the migrated DB.
 	require.Less(t, versionRows(t, backups[0]), versionRows(t, dbPath))
 }
 
@@ -81,7 +94,13 @@ func TestMigrateWithBackup_SecondRun_NoNewBackup(t *testing.T) {
 	db := openFileDB(t, dbPath)
 	log := slog.New(slog.DiscardHandler)
 
-	_, err := MigrateWithBackup(t.Context(), db, dbPath, log)
+	provider, err := goose.NewProvider(goose.DialectSQLite3, db.DB, sqlitemigrations.FS)
+	require.NoError(t, err)
+
+	_, err = provider.UpByOne(t.Context())
+	require.NoError(t, err)
+
+	_, err = MigrateWithBackup(t.Context(), db, dbPath, log)
 	require.NoError(t, err)
 
 	_, err = MigrateWithBackup(t.Context(), db, dbPath, log)
@@ -138,7 +157,13 @@ func TestMigrateWithBackup_DSNWithQuery(t *testing.T) {
 	dsn := "file:" + dbPath + "?_pragma=busy_timeout(5000)"
 	db := openFileDB(t, dsn)
 
-	_, err := MigrateWithBackup(t.Context(), db, dsn, slog.New(slog.DiscardHandler))
+	provider, err := goose.NewProvider(goose.DialectSQLite3, db.DB, sqlitemigrations.FS)
+	require.NoError(t, err)
+
+	_, err = provider.UpByOne(t.Context())
+	require.NoError(t, err)
+
+	_, err = MigrateWithBackup(t.Context(), db, dsn, slog.New(slog.DiscardHandler))
 	require.NoError(t, err)
 	require.Len(t, listBackups(t, dbPath), 1)
 }

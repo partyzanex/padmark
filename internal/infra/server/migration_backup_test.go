@@ -4,9 +4,29 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/pressly/goose/v3"
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
+
+	"github.com/partyzanex/padmark/internal/infra/storage/sqlite"
+	sqlitemigrations "github.com/partyzanex/padmark/migrations/sqlite"
 )
+
+// seedOlderDB creates a database with only the first migration applied, so a later full migrate
+// has both applied and pending migrations (the only case that takes a backup).
+func seedOlderDB(t *testing.T, dbPath string) {
+	t.Helper()
+
+	db, err := sqlite.Open(dbPath)
+	require.NoError(t, err)
+
+	provider, err := goose.NewProvider(goose.DialectSQLite3, db.DB, sqlitemigrations.FS)
+	require.NoError(t, err)
+
+	_, err = provider.UpByOne(t.Context())
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
+}
 
 func runMigrate(t *testing.T, dsn string, extra ...string) error {
 	t.Helper()
@@ -29,6 +49,12 @@ func TestMigrateCommand_BacksUpOnlyWhenPending(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "padmark.db")
 
 	require.NoError(t, runMigrate(t, dbPath))
+	require.Empty(t, backupsOf(t, dbPath), "fresh install has nothing worth backing up")
+
+	dbPath = filepath.Join(t.TempDir(), "older.db")
+	seedOlderDB(t, dbPath)
+
+	require.NoError(t, runMigrate(t, dbPath))
 	require.Len(t, backupsOf(t, dbPath), 1)
 
 	require.NoError(t, runMigrate(t, dbPath))
@@ -37,6 +63,7 @@ func TestMigrateCommand_BacksUpOnlyWhenPending(t *testing.T) {
 
 func TestMigrateCommand_SkipFlag_NoBackup(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "padmark.db")
+	seedOlderDB(t, dbPath)
 
 	require.NoError(t, runMigrate(t, dbPath, "--skip-migration-backup"))
 	require.Empty(t, backupsOf(t, dbPath))
@@ -46,6 +73,7 @@ func TestMigrateCommand_SkipEnv_NoBackup(t *testing.T) {
 	t.Setenv(EnvSkipMigrationBackup, "true")
 
 	dbPath := filepath.Join(t.TempDir(), "padmark.db")
+	seedOlderDB(t, dbPath)
 
 	require.NoError(t, runMigrate(t, dbPath))
 	require.Empty(t, backupsOf(t, dbPath))
@@ -62,6 +90,7 @@ func TestMigrateCommand_InMemory_NoBackup(t *testing.T) {
 func TestInitRepos_SQLite_BackupHonoursSkip(t *testing.T) {
 	for _, skip := range []bool{false, true} {
 		dbPath := filepath.Join(t.TempDir(), "padmark.db")
+		seedOlderDB(t, dbPath)
 
 		db, err := openDB(t.Context(), "sqlite", dbPath)
 		require.NoError(t, err)

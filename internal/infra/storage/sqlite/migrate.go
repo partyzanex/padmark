@@ -36,11 +36,12 @@ func Migrate(ctx context.Context, db *bun.DB) ([]*goose.MigrationResult, error) 
 }
 
 // MigrateWithBackup applies pending migrations like Migrate, but first copies a file-backed
-// database to "<path>.bak-<YYYYMMDD-HHMMSS>" (VACUUM INTO, mode 0600) when anything is pending.
+// database to "<path>.bak-<YYYYMMDD-HHMMSS>" (VACUUM INTO, mode 0600) when it already has applied migrations
+// and more are pending.
 // Several migrations are irreversible, so the backup is the only way back.
 //
 // Strategy: fail-hard. If the backup cannot be written the database is left unmigrated.
-// In-memory databases and up-to-date databases are never backed up.
+// In-memory, brand-new (nothing applied yet) and up-to-date databases are never backed up.
 func MigrateWithBackup(
 	ctx context.Context, db *bun.DB, dsn string, log *slog.Logger,
 ) ([]*goose.MigrationResult, error) {
@@ -51,12 +52,13 @@ func MigrateWithBackup(
 
 	path, _ := dbFilePath(dsn)
 	if path != "" {
-		pending, pendingErr := countPending(ctx, provider)
-		if pendingErr != nil {
-			return nil, pendingErr
+		applied, pending, countErr := countMigrations(ctx, provider)
+		if countErr != nil {
+			return nil, countErr
 		}
 
-		if pending > 0 {
+		// A brand-new install (nothing applied yet) has no data worth a backup.
+		if applied > 0 && pending > 0 {
 			backupPath := path + ".bak-" + time.Now().Format(backupTimeLayout)
 
 			backupErr := backupDB(ctx, db, backupPath)
@@ -81,21 +83,21 @@ func up(ctx context.Context, provider *goose.Provider) ([]*goose.MigrationResult
 	return results, nil
 }
 
-func countPending(ctx context.Context, provider *goose.Provider) (int, error) {
+func countMigrations(ctx context.Context, provider *goose.Provider) (applied, pending int, err error) {
 	statuses, err := provider.Status(ctx)
 	if err != nil {
-		return 0, fmt.Errorf("migrations status: %w", err)
+		return 0, 0, fmt.Errorf("migrations status: %w", err)
 	}
-
-	pending := 0
 
 	for _, status := range statuses {
 		if status.State == goose.StatePending {
 			pending++
+		} else {
+			applied++
 		}
 	}
 
-	return pending, nil
+	return applied, pending, nil
 }
 
 // backupDB writes a consistent copy of the database to backupPath. The target is created owner-only
