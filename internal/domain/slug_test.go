@@ -130,6 +130,17 @@ func TestResolveSlug_CustomEnabled_ReturnsCandidateUnchanged(t *testing.T) {
 	assert.Equal(t, "my-custom-slug", slug)
 }
 
+func TestHasGeneratedEditCodeShape(t *testing.T) {
+	code, err := NewEditCode()
+	require.NoError(t, err)
+	assert.True(t, HasGeneratedEditCodeShape(code))
+	assert.True(t, HasGeneratedEditCodeShape("rbHkuXQXtZ1t"))
+
+	for _, code := range []string{"", "hunter2", "rbHkuXQXtZ1", "rbHkuXQXtZ1t1", "abc-def_ghi!", "ПриветМир12"} {
+		assert.False(t, HasGeneratedEditCodeShape(code), code)
+	}
+}
+
 func TestNewEditCode_LengthAndCharset(t *testing.T) {
 	code, err := NewEditCode()
 	require.NoError(t, err)

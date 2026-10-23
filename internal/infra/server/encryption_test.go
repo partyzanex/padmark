@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -126,6 +127,43 @@ func encryptionTestReport(t *testing.T, output string) contentkeys.Report {
 	require.NoError(t, json.Unmarshal([]byte(output), &report))
 
 	return report
+}
+
+// The documented upgrade from v0.1.6 through the real CLI: migrate, encryption status,
+// encryption migrate, then the serve gate. tests/upgrade covers the converted data in depth.
+func TestEncryptionMigrateConvertsV016Database(t *testing.T) {
+	directory := t.TempDir()
+	dsn, keyfile := filepath.Join(directory, "v016.db"), filepath.Join(directory, "keys.json")
+	_, err := runEncryptionTestCommand(t, dsn, "", "keygen", "--key-id", "key", "--output", keyfile)
+	require.NoError(t, err)
+
+	dump, err := os.ReadFile("../../../tests/fixtures/v0.1.6/sqlite.sql")
+	require.NoError(t, err)
+	loader, err := openDB(t.Context(), "sqlite", dsn)
+	require.NoError(t, err)
+	_, err = loader.ExecContext(t.Context(), string(dump))
+	require.NoError(t, err)
+	require.NoError(t, loader.Close())
+	require.NoError(t, NewApp().Run(t.Context(), []string{"padmark", "migrate", "--storage", "sqlite", "--dsn", dsn}))
+
+	output, err := runEncryptionTestCommand(t, dsn, keyfile, "status")
+	require.NoError(t, err)
+	require.Contains(t, output, `"plaintext":7`)
+
+	output, err = runEncryptionTestCommand(t, dsn, keyfile, "migrate")
+	require.NoError(t, err)
+	report := encryptionTestReport(t, output)
+	require.Equal(t, contentkeys.Ready, report.State)
+	require.Equal(t, 7, report.Changed)
+	require.Zero(t, report.Plaintext)
+	require.NotContains(t, output, "my-custom_Slug-1")
+
+	ring, err := loadContentKeyring(keyfile, false, slog.New(slog.DiscardHandler))
+	require.NoError(t, err)
+	db, err := openDB(t.Context(), "sqlite", dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, db.Close()) })
+	require.NoError(t, validateContentEncryption(t.Context(), db, ring, crypto.NewEditCodeHasher(crypto.Argon2Params{})))
 }
 
 func TestEncryptionPruneRequiresExplicitCorruptFlag(t *testing.T) {

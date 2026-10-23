@@ -58,6 +58,23 @@ func newSlug() (string, error) { return randomString(slugChars, slugLength) }
 // NewEditCode generates a random edit code for a newly created note or link.
 func NewEditCode() (string, error) { return randomString(editCodeChars, editCodeLength) }
 
+// HasGeneratedEditCodeShape reports whether code looks like a server-generated edit code (every
+// release, v0.1.6 included, generates 12 chars of [A-Za-z0-9]). A caller-chosen code may share
+// the shape; only shape-mismatching codes are known to be caller-chosen.
+func HasGeneratedEditCodeShape(code string) bool {
+	if len(code) != editCodeLength {
+		return false
+	}
+
+	for _, char := range code {
+		if !strings.ContainsRune(editCodeChars, char) {
+			return false
+		}
+	}
+
+	return true
+}
+
 // ResolveSlug validates or generates a slug, returning the plaintext value to use as both the
 // resource's encryption key and the input to HashSlug. A user-supplied candidate is only
 // accepted when allowCustom is true; otherwise a non-empty candidate is rejected so callers

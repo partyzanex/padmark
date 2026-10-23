@@ -45,8 +45,10 @@ func encryptionCommand() *cli.Command {
 		{"key-activate", "Select an already registered KEK in a new keyring file"},
 		{"key-remove", "Remove an unused, inactive KEK from a new keyring file"},
 		{"register", "Register a KEK with this installation without overwriting existing checks"},
-		{"status", "Verify keys and envelopes; print counts without changing the database"},
-		{encryptionMigrate, "Wrap raw legacy ciphertext; resume an interrupted migration"},
+		{"status", "Verify keys and envelopes; print counts (plaintext = unconverted v0.1.6 notes) " +
+			"without changing the database"},
+		{encryptionMigrate, "Wrap raw legacy ciphertext and convert plaintext v0.1.6 notes in place " +
+			"(hashed ID, encrypted content, hashed edit code); resume an interrupted migration"},
 		{encryptionRewrap, "Rotate DEK wrappers to the active KEK, keeping payloads unchanged"},
 		{encryptionConvert, "Convert wrapped legacy records using one original slug per stdin line"},
 		{encryptionPrune, "Permanently remove malformed raw records; preview with --corrupt --dry-run"},

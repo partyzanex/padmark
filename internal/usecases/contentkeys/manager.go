@@ -140,7 +140,7 @@ func (m *Manager) PrepareServe(ctx context.Context) error {
 		return WrapError(err)
 	}
 
-	if report.State != Ready || report.Raw != 0 {
+	if report.State != Ready || report.Raw != 0 || report.Plaintext != 0 {
 		return errors.New("content migration required; run encryption migrate while all servers are stopped")
 	}
 
@@ -287,10 +287,17 @@ func (m *Manager) validateKeys(reg *Registry, requireActive bool) error {
 	return nil
 }
 
-// inspect classifies a row: unversioned values are raw legacy ciphertext (Raw) or
-// malformed raw data (CorruptRaw, also Failed); versioned values that do not
-// authenticate are Failed only and are never eligible for pruning.
+// inspect classifies a row: notes tagged as v0.1.6 plaintext are Plaintext whatever their
+// content looks like (it may resemble an envelope or base64 ciphertext); other unversioned
+// values are raw legacy ciphertext (Raw) or malformed raw data (CorruptRaw, also Failed);
+// versioned values that do not authenticate are Failed only and are never eligible for pruning.
 func (m *Manager) inspect(row Row, reg *Registry, report *Report) {
+	if row.Legacy != nil {
+		report.Plaintext++
+
+		return
+	}
+
 	cipher := m.ciphers[row.Resource]
 	if !cipher.Versioned(row.Value) {
 		if cipher.ValidateLegacy(row.Value) != nil {
@@ -331,7 +338,8 @@ func (m *Manager) inspect(row Row, reg *Registry, report *Report) {
 
 // initialize authenticates existing envelopes before binding this DB to the supplied keys.
 // Initialize must atomically insert state plus checks, or leave an existing registry untouched.
-// Malformed raw records may be bound only in pending state for explicit cleanup;
+// Malformed raw records may be bound only in pending state for explicit cleanup, and v0.1.6
+// plaintext notes only in pending state for conversion (they are not failures);
 // envelope, key and storage failures still prevent first-time initialization.
 func (m *Manager) initialize(ctx context.Context) error {
 	reg, err := m.store.Registry(ctx)
@@ -361,7 +369,7 @@ func (m *Manager) initializeRegistry(ctx context.Context) error {
 	}
 
 	reg := &Registry{InstallationID: uuid.NewString(), Phase: Ready, Checks: make(map[string]string)}
-	if report.Raw != 0 || report.Failed != 0 {
+	if report.Raw != 0 || report.Failed != 0 || report.Plaintext != 0 {
 		reg.Phase = Pending
 	}
 

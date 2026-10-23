@@ -124,7 +124,35 @@ func resourceColumns(resource string) (table, column string, err error) {
 	}
 }
 
-type storedRow struct{ ID, Value string }
+// storedRow is one scanned record; LegacySlug and EditCode are read for notes only and stay
+// empty unless the legacy_notes schema migration tagged the row.
+type storedRow struct {
+	ID         string `bun:"id"`
+	Value      string `bun:"value"`
+	LegacySlug string `bun:"legacy_slug"`
+	EditCode   string `bun:"edit_code"`
+}
+
+func (s *storedRow) toRow(resource string) keys.Row {
+	row := keys.Row{Resource: resource, ID: s.ID, Value: s.Value, Legacy: nil}
+	if s.LegacySlug != "" {
+		row.Legacy = &keys.LegacyNote{Slug: s.LegacySlug, EditCode: s.EditCode}
+	}
+
+	return row
+}
+
+// selectRows reads id and the encrypted column; for notes also the v0.1.6 legacy slug and,
+// only for such tagged rows, the plaintext edit code (hashes of current notes are never read).
+func selectRows(db *bun.DB, table, column string) *bun.SelectQuery {
+	query := db.NewSelect().Table(table).Column("id").ColumnExpr("? AS value", bun.Ident(column))
+	if table == "notes" {
+		query = query.ColumnExpr("COALESCE(legacy_slug, '') AS legacy_slug").
+			ColumnExpr("CASE WHEN legacy_slug IS NULL THEN '' ELSE edit_code END AS edit_code")
+	}
+
+	return query
+}
 
 func (r *Repository) Batch(ctx context.Context, resource, after string, limit int) ([]keys.Row, error) {
 	table, column, err := resourceColumns(resource)
@@ -134,16 +162,15 @@ func (r *Repository) Batch(ctx context.Context, resource, after string, limit in
 
 	var stored []storedRow
 
-	err = r.db.NewSelect().Table(table).Column("id").ColumnExpr("? AS value", bun.Ident(column)).
-		Where("id > ?", after).OrderExpr("id ASC").Limit(int64(limit)).Scan(ctx, &stored)
+	err = selectRows(r.db, table, column).Where("id > ?", after).OrderExpr("id ASC").Limit(int64(limit)).
+		Scan(ctx, &stored)
 	if err != nil {
-		return nil, fmt.Errorf("read encrypted records: %w", err)
+		return nil, fmt.Errorf("read encrypted records (apply schema migrations first): %w", err)
 	}
 
 	rows := make([]keys.Row, 0, len(stored))
 	for i := range stored {
-		row := &stored[i]
-		rows = append(rows, keys.Row{Resource: resource, ID: row.ID, Value: row.Value, Legacy: nil})
+		rows = append(rows, stored[i].toRow(resource))
 	}
 
 	return rows, nil
@@ -155,9 +182,9 @@ func (r *Repository) Get(ctx context.Context, resource, id string) (*keys.Row, e
 		return nil, err
 	}
 
-	var value string
+	var stored storedRow
 
-	err = r.db.NewSelect().Table(table).Column(column).Where("id = ?", id).Scan(ctx, &value)
+	err = selectRows(r.db, table, column).Where("id = ?", id).Scan(ctx, &stored)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil //nolint:nilnil // absence is part of the migration storage contract
 	}
@@ -166,7 +193,9 @@ func (r *Repository) Get(ctx context.Context, resource, id string) (*keys.Row, e
 		return nil, fmt.Errorf("read encrypted record: %w", err)
 	}
 
-	return &keys.Row{Resource: resource, ID: id, Value: value, Legacy: nil}, nil
+	row := stored.toRow(resource)
+
+	return &row, nil
 }
 
 func (r *Repository) Replace(ctx context.Context, row keys.Row, value string) (bool, error) {
@@ -190,9 +219,42 @@ func (r *Repository) Replace(ctx context.Context, row keys.Row, value string) (b
 	return count == 1, nil
 }
 
-// ConvertLegacy is not implemented yet.
-func (r *Repository) ConvertLegacy(context.Context, keys.Row, string, string, string) (bool, error) {
-	return false, errors.New("legacy note conversion is not implemented")
+// ConvertLegacy re-keys one tagged v0.1.6 note with a single compare-and-swap UPDATE: id,
+// content and edit_code are replaced and legacy_slug cleared only while the row still holds
+// the inspected id, content and legacy_slug. Errors never expose the slug, content, edit code
+// or any SQL parameter.
+func (r *Repository) ConvertLegacy(
+	ctx context.Context, row keys.Row, newID, value, editCodeHash string,
+) (bool, error) {
+	if row.Resource != "note" || row.Legacy == nil {
+		return false, errors.New("only tagged legacy notes can be converted")
+	}
+
+	result, err := r.db.NewUpdate().Table("notes").
+		Set("id = ?", newID).Set("content = ?", value).Set("edit_code = ?", editCodeHash).Set("legacy_slug = NULL").
+		Where("id = ? AND content = ? AND legacy_slug = ?", row.ID, row.Value, row.Legacy.Slug).Exec(ctx)
+	if err != nil {
+		return false, convertError(ctx, r.db, newID)
+	}
+
+	count, err := result.RowsAffected()
+	if err != nil {
+		return false, errors.New("could not read legacy note conversion count")
+	}
+
+	return count == 1, nil
+}
+
+// convertError classifies a failed conversion without forwarding the driver error, which can
+// quote SQL parameters. A row already stored under the target ID is reported as
+// keys.ErrConvertTargetExists so the caller counts a conflict; it is never overwritten.
+func convertError(ctx context.Context, db *bun.DB, newID string) error {
+	exists, err := db.NewSelect().Table("notes").Where("id = ?", newID).Exists(ctx)
+	if err == nil && exists {
+		return keys.ErrConvertTargetExists
+	}
+
+	return errors.New("legacy note compare-and-swap failed")
 }
 
 // Delete removes exactly the invalid raw value inspected by the caller. A

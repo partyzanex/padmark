@@ -151,7 +151,9 @@ func (r *NoteRepository) Exists(ctx context.Context, id string) (bool, error) {
 
 // Consume atomically deletes a note and returns it, but only if the note is eligible for deletion:
 // burn_after_reading is set (with no grace period), or expires_at has passed.
-// Returns domain.ErrNotFound otherwise.
+// Returns domain.ErrNotFound otherwise. RETURNING lists the model columns (?Columns), not *:
+// notes also has legacy_slug (migrations/postgres/20261023000001_legacy_notes.sql), which the
+// model does not map and bun refuses to scan.
 func (r *NoteRepository) Consume(ctx context.Context, id string) (*domain.Note, error) {
 	var dbNote note
 
@@ -159,7 +161,7 @@ func (r *NoteRepository) Consume(ctx context.Context, id string) (*domain.Note, 
 		Model(&dbNote).
 		Where("id = ?", id).
 		Where("burn_after_reading OR (expires_at IS NOT NULL AND expires_at <= ?)", time.Now()).
-		Returning("*").
+		Returning("?Columns").
 		Scan(ctx)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -174,6 +176,7 @@ func (r *NoteRepository) Consume(ctx context.Context, id string) (*domain.Note, 
 
 // SetBurnExpiry atomically sets expires_at and clears burn_after_reading on first read
 // for notes with a burn grace period. Returns domain.ErrNotFound if no eligible row is found.
+// RETURNING lists the model columns only; see Consume.
 func (r *NoteRepository) SetBurnExpiry(ctx context.Context, id string, expiresAt time.Time) (*domain.Note, error) {
 	var dbNote note
 
@@ -183,7 +186,7 @@ func (r *NoteRepository) SetBurnExpiry(ctx context.Context, id string, expiresAt
 		Set("burn_after_reading = FALSE").
 		Where("id = ?", id).
 		Where("burn_after_reading").
-		Returning("*").
+		Returning("?Columns").
 		Scan(ctx)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {

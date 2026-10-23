@@ -9,7 +9,8 @@ import (
 // legacy ciphertext, such as plaintext rows from before encryption, including ones that
 // contain "$". Versioned values are never candidates, even when they fail authentication
 // or name an unknown version; any such failure blocks the whole run before deletion.
-// Valid legacy ciphertext is never a candidate either. Stop all writers and back up the
+// Valid legacy ciphertext and v0.1.6 plaintext notes tagged for conversion by the
+// legacy_notes schema migration are never candidates either. Stop all writers and back up the
 // DB before calling with dryRun=false. It neither initializes the registry nor marks a
 // pending migration ready.
 func (m *Manager) PruneCorrupt(ctx context.Context, dryRun bool) (Report, error) {
@@ -24,7 +25,7 @@ func (m *Manager) PruneCorrupt(ctx context.Context, dryRun bool) (Report, error)
 
 	err = m.walk(ctx, func(row Row) error {
 		cipher := m.ciphers[row.Resource]
-		if cipher.Versioned(row.Value) || cipher.ValidateLegacy(row.Value) == nil {
+		if row.Legacy != nil || cipher.Versioned(row.Value) || cipher.ValidateLegacy(row.Value) == nil {
 			return nil
 		}
 
