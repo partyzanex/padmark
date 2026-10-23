@@ -1,10 +1,14 @@
 package sqlite
 
 import (
+	"bytes"
+	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -48,7 +52,14 @@ func skipWithoutPOSIXPerms(t *testing.T) {
 func touchDB(t *testing.T, dsn string) func() {
 	t.Helper()
 
-	db, err := Open(dsn)
+	return touchDBLogged(t, dsn, slog.New(slog.DiscardHandler))
+}
+
+// touchDBLogged is touchDB with an explicit logger, for tests asserting on what Open reports.
+func touchDBLogged(t *testing.T, dsn string, log *slog.Logger) func() {
+	t.Helper()
+
+	db, err := Open(dsn, log)
 	require.NoError(t, err)
 
 	_, err = db.ExecContext(t.Context(), `CREATE TABLE IF NOT EXISTS perm_probe (id INTEGER PRIMARY KEY)`)
@@ -164,7 +175,7 @@ func TestOpen_InMemoryCreatesNoFile(t *testing.T) {
 func TestOpen_ReadOnlyURIDoesNotCreateFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "missing.db")
 
-	db, err := Open("file:" + path + "?mode=ro")
+	db, err := Open("file:"+path+"?mode=ro", slog.New(slog.DiscardHandler))
 	require.NoError(t, err)
 
 	defer func() { require.NoError(t, db.Close()) }()
@@ -204,4 +215,109 @@ func TestDBFilePath(t *testing.T) {
 		require.Equal(t, tc.path, path, "path for %q", tc.dsn)
 		require.Equal(t, tc.create, create, "create for %q", tc.dsn)
 	}
+}
+
+// recordingLogger returns a logger that writes text records into the returned buffer.
+func recordingLogger() (*slog.Logger, *bytes.Buffer) {
+	buf := &bytes.Buffer{}
+
+	return slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug})), buf
+}
+
+// writeLooseDB creates an empty (valid, zero-page) database file with mode 0644, as an older
+// version or a restore would have left it.
+func writeLooseDB(t *testing.T) string {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "padmark.db")
+	require.NoError(t, os.WriteFile(path, nil, 0o644)) //nolint:gosec // deliberately loose to reproduce the old default
+	require.NoError(t, os.Chmod(path, 0o644))          //nolint:gosec // defeat the umask
+
+	return path
+}
+
+// TestOpen_NewFileLogsNothing pins that a freshly created 0600 file is not reported as tightened.
+func TestOpen_NewFileLogsNothing(t *testing.T) {
+	skipWithoutPOSIXPerms(t)
+
+	log, buf := recordingLogger()
+	path := filepath.Join(t.TempDir(), "padmark.db")
+
+	touchDBLogged(t, path, log)()
+
+	requireOwnerOnly(t, path)
+	require.Empty(t, buf.String())
+}
+
+// TestOpen_LogsWhenTighteningExistingFile pins that narrowing a pre-existing file is never silent:
+// the operator must be able to see why group/other access disappeared.
+func TestOpen_LogsWhenTighteningExistingFile(t *testing.T) {
+	skipWithoutPOSIXPerms(t)
+
+	log, buf := recordingLogger()
+	path := writeLooseDB(t)
+
+	touchDBLogged(t, path, log)()
+
+	requireOwnerOnly(t, path)
+	require.Contains(t, buf.String(), "level=INFO")
+	require.Contains(t, buf.String(), "tightened")
+	require.Contains(t, buf.String(), "file="+path)
+	require.Contains(t, buf.String(), "from=0644")
+	require.Contains(t, buf.String(), "to=0600")
+	require.NotContains(t, buf.String(), "level=WARN")
+}
+
+// TestOpen_AlreadyOwnerOnlyIsUntouched pins that a file with no group/other bits is neither
+// chmod-ed nor reported.
+func TestOpen_AlreadyOwnerOnlyIsUntouched(t *testing.T) {
+	skipWithoutPOSIXPerms(t)
+
+	path := filepath.Join(t.TempDir(), "padmark.db")
+	require.NoError(t, os.WriteFile(path, nil, 0o600))
+
+	calls := 0
+
+	t.Cleanup(func() { chmod = os.Chmod })
+
+	chmod = func(name string, mode fs.FileMode) error {
+		calls++
+
+		return os.Chmod(name, mode)
+	}
+
+	log, buf := recordingLogger()
+
+	touchDBLogged(t, path, log)()
+
+	require.Zero(t, calls, "an owner-only file must not be chmod-ed")
+	require.Empty(t, buf.String())
+}
+
+// TestOpen_ChmodFailureIsSoft pins that a pre-existing file whose permissions cannot be tightened
+// (foreign owner, read-only mount) does not block startup: a WARN is logged and the database works.
+func TestOpen_ChmodFailureIsSoft(t *testing.T) {
+	skipWithoutPOSIXPerms(t)
+
+	path := writeLooseDB(t)
+
+	t.Cleanup(func() { chmod = os.Chmod })
+
+	chmod = func(name string, _ fs.FileMode) error {
+		return &fs.PathError{Op: "chmod", Path: name, Err: syscall.EPERM}
+	}
+
+	log, buf := recordingLogger()
+
+	touchDBLogged(t, path, log)()
+
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	require.Equal(t, os.FileMode(0o644), info.Mode().Perm(), "the failed chmod must leave the mode alone")
+
+	require.Contains(t, buf.String(), "level=WARN")
+	require.Contains(t, buf.String(), "file="+path)
+	require.Contains(t, buf.String(), "mode=0644")
+	require.Contains(t, buf.String(), "operation not permitted")
+	require.NotContains(t, buf.String(), "level=INFO")
 }

@@ -125,7 +125,7 @@ func TestAccountsFlow(t *testing.T) {
 	ctx := context.Background()
 
 	// ── storage + wiring (see testAPITokenFlow for the same pattern) ──
-	db, err := sqliterepo.Open("file:accountsflow?mode=memory&cache=shared")
+	db, err := sqliterepo.Open("file:accountsflow?mode=memory&cache=shared", slog.New(slog.DiscardHandler))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, db.Close()) })
 

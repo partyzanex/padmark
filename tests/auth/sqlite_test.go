@@ -24,7 +24,7 @@ func (s *SQLiteAuthSuite) SetupTest() {
 	name := strings.ReplaceAll(s.T().Name(), "/", "_")
 	uri := fmt.Sprintf("file:%s?mode=memory&cache=shared", name)
 
-	db, err := sqliterepo.Open(uri)
+	db, err := sqliterepo.Open(uri, slog.New(slog.DiscardHandler))
 	s.Require().NoError(err)
 
 	s.db = db

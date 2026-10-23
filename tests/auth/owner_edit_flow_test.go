@@ -78,7 +78,7 @@ func newOwnerFlowEnv(t *testing.T, dbName string) ownerFlowEnv {
 
 	ctx := context.Background()
 
-	db, err := sqliterepo.Open("file:" + dbName + "?mode=memory&cache=shared")
+	db, err := sqliterepo.Open("file:"+dbName+"?mode=memory&cache=shared", slog.New(slog.DiscardHandler))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, db.Close()) })
 

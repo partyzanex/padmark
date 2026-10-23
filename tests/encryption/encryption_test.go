@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -32,7 +33,7 @@ import (
 type snapshot func(*testing.T) *bun.DB
 
 func TestSQLiteEncryption(t *testing.T) {
-	db, err := sqliterepo.Open(filepath.Join(t.TempDir(), "source.db"))
+	db, err := sqliterepo.Open(filepath.Join(t.TempDir(), "source.db"), slog.New(slog.DiscardHandler))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, db.Close()) })
 	_, err = sqliterepo.Migrate(t.Context(), db)
@@ -42,7 +43,7 @@ func TestSQLiteEncryption(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "restore.db")
 		_, err := db.NewRaw("VACUUM INTO ?", path).Exec(t.Context())
 		require.NoError(t, err)
-		restored, err := sqliterepo.Open(path)
+		restored, err := sqliterepo.Open(path, slog.New(slog.DiscardHandler))
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, restored.Close()) })
 

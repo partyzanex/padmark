@@ -1,6 +1,7 @@
 package sqlite
 
 import (
+	"log/slog"
 	"testing"
 
 	"github.com/pressly/goose/v3"
@@ -16,7 +17,7 @@ const (
 )
 
 func TestMigrateUsernameNoCase_KeepsExistingRowsAndEnforcesUniqueness(t *testing.T) {
-	db, err := Open("file:" + t.Name() + "?mode=memory&cache=shared")
+	db, err := Open("file:"+t.Name()+"?mode=memory&cache=shared", slog.New(slog.DiscardHandler))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, db.Close()) })
 
@@ -40,7 +41,7 @@ func TestMigrateUsernameNoCase_KeepsExistingRowsAndEnforcesUniqueness(t *testing
 }
 
 func TestMigrateUsernameNoCase_FailsLoudlyOnExistingCollision(t *testing.T) {
-	db, err := Open("file:" + t.Name() + "?mode=memory&cache=shared")
+	db, err := Open("file:"+t.Name()+"?mode=memory&cache=shared", slog.New(slog.DiscardHandler))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, db.Close()) })
 

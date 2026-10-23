@@ -92,7 +92,7 @@ func TestOpenDB_PostgresDSNPasswordNeverInErrorOrPanic(t *testing.T) {
 	for _, testCase := range dsnLeakCases(secret) {
 		t.Run(testCase.name, func(t *testing.T) {
 			text, panicked := callRecovering(func() error {
-				db, err := openDB(t.Context(), storagePostgres, testCase.dsn)
+				db, err := openDB(t.Context(), storagePostgres, testCase.dsn, slog.New(slog.DiscardHandler))
 				if err == nil {
 					_ = db.Close()
 				}

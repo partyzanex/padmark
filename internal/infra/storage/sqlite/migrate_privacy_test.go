@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"database/sql"
+	"log/slog"
 	"testing"
 
 	"github.com/pressly/goose/v3"
@@ -32,7 +33,7 @@ func TestMigratePrivacyTestSuite(t *testing.T) {
 }
 
 func (s *MigratePrivacyTestSuite) SetupTest() {
-	db, err := Open("file::memory:?cache=shared")
+	db, err := Open("file::memory:?cache=shared", slog.New(slog.DiscardHandler))
 	s.Require().NoError(err)
 
 	s.sqldb = db.DB

@@ -133,8 +133,9 @@ func encryptionAction(ctx context.Context, cmd *cli.Command) error {
 		return generateKeyring(cmd)
 	}
 
-	keyring, err := loadContentKeyring(cmd.String(FlagContentKeyring), cmd.Bool(FlagAllowSharedKeyring),
-		newLogger(DefaultLogLevel, DefaultLogFormat))
+	log := newLogger(DefaultLogLevel, DefaultLogFormat)
+
+	keyring, err := loadContentKeyring(cmd.String(FlagContentKeyring), cmd.Bool(FlagAllowSharedKeyring), log)
 	if err != nil {
 		//nolint:wrapcheck // WrapError adds shared encryption context.
 		return contentkeys.WrapError(err)
@@ -158,7 +159,7 @@ func encryptionAction(ctx context.Context, cmd *cli.Command) error {
 	// Bound argon2id workspace before converted legacy edit codes are hashed.
 	crypto.SetArgon2MemoryBudget(uint32(cmd.Int(FlagArgon2MemoryBudget))) //nolint:gosec // G115: bounded flag
 
-	db, err := openDB(ctx, cmd.String(FlagStorage), cmd.String(FlagDSN))
+	db, err := openDB(ctx, cmd.String(FlagStorage), cmd.String(FlagDSN), log)
 	if err != nil {
 		//nolint:wrapcheck // WrapError adds shared encryption context.
 		return contentkeys.WrapError(err)
