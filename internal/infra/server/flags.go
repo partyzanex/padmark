@@ -13,28 +13,33 @@ import (
 
 // Flag names used in CLI flags.
 const (
-	FlagAddr               = "addr"
-	FlagStorage            = "storage"
-	FlagDSN                = "dsn"
-	FlagLogLevel           = "log-level"
-	FlagLogFormat          = "log-format"
-	FlagEnableAccounts     = "enable-accounts"
-	FlagDisableAPI         = "disable-api"
-	FlagReadTimeout        = "read-timeout"
-	FlagWriteTimeout       = "write-timeout"
-	FlagMaxHeaderBytes     = "max-header-bytes"
-	FlagMaxBodyBytes       = "max-body-bytes"
-	FlagRateLimit          = "rate-limit"
-	FlagRateBurst          = "rate-burst"
-	FlagTLSCert            = "tls-cert"
-	FlagTLSKey             = "tls-key"
-	FlagHTTPRedirectAddr   = "http-redirect-addr"
-	FlagAllowedHosts       = "allowed-hosts"
-	FlagTrustedProxies     = "trusted-proxies"
-	FlagPublicScheme       = "public-scheme"
-	FlagCustomSlugs        = "custom-slugs"
-	FlagTOTPIssuer         = "totp-issuer"
-	FlagSessionTTL         = "session-ttl"
+	FlagAddr             = "addr"
+	FlagStorage          = "storage"
+	FlagDSN              = "dsn"
+	FlagLogLevel         = "log-level"
+	FlagLogFormat        = "log-format"
+	FlagEnableAccounts   = "enable-accounts"
+	FlagDisableAPI       = "disable-api"
+	FlagReadTimeout      = "read-timeout"
+	FlagWriteTimeout     = "write-timeout"
+	FlagMaxHeaderBytes   = "max-header-bytes"
+	FlagMaxBodyBytes     = "max-body-bytes"
+	FlagRateLimit        = "rate-limit"
+	FlagRateBurst        = "rate-burst"
+	FlagTLSCert          = "tls-cert"
+	FlagTLSKey           = "tls-key"
+	FlagHTTPRedirectAddr = "http-redirect-addr"
+	FlagAllowedHosts     = "allowed-hosts"
+	FlagTrustedProxies   = "trusted-proxies"
+	FlagPublicScheme     = "public-scheme"
+	FlagCustomSlugs      = "custom-slugs"
+	FlagTOTPIssuer       = "totp-issuer"
+	FlagSessionTTL       = "session-ttl"
+	// FlagAuthTokens is the removed v0.1.6 static bearer-token flag; it is still defined (hidden)
+	// so that using it fails startup with a migration hint instead of being ignored.
+	FlagAuthTokens = "auth-tokens" //nolint:gosec // flag name, not a credential
+	// FlagCookieMaxAge is the deprecated v0.1.6 cookie lifetime flag, superseded by --session-ttl.
+	FlagCookieMaxAge       = "cookie-max-age"
 	FlagArgon2Memory       = "argon2-memory"
 	FlagArgon2Time         = "argon2-time"
 	FlagArgon2Threads      = "argon2-threads"
@@ -70,6 +75,8 @@ const (
 	EnvCustomSlugs        = "PADMARK_CUSTOM_SLUGS"
 	EnvTOTPIssuer         = "PADMARK_TOTP_ISSUER"
 	EnvSessionTTL         = "PADMARK_SESSION_TTL"
+	EnvAuthTokens         = "PADMARK_AUTH_TOKENS" //nolint:gosec // env var name, not a credential
+	EnvCookieMaxAge       = "PADMARK_COOKIE_MAX_AGE"
 	EnvArgon2Memory       = "PADMARK_ARGON2_MEMORY"
 	EnvArgon2Time         = "PADMARK_ARGON2_TIME"
 	EnvArgon2Threads      = "PADMARK_ARGON2_THREADS"
@@ -261,6 +268,19 @@ func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
 			Sources: cli.EnvVars(EnvTOTPIssuer),
 			Value:   DefaultTOTPIssuer,
 			Usage:   "TOTP issuer name shown in the authenticator app (default: padmark)",
+		},
+		&cli.StringFlag{
+			Name:    FlagAuthTokens,
+			Sources: cli.EnvVars(EnvAuthTokens),
+			Hidden:  true,
+			Usage: "REMOVED: static bearer tokens were replaced by the account system; setting this " +
+				"fails startup (use --enable-accounts, " + EnvBootstrapToken + " and /setup)",
+		},
+		&cli.IntFlag{
+			Name:    FlagCookieMaxAge,
+			Sources: cli.EnvVars(EnvCookieMaxAge),
+			Hidden:  true,
+			Usage:   "DEPRECATED: use --session-ttl; honoured as the session TTL (seconds) when --session-ttl is unset",
 		},
 		&cli.IntFlag{
 			Name:    FlagSessionTTL,

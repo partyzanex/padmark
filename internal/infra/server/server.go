@@ -100,6 +100,30 @@ func parseTokens(raw string) []string {
 	return result
 }
 
+// sessionTTL resolves the session lifetime from --session-ttl and the deprecated
+// --cookie-max-age (the v0.1.6 name for the same knob). An explicit --session-ttl always wins and
+// the deprecated value is ignored with a warning; otherwise a set --cookie-max-age is honoured
+// so an upgrade does not silently change the lifetime operators configured. No extra bounds are
+// applied: --session-ttl itself has none, and auth.NewManager rejects an unusable TTL.
+func sessionTTL(ctx context.Context, cmd *cli.Command, log *slog.Logger) time.Duration {
+	seconds := cmd.Int(FlagSessionTTL)
+
+	if cmd.IsSet(FlagCookieMaxAge) {
+		if cmd.IsSet(FlagSessionTTL) {
+			log.WarnContext(ctx, "deprecated --cookie-max-age is ignored because --session-ttl is set",
+				"flag", "--"+FlagCookieMaxAge, "env", EnvCookieMaxAge, "use", "--"+FlagSessionTTL)
+		} else {
+			seconds = cmd.Int(FlagCookieMaxAge)
+
+			log.WarnContext(ctx, "--cookie-max-age is deprecated; its value is used as the session TTL, "+
+				"switch to --session-ttl",
+				"flag", "--"+FlagCookieMaxAge, "env", EnvCookieMaxAge, "use", "--"+FlagSessionTTL)
+		}
+	}
+
+	return time.Duration(seconds) * time.Second
+}
+
 func buildRouter(
 	ctx context.Context,
 	cmd *cli.Command,
@@ -156,7 +180,7 @@ func buildRouter(
 		ForcedScheme:   publicScheme,
 		// Same flag attachAccountSystem feeds into auth.NewManager's sessionTTL, so the TOTP
 		// session cookie's Max-Age always matches the actual server-side session lifetime.
-		SessionTTL:     time.Duration(cmd.Int(FlagSessionTTL)) * time.Second,
+		SessionTTL:     sessionTTL(ctx, cmd, log),
 		DisableAPI:     cmd.Bool(FlagDisableAPI),
 		DirectRedirect: cmd.Bool(FlagDirectRedirect),
 		// The same allow-list guards the redirect listener and, here, the main one.
@@ -390,13 +414,13 @@ func attachAccountSystem(
 		return handler, nil
 	}
 
-	sessionTTL := time.Duration(cmd.Int(FlagSessionTTL)) * time.Second
+	ttl := sessionTTL(ctx, cmd, log)
 
 	authMgr, err := auth.NewManager(
 		users, invites, sessions, apiTokens,
 		crypto.NewPasswordHasher(argon2ParamsFromFlags(cmd)).WithLogger(log),
 		crypto.NewSealer(argon2ParamsFromFlags(cmd)), crypto.NewTOTP(),
-		log, cmd.String(FlagTOTPIssuer), sessionTTL,
+		log, cmd.String(FlagTOTPIssuer), ttl,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("new auth manager: %w", err)
@@ -614,10 +638,25 @@ func serverAction(ctx context.Context, cmd *cli.Command) error {
 	return runServer(ctx, cmd, router, log)
 }
 
+// errRemovedAuthTokens is returned when the removed --auth-tokens / PADMARK_AUTH_TOKENS is set.
+var errRemovedAuthTokens = fmt.Errorf(
+	"--%s / %s was removed in this version: static bearer tokens are replaced by accounts; "+
+		"use --%s with %s and create the first admin via /setup or `padmark-cli setup` "+
+		"(API tokens are issued via /api/tokens); unset the old variable to start",
+	FlagAuthTokens, EnvAuthTokens, FlagEnableAccounts, EnvBootstrapToken,
+)
+
 // validateStartupSecrets checks the security configuration that must be sound before anything
 // is opened: the argon2 cost bounds, the argon2 memory budget and the bootstrap token. It returns
 // the validated token.
 func validateStartupSecrets(cmd *cli.Command) (string, error) {
+	// Fail closed: v0.1.6 gated writes behind these tokens, so ignoring them would bring the
+	// server up with anonymous writes. Only whether the value is set is checked; it is never
+	// echoed.
+	if cmd.String(FlagAuthTokens) != "" {
+		return "", errRemovedAuthTokens
+	}
+
 	costErr := argon2ParamsFromFlags(cmd).Validate()
 	if costErr != nil {
 		return "", fmt.Errorf("validate argon2 configuration: %w", costErr)
