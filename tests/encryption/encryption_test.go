@@ -100,7 +100,7 @@ func manager(t *testing.T, store keys.Storage, ring *crypto.ContentKeyring) *key
 	links, err := ring.ForResource("link")
 	require.NoError(t, err)
 
-	return keys.New(store, ring, notes, links)
+	return keys.New(store, ring, notes, links, crypto.NewEditCodeHasher(crypto.Argon2Params{}))
 }
 
 func reset(t *testing.T, db *bun.DB) {

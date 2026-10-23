@@ -37,6 +37,7 @@ func encryptionCommand() *cli.Command {
 	flags := append(migrateFlags(), &cli.StringFlag{
 		Name: FlagContentKeyring, Sources: cli.EnvVars(EnvContentKeyring), Usage: "Persisted content keyring JSON file",
 	}, allowSharedKeyringFlag())
+	flags = append(flags, argon2Flags()...)
 
 	items := []struct{ name, usage string }{
 		{"keygen", "Generate a keyring in a new 0600 file"},
@@ -44,8 +45,10 @@ func encryptionCommand() *cli.Command {
 		{"key-activate", "Select an already registered KEK in a new keyring file"},
 		{"key-remove", "Remove an unused, inactive KEK from a new keyring file"},
 		{"register", "Register a KEK with this installation without overwriting existing checks"},
-		{"status", "Verify keys and envelopes; print counts without changing the database"},
-		{encryptionMigrate, "Wrap raw legacy ciphertext; resume an interrupted migration"},
+		{"status", "Verify keys and envelopes; print counts (plaintext = unconverted v0.1.6 notes) " +
+			"without changing the database"},
+		{encryptionMigrate, "Wrap raw legacy ciphertext and convert plaintext v0.1.6 notes in place " +
+			"(hashed ID, encrypted content, hashed edit code); resume an interrupted migration"},
 		{encryptionRewrap, "Rotate DEK wrappers to the active KEK, keeping payloads unchanged"},
 		{encryptionConvert, "Convert wrapped legacy records using one original slug per stdin line"},
 		{encryptionPrune, "Permanently remove malformed raw records; preview with --corrupt --dry-run"},
@@ -82,7 +85,12 @@ func encryptionCommand() *cli.Command {
 	}
 }
 
-func newEncryptionManager(db *bun.DB, keyring *crypto.ContentKeyring) (*contentkeys.Manager, error) {
+// newEncryptionManager builds the content-key manager. hasher hashes the plaintext edit codes
+// of legacy (v0.1.6) notes converted by encryption migrate; serve never converts, but the
+// manager always needs one.
+func newEncryptionManager(
+	db *bun.DB, keyring *crypto.ContentKeyring, hasher contentkeys.EditCodeHasher,
+) (*contentkeys.Manager, error) {
 	notes, err := keyring.ForResource("note")
 	if err != nil {
 		//nolint:wrapcheck // WrapError adds shared encryption context.
@@ -95,7 +103,7 @@ func newEncryptionManager(db *bun.DB, keyring *crypto.ContentKeyring) (*contentk
 		return nil, contentkeys.WrapError(err)
 	}
 
-	return contentkeys.New(keyrepo.New(db), keyring, notes, links), nil
+	return contentkeys.New(keyrepo.New(db), keyring, notes, links, hasher), nil
 }
 
 func validateEncryptionFlags(cmd *cli.Command) error {
@@ -142,6 +150,14 @@ func encryptionAction(ctx context.Context, cmd *cli.Command) error {
 		return writeKeyring(cmd, keyring)
 	}
 
+	argonErr := validateArgon2Config(cmd)
+	if argonErr != nil {
+		return argonErr
+	}
+
+	// Bound argon2id workspace before converted legacy edit codes are hashed.
+	crypto.SetArgon2MemoryBudget(uint32(cmd.Int(FlagArgon2MemoryBudget))) //nolint:gosec // G115: bounded flag
+
 	db, err := openDB(ctx, cmd.String(FlagStorage), cmd.String(FlagDSN))
 	if err != nil {
 		//nolint:wrapcheck // WrapError adds shared encryption context.
@@ -149,7 +165,7 @@ func encryptionAction(ctx context.Context, cmd *cli.Command) error {
 	}
 	defer db.Close() //nolint:errcheck // all mutations commit before returning
 
-	manager, err := newEncryptionManager(db, keyring)
+	manager, err := newEncryptionManager(db, keyring, encryptionHasher(cmd))
 	if err != nil {
 		//nolint:wrapcheck // WrapError adds shared encryption context.
 		return contentkeys.WrapError(err)
@@ -179,7 +195,7 @@ func runEncryptionOperation(ctx context.Context, cmd *cli.Command, db *bun.DB,
 
 		keyring.Active = cmd.String(flagKeyID)
 
-		manager, err = newEncryptionManager(db, keyring)
+		manager, err = newEncryptionManager(db, keyring, encryptionHasher(cmd))
 		if err != nil {
 			//nolint:wrapcheck // WrapError adds shared encryption context.
 			return contentkeys.WrapError(err)
@@ -289,8 +305,15 @@ func writeKeyring(cmd *cli.Command, keyring *crypto.ContentKeyring) error {
 	return nil
 }
 
-func validateContentEncryption(ctx context.Context, db *bun.DB, keyring *crypto.ContentKeyring) error {
-	manager, err := newEncryptionManager(db, keyring)
+// encryptionHasher hashes converted legacy edit codes with the operator's argon2 cost.
+func encryptionHasher(cmd *cli.Command) *crypto.EditCodeHasher {
+	return crypto.NewEditCodeHasher(argon2ParamsFromFlags(cmd))
+}
+
+func validateContentEncryption(
+	ctx context.Context, db *bun.DB, keyring *crypto.ContentKeyring, hasher contentkeys.EditCodeHasher,
+) error {
+	manager, err := newEncryptionManager(db, keyring, hasher)
 	if err != nil {
 		return err
 	}

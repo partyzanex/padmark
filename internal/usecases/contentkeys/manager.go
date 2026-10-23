@@ -23,7 +23,22 @@ const (
 	resourceLink = "link"
 )
 
-type Row struct{ Resource, ID, Value string }
+// Row is one stored record as the migration protocol sees it. Legacy is set only for notes
+// tagged by the legacy_notes schema migration; it is nil for every other note and for all
+// links. Never log or wrap any field but Resource.
+type Row struct {
+	Legacy   *LegacyNote
+	Resource string
+	ID       string
+	Value    string
+}
+
+// LegacyNote carries the plaintext columns of a note written by v0.1.6 or earlier, whose ID
+// is the slug itself and whose content and edit code were stored unencrypted and unhashed.
+type LegacyNote struct {
+	Slug     string
+	EditCode string
+}
 
 type Registry struct {
 	Checks         map[string]string
@@ -42,6 +57,19 @@ type Storage interface {
 	Get(ctx context.Context, resource, id string) (*Row, error)
 	Replace(ctx context.Context, row Row, value string) (bool, error)
 	Delete(ctx context.Context, row Row) (bool, error)
+	// ConvertLegacy rewrites one tagged plaintext note in a single compare-and-swap: it sets
+	// id, content and edit_code and clears legacy_slug only while the row still holds the
+	// inspected id, content and legacy_slug. false means a concurrent change won. A target ID
+	// that already exists is reported as ErrConvertTargetExists, never by replacing that row.
+	ConvertLegacy(ctx context.Context, row Row, newID, value, editCodeHash string) (bool, error)
+}
+
+// EditCodeHasher hashes plaintext edit codes of converted legacy notes. Hash is the fast
+// format for server-generated high-entropy codes; HashUserProvided is the memory-hard format
+// for caller-chosen codes whose entropy is unknown.
+type EditCodeHasher interface {
+	Hash(code string) (string, error)
+	HashUserProvided(code string) (string, error)
 }
 
 type Keyring interface {
@@ -74,6 +102,7 @@ type Report struct {
 	Native     int            `json:"native"`
 	Failed     int            `json:"failed"`
 	CorruptRaw int            `json:"corrupt_raw"`
+	Plaintext  int            `json:"plaintext"`
 	Pruned     int            `json:"pruned"`
 	Changed    int            `json:"changed"`
 	Conflicts  int            `json:"conflicts"`
@@ -83,11 +112,15 @@ type Report struct {
 type Manager struct {
 	store   Storage
 	keys    Keyring
+	hasher  EditCodeHasher
 	ciphers map[string]Cipher
 }
 
-func New(store Storage, keys Keyring, notes, links Cipher) *Manager {
-	return &Manager{store: store, keys: keys, ciphers: map[string]Cipher{resourceNote: notes, resourceLink: links}}
+func New(store Storage, keys Keyring, notes, links Cipher, hasher EditCodeHasher) *Manager {
+	return &Manager{
+		store: store, keys: keys, hasher: hasher,
+		ciphers: map[string]Cipher{resourceNote: notes, resourceLink: links},
+	}
 }
 
 // Status authenticates envelopes and reports the remaining legacy layers without writing.
@@ -107,7 +140,7 @@ func (m *Manager) PrepareServe(ctx context.Context) error {
 		return WrapError(err)
 	}
 
-	if report.State != Ready || report.Raw != 0 {
+	if report.State != Ready || report.Raw != 0 || report.Plaintext != 0 {
 		return errors.New("content migration required; run encryption migrate while all servers are stopped")
 	}
 
@@ -254,10 +287,17 @@ func (m *Manager) validateKeys(reg *Registry, requireActive bool) error {
 	return nil
 }
 
-// inspect classifies a row: unversioned values are raw legacy ciphertext (Raw) or
-// malformed raw data (CorruptRaw, also Failed); versioned values that do not
-// authenticate are Failed only and are never eligible for pruning.
+// inspect classifies a row: notes tagged as v0.1.6 plaintext are Plaintext whatever their
+// content looks like (it may resemble an envelope or base64 ciphertext); other unversioned
+// values are raw legacy ciphertext (Raw) or malformed raw data (CorruptRaw, also Failed);
+// versioned values that do not authenticate are Failed only and are never eligible for pruning.
 func (m *Manager) inspect(row Row, reg *Registry, report *Report) {
+	if row.Legacy != nil {
+		report.Plaintext++
+
+		return
+	}
+
 	cipher := m.ciphers[row.Resource]
 	if !cipher.Versioned(row.Value) {
 		if cipher.ValidateLegacy(row.Value) != nil {
@@ -298,7 +338,8 @@ func (m *Manager) inspect(row Row, reg *Registry, report *Report) {
 
 // initialize authenticates existing envelopes before binding this DB to the supplied keys.
 // Initialize must atomically insert state plus checks, or leave an existing registry untouched.
-// Malformed raw records may be bound only in pending state for explicit cleanup;
+// Malformed raw records may be bound only in pending state for explicit cleanup, and v0.1.6
+// plaintext notes only in pending state for conversion (they are not failures);
 // envelope, key and storage failures still prevent first-time initialization.
 func (m *Manager) initialize(ctx context.Context) error {
 	reg, err := m.store.Registry(ctx)
@@ -328,7 +369,7 @@ func (m *Manager) initializeRegistry(ctx context.Context) error {
 	}
 
 	reg := &Registry{InstallationID: uuid.NewString(), Phase: Ready, Checks: make(map[string]string)}
-	if report.Raw != 0 || report.Failed != 0 {
+	if report.Raw != 0 || report.Failed != 0 || report.Plaintext != 0 {
 		reg.Phase = Pending
 	}
 

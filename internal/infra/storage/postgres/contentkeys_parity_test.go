@@ -86,6 +86,58 @@ func (s *ParitySuite) TestContentKeys_CiphertextCASPreservesConcurrentReplacemen
 	s.Equal("concurrent", stored.Value)
 }
 
+func (s *ParitySuite) TestContentKeys_ConvertLegacyCASAndTargetConflict() {
+	ctx := s.T().Context()
+
+	for _, slug := range []string{"legacy-slug", "taken-slug"} {
+		_, err := s.db.NewRaw(`INSERT INTO notes
+ (id, title, content, edit_code, views, burn_after_reading, burn_ttl, privacy, created_at, updated_at, legacy_slug)
+ VALUES (?, 'title', ?, 'hunter2', 0, false, 0, 'public', ?, ?, ?)`,
+			slug, "plain "+slug, time.Now(), time.Now(), slug).Exec(ctx)
+		s.Require().NoError(err)
+	}
+
+	s.Require().NoError(NewNoteRepository(s.db).Create(ctx, &domain.Note{
+		ID: domain.HashSlug("taken-slug"), Content: "current", EditCode: "s1$hash",
+		CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}))
+
+	repo := contentkeys.New(s.db)
+
+	legacy, err := repo.Get(ctx, "note", "legacy-slug")
+	s.Require().NoError(err)
+	s.Require().Equal(&keys.LegacyNote{Slug: "legacy-slug", EditCode: "hunter2"}, legacy.Legacy)
+
+	stale := *legacy
+	stale.Value = "edited meanwhile"
+	converted, err := repo.ConvertLegacy(ctx, stale, domain.HashSlug("legacy-slug"), "pmc2$p$new", "v1$hash")
+	s.Require().NoError(err)
+	s.False(converted)
+
+	converted, err = repo.ConvertLegacy(ctx, *legacy, domain.HashSlug("legacy-slug"), "pmc2$p$new", "v1$hash")
+	s.Require().NoError(err)
+	s.True(converted)
+
+	current, err := repo.Get(ctx, "note", domain.HashSlug("legacy-slug"))
+	s.Require().NoError(err)
+	s.Equal(keys.Row{Resource: "note", ID: domain.HashSlug("legacy-slug"), Value: "pmc2$p$new"}, *current)
+
+	taken, err := repo.Get(ctx, "note", "taken-slug")
+	s.Require().NoError(err)
+	converted, err = repo.ConvertLegacy(ctx, *taken, domain.HashSlug("taken-slug"), "pmc2$p$new", "s1$new")
+	s.Require().ErrorIs(err, keys.ErrConvertTargetExists)
+	s.False(converted)
+	s.NotContains(err.Error(), "taken")
+
+	untouched, err := repo.Get(ctx, "note", "taken-slug")
+	s.Require().NoError(err)
+	s.Equal(taken, untouched)
+
+	existing, err := repo.Get(ctx, "note", domain.HashSlug("taken-slug"))
+	s.Require().NoError(err)
+	s.Equal("current", existing.Value)
+}
+
 func (s *ParitySuite) TestContentKeys_ConcurrentReplaceSingleWinner() {
 	ctx := s.T().Context()
 	s.Require().NoError(NewLinkRepository(s.db, s.discard).Create(ctx, &domain.Link{

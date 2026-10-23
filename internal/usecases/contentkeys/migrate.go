@@ -31,7 +31,8 @@ func (m *Manager) replace(ctx context.Context, row Row, value string, report *Re
 	return nil
 }
 
-// Migrate adds the installation-key envelope to every structurally valid raw legacy row.
+// Migrate adds the installation-key envelope to every structurally valid raw legacy row and
+// converts every tagged v0.1.6 plaintext note in place (see convertLegacy).
 // A failure leaves phase=pending; committed rows are checked and skipped on the next run.
 func (m *Manager) Migrate(ctx context.Context, dryRun bool) (Report, error) {
 	if dryRun {
@@ -51,6 +52,10 @@ func (m *Manager) Migrate(ctx context.Context, dryRun bool) (Report, error) {
 	}
 
 	err := m.walk(ctx, func(row Row) error {
+		if row.Legacy != nil {
+			return m.convertLegacy(ctx, &row, &report)
+		}
+
 		cipher := m.ciphers[row.Resource]
 		if cipher.Versioned(row.Value) {
 			return nil
@@ -74,7 +79,7 @@ func (m *Manager) Migrate(ctx context.Context, dryRun bool) (Report, error) {
 		return final, WrapError(err)
 	}
 
-	if final.Raw != 0 {
+	if final.Raw != 0 || final.Plaintext != 0 {
 		return final, errors.New("migration incomplete; retry after stopping concurrent writers")
 	}
 
@@ -262,7 +267,7 @@ func (m *Manager) readyReport(ctx context.Context) (Report, error) {
 		return report, WrapError(err)
 	}
 
-	if reg == nil || report.State != Ready || report.Raw != 0 {
+	if reg == nil || report.State != Ready || report.Raw != 0 || report.Plaintext != 0 {
 		return report, errors.New("complete content migration first")
 	}
 

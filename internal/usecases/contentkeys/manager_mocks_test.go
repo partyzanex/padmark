@@ -54,6 +54,21 @@ func (mr *MockStorageMockRecorder) Batch(ctx, resource, after, limit any) *gomoc
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Batch", reflect.TypeOf((*MockStorage)(nil).Batch), ctx, resource, after, limit)
 }
 
+// ConvertLegacy mocks base method.
+func (m *MockStorage) ConvertLegacy(ctx context.Context, row Row, newID, value, editCodeHash string) (bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ConvertLegacy", ctx, row, newID, value, editCodeHash)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ConvertLegacy indicates an expected call of ConvertLegacy.
+func (mr *MockStorageMockRecorder) ConvertLegacy(ctx, row, newID, value, editCodeHash any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ConvertLegacy", reflect.TypeOf((*MockStorage)(nil).ConvertLegacy), ctx, row, newID, value, editCodeHash)
+}
+
 // Delete mocks base method.
 func (m *MockStorage) Delete(ctx context.Context, row Row) (bool, error) {
 	m.ctrl.T.Helper()
@@ -154,6 +169,60 @@ func (m *MockStorage) SetPhase(ctx context.Context, phase string) error {
 func (mr *MockStorageMockRecorder) SetPhase(ctx, phase any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetPhase", reflect.TypeOf((*MockStorage)(nil).SetPhase), ctx, phase)
+}
+
+// MockEditCodeHasher is a mock of EditCodeHasher interface.
+type MockEditCodeHasher struct {
+	ctrl     *gomock.Controller
+	recorder *MockEditCodeHasherMockRecorder
+	isgomock struct{}
+}
+
+// MockEditCodeHasherMockRecorder is the mock recorder for MockEditCodeHasher.
+type MockEditCodeHasherMockRecorder struct {
+	mock *MockEditCodeHasher
+}
+
+// NewMockEditCodeHasher creates a new mock instance.
+func NewMockEditCodeHasher(ctrl *gomock.Controller) *MockEditCodeHasher {
+	mock := &MockEditCodeHasher{ctrl: ctrl}
+	mock.recorder = &MockEditCodeHasherMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockEditCodeHasher) EXPECT() *MockEditCodeHasherMockRecorder {
+	return m.recorder
+}
+
+// Hash mocks base method.
+func (m *MockEditCodeHasher) Hash(code string) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Hash", code)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Hash indicates an expected call of Hash.
+func (mr *MockEditCodeHasherMockRecorder) Hash(code any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Hash", reflect.TypeOf((*MockEditCodeHasher)(nil).Hash), code)
+}
+
+// HashUserProvided mocks base method.
+func (m *MockEditCodeHasher) HashUserProvided(code string) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "HashUserProvided", code)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// HashUserProvided indicates an expected call of HashUserProvided.
+func (mr *MockEditCodeHasherMockRecorder) HashUserProvided(code any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "HashUserProvided", reflect.TypeOf((*MockEditCodeHasher)(nil).HashUserProvided), code)
 }
 
 // MockKeyring is a mock of Keyring interface.
