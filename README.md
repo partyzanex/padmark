@@ -847,8 +847,9 @@ Schema migrations create the registry tables; `status` and `--dry-run` never ini
 change that registry. The schema must already exist for those commands. The data migration is
 resumable and uses compare-and-swap. For previously encrypted records it wraps
 `content`/`target_url` without changing metadata. Tagged v0.1.6 plaintext notes are converted
-in place: their stored ID becomes `sha256(slug)`, content is encrypted, and the edit code is
-hashed. Their public URL and usable edit code stay the same, as do counters, TTL/burn settings,
+in place: their stored ID becomes `sha256(slug)`, content is encrypted, and every nonempty edit
+code is hashed with argon2id, since old records do not identify whether the code was generated
+or caller-chosen. Their public URL and usable edit code stay the same, as do counters, TTL/burn settings,
 privacy and timestamps. Deleted rows are never recreated. Any error exits nonzero; incomplete
 migrations block `serve` until a successful rerun.
 JSON reports contain `plaintext`, `raw`, `wrapped`, `native`, `failed`, `corrupt_raw`, `untagged_legacy`, `pruned`, `changed`,

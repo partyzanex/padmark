@@ -247,13 +247,8 @@ func assertStoredRowsConverted(t *testing.T, db *bun.DB, fixture []legacyNote) {
 
 		assert.NotEqual(t, note.editCode, row.EditCode, "edit code of %q must not stay plaintext", note.title)
 
-		prefix := "s1$" // generated 12-char codes take the fast hash
-		if !domain.HasGeneratedEditCodeShape(note.editCode) {
-			prefix = "v1$" // a caller-chosen code takes argon2id
-		}
-
-		assert.True(t, strings.HasPrefix(row.EditCode, prefix), "edit code of %q must be hashed with %s",
-			note.title, prefix)
+		assert.True(t, strings.HasPrefix(row.EditCode, "v1$"),
+			"legacy edit code of %q must use argon2id regardless of its shape", note.title)
 	}
 }
 
@@ -303,6 +298,7 @@ func assertEditCodes(t *testing.T, manager *notes.Manager, fixture []legacyNote)
 
 	for _, index := range []int{
 		noteUnicode, noteCustomSlug, notePrivate, noteHexArgonPrefix, noteHexFastPrefix, noteHexHashShaped,
+		noteWeakEditCode,
 	} {
 		note := &fixture[index]
 		update := func(code string) error {

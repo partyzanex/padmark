@@ -90,6 +90,8 @@ default, so without opting in the server stays fully public, exactly like v0.1.6
   listeners. `encryption migrate` also converts v0.1.6 plaintext notes in place (hashed slug,
   encrypted content, hashed edit code); `tests/upgrade` runs that path against database dumps
   produced by the real v0.1.6 binary on SQLite and PostgreSQL.
+  Every nonempty legacy edit code uses argon2id: its length and alphabet cannot establish
+  that it was server-generated. The original code remains valid after migration.
 - Session IDs, invite tokens and burn-after-reading reveal tokens are stored as SHA-256 digests
   only.
 

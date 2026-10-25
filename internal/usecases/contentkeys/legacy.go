@@ -45,20 +45,15 @@ func (m *Manager) convertLegacy(ctx context.Context, row *Row, report *Report) e
 	return nil
 }
 
-// hashLegacyEditCode keeps an empty code empty (it never verifies). A code shaped like a
-// server-generated one takes the fast hash, like a newly generated code; anything else was
-// chosen by the caller (v0.1.6 accepted any string) and takes the memory-hard hash.
+// hashLegacyEditCode keeps an empty code empty (it never verifies). Every nonempty legacy code
+// takes the memory-hard hash: v0.1.6 stored no provenance, and a caller-chosen weak code can
+// have exactly the same length and alphabet as a server-generated one.
 func (m *Manager) hashLegacyEditCode(code string) (string, error) {
 	if code == "" {
 		return "", nil
 	}
 
-	hash := m.hasher.HashUserProvided
-	if domain.HasGeneratedEditCodeShape(code) {
-		hash = m.hasher.Hash
-	}
-
-	hashed, err := hash(code)
+	hashed, err := m.hasher.HashUserProvided(code)
 	if err != nil {
 		return "", fmt.Errorf("hash legacy edit code: %w", err)
 	}

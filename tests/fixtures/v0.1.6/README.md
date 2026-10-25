@@ -55,7 +55,7 @@ use that path.
 
 | # | Title                   | Create request (v0.1.6)                                   | Then                    | Edit code            | After the upgrade                                         |
 |---|-------------------------|-----------------------------------------------------------|-------------------------|----------------------|-----------------------------------------------------------|
-| 1 | `1 unicode and dollars` | random slug; markdown starting with `pmc2$p$fake`, unicode, `$`, a valid base64 line | —     | generated (12 chars) | same content; edit code hashed `s1$…`                    |
+| 1 | `1 unicode and dollars` | random slug; markdown starting with `pmc2$p$fake`, unicode, `$`, a valid base64 line | —     | generated (12 chars) | same content; edit code hashed `v1$…` (argon2id)          |
 | 2 | `2 custom slug`         | `slug: my-custom_Slug-1`, `edit_code: hunter2`             | —                       | caller-chosen        | editable with `hunter2`; hashed `v1$…` (argon2id)          |
 | 3 | `3 private`             | `content_type: text/plain`, `private: true`                | —                       | generated            | `privacy = authenticated`                                  |
 | 4 | `4 burn after reading`  | `burn_after_reading: true`                                 | never read              | generated            | burns on its first read                                    |
@@ -86,6 +86,11 @@ use that path.
 | 5 | `kbv4rbbyo3`       | `NjU2rDbqn1x1` | `2026-10-23 00:12:49.252975` | `2036-10-20 00:12:49.299821` |
 | 6 | `od34bxkz3h`       | `4fbyuOALkCQk` | `2026-10-23 00:12:49.27025`  | `2026-10-23 00:12:50.314342` |
 | 7 | `xjr0nb16kk`       | `4lHg2NJHRoWl` | `2026-10-23 00:12:49.286155` | —                            |
+
+All nonempty legacy edit codes use argon2id after migration: v0.1.6 did not record whether a
+code was generated or caller-chosen. The upgrade tests also insert a caller-chosen
+`password1234` code with the same shape as a generated one, check the `v1$` format, and verify
+that the original code still authorizes edits on SQLite and PostgreSQL.
 
 The edit codes are fixture data from a throwaway database, published on purpose so the test can
 prove each v0.1.6 code still authorizes edits after the upgrade. Do not replace these historical

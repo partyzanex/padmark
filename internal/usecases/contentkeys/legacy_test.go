@@ -82,7 +82,7 @@ func (s *ManagerTestSuite) TestMigrateConvertsLegacyPlaintextNotes() {
 		newRow(resourceLink, "raw-link", legacyValue),
 	}
 	hashes := map[string]string{
-		"generated": "s1$fast", "custom": "v1$custom", "symbols": "v1$symbols", "empty-code": "",
+		"generated": "v1$generated", "custom": "v1$custom", "symbols": "v1$symbols", "empty-code": "",
 	}
 
 	var registry *Registry
@@ -103,7 +103,7 @@ func (s *ManagerTestSuite) TestMigrateConvertsLegacyPlaintextNotes() {
 		return nil
 	}).Times(4) // pending + ready, for each of the two runs
 	s.expectRows(&rows)
-	s.hasher.EXPECT().Hash("Abcdefgh1234").Return("s1$fast", nil)
+	s.hasher.EXPECT().HashUserProvided("Abcdefgh1234").Return("v1$generated", nil)
 	s.hasher.EXPECT().HashUserProvided("hunter2").Return("v1$custom", nil)
 	s.hasher.EXPECT().HashUserProvided("abc-def_ghi!").Return("v1$symbols", nil)
 	s.expectEncrypt(4)

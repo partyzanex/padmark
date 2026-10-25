@@ -140,7 +140,16 @@ const (
 	noteHexArgonPrefix = noteCount + iota // edit code "v1$...": tagged by the full-shape check
 	noteHexFastPrefix                     // edit code "s1$...": tagged by the full-shape check
 	noteHexHashShaped                     // edit code of the exact "s1$" hash shape: needs mark-legacy
+	noteWeakEditCode                      // caller-chosen 12-char alphanumeric code: must use argon2id
 )
+
+func weakEditCodeNote() legacyNote {
+	return legacyNote{
+		slug: "weak-custom-edit-code", editCode: "password1234", title: "11 weak alphanumeric edit code",
+		content: "Caller-chosen code with the same shape as a generated code.", contentType: "text/plain",
+		createdAt: "2026-10-23T00:13:00.000004Z",
+	}
+}
 
 func hexSlugNotes() []legacyNote {
 	hashShaped := "s1$" + strings.Repeat("A", 22) + "$" + strings.Repeat("B", 43)
