@@ -8,7 +8,11 @@ info:
 
     `--enable-accounts` gates access: TOTP-based user accounts with session cookies, plus
     long-lived API tokens issued to a user for CLI/programmatic access. When it is off, the site
-    is fully public and every request is treated as anonymous.
+    is fully public and every request is treated as anonymous. Nothing can enforce the
+    `authenticated` and `owner` privacy levels then, so a request that sends either in `privacy`
+    gets `422`; the edit code alone authorises `PUT` and `DELETE`. The deprecated `private: true`
+    is still accepted for v0.1.6 clients: as in v0.1.6 without authentication, such a note stays
+    readable by anyone until the server enables accounts.
 
     Read endpoints (`GET`) are gated by each note's `privacy` level:
 

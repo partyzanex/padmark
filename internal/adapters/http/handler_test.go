@@ -304,7 +304,9 @@ func (s *HandlerSuite) TestEditPage_OK() {
 	s.Contains(body, "edit me")
 	s.Contains(body, "# hello")
 	s.Contains(body, "Save")
-	s.Contains(body, `value="authenticated" selected`)
+	// Without accounts the stored level stays selectable but says it is not enforced (review R2).
+	s.Contains(body, `value="authenticated" data-hint="Not enforced: accounts are off, `+
+		`anyone with the link can view" selected`)
 }
 
 // TestEditPage_BurnNote_ContentWithheld: the editor never burns, so it must not pre-fill a
@@ -1404,6 +1406,8 @@ func (s *HandlerSuite) TestUpdateNote_ImmediateBurn() {
 }
 
 func (s *HandlerSuite) TestUpdateNote_WithPrivacy() {
+	// Protected privacy levels need the account system (requirePrivacySupport).
+	s.router = s.newRouterWithTOTPAuth()
 	s.expectMutationGate()
 
 	updated := newTestNote("updated", "body")

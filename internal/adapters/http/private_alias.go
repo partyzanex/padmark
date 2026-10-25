@@ -45,3 +45,16 @@ func resolvePrivacy(private ogenapi.OptBool, privacy *domain.Privacy) (*domain.P
 func privateFlag(note *domain.Note) bool {
 	return note.EffectivePrivacy() != domain.PrivacyPublic
 }
+
+// requirePrivacySupport rejects a protected level (authenticated, owner) sent in the `privacy`
+// field when the account system is off: no login exists, so nothing could enforce it, and an
+// accepted request would promise a restriction that does not apply. Callers pass only the
+// `privacy` field. The deprecated v0.1.6 `private: true` stays accepted for compatibility, as
+// v0.1.6 accepted it without --auth-tokens; the stored level applies once accounts are enabled.
+func requirePrivacySupport(accounts bool, level *domain.Privacy) error {
+	if accounts || level == nil || *level == domain.PrivacyPublic {
+		return nil
+	}
+
+	return domain.ErrPrivacyNeedsAccounts
+}

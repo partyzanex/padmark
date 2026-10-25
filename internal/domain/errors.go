@@ -22,9 +22,14 @@ var (
 	// ErrCustomSlugDisabled is returned when a create request supplies a custom slug but the
 	// server has human-readable (custom) slugs turned off (--custom-slugs=false).
 	ErrCustomSlugDisabled = errors.New("custom slugs are disabled on this server")
-	ErrForbidden          = errors.New("forbidden")
-	ErrInvalidEditCode    = errors.New("invalid edit code")
-	ErrDecryptionFailed   = errors.New("content decryption failed")
+	// ErrPrivacyNeedsAccounts is returned when a request asks for the authenticated or owner
+	// privacy level on a server without the account system: nothing could enforce it there, so
+	// every note and link is readable by anyone who has its URL.
+	ErrPrivacyNeedsAccounts = errors.New("privacy authenticated and owner need the account system, " +
+		"which is disabled on this server; send privacy public or omit it")
+	ErrForbidden        = errors.New("forbidden")
+	ErrInvalidEditCode  = errors.New("invalid edit code")
+	ErrDecryptionFailed = errors.New("content decryption failed")
 	// ErrEditCodeTooShort is returned when a caller-chosen edit code is shorter than
 	// MinEditCodeLength runes. Only creation is validated — see ValidateEditCode.
 	ErrEditCodeTooShort = errors.New("edit code must be at least 8 characters")

@@ -483,3 +483,15 @@ func (sess *uiSession) code(secret string, at time.Time) string {
 
 	return code
 }
+
+// expectPrivacyOptions checks the values the editor's privacy select offers, in order.
+func (sess *uiSession) expectPrivacyOptions(values ...string) {
+	sess.t.Helper()
+
+	options := sess.page.Locator("#privacySelect option")
+	sess.must(sess.expect.Locator(options).ToHaveCount(len(values)))
+
+	for index, value := range values {
+		sess.must(sess.expect.Locator(options.Nth(index)).ToHaveAttribute("value", value))
+	}
+}

@@ -19,7 +19,20 @@ func TestAccounts(t *testing.T) {
 		{name: "AdminForms", accounts: true, run: testAdminForms},
 		{name: "RevokeUser", accounts: true, run: testRevokeUser},
 		{name: "ChangePassword", accounts: true, run: testChangePassword},
+		{name: "PrivacyOptions", accounts: true, run: testPrivacyOptions},
 	})
+}
+
+// testPrivacyOptions: with the account system the editor (open to signed-in users only) offers
+// every level, including owner (review R2). The anonymous case is covered by TestPrivacyOptions.
+func testPrivacyOptions(sess *uiSession) {
+	sess.admin()
+	sess.gotoPage("/")
+	sess.expectPrivacyOptions("public", "authenticated", "owner")
+	sess.selectOption("#privacySelect", "owner")
+	sess.text("#privacyHint", "Only you can view")
+	sess.selectOption("#privacySelect", "authenticated")
+	sess.text("#privacyHint", "Requires login to view")
 }
 
 func testSetup(sess *uiSession) {

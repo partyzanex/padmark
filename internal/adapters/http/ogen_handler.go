@@ -56,11 +56,17 @@ func (h *OgenHandler) CreateNote(
 		burnTTL = req.TTL.Value
 	}
 
+	// A contradictory request is the caller's error (400) before any server capability (422).
 	privacy, err := resolvePrivacy(req.Private, optCreatePrivacyPtr(req.Privacy)) //nolint:staticcheck // deprecated alias
 	if err != nil {
 		v := ogenapi.CreateNoteBadRequest(errResp(err))
 
 		return &v, nil
+	}
+
+	err = requirePrivacySupport(h.accountsEnabled(), optCreatePrivacyPtr(req.Privacy))
+	if err != nil {
+		return mapCreateError(err, h.log), nil
 	}
 
 	note, err := h.manager.Create(ctx, &domain.Note{
@@ -127,6 +133,11 @@ func (h *OgenHandler) UpdateNote(
 		v := ogenapi.UpdateNoteBadRequest(errResp(err))
 
 		return &v, nil
+	}
+
+	err = requirePrivacySupport(h.accountsEnabled(), optUpdatePrivacyPtr(req.Privacy))
+	if err != nil {
+		return mapUpdateError(err, h.log), nil
 	}
 
 	if !h.anonymousNoteMutationAllowed(ctx, params.ID) {
@@ -211,6 +222,11 @@ func (h *OgenHandler) DeleteNote(
 func (h *OgenHandler) CreateLink(
 	ctx context.Context, req *ogenapi.CreateLinkRequest,
 ) (ogenapi.CreateLinkRes, error) {
+	err := requirePrivacySupport(h.accountsEnabled(), optCreateLinkPrivacyPtr(req.Privacy))
+	if err != nil {
+		return mapCreateLinkError(err, h.log), nil
+	}
+
 	link, err := h.linkManager.Create(ctx, req.TargetURL.String(), buildCreateLinkOptions(ctx, req))
 	if err != nil {
 		return mapCreateLinkError(err, h.log), nil
@@ -233,7 +249,7 @@ func (h *OgenHandler) CreateLinksBulk(
 	results := make([]ogenapi.BulkLinkResult, len(req.Links))
 
 	for i := range req.Links {
-		results[i] = createOneBulkLink(ctx, h.linkManager, h.log, &req.Links[i])
+		results[i] = createOneBulkLink(ctx, h.linkManager, h.log, h.accountsEnabled(), &req.Links[i])
 	}
 
 	return &ogenapi.BulkCreateLinksResponse{Results: results}, nil
@@ -313,9 +329,15 @@ func buildCreateLinkOptions(ctx context.Context, req *ogenapi.CreateLinkRequest)
 // error is logged here too, mirroring mapCreateLinkError's default branch — otherwise a bulk-item
 // failure with no known cause would go unlogged, unlike the single-item path.
 func createOneBulkLink(
-	ctx context.Context, manager LinkManager, log *slog.Logger, item *ogenapi.CreateLinkRequest,
+	ctx context.Context, manager LinkManager, log *slog.Logger, accounts bool, item *ogenapi.CreateLinkRequest,
 ) ogenapi.BulkLinkResult {
-	link, err := manager.Create(ctx, item.TargetURL.String(), buildCreateLinkOptions(ctx, item))
+	var link *domain.Link
+
+	err := requirePrivacySupport(accounts, optCreateLinkPrivacyPtr(item.Privacy))
+	if err == nil {
+		link, err = manager.Create(ctx, item.TargetURL.String(), buildCreateLinkOptions(ctx, item))
+	}
+
 	if err != nil {
 		status, message := errorStatusMessage(err)
 		if status == http.StatusInternalServerError {
@@ -644,8 +666,14 @@ func mapCreateInviteError(err error, log *slog.Logger) ogenapi.CreateInviteRes {
 // may not edit it via edit code either. Authenticated callers always pass; their ownership
 // still decides inside the usecase (OwnedBy / ValidateOwnership). A failed Peek defers to the
 // real mutation so the caller sees the same error (404) a read would produce, unchanged.
+// accountsEnabled reports whether the account system is attached (--enable-accounts): only then
+// can the authenticated and owner privacy levels be enforced.
+func (h *OgenHandler) accountsEnabled() bool { return h.authMgr != nil }
+
+// Without the account system (accountsEnabled false) no privacy level is enforced on reads, as
+// in v0.1.6 without --auth-tokens, so the edit code alone decides, like the native PUT/DELETE gate.
 func (h *OgenHandler) anonymousNoteMutationAllowed(ctx context.Context, id string) bool {
-	if callerIDFromCtx(ctx) != uuid.Nil {
+	if !h.accountsEnabled() || callerIDFromCtx(ctx) != uuid.Nil {
 		return true
 	}
 
@@ -660,7 +688,7 @@ func (h *OgenHandler) anonymousNoteMutationAllowed(ctx context.Context, id strin
 // anonymousLinkMutationAllowed is the links counterpart of anonymousNoteMutationAllowed
 // (see GetLink's VisibleTo check for the read-path symmetry).
 func (h *OgenHandler) anonymousLinkMutationAllowed(ctx context.Context, id string) bool {
-	if callerIDFromCtx(ctx) != uuid.Nil {
+	if !h.accountsEnabled() || callerIDFromCtx(ctx) != uuid.Nil {
 		return true
 	}
 

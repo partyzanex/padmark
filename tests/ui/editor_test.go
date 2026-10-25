@@ -2,6 +2,7 @@ package ui_test
 
 import (
 	"fmt"
+	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
@@ -37,6 +38,8 @@ func TestEditor(t *testing.T) {
 	cases = append(cases,
 		scenario{name: "Toolbar", run: testToolbar},
 		scenario{name: "Options", run: testOptions},
+		scenario{name: "PrivacyNeedsAccounts", allowedStatuses: []int{http.StatusUnprocessableEntity},
+			run: testPrivacyNeedsAccounts},
 		scenario{name: "EmptyContent", run: testEmptyContent},
 		scenario{name: "PublishAndView", run: testPublishAndView},
 		scenario{name: "EditAndSave", run: testEditAndSave},
@@ -76,12 +79,39 @@ func testOptions(sess *uiSession) {
 	sess.click("#burnLabel")
 	sess.must(sess.expect.Locator(sess.page.Locator("#burnTime")).ToBeDisabled())
 
-	for _, privacy := range []struct{ value, hint string }{
-		{"authenticated", "Requires login to view"}, {"owner", "Only you can view"}, {"public", "Anyone can view"},
-	} {
-		sess.selectOption("#privacySelect", privacy.value)
-		sess.text("#privacyHint", privacy.hint)
+	// Without the account system nothing enforces a protected level, so only public is offered.
+	sess.expectPrivacyOptions("public")
+	sess.text("#privacyHint", "Anyone can view")
+}
+
+// testPrivacyNeedsAccounts pins review R2 in the default configuration: the API refuses a
+// protected level it cannot enforce, and keeps accepting the deprecated v0.1.6 `private` flag,
+// which, as in v0.1.6 without auth, an independent client can still read.
+func testPrivacyNeedsAccounts(sess *uiSession) {
+	request := sess.browserContext.Request()
+	headers := map[string]string{"Accept": "application/json"}
+
+	refused, err := request.Post("/notes", playwright.APIRequestContextPostOptions{
+		Headers: headers, Data: map[string]any{"content": "protected?", "privacy": "authenticated"},
+	})
+	sess.must(err)
+	require.Equal(sess.t, http.StatusUnprocessableEntity, refused.Status())
+
+	created, err := request.Post("/notes", playwright.APIRequestContextPostOptions{
+		Headers: headers, Data: map[string]any{"content": "v0.1.6 private", "private": true},
+	})
+	sess.must(err)
+	require.Equal(sess.t, http.StatusCreated, created.Status())
+
+	var note struct {
+		ID string `json:"id"`
 	}
+
+	sess.must(created.JSON(&note))
+
+	read, err := request.Get("/notes/"+note.ID, playwright.APIRequestContextGetOptions{Headers: headers})
+	sess.must(err)
+	require.Equal(sess.t, http.StatusOK, read.Status())
 }
 
 func testEmptyContent(sess *uiSession) {

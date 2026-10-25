@@ -49,6 +49,8 @@ func (s *HandlerSuite) sendJSON(method, path, body string) *httptest.ResponseRec
 // TestCreateNote_PrivateAlias pins the deprecated v0.1.6 `private` boolean: it maps onto privacy
 // before the manager sees the note, and a disagreeing pair is a 400 that never reaches the manager.
 func (s *HandlerSuite) TestCreateNote_PrivateAlias() {
+	// Protected privacy levels need the account system (requirePrivacySupport).
+	s.router = s.newRouterWithTOTPAuth()
 	cases := []struct {
 		name string
 		body string
@@ -91,6 +93,8 @@ func (s *HandlerSuite) TestCreateNote_PrivateAliasConflict() {
 }
 
 func (s *HandlerSuite) TestUpdateNote_PrivateAlias() {
+	// Protected privacy levels need the account system (requirePrivacySupport).
+	s.router = s.newRouterWithTOTPAuth()
 	cases := []struct {
 		name string
 		body string

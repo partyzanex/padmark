@@ -14,6 +14,8 @@ import (
 )
 
 func (s *HandlerSuite) TestUpdateLink_OptionalFields() {
+	// The anonymous mutation gate applies only with the account system.
+	s.router = s.newRouterWithTOTPAuth()
 	for _, testCase := range []struct {
 		name, fields string
 		clear        bool
@@ -65,6 +67,8 @@ func (s *HandlerSuite) TestUpdateLink_InvalidBody() {
 }
 
 func (s *HandlerSuite) TestUpdateLink_AnonymousPrivateLinkDenied() {
+	// The anonymous mutation gate applies only with the account system.
+	s.router = s.newRouterWithTOTPAuth()
 	link := newTestLink()
 	privacy := domain.PrivacyAuthenticated
 
@@ -80,6 +84,8 @@ func (s *HandlerSuite) TestUpdateLink_AnonymousPrivateLinkDenied() {
 }
 
 func (s *HandlerSuite) TestUpdateLink_FailedCodesLockOut() {
+	// The anonymous mutation gate applies only with the account system.
+	s.router = s.newRouterWithTOTPAuth()
 	s.linkManager.EXPECT().Peek(gomock.Any(), testLinkID).Return(newTestLink(), nil).Times(10)
 	s.linkManager.EXPECT().Update(gomock.Any(), testLinkID, "wrong", uuid.Nil, gomock.Any(), gomock.Any()).
 		Return(nil, domain.ErrInvalidEditCode).Times(10)

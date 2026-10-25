@@ -45,6 +45,7 @@ type editorViewData struct {
 	Content          string
 	Nonce            string
 	Privacy          string
+	PrivacyOptions   []privacyOption
 	TTL              int64
 	EditMode         bool
 	BurnAfterReading bool
@@ -54,13 +55,59 @@ type editorViewData struct {
 	ContentWithheld bool
 }
 
+// privacyOption is one entry of the editor's privacy select. Hint, when set, replaces the
+// default hint text for that level.
+type privacyOption struct {
+	Value    string
+	Label    string
+	Hint     string
+	Selected bool
+}
+
+// privacyOptions lists the privacy levels the editor offers (review R2): public always,
+// authenticated only with the account system (otherwise nothing enforces it), owner only to a
+// signed-in user (an anonymous note has no owner). The current level of an edited note is always
+// listed, so saving without a change keeps it; without accounts its hint says it is not enforced.
+func privacyOptions(accounts, signedIn bool, current domain.Privacy) []privacyOption {
+	levels := []struct {
+		value   domain.Privacy
+		label   string
+		offered bool
+	}{
+		{domain.PrivacyPublic, "Public", true},
+		{domain.PrivacyAuthenticated, "Requires login", accounts},
+		{domain.PrivacyOwner, "Owner only", accounts && signedIn},
+	}
+
+	options := make([]privacyOption, 0, len(levels))
+
+	for index := range levels {
+		level := &levels[index]
+
+		selected := level.value == current
+		if !level.offered && !selected {
+			continue
+		}
+
+		option := privacyOption{Value: string(level.value), Label: level.label, Hint: "", Selected: selected}
+		if !accounts && level.value != domain.PrivacyPublic {
+			option.Hint = "Not enforced: accounts are off, anyone with the link can view"
+		}
+
+		options = append(options, option)
+	}
+
+	return options
+}
+
 // IndexPage handles GET / — serves the note editor.
 func (h *PageHandler) IndexPage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
 	err := h.indexTmpl.Execute(w, editorViewData{
-		Nonce:   nonceFromContext(r.Context()),
-		Privacy: string(domain.PrivacyPublic),
+		Nonce:          nonceFromContext(r.Context()),
+		Privacy:        string(domain.PrivacyPublic),
+		PrivacyOptions: privacyOptions(h.authMgr != nil, h.signedIn(r), domain.PrivacyPublic),
 		// ID/Title/Content blank — fresh editor. TTL/EditMode/BurnAfterReading/IsOwner are zero defaults
 		// (Create form, not owner view).
 		ID:               "",

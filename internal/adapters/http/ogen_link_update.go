@@ -18,6 +18,18 @@ import (
 func (h *OgenHandler) UpdateLink(
 	ctx context.Context, req *ogenapi.UpdateLinkRequest, params ogenapi.UpdateLinkParams,
 ) (ogenapi.UpdateLinkRes, error) {
+	var requested *domain.Privacy
+
+	if req.Privacy.IsSet() {
+		privacy := domain.Privacy(req.Privacy.Value)
+		requested = &privacy
+	}
+
+	err := requirePrivacySupport(h.accountsEnabled(), requested)
+	if err != nil {
+		return mapUpdateLinkError(err, h.log), nil
+	}
+
 	if !h.anonymousLinkMutationAllowed(ctx, params.ID) {
 		return &ogenapi.UpdateLinkUnauthorized{}, nil
 	}
@@ -34,10 +46,7 @@ func (h *OgenHandler) UpdateLink(
 		opts.ExpiresAt = &expiresAt
 	}
 
-	if req.Privacy.IsSet() {
-		privacy := domain.Privacy(req.Privacy.Value)
-		opts.Privacy = &privacy
-	}
+	opts.Privacy = requested
 
 	link, err := h.linkManager.Update(ctx, params.ID, req.EditCode.Or(""), callerIDFromCtx(ctx),
 		req.TargetURL.String(), opts)

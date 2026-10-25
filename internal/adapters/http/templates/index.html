@@ -82,9 +82,9 @@
             <span class="burn-text">Privacy</span>
             <div class="select-wrap">
                 <select class="field-select" id="privacySelect">
-                    <option value="public"{{if eq .Privacy "public"}} selected{{end}}>Public</option>
-                    <option value="authenticated"{{if eq .Privacy "authenticated"}} selected{{end}}>Requires login</option>
-                    <option value="owner"{{if eq .Privacy "owner"}} selected{{end}}>Owner only</option>
+                    {{- range .PrivacyOptions}}
+                    <option value="{{.Value}}"{{if .Hint}} data-hint="{{.Hint}}"{{end}}{{if .Selected}} selected{{end}}>{{.Label}}</option>
+                    {{- end}}
                 </select>
             </div>
             <span class="shortcut-hint" id="privacyHint">Anyone can view</span>
@@ -155,8 +155,20 @@
         return document.getElementById('privacySelect').value;
     }
 
+    // The server lists only the levels it can enforce; editing keeps the stored level unless the
+    // user changes it, so an unchanged level is not sent.
+    const initialPrivacy = getPrivacy();
+
+    function changedPrivacy() {
+        const privacy = getPrivacy();
+        return privacy === initialPrivacy ? undefined : privacy;
+    }
+
     function updatePrivacyHint() {
-        document.getElementById('privacyHint').textContent = privacyHints[getPrivacy()] || privacyHints.public;
+        const select = document.getElementById('privacySelect');
+        const option = select.options[select.selectedIndex];
+        document.getElementById('privacyHint').textContent =
+            (option && option.dataset.hint) || privacyHints[getPrivacy()] || privacyHints.public;
     }
 
     function getTTL() {
@@ -232,7 +244,7 @@
         btn.disabled = true;
 
         const burn = document.getElementById('burnCheck').checked;
-        const payload = { title: title || 'Untitled', content, edit_code: editCode, burn_after_reading: burn, privacy: getPrivacy() };
+        const payload = { title: title || 'Untitled', content, edit_code: editCode, burn_after_reading: burn, privacy: changedPrivacy() };
         if (burn) payload.ttl = ttl;
 
         try {

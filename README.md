@@ -594,7 +594,11 @@ session-cookie check; an unknown, revoked, or expired key falls through to 401 /
 
 ### User accounts with TOTP 2FA (web)
 
-**Off by default — the site is fully public** (read and create notes, no login). Enable the account system with `--enable-accounts` / `PADMARK_ENABLE_ACCOUNTS=true`:
+**Off by default — the site is fully public** (read and create notes, no login). Without accounts nothing can enforce
+the `authenticated` and `owner` privacy levels: the editor offers only Public, the API answers `422` to them, and the
+edit code alone authorises edits and deletion. The deprecated `private: true` of v0.1.6 is still accepted and, as in
+v0.1.6, not enforced until accounts are enabled. Enable the account system with `--enable-accounts` /
+`PADMARK_ENABLE_ACCOUNTS=true`:
 
 ```bash
 PADMARK_ENABLE_ACCOUNTS=true go run ./cmd/padmark-server serve

@@ -265,6 +265,13 @@ func (h *NoteHandler) UpdateNoteByPath(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	err = requirePrivacySupport(h.authMgr != nil, optUpdatePrivacyPtr(body.Privacy))
+	if err != nil {
+		h.writeError(w, r, err)
+
+		return
+	}
+
 	note, err := h.manager.Update(r.Context(), id, body.EditCode.Or(""), callerIDFromCtx(r.Context()), payload)
 	if err != nil {
 		h.writeError(w, r, err)

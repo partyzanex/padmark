@@ -62,6 +62,7 @@ func domainErrStatus(err error) (status int, message string) {
 		{domain.ErrOwnerPrivacyRequiresOwner, http.StatusUnprocessableEntity},
 		{domain.ErrInvalidSlug, http.StatusUnprocessableEntity},
 		{domain.ErrCustomSlugDisabled, http.StatusUnprocessableEntity},
+		{domain.ErrPrivacyNeedsAccounts, http.StatusUnprocessableEntity},
 		// Usually caught earlier by the schema's minLength/maxLength (ogen answers 400); what
 		// reaches the usecase (surrounding whitespace, control characters) is a 422 like the
 		// other create-time validation errors above.
