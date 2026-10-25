@@ -945,6 +945,8 @@ and its matching keyring into an isolated installation, run schema migration if 
 then `encryption status` and a read of a known record. Wrong/missing keys must fail validation.
 Do not delete registry rows to bypass that failure. SQLite file backups must include a consistent
 WAL state (use the backup API or `VACUUM INTO`); PostgreSQL can use `pg_dump`/`pg_restore`.
+Automatic SQLite backups reserve a new `0600` file before writing. A filename collision adds
+a unique suffix; existing backups are preserved even when the new write fails.
 Restoring a pre-migration backup also requires running `encryption migrate` before serving.
 There is no destructive encryption down-migration, and older binaries cannot read the new data.
 

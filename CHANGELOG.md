@@ -107,6 +107,8 @@ default, so without opting in the server stays fully public, exactly like v0.1.6
 - `padmark-server migrate` applies pending schema migrations and exits. On SQLite a `0600` copy of
   the database is written next to it before the first pending migration (`--skip-migration-backup`
   to opt out); on PostgreSQL the pending versions are logged with a reminder to `pg_dump`.
+  Existing backups are preserved on filename collisions: a new copy gets a unique suffix,
+  and a failed write removes only the file reserved for that attempt.
 - `--argon2-memory/time/threads` and the new `--argon2-memory-budget` (128 MiB): a process-wide
   cap on the memory held by concurrent argon2 derivations. README gained a memory-sizing section;
   a 256 MB container needs `GOMEMLIMIT≈200MiB`.
