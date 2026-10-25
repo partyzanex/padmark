@@ -187,10 +187,13 @@ func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
 		&cli.BoolFlag{
 			Name:    FlagCustomSlugs,
 			Sources: cli.EnvVars(EnvCustomSlugs),
-			Value:   false,
+			// On by default like v0.1.6, which always accepted a slug; set false to issue only
+			// random slugs, because human-readable public URLs are easier to guess.
+			Value: true,
 			Usage: "Allow user-supplied human-readable slugs at note creation (e.g. project/GUIDE.md) " +
 				"and at short-link creation (e.g. launch-2026, single segment only). " +
-				"Off by default because human-readable public URLs are easier to guess. " +
+				"On by default for v0.1.6 compatibility; set false to issue only random slugs, " +
+				"because human-readable public URLs are easier to guess. " +
 				"New content encryption keys are independent of the slug",
 		},
 		&cli.IntFlag{
