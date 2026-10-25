@@ -21,7 +21,8 @@ import (
 // ErrSlugConflict, since the caller chose that exact value.
 const maxHashRetries = 5
 
-// Storage defines persistence operations for links.
+// Storage defines persistence operations for links. Create must atomically claim the ID
+// across notes and links, returning domain.ErrSlugConflict if another resource owns it.
 type Storage interface {
 	Create(ctx context.Context, link *domain.Link) error
 	Update(ctx context.Context, id string, link *domain.Link) (*domain.Link, error)
@@ -44,13 +45,10 @@ type NotesChecker interface {
 	Exists(ctx context.Context, id string) (bool, error)
 }
 
-// SlugLock serializes the check-then-create window in resolveUniqueSlug. Notes and links live
-// in separate tables (see NotesChecker's doc comment), so the database's own PK constraint only
-// protects a same-table collision — a concurrent links.Create and notes.Create targeting the
-// same slug would otherwise both observe "not taken" and both write. The concrete
-// implementation must be the exact same instance notes.Manager locks against (see notes.
-// SlugLock), or this protects nothing. Declared here rather than imported from notes, for the
-// same reason as Encryptor above: a usecase package may only import domain + stdlib.
+// SlugLock serializes local preflight checks in resolveUniqueSlug. Share the same instance
+// with notes.Manager. Storage independently enforces cross-resource uniqueness between
+// server processes. Declared here rather than imported from notes: usecases depend only on
+// domain and stdlib.
 // Updates and target-cache fills also share this lock to coordinate local eviction.
 type SlugLock interface {
 	Lock(ctx context.Context, key string) (unlock func(), err error)
@@ -214,10 +212,8 @@ func validateLink(link *domain.Link) error {
 
 // Create validates a target URL and persists a new short link, returning it with the plaintext
 // target URL and plaintext edit code populated — both are stored encrypted/hashed. Mirrors
-// notes.Manager.Create closely; the notable difference is slug resolution needs a bounded retry
-// loop here (notes.Manager.Create never retries, since a note's own table is the only place a
-// collision can happen — links must also check against notes' table, so a random-slug collision
-// is expected to happen occasionally and is retried, not treated as a hard failure immediately).
+// notes.Manager.Create closely. Link slug resolution retries randomly generated candidates
+// rejected by preflight; a collision during the final atomic insert returns ErrSlugConflict.
 func (m *Manager) Create(ctx context.Context, targetURL string, opts CreateOptions) (*domain.Link, error) {
 	validURL, err := validateTargetURL(targetURL)
 	if err != nil {

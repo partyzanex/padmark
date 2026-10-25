@@ -602,7 +602,7 @@ func serverAction(ctx context.Context, cmd *cli.Command) error {
 	storage := cmd.String(FlagStorage)
 	dsn := cmd.String(FlagDSN)
 
-	keyring, err := loadServeKeyring(cmd.String(FlagContentKeyring), storage, dsn, log)
+	keyring, err := loadServeKeyring(cmd.String(FlagContentKeyring), storage, dsn, cmd.Bool(FlagAllowSharedKeyring), log)
 	if err != nil {
 		return fmt.Errorf("load content encryption keys: %w", err)
 	}

@@ -14,7 +14,8 @@ import (
 	"github.com/partyzanex/padmark/internal/domain"
 )
 
-// Storage defines persistence operations for notes.
+// Storage defines persistence operations for notes. Create must atomically claim the ID
+// across notes and links, returning domain.ErrSlugConflict if another resource owns it.
 type Storage interface {
 	Create(ctx context.Context, note *domain.Note) error
 	Get(ctx context.Context, id string) (*domain.Note, error)
@@ -32,12 +33,9 @@ type LinksChecker interface {
 	Exists(ctx context.Context, id string) (bool, error)
 }
 
-// SlugLock serializes the check-then-create window in resolveUniqueSlug. Notes and links live
-// in separate tables (see LinksChecker's doc comment), so the database's own PK constraint only
-// protects a same-table collision — a concurrent notes.Create and links.Create targeting the
-// same slug would otherwise both observe "not taken" and both write. The concrete
-// implementation must be the exact same instance links.Manager locks against (see links.
-// SlugLock), or this protects nothing.
+// SlugLock serializes local preflight checks in resolveUniqueSlug. Share the same instance
+// with links.Manager. Storage must independently enforce cross-resource uniqueness when
+// Create persists a row: different server processes do not share this lock.
 type SlugLock interface {
 	Lock(ctx context.Context, key string) (unlock func(), err error)
 }
@@ -562,16 +560,11 @@ func (m *Manager) renderContent(dbID string, note *domain.Note) (string, error) 
 }
 
 // resolveUniqueSlug resolves note.ID into a concrete slug and confirms no link already claims it.
-// Slugs are globally unique across notes and links (see links.Manager.Create's mirrored
-// notes.Exists check). Unlike links.Manager.Create, this never retries on collision — notes never
-// retried on a same-table collision either (the DB's own PK constraint on storage.Create was
-// always the sole backstop), so a cross-table hit is treated the same way: an immediate
-// domain.ErrSlugConflict, not a silently-generated different slug.
+// Unlike links.Manager.Create, notes never retry on collision: the result is
+// domain.ErrSlugConflict. Storage.Create arbitrates any races after this preflight check.
 //
-// The returned unlock must be called exactly once (by the caller, after storage.Create — see
-// SlugLock's doc comment for why the lock has to stay held past this check) — including on
-// every error path after the lock is acquired, so this never returns a non-nil unlock alongside
-// a non-nil error.
+// The caller must release the local lock after storage.Create, including error paths. This
+// function never returns a non-nil unlock alongside a non-nil error.
 func (m *Manager) resolveUniqueSlug(
 	ctx context.Context, note *domain.Note,
 ) (slug string, unlock func(), err error) {

@@ -57,7 +57,7 @@ func (h *NoteHandler) EditPage(w http.ResponseWriter, r *http.Request) {
 		Title:            note.Title,
 		Content:          content,
 		ContentWithheld:  note.BurnAfterReading,
-		TTL:              ttl,
+		TTLOptions:       burnTTLOptions(ttl),
 		EditMode:         true,
 		BurnAfterReading: note.BurnAfterReading || note.BurnTTL > 0,
 		Privacy:          string(note.EffectivePrivacy()),

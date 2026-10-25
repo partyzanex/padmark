@@ -49,7 +49,7 @@ type editorViewData struct {
 	Nonce            string
 	Privacy          string
 	PrivacyOptions   []privacyOption
-	TTL              int64
+	TTLOptions       []ttlOption
 	EditMode         bool
 	BurnAfterReading bool
 	IsOwner          bool
@@ -111,12 +111,12 @@ func (h *PageHandler) IndexPage(w http.ResponseWriter, r *http.Request) {
 		Nonce:          nonceFromContext(r.Context()),
 		Privacy:        string(domain.PrivacyPublic),
 		PrivacyOptions: privacyOptions(h.authMgr != nil, h.signedIn(r), domain.PrivacyPublic),
-		// ID/Title/Content blank — fresh editor. TTL/EditMode/BurnAfterReading/IsOwner are zero defaults
+		// ID/Title/Content blank — fresh editor. EditMode/BurnAfterReading/IsOwner are zero defaults
 		// (Create form, not owner view).
 		ID:               "",
 		Title:            "",
 		Content:          "",
-		TTL:              0,
+		TTLOptions:       burnTTLOptions(0),
 		EditMode:         false,
 		BurnAfterReading: false,
 		IsOwner:          false,

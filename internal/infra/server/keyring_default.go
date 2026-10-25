@@ -58,7 +58,7 @@ func resolveKeyringPath(explicit, storage, dsn string) (path string, derived boo
 
 // loadServeKeyring loads the keyring for serve. A derived default path that does not exist
 // yet is created with one fresh key; explicit paths are never created.
-func loadServeKeyring(explicit, storage, dsn string, log *slog.Logger) (*crypto.ContentKeyring, error) {
+func loadServeKeyring(explicit, storage, dsn string, allowFlag bool, log *slog.Logger) (*crypto.ContentKeyring, error) {
 	path, derived, err := resolveKeyringPath(explicit, storage, dsn)
 	if err != nil {
 		return nil, err
@@ -71,7 +71,7 @@ func loadServeKeyring(explicit, storage, dsn string, log *slog.Logger) (*crypto.
 		}
 	}
 
-	return loadContentKeyring(path, false, log)
+	return loadContentKeyring(path, allowFlag, log)
 }
 
 // loadToolKeyring loads the keyring for the encryption subcommands; it never creates one.

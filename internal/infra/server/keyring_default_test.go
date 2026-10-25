@@ -56,7 +56,7 @@ func TestLoadServeKeyringCreatesThenReuses(t *testing.T) {
 
 	log := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn}))
 
-	first, err := loadServeKeyring("", "sqlite", dsn, log)
+	first, err := loadServeKeyring("", "sqlite", dsn, false, log)
 	require.NoError(t, err)
 	require.Equal(t, "k1", first.Active)
 	require.Contains(t, logs.String(), "level=WARN")
@@ -72,7 +72,7 @@ func TestLoadServeKeyringCreatesThenReuses(t *testing.T) {
 
 	logs.Reset()
 
-	second, err := loadServeKeyring("", "sqlite", dsn, log)
+	second, err := loadServeKeyring("", "sqlite", dsn, false, log)
 	require.NoError(t, err)
 	require.Equal(t, first.Active, second.Active)
 	require.Equal(t, first.Keys["k1"], second.Keys["k1"])
@@ -87,14 +87,14 @@ func TestLoadServeKeyringExplicitMissingFails(t *testing.T) {
 	dir := t.TempDir()
 	explicit := filepath.Join(dir, "missing.json")
 
-	_, err := loadServeKeyring(explicit, "sqlite", filepath.Join(dir, "padmark.db"), slog.New(slog.DiscardHandler))
+	_, err := loadServeKeyring(explicit, "sqlite", filepath.Join(dir, "padmark.db"), false, slog.New(slog.DiscardHandler))
 	require.Error(t, err)
 	require.NoFileExists(t, explicit)
 	require.NoFileExists(t, filepath.Join(dir, defaultKeyringName))
 }
 
 func TestLoadServeKeyringPostgresWithoutPathFails(t *testing.T) {
-	_, err := loadServeKeyring("", "postgres", "postgres://h/db", slog.New(slog.DiscardHandler))
+	_, err := loadServeKeyring("", "postgres", "postgres://h/db", false, slog.New(slog.DiscardHandler))
 	require.ErrorContains(t, err, "encryption keygen")
 }
 

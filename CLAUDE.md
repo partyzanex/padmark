@@ -55,7 +55,8 @@ Dependencies point inward: adapters and infrastructure depend on usecases and do
 - Each adapter defines its own interfaces instead of importing another adapter's interfaces.
 - Manual wiring lives in `internal/infra/server/server.go`, through `serverAction`,
   `buildHandlers` and `buildRouter`; do not introduce a DI framework.
-- Notes and links share the same slug-lock instance and check each other's namespace.
+- Notes and links share the same slug-lock instance for local preflight/cache coordination.
+  Storage triggers enforce cross-process uniqueness through the `slug_namespace` primary key.
 - `NewHandler(manager, linkManager, log)` requires both managers.
   `NewRouter(handler, ogenHandler, opts)` receives `*RouterOptions` and returns `(http.Handler, error)`.
   Use `NoPinger{}` for test setups without a DB pinger.

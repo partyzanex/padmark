@@ -45,9 +45,9 @@ type ManagerSuite struct {
 	DB          *bun.DB
 }
 
-// newManager and newLinkManager take the same slugLock instance for a Manager/LinkManager pair
-// constructed together — see notes.SlugLock's doc comment for why sharing it (not one Locker
-// per manager) is what actually closes the cross-table race.
+// newManager and newLinkManager share a local slugLock for each Manager/LinkManager pair.
+// Storage independently enforces global uniqueness across replicas; see tests/slugs for
+// races between servers with separate locks and connection pools.
 func newManager(
 	t *testing.T, storage notes.Storage, linkChecker notes.LinksChecker, slugLock *lock.Locker,
 ) *notes.Manager {
@@ -593,15 +593,9 @@ func (s *ManagerSuite) TestCrossTableSlugUniqueness_LinkFirst_ThenNoteConflicts(
 	s.ErrorIs(err, domain.ErrSlugConflict)
 }
 
-// TestCrossTableSlugUniqueness_ConcurrentCreate is the sequential tests above run at the same
-// time instead of one after another, guarding the fix for the cross-table TOCTOU race: notes
-// and links are separate tables (see the comment block above) with no shared unique constraint,
-// so without notes.SlugLock/links.SlugLock nothing would stop two concurrent creates from both
-// passing their Exists() check before either has written. s.Manager and s.LinkManager are wired
-// (by each backend's SetupTest) against the same underlying *lock.Locker, so the race is closed
-// structurally — this test runs many concurrent attempts against real goroutines and a real
-// backend rather than forcing one specific interleaving, since correctness here must hold
-// regardless of scheduling, not just under one contrived ordering.
+// TestCrossTableSlugUniqueness_ConcurrentCreate runs both managers of one server concurrently.
+// They share a local lock; tests/slugs also covers independent servers, forcing both past
+// their preflight checks to exercise the database's cross-resource uniqueness constraint.
 func (s *ManagerSuite) TestCrossTableSlugUniqueness_ConcurrentCreate() {
 	ctx := s.T().Context()
 

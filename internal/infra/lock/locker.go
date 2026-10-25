@@ -17,14 +17,10 @@ type entry struct {
 // Locker serializes access to arbitrary string keys within one process. It backs
 // notes.Manager and links.Manager's SlugLock: both resources share one Locker instance so a
 // concurrent notes.Manager.Create and links.Manager.Create targeting the same slug serialize
-// against each other, not just against same-resource calls — closing the cross-table TOCTOU
-// window that a per-manager lock would miss (notes and links live in separate tables, so the
-// database's own PK constraint only protects same-table collisions; see resolveUniqueSlug in
-// both packages).
+// their preflight checks locally. Links also use it to coordinate local cache eviction.
 //
-// Locker is single-process only. A multi-replica deployment sharing one database still races
-// across replicas — that requires a database-level lock (e.g. Postgres advisory locks), not
-// covered here.
+// Locker is single-process only. Storage enforces global slug uniqueness across replicas
+// through the shared slug_namespace primary key and transactional resource triggers.
 type Locker struct {
 	locks map[string]*entry
 	mu    sync.Mutex

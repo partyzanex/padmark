@@ -61,18 +61,9 @@
             <div class="burn-time-wrap{{if .BurnAfterReading}} active{{end}}" id="burnTimeWrap">
                 <div class="select-wrap">
                     <select class="field-select burn-select" id="burnTime"{{if not .BurnAfterReading}} disabled{{end}}>
-                        <option value="0"{{if and .BurnAfterReading (eq .TTL 0)}} selected{{end}}>Immediately</option>
-                        <option value="300"{{if eq .TTL 300}} selected{{end}}>5 minutes</option>
-                        <option value="600"{{if eq .TTL 600}} selected{{end}}>10 minutes</option>
-                        <option value="1800"{{if eq .TTL 1800}} selected{{end}}>30 minutes</option>
-                        <option value="3600"{{if eq .TTL 3600}} selected{{end}}>1 hour</option>
-                        <option value="14400"{{if eq .TTL 14400}} selected{{end}}>4 hours</option>
-                        <option value="43200"{{if eq .TTL 43200}} selected{{end}}>12 hours</option>
-                        <option value="86400"{{if eq .TTL 86400}} selected{{end}}>24 hours</option>
-                        <option value="259200"{{if eq .TTL 259200}} selected{{end}}>3 days</option>
-                        <option value="604800"{{if eq .TTL 604800}} selected{{end}}>7 days</option>
-                        <option value="2592000"{{if eq .TTL 2592000}} selected{{end}}>30 days</option>
-                        <option value="7776000"{{if eq .TTL 7776000}} selected{{end}}>90 days</option>
+                        {{range .TTLOptions}}
+                        <option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>
+                        {{end}}
                     </select>
                 </div>
             </div>

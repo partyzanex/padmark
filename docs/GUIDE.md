@@ -141,9 +141,11 @@ checker, the shared slug lock, a renderer, an encryptor, an edit-code hasher, lo
 custom-slug setting. Its optional render cache defaults to a no-op implementation.
 The link manager follows the same namespace/ownership model.
 
-Notes and links must use the **same slug-lock instance** so concurrent creates cannot claim
-the same public identifier in different tables. Database uniqueness alone does not protect
-that cross-table check.
+Notes and links share the **same slug-lock instance** to serialize local preflight checks
+and coordinate link-cache eviction. Cross-process uniqueness is enforced by the database:
+resource triggers atomically reserve the hashed ID in `slug_namespace`, whose primary key
+is shared by both resource types. A losing create returns `ErrSlugConflict` (HTTP 409).
+Deleting or consuming a resource releases its reservation in the same transaction.
 
 The auth package separates sessions, onboarding, account administration and API-token
 operations. Content-key maintenance has its own manager and storage/cipher ports; it must
@@ -165,6 +167,12 @@ SQL migrations and their embedded filesystems live in `migrations/sqlite/` and
 `migrations/postgres/`. `serve` applies pending schema migrations; the `migrate` command
 applies them and exits. Existing SQLite databases receive an automatic backup before pending
 migrations unless opted out. PostgreSQL requires an operator-managed backup.
+
+The `20261025000001_slug_namespace` migration backfills existing native resources. If a
+note and a link already share a stored ID, the migration fails without removing either;
+resolve that existing collision explicitly before retrying. Tagged v0.1.6 notes reserve
+their final hashed IDs when content migration converts them, rather than claiming their
+temporary plaintext IDs.
 
 Schema migration and content migration are separate. The `encryption migrate` command
 converts tagged v0.1.6 plaintext notes and wraps older raw encrypted content. See

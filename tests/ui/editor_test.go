@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mxschmitt/playwright-go"
 	"github.com/stretchr/testify/require"
@@ -43,6 +44,7 @@ func TestEditor(t *testing.T) {
 		scenario{name: "EmptyContent", run: testEmptyContent},
 		scenario{name: "PublishAndView", run: testPublishAndView},
 		scenario{name: "EditAndSave", run: testEditAndSave},
+		scenario{name: "PreserveCustomBurnTTL", run: testPreserveCustomBurnTTL},
 		scenario{name: "OneTimeEditCode", run: testOneTimeEditCode},
 		scenario{name: "Reveal", run: testReveal},
 		scenario{name: "PublishFailure", allowedStatuses: []int{503}, run: testPublishFailure},
@@ -176,6 +178,49 @@ func testEditAndSave(sess *uiSession) {
 	sess.must(sess.expect.Page(sess.page).Not().ToHaveURL(regexpURL("/edit/")))
 	sess.must(sess.expect.Page(sess.page).ToHaveTitle("Updated title — Padmark"))
 	sess.must(sess.expect.Locator(sess.role(playwright.AriaRoleHeading, "Updated")).ToBeVisible())
+}
+
+func testPreserveCustomBurnTTL(sess *uiSession) {
+	request := sess.browserContext.Request()
+	headers := map[string]string{"Accept": "application/json"}
+	created, err := request.Post("/notes", playwright.APIRequestContextPostOptions{
+		Headers: headers, Data: map[string]any{
+			"content": "Original content", "burn_after_reading": true, "ttl": 123,
+		},
+	})
+	sess.must(err)
+	require.Equal(sess.t, http.StatusCreated, created.Status())
+
+	var note struct {
+		ID       string `json:"id"`
+		EditCode string `json:"edit_code"`
+	}
+
+	sess.must(created.JSON(&note))
+	sess.gotoPage("/edit/" + note.ID)
+	sess.must(sess.expect.Locator(sess.page.Locator("#burnCheck")).ToBeChecked())
+	sess.value("#burnTime", "123")
+	sess.fill("#editor", "Updated content")
+	sess.fill("#editCodeInput", note.EditCode)
+	sess.button("Save")
+	sess.must(sess.expect.Page(sess.page).ToHaveURL(regexp.MustCompile("/" + regexp.QuoteMeta(note.ID) + "$")))
+
+	// Saving must preserve a grace period, so both subsequent reads succeed rather than
+	// consuming the note on the first read as an accidental ttl=0 would do.
+	for range 2 {
+		read, readErr := request.Get("/notes/"+note.ID, playwright.APIRequestContextGetOptions{Headers: headers})
+		sess.must(readErr)
+		require.Equal(sess.t, http.StatusOK, read.Status())
+
+		var saved struct {
+			Content   string    `json:"content"`
+			ExpiresAt time.Time `json:"expires_at"`
+		}
+
+		sess.must(read.JSON(&saved))
+		require.Equal(sess.t, "Updated content", saved.Content)
+		require.WithinDuration(sess.t, time.Now().Add(123*time.Second), saved.ExpiresAt, 10*time.Second)
+	}
 }
 
 func testOneTimeEditCode(sess *uiSession) {

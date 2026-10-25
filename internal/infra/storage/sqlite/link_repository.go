@@ -10,8 +10,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/uptrace/bun"
-	sqlite "modernc.org/sqlite"
-	sqlite3 "modernc.org/sqlite/lib"
 
 	"github.com/partyzanex/padmark/internal/domain"
 )
@@ -83,10 +81,7 @@ func (r *LinkRepository) Create(ctx context.Context, domLink *domain.Link) error
 
 	_, err := r.db.NewInsert().Model(dbLink).Exec(ctx)
 	if err != nil {
-		var sqliteErr *sqlite.Error
-		if errors.As(err, &sqliteErr) &&
-			(sqliteErr.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE ||
-				sqliteErr.Code() == sqlite3.SQLITE_CONSTRAINT_PRIMARYKEY) {
+		if isUniqueViolation(err) {
 			return domain.ErrSlugConflict
 		}
 
