@@ -3,6 +3,26 @@
 package ogenapi
 
 // setDefaults set default value of fields.
+func (s *CreateAPITokenRequest) setDefaults() {
+	{
+		val := int(0)
+		s.TTLDays.SetTo(val)
+	}
+}
+
+// setDefaults set default value of fields.
+func (s *CreateLinkRequest) setDefaults() {
+	{
+		val := bool(false)
+		s.BurnAfterClick.SetTo(val)
+	}
+	{
+		val := CreateLinkRequestPrivacy("public")
+		s.Privacy.SetTo(val)
+	}
+}
+
+// setDefaults set default value of fields.
 func (s *CreateNoteRequest) setDefaults() {
 	{
 		val := CreateNoteRequestContentType("text/markdown")
@@ -11,9 +31,5 @@ func (s *CreateNoteRequest) setDefaults() {
 	{
 		val := bool(false)
 		s.BurnAfterReading.SetTo(val)
-	}
-	{
-		val := bool(false)
-		s.Private.SetTo(val)
 	}
 }

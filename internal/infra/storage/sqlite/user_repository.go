@@ -8,9 +8,11 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/uptrace/bun"
 
 	"github.com/partyzanex/padmark/internal/domain"
+	"github.com/partyzanex/padmark/internal/errorcontext"
 )
 
 type userRow struct {
@@ -18,17 +20,18 @@ type userRow struct {
 
 	CreatedAt       time.Time  `bun:"created_at,notnull"`
 	LastLoginAt     *time.Time `bun:"last_login_at"`
-	ID              string     `bun:"id,pk"`
 	Username        string     `bun:"username,notnull"`
 	TOTPSecret      string     `bun:"totp_secret,notnull"`
 	PasswordHash    string     `bun:"password_hash,notnull"`
 	KDFSalt         string     `bun:"kdf_salt,notnull"`
 	LastTOTPCounter int64      `bun:"last_totp_counter,notnull"`
+	ID              uuid.UUID  `bun:"id,pk"`
 	IsAdmin         bool       `bun:"is_admin,notnull"`
 }
 
 func toUserRow(usr *domain.User) *userRow {
 	return &userRow{
+		BaseModel:       bun.BaseModel{},
 		ID:              usr.ID,
 		Username:        usr.Username,
 		TOTPSecret:      usr.TOTPSecret,
@@ -74,7 +77,7 @@ func NewUserRepository(db *bun.DB) *UserRepository {
 
 // Create inserts a new user. Returns domain.ErrUserExists on duplicate username.
 func (r *UserRepository) Create(ctx context.Context, u *domain.User) error {
-	return insertUser(ctx, r.db, u)
+	return errorcontext.Wrap(insertUser(ctx, r.db, u), "insert user")
 }
 
 // insertUser inserts a user via conn (a *bun.DB or bun.Tx), mapping a unique-constraint
@@ -98,7 +101,7 @@ func insertUser(ctx context.Context, conn bun.IDB, u *domain.User) error {
 func (r *UserRepository) GetByUsername(ctx context.Context, username string) (*domain.User, error) {
 	var row userRow
 
-	err := r.db.NewSelect().Model(&row).Where("username = ?", username).Scan(ctx)
+	err := r.db.NewSelect().Model(&row).Where("lower(username) = lower(?)", username).Scan(ctx)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, domain.ErrNotFound
@@ -111,7 +114,7 @@ func (r *UserRepository) GetByUsername(ctx context.Context, username string) (*d
 }
 
 // GetByID fetches a user by primary key. Returns domain.ErrNotFound when absent.
-func (r *UserRepository) GetByID(ctx context.Context, id string) (*domain.User, error) {
+func (r *UserRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.User, error) {
 	var row userRow
 
 	err := r.db.NewSelect().Model(&row).Where("id = ?", id).Scan(ctx)
@@ -144,7 +147,7 @@ func (r *UserRepository) List(ctx context.Context) ([]*domain.User, error) {
 }
 
 // UpdateLastLogin sets last_login_at for the given user ID.
-func (r *UserRepository) UpdateLastLogin(ctx context.Context, id string, t time.Time) error {
+func (r *UserRepository) UpdateLastLogin(ctx context.Context, id uuid.UUID, t time.Time) error {
 	_, err := r.db.NewUpdate().
 		TableExpr("users").
 		Set("last_login_at = ?", t).
@@ -157,11 +160,28 @@ func (r *UserRepository) UpdateLastLogin(ctx context.Context, id string, t time.
 	return nil
 }
 
-// Revoke deletes the user record by ID.
-func (r *UserRepository) Revoke(ctx context.Context, id string) error {
-	_, err := r.db.NewDelete().TableExpr("users").Where("id = ?", id).Exec(ctx)
+// Revoke deletes the user record by ID. The delete refuses to remove the last remaining admin:
+// the EXISTS guard lives in the DELETE itself, so the check and the delete are one atomic
+// statement — two concurrent revocations of the only two admins cannot both succeed, which
+// would otherwise leave the server permanently admin-less (the bootstrap hole accept-first-admin
+// is meant to close). Zero affected rows means the target does not exist or is the last admin —
+// both map to domain.ErrForbidden; callers pre-check GetByID for a friendlier ErrNotFound.
+func (r *UserRepository) Revoke(ctx context.Context, id uuid.UUID) error {
+	res, err := r.db.NewDelete().TableExpr("users").
+		Where("id = ?", id).
+		Where("is_admin = 0 OR EXISTS (SELECT 1 FROM users AS u WHERE u.is_admin = 1 AND u.id != ?)", id).
+		Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("revoke user: %w", err)
+	}
+
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("revoke user rows affected: %w", err)
+	}
+
+	if affected == 0 {
+		return fmt.Errorf("revoke user: %w", domain.ErrForbidden)
 	}
 
 	return nil
@@ -170,7 +190,7 @@ func (r *UserRepository) Revoke(ctx context.Context, id string) error {
 // UpdateTOTPCounter atomically advances last_totp_counter only when counter is
 // strictly greater than the stored value. Returns true when the update applied
 // (code accepted) and false when it was a replay (stored counter >= counter).
-func (r *UserRepository) UpdateTOTPCounter(ctx context.Context, id string, counter int64) (bool, error) {
+func (r *UserRepository) UpdateTOTPCounter(ctx context.Context, id uuid.UUID, counter int64) (bool, error) {
 	res, err := r.db.NewUpdate().
 		TableExpr("users").
 		Set("last_totp_counter = ?", counter).
@@ -192,7 +212,7 @@ func (r *UserRepository) UpdateTOTPCounter(ctx context.Context, id string, count
 // UpdatePassword atomically replaces password_hash, kdf_salt, and totp_secret.
 // kdfSalt is raw bytes; the repository encodes it as base64url before storage.
 func (r *UserRepository) UpdatePassword(
-	ctx context.Context, id, passwordHash string, kdfSalt []byte, totpSecret string,
+	ctx context.Context, id uuid.UUID, passwordHash string, kdfSalt []byte, totpSecret string,
 ) error {
 	_, err := r.db.NewUpdate().
 		TableExpr("users").
@@ -203,6 +223,22 @@ func (r *UserRepository) UpdatePassword(
 		Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("update password: %w", err)
+	}
+
+	return nil
+}
+
+// UpdateTOTPSecret replaces only the sealed TOTP secret for the given user ID. The password hash
+// and KDF salt are deliberately left alone: this is the re-seal-on-login migration path, where
+// the secret is rewritten under the current argon2 cost while the credentials stay as they are.
+func (r *UserRepository) UpdateTOTPSecret(ctx context.Context, id uuid.UUID, totpSecret string) error {
+	_, err := r.db.NewUpdate().
+		TableExpr("users").
+		Set("totp_secret = ?", totpSecret).
+		Where("id = ?", id).
+		Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("update totp secret: %w", err)
 	}
 
 	return nil

@@ -4,155 +4,19 @@ package notes
 
 import (
 	"context"
-	"crypto/rand"
 	"errors"
 	"fmt"
 	"log/slog"
-	"math/big"
-	"regexp"
-	"sort"
-	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/partyzanex/padmark/internal/domain"
+	"github.com/partyzanex/padmark/internal/errorcontext"
 )
 
-// slugRe matches a custom slug: one or more path segments joined by "/", each starting with an
-// alphanumeric and otherwise containing alphanumerics, dot, hyphen or underscore. This allows
-// path-like slugs such as "project/GUIDE.md" while rejecting "..", "//", leading/trailing "/"
-// and dotfiles (path-traversal-ish shapes). Overall length is bounded separately by slugMaxLen.
-var slugRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*$`)
-
-// slugMaxLen bounds the total slug length (a slug doubles as the content encryption key material).
-const slugMaxLen = 100
-
-// slugMaxSegments bounds the number of "/"-separated path segments in a custom slug. Generous
-// enough for realistic paths (e.g. "docs/api/v2/reference.md") while ruling out pathologically
-// deep slugs that stay under slugMaxLen only by using many single-character segments.
-const slugMaxSegments = 10
-
-// ReservedSlugPrefixes returns the first path segments that name built-in routes. A custom slug
-// must not start with one, or its URL would resolve to that route (e.g. "edit/foo" → the editor)
-// instead of the note. internal/adapters/http.buildNamedRoutes uses this as the single source of
-// truth for which first segments are routes rather than note slugs.
-func ReservedSlugPrefixes() map[string]struct{} {
-	return map[string]struct{}{
-		"login": {}, "setup": {}, "logout": {}, "totp-login": {},
-		"admin": {}, "api": {}, "success": {}, "healthz": {}, "readyz": {},
-		"notes": {}, "edit": {}, "change-password": {}, "static": {},
-	}
-}
-
-const (
-	slugChars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-	// slugLength balances short, friendly URLs against the fact that the slug doubles
-	// as the content encryption key. 10 chars over a 62-char alphabet ≈ 60 bits: safe
-	// against online URL-guessing and a meaningful offline brute-force cost (years).
-	slugLength = 10
-
-	editCodeChars  = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
-	editCodeLength = 12
-)
-
-func newSlug() (string, error)     { return randomString(slugChars, slugLength) }
-func newEditCode() (string, error) { return randomString(editCodeChars, editCodeLength) }
-
-// resolveSlug validates or generates the note's slug, returning it. A user-supplied slug is only
-// accepted when allowCustom is true; otherwise it is rejected so callers cannot pick low-entropy,
-// guessable key material.
-func resolveSlug(note *domain.Note, allowCustom bool) (string, error) {
-	if note.ID == "" {
-		slug, err := newSlug()
-		if err != nil {
-			return "", fmt.Errorf("generate slug: %w", err)
-		}
-
-		note.ID = slug
-
-		return note.ID, nil
-	}
-
-	if !allowCustom {
-		return "", domain.ErrCustomSlugDisabled
-	}
-
-	if !validCustomSlug(note.ID) {
-		if first, reserved := firstSegmentReserved(note.ID); reserved {
-			return "", fmt.Errorf("slug starts with reserved route name %q (reserved: %s): %w",
-				first, strings.Join(sortedReservedSlugPrefixes(), ", "), domain.ErrInvalidSlug)
-		}
-
-		return "", domain.ErrInvalidSlug
-	}
-
-	return note.ID, nil
-}
-
-// validCustomSlug reports whether a user-supplied slug is acceptable: bounded length, path-like
-// shape (see slugRe), a bounded number of path segments (slugMaxSegments), and a first segment
-// that does not collide with a reserved route name.
-func validCustomSlug(slug string) bool {
-	if slug == "" || len(slug) > slugMaxLen {
-		return false
-	}
-
-	if !slugRe.MatchString(slug) {
-		return false
-	}
-
-	if strings.Count(slug, "/")+1 > slugMaxSegments {
-		return false
-	}
-
-	_, reserved := firstSegmentReserved(slug)
-
-	return !reserved
-}
-
-// firstSegmentReserved reports whether slug's first path segment collides with a reserved route
-// name, returning that segment so callers can name it in error messages.
-func firstSegmentReserved(slug string) (string, bool) {
-	first, _, _ := strings.Cut(slug, "/")
-
-	_, reserved := ReservedSlugPrefixes()[first]
-
-	return first, reserved
-}
-
-// sortedReservedSlugPrefixes returns ReservedSlugPrefixes' keys sorted, for stable error messages.
-func sortedReservedSlugPrefixes() []string {
-	prefixes := ReservedSlugPrefixes()
-	names := make([]string, 0, len(prefixes))
-
-	for name := range prefixes {
-		names = append(names, name)
-	}
-
-	sort.Strings(names)
-
-	return names
-}
-
-// randomString runs on every note create (via newSlug/newEditCode), not just at startup, so a
-// crypto/rand failure here must propagate as an error like any other request-time failure —
-// not panic. See Create's fail-hard-with-error handling of the returned error.
-func randomString(chars string, length int) (string, error) {
-	size := big.NewInt(int64(len(chars)))
-	buf := make([]byte, length)
-
-	for idx := range length {
-		nn, err := rand.Int(rand.Reader, size)
-		if err != nil {
-			return "", fmt.Errorf("crypto/rand unavailable: %w", err)
-		}
-
-		buf[idx] = chars[nn.Int64()]
-	}
-
-	return string(buf), nil
-}
-
-// Storage defines persistence operations for notes.
+// Storage defines persistence operations for notes. Create must atomically claim the ID
+// across notes and links, returning domain.ErrSlugConflict if another resource owns it.
 type Storage interface {
 	Create(ctx context.Context, note *domain.Note) error
 	Get(ctx context.Context, id string) (*domain.Note, error)
@@ -161,6 +25,20 @@ type Storage interface {
 	Update(ctx context.Context, id string, note *domain.Note) error
 	Delete(ctx context.Context, id string) error
 	IncrementViews(ctx context.Context, id string) error
+}
+
+// LinksChecker lets notes.Manager verify a candidate slug isn't already taken by a link — slugs
+// are globally unique across notes and links. See links.Manager's mirrored NotesChecker, which
+// enforces the same rule in the other direction.
+type LinksChecker interface {
+	Exists(ctx context.Context, id string) (bool, error)
+}
+
+// SlugLock serializes local preflight checks in resolveUniqueSlug. Share the same instance
+// with links.Manager. Storage must independently enforce cross-resource uniqueness when
+// Create persists a row: different server processes do not share this lock.
+type SlugLock interface {
+	Lock(ctx context.Context, key string) (unlock func(), err error)
 }
 
 // Renderer converts note content to safe HTML. Render handles markdown; RenderPlain handles
@@ -172,15 +50,41 @@ type Renderer interface {
 	RenderPlain(content string) (string, error)
 }
 
-// Encryptor encrypts and decrypts note content using the note's ID as key material.
-type Encryptor interface {
-	Encrypt(plaintext, key string) (string, error)
-	Decrypt(ciphertext, key string) (string, error)
+// RenderCache memoizes rendered HTML so repeat views of an unchanged note skip markdown parsing
+// and sanitizing. Entries are keyed by the hashed note id (domain.HashSlug) and valid only for the
+// UpdatedAt they were rendered at, so a note changed anywhere — including through another replica —
+// misses instead of serving stale HTML. Strategy: fail-soft; the cache is an optimisation, so a
+// miss, an eviction or an implementation that stores nothing only costs a re-render.
+type RenderCache interface {
+	// Get returns the HTML cached for id at updatedAt, if any.
+	Get(id string, updatedAt time.Time) (string, bool)
+	// Set stores html as the render of id at updatedAt; an implementation may decline.
+	Set(id string, updatedAt time.Time, html string)
+	// Delete drops whatever is cached for id.
+	Delete(id string)
 }
 
-// EditCodeHasher hashes and verifies note edit codes.
+// noRenderCache is the default RenderCache: it caches nothing.
+type noRenderCache struct{}
+
+func (noRenderCache) Get(string, time.Time) (string, bool) { return "", false }
+func (noRenderCache) Set(string, time.Time, string)        {}
+func (noRenderCache) Delete(string)                        {}
+
+// Encryptor writes content using installation keys and the stored record ID as authenticated
+// context. legacySlug is only for reading old records; new ciphertext needs no slug to decrypt.
+// The interface lives at its consumer to keep the usecase independent of crypto infrastructure.
+type Encryptor interface {
+	Encrypt(plaintext, recordID string) (string, error)
+	Decrypt(ciphertext, recordID, legacySlug string) (string, error)
+}
+
+// EditCodeHasher hashes and verifies note edit codes. Hash is for server-generated
+// high-entropy codes; HashUserProvided is for caller-chosen codes, which need a
+// memory-hard hash because their entropy is not guaranteed.
 type EditCodeHasher interface {
 	Hash(code string) (string, error)
+	HashUserProvided(code string) (string, error)
 	Verify(storedHash, code string) bool
 }
 
@@ -189,11 +93,15 @@ type EditCodeHasher interface {
 // machine stays independently readable and testable instead of growing inline here.
 type Manager struct {
 	storage   Storage
+	links     LinksChecker
+	slugLock  SlugLock
 	renderer  Renderer
 	encryptor Encryptor
 	hasher    EditCodeHasher
 	log       *slog.Logger
 	burn      *burner
+	// renderCache defaults to noRenderCache; attach a real one with WithRenderCache.
+	renderCache RenderCache
 	// allowCustomSlugs gates user-supplied (human-readable) slugs. When false, custom slugs are
 	// rejected and only server-generated random slugs are issued.
 	allowCustomSlugs bool
@@ -201,20 +109,62 @@ type Manager struct {
 
 // NewManager creates a new Manager with required dependencies. allowCustomSlugs enables
 // user-supplied slugs; when false, a create request carrying a slug is rejected with
-// domain.ErrCustomSlugDisabled (a custom slug is low-entropy content-encryption key material).
+// domain.ErrCustomSlugDisabled (custom public URLs are easier to guess).
+// slugLock must be the same instance passed to the paired links.Manager — see SlugLock's doc
+// comment for why.
 func NewManager(
-	storage Storage, renderer Renderer, encryptor Encryptor, hasher EditCodeHasher,
-	log *slog.Logger, allowCustomSlugs bool,
+	storage Storage, links LinksChecker, slugLock SlugLock, renderer Renderer, encryptor Encryptor,
+	hasher EditCodeHasher, log *slog.Logger, allowCustomSlugs bool,
 ) *Manager {
 	return &Manager{
 		storage:          storage,
+		links:            links,
+		slugLock:         slugLock,
 		renderer:         renderer,
 		encryptor:        encryptor,
 		hasher:           hasher,
 		log:              log,
 		burn:             newBurner(storage, encryptor, log),
+		renderCache:      noRenderCache{},
 		allowCustomSlugs: allowCustomSlugs,
 	}
+}
+
+// WithRenderCache attaches a RenderCache for rendered note HTML. The default caches nothing, so
+// behaviour is identical without one. Called by the composition root; do not call after the
+// server starts serving requests.
+func (m *Manager) WithRenderCache(cache RenderCache) *Manager {
+	m.renderCache = cache
+
+	return m
+}
+
+// validateForCreate runs Note.Validate, the ownership invariant (Note.ValidateOwnership) and,
+// when the caller chose one, the edit-code policy (domain.ValidateEditCode) — before anything is
+// resolved, hashed or persisted. An empty EditCode is not validated: Create generates it.
+// OwnerID is already final at this point (set by the HTTP layer before Create is called), unlike
+// Update, where the same ownership check must wait until after OwnerID is pinned from the
+// existing note — see the call site in Update for why it cannot share this helper. Update never
+// accepts a replacement code, so the edit-code policy only ever applies here.
+func validateForCreate(note *domain.Note) error {
+	err := note.Validate()
+	if err != nil {
+		return fmt.Errorf("validate: %w", err)
+	}
+
+	err = note.ValidateOwnership()
+	if err != nil {
+		return fmt.Errorf("validate: %w", err)
+	}
+
+	if note.EditCode != "" {
+		err = domain.ValidateEditCode(note.EditCode)
+		if err != nil {
+			return fmt.Errorf("validate edit code: %w", err)
+		}
+	}
+
+	return nil
 }
 
 // Create validates and persists a new note.
@@ -224,23 +174,20 @@ func (m *Manager) Create(ctx context.Context, note *domain.Note) (*domain.Note, 
 		note.ContentType = &ct
 	}
 
-	err := note.Validate()
+	err := validateForCreate(note)
 	if err != nil {
-		return nil, fmt.Errorf("validate: %w", err)
+		return nil, fmt.Errorf("validate for create: %w", err)
 	}
 
-	slug, err := resolveSlug(note, m.allowCustomSlugs)
+	slug, unlock, err := m.resolveUniqueSlug(ctx, note)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("resolve unique slug: %w", err)
 	}
+	defer unlock()
 
-	if note.EditCode == "" {
-		editCode, editCodeErr := newEditCode()
-		if editCodeErr != nil {
-			return nil, fmt.Errorf("generate edit code: %w", editCodeErr)
-		}
-
-		note.EditCode = editCode
+	hashedCode, hashErr := m.resolveEditCodeHash(note)
+	if hashErr != nil {
+		return nil, fmt.Errorf("resolve edit code hash: %w", hashErr)
 	}
 
 	// Create mutates note in place for persistence (hash the edit code, encrypt the content,
@@ -255,18 +202,13 @@ func (m *Manager) Create(ctx context.Context, note *domain.Note) (*domain.Note, 
 		note.ID = slug
 	}()
 
-	hashedCode, hashErr := m.hasher.Hash(note.EditCode)
-	if hashErr != nil {
-		return nil, fmt.Errorf("hash edit code: %w", hashErr)
-	}
-
 	note.EditCode = hashedCode
 
 	now := time.Now().UTC()
 	note.CreatedAt = now
 	note.UpdatedAt = now
 
-	encrypted, encErr := m.encryptor.Encrypt(note.Content, slug)
+	encrypted, encErr := m.encryptor.Encrypt(note.Content, domain.HashSlug(slug))
 	if encErr != nil {
 		return nil, fmt.Errorf("encrypt content: %w", encErr)
 	}
@@ -279,7 +221,7 @@ func (m *Manager) Create(ctx context.Context, note *domain.Note) (*domain.Note, 
 		return nil, fmt.Errorf("create note: %w", err)
 	}
 
-	m.log.DebugContext(ctx, "note created", "id", slug)
+	m.log.DebugContext(ctx, "note created", "id", domain.HashSlug(slug))
 
 	return note, nil
 }
@@ -318,7 +260,12 @@ func (m *Manager) Get(ctx context.Context, id string) (*domain.Note, error) {
 		return nil, fmt.Errorf("get note: %w", err)
 	}
 
-	return m.burn.applyPolicy(ctx, id, note)
+	operationResult, operationErr := m.burn.applyPolicy(ctx, id, note)
+	if operationErr != nil {
+		return operationResult, fmt.Errorf("apply policy: %w", operationErr)
+	}
+
+	return operationResult, nil
 }
 
 // View returns a note by ID and increments its view counter.
@@ -326,7 +273,7 @@ func (m *Manager) Get(ctx context.Context, id string) (*domain.Note, error) {
 func (m *Manager) View(ctx context.Context, id string) (*domain.Note, error) {
 	note, err := m.Get(ctx, id)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get: %w", err)
 	}
 
 	m.burn.applyViewIncrement(ctx, id, note)
@@ -339,7 +286,7 @@ func (m *Manager) View(ctx context.Context, id string) (*domain.Note, error) {
 func (m *Manager) ViewPreloaded(ctx context.Context, id string, preloaded *domain.Note) (*domain.Note, error) {
 	note, err := m.burn.applyPolicy(ctx, id, preloaded)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("apply policy: %w", err)
 	}
 
 	m.burn.applyViewIncrement(ctx, id, note)
@@ -347,10 +294,76 @@ func (m *Manager) ViewPreloaded(ctx context.Context, id string, preloaded *domai
 	return note, nil
 }
 
+// EnforceExpiry applies only the expiry half of the read policy to an already-fetched note (from
+// Peek): an expired note — plain TTL or a started burn timer — is deleted and ErrExpired is
+// returned. It never consumes a burn-after-reading note, starts its timer or counts a view, so a
+// caller that must not trigger burn (the editor) still cannot serve an expired note.
+func (m *Manager) EnforceExpiry(ctx context.Context, id string, note *domain.Note) error {
+	return errorcontext.Wrap(m.burn.enforceExpiry(ctx, id, note), "enforce expiry")
+}
+
+// pinImmutableFields carries forward two fields Update must never let the caller change: the
+// stored edit-code hash (never the plaintext the caller supplied — the repository's Update
+// column list excludes edit_code today, but if that ever changes this avoids leaking it) and
+// OwnerID (fixed at creation — excluded from the same column list today, kept here so it isn't
+// silently nilled out if that changes). Only once OwnerID is pinned to its real value does
+// ValidateOwnership's check become meaningful: the upfront Validate() call in Update runs before
+// this pin, when the caller-supplied OwnerID is always nil regardless of actual ownership, so it
+// cannot reject privacy=owner on a note that never had one — this can.
+func pinImmutableFields(note, existing *domain.Note) error {
+	note.EditCode = existing.EditCode
+	note.OwnerID = existing.OwnerID
+
+	err := note.ValidateOwnership()
+	if err != nil {
+		return fmt.Errorf("validate: %w", err)
+	}
+
+	return nil
+}
+
+// backfillPersistedState copies the storage-persisted privacy and view count into the working
+// note before the update is written.
+func backfillPersistedState(note, existing *domain.Note) {
+	if note.Privacy == nil {
+		note.Privacy = existing.Privacy
+	}
+
+	note.Views = existing.Views
+}
+
+// resolveExpiryTime fills in note.ExpiresAt when the caller omitted it. When burn is being
+// disabled (BurnTTL cleared) but the existing note has a burn-timer expiry, the stale expiry
+// must be dropped rather than inherited.
+func resolveExpiryTime(note, existing *domain.Note) {
+	if note.ClearExpiry {
+		note.ExpiresAt = nil
+
+		return
+	}
+
+	if note.ExpiresAt != nil {
+		return
+	}
+
+	if note.BurnTTL == 0 && existing.BurnTTL > 0 {
+		note.ExpiresAt = nil
+
+		return
+	}
+
+	note.ExpiresAt = existing.ExpiresAt
+}
+
 // Update validates and updates an existing note, preserving immutable metadata.
 // The caller must supply the correct edit code.
+// Update replaces a note's editable fields. The caller must either supply the note's edit_code,
+// or be the note's owner (callerID matches existing.OwnerID) — the latter lets an authenticated
+// creator (session or API token) edit without the edit_code. callerID is uuid.Nil for an
+// anonymous caller, which never matches an owner and falls back to the edit_code check
+// unconditionally.
 func (m *Manager) Update(
-	ctx context.Context, id, editCode string, note *domain.Note,
+	ctx context.Context, id, editCode string, callerID uuid.UUID, note *domain.Note,
 ) (*domain.Note, error) {
 	err := note.Validate()
 	if err != nil {
@@ -364,7 +377,7 @@ func (m *Manager) Update(
 		return nil, fmt.Errorf("update note: %w", err)
 	}
 
-	if !m.hasher.Verify(existing.EditCode, editCode) {
+	if !existing.OwnedBy(callerID) && !m.hasher.Verify(existing.EditCode, editCode) {
 		return nil, domain.ErrInvalidEditCode
 	}
 
@@ -372,19 +385,19 @@ func (m *Manager) Update(
 	note.CreatedAt = existing.CreatedAt
 	note.UpdatedAt = time.Now().UTC()
 
-	if note.ExpiresAt == nil {
-		// When burn is being disabled (BurnTTL cleared) but the existing note has a
-		// burn-timer expiry, do not inherit it — the stale expiry must be dropped.
-		if note.BurnTTL == 0 && existing.BurnTTL > 0 {
-			note.ExpiresAt = nil
-		} else {
-			note.ExpiresAt = existing.ExpiresAt
-		}
-	}
+	resolveExpiryTime(note, existing)
 
 	if note.ContentType == nil {
 		note.ContentType = existing.ContentType
 	}
+
+	// Privacy is intentionally absent from the UPDATE column list (COALESCE keeps the stored
+	// value when the caller omitted it) and views are never writable — so the response must
+	// backfill both from the existing note to report the persisted state, not the caller's
+	// defaults. Without this, a PUT on a privacy=owner note would answer "public" with
+	// "views": 0. Doing it here (before pinImmutableFields) also lets ValidateOwnership judge
+	// the note's real inherited privacy.
+	backfillPersistedState(note, existing)
 
 	// Update mutates note in place for persistence (encrypt content, carry the stored edit-code
 	// hash). The defer restores the caller-facing plaintext fields on every return path, so the
@@ -396,31 +409,31 @@ func (m *Manager) Update(
 		note.EditCode = editCode
 	}()
 
-	// Persist the stored hash, never the plaintext the caller supplied. The repository Update
-	// writes a fixed column allow-list that excludes edit_code, so today this is not persisted
-	// at all — but if that list ever changes, this rewrites the column with the existing hash
-	// instead of leaking the plaintext code.
-	note.EditCode = existing.EditCode
-
-	encrypted, encErr := m.encryptor.Encrypt(note.Content, id)
-	if encErr != nil {
-		return nil, fmt.Errorf("encrypt content: %w", encErr)
+	err = pinImmutableFields(note, existing)
+	if err != nil {
+		return nil, fmt.Errorf("pin immutable fields: %w", err)
 	}
 
-	note.Content = encrypted
+	note.Content, err = m.encryptor.Encrypt(note.Content, dbID)
+	if err != nil {
+		return nil, fmt.Errorf("encrypt content: %w", err)
+	}
 
 	err = m.storage.Update(ctx, dbID, note)
 	if err != nil {
 		return nil, fmt.Errorf("update note: %w", err)
 	}
 
-	m.log.DebugContext(ctx, "note updated", "id", id)
+	m.renderCache.Delete(dbID)
+
+	m.log.DebugContext(ctx, "note updated", "id", domain.HashSlug(id))
 
 	return note, nil
 }
 
-// Delete removes a note by ID after verifying the edit code.
-func (m *Manager) Delete(ctx context.Context, id, editCode string) error {
+// Delete removes a note by ID after verifying the edit code, or that the caller is the note's
+// owner — see Update for the exact bypass semantics.
+func (m *Manager) Delete(ctx context.Context, id, editCode string, callerID uuid.UUID) error {
 	dbID := domain.HashSlug(id)
 
 	existing, err := m.storage.Get(ctx, dbID)
@@ -428,7 +441,7 @@ func (m *Manager) Delete(ctx context.Context, id, editCode string) error {
 		return fmt.Errorf("delete note: %w", err)
 	}
 
-	if !m.hasher.Verify(existing.EditCode, editCode) {
+	if !existing.OwnedBy(callerID) && !m.hasher.Verify(existing.EditCode, editCode) {
 		return domain.ErrInvalidEditCode
 	}
 
@@ -436,6 +449,8 @@ func (m *Manager) Delete(ctx context.Context, id, editCode string) error {
 	if err != nil {
 		return fmt.Errorf("delete note: %w", err)
 	}
+
+	m.renderCache.Delete(dbID)
 
 	return nil
 }
@@ -449,7 +464,7 @@ func (m *Manager) GetRendered(ctx context.Context, id string) (*domain.Note, str
 
 	rendered, err := m.renderNote(id, note)
 	if err != nil {
-		return nil, "", err
+		return nil, "", fmt.Errorf("render note: %w", err)
 	}
 
 	return note, rendered, nil
@@ -467,50 +482,138 @@ func (m *Manager) GetRenderedPreloaded(
 
 	rendered, err := m.renderNote(id, note)
 	if err != nil {
-		return nil, "", err
+		return nil, "", fmt.Errorf("render note: %w", err)
 	}
 
 	return note, rendered, nil
 }
 
-// renderNote converts note content to safe HTML.
-// Plain-text notes are escaped and wrapped in <pre> (Renderer.RenderPlain); markdown notes are
-// parsed and sanitized (Renderer.Render). Manager only picks which strategy the content type calls for.
-func (m *Manager) renderNote(id string, note *domain.Note) (string, error) {
-	if note.ContentType != nil && *note.ContentType == domain.ContentTypePlain {
-		rendered, err := m.renderer.RenderPlain(note.Content)
+// resolveEditCodeHash fills an empty edit code with a server-generated one and returns its
+// stored-hash form. Generated codes are high-entropy, so they take the fast hash; a
+// caller-supplied code takes the memory-hard variant because its entropy is not guaranteed.
+// On success note.EditCode holds the plaintext code (generated or supplied).
+func (m *Manager) resolveEditCodeHash(note *domain.Note) (string, error) {
+	if note.EditCode == "" {
+		editCode, err := domain.NewEditCode()
 		if err != nil {
-			return "", fmt.Errorf("render note %s: %w", id, err)
+			return "", fmt.Errorf("generate edit code: %w", err)
 		}
 
-		return rendered, nil
+		note.EditCode = editCode
+
+		hashed, hashErr := m.hasher.Hash(note.EditCode)
+		if hashErr != nil {
+			return "", fmt.Errorf("hash edit code: %w", hashErr)
+		}
+
+		return hashed, nil
 	}
 
-	rendered, err := m.renderer.Render(note.Content)
+	hashed, err := m.hasher.HashUserProvided(note.EditCode)
 	if err != nil {
-		return "", fmt.Errorf("render note %s: %w", id, err)
+		return "", fmt.Errorf("hash edit code: %w", err)
+	}
+
+	return hashed, nil
+}
+
+// maxCachedRenderBytes keeps one huge note from pinning megabytes of HTML in the cache.
+const maxCachedRenderBytes = 256 * 1024
+
+// renderNote converts note content to safe HTML, going through the render cache for notes that
+// can be re-read: a burn-after-reading note is destroyed by the read that renders it, so a cached
+// copy would only keep its plaintext alive in memory after the burn.
+// The error names the note by domain.HashSlug(id), never the plaintext slug: the slug is the
+// note's capability URL and this error ends up in server logs.
+func (m *Manager) renderNote(id string, note *domain.Note) (string, error) {
+	dbID := domain.HashSlug(id)
+	cacheable := !note.BurnAfterReading && note.BurnTTL == 0
+
+	if cacheable {
+		cached, ok := m.renderCache.Get(dbID, note.UpdatedAt)
+		if ok {
+			return cached, nil
+		}
+	}
+
+	rendered, err := m.renderContent(dbID, note)
+	if err != nil {
+		return "", fmt.Errorf("render content: %w", err)
+	}
+
+	if cacheable && len(rendered) <= maxCachedRenderBytes {
+		m.renderCache.Set(dbID, note.UpdatedAt, rendered)
 	}
 
 	return rendered, nil
 }
 
-// decryptContent decrypts note.Content in place using the slug (note.ID) as the key.
-// The content key is derived from the slug, so any decryption failure means the caller
-// lacks the correct slug (or the stored data is corrupt) — either way the note is
-// inaccessible, so it is collapsed to domain.ErrNotFound (also avoids an existence oracle).
-// Genuine data corruption (malformed ciphertext) is logged at error level to distinguish it
-// from an ordinary wrong-slug miss, which is expected and logged at warn level.
+// renderContent picks the strategy the content type calls for: plain-text notes are escaped and
+// wrapped in <pre> (Renderer.RenderPlain), markdown notes are parsed and sanitized (Renderer.Render).
+// Errors name the note by dbID (its hash), never the plaintext slug.
+func (m *Manager) renderContent(dbID string, note *domain.Note) (string, error) {
+	render := m.renderer.Render
+	if note.ContentType != nil && *note.ContentType == domain.ContentTypePlain {
+		render = m.renderer.RenderPlain
+	}
+
+	rendered, err := render(note.Content)
+	if err != nil {
+		return "", fmt.Errorf("render note %s: %w", dbID, err)
+	}
+
+	return rendered, nil
+}
+
+// resolveUniqueSlug resolves note.ID into a concrete slug and confirms no link already claims it.
+// Unlike links.Manager.Create, notes never retry on collision: the result is
+// domain.ErrSlugConflict. Storage.Create arbitrates any races after this preflight check.
+//
+// The caller must release the local lock after storage.Create, including error paths. This
+// function never returns a non-nil unlock alongside a non-nil error.
+func (m *Manager) resolveUniqueSlug(
+	ctx context.Context, note *domain.Note,
+) (slug string, unlock func(), err error) {
+	slug, err = domain.ResolveSlug(note.ID, m.allowCustomSlugs)
+	if err != nil {
+		return "", nil, fmt.Errorf("resolve slug: %w", err)
+	}
+
+	unlock, err = m.slugLock.Lock(ctx, domain.HashSlug(slug))
+	if err != nil {
+		return "", nil, fmt.Errorf("lock slug: %w", err)
+	}
+
+	linkTaken, err := m.links.Exists(ctx, domain.HashSlug(slug))
+	if err != nil {
+		unlock()
+
+		return "", nil, fmt.Errorf("check link slug: %w", err)
+	}
+
+	if linkTaken {
+		unlock()
+
+		return "", nil, domain.ErrSlugConflict
+	}
+
+	return slug, unlock, nil
+}
+
+// decryptContent authenticates the stored record ID and decrypts content. The original
+// slug is passed separately only for legacy rows. Failed authentication/key lookup is
+// collapsed to ErrNotFound to preserve the existing non-disclosure contract.
 //
 // A free function rather than a Manager method so both Manager and burner (burn.go) — which
 // hold separate copies of the same encryptor/log collaborators — can decrypt without one
 // depending on the other.
 func decryptContent(ctx context.Context, enc Encryptor, log *slog.Logger, note *domain.Note) error {
-	plaintext, err := enc.Decrypt(note.Content, note.ID)
+	plaintext, err := enc.Decrypt(note.Content, domain.HashSlug(note.ID), note.ID)
 	if err != nil {
 		if errors.Is(err, domain.ErrMalformedCiphertext) {
-			log.ErrorContext(ctx, "stored content is corrupt", "id", note.ID, "err", err)
+			log.ErrorContext(ctx, "stored content is corrupt", "id", domain.HashSlug(note.ID), "err", err)
 		} else {
-			log.WarnContext(ctx, "content decryption failed (likely wrong slug)", "id", note.ID, "err", err)
+			log.WarnContext(ctx, "content decryption failed", "id", domain.HashSlug(note.ID), "err", err)
 		}
 
 		return domain.ErrNotFound

@@ -6,10 +6,17 @@ package client
 type OperationName = string
 
 const (
-	CreateNoteOperation OperationName = "CreateNote"
-	DeleteNoteOperation OperationName = "DeleteNote"
-	GetNoteOperation    OperationName = "GetNote"
-	HealthzOperation    OperationName = "Healthz"
-	ReadyzOperation     OperationName = "Readyz"
-	UpdateNoteOperation OperationName = "UpdateNote"
+	CreateAPITokenOperation  OperationName = "CreateAPIToken"
+	CreateInviteOperation    OperationName = "CreateInvite"
+	CreateLinkOperation      OperationName = "CreateLink"
+	CreateLinksBulkOperation OperationName = "CreateLinksBulk"
+	CreateNoteOperation      OperationName = "CreateNote"
+	DeleteLinkOperation      OperationName = "DeleteLink"
+	DeleteNoteOperation      OperationName = "DeleteNote"
+	GetLinkOperation         OperationName = "GetLink"
+	GetNoteOperation         OperationName = "GetNote"
+	HealthzOperation         OperationName = "Healthz"
+	ReadyzOperation          OperationName = "Readyz"
+	UpdateLinkOperation      OperationName = "UpdateLink"
+	UpdateNoteOperation      OperationName = "UpdateNote"
 )

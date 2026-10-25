@@ -1,6 +1,7 @@
 package crypto_test
 
 import (
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -181,4 +182,17 @@ func isBase32(str string) bool {
 	}
 
 	return len(str) > 0
+}
+
+func TestOTPAuthURIEscapesLabelAndQuery(t *testing.T) {
+	issuer, username := "Team & Co?issuer=evil#fragment", "Иван/user?secret=evil&x=y"
+	uri, err := crypto.OTPAuthURI(issuer, username, "JBSWY3DPEHPK3PXP")
+	require.NoError(t, err)
+	parsed, err := url.Parse(uri)
+	require.NoError(t, err)
+	require.Empty(t, parsed.Fragment)
+	require.Equal(t, issuer, parsed.Query().Get("issuer"))
+	require.Equal(t, "JBSWY3DPEHPK3PXP", parsed.Query().Get("secret"))
+	require.Equal(t, issuer+":"+username, strings.TrimPrefix(parsed.Path, "/"))
+	require.Len(t, parsed.Query(), 5)
 }

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/driver/pgdriver"
 
@@ -20,15 +21,16 @@ type note struct {
 	CreatedAt        time.Time  `bun:"created_at"`
 	UpdatedAt        time.Time  `bun:"updated_at"`
 	ExpiresAt        *time.Time `bun:"expires_at"`
-	ID               string     `bun:"id,pk"`
+	OwnerID          *uuid.UUID `bun:"owner_id"`
 	Title            string     `bun:"title"`
 	Content          string     `bun:"content"`
 	ContentType      string     `bun:"content_type"`
 	EditCode         string     `bun:"edit_code"`
+	ID               string     `bun:"id,pk"`
+	Privacy          string     `bun:"privacy"`
 	Views            int        `bun:"views"`
 	BurnTTL          int64      `bun:"burn_ttl"`
 	BurnAfterReading bool       `bun:"burn_after_reading"`
-	Private          bool       `bun:"private"`
 }
 
 // NoteRepository implements notes.Storage using PostgreSQL.
@@ -43,6 +45,7 @@ func NewNoteRepository(db *bun.DB) *NoteRepository {
 
 func toDomain(dbNote *note) *domain.Note {
 	return &domain.Note{
+		ClearExpiry:      false,
 		ID:               dbNote.ID,
 		CreatedAt:        dbNote.CreatedAt,
 		UpdatedAt:        dbNote.UpdatedAt,
@@ -54,11 +57,24 @@ func toDomain(dbNote *note) *domain.Note {
 		Views:            dbNote.Views,
 		BurnTTL:          dbNote.BurnTTL,
 		BurnAfterReading: dbNote.BurnAfterReading,
-		Private:          new(dbNote.Private),
+		Privacy:          privacyPtr(dbNote.Privacy),
+		OwnerID:          dbNote.OwnerID,
 	}
 }
 
-func boolVal(b *bool) bool { return b != nil && *b }
+func privacyPtr(s string) *domain.Privacy {
+	p := domain.Privacy(s)
+
+	return &p
+}
+
+func privacyVal(p *domain.Privacy) string {
+	if p == nil {
+		return string(domain.PrivacyPublic)
+	}
+
+	return string(*p)
+}
 
 func contentTypePtr(s string) *domain.ContentType {
 	ct := domain.ContentType(s)
@@ -77,6 +93,7 @@ func contentTypeVal(ct *domain.ContentType) string {
 // Create inserts a new note.
 func (r *NoteRepository) Create(ctx context.Context, domNote *domain.Note) error {
 	dbNote := &note{
+		BaseModel:        bun.BaseModel{},
 		ID:               domNote.ID,
 		Title:            domNote.Title,
 		Content:          domNote.Content,
@@ -87,7 +104,9 @@ func (r *NoteRepository) Create(ctx context.Context, domNote *domain.Note) error
 		ExpiresAt:        domNote.ExpiresAt,
 		BurnTTL:          domNote.BurnTTL,
 		BurnAfterReading: domNote.BurnAfterReading,
-		Private:          boolVal(domNote.Private),
+		Privacy:          privacyVal(domNote.Privacy),
+		OwnerID:          domNote.OwnerID,
+		Views:            domNote.Views,
 	}
 
 	_, err := r.db.NewInsert().Model(dbNote).Exec(ctx)
@@ -119,9 +138,22 @@ func (r *NoteRepository) Get(ctx context.Context, id string) (*domain.Note, erro
 	return toDomain(&dbNote), nil
 }
 
+// Exists reports whether a note with the given ID exists — used for the cross-table slug
+// uniqueness check shared with links (see notes.Manager.Create / links.Manager.Create).
+func (r *NoteRepository) Exists(ctx context.Context, id string) (bool, error) {
+	exists, err := r.db.NewSelect().Model((*note)(nil)).Where("id = ?", id).Exists(ctx)
+	if err != nil {
+		return false, fmt.Errorf("postgres note exists: %w", err)
+	}
+
+	return exists, nil
+}
+
 // Consume atomically deletes a note and returns it, but only if the note is eligible for deletion:
 // burn_after_reading is set (with no grace period), or expires_at has passed.
-// Returns domain.ErrNotFound otherwise.
+// Returns domain.ErrNotFound otherwise. RETURNING lists the model columns (?Columns), not *:
+// notes also has legacy_slug (migrations/postgres/20261023000001_legacy_notes.sql), which the
+// model does not map and bun refuses to scan.
 func (r *NoteRepository) Consume(ctx context.Context, id string) (*domain.Note, error) {
 	var dbNote note
 
@@ -129,7 +161,7 @@ func (r *NoteRepository) Consume(ctx context.Context, id string) (*domain.Note, 
 		Model(&dbNote).
 		Where("id = ?", id).
 		Where("burn_after_reading OR (expires_at IS NOT NULL AND expires_at <= ?)", time.Now()).
-		Returning("*").
+		Returning("?Columns").
 		Scan(ctx)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -144,6 +176,7 @@ func (r *NoteRepository) Consume(ctx context.Context, id string) (*domain.Note, 
 
 // SetBurnExpiry atomically sets expires_at and clears burn_after_reading on first read
 // for notes with a burn grace period. Returns domain.ErrNotFound if no eligible row is found.
+// RETURNING lists the model columns only; see Consume.
 func (r *NoteRepository) SetBurnExpiry(ctx context.Context, id string, expiresAt time.Time) (*domain.Note, error) {
 	var dbNote note
 
@@ -153,7 +186,7 @@ func (r *NoteRepository) SetBurnExpiry(ctx context.Context, id string, expiresAt
 		Set("burn_after_reading = FALSE").
 		Where("id = ?", id).
 		Where("burn_after_reading").
-		Returning("*").
+		Returning("?Columns").
 		Scan(ctx)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -169,6 +202,7 @@ func (r *NoteRepository) SetBurnExpiry(ctx context.Context, id string, expiresAt
 // Update modifies an existing note.
 func (r *NoteRepository) Update(ctx context.Context, id string, domNote *domain.Note) error {
 	dbNote := &note{
+		BaseModel:        bun.BaseModel{},
 		ID:               id,
 		Title:            domNote.Title,
 		Content:          domNote.Content,
@@ -177,6 +211,11 @@ func (r *NoteRepository) Update(ctx context.Context, id string, domNote *domain.
 		BurnAfterReading: domNote.BurnAfterReading,
 		CreatedAt:        domNote.CreatedAt,
 		UpdatedAt:        domNote.UpdatedAt,
+		OwnerID:          domNote.OwnerID,
+		ContentType:      contentTypeVal(domNote.ContentType),
+		EditCode:         domNote.EditCode,
+		Privacy:          privacyVal(domNote.Privacy),
+		Views:            domNote.Views,
 	}
 
 	var ctVal *string
@@ -186,10 +225,18 @@ func (r *NoteRepository) Update(ctx context.Context, id string, domNote *domain.
 		ctVal = &sv
 	}
 
+	// Named pVal, not privacyVal, to avoid shadowing the package-level privacyVal helper above.
+	var pVal *string
+
+	if domNote.Privacy != nil {
+		sv := string(*domNote.Privacy)
+		pVal = &sv
+	}
+
 	result, err := r.db.NewUpdate().Model(dbNote).
 		Column("title", "content", "expires_at", "burn_ttl", "burn_after_reading", "updated_at").
 		Set("content_type = COALESCE(?, content_type)", ctVal).
-		Set("private = COALESCE(?, private)", domNote.Private).
+		Set("privacy = COALESCE(?, privacy)", pVal).
 		Where("id = ?", id).
 		Exec(ctx)
 	if err != nil {

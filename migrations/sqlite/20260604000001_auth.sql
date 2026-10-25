@@ -13,10 +13,10 @@
 -- The password migration's DELETE of existing users/sessions/invites is dropped:
 -- those tables are created fresh here, so there is nothing to wipe.
 
--- Legacy plaintext-slug notes are unreachable after the move to hashed slugs and
--- cannot be decrypted; expire them so they are cleaned up on next access.
-UPDATE notes SET expires_at = CURRENT_TIMESTAMP
-WHERE expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP;
+-- Legacy plaintext-slug (v0.1.6) notes are deliberately left alone here: this migration used
+-- to expire them, but the 20261023000001_legacy_notes migration now tags them and
+-- `padmark-server encryption migrate` re-keys them under their hashed slug, so they survive
+-- the upgrade.
 
 -- Reveal tokens reference note IDs that are now hashed; old tokens are unusable.
 DELETE FROM reveal_tokens WHERE used_at IS NULL;
@@ -69,4 +69,4 @@ DROP TABLE IF EXISTS invites;
 DROP INDEX IF EXISTS idx_users_single_admin;
 DROP INDEX IF EXISTS idx_users_username;
 DROP TABLE IF EXISTS users;
--- The notes/reveal_tokens data changes are irreversible (no-op down).
+-- The reveal_tokens deletion is irreversible (no-op down).

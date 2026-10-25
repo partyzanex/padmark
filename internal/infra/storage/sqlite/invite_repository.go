@@ -7,11 +7,14 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/uptrace/bun"
 
 	"github.com/partyzanex/padmark/internal/domain"
+	"github.com/partyzanex/padmark/internal/errorcontext"
 )
 
 const (
@@ -24,14 +27,14 @@ type inviteRow struct {
 
 	ExpiresAt time.Time  `bun:"expires_at,notnull"`
 	UsedAt    *time.Time `bun:"used_at"`
-	Token     string     `bun:"token,pk"`
-	CreatedBy string     `bun:"created_by,notnull"`
+	TokenHash string     `bun:"token_hash,pk"`
 	UsedBy    string     `bun:"used_by"`
+	CreatedBy uuid.UUID  `bun:"created_by,notnull"`
 }
 
 func (r *inviteRow) toDomain() *domain.Invite {
 	return &domain.Invite{
-		Token:     r.Token,
+		TokenHash: r.TokenHash,
 		CreatedBy: r.CreatedBy,
 		ExpiresAt: r.ExpiresAt,
 		UsedAt:    r.UsedAt,
@@ -42,19 +45,19 @@ func (r *inviteRow) toDomain() *domain.Invite {
 // InviteRepository is a SQLite-backed store for single-use registration invites.
 // Consume uses a transaction (SELECT + UPDATE) since SQLite is single-writer.
 type InviteRepository struct {
-	db *bun.DB
+	db  *bun.DB
+	log *slog.Logger
 }
 
-// NewInviteRepository returns a new SQLite-backed InviteRepository.
-func NewInviteRepository(db *bun.DB) *InviteRepository {
-	return &InviteRepository{db: db}
+// NewInviteRepository returns a new SQLite-backed InviteRepository. log is used to surface
+// lazy-sweep failures — pass slog.Default() if no project logger is at hand.
+func NewInviteRepository(db *bun.DB, log *slog.Logger) *InviteRepository {
+	return &InviteRepository{db: db, log: log}
 }
 
-// Issue generates a single-use invite token with a 24-hour TTL.
+// Issue returns a single-use invite token with a 24-hour TTL, storing only its SHA-256 hash.
 // Expired and consumed tokens are lazily swept on each call.
-//
-//nolint:dupl // token-issuing pattern is identical across token table types by design
-func (r *InviteRepository) Issue(ctx context.Context, createdByID string) (string, error) {
+func (r *InviteRepository) Issue(ctx context.Context, createdByID uuid.UUID) (string, error) {
 	buf := make([]byte, inviteTokenBytes)
 
 	_, err := rand.Read(buf)
@@ -65,9 +68,13 @@ func (r *InviteRepository) Issue(ctx context.Context, createdByID string) (strin
 	tok := base64.RawURLEncoding.EncodeToString(buf)
 
 	row := &inviteRow{
-		Token:     tok,
+		BaseModel: bun.BaseModel{},
+		TokenHash: domain.HashInviteToken(tok),
 		CreatedBy: createdByID,
 		ExpiresAt: time.Now().Add(inviteTTL),
+		// UsedAt/UsedBy zero = nil/empty until a redemption records the consuming user.
+		UsedAt: nil,
+		UsedBy: "",
 	}
 
 	_, err = r.db.NewInsert().Model(row).Exec(ctx)
@@ -75,22 +82,26 @@ func (r *InviteRepository) Issue(ctx context.Context, createdByID string) (strin
 		return "", fmt.Errorf("insert invite: %w", err)
 	}
 
-	//nolint:errcheck // best-effort sweep; stale invites persist until next Issue
-	_, _ = r.db.NewDelete().
+	// Best-effort sweep of stale invites; a failure here does not block token issuance —
+	// stale rows simply persist until the next Issue call.
+	_, sweepErr := r.db.NewDelete().
 		TableExpr("invites").
 		Where("expires_at < ?", time.Now()).
 		WhereOr("used_at IS NOT NULL").
 		Exec(ctx)
+	if sweepErr != nil {
+		r.log.WarnContext(ctx, "invite sweep failed", "err", sweepErr)
+	}
 
 	return tok, nil
 }
 
 // classifyInviteMiss reads the invite row via conn (a *bun.DB or bun.Tx) and returns the
 // sentinel explaining a zero-row consume: ErrNotFound, ErrInviteUsed, or ErrInviteExpired.
-func classifyInviteMiss(ctx context.Context, conn bun.IDB, token string) error {
+func classifyInviteMiss(ctx context.Context, conn bun.IDB, tokenHash string) error {
 	var existing inviteRow
 
-	err := conn.NewSelect().Model(&existing).Where("token = ?", token).Scan(ctx)
+	err := conn.NewSelect().Model(&existing).Where("token_hash = ?", tokenHash).Scan(ctx)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.ErrNotFound
@@ -110,13 +121,15 @@ func classifyInviteMiss(ctx context.Context, conn bun.IDB, token string) error {
 // Returns domain.ErrInviteUsed, domain.ErrInviteExpired, or domain.ErrNotFound
 // when the token cannot be consumed.
 func (r *InviteRepository) Consume(ctx context.Context, token, username string) (*domain.Invite, error) {
+	tokenHash := domain.HashInviteToken(token)
+
 	var result *domain.Invite
 
 	err := r.db.RunInTx(ctx, nil, func(ctx context.Context, btx bun.Tx) error {
 		var row inviteRow
 
 		err := btx.NewSelect().Model(&row).
-			Where("token = ?", token).
+			Where("token_hash = ?", tokenHash).
 			Where("used_at IS NULL").
 			Where("expires_at > ?", time.Now()).
 			Scan(ctx)
@@ -125,7 +138,7 @@ func (r *InviteRepository) Consume(ctx context.Context, token, username string) 
 				return fmt.Errorf("select invite: %w", err)
 			}
 
-			return classifyInviteMiss(ctx, btx, token)
+			return errorcontext.Wrap(classifyInviteMiss(ctx, btx, tokenHash), "classify invite miss")
 		}
 
 		now := time.Now()
@@ -133,7 +146,7 @@ func (r *InviteRepository) Consume(ctx context.Context, token, username string) 
 		_, err = btx.NewUpdate().Model(&row).
 			Set("used_at = ?", now).
 			Set("used_by = ?", username).
-			Where("token = ?", token).
+			Where("token_hash = ?", tokenHash).
 			Exec(ctx)
 		if err != nil {
 			return fmt.Errorf("mark invite used: %w", err)
@@ -146,13 +159,6 @@ func (r *InviteRepository) Consume(ctx context.Context, token, username string) 
 		return nil
 	})
 	if err != nil {
-		// Sentinel errors pass through RunInTx unwrapped so callers can errors.Is them.
-		if errors.Is(err, domain.ErrNotFound) ||
-			errors.Is(err, domain.ErrInviteUsed) ||
-			errors.Is(err, domain.ErrInviteExpired) {
-			return nil, err //nolint:wrapcheck // intentionally unwrapped: domain sentinel, must remain unwrapped for errors.Is
-		}
-
 		return nil, fmt.Errorf("consume invite: %w", err)
 	}
 
@@ -164,11 +170,13 @@ func (r *InviteRepository) Consume(ctx context.Context, token, username string) 
 // back and the invite stays unconsumed, so a failed registration never burns the token.
 // Returns invite sentinels (ErrNotFound/ErrInviteUsed/ErrInviteExpired) or ErrUserExists.
 func (r *InviteRepository) RedeemInvite(ctx context.Context, token, username string, usr *domain.User) error {
+	tokenHash := domain.HashInviteToken(token)
+
 	err := r.db.RunInTx(ctx, nil, func(ctx context.Context, btx bun.Tx) error {
 		var row inviteRow
 
 		selErr := btx.NewSelect().Model(&row).
-			Where("token = ?", token).
+			Where("token_hash = ?", tokenHash).
 			Where("used_at IS NULL").
 			Where("expires_at > ?", time.Now()).
 			Scan(ctx)
@@ -177,7 +185,7 @@ func (r *InviteRepository) RedeemInvite(ctx context.Context, token, username str
 				return fmt.Errorf("select invite: %w", selErr)
 			}
 
-			return classifyInviteMiss(ctx, btx, token)
+			return errorcontext.Wrap(classifyInviteMiss(ctx, btx, tokenHash), "classify invite miss")
 		}
 
 		now := time.Now()
@@ -185,30 +193,17 @@ func (r *InviteRepository) RedeemInvite(ctx context.Context, token, username str
 		_, updErr := btx.NewUpdate().Model(&row).
 			Set("used_at = ?", now).
 			Set("used_by = ?", username).
-			Where("token = ?", token).
+			Where("token_hash = ?", tokenHash).
 			Exec(ctx)
 		if updErr != nil {
 			return fmt.Errorf("mark invite used: %w", updErr)
 		}
 
-		return insertUser(ctx, btx, usr)
+		return errorcontext.Wrap(insertUser(ctx, btx, usr), "insert user")
 	})
 	if err != nil {
-		if isInviteSentinel(err) {
-			return err //nolint:wrapcheck // domain sentinel, must stay unwrapped for errors.Is
-		}
-
 		return fmt.Errorf("redeem invite: %w", err)
 	}
 
 	return nil
-}
-
-// isInviteSentinel reports whether err is a domain sentinel that must pass through
-// RunInTx unwrapped so callers can errors.Is it.
-func isInviteSentinel(err error) bool {
-	return errors.Is(err, domain.ErrNotFound) ||
-		errors.Is(err, domain.ErrInviteUsed) ||
-		errors.Is(err, domain.ErrInviteExpired) ||
-		errors.Is(err, domain.ErrUserExists)
 }

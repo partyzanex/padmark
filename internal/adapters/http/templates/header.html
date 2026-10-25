@@ -17,11 +17,21 @@
             <div class="theme-indicator" id="themeIndicator"></div>
         </div>
         <div class="header-links">
+            <a href="/links" class="header-link">Links</a>
             <a href="/api" class="header-link">API</a>
             <a href="https://github.com/partyzanex/padmark" class="header-link" target="_blank" rel="noopener noreferrer">GitHub</a>
         </div>
     </div>
 </div>
+{{end}}
+
+{{/* signout renders the POST /logout form. It needs a view model with CSRFToken, so it is
+     included only by pages that exist solely for signed-in users (admin, change-password). */}}
+{{define "signout"}}
+<form method="POST" action="/logout">
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    <button type="submit" class="btn-ghost">Sign out</button>
+</form>
 {{end}}
 
 {{define "theme-js"}}

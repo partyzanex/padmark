@@ -1,93 +1,118 @@
 package server
 
 import (
+	"fmt"
+
 	"github.com/urfave/cli/v3"
 
+	"github.com/partyzanex/padmark/internal/infra/crypto"
+	"github.com/partyzanex/padmark/internal/infra/logging"
 	"github.com/partyzanex/padmark/internal/usecases/auth"
 )
 
 // Flag names used in CLI flags.
 const (
-	FlagAddr      = "addr"
-	FlagStorage   = "storage"
-	FlagDSN       = "dsn"
-	FlagLogLevel  = "log-level"
-	FlagLogFormat = "log-format"
-	// Deprecated: the PADMARK_AUTH_TOKENS bearer-token write auth is legacy and superseded by
-	// the TOTP account system (--enable-accounts). It will be removed in a future release.
-	FlagAuthTokens       = "auth-tokens" //nolint:gosec // flag name, not a credential
-	FlagEnableAccounts   = "enable-accounts"
-	FlagCookieMaxAge     = "cookie-max-age"
-	FlagReadTimeout      = "read-timeout"
-	FlagWriteTimeout     = "write-timeout"
-	FlagMaxHeaderBytes   = "max-header-bytes"
-	FlagMaxBodyBytes     = "max-body-bytes"
-	FlagRateLimit        = "rate-limit"
-	FlagRateBurst        = "rate-burst"
-	FlagTLSCert          = "tls-cert"
-	FlagTLSKey           = "tls-key"
-	FlagHTTPRedirectAddr = "http-redirect-addr"
-	FlagAllowedHosts     = "allowed-hosts"
-	FlagTrustedProxies   = "trusted-proxies"
-	FlagPublicScheme     = "public-scheme"
-	FlagCustomSlugs      = "custom-slugs"
-	FlagTOTPIssuer       = "totp-issuer"
-	FlagSessionTTL       = "session-ttl"
-	FlagArgon2Memory     = "argon2-memory"
-	FlagArgon2Time       = "argon2-time"
-	FlagArgon2Threads    = "argon2-threads"
+	FlagAddr                = "addr"
+	FlagStorage             = "storage"
+	FlagDSN                 = "dsn"
+	FlagLogLevel            = "log-level"
+	FlagLogFormat           = "log-format"
+	FlagEnableAccounts      = "enable-accounts"
+	FlagDisableAPI          = "disable-api"
+	FlagReadTimeout         = "read-timeout"
+	FlagWriteTimeout        = "write-timeout"
+	FlagMaxHeaderBytes      = "max-header-bytes"
+	FlagMaxBodyBytes        = "max-body-bytes"
+	FlagRateLimit           = "rate-limit"
+	FlagRateBurst           = "rate-burst"
+	FlagTLSCert             = "tls-cert"
+	FlagTLSKey              = "tls-key"
+	FlagHTTPRedirectAddr    = "http-redirect-addr"
+	FlagAllowedHosts        = "allowed-hosts"
+	FlagTrustedProxies      = "trusted-proxies"
+	FlagPublicScheme        = "public-scheme"
+	FlagCustomSlugs         = "custom-slugs"
+	FlagTOTPIssuer          = "totp-issuer"
+	FlagSessionTTL          = "session-ttl"
+	FlagArgon2Memory        = "argon2-memory"
+	FlagArgon2Time          = "argon2-time"
+	FlagArgon2Threads       = "argon2-threads"
+	FlagArgon2MemoryBudget  = "argon2-memory-budget"
+	FlagDirectRedirect      = "direct-redirect"
+	FlagMetricsAddr         = "metrics-addr"
+	FlagCSRFSecret          = "csrf-secret"
+	FlagContentKeyring      = "content-keyring-file"
+	FlagAllowSharedKeyring  = "allow-shared-keyring"
+	FlagSkipMigrationBackup = "skip-migration-backup"
+	// FlagAuthTokens is the removed v0.1.6 static bearer-token flag; it is still defined (hidden)
+	// so that using it fails startup with a migration hint instead of being ignored.
+	FlagAuthTokens = "auth-tokens" //nolint:gosec // flag name, not a credential
+	// FlagCookieMaxAge is the deprecated v0.1.6 cookie lifetime flag, superseded by --session-ttl.
+	FlagCookieMaxAge = "cookie-max-age"
 )
 
 // Env vars used to configure the service (prefix: PADMARK_*).
 const (
-	EnvAddr      = "PADMARK_ADDR"
-	EnvStorage   = "PADMARK_STORAGE"
-	EnvDSN       = "PADMARK_DSN"
-	EnvLogLevel  = "PADMARK_LOG_LEVEL"
-	EnvLogFormat = "PADMARK_LOG_FORMAT"
-	// Deprecated: bearer-token write auth is legacy; use the TOTP account system
-	// (PADMARK_ENABLE_ACCOUNTS) instead. PADMARK_AUTH_TOKENS will be removed in a future release.
-	EnvAuthTokens       = "PADMARK_AUTH_TOKENS" //nolint:gosec // env var name, not a credential
-	EnvEnableAccounts   = "PADMARK_ENABLE_ACCOUNTS"
-	EnvCookieMaxAge     = "PADMARK_COOKIE_MAX_AGE"
-	EnvReadTimeout      = "PADMARK_READ_TIMEOUT"
-	EnvWriteTimeout     = "PADMARK_WRITE_TIMEOUT"
-	EnvMaxHeaderBytes   = "PADMARK_MAX_HEADER_BYTES"
-	EnvMaxBodyBytes     = "PADMARK_MAX_BODY_BYTES"
-	EnvRateLimit        = "PADMARK_RATE_LIMIT"
-	EnvRateBurst        = "PADMARK_RATE_BURST"
-	EnvTLSCert          = "PADMARK_TLS_CERT"
-	EnvTLSKey           = "PADMARK_TLS_KEY"
-	EnvHTTPRedirectAddr = "PADMARK_HTTP_REDIRECT_ADDR"
-	EnvAllowedHosts     = "PADMARK_ALLOWED_HOSTS"
-	EnvTrustedProxies   = "PADMARK_TRUSTED_PROXIES"
-	EnvPublicScheme     = "PADMARK_PUBLIC_SCHEME"
-	EnvCustomSlugs      = "PADMARK_CUSTOM_SLUGS"
-	EnvTOTPIssuer       = "PADMARK_TOTP_ISSUER"
-	EnvSessionTTL       = "PADMARK_SESSION_TTL"
-	EnvArgon2Memory     = "PADMARK_ARGON2_MEMORY"
-	EnvArgon2Time       = "PADMARK_ARGON2_TIME"
-	EnvArgon2Threads    = "PADMARK_ARGON2_THREADS"
+	EnvAddr                = "PADMARK_ADDR"
+	EnvStorage             = "PADMARK_STORAGE"
+	EnvDSN                 = "PADMARK_DSN"
+	EnvLogLevel            = "PADMARK_LOG_LEVEL"
+	EnvLogFormat           = "PADMARK_LOG_FORMAT"
+	EnvEnableAccounts      = "PADMARK_ENABLE_ACCOUNTS"
+	EnvDisableAPI          = "PADMARK_DISABLE_API"
+	EnvReadTimeout         = "PADMARK_READ_TIMEOUT"
+	EnvWriteTimeout        = "PADMARK_WRITE_TIMEOUT"
+	EnvMaxHeaderBytes      = "PADMARK_MAX_HEADER_BYTES"
+	EnvMaxBodyBytes        = "PADMARK_MAX_BODY_BYTES"
+	EnvRateLimit           = "PADMARK_RATE_LIMIT"
+	EnvRateBurst           = "PADMARK_RATE_BURST"
+	EnvTLSCert             = "PADMARK_TLS_CERT"
+	EnvTLSKey              = "PADMARK_TLS_KEY"
+	EnvHTTPRedirectAddr    = "PADMARK_HTTP_REDIRECT_ADDR"
+	EnvAllowedHosts        = "PADMARK_ALLOWED_HOSTS"
+	EnvTrustedProxies      = "PADMARK_TRUSTED_PROXIES"
+	EnvPublicScheme        = "PADMARK_PUBLIC_SCHEME"
+	EnvCustomSlugs         = "PADMARK_CUSTOM_SLUGS"
+	EnvTOTPIssuer          = "PADMARK_TOTP_ISSUER"
+	EnvSessionTTL          = "PADMARK_SESSION_TTL"
+	EnvArgon2Memory        = "PADMARK_ARGON2_MEMORY"
+	EnvArgon2Time          = "PADMARK_ARGON2_TIME"
+	EnvArgon2Threads       = "PADMARK_ARGON2_THREADS"
+	EnvArgon2MemoryBudget  = "PADMARK_ARGON2_MEMORY_BUDGET"
+	EnvDirectRedirect      = "PADMARK_DIRECT_REDIRECT"
+	EnvMetricsAddr         = "PADMARK_METRICS_ADDR"
+	EnvCSRFSecret          = "PADMARK_CSRF_SECRET" //nolint:gosec // G101: env var name, not an inline credential
+	EnvContentKeyring      = "PADMARK_CONTENT_KEYRING_FILE"
+	EnvAllowSharedKeyring  = "PADMARK_ALLOW_SHARED_KEYRING"
+	EnvSkipMigrationBackup = "PADMARK_SKIP_MIGRATION_BACKUP"
+	EnvAuthTokens          = "PADMARK_AUTH_TOKENS" //nolint:gosec // env var name, not a credential
+	EnvCookieMaxAge        = "PADMARK_COOKIE_MAX_AGE"
+	// EnvBootstrapToken authorises creating the first admin via /setup without an invite. It is
+	// read from the environment only — never a flag, so it cannot show up in process listings.
+	EnvBootstrapToken = "PADMARK_BOOTSTRAP_TOKEN" //nolint:gosec // G101: env var name, not an inline credential
 )
 
 // Default values for all flags.
 const (
-	DefaultAddr           = ":8080"
-	DefaultStorage        = "sqlite"
-	DefaultDSN            = "padmark.db"
-	DefaultLogLevel       = "info"
-	DefaultLogFormat      = "json"
-	DefaultCookieMaxAge   = 90 * 24 * 60 * 60 // 3 months in seconds
-	DefaultReadTimeout    = 30                // seconds
-	DefaultWriteTimeout   = 60                // seconds
-	DefaultMaxHeaderBytes = 64 * 1024         // 64 KB
-	DefaultMaxBodyBytes   = 4 * 1024 * 1024   // 4 MB
-	DefaultRateLimit      = 10                // requests per second per IP
-	DefaultRateBurst      = 20                // max burst size per IP
-	DefaultTOTPIssuer     = "padmark"
-	DefaultArgon2Memory   = 24 * 1024 // argon2id memory in KiB (24 MiB)
-	DefaultArgon2Time     = 2         // argon2id iterations (OWASP minimum at 64 MiB)
-	DefaultArgon2Threads  = 1         // argon2id parallelism
+	DefaultAddr               = ":8080"
+	DefaultStorage            = "sqlite"
+	DefaultDSN                = "padmark.db"
+	DefaultLogLevel           = "info"
+	DefaultLogFormat          = "json"
+	DefaultReadTimeout        = 30              // seconds
+	DefaultWriteTimeout       = 60              // seconds
+	DefaultMaxHeaderBytes     = 64 * 1024       // 64 KB
+	DefaultMaxBodyBytes       = 4 * 1024 * 1024 // 4 MB
+	DefaultRateLimit          = 10              // requests per second per IP
+	DefaultRateBurst          = 20              // max burst size per IP
+	DefaultTOTPIssuer         = "padmark"
+	DefaultArgon2Memory       = 24 * 1024  // argon2id memory in KiB (24 MiB)
+	DefaultArgon2Time         = 2          // argon2id iterations (OWASP minimum at 64 MiB)
+	DefaultArgon2Threads      = 1          // argon2id parallelism
+	DefaultArgon2MemoryBudget = 128 * 1024 // KiB of argon2id workspace all concurrent derivations may hold (128 MiB)
+	DefaultAllowSharedKeyring = false      // refuse group/other-readable keyrings outside /run/secrets/
+	// DefaultDirectRedirect is off: an anonymous link must not be a free open redirector.
+	DefaultDirectRedirect = false
 )
 
 // DefaultSessionTTL is the --session-ttl flag default, in seconds — derived from
@@ -99,7 +124,16 @@ var DefaultSessionTTL = int(auth.DefaultSessionTTL.Seconds())
 
 // appFlags returns the full flag set for the serve subcommand.
 func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
-	return []cli.Flag{
+	return append([]cli.Flag{
+		&cli.StringFlag{
+			Name:    FlagContentKeyring,
+			Sources: cli.EnvVars(EnvContentKeyring),
+			Usage: "JSON keyring file for content encryption; back up separately from the database. " +
+				"Defaults to <sqlite db dir>/padmark-keys.json or ./padmark-keys.json for postgres; " +
+				"serve creates a missing default file (container default: /data/padmark-keys.json)",
+		},
+		allowSharedKeyringFlag(),
+		skipMigrationBackupFlag(),
 		&cli.StringFlag{
 			Name:    FlagAddr,
 			Sources: cli.EnvVars(EnvAddr),
@@ -116,25 +150,22 @@ func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
 			Name:    FlagDSN,
 			Sources: cli.EnvVars(EnvDSN),
 			Value:   DefaultDSN,
-			Usage:   "Database DSN (file path for sqlite, connection string for postgres)",
+			Usage: "Database DSN (file path for sqlite, connection string for postgres). " +
+				"A postgres DSN carries the password and a command-line flag is visible to every local " +
+				"user in the process listing (ps); set it via PADMARK_DSN instead",
 		},
 		&cli.StringFlag{
-			Name:    FlagLogLevel,
-			Sources: cli.EnvVars(EnvLogLevel),
-			Value:   DefaultLogLevel,
-			Usage:   "Log level: debug, info, warn, error",
+			Name:      FlagLogLevel,
+			Validator: logging.ValidateLevel,
+			Sources:   cli.EnvVars(EnvLogLevel),
+			Value:     DefaultLogLevel,
+			Usage:     "Log level: debug, info, warn, error",
 		},
 		&cli.StringFlag{
 			Name:    FlagLogFormat,
 			Sources: cli.EnvVars(EnvLogFormat),
 			Value:   DefaultLogFormat,
 			Usage:   "Log format: json, text",
-		},
-		&cli.StringFlag{
-			Name:    FlagAuthTokens,
-			Sources: cli.EnvVars(EnvAuthTokens),
-			Usage: "DEPRECATED (use --enable-accounts / TOTP instead): comma-separated Bearer " +
-				"tokens for write endpoints (empty = no auth). Will be removed in a future release",
 		},
 		&cli.BoolFlag{
 			Name:    FlagEnableAccounts,
@@ -144,18 +175,26 @@ func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
 				"Off by default: the site is fully public unless this is set",
 		},
 		&cli.BoolFlag{
+			Name:    FlagDisableAPI,
+			Sources: cli.EnvVars(EnvDisableAPI),
+			Value:   false,
+			Usage: "Disable the REST/JSON API (/notes*, /links*, /api, /api/openapi.yaml, /llms.txt, " +
+				"/api/tokens, /api/invites): every request reaching the disabling middleware gets 503 with " +
+				"code=api_disabled. The web UI becomes read-only: viewing /{id} (incl. JSON/raw reads), " +
+				"/r/{id}, login/admin pages and health checks keep working, but publishing or saving from " +
+				"the editor fails with the API-disabled error (it calls POST /notes and PUT /notes/{id})",
+		},
+		&cli.BoolFlag{
 			Name:    FlagCustomSlugs,
 			Sources: cli.EnvVars(EnvCustomSlugs),
-			Value:   false,
-			Usage: "Allow user-supplied human-readable slugs (e.g. project/GUIDE.md) at note creation. " +
-				"Off by default: only random slugs are issued, since a custom slug is low-entropy " +
-				"content-encryption key material. Enable for internal/trusted deployments",
-		},
-		&cli.IntFlag{
-			Name:    FlagCookieMaxAge,
-			Sources: cli.EnvVars(EnvCookieMaxAge),
-			Value:   DefaultCookieMaxAge,
-			Usage:   "Auth cookie max-age in seconds (default: 3 months)",
+			// On by default like v0.1.6, which always accepted a slug; set false to issue only
+			// random slugs, because human-readable public URLs are easier to guess.
+			Value: true,
+			Usage: "Allow user-supplied human-readable slugs at note creation (e.g. project/GUIDE.md) " +
+				"and at short-link creation (e.g. launch-2026, single segment only). " +
+				"On by default for v0.1.6 compatibility; set false to issue only random slugs, " +
+				"because human-readable public URLs are easier to guess. " +
+				"New content encryption keys are independent of the slug",
 		},
 		&cli.IntFlag{
 			Name:    FlagReadTimeout,
@@ -211,9 +250,10 @@ func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
 		&cli.StringFlag{
 			Name:    FlagAllowedHosts,
 			Sources: cli.EnvVars(EnvAllowedHosts),
-			Usage: "Comma-separated host allowlist for the HTTP→HTTPS redirect (e.g. example.com,www.example.com); " +
-				"when set, requests with any other Host get 400 instead of a redirect (anti Host-header injection); " +
-				"empty = redirect to the request Host (legacy behaviour)",
+			Usage: "Comma-separated Host allowlist (e.g. example.com,www.example.com), compared case-insensitively " +
+				"without the port; applies to the main listener (other Hosts get 421 Misdirected Request, " +
+				"/healthz and /readyz exempt) and to the HTTP→HTTPS redirect listener (400); " +
+				"empty = no Host check (legacy behaviour)",
 		},
 		&cli.StringFlag{
 			Name:    FlagTrustedProxies,
@@ -226,8 +266,9 @@ func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
 			Sources: cli.EnvVars(EnvPublicScheme),
 			Usage: "Force the scheme (http or https) used when building absolute links back to this " +
 				"server (note URLs, invite links, API-token envelopes), instead of auto-detecting it " +
-				"from TLS/X-Forwarded-Proto; set this when the reverse proxy's IP is not stable enough " +
-				"for --trusted-proxies (e.g. cloud load balancers, k8s ingress)",
+				"from TLS/X-Forwarded-Proto; https also marks session/CSRF cookies Secure and enables " +
+				"HSTS; set this when the reverse proxy's IP is not stable enough for --trusted-proxies " +
+				"(e.g. cloud load balancers, k8s ingress)",
 		},
 		&cli.StringFlag{
 			Name:    FlagTOTPIssuer,
@@ -235,30 +276,131 @@ func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
 			Value:   DefaultTOTPIssuer,
 			Usage:   "TOTP issuer name shown in the authenticator app (default: padmark)",
 		},
+		&cli.StringFlag{
+			Name:    FlagAuthTokens,
+			Sources: cli.EnvVars(EnvAuthTokens),
+			Hidden:  true,
+			Usage: "REMOVED: static bearer tokens were replaced by the account system; setting this " +
+				"fails startup (use --enable-accounts, " + EnvBootstrapToken + " and /setup)",
+		},
+		&cli.IntFlag{
+			Name:    FlagCookieMaxAge,
+			Sources: cli.EnvVars(EnvCookieMaxAge),
+			Hidden:  true,
+			Usage:   "DEPRECATED: use --session-ttl; honoured as the session TTL (seconds) when --session-ttl is unset",
+		},
 		&cli.IntFlag{
 			Name:    FlagSessionTTL,
 			Sources: cli.EnvVars(EnvSessionTTL),
 			Value:   DefaultSessionTTL,
 			Usage:   "TOTP session TTL in seconds (default: 30 days)",
 		},
+		&cli.BoolFlag{
+			Name:    FlagDirectRedirect,
+			Sources: cli.EnvVars(EnvDirectRedirect),
+			Value:   DefaultDirectRedirect,
+			Usage: "GET /r/{hash} behaviour for short links: true issues an immediate 301 to the " +
+				"target URL for every link; false (default) renders an interstitial page (meta-refresh + " +
+				"noscript fallback) showing the destination for links created anonymously, while links " +
+				"created by a signed-in owner still redirect directly (open-redirect/phishing hardening)",
+		},
+		&cli.StringFlag{
+			Name:    FlagMetricsAddr,
+			Sources: cli.EnvVars(EnvMetricsAddr),
+			Usage: "Address for a separate internal Prometheus /metrics listener (e.g. :9090); " +
+				"empty (default) disables it entirely. Bind this to a private interface only — " +
+				"metrics are never served on the main, public-facing listener",
+		},
+		&cli.StringFlag{
+			Name:    FlagCSRFSecret,
+			Sources: cli.EnvVars(EnvCSRFSecret),
+			Usage: "HMAC key for signing CSRF tokens (raw bytes, at least 32 characters). " +
+				"Flag values are visible in process listings (ps); prefer PADMARK_CSRF_SECRET. " +
+				"Empty (default) generates a fresh random secret per process: forms survive only " +
+				"within one process lifetime, so restarts invalidate outstanding tokens and " +
+				"multi-replica deployments 403 on every form. Set to a fixed random value " +
+				"(e.g. `openssl rand -base64 32`) shared across replicas to avoid that",
+		},
+	}, argon2Flags()...)
+}
+
+// argon2Flags is shared by serve and the encryption commands: encryption migrate hashes the
+// caller-chosen edit codes of converted legacy notes with the same argon2id cost as serve.
+func argon2Flags() []cli.Flag {
+	return []cli.Flag{
 		&cli.IntFlag{
-			Name:    FlagArgon2Memory,
-			Sources: cli.EnvVars(EnvArgon2Memory),
-			Value:   DefaultArgon2Memory,
-			Usage: "argon2id memory cost in KiB for account password hashing (default: 24576 = 24 MiB); " +
-				"edit codes use a fast hash and are unaffected",
+			Name:      FlagArgon2Memory,
+			Validator: boundedCost(int(crypto.MaxArgon2Memory)),
+			Sources:   cli.EnvVars(EnvArgon2Memory),
+			Value:     DefaultArgon2Memory,
+			Usage: "argon2id memory cost in KiB for account passwords, caller-chosen edit codes and the " +
+				"per-user TOTP key (default: 24576 = 24 MiB); every derivation allocates this much, bounded " +
+				"overall by --argon2-memory-budget. Server-generated edit codes use a fast hash instead",
 		},
 		&cli.IntFlag{
-			Name:    FlagArgon2Time,
-			Sources: cli.EnvVars(EnvArgon2Time),
-			Value:   DefaultArgon2Time,
-			Usage:   "argon2id time cost (iterations); raise when lowering memory to keep strength",
+			Name:      FlagArgon2Time,
+			Validator: boundedCost(int(crypto.MaxArgon2Time)),
+			Sources:   cli.EnvVars(EnvArgon2Time),
+			Value:     DefaultArgon2Time,
+			Usage:     "argon2id time cost (iterations); raise when lowering memory to keep strength",
 		},
 		&cli.IntFlag{
-			Name:    FlagArgon2Threads,
-			Sources: cli.EnvVars(EnvArgon2Threads),
-			Value:   DefaultArgon2Threads,
-			Usage:   "argon2id parallelism (CPU threads per hash)",
+			Name:      FlagArgon2Threads,
+			Validator: boundedCost(int(crypto.MaxArgon2Threads)),
+			Sources:   cli.EnvVars(EnvArgon2Threads),
+			Value:     DefaultArgon2Threads,
+			Usage:     "argon2id parallelism (CPU threads per hash)",
 		},
+		&cli.IntFlag{
+			Name:      FlagArgon2MemoryBudget,
+			Validator: boundedCost(maxArgon2MemoryBudget),
+			Sources:   cli.EnvVars(EnvArgon2MemoryBudget),
+			Value:     DefaultArgon2MemoryBudget,
+			Usage: "total argon2id memory in KiB that concurrent password, edit-code and TOTP-key " +
+				"derivations may hold at once (default: 131072 = 128 MiB); further requests queue. " +
+				"Must be at least --argon2-memory. Size it below the container memory limit and set " +
+				"GOMEMLIMIT to about 75-80% of that limit",
+		},
+	}
+}
+
+// skipMigrationBackupFlag is shared by serve and migrate, which both apply migrations.
+func skipMigrationBackupFlag() *cli.BoolFlag {
+	return &cli.BoolFlag{
+		Name:    FlagSkipMigrationBackup,
+		Sources: cli.EnvVars(EnvSkipMigrationBackup),
+		Value:   false,
+		Usage: "Do not back up the SQLite database before applying pending migrations. By default, when " +
+			"migrations are pending and the database is a file, a copy is written next to it as " +
+			"<db>.bak-<YYYYMMDD-HHMMSS> (mode 0600) first, because some migrations are irreversible. " +
+			"Set only if backups are managed elsewhere; ignored for postgres (use pg_dump)",
+	}
+}
+
+// allowSharedKeyringFlag is shared by serve and the encryption commands, which load the same keyring.
+func allowSharedKeyringFlag() *cli.BoolFlag {
+	return &cli.BoolFlag{
+		Name:    FlagAllowSharedKeyring,
+		Sources: cli.EnvVars(EnvAllowSharedKeyring),
+		Value:   DefaultAllowSharedKeyring,
+		Usage: "Accept a content keyring file readable by group or other users (logged as a warning). " +
+			"Startup otherwise refuses such a file; restrict it to 0600 or 0400 instead whenever possible. " +
+			"Only for secret managers that cannot provide an owner-only file; keyrings under /run/secrets/ " +
+			"(Docker/Compose secrets) are already exempt",
+	}
+}
+
+// maxArgon2MemoryBudget caps --argon2-memory-budget at 64 GiB (in KiB): it rejects typos and keeps
+// the value inside uint32 on every platform's int.
+const maxArgon2MemoryBudget = 64 * 1024 * 1024
+
+// boundedCost rejects negative and overflowing flag values before narrowing to uint32/uint8.
+func boundedCost(maximum int) func(int) error {
+	return func(value int) error {
+		if value < 1 || value > maximum {
+			return fmt.Errorf("%w 1 and %d", errInvalidArgon2Cost, maximum)
+		}
+
+		return nil
 	}
 }

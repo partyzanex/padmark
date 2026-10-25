@@ -22,10 +22,10 @@ func pingCommand() *urcli.Command {
 func pingAction(ctx context.Context, cmd *urcli.Command) error {
 	padmarkClient, err := newPadmarkClient(cmd)
 	if err != nil {
-		return err
+		return fmt.Errorf("create API client: %w", err)
 	}
 
-	erw := &errWriter{w: os.Stdout}
+	erw := &errWriter{w: os.Stdout, err: nil}
 	erw.printf("server: %s\n", resolveServerURL(cmd))
 
 	liveErr := checkLiveness(ctx, padmarkClient)
@@ -70,8 +70,8 @@ func checkReadiness(ctx context.Context, cl *padmark.Client) error {
 	case *padmark.ReadyzOK:
 		return nil
 	case *padmark.ErrorResponse:
-		return fmt.Errorf("service unavailable: %s", typed.Message)
+		return fmt.Errorf("%w: %s", ErrServiceUnavailable, typed.Message)
 	default:
-		return fmt.Errorf("unexpected response type: %T", res)
+		return fmt.Errorf("%w: %T", ErrUnexpectedResponse, res)
 	}
 }

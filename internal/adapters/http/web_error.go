@@ -1,11 +1,11 @@
 package http
 
 import (
+	_ "embed"
 	"errors"
 	"net/http"
 
-	_ "embed"
-
+	"github.com/partyzanex/padmark/internal/adapters/http/middleware"
 	"github.com/partyzanex/padmark/internal/domain"
 )
 
@@ -34,6 +34,9 @@ func domainErrToPageData(err error) errorViewData {
 			ErrorType: errorTypeClient,
 			Title:     "Paste not found",
 			Desc:      "The paste you're looking for doesn't exist, has expired, or was deleted.",
+			// Detail/Nonce unset on a not-found page (no extra context, no CSRF-bound form).
+			Detail: "",
+			Nonce:  "",
 		}
 	case errors.Is(err, domain.ErrInvalidEditCode):
 		return errorViewData{
@@ -41,6 +44,8 @@ func domainErrToPageData(err error) errorViewData {
 			ErrorType: errorTypeClient,
 			Title:     "Forbidden",
 			Desc:      "The edit code is invalid or missing.",
+			Detail:    "",
+			Nonce:     "",
 		}
 	case errors.Is(err, domain.ErrForbidden):
 		return errorViewData{
@@ -48,13 +53,17 @@ func domainErrToPageData(err error) errorViewData {
 			ErrorType: errorTypeClient,
 			Title:     "Forbidden",
 			Desc:      "You don't have permission to perform this action.",
+			Detail:    "",
+			Nonce:     "",
 		}
 	case errors.Is(err, domain.ErrExpired):
 		return errorViewData{
-			Code:      http.StatusGone,
-			ErrorType: errorTypeClient,
 			Title:     "Paste expired",
 			Desc:      "This paste had a limited lifetime and has been automatically deleted after expiration.",
+			Detail:    "",
+			ErrorType: errorTypeClient,
+			Nonce:     "",
+			Code:      http.StatusGone,
 		}
 	default:
 		return domainErrToDefaultPageData(err)
@@ -75,6 +84,8 @@ func domainErrToDefaultPageData(err error) errorViewData {
 			ErrorType: errorTypeServer,
 			Title:     "Internal server error",
 			Desc:      "Something went wrong on our end. Please try again later.",
+			Detail:    "",
+			Nonce:     "",
 		}
 	}
 
@@ -83,6 +94,8 @@ func domainErrToDefaultPageData(err error) errorViewData {
 		ErrorType: errorTypeClient,
 		Title:     "Request rejected",
 		Desc:      message,
+		Detail:    "",
+		Nonce:     "",
 	}
 }
 
@@ -110,7 +123,7 @@ func (h *common) writeNoteError(w http.ResponseWriter, r *http.Request, err erro
 // writeErrorPageData renders the HTML error template from explicit view data,
 // for cases that need a tailored title/description rather than a domain sentinel.
 func (h *common) writeErrorPageData(w http.ResponseWriter, r *http.Request, data *errorViewData) {
-	data.Nonce = nonceFromContext(r.Context())
+	data.Nonce = middleware.NonceFromContext(r.Context())
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(data.Code)
@@ -118,6 +131,21 @@ func (h *common) writeErrorPageData(w http.ResponseWriter, r *http.Request, data
 	tmplErr := h.errorTmpl.Execute(w, data)
 	if tmplErr != nil {
 		h.log.ErrorContext(r.Context(), "render error template", "err", tmplErr)
+	}
+}
+
+// privateToOtherPageData is the error shown to a signed-in caller whose account is not the one a
+// resource's privacy level admits. Separate from the /login redirect an anonymous caller gets:
+// this one is not missing a credential, so the page has to say the request is settled rather than
+// invite an action that would change nothing.
+func privateToOtherPageData() errorViewData {
+	return errorViewData{
+		Code:      http.StatusForbidden,
+		ErrorType: errorTypeClient,
+		Title:     "Not yours",
+		Desc:      "This is private to another account. Signing in again won't change that.",
+		Detail:    "",
+		Nonce:     "",
 	}
 }
 
@@ -129,5 +157,21 @@ func setupClosedPageData() errorViewData {
 		ErrorType: errorTypeClient,
 		Title:     "Setup is closed",
 		Desc:      "The first admin already exists. New accounts can only be created via an invite link.",
+		Detail:    "",
+		Nonce:     "",
+	}
+}
+
+// setupDisabledPageData explains why first-admin setup is unavailable: the operator configured no
+// bootstrap token, so nobody can prove ownership of the server.
+func setupDisabledPageData() errorViewData {
+	return errorViewData{
+		Code:      http.StatusForbidden,
+		ErrorType: errorTypeClient,
+		Title:     "Setup is disabled",
+		Desc: "Creating the first admin requires a bootstrap token. Set PADMARK_BOOTSTRAP_TOKEN " +
+			"(at least 32 characters) on the server, restart it, and enter the token here.",
+		Detail: "",
+		Nonce:  "",
 	}
 }

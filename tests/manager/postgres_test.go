@@ -1,7 +1,10 @@
+//go:build integration
+
 package integration
 
 import (
 	"database/sql"
+	"log/slog"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -11,6 +14,7 @@ import (
 	"github.com/uptrace/bun/dialect/pgdialect"
 	"github.com/uptrace/bun/driver/pgdriver"
 
+	"github.com/partyzanex/padmark/internal/infra/lock"
 	pgrepo "github.com/partyzanex/padmark/internal/infra/storage/postgres"
 )
 
@@ -57,13 +61,19 @@ func (s *PostgresManagerSuite) TearDownSuite() {
 func (s *PostgresManagerSuite) SetupTest() {
 	ctx := s.T().Context()
 
-	for _, tbl := range []string{"notes", "reveal_tokens"} {
+	for _, tbl := range []string{"notes", "links", "reveal_tokens"} {
 		_, err := s.db.NewTruncateTable().TableExpr(tbl).Cascade().Exec(ctx)
 		s.Require().NoError(err)
 	}
 
-	s.Manager = newManager(pgrepo.NewNoteRepository(s.db))
-	s.RevealStore = pgrepo.NewRevealRepository(s.db)
+	slugLock := lock.NewLocker()
+
+	s.Manager = newManager(s.T(), pgrepo.NewNoteRepository(s.db), pgrepo.NewLinkRepository(s.db, slog.Default()), slugLock)
+	s.LinkManager = newLinkManager(s.T(),
+		pgrepo.NewLinkRepository(s.db, slog.Default()), pgrepo.NewNoteRepository(s.db), slugLock,
+	)
+	s.RevealStore = pgrepo.NewRevealRepository(s.db, slog.Default())
+	s.DB = s.db
 }
 
 func TestPostgresManager(t *testing.T) {

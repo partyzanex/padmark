@@ -3,15 +3,13 @@
 package integration
 
 import (
-	"database/sql"
 	"fmt"
+	"log/slog"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
 	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect/sqlitedialect"
-	"github.com/uptrace/bun/driver/sqliteshim"
 
 	sqliterepo "github.com/partyzanex/padmark/internal/infra/storage/sqlite"
 )
@@ -26,17 +24,17 @@ func (s *SQLiteAuthSuite) SetupTest() {
 	name := strings.ReplaceAll(s.T().Name(), "/", "_")
 	uri := fmt.Sprintf("file:%s?mode=memory&cache=shared", name)
 
-	sqldb, err := sql.Open(sqliteshim.DriverName(), uri)
+	db, err := sqliterepo.Open(uri, slog.New(slog.DiscardHandler))
 	s.Require().NoError(err)
 
-	s.db = bun.NewDB(sqldb, sqlitedialect.New())
+	s.db = db
 
 	_, migrateErr := sqliterepo.Migrate(s.T().Context(), s.db)
 	s.Require().NoError(migrateErr)
 
 	s.Users = sqliterepo.NewUserRepository(s.db)
-	s.Invites = sqliterepo.NewInviteRepository(s.db)
-	s.Sessions = sqliterepo.NewSessionRepository(s.db)
+	s.Invites = sqliterepo.NewInviteRepository(s.db, slog.Default())
+	s.Sessions = sqliterepo.NewSessionRepository(s.db, slog.Default())
 }
 
 func (s *SQLiteAuthSuite) TearDownTest() {

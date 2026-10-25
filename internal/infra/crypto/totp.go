@@ -6,6 +6,8 @@ import (
 	"encoding/base64"
 	"fmt"
 	"image/png"
+	"net/url"
+	"strconv"
 	"time"
 
 	"github.com/pquerna/otp"
@@ -23,6 +25,15 @@ func GenerateTOTPSecret() (string, error) {
 	key, err := totp.Generate(totp.GenerateOpts{
 		Issuer:      "padmark",
 		AccountName: "setup",
+		// Period/SecretSize/Secret/Digits/Algorithm/Rand left at library defaults (SHA1, 6 digits,
+		// 20-byte secret, 30s period, crypto/rand). ValidateTOTP/ValidateTOTPWithCounter below
+		// match these so generated and validated secrets stay in sync.
+		Period:     0,
+		SecretSize: 0,
+		Secret:     nil,
+		Digits:     0,
+		Algorithm:  0,
+		Rand:       nil,
 	})
 	if err != nil {
 		return "", fmt.Errorf("generate totp key: %w", err)
@@ -39,6 +50,8 @@ func ValidateTOTP(secret, code string) bool {
 		Skew:      totpWindow,
 		Digits:    otp.DigitsSix,
 		Algorithm: otp.AlgorithmSHA1,
+		// Encoder zero = default base32 encoding (otp.EncoderDefault), matches GenerateTOTPSecret's output.
+		Encoder: otp.EncoderDefault,
 	})
 
 	return valid && err == nil
@@ -56,6 +69,8 @@ func ValidateTOTPWithCounter(secret, code string) (valid bool, counter int64) {
 		Skew:      0,
 		Digits:    otp.DigitsSix,
 		Algorithm: otp.AlgorithmSHA1,
+		// Encoder zero = default base32 encoding (otp.EncoderDefault), matches GenerateTOTPSecret's output.
+		Encoder: otp.EncoderDefault,
 	}
 
 	for delta := int64(-totpWindow); delta <= int64(totpWindow); delta++ {
@@ -75,17 +90,37 @@ func ValidateTOTPWithCounter(secret, code string) (valid bool, counter int64) {
 	return false, 0
 }
 
+// OTPAuthURI returns the otpauth:// enrollment URI for issuer/username/secret as plain text —
+// the machine-readable counterpart of GenerateQRCodeDataURL (headless provisioning prints this
+// instead of rendering a QR image). The URI is validated by parsing it back before returning.
+func OTPAuthURI(issuer, username, secret string) (string, error) {
+	var err error
+
+	query := url.Values{
+		"secret": {secret}, "issuer": {issuer}, "algorithm": {"SHA1"},
+		"digits": {"6"}, "period": {strconv.Itoa(totpPeriod)},
+	}
+	uri := "otpauth://totp/" + url.PathEscape(issuer) + ":" + url.PathEscape(username) + "?" + query.Encode()
+
+	_, err = otp.NewKeyFromURL(uri)
+	if err != nil {
+		return "", fmt.Errorf("parse otpauth url: %w", err)
+	}
+
+	return uri, nil
+}
+
 // GenerateQRCodeDataURL returns a data URL (image/png;base64) for the otpauth:// URI.
 // issuer is the service name shown in the authenticator app.
 func GenerateQRCodeDataURL(issuer, username, secret string) (string, error) {
-	key, err := otp.NewKeyFromURL(
-		fmt.Sprintf(
-			"otpauth://totp/%s:%s?secret=%s&issuer=%s&algorithm=SHA1&digits=6&period=%d",
-			issuer, username, secret, issuer, totpPeriod,
-		),
-	)
+	uri, err := OTPAuthURI(issuer, username, secret)
 	if err != nil {
-		return "", fmt.Errorf("parse otpauth url: %w", err)
+		return "", fmt.Errorf("otpauth uri: %w", err)
+	}
+
+	key, keyErr := otp.NewKeyFromURL(uri)
+	if keyErr != nil {
+		return "", fmt.Errorf("parse otpauth url: %w", keyErr)
 	}
 
 	img, err := key.Image(qrImageSize, qrImageSize)

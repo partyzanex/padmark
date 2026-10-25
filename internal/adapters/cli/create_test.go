@@ -99,19 +99,19 @@ func buildCreateReqFor(t *testing.T, args ...string) *padmark.CreateNoteRequest 
 	return req
 }
 
-func TestBuildCreateReq_Private_SetsPrivateTrue(t *testing.T) {
+func TestBuildCreateReq_Privacy_SetsValue(t *testing.T) {
 	t.Parallel()
 
-	req := buildCreateReqFor(t, "--private")
+	req := buildCreateReqFor(t, "--privacy", "owner")
 
-	assert.True(t, req.Private.IsSet())
-	assert.True(t, req.Private.Value)
+	require.True(t, req.Privacy.IsSet())
+	assert.Equal(t, padmark.CreateNoteRequestPrivacyOwner, req.Privacy.Value)
 }
 
-func TestBuildCreateReq_NoPrivateFlag_OmitsField(t *testing.T) {
+func TestBuildCreateReq_NoPrivacyFlag_OmitsField(t *testing.T) {
 	t.Parallel()
 
 	req := buildCreateReqFor(t)
 
-	assert.False(t, req.Private.IsSet(), "private must be omitted, not sent as false")
+	assert.False(t, req.Privacy.IsSet(), "privacy must be omitted, not sent as public")
 }

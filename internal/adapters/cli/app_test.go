@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -16,7 +15,7 @@ import (
 // instead of hanging. The slow server sleeps far longer than the timeout, so a fast failure
 // (well under the sleep) proves the bound is enforced rather than ignored.
 func TestRequestTimeout_SlowServer_FailsFast(t *testing.T) {
-	t.Parallel()
+	isolateEnv(t)
 
 	// serverDelay >> timeout so the client's deadline fires first. elapsed is measured before
 	// srv.Close() (which blocks until the in-flight handler's sleep ends), so the assertion sees
@@ -33,7 +32,7 @@ func TestRequestTimeout_SlowServer_FailsFast(t *testing.T) {
 	defer srv.Close()
 
 	start := time.Now()
-	err := runCLI(context.Background(), "--url", srv.URL, "--timeout", timeout, cmdGet, "some-id")
+	err := runCLI(t.Context(), "--url", srv.URL, "--timeout", timeout, cmdGet, "some-id")
 	elapsed := time.Since(start)
 
 	require.Error(t, err, "request must fail when the server is slower than the timeout")

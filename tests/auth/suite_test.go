@@ -25,16 +25,17 @@ var testArgon2Params = crypto.Argon2Params{Memory: 8 * 1024, Time: 1, Threads: 1
 type userRepo interface {
 	Create(ctx context.Context, u *domain.User) error
 	GetByUsername(ctx context.Context, username string) (*domain.User, error)
-	GetByID(ctx context.Context, id string) (*domain.User, error)
+	GetByID(ctx context.Context, id uuid.UUID) (*domain.User, error)
 	List(ctx context.Context) ([]*domain.User, error)
-	UpdateLastLogin(ctx context.Context, id string, t time.Time) error
-	UpdatePassword(ctx context.Context, id, passwordHash string, kdfSalt []byte, totpSecret string) error
-	UpdateTOTPCounter(ctx context.Context, id string, counter int64) (bool, error)
-	Revoke(ctx context.Context, id string) error
+	UpdateLastLogin(ctx context.Context, id uuid.UUID, t time.Time) error
+	UpdatePassword(ctx context.Context, id uuid.UUID, passwordHash string, kdfSalt []byte, totpSecret string) error
+	UpdateTOTPSecret(ctx context.Context, id uuid.UUID, totpSecret string) error
+	UpdateTOTPCounter(ctx context.Context, id uuid.UUID, counter int64) (bool, error)
+	Revoke(ctx context.Context, id uuid.UUID) error
 }
 
 type inviteRepo interface {
-	Issue(ctx context.Context, createdByID string) (string, error)
+	Issue(ctx context.Context, createdByID uuid.UUID) (string, error)
 	Consume(ctx context.Context, token, username string) (*domain.Invite, error)
 	RedeemInvite(ctx context.Context, token, username string, usr *domain.User) error
 }
@@ -43,8 +44,8 @@ type sessionRepo interface {
 	Create(ctx context.Context, s *domain.Session) error
 	Get(ctx context.Context, sessionID string) (*domain.Session, error)
 	Delete(ctx context.Context, sessionID string) error
-	DeleteByUserID(ctx context.Context, userID string) error
-	DeleteByUserIDExcept(ctx context.Context, userID, exceptSessionID string) error
+	DeleteByUserID(ctx context.Context, userID uuid.UUID) error
+	DeleteByUserIDExcept(ctx context.Context, userID uuid.UUID, exceptSessionHash string) error
 	DeleteExpired(ctx context.Context) error
 }
 
@@ -67,7 +68,7 @@ const testTOTPSecret = "JBSWY3DPEHPK3PXP"
 
 func (s *AuthSuite) newUser(username string) *domain.User {
 	return &domain.User{
-		ID:         uuid.New().String(),
+		ID:         uuid.New(),
 		Username:   username,
 		TOTPSecret: testTOTPSecret,
 		IsAdmin:    false,
@@ -121,7 +122,7 @@ func (s *AuthSuite) TestUser_GetByID() {
 }
 
 func (s *AuthSuite) TestUser_GetByID_NotFound() {
-	_, err := s.Users.GetByID(s.T().Context(), uuid.New().String())
+	_, err := s.Users.GetByID(s.T().Context(), uuid.New())
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
@@ -196,7 +197,7 @@ func (s *AuthSuite) TestInvite_Consume_OK() {
 
 	invite, err := s.Invites.Consume(ctx, tok, "newuser")
 	s.Require().NoError(err)
-	s.Equal(tok, invite.Token)
+	s.Equal(domain.HashInviteToken(tok), invite.TokenHash)
 	s.Equal("newuser", invite.UsedBy)
 	s.NotNil(invite.UsedAt)
 }
@@ -229,18 +230,18 @@ func (s *AuthSuite) TestSession_Create_Get() {
 	s.Require().NoError(s.Users.Create(ctx, usr))
 
 	sess := &domain.Session{
-		SessionID: "sess-alice-1",
-		UserID:    usr.ID,
-		CreatedAt: time.Now().Truncate(time.Second),
-		ExpiresAt: time.Now().Add(24 * time.Hour).Truncate(time.Second),
-		UserAgent: "Mozilla/5.0",
-		IP:        "127.0.0.1",
+		SessionHash: "sess-alice-1",
+		UserID:      usr.ID,
+		CreatedAt:   time.Now().Truncate(time.Second),
+		ExpiresAt:   time.Now().Add(24 * time.Hour).Truncate(time.Second),
+		UserAgent:   "Mozilla/5.0",
+		IP:          "127.0.0.1",
 	}
 	s.Require().NoError(s.Sessions.Create(ctx, sess))
 
-	got, err := s.Sessions.Get(ctx, sess.SessionID)
+	got, err := s.Sessions.Get(ctx, sess.SessionHash)
 	s.Require().NoError(err)
-	s.Equal(sess.SessionID, got.SessionID)
+	s.Equal(sess.SessionHash, got.SessionHash)
 	s.Equal(sess.UserID, got.UserID)
 }
 
@@ -251,14 +252,14 @@ func (s *AuthSuite) TestSession_Get_Expired_ReturnsErrSessionExpired() {
 
 	past := time.Now().Add(-time.Minute)
 	sess := &domain.Session{
-		SessionID: "sess-bob-expired",
-		UserID:    usr.ID,
-		CreatedAt: past,
-		ExpiresAt: past,
+		SessionHash: "sess-bob-expired",
+		UserID:      usr.ID,
+		CreatedAt:   past,
+		ExpiresAt:   past,
 	}
 	s.Require().NoError(s.Sessions.Create(ctx, sess))
 
-	_, err := s.Sessions.Get(ctx, sess.SessionID)
+	_, err := s.Sessions.Get(ctx, sess.SessionHash)
 	s.ErrorIs(err, domain.ErrSessionExpired)
 }
 
@@ -273,15 +274,15 @@ func (s *AuthSuite) TestSession_Delete() {
 	s.Require().NoError(s.Users.Create(ctx, usr))
 
 	sess := &domain.Session{
-		SessionID: "sess-carol-1",
-		UserID:    usr.ID,
-		CreatedAt: time.Now(),
-		ExpiresAt: time.Now().Add(time.Hour),
+		SessionHash: "sess-carol-1",
+		UserID:      usr.ID,
+		CreatedAt:   time.Now(),
+		ExpiresAt:   time.Now().Add(time.Hour),
 	}
 	s.Require().NoError(s.Sessions.Create(ctx, sess))
-	s.Require().NoError(s.Sessions.Delete(ctx, sess.SessionID))
+	s.Require().NoError(s.Sessions.Delete(ctx, sess.SessionHash))
 
-	_, err := s.Sessions.Get(ctx, sess.SessionID)
+	_, err := s.Sessions.Get(ctx, sess.SessionHash)
 	s.ErrorIs(err, domain.ErrSessionExpired)
 }
 
@@ -292,16 +293,16 @@ func (s *AuthSuite) TestSession_DeleteExpired() {
 
 	past := time.Now().Add(-time.Minute)
 	expired := &domain.Session{
-		SessionID: "sess-dave-old",
-		UserID:    usr.ID,
-		CreatedAt: past,
-		ExpiresAt: past,
+		SessionHash: "sess-dave-old",
+		UserID:      usr.ID,
+		CreatedAt:   past,
+		ExpiresAt:   past,
 	}
 	active := &domain.Session{
-		SessionID: "sess-dave-active",
-		UserID:    usr.ID,
-		CreatedAt: time.Now(),
-		ExpiresAt: time.Now().Add(time.Hour),
+		SessionHash: "sess-dave-active",
+		UserID:      usr.ID,
+		CreatedAt:   time.Now(),
+		ExpiresAt:   time.Now().Add(time.Hour),
 	}
 
 	s.Require().NoError(s.Sessions.Create(ctx, expired))
@@ -309,7 +310,7 @@ func (s *AuthSuite) TestSession_DeleteExpired() {
 
 	s.Require().NoError(s.Sessions.DeleteExpired(ctx))
 
-	_, err := s.Sessions.Get(ctx, active.SessionID)
+	_, err := s.Sessions.Get(ctx, active.SessionHash)
 	s.Require().NoError(err, "active session must survive DeleteExpired")
 }
 
@@ -324,21 +325,21 @@ func (s *AuthSuite) TestSession_DeleteByUserID_RemovesAllUserSessions() {
 
 	for i, id := range []string{"sess-eve-1", "sess-eve-2", "sess-eve-3"} {
 		s.Require().NoError(s.Sessions.Create(ctx, &domain.Session{
-			SessionID: id,
-			UserID:    usr.ID,
-			CreatedAt: time.Now(),
-			ExpiresAt: future,
-			UserAgent: "ua",
-			IP:        "1.2.3." + string(rune('1'+i)),
+			SessionHash: id,
+			UserID:      usr.ID,
+			CreatedAt:   time.Now(),
+			ExpiresAt:   future,
+			UserAgent:   "ua",
+			IP:          "1.2.3." + string(rune('1'+i)),
 		}))
 	}
 
 	// A session for a different user — must not be touched.
 	s.Require().NoError(s.Sessions.Create(ctx, &domain.Session{
-		SessionID: "sess-frank-1",
-		UserID:    other.ID,
-		CreatedAt: time.Now(),
-		ExpiresAt: future,
+		SessionHash: "sess-frank-1",
+		UserID:      other.ID,
+		CreatedAt:   time.Now(),
+		ExpiresAt:   future,
 	}))
 
 	s.Require().NoError(s.Sessions.DeleteByUserID(ctx, usr.ID))
@@ -358,23 +359,23 @@ func (s *AuthSuite) TestSession_DeleteByUserIDExcept_PreservesExceptedSession() 
 	s.Require().NoError(s.Users.Create(ctx, usr))
 
 	future := time.Now().Add(time.Hour)
-	keep := &domain.Session{SessionID: "sess-keep", UserID: usr.ID, CreatedAt: time.Now(), ExpiresAt: future}
-	old1 := &domain.Session{SessionID: "sess-old1", UserID: usr.ID, CreatedAt: time.Now(), ExpiresAt: future}
-	old2 := &domain.Session{SessionID: "sess-old2", UserID: usr.ID, CreatedAt: time.Now(), ExpiresAt: future}
+	keep := &domain.Session{SessionHash: "sess-keep", UserID: usr.ID, CreatedAt: time.Now(), ExpiresAt: future}
+	old1 := &domain.Session{SessionHash: "sess-old1", UserID: usr.ID, CreatedAt: time.Now(), ExpiresAt: future}
+	old2 := &domain.Session{SessionHash: "sess-old2", UserID: usr.ID, CreatedAt: time.Now(), ExpiresAt: future}
 
 	s.Require().NoError(s.Sessions.Create(ctx, keep))
 	s.Require().NoError(s.Sessions.Create(ctx, old1))
 	s.Require().NoError(s.Sessions.Create(ctx, old2))
 
-	s.Require().NoError(s.Sessions.DeleteByUserIDExcept(ctx, usr.ID, keep.SessionID))
+	s.Require().NoError(s.Sessions.DeleteByUserIDExcept(ctx, usr.ID, keep.SessionHash))
 
-	_, err := s.Sessions.Get(ctx, keep.SessionID)
+	_, err := s.Sessions.Get(ctx, keep.SessionHash)
 	s.Require().NoError(err, "excepted session must survive DeleteByUserIDExcept")
 
-	_, err = s.Sessions.Get(ctx, old1.SessionID)
+	_, err = s.Sessions.Get(ctx, old1.SessionHash)
 	s.Require().ErrorIs(err, domain.ErrSessionExpired, "old session 1 must be removed")
 
-	_, err = s.Sessions.Get(ctx, old2.SessionID)
+	_, err = s.Sessions.Get(ctx, old2.SessionHash)
 	s.Require().ErrorIs(err, domain.ErrSessionExpired, "old session 2 must be removed")
 }
 
@@ -384,16 +385,16 @@ func (s *AuthSuite) TestSession_DeleteByUserIDExcept_NoOtherSessions_IsIdempoten
 	s.Require().NoError(s.Users.Create(ctx, usr))
 
 	sess := &domain.Session{
-		SessionID: "sess-only",
-		UserID:    usr.ID,
-		CreatedAt: time.Now(),
-		ExpiresAt: time.Now().Add(time.Hour),
+		SessionHash: "sess-only",
+		UserID:      usr.ID,
+		CreatedAt:   time.Now(),
+		ExpiresAt:   time.Now().Add(time.Hour),
 	}
 	s.Require().NoError(s.Sessions.Create(ctx, sess))
 
-	s.Require().NoError(s.Sessions.DeleteByUserIDExcept(ctx, usr.ID, sess.SessionID))
+	s.Require().NoError(s.Sessions.DeleteByUserIDExcept(ctx, usr.ID, sess.SessionHash))
 
-	_, err := s.Sessions.Get(ctx, sess.SessionID)
+	_, err := s.Sessions.Get(ctx, sess.SessionHash)
 	s.Require().NoError(err, "sole session must survive when it is the excepted one")
 }
 

@@ -103,6 +103,10 @@
         <div class="admin-title">Admin panel</div>
 
         <div class="admin-section">
+            {{template "signout" .}}
+        </div>
+
+        <div class="admin-section">
             <div class="admin-section-title">Generate invite link</div>
             {{if .InviteURL}}
             <div class="msg-ok">Invite link generated — copy it now, it will not be shown again:</div>
@@ -118,7 +122,7 @@
             <div class="msg-err">{{.InviteError}}</div>
             {{end}}
             <div class="btn-row">
-                <form method="POST" action="/admin/invite" style="margin-top:16px;">
+                <form method="POST" action="/admin/invite" class="admin-invite-form">
                     <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
                     <button type="submit" class="btn-publish">Generate invite</button>
                 </form>
@@ -145,7 +149,7 @@
                 {{end}}
             </div>
             {{else}}
-            <div style="font-family:var(--font-mono);font-size:0.75rem;color:var(--text-muted);">No users.</div>
+            <div class="admin-empty">No users.</div>
             {{end}}
         </div>
 
@@ -170,6 +174,8 @@
                     <span class="user-name">{{slice .ID 0 12}}…</span>
                     <div class="user-meta">
                         {{.Username}} · created {{.CreatedAt.Format "2006-01-02 15:04"}} ·
+                        {{if .ExpiresAt}}expires {{.ExpiresAt.Format "2006-01-02 15:04"}}{{else}}never expires{{end}} ·
+                        {{if .IssuedBy}}issued by key {{slice .IssuedBy 0 12}}…{{else}}issued from a browser session{{end}} ·
                         {{if .LastUsedAt}}used {{.LastUsedAt.Format "2006-01-02 15:04"}}{{else}}never used{{end}}
                     </div>
                 </div>
@@ -182,8 +188,10 @@
             <div class="user-row">No API keys.</div>
             {{end}}
             <div class="btn-row">
-                <form method="POST" action="/admin/api-keys" style="margin-top:24px;">
+                <form method="POST" action="/admin/api-keys" class="admin-key-form">
                     <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+                    <label class="field-label" for="ttl_days">Lifetime, days (0 = never expires)</label>
+                    <input type="number" class="field-input" name="ttl_days" id="ttl_days" min="0" max="3650" value="0" required>
                     <button type="submit" class="btn-publish">Create key</button>
                 </form>
             </div>

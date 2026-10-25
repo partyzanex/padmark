@@ -9,8 +9,8 @@ import (
 )
 
 func migrateCommand() *cli.Command {
-	return &cli.Command{
-		Name:   "migrate",
+	return &cli.Command{ //nolint:exhaustruct_v5 // optional fields stay at zero values = features disabled
+		Name:   encryptionMigrate,
 		Usage:  "Apply pending database migrations and exit",
 		Flags:  migrateFlags(),
 		Action: migrateAction,
@@ -31,6 +31,7 @@ func migrateFlags() []cli.Flag {
 			Value:   DefaultDSN,
 			Usage:   "Database DSN",
 		},
+		skipMigrationBackupFlag(),
 	}
 }
 
@@ -40,7 +41,7 @@ func migrateAction(ctx context.Context, cmd *cli.Command) error {
 
 	log := slog.Default()
 
-	db, err := openDB(ctx, storage, dsn)
+	db, err := openDB(ctx, storage, dsn, log)
 	if err != nil {
 		return fmt.Errorf("open db: %w", err)
 	}
@@ -54,9 +55,14 @@ func migrateAction(ctx context.Context, cmd *cli.Command) error {
 
 	log.InfoContext(ctx, "running migrations", "storage", storage)
 
-	_, err = initStorage(ctx, storage, db, log)
+	if storage == storagePostgres {
+		_, err = initPostgresStorage(ctx, db, log)
+	} else {
+		_, err = initSQLiteStorage(ctx, db, log, migrationOptions{dsn: dsn, skipBackup: cmd.Bool(FlagSkipMigrationBackup)})
+	}
+
 	if err != nil {
-		return err
+		return fmt.Errorf("init sqlite storage: %w", err)
 	}
 
 	log.InfoContext(ctx, "migrations applied successfully")

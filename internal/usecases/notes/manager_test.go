@@ -1,6 +1,7 @@
 package notes
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"log/slog"
@@ -8,31 +9,44 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/mock/gomock"
 
 	"github.com/partyzanex/padmark/internal/domain"
 )
 
+// testUserID1 and testUserID2 are fixed fake user IDs for owner-bypass tests: distinct
+// identities that must NOT compare equal, standing in for "the note's owner" and "some other
+// authenticated caller" respectively.
+var (
+	testUserID1 = uuid.New() //nolint:gochecknoglobals // test fixture
+	testUserID2 = uuid.New() //nolint:gochecknoglobals // test fixture
+)
+
 // passthroughEncryptor is a test double that returns content unchanged.
 type passthroughEncryptor struct{}
 
-func (passthroughEncryptor) Encrypt(pt, _ string) (string, error) { return pt, nil }
-func (passthroughEncryptor) Decrypt(ct, _ string) (string, error) { return ct, nil }
+func (passthroughEncryptor) Encrypt(pt, _ string) (string, error)    { return pt, nil }
+func (passthroughEncryptor) Decrypt(ct, _, _ string) (string, error) { return ct, nil }
 
 // identityHasher is a test double that stores and compares edit codes as plaintext.
 type identityHasher struct{}
 
 func (identityHasher) Hash(code string) (string, error) { return code, nil }
-func (identityHasher) Verify(hash, code string) bool    { return hash == code }
+
+// HashUserProvided mirrors Hash but prefixes the code, so tests can assert which hashing
+// variant the usecase picked for caller-supplied codes (see
+// TestCreate_UserSuppliedCodeUsesMemoryHardHash).
+func (identityHasher) HashUserProvided(code string) (string, error) { return "user:" + code, nil }
+func (identityHasher) Verify(hash, code string) bool                { return hash == code || hash == "user:"+code }
 
 // failingEncryptor is a test double whose Decrypt always returns an error.
 type failingEncryptor struct{}
 
 func (failingEncryptor) Encrypt(pt, _ string) (string, error) { return pt, nil }
-func (failingEncryptor) Decrypt(_, _ string) (string, error) {
+func (failingEncryptor) Decrypt(_, _, _ string) (string, error) {
 	return "", errors.New("decryption failed")
 }
 
@@ -40,7 +54,7 @@ func (failingEncryptor) Decrypt(_, _ string) (string, error) {
 type prefixEncryptor struct{}
 
 func (prefixEncryptor) Encrypt(pt, _ string) (string, error) { return "enc:" + pt, nil }
-func (prefixEncryptor) Decrypt(ct, _ string) (string, error) {
+func (prefixEncryptor) Decrypt(ct, _, _ string) (string, error) {
 	return strings.TrimPrefix(ct, "enc:"), nil
 }
 
@@ -48,19 +62,32 @@ func (prefixEncryptor) Decrypt(ct, _ string) (string, error) {
 type prefixHasher struct{}
 
 func (prefixHasher) Hash(code string) (string, error) { return "hash:" + code, nil }
-func (prefixHasher) Verify(hash, code string) bool    { return hash == "hash:"+code }
+
+func (prefixHasher) HashUserProvided(code string) (string, error) { return "userhash:" + code, nil }
+
+func (prefixHasher) Verify(hash, code string) bool {
+	return hash == "hash:"+code || hash == "userhash:"+code
+}
 
 // errEncryptor fails on Encrypt (Decrypt passes through).
 type errEncryptor struct{}
 
-func (errEncryptor) Encrypt(string, string) (string, error) { return "", errors.New("encrypt boom") }
-func (errEncryptor) Decrypt(ct, _ string) (string, error)   { return ct, nil }
+func (errEncryptor) Encrypt(string, string) (string, error)  { return "", errors.New("encrypt boom") }
+func (errEncryptor) Decrypt(ct, _, _ string) (string, error) { return ct, nil }
+
+// noopSlugLock is a test double that grants every lock immediately — these tests exercise
+// business logic in isolation, never two concurrent Create calls, so nothing here needs the
+// real cross-manager serialization internal/infra/lock.Locker provides in production.
+type noopSlugLock struct{}
+
+func (noopSlugLock) Lock(context.Context, string) (func(), error) { return func() {}, nil }
 
 type ManagerTestSuite struct {
 	suite.Suite
 
 	ctrl     *gomock.Controller
 	storage  *MockStorage
+	links    *MockLinksChecker
 	renderer *MockRenderer
 	manager  *Manager
 }
@@ -68,9 +95,16 @@ type ManagerTestSuite struct {
 func (s *ManagerTestSuite) SetupTest() {
 	s.ctrl = gomock.NewController(s.T())
 	s.storage = NewMockStorage(s.ctrl)
+	s.links = NewMockLinksChecker(s.ctrl)
 	s.renderer = NewMockRenderer(s.ctrl)
-	s.manager = NewManager(s.storage, s.renderer, passthroughEncryptor{}, identityHasher{},
+	s.manager = NewManager(s.storage, s.links, noopSlugLock{}, s.renderer, passthroughEncryptor{}, identityHasher{},
 		slog.New(slog.DiscardHandler), true)
+}
+
+// expectSlugFree sets up s.links to report the candidate slug as not already taken by a link —
+// the default, common case for Create tests that are expected to reach storage.Create.
+func (s *ManagerTestSuite) expectSlugFree() {
+	s.links.EXPECT().Exists(gomock.Any(), gomock.Any()).Return(false, nil)
 }
 
 func (s *ManagerTestSuite) TearDownTest() {
@@ -81,117 +115,12 @@ func TestManagerTestSuite(t *testing.T) {
 	suite.Run(t, new(ManagerTestSuite))
 }
 
-// randomString
-
-func TestRandomString_Length(t *testing.T) {
-	const chars = "abc"
-
-	for _, length := range []int{1, 5, 10, 32} {
-		got, err := randomString(chars, length)
-		require.NoError(t, err)
-		assert.Len(t, got, length, "length=%d", length)
-	}
-}
-
-func TestRandomString_OnlyUsesCharset(t *testing.T) {
-	const chars = "xyz"
-
-	got, err := randomString(chars, 100)
-	require.NoError(t, err)
-
-	for _, ch := range got {
-		assert.Contains(t, chars, string(ch))
-	}
-}
-
-func TestRandomString_Entropy(t *testing.T) {
-	first, err := randomString(slugChars, slugLength)
-	require.NoError(t, err)
-
-	second, err := randomString(slugChars, slugLength)
-	require.NoError(t, err)
-
-	assert.NotEqual(t, first, second, "two calls should almost never produce the same string")
-}
-
-// newSlug
-
-func TestNewSlug_LengthAndCharset(t *testing.T) {
-	slug, err := newSlug()
-	require.NoError(t, err)
-
-	assert.Len(t, slug, slugLength, "generated slug must be slugLength chars")
-	assert.Equal(t, 10, slugLength, "slug length is the configured short-URL length")
-
-	for _, ch := range slug {
-		assert.Contains(t, slugChars, string(ch), "slug must only use the slug alphabet")
-	}
-}
-
-// validCustomSlug
-
-func TestValidCustomSlug(t *testing.T) {
-	cases := []struct {
-		slug string
-		want bool
-	}{
-		// single segment (legacy shapes still valid)
-		{"my-slug", true},
-		{"a_b-C9", true},
-		{"file.name.md", true},
-		// path-like multi-segment
-		{"project/GUIDE.md", true},
-		{"protocol-v1/README.md", true},
-		{"a/b/c/d.txt", true},
-		{strings.Repeat("a", 100), true}, // at length limit
-		{"a/b/c/d/e/f/g/h/i/j", true},    // at segment limit (10 segments)
-		// rejected
-		{"", false},
-		{"bad slug!", false},              // space / punctuation
-		{"admin/x", false},                // reserved first segment
-		{"edit/note", false},              // reserved first segment
-		{"notes/x", false},                // reserved first segment
-		{"../etc", false},                 // segment starts with dot (traversal-ish)
-		{".hidden", false},                // dotfile
-		{"a/.hidden", false},              // dotfile in a later segment
-		{"a//b", false},                   // empty segment
-		{"/leading", false},               // leading slash
-		{"trailing/", false},              // trailing slash
-		{strings.Repeat("a", 101), false}, // over length limit
-		{"a/b/c/d/e/f/g/h/i/j/k", false},  // over segment limit (11 segments, well under 100 chars)
-	}
-
-	for _, tc := range cases {
-		assert.Equal(t, tc.want, validCustomSlug(tc.slug), "slug %q", tc.slug)
-	}
-}
-
-// resolveSlug
-
-func TestResolveSlug_ReservedPrefix_ErrorNamesReservedPrefixes(t *testing.T) {
-	note := &domain.Note{ID: "admin/x"}
-
-	_, err := resolveSlug(note, true)
-
-	require.ErrorIs(t, err, domain.ErrInvalidSlug)
-	assert.Contains(t, err.Error(), `reserved route name "admin"`)
-	assert.Contains(t, err.Error(), "notes", "the reserved-name list should be spelled out")
-}
-
-func TestResolveSlug_InvalidShape_GenericMessage(t *testing.T) {
-	note := &domain.Note{ID: "bad slug!"}
-
-	_, err := resolveSlug(note, true)
-
-	require.ErrorIs(t, err, domain.ErrInvalidSlug)
-	assert.Equal(t, domain.ErrInvalidSlug.Error(), err.Error(),
-		"a shape violation unrelated to reserved prefixes should keep the generic message")
-}
-
 // Create
 
 func (s *ManagerTestSuite) TestCreate_OK() {
 	note := &domain.Note{Title: "hello", Content: "world"}
+
+	s.expectSlugFree()
 	s.storage.EXPECT().Create(gomock.Any(), note).Return(nil)
 
 	result, err := s.manager.Create(s.T().Context(), note)
@@ -208,6 +137,8 @@ func (s *ManagerTestSuite) TestCreate_OK() {
 
 func (s *ManagerTestSuite) TestCreate_WithCustomEditCode() {
 	note := &domain.Note{Title: "hello", Content: "world", EditCode: "MyCustomCode1"}
+
+	s.expectSlugFree()
 	s.storage.EXPECT().Create(gomock.Any(), note).Return(nil)
 
 	result, err := s.manager.Create(s.T().Context(), note)
@@ -216,8 +147,54 @@ func (s *ManagerTestSuite) TestCreate_WithCustomEditCode() {
 	s.Equal("MyCustomCode1", result.EditCode)
 }
 
+// TestCreate_UserSuppliedCodeUsesMemoryHardHash pins that a caller-chosen edit code is
+// hashed with the memory-hard variant (identityHasher.HashUserProvided → "user:" prefix)
+// because its entropy is not guaranteed.
+func (s *ManagerTestSuite) TestCreate_UserSuppliedCodeUsesMemoryHardHash() {
+	note := &domain.Note{Title: "hello", Content: "world", EditCode: "MyCustomCode1"}
+
+	var storedHash string
+
+	s.expectSlugFree()
+	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, stored *domain.Note) error {
+			storedHash = stored.EditCode
+
+			return nil
+		})
+
+	_, err := s.manager.Create(s.T().Context(), note)
+
+	s.Require().NoError(err)
+	s.Equal("user:MyCustomCode1", storedHash)
+}
+
+// TestCreate_GeneratedCodeUsesFastHash pins the mirror invariant: a server-generated code
+// stays on the fast-hash path (identityHasher.Hash → no prefix).
+func (s *ManagerTestSuite) TestCreate_GeneratedCodeUsesFastHash() {
+	note := &domain.Note{Title: "hello", Content: "world"}
+
+	var storedHash string
+
+	s.expectSlugFree()
+	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, stored *domain.Note) error {
+			storedHash = stored.EditCode
+
+			return nil
+		})
+
+	_, err := s.manager.Create(s.T().Context(), note)
+
+	s.Require().NoError(err)
+	s.Len(storedHash, 12)
+	s.NotContains(storedHash, "user:")
+}
+
 func (s *ManagerTestSuite) TestCreate_EmptyEditCodeIsGenerated() {
 	note := &domain.Note{Title: "hello", Content: "world", EditCode: ""}
+
+	s.expectSlugFree()
 	s.storage.EXPECT().Create(gomock.Any(), note).Return(nil)
 
 	result, err := s.manager.Create(s.T().Context(), note)
@@ -231,6 +208,8 @@ func (s *ManagerTestSuite) TestCreate_CustomEditCodeUsedForUpdate() {
 	customCode := "MyCustomCode1"
 
 	note := &domain.Note{Title: "hello", Content: "world", EditCode: customCode}
+
+	s.expectSlugFree()
 	s.storage.EXPECT().Create(gomock.Any(), note).Return(nil)
 
 	created, err := s.manager.Create(s.T().Context(), note)
@@ -241,7 +220,7 @@ func (s *ManagerTestSuite) TestCreate_CustomEditCodeUsedForUpdate() {
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug(created.ID)).Return(created, nil)
 	s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug(created.ID), gomock.Any()).Return(nil)
 
-	updated, err := s.manager.Update(s.T().Context(), created.ID, customCode, &domain.Note{
+	updated, err := s.manager.Update(s.T().Context(), created.ID, customCode, uuid.Nil, &domain.Note{
 		Title:   "updated",
 		Content: "new body",
 	})
@@ -255,6 +234,8 @@ func (s *ManagerTestSuite) TestCreate_CustomEditCodeWrongCodeForbidden() {
 	customCode := "MyCustomCode1"
 
 	note := &domain.Note{Title: "hello", Content: "world", EditCode: customCode}
+
+	s.expectSlugFree()
 	s.storage.EXPECT().Create(gomock.Any(), note).Return(nil)
 
 	created, err := s.manager.Create(s.T().Context(), note)
@@ -263,7 +244,7 @@ func (s *ManagerTestSuite) TestCreate_CustomEditCodeWrongCodeForbidden() {
 	// Update with wrong code must fail
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug(created.ID)).Return(created, nil)
 
-	_, err = s.manager.Update(s.T().Context(), created.ID, "WrongCode1234", &domain.Note{
+	_, err = s.manager.Update(s.T().Context(), created.ID, "WrongCode1234", uuid.Nil, &domain.Note{
 		Title:   "updated",
 		Content: "new body",
 	})
@@ -273,6 +254,8 @@ func (s *ManagerTestSuite) TestCreate_CustomEditCodeWrongCodeForbidden() {
 
 func (s *ManagerTestSuite) TestCreate_EmptyTitle() {
 	note := &domain.Note{Content: "body"}
+
+	s.expectSlugFree()
 	s.storage.EXPECT().Create(gomock.Any(), note).Return(nil)
 
 	result, err := s.manager.Create(s.T().Context(), note)
@@ -298,8 +281,37 @@ func (s *ManagerTestSuite) TestCreate_InvalidContentType() {
 	s.ErrorIs(err, domain.ErrInvalidContentType)
 }
 
+// TestCreate_OwnerPrivacy_NoOwnerID_Rejected verifies that a note cannot be created with
+// privacy=owner and no OwnerID (e.g. an anonymous caller) — such a note could never be read
+// back by anyone, including its own creator.
+func (s *ManagerTestSuite) TestCreate_OwnerPrivacy_NoOwnerID_Rejected() {
+	priv := domain.PrivacyOwner
+	note := &domain.Note{Title: "hi", Content: "body", Privacy: &priv}
+
+	_, err := s.manager.Create(s.T().Context(), note)
+
+	s.ErrorIs(err, domain.ErrOwnerPrivacyRequiresOwner)
+}
+
+// TestCreate_OwnerPrivacy_WithOwnerID_OK verifies that privacy=owner is accepted when the note
+// actually has an OwnerID (the HTTP layer sets this from the authenticated caller before Create).
+func (s *ManagerTestSuite) TestCreate_OwnerPrivacy_WithOwnerID_OK() {
+	priv := domain.PrivacyOwner
+	note := &domain.Note{Title: "hi", Content: "body", Privacy: &priv, OwnerID: new(testUserID1)}
+
+	s.expectSlugFree()
+	s.storage.EXPECT().Create(gomock.Any(), note).Return(nil)
+
+	result, err := s.manager.Create(s.T().Context(), note)
+
+	s.Require().NoError(err)
+	s.Equal(domain.PrivacyOwner, result.EffectivePrivacy())
+}
+
 func (s *ManagerTestSuite) TestCreate_WithBurnTTL() {
 	note := &domain.Note{Title: "hello", Content: "world", BurnAfterReading: true, BurnTTL: 3600}
+
+	s.expectSlugFree()
 	s.storage.EXPECT().Create(gomock.Any(), note).Return(nil)
 
 	result, err := s.manager.Create(s.T().Context(), note)
@@ -312,6 +324,8 @@ func (s *ManagerTestSuite) TestCreate_WithBurnTTL() {
 
 func (s *ManagerTestSuite) TestCreate_WithSlug() {
 	note := &domain.Note{ID: "my-slug", Title: "hello", Content: "world"}
+
+	s.expectSlugFree()
 	s.storage.EXPECT().Create(gomock.Any(), note).Return(nil)
 
 	result, err := s.manager.Create(s.T().Context(), note)
@@ -331,7 +345,7 @@ func (s *ManagerTestSuite) TestCreate_InvalidSlug() {
 func (s *ManagerTestSuite) TestCreate_CustomSlugDisabled() {
 	// With custom slugs off (allowCustomSlugs=false, the default), a create request that supplies
 	// a slug is rejected — the server issues only random slugs.
-	mgr := NewManager(s.storage, s.renderer, passthroughEncryptor{}, identityHasher{},
+	mgr := NewManager(s.storage, s.links, noopSlugLock{}, s.renderer, passthroughEncryptor{}, identityHasher{},
 		slog.New(slog.DiscardHandler), false)
 
 	_, err := mgr.Create(s.T().Context(), &domain.Note{ID: "my-slug", Title: "hello", Content: "world"})
@@ -341,19 +355,24 @@ func (s *ManagerTestSuite) TestCreate_CustomSlugDisabled() {
 
 func (s *ManagerTestSuite) TestCreate_CustomSlugDisabled_AutoSlugStillWorks() {
 	// With custom slugs off, a create request without a slug still succeeds with a generated one.
-	mgr := NewManager(s.storage, s.renderer, passthroughEncryptor{}, identityHasher{},
+	mgr := NewManager(s.storage, s.links, noopSlugLock{}, s.renderer, passthroughEncryptor{}, identityHasher{},
 		slog.New(slog.DiscardHandler), false)
+	s.expectSlugFree()
 	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
 
 	result, err := mgr.Create(s.T().Context(), &domain.Note{Title: "hello", Content: "world"})
 
 	s.Require().NoError(err)
-	s.Len(result.ID, slugLength)
+	// Exact generated-slug length is domain.ResolveSlug's contract, covered by
+	// domain.TestNewSlug_LengthAndCharset — this test only needs to know one was generated.
+	s.NotEmpty(result.ID)
 }
 
 func (s *ManagerTestSuite) TestCreate_StorageError() {
 	storageErr := errors.New("db error")
 	note := &domain.Note{Title: "hi"}
+
+	s.expectSlugFree()
 	s.storage.EXPECT().Create(gomock.Any(), note).Return(storageErr)
 
 	_, err := s.manager.Create(s.T().Context(), note)
@@ -366,8 +385,11 @@ func (s *ManagerTestSuite) TestCreate_StorageError() {
 // Create returns the error AND leaves the caller's note in plaintext (defer restore),
 // not in the half-hashed state it mutates into. storage.Create must not be reached.
 func (s *ManagerTestSuite) TestCreate_EncryptError_RestoresPlaintext() {
-	mgr := NewManager(s.storage, s.renderer, errEncryptor{}, prefixHasher{}, slog.New(slog.DiscardHandler), true)
+	mgr := NewManager(s.storage, s.links, noopSlugLock{}, s.renderer, errEncryptor{}, prefixHasher{},
+		slog.New(slog.DiscardHandler), true)
 	note := &domain.Note{Title: "t", Content: "secret body", EditCode: "mycode123456"}
+
+	s.expectSlugFree()
 
 	_, err := mgr.Create(s.T().Context(), note)
 
@@ -381,8 +403,11 @@ func (s *ManagerTestSuite) TestCreate_EncryptError_RestoresPlaintext() {
 // the encrypted content / hashed edit code / hashed-slug PK, and that on a storage failure the
 // caller's note is restored to plaintext and the slug ID (defer restore).
 func (s *ManagerTestSuite) TestCreate_StorageError_RestoresPlaintextAndPersistsEncrypted() {
-	mgr := NewManager(s.storage, s.renderer, prefixEncryptor{}, prefixHasher{}, slog.New(slog.DiscardHandler), true)
+	mgr := NewManager(s.storage, s.links, noopSlugLock{}, s.renderer, prefixEncryptor{}, prefixHasher{},
+		slog.New(slog.DiscardHandler), true)
 	note := &domain.Note{Title: "t", Content: "body", EditCode: "code12345678", ID: "myslug"}
+
+	s.expectSlugFree()
 
 	var atStore domain.Note
 
@@ -397,8 +422,9 @@ func (s *ManagerTestSuite) TestCreate_StorageError_RestoresPlaintextAndPersistsE
 	s.Require().Error(err)
 
 	// What hit storage: encrypted content, hashed edit code, hashed-slug primary key.
+	// The code is caller-supplied, so it takes the memory-hard variant ("userhash:").
 	s.Equal("enc:body", atStore.Content)
-	s.Equal("hash:code12345678", atStore.EditCode)
+	s.Equal("userhash:code12345678", atStore.EditCode)
 	s.Equal(domain.HashSlug("myslug"), atStore.ID)
 
 	// What the caller is left with: plaintext fields and the slug ID.
@@ -413,7 +439,8 @@ func (s *ManagerTestSuite) TestCreate_StorageError_RestoresPlaintextAndPersistsE
 // ("hash:"+code) is distinguishable from plaintext. This locks in the defense-in-depth fix so a
 // future change to the repository column allow-list cannot silently start persisting plaintext.
 func (s *ManagerTestSuite) TestUpdate_PersistsHashedEditCode_NotPlaintext() {
-	mgr := NewManager(s.storage, s.renderer, prefixEncryptor{}, prefixHasher{}, slog.New(slog.DiscardHandler), true)
+	mgr := NewManager(s.storage, s.links, noopSlugLock{}, s.renderer, prefixEncryptor{}, prefixHasher{},
+		slog.New(slog.DiscardHandler), true)
 
 	existing := &domain.Note{ID: "myslug", EditCode: "hash:code12345678", Content: "enc:old"}
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("myslug")).Return(existing, nil)
@@ -427,7 +454,7 @@ func (s *ManagerTestSuite) TestUpdate_PersistsHashedEditCode_NotPlaintext() {
 			return nil
 		})
 
-	updated, err := mgr.Update(s.T().Context(), "myslug", "code12345678", &domain.Note{
+	updated, err := mgr.Update(s.T().Context(), "myslug", "code12345678", uuid.Nil, &domain.Note{
 		Title:   "t",
 		Content: "new body",
 	})
@@ -447,7 +474,8 @@ func (s *ManagerTestSuite) TestUpdate_PersistsHashedEditCode_NotPlaintext() {
 // race (SetBurnExpiry → ErrNotFound), the re-fetch succeeds but decryption of the re-fetched
 // note fails — the error must propagate.
 func (s *ManagerTestSuite) TestHandleSetBurnExpiryErr_RefetchDecryptFails() {
-	mgr := NewManager(s.storage, s.renderer, failingEncryptor{}, identityHasher{}, slog.New(slog.DiscardHandler), true)
+	mgr := NewManager(s.storage, s.links, noopSlugLock{}, s.renderer, failingEncryptor{}, identityHasher{},
+		slog.New(slog.DiscardHandler), true)
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("burn-x")).Return(&domain.Note{ID: "x", Content: "ct"}, nil)
 
 	_, err := mgr.burn.handleSetExpiryErr(s.T().Context(), "burn-x", domain.ErrNotFound)
@@ -575,7 +603,7 @@ func (s *ManagerTestSuite) TestUpdate_OK() {
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(existing, nil)
 	s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("abc-123"), note).Return(nil)
 
-	result, err := s.manager.Update(s.T().Context(), "abc-123", "secret123456", note)
+	result, err := s.manager.Update(s.T().Context(), "abc-123", "secret123456", uuid.Nil, note)
 
 	s.Require().NoError(err)
 	s.Equal("abc-123", result.ID)
@@ -583,6 +611,47 @@ func (s *ManagerTestSuite) TestUpdate_OK() {
 	s.Equal(existing.CreatedAt, result.CreatedAt)
 	s.Equal(existing.ContentType, result.ContentType)
 	s.Equal("secret123456", result.EditCode)
+}
+
+// TestUpdate_ResponseReportsPersistedPrivacyAndViews verifies the PUT response backfills
+// privacy (when the caller omitted it) and views from the existing note — the repository's
+// UPDATE persists privacy via COALESCE and never writes views, so the response must report the
+// stored state rather than the caller's zero-value defaults (a privacy=owner note would
+// otherwise answer "public" with "views": 0, contradicting the next GET).
+func (s *ManagerTestSuite) TestUpdate_ResponseReportsPersistedPrivacyAndViews() {
+	ownerPrivacy := domain.PrivacyOwner
+	existing := &domain.Note{
+		ID:       "abc-123",
+		Title:    "old",
+		Privacy:  &ownerPrivacy,
+		Views:    7,
+		OwnerID:  new(uuid.UUID),
+		EditCode: "secret123456",
+	}
+
+	// Caller omits privacy; it must be inherited, not defaulted to public.
+	note := &domain.Note{Title: "updated", Content: "body"}
+
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(existing, nil)
+	s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("abc-123"), note).Return(nil)
+
+	result, err := s.manager.Update(s.T().Context(), "abc-123", "secret123456", *existing.OwnerID, note)
+
+	s.Require().NoError(err)
+	s.Equal(ownerPrivacy, *result.Privacy)
+	s.Equal(7, result.Views)
+
+	// Explicit privacy still wins over the stored value.
+	newPrivacy := domain.PrivacyAuthenticated
+	explicit := &domain.Note{Title: "updated", Privacy: &newPrivacy}
+
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(existing, nil)
+	s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("abc-123"), explicit).Return(nil)
+
+	result, err = s.manager.Update(s.T().Context(), "abc-123", "secret123456", *existing.OwnerID, explicit)
+
+	s.Require().NoError(err)
+	s.Equal(newPrivacy, *result.Privacy)
 }
 
 func (s *ManagerTestSuite) TestUpdate_EmptyTitle() {
@@ -596,7 +665,7 @@ func (s *ManagerTestSuite) TestUpdate_EmptyTitle() {
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(existing, nil)
 	s.storage.EXPECT().Update(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
 
-	result, err := s.manager.Update(s.T().Context(), "abc-123", "code", &domain.Note{})
+	result, err := s.manager.Update(s.T().Context(), "abc-123", "code", uuid.Nil, &domain.Note{})
 
 	s.Require().NoError(err)
 	s.NotNil(result)
@@ -607,7 +676,7 @@ func (s *ManagerTestSuite) TestUpdate_NotFound() {
 
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("missing")).Return(nil, domain.ErrNotFound)
 
-	_, err := s.manager.Update(s.T().Context(), "missing", "code", note)
+	_, err := s.manager.Update(s.T().Context(), "missing", "code", uuid.Nil, note)
 
 	s.ErrorIs(err, domain.ErrNotFound)
 }
@@ -622,7 +691,62 @@ func (s *ManagerTestSuite) TestUpdate_Forbidden() {
 
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(existing, nil)
 
-	_, err := s.manager.Update(s.T().Context(), "abc-123", "wrong-code", note)
+	_, err := s.manager.Update(s.T().Context(), "abc-123", "wrong-code", uuid.Nil, note)
+
+	s.ErrorIs(err, domain.ErrInvalidEditCode)
+}
+
+// TestUpdate_OwnerBypassesEditCode verifies that the exact user who created the note (callerID
+// matches existing.OwnerID) may update it with an empty or wrong edit_code.
+func (s *ManagerTestSuite) TestUpdate_OwnerBypassesEditCode() {
+	existing := &domain.Note{
+		ID:       "abc-123",
+		Title:    "old",
+		EditCode: "secret123456",
+		OwnerID:  new(testUserID1),
+	}
+	note := &domain.Note{Title: "updated", Content: "body"}
+
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(existing, nil)
+	s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("abc-123"), gomock.Any()).Return(nil)
+
+	result, err := s.manager.Update(s.T().Context(), "abc-123", "", testUserID1, note)
+
+	s.Require().NoError(err)
+	s.Equal("updated", result.Title)
+}
+
+// TestUpdate_NonOwnerCallerStillNeedsEditCode verifies that an authenticated caller who is NOT
+// the note's owner does not bypass edit_code — the owner check never extends to other users.
+func (s *ManagerTestSuite) TestUpdate_NonOwnerCallerStillNeedsEditCode() {
+	existing := &domain.Note{
+		ID:       "abc-123",
+		Title:    "old",
+		EditCode: "secret123456",
+		OwnerID:  new(testUserID1),
+	}
+	note := &domain.Note{Title: "hijacked"}
+
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(existing, nil)
+
+	_, err := s.manager.Update(s.T().Context(), "abc-123", "wrong-code", testUserID2, note)
+
+	s.ErrorIs(err, domain.ErrInvalidEditCode)
+}
+
+// TestUpdate_AnonymousNoteAlwaysNeedsEditCode verifies that a note with no owner (created
+// anonymously, or accounts disabled) never bypasses edit_code, even for an authenticated caller.
+func (s *ManagerTestSuite) TestUpdate_AnonymousNoteAlwaysNeedsEditCode() {
+	existing := &domain.Note{
+		ID:       "abc-123",
+		Title:    "old",
+		EditCode: "secret123456",
+	}
+	note := &domain.Note{Title: "hijacked"}
+
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(existing, nil)
+
+	_, err := s.manager.Update(s.T().Context(), "abc-123", "", testUserID1, note)
 
 	s.ErrorIs(err, domain.ErrInvalidEditCode)
 }
@@ -634,7 +758,7 @@ func (s *ManagerTestSuite) TestDelete_OK() {
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(existing, nil)
 	s.storage.EXPECT().Delete(gomock.Any(), domain.HashSlug("abc-123")).Return(nil)
 
-	err := s.manager.Delete(s.T().Context(), "abc-123", "secret123456")
+	err := s.manager.Delete(s.T().Context(), "abc-123", "secret123456", uuid.Nil)
 
 	s.Require().NoError(err)
 }
@@ -642,7 +766,7 @@ func (s *ManagerTestSuite) TestDelete_OK() {
 func (s *ManagerTestSuite) TestDelete_NotFound() {
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("missing")).Return(nil, domain.ErrNotFound)
 
-	err := s.manager.Delete(s.T().Context(), "missing", "code")
+	err := s.manager.Delete(s.T().Context(), "missing", "code", uuid.Nil)
 
 	s.ErrorIs(err, domain.ErrNotFound)
 }
@@ -651,7 +775,29 @@ func (s *ManagerTestSuite) TestDelete_Forbidden() {
 	existing := &domain.Note{ID: "abc-123", EditCode: "secret123456"}
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(existing, nil)
 
-	err := s.manager.Delete(s.T().Context(), "abc-123", "wrong-code")
+	err := s.manager.Delete(s.T().Context(), "abc-123", "wrong-code", uuid.Nil)
+
+	s.ErrorIs(err, domain.ErrInvalidEditCode)
+}
+
+// TestDelete_OwnerBypassesEditCode mirrors TestUpdate_OwnerBypassesEditCode for Delete.
+func (s *ManagerTestSuite) TestDelete_OwnerBypassesEditCode() {
+	existing := &domain.Note{ID: "abc-123", EditCode: "secret123456", OwnerID: new(testUserID1)}
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(existing, nil)
+	s.storage.EXPECT().Delete(gomock.Any(), domain.HashSlug("abc-123")).Return(nil)
+
+	err := s.manager.Delete(s.T().Context(), "abc-123", "", testUserID1)
+
+	s.Require().NoError(err)
+}
+
+// TestDelete_NonOwnerCallerStillNeedsEditCode mirrors TestUpdate_NonOwnerCallerStillNeedsEditCode
+// for Delete.
+func (s *ManagerTestSuite) TestDelete_NonOwnerCallerStillNeedsEditCode() {
+	existing := &domain.Note{ID: "abc-123", EditCode: "secret123456", OwnerID: new(testUserID1)}
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(existing, nil)
+
+	err := s.manager.Delete(s.T().Context(), "abc-123", "wrong-code", testUserID2)
 
 	s.ErrorIs(err, domain.ErrInvalidEditCode)
 }
@@ -669,6 +815,178 @@ func (s *ManagerTestSuite) TestGetRendered_OK() {
 	s.Require().NoError(err)
 	s.Equal(note, result)
 	s.Equal("<h1>Hello</h1>", html)
+}
+
+// ── content size cap ──
+
+func (s *ManagerTestSuite) TestCreate_ContentOverCap_Rejected() {
+	note := &domain.Note{Content: strings.Repeat("a", domain.MaxContentLength+1)}
+
+	_, err := s.manager.Create(s.T().Context(), note)
+
+	s.ErrorIs(err, domain.ErrContentTooLarge)
+}
+
+func (s *ManagerTestSuite) TestCreate_ContentAtCap_Accepted() {
+	s.expectSlugFree()
+	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
+
+	note := &domain.Note{Content: strings.Repeat("a", domain.MaxContentLength)}
+
+	_, err := s.manager.Create(s.T().Context(), note)
+
+	s.Require().NoError(err)
+}
+
+func (s *ManagerTestSuite) TestUpdate_ContentOverCap_Rejected() {
+	note := &domain.Note{Content: strings.Repeat("é", domain.MaxContentLength+1)}
+
+	_, err := s.manager.Update(s.T().Context(), "abc-123", "secret123456", uuid.Nil, note)
+
+	s.ErrorIs(err, domain.ErrContentTooLarge)
+}
+
+// ── render cache ──
+
+// statefulRenderCache backs the generated MockRenderCache with a map so the tests observe real
+// get/set/delete behaviour rather than a script of calls.
+func (s *ManagerTestSuite) statefulRenderCache() *MockRenderCache {
+	type entry struct {
+		updatedAt time.Time
+		html      string
+	}
+
+	store := map[string]entry{}
+	cache := NewMockRenderCache(s.ctrl)
+
+	cache.EXPECT().Get(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(id string, updatedAt time.Time) (string, bool) {
+			cached, ok := store[id]
+			if !ok || !cached.updatedAt.Equal(updatedAt) {
+				return "", false
+			}
+
+			return cached.html, true
+		}).AnyTimes()
+	cache.EXPECT().Set(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+		func(id string, updatedAt time.Time, html string) { store[id] = entry{updatedAt, html} }).AnyTimes()
+	cache.EXPECT().Delete(gomock.Any()).DoAndReturn(func(id string) { delete(store, id) }).AnyTimes()
+
+	return cache
+}
+
+// TestGetRendered_UnchangedNoteIsRenderedOnce: two views of an unchanged note cost one render.
+func (s *ManagerTestSuite) TestGetRendered_UnchangedNoteIsRenderedOnce() {
+	s.manager.WithRenderCache(s.statefulRenderCache())
+
+	stamp := time.Now().Add(-time.Hour)
+
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).
+		DoAndReturn(func(context.Context, string) (*domain.Note, error) {
+			return &domain.Note{ID: "abc-123", Content: "# Hello", UpdatedAt: stamp}, nil
+		}).Times(2)
+	s.storage.EXPECT().IncrementViews(gomock.Any(), domain.HashSlug("abc-123")).Return(nil).Times(2)
+	s.renderer.EXPECT().Render("# Hello").Return("<h1>Hello</h1>", nil).Times(1)
+
+	for range 2 {
+		_, html, err := s.manager.GetRendered(s.T().Context(), "abc-123")
+		s.Require().NoError(err)
+		s.Equal("<h1>Hello</h1>", html)
+	}
+}
+
+// TestGetRendered_ReRendersAfterUpdate: Update invalidates the entry, so the next view renders
+// the new content instead of serving stale HTML.
+func (s *ManagerTestSuite) TestGetRendered_ReRendersAfterUpdate() {
+	s.manager.WithRenderCache(s.statefulRenderCache())
+
+	stamp := time.Now().Add(-time.Hour)
+	current := &domain.Note{ID: "abc-123", Content: "old", UpdatedAt: stamp, EditCode: "secret123456"}
+
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).
+		DoAndReturn(func(context.Context, string) (*domain.Note, error) {
+			clone := *current
+
+			return &clone, nil
+		}).AnyTimes()
+	s.storage.EXPECT().IncrementViews(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
+	s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("abc-123"), gomock.Any()).
+		DoAndReturn(func(_ context.Context, _ string, note *domain.Note) error {
+			// Stored state after the update; keep the old UpdatedAt to prove the explicit
+			// invalidation (not just the changed key) drops the entry.
+			current = &domain.Note{ID: "abc-123", Content: "new", UpdatedAt: stamp, EditCode: "secret123456"}
+
+			return nil
+		})
+	s.renderer.EXPECT().Render("old").Return("<p>old</p>", nil).Times(1)
+	s.renderer.EXPECT().Render("new").Return("<p>new</p>", nil).Times(1)
+
+	_, html, err := s.manager.GetRendered(s.T().Context(), "abc-123")
+	s.Require().NoError(err)
+	s.Equal("<p>old</p>", html)
+
+	_, err = s.manager.Update(s.T().Context(), "abc-123", "secret123456", uuid.Nil, &domain.Note{Content: "new"})
+	s.Require().NoError(err)
+
+	_, html, err = s.manager.GetRendered(s.T().Context(), "abc-123")
+	s.Require().NoError(err)
+	s.Equal("<p>new</p>", html)
+}
+
+// TestGetRendered_ReRendersWhenUpdatedAtChanges covers an update made through another replica:
+// no local invalidation happens, but the new updated_at misses the cached entry.
+func (s *ManagerTestSuite) TestGetRendered_ReRendersWhenUpdatedAtChanges() {
+	s.manager.WithRenderCache(s.statefulRenderCache())
+
+	first := &domain.Note{ID: "abc-123", Content: "v1", UpdatedAt: time.Now().Add(-time.Hour)}
+	second := &domain.Note{ID: "abc-123", Content: "v2", UpdatedAt: time.Now()}
+
+	gomock.InOrder(
+		s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(first, nil),
+		s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(second, nil),
+	)
+	s.storage.EXPECT().IncrementViews(gomock.Any(), gomock.Any()).Return(nil).Times(2)
+	s.renderer.EXPECT().Render("v1").Return("<p>v1</p>", nil)
+	s.renderer.EXPECT().Render("v2").Return("<p>v2</p>", nil)
+
+	_, html, err := s.manager.GetRendered(s.T().Context(), "abc-123")
+	s.Require().NoError(err)
+	s.Equal("<p>v1</p>", html)
+
+	_, html, err = s.manager.GetRendered(s.T().Context(), "abc-123")
+	s.Require().NoError(err)
+	s.Equal("<p>v2</p>", html)
+}
+
+// TestGetRendered_BurnNotesAreNeverCached: reading a burn-after-reading note destroys it, and a
+// cached copy would outlive the burn in memory.
+func (s *ManagerTestSuite) TestGetRendered_BurnNotesAreNeverCached() {
+	cache := NewMockRenderCache(s.ctrl)
+	cache.EXPECT().Get(gomock.Any(), gomock.Any()).Times(0)
+	cache.EXPECT().Set(gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
+	s.manager.WithRenderCache(cache)
+
+	note := &domain.Note{ID: "abc-123", Content: "# Hello", BurnAfterReading: true}
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(note, nil)
+	s.storage.EXPECT().Consume(gomock.Any(), domain.HashSlug("abc-123")).Return(note, nil)
+	s.renderer.EXPECT().Render("# Hello").Return("<h1>Hello</h1>", nil)
+
+	_, _, err := s.manager.GetRendered(s.T().Context(), "abc-123")
+
+	s.Require().NoError(err)
+}
+
+// TestDelete_DropsCachedRender: a deleted note's rendered content must not linger in memory.
+func (s *ManagerTestSuite) TestDelete_DropsCachedRender() {
+	cache := NewMockRenderCache(s.ctrl)
+	s.manager.WithRenderCache(cache)
+
+	existing := &domain.Note{ID: "abc-123", EditCode: "secret123456"}
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(existing, nil)
+	s.storage.EXPECT().Delete(gomock.Any(), domain.HashSlug("abc-123")).Return(nil)
+	cache.EXPECT().Delete(domain.HashSlug("abc-123"))
+
+	s.Require().NoError(s.manager.Delete(s.T().Context(), "abc-123", "secret123456", uuid.Nil))
 }
 
 func (s *ManagerTestSuite) TestGetRendered_BurnAfterReading() {
@@ -712,7 +1030,10 @@ func (s *ManagerTestSuite) TestGetRendered_RenderError() {
 
 	_, _, err := s.manager.GetRendered(s.T().Context(), "abc-123")
 
-	s.ErrorIs(err, renderErr)
+	s.Require().ErrorIs(err, renderErr)
+	// The error is logged server-side: it names the note by hash, never by its capability slug.
+	s.NotContains(err.Error(), "abc-123")
+	s.Contains(err.Error(), domain.HashSlug("abc-123"))
 }
 
 func (s *ManagerTestSuite) TestGetRendered_PlainText_UsesRenderPlain() {
@@ -739,7 +1060,9 @@ func (s *ManagerTestSuite) TestGetRendered_PlainText_RenderPlainError() {
 
 	_, _, err := s.manager.GetRendered(s.T().Context(), "abc-123")
 
-	s.ErrorIs(err, renderErr)
+	s.Require().ErrorIs(err, renderErr)
+	s.NotContains(err.Error(), "abc-123")
+	s.Contains(err.Error(), domain.HashSlug("abc-123"))
 }
 
 // Peek
@@ -901,6 +1224,34 @@ func (s *ManagerTestSuite) TestViewPreloaded_Expired() {
 	s.ErrorIs(err, domain.ErrExpired)
 }
 
+// EnforceExpiry — expiry only, never burn
+
+func (s *ManagerTestSuite) TestEnforceExpiry_ExpiredNoteIsDeleted() {
+	past := time.Now().Add(-time.Minute)
+	note := &domain.Note{ID: "ee-1", ExpiresAt: &past, BurnAfterReading: true}
+
+	s.storage.EXPECT().Delete(gomock.Any(), domain.HashSlug("ee-1")).Return(nil)
+
+	err := s.manager.EnforceExpiry(s.T().Context(), "ee-1", note)
+
+	s.ErrorIs(err, domain.ErrExpired)
+}
+
+func (s *ManagerTestSuite) TestEnforceExpiry_LiveBurnNoteIsNotConsumed() {
+	future := time.Now().Add(time.Hour)
+
+	for _, note := range []*domain.Note{
+		{ID: "ee-2", BurnAfterReading: true},
+		{ID: "ee-3", BurnAfterReading: true, BurnTTL: 60},
+		{ID: "ee-4", ExpiresAt: &future},
+	} {
+		// No storage call at all: no Consume, no SetBurnExpiry, no Delete, no IncrementViews.
+		err := s.manager.EnforceExpiry(s.T().Context(), note.ID, note)
+
+		s.Require().NoError(err, note.ID)
+	}
+}
+
 // GetRenderedPreloaded
 
 func (s *ManagerTestSuite) TestGetRenderedPreloaded_OK() {
@@ -948,37 +1299,77 @@ func (s *ManagerTestSuite) TestPeek_ReturnsExpiredNote() {
 // Update — private notes
 
 func (s *ManagerTestSuite) TestUpdate_PrivateNote_CorrectCode() {
-	priv := true
+	priv := domain.PrivacyAuthenticated
 	existing := &domain.Note{
 		ID:       "priv-1",
 		Title:    "secret",
 		EditCode: "rightcode1234",
-		Private:  &priv,
+		Privacy:  &priv,
 	}
 	note := &domain.Note{Title: "updated secret"}
 
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("priv-1")).Return(existing, nil)
 	s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("priv-1"), note).Return(nil)
 
-	result, err := s.manager.Update(s.T().Context(), "priv-1", "rightcode1234", note)
+	result, err := s.manager.Update(s.T().Context(), "priv-1", "rightcode1234", uuid.Nil, note)
 
 	s.Require().NoError(err)
 	s.Equal("updated secret", result.Title)
 }
 
+// TestUpdate_OwnerPrivacy_AnonymousExistingNote_Rejected verifies that a caller with a valid
+// edit_code cannot flip an anonymously-created (ownerless) note to privacy=owner — such a note
+// could never be read back by anyone afterward.
+func (s *ManagerTestSuite) TestUpdate_OwnerPrivacy_AnonymousExistingNote_Rejected() {
+	priv := domain.PrivacyOwner
+	existing := &domain.Note{
+		ID:       "anon-1",
+		Title:    "old",
+		EditCode: "rightcode1234",
+	}
+	note := &domain.Note{Title: "updated", Privacy: &priv}
+
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("anon-1")).Return(existing, nil)
+
+	_, err := s.manager.Update(s.T().Context(), "anon-1", "rightcode1234", uuid.Nil, note)
+
+	s.ErrorIs(err, domain.ErrOwnerPrivacyRequiresOwner)
+}
+
+// TestUpdate_OwnerPrivacy_AlreadyOwnedNote_OK verifies that setting privacy=owner on a note that
+// already has a real owner is accepted.
+func (s *ManagerTestSuite) TestUpdate_OwnerPrivacy_AlreadyOwnedNote_OK() {
+	priv := domain.PrivacyOwner
+	existing := &domain.Note{
+		ID:       "owned-1",
+		Title:    "old",
+		EditCode: "rightcode1234",
+		OwnerID:  new(testUserID1),
+	}
+	note := &domain.Note{Title: "updated", Privacy: &priv}
+
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("owned-1")).Return(existing, nil)
+	s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("owned-1"), gomock.Any()).Return(nil)
+
+	result, err := s.manager.Update(s.T().Context(), "owned-1", "rightcode1234", uuid.Nil, note)
+
+	s.Require().NoError(err)
+	s.Equal(domain.PrivacyOwner, result.EffectivePrivacy())
+}
+
 func (s *ManagerTestSuite) TestUpdate_PrivateNote_WrongCode() {
-	priv := true
+	priv := domain.PrivacyAuthenticated
 	existing := &domain.Note{
 		ID:       "priv-2",
 		Title:    "secret",
 		EditCode: "rightcode1234",
-		Private:  &priv,
+		Privacy:  &priv,
 	}
 	note := &domain.Note{Title: "hijacked"}
 
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("priv-2")).Return(existing, nil)
 
-	_, err := s.manager.Update(s.T().Context(), "priv-2", "wrongcode0000", note)
+	_, err := s.manager.Update(s.T().Context(), "priv-2", "wrongcode0000", uuid.Nil, note)
 
 	s.ErrorIs(err, domain.ErrInvalidEditCode)
 }
@@ -1014,8 +1405,10 @@ func (s *ManagerTestSuite) TestView_BurnAfterReading_ConsumeError() {
 func TestGet_DecryptionFailure(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	storage := NewMockStorage(ctrl)
+	links := NewMockLinksChecker(ctrl)
 	renderer := NewMockRenderer(ctrl)
-	mgr := NewManager(storage, renderer, failingEncryptor{}, identityHasher{}, slog.New(slog.DiscardHandler), true)
+	mgr := NewManager(storage, links, noopSlugLock{}, renderer, failingEncryptor{}, identityHasher{},
+		slog.New(slog.DiscardHandler), true)
 
 	note := &domain.Note{ID: "enc-fail", Title: "t", Content: "ciphertext"}
 	storage.EXPECT().Get(gomock.Any(), domain.HashSlug("enc-fail")).Return(note, nil)
@@ -1028,8 +1421,10 @@ func TestGet_DecryptionFailure(t *testing.T) {
 func TestPeek_DecryptionFailure(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	storage := NewMockStorage(ctrl)
+	links := NewMockLinksChecker(ctrl)
 	renderer := NewMockRenderer(ctrl)
-	mgr := NewManager(storage, renderer, failingEncryptor{}, identityHasher{}, slog.New(slog.DiscardHandler), true)
+	mgr := NewManager(storage, links, noopSlugLock{}, renderer, failingEncryptor{}, identityHasher{},
+		slog.New(slog.DiscardHandler), true)
 
 	note := &domain.Note{ID: "enc-fail-peek", Title: "t", Content: "ciphertext"}
 	storage.EXPECT().Get(gomock.Any(), domain.HashSlug("enc-fail-peek")).Return(note, nil)
@@ -1044,8 +1439,10 @@ func TestPeek_DecryptionFailure(t *testing.T) {
 func TestGet_BurnAfterReading_DecryptionFailure(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	storage := NewMockStorage(ctrl)
+	links := NewMockLinksChecker(ctrl)
 	renderer := NewMockRenderer(ctrl)
-	mgr := NewManager(storage, renderer, failingEncryptor{}, identityHasher{}, slog.New(slog.DiscardHandler), true)
+	mgr := NewManager(storage, links, noopSlugLock{}, renderer, failingEncryptor{}, identityHasher{},
+		slog.New(slog.DiscardHandler), true)
 
 	// decryptContent runs before burn.applyPolicy, so Consume is never reached.
 	raw := &domain.Note{ID: "burn-enc-fail", Title: "t", BurnAfterReading: true, Content: "ciphertext"}
@@ -1061,8 +1458,10 @@ func TestGet_BurnAfterReading_DecryptionFailure(t *testing.T) {
 func TestGet_BurnTTL_DecryptionFailure(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	storage := NewMockStorage(ctrl)
+	links := NewMockLinksChecker(ctrl)
 	renderer := NewMockRenderer(ctrl)
-	mgr := NewManager(storage, renderer, failingEncryptor{}, identityHasher{}, slog.New(slog.DiscardHandler), true)
+	mgr := NewManager(storage, links, noopSlugLock{}, renderer, failingEncryptor{}, identityHasher{},
+		slog.New(slog.DiscardHandler), true)
 
 	// decryptContent runs before burn.applyPolicy, so SetBurnExpiry is never reached.
 	raw := &domain.Note{ID: "burn-ttl-enc-fail", Title: "t", BurnAfterReading: true, BurnTTL: 3600, Content: "ciphertext"}
@@ -1071,4 +1470,77 @@ func TestGet_BurnTTL_DecryptionFailure(t *testing.T) {
 	_, err := mgr.Get(t.Context(), "burn-ttl-enc-fail")
 
 	assert.ErrorIs(t, err, domain.ErrNotFound)
+}
+
+func (s *ManagerTestSuite) TestUpdateExplicitExpiry() {
+	future := time.Now().Add(time.Hour)
+	for _, testCase := range []struct {
+		name   string
+		update *domain.Note
+		want   *time.Time
+	}{
+		{"preserve", &domain.Note{Content: "body"}, &future},
+		{"clear", &domain.Note{Content: "body", ClearExpiry: true}, nil},
+		{"replace", &domain.Note{Content: "body", ExpiresAt: &future}, &future},
+	} {
+		s.Run(testCase.name, func() {
+			existing := &domain.Note{ID: domain.HashSlug("slug"), EditCode: "code", ExpiresAt: &future}
+			s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("slug")).Return(existing, nil)
+			s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("slug"), gomock.Any()).
+				DoAndReturn(func(_ context.Context, _ string, note *domain.Note) error {
+					s.Equal(testCase.want, note.ExpiresAt)
+
+					return nil
+				})
+			updated, err := s.manager.Update(s.T().Context(), "slug", "code", uuid.Nil, testCase.update)
+			s.Require().NoError(err)
+			s.Equal(testCase.want, updated.ExpiresAt)
+		})
+	}
+}
+
+// TestUpdateBurnImmediateExpiry pins resolveExpiryTime for the payload the HTTP adapter builds
+// from UpdateNoteRequest with burn_after_reading=true and ttl omitted, null or 0 (all three map
+// to BurnTTL=0, no ExpiresAt, no ClearExpiry): an existing hard expiry is kept, while a stale
+// burn-timer expiry from a previous burn TTL is dropped.
+func (s *ManagerTestSuite) TestUpdateBurnImmediateExpiry() {
+	future := time.Now().Add(time.Hour)
+	for _, testCase := range []struct {
+		name     string
+		existing *domain.Note
+		want     *time.Time
+	}{
+		{"hard expiry kept", &domain.Note{EditCode: "code", ExpiresAt: &future}, &future},
+		{"no expiry stays none", &domain.Note{EditCode: "code"}, nil},
+		{
+			"stale burn timer dropped",
+			&domain.Note{EditCode: "code", BurnAfterReading: true, BurnTTL: 600, ExpiresAt: &future},
+			nil,
+		},
+	} {
+		s.Run(testCase.name, func() {
+			s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("slug")).Return(testCase.existing, nil)
+			s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("slug"), gomock.Any()).
+				DoAndReturn(func(_ context.Context, _ string, note *domain.Note) error {
+					s.Equal(testCase.want, note.ExpiresAt)
+
+					return nil
+				})
+
+			update := &domain.Note{Content: "body", BurnAfterReading: true}
+			_, err := s.manager.Update(s.T().Context(), "slug", "code", uuid.Nil, update)
+			s.Require().NoError(err)
+		})
+	}
+}
+
+func (s *ManagerTestSuite) TestDecryptionFailureLogsOnlyHashedSlug() {
+	var buf bytes.Buffer
+
+	log := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	note := &domain.Note{ID: "secret-slug", Content: "invalid"}
+	err := decryptContent(s.T().Context(), failingEncryptor{}, log, note)
+	s.Require().ErrorIs(err, domain.ErrNotFound)
+	s.Contains(buf.String(), domain.HashSlug(note.ID))
+	s.NotContains(buf.String(), note.ID)
 }

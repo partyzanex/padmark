@@ -1,105 +1,46 @@
 package http
 
 import (
-	"context"
 	"crypto/rand"
-	"encoding/base64"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
-	"strings"
 	"time"
 
-	"github.com/bluele/gcache"
-	"github.com/google/uuid"
-
+	"github.com/partyzanex/padmark/internal/adapters/http/middleware"
 	"github.com/partyzanex/padmark/internal/adapters/http/ogenapi"
-	"github.com/partyzanex/padmark/internal/usecases/notes"
+	"github.com/partyzanex/padmark/internal/domain"
 )
-
-type contextKey uint8
-
-const (
-	keyRequestID contextKey = 1
-	keyNonce     contextKey = 2
-	keyUser      contextKey = 3
-	keyCSRF      contextKey = 4
-	keyLogUser   contextKey = 5
-)
-
-// logUser is a request-scoped holder the auth layer fills with the resolved identity so the
-// outer logging middleware can report it. A pointer is used because withLogging runs OUTSIDE
-// the auth middleware: the user set via r.WithContext downstream is not visible on the logger's
-// request, but a shared pointer installed before next() is mutated in place and read after.
-type logUser struct {
-	name  string
-	admin bool
-}
-
-// setLogUser records the identity for the request log, if the holder is present.
-func setLogUser(ctx context.Context, name string, admin bool) {
-	if lu, ok := ctx.Value(keyLogUser).(*logUser); ok {
-		lu.name = name
-		lu.admin = admin
-	}
-}
-
-func nonceFromContext(ctx context.Context) string {
-	v, _ := ctx.Value(keyNonce).(string)
-
-	return v
-}
-
-const protoHTTPS = "https"
-
-// protoHTTP is the non-TLS URL scheme, paired with protoHTTPS when building absolute links.
-const protoHTTP = "http"
-
-// requestScheme returns the URL scheme ("http" or "https") to use when building absolute links
-// back to this server, honouring the trusted-proxy handling in isHTTPS.
-func requestScheme(r *http.Request, trustedProxies []*net.IPNet) string {
-	if isHTTPS(r, trustedProxies) {
-		return protoHTTPS
-	}
-
-	return protoHTTP
-}
-
-// isHTTPS reports whether the request arrived over HTTPS.
-// X-Forwarded-Proto is only trusted when the remote address belongs to a trusted proxy;
-// spoofed headers from untrusted clients are ignored.
-func isHTTPS(r *http.Request, trustedProxies []*net.IPNet) bool {
-	if r.TLS != nil {
-		return true
-	}
-
-	if len(trustedProxies) == 0 {
-		return false
-	}
-
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		host = r.RemoteAddr
-	}
-
-	return isTrustedProxy(host, trustedProxies) && r.Header.Get("X-Forwarded-Proto") == protoHTTPS
-}
 
 // RouterOptions holds configurable parameters for the middleware stack.
 type RouterOptions struct {
-	ForcedScheme   string
+	ForcedScheme string
+	// BootstrapToken is the operator's proof of server ownership for creating the first admin
+	// via /setup without an invite (PADMARK_BOOTSTRAP_TOKEN). Empty keeps that bootstrap closed:
+	// otherwise whoever reached /setup first would become the single, permanent admin.
+	BootstrapToken string
 	TrustedProxies []*net.IPNet
 	CSRFSecret     []byte
-	CookieMaxAge   int
-	MaxBodyBytes   int
-	RateLimit      int
-	RateBurst      int
+	// AllowedHosts is the Host header allow-list for the main listener (--allowed-hosts). When
+	// non-empty, any other Host is refused with 421 before a handler runs; empty disables the
+	// check. See WithAllowedHosts.
+	AllowedHosts []string
+	MaxBodyBytes int
+	RateLimit    int
+	RateBurst    int
 	// SessionTTL sets the TOTP session cookie's Max-Age (see AuthHandler), matching the
 	// server-side session lifetime configured via auth.NewManager's sessionTTL — both should be
 	// fed the same --session-ttl value so the cookie never outlives (or expires before) the
 	// session it represents. Zero falls back to auth.DefaultSessionTTL.
 	SessionTTL time.Duration
+	// DisableAPI turns off the REST/JSON API surface (/notes*, /api, /api/openapi.yaml): every
+	// request reaching the disabling middleware gets 503 with code=api_disabled. The web UI and
+	// /healthz, /readyz keep working — see WithAPIDisabled.
+	DisableAPI bool
+	// DirectRedirect selects GET /r/{id}'s response mode: true issues an immediate 301 to the
+	// short link's target URL, false renders a transparency interstitial. See LinkHandler.Redirect.
+	DirectRedirect bool
 }
 
 // RouteRegistrar registers one concern's HTTP routes on mux. Each concern-specific handler
@@ -111,26 +52,47 @@ type RouteRegistrar interface {
 	RegisterRoutes(mux *http.ServeMux)
 }
 
-// registerOgenRoutes registers the generated REST API routes (note CRUD, health checks) served
-// directly by ogenSrv. These aren't owned by any concern handler — ogenSrv wraps the separate
-// OgenHandler — so they're registered here rather than via a RouteRegistrar. lockout is shared
-// with NoteHandler's native {id...} routes (see NoteHandler.RegisterRoutes) so fail-lockout
-// tracking is consistent for a note regardless of which route variant a client hits.
-func registerOgenRoutes(mux *http.ServeMux, ogenSrv http.Handler, lockout gcache.Cache) {
+// registerOgenRoutes registers the generated REST API routes (note and link CRUD, health checks)
+// served directly by ogenSrv. These aren't owned by any concern handler — ogenSrv wraps the
+// separate OgenHandler — so they're registered here rather than via a RouteRegistrar. lockout is
+// shared with NoteHandler's native {id...} routes (see NoteHandler.RegisterRoutes) so fail-lockout
+// tracking is consistent for a note or link regardless of which route variant a client hits — a
+// single cache keyed by path ID plus caller works since notes and links share one global slug
+// namespace (a note and a link can never have the same ID, see domain.HashSlug/ErrSlugConflict).
+func registerOgenRoutes(
+	mux *http.ServeMux, ogenSrv http.Handler, lockout *middleware.FailLockoutCache,
+	trustedProxies []*net.IPNet, log *slog.Logger,
+) {
+	locked := func(next http.Handler) http.Handler {
+		return middleware.RequireSameOrigin(log, middleware.WithFailLockout(lockout, trustedProxies, log, next))
+	}
+
 	mux.Handle("POST /notes", ogenSrv)
-	mux.Handle("PUT /notes/{id}", withFailLockout(lockout, ogenSrv))
-	mux.Handle("DELETE /notes/{id}", withFailLockout(lockout, ogenSrv))
+	mux.Handle("PUT /notes/{id}", locked(ogenSrv))
+	mux.Handle("DELETE /notes/{id}", locked(ogenSrv))
+	mux.Handle("POST /links", ogenSrv)
+	mux.Handle("POST /links/bulk", ogenSrv)
+	mux.Handle("GET /links/{id}", ogenSrv)
+	mux.Handle("PUT /links/{id}", locked(ogenSrv))
+	mux.Handle("DELETE /links/{id}", locked(ogenSrv))
 	mux.Handle("GET /healthz", ogenSrv)
 	mux.Handle("GET /readyz", ogenSrv)
+	// Account endpoints and note/link PUT/DELETE accept browser session cookies, so they enforce
+	// same-origin requests. POST /notes, POST /links and POST /links/bulk are deliberately not
+	// wrapped: they accept only JSON bodies (a cross-site JSON POST forces a CORS preflight the
+	// server never answers) and the session cookie is SameSite=Strict.
+	mux.Handle("POST /api/tokens", middleware.RequireSameOrigin(log, ogenSrv))
+	mux.Handle("POST /api/invites", middleware.RequireSameOrigin(log, ogenSrv))
 }
 
 // registerAllRoutes registers the ogen-served REST API routes plus every concern handler's own
 // routes (see RouteRegistrar) on mux.
 func registerAllRoutes(mux *http.ServeMux, handler *Handler, ogenSrv http.Handler) {
-	registerOgenRoutes(mux, ogenSrv, handler.lockout)
+	registerOgenRoutes(mux, ogenSrv, handler.lockout, handler.trustedProxies, handler.log)
 
 	registrars := []RouteRegistrar{
 		handler.NoteHandler,
+		handler.LinkHandler,
 		handler.AuthHandler,
 		handler.AdminHandler,
 		handler.PageHandler,
@@ -148,7 +110,13 @@ func registerAllRoutes(mux *http.ServeMux, handler *Handler, ogenSrv http.Handle
 func NewRouter(
 	handler *Handler, ogenHandler *OgenHandler, opts *RouterOptions,
 ) (http.Handler, error) {
-	ogenSrv, err := ogenapi.NewServer(ogenHandler, ogenapi.WithErrorHandler(newMaxBodyErrorHandler(handler.log)))
+	// The auth seam is optional on OgenHandler; attach it where it exists so the account
+	// endpoints (POST /api/tokens, /api/invites) serve instead of 503-ing.
+	if handler.authMgr != nil {
+		ogenHandler = ogenHandler.WithAuthManager(handler.authMgr)
+	}
+
+	ogenSrv, err := ogenapi.NewServer(ogenHandler, ogenapi.WithErrorHandler(newOgenErrorHandler(handler.log)))
 	if err != nil {
 		return nil, fmt.Errorf("new ogen server: %w", err)
 	}
@@ -168,244 +136,75 @@ func NewRouter(
 	handler.WithCSRFSecret(csrfSecret)
 	handler.WithTrustedProxies(opts.TrustedProxies)
 	handler.WithForcedScheme(opts.ForcedScheme)
-	handler.WithCookieMaxAge(opts.CookieMaxAge)
 	handler.WithSessionTTL(opts.SessionTTL)
+	handler.WithDirectRedirect(opts.DirectRedirect)
+	handler.WithBootstrapToken(opts.BootstrapToken)
 
-	tokenSet := handler.AllowedTokens()
 	mux := http.NewServeMux()
 
 	registerAllRoutes(mux, handler, ogenSrv)
 
-	namedRoutes := buildNamedRoutes()
+	return wrapMiddleware(mux, handler, opts, csrfSecret), nil
+}
 
-	var checker sessionChecker
+// wrapMiddleware wraps the routed mux in the server's middleware chain. The listing order is
+// innermost-first: the last wrapper applied is the one that sees a request first.
+func wrapMiddleware(
+	mux http.Handler, handler *Handler, opts *RouterOptions, csrfSecret []byte,
+) http.Handler {
+	var checker middleware.SessionChecker
 	if handler.authMgr != nil {
 		checker = handler.authMgr
 	}
 
-	stack := withRecovery(handler.log, mux)
-	stack = newAuthMiddleware(tokenSet, namedRoutes, checker, stack)
-	stack = withCSRFToken(csrfSecret, opts.TrustedProxies, stack)
+	stack := middleware.WithRecovery(handler.log, mux)
+	stack = middleware.WithRequestOrigin(opts.ForcedScheme, opts.TrustedProxies, stack)
 
-	stack = withBodyLimit(int64(opts.MaxBodyBytes), stack)
-
-	if opts.RateLimit > 0 {
-		stack = withRateLimit(opts.RateLimit, opts.RateBurst, opts.TrustedProxies, stack)
+	if opts.DisableAPI {
+		stack = middleware.WithAPIDisabled(handler.log, stack)
 	}
 
-	stack = withSecurityHeaders(opts.TrustedProxies, stack)
-	stack = withLogging(handler.log, stack)
-	stack = withRequestID(stack)
+	stack = middleware.NewAuthMiddleware(buildNamedRoutes(), checker, stack)
+	stack = middleware.WithCSRFToken(csrfSecret, opts.ForcedScheme, opts.TrustedProxies, stack)
 
-	// Second, outermost recovery layer: the inner withRecovery above only covers mux, so a
+	stack = middleware.WithBodyLimit(int64(opts.MaxBodyBytes), stack)
+
+	if opts.RateLimit > 0 {
+		stack = middleware.WithRateLimit(opts.RateLimit, opts.RateBurst, opts.TrustedProxies, handler.log, stack)
+	}
+
+	// Only meaningful when nothing is trusted — see WarnUnconfiguredProxy.
+	if len(opts.TrustedProxies) == 0 {
+		stack = middleware.WarnUnconfiguredProxy(handler.log, stack)
+	}
+
+	// Outside every stateful layer (auth, CSRF, rate limit) so a forged Host is refused before
+	// any of them runs, yet inside security headers, logging and the request ID so the refusal
+	// is still logged and carries them.
+	stack = middleware.WithAllowedHosts(opts.AllowedHosts, stack)
+
+	stack = middleware.WithSecurityHeaders(opts.ForcedScheme, opts.TrustedProxies, stack)
+	stack = middleware.WithLogging(handler.log, stack)
+	stack = middleware.WithRequestID(stack)
+
+	// Second, outermost recovery layer: the inner WithRecovery above only covers mux, so a
 	// panic in any middleware between it and here (auth, CSRF, rate-limit, security-headers,
 	// logging, request-ID) would otherwise fall through to net/http's bare per-connection
 	// recovery, which drops the response body and skips structured logging entirely.
-	stack = withRecovery(handler.log, stack)
-
-	return stack, nil
+	return middleware.WithRecovery(handler.log, stack)
 }
 
 // buildNamedRoutes returns the set of first path segments that name built-in routes rather than
-// notes. The auth middleware treats any request whose first segment is in this set as a non-note
-// route (so it keeps requiring auth); everything else may be a public note view. Sourced from
-// notes.ReservedSlugPrefixes, the single source of truth also used to reject colliding custom
-// slugs; keep the route registrations in NewRouter in sync with it.
+// notes or links. The auth middleware treats any request whose first segment is in this set as
+// a non-note route (so it keeps requiring auth); everything else may be a public note view.
+// Sourced from domain.ReservedSlugPrefixes, the single source of truth also used to reject
+// colliding custom slugs (shared by notes.Manager and links.Manager — a usecase package may not
+// import another usecase package, so this can't live in either directly); keep the route
+// registrations in NewRouter in sync with it.
 // login/setup/logout/totp-login/healthz/readyz are also special-cased by exact path in
-// isPublicPath, but stay listed here too: notes.ReservedSlugPrefixes blocks the whole
+// isPublicPath, but stay listed here too: domain.ReservedSlugPrefixes blocks the whole
 // first-segment namespace from custom-slug collisions (e.g. "healthz/status"), not just those
 // literal paths.
 func buildNamedRoutes() map[string]struct{} {
-	return notes.ReservedSlugPrefixes()
-}
-
-// makeTokenSet builds a lookup set from the configured bearer tokens.
-//
-// Deprecated: part of the legacy bearer-token write auth (PADMARK_AUTH_TOKENS), superseded by
-// the TOTP account system (--enable-accounts). Will be removed in a future release.
-func makeTokenSet(tokens []string) map[string]struct{} {
-	set := make(map[string]struct{}, len(tokens))
-
-	for _, tok := range tokens {
-		set[tok] = struct{}{}
-	}
-
-	return set
-}
-
-func withRequestID(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		id := uuid.NewString()
-		w.Header().Set("X-Request-ID", id)
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), keyRequestID, id)))
-	})
-}
-
-type statusRecorder struct {
-	http.ResponseWriter
-
-	status  int
-	written bool
-}
-
-func (sr *statusRecorder) WriteHeader(status int) {
-	if sr.written {
-		return
-	}
-
-	sr.status = status
-	sr.written = true
-	sr.ResponseWriter.WriteHeader(status)
-}
-
-func (sr *statusRecorder) Write(b []byte) (int, error) {
-	if !sr.written {
-		sr.status = http.StatusOK
-		sr.written = true
-	}
-
-	return sr.ResponseWriter.Write(b) //nolint:wrapcheck // pass-through implementation of io.Writer
-}
-
-func withLogging(log *slog.Logger, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
-		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
-
-		// Install the identity holder so the (inner) auth layer can record who the request
-		// resolved to; it stays anonymous when no auth runs or no valid session is present.
-		// Only the request passed downstream carries the holder; the original r.Context() is
-		// kept for logging (inherited context, preserves the request ID).
-		holder := &logUser{}
-		rr := r.WithContext(context.WithValue(r.Context(), keyLogUser, holder))
-
-		next.ServeHTTP(rec, rr)
-
-		level := slog.LevelInfo
-		if strings.HasPrefix(r.URL.Path, "/static/") {
-			level = slog.LevelDebug
-		}
-
-		user := "-"
-		if holder.name != "" {
-			user = holder.name
-		}
-
-		// remote is the immediate peer (the proxy/LB IP when behind one); xff is the
-		// X-Forwarded-For chain the proxy sent; user/admin is the resolved identity ("-" when
-		// anonymous). These make trusted-proxy and auth debugging possible without shell access.
-		// route is the first path segment only (e.g. "notes", "healthz") — it identifies which
-		// endpoint was hit for traffic/error debugging without exposing further segments, which
-		// for note routes can be the note slug itself (the content-encryption key material).
-		attrs := []any{
-			"method", r.Method,
-			"status", rec.status,
-			"duration", time.Since(start),
-			"remote", r.RemoteAddr,
-			"xff", r.Header.Get("X-Forwarded-For"),
-			"user", user,
-			"admin", holder.admin,
-			"route", firstPathSegment(r.URL.Path),
-		}
-
-		// The request path can embed a note slug, which is the note's content-encryption key
-		// material. Keep it out of info-level access logs; include it only when debug is enabled.
-		if log.Enabled(r.Context(), slog.LevelDebug) {
-			attrs = append(attrs, "path", r.URL.Path)
-		}
-
-		log.Log(r.Context(), level, "http", attrs...)
-	})
-}
-
-// firstPathSegment returns the first non-empty segment of path, without the leading slash
-// and without anything from the next slash onward. It returns "" for "" and "/".
-func firstPathSegment(path string) string {
-	trimmed := strings.TrimPrefix(path, "/")
-	if before, _, ok := strings.Cut(trimmed, "/"); ok {
-		return before
-	}
-
-	return trimmed
-}
-
-func withBodyLimit(maxBytes int64, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Body != nil && r.ContentLength != 0 {
-			r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
-		}
-
-		next.ServeHTTP(w, r)
-	})
-}
-
-func withStaticCacheControl(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cache-Control", "public, max-age=86400")
-		next.ServeHTTP(w, r)
-	})
-}
-
-// redocScriptSrc is the external origin Redoc is loaded from. It is added to script-src only on
-// the API docs page (see APIDocsPage), keeping the global CSP free of third-party origins.
-const redocScriptSrc = "https://cdn.redoc.ly"
-
-// buildCSP assembles the Content-Security-Policy for a response. extraScriptSrc adds extra
-// allowed script origins (e.g. the Redoc CDN on the /api page) without widening script-src
-// globally — every other page keeps script-src restricted to 'self' + nonce.
-func buildCSP(nonce string, extraScriptSrc ...string) string {
-	scriptSrcParts := append([]string{"script-src 'self' 'nonce-" + nonce + "'"}, extraScriptSrc...)
-	scriptSrc := strings.Join(scriptSrcParts, " ")
-
-	return "default-src 'self'; " +
-		scriptSrc + "; " +
-		"style-src 'self' 'nonce-" + nonce + "'; " +
-		"font-src 'self'; " +
-		"img-src 'self' data:; " +
-		"connect-src 'self'"
-}
-
-func withSecurityHeaders(trustedProxies []*net.IPNet, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var b [16]byte
-
-		_, err := rand.Read(b[:])
-		if err != nil {
-			http.Error(w, "internal server error", http.StatusInternalServerError)
-
-			return
-		}
-
-		nonce := base64.StdEncoding.EncodeToString(b[:])
-		r = r.WithContext(context.WithValue(r.Context(), keyNonce, nonce))
-
-		header := w.Header()
-		header.Set("Cache-Control", "private, no-store")
-		header.Set("X-Content-Type-Options", "nosniff")
-		header.Set("X-Frame-Options", "DENY")
-		header.Set("Referrer-Policy", "strict-origin-when-cross-origin")
-		header.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
-		header.Set("Content-Security-Policy", buildCSP(nonce))
-
-		if isHTTPS(r, trustedProxies) {
-			header.Set("Strict-Transport-Security", "max-age=63072000; includeSubDomains")
-		}
-
-		next.ServeHTTP(w, r)
-	})
-}
-
-func withRecovery(log *slog.Logger, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx := r.Context()
-
-		defer func() {
-			if p := recover(); p != nil {
-				log.ErrorContext(ctx, "panic recovered", "panic", p)
-				http.Error(w, "internal server error", http.StatusInternalServerError)
-			}
-		}()
-
-		next.ServeHTTP(w, r)
-	})
+	return domain.ReservedSlugPrefixes()
 }

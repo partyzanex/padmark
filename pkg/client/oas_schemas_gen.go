@@ -3,10 +3,767 @@
 package client
 
 import (
+	"net/url"
 	"time"
 
 	"github.com/go-faster/errors"
 )
+
+// Ref: #/components/schemas/BulkCreateLinksRequest
+type BulkCreateLinksRequest struct {
+	// Each item has the exact same shape and semantics as `CreateLinkRequest`.
+	Links []CreateLinkRequest `json:"links"`
+}
+
+// GetLinks returns the value of Links.
+func (s *BulkCreateLinksRequest) GetLinks() []CreateLinkRequest {
+	return s.Links
+}
+
+// SetLinks sets the value of Links.
+func (s *BulkCreateLinksRequest) SetLinks(val []CreateLinkRequest) {
+	s.Links = val
+}
+
+// Ref: #/components/schemas/BulkCreateLinksResponse
+type BulkCreateLinksResponse struct {
+	// Same length and order as the request's `links` array.
+	Results []BulkLinkResult `json:"results"`
+}
+
+// GetResults returns the value of Results.
+func (s *BulkCreateLinksResponse) GetResults() []BulkLinkResult {
+	return s.Results
+}
+
+// SetResults sets the value of Results.
+func (s *BulkCreateLinksResponse) SetResults(val []BulkLinkResult) {
+	s.Results = val
+}
+
+func (*BulkCreateLinksResponse) createLinksBulkRes() {}
+
+// The outcome for one item of a `POST /links/bulk` request. Either the created link's
+// fields are present (success) or `error` is (failure) — never both. `target_url` always
+// echoes the corresponding request item's `target_url`, even on failure, so a caller can
+// match `results[i]` back to `links[i]` without relying on array position alone.
+// Ref: #/components/schemas/BulkLinkResult
+type BulkLinkResult struct {
+	// Echoes the corresponding request item's target_url.
+	TargetURL url.URL `json:"target_url"`
+	// Present only when this item failed to create; human-readable.
+	Error OptString `json:"error"`
+	// Present only on success.
+	ID OptString `json:"id"`
+	// Present only on success.
+	EditCode OptString `json:"edit_code"`
+	// Present only on success.
+	Views OptInt `json:"views"`
+	// Present only on success.
+	BurnAfterClick OptBool `json:"burn_after_click"`
+	// Present only on success.
+	Privacy OptBulkLinkResultPrivacy `json:"privacy"`
+	// Present only on success.
+	ExpiresAt OptNilDateTime `json:"expires_at"`
+	// Present only on success.
+	DirectRedirect OptNilBool `json:"direct_redirect"`
+	// Present only on success.
+	CreatedAt OptDateTime `json:"created_at"`
+}
+
+// GetTargetURL returns the value of TargetURL.
+func (s *BulkLinkResult) GetTargetURL() url.URL {
+	return s.TargetURL
+}
+
+// GetError returns the value of Error.
+func (s *BulkLinkResult) GetError() OptString {
+	return s.Error
+}
+
+// GetID returns the value of ID.
+func (s *BulkLinkResult) GetID() OptString {
+	return s.ID
+}
+
+// GetEditCode returns the value of EditCode.
+func (s *BulkLinkResult) GetEditCode() OptString {
+	return s.EditCode
+}
+
+// GetViews returns the value of Views.
+func (s *BulkLinkResult) GetViews() OptInt {
+	return s.Views
+}
+
+// GetBurnAfterClick returns the value of BurnAfterClick.
+func (s *BulkLinkResult) GetBurnAfterClick() OptBool {
+	return s.BurnAfterClick
+}
+
+// GetPrivacy returns the value of Privacy.
+func (s *BulkLinkResult) GetPrivacy() OptBulkLinkResultPrivacy {
+	return s.Privacy
+}
+
+// GetExpiresAt returns the value of ExpiresAt.
+func (s *BulkLinkResult) GetExpiresAt() OptNilDateTime {
+	return s.ExpiresAt
+}
+
+// GetDirectRedirect returns the value of DirectRedirect.
+func (s *BulkLinkResult) GetDirectRedirect() OptNilBool {
+	return s.DirectRedirect
+}
+
+// GetCreatedAt returns the value of CreatedAt.
+func (s *BulkLinkResult) GetCreatedAt() OptDateTime {
+	return s.CreatedAt
+}
+
+// SetTargetURL sets the value of TargetURL.
+func (s *BulkLinkResult) SetTargetURL(val url.URL) {
+	s.TargetURL = val
+}
+
+// SetError sets the value of Error.
+func (s *BulkLinkResult) SetError(val OptString) {
+	s.Error = val
+}
+
+// SetID sets the value of ID.
+func (s *BulkLinkResult) SetID(val OptString) {
+	s.ID = val
+}
+
+// SetEditCode sets the value of EditCode.
+func (s *BulkLinkResult) SetEditCode(val OptString) {
+	s.EditCode = val
+}
+
+// SetViews sets the value of Views.
+func (s *BulkLinkResult) SetViews(val OptInt) {
+	s.Views = val
+}
+
+// SetBurnAfterClick sets the value of BurnAfterClick.
+func (s *BulkLinkResult) SetBurnAfterClick(val OptBool) {
+	s.BurnAfterClick = val
+}
+
+// SetPrivacy sets the value of Privacy.
+func (s *BulkLinkResult) SetPrivacy(val OptBulkLinkResultPrivacy) {
+	s.Privacy = val
+}
+
+// SetExpiresAt sets the value of ExpiresAt.
+func (s *BulkLinkResult) SetExpiresAt(val OptNilDateTime) {
+	s.ExpiresAt = val
+}
+
+// SetDirectRedirect sets the value of DirectRedirect.
+func (s *BulkLinkResult) SetDirectRedirect(val OptNilBool) {
+	s.DirectRedirect = val
+}
+
+// SetCreatedAt sets the value of CreatedAt.
+func (s *BulkLinkResult) SetCreatedAt(val OptDateTime) {
+	s.CreatedAt = val
+}
+
+// Present only on success.
+type BulkLinkResultPrivacy string
+
+const (
+	BulkLinkResultPrivacyPublic        BulkLinkResultPrivacy = "public"
+	BulkLinkResultPrivacyAuthenticated BulkLinkResultPrivacy = "authenticated"
+	BulkLinkResultPrivacyOwner         BulkLinkResultPrivacy = "owner"
+)
+
+// AllValues returns all BulkLinkResultPrivacy values.
+func (BulkLinkResultPrivacy) AllValues() []BulkLinkResultPrivacy {
+	return []BulkLinkResultPrivacy{
+		BulkLinkResultPrivacyPublic,
+		BulkLinkResultPrivacyAuthenticated,
+		BulkLinkResultPrivacyOwner,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s BulkLinkResultPrivacy) MarshalText() ([]byte, error) {
+	switch s {
+	case BulkLinkResultPrivacyPublic:
+		return []byte(s), nil
+	case BulkLinkResultPrivacyAuthenticated:
+		return []byte(s), nil
+	case BulkLinkResultPrivacyOwner:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *BulkLinkResultPrivacy) UnmarshalText(data []byte) error {
+	switch BulkLinkResultPrivacy(data) {
+	case BulkLinkResultPrivacyPublic:
+		*s = BulkLinkResultPrivacyPublic
+		return nil
+	case BulkLinkResultPrivacyAuthenticated:
+		*s = BulkLinkResultPrivacyAuthenticated
+		return nil
+	case BulkLinkResultPrivacyOwner:
+		*s = BulkLinkResultPrivacyOwner
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
+type CreateAPITokenForbidden ErrorResponse
+
+func (*CreateAPITokenForbidden) createAPITokenRes() {}
+
+type CreateAPITokenInternalServerError ErrorResponse
+
+func (*CreateAPITokenInternalServerError) createAPITokenRes() {}
+
+// Optional issuance parameters; see StepUpRequest for `password` / `totp_code`.
+// Ref: #/components/schemas/CreateAPITokenRequest
+type CreateAPITokenRequest struct {
+	// Lifetime in days; `0` (default) = never expires.
+	TTLDays OptInt `json:"ttl_days"`
+	// The account password (step-up, bearer callers only).
+	Password OptString `json:"password"`
+	// A current 6-digit TOTP code (step-up, bearer callers only).
+	TotpCode OptString `json:"totp_code"`
+}
+
+// GetTTLDays returns the value of TTLDays.
+func (s *CreateAPITokenRequest) GetTTLDays() OptInt {
+	return s.TTLDays
+}
+
+// GetPassword returns the value of Password.
+func (s *CreateAPITokenRequest) GetPassword() OptString {
+	return s.Password
+}
+
+// GetTotpCode returns the value of TotpCode.
+func (s *CreateAPITokenRequest) GetTotpCode() OptString {
+	return s.TotpCode
+}
+
+// SetTTLDays sets the value of TTLDays.
+func (s *CreateAPITokenRequest) SetTTLDays(val OptInt) {
+	s.TTLDays = val
+}
+
+// SetPassword sets the value of Password.
+func (s *CreateAPITokenRequest) SetPassword(val OptString) {
+	s.Password = val
+}
+
+// SetTotpCode sets the value of TotpCode.
+func (s *CreateAPITokenRequest) SetTotpCode(val OptString) {
+	s.TotpCode = val
+}
+
+// Ref: #/components/schemas/CreateAPITokenResponse
+type CreateAPITokenResponse struct {
+	// `pmk_…` envelope: `pmk_` + base64url of `{"url": "<base>", "token": "<key>"}` —
+	// decode it, use `url` as the API base and `token` in the Bearer header. Returned
+	// exactly once; only the hash is stored.
+	Token string `json:"token"`
+}
+
+// GetToken returns the value of Token.
+func (s *CreateAPITokenResponse) GetToken() string {
+	return s.Token
+}
+
+// SetToken sets the value of Token.
+func (s *CreateAPITokenResponse) SetToken(val string) {
+	s.Token = val
+}
+
+func (*CreateAPITokenResponse) createAPITokenRes() {}
+
+type CreateAPITokenServiceUnavailable ErrorResponse
+
+func (*CreateAPITokenServiceUnavailable) createAPITokenRes() {}
+
+type CreateAPITokenTooManyRequests ErrorResponse
+
+func (*CreateAPITokenTooManyRequests) createAPITokenRes() {}
+
+type CreateAPITokenUnauthorized ErrorResponse
+
+func (*CreateAPITokenUnauthorized) createAPITokenRes() {}
+
+type CreateAPITokenUnprocessableEntity ErrorResponse
+
+func (*CreateAPITokenUnprocessableEntity) createAPITokenRes() {}
+
+type CreateInviteForbidden ErrorResponse
+
+func (*CreateInviteForbidden) createInviteRes() {}
+
+type CreateInviteInternalServerError ErrorResponse
+
+func (*CreateInviteInternalServerError) createInviteRes() {}
+
+// Ref: #/components/schemas/CreateInviteResponse
+type CreateInviteResponse struct {
+	// Single-use signup link (`{scheme}://{host}/setup?invite={token}`).
+	InviteURL url.URL `json:"invite_url"`
+}
+
+// GetInviteURL returns the value of InviteURL.
+func (s *CreateInviteResponse) GetInviteURL() url.URL {
+	return s.InviteURL
+}
+
+// SetInviteURL sets the value of InviteURL.
+func (s *CreateInviteResponse) SetInviteURL(val url.URL) {
+	s.InviteURL = val
+}
+
+func (*CreateInviteResponse) createInviteRes() {}
+
+type CreateInviteServiceUnavailable ErrorResponse
+
+func (*CreateInviteServiceUnavailable) createInviteRes() {}
+
+type CreateInviteTooManyRequests ErrorResponse
+
+func (*CreateInviteTooManyRequests) createInviteRes() {}
+
+type CreateInviteUnauthorized ErrorResponse
+
+func (*CreateInviteUnauthorized) createInviteRes() {}
+
+type CreateLinkBadRequest ErrorResponse
+
+func (*CreateLinkBadRequest) createLinkRes() {}
+
+type CreateLinkConflict ErrorResponse
+
+func (*CreateLinkConflict) createLinkRes() {}
+
+type CreateLinkInternalServerError ErrorResponse
+
+func (*CreateLinkInternalServerError) createLinkRes() {}
+
+// Ref: #/components/schemas/CreateLinkRequest
+type CreateLinkRequest struct {
+	// Destination URL. Only `http` and `https` schemes are accepted.
+	TargetURL url.URL `json:"target_url"`
+	// Custom URL-friendly identifier. Must be a single path segment matching
+	// `[a-zA-Z0-9_-]+` — multi-segment slugs (containing `/`) return `422`, since short
+	// links are only served at `GET /r/{id}` and `/links/{id}`.
+	// If omitted a 10-character random slug is generated.
+	// Returns `409` if the slug is already taken by a note or another link.
+	Slug OptString `json:"slug"`
+	// When `true` the link is deleted the moment it is first deliberately followed via
+	// `GET /r/{id}` (a browser navigation or an explicit `Accept`; previews, scanners,
+	// `HEAD` and embeds get `409` and leave it intact — see "Short links").
+	BurnAfterClick OptBool `json:"burn_after_click"`
+	// Seconds until the link expires, counted from creation. Omitted means the link never
+	// expires. This is a hard expiry with no relation to `burn_after_click`;
+	// the two may be combined freely.
+	TTL OptInt64 `json:"ttl"`
+	// Optional custom edit code: 8–128 characters, without leading or trailing whitespace
+	// or control characters. Omit it to receive a random server-generated 12-character
+	// code. Same rules and status codes as `CreateNoteRequest.edit_code`.
+	// Intended for CLI and automation use.
+	EditCode OptString `json:"edit_code"`
+	// Who may follow the link: `public` (anyone), `authenticated` (any valid session or API
+	// token, not just the creator), or `owner` (only the account that created it
+	// — see "Edit codes and ownership" above). `owner` additionally requires the link to
+	// actually have an owner, i.e. `--enable-accounts` and an authenticated caller —
+	// otherwise the request is rejected with `422`.
+	Privacy OptCreateLinkRequestPrivacy `json:"privacy"`
+	// Per-link override of the redirect mode for `GET /r/{id}`: `false` forces the
+	// transparency interstitial; `true` forces an immediate `301`, but only for a link
+	// created by an authenticated owner or on a server running `--direct-redirect=true`
+	// (otherwise ignored). Omitted (or explicit `null`) inherits the default: interstitial
+	// for anonymous links, `301` for an owner's links.
+	DirectRedirect OptNilBool `json:"direct_redirect"`
+}
+
+// GetTargetURL returns the value of TargetURL.
+func (s *CreateLinkRequest) GetTargetURL() url.URL {
+	return s.TargetURL
+}
+
+// GetSlug returns the value of Slug.
+func (s *CreateLinkRequest) GetSlug() OptString {
+	return s.Slug
+}
+
+// GetBurnAfterClick returns the value of BurnAfterClick.
+func (s *CreateLinkRequest) GetBurnAfterClick() OptBool {
+	return s.BurnAfterClick
+}
+
+// GetTTL returns the value of TTL.
+func (s *CreateLinkRequest) GetTTL() OptInt64 {
+	return s.TTL
+}
+
+// GetEditCode returns the value of EditCode.
+func (s *CreateLinkRequest) GetEditCode() OptString {
+	return s.EditCode
+}
+
+// GetPrivacy returns the value of Privacy.
+func (s *CreateLinkRequest) GetPrivacy() OptCreateLinkRequestPrivacy {
+	return s.Privacy
+}
+
+// GetDirectRedirect returns the value of DirectRedirect.
+func (s *CreateLinkRequest) GetDirectRedirect() OptNilBool {
+	return s.DirectRedirect
+}
+
+// SetTargetURL sets the value of TargetURL.
+func (s *CreateLinkRequest) SetTargetURL(val url.URL) {
+	s.TargetURL = val
+}
+
+// SetSlug sets the value of Slug.
+func (s *CreateLinkRequest) SetSlug(val OptString) {
+	s.Slug = val
+}
+
+// SetBurnAfterClick sets the value of BurnAfterClick.
+func (s *CreateLinkRequest) SetBurnAfterClick(val OptBool) {
+	s.BurnAfterClick = val
+}
+
+// SetTTL sets the value of TTL.
+func (s *CreateLinkRequest) SetTTL(val OptInt64) {
+	s.TTL = val
+}
+
+// SetEditCode sets the value of EditCode.
+func (s *CreateLinkRequest) SetEditCode(val OptString) {
+	s.EditCode = val
+}
+
+// SetPrivacy sets the value of Privacy.
+func (s *CreateLinkRequest) SetPrivacy(val OptCreateLinkRequestPrivacy) {
+	s.Privacy = val
+}
+
+// SetDirectRedirect sets the value of DirectRedirect.
+func (s *CreateLinkRequest) SetDirectRedirect(val OptNilBool) {
+	s.DirectRedirect = val
+}
+
+type CreateLinkRequestEntityTooLarge ErrorResponse
+
+func (*CreateLinkRequestEntityTooLarge) createLinkRes() {}
+
+// Who may follow the link: `public` (anyone), `authenticated` (any valid session or API
+// token, not just the creator), or `owner` (only the account that created it
+// — see "Edit codes and ownership" above). `owner` additionally requires the link to
+// actually have an owner, i.e. `--enable-accounts` and an authenticated caller —
+// otherwise the request is rejected with `422`.
+type CreateLinkRequestPrivacy string
+
+const (
+	CreateLinkRequestPrivacyPublic        CreateLinkRequestPrivacy = "public"
+	CreateLinkRequestPrivacyAuthenticated CreateLinkRequestPrivacy = "authenticated"
+	CreateLinkRequestPrivacyOwner         CreateLinkRequestPrivacy = "owner"
+)
+
+// AllValues returns all CreateLinkRequestPrivacy values.
+func (CreateLinkRequestPrivacy) AllValues() []CreateLinkRequestPrivacy {
+	return []CreateLinkRequestPrivacy{
+		CreateLinkRequestPrivacyPublic,
+		CreateLinkRequestPrivacyAuthenticated,
+		CreateLinkRequestPrivacyOwner,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s CreateLinkRequestPrivacy) MarshalText() ([]byte, error) {
+	switch s {
+	case CreateLinkRequestPrivacyPublic:
+		return []byte(s), nil
+	case CreateLinkRequestPrivacyAuthenticated:
+		return []byte(s), nil
+	case CreateLinkRequestPrivacyOwner:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *CreateLinkRequestPrivacy) UnmarshalText(data []byte) error {
+	switch CreateLinkRequestPrivacy(data) {
+	case CreateLinkRequestPrivacyPublic:
+		*s = CreateLinkRequestPrivacyPublic
+		return nil
+	case CreateLinkRequestPrivacyAuthenticated:
+		*s = CreateLinkRequestPrivacyAuthenticated
+		return nil
+	case CreateLinkRequestPrivacyOwner:
+		*s = CreateLinkRequestPrivacyOwner
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
+// Merged schema.
+// Ref: #/components/schemas/CreateLinkResponse
+type CreateLinkResponse struct {
+	// Unique slug identifying the link.
+	ID string `json:"id"`
+	// Destination URL.
+	TargetURL url.URL `json:"target_url"`
+	// Number of times the link has been followed via `GET /r/{id}`, as read from storage.
+	// Concurrent redirects may increment the count after this read. The decrypted-target
+	// cache never supplies counters or authorization metadata.
+	Views int `json:"views"`
+	// `true` until the link is first followed (then it no longer exists — a subsequent read
+	// returns `404`), permanently `false` for links without this flag.
+	BurnAfterClick bool `json:"burn_after_click"`
+	// Who may follow the link. See `CreateLinkRequest.privacy` for the exact semantics of
+	// each value.
+	Privacy OptCreateLinkResponsePrivacy `json:"privacy"`
+	// ISO 8601 timestamp after which the link is inaccessible. `null` for links that never expire.
+	ExpiresAt OptNilDateTime `json:"expires_at"`
+	// Per-link override of the server's `--direct-redirect` flag. See
+	// `CreateLinkRequest.direct_redirect`. `null` means this link inherits the server-wide
+	// default.
+	DirectRedirect OptNilBool `json:"direct_redirect"`
+	// Creation timestamp (UTC).
+	CreatedAt time.Time `json:"created_at"`
+	// One-time secret required for future `DELETE` requests.
+	// This is the only time `edit_code` is returned — store it securely.
+	EditCode string `json:"edit_code"`
+}
+
+// GetID returns the value of ID.
+func (s *CreateLinkResponse) GetID() string {
+	return s.ID
+}
+
+// GetTargetURL returns the value of TargetURL.
+func (s *CreateLinkResponse) GetTargetURL() url.URL {
+	return s.TargetURL
+}
+
+// GetViews returns the value of Views.
+func (s *CreateLinkResponse) GetViews() int {
+	return s.Views
+}
+
+// GetBurnAfterClick returns the value of BurnAfterClick.
+func (s *CreateLinkResponse) GetBurnAfterClick() bool {
+	return s.BurnAfterClick
+}
+
+// GetPrivacy returns the value of Privacy.
+func (s *CreateLinkResponse) GetPrivacy() OptCreateLinkResponsePrivacy {
+	return s.Privacy
+}
+
+// GetExpiresAt returns the value of ExpiresAt.
+func (s *CreateLinkResponse) GetExpiresAt() OptNilDateTime {
+	return s.ExpiresAt
+}
+
+// GetDirectRedirect returns the value of DirectRedirect.
+func (s *CreateLinkResponse) GetDirectRedirect() OptNilBool {
+	return s.DirectRedirect
+}
+
+// GetCreatedAt returns the value of CreatedAt.
+func (s *CreateLinkResponse) GetCreatedAt() time.Time {
+	return s.CreatedAt
+}
+
+// GetEditCode returns the value of EditCode.
+func (s *CreateLinkResponse) GetEditCode() string {
+	return s.EditCode
+}
+
+// SetID sets the value of ID.
+func (s *CreateLinkResponse) SetID(val string) {
+	s.ID = val
+}
+
+// SetTargetURL sets the value of TargetURL.
+func (s *CreateLinkResponse) SetTargetURL(val url.URL) {
+	s.TargetURL = val
+}
+
+// SetViews sets the value of Views.
+func (s *CreateLinkResponse) SetViews(val int) {
+	s.Views = val
+}
+
+// SetBurnAfterClick sets the value of BurnAfterClick.
+func (s *CreateLinkResponse) SetBurnAfterClick(val bool) {
+	s.BurnAfterClick = val
+}
+
+// SetPrivacy sets the value of Privacy.
+func (s *CreateLinkResponse) SetPrivacy(val OptCreateLinkResponsePrivacy) {
+	s.Privacy = val
+}
+
+// SetExpiresAt sets the value of ExpiresAt.
+func (s *CreateLinkResponse) SetExpiresAt(val OptNilDateTime) {
+	s.ExpiresAt = val
+}
+
+// SetDirectRedirect sets the value of DirectRedirect.
+func (s *CreateLinkResponse) SetDirectRedirect(val OptNilBool) {
+	s.DirectRedirect = val
+}
+
+// SetCreatedAt sets the value of CreatedAt.
+func (s *CreateLinkResponse) SetCreatedAt(val time.Time) {
+	s.CreatedAt = val
+}
+
+// SetEditCode sets the value of EditCode.
+func (s *CreateLinkResponse) SetEditCode(val string) {
+	s.EditCode = val
+}
+
+// CreateLinkResponseHeaders wraps CreateLinkResponse with response headers.
+type CreateLinkResponseHeaders struct {
+	Location OptString
+	Response CreateLinkResponse
+}
+
+// GetLocation returns the value of Location.
+func (s *CreateLinkResponseHeaders) GetLocation() OptString {
+	return s.Location
+}
+
+// GetResponse returns the value of Response.
+func (s *CreateLinkResponseHeaders) GetResponse() CreateLinkResponse {
+	return s.Response
+}
+
+// SetLocation sets the value of Location.
+func (s *CreateLinkResponseHeaders) SetLocation(val OptString) {
+	s.Location = val
+}
+
+// SetResponse sets the value of Response.
+func (s *CreateLinkResponseHeaders) SetResponse(val CreateLinkResponse) {
+	s.Response = val
+}
+
+func (*CreateLinkResponseHeaders) createLinkRes() {}
+
+// Who may follow the link. See `CreateLinkRequest.privacy` for the exact semantics of
+// each value.
+type CreateLinkResponsePrivacy string
+
+const (
+	CreateLinkResponsePrivacyPublic        CreateLinkResponsePrivacy = "public"
+	CreateLinkResponsePrivacyAuthenticated CreateLinkResponsePrivacy = "authenticated"
+	CreateLinkResponsePrivacyOwner         CreateLinkResponsePrivacy = "owner"
+)
+
+// AllValues returns all CreateLinkResponsePrivacy values.
+func (CreateLinkResponsePrivacy) AllValues() []CreateLinkResponsePrivacy {
+	return []CreateLinkResponsePrivacy{
+		CreateLinkResponsePrivacyPublic,
+		CreateLinkResponsePrivacyAuthenticated,
+		CreateLinkResponsePrivacyOwner,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s CreateLinkResponsePrivacy) MarshalText() ([]byte, error) {
+	switch s {
+	case CreateLinkResponsePrivacyPublic:
+		return []byte(s), nil
+	case CreateLinkResponsePrivacyAuthenticated:
+		return []byte(s), nil
+	case CreateLinkResponsePrivacyOwner:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *CreateLinkResponsePrivacy) UnmarshalText(data []byte) error {
+	switch CreateLinkResponsePrivacy(data) {
+	case CreateLinkResponsePrivacyPublic:
+		*s = CreateLinkResponsePrivacyPublic
+		return nil
+	case CreateLinkResponsePrivacyAuthenticated:
+		*s = CreateLinkResponsePrivacyAuthenticated
+		return nil
+	case CreateLinkResponsePrivacyOwner:
+		*s = CreateLinkResponsePrivacyOwner
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
+type CreateLinkServiceUnavailable ErrorResponse
+
+func (*CreateLinkServiceUnavailable) createLinkRes() {}
+
+type CreateLinkTooManyRequests ErrorResponse
+
+func (*CreateLinkTooManyRequests) createLinkRes() {}
+
+type CreateLinkUnauthorized ErrorResponse
+
+func (*CreateLinkUnauthorized) createLinkRes() {}
+
+type CreateLinkUnprocessableEntity ErrorResponse
+
+func (*CreateLinkUnprocessableEntity) createLinkRes() {}
+
+type CreateLinkUnsupportedMediaType ErrorResponse
+
+func (*CreateLinkUnsupportedMediaType) createLinkRes() {}
+
+type CreateLinksBulkBadRequest ErrorResponse
+
+func (*CreateLinksBulkBadRequest) createLinksBulkRes() {}
+
+type CreateLinksBulkInternalServerError ErrorResponse
+
+func (*CreateLinksBulkInternalServerError) createLinksBulkRes() {}
+
+type CreateLinksBulkRequestEntityTooLarge ErrorResponse
+
+func (*CreateLinksBulkRequestEntityTooLarge) createLinksBulkRes() {}
+
+type CreateLinksBulkServiceUnavailable ErrorResponse
+
+func (*CreateLinksBulkServiceUnavailable) createLinksBulkRes() {}
+
+type CreateLinksBulkTooManyRequests ErrorResponse
+
+func (*CreateLinksBulkTooManyRequests) createLinksBulkRes() {}
+
+type CreateLinksBulkUnauthorized ErrorResponse
+
+func (*CreateLinksBulkUnauthorized) createLinksBulkRes() {}
+
+type CreateLinksBulkUnsupportedMediaType ErrorResponse
+
+func (*CreateLinksBulkUnsupportedMediaType) createLinksBulkRes() {}
 
 type CreateNoteBadRequest ErrorResponse
 
@@ -24,11 +781,16 @@ func (*CreateNoteInternalServerError) createNoteRes() {}
 type CreateNoteRequest struct {
 	// Human-readable title shown in the note header.
 	Title OptString `json:"title"`
-	// Note body. Interpreted as Markdown unless `content_type` is `text/plain`.
+	// Note body, at most 1048576 characters (1 MiB of text). Interpreted as Markdown unless
+	// `content_type` is `text/plain`. A longer body is rejected before the note is stored.
 	Content string `json:"content"`
 	// MIME type of `content`; controls rendering on the view page.
 	ContentType OptCreateNoteRequestContentType `json:"content_type"`
-	// Custom URL-friendly identifier. Must match `[a-zA-Z0-9_-]+`.
+	// Custom URL-friendly identifier: one or more path segments joined by `/` (up to 10
+	// segments, 100 characters total). Each segment must match
+	// `[A-Za-z0-9][A-Za-z0-9._-]*` and the first segment must not be a reserved route
+	// name (e.g. `login`, `admin`, `notes`, `links`, `r`, `edit`, `api`, `static`).
+	// Returns `422` for an invalid slug.
 	// If omitted a 10-character random slug is generated.
 	// Returns `409` if the slug is already taken.
 	Slug OptString `json:"slug"`
@@ -41,14 +803,29 @@ type CreateNoteRequest struct {
 	// `0` means the note is deleted immediately when it is first revealed.
 	// Omitted means the same as `0` (immediate burn after reading).
 	TTL OptInt64 `json:"ttl"`
-	// Optional custom edit code. If omitted a random 12-character code is generated.
+	// Optional custom edit code: 8–128 characters, without leading or trailing whitespace
+	// or control characters. Omit it to receive a random server-generated 12-character
+	// code. A code shorter than 8 or longer than 128 characters is rejected with `400`; one
+	// with surrounding whitespace or control characters with `422`. Codes chosen before
+	// this rule existed keep working for `PUT`/`DELETE` — only new codes are checked.
 	// Intended for CLI and automation use; the web UI does not expose this field.
 	EditCode OptString `json:"edit_code"`
-	// When `true` the note requires a valid credential (bearer token or authenticated
-	// session) to view. This gates access to "any authenticated caller", not just the
-	// note's creator — notes have no owner, so it does not isolate the note from other
-	// users on a multi-user instance. Meaningful when the server is started with
-	// `--auth-tokens` and/or `--enable-accounts`.
+	// Who may read the note (default `public` when both this and `private` are omitted;
+	// no schema-level `default` so the server can tell an omitted field from an explicit
+	// `public` when resolving the deprecated `private` alias): `public` (anyone), `authenticated` (any
+	// valid session or API
+	// token, not just the creator), or `owner` (only the account that created
+	// it — see "Edit codes and ownership" above). Meaningful when the server is started
+	// with `--enable-accounts`; `owner` additionally requires the note to actually have an
+	// owner, i.e. an authenticated caller at creation time — otherwise the request is
+	// rejected with `422`.
+	Privacy OptCreateNoteRequestPrivacy `json:"privacy"`
+	// Deprecated alias of `privacy`, kept for clients written against v0.1.6: `true` means
+	// `authenticated`, `false` means `public`. Sending both `private` and `privacy` is
+	// allowed only when they agree (`true` with `authenticated` or `owner`, `false` with
+	// `public`); a disagreeing pair is rejected with `400`. Omitted leaves `privacy` alone.
+	//
+	// Deprecated: schema marks this property as deprecated.
 	Private OptBool `json:"private"`
 }
 
@@ -85,6 +862,11 @@ func (s *CreateNoteRequest) GetTTL() OptInt64 {
 // GetEditCode returns the value of EditCode.
 func (s *CreateNoteRequest) GetEditCode() OptString {
 	return s.EditCode
+}
+
+// GetPrivacy returns the value of Privacy.
+func (s *CreateNoteRequest) GetPrivacy() OptCreateNoteRequestPrivacy {
+	return s.Privacy
 }
 
 // GetPrivate returns the value of Private.
@@ -125,6 +907,11 @@ func (s *CreateNoteRequest) SetTTL(val OptInt64) {
 // SetEditCode sets the value of EditCode.
 func (s *CreateNoteRequest) SetEditCode(val OptString) {
 	s.EditCode = val
+}
+
+// SetPrivacy sets the value of Privacy.
+func (s *CreateNoteRequest) SetPrivacy(val OptCreateNoteRequestPrivacy) {
+	s.Privacy = val
 }
 
 // SetPrivate sets the value of Private.
@@ -178,6 +965,63 @@ type CreateNoteRequestEntityTooLarge ErrorResponse
 
 func (*CreateNoteRequestEntityTooLarge) createNoteRes() {}
 
+// Who may read the note (default `public` when both this and `private` are omitted;
+// no schema-level `default` so the server can tell an omitted field from an explicit
+// `public` when resolving the deprecated `private` alias): `public` (anyone), `authenticated` (any
+// valid session or API
+// token, not just the creator), or `owner` (only the account that created
+// it — see "Edit codes and ownership" above). Meaningful when the server is started
+// with `--enable-accounts`; `owner` additionally requires the note to actually have an
+// owner, i.e. an authenticated caller at creation time — otherwise the request is
+// rejected with `422`.
+type CreateNoteRequestPrivacy string
+
+const (
+	CreateNoteRequestPrivacyPublic        CreateNoteRequestPrivacy = "public"
+	CreateNoteRequestPrivacyAuthenticated CreateNoteRequestPrivacy = "authenticated"
+	CreateNoteRequestPrivacyOwner         CreateNoteRequestPrivacy = "owner"
+)
+
+// AllValues returns all CreateNoteRequestPrivacy values.
+func (CreateNoteRequestPrivacy) AllValues() []CreateNoteRequestPrivacy {
+	return []CreateNoteRequestPrivacy{
+		CreateNoteRequestPrivacyPublic,
+		CreateNoteRequestPrivacyAuthenticated,
+		CreateNoteRequestPrivacyOwner,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s CreateNoteRequestPrivacy) MarshalText() ([]byte, error) {
+	switch s {
+	case CreateNoteRequestPrivacyPublic:
+		return []byte(s), nil
+	case CreateNoteRequestPrivacyAuthenticated:
+		return []byte(s), nil
+	case CreateNoteRequestPrivacyOwner:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *CreateNoteRequestPrivacy) UnmarshalText(data []byte) error {
+	switch CreateNoteRequestPrivacy(data) {
+	case CreateNoteRequestPrivacyPublic:
+		*s = CreateNoteRequestPrivacyPublic
+		return nil
+	case CreateNoteRequestPrivacyAuthenticated:
+		*s = CreateNoteRequestPrivacyAuthenticated
+		return nil
+	case CreateNoteRequestPrivacyOwner:
+		*s = CreateNoteRequestPrivacyOwner
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
 // Merged schema.
 // Ref: #/components/schemas/CreateNoteResponse
 type CreateNoteResponse struct {
@@ -195,9 +1039,13 @@ type CreateNoteResponse struct {
 	// After the first read of a note with a TTL this becomes `false` and `expires_at`
 	// is set.
 	BurnAfterReading bool `json:"burn_after_reading"`
-	// `true` when the note requires a valid credential (bearer token or authenticated
-	// session) to view — any authenticated caller, not just the note's creator (notes
-	// have no owner). `false` for publicly accessible notes.
+	// Who may read the note. See `CreateNoteRequest.privacy` for the exact semantics of
+	// each value.
+	Privacy OptCreateNoteResponsePrivacy `json:"privacy"`
+	// Deprecated, read-only: `true` when `privacy` is not `public`. Emitted for clients
+	// written against v0.1.6; use `privacy`.
+	//
+	// Deprecated: schema marks this property as deprecated.
 	Private OptBool `json:"private"`
 	// ISO 8601 timestamp after which the note is inaccessible.
 	// Set on the first read for burn-after-reading notes that have a TTL.
@@ -240,6 +1088,11 @@ func (s *CreateNoteResponse) GetViews() int {
 // GetBurnAfterReading returns the value of BurnAfterReading.
 func (s *CreateNoteResponse) GetBurnAfterReading() bool {
 	return s.BurnAfterReading
+}
+
+// GetPrivacy returns the value of Privacy.
+func (s *CreateNoteResponse) GetPrivacy() OptCreateNoteResponsePrivacy {
+	return s.Privacy
 }
 
 // GetPrivate returns the value of Private.
@@ -295,6 +1148,11 @@ func (s *CreateNoteResponse) SetViews(val int) {
 // SetBurnAfterReading sets the value of BurnAfterReading.
 func (s *CreateNoteResponse) SetBurnAfterReading(val bool) {
 	s.BurnAfterReading = val
+}
+
+// SetPrivacy sets the value of Privacy.
+func (s *CreateNoteResponse) SetPrivacy(val OptCreateNoteResponsePrivacy) {
+	s.Privacy = val
 }
 
 // SetPrivate sets the value of Private.
@@ -392,6 +1250,60 @@ func (s *CreateNoteResponseHeaders) SetResponse(val CreateNoteResponse) {
 
 func (*CreateNoteResponseHeaders) createNoteRes() {}
 
+// Who may read the note. See `CreateNoteRequest.privacy` for the exact semantics of
+// each value.
+type CreateNoteResponsePrivacy string
+
+const (
+	CreateNoteResponsePrivacyPublic        CreateNoteResponsePrivacy = "public"
+	CreateNoteResponsePrivacyAuthenticated CreateNoteResponsePrivacy = "authenticated"
+	CreateNoteResponsePrivacyOwner         CreateNoteResponsePrivacy = "owner"
+)
+
+// AllValues returns all CreateNoteResponsePrivacy values.
+func (CreateNoteResponsePrivacy) AllValues() []CreateNoteResponsePrivacy {
+	return []CreateNoteResponsePrivacy{
+		CreateNoteResponsePrivacyPublic,
+		CreateNoteResponsePrivacyAuthenticated,
+		CreateNoteResponsePrivacyOwner,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s CreateNoteResponsePrivacy) MarshalText() ([]byte, error) {
+	switch s {
+	case CreateNoteResponsePrivacyPublic:
+		return []byte(s), nil
+	case CreateNoteResponsePrivacyAuthenticated:
+		return []byte(s), nil
+	case CreateNoteResponsePrivacyOwner:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *CreateNoteResponsePrivacy) UnmarshalText(data []byte) error {
+	switch CreateNoteResponsePrivacy(data) {
+	case CreateNoteResponsePrivacyPublic:
+		*s = CreateNoteResponsePrivacyPublic
+		return nil
+	case CreateNoteResponsePrivacyAuthenticated:
+		*s = CreateNoteResponsePrivacyAuthenticated
+		return nil
+	case CreateNoteResponsePrivacyOwner:
+		*s = CreateNoteResponsePrivacyOwner
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
+type CreateNoteServiceUnavailable ErrorResponse
+
+func (*CreateNoteServiceUnavailable) createNoteRes() {}
+
 type CreateNoteUnauthorized ErrorResponse
 
 func (*CreateNoteUnauthorized) createNoteRes() {}
@@ -399,6 +1311,40 @@ func (*CreateNoteUnauthorized) createNoteRes() {}
 type CreateNoteUnprocessableEntity ErrorResponse
 
 func (*CreateNoteUnprocessableEntity) createNoteRes() {}
+
+type CreateNoteUnsupportedMediaType ErrorResponse
+
+func (*CreateNoteUnsupportedMediaType) createNoteRes() {}
+
+type DeleteLinkForbidden ErrorResponse
+
+func (*DeleteLinkForbidden) deleteLinkRes() {}
+
+type DeleteLinkInternalServerError ErrorResponse
+
+func (*DeleteLinkInternalServerError) deleteLinkRes() {}
+
+// DeleteLinkNoContent is response for DeleteLink operation.
+type DeleteLinkNoContent struct{}
+
+func (*DeleteLinkNoContent) deleteLinkRes() {}
+
+type DeleteLinkNotFound ErrorResponse
+
+func (*DeleteLinkNotFound) deleteLinkRes() {}
+
+type DeleteLinkServiceUnavailable ErrorResponse
+
+func (*DeleteLinkServiceUnavailable) deleteLinkRes() {}
+
+type DeleteLinkTooManyRequests ErrorResponse
+
+func (*DeleteLinkTooManyRequests) deleteLinkRes() {}
+
+// DeleteLinkUnauthorized is response for DeleteLink operation.
+type DeleteLinkUnauthorized struct{}
+
+func (*DeleteLinkUnauthorized) deleteLinkRes() {}
 
 type DeleteNoteForbidden ErrorResponse
 
@@ -417,7 +1363,16 @@ type DeleteNoteNotFound ErrorResponse
 
 func (*DeleteNoteNotFound) deleteNoteRes() {}
 
-type DeleteNoteUnauthorized ErrorResponse
+type DeleteNoteServiceUnavailable ErrorResponse
+
+func (*DeleteNoteServiceUnavailable) deleteNoteRes() {}
+
+type DeleteNoteTooManyRequests ErrorResponse
+
+func (*DeleteNoteTooManyRequests) deleteNoteRes() {}
+
+// DeleteNoteUnauthorized is response for DeleteNote operation.
+type DeleteNoteUnauthorized struct{}
 
 func (*DeleteNoteUnauthorized) deleteNoteRes() {}
 
@@ -425,6 +1380,9 @@ func (*DeleteNoteUnauthorized) deleteNoteRes() {}
 type ErrorResponse struct {
 	// Human-readable error description.
 	Message string `json:"message"`
+	// Optional machine-readable error code. The --disable-api middleware always
+	// returns api_disabled; other errors may omit this field.
+	Code OptString `json:"code"`
 }
 
 // GetMessage returns the value of Message.
@@ -432,12 +1390,46 @@ func (s *ErrorResponse) GetMessage() string {
 	return s.Message
 }
 
+// GetCode returns the value of Code.
+func (s *ErrorResponse) GetCode() OptString {
+	return s.Code
+}
+
 // SetMessage sets the value of Message.
 func (s *ErrorResponse) SetMessage(val string) {
 	s.Message = val
 }
 
+// SetCode sets the value of Code.
+func (s *ErrorResponse) SetCode(val OptString) {
+	s.Code = val
+}
+
 func (*ErrorResponse) readyzRes() {}
+
+type GetLinkGone ErrorResponse
+
+func (*GetLinkGone) getLinkRes() {}
+
+type GetLinkInternalServerError ErrorResponse
+
+func (*GetLinkInternalServerError) getLinkRes() {}
+
+type GetLinkNotFound ErrorResponse
+
+func (*GetLinkNotFound) getLinkRes() {}
+
+type GetLinkServiceUnavailable ErrorResponse
+
+func (*GetLinkServiceUnavailable) getLinkRes() {}
+
+type GetLinkUnauthorized ErrorResponse
+
+func (*GetLinkUnauthorized) getLinkRes() {}
+
+type GetNoteConflict ErrorResponse
+
+func (*GetNoteConflict) getNoteRes() {}
 
 type GetNoteGone ErrorResponse
 
@@ -451,8 +1443,175 @@ type GetNoteNotFound ErrorResponse
 
 func (*GetNoteNotFound) getNoteRes() {}
 
+type GetNoteServiceUnavailable ErrorResponse
+
+func (*GetNoteServiceUnavailable) getNoteRes() {}
+
+type GetNoteUnauthorized ErrorResponse
+
+func (*GetNoteUnauthorized) getNoteRes() {}
+
 // HealthzOK is response for Healthz operation.
 type HealthzOK struct{}
+
+// Ref: #/components/schemas/LinkResponse
+type LinkResponse struct {
+	// Unique slug identifying the link.
+	ID string `json:"id"`
+	// Destination URL.
+	TargetURL url.URL `json:"target_url"`
+	// Number of times the link has been followed via `GET /r/{id}`, as read from storage.
+	// Concurrent redirects may increment the count after this read. The decrypted-target
+	// cache never supplies counters or authorization metadata.
+	Views int `json:"views"`
+	// `true` until the link is first followed (then it no longer exists — a subsequent read
+	// returns `404`), permanently `false` for links without this flag.
+	BurnAfterClick bool `json:"burn_after_click"`
+	// Who may follow the link. See `CreateLinkRequest.privacy` for the exact semantics of
+	// each value.
+	Privacy OptLinkResponsePrivacy `json:"privacy"`
+	// ISO 8601 timestamp after which the link is inaccessible. `null` for links that never expire.
+	ExpiresAt OptNilDateTime `json:"expires_at"`
+	// Per-link override of the server's `--direct-redirect` flag. See
+	// `CreateLinkRequest.direct_redirect`. `null` means this link inherits the server-wide
+	// default.
+	DirectRedirect OptNilBool `json:"direct_redirect"`
+	// Creation timestamp (UTC).
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// GetID returns the value of ID.
+func (s *LinkResponse) GetID() string {
+	return s.ID
+}
+
+// GetTargetURL returns the value of TargetURL.
+func (s *LinkResponse) GetTargetURL() url.URL {
+	return s.TargetURL
+}
+
+// GetViews returns the value of Views.
+func (s *LinkResponse) GetViews() int {
+	return s.Views
+}
+
+// GetBurnAfterClick returns the value of BurnAfterClick.
+func (s *LinkResponse) GetBurnAfterClick() bool {
+	return s.BurnAfterClick
+}
+
+// GetPrivacy returns the value of Privacy.
+func (s *LinkResponse) GetPrivacy() OptLinkResponsePrivacy {
+	return s.Privacy
+}
+
+// GetExpiresAt returns the value of ExpiresAt.
+func (s *LinkResponse) GetExpiresAt() OptNilDateTime {
+	return s.ExpiresAt
+}
+
+// GetDirectRedirect returns the value of DirectRedirect.
+func (s *LinkResponse) GetDirectRedirect() OptNilBool {
+	return s.DirectRedirect
+}
+
+// GetCreatedAt returns the value of CreatedAt.
+func (s *LinkResponse) GetCreatedAt() time.Time {
+	return s.CreatedAt
+}
+
+// SetID sets the value of ID.
+func (s *LinkResponse) SetID(val string) {
+	s.ID = val
+}
+
+// SetTargetURL sets the value of TargetURL.
+func (s *LinkResponse) SetTargetURL(val url.URL) {
+	s.TargetURL = val
+}
+
+// SetViews sets the value of Views.
+func (s *LinkResponse) SetViews(val int) {
+	s.Views = val
+}
+
+// SetBurnAfterClick sets the value of BurnAfterClick.
+func (s *LinkResponse) SetBurnAfterClick(val bool) {
+	s.BurnAfterClick = val
+}
+
+// SetPrivacy sets the value of Privacy.
+func (s *LinkResponse) SetPrivacy(val OptLinkResponsePrivacy) {
+	s.Privacy = val
+}
+
+// SetExpiresAt sets the value of ExpiresAt.
+func (s *LinkResponse) SetExpiresAt(val OptNilDateTime) {
+	s.ExpiresAt = val
+}
+
+// SetDirectRedirect sets the value of DirectRedirect.
+func (s *LinkResponse) SetDirectRedirect(val OptNilBool) {
+	s.DirectRedirect = val
+}
+
+// SetCreatedAt sets the value of CreatedAt.
+func (s *LinkResponse) SetCreatedAt(val time.Time) {
+	s.CreatedAt = val
+}
+
+func (*LinkResponse) getLinkRes()    {}
+func (*LinkResponse) updateLinkRes() {}
+
+// Who may follow the link. See `CreateLinkRequest.privacy` for the exact semantics of
+// each value.
+type LinkResponsePrivacy string
+
+const (
+	LinkResponsePrivacyPublic        LinkResponsePrivacy = "public"
+	LinkResponsePrivacyAuthenticated LinkResponsePrivacy = "authenticated"
+	LinkResponsePrivacyOwner         LinkResponsePrivacy = "owner"
+)
+
+// AllValues returns all LinkResponsePrivacy values.
+func (LinkResponsePrivacy) AllValues() []LinkResponsePrivacy {
+	return []LinkResponsePrivacy{
+		LinkResponsePrivacyPublic,
+		LinkResponsePrivacyAuthenticated,
+		LinkResponsePrivacyOwner,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s LinkResponsePrivacy) MarshalText() ([]byte, error) {
+	switch s {
+	case LinkResponsePrivacyPublic:
+		return []byte(s), nil
+	case LinkResponsePrivacyAuthenticated:
+		return []byte(s), nil
+	case LinkResponsePrivacyOwner:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *LinkResponsePrivacy) UnmarshalText(data []byte) error {
+	switch LinkResponsePrivacy(data) {
+	case LinkResponsePrivacyPublic:
+		*s = LinkResponsePrivacyPublic
+		return nil
+	case LinkResponsePrivacyAuthenticated:
+		*s = LinkResponsePrivacyAuthenticated
+		return nil
+	case LinkResponsePrivacyOwner:
+		*s = LinkResponsePrivacyOwner
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
 
 // Ref: #/components/schemas/NoteResponse
 type NoteResponse struct {
@@ -470,9 +1629,13 @@ type NoteResponse struct {
 	// After the first read of a note with a TTL this becomes `false` and `expires_at`
 	// is set.
 	BurnAfterReading bool `json:"burn_after_reading"`
-	// `true` when the note requires a valid credential (bearer token or authenticated
-	// session) to view — any authenticated caller, not just the note's creator (notes
-	// have no owner). `false` for publicly accessible notes.
+	// Who may read the note. See `CreateNoteRequest.privacy` for the exact semantics of
+	// each value.
+	Privacy OptNoteResponsePrivacy `json:"privacy"`
+	// Deprecated, read-only: `true` when `privacy` is not `public`. Emitted for clients
+	// written against v0.1.6; use `privacy`.
+	//
+	// Deprecated: schema marks this property as deprecated.
 	Private OptBool `json:"private"`
 	// ISO 8601 timestamp after which the note is inaccessible.
 	// Set on the first read for burn-after-reading notes that have a TTL.
@@ -512,6 +1675,11 @@ func (s *NoteResponse) GetViews() int {
 // GetBurnAfterReading returns the value of BurnAfterReading.
 func (s *NoteResponse) GetBurnAfterReading() bool {
 	return s.BurnAfterReading
+}
+
+// GetPrivacy returns the value of Privacy.
+func (s *NoteResponse) GetPrivacy() OptNoteResponsePrivacy {
+	return s.Privacy
 }
 
 // GetPrivate returns the value of Private.
@@ -562,6 +1730,11 @@ func (s *NoteResponse) SetViews(val int) {
 // SetBurnAfterReading sets the value of BurnAfterReading.
 func (s *NoteResponse) SetBurnAfterReading(val bool) {
 	s.BurnAfterReading = val
+}
+
+// SetPrivacy sets the value of Privacy.
+func (s *NoteResponse) SetPrivacy(val OptNoteResponsePrivacy) {
+	s.Privacy = val
 }
 
 // SetPrivate sets the value of Private.
@@ -629,6 +1802,56 @@ func (s *NoteResponseContentType) UnmarshalText(data []byte) error {
 	}
 }
 
+// Who may read the note. See `CreateNoteRequest.privacy` for the exact semantics of
+// each value.
+type NoteResponsePrivacy string
+
+const (
+	NoteResponsePrivacyPublic        NoteResponsePrivacy = "public"
+	NoteResponsePrivacyAuthenticated NoteResponsePrivacy = "authenticated"
+	NoteResponsePrivacyOwner         NoteResponsePrivacy = "owner"
+)
+
+// AllValues returns all NoteResponsePrivacy values.
+func (NoteResponsePrivacy) AllValues() []NoteResponsePrivacy {
+	return []NoteResponsePrivacy{
+		NoteResponsePrivacyPublic,
+		NoteResponsePrivacyAuthenticated,
+		NoteResponsePrivacyOwner,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s NoteResponsePrivacy) MarshalText() ([]byte, error) {
+	switch s {
+	case NoteResponsePrivacyPublic:
+		return []byte(s), nil
+	case NoteResponsePrivacyAuthenticated:
+		return []byte(s), nil
+	case NoteResponsePrivacyOwner:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *NoteResponsePrivacy) UnmarshalText(data []byte) error {
+	switch NoteResponsePrivacy(data) {
+	case NoteResponsePrivacyPublic:
+		*s = NoteResponsePrivacyPublic
+		return nil
+	case NoteResponsePrivacyAuthenticated:
+		*s = NoteResponsePrivacyAuthenticated
+		return nil
+	case NoteResponsePrivacyOwner:
+		*s = NoteResponsePrivacyOwner
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
 // NewOptBool returns new OptBool with value set to v.
 func NewOptBool(v bool) OptBool {
 	return OptBool{
@@ -669,6 +1892,190 @@ func (o OptBool) Get() (v bool, ok bool) {
 
 // Or returns value if set, or given parameter if does not.
 func (o OptBool) Or(d bool) bool {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptBulkLinkResultPrivacy returns new OptBulkLinkResultPrivacy with value set to v.
+func NewOptBulkLinkResultPrivacy(v BulkLinkResultPrivacy) OptBulkLinkResultPrivacy {
+	return OptBulkLinkResultPrivacy{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptBulkLinkResultPrivacy is optional BulkLinkResultPrivacy.
+type OptBulkLinkResultPrivacy struct {
+	Value BulkLinkResultPrivacy
+	Set   bool
+}
+
+// IsSet returns true if OptBulkLinkResultPrivacy was set.
+func (o OptBulkLinkResultPrivacy) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptBulkLinkResultPrivacy) Reset() {
+	var v BulkLinkResultPrivacy
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptBulkLinkResultPrivacy) SetTo(v BulkLinkResultPrivacy) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptBulkLinkResultPrivacy) Get() (v BulkLinkResultPrivacy, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptBulkLinkResultPrivacy) Or(d BulkLinkResultPrivacy) BulkLinkResultPrivacy {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptCreateAPITokenRequest returns new OptCreateAPITokenRequest with value set to v.
+func NewOptCreateAPITokenRequest(v CreateAPITokenRequest) OptCreateAPITokenRequest {
+	return OptCreateAPITokenRequest{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptCreateAPITokenRequest is optional CreateAPITokenRequest.
+type OptCreateAPITokenRequest struct {
+	Value CreateAPITokenRequest
+	Set   bool
+}
+
+// IsSet returns true if OptCreateAPITokenRequest was set.
+func (o OptCreateAPITokenRequest) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptCreateAPITokenRequest) Reset() {
+	var v CreateAPITokenRequest
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptCreateAPITokenRequest) SetTo(v CreateAPITokenRequest) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptCreateAPITokenRequest) Get() (v CreateAPITokenRequest, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptCreateAPITokenRequest) Or(d CreateAPITokenRequest) CreateAPITokenRequest {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptCreateLinkRequestPrivacy returns new OptCreateLinkRequestPrivacy with value set to v.
+func NewOptCreateLinkRequestPrivacy(v CreateLinkRequestPrivacy) OptCreateLinkRequestPrivacy {
+	return OptCreateLinkRequestPrivacy{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptCreateLinkRequestPrivacy is optional CreateLinkRequestPrivacy.
+type OptCreateLinkRequestPrivacy struct {
+	Value CreateLinkRequestPrivacy
+	Set   bool
+}
+
+// IsSet returns true if OptCreateLinkRequestPrivacy was set.
+func (o OptCreateLinkRequestPrivacy) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptCreateLinkRequestPrivacy) Reset() {
+	var v CreateLinkRequestPrivacy
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptCreateLinkRequestPrivacy) SetTo(v CreateLinkRequestPrivacy) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptCreateLinkRequestPrivacy) Get() (v CreateLinkRequestPrivacy, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptCreateLinkRequestPrivacy) Or(d CreateLinkRequestPrivacy) CreateLinkRequestPrivacy {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptCreateLinkResponsePrivacy returns new OptCreateLinkResponsePrivacy with value set to v.
+func NewOptCreateLinkResponsePrivacy(v CreateLinkResponsePrivacy) OptCreateLinkResponsePrivacy {
+	return OptCreateLinkResponsePrivacy{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptCreateLinkResponsePrivacy is optional CreateLinkResponsePrivacy.
+type OptCreateLinkResponsePrivacy struct {
+	Value CreateLinkResponsePrivacy
+	Set   bool
+}
+
+// IsSet returns true if OptCreateLinkResponsePrivacy was set.
+func (o OptCreateLinkResponsePrivacy) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptCreateLinkResponsePrivacy) Reset() {
+	var v CreateLinkResponsePrivacy
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptCreateLinkResponsePrivacy) SetTo(v CreateLinkResponsePrivacy) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptCreateLinkResponsePrivacy) Get() (v CreateLinkResponsePrivacy, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptCreateLinkResponsePrivacy) Or(d CreateLinkResponsePrivacy) CreateLinkResponsePrivacy {
 	if v, ok := o.Get(); ok {
 		return v
 	}
@@ -721,6 +2128,190 @@ func (o OptCreateNoteRequestContentType) Or(d CreateNoteRequestContentType) Crea
 	return d
 }
 
+// NewOptCreateNoteRequestPrivacy returns new OptCreateNoteRequestPrivacy with value set to v.
+func NewOptCreateNoteRequestPrivacy(v CreateNoteRequestPrivacy) OptCreateNoteRequestPrivacy {
+	return OptCreateNoteRequestPrivacy{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptCreateNoteRequestPrivacy is optional CreateNoteRequestPrivacy.
+type OptCreateNoteRequestPrivacy struct {
+	Value CreateNoteRequestPrivacy
+	Set   bool
+}
+
+// IsSet returns true if OptCreateNoteRequestPrivacy was set.
+func (o OptCreateNoteRequestPrivacy) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptCreateNoteRequestPrivacy) Reset() {
+	var v CreateNoteRequestPrivacy
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptCreateNoteRequestPrivacy) SetTo(v CreateNoteRequestPrivacy) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptCreateNoteRequestPrivacy) Get() (v CreateNoteRequestPrivacy, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptCreateNoteRequestPrivacy) Or(d CreateNoteRequestPrivacy) CreateNoteRequestPrivacy {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptCreateNoteResponsePrivacy returns new OptCreateNoteResponsePrivacy with value set to v.
+func NewOptCreateNoteResponsePrivacy(v CreateNoteResponsePrivacy) OptCreateNoteResponsePrivacy {
+	return OptCreateNoteResponsePrivacy{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptCreateNoteResponsePrivacy is optional CreateNoteResponsePrivacy.
+type OptCreateNoteResponsePrivacy struct {
+	Value CreateNoteResponsePrivacy
+	Set   bool
+}
+
+// IsSet returns true if OptCreateNoteResponsePrivacy was set.
+func (o OptCreateNoteResponsePrivacy) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptCreateNoteResponsePrivacy) Reset() {
+	var v CreateNoteResponsePrivacy
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptCreateNoteResponsePrivacy) SetTo(v CreateNoteResponsePrivacy) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptCreateNoteResponsePrivacy) Get() (v CreateNoteResponsePrivacy, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptCreateNoteResponsePrivacy) Or(d CreateNoteResponsePrivacy) CreateNoteResponsePrivacy {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptDateTime returns new OptDateTime with value set to v.
+func NewOptDateTime(v time.Time) OptDateTime {
+	return OptDateTime{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptDateTime is optional time.Time.
+type OptDateTime struct {
+	Value time.Time
+	Set   bool
+}
+
+// IsSet returns true if OptDateTime was set.
+func (o OptDateTime) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptDateTime) Reset() {
+	var v time.Time
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptDateTime) SetTo(v time.Time) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptDateTime) Get() (v time.Time, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptDateTime) Or(d time.Time) time.Time {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptInt returns new OptInt with value set to v.
+func NewOptInt(v int) OptInt {
+	return OptInt{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptInt is optional int.
+type OptInt struct {
+	Value int
+	Set   bool
+}
+
+// IsSet returns true if OptInt was set.
+func (o OptInt) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptInt) Reset() {
+	var v int
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptInt) SetTo(v int) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptInt) Get() (v int, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptInt) Or(d int) int {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
 // NewOptInt64 returns new OptInt64 with value set to v.
 func NewOptInt64(v int64) OptInt64 {
 	return OptInt64{
@@ -761,6 +2352,115 @@ func (o OptInt64) Get() (v int64, ok bool) {
 
 // Or returns value if set, or given parameter if does not.
 func (o OptInt64) Or(d int64) int64 {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptLinkResponsePrivacy returns new OptLinkResponsePrivacy with value set to v.
+func NewOptLinkResponsePrivacy(v LinkResponsePrivacy) OptLinkResponsePrivacy {
+	return OptLinkResponsePrivacy{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptLinkResponsePrivacy is optional LinkResponsePrivacy.
+type OptLinkResponsePrivacy struct {
+	Value LinkResponsePrivacy
+	Set   bool
+}
+
+// IsSet returns true if OptLinkResponsePrivacy was set.
+func (o OptLinkResponsePrivacy) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptLinkResponsePrivacy) Reset() {
+	var v LinkResponsePrivacy
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptLinkResponsePrivacy) SetTo(v LinkResponsePrivacy) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptLinkResponsePrivacy) Get() (v LinkResponsePrivacy, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptLinkResponsePrivacy) Or(d LinkResponsePrivacy) LinkResponsePrivacy {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptNilBool returns new OptNilBool with value set to v.
+func NewOptNilBool(v bool) OptNilBool {
+	return OptNilBool{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptNilBool is optional nullable bool.
+type OptNilBool struct {
+	Value bool
+	Set   bool
+	Null  bool
+}
+
+// IsSet returns true if OptNilBool was set.
+func (o OptNilBool) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptNilBool) Reset() {
+	var v bool
+	o.Value = v
+	o.Set = false
+	o.Null = false
+}
+
+// SetTo sets value to v.
+func (o *OptNilBool) SetTo(v bool) {
+	o.Set = true
+	o.Null = false
+	o.Value = v
+}
+
+// IsNull returns true if value is Null.
+func (o OptNilBool) IsNull() bool { return o.Null }
+
+// SetToNull sets value to null.
+func (o *OptNilBool) SetToNull() {
+	o.Set = true
+	o.Null = true
+	var v bool
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptNilBool) Get() (v bool, ok bool) {
+	if o.Null {
+		return v, false
+	}
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptNilBool) Or(d bool) bool {
 	if v, ok := o.Get(); ok {
 		return v
 	}
@@ -830,6 +2530,161 @@ func (o OptNilDateTime) Or(d time.Time) time.Time {
 	return d
 }
 
+// NewOptNilInt64 returns new OptNilInt64 with value set to v.
+func NewOptNilInt64(v int64) OptNilInt64 {
+	return OptNilInt64{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptNilInt64 is optional nullable int64.
+type OptNilInt64 struct {
+	Value int64
+	Set   bool
+	Null  bool
+}
+
+// IsSet returns true if OptNilInt64 was set.
+func (o OptNilInt64) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptNilInt64) Reset() {
+	var v int64
+	o.Value = v
+	o.Set = false
+	o.Null = false
+}
+
+// SetTo sets value to v.
+func (o *OptNilInt64) SetTo(v int64) {
+	o.Set = true
+	o.Null = false
+	o.Value = v
+}
+
+// IsNull returns true if value is Null.
+func (o OptNilInt64) IsNull() bool { return o.Null }
+
+// SetToNull sets value to null.
+func (o *OptNilInt64) SetToNull() {
+	o.Set = true
+	o.Null = true
+	var v int64
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptNilInt64) Get() (v int64, ok bool) {
+	if o.Null {
+		return v, false
+	}
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptNilInt64) Or(d int64) int64 {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptNoteResponsePrivacy returns new OptNoteResponsePrivacy with value set to v.
+func NewOptNoteResponsePrivacy(v NoteResponsePrivacy) OptNoteResponsePrivacy {
+	return OptNoteResponsePrivacy{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptNoteResponsePrivacy is optional NoteResponsePrivacy.
+type OptNoteResponsePrivacy struct {
+	Value NoteResponsePrivacy
+	Set   bool
+}
+
+// IsSet returns true if OptNoteResponsePrivacy was set.
+func (o OptNoteResponsePrivacy) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptNoteResponsePrivacy) Reset() {
+	var v NoteResponsePrivacy
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptNoteResponsePrivacy) SetTo(v NoteResponsePrivacy) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptNoteResponsePrivacy) Get() (v NoteResponsePrivacy, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptNoteResponsePrivacy) Or(d NoteResponsePrivacy) NoteResponsePrivacy {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptStepUpRequest returns new OptStepUpRequest with value set to v.
+func NewOptStepUpRequest(v StepUpRequest) OptStepUpRequest {
+	return OptStepUpRequest{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptStepUpRequest is optional StepUpRequest.
+type OptStepUpRequest struct {
+	Value StepUpRequest
+	Set   bool
+}
+
+// IsSet returns true if OptStepUpRequest was set.
+func (o OptStepUpRequest) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptStepUpRequest) Reset() {
+	var v StepUpRequest
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptStepUpRequest) SetTo(v StepUpRequest) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptStepUpRequest) Get() (v StepUpRequest, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptStepUpRequest) Or(d StepUpRequest) StepUpRequest {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
 // NewOptString returns new OptString with value set to v.
 func NewOptString(v string) OptString {
 	return OptString{
@@ -870,6 +2725,52 @@ func (o OptString) Get() (v string, ok bool) {
 
 // Or returns value if set, or given parameter if does not.
 func (o OptString) Or(d string) string {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptUpdateLinkRequestPrivacy returns new OptUpdateLinkRequestPrivacy with value set to v.
+func NewOptUpdateLinkRequestPrivacy(v UpdateLinkRequestPrivacy) OptUpdateLinkRequestPrivacy {
+	return OptUpdateLinkRequestPrivacy{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptUpdateLinkRequestPrivacy is optional UpdateLinkRequestPrivacy.
+type OptUpdateLinkRequestPrivacy struct {
+	Value UpdateLinkRequestPrivacy
+	Set   bool
+}
+
+// IsSet returns true if OptUpdateLinkRequestPrivacy was set.
+func (o OptUpdateLinkRequestPrivacy) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptUpdateLinkRequestPrivacy) Reset() {
+	var v UpdateLinkRequestPrivacy
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptUpdateLinkRequestPrivacy) SetTo(v UpdateLinkRequestPrivacy) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptUpdateLinkRequestPrivacy) Get() (v UpdateLinkRequestPrivacy, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptUpdateLinkRequestPrivacy) Or(d UpdateLinkRequestPrivacy) UpdateLinkRequestPrivacy {
 	if v, ok := o.Get(); ok {
 		return v
 	}
@@ -922,10 +2823,244 @@ func (o OptUpdateNoteRequestContentType) Or(d UpdateNoteRequestContentType) Upda
 	return d
 }
 
+// NewOptUpdateNoteRequestPrivacy returns new OptUpdateNoteRequestPrivacy with value set to v.
+func NewOptUpdateNoteRequestPrivacy(v UpdateNoteRequestPrivacy) OptUpdateNoteRequestPrivacy {
+	return OptUpdateNoteRequestPrivacy{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptUpdateNoteRequestPrivacy is optional UpdateNoteRequestPrivacy.
+type OptUpdateNoteRequestPrivacy struct {
+	Value UpdateNoteRequestPrivacy
+	Set   bool
+}
+
+// IsSet returns true if OptUpdateNoteRequestPrivacy was set.
+func (o OptUpdateNoteRequestPrivacy) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptUpdateNoteRequestPrivacy) Reset() {
+	var v UpdateNoteRequestPrivacy
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptUpdateNoteRequestPrivacy) SetTo(v UpdateNoteRequestPrivacy) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptUpdateNoteRequestPrivacy) Get() (v UpdateNoteRequestPrivacy, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptUpdateNoteRequestPrivacy) Or(d UpdateNoteRequestPrivacy) UpdateNoteRequestPrivacy {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
 // ReadyzOK is response for Readyz operation.
 type ReadyzOK struct{}
 
 func (*ReadyzOK) readyzRes() {}
+
+// Re-authentication a bearer-token caller must present to issue a credential; ignored for
+// a browser session.
+// Ref: #/components/schemas/StepUpRequest
+type StepUpRequest struct {
+	// The account password.
+	Password OptString `json:"password"`
+	// A current 6-digit TOTP code (each code is accepted once).
+	TotpCode OptString `json:"totp_code"`
+}
+
+// GetPassword returns the value of Password.
+func (s *StepUpRequest) GetPassword() OptString {
+	return s.Password
+}
+
+// GetTotpCode returns the value of TotpCode.
+func (s *StepUpRequest) GetTotpCode() OptString {
+	return s.TotpCode
+}
+
+// SetPassword sets the value of Password.
+func (s *StepUpRequest) SetPassword(val OptString) {
+	s.Password = val
+}
+
+// SetTotpCode sets the value of TotpCode.
+func (s *StepUpRequest) SetTotpCode(val OptString) {
+	s.TotpCode = val
+}
+
+type UpdateLinkBadRequest ErrorResponse
+
+func (*UpdateLinkBadRequest) updateLinkRes() {}
+
+type UpdateLinkForbidden ErrorResponse
+
+func (*UpdateLinkForbidden) updateLinkRes() {}
+
+type UpdateLinkInternalServerError ErrorResponse
+
+func (*UpdateLinkInternalServerError) updateLinkRes() {}
+
+type UpdateLinkNotFound ErrorResponse
+
+func (*UpdateLinkNotFound) updateLinkRes() {}
+
+// Ref: #/components/schemas/UpdateLinkRequest
+type UpdateLinkRequest struct {
+	// New destination URL. Only http and https schemes are accepted.
+	TargetURL url.URL `json:"target_url"`
+	// Original edit code; may be omitted by the exact authenticated owner.
+	EditCode OptString `json:"edit_code"`
+	// Seconds until expiry, counted from this update. Omitted preserves the current
+	// expiry, null removes it, and 0 expires immediately.
+	TTL OptNilInt64 `json:"ttl"`
+	// New privacy level; omitted preserves the current level. owner requires an
+	// existing owner on the link, otherwise the request is rejected with 422.
+	Privacy OptUpdateLinkRequestPrivacy `json:"privacy"`
+	// New redirect override. Omitted preserves the current value; null resets it
+	// to inherit the server's direct-redirect default.
+	DirectRedirect OptNilBool `json:"direct_redirect"`
+}
+
+// GetTargetURL returns the value of TargetURL.
+func (s *UpdateLinkRequest) GetTargetURL() url.URL {
+	return s.TargetURL
+}
+
+// GetEditCode returns the value of EditCode.
+func (s *UpdateLinkRequest) GetEditCode() OptString {
+	return s.EditCode
+}
+
+// GetTTL returns the value of TTL.
+func (s *UpdateLinkRequest) GetTTL() OptNilInt64 {
+	return s.TTL
+}
+
+// GetPrivacy returns the value of Privacy.
+func (s *UpdateLinkRequest) GetPrivacy() OptUpdateLinkRequestPrivacy {
+	return s.Privacy
+}
+
+// GetDirectRedirect returns the value of DirectRedirect.
+func (s *UpdateLinkRequest) GetDirectRedirect() OptNilBool {
+	return s.DirectRedirect
+}
+
+// SetTargetURL sets the value of TargetURL.
+func (s *UpdateLinkRequest) SetTargetURL(val url.URL) {
+	s.TargetURL = val
+}
+
+// SetEditCode sets the value of EditCode.
+func (s *UpdateLinkRequest) SetEditCode(val OptString) {
+	s.EditCode = val
+}
+
+// SetTTL sets the value of TTL.
+func (s *UpdateLinkRequest) SetTTL(val OptNilInt64) {
+	s.TTL = val
+}
+
+// SetPrivacy sets the value of Privacy.
+func (s *UpdateLinkRequest) SetPrivacy(val OptUpdateLinkRequestPrivacy) {
+	s.Privacy = val
+}
+
+// SetDirectRedirect sets the value of DirectRedirect.
+func (s *UpdateLinkRequest) SetDirectRedirect(val OptNilBool) {
+	s.DirectRedirect = val
+}
+
+type UpdateLinkRequestEntityTooLarge ErrorResponse
+
+func (*UpdateLinkRequestEntityTooLarge) updateLinkRes() {}
+
+// New privacy level; omitted preserves the current level. owner requires an
+// existing owner on the link, otherwise the request is rejected with 422.
+type UpdateLinkRequestPrivacy string
+
+const (
+	UpdateLinkRequestPrivacyPublic        UpdateLinkRequestPrivacy = "public"
+	UpdateLinkRequestPrivacyAuthenticated UpdateLinkRequestPrivacy = "authenticated"
+	UpdateLinkRequestPrivacyOwner         UpdateLinkRequestPrivacy = "owner"
+)
+
+// AllValues returns all UpdateLinkRequestPrivacy values.
+func (UpdateLinkRequestPrivacy) AllValues() []UpdateLinkRequestPrivacy {
+	return []UpdateLinkRequestPrivacy{
+		UpdateLinkRequestPrivacyPublic,
+		UpdateLinkRequestPrivacyAuthenticated,
+		UpdateLinkRequestPrivacyOwner,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s UpdateLinkRequestPrivacy) MarshalText() ([]byte, error) {
+	switch s {
+	case UpdateLinkRequestPrivacyPublic:
+		return []byte(s), nil
+	case UpdateLinkRequestPrivacyAuthenticated:
+		return []byte(s), nil
+	case UpdateLinkRequestPrivacyOwner:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *UpdateLinkRequestPrivacy) UnmarshalText(data []byte) error {
+	switch UpdateLinkRequestPrivacy(data) {
+	case UpdateLinkRequestPrivacyPublic:
+		*s = UpdateLinkRequestPrivacyPublic
+		return nil
+	case UpdateLinkRequestPrivacyAuthenticated:
+		*s = UpdateLinkRequestPrivacyAuthenticated
+		return nil
+	case UpdateLinkRequestPrivacyOwner:
+		*s = UpdateLinkRequestPrivacyOwner
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
+type UpdateLinkServiceUnavailable ErrorResponse
+
+func (*UpdateLinkServiceUnavailable) updateLinkRes() {}
+
+type UpdateLinkTooManyRequests ErrorResponse
+
+func (*UpdateLinkTooManyRequests) updateLinkRes() {}
+
+// UpdateLinkUnauthorized is response for UpdateLink operation.
+type UpdateLinkUnauthorized struct{}
+
+func (*UpdateLinkUnauthorized) updateLinkRes() {}
+
+type UpdateLinkUnprocessableEntity ErrorResponse
+
+func (*UpdateLinkUnprocessableEntity) updateLinkRes() {}
+
+type UpdateLinkUnsupportedMediaType ErrorResponse
+
+func (*UpdateLinkUnsupportedMediaType) updateLinkRes() {}
 
 type UpdateNoteBadRequest ErrorResponse
 
@@ -947,20 +3082,30 @@ func (*UpdateNoteNotFound) updateNoteRes() {}
 type UpdateNoteRequest struct {
 	// New title.
 	Title OptString `json:"title"`
-	// New body.
+	// New body, at most 1048576 characters (see `CreateNoteRequest.content`).
 	Content string `json:"content"`
 	// New content type; defaults to the note's current type when omitted.
 	ContentType OptUpdateNoteRequestContentType `json:"content_type"`
-	// The edit code returned when the note was created.
-	EditCode string `json:"edit_code"`
+	// The edit code returned when the note was created. May be omitted when the request is
+	// authenticated (bearer token or session) as the note's owner — see
+	// "Edit codes and ownership" above.
+	EditCode OptString `json:"edit_code"`
 	// Update the burn-after-reading flag.
 	BurnAfterReading OptBool `json:"burn_after_reading"`
-	// New TTL in seconds (grace period after first read).
-	// Only meaningful when `burn_after_reading` is `true`.
-	// `0` means the note is deleted immediately when it is first revealed.
-	TTL OptInt64 `json:"ttl"`
-	// Update the private flag. See `CreateNoteRequest.private` for the exact semantics
-	// (requires login, not owner-only).
+	// With `burn_after_reading: true`, the grace period in seconds after first read;
+	// omitted, null or 0 means immediate burn. Otherwise this is a hard expiry counted
+	// from the update: omitted preserves the current expiry (except when disabling
+	// an existing burn timer), null removes it, and 0 expires immediately.
+	TTL OptNilInt64 `json:"ttl"`
+	// Update the privacy level. See `CreateNoteRequest.privacy` for the exact semantics of
+	// each value. Omitted keeps the note's current privacy level.
+	Privacy OptUpdateNoteRequestPrivacy `json:"privacy"`
+	// Deprecated alias of `privacy`, kept for clients written against v0.1.6: `true` means
+	// `authenticated`, `false` means `public`. Sending both `private` and `privacy` is
+	// allowed only when they agree (`true` with `authenticated` or `owner`, `false` with
+	// `public`); a disagreeing pair is rejected with `400`. Omitted keeps the current level.
+	//
+	// Deprecated: schema marks this property as deprecated.
 	Private OptBool `json:"private"`
 }
 
@@ -980,7 +3125,7 @@ func (s *UpdateNoteRequest) GetContentType() OptUpdateNoteRequestContentType {
 }
 
 // GetEditCode returns the value of EditCode.
-func (s *UpdateNoteRequest) GetEditCode() string {
+func (s *UpdateNoteRequest) GetEditCode() OptString {
 	return s.EditCode
 }
 
@@ -990,8 +3135,13 @@ func (s *UpdateNoteRequest) GetBurnAfterReading() OptBool {
 }
 
 // GetTTL returns the value of TTL.
-func (s *UpdateNoteRequest) GetTTL() OptInt64 {
+func (s *UpdateNoteRequest) GetTTL() OptNilInt64 {
 	return s.TTL
+}
+
+// GetPrivacy returns the value of Privacy.
+func (s *UpdateNoteRequest) GetPrivacy() OptUpdateNoteRequestPrivacy {
+	return s.Privacy
 }
 
 // GetPrivate returns the value of Private.
@@ -1015,7 +3165,7 @@ func (s *UpdateNoteRequest) SetContentType(val OptUpdateNoteRequestContentType) 
 }
 
 // SetEditCode sets the value of EditCode.
-func (s *UpdateNoteRequest) SetEditCode(val string) {
+func (s *UpdateNoteRequest) SetEditCode(val OptString) {
 	s.EditCode = val
 }
 
@@ -1025,8 +3175,13 @@ func (s *UpdateNoteRequest) SetBurnAfterReading(val OptBool) {
 }
 
 // SetTTL sets the value of TTL.
-func (s *UpdateNoteRequest) SetTTL(val OptInt64) {
+func (s *UpdateNoteRequest) SetTTL(val OptNilInt64) {
 	s.TTL = val
+}
+
+// SetPrivacy sets the value of Privacy.
+func (s *UpdateNoteRequest) SetPrivacy(val OptUpdateNoteRequestPrivacy) {
+	s.Privacy = val
 }
 
 // SetPrivate sets the value of Private.
@@ -1076,10 +3231,77 @@ func (s *UpdateNoteRequestContentType) UnmarshalText(data []byte) error {
 	}
 }
 
-type UpdateNoteUnauthorized ErrorResponse
+type UpdateNoteRequestEntityTooLarge ErrorResponse
+
+func (*UpdateNoteRequestEntityTooLarge) updateNoteRes() {}
+
+// Update the privacy level. See `CreateNoteRequest.privacy` for the exact semantics of
+// each value. Omitted keeps the note's current privacy level.
+type UpdateNoteRequestPrivacy string
+
+const (
+	UpdateNoteRequestPrivacyPublic        UpdateNoteRequestPrivacy = "public"
+	UpdateNoteRequestPrivacyAuthenticated UpdateNoteRequestPrivacy = "authenticated"
+	UpdateNoteRequestPrivacyOwner         UpdateNoteRequestPrivacy = "owner"
+)
+
+// AllValues returns all UpdateNoteRequestPrivacy values.
+func (UpdateNoteRequestPrivacy) AllValues() []UpdateNoteRequestPrivacy {
+	return []UpdateNoteRequestPrivacy{
+		UpdateNoteRequestPrivacyPublic,
+		UpdateNoteRequestPrivacyAuthenticated,
+		UpdateNoteRequestPrivacyOwner,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s UpdateNoteRequestPrivacy) MarshalText() ([]byte, error) {
+	switch s {
+	case UpdateNoteRequestPrivacyPublic:
+		return []byte(s), nil
+	case UpdateNoteRequestPrivacyAuthenticated:
+		return []byte(s), nil
+	case UpdateNoteRequestPrivacyOwner:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *UpdateNoteRequestPrivacy) UnmarshalText(data []byte) error {
+	switch UpdateNoteRequestPrivacy(data) {
+	case UpdateNoteRequestPrivacyPublic:
+		*s = UpdateNoteRequestPrivacyPublic
+		return nil
+	case UpdateNoteRequestPrivacyAuthenticated:
+		*s = UpdateNoteRequestPrivacyAuthenticated
+		return nil
+	case UpdateNoteRequestPrivacyOwner:
+		*s = UpdateNoteRequestPrivacyOwner
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
+type UpdateNoteServiceUnavailable ErrorResponse
+
+func (*UpdateNoteServiceUnavailable) updateNoteRes() {}
+
+type UpdateNoteTooManyRequests ErrorResponse
+
+func (*UpdateNoteTooManyRequests) updateNoteRes() {}
+
+// UpdateNoteUnauthorized is response for UpdateNote operation.
+type UpdateNoteUnauthorized struct{}
 
 func (*UpdateNoteUnauthorized) updateNoteRes() {}
 
 type UpdateNoteUnprocessableEntity ErrorResponse
 
 func (*UpdateNoteUnprocessableEntity) updateNoteRes() {}
+
+type UpdateNoteUnsupportedMediaType ErrorResponse
+
+func (*UpdateNoteUnsupportedMediaType) updateNoteRes() {}

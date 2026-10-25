@@ -1,10 +1,14 @@
+//go:build integration
+
 package postgres
 
 import (
+	"context"
 	"database/sql"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/suite"
 	"github.com/testcontainers/testcontainers-go"
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
@@ -120,6 +124,58 @@ func (s *RepositoryTestSuite) TestCreate_AllFields() {
 	s.WithinDuration(future, *got.ExpiresAt, time.Second)
 }
 
+// createTestUser inserts a minimal user row so notes.owner_id (a real FK on PostgreSQL) can
+// reference it, and returns the generated ID.
+func (s *RepositoryTestSuite) createTestUser(ctx context.Context) uuid.UUID {
+	s.T().Helper()
+
+	id := uuid.New()
+	err := NewUserRepository(s.db).Create(ctx, &domain.User{
+		ID: id, Username: "owner-" + id.String(), TOTPSecret: "secret", PasswordHash: "hash",
+		CreatedAt: time.Now(),
+	})
+	s.Require().NoError(err)
+
+	return id
+}
+
+// TestCreate_WithOwnerID verifies OwnerID round-trips through Create/Get — see
+// notes.Manager.isOwner, which relies on this to bypass edit_code for the note's creator.
+func (s *RepositoryTestSuite) TestCreate_WithOwnerID() {
+	ctx := s.T().Context()
+	ownerID := s.createTestUser(ctx)
+
+	n := newNote("owned", "title", "content")
+	n.OwnerID = &ownerID
+	s.Require().NoError(s.repo.Create(ctx, n))
+
+	got, err := s.repo.Get(ctx, "owned")
+	s.Require().NoError(err)
+	s.Require().NotNil(got.OwnerID)
+	s.Equal(ownerID, *got.OwnerID)
+}
+
+// TestUpdate_PreservesOwnerID verifies Update never changes owner_id — ownership is fixed at
+// creation and excluded from Update's column list, mirroring edit_code.
+func (s *RepositoryTestSuite) TestUpdate_PreservesOwnerID() {
+	ctx := s.T().Context()
+	ownerID := s.createTestUser(ctx)
+	attackerID := s.createTestUser(ctx)
+
+	n := newNote("owned-update", "title", "content")
+	n.OwnerID = &ownerID
+	s.Require().NoError(s.repo.Create(ctx, n))
+
+	updated := newNote("owned-update", "new title", "new content")
+	updated.OwnerID = &attackerID
+	s.Require().NoError(s.repo.Update(ctx, "owned-update", updated))
+
+	got, err := s.repo.Get(ctx, "owned-update")
+	s.Require().NoError(err)
+	s.Require().NotNil(got.OwnerID)
+	s.Equal(ownerID, *got.OwnerID, "owner_id must be immutable via Update, even if a caller sets it")
+}
+
 // ── Get ──
 
 func (s *RepositoryTestSuite) TestGet_OK() {
@@ -140,6 +196,23 @@ func (s *RepositoryTestSuite) TestGet_NotFound() {
 	_, err := s.repo.Get(s.T().Context(), "nonexistent")
 
 	s.ErrorIs(err, domain.ErrNotFound)
+}
+
+func (s *RepositoryTestSuite) TestExists_True() {
+	ctx := s.T().Context()
+
+	s.Require().NoError(s.repo.Create(ctx, newNote("exists-1", "t", "c")))
+
+	exists, err := s.repo.Exists(ctx, "exists-1")
+	s.Require().NoError(err)
+	s.True(exists)
+}
+
+func (s *RepositoryTestSuite) TestExists_False() {
+	exists, err := s.repo.Exists(s.T().Context(), "missing")
+
+	s.Require().NoError(err)
+	s.False(exists)
 }
 
 // ── Update ──
@@ -219,20 +292,20 @@ func (s *RepositoryTestSuite) TestUpdate_NotFound() {
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
-// TestUpdate_Private_Nil_PreservesExistingValue verifies that passing Private=nil to Update
-// keeps the existing private value in the DB (via COALESCE(NULL, private)).
-func (s *RepositoryTestSuite) TestUpdate_Private_Nil_PreservesExistingValue() {
+// TestUpdate_Privacy_Nil_PreservesExistingValue verifies that passing Privacy=nil to Update
+// keeps the existing privacy value in the DB (via COALESCE(NULL, privacy)).
+func (s *RepositoryTestSuite) TestUpdate_Privacy_Nil_PreservesExistingValue() {
 	ctx := s.T().Context()
 
 	note := newNote("priv-nil-1", "t", "c")
-	note.Private = new(true)
+	note.Privacy = new(domain.PrivacyAuthenticated)
 	s.Require().NoError(s.repo.Create(ctx, note))
 
-	// Update with Private=nil — must not touch the private column.
+	// Update with Privacy=nil — must not touch the privacy column.
 	updated := &domain.Note{
 		Title:     "t2",
 		Content:   "c2",
-		Private:   nil,
+		Privacy:   nil,
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
@@ -240,22 +313,23 @@ func (s *RepositoryTestSuite) TestUpdate_Private_Nil_PreservesExistingValue() {
 
 	got, err := s.repo.Get(ctx, "priv-nil-1")
 	s.Require().NoError(err)
-	s.True(got.Private != nil && *got.Private, "private must be preserved when Update receives Private=nil")
+	s.Equal(domain.PrivacyAuthenticated, got.EffectivePrivacy(),
+		"privacy must be preserved when Update receives Privacy=nil")
 }
 
-// TestUpdate_Private_ExplicitFalse_ClearsPrivacy verifies that passing Private=&false
-// explicitly sets the column to false, even if the note was previously private.
-func (s *RepositoryTestSuite) TestUpdate_Private_ExplicitFalse_ClearsPrivacy() {
+// TestUpdate_Privacy_ExplicitPublic_ClearsPrivacy verifies that passing Privacy=&public
+// explicitly sets the column to public, even if the note was previously authenticated-only.
+func (s *RepositoryTestSuite) TestUpdate_Privacy_ExplicitPublic_ClearsPrivacy() {
 	ctx := s.T().Context()
 
 	note := newNote("priv-false-1", "t", "c")
-	note.Private = new(true)
+	note.Privacy = new(domain.PrivacyAuthenticated)
 	s.Require().NoError(s.repo.Create(ctx, note))
 
 	updated := &domain.Note{
 		Title:     "t2",
 		Content:   "c2",
-		Private:   new(false),
+		Privacy:   new(domain.PrivacyPublic),
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
@@ -263,7 +337,7 @@ func (s *RepositoryTestSuite) TestUpdate_Private_ExplicitFalse_ClearsPrivacy() {
 
 	got, err := s.repo.Get(ctx, "priv-false-1")
 	s.Require().NoError(err)
-	s.False(got.Private != nil && *got.Private, "private must be cleared when Update receives Private=&false")
+	s.Equal(domain.PrivacyPublic, got.EffectivePrivacy(), "privacy must be cleared when Update receives Privacy=&public")
 }
 
 // TestUpdate_ContentType_Nil_PreservesExistingValue verifies that passing ContentType=nil to Update

@@ -30,10 +30,10 @@
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
                 {{.ExpiresLabel}}
             </span>
-            {{if .Private}}
+            {{if ne .Privacy "public"}}
             <span class="meta-tag">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-                Private
+                {{if eq .Privacy "owner"}}Owner only{{else}}Requires login{{end}}
             </span>
             {{end}}
         </div>
@@ -110,7 +110,7 @@
 </div>
 
 {{if not .NeedsConfirmation}}
-<textarea id="raw-content" hidden>{{.RawContent}}</textarea>
+<textarea data-raw-content hidden>{{.RawContent}}</textarea>
 {{end}}
 
 <script nonce="{{.Nonce}}">
@@ -146,7 +146,7 @@
     })();
 
     (function () {
-        const raw = document.getElementById('raw-content').value;
+        const raw = document.querySelector('[data-raw-content]').value;
         const bytes = new TextEncoder().encode(raw).length;
         let label;
         if (bytes < 1024) {
@@ -167,7 +167,7 @@
     }
 
     document.getElementById('copyRawBtn').addEventListener('click', function () {
-        const raw = document.getElementById('raw-content').value;
+        const raw = document.querySelector('[data-raw-content]').value;
         if (navigator.clipboard) {
             navigator.clipboard.writeText(raw).then(() => flashCopied(this));
         } else {
@@ -216,6 +216,26 @@
         });
         pre.appendChild(btn);
     });
+
+    // Heading IDs and user-written ids live in the "user-content-" namespace (DOM-clobbering
+    // protection), so in-document links like [x](#my-heading) are resolved against that prefix.
+    (function () {
+        function jump(name, push) {
+            let id;
+            try { id = decodeURIComponent(name); } catch (e) { return false; }
+            const target = document.getElementById('user-content-' + id);
+            if (!target) return false;
+            target.scrollIntoView();
+            if (push) history.pushState(null, '', '#' + name);
+            return true;
+        }
+        document.querySelectorAll('.markdown-body a[href^="#"]').forEach(function (link) {
+            link.addEventListener('click', function (ev) {
+                if (jump(link.getAttribute('href').slice(1), true)) ev.preventDefault();
+            });
+        });
+        if (location.hash.length > 1) jump(location.hash.slice(1), false);
+    })();
     {{end}}
 </script>
 </body>

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Padmark — Paste created</title>
+    <title>Padmark — {{if .IsLink}}Link{{else}}Paste{{end}} created</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <link rel="stylesheet" href="/static/style.css?p={{styleVersion}}">
 </head>
@@ -18,7 +18,7 @@
                 <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
             </div>
             <div>
-                <div class="success-title">Paste created</div>
+                <div class="success-title">{{if .IsLink}}Link{{else}}Paste{{end}} created</div>
                 <div class="success-subtitle">just now · {{.ExpiresLabel}}</div>
             </div>
         </div>
@@ -50,14 +50,14 @@
 
             <div class="warning-block">
                 <span class="warning-icon">⚠</span>
-                <span class="warning-text">Save this code — you need it to edit or delete the paste. It cannot be recovered.</span>
+                <span class="warning-text">Save this code — you need it to edit or delete the {{if .IsLink}}link{{else}}paste{{end}}. It cannot be recovered.</span>
             </div>
 
             {{if .BurnAfterReading}}
             <div class="card-divider"></div>
             <div class="warning-block">
                 <span class="warning-icon">🔥</span>
-                <span class="warning-text">Burn after reading — this note will be permanently deleted once it is revealed.</span>
+                <span class="warning-text">{{if .IsLink}}Burn after click — this link will be permanently deleted after the first transition.{{else}}Burn after reading — this note will be permanently deleted once it is revealed.{{end}}</span>
             </div>
             {{end}}
         </div>
@@ -65,12 +65,13 @@
         <div class="actions-row">
             <a href="{{.URL}}" class="btn-primary">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-                Go to paste
+                {{if .IsLink}}Open link{{else}}Go to paste{{end}}
             </a>
-            <a href="/" class="btn-ghost">
+            <a href="{{if .IsLink}}/links{{else}}/{{end}}" class="btn-ghost">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                 Create another
             </a>
+            {{if .IsLink}}<a href="/links/{{.ID}}/edit" class="btn-ghost">Edit link</a>{{end}}
         </div>
     </div>
 
@@ -107,7 +108,7 @@
         });
 
         const id = new URLSearchParams(location.search).get('id');
-        const key = 'padmark_edit_' + id;
+        const key = ({{.IsLink}} ? 'padmark_link_edit_' : 'padmark_edit_') + id;
         const code = sessionStorage.getItem(key);
         if (code) {
             sessionStorage.removeItem(key);

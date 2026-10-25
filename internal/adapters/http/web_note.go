@@ -1,17 +1,20 @@
 package http
 
 import (
+	"context"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"log/slog"
 	"net/http"
-	"net/url"
 	"time"
 
-	_ "embed"
+	"github.com/google/uuid"
 
-	"github.com/bluele/gcache"
-
+	"github.com/partyzanex/padmark/internal/adapters/http/middleware"
+	"github.com/partyzanex/padmark/internal/adapters/http/ogenapi"
+	"github.com/partyzanex/padmark/internal/adapters/http/response"
 	"github.com/partyzanex/padmark/internal/domain"
 )
 
@@ -27,17 +30,22 @@ type NoteHandler struct {
 	noteTmpl    *template.Template
 	indexTmpl   *template.Template // shared with PageHandler.IndexPage; EditPage reuses the editor template.
 
-	// lockout tracks consecutive wrong-edit-code failures per note ID. It is shared with the
-	// ogen-served single-segment PUT/DELETE /notes/{id} routes (see registerOgenRoutes in
+	// lockout tracks consecutive wrong-edit-code failures per bucket — see failLockoutKey: an
+	// authenticated user's sessions and API tokens share one bucket per resource, and anonymous
+	// callers get one bucket per resource and client IP. It is shared with
+	// the ogen-served single-segment PUT/DELETE /notes/{id} routes (see registerOgenRoutes in
 	// router.go) so fail-lockout tracking is consistent for a note regardless of which route
 	// variant a client hits.
-	lockout gcache.Cache
+	lockout *middleware.FailLockoutCache
 }
 
 func newNoteHandler(c *common, manager NoteManager, noteTmpl, indexTmpl *template.Template) *NoteHandler {
 	return &NoteHandler{
 		common: c, manager: manager, noteTmpl: noteTmpl, indexTmpl: indexTmpl,
-		lockout: newFailLockoutCache(),
+		lockout: middleware.NewFailLockoutCache(),
+		// revealStore zero = nil — Handler.WithRevealStore attaches one at router build; nil-checks
+		// in the burn routes short-circuit so tests/CLI builds that skip the option still work.
+		revealStore: nil,
 	}
 }
 
@@ -48,8 +56,12 @@ func newNoteHandler(c *common, manager NoteManager, noteTmpl, indexTmpl *templat
 // limitation); these native {id...} handlers bridge update/delete for path-like slugs, so by
 // ServeMux specificity single-segment IDs keep going to ogen and multi-segment to these.
 func (h *NoteHandler) RegisterRoutes(mux *http.ServeMux) {
-	mux.Handle("PUT /notes/{id...}", withFailLockout(h.lockout, http.HandlerFunc(h.UpdateNoteByPath)))
-	mux.Handle("DELETE /notes/{id...}", withFailLockout(h.lockout, http.HandlerFunc(h.DeleteNoteByPath)))
+	locked := func(next http.HandlerFunc) http.Handler {
+		return middleware.RequireSameOrigin(h.log, middleware.WithFailLockout(h.lockout, h.trustedProxies, h.log, next))
+	}
+
+	mux.Handle("PUT /notes/{id...}", locked(h.UpdateNoteByPath))
+	mux.Handle("DELETE /notes/{id...}", locked(h.DeleteNoteByPath))
 	mux.HandleFunc("GET /notes/{id...}", h.GetNote)
 	mux.HandleFunc("POST /notes/{id...}", h.guard(h.HandleReveal))
 	mux.HandleFunc("GET /edit/{id...}", h.EditPage)
@@ -58,19 +70,19 @@ func (h *NoteHandler) RegisterRoutes(mux *http.ServeMux) {
 }
 
 type noteViewData struct {
-	Body              template.HTML
-	Title             string
+	ExpiresISO        string
+	CSRFToken         string
 	ID                string
 	CreatedAt         string
-	CreatedISO        string // RFC 3339 timestamp for JS client-side (browser-local) formatting
+	CreatedISO        string
 	ExpiresLabel      string
-	ExpiresISO        string // RFC 3339 timestamp for JS client-side formatting; empty when never expires
-	RawContent        string
+	Title             string
 	Nonce             string
+	Body              template.HTML
 	ConfirmToken      string
-	CSRFToken         string
+	RawContent        string
+	Privacy           string
 	Views             int
-	Private           bool
 	CanEdit           bool
 	NeedsConfirmation bool
 }
@@ -97,7 +109,14 @@ func toNoteViewData(note *domain.Note, rendered string) noteViewData {
 		Views:        note.Views,
 		ExpiresLabel: expires,
 		ExpiresISO:   expiresISO,
-		Private:      note.Private != nil && *note.Private,
+		Privacy:      string(note.EffectivePrivacy()),
+		// CSRFToken populated by the wrap middleware at render time; Nonce from the request scope.
+		// CanEdit/NeedsConfirmation false here (regular view path, not burn interstitial).
+		CSRFToken:         "",
+		Nonce:             "",
+		ConfirmToken:      "",
+		CanEdit:           false,
+		NeedsConfirmation: false,
 	}
 }
 
@@ -109,9 +128,11 @@ type noteJSON struct {
 	Title            string             `json:"title"`
 	Content          string             `json:"content"`
 	ContentType      domain.ContentType `json:"content_type"`
+	Privacy          domain.Privacy     `json:"privacy"`
 	Views            int                `json:"views"`
 	BurnAfterReading bool               `json:"burn_after_reading"`
-	Private          bool               `json:"private"`
+	// Private is the deprecated v0.1.6 flag, true when Privacy is not public.
+	Private bool `json:"private"`
 }
 
 func toNoteJSON(note *domain.Note) noteJSON {
@@ -125,7 +146,8 @@ func toNoteJSON(note *domain.Note) noteJSON {
 		ExpiresAt:        note.ExpiresAt,
 		Views:            note.Views,
 		BurnAfterReading: note.BurnAfterReading,
-		Private:          note.Private != nil && *note.Private,
+		Privacy:          note.EffectivePrivacy(),
+		Private:          privateFlag(note),
 	}
 }
 
@@ -139,6 +161,15 @@ func toBurnInterstitialViewData(note *domain.Note, tok string) noteViewData {
 		ExpiresLabel:      "Burns after reading",
 		NeedsConfirmation: true,
 		ConfirmToken:      tok,
+		Privacy:           string(domain.PrivacyPublic),
+		// CSRFToken/Nonce populated by the wrap middleware; Body/RawContent/ExpiresISO not used on the
+		// interstitial (confirmation page, not the read view). CanEdit false (no edit affordance).
+		CSRFToken:  "",
+		Nonce:      "",
+		Body:       "",
+		RawContent: "",
+		ExpiresISO: "",
+		CanEdit:    false,
 	}
 }
 
@@ -149,12 +180,8 @@ func (h *NoteHandler) GetNote(w http.ResponseWriter, r *http.Request) {
 	// Check auth for private notes before any side effects (view count, burn).
 	// When auth is configured, preloaded holds the already-fetched note so the
 	// subsequent View/GetRendered can skip a second SELECT.
-	preloaded, handled := h.handlePrivateAuth(w, r, id)
+	preloaded, handled := h.gateNoteRead(w, r, id)
 	if handled {
-		return
-	}
-
-	if h.handleBurnInterstitial(w, r, id, preloaded) {
 		return
 	}
 
@@ -181,7 +208,7 @@ func (h *NoteHandler) GetNote(w http.ResponseWriter, r *http.Request) {
 
 		_, err = fmt.Fprint(w, note.Content) // raw content is intentional for text/plain and text/markdown
 		if err != nil {
-			h.log.ErrorContext(r.Context(), "write plain content", "id", id, "err", err)
+			h.log.ErrorContext(r.Context(), "write plain content", "id", domain.HashSlug(id), "err", err)
 		}
 
 	default:
@@ -201,31 +228,24 @@ func (h *NoteHandler) GetNote(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// updateNoteByPathBody mirrors ogenapi.UpdateNoteRequest for the native multi-segment update
-// route. Pointer fields distinguish an omitted value from a zero one where the update semantics
-// depend on it (title, content_type, private). The remaining fields stay plain values because
-// omitted-vs-zero carries no extra meaning for them: Content always fully replaces the stored
-// body (there is no partial update), EditCode is a required credential where an empty string
-// already fails verification the same way a wrong code does, and BurnAfterReading is a plain
-// on/off toggle with no "leave as is" state.
-type updateNoteByPathBody struct {
-	Title            *string `json:"title"`
-	ContentType      *string `json:"content_type"`
-	TTL              *int64  `json:"ttl"`
-	Private          *bool   `json:"private"`
-	Content          string  `json:"content"`
-	EditCode         string  `json:"edit_code"`
-	BurnAfterReading bool    `json:"burn_after_reading"`
-}
-
 // UpdateNoteByPath handles PUT /notes/{id...} for notes whose slug spans multiple path segments
 // (e.g. project/GUIDE.md). Single-segment IDs keep going to the ogen route PUT /notes/{id}; this
 // native handler mirrors that contract — same JSON body, 200 + note JSON, same domain-error
 // mapping — for the multi-segment case the generated single-segment router cannot match.
 func (h *NoteHandler) UpdateNoteByPath(w http.ResponseWriter, r *http.Request) {
+	if !isJSONContentType(r.Header.Get("Content-Type")) {
+		response.WriteJSONErrorStatus(w, r, h.log, http.StatusUnsupportedMediaType, unsupportedMediaTypeMessage)
+
+		return
+	}
+
 	id := r.PathValue("id")
 
-	var body updateNoteByPathBody
+	if h.gateAnonymousMutation(w, r, id) {
+		return
+	}
+
+	var body ogenapi.UpdateNoteRequest
 
 	err := json.NewDecoder(r.Body).Decode(&body)
 	if err != nil {
@@ -234,31 +254,28 @@ func (h *NoteHandler) UpdateNoteByPath(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var burnTTL int64
-	if body.BurnAfterReading && body.TTL != nil && *body.TTL >= 0 {
-		burnTTL = *body.TTL
+	err = body.Validate()
+	if err != nil {
+		h.writeDecodeError(w, r, err)
+
+		return
 	}
 
-	var contentType *domain.ContentType
+	payload, err := noteUpdatePayload(&body)
+	if err != nil {
+		response.WriteJSONErrorStatus(w, r, h.log, http.StatusBadRequest, err.Error())
 
-	if body.ContentType != nil {
-		ct := domain.ContentType(*body.ContentType)
-		contentType = &ct
+		return
 	}
 
-	title := ""
-	if body.Title != nil {
-		title = *body.Title
+	err = requirePrivacySupport(h.authMgr != nil, optUpdatePrivacyPtr(body.Privacy))
+	if err != nil {
+		h.writeError(w, r, err)
+
+		return
 	}
 
-	note, err := h.manager.Update(r.Context(), id, body.EditCode, &domain.Note{
-		Title:            title,
-		Content:          body.Content,
-		ContentType:      contentType,
-		BurnTTL:          burnTTL,
-		BurnAfterReading: body.BurnAfterReading,
-		Private:          body.Private,
-	})
+	note, err := h.manager.Update(r.Context(), id, body.EditCode.Or(""), middleware.CallerIDFromCtx(r.Context()), payload)
 	if err != nil {
 		h.writeError(w, r, err)
 
@@ -269,28 +286,23 @@ func (h *NoteHandler) UpdateNoteByPath(w http.ResponseWriter, r *http.Request) {
 
 	encErr := json.NewEncoder(w).Encode(toNoteJSON(note))
 	if encErr != nil {
-		h.log.ErrorContext(r.Context(), "encode update response", "id", id, "err", encErr)
+		h.log.ErrorContext(r.Context(), "encode update response", "id", domain.HashSlug(id), "err", encErr)
 	}
 }
 
 // DeleteNoteByPath handles DELETE /notes/{id...} for path-like slugs, mirroring the ogen
-// DELETE /notes/{id} contract: the edit code comes from the X-Edit-Code header or the edit_code
-// query parameter, and a successful delete returns 204 No Content.
+// DELETE /notes/{id} contract: the edit code comes from the X-Edit-Code header, or from the
+// deprecated edit_code query parameter (see deleteEditCode), and a successful delete returns 204.
 func (h *NoteHandler) DeleteNoteByPath(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	// The query-param fallback mirrors the documented ogen DELETE /notes/{id} contract (see
-	// openapi.yaml); dropping it here only would break parity between the two routes. Our own
-	// access logging never records the query string (withLogging in router.go logs r.URL.Path
-	// only, and only at debug level), so the residual leak surface — reverse-proxy/CDN logs,
-	// Referer on same-origin follow-up requests — is inherent to any query-param secret and
-	// outside this handler's control.
-	editCode := r.Header.Get("X-Edit-Code")
-	if editCode == "" {
-		editCode = r.URL.Query().Get("edit_code")
+	if h.gateAnonymousMutation(w, r, id) {
+		return
 	}
 
-	err := h.manager.Delete(r.Context(), id, editCode)
+	editCode := deleteEditCode(r.Context(), h.log, id, r.Header.Get("X-Edit-Code"), r.URL.Query().Get("edit_code"))
+
+	err := h.manager.Delete(r.Context(), id, editCode, middleware.CallerIDFromCtx(r.Context()))
 	if err != nil {
 		h.writeError(w, r, err)
 
@@ -298,6 +310,21 @@ func (h *NoteHandler) DeleteNoteByPath(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// deleteEditCode returns the X-Edit-Code header value or, when the header is absent, the
+// deprecated edit_code query value that v0.1.6 clients send (openapi.yaml, deleteNote). The query
+// form stays for backward compatibility although proxy/CDN logs and Referer can record it; each
+// use logs a warning with the hashed note ID only, never the code.
+func deleteEditCode(ctx context.Context, log *slog.Logger, id, header, query string) string {
+	if header != "" || query == "" {
+		return header
+	}
+
+	log.WarnContext(ctx, "deprecated edit_code query parameter used; send the X-Edit-Code header instead",
+		"id", domain.HashSlug(id))
+
+	return query
 }
 
 // HandleReveal handles POST /{id} for burn-after-reading confirmation.
@@ -340,14 +367,44 @@ func (h *NoteHandler) HandleReveal(w http.ResponseWriter, r *http.Request) {
 	h.renderNoteHTML(w, r, id, preloaded)
 }
 
-// handlePrivateAuth checks whether a note is private and the caller is authenticated.
+// gateAnonymousMutation enforces the note's read-level privacy for anonymous write callers
+// (PUT/DELETE): someone who could not read the note may not mutate it via edit code either —
+// the mutation counterpart of handlePrivateAuth, applied by UpdateNoteByPath and
+// DeleteNoteByPath. Authenticated callers always proceed; their ownership still decides inside
+// the usecase (OwnedBy / ValidateOwnership). A failed Peek defers to the real mutation so the
+// caller sees the same error (404) a read would produce. Reports whether the response has been
+// written (gate refused the request).
+func (h *NoteHandler) gateAnonymousMutation(w http.ResponseWriter, r *http.Request, id string) bool {
+	if h.authMgr == nil {
+		return false
+	}
+
+	if middleware.CallerIDFromCtx(r.Context()) != uuid.Nil || h.isAuthenticated(r) {
+		return false
+	}
+
+	note, err := h.manager.Peek(r.Context(), id)
+	if err != nil {
+		return false
+	}
+
+	if note.VisibleTo(uuid.Nil, false) {
+		return false
+	}
+
+	middleware.WriteUnauthorized(w)
+
+	return true
+}
+
+// handlePrivateAuth checks the note's privacy level against the caller (see Note.VisibleTo).
 // Returns the preloaded note (when auth is configured) and false when the request may proceed.
 // Returns nil and true when the response has been written (auth failed or note not found).
+// A denial is handed to common.denyPrivate, shared with the link gate, which decides between the
+// login redirect and 403 by whether the caller is already signed in.
 func (h *NoteHandler) handlePrivateAuth(w http.ResponseWriter, r *http.Request, id string) (*domain.Note, bool) {
 	// When there is no auth at all, every request is implicitly authorised.
-	// In TOTP-only mode (authMgr set, allowedTokens nil) we must still check
-	// the session before deciding to serve a private note.
-	if h.allowedTokens == nil && h.authMgr == nil {
+	if h.authMgr == nil {
 		return nil, false
 	}
 
@@ -358,18 +415,11 @@ func (h *NoteHandler) handlePrivateAuth(w http.ResponseWriter, r *http.Request, 
 		return nil, true
 	}
 
-	if (note.Private == nil || !*note.Private) || h.isAuthenticated(r) {
+	if note.VisibleTo(middleware.CallerIDFromCtx(r.Context()), h.isAuthenticated(r)) {
 		return note, false
 	}
 
-	if negotiate(r) == formatHTML {
-		loginURL := "/login?next=" + url.QueryEscape(r.URL.RequestURI())
-		http.Redirect(w, r, loginURL, http.StatusSeeOther)
-
-		return nil, true
-	}
-
-	http.Error(w, "unauthorized", http.StatusUnauthorized)
+	h.denyPrivate(w, r)
 
 	return nil, true
 }
@@ -396,16 +446,84 @@ func (h *NoteHandler) renderNoteHTML(w http.ResponseWriter, r *http.Request, id 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
 	data := toNoteViewData(note, rendered)
-	data.Nonce = nonceFromContext(r.Context())
-	// isAuthenticated already returns true when neither allowedTokens nor authMgr
-	// is configured, so the old "allowedTokens == nil" short-circuit is redundant
-	// and harmful: it made CanEdit always true in TOTP-only deployments.
-	data.CanEdit = h.isAuthenticated(r)
+	data.Nonce = middleware.NonceFromContext(r.Context())
+	// Also gated on VisibleTo: without it, a privacy=owner note would show the Edit link (and
+	// let EditPage render its plaintext, see EditPage's doc comment) to any authenticated
+	// caller, not just its owner.
+	authenticated := h.isAuthenticated(r)
+	data.CanEdit = authenticated && note.VisibleTo(middleware.CallerIDFromCtx(r.Context()), authenticated)
 
 	err = h.noteTmpl.Execute(w, data)
 	if err != nil {
-		h.log.ErrorContext(r.Context(), "render note template", "id", id, "err", err)
+		h.log.ErrorContext(r.Context(), "render note template", "id", domain.HashSlug(id), "err", err)
 	}
+}
+
+// gateNoteRead runs every check that may answer a note read before the read policy applies, in
+// order: privacy, the implicit-read refusal for burn notes, and the HTML burn interstitial. It
+// returns the note already loaded on the way (nil if none was needed) and whether the response
+// has been written.
+func (h *NoteHandler) gateNoteRead(w http.ResponseWriter, r *http.Request, id string) (*domain.Note, bool) {
+	preloaded, handled := h.handlePrivateAuth(w, r, id)
+	if handled {
+		return nil, true
+	}
+
+	preloaded, handled = h.refuseImplicitBurnRead(w, r, id, preloaded)
+	if handled {
+		return nil, true
+	}
+
+	if h.handleBurnInterstitial(w, r, id, preloaded) {
+		return nil, true
+	}
+
+	return preloaded, false
+}
+
+// burnReadNotExplicitCode is the stable `code` of the 409 refusing an implicit burn read.
+const burnReadNotExplicitCode = "burn_read_not_explicit"
+
+// refuseImplicitBurnRead keeps reads without explicit intent (see explicitRead) from burning a
+// note: a burn-after-reading note — immediate or with a grace-period timer not yet started — is
+// answered 409 and stays intact. Otherwise it returns the note it had to load as the preloaded
+// snapshot, so the caller applies the read policy to exactly the note that was checked, with
+// no second SELECT. Explicit reads and v0.1.6 API reads (see legacyAPIRead) pass through untouched.
+func (h *NoteHandler) refuseImplicitBurnRead(
+	w http.ResponseWriter, r *http.Request, id string, preloaded *domain.Note,
+) (*domain.Note, bool) {
+	if explicitRead(r) || legacyAPIRead(r) {
+		return preloaded, false
+	}
+
+	note := preloaded
+	if note == nil {
+		var err error
+
+		note, err = h.manager.Peek(r.Context(), id)
+		if err != nil {
+			h.writeError(w, r, err)
+
+			return nil, true
+		}
+	}
+
+	if !note.BurnAfterReading {
+		return note, false
+	}
+
+	writeBurnReadNotExplicit(w, r, h.log)
+
+	return nil, true
+}
+
+// writeBurnReadNotExplicit answers an access to a burn resource (burn-after-reading note,
+// burn_after_click link) that lacked deliberate intent: 409 with a stable code; nothing burned.
+func writeBurnReadNotExplicit(w http.ResponseWriter, r *http.Request, log *slog.Logger) {
+	response.WriteJSONErrorCode(w, r, log, http.StatusConflict,
+		"burn resource: accessing it destroys it, so the request must be a deliberate one — a browser "+
+			"navigation, or an Accept naming application/json, text/markdown, text/plain or text/html",
+		burnReadNotExplicitCode)
 }
 
 // handleBurnInterstitial renders the burn confirmation state via noteTmpl for browser
@@ -446,12 +564,12 @@ func (h *NoteHandler) handleBurnInterstitial(
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
 	data := toBurnInterstitialViewData(note, tok)
-	data.Nonce = nonceFromContext(r.Context())
-	data.CSRFToken = csrfFromContext(r.Context())
+	data.Nonce = middleware.NonceFromContext(r.Context())
+	data.CSRFToken = middleware.CSRFFromContext(r.Context())
 
 	execErr := h.noteTmpl.Execute(w, data)
 	if execErr != nil {
-		h.log.ErrorContext(r.Context(), "render burn interstitial", "id", id, "err", execErr)
+		h.log.ErrorContext(r.Context(), "render burn interstitial", "id", domain.HashSlug(id), "err", execErr)
 	}
 
 	return true

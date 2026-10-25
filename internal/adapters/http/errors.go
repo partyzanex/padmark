@@ -5,13 +5,9 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/partyzanex/padmark/internal/adapters/http/response"
 	"github.com/partyzanex/padmark/internal/domain"
 )
-
-// errorJSON is the API error body matching the OpenAPI ErrorResponse schema ({"message": ...}).
-type errorJSON struct {
-	Message string `json:"message"`
-}
 
 // domainErrStatus maps a domain error to its canonical HTTP status code and the matched
 // sentinel's short client-facing message — "" when err doesn't match anything known (message,
@@ -21,30 +17,51 @@ type errorJSON struct {
 // This is the single source of truth for "what status does this error deserve": errorStatusMessage
 // (JSON API errors), domainErrToPageData (HTML error page), and the ogen response mappers
 // (ogen_errors.go) all derive their status from this table instead of each repeating the same
-// errors.Is chain.
+// errors.Is chain. A slice (checked in order) rather than a switch keeps this a flat,
+// O(1)-complexity lookup as entries are added — none of these sentinels wrap one another, so
+// match order never affects the result.
 func domainErrStatus(err error) (status int, message string) {
-	switch {
-	case errors.Is(err, domain.ErrNotFound):
-		return http.StatusNotFound, domain.ErrNotFound.Error()
-	case errors.Is(err, domain.ErrExpired):
-		return http.StatusGone, domain.ErrExpired.Error()
-	case errors.Is(err, domain.ErrTitleTooLong):
-		return http.StatusUnprocessableEntity, domain.ErrTitleTooLong.Error()
-	case errors.Is(err, domain.ErrInvalidContentType):
-		return http.StatusUnprocessableEntity, domain.ErrInvalidContentType.Error()
-	case errors.Is(err, domain.ErrInvalidSlug):
-		return http.StatusUnprocessableEntity, domain.ErrInvalidSlug.Error()
-	case errors.Is(err, domain.ErrCustomSlugDisabled):
-		return http.StatusUnprocessableEntity, domain.ErrCustomSlugDisabled.Error()
-	case errors.Is(err, domain.ErrSlugConflict):
-		return http.StatusConflict, domain.ErrSlugConflict.Error()
-	case errors.Is(err, domain.ErrInvalidEditCode):
-		return http.StatusForbidden, domain.ErrInvalidEditCode.Error()
-	case errors.Is(err, domain.ErrForbidden):
-		return http.StatusForbidden, domain.ErrForbidden.Error()
-	default:
-		return http.StatusInternalServerError, ""
+	entries := []struct {
+		err    error
+		status int
+	}{
+		{domain.ErrNotFound, http.StatusNotFound},
+		{domain.ErrExpired, http.StatusGone},
+		{domain.ErrTitleTooLong, http.StatusUnprocessableEntity},
+		{domain.ErrContentTooLarge, http.StatusUnprocessableEntity},
+		{domain.ErrInvalidContentType, http.StatusUnprocessableEntity},
+		{domain.ErrInvalidPrivacy, http.StatusUnprocessableEntity},
+		{domain.ErrOwnerPrivacyRequiresOwner, http.StatusUnprocessableEntity},
+		{domain.ErrInvalidSlug, http.StatusUnprocessableEntity},
+		{domain.ErrCustomSlugDisabled, http.StatusUnprocessableEntity},
+		{domain.ErrPrivacyNeedsAccounts, http.StatusUnprocessableEntity},
+		// Usually caught earlier by the schema's minLength/maxLength (ogen answers 400); what
+		// reaches the usecase (surrounding whitespace, control characters) is a 422 like the
+		// other create-time validation errors above.
+		{domain.ErrEditCodeTooShort, http.StatusUnprocessableEntity},
+		{domain.ErrEditCodeMalformed, http.StatusUnprocessableEntity},
+		{domain.ErrSlugConflict, http.StatusConflict},
+		{domain.ErrBurnIntentRequired, http.StatusConflict},
+		{domain.ErrStepUpRequired, http.StatusForbidden},
+		{domain.ErrStepUpFailed, http.StatusForbidden},
+		{domain.ErrInvalidAPITokenTTL, http.StatusUnprocessableEntity},
+		{domain.ErrInvalidEditCode, http.StatusForbidden},
+		{domain.ErrForbidden, http.StatusForbidden},
+		// javascript:/data:/file:/etc. target URLs are a malformed request, not an
+		// otherwise-valid-but-unprocessable one — matches the acceptance criteria's literal 400
+		// (see TODO.md's Bug-class checklist, old C4), unlike the 422s above.
+		{domain.ErrInvalidURL, http.StatusBadRequest},
+		{domain.ErrAPITokenLimit, http.StatusTooManyRequests},
+		{domain.ErrFeatureNotSupported, http.StatusServiceUnavailable},
 	}
+
+	for _, entry := range entries {
+		if errors.Is(err, entry.err) {
+			return entry.status, entry.err.Error()
+		}
+	}
+
+	return http.StatusInternalServerError, ""
 }
 
 // errorStatusMessage maps a domain error to the HTTP status and the client-facing message used in
@@ -64,17 +81,19 @@ func errorStatusMessage(err error) (status int, message string) {
 // Stays a single small method rather than shared middleware since it has one caller today
 // (UpdateNoteByPath); future native handlers with a JSON body should call this method directly.
 func (h *common) writeDecodeError(w http.ResponseWriter, r *http.Request, err error) {
-	status, msg := http.StatusBadRequest, "invalid request body"
+	status, msg := http.StatusBadRequest, decodeErrorMessage
 
-	var maxErr *http.MaxBytesError
-	if errors.As(err, &maxErr) {
+	// Consume the typed result (not the ok flag) so errcheck sees the error-typed return used.
+	// Plain assignment (not an if-init) keeps noinlineerr happy.
+	maxBytes, _ := errors.AsType[*http.MaxBytesError](err)
+	if maxBytes != nil {
 		status, msg = http.StatusRequestEntityTooLarge, maxBodyErrorMessage
 	}
 
 	w.Header().Set("Content-Type", mimeJSON)
 	w.WriteHeader(status)
 
-	encErr := json.NewEncoder(w).Encode(errorJSON{Message: msg})
+	encErr := json.NewEncoder(w).Encode(response.ErrorJSON{Message: msg, Code: ""})
 	if encErr != nil {
 		h.log.ErrorContext(r.Context(), "write decode error response", "err", encErr)
 	}
@@ -90,8 +109,12 @@ func (h *common) writeError(w http.ResponseWriter, r *http.Request, err error) {
 	w.Header().Set("Content-Type", mimeJSON)
 	w.WriteHeader(status)
 
-	encErr := json.NewEncoder(w).Encode(errorJSON{Message: msg})
+	encErr := json.NewEncoder(w).Encode(response.ErrorJSON{Message: msg, Code: ""})
 	if encErr != nil {
 		h.log.ErrorContext(r.Context(), "write error response", "err", encErr)
 	}
 }
+
+var (
+	errRequestOriginUnavailable = errors.New("request origin unavailable")
+)

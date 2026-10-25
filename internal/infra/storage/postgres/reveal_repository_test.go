@@ -1,7 +1,10 @@
+//go:build integration
+
 package postgres
 
 import (
 	"database/sql"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -11,6 +14,8 @@ import (
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
 	"github.com/uptrace/bun/driver/pgdriver"
+
+	"github.com/partyzanex/padmark/internal/domain"
 )
 
 type RevealRepositoryTestSuite struct {
@@ -44,7 +49,7 @@ func (s *RevealRepositoryTestSuite) SetupSuite() {
 	_, migrateErr := Migrate(ctx, s.db)
 	s.Require().NoError(migrateErr)
 
-	s.repo = NewRevealRepository(s.db)
+	s.repo = NewRevealRepository(s.db, slog.Default())
 }
 
 func (s *RevealRepositoryTestSuite) TearDownSuite() {
@@ -86,7 +91,7 @@ func (s *RevealRepositoryTestSuite) TestIssue_StoredInDB() {
 
 	var row revealTokenRow
 
-	err = s.db.NewSelect().Model(&row).Where("token = ?", tok).Scan(ctx)
+	err = s.db.NewSelect().Model(&row).Where("token_hash = ?", domain.HashRevealToken(tok)).Scan(ctx)
 	s.Require().NoError(err)
 	s.Equal("note-abc", row.NoteID)
 	s.Nil(row.UsedAt)
@@ -98,7 +103,7 @@ func (s *RevealRepositoryTestSuite) TestIssue_SweepsExpiredTokens() {
 
 	// Insert a stale token directly.
 	stale := &revealTokenRow{
-		Token:     "stale-token",
+		TokenHash: "stale-token",
 		NoteID:    "note-stale",
 		ExpiresAt: time.Now().Add(-time.Hour),
 	}
@@ -114,10 +119,40 @@ func (s *RevealRepositoryTestSuite) TestIssue_SweepsExpiredTokens() {
 	err = s.db.NewSelect().
 		TableExpr("reveal_tokens").
 		ColumnExpr("count(*)").
-		Where("token = ?", "stale-token").
+		Where("token_hash = ?", "stale-token").
 		Scan(ctx, &count)
 	s.Require().NoError(err)
 	s.Zero(count, "expired token must be swept")
+}
+
+// TestIssue_RawTokenNotStored pins that only the SHA-256 digest of the bearer is persisted: a
+// database leak must not yield redeemable reveal tokens.
+func (s *RevealRepositoryTestSuite) TestIssue_RawTokenNotStored() {
+	ctx := s.T().Context()
+
+	tok, err := s.repo.Issue(ctx, "note-hash")
+	s.Require().NoError(err)
+
+	var hashes []string
+
+	err = s.db.NewSelect().TableExpr("reveal_tokens").Column("token_hash").Scan(ctx, &hashes)
+	s.Require().NoError(err)
+	s.Require().Len(hashes, 1)
+	s.NotEqual(tok, hashes[0], "the raw token must not be stored")
+	s.Equal(domain.HashRevealToken(tok), hashes[0])
+}
+
+// TestConsume_StoredHashIsNotABearer verifies that presenting the stored digest itself does not
+// redeem the token, while the raw value still does.
+func (s *RevealRepositoryTestSuite) TestConsume_StoredHashIsNotABearer() {
+	ctx := s.T().Context()
+
+	tok, err := s.repo.Issue(ctx, "note-leak")
+	s.Require().NoError(err)
+
+	s.False(s.repo.Consume(ctx, domain.HashRevealToken(tok), "note-leak"),
+		"a leaked digest must not be accepted as the bearer")
+	s.True(s.repo.Consume(ctx, tok, "note-leak"), "the raw token must still redeem")
 }
 
 // ── Consume ──
@@ -144,7 +179,7 @@ func (s *RevealRepositoryTestSuite) TestConsume_MarksUsedAt() {
 
 	var row revealTokenRow
 
-	err = s.db.NewSelect().Model(&row).Where("token = ?", tok).Scan(ctx)
+	err = s.db.NewSelect().Model(&row).Where("token_hash = ?", domain.HashRevealToken(tok)).Scan(ctx)
 	s.Require().NoError(err)
 	s.NotNil(row.UsedAt, "used_at must be set after Consume")
 }
@@ -172,7 +207,7 @@ func (s *RevealRepositoryTestSuite) TestConsume_ExpiredToken() {
 	ctx := s.T().Context()
 
 	expired := &revealTokenRow{
-		Token:     "expired-token",
+		TokenHash: domain.HashRevealToken("expired-token"),
 		NoteID:    "note-exp",
 		ExpiresAt: time.Now().Add(-time.Minute),
 	}
@@ -190,7 +225,7 @@ func (s *RevealRepositoryTestSuite) TestConsume_ExactExpiryBoundary_Rejected() {
 	ctx := s.T().Context()
 
 	boundary := &revealTokenRow{
-		Token:     "boundary-token",
+		TokenHash: domain.HashRevealToken("boundary-token"),
 		NoteID:    "note-boundary",
 		ExpiresAt: time.Now(),
 	}

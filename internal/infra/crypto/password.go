@@ -2,53 +2,94 @@ package crypto
 
 import (
 	"crypto/rand"
-	"crypto/sha256"
-	"encoding/hex"
+	"encoding/base64"
+	"errors"
 	"fmt"
-	"io"
-
-	"golang.org/x/crypto/hkdf"
+	"log/slog"
 )
 
 const (
-	pwKeyLen   uint32 = 32
-	pwKDFLen          = 16
-	pwHKDFInfo        = "padmark-user-key-v1"
+	pwKeyLen uint32 = 32
+	pwKDFLen int    = 16
 )
 
 // PasswordHasher hashes and verifies user passwords using argon2id with configurable cost.
 type PasswordHasher struct {
-	params Argon2Params
+	log *slog.Logger
+	// params is the cost Hash writes; ceiling (derived from it) is the most a stored hash may
+	// demand before Verify refuses to run the derivation.
+	params  Argon2Params
+	ceiling Argon2Params
 }
 
 // NewPasswordHasher returns a PasswordHasher using the given argon2 cost parameters.
 // Zero-valued fields fall back to DefaultArgon2Params.
 func NewPasswordHasher(params Argon2Params) *PasswordHasher {
-	return &PasswordHasher{params: params.withDefaults()}
+	return &PasswordHasher{
+		log:     slog.New(slog.DiscardHandler),
+		params:  params.withDefaults(),
+		ceiling: params.acceptedCeiling(),
+	}
+}
+
+// WithLogger sets the logger that records stored hashes refused for an excessive cost (WARN).
+// The default discards them.
+func (h *PasswordHasher) WithLogger(log *slog.Logger) *PasswordHasher {
+	h.log = log
+
+	return h
 }
 
 // Hash derives an argon2id hash from password (cost parameters embedded in the result).
 func (h *PasswordHasher) Hash(password string) (string, error) {
-	return hashArgon2(password, h.params)
+	operationResult, operationErr := hashArgon2(password, h.params)
+	if operationErr != nil {
+		return operationResult, fmt.Errorf("hash argon2: %w", operationErr)
+	}
+
+	return operationResult, nil
 }
 
 // Verify reports whether password matches storedHash, reading params from the stored hash.
+// Fail-closed: a hash whose cost exceeds the accepted ceiling never verifies and is logged.
 func (h *PasswordHasher) Verify(storedHash, password string) bool {
-	return verifyArgon2(storedHash, password)
+	return verifyLogged(h.log, "password", storedHash, password, h.ceiling)
+}
+
+// verifyLogged runs verifyArgon2 and logs a refused cost at WARN, naming what was being checked
+// but never the stored hash itself.
+func verifyLogged(log *slog.Logger, what, storedHash, secret string, ceiling Argon2Params) bool {
+	matched, err := verifyArgon2(storedHash, secret, ceiling)
+	if errors.Is(err, ErrArgon2CostTooHigh) {
+		log.Warn("refusing stored argon2 hash above the accepted cost ceiling",
+			"kind", what, "ceiling_memory_kib", ceiling.Memory, "ceiling_time", ceiling.Time,
+			"ceiling_threads", ceiling.Threads)
+	}
+
+	return matched
 }
 
 // HashPassword hashes a password with the default argon2 cost. Convenience helper for
 // callers that don't tune cost (e.g. tests); production wiring injects a PasswordHasher.
 func HashPassword(password string) (string, error) {
-	return hashArgon2(password, DefaultArgon2Params())
+	operationResult, operationErr := hashArgon2(password, DefaultArgon2Params())
+	if operationErr != nil {
+		return operationResult, fmt.Errorf("hash argon2: %w", operationErr)
+	}
+
+	return operationResult, nil
 }
 
 // VerifyPassword reports whether password matches storedHash (reads embedded params).
 func VerifyPassword(storedHash, password string) bool {
-	return verifyArgon2(storedHash, password)
+	// A cost above the ceiling is just a non-match for this config-less helper.
+	ceiling := DefaultArgon2Params().acceptedCeiling()
+	matched, _ := verifyArgon2(storedHash, password, ceiling) //nolint:errcheck // cost-too-high is a non-match here
+
+	return matched
 }
 
-// GenerateKDFSalt returns 16 random bytes to use as HKDF salt for user key derivation.
+// GenerateKDFSalt returns 16 random bytes to use as the argon2 salt for user key derivation.
 func GenerateKDFSalt() ([]byte, error) {
 	salt := make([]byte, pwKDFLen)
 
@@ -60,17 +101,25 @@ func GenerateKDFSalt() ([]byte, error) {
 	return salt, nil
 }
 
-// DeriveUserKey derives a 32-byte hex-encoded key from password and kdfSalt via HKDF-SHA256.
-// Use this as the AES encryption key for the user's TOTP secret.
-func DeriveUserKey(password, kdfSalt []byte) (string, error) {
-	reader := hkdf.New(sha256.New, password, kdfSalt, []byte(pwHKDFInfo))
+// DeriveUserKey derives a 32-byte base64url-encoded key from password and kdfSalt via
+// argon2id at the given cost. The result is the AES-GCM key used to wrap a user's TOTP
+// secret. Cost params must match the PasswordHasher config: a stolen DB then forces the
+// attacker through the same memory-hard work as the password column, instead of a
+// single-pass SHA-256 (HKDF) that would yield SHA-256 brute-force speeds.
+//
+// Use GenerateKDFSalt to produce a fresh salt; do not reuse salts across users.
+func DeriveUserKey(password, kdfSalt []byte, params Argon2Params) (string, error) {
+	params = params.withDefaults()
 
-	key := make([]byte, pwKeyLen)
-
-	_, err := io.ReadFull(reader, key)
+	err := params.Validate()
 	if err != nil {
-		return "", fmt.Errorf("hkdf: %w", err)
+		return "", fmt.Errorf("validate: %w", err)
 	}
 
-	return hex.EncodeToString(key), nil
+	key, err := deriveArgon2Key(password, kdfSalt, params, pwKeyLen)
+	if err != nil {
+		return "", fmt.Errorf("derive argon2 key: %w", err)
+	}
+
+	return base64.RawURLEncoding.EncodeToString(key), nil
 }

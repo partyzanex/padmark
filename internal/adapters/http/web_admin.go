@@ -1,14 +1,18 @@
 package http
 
 import (
+	_ "embed"
 	"errors"
 	"fmt"
 	"html/template"
 	"net/http"
 	"net/url"
+	"strconv"
+	"strings"
 
-	_ "embed"
+	"github.com/google/uuid"
 
+	"github.com/partyzanex/padmark/internal/adapters/http/middleware"
 	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/usecases/auth"
 )
@@ -40,12 +44,21 @@ func (h *AdminHandler) RegisterRoutes(mux *http.ServeMux) {
 
 // requireAdmin wraps next so it only runs for a request whose context user (resolved by the auth
 // middleware, see middleware_auth.go) is a signed-in admin; anonymous or non-admin requests get
-// 403. Every admin route uses this instead of repeating the same userFromContext/IsAdmin check.
+// 403. Every admin route uses this instead of repeating the same UserFromContext/IsAdmin check.
 func requireAdmin(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		usr := userFromContext(r)
+		usr := middleware.UserFromContext(r)
 		if usr == nil || !usr.IsAdmin {
 			http.Error(w, "forbidden", http.StatusForbidden)
+
+			return
+		}
+
+		// The admin panel is a browser UI: a bearer API token must not reach it. Its forms mint
+		// keys and invites and revoke users, and a CSRF token is available to anyone, so a leaked
+		// key would otherwise bypass the step-up the JSON issuance endpoints demand.
+		if middleware.APITokenHashFromCtx(r.Context()) != "" {
+			http.Error(w, "the admin panel requires a browser session", http.StatusForbidden)
 
 			return
 		}
@@ -71,7 +84,7 @@ type adminViewData struct {
 // AdminPage handles GET /admin — lists users and API tokens for admin. requireAdmin (RegisterRoutes)
 // already guarantees the context user is a signed-in admin.
 func (h *AdminHandler) AdminPage(w http.ResponseWriter, r *http.Request) {
-	usr := userFromContext(r)
+	usr := middleware.UserFromContext(r)
 
 	data, err := h.adminData(r, usr.ID)
 	if err != nil {
@@ -92,7 +105,7 @@ func (h *AdminHandler) AdminPage(w http.ResponseWriter, r *http.Request) {
 // AdminInviteHandler handles POST /admin/invite — generates a single-use invite link.
 // requireAdmin (RegisterRoutes) already guarantees the context user is a signed-in admin.
 func (h *AdminHandler) AdminInviteHandler(w http.ResponseWriter, r *http.Request) {
-	usr := userFromContext(r)
+	usr := middleware.UserFromContext(r)
 
 	data, err := h.adminData(r, usr.ID)
 	if err != nil {
@@ -102,7 +115,8 @@ func (h *AdminHandler) AdminInviteHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	token, genErr := h.authMgr.GenerateInvite(r.Context(), usr.ID)
+	// requireAdmin admits only browser sessions, which issue without a step-up.
+	token, genErr := h.authMgr.GenerateInvite(r.Context(), usr.ID, auth.SessionIssuer())
 	if genErr != nil {
 		data.InviteError = "Failed to generate invite link."
 	} else {
@@ -122,11 +136,13 @@ func (h *AdminHandler) AdminInviteHandler(w http.ResponseWriter, r *http.Request
 // AdminRevokeHandler handles POST /admin/users/{id}/revoke — removes a user.
 // requireAdmin (RegisterRoutes) already guarantees the context user is a signed-in admin.
 func (h *AdminHandler) AdminRevokeHandler(w http.ResponseWriter, r *http.Request) {
-	usr := userFromContext(r)
+	usr := middleware.UserFromContext(r)
 
-	targetID := r.PathValue("id")
-	if targetID == "" {
-		http.Error(w, "bad request", http.StatusBadRequest)
+	targetID, parseErr := uuid.Parse(r.PathValue("id"))
+	if parseErr != nil {
+		// A malformed ID could never have matched a real user anyway — same outcome as a failed
+		// RevokeUser call below, just caught one step earlier.
+		http.Redirect(w, r, "/admin?revoke_error="+url.QueryEscape("Failed to revoke user."), http.StatusSeeOther)
 
 		return
 	}
@@ -155,9 +171,23 @@ func (h *AdminHandler) AdminRevokeHandler(w http.ResponseWriter, r *http.Request
 // logged nor placed in a URL: it lives only in the rendered page.
 // requireAdmin (RegisterRoutes) already guarantees the context user is a signed-in admin.
 func (h *AdminHandler) AdminCreateKeyHandler(w http.ResponseWriter, r *http.Request) {
-	usr := userFromContext(r)
+	usr := middleware.UserFromContext(r)
 
-	plain, createErr := h.authMgr.CreateAPIToken(r.Context(), usr.ID)
+	// requireAdmin admits only browser sessions, which issue without a step-up. An empty lifetime
+	// means 0 (never expires); an unparsable or out-of-range one is refused by the usecase
+	// (ErrInvalidAPITokenTTL).
+	ttlDays := 0
+
+	if raw := strings.TrimSpace(r.FormValue("ttl_days")); raw != "" {
+		parsed, ttlErr := strconv.Atoi(raw)
+		if ttlErr != nil {
+			parsed = -1
+		}
+
+		ttlDays = parsed
+	}
+
+	plain, createErr := h.authMgr.CreateAPIToken(r.Context(), usr.ID, auth.SessionIssuer(), ttlDays)
 
 	data, err := h.adminData(r, usr.ID)
 	if err != nil {
@@ -172,8 +202,12 @@ func (h *AdminHandler) AdminCreateKeyHandler(w http.ResponseWriter, r *http.Requ
 		h.log.ErrorContext(r.Context(), "create api token", "err", createErr)
 
 		data.KeyError = "Failed to create API key."
-		if errors.Is(createErr, domain.ErrAPITokenLimit) {
+
+		switch {
+		case errors.Is(createErr, domain.ErrAPITokenLimit):
 			data.KeyError = "This user already holds the maximum number of API keys; revoke one first."
+		case errors.Is(createErr, domain.ErrInvalidAPITokenTTL):
+			data.KeyError = fmt.Sprintf("Lifetime must be 0 (never expires) to %d days.", auth.MaxAPITokenTTLDays)
 		}
 	default:
 		scheme := h.scheme(r)
@@ -201,7 +235,7 @@ func (h *AdminHandler) AdminCreateKeyHandler(w http.ResponseWriter, r *http.Requ
 // public ID (the token hash) and redirects back to /admin. requireAdmin (RegisterRoutes) already
 // guarantees the context user is a signed-in admin.
 func (h *AdminHandler) AdminRevokeKeyHandler(w http.ResponseWriter, r *http.Request) {
-	usr := userFromContext(r)
+	usr := middleware.UserFromContext(r)
 
 	tokenID := r.PathValue("id")
 	if tokenID == "" {
@@ -223,10 +257,19 @@ func (h *AdminHandler) AdminRevokeKeyHandler(w http.ResponseWriter, r *http.Requ
 
 // adminData assembles the shared admin-page view model — signed-in nonce/CSRF plus the user
 // and API-token lists. Both lists require admin rights, already verified by the caller.
-func (h *AdminHandler) adminData(r *http.Request, adminID string) (adminViewData, error) {
+func (h *AdminHandler) adminData(r *http.Request, adminID uuid.UUID) (adminViewData, error) {
 	data := adminViewData{
-		Nonce:     nonceFromContext(r.Context()),
-		CSRFToken: csrfFromContext(r.Context()),
+		Nonce:     middleware.NonceFromContext(r.Context()),
+		CSRFToken: middleware.CSRFFromContext(r.Context()),
+		// Status/action fields zeroed: populated by the per-action POST handler before re-render on failure
+		// (e.g. InviteURL after a successful invite issuance, KeyError on revoke failure). Zero on initial GET.
+		InviteURL:   "",
+		InviteError: "",
+		RevokeError: "",
+		KeyError:    "",
+		NewKey:      "",
+		Users:       nil,
+		APITokens:   nil,
 	}
 
 	users, err := h.authMgr.ListUsers(r.Context(), adminID)

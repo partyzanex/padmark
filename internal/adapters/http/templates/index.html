@@ -17,12 +17,12 @@
             <span class="toolbar-label">Markdown</span>
             <div class="toolbar-actions">
                 <button class="toolbar-btn" id="mdBold">B</button>
-                <button class="toolbar-btn" id="mdItalic" style="font-style:italic">I</button>
+                <button class="toolbar-btn toolbar-italic" id="mdItalic">I</button>
                 <button class="toolbar-btn" id="mdCode">&lt;/&gt;</button>
                 <button class="toolbar-btn" id="mdBlock">block</button>
             </div>
         </div>
-        <textarea class="editor-textarea" id="editor" placeholder="Paste or write your Markdown…" spellcheck="false">{{.Content}}</textarea>
+        <textarea class="editor-textarea" id="editor" placeholder="{{if .ContentWithheld}}Burn-after-reading content is not shown here — write the replacement content{{else}}Paste or write your Markdown…{{end}}" spellcheck="false">{{.Content}}</textarea>
         <div class="editor-footer">
             <span class="char-count" id="charCount">0 characters</span>
             <span class="format-hint">
@@ -39,14 +39,14 @@
         </div>
         {{if .EditMode}}
         <div class="field-group">
-            <label class="field-label">Edit code <span class="optional">· required</span></label>
+            <label class="field-label">Edit code <span class="optional">· {{if .IsOwner}}optional, you created this note{{else}}required{{end}}</span></label>
             <input type="text" class="field-input" placeholder="Paste your edit code" id="editCodeInput">
         </div>
         {{else}}
         <div class="field-group">
             <label class="field-label">Slug <span class="optional">· optional</span></label>
             <input type="text" class="field-input" placeholder="my-snippet" id="slugInput"
-                   pattern="[a-zA-Z0-9_-]+" title="Letters, numbers, hyphens and underscores only">
+                   pattern="[a-zA-Z0-9_\-]+" title="Letters, numbers, hyphens and underscores only">
         </div>
         {{end}}
     </div>
@@ -61,30 +61,24 @@
             <div class="burn-time-wrap{{if .BurnAfterReading}} active{{end}}" id="burnTimeWrap">
                 <div class="select-wrap">
                     <select class="field-select burn-select" id="burnTime"{{if not .BurnAfterReading}} disabled{{end}}>
-                        <option value="0"{{if and .BurnAfterReading (eq .TTL 0)}} selected{{end}}>Immediately</option>
-                        <option value="300"{{if eq .TTL 300}} selected{{end}}>5 minutes</option>
-                        <option value="600"{{if eq .TTL 600}} selected{{end}}>10 minutes</option>
-                        <option value="1800"{{if eq .TTL 1800}} selected{{end}}>30 minutes</option>
-                        <option value="3600"{{if eq .TTL 3600}} selected{{end}}>1 hour</option>
-                        <option value="14400"{{if eq .TTL 14400}} selected{{end}}>4 hours</option>
-                        <option value="43200"{{if eq .TTL 43200}} selected{{end}}>12 hours</option>
-                        <option value="86400"{{if eq .TTL 86400}} selected{{end}}>24 hours</option>
-                        <option value="259200"{{if eq .TTL 259200}} selected{{end}}>3 days</option>
-                        <option value="604800"{{if eq .TTL 604800}} selected{{end}}>7 days</option>
-                        <option value="2592000"{{if eq .TTL 2592000}} selected{{end}}>30 days</option>
-                        <option value="7776000"{{if eq .TTL 7776000}} selected{{end}}>90 days</option>
+                        {{range .TTLOptions}}
+                        <option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>
+                        {{end}}
                     </select>
                 </div>
             </div>
         </div>
 
         <div class="burn-row private-row">
-            <label class="burn-checkbox" id="privateLabel">
-                <input type="checkbox" id="privateCheck"{{if .Private}} checked{{end}}>
-                <span class="checkmark"></span>
-                <span class="burn-text">Private note</span>
-            </label>
-            <span class="shortcut-hint">Requires server auth token to view</span>
+            <span class="burn-text">Privacy</span>
+            <div class="select-wrap">
+                <select class="field-select" id="privacySelect">
+                    {{- range .PrivacyOptions}}
+                    <option value="{{.Value}}"{{if .Hint}} data-hint="{{.Hint}}"{{end}}{{if .Selected}} selected{{end}}>{{.Label}}</option>
+                    {{- end}}
+                </select>
+            </div>
+            <span class="shortcut-hint" id="privacyHint">Anyone can view</span>
         </div>
     </div>
 
@@ -98,6 +92,7 @@
 <script nonce="{{.Nonce}}">
     const editMode = {{.EditMode}};
     const noteID = {{.ID | js}};
+    const isOwner = {{.IsOwner}};
 
     function updateCount() {
         const len = document.getElementById('editor').value.length;
@@ -122,6 +117,17 @@
         setTimeout(() => { btn.textContent = label; btn.style.background = ''; }, 1800);
     }
 
+    // errorMessage reads the server's JSON error body ({"message": ...}) from a failed response so
+    // the button names the actual cause (cross-origin rejection, API disabled, validation failure)
+    // instead of a guess; fallback covers an empty or non-JSON body.
+    async function errorMessage(resp, fallback) {
+        try {
+            const body = await resp.json();
+            if (body && typeof body.message === 'string' && body.message) return body.message;
+        } catch (_) { /* empty or non-JSON body */ }
+        return fallback;
+    }
+
     function toggleBurn() {
         const checked = document.getElementById('burnCheck').checked;
         const wrap = document.getElementById('burnTimeWrap');
@@ -130,8 +136,30 @@
         sel.disabled = !checked;
     }
 
-    function getPrivate() {
-        return document.getElementById('privateCheck').checked;
+    const privacyHints = {
+        public: 'Anyone can view',
+        authenticated: 'Requires login to view',
+        owner: 'Only you can view',
+    };
+
+    function getPrivacy() {
+        return document.getElementById('privacySelect').value;
+    }
+
+    // The server lists only the levels it can enforce; editing keeps the stored level unless the
+    // user changes it, so an unchanged level is not sent.
+    const initialPrivacy = getPrivacy();
+
+    function changedPrivacy() {
+        const privacy = getPrivacy();
+        return privacy === initialPrivacy ? undefined : privacy;
+    }
+
+    function updatePrivacyHint() {
+        const select = document.getElementById('privacySelect');
+        const option = select.options[select.selectedIndex];
+        document.getElementById('privacyHint').textContent =
+            (option && option.dataset.hint) || privacyHints[getPrivacy()] || privacyHints.public;
     }
 
     function getTTL() {
@@ -158,8 +186,7 @@
         btn.style.opacity = '0.7';
         btn.disabled = true;
 
-        const privateNote = getPrivate();
-        const payload = { title, content, burn_after_reading: burnAfterReading, private: privateNote };
+        const payload = { title, content, burn_after_reading: burnAfterReading, privacy: getPrivacy() };
         if (slug) payload.slug = slug;
         if (burnAfterReading) payload.ttl = ttl;
 
@@ -170,7 +197,7 @@
                 body: JSON.stringify(payload)
             });
 
-            if (!resp.ok) { throw new Error('HTTP ' + resp.status); }
+            if (!resp.ok) { throw new Error(await errorMessage(resp, 'Error — try again')); }
 
             const note = await resp.json();
             if (note.edit_code) {
@@ -185,7 +212,7 @@
             }
             window.location.href = '/success?' + params.toString();
         } catch (err) {
-            btn.textContent = 'Error — try again';
+            btn.textContent = err.message || 'Error — try again';
             btn.style.background = '#ef4444';
             btn.style.opacity = '1';
             btn.disabled = false;
@@ -201,15 +228,14 @@
         const ttl = getTTL();
 
         if (!content) { showError(btn, 'Save', 'Enter some text first'); return; }
-        if (!editCode) { showError(btn, 'Save', 'Edit code required'); return; }
+        if (!editCode && !isOwner) { showError(btn, 'Save', 'Edit code required'); return; }
 
         btn.textContent = 'Saving…';
         btn.style.opacity = '0.7';
         btn.disabled = true;
 
         const burn = document.getElementById('burnCheck').checked;
-        const privateNote = getPrivate();
-        const payload = { title: title || 'Untitled', content, edit_code: editCode, burn_after_reading: burn, private: privateNote };
+        const payload = { title: title || 'Untitled', content, edit_code: editCode, burn_after_reading: burn, privacy: changedPrivacy() };
         if (burn) payload.ttl = ttl;
 
         try {
@@ -219,8 +245,13 @@
                 body: JSON.stringify(payload)
             });
 
-            if (resp.status === 403) { throw new Error('Invalid edit code'); }
-            if (!resp.ok) { throw new Error('HTTP ' + resp.status); }
+            if (!resp.ok) {
+                const msg = await errorMessage(resp, 'HTTP ' + resp.status);
+                // Only the edit-code rejection (403 "invalid edit code", domain.ErrInvalidEditCode)
+                // means the code was wrong; other 403s (e.g. "cross-origin request rejected") are not.
+                if (resp.status === 403 && msg === 'invalid edit code') { throw new Error('Invalid edit code'); }
+                throw new Error(msg);
+            }
 
             window.location.href = '/' + noteID;
         } catch (err) {
@@ -232,8 +263,11 @@
         }
     }
 
+    updatePrivacyHint();
+
     document.getElementById('editor').addEventListener('input', updateCount);
     document.getElementById('burnCheck').addEventListener('change', toggleBurn);
+    document.getElementById('privacySelect').addEventListener('change', updatePrivacyHint);
     document.getElementById('submitBtn').addEventListener('click', editMode ? save : publish);
     document.getElementById('mdBold').addEventListener('click', () => insertMd('**', '**'));
     document.getElementById('mdItalic').addEventListener('click', () => insertMd('_', '_'));
