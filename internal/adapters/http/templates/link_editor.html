@@ -11,7 +11,7 @@
 <div class="wrapper wrapper--wide">
     {{template "header"}}
 
-    <form id="linkForm" class="link-form">
+    <form id="linkForm" class="link-form" autocomplete="off">
         <h1 class="link-heading">{{if .EditMode}}Edit link{{else}}Create a short link{{end}}</h1>
         <p class="shortcut-hint">{{if .EditMode}}Update the destination and access settings without following the link.{{else}}Share a shorter URL with control over access and expiration.{{end}}</p>
 
@@ -23,11 +23,11 @@
         <div class="options-row">
             <div class="field-group">
                 <label class="field-label" for="slugInput">Slug <span class="optional">· {{if .EditMode}}fixed{{else}}optional{{end}}</span></label>
-                <input type="text" class="field-input" id="slugInput" placeholder="my-link" value="{{.ID}}" pattern="[a-zA-Z0-9_\-]+" title="Letters, numbers, hyphens and underscores only"{{if .EditMode}} readonly{{end}}>
+                <input type="text" class="field-input" id="slugInput" name="link_slug" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="my-link" value="{{.ID}}" pattern="[a-zA-Z0-9_\-]+" title="Letters, numbers, hyphens and underscores only"{{if .EditMode}} readonly{{end}}>
             </div>
             <div class="field-group">
                 <label class="field-label" for="editCodeInput">Edit code <span class="optional">· {{if .EditMode}}{{if .IsOwner}}optional for you{{else}}required to save{{end}}{{else}}optional{{end}}</span></label>
-                <input type="password" class="field-input" id="editCodeInput" autocomplete="off" placeholder="{{if .EditMode}}Original edit code{{else}}Leave blank to generate{{end}}"{{if not .EditMode}} minlength="8" maxlength="128"{{end}}>
+                <input type="password" class="field-input" id="editCodeInput" name="link_edit_code" autocomplete="new-password" placeholder="{{if .EditMode}}Original edit code{{else}}Leave blank to generate{{end}}"{{if not .EditMode}} minlength="8" maxlength="128"{{end}}>
             </div>
         </div>
 
