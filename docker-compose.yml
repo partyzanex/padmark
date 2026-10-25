@@ -21,7 +21,7 @@ services:
       - padmark
 
   padmark:
-    image: ${DOCKER_IMAGE:-partyzanex/padmark}:${DOCKER_TAG:-latest}
+    image: ${DOCKER_IMAGE:-partydev/padmark}:${DOCKER_TAG:-latest}
     command: serve
     ports:
       - "8080:8080"
