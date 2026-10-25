@@ -137,6 +137,11 @@ type DeleteNoteParams struct {
 	ID string
 	// Edit code returned at note creation.
 	XEditCode OptString `json:",omitempty,omitzero"`
+	// Deprecated: send the `X-Edit-Code` header instead. Accepted for v0.1.6 clients and
+	// used only when `X-Edit-Code` is absent; the server logs a warning for each use.
+	//
+	// Deprecated: schema marks this parameter as deprecated.
+	EditCode OptString `json:",omitempty,omitzero"`
 }
 
 func unpackDeleteNoteParams(packed middleware.Parameters) (params DeleteNoteParams) {
@@ -156,10 +161,20 @@ func unpackDeleteNoteParams(packed middleware.Parameters) (params DeleteNotePara
 			params.XEditCode = v.(OptString)
 		}
 	}
+	{
+		key := middleware.ParameterKey{
+			Name: "edit_code",
+			In:   "query",
+		}
+		if v, ok := packed[key]; ok {
+			params.EditCode = v.(OptString)
+		}
+	}
 	return params
 }
 
 func decodeDeleteNoteParams(args [1]string, argsEscaped bool, r *http.Request) (params DeleteNoteParams, _ error) {
+	q := uri.NewQueryDecoder(r.URL.Query())
 	h := uri.NewHeaderDecoder(r.Header)
 	// Decode path: id.
 	if err := func() error {
@@ -242,6 +257,47 @@ func decodeDeleteNoteParams(args [1]string, argsEscaped bool, r *http.Request) (
 		return params, &ogenerrors.DecodeParamError{
 			Name: "X-Edit-Code",
 			In:   "header",
+			Err:  err,
+		}
+	}
+	// Decode query: edit_code.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "edit_code",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotEditCodeVal string
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToString(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotEditCodeVal = c
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.EditCode.SetTo(paramsDotEditCodeVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "edit_code",
+			In:   "query",
 			Err:  err,
 		}
 	}

@@ -933,10 +933,10 @@ func (s *Server) handleDeleteLinkRequest(args [1]string, argsEscaped bool, w htt
 // supplied in the `X-Edit-Code` request header — unless the request is authenticated
 // (bearer token or session) as the exact user who created the note, in which case no edit
 // code is needed. See "Edit codes and ownership" above.
-// The edit code is deliberately not accepted as a query parameter: a query string can end
-// up in reverse-proxy/CDN access logs or in the `Referer` header of a same-origin
-// follow-up request. A stray `?edit_code=` is ignored, so the request is treated as having
-// no edit code. Better still, sign in (session or API token) before creating the note and
+// The `edit_code` query parameter is deprecated and kept only for clients written for
+// v0.1.6: a query string can end up in reverse-proxy/CDN access logs or in the `Referer`
+// header of a same-origin follow-up request. The server uses it only when `X-Edit-Code`
+// is absent. Better still, sign in (session or API token) before creating the note and
 // skip the edit code entirely.
 //
 // DELETE /notes/{id}
@@ -1042,6 +1042,10 @@ func (s *Server) handleDeleteNoteRequest(args [1]string, argsEscaped bool, w htt
 					Name: "X-Edit-Code",
 					In:   "header",
 				}: params.XEditCode,
+				{
+					Name: "edit_code",
+					In:   "query",
+				}: params.EditCode,
 			},
 			Raw: r,
 		}
@@ -1237,8 +1241,9 @@ func (s *Server) handleGetLinkRequest(args [1]string, argsEscaped bool, w http.R
 // `now + ttl` and the note expires automatically when that timestamp is reached.
 // Because such a read destroys the note (or starts its timer), it must be explicit: send
 // an `Accept` header naming `application/json` (or `text/markdown`, `text/plain`,
-// `text/html`) exactly. A burn-after-reading note requested without `Accept`, with only
-// wildcards (`*/*`, `text/*`), with `HEAD`, or as a browser subresource
+// `text/html`) exactly. For v0.1.6 clients, a request with no `Accept` header at all (and
+// no `Sec-Fetch-Dest`) also counts as a read on this path. A burn-after-reading note
+// requested with only wildcards (`*/*`, `text/*`), with `HEAD`, or as a browser subresource
 // (`Sec-Fetch-Dest` other than `document`/`empty`, e.g. an `<img>`) is answered `409`
 // with code `burn_read_not_explicit` and stays intact — link unfurlers and mail scanners
 // can no longer burn it. Other notes are unaffected.

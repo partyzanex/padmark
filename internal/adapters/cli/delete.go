@@ -1,4 +1,4 @@
-package cli //nolint:dupl // whole-file shape mirrors delete_link.go; see deleteAction's comment
+package cli
 
 import (
 	"context"
@@ -33,13 +33,14 @@ func deleteCommand() *urcli.Command {
 // error — the CLI does not pre-validate which credential the caller intends to rely on. The
 // shared "resolve ID → delete → print confirmation" skeleton lives in runDeleteCommand; only the
 // ogen-forced per-operation bits (params/response types, client method) stay here and in
-// delete_link.go, which is why the two files still read as near-duplicates to the dupl linter —
-// see the package-level nolint above.
+// delete_link.go.
 func deleteAction(ctx context.Context, cmd *urcli.Command) error {
 	deleteNote := func(ctx context.Context, padmarkClient *padmark.Client, id, editCode string) error {
 		params := padmark.DeleteNoteParams{
 			ID:        id,
 			XEditCode: padmark.OptString{Value: "", Set: false},
+			// The deprecated query form stays unset: the code travels in X-Edit-Code only.
+			EditCode: padmark.OptString{Value: "", Set: false}, //nolint:staticcheck // deprecated field, never set
 		}
 
 		if editCode != "" {

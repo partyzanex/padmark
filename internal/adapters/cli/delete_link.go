@@ -1,4 +1,4 @@
-package cli //nolint:dupl // whole-file shape mirrors delete.go; see deleteLinkAction's comment
+package cli
 
 import (
 	"context"
@@ -36,8 +36,7 @@ func deleteLinkCommand() *urcli.Command {
 // --token identifies the link's owner, mirroring deleteAction's note-side contract exactly. The
 // shared "resolve ID → delete → print confirmation" skeleton lives in runDeleteCommand; only the
 // ogen-forced per-operation bits (params/response types, client method) stay here and in
-// delete.go, which is why the two files still read as near-duplicates to the dupl linter — see
-// the package-level nolint above.
+// delete.go.
 func deleteLinkAction(ctx context.Context, cmd *urcli.Command) error {
 	deleteLink := func(ctx context.Context, padmarkClient *padmark.Client, id, editCode string) error {
 		params := padmark.DeleteLinkParams{

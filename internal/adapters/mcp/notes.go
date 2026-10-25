@@ -180,13 +180,14 @@ func (m *Manager) updateNote(
 	return nil, noteOutputFromNote(resp), nil
 }
 
-//nolint:dupl // the delete-link tool repeats this skeleton over a distinct generated ogen type
 func (m *Manager) deleteNote(
 	ctx context.Context, _ *mcpsdk.CallToolRequest, input deleteNoteInput,
 ) (*mcpsdk.CallToolResult, deleteNoteOutput, error) {
 	params := padmark.DeleteNoteParams{
 		ID:        input.ID,
 		XEditCode: padmark.OptString{Value: "", Set: false},
+		// The deprecated query form stays unset: the code travels in X-Edit-Code only.
+		EditCode: padmark.OptString{Value: "", Set: false}, //nolint:staticcheck // deprecated field, never set
 	}
 	if code := editCodeFor(m.vault, input.ID, input.EditCode); code != "" {
 		// The header, not the query parameter — query strings land in access logs.

@@ -196,7 +196,6 @@ func (m *Manager) getLink(
 	return nil, linkOutputFromLink(resp), nil
 }
 
-//nolint:dupl // the delete-note tool repeats this skeleton over a distinct generated ogen type
 func (m *Manager) deleteLink(
 	ctx context.Context, _ *mcpsdk.CallToolRequest, input deleteLinkInput,
 ) (*mcpsdk.CallToolResult, deleteNoteOutput, error) {

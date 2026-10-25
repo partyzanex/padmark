@@ -115,6 +115,16 @@ func explicitRead(r *http.Request) bool {
 	return false
 }
 
+// legacyAPIRead reports whether r is a GET /notes/{id} with no Accept header at all and no
+// Sec-Fetch-Dest: the exact request padmark-cli and pkg/client v0.1.6 send to read a note. It is
+// accepted as an explicit read for backward compatibility. Browsers send Accept on navigations
+// and fetches, and people share the short /{id} URL, so unfurlers and embeds stay behind
+// explicitRead; an Accept of */* is still not intent.
+func legacyAPIRead(r *http.Request) bool {
+	return r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/notes/") &&
+		len(r.Header.Values("Accept")) == 0 && r.Header.Get("Sec-Fetch-Dest") == ""
+}
+
 // parseAccept extracts one acceptEntry per comma-separated media range. Unparseable garbage is
 // skipped rather than failing the request: Accept is advisory.
 func parseAccept(accept string) []acceptEntry {

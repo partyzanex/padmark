@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"html/template"
@@ -280,8 +281,8 @@ func (h *NoteHandler) UpdateNoteByPath(w http.ResponseWriter, r *http.Request) {
 }
 
 // DeleteNoteByPath handles DELETE /notes/{id...} for path-like slugs, mirroring the ogen
-// DELETE /notes/{id} contract: the edit code comes from the X-Edit-Code header only (never the
-// query string, which leaks into proxy logs and Referer), and a successful delete returns 204.
+// DELETE /notes/{id} contract: the edit code comes from the X-Edit-Code header, or from the
+// deprecated edit_code query parameter (see deleteEditCode), and a successful delete returns 204.
 func (h *NoteHandler) DeleteNoteByPath(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
@@ -289,7 +290,7 @@ func (h *NoteHandler) DeleteNoteByPath(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	editCode := r.Header.Get("X-Edit-Code")
+	editCode := deleteEditCode(r.Context(), h.log, id, r.Header.Get("X-Edit-Code"), r.URL.Query().Get("edit_code"))
 
 	err := h.manager.Delete(r.Context(), id, editCode, callerIDFromCtx(r.Context()))
 	if err != nil {
@@ -299,6 +300,21 @@ func (h *NoteHandler) DeleteNoteByPath(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// deleteEditCode returns the X-Edit-Code header value or, when the header is absent, the
+// deprecated edit_code query value that v0.1.6 clients send (openapi.yaml, deleteNote). The query
+// form stays for backward compatibility although proxy/CDN logs and Referer can record it; each
+// use logs a warning with the hashed note ID only, never the code.
+func deleteEditCode(ctx context.Context, log *slog.Logger, id, header, query string) string {
+	if header != "" || query == "" {
+		return header
+	}
+
+	log.WarnContext(ctx, "deprecated edit_code query parameter used; send the X-Edit-Code header instead",
+		"id", domain.HashSlug(id))
+
+	return query
 }
 
 // HandleReveal handles POST /{id} for burn-after-reading confirmation.
@@ -462,11 +478,11 @@ const burnReadNotExplicitCode = "burn_read_not_explicit"
 // note: a burn-after-reading note — immediate or with a grace-period timer not yet started — is
 // answered 409 and stays intact. Otherwise it returns the note it had to load as the preloaded
 // snapshot, so the caller applies the read policy to exactly the note that was checked, with
-// no second SELECT. Explicit reads pass through untouched.
+// no second SELECT. Explicit reads and v0.1.6 API reads (see legacyAPIRead) pass through untouched.
 func (h *NoteHandler) refuseImplicitBurnRead(
 	w http.ResponseWriter, r *http.Request, id string, preloaded *domain.Note,
 ) (*domain.Note, bool) {
-	if explicitRead(r) {
+	if explicitRead(r) || legacyAPIRead(r) {
 		return preloaded, false
 	}
 

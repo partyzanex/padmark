@@ -196,7 +196,10 @@ func (h *OgenHandler) DeleteNote(
 		return &ogenapi.DeleteNoteUnauthorized{}, nil
 	}
 
-	err := h.manager.Delete(ctx, params.ID, params.XEditCode.Or(""), callerIDFromCtx(ctx))
+	//nolint:staticcheck // deprecated v0.1.6 query form, kept for backward compatibility
+	editCode := deleteEditCode(ctx, h.log, params.ID, params.XEditCode.Or(""), params.EditCode.Or(""))
+
+	err := h.manager.Delete(ctx, params.ID, editCode, callerIDFromCtx(ctx))
 	if err != nil {
 		return mapDeleteError(err, h.log), nil
 	}

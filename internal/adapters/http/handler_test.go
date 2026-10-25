@@ -1147,6 +1147,8 @@ func (s *HandlerSuite) TestGetNote_ImplicitRead_PeekNotFound() {
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/notes/nonexistent", nil)
+	// No Accept at all on /notes/ is a v0.1.6 API read (legacyAPIRead); */* stays implicit.
+	r.Header.Set("Accept", "*/*")
 
 	s.router.ServeHTTP(w, r)
 
@@ -1541,20 +1543,31 @@ func (s *HandlerSuite) TestDeleteNote_OK() {
 	s.Equal(http.StatusNoContent, w.Code)
 }
 
-// TestDeleteNote_QueryParamIgnored pins that the edit code is never read from the query string
-// (it would leak through proxy/CDN access logs and Referer): the manager sees an empty code and
-// the missing-code rejection surfaces as 403, for single-segment and path-like slugs alike.
-func (s *HandlerSuite) TestDeleteNote_QueryParamIgnored() {
+// TestDeleteNote_QueryParamFallback pins the deprecated v0.1.6 form: without X-Edit-Code the
+// edit_code query value reaches the manager, and the header wins when both are sent, for
+// single-segment and path-like slugs alike.
+func (s *HandlerSuite) TestDeleteNote_QueryParamFallback() {
 	for _, id := range []string{testID, "project/GUIDE.md"} {
 		s.expectMutationGate()
-		s.manager.EXPECT().Delete(gomock.Any(), id, "", uuid.Nil).Return(domain.ErrInvalidEditCode)
+		s.manager.EXPECT().Delete(gomock.Any(), id, "fromquery", uuid.Nil).Return(nil)
 
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest(http.MethodDelete, "/notes/"+id+"?edit_code=fromquery", nil)
 
 		s.router.ServeHTTP(w, r)
 
-		s.Equal(http.StatusForbidden, w.Code, "edit_code in the query string must be ignored for %q", id)
+		s.Equal(http.StatusNoContent, w.Code, "query edit_code must be used without the header for %q", id)
+
+		s.expectMutationGate()
+		s.manager.EXPECT().Delete(gomock.Any(), id, "fromheader", uuid.Nil).Return(nil)
+
+		w = httptest.NewRecorder()
+		r = httptest.NewRequest(http.MethodDelete, "/notes/"+id+"?edit_code=fromquery", nil)
+		r.Header.Set("X-Edit-Code", "fromheader")
+
+		s.router.ServeHTTP(w, r)
+
+		s.Equal(http.StatusNoContent, w.Code, "X-Edit-Code must win over the query for %q", id)
 	}
 }
 
