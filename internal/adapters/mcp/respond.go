@@ -1,9 +1,9 @@
 package mcp
 
 import (
-	"errors"
 	"fmt"
 
+	"github.com/partyzanex/padmark/internal/errorcontext"
 	padmark "github.com/partyzanex/padmark/pkg/client"
 )
 
@@ -16,23 +16,23 @@ func mapCreateNoteRes(res padmark.CreateNoteRes) (*padmark.CreateNoteResponse, e
 	case *padmark.CreateNoteResponseHeaders:
 		return &typed.Response, nil
 	case *padmark.CreateNoteBadRequest:
-		return nil, apiStatus("bad request", typed.Message)
+		return nil, errorcontext.Wrap(apiStatus(ErrBadRequest, typed.Message), "decode create note response")
 	case *padmark.CreateNoteUnauthorized:
-		return nil, unauthorizedErr()
+		return nil, errorcontext.Wrap(unauthorizedErr(), "decode create note response")
 	case *padmark.CreateNoteConflict:
-		return nil, conflictErr()
+		return nil, errorcontext.Wrap(conflictErr(), "decode create note response")
 	case *padmark.CreateNoteRequestEntityTooLarge:
-		return nil, fmt.Errorf("content too large: %s", typed.Message)
+		return nil, fmt.Errorf("%w: %s", ErrContentTooLarge, typed.Message)
 	case *padmark.CreateNoteUnsupportedMediaType:
-		return nil, unsupportedErr()
+		return nil, errorcontext.Wrap(unsupportedErr(), "decode create note response")
 	case *padmark.CreateNoteUnprocessableEntity:
-		return nil, apiStatus("rejected", typed.Message)
+		return nil, errorcontext.Wrap(apiStatus(ErrRejected, typed.Message), "decode create note response")
 	case *padmark.CreateNoteServiceUnavailable:
-		return nil, serviceUnavailableError(padmark.ErrorResponse(*typed))
+		return nil, errorcontext.Wrap(serviceUnavailableError(padmark.ErrorResponse(*typed)), "decode create note response")
 	case *padmark.CreateNoteInternalServerError:
-		return nil, serverErr()
+		return nil, errorcontext.Wrap(serverErr(), "decode create note response")
 	default:
-		return nil, unexpectedRes(res)
+		return nil, errorcontext.Wrap(unexpectedRes(res), "decode create note response")
 	}
 }
 
@@ -41,19 +41,19 @@ func mapGetNoteRes(res padmark.GetNoteRes) (*padmark.NoteResponse, error) {
 	case *padmark.NoteResponse:
 		return typed, nil
 	case *padmark.GetNoteUnauthorized:
-		return nil, unauthorizedErr()
+		return nil, errorcontext.Wrap(unauthorizedErr(), "decode get note response")
 	case *padmark.GetNoteNotFound:
-		return nil, notFoundErr("note")
+		return nil, errorcontext.Wrap(notFoundErr("note"), "decode get note response")
 	case *padmark.GetNoteGone:
-		return nil, goneErr("note")
+		return nil, errorcontext.Wrap(goneErr("note"), "decode get note response")
 	case *padmark.GetNoteConflict:
-		return nil, burnReadRefusedErr(typed.Message)
+		return nil, errorcontext.Wrap(burnReadRefusedErr(typed.Message), "decode get note response")
 	case *padmark.GetNoteServiceUnavailable:
-		return nil, serviceUnavailableError(padmark.ErrorResponse(*typed))
+		return nil, errorcontext.Wrap(serviceUnavailableError(padmark.ErrorResponse(*typed)), "decode get note response")
 	case *padmark.GetNoteInternalServerError:
-		return nil, serverErr()
+		return nil, errorcontext.Wrap(serverErr(), "decode get note response")
 	default:
-		return nil, unexpectedRes(res)
+		return nil, errorcontext.Wrap(unexpectedRes(res), "decode get note response")
 	}
 }
 
@@ -63,49 +63,32 @@ func mapUpdateNoteRes(res padmark.UpdateNoteRes) (*padmark.NoteResponse, error) 
 	case *padmark.NoteResponse:
 		return typed, nil
 	case *padmark.UpdateNoteBadRequest:
-		return nil, apiStatus("bad request", typed.Message)
+		return nil, errorcontext.Wrap(apiStatus(ErrBadRequest, typed.Message), "decode update note response")
 	case *padmark.UpdateNoteUnauthorized:
-		return nil, unauthorizedErr()
+		return nil, errorcontext.Wrap(unauthorizedErr(), "decode update note response")
 	case *padmark.UpdateNoteForbidden:
-		return nil, forbiddenErr("note")
+		return nil, errorcontext.Wrap(forbiddenErr("note"), "decode update note response")
 	case *padmark.UpdateNoteNotFound:
-		return nil, notFoundErr("note")
+		return nil, errorcontext.Wrap(notFoundErr("note"), "decode update note response")
 	case *padmark.UpdateNoteRequestEntityTooLarge:
-		return nil, fmt.Errorf("content too large: %s", typed.Message)
+		return nil, fmt.Errorf("%w: %s", ErrContentTooLarge, typed.Message)
 	case *padmark.UpdateNoteUnsupportedMediaType:
-		return nil, unsupportedErr()
+		return nil, errorcontext.Wrap(unsupportedErr(), "decode update note response")
 	case *padmark.UpdateNoteUnprocessableEntity:
-		return nil, apiStatus("rejected", typed.Message)
+		return nil, errorcontext.Wrap(apiStatus(ErrRejected, typed.Message), "decode update note response")
 	case *padmark.UpdateNoteTooManyRequests:
-		return nil, rateLimitedErr("note updates")
+		return nil, errorcontext.Wrap(rateLimitedErr("note updates"), "decode update note response")
 	case *padmark.UpdateNoteServiceUnavailable:
-		return nil, serviceUnavailableError(padmark.ErrorResponse(*typed))
+		return nil, errorcontext.Wrap(serviceUnavailableError(padmark.ErrorResponse(*typed)), "decode update note response")
 	case *padmark.UpdateNoteInternalServerError:
-		return nil, serverErr()
+		return nil, errorcontext.Wrap(serverErr(), "decode update note response")
 	default:
-		return nil, unexpectedRes(res)
+		return nil, errorcontext.Wrap(unexpectedRes(res), "decode update note response")
 	}
 }
 
 func mapDeleteNoteRes(res padmark.DeleteNoteRes) error {
-	switch typed := res.(type) {
-	case *padmark.DeleteNoteNoContent:
-		return nil
-	case *padmark.DeleteNoteUnauthorized:
-		return unauthorizedErr()
-	case *padmark.DeleteNoteForbidden:
-		return forbiddenErr("note")
-	case *padmark.DeleteNoteNotFound:
-		return notFoundErr("note")
-	case *padmark.DeleteNoteTooManyRequests:
-		return rateLimitedErr("note deletes")
-	case *padmark.DeleteNoteServiceUnavailable:
-		return serviceUnavailableError(padmark.ErrorResponse(*typed))
-	case *padmark.DeleteNoteInternalServerError:
-		return serverErr()
-	default:
-		return unexpectedRes(res)
-	}
+	return errorcontext.Wrap(mapDeleteRes(res, "note"), "delete note response")
 }
 
 func mapCreateLinkRes(res padmark.CreateLinkRes) (*padmark.CreateLinkResponseHeaders, error) {
@@ -113,25 +96,25 @@ func mapCreateLinkRes(res padmark.CreateLinkRes) (*padmark.CreateLinkResponseHea
 	case *padmark.CreateLinkResponseHeaders:
 		return typed, nil
 	case *padmark.CreateLinkBadRequest:
-		return nil, apiStatus("bad request", typed.Message)
+		return nil, errorcontext.Wrap(apiStatus(ErrBadRequest, typed.Message), "decode create link response")
 	case *padmark.CreateLinkUnauthorized:
-		return nil, unauthorizedErr()
+		return nil, errorcontext.Wrap(unauthorizedErr(), "decode create link response")
 	case *padmark.CreateLinkConflict:
-		return nil, conflictErr()
+		return nil, errorcontext.Wrap(conflictErr(), "decode create link response")
 	case *padmark.CreateLinkRequestEntityTooLarge:
-		return nil, fmt.Errorf("content too large: %s", typed.Message)
+		return nil, fmt.Errorf("%w: %s", ErrContentTooLarge, typed.Message)
 	case *padmark.CreateLinkUnsupportedMediaType:
-		return nil, unsupportedErr()
+		return nil, errorcontext.Wrap(unsupportedErr(), "decode create link response")
 	case *padmark.CreateLinkUnprocessableEntity:
-		return nil, apiStatus("rejected", typed.Message)
+		return nil, errorcontext.Wrap(apiStatus(ErrRejected, typed.Message), "decode create link response")
 	case *padmark.CreateLinkTooManyRequests:
-		return nil, rateLimitedErr("link creations")
+		return nil, errorcontext.Wrap(rateLimitedErr("link creations"), "decode create link response")
 	case *padmark.CreateLinkServiceUnavailable:
-		return nil, serviceUnavailableError(padmark.ErrorResponse(*typed))
+		return nil, errorcontext.Wrap(serviceUnavailableError(padmark.ErrorResponse(*typed)), "decode create link response")
 	case *padmark.CreateLinkInternalServerError:
-		return nil, serverErr()
+		return nil, errorcontext.Wrap(serverErr(), "decode create link response")
 	default:
-		return nil, unexpectedRes(res)
+		return nil, errorcontext.Wrap(unexpectedRes(res), "decode create link response")
 	}
 }
 
@@ -140,21 +123,23 @@ func mapCreateLinksBulkRes(res padmark.CreateLinksBulkRes) (*padmark.BulkCreateL
 	case *padmark.BulkCreateLinksResponse:
 		return typed, nil
 	case *padmark.CreateLinksBulkBadRequest:
-		return nil, apiStatus("bad request", typed.Message)
+		return nil, errorcontext.Wrap(apiStatus(ErrBadRequest, typed.Message), "decode create links bulk response")
 	case *padmark.CreateLinksBulkUnauthorized:
-		return nil, unauthorizedErr()
+		return nil, errorcontext.Wrap(unauthorizedErr(), "decode create links bulk response")
 	case *padmark.CreateLinksBulkRequestEntityTooLarge:
-		return nil, fmt.Errorf("content too large: %s", typed.Message)
+		return nil, fmt.Errorf("%w: %s", ErrContentTooLarge, typed.Message)
 	case *padmark.CreateLinksBulkUnsupportedMediaType:
-		return nil, unsupportedErr()
+		return nil, errorcontext.Wrap(unsupportedErr(), "decode create links bulk response")
 	case *padmark.CreateLinksBulkTooManyRequests:
-		return nil, rateLimitedErr("bulk link creations")
+		return nil, errorcontext.Wrap(rateLimitedErr("bulk link creations"), "decode create links bulk response")
 	case *padmark.CreateLinksBulkServiceUnavailable:
-		return nil, serviceUnavailableError(padmark.ErrorResponse(*typed))
+		return nil, errorcontext.Wrap(
+			serviceUnavailableError(padmark.ErrorResponse(*typed)), "decode bulk link creation response",
+		)
 	case *padmark.CreateLinksBulkInternalServerError:
-		return nil, serverErr()
+		return nil, errorcontext.Wrap(serverErr(), "decode create links bulk response")
 	default:
-		return nil, unexpectedRes(res)
+		return nil, errorcontext.Wrap(unexpectedRes(res), "decode create links bulk response")
 	}
 }
 
@@ -163,38 +148,48 @@ func mapGetLinkRes(res padmark.GetLinkRes) (*padmark.LinkResponse, error) {
 	case *padmark.LinkResponse:
 		return typed, nil
 	case *padmark.GetLinkUnauthorized:
-		return nil, unauthorizedErr()
+		return nil, errorcontext.Wrap(unauthorizedErr(), "decode get link response")
 	case *padmark.GetLinkNotFound:
-		return nil, notFoundErr("link")
+		return nil, errorcontext.Wrap(notFoundErr("link"), "decode get link response")
 	case *padmark.GetLinkGone:
-		return nil, goneErr("link")
+		return nil, errorcontext.Wrap(goneErr("link"), "decode get link response")
 	case *padmark.GetLinkServiceUnavailable:
-		return nil, serviceUnavailableError(padmark.ErrorResponse(*typed))
+		return nil, errorcontext.Wrap(serviceUnavailableError(padmark.ErrorResponse(*typed)), "decode get link response")
 	case *padmark.GetLinkInternalServerError:
-		return nil, serverErr()
+		return nil, errorcontext.Wrap(serverErr(), "decode get link response")
 	default:
-		return nil, unexpectedRes(res)
+		return nil, errorcontext.Wrap(unexpectedRes(res), "decode get link response")
 	}
 }
 
 func mapDeleteLinkRes(res padmark.DeleteLinkRes) error {
+	return errorcontext.Wrap(mapDeleteRes(res, "link"), "delete link response")
+}
+
+func mapDeleteRes(res any, resource string) error {
 	switch typed := res.(type) {
-	case *padmark.DeleteLinkNoContent:
+	case *padmark.DeleteNoteNoContent, *padmark.DeleteLinkNoContent:
 		return nil
-	case *padmark.DeleteLinkUnauthorized:
-		return unauthorizedErr()
-	case *padmark.DeleteLinkForbidden:
-		return forbiddenErr("link")
-	case *padmark.DeleteLinkNotFound:
-		return notFoundErr("link")
-	case *padmark.DeleteLinkTooManyRequests:
-		return rateLimitedErr("link deletes")
+	case *padmark.DeleteNoteUnauthorized, *padmark.DeleteLinkUnauthorized:
+		return errorcontext.Wrap(unauthorizedErr(), "authorize deletion")
+	case *padmark.DeleteNoteForbidden, *padmark.DeleteLinkForbidden:
+		return errorcontext.Wrap(forbiddenErr(resource), "authorize deletion")
+	case *padmark.DeleteNoteNotFound, *padmark.DeleteLinkNotFound:
+		return errorcontext.Wrap(notFoundErr(resource), "resolve deleted resource")
+	case *padmark.DeleteNoteTooManyRequests, *padmark.DeleteLinkTooManyRequests:
+		return errorcontext.Wrap(rateLimitedErr(resource+" deletes"), "limit deletion requests")
+	case *padmark.DeleteNoteServiceUnavailable:
+		return errorcontext.Wrap(
+			serviceUnavailableError(padmark.ErrorResponse(*typed)), "decode service unavailable response",
+		)
 	case *padmark.DeleteLinkServiceUnavailable:
-		return serviceUnavailableError(padmark.ErrorResponse(*typed))
-	case *padmark.DeleteLinkInternalServerError:
-		return serverErr()
+		return errorcontext.Wrap(
+			serviceUnavailableError(padmark.ErrorResponse(*typed)), "decode service unavailable response",
+		)
+	case *padmark.DeleteNoteInternalServerError, *padmark.DeleteLinkInternalServerError:
+		return ErrServer
 	default:
-		return unexpectedRes(res)
+		return errorcontext.Wrap(unexpectedRes(res), "decode deletion response")
 	}
 }
 
@@ -207,53 +202,54 @@ func transportError(op string, err error) error {
 
 // Error texts. Each carries the remediation the model needs to self-correct.
 
-func apiStatus(kind, message string) error {
+func apiStatus(cause error, message string) error {
 	if message == "" {
 		message = "no details provided"
 	}
 
-	return fmt.Errorf("%s: %s", kind, message)
+	return fmt.Errorf("%w: %s", cause, message)
 }
 
 func unauthorizedErr() error {
-	return fmt.Errorf("unauthorized: the server needs a bearer token (--token / %s) or edit_code", EnvToken)
+	return fmt.Errorf("%w: the server needs a bearer token (--token / %s) or edit_code", ErrUnauthorized, EnvToken)
 }
 
 func forbiddenErr(kind string) error {
-	return fmt.Errorf("forbidden: wrong edit_code for the %s (an edit_code is shown exactly once, at creation)", kind)
+	return fmt.Errorf("%w: wrong edit_code for the %s (an edit_code "+
+		"is shown exactly once, at creation)", ErrForbidden, kind)
 }
 
 func notFoundErr(kind string) error {
-	return fmt.Errorf("%s not found — wrong ID, already deleted/expired, or a different server", kind)
+	return fmt.Errorf("%s %w — wrong ID, already deleted/expired, or a different server", kind, ErrNotFound)
 }
 
 func goneErr(kind string) error {
-	return fmt.Errorf("gone: the %s was destroyed after its first read (burn-after-reading with a TTL)", kind)
+	return fmt.Errorf("%w: the %s was destroyed after its first read (burn-after-reading with a TTL)", ErrGone, kind)
 }
 
 func conflictErr() error {
-	return errors.New("conflict: the slug is already in use — pick another slug or omit it to let the server generate one")
+	return ErrSlugConflict
 }
 
 func rateLimitedErr(op string) error {
-	return fmt.Errorf("too many requests: rate limit or failure lockout is active on %s — wait and retry", op)
+	return fmt.Errorf("%w: rate limit or failure lockout is active on %s — wait and retry", ErrRateLimited, op)
 }
 
 func unsupportedErr() error {
-	return errors.New("unsupported content type — send JSON (Content-Type: application/json)")
+	return ErrUnsupportedContentType
 }
 
 // burnReadRefusedErr reports a burn-after-reading read the server refused as not explicit
 // (409). The client always sends Accept: application/json, so this means a misbehaving proxy
 // stripped the header; the note is still intact.
 func burnReadRefusedErr(message string) error {
-	return fmt.Errorf("refused: %s — the note is still intact", message)
+	return fmt.Errorf("%w: %s — the note is still intact", ErrBurnReadRefused, message)
 }
 
 func serverErr() error {
-	return errors.New("padmark server error — check the server's logs")
+	return ErrServer
 }
 
 func unexpectedRes(res any) error {
-	return fmt.Errorf("unexpected response type %T", res)
+	return fmt.Errorf("%w %T", ErrUnexpectedResponse, res)
 }

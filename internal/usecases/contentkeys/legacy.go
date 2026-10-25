@@ -17,12 +17,12 @@ func (m *Manager) convertLegacy(ctx context.Context, row *Row, report *Report) e
 
 	value, err := m.ciphers[row.Resource].Encrypt(row.Value, newID)
 	if err != nil {
-		return errors.New("could not encrypt converted legacy note")
+		return errEncryptLegacyNote
 	}
 
 	hash, err := m.hashLegacyEditCode(row.Legacy.EditCode)
 	if err != nil {
-		return WrapError(err)
+		return Wrap(err)
 	}
 
 	converted, err := m.store.ConvertLegacy(ctx, *row, newID, value, hash)
@@ -33,7 +33,7 @@ func (m *Manager) convertLegacy(ctx context.Context, row *Row, report *Report) e
 	}
 
 	if err != nil {
-		return WrapError(err)
+		return Wrap(err)
 	}
 
 	if converted {
@@ -70,23 +70,23 @@ func (m *Manager) hashLegacyEditCode(code string) (string, error) {
 func (m *Manager) MarkLegacy(ctx context.Context, id string) (Report, error) {
 	row, err := m.store.Get(ctx, resourceNote, id)
 	if err != nil {
-		return newReport("unknown"), WrapError(err)
+		return newReport("unknown"), Wrap(err)
 	}
 
 	if row == nil {
-		return newReport("unknown"), WrapError(errors.New("note not found"))
+		return newReport("unknown"), Wrap(ErrNoteNotFound)
 	}
 
 	if row.Legacy == nil {
 		markErr := m.markLegacy(ctx, row)
 		if markErr != nil {
-			return newReport("unknown"), WrapError(markErr)
+			return newReport("unknown"), Wrap(markErr)
 		}
 	}
 
 	report, err := m.Status(ctx)
 	if err != nil && !errors.Is(err, errInvalidRecords) {
-		return report, WrapError(err)
+		return report, Wrap(err)
 	}
 
 	// Other records may still need attention; this report shows them, but the mark succeeded.
@@ -96,20 +96,20 @@ func (m *Manager) MarkLegacy(ctx context.Context, id string) (Report, error) {
 func (m *Manager) markLegacy(ctx context.Context, row *Row) error {
 	cipher := m.ciphers[resourceNote]
 	if cipher.Versioned(row.Value) {
-		return errors.New("note already has an encryption envelope; there is nothing to convert")
+		return errNoteAlreadyEnveloped
 	}
 
 	if cipher.ValidateLegacy(row.Value) == nil && m.hasher.IsStoredHash(row.StoredEditCode) {
-		return errors.New("note holds structurally valid legacy ciphertext; it is not v0.1.6 plaintext")
+		return errNoteIsLegacyCiphertext
 	}
 
 	marked, err := m.store.MarkLegacy(ctx, *row)
 	if err != nil {
-		return WrapError(err)
+		return Wrap(err)
 	}
 
 	if !marked {
-		return errors.New("note changed concurrently; stop all writers and retry")
+		return errNoteChangedConcurrently
 	}
 
 	return nil

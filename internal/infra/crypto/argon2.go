@@ -61,8 +61,7 @@ func DefaultArgon2Params() Argon2Params {
 func (p Argon2Params) Validate() error {
 	if p.Threads == 0 || p.Threads > MaxArgon2Threads || p.Time == 0 || p.Time > MaxArgon2Time ||
 		p.Memory < 8*uint32(p.Threads) || p.Memory > MaxArgon2Memory {
-		return errors.New("argon2 cost outside supported bounds " +
-			"(memory: 8*threads..262144 KiB, time: 1..10, threads: 1..16)")
+		return errInvalidArgon2Cost
 	}
 
 	return nil
@@ -114,7 +113,7 @@ func hashArgon2(secret string, params Argon2Params) (string, error) {
 
 	err := params.Validate()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("validate: %w", err)
 	}
 
 	salt := make([]byte, argon2SaltLen)
@@ -126,7 +125,7 @@ func hashArgon2(secret string, params Argon2Params) (string, error) {
 
 	key, err := deriveArgon2Key([]byte(secret), salt, params, argon2KeyLen)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("derive argon2 key: %w", err)
 	}
 
 	enc := base64.RawURLEncoding
@@ -178,7 +177,7 @@ func verifyArgon2(storedHash, secret string, ceiling Argon2Params) (bool, error)
 
 	actual, err := deriveArgon2Key([]byte(secret), salt, params, argon2KeyLen)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("derive argon2 key: %w", err)
 	}
 
 	return subtle.ConstantTimeCompare(expected, actual) == 1, nil
@@ -199,24 +198,24 @@ func parseArgon2Cost(memoryText, timeText, threadsText string) (Argon2Params, er
 
 	memory, err := parseU32(memoryText)
 	if err != nil {
-		return none, err
+		return none, fmt.Errorf("parse u32: %w", err)
 	}
 
 	iterations, err := parseU32(timeText)
 	if err != nil {
-		return none, err
+		return none, fmt.Errorf("parse u32: %w", err)
 	}
 
 	threads, err := parseU32(threadsText)
 	if err != nil || threads > math.MaxUint8 {
-		return none, errors.New("invalid argon2 threads")
+		return none, errInvalidArgon2Threads
 	}
 
 	params := Argon2Params{Memory: memory, Time: iterations, Threads: uint8(threads)}
 
 	err = params.Validate()
 	if err != nil {
-		return none, err
+		return none, fmt.Errorf("validate: %w", err)
 	}
 
 	return params, nil

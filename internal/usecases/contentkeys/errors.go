@@ -56,10 +56,10 @@ func (e *contextError) Error() string { return errorContext + ": " + e.err.Error
 
 func (e *contextError) Unwrap() error { return e.err }
 
-// WrapError adds context while preserving successful nil results and error identity.
+// Wrap adds context while preserving successful nil results and error identity.
 // An error that already carries the context anywhere in its chain is returned
 // unchanged, so nested calls never repeat the prefix.
-func WrapError(err error) error {
+func Wrap(err error) error {
 	if err == nil {
 		return nil
 	}
@@ -80,3 +80,27 @@ func unwrapContext(err error) error {
 
 	return err
 }
+
+var (
+	ErrMigrationRequired = errors.New("content migration required; run encryption " +
+		"migrate while all servers are stopped")
+	ErrNoteNotFound            = errors.New("note not found")
+	errActiveKeyNotRegistered  = errors.New("active key is not registered; run encryption register")
+	errCannotRemoveActiveKey   = errors.New("cannot remove the active key")
+	errConversionIncomplete    = errors.New("some supplied records could not be converted; see counts")
+	errEncryptConvertedRecord  = errors.New("could not encrypt converted record")
+	errEncryptLegacyNote       = errors.New("could not encrypt converted legacy note")
+	errInvalidInstallationID   = errors.New("invalid encryption installation ID")
+	errInvalidMigrationState   = errors.New("invalid encryption migration state")
+	errInvalidRotationEnvelope = errors.New("rotation encountered an invalid envelope")
+	errKeyStillReferenced      = errors.New("key is still referenced by encrypted records")
+	errMigrationIncomplete     = errors.New("migration incomplete; retry after stopping concurrent writers")
+	errMigrationNotComplete    = errors.New("complete content migration first")
+	errMigrationNotInitialized = errors.New("initialize encryption with migrate before registering another key")
+	errNoteAlreadyEnveloped    = errors.New("note already has an encryption envelope; there is nothing to convert")
+	errNoteChangedConcurrently = errors.New("note changed concurrently; stop all writers and retry")
+	errNoteIsLegacyCiphertext  = errors.New("note holds structurally valid legacy ciphertext; it is not v0.1.6 plaintext")
+	errReadSlugInput           = errors.New("could not read slug input (maximum line length 4096 bytes)")
+	errRecordNotVersioned      = errors.New("record is not a versioned envelope")
+	errRotationIncomplete      = errors.New("rotation incomplete; retry after stopping concurrent writers")
+)

@@ -66,7 +66,7 @@ func (m *OnboardingManager) GenerateInvite(ctx context.Context, adminUserID uuid
 
 	err = authorizeIssuer(ctx, m.stepUp, admin.ID, issuer)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("authorize issuer: %w", err)
 	}
 
 	tok, err := m.invites.Issue(ctx, adminUserID)
@@ -117,7 +117,7 @@ func (m *OnboardingManager) AcceptInvite(ctx context.Context, token, username, p
 
 	usr, enr, err := m.buildUser(username, password, false)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("build user: %w", err)
 	}
 
 	err = m.invites.RedeemInvite(ctx, token, username, usr)
@@ -156,7 +156,7 @@ func (m *OnboardingManager) AcceptFirstAdmin(ctx context.Context, username, pass
 
 	usr, enr, err := m.buildUser(username, password, true)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("build user: %w", err)
 	}
 
 	err = m.users.Create(ctx, usr)

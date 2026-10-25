@@ -8,6 +8,7 @@ import (
 	"io"
 
 	"github.com/partyzanex/padmark/internal/domain"
+	"github.com/partyzanex/padmark/internal/errorcontext"
 )
 
 const maxSlugLine = 4096
@@ -17,19 +18,24 @@ const maxSlugLine = 4096
 func (m *Manager) MigrateIfNeeded(ctx context.Context) (Report, error) {
 	err := m.initialize(ctx)
 	if err != nil {
-		return newReport(Pending), WrapError(err)
+		return newReport(Pending), Wrap(err)
 	}
 
 	report, err := m.Status(ctx)
 	if err != nil {
-		return report, WrapError(err)
+		return report, Wrap(err)
 	}
 
 	if report.State == Ready && report.Raw == 0 && report.Plaintext == 0 {
 		return report, nil
 	}
 
-	return m.Migrate(ctx, false)
+	operationResult, operationErr := m.Migrate(ctx, false)
+	if operationErr != nil {
+		return operationResult, fmt.Errorf("migrate: %w", operationErr)
+	}
+
+	return operationResult, nil
 }
 
 func (m *Manager) replace(ctx context.Context, row Row, value string, report *Report) error {
@@ -39,7 +45,7 @@ func (m *Manager) replace(ctx context.Context, row Row, value string, report *Re
 
 	replaced, err := m.store.Replace(ctx, row, value)
 	if err != nil {
-		return WrapError(err)
+		return Wrap(err)
 	}
 
 	if replaced {
@@ -56,40 +62,55 @@ func (m *Manager) replace(ctx context.Context, row Row, value string, report *Re
 // A failure leaves phase=pending; committed rows are checked and skipped on the next run.
 func (m *Manager) Migrate(ctx context.Context, dryRun bool) (Report, error) {
 	if dryRun {
-		return m.Status(ctx)
+		operationResult, operationErr := m.Status(ctx)
+		if operationErr != nil {
+			return operationResult, fmt.Errorf("status: %w", operationErr)
+		}
+
+		return operationResult, nil
 	}
 
 	report := newReport(Pending)
 	// Existing corrupt raw records should keep a previously initialized DB pending.
 	initErr := m.initialize(ctx)
 	if initErr != nil {
-		return m.failureReport(ctx, &report, initErr)
+		operationResult, operationErr := m.failureReport(ctx, &report, initErr)
+		if operationErr != nil {
+			return operationResult, fmt.Errorf("failure report: %w", operationErr)
+		}
+
+		return operationResult, nil
 	}
 
 	pendingErr := m.store.SetPhase(ctx, Pending)
 	if pendingErr != nil {
-		return report, WrapError(pendingErr)
+		return report, Wrap(pendingErr)
 	}
 
-	err := m.walk(ctx, func(row Row) error { return m.migrateRow(ctx, &row, &report) })
+	err := m.walk(ctx, func(row Row) error { return errorcontext.Wrap(m.migrateRow(ctx, &row, &report), "migrate row") })
 	if err != nil {
-		return m.failureReport(ctx, &report, err)
+		operationResult, operationErr := m.failureReport(ctx, &report, err)
+		if operationErr != nil {
+			return operationResult, fmt.Errorf("failure report: %w", operationErr)
+		}
+
+		return operationResult, nil
 	}
 
 	final, err := m.Status(ctx)
 
 	final.Changed, final.Conflicts = report.Changed, report.Conflicts
 	if err != nil {
-		return final, WrapError(err)
+		return final, Wrap(err)
 	}
 
 	if final.Raw != 0 || final.Plaintext != 0 {
-		return final, errors.New("migration incomplete; retry after stopping concurrent writers")
+		return final, errMigrationIncomplete
 	}
 
 	readyErr := m.store.SetPhase(ctx, Ready)
 	if readyErr != nil {
-		return final, WrapError(readyErr)
+		return final, Wrap(readyErr)
 	}
 
 	final.State = Ready
@@ -100,7 +121,7 @@ func (m *Manager) Migrate(ctx context.Context, dryRun bool) (Report, error) {
 // migrateRow converts a tagged v0.1.6 note or wraps one structurally valid raw legacy value.
 func (m *Manager) migrateRow(ctx context.Context, row *Row, report *Report) error {
 	if row.Legacy != nil {
-		return m.convertLegacy(ctx, row, report)
+		return errorcontext.Wrap(m.convertLegacy(ctx, row, report), "convert legacy")
 	}
 
 	// An untagged v0.1.6 note is plaintext: wrapping it as legacy ciphertext would make it
@@ -115,14 +136,14 @@ func (m *Manager) migrateRow(ctx context.Context, row *Row, report *Report) erro
 		return nil //nolint:nilerr // final validation counts corrupt rows without exposing data
 	}
 
-	return m.replace(ctx, *row, value, report)
+	return errorcontext.Wrap(m.replace(ctx, *row, value, report), "replace")
 }
 
 // Rewrap only changes DEK wrappers. Interrupted rotations remain readable with both keys.
 func (m *Manager) Rewrap(ctx context.Context, dryRun bool) (Report, error) {
 	report, err := m.readyReport(ctx)
 	if err != nil {
-		return report, WrapError(err)
+		return report, Wrap(err)
 	}
 
 	if dryRun {
@@ -132,25 +153,30 @@ func (m *Manager) Rewrap(ctx context.Context, dryRun bool) (Report, error) {
 	err = m.walk(ctx, func(row Row) error {
 		value, rewrapErr := m.ciphers[row.Resource].Rewrap(row.Value, row.ID)
 		if rewrapErr != nil {
-			return errors.New("rotation encountered an invalid envelope")
+			return errInvalidRotationEnvelope
 		}
 
-		return m.replace(ctx, row, value, &report)
+		return errorcontext.Wrap(m.replace(ctx, row, value, &report), "replace")
 	})
 	if err != nil {
-		return m.failureReport(ctx, &report, err)
+		operationResult, operationErr := m.failureReport(ctx, &report, err)
+		if operationErr != nil {
+			return operationResult, fmt.Errorf("failure report: %w", operationErr)
+		}
+
+		return operationResult, nil
 	}
 
 	final, err := m.Status(ctx)
 
 	final.Changed, final.Conflicts = report.Changed, report.Conflicts
 	if err != nil {
-		return final, WrapError(err)
+		return final, Wrap(err)
 	}
 
 	for id, count := range final.Keys {
 		if id != m.keys.ActiveKey() && count != 0 {
-			return final, errors.New("rotation incomplete; retry after stopping concurrent writers")
+			return final, errRotationIncomplete
 		}
 	}
 
@@ -162,7 +188,7 @@ func (m *Manager) Rewrap(ctx context.Context, dryRun bool) (Report, error) {
 func (m *Manager) ConvertSlugs(ctx context.Context, input io.Reader, dryRun bool) (Report, error) {
 	report, err := m.readyReport(ctx)
 	if err != nil {
-		return report, WrapError(err)
+		return report, Wrap(err)
 	}
 
 	scanner := bufio.NewScanner(input)
@@ -177,12 +203,12 @@ func (m *Manager) ConvertSlugs(ctx context.Context, input io.Reader, dryRun bool
 
 		err = m.convertSlug(ctx, slug, dryRun, &report, conversionFailures)
 		if err != nil {
-			return report, WrapError(err)
+			return report, Wrap(err)
 		}
 	}
 
 	if scanner.Err() != nil {
-		return report, errors.New("could not read slug input (maximum line length 4096 bytes)")
+		return report, errReadSlugInput
 	}
 
 	final, err := m.status(ctx, conversionFailures)
@@ -192,11 +218,11 @@ func (m *Manager) ConvertSlugs(ctx context.Context, input io.Reader, dryRun bool
 	// ciphertext that authenticates structurally but cannot decrypt with its slug).
 	final.Failed += len(conversionFailures)
 	if err != nil {
-		return final, WrapError(err)
+		return final, Wrap(err)
 	}
 
 	if final.Failed != 0 || final.Missing != 0 || final.Conflicts != 0 {
-		return final, errors.New("some supplied records could not be converted; see counts")
+		return final, errConversionIncomplete
 	}
 
 	return final, nil
@@ -210,7 +236,7 @@ func (m *Manager) convertSlug(
 	for _, resource := range []string{resourceNote, resourceLink} {
 		row, err := m.store.Get(ctx, resource, domain.HashSlug(slug))
 		if err != nil {
-			return WrapError(err)
+			return Wrap(err)
 		}
 
 		if row == nil {
@@ -244,12 +270,12 @@ func (m *Manager) convertSlug(
 
 		value, err := cipher.Encrypt(plain, row.ID)
 		if err != nil {
-			return errors.New("could not encrypt converted record")
+			return errEncryptConvertedRecord
 		}
 
 		replaceErr := m.replace(ctx, *row, value, report)
 		if replaceErr != nil {
-			return WrapError(replaceErr)
+			return Wrap(replaceErr)
 		}
 	}
 
@@ -264,7 +290,7 @@ func (m *Manager) convertSlug(
 // converted; the final scan reports them as raw or malformed raw records.
 func inspectVersioned(cipher Cipher, row *Row) (string, error) {
 	if !cipher.Versioned(row.Value) {
-		return "", errors.New("record is not a versioned envelope")
+		return "", errRecordNotVersioned
 	}
 
 	kind, _, err := cipher.Inspect(row.Value, row.ID)
@@ -284,32 +310,32 @@ func recordFailure(failures map[string]struct{}, report *Report, row *Row) {
 func (m *Manager) readyReport(ctx context.Context) (Report, error) {
 	report, err := m.Status(ctx)
 	if err != nil {
-		return report, WrapError(err)
+		return report, Wrap(err)
 	}
 
 	reg, err := m.store.Registry(ctx)
 	if err != nil {
-		return report, WrapError(err)
+		return report, Wrap(err)
 	}
 
 	if reg == nil || report.State != Ready || report.Raw != 0 || report.Plaintext != 0 {
-		return report, errors.New("complete content migration first")
+		return report, errMigrationNotComplete
 	}
 
 	err = m.validateKeys(reg, true)
 
-	return report, WrapError(err)
+	return report, Wrap(err)
 }
 
 // Refresh counts after a partial failure when the caller's context still allows reading.
 func (m *Manager) failureReport(ctx context.Context, partial *Report, cause error) (Report, error) {
 	if ctx.Err() != nil {
-		return *partial, WrapError(cause)
+		return *partial, Wrap(cause)
 	}
 
 	current, statusErr := m.Status(ctx)
 	current.Changed, current.Conflicts = partial.Changed, partial.Conflicts
 	current.Pruned = partial.Pruned
 
-	return current, WrapError(errors.Join(unwrapContext(cause), unwrapContext(statusErr)))
+	return current, Wrap(errors.Join(unwrapContext(cause), unwrapContext(statusErr)))
 }

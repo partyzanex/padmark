@@ -26,6 +26,7 @@ func isDisabledAPIPath(path string) bool {
 	return path == "/notes" || strings.HasPrefix(path, "/notes/") ||
 		path == "/links" || strings.HasPrefix(path, "/links/") ||
 		path == apiDocsPath || path == apiSpecPath || path == llmsTxtPath ||
+		path == apiReferencePath ||
 		// Account provisioning (self-service token issuance, invite minting) is part of the
 		// same machine surface: --disable-api is the operator's "headless off" switch, and the
 		// middleware blocks them when reached, like the rest of the API.

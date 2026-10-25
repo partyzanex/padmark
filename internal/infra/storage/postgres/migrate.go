@@ -13,7 +13,12 @@ import (
 
 // Migrate applies all pending goose migrations to the PostgreSQL database.
 func Migrate(ctx context.Context, db *bun.DB) ([]*goose.MigrationResult, error) {
-	return migrate(ctx, db, nil)
+	operationResult, operationErr := migrate(ctx, db, nil)
+	if operationErr != nil {
+		return operationResult, fmt.Errorf("migrate: %w", operationErr)
+	}
+
+	return operationResult, nil
 }
 
 // MigrateWithWarning is Migrate that first logs a WARN listing the pending migration versions and
@@ -22,7 +27,12 @@ func Migrate(ctx context.Context, db *bun.DB) ([]*goose.MigrationResult, error) 
 //
 // Strategy: fail-hard for the migration itself; a failed pending-status lookup is also returned.
 func MigrateWithWarning(ctx context.Context, db *bun.DB, log *slog.Logger) ([]*goose.MigrationResult, error) {
-	return migrate(ctx, db, log)
+	operationResult, operationErr := migrate(ctx, db, log)
+	if operationErr != nil {
+		return operationResult, fmt.Errorf("migrate: %w", operationErr)
+	}
+
+	return operationResult, nil
 }
 
 func migrate(ctx context.Context, db *bun.DB, log *slog.Logger) ([]*goose.MigrationResult, error) {
@@ -34,7 +44,7 @@ func migrate(ctx context.Context, db *bun.DB, log *slog.Logger) ([]*goose.Migrat
 	if log != nil {
 		warnErr := warnPending(ctx, provider, log)
 		if warnErr != nil {
-			return nil, warnErr
+			return nil, fmt.Errorf("warn pending: %w", warnErr)
 		}
 	}
 

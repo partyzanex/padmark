@@ -42,7 +42,12 @@ func (h *PasswordHasher) WithLogger(log *slog.Logger) *PasswordHasher {
 
 // Hash derives an argon2id hash from password (cost parameters embedded in the result).
 func (h *PasswordHasher) Hash(password string) (string, error) {
-	return hashArgon2(password, h.params)
+	operationResult, operationErr := hashArgon2(password, h.params)
+	if operationErr != nil {
+		return operationResult, fmt.Errorf("hash argon2: %w", operationErr)
+	}
+
+	return operationResult, nil
 }
 
 // Verify reports whether password matches storedHash, reading params from the stored hash.
@@ -67,7 +72,12 @@ func verifyLogged(log *slog.Logger, what, storedHash, secret string, ceiling Arg
 // HashPassword hashes a password with the default argon2 cost. Convenience helper for
 // callers that don't tune cost (e.g. tests); production wiring injects a PasswordHasher.
 func HashPassword(password string) (string, error) {
-	return hashArgon2(password, DefaultArgon2Params())
+	operationResult, operationErr := hashArgon2(password, DefaultArgon2Params())
+	if operationErr != nil {
+		return operationResult, fmt.Errorf("hash argon2: %w", operationErr)
+	}
+
+	return operationResult, nil
 }
 
 // VerifyPassword reports whether password matches storedHash (reads embedded params).
@@ -103,12 +113,12 @@ func DeriveUserKey(password, kdfSalt []byte, params Argon2Params) (string, error
 
 	err := params.Validate()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("validate: %w", err)
 	}
 
 	key, err := deriveArgon2Key(password, kdfSalt, params, pwKeyLen)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("derive argon2 key: %w", err)
 	}
 
 	return base64.RawURLEncoding.EncodeToString(key), nil

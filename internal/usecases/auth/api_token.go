@@ -85,12 +85,12 @@ func (m *APITokenManager) CreateAPIToken(
 
 	err = authorizeIssuer(ctx, m.stepUp, usr.ID, issuer)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("authorize issuer: %w", err)
 	}
 
 	plain, err := newAPIToken()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("new apitoken: %w", err)
 	}
 
 	now := time.Now()

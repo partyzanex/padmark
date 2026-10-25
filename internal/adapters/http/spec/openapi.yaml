@@ -19,7 +19,7 @@ info:
     - `public` (default): anyone can read it.
     - `authenticated`: **any** valid credential (a session or an API token) may read it — not just
       the note's creator.
-    - `owner`: only the credential that created the note (see "Edit codes and ownership" below)
+    - `owner`: only the account that created the note (see "Edit codes and ownership" below)
       may read it. Requires `--enable-accounts` and an authenticated session or API token at
       creation time — a request that would produce an ownerless note (anonymous) is rejected with
       `422` instead of silently creating a note nobody, including its creator, could ever read
@@ -52,8 +52,8 @@ info:
     Every note is created with a randomly generated 12-character `edit_code`.  It is returned
     **once** in the `CreateNoteResponse` and is never exposed again.  Store it — it is required
     for `PUT` and `DELETE`, **unless** the note was created while authenticated (a session or an
-    API token): the exact same credential that created it may then edit or delete it without the
-    `edit_code`. This owner check is strict — it never extends to other authenticated users or to
+    API token): any session or API token for that same account may edit or delete it without the
+    `edit_code`. Ownership follows the account ID. It never extends to other users or to
     admins, and it does not apply to notes created anonymously (no owner is recorded, so
     `edit_code` is always required for them, from everyone).
 
@@ -813,7 +813,7 @@ components:
             Who may read the note (default `public` when both this and `private` are omitted;
             no schema-level `default` so the server can tell an omitted field from an explicit
             `public` when resolving the deprecated `private` alias): `public` (anyone), `authenticated` (any valid session or API
-            token, not just the creator), or `owner` (only the exact credential that created
+            token, not just the creator), or `owner` (only the account that created
             it — see "Edit codes and ownership" above). Meaningful when the server is started
             with `--enable-accounts`; `owner` additionally requires the note to actually have an
             owner, i.e. an authenticated caller at creation time — otherwise the request is
@@ -1004,7 +1004,7 @@ components:
           default: "public"
           description: |
             Who may follow the link: `public` (anyone), `authenticated` (any valid session or API
-            token, not just the creator), or `owner` (only the exact credential that created it
+            token, not just the creator), or `owner` (only the account that created it
             — see "Edit codes and ownership" above). `owner` additionally requires the link to
             actually have an owner, i.e. `--enable-accounts` and an authenticated caller —
             otherwise the request is rejected with `422`.

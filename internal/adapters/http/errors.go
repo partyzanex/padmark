@@ -114,3 +114,7 @@ func (h *common) writeError(w http.ResponseWriter, r *http.Request, err error) {
 		h.log.ErrorContext(r.Context(), "write error response", "err", encErr)
 	}
 }
+
+var (
+	errRequestOriginUnavailable = errors.New("request origin unavailable")
+)

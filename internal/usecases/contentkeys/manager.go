@@ -1,16 +1,17 @@
 // Package contentkeys manages encrypted records without invoking read/burn lifecycle operations.
 package contentkeys
 
-// The package godoc lives here, so the generated mocks must not add a second one.
-//go:generate go run go.uber.org/mock/mockgen@latest -source=manager.go -destination=manager_mocks_test.go -package=contentkeys -write_package_comment=false
-
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
+
+	"github.com/partyzanex/padmark/internal/errorcontext"
 )
+
+// The package godoc lives here, so the generated mocks must not add a second one.
+//go:generate go run go.uber.org/mock/mockgen@latest -source=manager.go -destination=manager_mocks_test.go -package=contentkeys -write_package_comment=false
 
 const (
 	Pending   = "pending"
@@ -146,23 +147,28 @@ func New(store Storage, keys Keyring, notes, links Cipher, hasher EditCodeHasher
 
 // Status authenticates envelopes and reports the remaining legacy layers without writing.
 func (m *Manager) Status(ctx context.Context) (Report, error) {
-	return m.status(ctx, nil)
+	operationResult, operationErr := m.status(ctx, nil)
+	if operationErr != nil {
+		return operationResult, fmt.Errorf("status: %w", operationErr)
+	}
+
+	return operationResult, nil
 }
 
 // PrepareServe validates readiness before listeners, lifecycle work or key activation.
 func (m *Manager) PrepareServe(ctx context.Context) error {
 	initErr := m.initialize(ctx)
 	if initErr != nil {
-		return WrapError(initErr)
+		return Wrap(initErr)
 	}
 
 	report, err := m.Status(ctx)
 	if err != nil {
-		return WrapError(err)
+		return Wrap(err)
 	}
 
 	if report.State != Ready || report.Raw != 0 || report.Plaintext != 0 {
-		return errors.New("content migration required; run encryption migrate while all servers are stopped")
+		return ErrMigrationRequired
 	}
 
 	return nil
@@ -172,26 +178,26 @@ func (m *Manager) PrepareServe(ctx context.Context) error {
 func (m *Manager) Register(ctx context.Context, keyID string) error {
 	reg, err := m.store.Registry(ctx)
 	if err != nil {
-		return WrapError(err)
+		return Wrap(err)
 	}
 
 	if reg == nil {
-		return errors.New("initialize encryption with migrate before registering another key")
+		return errMigrationNotInitialized
 	}
 
 	validationErr := m.validateKeys(reg, false)
 	if validationErr != nil {
-		return WrapError(validationErr)
+		return Wrap(validationErr)
 	}
 
 	_, statusErr := m.Status(ctx)
 	if statusErr != nil {
-		return WrapError(statusErr)
+		return Wrap(statusErr)
 	}
 
 	check, err := m.keys.KeyCheck(reg.InstallationID, keyID)
 	if err != nil {
-		return WrapError(err)
+		return Wrap(err)
 	}
 
 	if _, exists := reg.Checks[keyID]; exists {
@@ -200,36 +206,36 @@ func (m *Manager) Register(ctx context.Context, keyID string) error {
 
 	registerErr := m.store.Register(ctx, keyID, check)
 	if registerErr != nil {
-		return WrapError(registerErr)
+		return Wrap(registerErr)
 	}
 
 	reg, err = m.store.Registry(ctx)
 	if err != nil {
-		return WrapError(err)
+		return Wrap(err)
 	}
 
-	return WrapError(m.keys.VerifyKeyCheck(reg.InstallationID, keyID, reg.Checks[keyID]))
+	return Wrap(m.keys.VerifyKeyCheck(reg.InstallationID, keyID, reg.Checks[keyID]))
 }
 
 // CanRemove checks live references; historical registry checks remain to prevent ID reuse.
 // All writers must be stopped until replicas have installed the resulting keyring.
 func (m *Manager) CanRemove(ctx context.Context, keyID string) error {
 	if keyID == m.keys.ActiveKey() {
-		return errors.New("cannot remove the active key")
+		return errCannotRemoveActiveKey
 	}
 
 	prepareErr := m.PrepareServe(ctx)
 	if prepareErr != nil {
-		return WrapError(prepareErr)
+		return Wrap(prepareErr)
 	}
 
 	report, err := m.Status(ctx)
 	if err != nil {
-		return WrapError(err)
+		return Wrap(err)
 	}
 
 	if report.Keys[keyID] != 0 {
-		return errors.New("key is still referenced by encrypted records")
+		return errKeyStillReferenced
 	}
 
 	return nil
@@ -262,12 +268,12 @@ func (m *Manager) walk(ctx context.Context, visit func(Row) error) error {
 
 				err := ctx.Err()
 				if err != nil {
-					return WrapError(err)
+					return Wrap(err)
 				}
 
 				err = visit(*row)
 				if err != nil {
-					return WrapError(err)
+					return Wrap(err)
 				}
 			}
 
@@ -284,23 +290,23 @@ func (m *Manager) validateKeys(reg *Registry, requireActive bool) error {
 	}
 
 	if reg.Phase != Ready && reg.Phase != Pending {
-		return errors.New("invalid encryption migration state")
+		return errInvalidMigrationState
 	}
 
 	_, parseErr := uuid.Parse(reg.InstallationID)
 	if parseErr != nil {
-		return errors.New("invalid encryption installation ID")
+		return errInvalidInstallationID
 	}
 
 	if requireActive && reg.Checks[m.keys.ActiveKey()] == "" {
-		return errors.New("active key is not registered; run encryption register")
+		return errActiveKeyNotRegistered
 	}
 
 	for _, id := range m.keys.KeyIDs() {
 		if check, found := reg.Checks[id]; found {
 			err := m.keys.VerifyKeyCheck(reg.InstallationID, id, check)
 			if err != nil {
-				return WrapError(err)
+				return Wrap(err)
 			}
 		}
 	}
@@ -382,28 +388,28 @@ func (m *Manager) untaggedLegacy(row *Row) bool {
 func (m *Manager) initialize(ctx context.Context) error {
 	reg, err := m.store.Registry(ctx)
 	if err != nil {
-		return WrapError(err)
+		return Wrap(err)
 	}
 
 	if reg == nil {
 		err := m.initializeRegistry(ctx)
 		if err != nil {
-			return WrapError(err)
+			return Wrap(err)
 		}
 
 		reg, err = m.store.Registry(ctx)
 		if err != nil {
-			return WrapError(err)
+			return Wrap(err)
 		}
 	}
 
-	return m.validateKeys(reg, true)
+	return errorcontext.Wrap(m.validateKeys(reg, true), "validate keys")
 }
 
 func (m *Manager) initializeRegistry(ctx context.Context) error {
 	report, err := m.Status(ctx)
 	if err != nil && !onlyCorruptRaw(&report, err) {
-		return WrapError(err)
+		return Wrap(err)
 	}
 
 	reg := &Registry{InstallationID: uuid.NewString(), Phase: Ready, Checks: make(map[string]string)}
@@ -414,13 +420,13 @@ func (m *Manager) initializeRegistry(ctx context.Context) error {
 	for _, id := range m.keys.KeyIDs() {
 		check, err := m.keys.KeyCheck(reg.InstallationID, id)
 		if err != nil {
-			return WrapError(err)
+			return Wrap(err)
 		}
 
 		reg.Checks[id] = check
 	}
 
-	return WrapError(m.store.Initialize(ctx, reg))
+	return Wrap(m.store.Initialize(ctx, reg))
 }
 
 // status removes conversion failures already counted by the final storage scan.
@@ -429,12 +435,12 @@ func (m *Manager) status(ctx context.Context, conversionFailures map[string]stru
 
 	report := newReport("uninitialized")
 	if err != nil {
-		return report, WrapError(err)
+		return report, Wrap(err)
 	}
 
 	validationErr := m.validateKeys(reg, false)
 	if validationErr != nil {
-		return report, WrapError(validationErr)
+		return report, Wrap(validationErr)
 	}
 
 	if reg != nil {
@@ -452,13 +458,13 @@ func (m *Manager) status(ctx context.Context, conversionFailures map[string]stru
 		return nil
 	})
 	if err != nil {
-		return report, WrapError(err)
+		return report, Wrap(err)
 	}
 
 	if report.Failed != 0 {
-		err = invalidRecordsError(&report)
+		validationErr := invalidRecordsError(&report)
 
-		return report, err
+		return report, fmt.Errorf("validate encrypted records: %w", validationErr)
 	}
 
 	return report, nil

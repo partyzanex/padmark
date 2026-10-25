@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/partyzanex/padmark/internal/domain"
+	"github.com/partyzanex/padmark/internal/errorcontext"
 )
 
 // Storage defines persistence operations for notes. Create must atomically claim the ID
@@ -175,18 +176,18 @@ func (m *Manager) Create(ctx context.Context, note *domain.Note) (*domain.Note, 
 
 	err := validateForCreate(note)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("validate for create: %w", err)
 	}
 
 	slug, unlock, err := m.resolveUniqueSlug(ctx, note)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("resolve unique slug: %w", err)
 	}
 	defer unlock()
 
 	hashedCode, hashErr := m.resolveEditCodeHash(note)
 	if hashErr != nil {
-		return nil, hashErr
+		return nil, fmt.Errorf("resolve edit code hash: %w", hashErr)
 	}
 
 	// Create mutates note in place for persistence (hash the edit code, encrypt the content,
@@ -259,7 +260,12 @@ func (m *Manager) Get(ctx context.Context, id string) (*domain.Note, error) {
 		return nil, fmt.Errorf("get note: %w", err)
 	}
 
-	return m.burn.applyPolicy(ctx, id, note)
+	operationResult, operationErr := m.burn.applyPolicy(ctx, id, note)
+	if operationErr != nil {
+		return operationResult, fmt.Errorf("apply policy: %w", operationErr)
+	}
+
+	return operationResult, nil
 }
 
 // View returns a note by ID and increments its view counter.
@@ -267,7 +273,7 @@ func (m *Manager) Get(ctx context.Context, id string) (*domain.Note, error) {
 func (m *Manager) View(ctx context.Context, id string) (*domain.Note, error) {
 	note, err := m.Get(ctx, id)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get: %w", err)
 	}
 
 	m.burn.applyViewIncrement(ctx, id, note)
@@ -280,7 +286,7 @@ func (m *Manager) View(ctx context.Context, id string) (*domain.Note, error) {
 func (m *Manager) ViewPreloaded(ctx context.Context, id string, preloaded *domain.Note) (*domain.Note, error) {
 	note, err := m.burn.applyPolicy(ctx, id, preloaded)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("apply policy: %w", err)
 	}
 
 	m.burn.applyViewIncrement(ctx, id, note)
@@ -293,7 +299,7 @@ func (m *Manager) ViewPreloaded(ctx context.Context, id string, preloaded *domai
 // returned. It never consumes a burn-after-reading note, starts its timer or counts a view, so a
 // caller that must not trigger burn (the editor) still cannot serve an expired note.
 func (m *Manager) EnforceExpiry(ctx context.Context, id string, note *domain.Note) error {
-	return m.burn.enforceExpiry(ctx, id, note)
+	return errorcontext.Wrap(m.burn.enforceExpiry(ctx, id, note), "enforce expiry")
 }
 
 // pinImmutableFields carries forward two fields Update must never let the caller change: the
@@ -405,7 +411,7 @@ func (m *Manager) Update(
 
 	err = pinImmutableFields(note, existing)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("pin immutable fields: %w", err)
 	}
 
 	note.Content, err = m.encryptor.Encrypt(note.Content, dbID)
@@ -458,7 +464,7 @@ func (m *Manager) GetRendered(ctx context.Context, id string) (*domain.Note, str
 
 	rendered, err := m.renderNote(id, note)
 	if err != nil {
-		return nil, "", err
+		return nil, "", fmt.Errorf("render note: %w", err)
 	}
 
 	return note, rendered, nil
@@ -476,7 +482,7 @@ func (m *Manager) GetRenderedPreloaded(
 
 	rendered, err := m.renderNote(id, note)
 	if err != nil {
-		return nil, "", err
+		return nil, "", fmt.Errorf("render note: %w", err)
 	}
 
 	return note, rendered, nil
@@ -532,7 +538,7 @@ func (m *Manager) renderNote(id string, note *domain.Note) (string, error) {
 
 	rendered, err := m.renderContent(dbID, note)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("render content: %w", err)
 	}
 
 	if cacheable && len(rendered) <= maxCachedRenderBytes {

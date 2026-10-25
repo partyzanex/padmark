@@ -2,13 +2,13 @@ package cli
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"strings"
 
 	urcli "github.com/urfave/cli/v3"
 
+	"github.com/partyzanex/padmark/internal/errorcontext"
 	padmark "github.com/partyzanex/padmark/pkg/client"
 )
 
@@ -77,13 +77,13 @@ func createCommand() *urcli.Command {
 // lone --ttl while `edit` silently sent it — an inconsistency. Both now reject it explicitly.
 func validateBurnTTL(cmd *urcli.Command) error {
 	if cmd.IsSet(FlagTTL) && !cmd.Bool(FlagBurn) {
-		return errors.New("--ttl requires --burn (it sets the grace period after the first read)")
+		return errBurnRequiredForTTL
 	}
 
 	// Explicitly negative or zero TTL is a user error (an unset one legitimately means "no
 	// grace period"); silently dropping it would create a non-expiring burn note.
 	if ttl := cmd.Int64(FlagTTL); cmd.IsSet(FlagTTL) && ttl <= 0 {
-		return errors.New("--ttl must be a positive number of seconds")
+		return errNonPositiveTTL
 	}
 
 	return nil
@@ -92,23 +92,23 @@ func validateBurnTTL(cmd *urcli.Command) error {
 func createAction(ctx context.Context, cmd *urcli.Command) error {
 	err := validateBurnTTL(cmd)
 	if err != nil {
-		return err
+		return fmt.Errorf("validate burn TTL: %w", err)
 	}
 
 	content, err := readContent(cmd)
 	if err != nil {
-		return err
+		return fmt.Errorf("read note content: %w", err)
 	}
 
 	if strings.TrimSpace(content) == "" {
-		return errors.New("content must not be empty")
+		return ErrEmptyContent
 	}
 
 	req := buildCreateReq(cmd, content)
 
 	cl, err := newPadmarkClient(cmd)
 	if err != nil {
-		return err
+		return fmt.Errorf("create API client: %w", err)
 	}
 
 	res, err := cl.CreateNote(ctx, req)
@@ -118,10 +118,10 @@ func createAction(ctx context.Context, cmd *urcli.Command) error {
 
 	note, apiErr := handleCreateNoteRes(res)
 	if apiErr != nil {
-		return apiErr
+		return fmt.Errorf("decode create note response: %w", apiErr)
 	}
 
-	return printCreateResult(os.Stdout, resolveServerURL(cmd), note)
+	return errorcontext.Wrap(printCreateResult(os.Stdout, resolveServerURL(cmd), note), "print create result")
 }
 
 func buildCreateReq(cmd *urcli.Command, content string) *padmark.CreateNoteRequest {
@@ -184,21 +184,21 @@ func handleCreateNoteRes(res padmark.CreateNoteRes) (*padmark.CreateNoteResponse
 
 		return &resp, nil
 	case *padmark.CreateNoteBadRequest:
-		return nil, fmt.Errorf("bad request: %s", typed.Message)
+		return nil, fmt.Errorf("%w: %s", ErrBadRequest, typed.Message)
 	case *padmark.CreateNoteUnauthorized:
-		return nil, fmt.Errorf("unauthorized: %s", typed.Message)
+		return nil, fmt.Errorf("%w: %s", ErrUnauthorized, typed.Message)
 	case *padmark.CreateNoteConflict:
-		return nil, fmt.Errorf("slug conflict: %s", typed.Message)
+		return nil, fmt.Errorf("%w: %s", ErrSlugConflict, typed.Message)
 	case *padmark.CreateNoteRequestEntityTooLarge:
-		return nil, fmt.Errorf("content too large: %s", typed.Message)
+		return nil, fmt.Errorf("%w: %s", ErrContentTooLarge, typed.Message)
 	case *padmark.CreateNoteUnprocessableEntity:
-		return nil, fmt.Errorf("validation error: %s", typed.Message)
+		return nil, fmt.Errorf("%w: %s", ErrValidation, typed.Message)
 	case *padmark.CreateNoteServiceUnavailable:
-		return nil, serviceUnavailableError(padmark.ErrorResponse(*typed))
+		return nil, errorcontext.Wrap(serviceUnavailableError(padmark.ErrorResponse(*typed)), "decode create note response")
 	case *padmark.CreateNoteInternalServerError:
-		return nil, fmt.Errorf("server error: %s", typed.Message)
+		return nil, fmt.Errorf("%w: %s", ErrServer, typed.Message)
 	default:
-		return nil, fmt.Errorf("unexpected response type: %T", res)
+		return nil, fmt.Errorf("%w: %T", ErrUnexpectedResponse, res)
 	}
 }
 

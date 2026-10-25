@@ -39,12 +39,12 @@ type ContentKeyring struct {
 // at WARN. The loader never changes the permissions of the operator's file.
 func LoadContentKeyring(path string, log *slog.Logger, opts KeyringLoadOptions) (*ContentKeyring, error) {
 	if path == "" {
-		return nil, errors.New("content keyring file is required")
+		return nil, errKeyringFileRequired
 	}
 
 	err := requireRegularKeyring(path)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("require regular keyring: %w", err)
 	}
 
 	file, err := os.Open(path) //nolint:gosec // explicit operator-supplied secret path
@@ -56,14 +56,14 @@ func LoadContentKeyring(path string, log *slog.Logger, opts KeyringLoadOptions) 
 	if permissionErr != nil {
 		file.Close() //nolint:errcheck,gosec // preserve the primary file validation error
 
-		return nil, permissionErr
+		return nil, fmt.Errorf("check keyring permissions: %w", permissionErr)
 	}
 
 	data, err := io.ReadAll(io.LimitReader(file, maxKeyringSize+1))
 
 	closeErr := file.Close()
 	if err != nil || closeErr != nil || len(data) > maxKeyringSize {
-		return nil, errors.New("content keyring must be readable and within 64 KiB")
+		return nil, errKeyringUnreadableOrTooLarge
 	}
 
 	decoder := json.NewDecoder(bytes.NewReader(data))
@@ -73,17 +73,17 @@ func LoadContentKeyring(path string, log *slog.Logger, opts KeyringLoadOptions) 
 
 	err = decoder.Decode(&keyring)
 	if err != nil {
-		return nil, errors.New("invalid content keyring JSON")
+		return nil, errInvalidKeyringJSON
 	}
 
 	var extra any
 	if decoder.Decode(&extra) != io.EOF || decoder.InputOffset() > maxKeyringSize {
-		return nil, errors.New("content keyring must contain one JSON object within 64 KiB")
+		return nil, errInvalidKeyringDocument
 	}
 
 	_, err = NewContentCipher(keyring.Active, keyring.Keys, "note")
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("new content cipher: %w", err)
 	}
 
 	return &keyring, nil
@@ -146,7 +146,7 @@ func checkKeyringPermissions(path string, file *os.File, log *slog.Logger, opts 
 func (k *ContentKeyring) ForResource(resource string) (*ContentEncryptor, error) {
 	content, err := NewContentCipher(k.Active, k.Keys, resource)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("new content cipher: %w", err)
 	}
 
 	return &ContentEncryptor{ContentCipher: content}, nil

@@ -53,9 +53,9 @@ func (m *Manager) checkReadiness(ctx context.Context) error {
 	case *padmark.ReadyzOK:
 		return nil
 	case *padmark.ErrorResponse:
-		return fmt.Errorf("service unavailable: %s", typed.Message)
+		return fmt.Errorf("%w: %s", ErrServiceUnavailable, typed.Message)
 	default:
-		return fmt.Errorf("unexpected response type: %T", res)
+		return fmt.Errorf("%w: %T", ErrUnexpectedResponse, res)
 	}
 }
 

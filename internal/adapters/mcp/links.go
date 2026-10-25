@@ -2,12 +2,12 @@ package mcp
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/url"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/partyzanex/padmark/internal/errorcontext"
 	padmark "github.com/partyzanex/padmark/pkg/client"
 )
 
@@ -54,20 +54,19 @@ func (m *Manager) createLink(
 	// A bad target URL is a model-fixable mistake; fail up front instead of a 400 round-trip.
 	parsed, err := url.Parse(input.TargetURL)
 	if err != nil || (parsed.Host == "" && parsed.Scheme == "") {
-		return nil, createLinkOutput{}, fmt.Errorf(
-			"target_url %q is not a valid URL (http/https required)", input.TargetURL)
+		return nil, createLinkOutput{}, fmt.Errorf("target_url %q %w", input.TargetURL, errInvalidTargetURL)
 	}
 
 	req := newCreateLinkRequest(input, parsed)
 
 	res, err := m.client.CreateLink(ctx, req)
 	if err != nil {
-		return nil, createLinkOutput{}, transportError("create link", err)
+		return nil, createLinkOutput{}, errorcontext.Wrap(transportError("create link", err), "handle create link")
 	}
 
 	resp, apiErr := mapCreateLinkRes(res)
 	if apiErr != nil {
-		return nil, createLinkOutput{}, apiErr
+		return nil, createLinkOutput{}, fmt.Errorf("map create link res: %w", apiErr)
 	}
 
 	return nil, m.linkOutputFromCreate(resp, input.RevealEditCode), nil
@@ -117,29 +116,31 @@ func (m *Manager) createLinksBulk(
 	ctx context.Context, _ *mcpsdk.CallToolRequest, input createBulkLinksInput,
 ) (*mcpsdk.CallToolResult, createBulkLinksOutput, error) {
 	if len(input.TargetURLs) == 0 {
-		return nil, createBulkLinksOutput{}, errors.New("target_urls must contain at least one URL")
+		return nil, createBulkLinksOutput{}, errEmptyTargetURLs
 	}
 
 	// The padmark contract caps bulk creation at one hundred links per request.
 	const bulkLimit = 100
 	if len(input.TargetURLs) > bulkLimit {
 		return nil, createBulkLinksOutput{},
-			fmt.Errorf("target_urls exceeds the %d-links padmark limit", bulkLimit)
+			fmt.Errorf("%w the %d-links padmark limit", errTooManyTargets, bulkLimit)
 	}
 
 	reqs, buildErr := bulkCreateRequests(input.TargetURLs)
 	if buildErr != nil {
-		return nil, createBulkLinksOutput{}, buildErr
+		return nil, createBulkLinksOutput{}, fmt.Errorf("bulk create requests: %w", buildErr)
 	}
 
 	res, err := m.client.CreateLinksBulk(ctx, &padmark.BulkCreateLinksRequest{Links: reqs})
 	if err != nil {
-		return nil, createBulkLinksOutput{}, transportError("bulk create links", err)
+		return nil, createBulkLinksOutput{}, errorcontext.Wrap(
+			transportError("bulk create links", err), "create bulk links",
+		)
 	}
 
 	resp, apiErr := mapCreateLinksBulkRes(res)
 	if apiErr != nil {
-		return nil, createBulkLinksOutput{}, apiErr
+		return nil, createBulkLinksOutput{}, fmt.Errorf("map create links bulk res: %w", apiErr)
 	}
 
 	return nil, m.bulkLinkOutput(resp), nil
@@ -168,8 +169,7 @@ func bulkCreateRequests(targetURLs []string) ([]padmark.CreateLinkRequest, error
 	for idx, targetURL := range targetURLs {
 		parsed, err := url.Parse(targetURL)
 		if err != nil || (parsed.Host == "" && parsed.Scheme == "") {
-			return nil, fmt.Errorf(
-				"target_urls[%d] %q is not a valid URL (http/https required)", idx, targetURL)
+			return nil, fmt.Errorf("target_urls[%d] %q %w", idx, targetURL, errInvalidTargetURL)
 		}
 
 		req := empty
@@ -185,12 +185,12 @@ func (m *Manager) getLink(
 ) (*mcpsdk.CallToolResult, createLinkOutput, error) {
 	res, err := m.client.GetLink(ctx, padmark.GetLinkParams{ID: input.ID})
 	if err != nil {
-		return nil, createLinkOutput{}, transportError("get link", err)
+		return nil, createLinkOutput{}, errorcontext.Wrap(transportError("get link", err), "handle get link")
 	}
 
 	resp, apiErr := mapGetLinkRes(res)
 	if apiErr != nil {
-		return nil, createLinkOutput{}, apiErr
+		return nil, createLinkOutput{}, fmt.Errorf("map get link res: %w", apiErr)
 	}
 
 	return nil, linkOutputFromLink(resp), nil
@@ -210,12 +210,12 @@ func (m *Manager) deleteLink(
 
 	res, err := m.client.DeleteLink(ctx, params)
 	if err != nil {
-		return nil, deleteNoteOutput{}, transportError("delete link", err)
+		return nil, deleteNoteOutput{}, errorcontext.Wrap(transportError("delete link", err), "handle delete link")
 	}
 
 	apiErr := mapDeleteLinkRes(res)
 	if apiErr != nil {
-		return nil, deleteNoteOutput{}, apiErr
+		return nil, deleteNoteOutput{}, fmt.Errorf("map delete link res: %w", apiErr)
 	}
 
 	return nil, deleteNoteOutput{ID: input.ID, Deleted: true}, nil

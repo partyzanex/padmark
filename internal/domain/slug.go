@@ -55,10 +55,24 @@ const (
 	editCodeLength = 12
 )
 
-func newSlug() (string, error) { return randomString(slugChars, slugLength) }
+func newSlug() (string, error) {
+	operationResult, operationErr := randomString(slugChars, slugLength)
+	if operationErr != nil {
+		return operationResult, fmt.Errorf("random string: %w", operationErr)
+	}
+
+	return operationResult, nil
+}
 
 // NewEditCode generates a random edit code for a newly created note or link.
-func NewEditCode() (string, error) { return randomString(editCodeChars, editCodeLength) }
+func NewEditCode() (string, error) {
+	operationResult, operationErr := randomString(editCodeChars, editCodeLength)
+	if operationErr != nil {
+		return operationResult, fmt.Errorf("random string: %w", operationErr)
+	}
+
+	return operationResult, nil
+}
 
 // HasGeneratedEditCodeShape reports whether code looks like a server-generated edit code (every
 // release, v0.1.6 included, generates 12 chars of [A-Za-z0-9]). A caller-chosen code may share

@@ -9,6 +9,7 @@ import (
 
 	urcli "github.com/urfave/cli/v3"
 
+	"github.com/partyzanex/padmark/internal/errorcontext"
 	padmark "github.com/partyzanex/padmark/pkg/client"
 )
 
@@ -42,7 +43,7 @@ func readStepUp(cmd *urcli.Command) (password, totpCode string, err error) {
 
 	password, err = setupPassword(cmd)
 	if err != nil {
-		return "", "", err
+		return "", "", fmt.Errorf("setup password: %w", err)
 	}
 
 	return password, totpCode, nil
@@ -71,12 +72,12 @@ func createTokenCommand() *urcli.Command {
 func createTokenAction(ctx context.Context, cmd *urcli.Command) error {
 	apiClient, err := newPadmarkClient(cmd)
 	if err != nil {
-		return err
+		return fmt.Errorf("create API client: %w", err)
 	}
 
 	password, totpCode, err := readStepUp(cmd)
 	if err != nil {
-		return err
+		return fmt.Errorf("read step up: %w", err)
 	}
 
 	res, clientErr := apiClient.CreateAPIToken(ctx, padmark.NewOptCreateAPITokenRequest(padmark.CreateAPITokenRequest{
@@ -90,7 +91,7 @@ func createTokenAction(ctx context.Context, cmd *urcli.Command) error {
 
 	token, err := handleCreateAPITokenRes(res)
 	if err != nil {
-		return err
+		return fmt.Errorf("handle create apitoken res: %w", err)
 	}
 
 	// Keep the machine-readable value isolated on stdout; the warning goes to stderr.
@@ -116,19 +117,21 @@ func handleCreateAPITokenRes(res padmark.CreateAPITokenRes) (string, error) {
 	case *padmark.CreateAPITokenResponse:
 		return typed.Token, nil
 	case *padmark.CreateAPITokenUnauthorized:
-		return "", fmt.Errorf("unauthorized: %s", typed.Message)
+		return "", fmt.Errorf("%w: %s", ErrUnauthorized, typed.Message)
 	case *padmark.CreateAPITokenForbidden:
-		return "", fmt.Errorf("step-up refused: %s", typed.Message)
+		return "", fmt.Errorf("%w: %s", ErrStepUpRefused, typed.Message)
 	case *padmark.CreateAPITokenUnprocessableEntity:
-		return "", fmt.Errorf("invalid request: %s", typed.Message)
+		return "", fmt.Errorf("%w: %s", ErrInvalidRequest, typed.Message)
 	case *padmark.CreateAPITokenTooManyRequests:
-		return "", fmt.Errorf("token cap reached (revoke one via /admin): %s", typed.Message)
+		return "", fmt.Errorf("%w: %s", ErrTokenLimit, typed.Message)
 	case *padmark.CreateAPITokenServiceUnavailable:
-		return "", serviceUnavailableError(padmark.ErrorResponse(*typed))
+		return "", errorcontext.Wrap(
+			serviceUnavailableError(padmark.ErrorResponse(*typed)), "decode create API token response",
+		)
 	case *padmark.CreateAPITokenInternalServerError:
-		return "", fmt.Errorf("server error: %s", typed.Message)
+		return "", fmt.Errorf("%w: %s", ErrServer, typed.Message)
 	default:
-		return "", fmt.Errorf("unexpected response type: %T", res)
+		return "", fmt.Errorf("%w: %T", ErrUnexpectedResponse, res)
 	}
 }
 
@@ -148,12 +151,12 @@ func createInviteCommand() *urcli.Command {
 func createInviteAction(ctx context.Context, cmd *urcli.Command) error {
 	apiClient, err := newPadmarkClient(cmd)
 	if err != nil {
-		return err
+		return fmt.Errorf("create API client: %w", err)
 	}
 
 	password, totpCode, err := readStepUp(cmd)
 	if err != nil {
-		return err
+		return fmt.Errorf("read step up: %w", err)
 	}
 
 	res, clientErr := apiClient.CreateInvite(ctx, padmark.NewOptStepUpRequest(padmark.StepUpRequest{
@@ -166,7 +169,7 @@ func createInviteAction(ctx context.Context, cmd *urcli.Command) error {
 
 	inviteURL, err := handleCreateInviteRes(res)
 	if err != nil {
-		return err
+		return fmt.Errorf("handle create invite res: %w", err)
 	}
 
 	ew := &errWriter{w: commandErrWriter(cmd), err: nil}
@@ -191,14 +194,14 @@ func handleCreateInviteRes(res padmark.CreateInviteRes) (string, error) {
 	case *padmark.CreateInviteResponse:
 		return typed.InviteURL.String(), nil
 	case *padmark.CreateInviteUnauthorized:
-		return "", fmt.Errorf("unauthorized: %s", typed.Message)
+		return "", fmt.Errorf("%w: %s", ErrUnauthorized, typed.Message)
 	case *padmark.CreateInviteForbidden:
-		return "", fmt.Errorf("forbidden (admin and a valid step-up required): %s", typed.Message)
+		return "", fmt.Errorf("%w: %s", errAdminStepUpRequired, typed.Message)
 	case *padmark.CreateInviteServiceUnavailable:
-		return "", serviceUnavailableError(padmark.ErrorResponse(*typed))
+		return "", errorcontext.Wrap(serviceUnavailableError(padmark.ErrorResponse(*typed)), "decode create invite response")
 	case *padmark.CreateInviteInternalServerError:
-		return "", fmt.Errorf("server error: %s", typed.Message)
+		return "", fmt.Errorf("%w: %s", ErrServer, typed.Message)
 	default:
-		return "", fmt.Errorf("unexpected response type: %T", res)
+		return "", fmt.Errorf("%w: %T", ErrUnexpectedResponse, res)
 	}
 }

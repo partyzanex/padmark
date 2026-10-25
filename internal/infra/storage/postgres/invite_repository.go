@@ -14,6 +14,7 @@ import (
 	"github.com/uptrace/bun"
 
 	"github.com/partyzanex/padmark/internal/domain"
+	"github.com/partyzanex/padmark/internal/errorcontext"
 )
 
 const (
@@ -117,7 +118,7 @@ func (r *InviteRepository) Consume(ctx context.Context, token, username string) 
 		return nil, fmt.Errorf("consume invite: %w", err)
 	}
 
-	return nil, classifyInviteMiss(ctx, r.db, tokenHash)
+	return nil, errorcontext.Wrap(classifyInviteMiss(ctx, r.db, tokenHash), "handle consume")
 }
 
 // classifyInviteMiss reads the invite row via conn (a *bun.DB or bun.Tx) and returns
@@ -170,10 +171,10 @@ func (r *InviteRepository) RedeemInvite(ctx context.Context, token, username str
 		}
 
 		if affected == 0 {
-			return classifyInviteMiss(ctx, btx, tokenHash)
+			return errorcontext.Wrap(classifyInviteMiss(ctx, btx, tokenHash), "classify invite miss")
 		}
 
-		return insertUser(ctx, btx, usr)
+		return errorcontext.Wrap(insertUser(ctx, btx, usr), "insert user")
 	})
 	if err != nil {
 		return fmt.Errorf("redeem invite: %w", err)

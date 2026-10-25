@@ -12,11 +12,11 @@ import (
 // AddKey adds a random 256-bit KEK; reusing a key ID is rejected.
 func (k *ContentKeyring) AddKey(id string) error {
 	if !validKeyID(id) {
-		return errors.New("invalid content key ID")
+		return ErrInvalidContentKeyID
 	}
 
 	if _, exists := k.Keys[id]; exists {
-		return errors.New("content key ID already exists")
+		return ErrContentKeyIDExists
 	}
 
 	key := make([]byte, aesKeySize)
@@ -40,17 +40,17 @@ func (k *ContentKeyring) AddKey(id string) error {
 func WriteContentKeyring(path string, keyring *ContentKeyring) error {
 	_, validateErr := NewContentCipher(keyring.Active, keyring.Keys, "note")
 	if validateErr != nil {
-		return validateErr
+		return fmt.Errorf("new content cipher: %w", validateErr)
 	}
 
 	data, err := json.Marshal(keyring)
 	if err != nil {
-		return errors.New("encode content keyring")
+		return errEncodeKeyring
 	}
 	defer clear(data)
 
 	if len(data) > maxKeyringSize {
-		return errors.New("content keyring exceeds 64 KiB")
+		return errKeyringTooLarge
 	}
 
 	file, err := os.CreateTemp(filepath.Dir(path), ".padmark-keyring-*")

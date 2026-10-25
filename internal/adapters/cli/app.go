@@ -13,6 +13,7 @@ import (
 
 	urcli "github.com/urfave/cli/v3"
 
+	"github.com/partyzanex/padmark/internal/errorcontext"
 	padmark "github.com/partyzanex/padmark/pkg/client"
 )
 
@@ -74,12 +75,12 @@ func newPadmarkClient(cmd *urcli.Command) (*padmark.Client, error) {
 	// An envelope token carries its own server URL; an explicit --url/PADMARK_URL still wins.
 	token, serverURL, trustErr := resolveTrustedServer(cmd)
 	if trustErr != nil {
-		return nil, trustErr
+		return nil, fmt.Errorf("resolve trusted server: %w", trustErr)
 	}
 
 	insecureErr := checkInsecureToken(commandErrWriter(cmd), serverURL, token, cmd.Bool(FlagAllowInsecureHTTP))
 	if insecureErr != nil {
-		return nil, insecureErr
+		return nil, fmt.Errorf("validate token transport: %w", insecureErr)
 	}
 
 	transport := &bearerTransport{base: http.DefaultTransport, token: token}
@@ -133,7 +134,9 @@ func checkInsecureToken(errOut io.Writer, serverURL, token string, allowInsecure
 		return nil
 	}
 
-	return checkInsecureTransport(errOut, serverURL, "bearer token", allowInsecure)
+	return errorcontext.Wrap(
+		checkInsecureTransport(errOut, serverURL, "bearer token", allowInsecure), "validate token transport",
+	)
 }
 
 // checkInsecureTransport implements the shared policy for checkInsecureToken and
@@ -206,8 +209,7 @@ func readContent(cmd *urcli.Command) (string, error) {
 	// io.ReadAll would block forever, looking like a hang. Fail fast with a clear message.
 	stat, statErr := os.Stdin.Stat()
 	if statErr == nil && isCharDevice(stat.Mode()) {
-		return "", errors.New(
-			"no content provided: pass --content, --file, or pipe content via stdin")
+		return "", errContentRequired
 	}
 
 	data, err := io.ReadAll(os.Stdin)
@@ -228,7 +230,7 @@ func isCharDevice(mode os.FileMode) bool {
 func noteIDArg(cmd *urcli.Command) (string, error) {
 	id := cmd.Args().Get(0)
 	if id == "" {
-		return "", errors.New("note ID is required as the first argument")
+		return "", errNoteIDRequired
 	}
 
 	return id, nil
@@ -238,7 +240,7 @@ func noteIDArg(cmd *urcli.Command) (string, error) {
 func linkIDArg(cmd *urcli.Command) (string, error) {
 	id := cmd.Args().Get(0)
 	if id == "" {
-		return "", errors.New("link ID is required as the first argument")
+		return "", errLinkIDRequired
 	}
 
 	return id, nil
@@ -254,17 +256,17 @@ func runDeleteCommand(
 ) error {
 	id, err := idArg(cmd)
 	if err != nil {
-		return err
+		return fmt.Errorf("read resource ID: %w", err)
 	}
 
 	cl, err := newPadmarkClient(cmd)
 	if err != nil {
-		return err
+		return fmt.Errorf("create API client: %w", err)
 	}
 
 	err = doDelete(ctx, cl, id, cmd.String(FlagEditCode))
 	if err != nil {
-		return err
+		return fmt.Errorf("delete resource: %w", err)
 	}
 
 	ew := &errWriter{w: os.Stdout, err: nil}

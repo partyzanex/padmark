@@ -449,8 +449,11 @@ curl -X POST http://localhost:4000/notes \
 ```
 
 Interactive API docs live at `/api` (Redoc, vendored into the binary and served from `/static/` — no
-CDN fetch, works offline). Raw OpenAPI spec at `/api/openapi.yaml`. A short Markdown
-overview of the machine surface, written for agents in the llms.txt convention, at `/llms.txt`.
+CDN fetch, works offline). Raw OpenAPI spec at `/api/openapi.yaml`. The agent-facing
+`/llms.txt` is a navigation index; `/api/reference.md` contains the detailed API guide,
+including authentication, errors, burn behavior and a safe discovery example.
+These documents are embedded in the same binary. Use all three from the target instance;
+links are relative to that instance's origin, which must be retained when copying the text.
 The API documentation reports the application release version, also shown by `padmark-server --version`.
 Release images receive it from the Git tag during the build; source builds default to the current
 release draft (`0.4.0`). A manual Docker build can set `--build-arg APP_VERSION=0.4.0`.
@@ -551,8 +554,8 @@ Notes for agents:
 - `get_note` is not read-only: reads bump `views`, and the first read of a burn-after-reading
   note destroys it. `get_link` is read-only — burn-after-click fires on the browser redirect
   path, not on metadata.
-- Machine-readable docs: `/llms.txt` (overview) and `/api/openapi.yaml` (full contract); both
-  are served even without a token, and both go away with the REST surface under
+- Machine-readable docs: `/llms.txt` (index), `/api/reference.md` (guide) and
+  `/api/openapi.yaml` (schemas); all are served even without a token and go away with the REST surface under
   `--disable-api`.
 
 ---
@@ -708,7 +711,7 @@ CI/agent deployments and scripting:
   cap); revocation stays admin-panel-only.
 - **`padmark-cli create-invite`** — `POST /api/invites` (admin only, same step-up): prints the
   single-use invite URL once; the invite expires after 24 h.
-- The JSON variant of `POST /setup` is also documented for machine callers in `/llms.txt`:
+- The JSON variant of `POST /setup` is also documented for machine callers in `/api/reference.md`:
   send `{"username", "password", "invite"?}` with `Accept: application/json` — `201` with
   `{"otp_auth_uri"}`, `403` once any account exists, `409` taken username, `410` spent invite,
   `422` weak password. Without `--enable-accounts` the token/invite operations answer `503`.
@@ -993,7 +996,7 @@ There is no destructive encryption down-migration, and older binaries cannot rea
 | `--allow-shared-keyring` | `PADMARK_ALLOW_SHARED_KEYRING` | `false` | Accept a keyring file readable by group or other users (logged at WARN) instead of refusing startup. Only for secret managers that cannot provide an owner-only file; keyrings under `/run/secrets/` are already exempt. Prefer mode `0600`/`0400` |
 | `--enable-accounts` | `PADMARK_ENABLE_ACCOUNTS` | `false` | Enable the TOTP account system (`/setup`, `/login`, `/admin`, privacy-level gating); off = fully public |
 | — | `PADMARK_BOOTSTRAP_TOKEN` | — | Environment only (never a flag). Required to create the first admin via `/setup` without an invite; at least 32 characters (shorter fails startup). Unset = first-admin setup disabled. Never logged; unset it once the admin exists |
-| `--disable-api` | `PADMARK_DISABLE_API` | `false` | Disable the REST/JSON API (`/notes*`, `/links*`, `/api`, `/api/openapi.yaml`, `/llms.txt`, `/api/tokens`, `/api/invites`): the middleware returns `503` with `{"message":"API is disabled","code":"api_disabled"}`. Match `code` to identify the cause; outer middleware may reject a request first. The editor becomes **read-only**: viewing `/{id}` (including JSON/raw reads), `/r/{id}`, account/admin forms and health checks keep working, but publishing or saving from the editor fails with the API-disabled error, because the editor calls `POST /notes` and `PUT /notes/{id}` |
+| `--disable-api` | `PADMARK_DISABLE_API` | `false` | Disable the REST/JSON API (`/notes*`, `/links*`, `/api`, `/api/openapi.yaml`, `/api/reference.md`, `/llms.txt`, `/api/tokens`, `/api/invites`): the middleware returns `503` with `{"message":"API is disabled","code":"api_disabled"}`. Match `code` to identify the cause; outer middleware may reject a request first. The editor becomes **read-only**: viewing `/{id}` (including JSON/raw reads), `/r/{id}`, account/admin forms and health checks keep working, but publishing or saving from the editor fails with the API-disabled error, because the editor calls `POST /notes` and `PUT /notes/{id}` |
 | `--totp-issuer` | `PADMARK_TOTP_ISSUER` | `padmark` | TOTP issuer shown in the authenticator app |
 | `--session-ttl` | `PADMARK_SESSION_TTL` | `2592000` | Session lifetime in seconds (default 30 days) |
 | `--csrf-secret` | `PADMARK_CSRF_SECRET` | — | HMAC key signing CSRF form tokens; raw bytes, **at least 32 characters** (a shorter value is rejected at startup). Empty (default) mints a fresh random secret per process — fine for a single instance, but restarts then invalidate open forms and multiple replicas `403` each other's form submits. Generate with `openssl rand -base64 32` and share the same value across replicas |

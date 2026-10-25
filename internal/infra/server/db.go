@@ -37,7 +37,7 @@ var errInvalidPostgresDSN = errors.New("invalid postgres dsn")
 func openPostgresDB(dsn string, _ *slog.Logger) (db *bun.DB, err error) {
 	err = validatePostgresDSN(dsn)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("validate postgres dsn: %w", err)
 	}
 
 	defer func() {
@@ -88,12 +88,12 @@ func openDB(ctx context.Context, storage, dsn string, log *slog.Logger) (*bun.DB
 
 	opener, ok := openers[storage]
 	if !ok {
-		return nil, fmt.Errorf("unknown storage backend %q: supported backends: postgres, sqlite", storage)
+		return nil, fmt.Errorf("%w %q: supported backends: postgres, sqlite", errUnknownStorage, storage)
 	}
 
 	db, err := opener(dsn, log)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("opener: %w", err)
 	}
 
 	err = db.PingContext(ctx)
@@ -194,7 +194,7 @@ func parseTrustedProxies(raw string) ([]*net.IPNet, error) {
 		if !strings.Contains(cidr, "/") {
 			ip := net.ParseIP(cidr)
 			if ip == nil {
-				return nil, fmt.Errorf("invalid trusted proxy address: %q", cidr)
+				return nil, fmt.Errorf("%w: %q", errInvalidTrustedProxy, cidr)
 			}
 
 			if ip.To4() != nil {

@@ -17,11 +17,11 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/uptrace/bun"
 	"github.com/urfave/cli/v3"
 
-	"github.com/uptrace/bun"
-
 	adaptershttp "github.com/partyzanex/padmark/internal/adapters/http"
+	"github.com/partyzanex/padmark/internal/errorcontext"
 	"github.com/partyzanex/padmark/internal/infra/crypto"
 	"github.com/partyzanex/padmark/internal/infra/linkcache"
 	"github.com/partyzanex/padmark/internal/infra/linkmetrics"
@@ -59,8 +59,8 @@ const (
 // startup rather than leaving the bootstrap guessable. The value never appears in errors or logs.
 func parseBootstrapToken(raw string) (string, error) {
 	if raw != "" && len(raw) < minBootstrapTokenLen {
-		return "", fmt.Errorf("%s must be at least %d characters, got %d",
-			EnvBootstrapToken, minBootstrapTokenLen, len(raw))
+		return "", fmt.Errorf("%w: %s must be at least %d characters, got %d",
+			errInvalidBootstrapToken, EnvBootstrapToken, minBootstrapTokenLen, len(raw))
 	}
 
 	return raw, nil
@@ -78,7 +78,8 @@ func parseCSRFSecret(raw string) ([]byte, error) {
 	}
 
 	if len(raw) < minCSRFSecretLen {
-		return nil, fmt.Errorf("csrf secret must be at least %d characters, got %d", minCSRFSecretLen, len(raw))
+		return nil, fmt.Errorf("%w: csrf secret must be at least %d "+
+			"characters, got %d", errInvalidCSRFSecret, minCSRFSecretLen, len(raw))
 	}
 
 	return []byte(raw), nil
@@ -146,7 +147,7 @@ func buildRouter(
 ) (http.Handler, error) {
 	trustedProxies, err := parseTrustedProxies(cmd.String(FlagTrustedProxies))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("parse trusted proxies: %w", err)
 	}
 
 	// A warning rather than a startup error: the flag is still parseable and the operator may
@@ -164,12 +165,12 @@ func buildRouter(
 
 	publicScheme, err := parsePublicScheme(cmd.String(FlagPublicScheme))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("parse public scheme: %w", err)
 	}
 
 	csrfSecret, err := parseCSRFSecret(cmd.String(FlagCSRFSecret))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("parse CSRF secret: %w", err)
 	}
 
 	// The per-process fallback is a deliberate, documented default rather than a startup failure:
@@ -357,7 +358,7 @@ func runServer(ctx context.Context, cmd *cli.Command, router http.Handler, log *
 	tlsKey := cmd.String(FlagTLSKey)
 
 	if (tlsCert == "") != (tlsKey == "") {
-		return errors.New("--tls-cert and --tls-key must both be set to enable TLS")
+		return errIncompleteTLSConfig
 	}
 
 	srv := newMainServer(
@@ -380,7 +381,7 @@ func runServer(ctx context.Context, cmd *cli.Command, router http.Handler, log *
 		}
 	}
 
-	return waitAndShutdown(serverCtx)
+	return errorcontext.Wrap(waitAndShutdown(serverCtx), "wait and shutdown")
 }
 
 // waitAndShutdown blocks until SIGINT/SIGTERM arrives or serverCtx is cancelled (the main
@@ -407,7 +408,11 @@ func waitAndShutdown(serverCtx context.Context) error {
 		return errors.Join(fmt.Errorf("server: %w", context.Cause(serverCtx)), shutdownErr)
 	}
 
-	return shutdownErr
+	if shutdownErr != nil {
+		return fmt.Errorf("shutdown server: %w", shutdownErr)
+	}
+
+	return nil
 }
 
 // attachAccountSystem wires the opt-in TOTP account manager onto the handler when
@@ -553,7 +558,7 @@ func buildHandlers(
 
 	handler, err = attachAccountSystem(ctx, cmd, handler, userRepo, inviteRepo, sessionRepo, apiTokenRepo, log)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("attach account system: %w", err)
 	}
 
 	ogenHandler := adaptershttp.NewOgenHandler(manager, linkManager, db.DB, log)
@@ -572,14 +577,14 @@ func initRepos(
 	case storagePostgres:
 		repo, err = initPostgresStorage(ctx, db, log)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, fmt.Errorf("init postgres storage: %w", err)
 		}
 
 		linkRepo = newPostgresLinkRepository(db)
 	default:
 		repo, err = initSQLiteStorage(ctx, db, log, opts)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, fmt.Errorf("init sqlite storage: %w", err)
 		}
 
 		linkRepo = newSQLiteLinkRepository(db)
@@ -591,7 +596,7 @@ func initRepos(
 func serverAction(ctx context.Context, cmd *cli.Command) error {
 	bootstrapToken, err := validateStartupSecrets(cmd)
 	if err != nil {
-		return err
+		return fmt.Errorf("validate startup secrets: %w", err)
 	}
 
 	// Bound concurrent argon2id workspace before any hasher can run (validated above).
@@ -617,7 +622,7 @@ func serverAction(ctx context.Context, cmd *cli.Command) error {
 	repo, linkRepo, err := initRepos(ctx, storage, db, log,
 		migrationOptions{dsn: dsn, skipBackup: cmd.Bool(FlagSkipMigrationBackup)})
 	if err != nil {
-		return err
+		return fmt.Errorf("init repos: %w", err)
 	}
 
 	err = validateContentEncryption(ctx, db, keyring, encryptionHasher(cmd), log)
@@ -627,17 +632,17 @@ func serverAction(ctx context.Context, cmd *cli.Command) error {
 
 	metricsRegistry, linkMetrics, err := newMetricsRegistry()
 	if err != nil {
-		return err
+		return fmt.Errorf("create metrics registry: %w", err)
 	}
 
 	handler, ogenHandler, err := buildHandlers(ctx, cmd, storage, db, repo, linkRepo, log, linkMetrics, keyring)
 	if err != nil {
-		return err
+		return fmt.Errorf("build request handlers: %w", err)
 	}
 
 	router, err := buildRouter(ctx, cmd, handler, ogenHandler, log, bootstrapToken)
 	if err != nil {
-		return err
+		return fmt.Errorf("build router: %w", err)
 	}
 
 	if metricsAddr := cmd.String(FlagMetricsAddr); metricsAddr != "" {
@@ -650,7 +655,7 @@ func serverAction(ctx context.Context, cmd *cli.Command) error {
 		"tls", cmd.String(FlagTLSCert) != "",
 	)
 
-	return runServer(ctx, cmd, router, log)
+	return errorcontext.Wrap(runServer(ctx, cmd, router, log), "run server")
 }
 
 // errRemovedAuthTokens is returned when the removed --auth-tokens / PADMARK_AUTH_TOKENS is set.
@@ -674,7 +679,7 @@ func validateStartupSecrets(cmd *cli.Command) (string, error) {
 
 	argonErr := validateArgon2Config(cmd)
 	if argonErr != nil {
-		return "", argonErr
+		return "", fmt.Errorf("validate argon2 config: %w", argonErr)
 	}
 
 	bootstrapToken, tokenErr := parseBootstrapToken(os.Getenv(EnvBootstrapToken))
@@ -705,8 +710,8 @@ func validateArgon2Config(cmd *cli.Command) error {
 func validateArgon2MemoryBudget(cmd *cli.Command) error {
 	budget, memory := cmd.Int(FlagArgon2MemoryBudget), cmd.Int(FlagArgon2Memory)
 	if budget < memory {
-		return fmt.Errorf("--%s (%d KiB) must be at least --%s (%d KiB)",
-			FlagArgon2MemoryBudget, budget, FlagArgon2Memory, memory)
+		return fmt.Errorf("%w: --%s (%d KiB) must be at least --%s (%d "+
+			"KiB)", errInvalidArgon2Budget, FlagArgon2MemoryBudget, budget, FlagArgon2Memory, memory)
 	}
 
 	return nil

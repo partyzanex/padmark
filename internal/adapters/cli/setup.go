@@ -12,6 +12,8 @@ import (
 	"strings"
 
 	urcli "github.com/urfave/cli/v3"
+
+	"github.com/partyzanex/padmark/internal/errorcontext"
 )
 
 func setupCommand() *urcli.Command {
@@ -49,7 +51,7 @@ func setupCommand() *urcli.Command {
 func setupAction(ctx context.Context, cmd *urcli.Command) error {
 	username := cmd.String(FlagUsername)
 	if strings.TrimSpace(username) == "" {
-		return errors.New("--username is required")
+		return errUsernameRequired
 	}
 
 	// The trust gate runs before stdin is consumed, before the insecure warning and before any
@@ -57,12 +59,12 @@ func setupAction(ctx context.Context, cmd *urcli.Command) error {
 	// Setup is unauthenticated, so the bearer key itself is deliberately not sent.
 	_, serverURL, trustErr := resolveTrustedServer(cmd)
 	if trustErr != nil {
-		return trustErr
+		return fmt.Errorf("resolve trusted server: %w", trustErr)
 	}
 
 	password, err := setupPassword(cmd)
 	if err != nil {
-		return err
+		return fmt.Errorf("setup password: %w", err)
 	}
 
 	invite := cmd.String(FlagInvite)
@@ -91,7 +93,7 @@ func setupAction(ctx context.Context, cmd *urcli.Command) error {
 	// Same policy as the token flow: secrets must not travel in cleartext silently.
 	insecureErr := checkInsecureSetup(commandErrWriter(cmd), endpoint, cmd.Bool(FlagAllowInsecureHTTP))
 	if insecureErr != nil {
-		return insecureErr
+		return fmt.Errorf("check insecure setup: %w", insecureErr)
 	}
 
 	httpClient := &http.Client{Timeout: cmd.Duration(FlagTimeout)}
@@ -111,13 +113,16 @@ func setupAction(ctx context.Context, cmd *urcli.Command) error {
 	// Body-close failure cannot change the command outcome; the config reports blank assigns.
 	defer func() { _ = resp.Body.Close() }() //nolint:errcheck // see the comment above
 
-	return handleSetupRes(commandErrWriter(cmd), resp)
+	return errorcontext.Wrap(handleSetupRes(commandErrWriter(cmd), resp), "decode setup response")
 }
 
 // checkInsecureSetup guards the initial admin's password (and the returned TOTP secret, an
 // equivalent credential) against cleartext transport with the same policy as checkInsecureToken.
 func checkInsecureSetup(errOut io.Writer, serverURL string, allowInsecure bool) error {
-	return checkInsecureTransport(errOut, serverURL, "the initial admin password and TOTP secret", allowInsecure)
+	return errorcontext.Wrap(
+		checkInsecureTransport(errOut, serverURL, "the initial admin password and TOTP secret", allowInsecure),
+		"validate setup transport",
+	)
 }
 
 // setupJSONHeaders marks the request as the machine-readable setup variant: application/json
@@ -171,10 +176,10 @@ func handleSetupRes(errOut io.Writer, resp *http.Response) error {
 
 		parseErr := json.Unmarshal(body, &apiErr)
 		if parseErr != nil || apiErr.Message == "" {
-			return fmt.Errorf("setup failed: HTTP %d", resp.StatusCode)
+			return fmt.Errorf("%w: HTTP %d", ErrSetupFailed, resp.StatusCode)
 		}
 
-		return fmt.Errorf("setup failed: %s", apiErr.Message)
+		return fmt.Errorf("%w: %s", ErrSetupFailed, apiErr.Message)
 	}
 
 	var out struct {
@@ -190,7 +195,7 @@ func handleSetupRes(errOut io.Writer, resp *http.Response) error {
 	ew.printf("TOTP URI (and its secret) is shown exactly once — scan it now or save it.\n")
 
 	if out.OTPAuthURI == "" {
-		return errors.New("setup succeeded but the response carries no otpauth_uri")
+		return errSetupMissingOTPURI
 	}
 
 	// Single-line stdout print: piped-safe, machine-consumable.

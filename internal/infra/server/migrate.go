@@ -62,7 +62,7 @@ func migrateAction(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	if err != nil {
-		return err
+		return fmt.Errorf("init sqlite storage: %w", err)
 	}
 
 	log.InfoContext(ctx, "migrations applied successfully")

@@ -3,6 +3,9 @@ package contentkeys
 import (
 	"context"
 	"errors"
+	"fmt"
+
+	"github.com/partyzanex/padmark/internal/errorcontext"
 )
 
 const (
@@ -24,12 +27,12 @@ func (m *Manager) PruneCorrupt(ctx context.Context, dryRun bool) (Report, error)
 	report, err := m.Status(ctx)
 	if dryRun {
 		if err != nil && !errors.Is(err, errInvalidRecords) {
-			return report, WrapError(err)
+			return report, Wrap(err)
 		}
 
 		listErr := m.listCandidates(ctx, &report)
 		if listErr != nil {
-			return report, WrapError(listErr)
+			return report, Wrap(listErr)
 		}
 
 		// Malformed raw data alone is what a prune run resolves, so the preview succeeds; untagged
@@ -38,21 +41,38 @@ func (m *Manager) PruneCorrupt(ctx context.Context, dryRun bool) (Report, error)
 			return report, nil
 		}
 
-		return report, WrapError(err)
+		return report, Wrap(err)
 	}
 
 	if err != nil && !onlyCorruptRaw(&report, err) {
-		return report, WrapError(err)
+		return report, Wrap(err)
 	}
 
-	err = m.walk(ctx, func(row Row) error {
+	err = m.deleteCorruptRows(ctx, &report)
+	if err != nil {
+		operationResult, operationErr := m.failureReport(ctx, &report, err)
+		if operationErr != nil {
+			return operationResult, fmt.Errorf("failure report: %w", operationErr)
+		}
+
+		return operationResult, nil
+	}
+
+	final, err := m.Status(ctx)
+	final.Pruned, final.Conflicts = report.Pruned, report.Conflicts
+
+	return final, Wrap(err)
+}
+
+func (m *Manager) deleteCorruptRows(ctx context.Context, report *Report) error {
+	return errorcontext.Wrap(m.walk(ctx, func(row Row) error {
 		if m.pruneReason(&row) != reasonCorruptRaw {
 			return nil
 		}
 
-		deleted, deleteErr := m.store.Delete(ctx, row)
-		if deleteErr != nil {
-			return WrapError(deleteErr)
+		deleted, err := m.store.Delete(ctx, row)
+		if err != nil {
+			return Wrap(err)
 		}
 
 		if deleted {
@@ -62,15 +82,7 @@ func (m *Manager) PruneCorrupt(ctx context.Context, dryRun bool) (Report, error)
 		}
 
 		return nil
-	})
-	if err != nil {
-		return m.failureReport(ctx, &report, err)
-	}
-
-	final, err := m.Status(ctx)
-	final.Pruned, final.Conflicts = report.Pruned, report.Conflicts
-
-	return final, WrapError(err)
+	}), "delete corrupt rows")
 }
 
 // pruneReason classifies a row for pruning: reasonCorruptRaw for malformed raw data that prune
@@ -93,12 +105,12 @@ func (m *Manager) pruneReason(row *Row) string {
 
 // listCandidates adds every record a prune run would delete or refuses to delete to the report.
 func (m *Manager) listCandidates(ctx context.Context, report *Report) error {
-	return m.walk(ctx, func(row Row) error {
+	return errorcontext.Wrap(m.walk(ctx, func(row Row) error {
 		reason := m.pruneReason(&row)
 		if reason != "" {
 			report.Candidates = append(report.Candidates, Candidate{Resource: row.Resource, ID: row.ID, Reason: reason})
 		}
 
 		return nil
-	})
+	}), "walk")
 }

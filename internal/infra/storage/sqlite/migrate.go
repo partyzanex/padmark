@@ -13,6 +13,7 @@ import (
 	"github.com/pressly/goose/v3"
 	"github.com/uptrace/bun"
 
+	"github.com/partyzanex/padmark/internal/errorcontext"
 	sqlitemigrations "github.com/partyzanex/padmark/migrations/sqlite"
 )
 
@@ -31,10 +32,15 @@ func newProvider(db *bun.DB) (*goose.Provider, error) {
 func Migrate(ctx context.Context, db *bun.DB) ([]*goose.MigrationResult, error) {
 	provider, err := newProvider(db)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("new provider: %w", err)
 	}
 
-	return up(ctx, provider)
+	operationResult, operationErr := up(ctx, provider)
+	if operationErr != nil {
+		return operationResult, fmt.Errorf("up: %w", operationErr)
+	}
+
+	return operationResult, nil
 }
 
 // MigrateWithBackup applies pending migrations like Migrate, but first copies a file-backed
@@ -49,14 +55,14 @@ func MigrateWithBackup(
 ) ([]*goose.MigrationResult, error) {
 	provider, err := newProvider(db)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("new provider: %w", err)
 	}
 
 	path, _ := dbFilePath(dsn)
 	if path != "" {
 		applied, pending, countErr := countMigrations(ctx, provider)
 		if countErr != nil {
-			return nil, countErr
+			return nil, fmt.Errorf("count migrations: %w", countErr)
 		}
 
 		// A brand-new install (nothing applied yet) has no data worth a backup.
@@ -73,7 +79,12 @@ func MigrateWithBackup(
 		}
 	}
 
-	return up(ctx, provider)
+	operationResult, operationErr := up(ctx, provider)
+	if operationErr != nil {
+		return operationResult, fmt.Errorf("up: %w", operationErr)
+	}
+
+	return operationResult, nil
 }
 
 func up(ctx context.Context, provider *goose.Provider) ([]*goose.MigrationResult, error) {
@@ -107,7 +118,7 @@ func countMigrations(ctx context.Context, provider *goose.Provider) (applied, pe
 func backupDB(ctx context.Context, db *bun.DB, preferred string, log *slog.Logger) (string, error) {
 	backupPath, err := reserveBackupFile(preferred)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("reserve backup file: %w", err)
 	}
 
 	quoted := "'" + strings.ReplaceAll(backupPath, "'", "''") + "'"
@@ -122,7 +133,7 @@ func backupDB(ctx context.Context, db *bun.DB, preferred string, log *slog.Logge
 		return "", fmt.Errorf("vacuum into: %w", err)
 	}
 
-	return backupPath, restrictDBFile(backupPath, false, log)
+	return backupPath, errorcontext.Wrap(restrictDBFile(backupPath, false, log), "handle backup db")
 }
 
 func reserveBackupFile(preferred string) (string, error) {

@@ -3,6 +3,7 @@ package http
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -160,7 +161,7 @@ func (h *OgenHandler) UpdateNote(
 func noteUpdatePayload(req *ogenapi.UpdateNoteRequest) (*domain.Note, error) {
 	privacy, err := resolvePrivacy(req.Private, optUpdatePrivacyPtr(req.Privacy)) //nolint:staticcheck // deprecated alias
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("resolve privacy: %w", err)
 	}
 
 	burnAfterReading := req.BurnAfterReading.Or(false)

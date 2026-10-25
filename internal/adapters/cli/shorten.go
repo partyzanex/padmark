@@ -2,13 +2,13 @@ package cli
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/url"
 	"os"
 
 	urcli "github.com/urfave/cli/v3"
 
+	"github.com/partyzanex/padmark/internal/errorcontext"
 	padmark "github.com/partyzanex/padmark/pkg/client"
 )
 
@@ -58,12 +58,12 @@ func shortenCommand() *urcli.Command {
 func shortenAction(ctx context.Context, cmd *urcli.Command) error {
 	req, err := buildShortenReq(cmd)
 	if err != nil {
-		return err
+		return fmt.Errorf("build shorten req: %w", err)
 	}
 
 	cl, err := newPadmarkClient(cmd)
 	if err != nil {
-		return err
+		return fmt.Errorf("create API client: %w", err)
 	}
 
 	res, err := cl.CreateLink(ctx, req)
@@ -73,10 +73,10 @@ func shortenAction(ctx context.Context, cmd *urcli.Command) error {
 
 	link, apiErr := handleCreateLinkRes(res)
 	if apiErr != nil {
-		return apiErr
+		return fmt.Errorf("decode create link response: %w", apiErr)
 	}
 
-	return printCreateLinkResult(os.Stdout, resolveServerURL(cmd), link)
+	return errorcontext.Wrap(printCreateLinkResult(os.Stdout, resolveServerURL(cmd), link), "print create link result")
 }
 
 func buildShortenReq(cmd *urcli.Command) (*padmark.CreateLinkRequest, error) {
@@ -88,7 +88,7 @@ func buildShortenReq(cmd *urcli.Command) (*padmark.CreateLinkRequest, error) {
 	// Only an explicitly set non-positive TTL is a user error — an unset TTL legitimately means
 	// "no expiry", and flag zero values must never fail.
 	if ttl := cmd.Int64(FlagTTL); cmd.IsSet(FlagTTL) && ttl <= 0 {
-		return nil, fmt.Errorf("invalid --%s: must be a positive number of seconds (omit for no expiry)", FlagTTL)
+		return nil, fmt.Errorf("invalid --%s: %w", FlagTTL, errLinkTTL)
 	}
 
 	req := &padmark.CreateLinkRequest{
@@ -137,22 +137,22 @@ func handleCreateLinkRes(res padmark.CreateLinkRes) (*padmark.CreateLinkResponse
 
 		return &resp, nil
 	case *padmark.CreateLinkBadRequest:
-		return nil, fmt.Errorf("bad request: %s", typed.Message)
+		return nil, fmt.Errorf("%w: %s", ErrBadRequest, typed.Message)
 	case *padmark.CreateLinkUnauthorized:
-		return nil, fmt.Errorf("unauthorized: %s", typed.Message)
+		return nil, fmt.Errorf("%w: %s", ErrUnauthorized, typed.Message)
 	case *padmark.CreateLinkConflict:
-		return nil, fmt.Errorf("slug conflict: %s", typed.Message)
+		return nil, fmt.Errorf("%w: %s", ErrSlugConflict, typed.Message)
 	case *padmark.CreateLinkRequestEntityTooLarge:
-		return nil, fmt.Errorf("request too large: %s", typed.Message)
+		return nil, fmt.Errorf("%w: %s", ErrRequestTooLarge, typed.Message)
 	case *padmark.CreateLinkUnprocessableEntity:
-		return nil, fmt.Errorf("validation error: %s", typed.Message)
+		return nil, fmt.Errorf("%w: %s", ErrValidation, typed.Message)
 	case *padmark.CreateLinkTooManyRequests:
-		return nil, errors.New("rate limit exceeded, try again later")
+		return nil, ErrRateLimited
 	case *padmark.CreateLinkServiceUnavailable:
-		return nil, serviceUnavailableError(padmark.ErrorResponse(*typed))
+		return nil, errorcontext.Wrap(serviceUnavailableError(padmark.ErrorResponse(*typed)), "decode create link response")
 	case *padmark.CreateLinkInternalServerError:
-		return nil, fmt.Errorf("server error: %s", typed.Message)
+		return nil, fmt.Errorf("%w: %s", ErrServer, typed.Message)
 	default:
-		return nil, fmt.Errorf("unexpected response type: %T", res)
+		return nil, fmt.Errorf("%w: %T", ErrUnexpectedResponse, res)
 	}
 }

@@ -14,7 +14,7 @@ func parsePublicScheme(raw string) (string, error) {
 	case "", "http", "https":
 		return raw, nil
 	default:
-		return "", fmt.Errorf("invalid public scheme %q: must be %q or %q", raw, "http", "https")
+		return "", fmt.Errorf("%w %q: must be %q or %q", errInvalidPublicScheme, raw, "http", "https")
 	}
 }
 

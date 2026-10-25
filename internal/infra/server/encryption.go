@@ -14,6 +14,7 @@ import (
 	"github.com/uptrace/bun"
 	"github.com/urfave/cli/v3"
 
+	"github.com/partyzanex/padmark/internal/errorcontext"
 	"github.com/partyzanex/padmark/internal/infra/crypto"
 	keyrepo "github.com/partyzanex/padmark/internal/infra/storage/contentkeys"
 	"github.com/partyzanex/padmark/internal/usecases/contentkeys"
@@ -106,14 +107,12 @@ func newEncryptionManager(
 ) (*contentkeys.Manager, error) {
 	notes, err := keyring.ForResource("note")
 	if err != nil {
-		//nolint:wrapcheck // WrapError adds shared encryption context.
-		return nil, contentkeys.WrapError(err)
+		return nil, contentkeys.Wrap(err)
 	}
 
 	links, err := keyring.ForResource("link")
 	if err != nil {
-		//nolint:wrapcheck // WrapError adds shared encryption context.
-		return nil, contentkeys.WrapError(err)
+		return nil, contentkeys.Wrap(err)
 	}
 
 	return contentkeys.New(keyrepo.New(db), keyring, notes, links, hasher), nil
@@ -121,11 +120,11 @@ func newEncryptionManager(
 
 func validateEncryptionFlags(cmd *cli.Command) error {
 	if cmd.Name == encryptionPrune && !cmd.Bool(flagCorrupt) {
-		return errors.New("prune requires --corrupt; preview permanent raw-record deletion with --corrupt --dry-run")
+		return errPruneRequiresCorrupt
 	}
 
 	if cmd.Name == encryptionMark && cmd.String(flagNoteID) == "" {
-		return errors.New("mark-legacy requires --id; list candidate IDs with prune --corrupt --dry-run")
+		return errMarkLegacyRequiresID
 	}
 
 	if !cmd.Bool(flagDryRun) {
@@ -136,18 +135,18 @@ func validateEncryptionFlags(cmd *cli.Command) error {
 	case encryptionMigrate, encryptionRewrap, encryptionConvert, encryptionPrune:
 		return nil
 	default:
-		return errors.New("--dry-run is supported only by migrate, rewrap, convert and prune; status is always read-only")
+		return errUnsupportedDryRun
 	}
 }
 
 func encryptionAction(ctx context.Context, cmd *cli.Command) error {
 	flagErr := validateEncryptionFlags(cmd)
 	if flagErr != nil {
-		return flagErr
+		return fmt.Errorf("validate encryption flags: %w", flagErr)
 	}
 
 	if cmd.Name == "keygen" {
-		return generateKeyring(cmd)
+		return errorcontext.Wrap(generateKeyring(cmd), "generate keyring")
 	}
 
 	log := newLogger(DefaultLogLevel, DefaultLogFormat)
@@ -155,23 +154,21 @@ func encryptionAction(ctx context.Context, cmd *cli.Command) error {
 	keyring, err := loadToolKeyring(cmd.String(FlagContentKeyring), cmd.String(FlagStorage), cmd.String(FlagDSN),
 		cmd.Bool(FlagAllowSharedKeyring), log)
 	if err != nil {
-		//nolint:wrapcheck // WrapError adds shared encryption context.
-		return contentkeys.WrapError(err)
+		return contentkeys.Wrap(err)
 	}
 
 	if cmd.Name == "key-add" {
 		err = keyring.AddKey(cmd.String(flagKeyID))
 		if err != nil {
-			//nolint:wrapcheck // WrapError adds shared encryption context.
-			return contentkeys.WrapError(err)
+			return contentkeys.Wrap(err)
 		}
 
-		return writeKeyring(cmd, keyring)
+		return errorcontext.Wrap(writeKeyring(cmd, keyring), "write keyring")
 	}
 
 	argonErr := validateArgon2Config(cmd)
 	if argonErr != nil {
-		return argonErr
+		return fmt.Errorf("validate argon2 config: %w", argonErr)
 	}
 
 	// Bound argon2id workspace before converted legacy edit codes are hashed.
@@ -179,18 +176,16 @@ func encryptionAction(ctx context.Context, cmd *cli.Command) error {
 
 	db, err := openDB(ctx, cmd.String(FlagStorage), cmd.String(FlagDSN), log)
 	if err != nil {
-		//nolint:wrapcheck // WrapError adds shared encryption context.
-		return contentkeys.WrapError(err)
+		return contentkeys.Wrap(err)
 	}
 	defer db.Close() //nolint:errcheck // all mutations commit before returning
 
 	manager, err := newEncryptionManager(db, keyring, encryptionHasher(cmd))
 	if err != nil {
-		//nolint:wrapcheck // WrapError adds shared encryption context.
-		return contentkeys.WrapError(err)
+		return contentkeys.Wrap(err)
 	}
 
-	return runEncryptionOperation(ctx, cmd, db, keyring, manager)
+	return errorcontext.Wrap(runEncryptionOperation(ctx, cmd, db, keyring, manager), "run encryption operation")
 }
 
 func runEncryptionOperation(ctx context.Context, cmd *cli.Command, db *bun.DB,
@@ -199,51 +194,46 @@ func runEncryptionOperation(ctx context.Context, cmd *cli.Command, db *bun.DB,
 
 	switch cmd.Name {
 	case "register":
-		//nolint:wrapcheck // WrapError adds shared encryption context.
-		return contentkeys.WrapError(manager.Register(ctx, cmd.String(flagKeyID)))
+		return contentkeys.Wrap(manager.Register(ctx, cmd.String(flagKeyID)))
 	case "key-activate":
 		reg, readErr := keyrepo.New(db).Registry(ctx)
 		if readErr != nil {
-			//nolint:wrapcheck // WrapError adds shared encryption context.
-			return contentkeys.WrapError(readErr)
+			return contentkeys.Wrap(readErr)
 		}
 
 		if reg == nil {
-			return errors.New("initialize and register the key before activation")
+			return errActivateUnregisteredKey
 		}
 
 		keyring.Active = cmd.String(flagKeyID)
 
 		manager, err = newEncryptionManager(db, keyring, encryptionHasher(cmd))
 		if err != nil {
-			//nolint:wrapcheck // WrapError adds shared encryption context.
-			return contentkeys.WrapError(err)
+			return contentkeys.Wrap(err)
 		}
 
 		err := manager.PrepareServe(ctx)
 		if err != nil {
-			//nolint:wrapcheck // WrapError adds shared encryption context.
-			return contentkeys.WrapError(err)
+			return contentkeys.Wrap(err)
 		}
 
-		return writeKeyring(cmd, keyring)
+		return errorcontext.Wrap(writeKeyring(cmd, keyring), "write keyring")
 	case "key-remove":
 		id := cmd.String(flagKeyID)
 		if _, exists := keyring.Keys[id]; !exists {
-			return errors.New("key ID not present in keyring")
+			return errKeyIDNotInKeyring
 		}
 
 		err := manager.CanRemove(ctx, id)
 		if err != nil {
-			//nolint:wrapcheck // WrapError adds shared encryption context.
-			return contentkeys.WrapError(err)
+			return contentkeys.Wrap(err)
 		}
 
 		delete(keyring.Keys, id)
 
-		return writeKeyring(cmd, keyring)
+		return errorcontext.Wrap(writeKeyring(cmd, keyring), "write keyring")
 	default:
-		return runEncryptionData(ctx, cmd, manager)
+		return errorcontext.Wrap(runEncryptionData(ctx, cmd, manager), "run encryption data")
 	}
 }
 
@@ -272,7 +262,7 @@ func runEncryptionData(ctx context.Context, cmd *cli.Command, manager *contentke
 	case encryptionMark:
 		report, err = manager.MarkLegacy(ctx, cmd.String(flagNoteID))
 	default:
-		return errors.New("unknown encryption operation")
+		return errUnknownEncryptionOperation
 	}
 
 	output := cmd.Root().Writer
@@ -285,8 +275,7 @@ func runEncryptionData(ctx context.Context, cmd *cli.Command, manager *contentke
 		return errors.Join(err, fmt.Errorf("write encryption report: %w", writeErr))
 	}
 
-	//nolint:wrapcheck // WrapError adds shared encryption context.
-	return contentkeys.WrapError(err)
+	return contentkeys.Wrap(err)
 }
 
 func generateKeyring(cmd *cli.Command) error {
@@ -294,23 +283,21 @@ func generateKeyring(cmd *cli.Command) error {
 
 	err := keyring.AddKey(keyring.Active)
 	if err != nil {
-		//nolint:wrapcheck // WrapError adds shared encryption context.
-		return contentkeys.WrapError(err)
+		return contentkeys.Wrap(err)
 	}
 
-	return writeKeyring(cmd, keyring)
+	return errorcontext.Wrap(writeKeyring(cmd, keyring), "write keyring")
 }
 
 func writeKeyring(cmd *cli.Command, keyring *crypto.ContentKeyring) error {
 	path := cmd.String(flagKeyOutput)
 	if path == "" {
-		return errors.New("--output must name a new keyring file outside the repository")
+		return errKeyringOutputRequired
 	}
 
 	writeErr := crypto.WriteContentKeyring(path, keyring)
 	if writeErr != nil {
-		//nolint:wrapcheck // WrapError adds shared encryption context.
-		return contentkeys.WrapError(writeErr)
+		return contentkeys.Wrap(writeErr)
 	}
 
 	output := cmd.Root().Writer
@@ -336,7 +323,7 @@ func validateContentEncryption(
 ) error {
 	manager, err := newEncryptionManager(db, keyring, hasher)
 	if err != nil {
-		return err
+		return fmt.Errorf("new encryption manager: %w", err)
 	}
 
 	log.InfoContext(ctx, "preparing stored content; pending migrations run automatically")
@@ -347,8 +334,7 @@ func validateContentEncryption(
 			"native", report.Native)
 	}
 
-	//nolint:wrapcheck // WrapError adds shared encryption context.
-	return contentkeys.WrapError(err)
+	return contentkeys.Wrap(err)
 }
 
 // managedSecretsDir is where Docker and Compose mount secrets. Compose bind-mounts a

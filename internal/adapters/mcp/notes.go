@@ -2,11 +2,12 @@ package mcp
 
 import (
 	"context"
-	"errors"
+	"fmt"
 	"strings"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/partyzanex/padmark/internal/errorcontext"
 	padmark "github.com/partyzanex/padmark/pkg/client"
 )
 
@@ -53,7 +54,7 @@ func (m *Manager) createNote(
 	// The padmark contract requires non-empty content; say so up front instead of paying a
 	// 400 round-trip for something the model can fix immediately.
 	if strings.TrimSpace(input.Content) == "" {
-		return nil, createNoteOutput{}, errors.New("content must not be empty")
+		return nil, createNoteOutput{}, ErrEmptyContent
 	}
 
 	req := &padmark.CreateNoteRequest{
@@ -99,12 +100,12 @@ func (m *Manager) createNote(
 
 	res, err := m.client.CreateNote(ctx, req)
 	if err != nil {
-		return nil, createNoteOutput{}, transportError("create note", err)
+		return nil, createNoteOutput{}, errorcontext.Wrap(transportError("create note", err), "handle create note")
 	}
 
 	resp, apiErr := mapCreateNoteRes(res)
 	if apiErr != nil {
-		return nil, createNoteOutput{}, apiErr
+		return nil, createNoteOutput{}, fmt.Errorf("map create note res: %w", apiErr)
 	}
 
 	return nil, m.noteOutputFromCreate(resp, input.RevealEditCode), nil
@@ -115,12 +116,12 @@ func (m *Manager) getNote(
 ) (*mcpsdk.CallToolResult, createNoteOutput, error) {
 	res, err := m.client.GetNote(ctx, padmark.GetNoteParams{ID: input.ID})
 	if err != nil {
-		return nil, createNoteOutput{}, transportError("get note", err)
+		return nil, createNoteOutput{}, errorcontext.Wrap(transportError("get note", err), "handle get note")
 	}
 
 	resp, apiErr := mapGetNoteRes(res)
 	if apiErr != nil {
-		return nil, createNoteOutput{}, apiErr
+		return nil, createNoteOutput{}, fmt.Errorf("map get note res: %w", apiErr)
 	}
 
 	return nil, noteOutputFromNote(resp), nil
@@ -169,12 +170,12 @@ func (m *Manager) updateNote(
 
 	res, err := m.client.UpdateNote(ctx, req, padmark.UpdateNoteParams{ID: input.ID})
 	if err != nil {
-		return nil, createNoteOutput{}, transportError("update note", err)
+		return nil, createNoteOutput{}, errorcontext.Wrap(transportError("update note", err), "handle update note")
 	}
 
 	resp, apiErr := mapUpdateNoteRes(res)
 	if apiErr != nil {
-		return nil, createNoteOutput{}, apiErr
+		return nil, createNoteOutput{}, fmt.Errorf("map update note res: %w", apiErr)
 	}
 
 	return nil, noteOutputFromNote(resp), nil
@@ -196,12 +197,12 @@ func (m *Manager) deleteNote(
 
 	res, err := m.client.DeleteNote(ctx, params)
 	if err != nil {
-		return nil, deleteNoteOutput{}, transportError("delete note", err)
+		return nil, deleteNoteOutput{}, errorcontext.Wrap(transportError("delete note", err), "handle delete note")
 	}
 
 	apiErr := mapDeleteNoteRes(res)
 	if apiErr != nil {
-		return nil, deleteNoteOutput{}, apiErr
+		return nil, deleteNoteOutput{}, fmt.Errorf("map delete note res: %w", apiErr)
 	}
 
 	return nil, deleteNoteOutput{ID: input.ID, Deleted: true}, nil

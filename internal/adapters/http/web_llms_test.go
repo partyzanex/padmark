@@ -33,9 +33,10 @@ func TestLLMsTxt_WriteError_DoesNotCorruptBody(t *testing.T) {
 
 	adhttp.LLMsTxt(wer, req)
 
-	// http.Error writes an error line after the partial body — assert it is absent.
-	assert.NotContains(t, string(wer.body), "llms.txt",
-		"http.Error must not be called after a partial Write")
+	expected := httptest.NewRecorder()
+	adhttp.LLMsTxt(expected, req)
+	assert.Equal(t, expected.Body.Bytes(), wer.body,
+		"http.Error must not append text after a partial Write")
 	// WriteHeader must not have been called — no status change attempted.
 	assert.Equal(t, 0, wer.writeHeaderCalls,
 		"WriteHeader must not be called when Write fails")
@@ -86,6 +87,7 @@ func (s *LLMsRouterSuite) TearDownTest() {
 
 func (s *LLMsRouterSuite) newRouter() http.Handler {
 	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog)
+	handler.WithAuthManager(NewMockAuthManager(s.ctrl))
 	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog)
 
 	opts := adhttp.RouterOptions{
@@ -136,12 +138,14 @@ func (s *LLMsRouterSuite) TestAnonymousFetch() {
 func (s *LLMsRouterSuite) TestReferencedSpecIsAlive() {
 	router := s.newRouter()
 
-	req := httptest.NewRequest(http.MethodGet, "/api/openapi.yaml", nil)
-	rec := httptest.NewRecorder()
+	for _, path := range []string{"/api/openapi.yaml", "/api/reference.md", "/api"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
 
-	router.ServeHTTP(rec, req)
+		router.ServeHTTP(rec, req)
 
-	s.Equal(http.StatusOK, rec.Code)
+		s.Equal(http.StatusOK, rec.Code, path)
+	}
 }
 
 // TestReferencedSpecIsAdvertised cross-checks the document against the router: llms.txt must
@@ -155,4 +159,5 @@ func (s *LLMsRouterSuite) TestSpecURLAdvertised() {
 	router.ServeHTTP(rec, req)
 
 	s.Contains(rec.Body.String(), "/api/openapi.yaml")
+	s.Contains(rec.Body.String(), "/api/reference.md")
 }

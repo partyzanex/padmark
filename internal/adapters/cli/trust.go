@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	urcli "github.com/urfave/cli/v3"
@@ -35,7 +34,7 @@ func trustAction(_ context.Context, cmd *urcli.Command) error {
 
 	if !cmd.IsSet(FlagURL) {
 		if embeddedURL == "" {
-			return errors.New("nothing to trust: the token is not a pmk_ envelope and no --url was given")
+			return errNoTrustTarget
 		}
 
 		serverURL = embeddedURL
@@ -82,10 +81,9 @@ func ensureTrustedServer(cmd *urcli.Command, embeddedURL, serverURL string) erro
 		return nil
 	}
 
-	return fmt.Errorf(
-		"token pins server %s, which is not trusted yet; run `padmark-cli trust` to record it, "+
-			"or choose the server explicitly with --url/PADMARK_URL",
-		origin)
+	return fmt.Errorf("%w %s, which is not trusted yet; run "+
+		"`padmark-cli trust` to record it, or choose "+
+		"the server explicitly with --url/PADMARK_URL", ErrUntrustedServer, origin)
 }
 
 // resolveTrustedServer is the single gate every server-bound command goes through before any
@@ -99,7 +97,7 @@ func resolveTrustedServer(cmd *urcli.Command) (bearer, serverURL string, err err
 
 	trustErr := ensureTrustedServer(cmd, embeddedURL, serverURL)
 	if trustErr != nil {
-		return "", "", trustErr
+		return "", "", fmt.Errorf("validate trusted server: %w", trustErr)
 	}
 
 	return bearer, serverURL, nil

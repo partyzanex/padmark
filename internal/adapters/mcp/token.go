@@ -13,7 +13,6 @@ import (
 
 	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/infra/tokenfile"
-
 	padmark "github.com/partyzanex/padmark/pkg/client"
 )
 
@@ -60,12 +59,12 @@ func newPadmarkClient(cmd *urcli.Command) (*padmark.Client, error) {
 
 	trustErr := ensureTrustedServer(cmd, embeddedURL, serverURL)
 	if trustErr != nil {
-		return nil, trustErr
+		return nil, fmt.Errorf("validate trusted server: %w", trustErr)
 	}
 
 	insecureErr := checkInsecureToken(stderrWriter(cmd), serverURL, token, cmd.Bool(FlagAllowInsecureHTTP))
 	if insecureErr != nil {
-		return nil, insecureErr
+		return nil, fmt.Errorf("validate token transport: %w", insecureErr)
 	}
 
 	transport := &bearerTransport{base: http.DefaultTransport, token: token}

@@ -12,6 +12,7 @@ import (
 	"github.com/uptrace/bun"
 
 	"github.com/partyzanex/padmark/internal/domain"
+	"github.com/partyzanex/padmark/internal/errorcontext"
 )
 
 type userRow struct {
@@ -76,7 +77,7 @@ func NewUserRepository(db *bun.DB) *UserRepository {
 
 // Create inserts a new user. Returns domain.ErrUserExists on duplicate username.
 func (r *UserRepository) Create(ctx context.Context, u *domain.User) error {
-	return insertUser(ctx, r.db, u)
+	return errorcontext.Wrap(insertUser(ctx, r.db, u), "insert user")
 }
 
 // insertUser inserts a user via conn (a *bun.DB or bun.Tx), mapping a unique-constraint

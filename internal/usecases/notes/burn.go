@@ -31,11 +31,16 @@ func newBurner(storage Storage, encryptor Encryptor, log *slog.Logger) *burner {
 func (b *burner) applyPolicy(ctx context.Context, id string, note *domain.Note) (*domain.Note, error) {
 	err := b.enforceExpiry(ctx, id, note)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("enforce expiry: %w", err)
 	}
 
 	if note.BurnAfterReading {
-		return b.burnNote(ctx, id, note)
+		operationResult, operationErr := b.burnNote(ctx, id, note)
+		if operationErr != nil {
+			return operationResult, fmt.Errorf("burn note: %w", operationErr)
+		}
+
+		return operationResult, nil
 	}
 
 	return note, nil
@@ -76,7 +81,12 @@ func (b *burner) applyViewIncrement(ctx context.Context, id string, note *domain
 
 func (b *burner) burnNote(ctx context.Context, id string, note *domain.Note) (*domain.Note, error) {
 	if note.BurnTTL > 0 {
-		return b.startTimer(ctx, id, note)
+		operationResult, operationErr := b.startTimer(ctx, id, note)
+		if operationErr != nil {
+			return operationResult, fmt.Errorf("start timer: %w", operationErr)
+		}
+
+		return operationResult, nil
 	}
 
 	consumed, consumeErr := b.storage.Consume(ctx, domain.HashSlug(id))
@@ -101,7 +111,12 @@ func (b *burner) startTimer(ctx context.Context, id string, note *domain.Note) (
 
 	updated, burnErr := b.storage.SetBurnExpiry(ctx, domain.HashSlug(id), expiresAt)
 	if burnErr != nil {
-		return b.handleSetExpiryErr(ctx, id, burnErr)
+		operationResult, operationErr := b.handleSetExpiryErr(ctx, id, burnErr)
+		if operationErr != nil {
+			return operationResult, fmt.Errorf("handle set expiry err: %w", operationErr)
+		}
+
+		return operationResult, nil
 	}
 
 	updated.ID = id

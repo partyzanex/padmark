@@ -379,7 +379,7 @@ type CreateLinkRequest struct {
 	// Intended for CLI and automation use.
 	EditCode OptString `json:"edit_code"`
 	// Who may follow the link: `public` (anyone), `authenticated` (any valid session or API
-	// token, not just the creator), or `owner` (only the exact credential that created it
+	// token, not just the creator), or `owner` (only the account that created it
 	// — see "Edit codes and ownership" above). `owner` additionally requires the link to
 	// actually have an owner, i.e. `--enable-accounts` and an authenticated caller —
 	// otherwise the request is rejected with `422`.
@@ -467,7 +467,7 @@ type CreateLinkRequestEntityTooLarge ErrorResponse
 func (*CreateLinkRequestEntityTooLarge) createLinkRes() {}
 
 // Who may follow the link: `public` (anyone), `authenticated` (any valid session or API
-// token, not just the creator), or `owner` (only the exact credential that created it
+// token, not just the creator), or `owner` (only the account that created it
 // — see "Edit codes and ownership" above). `owner` additionally requires the link to
 // actually have an owner, i.e. `--enable-accounts` and an authenticated caller —
 // otherwise the request is rejected with `422`.
@@ -814,7 +814,7 @@ type CreateNoteRequest struct {
 	// no schema-level `default` so the server can tell an omitted field from an explicit
 	// `public` when resolving the deprecated `private` alias): `public` (anyone), `authenticated` (any
 	// valid session or API
-	// token, not just the creator), or `owner` (only the exact credential that created
+	// token, not just the creator), or `owner` (only the account that created
 	// it — see "Edit codes and ownership" above). Meaningful when the server is started
 	// with `--enable-accounts`; `owner` additionally requires the note to actually have an
 	// owner, i.e. an authenticated caller at creation time — otherwise the request is
@@ -969,7 +969,7 @@ func (*CreateNoteRequestEntityTooLarge) createNoteRes() {}
 // no schema-level `default` so the server can tell an omitted field from an explicit
 // `public` when resolving the deprecated `private` alias): `public` (anyone), `authenticated` (any
 // valid session or API
-// token, not just the creator), or `owner` (only the exact credential that created
+// token, not just the creator), or `owner` (only the account that created
 // it — see "Edit codes and ownership" above). Meaningful when the server is started
 // with `--enable-accounts`; `owner` additionally requires the note to actually have an
 // owner, i.e. an authenticated caller at creation time — otherwise the request is

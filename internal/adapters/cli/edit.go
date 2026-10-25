@@ -2,13 +2,13 @@ package cli
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"strings"
 
 	urcli "github.com/urfave/cli/v3"
 
+	"github.com/partyzanex/padmark/internal/errorcontext"
 	padmark "github.com/partyzanex/padmark/pkg/client"
 )
 
@@ -64,28 +64,28 @@ func editCommand() *urcli.Command {
 func editAction(ctx context.Context, cmd *urcli.Command) error {
 	err := validateBurnTTL(cmd)
 	if err != nil {
-		return err
+		return fmt.Errorf("validate burn TTL: %w", err)
 	}
 
 	id, editCode, err := editActionArgs(cmd)
 	if err != nil {
-		return err
+		return fmt.Errorf("edit action args: %w", err)
 	}
 
 	content, err := readContent(cmd)
 	if err != nil {
-		return err
+		return fmt.Errorf("read note content: %w", err)
 	}
 
 	if strings.TrimSpace(content) == "" {
-		return errors.New("content must not be empty")
+		return ErrEmptyContent
 	}
 
 	req := buildUpdateReq(cmd, content, editCode)
 
 	cl, err := newPadmarkClient(cmd)
 	if err != nil {
-		return err
+		return fmt.Errorf("create API client: %w", err)
 	}
 
 	res, err := cl.UpdateNote(ctx, req, padmark.UpdateNoteParams{ID: id})
@@ -95,10 +95,10 @@ func editAction(ctx context.Context, cmd *urcli.Command) error {
 
 	note, apiErr := handleUpdateNoteRes(res)
 	if apiErr != nil {
-		return apiErr
+		return fmt.Errorf("decode update note response: %w", apiErr)
 	}
 
-	return printNote(os.Stdout, note)
+	return errorcontext.Wrap(printNote(os.Stdout, note), "print note")
 }
 
 // editActionArgs resolves the note ID and edit code. editCode may come back empty: the server
@@ -108,7 +108,7 @@ func editAction(ctx context.Context, cmd *urcli.Command) error {
 func editActionArgs(cmd *urcli.Command) (id, editCode string, err error) {
 	id, err = noteIDArg(cmd)
 	if err != nil {
-		return "", "", err
+		return "", "", fmt.Errorf("read note ID: %w", err)
 	}
 
 	return id, cmd.String(FlagEditCode), nil
@@ -169,20 +169,20 @@ func handleUpdateNoteRes(res padmark.UpdateNoteRes) (*padmark.NoteResponse, erro
 	case *padmark.NoteResponse:
 		return typed, nil
 	case *padmark.UpdateNoteBadRequest:
-		return nil, fmt.Errorf("bad request: %s", typed.Message)
+		return nil, fmt.Errorf("%w: %s", ErrBadRequest, typed.Message)
 	case *padmark.UpdateNoteUnauthorized:
-		return nil, errors.New("unauthorized")
+		return nil, ErrUnauthorized
 	case *padmark.UpdateNoteForbidden:
-		return nil, errors.New("forbidden: wrong edit code")
+		return nil, errWrongEditCode
 	case *padmark.UpdateNoteNotFound:
-		return nil, errors.New("note not found")
+		return nil, ErrNoteNotFound
 	case *padmark.UpdateNoteUnprocessableEntity:
-		return nil, fmt.Errorf("validation error: %s", typed.Message)
+		return nil, fmt.Errorf("%w: %s", ErrValidation, typed.Message)
 	case *padmark.UpdateNoteServiceUnavailable:
-		return nil, serviceUnavailableError(padmark.ErrorResponse(*typed))
+		return nil, errorcontext.Wrap(serviceUnavailableError(padmark.ErrorResponse(*typed)), "decode update note response")
 	case *padmark.UpdateNoteInternalServerError:
-		return nil, fmt.Errorf("server error: %s", typed.Message)
+		return nil, fmt.Errorf("%w: %s", ErrServer, typed.Message)
 	default:
-		return nil, fmt.Errorf("unexpected response type: %T", res)
+		return nil, fmt.Errorf("%w: %T", ErrUnexpectedResponse, res)
 	}
 }

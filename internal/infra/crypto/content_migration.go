@@ -2,7 +2,7 @@ package crypto
 
 import (
 	"encoding/base64"
-	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/partyzanex/padmark/internal/domain"
@@ -33,17 +33,22 @@ func (enc *ContentCipher) ValidateLegacy(value string) error {
 func (enc *ContentCipher) WrapLegacy(value, recordID string) (string, error) {
 	err := enc.ValidateLegacy(value)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("validate legacy: %w", err)
 	}
 
-	return enc.encrypt(value, recordID, legacyKind)
+	operationResult, operationErr := enc.encrypt(value, recordID, legacyKind)
+	if operationErr != nil {
+		return operationResult, fmt.Errorf("encrypt: %w", operationErr)
+	}
+
+	return operationResult, nil
 }
 
 // Inspect authenticates the envelope, including its payload digest, without opening the payload.
 func (enc *ContentCipher) Inspect(value, recordID string) (kind, keyID string, err error) {
 	envelope, err := enc.unwrap(value, recordID)
 	if err != nil {
-		return "", "", err
+		return "", "", fmt.Errorf("unwrap: %w", err)
 	}
 
 	clear(envelope.dek)
@@ -55,7 +60,7 @@ func (enc *ContentCipher) Inspect(value, recordID string) (kind, keyID string, e
 func (enc *ContentCipher) Rewrap(value, recordID string) (string, error) {
 	envelope, err := enc.unwrap(value, recordID)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("unwrap: %w", err)
 	}
 	defer clear(envelope.dek)
 
@@ -66,7 +71,7 @@ func (enc *ContentCipher) Rewrap(value, recordID string) (string, error) {
 	wrapped, err := enc.seal(enc.keys[enc.activeID], envelope.dek,
 		wrappedKeyAAD(envelope.aad, enc.activeID, envelope.payload))
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("seal: %w", err)
 	}
 
 	return strings.Join([]string{contentVersion, envelope.kind, enc.activeID,
@@ -76,22 +81,22 @@ func (enc *ContentCipher) Rewrap(value, recordID string) (string, error) {
 // KeyCheck creates a registry value with its own purpose and installation/key binding.
 func (k *ContentKeyring) KeyCheck(installationID, keyID string) (string, error) {
 	if !validKeyID(keyID) || len(k.Keys[keyID]) != aesKeySize {
-		return "", errors.New("key is missing or invalid")
+		return "", errMissingOrInvalidKey
 	}
 
 	gcm, err := contentGCM(k.Keys[keyID])
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("content gcm: %w", err)
 	}
 
 	enc, err := NewContentCipher(k.Active, k.Keys, "note")
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("new content cipher: %w", err)
 	}
 
 	sealed, err := enc.seal(gcm, []byte("padmark-key-check"), keyCheckAAD(installationID, keyID))
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("seal: %w", err)
 	}
 
 	return base64.RawURLEncoding.EncodeToString(sealed), nil
@@ -100,22 +105,22 @@ func (k *ContentKeyring) KeyCheck(installationID, keyID string) (string, error) 
 // VerifyKeyCheck rejects a missing or substituted key and never replaces a failed check.
 func (k *ContentKeyring) VerifyKeyCheck(installationID, keyID, value string) error {
 	if !validKeyID(keyID) || len(k.Keys[keyID]) != aesKeySize {
-		return errors.New("required content key is missing")
+		return ErrContentKeyMissing
 	}
 
 	data, err := decodeContentField(value, contentNonceSize+contentTagSize, keyCheckSize)
 	if err != nil {
-		return errors.New("invalid content key verification")
+		return errInvalidKeyVerification
 	}
 
 	gcm, err := contentGCM(k.Keys[keyID])
 	if err != nil {
-		return err
+		return fmt.Errorf("content gcm: %w", err)
 	}
 
 	plain, err := gcm.Open(nil, data[:contentNonceSize], data[contentNonceSize:], keyCheckAAD(installationID, keyID))
 	if err != nil || string(plain) != "padmark-key-check" {
-		return errors.New("content key does not match this installation")
+		return ErrContentKeyMismatch
 	}
 
 	return nil

@@ -7,7 +7,6 @@ import (
 
 	"github.com/partyzanex/padmark/internal/infra/crypto"
 	"github.com/partyzanex/padmark/internal/infra/logging"
-
 	"github.com/partyzanex/padmark/internal/usecases/auth"
 )
 
@@ -399,7 +398,7 @@ const maxArgon2MemoryBudget = 64 * 1024 * 1024
 func boundedCost(maximum int) func(int) error {
 	return func(value int) error {
 		if value < 1 || value > maximum {
-			return fmt.Errorf("cost must be between 1 and %d", maximum)
+			return fmt.Errorf("%w 1 and %d", errInvalidArgon2Cost, maximum)
 		}
 
 		return nil

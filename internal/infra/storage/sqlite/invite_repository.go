@@ -14,6 +14,7 @@ import (
 	"github.com/uptrace/bun"
 
 	"github.com/partyzanex/padmark/internal/domain"
+	"github.com/partyzanex/padmark/internal/errorcontext"
 )
 
 const (
@@ -137,7 +138,7 @@ func (r *InviteRepository) Consume(ctx context.Context, token, username string) 
 				return fmt.Errorf("select invite: %w", err)
 			}
 
-			return classifyInviteMiss(ctx, btx, tokenHash)
+			return errorcontext.Wrap(classifyInviteMiss(ctx, btx, tokenHash), "classify invite miss")
 		}
 
 		now := time.Now()
@@ -184,7 +185,7 @@ func (r *InviteRepository) RedeemInvite(ctx context.Context, token, username str
 				return fmt.Errorf("select invite: %w", selErr)
 			}
 
-			return classifyInviteMiss(ctx, btx, tokenHash)
+			return errorcontext.Wrap(classifyInviteMiss(ctx, btx, tokenHash), "classify invite miss")
 		}
 
 		now := time.Now()
@@ -198,7 +199,7 @@ func (r *InviteRepository) RedeemInvite(ctx context.Context, token, username str
 			return fmt.Errorf("mark invite used: %w", updErr)
 		}
 
-		return insertUser(ctx, btx, usr)
+		return errorcontext.Wrap(insertUser(ctx, btx, usr), "insert user")
 	})
 	if err != nil {
 		return fmt.Errorf("redeem invite: %w", err)

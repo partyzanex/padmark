@@ -9,6 +9,7 @@ import (
 
 	urcli "github.com/urfave/cli/v3"
 
+	"github.com/partyzanex/padmark/internal/errorcontext"
 	"github.com/partyzanex/padmark/internal/infra/logging"
 )
 
@@ -84,8 +85,8 @@ func runAction(ctx context.Context, cmd *urcli.Command) error {
 
 	cl, err := newPadmarkClient(cmd)
 	if err != nil {
-		return err
+		return fmt.Errorf("create API client: %w", err)
 	}
 
-	return NewManager(cl, log).Run(ctx)
+	return errorcontext.Wrap(NewManager(cl, log).Run(ctx), "run server")
 }

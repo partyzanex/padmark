@@ -148,7 +148,7 @@ func (s *ManagerTestSuite) TestMigrateLegacyConflicts() {
 	for name, convertErr := range map[string]error{
 		"concurrent change":   nil,
 		"target id exists":    ErrConvertTargetExists,
-		"wrapped target race": WrapError(ErrConvertTargetExists),
+		"wrapped target race": Wrap(ErrConvertTargetExists),
 	} {
 		s.Run(name, func() {
 			ctx := s.T().Context()

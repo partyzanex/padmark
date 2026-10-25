@@ -2,11 +2,11 @@ package cli
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	urcli "github.com/urfave/cli/v3"
 
+	"github.com/partyzanex/padmark/internal/errorcontext"
 	padmark "github.com/partyzanex/padmark/pkg/client"
 )
 
@@ -53,10 +53,10 @@ func deleteLinkAction(ctx context.Context, cmd *urcli.Command) error {
 			return fmt.Errorf("delete link: %w", err)
 		}
 
-		return handleDeleteLinkRes(res)
+		return errorcontext.Wrap(handleDeleteLinkRes(res), "decode delete link response")
 	}
 
-	return runDeleteCommand(ctx, cmd, linkIDArg, deleteLink)
+	return errorcontext.Wrap(runDeleteCommand(ctx, cmd, linkIDArg, deleteLink), "delete resource")
 }
 
 func handleDeleteLinkRes(res padmark.DeleteLinkRes) error {
@@ -64,16 +64,18 @@ func handleDeleteLinkRes(res padmark.DeleteLinkRes) error {
 	case *padmark.DeleteLinkNoContent:
 		return nil
 	case *padmark.DeleteLinkUnauthorized:
-		return errors.New("unauthorized")
+		return ErrUnauthorized
 	case *padmark.DeleteLinkForbidden:
-		return errors.New("forbidden: wrong edit code or --token is not the link's owner")
+		return errLinkOwnershipRequired
 	case *padmark.DeleteLinkNotFound:
-		return errors.New("link not found")
+		return ErrLinkNotFound
 	case *padmark.DeleteLinkServiceUnavailable:
-		return serviceUnavailableError(padmark.ErrorResponse(*typed))
+		return errorcontext.Wrap(
+			serviceUnavailableError(padmark.ErrorResponse(*typed)), "decode service unavailable response",
+		)
 	case *padmark.DeleteLinkInternalServerError:
-		return fmt.Errorf("server error: %s", typed.Message)
+		return fmt.Errorf("%w: %s", ErrServer, typed.Message)
 	default:
-		return fmt.Errorf("unexpected response type: %T", res)
+		return fmt.Errorf("%w: %T", ErrUnexpectedResponse, res)
 	}
 }

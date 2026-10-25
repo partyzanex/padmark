@@ -88,7 +88,8 @@ Dependencies point inward: adapters and infrastructure depend on usecases and do
 - Browser auth failures redirect to `/login?next=...`; `safeNextURL` rejects external URLs.
 - `--disable-api` makes the editor read-only: publish/save call the disabled REST endpoints.
   Note views, link redirects, account/admin forms and health checks remain available.
-- Delete credentials use `X-Edit-Code`; query-string edit codes are not accepted.
+- Delete credentials use `X-Edit-Code`. Notes retain the deprecated query-string fallback
+  for v0.1.6 clients; links ignore query-string edit codes.
 - Translate domain errors centrally through `errors.go`/`ogen_errors.go`; JSON responses use
   `{"message": ..., "code"?: ...}`. Do not expose wrapped internal errors to clients.
 
@@ -120,6 +121,8 @@ Dependencies point inward: adapters and infrastructure depend on usecases and do
 
 ## Linting and generated files
 
+- Change linter configuration, exclusions or `nolint` directives only at the repository
+  owner's explicit request. Fix code under the existing checks instead of weakening them.
 - `.golangci.yml` defines enabled linters, exclusions and thresholds (121-column lines,
   complexity 12, JSON `snake_case`, YAML `camelCase`). `_test.go` has specific exclusions.
 - CI pins golangci-lint v2.15.0 and Go 1.27.3. The lint config currently sets analysis

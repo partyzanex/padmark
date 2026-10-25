@@ -20,7 +20,7 @@ func ParseLevel(value string) (slog.Level, error) {
 	case "error":
 		return slog.LevelError, nil
 	default:
-		return slog.LevelInfo, fmt.Errorf("invalid log level %q: use debug, info, warn or error", value)
+		return slog.LevelInfo, fmt.Errorf("%w %q: use debug, info, warn or error", ErrInvalidLevel, value)
 	}
 }
 
@@ -29,6 +29,9 @@ func ParseLevel(value string) (slog.Level, error) {
 // rejected at flag parsing instead of silently falling back to info.
 func ValidateLevel(value string) error {
 	_, err := ParseLevel(value)
+	if err != nil {
+		return fmt.Errorf("parse level: %w", err)
+	}
 
-	return err
+	return nil
 }

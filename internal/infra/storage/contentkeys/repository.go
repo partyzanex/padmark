@@ -9,6 +9,7 @@ import (
 
 	"github.com/uptrace/bun"
 
+	"github.com/partyzanex/padmark/internal/errorcontext"
 	keys "github.com/partyzanex/padmark/internal/usecases/contentkeys"
 )
 
@@ -55,12 +56,12 @@ func (r *Repository) Initialize(ctx context.Context, reg *keys.Registry) error {
 			"VALUES (1, ?, ?) ON CONFLICT (id) DO NOTHING",
 			reg.InstallationID, reg.Phase).Exec(ctx)
 		if err != nil {
-			return keys.WrapError(err)
+			return keys.Wrap(err)
 		}
 
 		count, err := result.RowsAffected()
 		if err != nil {
-			return keys.WrapError(err)
+			return keys.Wrap(err)
 		}
 
 		if count == 0 {
@@ -72,7 +73,7 @@ func (r *Repository) Initialize(ctx context.Context, reg *keys.Registry) error {
 			_, err := transaction.NewRaw("INSERT INTO content_encryption_keys (key_id, verification) VALUES (?, ?)",
 				id, check).Exec(ctx)
 			if err != nil {
-				return keys.WrapError(err)
+				return keys.Wrap(err)
 			}
 		}
 
@@ -107,7 +108,7 @@ func (r *Repository) SetPhase(ctx context.Context, phase string) error {
 	}
 
 	if count != 1 {
-		return errors.New("encryption registry is absent")
+		return errRegistryAbsent
 	}
 
 	return nil
@@ -123,7 +124,7 @@ func resourceColumns(resource string) (table, column string, err error) {
 	case "link":
 		return "links", "target_url", nil
 	default:
-		return "", "", errors.New("invalid encryption resource")
+		return "", "", errInvalidResource
 	}
 }
 
@@ -162,7 +163,7 @@ func selectRows(db *bun.DB, table, column string) *bun.SelectQuery {
 func (r *Repository) Batch(ctx context.Context, resource, after string, limit int) ([]keys.Row, error) {
 	table, column, err := resourceColumns(resource)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("resource columns: %w", err)
 	}
 
 	var stored []storedRow
@@ -184,7 +185,7 @@ func (r *Repository) Batch(ctx context.Context, resource, after string, limit in
 func (r *Repository) Get(ctx context.Context, resource, id string) (*keys.Row, error) {
 	table, column, err := resourceColumns(resource)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("resource columns: %w", err)
 	}
 
 	var stored storedRow
@@ -206,19 +207,19 @@ func (r *Repository) Get(ctx context.Context, resource, id string) (*keys.Row, e
 func (r *Repository) Replace(ctx context.Context, row keys.Row, value string) (bool, error) {
 	table, column, err := resourceColumns(row.Resource)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("resource columns: %w", err)
 	}
 
 	result, err := r.db.NewUpdate().Table(table).Set("? = ?", bun.Ident(column), value).
 		Where("id = ? AND ? = ?", row.ID, bun.Ident(column), row.Value).Exec(ctx)
 	// Driver errors can contain SQL parameters; never forward an error containing ciphertext.
 	if err != nil {
-		return false, errors.New("ciphertext compare-and-swap failed")
+		return false, errCiphertextConflict
 	}
 
 	count, err := result.RowsAffected()
 	if err != nil {
-		return false, errors.New("could not read ciphertext update count")
+		return false, errReadCiphertextUpdateCount
 	}
 
 	return count == 1, nil
@@ -232,19 +233,19 @@ func (r *Repository) ConvertLegacy(
 	ctx context.Context, row keys.Row, newID, value, editCodeHash string,
 ) (bool, error) {
 	if row.Resource != resourceNote || row.Legacy == nil {
-		return false, errors.New("only tagged legacy notes can be converted")
+		return false, errLegacyTagRequired
 	}
 
 	result, err := r.db.NewUpdate().Table("notes").
 		Set("id = ?", newID).Set("content = ?", value).Set("edit_code = ?", editCodeHash).Set("legacy_slug = NULL").
 		Where("id = ? AND content = ? AND legacy_slug = ?", row.ID, row.Value, row.Legacy.Slug).Exec(ctx)
 	if err != nil {
-		return false, convertError(ctx, r.db, newID)
+		return false, errorcontext.Wrap(convertError(ctx, r.db, newID), "handle convert legacy")
 	}
 
 	count, err := result.RowsAffected()
 	if err != nil {
-		return false, errors.New("could not read legacy note conversion count")
+		return false, errReadLegacyConversionCount
 	}
 
 	return count == 1, nil
@@ -255,18 +256,18 @@ func (r *Repository) ConvertLegacy(
 // no tag. Errors never expose the slug, content or any SQL parameter.
 func (r *Repository) MarkLegacy(ctx context.Context, row keys.Row) (bool, error) {
 	if row.Resource != resourceNote || row.Legacy != nil {
-		return false, errors.New("only untagged notes can be marked as legacy")
+		return false, errUntaggedNoteRequired
 	}
 
 	result, err := r.db.NewUpdate().Table("notes").Set("legacy_slug = id").
 		Where("id = ? AND content = ? AND legacy_slug IS NULL", row.ID, row.Value).Exec(ctx)
 	if err != nil {
-		return false, errors.New("legacy note mark compare-and-swap failed")
+		return false, errLegacyMarkConflict
 	}
 
 	count, err := result.RowsAffected()
 	if err != nil {
-		return false, errors.New("could not read legacy note mark count")
+		return false, errReadLegacyMarkCount
 	}
 
 	return count == 1, nil
@@ -281,7 +282,7 @@ func convertError(ctx context.Context, db *bun.DB, newID string) error {
 		return keys.ErrConvertTargetExists
 	}
 
-	return errors.New("legacy note compare-and-swap failed")
+	return errLegacyNoteConflict
 }
 
 // Delete removes exactly the invalid raw value inspected by the caller. A
@@ -290,18 +291,18 @@ func convertError(ctx context.Context, db *bun.DB, newID string) error {
 func (r *Repository) Delete(ctx context.Context, row keys.Row) (bool, error) {
 	table, column, err := resourceColumns(row.Resource)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("resource columns: %w", err)
 	}
 
 	result, err := r.db.NewDelete().Table(table).
 		Where("id = ? AND ? = ?", row.ID, bun.Ident(column), row.Value).Exec(ctx)
 	if err != nil {
-		return false, errors.New("corrupt raw compare-and-delete failed")
+		return false, errCorruptRawConflict
 	}
 
 	count, err := result.RowsAffected()
 	if err != nil {
-		return false, errors.New("could not read corrupt raw deletion count")
+		return false, errReadCorruptRawDeletionCount
 	}
 
 	return count == 1, nil

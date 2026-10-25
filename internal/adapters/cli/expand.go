@@ -2,12 +2,12 @@ package cli
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 
 	urcli "github.com/urfave/cli/v3"
 
+	"github.com/partyzanex/padmark/internal/errorcontext"
 	padmark "github.com/partyzanex/padmark/pkg/client"
 )
 
@@ -29,12 +29,12 @@ func expandCommand() *urcli.Command {
 func expandAction(ctx context.Context, cmd *urcli.Command) error {
 	id, err := linkIDArg(cmd)
 	if err != nil {
-		return err
+		return fmt.Errorf("read link ID: %w", err)
 	}
 
 	cl, err := newPadmarkClient(cmd)
 	if err != nil {
-		return err
+		return fmt.Errorf("create API client: %w", err)
 	}
 
 	res, err := cl.GetLink(ctx, padmark.GetLinkParams{ID: id})
@@ -44,14 +44,14 @@ func expandAction(ctx context.Context, cmd *urcli.Command) error {
 
 	link, apiErr := handleGetLinkRes(res)
 	if apiErr != nil {
-		return apiErr
+		return fmt.Errorf("decode get link response: %w", apiErr)
 	}
 
 	if cmd.Bool(FlagJSON) {
-		return printLinkJSON(os.Stdout, link)
+		return errorcontext.Wrap(printLinkJSON(os.Stdout, link), "print link json")
 	}
 
-	return printLink(os.Stdout, link)
+	return errorcontext.Wrap(printLink(os.Stdout, link), "print link")
 }
 
 func handleGetLinkRes(res padmark.GetLinkRes) (*padmark.LinkResponse, error) {
@@ -59,16 +59,16 @@ func handleGetLinkRes(res padmark.GetLinkRes) (*padmark.LinkResponse, error) {
 	case *padmark.LinkResponse:
 		return typed, nil
 	case *padmark.GetLinkUnauthorized:
-		return nil, fmt.Errorf("unauthorized: %s", typed.Message)
+		return nil, fmt.Errorf("%w: %s", ErrUnauthorized, typed.Message)
 	case *padmark.GetLinkNotFound:
-		return nil, errors.New("link not found")
+		return nil, ErrLinkNotFound
 	case *padmark.GetLinkGone:
-		return nil, errors.New("link has expired")
+		return nil, ErrLinkGone
 	case *padmark.GetLinkServiceUnavailable:
-		return nil, serviceUnavailableError(padmark.ErrorResponse(*typed))
+		return nil, errorcontext.Wrap(serviceUnavailableError(padmark.ErrorResponse(*typed)), "decode get link response")
 	case *padmark.GetLinkInternalServerError:
-		return nil, fmt.Errorf("server error: %s", typed.Message)
+		return nil, fmt.Errorf("%w: %s", ErrServer, typed.Message)
 	default:
-		return nil, fmt.Errorf("unexpected response type: %T", res)
+		return nil, fmt.Errorf("%w: %T", ErrUnexpectedResponse, res)
 	}
 }

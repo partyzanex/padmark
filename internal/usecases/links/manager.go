@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/partyzanex/padmark/internal/domain"
+	"github.com/partyzanex/padmark/internal/errorcontext"
 )
 
 // maxHashRetries bounds random-slug collision retries in Create — a bounded loop, never an
@@ -217,7 +218,7 @@ func validateLink(link *domain.Link) error {
 func (m *Manager) Create(ctx context.Context, targetURL string, opts CreateOptions) (*domain.Link, error) {
 	validURL, err := validateTargetURL(targetURL)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("validate target url: %w", err)
 	}
 
 	link := &domain.Link{
@@ -235,7 +236,7 @@ func (m *Manager) Create(ctx context.Context, targetURL string, opts CreateOptio
 
 	err = validateLink(link)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("validate link: %w", err)
 	}
 
 	// A caller-chosen code must meet the edit-code policy before it is hashed; an empty one is
@@ -249,20 +250,20 @@ func (m *Manager) Create(ctx context.Context, targetURL string, opts CreateOptio
 
 	plaintextCode, err := m.resolveAndHashEditCode(link)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("resolve and hash edit code: %w", err)
 	}
 
 	link.CreatedAt = time.Now().UTC()
 
 	slug, unlock, err := m.resolveUniqueSlug(ctx, opts.CustomHash)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("resolve unique slug: %w", err)
 	}
 	defer unlock()
 
 	err = m.persistLink(ctx, link, slug, validURL, plaintextCode)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("persist link: %w", err)
 	}
 
 	m.log.DebugContext(ctx, "link created", "id", domain.HashSlug(slug))
@@ -321,7 +322,12 @@ func (m *Manager) Peek(ctx context.Context, slug string) (*domain.Link, error) {
 // optional Cache can skip decryption after verifying the current ciphertext.
 // This operation does not authorize a reader; adapters with accounts enabled use Follow.
 func (m *Manager) Redirect(ctx context.Context, slug string) (*domain.Link, error) {
-	return m.redirect(ctx, slug, true)
+	operationResult, operationErr := m.redirect(ctx, slug, true)
+	if operationErr != nil {
+		return operationResult, fmt.Errorf("redirect: %w", operationErr)
+	}
+
+	return operationResult, nil
 }
 
 // RedirectWithoutBurn is Redirect for an access that did not deliberately follow the link (a
@@ -330,7 +336,12 @@ func (m *Manager) Redirect(ctx context.Context, slug string) (*domain.Link, erro
 // snapshot the rest of the policy uses, so a concurrent switch to burn cannot slip through. Any
 // other link is followed exactly as by Redirect.
 func (m *Manager) RedirectWithoutBurn(ctx context.Context, slug string) (*domain.Link, error) {
-	return m.redirect(ctx, slug, false)
+	operationResult, operationErr := m.redirect(ctx, slug, false)
+	if operationErr != nil {
+		return operationResult, fmt.Errorf("redirect: %w", operationErr)
+	}
+
+	return operationResult, nil
 }
 
 // Delete removes a link by slug after verifying the edit code, or that the caller is the link's
@@ -394,7 +405,12 @@ func (m *Manager) redirect(ctx context.Context, slug string, allowBurn bool) (*d
 		return nil, fmt.Errorf("redirect: %w", err)
 	}
 
-	return m.redirectLink(ctx, slug, link, allowBurn, nil)
+	operationResult, operationErr := m.redirectLink(ctx, slug, link, allowBurn, nil)
+	if operationErr != nil {
+		return operationResult, fmt.Errorf("redirect link: %w", operationErr)
+	}
+
+	return operationResult, nil
 }
 
 func (m *Manager) redirectLink(
@@ -403,7 +419,7 @@ func (m *Manager) redirectLink(
 	dbID := domain.HashSlug(slug)
 
 	if link.Expired(time.Now()) {
-		return nil, m.expireLink(ctx, slug, dbID, reader)
+		return nil, errorcontext.Wrap(m.expireLink(ctx, slug, dbID, reader), "handle redirect link")
 	}
 
 	if link.BurnAfterClick {
@@ -411,12 +427,17 @@ func (m *Manager) redirectLink(
 			return nil, fmt.Errorf("redirect: %w", domain.ErrBurnIntentRequired)
 		}
 
-		return m.consumeLink(ctx, slug, dbID, reader)
+		operationResult, operationErr := m.consumeLink(ctx, slug, dbID, reader)
+		if operationErr != nil {
+			return operationResult, fmt.Errorf("consume link: %w", operationErr)
+		}
+
+		return operationResult, nil
 	}
 
 	incErr := m.incrementRedirectViews(ctx, dbID, link, reader)
 	if incErr != nil {
-		return nil, incErr
+		return nil, fmt.Errorf("increment redirect views: %w", incErr)
 	}
 
 	if m.metrics != nil {
@@ -468,7 +489,7 @@ func (m *Manager) resolveLink(ctx context.Context, slug string) (*domain.Link, e
 
 	err = decryptTargetURL(ctx, m.encryptor, m.log, link)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("decrypt target url: %w", err)
 	}
 
 	if cacheable {
@@ -569,7 +590,7 @@ func (m *Manager) resolveUniqueSlug(
 		if err != nil {
 			unlock()
 
-			return "", nil, err
+			return "", nil, fmt.Errorf("slug taken: %w", err)
 		}
 
 		if !taken {

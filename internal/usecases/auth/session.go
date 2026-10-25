@@ -101,12 +101,12 @@ func (m *SessionManager) Login(
 
 	factorErr := m.verifyLoginFactors(ctx, usr, password, totpCode)
 	if factorErr != nil {
-		return "", factorErr
+		return "", fmt.Errorf("verify login factors: %w", factorErr)
 	}
 
 	sessionID, err := newSessionID()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("new session id: %w", err)
 	}
 
 	now := time.Now()
@@ -190,12 +190,12 @@ func (m *SessionManager) ChangePassword(
 	// The decrypted secret is reused below, so it is decrypted only once.
 	rawSecret, err := m.verifyTOTPStepUp(ctx, oldPassword, usr, totpCode)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("verify totpstep up: %w", err)
 	}
 
 	newHash, newSalt, encSecret, err := m.buildNewCredentials(newPassword, rawSecret)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("build new credentials: %w", err)
 	}
 
 	err = m.users.UpdatePassword(ctx, usr.ID, newHash, newSalt, encSecret)
@@ -208,7 +208,7 @@ func (m *SessionManager) ChangePassword(
 	// A revocation failure must be surfaced alongside the replacement session.
 	newID, err := newSessionID()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("new session id: %w", err)
 	}
 
 	now := time.Now()
@@ -228,7 +228,7 @@ func (m *SessionManager) ChangePassword(
 
 	err = m.revokeOldCredentials(ctx, usr.ID, newID)
 	if err != nil {
-		return newID, err
+		return newID, fmt.Errorf("revoke old credentials: %w", err)
 	}
 
 	return newID, nil
@@ -339,7 +339,7 @@ func (m *SessionManager) verifyLoginFactors(ctx context.Context, usr *domain.Use
 
 	ok, err := m.validateAndRecordTOTP(ctx, usr.ID, secret, totpCode)
 	if err != nil {
-		return err
+		return fmt.Errorf("validate and record totp: %w", err)
 	}
 
 	if !ok {
@@ -396,7 +396,7 @@ func (m *SessionManager) verifyTOTPStepUp(
 
 	ok, err := m.validateAndRecordTOTP(ctx, usr.ID, rawSecret, totpCode)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("validate and record totp: %w", err)
 	}
 
 	if !ok {

@@ -1,7 +1,6 @@
 package tokenfile
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -26,7 +25,12 @@ const knownHostsFile = "known_hosts"
 // HostsPath resolves ~/.config/padmark/known_hosts, honouring XDG_CONFIG_HOME when set —
 // the same directory tokenfile.Path resolves the token file in.
 func HostsPath() (string, error) {
-	return configPath(knownHostsFile)
+	operationResult, operationErr := configPath(knownHostsFile)
+	if operationErr != nil {
+		return operationResult, fmt.Errorf("config path: %w", operationErr)
+	}
+
+	return operationResult, nil
 }
 
 // permGroupOtherWrite masks the group- and other-write bits. A trust store anyone else can
@@ -55,7 +59,7 @@ func Origin(serverURL string) (string, error) {
 	host := strings.ToLower(parsed.Hostname())
 
 	if scheme == "" || host == "" {
-		return "", fmt.Errorf("server URL %q has no scheme or host", serverURL)
+		return "", fmt.Errorf("server URL %q %w", serverURL, ErrInvalidServerURL)
 	}
 
 	port := parsed.Port()
@@ -145,7 +149,7 @@ func trustworthyHostsMode(mode os.FileMode) bool {
 // but it decides where credentials are sent, so it stays owner-only like the token itself.
 func AddKnownOrigin(origin string) error {
 	if origin == "" {
-		return errors.New("trusted origin must not be empty")
+		return errEmptyTrustedOrigin
 	}
 
 	origin, err := Origin(origin)
@@ -159,7 +163,7 @@ func AddKnownOrigin(origin string) error {
 
 	path, err := HostsPath()
 	if err != nil {
-		return err
+		return fmt.Errorf("hosts path: %w", err)
 	}
 
 	mkdirErr := os.MkdirAll(filepath.Dir(path), configDirMode)

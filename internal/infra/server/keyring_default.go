@@ -65,17 +65,22 @@ func resolveKeyringPath(explicit, storage, dsn string) (path string, derived boo
 func loadServeKeyring(explicit, storage, dsn string, allowFlag bool, log *slog.Logger) (*crypto.ContentKeyring, error) {
 	path, derived, err := resolveKeyringPath(explicit, storage, dsn)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("resolve keyring path: %w", err)
 	}
 
 	if derived {
 		err = ensureDefaultKeyring(path, log)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("ensure default keyring: %w", err)
 		}
 	}
 
-	return loadContentKeyring(path, allowFlag, log)
+	operationResult, operationErr := loadContentKeyring(path, allowFlag, log)
+	if operationErr != nil {
+		return operationResult, fmt.Errorf("load content keyring: %w", operationErr)
+	}
+
+	return operationResult, nil
 }
 
 // loadToolKeyring loads the keyring for the encryption subcommands; it never creates one.
@@ -84,7 +89,7 @@ func loadServeKeyring(explicit, storage, dsn string, allowFlag bool, log *slog.L
 func loadToolKeyring(explicit, storage, dsn string, allowFlag bool, log *slog.Logger) (*crypto.ContentKeyring, error) {
 	path, _, err := resolveKeyringPath(explicit, storage, dsn)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("resolve keyring path: %w", err)
 	}
 
 	keyring, err := loadContentKeyring(path, allowFlag, log)
@@ -95,7 +100,11 @@ func loadToolKeyring(explicit, storage, dsn string, allowFlag bool, log *slog.Lo
 			err, defaultKeyID, path)
 	}
 
-	return keyring, err
+	if err != nil {
+		return keyring, fmt.Errorf("load content keyring: %w", err)
+	}
+
+	return keyring, nil
 }
 
 // ensureDefaultKeyring creates the installation keyring at path when it is missing.

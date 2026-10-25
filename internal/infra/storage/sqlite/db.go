@@ -31,7 +31,7 @@ func Open(dsn string, log *slog.Logger) (*bun.DB, error) {
 	if path != "" {
 		err := restrictDBFile(path, create, log)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("restrict dbfile: %w", err)
 		}
 	}
 

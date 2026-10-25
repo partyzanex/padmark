@@ -2,7 +2,6 @@ package mcp
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	urcli "github.com/urfave/cli/v3"
@@ -36,7 +35,7 @@ func trustAction(_ context.Context, cmd *urcli.Command) error {
 
 	if !cmd.IsSet(FlagBaseURL) {
 		if embeddedURL == "" {
-			return errors.New("nothing to trust: the token is not a pmk_ envelope and no --base-url was given")
+			return errNoTrustTarget
 		}
 
 		serverURL = embeddedURL
@@ -83,8 +82,8 @@ func ensureTrustedServer(cmd *urcli.Command, embeddedURL, serverURL string) erro
 		return nil
 	}
 
-	return fmt.Errorf(
-		"token pins server %s, which is not trusted yet; run `padmark-mcp trust` to record it, "+
-			"or choose the server explicitly with --base-url/PADMARK_URL",
-		origin)
+	return fmt.Errorf("%w %s, which is not trusted yet; run "+
+		"`padmark-mcp trust` to record it, or choose "+
+		"the server explicitly with "+
+		"--base-url/PADMARK_URL", ErrUntrustedServer, origin)
 }

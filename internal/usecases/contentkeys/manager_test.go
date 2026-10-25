@@ -596,15 +596,15 @@ func (s *ManagerTestSuite) TestKeyRemovalGates() {
 func (s *ManagerTestSuite) TestWrapErrorAddsContextOnce() {
 	cause := errors.New("registry down")
 
-	wrapped := WrapError(WrapError(cause))
+	wrapped := Wrap(Wrap(cause))
 	s.Require().ErrorIs(wrapped, cause)
 	s.Equal("content encryption: registry down", wrapped.Error())
-	s.Equal(wrapped, WrapError(wrapped))
-	s.Require().NoError(WrapError(nil))
+	s.Equal(wrapped, Wrap(wrapped))
+	s.Require().NoError(Wrap(nil))
 
 	s.store.EXPECT().Registry(gomock.Any()).Return(nil, cause).AnyTimes()
 
-	err := WrapError(s.manager.PrepareServe(s.T().Context()))
+	err := Wrap(s.manager.PrepareServe(s.T().Context()))
 	s.Require().ErrorIs(err, cause)
 	s.Equal(1, countPrefix(err))
 }

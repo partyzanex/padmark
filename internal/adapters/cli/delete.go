@@ -2,11 +2,11 @@ package cli
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	urcli "github.com/urfave/cli/v3"
 
+	"github.com/partyzanex/padmark/internal/errorcontext"
 	padmark "github.com/partyzanex/padmark/pkg/client"
 )
 
@@ -52,10 +52,10 @@ func deleteAction(ctx context.Context, cmd *urcli.Command) error {
 			return fmt.Errorf("delete note: %w", err)
 		}
 
-		return handleDeleteNoteRes(res)
+		return errorcontext.Wrap(handleDeleteNoteRes(res), "decode delete note response")
 	}
 
-	return runDeleteCommand(ctx, cmd, noteIDArg, deleteNote)
+	return errorcontext.Wrap(runDeleteCommand(ctx, cmd, noteIDArg, deleteNote), "delete resource")
 }
 
 func handleDeleteNoteRes(res padmark.DeleteNoteRes) error {
@@ -63,16 +63,18 @@ func handleDeleteNoteRes(res padmark.DeleteNoteRes) error {
 	case *padmark.DeleteNoteNoContent:
 		return nil
 	case *padmark.DeleteNoteUnauthorized:
-		return errors.New("unauthorized")
+		return ErrUnauthorized
 	case *padmark.DeleteNoteForbidden:
-		return errors.New("forbidden: wrong edit code or --token is not the note's owner")
+		return errNoteOwnershipRequired
 	case *padmark.DeleteNoteNotFound:
-		return errors.New("note not found")
+		return ErrNoteNotFound
 	case *padmark.DeleteNoteServiceUnavailable:
-		return serviceUnavailableError(padmark.ErrorResponse(*typed))
+		return errorcontext.Wrap(
+			serviceUnavailableError(padmark.ErrorResponse(*typed)), "decode service unavailable response",
+		)
 	case *padmark.DeleteNoteInternalServerError:
-		return fmt.Errorf("server error: %s", typed.Message)
+		return fmt.Errorf("%w: %s", ErrServer, typed.Message)
 	default:
-		return fmt.Errorf("unexpected response type: %T", res)
+		return fmt.Errorf("%w: %T", ErrUnexpectedResponse, res)
 	}
 }

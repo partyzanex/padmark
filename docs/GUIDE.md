@@ -230,7 +230,9 @@ a confirmation form. A raw-query flag alone does not prove intent.
 
 `internal/adapters/cli` and `mcp` are clients of the HTTP API; they do not open application
 databases. Both accept the API-token envelope format and use the same token/URL resolution
-rules. `/llms.txt` is embedded machine-facing documentation; update it with API behavior.
+rules. `/llms.txt` is an embedded navigation index linking to `/api/reference.md` (the
+detailed API guide) and `/api/openapi.yaml` (schemas). All three describe the same build;
+update the reference with API behavior and keep the index's safety guidance current.
 
 ## 7. CLI and Configuration
 

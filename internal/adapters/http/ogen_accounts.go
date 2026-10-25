@@ -2,7 +2,6 @@ package http
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/partyzanex/padmark/internal/adapters/http/middleware"
@@ -24,7 +23,7 @@ func (h *OgenHandler) WithAuthManager(mgr AuthManager) *OgenHandler {
 func (h *OgenHandler) apiTokenEnvelope(ctx context.Context, plain string) (string, error) {
 	base, err := requestBaseURL(ctx)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("request base url: %w", err)
 	}
 
 	envelope, encErr := domain.EncodeAPITokenEnvelope(base, plain)
@@ -41,7 +40,7 @@ func (h *OgenHandler) apiTokenEnvelope(ctx context.Context, plain string) (strin
 func requestBaseURL(ctx context.Context) (string, error) {
 	origin := middleware.OriginFromCtx(ctx)
 	if origin.Host == "" {
-		return "", errors.New("request origin unavailable")
+		return "", errRequestOriginUnavailable
 	}
 
 	return origin.Scheme + "://" + origin.Host, nil

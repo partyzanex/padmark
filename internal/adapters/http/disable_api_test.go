@@ -82,6 +82,7 @@ func (s *DisableAPISuite) TestAPIPaths_Return503WithCode() {
 		{"invite create", http.MethodPost, "/api/invites", ""},
 		{"api docs", http.MethodGet, "/api", ""},
 		{"openapi spec", http.MethodGet, "/api/openapi.yaml", ""},
+		{"API reference", http.MethodGet, "/api/reference.md", ""},
 		{"llms.txt", http.MethodGet, "/llms.txt", ""},
 	}
 

@@ -167,11 +167,12 @@ func (am *authMiddleware) resolveAPITokenUser(r *http.Request) (*http.Request, b
 	return r.WithContext(ctx), true
 }
 
-// apiDocsPath, apiSpecPath and llmsTxtPath are always public (see isPublicPath) and are also
+// Documentation paths are always public (see isPublicPath) and are also
 // part of the REST/JSON API surface that --disable-api turns off (see isDisabledAPIPath).
 const (
-	apiDocsPath = "/api"
-	apiSpecPath = "/api/openapi.yaml"
+	apiDocsPath      = "/api"
+	apiSpecPath      = "/api/openapi.yaml"
+	apiReferencePath = "/api/reference.md"
 
 	// llmsTxtPath is always public (see isPublicPath) and is also part of the
 	// REST/JSON API surface that --disable-api turns off (see isDisabledAPIPath).
@@ -198,6 +199,7 @@ func isPublicPath(path string) bool {
 		path == "/totp-login" ||
 		strings.HasPrefix(path, "/static/") ||
 		path == apiDocsPath || path == apiSpecPath || path == llmsTxtPath || path == FaviconPath ||
+		path == apiReferencePath ||
 		path == "/healthz" || path == "/readyz"
 }
 

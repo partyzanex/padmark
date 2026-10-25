@@ -28,7 +28,7 @@ func (m *Manager) Update(
 ) (*domain.Link, error) {
 	validURL, err := validateTargetURL(targetURL)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("validate target url: %w", err)
 	}
 
 	dbID := domain.HashSlug(slug)
@@ -54,7 +54,7 @@ func (m *Manager) Update(
 
 	err = validateLink(updated)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("validate link: %w", err)
 	}
 
 	updated.TargetURL, err = m.encryptor.Encrypt(validURL, dbID)

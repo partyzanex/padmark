@@ -9,6 +9,8 @@ import (
 	"os"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/partyzanex/padmark/internal/errorcontext"
 )
 
 // version is reported in the MCP initialize result. A non-empty version is required by the
@@ -61,7 +63,7 @@ func NewManager(client PadmarkClient, log *slog.Logger) *Manager {
 // Run serves MCP over stdio until stdin closes, the context is cancelled, or the SDK reports a
 // transport error. A client disconnecting (stdin EOF) is a session ending normally, not an error.
 func (m *Manager) Run(ctx context.Context) error {
-	return m.Serve(ctx, &mcpsdk.StdioTransport{MaxLineLength: 0})
+	return errorcontext.Wrap(m.Serve(ctx, &mcpsdk.StdioTransport{MaxLineLength: 0}), "serve")
 }
 
 // Serve serves MCP over an explicit transport — the seam for alternative transports (stdio is
