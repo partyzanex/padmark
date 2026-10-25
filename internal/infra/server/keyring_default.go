@@ -75,13 +75,23 @@ func loadServeKeyring(explicit, storage, dsn string, log *slog.Logger) (*crypto.
 }
 
 // loadToolKeyring loads the keyring for the encryption subcommands; it never creates one.
+// A missing file gets the exact keygen command: an upgrade from v0.1.6 runs encryption
+// migrate before the first serve, so the SQLite default keyring does not exist yet.
 func loadToolKeyring(explicit, storage, dsn string, allowFlag bool, log *slog.Logger) (*crypto.ContentKeyring, error) {
 	path, _, err := resolveKeyringPath(explicit, storage, dsn)
 	if err != nil {
 		return nil, err
 	}
 
-	return loadContentKeyring(path, allowFlag, log)
+	keyring, err := loadContentKeyring(path, allowFlag, log)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("%w; the encryption commands never create a keyring: if this database holds "+
+			"no encrypted content yet (a v0.1.6 upgrade or a new installation), create one with "+
+			"`padmark-server encryption keygen --key-id %s --output %s`, otherwise restore the original keyring",
+			err, defaultKeyID, path)
+	}
+
+	return keyring, err
 }
 
 // ensureDefaultKeyring creates the installation keyring at path when it is missing.

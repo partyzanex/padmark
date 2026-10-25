@@ -6,8 +6,8 @@
 -- until the conversion re-keys the row (id = hash, native envelope, hashed edit code) and
 -- clears it; serve refuses to start while any row is still tagged.
 --
--- Known gap: a v0.1.6 custom slug that is itself 64 lowercase hex characters is not tagged.
--- Its plaintext content then falls into the raw/corrupt-raw path of encryption status.
+-- A v0.1.6 custom slug that is itself 64 lowercase hex characters is not tagged here;
+-- 20261024000001_legacy_hex_slugs tags it by its plaintext edit code.
 ALTER TABLE notes ADD COLUMN legacy_slug TEXT;
 UPDATE notes SET legacy_slug = id WHERE length(id) <> 64 OR id GLOB '*[^0-9a-f]*';
 
