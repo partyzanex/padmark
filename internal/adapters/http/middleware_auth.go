@@ -176,6 +176,9 @@ const (
 	// REST/JSON API surface that --disable-api turns off (see isDisabledAPIPath).
 	llmsTxtPath = "/llms.txt"
 
+	// faviconPath is always public: browsers request it on their own for pages without an icon.
+	faviconPath = "/favicon.ico"
+
 	// linkCreatePath and notesCreatePath are the collection roots (POST create); isPublicRoute
 	// admits them alongside the resource paths below. editPathPrefix covers GET /edit/{id},
 	// whose per-note privacy check lives in EditPage.
@@ -193,7 +196,7 @@ func isPublicPath(path string) bool {
 		path == "/logout" ||
 		path == "/totp-login" ||
 		strings.HasPrefix(path, "/static/") ||
-		path == apiDocsPath || path == apiSpecPath || path == llmsTxtPath ||
+		path == apiDocsPath || path == apiSpecPath || path == llmsTxtPath || path == faviconPath ||
 		path == "/healthz" || path == "/readyz"
 }
 

@@ -33,6 +33,9 @@ func (h *PageHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api", h.APIDocsPage)
 	mux.HandleFunc("GET /api/openapi.yaml", APISpec)
 	mux.HandleFunc("GET /llms.txt", LLMsTxt)
+	// HTML pages declare /static/favicon.svg; a raw text/markdown view cannot, so the browser asks
+	// for /favicon.ico and would otherwise get a 404 from the note route.
+	mux.Handle("GET "+faviconPath, http.RedirectHandler("/static/favicon.svg", http.StatusMovedPermanently))
 	mux.HandleFunc("GET /{$}", h.IndexPage)
 	mux.HandleFunc("GET /success", h.SuccessPage)
 	mux.Handle("GET /static/", withStaticCacheControl(StaticHandler))

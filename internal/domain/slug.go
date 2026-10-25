@@ -39,6 +39,8 @@ func ReservedSlugPrefixes() map[string]struct{} {
 		// Served file, registered per exact segment ("llms.txt", not "llms") so agent docs
 		// stay reachable without blocking the "llms" segment for note slugs.
 		"llms.txt": {},
+		// Browsers request /favicon.ico on pages that declare no icon (raw text/markdown views).
+		"favicon.ico": {},
 	}
 }
 
