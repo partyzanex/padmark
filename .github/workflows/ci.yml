@@ -102,6 +102,11 @@ jobs:
             go.sum
             tests/ui/go.sum
 
+      - name: Install make
+        run: |
+          apt-get update
+          apt-get install --yes --no-install-recommends make
+
       - run: make test-ui-setup
       - run: make test-ui
 
