@@ -185,6 +185,54 @@ func (r *LinkRepository) Consume(ctx context.Context, id string) (*domain.Link, 
 	return linkToDomain(&dbLink), nil
 }
 
+// ConsumeVisible enforces the reader's current access in the DELETE itself, including after
+// a concurrent writer has changed privacy. With allowBurn=false only expired rows qualify.
+func (r *LinkRepository) ConsumeVisible(
+	ctx context.Context, id string, callerID uuid.UUID, authenticated, allowBurn bool,
+) (*domain.Link, error) {
+	var dbLink link
+
+	err := r.db.NewDelete().Model(&dbLink).Where("id = ?", id).
+		Where("(expires_at IS NOT NULL AND expires_at <= ?) OR (burn_after_click AND ?)", time.Now(), allowBurn).
+		Where("privacy = ? OR (privacy = ? AND ?) OR (privacy = ? AND owner_id = ? AND ?)",
+			domain.PrivacyPublic, domain.PrivacyAuthenticated, authenticated,
+			domain.PrivacyOwner, callerID, callerID != uuid.Nil).
+		Returning("*").Scan(ctx)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, domain.ErrNotFound
+		}
+
+		return nil, fmt.Errorf("sqlite consume visible link: %w", err)
+	}
+
+	return linkToDomain(&dbLink), nil
+}
+
+// IncrementViewsVisible counts a read only while the current row still admits this reader.
+func (r *LinkRepository) IncrementViewsVisible(
+	ctx context.Context, id string, callerID uuid.UUID, authenticated bool,
+) error {
+	result, err := r.db.NewUpdate().TableExpr("links").Set("views = views + 1").Where("id = ?", id).
+		Where("privacy = ? OR (privacy = ? AND ?) OR (privacy = ? AND owner_id = ? AND ?)",
+			domain.PrivacyPublic, domain.PrivacyAuthenticated, authenticated,
+			domain.PrivacyOwner, callerID, callerID != uuid.Nil).Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("sqlite increment visible link views: %w", err)
+	}
+
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("sqlite visible link rowsaffected: %w", err)
+	}
+
+	if affected == 0 {
+		return domain.ErrNotFound
+	}
+
+	return nil
+}
+
 // IncrementViews atomically increments the click counter for a link.
 func (r *LinkRepository) IncrementViews(ctx context.Context, id string) error {
 	result, err := r.db.NewUpdate().

@@ -13,6 +13,7 @@ import (
 	context "context"
 	reflect "reflect"
 
+	uuid "github.com/google/uuid"
 	domain "github.com/partyzanex/padmark/internal/domain"
 	gomock "go.uber.org/mock/gomock"
 )
@@ -54,6 +55,21 @@ func (m *MockStorage) Consume(ctx context.Context, id string) (*domain.Link, err
 func (mr *MockStorageMockRecorder) Consume(ctx, id any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Consume", reflect.TypeOf((*MockStorage)(nil).Consume), ctx, id)
+}
+
+// ConsumeVisible mocks base method.
+func (m *MockStorage) ConsumeVisible(ctx context.Context, id string, callerID uuid.UUID, authenticated, allowBurn bool) (*domain.Link, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ConsumeVisible", ctx, id, callerID, authenticated, allowBurn)
+	ret0, _ := ret[0].(*domain.Link)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ConsumeVisible indicates an expected call of ConsumeVisible.
+func (mr *MockStorageMockRecorder) ConsumeVisible(ctx, id, callerID, authenticated, allowBurn any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ConsumeVisible", reflect.TypeOf((*MockStorage)(nil).ConsumeVisible), ctx, id, callerID, authenticated, allowBurn)
 }
 
 // Create mocks base method.
@@ -126,6 +142,20 @@ func (m *MockStorage) IncrementViews(ctx context.Context, id string) error {
 func (mr *MockStorageMockRecorder) IncrementViews(ctx, id any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IncrementViews", reflect.TypeOf((*MockStorage)(nil).IncrementViews), ctx, id)
+}
+
+// IncrementViewsVisible mocks base method.
+func (m *MockStorage) IncrementViewsVisible(ctx context.Context, id string, callerID uuid.UUID, authenticated bool) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "IncrementViewsVisible", ctx, id, callerID, authenticated)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// IncrementViewsVisible indicates an expected call of IncrementViewsVisible.
+func (mr *MockStorageMockRecorder) IncrementViewsVisible(ctx, id, callerID, authenticated any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IncrementViewsVisible", reflect.TypeOf((*MockStorage)(nil).IncrementViewsVisible), ctx, id, callerID, authenticated)
 }
 
 // Update mocks base method.

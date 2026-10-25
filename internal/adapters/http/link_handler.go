@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/partyzanex/padmark/internal/domain"
+	"github.com/partyzanex/padmark/internal/usecases/links"
 
 	_ "embed"
 )
@@ -58,12 +59,13 @@ type redirectViewData struct {
 func (h *LinkHandler) Redirect(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	handled := h.handlePrivateAuth(w, r, id)
-	if handled {
+	link, err := h.followLink(r, id)
+	if errors.Is(err, domain.ErrForbidden) {
+		h.denyPrivate(w, r)
+
 		return
 	}
 
-	link, err := h.followLink(r, id)
 	if errors.Is(err, domain.ErrBurnIntentRequired) {
 		writeBurnReadNotExplicit(w, r, h.log)
 
@@ -101,6 +103,17 @@ func (h *LinkHandler) Redirect(w http.ResponseWriter, r *http.Request) {
 // (explicitRead — a browser navigation or a client naming the format) may consume a
 // burn_after_click link; anything else (preview fetch, scanner, HEAD, <img src="/r/…">) may not.
 func (h *LinkHandler) followLink(r *http.Request, id string) (*domain.Link, error) {
+	if h.authMgr != nil {
+		link, err := h.manager.Follow(r.Context(), id, links.FollowOptions{
+			CallerID: callerIDFromCtx(r.Context()), Authenticated: h.isAuthenticated(r), AllowBurn: explicitRead(r),
+		})
+		if err != nil {
+			return nil, fmt.Errorf("follow link: %w", err)
+		}
+
+		return link, nil
+	}
+
 	if explicitRead(r) {
 		link, err := h.manager.Redirect(r.Context(), id)
 		if err != nil {
@@ -116,36 +129,6 @@ func (h *LinkHandler) followLink(r *http.Request, id string) (*domain.Link, erro
 	}
 
 	return link, nil
-}
-
-// handlePrivateAuth checks the link's privacy level against the caller (see Link.VisibleTo),
-// mirroring NoteHandler.handlePrivateAuth exactly — both now hand a denial to common.denyPrivate,
-// so "exactly" is enforced by the shared code rather than by two copies staying in step. GET
-// /r/{id} is browser-only (no JSON variant registered for it — see openapi.yaml's "Short links"
-// section), but a non-HTML request is still answered sanely (401 JSON) rather than assumed to be
-// a browser.
-//
-// Uses Peek (non-mutating) so a denied caller never triggers Redirect's side effects (view count,
-// burn-after-click consumption) — the same reason NoteHandler.Peek exists.
-func (h *LinkHandler) handlePrivateAuth(w http.ResponseWriter, r *http.Request, id string) bool {
-	if h.authMgr == nil {
-		return false
-	}
-
-	link, err := h.manager.Peek(r.Context(), id)
-	if err != nil {
-		h.writeErrorPage(w, r, err)
-
-		return true
-	}
-
-	if link.VisibleTo(callerIDFromCtx(r.Context()), h.isAuthenticated(r)) {
-		return false
-	}
-
-	h.denyPrivate(w, r)
-
-	return true
 }
 
 // WithDirectRedirect sets GET /r/{id}'s response mode (see RouterOptions.DirectRedirect). Called

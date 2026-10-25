@@ -261,7 +261,7 @@ func (h *OgenHandler) CreateLinksBulk(
 //
 // GET /links/{id} is routed through ogenSrv (unlike GET /notes/{id}, which bypasses it — see
 // GetNote's doc comment), so this method is the sole enforcement point for the link's privacy
-// level on this path and must check it explicitly, mirroring LinkHandler.handlePrivateAuth.
+// level on this path and must check it explicitly, like the Follow usecase on the redirect path.
 // authenticatedFromCtx recognizes a TOTP session or an API token (both set the context user via
 // the auth middleware's isPublicRoute branch).
 func (h *OgenHandler) GetLink(

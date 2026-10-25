@@ -74,6 +74,8 @@ default, so without opting in the server stays fully public, exactly like v0.1.6
   and health checks remain available.
 
 **Short links**
+- Redirects check privacy on the snapshot supplying the URL. Burn/expiry deletion and click
+  increments also check the reader's current access in SQL, including across replicas.
 - `/links`, `/links/bulk`, `GET/PUT/DELETE /links/{id}`, redirect at `/r/{id}`. The same
   edit_code / ownership / privacy / burn-after-click model as notes.
 - An interstitial page instead of an instant redirect for anonymously created links by default

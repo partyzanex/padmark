@@ -13,6 +13,7 @@ import (
 
 	adhttp "github.com/partyzanex/padmark/internal/adapters/http"
 	"github.com/partyzanex/padmark/internal/domain"
+	"github.com/partyzanex/padmark/internal/usecases/links"
 )
 
 const (
@@ -637,14 +638,11 @@ func (s *HandlerSuite) TestRedirectLink_BurnAfterClick_ConsumedOnce() {
 // with a page rather than a bare 401. 403 rather than the /login redirect, because this caller is
 // already signed in and logging in again would land them right back here.
 func (s *HandlerSuite) TestRedirectLink_OwnerOnly_NonOwner_HTML_Forbidden() {
-	owner := &domain.User{ID: uuid.New(), Username: "alice"}
 	other := &domain.User{ID: uuid.New(), Username: "bob"}
 
-	link := newTestLink()
-	link.Privacy = new(domain.PrivacyOwner)
-	link.OwnerID = &owner.ID
-
-	s.linkManager.EXPECT().Peek(gomock.Any(), testLinkID).Return(link, nil)
+	s.linkManager.EXPECT().Follow(gomock.Any(), testLinkID, links.FollowOptions{
+		CallerID: other.ID, Authenticated: true, AllowBurn: true,
+	}).Return(nil, domain.ErrForbidden)
 	s.authMgr.EXPECT().GetSession(gomock.Any(), "valid-sess").Return(other, nil).Times(1)
 
 	router := s.newLinkRouterWithTOTPAuth()
@@ -671,8 +669,9 @@ func (s *HandlerSuite) TestRedirectLink_OwnerOnly_Owner_Authorized() {
 	link.Privacy = new(domain.PrivacyOwner)
 	link.OwnerID = &owner.ID
 
-	s.linkManager.EXPECT().Peek(gomock.Any(), testLinkID).Return(link, nil)
-	s.linkManager.EXPECT().Redirect(gomock.Any(), testLinkID).Return(link, nil)
+	s.linkManager.EXPECT().Follow(gomock.Any(), testLinkID, links.FollowOptions{
+		CallerID: owner.ID, Authenticated: true, AllowBurn: true,
+	}).Return(link, nil)
 	s.authMgr.EXPECT().GetSession(gomock.Any(), "valid-sess").Return(owner, nil).Times(1)
 
 	router := s.newLinkRouterWithTOTPAuth()
@@ -691,13 +690,9 @@ func (s *HandlerSuite) TestRedirectLink_OwnerOnly_Owner_Authorized() {
 // from denying a different authenticated caller — completes the privacy × caller matrix alongside
 // TestRedirectLink_OwnerOnly_NonOwner_HTML_Forbidden and _Owner_Authorized above.
 func (s *HandlerSuite) TestRedirectLink_OwnerOnly_Anonymous_Unauthorized() {
-	owner := &domain.User{ID: uuid.New(), Username: "alice"}
-
-	link := newTestLink()
-	link.Privacy = new(domain.PrivacyOwner)
-	link.OwnerID = &owner.ID
-
-	s.linkManager.EXPECT().Peek(gomock.Any(), testLinkID).Return(link, nil)
+	s.linkManager.EXPECT().Follow(gomock.Any(), testLinkID, links.FollowOptions{
+		CallerID: uuid.Nil, Authenticated: false, AllowBurn: true,
+	}).Return(nil, domain.ErrForbidden)
 
 	router := s.newLinkRouterWithTOTPAuth()
 
@@ -713,13 +708,9 @@ func (s *HandlerSuite) TestRedirectLink_OwnerOnly_Anonymous_Unauthorized() {
 // TestRedirectLink_OwnerOnly_Anonymous_HTML_RedirectToLogin is the HTML-negotiated counterpart to
 // the anonymous case above — mirrors TestOwnerOnlyNote_Anonymous_HTML_RedirectToLogin.
 func (s *HandlerSuite) TestRedirectLink_OwnerOnly_Anonymous_HTML_RedirectToLogin() {
-	owner := &domain.User{ID: uuid.New(), Username: "alice"}
-
-	link := newTestLink()
-	link.Privacy = new(domain.PrivacyOwner)
-	link.OwnerID = &owner.ID
-
-	s.linkManager.EXPECT().Peek(gomock.Any(), testLinkID).Return(link, nil)
+	s.linkManager.EXPECT().Follow(gomock.Any(), testLinkID, links.FollowOptions{
+		CallerID: uuid.Nil, Authenticated: false, AllowBurn: true,
+	}).Return(nil, domain.ErrForbidden)
 
 	router := s.newLinkRouterWithTOTPAuth()
 
@@ -738,10 +729,9 @@ func (s *HandlerSuite) TestRedirectLink_OwnerOnly_Anonymous_HTML_RedirectToLogin
 // unlike privacy: owner, any logged-in caller (not just the creator) is enough, but anonymous
 // never is.
 func (s *HandlerSuite) TestRedirectLink_PrivacyAuthenticated_Unauthenticated() {
-	link := newTestLink()
-	link.Privacy = new(domain.PrivacyAuthenticated)
-
-	s.linkManager.EXPECT().Peek(gomock.Any(), testLinkID).Return(link, nil)
+	s.linkManager.EXPECT().Follow(gomock.Any(), testLinkID, links.FollowOptions{
+		CallerID: uuid.Nil, Authenticated: false, AllowBurn: true,
+	}).Return(nil, domain.ErrForbidden)
 
 	router := s.newLinkRouterWithTOTPAuth()
 
@@ -764,8 +754,9 @@ func (s *HandlerSuite) TestRedirectLink_PrivacyAuthenticated_Authenticated() {
 	link := newTestLink()
 	link.Privacy = new(domain.PrivacyAuthenticated)
 
-	s.linkManager.EXPECT().Peek(gomock.Any(), testLinkID).Return(link, nil)
-	s.linkManager.EXPECT().Redirect(gomock.Any(), testLinkID).Return(link, nil)
+	s.linkManager.EXPECT().Follow(gomock.Any(), testLinkID, links.FollowOptions{
+		CallerID: usr.ID, Authenticated: true, AllowBurn: true,
+	}).Return(link, nil)
 	s.authMgr.EXPECT().GetSession(gomock.Any(), "valid-sess").Return(usr, nil).Times(1)
 
 	router := s.newLinkRouterWithTOTPAuth()

@@ -1,0 +1,181 @@
+//go:build integration
+
+package integration
+
+import (
+	"context"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/require"
+
+	adhttp "github.com/partyzanex/padmark/internal/adapters/http"
+	"github.com/partyzanex/padmark/internal/domain"
+	"github.com/partyzanex/padmark/internal/infra/crypto"
+	"github.com/partyzanex/padmark/internal/infra/linkcache"
+	"github.com/partyzanex/padmark/internal/infra/lock"
+	sqliterepo "github.com/partyzanex/padmark/internal/infra/storage/sqlite"
+	"github.com/partyzanex/padmark/internal/testutil"
+	"github.com/partyzanex/padmark/internal/usecases/auth"
+	"github.com/partyzanex/padmark/internal/usecases/links"
+)
+
+// pausedLinkRead lets a separate manager commit an update after the reader fetched its row.
+// Neither manager shares a process-local slug lock or target cache with the other.
+type pausedLinkRead struct {
+	links.Storage
+
+	once    sync.Once
+	read    chan struct{}
+	proceed chan struct{}
+}
+
+func (s *pausedLinkRead) GetByID(ctx context.Context, id string) (*domain.Link, error) {
+	link, err := s.Storage.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	s.once.Do(func() {
+		close(s.read)
+
+		select {
+		case <-s.proceed:
+		case <-ctx.Done():
+		}
+	})
+
+	return link, ctx.Err()
+}
+
+func TestLinkRedirectPrivacyRace(t *testing.T) {
+	for _, scenario := range []struct {
+		name     string
+		burn     bool
+		implicit bool
+	}{
+		{name: "ordinary"},
+		{name: "burn", burn: true},
+		{name: "preview", implicit: true},
+		{name: "burn_preview", burn: true, implicit: true},
+	} {
+		for _, cached := range []bool{false, true} {
+			name := scenario.name + "/uncached"
+			if cached {
+				name = scenario.name + "/cached"
+			}
+
+			t.Run(name, func(t *testing.T) {
+				env := newOwnerFlowEnv(t, strings.ReplaceAll(t.Name(), "/", "_"))
+				_, err := env.authMgr.AcceptFirstAdmin(t.Context(), "owner", ownerFlowPassword)
+				require.NoError(t, err)
+				owner, err := env.users.GetByUsername(t.Context(), "owner")
+				require.NoError(t, err)
+				key, err := env.authMgr.CreateAPIToken(t.Context(), owner.ID, auth.SessionIssuer(), 0)
+				require.NoError(t, err)
+
+				log := slog.New(slog.DiscardHandler)
+				notes, writer := newOwnerFlowManagers(t, env.db, log)
+				publicURL, privateURL := "https://example.com/public", "https://example.com/private?secret=hidden"
+				link, err := writer.Create(t.Context(), publicURL, links.CreateOptions{
+					OwnerID: &owner.ID, BurnAfterClick: scenario.burn,
+				})
+				require.NoError(t, err)
+
+				repo := sqliterepo.NewLinkRepository(env.db, log)
+				paused := &pausedLinkRead{Storage: repo, read: make(chan struct{}), proceed: make(chan struct{})}
+
+				reader := links.NewManager(paused, sqliterepo.NewNoteRepository(env.db), lock.NewLocker(),
+					testutil.ContentEncryptor(t, "link"), crypto.NewEditCodeHasher(testArgon2Params), log, false)
+				if cached {
+					cache := linkcache.NewDefault(log)
+					stored, getErr := repo.GetByID(t.Context(), domain.HashSlug(link.ID))
+					require.NoError(t, getErr)
+					cache.Set(t.Context(), stored.ID, stored.TargetURL, publicURL)
+					reader.WithCache(cache)
+				}
+
+				handler := adhttp.NewHandler(notes, reader, log).WithAuthManager(env.authMgr)
+				ogen := adhttp.NewOgenHandler(notes, reader, adhttp.NoPinger{}, log)
+				router, err := adhttp.NewRouter(handler, ogen, &adhttp.RouterOptions{
+					MaxBodyBytes: 256 * 1024, DirectRedirect: true,
+				})
+				require.NoError(t, err)
+
+				server := httptest.NewServer(router)
+				t.Cleanup(server.Close)
+
+				var release sync.Once
+
+				resume := func() { release.Do(func() { close(paused.proceed) }) }
+				t.Cleanup(resume)
+
+				request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/r/"+link.ID, nil)
+				require.NoError(t, err)
+				request.Header.Set("Accept", "application/json")
+
+				if scenario.implicit {
+					request.Header.Set("Accept", "*/*")
+				}
+
+				client := &http.Client{Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error {
+					return http.ErrUseLastResponse
+				}}
+				response := make(chan *http.Response, 1)
+				failure := make(chan error, 1)
+
+				go func() {
+					result, doErr := client.Do(request)
+					response <- result
+
+					failure <- doErr
+				}()
+
+				select {
+				case <-paused.read:
+				case <-time.After(10 * time.Second):
+					t.Fatal("redirect did not reach the initial row read")
+				}
+
+				_, err = writer.Update(t.Context(), link.ID, "", owner.ID, privateURL,
+					links.UpdateOptions{Privacy: new(domain.PrivacyOwner)})
+				require.NoError(t, err)
+				resume()
+
+				resp := <-response
+
+				require.NoError(t, <-failure)
+
+				defer resp.Body.Close()
+
+				body, err := io.ReadAll(resp.Body)
+				require.NoError(t, err)
+				require.NotContains(t, resp.Header.Get("Location"), privateURL)
+				require.NotContains(t, string(body), privateURL)
+				require.GreaterOrEqual(t, resp.StatusCode, http.StatusBadRequest)
+				current, err := repo.GetByID(t.Context(), domain.HashSlug(link.ID))
+				require.NoError(t, err, "the unauthorized request must not consume the new private row")
+				require.Zero(t, current.Views, "the new private row must not receive an anonymous click")
+
+				request.Header.Set("Authorization", "Bearer "+key)
+				request.Header.Set("Accept", "application/json")
+				resp, err = client.Do(request)
+				require.NoError(t, err)
+				require.NoError(t, resp.Body.Close())
+				require.Equal(t, http.StatusMovedPermanently, resp.StatusCode)
+				require.Equal(t, privateURL, resp.Header.Get("Location"), "the owner must retain access")
+
+				if scenario.burn {
+					_, err = repo.GetByID(t.Context(), domain.HashSlug(link.ID))
+					require.ErrorIs(t, err, domain.ErrNotFound, "the owner consumes the burn link")
+				}
+			})
+		}
+	}
+}

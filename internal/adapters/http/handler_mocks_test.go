@@ -821,6 +821,21 @@ func (mr *MockLinkManagerMockRecorder) Delete(ctx, slug, editCode, callerID any)
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Delete", reflect.TypeOf((*MockLinkManager)(nil).Delete), ctx, slug, editCode, callerID)
 }
 
+// Follow mocks base method.
+func (m *MockLinkManager) Follow(ctx context.Context, slug string, options links.FollowOptions) (*domain.Link, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Follow", ctx, slug, options)
+	ret0, _ := ret[0].(*domain.Link)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Follow indicates an expected call of Follow.
+func (mr *MockLinkManagerMockRecorder) Follow(ctx, slug, options any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Follow", reflect.TypeOf((*MockLinkManager)(nil).Follow), ctx, slug, options)
+}
+
 // Peek mocks base method.
 func (m *MockLinkManager) Peek(ctx context.Context, slug string) (*domain.Link, error) {
 	m.ctrl.T.Helper()

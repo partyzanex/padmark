@@ -30,6 +30,11 @@ type Storage interface {
 	IncrementViews(ctx context.Context, id string) error
 	Delete(ctx context.Context, id string) error
 	Consume(ctx context.Context, id string) (*domain.Link, error)
+	// ConsumeVisible atomically checks current visibility and expiry/burn eligibility before
+	// deleting and returning a row. allowBurn=false permits only expired rows.
+	ConsumeVisible(ctx context.Context, id string, callerID uuid.UUID, authenticated, allowBurn bool) (*domain.Link, error)
+	// IncrementViewsVisible refuses a row that is no longer visible to this reader.
+	IncrementViewsVisible(ctx context.Context, id string, callerID uuid.UUID, authenticated bool) error
 }
 
 // NotesChecker lets links.Manager verify a candidate slug isn't already taken by a note — slugs
@@ -318,6 +323,7 @@ func (m *Manager) Peek(ctx context.Context, slug string) (*domain.Link, error) {
 //
 // The initial fetch always reads current storage metadata. For public links the
 // optional Cache can skip decryption after verifying the current ciphertext.
+// This operation does not authorize a reader; adapters with accounts enabled use Follow.
 func (m *Manager) Redirect(ctx context.Context, slug string) (*domain.Link, error) {
 	return m.redirect(ctx, slug, true)
 }
@@ -387,22 +393,21 @@ func (m *Manager) persistLink(
 // redirect is Redirect/RedirectWithoutBurn's shared body; allowBurn says whether this access may
 // consume a burn_after_click link.
 func (m *Manager) redirect(ctx context.Context, slug string, allowBurn bool) (*domain.Link, error) {
-	dbID := domain.HashSlug(slug)
-
 	link, err := m.resolveLink(ctx, slug)
 	if err != nil {
 		return nil, fmt.Errorf("redirect: %w", err)
 	}
 
+	return m.redirectLink(ctx, slug, link, allowBurn, nil)
+}
+
+func (m *Manager) redirectLink(
+	ctx context.Context, slug string, link *domain.Link, allowBurn bool, reader *FollowOptions,
+) (*domain.Link, error) {
+	dbID := domain.HashSlug(slug)
+
 	if link.Expired(time.Now()) {
-		delErr := m.storage.Delete(ctx, dbID)
-		if delErr != nil {
-			m.log.ErrorContext(ctx, "delete expired link", "id", domain.HashSlug(slug), "err", delErr)
-		}
-
-		m.evictCache(dbID)
-
-		return nil, domain.ErrExpired
+		return nil, m.expireLink(ctx, slug, dbID, reader)
 	}
 
 	if link.BurnAfterClick {
@@ -410,14 +415,12 @@ func (m *Manager) redirect(ctx context.Context, slug string, allowBurn bool) (*d
 			return nil, fmt.Errorf("redirect: %w", domain.ErrBurnIntentRequired)
 		}
 
-		return m.consumeLink(ctx, slug, dbID)
+		return m.consumeLink(ctx, slug, dbID, reader)
 	}
 
-	incErr := m.storage.IncrementViews(ctx, dbID)
+	incErr := m.incrementRedirectViews(ctx, dbID, link, reader)
 	if incErr != nil {
-		m.log.ErrorContext(ctx, "increment link views", "id", domain.HashSlug(slug), "err", incErr)
-	} else {
-		link.Views++
+		return nil, incErr
 	}
 
 	if m.metrics != nil {
@@ -612,8 +615,19 @@ func (m *Manager) slugTaken(ctx context.Context, dbID string) (bool, error) {
 	return linksExist, nil
 }
 
-func (m *Manager) consumeLink(ctx context.Context, slug, dbID string) (*domain.Link, error) {
-	consumed, err := m.storage.Consume(ctx, dbID)
+func (m *Manager) consumeLink(
+	ctx context.Context, slug, dbID string, reader *FollowOptions,
+) (*domain.Link, error) {
+	var consumed *domain.Link
+
+	var err error
+
+	if reader == nil {
+		consumed, err = m.storage.Consume(ctx, dbID)
+	} else {
+		consumed, err = m.storage.ConsumeVisible(ctx, dbID, reader.CallerID, reader.Authenticated, true)
+	}
+
 	if err != nil {
 		return nil, fmt.Errorf("redirect: burn after click: %w", err)
 	}

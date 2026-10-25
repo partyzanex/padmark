@@ -134,6 +134,7 @@ type LinkManager interface {
 		ctx context.Context, slug, editCode string, callerID uuid.UUID, targetURL string, opts links.UpdateOptions,
 	) (*domain.Link, error)
 	Peek(ctx context.Context, slug string) (*domain.Link, error)
+	Follow(ctx context.Context, slug string, options links.FollowOptions) (*domain.Link, error)
 	Redirect(ctx context.Context, slug string) (*domain.Link, error)
 	// RedirectWithoutBurn follows a link like Redirect but never consumes a burn_after_click
 	// link (domain.ErrBurnIntentRequired). See links.Manager.RedirectWithoutBurn.
@@ -201,7 +202,7 @@ func (c *common) isHTTPS(r *http.Request) bool {
 }
 
 // denyPrivate answers a caller that failed a resource's privacy check. Shared by
-// NoteHandler.handlePrivateAuth and LinkHandler.handlePrivateAuth so the two gates cannot drift.
+// NoteHandler.handlePrivateAuth and LinkHandler.Redirect so their denial responses cannot drift.
 //
 // An anonymous browser is sent to the login page carrying its original target: signing in is
 // exactly what would grant access. A browser that is already signed in gets 403 instead — it is
