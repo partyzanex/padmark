@@ -190,7 +190,8 @@ Tests without a database pinger use `NoPinger{}`.
 
 The generated OpenAPI handlers serve single-segment API paths; handwritten handlers also
 support path-like note slugs. Keep their status codes, validation and ownership behavior
-aligned. Edit codes for deletion come from `X-Edit-Code`, never the query string.
+aligned. Edit codes for deletion come from `X-Edit-Code`; the deprecated `edit_code` query
+parameter is a fallback for v0.1.6 clients only (`deleteEditCode`).
 
 `domain.ReservedSlugPrefixes()` is the source of truth for named first-segment routes.
 Registering a new prefix without reserving it can send that route into note resolution.

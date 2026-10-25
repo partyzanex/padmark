@@ -79,13 +79,15 @@ The timer starts on first read, not on creation.
 
 Only an intentional read burns a note. Browsers get a "reveal" confirmation page first; API
 clients must name the format in `Accept` (`application/json`, `text/markdown`, `text/plain`).
-A burn-after-reading note requested without `Accept`, with only `*/*`, with `HEAD`, or as a
-browser subresource (`<img src>`, `<iframe>`) is answered `409` (`code: burn_read_not_explicit`)
+A burn-after-reading note requested with only `*/*`, with `HEAD`, as a browser subresource
+(`<img src>`, `<iframe>`), or at the short `/{id}` URL without `Accept` is answered `409`
+(`code: burn_read_not_explicit`)
 and stays intact — so link unfurlers, mail scanners and embeds in other notes cannot destroy it.
 The editor (`/edit/{id}`) never shows a burn-after-reading note's content and answers `410` for
 an expired note. `padmark-cli` and `padmark-mcp` always send `Accept: application/json`. The
 same rule protects `burn_after_click` links on `GET /r/{id}`: only a browser navigation or an
 explicit `Accept` follows (and burns) one; previews, scanners, `HEAD` and embeds get `409`.
+For v0.1.6 clients, `GET /notes/{id}` with no `Accept` header at all still counts as a read.
 
 ---
 
@@ -311,7 +313,7 @@ padmark-cli create --file note.md
 # Create from stdin
 echo "# Hello" | padmark-cli create
 
-# Custom slug and title (server must run with --custom-slugs; see Configuration reference)
+# Custom slug and title (refused if the server runs with --custom-slugs=false; see Configuration reference)
 padmark-cli create --title "Runbook" --content "..." --slug deploy-notes
 
 # Burn-after-reading with a 1-hour window after first read
@@ -408,10 +410,10 @@ curl -X DELETE http://localhost:4000/notes/{id} \
   -H "X-Edit-Code: JmNkn0LdjbMw"
 ```
 
-> `DELETE` reads the edit code from the `X-Edit-Code` header only. A `?edit_code=` query parameter
-> is **ignored** (the request counts as having no edit code): a query string ends up in
-> reverse-proxy/CDN access logs and `Referer` headers. Clients that used the query form must
-> switch to the header.
+> `DELETE` reads the edit code from the `X-Edit-Code` header. The `?edit_code=` query parameter
+> is **deprecated**: it is used only when the header is absent, kept for v0.1.6 clients, and logs
+> a warning. A query string ends up in reverse-proxy/CDN access logs and `Referer` headers, so
+> send the header.
 
 **Update or delete without `edit_code`** — if the note was created by this same authenticated
 caller, `edit_code` can be omitted entirely; a Bearer token or session cookie is enough (see
@@ -964,7 +966,7 @@ There is no destructive encryption down-migration, and older binaries cannot rea
 | `--log-format` | `PADMARK_LOG_FORMAT` | `json` | `json` or `text` |
 | `--trusted-proxies` | `PADMARK_TRUSTED_PROXIES` | — | Proxy CIDRs/IPs whose `X-Forwarded-For` / `X-Real-IP` is believed when resolving the real client IP; also the addresses whose `X-Forwarded-Proto` is trusted when building absolute links (note URLs, invite links, API-token envelopes). Set it to the proxy's own addresses and nothing wider — see [Getting `--trusted-proxies` wrong](#getting---trusted-proxies-wrong) |
 | `--public-scheme` | `PADMARK_PUBLIC_SCHEME` | — | Force `http` or `https` for absolute links back to this server, bypassing TLS/`X-Forwarded-Proto` detection; `https` also marks session/CSRF cookies `Secure` and enables HSTS. Use this instead of `--trusted-proxies` when the proxy's IP isn't stable (cloud load balancers, k8s ingress) |
-| `--custom-slugs` | `PADMARK_CUSTOM_SLUGS` | `false` | Allow user-supplied human-readable slugs/link aliases (e.g. `project/GUIDE.md`) at creation. Off by default because public human-readable URLs are easy to guess. New content keys are independent of the slug; existing legacy ciphertext keeps its old protection until migrated. A slug's first path segment must not be a reserved route name: `login`, `setup`, `logout`, `totp-login`, `admin`, `api`, `success`, `healthz`, `readyz`, `notes`, `edit`, `change-password`, `static`, `links`, `r` |
+| `--custom-slugs` | `PADMARK_CUSTOM_SLUGS` | `true` | Allow user-supplied human-readable slugs/link aliases (e.g. `project/GUIDE.md`) at creation. On by default, as in v0.1.6; set `false` to issue only random slugs, because public human-readable URLs are easy to guess. New content keys are independent of the slug; existing legacy ciphertext keeps its old protection until migrated. A slug's first path segment must not be a reserved route name: `login`, `setup`, `logout`, `totp-login`, `admin`, `api`, `success`, `healthz`, `readyz`, `notes`, `edit`, `change-password`, `static`, `links`, `r` |
 | `--direct-redirect` | `PADMARK_DIRECT_REDIRECT` | `false` | `GET /r/{id}` behavior for short links. **Default changed from `true` to `false`:** links created anonymously now render an interstitial page (meta-refresh + `<noscript>` fallback) showing the destination, so the instance is not an open redirector; links created by a signed-in owner still get an immediate `301`. Set `true` to restore the `301` for every link |
 | `--metrics-addr` | `PADMARK_METRICS_ADDR` | — | Address for a separate internal Prometheus `/metrics` listener (e.g. `:9090`); empty (default) disables it entirely. Exposes `padmark_links_created_total`, `padmark_links_redirects_total`, `padmark_links_collisions_total`, plus standard Go/process collectors. Bind this to a private interface only — metrics are never served on the main, public-facing listener |
 

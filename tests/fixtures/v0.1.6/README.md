@@ -2,8 +2,11 @@
 
 `sqlite.sql` and `postgres.sql` are plain-SQL dumps of databases written by a real
 **padmark v0.1.6** server (tag `v0.1.6`, commit `d2e5e8f`). `tests/upgrade` loads them into a
-fresh database and replays the operator upgrade path: `padmark-server migrate` →
-`padmark-server encryption migrate` → `serve`.
+fresh database, supplies a test installation keyring and replays the operator upgrade path:
+`padmark-server migrate` → `padmark-server encryption migrate` → `serve`.
+For a real installation, create the keyring before content migration if that installation
+never had one; encryption commands do not create it implicitly. See the
+[upgrade checklist](../../../CHANGELOG.md#upgrade-checklist-from-v016).
 
 v0.1.6 stored everything in plaintext: `notes.id` is the slug itself, `content` is the raw
 note body and `edit_code` is the plaintext edit code. The dumps include the `goose_db_version`
@@ -19,7 +22,7 @@ rows, so the current migrations apply from the right point:
 Requires `go`, `curl`, `jq`, `sqlite3` and Docker. Run from the repository root:
 
 ```sh
-scratch=$(mktemp -d /private/tmp/padmark-v016.XXXXXX)
+scratch=$(mktemp -d)
 git worktree add --detach "$scratch/src" v0.1.6
 (cd "$scratch/src" && go build -o "$scratch/padmark-v016" ./cmd/padmark-server)  # go 1.26.1 module
 git worktree remove "$scratch/src"
@@ -85,4 +88,5 @@ use that path.
 | 7 | `xjr0nb16kk`       | `4lHg2NJHRoWl` | `2026-10-23 00:12:49.286155` | —                            |
 
 The edit codes are fixture data from a throwaway database, published on purpose so the test can
-prove each v0.1.6 code still authorizes edits after the upgrade.
+prove each v0.1.6 code still authorizes edits after the upgrade. Do not replace these historical
+values with the current create-policy minimum: legacy short codes must keep verifying.
