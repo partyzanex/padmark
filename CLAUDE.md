@@ -65,12 +65,14 @@ Dependencies point inward: adapters and infrastructure depend on usecases and do
 
 - Flag names, environment variables and defaults are grouped in `internal/infra/server/flags.go`.
   Server variables use `PADMARK_*`; `PADMARK_BOOTSTRAP_TOKEN` is environment-only.
-- File-backed SQLite defaults to `padmark-keys.json` beside the DB. Only `serve` generates a
-  missing default keyring. Explicit keyring paths must already exist; PostgreSQL and
-  in-memory/temporary SQLite need an explicit path.
-- Encryption tools never generate a keyring implicitly. For a v0.1.6 upgrade: stop writers,
-  back up, create a keyring if that installation never had one, then schema `migrate`,
-  `encryption migrate`, verify `encryption status`, and `serve`.
+- File-backed SQLite defaults to `padmark-keys.json` beside the DB; PostgreSQL uses the
+  working directory. The container works in `/data`, persisted by a named volume in Compose.
+  Only `serve` generates missing default keys. Explicit paths must already exist;
+  in-memory/temporary SQLite needs an explicit path.
+- `serve` completes pending schema/content migrations automatically before listening.
+  `content_encryption_state.phase` records completion; ready restarts skip migration writes.
+  Stop old-version writers and preserve DB/keyring backups when upgrading. The `encryption`
+  commands remain optional maintenance tools and never create a keyring implicitly.
 - Keep installation keys and real credentials out of the repository. Test credentials must
   belong only to isolated fixtures. Back up database and keyring separately.
 - SQL migrations live in `migrations/sqlite/` and `migrations/postgres/` and are embedded per dialect.

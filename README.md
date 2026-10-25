@@ -142,10 +142,12 @@ Open `http://localhost:8080`. On a fresh file-backed SQLite installation the ser
 restarts and back up the keyring separately from the database. Losing the keys makes the
 encrypted content unreadable. All replicas sharing a database need the same keyring.
 
-An explicit `PADMARK_CONTENT_KEYRING_FILE` / `--content-keyring-file` overrides that default;
-an explicitly named file must already exist. SQLite in-memory/temporary databases and
-PostgreSQL require an explicit keyring. Existing installations should follow
-[the migration workflow](#content-key-management-migration-and-rotation) before serving.
+For PostgreSQL, the default keyring is `./padmark-keys.json` in the working directory.
+The container uses `/data`, so its default is `/data/padmark-keys.json` for either backend.
+Keep that directory on a persistent volume. An explicit `PADMARK_CONTENT_KEYRING_FILE` /
+`--content-keyring-file` overrides the default and must already exist; in-memory/temporary
+SQLite requires an explicit keyring. `serve` automatically completes pending schema and
+content migrations before accepting requests; see [the migration workflow](#content-key-management-migration-and-rotation).
 
 The SQLite database holds password hashes, sealed TOTP secrets, token hashes and encrypted
 notes. The server creates it with mode `0600` and attempts to tighten an existing file, and
@@ -156,8 +158,8 @@ account. Windows ACLs are not managed.
 
 ### Explicit keyring
 
-Create this file **once**, outside the repository/build context, when using PostgreSQL or
-when you want to choose the keyring location yourself:
+To manage the keyring location yourself, create this file **once**, outside the
+repository/build context:
 
 ```bash
 install -d -m 700 "$HOME/.config/padmark"
@@ -172,9 +174,8 @@ You can also pass its path with `--content-keyring-file`. The server rejects a m
 malformed explicit keyring, or one readable by
 group or other users, before opening the DB; keep the file at mode `0600` or `0400`.
 
-Only `serve` creates a missing default SQLite keyring. The `encryption` commands never create
-one implicitly: use `encryption keygen` before an upgrade's first `encryption migrate` if the
-old installation has never had a keyring.
+Only `serve` creates a missing default keyring. The optional `encryption` maintenance commands
+never create one implicitly; create a keyring first when choosing that manual workflow.
 
 ### PostgreSQL
 
@@ -184,7 +185,8 @@ PADMARK_DSN="postgres://user:pass@localhost:5432/padmark?sslmode=disable" \
   go run ./cmd/padmark-server serve --addr :8080
 ```
 
-Create and export the keyring path as shown above before running this command.
+The first start creates `./padmark-keys.json` and migrates stored content automatically.
+Subsequent starts reuse the keyring and skip completed migration writes.
 
 ### Docker
 
@@ -195,18 +197,18 @@ docker run -d \
   --name padmark \
   -p 8080:8080 \
   -v padmark_data:/data \
-  --mount "type=bind,src=$PADMARK_CONTENT_KEYRING_FILE,dst=/run/secrets/content-keys.json,readonly" \
-  -e PADMARK_CONTENT_KEYRING_FILE=/run/secrets/content-keys.json \
   -e PADMARK_DSN=/data/padmark.db \
   partydev/padmark:latest
 ```
 
 Open `http://localhost:8080`.
 
-The image runs as UID/GID `65534`. Give that UID read access to the mounted key file;
+The image runs as UID/GID `65534`. Its writable `/data` volume holds the automatically
+generated keyring. To use an explicit keyring instead, mount it and set
+`PADMARK_CONTENT_KEYRING_FILE`. Give the service UID read access to that file;
 on Linux, use a dedicated copy owned by `65534:65534` with mode `0400`, and set the host's
 `PADMARK_CONTENT_KEYRING_FILE` to that copy. Keep it outside the build context and never bake
-the key into the image. The same file-permission requirement applies to Compose secrets below.
+the key into the image.
 Keyrings under `/run/secrets/` are exempt from the owner-only mode check (Compose bind-mounts a
 file secret with the host file's mode and Swarm defaults to `0444`); startup logs a warning
 instead of refusing, so still restrict the host file yourself.
@@ -218,8 +220,10 @@ image sets no `GOMEMLIMIT` because it cannot know your limit; see
 
 **PostgreSQL (Compose):**
 
-Save the file below as `docker-compose.yml`, set `POSTGRES_PASSWORD` and the host
-`PADMARK_CONTENT_KEYRING_FILE` path in `.env`, then run `docker compose up -d`.
+Save the file below as `docker-compose.yml`, set `POSTGRES_PASSWORD` in `.env`, then run
+`docker compose up -d`. The app creates its keyring on the persistent `content_keys` volume
+and migrates the database at startup. No shell or migration command inside the app container
+is required. When updating, stop the old app version before starting v0.4.0 against that DB.
 The bundled Compose file defaults to `partydev/padmark:latest`. Set `DOCKER_IMAGE` and
 `DOCKER_TAG` to the repository/tag you actually publish. `make docker-build` and CI currently
 fall back to `partyzanex/padmark` unless overridden; for the Compose default, build with
@@ -259,9 +263,8 @@ services:
       PADMARK_DSN: "postgres://padmark:${POSTGRES_PASSWORD}@db:5432/padmark?sslmode=disable"
       PADMARK_ADDR: ":8080"
       PADMARK_LOG_FORMAT: json
-      PADMARK_CONTENT_KEYRING_FILE: /run/secrets/padmark_content_keys
-    secrets:
-      - padmark_content_keys
+    volumes:
+      - content_keys:/data
     depends_on:
       db:
         condition: service_healthy
@@ -272,18 +275,16 @@ services:
 networks:
   padmark:
 
-secrets:
-  padmark_content_keys:
-    file: ${PADMARK_CONTENT_KEYRING_FILE:?Set the host keyring file path}
-
 volumes:
   db_data:
+  content_keys:
 ```
 
 This file is also included in the repo as [`docker-compose.yml`](docker-compose.yml).
 
 Compose requires `POSTGRES_PASSWORD`; that value is used for both PostgreSQL and the app DSN.
-The named `db_data` volume preserves database files when containers are recreated.
+The named `db_data` and `content_keys` volumes preserve the database and its keys when
+containers are recreated. Retain and back up both.
 
 ---
 
@@ -752,7 +753,7 @@ after they stop, and existing sessions and API tokens keep working throughout.
   encrypts the payload with AES-256-GCM, and encrypts that data key with the active installation
   key. The record's hashed ID and resource type authenticate the ciphertext; slugs do not
   derive either encryption key. Titles and other metadata remain unencrypted.
-- Existing unversioned ciphertext requires the explicit migration below before `serve` starts.
+- `serve` automatically wraps existing unversioned ciphertext before opening its listeners.
   Migration protects it with an outer `pmc2$l$…` envelope. Its inner legacy layer still needs
   the original slug; `convert` replaces that layer with native `kind=p` when the slug is known.
   Reads/Peek never migrate records. Updating a note writes native `kind=p`.
@@ -816,6 +817,22 @@ after they stop, and existing sessions and API tokens keep working throughout.
 
 ## Content key management, migration and rotation
 
+Normal startup handles upgrades automatically: `serve` applies schema migrations, creates a
+missing default keyring, and completes pending content migration before opening listeners.
+The database's `content_encryption_state.phase` records `pending`/`ready`. Interrupted runs
+resume; ready databases are authenticated and skip migration writes on subsequent starts.
+Errors keep startup blocked and never trigger automatic deletion of corrupt records.
+
+For PostgreSQL containers, retain `/data` as a persistent volume for `padmark-keys.json`;
+the Compose example does this with `content_keys`. Keep the same keyring across restarts and
+replicas. Upgrade v0.3.2/v0.3.3 by replacing the old app container after it has stopped;
+running old and new binaries against the migrated database simultaneously is unsupported.
+Existing notes, edit codes, accounts and API keys remain usable. Browser sessions are
+invalidated by the session-hashing schema migration, so users sign in again with their
+existing password and TOTP.
+
+The commands below are optional inspection and maintenance tools.
+
 Build the current server with `go build -o bin/padmark-server ./cmd/padmark-server`.
 Commands use `PADMARK_STORAGE`, `PADMARK_DSN` and `PADMARK_CONTENT_KEYRING_FILE`, or the
 corresponding flags before the encryption subcommand. SQLite and PostgreSQL use the same
@@ -827,11 +844,12 @@ operation at a time. CAS protects individual rows against a racing update/delete
 commands do not acquire a deployment-wide maintenance lock. Running replicas keep their
 in-memory keys and must be restarted with the resulting keyring before accepting writes.
 
-For an existing installation, preserve a consistent database backup and its current keyring
+For a manual maintenance run, preserve a consistent database backup and its current keyring
 separately. The encryption commands never generate a missing keyring. If the old installation
 has never used content encryption, create one with `encryption keygen` before proceeding;
 otherwise restore and use its existing keys. File-backed SQLite defaults to
-`padmark-keys.json` beside the configured database; PostgreSQL needs an explicit path.
+`padmark-keys.json` beside the configured database; PostgreSQL defaults to the working directory
+(`/data` in the container). An explicit keyring path must already exist.
 See [the v0.1.6 upgrade checklist](CHANGELOG.md#upgrade-checklist-from-v016) for configuration
 changes and the known legacy-slug edge case. Then:
 
@@ -947,7 +965,7 @@ Do not delete registry rows to bypass that failure. SQLite file backups must inc
 WAL state (use the backup API or `VACUUM INTO`); PostgreSQL can use `pg_dump`/`pg_restore`.
 Automatic SQLite backups reserve a new `0600` file before writing. A filename collision adds
 a unique suffix; existing backups are preserved even when the new write fails.
-Restoring a pre-migration backup also requires running `encryption migrate` before serving.
+On restoring a pre-migration backup, `serve` completes the pending migration automatically.
 There is no destructive encryption down-migration, and older binaries cannot read the new data.
 
 ## Configuration reference
@@ -959,7 +977,7 @@ There is no destructive encryption down-migration, and older binaries cannot rea
 | `--addr` | `PADMARK_ADDR` | `:8080` | Listen address |
 | `--storage` | `PADMARK_STORAGE` | `sqlite` | `sqlite` or `postgres` |
 | `--dsn` | `PADMARK_DSN` | `padmark.db` | DB path or connection string. A Postgres DSN carries the password, and a command-line flag is visible to every local user in the process listing (`ps`) — pass it via `PADMARK_DSN` instead |
-| `--content-keyring-file` | `PADMARK_CONTENT_KEYRING_FILE` | `<db dir>/padmark-keys.json` for file-backed SQLite | Persisted JSON keyring for note/link encryption. `serve` creates a missing default SQLite keyring; explicit paths must already exist. Required explicitly for PostgreSQL and in-memory/temporary SQLite. Encryption tools never create it implicitly. Back it up separately from the DB |
+| `--content-keyring-file` | `PADMARK_CONTENT_KEYRING_FILE` | `<db dir>/padmark-keys.json` for file-backed SQLite; `./padmark-keys.json` for PostgreSQL | Persistent keyring for note/link encryption. The image works in `/data`. `serve` creates missing default files; explicit paths must already exist. In-memory/temporary SQLite requires an explicit file. Encryption tools never create keys implicitly. Back up separately from the DB |
 | `--skip-migration-backup` | `PADMARK_SKIP_MIGRATION_BACKUP` | `false` | Skip the automatic SQLite backup before applying pending schema migrations to an existing database. PostgreSQL logs a backup reminder; take `pg_dump` separately |
 | `--allow-shared-keyring` | `PADMARK_ALLOW_SHARED_KEYRING` | `false` | Accept a keyring file readable by group or other users (logged at WARN) instead of refusing startup. Only for secret managers that cannot provide an owner-only file; keyrings under `/run/secrets/` are already exempt. Prefer mode `0600`/`0400` |
 | `--enable-accounts` | `PADMARK_ENABLE_ACCOUNTS` | `false` | Enable the TOTP account system (`/setup`, `/login`, `/admin`, privacy-level gating); off = fully public |

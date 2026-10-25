@@ -38,7 +38,8 @@ const (
 func encryptionCommand() *cli.Command {
 	flags := append(migrateFlags(), &cli.StringFlag{
 		Name: FlagContentKeyring, Sources: cli.EnvVars(EnvContentKeyring),
-		Usage: "Content keyring JSON file; sqlite defaults to <db dir>/padmark-keys.json (never created here)",
+		Usage: "Content keyring file; defaults to <sqlite db dir>/padmark-keys.json or ./padmark-keys.json " +
+			"for postgres (never created by encryption commands)",
 	}, allowSharedKeyringFlag())
 	flags = append(flags, argon2Flags()...)
 
@@ -331,15 +332,23 @@ func encryptionHasher(cmd *cli.Command) *crypto.EditCodeHasher {
 }
 
 func validateContentEncryption(
-	ctx context.Context, db *bun.DB, keyring *crypto.ContentKeyring, hasher contentkeys.EditCodeHasher,
+	ctx context.Context, db *bun.DB, keyring *crypto.ContentKeyring, hasher contentkeys.EditCodeHasher, log *slog.Logger,
 ) error {
 	manager, err := newEncryptionManager(db, keyring, hasher)
 	if err != nil {
 		return err
 	}
 
+	log.InfoContext(ctx, "preparing stored content; pending migrations run automatically")
+
+	report, err := manager.MigrateIfNeeded(ctx)
+	if err == nil {
+		log.InfoContext(ctx, "stored content ready", "migrated", report.Changed, "wrapped", report.Wrapped,
+			"native", report.Native)
+	}
+
 	//nolint:wrapcheck // WrapError adds shared encryption context.
-	return contentkeys.WrapError(manager.PrepareServe(ctx))
+	return contentkeys.WrapError(err)
 }
 
 // managedSecretsDir is where Docker and Compose mount secrets. Compose bind-mounts a

@@ -162,6 +162,7 @@ func metadata(t *testing.T, db *bun.DB, table, id string) map[string]any {
 
 func runEncryptionSuite(t *testing.T, db *bun.DB, backup snapshot) {
 	t.Helper()
+	t.Run("automatic_startup_resume_and_noop", func(t *testing.T) { testAutomaticStartup(t, db) })
 	t.Run("concurrent_initialize_preserves_winner", func(t *testing.T) {
 		testConcurrentInitialize(t, db)
 	})

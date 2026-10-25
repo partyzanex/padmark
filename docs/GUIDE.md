@@ -174,8 +174,10 @@ resolve that existing collision explicitly before retrying. Tagged v0.1.6 notes 
 their final hashed IDs when content migration converts them, rather than claiming their
 temporary plaintext IDs.
 
-Schema migration and content migration are separate. The `encryption migrate` command
-converts tagged v0.1.6 plaintext notes and wraps older raw encrypted content. See
+Schema migration and content migration are separate phases that `serve` completes
+automatically before listening. The persisted `pending`/`ready` state resumes interrupted
+work and skips writes on ready restarts. The optional `encryption migrate` command uses the
+same conversion of v0.1.6 plaintext and wrapping of older ciphertext. See
 [the upgrade checklist](../CHANGELOG.md#upgrade-checklist-from-v016) before changing that path.
 
 ### Rendering and caches
@@ -233,8 +235,9 @@ environment source; the bootstrap token is environment-only. Consult
 [the configuration table](../README.md#configuration-reference) and [.env.example](../.env.example).
 
 For file-backed SQLite, an unset keyring path resolves to `padmark-keys.json` beside the DB.
-Only `serve` creates that default file. Explicit paths must exist. PostgreSQL and
-in-memory/temporary SQLite require an explicit keyring; encryption tools never create one.
+PostgreSQL defaults to the working directory. Only `serve` creates missing default files.
+Explicit paths must exist, and in-memory/temporary SQLite requires an explicit keyring;
+encryption tools never create one.
 
 `--disable-api` disables the REST endpoints, API docs and `/llms.txt`. The editor becomes
 read-only because publish/save use the REST endpoints. Browser note views, link redirects,
@@ -416,10 +419,11 @@ not a second build recipe in this guide. The Dockerfile builds the server with
 `golang:1.27.3-alpine` and `CGO_ENABLED=0`, then runs it as UID/GID 65534 in scratch.
 It contains no shell, CLI/MCP executable or browser-test environment.
 
-The `/data` volume preserves SQLite data. A new file-backed SQLite installation can generate
-its default keyring there; an explicitly configured keyring must already exist and be readable
-by the service UID. Compose uses PostgreSQL and requires both `POSTGRES_PASSWORD` and an
-explicit keyring secret. Retain the same keys on every restart/replica.
+The container works in `/data`; persist that volume for its generated keyring and SQLite data.
+An explicitly configured keyring must already exist and be readable by the service UID.
+Compose uses PostgreSQL with `db_data` and `content_keys` named volumes and requires
+`POSTGRES_PASSWORD`. Startup migrates schema/content without commands inside the container.
+Retain the same keys on every restart/replica; stop old-version writers during the upgrade.
 
 Schema/content maintenance and container upgrades need consistent backups. A PostgreSQL
 data directory cannot be opened by an older major version. Consult the

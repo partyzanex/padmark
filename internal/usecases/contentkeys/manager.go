@@ -149,7 +149,7 @@ func (m *Manager) Status(ctx context.Context) (Report, error) {
 	return m.status(ctx, nil)
 }
 
-// PrepareServe runs before any listener, cleanup, TTL or burn operation.
+// PrepareServe validates readiness before listeners, lifecycle work or key activation.
 func (m *Manager) PrepareServe(ctx context.Context) error {
 	initErr := m.initialize(ctx)
 	if initErr != nil {

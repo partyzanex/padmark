@@ -620,7 +620,7 @@ func serverAction(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	err = validateContentEncryption(ctx, db, keyring, encryptionHasher(cmd))
+	err = validateContentEncryption(ctx, db, keyring, encryptionHasher(cmd), log)
 	if err != nil {
 		return fmt.Errorf("validate content encryption: %w", err)
 	}

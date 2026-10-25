@@ -24,7 +24,7 @@ func TestDefaultKeyringPath(t *testing.T) {
 		{"in-memory", "sqlite", ":memory:", ""},
 		{"file memory uri", "sqlite", "file::memory:?cache=shared", ""},
 		{"empty dsn", "sqlite", "", ""},
-		{"postgres", "postgres", "postgres://u:p@h/db", ""},
+		{"postgres", "postgres", "postgres://u:p@h/db", "padmark-keys.json"},
 	}
 
 	for _, tc := range cases {
@@ -33,16 +33,15 @@ func TestDefaultKeyringPath(t *testing.T) {
 }
 
 func TestResolveKeyringPathErrors(t *testing.T) {
-	_, _, err := resolveKeyringPath("", "postgres", "postgres://u:p@h/db")
-	require.ErrorContains(t, err, "content keyring is required")
-	require.ErrorContains(t, err, "encryption keygen")
-	require.ErrorContains(t, err, "padmark-keys.json")
-	require.NotContains(t, err.Error(), "u:p")
+	path, derived, err := resolveKeyringPath("", "postgres", "postgres://u:p@h/db")
+	require.NoError(t, err)
+	require.Equal(t, "padmark-keys.json", path)
+	require.True(t, derived)
 
 	_, _, err = resolveKeyringPath("", "sqlite", ":memory:")
 	require.ErrorContains(t, err, "content keyring is required")
 
-	path, derived, err := resolveKeyringPath("/x/keys.json", "postgres", "")
+	path, derived, err = resolveKeyringPath("/x/keys.json", "postgres", "")
 	require.NoError(t, err)
 	require.Equal(t, "/x/keys.json", path)
 	require.False(t, derived)
@@ -93,9 +92,13 @@ func TestLoadServeKeyringExplicitMissingFails(t *testing.T) {
 	require.NoFileExists(t, filepath.Join(dir, defaultKeyringName))
 }
 
-func TestLoadServeKeyringPostgresWithoutPathFails(t *testing.T) {
-	_, err := loadServeKeyring("", "postgres", "postgres://h/db", false, slog.New(slog.DiscardHandler))
-	require.ErrorContains(t, err, "encryption keygen")
+func TestLoadServeKeyringPostgresCreatesDefault(t *testing.T) {
+	t.Chdir(t.TempDir())
+
+	ring, err := loadServeKeyring("", "postgres", "postgres://h/db", false, slog.New(slog.DiscardHandler))
+	require.NoError(t, err)
+	require.Equal(t, "k1", ring.Active)
+	require.FileExists(t, defaultKeyringName)
 }
 
 func TestLoadToolKeyringDoesNotCreate(t *testing.T) {

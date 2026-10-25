@@ -168,7 +168,8 @@ func TestEncryptionMigrateConvertsV016Database(t *testing.T) {
 	db, err := openDB(t.Context(), "sqlite", dsn, slog.New(slog.DiscardHandler))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, db.Close()) })
-	require.NoError(t, validateContentEncryption(t.Context(), db, ring, crypto.NewEditCodeHasher(crypto.Argon2Params{})))
+	require.NoError(t, validateContentEncryption(t.Context(), db, ring,
+		crypto.NewEditCodeHasher(crypto.Argon2Params{}), slog.New(slog.DiscardHandler)))
 }
 
 func TestEncryptionPruneRequiresExplicitCorruptFlag(t *testing.T) {
@@ -237,7 +238,8 @@ func assertEncryptionPruneRecovery(t *testing.T, dsn, keyfile string) {
 	db, err := openDB(t.Context(), "sqlite", dsn, slog.New(slog.DiscardHandler))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, db.Close()) })
-	require.NoError(t, validateContentEncryption(t.Context(), db, ring, crypto.NewEditCodeHasher(crypto.Argon2Params{})))
+	require.NoError(t, validateContentEncryption(t.Context(), db, ring,
+		crypto.NewEditCodeHasher(crypto.Argon2Params{}), slog.New(slog.DiscardHandler)))
 	missing, err := keyrepo.New(db).Get(t.Context(), "note", "old-id")
 	require.NoError(t, err)
 	require.Nil(t, missing)
@@ -250,7 +252,8 @@ func TestValidateContentEncryptionAddsContextOnce(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, db.Close()) })
 
 	ring := &crypto.ContentKeyring{Active: "key", Keys: map[string][]byte{"key": bytes.Repeat([]byte{1}, 32)}}
-	err = validateContentEncryption(t.Context(), db, ring, crypto.NewEditCodeHasher(crypto.Argon2Params{}))
+	err = validateContentEncryption(t.Context(), db, ring, crypto.NewEditCodeHasher(crypto.Argon2Params{}),
+		slog.New(slog.DiscardHandler))
 	require.Error(t, err)
 	require.True(t, strings.HasPrefix(err.Error(), "content encryption: "), err.Error())
 	require.Equal(t, 1, strings.Count(err.Error(), "content encryption:"), err.Error())

@@ -130,7 +130,8 @@ func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
 			Name:    FlagContentKeyring,
 			Sources: cli.EnvVars(EnvContentKeyring),
 			Usage: "JSON keyring file for content encryption; back up separately from the database. " +
-				"Required for postgres; sqlite defaults to <db dir>/padmark-keys.json, created on first serve",
+				"Defaults to <sqlite db dir>/padmark-keys.json or ./padmark-keys.json for postgres; " +
+				"serve creates a missing default file (container default: /data/padmark-keys.json)",
 		},
 		allowSharedKeyringFlag(),
 		skipMigrationBackupFlag(),

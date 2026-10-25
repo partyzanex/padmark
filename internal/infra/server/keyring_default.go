@@ -21,14 +21,18 @@ const (
 	defaultKeyID = "k1"
 )
 
-// errKeyringRequired explains how to provide a keyring when no default can be derived.
+// errKeyringRequired explains how to provide a keyring when no persistent default can be derived.
 var errKeyringRequired = errors.New("content keyring is required: set --" + FlagContentKeyring + " (" +
 	EnvContentKeyring + ") to a keyring created with `padmark-server encryption keygen`; " +
 	"the sqlite backend defaults to <db dir>/" + defaultKeyringName + " when the database is a file")
 
-// defaultKeyringPath derives <db dir>/padmark-keys.json for a file-backed SQLite database.
-// It returns "" for other backends and for in-memory or temporary SQLite databases.
+// defaultKeyringPath uses the SQLite database directory or PostgreSQL's working directory.
+// The container's working directory is /data, which must be backed by a persistent volume.
 func defaultKeyringPath(storage, dsn string) string {
+	if storage == storagePostgres {
+		return defaultKeyringName
+	}
+
 	if storage != storageSQLite {
 		return ""
 	}
@@ -75,8 +79,8 @@ func loadServeKeyring(explicit, storage, dsn string, allowFlag bool, log *slog.L
 }
 
 // loadToolKeyring loads the keyring for the encryption subcommands; it never creates one.
-// A missing file gets the exact keygen command: an upgrade from v0.1.6 runs encryption
-// migrate before the first serve, so the SQLite default keyring does not exist yet.
+// A missing file gets the exact keygen command for operators choosing manual maintenance
+// before the first serve; normal startup creates its default keyring automatically.
 func loadToolKeyring(explicit, storage, dsn string, allowFlag bool, log *slog.Logger) (*crypto.ContentKeyring, error) {
 	path, _, err := resolveKeyringPath(explicit, storage, dsn)
 	if err != nil {
@@ -114,6 +118,10 @@ func ensureDefaultKeyring(path string, log *slog.Logger) error {
 	}
 
 	err = crypto.WriteContentKeyring(path, keyring)
+	if errors.Is(err, os.ErrExist) {
+		return nil // another starter has atomically published the complete keyring
+	}
+
 	if err != nil {
 		return fmt.Errorf("create default content keyring: %w", err)
 	}

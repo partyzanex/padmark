@@ -22,23 +22,42 @@ That baseline is not the latest released version.
 - Bootstrap/step-up protection, session/key revocation, CSRF/lockout hardening, argon2 memory
   budgeting, content/rendering limits and operational configuration checks.
 - The separate Go browser-test module, desktop/mobile PNG comparisons and CI integration.
+- Automatic startup content migration with a persisted `pending`/`ready` state. A restart
+  resumes unfinished rows and skips migration writes once ready. PostgreSQL containers
+  generate their default keyring on the persistent `/data` volume; no in-container command
+  is needed for a normal upgrade.
 - Database-enforced slug uniqueness across notes and links, including concurrent creates
   from different server replicas. Reservations are released atomically on deletion or burn.
   If existing native records already collide, the schema migration stops and preserves both
   records; resolve the collision explicitly before retrying.
 
+### Upgrading v0.3.2/v0.3.3 to v0.4.0
+
+Stop the old app container, retain the PostgreSQL database, and start the new image with a
+persistent `/data` volume. Startup applies schema migrations, creates its default keyring
+when missing, wraps old ciphertext, and persists `phase=ready` before accepting requests.
+Subsequent starts reuse the key and skip migration writes. Compose provides the named
+`content_keys` volume. An explicitly configured keyring remains supported and must exist.
+
+Regression tests replay real v0.3.2/v0.3.3 SQLite/PostgreSQL dumps: notes, historical edit
+codes, account passwords/TOTP and API keys stay usable. Existing browser sessions are
+invalidated by the session-hashing migration, so users sign in again. Old and new binaries
+must not run against the upgraded database simultaneously; binary-only rollback is unsupported.
+If using the removed `--auth-tokens` setting, follow the account migration below.
+
 ### Compatibility with v0.1.6 — TL;DR
 
 A v0.1.6 installation upgrades in place: existing notes are carried over, and every removed
 option either keeps working with a warning or fails startup with a message that says what to do
-instead. With the servers stopped: create the keyring (`encryption keygen`), then `migrate`,
-`encryption migrate`, `serve`.
+instead. Stop old writers and retain the database and persistent key directory, then start
+`serve`: it completes schema/content migrations automatically before opening its listeners.
+Explicit maintenance commands remain available for preview and exceptional data repair.
 
 | What | Effect when upgrading from v0.1.6 |
 |---|---|
-| **Existing notes are converted, not lost.** v0.1.6 stored plaintext content under plain slugs; the new schema stores `sha256(slug)` as the id and encrypted content. Migration `20261023000001` tags every v0.1.6 row (`legacy_slug`), and `encryption migrate` converts them: same URL, same content, same edit code, `private` becomes `privacy: authenticated`, burn and expiry are preserved. | `serve` refuses to start with `content migration required` while any tagged row remains, so a half-done upgrade cannot leak or corrupt anything. `encryption status` reports the count as `plaintext`; `encryption migrate --dry-run` previews. A v0.1.6 custom slug that is itself 64 lowercase hex characters looks like a hashed id; migration `20261024000001` tags it because its plaintext edit code does not have the full shape of a stored hash (a code that only starts with `v1$` or `s1$` is still recognised). Such a note is never wrapped as ciphertext or pruned; `encryption status` reports an untagged one as `untagged_legacy`. Remaining gap: a caller-chosen code of the exact hash shape shows as `corrupt_raw`; `encryption prune --corrupt --dry-run` lists its ID and `encryption mark-legacy --id <id>` tags it for conversion. |
+| **Existing notes are converted, not lost.** v0.1.6 plaintext notes are tagged by schema migration and converted to hashed IDs, encrypted content and hashed edit codes; URL, content, usable edit code, burn and expiry are preserved. | `serve` completes this automatically and persists `phase=ready` before listening. Interrupted runs resume. The optional `encryption migrate --dry-run` previews counts. A 64-hex custom slug with an edit code that exactly matches a stored hash remains ambiguous (`corrupt_raw`): use `mark-legacy` before conversion or pruning. Invalid data blocks startup and is never deleted automatically. |
 | **Schema migrations: 19 new, several irreversible** (drop `private`, token hashing). They run on `serve` and on `padmark-server migrate`. | SQLite: when the database already has applied migrations and new ones are pending, a copy `<db>.bak-<YYYYMMDD-HHMMSS>` (mode `0600`) is written next to it first; startup fails if the copy cannot be made. `--skip-migration-backup` / `PADMARK_SKIP_MIGRATION_BACKUP` opts out. PostgreSQL: a warning lists the pending versions; take `pg_dump` yourself. |
-| **A keyring is required for content encryption.** | SQLite with a file database: defaults to `padmark-keys.json` next to the database file; `serve` generates it on first start (`0600`) and logs a warning to back it up. PostgreSQL and `:memory:`: `PADMARK_CONTENT_KEYRING_FILE` / `--content-keyring-file` with a file from `padmark-server encryption keygen` is mandatory. The `encryption` commands never create a keyring, and an upgrade runs `encryption migrate` before the first `serve`, so create the keyring with `encryption keygen` first on SQLite too; a missing file gives an error with the exact keygen command. Back it up separately from the database: losing the key means losing the content. |
+| **A persistent keyring is required for content encryption.** | `serve` creates a missing default file with mode `0600`: beside the SQLite DB or in the PostgreSQL working directory (`/data` in the image). Compose preserves it on `content_keys`. Explicit paths and in-memory SQLite require an existing keyring. Maintenance commands never generate keys implicitly. Preserve and back up the keyring separately from the DB. |
 | **`--auth-tokens` / `PADMARK_AUTH_TOKENS` is removed**; static bearer tokens are replaced by the account system (`--enable-accounts`, TOTP, API tokens). | Startup **fails closed** whenever the flag or the variable is set: the error names `--enable-accounts`, `PADMARK_BOOTSTRAP_TOKEN` and `/api/tokens`; the token value is never echoed. Without accounts the server is fully public, as v0.1.6 was without `--auth-tokens`, so unset the variable only after deciding whether you need accounts. |
 | **`--cookie-max-age` / `PADMARK_COOKIE_MAX_AGE` is deprecated** in favour of `--session-ttl` (seconds, default 30 days). | Still accepted: its value becomes the session TTL with a warning. If both are set, `--session-ttl` wins and the old flag is ignored with a warning. |
 | **API: `private: bool` is deprecated** in favour of `privacy: public\|authenticated\|owner`. | Requests may still send `private`: `true` maps to `authenticated`, `false` to `public`; sending both with contradicting values is a `400`. Responses carry both `privacy` and the read-only `private` (`true` for anything other than `public`). The `private` column is dropped irreversibly by migration `20260723000001`; the field lives on in the API only. |
@@ -118,7 +137,7 @@ default, so without opting in the server stays fully public, exactly like v0.1.6
 - `--argon2-memory/time/threads` and the new `--argon2-memory-budget` (128 MiB): a process-wide
   cap on the memory held by concurrent argon2 derivations. README gained a memory-sizing section;
   a 256 MB container needs `GOMEMLIMIT≈200MiB`.
-- Fonts and Redoc are self-hosted, no external CDNs. docker-compose with the keyring as a secret;
+- Fonts and Redoc are self-hosted, no external CDNs. docker-compose persists generated keys in a named volume;
   `.env.example` documents server/Compose configuration, keyring behavior and memory settings.
 
 **Development and browser tests**
@@ -176,13 +195,13 @@ Low and other:
 1. Stop every server instance; the content conversion must not race with writers.
 2. Back up the database yourself as well (`migrate` makes a SQLite copy, but not a PostgreSQL
    one).
-3. Keyring. Create it before step 4: the `encryption` commands never create one.
-   SQLite with a file database:
-   `padmark-server encryption keygen --key-id k1 --output <db dir>/padmark-keys.json`;
-   `serve` and the `encryption` commands find it there without a setting.
-   PostgreSQL: `encryption keygen`, `chmod 600`, and pass `PADMARK_CONTENT_KEYRING_FILE`.
-4. `padmark-server migrate` (schema), then `padmark-server encryption migrate` (content;
-   `--dry-run` first if you like). `encryption status` must show `plaintext: 0`. If it shows
+3. Preserve an existing keyring. If this installation has never used one, `serve` creates the
+   default automatically beside the SQLite DB or in the PostgreSQL working directory
+   (`/data` in the container). Keep that directory on a persistent volume. An explicit path
+   must already contain a keyring.
+4. Start the new image: `serve` completes schema/content migration automatically. For an
+   optional manual preview, use `migrate`, then `encryption migrate --dry-run`.
+   `encryption status` must show `plaintext: 0`. If it shows
    `untagged_legacy` or `corrupt_raw` above 0, list the IDs with
    `encryption prune --corrupt --dry-run`. Tag each v0.1.6 note among them with
    `encryption mark-legacy --id <id>` and rerun `encryption migrate`. Do not run
@@ -196,9 +215,9 @@ Low and other:
 7. In a memory-limited container set `GOMEMLIMIT` to about 75–80 % of the limit and, if needed,
    `PADMARK_ARGON2_MEMORY_BUDGET`.
 8. Behind a reverse proxy: `--trusted-proxies`, `--public-scheme https`, `--allowed-hosts`.
-9. Start `serve`. It refuses with `content migration required` if step 4 was skipped, and with a
-   keyring error if the keyring is missing on PostgreSQL. Check the log for the keyring backup
-   warning and key-registry errors.
+9. Check readiness and the `stored content ready` log. The persisted phase must be `ready`;
+   wrong keys or invalid records keep startup blocked. Retain the generated keyring with
+   the persistent volume and back it up separately from the database.
 
 ## v0.3.3 — 2026-07-12
 

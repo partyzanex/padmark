@@ -12,6 +12,26 @@ import (
 
 const maxSlugLine = 4096
 
+// MigrateIfNeeded prepares startup automatically. Ready is persisted only after every row
+// validates; restarts skip writes, and interrupted migrations resume the remaining raw rows.
+func (m *Manager) MigrateIfNeeded(ctx context.Context) (Report, error) {
+	err := m.initialize(ctx)
+	if err != nil {
+		return newReport(Pending), WrapError(err)
+	}
+
+	report, err := m.Status(ctx)
+	if err != nil {
+		return report, WrapError(err)
+	}
+
+	if report.State == Ready && report.Raw == 0 && report.Plaintext == 0 {
+		return report, nil
+	}
+
+	return m.Migrate(ctx, false)
+}
+
 func (m *Manager) replace(ctx context.Context, row Row, value string, report *Report) error {
 	if value == row.Value {
 		return nil

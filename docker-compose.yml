@@ -30,9 +30,8 @@ services:
       PADMARK_DSN: "postgres://padmark:${POSTGRES_PASSWORD}@db:5432/padmark?sslmode=disable"
       PADMARK_ADDR: ":8080"
       PADMARK_LOG_FORMAT: json
-      PADMARK_CONTENT_KEYRING_FILE: /run/secrets/padmark_content_keys
-    secrets:
-      - padmark_content_keys
+    volumes:
+      - content_keys:/data
     depends_on:
       db:
         condition: service_healthy
@@ -43,9 +42,6 @@ services:
 networks:
   padmark:
 
-secrets:
-  padmark_content_keys:
-    file: ${PADMARK_CONTENT_KEYRING_FILE:?Set the host keyring file path}
-
 volumes:
   db_data:
+  content_keys:

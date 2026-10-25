@@ -23,6 +23,7 @@ graphify-out/
 
 padmark.db-shm
 padmark.db-wal
+*.db.bak-*
 
 # Interrupted keyring generation must never enter version control or image layers.
 **/.padmark-keyring-*

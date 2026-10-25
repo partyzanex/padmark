@@ -28,6 +28,8 @@ COPY --from=builder --chown=65534:65534 /data /data
 
 VOLUME ["/data"]
 
+WORKDIR /data
+
 ENV PADMARK_DSN=/data/padmark.db \
     PADMARK_ADDR=:8080 \
     PADMARK_LOG_LEVEL=info \
