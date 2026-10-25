@@ -25,12 +25,14 @@ const (
 )
 
 // Build compiles the current repository, without touching the operator's bin directory.
-func Build(t *testing.T) string {
+func Build(t *testing.T, buildFlags ...string) string {
 	t.Helper()
 
 	binary := filepath.Join(t.TempDir(), "padmark-server")
+	args := append([]string{"build", "-buildvcs=false", "-o", binary}, buildFlags...)
+	args = append(args, "./cmd/padmark-server")
 	//nolint:gosec // repository source and a test-owned output path
-	command := exec.CommandContext(t.Context(), "go", "build", "-buildvcs=false", "-o", binary, "./cmd/padmark-server")
+	command := exec.CommandContext(t.Context(), "go", args...)
 	command.Dir = "../.."
 	output, err := command.CombinedOutput()
 	require.NoError(t, err, string(output))

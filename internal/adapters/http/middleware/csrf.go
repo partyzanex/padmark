@@ -1,4 +1,4 @@
-package http
+package middleware
 
 import (
 	"context"
@@ -17,7 +17,7 @@ const (
 	csrfCookieName = "padmark_csrf"
 	csrfFieldName  = "csrf_token"
 	csrfNonceBytes = 32
-	// maxCSRFFormBytes caps the body parsed by csrfGuard. The guarded endpoints are small auth
+	// maxCSRFFormBytes caps the body parsed by CSRFGuard. The guarded endpoints are small auth
 	// forms, so 1 MiB is generous; the explicit cap satisfies gosec G120 (the global body limit
 	// already applies upstream, but gosec wants a bound at the parse site).
 	maxCSRFFormBytes = 1 << 20
@@ -41,11 +41,11 @@ func csrfSessionBinding(sessionID string) string {
 	return "session:" + base64.RawURLEncoding.EncodeToString(sum[:])
 }
 
-// generateCSRFToken creates a signed CSRF token:
+// GenerateCSRFToken creates a signed CSRF token:
 // base64url(nonce) + "." + base64url(HMAC(secret, domain || binding || nonce)), where the binding
 // is derived from sessionID (empty = anonymous). Both the cookie and the hidden form field carry
 // the full signed value so forged cookies fail the HMAC check.
-func generateCSRFToken(secret []byte, sessionID string) (string, error) {
+func GenerateCSRFToken(secret []byte, sessionID string) (string, error) {
 	nonce := make([]byte, csrfNonceBytes)
 
 	_, err := rand.Read(nonce)
@@ -68,9 +68,9 @@ func csrfHMAC(nonceB64, binding string, secret []byte) []byte {
 	return hm.Sum(nil)
 }
 
-// verifyCSRFToken checks the HMAC signature for the state implied by sessionID (empty =
+// VerifyCSRFToken checks the HMAC signature for the state implied by sessionID (empty =
 // anonymous) and rejects an unconfigured secret.
-func verifyCSRFToken(token string, secret []byte, sessionID string) bool {
+func VerifyCSRFToken(token string, secret []byte, sessionID string) bool {
 	if len(secret) == 0 {
 		return false
 	}
@@ -90,23 +90,23 @@ func verifyCSRFToken(token string, secret []byte, sessionID string) bool {
 	return hmac.Equal(gotMAC, expected)
 }
 
-func csrfFromContext(ctx context.Context) string {
+func CSRFFromContext(ctx context.Context) string {
 	v, _ := ctx.Value(keyCSRF).(string)
 
 	return v
 }
 
-// setCSRFCookie writes the CSRF cookie; forcedScheme and trustedProxies feed isHTTPS for the
+// setCSRFCookie writes the CSRF cookie; forcedScheme and trustedProxies feed IsHTTPS for the
 // Secure attribute.
 func setCSRFCookie(
 	w http.ResponseWriter, r *http.Request, token, forcedScheme string, trustedProxies []*net.IPNet,
 ) {
-	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: HttpOnly/SameSite set; Secure follows isHTTPS
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: HttpOnly/SameSite set; Secure follows IsHTTPS
 		Name:     csrfCookieName,
 		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   isHTTPS(r, forcedScheme, trustedProxies),
+		Secure:   IsHTTPS(r, forcedScheme, trustedProxies),
 		SameSite: http.SameSiteStrictMode,
 		// Unused optional fields zeroed: no Raw, RawExpires, Unparsed, Quoted, Domain, Expires,
 		// Partitioned. MaxAge=0 means session cookie (cleared on browser close).
@@ -121,14 +121,14 @@ func setCSRFCookie(
 	})
 }
 
-// rotateCSRFToken generates a fresh signed token bound to sessionID (empty = anonymous), sets it
+// RotateCSRFToken generates a fresh signed token bound to sessionID (empty = anonymous), sets it
 // as the cookie, and returns the token for embedding in any form rendered in the same response.
 // Callers that have just issued or replaced the session cookie pass the NEW session id: the
 // request still carries the old (or no) cookie.
-func rotateCSRFToken(
+func RotateCSRFToken(
 	w http.ResponseWriter, r *http.Request, secret []byte, sessionID, forcedScheme string, trustedProxies []*net.IPNet,
 ) string {
-	token, err := generateCSRFToken(secret, sessionID)
+	token, err := GenerateCSRFToken(secret, sessionID)
 	if err != nil {
 		return ""
 	}
@@ -138,15 +138,15 @@ func rotateCSRFToken(
 	return token
 }
 
-// clearCSRFCookie removes the CSRF cookie on logout.
-func clearCSRFCookie(w http.ResponseWriter, r *http.Request, forcedScheme string, trustedProxies []*net.IPNet) {
-	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: HttpOnly/SameSite set; Secure follows isHTTPS
+// ClearCSRFCookie removes the CSRF cookie on logout.
+func ClearCSRFCookie(w http.ResponseWriter, r *http.Request, forcedScheme string, trustedProxies []*net.IPNet) {
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: HttpOnly/SameSite set; Secure follows IsHTTPS
 		Name:     csrfCookieName,
 		Value:    "",
 		Path:     "/",
 		MaxAge:   -1,
 		HttpOnly: true,
-		Secure:   isHTTPS(r, forcedScheme, trustedProxies),
+		Secure:   IsHTTPS(r, forcedScheme, trustedProxies),
 		SameSite: http.SameSiteStrictMode,
 		// Unused optional fields zeroed: no Raw, RawExpires, Unparsed, Quoted, Domain, Expires, Partitioned.
 		Raw:         "",
@@ -159,17 +159,17 @@ func clearCSRFCookie(w http.ResponseWriter, r *http.Request, forcedScheme string
 	})
 }
 
-// withCSRFToken reads the CSRF cookie if it is present and carries a valid HMAC signature for
+// WithCSRFToken reads the CSRF cookie if it is present and carries a valid HMAC signature for
 // the request's current session state; otherwise generates a fresh signed token bound to that
 // session and sets the cookie, so the token follows login, logout and session replacement.
 // The token is injected into the request context so handlers can embed it in forms.
-func withCSRFToken(secret []byte, forcedScheme string, trustedProxies []*net.IPNet, next http.Handler) http.Handler {
+func WithCSRFToken(secret []byte, forcedScheme string, trustedProxies []*net.IPNet, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		sessionID := extractSessionID(r)
+		sessionID := ExtractSessionID(r)
 
 		token := func() string {
-			value, ok := singleCookieValue(r, csrfCookieName)
-			if ok && value != "" && verifyCSRFToken(value, secret, sessionID) {
+			value, ok := SingleCookieValue(r, csrfCookieName)
+			if ok && value != "" && VerifyCSRFToken(value, secret, sessionID) {
 				return value
 			}
 
@@ -177,7 +177,7 @@ func withCSRFToken(secret []byte, forcedScheme string, trustedProxies []*net.IPN
 		}()
 
 		if token == "" {
-			token = rotateCSRFToken(w, r, secret, sessionID, forcedScheme, trustedProxies)
+			token = RotateCSRFToken(w, r, secret, sessionID, forcedScheme, trustedProxies)
 			if token == "" {
 				http.Error(w, "internal server error", http.StatusInternalServerError)
 
@@ -191,11 +191,11 @@ func withCSRFToken(secret []byte, forcedScheme string, trustedProxies []*net.IPN
 
 // crossSiteRequest reports whether the browser says a request was initiated from another origin
 // or site: an Origin header that is not this server's origin, or Sec-Fetch-Site other than
-// same-origin/none. Machine clients send neither header and pass, as in requireSameOrigin and the
+// same-origin/none. Machine clients send neither header and pass, as in RequireSameOrigin and the
 // JSON /setup path.
 func crossSiteRequest(r *http.Request) bool {
 	origin := r.Header.Get("Origin")
-	if origin != "" && !sameOrigin(r, origin) {
+	if origin != "" && !SameOrigin(r, origin) {
 		return true
 	}
 
@@ -207,7 +207,7 @@ func crossSiteRequest(r *http.Request) bool {
 	}
 }
 
-// csrfGuard wraps a POST handler. For POST requests it validates that:
+// CSRFGuard wraps a POST handler. For POST requests it validates that:
 //  1. The request is not announced as cross-origin (Origin / Sec-Fetch-Site), defence in depth
 //     against a cookie planted from a sibling subdomain.
 //  2. The padmark_csrf cookie and the csrf_token form field carry the same signed value.
@@ -215,7 +215,7 @@ func crossSiteRequest(r *http.Request) bool {
 //     to the padmark_session cookie, or to "anonymous" when there is none).
 //
 // Returns 403 on any failure.
-func csrfGuard(secret []byte, next http.HandlerFunc) http.HandlerFunc {
+func CSRFGuard(secret []byte, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
 			if crossSiteRequest(r) {
@@ -226,7 +226,7 @@ func csrfGuard(secret []byte, next http.HandlerFunc) http.HandlerFunc {
 
 			// Several same-name cookies are ambiguous (cookie tossing from a sibling subdomain):
 			// Request.Cookie would return the first, which the attacker can order, so refuse.
-			cookieValue, cookieOK := singleCookieValue(r, csrfCookieName)
+			cookieValue, cookieOK := SingleCookieValue(r, csrfCookieName)
 			if !cookieOK || cookieValue == "" {
 				http.Error(w, "forbidden", http.StatusForbidden)
 
@@ -244,7 +244,7 @@ func csrfGuard(secret []byte, next http.HandlerFunc) http.HandlerFunc {
 				return
 			}
 
-			if !verifyCSRFToken(cookieValue, secret, extractSessionID(r)) {
+			if !VerifyCSRFToken(cookieValue, secret, ExtractSessionID(r)) {
 				http.Error(w, "forbidden", http.StatusForbidden)
 
 				return

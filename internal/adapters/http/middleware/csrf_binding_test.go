@@ -1,4 +1,4 @@
-package http
+package middleware
 
 import (
 	"net/http"
@@ -18,19 +18,19 @@ var bindingTestSecret = []byte("padmark-test-csrf-secret-32bytes") //nolint:goch
 func TestCSRFToken_IsBoundToSession(t *testing.T) {
 	t.Parallel()
 
-	anon, err := generateCSRFToken(bindingTestSecret, "")
+	anon, err := GenerateCSRFToken(bindingTestSecret, "")
 	require.NoError(t, err)
 
-	bound, err := generateCSRFToken(bindingTestSecret, "session-1")
+	bound, err := GenerateCSRFToken(bindingTestSecret, "session-1")
 	require.NoError(t, err)
 
-	assert.True(t, verifyCSRFToken(anon, bindingTestSecret, ""))
-	assert.False(t, verifyCSRFToken(anon, bindingTestSecret, "session-1"),
+	assert.True(t, VerifyCSRFToken(anon, bindingTestSecret, ""))
+	assert.False(t, VerifyCSRFToken(anon, bindingTestSecret, "session-1"),
 		"a token issued to an anonymous visitor must not validate for a signed-in session")
 
-	assert.True(t, verifyCSRFToken(bound, bindingTestSecret, "session-1"))
-	assert.False(t, verifyCSRFToken(bound, bindingTestSecret, "session-2"), "another session")
-	assert.False(t, verifyCSRFToken(bound, bindingTestSecret, ""), "the session is gone")
+	assert.True(t, VerifyCSRFToken(bound, bindingTestSecret, "session-1"))
+	assert.False(t, VerifyCSRFToken(bound, bindingTestSecret, "session-2"), "another session")
+	assert.False(t, VerifyCSRFToken(bound, bindingTestSecret, ""), "the session is gone")
 }
 
 func csrfPost(t *testing.T, token, sessionID string, headers map[string]string) *http.Request {
@@ -42,7 +42,7 @@ func csrfPost(t *testing.T, token, sessionID string, headers map[string]string) 
 	req.AddCookie(&http.Cookie{Name: csrfCookieName, Value: token}) //nolint:gosec // G124: test cookie
 
 	if sessionID != "" {
-		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: sessionID}) //nolint:gosec // G124: test cookie
+		req.AddCookie(&http.Cookie{Name: SessionCookieName, Value: sessionID}) //nolint:gosec // G124: test cookie
 	}
 
 	for key, value := range headers {
@@ -53,7 +53,7 @@ func csrfPost(t *testing.T, token, sessionID string, headers map[string]string) 
 }
 
 func runGuard(req *http.Request) (code int, called bool) {
-	guard := csrfGuard(bindingTestSecret, func(w http.ResponseWriter, _ *http.Request) {
+	guard := CSRFGuard(bindingTestSecret, func(w http.ResponseWriter, _ *http.Request) {
 		called = true
 
 		w.WriteHeader(http.StatusNoContent)
@@ -68,14 +68,14 @@ func runGuard(req *http.Request) (code int, called bool) {
 func TestCSRFGuard_RejectsAnonymousTokenOnSignedInPost(t *testing.T) {
 	t.Parallel()
 
-	anon, err := generateCSRFToken(bindingTestSecret, "")
+	anon, err := GenerateCSRFToken(bindingTestSecret, "")
 	require.NoError(t, err)
 
 	code, called := runGuard(csrfPost(t, anon, "sess-1", nil))
 	assert.Equal(t, http.StatusForbidden, code, "a pair minted before sign-in must not authorise a session POST")
 	assert.False(t, called)
 
-	bound, err := generateCSRFToken(bindingTestSecret, "sess-1")
+	bound, err := GenerateCSRFToken(bindingTestSecret, "sess-1")
 	require.NoError(t, err)
 
 	code, called = runGuard(csrfPost(t, bound, "sess-1", nil))
@@ -86,7 +86,7 @@ func TestCSRFGuard_RejectsAnonymousTokenOnSignedInPost(t *testing.T) {
 func TestCSRFGuard_RejectsCrossSiteSignals(t *testing.T) {
 	t.Parallel()
 
-	token, err := generateCSRFToken(bindingTestSecret, "sess-1")
+	token, err := GenerateCSRFToken(bindingTestSecret, "sess-1")
 	require.NoError(t, err)
 
 	cases := []struct {
@@ -119,24 +119,24 @@ func TestCSRFGuard_RejectsCrossSiteSignals(t *testing.T) {
 func TestWithCSRFToken_ReissuesTokenWhenSessionChanges(t *testing.T) {
 	t.Parallel()
 
-	anon, err := generateCSRFToken(bindingTestSecret, "")
+	anon, err := GenerateCSRFToken(bindingTestSecret, "")
 	require.NoError(t, err)
 
 	var seen string
 
-	handler := withCSRFToken(bindingTestSecret, "", nil, http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
-		seen = csrfFromContext(r.Context())
+	handler := WithCSRFToken(bindingTestSecret, "", nil, http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		seen = CSRFFromContext(r.Context())
 	}))
 
 	req := httptest.NewRequest(http.MethodGet, "/admin", nil)
 	req.AddCookie(&http.Cookie{Name: csrfCookieName, Value: anon})        //nolint:gosec // G124: test cookie
-	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "sess-1"}) //nolint:gosec // G124: test cookie
+	req.AddCookie(&http.Cookie{Name: SessionCookieName, Value: "sess-1"}) //nolint:gosec // G124: test cookie
 
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
 	require.NotEmpty(t, seen)
 	assert.NotEqual(t, anon, seen, "an anonymous-bound cookie must be replaced")
-	assert.True(t, verifyCSRFToken(seen, bindingTestSecret, "sess-1"))
+	assert.True(t, VerifyCSRFToken(seen, bindingTestSecret, "sess-1"))
 	assert.Contains(t, rec.Header().Get("Set-Cookie"), csrfCookieName+"="+seen)
 }

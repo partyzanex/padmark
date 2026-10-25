@@ -1,9 +1,9 @@
 package http
 
 import (
-	"context"
 	"crypto/sha256"
 	"crypto/subtle"
+	_ "embed"
 	"errors"
 	"html/template"
 	"net"
@@ -12,11 +12,10 @@ import (
 	"strings"
 	"time"
 
-	_ "embed"
-
 	"github.com/bluele/gcache"
-	"github.com/google/uuid"
 
+	"github.com/partyzanex/padmark/internal/adapters/http/middleware"
+	"github.com/partyzanex/padmark/internal/adapters/http/response"
 	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/usecases/auth"
 )
@@ -50,96 +49,6 @@ var loginTmplSrc string
 //go:embed templates/setup.html
 var setupTmplSrc string
 
-const sessionCookieName = "padmark_session"
-
-func extractSessionID(r *http.Request) string {
-	value, ok := singleCookieValue(r, sessionCookieName)
-	if !ok {
-		return ""
-	}
-
-	return value
-}
-
-// singleCookieValue returns the value of the named cookie only when exactly one such cookie was
-// sent. A sibling subdomain can plant a same-name cookie (Domain=parent, longer Path) that the
-// browser orders before the legitimate host-only one, and Request.Cookie would silently pick the
-// first; several same-name cookies are therefore treated as ambiguous and yield no value.
-func singleCookieValue(r *http.Request, name string) (string, bool) {
-	var (
-		value string
-		found int
-	)
-
-	for _, cookie := range r.Cookies() {
-		if cookie.Name == name {
-			value = cookie.Value
-			found++
-		}
-	}
-
-	if found != 1 {
-		return "", false
-	}
-
-	return value, true
-}
-
-func userFromContext(r *http.Request) *domain.User {
-	return userFromCtx(r.Context())
-}
-
-// userFromCtx is the context-only counterpart of userFromContext, for ogen handlers (OgenHandler
-// methods receive only a context.Context, not *http.Request) — see NewRouter for why the
-// auth-middleware-enriched context still reaches them: ogen dispatches using r.Context().
-func userFromCtx(ctx context.Context) *domain.User {
-	usr, _ := ctx.Value(keyUser).(*domain.User)
-
-	return usr
-}
-
-// apiTokenHashFromCtx returns the public ID (hash) of the bearer API token the request
-// authenticated with, or "" for a browser session or an anonymous caller. Credential-issuing
-// operations use it to demand a step-up from a bearer and to record it as the new key's issuer.
-func apiTokenHashFromCtx(ctx context.Context) string {
-	hash, _ := ctx.Value(keyAPIToken).(string)
-
-	return hash
-}
-
-// ownerIDFromCtx returns the authenticated caller's user ID for stamping domain.Note.OwnerID at
-// creation, or nil for an anonymous caller (note stays unowned, exactly like before this field
-// existed).
-func ownerIDFromCtx(ctx context.Context) *uuid.UUID {
-	usr := userFromCtx(ctx)
-	if usr == nil {
-		return nil
-	}
-
-	return &usr.ID
-}
-
-// callerIDFromCtx returns the authenticated caller's user ID for the owner-bypass check in
-// notes.Manager.Update/Delete, or uuid.Nil for an anonymous caller (never matches an owner).
-func callerIDFromCtx(ctx context.Context) uuid.UUID {
-	usr := userFromCtx(ctx)
-	if usr == nil {
-		return uuid.Nil
-	}
-
-	return usr.ID
-}
-
-// authenticatedFromCtx reports whether the request resolved to a TOTP session or API-token user
-// — the context-only counterpart of common.isAuthenticated's context check, for ogen handlers
-// (see userFromCtx). Unlike common.isAuthenticated, it does NOT special-case "no auth configured
-// at all" (context has no way to know that). Callers that need that must use
-// common.isAuthenticated instead; this exists for handlers that only see a context.Context,
-// e.g. OgenHandler.GetLink.
-func authenticatedFromCtx(ctx context.Context) bool {
-	return userFromCtx(ctx) != nil
-}
-
 // AuthHandler serves login, logout, account setup, and password-change endpoints.
 type AuthHandler struct {
 	*common
@@ -157,10 +66,10 @@ func newAuthHandler(c *common, loginTmpl, setupTmpl, changePwTmpl *template.Temp
 func (h *AuthHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /login", h.LoginPage)
 	// Per-IP limiter first (cheapest, and every attempt spends the caller's IP budget, including
-	// ones the account lock then rejects), then the per-username lock — see withLoginLockout.
-	loginLock := newLoginLockout(gcache.NewRealClock())
-	mux.HandleFunc("POST /totp-login", h.guard(withTOTPRateLimit(h.trustedProxies, h.log,
-		withLoginLockout(loginLock, h.log, h.TOTPLoginHandler))))
+	// ones the account lock then rejects), then the per-username lock — see WithLoginLockout.
+	loginLock := middleware.NewLoginLockout(gcache.NewRealClock())
+	mux.HandleFunc("POST /totp-login", h.guard(middleware.WithTOTPRateLimit(h.trustedProxies, h.log,
+		middleware.WithLoginLockout(loginLock, h.log, h.TOTPLoginHandler))))
 	mux.HandleFunc("POST /logout", h.guard(h.LogoutHandler))
 	mux.HandleFunc("GET /setup", h.SetupPage)
 	mux.HandleFunc("POST /setup", h.setupGuard(h.SetupHandler))
@@ -182,11 +91,11 @@ func (h *AuthHandler) LoginPage(w http.ResponseWriter, r *http.Request) {
 	// Already signed in → don't show the form again; go where the user intended (or home).
 	if h.hasValidSession(r) {
 		dest := "/"
-		if next := safeNextURL(r.URL.Query().Get("next")); next != "" {
+		if next := middleware.SafeNextURL(r.URL.Query().Get("next")); next != "" {
 			dest = next
 		}
 
-		http.Redirect(w, r, dest, http.StatusSeeOther) //nolint:gosec // G710: dest validated by safeNextURL
+		http.Redirect(w, r, dest, http.StatusSeeOther) //nolint:gosec // G710: dest validated by SafeNextURL
 
 		return
 	}
@@ -195,9 +104,9 @@ func (h *AuthHandler) LoginPage(w http.ResponseWriter, r *http.Request) {
 
 	err := h.loginTmpl.Execute(w, loginViewData{
 		Error:     r.URL.Query().Get("error") == "1",
-		Nonce:     nonceFromContext(r.Context()),
-		Next:      safeNextURL(r.URL.Query().Get("next")),
-		CSRFToken: csrfFromContext(r.Context()),
+		Nonce:     middleware.NonceFromContext(r.Context()),
+		Next:      middleware.SafeNextURL(r.URL.Query().Get("next")),
+		CSRFToken: middleware.CSRFFromContext(r.Context()),
 	})
 	if err != nil {
 		h.log.ErrorContext(r.Context(), "render login template", "err", err)
@@ -221,11 +130,11 @@ func (h *AuthHandler) TOTPLoginHandler(w http.ResponseWriter, r *http.Request) {
 	username := r.FormValue("username")
 	password := r.FormValue("password")
 	code := r.FormValue("code")
-	next := safeNextURL(r.FormValue("next"))
+	next := middleware.SafeNextURL(r.FormValue("next"))
 
 	// The session cookie the browser presented, if any, is revoked by the usecase on success.
 	sessID, err := h.authMgr.Login(
-		r.Context(), username, password, code, truncateUA(r.UserAgent()), remoteIP(r), extractSessionID(r),
+		r.Context(), username, password, code, truncateUA(r.UserAgent()), remoteIP(r), middleware.ExtractSessionID(r),
 	)
 	if err != nil {
 		dest := "/login?error=1"
@@ -238,8 +147,8 @@ func (h *AuthHandler) TOTPLoginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: HttpOnly/SameSite set; Secure follows isHTTPS
-		Name:     sessionCookieName,
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: HttpOnly/SameSite set; Secure follows IsHTTPS
+		Name:     middleware.SessionCookieName,
 		Value:    sessID,
 		Path:     "/",
 		MaxAge:   int(h.sessionMaxAge().Seconds()),
@@ -257,14 +166,14 @@ func (h *AuthHandler) TOTPLoginHandler(w http.ResponseWriter, r *http.Request) {
 	})
 
 	// The CSRF token is bound to the session: re-mint it for the session just issued.
-	rotateCSRFToken(w, r, h.csrfSecret, sessID, h.forcedScheme, h.trustedProxies)
+	middleware.RotateCSRFToken(w, r, h.csrfSecret, sessID, h.forcedScheme, h.trustedProxies)
 
 	dest := "/"
 	if next != "" {
 		dest = next
 	}
 
-	http.Redirect(w, r, dest, http.StatusSeeOther) //nolint:gosec // G710: dest validated by safeNextURL
+	http.Redirect(w, r, dest, http.StatusSeeOther) //nolint:gosec // G710: dest validated by SafeNextURL
 }
 
 // ── logout (POST /logout) ──
@@ -273,7 +182,7 @@ func (h *AuthHandler) TOTPLoginHandler(w http.ResponseWriter, r *http.Request) {
 // Returns 500 if server-side session deletion fails to prevent the cookie being
 // cleared while the session remains valid on the server.
 func (h *AuthHandler) LogoutHandler(w http.ResponseWriter, r *http.Request) {
-	sessID := extractSessionID(r)
+	sessID := middleware.ExtractSessionID(r)
 	if sessID != "" && h.authMgr != nil {
 		logoutErr := h.authMgr.Logout(r.Context(), sessID)
 		if logoutErr != nil {
@@ -284,8 +193,8 @@ func (h *AuthHandler) LogoutHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: HttpOnly/SameSite set; Secure follows isHTTPS
-		Name:     sessionCookieName,
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: HttpOnly/SameSite set; Secure follows IsHTTPS
+		Name:     middleware.SessionCookieName,
 		Value:    "",
 		Path:     "/",
 		MaxAge:   -1,
@@ -302,7 +211,7 @@ func (h *AuthHandler) LogoutHandler(w http.ResponseWriter, r *http.Request) {
 		Partitioned: false,
 	})
 
-	clearCSRFCookie(w, r, h.forcedScheme, h.trustedProxies)
+	middleware.ClearCSRFCookie(w, r, h.forcedScheme, h.trustedProxies)
 
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }
@@ -341,10 +250,10 @@ func (h *AuthHandler) SetupPage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
 	renderErr := h.setupTmpl.Execute(w, setupViewData{
-		Nonce:        nonceFromContext(r.Context()),
+		Nonce:        middleware.NonceFromContext(r.Context()),
 		Token:        token,
 		IsFirstAdmin: token == "",
-		CSRFToken:    csrfFromContext(r.Context()),
+		CSRFToken:    middleware.CSRFFromContext(r.Context()),
 		// Error/QRCode unset on initial GET render; populated on POST failure or QR display.
 		Error:  "",
 		QRCode: "",
@@ -398,8 +307,8 @@ func (h *AuthHandler) SetupHandler(w http.ResponseWriter, r *http.Request) {
 	token := r.FormValue("invite")
 
 	data := setupViewData{
-		Nonce:        nonceFromContext(r.Context()),
-		CSRFToken:    csrfFromContext(r.Context()),
+		Nonce:        middleware.NonceFromContext(r.Context()),
+		CSRFToken:    middleware.CSRFFromContext(r.Context()),
 		Token:        token,
 		IsFirstAdmin: token == "",
 		// Error/QRCode populated below in the failure/success branches; zero on initial render.
@@ -461,8 +370,8 @@ func (h *AuthHandler) ChangePasswordPage(w http.ResponseWriter, r *http.Request)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
 	renderErr := h.changePwTmpl.Execute(w, changePwViewData{
-		Nonce:     nonceFromContext(r.Context()),
-		CSRFToken: csrfFromContext(r.Context()),
+		Nonce:     middleware.NonceFromContext(r.Context()),
+		CSRFToken: middleware.CSRFFromContext(r.Context()),
 		// Error/Success populated by the caller before re-render on failure; zero on GET.
 		Error:   "",
 		Success: false,
@@ -490,8 +399,8 @@ func (h *AuthHandler) ChangePasswordHandler(w http.ResponseWriter, r *http.Reque
 	totpCode := r.FormValue("totp_code")
 
 	data := changePwViewData{
-		Nonce:     nonceFromContext(r.Context()),
-		CSRFToken: csrfFromContext(r.Context()),
+		Nonce:     middleware.NonceFromContext(r.Context()),
+		CSRFToken: middleware.CSRFFromContext(r.Context()),
 		// Error/Success populated below on failure/success branches; zero on initial render.
 		Error:   "",
 		Success: false,
@@ -539,7 +448,7 @@ func (h *AuthHandler) setupGuard(next http.HandlerFunc) http.HandlerFunc {
 		// type forces the browser into an OPTIONS preflight it cannot complete without a CORS
 		// approval — this holds even where Fetch Metadata is unavailable.
 		if !isJSONContentType(r.Header.Get("Content-Type")) {
-			writeJSONErrorStatus(w, r, h.log, http.StatusUnsupportedMediaType,
+			response.WriteJSONErrorStatus(w, r, h.log, http.StatusUnsupportedMediaType,
 				"setup requires Content-Type: application/json")
 
 			return
@@ -552,7 +461,7 @@ func (h *AuthHandler) setupGuard(next http.HandlerFunc) http.HandlerFunc {
 		switch site := r.Header.Get("Sec-Fetch-Site"); site {
 		case "", "same-origin", "none":
 		default:
-			writeJSONErrorStatus(w, r, h.log, http.StatusForbidden, "setup requires a same-origin request")
+			response.WriteJSONErrorStatus(w, r, h.log, http.StatusForbidden, "setup requires a same-origin request")
 
 			return
 		}
@@ -560,8 +469,8 @@ func (h *AuthHandler) setupGuard(next http.HandlerFunc) http.HandlerFunc {
 		// When a browser announced its Origin, it must be this request's own origin: a
 		// cross-site POST always carries Origin, so the host comparison settles it even where
 		// Sec-Fetch-Site is missing. Machine clients send neither header.
-		if origin := r.Header.Get("Origin"); origin != "" && !sameOrigin(r, origin) {
-			writeJSONErrorStatus(w, r, h.log, http.StatusForbidden, "setup requires a same-origin request")
+		if origin := r.Header.Get("Origin"); origin != "" && !middleware.SameOrigin(r, origin) {
+			response.WriteJSONErrorStatus(w, r, h.log, http.StatusForbidden, "setup requires a same-origin request")
 
 			return
 		}
@@ -586,7 +495,7 @@ func (h *AuthHandler) hasValidSession(r *http.Request) bool {
 		return false
 	}
 
-	sessID := extractSessionID(r)
+	sessID := middleware.ExtractSessionID(r)
 	if sessID == "" {
 		return false
 	}
@@ -684,13 +593,13 @@ func (h *AuthHandler) doChangePassword(
 		return "New passwords do not match.", ""
 	}
 
-	sessID := extractSessionID(r)
+	sessID := middleware.ExtractSessionID(r)
 
 	newSessID, changeErr := h.authMgr.ChangePassword(r.Context(), sessID, oldPassword, newPassword, totpCode)
 	if changeErr == nil || errors.Is(changeErr, domain.ErrSessionRevocation) {
 		// Replace the session cookie: all old sessions were invalidated; use the fresh one.
-		http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: HttpOnly/SameSite set; Secure follows isHTTPS
-			Name:     sessionCookieName,
+		http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: HttpOnly/SameSite set; Secure follows IsHTTPS
+			Name:     middleware.SessionCookieName,
 			Value:    newSessID,
 			Path:     "/",
 			MaxAge:   int(h.sessionMaxAge().Seconds()),
@@ -707,7 +616,7 @@ func (h *AuthHandler) doChangePassword(
 			Partitioned: false,
 		})
 
-		rotatedCSRF = rotateCSRFToken(w, r, h.csrfSecret, newSessID, h.forcedScheme, h.trustedProxies)
+		rotatedCSRF = middleware.RotateCSRFToken(w, r, h.csrfSecret, newSessID, h.forcedScheme, h.trustedProxies)
 
 		if errors.Is(changeErr, domain.ErrSessionRevocation) {
 			return "Password changed, but older sessions or API tokens could not be revoked. " +

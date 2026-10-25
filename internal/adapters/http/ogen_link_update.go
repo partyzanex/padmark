@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/partyzanex/padmark/internal/adapters/http/middleware"
 	"github.com/partyzanex/padmark/internal/adapters/http/ogenapi"
 	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/usecases/links"
@@ -48,7 +49,7 @@ func (h *OgenHandler) UpdateLink(
 
 	opts.Privacy = requested
 
-	link, err := h.linkManager.Update(ctx, params.ID, req.EditCode.Or(""), callerIDFromCtx(ctx),
+	link, err := h.linkManager.Update(ctx, params.ID, req.EditCode.Or(""), middleware.CallerIDFromCtx(ctx),
 		req.TargetURL.String(), opts)
 	if err != nil {
 		return mapUpdateLinkError(err, h.log), nil

@@ -645,7 +645,8 @@ func serverAction(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	log.InfoContext(ctx, "server started",
-		"addr", cmd.String(FlagAddr), "storage", storage, "dsn", redactDSN(dsn),
+		"addr", cmd.String(FlagAddr), "url", listenerURL(cmd.String(FlagAddr), cmd.String(FlagTLSCert) != ""),
+		"storage", storage, "dsn", redactDSN(dsn),
 		"tls", cmd.String(FlagTLSCert) != "",
 	)
 

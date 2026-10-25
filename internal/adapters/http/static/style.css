@@ -281,6 +281,14 @@ body::before {
 
 .header-link:hover { color: var(--accent-hover); }
 
+.link-form { display: grid; gap: 24px; }
+.link-form .options-row { margin-bottom: 0; align-items: start; }
+.link-form .field-select { width: 100%; }
+.link-form .shortcut-hint { line-height: 1.6; }
+.link-heading { font-family: var(--font-display); font-size: 1.8rem; }
+.link-error { color: var(--danger, #ef4444); overflow-wrap: anywhere; }
+.link-form [hidden] { display: none; }
+
 /* ================================================================
    Logo
    ================================================================ */
@@ -2096,6 +2104,8 @@ a.copy-value:hover {
    Responsive
    ================================================================ */
 @media (max-width: 640px) {
+    .header { flex-wrap: wrap; gap: 14px; }
+    .header-right { gap: 12px; }
     .wrapper        { padding: 36px 16px 60px; }
     .wrapper--wide  { padding: 32px 12px 60px; }
     .options-row    { grid-template-columns: 1fr; }

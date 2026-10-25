@@ -1,4 +1,4 @@
-package http
+package middleware
 
 import (
 	"encoding/base64"
@@ -16,16 +16,16 @@ func TestVerifyCSRFToken_RejectsEmptySecret(t *testing.T) {
 	// verifier's deterministic empty-key HMAC before the fail-closed check.
 	nonce := "chosen-nonce"
 	forged := nonce + "." + base64.RawURLEncoding.EncodeToString(csrfHMAC(nonce, csrfAnonymousBinding, nil))
-	require.False(t, verifyCSRFToken(forged, nil, ""))
-	require.False(t, verifyCSRFToken(forged, []byte{}, ""))
+	require.False(t, VerifyCSRFToken(forged, nil, ""))
+	require.False(t, VerifyCSRFToken(forged, []byte{}, ""))
 
 	secret := []byte("padmark-test-csrf-secret-32bytes")
-	valid, err := generateCSRFToken(secret, "")
+	valid, err := GenerateCSRFToken(secret, "")
 	require.NoError(t, err)
-	require.True(t, verifyCSRFToken(valid, secret, ""))
-	require.False(t, verifyCSRFToken(valid, nil, ""))
-	require.False(t, verifyCSRFToken(valid, []byte("different-secret"), ""))
-	require.False(t, verifyCSRFToken(forged, secret, ""))
+	require.True(t, VerifyCSRFToken(valid, secret, ""))
+	require.False(t, VerifyCSRFToken(valid, nil, ""))
+	require.False(t, VerifyCSRFToken(valid, []byte("different-secret"), ""))
+	require.False(t, VerifyCSRFToken(forged, secret, ""))
 }
 
 func TestCSRFGuard_EmptySecretCannotAuthorizePOST(t *testing.T) {
@@ -38,7 +38,7 @@ func TestCSRFGuard_EmptySecretCannotAuthorizePOST(t *testing.T) {
 		req.AddCookie(&http.Cookie{Name: csrfCookieName, Value: forged}) //nolint:gosec // G124: test cookie
 
 		called := false
-		guard := (&common{csrfSecret: secret}).guard(func(w http.ResponseWriter, _ *http.Request) {
+		guard := CSRFGuard(secret, func(w http.ResponseWriter, _ *http.Request) {
 			called = true
 
 			w.WriteHeader(http.StatusNoContent)

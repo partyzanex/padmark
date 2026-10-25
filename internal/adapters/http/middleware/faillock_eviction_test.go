@@ -1,4 +1,4 @@
-package http
+package middleware
 
 import (
 	"net/http"
@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The lockout caches (newFailLockoutCache, newLoginLockout) are bounded gcache ARC caches. ARC
+// The lockout caches (NewFailLockoutCache, NewLoginLockout) are bounded gcache ARC caches. ARC
 // keeps entries seen once in its recency list (T1) and entries seen at least twice in its
 // frequency list (T2). A locked bucket has been hit maxFailedAttempts / maxLoginFailures times,
 // so it lives in T2. Flooding the cache with keys that are hit only once churns T1 and never
@@ -36,12 +36,12 @@ func failLockoutAttempt(handler http.Handler, id string) int {
 	return rec.Code
 }
 
-// lockedFailLockout returns a withFailLockout handler in which the attacker has already locked
+// lockedFailLockout returns a WithFailLockout handler in which the attacker has already locked
 // the bucket of resource "victim".
 func lockedFailLockout(t *testing.T) http.Handler {
 	t.Helper()
 
-	handler := withFailLockout(newFailLockoutCache(), nil, testDiscardLog, alwaysForbidden())
+	handler := WithFailLockout(NewFailLockoutCache(), nil, testDiscardLog, alwaysForbidden())
 
 	for range maxFailedAttempts {
 		require.Equal(t, http.StatusForbidden, failLockoutAttempt(handler, "victim"))

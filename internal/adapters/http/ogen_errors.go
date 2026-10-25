@@ -11,7 +11,9 @@ import (
 	"github.com/ogen-go/ogen/ogenerrors"
 	"github.com/ogen-go/ogen/validate"
 
+	"github.com/partyzanex/padmark/internal/adapters/http/middleware"
 	"github.com/partyzanex/padmark/internal/adapters/http/ogenapi"
+	"github.com/partyzanex/padmark/internal/adapters/http/response"
 )
 
 const internalErrorMessage = "internal server error"
@@ -84,7 +86,7 @@ func newOgenErrorHandler(log *slog.Logger) ogenapi.ErrorHandler {
 		w.Header().Set("Content-Type", mimeJSON)
 		w.WriteHeader(status)
 
-		encErr := json.NewEncoder(w).Encode(errorJSON{Message: msg, Code: ""})
+		encErr := json.NewEncoder(w).Encode(response.ErrorJSON{Message: msg, Code: ""})
 		if encErr != nil {
 			log.ErrorContext(ctx, "write ogen error response", "status", status, "err", encErr)
 		}
@@ -115,7 +117,7 @@ func ogenErrorMessage(err error, status int) string {
 	case http.StatusBadRequest:
 		return decodeErrorMessage
 	case http.StatusUnauthorized:
-		return msgUnauthorized
+		return middleware.MsgUnauthorized
 	case http.StatusNotImplemented:
 		return notImplementedMessage
 	default:

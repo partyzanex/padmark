@@ -1,4 +1,4 @@
-package http
+package middleware
 
 import (
 	"crypto/sha256"
@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/bluele/gcache"
+
+	"github.com/partyzanex/padmark/internal/adapters/http/response"
 )
 
 const (
@@ -51,16 +53,16 @@ type loginAttempts struct {
 	count   int
 }
 
-// loginLockout tracks POST /totp-login attempts per username, complementing the per-IP
-// withTOTPRateLimit: the IP limiter caps one source, this caps one target, so a distributed
+// LoginLockout tracks POST /totp-login attempts per username, complementing the per-IP
+// WithTOTPRateLimit: the IP limiter caps one source, this caps one target, so a distributed
 // attacker (many IPs, or every client collapsed behind an untrusted proxy) still gets at most
 // maxLoginFailures guesses per account per loginLockoutDur.
 //
-// A fixed window (rather than exponential backoff) mirrors withFailLockout: it is easy to
+// A fixed window (rather than exponential backoff) mirrors WithFailLockout: it is easy to
 // reason about, and it bounds how long an attacker can keep a known username locked to five
 // minutes past their last counted attempt — while the per-IP limiter caps how fast they can
 // feed it.
-type loginLockout struct {
+type LoginLockout struct {
 	cache gcache.Cache
 	// locked pins usernames that reached maxLoginFailures so that evicting their counter from
 	// the ARC cache (by spraying other usernames) cannot unlock them.
@@ -71,8 +73,8 @@ type loginLockout struct {
 	mu sync.Mutex
 }
 
-func newLoginLockout(clock gcache.Clock) *loginLockout {
-	return &loginLockout{
+func NewLoginLockout(clock gcache.Clock) *LoginLockout {
+	return &LoginLockout{
 		cache:  gcache.New(maxTrackedLogins).ARC().Clock(clock).Build(),
 		locked: newLockedSet[loginLockKey](),
 		clock:  clock,
@@ -83,7 +85,7 @@ func newLoginLockout(clock gcache.Clock) *loginLockout {
 // reserve counts one attempt for key before it is attempted, unless key is locked. Counting up
 // front (and refunding via reset on success) means concurrent in-flight attempts are counted
 // too. It returns the remaining lock time and false when key is locked.
-func (l *loginLockout) reserve(key loginLockKey) (time.Duration, bool) {
+func (l *LoginLockout) reserve(key loginLockKey) (time.Duration, bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -124,7 +126,7 @@ func (l *loginLockout) reserve(key loginLockKey) (time.Duration, bool) {
 }
 
 // reset clears key after a successful login.
-func (l *loginLockout) reset(key loginLockKey) {
+func (l *LoginLockout) reset(key loginLockKey) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -132,7 +134,7 @@ func (l *loginLockout) reset(key loginLockKey) {
 	l.locked.unlock(key)
 }
 
-// withLoginLockout wraps POST /totp-login with the per-username lock. It must run after the
+// WithLoginLockout wraps POST /totp-login with the per-username lock. It must run after the
 // CSRF guard, which has already parsed the (size-capped) form, so reading "username" here does
 // not consume anything the handler needs.
 //
@@ -140,7 +142,7 @@ func (l *loginLockout) reset(key loginLockKey) {
 // resets the username's counter. A locked username gets 429 with a fixed JSON body and
 // Retry-After, before the auth usecase runs — so the response is identical whether the account
 // exists or not and whether the password was right, and cannot serve as an oracle for either.
-func withLoginLockout(lock *loginLockout, log *slog.Logger, next http.HandlerFunc) http.HandlerFunc {
+func WithLoginLockout(lock *LoginLockout, log *slog.Logger, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		key := newLoginLockKey(r.FormValue("username"))
 
@@ -149,7 +151,7 @@ func withLoginLockout(lock *loginLockout, log *slog.Logger, next http.HandlerFun
 			log.WarnContext(r.Context(), "login attempt rejected: username locked after repeated failures",
 				"username_sha256", hex.EncodeToString(key[:8]))
 			w.Header().Set("Retry-After", strconv.Itoa(retryAfterSeconds(retryAfter)))
-			writeJSONErrorStatus(w, r, log, http.StatusTooManyRequests, "too many failed attempts, try again later")
+			response.WriteJSONErrorStatus(w, r, log, http.StatusTooManyRequests, "too many failed attempts, try again later")
 
 			return
 		}
@@ -172,7 +174,7 @@ func retryAfterSeconds(remaining time.Duration) int {
 func sessionIssued(header http.Header) bool {
 	for _, raw := range header.Values("Set-Cookie") {
 		cookie, err := http.ParseSetCookie(raw)
-		if err == nil && cookie.Name == sessionCookieName && cookie.Value != "" && cookie.MaxAge >= 0 {
+		if err == nil && cookie.Name == SessionCookieName && cookie.Value != "" && cookie.MaxAge >= 0 {
 			return true
 		}
 	}

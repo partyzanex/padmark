@@ -2,13 +2,15 @@ FROM golang:1.27.3-alpine AS builder
 
 WORKDIR /src
 
+ARG APP_VERSION
+
 COPY . .
 
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 go build \
       -trimpath \
-      -ldflags="-s -w" \
+      -ldflags="-s -w -X github.com/partyzanex/padmark/internal/buildinfo.version=${APP_VERSION}" \
       -o /bin/padmark-server \
       ./cmd/padmark-server && \
     # Pre-create /data owned by nobody (UID 65534) so the SQLite backend

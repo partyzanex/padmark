@@ -1,10 +1,12 @@
-package http
+package middleware
 
 import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
 	"strings"
+
+	"github.com/partyzanex/padmark/internal/adapters/http/response"
 )
 
 // disabledAPIMessage is the fixed body of every REST/JSON API response while --disable-api is
@@ -30,10 +32,10 @@ func isDisabledAPIPath(path string) bool {
 		path == "/api/tokens" || path == "/api/invites"
 }
 
-// withAPIDisabled responds with 503 and a stable code without calling the API handler.
+// WithAPIDisabled responds with 503 and a stable code without calling the API handler.
 // Outer middleware may respond first; see NewRouter for the current stack order.
 // Only wired in when RouterOptions.DisableAPI is set.
-func withAPIDisabled(log *slog.Logger, next http.Handler) http.Handler {
+func WithAPIDisabled(log *slog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !isDisabledAPIPath(r.URL.Path) {
 			next.ServeHTTP(w, r)
@@ -41,10 +43,10 @@ func withAPIDisabled(log *slog.Logger, next http.Handler) http.Handler {
 			return
 		}
 
-		w.Header().Set("Content-Type", mimeJSON)
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusServiceUnavailable)
 
-		err := json.NewEncoder(w).Encode(errorJSON{Message: disabledAPIMessage, Code: disabledAPICode})
+		err := json.NewEncoder(w).Encode(response.ErrorJSON{Message: disabledAPIMessage, Code: disabledAPICode})
 		if err != nil {
 			log.ErrorContext(r.Context(), "write api-disabled response", "err", err)
 		}

@@ -1,4 +1,4 @@
-package http
+package middleware
 
 import (
 	"log/slog"
@@ -11,6 +11,8 @@ import (
 
 	"github.com/bluele/gcache"
 	"golang.org/x/time/rate"
+
+	"github.com/partyzanex/padmark/internal/adapters/http/response"
 )
 
 // maxTrackedIPs is the capacity of the ARC cache that maps client IPs to rate
@@ -36,7 +38,7 @@ type rateLimitMiddleware struct {
 
 // newIPRateLimiterCache builds an ARC cache mapping client IP to a *rate.Limiter, evicting
 // idle entries after limiterTTL. newLimiter is called once per IP, the first time it's seen —
-// used by both withRateLimit (general per-request limit) and withTOTPRateLimit (POST
+// used by both WithRateLimit (general per-request limit) and WithTOTPRateLimit (POST
 // /totp-login-specific limit), which need independent per-IP buckets since they track
 // unrelated concerns and must not share state.
 //
@@ -58,20 +60,20 @@ func newIPRateLimiterCache(newLimiter func() *rate.Limiter) gcache.Cache {
 func allowRequest(w http.ResponseWriter, r *http.Request, log *slog.Logger, cache gcache.Cache, ip string) bool {
 	cached, err := cache.Get(ip)
 	if err != nil {
-		writeJSONErrorStatus(w, r, log, http.StatusInternalServerError, "internal server error")
+		response.WriteJSONErrorStatus(w, r, log, http.StatusInternalServerError, "internal server error")
 
 		return false
 	}
 
 	limiter, ok := cached.(*rate.Limiter)
 	if !ok {
-		writeJSONErrorStatus(w, r, log, http.StatusInternalServerError, "internal server error")
+		response.WriteJSONErrorStatus(w, r, log, http.StatusInternalServerError, "internal server error")
 
 		return false
 	}
 
 	if !limiter.Allow() {
-		writeJSONErrorStatus(w, r, log, http.StatusTooManyRequests, "too many requests")
+		response.WriteJSONErrorStatus(w, r, log, http.StatusTooManyRequests, "too many requests")
 
 		return false
 	}
@@ -79,7 +81,7 @@ func allowRequest(w http.ResponseWriter, r *http.Request, log *slog.Logger, cach
 	return true
 }
 
-func withRateLimit(rps, burst int, trustedProxies []*net.IPNet, log *slog.Logger, next http.Handler) http.Handler {
+func WithRateLimit(rps, burst int, trustedProxies []*net.IPNet, log *slog.Logger, next http.Handler) http.Handler {
 	limiterCache := newIPRateLimiterCache(func() *rate.Limiter {
 		return rate.NewLimiter(rate.Limit(rps), burst)
 	})
@@ -88,7 +90,7 @@ func withRateLimit(rps, burst int, trustedProxies []*net.IPNet, log *slog.Logger
 }
 
 func (rl *rateLimitMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	ip := clientIP(r, rl.trustedProxies)
+	ip := ClientIP(r, rl.trustedProxies)
 
 	if !allowRequest(w, r, rl.log, rl.cache, ip) {
 		return
@@ -97,11 +99,11 @@ func (rl *rateLimitMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	rl.next.ServeHTTP(w, r)
 }
 
-// clientIP returns the real client IP for rate limiting purposes.
+// ClientIP returns the real client IP for rate limiting purposes.
 // X-Forwarded-For and X-Real-IP are only trusted when the direct connection
 // originates from a trusted proxy CIDR. If trustedProxies is empty, these
 // headers are ignored and RemoteAddr is used directly.
-func clientIP(req *http.Request, trustedProxies []*net.IPNet) string {
+func ClientIP(req *http.Request, trustedProxies []*net.IPNet) string {
 	remoteHost, _, err := net.SplitHostPort(req.RemoteAddr)
 	if err != nil {
 		remoteHost = req.RemoteAddr
@@ -152,16 +154,16 @@ func clientIPFromForwarded(forwarded string, trustedProxies []*net.IPNet) string
 	return ""
 }
 
-// withTOTPRateLimit returns a HandlerFunc wrapper that caps POST /totp-login at
+// WithTOTPRateLimit returns a HandlerFunc wrapper that caps POST /totp-login at
 // totpRatePerMin attempts per minute per client IP. The burst equals the rate cap
 // so an attacker can make at most 10 attempts before being throttled.
-func withTOTPRateLimit(trustedProxies []*net.IPNet, log *slog.Logger, next http.HandlerFunc) http.HandlerFunc {
+func WithTOTPRateLimit(trustedProxies []*net.IPNet, log *slog.Logger, next http.HandlerFunc) http.HandlerFunc {
 	cache := newIPRateLimiterCache(func() *rate.Limiter {
 		return rate.NewLimiter(rate.Every(time.Minute/totpRatePerMin), totpRatePerMin)
 	})
 
 	return func(w http.ResponseWriter, r *http.Request) {
-		ip := clientIP(r, trustedProxies)
+		ip := ClientIP(r, trustedProxies)
 
 		if !allowRequest(w, r, log, cache, ip) {
 			return
@@ -171,7 +173,7 @@ func withTOTPRateLimit(trustedProxies []*net.IPNet, log *slog.Logger, next http.
 	}
 }
 
-// warnUnconfiguredProxy logs once, on the first request that arrives with a forwarding header
+// WarnUnconfiguredProxy logs once, on the first request that arrives with a forwarding header
 // while no proxy is trusted. That combination is evidence that a proxy really does sit in front
 // of the server but --trusted-proxies was left empty: the headers are then ignored, every
 // request is attributed to the proxy's own address, and all clients collapse into a single
@@ -181,7 +183,7 @@ func withTOTPRateLimit(trustedProxies []*net.IPNet, log *slog.Logger, next http.
 // a perfectly good configuration and must stay silent. A client can of course send the header
 // to a directly-exposed server and trigger the warning, which is why this is one log line and
 // not an error. Install only when len(trustedProxies) == 0; wrap nothing otherwise.
-func warnUnconfiguredProxy(log *slog.Logger, next http.Handler) http.Handler {
+func WarnUnconfiguredProxy(log *slog.Logger, next http.Handler) http.Handler {
 	var once sync.Once
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

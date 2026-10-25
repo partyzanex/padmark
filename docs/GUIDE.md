@@ -198,6 +198,16 @@ The HTTP adapter defines its own `NoteManager`, `LinkManager` and auth interface
 usecase managers. `NewRouter(handler, ogenHandler, *RouterOptions)` returns `(http.Handler, error)`.
 Tests without a database pinger use `NoPinger{}`.
 
+`http/middleware/` owns authentication, CSRF/cookies, request context, proxy detection,
+rate/guessing limits, security headers, logging and recovery. The router composes the chain;
+middleware never imports the parent adapter. `http/response/` supplies the shared JSON error
+format without introducing a dependency cycle. Resource privacy remains in the handlers/usecases.
+
+`LinkHandler` serves the creation form at `/links`, the metadata-only editor at
+`/links/{id}/edit`, and redirects at `/r/{id}`. Editor reads and saves do not consume burn links.
+The `/api/openapi.yaml` response uses the same build version as `padmark-server --version`;
+release container builds inject the Git-tag version through the `APP_VERSION` build argument.
+
 The generated OpenAPI handlers serve single-segment API paths; handwritten handlers also
 support path-like note slugs. Keep their status codes, validation and ownership behavior
 aligned. Edit codes for deletion come from `X-Edit-Code`; the deprecated `edit_code` query
@@ -335,7 +345,7 @@ make test-ui UI_ARGS='-run TestEditor/desktop/Toolbar'
 make test-ui UI_ARGS='-race'
 ```
 
-The 19 scenarios run at desktop/mobile sizes (38 checks). Each gets a real server, isolated
+The scenarios run at desktop/mobile sizes. Each gets a real server, isolated
 SQLite/keyring and browser context. Uncaught JavaScript, console errors and failed resources
 fail the case. Layout and PNG assertions detect visual changes. Only deliberately expected
 HTTP errors are exempted, and missing static resources always fail.

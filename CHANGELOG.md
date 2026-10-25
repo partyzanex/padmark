@@ -22,6 +22,10 @@ That baseline is not the latest released version.
 - Bootstrap/step-up protection, session/key revocation, CSRF/lockout hardening, argon2 memory
   budgeting, content/rendering limits and operational configuration checks.
 - The separate Go browser-test module, desktop/mobile PNG comparisons and CI integration.
+- Browser forms for creating, editing and deleting short links, including privacy, redirect
+  mode, expiration and burn-after-click settings. Editing preserves expiry unless changed.
+- API documentation reports the application release version, shared with `--version` and
+  injected from the release tag when building container images.
 - Automatic startup content migration with a persisted `pending`/`ready` state. A restart
   resumes unfinished rows and skips migration writes once ready. PostgreSQL containers
   generate their default keyring on the persistent `/data` volume; no in-container command

@@ -1,4 +1,4 @@
-package http
+package middleware
 
 import (
 	net_http "net/http"
@@ -46,7 +46,7 @@ func TestWithAllowedHosts(t *testing.T) {
 			req.Host = testCase.host
 
 			rec := httptest.NewRecorder()
-			withAllowedHosts(testCase.hosts, okHandler).ServeHTTP(rec, req)
+			WithAllowedHosts(testCase.hosts, okHandler).ServeHTTP(rec, req)
 
 			assert.Equal(t, testCase.want, rec.Code)
 		})

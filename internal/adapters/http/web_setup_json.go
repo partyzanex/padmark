@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/partyzanex/padmark/internal/adapters/http/response"
 	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/usecases/auth"
 )
@@ -46,7 +47,7 @@ func setupJSONStatus(err error) int {
 	}
 }
 
-// writeJSONStatus writes a 201-style success body with the errorJSON-family wire format.
+// writeJSONStatus writes a 201-style success body with the ErrorJSON-family wire format.
 func (h *AuthHandler) writeJSONStatus(w http.ResponseWriter, r *http.Request, status int, body any) {
 	w.Header().Set("Content-Type", mimeJSON)
 	w.WriteHeader(status)
@@ -76,13 +77,13 @@ func (h *AuthHandler) setupJSON(w http.ResponseWriter, r *http.Request) {
 
 	decErr := json.NewDecoder(r.Body).Decode(&req)
 	if decErr != nil {
-		writeJSONErrorStatus(w, r, h.log, http.StatusBadRequest, decodeErrorMessage)
+		response.WriteJSONErrorStatus(w, r, h.log, http.StatusBadRequest, decodeErrorMessage)
 
 		return
 	}
 
 	if strings.TrimSpace(req.Username) == "" {
-		writeJSONErrorStatus(w, r, h.log, http.StatusBadRequest, "username is required")
+		response.WriteJSONErrorStatus(w, r, h.log, http.StatusBadRequest, "username is required")
 
 		return
 	}
@@ -130,20 +131,20 @@ func (h *AuthHandler) setupGateOpenJSON(w http.ResponseWriter, r *http.Request, 
 	empty, gateErr := h.authMgr.IsEmpty(r.Context())
 	if gateErr != nil {
 		h.log.ErrorContext(r.Context(), "check empty", "err", gateErr)
-		writeJSONErrorStatus(w, r, h.log, http.StatusInternalServerError, internalErrorMessage)
+		response.WriteJSONErrorStatus(w, r, h.log, http.StatusInternalServerError, internalErrorMessage)
 
 		return false
 	}
 
 	if !empty {
-		writeJSONErrorStatus(w, r, h.log, http.StatusForbidden,
+		response.WriteJSONErrorStatus(w, r, h.log, http.StatusForbidden,
 			"The first admin already exists. New accounts require an invite.")
 
 		return false
 	}
 
 	if len(h.bootstrapDigest) == 0 {
-		writeJSONErrorCode(w, r, h.log, http.StatusForbidden,
+		response.WriteJSONErrorCode(w, r, h.log, http.StatusForbidden,
 			"First-admin setup is disabled: set PADMARK_BOOTSTRAP_TOKEN (at least 32 characters) "+
 				"on the server and send it as bootstrap_token.", bootstrapDisabledCode)
 
@@ -151,7 +152,7 @@ func (h *AuthHandler) setupGateOpenJSON(w http.ResponseWriter, r *http.Request, 
 	}
 
 	if !h.bootstrapTokenValid(presented) {
-		writeJSONErrorCode(w, r, h.log, http.StatusForbidden, "Invalid bootstrap token.",
+		response.WriteJSONErrorCode(w, r, h.log, http.StatusForbidden, "Invalid bootstrap token.",
 			bootstrapTokenInvalidCode)
 
 		return false
@@ -172,5 +173,5 @@ func (h *AuthHandler) setupJSONFailure(w http.ResponseWriter, r *http.Request, s
 		msg = internalErrorMessage
 	}
 
-	writeJSONErrorStatus(w, r, h.log, status, msg)
+	response.WriteJSONErrorStatus(w, r, h.log, status, msg)
 }

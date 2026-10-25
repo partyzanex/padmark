@@ -1,4 +1,4 @@
-package http
+package middleware
 
 import (
 	"bytes"
@@ -41,31 +41,31 @@ func newReq(remoteAddr, xff, xri string) *http.Request {
 	return req
 }
 
-// clientIP
+// ClientIP
 
 func TestClientIP_NoProxies_UsesRemoteAddr(t *testing.T) {
 	req := newReq("10.0.0.1:9000", "1.2.3.4", "")
-	assert.Equal(t, "10.0.0.1", clientIP(req, nil))
+	assert.Equal(t, "10.0.0.1", ClientIP(req, nil))
 }
 
 func TestClientIP_TrustedProxy_XForwardedFor(t *testing.T) {
 	req := newReq("10.0.0.2:5000", "203.0.113.5, 10.0.0.2", "")
-	assert.Equal(t, "203.0.113.5", clientIP(req, []*net.IPNet{parseCIDR(t, "10.0.0.0/8")}))
+	assert.Equal(t, "203.0.113.5", ClientIP(req, []*net.IPNet{parseCIDR(t, "10.0.0.0/8")}))
 }
 
 func TestClientIP_TrustedProxy_XRealIP(t *testing.T) {
 	req := newReq("10.0.0.2:5000", "", "203.0.113.7")
-	assert.Equal(t, "203.0.113.7", clientIP(req, []*net.IPNet{parseCIDR(t, "10.0.0.0/8")}))
+	assert.Equal(t, "203.0.113.7", ClientIP(req, []*net.IPNet{parseCIDR(t, "10.0.0.0/8")}))
 }
 
 func TestClientIP_UntrustedProxy_HeaderIgnored(t *testing.T) {
 	req := newReq("10.0.0.1:9000", "1.2.3.4", "")
-	assert.Equal(t, "10.0.0.1", clientIP(req, []*net.IPNet{parseCIDR(t, "192.168.0.0/16")}))
+	assert.Equal(t, "10.0.0.1", ClientIP(req, []*net.IPNet{parseCIDR(t, "192.168.0.0/16")}))
 }
 
 func TestClientIP_MalformedRemoteAddr(t *testing.T) {
 	req := newReq("not-valid", "", "")
-	assert.Equal(t, "not-valid", clientIP(req, nil))
+	assert.Equal(t, "not-valid", ClientIP(req, nil))
 }
 
 func TestClientIP_TrustedProxy_SpoofedLeftmostXFFIgnored(t *testing.T) {
@@ -73,34 +73,34 @@ func TestClientIP_TrustedProxy_SpoofedLeftmostXFFIgnored(t *testing.T) {
 	// client IP "198.51.100.9". The rightmost non-trusted entry must win, otherwise rotating
 	// the leftmost value grants a fresh rate-limit bucket per request.
 	req := newReq("10.0.0.2:5000", "1.2.3.4, 198.51.100.9", "")
-	assert.Equal(t, "198.51.100.9", clientIP(req, []*net.IPNet{parseCIDR(t, "10.0.0.0/8")}))
+	assert.Equal(t, "198.51.100.9", ClientIP(req, []*net.IPNet{parseCIDR(t, "10.0.0.0/8")}))
 }
 
 func TestClientIP_TrustedProxy_PlantedTrustedEntryDoesNotUnmaskAttackerValue(t *testing.T) {
 	// The client lists a fake trusted-proxy IP to the left; the walk stops at the entry the
 	// real proxy appended and never reaches the planted one.
 	req := newReq("10.0.0.2:5000", "203.0.113.5, 10.0.0.2, 198.51.100.9", "")
-	assert.Equal(t, "198.51.100.9", clientIP(req, []*net.IPNet{parseCIDR(t, "10.0.0.0/8")}))
+	assert.Equal(t, "198.51.100.9", ClientIP(req, []*net.IPNet{parseCIDR(t, "10.0.0.0/8")}))
 }
 
 func TestClientIP_TrustedProxy_MalformedXFEntryFallsBackToRemoteAddr(t *testing.T) {
 	// A malformed entry breaks the append chain, so nothing in the list is trustworthy;
 	// RemoteAddr (the proxy's own IP) is the only safe bucket key.
 	req := newReq("10.0.0.2:5000", "8.8.8.8, junk", "")
-	assert.Equal(t, "10.0.0.2", clientIP(req, []*net.IPNet{parseCIDR(t, "10.0.0.0/8")}))
+	assert.Equal(t, "10.0.0.2", ClientIP(req, []*net.IPNet{parseCIDR(t, "10.0.0.0/8")}))
 }
 
 func TestClientIP_TrustedProxy_AllXFFEntriesTrustedFallsBackToRemoteAddr(t *testing.T) {
 	req := newReq("10.0.0.2:5000", "10.0.0.3, 10.0.0.2", "")
-	assert.Equal(t, "10.0.0.2", clientIP(req, []*net.IPNet{parseCIDR(t, "10.0.0.0/8")}))
+	assert.Equal(t, "10.0.0.2", ClientIP(req, []*net.IPNet{parseCIDR(t, "10.0.0.0/8")}))
 }
 
 func TestClientIP_TrustedProxy_InvalidXRealIPFallsBackToRemoteAddr(t *testing.T) {
 	req := newReq("10.0.0.2:5000", "", "not-an-ip")
-	assert.Equal(t, "10.0.0.2", clientIP(req, []*net.IPNet{parseCIDR(t, "10.0.0.0/8")}))
+	assert.Equal(t, "10.0.0.2", ClientIP(req, []*net.IPNet{parseCIDR(t, "10.0.0.0/8")}))
 }
 
-// clientIP under a misconfigured --trusted-proxies
+// ClientIP under a misconfigured --trusted-proxies
 //
 // These pin what actually happens when the operator gets the flag wrong in either direction.
 // Both cases are configuration errors, not code defects, but the consequences differ enough
@@ -112,7 +112,7 @@ func TestClientIP_TrustedProxy_InvalidXRealIPFallsBackToRemoteAddr(t *testing.T)
 // So a wide-open CIDR does not, by itself, make X-Forwarded-For spoofable.
 func TestClientIP_WideOpenProxies_XForwardedForStillFallsBackToRemoteAddr(t *testing.T) {
 	req := newReq("198.51.100.9:5000", "1.2.3.4, 5.6.7.8", "")
-	assert.Equal(t, "198.51.100.9", clientIP(req, []*net.IPNet{parseCIDR(t, "0.0.0.0/0")}))
+	assert.Equal(t, "198.51.100.9", ClientIP(req, []*net.IPNet{parseCIDR(t, "0.0.0.0/0")}))
 }
 
 // TestClientIP_WideOpenProxies_XRealIPIsSpoofable is the real cost of an over-broad
@@ -121,7 +121,7 @@ func TestClientIP_WideOpenProxies_XForwardedForStillFallsBackToRemoteAddr(t *tes
 // trusted. The client then picks its own rate-limit bucket.
 func TestClientIP_WideOpenProxies_XRealIPIsSpoofable(t *testing.T) {
 	req := newReq("198.51.100.9:5000", "", "1.2.3.4")
-	assert.Equal(t, "1.2.3.4", clientIP(req, []*net.IPNet{parseCIDR(t, "0.0.0.0/0")}))
+	assert.Equal(t, "1.2.3.4", ClientIP(req, []*net.IPNet{parseCIDR(t, "0.0.0.0/0")}))
 }
 
 // TestClientIP_WideOpenProxies_XRealIPWinsOverNeutralisedXFF combines the two above: XFF
@@ -129,7 +129,7 @@ func TestClientIP_WideOpenProxies_XRealIPIsSpoofable(t *testing.T) {
 // header precedence cannot silently make this worse.
 func TestClientIP_WideOpenProxies_XRealIPWinsOverNeutralisedXFF(t *testing.T) {
 	req := newReq("198.51.100.9:5000", "1.2.3.4, 5.6.7.8", "9.9.9.9")
-	assert.Equal(t, "9.9.9.9", clientIP(req, []*net.IPNet{parseCIDR(t, "0.0.0.0/0")}))
+	assert.Equal(t, "9.9.9.9", ClientIP(req, []*net.IPNet{parseCIDR(t, "0.0.0.0/0")}))
 }
 
 // TestWithTOTPRateLimit_WideOpenProxies_SpoofedXRealIPDefeatsLimit is the end-to-end
@@ -143,7 +143,7 @@ func TestWithTOTPRateLimit_WideOpenProxies_SpoofedXRealIPDefeatsLimit(t *testing
 
 		w.WriteHeader(http.StatusOK)
 	})
-	handler := withTOTPRateLimit([]*net.IPNet{parseCIDR(t, "0.0.0.0/0")}, testDiscardLog, inner)
+	handler := WithTOTPRateLimit([]*net.IPNet{parseCIDR(t, "0.0.0.0/0")}, testDiscardLog, inner)
 
 	const attempts = totpRatePerMin * 3
 
@@ -168,7 +168,7 @@ func TestWithTOTPRateLimit_NoProxiesConfigured_SpoofedHeadersDoNotDefeatLimit(t 
 	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	handler := withTOTPRateLimit(nil, testDiscardLog, inner)
+	handler := WithTOTPRateLimit(nil, testDiscardLog, inner)
 
 	var lastCode int
 
@@ -197,7 +197,7 @@ func TestWithTOTPRateLimit_ProxyPresentButUntrusted_ClientsShareOneBucket(t *tes
 	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	handler := withTOTPRateLimit(nil, testDiscardLog, inner)
+	handler := WithTOTPRateLimit(nil, testDiscardLog, inner)
 
 	// Distinct real clients, each correctly announced by the proxy in X-Forwarded-For.
 	for i := range totpRatePerMin {
@@ -220,7 +220,7 @@ func TestWithTOTPRateLimit_ProxyPresentButUntrusted_ClientsShareOneBucket(t *tes
 		"an unconfigured proxy collapses every client into the proxy's own bucket")
 }
 
-// warnUnconfiguredProxy
+// WarnUnconfiguredProxy
 
 // countingHandler records how many requests reached the wrapped handler.
 type countingHandler struct{ calls int }
@@ -256,7 +256,7 @@ func TestWarnUnconfiguredProxy_ForwardingHeaderWarnsOnce(t *testing.T) {
 	var buf bytes.Buffer
 
 	inner := &countingHandler{}
-	handler := warnUnconfiguredProxy(newWarnRecorder(&buf), inner)
+	handler := WarnUnconfiguredProxy(newWarnRecorder(&buf), inner)
 
 	for range 3 {
 		handler.ServeHTTP(httptest.NewRecorder(), warnReq("203.0.113.5", ""))
@@ -270,7 +270,7 @@ func TestWarnUnconfiguredProxy_ForwardingHeaderWarnsOnce(t *testing.T) {
 func TestWarnUnconfiguredProxy_XRealIPAlsoWarns(t *testing.T) {
 	var buf bytes.Buffer
 
-	handler := warnUnconfiguredProxy(newWarnRecorder(&buf), &countingHandler{})
+	handler := WarnUnconfiguredProxy(newWarnRecorder(&buf), &countingHandler{})
 	handler.ServeHTTP(httptest.NewRecorder(), warnReq("", "203.0.113.5"))
 
 	assert.Contains(t, buf.String(), "no proxy is trusted")
@@ -283,7 +283,7 @@ func TestWarnUnconfiguredProxy_NoHeaderStaysSilent(t *testing.T) {
 	var buf bytes.Buffer
 
 	inner := &countingHandler{}
-	handler := warnUnconfiguredProxy(newWarnRecorder(&buf), inner)
+	handler := WarnUnconfiguredProxy(newWarnRecorder(&buf), inner)
 
 	for range 3 {
 		handler.ServeHTTP(httptest.NewRecorder(), warnReq("", ""))
@@ -307,7 +307,7 @@ func TestIsTrustedProxy_InvalidIP(t *testing.T) {
 	assert.False(t, isTrustedProxy("not-an-ip", []*net.IPNet{parseCIDR(t, "10.0.0.0/8")}))
 }
 
-// withTOTPRateLimit
+// WithTOTPRateLimit
 
 func TestWithTOTPRateLimit_AllowsUnderLimit(t *testing.T) {
 	calls := 0
@@ -316,7 +316,7 @@ func TestWithTOTPRateLimit_AllowsUnderLimit(t *testing.T) {
 
 		w.WriteHeader(http.StatusOK)
 	})
-	handler := withTOTPRateLimit(nil, testDiscardLog, inner)
+	handler := WithTOTPRateLimit(nil, testDiscardLog, inner)
 
 	for range totpRatePerMin {
 		req := httptest.NewRequest(http.MethodPost, "/totp-login", nil)
@@ -335,7 +335,7 @@ func TestWithTOTPRateLimit_BlocksOverLimit(t *testing.T) {
 	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	handler := withTOTPRateLimit(nil, testDiscardLog, inner)
+	handler := WithTOTPRateLimit(nil, testDiscardLog, inner)
 
 	for range totpRatePerMin {
 		req := httptest.NewRequest(http.MethodPost, "/totp-login", nil)
@@ -354,20 +354,19 @@ func TestWithTOTPRateLimit_BlocksOverLimit(t *testing.T) {
 	assert.Equal(t, http.StatusTooManyRequests, rec.Code)
 
 	// The OpenAPI ErrorResponse schema promises JSON ({"message": ...}), not net/http's
-	// default text/plain (see errors.go's writeJSONErrorStatus).
-	//nolint:testifylint // Content-Type header string, not a JSON body; JSONEq suggestion misfires on "mimeJSON"
-	assert.Equal(t, mimeJSON, rec.Header().Get("Content-Type"))
+	// default text/plain (see errors.go's WriteJSONErrorStatus).
+	assert.Equal(t, "application/json", rec.Header().Get("Content-Type"))
 	assert.JSONEq(t, `{"message":"too many requests"}`, rec.Body.String())
 }
 
 // TestWithRateLimit_Exceeded_ReturnsJSONError is withTOTPRateLimit_BlocksOverLimit's general
-// counterpart: withRateLimit (the whole-stack per-IP limiter, not just POST /totp-login) must
+// counterpart: WithRateLimit (the whole-stack per-IP limiter, not just POST /totp-login) must
 // answer 429 with the same JSON shape.
 func TestWithRateLimit_Exceeded_ReturnsJSONError(t *testing.T) {
 	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	handler := withRateLimit(1, 1, nil, testDiscardLog, inner)
+	handler := WithRateLimit(1, 1, nil, testDiscardLog, inner)
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.RemoteAddr = "7.7.7.7:9000"
@@ -379,8 +378,7 @@ func TestWithRateLimit_Exceeded_ReturnsJSONError(t *testing.T) {
 	handler.ServeHTTP(rec, req)
 
 	assert.Equal(t, http.StatusTooManyRequests, rec.Code)
-	//nolint:testifylint // Content-Type header string, not a JSON body; JSONEq suggestion misfires on "mimeJSON"
-	assert.Equal(t, mimeJSON, rec.Header().Get("Content-Type"))
+	assert.Equal(t, "application/json", rec.Header().Get("Content-Type"))
 	assert.JSONEq(t, `{"message":"too many requests"}`, rec.Body.String())
 }
 
@@ -388,7 +386,7 @@ func TestWithTOTPRateLimit_DifferentIPs_IndependentBuckets(t *testing.T) {
 	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	handler := withTOTPRateLimit(nil, testDiscardLog, inner)
+	handler := WithTOTPRateLimit(nil, testDiscardLog, inner)
 
 	// exhaust bucket for IP A
 	for range totpRatePerMin {

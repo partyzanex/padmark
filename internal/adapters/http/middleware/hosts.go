@@ -1,4 +1,4 @@
-package http
+package middleware
 
 import (
 	"net"
@@ -23,12 +23,12 @@ func normalizeHost(raw string) string {
 	return strings.ToLower(host)
 }
 
-// withAllowedHosts rejects requests whose Host header is not in hosts with 421 Misdirected
+// WithAllowedHosts rejects requests whose Host header is not in hosts with 421 Misdirected
 // Request before any handler runs, so a forged Host cannot reach code that echoes it (absolute
 // URLs in redirects, invite links, cache keys behind a shared cache). An empty list disables
 // the check, which is the default. /healthz and /readyz bypass it: orchestrator probes
 // address the pod by IP and would otherwise fail the moment the allow-list is set.
-func withAllowedHosts(hosts []string, next http.Handler) http.Handler {
+func WithAllowedHosts(hosts []string, next http.Handler) http.Handler {
 	if len(hosts) == 0 {
 		return next
 	}

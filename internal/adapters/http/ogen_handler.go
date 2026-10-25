@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/partyzanex/padmark/internal/adapters/http/middleware"
 	"github.com/partyzanex/padmark/internal/adapters/http/ogenapi"
 	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/usecases/auth"
@@ -77,7 +78,7 @@ func (h *OgenHandler) CreateNote(
 		UpdatedAt:        time.Time{},
 		ExpiresAt:        nil,
 		Privacy:          privacy,
-		OwnerID:          ownerIDFromCtx(ctx),
+		OwnerID:          middleware.OwnerIDFromCtx(ctx),
 		ID:               req.Slug.Or(""),
 		Title:            req.Title.Or(""),
 		Content:          req.Content,
@@ -108,8 +109,8 @@ func (h *OgenHandler) GetNote(
 		return mapGetError(err, h.log), nil
 	}
 
-	if !note.VisibleTo(callerIDFromCtx(ctx), authenticatedFromCtx(ctx)) {
-		v := ogenapi.GetNoteUnauthorized(errorResponse(msgUnauthorized))
+	if !note.VisibleTo(middleware.CallerIDFromCtx(ctx), middleware.AuthenticatedFromCtx(ctx)) {
+		v := ogenapi.GetNoteUnauthorized(errorResponse(middleware.MsgUnauthorized))
 
 		return &v, nil
 	}
@@ -146,7 +147,7 @@ func (h *OgenHandler) UpdateNote(
 		return &v, nil
 	}
 
-	note, err := h.manager.Update(ctx, params.ID, req.EditCode.Or(""), callerIDFromCtx(ctx), payload)
+	note, err := h.manager.Update(ctx, params.ID, req.EditCode.Or(""), middleware.CallerIDFromCtx(ctx), payload)
 	if err != nil {
 		return mapUpdateError(err, h.log), nil
 	}
@@ -210,7 +211,7 @@ func (h *OgenHandler) DeleteNote(
 	//nolint:staticcheck // deprecated v0.1.6 query form, kept for backward compatibility
 	editCode := deleteEditCode(ctx, h.log, params.ID, params.XEditCode.Or(""), params.EditCode.Or(""))
 
-	err := h.manager.Delete(ctx, params.ID, editCode, callerIDFromCtx(ctx))
+	err := h.manager.Delete(ctx, params.ID, editCode, middleware.CallerIDFromCtx(ctx))
 	if err != nil {
 		return mapDeleteError(err, h.log), nil
 	}
@@ -262,7 +263,7 @@ func (h *OgenHandler) CreateLinksBulk(
 // GET /links/{id} is routed through ogenSrv (unlike GET /notes/{id}, which bypasses it — see
 // GetNote's doc comment), so this method is the sole enforcement point for the link's privacy
 // level on this path and must check it explicitly, like the Follow usecase on the redirect path.
-// authenticatedFromCtx recognizes a TOTP session or an API token (both set the context user via
+// AuthenticatedFromCtx recognizes a TOTP session or an API token (both set the context user via
 // the auth middleware's isPublicRoute branch).
 func (h *OgenHandler) GetLink(
 	ctx context.Context, params ogenapi.GetLinkParams,
@@ -272,8 +273,8 @@ func (h *OgenHandler) GetLink(
 		return mapGetLinkError(err, h.log), nil
 	}
 
-	if !link.VisibleTo(callerIDFromCtx(ctx), authenticatedFromCtx(ctx)) {
-		v := ogenapi.GetLinkUnauthorized(errorResponse(msgUnauthorized))
+	if !link.VisibleTo(middleware.CallerIDFromCtx(ctx), middleware.AuthenticatedFromCtx(ctx)) {
+		v := ogenapi.GetLinkUnauthorized(errorResponse(middleware.MsgUnauthorized))
 
 		return &v, nil
 	}
@@ -298,7 +299,7 @@ func (h *OgenHandler) DeleteLink(
 		return &ogenapi.DeleteLinkUnauthorized{}, nil
 	}
 
-	err := h.linkManager.Delete(ctx, params.ID, params.XEditCode.Or(""), callerIDFromCtx(ctx))
+	err := h.linkManager.Delete(ctx, params.ID, params.XEditCode.Or(""), middleware.CallerIDFromCtx(ctx))
 	if err != nil {
 		return mapDeleteLinkError(err, h.log), nil
 	}
@@ -312,7 +313,7 @@ func buildCreateLinkOptions(ctx context.Context, req *ogenapi.CreateLinkRequest)
 	return links.CreateOptions{
 		ExpiresAt:      ttlToExpiresAt(req.TTL),
 		Privacy:        optCreateLinkPrivacyPtr(req.Privacy),
-		OwnerID:        ownerIDFromCtx(ctx),
+		OwnerID:        middleware.OwnerIDFromCtx(ctx),
 		DirectRedirect: optDirectRedirectPtr(req.DirectRedirect),
 		CustomHash:     req.Slug.Or(""),
 		EditCode:       req.EditCode.Or(""),
@@ -508,9 +509,9 @@ func (h *OgenHandler) CreateAPIToken(
 
 	// Unreachable per routing (the path requires a credential in the auth middleware), but
 	// guarded defensively: the handler must never mint a token for an unknown user.
-	usr := userFromCtx(ctx)
+	usr := middleware.UserFromCtx(ctx)
 	if usr == nil {
-		v := ogenapi.CreateAPITokenUnauthorized(errorResponse(msgUnauthorized))
+		v := ogenapi.CreateAPITokenUnauthorized(errorResponse(middleware.MsgUnauthorized))
 
 		return &v, nil
 	}
@@ -543,7 +544,7 @@ func (h *OgenHandler) CreateInvite(ctx context.Context, req ogenapi.OptStepUpReq
 
 	// The gate mirrors requireAdmin (web_admin.go): admin-only issuance. GenerateInvite
 	// re-checks admin in the usecase, so a context carrying a stale identity cannot mint invites.
-	usr := userFromCtx(ctx)
+	usr := middleware.UserFromCtx(ctx)
 	if usr == nil || !usr.IsAdmin {
 		v := ogenapi.CreateInviteForbidden(errorResponse("forbidden"))
 
@@ -612,7 +613,7 @@ func mapCreateAPITokenError(err error, log *slog.Logger) ogenapi.CreateAPITokenR
 // the request body carried. The usecase decides whether the step-up is needed and valid.
 func issuerFromCtx(ctx context.Context, password, totpCode string) auth.Issuer {
 	return auth.Issuer{
-		APITokenHash: apiTokenHashFromCtx(ctx),
+		APITokenHash: middleware.APITokenHashFromCtx(ctx),
 		StepUp:       auth.StepUp{Password: password, TOTPCode: totpCode},
 	}
 }
@@ -673,7 +674,7 @@ func (h *OgenHandler) accountsEnabled() bool { return h.authMgr != nil }
 // Without the account system (accountsEnabled false) no privacy level is enforced on reads, as
 // in v0.1.6 without --auth-tokens, so the edit code alone decides, like the native PUT/DELETE gate.
 func (h *OgenHandler) anonymousNoteMutationAllowed(ctx context.Context, id string) bool {
-	if !h.accountsEnabled() || callerIDFromCtx(ctx) != uuid.Nil {
+	if !h.accountsEnabled() || middleware.CallerIDFromCtx(ctx) != uuid.Nil {
 		return true
 	}
 
@@ -688,7 +689,7 @@ func (h *OgenHandler) anonymousNoteMutationAllowed(ctx context.Context, id strin
 // anonymousLinkMutationAllowed is the links counterpart of anonymousNoteMutationAllowed
 // (see GetLink's VisibleTo check for the read-path symmetry).
 func (h *OgenHandler) anonymousLinkMutationAllowed(ctx context.Context, id string) bool {
-	if !h.accountsEnabled() || callerIDFromCtx(ctx) != uuid.Nil {
+	if !h.accountsEnabled() || middleware.CallerIDFromCtx(ctx) != uuid.Nil {
 		return true
 	}
 

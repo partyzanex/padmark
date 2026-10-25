@@ -28,8 +28,8 @@ const (
 // Domain=example.com. The browser then sends two cookies with the same name, ordered by RFC 6265
 // §5.4 (longer Path first, then earlier creation time), so an attacker who picks a longer Path
 // (e.g. Path=/admin) — or simply plants the cookie first — controls which one comes first.
-// net/http's Request.Cookie returns the FIRST same-name cookie, and that is what csrfGuard and
-// extractSessionID read. Neither cookie uses the __Host- prefix, which is what would stop a
+// net/http's Request.Cookie returns the FIRST same-name cookie, and that is what CSRFGuard and
+// ExtractSessionID read. Neither cookie uses the __Host- prefix, which is what would stop a
 // sibling subdomain from setting them at all.
 type DuplicateCookieSuite struct {
 	suite.Suite
@@ -128,7 +128,7 @@ func sessionCookieValue(value string) *http.Cookie {
 // bound to a session, so any issued token validates for any victim), tosses it as padmark_csrf
 // from a sibling subdomain so it precedes the victim's host-only cookie, and auto-submits a form
 // carrying the same token. The victim's SameSite=Strict session cookie is sent (sibling
-// subdomains are same-site), csrfGuard compares the FIRST cookie with the field, both are the
+// subdomains are same-site), CSRFGuard compares the FIRST cookie with the field, both are the
 // attacker's — and the admin action runs.
 //
 // Desired: an ambiguous request carrying more than one padmark_csrf cookie is refused, so the
@@ -145,7 +145,7 @@ func (s *DuplicateCookieSuite) TestDuplicateCSRFCookie_AttackerFirst_Rejected() 
 }
 
 // TestDuplicateCSRFCookie_VictimFirst_Rejected pins the other order: when the victim's own cookie
-// comes first, the attacker's form token does not match it and csrfGuard refuses — the attack
+// comes first, the attacker's form token does not match it and CSRFGuard refuses — the attack
 // depends entirely on winning the cookie order.
 func (s *DuplicateCookieSuite) TestDuplicateCSRFCookie_VictimFirst_Rejected() {
 	attackerToken := adhttp.GenerateCSRFTokenForTest(authTestCSRFSecret)
@@ -164,7 +164,7 @@ func (s *DuplicateCookieSuite) TestDuplicateCSRFCookie_VictimFirst_Rejected() {
 // the victim then creates are owned by — and readable to — the attacker.
 //
 // Desired: the attacker-planted (first) session is never the one the server resolves. Today
-// extractSessionID → r.Cookie returns it and GetSession is called with it.
+// ExtractSessionID → r.Cookie returns it and GetSession is called with it.
 func (s *DuplicateCookieSuite) TestDuplicateSessionCookie_AttackerFirst_NotResolved() {
 	req := httptest.NewRequest(http.MethodGet, "/change-password", nil)
 	req.AddCookie(sessionCookieValue(dupAttackerSession))

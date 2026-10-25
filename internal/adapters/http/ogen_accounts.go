@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/partyzanex/padmark/internal/adapters/http/middleware"
 	"github.com/partyzanex/padmark/internal/domain"
 )
 
@@ -35,10 +36,10 @@ func (h *OgenHandler) apiTokenEnvelope(ctx context.Context, plain string) (strin
 }
 
 // requestBaseURL returns `<scheme>://<host>` of the incoming request, taken from the
-// withRequestOrigin middleware (ogen handlers receive only a context). Unreachable when the
+// WithRequestOrigin middleware (ogen handlers receive only a context). Unreachable when the
 // middleware is installed; failing beats handing out a link with an unusable base URL.
 func requestBaseURL(ctx context.Context) (string, error) {
-	origin := originFromCtx(ctx)
+	origin := middleware.OriginFromCtx(ctx)
 	if origin.Host == "" {
 		return "", errors.New("request origin unavailable")
 	}

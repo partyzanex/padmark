@@ -1,4 +1,4 @@
-package http
+package middleware
 
 import (
 	"net/http"
@@ -15,7 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// loginLockFixture wraps a stub login handler with withLoginLockout on a fake clock. The stub
+// loginLockFixture wraps a stub login handler with WithLoginLockout on a fake clock. The stub
 // "signs in" (sets the session cookie) when the form's code is "ok" and fails otherwise,
 // mirroring TOTPLoginHandler's 303-for-both-outcomes behaviour.
 type loginLockFixture struct {
@@ -30,7 +30,7 @@ func newLoginLockFixture() *loginLockFixture {
 		fix.upstream.Add(1)
 
 		if r.FormValue("code") == "ok" {
-			http.SetCookie(w, &http.Cookie{Name: sessionCookieName, Value: "sess", MaxAge: 60}) //nolint:gosec // test
+			http.SetCookie(w, &http.Cookie{Name: SessionCookieName, Value: "sess", MaxAge: 60}) //nolint:gosec // test
 			http.Redirect(w, r, "/", http.StatusSeeOther)
 
 			return
@@ -38,7 +38,7 @@ func newLoginLockFixture() *loginLockFixture {
 
 		http.Redirect(w, r, "/login?error=1", http.StatusSeeOther)
 	}
-	fix.handler = withLoginLockout(newLoginLockout(fix.clock), testDiscardLog, stub)
+	fix.handler = WithLoginLockout(NewLoginLockout(fix.clock), testDiscardLog, stub)
 
 	return fix
 }
@@ -129,9 +129,9 @@ func TestSessionIssued(t *testing.T) {
 		want   bool
 	}{
 		//nolint:gosec // G124: test cookie, attributes irrelevant to sessionIssued
-		"live session": {cookie: &http.Cookie{Name: sessionCookieName, Value: "s", MaxAge: 60}, want: true},
+		"live session": {cookie: &http.Cookie{Name: SessionCookieName, Value: "s", MaxAge: 60}, want: true},
 		//nolint:gosec // G124: test cookie, attributes irrelevant to sessionIssued
-		"session delete": {cookie: &http.Cookie{Name: sessionCookieName, Value: "", MaxAge: -1}, want: false},
+		"session delete": {cookie: &http.Cookie{Name: SessionCookieName, Value: "", MaxAge: -1}, want: false},
 		//nolint:gosec // G124: test cookie, attributes irrelevant to sessionIssued
 		"other cookie": {cookie: &http.Cookie{Name: "padmark_csrf", Value: "tok"}, want: false},
 		"no cookie":    {cookie: nil, want: false},

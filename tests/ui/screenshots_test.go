@@ -69,14 +69,39 @@ func (sess *uiSession) stableScreenshot(name string, options playwright.PageScre
 		next, captureErr := sess.page.Screenshot(options)
 		sess.must(captureErr)
 
-		if bytes.Equal(actual, next) {
+		if bytes.Equal(actual, next) || sess.sameScreenshot(actual, next) {
 			return next
+		}
+
+		if !time.Now().Before(deadline) {
+			sess.must(os.WriteFile(filepath.Join(sess.artifacts, name+".unstable-before.png"), actual, 0o600))
+			sess.must(os.WriteFile(filepath.Join(sess.artifacts, name+".unstable-after.png"), next, 0o600))
 		}
 
 		require.True(sess.t, time.Now().Before(deadline), "screenshot %s did not stabilize", name)
 
 		actual = next
 	}
+}
+
+// sameScreenshot ignores only the antialiasing noise already excluded by snapshot comparisons.
+// Full-page mobile captures can rasterize a rounded border a little differently between frames.
+func (sess *uiSession) sameScreenshot(previous, next []byte) bool {
+	sess.t.Helper()
+
+	previousImage, err := png.Decode(bytes.NewReader(previous))
+	sess.must(err)
+	nextImage, err := png.Decode(bytes.NewReader(next))
+	sess.must(err)
+
+	if previousImage.Bounds() != nextImage.Bounds() {
+		return false
+	}
+
+	count, err := pixelmatch.MatchPixel(previousImage, nextImage, pixelmatch.Threshold(0.2))
+	sess.must(err)
+
+	return count == 0
 }
 
 // compareScreenshot fails the test when the capture differs from the reference image.

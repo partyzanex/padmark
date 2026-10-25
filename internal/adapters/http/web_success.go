@@ -1,20 +1,23 @@
 package http
 
 import (
+	_ "embed"
 	"net/http"
 	"time"
 
-	_ "embed"
+	"github.com/partyzanex/padmark/internal/adapters/http/middleware"
 )
 
 //go:embed templates/success.html
 var successTmplSrc string
 
 type successViewData struct {
+	ID               string
 	URL              string
 	ExpiresLabel     string
 	Nonce            string
 	BurnAfterReading bool
+	IsLink           bool
 }
 
 // SuccessPage handles GET /success and renders the post-create confirmation page.
@@ -35,6 +38,12 @@ func (h *PageHandler) SuccessPage(w http.ResponseWriter, r *http.Request) {
 	// page via html/template (escaped, no injection) for the user to copy — it is never emailed
 	// or used server-side. Add allowed-host validation here if absolute links ever leave the page.
 	noteURL := scheme + "://" + r.Host + "/" + id
+
+	isLink := query.Get("kind") == "link"
+	if isLink {
+		noteURL = scheme + "://" + r.Host + "/r/" + id
+	}
+
 	burn := query.Get("burn") == "1"
 
 	expiresLabel := "never expires"
@@ -43,6 +52,9 @@ func (h *PageHandler) SuccessPage(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case raw == "immediately":
 		expiresLabel = "burns immediately after reading"
+		if isLink {
+			expiresLabel = "burns after the first click"
+		}
 	case raw != "":
 		parsed, err := time.Parse(time.RFC3339, raw)
 		if err == nil {
@@ -53,10 +65,12 @@ func (h *PageHandler) SuccessPage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
 	err := h.successTmpl.Execute(w, successViewData{
+		ID:               id,
 		URL:              noteURL,
 		ExpiresLabel:     expiresLabel,
 		BurnAfterReading: burn,
-		Nonce:            nonceFromContext(r.Context()),
+		Nonce:            middleware.NonceFromContext(r.Context()),
+		IsLink:           isLink,
 	})
 	if err != nil {
 		h.log.ErrorContext(r.Context(), "render success template", "err", err)

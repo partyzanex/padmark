@@ -97,7 +97,7 @@ info:
     fetch (`Sec-Fetch-Dest` other than `document`/`empty`, e.g. `<img src="/r/{id}">`) gets
     `409` (`code: burn_read_not_explicit`) and leaves the link intact, so link unfurlers and
     mail scanners cannot burn it. Ordinary links redirect any client as before.
-  version: 1.0.0
+  version: 0.4.0
 
 servers:
   - url: http://localhost:8080

@@ -1,28 +1,28 @@
 package http
 
 import (
+	_ "embed"
 	"errors"
 	"fmt"
 	"html/template"
 	"net/http"
 
+	"github.com/partyzanex/padmark/internal/adapters/http/middleware"
 	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/usecases/links"
-
-	_ "embed"
 )
 
 //go:embed templates/redirect.html
 var redirectTmplSrc string
 
-// LinkHandler serves the browser-facing short-link redirect route (GET /r/{id}). The JSON API
-// operations (POST /links, GET/DELETE /links/{id}) are served by OgenHandler instead — see
-// ogen_link.go — mirroring how NoteHandler and OgenHandler split notes' browser and API surfaces.
+// LinkHandler serves the browser's link editor and redirect routes. OgenHandler serves
+// the JSON API, mirroring the split between note pages and note API operations.
 type LinkHandler struct {
 	*common
 
 	manager LinkManager
 	tmpl    *template.Template
+	editor  *template.Template
 
 	// directRedirect selects GET /r/{id}'s response mode: true issues an immediate 301 to the
 	// target URL, false renders the interstitial (redirect.html). Set via Handler.WithDirectRedirect
@@ -31,19 +31,22 @@ type LinkHandler struct {
 	directRedirect bool
 }
 
-func newLinkHandler(c *common, manager LinkManager, tmpl *template.Template) *LinkHandler {
+func newLinkHandler(c *common, manager LinkManager, tmpl, editor *template.Template) *LinkHandler {
 	return &LinkHandler{
 		common:  c,
 		manager: manager,
 		tmpl:    tmpl,
+		editor:  editor,
 		// directRedirect zero = false = interstitial mode; WithDirectRedirect overrides at router build.
 		directRedirect: false,
 	}
 }
 
-// RegisterRoutes registers the short-link redirect route.
+// RegisterRoutes registers creation/editing pages and the short-link redirect route.
 func (h *LinkHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /r/{id}", h.Redirect)
+	mux.HandleFunc("GET /links", h.CreateLinkPage)
+	mux.HandleFunc("GET /links/{id}/edit", h.EditLinkPage)
 }
 
 type redirectViewData struct {
@@ -91,7 +94,7 @@ func (h *LinkHandler) Redirect(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
-	data := redirectViewData{TargetURL: link.TargetURL, Nonce: nonceFromContext(r.Context())}
+	data := redirectViewData{TargetURL: link.TargetURL, Nonce: middleware.NonceFromContext(r.Context())}
 
 	execErr := h.tmpl.Execute(w, data)
 	if execErr != nil {
@@ -105,7 +108,7 @@ func (h *LinkHandler) Redirect(w http.ResponseWriter, r *http.Request) {
 func (h *LinkHandler) followLink(r *http.Request, id string) (*domain.Link, error) {
 	if h.authMgr != nil {
 		link, err := h.manager.Follow(r.Context(), id, links.FollowOptions{
-			CallerID: callerIDFromCtx(r.Context()), Authenticated: h.isAuthenticated(r), AllowBurn: explicitRead(r),
+			CallerID: middleware.CallerIDFromCtx(r.Context()), Authenticated: h.isAuthenticated(r), AllowBurn: explicitRead(r),
 		})
 		if err != nil {
 			return nil, fmt.Errorf("follow link: %w", err)

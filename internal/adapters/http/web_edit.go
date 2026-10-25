@@ -2,9 +2,10 @@ package http
 
 import (
 	"net/http"
-
-	"github.com/partyzanex/padmark/internal/domain"
 	"time"
+
+	"github.com/partyzanex/padmark/internal/adapters/http/middleware"
+	"github.com/partyzanex/padmark/internal/domain"
 )
 
 // EditPage handles GET /edit/{id} and renders the note editor pre-filled with existing content.
@@ -49,7 +50,7 @@ func (h *NoteHandler) EditPage(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
-	usr := userFromContext(r)
+	usr := middleware.UserFromContext(r)
 	isOwner := usr != nil && note.OwnedBy(usr.ID)
 
 	err = h.indexTmpl.Execute(w, editorViewData{
@@ -62,7 +63,7 @@ func (h *NoteHandler) EditPage(w http.ResponseWriter, r *http.Request) {
 		BurnAfterReading: note.BurnAfterReading || note.BurnTTL > 0,
 		Privacy:          string(note.EffectivePrivacy()),
 		PrivacyOptions:   privacyOptions(h.authMgr != nil, h.signedIn(r), note.EffectivePrivacy()),
-		Nonce:            nonceFromContext(r.Context()),
+		Nonce:            middleware.NonceFromContext(r.Context()),
 		IsOwner:          isOwner,
 	})
 	if err != nil {

@@ -1,101 +1,17 @@
 package http
 
 import (
-	"context"
 	"crypto/rand"
-	"encoding/base64"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
-	"net/url"
-	"strings"
 	"time"
 
-	"github.com/google/uuid"
-
+	"github.com/partyzanex/padmark/internal/adapters/http/middleware"
 	"github.com/partyzanex/padmark/internal/adapters/http/ogenapi"
 	"github.com/partyzanex/padmark/internal/domain"
 )
-
-type contextKey uint8
-
-const (
-	keyRequestID contextKey = 1
-	keyNonce     contextKey = 2
-	keyUser      contextKey = 3
-	keyCSRF      contextKey = 4
-	keyLogUser   contextKey = 5
-	keyAPIToken  contextKey = 6
-)
-
-// logUser is a request-scoped holder the auth layer fills with the resolved identity so the
-// outer logging middleware can report it. A pointer is used because withLogging runs OUTSIDE
-// the auth middleware: the user set via r.WithContext downstream is not visible on the logger's
-// request, but a shared pointer installed before next() is mutated in place and read after.
-type logUser struct {
-	name  string
-	admin bool
-}
-
-// setLogUser records the identity for the request log, if the holder is present.
-func setLogUser(ctx context.Context, name string, admin bool) {
-	if lu, ok := ctx.Value(keyLogUser).(*logUser); ok {
-		lu.name = name
-		lu.admin = admin
-	}
-}
-
-func nonceFromContext(ctx context.Context) string {
-	v, _ := ctx.Value(keyNonce).(string)
-
-	return v
-}
-
-const protoHTTPS = "https"
-
-// protoHTTP is the non-TLS URL scheme, paired with protoHTTPS when building absolute links.
-const protoHTTP = "http"
-
-// requestScheme returns the URL scheme ("http" or "https") to use when building absolute links
-// back to this server: the operator-forced override when set (--public-scheme, see
-// Handler.WithForcedScheme), otherwise the auto-detected value from isHTTPS.
-func requestScheme(r *http.Request, forcedScheme string, trustedProxies []*net.IPNet) string {
-	if forcedScheme != "" {
-		return forcedScheme
-	}
-
-	if isHTTPS(r, "", trustedProxies) {
-		return protoHTTPS
-	}
-
-	return protoHTTP
-}
-
-// isHTTPS reports whether the request must be treated as HTTPS — the decision behind the
-// cookie Secure attribute and HSTS. An operator-forced "https" (--public-scheme) is honoured
-// unconditionally: that flag is the recommended setup behind a TLS-terminating load balancer
-// whose address is not stable enough for --trusted-proxies, so the request itself arrives as
-// plain HTTP with no trustworthy X-Forwarded-Proto. Any other forcedScheme falls back to
-// detection — a forced "http" only affects link building and never strips Secure from a
-// cookie that really is travelling over TLS. X-Forwarded-Proto is only trusted when the remote
-// address belongs to a trusted proxy; spoofed headers from untrusted clients are ignored.
-func isHTTPS(r *http.Request, forcedScheme string, trustedProxies []*net.IPNet) bool {
-	if forcedScheme == protoHTTPS || r.TLS != nil {
-		return true
-	}
-
-	if len(trustedProxies) == 0 {
-		return false
-	}
-
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		host = r.RemoteAddr
-	}
-
-	return isTrustedProxy(host, trustedProxies) && r.Header.Get("X-Forwarded-Proto") == protoHTTPS
-}
 
 // RouterOptions holds configurable parameters for the middleware stack.
 type RouterOptions struct {
@@ -108,7 +24,7 @@ type RouterOptions struct {
 	CSRFSecret     []byte
 	// AllowedHosts is the Host header allow-list for the main listener (--allowed-hosts). When
 	// non-empty, any other Host is refused with 421 before a handler runs; empty disables the
-	// check. See withAllowedHosts.
+	// check. See WithAllowedHosts.
 	AllowedHosts []string
 	MaxBodyBytes int
 	RateLimit    int
@@ -120,7 +36,7 @@ type RouterOptions struct {
 	SessionTTL time.Duration
 	// DisableAPI turns off the REST/JSON API surface (/notes*, /api, /api/openapi.yaml): every
 	// request reaching the disabling middleware gets 503 with code=api_disabled. The web UI and
-	// /healthz, /readyz keep working — see withAPIDisabled.
+	// /healthz, /readyz keep working — see WithAPIDisabled.
 	DisableAPI bool
 	// DirectRedirect selects GET /r/{id}'s response mode: true issues an immediate 301 to the
 	// short link's target URL, false renders a transparency interstitial. See LinkHandler.Redirect.
@@ -144,10 +60,11 @@ type RouteRegistrar interface {
 // single cache keyed by path ID plus caller works since notes and links share one global slug
 // namespace (a note and a link can never have the same ID, see domain.HashSlug/ErrSlugConflict).
 func registerOgenRoutes(
-	mux *http.ServeMux, ogenSrv http.Handler, lockout *failLockoutCache, trustedProxies []*net.IPNet, log *slog.Logger,
+	mux *http.ServeMux, ogenSrv http.Handler, lockout *middleware.FailLockoutCache,
+	trustedProxies []*net.IPNet, log *slog.Logger,
 ) {
 	locked := func(next http.Handler) http.Handler {
-		return requireSameOrigin(log, withFailLockout(lockout, trustedProxies, log, next))
+		return middleware.RequireSameOrigin(log, middleware.WithFailLockout(lockout, trustedProxies, log, next))
 	}
 
 	mux.Handle("POST /notes", ogenSrv)
@@ -164,8 +81,8 @@ func registerOgenRoutes(
 	// same-origin requests. POST /notes, POST /links and POST /links/bulk are deliberately not
 	// wrapped: they accept only JSON bodies (a cross-site JSON POST forces a CORS preflight the
 	// server never answers) and the session cookie is SameSite=Strict.
-	mux.Handle("POST /api/tokens", requireSameOrigin(log, ogenSrv))
-	mux.Handle("POST /api/invites", requireSameOrigin(log, ogenSrv))
+	mux.Handle("POST /api/tokens", middleware.RequireSameOrigin(log, ogenSrv))
+	mux.Handle("POST /api/invites", middleware.RequireSameOrigin(log, ogenSrv))
 }
 
 // registerAllRoutes registers the ogen-served REST API routes plus every concern handler's own
@@ -235,46 +152,46 @@ func NewRouter(
 func wrapMiddleware(
 	mux http.Handler, handler *Handler, opts *RouterOptions, csrfSecret []byte,
 ) http.Handler {
-	var checker sessionChecker
+	var checker middleware.SessionChecker
 	if handler.authMgr != nil {
 		checker = handler.authMgr
 	}
 
-	stack := withRecovery(handler.log, mux)
-	stack = withRequestOrigin(opts.ForcedScheme, opts.TrustedProxies, stack)
+	stack := middleware.WithRecovery(handler.log, mux)
+	stack = middleware.WithRequestOrigin(opts.ForcedScheme, opts.TrustedProxies, stack)
 
 	if opts.DisableAPI {
-		stack = withAPIDisabled(handler.log, stack)
+		stack = middleware.WithAPIDisabled(handler.log, stack)
 	}
 
-	stack = newAuthMiddleware(buildNamedRoutes(), checker, stack)
-	stack = withCSRFToken(csrfSecret, opts.ForcedScheme, opts.TrustedProxies, stack)
+	stack = middleware.NewAuthMiddleware(buildNamedRoutes(), checker, stack)
+	stack = middleware.WithCSRFToken(csrfSecret, opts.ForcedScheme, opts.TrustedProxies, stack)
 
-	stack = withBodyLimit(int64(opts.MaxBodyBytes), stack)
+	stack = middleware.WithBodyLimit(int64(opts.MaxBodyBytes), stack)
 
 	if opts.RateLimit > 0 {
-		stack = withRateLimit(opts.RateLimit, opts.RateBurst, opts.TrustedProxies, handler.log, stack)
+		stack = middleware.WithRateLimit(opts.RateLimit, opts.RateBurst, opts.TrustedProxies, handler.log, stack)
 	}
 
-	// Only meaningful when nothing is trusted — see warnUnconfiguredProxy.
+	// Only meaningful when nothing is trusted — see WarnUnconfiguredProxy.
 	if len(opts.TrustedProxies) == 0 {
-		stack = warnUnconfiguredProxy(handler.log, stack)
+		stack = middleware.WarnUnconfiguredProxy(handler.log, stack)
 	}
 
 	// Outside every stateful layer (auth, CSRF, rate limit) so a forged Host is refused before
 	// any of them runs, yet inside security headers, logging and the request ID so the refusal
 	// is still logged and carries them.
-	stack = withAllowedHosts(opts.AllowedHosts, stack)
+	stack = middleware.WithAllowedHosts(opts.AllowedHosts, stack)
 
-	stack = withSecurityHeaders(opts.ForcedScheme, opts.TrustedProxies, stack)
-	stack = withLogging(handler.log, stack)
-	stack = withRequestID(stack)
+	stack = middleware.WithSecurityHeaders(opts.ForcedScheme, opts.TrustedProxies, stack)
+	stack = middleware.WithLogging(handler.log, stack)
+	stack = middleware.WithRequestID(stack)
 
-	// Second, outermost recovery layer: the inner withRecovery above only covers mux, so a
+	// Second, outermost recovery layer: the inner WithRecovery above only covers mux, so a
 	// panic in any middleware between it and here (auth, CSRF, rate-limit, security-headers,
 	// logging, request-ID) would otherwise fall through to net/http's bare per-connection
 	// recovery, which drops the response body and skips structured logging entirely.
-	return withRecovery(handler.log, stack)
+	return middleware.WithRecovery(handler.log, stack)
 }
 
 // buildNamedRoutes returns the set of first path segments that name built-in routes rather than
@@ -290,257 +207,4 @@ func wrapMiddleware(
 // literal paths.
 func buildNamedRoutes() map[string]struct{} {
 	return domain.ReservedSlugPrefixes()
-}
-
-// requireSameOrigin rejects a request that explicitly announces a foreign origin. Machine
-// clients (CLI, agents, curl) send no Origin header; a browser's cross-site POST always sends
-// one (CORS semantics), so comparing it with the request's own origin closes cookie-CSRF for
-// the routes it wraps — session-authenticated account endpoints and note/link PUT/DELETE;
-// SameSite alone admits sibling-subdomain calls. It is not applied to every mutation: the
-// JSON-only creation routes (POST /notes, /links, /links/bulk) rely on the CORS preflight a
-// cross-site JSON POST triggers plus the SameSite=Strict session cookie instead (see
-// registerOgenRoutes). A missing Origin is allowed for non-browser clients.
-func requireSameOrigin(log *slog.Logger, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if origin := r.Header.Get("Origin"); origin != "" && !sameOrigin(r, origin) {
-			writeJSONErrorStatus(w, r, log, http.StatusForbidden, "cross-origin request rejected")
-
-			return
-		}
-
-		next.ServeHTTP(w, r)
-	})
-}
-
-// sameOrigin reports whether origin matches the origin the request itself arrived with: hosts
-// must be equal (case-insensitively — Host is the strong gate, a sibling subdomain can never
-// match), and when the requestOrigin middleware has stored a scheme, schemes must match too.
-func sameOrigin(r *http.Request, origin string) bool {
-	parsed, err := url.Parse(origin)
-	if err != nil || parsed.Host == "" || parsed.Scheme == "" {
-		return false
-	}
-
-	if !strings.EqualFold(parsed.Host, r.Host) {
-		return false
-	}
-
-	if ctxOrigin := originFromCtx(r.Context()); ctxOrigin.Host != "" {
-		return strings.EqualFold(parsed.Scheme, ctxOrigin.Scheme)
-	}
-
-	return true
-}
-
-// requestOrigin carries the scheme+host a request arrived with. Ogen handlers receive only a
-// context, and two of the account operations embed the server's base URL into their one-time
-// responses — the pmk_… token envelope and the invite link. The HTML admin panel builds the
-// same pair from the request directly (web_admin.go); this middleware is its context-borne
-// counterpart.
-type requestOrigin struct {
-	Scheme string
-	Host   string
-}
-
-type originCtxKey struct{}
-
-// withRequestOrigin stores the request's origin in the context. forcedScheme is the
-// operator-forced override (Handler.WithForcedScheme); an empty value defers to
-// requestScheme's TLS/X-Forwarded-Proto detection — same rules as common.scheme.
-func withRequestOrigin(forcedScheme string, trustedProxies []*net.IPNet, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		origin := requestOrigin{Scheme: requestScheme(r, forcedScheme, trustedProxies), Host: r.Host}
-
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), originCtxKey{}, origin)))
-	})
-}
-
-// originFromCtx returns the stored request origin; zero-valued when the middleware is not
-// installed (callers treat that as an error rather than minting a URL with a broken base).
-func originFromCtx(ctx context.Context) requestOrigin {
-	origin, _ := ctx.Value(originCtxKey{}).(requestOrigin)
-
-	return origin
-}
-
-func withRequestID(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		id := uuid.NewString()
-		w.Header().Set("X-Request-ID", id)
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), keyRequestID, id)))
-	})
-}
-
-type statusRecorder struct {
-	http.ResponseWriter
-
-	status  int
-	written bool
-}
-
-func (sr *statusRecorder) WriteHeader(status int) {
-	if sr.written {
-		return
-	}
-
-	sr.status = status
-	sr.written = true
-	sr.ResponseWriter.WriteHeader(status)
-}
-
-func (sr *statusRecorder) Write(b []byte) (int, error) {
-	if !sr.written {
-		sr.status = http.StatusOK
-		sr.written = true
-	}
-
-	n, err := sr.ResponseWriter.Write(b)
-	if err != nil {
-		return n, fmt.Errorf("write response: %w", err)
-	}
-
-	return n, nil
-}
-
-func withLogging(log *slog.Logger, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
-		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK, written: false}
-
-		// Install the identity holder so the (inner) auth layer can record who the request
-		// resolved to; it stays anonymous when no auth runs or no valid session is present.
-		// Only the request passed downstream carries the holder; the original r.Context() is
-		// kept for logging (inherited context, preserves the request ID).
-		holder := &logUser{name: "", admin: false}
-		rr := r.WithContext(context.WithValue(r.Context(), keyLogUser, holder))
-
-		next.ServeHTTP(rec, rr)
-
-		level := slog.LevelInfo
-		if strings.HasPrefix(r.URL.Path, "/static/") {
-			level = slog.LevelDebug
-		}
-
-		user := "-"
-		if holder.name != "" {
-			user = holder.name
-		}
-
-		// remote is the immediate peer (the proxy/LB IP when behind one); xff is the
-		// X-Forwarded-For chain the proxy sent; user/admin is the resolved identity ("-" when
-		// anonymous). These make trusted-proxy and auth debugging possible without shell access.
-		// Only built-in route names are safe to log; the first segment of /{slug}
-		// is itself secret key material for legacy content.
-		attrs := []any{
-			"method", r.Method,
-			"status", rec.status,
-			"duration", time.Since(start),
-			"remote", r.RemoteAddr,
-			"xff", r.Header.Get("X-Forwarded-For"),
-			"user", user,
-			"admin", holder.admin,
-			"route", logRoute(r.URL.Path),
-		}
-
-		// Debug correlation also uses a digest, never the plaintext path or query string.
-		if log.Enabled(r.Context(), slog.LevelDebug) {
-			attrs = append(attrs, "path_hash", domain.HashSlug(r.URL.Path))
-		}
-
-		log.Log(r.Context(), level, "http", attrs...)
-	})
-}
-
-// logRoute reports a built-in route name or a constant label for note slug paths.
-func logRoute(path string) string {
-	trimmed := strings.TrimPrefix(path, "/")
-	if trimmed == "" {
-		return ""
-	}
-
-	if first, reserved := domain.FirstSegmentReserved(trimmed); reserved {
-		return first
-	}
-
-	return "note"
-}
-
-func withBodyLimit(maxBytes int64, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Body != nil && r.ContentLength != 0 {
-			r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
-		}
-
-		next.ServeHTTP(w, r)
-	})
-}
-
-func withStaticCacheControl(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cache-Control", "public, max-age=86400")
-		next.ServeHTTP(w, r)
-	})
-}
-
-// buildCSP assembles the Content-Security-Policy applied to every response, the /api docs page
-// included: scripts come only from the app origin ('self', e.g. the vendored Redoc bundle under
-// /static/) or carry the per-request nonce — no third-party origin is ever allowed.
-func buildCSP(nonce string) string {
-	return "default-src 'self'; " +
-		"script-src 'self' 'nonce-" + nonce + "'; " +
-		"style-src 'self' 'nonce-" + nonce + "'; " +
-		"font-src 'self'; " +
-		"img-src 'self' data:; " +
-		"connect-src 'self'; " +
-		// default-src does not cover these: block <base> hijacking of relative URLs, forms posting
-		// off-origin, framing (clickjacking; supersedes X-Frame-Options) and plugin content.
-		"base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'"
-}
-
-// withSecurityHeaders sets the hardening headers on every response. HSTS is emitted only when
-// the request counts as HTTPS (see isHTTPS: direct TLS, a trusted proxy's X-Forwarded-Proto, or
-// a forced "https" scheme) — sending it over plain HTTP would be ignored by browsers anyway.
-func withSecurityHeaders(forcedScheme string, trustedProxies []*net.IPNet, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var b [16]byte
-
-		_, err := rand.Read(b[:])
-		if err != nil {
-			http.Error(w, "internal server error", http.StatusInternalServerError)
-
-			return
-		}
-
-		nonce := base64.StdEncoding.EncodeToString(b[:])
-		r = r.WithContext(context.WithValue(r.Context(), keyNonce, nonce))
-
-		header := w.Header()
-		header.Set("Cache-Control", "private, no-store")
-		header.Set("X-Content-Type-Options", "nosniff")
-		header.Set("X-Frame-Options", "DENY")
-		header.Set("Referrer-Policy", "strict-origin-when-cross-origin")
-		header.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
-		header.Set("Content-Security-Policy", buildCSP(nonce))
-
-		if isHTTPS(r, forcedScheme, trustedProxies) {
-			header.Set("Strict-Transport-Security", "max-age=63072000; includeSubDomains")
-		}
-
-		next.ServeHTTP(w, r)
-	})
-}
-
-func withRecovery(log *slog.Logger, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx := r.Context()
-
-		defer func() {
-			if p := recover(); p != nil {
-				log.ErrorContext(ctx, "panic recovered", "panic", p)
-				http.Error(w, "internal server error", http.StatusInternalServerError)
-			}
-		}()
-
-		next.ServeHTTP(w, r)
-	})
 }

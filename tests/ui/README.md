@@ -7,10 +7,12 @@ downloaded tools and reports live under `tests/ui/`. The test server binary and 
 server's database and keyring go to the system temporary directory and are removed
 after the run.
 
-The suite has 19 scenarios, each run on desktop (1280 × 900) and mobile (390 × 844):
-38 browser checks in total. They cover field entry, editor formatting, validation,
+Every scenario runs on desktop (1280 × 900) and mobile (390 × 844).
+They cover field entry, editor formatting, validation,
 publish/save, clipboard actions, raw view, burn confirmation, theme persistence,
-setup/login, password changes, admin invites, keys and user revocation.
+setup/login, password changes, admin invites, keys and user revocation. Link scenarios cover
+creation, validation, failure/retry, editing/deletion, expiry preservation/reset, redirect
+settings, burn after click and owner-only access to the editor.
 
 Each scenario starts a real Padmark server with its own temporary SQLite database,
 keyring and browser context. Inherited `PADMARK_*` settings are removed from the
@@ -32,7 +34,7 @@ already includes those libraries and the matching browser.
 
 ```sh
 make test-ui-setup        # Download Go dependencies, driver and Chromium (first run)
-make test-ui              # All 38 checks, including screenshots
+make test-ui              # All browser checks, including screenshots
 make test-ui-headed       # Watch the Chromium window (screenshots are not compared)
 make test-ui-debug        # Step through actions in the Playwright Inspector
 make test-ui-update       # Update references after an intentional design change
@@ -59,8 +61,8 @@ with `-headed` is refused for the same reason.
 
 ## Writing scenarios
 
-Scenarios are ordinary Go functions in `editor_test.go` and `accounts_test.go`.
-Add a case to `TestEditor` or `TestAccounts`; `runScenarios` runs it at both screen
+Scenarios are ordinary Go functions in `editor_test.go`, `links_test.go` and `accounts_test.go`.
+Add a case to `TestEditor`, `TestLinks` or `TestAccounts`; `runScenarios` runs it at both screen
 sizes with a fresh server, context, diagnostics and failure artifacts.
 
 ```go

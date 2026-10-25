@@ -16,6 +16,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/partyzanex/padmark/internal/adapters/http/middleware"
 	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/usecases/auth"
 	"github.com/partyzanex/padmark/internal/usecases/links"
@@ -184,21 +185,21 @@ func (c *common) sessionMaxAge() time.Duration {
 
 // guard wraps next with CSRF verification using the secret set via Handler.WithCSRFSecret.
 func (c *common) guard(next http.HandlerFunc) http.HandlerFunc {
-	return csrfGuard(c.csrfSecret, next)
+	return middleware.CSRFGuard(c.csrfSecret, next)
 }
 
 // scheme returns the scheme ("http" or "https") to use when building absolute links back to
 // this server: the operator-forced override when set (--public-scheme), otherwise the
-// auto-detected value from TLS/X-Forwarded-Proto (see requestScheme).
+// auto-detected value from TLS/X-Forwarded-Proto (see RequestScheme).
 func (c *common) scheme(r *http.Request) string {
-	return requestScheme(r, c.forcedScheme, c.trustedProxies)
+	return middleware.RequestScheme(r, c.forcedScheme, c.trustedProxies)
 }
 
 // isHTTPS reports whether cookies issued for this request must carry the Secure attribute:
 // the operator-forced "https" scheme counts, as do direct TLS and a trusted proxy's
-// X-Forwarded-Proto (see the package-level isHTTPS for the precedence rules).
+// X-Forwarded-Proto (see the package-level IsHTTPS for the precedence rules).
 func (c *common) isHTTPS(r *http.Request) bool {
-	return isHTTPS(r, c.forcedScheme, c.trustedProxies)
+	return middleware.IsHTTPS(r, c.forcedScheme, c.trustedProxies)
 }
 
 // denyPrivate answers a caller that failed a resource's privacy check. Shared by
@@ -214,7 +215,7 @@ func (c *common) isHTTPS(r *http.Request) bool {
 // navigation fix.
 func (c *common) denyPrivate(w http.ResponseWriter, r *http.Request) {
 	if negotiate(r) != formatHTML {
-		writeUnauthorized(w)
+		middleware.WriteUnauthorized(w)
 
 		return
 	}
@@ -239,12 +240,12 @@ func (c *common) isAuthenticated(r *http.Request) bool {
 
 	// The auth middleware already resolved the session and stored the user in context.
 	// Reading from context avoids a redundant DB round-trip for auth-protected routes.
-	if userFromContext(r) != nil {
+	if middleware.UserFromContext(r) != nil {
 		return true
 	}
 
 	// For public routes the middleware does not run, so fall back to a direct session check.
-	if sessID := extractSessionID(r); sessID != "" {
+	if sessID := middleware.ExtractSessionID(r); sessID != "" {
 		_, err := c.authMgr.GetSession(r.Context(), sessID)
 		if err == nil {
 			return true
@@ -296,6 +297,7 @@ func NewHandler(manager NoteManager, linkManager LinkManager, log *slog.Logger) 
 	successTmpl := parseTmpl("success", successTmplSrc)
 	errorTmpl := parseTmpl("error", errorTmplSrc)
 	redirectTmpl := parseTmpl("redirect", redirectTmplSrc)
+	linkEditor := parseTmpl("link_editor", linkEditorTmplSrc)
 
 	cmn := &common{
 		log:       log,
@@ -304,7 +306,7 @@ func NewHandler(manager NoteManager, linkManager LinkManager, log *slog.Logger) 
 		// and attached later via WithAuthManager / WithForcedScheme / WithCSRFSecret /
 		// WithTrustedProxies / WithSessionTTL from the composition root. NewRouter calls all
 		// of them before the server starts serving requests — missing one is a startup bug,
-		// caught on guarded POSTs (csrfSecret=nil → csrfGuard rejects with 403).
+		// caught on guarded POSTs (csrfSecret=nil → CSRFGuard rejects with 403).
 		authMgr:        nil,
 		forcedScheme:   "",
 		csrfSecret:     nil,
@@ -317,7 +319,7 @@ func NewHandler(manager NoteManager, linkManager LinkManager, log *slog.Logger) 
 	return &Handler{
 		common:       cmn,
 		NoteHandler:  newNoteHandler(cmn, manager, noteTmpl, indexTmpl),
-		LinkHandler:  newLinkHandler(cmn, linkManager, redirectTmpl),
+		LinkHandler:  newLinkHandler(cmn, linkManager, redirectTmpl, linkEditor),
 		AuthHandler:  newAuthHandler(cmn, loginTmpl, setupTmpl, changePwTmpl),
 		AdminHandler: newAdminHandler(cmn, adminTmpl),
 		PageHandler:  newPageHandler(cmn, indexTmpl, successTmpl, apidocsTmpl),
@@ -373,7 +375,7 @@ func (h *Handler) WithTrustedProxies(proxies []*net.IPNet) *Handler {
 // WithForcedScheme overrides the scheme ("http" or "https") used when building absolute links
 // back to this server, bypassing TLS/X-Forwarded-Proto auto-detection entirely. "https" also
 // marks every request as HTTPS for the session/CSRF cookie Secure attribute and HSTS (see
-// isHTTPS), since behind a TLS-terminating proxy that is the only signal the server has. Pass an
+// IsHTTPS), since behind a TLS-terminating proxy that is the only signal the server has. Pass an
 // empty string to keep auto-detection. Called by NewRouter; do not call after the server starts.
 func (h *Handler) WithForcedScheme(scheme string) *Handler {
 	h.forcedScheme = scheme

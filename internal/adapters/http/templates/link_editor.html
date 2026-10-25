@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dim">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Padmark — {{if .EditMode}}Edit link{{else}}Create link{{end}}</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="stylesheet" href="/static/style.css?p={{styleVersion}}">
+</head>
+<body>
+<div class="wrapper wrapper--wide">
+    {{template "header"}}
+
+    <form id="linkForm" class="link-form">
+        <h1 class="link-heading">{{if .EditMode}}Edit link{{else}}Create a short link{{end}}</h1>
+        <p class="shortcut-hint">{{if .EditMode}}Update the destination and access settings without following the link.{{else}}Share a shorter URL with control over access and expiration.{{end}}</p>
+
+        <div class="field-group">
+            <label class="field-label" for="targetInput">Destination URL</label>
+            <input type="url" class="field-input" id="targetInput" placeholder="https://example.com/some/long/path" value="{{.TargetURL}}" required>
+        </div>
+
+        <div class="options-row">
+            <div class="field-group">
+                <label class="field-label" for="slugInput">Slug <span class="optional">· {{if .EditMode}}fixed{{else}}optional{{end}}</span></label>
+                <input type="text" class="field-input" id="slugInput" placeholder="my-link" value="{{.ID}}" pattern="[a-zA-Z0-9_\-]+" title="Letters, numbers, hyphens and underscores only"{{if .EditMode}} readonly{{end}}>
+            </div>
+            <div class="field-group">
+                <label class="field-label" for="editCodeInput">Edit code <span class="optional">· {{if .EditMode}}{{if .IsOwner}}optional for you{{else}}required to save{{end}}{{else}}optional{{end}}</span></label>
+                <input type="password" class="field-input" id="editCodeInput" autocomplete="off" placeholder="{{if .EditMode}}Original edit code{{else}}Leave blank to generate{{end}}"{{if not .EditMode}} minlength="8" maxlength="128"{{end}}>
+            </div>
+        </div>
+
+        <div class="options-row">
+            <div class="field-group">
+                <label class="field-label" for="privacySelect">Privacy</label>
+                <div class="select-wrap">
+                    <select class="field-select" id="privacySelect">
+                        {{range .PrivacyOptions}}<option value="{{.Value}}"{{if .Hint}} data-hint="{{.Hint}}"{{end}}{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+                    </select>
+                </div>
+                <span class="shortcut-hint" id="privacyHint"></span>
+            </div>
+            <div class="field-group">
+                <label class="field-label" for="redirectSelect">Redirect mode</label>
+                <div class="select-wrap">
+                    <select class="field-select" id="redirectSelect">
+                        <option value="inherit"{{if eq .DirectRedirect "inherit"}} selected{{end}}>Server default</option>
+                        <option value="false"{{if eq .DirectRedirect "false"}} selected{{end}}>Show destination first</option>
+                        <option value="true"{{if eq .DirectRedirect "true"}} selected{{end}}>Redirect immediately</option>
+                    </select>
+                </div>
+                <span class="shortcut-hint">Immediate redirects require an owner or server support.</span>
+            </div>
+        </div>
+
+        <div class="options-row">
+            <div class="field-group">
+                <label class="field-label" for="expirySelect">Expiration</label>
+                <div class="select-wrap">
+                    <select class="field-select" id="expirySelect">
+                        {{if .EditMode}}<option value="keep">Keep current expiration</option>{{end}}
+                        <option value="never">Never expires</option>
+                        <option value="seconds">After a duration</option>
+                    </select>
+                </div>
+                <span class="shortcut-hint" id="expiryHint">{{if .EditMode}}{{.ExpiresLabel}}{{else}}Counted from creation, independently of burn after click.{{end}}</span>
+            </div>
+            <div class="field-group" id="ttlGroup" hidden>
+                <label class="field-label" for="ttlInput">Lifetime in seconds</label>
+                <input type="number" class="field-input" id="ttlInput" min="1" max="9223372036" step="1" placeholder="86400" disabled>
+            </div>
+        </div>
+
+        <div class="burn-row">
+            <label class="burn-checkbox" id="burnLabel">
+                <input type="checkbox" id="burnCheck"{{if .BurnAfterClick}} checked{{end}}{{if .EditMode}} disabled{{end}}>
+                <span class="checkmark"></span>
+                <span class="burn-text">Burn after the first click</span>
+            </label>
+        </div>
+        {{if .EditMode}}<p class="shortcut-hint">Burn after click is fixed when the link is created.</p>{{end}}
+
+        <p id="linkError" class="link-error" role="alert" hidden></p>
+        <p id="linkStatus" class="shortcut-hint" role="status"></p>
+        <div class="publish-row">
+            <button type="submit" class="btn-publish" id="submitBtn">{{if .EditMode}}Save link{{else}}Create link{{end}}</button>
+            {{if .EditMode}}<button type="button" class="btn-ghost" id="deleteBtn">Delete link</button>{{end}}
+            <a href="/" class="btn-ghost">Create a note</a>
+        </div>
+    </form>
+</div>
+
+<script nonce="{{.Nonce}}">
+    {{template "theme-js"}}
+
+    const editMode = {{.EditMode}};
+    const linkID = {{.ID}};
+    const isOwner = {{.IsOwner}};
+    const form = document.getElementById('linkForm');
+    const submitButton = document.getElementById('submitBtn');
+    const errorBox = document.getElementById('linkError');
+    const statusBox = document.getElementById('linkStatus');
+    const privacySelect = document.getElementById('privacySelect');
+    const redirectSelect = document.getElementById('redirectSelect');
+    const expirySelect = document.getElementById('expirySelect');
+    const ttlInput = document.getElementById('ttlInput');
+    let initialPrivacy = privacySelect.value;
+    let initialRedirect = redirectSelect.value;
+
+    function updatePrivacyHint() {
+        const option = privacySelect.selectedOptions[0];
+        const hints = {public: 'Anyone can follow', authenticated: 'Requires login to follow', owner: 'Only you can follow'};
+        document.getElementById('privacyHint').textContent = option.dataset.hint || hints[option.value];
+    }
+    privacySelect.addEventListener('change', updatePrivacyHint);
+    updatePrivacyHint();
+
+    function updateExpiry() {
+        const enabled = expirySelect.value === 'seconds';
+        document.getElementById('ttlGroup').hidden = !enabled;
+        ttlInput.disabled = !enabled;
+        ttlInput.required = enabled;
+    }
+    expirySelect.addEventListener('change', updateExpiry);
+    updateExpiry();
+
+    async function apiRequest(method, path, payload, editCode) {
+        const headers = {'Content-Type': 'application/json'};
+        if (editCode) headers['X-Edit-Code'] = editCode;
+        const response = await fetch(path, {method, headers, body: payload ? JSON.stringify(payload) : undefined});
+        if (!response.ok) {
+            let message = 'Unable to save the link. Please try again.';
+            try { message = (await response.json()).message || message; } catch (_) {}
+            throw new Error(message);
+        }
+        return response.status === 204 ? null : response.json();
+    }
+
+    function showError(error) {
+        errorBox.textContent = error.message;
+        errorBox.hidden = false;
+    }
+
+    form.addEventListener('submit', async event => {
+        event.preventDefault();
+        errorBox.hidden = true;
+        statusBox.textContent = '';
+        const target = document.getElementById('targetInput').value.trim();
+        const code = document.getElementById('editCodeInput').value;
+        const slug = document.getElementById('slugInput').value.trim();
+        const payload = {target_url: target};
+        try {
+            if (!['http:', 'https:'].includes(new URL(target).protocol)) throw new Error('Use an http:// or https:// destination URL.');
+            if (editMode && !isOwner && !code) throw new Error('Edit code required');
+            if (code) payload.edit_code = code;
+            if (!editMode) {
+                if (slug) payload.slug = slug;
+                payload.burn_after_click = document.getElementById('burnCheck').checked;
+            }
+            if (!editMode || privacySelect.value !== initialPrivacy) payload.privacy = privacySelect.value;
+            if (!editMode || redirectSelect.value !== initialRedirect) {
+                payload.direct_redirect = redirectSelect.value === 'inherit' ? null : redirectSelect.value === 'true';
+            }
+            if (expirySelect.value === 'seconds') payload.ttl = Number(ttlInput.value);
+            else if (editMode && expirySelect.value === 'never') payload.ttl = null;
+
+            submitButton.disabled = true;
+            const link = await apiRequest(editMode ? 'PUT' : 'POST', '/links' + (editMode ? '/' + encodeURIComponent(linkID) : ''), payload);
+            if (editMode) {
+                initialPrivacy = privacySelect.value;
+                initialRedirect = redirectSelect.value;
+                expirySelect.value = 'keep';
+                updateExpiry();
+                document.getElementById('expiryHint').textContent = link.expires_at ? 'Expires ' + link.expires_at : 'Never expires';
+                statusBox.textContent = 'Link saved';
+            } else {
+                if (link.edit_code) sessionStorage.setItem('padmark_link_edit_' + link.id, link.edit_code);
+                const params = new URLSearchParams({kind: 'link', id: link.id});
+                if (link.burn_after_click) params.set('burn', '1');
+                if (link.expires_at) params.set('expires', link.expires_at);
+                else if (link.burn_after_click) params.set('expires', 'immediately');
+                location.href = '/success?' + params;
+            }
+        } catch (error) { showError(error); }
+        finally { submitButton.disabled = false; }
+    });
+
+    const deleteButton = document.getElementById('deleteBtn');
+    if (deleteButton) deleteButton.addEventListener('click', async () => {
+        errorBox.hidden = true;
+        const code = document.getElementById('editCodeInput').value;
+        if (!isOwner && !code) { showError(new Error('Edit code required')); return; }
+        if (!confirm('Permanently delete this link?')) return;
+        deleteButton.disabled = true;
+        submitButton.disabled = true;
+        try {
+            await apiRequest('DELETE', '/links/' + encodeURIComponent(linkID), null, code);
+            location.href = '/links';
+        } catch (error) { showError(error); }
+        finally { deleteButton.disabled = false; submitButton.disabled = false; }
+    });
+
+    document.addEventListener('keydown', event => {
+        if ((event.ctrlKey || event.metaKey) && event.key === 'Enter' && !submitButton.disabled) {
+            event.preventDefault();
+            form.requestSubmit();
+        }
+    });
+</script>
+</body>
+</html>

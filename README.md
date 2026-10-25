@@ -451,8 +451,19 @@ curl -X POST http://localhost:4000/notes \
 Interactive API docs live at `/api` (Redoc, vendored into the binary and served from `/static/` — no
 CDN fetch, works offline). Raw OpenAPI spec at `/api/openapi.yaml`. A short Markdown
 overview of the machine surface, written for agents in the llms.txt convention, at `/llms.txt`.
+The API documentation reports the application release version, also shown by `padmark-server --version`.
+Release images receive it from the Git tag during the build; source builds default to the current
+release draft (`0.4.0`). A manual Docker build can set `--build-arg APP_VERSION=0.4.0`.
 
 **Short links**
+
+Open **Links** in the header (`/links`) to create a short URL. The form includes the destination,
+optional slug/edit code, privacy, redirect mode, expiration in seconds and burn after click.
+TTL counts from creation; burn after click is independent. After creation, copy the short URL
+and the one-time edit code. **Edit link** opens `/links/{id}/edit`, where you can update or delete
+the link without following it. Saving preserves the existing expiration unless explicitly changed;
+burn after click is fixed at creation. The authenticated owner may save/delete without an edit code.
+
 ```bash
 # Create a short link
 curl -X POST http://localhost:4000/links \

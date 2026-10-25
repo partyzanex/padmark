@@ -1,11 +1,11 @@
 package http
 
 import (
+	_ "embed"
 	"html/template"
 	"net/http"
 
-	_ "embed"
-
+	"github.com/partyzanex/padmark/internal/adapters/http/middleware"
 	"github.com/partyzanex/padmark/internal/domain"
 )
 
@@ -35,10 +35,10 @@ func (h *PageHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /llms.txt", LLMsTxt)
 	// HTML pages declare /static/favicon.svg; a raw text/markdown view cannot, so the browser asks
 	// for /favicon.ico and would otherwise get a 404 from the note route.
-	mux.Handle("GET "+faviconPath, http.RedirectHandler("/static/favicon.svg", http.StatusMovedPermanently))
+	mux.Handle("GET "+middleware.FaviconPath, http.RedirectHandler("/static/favicon.svg", http.StatusMovedPermanently))
 	mux.HandleFunc("GET /{$}", h.IndexPage)
 	mux.HandleFunc("GET /success", h.SuccessPage)
-	mux.Handle("GET /static/", withStaticCacheControl(StaticHandler))
+	mux.Handle("GET /static/", middleware.WithStaticCacheControl(StaticHandler))
 }
 
 // editorViewData is shared by IndexPage (create) and EditPage (edit).
@@ -108,7 +108,7 @@ func (h *PageHandler) IndexPage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
 	err := h.indexTmpl.Execute(w, editorViewData{
-		Nonce:          nonceFromContext(r.Context()),
+		Nonce:          middleware.NonceFromContext(r.Context()),
 		Privacy:        string(domain.PrivacyPublic),
 		PrivacyOptions: privacyOptions(h.authMgr != nil, h.signedIn(r), domain.PrivacyPublic),
 		// ID/Title/Content blank — fresh editor. EditMode/BurnAfterReading/IsOwner are zero defaults

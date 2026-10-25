@@ -1,4 +1,4 @@
-package http
+package middleware
 
 import (
 	"context"
@@ -7,16 +7,17 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/partyzanex/padmark/internal/domain"
 )
 
 // TestWithFailLockout_LockedOut_ReturnsJSONError pins the OpenAPI-promised error shape
 // ({"message": ...} JSON, not net/http's default text/plain) for the 429 a locked-out note ID
-// gets — see errors.go's writeJSONErrorStatus.
+// gets — see errors.go's WriteJSONErrorStatus.
 func TestWithFailLockout_LockedOut_ReturnsJSONError(t *testing.T) {
-	cache := newFailLockoutCache()
+	cache := NewFailLockoutCache()
 
 	setErr := cache.Set(failLockoutKey{ID: "locked-note", IP: httptestRemoteIP, CallerID: uuid.Nil}, maxFailedAttempts)
 	require.NoError(t, setErr)
@@ -26,7 +27,7 @@ func TestWithFailLockout_LockedOut_ReturnsJSONError(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	handler := withFailLockout(cache, nil, testDiscardLog, inner)
+	handler := WithFailLockout(cache, nil, testDiscardLog, inner)
 
 	req := httptest.NewRequest(http.MethodPut, "/notes/locked-note", nil)
 	req.SetPathValue("id", "locked-note")
@@ -35,13 +36,12 @@ func TestWithFailLockout_LockedOut_ReturnsJSONError(t *testing.T) {
 	handler.ServeHTTP(rec, req)
 
 	assert.Equal(t, http.StatusTooManyRequests, rec.Code)
-	//nolint:testifylint // Content-Type header string, not a JSON body; JSONEq suggestion misfires on "mimeJSON"
-	assert.Equal(t, mimeJSON, rec.Header().Get("Content-Type"))
+	assert.Equal(t, "application/json", rec.Header().Get("Content-Type"))
 	assert.JSONEq(t, `{"message":"too many failed attempts, try again later"}`, rec.Body.String())
 }
 
 func TestWithFailLockout_CallerSuccessDoesNotResetOthers(t *testing.T) {
-	cache := newFailLockoutCache()
+	cache := NewFailLockoutCache()
 	first, second := uuid.New(), uuid.New()
 	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Has("success") {
@@ -50,7 +50,7 @@ func TestWithFailLockout_CallerSuccessDoesNotResetOthers(t *testing.T) {
 			w.WriteHeader(http.StatusForbidden)
 		}
 	})
-	handler := withFailLockout(cache, nil, testDiscardLog, inner)
+	handler := WithFailLockout(cache, nil, testDiscardLog, inner)
 	send := func(caller uuid.UUID, success bool) int {
 		req := httptest.NewRequest(http.MethodPut, "/notes/resource", nil)
 		req.SetPathValue("id", "resource")
@@ -87,7 +87,7 @@ func TestWithFailLockout_CallerSuccessDoesNotResetOthers(t *testing.T) {
 // TestWithFailLockout_UnderThreshold_ReachesUpstream is the control case: below
 // maxFailedAttempts the request passes through untouched.
 func TestWithFailLockout_UnderThreshold_ReachesUpstream(t *testing.T) {
-	cache := newFailLockoutCache()
+	cache := NewFailLockoutCache()
 
 	setErr := cache.Set(failLockoutKey{ID: "almost-locked", IP: httptestRemoteIP, CallerID: uuid.Nil}, maxFailedAttempts-1)
 	require.NoError(t, setErr)
@@ -99,7 +99,7 @@ func TestWithFailLockout_UnderThreshold_ReachesUpstream(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	handler := withFailLockout(cache, nil, testDiscardLog, inner)
+	handler := WithFailLockout(cache, nil, testDiscardLog, inner)
 
 	req := httptest.NewRequest(http.MethodPut, "/notes/almost-locked", nil)
 	req.SetPathValue("id", "almost-locked")

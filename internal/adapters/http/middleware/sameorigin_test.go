@@ -1,4 +1,4 @@
-package http
+package middleware
 
 import (
 	"context"
@@ -12,7 +12,7 @@ import (
 )
 
 // TestSameOrigin_HostIsTheGate — the host comparison settles every cross-site origin, scheme
-// precision is additional when the requestOrigin middleware ran.
+// precision is additional when the RequestOrigin middleware ran.
 func TestSameOrigin_HostIsTheGate(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -34,10 +34,10 @@ func TestSameOrigin_HostIsTheGate(t *testing.T) {
 
 		if caseRow.ctxHost != "" {
 			r = r.WithContext(withTestOrigin(
-				r.Context(), requestOrigin{Scheme: caseRow.ctxSche, Host: caseRow.ctxHost}))
+				r.Context(), RequestOrigin{Scheme: caseRow.ctxSche, Host: caseRow.ctxHost}))
 		}
 
-		assert.Equal(t, caseRow.wantSame, sameOrigin(r, caseRow.origin), caseRow.name)
+		assert.Equal(t, caseRow.wantSame, SameOrigin(r, caseRow.origin), caseRow.name)
 	}
 }
 
@@ -46,9 +46,9 @@ func TestSameOrigin_HostIsTheGate(t *testing.T) {
 func TestSameOrigin_MalformedOriginIsForeign(t *testing.T) {
 	for _, bad := range []string{"notaurl", "://", "https://"} {
 		r := httptest.NewRequest(http.MethodPost, "https://padmark.example/api/tokens", nil)
-		r = r.WithContext(withTestOrigin(r.Context(), requestOrigin{Scheme: protoHTTPS, Host: "padmark.example"}))
+		r = r.WithContext(withTestOrigin(r.Context(), RequestOrigin{Scheme: SchemeHTTPS, Host: "padmark.example"}))
 
-		assert.False(t, sameOrigin(r, bad), "malformed Origin %q must not count as same-origin", bad)
+		assert.False(t, SameOrigin(r, bad), "malformed Origin %q must not count as same-origin", bad)
 	}
 }
 
@@ -58,7 +58,7 @@ func TestRequireSameOrigin_RejectsAndAllows(t *testing.T) {
 		w.WriteHeader(http.StatusCreated)
 	})
 
-	gated := requireSameOrigin(slog.New(slog.DiscardHandler), upstream)
+	gated := RequireSameOrigin(slog.New(slog.DiscardHandler), upstream)
 
 	tests := []struct {
 		name   string
@@ -88,8 +88,8 @@ func TestRequireSameOrigin_RejectsAndAllows(t *testing.T) {
 	}
 }
 
-// withTestOrigin installs a requestOrigin value directly, standing in for withRequestOrigin —
+// withTestOrigin installs a RequestOrigin value directly, standing in for WithRequestOrigin —
 // the unit test bypasses the middleware that would produce it.
-func withTestOrigin(ctx context.Context, origin requestOrigin) context.Context {
+func withTestOrigin(ctx context.Context, origin RequestOrigin) context.Context {
 	return context.WithValue(ctx, originCtxKey{}, origin)
 }

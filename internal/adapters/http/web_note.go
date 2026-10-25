@@ -2,6 +2,7 @@ package http
 
 import (
 	"context"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"html/template"
@@ -9,11 +10,11 @@ import (
 	"net/http"
 	"time"
 
-	_ "embed"
-
 	"github.com/google/uuid"
 
+	"github.com/partyzanex/padmark/internal/adapters/http/middleware"
 	"github.com/partyzanex/padmark/internal/adapters/http/ogenapi"
+	"github.com/partyzanex/padmark/internal/adapters/http/response"
 	"github.com/partyzanex/padmark/internal/domain"
 )
 
@@ -35,13 +36,13 @@ type NoteHandler struct {
 	// the ogen-served single-segment PUT/DELETE /notes/{id} routes (see registerOgenRoutes in
 	// router.go) so fail-lockout tracking is consistent for a note regardless of which route
 	// variant a client hits.
-	lockout *failLockoutCache
+	lockout *middleware.FailLockoutCache
 }
 
 func newNoteHandler(c *common, manager NoteManager, noteTmpl, indexTmpl *template.Template) *NoteHandler {
 	return &NoteHandler{
 		common: c, manager: manager, noteTmpl: noteTmpl, indexTmpl: indexTmpl,
-		lockout: newFailLockoutCache(),
+		lockout: middleware.NewFailLockoutCache(),
 		// revealStore zero = nil — Handler.WithRevealStore attaches one at router build; nil-checks
 		// in the burn routes short-circuit so tests/CLI builds that skip the option still work.
 		revealStore: nil,
@@ -55,10 +56,12 @@ func newNoteHandler(c *common, manager NoteManager, noteTmpl, indexTmpl *templat
 // limitation); these native {id...} handlers bridge update/delete for path-like slugs, so by
 // ServeMux specificity single-segment IDs keep going to ogen and multi-segment to these.
 func (h *NoteHandler) RegisterRoutes(mux *http.ServeMux) {
-	mux.Handle("PUT /notes/{id...}",
-		requireSameOrigin(h.log, withFailLockout(h.lockout, h.trustedProxies, h.log, http.HandlerFunc(h.UpdateNoteByPath))))
-	mux.Handle("DELETE /notes/{id...}",
-		requireSameOrigin(h.log, withFailLockout(h.lockout, h.trustedProxies, h.log, http.HandlerFunc(h.DeleteNoteByPath))))
+	locked := func(next http.HandlerFunc) http.Handler {
+		return middleware.RequireSameOrigin(h.log, middleware.WithFailLockout(h.lockout, h.trustedProxies, h.log, next))
+	}
+
+	mux.Handle("PUT /notes/{id...}", locked(h.UpdateNoteByPath))
+	mux.Handle("DELETE /notes/{id...}", locked(h.DeleteNoteByPath))
 	mux.HandleFunc("GET /notes/{id...}", h.GetNote)
 	mux.HandleFunc("POST /notes/{id...}", h.guard(h.HandleReveal))
 	mux.HandleFunc("GET /edit/{id...}", h.EditPage)
@@ -231,7 +234,7 @@ func (h *NoteHandler) GetNote(w http.ResponseWriter, r *http.Request) {
 // mapping — for the multi-segment case the generated single-segment router cannot match.
 func (h *NoteHandler) UpdateNoteByPath(w http.ResponseWriter, r *http.Request) {
 	if !isJSONContentType(r.Header.Get("Content-Type")) {
-		writeJSONErrorStatus(w, r, h.log, http.StatusUnsupportedMediaType, unsupportedMediaTypeMessage)
+		response.WriteJSONErrorStatus(w, r, h.log, http.StatusUnsupportedMediaType, unsupportedMediaTypeMessage)
 
 		return
 	}
@@ -260,7 +263,7 @@ func (h *NoteHandler) UpdateNoteByPath(w http.ResponseWriter, r *http.Request) {
 
 	payload, err := noteUpdatePayload(&body)
 	if err != nil {
-		writeJSONErrorStatus(w, r, h.log, http.StatusBadRequest, err.Error())
+		response.WriteJSONErrorStatus(w, r, h.log, http.StatusBadRequest, err.Error())
 
 		return
 	}
@@ -272,7 +275,7 @@ func (h *NoteHandler) UpdateNoteByPath(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	note, err := h.manager.Update(r.Context(), id, body.EditCode.Or(""), callerIDFromCtx(r.Context()), payload)
+	note, err := h.manager.Update(r.Context(), id, body.EditCode.Or(""), middleware.CallerIDFromCtx(r.Context()), payload)
 	if err != nil {
 		h.writeError(w, r, err)
 
@@ -299,7 +302,7 @@ func (h *NoteHandler) DeleteNoteByPath(w http.ResponseWriter, r *http.Request) {
 
 	editCode := deleteEditCode(r.Context(), h.log, id, r.Header.Get("X-Edit-Code"), r.URL.Query().Get("edit_code"))
 
-	err := h.manager.Delete(r.Context(), id, editCode, callerIDFromCtx(r.Context()))
+	err := h.manager.Delete(r.Context(), id, editCode, middleware.CallerIDFromCtx(r.Context()))
 	if err != nil {
 		h.writeError(w, r, err)
 
@@ -376,7 +379,7 @@ func (h *NoteHandler) gateAnonymousMutation(w http.ResponseWriter, r *http.Reque
 		return false
 	}
 
-	if callerIDFromCtx(r.Context()) != uuid.Nil || h.isAuthenticated(r) {
+	if middleware.CallerIDFromCtx(r.Context()) != uuid.Nil || h.isAuthenticated(r) {
 		return false
 	}
 
@@ -389,7 +392,7 @@ func (h *NoteHandler) gateAnonymousMutation(w http.ResponseWriter, r *http.Reque
 		return false
 	}
 
-	writeUnauthorized(w)
+	middleware.WriteUnauthorized(w)
 
 	return true
 }
@@ -412,7 +415,7 @@ func (h *NoteHandler) handlePrivateAuth(w http.ResponseWriter, r *http.Request, 
 		return nil, true
 	}
 
-	if note.VisibleTo(callerIDFromCtx(r.Context()), h.isAuthenticated(r)) {
+	if note.VisibleTo(middleware.CallerIDFromCtx(r.Context()), h.isAuthenticated(r)) {
 		return note, false
 	}
 
@@ -443,12 +446,12 @@ func (h *NoteHandler) renderNoteHTML(w http.ResponseWriter, r *http.Request, id 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
 	data := toNoteViewData(note, rendered)
-	data.Nonce = nonceFromContext(r.Context())
+	data.Nonce = middleware.NonceFromContext(r.Context())
 	// Also gated on VisibleTo: without it, a privacy=owner note would show the Edit link (and
 	// let EditPage render its plaintext, see EditPage's doc comment) to any authenticated
 	// caller, not just its owner.
 	authenticated := h.isAuthenticated(r)
-	data.CanEdit = authenticated && note.VisibleTo(callerIDFromCtx(r.Context()), authenticated)
+	data.CanEdit = authenticated && note.VisibleTo(middleware.CallerIDFromCtx(r.Context()), authenticated)
 
 	err = h.noteTmpl.Execute(w, data)
 	if err != nil {
@@ -517,7 +520,7 @@ func (h *NoteHandler) refuseImplicitBurnRead(
 // writeBurnReadNotExplicit answers an access to a burn resource (burn-after-reading note,
 // burn_after_click link) that lacked deliberate intent: 409 with a stable code; nothing burned.
 func writeBurnReadNotExplicit(w http.ResponseWriter, r *http.Request, log *slog.Logger) {
-	writeJSONErrorCode(w, r, log, http.StatusConflict,
+	response.WriteJSONErrorCode(w, r, log, http.StatusConflict,
 		"burn resource: accessing it destroys it, so the request must be a deliberate one — a browser "+
 			"navigation, or an Accept naming application/json, text/markdown, text/plain or text/html",
 		burnReadNotExplicitCode)
@@ -561,8 +564,8 @@ func (h *NoteHandler) handleBurnInterstitial(
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
 	data := toBurnInterstitialViewData(note, tok)
-	data.Nonce = nonceFromContext(r.Context())
-	data.CSRFToken = csrfFromContext(r.Context())
+	data.Nonce = middleware.NonceFromContext(r.Context())
+	data.CSRFToken = middleware.CSRFFromContext(r.Context())
 
 	execErr := h.noteTmpl.Execute(w, data)
 	if execErr != nil {

@@ -189,7 +189,7 @@ func (s *HandlerSuite) csrf() string {
 }
 
 // revealPOST builds a POST request for the burn-reveal routes with a valid CSRF cookie+field,
-// since POST /{id} and POST /notes/{id} are now wrapped in csrfGuard. body holds the non-CSRF
+// since POST /{id} and POST /notes/{id} are now wrapped in CSRFGuard. body holds the non-CSRF
 // form fields (may be empty); the matching csrf_token field is appended automatically.
 func (s *HandlerSuite) revealPOST(path, body string) *http.Request {
 	csrf := s.csrf()
@@ -2764,7 +2764,7 @@ func (s *HandlerSuite) TestPrivateNote_TOTPMode_Unauthenticated() {
 	note.Privacy = new(domain.PrivacyAuthenticated)
 
 	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
-	// isAuthenticated fallback: no session cookie → extractSessionID returns "" →
+	// isAuthenticated fallback: no session cookie → ExtractSessionID returns "" →
 	// GetSession is never called; the function returns false directly.
 
 	router := s.newRouterWithTOTPAuth()
@@ -3113,7 +3113,7 @@ func (s *HandlerSuite) TestCanEdit_TOTPMode_Unauthenticated() {
 	// without calling isAuthenticated. Only renderNoteHTML calls isAuthenticated.
 	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
 	s.manager.EXPECT().GetRenderedPreloaded(gomock.Any(), testID, note).Return(note, "rendered", nil)
-	// isAuthenticated: no session cookie → extractSessionID = "" → GetSession not called.
+	// isAuthenticated: no session cookie → ExtractSessionID = "" → GetSession not called.
 
 	router := s.newRouterWithTOTPAuth()
 

@@ -1544,7 +1544,7 @@ func (s *AuthHandlerSuite) TestCSRFGuard_TokenMismatch_Returns403() {
 
 // TestCSRFGuard_InvalidHMAC_Returns403 covers the branch where cookie and form field match
 // (so the equality check passes) but the token's HMAC signature is invalid — e.g. a token
-// minted with a different secret. The guard must still reject it via verifyCSRFToken.
+// minted with a different secret. The guard must still reject it via VerifyCSRFToken.
 func (s *AuthHandlerSuite) TestCSRFGuard_InvalidHMAC_Returns403() {
 	forgedSecret := []byte("a-different-csrf-secret-32bytes!!")
 	forged := adhttp.GenerateCSRFTokenForTest(forgedSecret)

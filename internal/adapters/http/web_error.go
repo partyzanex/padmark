@@ -1,11 +1,11 @@
 package http
 
 import (
+	_ "embed"
 	"errors"
 	"net/http"
 
-	_ "embed"
-
+	"github.com/partyzanex/padmark/internal/adapters/http/middleware"
 	"github.com/partyzanex/padmark/internal/domain"
 )
 
@@ -123,7 +123,7 @@ func (h *common) writeNoteError(w http.ResponseWriter, r *http.Request, err erro
 // writeErrorPageData renders the HTML error template from explicit view data,
 // for cases that need a tailored title/description rather than a domain sentinel.
 func (h *common) writeErrorPageData(w http.ResponseWriter, r *http.Request, data *errorViewData) {
-	data.Nonce = nonceFromContext(r.Context())
+	data.Nonce = middleware.NonceFromContext(r.Context())
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(data.Code)

@@ -1,4 +1,4 @@
-package http
+package middleware
 
 import (
 	"context"
@@ -7,25 +7,26 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/partyzanex/padmark/internal/adapters/http/response"
 	"github.com/partyzanex/padmark/internal/domain"
 )
 
-// sessionChecker resolves a session ID or an API-token bearer key to a User; used by the
+// SessionChecker resolves a session ID or an API-token bearer key to a User; used by the
 // auth middleware.
-type sessionChecker interface {
+type SessionChecker interface {
 	GetSession(ctx context.Context, sessionID string) (*domain.User, error)
 	// ResolveAPIToken maps a bearer API key to its owning user and the key's public ID,
 	// recording last-used. Returns domain.ErrNotFound when the key is unknown, revoked, or expired.
 	ResolveAPIToken(ctx context.Context, plainToken string) (*domain.User, string, error)
 }
 
-// newAuthMiddleware wraps the entire handler tree with session auth.
+// NewAuthMiddleware wraps the entire handler tree with session auth.
 // If checker is nil, auth is disabled and all requests pass through.
 // Browser requests without a valid credential are redirected to /login.
 // API requests without a valid Bearer token receive 401.
 // namedRoutes is the set of single-segment path names that are named page routes,
 // not note IDs — maintained in NewRouter alongside route registrations.
-func newAuthMiddleware(namedRoutes map[string]struct{}, checker sessionChecker, next http.Handler) http.Handler {
+func NewAuthMiddleware(namedRoutes map[string]struct{}, checker SessionChecker, next http.Handler) http.Handler {
 	if checker == nil {
 		return next
 	}
@@ -34,7 +35,7 @@ func newAuthMiddleware(namedRoutes map[string]struct{}, checker sessionChecker, 
 }
 
 type authMiddleware struct {
-	checker     sessionChecker
+	checker     SessionChecker
 	namedRoutes map[string]struct{}
 	next        http.Handler
 }
@@ -93,21 +94,21 @@ func (am *authMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeUnauthorized(w)
+	WriteUnauthorized(w)
 }
 
-// writeUnauthorized answers a non-browser request with the same JSON shape as every other API
-// error (errorJSON, matching the OpenAPI ErrorResponse schema) instead of the plain-text body
+// WriteUnauthorized answers a non-browser request with the same JSON shape as every other API
+// error (ErrorJSON, matching the OpenAPI ErrorResponse schema) instead of the plain-text body
 // http.Error would produce — the generated ogen client (used by the CLI) decodes API errors as
 // JSON, so a plain-text 401 here surfaces as an opaque decode failure instead of a clean message.
-func writeUnauthorized(w http.ResponseWriter) {
-	w.Header().Set("Content-Type", mimeJSON)
+func WriteUnauthorized(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusUnauthorized)
 
 	// Encoding a fixed two-field struct only fails on a broken connection, which is
 	// unactionable here — not worth threading a logger into this otherwise stateless
 	// middleware just to report it.
-	err := json.NewEncoder(w).Encode(errorJSON{Message: msgUnauthorized, Code: ""})
+	err := json.NewEncoder(w).Encode(response.ErrorJSON{Message: MsgUnauthorized, Code: ""})
 	if err != nil {
 		return
 	}
@@ -122,7 +123,7 @@ func (am *authMiddleware) resolveSessionUser(r *http.Request) (*http.Request, bo
 		return r, false
 	}
 
-	sessID := extractSessionID(r)
+	sessID := ExtractSessionID(r)
 	if sessID == "" {
 		return r, false
 	}
@@ -176,8 +177,8 @@ const (
 	// REST/JSON API surface that --disable-api turns off (see isDisabledAPIPath).
 	llmsTxtPath = "/llms.txt"
 
-	// faviconPath is always public: browsers request it on their own for pages without an icon.
-	faviconPath = "/favicon.ico"
+	// FaviconPath is always public: browsers request it on their own for pages without an icon.
+	FaviconPath = "/favicon.ico"
 
 	// linkCreatePath and notesCreatePath are the collection roots (POST create); isPublicRoute
 	// admits them alongside the resource paths below. editPathPrefix covers GET /edit/{id},
@@ -186,8 +187,8 @@ const (
 	editPathPrefix  = "edit/"
 	notesCreatePath = "notes"
 
-	// msgUnauthorized is the shared client-facing message for every 401 the adapter writes.
-	msgUnauthorized = "unauthorized"
+	// MsgUnauthorized is the shared client-facing message for every 401 the adapter writes.
+	MsgUnauthorized = "unauthorized"
 )
 
 func isPublicPath(path string) bool {
@@ -196,7 +197,7 @@ func isPublicPath(path string) bool {
 		path == "/logout" ||
 		path == "/totp-login" ||
 		strings.HasPrefix(path, "/static/") ||
-		path == apiDocsPath || path == apiSpecPath || path == llmsTxtPath || path == faviconPath ||
+		path == apiDocsPath || path == apiSpecPath || path == llmsTxtPath || path == FaviconPath ||
 		path == "/healthz" || path == "/readyz"
 }
 
@@ -278,9 +279,9 @@ func isNoteIDPath(trimmed string, namedRoutes map[string]struct{}) bool {
 	return !isNamed
 }
 
-// safeNextURL validates that the redirect target is a local path to prevent open redirects.
+// SafeNextURL validates that the redirect target is a local path to prevent open redirects.
 // Returns empty string if the value is absent or unsafe.
-func safeNextURL(next string) string {
+func SafeNextURL(next string) string {
 	if next == "" {
 		return ""
 	}

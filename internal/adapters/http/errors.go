@@ -3,39 +3,11 @@ package http
 import (
 	"encoding/json"
 	"errors"
-	"log/slog"
 	"net/http"
 
+	"github.com/partyzanex/padmark/internal/adapters/http/response"
 	"github.com/partyzanex/padmark/internal/domain"
 )
-
-// errorJSON matches the OpenAPI ErrorResponse schema; Code is optional for existing errors.
-type errorJSON struct {
-	Message string `json:"message"`
-	Code    string `json:"code,omitempty"`
-}
-
-// writeJSONErrorStatus writes a JSON error response ({"message": msg}) for a status the caller
-// already decided on directly, rather than one derived from a domain.error — used by
-// middleware whose response describes its own decision (rate limit exceeded, cache lookup
-// failed, too many failed edit-code attempts), not a usecase outcome. See writeError for the
-// domain-error-driven counterpart with the same wire format (net/http's own http.Error writes
-// text/plain, which the OpenAPI ErrorResponse schema never promised).
-func writeJSONErrorStatus(w http.ResponseWriter, r *http.Request, log *slog.Logger, status int, msg string) {
-	writeJSONErrorCode(w, r, log, status, msg, "")
-}
-
-// writeJSONErrorCode is writeJSONErrorStatus plus the optional machine-readable `code` field,
-// for decisions a client is expected to branch on rather than show.
-func writeJSONErrorCode(w http.ResponseWriter, r *http.Request, log *slog.Logger, status int, msg, code string) {
-	w.Header().Set("Content-Type", mimeJSON)
-	w.WriteHeader(status)
-
-	err := json.NewEncoder(w).Encode(errorJSON{Message: msg, Code: code})
-	if err != nil {
-		log.ErrorContext(r.Context(), "write error response", "err", err)
-	}
-}
 
 // domainErrStatus maps a domain error to its canonical HTTP status code and the matched
 // sentinel's short client-facing message — "" when err doesn't match anything known (message,
@@ -121,7 +93,7 @@ func (h *common) writeDecodeError(w http.ResponseWriter, r *http.Request, err er
 	w.Header().Set("Content-Type", mimeJSON)
 	w.WriteHeader(status)
 
-	encErr := json.NewEncoder(w).Encode(errorJSON{Message: msg, Code: ""})
+	encErr := json.NewEncoder(w).Encode(response.ErrorJSON{Message: msg, Code: ""})
 	if encErr != nil {
 		h.log.ErrorContext(r.Context(), "write decode error response", "err", encErr)
 	}
@@ -137,7 +109,7 @@ func (h *common) writeError(w http.ResponseWriter, r *http.Request, err error) {
 	w.Header().Set("Content-Type", mimeJSON)
 	w.WriteHeader(status)
 
-	encErr := json.NewEncoder(w).Encode(errorJSON{Message: msg, Code: ""})
+	encErr := json.NewEncoder(w).Encode(response.ErrorJSON{Message: msg, Code: ""})
 	if encErr != nil {
 		h.log.ErrorContext(r.Context(), "write error response", "err", encErr)
 	}
