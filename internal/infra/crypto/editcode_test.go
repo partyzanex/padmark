@@ -145,3 +145,27 @@ func TestEditCodeHasher_VerifiesCodesHashedWithOtherParams(t *testing.T) {
 
 	assert.True(t, current.Verify(hash, "chosen-by-user"))
 }
+
+// TestEditCodeHasher_IsStoredHash pins the exact stored-hash shape: real hashes of both formats
+// match, while v0.1.6 caller-chosen codes that only start like a hash do not (review R1).
+func TestEditCodeHasher_IsStoredHash(t *testing.T) {
+	hasher := crypto.NewEditCodeHasher(crypto.DefaultArgon2Params())
+
+	fast, err := hasher.Hash("code12345678")
+	require.NoError(t, err)
+	argon, err := hasher.HashUserProvided("caller-chosen-code")
+	require.NoError(t, err)
+
+	assert.True(t, hasher.IsStoredHash(fast), "s1$ hash %q", fast)
+	assert.True(t, hasher.IsStoredHash(argon), "v1$ hash %q", argon)
+
+	salt, digest := strings.Repeat("A", 22), strings.Repeat("B", 43)
+	for _, value := range []string{
+		"", "hunter2", "v1$old-user-code", "s1$old-user-code",
+		"s1$" + salt + "$" + digest[1:], "s1$" + salt[1:] + "$" + digest + "B",
+		"s1$" + salt + "$" + digest + "=", "x1$" + salt + "$" + digest,
+		"v1$1$1$$" + salt + "$" + digest, "v1$a$1$1$" + salt + "$" + digest, "v1$1$1$1$1$" + salt + "$" + digest,
+	} {
+		assert.False(t, hasher.IsStoredHash(value), "%q must not count as a stored hash", value)
+	}
+}

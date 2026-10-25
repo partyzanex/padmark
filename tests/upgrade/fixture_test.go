@@ -3,10 +3,12 @@
 package upgrade_test
 
 import (
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/uptrace/bun"
 )
 
 // legacyNote is one note of the v0.1.6 fixture (tests/fixtures/v0.1.6/README.md), exactly as
@@ -23,6 +25,8 @@ type legacyNote struct {
 	views       int
 	burn        bool
 	private     bool
+	// untaggedBySchema marks a note the schema migrations cannot recognise as v0.1.6 data.
+	untaggedBySchema bool
 }
 
 // Scenario indexes (README.md "Scenario").
@@ -127,6 +131,54 @@ func (f *dialectFixture) notes() []legacyNote {
 	}
 
 	return notes
+}
+
+// Review R1 scenario: v0.1.6 accepted any caller-chosen slug and edit code, so a custom slug of
+// 64 hex characters (which looks like a hashed ID) can carry a code that looks like a stored hash.
+// These notes are inserted into the dump with the v0.1.6 schema, before the schema migrations.
+const (
+	noteHexArgonPrefix = noteCount + iota // edit code "v1$...": tagged by the full-shape check
+	noteHexFastPrefix                     // edit code "s1$...": tagged by the full-shape check
+	noteHexHashShaped                     // edit code of the exact "s1$" hash shape: needs mark-legacy
+)
+
+func hexSlugNotes() []legacyNote {
+	hashShaped := "s1$" + strings.Repeat("A", 22) + "$" + strings.Repeat("B", 43)
+
+	return []legacyNote{
+		{
+			slug: strings.Repeat("a", 64), editCode: "v1$old-user-code", title: "8 hex slug, v1$ code",
+			content: "64-hex custom slug, code starts like an argon2id hash", contentType: "text/markdown",
+			createdAt: "2026-10-23T00:13:00.000001Z",
+		},
+		{
+			slug: strings.Repeat("b", 64), editCode: "s1$old-user-code", title: "9 hex slug, s1$ code",
+			content: "64-hex custom slug, code starts like a fast hash", contentType: "text/plain",
+			createdAt: "2026-10-23T00:13:00.000002Z",
+		},
+		{
+			slug: strings.Repeat("c", 64), editCode: hashShaped, title: "10 hex slug, hash-shaped code",
+			content: "64-hex custom slug, code has the exact shape of a stored hash", contentType: "text/markdown",
+			createdAt: "2026-10-23T00:13:00.000003Z", untaggedBySchema: true,
+		},
+	}
+}
+
+// insertV016Notes stores notes with the v0.1.6 schema exactly as the v0.1.6 server did: the slug
+// as id and plaintext content and edit code.
+func insertV016Notes(t *testing.T, db *bun.DB, notes []legacyNote) {
+	t.Helper()
+
+	for i := range notes {
+		note := &notes[i]
+		created := parseTime(t, note.createdAt)
+		_, err := db.NewRaw(`INSERT INTO notes (id, title, content, content_type, edit_code, views,
+ burn_after_reading, burn_ttl, expires_at, created_at, updated_at, private)
+ VALUES (?, ?, ?, ?, ?, 0, ?, 0, NULL, ?, ?, ?)`,
+			note.slug, note.title, note.content, note.contentType, note.editCode, note.burn, created, created,
+			note.private).Exec(t.Context())
+		require.NoError(t, err, note.title)
+	}
 }
 
 func parseTime(t *testing.T, value string) time.Time {

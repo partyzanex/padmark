@@ -113,9 +113,12 @@ func (r *Repository) SetPhase(ctx context.Context, phase string) error {
 	return nil
 }
 
+// resourceNote is the only resource with v0.1.6 legacy rows and edit codes to inspect.
+const resourceNote = "note"
+
 func resourceColumns(resource string) (table, column string, err error) {
 	switch resource {
-	case "note":
+	case resourceNote:
 		return "notes", "content", nil
 	case "link":
 		return "links", "target_url", nil
@@ -124,8 +127,8 @@ func resourceColumns(resource string) (table, column string, err error) {
 	}
 }
 
-// storedRow is one scanned record; LegacySlug and EditCode are read for notes only and stay
-// empty unless the legacy_notes schema migration tagged the row.
+// storedRow is one scanned record; LegacySlug and EditCode are read for notes only. LegacySlug
+// stays empty unless a schema migration or MarkLegacy tagged the row.
 type storedRow struct {
 	ID         string `bun:"id"`
 	Value      string `bun:"value"`
@@ -134,21 +137,23 @@ type storedRow struct {
 }
 
 func (s *storedRow) toRow(resource string) keys.Row {
-	row := keys.Row{Resource: resource, ID: s.ID, Value: s.Value, Legacy: nil}
+	row := keys.Row{Resource: resource, ID: s.ID, Value: s.Value, Legacy: nil, StoredEditCode: ""}
 	if s.LegacySlug != "" {
 		row.Legacy = &keys.LegacyNote{Slug: s.LegacySlug, EditCode: s.EditCode}
+	} else {
+		row.StoredEditCode = s.EditCode
 	}
 
 	return row
 }
 
-// selectRows reads id and the encrypted column; for notes also the v0.1.6 legacy slug and,
-// only for such tagged rows, the plaintext edit code (hashes of current notes are never read).
+// selectRows reads id and the encrypted column; for notes also the v0.1.6 legacy slug and the
+// stored edit code: plaintext for a tagged row, and for an untagged row normally a hash, which
+// the manager only checks for the hash shape (see contentkeys.EditCodeHasher.IsStoredHash).
 func selectRows(db *bun.DB, table, column string) *bun.SelectQuery {
 	query := db.NewSelect().Table(table).Column("id").ColumnExpr("? AS value", bun.Ident(column))
 	if table == "notes" {
-		query = query.ColumnExpr("COALESCE(legacy_slug, '') AS legacy_slug").
-			ColumnExpr("CASE WHEN legacy_slug IS NULL THEN '' ELSE edit_code END AS edit_code")
+		query = query.ColumnExpr("COALESCE(legacy_slug, '') AS legacy_slug").Column("edit_code")
 	}
 
 	return query
@@ -226,7 +231,7 @@ func (r *Repository) Replace(ctx context.Context, row keys.Row, value string) (b
 func (r *Repository) ConvertLegacy(
 	ctx context.Context, row keys.Row, newID, value, editCodeHash string,
 ) (bool, error) {
-	if row.Resource != "note" || row.Legacy == nil {
+	if row.Resource != resourceNote || row.Legacy == nil {
 		return false, errors.New("only tagged legacy notes can be converted")
 	}
 
@@ -240,6 +245,28 @@ func (r *Repository) ConvertLegacy(
 	count, err := result.RowsAffected()
 	if err != nil {
 		return false, errors.New("could not read legacy note conversion count")
+	}
+
+	return count == 1, nil
+}
+
+// MarkLegacy tags one untagged note as v0.1.6 plaintext (legacy_slug = id) with a single
+// compare-and-swap UPDATE: only while the row still holds the inspected id and content and has
+// no tag. Errors never expose the slug, content or any SQL parameter.
+func (r *Repository) MarkLegacy(ctx context.Context, row keys.Row) (bool, error) {
+	if row.Resource != resourceNote || row.Legacy != nil {
+		return false, errors.New("only untagged notes can be marked as legacy")
+	}
+
+	result, err := r.db.NewUpdate().Table("notes").Set("legacy_slug = id").
+		Where("id = ? AND content = ? AND legacy_slug IS NULL", row.ID, row.Value).Exec(ctx)
+	if err != nil {
+		return false, errors.New("legacy note mark compare-and-swap failed")
+	}
+
+	count, err := result.RowsAffected()
+	if err != nil {
+		return false, errors.New("could not read legacy note mark count")
 	}
 
 	return count == 1, nil

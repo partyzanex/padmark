@@ -3,6 +3,7 @@ package contentkeys_test
 import (
 	"log/slog"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -118,7 +119,9 @@ func TestConvertLegacyCASAndTargetConflict(t *testing.T) {
 
 	current, err := repo.Get(ctx, "note", domain.HashSlug("legacy-slug"))
 	require.NoError(t, err)
-	require.Equal(t, keys.Row{Resource: "note", ID: domain.HashSlug("legacy-slug"), Value: "pmc2$p$new"}, *current)
+	require.Equal(t, keys.Row{
+		Resource: "note", ID: domain.HashSlug("legacy-slug"), Value: "pmc2$p$new", StoredEditCode: "v1$hash",
+	}, *current)
 
 	var editCode string
 	require.NoError(t, db.NewSelect().Table("notes").Column("edit_code").Where("id = ?", current.ID).Scan(ctx, &editCode))
@@ -141,4 +144,50 @@ func TestConvertLegacyCASAndTargetConflict(t *testing.T) {
 
 	_, err = repo.ConvertLegacy(ctx, keys.Row{Resource: "link", ID: "x", Value: "y"}, "z", "v", "")
 	require.Error(t, err, "links are never converted")
+}
+
+// TestMarkLegacyTagsOnlyTheInspectedUntaggedNote: MarkLegacy tags an untagged note only while it
+// still holds the inspected content, and refuses links and already tagged notes.
+func TestMarkLegacyTagsOnlyTheInspectedUntaggedNote(t *testing.T) {
+	ctx := t.Context()
+	db, err := sqlite.Open(filepath.Join(t.TempDir(), "mark.db"), slog.New(slog.DiscardHandler))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, db.Close()) })
+
+	_, err = sqlite.Migrate(ctx, db)
+	require.NoError(t, err)
+
+	slug := strings.Repeat("a", 64)
+	hashShaped := "s1$" + strings.Repeat("A", 22) + "$" + strings.Repeat("B", 43)
+	now := time.Now().UTC()
+	_, err = db.NewRaw(`INSERT INTO notes
+ (id, title, content, edit_code, views, burn_after_reading, burn_ttl, privacy, created_at, updated_at)
+ VALUES (?, 'title', 'v0.1.6 plaintext', ?, 0, false, 0, 'public', ?, ?)`, slug, hashShaped, now, now).Exec(ctx)
+	require.NoError(t, err)
+
+	repo := repository.New(db)
+	row, err := repo.Get(ctx, "note", slug)
+	require.NoError(t, err)
+	require.Nil(t, row.Legacy)
+	require.Equal(t, hashShaped, row.StoredEditCode, "untagged notes expose the stored edit code")
+
+	stale := *row
+	stale.Value = "edited meanwhile"
+	marked, err := repo.MarkLegacy(ctx, stale)
+	require.NoError(t, err)
+	require.False(t, marked, "a changed row must not be tagged")
+
+	marked, err = repo.MarkLegacy(ctx, *row)
+	require.NoError(t, err)
+	require.True(t, marked)
+
+	tagged, err := repo.Get(ctx, "note", slug)
+	require.NoError(t, err)
+	require.Equal(t, &keys.LegacyNote{Slug: slug, EditCode: hashShaped}, tagged.Legacy)
+	require.Empty(t, tagged.StoredEditCode)
+
+	_, err = repo.MarkLegacy(ctx, *tagged)
+	require.Error(t, err, "an already tagged note is refused")
+	_, err = repo.MarkLegacy(ctx, keys.Row{Resource: "link", ID: slug, Value: "x"})
+	require.Error(t, err, "links never carry v0.1.6 plaintext")
 }

@@ -65,3 +65,57 @@ func (m *Manager) hashLegacyEditCode(code string) (string, error) {
 
 	return hashed, nil
 }
+
+// MarkLegacy tags one untagged note as v0.1.6 plaintext so the next Migrate converts it in
+// place (slug = id). It is the explicit fix for a v0.1.6 note that the schema migrations could
+// not recognise: a custom slug of 64 hex characters with an edit code of the stored-hash shape,
+// which Status reports as corrupt raw data, or an untagged_legacy note. A note with an envelope
+// or with structurally valid legacy ciphertext and a hash-shaped edit code is refused: tagging it
+// would encrypt ciphertext as if it were plaintext. Stop all writers before calling it.
+func (m *Manager) MarkLegacy(ctx context.Context, id string) (Report, error) {
+	row, err := m.store.Get(ctx, resourceNote, id)
+	if err != nil {
+		return newReport("unknown"), WrapError(err)
+	}
+
+	if row == nil {
+		return newReport("unknown"), WrapError(errors.New("note not found"))
+	}
+
+	if row.Legacy == nil {
+		markErr := m.markLegacy(ctx, row)
+		if markErr != nil {
+			return newReport("unknown"), WrapError(markErr)
+		}
+	}
+
+	report, err := m.Status(ctx)
+	if err != nil && !errors.Is(err, errInvalidRecords) {
+		return report, WrapError(err)
+	}
+
+	// Other records may still need attention; this report shows them, but the mark succeeded.
+	return report, nil
+}
+
+func (m *Manager) markLegacy(ctx context.Context, row *Row) error {
+	cipher := m.ciphers[resourceNote]
+	if cipher.Versioned(row.Value) {
+		return errors.New("note already has an encryption envelope; there is nothing to convert")
+	}
+
+	if cipher.ValidateLegacy(row.Value) == nil && m.hasher.IsStoredHash(row.StoredEditCode) {
+		return errors.New("note holds structurally valid legacy ciphertext; it is not v0.1.6 plaintext")
+	}
+
+	marked, err := m.store.MarkLegacy(ctx, *row)
+	if err != nil {
+		return WrapError(err)
+	}
+
+	if !marked {
+		return errors.New("note changed concurrently; stop all writers and retry")
+	}
+
+	return nil
+}

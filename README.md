@@ -851,15 +851,27 @@ in place: their stored ID becomes `sha256(slug)`, content is encrypted, and the 
 hashed. Their public URL and usable edit code stay the same, as do counters, TTL/burn settings,
 privacy and timestamps. Deleted rows are never recreated. Any error exits nonzero; incomplete
 migrations block `serve` until a successful rerun.
-JSON reports contain `plaintext`, `raw`, `wrapped`, `native`, `failed`, `corrupt_raw`, `pruned`, `changed`, `conflicts`, `missing`
-and counts by key ID, without slugs or plaintext content. Raw validation checks structure only; the
+JSON reports contain `plaintext`, `raw`, `wrapped`, `native`, `failed`, `corrupt_raw`, `untagged_legacy`, `pruned`, `changed`,
+`conflicts`, `missing` and counts by key ID, without plaintext content. Only `prune --corrupt --dry-run` adds
+`candidates` with record IDs (for an untagged v0.1.6 note, the ID is its slug). Raw validation checks structure only; the
 old encryption tag cannot be authenticated without the original slug.
 
 `plaintext` counts tagged, unconverted v0.1.6 notes; successful migration brings it to zero.
-If a v0.1.6 upgrade reports `corrupt_raw`, stop and investigate against the backup before any
-pruning: an unrecognized legacy note could otherwise be deleted. Migration `20261024000001`
-tags 64-character lowercase-hex legacy slugs using their plaintext edit-code format; a legacy
-code beginning with `v1$` or `s1$` remains an ambiguous case.
+Migration `20261024000001` tags v0.1.6 notes whose custom slug is 64 lowercase hex characters:
+their plaintext edit code does not have the full shape of a stored hash. An untagged note with
+such a code (for example from an earlier build of this release) is counted as `untagged_legacy`:
+it blocks `serve`, is never wrapped as ciphertext and is never pruned. A caller-chosen v0.1.6 code
+of the exact hash shape cannot be told apart and shows as `corrupt_raw`. In both cases, list the
+IDs and tag each v0.1.6 note explicitly before any pruning:
+
+```bash
+bin/padmark-server encryption prune --corrupt --dry-run   # "candidates": IDs with a reason
+bin/padmark-server encryption mark-legacy --id <id>
+bin/padmark-server encryption migrate
+```
+
+`mark-legacy` refuses a note with an envelope, and a note with structurally valid legacy
+ciphertext and a hashed edit code: tagging those would encrypt ciphertext as plaintext.
 
 Old databases may still contain expired plaintext from the era before content encryption.
 Structurally invalid raw records are counted in both `failed` and `corrupt_raw`. Migration
@@ -877,8 +889,9 @@ bin/padmark-server encryption status
 `prune --corrupt` permanently deletes corrupt raw values. A value is a versioned envelope only
 if its first `$`-separated segment matches `pmc<digits>`; any other value (with or without `$`)
 that is not structurally valid legacy base64 ciphertext is corrupt raw. It checks both notes and
-links, including expired records; it never deletes tagged v0.1.6 plaintext notes, structurally
-valid legacy ciphertext or versioned envelopes. Key, registry,
+links, including expired records; it never deletes tagged or untagged v0.1.6 plaintext notes,
+structurally valid legacy ciphertext or versioned envelopes, and it refuses to run while any
+untagged v0.1.6 note remains. Key, registry,
 envelope-authentication and database errors abort the preflight without deletion. Compare-and-delete
 preserves records whose content changed after scanning; conflicts are counted. Dry-run writes
 nothing, including registry state. Pruning does not initialize the registry or finish a pending

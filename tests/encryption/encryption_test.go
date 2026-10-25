@@ -113,6 +113,10 @@ func reset(t *testing.T, db *bun.DB) {
 	}
 }
 
+// legacyEditCode has the exact shape of the hashed edit code every v0.2.0–v0.3.3 row stores; a
+// plaintext code would mark the row as an untagged v0.1.6 note instead of raw legacy ciphertext.
+const legacyEditCode = "s1$" + "AAAAAAAAAAAAAAAAAAAAAA" + "$" + "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+
 func insertLegacy(t *testing.T, db *bun.DB, resource, slug string) keys.Row {
 	t.Helper()
 
@@ -121,10 +125,11 @@ func insertLegacy(t *testing.T, db *bun.DB, resource, slug string) keys.Row {
 
 	row := keys.Row{Resource: resource, ID: domain.HashSlug(slug), Value: value}
 	if resource == "note" {
+		row.StoredEditCode = legacyEditCode
 		_, err = db.NewRaw(`INSERT INTO notes
  (id,title,content,edit_code,views,burn_after_reading,burn_ttl,privacy,created_at,updated_at)
- VALUES (?, 'title', ?, 'hash', 7, true, 60, 'public', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
-			row.ID, value).Exec(t.Context())
+ VALUES (?, 'title', ?, ?, 7, true, 60, 'public', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+			row.ID, value, legacyEditCode).Exec(t.Context())
 	} else {
 		_, err = db.NewRaw(`INSERT INTO links (id,target_url,edit_code,views,burn_after_click,privacy)
  VALUES (?, ?, 'hash', 9, true, 'public')`, row.ID, value).Exec(t.Context())

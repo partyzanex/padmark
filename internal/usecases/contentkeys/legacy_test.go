@@ -39,7 +39,7 @@ func (s *ManagerTestSuite) expectConvert(rows *[]Row, hashes map[string]string, 
 				return false, nil
 			}
 
-			(*rows)[index] = Row{Resource: resourceNote, ID: newID, Value: value}
+			(*rows)[index] = Row{Resource: resourceNote, ID: newID, Value: value, StoredEditCode: storedHash}
 
 			return true, nil
 		}).Times(times)

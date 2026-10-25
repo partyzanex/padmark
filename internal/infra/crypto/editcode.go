@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"strings"
 )
 
@@ -116,6 +117,20 @@ func (h *EditCodeHasher) Verify(storedHash, code string) bool {
 	}
 
 	return subtle.ConstantTimeCompare(expected, editCodeDigest(salt, code)) == 1
+}
+
+// storedEditCodeHash matches exactly the two formats every release since v0.2.0 stores: Hash
+// ("s1$<salt>$<digest>") and argon2id ("v1$<memory>$<time>$<threads>$<salt>$<key>"), each with
+// a 16-byte salt and a 32-byte digest or key in unpadded base64url (22 and 43 characters).
+// migrations/*/20261024000001_legacy_hex_slugs.sql applies the same rule in SQL; keep them equal.
+var storedEditCodeHash = regexp.MustCompile(
+	`^(?:s1|v1\$[0-9]+\$[0-9]+\$[0-9]+)\$[A-Za-z0-9_-]{22}\$[A-Za-z0-9_-]{43}$`)
+
+// IsStoredHash reports whether value has the exact shape of a stored edit-code hash. v0.1.6
+// stored edit codes in plaintext, and a caller-chosen code could start with "v1$" or "s1$", so
+// a prefix check cannot tell a hash from such a code; only a value of the full shape can be a hash.
+func (h *EditCodeHasher) IsStoredHash(value string) bool {
+	return storedEditCodeHash.MatchString(value)
 }
 
 // editCodeDigest computes SHA-256(salt || code).

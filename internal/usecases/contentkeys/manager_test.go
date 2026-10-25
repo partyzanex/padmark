@@ -17,6 +17,9 @@ const (
 	activeKey      = "key"
 	spareKey       = "spare"
 	installationID = "1b4e28ba-2fa1-11d2-883f-0016d3cca427"
+	// storedHash stands for a hashed edit code: every note written since v0.2.0 stores one, and
+	// the hasher mock below treats only this value as hash-shaped.
+	storedHash = "s1$stored$hash"
 
 	legacyValue   = "bGVnYWN5LWNpcGhlcnRleHQtYmFzZTY0"
 	corruptValue  = "plaintext from before encryption"
@@ -59,8 +62,14 @@ var fixtures = map[string]cipherFixture{
 
 func checkFor(keyID string) string { return "check-" + keyID }
 
+// newRow builds a record as a release since v0.2.0 stores it: notes carry a hashed edit code.
 func newRow(resource, slug, value string) Row {
-	return Row{Resource: resource, ID: domain.HashSlug(slug), Value: value}
+	row := Row{Resource: resource, ID: domain.HashSlug(slug), Value: value}
+	if resource == resourceNote {
+		row.StoredEditCode = storedHash
+	}
+
+	return row
 }
 
 func readyRegistry() *Registry {
@@ -116,6 +125,9 @@ func (s *ManagerTestSuite) SetupTest() {
 	s.stubCipher(s.notes)
 	s.stubCipher(s.links)
 	s.hasher = NewMockEditCodeHasher(s.ctrl)
+	s.hasher.EXPECT().IsStoredHash(gomock.Any()).DoAndReturn(func(value string) bool {
+		return value == storedHash
+	}).AnyTimes()
 	s.manager = New(s.store, s.keys, s.notes, s.links, s.hasher)
 }
 

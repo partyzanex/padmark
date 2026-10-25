@@ -43,6 +43,7 @@ func runUpgrade(t *testing.T, db *bun.DB, repos repositories, fixture []legacyNo
 	t.Helper()
 
 	assertSchemaKeepsLegacyRows(t, db, fixture)
+	resolveUntaggedNotes(t, db, fixture)
 	convertContent(t, db, fixture)
 	assertStoredRowsConverted(t, db, fixture)
 
@@ -98,9 +99,72 @@ func assertSchemaKeepsLegacyRows(t *testing.T, db *bun.DB, fixture []legacyNote)
 			err = db.NewSelect().Table("notes").ColumnExpr("legacy_slug").Where("id = ?", note.slug).
 				Scan(t.Context(), &legacySlug)
 			require.NoError(t, err)
+
+			if note.untaggedBySchema {
+				assert.False(t, legacySlug.Valid, "a code of the exact hash shape cannot be told apart by SQL")
+
+				return
+			}
+
 			assert.Equal(t, sql.NullString{String: note.slug, Valid: true}, legacySlug, "the legacy note must be tagged")
 		})
 	}
+}
+
+// resolveUntaggedNotes walks review R1 on the v0.1.6 notes whose custom slug is 64 hex
+// characters: the schema migration tags codes that only start like a hash, prune never deletes
+// an untagged v0.1.6 note, and mark-legacy is the explicit fix for a code of the exact hash shape.
+func resolveUntaggedNotes(t *testing.T, db *bun.DB, fixture []legacyNote) {
+	t.Helper()
+
+	ctx := t.Context()
+	keyManager := newKeyManager(t, db)
+	argon, fast, shaped := &fixture[noteHexArgonPrefix], &fixture[noteHexFastPrefix], &fixture[noteHexHashShaped]
+
+	// Only the exact-shape code escapes the schema migration. A prune run would delete it, so the
+	// preview names it; tagged notes are never candidates.
+	report, err := keyManager.Status(ctx)
+	require.ErrorContains(t, err, "mark-legacy --id")
+	assert.Equal(t, len(fixture)-1, report.Plaintext)
+	assert.Equal(t, 1, report.CorruptRaw)
+	assert.Zero(t, report.UntaggedLegacy)
+
+	preview, err := keyManager.PruneCorrupt(ctx, true)
+	require.NoError(t, err)
+	assert.Equal(t, []contentkeys.Candidate{{Resource: "note", ID: shaped.slug, Reason: "corrupt_raw"}},
+		preview.Candidates)
+
+	// A database migrated by the earlier prefix-only rule left the other two untagged as well:
+	// prune then refuses to run and deletes nothing, not even the corrupt-looking note.
+	_, err = db.NewUpdate().Table("notes").Set("legacy_slug = NULL").
+		Where("id IN (?)", bun.List([]string{argon.slug, fast.slug})).Exec(ctx)
+	require.NoError(t, err)
+
+	report, err = keyManager.PruneCorrupt(ctx, false)
+	require.ErrorContains(t, err, "mark-legacy --id")
+	assert.Zero(t, report.Pruned)
+	assert.Equal(t, 2, report.UntaggedLegacy)
+
+	count, err := db.NewSelect().Table("notes").Count(ctx)
+	require.NoError(t, err)
+	require.EqualValues(t, len(fixture), count, "prune must not delete any v0.1.6 note")
+
+	preview, err = keyManager.PruneCorrupt(ctx, true)
+	require.Error(t, err)
+	assert.ElementsMatch(t, []contentkeys.Candidate{
+		{Resource: "note", ID: argon.slug, Reason: "untagged_legacy"},
+		{Resource: "note", ID: fast.slug, Reason: "untagged_legacy"},
+		{Resource: "note", ID: shaped.slug, Reason: "corrupt_raw"},
+	}, preview.Candidates)
+
+	for _, note := range []*legacyNote{argon, fast, shaped} {
+		_, err = keyManager.MarkLegacy(ctx, note.slug)
+		require.NoError(t, err, "mark-legacy %q", note.title)
+	}
+
+	report, err = keyManager.Status(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, len(fixture), report.Plaintext)
 }
 
 // convertContent follows the operator order: serve refuses, status counts the plaintext rows,
@@ -184,7 +248,7 @@ func assertStoredRowsConverted(t *testing.T, db *bun.DB, fixture []legacyNote) {
 		assert.NotEqual(t, note.editCode, row.EditCode, "edit code of %q must not stay plaintext", note.title)
 
 		prefix := "s1$" // generated 12-char codes take the fast hash
-		if i == noteCustomSlug {
+		if !domain.HasGeneratedEditCodeShape(note.editCode) {
 			prefix = "v1$" // a caller-chosen code takes argon2id
 		}
 
@@ -237,7 +301,9 @@ func assertNotesReadable(t *testing.T, manager *notes.Manager, fixture []legacyN
 func assertEditCodes(t *testing.T, manager *notes.Manager, fixture []legacyNote) {
 	t.Helper()
 
-	for _, index := range []int{noteUnicode, noteCustomSlug, notePrivate} {
+	for _, index := range []int{
+		noteUnicode, noteCustomSlug, notePrivate, noteHexArgonPrefix, noteHexFastPrefix, noteHexHashShaped,
+	} {
 		note := &fixture[index]
 		update := func(code string) error {
 			_, err := manager.Update(t.Context(), note.slug, code, uuid.Nil, &domain.Note{

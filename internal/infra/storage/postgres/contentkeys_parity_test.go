@@ -120,7 +120,9 @@ func (s *ParitySuite) TestContentKeys_ConvertLegacyCASAndTargetConflict() {
 
 	current, err := repo.Get(ctx, "note", domain.HashSlug("legacy-slug"))
 	s.Require().NoError(err)
-	s.Equal(keys.Row{Resource: "note", ID: domain.HashSlug("legacy-slug"), Value: "pmc2$p$new"}, *current)
+	s.Equal(keys.Row{
+		Resource: "note", ID: domain.HashSlug("legacy-slug"), Value: "pmc2$p$new", StoredEditCode: "v1$hash",
+	}, *current)
 
 	taken, err := repo.Get(ctx, "note", "taken-slug")
 	s.Require().NoError(err)

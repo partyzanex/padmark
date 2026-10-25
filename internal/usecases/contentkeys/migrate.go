@@ -51,23 +51,7 @@ func (m *Manager) Migrate(ctx context.Context, dryRun bool) (Report, error) {
 		return report, WrapError(pendingErr)
 	}
 
-	err := m.walk(ctx, func(row Row) error {
-		if row.Legacy != nil {
-			return m.convertLegacy(ctx, &row, &report)
-		}
-
-		cipher := m.ciphers[row.Resource]
-		if cipher.Versioned(row.Value) {
-			return nil
-		}
-
-		value, err := cipher.WrapLegacy(row.Value, row.ID)
-		if err != nil {
-			return nil //nolint:nilerr // final validation counts corrupt rows without exposing data
-		}
-
-		return m.replace(ctx, row, value, &report)
-	})
+	err := m.walk(ctx, func(row Row) error { return m.migrateRow(ctx, &row, &report) })
 	if err != nil {
 		return m.failureReport(ctx, &report, err)
 	}
@@ -91,6 +75,27 @@ func (m *Manager) Migrate(ctx context.Context, dryRun bool) (Report, error) {
 	final.State = Ready
 
 	return final, nil
+}
+
+// migrateRow converts a tagged v0.1.6 note or wraps one structurally valid raw legacy value.
+func (m *Manager) migrateRow(ctx context.Context, row *Row, report *Report) error {
+	if row.Legacy != nil {
+		return m.convertLegacy(ctx, row, report)
+	}
+
+	// An untagged v0.1.6 note is plaintext: wrapping it as legacy ciphertext would make it
+	// unreadable. The final Status reports it until MarkLegacy tags it.
+	cipher := m.ciphers[row.Resource]
+	if cipher.Versioned(row.Value) || m.untaggedLegacy(row) {
+		return nil
+	}
+
+	value, err := cipher.WrapLegacy(row.Value, row.ID)
+	if err != nil {
+		return nil //nolint:nilerr // final validation counts corrupt rows without exposing data
+	}
+
+	return m.replace(ctx, *row, value, report)
 }
 
 // Rewrap only changes DEK wrappers. Interrupted rotations remain readable with both keys.

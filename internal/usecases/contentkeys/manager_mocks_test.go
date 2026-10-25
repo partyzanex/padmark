@@ -113,6 +113,21 @@ func (mr *MockStorageMockRecorder) Initialize(ctx, registry any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Initialize", reflect.TypeOf((*MockStorage)(nil).Initialize), ctx, registry)
 }
 
+// MarkLegacy mocks base method.
+func (m *MockStorage) MarkLegacy(ctx context.Context, row Row) (bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "MarkLegacy", ctx, row)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// MarkLegacy indicates an expected call of MarkLegacy.
+func (mr *MockStorageMockRecorder) MarkLegacy(ctx, row any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MarkLegacy", reflect.TypeOf((*MockStorage)(nil).MarkLegacy), ctx, row)
+}
+
 // Register mocks base method.
 func (m *MockStorage) Register(ctx context.Context, keyID, check string) error {
 	m.ctrl.T.Helper()
@@ -223,6 +238,20 @@ func (m *MockEditCodeHasher) HashUserProvided(code string) (string, error) {
 func (mr *MockEditCodeHasherMockRecorder) HashUserProvided(code any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "HashUserProvided", reflect.TypeOf((*MockEditCodeHasher)(nil).HashUserProvided), code)
+}
+
+// IsStoredHash mocks base method.
+func (m *MockEditCodeHasher) IsStoredHash(value string) bool {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "IsStoredHash", value)
+	ret0, _ := ret[0].(bool)
+	return ret0
+}
+
+// IsStoredHash indicates an expected call of IsStoredHash.
+func (mr *MockEditCodeHasherMockRecorder) IsStoredHash(value any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsStoredHash", reflect.TypeOf((*MockEditCodeHasher)(nil).IsStoredHash), value)
 }
 
 // MockKeyring is a mock of Keyring interface.

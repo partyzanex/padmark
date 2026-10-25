@@ -24,13 +24,16 @@ const (
 )
 
 // Row is one stored record as the migration protocol sees it. Legacy is set only for notes
-// tagged by the legacy_notes schema migration; it is nil for every other note and for all
-// links. Never log or wrap any field but Resource.
+// tagged by the legacy_notes schema migrations or MarkLegacy; it is nil for every other note
+// and for all links. StoredEditCode is the edit_code of an untagged note (a hash, unless the
+// row is an untagged v0.1.6 note) and empty for links and tagged notes. Never log or wrap any
+// field but Resource.
 type Row struct {
-	Legacy   *LegacyNote
-	Resource string
-	ID       string
-	Value    string
+	Legacy         *LegacyNote
+	Resource       string
+	ID             string
+	Value          string
+	StoredEditCode string
 }
 
 // LegacyNote carries the plaintext columns of a note written by v0.1.6 or earlier, whose ID
@@ -62,14 +65,20 @@ type Storage interface {
 	// inspected id, content and legacy_slug. false means a concurrent change won. A target ID
 	// that already exists is reported as ErrConvertTargetExists, never by replacing that row.
 	ConvertLegacy(ctx context.Context, row Row, newID, value, editCodeHash string) (bool, error)
+	// MarkLegacy tags one untagged note for conversion (legacy_slug = id) only while the row
+	// still holds the inspected id and content and has no tag. false means a concurrent change won.
+	MarkLegacy(ctx context.Context, row Row) (bool, error)
 }
 
 // EditCodeHasher hashes plaintext edit codes of converted legacy notes. Hash is the fast
 // format for server-generated high-entropy codes; HashUserProvided is the memory-hard format
-// for caller-chosen codes whose entropy is unknown.
+// for caller-chosen codes whose entropy is unknown. IsStoredHash reports whether a stored
+// value has the exact shape of such a hash: every release since v0.2.0 stores only hashes, so
+// an untagged note whose edit code is not hash-shaped can only be a v0.1.6 plaintext note.
 type EditCodeHasher interface {
 	Hash(code string) (string, error)
 	HashUserProvided(code string) (string, error)
+	IsStoredHash(value string) bool
 }
 
 type Keyring interface {
@@ -93,20 +102,32 @@ type Cipher interface {
 	Encrypt(plain, recordID string) (string, error)
 }
 
-// Report contains counts and public key IDs only; never slugs, content, or key bytes.
+// Report contains counts and public key IDs; never content or key bytes. Only a prune dry run
+// fills Candidates with record IDs, so the operator can review them before any deletion; for an
+// untagged v0.1.6 note the ID is its slug.
 type Report struct {
-	Keys       map[string]int `json:"keys"`
-	State      string         `json:"state"`
-	Raw        int            `json:"raw"`
-	Wrapped    int            `json:"wrapped"`
-	Native     int            `json:"native"`
-	Failed     int            `json:"failed"`
-	CorruptRaw int            `json:"corrupt_raw"`
-	Plaintext  int            `json:"plaintext"`
-	Pruned     int            `json:"pruned"`
-	Changed    int            `json:"changed"`
-	Conflicts  int            `json:"conflicts"`
-	Missing    int            `json:"missing"`
+	Keys           map[string]int `json:"keys"`
+	State          string         `json:"state"`
+	Candidates     []Candidate    `json:"candidates,omitempty"`
+	Raw            int            `json:"raw"`
+	Wrapped        int            `json:"wrapped"`
+	Native         int            `json:"native"`
+	Failed         int            `json:"failed"`
+	CorruptRaw     int            `json:"corrupt_raw"`
+	UntaggedLegacy int            `json:"untagged_legacy"`
+	Plaintext      int            `json:"plaintext"`
+	Pruned         int            `json:"pruned"`
+	Changed        int            `json:"changed"`
+	Conflicts      int            `json:"conflicts"`
+	Missing        int            `json:"missing"`
+}
+
+// Candidate is one record a prune dry run reports: Reason is "corrupt_raw" (prune would delete
+// it) or "untagged_legacy" (a v0.1.6 note that prune never deletes; tag it with MarkLegacy).
+type Candidate struct {
+	Resource string `json:"resource"`
+	ID       string `json:"id"`
+	Reason   string `json:"reason"`
 }
 
 type Manager struct {
@@ -288,9 +309,11 @@ func (m *Manager) validateKeys(reg *Registry, requireActive bool) error {
 }
 
 // inspect classifies a row: notes tagged as v0.1.6 plaintext are Plaintext whatever their
-// content looks like (it may resemble an envelope or base64 ciphertext); other unversioned
-// values are raw legacy ciphertext (Raw) or malformed raw data (CorruptRaw, also Failed);
-// versioned values that do not authenticate are Failed only and are never eligible for pruning.
+// content looks like (it may resemble an envelope or base64 ciphertext); an untagged note with
+// an unversioned value and an edit code that is not hash-shaped is an untagged v0.1.6 note
+// (UntaggedLegacy, also Failed, never pruned); other unversioned values are raw legacy
+// ciphertext (Raw) or malformed raw data (CorruptRaw, also Failed); versioned values that do
+// not authenticate are Failed only and are never eligible for pruning.
 func (m *Manager) inspect(row Row, reg *Registry, report *Report) {
 	if row.Legacy != nil {
 		report.Plaintext++
@@ -300,6 +323,13 @@ func (m *Manager) inspect(row Row, reg *Registry, report *Report) {
 
 	cipher := m.ciphers[row.Resource]
 	if !cipher.Versioned(row.Value) {
+		if m.untaggedLegacy(&row) {
+			report.Failed++
+			report.UntaggedLegacy++
+
+			return
+		}
+
 		if cipher.ValidateLegacy(row.Value) != nil {
 			report.Failed++
 			report.CorruptRaw++
@@ -334,6 +364,14 @@ func (m *Manager) inspect(row Row, reg *Registry, report *Report) {
 	} else {
 		report.Native++
 	}
+}
+
+// untaggedLegacy reports whether an unversioned row is a v0.1.6 plaintext note that no schema
+// migration tagged: only notes carry edit codes, and every release since v0.2.0 stores them
+// hashed, so a note whose edit code is not hash-shaped cannot be raw legacy ciphertext. Such a
+// row must never be wrapped as ciphertext or pruned as malformed data.
+func (m *Manager) untaggedLegacy(row *Row) bool {
+	return row.Resource == resourceNote && row.Legacy == nil && !m.hasher.IsStoredHash(row.StoredEditCode)
 }
 
 // initialize authenticates existing envelopes before binding this DB to the supplied keys.

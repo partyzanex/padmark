@@ -14,10 +14,14 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/infra/crypto"
 	keyrepo "github.com/partyzanex/padmark/internal/infra/storage/contentkeys"
 	"github.com/partyzanex/padmark/internal/usecases/contentkeys"
 )
+
+// hashShapedEditCode has the exact shape of a stored "s1$" hash (22 + 43 base64url characters).
+const hashShapedEditCode = "s1$" + "AAAAAAAAAAAAAAAAAAAAAA" + "$" + "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
 
 func TestEncryptionCommands_KeyLifecycle(t *testing.T) {
 	directory := t.TempDir()
@@ -187,11 +191,13 @@ func TestEncryptionPruneRecoversExpiredPlaintextDatabase(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, db.Close()) })
 
 	expired := time.Now().UTC().Add(-time.Hour)
+	// A malformed row of a v0.2.0–v0.3.3 database: its edit code has the stored-hash shape, so it
+	// is corrupt raw data, not an untagged v0.1.6 note (which prune never deletes).
 	_, err = db.NewRaw(`INSERT INTO notes
  (id,title,content,edit_code,views,burn_after_reading,burn_ttl,privacy,created_at,updated_at,expires_at)
- VALUES ('old-id', 'old', ?, 'hash', 7, false, 0, 'public', ?, ?, ?)`,
+ VALUES ('old-id', 'old', ?, ?, 7, false, 0, 'public', ?, ?, ?)`,
 		// "$" in pre-encryption plaintext must not make the row look like a versioned envelope.
-		"sensitive old plaintext costing $5 in $HOME", expired, expired, expired).Exec(t.Context())
+		"sensitive old plaintext costing $5 in $HOME", hashShapedEditCode, expired, expired, expired).Exec(t.Context())
 	require.NoError(t, err)
 	output, err := runEncryptionTestCommand(t, dsn, keyfile, "migrate")
 	require.ErrorContains(t, err, "prune --corrupt --dry-run")
@@ -248,4 +254,51 @@ func TestValidateContentEncryptionAddsContextOnce(t *testing.T) {
 	require.Error(t, err)
 	require.True(t, strings.HasPrefix(err.Error(), "content encryption: "), err.Error())
 	require.Equal(t, 1, strings.Count(err.Error(), "content encryption:"), err.Error())
+}
+
+// TestEncryptionMarkLegacyConvertsHashShapedV016Note: a v0.1.6 note whose custom slug is 64 hex
+// characters and whose edit code has the exact stored-hash shape is listed by the prune preview,
+// tagged by mark-legacy and converted by migrate; it is never deleted (review R1).
+func TestEncryptionMarkLegacyConvertsHashShapedV016Note(t *testing.T) {
+	directory := t.TempDir()
+	dsn, keyfile := filepath.Join(directory, "legacy.db"), filepath.Join(directory, "keys.json")
+	_, err := runEncryptionTestCommand(t, dsn, "", "keygen", "--key-id", "key", "--output", keyfile)
+	require.NoError(t, err)
+	require.NoError(t, NewApp().Run(t.Context(), []string{"padmark", "migrate", "--storage", "sqlite", "--dsn", dsn}))
+
+	db, err := openDB(t.Context(), "sqlite", dsn, slog.New(slog.DiscardHandler))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, db.Close()) })
+
+	slug, now := strings.Repeat("c", 64), time.Now().UTC()
+	_, err = db.NewRaw(`INSERT INTO notes
+ (id,title,content,edit_code,views,burn_after_reading,burn_ttl,privacy,created_at,updated_at)
+ VALUES (?, 'v0.1.6', 'plaintext of a v0.1.6 note', ?, 0, false, 0, 'public', ?, ?)`,
+		slug, hashShapedEditCode, now, now).Exec(t.Context())
+	require.NoError(t, err)
+
+	_, err = runEncryptionTestCommand(t, dsn, keyfile, "migrate")
+	require.ErrorContains(t, err, "mark-legacy --id")
+
+	output, err := runEncryptionTestCommand(t, dsn, keyfile, "prune", "--corrupt", "--dry-run")
+	require.NoError(t, err)
+	require.Equal(t, []contentkeys.Candidate{{Resource: "note", ID: slug, Reason: "corrupt_raw"}},
+		encryptionTestReport(t, output).Candidates)
+
+	_, err = runEncryptionTestCommand(t, dsn, keyfile, "mark-legacy")
+	require.ErrorContains(t, err, "requires --id")
+
+	output, err = runEncryptionTestCommand(t, dsn, keyfile, "mark-legacy", "--id", slug)
+	require.NoError(t, err)
+	require.Equal(t, 1, encryptionTestReport(t, output).Plaintext)
+
+	output, err = runEncryptionTestCommand(t, dsn, keyfile, "migrate")
+	require.NoError(t, err)
+	report := encryptionTestReport(t, output)
+	require.Equal(t, contentkeys.Ready, report.State)
+	require.Equal(t, 1, report.Native)
+
+	var ids []string
+	require.NoError(t, db.NewSelect().Table("notes").Column("id").Scan(t.Context(), &ids))
+	require.Equal(t, []string{domain.HashSlug(slug)}, ids, "the note must be converted, not deleted")
 }

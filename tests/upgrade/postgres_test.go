@@ -43,11 +43,14 @@ func TestPostgresUpgradeFromV016(t *testing.T) {
 
 	t.Cleanup(func() { require.NoError(t, db.Close()) })
 
+	notes := append(fixture.notes(), hexSlugNotes()...)
+	insertV016Notes(t, db, notes[noteCount:])
+
 	_, err = pgrepo.Migrate(ctx, db)
 	require.NoError(t, err)
 
 	runUpgrade(t, db, repositories{
 		notes: pgrepo.NewNoteRepository(db),
 		links: pgrepo.NewLinkRepository(db, slog.New(slog.DiscardHandler)),
-	}, fixture.notes())
+	}, notes)
 }

@@ -24,6 +24,7 @@ const (
 	flagKeyOutput = "output"
 	flagDryRun    = "dry-run"
 	flagCorrupt   = "corrupt"
+	flagNoteID    = "id"
 )
 
 const (
@@ -31,6 +32,7 @@ const (
 	encryptionRewrap  = "rewrap"
 	encryptionConvert = "convert"
 	encryptionPrune   = "prune"
+	encryptionMark    = "mark-legacy"
 )
 
 func encryptionCommand() *cli.Command {
@@ -52,7 +54,10 @@ func encryptionCommand() *cli.Command {
 			"(hashed ID, encrypted content, hashed edit code); resume an interrupted migration"},
 		{encryptionRewrap, "Rotate DEK wrappers to the active KEK, keeping payloads unchanged"},
 		{encryptionConvert, "Convert wrapped legacy records using one original slug per stdin line"},
-		{encryptionPrune, "Permanently remove malformed raw records; preview with --corrupt --dry-run"},
+		{encryptionPrune, "Permanently remove malformed raw records; preview with --corrupt --dry-run " +
+			"(lists candidate IDs)"},
+		{encryptionMark, "Tag one note as v0.1.6 plaintext for conversion by encryption migrate " +
+			"(a 64-hex custom slug the schema migrations could not recognise)"},
 	}
 
 	commands := make([]*cli.Command, 0, len(items))
@@ -68,6 +73,12 @@ func encryptionCommand() *cli.Command {
 		if item.name == encryptionPrune {
 			operationFlags = append(operationFlags, &cli.BoolFlag{
 				Name: flagCorrupt, Usage: "Explicitly select malformed raw records for permanent deletion",
+			})
+		}
+
+		if item.name == encryptionMark {
+			operationFlags = append(operationFlags, &cli.StringFlag{
+				Name: flagNoteID, Usage: "Note ID from encryption prune --corrupt --dry-run (required)",
 			})
 		}
 
@@ -110,6 +121,10 @@ func newEncryptionManager(
 func validateEncryptionFlags(cmd *cli.Command) error {
 	if cmd.Name == encryptionPrune && !cmd.Bool(flagCorrupt) {
 		return errors.New("prune requires --corrupt; preview permanent raw-record deletion with --corrupt --dry-run")
+	}
+
+	if cmd.Name == encryptionMark && cmd.String(flagNoteID) == "" {
+		return errors.New("mark-legacy requires --id; list candidate IDs with prune --corrupt --dry-run")
 	}
 
 	if !cmd.Bool(flagDryRun) {
@@ -253,6 +268,8 @@ func runEncryptionData(ctx context.Context, cmd *cli.Command, manager *contentke
 		report, err = manager.ConvertSlugs(ctx, input, cmd.Bool(flagDryRun))
 	case encryptionPrune:
 		report, err = manager.PruneCorrupt(ctx, cmd.Bool(flagDryRun))
+	case encryptionMark:
+		report, err = manager.MarkLegacy(ctx, cmd.String(flagNoteID))
 	default:
 		return errors.New("unknown encryption operation")
 	}

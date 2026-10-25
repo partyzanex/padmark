@@ -33,11 +33,14 @@ func TestSQLiteUpgradeFromV016(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, db.Close()) })
 
+	notes := append(fixture.notes(), hexSlugNotes()...)
+	insertV016Notes(t, db, notes[noteCount:])
+
 	_, err = sqliterepo.Migrate(ctx, db)
 	require.NoError(t, err)
 
 	runUpgrade(t, db, repositories{
 		notes: sqliterepo.NewNoteRepository(db),
 		links: sqliterepo.NewLinkRepository(db, slog.New(slog.DiscardHandler)),
-	}, fixture.notes())
+	}, notes)
 }
