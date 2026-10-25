@@ -33,7 +33,7 @@ already includes those libraries and the matching browser.
 ```sh
 make test-ui-setup        # Download Go dependencies, driver and Chromium (first run)
 make test-ui              # All 38 checks, including screenshots
-make test-ui-headed       # Watch the Chromium window
+make test-ui-headed       # Watch the Chromium window (screenshots are not compared)
 make test-ui-debug        # Step through actions in the Playwright Inspector
 make test-ui-update       # Update references after an intentional design change
 make test-ui-report       # Open the last HTML report; Ctrl+C stops the local server
@@ -53,6 +53,9 @@ You can also run `go test -v -count=1 -parallel=2 .` from `tests/ui/` after setu
 Use `-args -headed` or `-args -update` for the custom browser/snapshot flags. The
 Makefile clears inherited `GOROOT` so the selected Go executable locates its SDK.
 The nested module is excluded from root `go test ./...`; run browser tests explicitly.
+Headed and debug runs skip screenshot comparisons: the references come from headless
+Chromium, and the full headed browser renders fonts and scrollbars differently. `-update`
+with `-headed` is refused for the same reason.
 
 ## Writing scenarios
 

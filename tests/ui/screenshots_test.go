@@ -14,64 +14,106 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func (e *ui) screenshot(name string, masks ...string) {
-	e.t.Helper()
-	e.eval("() => document.fonts.ready")
-	e.eval(`() => {
+func (sess *uiSession) screenshot(name string, masks ...string) {
+	sess.t.Helper()
+
+	// References are captured by headless Chromium (chromium-headless-shell). A headed run uses the
+	// full browser, which renders fonts and scrollbars differently, so it only watches the flow.
+	if *withBrowser {
+		sess.t.Logf("headed run: screenshot %s is not compared", name)
+
+		return
+	}
+
+	sess.eval("() => document.fonts.ready")
+	sess.eval(`() => {
 		for (const tag of document.querySelectorAll('#createdTag')) {
 			const icon = tag.querySelector('svg');
 			tag.replaceChildren(...(icon ? [icon] : []), document.createTextNode(' Oct 24, 2026, 12:00 PM'));
 		}
 	}`)
+
 	options := playwright.PageScreenshotOptions{
-		FullPage: playwright.Bool(true), Animations: playwright.ScreenshotAnimationsDisabled,
+		FullPage: new(true), Animations: playwright.ScreenshotAnimationsDisabled,
 		Scale: playwright.ScreenshotScaleCss, Caret: playwright.ScreenshotCaretHide,
 	}
 	for _, selector := range masks {
-		options.Mask = append(options.Mask, e.page.Locator(selector))
+		options.Mask = append(options.Mask, sess.page.Locator(selector))
 	}
-	// Compare two consecutive captures so fonts, transitions and layout have settled.
-	actual, err := e.page.Screenshot(options)
-	e.must(err)
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		next, captureErr := e.page.Screenshot(options)
-		e.must(captureErr)
-		if bytes.Equal(actual, next) {
-			actual = next
-			break
-		}
-		require.True(e.t, time.Now().Before(deadline), "screenshot %s did not stabilize", name)
-		actual = next
-	}
-	reference := filepath.Join("testdata", "screenshots", e.screen.name, runtime.GOOS, name)
+
+	actual := sess.stableScreenshot(name, options)
+	reference := filepath.Join("testdata", "screenshots", sess.screen.name, runtime.GOOS, name)
+
 	if *updateImages {
-		e.must(os.MkdirAll(filepath.Dir(reference), 0o755))
-		e.must(os.WriteFile(reference, actual, 0o644))
+		//nolint:gosec // G301: committed reference images must stay readable by every developer and CI
+		sess.must(os.MkdirAll(filepath.Dir(reference), 0o755))
+		//nolint:gosec // G306: committed reference images must stay readable by every developer and CI
+		sess.must(os.WriteFile(reference, actual, 0o644))
+
 		return
 	}
+
+	sess.compareScreenshot(name, reference, actual)
+}
+
+// stableScreenshot compares two consecutive captures so fonts, transitions and layout have settled.
+func (sess *uiSession) stableScreenshot(name string, options playwright.PageScreenshotOptions) []byte {
+	sess.t.Helper()
+
+	actual, err := sess.page.Screenshot(options)
+	sess.must(err)
+
+	deadline := time.Now().Add(5 * time.Second)
+
+	for {
+		next, captureErr := sess.page.Screenshot(options)
+		sess.must(captureErr)
+
+		if bytes.Equal(actual, next) {
+			return next
+		}
+
+		require.True(sess.t, time.Now().Before(deadline), "screenshot %s did not stabilize", name)
+
+		actual = next
+	}
+}
+
+// compareScreenshot fails the test when the capture differs from the reference image.
+func (sess *uiSession) compareScreenshot(name, reference string, actual []byte) {
+	sess.t.Helper()
+
+	//nolint:gosec // G304: the path is built from fixed test data, not from user input
 	expected, err := os.ReadFile(reference)
 	if err != nil {
-		e.must(os.WriteFile(filepath.Join(e.artifacts, name+".actual.png"), actual, 0o600))
-		e.t.Fatalf("read screenshot reference %s: %v; review the actual image, then run make test-ui-update", reference, err)
+		sess.must(os.WriteFile(filepath.Join(sess.artifacts, name+".actual.png"), actual, 0o600))
+		sess.t.Fatalf("read screenshot reference %s: %v; review the actual image, then run make test-ui-update",
+			reference, err)
 	}
+
 	expectedImage, err := png.Decode(bytes.NewReader(expected))
-	e.must(err)
+	sess.must(err)
 	actualImage, err := png.Decode(bytes.NewReader(actual))
-	e.must(err)
+	sess.must(err)
+
 	var diffImage image.Image
+
 	count, diffErr := pixelmatch.MatchPixel(expectedImage, actualImage,
 		pixelmatch.Threshold(0.2), pixelmatch.WriteTo(&diffImage))
 	if diffErr == nil && count <= 100 {
 		return
 	}
-	e.must(os.WriteFile(filepath.Join(e.artifacts, name+".actual.png"), actual, 0o600))
-	e.must(os.WriteFile(filepath.Join(e.artifacts, name+".expected.png"), expected, 0o600))
+
+	sess.must(os.WriteFile(filepath.Join(sess.artifacts, name+".actual.png"), actual, 0o600))
+	//nolint:gosec // G703: the artifact path is built from fixed test names, not from user input
+	sess.must(os.WriteFile(filepath.Join(sess.artifacts, name+".expected.png"), expected, 0o600))
+
 	if diffImage != nil {
 		var buffer bytes.Buffer
-		e.must(png.Encode(&buffer, diffImage))
-		e.must(os.WriteFile(filepath.Join(e.artifacts, name+".diff.png"), buffer.Bytes(), 0o600))
+		sess.must(png.Encode(&buffer, diffImage))
+		sess.must(os.WriteFile(filepath.Join(sess.artifacts, name+".diff.png"), buffer.Bytes(), 0o600))
 	}
-	require.NoError(e.t, diffErr, "screenshot dimensions must match: %s", reference)
-	require.LessOrEqual(e.t, count, 100, "screenshot changed: %s; see %s", reference, e.artifacts)
+
+	require.NoError(sess.t, diffErr, "screenshot dimensions must match: %s", reference)
+	require.LessOrEqual(sess.t, count, 100, "screenshot changed: %s; see %s", reference, sess.artifacts)
 }
