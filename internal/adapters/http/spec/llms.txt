@@ -15,8 +15,9 @@ contract is at [`/api/openapi.yaml`](/api/openapi.yaml).
   a hard expiry from the request. Responds `201` with the note and `Location: /{id}`; `409`
   when the slug is taken, `422` for an invalid slug or `privacy: owner` without a credential.
 - `GET /notes/{id}` — read a note as JSON (send `Accept: application/json`). Incrementing
-  `views` is a side effect of every read, and burn-after-reading notes are destroyed by the
-  first read. That burning read must be explicit: name the format in `Accept`
+  `views` is a side effect of every read. A burn note with no grace period is destroyed by
+  its first intentional read; with a positive burn `ttl`, that read starts the grace period.
+  That burning read must be explicit: name the format in `Accept`
   (`application/json`, `text/markdown`, `text/plain` or `text/html`); a burn-after-reading note
   requested without `Accept`, with only wildcards (`*/*`), with `HEAD` or as a browser
   subresource gets `409` (`code: burn_read_not_explicit`) and stays intact. `401` when the
@@ -31,12 +32,14 @@ contract is at [`/api/openapi.yaml`](/api/openapi.yaml).
   immediately, omitted preserves the current expiry (except that disabling an existing burn
   timer clears its expiry), and `ttl: null` removes it. With burn, `ttl` is the post-read
   grace period; omitted, null or 0 means immediate burn.
-- `DELETE /notes/{id}` — delete; the `edit_code` goes in the `X-Edit-Code` header or the
-  `edit_code` query parameter, unless authenticated as the owner.
+- `DELETE /notes/{id}` — delete; send the edit code in the `X-Edit-Code` header, unless
+  authenticated as the owner. An `edit_code` query parameter is not accepted.
 
-Every new note returns `edit_code` **exactly once, at creation**. Only an argon2id hash is
-stored — a lost edit code cannot be recovered; the only remedies are a saved code or a bearer
-token for the owning account. Omit `edit_code` on create to get a random 12-character code; a
+Every new note returns `edit_code` **exactly once, at creation**. Generated codes use a salted
+SHA-256 hash; caller-chosen codes use argon2id. A lost edit code cannot be recovered; use a
+saved code or a session/API token for the owning account. Ownership follows the account ID,
+so another session or API token for that same account also works. Omit `edit_code` on create
+to get a random 12-character code; a
 chosen one (notes and links alike) must be 8–128 characters with no leading/trailing whitespace
 or control characters (`400` if too short/long, `422` otherwise).
 
@@ -111,10 +114,12 @@ All machine responses use `{"message": string}` (message required, optional `cod
 `404 {"message": "not found"}`. Request bodies must be `application/json` (`415` otherwise)
 and within the server's body limit (`413`). `429` means rate limiting or a repeated-failure
 lockout is active (10 failed edit-code attempts within a rolling 5-minute window); edit-code
-lockout is scoped to the resource and authenticated user ID (across sessions/tokens), with a
-separate shared anonymous bucket per resource.
+lockout is scoped to the resource and authenticated user ID (across sessions/tokens).
+Anonymous attempts are scoped to the resource and client IP, with IPv6 grouped by /64.
 `503` with `code: "api_disabled"` means the instance runs with `--disable-api` and the
-REST surface is off. Match `code`, not `message`; other `503` responses have other causes.
+REST surface is off. The editor cannot publish or save because it uses the REST API;
+viewing `/{id}`, following `/r/{id}`, account/admin forms and health checks still work.
+Match `code`, not `message`; other `503` responses have other causes.
 
 ## Health
 

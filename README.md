@@ -38,7 +38,7 @@ Those tools are built for humans. padmark is built for agents — and humans who
 
 - Share Markdown (or plain text) notes via a short URL
 - Edit or delete notes using a secret `edit_code` — no login required
-- If you were signed in (session or API token) when you created a note, edit or delete it later with that same credential — no `edit_code` needed
+- If you created a note while signed in, edit or delete it later from any session or API token for that same account — no `edit_code` needed
 - Make notes disappear after the first read (burn-after-reading)
 - Choose who can read a note: anyone, any logged-in user, or only its owner
 - Gate access with user accounts protected by TOTP two-factor auth, or with API Bearer tokens
@@ -65,7 +65,7 @@ Every note has:
 | `privacy` | Who can read it: `public` (default), `authenticated`, or `owner` |
 
 > **Keep your `edit_code` safe.** It's shown once at creation and cannot be recovered. Exception:
-> if you created the note while authenticated (session or API token), that same credential edits
+> if you created the note while authenticated, any session or API token for that account edits
 > and deletes it without the `edit_code` — see [Editing without `edit_code`](#editing-without-edit_code-owners).
 
 ### Burn-after-reading modes
@@ -129,7 +129,33 @@ the database read or cache authorization decisions.
 
 ## Quick start
 
-Create an installation keyring **once**, outside the repository, before starting the server:
+### SQLite (simplest)
+
+```bash
+go run ./cmd/padmark-server serve --addr :8080
+```
+
+Open `http://localhost:8080`. On a fresh file-backed SQLite installation the server creates
+`padmark.db` and an installation keyring, `padmark-keys.json`, beside it. Keep both across
+restarts and back up the keyring separately from the database. Losing the keys makes the
+encrypted content unreadable. All replicas sharing a database need the same keyring.
+
+An explicit `PADMARK_CONTENT_KEYRING_FILE` / `--content-keyring-file` overrides that default;
+an explicitly named file must already exist. SQLite in-memory/temporary databases and
+PostgreSQL require an explicit keyring. Existing installations should follow
+[the migration workflow](#content-key-management-migration-and-rotation) before serving.
+
+The SQLite database holds password hashes, sealed TOTP secrets, token hashes and encrypted
+notes. The server creates it with mode `0600` and attempts to tighten an existing file, and
+any leftover `-wal`/`-shm`/`-journal` sidecar, to `0600` on every start; a failed permission
+change is logged as a warning. SQLite creates new sidecars with the same mode.
+Run the service under `umask 077` and keep its data directory private to the service
+account. Windows ACLs are not managed.
+
+### Explicit keyring
+
+Create this file **once**, outside the repository/build context, when using PostgreSQL or
+when you want to choose the keyring location yourself:
 
 ```bash
 install -d -m 700 "$HOME/.config/padmark"
@@ -140,33 +166,23 @@ go run ./cmd/padmark-server encryption keygen \
 
 The command refuses to overwrite an existing file. Keep this file for subsequent starts and
 back it up separately from the database: losing its keys makes new encrypted content unreadable.
-All replicas sharing a database need the same keyring. You can also pass its path with
-`--content-keyring-file`. The server rejects a missing or malformed keyring, or one readable by
+You can also pass its path with `--content-keyring-file`. The server rejects a missing or
+malformed explicit keyring, or one readable by
 group or other users, before opening the DB; keep the file at mode `0600` or `0400`.
 
-### SQLite (simplest)
-
-```bash
-go run ./cmd/padmark-server --addr :4000
-```
-
-Open `http://localhost:4000`.
-
-The database file (`padmark.db` in the working directory by default) holds password hashes,
-sealed TOTP secrets, token hashes and every encrypted note. The server creates it with mode
-`0600` and tightens an existing file, and any leftover `-wal`/`-shm`/`-journal` sidecar, to
-`0600` on every start; SQLite creates new sidecars with the same mode. Still run the service
-under `umask 077` and keep the database in a directory only the service account can enter.
-Windows ACLs are not managed.
+Only `serve` creates a missing default SQLite keyring. The `encryption` commands never create
+one implicitly: use `encryption keygen` before an upgrade's first `encryption migrate` if the
+old installation has never had a keyring.
 
 ### PostgreSQL
 
 ```bash
-go run ./cmd/padmark-server serve \
-  --storage postgres \
-  --dsn "postgres://user:pass@localhost:5432/padmark?sslmode=disable" \
-  --addr :4000
+PADMARK_STORAGE=postgres \
+PADMARK_DSN="postgres://user:pass@localhost:5432/padmark?sslmode=disable" \
+  go run ./cmd/padmark-server serve --addr :8080
 ```
+
+Create and export the keyring path as shown above before running this command.
 
 ### Docker
 
@@ -180,7 +196,7 @@ docker run -d \
   --mount "type=bind,src=$PADMARK_CONTENT_KEYRING_FILE,dst=/run/secrets/content-keys.json,readonly" \
   -e PADMARK_CONTENT_KEYRING_FILE=/run/secrets/content-keys.json \
   -e PADMARK_DSN=/data/padmark.db \
-  partyzanex/padmark:latest
+  partydev/padmark:latest
 ```
 
 Open `http://localhost:8080`.
@@ -202,7 +218,11 @@ image sets no `GOMEMLIMIT` because it cannot know your limit; see
 
 Save the file below as `docker-compose.yml`, set `POSTGRES_PASSWORD` and the host
 `PADMARK_CONTENT_KEYRING_FILE` path in `.env`, then run `docker compose up -d`.
-The default image matches CI; override `DOCKER_IMAGE`/`DOCKER_TAG` for your own build.
+The bundled Compose file defaults to `partydev/padmark:latest`. Set `DOCKER_IMAGE` and
+`DOCKER_TAG` to the repository/tag you actually publish. `make docker-build` and CI currently
+fall back to `partyzanex/padmark` unless overridden; for the Compose default, build with
+`make docker-build DOCKER_IMAGE=partydev/padmark` and configure the CI repository variable
+`DOCKER_IMAGE` to match when publishing there.
 
 ```yaml
 services:
@@ -228,7 +248,7 @@ services:
       - padmark
 
   padmark:
-    image: ${DOCKER_IMAGE:-partyzanex/padmark}:${DOCKER_TAG:-latest}
+    image: ${DOCKER_IMAGE:-partydev/padmark}:${DOCKER_TAG:-latest}
     command: serve
     ports:
       - "8080:8080"
@@ -300,7 +320,7 @@ padmark-cli create --title "Secret" --content "eyes only" --burn --ttl 3600
 # Requires login to read (any signed-in caller, not just the creator — see "API keys" below)
 padmark-cli create --title "Internal" --content "..." --privacy authenticated
 
-# Owner-only: only the exact credential that created it can ever read it
+# Owner-only: readable through sessions/API tokens for the account that created it
 padmark-cli create --title "Just for me" --content "..." --privacy owner
 
 # Plain text instead of markdown
@@ -632,8 +652,9 @@ are untouched. Rolling back also drops the rows.
 
 **`privacy: authenticated`** notes require either a valid session (browsers are redirected to
 `/login`) or a Bearer token (API clients get `401`) — any signed-in caller, not just the creator.
-**`privacy: owner`** notes go further: only the exact credential that created the note may read
-it (see "Editing without `edit_code`" below for the same owner-scoping applied to writes) —
+**`privacy: owner`** notes go further: only the account that created the note may read it,
+through any of that account's sessions or API tokens (see "Editing without `edit_code`" below
+for the same owner-scoping applied to writes) —
 meaningless without `--enable-accounts`, since a note has no recorded owner otherwise.
 
 Secret CLI flag values (`--password`, `--token`, `--csrf-secret`) are visible in process
@@ -677,7 +698,7 @@ CI/agent deployments and scripting:
 ### Editing without `edit_code` (owners)
 
 If you were authenticated — a session cookie (web UI) or an API Bearer token (CLI/API) — at the
-moment you **created** a note, that exact same credential can edit or delete it later with no
+moment you **created** a note, any session or API token for that same account can edit or delete it later with no
 `edit_code` at all. This only requires `--enable-accounts=true`; it works regardless of the
 note's `privacy` level.
 
@@ -801,7 +822,12 @@ commands do not acquire a deployment-wide maintenance lock. Running replicas kee
 in-memory keys and must be restarted with the resulting keyring before accepting writes.
 
 For an existing installation, preserve a consistent database backup and its current keyring
-separately. Generate a keyring once if the old installation has none, then:
+separately. The encryption commands never generate a missing keyring. If the old installation
+has never used content encryption, create one with `encryption keygen` before proceeding;
+otherwise restore and use its existing keys. File-backed SQLite defaults to
+`padmark-keys.json` beside the configured database; PostgreSQL needs an explicit path.
+See [the v0.1.6 upgrade checklist](CHANGELOG.md#upgrade-checklist-from-v016) for configuration
+changes and the known legacy-slug edge case. Then:
 
 ```bash
 bin/padmark-server migrate
@@ -813,12 +839,21 @@ bin/padmark-server encryption status
 
 Schema migrations create the registry tables; `status` and `--dry-run` never initialize or
 change that registry. The schema must already exist for those commands. The data migration is
-resumable: it only changes `content`/`target_url`, uses compare-and-swap, and leaves counters,
-TTL/burn settings, ownership, edit codes and timestamps unchanged. It never recreates deleted
-rows. Any error exits nonzero; incomplete migrations block `serve` until a successful rerun.
-JSON reports contain `raw`, `wrapped`, `native`, `failed`, `corrupt_raw`, `pruned`, `changed`, `conflicts`, `missing`
-and counts by key ID, without slugs or plaintext. Raw validation checks structure only; the
+resumable and uses compare-and-swap. For previously encrypted records it wraps
+`content`/`target_url` without changing metadata. Tagged v0.1.6 plaintext notes are converted
+in place: their stored ID becomes `sha256(slug)`, content is encrypted, and the edit code is
+hashed. Their public URL and usable edit code stay the same, as do counters, TTL/burn settings,
+privacy and timestamps. Deleted rows are never recreated. Any error exits nonzero; incomplete
+migrations block `serve` until a successful rerun.
+JSON reports contain `plaintext`, `raw`, `wrapped`, `native`, `failed`, `corrupt_raw`, `pruned`, `changed`, `conflicts`, `missing`
+and counts by key ID, without slugs or plaintext content. Raw validation checks structure only; the
 old encryption tag cannot be authenticated without the original slug.
+
+`plaintext` counts tagged, unconverted v0.1.6 notes; successful migration brings it to zero.
+If a v0.1.6 upgrade reports `corrupt_raw`, stop and investigate against the backup before any
+pruning: an unrecognized legacy note could otherwise be deleted. Migration `20261024000001`
+tags 64-character lowercase-hex legacy slugs using their plaintext edit-code format; a legacy
+code beginning with `v1$` or `s1$` remains an ambiguous case.
 
 Old databases may still contain expired plaintext from the era before content encryption.
 Structurally invalid raw records are counted in both `failed` and `corrupt_raw`. Migration
@@ -836,8 +871,8 @@ bin/padmark-server encryption status
 `prune --corrupt` permanently deletes corrupt raw values. A value is a versioned envelope only
 if its first `$`-separated segment matches `pmc<digits>`; any other value (with or without `$`)
 that is not structurally valid legacy base64 ciphertext is corrupt raw. It checks both notes and
-links, including expired records; it never deletes structurally valid legacy ciphertext or
-versioned envelopes. Key, registry,
+links, including expired records; it never deletes tagged v0.1.6 plaintext notes, structurally
+valid legacy ciphertext or versioned envelopes. Key, registry,
 envelope-authentication and database errors abort the preflight without deletion. Compare-and-delete
 preserves records whose content changed after scanning; conflicts are counted. Dry-run writes
 nothing, including registry state. Pruning does not initialize the registry or finish a pending
@@ -902,16 +937,17 @@ There is no destructive encryption down-migration, and older binaries cannot rea
 | `--addr` | `PADMARK_ADDR` | `:8080` | Listen address |
 | `--storage` | `PADMARK_STORAGE` | `sqlite` | `sqlite` or `postgres` |
 | `--dsn` | `PADMARK_DSN` | `padmark.db` | DB path or connection string. A Postgres DSN carries the password, and a command-line flag is visible to every local user in the process listing (`ps`) — pass it via `PADMARK_DSN` instead |
-| `--content-keyring-file` | `PADMARK_CONTENT_KEYRING_FILE` | required | Path to the persisted JSON keyring for note/link encryption; mount as a secret and back up separately from the DB |
+| `--content-keyring-file` | `PADMARK_CONTENT_KEYRING_FILE` | `<db dir>/padmark-keys.json` for file-backed SQLite | Persisted JSON keyring for note/link encryption. `serve` creates a missing default SQLite keyring; explicit paths must already exist. Required explicitly for PostgreSQL and in-memory/temporary SQLite. Encryption tools never create it implicitly. Back it up separately from the DB |
+| `--skip-migration-backup` | `PADMARK_SKIP_MIGRATION_BACKUP` | `false` | Skip the automatic SQLite backup before applying pending schema migrations to an existing database. PostgreSQL logs a backup reminder; take `pg_dump` separately |
 | `--allow-shared-keyring` | `PADMARK_ALLOW_SHARED_KEYRING` | `false` | Accept a keyring file readable by group or other users (logged at WARN) instead of refusing startup. Only for secret managers that cannot provide an owner-only file; keyrings under `/run/secrets/` are already exempt. Prefer mode `0600`/`0400` |
 | `--enable-accounts` | `PADMARK_ENABLE_ACCOUNTS` | `false` | Enable the TOTP account system (`/setup`, `/login`, `/admin`, privacy-level gating); off = fully public |
 | — | `PADMARK_BOOTSTRAP_TOKEN` | — | Environment only (never a flag). Required to create the first admin via `/setup` without an invite; at least 32 characters (shorter fails startup). Unset = first-admin setup disabled. Never logged; unset it once the admin exists |
-| `--disable-api` | `PADMARK_DISABLE_API` | `false` | Disable the REST/JSON API (`/notes*`, `/links*`, `/api`, `/api/openapi.yaml`, `/llms.txt`, `/api/tokens`, `/api/invites`): the middleware returns `503` with `{"message":"API is disabled","code":"api_disabled"}`. Match `code` to identify the cause; outer middleware may reject a request first. The web UI becomes **read-only**: viewing `/{id}` (including JSON/raw reads), `/r/{id}`, the login/admin pages and health checks keep working, but publishing or saving from the editor fails with the API-disabled error, because the editor calls `POST /notes` and `PUT /notes/{id}` |
+| `--disable-api` | `PADMARK_DISABLE_API` | `false` | Disable the REST/JSON API (`/notes*`, `/links*`, `/api`, `/api/openapi.yaml`, `/llms.txt`, `/api/tokens`, `/api/invites`): the middleware returns `503` with `{"message":"API is disabled","code":"api_disabled"}`. Match `code` to identify the cause; outer middleware may reject a request first. The editor becomes **read-only**: viewing `/{id}` (including JSON/raw reads), `/r/{id}`, account/admin forms and health checks keep working, but publishing or saving from the editor fails with the API-disabled error, because the editor calls `POST /notes` and `PUT /notes/{id}` |
 | `--totp-issuer` | `PADMARK_TOTP_ISSUER` | `padmark` | TOTP issuer shown in the authenticator app |
 | `--session-ttl` | `PADMARK_SESSION_TTL` | `2592000` | Session lifetime in seconds (default 30 days) |
 | `--csrf-secret` | `PADMARK_CSRF_SECRET` | — | HMAC key signing CSRF form tokens; raw bytes, **at least 32 characters** (a shorter value is rejected at startup). Empty (default) mints a fresh random secret per process — fine for a single instance, but restarts then invalidate open forms and multiple replicas `403` each other's form submits. Generate with `openssl rand -base64 32` and share the same value across replicas |
 | `--argon2-memory` | `PADMARK_ARGON2_MEMORY` | `24576` | argon2id memory cost in KiB for **account passwords**, caller-chosen edit codes and the key wrapping each user's TOTP secret (default 24 MiB); lower for low-RAM hosts. Every derivation allocates this much; see [Memory sizing](#memory-sizing-argon2id). Server-generated edit codes use a fast salted SHA-256 instead |
-| `--argon2-time` | `PADMARK_ARGON2_TIME` | `2` | argon2id iterations (OWASP minimum at 64 MiB) — raise when lowering memory |
+| `--argon2-time` | `PADMARK_ARGON2_TIME` | `2` | argon2id iterations for new account-password hashes, caller-chosen edit-code hashes and TOTP-secret wrapping |
 | `--argon2-threads` | `PADMARK_ARGON2_THREADS` | `1` | argon2id parallelism (CPU threads per hash) |
 | `--argon2-memory-budget` | `PADMARK_ARGON2_MEMORY_BUDGET` | `131072` | Total argon2id memory in KiB that concurrent password, edit-code and TOTP-key derivations may hold at once (default 128 MiB); further requests queue in FIFO order. Must be at least `--argon2-memory` (startup fails otherwise); a single derivation larger than the budget still runs, alone. See [Memory sizing](#memory-sizing-argon2id) |
 | `--rate-limit` | `PADMARK_RATE_LIMIT` | `10` | Requests/sec per IP (`0` = disabled) |
@@ -934,11 +970,12 @@ There is no destructive encryption down-migration, and older binaries cannot rea
 
 #### Memory sizing (argon2id)
 
-Every argon2id derivation allocates its full memory cost up front: `--argon2-memory` (24 MiB by
-default) for a password hash, a login check, or the per-user TOTP key derived on every
-successful login; a fixed 64 MiB for a caller-chosen edit code on create, update or delete.
-Unknown usernames still pay for a dummy check. None of these need an account, and the per-IP
-rate limiter does not serialise them, so a handful of concurrent requests can allocate
+Every argon2id derivation allocates its full memory cost up front. New password hashes,
+caller-chosen edit-code hashes and TOTP-secret wrapping use `--argon2-memory` (24 MiB by
+default). Verification uses the cost recorded in each stored hash or secret; older records
+may therefore still require 64 MiB or another accepted cost. Unknown usernames still pay for
+a dummy check. Work can be triggered before a caller has authenticated, and the per-IP
+rate limiter does not serialise it, so a handful of concurrent requests can allocate
 hundreds of MiB.
 
 `--argon2-memory-budget` caps the argon2id memory held by concurrent derivations; requests
@@ -957,7 +994,7 @@ Example for a 256 MB container (`docker run --memory 256m`, or a Kubernetes limi
 
 ```bash
 GOMEMLIMIT=200MiB
-PADMARK_ARGON2_MEMORY=19456         # 19 MiB (OWASP: m=19456, t=2); 24576 also fits
+PADMARK_ARGON2_MEMORY=19456         # 19 MiB for newly written hashes; default is 24576
 PADMARK_ARGON2_MEMORY_BUDGET=65536  # 64 MiB; up to 131072 leaves less headroom for the rest
 ```
 
@@ -1028,13 +1065,40 @@ cost until the password is changed. The change costs RAM and CPU per login, not 
 
 ## Development
 
+This checkout includes unreleased development; [CHANGELOG.md](CHANGELOG.md) separates the
+current draft from tagged releases. References to `v0.1.6` describe historical migration
+fixtures rather than the current release number.
+
+Use Go 1.27.3 (see [`go.mod`](go.mod)). The application module and browser-test module have
+separate dependencies and test commands:
+
 ```bash
-make build    # compile
-make test     # run tests
-make cover    # generate HTML coverage report
-make lint     # run linter
-make gen      # regenerate mocks (mockgen)
+make build          # compile binaries from cmd/
+go test ./...       # application-module unit tests
+make test           # application unit + integration tests, -race and coverage; Docker required
+make cover          # application-module HTML coverage report
+make lint           # application-module linter
+make gen            # regenerate generated code and mocks
+
+make test-ui-setup   # install Go browser-test dependencies, driver and Chromium
+make test-ui         # 38 browser checks on desktop/mobile, including visual comparisons
+make test-ui-headed  # same checks with a visible browser
+make test-ui-debug   # Playwright Inspector
+make test-ui-report  # open the last browser-test report
+make test-ui-update  # update reference PNGs after an intentional UI change
 ```
+
+Browser tests are Go code in a separate module under [`tests/ui`](tests/ui/README.md).
+Their `go.mod`, `go.sum`, Makefile, PNG references, downloaded tools and reports stay there.
+`go test ./...` and `make test` at the repository root do not include this nested module.
+There is no npm/TypeScript setup; playwright-go downloads its internal Node.js driver itself.
+For one scenario: `make test-ui UI_ARGS='-run TestEditor/desktop/Toolbar'`.
+
+CI runs lint, application unit tests, integration tests and browser tests before publishing
+the container image. Browser tests run in the pinned Playwright Linux image matching the Go
+binding and retain failure artifacts. See [the development guide](docs/GUIDE.md) for the
+architecture and [the browser-test guide](tests/ui/README.md) for adding scenarios and
+reviewing screenshots.
 
 ---
 

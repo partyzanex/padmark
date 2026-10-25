@@ -1,8 +1,9 @@
 # Go Service Development Guide
 
-> Architectural patterns applicable to padmark and similar Go services.
-
----
+Architecture and development conventions for the current Padmark repository. Operational
+configuration and upgrades are documented in [README.md](../README.md); browser-test setup
+is in [tests/ui/README.md](../tests/ui/README.md). The application and browser-test modules
+both require Go 1.27.3.
 
 ## Contents
 
@@ -24,760 +25,415 @@
 16. [Deploy](#16-deploy)
 17. [Cheatsheet](#17-cheatsheet)
 
----
-
 ## 1. Clean Architecture
 
-### Dependency Rule
-
-```
-domain  <--  usecases  <--  infra
-                        <--> adapters
-```
+Dependencies point inward: HTTP/CLI/MCP adapters and infrastructure depend on the usecases
+and domain, rather than the domain depending on an HTTP server, database or crypto library.
 
 | Layer | Responsibility | Dependencies |
-|-------|----------------|--------------|
-| **Domain** | Entities, domain errors | stdlib only (+ `github.com/google/uuid` for user-keyed IDs — recorded exception) |
-| **Usecases** | Business logic, dependency interfaces | Domain only |
-| **Infra** | Implementations: DB, cache, HTTP clients, CLI | Implements usecases interfaces |
-| **Adapters** | Protocol translation: HTTP handlers | Converts between domain and protocol |
+|---|---|---|
+| Domain | Entities, validation, ownership and sentinel errors | stdlib and `github.com/google/uuid` for account IDs |
+| Usecases | Notes, links, accounts, content-key migration/rotation | Domain and consumer-defined interfaces |
+| Infrastructure | Storage, encryption, rendering, caching, server composition | Implements usecase interfaces |
+| Adapters | HTTP, CLI and MCP protocols | Their own interfaces to usecases |
 
-### Key Principles
+Interfaces belong beside their consumers. Constructors return concrete types and take
+required dependencies as arguments. Add an interface when it supports tests, multiple
+implementations or a package boundary; do not add one only to mirror a concrete type.
 
-| Principle | Implementation |
-|-----------|----------------|
-| Dependencies point inward only | infra/adapters → usecases → domain |
-| Interfaces next to consumer | `Repository` in usecases, not in domain or infra |
-| Zero dependencies in domain | stdlib only (exception: `github.com/google/uuid` for user-keyed IDs), no interfaces |
-| SQL-first | uptrace/bun + goose migrations |
-| Mock generation | `//go:generate` with `go.uber.org/mock/mockgen` |
-| Vendor | `go mod vendor`, committed to the repo |
-
----
+Dependencies are recorded in `go.mod`/`go.sum`. `vendor/` is ignored and is not committed.
+Browser dependencies are isolated in the nested `tests/ui` module.
 
 ## 2. Project Structure
 
-```
+```text
 padmark/
-├── cmd/padmark-server/
-│   └── main.go                  # 10-15 lines, delegates to infra/cmd
-│
+├── cmd/
+│   ├── padmark-server/          # serve, migrate, encryption subcommands
+│   ├── padmark-cli/             # HTTP client CLI
+│   └── padmark-mcp/             # stdio MCP proxy
 ├── internal/
-│   ├── domain/                  # Entities and errors (no interfaces)
-│   │   ├── errors.go
-│   │   └── note.go
-│   │
-│   ├── usecases/notes/          # Business logic + dependency interfaces
-│   │   ├── manager.go           # //go:generate mockgen ...
-│   │   ├── manager_test.go
-│   │   └── manager_mocks_test.go
-│   │
-│   ├── infra/                   # Implementations
-│   │   ├── cmd/                 # DI, CLI, startup
-│   │   │   ├── app.go           # NewApp(), Run(), action()
-│   │   │   └── flags.go         # Flag/Env/Default constants
-│   │   ├── storage/             # DB implementations (memory, sqlite, postgres)
-│   │   └── render/              # Markdown renderer (goldmark + bluemonday)
-│   │
-│   └── adapters/                # Protocol translation
-│       └── http/                # HTTP handlers, content negotiation
-│
-├── tests/                       # Integration tests
-│   └── {feature}_test.go        # //go:build integration
-│
-├── migrations/                  # goose SQL + embed
-│   ├── migrations.go
-│   └── YYYYMMDD_name.sql
-│
-├── templates/                   # HTML templates
+│   ├── domain/                 # Notes, links, accounts, errors and token envelopes
+│   ├── usecases/
+│   │   ├── notes/              # Note lifecycle, burn/read policy, rendering coordination
+│   │   ├── links/              # Short-link lifecycle and redirect policy
+│   │   ├── auth/               # Sessions, TOTP, onboarding, invites and API tokens
+│   │   └── contentkeys/        # Installation-key migration and rotation
+│   ├── infra/
+│   │   ├── server/             # CLI configuration, composition and listeners
+│   │   ├── storage/            # sqlite/, postgres/, contentkeys/
+│   │   ├── crypto/             # Hashes, TOTP sealing, keyrings and content envelopes
+│   │   ├── render/             # Markdown rendering and sanitization
+│   │   ├── rendercache/        # Rendered-note cache
+│   │   ├── linkcache/          # Decrypted public-link target cache
+│   │   └── linkmetrics/        # Prometheus link counters
+│   └── adapters/
+│       ├── http/               # Handlers, router, templates/, static/, spec/
+│       ├── cli/                # CLI commands and HTTP client setup
+│       └── mcp/                # MCP tools and HTTP proxy
+├── migrations/
+│   ├── sqlite/                 # SQL files and embedded FS
+│   └── postgres/               # SQL files and embedded FS
+├── pkg/client/                 # Generated OpenAPI client/server types
+├── tests/
+│   ├── auth/, manager/, mcp/, encryption/  # Application integration suites
+│   ├── upgrade/, fixtures/     # Real v0.1.6 upgrade path and database dumps
+│   └── ui/                    # Separate Go module, browser tests and testdata/screenshots/
 ├── docs/
-├── Makefile                     # include go.mk
-├── go.mk                        # partyzanex/go-makefile
-├── Dockerfile                   # multi-stage -> scratch
-└── .golangci.yml                # v2
+├── openapi.yaml                # API source, embedded into HTTP adapter via generation
+├── Makefile                    # Project commands, includes downloaded go.mk
+├── Dockerfile                  # Go builder → unprivileged scratch runtime
+└── .github/workflows/ci.yml
 ```
 
----
+Application unit tests remain beside the packages they test. New browser sources,
+dependencies, configuration, tools and output belong under `tests/ui/`.
 
 ## 3. Domain Layer
 
-Entities and sentinel errors only. No interfaces, no external dependencies.
+The domain contains no persistence or transport interfaces. Notes use string identifiers;
+the public slug is hashed with `domain.HashSlug` for storage. Account ownership uses
+`*uuid.UUID`; an anonymous note/link has no owner.
+
+The full models are in [note.go](../internal/domain/note.go) and
+[link.go](../internal/domain/link.go). Relevant rules include:
+
+- `PrivacyPublic`, `PrivacyAuthenticated`, `PrivacyOwner` determine visibility.
+- `OwnedBy` compares account IDs. Any valid session or API token for the creating account
+  has the same owner identity; an administrator is not automatically another user's owner.
+- `ValidateOwnership` rejects owner-only privacy without an owner.
+- `ClearExpiry` is an update instruction, not a persisted column.
+- Note content and title limits are shared with the OpenAPI contract.
+
+Sentinel errors live in [errors.go](../internal/domain/errors.go), for example:
 
 ```go
-// internal/domain/errors.go
-package domain
-
-import "errors"
-
 var (
-    ErrNotFound      = errors.New("not found")
-    ErrTitleRequired = errors.New("title is required")
-    ErrInvalidSlug   = errors.New("invalid slug")
+    ErrNotFound   = errors.New("not found")
+    ErrExpired    = errors.New("expired")
+    ErrSlugConflict = errors.New("slug is already taken")
 )
 ```
 
-```go
-// internal/domain/note.go
-package domain
-
-import "time"
-
-type Note struct {
-    ID        int64
-    Title     string
-    Content   string
-    CreatedAt time.Time
-    UpdatedAt time.Time
-}
-```
-
-**Rules:**
-- No `interface` in domain — they belong in usecases
-- Stdlib only (exception: `github.com/google/uuid` for user-keyed IDs)
-- Sentinel errors via `errors.New`
-- Business rules as methods on entities (if needed)
-
----
+Keep validation and ownership rules in the domain instead of reimplementing them per adapter.
 
 ## 4. Usecases Layer
 
-Business logic + dependency interfaces. Interfaces defined **next to the consumer** (DIP).
+Business logic lives in managers. Each manager defines the ports it consumes next to the
+implementation. For example, the note storage port includes atomic operations used by
+burn-after-reading, not just ordinary CRUD:
 
 ```go
-//go:generate go run go.uber.org/mock/mockgen@latest -source=manager.go -destination=manager_mocks_test.go -package=notes
-
-package notes
-
-// Interfaces — defined here, not in domain or infra
+// Excerpt of notes.Storage; see the full interface in manager.go.
 type Storage interface {
     Create(ctx context.Context, note *domain.Note) error
-    List(ctx context.Context, limit, offset int) ([]domain.Note, int, error)
-    Get(ctx context.Context, id int64) (*domain.Note, error)
-    Update(ctx context.Context, id int64, note *domain.Note) error
-    Delete(ctx context.Context, id int64) error
-}
-
-type Renderer interface {
-    Render(content string) (string, error)
-}
-
-// Manager — constructor accepts interfaces
-type Manager struct {
-    storage  Storage
-    renderer Renderer
-    log      *slog.Logger
-}
-
-func NewManager(storage Storage, renderer Renderer, log *slog.Logger) *Manager {
-    return &Manager{storage: storage, renderer: renderer, log: log}
+    Get(ctx context.Context, id string) (*domain.Note, error)
+    Consume(ctx context.Context, id string) (*domain.Note, error)
+    SetBurnExpiry(ctx context.Context, id string, expiresAt time.Time) (*domain.Note, error)
+    Update(ctx context.Context, id string, note *domain.Note) error
+    Delete(ctx context.Context, id string) error
+    IncrementViews(ctx context.Context, id string) error
 }
 ```
 
-**Rules:**
-- Struct is named `Manager` (not `UseCase`, not `Service`)
-- Constructor takes all dependencies explicitly — no `WithOption` for required deps
-- `//go:generate mockgen` in the file with interfaces
-- Logger: `*slog.Logger`
-- No nil-checks — if a dependency is required, it's passed via constructor
+[notes.NewManager](../internal/usecases/notes/manager.go) receives storage, a link-namespace
+checker, the shared slug lock, a renderer, an encryptor, an edit-code hasher, logger and the
+custom-slug setting. Its optional render cache defaults to a no-op implementation.
+The link manager follows the same namespace/ownership model.
 
----
+Notes and links must use the **same slug-lock instance** so concurrent creates cannot claim
+the same public identifier in different tables. Database uniqueness alone does not protect
+that cross-table check.
+
+The auth package separates sessions, onboarding, account administration and API-token
+operations. Content-key maintenance has its own manager and storage/cipher ports; it must
+not make the note manager depend on infrastructure crypto implementations.
 
 ## 5. Infra Layer
 
-### Storage (in-memory)
+### Storage and migrations
 
-```go
-// internal/infra/storage/memory.go
-package storage
+Production storage implementations are in `internal/infra/storage/sqlite` and `postgres`.
+Both use Bun and have concrete constructors such as `NewNoteRepository`,
+`NewLinkRepository` and `NewUserRepository`. There is no production in-memory storage backend.
 
-type Repository struct {
-    mu    sync.RWMutex
-    notes map[int64]*domain.Note
-    seq   int64
-}
+Translate storage errors to domain errors at the repository boundary. Preserve atomic
+consume/expiry/update semantics across both backends; do not implement a destructive read
+as an unprotected read followed by a separate delete.
 
-func NewRepository() *Repository {
-    return &Repository{notes: make(map[int64]*domain.Note)}
-}
+SQL migrations and their embedded filesystems live in `migrations/sqlite/` and
+`migrations/postgres/`. `serve` applies pending schema migrations; the `migrate` command
+applies them and exits. Existing SQLite databases receive an automatic backup before pending
+migrations unless opted out. PostgreSQL requires an operator-managed backup.
 
-func (r *Repository) Get(ctx context.Context, id int64) (*domain.Note, error) {
-    r.mu.RLock()
-    defer r.mu.RUnlock()
-    note, ok := r.notes[id]
-    if !ok {
-        return nil, domain.ErrNotFound
-    }
-    return note, nil
-}
-```
+Schema migration and content migration are separate. The `encryption migrate` command
+converts tagged v0.1.6 plaintext notes and wraps older raw encrypted content. See
+[the upgrade checklist](../CHANGELOG.md#upgrade-checklist-from-v016) before changing that path.
 
-### Migrations (goose)
+### Rendering and caches
 
-```go
-// migrations/migrations.go
-package migrations
+`internal/infra/render` combines Goldmark, Chroma and Bluemonday. Plain-text notes use a
+separate escaping/rendering path through the same renderer port.
 
-import "embed"
-
-//go:embed *.sql
-var FS embed.FS
-```
-
-**Rules:**
-- Constructors return concrete type: `NewRepository() *Repository`
-- Structs named by role: `Repository`, `Cache` (not `MemoryRepository`)
-- DB errors translated to domain errors: `sql.ErrNoRows` → `domain.ErrNotFound`
-
----
+Rendered notes are cached by hashed ID and update time; burn-after-reading notes bypass the
+cache. Short-link caching reuses only decrypted public targets: metadata and access/expiry
+checks still read current database state, including changes made by another replica.
 
 ## 6. Adapters Layer
 
-### HTTP Handler
+### HTTP
 
-```go
-// internal/adapters/http/handler.go
-type Handler struct {
-    manager *notes.Manager
-    log     *slog.Logger
-}
+The HTTP adapter defines its own `NoteManager`, `LinkManager` and auth interfaces.
+`NewHandler(manager, linkManager, log)` receives those interfaces rather than concrete
+usecase managers. `NewRouter(handler, ogenHandler, *RouterOptions)` returns `(http.Handler, error)`.
+Tests without a database pinger use `NoPinger{}`.
 
-func (h *Handler) GetNote(w http.ResponseWriter, r *http.Request) {
-    note, err := h.manager.Get(r.Context(), id)
-    if err != nil {
-        h.writeError(w, err)
-        return
-    }
-    h.negotiate(w, r, note)
-}
-```
+The generated OpenAPI handlers serve single-segment API paths; handwritten handlers also
+support path-like note slugs. Keep their status codes, validation and ownership behavior
+aligned. Edit codes for deletion come from `X-Edit-Code`, never the query string.
 
-### Error translation (HTTP)
-
-```go
-func (h *Handler) writeError(w http.ResponseWriter, err error) {
-    switch {
-    case errors.Is(err, domain.ErrNotFound):
-        http.Error(w, "not found", http.StatusNotFound)
-    case errors.Is(err, domain.ErrTitleRequired):
-        http.Error(w, err.Error(), http.StatusBadRequest)
-    default:
-        http.Error(w, "internal error", http.StatusInternalServerError)
-    }
-}
-```
+`domain.ReservedSlugPrefixes()` is the source of truth for named first-segment routes.
+Registering a new prefix without reserving it can send that route into note resolution.
 
 ### Content negotiation
 
-```go
-// internal/adapters/http/negotiate.go
-func (h *Handler) negotiate(w http.ResponseWriter, r *http.Request, note *domain.Note) {
-    accept := r.Header.Get("Accept")
-    switch {
-    case strings.Contains(accept, "text/html"):
-        // render markdown to HTML page
-    case strings.Contains(accept, "text/plain"), strings.Contains(accept, "text/markdown"):
-        // return raw markdown
-    default:
-        // return JSON
-    }
-}
-```
+`negotiate(r)` ranks supported `Accept` formats by quality, specificity and header order.
+JSON is the default for a missing/wildcard header; `?raw=1` selects raw content. Do not
+replace the parser with substring checks.
 
-**Rules:**
-- Each adapter defines **its own** interfaces — does not reuse from usecases
-- Adapter defines: `NoteRenderer interface { Render(string) (string, error) }`
+Burn reads additionally require deliberate intent. Missing or wildcard-only `Accept`, `HEAD`
+and browser subresource requests do not consume a note/link. Browser note reads first show
+a confirmation form. A raw-query flag alone does not prove intent.
 
----
+### CLI and MCP
+
+`internal/adapters/cli` and `mcp` are clients of the HTTP API; they do not open application
+databases. Both accept the API-token envelope format and use the same token/URL resolution
+rules. `/llms.txt` is embedded machine-facing documentation; update it with API behavior.
 
 ## 7. CLI and Configuration
 
-### flags.go
+The server command is assembled in `internal/infra/server/app.go` with `serve`, `migrate`
+and `encryption` subcommands. Omitting the subcommand still runs `serve`.
 
-Three constant groups: flag names, env vars, defaults.
+`cmd/padmark-server/main.go` calls `server.NewApp().Run(ctx, os.Args)` and reports an error.
+Keep composition and operational logic in `internal/infra/server/`, not in `main`.
 
-```go
-// internal/infra/server/flags.go
-package cmd
+`flags.go` groups `Flag*`, `Env*` and `Default*` constants. Most flags have a `PADMARK_*`
+environment source; the bootstrap token is environment-only. Consult
+[the configuration table](../README.md#configuration-reference) and [.env.example](../.env.example).
 
-const (
-    // Flags
-    FlagAddr     = "addr"
-    FlagLogLevel = "log-level"
+For file-backed SQLite, an unset keyring path resolves to `padmark-keys.json` beside the DB.
+Only `serve` creates that default file. Explicit paths must exist. PostgreSQL and
+in-memory/temporary SQLite require an explicit keyring; encryption tools never create one.
 
-    // Environment variables
-    EnvAddr     = "PADMARK_ADDR"
-    EnvLogLevel = "PADMARK_LOG_LEVEL"
-
-    // Defaults
-    DefaultAddr     = ":8080"
-    DefaultLogLevel = "info"
-)
-```
-
-### main.go
-
-```go
-// cmd/padmark-server/main.go
-package main
-
-import "github.com/partyzanex/padmark/internal/infra/server"
-
-func main() {
-    app := cmd.NewApp()
-    if err := cmd.Run(app); err != nil {
-        slog.Error("failed to run", "error", err)
-        os.Exit(1)
-    }
-}
-```
-
-10-15 lines. All logic in `internal/infra/server/`.
-
----
+`--disable-api` disables the REST endpoints, API docs and `/llms.txt`. The editor becomes
+read-only because publish/save use the REST endpoints. Browser note views, link redirects,
+account/admin forms and health endpoints remain available.
 
 ## 8. Dependency Injection
 
-All dependency wiring in `action()` in `app.go`. Manual DI, no frameworks.
+Manual wiring lives in [server.go](../internal/infra/server/server.go), chiefly
+`serverAction`, `buildHandlers` and `buildRouter`:
 
-```go
-// internal/infra/server/app.go
-func action(ctx context.Context, cmd *cli.Command) error {
-    log := newLogger(cmd.String(FlagLogLevel))
+1. Validate startup configuration/secrets and initialize logging.
+2. Load the keyring, open storage, apply schema migrations and validate content encryption.
+3. Construct repositories, ciphers, renderer, shared slug lock, caches and metrics.
+4. Build note/link/auth managers and inject them into the HTTP handlers/router.
+5. Start configured listeners and register shutdown/cleanup work.
 
-    // 1. Infrastructure
-    storage := memory.NewRepository()
-
-    // 2. Business logic
-    renderer := render.NewMarkdownRenderer()
-    manager := notes.NewManager(storage, renderer, log)
-
-    // 3. Adapters
-    handler := httphandler.NewHandler(manager, log)
-
-    // 4. HTTP server + graceful shutdown
-    srv := &http.Server{
-        Addr:    cmd.String(FlagAddr),
-        Handler: newRouter(handler),
-    }
-
-    go func() {
-        <-ctx.Done()
-        _ = srv.Shutdown(context.Background())
-    }()
-
-    return srv.ListenAndServe()
-}
-```
-
-**Order:**
-1. Logger
-2. Infrastructure (storage, renderer)
-3. Business logic
-4. Adapters (HTTP handler, router)
-5. Server start + graceful shutdown
-
----
+Required dependencies use constructors; optional facilities can use explicit `With...`
+methods or options. Use mocks/no-op implementations in tests instead of adding nil checks
+around ordinary production operations.
 
 ## 9. Error Handling
 
-### Sentinel errors in domain
+Wrap errors with the operation while preserving the chain:
 
 ```go
-var (
-    ErrNotFound      = errors.New("not found")
-    ErrTitleRequired = errors.New("title is required")
-)
-```
-
-### Wrapping with context
-
-```go
-// Always wrap with operation description
 return fmt.Errorf("create note: %w", err)
-return fmt.Errorf("storage.Get id=%d: %w", id, err)
 ```
 
-### Error chain
+Repositories translate SQL errors into domain sentinels. HTTP's `domainErrStatus` maps
+sentinels to status/message pairs; JSON, HTML and ogen responses derive from that mapping.
+Do not duplicate status tables or return raw wrapped infrastructure errors to clients.
 
-```
-domain.ErrNotFound (sentinel)
-    → usecases: fmt.Errorf("get note: %w", err)
-    → adapters/http: writeError() → 404 Not Found
-```
-
----
+The machine error shape is `{"message": string, "code"?: string}`. Stable middleware codes
+such as `api_disabled`, `burn_read_not_explicit` and `step_up_required` distinguish causes
+that share an HTTP status. Unexpected internal errors are logged and return a generic message.
 
 ## 10. Metrics
 
-### Structure
+[linkmetrics](../internal/infra/linkmetrics/metrics.go) implements the link manager's metrics
+port. `NewRegistered(reg)` registers these counters with a supplied Prometheus registry:
 
-```go
-// internal/infra/metrics/metrics.go
-type Metrics struct {
-    NotesCreatedTotal *prometheus.CounterVec
-    RequestDuration   *prometheus.HistogramVec
-}
-```
+- `padmark_links_created_total`
+- `padmark_links_redirects_total`
+- `padmark_links_collisions_total`
 
-### DI pattern for metrics
-
-- In production: `metrics.New()` → Prometheus
-- In unit tests: `MockMetrics` (mockgen) with `.AnyTimes()`
-- In integration tests: `discardMetrics{}` (no-op struct)
-
-```go
-// Integration test — no-op stub
-type discardMetrics struct{}
-func (discardMetrics) IncCreated() {}
-```
-
----
+The separate `--metrics-addr` listener is disabled by default. It also exposes standard
+Go/process collectors; metrics are not served on the public HTTP listener.
+Use mocks with `.AnyTimes()` or a no-op metrics implementation when metric call counts are
+not the subject of a test.
 
 ## 11. Graceful Shutdown
 
-```go
-ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
-defer stop()
+The server registers listener shutdown with `github.com/partyzanex/shutdown` and releases
+its infrastructure resources. Keep shutdown bounded and handle `http.ErrServerClosed` as
+the normal outcome of closing an HTTP server.
 
-srv := &http.Server{...}
-
-go func() {
-    <-ctx.Done()
-    shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-    defer cancel()
-    _ = srv.Shutdown(shutdownCtx)
-}()
-
-return srv.ListenAndServe()
-```
-
-### sync.Once for safe Close
-
-```go
-type Worker struct {
-    stop      chan struct{}
-    closeOnce sync.Once
-}
-
-func (w *Worker) Close() error {
-    w.closeOnce.Do(func() { close(w.stop) })
-    return nil
-}
-```
-
----
+Background workers should make repeated close calls safe, for example with `sync.Once`.
+Do not hold a mutex while waiting for network I/O, and do not store `context.Context` in
+long-lived structs: pass a context to each operation instead.
 
 ## 12. Testing
 
-### Mock generation
+### Application unit and integration tests
 
-```go
-// In the file with interfaces:
-//go:generate go run go.uber.org/mock/mockgen@latest -source=manager.go -destination=manager_mocks_test.go -package=notes
-```
+Unit tests live beside their application packages and use `testify/suite`, `require` and
+`go.uber.org/mock`. Generate mocks from the consumer interface's actual directive; an HTTP
+mock may target `http_test` rather than the implementation package.
 
-### Unit tests (testify/suite + gomock)
+Application integration suites live in `tests/auth`, `manager`, `mcp`, `encryption` and
+`upgrade`, with `//go:build integration`. PostgreSQL repository tests use that tag too.
+SQLite suites can use temporary/in-memory databases; PostgreSQL suites use testcontainers
+and need Docker. Upgrade suites load dumps produced by the real v0.1.6 binary.
 
-```go
-type ManagerTestSuite struct {
-    suite.Suite
-    ctrl    *gomock.Controller
-    storage *MockStorage
-    log     *slog.Logger
-}
-
-func (s *ManagerTestSuite) SetupTest() {
-    s.ctrl = gomock.NewController(s.T())
-    s.storage = NewMockStorage(s.ctrl)
-}
-
-func (s *ManagerTestSuite) TearDownTest() {
-    s.ctrl.Finish()
-}
-
-func TestManagerTestSuite(t *testing.T) {
-    suite.Run(t, new(ManagerTestSuite))
-}
-```
-
-### Integration tests (testcontainers + testify/suite)
-
-```go
-//go:build integration
-
-package tests
-
-type NotesTestSuite struct {
-    suite.Suite
-    db  *sql.DB
-    log *slog.Logger
-}
-
-func (s *NotesTestSuite) SetupTest() {
-    // Truncate tables between tests
-    _, _ = s.db.Exec("DELETE FROM notes")
-}
-
-func (s *NotesTestSuite) TestCreateAndGet() {
-    ctx := s.T().Context() // always s.T().Context()
-    // ...
-}
-
-func TestNotesTestSuite(t *testing.T) {
-    t.Parallel()
-    suite.Run(t, new(NotesTestSuite))
-}
-```
-
-### Rules
-
-- `//go:build integration` — integration tests in `tests/` or `*_integration_test.go`
-- `s.T().Context()` — always, never `context.Background()`
-- Never store `context.Context` in suite fields
-- `SetupTest()` — clean state between tests
-- Mock metrics with `.AnyTimes()` — don't overload tests with exact call counts
-
-### Running
+Use `t.Context()` / `s.T().Context()`, clean state between tests and use polling assertions
+for asynchronous behavior. Do not store a context in a suite field or share mutable test data.
 
 ```bash
-make test                          # All tests (unit + integration, -race)
-go test ./internal/usecases/...   # Unit only
-go test -tags=integration ./tests/ # Integration only
-go generate ./...                  # Regenerate mocks
+go test ./...                           # Root module, unit tests
+make test                               # Root module, unit + integration, -race and coverage
+go test -tags=integration ./tests/... ./internal/infra/storage/postgres
+go generate ./...                       # Run checked-in generation directives
 ```
 
----
+### Browser tests
+
+`tests/ui/` is a separate Go module using playwright-go and the standard `testing` runner.
+It owns its `go.mod`, `go.sum`, Makefile, screenshots, driver/browser cache and reports.
+Root `go test ./...` and `make test` do **not** include it.
+
+```bash
+make test-ui-setup
+make test-ui
+make test-ui-headed
+make test-ui UI_ARGS='-run TestEditor/desktop/Toolbar'
+make test-ui UI_ARGS='-race'
+```
+
+The 19 scenarios run at desktop/mobile sizes (38 checks). Each gets a real server, isolated
+SQLite/keyring and browser context. Uncaught JavaScript, console errors and failed resources
+fail the case. Layout and PNG assertions detect visual changes. Only deliberately expected
+HTTP errors are exempted, and missing static resources always fail.
+
+`make test-ui-update` updates reference PNGs after an intentional design change; review the
+diffs. `make test-ui-report` opens the report, and `make test-ui-debug` uses Playwright Inspector.
+A separate npm/Node installation is not required: the Go binding downloads its internal
+Node.js driver. See [the browser guide](../tests/ui/README.md) for authoring and artifacts.
+
+### CI
+
+[ci.yml](../.github/workflows/ci.yml) runs lint, unit tests, integration tests and the browser
+module. Browser tests use a pinned Linux Playwright image matching the Go binding and upload
+their report/failure artifacts. Docker publishing waits for all those jobs.
 
 ## 13. Security
 
-### API keys and secrets
+### Secrets and stored content
 
-- Secrets passed **only** via env vars
-- Never hardcode secrets in code, tests, or committed configs
-- Local secrets in `.env.local` (add to `.gitignore`)
+- Keep real secrets out of source, logs and committed configuration. `.env` is ignored and
+  used by `make run`; `.env.example` documents sample values. Isolated test credentials and
+  published upgrade-fixture codes are not production secrets.
+- Prefer environment variables, stdin and protected files to secret-valued flags visible
+  in process listings. Token envelopes contain the raw token and are secrets too.
+- Store and back up the installation keyring separately from the database. All replicas
+  sharing data need the same keyring and a shared CSRF secret for interchangeable forms.
+- Notes and link targets use installation-key content envelopes. Generated edit codes use
+  salted SHA-256; caller-chosen codes use the configured argon2id cost. Verification uses
+  recorded parameters within the accepted ceiling.
+- Stop writers before schema/content migration and key rotation. See
+  [key management](../README.md#content-key-management-migration-and-rotation) for the supported
+  order, legacy plaintext conversion, corrupt-record diagnostics and backup handling.
 
-### CLI API tokens
+### Account tokens and ownership
 
-Long-lived bearer keys for the CLI. Requires the account system (`--enable-accounts`).
+An admin can issue a key for their own account from `/admin`; account API endpoints and the
+CLI also support issuance. Bearer callers issuing keys/invites must re-authenticate with the
+account password and a fresh TOTP code. A key issued by another key is revoked with its issuer;
+password changes revoke the account's keys and other sessions. `/admin` requires a browser session.
 
-**Issuance (admin, in the browser).** An admin mints a key for their own account from `/admin` →
-"API keys" → "Create key" — there is no way to issue a key for a different account. It is shown
-**once** on that page as an *envelope token* (see below); only the raw key's SHA-256 hash is
-stored (`api_tokens.token_hash`, the primary key). The raw key is never logged and never placed in
-a URL. Keys are listed (hash prefix, owner, created / last-used) and revoked from the same page.
+The envelope is `pmk_` plus unpadded base64url JSON `{"url":"...","token":"..."}`.
+The domain codec is shared by adapters; only the extracted raw key is sent in the Bearer
+header. An explicit `--url` / `PADMARK_URL` overrides an embedded URL.
 
-**Envelope token format.** The value handed to the user is self-contained: it packs both the
-server base URL and the raw key so the user configures a single string. It is
-`pmk_` + base64url(no padding) of a JSON object:
+CLI token precedence is flag, `PADMARK_TOKEN`, then the config token file
+(`~/.config/padmark/token`, honoring `XDG_CONFIG_HOME`). Keep that directory/file at
+`0700`/`0600`. Non-HTTPS, non-loopback credential transmission is refused without
+`--allow-insecure-http`; loopback HTTP produces a warning.
 
-```
-pmk_<base64url({"url":"https://notes.example.com","token":"<raw-key>"})>
-```
-
-The codec lives in `domain` (`EncodeAPITokenEnvelope` / `DecodeAPITokenEnvelope`) — the only layer
-both the HTTP adapter (which encodes on issuance) and the CLI adapter (which decodes) may import.
-The base URL is derived from the issuing request (`scheme + "://" + r.Host`, same as invite links).
-The envelope is transport convenience only: **the server authenticates on the raw key alone**, so
-encoding is a presentation concern, not a security boundary. A legacy bare key (no `pmk_` prefix)
-still works — it is used verbatim as the bearer.
-
-**Distribution.** There is no CLI login command and no anonymous endpoint. The admin copies the
-envelope token out of the page and hands it to the user, who stores it (see precedence below).
-
-**CLI consumption.** `newPadmarkClient` resolves the token in this order (first non-empty wins):
-
-1. `--token` flag
-2. `PADMARK_TOKEN` env var
-3. `~/.config/padmark/token` (honours `XDG_CONFIG_HOME`; contents are trimmed)
-
-`splitToken` then unpacks the resolved value: for an envelope token it extracts the raw key and the
-embedded URL; a legacy bare key yields itself and no URL. The raw key is sent as
-`Authorization: Bearer <raw-key>` on every request — the envelope itself is never transmitted. The
-embedded URL becomes the server base URL **unless** `--url` / `PADMARK_URL` is set explicitly
-(`cmd.IsSet`), in which case the explicit value wins. On the server, the auth middleware resolves
-the key via `Manager.ResolveAPIToken` (after session-cookie and legacy bearer checks); an unknown,
-revoked, or expired key falls through to 401 / login redirect.
-
-**Handling the token file.**
-
-- Create the directory `0700` and the file `0600` (the CLI only reads it — set the modes yourself):
-  ```sh
-  mkdir -m 700 -p ~/.config/padmark
-  printf '%s' "<paste-envelope-token>" > ~/.config/padmark/token && chmod 600 ~/.config/padmark/token
-  ```
-  With an envelope token the URL is already baked in, so `--url` / `PADMARK_URL` can be omitted.
-- Sending a token to a non-HTTPS server logs a cleartext-exposure warning (advisory, not blocking);
-  use an `https://` server URL in production.
-- To rotate or revoke, delete the key in `/admin` and issue a new one; the old hash stops resolving.
-
----
+Ownership follows the account ID, not a particular session or token. Other users still need
+the edit code and permission to read the record; an admin role alone grants no owner bypass.
+Deletion uses `X-Edit-Code`. Anonymous edit-code lockout is per record and client IP (/64 for
+IPv6), while authenticated attempts are per record and account ID.
 
 ## 14. Modern Go
 
-### Go 1.22+: range over int
+The build toolchain is Go 1.27.3. Use `for range N`, `t.Context()` / `s.T().Context()` and
+`sync.WaitGroup.Go` where they fit; use `log/slog` for structured logging. Run and review
+`go fix ./...` when upgrading the toolchain rather than rewriting code mechanically by hand.
 
-```go
-// Instead of:
-for i := 0; i < 10; i++ { ... }
-// Use:
-for range 10 { ... }
-for i := range 10 { ... }
-```
-
-### Go 1.24+: t.Context()
-
-```go
-// In tests — automatically cancelled when test finishes
-func TestSomething(t *testing.T) {
-    ctx := t.Context()
-}
-
-// In testify/suite:
-func (s *Suite) TestSomething() {
-    ctx := s.T().Context()
-}
-```
-
-### Go 1.25+: sync.WaitGroup.Go
-
-```go
-// Instead of:
-wg.Add(1)
-go func() {
-    defer wg.Done()
-    doWork()
-}()
-
-// Use:
-wg.Go(func() {
-    doWork()
-})
-```
-
-### Go 1.26: go fix ./...
-
-Automatically modernizes code. Run when upgrading the toolchain:
-
-```bash
-go fix ./...
-```
-
-### Structured logging (slog)
-
-Use `log/slog`. JSON format in production, text in development.
-
-```go
-log.InfoContext(ctx, "note created", "id", note.ID, "title", note.Title)
-```
-
----
+CI pins golangci-lint v2.15.0. [.golangci.yml](../.golangci.yml) controls exclusions,
+line length, complexity and build tags. Its current `run.go: '1.25'` analysis setting is
+separate from the build toolchain in `go.mod`.
 
 ## 15. Anti-patterns
 
-### Context stored in struct fields
-
-```go
-// WRONG
-type Service struct {
-    ctx context.Context // anti-pattern
-}
-
-// RIGHT: context passed as first method argument
-func (s *Service) Process(ctx context.Context, ...) error
-```
-
-### Interface next to implementation (Java-style)
-
-In Go, interfaces are defined by the **consumer**, not the provider.
-
-```go
-// RIGHT: each consumer defines its own interface
-// usecases/notes/manager.go
-type Storage interface {
-    Get(ctx context.Context, id int64) (*domain.Note, error)
-}
-
-// adapters/http/handler.go — its OWN interface, not reusing notes.Storage
-type NoteGetter interface {
-    Get(ctx context.Context, id int64) (*domain.Note, error)
-}
-```
-
-### Constructor returns interface
-
-```go
-// WRONG
-func NewRepository(db *sql.DB) Storage { ... }
-
-// RIGHT: return concrete type
-func NewRepository(db *sql.DB) *Repository { ... }
-```
-
-### Premature interfaces
-
-Don't create an interface if it has one consumer and one implementation. Create an interface when:
-- Mocking in tests is needed
-- Multiple implementations exist
-- Decoupling between packages is required
-
-### Nil-checks for required dependencies
-
-```go
-// WRONG: nil-check before every call
-if m.storage != nil {
-    m.storage.Create(ctx, note)
-}
-
-// RIGHT: required dep via constructor, no-op in tests via mock
-func NewManager(storage Storage, log *slog.Logger) *Manager
-```
-
----
+- Storing `context.Context` in service, repository or suite fields.
+- Making usecases import concrete SQL/crypto/HTTP implementations.
+- Reusing another adapter's interface instead of defining a consumer port.
+- Returning interfaces from constructors only to hide a single implementation.
+- Creating interfaces without a testing, implementation or package-boundary need.
+- Adding repeated nil checks for required dependencies instead of injecting them.
+- Holding a mutex across network I/O.
+- Duplicating privacy, burn, error-status or reserved-route rules across adapters.
+- Adding browser manifests, downloads or artifacts to the repository root.
 
 ## 16. Deploy
 
-### Dockerfile
+Use the checked-in [Dockerfile](../Dockerfile) and [Compose file](../docker-compose.yml),
+not a second build recipe in this guide. The Dockerfile builds the server with
+`golang:1.27.3-alpine` and `CGO_ENABLED=0`, then runs it as UID/GID 65534 in scratch.
+It contains no shell, CLI/MCP executable or browser-test environment.
 
-Multi-stage: builder (Go image) → scratch (minimal image).
+The `/data` volume preserves SQLite data. A new file-backed SQLite installation can generate
+its default keyring there; an explicitly configured keyring must already exist and be readable
+by the service UID. Compose uses PostgreSQL and requires both `POSTGRES_PASSWORD` and an
+explicit keyring secret. Retain the same keys on every restart/replica.
 
-```dockerfile
-FROM golang:1.25 AS builder
-WORKDIR /src
-COPY . .
-RUN make build
-
-FROM scratch
-COPY --from=builder /src/bin/server /usr/local/bin/server
-COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
-ENTRYPOINT ["server"]
-```
-
----
+Schema/content maintenance and container upgrades need consistent backups. A PostgreSQL
+data directory cannot be opened by an older major version. Consult the
+[v0.1.6 checklist](../CHANGELOG.md#upgrade-checklist-from-v016) before upgrading existing data.
 
 ## 17. Cheatsheet
 
-### Commands
-
 ```bash
-make build            # Build
-make test             # All tests (-race)
-make lint             # golangci-lint
-go generate ./...     # Regenerate mocks
-docker compose up -d  # Local infrastructure
+make build
+make test                        # Application unit/integration; Docker required
+make lint
+make test-ui-setup
+make test-ui                     # Separate browser module
+make test-ui-headed
+make test-ui-report
 ```
 
-### Tech stack
-
-| Component | Library |
-|-----------|---------|
-| CLI | `urfave/cli/v3` |
-| Logging | `log/slog` |
-| HTTP router | `net/http` (Go 1.22+ patterns) or `go-chi/chi` |
-| Markdown | `yuin/goldmark` |
-| HTML sanitization | `microcosm-cc/bluemonday` |
-| PostgreSQL | `uptrace/bun` + `pgdriver` |
-| SQLite | `modernc.org/sqlite` |
-| Migrations | `pressly/goose/v3` (embedded SQL) |
-| Tests | `stretchr/testify/suite` + `go.uber.org/mock` |
-| Containers | `testcontainers/testcontainers-go` |
-
+| Component | Implementation |
+|---|---|
+| CLI / logging / HTTP router | urfave/cli/v3 / log/slog / net/http ServeMux |
+| HTTP contract | ogen + openapi.yaml |
+| Markdown / sanitization | Goldmark + Chroma / Bluemonday |
+| Persistence | Bun + pgdriver or modernc SQLite; embedded goose SQL migrations |
+| Content / account secrets | Installation-key AES-GCM envelopes; argon2id; TOTP |
+| Unit/integration tests | testify, gomock, testcontainers |
+| Browser tests | playwright-go, Go testing/require, Go pixelmatch |

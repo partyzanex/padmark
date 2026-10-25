@@ -29,6 +29,8 @@ padmark-server
 
 # Local caches and editor state.
 .gocache/
+tests/ui/.cache/
+tests/ui/artifacts/
 .idea/
 .serena/
 .graphify/
