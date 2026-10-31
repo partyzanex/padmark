@@ -135,7 +135,7 @@ func printCreateLinkResult(w io.Writer, serverURL string, link *padmark.CreateLi
 	erw := &errWriter{w: twr, err: nil}
 
 	erw.printf("id:\t%s\n", link.ID)
-	erw.printf("url:\t%s/r/%s\n", serverURL, link.ID)
+	erw.printf("url:\t%s/%s\n", serverURL, link.ID)
 	erw.printf("target_url:\t%s\n", link.TargetURL.String())
 	erw.printf("edit-code:\t%s\n", link.EditCode)
 

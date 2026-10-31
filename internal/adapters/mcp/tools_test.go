@@ -364,7 +364,7 @@ func (s *toolRegistrationSuite) TestAllNineToolsRegistered() {
 
 	// get_note must not be marked read-only: reads bump views and burn burn-after-reading notes.
 	s.Falsef(annotations["get_note"].ReadOnlyHint, "get_note is not read-only on padmark")
-	// get_link is read-only: burn-after-click fires on GET /r/{id}, not on metadata.
+	// get_link is read-only: burn-after-click fires on GET /{id}, not on metadata.
 	s.Truef(annotations["get_link"].ReadOnlyHint, "get_link metadata is read-only")
 	s.Falsef(annotations["delete_note"].ReadOnlyHint, "delete_note mutates")
 }

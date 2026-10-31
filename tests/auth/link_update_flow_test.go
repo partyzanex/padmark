@@ -141,6 +141,9 @@ func TestLinkUpdateFlow(t *testing.T) {
 	require.Equal(t, target.String(), link.TargetURL.String())
 	require.Equal(t, 1, link.Views)
 
+	// The bare slug serves the same link: no note has this id in the shared namespace.
+	request(http.MethodGet, "/"+created.ID, "", "", http.StatusMovedPermanently)
+
 	raw = request(http.MethodGet, path, "", "", http.StatusOK)
 	updated.ExpiresAt = nil
 	updated.DirectRedirect = nil

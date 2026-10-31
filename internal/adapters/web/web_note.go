@@ -55,6 +55,7 @@ func newNoteHandler(c *common, manager NoteManager, noteTmpl, indexTmpl *templat
 // ogen PUT/DELETE /notes/{id} routes (registerOgenRoutes) stay single-segment (generated router
 // limitation); these native {id...} handlers bridge update/delete for path-like slugs, so by
 // ServeMux specificity single-segment IDs keep going to ogen and multi-segment to these.
+// GET /{id...} is registered by Handler.GetNoteOrLink, because a bare slug can also name a link.
 func (h *NoteHandler) RegisterRoutes(mux *http.ServeMux) {
 	locked := func(next http.HandlerFunc) http.Handler {
 		return middleware.RequireSameOrigin(h.log, middleware.WithFailLockout(h.lockout, h.trustedProxies, h.log, next))
@@ -65,7 +66,6 @@ func (h *NoteHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /notes/{id...}", h.GetNote)
 	mux.HandleFunc("POST /notes/{id...}", h.guard(h.HandleReveal))
 	mux.HandleFunc("GET /edit/{id...}", h.EditPage)
-	mux.HandleFunc("GET /{id...}", h.GetNote)
 	mux.HandleFunc("POST /{id...}", h.guard(h.HandleReveal))
 }
 
@@ -175,40 +175,7 @@ func toBurnInterstitialViewData(note *domain.Note, tok string) noteViewData {
 
 // GetNote handles GET /notes/{id} with content negotiation via Accept header.
 func (h *NoteHandler) GetNote(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-
-	// Check auth for private notes before any side effects (view count, burn).
-	// When auth is configured, preloaded holds the already-fetched note so the
-	// subsequent View/GetRendered can skip a second SELECT.
-	preloaded, handled := h.gateNoteRead(w, r, id)
-	if handled {
-		return
-	}
-
-	switch negotiate(r) {
-	case formatHTML:
-		h.renderNoteHTML(w, r, id, preloaded)
-
-	case formatPlain:
-		h.writePlainNote(w, r, id, preloaded)
-
-	case formatJSON:
-		note, err := h.viewNote(r, id, preloaded)
-		if err != nil {
-			h.writeError(w, r, err)
-
-			return
-		}
-
-		w.Header().Set("Content-Type", mimeJSON)
-
-		err = json.NewEncoder(w).Encode(toNoteJSON(note))
-		if err != nil {
-			h.log.ErrorContext(r.Context(), "encode get response", "err", err)
-		}
-	default:
-		// negotiate returns only the formats above.
-	}
+	h.serveNote(w, r, r.PathValue("id"), nil)
 }
 
 // UpdateNoteByPath handles PUT /notes/{id...} for notes whose slug spans multiple path segments
@@ -325,7 +292,7 @@ func (h *NoteHandler) HandleReveal(w http.ResponseWriter, r *http.Request) {
 
 	// Auth check must happen before consuming the token to prevent token-based
 	// bypass of private note access control.
-	preloaded, handled := h.handlePrivateAuth(w, r, id)
+	preloaded, handled := h.handlePrivateAuth(w, r, id, nil)
 	if handled {
 		return
 	}
@@ -350,6 +317,43 @@ func (h *NoteHandler) HandleReveal(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.renderNoteHTML(w, r, id, preloaded)
+}
+
+// serveNote answers a note read. peeked is the note that the caller already loaded with Peek, or
+// nil; the gates and the read policy then use it and do not read the note a second time.
+func (h *NoteHandler) serveNote(w http.ResponseWriter, r *http.Request, id string, peeked *domain.Note) {
+	// Check auth for private notes before any side effects (view count, burn).
+	// When auth is configured, preloaded holds the already-fetched note so the
+	// subsequent View/GetRendered can skip a second SELECT.
+	preloaded, handled := h.gateNoteRead(w, r, id, peeked)
+	if handled {
+		return
+	}
+
+	switch negotiate(r) {
+	case formatHTML:
+		h.renderNoteHTML(w, r, id, preloaded)
+
+	case formatPlain:
+		h.writePlainNote(w, r, id, preloaded)
+
+	case formatJSON:
+		note, err := h.viewNote(r, id, preloaded)
+		if err != nil {
+			h.writeError(w, r, err)
+
+			return
+		}
+
+		w.Header().Set("Content-Type", mimeJSON)
+
+		err = json.NewEncoder(w).Encode(toNoteJSON(note))
+		if err != nil {
+			h.log.ErrorContext(r.Context(), "encode get response", "err", err)
+		}
+	default:
+		// negotiate returns only the formats above.
+	}
 }
 
 // writePlainNote writes the raw note content as text/plain or text/markdown.
@@ -407,21 +411,29 @@ func (h *NoteHandler) gateAnonymousMutation(w http.ResponseWriter, r *http.Reque
 }
 
 // handlePrivateAuth checks the note's privacy level against the caller (see Note.VisibleTo).
-// Returns the preloaded note (when auth is configured) and false when the request may proceed.
+// peeked is a note already loaded with Peek, or nil to load it here.
+// Returns the preloaded note (when auth is configured, or peeked) and false when the request may proceed.
 // Returns nil and true when the response has been written (auth failed or note not found).
 // A denial is handed to common.denyPrivate, shared with the link gate, which decides between the
 // login redirect and 403 by whether the caller is already signed in.
-func (h *NoteHandler) handlePrivateAuth(w http.ResponseWriter, r *http.Request, id string) (*domain.Note, bool) {
+func (h *NoteHandler) handlePrivateAuth(
+	w http.ResponseWriter, r *http.Request, id string, peeked *domain.Note,
+) (*domain.Note, bool) {
 	// When there is no auth at all, every request is implicitly authorised.
 	if h.authMgr == nil {
-		return nil, false
+		return peeked, false
 	}
 
-	note, err := h.manager.Peek(r.Context(), id)
-	if err != nil {
-		h.writeNoteError(w, r, err)
+	note := peeked
+	if note == nil {
+		var err error
 
-		return nil, true
+		note, err = h.manager.Peek(r.Context(), id)
+		if err != nil {
+			h.writeNoteError(w, r, err)
+
+			return nil, true
+		}
 	}
 
 	if note.VisibleTo(middleware.CallerIDFromCtx(r.Context()), h.isAuthenticated(r)) {
@@ -456,11 +468,11 @@ func (h *NoteHandler) renderNoteHTML(w http.ResponseWriter, r *http.Request, id 
 
 	data := toNoteViewData(note, rendered)
 	data.Nonce = middleware.NonceFromContext(r.Context())
-	// Also gated on VisibleTo: without it, a privacy=owner note would show the Edit link (and
-	// let EditPage render its plaintext, see EditPage's doc comment) to any authenticated
-	// caller, not just its owner.
+	// Every reader sees the Edit link: the author of an anonymous note edits it with the edit
+	// code, and PUT checks that code on the server. VisibleTo hides the link of a privacy=owner
+	// note from a caller who is not its owner (see EditPage's doc comment).
 	authenticated := h.isAuthenticated(r)
-	data.CanEdit = authenticated && note.VisibleTo(middleware.CallerIDFromCtx(r.Context()), authenticated)
+	data.CanEdit = note.VisibleTo(middleware.CallerIDFromCtx(r.Context()), authenticated)
 
 	err = h.noteTmpl.Execute(w, data)
 	if err != nil {
@@ -472,8 +484,10 @@ func (h *NoteHandler) renderNoteHTML(w http.ResponseWriter, r *http.Request, id 
 // order: privacy, the implicit-read refusal for burn notes, and the HTML burn interstitial. It
 // returns the note already loaded on the way (nil if none was needed) and whether the response
 // has been written.
-func (h *NoteHandler) gateNoteRead(w http.ResponseWriter, r *http.Request, id string) (*domain.Note, bool) {
-	preloaded, handled := h.handlePrivateAuth(w, r, id)
+func (h *NoteHandler) gateNoteRead(
+	w http.ResponseWriter, r *http.Request, id string, peeked *domain.Note,
+) (*domain.Note, bool) {
+	preloaded, handled := h.handlePrivateAuth(w, r, id, peeked)
 	if handled {
 		return nil, true
 	}

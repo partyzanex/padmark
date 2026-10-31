@@ -1090,7 +1090,7 @@ func (s *Server) handleDeleteNoteRequest(args [1]string, argsEscaped bool, w htt
 //
 // Returns the link as JSON, including its decrypted `target_url`. This is a metadata-only
 // read: it does not increment `views`, does not consume a `burn_after_click` link, and does
-// not follow the redirect — visiting `GET /r/{id}` does all of that. See the "Short links"
+// not follow the redirect — visiting `GET /{id}` does all of that. See the "Short links"
 // section above.
 //
 // GET /links/{id}

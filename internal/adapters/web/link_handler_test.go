@@ -104,7 +104,7 @@ func (s *HandlerSuite) TestCreateLink_OK() {
 	s.router.ServeHTTP(w, r)
 
 	s.Equal(http.StatusCreated, w.Code)
-	s.Equal("/r/"+testLinkID, w.Header().Get("Location"))
+	s.Equal("/"+testLinkID, w.Header().Get("Location"))
 
 	var resp testLinkResponse
 	s.Require().NoError(json.NewDecoder(w.Body).Decode(&resp))

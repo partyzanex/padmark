@@ -85,7 +85,7 @@ A burn-after-reading note requested with only `*/*`, with `HEAD`, as a browser s
 and stays intact — so link unfurlers, mail scanners and embeds in other notes cannot destroy it.
 The editor (`/edit/{id}`) never shows a burn-after-reading note's content and answers `410` for
 an expired note. `padmark-cli` and `padmark-mcp` always send `Accept: application/json`. The
-same rule protects `burn_after_click` links on `GET /r/{id}`: only a browser navigation or an
+same rule protects `burn_after_click` links on `GET /{id}`: only a browser navigation or an
 explicit `Accept` follows (and burns) one; previews, scanners, `HEAD` and embeds get `409`.
 For v0.1.6 clients, `GET /notes/{id}` with no `Accept` header at all still counts as a read.
 
@@ -105,11 +105,14 @@ Every short link has:
 | `privacy` | Who can follow it: `public` (default), `authenticated`, or `owner` |
 | `direct_redirect` | Per-link override of the redirect mode; omitted inherits the default below. Ignored for anonymously created links unless the operator enabled `--direct-redirect` |
 
-Visiting `GET /r/{id}` either redirects immediately (`301`) or shows a brief transparency
-interstitial with the destination and a manual continue link first. **By default a link created
-anonymously gets the interstitial** (so the instance cannot be used as a free open redirector),
-while a link created by a signed-in owner (session or API token) redirects directly. The operator
-can restore the old behaviour — `301` for every link — with `--direct-redirect=true` (see
+A short link answers at the same `GET /{id}` as a note: notes and links share one slug
+namespace, so the server serves the note with that `id` or, when there is none, the link. The
+older `GET /r/{id}` URL keeps working. Visiting the link either redirects immediately (`301`)
+or shows a brief transparency interstitial with the destination and a manual continue link
+first. **By default a link created anonymously gets the interstitial** (so the instance cannot
+be used as a free open redirector), while a link created by a signed-in owner (session or API
+token) redirects directly. The operator can restore the old behaviour — `301` for every link —
+with `--direct-redirect=true` (see
 [Configuration reference](#server)); a link's `direct_redirect` at creation or update time then
 overrides that, and for an owner's links it can opt back into the interstitial. In every mode an
 expired link answers `410 Gone`, a missing one `404`, and a link denied by its `privacy` level
@@ -491,17 +494,17 @@ curl -X PUT http://localhost:4000/links/{id} \
 
 # Follow it — an HTML transparency interstitial for an anonymously created link (default),
 # 301 for an owner's link or when the server runs with --direct-redirect=true
-curl -i http://localhost:4000/r/{id}
+curl -i http://localhost:4000/{id}
 # A burn_after_click link needs a deliberate access (otherwise 409, link intact):
-curl -i -H "Accept: text/html" http://localhost:4000/r/{id}
+curl -i -H "Accept: text/html" http://localhost:4000/{id}
 
 # Delete a link
 curl -X DELETE http://localhost:4000/links/{id} \
   -H "X-Edit-Code: MySecretCode1"
 ```
 
-`GET /r/{id}` is a browser-facing redirect, not part of the JSON API spec — the same reason bare
-`GET /{id}` (the note-view shortcut) isn't documented in `/api/openapi.yaml` either.
+`GET /{id}` for a short link is a browser-facing redirect, not part of the JSON API spec — the
+same reason the note view at `GET /{id}` isn't documented in `/api/openapi.yaml` either.
 
 `PUT /links/{id}` requires `target_url`; an authenticated owner may omit `edit_code`.
 Omitted `ttl`, `privacy`, and `direct_redirect` keep their current values. TTL is counted from
@@ -998,7 +1001,7 @@ There is no destructive encryption down-migration, and older binaries cannot rea
 | `--allow-shared-keyring` | `PADMARK_ALLOW_SHARED_KEYRING` | `false` | Accept a keyring file readable by group or other users (logged at WARN) instead of refusing startup. Only for secret managers that cannot provide an owner-only file; keyrings under `/run/secrets/` are already exempt. Prefer mode `0600`/`0400` |
 | `--enable-accounts` | `PADMARK_ENABLE_ACCOUNTS` | `false` | Enable the TOTP account system (`/setup`, `/login`, `/admin`, privacy-level gating); off = fully public |
 | — | `PADMARK_BOOTSTRAP_TOKEN` | — | Environment only (never a flag). Required to create the first admin via `/setup` without an invite; at least 32 characters (shorter fails startup). Unset = first-admin setup disabled. Never logged; unset it once the admin exists |
-| `--disable-api` | `PADMARK_DISABLE_API` | `false` | Disable the REST/JSON API (`/notes*`, `/links*`, `/api`, `/api/openapi.yaml`, `/api/reference.md`, `/llms.txt`, `/api/tokens`, `/api/invites`): the middleware returns `503` with `{"message":"API is disabled","code":"api_disabled"}`. Match `code` to identify the cause; outer middleware may reject a request first. The editor becomes **read-only**: viewing `/{id}` (including JSON/raw reads), `/r/{id}`, account/admin forms and health checks keep working, but publishing or saving from the editor fails with the API-disabled error, because the editor calls `POST /notes` and `PUT /notes/{id}` |
+| `--disable-api` | `PADMARK_DISABLE_API` | `false` | Disable the REST/JSON API (`/notes*`, `/links*`, `/api`, `/api/openapi.yaml`, `/api/reference.md`, `/llms.txt`, `/api/tokens`, `/api/invites`): the middleware returns `503` with `{"message":"API is disabled","code":"api_disabled"}`. Match `code` to identify the cause; outer middleware may reject a request first. The editor becomes **read-only**: viewing `/{id}` (including JSON/raw reads and short links), account/admin forms and health checks keep working, but publishing or saving from the editor fails with the API-disabled error, because the editor calls `POST /notes` and `PUT /notes/{id}` |
 | `--totp-issuer` | `PADMARK_TOTP_ISSUER` | `padmark` | TOTP issuer shown in the authenticator app |
 | `--session-ttl` | `PADMARK_SESSION_TTL` | `2592000` | Session lifetime in seconds (default 30 days) |
 | `--csrf-secret` | `PADMARK_CSRF_SECRET` | — | HMAC key signing CSRF form tokens; raw bytes, **at least 32 characters** (a shorter value is rejected at startup). Empty (default) mints a fresh random secret per process — fine for a single instance, but restarts then invalidate open forms and multiple replicas `403` each other's form submits. Generate with `openssl rand -base64 32` and share the same value across replicas |
@@ -1021,7 +1024,7 @@ There is no destructive encryption down-migration, and older binaries cannot rea
 | `--trusted-proxies` | `PADMARK_TRUSTED_PROXIES` | — | Proxy CIDRs/IPs whose `X-Forwarded-For` / `X-Real-IP` is believed when resolving the real client IP; also the addresses whose `X-Forwarded-Proto` is trusted when building absolute links (note URLs, invite links, API-token envelopes). Set it to the proxy's own addresses and nothing wider — see [Getting `--trusted-proxies` wrong](#getting---trusted-proxies-wrong) |
 | `--public-scheme` | `PADMARK_PUBLIC_SCHEME` | — | Force `http` or `https` for absolute links back to this server, bypassing TLS/`X-Forwarded-Proto` detection; `https` also marks session/CSRF cookies `Secure` and enables HSTS. Use this instead of `--trusted-proxies` when the proxy's IP isn't stable (cloud load balancers, k8s ingress) |
 | `--custom-slugs` | `PADMARK_CUSTOM_SLUGS` | `true` | Allow user-supplied human-readable slugs/link aliases (e.g. `project/GUIDE.md`) at creation. On by default, as in v0.1.6; set `false` to issue only random slugs, because public human-readable URLs are easy to guess. New content keys are independent of the slug; existing legacy ciphertext keeps its old protection until migrated. A slug's first path segment must not be a reserved route name: `login`, `setup`, `logout`, `totp-login`, `admin`, `api`, `success`, `healthz`, `readyz`, `notes`, `edit`, `change-password`, `static`, `links`, `r`, and the exact segments `llms.txt` and `favicon.ico` |
-| `--direct-redirect` | `PADMARK_DIRECT_REDIRECT` | `false` | `GET /r/{id}` behavior for short links. **Default changed from `true` to `false`:** links created anonymously now render an interstitial page (meta-refresh + `<noscript>` fallback) showing the destination, so the instance is not an open redirector; links created by a signed-in owner still get an immediate `301`. Set `true` to restore the `301` for every link |
+| `--direct-redirect` | `PADMARK_DIRECT_REDIRECT` | `false` | `GET /{id}` behavior for short links. **Default changed from `true` to `false`:** links created anonymously now render an interstitial page (meta-refresh + `<noscript>` fallback) showing the destination, so the instance is not an open redirector; links created by a signed-in owner still get an immediate `301`. Set `true` to restore the `301` for every link |
 | `--metrics-addr` | `PADMARK_METRICS_ADDR` | — | Address for a separate internal Prometheus `/metrics` listener (e.g. `:9090`); empty (default) disables it entirely. Exposes `padmark_links_created_total`, `padmark_links_redirects_total`, `padmark_links_collisions_total`, plus standard Go/process collectors. Bind this to a private interface only — metrics are never served on the main, public-facing listener |
 
 #### Memory sizing (argon2id)

@@ -24,7 +24,7 @@ type LinkHandler struct {
 	tmpl    *template.Template
 	editor  *template.Template
 
-	// directRedirect selects GET /r/{id}'s response mode: true issues an immediate 301 to the
+	// directRedirect selects the short-link redirect's response mode: true issues an immediate 301 to the
 	// target URL, false renders the interstitial (redirect.html). Set via Handler.WithDirectRedirect
 	// (RouterOptions.DirectRedirect); the zero value (false) only matters for callers that build a
 	// Handler without going through NewRouter, e.g. tests that don't exercise this route.
@@ -54,7 +54,8 @@ type redirectViewData struct {
 	Nonce     string
 }
 
-// Redirect handles GET /r/{id}: resolves the link, applies its privacy gate (mirrors
+// Redirect handles GET /r/{id}, the older short-link URL (Handler.GetNoteOrLink serves GET /{id}
+// through respondLink): resolves the link, applies its privacy gate (mirrors
 // NoteHandler.handlePrivateAuth), then either issues a 301 to the target URL or renders the
 // transparency interstitial. The mode is link.EffectiveDirectRedirect(h.directRedirect): anonymous
 // links get the interstitial unless the operator enabled --direct-redirect; links created by an
@@ -63,6 +64,12 @@ func (h *LinkHandler) Redirect(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
 	link, err := h.followLink(r, id)
+	h.respondLink(w, r, id, link, err)
+}
+
+// respondLink writes the answer for a followed link: the privacy denial, the burn-intent refusal
+// or another error page, else the 301 or the transparency interstitial.
+func (h *LinkHandler) respondLink(w http.ResponseWriter, r *http.Request, id string, link *domain.Link, err error) {
 	if errors.Is(err, domain.ErrForbidden) {
 		h.denyPrivate(w, r)
 
@@ -87,7 +94,7 @@ func (h *LinkHandler) Redirect(w http.ResponseWriter, r *http.Request) {
 		// validateTargetURL (domain.ErrInvalidURL rejects javascript:/data:/file:/etc at creation
 		// time), and redirecting to a URL its own creator chose is a short-link service's entire
 		// purpose, the same category as any commercial URL shortener.
-		http.Redirect(w, r, link.TargetURL, http.StatusMovedPermanently)
+		http.Redirect(w, r, link.TargetURL, http.StatusMovedPermanently) //nolint:gosec // G710: creator-chosen target
 
 		return
 	}
@@ -104,7 +111,7 @@ func (h *LinkHandler) Redirect(w http.ResponseWriter, r *http.Request) {
 
 // followLink follows the link only as far as the request's intent allows: a deliberate access
 // (explicitRead — a browser navigation or a client naming the format) may consume a
-// burn_after_click link; anything else (preview fetch, scanner, HEAD, <img src="/r/…">) may not.
+// burn_after_click link; anything else (preview fetch, scanner, HEAD, <img src="/…">) may not.
 func (h *LinkHandler) followLink(r *http.Request, id string) (*domain.Link, error) {
 	if h.authMgr != nil {
 		link, err := h.manager.Follow(r.Context(), id, links.FollowOptions{
@@ -136,7 +143,7 @@ func (h *LinkHandler) followLink(r *http.Request, id string) (*domain.Link, erro
 	return link, nil
 }
 
-// WithDirectRedirect sets GET /r/{id}'s response mode (see RouterOptions.DirectRedirect). Called
+// WithDirectRedirect sets the short-link redirect's response mode (see RouterOptions.DirectRedirect). Called
 // by NewRouter; do not call after the server starts.
 func (h *Handler) WithDirectRedirect(v bool) *Handler {
 	h.directRedirect = v

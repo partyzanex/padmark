@@ -203,7 +203,7 @@ func accessFlags() []cli.Flag {
 			flag.Usage = "Disable the REST/JSON API (/notes*, /links*, /api, /api/openapi.yaml, /llms.txt, " +
 				"/api/tokens, /api/invites): every request reaching the disabling middleware gets 503 with " +
 				"code=api_disabled. The web UI becomes read-only: viewing /{id} (incl. JSON/raw reads), " +
-				"/r/{id}, login/admin pages and health checks keep working, but publishing or saving from " +
+				"short links, login/admin pages and health checks keep working, but publishing or saving from " +
 				"the editor fails with the API-disabled error (it calls POST /notes and PUT /notes/{id})"
 		}),
 		clifactory.BoolFlag(func(flag *cli.BoolFlag) {
@@ -346,7 +346,7 @@ func miscFlags() []cli.Flag {
 			flag.Name = FlagDirectRedirect
 			flag.Sources = cli.EnvVars(EnvDirectRedirect)
 			flag.Value = DefaultDirectRedirect
-			flag.Usage = "GET /r/{hash} behaviour for short links: true issues an immediate 301 to the " +
+			flag.Usage = "Redirect behaviour for short links: true issues an immediate 301 to the " +
 				"target URL for every link; false (default) renders an interstitial page (meta-refresh + " +
 				"noscript fallback) showing the destination for links created anonymously, while links " +
 				"created by a signed-in owner still redirect directly (open-redirect/phishing hardening)"

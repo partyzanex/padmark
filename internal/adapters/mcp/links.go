@@ -21,7 +21,7 @@ func registerLinkTools(srv *mcpsdk.Server, m *Manager) {
 
 func createLinkTool() *mcpsdk.Tool {
 	return newTool("create_link",
-		"Create a short link to a target URL (http/https only). Browsers follow it at GET /r/{id}; the padmark "+
+		"Create a short link to a target URL (http/https only). Browsers follow it at GET /{id}; the padmark "+
 			"edit_code is returned exactly once and is kept in the proxy for delete within this session; it is shown "+
 			"in the result only when reveal_edit_code is set.",
 		hints(false, false, false))
@@ -37,7 +37,7 @@ func createLinksBulkTool() *mcpsdk.Tool {
 func getLinkTool() *mcpsdk.Tool {
 	return newTool("get_link",
 		"Read short-link metadata. Read-only: this does not follow the link, bump views, or consume "+
-			"burn-after-click — following happens on the browser-facing GET /r/{id} path.",
+			"burn-after-click — following happens on the browser-facing GET /{id} path.",
 		hints(true, false, false))
 }
 

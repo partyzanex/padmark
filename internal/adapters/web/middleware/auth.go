@@ -227,9 +227,10 @@ func isPublicRoute(r *http.Request, namedRoutes map[string]struct{}) bool {
 
 	switch {
 	case isLinkPath(path) || path == linkCreatePath:
-		// GET /r/{id}, GET/PUT/DELETE /links/{id}, POST /links, POST /links/bulk — per-link
-		// privacy and per-link ownership are enforced downstream. Unlike note paths these
-		// have a fixed, unambiguous prefix, so no namedRoutes disambiguation is needed.
+		// GET /r/{id} (GET /{id} is a note path below), GET/PUT/DELETE /links/{id}, POST /links,
+		// POST /links/bulk — per-link privacy and per-link ownership are enforced downstream.
+		// Unlike note paths these have a fixed, unambiguous prefix, so no namedRoutes
+		// disambiguation is needed.
 		return true
 	case r.Method == http.MethodGet && strings.HasPrefix(path, editPathPrefix):
 		// GET /edit/{id} (the only method the route serves): the editor re-runs the same

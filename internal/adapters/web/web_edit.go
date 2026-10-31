@@ -17,7 +17,7 @@ import (
 func (h *NoteHandler) EditPage(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	preloaded, handled := h.handlePrivateAuth(w, r, id)
+	preloaded, handled := h.handlePrivateAuth(w, r, id, nil)
 	if handled {
 		return
 	}

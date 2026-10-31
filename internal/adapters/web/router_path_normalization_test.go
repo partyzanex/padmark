@@ -84,6 +84,10 @@ func (s *PathNormalizationSuite) recordPeeks() *[]string {
 			return nil, domain.ErrNotFound
 		}).AnyTimes()
 
+	// With no note, the GET /{id...} catch-all looks for a short link; none exists here either.
+	s.linkManager.EXPECT().Follow(gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(nil, domain.ErrNotFound).AnyTimes()
+
 	return &peeked
 }
 

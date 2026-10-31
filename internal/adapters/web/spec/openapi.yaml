@@ -65,15 +65,17 @@ info:
     ## Short links
 
     `POST /links` creates a short link that redirects to `target_url` when visited at
-    `GET /r/{id}`. Short links share the same slug namespace as notes — a note and a link can
-    never have the same `id`, in either creation order — and use the same `privacy` levels,
+    `GET /{id}`. Short links share the same slug namespace as notes — a note and a link can
+    never have the same `id`, in either creation order — so the bare `GET /{id}` serves the note
+    with that `id` or, when no note has it, the short link. The older `GET /r/{id}` URL keeps
+    working for links. Short links use the same `privacy` levels,
     `edit_code`/ownership rules, and edit-code/owner-bypass semantics described above for notes.
     Only `http` and `https` target URLs are accepted; anything else (`javascript:`, `data:`,
     `file:`, ...) is rejected with `400`.
 
-    `GET /r/{id}` is a browser-facing redirect, not a JSON API operation, so it is intentionally
-    not part of this spec's `paths` (the same convention already applies to notes' own bare
-    `GET /{id}` view route). Its behaviour depends on who created the link and on the server's
+    `GET /{id}` for a short link is a browser-facing redirect, not a JSON API operation, so it is
+    intentionally not part of this spec's `paths` (the same convention already applies to the
+    note view at the same route). Its behaviour depends on who created the link and on the server's
     `--direct-redirect` flag (default `false`):
 
     - a link created by an authenticated owner (session or API token): `301 Moved Permanently`
@@ -94,7 +96,7 @@ info:
     consumes it; every request after that gets `404`, in either response mode. Only a deliberate
     access consumes it — a browser navigation, or a request whose `Accept` names a served type
     exactly. A request without `Accept`, with only `*/*`, a `HEAD`, or a browser subresource
-    fetch (`Sec-Fetch-Dest` other than `document`/`empty`, e.g. `<img src="/r/{id}">`) gets
+    fetch (`Sec-Fetch-Dest` other than `document`/`empty`, e.g. `<img src="/{id}">`) gets
     `409` (`code: burn_read_not_explicit`) and leaves the link intact, so link unfurlers and
     mail scanners cannot burn it. Ordinary links redirect any client as before.
   version: 0.4.0
@@ -362,10 +364,10 @@ paths:
           description: Link created successfully
           headers:
             Location:
-              description: Canonical redirect URL of the created link (`/r/{id}`)
+              description: Canonical redirect URL of the created link (`/{id}`)
               schema:
                 type: string
-                example: /r/abcde12345
+                example: /abcde12345
           content:
             application/json:
               schema:
@@ -451,7 +453,7 @@ paths:
       description: |
         Returns the link as JSON, including its decrypted `target_url`. This is a metadata-only
         read: it does not increment `views`, does not consume a `burn_after_click` link, and does
-        not follow the redirect — visiting `GET /r/{id}` does all of that. See the "Short links"
+        not follow the redirect — visiting `GET /{id}` does all of that. See the "Short links"
         section above.
       tags: [links]
       parameters:
@@ -967,7 +969,7 @@ components:
           description: |
             Custom URL-friendly identifier. Must be a single path segment matching
             `[a-zA-Z0-9_-]+` — multi-segment slugs (containing `/`) return `422`, since short
-            links are only served at `GET /r/{id}` and `/links/{id}`.
+            links are only served at `GET /{id}`, `GET /r/{id}` and `/links/{id}`.
             If omitted a 10-character random slug is generated.
             Returns `409` if the slug is already taken by a note or another link.
           example: my-link
@@ -976,7 +978,7 @@ components:
           default: false
           description: |
             When `true` the link is deleted the moment it is first deliberately followed via
-            `GET /r/{id}` (a browser navigation or an explicit `Accept`; previews, scanners,
+            `GET /{id}` (a browser navigation or an explicit `Accept`; previews, scanners,
             `HEAD` and embeds get `409` and leave it intact — see "Short links").
         ttl:
           type: integer
@@ -1012,7 +1014,7 @@ components:
           type: boolean
           nullable: true
           description: |
-            Per-link override of the redirect mode for `GET /r/{id}`: `false` forces the
+            Per-link override of the redirect mode for `GET /{id}`: `false` forces the
             transparency interstitial; `true` forces an immediate `301`, but only for a link
             created by an authenticated owner or on a server running `--direct-redirect=true`
             (otherwise ignored). Omitted (or explicit `null`) inherits the default: interstitial
@@ -1069,7 +1071,7 @@ components:
         views:
           type: integer
           description: |
-            Number of times the link has been followed via `GET /r/{id}`, as read from storage.
+            Number of times the link has been followed via `GET /{id}`, as read from storage.
             Concurrent redirects may increment the count after this read. The decrypted-target
             cache never supplies counters or authorization metadata.
           example: 3

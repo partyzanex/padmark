@@ -57,7 +57,7 @@ or control characters (`400` if too short/long, `422` otherwise).
 - `POST /links` — create a short link (`target_url`, http/https only — anything else is
   `400`; optional `slug` (a single path segment), `burn_after_click`, `ttl` (hard expiry in
   seconds from creation, independent of `burn_after_click`), `privacy`, `edit_code`,
-  `direct_redirect`). Responds `201` with link metadata and `Location: /r/{id}`; `409` when
+  `direct_redirect`). Responds `201` with link metadata and `Location: /{id}`; `409` when
   the slug is taken by a note or link.
 - `POST /links/bulk` — create up to 100 links; best-effort, `results[i]` corresponds to
   `links[i]` (per-element `error` or success fields).
@@ -72,7 +72,8 @@ or control characters (`400` if too short/long, `422` otherwise).
   the server default. Preserves slug, views, edit code, owner, creation time and burn setting.
 - `DELETE /links/{id}` — send `X-Edit-Code`, or omit it as the authenticated owner.
   Unlike notes' legacy fallback, an `edit_code` query parameter is ignored.
-- `GET /r/{id}` follows a link: an immediate `301` when direct redirect is enabled, otherwise
+- `GET /{id}` follows a link when no note has this `id` (the older `GET /r/{id}` also works):
+  an immediate `301` when direct redirect is enabled, otherwise
   an HTML transparency page with a link to the destination. It is outside the JSON API.
   `/{id}` serves notes. A `burn_after_click` link is consumed only by a deliberate access (a
   browser navigation, or an `Accept` naming e.g. `text/html` exactly); without `Accept`, with
@@ -132,7 +133,7 @@ lockout is scoped to the resource and authenticated user ID (across sessions/tok
 Anonymous attempts are scoped to the resource and client IP, with IPv6 grouped by /64.
 `503` with `code: "api_disabled"` means the instance runs with `--disable-api` and the
 REST surface is off. The editor cannot publish or save because it uses the REST API;
-viewing `/{id}`, following `/r/{id}`, account/admin forms and health checks still work.
+viewing notes and following short links at `/{id}`, account/admin forms and health checks still work.
 Match `code`, not `message`; other `503` responses have other causes.
 
 ## Safe discovery

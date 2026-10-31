@@ -38,7 +38,7 @@ type RouterOptions struct {
 	// request reaching the disabling middleware gets 503 with code=api_disabled. The web UI and
 	// /healthz, /readyz keep working — see WithAPIDisabled.
 	DisableAPI bool
-	// DirectRedirect selects GET /r/{id}'s response mode: true issues an immediate 301 to the
+	// DirectRedirect selects the short-link redirect's response mode: true issues an immediate 301 to the
 	// short link's target URL, false renders a transparency interstitial. See LinkHandler.Redirect.
 	DirectRedirect bool
 }
@@ -100,6 +100,8 @@ func registerAllRoutes(mux *http.ServeMux, handler *Handler, ogenSrv http.Handle
 	for _, registrar := range registrars {
 		registrar.RegisterRoutes(mux)
 	}
+
+	mux.HandleFunc("GET /{id...}", handler.GetNoteOrLink)
 }
 
 // NewRouter registers all routes and wraps them with middleware.

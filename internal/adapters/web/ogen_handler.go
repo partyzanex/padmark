@@ -236,7 +236,7 @@ func (h *OgenHandler) CreateLink(
 	}
 
 	return &ogenapi.CreateLinkResponseHeaders{
-		Location: ogenapi.NewOptString("/r/" + link.ID),
+		Location: ogenapi.NewOptString("/" + link.ID),
 		Response: domainLinkToCreateResponse(link, h.log),
 	}, nil
 }
@@ -285,7 +285,7 @@ func (h *OgenHandler) GetLink(
 	// matching LinkHandler.Redirect's order, so an expired private link answers a stranger with
 	// 401 rather than confirming it once existed. Unlike the redirect path this only reports the
 	// expiry and does not delete the row: GET /links/{id} is documented as a side-effect-free
-	// metadata read, and the expired link is cleaned up on its next GET /r/{id}.
+	// metadata read, and the expired link is cleaned up on its next GET /{id}.
 	if link.Expired(time.Now()) {
 		return mapGetLinkError(domain.ErrExpired, h.log), nil
 	}

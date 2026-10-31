@@ -361,12 +361,12 @@ type CreateLinkRequest struct {
 	TargetURL url.URL `json:"target_url"`
 	// Custom URL-friendly identifier. Must be a single path segment matching
 	// `[a-zA-Z0-9_-]+` — multi-segment slugs (containing `/`) return `422`, since short
-	// links are only served at `GET /r/{id}` and `/links/{id}`.
+	// links are only served at `GET /{id}`, `GET /r/{id}` and `/links/{id}`.
 	// If omitted a 10-character random slug is generated.
 	// Returns `409` if the slug is already taken by a note or another link.
 	Slug OptString `json:"slug"`
 	// When `true` the link is deleted the moment it is first deliberately followed via
-	// `GET /r/{id}` (a browser navigation or an explicit `Accept`; previews, scanners,
+	// `GET /{id}` (a browser navigation or an explicit `Accept`; previews, scanners,
 	// `HEAD` and embeds get `409` and leave it intact — see "Short links").
 	BurnAfterClick OptBool `json:"burn_after_click"`
 	// Seconds until the link expires, counted from creation. Omitted means the link never
@@ -384,7 +384,7 @@ type CreateLinkRequest struct {
 	// actually have an owner, i.e. `--enable-accounts` and an authenticated caller —
 	// otherwise the request is rejected with `422`.
 	Privacy OptCreateLinkRequestPrivacy `json:"privacy"`
-	// Per-link override of the redirect mode for `GET /r/{id}`: `false` forces the
+	// Per-link override of the redirect mode for `GET /{id}`: `false` forces the
 	// transparency interstitial; `true` forces an immediate `301`, but only for a link
 	// created by an authenticated owner or on a server running `--direct-redirect=true`
 	// (otherwise ignored). Omitted (or explicit `null`) inherits the default: interstitial
@@ -526,7 +526,7 @@ type CreateLinkResponse struct {
 	ID string `json:"id"`
 	// Destination URL.
 	TargetURL url.URL `json:"target_url"`
-	// Number of times the link has been followed via `GET /r/{id}`, as read from storage.
+	// Number of times the link has been followed via `GET /{id}`, as read from storage.
 	// Concurrent redirects may increment the count after this read. The decrypted-target
 	// cache never supplies counters or authorization metadata.
 	Views int `json:"views"`
@@ -1460,7 +1460,7 @@ type LinkResponse struct {
 	ID string `json:"id"`
 	// Destination URL.
 	TargetURL url.URL `json:"target_url"`
-	// Number of times the link has been followed via `GET /r/{id}`, as read from storage.
+	// Number of times the link has been followed via `GET /{id}`, as read from storage.
 	// Concurrent redirects may increment the count after this read. The decrypted-target
 	// cache never supplies counters or authorization metadata.
 	Views int `json:"views"`

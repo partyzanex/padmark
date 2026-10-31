@@ -8,7 +8,7 @@ base explicitly. The linked reference and OpenAPI are embedded in the same serve
 use the target instance's documents together when checking API compatibility.
 
 Reading a note increments `views` and can start or complete burn-after-reading. Following
-`/r/{id}` can consume a burn-after-click link. Use documentation or `/healthz` for discovery;
+`/{id}` can consume a burn-after-click link. Use documentation or `/healthz` for discovery;
 read content or follow redirects only when the user intends it.
 
 An issued `pmk_…` value is an envelope: decode its base64url JSON, use `url` as the API base,

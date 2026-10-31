@@ -41,7 +41,7 @@ func New() *Metrics {
 			Namespace:   namespace,
 			Subsystem:   subsystem,
 			Name:        "redirects_total",
-			Help:        "Total number of successful short-link redirects served via GET /r/{id}.",
+			Help:        "Total number of successful short-link redirects served via GET /{id} or GET /r/{id}.",
 			Unit:        "",
 			ConstLabels: nil,
 		}),

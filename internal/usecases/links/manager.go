@@ -570,14 +570,14 @@ func (m *Manager) resolveAndHashEditCode(link *domain.Link) (string, error) {
 func (m *Manager) resolveUniqueSlug(
 	ctx context.Context, customHash string,
 ) (slug string, unlock func(), err error) {
-	// Unlike notes, links are only served at single-segment routes (GET /r/{id} plus the ogen
+	// Unlike notes, links are only served at single-segment routes (GET /{id} and GET /r/{id} plus the ogen
 	// GET /links/{id} / DELETE /links/{id}), so a multi-segment custom alias would be created
 	// successfully yet unroutable and unreachable through the API. Reject it here, at the
 	// resource that owns the routing constraint, rather than narrowing the shared
 	// domain.ValidCustomSlug that multi-segment notes legitimately rely on.
 	if strings.Contains(customHash, "/") {
 		return "", nil, fmt.Errorf(
-			"custom link slug %q must be a single path segment (links are served at /r/{id}): %w",
+			"custom link slug %q must be a single path segment (links are served at /{id}): %w",
 			customHash, domain.ErrInvalidSlug)
 	}
 

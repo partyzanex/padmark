@@ -204,7 +204,9 @@ middleware never imports the parent adapter. `http/response/` supplies the share
 format without introducing a dependency cycle. Resource privacy remains in the handlers/usecases.
 
 `LinkHandler` serves the creation form at `/links`, the metadata-only editor at
-`/links/{id}/edit`, and redirects at `/r/{id}`. Editor reads and saves do not consume burn links.
+`/links/{id}/edit`, and redirects at `/r/{id}`. `Handler.GetNoteOrLink` serves the bare `/{id}`:
+it reads the note first and calls the link redirect only when no note has the slug. Editor reads
+and saves do not consume burn links.
 The `/api/openapi.yaml` response uses the same build version as `padmark-server --version`;
 release container builds inject the Git-tag version through the `APP_VERSION` build argument.
 

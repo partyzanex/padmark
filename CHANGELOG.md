@@ -34,6 +34,9 @@ That baseline is not the latest released version.
   from different server replicas. Reservations are released atomically on deletion or burn.
   If existing native records already collide, the schema migration stops and preserves both
   records; resolve the collision explicitly before retrying.
+- Short links answer at `/{id}`, like notes: the server serves the note with that `id` or, when
+  there is none, the link. `POST /links` returns `Location: /{id}`, and the web UI, CLI and MCP
+  show the short URL. The older `/r/{id}` URLs keep working.
 
 ### Upgrading v0.3.2/v0.3.3 to v0.4.0
 

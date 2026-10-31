@@ -37,12 +37,10 @@ func (h *PageHandler) SuccessPage(w http.ResponseWriter, r *http.Request) {
 	// r.Host may be attacker-controlled (Host header), but this URL is only rendered into the
 	// page via html/template (escaped, no injection) for the user to copy — it is never emailed
 	// or used server-side. Add allowed-host validation here if absolute links ever leave the page.
+	// Notes and short links share one slug namespace, so both answer at /{id}.
 	noteURL := scheme + "://" + r.Host + "/" + id
 
 	isLink := query.Get("kind") == "link"
-	if isLink {
-		noteURL = scheme + "://" + r.Host + "/r/" + id
-	}
 
 	burn := query.Get("burn") == "1"
 

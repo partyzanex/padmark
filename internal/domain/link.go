@@ -18,7 +18,7 @@ type Link struct {
 	// creator — see links.Manager.Update/Delete, mirroring notes.Manager.Update/Delete.
 	OwnerID *uuid.UUID
 	// DirectRedirect overrides the redirect mode for this one link: nil means "inherit" (the
-	// server flag, or direct for an owned link), non-nil forces GET /r/{id} into 301 mode (true) or
+	// server flag, or direct for an owned link), non-nil forces the redirect into 301 mode (true) or
 	// interstitial mode (false). An anonymous link's true is ignored unless the operator enabled
 	// --direct-redirect. See EffectiveDirectRedirect.
 	DirectRedirect *bool
@@ -66,7 +66,7 @@ func (l *Link) EffectivePrivacy() Privacy {
 	return *l.Privacy
 }
 
-// EffectiveDirectRedirect reports whether GET /r/{id} should answer with an immediate 301 rather
+// EffectiveDirectRedirect reports whether the short-link redirect should answer with an immediate 301 rather
 // than the transparency interstitial.
 //
 // serverDefault is the operator's --direct-redirect flag, which defaults to false so that an

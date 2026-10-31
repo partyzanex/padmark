@@ -19,7 +19,7 @@ const (
 // isDisabledAPIPath reports whether path belongs to the REST/JSON API surface that
 // --disable-api turns off: note CRUD (/notes and everything under it), short-link CRUD
 // (/links and everything under it), and the machine-readable contract (API docs, spec,
-// llms.txt). The web UI's short note URL (/{id}), /edit/{id}, /r/{id}, and operational
+// llms.txt). The web UI's short note URL (/{id}), /edit/{id}, the short link URLs (/{id}, /r/{id}), and operational
 // endpoints (/healthz, /readyz, /static/*) are deliberately not matched here — they keep
 // working.
 func isDisabledAPIPath(path string) bool {

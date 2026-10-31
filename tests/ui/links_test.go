@@ -76,7 +76,7 @@ func (sess *uiSession) createTestLink() (string, string) {
 	id, code := sess.createdLink()
 	require.Equal(sess.t, "ui-link", id)
 	require.Equal(sess.t, "Link-Edit-Code42!", code)
-	sess.must(sess.expect.Locator(sess.page.Locator(".copy-value").First()).ToHaveText(sess.baseURL + "/r/" + id))
+	sess.must(sess.expect.Locator(sess.page.Locator(".copy-value").First()).ToHaveText(sess.baseURL + "/" + id))
 	sess.screenshot("link-created.png", ".copy-value", ".success-subtitle")
 
 	return id, code

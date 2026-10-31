@@ -27,7 +27,7 @@ func shortenCommand() *urcli.Command {
 			clifactory.StringFlag(func(flag *urcli.StringFlag) {
 				flag.Name = FlagSlug
 				flag.Usage = "Custom URL slug (letters, digits, hyphens, underscores; " +
-					"single segment — links are served at /r/{id})"
+					"single segment — links are served at /{id})"
 			}),
 			clifactory.StringFlag(func(flag *urcli.StringFlag) {
 				flag.Name = FlagPrivacy

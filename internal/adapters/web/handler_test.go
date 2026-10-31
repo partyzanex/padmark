@@ -1221,7 +1221,9 @@ func (s *HandlerSuite) TestGetNote_Expired() {
 
 func (s *HandlerSuite) TestGetNote_ShortURL() {
 	note := newTestNote("short", "body")
-	s.manager.EXPECT().View(gomock.Any(), testID).Return(note, nil)
+	// GET /{id} reads the note first (it may be a short link instead) and reuses that snapshot.
+	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
+	s.manager.EXPECT().ViewPreloaded(gomock.Any(), testID, note).Return(note, nil)
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/"+testID, nil)
@@ -2388,8 +2390,8 @@ func (s *HandlerSuite) TestGetNote_OpenInstance_ShowsEditButtons() {
 	s.Contains(body, "New")
 }
 
-func (s *HandlerSuite) TestGetNote_AuthInstance_Unauthenticated_HidesEditButtons() {
-	// Auth tokens configured, user not authenticated → CanEdit is false.
+func (s *HandlerSuite) TestGetNote_AuthInstance_Unauthenticated_ShowsEditButtons() {
+	// Accounts enabled, user not authenticated → CanEdit is true: the edit code authorizes the save.
 	// handlePrivateAuth calls Peek first; the public note is then rendered via GetRenderedPreloaded.
 	router := s.newRouterWithTOTPAuth()
 	note := newTestNote("public note", "content")
@@ -2406,8 +2408,8 @@ func (s *HandlerSuite) TestGetNote_AuthInstance_Unauthenticated_HidesEditButtons
 	s.Equal(http.StatusOK, w.Code)
 
 	body := w.Body.String()
-	s.NotContains(body, `href="/edit/`)
-	s.NotContains(body, ">New<")
+	s.Contains(body, `href="/edit/`)
+	s.Contains(body, ">New<")
 }
 
 // ── Login ──.
@@ -2813,7 +2815,7 @@ func (s *HandlerSuite) TestHandleReveal_CrossNoteToken_TokenNotBurned() {
 // ── TOTP-mode private note and CanEdit fixes ──
 //
 // In TOTP-only deployments (authMgr set) handlePrivateAuth must respect the session before
-// serving private notes, and CanEdit must depend on actual authentication state.
+// serving private notes, and CanEdit must follow the note's visibility to the caller.
 //
 // Call-flow for GET /notes/{id} in TOTP mode:
 //   1. Auth middleware is bypassed (note route is public).
@@ -3205,7 +3207,7 @@ func (s *HandlerSuite) TestEditPage_OwnerOnly_Owner_OK() {
 }
 
 // TestCanEdit_TOTPMode_Unauthenticated verifies that in TOTP-only mode an
-// unauthenticated visitor does NOT see the edit button (CanEdit = false).
+// unauthenticated visitor sees the edit button of a public note: the edit code authorizes the save.
 func (s *HandlerSuite) TestCanEdit_TOTPMode_Unauthenticated() {
 	note := newTestNote("public note", "content")
 
@@ -3224,8 +3226,8 @@ func (s *HandlerSuite) TestCanEdit_TOTPMode_Unauthenticated() {
 	router.ServeHTTP(w, r)
 
 	s.Equal(http.StatusOK, w.Code)
-	s.NotContains(w.Body.String(), `href="/edit/`+testID+`"`,
-		"unauthenticated user must not see the edit button in TOTP mode")
+	s.Contains(w.Body.String(), `href="/edit/`+testID+`"`,
+		"an unauthenticated reader of a public note must see the edit button in TOTP mode")
 }
 
 // TestCanEdit_TOTPMode_Authenticated verifies that an authenticated TOTP-session
