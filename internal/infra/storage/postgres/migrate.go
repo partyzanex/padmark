@@ -13,7 +13,7 @@ import (
 
 // Migrate applies all pending goose migrations to the PostgreSQL database.
 func Migrate(ctx context.Context, db *bun.DB) ([]*goose.MigrationResult, error) {
-	operationResult, operationErr := migrate(ctx, db, nil)
+	operationResult, operationErr := runMigrations(ctx, db, nil)
 	if operationErr != nil {
 		return operationResult, fmt.Errorf("migrate: %w", operationErr)
 	}
@@ -27,7 +27,7 @@ func Migrate(ctx context.Context, db *bun.DB) ([]*goose.MigrationResult, error) 
 //
 // Strategy: fail-hard for the migration itself; a failed pending-status lookup is also returned.
 func MigrateWithWarning(ctx context.Context, db *bun.DB, log *slog.Logger) ([]*goose.MigrationResult, error) {
-	operationResult, operationErr := migrate(ctx, db, log)
+	operationResult, operationErr := runMigrations(ctx, db, log)
 	if operationErr != nil {
 		return operationResult, fmt.Errorf("migrate: %w", operationErr)
 	}
@@ -35,7 +35,7 @@ func MigrateWithWarning(ctx context.Context, db *bun.DB, log *slog.Logger) ([]*g
 	return operationResult, nil
 }
 
-func migrate(ctx context.Context, db *bun.DB, log *slog.Logger) ([]*goose.MigrationResult, error) {
+func runMigrations(ctx context.Context, db *bun.DB, log *slog.Logger) ([]*goose.MigrationResult, error) {
 	provider, err := goose.NewProvider(goose.DialectPostgres, db.DB, pgmigrations.FS)
 	if err != nil {
 		return nil, fmt.Errorf("migrations provider: %w", err)

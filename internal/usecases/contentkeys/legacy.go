@@ -78,7 +78,7 @@ func (m *Manager) MarkLegacy(ctx context.Context, id string) (Report, error) {
 	}
 
 	if row.Legacy == nil {
-		markErr := m.markLegacy(ctx, row)
+		markErr := m.markRowLegacy(ctx, row)
 		if markErr != nil {
 			return newReport("unknown"), Wrap(markErr)
 		}
@@ -93,7 +93,7 @@ func (m *Manager) MarkLegacy(ctx context.Context, id string) (Report, error) {
 	return report, nil
 }
 
-func (m *Manager) markLegacy(ctx context.Context, row *Row) error {
+func (m *Manager) markRowLegacy(ctx context.Context, row *Row) error {
 	cipher := m.ciphers[resourceNote]
 	if cipher.Versioned(row.Value) {
 		return errNoteAlreadyEnveloped

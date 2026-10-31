@@ -51,7 +51,8 @@ func (s *ManagerSuite) SetupTest() {
 	s.users = NewMockUserStore(s.ctrl)
 	s.invites = NewMockInviteStore(s.ctrl)
 	s.sessions = NewMockSessionStore(s.ctrl)
-	mgr, err := NewManager(s.users, s.invites, s.sessions, nil,
+	mgr, err := NewManager(
+		Stores{Users: s.users, Invites: s.invites, Sessions: s.sessions, APITokens: nil},
 		crypto.NewPasswordHasher(testArgon2Params),
 		crypto.NewSealer(testArgon2Params), crypto.NewTOTP(), discardLog(), "padmark", 0)
 	s.Require().NoError(err)
@@ -634,7 +635,8 @@ func (s *ManagerSuite) TestChangePassword_RevocationFailureReturnsSessionAndWarn
 func (s *ManagerSuite) TestChangePassword_RevokesAPITokens() {
 	for _, revokeErr := range []error{nil, errors.New("db timeout")} {
 		apiTokens := NewMockAPITokenStore(s.ctrl)
-		mgr, err := NewManager(s.users, s.invites, s.sessions, apiTokens,
+		mgr, err := NewManager(
+			Stores{Users: s.users, Invites: s.invites, Sessions: s.sessions, APITokens: apiTokens},
 			crypto.NewPasswordHasher(testArgon2Params),
 			crypto.NewSealer(testArgon2Params), crypto.NewTOTP(), discardLog(), "padmark", 0)
 		s.Require().NoError(err)

@@ -65,7 +65,7 @@ func (h *EditCodeHasher) WithLogger(log *slog.Logger) *EditCodeHasher {
 }
 
 // Hash returns a salted SHA-256 of code in the format "s1$<base64url_salt>$<base64url_digest>".
-func (h *EditCodeHasher) Hash(code string) (string, error) {
+func (*EditCodeHasher) Hash(code string) (string, error) {
 	salt := make([]byte, editCodeSaltLen)
 
 	_, err := rand.Read(salt)
@@ -129,7 +129,7 @@ var storedEditCodeHash = regexp.MustCompile(
 // IsStoredHash reports whether value has the exact shape of a stored edit-code hash. v0.1.6
 // stored edit codes in plaintext, and a caller-chosen code could start with "v1$" or "s1$", so
 // a prefix check cannot tell a hash from such a code; only a value of the full shape can be a hash.
-func (h *EditCodeHasher) IsStoredHash(value string) bool {
+func (*EditCodeHasher) IsStoredHash(value string) bool {
 	return storedEditCodeHash.MatchString(value)
 }
 

@@ -49,10 +49,12 @@ func TestAPITokenFlow_AdminIssuesKey_CLICreatesNote(t *testing.T) {
 	users := sqliterepo.NewUserRepository(db)
 
 	authMgr, err := auth.NewManager(
-		users,
-		sqliterepo.NewInviteRepository(db, slog.Default()),
-		sqliterepo.NewSessionRepository(db, slog.Default()),
-		sqliterepo.NewAPITokenRepository(db),
+		auth.Stores{
+			Users:     users,
+			Invites:   sqliterepo.NewInviteRepository(db, slog.Default()),
+			Sessions:  sqliterepo.NewSessionRepository(db, slog.Default()),
+			APITokens: sqliterepo.NewAPITokenRepository(db),
+		},
 		crypto.NewPasswordHasher(testArgon2Params),
 		crypto.NewSealer(testArgon2Params),
 		crypto.NewTOTP(),

@@ -56,7 +56,10 @@ func UserFromContext(r *http.Request) *domain.User {
 // methods receive only a context.Context, not *http.Request) — see NewRouter for why the
 // auth-middleware-enriched context still reaches them: ogen dispatches using r.Context().
 func UserFromCtx(ctx context.Context) *domain.User {
-	usr, _ := ctx.Value(keyUser).(*domain.User)
+	usr, ok := ctx.Value(keyUser).(*domain.User)
+	if !ok {
+		return nil
+	}
 
 	return usr
 }
@@ -65,7 +68,10 @@ func UserFromCtx(ctx context.Context) *domain.User {
 // authenticated with, or "" for a browser session or an anonymous caller. Credential-issuing
 // operations use it to demand a step-up from a bearer and to record it as the new key's issuer.
 func APITokenHashFromCtx(ctx context.Context) string {
-	hash, _ := ctx.Value(keyAPIToken).(string)
+	hash, ok := ctx.Value(keyAPIToken).(string)
+	if !ok {
+		return ""
+	}
 
 	return hash
 }

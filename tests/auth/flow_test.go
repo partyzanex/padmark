@@ -34,10 +34,12 @@ func (s *AuthFlowSuite) SetupTest() {
 	s.SQLiteAuthSuite.SetupTest()
 
 	mgr, err := auth.NewManager(
-		s.Users,
-		s.Invites,
-		s.Sessions,
-		nil, // this suite exercises TOTP/session flows, not API tokens
+		auth.Stores{
+			Users:     s.Users,
+			Invites:   s.Invites,
+			Sessions:  s.Sessions,
+			APITokens: nil, // this suite exercises TOTP/session flows, not API tokens
+		},
 		crypto.NewPasswordHasher(testArgon2Params),
 		crypto.NewSealer(testArgon2Params),
 		crypto.NewTOTP(),

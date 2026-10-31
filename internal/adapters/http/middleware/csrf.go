@@ -92,7 +92,10 @@ func VerifyCSRFToken(token string, secret []byte, sessionID string) bool {
 
 // CSRFFromContext returns the CSRF token issued for this request, or "" when there is none.
 func CSRFFromContext(ctx context.Context) string {
-	v, _ := ctx.Value(keyCSRF).(string)
+	v, ok := ctx.Value(keyCSRF).(string)
+	if !ok {
+		return ""
+	}
 
 	return v
 }

@@ -60,6 +60,8 @@ func (h *PageHandler) SuccessPage(w http.ResponseWriter, r *http.Request) {
 		if err == nil {
 			expiresLabel = "expires " + parsed.Format("Jan 2, 2006")
 		}
+	default:
+		// No expiry keeps the "never expires" label.
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

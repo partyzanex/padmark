@@ -128,22 +128,27 @@ type Manager struct {
 	*APITokenManager
 }
 
+// Stores groups the account repositories that Manager uses. APITokens enables the CLI API-token
+// flow (issue/resolve/list/revoke). Set it to nil to disable that flow: the token methods then
+// return domain.ErrFeatureNotSupported.
+type Stores struct {
+	Users     UserStore
+	Invites   InviteStore
+	Sessions  SessionStore
+	APITokens APITokenStore
+}
+
 // NewManager returns a new auth Manager.
 // passwordHasher carries the (configurable) argon2 cost used for password hashing/verification.
 // sealer and totp provide the secret-sealing and TOTP primitives (injected so the usecase owns
 // its contracts instead of importing infra/crypto). issuer is the TOTP issuer name shown in the
 // authenticator app. sessionTTL controls how long a session remains valid; pass 0 for the
 // default (30 days).
-// apiTokens enables the CLI API-token flow (issue/resolve/list/revoke). Pass nil to disable it:
-// the token methods then return domain.ErrFeatureNotSupported.
 //
 // Returns an error when NewSessionManager's bootstrap-time crypto precompute fails (see its
 // doc); NewManager runs only at the composition root, so the caller should treat this as fatal.
 func NewManager(
-	users UserStore,
-	invites InviteStore,
-	sessions SessionStore,
-	apiTokens APITokenStore,
+	stores Stores,
 	passwordHasher PasswordHasher,
 	sealer SecretSealer,
 	totp TOTPManager,
@@ -152,7 +157,7 @@ func NewManager(
 	sessionTTL time.Duration,
 ) (*Manager, error) {
 	sessionMgr, err := NewSessionManager(
-		users, sessions, apiTokens, passwordHasher, sealer, totp, log, sessionTTL,
+		stores.Users, stores.Sessions, stores.APITokens, passwordHasher, sealer, totp, log, sessionTTL,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("new session manager: %w", err)
@@ -162,9 +167,9 @@ func NewManager(
 	return &Manager{
 		SessionManager: sessionMgr,
 		OnboardingManager: NewOnboardingManager(
-			users, invites, passwordHasher, sealer, totp, sessionMgr, issuer,
+			stores.Users, stores.Invites, passwordHasher, sealer, totp, sessionMgr, issuer,
 		),
-		UserAdminManager: NewUserAdminManager(users),
-		APITokenManager:  NewAPITokenManager(apiTokens, users, sessionMgr, log),
+		UserAdminManager: NewUserAdminManager(stores.Users),
+		APITokenManager:  NewAPITokenManager(stores.APITokens, stores.Users, sessionMgr, log),
 	}, nil
 }

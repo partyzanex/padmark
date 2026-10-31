@@ -1,4 +1,4 @@
-package pgmigrations
+package postgres
 
 import "embed"
 

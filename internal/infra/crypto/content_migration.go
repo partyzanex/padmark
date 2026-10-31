@@ -9,12 +9,12 @@ import (
 )
 
 // Versioned classifies value with IsVersionedContent; see its godoc for the exact rule.
-func (enc *ContentCipher) Versioned(value string) bool {
+func (*ContentCipher) Versioned(value string) bool {
 	return IsVersionedContent(value)
 }
 
 // ValidateLegacy checks structure only: the original slug is required to authenticate legacy data.
-func (enc *ContentCipher) ValidateLegacy(value string) error {
+func (*ContentCipher) ValidateLegacy(value string) error {
 	if len(value) > maxLegacyContentSize {
 		return domain.ErrMalformedCiphertext
 	}
@@ -36,7 +36,7 @@ func (enc *ContentCipher) WrapLegacy(value, recordID string) (string, error) {
 		return "", fmt.Errorf("validate legacy: %w", err)
 	}
 
-	operationResult, operationErr := enc.encrypt(value, recordID, legacyKind)
+	operationResult, operationErr := enc.encryptKind(value, recordID, legacyKind)
 	if operationErr != nil {
 		return operationResult, fmt.Errorf("encrypt: %w", operationErr)
 	}

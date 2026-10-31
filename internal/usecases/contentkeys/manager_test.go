@@ -280,7 +280,7 @@ func (s *ManagerTestSuite) TestMigrateInitializesPendingWithCorruptRaw() {
 		})
 	s.expectDeletes(&rows, 1)
 
-	report, err := s.manager.Migrate(ctx, false)
+	report, err := s.manager.Migrate(ctx)
 	s.Require().ErrorContains(err, "prune --corrupt --dry-run")
 	s.Equal(1, report.CorruptRaw)
 	s.Equal(1, report.Failed)
@@ -290,14 +290,14 @@ func (s *ManagerTestSuite) TestMigrateInitializesPendingWithCorruptRaw() {
 	s.Require().NotNil(registry)
 	s.Require().Error(s.manager.PrepareServe(ctx))
 
-	report, err = s.manager.PruneCorrupt(ctx, false)
+	report, err = s.manager.PruneCorrupt(ctx)
 	s.Require().NoError(err)
 	s.Equal(1, report.Pruned)
 	s.Equal(Pending, report.State)
 	s.Require().ErrorContains(s.manager.PrepareServe(ctx), "content migration required",
 		"pruning must not finish the migration implicitly")
 
-	report, err = s.manager.Migrate(ctx, false)
+	report, err = s.manager.Migrate(ctx)
 	s.Require().NoError(err)
 	s.Equal(Ready, report.State)
 	s.Require().NoError(s.manager.PrepareServe(ctx))
@@ -310,19 +310,19 @@ func (s *ManagerTestSuite) TestPruneDryRunDoesNotInitializeOrDelete() {
 	s.expectRegistry(nil)
 	s.expectRows(&rows)
 
-	report, err := s.manager.PruneCorrupt(ctx, true)
+	report, err := s.manager.PreviewPrune(ctx)
 	s.Require().NoError(err)
 	s.Equal(1, report.CorruptRaw)
 	s.Equal(1, report.Failed)
 	s.Zero(report.Pruned)
 	s.Len(rows, 1)
 
-	_, err = s.manager.Migrate(ctx, true)
+	_, err = s.manager.Status(ctx)
 	s.Require().Error(err)
 
 	s.expectDeletes(&rows, 1)
 
-	report, err = s.manager.PruneCorrupt(ctx, false)
+	report, err = s.manager.PruneCorrupt(ctx)
 	s.Require().NoError(err)
 	s.Equal(1, report.Pruned)
 	s.Empty(rows)
@@ -342,7 +342,7 @@ func (s *ManagerTestSuite) TestPrunePreservesValidRecords() {
 	s.expectRows(&rows)
 	s.expectDeletes(&rows, 2)
 
-	report, err := s.manager.PruneCorrupt(s.T().Context(), false)
+	report, err := s.manager.PruneCorrupt(s.T().Context())
 	s.Require().NoError(err)
 	s.Equal(2, report.Pruned)
 	s.Equal(1, report.Raw)
@@ -368,7 +368,7 @@ func (s *ManagerTestSuite) TestCorruptRawWithDollarIsPrunable() {
 
 	s.expectDeletes(&rows, 1)
 
-	report, err = s.manager.PruneCorrupt(ctx, false)
+	report, err = s.manager.PruneCorrupt(ctx)
 	s.Require().NoError(err)
 	s.Equal(1, report.Pruned)
 	s.Equal([]Row{newRow(resourceNote, "native", nativeValue)}, rows)
@@ -387,7 +387,7 @@ func (s *ManagerTestSuite) TestInvalidEnvelopeCannotBePrunedOrBindNewRegistry() 
 			s.expectRegistry(nil)
 			s.expectRows(&rows)
 
-			_, err := s.manager.Migrate(ctx, false)
+			_, err := s.manager.Migrate(ctx)
 			s.Require().Error(err)
 
 			report, err := s.manager.Status(ctx)
@@ -396,8 +396,10 @@ func (s *ManagerTestSuite) TestInvalidEnvelopeCannotBePrunedOrBindNewRegistry() 
 			s.Equal(2, report.Failed)
 			s.Equal(1, report.CorruptRaw, "versioned values are never malformed raw records")
 
-			for _, dryRun := range []bool{true, false} {
-				report, err := s.manager.PruneCorrupt(ctx, dryRun)
+			for _, prune := range []func(context.Context) (Report, error){
+				s.manager.PreviewPrune, s.manager.PruneCorrupt,
+			} {
+				report, err := prune(ctx)
 				s.Require().Error(err)
 				s.Zero(report.Pruned)
 				s.Len(rows, 2)
@@ -429,7 +431,7 @@ func (s *ManagerTestSuite) TestMixedDatabaseClassification() {
 	s.Equal(1, report.Wrapped)
 	s.Equal(map[string]int{activeKey: 2}, report.Keys)
 
-	report, err = s.manager.PruneCorrupt(s.T().Context(), false)
+	report, err = s.manager.PruneCorrupt(s.T().Context())
 	s.Require().Error(err, "a failing envelope blocks the whole prune before any deletion")
 	s.Zero(report.Pruned)
 	s.Len(rows, 6)
@@ -442,10 +444,10 @@ func (s *ManagerTestSuite) TestWrongKeyCannotPruneOrInitialize() {
 	s.expectRegistry(nil)
 	s.expectRows(&rows)
 
-	_, err := s.manager.Migrate(ctx, false)
+	_, err := s.manager.Migrate(ctx)
 	s.Require().Error(err)
 
-	_, err = s.manager.PruneCorrupt(ctx, false)
+	_, err = s.manager.PruneCorrupt(ctx)
 	s.Require().Error(err)
 	s.Len(rows, 2)
 }
@@ -460,10 +462,10 @@ func (s *ManagerTestSuite) TestSubstitutedKeyRejectedByRegistryCheck() {
 	s.expectRegistry(readyRegistry())
 	s.expectRows(&rows)
 
-	_, err := s.manager.Migrate(ctx, false)
+	_, err := s.manager.Migrate(ctx)
 	s.Require().ErrorContains(err, "does not match")
 
-	_, err = s.manager.PruneCorrupt(ctx, false)
+	_, err = s.manager.PruneCorrupt(ctx)
 	s.Require().ErrorContains(err, "does not match")
 	s.Len(rows, 1)
 }
@@ -475,10 +477,10 @@ func (s *ManagerTestSuite) TestReadFailureDoesNotInitializeOrPrune() {
 	s.store.EXPECT().Batch(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
 		Return(nil, errors.New("scan failed")).AnyTimes()
 
-	_, err := s.manager.Migrate(ctx, false)
+	_, err := s.manager.Migrate(ctx)
 	s.Require().ErrorContains(err, "scan failed")
 
-	_, err = s.manager.PruneCorrupt(ctx, false)
+	_, err = s.manager.PruneCorrupt(ctx)
 	s.Require().ErrorContains(err, "scan failed")
 	s.Equal(1, countPrefix(err))
 }
@@ -494,7 +496,7 @@ func (s *ManagerTestSuite) TestPruneConflictPreservesConcurrentReplacement() {
 		return false, nil
 	})
 
-	report, err := s.manager.PruneCorrupt(s.T().Context(), false)
+	report, err := s.manager.PruneCorrupt(s.T().Context())
 	s.Require().NoError(err)
 	s.Zero(report.Pruned)
 	s.Equal(1, report.Conflicts)
@@ -509,7 +511,7 @@ func (s *ManagerTestSuite) TestPruneDeleteFailureKeepsRecord() {
 	s.expectRows(&rows)
 	s.store.EXPECT().Delete(gomock.Any(), rows[0]).Return(false, errors.New("delete failed"))
 
-	report, err := s.manager.PruneCorrupt(s.T().Context(), false)
+	report, err := s.manager.PruneCorrupt(s.T().Context())
 	s.Require().ErrorContains(err, "delete failed")
 	s.Equal(1, countPrefix(err), "joined failure and status errors carry the context once")
 	s.Zero(report.Pruned)

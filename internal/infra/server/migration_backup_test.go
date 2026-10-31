@@ -96,7 +96,7 @@ func TestInitRepos_SQLite_BackupHonoursSkip(t *testing.T) {
 		db, err := openDB(t.Context(), "sqlite", dbPath, slog.New(slog.DiscardHandler))
 		require.NoError(t, err)
 
-		_, _, err = initRepos(t.Context(), "sqlite", db, newLogger("error", "text"),
+		_, err = initRepos(t.Context(), "sqlite", db, newLogger("error", "text"),
 			migrationOptions{dsn: dbPath, skipBackup: skip})
 		require.NoError(t, err)
 		require.NoError(t, db.Close())

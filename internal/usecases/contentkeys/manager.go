@@ -108,34 +108,6 @@ type Cipher interface {
 	Encrypt(plain, recordID string) (string, error)
 }
 
-// Report contains counts and public key IDs; never content or key bytes. Only a prune dry run
-// fills Candidates with record IDs, so the operator can review them before any deletion; for an
-// untagged v0.1.6 note the ID is its slug.
-type Report struct {
-	Keys           map[string]int `json:"keys"`
-	State          string         `json:"state"`
-	Candidates     []Candidate    `json:"candidates,omitempty"`
-	Raw            int            `json:"raw"`
-	Wrapped        int            `json:"wrapped"`
-	Native         int            `json:"native"`
-	Failed         int            `json:"failed"`
-	CorruptRaw     int            `json:"corrupt_raw"`
-	UntaggedLegacy int            `json:"untagged_legacy"`
-	Plaintext      int            `json:"plaintext"`
-	Pruned         int            `json:"pruned"`
-	Changed        int            `json:"changed"`
-	Conflicts      int            `json:"conflicts"`
-	Missing        int            `json:"missing"`
-}
-
-// Candidate is one record a prune dry run reports: Reason is "corrupt_raw" (prune would delete
-// it) or "untagged_legacy" (a v0.1.6 note that prune never deletes; tag it with MarkLegacy).
-type Candidate struct {
-	Resource string `json:"resource"`
-	ID       string `json:"id"`
-	Reason   string `json:"reason"`
-}
-
 // Manager migrates, rewraps, converts and prunes encrypted records without the read and burn
 // lifecycle of notes and links.
 type Manager struct {
@@ -155,7 +127,7 @@ func New(store Storage, keys Keyring, notes, links Cipher, hasher EditCodeHasher
 
 // Status authenticates envelopes and reports the remaining legacy layers without writing.
 func (m *Manager) Status(ctx context.Context) (Report, error) {
-	operationResult, operationErr := m.status(ctx, nil)
+	operationResult, operationErr := m.statusWithFailures(ctx, nil)
 	if operationErr != nil {
 		return operationResult, fmt.Errorf("status: %w", operationErr)
 	}
@@ -193,7 +165,7 @@ func (m *Manager) Register(ctx context.Context, keyID string) error {
 		return errMigrationNotInitialized
 	}
 
-	validationErr := m.validateKeys(reg, false)
+	validationErr := m.validateKeys(reg)
 	if validationErr != nil {
 		return Wrap(validationErr)
 	}
@@ -249,15 +221,6 @@ func (m *Manager) CanRemove(ctx context.Context, keyID string) error {
 	return nil
 }
 
-func newReport(state string) Report {
-	var report Report
-
-	report.State = state
-	report.Keys = make(map[string]int)
-
-	return report
-}
-
 func (m *Manager) walk(ctx context.Context, visit func(Row) error) error {
 	for _, resource := range []string{resourceNote, resourceLink} {
 		after := ""
@@ -292,11 +255,38 @@ func (m *Manager) walk(ctx context.Context, visit func(Row) error) error {
 	return nil
 }
 
-func (m *Manager) validateKeys(reg *Registry, requireActive bool) error {
+func (m *Manager) validateKeys(reg *Registry) error {
 	if reg == nil {
 		return nil
 	}
 
+	err := validateRegistry(reg)
+	if err != nil {
+		return err
+	}
+
+	return m.verifyKeyChecks(reg)
+}
+
+// validateActiveKeys is validateKeys that also requires a registered check for the active key.
+func (m *Manager) validateActiveKeys(reg *Registry) error {
+	if reg == nil {
+		return nil
+	}
+
+	err := validateRegistry(reg)
+	if err != nil {
+		return err
+	}
+
+	if reg.Checks[m.keys.ActiveKey()] == "" {
+		return errActiveKeyNotRegistered
+	}
+
+	return m.verifyKeyChecks(reg)
+}
+
+func validateRegistry(reg *Registry) error {
 	if reg.Phase != Ready && reg.Phase != Pending {
 		return errInvalidMigrationState
 	}
@@ -306,10 +296,10 @@ func (m *Manager) validateKeys(reg *Registry, requireActive bool) error {
 		return errInvalidInstallationID
 	}
 
-	if requireActive && reg.Checks[m.keys.ActiveKey()] == "" {
-		return errActiveKeyNotRegistered
-	}
+	return nil
+}
 
+func (m *Manager) verifyKeyChecks(reg *Registry) error {
 	for _, id := range m.keys.KeyIDs() {
 		if check, found := reg.Checks[id]; found {
 			err := m.keys.VerifyKeyCheck(reg.InstallationID, id, check)
@@ -411,7 +401,7 @@ func (m *Manager) initialize(ctx context.Context) error {
 		}
 	}
 
-	return errorcontext.Wrap(m.validateKeys(reg, true), "validate keys")
+	return errorcontext.Wrap(m.validateActiveKeys(reg), "validate active keys")
 }
 
 func (m *Manager) initializeRegistry(ctx context.Context) error {
@@ -437,8 +427,8 @@ func (m *Manager) initializeRegistry(ctx context.Context) error {
 	return Wrap(m.store.Initialize(ctx, reg))
 }
 
-// status removes conversion failures already counted by the final storage scan.
-func (m *Manager) status(ctx context.Context, conversionFailures map[string]struct{}) (Report, error) {
+// statusWithFailures removes conversion failures already counted by the final storage scan.
+func (m *Manager) statusWithFailures(ctx context.Context, conversionFailures map[string]struct{}) (Report, error) {
 	reg, err := m.store.Registry(ctx)
 
 	report := newReport("uninitialized")
@@ -446,7 +436,7 @@ func (m *Manager) status(ctx context.Context, conversionFailures map[string]stru
 		return report, Wrap(err)
 	}
 
-	validationErr := m.validateKeys(reg, false)
+	validationErr := m.validateKeys(reg)
 	if validationErr != nil {
 		return report, Wrap(validationErr)
 	}

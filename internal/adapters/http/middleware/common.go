@@ -84,7 +84,10 @@ func WithRequestOrigin(forcedScheme string, trustedProxies []*net.IPNet, next ht
 // OriginFromCtx returns the stored request origin; zero-valued when the middleware is not
 // installed (callers treat that as an error rather than minting a URL with a broken base).
 func OriginFromCtx(ctx context.Context) RequestOrigin {
-	origin, _ := ctx.Value(originCtxKey{}).(RequestOrigin)
+	origin, ok := ctx.Value(originCtxKey{}).(RequestOrigin)
+	if !ok {
+		return RequestOrigin{Scheme: "", Host: ""}
+	}
 
 	return origin
 }

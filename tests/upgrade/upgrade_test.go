@@ -129,7 +129,7 @@ func resolveUntaggedNotes(t *testing.T, db *bun.DB, fixture []legacyNote) {
 	assert.Equal(t, 1, report.CorruptRaw)
 	assert.Zero(t, report.UntaggedLegacy)
 
-	preview, err := keyManager.PruneCorrupt(ctx, true)
+	preview, err := keyManager.PreviewPrune(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, []contentkeys.Candidate{{Resource: "note", ID: shaped.slug, Reason: "corrupt_raw"}},
 		preview.Candidates)
@@ -140,7 +140,7 @@ func resolveUntaggedNotes(t *testing.T, db *bun.DB, fixture []legacyNote) {
 		Where("id IN (?)", bun.List([]string{argon.slug, fast.slug})).Exec(ctx)
 	require.NoError(t, err)
 
-	report, err = keyManager.PruneCorrupt(ctx, false)
+	report, err = keyManager.PruneCorrupt(ctx)
 	require.ErrorContains(t, err, "mark-legacy --id")
 	assert.Zero(t, report.Pruned)
 	assert.Equal(t, 2, report.UntaggedLegacy)
@@ -149,7 +149,7 @@ func resolveUntaggedNotes(t *testing.T, db *bun.DB, fixture []legacyNote) {
 	require.NoError(t, err)
 	require.EqualValues(t, len(fixture), count, "prune must not delete any v0.1.6 note")
 
-	preview, err = keyManager.PruneCorrupt(ctx, true)
+	preview, err = keyManager.PreviewPrune(ctx)
 	require.Error(t, err)
 	assert.ElementsMatch(t, []contentkeys.Candidate{
 		{Resource: "note", ID: argon.slug, Reason: "untagged_legacy"},
@@ -185,7 +185,7 @@ func convertContent(t *testing.T, db *bun.DB, fixture []legacyNote) {
 	assert.Zero(t, report.CorruptRaw)
 	assert.Equal(t, contentkeys.Pending, report.State)
 
-	dryRun, err := keyManager.Migrate(ctx, true)
+	dryRun, err := keyManager.Status(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, len(fixture), dryRun.Plaintext)
 	assert.Zero(t, dryRun.Changed)
@@ -197,7 +197,7 @@ func convertContent(t *testing.T, db *bun.DB, fixture []legacyNote) {
 		Scan(ctx, &stored), "a dry run must not convert anything")
 	require.Equal(t, custom.content, stored)
 
-	report, err = keyManager.Migrate(ctx, false)
+	report, err = keyManager.Migrate(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, contentkeys.Ready, report.State)
 	assert.Equal(t, len(fixture), report.Changed)
@@ -207,7 +207,7 @@ func convertContent(t *testing.T, db *bun.DB, fixture []legacyNote) {
 
 	require.NoError(t, keyManager.PrepareServe(ctx))
 
-	report, err = keyManager.Migrate(ctx, false)
+	report, err = keyManager.Migrate(ctx)
 	require.NoError(t, err)
 	assert.Zero(t, report.Changed, "a second migrate must be a no-op")
 	assert.Zero(t, report.Conflicts)

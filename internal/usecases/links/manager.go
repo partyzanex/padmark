@@ -322,7 +322,7 @@ func (m *Manager) Peek(ctx context.Context, slug string) (*domain.Link, error) {
 // optional Cache can skip decryption after verifying the current ciphertext.
 // This operation does not authorize a reader; adapters with accounts enabled use Follow.
 func (m *Manager) Redirect(ctx context.Context, slug string) (*domain.Link, error) {
-	operationResult, operationErr := m.redirect(ctx, slug, true)
+	operationResult, operationErr := m.resolveAndRedirect(ctx, slug, true)
 	if operationErr != nil {
 		return operationResult, fmt.Errorf("redirect: %w", operationErr)
 	}
@@ -336,7 +336,7 @@ func (m *Manager) Redirect(ctx context.Context, slug string) (*domain.Link, erro
 // snapshot the rest of the policy uses, so a concurrent switch to burn cannot slip through. Any
 // other link is followed exactly as by Redirect.
 func (m *Manager) RedirectWithoutBurn(ctx context.Context, slug string) (*domain.Link, error) {
-	operationResult, operationErr := m.redirect(ctx, slug, false)
+	operationResult, operationErr := m.resolveAndRedirect(ctx, slug, false)
 	if operationErr != nil {
 		return operationResult, fmt.Errorf("redirect: %w", operationErr)
 	}
@@ -397,15 +397,15 @@ func (m *Manager) persistLink(
 	return nil
 }
 
-// redirect is Redirect/RedirectWithoutBurn's shared body; allowBurn says whether this access may
-// consume a burn_after_click link.
-func (m *Manager) redirect(ctx context.Context, slug string, allowBurn bool) (*domain.Link, error) {
+// resolveAndRedirect is Redirect/RedirectWithoutBurn's shared body; allowBurn says whether this
+// access may consume a burn_after_click link.
+func (m *Manager) resolveAndRedirect(ctx context.Context, slug string, allowBurn bool) (*domain.Link, error) {
 	link, err := m.resolveLink(ctx, slug)
 	if err != nil {
 		return nil, fmt.Errorf("redirect: %w", err)
 	}
 
-	operationResult, operationErr := m.redirectLink(ctx, slug, link, allowBurn, nil)
+	operationResult, operationErr := m.redirectLink(ctx, slug, link, redirectAccess{reader: nil, allowBurn: allowBurn})
 	if operationErr != nil {
 		return operationResult, fmt.Errorf("redirect link: %w", operationErr)
 	}
@@ -413,17 +413,25 @@ func (m *Manager) redirect(ctx context.Context, slug string, allowBurn bool) (*d
 	return operationResult, nil
 }
 
+// redirectAccess describes one redirect. reader is the Follow caller whose visibility storage
+// enforces, or nil for Redirect; allowBurn says whether the access may consume a burn link.
+type redirectAccess struct {
+	reader    *FollowOptions
+	allowBurn bool
+}
+
 func (m *Manager) redirectLink(
-	ctx context.Context, slug string, link *domain.Link, allowBurn bool, reader *FollowOptions,
+	ctx context.Context, slug string, link *domain.Link, access redirectAccess,
 ) (*domain.Link, error) {
 	dbID := domain.HashSlug(slug)
+	reader := access.reader
 
 	if link.Expired(time.Now()) {
 		return nil, errorcontext.Wrap(m.expireLink(ctx, slug, dbID, reader), "handle redirect link")
 	}
 
 	if link.BurnAfterClick {
-		if !allowBurn {
+		if !access.allowBurn {
 			return nil, fmt.Errorf("redirect: %w", domain.ErrBurnIntentRequired)
 		}
 

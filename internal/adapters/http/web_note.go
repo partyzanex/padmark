@@ -225,6 +225,8 @@ func (h *NoteHandler) GetNote(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			h.log.ErrorContext(r.Context(), "encode get response", "err", err)
 		}
+	default:
+		// negotiate returns only the formats above.
 	}
 }
 

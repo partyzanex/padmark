@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -52,8 +53,8 @@ func Start(t *testing.T, binary, directory string, args ...string) (baseURL stri
 	address := listener.Addr().String()
 	require.NoError(t, listener.Close())
 
-	args = append(args, "--addr", address, "--metrics-addr", "")
-	command := exec.CommandContext(t.Context(), binary, args...) //nolint:gosec // controlled test binary/arguments
+	commandArgs := slices.Concat(args, []string{"--addr", address, "--metrics-addr", ""})
+	command := exec.CommandContext(t.Context(), binary, commandArgs...) //nolint:gosec // controlled test binary/arguments
 	command.Dir = directory
 
 	for _, value := range os.Environ() {

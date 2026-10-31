@@ -47,10 +47,12 @@ func newAuthManagerWithTokens(
 	apiTokens *MockAPITokenStore,
 ) *Manager {
 	mgr, err := NewManager(
-		users,
-		NewMockInviteStore(suite.ctrl),
-		NewMockSessionStore(suite.ctrl),
-		apiTokens,
+		Stores{
+			Users:     users,
+			Invites:   NewMockInviteStore(suite.ctrl),
+			Sessions:  NewMockSessionStore(suite.ctrl),
+			APITokens: apiTokens,
+		},
 		crypto.NewPasswordHasher(testArgon2Params),
 		crypto.NewSealer(testArgon2Params),
 		crypto.NewTOTP(),
@@ -69,10 +71,12 @@ func (suite *APITokenSuite) disabledMgr() *Manager {
 	suite.T().Helper()
 
 	mgr, err := NewManager(
-		suite.users,
-		NewMockInviteStore(suite.ctrl),
-		NewMockSessionStore(suite.ctrl),
-		nil, // API-token flow disabled → methods return domain.ErrFeatureNotSupported
+		Stores{
+			Users:     suite.users,
+			Invites:   NewMockInviteStore(suite.ctrl),
+			Sessions:  NewMockSessionStore(suite.ctrl),
+			APITokens: nil, // API-token flow disabled → methods return domain.ErrFeatureNotSupported
+		},
 		crypto.NewPasswordHasher(testArgon2Params),
 		crypto.NewSealer(testArgon2Params),
 		crypto.NewTOTP(),

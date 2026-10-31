@@ -78,13 +78,12 @@ func (l *Link) EffectivePrivacy() Privacy {
 //     redirects directly unless its own override says otherwise; an anonymous link always gets
 //     the interstitial, whatever override its creator asked for.
 func (l *Link) EffectiveDirectRedirect(serverDefault bool) bool {
-	owned := l.OwnerID != nil
-
-	if l.DirectRedirect != nil && (serverDefault || owned) {
+	allowed := serverDefault || l.OwnerID != nil
+	if l.DirectRedirect != nil && allowed {
 		return *l.DirectRedirect
 	}
 
-	return serverDefault || owned
+	return allowed
 }
 
 // Expired reports whether l's TTL has elapsed as of now. A nil ExpiresAt means the link never

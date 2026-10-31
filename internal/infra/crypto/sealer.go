@@ -53,7 +53,7 @@ func NewSealer(params Argon2Params) *Sealer {
 }
 
 // GenerateSalt returns a fresh random per-user KDF salt (16 bytes).
-func (s *Sealer) GenerateSalt() ([]byte, error) {
+func (*Sealer) GenerateSalt() ([]byte, error) {
 	operationResult, operationErr := GenerateKDFSalt()
 	if operationErr != nil {
 		return operationResult, fmt.Errorf("generate kdfsalt: %w", operationErr)

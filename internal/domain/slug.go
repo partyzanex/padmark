@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"math/big"
 	"regexp"
-	"sort"
+	"slices"
 	"strings"
 )
 
@@ -96,6 +96,8 @@ func HasGeneratedEditCodeShape(code string) bool {
 // accepted when allowCustom is true; otherwise a non-empty candidate is rejected so callers
 // cannot pick low-entropy, guessable key material. An empty candidate always generates a fresh
 // random slug, regardless of allowCustom (custom aliases are optional, not mandatory).
+//
+//nolint:revive // allowCustom is the --custom-slugs setting; the domain owns this slug rule
 func ResolveSlug(candidate string, allowCustom bool) (string, error) {
 	if candidate == "" {
 		slug, err := newSlug()
@@ -162,7 +164,7 @@ func SortedReservedSlugPrefixes() []string {
 		names = append(names, name)
 	}
 
-	sort.Strings(names)
+	slices.Sort(names)
 
 	return names
 }

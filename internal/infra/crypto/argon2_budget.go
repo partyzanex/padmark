@@ -1,6 +1,7 @@
 package crypto
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"sync/atomic"
@@ -26,10 +27,8 @@ type argon2Budget struct {
 }
 
 // newArgon2Budget returns a budget of kib KiB; zero selects DefaultArgon2MemoryBudget.
-func newArgon2Budget(kib uint32) *argon2Budget {
-	if kib == 0 {
-		kib = DefaultArgon2MemoryBudget
-	}
+func newArgon2Budget(requested uint32) *argon2Budget {
+	kib := cmp.Or(requested, DefaultArgon2MemoryBudget)
 
 	return &argon2Budget{sem: semaphore.NewWeighted(int64(kib)), capacity: int64(kib), kib: kib}
 }

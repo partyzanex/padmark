@@ -18,15 +18,12 @@ func parsePublicScheme(raw string) (string, error) {
 	}
 }
 
-// listenerURL formats a browser URL for the main listener. Wildcard addresses use
-// localhost; the scheme reflects TLS on this listener, independently of a reverse proxy.
-func listenerURL(addr string, tlsEnabled bool) string {
+// listenerURL formats a browser URL for the main listener. Wildcard addresses use localhost.
+func listenerURL(scheme, addr string) string {
 	var endpoint url.URL
 
-	endpoint.Scheme = "http"
-	if tlsEnabled {
-		endpoint.Scheme = "https"
-	}
+	endpoint.Scheme = scheme
+	endpoint.Host = addr
 
 	host, port, err := net.SplitHostPort(addr)
 	if err == nil {
@@ -35,10 +32,8 @@ func listenerURL(addr string, tlsEnabled bool) string {
 			host = "localhost"
 		}
 
-		addr = net.JoinHostPort(host, port)
+		endpoint.Host = net.JoinHostPort(host, port)
 	}
-
-	endpoint.Host = addr
 
 	return endpoint.String()
 }

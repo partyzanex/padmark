@@ -232,7 +232,7 @@ func TestDBFilePath(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		path, create := dbFilePath(tc.dsn)
+		path, create := DBFilePath(tc.dsn)
 		require.Equal(t, tc.path, path, "path for %q", tc.dsn)
 		require.Equal(t, tc.create, create, "create for %q", tc.dsn)
 	}

@@ -107,6 +107,8 @@ func isLoopbackHost(serverURL string) bool {
 // Plain HTTP to a loopback host only warns on stderr, keeping local development working. Plain
 // HTTP to any other host is an error unless allowInsecure (--allow-insecure-http) is set, in
 // which case it warns and proceeds.
+//
+//nolint:revive // allowInsecure is the --allow-insecure-http setting; this function is its only policy
 func checkInsecureToken(errOut io.Writer, serverURL, token string, allowInsecure bool) error {
 	if token == "" {
 		return nil
@@ -139,17 +141,18 @@ type bearerTransport struct {
 }
 
 func (tr *bearerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	req = req.Clone(req.Context())
+	// RoundTrip must not modify the caller's request, so the headers go on a clone.
+	clone := req.Clone(req.Context())
 
 	if tr.token != "" {
-		req.Header.Set("Authorization", "Bearer "+tr.token)
+		clone.Header.Set("Authorization", "Bearer "+tr.token)
 	}
 
-	if req.Header.Get("Accept") == "" {
-		req.Header.Set("Accept", "application/json")
+	if clone.Header.Get("Accept") == "" {
+		clone.Header.Set("Accept", "application/json")
 	}
 
-	resp, err := tr.base.RoundTrip(req)
+	resp, err := tr.base.RoundTrip(clone)
 	if err != nil {
 		return nil, fmt.Errorf("http: %w", err)
 	}

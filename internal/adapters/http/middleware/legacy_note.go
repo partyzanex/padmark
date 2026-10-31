@@ -25,7 +25,10 @@ func WithLegacyNoteEditCode(next http.Handler) http.Handler {
 
 // LegacyNoteEditCodeFromCtx returns a query credential captured by WithLegacyNoteEditCode.
 func LegacyNoteEditCodeFromCtx(ctx context.Context) string {
-	code, _ := ctx.Value(legacyNoteEditCodeKey{}).(string)
+	code, ok := ctx.Value(legacyNoteEditCodeKey{}).(string)
+	if !ok {
+		return ""
+	}
 
 	return code
 }

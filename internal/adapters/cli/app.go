@@ -145,6 +145,8 @@ func checkInsecureToken(errOut io.Writer, serverURL, token string, allowInsecure
 
 // checkInsecureTransport implements the shared policy for checkInsecureToken and
 // checkInsecureSetup; what names the credential in the message.
+//
+//nolint:revive // allowInsecure is the --allow-insecure-http setting; this function is its only policy
 func checkInsecureTransport(errOut io.Writer, serverURL, what string, allowInsecure bool) error {
 	parsed, err := url.Parse(serverURL)
 	if err == nil && parsed.Scheme == "https" {
@@ -176,17 +178,18 @@ type bearerTransport struct {
 }
 
 func (tr *bearerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	req = req.Clone(req.Context())
+	// RoundTrip must not modify the caller's request, so the headers go on a clone.
+	clone := req.Clone(req.Context())
 
 	if tr.token != "" {
-		req.Header.Set("Authorization", "Bearer "+tr.token)
+		clone.Header.Set("Authorization", "Bearer "+tr.token)
 	}
 
-	if req.Header.Get("Accept") == "" {
-		req.Header.Set("Accept", "application/json")
+	if clone.Header.Get("Accept") == "" {
+		clone.Header.Set("Accept", "application/json")
 	}
 
-	resp, err := tr.base.RoundTrip(req)
+	resp, err := tr.base.RoundTrip(clone)
 	if err != nil {
 		return nil, fmt.Errorf("http: %w", err)
 	}

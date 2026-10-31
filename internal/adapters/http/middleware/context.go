@@ -37,7 +37,10 @@ func setLogUser(ctx context.Context, name string, admin bool) {
 
 // NonceFromContext returns the per-request CSP nonce, or "" when the request has none.
 func NonceFromContext(ctx context.Context) string {
-	v, _ := ctx.Value(keyNonce).(string)
+	v, ok := ctx.Value(keyNonce).(string)
+	if !ok {
+		return ""
+	}
 
 	return v
 }

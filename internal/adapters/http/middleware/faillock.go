@@ -139,6 +139,8 @@ func WithFailLockout(
 			// Success resets only this caller's failures, preserving other buckets.
 			cache.Remove(key)
 			cache.locked.unlock(key)
+		default:
+			// Other 4xx and 5xx responses leave the failure count unchanged.
 		}
 	})
 }

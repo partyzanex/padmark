@@ -34,12 +34,12 @@ func (s *ManagerTestSuite) TestUntaggedLegacyBlocksAndIsNeverPruned() {
 	s.Equal(2, report.Failed)
 
 	// No Delete expectation: the strict mock fails the test if prune deletes anything.
-	report, err = s.manager.PruneCorrupt(ctx, false)
+	report, err = s.manager.PruneCorrupt(ctx)
 	s.Require().Error(err, "an untagged v0.1.6 note must block the whole prune run")
 	s.Zero(report.Pruned)
 	s.Len(rows, 2)
 
-	report, err = s.manager.PruneCorrupt(ctx, true)
+	report, err = s.manager.PreviewPrune(ctx)
 	s.Require().Error(err)
 	s.ElementsMatch([]Candidate{
 		{Resource: resourceNote, ID: untagged.ID, Reason: reasonUntaggedLegacy},
@@ -57,7 +57,7 @@ func (s *ManagerTestSuite) TestPruneDryRunListsCorruptCandidates() {
 	s.expectRegistry(nil)
 	s.expectRows(&rows)
 
-	report, err := s.manager.PruneCorrupt(ctx, true)
+	report, err := s.manager.PreviewPrune(ctx)
 	s.Require().NoError(err)
 	s.Equal([]Candidate{{Resource: resourceNote, ID: corrupt.ID, Reason: reasonCorruptRaw}}, report.Candidates)
 }
@@ -73,7 +73,7 @@ func (s *ManagerTestSuite) TestMigrateNeverWrapsUntaggedLegacy() {
 	s.store.EXPECT().SetPhase(gomock.Any(), Pending).Return(nil)
 
 	// No Replace expectation: wrapping the row would be an unexpected call.
-	report, err := s.manager.Migrate(ctx, false)
+	report, err := s.manager.Migrate(ctx)
 	s.Require().ErrorContains(err, "mark-legacy --id")
 	s.Equal(1, report.UntaggedLegacy)
 	s.Zero(report.Raw)

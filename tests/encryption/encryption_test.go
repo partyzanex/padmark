@@ -224,7 +224,7 @@ func testInvalidInitialRecord(t *testing.T, db *bun.DB) {
 	_, err := db.NewUpdate().Table("notes").Set("content = ?", "invalid").
 		Where("id = ?", note.ID).Exec(t.Context())
 	require.NoError(t, err)
-	report, err := manager(t, repo, testKeyring()).Migrate(t.Context(), false)
+	report, err := manager(t, repo, testKeyring()).Migrate(t.Context())
 	require.Error(t, err)
 	require.Equal(t, 1, report.Failed)
 	require.Equal(t, 1, report.CorruptRaw)
@@ -276,7 +276,7 @@ func testPruneCorruptRaw(t *testing.T, db *bun.DB) {
 	makeCorruptRaw(t, db, insertLegacy(t, db, "link", "corrupt-link"))
 	makeCorruptRawValue(t, db, insertLegacy(t, db, "note", "corrupt-dollar"), "costs $5; see $HOME and $x^2$")
 
-	report, err := mgr.PruneCorrupt(ctx, true)
+	report, err := mgr.PreviewPrune(ctx)
 	require.NoError(t, err)
 	require.Equal(t, 42, report.CorruptRaw)
 	require.Zero(t, report.Pruned)
@@ -285,14 +285,14 @@ func testPruneCorruptRaw(t *testing.T, db *bun.DB) {
 	require.NoError(t, err)
 	require.Nil(t, registry)
 
-	report, err = mgr.Migrate(ctx, false)
+	report, err = mgr.Migrate(ctx)
 	require.ErrorContains(t, err, "prune --corrupt --dry-run")
 	require.Equal(t, 2, report.Changed)
 	require.Equal(t, 42, report.Failed)
 	wrappedNote, wrappedLink := readRow(t, repo, note), readRow(t, repo, link)
 	require.Error(t, mgr.PrepareServe(ctx))
 
-	report, err = mgr.PruneCorrupt(ctx, false)
+	report, err = mgr.PruneCorrupt(ctx)
 	require.NoError(t, err)
 	require.Equal(t, 42, report.Pruned)
 	require.Zero(t, report.Failed)
@@ -305,11 +305,11 @@ func testPruneCorruptRaw(t *testing.T, db *bun.DB) {
 	require.Equal(t, beforeLink, metadata(t, db, "links", link.ID))
 	require.Error(t, mgr.PrepareServe(ctx), "prune must not mark a pending migration ready")
 
-	report, err = mgr.PruneCorrupt(ctx, false)
+	report, err = mgr.PruneCorrupt(ctx)
 	require.NoError(t, err)
 	require.Zero(t, report.Pruned)
 
-	_, err = mgr.Migrate(ctx, false)
+	_, err = mgr.Migrate(ctx)
 	require.NoError(t, err)
 	require.NoError(t, mgr.PrepareServe(ctx))
 }
@@ -359,7 +359,7 @@ func testPruneConcurrentCAS(t *testing.T, db *bun.DB) {
 		return err
 	}}
 
-	report, err := manager(t, store, ring).PruneCorrupt(ctx, false)
+	report, err := manager(t, store, ring).PruneCorrupt(ctx)
 	require.NoError(t, err)
 	require.Zero(t, report.Pruned)
 	require.Equal(t, 2, report.Conflicts)
@@ -389,12 +389,12 @@ func testPrunePartialFailure(t *testing.T, db *bun.DB) {
 
 		return nil
 	}}
-	report, err := manager(t, store, ring).PruneCorrupt(t.Context(), false)
+	report, err := manager(t, store, ring).PruneCorrupt(t.Context())
 	require.ErrorContains(t, err, "simulated delete failure")
 	require.Equal(t, 1, report.Pruned)
 	require.Equal(t, 1, report.CorruptRaw)
 
-	report, err = manager(t, repo, ring).PruneCorrupt(t.Context(), false)
+	report, err = manager(t, repo, ring).PruneCorrupt(t.Context())
 	require.NoError(t, err)
 	require.Equal(t, 1, report.Pruned)
 	require.Zero(t, report.Failed)
@@ -413,7 +413,7 @@ func testMigrationRotationRestore(t *testing.T, db *bun.DB, backup snapshot) {
 	link := insertLegacy(t, db, "link", "legacy-link")
 	beforeNote := metadata(t, db, "notes", note.ID)
 	beforeLink := metadata(t, db, "links", link.ID)
-	report, err := mgr.Migrate(ctx, true)
+	report, err := mgr.Status(ctx)
 	require.NoError(t, err)
 	require.Equal(t, 2, report.Raw)
 
@@ -423,7 +423,7 @@ func testMigrationRotationRestore(t *testing.T, db *bun.DB, backup snapshot) {
 	require.ErrorContains(t, mgr.PrepareServe(ctx), "migration required")
 	require.Equal(t, note, readRow(t, repo, note))
 
-	report, err = mgr.Migrate(ctx, false)
+	report, err = mgr.Migrate(ctx)
 	require.NoError(t, err)
 	require.Equal(t, 2, report.Changed)
 	require.Equal(t, 2, report.Wrapped)
@@ -431,7 +431,7 @@ func testMigrationRotationRestore(t *testing.T, db *bun.DB, backup snapshot) {
 	require.Equal(t, beforeNote, metadata(t, db, "notes", note.ID))
 	require.Equal(t, beforeLink, metadata(t, db, "links", link.ID))
 
-	report, err = mgr.Migrate(ctx, false)
+	report, err = mgr.Migrate(ctx)
 	require.NoError(t, err)
 	require.Zero(t, report.Changed)
 	wrappedNote := readRow(t, repo, note)
@@ -445,12 +445,12 @@ func testMigrationRotationRestore(t *testing.T, db *bun.DB, backup snapshot) {
 	mgr = manager(t, repo, ring)
 	require.NoError(t, mgr.PrepareServe(ctx))
 	require.ErrorContains(t, mgr.CanRemove(ctx, "old"), "still referenced")
-	report, err = mgr.Rewrap(ctx, true)
+	report, err = mgr.PreviewRewrap(ctx)
 	require.NoError(t, err)
 	require.Zero(t, report.Changed)
 	require.Equal(t, wrappedNote, readRow(t, repo, note))
 
-	report, err = mgr.Rewrap(ctx, false)
+	report, err = mgr.Rewrap(ctx)
 	require.NoError(t, err)
 	require.Equal(t, 2, report.Changed)
 
@@ -521,13 +521,13 @@ func testRestartAfterFailure(t *testing.T, db *bun.DB) {
 		},
 		count: 0,
 	}
-	report, err := manager(t, failing, ring).Migrate(ctx, false)
+	report, err := manager(t, failing, ring).Migrate(ctx)
 	require.Error(t, err)
 	require.Equal(t, 1, report.Changed)
 	require.Equal(t, 40, report.Raw)
 	require.Equal(t, 1, report.Wrapped)
 	require.Error(t, manager(t, repo, ring).PrepareServe(ctx))
-	report, err = manager(t, repo, ring).Migrate(ctx, false)
+	report, err = manager(t, repo, ring).Migrate(ctx)
 	require.NoError(t, err)
 	require.Equal(t, 40, report.Changed)
 	require.Equal(t, 41, report.Wrapped)
@@ -537,10 +537,10 @@ func testRestartAfterFailure(t *testing.T, db *bun.DB) {
 	require.NoError(t, manager(t, repo, ring).Register(ctx, "next"))
 	ring.Active = "next"
 	failing.count = 0
-	_, err = manager(t, failing, ring).Rewrap(ctx, false)
+	_, err = manager(t, failing, ring).Rewrap(ctx)
 	require.Error(t, err)
 	require.NoError(t, manager(t, repo, ring).PrepareServe(ctx))
-	report, err = manager(t, repo, ring).Rewrap(ctx, false)
+	report, err = manager(t, repo, ring).Rewrap(ctx)
 	require.NoError(t, err)
 	require.Equal(t, 40, report.Changed)
 }
@@ -574,7 +574,7 @@ func testConcurrentCAS(t *testing.T, db *bun.DB) {
 		},
 		count: 0,
 	}
-	report, err := manager(t, store, ring).Migrate(ctx, false)
+	report, err := manager(t, store, ring).Migrate(ctx)
 	require.NoError(t, err)
 	require.Equal(t, 2, report.Conflicts)
 	require.Equal(t, newer, readRow(t, repo, note).Value)
@@ -597,7 +597,7 @@ func requireUnprunableEnvelope(t *testing.T, mgr *keys.Manager, report *keys.Rep
 	require.Zero(t, report.CorruptRaw, "an unknown envelope version is never malformed raw data")
 	require.NotContains(t, err.Error(), "prune --corrupt", "prune cannot fix a failing envelope")
 
-	pruned, err := mgr.PruneCorrupt(t.Context(), false)
+	pruned, err := mgr.PruneCorrupt(t.Context())
 	require.Error(t, err)
 	require.Zero(t, pruned.Pruned)
 }
@@ -611,7 +611,7 @@ func testKeysAndCorruption(t *testing.T, db *bun.DB) {
 	ring := testKeyring()
 	mgr := manager(t, repo, ring)
 	note := insertLegacy(t, db, "note", "sensitive-slug")
-	_, err := mgr.Migrate(ctx, false)
+	_, err := mgr.Migrate(ctx)
 	require.NoError(t, err)
 	valid := readRow(t, repo, note)
 	wrong := testKeyring()
@@ -628,7 +628,7 @@ func testKeysAndCorruption(t *testing.T, db *bun.DB) {
 		Where("id = ?", note.ID).Exec(ctx)
 	require.NoError(t, err)
 	require.Error(t, mgr.PrepareServe(ctx))
-	report, err := mgr.Migrate(ctx, false)
+	report, err := mgr.Migrate(ctx)
 	require.Error(t, err)
 	require.NotContains(t, err.Error(), "sensitive-slug")
 	requireUnprunableEnvelope(t, mgr, &report, err)
@@ -640,7 +640,7 @@ func testKeysAndCorruption(t *testing.T, db *bun.DB) {
 	_, err = db.NewUpdate().Table("notes").Set("content = ?", valid.Value).Where("id = ?", note.ID).Exec(ctx)
 	require.NoError(t, err)
 	require.Error(t, mgr.PrepareServe(ctx))
-	_, err = mgr.Migrate(ctx, false)
+	_, err = mgr.Migrate(ctx)
 	require.NoError(t, err)
 	report, err = mgr.ConvertSlugs(ctx, strings.NewReader("missing-secret-slug\n"), false)
 	require.Error(t, err)

@@ -30,7 +30,8 @@ func (m *Manager) Follow(ctx context.Context, slug string, options FollowOptions
 		return nil, domain.ErrForbidden
 	}
 
-	operationResult, operationErr := m.redirectLink(ctx, slug, link, options.AllowBurn, &options)
+	operationResult, operationErr := m.redirectLink(ctx, slug, link,
+		redirectAccess{reader: &options, allowBurn: options.AllowBurn})
 	if operationErr != nil {
 		return operationResult, fmt.Errorf("redirect link: %w", operationErr)
 	}

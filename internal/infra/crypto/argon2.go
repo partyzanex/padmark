@@ -105,11 +105,11 @@ func (p Argon2Params) withDefaults() Argon2Params {
 	return p
 }
 
-// hashArgon2 derives an argon2id hash of secret using p. The params are embedded in the
-// output ("v1$memory$time$threads$salt$key"), so verifyArgon2 works regardless of later
-// supported param changes — cost changes within the hard limits preserve existing hashes.
-func hashArgon2(secret string, params Argon2Params) (string, error) {
-	params = params.withDefaults()
+// hashArgon2 derives an argon2id hash of secret using requested, with defaults for zero fields.
+// The params are embedded in the output ("v1$memory$time$threads$salt$key"), so verifyArgon2
+// works regardless of later supported param changes — cost changes within the hard limits preserve existing hashes.
+func hashArgon2(secret string, requested Argon2Params) (string, error) {
+	params := requested.withDefaults()
 
 	err := params.Validate()
 	if err != nil {

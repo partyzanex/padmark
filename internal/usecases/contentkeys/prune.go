@@ -20,30 +20,11 @@ const (
 // or name an unknown version; any such failure blocks the whole run before deletion.
 // Valid legacy ciphertext, v0.1.6 plaintext notes tagged for conversion, and untagged v0.1.6
 // notes (see untaggedLegacy) are never candidates either; an untagged v0.1.6 note also blocks
-// the whole run until MarkLegacy tags it. A dry run lists every candidate ID with its reason.
-// Stop all writers and back up the DB before calling with dryRun=false. It neither initializes
-// the registry nor marks a pending migration ready.
-func (m *Manager) PruneCorrupt(ctx context.Context, dryRun bool) (Report, error) {
+// the whole run until MarkLegacy tags it. PreviewPrune lists every candidate ID with its reason.
+// Stop all writers and back up the DB before the call. It neither initializes the registry nor
+// marks a pending migration ready.
+func (m *Manager) PruneCorrupt(ctx context.Context) (Report, error) {
 	report, err := m.Status(ctx)
-	if dryRun {
-		if err != nil && !errors.Is(err, errInvalidRecords) {
-			return report, Wrap(err)
-		}
-
-		listErr := m.listCandidates(ctx, &report)
-		if listErr != nil {
-			return report, Wrap(listErr)
-		}
-
-		// Malformed raw data alone is what a prune run resolves, so the preview succeeds; untagged
-		// v0.1.6 notes or failing envelopes keep the error, with the candidates listed anyway.
-		if onlyCorruptRaw(&report, err) {
-			return report, nil
-		}
-
-		return report, Wrap(err)
-	}
-
 	if err != nil && !onlyCorruptRaw(&report, err) {
 		return report, Wrap(err)
 	}
@@ -62,6 +43,28 @@ func (m *Manager) PruneCorrupt(ctx context.Context, dryRun bool) (Report, error)
 	final.Pruned, final.Conflicts = report.Pruned, report.Conflicts
 
 	return final, Wrap(err)
+}
+
+// PreviewPrune is the dry run of PruneCorrupt: it lists every candidate ID with its reason and
+// deletes nothing.
+func (m *Manager) PreviewPrune(ctx context.Context) (Report, error) {
+	report, err := m.Status(ctx)
+	if err != nil && !errors.Is(err, errInvalidRecords) {
+		return report, Wrap(err)
+	}
+
+	listErr := m.listCandidates(ctx, &report)
+	if listErr != nil {
+		return report, Wrap(listErr)
+	}
+
+	// Malformed raw data alone is what a prune run resolves, so the preview succeeds; untagged
+	// v0.1.6 notes or failing envelopes keep the error, with the candidates listed anyway.
+	if onlyCorruptRaw(&report, err) {
+		return report, nil
+	}
+
+	return report, Wrap(err)
 }
 
 func (m *Manager) deleteCorruptRows(ctx context.Context, report *Report) error {

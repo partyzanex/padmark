@@ -30,7 +30,7 @@ func (m *Manager) MigrateIfNeeded(ctx context.Context) (Report, error) {
 		return report, nil
 	}
 
-	operationResult, operationErr := m.Migrate(ctx, false)
+	operationResult, operationErr := m.Migrate(ctx)
 	if operationErr != nil {
 		return operationResult, fmt.Errorf("migrate: %w", operationErr)
 	}
@@ -60,16 +60,8 @@ func (m *Manager) replace(ctx context.Context, row Row, value string, report *Re
 // Migrate adds the installation-key envelope to every structurally valid raw legacy row and
 // converts every tagged v0.1.6 plaintext note in place (see convertLegacy).
 // A failure leaves phase=pending; committed rows are checked and skipped on the next run.
-func (m *Manager) Migrate(ctx context.Context, dryRun bool) (Report, error) {
-	if dryRun {
-		operationResult, operationErr := m.Status(ctx)
-		if operationErr != nil {
-			return operationResult, fmt.Errorf("status: %w", operationErr)
-		}
-
-		return operationResult, nil
-	}
-
+// Status is the dry run of Migrate: it reports the same counts without changes.
+func (m *Manager) Migrate(ctx context.Context) (Report, error) {
 	report := newReport(Pending)
 	// Existing corrupt raw records should keep a previously initialized DB pending.
 	initErr := m.initialize(ctx)
@@ -139,15 +131,19 @@ func (m *Manager) migrateRow(ctx context.Context, row *Row, report *Report) erro
 	return errorcontext.Wrap(m.replace(ctx, *row, value, report), "replace")
 }
 
+// PreviewRewrap is the dry run of Rewrap: it reports the current counts and fails when Rewrap
+// would refuse to start.
+func (m *Manager) PreviewRewrap(ctx context.Context) (Report, error) {
+	report, err := m.readyReport(ctx)
+
+	return report, Wrap(err)
+}
+
 // Rewrap only changes DEK wrappers. Interrupted rotations remain readable with both keys.
-func (m *Manager) Rewrap(ctx context.Context, dryRun bool) (Report, error) {
+func (m *Manager) Rewrap(ctx context.Context) (Report, error) {
 	report, err := m.readyReport(ctx)
 	if err != nil {
 		return report, Wrap(err)
-	}
-
-	if dryRun {
-		return report, nil
 	}
 
 	err = m.walk(ctx, func(row Row) error {
@@ -194,6 +190,7 @@ func (m *Manager) ConvertSlugs(ctx context.Context, input io.Reader, dryRun bool
 	scanner := bufio.NewScanner(input)
 	scanner.Buffer(make([]byte, maxSlugLine), maxSlugLine)
 	conversionFailures := make(map[string]struct{})
+	run := &slugConversion{report: &report, failures: conversionFailures, dryRun: dryRun}
 
 	for scanner.Scan() {
 		slug := scanner.Text()
@@ -201,7 +198,7 @@ func (m *Manager) ConvertSlugs(ctx context.Context, input io.Reader, dryRun bool
 			continue
 		}
 
-		err = m.convertSlug(ctx, slug, dryRun, &report, conversionFailures)
+		err = m.convertSlug(ctx, slug, run)
 		if err != nil {
 			return report, Wrap(err)
 		}
@@ -211,7 +208,7 @@ func (m *Manager) ConvertSlugs(ctx context.Context, input io.Reader, dryRun bool
 		return report, errReadSlugInput
 	}
 
-	final, err := m.status(ctx, conversionFailures)
+	final, err := m.statusWithFailures(ctx, conversionFailures)
 	final.Changed, final.Conflicts, final.Missing = report.Changed, report.Conflicts, report.Missing
 
 	// Only failures not already represented by Status remain (e.g. an inner legacy
@@ -228,9 +225,15 @@ func (m *Manager) ConvertSlugs(ctx context.Context, input io.Reader, dryRun bool
 	return final, nil
 }
 
-func (m *Manager) convertSlug(
-	ctx context.Context, slug string, dryRun bool, report *Report, failures map[string]struct{},
-) error {
+// slugConversion is the state of one ConvertSlugs run: the report it fills, the records that
+// failed conversion and whether it only checks the records.
+type slugConversion struct {
+	report   *Report
+	failures map[string]struct{}
+	dryRun   bool
+}
+
+func (m *Manager) convertSlug(ctx context.Context, slug string, run *slugConversion) error {
 	found := false
 
 	for _, resource := range []string{resourceNote, resourceLink} {
@@ -248,7 +251,7 @@ func (m *Manager) convertSlug(
 
 		kind, err := inspectVersioned(cipher, row)
 		if err != nil {
-			recordFailure(failures, report, row)
+			recordFailure(run.failures, run.report, row)
 
 			continue
 		}
@@ -259,12 +262,12 @@ func (m *Manager) convertSlug(
 
 		plain, err := cipher.Decrypt(row.Value, row.ID, slug)
 		if err != nil {
-			recordFailure(failures, report, row)
+			recordFailure(run.failures, run.report, row)
 
 			continue
 		}
 
-		if dryRun {
+		if run.dryRun {
 			continue
 		}
 
@@ -273,14 +276,14 @@ func (m *Manager) convertSlug(
 			return errEncryptConvertedRecord
 		}
 
-		replaceErr := m.replace(ctx, *row, value, report)
+		replaceErr := m.replace(ctx, *row, value, run.report)
 		if replaceErr != nil {
 			return Wrap(replaceErr)
 		}
 	}
 
 	if !found {
-		report.Missing++
+		run.report.Missing++
 	}
 
 	return nil
@@ -322,7 +325,7 @@ func (m *Manager) readyReport(ctx context.Context) (Report, error) {
 		return report, errMigrationNotComplete
 	}
 
-	err = m.validateKeys(reg, true)
+	err = m.validateActiveKeys(reg)
 
 	return report, Wrap(err)
 }

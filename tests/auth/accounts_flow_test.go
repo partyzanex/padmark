@@ -17,6 +17,7 @@ import (
 
 	"github.com/pquerna/otp/totp"
 	"github.com/stretchr/testify/require"
+	"github.com/uptrace/bun"
 
 	clicmd "github.com/partyzanex/padmark/internal/adapters/cli"
 	adaptershttp "github.com/partyzanex/padmark/internal/adapters/http"
@@ -136,10 +137,7 @@ func TestAccountsFlow(t *testing.T) {
 	users := sqliterepo.NewUserRepository(db)
 
 	authMgr, err := auth.NewManager(
-		users,
-		sqliterepo.NewInviteRepository(db, slog.Default()),
-		sqliterepo.NewSessionRepository(db, slog.Default()),
-		sqliterepo.NewAPITokenRepository(db),
+		sqliteAuthStores(db, users),
 		crypto.NewPasswordHasher(testArgon2Params),
 		crypto.NewSealer(testArgon2Params),
 		crypto.NewTOTP(),
@@ -362,4 +360,14 @@ func TestAccountsFlow(t *testing.T) {
 		APITokenHash: "", StepUp: auth.StepUp{Password: "", TOTPCode: ""},
 	}, 0)
 	require.ErrorIs(t, err, domain.ErrAPITokenLimit)
+}
+
+// sqliteAuthStores builds the account repositories of one SQLite test database around users.
+func sqliteAuthStores(db *bun.DB, users auth.UserStore) auth.Stores {
+	return auth.Stores{
+		Users:     users,
+		Invites:   sqliterepo.NewInviteRepository(db, slog.Default()),
+		Sessions:  sqliterepo.NewSessionRepository(db, slog.Default()),
+		APITokens: sqliterepo.NewAPITokenRepository(db),
+	}
 }

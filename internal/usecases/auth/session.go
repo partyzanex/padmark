@@ -193,12 +193,12 @@ func (m *SessionManager) ChangePassword(
 		return "", fmt.Errorf("verify totpstep up: %w", err)
 	}
 
-	newHash, newSalt, encSecret, err := m.buildNewCredentials(newPassword, rawSecret)
+	creds, err := m.buildNewCredentials(newPassword, rawSecret)
 	if err != nil {
 		return "", fmt.Errorf("build new credentials: %w", err)
 	}
 
-	err = m.users.UpdatePassword(ctx, usr.ID, newHash, newSalt, encSecret)
+	err = m.users.UpdatePassword(ctx, usr.ID, creds.hash, creds.salt, creds.encSecret)
 	if err != nil {
 		return "", fmt.Errorf("update password: %w", err)
 	}
@@ -292,31 +292,36 @@ func (m *SessionManager) revokeAPITokens(ctx context.Context, userID uuid.UUID) 
 // buildNewCredentials validates newPassword complexity, derives a fresh KDF key, and
 // re-encrypts the already-decrypted TOTP secret so it can be stored under the new password.
 // rawSecret comes from verifyTOTPStepUp, so the secret is decrypted only once per change.
-// Returns the new password hash, KDF salt, and encrypted TOTP secret.
-func (m *SessionManager) buildNewCredentials(
-	newPassword, rawSecret string,
-) (hash string, salt []byte, encSecret string, err error) {
-	err = domain.ValidatePassword(newPassword)
+func (m *SessionManager) buildNewCredentials(newPassword, rawSecret string) (*newCredentials, error) {
+	err := domain.ValidatePassword(newPassword)
 	if err != nil {
-		return "", nil, "", fmt.Errorf("validate new password: %w", err)
+		return nil, fmt.Errorf("validate new password: %w", err)
 	}
 
-	newSalt, err := m.sealer.GenerateSalt()
+	salt, err := m.sealer.GenerateSalt()
 	if err != nil {
-		return "", nil, "", fmt.Errorf("generate kdf salt: %w", err)
+		return nil, fmt.Errorf("generate kdf salt: %w", err)
 	}
 
-	encSecret, err = m.sealer.Seal(rawSecret, []byte(newPassword), newSalt)
+	encSecret, err := m.sealer.Seal(rawSecret, []byte(newPassword), salt)
 	if err != nil {
-		return "", nil, "", fmt.Errorf("seal totp secret: %w", err)
+		return nil, fmt.Errorf("seal totp secret: %w", err)
 	}
 
-	hash, err = m.pw.Hash(newPassword)
+	hash, err := m.pw.Hash(newPassword)
 	if err != nil {
-		return "", nil, "", fmt.Errorf("hash password: %w", err)
+		return nil, fmt.Errorf("hash password: %w", err)
 	}
 
-	return hash, newSalt, encSecret, nil
+	return &newCredentials{hash: hash, encSecret: encSecret, salt: salt}, nil
+}
+
+// newCredentials is the stored form of a changed password: its hash, the new KDF salt and the
+// TOTP secret sealed under the new password.
+type newCredentials struct {
+	hash      string
+	encSecret string
+	salt      []byte
 }
 
 // verifyLoginFactors checks the password and the TOTP second factor for usr.

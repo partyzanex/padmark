@@ -79,6 +79,8 @@ func Origin(serverURL string) (string, error) {
 		host = net.JoinHostPort(host, port)
 	case strings.Contains(host, ":"):
 		host = "[" + host + "]" // IPv6 literal without a port keeps its brackets
+	default:
+		// A host name or IPv4 address without a port needs no change.
 	}
 
 	return scheme + "://" + host, nil
@@ -155,16 +157,16 @@ func trustworthyHostsMode(mode os.FileMode) bool {
 	return runtime.GOOS == osWindows || mode.Perm()&permGroupOtherWrite == 0
 }
 
-// AddKnownOrigin appends origin, canonicalised through Origin, to the hosts file, creating it
+// AddKnownOrigin appends raw, canonicalised through Origin, to the hosts file, creating it
 // owner-only (0600) next to the token file. An origin that is already recorded is not
 // duplicated. The file is not a secret,
 // but it decides where credentials are sent, so it stays owner-only like the token itself.
-func AddKnownOrigin(origin string) error {
-	if origin == "" {
+func AddKnownOrigin(raw string) error {
+	if raw == "" {
 		return errEmptyTrustedOrigin
 	}
 
-	origin, err := Origin(origin)
+	origin, err := Origin(raw)
 	if err != nil {
 		return fmt.Errorf("normalise trusted origin: %w", err)
 	}

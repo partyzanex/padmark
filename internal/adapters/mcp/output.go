@@ -143,29 +143,28 @@ func (m *Manager) bulkLinkOutput(resp *padmark.BulkCreateLinksResponse) createBu
 	return out
 }
 
-// editCodeFields fills the edit-code fields of a create output per the reveal contract:
-// by default only a hint that the proxy holds the code is shown.
+// editCodeFields fills the edit-code fields of a create output per the reveal contract.
 func (out *createNoteOutput) editCodeFields(code string, reveal bool) {
-	if reveal {
-		out.EditCode = code
-		out.EditCodeNote = "edit_code shown by opt-in request — it cannot be recovered later"
-
-		return
-	}
-
-	out.EditCodeNote = "edit_code stored by the proxy for this session; update/delete need no edit_code now"
+	out.EditCode, out.EditCodeNote = revealContract(code, reveal,
+		"edit_code stored by the proxy for this session; update/delete need no edit_code now")
 }
 
 // editCodeFields is the same reveal contract for link outputs.
 func (out *createLinkOutput) editCodeFields(code string, reveal bool) {
-	if reveal {
-		out.EditCode = code
-		out.EditCodeNote = "edit_code shown by opt-in request — it cannot be recovered later"
+	out.EditCode, out.EditCodeNote = revealContract(code, reveal,
+		"edit_code stored by the proxy for this session; delete_link needs no edit_code now")
+}
 
-		return
+// revealContract returns the edit code and its note for a create output: by default only
+// hiddenNote, a hint that the proxy holds the code, is shown.
+//
+//nolint:revive // reveal is the caller's opt-in from the tool input
+func revealContract(code string, reveal bool, hiddenNote string) (editCode, note string) {
+	if reveal {
+		return code, "edit_code shown by opt-in request — it cannot be recovered later"
 	}
 
-	out.EditCodeNote = "edit_code stored by the proxy for this session; delete_link needs no edit_code now"
+	return "", hiddenNote
 }
 
 func optStrText(o padmark.OptString) string {

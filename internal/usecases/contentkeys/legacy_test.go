@@ -72,7 +72,7 @@ func (s *ManagerTestSuite) TestLegacyPlaintextIsNeverMisclassified() {
 	s.Equal(1, report.Native)
 	s.Require().ErrorContains(s.manager.PrepareServe(ctx), "content migration required")
 
-	report, err = s.manager.PruneCorrupt(ctx, false)
+	report, err = s.manager.PruneCorrupt(ctx)
 	s.Require().NoError(err)
 	s.Zero(report.Pruned, "prune must never delete a legacy note")
 	s.Len(rows, 4)
@@ -121,7 +121,7 @@ func (s *ManagerTestSuite) TestMigrateConvertsLegacyPlaintextNotes() {
 			return true, nil
 		})
 
-	report, err := s.manager.Migrate(ctx, false)
+	report, err := s.manager.Migrate(ctx)
 	s.Require().NoError(err)
 	s.Equal(Ready, report.State)
 	s.Equal(5, report.Changed)
@@ -131,7 +131,7 @@ func (s *ManagerTestSuite) TestMigrateConvertsLegacyPlaintextNotes() {
 	s.Equal(1, report.Wrapped)
 	s.Require().NoError(s.manager.PrepareServe(ctx))
 
-	report, err = s.manager.Migrate(ctx, false)
+	report, err = s.manager.Migrate(ctx)
 	s.Require().NoError(err)
 	s.Zero(report.Changed, "a converted database needs no second pass")
 }
@@ -143,7 +143,7 @@ func (s *ManagerTestSuite) TestMigrateDryRunDoesNotConvertLegacy() {
 	s.expectRegistry(nil)
 	s.expectRows(&rows)
 
-	report, err := s.manager.Migrate(s.T().Context(), true)
+	report, err := s.manager.Status(s.T().Context())
 	s.Require().NoError(err)
 	s.Equal(1, report.Plaintext)
 	s.Zero(report.Changed)
@@ -170,7 +170,7 @@ func (s *ManagerTestSuite) TestMigrateLegacyConflicts() {
 				Return(false, convertErr)
 			s.expectConvert(&rows, map[string]string{"free": ""}, 1)
 
-			report, err := s.manager.Migrate(ctx, false)
+			report, err := s.manager.Migrate(ctx)
 			s.Require().ErrorContains(err, "migration incomplete")
 			s.Equal(1, report.Conflicts)
 			s.Equal(1, report.Changed, "the walk continues past a conflicting row")
@@ -193,7 +193,7 @@ func (s *ManagerTestSuite) TestMigrateLegacyStorageFailureAborts() {
 	s.store.EXPECT().ConvertLegacy(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
 		Return(false, cause)
 
-	report, err := s.manager.Migrate(ctx, false)
+	report, err := s.manager.Migrate(ctx)
 	s.Require().ErrorIs(err, cause)
 	s.Equal(1, countPrefix(err))
 	s.Equal(1, report.Plaintext)

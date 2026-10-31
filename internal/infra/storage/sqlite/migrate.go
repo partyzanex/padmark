@@ -13,7 +13,6 @@ import (
 	"github.com/pressly/goose/v3"
 	"github.com/uptrace/bun"
 
-	"github.com/partyzanex/padmark/internal/errorcontext"
 	sqlitemigrations "github.com/partyzanex/padmark/migrations/sqlite"
 )
 
@@ -58,7 +57,7 @@ func MigrateWithBackup(
 		return nil, fmt.Errorf("new provider: %w", err)
 	}
 
-	path, _ := dbFilePath(dsn)
+	path, _ := DBFilePath(dsn)
 	if path != "" {
 		backupErr := backupBeforeMigrations(ctx, db, provider, path, log)
 		if backupErr != nil {
@@ -144,7 +143,9 @@ func backupDB(ctx context.Context, db *bun.DB, preferred string, log *slog.Logge
 		return "", fmt.Errorf("vacuum into: %w", err)
 	}
 
-	return backupPath, errorcontext.Wrap(restrictDBFile(backupPath, false, log), "handle backup db")
+	restrictDBFile(backupPath, log)
+
+	return backupPath, nil
 }
 
 func reserveBackupFile(preferred string) (string, error) {

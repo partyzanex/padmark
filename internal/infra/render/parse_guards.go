@@ -63,6 +63,8 @@ func guardedParserOptions() []parser.Option {
 			blockParsers[idx].Value = &depthLimitedParser{BlockParser: parser.NewBlockquoteParser()}
 		case parser.NewListParser():
 			blockParsers[idx].Value = &depthLimitedParser{BlockParser: parser.NewListParser()}
+		default:
+			// Other parsers keep the goldmark implementation.
 		}
 	}
 
@@ -73,6 +75,8 @@ func guardedParserOptions() []parser.Option {
 			inlineParsers[idx].Value = &linkTailBudgetParser{inner: parser.NewLinkParser()}
 		case parser.NewEmphasisParser():
 			inlineParsers[idx].Value = &delimiterStackGuard{InlineParser: parser.NewEmphasisParser()}
+		default:
+			// Other parsers keep the goldmark implementation.
 		}
 	}
 
@@ -379,15 +383,19 @@ func (g *linkifyGuard) Parse(parent ast.Node, block text.Reader, pctx parser.Con
 	return g.InlineParser.Parse(parent, block, pctx)
 }
 
-func (g *linkifyGuard) mayLinkify(line []byte) bool {
-	if len(line) == 0 {
+func (g *linkifyGuard) mayLinkify(segment []byte) bool {
+	if len(segment) == 0 {
 		return false
 	}
 
 	// Like linkify, look past the trigger character itself.
-	switch line[0] {
+	var line []byte
+
+	switch segment[0] {
 	case ' ', '*', '_', '~', '(':
-		line = line[1:]
+		line = segment[1:]
+	default:
+		line = segment
 	}
 
 	// The starts linkify tries as URLs (a superset is harmless: linkify itself decides).

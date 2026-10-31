@@ -20,7 +20,7 @@ func (h *OgenHandler) WithAuthManager(mgr AuthManager) *OgenHandler {
 
 // apiTokenEnvelope packs a plain bearer key into the pmk_ envelope carrying the server's own
 // base URL — the same shape the admin panel returns (web_admin.go AdminCreateKeyHandler).
-func (h *OgenHandler) apiTokenEnvelope(ctx context.Context, plain string) (string, error) {
+func (*OgenHandler) apiTokenEnvelope(ctx context.Context, plain string) (string, error) {
 	base, err := requestBaseURL(ctx)
 	if err != nil {
 		return "", fmt.Errorf("request base url: %w", err)

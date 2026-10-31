@@ -72,6 +72,8 @@ type privacyOption struct {
 // authenticated only with the account system (otherwise nothing enforces it), owner only to a
 // signed-in user (an anonymous note has no owner). The current level of an edited note is always
 // listed, so saving without a change keeps it; without accounts its hint says it is not enforced.
+//
+//nolint:revive // accounts is the --enable-accounts setting that selects the offered levels
 func privacyOptions(accounts, signedIn bool, current domain.Privacy) []privacyOption {
 	levels := []struct {
 		value   domain.Privacy

@@ -153,7 +153,7 @@ func wrappedKeyAAD(aad []byte, keyID string, payload []byte) ([]byte, error) {
 // Encrypt writes pmc2$p$kid$wrappedDEK$payload. The supplied ID is the stored HashSlug ID,
 // not the original slug. Empty content is valid and still gets an authenticated ciphertext.
 func (enc *ContentCipher) Encrypt(plaintext, recordID string) (string, error) {
-	operationResult, operationErr := enc.encrypt(plaintext, recordID, contentKind)
+	operationResult, operationErr := enc.encryptKind(plaintext, recordID, contentKind)
 	if operationErr != nil {
 		return operationResult, fmt.Errorf("encrypt: %w", operationErr)
 	}
@@ -161,20 +161,28 @@ func (enc *ContentCipher) Encrypt(plaintext, recordID string) (string, error) {
 	return operationResult, nil
 }
 
-func parseContentEnvelope(value string) (keyID string, wrapped, payload []byte, err error) {
+// parsedEnvelope holds the fields of a content envelope before its data key is unwrapped.
+type parsedEnvelope struct {
+	kind    string
+	keyID   string
+	wrapped []byte
+	payload []byte
+}
+
+func parseContentEnvelope(value string) (*parsedEnvelope, error) {
 	if len(value) > maxContentEnvelopeSize {
-		return "", nil, nil, domain.ErrMalformedCiphertext
+		return nil, domain.ErrMalformedCiphertext
 	}
 
 	parts := strings.SplitN(value, "$", contentParts+1)
 	if len(parts) != contentParts || parts[0] != contentVersion ||
 		(parts[1] != contentKind && parts[1] != legacyKind) || !validKeyID(parts[2]) {
-		return "", nil, nil, domain.ErrMalformedCiphertext
+		return nil, domain.ErrMalformedCiphertext
 	}
 
-	wrapped, err = decodeContentField(parts[3], wrappedKeySize, wrappedKeySize)
+	wrapped, err := decodeContentField(parts[3], wrappedKeySize, wrappedKeySize)
 	if err != nil {
-		return "", nil, nil, fmt.Errorf("decode content field: %w", err)
+		return nil, fmt.Errorf("decode content field: %w", err)
 	}
 
 	limit := MaxContentSize
@@ -182,13 +190,13 @@ func parseContentEnvelope(value string) (keyID string, wrapped, payload []byte, 
 		limit = maxLegacyContentSize
 	}
 
-	payload, err = decodeContentField(parts[4], contentNonceSize+contentTagSize,
+	payload, err := decodeContentField(parts[4], contentNonceSize+contentTagSize,
 		limit+contentNonceSize+contentTagSize)
 	if err != nil {
-		return "", nil, nil, fmt.Errorf("decode content field: %w", err)
+		return nil, fmt.Errorf("decode content field: %w", err)
 	}
 
-	return parts[2], wrapped, payload, nil
+	return &parsedEnvelope{kind: parts[1], keyID: parts[2], wrapped: wrapped, payload: payload}, nil
 }
 
 // Decrypt opens only the new format, using the DB ID and resource type as authenticated
@@ -206,7 +214,7 @@ func (enc *ContentCipher) Decrypt(value, recordID string) (string, error) {
 	return plaintext, nil
 }
 
-func (enc *ContentCipher) encrypt(plaintext, recordID, kind string) (string, error) {
+func (enc *ContentCipher) encryptKind(plaintext, recordID, kind string) (string, error) {
 	limit := MaxContentSize
 	if kind == legacyKind {
 		limit = maxLegacyContentSize
@@ -285,29 +293,27 @@ type unwrappedEnvelope struct {
 
 // unwrap authenticates the complete payload digest and context without decrypting content.
 func (enc *ContentCipher) unwrap(value, recordID string) (*unwrappedEnvelope, error) {
-	keyID, wrapped, payload, err := parseContentEnvelope(value)
+	parsed, err := parseContentEnvelope(value)
 	if err != nil {
 		return nil, fmt.Errorf("parse content envelope: %w", err)
 	}
 
-	kind := strings.SplitN(value, "$", contentParts)[1]
-
-	kek, ok := enc.keys[keyID]
+	kek, ok := enc.keys[parsed.keyID]
 	if !ok {
 		return nil, domain.ErrDecryptionFailed
 	}
 
-	aad, err := enc.contentAADForKind(recordID, kind)
+	aad, err := enc.contentAADForKind(recordID, parsed.kind)
 	if err != nil {
 		return nil, fmt.Errorf("content aadfor kind: %w", err)
 	}
 
-	keyAAD, err := wrappedKeyAAD(aad, keyID, payload)
+	keyAAD, err := wrappedKeyAAD(aad, parsed.keyID, parsed.payload)
 	if err != nil {
 		return nil, domain.ErrDecryptionFailed
 	}
 
-	dek, err := kek.Open(nil, wrapped[:contentNonceSize], wrapped[contentNonceSize:], keyAAD)
+	dek, err := kek.Open(nil, parsed.wrapped[:contentNonceSize], parsed.wrapped[contentNonceSize:], keyAAD)
 	if err != nil {
 		return nil, domain.ErrDecryptionFailed
 	}
@@ -318,7 +324,9 @@ func (enc *ContentCipher) unwrap(value, recordID string) (*unwrappedEnvelope, er
 		return nil, domain.ErrMalformedCiphertext
 	}
 
-	return &unwrappedEnvelope{dek: dek, payload: payload, aad: aad, kind: kind, keyID: keyID}, nil
+	return &unwrappedEnvelope{
+		dek: dek, payload: parsed.payload, aad: aad, kind: parsed.kind, keyID: parsed.keyID,
+	}, nil
 }
 
 // contentAAD has fixed-size fields: a purpose/version prefix, kind, resource byte, and

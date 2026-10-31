@@ -423,9 +423,7 @@ func waitAndShutdown(serverCtx context.Context) error {
 // Returns an error when auth.NewManager's bootstrap-time crypto precompute fails — this only
 // runs once at startup, so the caller should treat it as fatal.
 func attachAccountSystem(
-	ctx context.Context, cmd *cli.Command, handler *adaptershttp.Handler,
-	users auth.UserStore, invites auth.InviteStore, sessions auth.SessionStore,
-	apiTokens auth.APITokenStore, log *slog.Logger,
+	ctx context.Context, cmd *cli.Command, handler *adaptershttp.Handler, stores auth.Stores, log *slog.Logger,
 ) (*adaptershttp.Handler, error) {
 	if !cmd.Bool(FlagEnableAccounts) {
 		log.InfoContext(ctx, "account system disabled (public mode); set --enable-accounts to enable login/admin")
@@ -441,7 +439,7 @@ func attachAccountSystem(
 	}
 
 	authMgr, err := auth.NewManager(
-		users, invites, sessions, apiTokens,
+		stores,
 		crypto.NewPasswordHasher(argonParams).WithLogger(log),
 		crypto.NewSealer(argonParams), crypto.NewTOTP(),
 		log, cmd.String(FlagTOTPIssuer), ttl,
@@ -468,22 +466,22 @@ func attachAccountSystem(
 }
 
 //nolint:ireturn // factory: returns different concrete impls (postgres vs sqlite) behind common interfaces
-func buildAuthRepos(
-	storage string, db *bun.DB,
-) (auth.UserStore, auth.InviteStore, auth.SessionStore, auth.APITokenStore, adaptershttp.RevealTokenStore) {
+func buildAuthRepos(storage string, db *bun.DB) (auth.Stores, adaptershttp.RevealTokenStore) {
 	switch storage {
 	case storagePostgres:
-		return postgres.NewUserRepository(db),
-			postgres.NewInviteRepository(db, slog.Default()),
-			postgres.NewSessionRepository(db, slog.Default()),
-			postgres.NewAPITokenRepository(db),
-			postgres.NewRevealRepository(db, slog.Default())
+		return auth.Stores{
+			Users:     postgres.NewUserRepository(db),
+			Invites:   postgres.NewInviteRepository(db, slog.Default()),
+			Sessions:  postgres.NewSessionRepository(db, slog.Default()),
+			APITokens: postgres.NewAPITokenRepository(db),
+		}, postgres.NewRevealRepository(db, slog.Default())
 	default:
-		return sqlite.NewUserRepository(db),
-			sqlite.NewInviteRepository(db, slog.Default()),
-			sqlite.NewSessionRepository(db, slog.Default()),
-			sqlite.NewAPITokenRepository(db),
-			sqlite.NewRevealRepository(db, slog.Default())
+		return auth.Stores{
+			Users:     sqlite.NewUserRepository(db),
+			Invites:   sqlite.NewInviteRepository(db, slog.Default()),
+			Sessions:  sqlite.NewSessionRepository(db, slog.Default()),
+			APITokens: sqlite.NewAPITokenRepository(db),
+		}, sqlite.NewRevealRepository(db, slog.Default())
 	}
 }
 
@@ -523,13 +521,21 @@ func newMetricsRegistry() (*prometheus.Registry, *linkmetrics.Metrics, error) {
 	return reg, linkMetrics, nil
 }
 
+// serverStorage is the opened storage backend: its name, the connection and the content
+// repositories that initRepos built for it.
+type serverStorage struct {
+	db    *bun.DB
+	notes notes.Storage
+	links links.Storage
+	name  string
+}
+
 // buildHandlers assembles the notes/links business-logic managers and wires them into the
 // JSON/HTML handler and the ogen-generated handler, including the optional account system and
 // link cache/metrics collaborators.
 func buildHandlers(
-	ctx context.Context, cmd *cli.Command, storage string, db *bun.DB,
-	repo notes.Storage, linkRepo links.Storage, log *slog.Logger, linkMetrics *linkmetrics.Metrics,
-	keyring *crypto.ContentKeyring,
+	ctx context.Context, cmd *cli.Command, store serverStorage, log *slog.Logger,
+	linkMetrics *linkmetrics.Metrics, keyring *crypto.ContentKeyring,
 ) (*adaptershttp.Handler, *adaptershttp.OgenHandler, error) {
 	noteCipher, err := keyring.ForResource("note")
 	if err != nil {
@@ -548,11 +554,11 @@ func buildHandlers(
 
 	var checker links.NotesChecker
 
-	switch storage {
+	switch store.name {
 	case storagePostgres:
-		checker = newPostgresNotesChecker(db)
+		checker = newPostgresNotesChecker(store.db)
 	default:
-		checker = newSQLiteNotesChecker(db)
+		checker = newSQLiteNotesChecker(store.db)
 	}
 
 	// One Locker instance shared by both managers: it closes the cross-table TOCTOU race
@@ -561,54 +567,54 @@ func buildHandlers(
 	// other's, protecting nothing.
 	slugLock := lock.NewLocker()
 
-	manager := notes.NewManager(repo, linkRepo, slugLock, render.NewRenderer(), noteCipher,
+	manager := notes.NewManager(store.notes, store.links, slugLock, render.NewRenderer(), noteCipher,
 		crypto.NewEditCodeHasher(argonParams).WithLogger(log), log, cmd.Bool(FlagCustomSlugs)).
 		WithRenderCache(rendercache.NewDefault(log))
-	linkManager := links.NewManager(linkRepo, checker, slugLock, linkCipher,
+	linkManager := links.NewManager(store.links, checker, slugLock, linkCipher,
 		crypto.NewEditCodeHasher(argonParams).WithLogger(log), log, cmd.Bool(FlagCustomSlugs)).
 		WithCache(linkcache.NewDefault(log)).
 		WithMetrics(linkMetrics)
 
-	userRepo, inviteRepo, sessionRepo, apiTokenRepo, revealStore := buildAuthRepos(storage, db)
+	authStores, revealStore := buildAuthRepos(store.name, store.db)
 
 	handler := adaptershttp.NewHandler(manager, linkManager, log).
 		WithRevealStore(revealStore)
 
-	handler, err = attachAccountSystem(ctx, cmd, handler, userRepo, inviteRepo, sessionRepo, apiTokenRepo, log)
+	handler, err = attachAccountSystem(ctx, cmd, handler, authStores, log)
 	if err != nil {
 		return nil, nil, fmt.Errorf("attach account system: %w", err)
 	}
 
-	ogenHandler := adaptershttp.NewOgenHandler(manager, linkManager, db.DB, log)
+	ogenHandler := adaptershttp.NewOgenHandler(manager, linkManager, store.db.DB, log)
 
 	return handler, ogenHandler, nil
 }
 
 // initRepos runs migrations and builds the note and link repositories for the chosen backend.
 // openDB already validated the backend name, so unknown values cannot reach the default branch.
-//
-//nolint:ireturn // dispatches by backend behind the notes/links usecase Storage interfaces
 func initRepos(
 	ctx context.Context, storage string, db *bun.DB, log *slog.Logger, opts migrationOptions,
-) (repo notes.Storage, linkRepo links.Storage, err error) {
+) (serverStorage, error) {
+	store := serverStorage{db: db, notes: nil, links: nil, name: storage}
+
 	switch storage {
 	case storagePostgres:
-		repo, err = initPostgresStorage(ctx, db, log)
+		repo, err := initPostgresStorage(ctx, db, log)
 		if err != nil {
-			return nil, nil, fmt.Errorf("init postgres storage: %w", err)
+			return store, fmt.Errorf("init postgres storage: %w", err)
 		}
 
-		linkRepo = newPostgresLinkRepository(db)
+		store.notes, store.links = repo, newPostgresLinkRepository(db)
 	default:
-		repo, err = initSQLiteStorage(ctx, db, log, opts)
+		repo, err := initSQLiteStorage(ctx, db, log, opts)
 		if err != nil {
-			return nil, nil, fmt.Errorf("init sqlite storage: %w", err)
+			return store, fmt.Errorf("init sqlite storage: %w", err)
 		}
 
-		linkRepo = newSQLiteLinkRepository(db)
+		store.notes, store.links = repo, newSQLiteLinkRepository(db)
 	}
 
-	return repo, linkRepo, nil
+	return store, nil
 }
 
 func serverAction(ctx context.Context, cmd *cli.Command) error {
@@ -640,7 +646,7 @@ func serverAction(ctx context.Context, cmd *cli.Command) error {
 
 	defer closeServerDB(ctx, db, log)
 
-	repo, linkRepo, err := initRepos(ctx, storage, db, log,
+	store, err := initRepos(ctx, storage, db, log,
 		migrationOptions{dsn: dsn, skipBackup: cmd.Bool(FlagSkipMigrationBackup)})
 	if err != nil {
 		return fmt.Errorf("init repos: %w", err)
@@ -656,7 +662,7 @@ func serverAction(ctx context.Context, cmd *cli.Command) error {
 		return fmt.Errorf("create metrics registry: %w", err)
 	}
 
-	handler, ogenHandler, err := buildHandlers(ctx, cmd, storage, db, repo, linkRepo, log, linkMetrics, keyring)
+	handler, ogenHandler, err := buildHandlers(ctx, cmd, store, log, linkMetrics, keyring)
 	if err != nil {
 		return fmt.Errorf("build request handlers: %w", err)
 	}
@@ -677,10 +683,18 @@ func serverAction(ctx context.Context, cmd *cli.Command) error {
 
 // logServerStarted records the listener, the storage backend and the redacted DSN at startup.
 func logServerStarted(ctx context.Context, cmd *cli.Command, log *slog.Logger, storage, dsn string) {
+	tlsEnabled := cmd.String(FlagTLSCert) != ""
+
+	// The scheme reflects TLS on this listener, independently of a reverse proxy.
+	scheme := "http"
+	if tlsEnabled {
+		scheme = "https"
+	}
+
 	log.InfoContext(ctx, "server started",
-		"addr", cmd.String(FlagAddr), "url", listenerURL(cmd.String(FlagAddr), cmd.String(FlagTLSCert) != ""),
+		"addr", cmd.String(FlagAddr), "url", listenerURL(scheme, cmd.String(FlagAddr)),
 		"storage", storage, "dsn", redactDSN(dsn),
-		"tls", cmd.String(FlagTLSCert) != "",
+		"tls", tlsEnabled,
 	)
 }
 

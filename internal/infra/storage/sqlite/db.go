@@ -27,12 +27,16 @@ import (
 // databases are left alone. Anything Open does to the permissions of an existing file is reported
 // through log, which is required.
 func Open(dsn string, log *slog.Logger) (*bun.DB, error) {
-	path, create := dbFilePath(dsn)
-	if path != "" {
-		err := restrictDBFile(path, create, log)
+	path, create := DBFilePath(dsn)
+	if path != "" && create {
+		err := createDBFile(path)
 		if err != nil {
-			return nil, fmt.Errorf("restrict dbfile: %w", err)
+			return nil, fmt.Errorf("create db file: %w", err)
 		}
+	}
+
+	if path != "" {
+		restrictDBFile(path, log)
 	}
 
 	sqldb, err := sql.Open(sqliteshim.DriverName(), WithPragmas(dsn))
@@ -60,9 +64,9 @@ var chmod = os.Chmod //nolint:gochecknoglobals // test seam, never reassigned in
 // account.
 //
 // Error strategy, split by who owns the file:
-//   - A file created here (create set, path missing) is created with 0600 so the driver only ever
-//     opens an existing file and never applies its own default. Creation failure is fatal
-//     (fail-hard): the database is a critical dependency.
+//   - A missing file is created first by createDBFile with 0600 so the driver only ever opens an
+//     existing file and never applies its own default. Creation failure is fatal (fail-hard):
+//     the database is a critical dependency.
 //   - A pre-existing file is the operator's: its permissions are their decision, and a v0.1.6
 //     installation may legitimately hold it under another uid, on a read-only bind mount, or
 //     shared with a backup user via group read. It is stat-ed first and left alone when it
@@ -74,21 +78,23 @@ var chmod = os.Chmod //nolint:gochecknoglobals // test seam, never reassigned in
 // file's mode, so only leftovers from a previous run are examined, under the same best-effort
 // policy. Logged errors are *fs.PathError values naming the resolved file path only, never the
 // rest of the DSN.
-func restrictDBFile(path string, create bool, log *slog.Logger) error {
-	if create {
-		file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, dbFilePerm) //nolint:gosec // operator-configured DSN path
-		if err != nil {
-			return fmt.Errorf("create sqlite database file: %w", err)
-		}
-
-		err = file.Close()
-		if err != nil {
-			return fmt.Errorf("close sqlite database file: %w", err)
-		}
-	}
-
+func restrictDBFile(path string, log *slog.Logger) {
 	for _, name := range append([]string{path}, sidecarPaths(path)...) {
 		tightenFile(name, log)
+	}
+}
+
+// createDBFile creates a missing database file with owner-only permissions before the driver
+// opens it, so the file never exists with the default umask.
+func createDBFile(path string) error {
+	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, dbFilePerm) //nolint:gosec // operator-configured DSN path
+	if err != nil {
+		return fmt.Errorf("create sqlite database file: %w", err)
+	}
+
+	err = file.Close()
+	if err != nil {
+		return fmt.Errorf("close sqlite database file: %w", err)
 	}
 
 	return nil
@@ -132,7 +138,7 @@ func sidecarPaths(path string) []string {
 	return []string{path + "-wal", path + "-shm", path + "-journal"}
 }
 
-// dbFilePath resolves the on-disk database path a DSN opens, mirroring how the modernc driver and
+// DBFilePath resolves the on-disk database path a DSN opens, mirroring how the modernc driver and
 // SQLite interpret it. It returns "" for databases with no file — ":memory:", "file::memory:",
 // "file:name?mode=memory", the memdb VFS and the empty name (a private temporary database) — and
 // for DSN shapes it cannot resolve with confidence, which are then left to the driver unchanged.
@@ -142,8 +148,8 @@ func sidecarPaths(path string) []string {
 // Bare DSNs ("padmark.db", "/var/lib/padmark/padmark.db?_pragma=...") are a path with an optional
 // query string, which the driver strips before opening. "file:" URIs follow SQLite's URI rules:
 // an optional "//" authority that must be empty or "localhost", a percent-encoded path, then an
-// optional query and fragment.
-func dbFilePath(dsn string) (path string, create bool) {
+// optional query and fragment. Callers also use it to place sibling files next to the database.
+func DBFilePath(dsn string) (path string, create bool) {
 	uri, isURI := strings.CutPrefix(dsn, "file:")
 	if isURI {
 		return fileURIPath(uri)
@@ -157,13 +163,7 @@ func dbFilePath(dsn string) (path string, create bool) {
 	return path, true
 }
 
-// DBFilePath exposes dbFilePath so callers can locate the database file a DSN opens, for example to
-// place sibling files next to it. path is "" for in-memory and temporary databases.
-func DBFilePath(dsn string) (path string, create bool) {
-	return dbFilePath(dsn)
-}
-
-// fileURIPath is dbFilePath for a "file:" URI, given with the "file:" scheme already removed.
+// fileURIPath is DBFilePath for a "file:" URI, given with the "file:" scheme already removed.
 func fileURIPath(uri string) (path string, create bool) {
 	rest, _, _ := strings.Cut(uri, "#")
 	rest, query, _ := strings.Cut(rest, "?")
@@ -238,17 +238,19 @@ func WithPragmas(dsn string) string {
 		{"_txlock=", "_txlock=immediate"},
 	}
 
+	result := dsn
+
 	for i := range pragmas {
-		if strings.Contains(dsn, pragmas[i].key) {
+		if strings.Contains(result, pragmas[i].key) {
 			continue
 		}
 
-		if strings.Contains(dsn, "?") {
-			dsn += "&" + pragmas[i].value
+		if strings.Contains(result, "?") {
+			result += "&" + pragmas[i].value
 		} else {
-			dsn += "?" + pragmas[i].value
+			result += "?" + pragmas[i].value
 		}
 	}
 
-	return dsn
+	return result
 }

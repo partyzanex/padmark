@@ -217,8 +217,6 @@ func encryptionAction(ctx context.Context, cmd *cli.Command) error {
 func runEncryptionOperation(ctx context.Context, cmd *cli.Command, db *bun.DB,
 	keyring *crypto.ContentKeyring, manager *contentkeys.Manager, hasher *crypto.EditCodeHasher,
 ) error {
-	var err error
-
 	switch cmd.Name {
 	case "register":
 		return contentkeys.Wrap(manager.Register(ctx, cmd.String(flagKeyID)))
@@ -234,12 +232,13 @@ func runEncryptionOperation(ctx context.Context, cmd *cli.Command, db *bun.DB,
 
 		keyring.Active = cmd.String(flagKeyID)
 
-		manager, err = newEncryptionManager(db, keyring, hasher)
+		// The new active key needs a manager built from the changed keyring.
+		activeManager, err := newEncryptionManager(db, keyring, hasher)
 		if err != nil {
 			return contentkeys.Wrap(err)
 		}
 
-		err := manager.PrepareServe(ctx)
+		err = activeManager.PrepareServe(ctx)
 		if err != nil {
 			return contentkeys.Wrap(err)
 		}
@@ -264,6 +263,20 @@ func runEncryptionOperation(ctx context.Context, cmd *cli.Command, db *bun.DB,
 	}
 }
 
+// encryptionStep is one contentkeys operation that reports its result.
+type encryptionStep func(ctx context.Context) (contentkeys.Report, error)
+
+// previewOrApply runs preview for --dry-run and apply otherwise.
+func previewOrApply(
+	ctx context.Context, cmd *cli.Command, preview, apply encryptionStep,
+) (contentkeys.Report, error) {
+	if cmd.Bool(flagDryRun) {
+		return preview(ctx)
+	}
+
+	return apply(ctx)
+}
+
 func runEncryptionData(ctx context.Context, cmd *cli.Command, manager *contentkeys.Manager) error {
 	var (
 		report contentkeys.Report
@@ -274,9 +287,9 @@ func runEncryptionData(ctx context.Context, cmd *cli.Command, manager *contentke
 	case "status":
 		report, err = manager.Status(ctx)
 	case encryptionMigrate:
-		report, err = manager.Migrate(ctx, cmd.Bool(flagDryRun))
+		report, err = previewOrApply(ctx, cmd, manager.Status, manager.Migrate)
 	case encryptionRewrap:
-		report, err = manager.Rewrap(ctx, cmd.Bool(flagDryRun))
+		report, err = previewOrApply(ctx, cmd, manager.PreviewRewrap, manager.Rewrap)
 	case encryptionConvert:
 		input := cmd.Root().Reader
 		if input == nil {
@@ -285,7 +298,7 @@ func runEncryptionData(ctx context.Context, cmd *cli.Command, manager *contentke
 
 		report, err = manager.ConvertSlugs(ctx, input, cmd.Bool(flagDryRun))
 	case encryptionPrune:
-		report, err = manager.PruneCorrupt(ctx, cmd.Bool(flagDryRun))
+		report, err = previewOrApply(ctx, cmd, manager.PreviewPrune, manager.PruneCorrupt)
 	case encryptionMark:
 		report, err = manager.MarkLegacy(ctx, cmd.String(flagNoteID))
 	default:

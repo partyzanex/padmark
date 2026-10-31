@@ -262,19 +262,13 @@ func isLinkPath(trimmed string) bool {
 // and whether the matched note is actually served publicly is decided downstream, per-note, by
 // handlePrivateAuth.
 func isNoteIDPath(trimmed string, namedRoutes map[string]struct{}) bool {
-	if trimmed == "" {
+	// /notes/{id...} — strip the API prefix, then apply the same first-segment guard to the rest.
+	path, _ := strings.CutPrefix(trimmed, "notes/")
+	if path == "" {
 		return false
 	}
 
-	// /notes/{id...} — strip the API prefix, then apply the same first-segment guard to the rest.
-	if after, ok := strings.CutPrefix(trimmed, "notes/"); ok {
-		trimmed = after
-		if trimmed == "" {
-			return false
-		}
-	}
-
-	first, _, _ := strings.Cut(trimmed, "/")
+	first, _, _ := strings.Cut(path, "/")
 
 	_, isNamed := namedRoutes[first]
 

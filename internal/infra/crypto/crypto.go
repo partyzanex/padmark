@@ -27,7 +27,7 @@ type Encryptor struct{}
 func New() *Encryptor { return &Encryptor{} }
 
 // Encrypt encrypts plaintext with a key derived from slug. Returns base64-encoded ciphertext.
-func (e *Encryptor) Encrypt(plaintext, slug string) (string, error) {
+func (*Encryptor) Encrypt(plaintext, slug string) (string, error) {
 	gcm, err := newGCM(slug)
 	if err != nil {
 		return "", fmt.Errorf("new gcm: %w", err)
@@ -46,7 +46,7 @@ func (e *Encryptor) Encrypt(plaintext, slug string) (string, error) {
 }
 
 // Decrypt decrypts base64-encoded ciphertext with a key derived from slug.
-func (e *Encryptor) Decrypt(ciphertext, slug string) (string, error) {
+func (*Encryptor) Decrypt(ciphertext, slug string) (string, error) {
 	data, err := base64.StdEncoding.DecodeString(ciphertext)
 	if err != nil {
 		return "", errors.Join(domain.ErrMalformedCiphertext, fmt.Errorf("base64 decode: %w", err))

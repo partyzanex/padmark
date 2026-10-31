@@ -256,6 +256,8 @@ func selectFormat(entries []acceptEntry) format {
 			best = current
 		case current.q == best.q && current.spec == best.spec && current.order < best.order:
 			best = current
+		default:
+			// A lower-ranked entry keeps the current best.
 		}
 	}
 

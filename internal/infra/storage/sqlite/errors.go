@@ -4,7 +4,7 @@ import (
 	"errors"
 	"strings"
 
-	sqlite "modernc.org/sqlite"
+	"modernc.org/sqlite"
 	sqlite3 "modernc.org/sqlite/lib"
 )
 

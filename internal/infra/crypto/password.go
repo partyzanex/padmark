@@ -112,8 +112,8 @@ func GenerateKDFSalt() ([]byte, error) {
 // single-pass SHA-256 (HKDF) that would yield SHA-256 brute-force speeds.
 //
 // Use GenerateKDFSalt to produce a fresh salt; do not reuse salts across users.
-func DeriveUserKey(password, kdfSalt []byte, params Argon2Params) (string, error) {
-	params = params.withDefaults()
+func DeriveUserKey(password, kdfSalt []byte, requested Argon2Params) (string, error) {
+	params := requested.withDefaults()
 
 	err := params.Validate()
 	if err != nil {

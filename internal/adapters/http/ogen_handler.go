@@ -481,7 +481,7 @@ func optUpdateContentTypePtr(o ogenapi.OptUpdateNoteRequestContentType) *domain.
 }
 
 // Healthz implements ogenapi.Handler.
-func (h *OgenHandler) Healthz(_ context.Context) error {
+func (*OgenHandler) Healthz(_ context.Context) error {
 	return nil
 }
 
@@ -634,6 +634,8 @@ func stepUpErrResp(err error) ogenapi.ErrorResponse {
 		resp.Code = ogenapi.NewOptString(stepUpRequiredCode)
 	case errors.Is(err, domain.ErrStepUpFailed):
 		resp.Code = ogenapi.NewOptString(stepUpFailedCode)
+	default:
+		// Other errors keep the response without a code.
 	}
 
 	return resp

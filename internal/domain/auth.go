@@ -72,6 +72,8 @@ func hasRequiredCharClasses(password string) bool {
 			hasDigit = true
 		case unicode.IsPunct(char) || unicode.IsSymbol(char):
 			hasSpecial = true
+		default:
+			// Spaces and other characters satisfy no class.
 		}
 	}
 

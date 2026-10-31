@@ -201,13 +201,13 @@ func (h *AdminHandler) AdminCreateKeyHandler(w http.ResponseWriter, r *http.Requ
 	case createErr != nil:
 		h.log.ErrorContext(r.Context(), "create api token", "err", createErr)
 
-		data.KeyError = "Failed to create API key."
-
 		switch {
 		case errors.Is(createErr, domain.ErrAPITokenLimit):
 			data.KeyError = "This user already holds the maximum number of API keys; revoke one first."
 		case errors.Is(createErr, domain.ErrInvalidAPITokenTTL):
 			data.KeyError = fmt.Sprintf("Lifetime must be 0 (never expires) to %d days.", auth.MaxAPITokenTTLDays)
+		default:
+			data.KeyError = "Failed to create API key."
 		}
 	default:
 		scheme := h.scheme(r)

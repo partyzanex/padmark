@@ -51,6 +51,8 @@ func privateFlag(note *domain.Note) bool {
 // accepted request would promise a restriction that does not apply. Callers pass only the
 // `privacy` field. The deprecated v0.1.6 `private: true` stays accepted for compatibility, as
 // v0.1.6 accepted it without --auth-tokens; the stored level applies once accounts are enabled.
+//
+//nolint:revive // accounts is the --enable-accounts setting; this function is its only privacy rule
 func requirePrivacySupport(accounts bool, level *domain.Privacy) error {
 	if accounts || level == nil || *level == domain.PrivacyPublic {
 		return nil

@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"cmp"
 	"fmt"
 
 	"github.com/partyzanex/padmark/internal/errorcontext"
@@ -203,11 +204,7 @@ func transportError(op string, err error) error {
 // Error texts. Each carries the remediation the model needs to self-correct.
 
 func apiStatus(cause error, message string) error {
-	if message == "" {
-		message = "no details provided"
-	}
-
-	return fmt.Errorf("%w: %s", cause, message)
+	return fmt.Errorf("%w: %s", cause, cmp.Or(message, "no details provided"))
 }
 
 func unauthorizedErr() error {

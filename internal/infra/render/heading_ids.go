@@ -53,8 +53,8 @@ func (s *headingIDs) Put(value []byte) {
 
 // slugify mirrors goldmark's ids.Generate base: ASCII alphanumerics lowercased, spaces, '-' and
 // '_' turned into '-', everything else (including multi-byte runes) dropped.
-func slugify(value []byte, kind ast.NodeKind) string {
-	value = util.TrimRightSpace(util.TrimLeftSpace(value))
+func slugify(raw []byte, kind ast.NodeKind) string {
+	value := util.TrimRightSpace(util.TrimLeftSpace(raw))
 
 	result := make([]byte, 0, len(value))
 
@@ -76,6 +76,8 @@ func slugify(value []byte, kind ast.NodeKind) string {
 			result = append(result, char)
 		case util.IsSpace(char) || char == '-' || char == '_':
 			result = append(result, '-')
+		default:
+			// Other ASCII characters are dropped from the ID.
 		}
 	}
 
