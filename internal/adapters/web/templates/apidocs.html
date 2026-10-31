@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Padmark — API</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+</head>
+<body>
+    <div id="redoc-container"></div>
+    <script src="/static/redoc.standalone.js?p={{.RedocVersion}}" nonce="{{.Nonce}}"></script>
+    <script nonce="{{.Nonce}}">
+        Redoc.init('/api/openapi.yaml', {nonce: '{{.Nonce}}'}, document.getElementById('redoc-container'));
+    </script>
+</body>
+</html>

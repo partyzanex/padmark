@@ -1,19 +1,30 @@
+//go:build integration
+
 package integration
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"strings"
+	"sync"
+	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/suite"
+	"github.com/uptrace/bun"
 
 	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/infra/crypto"
+	"github.com/partyzanex/padmark/internal/infra/lock"
 	"github.com/partyzanex/padmark/internal/infra/render"
+	"github.com/partyzanex/padmark/internal/testutil"
+	"github.com/partyzanex/padmark/internal/usecases/links"
 	"github.com/partyzanex/padmark/internal/usecases/notes"
 )
 
-var discardLog = slog.New(slog.DiscardHandler) //nolint:gochecknoglobals // test helper
+func discardLog() *slog.Logger { return slog.New(slog.DiscardHandler) }
 
 type revealStore interface {
 	Issue(ctx context.Context, noteID string) (string, error)
@@ -21,25 +32,54 @@ type revealStore interface {
 }
 
 // ManagerSuite is the storage-agnostic business-logic integration suite.
-// Embed it in a storage-specific suite that sets Manager and RevealStore in SetupTest.
+// Embed it in a storage-specific suite that sets Manager, LinkManager, RevealStore, and DB in
+// SetupTest. DB is the raw handle, exposed only for tests that need to bypass the repository's
+// decrypt path and inspect exactly what ended up on disk (e.g. the encryption-at-rest check
+// below) — everyday business-logic tests should go through Manager/LinkManager instead.
 type ManagerSuite struct {
 	suite.Suite
 
 	Manager     *notes.Manager
+	LinkManager *links.Manager
 	RevealStore revealStore
+	DB          *bun.DB
 }
 
-func newManager(storage notes.Storage) *notes.Manager {
+// newManager and newLinkManager share a local slugLock for each Manager/LinkManager pair.
+// Storage independently enforces global uniqueness across replicas; see tests/slugs for
+// races between servers with separate locks and connection pools.
+func newManager(
+	t *testing.T, storage notes.Storage, linkChecker notes.LinksChecker, slugLock *lock.Locker,
+) *notes.Manager {
+	t.Helper()
+
 	return notes.NewManager(
-		storage, render.NewRenderer(), crypto.New(),
-		crypto.NewEditCodeHasher(), discardLog, true,
+		storage, linkChecker, slugLock, render.NewRenderer(), testutil.ContentEncryptor(t, "note"),
+		crypto.NewEditCodeHasher(crypto.DefaultArgon2Params()), discardLog(), true,
 	)
 }
 
-// ── Create ──
+func newLinkManager(
+	t *testing.T, storage links.Storage, notesChecker links.NotesChecker, slugLock *lock.Locker,
+) *links.Manager {
+	t.Helper()
+
+	return links.NewManager(
+		storage, notesChecker, slugLock, testutil.ContentEncryptor(t, "link"),
+		crypto.NewEditCodeHasher(crypto.DefaultArgon2Params()), discardLog(), true,
+	)
+}
+
+// ── Create ──.
 
 func (s *ManagerSuite) TestCreate_GeneratesSlugAndEditCode() {
-	note := &domain.Note{Title: "hello", Content: "world"}
+	note := &domain.Note{
+		Title: "hello", Content: "world",
+		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
+		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
+		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
+		ClearExpiry: false,
+	}
 
 	result, err := s.Manager.Create(s.T().Context(), note)
 
@@ -52,7 +92,12 @@ func (s *ManagerSuite) TestCreate_GeneratesSlugAndEditCode() {
 }
 
 func (s *ManagerSuite) TestCreate_CustomSlug() {
-	note := &domain.Note{ID: "my-slug", Title: "t", Content: "c"}
+	note := &domain.Note{
+		ID: "my-slug", Title: "t", Content: "c",
+		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
+		Privacy: nil, OwnerID: nil, ContentType: nil, EditCode: "",
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+	}
 
 	result, err := s.Manager.Create(s.T().Context(), note)
 
@@ -60,8 +105,108 @@ func (s *ManagerSuite) TestCreate_CustomSlug() {
 	s.Equal("my-slug", result.ID)
 }
 
+// Exercise the bytes persisted by both SQL backends, not only the cipher in isolation.
+func (s *ManagerSuite) TestContentEnvelope_StoredPayloadNeedsKeyringNotSlug() {
+	ctx := s.T().Context()
+	note, err := s.Manager.Create(ctx, &domain.Note{
+		ID: "oncall-runbook", Content: "private payload",
+		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
+		Privacy: nil, OwnerID: nil, Title: "", ContentType: nil,
+		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
+		ClearExpiry: false,
+	})
+	s.Require().NoError(err)
+	link, err := s.LinkManager.Create(ctx, "https://example.com/private", links.CreateOptions{
+		CustomHash: "docs",
+		ExpiresAt:  nil, Privacy: nil, OwnerID: nil, DirectRedirect: nil,
+		EditCode: "", BurnAfterClick: false,
+	})
+	s.Require().NoError(err)
+
+	for _, item := range []struct{ table, column, resource, slug, plaintext string }{
+		{"notes", "content", "note", note.ID, "private payload"},
+		{"links", "target_url", "link", link.ID, "https://example.com/private"},
+	} {
+		var stored string
+
+		id := domain.HashSlug(item.slug)
+		s.Require().NoError(s.DB.NewSelect().Table(item.table).Column(item.column).Where("id = ?", id).Scan(ctx, &stored))
+		s.True(strings.HasPrefix(stored, "pmc2$p$test$"))
+		cipher := testutil.ContentEncryptor(s.T(), item.resource).ContentCipher
+		opened, openErr := cipher.Decrypt(stored, id)
+		s.Require().NoError(openErr)
+		s.Equal(item.plaintext, opened)
+		_, legacyErr := crypto.New().Decrypt(stored, item.slug)
+		s.Require().Error(legacyErr)
+
+		_, wrongIDErr := cipher.Decrypt(stored, domain.HashSlug("different-row"))
+		s.Require().Error(wrongIDErr)
+	}
+}
+
+func (s *ManagerSuite) TestContentEnvelope_LegacyReadAndNoteUpdate() {
+	ctx := s.T().Context()
+	note, err := s.Manager.Create(ctx, &domain.Note{
+		ID: "legacy-note", Content: "old content",
+		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
+		Privacy: nil, OwnerID: nil, Title: "", ContentType: nil,
+		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
+		ClearExpiry: false,
+	})
+	s.Require().NoError(err)
+
+	id := domain.HashSlug(note.ID)
+	legacy, err := crypto.New().Encrypt("old content", note.ID)
+	s.Require().NoError(err)
+	legacy, err = testutil.ContentEncryptor(s.T(), "note").WrapLegacy(legacy, id)
+	s.Require().NoError(err)
+	_, err = s.DB.NewUpdate().Table("notes").Set("content = ?", legacy).Where("id = ?", id).Exec(ctx)
+	s.Require().NoError(err)
+	peeked, err := s.Manager.Peek(ctx, note.ID)
+	s.Require().NoError(err)
+	s.Equal("old content", peeked.Content)
+
+	var stored string
+	s.Require().NoError(s.DB.NewSelect().Table("notes").Column("content").Where("id = ?", id).Scan(ctx, &stored))
+	s.Equal(legacy, stored, "Peek must not perform a hidden migration")
+	_, err = s.Manager.Update(ctx, note.ID, note.EditCode, uuid.Nil, &domain.Note{
+		Content:   "updated",
+		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
+		Privacy: nil, OwnerID: nil, ID: "", Title: "",
+		ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
+		BurnAfterReading: false, ClearExpiry: false,
+	})
+	s.Require().NoError(err)
+	s.Require().NoError(s.DB.NewSelect().Table("notes").Column("content").Where("id = ?", id).Scan(ctx, &stored))
+	opened, err := testutil.ContentEncryptor(s.T(), "note").ContentCipher.Decrypt(stored, id)
+	s.Require().NoError(err)
+	s.Equal("updated", opened)
+
+	link, err := s.LinkManager.Create(ctx, "https://example.com/legacy", links.CreateOptions{
+		ExpiresAt: nil, Privacy: nil, OwnerID: nil, DirectRedirect: nil,
+		CustomHash: "", EditCode: "", BurnAfterClick: false,
+	})
+	s.Require().NoError(err)
+	legacyURL, err := crypto.New().Encrypt(link.TargetURL, link.ID)
+	s.Require().NoError(err)
+	legacyURL, err = testutil.ContentEncryptor(s.T(), "link").WrapLegacy(legacyURL, domain.HashSlug(link.ID))
+	s.Require().NoError(err)
+	_, err = s.DB.NewUpdate().Table("links").Set("target_url = ?", legacyURL).
+		Where("id = ?", domain.HashSlug(link.ID)).Exec(ctx)
+	s.Require().NoError(err)
+	redirect, err := s.LinkManager.Redirect(ctx, link.ID)
+	s.Require().NoError(err)
+	s.Equal("https://example.com/legacy", redirect.TargetURL)
+}
+
 func (s *ManagerSuite) TestCreate_InvalidSlug() {
-	note := &domain.Note{ID: "bad slug!", Title: "t"}
+	note := &domain.Note{
+		ID: "bad slug!", Title: "t",
+		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
+		Privacy: nil, OwnerID: nil, Content: "", ContentType: nil,
+		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
+		ClearExpiry: false,
+	}
 
 	_, err := s.Manager.Create(s.T().Context(), note)
 
@@ -70,29 +215,51 @@ func (s *ManagerSuite) TestCreate_InvalidSlug() {
 
 func (s *ManagerSuite) TestCreate_SlugConflict() {
 	ctx := s.T().Context()
-	note := &domain.Note{ID: "dup", Title: "t", Content: "c"}
+	note := &domain.Note{
+		ID: "dup", Title: "t", Content: "c",
+		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
+		Privacy: nil, OwnerID: nil, ContentType: nil, EditCode: "",
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+	}
 
 	_, err := s.Manager.Create(ctx, note)
 	s.Require().NoError(err)
 
-	_, err = s.Manager.Create(ctx, &domain.Note{ID: "dup", Title: "t2", Content: "c2"})
+	_, err = s.Manager.Create(ctx, &domain.Note{
+		ID: "dup", Title: "t2", Content: "c2",
+		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
+		Privacy: nil, OwnerID: nil, ContentType: nil, EditCode: "",
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+	})
 
 	s.ErrorIs(err, domain.ErrSlugConflict)
 }
 
 func (s *ManagerSuite) TestCreate_EmptyTitleAllowed() {
-	result, err := s.Manager.Create(s.T().Context(), &domain.Note{Content: "c"})
+	result, err := s.Manager.Create(s.T().Context(), &domain.Note{
+		Content:   "c",
+		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
+		Privacy: nil, OwnerID: nil, ID: "", Title: "",
+		ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
+		BurnAfterReading: false, ClearExpiry: false,
+	})
 
 	s.Require().NoError(err)
 	s.NotEmpty(result.ID)
 	s.Empty(result.Title)
 }
 
-// ── Get / expiry / burn ──
+// ── Get / expiry / burn ──.
 
 func (s *ManagerSuite) TestGet_OK() {
 	ctx := s.T().Context()
-	created, err := s.Manager.Create(ctx, &domain.Note{Title: "t", Content: "c"})
+	created, err := s.Manager.Create(ctx, &domain.Note{
+		Title: "t", Content: "c",
+		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
+		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
+		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
+		ClearExpiry: false,
+	})
 	s.Require().NoError(err)
 
 	got, err := s.Manager.Get(ctx, created.ID)
@@ -110,13 +277,18 @@ func (s *ManagerSuite) TestGet_NotFound() {
 func (s *ManagerSuite) TestGet_Expired_DeletesNote() {
 	ctx := s.T().Context()
 	past := time.Now().Add(-time.Minute)
-	created, err := s.Manager.Create(ctx, &domain.Note{Title: "t", Content: "c", ExpiresAt: &past})
+	created, err := s.Manager.Create(ctx, &domain.Note{
+		Title: "t", Content: "c", ExpiresAt: &past,
+		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, Privacy: nil,
+		OwnerID: nil, ID: "", ContentType: nil, EditCode: "",
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+	})
 	s.Require().NoError(err)
 
 	_, err = s.Manager.Get(ctx, created.ID)
 	s.Require().ErrorIs(err, domain.ErrExpired)
 
-	// note must be removed from storage
+	// note must be removed from storage.
 	_, err = s.Manager.Peek(ctx, created.ID)
 	s.ErrorIs(err, domain.ErrNotFound)
 }
@@ -125,6 +297,10 @@ func (s *ManagerSuite) TestGet_BurnAfterReading_ConsumedOnFirstRead() {
 	ctx := s.T().Context()
 	created, err := s.Manager.Create(ctx, &domain.Note{
 		Title: "burn", Content: "c", BurnAfterReading: true,
+
+		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
+		OwnerID: nil, ID: "", ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
+		ClearExpiry: false,
 	})
 	s.Require().NoError(err)
 
@@ -140,6 +316,10 @@ func (s *ManagerSuite) TestGet_BurnAfterReading_WithTTL_StartsTimer() {
 	ctx := s.T().Context()
 	created, err := s.Manager.Create(ctx, &domain.Note{
 		Title: "burn-ttl", Content: "c", BurnAfterReading: true, BurnTTL: 3600,
+
+		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
+		OwnerID: nil, ID: "", ContentType: nil, EditCode: "", Views: 0,
+		ClearExpiry: false,
 	})
 	s.Require().NoError(err)
 
@@ -155,12 +335,17 @@ func (s *ManagerSuite) TestGet_BurnAfterReading_WithTTL_StartsTimer() {
 	s.Require().NoError(err)
 }
 
-// ── Peek ──
+// ── Peek ──.
 
 func (s *ManagerSuite) TestPeek_ReturnsExpiredNoteWithoutDeleting() {
 	ctx := s.T().Context()
 	past := time.Now().Add(-time.Minute)
-	created, err := s.Manager.Create(ctx, &domain.Note{Title: "t", Content: "c", ExpiresAt: &past})
+	created, err := s.Manager.Create(ctx, &domain.Note{
+		Title: "t", Content: "c", ExpiresAt: &past,
+		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, Privacy: nil,
+		OwnerID: nil, ID: "", ContentType: nil, EditCode: "",
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+	})
 	s.Require().NoError(err)
 
 	// Peek must return the expired note without removing it.
@@ -173,11 +358,17 @@ func (s *ManagerSuite) TestPeek_ReturnsExpiredNoteWithoutDeleting() {
 	s.Require().NoError(err)
 }
 
-// ── View ──
+// ── View ──.
 
 func (s *ManagerSuite) TestView_IncrementsViews() {
 	ctx := s.T().Context()
-	created, err := s.Manager.Create(ctx, &domain.Note{Title: "t", Content: "c"})
+	created, err := s.Manager.Create(ctx, &domain.Note{
+		Title: "t", Content: "c",
+		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
+		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
+		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
+		ClearExpiry: false,
+	})
 	s.Require().NoError(err)
 
 	_, err = s.Manager.View(ctx, created.ID)
@@ -195,6 +386,10 @@ func (s *ManagerSuite) TestView_BurnAfterReading_NoViewsIncrement() {
 	ctx := s.T().Context()
 	created, err := s.Manager.Create(ctx, &domain.Note{
 		Title: "burn", Content: "c", BurnAfterReading: true,
+
+		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
+		OwnerID: nil, ID: "", ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
+		ClearExpiry: false,
 	})
 	s.Require().NoError(err)
 
@@ -203,15 +398,26 @@ func (s *ManagerSuite) TestView_BurnAfterReading_NoViewsIncrement() {
 	s.Equal(0, got.Views)
 }
 
-// ── Update ──
+// ── Update ──.
 
 func (s *ManagerSuite) TestUpdate_PreservesMetadata() {
 	ctx := s.T().Context()
-	created, err := s.Manager.Create(ctx, &domain.Note{Title: "old", Content: "c"})
+	created, err := s.Manager.Create(ctx, &domain.Note{
+		Title: "old", Content: "c",
+		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
+		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
+		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
+		ClearExpiry: false,
+	})
 	s.Require().NoError(err)
 
-	updated, err := s.Manager.Update(ctx, created.ID, created.EditCode, &domain.Note{
+	updated, err := s.Manager.Update(ctx, created.ID, created.EditCode, uuid.Nil, &domain.Note{
 		Title: "new", Content: "new content",
+
+		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
+		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
+		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
+		ClearExpiry: false,
 	})
 
 	s.Require().NoError(err)
@@ -222,29 +428,53 @@ func (s *ManagerSuite) TestUpdate_PreservesMetadata() {
 
 func (s *ManagerSuite) TestUpdate_Forbidden() {
 	ctx := s.T().Context()
-	created, err := s.Manager.Create(ctx, &domain.Note{Title: "t", Content: "c"})
+	created, err := s.Manager.Create(ctx, &domain.Note{
+		Title: "t", Content: "c",
+		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
+		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
+		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
+		ClearExpiry: false,
+	})
 	s.Require().NoError(err)
 
-	_, err = s.Manager.Update(ctx, created.ID, "wrong-code", &domain.Note{Title: "hijack", Content: "x"})
+	_, err = s.Manager.Update(ctx, created.ID, "wrong-code", uuid.Nil, &domain.Note{
+		Title: "hijack", Content: "x",
+		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
+		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
+		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
+		ClearExpiry: false,
+	})
 
 	s.ErrorIs(err, domain.ErrInvalidEditCode)
 }
 
 func (s *ManagerSuite) TestUpdate_NotFound() {
-	_, err := s.Manager.Update(s.T().Context(), "nonexistent", "code",
-		&domain.Note{Title: "t", Content: "c"})
+	_, err := s.Manager.Update(s.T().Context(), "nonexistent", "code", uuid.Nil,
+		&domain.Note{
+			Title: "t", Content: "c",
+			CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
+			Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
+			EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
+			ClearExpiry: false,
+		})
 
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
-// ── Delete ──
+// ── Delete ──.
 
 func (s *ManagerSuite) TestDelete_OK() {
 	ctx := s.T().Context()
-	created, err := s.Manager.Create(ctx, &domain.Note{Title: "t", Content: "c"})
+	created, err := s.Manager.Create(ctx, &domain.Note{
+		Title: "t", Content: "c",
+		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
+		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
+		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
+		ClearExpiry: false,
+	})
 	s.Require().NoError(err)
 
-	err = s.Manager.Delete(ctx, created.ID, created.EditCode)
+	err = s.Manager.Delete(ctx, created.ID, created.EditCode, uuid.Nil)
 	s.Require().NoError(err)
 
 	_, err = s.Manager.Peek(ctx, created.ID)
@@ -253,19 +483,31 @@ func (s *ManagerSuite) TestDelete_OK() {
 
 func (s *ManagerSuite) TestDelete_Forbidden() {
 	ctx := s.T().Context()
-	created, err := s.Manager.Create(ctx, &domain.Note{Title: "t", Content: "c"})
+	created, err := s.Manager.Create(ctx, &domain.Note{
+		Title: "t", Content: "c",
+		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
+		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
+		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
+		ClearExpiry: false,
+	})
 	s.Require().NoError(err)
 
-	err = s.Manager.Delete(ctx, created.ID, "wrong-code")
+	err = s.Manager.Delete(ctx, created.ID, "wrong-code", uuid.Nil)
 
 	s.ErrorIs(err, domain.ErrInvalidEditCode)
 }
 
-// ── GetRendered ──
+// ── GetRendered ──.
 
 func (s *ManagerSuite) TestGetRendered_Markdown() {
 	ctx := s.T().Context()
-	created, err := s.Manager.Create(ctx, &domain.Note{Title: "md", Content: "# Hello"})
+	created, err := s.Manager.Create(ctx, &domain.Note{
+		Title: "md", Content: "# Hello",
+		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
+		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
+		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
+		ClearExpiry: false,
+	})
 	s.Require().NoError(err)
 
 	_, rendered, err := s.Manager.GetRendered(ctx, created.ID)
@@ -285,6 +527,10 @@ func (s *ManagerSuite) TestUpdate_ClearsBurnExpiryWhenBurnDisabled() {
 
 	created, err := s.Manager.Create(ctx, &domain.Note{
 		Title: "burn-edit", Content: "c", BurnAfterReading: true, BurnTTL: 3600,
+
+		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
+		OwnerID: nil, ID: "", ContentType: nil, EditCode: "", Views: 0,
+		ClearExpiry: false,
 	})
 	s.Require().NoError(err)
 
@@ -294,12 +540,15 @@ func (s *ManagerSuite) TestUpdate_ClearsBurnExpiryWhenBurnDisabled() {
 	s.Require().NotNil(got.ExpiresAt, "precondition: burn timer must have set expires_at")
 
 	// User unchecks burn_after_reading in the editor.
-	_, err = s.Manager.Update(ctx, created.ID, created.EditCode, &domain.Note{
+	_, err = s.Manager.Update(ctx, created.ID, created.EditCode, uuid.Nil, &domain.Note{
 		Title:            "burn-edit",
 		Content:          "c",
-		BurnAfterReading: false,
-		BurnTTL:          0,
+		BurnAfterReading: false, BurnTTL: 0,
 		// ExpiresAt intentionally nil — user cleared the burn setting.
+
+		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
+		OwnerID: nil, ID: "", ContentType: nil, EditCode: "", Views: 0,
+		ClearExpiry: false,
 	})
 	s.Require().NoError(err)
 
@@ -314,16 +563,34 @@ func (s *ManagerSuite) TestUpdate_ClearsBurnExpiryWhenBurnDisabled() {
 func (s *ManagerSuite) TestUpdate_PreservesEditCode() {
 	ctx := s.T().Context()
 
-	created, err := s.Manager.Create(ctx, &domain.Note{Title: "v1", Content: "c1"})
+	created, err := s.Manager.Create(ctx, &domain.Note{
+		Title: "v1", Content: "c1",
+		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
+		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
+		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
+		ClearExpiry: false,
+	})
 	s.Require().NoError(err)
 
 	code := created.EditCode
 
-	_, err = s.Manager.Update(ctx, created.ID, code, &domain.Note{Title: "v2", Content: "c2"})
+	_, err = s.Manager.Update(ctx, created.ID, code, uuid.Nil, &domain.Note{
+		Title: "v2", Content: "c2",
+		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
+		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
+		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
+		ClearExpiry: false,
+	})
 	s.Require().NoError(err)
 
 	// The edit code's stored hash must be unchanged, so it still verifies on a second update.
-	_, err = s.Manager.Update(ctx, created.ID, code, &domain.Note{Title: "v3", Content: "c3"})
+	_, err = s.Manager.Update(ctx, created.ID, code, uuid.Nil, &domain.Note{
+		Title: "v3", Content: "c3",
+		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
+		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
+		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
+		ClearExpiry: false,
+	})
 	s.Require().NoError(err, "edit code must remain valid after an update (hash unchanged)")
 }
 
@@ -332,6 +599,10 @@ func (s *ManagerSuite) TestGetRendered_PlainText_HTMLEscaped() {
 	ct := domain.ContentTypePlain
 	created, err := s.Manager.Create(ctx, &domain.Note{
 		Title: "plain", Content: "<b>bold</b>", ContentType: &ct,
+
+		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
+		Privacy: nil, OwnerID: nil, ID: "", EditCode: "",
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
 	})
 	s.Require().NoError(err)
 
@@ -343,12 +614,17 @@ func (s *ManagerSuite) TestGetRendered_PlainText_HTMLEscaped() {
 	s.NotContains(rendered, "<b>")
 }
 
-// ── RevealStore ──
+// ── RevealStore ──.
 
 func (s *ManagerSuite) TestReveal_Issue_ReturnsNonEmptyToken() {
 	ctx := s.T().Context()
 
-	created, err := s.Manager.Create(ctx, &domain.Note{Title: "t", Content: "c", BurnAfterReading: true})
+	created, err := s.Manager.Create(ctx, &domain.Note{
+		Title: "t", Content: "c", BurnAfterReading: true,
+		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
+		OwnerID: nil, ID: "", ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
+		ClearExpiry: false,
+	})
 	s.Require().NoError(err)
 
 	tok, err := s.RevealStore.Issue(ctx, created.ID)
@@ -360,7 +636,12 @@ func (s *ManagerSuite) TestReveal_Issue_ReturnsNonEmptyToken() {
 func (s *ManagerSuite) TestReveal_Consume_ReturnsNoteID() {
 	ctx := s.T().Context()
 
-	created, err := s.Manager.Create(ctx, &domain.Note{Title: "t", Content: "c", BurnAfterReading: true})
+	created, err := s.Manager.Create(ctx, &domain.Note{
+		Title: "t", Content: "c", BurnAfterReading: true,
+		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
+		OwnerID: nil, ID: "", ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
+		ClearExpiry: false,
+	})
 	s.Require().NoError(err)
 
 	tok, err := s.RevealStore.Issue(ctx, created.ID)
@@ -374,7 +655,12 @@ func (s *ManagerSuite) TestReveal_Consume_ReturnsNoteID() {
 func (s *ManagerSuite) TestReveal_EndToEnd_BurnAfterReading() {
 	ctx := s.T().Context()
 
-	created, err := s.Manager.Create(ctx, &domain.Note{Title: "burn", Content: "secret", BurnAfterReading: true})
+	created, err := s.Manager.Create(ctx, &domain.Note{
+		Title: "burn", Content: "secret", BurnAfterReading: true,
+		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
+		OwnerID: nil, ID: "", ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
+		ClearExpiry: false,
+	})
 	s.Require().NoError(err)
 
 	tok, err := s.RevealStore.Issue(ctx, created.ID)
@@ -392,7 +678,7 @@ func (s *ManagerSuite) TestReveal_EndToEnd_BurnAfterReading() {
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
-// ── RevealStore edge cases ──
+// ── RevealStore edge cases ──.
 
 func (s *ManagerSuite) TestReveal_Consume_UnknownToken() {
 	ok := s.RevealStore.Consume(s.T().Context(), "no-such-token", "any-note")
@@ -403,7 +689,12 @@ func (s *ManagerSuite) TestReveal_Consume_UnknownToken() {
 func (s *ManagerSuite) TestReveal_Consume_AlreadyUsed() {
 	ctx := s.T().Context()
 
-	created, err := s.Manager.Create(ctx, &domain.Note{Title: "t", Content: "c", BurnAfterReading: true})
+	created, err := s.Manager.Create(ctx, &domain.Note{
+		Title: "t", Content: "c", BurnAfterReading: true,
+		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
+		OwnerID: nil, ID: "", ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
+		ClearExpiry: false,
+	})
 	s.Require().NoError(err)
 
 	tok, err := s.RevealStore.Issue(ctx, created.ID)
@@ -419,7 +710,12 @@ func (s *ManagerSuite) TestReveal_Consume_AlreadyUsed() {
 func (s *ManagerSuite) TestReveal_Consume_TokenNotReusableAfterNoteBurned() {
 	ctx := s.T().Context()
 
-	created, err := s.Manager.Create(ctx, &domain.Note{Title: "t", Content: "c", BurnAfterReading: true})
+	created, err := s.Manager.Create(ctx, &domain.Note{
+		Title: "t", Content: "c", BurnAfterReading: true,
+		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
+		OwnerID: nil, ID: "", ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
+		ClearExpiry: false,
+	})
 	s.Require().NoError(err)
 
 	tok, err := s.RevealStore.Issue(ctx, created.ID)
@@ -440,7 +736,12 @@ func (s *ManagerSuite) TestReveal_Consume_TokenNotReusableAfterNoteBurned() {
 func (s *ManagerSuite) TestReveal_IssueMultiple_EachConsumedOnce() {
 	ctx := s.T().Context()
 
-	created, err := s.Manager.Create(ctx, &domain.Note{Title: "t", Content: "c", BurnAfterReading: true})
+	created, err := s.Manager.Create(ctx, &domain.Note{
+		Title: "t", Content: "c", BurnAfterReading: true,
+		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
+		OwnerID: nil, ID: "", ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
+		ClearExpiry: false,
+	})
 	s.Require().NoError(err)
 
 	tok1, err := s.RevealStore.Issue(ctx, created.ID)
@@ -456,4 +757,259 @@ func (s *ManagerSuite) TestReveal_IssueMultiple_EachConsumedOnce() {
 
 	ok = s.RevealStore.Consume(ctx, tok2, created.ID)
 	s.True(ok, "second independent token must still be consumable")
+}
+
+// ── Cross-table slug uniqueness (notes vs links) ──
+//
+// Notes and links share one global slug namespace (see the project checklist's "Cross-table slug
+// uniqueness" entry): a note and a link can never have the same ID, in either creation order.
+// Enforced at the application level — links.Manager.Create checks notes.Exists, notes.Manager.
+// Create checks links.Exists — not via a unified `slugs` table, a deliberate trade-off already
+// written down elsewhere (keeps notes and links as independently owned tables/repositories per
+// this project's onion-architecture layering, at the cost of two application-level existence
+// checks instead of one DB-level unique constraint). These tests are the concrete verification
+// that both directions are actually wired, not just documented — exercised against a real
+// database (SQLite or Postgres, via ManagerSuite's two embedders), not mocks.
+
+func (s *ManagerSuite) TestCrossTableSlugUniqueness_NoteFirst_ThenLinkConflicts() {
+	ctx := s.T().Context()
+
+	_, err := s.Manager.Create(ctx, &domain.Note{
+		ID: "shared-slug", Title: "t", Content: "c",
+		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
+		Privacy: nil, OwnerID: nil, ContentType: nil, EditCode: "",
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+	})
+	s.Require().NoError(err)
+
+	_, err = s.LinkManager.Create(ctx, "https://example.com", links.CreateOptions{
+		CustomHash: "shared-slug",
+		ExpiresAt:  nil, Privacy: nil, OwnerID: nil, DirectRedirect: nil,
+		EditCode: "", BurnAfterClick: false,
+	})
+	s.ErrorIs(err, domain.ErrSlugConflict)
+}
+
+func (s *ManagerSuite) TestCrossTableSlugUniqueness_LinkFirst_ThenNoteConflicts() {
+	ctx := s.T().Context()
+
+	_, err := s.LinkManager.Create(ctx, "https://example.com", links.CreateOptions{
+		CustomHash: "shared-slug",
+		ExpiresAt:  nil, Privacy: nil, OwnerID: nil, DirectRedirect: nil,
+		EditCode: "", BurnAfterClick: false,
+	})
+	s.Require().NoError(err)
+
+	_, err = s.Manager.Create(ctx, &domain.Note{
+		ID: "shared-slug", Title: "t", Content: "c",
+		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
+		Privacy: nil, OwnerID: nil, ContentType: nil, EditCode: "",
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+	})
+	s.ErrorIs(err, domain.ErrSlugConflict)
+}
+
+// TestCrossTableSlugUniqueness_ConcurrentCreate runs both managers of one server concurrently.
+// They share a local lock; tests/slugs also covers independent servers, forcing both past
+// their preflight checks to exercise the database's cross-resource uniqueness constraint.
+func (s *ManagerSuite) TestCrossTableSlugUniqueness_ConcurrentCreate() {
+	ctx := s.T().Context()
+
+	const attempts = 20
+
+	for i := range attempts {
+		slug := fmt.Sprintf("shared-race-slug-%d", i)
+
+		var wg sync.WaitGroup
+
+		var noteErr, linkErr error
+
+		wg.Add(2)
+
+		go func() {
+			defer wg.Done()
+
+			_, noteErr = s.Manager.Create(ctx, &domain.Note{
+				ID: slug, Title: "t", Content: "c",
+				CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
+				Privacy: nil, OwnerID: nil, ContentType: nil, EditCode: "",
+				Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+			})
+		}()
+
+		go func() {
+			defer wg.Done()
+
+			_, linkErr = s.LinkManager.Create(ctx, "https://example.com", links.CreateOptions{
+				CustomHash: slug,
+				ExpiresAt:  nil, Privacy: nil, OwnerID: nil, DirectRedirect: nil,
+				EditCode: "", BurnAfterClick: false,
+			})
+		}()
+
+		wg.Wait()
+
+		// Documented invariant: a note and a link can never share a slug, regardless of
+		// creation order or timing. Exactly one of these two creates must have succeeded.
+		noteOK := noteErr == nil
+		linkOK := linkErr == nil
+
+		s.NotEqualf(noteOK, linkOK,
+			"attempt %d: expected exactly one of the two concurrent creates to succeed (global slug "+
+				"uniqueness), got note err=%v, link err=%v — both succeeding means the cross-table "+
+				"TOCTOU race let two different resources claim the same slug", i, noteErr, linkErr)
+	}
+}
+
+// TestLink_TargetURLIsEncryptedAtRest is the concrete verification behind the acceptance
+// criteria's "DB dump of the links table contains no plaintext target URLs" — it bypasses
+// LinkManager's own decrypt path (Peek/Redirect always decrypt) and reads the raw stored column
+// directly via DB, using the real content envelope encryptor (not a passthrough test double, unlike
+// links.Manager's own unit tests).
+func (s *ManagerSuite) TestLink_TargetURLIsEncryptedAtRest() {
+	ctx := s.T().Context()
+
+	const plaintext = "https://example.com/secret/path?token=abc123"
+
+	created, err := s.LinkManager.Create(ctx, plaintext, links.CreateOptions{
+		CustomHash: "encrypted-check",
+		ExpiresAt:  nil, Privacy: nil, OwnerID: nil, DirectRedirect: nil,
+		EditCode: "", BurnAfterClick: false,
+	})
+	s.Require().NoError(err)
+	s.Equal(plaintext, created.TargetURL, "Create must still hand back the plaintext to the caller")
+
+	var stored string
+
+	err = s.DB.NewSelect().
+		Table("links").
+		Column("target_url").
+		Where("id = ?", domain.HashSlug(created.ID)).
+		Scan(ctx, &stored)
+	s.Require().NoError(err)
+
+	s.NotEqual(plaintext, stored, "target_url must not be stored in plaintext")
+	s.NotContains(stored, "example.com", "ciphertext must not leak any substring of the plaintext URL")
+}
+
+// TestLink_CreateThenRedirect_RealCrypto_RoundTrips exercises the production cipher,
+// including the ID/type binding that a passthrough test encryptor cannot validate.
+func (s *ManagerSuite) TestLink_CreateThenRedirect_RealCrypto_RoundTrips() {
+	ctx := s.T().Context()
+
+	const plaintext = "https://example.com/round-trip"
+
+	created, err := s.LinkManager.Create(ctx, plaintext, links.CreateOptions{
+		ExpiresAt: nil, Privacy: nil, OwnerID: nil, DirectRedirect: nil,
+		CustomHash: "", EditCode: "", BurnAfterClick: false,
+	})
+	s.Require().NoError(err)
+
+	peeked, err := s.LinkManager.Peek(ctx, created.ID)
+	s.Require().NoError(err)
+	s.Equal(plaintext, peeked.TargetURL)
+
+	redirected, err := s.LinkManager.Redirect(ctx, created.ID)
+	s.Require().NoError(err)
+	s.Equal(plaintext, redirected.TargetURL)
+	s.Equal(1, redirected.Views)
+}
+
+// Updating a destination preserves the original encrypted edit-code hash and slug,
+// and the next redirect decrypts the new ciphertext with the same record identity.
+func (s *ManagerSuite) TestLink_Update_RealCrypto() {
+	ctx := s.T().Context()
+	link, err := s.LinkManager.Create(ctx, "https://example.com/old", links.CreateOptions{
+		ExpiresAt: nil, Privacy: nil, OwnerID: nil, DirectRedirect: nil,
+		CustomHash: "", EditCode: "", BurnAfterClick: false,
+	})
+	s.Require().NoError(err)
+	_, err = s.LinkManager.Redirect(ctx, link.ID)
+	s.Require().NoError(err)
+
+	var originalHash string
+
+	err = s.DB.NewSelect().TableExpr("links").Column("edit_code").
+		Where("id = ?", domain.HashSlug(link.ID)).Scan(ctx, &originalHash)
+	s.Require().NoError(err)
+	updated, err := s.LinkManager.Update(ctx, link.ID, link.EditCode, uuid.Nil,
+		"https://example.com/new", links.UpdateOptions{
+			ExpiresAt: nil, Privacy: nil, DirectRedirect: nil,
+			ClearExpiry: false, ResetDirectRedirect: false,
+		})
+	s.Require().NoError(err)
+	s.Equal(link.ID, updated.ID)
+
+	s.Equal(1, updated.Views)
+	s.Empty(updated.EditCode)
+
+	var stored struct {
+		TargetURL string `bun:"target_url"`
+		EditCode  string `bun:"edit_code"`
+	}
+
+	err = s.DB.NewSelect().TableExpr("links").Column("target_url", "edit_code").
+		Where("id = ?", domain.HashSlug(link.ID)).Scan(ctx, &stored)
+	s.Require().NoError(err)
+	s.True(strings.HasPrefix(stored.TargetURL, "pmc2$p$"))
+	s.NotContains(stored.TargetURL, "https://example.com/new")
+	s.Equal(originalHash, stored.EditCode)
+	redirected, err := s.LinkManager.Redirect(ctx, link.ID)
+	s.Require().NoError(err)
+	s.Equal("https://example.com/new", redirected.TargetURL)
+	// The original edit code still authorizes a subsequent mutation.
+	s.NoError(s.LinkManager.Delete(ctx, link.ID, link.EditCode, uuid.Nil))
+}
+
+func (s *ManagerSuite) TestUpdatePlainExpiryPersists() {
+	future := time.Now().Add(time.Hour)
+	created, err := s.Manager.Create(s.T().Context(), &domain.Note{
+		Content: "body", ExpiresAt: &future,
+		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, Privacy: nil,
+		OwnerID: nil, ID: "", Title: "", ContentType: nil,
+		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
+		ClearExpiry: false,
+	})
+	s.Require().NoError(err)
+
+	_, err = s.Manager.Update(s.T().Context(), created.ID, created.EditCode, uuid.Nil, &domain.Note{
+		Content:   "preserved",
+		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
+		Privacy: nil, OwnerID: nil, ID: "", Title: "",
+		ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
+		BurnAfterReading: false, ClearExpiry: false,
+	})
+	s.Require().NoError(err)
+	stored, err := s.Manager.Peek(s.T().Context(), created.ID)
+	s.Require().NoError(err)
+	s.Require().NotNil(stored.ExpiresAt)
+	s.WithinDuration(future, *stored.ExpiresAt, time.Second)
+
+	later := future.Add(time.Hour)
+	_, err = s.Manager.Update(s.T().Context(), created.ID, created.EditCode, uuid.Nil,
+		&domain.Note{
+			Content: "replaced", ExpiresAt: &later,
+			CreatedAt: time.Time{}, UpdatedAt: time.Time{}, Privacy: nil,
+			OwnerID: nil, ID: "", Title: "", ContentType: nil,
+			EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
+			ClearExpiry: false,
+		})
+	s.Require().NoError(err)
+	stored, err = s.Manager.Peek(s.T().Context(), created.ID)
+	s.Require().NoError(err)
+	s.Require().NotNil(stored.ExpiresAt)
+	s.WithinDuration(later, *stored.ExpiresAt, time.Second)
+
+	_, err = s.Manager.Update(s.T().Context(), created.ID, created.EditCode, uuid.Nil,
+		&domain.Note{
+			Content: "no expiry", ClearExpiry: true,
+			CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
+			Privacy: nil, OwnerID: nil, ID: "", Title: "",
+			ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
+			BurnAfterReading: false,
+		})
+	s.Require().NoError(err)
+	stored, err = s.Manager.Peek(s.T().Context(), created.ID)
+	s.Require().NoError(err)
+	s.Nil(stored.ExpiresAt)
 }

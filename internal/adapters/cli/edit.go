@@ -2,89 +2,91 @@ package cli
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"strings"
 
 	urcli "github.com/urfave/cli/v3"
 
+	"github.com/partyzanex/padmark/internal/clifactory"
+	"github.com/partyzanex/padmark/internal/errorcontext"
 	padmark "github.com/partyzanex/padmark/pkg/client"
 )
 
 func editCommand() *urcli.Command {
-	return &urcli.Command{
-		Name:      "edit",
-		Usage:     "Update an existing note",
-		ArgsUsage: argsUsageID,
-		Flags: []urcli.Flag{
-			&urcli.StringFlag{
-				Name:    FlagEditCode,
-				Aliases: []string{"e"},
-				Sources: urcli.EnvVars(EnvEditCode),
-				Usage:   "Edit code returned at note creation (env: PADMARK_EDIT_CODE)",
-			},
-			&urcli.StringFlag{
-				Name:    FlagTitle,
-				Aliases: []string{"t"},
-				Usage:   "New title (derived from the first non-empty line of content if omitted)",
-			},
-			&urcli.StringFlag{
-				Name:    FlagContent,
-				Aliases: []string{"c"},
-				Usage:   "New content (reads from stdin if neither --content nor --file is set)",
-			},
-			&urcli.StringFlag{
-				Name:    FlagFile,
-				Aliases: []string{"f"},
-				Usage:   "Read new content from `file`",
-			},
-			&urcli.BoolFlag{
-				Name:  FlagPlain,
-				Usage: "Set content type to text/plain",
-			},
-			&urcli.BoolFlag{
-				Name:  FlagPrivate,
-				Usage: "Require authentication (any bearer token or session) to read the note",
-			},
-			&urcli.BoolFlag{
-				Name:  FlagBurn,
-				Usage: "Enable burn-after-reading",
-			},
-			&urcli.Int64Flag{
-				Name:  FlagTTL,
-				Usage: "Grace period in seconds after first read (only with --burn)",
-			},
-		},
-		Action: editAction,
-	}
+	return clifactory.Command(func(command *urcli.Command) {
+		command.Name = "edit"
+		command.Usage = "Update an existing note"
+		command.ArgsUsage = argsUsageID
+		command.Flags = []urcli.Flag{
+			clifactory.StringFlag(func(flag *urcli.StringFlag) {
+				flag.Name = FlagEditCode
+				flag.Aliases = []string{"e"}
+				flag.Sources = urcli.EnvVars(EnvEditCode)
+				flag.Usage = "Edit code returned at note creation (env: PADMARK_EDIT_CODE). Optional if " +
+					"--token identifies the note's owner. " + psWarnEditCode
+			}),
+			clifactory.StringFlag(func(flag *urcli.StringFlag) {
+				flag.Name = FlagTitle
+				flag.Aliases = []string{"t"}
+				flag.Usage = "New title (derived from the first non-empty line of content if omitted)"
+			}),
+			clifactory.StringFlag(func(flag *urcli.StringFlag) {
+				flag.Name = FlagContent
+				flag.Aliases = []string{"c"}
+				flag.Usage = "New content (reads from stdin if neither --content nor --file is set)"
+			}),
+			clifactory.StringFlag(func(flag *urcli.StringFlag) {
+				flag.Name = FlagFile
+				flag.Aliases = []string{"f"}
+				flag.Usage = "Read new content from `file`"
+			}),
+			clifactory.BoolFlag(func(flag *urcli.BoolFlag) {
+				flag.Name = FlagPlain
+				flag.Usage = "Set content type to text/plain"
+			}),
+			clifactory.StringFlag(func(flag *urcli.StringFlag) {
+				flag.Name = FlagPrivacy
+				flag.Usage = "Privacy level: public, authenticated, or owner"
+			}),
+			clifactory.BoolFlag(func(flag *urcli.BoolFlag) {
+				flag.Name = FlagBurn
+				flag.Usage = "Enable burn-after-reading"
+			}),
+			clifactory.Int64Flag(func(flag *urcli.Int64Flag) {
+				flag.Name = FlagTTL
+				flag.Usage = "Grace period in seconds after first read (only with --burn)"
+			}),
+		}
+		command.Action = editAction
+	})
 }
 
 func editAction(ctx context.Context, cmd *urcli.Command) error {
 	err := validateBurnTTL(cmd)
 	if err != nil {
-		return err
+		return fmt.Errorf("validate burn TTL: %w", err)
 	}
 
 	id, editCode, err := editActionArgs(cmd)
 	if err != nil {
-		return err
+		return fmt.Errorf("edit action args: %w", err)
 	}
 
 	content, err := readContent(cmd)
 	if err != nil {
-		return err
+		return fmt.Errorf("read note content: %w", err)
 	}
 
 	if strings.TrimSpace(content) == "" {
-		return errors.New("content must not be empty")
+		return ErrEmptyContent
 	}
 
 	req := buildUpdateReq(cmd, content, editCode)
 
 	cl, err := newPadmarkClient(cmd)
 	if err != nil {
-		return err
+		return fmt.Errorf("create API client: %w", err)
 	}
 
 	res, err := cl.UpdateNote(ctx, req, padmark.UpdateNoteParams{ID: id})
@@ -94,24 +96,23 @@ func editAction(ctx context.Context, cmd *urcli.Command) error {
 
 	note, apiErr := handleUpdateNoteRes(res)
 	if apiErr != nil {
-		return apiErr
+		return fmt.Errorf("decode update note response: %w", apiErr)
 	}
 
-	return printNote(os.Stdout, note)
+	return errorcontext.Wrap(printNote(os.Stdout, note), "print note")
 }
 
+// editActionArgs resolves the note ID and edit code. editCode may come back empty: the server
+// still accepts the request when --token identifies the note's owner (see buildUpdateReq), and
+// otherwise rejects it with a clear "invalid edit code" API error — the CLI does not pre-validate
+// which credential the caller intends to rely on.
 func editActionArgs(cmd *urcli.Command) (id, editCode string, err error) {
 	id, err = noteIDArg(cmd)
 	if err != nil {
-		return "", "", err
+		return "", "", fmt.Errorf("read note ID: %w", err)
 	}
 
-	editCode = cmd.String(FlagEditCode)
-	if editCode == "" {
-		return "", "", errors.New("--edit-code is required (or set PADMARK_EDIT_CODE)")
-	}
-
-	return id, editCode, nil
+	return id, cmd.String(FlagEditCode), nil
 }
 
 func buildUpdateReq(cmd *urcli.Command, content, editCode string) *padmark.UpdateNoteRequest {
@@ -120,7 +121,13 @@ func buildUpdateReq(cmd *urcli.Command, content, editCode string) *padmark.Updat
 		title = firstLine(content)
 	}
 
-	req := &padmark.UpdateNoteRequest{Content: content, EditCode: editCode}
+	req := new(padmark.UpdateNoteRequest)
+	req.Content = content
+
+	if editCode != "" {
+		req.EditCode = padmark.NewOptString(editCode)
+	}
+
 	if title != "" {
 		req.Title = padmark.NewOptString(title)
 	}
@@ -131,8 +138,8 @@ func buildUpdateReq(cmd *urcli.Command, content, editCode string) *padmark.Updat
 		)
 	}
 
-	if cmd.IsSet(FlagPrivate) {
-		req.Private = padmark.NewOptBool(cmd.Bool(FlagPrivate))
+	if cmd.IsSet(FlagPrivacy) {
+		req.Privacy = padmark.NewOptUpdateNoteRequestPrivacy(padmark.UpdateNoteRequestPrivacy(cmd.String(FlagPrivacy)))
 	}
 
 	if cmd.IsSet(FlagBurn) {
@@ -142,30 +149,56 @@ func buildUpdateReq(cmd *urcli.Command, content, editCode string) *padmark.Updat
 	// TTL only with --burn (enforced by validateBurnTTL), matching `create`'s contract.
 	if cmd.Bool(FlagBurn) {
 		if ttl := cmd.Int64(FlagTTL); ttl > 0 {
-			req.TTL = padmark.NewOptInt64(ttl)
+			req.TTL = padmark.NewOptNilInt64(ttl)
 		}
 	}
 
 	return req
 }
 
+// handleUpdateNoteRes maps every UpdateNote response variant; exhaustive keeps the list complete.
 func handleUpdateNoteRes(res padmark.UpdateNoteRes) (*padmark.NoteResponse, error) {
-	switch typed := res.(type) {
-	case *padmark.NoteResponse:
+	if typed, ok := res.(*padmark.NoteResponse); ok {
 		return typed, nil
-	case *padmark.UpdateNoteBadRequest:
-		return nil, fmt.Errorf("bad request: %s", typed.Message)
-	case *padmark.UpdateNoteUnauthorized:
-		return nil, fmt.Errorf("unauthorized: %s", typed.Message)
-	case *padmark.UpdateNoteForbidden:
-		return nil, errors.New("forbidden: wrong edit code")
-	case *padmark.UpdateNoteNotFound:
-		return nil, errors.New("note not found")
-	case *padmark.UpdateNoteUnprocessableEntity:
-		return nil, fmt.Errorf("validation error: %s", typed.Message)
+	}
+
+	err := updateNoteClientError(res)
+	if err != nil {
+		return nil, err
+	}
+
+	switch typed := res.(type) {
+	case *padmark.UpdateNoteServiceUnavailable:
+		return nil, errorcontext.Wrap(
+			serviceUnavailableError(padmark.ErrorResponse(*typed)), "decode update note response")
 	case *padmark.UpdateNoteInternalServerError:
-		return nil, fmt.Errorf("server error: %s", typed.Message)
+		return nil, fmt.Errorf("%w: %s", ErrServer, typed.Message)
 	default:
-		return nil, fmt.Errorf("unexpected response type: %T", res)
+		return nil, fmt.Errorf("%w: %T", ErrUnexpectedResponse, res)
+	}
+}
+
+// updateNoteClientError maps the client-error variants of an UpdateNote response. It returns nil
+// for every other variant, so the caller handles those.
+func updateNoteClientError(res padmark.UpdateNoteRes) error {
+	switch typed := res.(type) {
+	case *padmark.UpdateNoteBadRequest:
+		return fmt.Errorf("%w: %s", ErrBadRequest, typed.Message)
+	case *padmark.UpdateNoteUnauthorized:
+		return ErrUnauthorized
+	case *padmark.UpdateNoteForbidden:
+		return errWrongEditCode
+	case *padmark.UpdateNoteNotFound:
+		return ErrNoteNotFound
+	case *padmark.UpdateNoteUnprocessableEntity:
+		return fmt.Errorf("%w: %s", ErrValidation, typed.Message)
+	case *padmark.UpdateNoteRequestEntityTooLarge:
+		return fmt.Errorf("%w: %s", ErrContentTooLarge, typed.Message)
+	case *padmark.UpdateNoteUnsupportedMediaType:
+		return fmt.Errorf("%w: %s", ErrBadRequest, typed.Message)
+	case *padmark.UpdateNoteTooManyRequests:
+		return ErrRateLimited
+	default:
+		return nil
 	}
 }

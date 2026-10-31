@@ -1,0 +1,42 @@
+Vendored third-party asset: redoc.standalone.js
+
+Package:  redoc (https://github.com/Redocly/redoc)
+Version:  2.5.4 (newest stable 2.x release; pinned, never "latest")
+Source:   https://registry.npmjs.org/redoc/-/redoc-2.5.4.tgz -> package/bundles/redoc.standalone.js
+          (byte-identical to https://cdn.jsdelivr.net/npm/redoc@2.5.4/bundles/redoc.standalone.js)
+Tarball:  sha1 c2b77b368800f56f69d43697d0fc45738fd8f466 (npm dist.shasum)
+          sha512-M6jWhG1qoBnH6TFmzJnstyCZ87HmOY/UzDm78mHiYihEdlV/YcS9ogOo1NlElnJMeLsyxHFe2yFc4sNjHTrABQ== (npm dist.integrity)
+File:     sha256 dcaf76612bc4a3fbcc923a8966dee2f6146a5f32e5ce1b6f02dd60cbbf89500b, 1103471 bytes
+License:  MIT (reproduced below)
+
+Why vendored: /api is same-origin and public; loading Redoc from a CDN let a compromised CDN
+or a moved "latest" tag run same-origin JS against an admin's session. Served from /static/
+under the global CSP (script-src 'self' 'nonce-...'), with no third-party origin.
+
+Re-fetch (then verify the tarball against `npm view redoc@<ver> dist.integrity` and update the
+hashes above):
+  curl -fsSL https://registry.npmjs.org/redoc/-/redoc-2.5.4.tgz | tar -xzO package/bundles/redoc.standalone.js > internal/adapters/web/static/redoc.standalone.js
+
+--------------------------------------------------------------------------------
+The MIT License (MIT)
+
+Copyright (c) 2015-present, Rebilly, Inc. 
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+

@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dim">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Padmark — {{if .IsLink}}Link{{else}}Paste{{end}} created</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="stylesheet" href="/static/style.css?p={{styleVersion}}">
+</head>
+<body class="bg-success">
+<div class="wrapper">
+
+    {{template "header"}}
+
+    <div class="success-card">
+        <div class="success-banner">
+            <div class="success-icon">
+                <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+            </div>
+            <div>
+                <div class="success-title">{{if .IsLink}}Link{{else}}Paste{{end}} created</div>
+                <div class="success-subtitle">just now · {{.ExpiresLabel}}</div>
+            </div>
+        </div>
+
+        <div class="card-body">
+            <div class="field-block">
+                <span class="field-block-label">View link</span>
+                <div class="copy-row">
+                    <a href="{{.URL}}" class="copy-value">{{.URL}}</a>
+                    <button class="copy-btn" id="copyLinkBtn" data-url="{{.URL}}">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                        Copy
+                    </button>
+                </div>
+            </div>
+
+            <div class="card-divider"></div>
+
+            <div class="field-block" id="editCodeBlock">
+                <span class="field-block-label">Edit code</span>
+                <div class="copy-row secret-row">
+                    <span class="copy-value" id="editCodeValue"></span>
+                    <button class="copy-btn" id="editCodeCopyBtn">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                        Copy
+                    </button>
+                </div>
+            </div>
+
+            <div class="warning-block">
+                <span class="warning-icon">⚠</span>
+                <span class="warning-text">Save this code — you need it to edit or delete the {{if .IsLink}}link{{else}}paste{{end}}. It cannot be recovered.</span>
+            </div>
+
+            {{if .BurnAfterReading}}
+            <div class="card-divider"></div>
+            <div class="warning-block">
+                <span class="warning-icon">🔥</span>
+                <span class="warning-text">{{if .IsLink}}Burn after click — this link will be permanently deleted after the first transition.{{else}}Burn after reading — this note will be permanently deleted once it is revealed.{{end}}</span>
+            </div>
+            {{end}}
+        </div>
+
+        <div class="actions-row">
+            <a href="{{.URL}}" class="btn-primary">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                {{if .IsLink}}Open link{{else}}Go to paste{{end}}
+            </a>
+            <a href="{{if .IsLink}}/links{{else}}/{{end}}" class="btn-ghost">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                Create another
+            </a>
+            {{if .IsLink}}<a href="/links/{{.ID}}/edit" class="btn-ghost">Edit link</a>{{end}}
+        </div>
+    </div>
+
+</div>
+
+<script nonce="{{.Nonce}}">
+    {{template "theme-js"}}
+
+    function flashCopied(btn, orig) {
+        btn.classList.add('copied');
+        btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> Copied`;
+        setTimeout(() => { btn.innerHTML = orig; btn.classList.remove('copied'); }, 2000);
+    }
+
+    function copyText(btn, text) {
+        const orig = btn.innerHTML;
+        if (navigator.clipboard) {
+            navigator.clipboard.writeText(text).then(() => flashCopied(btn, orig));
+        } else {
+            const el = document.createElement('textarea');
+            el.value = text;
+            document.body.appendChild(el);
+            el.select();
+            document.execCommand('copy');
+            document.body.removeChild(el);
+            flashCopied(btn, orig);
+        }
+    }
+
+    (function () {
+        const copyLinkBtn = document.getElementById('copyLinkBtn');
+        copyLinkBtn.addEventListener('click', function () {
+            copyText(this, this.dataset.url);
+        });
+
+        const id = new URLSearchParams(location.search).get('id');
+        const key = ({{.IsLink}} ? 'padmark_link_edit_' : 'padmark_edit_') + id;
+        const code = sessionStorage.getItem(key);
+        if (code) {
+            sessionStorage.removeItem(key);
+            document.getElementById('editCodeValue').textContent = code;
+            document.getElementById('editCodeCopyBtn').addEventListener('click', function () {
+                copyText(this, code);
+            });
+        } else {
+            // edit code not available (e.g. page was refreshed) — hide the block
+            document.getElementById('editCodeBlock').style.display = 'none';
+        }
+    })();
+</script>
+</body>
+</html>

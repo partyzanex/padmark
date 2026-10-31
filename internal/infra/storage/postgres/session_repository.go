@@ -5,8 +5,10 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/uptrace/bun"
 
 	"github.com/partyzanex/padmark/internal/domain"
@@ -15,44 +17,47 @@ import (
 type sessionRow struct {
 	bun.BaseModel `bun:"table:sessions"`
 
-	CreatedAt time.Time `bun:"created_at,notnull"`
-	ExpiresAt time.Time `bun:"expires_at,notnull"`
-	SessionID string    `bun:"session_id,pk"`
-	UserID    string    `bun:"user_id,notnull"`
-	UserAgent string    `bun:"user_agent"`
-	IP        string    `bun:"ip"`
+	CreatedAt   time.Time `bun:"created_at,notnull"`
+	ExpiresAt   time.Time `bun:"expires_at,notnull"`
+	SessionHash string    `bun:"session_hash,pk"`
+	UserAgent   string    `bun:"user_agent"`
+	IP          string    `bun:"ip"`
+	UserID      uuid.UUID `bun:"user_id,notnull"`
 }
 
 func toSessionRow(sess *domain.Session) *sessionRow {
 	return &sessionRow{
-		SessionID: sess.SessionID,
-		UserID:    sess.UserID,
-		CreatedAt: sess.CreatedAt,
-		ExpiresAt: sess.ExpiresAt,
-		UserAgent: sess.UserAgent,
-		IP:        sess.IP,
+		BaseModel:   bun.BaseModel{},
+		SessionHash: sess.SessionHash,
+		UserID:      sess.UserID,
+		CreatedAt:   sess.CreatedAt,
+		ExpiresAt:   sess.ExpiresAt,
+		UserAgent:   sess.UserAgent,
+		IP:          sess.IP,
 	}
 }
 
 func (r *sessionRow) toDomain() *domain.Session {
 	return &domain.Session{
-		SessionID: r.SessionID,
-		UserID:    r.UserID,
-		CreatedAt: r.CreatedAt,
-		ExpiresAt: r.ExpiresAt,
-		UserAgent: r.UserAgent,
-		IP:        r.IP,
+		SessionHash: r.SessionHash,
+		UserID:      r.UserID,
+		CreatedAt:   r.CreatedAt,
+		ExpiresAt:   r.ExpiresAt,
+		UserAgent:   r.UserAgent,
+		IP:          r.IP,
 	}
 }
 
 // SessionRepository is a PostgreSQL-backed store for authenticated browser sessions.
 type SessionRepository struct {
-	db *bun.DB
+	db  *bun.DB
+	log *slog.Logger
 }
 
-// NewSessionRepository returns a new PostgreSQL-backed SessionRepository.
-func NewSessionRepository(db *bun.DB) *SessionRepository {
-	return &SessionRepository{db: db}
+// NewSessionRepository returns a new PostgreSQL-backed SessionRepository. log is used to surface
+// lazy-sweep failures.
+func NewSessionRepository(db *bun.DB, log *slog.Logger) *SessionRepository {
+	return &SessionRepository{db: db, log: log}
 }
 
 // Create inserts a new session record. Expired sessions are lazily swept on each call
@@ -63,8 +68,12 @@ func (r *SessionRepository) Create(ctx context.Context, s *domain.Session) error
 		return fmt.Errorf("insert session: %w", err)
 	}
 
-	//nolint:errcheck // best-effort sweep; stale sessions persist until next Create
-	_ = r.DeleteExpired(ctx)
+	// Best-effort sweep of expired sessions; a failure here does not block session creation —
+	// stale rows simply persist until the next Create call.
+	sweepErr := r.DeleteExpired(ctx)
+	if sweepErr != nil {
+		r.log.WarnContext(ctx, "session sweep failed", "err", sweepErr)
+	}
 
 	return nil
 }
@@ -77,7 +86,7 @@ func (r *SessionRepository) Get(ctx context.Context, sessionID string) (*domain.
 
 	err := r.db.NewSelect().
 		Model(&row).
-		Where("session_id = ?", sessionID).
+		Where("session_hash = ?", sessionID).
 		Where("expires_at > ?", time.Now()).
 		Scan(ctx)
 	if err != nil {
@@ -95,7 +104,7 @@ func (r *SessionRepository) Get(ctx context.Context, sessionID string) (*domain.
 func (r *SessionRepository) Delete(ctx context.Context, sessionID string) error {
 	_, err := r.db.NewDelete().
 		TableExpr("sessions").
-		Where("session_id = ?", sessionID).
+		Where("session_hash = ?", sessionID).
 		Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("delete session: %w", err)
@@ -105,11 +114,11 @@ func (r *SessionRepository) Delete(ctx context.Context, sessionID string) error 
 }
 
 // DeleteByUserIDExcept removes all sessions for the user except the specified one.
-func (r *SessionRepository) DeleteByUserIDExcept(ctx context.Context, userID, exceptSessionID string) error {
+func (r *SessionRepository) DeleteByUserIDExcept(ctx context.Context, userID uuid.UUID, exceptSessionID string) error {
 	_, err := r.db.NewDelete().
 		TableExpr("sessions").
 		Where("user_id = ?", userID).
-		Where("session_id != ?", exceptSessionID).
+		Where("session_hash != ?", exceptSessionID).
 		Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("delete sessions by user except: %w", err)
@@ -119,7 +128,7 @@ func (r *SessionRepository) DeleteByUserIDExcept(ctx context.Context, userID, ex
 }
 
 // DeleteByUserID removes all sessions belonging to the given user.
-func (r *SessionRepository) DeleteByUserID(ctx context.Context, userID string) error {
+func (r *SessionRepository) DeleteByUserID(ctx context.Context, userID uuid.UUID) error {
 	_, err := r.db.NewDelete().
 		TableExpr("sessions").
 		Where("user_id = ?", userID).

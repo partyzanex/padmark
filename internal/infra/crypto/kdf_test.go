@@ -19,22 +19,23 @@ func TestGenerateKDFSalt_LengthAndRandomness(t *testing.T) {
 }
 
 func TestDeriveUserKey_DeterministicAndSensitive(t *testing.T) {
+	params := crypto.DefaultArgon2Params()
 	password := []byte("correct horse battery staple")
 	salt := []byte("saltsaltsalt1234")
 
-	key1, err := crypto.DeriveUserKey(password, salt)
+	key1, err := crypto.DeriveUserKey(password, salt, params)
 	require.NoError(t, err)
-	require.Len(t, key1, 64, "32-byte key, hex-encoded")
+	require.Len(t, key1, 43, "32-byte key, base64url-encoded")
 
-	key2, err := crypto.DeriveUserKey(password, salt)
+	key2, err := crypto.DeriveUserKey(password, salt, params)
 	require.NoError(t, err)
 	require.Equal(t, key1, key2, "same password+salt → same key")
 
-	keyOtherSalt, err := crypto.DeriveUserKey(password, []byte("differentsalt456"))
+	keyOtherSalt, err := crypto.DeriveUserKey(password, []byte("differentsalt456"), params)
 	require.NoError(t, err)
 	require.NotEqual(t, key1, keyOtherSalt, "different salt → different key")
 
-	keyOtherPw, err := crypto.DeriveUserKey([]byte("another password!!"), salt)
+	keyOtherPw, err := crypto.DeriveUserKey([]byte("another password!!"), salt, params)
 	require.NoError(t, err)
 	require.NotEqual(t, key1, keyOtherPw, "different password → different key")
 }

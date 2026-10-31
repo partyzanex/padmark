@@ -1,16 +1,17 @@
+//go:build integration
+
 package integration
 
 import (
-	"database/sql"
 	"fmt"
+	"log/slog"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
 	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect/sqlitedialect"
-	"github.com/uptrace/bun/driver/sqliteshim"
 
+	"github.com/partyzanex/padmark/internal/infra/lock"
 	sqliterepo "github.com/partyzanex/padmark/internal/infra/storage/sqlite"
 )
 
@@ -25,14 +26,23 @@ func (s *SQLiteManagerSuite) SetupTest() {
 	name := strings.ReplaceAll(s.T().Name(), "/", "_")
 	uri := fmt.Sprintf("file:%s?mode=memory&cache=shared", name)
 
-	sqldb, err := sql.Open(sqliteshim.DriverName(), uri)
+	db, err := sqliterepo.Open(uri, slog.New(slog.DiscardHandler))
 	s.Require().NoError(err)
 
-	s.db = bun.NewDB(sqldb, sqlitedialect.New())
+	s.db = db
 	_, migrateErr := sqliterepo.Migrate(s.T().Context(), s.db)
 	s.Require().NoError(migrateErr)
-	s.Manager = newManager(sqliterepo.NewNoteRepository(s.db))
-	s.RevealStore = sqliterepo.NewRevealRepository(s.db)
+
+	slugLock := lock.NewLocker()
+
+	s.Manager = newManager(s.T(),
+		sqliterepo.NewNoteRepository(s.db), sqliterepo.NewLinkRepository(s.db, slog.Default()), slugLock,
+	)
+	s.LinkManager = newLinkManager(s.T(),
+		sqliterepo.NewLinkRepository(s.db, slog.Default()), sqliterepo.NewNoteRepository(s.db), slugLock,
+	)
+	s.RevealStore = sqliterepo.NewRevealRepository(s.db, slog.Default())
+	s.DB = s.db
 }
 
 func (s *SQLiteManagerSuite) TearDownTest() {

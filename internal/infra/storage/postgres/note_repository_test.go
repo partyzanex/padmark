@@ -1,10 +1,14 @@
+//go:build integration
+
 package postgres
 
 import (
+	"context"
 	"database/sql"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/suite"
 	"github.com/testcontainers/testcontainers-go"
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
@@ -81,10 +85,13 @@ func newNote(id, title, content string) *domain.Note {
 		ContentType: new(domain.ContentTypeMarkdown),
 		CreatedAt:   now,
 		UpdatedAt:   now,
+
+		ExpiresAt: nil, Privacy: nil, OwnerID: nil, EditCode: "",
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
 	}
 }
 
-// ── Create ──
+// ── Create ──.
 
 func (s *RepositoryTestSuite) TestCreate_OK() {
 	err := s.repo.Create(s.T().Context(), newNote("c1", "hello", "world"))
@@ -120,7 +127,61 @@ func (s *RepositoryTestSuite) TestCreate_AllFields() {
 	s.WithinDuration(future, *got.ExpiresAt, time.Second)
 }
 
-// ── Get ──
+// createTestUser inserts a minimal user row so notes.owner_id (a real FK on PostgreSQL) can
+// reference it, and returns the generated ID.
+func (s *RepositoryTestSuite) createTestUser(ctx context.Context) uuid.UUID {
+	s.T().Helper()
+
+	id := uuid.New()
+	err := NewUserRepository(s.db).Create(ctx, &domain.User{
+		ID: id, Username: "owner-" + id.String(), TOTPSecret: "secret", PasswordHash: "hash",
+		CreatedAt: time.Now(),
+
+		LastLoginAt: nil, KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
+	})
+	s.Require().NoError(err)
+
+	return id
+}
+
+// TestCreate_WithOwnerID verifies OwnerID round-trips through Create/Get — see
+// notes.Manager.isOwner, which relies on this to bypass edit_code for the note's creator.
+func (s *RepositoryTestSuite) TestCreate_WithOwnerID() {
+	ctx := s.T().Context()
+	ownerID := s.createTestUser(ctx)
+
+	n := newNote("owned", "title", "content")
+	n.OwnerID = &ownerID
+	s.Require().NoError(s.repo.Create(ctx, n))
+
+	got, err := s.repo.Get(ctx, "owned")
+	s.Require().NoError(err)
+	s.Require().NotNil(got.OwnerID)
+	s.Equal(ownerID, *got.OwnerID)
+}
+
+// TestUpdate_PreservesOwnerID verifies Update never changes owner_id — ownership is fixed at
+// creation and excluded from Update's column list, mirroring edit_code.
+func (s *RepositoryTestSuite) TestUpdate_PreservesOwnerID() {
+	ctx := s.T().Context()
+	ownerID := s.createTestUser(ctx)
+	attackerID := s.createTestUser(ctx)
+
+	n := newNote("owned-update", "title", "content")
+	n.OwnerID = &ownerID
+	s.Require().NoError(s.repo.Create(ctx, n))
+
+	updated := newNote("owned-update", "new title", "new content")
+	updated.OwnerID = &attackerID
+	s.Require().NoError(s.repo.Update(ctx, "owned-update", updated))
+
+	got, err := s.repo.Get(ctx, "owned-update")
+	s.Require().NoError(err)
+	s.Require().NotNil(got.OwnerID)
+	s.Equal(ownerID, *got.OwnerID, "owner_id must be immutable via Update, even if a caller sets it")
+}
+
+// ── Get ──.
 
 func (s *RepositoryTestSuite) TestGet_OK() {
 	ctx := s.T().Context()
@@ -142,7 +203,24 @@ func (s *RepositoryTestSuite) TestGet_NotFound() {
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
-// ── Update ──
+func (s *RepositoryTestSuite) TestExists_True() {
+	ctx := s.T().Context()
+
+	s.Require().NoError(s.repo.Create(ctx, newNote("exists-1", "t", "c")))
+
+	exists, err := s.repo.Exists(ctx, "exists-1")
+	s.Require().NoError(err)
+	s.True(exists)
+}
+
+func (s *RepositoryTestSuite) TestExists_False() {
+	exists, err := s.repo.Exists(s.T().Context(), "missing")
+
+	s.Require().NoError(err)
+	s.False(exists)
+}
+
+// ── Update ──.
 
 func (s *RepositoryTestSuite) TestUpdate_OK() {
 	ctx := s.T().Context()
@@ -154,6 +232,10 @@ func (s *RepositoryTestSuite) TestUpdate_OK() {
 		ContentType: new(domain.ContentTypePlain),
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
+
+		ExpiresAt: nil, Privacy: nil, OwnerID: nil, ID: "",
+		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
+		ClearExpiry: false,
 	}
 	err := s.repo.Update(ctx, "u1", updated)
 	s.Require().NoError(err)
@@ -177,6 +259,10 @@ func (s *RepositoryTestSuite) TestUpdate_ExpiresAt() {
 		ExpiresAt: &future,
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
+
+		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
+		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
+		ClearExpiry: false,
 	}
 
 	s.Require().NoError(s.repo.Update(ctx, "u2", updated))
@@ -197,6 +283,9 @@ func (s *RepositoryTestSuite) TestUpdate_BurnAfterReading() {
 		BurnAfterReading: true,
 		CreatedAt:        time.Now(),
 		UpdatedAt:        time.Now(),
+
+		ExpiresAt: nil, Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
+		EditCode: "", Views: 0, BurnTTL: 0, ClearExpiry: false,
 	}
 
 	s.Require().NoError(s.repo.Update(ctx, "u3", updated))
@@ -212,6 +301,10 @@ func (s *RepositoryTestSuite) TestUpdate_NotFound() {
 		Content:   "x",
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
+
+		ExpiresAt: nil, Privacy: nil, OwnerID: nil, ID: "",
+		ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
+		BurnAfterReading: false, ClearExpiry: false,
 	}
 
 	err := s.repo.Update(s.T().Context(), "nonexistent", note)
@@ -219,51 +312,60 @@ func (s *RepositoryTestSuite) TestUpdate_NotFound() {
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
-// TestUpdate_Private_Nil_PreservesExistingValue verifies that passing Private=nil to Update
-// keeps the existing private value in the DB (via COALESCE(NULL, private)).
-func (s *RepositoryTestSuite) TestUpdate_Private_Nil_PreservesExistingValue() {
+// TestUpdate_Privacy_Nil_PreservesExistingValue verifies that passing Privacy=nil to Update
+// keeps the existing privacy value in the DB (via COALESCE(NULL, privacy)).
+func (s *RepositoryTestSuite) TestUpdate_Privacy_Nil_PreservesExistingValue() {
 	ctx := s.T().Context()
 
 	note := newNote("priv-nil-1", "t", "c")
-	note.Private = new(true)
+	note.Privacy = new(domain.PrivacyAuthenticated)
 	s.Require().NoError(s.repo.Create(ctx, note))
 
-	// Update with Private=nil — must not touch the private column.
+	// Update with Privacy=nil — must not touch the privacy column.
 	updated := &domain.Note{
 		Title:     "t2",
 		Content:   "c2",
-		Private:   nil,
+		Privacy:   nil,
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
+
+		ExpiresAt: nil, OwnerID: nil, ID: "", ContentType: nil,
+		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
+		ClearExpiry: false,
 	}
 	s.Require().NoError(s.repo.Update(ctx, "priv-nil-1", updated))
 
 	got, err := s.repo.Get(ctx, "priv-nil-1")
 	s.Require().NoError(err)
-	s.True(got.Private != nil && *got.Private, "private must be preserved when Update receives Private=nil")
+	s.Equal(domain.PrivacyAuthenticated, got.EffectivePrivacy(),
+		"privacy must be preserved when Update receives Privacy=nil")
 }
 
-// TestUpdate_Private_ExplicitFalse_ClearsPrivacy verifies that passing Private=&false
-// explicitly sets the column to false, even if the note was previously private.
-func (s *RepositoryTestSuite) TestUpdate_Private_ExplicitFalse_ClearsPrivacy() {
+// TestUpdate_Privacy_ExplicitPublic_ClearsPrivacy verifies that passing Privacy=&public
+// explicitly sets the column to public, even if the note was previously authenticated-only.
+func (s *RepositoryTestSuite) TestUpdate_Privacy_ExplicitPublic_ClearsPrivacy() {
 	ctx := s.T().Context()
 
 	note := newNote("priv-false-1", "t", "c")
-	note.Private = new(true)
+	note.Privacy = new(domain.PrivacyAuthenticated)
 	s.Require().NoError(s.repo.Create(ctx, note))
 
 	updated := &domain.Note{
 		Title:     "t2",
 		Content:   "c2",
-		Private:   new(false),
+		Privacy:   new(domain.PrivacyPublic),
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
+
+		ExpiresAt: nil, OwnerID: nil, ID: "", ContentType: nil,
+		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
+		ClearExpiry: false,
 	}
 	s.Require().NoError(s.repo.Update(ctx, "priv-false-1", updated))
 
 	got, err := s.repo.Get(ctx, "priv-false-1")
 	s.Require().NoError(err)
-	s.False(got.Private != nil && *got.Private, "private must be cleared when Update receives Private=&false")
+	s.Equal(domain.PrivacyPublic, got.EffectivePrivacy(), "privacy must be cleared when Update receives Privacy=&public")
 }
 
 // TestUpdate_ContentType_Nil_PreservesExistingValue verifies that passing ContentType=nil to Update
@@ -281,6 +383,10 @@ func (s *RepositoryTestSuite) TestUpdate_ContentType_Nil_PreservesExistingValue(
 		ContentType: nil,
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
+
+		ExpiresAt: nil, Privacy: nil, OwnerID: nil, ID: "",
+		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
+		ClearExpiry: false,
 	}
 	s.Require().NoError(s.repo.Update(ctx, "ct-nil-pg", updated))
 
@@ -304,6 +410,10 @@ func (s *RepositoryTestSuite) TestUpdate_ContentType_ExplicitChange() {
 		ContentType: new(domain.ContentTypeMarkdown),
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
+
+		ExpiresAt: nil, Privacy: nil, OwnerID: nil, ID: "",
+		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
+		ClearExpiry: false,
 	}
 	s.Require().NoError(s.repo.Update(ctx, "ct-change-pg", updated))
 
@@ -312,7 +422,7 @@ func (s *RepositoryTestSuite) TestUpdate_ContentType_ExplicitChange() {
 	s.Equal(new(domain.ContentTypeMarkdown), got.ContentType, "content_type must be updated when explicitly set")
 }
 
-// ── IncrementViews ──
+// ── IncrementViews ──.
 
 func (s *RepositoryTestSuite) TestIncrementViews_OK() {
 	ctx := s.T().Context()
@@ -333,7 +443,7 @@ func (s *RepositoryTestSuite) TestIncrementViews_NotFound() {
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
-// ── Delete ──
+// ── Delete ──.
 
 func (s *RepositoryTestSuite) TestDelete_OK() {
 	ctx := s.T().Context()
@@ -351,7 +461,7 @@ func (s *RepositoryTestSuite) TestDelete_NotFound() {
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
-// Consume
+// Consume.
 
 func (s *RepositoryTestSuite) TestConsume_BurnAfterReading() {
 	ctx := s.T().Context()
@@ -392,7 +502,7 @@ func (s *RepositoryTestSuite) TestConsume_NotEligible() {
 	_, err := s.repo.Consume(ctx, "con-no")
 	s.Require().ErrorIs(err, domain.ErrNotFound)
 
-	// note must still exist
+	// note must still exist.
 	got, err := s.repo.Get(ctx, "con-no")
 	s.Require().NoError(err)
 	s.Equal("con-no", got.ID)
@@ -404,7 +514,7 @@ func (s *RepositoryTestSuite) TestConsume_NotFound() {
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
-// ── Migrate ──
+// ── Migrate ──.
 
 func (s *RepositoryTestSuite) TestMigrate_Idempotent() {
 	// Running Migrate again should not fail (all migrations already applied).
@@ -413,30 +523,34 @@ func (s *RepositoryTestSuite) TestMigrate_Idempotent() {
 	s.Require().NoError(err)
 }
 
-// ── Roundtrip ──
+// ── Roundtrip ──.
 
 func (s *RepositoryTestSuite) TestRoundtrip_CRUD() {
 	ctx := s.T().Context()
 
-	// Create
+	// Create.
 	n := newNote("rt1", "original", "# Hello")
 	n.EditCode = "edit123"
 	s.Require().NoError(s.repo.Create(ctx, n))
 
-	// Read
+	// Read.
 	got, err := s.repo.Get(ctx, "rt1")
 	s.Require().NoError(err)
 	s.Equal("original", got.Title)
 	s.Equal("# Hello", got.Content)
 	s.Equal("edit123", got.EditCode)
 
-	// Update
+	// Update.
 	updated := &domain.Note{
 		Title:       "updated",
 		Content:     "# Updated",
 		ContentType: new(domain.ContentTypePlain),
 		CreatedAt:   got.CreatedAt,
 		UpdatedAt:   time.Now(),
+
+		ExpiresAt: nil, Privacy: nil, OwnerID: nil, ID: "",
+		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
+		ClearExpiry: false,
 	}
 	s.Require().NoError(s.repo.Update(ctx, "rt1", updated))
 
@@ -445,14 +559,14 @@ func (s *RepositoryTestSuite) TestRoundtrip_CRUD() {
 	s.Equal("updated", got.Title)
 	s.Equal(new(domain.ContentTypePlain), got.ContentType)
 
-	// Views
+	// Views.
 	s.Require().NoError(s.repo.IncrementViews(ctx, "rt1"))
 
 	got, err = s.repo.Get(ctx, "rt1")
 	s.Require().NoError(err)
 	s.Equal(1, got.Views)
 
-	// Delete
+	// Delete.
 	s.Require().NoError(s.repo.Delete(ctx, "rt1"))
 
 	_, err = s.repo.Get(ctx, "rt1")

@@ -1,69 +1,94 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"strings"
 
 	urcli "github.com/urfave/cli/v3"
 
+	"github.com/partyzanex/padmark/internal/clifactory"
+	"github.com/partyzanex/padmark/internal/errorcontext"
 	padmark "github.com/partyzanex/padmark/pkg/client"
 )
 
 // NewApp returns the root CLI command for padmark-cli.
 func NewApp() *urcli.Command {
-	return &urcli.Command{
-		Name:                  "padmark-cli",
-		Usage:                 "Command-line client for the Padmark notes service",
-		EnableShellCompletion: true,
-		Flags:                 globalFlags(),
-		Commands: []*urcli.Command{
+	return clifactory.Command(func(command *urcli.Command) {
+		command.Name = "padmark-cli"
+		command.Usage = "Command-line client for the Padmark notes service"
+		command.EnableShellCompletion = true
+		command.Flags = globalFlags()
+		command.Commands = []*urcli.Command{
 			createCommand(),
 			getCommand(),
 			editCommand(),
 			deleteCommand(),
+			shortenCommand(),
+			expandCommand(),
+			deleteLinkCommand(),
 			pingCommand(),
-		},
-	}
+			setupCommand(),
+			createTokenCommand(),
+			createInviteCommand(),
+			trustCommand(),
+		}
+	})
 }
 
 func globalFlags() []urcli.Flag {
 	return []urcli.Flag{
-		&urcli.StringFlag{
-			Name:    FlagURL,
-			Aliases: []string{"u"},
-			Sources: urcli.EnvVars(EnvURL),
-			Value:   DefaultURL,
-			Usage:   "Padmark server URL",
-		},
-		&urcli.StringFlag{
-			Name:    FlagToken,
-			Sources: urcli.EnvVars(EnvToken),
-			Usage:   "Bearer token for authentication (env: PADMARK_TOKEN; falls back to ~/.config/padmark/token)",
-		},
-		&urcli.DurationFlag{
-			Name:    FlagTimeout,
-			Sources: urcli.EnvVars(EnvTimeout),
-			Value:   DefaultTimeout,
-			Usage:   "Per-request HTTP timeout; 0 disables it (env: PADMARK_TIMEOUT)",
-		},
+		clifactory.StringFlag(func(flag *urcli.StringFlag) {
+			flag.Name = FlagURL
+			flag.Aliases = []string{"u"}
+			flag.Sources = urcli.EnvVars(EnvURL)
+			flag.Value = DefaultURL
+			flag.Usage = "Padmark server URL"
+		}),
+		clifactory.StringFlag(func(flag *urcli.StringFlag) {
+			flag.Name = FlagToken
+			flag.Sources = urcli.EnvVars(EnvToken)
+			flag.Usage = "Bearer token (env: PADMARK_TOKEN; falls back to ~/.config/padmark/token). " +
+				"Flag values are visible in process listings (ps); prefer the env var or token file"
+		}),
+		clifactory.DurationFlag(func(flag *urcli.DurationFlag) {
+			flag.Name = FlagTimeout
+			flag.Sources = urcli.EnvVars(EnvTimeout)
+			flag.Value = DefaultTimeout
+			flag.Usage = "Per-request HTTP timeout; 0 disables it (env: PADMARK_TIMEOUT)"
+		}),
+		clifactory.BoolFlag(func(flag *urcli.BoolFlag) {
+			flag.Name = FlagAllowInsecureHTTP
+			flag.Sources = urcli.EnvVars(EnvAllowInsecureHTTP)
+			flag.Usage = "Allow sending a bearer token or setup password over plain HTTP to a non-loopback host " +
+				"(loopback hosts only warn); default refuses (env: PADMARK_ALLOW_INSECURE_HTTP)"
+		}),
 	}
 }
 
 func newPadmarkClient(cmd *urcli.Command) (*padmark.Client, error) {
-	token, embeddedURL := splitToken(resolveToken(cmd))
-
 	// An envelope token carries its own server URL; an explicit --url/PADMARK_URL still wins.
-	serverURL := pickServerURL(cmd, embeddedURL)
+	token, serverURL, trustErr := resolveTrustedServer(cmd)
+	if trustErr != nil {
+		return nil, fmt.Errorf("resolve trusted server: %w", trustErr)
+	}
 
-	warnInsecureToken(commandErrWriter(cmd), serverURL, token)
+	insecureErr := checkInsecureToken(commandErrWriter(cmd), serverURL, token, allowInsecureHTTP(cmd))
+	if insecureErr != nil {
+		return nil, fmt.Errorf("validate token transport: %w", insecureErr)
+	}
 
 	transport := &bearerTransport{base: http.DefaultTransport, token: token}
-	httpClient := &http.Client{Transport: transport, Timeout: cmd.Duration(FlagTimeout)}
+	httpClient := &http.Client{
+		Transport: transport, Timeout: cmd.Duration(FlagTimeout),
+		CheckRedirect: nil, Jar: nil,
+	}
 
 	cl, err := padmark.NewClient(serverURL, padmark.WithClient(httpClient))
 	if err != nil {
@@ -82,28 +107,80 @@ func commandErrWriter(cmd *urcli.Command) io.Writer {
 	return os.Stderr
 }
 
-// warnInsecureToken prints a stderr warning when a bearer token would be sent over a non-HTTPS
-// connection, where it travels in cleartext and can be intercepted. It is advisory only and
-// does not block the request. No token is set, or HTTPS in use → no warning.
-func warnInsecureToken(errOut io.Writer, serverURL, token string) {
-	if token == "" {
-		return
+// errInsecureTransport is returned when a credential would travel in cleartext to a non-loopback
+// host and the operator did not opt in with --allow-insecure-http.
+var errInsecureTransport = errors.New("refusing to send credentials over non-HTTPS to a non-loopback host")
+
+// isLoopbackHost reports whether the URL's host is localhost or a loopback IP (127.0.0.0/8, ::1).
+// An unparsable URL or empty host is not loopback, so the check fails closed.
+func isLoopbackHost(serverURL string) bool {
+	parsed, err := url.Parse(serverURL)
+	if err != nil {
+		return false
 	}
 
+	host := parsed.Hostname()
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+
+	addr, err := netip.ParseAddr(host)
+
+	return err == nil && addr.IsLoopback()
+}
+
+// insecureHTTPSetting is the value of --allow-insecure-http. Its underlying type is bool, and the
+// named type keeps the setting out of bare bool parameters.
+type insecureHTTPSetting bool
+
+// insecureHTTPDenied refuses cleartext transport to a non-loopback host.
+const insecureHTTPDenied insecureHTTPSetting = false
+
+// allowInsecureHTTP reads the --allow-insecure-http setting of the command.
+func allowInsecureHTTP(cmd *urcli.Command) insecureHTTPSetting {
+	return insecureHTTPSetting(cmd.Bool(FlagAllowInsecureHTTP))
+}
+
+// checkInsecureToken guards a bearer token against cleartext transport. HTTPS or no token → nil.
+// Plain HTTP to a loopback host only warns on stderr, keeping local development working. Plain
+// HTTP to any other host is an error unless allowInsecure (--allow-insecure-http) is set, in
+// which case it warns and proceeds.
+func checkInsecureToken(errOut io.Writer, serverURL, token string, allowInsecure insecureHTTPSetting) error {
+	if token == "" {
+		return nil
+	}
+
+	return errorcontext.Wrap(
+		checkInsecureTransport(errOut, serverURL, "bearer token", allowInsecure), "validate token transport",
+	)
+}
+
+// checkInsecureTransport implements the shared policy for checkInsecureToken and
+// checkInsecureSetup; what names the credential in the message.
+func checkInsecureTransport(errOut io.Writer, serverURL, what string, allowInsecure insecureHTTPSetting) error {
 	parsed, err := url.Parse(serverURL)
 	if err == nil && parsed.Scheme == "https" {
-		return
+		return nil
+	}
+
+	if allowInsecure == insecureHTTPDenied && !isLoopbackHost(serverURL) {
+		return fmt.Errorf("%w: %s to %s; use an https:// URL or pass --%s",
+			errInsecureTransport, what, serverURL, FlagAllowInsecureHTTP)
 	}
 
 	// Best-effort advisory write (errWriter swallows the error); a failed warning must not
 	// abort the command.
-	ew := &errWriter{w: errOut}
+	ew := &errWriter{w: errOut, err: nil}
 	ew.printf(
-		"warning: bearer token will be sent in cleartext over a non-HTTPS URL (%s); use an https:// server URL\n",
-		serverURL)
+		"warning: %s will be sent in cleartext over a non-HTTPS URL (%s); use an https:// server URL\n",
+		what, serverURL)
+
+	return nil
 }
 
-// bearerTransport injects an Authorization: Bearer header when a token is configured.
+// bearerTransport injects an Authorization: Bearer header when a token is configured, and
+// Accept: application/json when the request names none: the generated client sends no Accept,
+// and the server refuses a burn-after-reading read that does not state its format explicitly.
 // base is listed first to group pointer-sized fields contiguously (govet fieldalignment).
 type bearerTransport struct {
 	base  http.RoundTripper
@@ -111,12 +188,18 @@ type bearerTransport struct {
 }
 
 func (tr *bearerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	// RoundTrip must not modify the caller's request, so the headers go on a clone.
+	clone := req.Clone(req.Context())
+
 	if tr.token != "" {
-		req = req.Clone(req.Context())
-		req.Header.Set("Authorization", "Bearer "+tr.token)
+		clone.Header.Set("Authorization", "Bearer "+tr.token)
 	}
 
-	resp, err := tr.base.RoundTrip(req)
+	if clone.Header.Get("Accept") == "" {
+		clone.Header.Set("Accept", "application/json")
+	}
+
+	resp, err := tr.base.RoundTrip(clone)
 	if err != nil {
 		return nil, fmt.Errorf("http: %w", err)
 	}
@@ -143,8 +226,7 @@ func readContent(cmd *urcli.Command) (string, error) {
 	// io.ReadAll would block forever, looking like a hang. Fail fast with a clear message.
 	stat, statErr := os.Stdin.Stat()
 	if statErr == nil && isCharDevice(stat.Mode()) {
-		return "", errors.New(
-			"no content provided: pass --content, --file, or pipe content via stdin")
+		return "", errContentRequired
 	}
 
 	data, err := io.ReadAll(os.Stdin)
@@ -165,8 +247,51 @@ func isCharDevice(mode os.FileMode) bool {
 func noteIDArg(cmd *urcli.Command) (string, error) {
 	id := cmd.Args().Get(0)
 	if id == "" {
-		return "", errors.New("note ID is required as the first argument")
+		return "", errNoteIDRequired
 	}
 
 	return id, nil
+}
+
+// linkIDArg returns the link ID from the first positional argument or an error.
+func linkIDArg(cmd *urcli.Command) (string, error) {
+	id := cmd.Args().Get(0)
+	if id == "" {
+		return "", errLinkIDRequired
+	}
+
+	return id, nil
+}
+
+// runDeleteCommand implements the "resolve ID → delete → print confirmation" flow shared by
+// `delete` (notes) and `delete-link` (links). Only this skeleton is shared: ogen generates
+// distinct params/response-union/client-method types per operation, so the resource-specific
+// request-building and response-mapping stay in doDelete, supplied by each command's own action.
+func runDeleteCommand(
+	ctx context.Context, cmd *urcli.Command, idArg func(*urcli.Command) (string, error),
+	doDelete func(ctx context.Context, cl *padmark.Client, id, editCode string) error,
+) error {
+	id, err := idArg(cmd)
+	if err != nil {
+		return fmt.Errorf("read resource ID: %w", err)
+	}
+
+	cl, err := newPadmarkClient(cmd)
+	if err != nil {
+		return fmt.Errorf("create API client: %w", err)
+	}
+
+	err = doDelete(ctx, cl, id, cmd.String(FlagEditCode))
+	if err != nil {
+		return fmt.Errorf("delete resource: %w", err)
+	}
+
+	ew := &errWriter{w: os.Stdout, err: nil}
+	ew.printf("deleted %s\n", id)
+
+	if ew.err != nil {
+		return fmt.Errorf("write output: %w", ew.err)
+	}
+
+	return nil
 }

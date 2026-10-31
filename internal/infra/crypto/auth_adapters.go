@@ -1,20 +1,13 @@
 package crypto
 
-// This file exposes the package-level KDF and TOTP helpers as small method sets so that the
-// auth usecase can depend on interfaces it owns (DIP) instead of importing this infra package
+import (
+	"fmt"
+)
+
+// This file exposes the package-level TOTP helpers as a small method set so that the auth
+// usecase can depend on interfaces it owns (DIP) instead of importing this infra package
 // directly. The structural interfaces live next to their consumer in usecases/auth.
-
-// KDF derives encryption keys from passwords. It implements the auth usecase's KeyDeriver.
-type KDF struct{}
-
-// NewKDF returns a KDF adapter.
-func NewKDF() *KDF { return &KDF{} }
-
-// GenerateSalt returns a fresh random HKDF salt.
-func (KDF) GenerateSalt() ([]byte, error) { return GenerateKDFSalt() }
-
-// DeriveKey derives the AES key used to encrypt a user's TOTP secret.
-func (KDF) DeriveKey(password, salt []byte) (string, error) { return DeriveUserKey(password, salt) }
+// The key-derivation side of that seam is Sealer (sealer.go), which owns the envelope format.
 
 // TOTP generates and validates TOTP secrets/codes. It implements the auth usecase's TOTPManager.
 type TOTP struct{}
@@ -23,7 +16,14 @@ type TOTP struct{}
 func NewTOTP() *TOTP { return &TOTP{} }
 
 // GenerateSecret returns a fresh random base32 TOTP secret.
-func (TOTP) GenerateSecret() (string, error) { return GenerateTOTPSecret() }
+func (TOTP) GenerateSecret() (string, error) {
+	operationResult, operationErr := GenerateTOTPSecret()
+	if operationErr != nil {
+		return operationResult, fmt.Errorf("generate totpsecret: %w", operationErr)
+	}
+
+	return operationResult, nil
+}
 
 // ValidateWithCounter validates code against secret, returning the accepted time-step counter
 // (used by the caller for replay protection).
@@ -33,5 +33,21 @@ func (TOTP) ValidateWithCounter(secret, code string) (valid bool, counter int64)
 
 // GenerateQRCode renders the otpauth enrollment QR code as a data URL.
 func (TOTP) GenerateQRCode(issuer, account, secret string) (string, error) {
-	return GenerateQRCodeDataURL(issuer, account, secret)
+	operationResult, operationErr := GenerateQRCodeDataURL(issuer, account, secret)
+	if operationErr != nil {
+		return operationResult, fmt.Errorf("generate qrcode data url: %w", operationErr)
+	}
+
+	return operationResult, nil
+}
+
+// TOTPURI returns the enrollment URI as plain text — the machine-readable variant of
+// GenerateQRCode used by headless provisioning.
+func (TOTP) TOTPURI(issuer, account, secret string) (string, error) {
+	operationResult, operationErr := OTPAuthURI(issuer, account, secret)
+	if operationErr != nil {
+		return operationResult, fmt.Errorf("otpauth uri: %w", operationErr)
+	}
+
+	return operationResult, nil
 }

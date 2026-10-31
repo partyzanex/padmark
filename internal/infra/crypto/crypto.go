@@ -19,18 +19,18 @@ const aesKeySize = 32
 
 const hkdfInfo = "padmark-content-v1"
 
-// Encryptor encrypts and decrypts note content using AES-256-GCM.
-// The key is derived from the note slug via HKDF-SHA256.
+// Encryptor is the legacy HKDF-based primitive, retained for old content and the
+// password-keyed TOTP Sealer. New note/link writes must use ContentCipher instead.
 type Encryptor struct{}
 
 // New returns a new Encryptor.
 func New() *Encryptor { return &Encryptor{} }
 
 // Encrypt encrypts plaintext with a key derived from slug. Returns base64-encoded ciphertext.
-func (e *Encryptor) Encrypt(plaintext, slug string) (string, error) {
+func (*Encryptor) Encrypt(plaintext, slug string) (string, error) {
 	gcm, err := newGCM(slug)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("new gcm: %w", err)
 	}
 
 	nonce := make([]byte, gcm.NonceSize())
@@ -46,7 +46,7 @@ func (e *Encryptor) Encrypt(plaintext, slug string) (string, error) {
 }
 
 // Decrypt decrypts base64-encoded ciphertext with a key derived from slug.
-func (e *Encryptor) Decrypt(ciphertext, slug string) (string, error) {
+func (*Encryptor) Decrypt(ciphertext, slug string) (string, error) {
 	data, err := base64.StdEncoding.DecodeString(ciphertext)
 	if err != nil {
 		return "", errors.Join(domain.ErrMalformedCiphertext, fmt.Errorf("base64 decode: %w", err))
@@ -54,7 +54,7 @@ func (e *Encryptor) Decrypt(ciphertext, slug string) (string, error) {
 
 	gcm, err := newGCM(slug)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("new gcm: %w", err)
 	}
 
 	if len(data) < gcm.NonceSize() {
@@ -75,7 +75,7 @@ func (e *Encryptor) Decrypt(ciphertext, slug string) (string, error) {
 func newGCM(slug string) (cipher.AEAD, error) {
 	key, err := deriveKey(slug)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("derive key: %w", err)
 	}
 
 	block, err := aes.NewCipher(key)

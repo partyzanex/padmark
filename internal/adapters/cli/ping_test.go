@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -13,7 +12,7 @@ import (
 // a failing /healthz must surface as a non-nil error (non-zero exit) even when /readyz passes.
 // Before the fix, pingAction returned only readyErr, masking the liveness failure as exit 0.
 func TestPing_LivenessFails_ReadinessOK_ReturnsError(t *testing.T) {
-	t.Parallel()
+	isolateEnv(t)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -26,14 +25,14 @@ func TestPing_LivenessFails_ReadinessOK_ReturnsError(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	err := runCLI(context.Background(), "--url", srv.URL, cmdPing)
+	err := runCLI(t.Context(), "--url", srv.URL, cmdPing)
 
 	require.Error(t, err, "liveness failure must produce a non-zero exit even if readiness is OK")
 }
 
 // TestPing_AllProbesOK_ReturnsNil confirms the happy path: both probes pass → nil → exit 0.
 func TestPing_AllProbesOK_ReturnsNil(t *testing.T) {
-	t.Parallel()
+	isolateEnv(t)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -46,7 +45,7 @@ func TestPing_AllProbesOK_ReturnsNil(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	err := runCLI(context.Background(), "--url", srv.URL, cmdPing)
+	err := runCLI(t.Context(), "--url", srv.URL, cmdPing)
 
 	require.NoError(t, err)
 }

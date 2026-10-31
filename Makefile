@@ -3,6 +3,9 @@ GOOSE        := $(CURDIR)/bin/goose
 DB_SQLITE    ?= ./padmark.db
 POSTGRES_DSN := postgres://padmark:padmark@localhost:5432/padmark?sslmode=disable
 
+# Let the selected Go toolchain locate its own standard library.
+unexport GOROOT
+
 include go.mk
 
 go.mk:
@@ -23,6 +26,30 @@ run: build
 .PHONY: test
 test:
 	go test -v -count=1 -race -tags=integration ./... -coverprofile=cover.out
+
+UI_ARGS ?=
+
+.PHONY: test-ui-setup test-ui test-ui-headed test-ui-debug test-ui-update test-ui-report test-ui-lint
+test-ui-setup:
+	$(MAKE) -C tests/ui setup
+
+test-ui:
+	$(MAKE) -C tests/ui test ARGS="$(UI_ARGS)"
+
+test-ui-headed:
+	$(MAKE) -C tests/ui headed ARGS="$(UI_ARGS)"
+
+test-ui-debug:
+	$(MAKE) -C tests/ui debug ARGS="$(UI_ARGS)"
+
+test-ui-update:
+	$(MAKE) -C tests/ui update ARGS="$(UI_ARGS)"
+
+test-ui-report:
+	$(MAKE) -C tests/ui report
+
+test-ui-lint:
+	$(MAKE) -C tests/ui lint ARGS="$(UI_ARGS)"
 
 .PHONY: cover
 cover: test

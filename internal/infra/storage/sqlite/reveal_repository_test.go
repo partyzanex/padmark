@@ -1,14 +1,14 @@
 package sqlite
 
 import (
-	"database/sql"
+	"log/slog"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/suite"
 	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect/sqlitedialect"
-	"github.com/uptrace/bun/driver/sqliteshim"
+
+	"github.com/partyzanex/padmark/internal/domain"
 )
 
 type RevealRepositoryTestSuite struct {
@@ -19,16 +19,16 @@ type RevealRepositoryTestSuite struct {
 }
 
 func (s *RevealRepositoryTestSuite) SetupTest() {
-	sqldb, err := sql.Open(sqliteshim.DriverName(), "file::memory:?cache=shared&_busy_timeout=5000")
+	db, err := Open("file::memory:?cache=shared&_busy_timeout=5000", slog.New(slog.DiscardHandler))
 	s.Require().NoError(err)
 
-	s.db = bun.NewDB(sqldb, sqlitedialect.New())
+	s.db = db
 	s.Require().NoError(s.db.Ping())
 
 	_, err = s.db.NewCreateTable().Model((*revealTokenRow)(nil)).IfNotExists().Exec(s.T().Context())
 	s.Require().NoError(err)
 
-	s.repo = NewRevealRepository(s.db)
+	s.repo = NewRevealRepository(s.db, slog.Default())
 }
 
 func (s *RevealRepositoryTestSuite) TearDownTest() {
@@ -39,7 +39,7 @@ func TestRevealRepositoryTestSuite(t *testing.T) {
 	suite.Run(t, new(RevealRepositoryTestSuite))
 }
 
-// ── Issue ──
+// ── Issue ──.
 
 func (s *RevealRepositoryTestSuite) TestIssue_ReturnsNonEmptyToken() {
 	tok, err := s.repo.Issue(s.T().Context(), "note-1")
@@ -56,7 +56,7 @@ func (s *RevealRepositoryTestSuite) TestIssue_StoredInDB() {
 
 	var row revealTokenRow
 
-	err = s.db.NewSelect().Model(&row).Where("token = ?", tok).Scan(ctx)
+	err = s.db.NewSelect().Model(&row).Where("token_hash = ?", domain.HashRevealToken(tok)).Scan(ctx)
 	s.Require().NoError(err)
 	s.Equal("note-abc", row.NoteID)
 	s.Nil(row.UsedAt)
@@ -67,9 +67,11 @@ func (s *RevealRepositoryTestSuite) TestIssue_SweepsExpiredTokens() {
 	ctx := s.T().Context()
 
 	stale := &revealTokenRow{
-		Token:     "stale-token",
+		TokenHash: "stale-token",
 		NoteID:    "note-stale",
 		ExpiresAt: time.Now().Add(-time.Hour),
+
+		BaseModel: bun.BaseModel{}, UsedAt: nil,
 	}
 	_, err := s.db.NewInsert().Model(stale).Exec(ctx)
 	s.Require().NoError(err)
@@ -82,13 +84,43 @@ func (s *RevealRepositoryTestSuite) TestIssue_SweepsExpiredTokens() {
 	err = s.db.NewSelect().
 		TableExpr("reveal_tokens").
 		ColumnExpr("count(*)").
-		Where("token = ?", "stale-token").
+		Where("token_hash = ?", "stale-token").
 		Scan(ctx, &count)
 	s.Require().NoError(err)
 	s.Zero(count, "expired token must be swept")
 }
 
-// ── Consume ──
+// TestIssue_RawTokenNotStored pins that only the SHA-256 digest of the bearer is persisted: a
+// database leak must not yield redeemable reveal tokens.
+func (s *RevealRepositoryTestSuite) TestIssue_RawTokenNotStored() {
+	ctx := s.T().Context()
+
+	tok, err := s.repo.Issue(ctx, "note-hash")
+	s.Require().NoError(err)
+
+	var hashes []string
+
+	err = s.db.NewSelect().TableExpr("reveal_tokens").Column("token_hash").Scan(ctx, &hashes)
+	s.Require().NoError(err)
+	s.Require().Len(hashes, 1)
+	s.NotEqual(tok, hashes[0], "the raw token must not be stored")
+	s.Equal(domain.HashRevealToken(tok), hashes[0])
+}
+
+// TestConsume_StoredHashIsNotABearer verifies that presenting the stored digest itself does not
+// redeem the token, while the raw value still does.
+func (s *RevealRepositoryTestSuite) TestConsume_StoredHashIsNotABearer() {
+	ctx := s.T().Context()
+
+	tok, err := s.repo.Issue(ctx, "note-leak")
+	s.Require().NoError(err)
+
+	s.False(s.repo.Consume(ctx, domain.HashRevealToken(tok), "note-leak"),
+		"a leaked digest must not be accepted as the bearer")
+	s.True(s.repo.Consume(ctx, tok, "note-leak"), "the raw token must still redeem")
+}
+
+// ── Consume ──.
 
 func (s *RevealRepositoryTestSuite) TestConsume_OK() {
 	ctx := s.T().Context()
@@ -112,7 +144,7 @@ func (s *RevealRepositoryTestSuite) TestConsume_MarksUsedAt() {
 
 	var row revealTokenRow
 
-	err = s.db.NewSelect().Model(&row).Where("token = ?", tok).Scan(ctx)
+	err = s.db.NewSelect().Model(&row).Where("token_hash = ?", domain.HashRevealToken(tok)).Scan(ctx)
 	s.Require().NoError(err)
 	s.NotNil(row.UsedAt, "used_at must be set after Consume")
 }
@@ -140,9 +172,11 @@ func (s *RevealRepositoryTestSuite) TestConsume_ExpiredToken() {
 	ctx := s.T().Context()
 
 	expired := &revealTokenRow{
-		Token:     "expired-token",
+		TokenHash: domain.HashRevealToken("expired-token"),
 		NoteID:    "note-exp",
 		ExpiresAt: time.Now().Add(-time.Minute),
+
+		BaseModel: bun.BaseModel{}, UsedAt: nil,
 	}
 	_, err := s.db.NewInsert().Model(expired).Exec(ctx)
 	s.Require().NoError(err)
@@ -158,9 +192,11 @@ func (s *RevealRepositoryTestSuite) TestConsume_ExactExpiryBoundary_Rejected() {
 	ctx := s.T().Context()
 
 	boundary := &revealTokenRow{
-		Token:     "boundary-token",
+		TokenHash: domain.HashRevealToken("boundary-token"),
 		NoteID:    "note-boundary",
 		ExpiresAt: time.Now(),
+
+		BaseModel: bun.BaseModel{}, UsedAt: nil,
 	}
 	_, err := s.db.NewInsert().Model(boundary).Exec(ctx)
 	s.Require().NoError(err)

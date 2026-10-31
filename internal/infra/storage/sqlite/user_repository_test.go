@@ -1,15 +1,14 @@
 package sqlite
 
 import (
-	"database/sql"
+	"log/slog"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect/sqlitedialect"
-	"github.com/uptrace/bun/driver/sqliteshim"
 
 	"github.com/partyzanex/padmark/internal/domain"
 )
@@ -22,10 +21,10 @@ type UserRepositoryTestSuite struct {
 }
 
 func (s *UserRepositoryTestSuite) SetupTest() {
-	sqldb, err := sql.Open(sqliteshim.DriverName(), "file::memory:?cache=shared&_busy_timeout=5000")
+	db, err := Open("file::memory:?cache=shared&_busy_timeout=5000", slog.New(slog.DiscardHandler))
 	s.Require().NoError(err)
 
-	s.db = bun.NewDB(sqldb, sqlitedialect.New())
+	s.db = db
 	s.Require().NoError(s.db.Ping())
 
 	_, err = Migrate(s.T().Context(), s.db)
@@ -44,17 +43,19 @@ func TestUserRepositoryTestSuite(t *testing.T) {
 
 func (s *UserRepositoryTestSuite) newUser(username string) *domain.User {
 	return &domain.User{
-		ID:           "id-" + username,
+		ID:           uuid.New(),
 		Username:     username,
 		TOTPSecret:   "totp-secret",
 		PasswordHash: "hash",
 		KDFSalt:      []byte("saltsaltsalt1234"),
 		IsAdmin:      false,
 		CreatedAt:    time.Now().Truncate(time.Second),
+
+		LastLoginAt: nil, LastTOTPCounter: 0,
 	}
 }
 
-// ── Create ──
+// ── Create ──.
 
 func (s *UserRepositoryTestSuite) TestCreate_GetByUsername_RoundTrip() {
 	ctx := s.T().Context()
@@ -111,14 +112,14 @@ func (s *UserRepositoryTestSuite) TestCreate_IsAdmin_StoredCorrectly() {
 	s.True(got.IsAdmin)
 }
 
-// ── GetByUsername ──
+// ── GetByUsername ──.
 
 func (s *UserRepositoryTestSuite) TestGetByUsername_NotFound_ReturnsErrNotFound() {
 	_, err := s.repo.GetByUsername(s.T().Context(), "nobody")
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
-// ── GetByID ──
+// ── GetByID ──.
 
 func (s *UserRepositoryTestSuite) TestGetByID_Found() {
 	ctx := s.T().Context()
@@ -132,11 +133,11 @@ func (s *UserRepositoryTestSuite) TestGetByID_Found() {
 }
 
 func (s *UserRepositoryTestSuite) TestGetByID_NotFound_ReturnsErrNotFound() {
-	_, err := s.repo.GetByID(s.T().Context(), "no-such-id")
+	_, err := s.repo.GetByID(s.T().Context(), uuid.New())
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
-// ── List ──
+// ── List ──.
 
 func (s *UserRepositoryTestSuite) TestList_Empty_ReturnsEmptySlice() {
 	users, err := s.repo.List(s.T().Context())
@@ -163,7 +164,7 @@ func (s *UserRepositoryTestSuite) TestList_OrderedByCreatedAt() {
 	s.Equal("eve", users[1].Username)
 }
 
-// ── UpdateLastLogin ──
+// ── UpdateLastLogin ──.
 
 func (s *UserRepositoryTestSuite) TestUpdateLastLogin_SetsField() {
 	ctx := s.T().Context()
@@ -180,11 +181,11 @@ func (s *UserRepositoryTestSuite) TestUpdateLastLogin_SetsField() {
 }
 
 func (s *UserRepositoryTestSuite) TestUpdateLastLogin_NonExistentUser_NoError() {
-	err := s.repo.UpdateLastLogin(s.T().Context(), "ghost-id", time.Now())
+	err := s.repo.UpdateLastLogin(s.T().Context(), uuid.New(), time.Now())
 	s.Require().NoError(err)
 }
 
-// ── Revoke ──
+// ── Revoke ──.
 
 func (s *UserRepositoryTestSuite) TestRevoke_RemovesUser() {
 	ctx := s.T().Context()
@@ -197,65 +198,85 @@ func (s *UserRepositoryTestSuite) TestRevoke_RemovesUser() {
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
-func (s *UserRepositoryTestSuite) TestRevoke_NonExistentUser_NoError() {
-	err := s.repo.Revoke(s.T().Context(), "ghost-id")
-	s.Require().NoError(err)
+// TestRevoke_LastAdminRefused verifies the atomic last-admin guard: deleting the only admin
+// must fail with domain.ErrForbidden and leave the user in place — otherwise two concurrent
+// revocations could leave the server permanently admin-less.
+func (s *UserRepositoryTestSuite) TestRevoke_LastAdminRefused() {
+	ctx := s.T().Context()
+	admin := s.newUser("admin")
+	admin.IsAdmin = true
+	s.Require().NoError(s.repo.Create(ctx, admin))
+
+	err := s.repo.Revoke(ctx, admin.ID)
+
+	s.Require().ErrorIs(err, domain.ErrForbidden)
+
+	_, getErr := s.repo.GetByID(ctx, admin.ID)
+	s.Require().NoError(getErr, "the last admin must survive a refused revocation")
 }
 
-// TestRevoke_CascadesSessionsAndInvites verifies that with foreign_keys enabled
-// (as in production), deleting a user also removes their sessions and the invites
-// they issued. Without ON DELETE CASCADE this DELETE would fail (PostgreSQL) or
-// leave orphan rows (SQLite). Uses a dedicated FK-enabled connection because the
-// suite's shared DSN does not set the pragma.
+func (s *UserRepositoryTestSuite) TestRevoke_NonExistentUser_ReturnsErrForbidden() {
+	err := s.repo.Revoke(s.T().Context(), uuid.New())
+	s.ErrorIs(err, domain.ErrForbidden)
+}
+
+// TestRevoke_CascadesSessionsAndInvites verifies that with foreign_keys enabled (as in
+// production — Open applies it via WithPragmas), deleting a user also removes their sessions
+// and the invites they issued. Without ON DELETE CASCADE this DELETE would fail (PostgreSQL) or
+// leave orphan rows (SQLite). Uses its own dedicated DSN (distinct from the suite's shared one)
+// purely for isolation, not to opt into FK enforcement — that's on by default for every Open
+// call now.
 func TestRevoke_CascadesSessionsAndInvites(t *testing.T) {
 	ctx := t.Context()
 
-	sqldb, err := sql.Open(sqliteshim.DriverName(),
-		"file:cascade_fk?mode=memory&cache=shared&_busy_timeout=5000&_pragma=foreign_keys(1)")
+	db, err := Open("file:cascade_fk?mode=memory&cache=shared", slog.New(slog.DiscardHandler))
 	require.NoError(t, err)
 
-	defer func() { require.NoError(t, sqldb.Close()) }()
+	defer func() { require.NoError(t, db.Close()) }()
 
-	db := bun.NewDB(sqldb, sqlitedialect.New())
 	require.NoError(t, db.Ping())
 
 	_, err = Migrate(ctx, db)
 	require.NoError(t, err)
 
 	users := NewUserRepository(db)
-	sessions := NewSessionRepository(db)
-	invites := NewInviteRepository(db)
+	sessions := NewSessionRepository(db, slog.Default())
+	invites := NewInviteRepository(db, slog.Default())
 
-	admin := &domain.User{
-		ID: "admin-id", Username: "admin", TOTPSecret: "s", PasswordHash: "h",
-		KDFSalt: []byte("saltsaltsalt1234"), IsAdmin: true, CreatedAt: time.Now().Truncate(time.Second),
+	usr := &domain.User{
+		ID: uuid.New(), Username: "usr", TOTPSecret: "s", PasswordHash: "h",
+		KDFSalt: []byte("saltsaltsalt1234"), IsAdmin: false, CreatedAt: time.Now().Truncate(time.Second),
+
+		LastLoginAt: nil, LastTOTPCounter: 0,
 	}
-	require.NoError(t, users.Create(ctx, admin))
+	require.NoError(t, users.Create(ctx, usr))
 
 	require.NoError(t, sessions.Create(ctx, &domain.Session{
-		SessionID: "sess-1", UserID: admin.ID,
+		SessionHash: "sess-1", UserID: usr.ID,
 		CreatedAt: time.Now(), ExpiresAt: time.Now().Add(time.Hour),
+
+		UserAgent: "", IP: "",
 	}))
 
-	_, err = invites.Issue(ctx, admin.ID)
+	_, err = invites.Issue(ctx, usr.ID)
 	require.NoError(t, err)
 
-	require.NoError(t, users.Revoke(ctx, admin.ID))
+	require.NoError(t, users.Revoke(ctx, usr.ID))
 
-	sessCount, err := db.NewSelect().TableExpr("sessions").Where("user_id = ?", admin.ID).Count(ctx)
+	sessCount, err := db.NewSelect().TableExpr("sessions").Where("user_id = ?", usr.ID).Count(ctx)
 	require.NoError(t, err)
 	require.Zero(t, sessCount, "sessions must cascade-delete with the user")
 
-	invCount, err := db.NewSelect().TableExpr("invites").Where("created_by = ?", admin.ID).Count(ctx)
+	invCount, err := db.NewSelect().TableExpr("invites").Where("created_by = ?", usr.ID).Count(ctx)
 	require.NoError(t, err)
 	require.Zero(t, invCount, "invites must cascade-delete with the issuing user")
 }
 
-// ── RedeemInvite (atomic consume + insert) ──
+// ── RedeemInvite (atomic consume + insert) ──.
 
 func (s *UserRepositoryTestSuite) TestRedeemInvite_UsernameCollision_RollsBackInvite() {
 	ctx := s.T().Context()
-	invites := NewInviteRepository(s.db)
+	invites := NewInviteRepository(s.db, slog.Default())
 
 	creator := s.newUser("creator")
 	s.Require().NoError(s.repo.Create(ctx, creator))
@@ -268,7 +289,7 @@ func (s *UserRepositoryTestSuite) TestRedeemInvite_UsernameCollision_RollsBackIn
 	// Redeeming for an already-taken username hits the unique constraint inside the
 	// transaction → the whole tx rolls back with ErrUserExists.
 	dup := s.newUser("taken")
-	dup.ID = "id-dup"
+	dup.ID = uuid.New()
 	s.Require().ErrorIs(invites.RedeemInvite(ctx, tok, "taken", dup), domain.ErrUserExists)
 
 	// The invite must NOT have been burned: a retry with a free username succeeds.
@@ -280,7 +301,7 @@ func (s *UserRepositoryTestSuite) TestRedeemInvite_UsernameCollision_RollsBackIn
 	s.Equal("fresh", got.Username)
 }
 
-// ── UpdateTOTPCounter ──
+// ── UpdateTOTPCounter ──.
 
 func (s *UserRepositoryTestSuite) TestUpdateTOTPCounter_PersistsAndBlocksReplay() {
 	ctx := s.T().Context()
@@ -309,7 +330,7 @@ func (s *UserRepositoryTestSuite) TestUpdateTOTPCounter_PersistsAndBlocksReplay(
 	s.Equal(int64(101), got.LastTOTPCounter)
 }
 
-// ── UpdatePassword ──
+// ── UpdatePassword ──.
 
 func (s *UserRepositoryTestSuite) TestUpdatePassword_UpdatesAllFields() {
 	ctx := s.T().Context()
@@ -351,6 +372,39 @@ func (s *UserRepositoryTestSuite) TestUpdatePassword_KDFSalt_Base64RoundTrip() {
 }
 
 func (s *UserRepositoryTestSuite) TestUpdatePassword_NonExistentUser_NoError() {
-	err := s.repo.UpdatePassword(s.T().Context(), "ghost-id", "h", []byte("s"), "t")
+	err := s.repo.UpdatePassword(s.T().Context(), uuid.New(), "h", []byte("s"), "t")
 	s.Require().NoError(err)
+}
+
+// ── Case-insensitive usernames ──.
+
+// TestCreate_DuplicateUsernameDifferentCase_ReturnsErrUserExists pins that "Admin" cannot be
+// registered next to "admin": otherwise two accounts would differ only by case, which is an
+// impersonation/phishing aid and splits one person's lockout bucket from their account.
+func (s *UserRepositoryTestSuite) TestCreate_DuplicateUsernameDifferentCase_ReturnsErrUserExists() {
+	ctx := s.T().Context()
+
+	s.Require().NoError(s.repo.Create(ctx, s.newUser("admin")))
+
+	err := s.repo.Create(ctx, s.newUser("Admin"))
+	s.ErrorIs(err, domain.ErrUserExists)
+}
+
+// TestGetByUsername_IsCaseInsensitive verifies the lookup finds the stored row whatever case the
+// login form used, and returns the username as it was registered.
+func (s *UserRepositoryTestSuite) TestGetByUsername_IsCaseInsensitive() {
+	ctx := s.T().Context()
+
+	stored := s.newUser("Alice")
+	s.Require().NoError(s.repo.Create(ctx, stored))
+
+	for _, query := range []string{"Alice", "alice", "ALICE"} {
+		got, err := s.repo.GetByUsername(ctx, query)
+		s.Require().NoError(err, query)
+		s.Equal(stored.ID, got.ID, query)
+		s.Equal("Alice", got.Username, "the stored spelling is preserved")
+	}
+
+	_, err := s.repo.GetByUsername(ctx, "alic")
+	s.ErrorIs(err, domain.ErrNotFound)
 }

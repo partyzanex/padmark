@@ -1,7 +1,10 @@
+//go:build integration
+
 package postgres
 
 import (
 	"database/sql"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -48,7 +51,7 @@ func (s *SessionRepositoryTestSuite) SetupSuite() {
 	_, err = Migrate(ctx, s.db)
 	s.Require().NoError(err)
 
-	s.repo = NewSessionRepository(s.db)
+	s.repo = NewSessionRepository(s.db, slog.Default())
 	s.users = NewUserRepository(s.db)
 }
 
@@ -83,10 +86,10 @@ func TestSessionRepositoryTestSuite(t *testing.T) {
 }
 
 // createUser inserts a test user and returns the generated UUID.
-func (s *SessionRepositoryTestSuite) createUser(suffix string) string {
+func (s *SessionRepositoryTestSuite) createUser(suffix string) uuid.UUID {
 	s.T().Helper()
 
-	id := uuid.New().String()
+	id := uuid.New()
 	err := s.users.Create(s.T().Context(), &domain.User{
 		ID:           id,
 		Username:     "user-" + suffix,
@@ -94,24 +97,26 @@ func (s *SessionRepositoryTestSuite) createUser(suffix string) string {
 		PasswordHash: "hash",
 		KDFSalt:      []byte("saltsaltsalt1234"),
 		CreatedAt:    time.Now().Truncate(time.Second),
+
+		LastLoginAt: nil, LastTOTPCounter: 0, IsAdmin: false,
 	})
 	s.Require().NoError(err)
 
 	return id
 }
 
-func (s *SessionRepositoryTestSuite) newSession(id, userID string, ttl time.Duration) *domain.Session {
+func (s *SessionRepositoryTestSuite) newSession(id string, userID uuid.UUID, ttl time.Duration) *domain.Session {
 	return &domain.Session{
-		SessionID: id,
-		UserID:    userID,
-		CreatedAt: time.Now().Truncate(time.Second),
-		ExpiresAt: time.Now().Add(ttl).Truncate(time.Second),
-		UserAgent: "Mozilla/5.0",
-		IP:        "127.0.0.1",
+		SessionHash: id,
+		UserID:      userID,
+		CreatedAt:   time.Now().Truncate(time.Second),
+		ExpiresAt:   time.Now().Add(ttl).Truncate(time.Second),
+		UserAgent:   "Mozilla/5.0",
+		IP:          "127.0.0.1",
 	}
 }
 
-// ── Create / Get ──
+// ── Create / Get ──.
 
 func (s *SessionRepositoryTestSuite) TestCreate_Get_RoundTrip() {
 	ctx := s.T().Context()
@@ -120,9 +125,9 @@ func (s *SessionRepositoryTestSuite) TestCreate_Get_RoundTrip() {
 	sess := s.newSession("sess-1", userID, time.Hour)
 	s.Require().NoError(s.repo.Create(ctx, sess))
 
-	got, err := s.repo.Get(ctx, sess.SessionID)
+	got, err := s.repo.Get(ctx, sess.SessionHash)
 	s.Require().NoError(err)
-	s.Equal(sess.SessionID, got.SessionID)
+	s.Equal(sess.SessionHash, got.SessionHash)
 	s.Equal(sess.UserID, got.UserID)
 	s.Equal(sess.UserAgent, got.UserAgent)
 	s.Equal(sess.IP, got.IP)
@@ -135,7 +140,7 @@ func (s *SessionRepositoryTestSuite) TestGet_Expired_ReturnsErrSessionExpired() 
 	expired := s.newSession("sess-expired", userID, -time.Minute)
 	s.Require().NoError(s.repo.Create(ctx, expired))
 
-	_, err := s.repo.Get(ctx, expired.SessionID)
+	_, err := s.repo.Get(ctx, expired.SessionHash)
 	s.ErrorIs(err, domain.ErrSessionExpired)
 }
 
@@ -151,12 +156,13 @@ func (s *SessionRepositoryTestSuite) TestGet_ExactExpiryBoundary_ReturnsErrSessi
 	userID := s.createUser("u3")
 
 	boundary := &sessionRow{
-		SessionID: "sess-boundary",
-		UserID:    userID,
-		CreatedAt: time.Now(),
-		ExpiresAt: time.Now(), // exactly now — must be rejected
-		UserAgent: "",
-		IP:        "",
+		SessionHash: "sess-boundary",
+		UserID:      userID,
+		CreatedAt:   time.Now(),
+		ExpiresAt:   time.Now(), // exactly now — must be rejected.
+		UserAgent:   "", IP: "",
+
+		BaseModel: bun.BaseModel{},
 	}
 	_, err := s.db.NewInsert().Model(boundary).Exec(ctx)
 	s.Require().NoError(err)
@@ -165,7 +171,7 @@ func (s *SessionRepositoryTestSuite) TestGet_ExactExpiryBoundary_ReturnsErrSessi
 	s.ErrorIs(err, domain.ErrSessionExpired, "session at exact expiry boundary must be rejected")
 }
 
-// ── Delete ──
+// ── Delete ──.
 
 func (s *SessionRepositoryTestSuite) TestDelete_RemovesSession() {
 	ctx := s.T().Context()
@@ -173,9 +179,9 @@ func (s *SessionRepositoryTestSuite) TestDelete_RemovesSession() {
 
 	sess := s.newSession("sess-del", userID, time.Hour)
 	s.Require().NoError(s.repo.Create(ctx, sess))
-	s.Require().NoError(s.repo.Delete(ctx, sess.SessionID))
+	s.Require().NoError(s.repo.Delete(ctx, sess.SessionHash))
 
-	_, err := s.repo.Get(ctx, sess.SessionID)
+	_, err := s.repo.Get(ctx, sess.SessionHash)
 	s.ErrorIs(err, domain.ErrSessionExpired)
 }
 
@@ -184,7 +190,7 @@ func (s *SessionRepositoryTestSuite) TestDelete_NonExistentSession_NoError() {
 	s.Require().NoError(err)
 }
 
-// ── DeleteByUserID ──
+// ── DeleteByUserID ──.
 
 func (s *SessionRepositoryTestSuite) TestDeleteByUserID_RemovesAllUserSessions() {
 	ctx := s.T().Context()
@@ -222,12 +228,12 @@ func (s *SessionRepositoryTestSuite) TestDeleteByUserIDExcept_PreservesExceptedS
 	s.Require().NoError(s.repo.Create(ctx, old1))
 	s.Require().NoError(s.repo.Create(ctx, s.newSession("sess-other", otherID, time.Hour)))
 
-	s.Require().NoError(s.repo.DeleteByUserIDExcept(ctx, ownerID, keep.SessionID))
+	s.Require().NoError(s.repo.DeleteByUserIDExcept(ctx, ownerID, keep.SessionHash))
 
-	_, err := s.repo.Get(ctx, keep.SessionID)
+	_, err := s.repo.Get(ctx, keep.SessionHash)
 	s.Require().NoError(err, "excepted session must survive")
 
-	_, err = s.repo.Get(ctx, old1.SessionID)
+	_, err = s.repo.Get(ctx, old1.SessionHash)
 	s.Require().ErrorIs(err, domain.ErrSessionExpired, "old session must be removed")
 
 	_, err = s.repo.Get(ctx, "sess-other")
@@ -240,9 +246,9 @@ func (s *SessionRepositoryTestSuite) TestDeleteByUserIDExcept_NoOtherSessions_Is
 	sess := s.newSession("sess-sole", userID, time.Hour)
 	s.Require().NoError(s.repo.Create(ctx, sess))
 
-	s.Require().NoError(s.repo.DeleteByUserIDExcept(ctx, userID, sess.SessionID))
+	s.Require().NoError(s.repo.DeleteByUserIDExcept(ctx, userID, sess.SessionHash))
 
-	_, err := s.repo.Get(ctx, sess.SessionID)
+	_, err := s.repo.Get(ctx, sess.SessionHash)
 	s.Require().NoError(err, "sole session must survive when it is the excepted one")
 }
 
@@ -252,7 +258,7 @@ func (s *SessionRepositoryTestSuite) TestDeleteByUserID_NoSessions_IsIdempotent(
 	s.Require().NoError(err)
 }
 
-// ── DeleteExpired ──
+// ── DeleteExpired ──.
 
 func (s *SessionRepositoryTestSuite) TestDeleteExpired_RemovesExpiredKeepsActive() {
 	ctx := s.T().Context()
@@ -266,7 +272,7 @@ func (s *SessionRepositoryTestSuite) TestDeleteExpired_RemovesExpiredKeepsActive
 
 	s.Require().NoError(s.repo.DeleteExpired(ctx))
 
-	_, err := s.repo.Get(ctx, active.SessionID)
+	_, err := s.repo.Get(ctx, active.SessionHash)
 	s.Require().NoError(err, "active session must survive DeleteExpired")
 
 	var count int
@@ -274,7 +280,7 @@ func (s *SessionRepositoryTestSuite) TestDeleteExpired_RemovesExpiredKeepsActive
 	err = s.db.NewSelect().
 		TableExpr("sessions").
 		ColumnExpr("count(*)").
-		Where("session_id = ?", expired.SessionID).
+		Where("session_hash = ?", expired.SessionHash).
 		Scan(ctx, &count)
 	s.Require().NoError(err)
 	s.Zero(count, "expired session must be removed by DeleteExpired")

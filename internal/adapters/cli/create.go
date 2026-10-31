@@ -2,13 +2,14 @@ package cli
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"strings"
 
 	urcli "github.com/urfave/cli/v3"
 
+	"github.com/partyzanex/padmark/internal/clifactory"
+	"github.com/partyzanex/padmark/internal/errorcontext"
 	padmark "github.com/partyzanex/padmark/pkg/client"
 )
 
@@ -21,55 +22,56 @@ const (
 )
 
 func createCommand() *urcli.Command {
-	return &urcli.Command{
-		Name:      "create",
-		Usage:     "Create a new note",
-		ArgsUsage: " ",
-		Flags: []urcli.Flag{
-			&urcli.StringFlag{
-				Name:    FlagTitle,
-				Aliases: []string{"t"},
-				Usage:   "Note title (derived from the first non-empty line of content if omitted)",
-			},
-			&urcli.StringFlag{
-				Name:    FlagContent,
-				Aliases: []string{"c"},
-				Usage:   "Note content (reads from stdin if neither --content nor --file is set)",
-			},
-			&urcli.StringFlag{
-				Name:    FlagFile,
-				Aliases: []string{"f"},
-				Usage:   "Read note content from `file`",
-			},
-			&urcli.StringFlag{
-				Name:  FlagSlug,
-				Usage: "Custom URL slug (letters, digits, hyphens, underscores)",
-			},
-			&urcli.BoolFlag{
-				Name:  FlagPlain,
-				Usage: "Use text/plain content type instead of text/markdown",
-			},
-			&urcli.BoolFlag{
-				Name:  FlagPrivate,
-				Usage: "Require authentication (any bearer token or session) to read the note",
-			},
-			&urcli.BoolFlag{
-				Name:  FlagBurn,
-				Usage: "Burn after reading: delete on first read (add --ttl for a grace period)",
-			},
-			&urcli.Int64Flag{
-				Name:  FlagTTL,
-				Usage: "Seconds the note survives after the first read (only with --burn)",
-			},
-			&urcli.StringFlag{
-				Name:    FlagEditCode,
-				Aliases: []string{"e"},
-				Usage:   "Custom edit code (random 12-char code generated if omitted)",
-				Sources: urcli.EnvVars(EnvEditCode),
-			},
-		},
-		Action: createAction,
-	}
+	return clifactory.Command(func(command *urcli.Command) {
+		command.Name = "create"
+		command.Usage = "Create a new note"
+		command.ArgsUsage = " "
+		command.Flags = []urcli.Flag{
+			clifactory.StringFlag(func(flag *urcli.StringFlag) {
+				flag.Name = FlagTitle
+				flag.Aliases = []string{"t"}
+				flag.Usage = "Note title (derived from the first non-empty line of content if omitted)"
+			}),
+			clifactory.StringFlag(func(flag *urcli.StringFlag) {
+				flag.Name = FlagContent
+				flag.Aliases = []string{"c"}
+				flag.Usage = "Note content (reads from stdin if neither --content nor --file is set)"
+			}),
+			clifactory.StringFlag(func(flag *urcli.StringFlag) {
+				flag.Name = FlagFile
+				flag.Aliases = []string{"f"}
+				flag.Usage = "Read note content from `file`"
+			}),
+			clifactory.StringFlag(func(flag *urcli.StringFlag) {
+				flag.Name = FlagSlug
+				flag.Usage = "Custom URL slug (letters, digits, hyphens, underscores)"
+			}),
+			clifactory.BoolFlag(func(flag *urcli.BoolFlag) {
+				flag.Name = FlagPlain
+				flag.Usage = "Use text/plain content type instead of text/markdown"
+			}),
+			clifactory.StringFlag(func(flag *urcli.StringFlag) {
+				flag.Name = FlagPrivacy
+				flag.Usage = "Privacy level: public (default), authenticated, or owner"
+			}),
+			clifactory.BoolFlag(func(flag *urcli.BoolFlag) {
+				flag.Name = FlagBurn
+				flag.Usage = "Burn after reading: delete on first read (add --ttl for a grace period)"
+			}),
+			clifactory.Int64Flag(func(flag *urcli.Int64Flag) {
+				flag.Name = FlagTTL
+				flag.Usage = "Seconds the note survives after the first read (only with --burn)"
+			}),
+			clifactory.StringFlag(func(flag *urcli.StringFlag) {
+				flag.Name = FlagEditCode
+				flag.Aliases = []string{"e"}
+				flag.Usage = "Custom edit code, 8-128 chars (random 12-char code generated if omitted). " +
+					psWarnEditCode
+				flag.Sources = urcli.EnvVars(EnvEditCode)
+			}),
+		}
+		command.Action = createAction
+	})
 }
 
 // validateBurnTTL enforces the documented contract that --ttl (a grace period after the first
@@ -77,7 +79,13 @@ func createCommand() *urcli.Command {
 // lone --ttl while `edit` silently sent it — an inconsistency. Both now reject it explicitly.
 func validateBurnTTL(cmd *urcli.Command) error {
 	if cmd.IsSet(FlagTTL) && !cmd.Bool(FlagBurn) {
-		return errors.New("--ttl requires --burn (it sets the grace period after the first read)")
+		return errBurnRequiredForTTL
+	}
+
+	// Explicitly negative or zero TTL is a user error (an unset one legitimately means "no
+	// grace period"); silently dropping it would create a non-expiring burn note.
+	if ttl := cmd.Int64(FlagTTL); cmd.IsSet(FlagTTL) && ttl <= 0 {
+		return errNonPositiveTTL
 	}
 
 	return nil
@@ -86,23 +94,23 @@ func validateBurnTTL(cmd *urcli.Command) error {
 func createAction(ctx context.Context, cmd *urcli.Command) error {
 	err := validateBurnTTL(cmd)
 	if err != nil {
-		return err
+		return fmt.Errorf("validate burn TTL: %w", err)
 	}
 
 	content, err := readContent(cmd)
 	if err != nil {
-		return err
+		return fmt.Errorf("read note content: %w", err)
 	}
 
 	if strings.TrimSpace(content) == "" {
-		return errors.New("content must not be empty")
+		return ErrEmptyContent
 	}
 
 	req := buildCreateReq(cmd, content)
 
 	cl, err := newPadmarkClient(cmd)
 	if err != nil {
-		return err
+		return fmt.Errorf("create API client: %w", err)
 	}
 
 	res, err := cl.CreateNote(ctx, req)
@@ -112,10 +120,10 @@ func createAction(ctx context.Context, cmd *urcli.Command) error {
 
 	note, apiErr := handleCreateNoteRes(res)
 	if apiErr != nil {
-		return apiErr
+		return fmt.Errorf("decode create note response: %w", apiErr)
 	}
 
-	return printCreateResult(os.Stdout, resolveServerURL(cmd), note)
+	return errorcontext.Wrap(printCreateResult(os.Stdout, resolveServerURL(cmd), note), "print create result")
 }
 
 func buildCreateReq(cmd *urcli.Command, content string) *padmark.CreateNoteRequest {
@@ -124,7 +132,10 @@ func buildCreateReq(cmd *urcli.Command, content string) *padmark.CreateNoteReque
 		title = firstLine(content)
 	}
 
-	req := &padmark.CreateNoteRequest{Content: content}
+	// Optional fields stay unset until the caller supplies them; legacy aliases stay unused.
+	req := new(padmark.CreateNoteRequest)
+	req.Content = content
+
 	if title != "" {
 		req.Title = padmark.NewOptString(title)
 	}
@@ -139,8 +150,8 @@ func buildCreateReq(cmd *urcli.Command, content string) *padmark.CreateNoteReque
 		req.Slug = padmark.NewOptString(slug)
 	}
 
-	if cmd.Bool(FlagPrivate) {
-		req.Private = padmark.NewOptBool(true)
+	if p := cmd.String(FlagPrivacy); p != "" {
+		req.Privacy = padmark.NewOptCreateNoteRequestPrivacy(padmark.CreateNoteRequestPrivacy(p))
 	}
 
 	if ec := cmd.String(FlagEditCode); ec != "" {
@@ -165,19 +176,24 @@ func handleCreateNoteRes(res padmark.CreateNoteRes) (*padmark.CreateNoteResponse
 
 		return &resp, nil
 	case *padmark.CreateNoteBadRequest:
-		return nil, fmt.Errorf("bad request: %s", typed.Message)
+		return nil, fmt.Errorf("%w: %s", ErrBadRequest, typed.Message)
 	case *padmark.CreateNoteUnauthorized:
-		return nil, fmt.Errorf("unauthorized: %s", typed.Message)
+		return nil, fmt.Errorf("%w: %s", ErrUnauthorized, typed.Message)
 	case *padmark.CreateNoteConflict:
-		return nil, fmt.Errorf("slug conflict: %s", typed.Message)
+		return nil, fmt.Errorf("%w: %s", ErrSlugConflict, typed.Message)
 	case *padmark.CreateNoteRequestEntityTooLarge:
-		return nil, fmt.Errorf("content too large: %s", typed.Message)
+		return nil, fmt.Errorf("%w: %s", ErrContentTooLarge, typed.Message)
 	case *padmark.CreateNoteUnprocessableEntity:
-		return nil, fmt.Errorf("validation error: %s", typed.Message)
+		return nil, fmt.Errorf("%w: %s", ErrValidation, typed.Message)
+	case *padmark.CreateNoteUnsupportedMediaType:
+		return nil, fmt.Errorf("%w: %s", ErrBadRequest, typed.Message)
+	case *padmark.CreateNoteServiceUnavailable:
+		return nil, errorcontext.Wrap(
+			serviceUnavailableError(padmark.ErrorResponse(*typed)), "decode create note response")
 	case *padmark.CreateNoteInternalServerError:
-		return nil, fmt.Errorf("server error: %s", typed.Message)
+		return nil, fmt.Errorf("%w: %s", ErrServer, typed.Message)
 	default:
-		return nil, fmt.Errorf("unexpected response type: %T", res)
+		return nil, fmt.Errorf("%w: %T", ErrUnexpectedResponse, res)
 	}
 }
 

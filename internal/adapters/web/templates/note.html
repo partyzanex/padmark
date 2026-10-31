@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dim">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Title}} — Padmark</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="stylesheet" href="/static/style.css?p={{styleVersion}}">
+</head>
+<body>
+<div class="wrapper">
+
+    {{template "header"}}
+
+    <div class="meta-bar">
+        <div class="meta-info">
+            <span class="meta-tag" id="createdTag"{{if .CreatedISO}} data-created="{{.CreatedISO}}"{{end}}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                {{.CreatedAt}}
+            </span>
+            <span class="meta-tag">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                {{.Views}} views
+            </span>
+            <span class="meta-tag" id="contentSizeTag">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                <span id="contentSizeLabel"></span>
+            </span>
+            <span class="meta-tag" id="expiresTag"{{if .ExpiresISO}} data-expires="{{.ExpiresISO}}"{{end}}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                {{.ExpiresLabel}}
+            </span>
+            {{if ne .Privacy "public"}}
+            <span class="meta-tag">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                {{if eq .Privacy "owner"}}Owner only{{else}}Requires login{{end}}
+            </span>
+            {{end}}
+        </div>
+        {{if not .NeedsConfirmation}}
+        <div class="meta-actions">
+            <button class="meta-btn" id="copyRawBtn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                Copy
+            </button>
+            <a href="/{{.ID}}?raw=1" class="meta-btn" target="_blank" rel="noopener">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                Raw
+            </a>
+            <button class="meta-btn" id="copyLinkBtn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+                Link
+            </button>
+        </div>
+        {{end}}
+    </div>
+
+    {{if .NeedsConfirmation}}
+    <div class="article-card article-card--warning">
+        <div class="confirm-header">
+            <div class="confirm-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+                    <line x1="12" y1="9" x2="12" y2="13"></line>
+                    <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                </svg>
+            </div>
+            <div class="confirm-title">One-time document</div>
+        </div>
+
+        <div class="confirm-body">
+            <p>This note will be permanently deleted once you reveal it. After that, no one — including you — will be able to open it again.</p>
+            <p class="confirm-hint">Link-preview bots and proxies may have already opened this URL. If you did not request this page, the note may still be intact.</p>
+        </div>
+
+        <div class="confirm-actions">
+            <form method="POST" action="/{{.ID}}" class="confirm-form">
+                <input type="hidden" name="token" value="{{.ConfirmToken}}">
+                <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+                <button type="submit" class="btn-primary">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                        <circle cx="12" cy="12" r="3"></circle>
+                    </svg>
+                    Reveal and burn
+                </button>
+            </form>
+        </div>
+    </div>
+    {{else}}
+    <div class="article-card">
+        <div class="prose markdown-body">
+            {{.Body}}
+        </div>
+    </div>
+    {{end}}
+
+    <div class="paste-footer">
+        {{if not .NeedsConfirmation}}
+        <a href="/{{.ID}}?raw=1" class="paste-footer-link" target="_blank" rel="noopener">Raw</a>
+        {{end}}
+        {{if .CanEdit}}
+        <span class="paste-footer-sep">·</span>
+        <a href="/edit/{{.ID}}" class="paste-footer-link">Edit</a>
+        <span class="paste-footer-sep">·</span>
+        <a href="/" class="paste-footer-link">New</a>
+        {{end}}
+    </div>
+
+</div>
+
+{{if not .NeedsConfirmation}}
+<textarea data-raw-content hidden>{{.RawContent}}</textarea>
+{{end}}
+
+<script nonce="{{.Nonce}}">
+    {{template "theme-js"}}
+
+    // Render the created timestamp in the visitor's local timezone/locale so it is
+    // consistent with the expiry timestamp below (which is also client-formatted).
+    (function () {
+        const tag = document.getElementById('createdTag');
+        const iso = tag && tag.dataset.created;
+        if (!iso) return;
+        const d = new Date(iso);
+        const formatted = d.toLocaleString(undefined, {
+            year: 'numeric', month: 'short', day: 'numeric',
+            hour: '2-digit', minute: '2-digit'
+        });
+        const svg = tag.querySelector('svg').outerHTML;
+        tag.innerHTML = svg + ' ' + formatted;
+    })();
+
+    {{if not .NeedsConfirmation}}
+    (function () {
+        const tag = document.getElementById('expiresTag');
+        const iso = tag && tag.dataset.expires;
+        if (!iso) return;
+        const d = new Date(iso);
+        const formatted = d.toLocaleString(undefined, {
+            year: 'numeric', month: 'short', day: 'numeric',
+            hour: '2-digit', minute: '2-digit', second: '2-digit'
+        });
+        const svg = tag.querySelector('svg').outerHTML;
+        tag.innerHTML = svg + ' Expires ' + formatted;
+    })();
+
+    (function () {
+        const raw = document.querySelector('[data-raw-content]').value;
+        const bytes = new TextEncoder().encode(raw).length;
+        let label;
+        if (bytes < 1024) {
+            label = bytes + ' B';
+        } else if (bytes < 1024 * 1024) {
+            label = (bytes / 1024).toFixed(1) + ' KB';
+        } else {
+            label = (bytes / (1024 * 1024)).toFixed(2) + ' MB';
+        }
+        document.getElementById('contentSizeLabel').textContent = label;
+    })();
+
+    function flashCopied(btn) {
+        const orig = btn.innerHTML;
+        btn.classList.add('copied');
+        btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> Copied`;
+        setTimeout(() => { btn.innerHTML = orig; btn.classList.remove('copied'); }, 2000);
+    }
+
+    document.getElementById('copyRawBtn').addEventListener('click', function () {
+        const raw = document.querySelector('[data-raw-content]').value;
+        if (navigator.clipboard) {
+            navigator.clipboard.writeText(raw).then(() => flashCopied(this));
+        } else {
+            const el = document.createElement('textarea');
+            el.value = raw;
+            document.body.appendChild(el);
+            el.select();
+            document.execCommand('copy');
+            document.body.removeChild(el);
+            flashCopied(this);
+        }
+    });
+
+    document.getElementById('copyLinkBtn').addEventListener('click', function () {
+        if (navigator.clipboard) {
+            navigator.clipboard.writeText(window.location.href).then(() => flashCopied(this));
+        } else {
+            const el = document.createElement('textarea');
+            el.value = window.location.href;
+            document.body.appendChild(el);
+            el.select();
+            document.execCommand('copy');
+            document.body.removeChild(el);
+            flashCopied(this);
+        }
+    });
+
+    document.querySelectorAll('.markdown-body pre').forEach(function (pre) {
+        const btn = document.createElement('button');
+        btn.className = 'copy-code-btn';
+        btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy';
+        btn.addEventListener('click', function () {
+            const code = pre.querySelector('code');
+            const text = (code || pre).textContent;
+            if (navigator.clipboard) {
+                navigator.clipboard.writeText(text).then(function () { flashCopied(btn); });
+            } else {
+                const el = document.createElement('textarea');
+                el.value = text;
+                document.body.appendChild(el);
+                el.select();
+                document.execCommand('copy');
+                document.body.removeChild(el);
+                flashCopied(btn);
+            }
+        });
+        pre.appendChild(btn);
+    });
+
+    // Heading IDs and user-written ids live in the "user-content-" namespace (DOM-clobbering
+    // protection), so in-document links like [x](#my-heading) are resolved against that prefix.
+    (function () {
+        function jump(name, push) {
+            let id;
+            try { id = decodeURIComponent(name); } catch (e) { return false; }
+            const target = document.getElementById('user-content-' + id);
+            if (!target) return false;
+            target.scrollIntoView();
+            if (push) history.pushState(null, '', '#' + name);
+            return true;
+        }
+        document.querySelectorAll('.markdown-body a[href^="#"]').forEach(function (link) {
+            link.addEventListener('click', function (ev) {
+                if (jump(link.getAttribute('href').slice(1), true)) ev.preventDefault();
+            });
+        });
+        if (location.hash.length > 1) jump(location.hash.slice(1), false);
+    })();
+    {{end}}
+</script>
+</body>
+</html>

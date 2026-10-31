@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 	urcli "github.com/urfave/cli/v3"
 
+	"github.com/partyzanex/padmark/internal/clifactory"
 	padmark "github.com/partyzanex/padmark/pkg/client"
 )
 
@@ -18,41 +19,41 @@ func buildUpdateReqFor(t *testing.T, args ...string) *padmark.UpdateNoteRequest 
 
 	var req *padmark.UpdateNoteRequest
 
-	app := &urcli.Command{
-		Flags: editCommand().Flags,
-		Action: func(_ context.Context, cmd *urcli.Command) error {
+	app := clifactory.Command(func(command *urcli.Command) {
+		command.Flags = editCommand().Flags
+		command.Action = func(_ context.Context, cmd *urcli.Command) error {
 			req = buildUpdateReq(cmd, "content", "edit-code")
 
 			return nil
-		},
-	}
+		}
+	})
 	require.NoError(t, app.Run(t.Context(), append([]string{testBin}, args...)))
 
 	return req
 }
 
-func TestBuildUpdateReq_Private_SetsPrivateTrue(t *testing.T) {
+func TestBuildUpdateReq_Privacy_SetsValue(t *testing.T) {
 	t.Parallel()
 
-	req := buildUpdateReqFor(t, "--private")
+	req := buildUpdateReqFor(t, "--privacy", "owner")
 
-	assert.True(t, req.Private.IsSet())
-	assert.True(t, req.Private.Value)
+	require.True(t, req.Privacy.IsSet())
+	assert.Equal(t, padmark.UpdateNoteRequestPrivacyOwner, req.Privacy.Value)
 }
 
-func TestBuildUpdateReq_PrivateFalse_ClearsPrivate(t *testing.T) {
+func TestBuildUpdateReq_PrivacyPublic_ExplicitlySent(t *testing.T) {
 	t.Parallel()
 
-	req := buildUpdateReqFor(t, "--private=false")
+	req := buildUpdateReqFor(t, "--privacy", "public")
 
-	assert.True(t, req.Private.IsSet(), "explicit --private=false must still be sent")
-	assert.False(t, req.Private.Value)
+	require.True(t, req.Privacy.IsSet(), "explicit --privacy=public must still be sent")
+	assert.Equal(t, padmark.UpdateNoteRequestPrivacyPublic, req.Privacy.Value)
 }
 
-func TestBuildUpdateReq_NoPrivateFlag_OmitsField(t *testing.T) {
+func TestBuildUpdateReq_NoPrivacyFlag_OmitsField(t *testing.T) {
 	t.Parallel()
 
 	req := buildUpdateReqFor(t)
 
-	assert.False(t, req.Private.IsSet(), "private must be omitted when not passed, not sent as false")
+	assert.False(t, req.Privacy.IsSet(), "privacy must be omitted when not passed, not sent as public")
 }

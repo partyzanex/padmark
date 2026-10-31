@@ -1,0 +1,181 @@
+package cli
+
+import (
+	"context"
+	"fmt"
+	"net/url"
+	"os"
+
+	urcli "github.com/urfave/cli/v3"
+
+	"github.com/partyzanex/padmark/internal/clifactory"
+	"github.com/partyzanex/padmark/internal/errorcontext"
+	padmark "github.com/partyzanex/padmark/pkg/client"
+)
+
+func shortenCommand() *urcli.Command {
+	return clifactory.Command(func(command *urcli.Command) {
+		command.Name = "shorten"
+		command.Usage = "Create a new short link"
+		command.ArgsUsage = " "
+		command.Flags = []urcli.Flag{
+			clifactory.StringFlag(func(flag *urcli.StringFlag) {
+				flag.Name = FlagTargetURL
+				flag.Required = true
+				flag.Usage = "Destination URL (http/https only)"
+			}),
+			clifactory.StringFlag(func(flag *urcli.StringFlag) {
+				flag.Name = FlagSlug
+				flag.Usage = "Custom URL slug (letters, digits, hyphens, underscores; " +
+					"single segment — links are served at /{id})"
+			}),
+			clifactory.StringFlag(func(flag *urcli.StringFlag) {
+				flag.Name = FlagPrivacy
+				flag.Usage = "Privacy level: public (default), authenticated, or owner"
+			}),
+			clifactory.BoolFlag(func(flag *urcli.BoolFlag) {
+				flag.Name = FlagBurn
+				flag.Usage = "Burn after click: delete the link the moment it is first followed"
+			}),
+			clifactory.Int64Flag(func(flag *urcli.Int64Flag) {
+				flag.Name = FlagTTL
+				flag.Usage = "Seconds until the link expires, counted from creation (omit for no expiry)"
+			}),
+			clifactory.StringFlag(func(flag *urcli.StringFlag) {
+				flag.Name = FlagEditCode
+				flag.Aliases = []string{"e"}
+				flag.Usage = "Custom edit code, 8-128 chars (random 12-char code generated if omitted). " +
+					psWarnEditCode
+				flag.Sources = urcli.EnvVars(EnvEditCode)
+			}),
+			clifactory.BoolFlag(func(flag *urcli.BoolFlag) {
+				flag.Name = FlagDirectRedirect
+				flag.Usage = "Override the server's --direct-redirect default for this link only " +
+					"(--direct-redirect=false forces the transparency interstitial); " +
+					"omitted inherits the server default"
+			}),
+		}
+		command.Action = shortenAction
+	})
+}
+
+func shortenAction(ctx context.Context, cmd *urcli.Command) error {
+	req, err := buildShortenReq(cmd)
+	if err != nil {
+		return fmt.Errorf("build shorten req: %w", err)
+	}
+
+	cl, err := newPadmarkClient(cmd)
+	if err != nil {
+		return fmt.Errorf("create API client: %w", err)
+	}
+
+	res, err := cl.CreateLink(ctx, req)
+	if err != nil {
+		return fmt.Errorf("create link: %w", err)
+	}
+
+	link, apiErr := handleCreateLinkRes(res)
+	if apiErr != nil {
+		return fmt.Errorf("decode create link response: %w", apiErr)
+	}
+
+	return errorcontext.Wrap(printCreateLinkResult(os.Stdout, resolveServerURL(cmd), link), "print create link result")
+}
+
+func buildShortenReq(cmd *urcli.Command) (*padmark.CreateLinkRequest, error) {
+	target, err := url.Parse(cmd.String(FlagTargetURL))
+	if err != nil {
+		return nil, fmt.Errorf("invalid --%s: %w", FlagTargetURL, err)
+	}
+
+	// Only an explicitly set non-positive TTL is a user error — an unset TTL legitimately means
+	// "no expiry", and flag zero values must never fail.
+	if ttl := cmd.Int64(FlagTTL); cmd.IsSet(FlagTTL) && ttl <= 0 {
+		return nil, fmt.Errorf("invalid --%s: %w", FlagTTL, errLinkTTL)
+	}
+
+	req := &padmark.CreateLinkRequest{
+		TargetURL: *target,
+		// Opt fields zeroed: the server applies its defaults. Only the flags the CLI explicitly
+		// reads (--slug, --burn, --ttl, --edit-code, --privacy, --direct) populate these later.
+		Slug:           padmark.OptString{Value: "", Set: false},
+		BurnAfterClick: padmark.OptBool{Value: false, Set: false},
+		TTL:            padmark.OptInt64{Value: 0, Set: false},
+		EditCode:       padmark.OptString{Value: "", Set: false},
+		Privacy:        padmark.OptCreateLinkRequestPrivacy{Value: "", Set: false},
+		DirectRedirect: padmark.OptNilBool{Value: false, Set: false, Null: false},
+	}
+
+	if slug := cmd.String(FlagSlug); slug != "" {
+		req.Slug = padmark.NewOptString(slug)
+	}
+
+	if p := cmd.String(FlagPrivacy); p != "" {
+		req.Privacy = padmark.NewOptCreateLinkRequestPrivacy(padmark.CreateLinkRequestPrivacy(p))
+	}
+
+	if ec := cmd.String(FlagEditCode); ec != "" {
+		req.EditCode = padmark.NewOptString(ec)
+	}
+
+	if cmd.Bool(FlagBurn) {
+		req.BurnAfterClick = padmark.NewOptBool(true)
+	}
+
+	if ttl := cmd.Int64(FlagTTL); ttl > 0 {
+		req.TTL = padmark.NewOptInt64(ttl)
+	}
+
+	if cmd.IsSet(FlagDirectRedirect) {
+		req.DirectRedirect = padmark.NewOptNilBool(cmd.Bool(FlagDirectRedirect))
+	}
+
+	return req, nil
+}
+
+func handleCreateLinkRes(res padmark.CreateLinkRes) (*padmark.CreateLinkResponse, error) {
+	if typed, ok := res.(*padmark.CreateLinkResponseHeaders); ok {
+		resp := typed.Response
+
+		return &resp, nil
+	}
+
+	err := createLinkClientError(res)
+	if err != nil {
+		return nil, err
+	}
+
+	switch typed := res.(type) {
+	case *padmark.CreateLinkServiceUnavailable:
+		return nil, errorcontext.Wrap(
+			serviceUnavailableError(padmark.ErrorResponse(*typed)), "decode create link response")
+	case *padmark.CreateLinkInternalServerError:
+		return nil, fmt.Errorf("%w: %s", ErrServer, typed.Message)
+	default:
+		return nil, fmt.Errorf("%w: %T", ErrUnexpectedResponse, res)
+	}
+}
+
+// createLinkClientError maps the client-error variants of a CreateLink response. It returns nil
+// for every other variant, so the caller handles those.
+func createLinkClientError(res padmark.CreateLinkRes) error {
+	switch typed := res.(type) {
+	case *padmark.CreateLinkBadRequest:
+		return fmt.Errorf("%w: %s", ErrBadRequest, typed.Message)
+	case *padmark.CreateLinkUnauthorized:
+		return fmt.Errorf("%w: %s", ErrUnauthorized, typed.Message)
+	case *padmark.CreateLinkConflict:
+		return fmt.Errorf("%w: %s", ErrSlugConflict, typed.Message)
+	case *padmark.CreateLinkRequestEntityTooLarge:
+		return fmt.Errorf("%w: %s", ErrRequestTooLarge, typed.Message)
+	case *padmark.CreateLinkUnprocessableEntity:
+		return fmt.Errorf("%w: %s", ErrValidation, typed.Message)
+	case *padmark.CreateLinkUnsupportedMediaType:
+		return fmt.Errorf("%w: %s", ErrBadRequest, typed.Message)
+	case *padmark.CreateLinkTooManyRequests:
+		return ErrRateLimited
+	default:
+		return nil
+	}
+}

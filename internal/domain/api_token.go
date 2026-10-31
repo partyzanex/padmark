@@ -6,18 +6,25 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // APIToken is a long-lived bearer key issued through the browser-based CLI login flow.
 // The plain key is shown to the user exactly once; only its SHA-256 hash is persisted.
 // TokenHash is both the primary key and the public identifier used in admin URLs, since the
 // CLI flow does not issue a separate opaque ID. It is looked up on every authenticated API request.
+//
+// IssuedBy is the TokenHash of the API token whose bearer issued this one, nil when it was issued
+// from a browser session. The store cascades revocation along it: deleting a token deletes every
+// token issued with it, so revoking a leaked key also takes out whatever it minted.
 type APIToken struct {
 	CreatedAt  time.Time
 	ExpiresAt  *time.Time
 	LastUsedAt *time.Time
-	UserID     string
+	IssuedBy   *string
 	TokenHash  string
+	UserID     uuid.UUID
 }
 
 // apiTokenEnvelopePrefix marks a value produced by EncodeAPITokenEnvelope so the CLI can tell a

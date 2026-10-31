@@ -15,26 +15,27 @@ import (
 type OnboardingManager struct {
 	totp    TOTPManager
 	invites InviteStore
-	enc     Encryptor
+	sealer  SecretSealer
 	pw      PasswordHasher
-	kdf     KeyDeriver
 	users   UserStore
+	stepUp  StepUpVerifier
 	issuer  string
 }
 
 // NewOnboardingManager returns a new OnboardingManager. issuer is the TOTP issuer name shown
-// in the authenticator app when a new user enrolls.
+// in the authenticator app when a new user enrolls; stepUp re-authenticates a bearer-token
+// caller before it may issue an invite.
 func NewOnboardingManager(
-	users UserStore, invites InviteStore, passwordHasher PasswordHasher, kdf KeyDeriver,
-	enc Encryptor, totp TOTPManager, issuer string,
+	users UserStore, invites InviteStore, passwordHasher PasswordHasher,
+	sealer SecretSealer, totp TOTPManager, stepUp StepUpVerifier, issuer string,
 ) *OnboardingManager {
 	return &OnboardingManager{
 		users:   users,
 		invites: invites,
 		pw:      passwordHasher,
-		kdf:     kdf,
-		enc:     enc,
+		sealer:  sealer,
 		totp:    totp,
+		stepUp:  stepUp,
 		issuer:  issuer,
 	}
 }
@@ -49,9 +50,11 @@ func (m *OnboardingManager) IsEmpty(ctx context.Context) (bool, error) {
 	return len(users) == 0, nil
 }
 
-// GenerateInvite creates a single-use invite link for adminUserID.
-// Returns domain.ErrForbidden when the caller is not an admin.
-func (m *OnboardingManager) GenerateInvite(ctx context.Context, adminUserID string) (string, error) {
+// GenerateInvite creates a single-use invite link for adminUserID. issuer says how the caller
+// authenticated: a bearer-token caller must pass a step-up.
+// Returns domain.ErrForbidden when the caller is not an admin, and domain.ErrStepUpRequired /
+// domain.ErrStepUpFailed for a bearer without a valid step-up.
+func (m *OnboardingManager) GenerateInvite(ctx context.Context, adminUserID uuid.UUID, issuer Issuer) (string, error) {
 	admin, err := m.users.GetByID(ctx, adminUserID)
 	if err != nil {
 		return "", fmt.Errorf("get admin user: %w", err)
@@ -59,6 +62,11 @@ func (m *OnboardingManager) GenerateInvite(ctx context.Context, adminUserID stri
 
 	if !admin.IsAdmin {
 		return "", domain.ErrForbidden
+	}
+
+	err = authorizeIssuer(ctx, m.stepUp, admin.ID, issuer)
+	if err != nil {
+		return "", fmt.Errorf("authorize issuer: %w", err)
 	}
 
 	tok, err := m.invites.Issue(ctx, adminUserID)
@@ -69,13 +77,28 @@ func (m *OnboardingManager) GenerateInvite(ctx context.Context, adminUserID stri
 	return tok, nil
 }
 
+// Enrollment is what a newly created account must show its owner exactly once: the
+// machine-readable otpauth:// enrollment URI (headless provisioning prints this) and the
+// browser-rendered QR code data URL. Both must be computed while the raw TOTP secret is still
+// in scope — it is only stored sealed, so neither can be reconstructed afterwards.
+type Enrollment struct {
+	TOTPURI string
+	QRCode  string
+}
+
 // AcceptInvite consumes the invite token, creates a new user with a fresh TOTP secret,
-// and returns the QR code data URL the user should scan. The consume and the user
-// insert happen in a single transaction, so a failed registration never burns the token.
-func (m *OnboardingManager) AcceptInvite(ctx context.Context, token, username, password string) (string, error) {
-	err := domain.ValidatePassword(password)
+// and returns the enrollment material (otpauth URI + QR code) the user should scan. The
+// consume and the user insert happen in a single transaction, so a failed registration
+// never burns the token.
+func (m *OnboardingManager) AcceptInvite(ctx context.Context, token, username, password string) (*Enrollment, error) {
+	err := domain.ValidateUsername(username)
 	if err != nil {
-		return "", err //nolint:wrapcheck // ErrWeakPassword sentinel passes through for errors.Is
+		return nil, fmt.Errorf("validate username: %w", err)
+	}
+
+	err = domain.ValidatePassword(password)
+	if err != nil {
+		return nil, fmt.Errorf("validate password: %w", err)
 	}
 
 	// Fast pre-check to reject an already-taken username before the expensive buildUser work
@@ -85,24 +108,24 @@ func (m *OnboardingManager) AcceptInvite(ctx context.Context, token, username, p
 	// invite on a collision); the pre-check does not widen that, it only avoids needless argon2.
 	_, lookupErr := m.users.GetByUsername(ctx, username)
 	if lookupErr == nil {
-		return "", domain.ErrUserExists
+		return nil, domain.ErrUserExists
 	}
 
 	if !errors.Is(lookupErr, domain.ErrNotFound) {
-		return "", fmt.Errorf("check username: %w", lookupErr)
+		return nil, fmt.Errorf("check username: %w", lookupErr)
 	}
 
-	usr, qrURL, err := m.buildUser(username, password, false)
+	usr, enr, err := m.buildUser(username, password, false)
 	if err != nil {
-		return "", err
+		return nil, fmt.Errorf("build user: %w", err)
 	}
 
 	err = m.invites.RedeemInvite(ctx, token, username, usr)
 	if err != nil {
-		return "", err //nolint:wrapcheck // domain sentinels pass through for errors.Is
+		return nil, fmt.Errorf("redeem invite: %w", err)
 	}
 
-	return qrURL, nil
+	return enr, nil
 }
 
 // AcceptFirstAdmin creates the first admin user without requiring an invite token.
@@ -111,78 +134,88 @@ func (m *OnboardingManager) AcceptInvite(ctx context.Context, token, username, p
 // The List check is a best-effort gate; the hard guarantee against a concurrent
 // double-bootstrap (e.g. two instances racing on an empty DB) is the partial
 // unique index on users.is_admin: the second writer loses with domain.ErrUserExists.
-func (m *OnboardingManager) AcceptFirstAdmin(ctx context.Context, username, password string) (string, error) {
-	err := domain.ValidatePassword(password)
+func (m *OnboardingManager) AcceptFirstAdmin(ctx context.Context, username, password string) (*Enrollment, error) {
+	err := domain.ValidateUsername(username)
 	if err != nil {
-		return "", err //nolint:wrapcheck // ErrWeakPassword sentinel passes through for errors.Is
+		return nil, fmt.Errorf("validate username: %w", err)
+	}
+
+	err = domain.ValidatePassword(password)
+	if err != nil {
+		return nil, fmt.Errorf("validate password: %w", err)
 	}
 
 	users, err := m.users.List(ctx)
 	if err != nil {
-		return "", fmt.Errorf("list users: %w", err)
+		return nil, fmt.Errorf("list users: %w", err)
 	}
 
 	if len(users) > 0 {
-		return "", domain.ErrForbidden
+		return nil, domain.ErrForbidden
 	}
 
-	usr, qrURL, err := m.buildUser(username, password, true)
+	usr, enr, err := m.buildUser(username, password, true)
 	if err != nil {
-		return "", err
+		return nil, fmt.Errorf("build user: %w", err)
 	}
 
 	err = m.users.Create(ctx, usr)
 	if err != nil {
-		return "", err //nolint:wrapcheck // ErrUserExists sentinel passes through for errors.Is
+		return nil, fmt.Errorf("create first admin user: %w", err)
 	}
 
-	return qrURL, nil
+	return enr, nil
 }
 
-// buildUser generates a fresh TOTP secret, encrypts it with a password-derived key, and
-// assembles the user record together with its QR code data URL — without touching the DB.
-// The caller persists the returned user (directly or via RedeemInvite); generating the QR
-// here, before any insert, keeps the insert the last fallible step so it can be rolled back.
-func (m *OnboardingManager) buildUser(username, password string, isAdmin bool) (*domain.User, string, error) {
+// buildUser generates a fresh TOTP secret, seals it under a password-derived key, and
+// assembles the user record together with its enrollment material (otpauth URI + QR code) —
+// without touching the DB. The caller persists the returned user (directly or via
+// RedeemInvite); generating enrollment here, before any insert, keeps the insert the last
+// fallible step so it can be rolled back.
+func (m *OnboardingManager) buildUser(username, password string, isAdmin bool) (*domain.User, *Enrollment, error) {
 	rawSecret, err := m.totp.GenerateSecret()
 	if err != nil {
-		return nil, "", fmt.Errorf("generate totp secret: %w", err)
+		return nil, nil, fmt.Errorf("generate totp secret: %w", err)
 	}
 
-	kdfSalt, err := m.kdf.GenerateSalt()
+	kdfSalt, err := m.sealer.GenerateSalt()
 	if err != nil {
-		return nil, "", fmt.Errorf("generate kdf salt: %w", err)
+		return nil, nil, fmt.Errorf("generate kdf salt: %w", err)
 	}
 
-	derivedKey, err := m.kdf.DeriveKey([]byte(password), kdfSalt)
+	encSecret, err := m.sealer.Seal(rawSecret, []byte(password), kdfSalt)
 	if err != nil {
-		return nil, "", fmt.Errorf("derive user key: %w", err)
-	}
-
-	encSecret, err := m.enc.Encrypt(rawSecret, derivedKey)
-	if err != nil {
-		return nil, "", fmt.Errorf("encrypt totp secret: %w", err)
+		return nil, nil, fmt.Errorf("seal totp secret: %w", err)
 	}
 
 	pwHash, err := m.pw.Hash(password)
 	if err != nil {
-		return nil, "", fmt.Errorf("hash password: %w", err)
+		return nil, nil, fmt.Errorf("hash password: %w", err)
 	}
 
 	usr := &domain.User{
-		ID:           uuid.New().String(),
+		ID:           uuid.New(),
 		Username:     username,
 		TOTPSecret:   encSecret,
 		PasswordHash: pwHash,
 		KDFSalt:      kdfSalt,
 		IsAdmin:      isAdmin,
 		CreatedAt:    time.Now(),
+		// LastLoginAt:    — no previous login on a freshly created account; nil pointer signals "never".
+		// LastTOTPCounter: counter starts at 0; first TOTP code validates against this baseline.
+		LastLoginAt:     nil,
+		LastTOTPCounter: 0,
+	}
+
+	totpURI, err := m.totp.TOTPURI(m.issuer, username, rawSecret)
+	if err != nil {
+		return nil, nil, fmt.Errorf("generate totp uri: %w", err)
 	}
 
 	qrURL, err := m.totp.GenerateQRCode(m.issuer, username, rawSecret)
 	if err != nil {
-		return nil, "", fmt.Errorf("generate qr code: %w", err)
+		return nil, nil, fmt.Errorf("generate qr code: %w", err)
 	}
 
-	return usr, qrURL, nil
+	return usr, &Enrollment{TOTPURI: totpURI, QRCode: qrURL}, nil
 }

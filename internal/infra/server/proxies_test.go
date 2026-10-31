@@ -71,3 +71,56 @@ func TestParseTrustedProxies(t *testing.T) {
 		require.Error(t, err)
 	})
 }
+
+// TestOverlyBroadProxyCIDRs pins the threshold that separates a plausible proxy range from a
+// configuration mistake. The false-positive side matters as much as the detection: flagging a
+// real deployment's range would train operators to ignore the warning, so the standard private
+// ranges and realistic published CDN prefixes must all stay silent.
+func TestOverlyBroadProxyCIDRs(t *testing.T) {
+	t.Run("no proxies configured is not broad", func(t *testing.T) {
+		require.Empty(t, overlyBroadProxyCIDRs(nil))
+	})
+
+	t.Run("legitimate ranges are not flagged", func(t *testing.T) {
+		// Private IPv4 ranges, IPv6 unique-local, a loopback host route, and a published
+		// CDN-sized prefix — every shape a correct deployment actually uses.
+		for _, cidr := range []string{
+			"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.1/32",
+			"fc00::/7", "2001:db8::/32", "103.21.244.0/22",
+		} {
+			nets, err := parseTrustedProxies(cidr)
+			require.NoError(t, err)
+			require.Empty(t, overlyBroadProxyCIDRs(nets), "%s must not be flagged", cidr)
+		}
+	})
+
+	t.Run("wide open ipv4 is flagged", func(t *testing.T) {
+		nets, err := parseTrustedProxies("0.0.0.0/0")
+		require.NoError(t, err)
+		require.Equal(t, []string{"0.0.0.0/0"}, overlyBroadProxyCIDRs(nets))
+	})
+
+	t.Run("wide open ipv6 is flagged", func(t *testing.T) {
+		nets, err := parseTrustedProxies("::/0")
+		require.NoError(t, err)
+		require.Equal(t, []string{"::/0"}, overlyBroadProxyCIDRs(nets))
+	})
+
+	t.Run("half the ipv4 space is flagged", func(t *testing.T) {
+		nets, err := parseTrustedProxies("0.0.0.0/1")
+		require.NoError(t, err)
+		require.Len(t, overlyBroadProxyCIDRs(nets), 1)
+	})
+
+	t.Run("ipv6 global unicast is flagged", func(t *testing.T) {
+		nets, err := parseTrustedProxies("2000::/3")
+		require.NoError(t, err)
+		require.Len(t, overlyBroadProxyCIDRs(nets), 1)
+	})
+
+	t.Run("only the broad entries are reported", func(t *testing.T) {
+		nets, err := parseTrustedProxies("10.0.0.0/8, 0.0.0.0/0, 192.168.0.0/16")
+		require.NoError(t, err)
+		require.Equal(t, []string{"0.0.0.0/0"}, overlyBroadProxyCIDRs(nets))
+	})
+}

@@ -1,11 +1,15 @@
 package auth
 
 import (
+	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/pquerna/otp"
 	"github.com/pquerna/otp/totp"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/mock/gomock"
@@ -14,7 +18,7 @@ import (
 	"github.com/partyzanex/padmark/internal/infra/crypto"
 )
 
-var discardLog = slog.New(slog.DiscardHandler) //nolint:gochecknoglobals // test helper
+func discardLog() *slog.Logger { return slog.New(slog.DiscardHandler) }
 
 // testArgon2Params uses minimal argon2id cost so these tests exercise real hash/verify logic
 // without paying crypto.DefaultArgon2Params' production-strength (64 MiB) cost on every one of
@@ -34,6 +38,12 @@ type ManagerSuite struct {
 	invites  *MockInviteStore
 	sessions *MockSessionStore
 	mgr      *Manager
+
+	// adminID and userID are fixed per-test identities (fresh each SetupTest) reused by the
+	// adminUser/testUser helpers and referenced directly by tests that need to assert the exact
+	// ID a mock call was made with.
+	adminID uuid.UUID
+	userID  uuid.UUID
 }
 
 func (s *ManagerSuite) SetupTest() {
@@ -41,43 +51,76 @@ func (s *ManagerSuite) SetupTest() {
 	s.users = NewMockUserStore(s.ctrl)
 	s.invites = NewMockInviteStore(s.ctrl)
 	s.sessions = NewMockSessionStore(s.ctrl)
-	mgr, err := NewManager(s.users, s.invites, s.sessions, nil, crypto.New(),
+	mgr, err := NewManager(
+		Stores{Users: s.users, Invites: s.invites, Sessions: s.sessions, APITokens: nil},
 		crypto.NewPasswordHasher(testArgon2Params),
-		crypto.NewKDF(), crypto.NewTOTP(), discardLog, "padmark", 0)
+		crypto.NewSealer(testArgon2Params), crypto.NewTOTP(), discardLog(), "padmark", 0)
 	s.Require().NoError(err)
 	s.mgr = mgr
+	s.adminID = uuid.New()
+	s.userID = uuid.New()
 }
 
 func (s *ManagerSuite) TearDownTest() {
 	s.ctrl.Finish()
 }
 
-// ── helpers ──
+// ── helpers ──.
 
 func (s *ManagerSuite) adminUser() *domain.User {
 	return &domain.User{
-		ID:       "admin-uuid",
+		ID:       s.adminID,
 		Username: "admin",
 		IsAdmin:  true,
+
+		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
+		KDFSalt: nil, LastTOTPCounter: 0,
 	}
 }
 
-// testUser builds a domain.User whose TOTP secret is encrypted with a key derived from testPassword.
-// Returns the user and the raw (unencrypted) TOTP secret.
+// testUser builds a domain.User whose TOTP secret is sealed under testPassword at the suite's
+// argon2 cost — i.e. an already-current seal, so login never triggers the re-seal migration.
+// Returns the user and the raw (unsealed) TOTP secret.
 func (s *ManagerSuite) testUser() (*domain.User, string) {
+	s.T().Helper()
+
+	return s.userWithSealedSecret(func(rawSecret string, kdfSalt []byte) string {
+		sealed, err := crypto.NewSealer(testArgon2Params).Seal(rawSecret, []byte(testPassword), kdfSalt)
+		s.Require().NoError(err)
+
+		return sealed
+	})
+}
+
+// legacyTestUser builds a user whose TOTP secret uses the pre-versioning layout: a bare base64
+// ciphertext keyed by argon2id, with no envelope recording the cost. Logging in as this user
+// must still work and must migrate the secret forward.
+func (s *ManagerSuite) legacyTestUser() (*domain.User, string) {
+	s.T().Helper()
+
+	return s.userWithSealedSecret(func(rawSecret string, kdfSalt []byte) string {
+		derivedKey, err := crypto.DeriveUserKey([]byte(testPassword), kdfSalt, testArgon2Params)
+		s.Require().NoError(err)
+
+		ciphertext, err := crypto.New().Encrypt(rawSecret, derivedKey)
+		s.Require().NoError(err)
+
+		return ciphertext
+	})
+}
+
+// userWithSealedSecret assembles the shared user fixture, delegating only the on-disk
+// representation of the TOTP secret to seal, so each fixture differs in exactly that one field.
+func (s *ManagerSuite) userWithSealedSecret(seal func(rawSecret string, kdfSalt []byte) string) (*domain.User, string) {
 	s.T().Helper()
 
 	kdfSalt, err := crypto.GenerateKDFSalt()
 	s.Require().NoError(err)
 
-	derivedKey, err := crypto.DeriveUserKey([]byte(testPassword), kdfSalt)
-	s.Require().NoError(err)
-
 	rawSecret, err := crypto.GenerateTOTPSecret()
 	s.Require().NoError(err)
 
-	encSecret, err := crypto.New().Encrypt(rawSecret, derivedKey)
-	s.Require().NoError(err)
+	encSecret := seal(rawSecret, kdfSalt)
 
 	// verifyArgon2 reads its cost parameters from the stored hash itself, so hashing the
 	// fixture with testArgon2Params (cheap) verifies identically to crypto.HashPassword's
@@ -86,24 +129,26 @@ func (s *ManagerSuite) testUser() (*domain.User, string) {
 	s.Require().NoError(err)
 
 	usr := &domain.User{
-		ID:           "user-id",
+		ID:           s.userID,
 		Username:     "alice",
 		TOTPSecret:   encSecret,
 		PasswordHash: pwHash,
 		KDFSalt:      kdfSalt,
+
+		CreatedAt: time.Time{}, LastLoginAt: nil, LastTOTPCounter: 0, IsAdmin: false,
 	}
 
 	return usr, rawSecret
 }
 
-// ── Login ──
+// ── Login ──.
 
 func (s *ManagerSuite) TestLogin_InvalidUsername_ReturnsErrInvalidTOTP() {
 	s.users.EXPECT().
 		GetByUsername(gomock.Any(), "unknown").
 		Return(nil, domain.ErrNotFound)
 
-	_, err := s.mgr.Login(s.T().Context(), "unknown", testPassword, "123456", "", "")
+	_, err := s.mgr.Login(s.T().Context(), "unknown", testPassword, "123456", "", "", "")
 	s.ErrorIs(err, domain.ErrInvalidTOTP)
 }
 
@@ -111,7 +156,7 @@ func (s *ManagerSuite) TestLogin_WrongPassword_ReturnsErrInvalidTOTP() {
 	usr, _ := s.testUser()
 	s.users.EXPECT().GetByUsername(gomock.Any(), "alice").Return(usr, nil)
 
-	_, err := s.mgr.Login(s.T().Context(), "alice", "WrongP@ss12!", "000000", "", "")
+	_, err := s.mgr.Login(s.T().Context(), "alice", "WrongP@ss12!", "000000", "", "", "")
 	s.ErrorIs(err, domain.ErrInvalidTOTP)
 }
 
@@ -119,7 +164,7 @@ func (s *ManagerSuite) TestLogin_WrongTOTP_ReturnsErrInvalidTOTP() {
 	usr, _ := s.testUser()
 	s.users.EXPECT().GetByUsername(gomock.Any(), "alice").Return(usr, nil)
 
-	_, err := s.mgr.Login(s.T().Context(), "alice", testPassword, "000000", "", "")
+	_, err := s.mgr.Login(s.T().Context(), "alice", testPassword, "000000", "", "", "")
 	s.ErrorIs(err, domain.ErrInvalidTOTP)
 }
 
@@ -130,11 +175,54 @@ func (s *ManagerSuite) TestLogin_ValidTOTP_CreatesSession() {
 	s.Require().NoError(codeErr)
 
 	s.users.EXPECT().GetByUsername(gomock.Any(), "alice").Return(usr, nil)
-	s.users.EXPECT().UpdateTOTPCounter(gomock.Any(), "user-id", gomock.Any()).Return(true, nil)
+	s.users.EXPECT().UpdateTOTPCounter(gomock.Any(), s.userID, gomock.Any()).Return(true, nil)
 	s.sessions.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
-	s.users.EXPECT().UpdateLastLogin(gomock.Any(), "user-id", gomock.Any()).Return(nil)
+	s.users.EXPECT().UpdateLastLogin(gomock.Any(), s.userID, gomock.Any()).Return(nil)
 
-	sessID, err := s.mgr.Login(s.T().Context(), "alice", testPassword, totpCode, "UA", "127.0.0.1")
+	sessID, err := s.mgr.Login(s.T().Context(), "alice", testPassword, totpCode, "UA", "127.0.0.1", "")
+	s.Require().NoError(err)
+	s.NotEmpty(sessID)
+}
+
+// TestLogin_RevokesPreviousSession pins that signing in again does not leave the session the
+// browser presented behind: it is deleted right after the new one is created, so a stolen or
+// forgotten cookie cannot outlive a re-login.
+func (s *ManagerSuite) TestLogin_RevokesPreviousSession() {
+	usr, rawSecret := s.testUser()
+
+	totpCode, codeErr := totp.GenerateCode(rawSecret, time.Now())
+	s.Require().NoError(codeErr)
+
+	s.users.EXPECT().GetByUsername(gomock.Any(), "alice").Return(usr, nil)
+	s.users.EXPECT().UpdateTOTPCounter(gomock.Any(), s.userID, gomock.Any()).Return(true, nil)
+
+	gomock.InOrder(
+		s.sessions.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil),
+		s.sessions.EXPECT().Delete(gomock.Any(), hashToken("old-session")).Return(nil),
+	)
+	s.users.EXPECT().UpdateLastLogin(gomock.Any(), s.userID, gomock.Any()).Return(nil)
+
+	sessID, err := s.mgr.Login(s.T().Context(), "alice", testPassword, totpCode, "UA", "127.0.0.1", "old-session")
+	s.Require().NoError(err)
+	s.NotEmpty(sessID)
+	s.NotEqual("old-session", sessID)
+}
+
+// TestLogin_PreviousSessionDeleteFailure_DoesNotFailLogin — revoking the old session is
+// best-effort (fail-soft): the new session is already valid and the caller holds a working login.
+func (s *ManagerSuite) TestLogin_PreviousSessionDeleteFailure_DoesNotFailLogin() {
+	usr, rawSecret := s.testUser()
+
+	totpCode, codeErr := totp.GenerateCode(rawSecret, time.Now())
+	s.Require().NoError(codeErr)
+
+	s.users.EXPECT().GetByUsername(gomock.Any(), "alice").Return(usr, nil)
+	s.users.EXPECT().UpdateTOTPCounter(gomock.Any(), s.userID, gomock.Any()).Return(true, nil)
+	s.sessions.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
+	s.sessions.EXPECT().Delete(gomock.Any(), hashToken("old-session")).Return(errors.New("db down"))
+	s.users.EXPECT().UpdateLastLogin(gomock.Any(), s.userID, gomock.Any()).Return(nil)
+
+	sessID, err := s.mgr.Login(s.T().Context(), "alice", testPassword, totpCode, "UA", "127.0.0.1", "old-session")
 	s.Require().NoError(err)
 	s.NotEmpty(sessID)
 }
@@ -148,25 +236,116 @@ func (s *ManagerSuite) TestLogin_ReplayedTOTP_ReturnsErrInvalidTOTP() {
 	// The store's conditional counter update reports the code as already used.
 	// This guard lives in the DB, so it holds across restarts and instances.
 	s.users.EXPECT().GetByUsername(gomock.Any(), "alice").Return(usr, nil)
-	s.users.EXPECT().UpdateTOTPCounter(gomock.Any(), "user-id", gomock.Any()).Return(false, nil)
+	s.users.EXPECT().UpdateTOTPCounter(gomock.Any(), s.userID, gomock.Any()).Return(false, nil)
 
-	_, err := s.mgr.Login(s.T().Context(), "alice", testPassword, totpCode, "UA", "127.0.0.1")
+	_, err := s.mgr.Login(s.T().Context(), "alice", testPassword, totpCode, "UA", "127.0.0.1", "")
 	s.ErrorIs(err, domain.ErrInvalidTOTP)
 }
 
-// ── Logout ──
+// ── TOTP secret migration on login ──.
+
+// TestLogin_LegacySeal_MigratesSecret pins the migration path for accounts whose TOTP secret
+// predates the versioned envelope: the login succeeds and the secret is rewritten in the
+// current format, so the account survives a later change to the configured argon2 cost.
+func (s *ManagerSuite) TestLogin_LegacySeal_MigratesSecret() {
+	usr, rawSecret := s.legacyTestUser()
+	legacySealed := usr.TOTPSecret
+
+	totpCode, codeErr := totp.GenerateCode(rawSecret, time.Now())
+	s.Require().NoError(codeErr)
+
+	var resealed string
+
+	s.users.EXPECT().GetByUsername(gomock.Any(), "alice").Return(usr, nil)
+	s.users.EXPECT().UpdateTOTPCounter(gomock.Any(), s.userID, gomock.Any()).Return(true, nil)
+	s.users.EXPECT().
+		UpdateTOTPSecret(gomock.Any(), s.userID, gomock.Any()).
+		DoAndReturn(func(_ context.Context, _ uuid.UUID, secret string) error {
+			resealed = secret
+
+			return nil
+		})
+	s.sessions.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
+	s.users.EXPECT().UpdateLastLogin(gomock.Any(), s.userID, gomock.Any()).Return(nil)
+
+	sessID, err := s.mgr.Login(s.T().Context(), "alice", testPassword, totpCode, "UA", "127.0.0.1", "")
+	s.Require().NoError(err)
+	s.NotEmpty(sessID)
+
+	s.NotEqual(legacySealed, resealed, "the stored secret must have been rewritten")
+
+	// The rewritten value must still yield the same TOTP secret, now under a versioned envelope
+	// that no longer reports itself stale.
+	got, stale, openErr := crypto.NewSealer(testArgon2Params).
+		Open(resealed, []byte(testPassword), usr.KDFSalt)
+	s.Require().NoError(openErr)
+	s.Equal(rawSecret, got)
+	s.False(stale)
+}
+
+// TestLogin_CurrentSeal_DoesNotRewrite guards against a needless write on every single login:
+// an up-to-date secret must not touch the store. The suite's strict mock has no
+// UpdateTOTPSecret expectation, so any call fails the test.
+func (s *ManagerSuite) TestLogin_CurrentSeal_DoesNotRewrite() {
+	usr, rawSecret := s.testUser()
+
+	totpCode, codeErr := totp.GenerateCode(rawSecret, time.Now())
+	s.Require().NoError(codeErr)
+
+	s.users.EXPECT().GetByUsername(gomock.Any(), "alice").Return(usr, nil)
+	s.users.EXPECT().UpdateTOTPCounter(gomock.Any(), s.userID, gomock.Any()).Return(true, nil)
+	s.sessions.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
+	s.users.EXPECT().UpdateLastLogin(gomock.Any(), s.userID, gomock.Any()).Return(nil)
+
+	_, err := s.mgr.Login(s.T().Context(), "alice", testPassword, totpCode, "UA", "127.0.0.1", "")
+	s.Require().NoError(err)
+}
+
+// TestLogin_LegacySeal_ResealFailureDoesNotFailLogin pins the fail-soft contract: both factors
+// have already passed and the old secret is still perfectly usable, so a failed migration write
+// must not cost the user their login. The next login retries it.
+func (s *ManagerSuite) TestLogin_LegacySeal_ResealFailureDoesNotFailLogin() {
+	usr, rawSecret := s.legacyTestUser()
+
+	totpCode, codeErr := totp.GenerateCode(rawSecret, time.Now())
+	s.Require().NoError(codeErr)
+
+	s.users.EXPECT().GetByUsername(gomock.Any(), "alice").Return(usr, nil)
+	s.users.EXPECT().UpdateTOTPCounter(gomock.Any(), s.userID, gomock.Any()).Return(true, nil)
+	s.users.EXPECT().
+		UpdateTOTPSecret(gomock.Any(), s.userID, gomock.Any()).
+		Return(errors.New("db down"))
+	s.sessions.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
+	s.users.EXPECT().UpdateLastLogin(gomock.Any(), s.userID, gomock.Any()).Return(nil)
+
+	sessID, err := s.mgr.Login(s.T().Context(), "alice", testPassword, totpCode, "UA", "127.0.0.1", "")
+	s.Require().NoError(err)
+	s.NotEmpty(sessID)
+}
+
+// TestLogin_WrongTOTP_DoesNotMigrate keeps the migration behind the second factor: a correct
+// password with a wrong code must not trigger a write. The strict mock enforces this.
+func (s *ManagerSuite) TestLogin_WrongTOTP_DoesNotMigrate() {
+	usr, _ := s.legacyTestUser()
+	s.users.EXPECT().GetByUsername(gomock.Any(), "alice").Return(usr, nil)
+
+	_, err := s.mgr.Login(s.T().Context(), "alice", testPassword, "000000", "", "", "")
+	s.ErrorIs(err, domain.ErrInvalidTOTP)
+}
+
+// ── Logout ──.
 
 func (s *ManagerSuite) TestLogout_DeletesSession() {
-	s.sessions.EXPECT().Delete(gomock.Any(), "sess-1").Return(nil)
+	s.sessions.EXPECT().Delete(gomock.Any(), hashToken("sess-1")).Return(nil)
 
 	s.Require().NoError(s.mgr.Logout(s.T().Context(), "sess-1"))
 }
 
-// ── GetSession ──
+// ── GetSession ──.
 
 func (s *ManagerSuite) TestGetSession_ExpiredSession_ReturnsErrSessionExpired() {
 	s.sessions.EXPECT().
-		Get(gomock.Any(), "bad-sess").
+		Get(gomock.Any(), hashToken("bad-sess")).
 		Return(nil, domain.ErrSessionExpired)
 
 	_, err := s.mgr.GetSession(s.T().Context(), "bad-sess")
@@ -174,41 +353,58 @@ func (s *ManagerSuite) TestGetSession_ExpiredSession_ReturnsErrSessionExpired() 
 }
 
 func (s *ManagerSuite) TestGetSession_ValidSession_ReturnsUser() {
-	sess := &domain.Session{SessionID: "s1", UserID: "user-id", ExpiresAt: time.Now().Add(time.Hour)}
-	usr := &domain.User{ID: "user-id", Username: "alice"}
+	sess := &domain.Session{
+		SessionHash: "s1", UserID: s.userID, ExpiresAt: time.Now().Add(time.Hour),
+		CreatedAt: time.Time{}, UserAgent: "", IP: "",
+	}
+	usr := &domain.User{
+		ID: s.userID, Username: "alice",
+		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
+		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
+	}
 
-	s.sessions.EXPECT().Get(gomock.Any(), "s1").Return(sess, nil)
-	s.users.EXPECT().GetByID(gomock.Any(), "user-id").Return(usr, nil)
+	s.sessions.EXPECT().Get(gomock.Any(), hashToken("s1")).Return(sess, nil)
+	s.users.EXPECT().GetByID(gomock.Any(), s.userID).Return(usr, nil)
 
 	got, err := s.mgr.GetSession(s.T().Context(), "s1")
 	s.Require().NoError(err)
 	s.Equal("alice", got.Username)
 }
 
-// ── GenerateInvite ──
+// ── GenerateInvite ──.
 
 func (s *ManagerSuite) TestGenerateInvite_NonAdmin_ReturnsErrForbidden() {
-	nonAdmin := &domain.User{ID: "user-id", IsAdmin: false}
-	s.users.EXPECT().GetByID(gomock.Any(), "user-id").Return(nonAdmin, nil)
+	nonAdmin := &domain.User{
+		ID: s.userID, IsAdmin: false, CreatedAt: time.Time{},
+		LastLoginAt: nil, Username: "", TOTPSecret: "", PasswordHash: "",
+		KDFSalt: nil, LastTOTPCounter: 0,
+	}
+	s.users.EXPECT().GetByID(gomock.Any(), s.userID).Return(nonAdmin, nil)
 
-	_, err := s.mgr.GenerateInvite(s.T().Context(), "user-id")
+	_, err := s.mgr.GenerateInvite(s.T().Context(), s.userID, Issuer{
+		APITokenHash: "", StepUp: StepUp{Password: "", TOTPCode: ""},
+	})
 	s.ErrorIs(err, domain.ErrForbidden)
 }
 
 func (s *ManagerSuite) TestGenerateInvite_Admin_ReturnsToken() {
-	s.users.EXPECT().GetByID(gomock.Any(), "admin-uuid").Return(s.adminUser(), nil)
-	s.invites.EXPECT().Issue(gomock.Any(), "admin-uuid").Return("tok-abc", nil)
+	s.users.EXPECT().GetByID(gomock.Any(), s.adminID).Return(s.adminUser(), nil)
+	s.invites.EXPECT().Issue(gomock.Any(), s.adminID).Return("tok-abc", nil)
 
-	tok, err := s.mgr.GenerateInvite(s.T().Context(), "admin-uuid")
+	tok, err := s.mgr.GenerateInvite(s.T().Context(), s.adminID, Issuer{
+		APITokenHash: "", StepUp: StepUp{Password: "", TOTPCode: ""},
+	})
 	s.Require().NoError(err)
 	s.Equal("tok-abc", tok)
 }
 
 func (s *ManagerSuite) TestGenerateInvite_AdminLookupFails_WrapsError() {
 	boom := errors.New("boom")
-	s.users.EXPECT().GetByID(gomock.Any(), "admin-uuid").Return(nil, boom)
+	s.users.EXPECT().GetByID(gomock.Any(), s.adminID).Return(nil, boom)
 
-	_, err := s.mgr.GenerateInvite(s.T().Context(), "admin-uuid")
+	_, err := s.mgr.GenerateInvite(s.T().Context(), s.adminID, Issuer{
+		APITokenHash: "", StepUp: StepUp{Password: "", TOTPCode: ""},
+	})
 	s.Require().Error(err)
 	s.ErrorIs(err, boom)
 }
@@ -216,15 +412,17 @@ func (s *ManagerSuite) TestGenerateInvite_AdminLookupFails_WrapsError() {
 func (s *ManagerSuite) TestGenerateInvite_IssueFails_WrapsError() {
 	boom := errors.New("boom")
 
-	s.users.EXPECT().GetByID(gomock.Any(), "admin-uuid").Return(s.adminUser(), nil)
-	s.invites.EXPECT().Issue(gomock.Any(), "admin-uuid").Return("", boom)
+	s.users.EXPECT().GetByID(gomock.Any(), s.adminID).Return(s.adminUser(), nil)
+	s.invites.EXPECT().Issue(gomock.Any(), s.adminID).Return("", boom)
 
-	_, err := s.mgr.GenerateInvite(s.T().Context(), "admin-uuid")
+	_, err := s.mgr.GenerateInvite(s.T().Context(), s.adminID, Issuer{
+		APITokenHash: "", StepUp: StepUp{Password: "", TOTPCode: ""},
+	})
 	s.Require().Error(err)
 	s.ErrorIs(err, boom)
 }
 
-// ── AcceptInvite ──
+// ── AcceptInvite ──.
 
 func (s *ManagerSuite) TestAcceptInvite_WeakPassword_ReturnsErrWeakPassword() {
 	_, err := s.mgr.AcceptInvite(s.T().Context(), "tok", "newuser", "weak")
@@ -247,9 +445,14 @@ func (s *ManagerSuite) TestAcceptInvite_ValidToken_CreatesUserAndReturnsQR() {
 		RedeemInvite(gomock.Any(), "good-tok", "newuser", gomock.Any()).
 		Return(nil)
 
-	qrURL, err := s.mgr.AcceptInvite(s.T().Context(), "good-tok", "newuser", testPassword)
+	enr, err := s.mgr.AcceptInvite(s.T().Context(), "good-tok", "newuser", testPassword)
 	s.Require().NoError(err)
-	s.Contains(qrURL, "data:image/png;base64,")
+	s.Contains(enr.QRCode, "data:image/png;base64,")
+	s.Contains(enr.TOTPURI, "otpauth://totp/")
+
+	// The URI must be a parseable otpauth key — CLI consumers rely on that.
+	_, parseErr := otp.NewKeyFromURL(enr.TOTPURI)
+	s.Require().NoError(parseErr)
 }
 
 func (s *ManagerSuite) TestAcceptInvite_RaceLoser_ReturnsErrUserExistsAndKeepsInvite() {
@@ -268,14 +471,18 @@ func (s *ManagerSuite) TestAcceptInvite_DuplicateUsername_ReturnsErrUserExistsWi
 	// GetByUsername finds existing user → ErrUserExists returned before RedeemInvite is called.
 	s.users.EXPECT().
 		GetByUsername(gomock.Any(), "existing").
-		Return(&domain.User{ID: "x", Username: "existing"}, nil)
+		Return(&domain.User{
+			ID: uuid.New(), Username: "existing",
+			CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
+			KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
+		}, nil)
 	// RedeemInvite must NOT be called.
 
 	_, err := s.mgr.AcceptInvite(s.T().Context(), "tok", "existing", testPassword)
 	s.ErrorIs(err, domain.ErrUserExists)
 }
 
-// ── AcceptFirstAdmin ──
+// ── AcceptFirstAdmin ──.
 
 func (s *ManagerSuite) TestAcceptFirstAdmin_WeakPassword_ReturnsErrWeakPassword() {
 	_, err := s.mgr.AcceptFirstAdmin(s.T().Context(), "admin", "tooshort")
@@ -283,7 +490,11 @@ func (s *ManagerSuite) TestAcceptFirstAdmin_WeakPassword_ReturnsErrWeakPassword(
 }
 
 func (s *ManagerSuite) TestAcceptFirstAdmin_NonEmptyDB_ReturnsErrForbidden() {
-	s.users.EXPECT().List(gomock.Any()).Return([]*domain.User{{ID: "existing"}}, nil)
+	s.users.EXPECT().List(gomock.Any()).Return([]*domain.User{{
+		ID:        uuid.New(),
+		CreatedAt: time.Time{}, LastLoginAt: nil, Username: "", TOTPSecret: "",
+		PasswordHash: "", KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
+	}}, nil)
 
 	_, err := s.mgr.AcceptFirstAdmin(s.T().Context(), "admin", testPassword)
 	s.ErrorIs(err, domain.ErrForbidden)
@@ -301,9 +512,10 @@ func (s *ManagerSuite) TestAcceptFirstAdmin_EmptyDB_CreatesAdminAndReturnsQR() {
 		},
 	)
 
-	qrURL, err := s.mgr.AcceptFirstAdmin(s.T().Context(), "firstadmin", testPassword)
+	enr, err := s.mgr.AcceptFirstAdmin(s.T().Context(), "firstadmin", testPassword)
 	s.Require().NoError(err)
-	s.Contains(qrURL, "data:image/png;base64,")
+	s.Contains(enr.QRCode, "data:image/png;base64,")
+	s.Contains(enr.TOTPURI, "otpauth://totp/")
 }
 
 func (s *ManagerSuite) TestAcceptFirstAdmin_RaceLoser_PropagatesErrUserExists() {
@@ -318,14 +530,17 @@ func (s *ManagerSuite) TestAcceptFirstAdmin_RaceLoser_PropagatesErrUserExists() 
 	s.ErrorIs(err, domain.ErrUserExists)
 }
 
-// ── ChangePassword ──
+// ── ChangePassword ──.
 
 func (s *ManagerSuite) TestChangePassword_WrongOldPassword_ReturnsErrInvalidPassword() {
 	usr, _ := s.testUser()
-	sess := &domain.Session{SessionID: "sess", UserID: "user-id"}
+	sess := &domain.Session{
+		SessionHash: "sess", UserID: s.userID,
+		CreatedAt: time.Time{}, ExpiresAt: time.Time{}, UserAgent: "", IP: "",
+	}
 
-	s.sessions.EXPECT().Get(gomock.Any(), "sess").Return(sess, nil)
-	s.users.EXPECT().GetByID(gomock.Any(), "user-id").Return(usr, nil)
+	s.sessions.EXPECT().Get(gomock.Any(), hashToken("sess")).Return(sess, nil)
+	s.users.EXPECT().GetByID(gomock.Any(), s.userID).Return(usr, nil)
 
 	_, err := s.mgr.ChangePassword(s.T().Context(), "sess", "WrongP@ss12!", "NewP@ssw0rd!", "000000")
 	s.ErrorIs(err, domain.ErrInvalidPassword)
@@ -333,10 +548,13 @@ func (s *ManagerSuite) TestChangePassword_WrongOldPassword_ReturnsErrInvalidPass
 
 func (s *ManagerSuite) TestChangePassword_InvalidTOTP_ReturnsErrInvalidTOTP() {
 	usr, _ := s.testUser()
-	sess := &domain.Session{SessionID: "sess", UserID: "user-id"}
+	sess := &domain.Session{
+		SessionHash: "sess", UserID: s.userID,
+		CreatedAt: time.Time{}, ExpiresAt: time.Time{}, UserAgent: "", IP: "",
+	}
 
-	s.sessions.EXPECT().Get(gomock.Any(), "sess").Return(sess, nil)
-	s.users.EXPECT().GetByID(gomock.Any(), "user-id").Return(usr, nil)
+	s.sessions.EXPECT().Get(gomock.Any(), hashToken("sess")).Return(sess, nil)
+	s.users.EXPECT().GetByID(gomock.Any(), s.userID).Return(usr, nil)
 
 	_, err := s.mgr.ChangePassword(s.T().Context(), "sess", testPassword, "NewP@ssw0rd!", "000000")
 	s.ErrorIs(err, domain.ErrInvalidTOTP)
@@ -344,14 +562,17 @@ func (s *ManagerSuite) TestChangePassword_InvalidTOTP_ReturnsErrInvalidTOTP() {
 
 func (s *ManagerSuite) TestChangePassword_WeakNewPassword_ReturnsErrWeakPassword() {
 	usr, rawSecret := s.testUser()
-	sess := &domain.Session{SessionID: "sess", UserID: "user-id"}
+	sess := &domain.Session{
+		SessionHash: "sess", UserID: s.userID,
+		CreatedAt: time.Time{}, ExpiresAt: time.Time{}, UserAgent: "", IP: "",
+	}
 
 	code, err := totp.GenerateCode(rawSecret, time.Now())
 	s.Require().NoError(err)
 
-	s.sessions.EXPECT().Get(gomock.Any(), "sess").Return(sess, nil)
-	s.users.EXPECT().GetByID(gomock.Any(), "user-id").Return(usr, nil)
-	s.users.EXPECT().UpdateTOTPCounter(gomock.Any(), "user-id", gomock.Any()).Return(true, nil)
+	s.sessions.EXPECT().Get(gomock.Any(), hashToken("sess")).Return(sess, nil)
+	s.users.EXPECT().GetByID(gomock.Any(), s.userID).Return(usr, nil)
+	s.users.EXPECT().UpdateTOTPCounter(gomock.Any(), s.userID, gomock.Any()).Return(true, nil)
 
 	_, err = s.mgr.ChangePassword(s.T().Context(), "sess", testPassword, "weak", code)
 	s.ErrorIs(err, domain.ErrWeakPassword)
@@ -359,21 +580,24 @@ func (s *ManagerSuite) TestChangePassword_WeakNewPassword_ReturnsErrWeakPassword
 
 func (s *ManagerSuite) TestChangePassword_Success_UpdatesPasswordAndRotatesSession() {
 	usr, rawSecret := s.testUser()
-	sess := &domain.Session{SessionID: "sess", UserID: "user-id", UserAgent: "ua", IP: "1.2.3.4"}
+	sess := &domain.Session{
+		SessionHash: "sess", UserID: s.userID, UserAgent: "ua", IP: "1.2.3.4",
+		CreatedAt: time.Time{}, ExpiresAt: time.Time{},
+	}
 
 	code, err := totp.GenerateCode(rawSecret, time.Now())
 	s.Require().NoError(err)
 
-	s.sessions.EXPECT().Get(gomock.Any(), "sess").Return(sess, nil)
-	s.users.EXPECT().GetByID(gomock.Any(), "user-id").Return(usr, nil)
-	s.users.EXPECT().UpdateTOTPCounter(gomock.Any(), "user-id", gomock.Any()).Return(true, nil)
-	s.users.EXPECT().UpdatePassword(gomock.Any(), "user-id", gomock.Any(), gomock.Any(), gomock.Any()).
+	s.sessions.EXPECT().Get(gomock.Any(), hashToken("sess")).Return(sess, nil)
+	s.users.EXPECT().GetByID(gomock.Any(), s.userID).Return(usr, nil)
+	s.users.EXPECT().UpdateTOTPCounter(gomock.Any(), s.userID, gomock.Any()).Return(true, nil)
+	s.users.EXPECT().UpdatePassword(gomock.Any(), s.userID, gomock.Any(), gomock.Any(), gomock.Any()).
 		Return(nil)
 	// Create must be called BEFORE DeleteByUserIDExcept (atomicity fix).
 	// DeleteByUserIDExcept preserves the new session while wiping old ones.
 	gomock.InOrder(
 		s.sessions.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil),
-		s.sessions.EXPECT().DeleteByUserIDExcept(gomock.Any(), "user-id", gomock.Any()).Return(nil),
+		s.sessions.EXPECT().DeleteByUserIDExcept(gomock.Any(), s.userID, gomock.Any()).Return(nil),
 	)
 
 	newSessID, err := s.mgr.ChangePassword(s.T().Context(), "sess", testPassword, "NewP@ssw0rd!", code)
@@ -382,28 +606,113 @@ func (s *ManagerSuite) TestChangePassword_Success_UpdatesPasswordAndRotatesSessi
 	s.NotEqual("sess", newSessID)
 }
 
-func (s *ManagerSuite) TestChangePassword_DeleteByUserIDFails_ReturnsNewSessionID() {
+func (s *ManagerSuite) TestChangePassword_RevocationFailureReturnsSessionAndWarning() {
 	usr, rawSecret := s.testUser()
-	sess := &domain.Session{SessionID: "sess", UserID: "user-id", UserAgent: "ua", IP: "1.2.3.4"}
+	sess := &domain.Session{
+		SessionHash: "sess", UserID: s.userID, UserAgent: "ua", IP: "1.2.3.4",
+		CreatedAt: time.Time{}, ExpiresAt: time.Time{},
+	}
 
 	code, err := totp.GenerateCode(rawSecret, time.Now())
 	s.Require().NoError(err)
 
-	s.sessions.EXPECT().Get(gomock.Any(), "sess").Return(sess, nil)
-	s.users.EXPECT().GetByID(gomock.Any(), "user-id").Return(usr, nil)
-	s.users.EXPECT().UpdateTOTPCounter(gomock.Any(), "user-id", gomock.Any()).Return(true, nil)
-	s.users.EXPECT().UpdatePassword(gomock.Any(), "user-id", gomock.Any(), gomock.Any(), gomock.Any()).
+	s.sessions.EXPECT().Get(gomock.Any(), hashToken("sess")).Return(sess, nil)
+	s.users.EXPECT().GetByID(gomock.Any(), s.userID).Return(usr, nil)
+	s.users.EXPECT().UpdateTOTPCounter(gomock.Any(), s.userID, gomock.Any()).Return(true, nil)
+	s.users.EXPECT().UpdatePassword(gomock.Any(), s.userID, gomock.Any(), gomock.Any(), gomock.Any()).
 		Return(nil)
 	s.sessions.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
-	s.sessions.EXPECT().DeleteByUserIDExcept(gomock.Any(), "user-id", gomock.Any()).Return(errors.New("db timeout"))
+	s.sessions.EXPECT().DeleteByUserIDExcept(gomock.Any(), s.userID, gomock.Any()).Return(errors.New("db timeout"))
 
-	// DeleteByUserIDExcept failure should warn but not fail the caller — new session was created.
+	// A partial result must retain the replacement session and explicitly report revocation failure.
 	newSessID, err := s.mgr.ChangePassword(s.T().Context(), "sess", testPassword, "NewP@ssw0rd!", code)
-	s.Require().NoError(err)
+	s.Require().ErrorIs(err, domain.ErrSessionRevocation)
 	s.NotEmpty(newSessID)
 }
 
-// ── IsEmpty ──
+// TestChangePassword_RevokesAPITokens: a password change also revokes every API token of the
+// account (M-6), and a failure there is reported like a session-revocation failure.
+func (s *ManagerSuite) TestChangePassword_RevokesAPITokens() {
+	for _, revokeErr := range []error{nil, errors.New("db timeout")} {
+		apiTokens := NewMockAPITokenStore(s.ctrl)
+		mgr, err := NewManager(
+			Stores{Users: s.users, Invites: s.invites, Sessions: s.sessions, APITokens: apiTokens},
+			crypto.NewPasswordHasher(testArgon2Params),
+			crypto.NewSealer(testArgon2Params), crypto.NewTOTP(), discardLog(), "padmark", 0)
+		s.Require().NoError(err)
+
+		usr, rawSecret := s.testUser()
+		sess := &domain.Session{
+			SessionHash: "sess", UserID: s.userID,
+			CreatedAt: time.Time{}, ExpiresAt: time.Time{}, UserAgent: "", IP: "",
+		}
+
+		code, err := totp.GenerateCode(rawSecret, time.Now())
+		s.Require().NoError(err)
+
+		s.sessions.EXPECT().Get(gomock.Any(), hashToken("sess")).Return(sess, nil)
+		s.users.EXPECT().GetByID(gomock.Any(), s.userID).Return(usr, nil)
+		s.users.EXPECT().UpdateTOTPCounter(gomock.Any(), s.userID, gomock.Any()).Return(true, nil)
+		s.users.EXPECT().UpdatePassword(gomock.Any(), s.userID, gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
+		s.sessions.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
+		s.sessions.EXPECT().DeleteByUserIDExcept(gomock.Any(), s.userID, gomock.Any()).Return(nil)
+		apiTokens.EXPECT().DeleteByUserID(gomock.Any(), s.userID).Return(revokeErr)
+
+		newSessID, err := mgr.ChangePassword(s.T().Context(), "sess", testPassword, "NewP@ssw0rd!", code)
+		s.NotEmpty(newSessID)
+
+		if revokeErr == nil {
+			s.Require().NoError(err)
+		} else {
+			s.Require().ErrorIs(err, domain.ErrSessionRevocation)
+		}
+	}
+}
+
+// ── VerifyStepUp / GenerateInvite step-up (M-6) ──.
+
+func (s *ManagerSuite) TestVerifyStepUp() {
+	usr, rawSecret := s.testUser()
+
+	code, err := totp.GenerateCode(rawSecret, time.Now())
+	s.Require().NoError(err)
+
+	s.users.EXPECT().GetByID(gomock.Any(), s.userID).Return(usr, nil).Times(3)
+
+	s.Require().ErrorIs(s.mgr.VerifyStepUp(s.T().Context(), s.userID, StepUp{Password: "WrongP@ss12!", TOTPCode: code}),
+		domain.ErrStepUpFailed, "wrong password")
+	s.Require().ErrorIs(s.mgr.VerifyStepUp(s.T().Context(), s.userID, StepUp{Password: testPassword, TOTPCode: "000000"}),
+		domain.ErrStepUpFailed, "wrong code")
+
+	s.users.EXPECT().UpdateTOTPCounter(gomock.Any(), s.userID, gomock.Any()).Return(true, nil)
+	s.Require().NoError(s.mgr.VerifyStepUp(s.T().Context(), s.userID, StepUp{Password: testPassword, TOTPCode: code}))
+}
+
+func (s *ManagerSuite) TestGenerateInvite_Bearer_RequiresStepUp() {
+	admin, rawSecret := s.testUser()
+	admin.IsAdmin = true
+
+	s.users.EXPECT().GetByID(gomock.Any(), s.userID).Return(admin, nil).AnyTimes()
+
+	_, err := s.mgr.GenerateInvite(s.T().Context(), s.userID, Issuer{
+		APITokenHash: "parent",
+		StepUp:       StepUp{Password: "", TOTPCode: ""},
+	})
+	s.Require().ErrorIs(err, domain.ErrStepUpRequired, "a bearer without step-up mints no invite")
+
+	code, err := totp.GenerateCode(rawSecret, time.Now())
+	s.Require().NoError(err)
+
+	s.users.EXPECT().UpdateTOTPCounter(gomock.Any(), s.userID, gomock.Any()).Return(true, nil)
+	s.invites.EXPECT().Issue(gomock.Any(), s.userID).Return("tok-abc", nil)
+
+	tok, err := s.mgr.GenerateInvite(s.T().Context(), s.userID,
+		Issuer{APITokenHash: "parent", StepUp: StepUp{Password: testPassword, TOTPCode: code}})
+	s.Require().NoError(err)
+	s.Equal("tok-abc", tok)
+}
+
+// ── IsEmpty ──.
 
 func (s *ManagerSuite) TestIsEmpty_NoUsers_ReturnsTrue() {
 	s.users.EXPECT().List(gomock.Any()).Return(nil, nil)
@@ -414,39 +723,52 @@ func (s *ManagerSuite) TestIsEmpty_NoUsers_ReturnsTrue() {
 }
 
 func (s *ManagerSuite) TestIsEmpty_HasUsers_ReturnsFalse() {
-	s.users.EXPECT().List(gomock.Any()).Return([]*domain.User{{ID: "u1"}}, nil)
+	s.users.EXPECT().List(gomock.Any()).Return([]*domain.User{{
+		ID:        uuid.New(),
+		CreatedAt: time.Time{}, LastLoginAt: nil, Username: "", TOTPSecret: "",
+		PasswordHash: "", KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
+	}}, nil)
 
 	empty, err := s.mgr.IsEmpty(s.T().Context())
 	s.Require().NoError(err)
 	s.False(empty)
 }
 
-// ── ListUsers ──
+// ── ListUsers ──.
 
 func (s *ManagerSuite) TestListUsers_Admin_ReturnsUsers() {
-	users := []*domain.User{s.adminUser(), {ID: "u2", Username: "bob"}}
+	users := []*domain.User{s.adminUser(), {
+		ID: uuid.New(), Username: "bob",
+		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
+		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
+	}}
 
-	s.users.EXPECT().GetByID(gomock.Any(), "admin-uuid").Return(s.adminUser(), nil)
+	s.users.EXPECT().GetByID(gomock.Any(), s.adminID).Return(s.adminUser(), nil)
 	s.users.EXPECT().List(gomock.Any()).Return(users, nil)
 
-	got, err := s.mgr.ListUsers(s.T().Context(), "admin-uuid")
+	got, err := s.mgr.ListUsers(s.T().Context(), s.adminID)
 	s.Require().NoError(err)
 	s.Equal(users, got)
 }
 
 func (s *ManagerSuite) TestListUsers_NonAdmin_ReturnsErrForbidden() {
-	nonAdmin := &domain.User{ID: "caller", IsAdmin: false}
-	s.users.EXPECT().GetByID(gomock.Any(), "caller").Return(nonAdmin, nil)
+	caller := uuid.New()
+	nonAdmin := &domain.User{
+		ID: caller, IsAdmin: false, CreatedAt: time.Time{},
+		LastLoginAt: nil, Username: "", TOTPSecret: "", PasswordHash: "",
+		KDFSalt: nil, LastTOTPCounter: 0,
+	}
+	s.users.EXPECT().GetByID(gomock.Any(), caller).Return(nonAdmin, nil)
 
-	_, err := s.mgr.ListUsers(s.T().Context(), "caller")
+	_, err := s.mgr.ListUsers(s.T().Context(), caller)
 	s.ErrorIs(err, domain.ErrForbidden)
 }
 
 func (s *ManagerSuite) TestListUsers_AdminLookupFails_WrapsError() {
 	boom := errors.New("boom")
-	s.users.EXPECT().GetByID(gomock.Any(), "admin-uuid").Return(nil, boom)
+	s.users.EXPECT().GetByID(gomock.Any(), s.adminID).Return(nil, boom)
 
-	_, err := s.mgr.ListUsers(s.T().Context(), "admin-uuid")
+	_, err := s.mgr.ListUsers(s.T().Context(), s.adminID)
 	s.Require().Error(err)
 	s.ErrorIs(err, boom)
 }
@@ -454,107 +776,150 @@ func (s *ManagerSuite) TestListUsers_AdminLookupFails_WrapsError() {
 func (s *ManagerSuite) TestListUsers_ListFails_WrapsError() {
 	boom := errors.New("boom")
 
-	s.users.EXPECT().GetByID(gomock.Any(), "admin-uuid").Return(s.adminUser(), nil)
+	s.users.EXPECT().GetByID(gomock.Any(), s.adminID).Return(s.adminUser(), nil)
 	s.users.EXPECT().List(gomock.Any()).Return(nil, boom)
 
-	_, err := s.mgr.ListUsers(s.T().Context(), "admin-uuid")
+	_, err := s.mgr.ListUsers(s.T().Context(), s.adminID)
 	s.Require().Error(err)
 	s.ErrorIs(err, boom)
 }
 
-// ── RevokeUser ──
+// ── RevokeUser ──.
 
 func (s *ManagerSuite) TestRevokeUser_SelfRevoke_ReturnsErrForbidden() {
 	// Self-revoke rejected before any DB call.
-	s.ErrorIs(s.mgr.RevokeUser(s.T().Context(), "admin-uuid", "admin-uuid"), domain.ErrForbidden)
+	s.ErrorIs(s.mgr.RevokeUser(s.T().Context(), s.adminID, s.adminID), domain.ErrForbidden)
 }
 
 func (s *ManagerSuite) TestRevokeUser_NonAdmin_ReturnsErrForbidden() {
-	nonAdmin := &domain.User{ID: "caller", IsAdmin: false}
-	s.users.EXPECT().GetByID(gomock.Any(), "caller").Return(nonAdmin, nil)
+	caller := uuid.New()
+	target := uuid.New()
+	nonAdmin := &domain.User{
+		ID: caller, IsAdmin: false, CreatedAt: time.Time{},
+		LastLoginAt: nil, Username: "", TOTPSecret: "", PasswordHash: "",
+		KDFSalt: nil, LastTOTPCounter: 0,
+	}
+	s.users.EXPECT().GetByID(gomock.Any(), caller).Return(nonAdmin, nil)
 
-	s.ErrorIs(s.mgr.RevokeUser(s.T().Context(), "caller", "target"), domain.ErrForbidden)
+	s.ErrorIs(s.mgr.RevokeUser(s.T().Context(), caller, target), domain.ErrForbidden)
 }
 
 func (s *ManagerSuite) TestRevokeUser_AdminLookupFails_WrapsError() {
 	boom := errors.New("boom")
-	s.users.EXPECT().GetByID(gomock.Any(), "admin-uuid").Return(nil, boom)
+	target := uuid.New()
 
-	err := s.mgr.RevokeUser(s.T().Context(), "admin-uuid", "target-uuid")
+	s.users.EXPECT().GetByID(gomock.Any(), s.adminID).Return(nil, boom)
+
+	err := s.mgr.RevokeUser(s.T().Context(), s.adminID, target)
 	s.Require().Error(err)
 	s.ErrorIs(err, boom)
 }
 
 func (s *ManagerSuite) TestRevokeUser_TargetLookupFails_WrapsError() {
 	boom := errors.New("boom")
+	target := uuid.New()
 
-	s.users.EXPECT().GetByID(gomock.Any(), "admin-uuid").Return(s.adminUser(), nil)
-	s.users.EXPECT().GetByID(gomock.Any(), "target-uuid").Return(nil, boom)
+	s.users.EXPECT().GetByID(gomock.Any(), s.adminID).Return(s.adminUser(), nil)
+	s.users.EXPECT().GetByID(gomock.Any(), target).Return(nil, boom)
 
-	err := s.mgr.RevokeUser(s.T().Context(), "admin-uuid", "target-uuid")
+	err := s.mgr.RevokeUser(s.T().Context(), s.adminID, target)
 	s.Require().Error(err)
 	s.ErrorIs(err, boom)
 }
 
 func (s *ManagerSuite) TestRevokeUser_LastAdminListFails_WrapsError() {
-	target := &domain.User{ID: "target-uuid", IsAdmin: true}
+	targetID := uuid.New()
+	target := &domain.User{
+		ID: targetID, IsAdmin: true,
+		CreatedAt: time.Time{}, LastLoginAt: nil, Username: "", TOTPSecret: "",
+		PasswordHash: "", KDFSalt: nil, LastTOTPCounter: 0,
+	}
 	boom := errors.New("boom")
 
-	s.users.EXPECT().GetByID(gomock.Any(), "admin-uuid").Return(s.adminUser(), nil)
-	s.users.EXPECT().GetByID(gomock.Any(), "target-uuid").Return(target, nil)
+	s.users.EXPECT().GetByID(gomock.Any(), s.adminID).Return(s.adminUser(), nil)
+	s.users.EXPECT().GetByID(gomock.Any(), targetID).Return(target, nil)
 	s.users.EXPECT().List(gomock.Any()).Return(nil, boom)
 
-	err := s.mgr.RevokeUser(s.T().Context(), "admin-uuid", "target-uuid")
+	err := s.mgr.RevokeUser(s.T().Context(), s.adminID, targetID)
 	s.Require().Error(err)
 	s.ErrorIs(err, boom)
 }
 
 func (s *ManagerSuite) TestRevokeUser_RevokeFails_WrapsError() {
-	nonAdminTarget := &domain.User{ID: "target-uuid", IsAdmin: false}
+	targetID := uuid.New()
+	nonAdminTarget := &domain.User{
+		ID: targetID, IsAdmin: false, CreatedAt: time.Time{},
+		LastLoginAt: nil, Username: "", TOTPSecret: "", PasswordHash: "",
+		KDFSalt: nil, LastTOTPCounter: 0,
+	}
 	boom := errors.New("boom")
 
-	s.users.EXPECT().GetByID(gomock.Any(), "admin-uuid").Return(s.adminUser(), nil)
-	s.users.EXPECT().GetByID(gomock.Any(), "target-uuid").Return(nonAdminTarget, nil)
-	s.users.EXPECT().Revoke(gomock.Any(), "target-uuid").Return(boom)
+	s.users.EXPECT().GetByID(gomock.Any(), s.adminID).Return(s.adminUser(), nil)
+	s.users.EXPECT().GetByID(gomock.Any(), targetID).Return(nonAdminTarget, nil)
+	s.users.EXPECT().Revoke(gomock.Any(), targetID).Return(boom)
 
-	err := s.mgr.RevokeUser(s.T().Context(), "admin-uuid", "target-uuid")
+	err := s.mgr.RevokeUser(s.T().Context(), s.adminID, targetID)
 	s.Require().Error(err)
 	s.ErrorIs(err, boom)
 }
 
 func (s *ManagerSuite) TestRevokeUser_LastAdmin_ReturnsErrForbidden() {
-	target := &domain.User{ID: "target-uuid", IsAdmin: true}
+	targetID := uuid.New()
+	target := &domain.User{
+		ID: targetID, IsAdmin: true,
+		CreatedAt: time.Time{}, LastLoginAt: nil, Username: "", TOTPSecret: "",
+		PasswordHash: "", KDFSalt: nil, LastTOTPCounter: 0,
+	}
 
-	s.users.EXPECT().GetByID(gomock.Any(), "admin-uuid").Return(s.adminUser(), nil)
-	s.users.EXPECT().GetByID(gomock.Any(), "target-uuid").Return(target, nil)
+	s.users.EXPECT().GetByID(gomock.Any(), s.adminID).Return(s.adminUser(), nil)
+	s.users.EXPECT().GetByID(gomock.Any(), targetID).Return(target, nil)
 	// Only admin in the system is the target — no others remain.
 	s.users.EXPECT().List(gomock.Any()).Return([]*domain.User{target}, nil)
 
-	s.ErrorIs(s.mgr.RevokeUser(s.T().Context(), "admin-uuid", "target-uuid"), domain.ErrForbidden)
+	s.ErrorIs(s.mgr.RevokeUser(s.T().Context(), s.adminID, targetID), domain.ErrForbidden)
 }
 
 func (s *ManagerSuite) TestRevokeUser_Admin_RevokesNonAdminTarget() {
-	nonAdminTarget := &domain.User{ID: "target-uuid", IsAdmin: false}
+	targetID := uuid.New()
+	nonAdminTarget := &domain.User{
+		ID: targetID, IsAdmin: false, CreatedAt: time.Time{},
+		LastLoginAt: nil, Username: "", TOTPSecret: "", PasswordHash: "",
+		KDFSalt: nil, LastTOTPCounter: 0,
+	}
 
-	s.users.EXPECT().GetByID(gomock.Any(), "admin-uuid").Return(s.adminUser(), nil)
-	s.users.EXPECT().GetByID(gomock.Any(), "target-uuid").Return(nonAdminTarget, nil)
-	s.users.EXPECT().Revoke(gomock.Any(), "target-uuid").Return(nil)
+	s.users.EXPECT().GetByID(gomock.Any(), s.adminID).Return(s.adminUser(), nil)
+	s.users.EXPECT().GetByID(gomock.Any(), targetID).Return(nonAdminTarget, nil)
+	s.users.EXPECT().Revoke(gomock.Any(), targetID).Return(nil)
 
-	s.Require().NoError(s.mgr.RevokeUser(s.T().Context(), "admin-uuid", "target-uuid"))
+	s.Require().NoError(s.mgr.RevokeUser(s.T().Context(), s.adminID, targetID))
 }
 
 func (s *ManagerSuite) TestRevokeUser_Admin_RevokesSecondAdmin() {
-	secondAdmin := &domain.User{ID: "admin2", IsAdmin: true}
+	admin2ID := uuid.New()
+	secondAdmin := &domain.User{
+		ID: admin2ID, IsAdmin: true,
+		CreatedAt: time.Time{}, LastLoginAt: nil, Username: "", TOTPSecret: "",
+		PasswordHash: "", KDFSalt: nil, LastTOTPCounter: 0,
+	}
 
-	s.users.EXPECT().GetByID(gomock.Any(), "admin-uuid").Return(s.adminUser(), nil)
-	s.users.EXPECT().GetByID(gomock.Any(), "admin2").Return(secondAdmin, nil)
+	s.users.EXPECT().GetByID(gomock.Any(), s.adminID).Return(s.adminUser(), nil)
+	s.users.EXPECT().GetByID(gomock.Any(), admin2ID).Return(secondAdmin, nil)
 	// Two admins exist; after revoke one remains → allowed.
 	s.users.EXPECT().List(gomock.Any()).Return([]*domain.User{s.adminUser(), secondAdmin}, nil)
-	s.users.EXPECT().Revoke(gomock.Any(), "admin2").Return(nil)
+	s.users.EXPECT().Revoke(gomock.Any(), admin2ID).Return(nil)
 
-	s.Require().NoError(s.mgr.RevokeUser(s.T().Context(), "admin-uuid", "admin2"))
+	s.Require().NoError(s.mgr.RevokeUser(s.T().Context(), s.adminID, admin2ID))
 }
 
 func TestAuthManager(t *testing.T) {
 	suite.Run(t, new(ManagerSuite))
+}
+
+func (s *ManagerSuite) TestOnboardingInvalidUsernameNeverTouchesStorage() {
+	for _, username := range []string{"", "  ", "a/b", "a&secret=x", strings.Repeat("a", 65)} {
+		_, err := s.mgr.AcceptFirstAdmin(s.T().Context(), username, testPassword)
+		s.Require().ErrorIs(err, domain.ErrInvalidUsername)
+		_, err = s.mgr.AcceptInvite(s.T().Context(), "unused-invite", username, testPassword)
+		s.Require().ErrorIs(err, domain.ErrInvalidUsername)
+	}
 }

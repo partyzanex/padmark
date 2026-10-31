@@ -6,31 +6,34 @@ import (
 	"log/slog"
 
 	"github.com/urfave/cli/v3"
+
+	"github.com/partyzanex/padmark/internal/clifactory"
 )
 
 func migrateCommand() *cli.Command {
-	return &cli.Command{
-		Name:   "migrate",
-		Usage:  "Apply pending database migrations and exit",
-		Flags:  migrateFlags(),
-		Action: migrateAction,
-	}
+	return clifactory.Command(func(command *cli.Command) {
+		command.Name = encryptionMigrate
+		command.Usage = "Apply pending database migrations and exit"
+		command.Flags = migrateFlags()
+		command.Action = migrateAction
+	})
 }
 
 func migrateFlags() []cli.Flag {
 	return []cli.Flag{
-		&cli.StringFlag{
-			Name:    FlagStorage,
-			Sources: cli.EnvVars(EnvStorage),
-			Value:   DefaultStorage,
-			Usage:   "Storage backend: sqlite, postgres",
-		},
-		&cli.StringFlag{
-			Name:    FlagDSN,
-			Sources: cli.EnvVars(EnvDSN),
-			Value:   DefaultDSN,
-			Usage:   "Database DSN",
-		},
+		clifactory.StringFlag(func(flag *cli.StringFlag) {
+			flag.Name = FlagStorage
+			flag.Sources = cli.EnvVars(EnvStorage)
+			flag.Value = DefaultStorage
+			flag.Usage = "Storage backend: sqlite, postgres"
+		}),
+		clifactory.StringFlag(func(flag *cli.StringFlag) {
+			flag.Name = FlagDSN
+			flag.Sources = cli.EnvVars(EnvDSN)
+			flag.Value = DefaultDSN
+			flag.Usage = "Database DSN"
+		}),
+		skipMigrationBackupFlag(),
 	}
 }
 
@@ -40,7 +43,7 @@ func migrateAction(ctx context.Context, cmd *cli.Command) error {
 
 	log := slog.Default()
 
-	db, err := openDB(ctx, storage, dsn)
+	db, err := openDB(ctx, storage, dsn, log)
 	if err != nil {
 		return fmt.Errorf("open db: %w", err)
 	}
@@ -54,9 +57,15 @@ func migrateAction(ctx context.Context, cmd *cli.Command) error {
 
 	log.InfoContext(ctx, "running migrations", "storage", storage)
 
-	_, err = initStorage(ctx, storage, db, log)
+	if storage == storagePostgres {
+		_, err = initPostgresStorage(ctx, db, log)
+	} else {
+		_, err = initSQLiteStorage(
+			ctx, db, log, migrationOptions{dsn: dsn, skipBackup: cmd.Bool(FlagSkipMigrationBackup)})
+	}
+
 	if err != nil {
-		return err
+		return fmt.Errorf("init sqlite storage: %w", err)
 	}
 
 	log.InfoContext(ctx, "migrations applied successfully")

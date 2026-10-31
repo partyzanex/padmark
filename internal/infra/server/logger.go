@@ -3,23 +3,28 @@ package server
 import (
 	"log/slog"
 	"os"
+
+	"github.com/partyzanex/padmark/internal/infra/logging"
 )
 
 func newLogger(level, format string) *slog.Logger {
-	var lvl slog.Level
+	lvl, levelErr := logging.ParseLevel(level)
 
-	switch level {
-	case "debug":
-		lvl = slog.LevelDebug
-	case "warn":
-		lvl = slog.LevelWarn
-	case "error":
-		lvl = slog.LevelError
-	default:
-		lvl = slog.LevelInfo
+	log := buildLogger(lvl, format)
+	if levelErr != nil {
+		log.Warn("invalid log level; falling back to info", "err", levelErr)
 	}
 
-	opts := &slog.HandlerOptions{Level: lvl}
+	return log
+}
+
+func buildLogger(lvl slog.Level, format string) *slog.Logger {
+	opts := &slog.HandlerOptions{
+		Level: lvl,
+		// AddSource / ReplaceAttr zero = no source-file annotations and no attribute rewriting.
+		AddSource:   false,
+		ReplaceAttr: nil,
+	}
 
 	if format == "text" {
 		return slog.New(slog.NewTextHandler(os.Stderr, opts))

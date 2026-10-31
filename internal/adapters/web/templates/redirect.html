@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dim">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Meta refresh navigates without any script — html/template context-filters the URL in
+         this attribute (a javascript:/data: target degenerates to a dead link, it cannot run).
+         The 5-second delay is the point of the interstitial: it gives the visitor time to read
+         the destination before being sent there (links with direct_redirect=false). -->
+    <meta http-equiv="refresh" content="5;url={{.TargetURL}}">
+    <title>Padmark — Redirecting…</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="stylesheet" href="/static/style.css?p={{styleVersion}}">
+</head>
+<body class="bg-success">
+<div class="wrapper wrapper--centered">
+
+    {{template "header"}}
+
+    <div class="success-card">
+        <div class="success-banner">
+            <div class="success-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+            </div>
+            <div>
+                <div class="success-title">Redirecting…</div>
+                <div class="success-subtitle">You're being sent to an external site</div>
+            </div>
+        </div>
+
+        <div class="card-body">
+            <div class="field-block">
+                <span class="field-block-label">Destination</span>
+                <div class="copy-row">
+                    <a href="{{.TargetURL}}" class="copy-value">{{.TargetURL}}</a>
+                </div>
+            </div>
+
+            <div class="warning-block">
+                <span class="warning-icon">⚠</span>
+                <span class="warning-text">Only continue if you recognize and trust this destination.</span>
+            </div>
+        </div>
+
+        <div class="actions-row">
+            <a href="{{.TargetURL}}" class="btn-primary" id="continueLink">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+                Continue
+            </a>
+            <a href="/" class="btn-ghost">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+                Home
+            </a>
+        </div>
+
+        <noscript>
+            <div class="card-divider"></div>
+            <div class="warning-block">
+                <span class="warning-icon">🔗</span>
+                <span class="warning-text">If you are not redirected automatically in a few seconds, use the Continue link above.</span>
+            </div>
+        </noscript>
+    </div>
+
+</div>
+
+<script nonce="{{.Nonce}}">
+    {{template "theme-js"}}
+</script>
+</body>
+</html>

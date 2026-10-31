@@ -4,6 +4,7 @@ package integration
 
 import (
 	"database/sql"
+	"log/slog"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -66,8 +67,8 @@ func (s *PostgresAuthSuite) SetupTest() {
 	}
 
 	s.Users = pgrepo.NewUserRepository(s.db)
-	s.Invites = pgrepo.NewInviteRepository(s.db)
-	s.Sessions = pgrepo.NewSessionRepository(s.db)
+	s.Invites = pgrepo.NewInviteRepository(s.db, slog.Default())
+	s.Sessions = pgrepo.NewSessionRepository(s.db, slog.Default())
 }
 
 func TestPostgresAuth(t *testing.T) {

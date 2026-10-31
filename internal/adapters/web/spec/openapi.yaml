@@ -1,0 +1,1277 @@
+openapi: 3.1.0
+info:
+  title: Padmark API
+  description: |
+    JSON API for creating, storing, and managing Markdown notes.
+
+    ## Authentication
+
+    `--enable-accounts` gates access: TOTP-based user accounts with session cookies, plus
+    long-lived API tokens issued to a user for CLI/programmatic access. When it is off, the site
+    is fully public and every request is treated as anonymous. Nothing can enforce the
+    `authenticated` and `owner` privacy levels then, so a request that sends either in `privacy`
+    gets `422`; the edit code alone authorises `PUT` and `DELETE`. The deprecated `private: true`
+    is still accepted for v0.1.6 clients: as in v0.1.6 without authentication, such a note stays
+    readable by anyone until the server enables accounts.
+
+    Read endpoints (`GET`) are gated by each note's `privacy` level:
+
+    - `public` (default): anyone can read it.
+    - `authenticated`: **any** valid credential (a session or an API token) may read it — not just
+      the note's creator.
+    - `owner`: only the account that created the note (see "Edit codes and ownership" below)
+      may read it. Requires `--enable-accounts` and an authenticated session or API token at
+      creation time — a request that would produce an ownerless note (anonymous) is rejected with
+      `422` instead of silently creating a note nobody, including its creator, could ever read
+      again.
+
+    Mutations follow the same rule as reads: a caller who may read a note (or link) may also
+    attempt to mutate it with an `edit_code`. `PUT`/`DELETE` on a resource whose `privacy` level
+    requires a credential (`authenticated` or `owner`) answer `401` to an anonymous caller before
+    the edit code is even checked; anonymous callers can always create (`POST`) and, with the
+    correct `edit_code`, edit or delete anything `public`.
+
+    ## Disabled API
+
+    With `--disable-api`, API requests that reach the disabling middleware receive
+    `503` with `{"message":"API is disabled","code":"api_disabled"}`. Match `code`,
+    not the human-readable message, to distinguish this from other service failures.
+    Outer middleware may reject a request first (for example, authentication or rate limiting).
+    The web UI and `/healthz` and `/readyz` remain available.
+
+    ## Burn-after-reading
+
+    Notes can be configured to self-destruct after the first read:
+
+    - **Without TTL** (`burn_after_reading: true`): the note is deleted the moment it is first read.
+    - **With TTL** (`burn_after_reading: true, ttl: N`): the note stays accessible for *N* seconds
+      after the first read, then expires.  The exact expiry timestamp is returned in `expires_at`.
+
+    ## Edit codes and ownership
+
+    Every note is created with a randomly generated 12-character `edit_code`.  It is returned
+    **once** in the `CreateNoteResponse` and is never exposed again.  Store it — it is required
+    for `PUT` and `DELETE`, **unless** the note was created while authenticated (a session or an
+    API token): any session or API token for that same account may edit or delete it without the
+    `edit_code`. Ownership follows the account ID. It never extends to other users or to
+    admins, and it does not apply to notes created anonymously (no owner is recorded, so
+    `edit_code` is always required for them, from everyone).
+
+    A caller may choose its own `edit_code` at creation (`CreateNoteRequest.edit_code`,
+    `CreateLinkRequest.edit_code`); it must be 8–128 characters with no leading or trailing
+    whitespace or control characters. Only newly chosen codes are checked — resources created
+    with a shorter code before this rule keep accepting it.
+
+    ## Short links
+
+    `POST /links` creates a short link that redirects to `target_url` when visited at
+    `GET /{id}`. Short links share the same slug namespace as notes — a note and a link can
+    never have the same `id`, in either creation order — so the bare `GET /{id}` serves the note
+    with that `id` or, when no note has it, the short link. The older `GET /r/{id}` URL keeps
+    working for links. Short links use the same `privacy` levels,
+    `edit_code`/ownership rules, and edit-code/owner-bypass semantics described above for notes.
+    Only `http` and `https` target URLs are accepted; anything else (`javascript:`, `data:`,
+    `file:`, ...) is rejected with `400`.
+
+    `GET /{id}` for a short link is a browser-facing redirect, not a JSON API operation, so it is
+    intentionally not part of this spec's `paths` (the same convention already applies to the
+    note view at the same route). Its behaviour depends on who created the link and on the server's
+    `--direct-redirect` flag (default `false`):
+
+    - a link created by an authenticated owner (session or API token): `301 Moved Permanently`
+      straight to `target_url`;
+    - a link created anonymously: `200` HTML interstitial (meta-refresh with a 5-second delay +
+      `<noscript>` fallback) showing `target_url` before redirecting — for transparency, so a
+      visitor has time to see the destination, and so the instance is not a free open redirector;
+    - `--direct-redirect=true`: `301` for every link, anonymous ones included.
+
+    An individual link may override this via `direct_redirect` at creation time (see
+    `CreateLinkRequest.direct_redirect`): `false` forces the interstitial; `true` forces `301` only
+    for an owner's link, or on a server running with `--direct-redirect=true` — an anonymous
+    link's `true` is ignored otherwise. Omitted (or `null`) inherits the rules above.
+
+    In both modes an expired link responds `410 Gone`, a missing link `404`, and a link denied by
+    its `privacy` level `401` (or a login redirect for a browser request) — mirroring notes'
+    `handlePrivateAuth`. A `burn_after_click` link is deleted atomically on the redirect that
+    consumes it; every request after that gets `404`, in either response mode. Only a deliberate
+    access consumes it — a browser navigation, or a request whose `Accept` names a served type
+    exactly. A request without `Accept`, with only `*/*`, a `HEAD`, or a browser subresource
+    fetch (`Sec-Fetch-Dest` other than `document`/`empty`, e.g. `<img src="/{id}">`) gets
+    `409` (`code: burn_read_not_explicit`) and leaves the link intact, so link unfurlers and
+    mail scanners cannot burn it. Ordinary links redirect any client as before.
+  version: 0.4.0
+
+servers:
+  - url: http://localhost:8080
+
+tags:
+  - name: notes
+    description: CRUD operations on notes
+  - name: links
+    description: Short-link creation, lookup, and deletion (see the "Short links" section above)
+  - name: health
+    description: Liveness and readiness probes
+  - name: accounts
+    description: >
+      API tokens and signup invites for `--enable-accounts` deployments. `POST /api/tokens`
+      is callable by any authenticated caller and always issues for themselves; `POST /api/invites`
+      requires an admin.
+
+paths:
+  /notes:
+    post:
+      operationId: createNote
+      summary: Create a new note
+      description: |
+        Creates a note and returns it together with the one-time `edit_code`.
+        If `slug` is omitted a 10-character random slug is generated.
+        Responds `409 Conflict` when the requested slug is already taken.
+      tags: [notes]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateNoteRequest"
+      responses:
+        "201":
+          description: Note created successfully
+          headers:
+            Location:
+              description: Canonical URL of the created note (`/{id}`)
+              schema:
+                type: string
+                example: /abcde12345
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateNoteResponse"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "409":
+          description: A note with the requested slug already exists
+          $ref: "#/components/responses/Error"
+        "413":
+          description: Request body exceeds the server limit (configurable, default 4 MB)
+          $ref: "#/components/responses/Error"
+        "415":
+          description: |
+            The request body was not sent as `application/json`. Every operation that takes a
+            body accepts only that media type.
+          $ref: "#/components/responses/Error"
+        "422":
+          $ref: "#/components/responses/Error"
+        "500":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/APIDisabled"
+
+  /notes/{id}:
+    get:
+      operationId: getNote
+      summary: Get a note by ID
+      description: |
+        Returns the note as JSON.  Increments the view counter on every call.
+
+        For burn-after-reading notes **without TTL** the note is deleted on this request and
+        the response body is the last snapshot of the note before deletion.
+
+        For burn-after-reading notes **with TTL** `expires_at` is set on the first read to
+        `now + ttl` and the note expires automatically when that timestamp is reached.
+
+        Because such a read destroys the note (or starts its timer), it must be explicit: send
+        an `Accept` header naming `application/json` (or `text/markdown`, `text/plain`,
+        `text/html`) exactly. For v0.1.6 clients, a request with no `Accept` header at all (and
+        no `Sec-Fetch-Dest`) also counts as a read on this path. A burn-after-reading note
+        requested with only wildcards (`*/*`, `text/*`), with `HEAD`, or as a browser subresource
+        (`Sec-Fetch-Dest` other than `document`/`empty`, e.g. an `<img>`) is answered `409`
+        with code `burn_read_not_explicit` and stays intact — link unfurlers and mail scanners
+        can no longer burn it. Other notes are unaffected.
+      tags: [notes]
+      parameters:
+        - $ref: "#/components/parameters/noteId"
+      responses:
+        "200":
+          description: Note found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NoteResponse"
+        "401":
+          description: |
+            The note's privacy level requires a credential this request didn't supply — see the
+            `privacy` field semantics above (`authenticated` or `owner`).
+          $ref: "#/components/responses/Error"
+        "404":
+          description: Note not found
+          $ref: "#/components/responses/Error"
+        "409":
+          description: |
+            Burn-after-reading note requested without explicit read intent (code
+            `burn_read_not_explicit`); the note is left intact. Retry with an explicit `Accept`.
+          $ref: "#/components/responses/Error"
+        "410":
+          description: Note has expired or was already consumed (burn-after-reading)
+          $ref: "#/components/responses/Error"
+        "500":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/APIDisabled"
+
+    put:
+      operationId: updateNote
+      summary: Update an existing note
+      description: |
+        Replaces the note's title, content, content type, and burn settings.
+        Anonymous callers may update any note whose `privacy` level would also let them read it
+        (see "Authentication" above); the `edit_code` must match the one returned when the note
+        was created — unless the request is authenticated (bearer token or session) as the exact
+        user who created the note, in which case `edit_code` may be omitted. See "Edit codes and
+        ownership" above. Returns the updated note.
+      tags: [notes]
+      parameters:
+        - $ref: "#/components/parameters/noteId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateNoteRequest"
+      responses:
+        "200":
+          description: Note updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NoteResponse"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          description: |
+            Anonymous callers may only mutate notes they could read: the note's `privacy` level
+            requires a credential (`authenticated` or `owner`) this request didn't supply — see
+            the `privacy` field semantics above. A wrong edit code is `403`, not `401`.
+        "403":
+          description: Wrong edit code, or the authenticated user is not the owner
+          $ref: "#/components/responses/Error"
+        "404":
+          description: Note not found
+          $ref: "#/components/responses/Error"
+        "413":
+          description: Request body exceeds the server limit (configurable, default 4 MB)
+          $ref: "#/components/responses/Error"
+        "415":
+          description: |
+            The request body was not sent as `application/json`. Every operation that takes a
+            body accepts only that media type.
+          $ref: "#/components/responses/Error"
+        "422":
+          $ref: "#/components/responses/Error"
+        "429":
+          description: |
+            Rate limit exceeded — either the server's general per-IP request limit
+            (`--rate-limit`, if enabled), or too many failed edit-code attempts by this caller
+            against this note ID (10 within a rolling 5-minute lockout window). Authenticated
+            callers are tracked by user ID across all sessions and API tokens; anonymous callers
+            are tracked per client IP and resource (behind a proxy that is not listed in
+            `--trusted-proxies`, every anonymous caller appears as the proxy's IP and shares one
+            bucket).
+          $ref: "#/components/responses/Error"
+        "500":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/APIDisabled"
+
+    delete:
+      operationId: deleteNote
+      summary: Delete a note
+      description: |
+        Permanently deletes the note. Anonymous callers may delete any note whose `privacy`
+        level would also let them read it (see "Authentication" above). The edit code must be
+        supplied in the `X-Edit-Code` request header — unless the request is authenticated
+        (bearer token or session) as the exact user who created the note, in which case no edit
+        code is needed. See "Edit codes and ownership" above.
+
+        The `edit_code` query parameter is deprecated and kept only for clients written for
+        v0.1.6: a query string can end up in reverse-proxy/CDN access logs or in the `Referer`
+        header of a same-origin follow-up request. The server uses it only when `X-Edit-Code`
+        is absent. Better still, sign in (session or API token) before creating the note and
+        skip the edit code entirely.
+      tags: [notes]
+      parameters:
+        - $ref: "#/components/parameters/noteId"
+        - name: X-Edit-Code
+          in: header
+          description: Edit code returned at note creation.
+          schema:
+            type: string
+        - name: edit_code
+          in: query
+          deprecated: true
+          description: |
+            Deprecated: send the `X-Edit-Code` header instead. Accepted for v0.1.6 clients and
+            used only when `X-Edit-Code` is absent; the server logs a warning for each use.
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Note deleted
+        "401":
+          description: |
+            Anonymous callers may only mutate notes they could read: the note's `privacy` level
+            requires a credential (`authenticated` or `owner`) this request didn't supply — see
+            the `privacy` field semantics above. A wrong edit code is `403`, not `401`.
+        "403":
+          description: Wrong edit code, or the authenticated user is not the owner
+          $ref: "#/components/responses/Error"
+        "404":
+          description: Note not found
+          $ref: "#/components/responses/Error"
+        "429":
+          description: |
+            Rate limit exceeded — either the server's general per-IP request limit
+            (`--rate-limit`, if enabled), or too many failed edit-code attempts by this caller
+            against this note ID (10 within a rolling 5-minute lockout window). Authenticated
+            callers are tracked by user ID across all sessions and API tokens; anonymous callers
+            are tracked per client IP and resource (behind a proxy that is not listed in
+            `--trusted-proxies`, every anonymous caller appears as the proxy's IP and shares one
+            bucket).
+          $ref: "#/components/responses/Error"
+        "500":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/APIDisabled"
+
+  /links:
+    post:
+      operationId: createLink
+      summary: Create a new short link
+      description: |
+        Creates a short link and returns it together with the one-time `edit_code`.
+        If `slug` is omitted a 10-character random slug is generated.
+        Responds `409 Conflict` when the requested slug is already taken by a note or a link.
+      tags: [links]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateLinkRequest"
+      responses:
+        "201":
+          description: Link created successfully
+          headers:
+            Location:
+              description: Canonical redirect URL of the created link (`/{id}`)
+              schema:
+                type: string
+                example: /abcde12345
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateLinkResponse"
+        "400":
+          description: Invalid target URL (missing/disallowed scheme, e.g. `javascript:`)
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "409":
+          description: A note or link with the requested slug already exists
+          $ref: "#/components/responses/Error"
+        "413":
+          description: Request body exceeds the server limit (configurable, default 4 MB)
+          $ref: "#/components/responses/Error"
+        "415":
+          description: |
+            The request body was not sent as `application/json`. Every operation that takes a
+            body accepts only that media type.
+          $ref: "#/components/responses/Error"
+        "422":
+          $ref: "#/components/responses/Error"
+        "429":
+          description: Rate limit exceeded
+          $ref: "#/components/responses/Error"
+        "500":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/APIDisabled"
+
+  /links/bulk:
+    post:
+      operationId: createLinksBulk
+      summary: Create multiple short links in one request
+      description: |
+        Creates up to 100 links in a single request. Best-effort, not transactional: each item is
+        created independently, so one item failing (e.g. a disallowed URL scheme, or a slug
+        conflict) does not stop the others from succeeding. `results` is the same length and order
+        as the request's `links` array — `results[i]` is always the outcome for `links[i]`, and
+        carries either the created link's fields (mirroring `CreateLinkResponse`) or an `error`
+        message, never both.
+      tags: [links]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BulkCreateLinksRequest"
+      responses:
+        "200":
+          description: |
+            Processed (some items may still have failed individually — check each `results[i]`
+            for an `error` field rather than relying on this status alone)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BulkCreateLinksResponse"
+        "400":
+          description: Malformed request, or more than 100 items in `links`
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "413":
+          description: Request body exceeds the server limit (configurable, default 4 MB)
+          $ref: "#/components/responses/Error"
+        "415":
+          description: |
+            The request body was not sent as `application/json`. Every operation that takes a
+            body accepts only that media type.
+          $ref: "#/components/responses/Error"
+        "429":
+          description: Rate limit exceeded
+          $ref: "#/components/responses/Error"
+        "500":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/APIDisabled"
+
+  /links/{id}:
+    get:
+      operationId: getLink
+      summary: Get a link's metadata by ID
+      description: |
+        Returns the link as JSON, including its decrypted `target_url`. This is a metadata-only
+        read: it does not increment `views`, does not consume a `burn_after_click` link, and does
+        not follow the redirect — visiting `GET /{id}` does all of that. See the "Short links"
+        section above.
+      tags: [links]
+      parameters:
+        - $ref: "#/components/parameters/linkId"
+      responses:
+        "200":
+          description: Link found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LinkResponse"
+        "401":
+          description: |
+            The link's privacy level requires a credential this request didn't supply — see the
+            `privacy` field semantics in the "Authentication" section above.
+          $ref: "#/components/responses/Error"
+        "404":
+          description: Link not found
+          $ref: "#/components/responses/Error"
+        "410":
+          description: Link has expired
+          $ref: "#/components/responses/Error"
+        "500":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/APIDisabled"
+
+    put:
+      operationId: updateLink
+      summary: Update an existing link
+      description: |
+        Replaces the destination URL, preserving the slug, edit code, click count, owner,
+        creation time, and burn-after-click setting. Optional fields omitted from the request
+        retain their current values. TTL is counted from this update; null removes expiry.
+        Anonymous callers may update links they could read with the original edit_code.
+        The exact authenticated owner may omit edit_code, as with PUT /notes/{id}.
+        Returns the updated link; the edit code is never returned again.
+      tags: [links]
+      parameters:
+        - $ref: "#/components/parameters/linkId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateLinkRequest"
+      responses:
+        "200":
+          description: Link updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LinkResponse"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          description: |
+            Anonymous callers may only mutate links they could read: the link's `privacy` level
+            requires a credential (`authenticated` or `owner`) this request didn't supply — see
+            the `privacy` field semantics above. A wrong edit code is `403`, not `401`.
+        "403":
+          description: Wrong edit code, or the authenticated user is not the owner
+          $ref: "#/components/responses/Error"
+        "404":
+          description: Link not found
+          $ref: "#/components/responses/Error"
+        "413":
+          description: Request body exceeds the server limit (configurable, default 4 MB)
+          $ref: "#/components/responses/Error"
+        "415":
+          description: |
+            The request body was not sent as `application/json`. Every operation that takes a
+            body accepts only that media type.
+          $ref: "#/components/responses/Error"
+        "422":
+          $ref: "#/components/responses/Error"
+        "429":
+          description: |
+            Rate limit exceeded — either the server's general per-IP request limit
+            (`--rate-limit`, if enabled), or too many failed edit-code attempts by this caller
+            against this link ID (10 within a rolling 5-minute lockout window). Authenticated
+            callers are tracked by user ID across all sessions and API tokens; anonymous callers
+            are tracked per client IP and resource (behind a proxy that is not listed in
+            `--trusted-proxies`, every anonymous caller appears as the proxy's IP and shares one
+            bucket).
+          $ref: "#/components/responses/Error"
+        "500":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/APIDisabled"
+
+    delete:
+      operationId: deleteLink
+      summary: Delete a link
+      description: |
+        Permanently deletes the link. The edit code must be supplied as the `X-Edit-Code`
+        request header (a `?edit_code=` query parameter is ignored: query strings leak into proxy
+        logs and `Referer`) — unless the request is authenticated (bearer token or session) as the
+        exact user who created the link, in which case no edit code is needed. See "Edit codes
+        and ownership" above.
+      tags: [links]
+      parameters:
+        - $ref: "#/components/parameters/linkId"
+        - name: X-Edit-Code
+          in: header
+          description: Edit code returned at link creation.
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Link deleted
+        "401":
+          description: |
+            Anonymous callers may only mutate links they could read: the link's `privacy` level
+            requires a credential (`authenticated` or `owner`) this request didn't supply — see
+            the `privacy` field semantics in the "Authentication" section above. A wrong edit
+            code is `403`, not `401`.
+        "403":
+          description: Wrong edit code, or the authenticated user is not the owner
+          $ref: "#/components/responses/Error"
+        "404":
+          description: Link not found
+          $ref: "#/components/responses/Error"
+        "429":
+          description: |
+            Rate limit exceeded — either the server's general per-IP request limit
+            (`--rate-limit`, if enabled), or too many failed edit-code attempts by this caller
+            against this link ID (10 within a rolling 5-minute lockout window). Authenticated
+            callers are tracked by user ID across all sessions and API tokens; anonymous callers
+            are tracked per client IP and resource (behind a proxy that is not listed in
+            `--trusted-proxies`, every anonymous caller appears as the proxy's IP and shares one
+            bucket).
+          $ref: "#/components/responses/Error"
+        "500":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/APIDisabled"
+
+  /healthz:
+    get:
+      operationId: healthz
+      summary: Liveness probe
+      description: Returns 200 as long as the process is running.
+      tags: [health]
+      responses:
+        "200":
+          description: Service is alive
+
+  /readyz:
+    get:
+      operationId: readyz
+      summary: Readiness probe
+      description: Returns 200 when the storage backend is reachable, 503 otherwise.
+      tags: [health]
+      responses:
+        "200":
+          description: Service is ready
+        "503":
+          description: Storage backend unreachable
+          $ref: "#/components/responses/Error"
+
+  /api/tokens:
+    post:
+      operationId: createAPIToken
+      summary: Issue an API token for the authenticated caller
+      description: |
+        Issues an API bearer key **for the caller themself** — it cannot mint a token for another
+        user. `ttl_days` sets its lifetime in days (`0` or omitted = never expires).
+
+        A TOTP session cookie (browser) issues directly. An `Authorization: Bearer <token>` caller
+        must re-authenticate with the account `password` and a fresh `totp_code` (step-up,
+        replay-protected like a login) — otherwise `403` (`code: step_up_required`, or
+        `step_up_failed` for a wrong password/code) — so a leaked key alone cannot multiply
+        itself. A key issued by a bearer records that bearer as its issuer: revoking the issuer
+        revokes it too. Changing the account password revokes all of the user's keys.
+
+        The returned `token` is a `pmk_…` envelope (`pmk_` + base64url of
+        `{"url": "<server base url>", "token": "<bearer key>"}`) and is shown **exactly
+        once** — only its SHA-256 hash is stored server-side. A user may hold at most 20 live
+        tokens; when that cap is reached the operation answers `429` (revoke one first —
+        revocation is admin-panel-only today).
+      tags: [accounts]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAPITokenRequest"
+      responses:
+        "201":
+          description: Token issued (envelope shown once)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateAPITokenResponse"
+        "401":
+          description: No or unknown credential
+          $ref: "#/components/responses/Error"
+        "403":
+          description: |
+            A bearer caller sent no step-up (`code: step_up_required`) or a wrong password or
+            TOTP code (`code: step_up_failed`)
+          $ref: "#/components/responses/Error"
+        "422":
+          description: "`ttl_days` out of range"
+          $ref: "#/components/responses/Error"
+        "429":
+          description: This user already holds the maximum number (20) of API tokens
+          $ref: "#/components/responses/Error"
+        "503":
+          description: |
+            Account features not enabled (start with `--enable-accounts`), or the API is
+            disabled (`code: api_disabled`). Outer middleware may reject a request first.
+          $ref: "#/components/responses/Error"
+        "500":
+          $ref: "#/components/responses/Error"
+
+  /api/invites:
+    post:
+      operationId: createInvite
+      summary: Issue a single-use signup invite link (admin only)
+      description: |
+        The JSON counterpart of the admin panel's `POST /admin/invite`. Requires an **admin**
+        credential (a non-admin authenticated caller gets `403`). The invite is single-use and
+        expires (24 h); the invitee completes signup through the web setup page or the
+        machine-readable variant of `POST /setup` (send JSON with `Accept: application/json`).
+
+        Like `POST /api/tokens`, a bearer caller must re-authenticate with `password` and
+        `totp_code` (`403`, `code: step_up_required` / `step_up_failed`); a session issues
+        directly.
+      tags: [accounts]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StepUpRequest"
+      responses:
+        "201":
+          description: Invite issued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateInviteResponse"
+        "401":
+          description: No or unknown credential
+          $ref: "#/components/responses/Error"
+        "403":
+          description: |
+            The caller is authenticated but not an admin, or a bearer caller's step-up is
+            missing (`code: step_up_required`) or wrong (`code: step_up_failed`)
+          $ref: "#/components/responses/Error"
+        "429":
+          description: Rate limit exceeded
+          $ref: "#/components/responses/Error"
+        "503":
+          description: |
+            Account features not enabled (start with `--enable-accounts`), or the API is
+            disabled (`code: api_disabled`). Outer middleware may reject a request first.
+          $ref: "#/components/responses/Error"
+        "500":
+          $ref: "#/components/responses/Error"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: |
+        A long-lived API token issued to a user account (see `--enable-accounts`), presented as
+        `Authorization: Bearer <token>`.
+
+  parameters:
+    noteId:
+      name: id
+      in: path
+      required: true
+      description: Note ID (slug) — 10-char random string or the custom slug chosen at creation
+      schema:
+        type: string
+        example: abcde12345
+
+    linkId:
+      name: id
+      in: path
+      required: true
+      description: Link ID (slug) — 10-char random string or the custom slug chosen at creation
+      schema:
+        type: string
+        example: abcde12345
+
+  schemas:
+    CreateNoteRequest:
+      type: object
+      required: [content]
+      properties:
+        title:
+          type: string
+          description: Human-readable title shown in the note header
+          example: My snippet
+        content:
+          type: string
+          maxLength: 1048576
+          description: |
+            Note body, at most 1048576 characters (1 MiB of text). Interpreted as Markdown unless
+            `content_type` is `text/plain`. A longer body is rejected before the note is stored.
+          example: "# Hello\n\nThis is **padmark**."
+        content_type:
+          type: string
+          enum: ["text/markdown", "text/plain"]
+          default: "text/markdown"
+          description: MIME type of `content`; controls rendering on the view page
+        slug:
+          type: string
+          description: |
+            Custom URL-friendly identifier: one or more path segments joined by `/` (up to 10
+            segments, 100 characters total). Each segment must match
+            `[A-Za-z0-9][A-Za-z0-9._-]*` and the first segment must not be a reserved route
+            name (e.g. `login`, `admin`, `notes`, `links`, `r`, `edit`, `api`, `static`).
+            Returns `422` for an invalid slug.
+            If omitted a 10-character random slug is generated.
+            Returns `409` if the slug is already taken.
+          example: my-snippet
+        burn_after_reading:
+          type: boolean
+          default: false
+          description: |
+            When `true` the note self-destructs after the first read.
+            If `ttl` is also provided the note is not deleted immediately but expires `ttl`
+            seconds after the first read.
+        ttl:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 9223372036
+          description: |
+            Grace period in seconds after the first read before the note expires.
+            Only meaningful when `burn_after_reading` is `true`.
+            `0` means the note is deleted immediately when it is first revealed.
+            Omitted means the same as `0` (immediate burn after reading).
+          example: 3600
+        edit_code:
+          type: string
+          minLength: 8
+          maxLength: 128
+          description: |
+            Optional custom edit code: 8–128 characters, without leading or trailing whitespace
+            or control characters. Omit it to receive a random server-generated 12-character
+            code. A code shorter than 8 or longer than 128 characters is rejected with `400`; one
+            with surrounding whitespace or control characters with `422`. Codes chosen before
+            this rule existed keep working for `PUT`/`DELETE` — only new codes are checked.
+            Intended for CLI and automation use; the web UI does not expose this field.
+          example: MySecretCode1
+
+        privacy:
+          type: string
+          enum: ["public", "authenticated", "owner"]
+          description: |
+            Who may read the note (default `public` when both this and `private` are omitted;
+            no schema-level `default` so the server can tell an omitted field from an explicit
+            `public` when resolving the deprecated `private` alias): `public` (anyone), `authenticated` (any valid session or API
+            token, not just the creator), or `owner` (only the account that created
+            it — see "Edit codes and ownership" above). Meaningful when the server is started
+            with `--enable-accounts`; `owner` additionally requires the note to actually have an
+            owner, i.e. an authenticated caller at creation time — otherwise the request is
+            rejected with `422`.
+        private:
+          type: boolean
+          deprecated: true
+          description: |
+            Deprecated alias of `privacy`, kept for clients written against v0.1.6: `true` means
+            `authenticated`, `false` means `public`. Sending both `private` and `privacy` is
+            allowed only when they agree (`true` with `authenticated` or `owner`, `false` with
+            `public`); a disagreeing pair is rejected with `400`. Omitted leaves `privacy` alone.
+
+    UpdateNoteRequest:
+      type: object
+      required: [content]
+      properties:
+        title:
+          type: string
+          description: New title
+          example: Updated title
+        content:
+          type: string
+          maxLength: 1048576
+          description: New body, at most 1048576 characters (see `CreateNoteRequest.content`)
+          example: "# Updated\n\nNew content."
+        content_type:
+          type: string
+          enum: ["text/markdown", "text/plain"]
+          description: New content type; defaults to the note's current type when omitted
+        edit_code:
+          type: string
+          description: |
+            The edit code returned when the note was created. May be omitted when the request is
+            authenticated (bearer token or session) as the note's owner — see
+            "Edit codes and ownership" above.
+          example: JmNkn0LdjbMw
+        burn_after_reading:
+          type: boolean
+          description: Update the burn-after-reading flag
+        ttl:
+          type: integer
+          format: int64
+          nullable: true
+          minimum: 0
+          maximum: 9223372036
+          description: |
+            With `burn_after_reading: true`, the grace period in seconds after first read;
+            omitted, null or 0 means immediate burn. Otherwise this is a hard expiry counted
+            from the update: omitted preserves the current expiry (except when disabling
+            an existing burn timer), null removes it, and 0 expires immediately.
+          example: 3600
+        privacy:
+          type: string
+          enum: ["public", "authenticated", "owner"]
+          description: |
+            Update the privacy level. See `CreateNoteRequest.privacy` for the exact semantics of
+            each value. Omitted keeps the note's current privacy level.
+        private:
+          type: boolean
+          deprecated: true
+          description: |
+            Deprecated alias of `privacy`, kept for clients written against v0.1.6: `true` means
+            `authenticated`, `false` means `public`. Sending both `private` and `privacy` is
+            allowed only when they agree (`true` with `authenticated` or `owner`, `false` with
+            `public`); a disagreeing pair is rejected with `400`. Omitted keeps the current level.
+
+    NoteResponse:
+      type: object
+      required: [id, title, content, content_type, views, burn_after_reading, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          description: Unique slug identifying the note
+          example: abcde12345
+        title:
+          type: string
+          description: Note title
+          example: My snippet
+        content:
+          type: string
+          description: Note body (Markdown or plain text depending on `content_type`)
+        content_type:
+          type: string
+          enum: ["text/markdown", "text/plain"]
+          description: MIME type of `content`
+        views:
+          type: integer
+          description: Number of times the note has been fetched via GET
+          example: 3
+        burn_after_reading:
+          type: boolean
+          description: |
+            `true` until the first read (or permanently `false` for non-burn notes).
+            After the first read of a note with a TTL this becomes `false` and `expires_at`
+            is set.
+        privacy:
+          type: string
+          enum: ["public", "authenticated", "owner"]
+          description: |
+            Who may read the note. See `CreateNoteRequest.privacy` for the exact semantics of
+            each value.
+        private:
+          type: boolean
+          deprecated: true
+          readOnly: true
+          description: |
+            Deprecated, read-only: `true` when `privacy` is not `public`. Emitted for clients
+            written against v0.1.6; use `privacy`.
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: |
+            ISO 8601 timestamp after which the note is inaccessible.
+            Set on the first read for burn-after-reading notes that have a TTL.
+            `null` for notes that are not expiring.
+        created_at:
+          type: string
+          format: date-time
+          description: Creation timestamp (UTC)
+        updated_at:
+          type: string
+          format: date-time
+          description: Last-update timestamp (UTC)
+
+    CreateNoteResponse:
+      allOf:
+        - $ref: "#/components/schemas/NoteResponse"
+        - type: object
+          required: [edit_code]
+          properties:
+            edit_code:
+              type: string
+              description: |
+                One-time secret required for future `PUT` and `DELETE` requests.
+                This is the only time `edit_code` is returned — store it securely.
+              example: JmNkn0LdjbMw
+
+    CreateLinkRequest:
+      type: object
+      required: [target_url]
+      properties:
+        target_url:
+          type: string
+          format: uri
+          description: Destination URL. Only `http` and `https` schemes are accepted
+          example: https://example.com/some/long/path?query=1
+        slug:
+          type: string
+          description: |
+            Custom URL-friendly identifier. Must be a single path segment matching
+            `[a-zA-Z0-9_-]+` — multi-segment slugs (containing `/`) return `422`, since short
+            links are only served at `GET /{id}`, `GET /r/{id}` and `/links/{id}`.
+            If omitted a 10-character random slug is generated.
+            Returns `409` if the slug is already taken by a note or another link.
+          example: my-link
+        burn_after_click:
+          type: boolean
+          default: false
+          description: |
+            When `true` the link is deleted the moment it is first deliberately followed via
+            `GET /{id}` (a browser navigation or an explicit `Accept`; previews, scanners,
+            `HEAD` and embeds get `409` and leave it intact — see "Short links").
+        ttl:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 9223372036
+          description: |
+            Seconds until the link expires, counted from creation. Omitted means the link never
+            expires. This is a hard expiry with no relation to `burn_after_click`;
+            the two may be combined freely.
+          example: 86400
+        edit_code:
+          type: string
+          minLength: 8
+          maxLength: 128
+          description: |
+            Optional custom edit code: 8–128 characters, without leading or trailing whitespace
+            or control characters. Omit it to receive a random server-generated 12-character
+            code. Same rules and status codes as `CreateNoteRequest.edit_code`.
+            Intended for CLI and automation use.
+          example: MySecretCode1
+        privacy:
+          type: string
+          enum: ["public", "authenticated", "owner"]
+          default: "public"
+          description: |
+            Who may follow the link: `public` (anyone), `authenticated` (any valid session or API
+            token, not just the creator), or `owner` (only the account that created it
+            — see "Edit codes and ownership" above). `owner` additionally requires the link to
+            actually have an owner, i.e. `--enable-accounts` and an authenticated caller —
+            otherwise the request is rejected with `422`.
+        direct_redirect:
+          type: boolean
+          nullable: true
+          description: |
+            Per-link override of the redirect mode for `GET /{id}`: `false` forces the
+            transparency interstitial; `true` forces an immediate `301`, but only for a link
+            created by an authenticated owner or on a server running `--direct-redirect=true`
+            (otherwise ignored). Omitted (or explicit `null`) inherits the default: interstitial
+            for anonymous links, `301` for an owner's links.
+
+    UpdateLinkRequest:
+      type: object
+      required: [target_url]
+      properties:
+        target_url:
+          type: string
+          format: uri
+          description: New destination URL. Only http and https schemes are accepted
+          example: https://example.com/new/path
+        edit_code:
+          type: string
+          description: Original edit code; may be omitted by the exact authenticated owner
+        ttl:
+          type: integer
+          format: int64
+          nullable: true
+          minimum: 0
+          maximum: 9223372036
+          description: |
+            Seconds until expiry, counted from this update. Omitted preserves the current
+            expiry, null removes it, and 0 expires immediately.
+          example: 86400
+        privacy:
+          type: string
+          enum: ["public", "authenticated", "owner"]
+          description: |
+            New privacy level; omitted preserves the current level. owner requires an
+            existing owner on the link, otherwise the request is rejected with 422.
+        direct_redirect:
+          type: boolean
+          nullable: true
+          description: |
+            New redirect override. Omitted preserves the current value; null resets it
+            to inherit the server's direct-redirect default.
+
+    LinkResponse:
+      type: object
+      required: [id, target_url, views, burn_after_click, created_at]
+      properties:
+        id:
+          type: string
+          description: Unique slug identifying the link
+          example: abcde12345
+        target_url:
+          type: string
+          format: uri
+          description: Destination URL
+          example: https://example.com/some/long/path?query=1
+        views:
+          type: integer
+          description: |
+            Number of times the link has been followed via `GET /{id}`, as read from storage.
+            Concurrent redirects may increment the count after this read. The decrypted-target
+            cache never supplies counters or authorization metadata.
+          example: 3
+        burn_after_click:
+          type: boolean
+          description: |
+            `true` until the link is first followed (then it no longer exists — a subsequent read
+            returns `404`), permanently `false` for links without this flag.
+        privacy:
+          type: string
+          enum: ["public", "authenticated", "owner"]
+          description: |
+            Who may follow the link. See `CreateLinkRequest.privacy` for the exact semantics of
+            each value.
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: ISO 8601 timestamp after which the link is inaccessible. `null` for links that never expire
+        direct_redirect:
+          type: boolean
+          nullable: true
+          description: |
+            Per-link override of the server's `--direct-redirect` flag. See
+            `CreateLinkRequest.direct_redirect`. `null` means this link inherits the server-wide
+            default.
+        created_at:
+          type: string
+          format: date-time
+          description: Creation timestamp (UTC)
+
+    CreateLinkResponse:
+      allOf:
+        - $ref: "#/components/schemas/LinkResponse"
+        - type: object
+          required: [edit_code]
+          properties:
+            edit_code:
+              type: string
+              description: |
+                One-time secret required for future `DELETE` requests.
+                This is the only time `edit_code` is returned — store it securely.
+              example: JmNkn0LdjbMw
+
+    BulkCreateLinksRequest:
+      type: object
+      required: [links]
+      properties:
+        links:
+          type: array
+          minItems: 1
+          maxItems: 100
+          description: Each item has the exact same shape and semantics as `CreateLinkRequest`
+          items:
+            $ref: "#/components/schemas/CreateLinkRequest"
+
+    BulkLinkResult:
+      type: object
+      required: [target_url]
+      description: |
+        The outcome for one item of a `POST /links/bulk` request. Either the created link's
+        fields are present (success) or `error` is (failure) — never both. `target_url` always
+        echoes the corresponding request item's `target_url`, even on failure, so a caller can
+        match `results[i]` back to `links[i]` without relying on array position alone.
+      properties:
+        target_url:
+          type: string
+          format: uri
+          description: Echoes the corresponding request item's target_url
+        error:
+          type: string
+          description: Present only when this item failed to create; human-readable
+          example: "invalid target url: only http and https schemes are allowed"
+        id:
+          type: string
+          description: Present only on success
+        edit_code:
+          type: string
+          description: Present only on success
+        views:
+          type: integer
+          description: Present only on success
+        burn_after_click:
+          type: boolean
+          description: Present only on success
+        privacy:
+          type: string
+          enum: ["public", "authenticated", "owner"]
+          description: Present only on success
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Present only on success
+        direct_redirect:
+          type: boolean
+          nullable: true
+          description: Present only on success
+        created_at:
+          type: string
+          format: date-time
+          description: Present only on success
+
+    BulkCreateLinksResponse:
+      type: object
+      required: [results]
+      properties:
+        results:
+          type: array
+          description: Same length and order as the request's `links` array
+          items:
+            $ref: "#/components/schemas/BulkLinkResult"
+
+    ErrorResponse:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+          description: Human-readable error description
+          example: note not found
+        code:
+          type: string
+          description: |
+            Optional machine-readable error code. The --disable-api middleware always
+            returns api_disabled; other errors may omit this field.
+          example: api_disabled
+
+    StepUpRequest:
+      type: object
+      description: |
+        Re-authentication a bearer-token caller must present to issue a credential; ignored for
+        a browser session.
+      properties:
+        password:
+          type: string
+          format: password
+          description: The account password
+        totp_code:
+          type: string
+          description: A current 6-digit TOTP code (each code is accepted once)
+          example: "123456"
+
+    CreateAPITokenRequest:
+      type: object
+      description: Optional issuance parameters; see StepUpRequest for `password` / `totp_code`.
+      properties:
+        ttl_days:
+          type: integer
+          minimum: 0
+          maximum: 3650
+          default: 0
+          description: Lifetime in days; `0` (default) = never expires
+          example: 90
+        password:
+          type: string
+          format: password
+          description: The account password (step-up, bearer callers only)
+        totp_code:
+          type: string
+          description: A current 6-digit TOTP code (step-up, bearer callers only)
+          example: "123456"
+
+    CreateAPITokenResponse:
+      type: object
+      required: [token]
+      properties:
+        token:
+          type: string
+          description: |
+            `pmk_…` envelope: `pmk_` + base64url of `{"url": "<base>", "token": "<key>"}` —
+            decode it, use `url` as the API base and `token` in the Bearer header. Returned
+            exactly once; only the hash is stored.
+          example: pmk_aHR0cDovL2xvY2FsaG9zdDo4MDgw
+
+    CreateInviteResponse:
+      type: object
+      required: [invite_url]
+      properties:
+        invite_url:
+          type: string
+          format: uri
+          description: Single-use signup link (`{scheme}://{host}/setup?invite={token}`)
+          example: https://padmark.example.com/setup?invite=JmNkn0LdjbMw
+
+  responses:
+    APIDisabled:
+      description: |
+        The API is disabled by --disable-api. The response always includes code=api_disabled.
+        Authentication, rate limiting, or other outer middleware may respond first.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            message: API is disabled
+            code: api_disabled
+    Error:
+      description: Error response
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"

@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dim">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Padmark{{if .EditMode}} — Edit{{end}}</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="stylesheet" href="/static/style.css?p={{styleVersion}}">
+</head>
+<body>
+<div class="wrapper">
+
+    {{template "header"}}
+
+    <div class="editor-container">
+        <div class="editor-toolbar">
+            <span class="toolbar-label">Markdown</span>
+            <div class="toolbar-actions">
+                <button class="toolbar-btn" id="mdBold">B</button>
+                <button class="toolbar-btn toolbar-italic" id="mdItalic">I</button>
+                <button class="toolbar-btn" id="mdCode">&lt;/&gt;</button>
+                <button class="toolbar-btn" id="mdBlock">block</button>
+            </div>
+        </div>
+        <textarea class="editor-textarea" id="editor" placeholder="{{if .ContentWithheld}}Burn-after-reading content is not shown here — write the replacement content{{else}}Paste or write your Markdown…{{end}}" spellcheck="false">{{.Content}}</textarea>
+        <div class="editor-footer">
+            <span class="char-count" id="charCount">0 characters</span>
+            <span class="format-hint">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 113 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                Markdown supported
+            </span>
+        </div>
+    </div>
+
+    <div class="options-row">
+        <div class="field-group">
+            <label class="field-label">Title <span class="optional">· shown in the header</span></label>
+            <input type="text" class="field-input" placeholder="My snippet" id="titleInput" value="{{.Title}}">
+        </div>
+        {{if .EditMode}}
+        <div class="field-group">
+            <label class="field-label">Edit code <span class="optional">· {{if .IsOwner}}optional, you created this note{{else}}required{{end}}</span></label>
+            <input type="text" class="field-input" placeholder="Paste your edit code" id="editCodeInput">
+        </div>
+        {{else}}
+        <div class="field-group">
+            <label class="field-label">Slug <span class="optional">· optional</span></label>
+            <input type="text" class="field-input" placeholder="my-snippet" id="slugInput"
+                   pattern="[a-zA-Z0-9_\-]+" title="Letters, numbers, hyphens and underscores only">
+        </div>
+        {{end}}
+    </div>
+
+    <div class="options-row note-flags-row">
+        <div class="burn-row">
+            <label class="burn-checkbox" id="burnLabel">
+                <input type="checkbox" id="burnCheck"{{if .BurnAfterReading}} checked{{end}}>
+                <span class="checkmark"></span>
+                <span class="burn-text">Burn after reading in</span>
+            </label>
+            <div class="burn-time-wrap{{if .BurnAfterReading}} active{{end}}" id="burnTimeWrap">
+                <div class="select-wrap">
+                    <select class="field-select burn-select" id="burnTime"{{if not .BurnAfterReading}} disabled{{end}}>
+                        {{range .TTLOptions}}
+                        <option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>
+                        {{end}}
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        <div class="burn-row private-row">
+            <span class="burn-text">Privacy</span>
+            <div class="select-wrap">
+                <select class="field-select" id="privacySelect">
+                    {{- range .PrivacyOptions}}
+                    <option value="{{.Value}}"{{if .Hint}} data-hint="{{.Hint}}"{{end}}{{if .Selected}} selected{{end}}>{{.Label}}</option>
+                    {{- end}}
+                </select>
+            </div>
+            <span class="shortcut-hint" id="privacyHint">Anyone can view</span>
+        </div>
+    </div>
+
+    <div class="publish-row">
+        <button class="btn-publish" id="submitBtn">{{if .EditMode}}Save{{else}}Publish{{end}}</button>
+        <span class="shortcut-hint"><kbd>Ctrl</kbd> + <kbd>Enter</kbd></span>
+    </div>
+
+</div>
+
+<script nonce="{{.Nonce}}">
+    const editMode = {{.EditMode}};
+    const noteID = {{.ID | js}};
+    const isOwner = {{.IsOwner}};
+
+    function updateCount() {
+        const len = document.getElementById('editor').value.length;
+        document.getElementById('charCount').textContent = len + ' character' + (len === 1 ? '' : 's');
+    }
+    updateCount();
+
+    {{template "theme-js"}}
+
+    function insertMd(before, after) {
+        const ta = document.getElementById('editor');
+        const start = ta.selectionStart, end = ta.selectionEnd;
+        const sel = ta.value.substring(start, end);
+        ta.setRangeText(before + sel + after, start, end, 'select');
+        ta.focus();
+        updateCount();
+    }
+
+    function showError(btn, label, msg) {
+        btn.textContent = msg;
+        btn.style.background = '#ef4444';
+        setTimeout(() => { btn.textContent = label; btn.style.background = ''; }, 1800);
+    }
+
+    // errorMessage reads the server's JSON error body ({"message": ...}) from a failed response so
+    // the button names the actual cause (cross-origin rejection, API disabled, validation failure)
+    // instead of a guess; fallback covers an empty or non-JSON body.
+    async function errorMessage(resp, fallback) {
+        try {
+            const body = await resp.json();
+            if (body && typeof body.message === 'string' && body.message) return body.message;
+        } catch (_) { /* empty or non-JSON body */ }
+        return fallback;
+    }
+
+    function toggleBurn() {
+        const checked = document.getElementById('burnCheck').checked;
+        const wrap = document.getElementById('burnTimeWrap');
+        const sel = document.getElementById('burnTime');
+        wrap.classList.toggle('active', checked);
+        sel.disabled = !checked;
+    }
+
+    const privacyHints = {
+        public: 'Anyone can view',
+        authenticated: 'Requires login to view',
+        owner: 'Only you can view',
+    };
+
+    function getPrivacy() {
+        return document.getElementById('privacySelect').value;
+    }
+
+    // The server lists only the levels it can enforce; editing keeps the stored level unless the
+    // user changes it, so an unchanged level is not sent.
+    const initialPrivacy = getPrivacy();
+
+    function changedPrivacy() {
+        const privacy = getPrivacy();
+        return privacy === initialPrivacy ? undefined : privacy;
+    }
+
+    function updatePrivacyHint() {
+        const select = document.getElementById('privacySelect');
+        const option = select.options[select.selectedIndex];
+        document.getElementById('privacyHint').textContent =
+            (option && option.dataset.hint) || privacyHints[getPrivacy()] || privacyHints.public;
+    }
+
+    function getTTL() {
+        if (!document.getElementById('burnCheck').checked) return 0;
+        return parseInt(document.getElementById('burnTime').value);
+    }
+
+    async function publish() {
+        const btn = document.getElementById('submitBtn');
+        const content = document.getElementById('editor').value.trim();
+        const titleInput = document.getElementById('titleInput').value.trim();
+        const slug = document.getElementById('slugInput').value.trim();
+        const burnAfterReading = document.getElementById('burnCheck').checked;
+        const ttl = getTTL();
+
+        if (!content) { showError(btn, 'Publish', 'Enter some text first'); return; }
+
+        let title = titleInput;
+        if (!title) {
+            title = content.split('\n').map(l => l.replace(/^#+\s*/, '').trim()).find(l => l.length > 0) || 'Untitled';
+        }
+
+        btn.textContent = 'Publishing…';
+        btn.style.opacity = '0.7';
+        btn.disabled = true;
+
+        const payload = { title, content, burn_after_reading: burnAfterReading, privacy: getPrivacy() };
+        if (slug) payload.slug = slug;
+        if (burnAfterReading) payload.ttl = ttl;
+
+        try {
+            const resp = await fetch('/notes', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            if (!resp.ok) { throw new Error(await errorMessage(resp, 'Error — try again')); }
+
+            const note = await resp.json();
+            if (note.edit_code) {
+                sessionStorage.setItem('padmark_edit_' + note.id, note.edit_code);
+            }
+            const params = new URLSearchParams({ id: note.id });
+            if (note.burn_after_reading) params.set('burn', '1');
+            if (note.expires_at) {
+                params.set('expires', note.expires_at);
+            } else if (burnAfterReading) {
+                params.set('expires', 'immediately');
+            }
+            window.location.href = '/success?' + params.toString();
+        } catch (err) {
+            btn.textContent = err.message || 'Error — try again';
+            btn.style.background = '#ef4444';
+            btn.style.opacity = '1';
+            btn.disabled = false;
+            setTimeout(() => { btn.textContent = 'Publish'; btn.style.background = ''; }, 2500);
+        }
+    }
+
+    async function save() {
+        const btn = document.getElementById('submitBtn');
+        const content = document.getElementById('editor').value.trim();
+        const title = document.getElementById('titleInput').value.trim();
+        const editCode = document.getElementById('editCodeInput').value.trim();
+        const ttl = getTTL();
+
+        if (!content) { showError(btn, 'Save', 'Enter some text first'); return; }
+        if (!editCode && !isOwner) { showError(btn, 'Save', 'Edit code required'); return; }
+
+        btn.textContent = 'Saving…';
+        btn.style.opacity = '0.7';
+        btn.disabled = true;
+
+        const burn = document.getElementById('burnCheck').checked;
+        const payload = { title: title || 'Untitled', content, edit_code: editCode, burn_after_reading: burn, privacy: changedPrivacy() };
+        if (burn) payload.ttl = ttl;
+
+        try {
+            const resp = await fetch('/notes/' + noteID, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            if (!resp.ok) {
+                const msg = await errorMessage(resp, 'HTTP ' + resp.status);
+                // Only the edit-code rejection (403 "invalid edit code", domain.ErrInvalidEditCode)
+                // means the code was wrong; other 403s (e.g. "cross-origin request rejected") are not.
+                if (resp.status === 403 && msg === 'invalid edit code') { throw new Error('Invalid edit code'); }
+                throw new Error(msg);
+            }
+
+            window.location.href = '/' + noteID;
+        } catch (err) {
+            btn.textContent = err.message || 'Error — try again';
+            btn.style.background = '#ef4444';
+            btn.style.opacity = '1';
+            btn.disabled = false;
+            setTimeout(() => { btn.textContent = 'Save'; btn.style.background = ''; }, 2500);
+        }
+    }
+
+    updatePrivacyHint();
+
+    document.getElementById('editor').addEventListener('input', updateCount);
+    document.getElementById('burnCheck').addEventListener('change', toggleBurn);
+    document.getElementById('privacySelect').addEventListener('change', updatePrivacyHint);
+    document.getElementById('submitBtn').addEventListener('click', editMode ? save : publish);
+    document.getElementById('mdBold').addEventListener('click', () => insertMd('**', '**'));
+    document.getElementById('mdItalic').addEventListener('click', () => insertMd('_', '_'));
+    document.getElementById('mdCode').addEventListener('click', () => insertMd('`', '`'));
+    document.getElementById('mdBlock').addEventListener('click', () => insertMd('\n```\n', '\n```\n'));
+
+    document.addEventListener('keydown', e => {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+            e.preventDefault();
+            editMode ? save() : publish();
+        }
+    });
+</script>
+</body>
+</html>

@@ -8,24 +8,25 @@ import (
 
 	urcli "github.com/urfave/cli/v3"
 
+	"github.com/partyzanex/padmark/internal/clifactory"
 	padmark "github.com/partyzanex/padmark/pkg/client"
 )
 
 func pingCommand() *urcli.Command {
-	return &urcli.Command{
-		Name:   "ping",
-		Usage:  "Check server liveness and readiness",
-		Action: pingAction,
-	}
+	return clifactory.Command(func(command *urcli.Command) {
+		command.Name = "ping"
+		command.Usage = "Check server liveness and readiness"
+		command.Action = pingAction
+	})
 }
 
 func pingAction(ctx context.Context, cmd *urcli.Command) error {
 	padmarkClient, err := newPadmarkClient(cmd)
 	if err != nil {
-		return err
+		return fmt.Errorf("create API client: %w", err)
 	}
 
-	erw := &errWriter{w: os.Stdout}
+	erw := &errWriter{w: os.Stdout, err: nil}
 	erw.printf("server: %s\n", resolveServerURL(cmd))
 
 	liveErr := checkLiveness(ctx, padmarkClient)
@@ -70,8 +71,8 @@ func checkReadiness(ctx context.Context, cl *padmark.Client) error {
 	case *padmark.ReadyzOK:
 		return nil
 	case *padmark.ErrorResponse:
-		return fmt.Errorf("service unavailable: %s", typed.Message)
+		return fmt.Errorf("%w: %s", ErrServiceUnavailable, typed.Message)
 	default:
-		return fmt.Errorf("unexpected response type: %T", res)
+		return fmt.Errorf("%w: %T", ErrUnexpectedResponse, res)
 	}
 }

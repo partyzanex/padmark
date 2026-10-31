@@ -15,7 +15,9 @@ import (
 	"github.com/stretchr/testify/require"
 	urcli "github.com/urfave/cli/v3"
 
+	"github.com/partyzanex/padmark/internal/clifactory"
 	"github.com/partyzanex/padmark/internal/domain"
+	"github.com/partyzanex/padmark/internal/infra/tokenfile"
 )
 
 // writeTokenFile points XDG_CONFIG_HOME at a temp dir and writes the given token file contents,
@@ -60,7 +62,7 @@ func writeTokenFileMode(t *testing.T, contents string, mode os.FileMode) string 
 }
 
 func TestReadTokenFile_TightensGroupOtherReadableFile(t *testing.T) {
-	if runtime.GOOS == osWindows {
+	if runtime.GOOS == "windows" {
 		t.Skip("POSIX permission bits are not meaningful on Windows")
 	}
 
@@ -77,7 +79,7 @@ func TestReadTokenFile_TightensGroupOtherReadableFile(t *testing.T) {
 }
 
 func TestReadTokenFile_LeavesOwnerOnlyFileUntouched(t *testing.T) {
-	if runtime.GOOS == osWindows {
+	if runtime.GOOS == "windows" {
 		t.Skip("POSIX permission bits are not meaningful on Windows")
 	}
 
@@ -96,7 +98,7 @@ func TestReadTokenFile_LeavesOwnerOnlyFileUntouched(t *testing.T) {
 func TestTokenFilePath_XDGConfigHome(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "/tmp/xdg-config")
 
-	path, err := tokenFilePath()
+	path, err := tokenfile.Path()
 	require.NoError(t, err)
 	assert.Equal(t, filepath.Join("/tmp/xdg-config", "padmark", "token"), path)
 }
@@ -105,7 +107,7 @@ func TestTokenFilePath_HomeFallback(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "")
 	t.Setenv("HOME", "/home/tester")
 
-	path, err := tokenFilePath()
+	path, err := tokenfile.Path()
 	require.NoError(t, err)
 	assert.Equal(t, filepath.Join("/home/tester", ".config", "padmark", "token"), path)
 }
@@ -121,7 +123,7 @@ func captureAuthServer(gotAuth *string) *httptest.Server {
 }
 
 func TestResolveToken_ConfigFile_SentAsBearer(t *testing.T) {
-	t.Setenv("PADMARK_TOKEN", "") // neutralise any ambient env token
+	isolateEnv(t)
 	writeTokenFile(t, "file-token\n")
 
 	var gotAuth string
@@ -129,13 +131,13 @@ func TestResolveToken_ConfigFile_SentAsBearer(t *testing.T) {
 	srv := captureAuthServer(&gotAuth)
 	defer srv.Close()
 
-	_ = runCLI(context.Background(), "--url", srv.URL, cmdGet, "some-id")
+	_ = runCLI(t.Context(), "--url", srv.URL, cmdGet, "some-id")
 
 	assert.Equal(t, "Bearer file-token", gotAuth, "token from config file is sent as Bearer")
 }
 
 func TestResolveToken_FlagOverridesConfigFile(t *testing.T) {
-	t.Setenv("PADMARK_TOKEN", "")
+	isolateEnv(t)
 	writeTokenFile(t, "file-token\n")
 
 	var gotAuth string
@@ -143,21 +145,20 @@ func TestResolveToken_FlagOverridesConfigFile(t *testing.T) {
 	srv := captureAuthServer(&gotAuth)
 	defer srv.Close()
 
-	_ = runCLI(context.Background(), "--url", srv.URL, "--token", "flag-token", cmdGet, "some-id")
+	_ = runCLI(t.Context(), "--url", srv.URL, "--token", "flag-token", cmdGet, "some-id")
 
 	assert.Equal(t, "Bearer flag-token", gotAuth, "--token wins over the config file")
 }
 
 func TestResolveToken_NoTokenAnywhere_NoAuthHeader(t *testing.T) {
-	t.Setenv("PADMARK_TOKEN", "")
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir()) // no token file
+	isolateEnv(t)
 
 	var gotAuth string
 
 	srv := captureAuthServer(&gotAuth)
 	defer srv.Close()
 
-	_ = runCLI(context.Background(), "--url", srv.URL, cmdGet, "some-id")
+	_ = runCLI(t.Context(), "--url", srv.URL, cmdGet, "some-id")
 
 	assert.Empty(t, gotAuth, "no token configured ⇒ no Authorization header")
 }
@@ -169,22 +170,21 @@ func resolvedURLFor(t *testing.T, args ...string) string {
 
 	var got string
 
-	app := &urcli.Command{
-		Flags: globalFlags(),
-		Action: func(_ context.Context, cmd *urcli.Command) error {
+	app := clifactory.Command(func(command *urcli.Command) {
+		command.Flags = globalFlags()
+		command.Action = func(_ context.Context, cmd *urcli.Command) error {
 			got = resolveServerURL(cmd)
 
 			return nil
-		},
-	}
-	require.NoError(t, app.Run(context.Background(), append([]string{"padmark-cli"}, args...)))
+		}
+	})
+	require.NoError(t, app.Run(t.Context(), append([]string{"padmark-cli"}, args...)))
 
 	return got
 }
 
 func TestResolveServerURL_EmbeddedFromToken(t *testing.T) {
-	t.Setenv("PADMARK_TOKEN", "")
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	isolateEnv(t)
 
 	envelope, err := domain.EncodeAPITokenEnvelope("http://embedded:4000", "k")
 	require.NoError(t, err)
@@ -194,8 +194,7 @@ func TestResolveServerURL_EmbeddedFromToken(t *testing.T) {
 }
 
 func TestResolveServerURL_ExplicitFlagWins(t *testing.T) {
-	t.Setenv("PADMARK_TOKEN", "")
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	isolateEnv(t)
 
 	envelope, err := domain.EncodeAPITokenEnvelope("http://embedded:4000", "k")
 	require.NoError(t, err)
@@ -206,8 +205,7 @@ func TestResolveServerURL_ExplicitFlagWins(t *testing.T) {
 }
 
 func TestResolveServerURL_DefaultWhenNoToken(t *testing.T) {
-	t.Setenv("PADMARK_TOKEN", "")
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	isolateEnv(t)
 
 	assert.Equal(t, DefaultURL, resolvedURLFor(t),
 		"with no token and no --url, the default server URL is used")
@@ -229,8 +227,7 @@ func TestSplitToken_LegacyBareKey(t *testing.T) {
 }
 
 func TestEnvelopeToken_EmbeddedURLUsed_KeySentAsBearer(t *testing.T) {
-	t.Setenv("PADMARK_TOKEN", "")
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir()) // no token file
+	isolateEnv(t)
 
 	var gotAuth string
 
@@ -239,18 +236,21 @@ func TestEnvelopeToken_EmbeddedURLUsed_KeySentAsBearer(t *testing.T) {
 
 	// The envelope carries the server URL and the command runs WITHOUT --url: reaching the test
 	// server at all proves the embedded URL was used, and the header proves the key was unpacked.
+	// The pinned origin is recorded as trusted first — the trust-on-first-use gate (trust.go)
+	// would otherwise stop the request before it leaves the machine.
 	envelope, err := domain.EncodeAPITokenEnvelope(srv.URL, "envelope-key")
 	require.NoError(t, err)
 
-	_ = runCLI(context.Background(), "--token", envelope, cmdGet, "some-id")
+	require.NoError(t, runCLI(t.Context(), "--token", envelope, cmdTrust))
+
+	_ = runCLI(t.Context(), "--token", envelope, cmdGet, "some-id")
 
 	assert.Equal(t, "Bearer envelope-key", gotAuth,
 		"the embedded URL is used and the packed key is sent as Bearer")
 }
 
 func TestEnvelopeToken_ExplicitURLOverridesEmbedded(t *testing.T) {
-	t.Setenv("PADMARK_TOKEN", "")
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	isolateEnv(t)
 
 	var gotAuth string
 
@@ -261,7 +261,7 @@ func TestEnvelopeToken_ExplicitURLOverridesEmbedded(t *testing.T) {
 	envelope, err := domain.EncodeAPITokenEnvelope("http://127.0.0.1:1", "envelope-key")
 	require.NoError(t, err)
 
-	_ = runCLI(context.Background(), "--url", srv.URL, "--token", envelope, cmdGet, "some-id")
+	_ = runCLI(t.Context(), "--url", srv.URL, "--token", envelope, cmdGet, "some-id")
 
 	assert.Equal(t, "Bearer envelope-key", gotAuth,
 		"--url overrides the embedded URL while the packed key is still sent as Bearer")

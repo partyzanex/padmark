@@ -1,14 +1,13 @@
 package sqlite
 
 import (
-	"database/sql"
+	"log/slog"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/suite"
 	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect/sqlitedialect"
-	"github.com/uptrace/bun/driver/sqliteshim"
 
 	"github.com/partyzanex/padmark/internal/domain"
 )
@@ -21,10 +20,10 @@ type RepositoryTestSuite struct {
 }
 
 func (s *RepositoryTestSuite) SetupTest() {
-	sqldb, err := sql.Open(sqliteshim.DriverName(), "file::memory:?cache=shared")
+	db, err := Open("file::memory:?cache=shared", slog.New(slog.DiscardHandler))
 	s.Require().NoError(err)
 
-	s.db = bun.NewDB(sqldb, sqlitedialect.New())
+	s.db = db
 	s.Require().NoError(s.db.Ping())
 
 	_, err = s.db.NewCreateTable().Model((*note)(nil)).IfNotExists().Exec(s.T().Context())
@@ -41,7 +40,7 @@ func TestRepositoryTestSuite(t *testing.T) {
 	suite.Run(t, new(RepositoryTestSuite))
 }
 
-// Create
+// Create.
 
 func (s *RepositoryTestSuite) TestCreate_OK() {
 	domNote := &domain.Note{
@@ -51,6 +50,9 @@ func (s *RepositoryTestSuite) TestCreate_OK() {
 		ContentType: new(domain.ContentTypeMarkdown),
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
+
+		ExpiresAt: nil, Privacy: nil, OwnerID: nil, EditCode: "",
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
 	}
 
 	err := s.repo.Create(s.T().Context(), domNote)
@@ -59,8 +61,18 @@ func (s *RepositoryTestSuite) TestCreate_OK() {
 }
 
 func (s *RepositoryTestSuite) TestCreate_SetsID() {
-	note1 := &domain.Note{ID: "id-1", Title: "a", Content: "b", CreatedAt: time.Now(), UpdatedAt: time.Now()}
-	note2 := &domain.Note{ID: "id-2", Title: "c", Content: "d", CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	note1 := &domain.Note{
+		ID: "id-1", Title: "a", Content: "b", CreatedAt: time.Now(), UpdatedAt: time.Now(),
+		ExpiresAt: nil, Privacy: nil, OwnerID: nil, ContentType: nil,
+		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
+		ClearExpiry: false,
+	}
+	note2 := &domain.Note{
+		ID: "id-2", Title: "c", Content: "d", CreatedAt: time.Now(), UpdatedAt: time.Now(),
+		ExpiresAt: nil, Privacy: nil, OwnerID: nil, ContentType: nil,
+		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
+		ClearExpiry: false,
+	}
 
 	s.Require().NoError(s.repo.Create(s.T().Context(), note1))
 	s.Require().NoError(s.repo.Create(s.T().Context(), note2))
@@ -74,7 +86,7 @@ func (s *RepositoryTestSuite) TestCreate_SetsID() {
 	s.Equal("id-2", result2.ID)
 }
 
-// Get
+// Get.
 
 func (s *RepositoryTestSuite) TestGet_OK() {
 	domNote := &domain.Note{
@@ -84,6 +96,9 @@ func (s *RepositoryTestSuite) TestGet_OK() {
 		ContentType: new(domain.ContentTypeMarkdown),
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
+
+		ExpiresAt: nil, Privacy: nil, OwnerID: nil, EditCode: "",
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
 	}
 	s.Require().NoError(s.repo.Create(s.T().Context(), domNote))
 
@@ -101,7 +116,30 @@ func (s *RepositoryTestSuite) TestGet_NotFound() {
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
-// Update
+func (s *RepositoryTestSuite) TestExists_True() {
+	ctx := s.T().Context()
+
+	n := &domain.Note{
+		ID: "exists-1", Title: "t", Content: "c", CreatedAt: time.Now(), UpdatedAt: time.Now(),
+		ExpiresAt: nil, Privacy: nil, OwnerID: nil, ContentType: nil,
+		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
+		ClearExpiry: false,
+	}
+	s.Require().NoError(s.repo.Create(ctx, n))
+
+	exists, err := s.repo.Exists(ctx, "exists-1")
+	s.Require().NoError(err)
+	s.True(exists)
+}
+
+func (s *RepositoryTestSuite) TestExists_False() {
+	exists, err := s.repo.Exists(s.T().Context(), "missing")
+
+	s.Require().NoError(err)
+	s.False(exists)
+}
+
+// Update.
 
 func (s *RepositoryTestSuite) TestUpdate_OK() {
 	domNote := &domain.Note{
@@ -111,6 +149,9 @@ func (s *RepositoryTestSuite) TestUpdate_OK() {
 		ContentType: new(domain.ContentTypeMarkdown),
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
+
+		ExpiresAt: nil, Privacy: nil, OwnerID: nil, EditCode: "",
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
 	}
 	s.Require().NoError(s.repo.Create(s.T().Context(), domNote))
 
@@ -120,6 +161,10 @@ func (s *RepositoryTestSuite) TestUpdate_OK() {
 		ContentType: new(domain.ContentTypePlain),
 		CreatedAt:   domNote.CreatedAt,
 		UpdatedAt:   time.Now(),
+
+		ExpiresAt: nil, Privacy: nil, OwnerID: nil, ID: "",
+		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
+		ClearExpiry: false,
 	}
 	err := s.repo.Update(s.T().Context(), domNote.ID, updated)
 
@@ -134,16 +179,21 @@ func (s *RepositoryTestSuite) TestUpdate_OK() {
 }
 
 func (s *RepositoryTestSuite) TestUpdate_NotFound() {
-	domNote := &domain.Note{Title: "test", Content: "test", CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	domNote := &domain.Note{
+		Title: "test", Content: "test", CreatedAt: time.Now(), UpdatedAt: time.Now(),
+		ExpiresAt: nil, Privacy: nil, OwnerID: nil, ID: "",
+		ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
+		BurnAfterReading: false, ClearExpiry: false,
+	}
 
 	err := s.repo.Update(s.T().Context(), "nonexistent", domNote)
 
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
-// TestUpdate_Private_Nil_PreservesExistingValue verifies that passing Private=nil to Update
-// keeps the existing private value in the DB (via COALESCE(NULL, private)).
-func (s *RepositoryTestSuite) TestUpdate_Private_Nil_PreservesExistingValue() {
+// TestUpdate_Privacy_Nil_PreservesExistingValue verifies that passing Privacy=nil to Update
+// keeps the existing privacy value in the DB (via COALESCE(NULL, privacy)).
+func (s *RepositoryTestSuite) TestUpdate_Privacy_Nil_PreservesExistingValue() {
 	ctx := s.T().Context()
 
 	note := &domain.Note{
@@ -151,30 +201,38 @@ func (s *RepositoryTestSuite) TestUpdate_Private_Nil_PreservesExistingValue() {
 		Title:       "t",
 		Content:     "c",
 		ContentType: new(domain.ContentTypeMarkdown),
-		Private:     new(true),
+		Privacy:     new(domain.PrivacyAuthenticated),
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
+
+		ExpiresAt: nil, OwnerID: nil, EditCode: "", Views: 0,
+		BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
 	}
 	s.Require().NoError(s.repo.Create(ctx, note))
 
-	// Update with Private=nil — must not touch the private column.
+	// Update with Privacy=nil — must not touch the privacy column.
 	updated := &domain.Note{
 		Title:     "t2",
 		Content:   "c2",
-		Private:   nil,
+		Privacy:   nil,
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
+
+		ExpiresAt: nil, OwnerID: nil, ID: "", ContentType: nil,
+		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
+		ClearExpiry: false,
 	}
 	s.Require().NoError(s.repo.Update(ctx, "priv-nil-1", updated))
 
 	got, err := s.repo.Get(ctx, "priv-nil-1")
 	s.Require().NoError(err)
-	s.True(got.Private != nil && *got.Private, "private must be preserved when Update receives Private=nil")
+	s.Equal(domain.PrivacyAuthenticated, got.EffectivePrivacy(),
+		"privacy must be preserved when Update receives Privacy=nil")
 }
 
-// TestUpdate_Private_ExplicitFalse_ClearsPrivacy verifies that passing Private=&false
-// explicitly sets the column to false, even if the note was previously private.
-func (s *RepositoryTestSuite) TestUpdate_Private_ExplicitFalse_ClearsPrivacy() {
+// TestUpdate_Privacy_ExplicitPublic_ClearsPrivacy verifies that passing Privacy=&PrivacyPublic
+// explicitly sets the column to public, even if the note was previously authenticated-only.
+func (s *RepositoryTestSuite) TestUpdate_Privacy_ExplicitPublic_ClearsPrivacy() {
 	ctx := s.T().Context()
 
 	note := &domain.Note{
@@ -182,24 +240,32 @@ func (s *RepositoryTestSuite) TestUpdate_Private_ExplicitFalse_ClearsPrivacy() {
 		Title:       "t",
 		Content:     "c",
 		ContentType: new(domain.ContentTypeMarkdown),
-		Private:     new(true),
+		Privacy:     new(domain.PrivacyAuthenticated),
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
+
+		ExpiresAt: nil, OwnerID: nil, EditCode: "", Views: 0,
+		BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
 	}
 	s.Require().NoError(s.repo.Create(ctx, note))
 
 	updated := &domain.Note{
 		Title:     "t2",
 		Content:   "c2",
-		Private:   new(false),
+		Privacy:   new(domain.PrivacyPublic),
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
+
+		ExpiresAt: nil, OwnerID: nil, ID: "", ContentType: nil,
+		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
+		ClearExpiry: false,
 	}
 	s.Require().NoError(s.repo.Update(ctx, "priv-false-1", updated))
 
 	got, err := s.repo.Get(ctx, "priv-false-1")
 	s.Require().NoError(err)
-	s.False(got.Private != nil && *got.Private, "private must be cleared when Update receives Private=&false")
+	s.Equal(domain.PrivacyPublic, got.EffectivePrivacy(),
+		"privacy must be cleared when Update receives Privacy=&PrivacyPublic")
 }
 
 // TestUpdate_ContentType_Nil_PreservesExistingValue verifies that passing ContentType=nil to Update
@@ -214,6 +280,9 @@ func (s *RepositoryTestSuite) TestUpdate_ContentType_Nil_PreservesExistingValue(
 		ContentType: new(domain.ContentTypePlain),
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
+
+		ExpiresAt: nil, Privacy: nil, OwnerID: nil, EditCode: "",
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
 	}
 	s.Require().NoError(s.repo.Create(ctx, note))
 
@@ -223,6 +292,10 @@ func (s *RepositoryTestSuite) TestUpdate_ContentType_Nil_PreservesExistingValue(
 		ContentType: nil,
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
+
+		ExpiresAt: nil, Privacy: nil, OwnerID: nil, ID: "",
+		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
+		ClearExpiry: false,
 	}
 	s.Require().NoError(s.repo.Update(ctx, "ct-nil-1", updated))
 
@@ -243,6 +316,9 @@ func (s *RepositoryTestSuite) TestUpdate_ContentType_ExplicitChange() {
 		ContentType: new(domain.ContentTypePlain),
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
+
+		ExpiresAt: nil, Privacy: nil, OwnerID: nil, EditCode: "",
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
 	}
 	s.Require().NoError(s.repo.Create(ctx, note))
 
@@ -252,6 +328,10 @@ func (s *RepositoryTestSuite) TestUpdate_ContentType_ExplicitChange() {
 		ContentType: new(domain.ContentTypeMarkdown),
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
+
+		ExpiresAt: nil, Privacy: nil, OwnerID: nil, ID: "",
+		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
+		ClearExpiry: false,
 	}
 	s.Require().NoError(s.repo.Update(ctx, "ct-change-1", updated))
 
@@ -260,7 +340,7 @@ func (s *RepositoryTestSuite) TestUpdate_ContentType_ExplicitChange() {
 	s.Equal(new(domain.ContentTypeMarkdown), got.ContentType, "content_type must be updated when explicitly set")
 }
 
-// Delete
+// Delete.
 
 func (s *RepositoryTestSuite) TestDelete_OK() {
 	domNote := &domain.Note{
@@ -269,6 +349,10 @@ func (s *RepositoryTestSuite) TestDelete_OK() {
 		Content:   "x",
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
+
+		ExpiresAt: nil, Privacy: nil, OwnerID: nil, ContentType: nil,
+		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
+		ClearExpiry: false,
 	}
 	s.Require().NoError(s.repo.Create(s.T().Context(), domNote))
 
@@ -287,26 +371,37 @@ func (s *RepositoryTestSuite) TestDelete_NotFound() {
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
-// DuplicateSlug
+// DuplicateSlug.
 
 func (s *RepositoryTestSuite) TestCreate_DuplicateSlug() {
 	ctx := s.T().Context()
 
-	n := &domain.Note{ID: "dup-1", Title: "a", Content: "b", CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	n := &domain.Note{
+		ID: "dup-1", Title: "a", Content: "b", CreatedAt: time.Now(), UpdatedAt: time.Now(),
+		ExpiresAt: nil, Privacy: nil, OwnerID: nil, ContentType: nil,
+		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
+		ClearExpiry: false,
+	}
 	s.Require().NoError(s.repo.Create(ctx, n))
 
-	dup := &domain.Note{ID: "dup-1", Title: "c", Content: "d", CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	dup := &domain.Note{
+		ID: "dup-1", Title: "c", Content: "d", CreatedAt: time.Now(), UpdatedAt: time.Now(),
+		ExpiresAt: nil, Privacy: nil, OwnerID: nil, ContentType: nil,
+		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
+		ClearExpiry: false,
+	}
 	err := s.repo.Create(ctx, dup)
 
 	s.ErrorIs(err, domain.ErrSlugConflict)
 }
 
-// AllFields
+// AllFields.
 
 func (s *RepositoryTestSuite) TestCreate_AllFields() {
 	ctx := s.T().Context()
 
 	future := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
+	owner := uuid.New()
 	note := &domain.Note{
 		ID:               "all-fields",
 		Title:            "title",
@@ -316,8 +411,11 @@ func (s *RepositoryTestSuite) TestCreate_AllFields() {
 		ExpiresAt:        &future,
 		BurnAfterReading: true,
 		BurnTTL:          3600,
+		OwnerID:          &owner,
 		CreatedAt:        time.Now(),
 		UpdatedAt:        time.Now(),
+
+		Privacy: nil, Views: 0, ClearExpiry: false,
 	}
 	s.Require().NoError(s.repo.Create(ctx, note))
 
@@ -328,14 +426,69 @@ func (s *RepositoryTestSuite) TestCreate_AllFields() {
 	s.Equal(int64(3600), got.BurnTTL)
 	s.Equal(new(domain.ContentTypePlain), got.ContentType)
 	s.NotNil(got.ExpiresAt)
+	s.Require().NotNil(got.OwnerID)
+	s.Equal(owner, *got.OwnerID)
 }
 
-// IncrementViews
+// TestCreate_NoOwnerID verifies an anonymously-created note (no authenticated caller) persists
+// OwnerID as nil, not an empty string — Manager.isOwner relies on this nil check.
+func (s *RepositoryTestSuite) TestCreate_NoOwnerID() {
+	ctx := s.T().Context()
+
+	note := &domain.Note{
+		ID: "anon", Title: "t", Content: "c", CreatedAt: time.Now(), UpdatedAt: time.Now(),
+		ExpiresAt: nil, Privacy: nil, OwnerID: nil, ContentType: nil,
+		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
+		ClearExpiry: false,
+	}
+	s.Require().NoError(s.repo.Create(ctx, note))
+
+	got, err := s.repo.Get(ctx, "anon")
+	s.Require().NoError(err)
+	s.Nil(got.OwnerID)
+}
+
+// TestUpdate_PreservesOwnerID verifies Update never changes owner_id — ownership is fixed at
+// creation and is excluded from Update's column list, mirroring edit_code.
+func (s *RepositoryTestSuite) TestUpdate_PreservesOwnerID() {
+	ctx := s.T().Context()
+
+	owner := uuid.New()
+	attacker := uuid.New()
+	note := &domain.Note{
+		ID: "owned", Title: "t", Content: "c", OwnerID: &owner,
+		CreatedAt: time.Now(), UpdatedAt: time.Now(),
+
+		ExpiresAt: nil, Privacy: nil, ContentType: nil, EditCode: "",
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+	}
+	s.Require().NoError(s.repo.Create(ctx, note))
+
+	s.Require().NoError(s.repo.Update(ctx, "owned", &domain.Note{
+		Title: "updated", Content: "new", OwnerID: &attacker,
+
+		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
+		Privacy: nil, ID: "", ContentType: nil, EditCode: "",
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+	}))
+
+	got, err := s.repo.Get(ctx, "owned")
+	s.Require().NoError(err)
+	s.Require().NotNil(got.OwnerID)
+	s.Equal(owner, *got.OwnerID, "owner_id must be immutable via Update, even if a caller sets it")
+}
+
+// IncrementViews.
 
 func (s *RepositoryTestSuite) TestIncrementViews_OK() {
 	ctx := s.T().Context()
 
-	n := &domain.Note{ID: "views-ok", Title: "t", Content: "c", CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	n := &domain.Note{
+		ID: "views-ok", Title: "t", Content: "c", CreatedAt: time.Now(), UpdatedAt: time.Now(),
+		ExpiresAt: nil, Privacy: nil, OwnerID: nil, ContentType: nil,
+		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
+		ClearExpiry: false,
+	}
 	s.Require().NoError(s.repo.Create(ctx, n))
 
 	s.Require().NoError(s.repo.IncrementViews(ctx, "views-ok"))
@@ -352,7 +505,7 @@ func (s *RepositoryTestSuite) TestIncrementViews_NotFound() {
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
-// Consume
+// Consume.
 
 func (s *RepositoryTestSuite) TestConsume_BurnAfterReading() {
 	ctx := s.T().Context()
@@ -360,6 +513,9 @@ func (s *RepositoryTestSuite) TestConsume_BurnAfterReading() {
 	n := &domain.Note{
 		ID: "consume-bar", Title: "burn", Content: "me",
 		BurnAfterReading: true, CreatedAt: time.Now(), UpdatedAt: time.Now(),
+
+		ExpiresAt: nil, Privacy: nil, OwnerID: nil, ContentType: nil, EditCode: "",
+		Views: 0, BurnTTL: 0, ClearExpiry: false,
 	}
 	s.Require().NoError(s.repo.Create(ctx, n))
 
@@ -378,6 +534,9 @@ func (s *RepositoryTestSuite) TestConsume_Expired() {
 	n := &domain.Note{
 		ID: "consume-exp", Title: "expired", Content: "me",
 		ExpiresAt: &past, CreatedAt: time.Now(), UpdatedAt: time.Now(),
+
+		Privacy: nil, OwnerID: nil, ContentType: nil, EditCode: "",
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
 	}
 	s.Require().NoError(s.repo.Create(ctx, n))
 
@@ -392,13 +551,18 @@ func (s *RepositoryTestSuite) TestConsume_Expired() {
 func (s *RepositoryTestSuite) TestConsume_NotEligible() {
 	ctx := s.T().Context()
 
-	n := &domain.Note{ID: "consume-no", Title: "plain", Content: "me", CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	n := &domain.Note{
+		ID: "consume-no", Title: "plain", Content: "me", CreatedAt: time.Now(), UpdatedAt: time.Now(),
+		ExpiresAt: nil, Privacy: nil, OwnerID: nil, ContentType: nil,
+		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
+		ClearExpiry: false,
+	}
 	s.Require().NoError(s.repo.Create(ctx, n))
 
 	_, err := s.repo.Consume(ctx, "consume-no")
 	s.Require().ErrorIs(err, domain.ErrNotFound)
 
-	// note must still exist
+	// note must still exist.
 	got, err := s.repo.Get(ctx, "consume-no")
 	s.Require().NoError(err)
 	s.Equal("consume-no", got.ID)
@@ -410,15 +574,13 @@ func (s *RepositoryTestSuite) TestConsume_NotFound() {
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
-// Migrate
+// Migrate.
 
 func (s *RepositoryTestSuite) TestMigrate_OK() {
 	ctx := s.T().Context()
 
-	sqldb, err := sql.Open(sqliteshim.DriverName(), "file:migrate_ok?mode=memory&cache=shared")
+	db, err := Open("file:migrate_ok?mode=memory&cache=shared", slog.New(slog.DiscardHandler))
 	s.Require().NoError(err)
-
-	db := bun.NewDB(sqldb, sqlitedialect.New())
 
 	defer func() { s.Require().NoError(db.Close()) }()
 
@@ -429,10 +591,8 @@ func (s *RepositoryTestSuite) TestMigrate_OK() {
 func (s *RepositoryTestSuite) TestMigrate_Idempotent() {
 	ctx := s.T().Context()
 
-	sqldb, err := sql.Open(sqliteshim.DriverName(), "file:migrate_idem?mode=memory&cache=shared")
+	db, err := Open("file:migrate_idem?mode=memory&cache=shared", slog.New(slog.DiscardHandler))
 	s.Require().NoError(err)
-
-	db := bun.NewDB(sqldb, sqlitedialect.New())
 
 	defer func() { s.Require().NoError(db.Close()) }()
 

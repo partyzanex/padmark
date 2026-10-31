@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"context"
 	"os"
 	"testing"
 
@@ -12,7 +11,7 @@ import (
 // TestValidateBurnTTL_LoneTTLRejected verifies that --ttl without --burn is rejected with a
 // clear message, for both `create` and `edit` (the contract: --ttl only with --burn).
 func TestValidateBurnTTL_LoneTTLRejected(t *testing.T) {
-	t.Parallel()
+	isolateEnv(t)
 
 	cases := []struct {
 		name string
@@ -24,9 +23,7 @@ func TestValidateBurnTTL_LoneTTLRejected(t *testing.T) {
 
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			t.Parallel()
-
-			err := runCLI(context.Background(), testCase.args...)
+			err := runCLI(t.Context(), testCase.args...)
 
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), "--ttl requires --burn")
@@ -38,9 +35,9 @@ func TestValidateBurnTTL_LoneTTLRejected(t *testing.T) {
 // present: the command proceeds past validateBurnTTL and fails later for an unrelated reason
 // (empty content), proving the TTL contract check passed.
 func TestValidateBurnTTL_TTLWithBurnPasses(t *testing.T) {
-	t.Parallel()
+	isolateEnv(t)
 
-	err := runCLI(context.Background(), cmdCreate, "--burn", "--ttl", "60", "--content", "")
+	err := runCLI(t.Context(), cmdCreate, "--burn", "--ttl", "60", "--content", "")
 
 	require.Error(t, err)
 	assert.NotContains(t, err.Error(), "--ttl requires --burn",
