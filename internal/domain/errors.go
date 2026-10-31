@@ -2,6 +2,8 @@ package domain
 
 import "errors"
 
+// Sentinel errors of the domain. Adapters translate them to protocol responses; compare them
+// with errors.Is.
 var (
 	ErrNotFound = errors.New("not found")
 	// ErrExpired is shared by notes and links — both expire the same way (hard TTL, deleted on
@@ -61,16 +63,17 @@ var (
 	ErrSessionRevocation   = errors.New("password changed, but older sessions or API tokens could not be revoked")
 	ErrFeatureNotSupported = errors.New("feature is not enabled")
 	ErrAPITokenLimit       = errors.New("api token limit reached")
-	// ErrBurnIntentRequired: a burn-after-click link (or burn-after-reading note) is destroyed by
-	// the access that reads it, so an access without deliberate intent — a preview fetch, a
-	// scanner, an embedded resource — must leave it intact instead.
+	// ErrBurnIntentRequired reports an access without deliberate intent to a burn resource.
+	// A burn-after-click link (or burn-after-reading note) is destroyed by the access that reads
+	// it, so a preview fetch, a scanner or an embedded resource must leave it intact instead.
 	ErrBurnIntentRequired = errors.New("burn resource requires a deliberate access")
-	// ErrStepUpRequired: issuing a credential (API token, invite) with a bearer API token needs a
-	// re-authentication — the account password and a fresh TOTP code — so a leaked key alone
-	// cannot multiply itself.
+	// ErrStepUpRequired reports that issuing a credential (API token, invite) with a bearer API
+	// token needs a re-authentication — the account password and a fresh TOTP code — so a
+	// leaked key alone cannot multiply itself.
 	ErrStepUpRequired = errors.New("re-authentication required: send the account password and a TOTP code")
-	// ErrStepUpFailed: the step-up password or TOTP code was wrong (or the code was already used).
+	// ErrStepUpFailed reports a wrong step-up password or TOTP code (or a code already used).
 	ErrStepUpFailed = errors.New("re-authentication failed: invalid password or TOTP code")
-	// ErrInvalidAPITokenTTL: an API token lifetime outside 0 (never expires) … MaxAPITokenTTLDays.
+	// ErrInvalidAPITokenTTL reports an API token lifetime outside 0 (never expires) …
+	// MaxAPITokenTTLDays.
 	ErrInvalidAPITokenTTL = errors.New("api token lifetime out of range")
 )

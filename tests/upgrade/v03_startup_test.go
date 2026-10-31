@@ -189,7 +189,15 @@ func runV03Startup(t *testing.T, binary, directory, storage, dsn string, db *bun
 	stop()
 }
 
-func v03Request(t *testing.T, method, url, token, cookie, contentType, body string) *http.Response {
+// v03Response is a read and closed HTTP response, so a caller never holds an open body.
+type v03Response struct {
+	header  http.Header
+	cookies []*http.Cookie
+	body    []byte
+	status  int
+}
+
+func v03Request(t *testing.T, method, url, token, cookie, contentType, body string) v03Response {
 	t.Helper()
 
 	request, err := http.NewRequestWithContext(t.Context(), method, url, strings.NewReader(body))
@@ -208,16 +216,21 @@ func v03Request(t *testing.T, method, url, token, cookie, contentType, body stri
 		request.Header.Set("Content-Type", contentType)
 	}
 
-	client := &http.Client{Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error {
-		return http.ErrUseLastResponse
-	},
+	client := &http.Client{
+		Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
 		Transport: nil, Jar: nil,
 	}
 	response, err := client.Do(request)
 	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, response.Body.Close()) })
 
-	return response
+	defer func() { require.NoError(t, response.Body.Close()) }()
+
+	raw, err := io.ReadAll(response.Body)
+	require.NoError(t, err)
+
+	return v03Response{header: response.Header, cookies: response.Cookies(), body: raw, status: response.StatusCode}
 }
 
 func assertV03HTTP(t *testing.T, baseURL string, fixture v03Fixture) {
@@ -225,13 +238,13 @@ func assertV03HTTP(t *testing.T, baseURL string, fixture v03Fixture) {
 
 	for _, note := range fixture.Notes {
 		response := v03Request(t, http.MethodGet, baseURL+"/notes/"+note.ID, fixture.Auth.APIToken, "", "", "")
-		require.Equal(t, http.StatusOK, response.StatusCode, note.Name)
+		require.Equal(t, http.StatusOK, response.status, note.Name)
 
 		var result struct {
 			Content string `json:"content"`
 		}
 
-		require.NoError(t, json.NewDecoder(response.Body).Decode(&result))
+		require.NoError(t, json.Unmarshal(response.body, &result))
 		require.Equal(t, note.Content, result.Content)
 
 		if note.Name == "weak_code" {
@@ -240,12 +253,12 @@ func assertV03HTTP(t *testing.T, baseURL string, fixture v03Fixture) {
 			})
 			require.NoError(t, err)
 			updated := v03Request(t, http.MethodPut, baseURL+"/notes/"+note.ID, "", "", "application/json", string(body))
-			require.Equal(t, http.StatusOK, updated.StatusCode)
+			require.Equal(t, http.StatusOK, updated.status)
 		}
 	}
 
 	sessionRead := v03Request(t, http.MethodGet, baseURL+"/notes/compat-private", "", fixture.Auth.Session, "", "")
-	require.Equal(t, http.StatusUnauthorized, sessionRead.StatusCode,
+	require.Equal(t, http.StatusUnauthorized, sessionRead.status,
 		"the session-hashing migration requires a fresh login")
 
 	code, err := totp.GenerateCode(fixture.Auth.TOTPSecret, time.Now())
@@ -253,24 +266,23 @@ func assertV03HTTP(t *testing.T, baseURL string, fixture v03Fixture) {
 
 	form := url.Values{"username": {fixture.Auth.Username}, "password": {fixture.Auth.Password}, "code": {code}}
 	login := v03Login(t, baseURL, form)
-	require.Equal(t, http.StatusSeeOther, login.StatusCode)
-	require.NotContains(t, login.Header.Get("Location"), "error=1", "the old password and TOTP must still authenticate")
-	require.NotEmpty(t, login.Cookies())
-	_, err = io.Copy(io.Discard, login.Body)
-	require.NoError(t, err)
+	require.Equal(t, http.StatusSeeOther, login.status)
+	require.NotContains(t, login.header.Get("Location"), "error=1", "the old password and TOTP must still authenticate")
+	require.NotEmpty(t, login.cookies)
 
 	created := v03Request(t, http.MethodPost, baseURL+"/links", fixture.Auth.APIToken, "", "application/json",
 		`{"target_url":"https://example.com/after-upgrade"}`)
-	require.Equal(t, http.StatusCreated, created.StatusCode)
+	require.Equal(t, http.StatusCreated, created.status)
 }
 
-func v03Login(t *testing.T, baseURL string, form url.Values) *http.Response {
+func v03Login(t *testing.T, baseURL string, form url.Values) v03Response {
 	t.Helper()
 
 	jar, err := cookiejar.New(nil)
 	require.NoError(t, err)
 
-	client := &http.Client{Jar: jar, Timeout: 10 * time.Second,
+	client := &http.Client{
+		Jar: jar, Timeout: 10 * time.Second,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 		Transport:     nil,
 	}
@@ -295,7 +307,11 @@ func v03Login(t *testing.T, baseURL string, form url.Values) *http.Response {
 	request.Header.Set("Origin", baseURL)
 	response, err := client.Do(request)
 	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, response.Body.Close()) })
 
-	return response
+	defer func() { require.NoError(t, response.Body.Close()) }()
+
+	raw, err := io.ReadAll(response.Body)
+	require.NoError(t, err)
+
+	return v03Response{header: response.Header, cookies: response.Cookies(), body: raw, status: response.StatusCode}
 }

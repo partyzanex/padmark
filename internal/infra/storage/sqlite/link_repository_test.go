@@ -41,7 +41,8 @@ func TestLinkRepositoryTestSuite(t *testing.T) {
 }
 
 func (s *LinkRepositoryTestSuite) TestCreate_OK() {
-	domLink := &domain.Link{ID: "link-1", TargetURL: "ciphertext", CreatedAt: time.Now(),
+	domLink := &domain.Link{
+		ID: "link-1", TargetURL: "ciphertext", CreatedAt: time.Now(),
 		ExpiresAt: nil, Privacy: nil, OwnerID: nil, DirectRedirect: nil,
 		EditCode: "", Views: 0, BurnAfterClick: false,
 	}
@@ -71,7 +72,8 @@ func (s *LinkRepositoryTestSuite) TestCreate_SweepsExpiredLinks() {
 	s.Require().NoError(err)
 
 	// This Create's sweep should delete the row above.
-	s.Require().NoError(s.repo.Create(ctx, &domain.Link{ID: "fresh", TargetURL: "b", CreatedAt: time.Now(),
+	s.Require().NoError(s.repo.Create(ctx, &domain.Link{
+		ID: "fresh", TargetURL: "b", CreatedAt: time.Now(),
 		ExpiresAt: nil, Privacy: nil, OwnerID: nil, DirectRedirect: nil,
 		EditCode: "", Views: 0, BurnAfterClick: false,
 	}))
@@ -86,13 +88,15 @@ func (s *LinkRepositoryTestSuite) TestCreate_SweepsExpiredLinks() {
 func (s *LinkRepositoryTestSuite) TestCreate_DuplicateSlug() {
 	ctx := s.T().Context()
 
-	l := &domain.Link{ID: "dup-1", TargetURL: "a", CreatedAt: time.Now(),
+	l := &domain.Link{
+		ID: "dup-1", TargetURL: "a", CreatedAt: time.Now(),
 		ExpiresAt: nil, Privacy: nil, OwnerID: nil, DirectRedirect: nil,
 		EditCode: "", Views: 0, BurnAfterClick: false,
 	}
 	s.Require().NoError(s.repo.Create(ctx, l))
 
-	dup := &domain.Link{ID: "dup-1", TargetURL: "b", CreatedAt: time.Now(),
+	dup := &domain.Link{
+		ID: "dup-1", TargetURL: "b", CreatedAt: time.Now(),
 		ExpiresAt: nil, Privacy: nil, OwnerID: nil, DirectRedirect: nil,
 		EditCode: "", Views: 0, BurnAfterClick: false,
 	}
@@ -142,7 +146,8 @@ func (s *LinkRepositoryTestSuite) TestCreate_AllFields() {
 func (s *LinkRepositoryTestSuite) TestCreate_DirectRedirectDefaultsToNil() {
 	ctx := s.T().Context()
 
-	l := &domain.Link{ID: "no-override", TargetURL: "a", CreatedAt: time.Now(),
+	l := &domain.Link{
+		ID: "no-override", TargetURL: "a", CreatedAt: time.Now(),
 		ExpiresAt: nil, Privacy: nil, OwnerID: nil, DirectRedirect: nil,
 		EditCode: "", Views: 0, BurnAfterClick: false,
 	}
@@ -159,7 +164,8 @@ func (s *LinkRepositoryTestSuite) TestCreate_DirectRedirectDefaultsToNil() {
 func (s *LinkRepositoryTestSuite) TestCreate_NoOwnerID_DefaultsToPublicPrivacy() {
 	ctx := s.T().Context()
 
-	l := &domain.Link{ID: "anon", TargetURL: "ciphertext", CreatedAt: time.Now(),
+	l := &domain.Link{
+		ID: "anon", TargetURL: "ciphertext", CreatedAt: time.Now(),
 		ExpiresAt: nil, Privacy: nil, OwnerID: nil, DirectRedirect: nil,
 		EditCode: "", Views: 0, BurnAfterClick: false,
 	}
@@ -180,7 +186,8 @@ func (s *LinkRepositoryTestSuite) TestGetByID_NotFound() {
 func (s *LinkRepositoryTestSuite) TestExists_True() {
 	ctx := s.T().Context()
 
-	l := &domain.Link{ID: "exists-1", TargetURL: "a", CreatedAt: time.Now(),
+	l := &domain.Link{
+		ID: "exists-1", TargetURL: "a", CreatedAt: time.Now(),
 		ExpiresAt: nil, Privacy: nil, OwnerID: nil, DirectRedirect: nil,
 		EditCode: "", Views: 0, BurnAfterClick: false,
 	}
@@ -201,7 +208,8 @@ func (s *LinkRepositoryTestSuite) TestExists_False() {
 func (s *LinkRepositoryTestSuite) TestIncrementViews_OK() {
 	ctx := s.T().Context()
 
-	l := &domain.Link{ID: "views-ok", TargetURL: "a", CreatedAt: time.Now(),
+	l := &domain.Link{
+		ID: "views-ok", TargetURL: "a", CreatedAt: time.Now(),
 		ExpiresAt: nil, Privacy: nil, OwnerID: nil, DirectRedirect: nil,
 		EditCode: "", Views: 0, BurnAfterClick: false,
 	}
@@ -224,7 +232,8 @@ func (s *LinkRepositoryTestSuite) TestIncrementViews_NotFound() {
 func (s *LinkRepositoryTestSuite) TestConsume_BurnAfterClick() {
 	ctx := s.T().Context()
 
-	l := &domain.Link{ID: "consume-bac", TargetURL: "a", BurnAfterClick: true, CreatedAt: time.Now(),
+	l := &domain.Link{
+		ID: "consume-bac", TargetURL: "a", BurnAfterClick: true, CreatedAt: time.Now(),
 		ExpiresAt: nil, Privacy: nil, OwnerID: nil, DirectRedirect: nil,
 		EditCode: "", Views: 0,
 	}
@@ -242,7 +251,8 @@ func (s *LinkRepositoryTestSuite) TestConsume_Expired() {
 	ctx := s.T().Context()
 
 	past := time.Now().Add(-time.Hour)
-	l := &domain.Link{ID: "consume-exp", TargetURL: "a", ExpiresAt: &past, CreatedAt: time.Now(),
+	l := &domain.Link{
+		ID: "consume-exp", TargetURL: "a", ExpiresAt: &past, CreatedAt: time.Now(),
 		Privacy: nil, OwnerID: nil, DirectRedirect: nil, EditCode: "", Views: 0,
 		BurnAfterClick: false,
 	}
@@ -259,7 +269,8 @@ func (s *LinkRepositoryTestSuite) TestConsume_Expired() {
 func (s *LinkRepositoryTestSuite) TestConsume_NotEligible() {
 	ctx := s.T().Context()
 
-	l := &domain.Link{ID: "consume-no", TargetURL: "a", CreatedAt: time.Now(),
+	l := &domain.Link{
+		ID: "consume-no", TargetURL: "a", CreatedAt: time.Now(),
 		ExpiresAt: nil, Privacy: nil, OwnerID: nil, DirectRedirect: nil,
 		EditCode: "", Views: 0, BurnAfterClick: false,
 	}
@@ -282,7 +293,8 @@ func (s *LinkRepositoryTestSuite) TestConsume_NotFound() {
 func (s *LinkRepositoryTestSuite) TestDelete_OK() {
 	ctx := s.T().Context()
 
-	l := &domain.Link{ID: "del-1", TargetURL: "a", CreatedAt: time.Now(),
+	l := &domain.Link{
+		ID: "del-1", TargetURL: "a", CreatedAt: time.Now(),
 		ExpiresAt: nil, Privacy: nil, OwnerID: nil, DirectRedirect: nil,
 		EditCode: "", Views: 0, BurnAfterClick: false,
 	}
@@ -336,7 +348,8 @@ func (s *LinkRepositoryTestSuite) TestUpdate_EditableColumnsOnly() {
 	stored, err := s.repo.GetByID(ctx, original.ID)
 	s.Require().NoError(err)
 	s.Equal(updated, stored)
-	_, err = s.repo.Update(ctx, "missing-link", &domain.Link{TargetURL: "unused",
+	_, err = s.repo.Update(ctx, "missing-link", &domain.Link{
+		TargetURL: "unused",
 		CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
 		DirectRedirect: nil, ID: "", EditCode: "", Views: 0,
 		BurnAfterClick: false,

@@ -61,12 +61,14 @@ func (s *RepositoryTestSuite) TestCreate_OK() {
 }
 
 func (s *RepositoryTestSuite) TestCreate_SetsID() {
-	note1 := &domain.Note{ID: "id-1", Title: "a", Content: "b", CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	note1 := &domain.Note{
+		ID: "id-1", Title: "a", Content: "b", CreatedAt: time.Now(), UpdatedAt: time.Now(),
 		ExpiresAt: nil, Privacy: nil, OwnerID: nil, ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
 		ClearExpiry: false,
 	}
-	note2 := &domain.Note{ID: "id-2", Title: "c", Content: "d", CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	note2 := &domain.Note{
+		ID: "id-2", Title: "c", Content: "d", CreatedAt: time.Now(), UpdatedAt: time.Now(),
 		ExpiresAt: nil, Privacy: nil, OwnerID: nil, ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
 		ClearExpiry: false,
@@ -117,7 +119,8 @@ func (s *RepositoryTestSuite) TestGet_NotFound() {
 func (s *RepositoryTestSuite) TestExists_True() {
 	ctx := s.T().Context()
 
-	n := &domain.Note{ID: "exists-1", Title: "t", Content: "c", CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	n := &domain.Note{
+		ID: "exists-1", Title: "t", Content: "c", CreatedAt: time.Now(), UpdatedAt: time.Now(),
 		ExpiresAt: nil, Privacy: nil, OwnerID: nil, ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
 		ClearExpiry: false,
@@ -176,7 +179,8 @@ func (s *RepositoryTestSuite) TestUpdate_OK() {
 }
 
 func (s *RepositoryTestSuite) TestUpdate_NotFound() {
-	domNote := &domain.Note{Title: "test", Content: "test", CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	domNote := &domain.Note{
+		Title: "test", Content: "test", CreatedAt: time.Now(), UpdatedAt: time.Now(),
 		ExpiresAt: nil, Privacy: nil, OwnerID: nil, ID: "",
 		ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
 		BurnAfterReading: false, ClearExpiry: false,
@@ -372,14 +376,16 @@ func (s *RepositoryTestSuite) TestDelete_NotFound() {
 func (s *RepositoryTestSuite) TestCreate_DuplicateSlug() {
 	ctx := s.T().Context()
 
-	n := &domain.Note{ID: "dup-1", Title: "a", Content: "b", CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	n := &domain.Note{
+		ID: "dup-1", Title: "a", Content: "b", CreatedAt: time.Now(), UpdatedAt: time.Now(),
 		ExpiresAt: nil, Privacy: nil, OwnerID: nil, ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
 		ClearExpiry: false,
 	}
 	s.Require().NoError(s.repo.Create(ctx, n))
 
-	dup := &domain.Note{ID: "dup-1", Title: "c", Content: "d", CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	dup := &domain.Note{
+		ID: "dup-1", Title: "c", Content: "d", CreatedAt: time.Now(), UpdatedAt: time.Now(),
 		ExpiresAt: nil, Privacy: nil, OwnerID: nil, ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
 		ClearExpiry: false,
@@ -429,7 +435,8 @@ func (s *RepositoryTestSuite) TestCreate_AllFields() {
 func (s *RepositoryTestSuite) TestCreate_NoOwnerID() {
 	ctx := s.T().Context()
 
-	note := &domain.Note{ID: "anon", Title: "t", Content: "c", CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	note := &domain.Note{
+		ID: "anon", Title: "t", Content: "c", CreatedAt: time.Now(), UpdatedAt: time.Now(),
 		ExpiresAt: nil, Privacy: nil, OwnerID: nil, ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
 		ClearExpiry: false,
@@ -476,7 +483,8 @@ func (s *RepositoryTestSuite) TestUpdate_PreservesOwnerID() {
 func (s *RepositoryTestSuite) TestIncrementViews_OK() {
 	ctx := s.T().Context()
 
-	n := &domain.Note{ID: "views-ok", Title: "t", Content: "c", CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	n := &domain.Note{
+		ID: "views-ok", Title: "t", Content: "c", CreatedAt: time.Now(), UpdatedAt: time.Now(),
 		ExpiresAt: nil, Privacy: nil, OwnerID: nil, ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
 		ClearExpiry: false,
@@ -543,7 +551,8 @@ func (s *RepositoryTestSuite) TestConsume_Expired() {
 func (s *RepositoryTestSuite) TestConsume_NotEligible() {
 	ctx := s.T().Context()
 
-	n := &domain.Note{ID: "consume-no", Title: "plain", Content: "me", CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	n := &domain.Note{
+		ID: "consume-no", Title: "plain", Content: "me", CreatedAt: time.Now(), UpdatedAt: time.Now(),
 		ExpiresAt: nil, Privacy: nil, OwnerID: nil, ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
 		ClearExpiry: false,

@@ -13,10 +13,15 @@ import (
 	keys "github.com/partyzanex/padmark/internal/usecases/contentkeys"
 )
 
+// Repository implements contentkeys.Storage: the encryption state, the key verifications and the
+// compare-and-swap updates of encrypted columns. Errors are fail-hard for the migration.
 type Repository struct{ db *bun.DB }
 
+// New returns a Repository on db. The same SQL serves SQLite and PostgreSQL.
 func New(db *bun.DB) *Repository { return &Repository{db: db} }
 
+// Registry returns the encryption state and the key checks, or nil when the installation has no
+// state yet.
 func (r *Repository) Registry(ctx context.Context) (*keys.Registry, error) {
 	reg := &keys.Registry{InstallationID: "", Phase: "", Checks: make(map[string]string)}
 
@@ -86,6 +91,8 @@ func (r *Repository) Initialize(ctx context.Context, reg *keys.Registry) error {
 	return nil
 }
 
+// Register records the verification value of key id. A key that is already registered stays
+// unchanged.
 func (r *Repository) Register(ctx context.Context, id, check string) error {
 	_, err := r.db.NewRaw("INSERT INTO content_encryption_keys (key_id, verification) "+
 		"VALUES (?, ?) ON CONFLICT (key_id) DO NOTHING", id, check).Exec(ctx)
@@ -96,6 +103,7 @@ func (r *Repository) Register(ctx context.Context, id, check string) error {
 	return nil
 }
 
+// SetPhase changes the migration phase. It fails when the state row is absent.
 func (r *Repository) SetPhase(ctx context.Context, phase string) error {
 	result, err := r.db.NewUpdate().Table("content_encryption_state").Set("phase = ?", phase).Where("id = 1").Exec(ctx)
 	if err != nil {
@@ -160,6 +168,7 @@ func selectRows(db *bun.DB, table, column string) *bun.SelectQuery {
 	return query
 }
 
+// Batch returns up to limit records of resource with an ID after the given one, in ID order.
 func (r *Repository) Batch(ctx context.Context, resource, after string, limit int) ([]keys.Row, error) {
 	table, column, err := resourceColumns(resource)
 	if err != nil {
@@ -182,6 +191,7 @@ func (r *Repository) Batch(ctx context.Context, resource, after string, limit in
 	return rows, nil
 }
 
+// Get returns one record of resource, or nil when it does not exist.
 func (r *Repository) Get(ctx context.Context, resource, id string) (*keys.Row, error) {
 	table, column, err := resourceColumns(resource)
 	if err != nil {
@@ -204,6 +214,8 @@ func (r *Repository) Get(ctx context.Context, resource, id string) (*keys.Row, e
 	return &row, nil
 }
 
+// Replace sets the encrypted column of row to value only while the row still holds the inspected
+// value. false means a concurrent change won. Errors never expose ciphertext or SQL parameters.
 func (r *Repository) Replace(ctx context.Context, row keys.Row, value string) (bool, error) {
 	table, column, err := resourceColumns(row.Resource)
 	if err != nil {

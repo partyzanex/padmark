@@ -80,7 +80,7 @@ func errorStatusMessage(err error) (status int, message string) {
 // multi-segment note handlers consistent with the ogen error surface (JSON ErrorResponse body).
 // Stays a single small method rather than shared middleware since it has one caller today
 // (UpdateNoteByPath); future native handlers with a JSON body should call this method directly.
-func (h *common) writeDecodeError(w http.ResponseWriter, r *http.Request, err error) {
+func (c *common) writeDecodeError(w http.ResponseWriter, r *http.Request, err error) {
 	status, msg := http.StatusBadRequest, decodeErrorMessage
 
 	// Consume the typed result (not the ok flag) so errcheck sees the error-typed return used.
@@ -95,7 +95,7 @@ func (h *common) writeDecodeError(w http.ResponseWriter, r *http.Request, err er
 
 	encErr := json.NewEncoder(w).Encode(response.ErrorJSON{Message: msg, Code: ""})
 	if encErr != nil {
-		h.log.ErrorContext(r.Context(), "write decode error response", "err", encErr)
+		c.log.ErrorContext(r.Context(), "write decode error response", "err", encErr)
 	}
 }
 
@@ -103,7 +103,7 @@ func (h *common) writeDecodeError(w http.ResponseWriter, r *http.Request, err er
 // schema, so the generated ogen client decodes it into a typed error (e.g. GetNoteNotFound)
 // instead of failing on an unexpected content type. Used for non-HTML (API/CLI) clients; browser
 // requests get the HTML error page via writeErrorPage / writeNoteError.
-func (h *common) writeError(w http.ResponseWriter, r *http.Request, err error) {
+func (c *common) writeError(w http.ResponseWriter, r *http.Request, err error) {
 	status, msg := errorStatusMessage(err)
 
 	w.Header().Set("Content-Type", mimeJSON)
@@ -111,10 +111,8 @@ func (h *common) writeError(w http.ResponseWriter, r *http.Request, err error) {
 
 	encErr := json.NewEncoder(w).Encode(response.ErrorJSON{Message: msg, Code: ""})
 	if encErr != nil {
-		h.log.ErrorContext(r.Context(), "write error response", "err", encErr)
+		c.log.ErrorContext(r.Context(), "write error response", "err", encErr)
 	}
 }
 
-var (
-	errRequestOriginUnavailable = errors.New("request origin unavailable")
-)
+var errRequestOriginUnavailable = errors.New("request origin unavailable")

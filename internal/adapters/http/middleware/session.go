@@ -2,7 +2,6 @@ package middleware
 
 import (
 	"context"
-	_ "embed"
 	"net/http"
 
 	"github.com/google/uuid"
@@ -10,8 +9,11 @@ import (
 	"github.com/partyzanex/padmark/internal/domain"
 )
 
+// SessionCookieName is the name of the cookie that carries the session ID.
 const SessionCookieName = "padmark_session"
 
+// ExtractSessionID returns the session cookie value, or "" when the cookie is absent or ambiguous
+// (see SingleCookieValue).
 func ExtractSessionID(r *http.Request) string {
 	value, ok := SingleCookieValue(r, SessionCookieName)
 	if !ok {
@@ -45,6 +47,7 @@ func SingleCookieValue(r *http.Request, name string) (string, bool) {
 	return value, true
 }
 
+// UserFromContext returns the authenticated user of the request, or nil for an anonymous request.
 func UserFromContext(r *http.Request) *domain.User {
 	return UserFromCtx(r.Context())
 }

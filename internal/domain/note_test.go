@@ -32,7 +32,8 @@ func TestContentType_Valid(t *testing.T) {
 
 func TestNote_Validate_TitleOptional(t *testing.T) {
 	// Title is intentionally optional — an empty title must validate.
-	note := &Note{Title: "", Content: "body",
+	note := &Note{
+		Title: "", Content: "body",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
@@ -43,7 +44,8 @@ func TestNote_Validate_TitleOptional(t *testing.T) {
 }
 
 func TestNote_Validate_TitleTooLong(t *testing.T) {
-	note := &Note{Title: strings.Repeat("a", MaxTitleLength+1),
+	note := &Note{
+		Title:     strings.Repeat("a", MaxTitleLength+1),
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", Content: "",
 		ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
@@ -55,7 +57,8 @@ func TestNote_Validate_TitleTooLong(t *testing.T) {
 
 func TestNote_Validate_InvalidContentType(t *testing.T) {
 	ct := ContentType("text/html")
-	note := &Note{Title: "ok", ContentType: &ct,
+	note := &Note{
+		Title: "ok", ContentType: &ct,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", Content: "",
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
@@ -75,7 +78,8 @@ func TestPrivacy_Valid(t *testing.T) {
 
 func TestNote_Validate_InvalidPrivacy(t *testing.T) {
 	p := Privacy("secret")
-	note := &Note{Title: "ok", Privacy: &p,
+	note := &Note{
+		Title: "ok", Privacy: &p,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		OwnerID: nil, ID: "", Content: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
@@ -89,21 +93,24 @@ func TestNote_ValidateOwnership(t *testing.T) {
 	owner := uuid.New()
 	ownerLevel, publicLevel := PrivacyOwner, PrivacyPublic
 
-	require.ErrorIs(t, (&Note{Privacy: &ownerLevel,
+	require.ErrorIs(t, (&Note{
+		Privacy:   &ownerLevel,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		OwnerID: nil, ID: "", Title: "", Content: "",
 		ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
 		BurnAfterReading: false, ClearExpiry: false,
 	}).ValidateOwnership(), ErrOwnerPrivacyRequiresOwner,
 		"owner-only privacy on a note with no OwnerID must be rejected")
-	assert.NoError(t, (&Note{Privacy: &ownerLevel, OwnerID: &owner,
+	assert.NoError(t, (&Note{
+		Privacy: &ownerLevel, OwnerID: &owner,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		ID: "", Title: "", Content: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
 		ClearExpiry: false,
 	}).ValidateOwnership(),
 		"owner-only privacy on a note with an OwnerID is fine")
-	assert.NoError(t, (&Note{Privacy: &publicLevel,
+	assert.NoError(t, (&Note{
+		Privacy:   &publicLevel,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		OwnerID: nil, ID: "", Title: "", Content: "",
 		ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
@@ -127,7 +134,8 @@ func TestNote_EffectivePrivacy(t *testing.T) {
 	}).EffectivePrivacy(), "nil Privacy defaults to public")
 
 	owner := PrivacyOwner
-	assert.Equal(t, PrivacyOwner, (&Note{Privacy: &owner,
+	assert.Equal(t, PrivacyOwner, (&Note{
+		Privacy:   &owner,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		OwnerID: nil, ID: "", Title: "", Content: "",
 		ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
@@ -149,13 +157,15 @@ func TestNote_VisibleTo(t *testing.T) {
 		authenticated bool
 		want          bool
 	}{
-		{"public visible to anonymous", &Note{Privacy: &public,
+		{"public visible to anonymous", &Note{
+			Privacy:   &public,
 			CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 			OwnerID: nil, ID: "", Title: "", Content: "",
 			ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
 			BurnAfterReading: false, ClearExpiry: false,
 		}, uuid.Nil, false, true},
-		{"public visible to authenticated", &Note{Privacy: &public,
+		{"public visible to authenticated", &Note{
+			Privacy:   &public,
 			CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 			OwnerID: nil, ID: "", Title: "", Content: "",
 			ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
@@ -167,7 +177,8 @@ func TestNote_VisibleTo(t *testing.T) {
 			Content: "", ContentType: nil, EditCode: "", Views: 0,
 			BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
 		}, uuid.Nil, false, true},
-		{"authenticated hides from anonymous", &Note{Privacy: &authenticated,
+		{"authenticated hides from anonymous", &Note{
+			Privacy:   &authenticated,
 			CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 			OwnerID: nil, ID: "", Title: "", Content: "",
 			ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
@@ -175,26 +186,30 @@ func TestNote_VisibleTo(t *testing.T) {
 		}, uuid.Nil, false, false},
 		{
 			"authenticated visible to any authenticated caller",
-			&Note{Privacy: &authenticated, OwnerID: &owner,
+			&Note{
+				Privacy: &authenticated, OwnerID: &owner,
 				CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 				ID: "", Title: "", Content: "", ContentType: nil,
 				EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
 				ClearExpiry: false,
 			}, other, true, true,
 		},
-		{"owner hides from anonymous", &Note{Privacy: &ownerOnly, OwnerID: &owner,
+		{"owner hides from anonymous", &Note{
+			Privacy: &ownerOnly, OwnerID: &owner,
 			CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 			ID: "", Title: "", Content: "", ContentType: nil,
 			EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
 			ClearExpiry: false,
 		}, uuid.Nil, false, false},
-		{"owner hides from other authenticated caller", &Note{Privacy: &ownerOnly, OwnerID: &owner,
+		{"owner hides from other authenticated caller", &Note{
+			Privacy: &ownerOnly, OwnerID: &owner,
 			CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 			ID: "", Title: "", Content: "", ContentType: nil,
 			EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
 			ClearExpiry: false,
 		}, other, true, false},
-		{"owner visible to the owner", &Note{Privacy: &ownerOnly, OwnerID: &owner,
+		{"owner visible to the owner", &Note{
+			Privacy: &ownerOnly, OwnerID: &owner,
 			CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 			ID: "", Title: "", Content: "", ContentType: nil,
 			EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
@@ -203,19 +218,22 @@ func TestNote_VisibleTo(t *testing.T) {
 		// A note that ended up privacy=owner with no OwnerID (should be unreachable through
 		// ValidateOwnership, but VisibleTo must not rely on that as its only guard) hides from
 		// everyone, including an authenticated caller with no way to prove ownership of nothing.
-		{"owner with nil OwnerID hides from anonymous", &Note{Privacy: &ownerOnly,
+		{"owner with nil OwnerID hides from anonymous", &Note{
+			Privacy:   &ownerOnly,
 			CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 			OwnerID: nil, ID: "", Title: "", Content: "",
 			ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
 			BurnAfterReading: false, ClearExpiry: false,
 		}, uuid.Nil, false, false},
-		{"owner with nil OwnerID hides from authenticated caller", &Note{Privacy: &ownerOnly,
+		{"owner with nil OwnerID hides from authenticated caller", &Note{
+			Privacy:   &ownerOnly,
 			CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 			OwnerID: nil, ID: "", Title: "", Content: "",
 			ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
 			BurnAfterReading: false, ClearExpiry: false,
 		}, other, true, false},
-		{"owner with nil OwnerID hides from a caller matching uuid.Nil", &Note{Privacy: &ownerOnly,
+		{"owner with nil OwnerID hides from a caller matching uuid.Nil", &Note{
+			Privacy:   &ownerOnly,
 			CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 			OwnerID: nil, ID: "", Title: "", Content: "",
 			ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
@@ -223,7 +241,8 @@ func TestNote_VisibleTo(t *testing.T) {
 		}, uuid.Nil, true, false},
 		// A corrupted/unrecognized privacy value (unreachable through Validate(), only possible
 		// via direct DB tampering) must fail closed, not open.
-		{"unrecognized privacy value fails closed", &Note{Privacy: &garbage, OwnerID: &owner,
+		{"unrecognized privacy value fails closed", &Note{
+			Privacy: &garbage, OwnerID: &owner,
 			CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 			ID: "", Title: "", Content: "", ContentType: nil,
 			EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
@@ -241,7 +260,8 @@ func TestNote_VisibleTo(t *testing.T) {
 func TestNote_OwnedBy(t *testing.T) {
 	owner := uuid.New()
 	other := uuid.New()
-	note := &Note{OwnerID: &owner,
+	note := &Note{
+		OwnerID:   &owner,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, ID: "", Title: "", Content: "",
 		ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
@@ -268,7 +288,8 @@ func TestNote_OwnedBy_AnonymousNote(t *testing.T) {
 func TestNote_Validate_ContentLength(t *testing.T) {
 	t.Parallel()
 
-	atCap := &Note{Content: strings.Repeat("a", MaxContentLength),
+	atCap := &Note{
+		Content:   strings.Repeat("a", MaxContentLength),
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", Title: "",
 		ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
@@ -276,7 +297,8 @@ func TestNote_Validate_ContentLength(t *testing.T) {
 	}
 	require.NoError(t, atCap.Validate())
 
-	over := &Note{Content: strings.Repeat("a", MaxContentLength+1),
+	over := &Note{
+		Content:   strings.Repeat("a", MaxContentLength+1),
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", Title: "",
 		ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
@@ -285,7 +307,8 @@ func TestNote_Validate_ContentLength(t *testing.T) {
 	require.ErrorIs(t, over.Validate(), ErrContentTooLarge)
 
 	// The cap counts characters, not bytes: a body of two-byte runes at the cap is valid.
-	multibyte := &Note{Content: strings.Repeat("é", MaxContentLength),
+	multibyte := &Note{
+		Content:   strings.Repeat("é", MaxContentLength),
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", Title: "",
 		ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,

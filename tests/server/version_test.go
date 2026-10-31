@@ -35,7 +35,8 @@ func TestAPIDocumentationReleaseVersion(t *testing.T) {
 
 			baseURL, _ := servertest.Start(t, binary, t.TempDir())
 
-			client := &http.Client{Timeout: 5 * time.Second,
+			client := &http.Client{
+				Timeout:   5 * time.Second,
 				Transport: nil, CheckRedirect: nil, Jar: nil,
 			}
 			defer client.CloseIdleConnections()

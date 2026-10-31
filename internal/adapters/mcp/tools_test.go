@@ -6,10 +6,9 @@ import (
 	"testing"
 	time "time"
 
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/mock/gomock"
-
-	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	padmark "github.com/partyzanex/padmark/pkg/client"
 )
@@ -41,12 +40,15 @@ func (s *ToolsSuite) TearDownTest() {
 // callTool drives a tool through a real SDK server over an in-memory transport, so the test
 // exercises the same schema inference, unmarshalling, and result packing a real agent sees.
 func (s *ToolsSuite) callTool(ctx context.Context, name string, args map[string]any) *mcpsdk.CallToolResult {
+	s.T().Helper()
+
 	sess, err := connectTestClient(ctx, s.mgr)
 	s.Require().NoError(err)
 
 	defer sess.Close()
 
-	res, err := sess.CallTool(ctx, &mcpsdk.CallToolParams{Name: name, Arguments: args,
+	res, err := sess.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name: name, Arguments: args,
 		Meta: nil, InputResponses: nil, RequestState: "",
 	})
 	s.Require().NoError(err, "%s tool call must succeed at protocol level", name)
@@ -55,6 +57,8 @@ func (s *ToolsSuite) callTool(ctx context.Context, name string, args map[string]
 }
 
 func (s *ToolsSuite) successText(res *mcpsdk.CallToolResult) string {
+	s.T().Helper()
+
 	s.Require().False(res.IsError, "expected a successful result")
 	s.Require().NotEmpty(res.Content)
 
@@ -66,6 +70,8 @@ func (s *ToolsSuite) successText(res *mcpsdk.CallToolResult) string {
 
 // errorTextOf asserts an error result and returns its error text.
 func (s *ToolsSuite) errorTextOf(res *mcpsdk.CallToolResult) string {
+	s.T().Helper()
+
 	s.Require().True(res.IsError, "expected an error result")
 	s.Require().NotEmpty(res.Content)
 
@@ -266,7 +272,8 @@ func (s *ToolsSuite) TestCreateLinksBulk_PassesItemsThrough() {
 	ctx := s.T().Context()
 
 	results := padmark.BulkCreateLinksResponse{Results: []padmark.BulkLinkResult{
-		{TargetURL: testURL(s.T(), "https://ok.example.com"), ID: padmark.NewOptString("link-ok"),
+		{
+			TargetURL: testURL(s.T(), "https://ok.example.com"), ID: padmark.NewOptString("link-ok"),
 			EditCode:       padmark.NewOptString("bulk-code-1"),
 			Error:          padmark.OptString{Value: "", Set: false},
 			Views:          padmark.OptInt{Value: 0, Set: false},
@@ -276,7 +283,8 @@ func (s *ToolsSuite) TestCreateLinksBulk_PassesItemsThrough() {
 			DirectRedirect: padmark.OptNilBool{Value: false, Set: false, Null: false},
 			CreatedAt:      padmark.OptDateTime{Value: time.Time{}, Set: false},
 		},
-		{TargetURL: testURL(s.T(), "https://bad.example.com"), Error: padmark.NewOptString("invalid slug"),
+		{
+			TargetURL: testURL(s.T(), "https://bad.example.com"), Error: padmark.NewOptString("invalid slug"),
 			ID:             padmark.OptString{Value: "", Set: false},
 			EditCode:       padmark.OptString{Value: "", Set: false},
 			Views:          padmark.OptInt{Value: 0, Set: false},

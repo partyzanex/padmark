@@ -151,6 +151,7 @@ type Pinger interface {
 // NoPinger is a no-op Pinger for use when database health checks are not required.
 type NoPinger struct{}
 
+// PingContext always reports a healthy database.
 func (NoPinger) PingContext(_ context.Context) error { return nil }
 
 // common holds the collaborators and config shared by every concern-specific handler

@@ -81,6 +81,7 @@ func unwrapContext(err error) error {
 	return err
 }
 
+// Errors of the content key migration. Compare the exported values with errors.Is.
 var (
 	ErrMigrationRequired = errors.New("content migration required; run encryption " +
 		"migrate while all servers are stopped")

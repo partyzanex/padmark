@@ -8,11 +8,17 @@ import (
 )
 
 func newLogger(level, format string) *slog.Logger {
-	lvl, err := logging.ParseLevel(level)
-	if err != nil {
-		slog.Warn("invalid log level; falling back to info", "err", err)
+	lvl, levelErr := logging.ParseLevel(level)
+
+	log := buildLogger(lvl, format)
+	if levelErr != nil {
+		log.Warn("invalid log level; falling back to info", "err", levelErr)
 	}
 
+	return log
+}
+
+func buildLogger(lvl slog.Level, format string) *slog.Logger {
 	opts := &slog.HandlerOptions{
 		Level: lvl,
 		// AddSource / ReplaceAttr zero = no source-file annotations and no attribute rewriting.

@@ -6,9 +6,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/partyzanex/padmark/internal/clifactory"
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
+
+	"github.com/partyzanex/padmark/internal/clifactory"
 )
 
 // The flag and env names are the operator-facing contract, so the tests spell them out.
@@ -55,10 +56,12 @@ func TestServerRejectsArgon2MemoryBudgetBelowArgon2Memory(t *testing.T) {
 		env  string
 		args []string
 	}{
-		{name: "flag", args: []string{"--argon2-memory", "65536", "--" + budgetFlagName, "32768"},
+		{
+			name: "flag", args: []string{"--argon2-memory", "65536", "--" + budgetFlagName, "32768"},
 			env: "",
 		},
-		{name: "env below default memory", env: "1024",
+		{
+			name: "env below default memory", env: "1024",
 			args: nil,
 		},
 	}

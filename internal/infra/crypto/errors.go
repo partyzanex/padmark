@@ -4,6 +4,7 @@ import (
 	"errors"
 )
 
+// Errors of content encryption and keyring handling. Compare the exported values with errors.Is.
 var (
 	ErrContentKeyIDExists      = errors.New("content key ID already exists")
 	ErrContentKeyMismatch      = errors.New("content key does not match this installation")

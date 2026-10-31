@@ -88,7 +88,8 @@ func TestMCPDebugLogLevel_LogsToStderrOnly(t *testing.T) {
 		})
 	}()
 
-	client := mcpsdk.NewClient(&mcpsdk.Implementation{Name: "test-client", Version: "0",
+	client := mcpsdk.NewClient(&mcpsdk.Implementation{
+		Name: "test-client", Version: "0",
 		Title: "", Description: "", WebsiteURL: "", Icons: nil,
 	}, nil)
 
@@ -100,7 +101,8 @@ func TestMCPDebugLogLevel_LogsToStderrOnly(t *testing.T) {
 	}, nil)
 	require.NoError(t, err)
 
-	_, err = session.CallTool(t.Context(), &mcpsdk.CallToolParams{Name: "check_server",
+	_, err = session.CallTool(t.Context(), &mcpsdk.CallToolParams{
+		Name: "check_server",
 		Meta: nil, Arguments: nil, InputResponses: nil, RequestState: "",
 	})
 	require.NoError(t, err)

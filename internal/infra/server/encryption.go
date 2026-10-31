@@ -215,7 +215,8 @@ func encryptionAction(ctx context.Context, cmd *cli.Command) error {
 }
 
 func runEncryptionOperation(ctx context.Context, cmd *cli.Command, db *bun.DB,
-	keyring *crypto.ContentKeyring, manager *contentkeys.Manager, hasher *crypto.EditCodeHasher) error {
+	keyring *crypto.ContentKeyring, manager *contentkeys.Manager, hasher *crypto.EditCodeHasher,
+) error {
 	var err error
 
 	switch cmd.Name {

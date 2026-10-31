@@ -70,6 +70,8 @@ func handleDeleteNoteRes(res padmark.DeleteNoteRes) error {
 		return errNoteOwnershipRequired
 	case *padmark.DeleteNoteNotFound:
 		return ErrNoteNotFound
+	case *padmark.DeleteNoteTooManyRequests:
+		return ErrRateLimited
 	case *padmark.DeleteNoteServiceUnavailable:
 		return errorcontext.Wrap(
 			serviceUnavailableError(padmark.ErrorResponse(*typed)), "decode service unavailable response",

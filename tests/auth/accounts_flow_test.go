@@ -96,7 +96,7 @@ func bearerPostOrigin(t *testing.T, baseURL, path, bearer, origin string) *http.
 }
 
 // setupPost posts the JSON setup body (the headless bootstrap surface).
-func setupPost(t *testing.T, baseURL string, body string) *http.Response {
+func setupPost(t *testing.T, baseURL, body string) *http.Response {
 	t.Helper()
 
 	req, err := http.NewRequest(http.MethodPost, baseURL+"/setup", strings.NewReader(body))

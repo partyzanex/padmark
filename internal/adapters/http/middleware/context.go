@@ -35,12 +35,14 @@ func setLogUser(ctx context.Context, name string, admin bool) {
 	}
 }
 
+// NonceFromContext returns the per-request CSP nonce, or "" when the request has none.
 func NonceFromContext(ctx context.Context) string {
 	v, _ := ctx.Value(keyNonce).(string)
 
 	return v
 }
 
+// SchemeHTTPS is the TLS URL scheme, paired with SchemeHTTP when building absolute links.
 const SchemeHTTPS = "https"
 
 // SchemeHTTP is the non-TLS URL scheme, paired with SchemeHTTPS when building absolute links.

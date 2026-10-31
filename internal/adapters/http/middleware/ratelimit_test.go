@@ -233,7 +233,8 @@ func (c *countingHandler) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 
 // newWarnRecorder returns a logger writing into buf, so a test can assert on what was logged.
 func newWarnRecorder(buf *bytes.Buffer) *slog.Logger {
-	return slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelWarn,
+	return slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{
+		Level:     slog.LevelWarn,
 		AddSource: false, ReplaceAttr: nil,
 	}))
 }

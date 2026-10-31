@@ -30,7 +30,8 @@ func (identityHasher) Hash(code string) (string, error) { return code, nil }
 // HashUserProvided prefixes the code so tests can assert which hashing variant the usecase
 // picked for caller-supplied codes (see TestCreate_UserSuppliedCodeUsesMemoryHardHash).
 func (identityHasher) HashUserProvided(code string) (string, error) { return "user:" + code, nil }
-func (identityHasher) Verify(hash, code string) bool                { return hash == code || hash == "user:"+code }
+
+func (identityHasher) Verify(hash, code string) bool { return hash == code || hash == "user:"+code }
 
 // failingEncryptor is a test double whose Decrypt always returns an error.
 type failingEncryptor struct{}
@@ -107,7 +108,8 @@ func (s *ManagerTestSuite) TestCreate_UserSuppliedCodeUsesMemoryHardHash() {
 			return nil
 		})
 
-	_, err := s.manager.Create(s.T().Context(), "https://example.com", CreateOptions{EditCode: "MyCustomCode1",
+	_, err := s.manager.Create(s.T().Context(), "https://example.com", CreateOptions{
+		EditCode:  "MyCustomCode1",
 		ExpiresAt: nil, Privacy: nil, OwnerID: nil, DirectRedirect: nil,
 		CustomHash: "", BurnAfterClick: false,
 	})
@@ -162,8 +164,9 @@ func (s *ManagerTestSuite) TestCreate_URLSchemeWhitelist() {
 func (s *ManagerTestSuite) TestCreate_CustomAliasConflict_WithNotes() {
 	s.notes.EXPECT().Exists(gomock.Any(), gomock.Any()).Return(true, nil)
 
-	_, err := s.manager.Create(s.T().Context(), "https://example.com", CreateOptions{CustomHash: "taken",
-		ExpiresAt: nil, Privacy: nil, OwnerID: nil, DirectRedirect: nil,
+	_, err := s.manager.Create(s.T().Context(), "https://example.com", CreateOptions{
+		CustomHash: "taken",
+		ExpiresAt:  nil, Privacy: nil, OwnerID: nil, DirectRedirect: nil,
 		EditCode: "", BurnAfterClick: false,
 	})
 
@@ -174,8 +177,9 @@ func (s *ManagerTestSuite) TestCreate_CustomAliasConflict_WithLinks() {
 	s.notes.EXPECT().Exists(gomock.Any(), gomock.Any()).Return(false, nil)
 	s.storage.EXPECT().Exists(gomock.Any(), gomock.Any()).Return(true, nil)
 
-	_, err := s.manager.Create(s.T().Context(), "https://example.com", CreateOptions{CustomHash: "taken",
-		ExpiresAt: nil, Privacy: nil, OwnerID: nil, DirectRedirect: nil,
+	_, err := s.manager.Create(s.T().Context(), "https://example.com", CreateOptions{
+		CustomHash: "taken",
+		ExpiresAt:  nil, Privacy: nil, OwnerID: nil, DirectRedirect: nil,
 		EditCode: "", BurnAfterClick: false,
 	})
 
@@ -215,15 +219,17 @@ func (s *ManagerTestSuite) TestCreate_CustomSlugRejectsMultiSegment() {
 	// Links are only served at single-segment routes (/r/{id}, /links/{id}); a path-like alias
 	// would be created but unroutable, so Create must reject it up front. No repo call
 	// expectations are set — gomock fails the test if the guard ever lets a slug through.
-	_, err := s.manager.Create(s.T().Context(), "https://example.com", CreateOptions{CustomHash: "docs/guide",
-		ExpiresAt: nil, Privacy: nil, OwnerID: nil, DirectRedirect: nil,
+	_, err := s.manager.Create(s.T().Context(), "https://example.com", CreateOptions{
+		CustomHash: "docs/guide",
+		ExpiresAt:  nil, Privacy: nil, OwnerID: nil, DirectRedirect: nil,
 		EditCode: "", BurnAfterClick: false,
 	})
 
 	s.Require().ErrorIs(err, domain.ErrInvalidSlug)
 
-	_, err = s.manager.Create(s.T().Context(), "https://example.com", CreateOptions{CustomHash: "a/b/c",
-		ExpiresAt: nil, Privacy: nil, OwnerID: nil, DirectRedirect: nil,
+	_, err = s.manager.Create(s.T().Context(), "https://example.com", CreateOptions{
+		CustomHash: "a/b/c",
+		ExpiresAt:  nil, Privacy: nil, OwnerID: nil, DirectRedirect: nil,
 		EditCode: "", BurnAfterClick: false,
 	})
 
@@ -234,8 +240,9 @@ func (s *ManagerTestSuite) TestCreate_CustomSlugDisabled() {
 	s.manager = NewManager(s.storage, s.notes, noopSlugLock{}, passthroughEncryptor{}, identityHasher{},
 		slog.New(slog.DiscardHandler), false)
 
-	_, err := s.manager.Create(s.T().Context(), "https://example.com", CreateOptions{CustomHash: "my-alias",
-		ExpiresAt: nil, Privacy: nil, OwnerID: nil, DirectRedirect: nil,
+	_, err := s.manager.Create(s.T().Context(), "https://example.com", CreateOptions{
+		CustomHash: "my-alias",
+		ExpiresAt:  nil, Privacy: nil, OwnerID: nil, DirectRedirect: nil,
 		EditCode: "", BurnAfterClick: false,
 	})
 
@@ -245,7 +252,8 @@ func (s *ManagerTestSuite) TestCreate_CustomSlugDisabled() {
 func (s *ManagerTestSuite) TestCreate_InvalidPrivacy() {
 	p := domain.Privacy("bogus")
 
-	_, err := s.manager.Create(s.T().Context(), "https://example.com", CreateOptions{Privacy: &p,
+	_, err := s.manager.Create(s.T().Context(), "https://example.com", CreateOptions{
+		Privacy:   &p,
 		ExpiresAt: nil, OwnerID: nil, DirectRedirect: nil, CustomHash: "",
 		EditCode: "", BurnAfterClick: false,
 	})
@@ -256,7 +264,8 @@ func (s *ManagerTestSuite) TestCreate_InvalidPrivacy() {
 func (s *ManagerTestSuite) TestCreate_OwnerPrivacyRequiresOwner() {
 	p := domain.PrivacyOwner
 
-	_, err := s.manager.Create(s.T().Context(), "https://example.com", CreateOptions{Privacy: &p,
+	_, err := s.manager.Create(s.T().Context(), "https://example.com", CreateOptions{
+		Privacy:   &p,
 		ExpiresAt: nil, OwnerID: nil, DirectRedirect: nil, CustomHash: "",
 		EditCode: "", BurnAfterClick: false,
 	})
@@ -273,7 +282,8 @@ func (s *ManagerTestSuite) TestCreate_OwnerPrivacy_WithOwnerID_OK() {
 	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
 
 	link, err := s.manager.Create(s.T().Context(), "https://example.com",
-		CreateOptions{Privacy: &ownerPrivacy, OwnerID: &owner,
+		CreateOptions{
+			Privacy: &ownerPrivacy, OwnerID: &owner,
 			ExpiresAt: nil, DirectRedirect: nil, CustomHash: "", EditCode: "",
 			BurnAfterClick: false,
 		})
@@ -299,8 +309,9 @@ func (s *ManagerTestSuite) TestCreate_DirectRedirectOverride_PassedThrough() {
 			return nil
 		})
 
-	link, err := s.manager.Create(s.T().Context(), "https://example.com", CreateOptions{DirectRedirect: &override,
-		ExpiresAt: nil, Privacy: nil, OwnerID: nil, CustomHash: "",
+	link, err := s.manager.Create(s.T().Context(), "https://example.com", CreateOptions{
+		DirectRedirect: &override,
+		ExpiresAt:      nil, Privacy: nil, OwnerID: nil, CustomHash: "",
 		EditCode: "", BurnAfterClick: false,
 	})
 
@@ -325,7 +336,8 @@ func (s *ManagerTestSuite) TestCreate_StorageError() {
 // Redirect
 
 func (s *ManagerTestSuite) TestRedirect_OK() {
-	link := &domain.Link{TargetURL: "https://example.com",
+	link := &domain.Link{
+		TargetURL: "https://example.com",
 		CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
 		DirectRedirect: nil, ID: "", EditCode: "", Views: 0,
 		BurnAfterClick: false,
@@ -350,7 +362,8 @@ func (s *ManagerTestSuite) TestRedirect_NotFound() {
 
 func (s *ManagerTestSuite) TestRedirect_Expired() {
 	past := time.Now().Add(-time.Hour)
-	link := &domain.Link{TargetURL: "https://example.com", ExpiresAt: &past,
+	link := &domain.Link{
+		TargetURL: "https://example.com", ExpiresAt: &past,
 		CreatedAt: time.Time{}, Privacy: nil, OwnerID: nil, DirectRedirect: nil,
 		ID: "", EditCode: "", Views: 0, BurnAfterClick: false,
 	}
@@ -363,7 +376,8 @@ func (s *ManagerTestSuite) TestRedirect_Expired() {
 }
 
 func (s *ManagerTestSuite) TestRedirect_BurnAfterClick_ConsumedOnce() {
-	link := &domain.Link{TargetURL: "https://example.com", BurnAfterClick: true,
+	link := &domain.Link{
+		TargetURL: "https://example.com", BurnAfterClick: true,
 		CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
 		DirectRedirect: nil, ID: "", EditCode: "", Views: 0,
 	}
@@ -379,7 +393,8 @@ func (s *ManagerTestSuite) TestRedirect_BurnAfterClick_ConsumedOnce() {
 // TestRedirectWithoutBurn_BurnLinkLeftIntact: an access without deliberate intent must neither
 // consume a burn_after_click link nor count a view — it gets ErrBurnIntentRequired.
 func (s *ManagerTestSuite) TestRedirectWithoutBurn_BurnLinkLeftIntact() {
-	link := &domain.Link{TargetURL: "https://example.com", BurnAfterClick: true,
+	link := &domain.Link{
+		TargetURL: "https://example.com", BurnAfterClick: true,
 		CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
 		DirectRedirect: nil, ID: "", EditCode: "", Views: 0,
 	}
@@ -394,7 +409,8 @@ func (s *ManagerTestSuite) TestRedirectWithoutBurn_BurnLinkLeftIntact() {
 
 // TestRedirectWithoutBurn_OrdinaryLinkFollowed: any other link is followed exactly as by Redirect.
 func (s *ManagerTestSuite) TestRedirectWithoutBurn_OrdinaryLinkFollowed() {
-	link := &domain.Link{TargetURL: "https://example.com",
+	link := &domain.Link{
+		TargetURL: "https://example.com",
 		CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
 		DirectRedirect: nil, ID: "", EditCode: "", Views: 0,
 		BurnAfterClick: false,
@@ -413,7 +429,8 @@ func (s *ManagerTestSuite) TestRedirectWithoutBurn_OrdinaryLinkFollowed() {
 // deleted and ErrExpired returned on either path.
 func (s *ManagerTestSuite) TestRedirectWithoutBurn_ExpiredLinkStillExpires() {
 	past := time.Now().Add(-time.Minute)
-	link := &domain.Link{TargetURL: "https://example.com", BurnAfterClick: true, ExpiresAt: &past,
+	link := &domain.Link{
+		TargetURL: "https://example.com", BurnAfterClick: true, ExpiresAt: &past,
 		CreatedAt: time.Time{}, Privacy: nil, OwnerID: nil, DirectRedirect: nil,
 		ID: "", EditCode: "", Views: 0,
 	}
@@ -428,7 +445,8 @@ func (s *ManagerTestSuite) TestRedirectWithoutBurn_ExpiredLinkStillExpires() {
 // TestRedirect_BurnAfterClick_SecondCallNotFound verifies burn-after-click is exactly-once: a
 // second Redirect for the same slug, after the row was consumed, gets ErrNotFound.
 func (s *ManagerTestSuite) TestRedirect_BurnAfterClick_SecondCallNotFound() {
-	link := &domain.Link{TargetURL: "https://example.com", BurnAfterClick: true,
+	link := &domain.Link{
+		TargetURL: "https://example.com", BurnAfterClick: true,
 		CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
 		DirectRedirect: nil, ID: "", EditCode: "", Views: 0,
 	}
@@ -448,7 +466,8 @@ func (s *ManagerTestSuite) TestRedirect_DecryptFailure() {
 	s.manager = NewManager(s.storage, s.notes, noopSlugLock{}, failingEncryptor{}, identityHasher{},
 		slog.New(slog.DiscardHandler), true)
 
-	link := &domain.Link{TargetURL: "ciphertext",
+	link := &domain.Link{
+		TargetURL: "ciphertext",
 		CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
 		DirectRedirect: nil, ID: "", EditCode: "", Views: 0,
 		BurnAfterClick: false,
@@ -469,7 +488,8 @@ func (s *ManagerTestSuite) TestRedirect_CacheHit_ReadsCurrentMetadata() {
 	s.manager = NewManager(s.storage, s.notes, noopSlugLock{}, failingEncryptor{}, identityHasher{},
 		slog.New(slog.DiscardHandler), true).WithCache(cache)
 
-	stored := &domain.Link{TargetURL: "ciphertext", Views: 8,
+	stored := &domain.Link{
+		TargetURL: "ciphertext", Views: 8,
 		CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
 		DirectRedirect: nil, ID: "", EditCode: "", BurnAfterClick: false,
 	}
@@ -490,7 +510,8 @@ func (s *ManagerTestSuite) TestRedirect_CacheMiss_PopulatesCacheForNonBurnLink()
 	s.manager = NewManager(s.storage, s.notes, noopSlugLock{}, passthroughEncryptor{}, identityHasher{},
 		slog.New(slog.DiscardHandler), true).WithCache(cache)
 
-	link := &domain.Link{TargetURL: "https://example.com",
+	link := &domain.Link{
+		TargetURL: "https://example.com",
 		CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
 		DirectRedirect: nil, ID: "", EditCode: "", Views: 0,
 		BurnAfterClick: false,
@@ -514,7 +535,8 @@ func (s *ManagerTestSuite) TestRedirect_BurnAfterClick_NeverCached() {
 	s.manager = NewManager(s.storage, s.notes, noopSlugLock{}, passthroughEncryptor{}, identityHasher{},
 		slog.New(slog.DiscardHandler), true).WithCache(cache)
 
-	link := &domain.Link{TargetURL: "https://example.com", BurnAfterClick: true,
+	link := &domain.Link{
+		TargetURL: "https://example.com", BurnAfterClick: true,
 		CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
 		DirectRedirect: nil, ID: "", EditCode: "", Views: 0,
 	}
@@ -534,7 +556,8 @@ func (s *ManagerTestSuite) TestRedirect_Expired_EvictsCache() {
 		slog.New(slog.DiscardHandler), true).WithCache(cache)
 
 	past := time.Now().Add(-time.Hour)
-	link := &domain.Link{TargetURL: "https://example.com", ExpiresAt: &past,
+	link := &domain.Link{
+		TargetURL: "https://example.com", ExpiresAt: &past,
 		CreatedAt: time.Time{}, Privacy: nil, OwnerID: nil, DirectRedirect: nil,
 		ID: "", EditCode: "", Views: 0, BurnAfterClick: false,
 	}
@@ -553,7 +576,8 @@ func (s *ManagerTestSuite) TestPeek_CacheHit_ReadsCurrentMetadata() {
 	s.manager = NewManager(s.storage, s.notes, noopSlugLock{}, failingEncryptor{}, identityHasher{},
 		slog.New(slog.DiscardHandler), true).WithCache(cache)
 
-	stored := &domain.Link{TargetURL: "ciphertext", Views: 8,
+	stored := &domain.Link{
+		TargetURL: "ciphertext", Views: 8,
 		CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
 		DirectRedirect: nil, ID: "", EditCode: "", BurnAfterClick: false,
 	}
@@ -573,7 +597,8 @@ func (s *ManagerTestSuite) TestPeek_PrivateRowNeverUsesCache() {
 	s.manager.WithCache(cache)
 
 	privacy, owner := domain.PrivacyOwner, uuid.New()
-	stored := &domain.Link{TargetURL: "https://example.com/private", Privacy: &privacy, OwnerID: &owner,
+	stored := &domain.Link{
+		TargetURL: "https://example.com/private", Privacy: &privacy, OwnerID: &owner,
 		CreatedAt: time.Time{}, ExpiresAt: nil, DirectRedirect: nil, ID: "",
 		EditCode: "", Views: 0, BurnAfterClick: false,
 	}
@@ -636,7 +661,8 @@ func (s *ManagerTestSuite) TestRedirect_RecordsRedirect() {
 	s.manager = NewManager(s.storage, s.notes, noopSlugLock{}, passthroughEncryptor{}, identityHasher{},
 		slog.New(slog.DiscardHandler), true).WithMetrics(metrics)
 
-	link := &domain.Link{TargetURL: "https://example.com",
+	link := &domain.Link{
+		TargetURL: "https://example.com",
 		CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
 		DirectRedirect: nil, ID: "", EditCode: "", Views: 0,
 		BurnAfterClick: false,
@@ -655,7 +681,8 @@ func (s *ManagerTestSuite) TestRedirect_BurnAfterClick_RecordsRedirect() {
 	s.manager = NewManager(s.storage, s.notes, noopSlugLock{}, passthroughEncryptor{}, identityHasher{},
 		slog.New(slog.DiscardHandler), true).WithMetrics(metrics)
 
-	link := &domain.Link{TargetURL: "https://example.com", BurnAfterClick: true,
+	link := &domain.Link{
+		TargetURL: "https://example.com", BurnAfterClick: true,
 		CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
 		DirectRedirect: nil, ID: "", EditCode: "", Views: 0,
 	}
@@ -715,8 +742,9 @@ func (s *ManagerTestSuite) TestCreate_CustomAliasConflict_DoesNotRecordCollision
 	s.storage.EXPECT().Exists(gomock.Any(), gomock.Any()).Return(true, nil)
 	// metrics.EXPECT().IncCollisions() deliberately absent.
 
-	_, err := s.manager.Create(s.T().Context(), "https://example.com", CreateOptions{CustomHash: "taken",
-		ExpiresAt: nil, Privacy: nil, OwnerID: nil, DirectRedirect: nil,
+	_, err := s.manager.Create(s.T().Context(), "https://example.com", CreateOptions{
+		CustomHash: "taken",
+		ExpiresAt:  nil, Privacy: nil, OwnerID: nil, DirectRedirect: nil,
 		EditCode: "", BurnAfterClick: false,
 	})
 
@@ -727,7 +755,8 @@ func (s *ManagerTestSuite) TestCreate_CustomAliasConflict_DoesNotRecordCollision
 
 func (s *ManagerTestSuite) TestDelete_OwnerBypassesEditCode() {
 	owner := uuid.New()
-	existing := &domain.Link{EditCode: "secret123456", OwnerID: &owner,
+	existing := &domain.Link{
+		EditCode: "secret123456", OwnerID: &owner,
 		CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, DirectRedirect: nil,
 		ID: "", TargetURL: "", Views: 0, BurnAfterClick: false,
 	}
@@ -745,7 +774,8 @@ func (s *ManagerTestSuite) TestDelete_EvictsCache() {
 		slog.New(slog.DiscardHandler), true).WithCache(cache)
 
 	owner := uuid.New()
-	existing := &domain.Link{EditCode: "secret123456", OwnerID: &owner,
+	existing := &domain.Link{
+		EditCode: "secret123456", OwnerID: &owner,
 		CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, DirectRedirect: nil,
 		ID: "", TargetURL: "", Views: 0, BurnAfterClick: false,
 	}
@@ -761,7 +791,8 @@ func (s *ManagerTestSuite) TestDelete_EvictsCache() {
 func (s *ManagerTestSuite) TestDelete_NonOwnerNeedsEditCode() {
 	owner := uuid.New()
 	other := uuid.New()
-	existing := &domain.Link{EditCode: "secret123456", OwnerID: &owner,
+	existing := &domain.Link{
+		EditCode: "secret123456", OwnerID: &owner,
 		CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, DirectRedirect: nil,
 		ID: "", TargetURL: "", Views: 0, BurnAfterClick: false,
 	}
@@ -773,7 +804,8 @@ func (s *ManagerTestSuite) TestDelete_NonOwnerNeedsEditCode() {
 }
 
 func (s *ManagerTestSuite) TestDelete_CorrectEditCode() {
-	existing := &domain.Link{EditCode: "secret123456",
+	existing := &domain.Link{
+		EditCode:  "secret123456",
 		CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
 		DirectRedirect: nil, ID: "", TargetURL: "", Views: 0,
 		BurnAfterClick: false,
@@ -787,7 +819,8 @@ func (s *ManagerTestSuite) TestDelete_CorrectEditCode() {
 }
 
 func (s *ManagerTestSuite) TestDelete_AnonymousLinkAlwaysNeedsEditCode() {
-	existing := &domain.Link{EditCode: "secret123456",
+	existing := &domain.Link{
+		EditCode:  "secret123456",
 		CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
 		DirectRedirect: nil, ID: "", TargetURL: "", Views: 0,
 		BurnAfterClick: false,
@@ -810,10 +843,12 @@ func (s *ManagerTestSuite) TestDelete_NotFound() {
 func (s *ManagerTestSuite) TestDecryptionFailureLogsOnlyHashedSlug() {
 	var buf bytes.Buffer
 
-	log := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug,
+	log := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{
+		Level:     slog.LevelDebug,
 		AddSource: false, ReplaceAttr: nil,
 	}))
-	note := &domain.Link{ID: "secret-slug", TargetURL: "invalid",
+	note := &domain.Link{
+		ID: "secret-slug", TargetURL: "invalid",
 		CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
 		DirectRedirect: nil, EditCode: "", Views: 0, BurnAfterClick: false,
 	}

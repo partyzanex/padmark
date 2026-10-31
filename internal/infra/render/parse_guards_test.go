@@ -6,11 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	highlighting "github.com/yuin/goldmark-highlighting/v2"
-
 	chromahtml "github.com/alecthomas/chroma/v2/formatters/html"
 	"github.com/stretchr/testify/suite"
 	"github.com/yuin/goldmark"
+	highlighting "github.com/yuin/goldmark-highlighting/v2"
 	"github.com/yuin/goldmark/extension"
 	"github.com/yuin/goldmark/parser"
 	"github.com/yuin/goldmark/renderer/html"
@@ -52,6 +51,8 @@ func (s *ParseGuardsSuite) SetupTest() {
 
 // guardedHTML is the unsanitized HTML of the guarded parser, comparable with stockHTML.
 func (s *ParseGuardsSuite) guardedHTML(src string) string {
+	s.T().Helper()
+
 	var buf bytes.Buffer
 
 	pctx := parser.NewContext(parser.WithIDs(newHeadingIDs()))
@@ -61,6 +62,8 @@ func (s *ParseGuardsSuite) guardedHTML(src string) string {
 }
 
 func (s *ParseGuardsSuite) stockHTML(src string) string {
+	s.T().Helper()
+
 	var buf bytes.Buffer
 
 	s.Require().NoError(s.stock.Convert([]byte(src), &buf))

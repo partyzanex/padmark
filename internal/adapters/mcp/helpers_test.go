@@ -23,7 +23,8 @@ func connectTestClient(ctx context.Context, mgr *Manager) (*mcpsdk.ClientSession
 		return nil, err
 	}
 
-	client := mcpsdk.NewClient(&mcpsdk.Implementation{Name: "test-client", Version: "0",
+	client := mcpsdk.NewClient(&mcpsdk.Implementation{
+		Name: "test-client", Version: "0",
 		Title: "", Description: "", WebsiteURL: "", Icons: nil,
 	}, nil)
 

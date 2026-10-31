@@ -70,6 +70,8 @@ func (s *HandlerSuite) SetupTest() {
 }
 
 func (s *HandlerSuite) newRouter() http.Handler {
+	s.T().Helper()
+
 	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog())
 	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
 
@@ -90,6 +92,8 @@ func (s *HandlerSuite) newRouter() http.Handler {
 // newRouterWithOptions builds a router with the given trusted proxies and forced scheme,
 // used to exercise scheme-detection precedence (auto-detect vs --public-scheme override).
 func (s *HandlerSuite) newRouterWithOptions(trustedProxies []*net.IPNet, forcedScheme string) http.Handler {
+	s.T().Helper()
+
 	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog())
 	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
 
@@ -111,6 +115,8 @@ func (s *HandlerSuite) newRouterWithOptions(trustedProxies []*net.IPNet, forcedS
 
 // newRouterWithAllowedHosts builds a router whose main listener only serves the given Hosts.
 func (s *HandlerSuite) newRouterWithAllowedHosts(hosts ...string) http.Handler {
+	s.T().Helper()
+
 	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog())
 	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
 
@@ -159,6 +165,8 @@ func (s *HandlerSuite) TestAllowedHosts_EnforcedOnMainListener() {
 // also the standard way to force "auth is configured" for tests that only need an anonymous
 // request to be treated as unauthenticated (no session/API-token credential presented).
 func (s *HandlerSuite) newRouterWithTOTPAuth() http.Handler {
+	s.T().Helper()
+
 	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog()).
 		WithAuthManager(s.authMgr)
 	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
@@ -180,6 +188,8 @@ func (s *HandlerSuite) newRouterWithTOTPAuth() http.Handler {
 // newRouterWithReveal builds a router with RevealStore and auth configured so that
 // unauthenticated HTML requests trigger the burn interstitial.
 func (s *HandlerSuite) newRouterWithReveal() http.Handler {
+	s.T().Helper()
+
 	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog()).
 		WithAuthManager(s.authMgr).
 		WithRevealStore(s.revealStore)
@@ -1657,7 +1667,8 @@ func (s *HandlerSuite) TestReadyz_OK() {
 func (s *HandlerSuite) TestReadyz_NoPinger() {
 	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog())
 	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, adhttp.NoPinger{}, discardLog())
-	opts := adhttp.RouterOptions{MaxBodyBytes: 256 * 1024,
+	opts := adhttp.RouterOptions{
+		MaxBodyBytes: 256 * 1024,
 		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, CSRFSecret: nil,
 		AllowedHosts: nil, RateLimit: 0, RateBurst: 0, SessionTTL: 0, DisableAPI: false,
 		DirectRedirect: false,
@@ -2542,7 +2553,7 @@ func (s *HandlerSuite) TestAPISpec_WriteFail() {
 	fw := newFailWriter()
 	r := httptest.NewRequest(http.MethodGet, "/api/openapi.yaml", nil)
 
-	adhttp.APISpec(fw, r)
+	adhttp.APISpec(discardLog())(fw, r)
 
 	s.NotNil(fw)
 }
@@ -2550,7 +2561,8 @@ func (s *HandlerSuite) TestAPISpec_WriteFail() {
 func (s *HandlerSuite) TestAPIDocsPage_Public() {
 	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog()).WithAuthManager(s.authMgr)
 	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
-	opts := adhttp.RouterOptions{MaxBodyBytes: 256 * 1024,
+	opts := adhttp.RouterOptions{
+		MaxBodyBytes: 256 * 1024,
 		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, CSRFSecret: nil,
 		AllowedHosts: nil, RateLimit: 0, RateBurst: 0, SessionTTL: 0, DisableAPI: false,
 		DirectRedirect: false,
@@ -2985,7 +2997,8 @@ func (s *HandlerSuite) TestMutationGate_MultiSegmentPaths() {
 func (s *HandlerSuite) TestPrivateNote_TOTPMode_Authenticated() {
 	note := newTestNote("secret", "private content")
 	note.Privacy = new(domain.PrivacyAuthenticated)
-	usr := &domain.User{ID: uuid.New(), Username: "alice",
+	usr := &domain.User{
+		ID: uuid.New(), Username: "alice",
 		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
 		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
 	}
@@ -3009,7 +3022,8 @@ func (s *HandlerSuite) TestPrivateNote_TOTPMode_Authenticated() {
 // TestOwnerOnlyNote_Owner_Authorized verifies that a note with privacy: owner is readable by
 // the exact authenticated session that created it.
 func (s *HandlerSuite) TestOwnerOnlyNote_Owner_Authorized() {
-	owner := &domain.User{ID: uuid.New(), Username: "alice",
+	owner := &domain.User{
+		ID: uuid.New(), Username: "alice",
 		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
 		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
 	}
@@ -3040,11 +3054,13 @@ func (s *HandlerSuite) TestOwnerOnlyNote_Owner_Authorized() {
 // The answer is 403, not the /login redirect an anonymous browser gets: this caller already has a
 // credential, just not the right one, so a login page would send them straight back here.
 func (s *HandlerSuite) TestOwnerOnlyNote_OtherAuthenticatedUser_Forbidden() {
-	owner := &domain.User{ID: uuid.New(), Username: "alice",
+	owner := &domain.User{
+		ID: uuid.New(), Username: "alice",
 		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
 		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
 	}
-	other := &domain.User{ID: uuid.New(), Username: "bob",
+	other := &domain.User{
+		ID: uuid.New(), Username: "bob",
 		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
 		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
 	}
@@ -3073,7 +3089,8 @@ func (s *HandlerSuite) TestOwnerOnlyNote_OtherAuthenticatedUser_Forbidden() {
 // TestOwnerOnlyNote_Anonymous_Unauthorized verifies that a note with privacy: owner is not
 // readable by an unauthenticated caller.
 func (s *HandlerSuite) TestOwnerOnlyNote_Anonymous_Unauthorized() {
-	owner := &domain.User{ID: uuid.New(), Username: "alice",
+	owner := &domain.User{
+		ID: uuid.New(), Username: "alice",
 		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
 		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
 	}
@@ -3098,7 +3115,8 @@ func (s *HandlerSuite) TestOwnerOnlyNote_Anonymous_Unauthorized() {
 // TestOwnerOnlyNote_Anonymous_Unauthorized: a browser request (Accept: text/html) to a
 // privacy: owner note from an anonymous caller must redirect to /login, not 401.
 func (s *HandlerSuite) TestOwnerOnlyNote_Anonymous_HTML_RedirectToLogin() {
-	owner := &domain.User{ID: uuid.New(), Username: "alice",
+	owner := &domain.User{
+		ID: uuid.New(), Username: "alice",
 		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
 		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
 	}
@@ -3124,11 +3142,13 @@ func (s *HandlerSuite) TestOwnerOnlyNote_Anonymous_HTML_RedirectToLogin() {
 // note is gated exactly like GET /notes/{id} — a different authenticated caller must not see the
 // note's plaintext content in the editor form, even though they are logged in.
 func (s *HandlerSuite) TestEditPage_OwnerOnly_NonOwner_Forbidden() {
-	owner := &domain.User{ID: uuid.New(), Username: "alice",
+	owner := &domain.User{
+		ID: uuid.New(), Username: "alice",
 		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
 		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
 	}
-	other := &domain.User{ID: uuid.New(), Username: "bob",
+	other := &domain.User{
+		ID: uuid.New(), Username: "bob",
 		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
 		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
 	}
@@ -3158,7 +3178,8 @@ func (s *HandlerSuite) TestEditPage_OwnerOnly_NonOwner_Forbidden() {
 // TestEditPage_OwnerOnly_Owner_OK verifies that GET /edit/{id} for a privacy: owner note still
 // works normally for the exact authenticated session that created it.
 func (s *HandlerSuite) TestEditPage_OwnerOnly_Owner_OK() {
-	owner := &domain.User{ID: uuid.New(), Username: "alice",
+	owner := &domain.User{
+		ID: uuid.New(), Username: "alice",
 		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
 		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
 	}
@@ -3211,7 +3232,8 @@ func (s *HandlerSuite) TestCanEdit_TOTPMode_Unauthenticated() {
 // user sees the edit button.
 func (s *HandlerSuite) TestCanEdit_TOTPMode_Authenticated() {
 	note := newTestNote("public note", "content")
-	usr := &domain.User{ID: uuid.New(), Username: "alice",
+	usr := &domain.User{
+		ID: uuid.New(), Username: "alice",
 		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
 		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
 	}

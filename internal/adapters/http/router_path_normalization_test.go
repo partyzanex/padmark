@@ -91,6 +91,8 @@ func (s *PathNormalizationSuite) recordPeeks() *[]string {
 // so r.URL.Path / r.URL.RawPath hold what an arbitrary client could send. A POST carries a valid
 // CSRF cookie and matching form field, so the CSRF guard is not what stops it.
 func (s *PathNormalizationSuite) rawRequest(method, target string) *http.Request {
+	s.T().Helper()
+
 	var head, body strings.Builder
 
 	head.WriteString(method + " " + target + " HTTP/1.1\r\nHost: example.com\r\n")
@@ -259,7 +261,8 @@ func (s *PathNormalizationSuite) TestPercentEncodedLoginPath_IsTheLoginPage() {
 // View/GetRendered call, no content.
 func (s *PathNormalizationSuite) TestPercentEncodedPrivateSlug_StillGated() {
 	privacy := domain.PrivacyAuthenticated
-	private := &domain.Note{ID: "secret", Content: "top secret", Privacy: &privacy,
+	private := &domain.Note{
+		ID: "secret", Content: "top secret", Privacy: &privacy,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		OwnerID: nil, Title: "", ContentType: nil, EditCode: "",
 		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,

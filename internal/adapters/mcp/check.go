@@ -30,7 +30,7 @@ func (m *Manager) checkServer(
 
 	liveErr := m.client.Healthz(ctx)
 	if liveErr != nil {
-		m.log.Debug("check_server: healthz failed", "err", liveErr)
+		m.log.DebugContext(ctx, "check_server: healthz failed", "err", liveErr)
 	}
 
 	readyErr := m.checkReadiness(ctx)

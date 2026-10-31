@@ -6,7 +6,7 @@ import (
 	padmark "github.com/partyzanex/padmark/pkg/client"
 )
 
-//go:generate go run go.uber.org/mock/mockgen@latest -source=seam.go -destination=mcp_mocks_test.go -package=mcp
+//go:generate go run go.uber.org/mock/mockgen@latest -source=seam.go -destination=mcp_mocks_test.go -package=mcp -write_package_comment=false
 
 // PadmarkClient is the subset of the generated ogen client (*padmark.Client) the tools need.
 // A seam by the project's DIP convention: declared next to the consumer (this package),

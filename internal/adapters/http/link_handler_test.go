@@ -46,6 +46,8 @@ type testLinkResponse struct {
 // newLinkRouter builds a router with DirectRedirect set explicitly, since RouterOptions'
 // zero value (false) would otherwise always exercise the interstitial path.
 func (s *HandlerSuite) newLinkRouter(directRedirect bool) http.Handler {
+	s.T().Helper()
+
 	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog())
 	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
 
@@ -67,6 +69,8 @@ func (s *HandlerSuite) newLinkRouter(directRedirect bool) http.Handler {
 // newLinkRouterWithTOTPAuth is newLinkRouter(true) with a TOTP AuthManager attached, for privacy
 // tests — none of them need the interstitial mode, only the 301 vs. denied distinction.
 func (s *HandlerSuite) newLinkRouterWithTOTPAuth() http.Handler {
+	s.T().Helper()
+
 	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog()).
 		WithAuthManager(s.authMgr)
 	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
@@ -294,11 +298,13 @@ func (s *HandlerSuite) TestGetLink_ExpiredAndPrivate_Anonymous_Unauthorized() {
 }
 
 func (s *HandlerSuite) TestGetLink_OwnerOnly_NonOwner_Unauthorized() {
-	owner := &domain.User{ID: uuid.New(), Username: "alice",
+	owner := &domain.User{
+		ID: uuid.New(), Username: "alice",
 		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
 		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
 	}
-	other := &domain.User{ID: uuid.New(), Username: "bob",
+	other := &domain.User{
+		ID: uuid.New(), Username: "bob",
 		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
 		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
 	}
@@ -406,7 +412,8 @@ func (s *HandlerSuite) TestDeleteLink_Gated_PublicLink_WrongEditCode() {
 }
 
 func (s *HandlerSuite) TestDeleteLink_OwnerBypass_NoEditCode() {
-	owner := &domain.User{ID: uuid.New(), Username: "alice",
+	owner := &domain.User{
+		ID: uuid.New(), Username: "alice",
 		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
 		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
 	}
@@ -657,7 +664,8 @@ func (s *HandlerSuite) TestRedirectLink_BurnAfterClick_ConsumedOnce() {
 // with a page rather than a bare 401. 403 rather than the /login redirect, because this caller is
 // already signed in and logging in again would land them right back here.
 func (s *HandlerSuite) TestRedirectLink_OwnerOnly_NonOwner_HTML_Forbidden() {
-	other := &domain.User{ID: uuid.New(), Username: "bob",
+	other := &domain.User{
+		ID: uuid.New(), Username: "bob",
 		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
 		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
 	}
@@ -685,7 +693,8 @@ func (s *HandlerSuite) TestRedirectLink_OwnerOnly_NonOwner_HTML_Forbidden() {
 // TestRedirectLink_OwnerOnly_Owner_Authorized is the positive counterpart: the link's own owner
 // may always follow it.
 func (s *HandlerSuite) TestRedirectLink_OwnerOnly_Owner_Authorized() {
-	owner := &domain.User{ID: uuid.New(), Username: "alice",
+	owner := &domain.User{
+		ID: uuid.New(), Username: "alice",
 		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
 		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
 	}
@@ -774,7 +783,8 @@ func (s *HandlerSuite) TestRedirectLink_PrivacyAuthenticated_Unauthenticated() {
 // Authenticated: any valid session — not just the link's owner — may follow a privacy:
 // authenticated link.
 func (s *HandlerSuite) TestRedirectLink_PrivacyAuthenticated_Authenticated() {
-	usr := &domain.User{ID: uuid.New(), Username: "alice",
+	usr := &domain.User{
+		ID: uuid.New(), Username: "alice",
 		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
 		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
 	}
@@ -802,7 +812,8 @@ func (s *HandlerSuite) TestRedirectLink_PrivacyAuthenticated_Authenticated() {
 // (added as a bug fix in the HTTP handlers section) also grants access to any authenticated
 // caller for privacy: authenticated, not just the link's owner.
 func (s *HandlerSuite) TestGetLink_PrivacyAuthenticated_Authenticated() {
-	usr := &domain.User{ID: uuid.New(), Username: "alice",
+	usr := &domain.User{
+		ID: uuid.New(), Username: "alice",
 		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
 		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
 	}

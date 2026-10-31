@@ -42,6 +42,8 @@ func (s *MigrateLinksDirectRedirectTestSuite) TearDownTest() {
 }
 
 func (s *MigrateLinksDirectRedirectTestSuite) provider() *goose.Provider {
+	s.T().Helper()
+
 	provider, err := goose.NewProvider(goose.DialectSQLite3, s.sqldb, sqlitemigrations.FS)
 	s.Require().NoError(err)
 

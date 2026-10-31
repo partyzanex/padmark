@@ -11,6 +11,7 @@ var ErrForbidden = errors.New("forbidden")
 // ErrNotFound identifies a missing note or short link.
 var ErrNotFound = errors.New("not found")
 
+// Errors that the CLI commands return. Callers match the exported values with errors.Is.
 var (
 	ErrAPIDisabled = errors.New("API is disabled on this server " +
 		"(api_disabled); ask the operator to enable it")
@@ -36,6 +37,7 @@ var (
 	errWrongEditCode      = fmt.Errorf("%w: wrong edit code", ErrForbidden)
 )
 
+// Errors that the CLI maps from the server response variants. Callers match them with errors.Is.
 var (
 	ErrBadRequest          = errors.New("bad request")
 	ErrBurnReadRefused     = errors.New("refused")

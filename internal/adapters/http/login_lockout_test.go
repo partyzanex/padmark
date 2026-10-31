@@ -135,6 +135,8 @@ func (s *LoginLockoutSuite) attemptWhileLocked(remoteAddr, username string) (*ht
 // requireLocked asserts the attempt was throttled by the account lock and never reached the
 // usecase.
 func (s *LoginLockoutSuite) requireLocked(rec *httptest.ResponseRecorder, leaks *int) {
+	s.T().Helper()
+
 	s.Require().Equal(http.StatusTooManyRequests, rec.Code,
 		"account must be locked after %d failures; got Location=%q", loginLockThreshold, rec.Header().Get("Location"))
 	s.JSONEq(`{"message":"too many failed attempts, try again later"}`, rec.Body.String())

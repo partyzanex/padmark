@@ -16,7 +16,8 @@ const convertedPrefix = "pmc2$p$key$converted-"
 // legacyRow is a v0.1.6 note as the schema migration tags it: plaintext slug as ID,
 // plaintext content and edit code.
 func legacyRow(slug, value, editCode string) Row {
-	return Row{Resource: resourceNote, ID: slug, Value: value, Legacy: &LegacyNote{Slug: slug, EditCode: editCode},
+	return Row{
+		Resource: resourceNote, ID: slug, Value: value, Legacy: &LegacyNote{Slug: slug, EditCode: editCode},
 		StoredEditCode: "",
 	}
 }
@@ -41,7 +42,8 @@ func (s *ManagerTestSuite) expectConvert(rows *[]Row, hashes map[string]string, 
 				return false, nil
 			}
 
-			(*rows)[index] = Row{Resource: resourceNote, ID: newID, Value: value, StoredEditCode: storedHash,
+			(*rows)[index] = Row{
+				Resource: resourceNote, ID: newID, Value: value, StoredEditCode: storedHash,
 				Legacy: nil,
 			}
 

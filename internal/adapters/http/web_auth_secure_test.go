@@ -30,6 +30,8 @@ func cookieByName(rec *httptest.ResponseRecorder, name string) *http.Cookie {
 // loginRequest builds a successful TOTP login POST (the mock expectation is registered by the
 // caller) and returns the recorded response.
 func (s *AuthHandlerSuite) loginRequest(router http.Handler) *httptest.ResponseRecorder {
+	s.T().Helper()
+
 	form := withCSRF(url.Values{"username": {"alice"}, "password": {"ValidP@ss12!"}, "code": {"123456"}})
 	req := httptest.NewRequest(http.MethodPost, "/totp-login", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")

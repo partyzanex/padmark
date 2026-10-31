@@ -78,8 +78,10 @@ func (enc *ContentCipher) Rewrap(value, recordID string) (string, error) {
 		return "", fmt.Errorf("seal: %w", err)
 	}
 
-	return strings.Join([]string{contentVersion, envelope.kind, enc.activeID,
-		base64.RawURLEncoding.EncodeToString(wrapped), base64.RawURLEncoding.EncodeToString(envelope.payload)}, "$"), nil
+	return strings.Join([]string{
+		contentVersion, envelope.kind, enc.activeID,
+		base64.RawURLEncoding.EncodeToString(wrapped), base64.RawURLEncoding.EncodeToString(envelope.payload),
+	}, "$"), nil
 }
 
 // KeyCheck creates a registry value with its own purpose and installation/key binding.
@@ -136,8 +138,10 @@ func keyCheckAAD(installationID, keyID string) []byte {
 	return []byte("padmark-key-check-v1\x00" + installationID + "\x00" + keyID)
 }
 
+// ActiveKey returns the ID of the key that encrypts new content.
 func (k *ContentKeyring) ActiveKey() string { return k.Active }
 
+// KeyIDs returns the IDs of all keys in the keyring, in no specific order.
 func (k *ContentKeyring) KeyIDs() []string {
 	ids := make([]string, 0, len(k.Keys))
 	for id := range k.Keys {

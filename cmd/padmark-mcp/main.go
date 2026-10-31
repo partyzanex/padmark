@@ -1,3 +1,4 @@
+// Command padmark-mcp runs a Model Context Protocol server over stdio for a Padmark server.
 package main
 
 import (

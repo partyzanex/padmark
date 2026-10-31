@@ -145,8 +145,9 @@ func TestBuildShortenReq_NoDirectRedirectFlag_OmitsField(t *testing.T) {
 func TestHandleCreateLinkRes_SlugConflict_CleanMessage(t *testing.T) {
 	t.Parallel()
 
-	_, err := handleCreateLinkRes(&padmark.CreateLinkConflict{Message: "slug already exists",
-		Code: padmark.OptString{Value: "", Set: false},
+	_, err := handleCreateLinkRes(&padmark.CreateLinkConflict{
+		Message: "slug already exists",
+		Code:    padmark.OptString{Value: "", Set: false},
 	})
 	require.Error(t, err)
 	assert.Equal(t, "slug conflict: slug already exists", err.Error())
@@ -155,7 +156,8 @@ func TestHandleCreateLinkRes_SlugConflict_CleanMessage(t *testing.T) {
 func TestHandleCreateLinkRes_Success(t *testing.T) {
 	t.Parallel()
 
-	link := padmark.CreateLinkResponse{ID: "abc",
+	link := padmark.CreateLinkResponse{
+		ID: "abc",
 		TargetURL: url.URL{
 			Scheme: "", Opaque: "", User: nil, Host: "", Path: "", Fragment: "",
 			RawQuery: "", RawPath: "", RawFragment: "", ForceQuery: false, OmitHost: false,
@@ -167,7 +169,8 @@ func TestHandleCreateLinkRes_Success(t *testing.T) {
 		CreatedAt:      time.Time{}, EditCode: "",
 	}
 
-	got, err := handleCreateLinkRes(&padmark.CreateLinkResponseHeaders{Response: link,
+	got, err := handleCreateLinkRes(&padmark.CreateLinkResponseHeaders{
+		Response: link,
 		Location: padmark.OptString{Value: "", Set: false},
 	})
 	require.NoError(t, err)

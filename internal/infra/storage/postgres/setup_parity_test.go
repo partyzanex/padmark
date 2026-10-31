@@ -96,6 +96,8 @@ func (s *ParitySuite) parityUser(username string) *domain.User {
 }
 
 func (s *ParitySuite) createParityUser(username string, admin bool) *domain.User {
+	s.T().Helper()
+
 	usr := s.parityUser(username)
 	usr.IsAdmin = admin
 	s.Require().NoError(NewUserRepository(s.db).Create(s.T().Context(), usr))
@@ -104,6 +106,8 @@ func (s *ParitySuite) createParityUser(username string, admin bool) *domain.User
 }
 
 func (s *ParitySuite) count(table string) int64 {
+	s.T().Helper()
+
 	count, err := s.db.NewSelect().Table(table).Count(s.T().Context())
 	s.Require().NoError(err)
 

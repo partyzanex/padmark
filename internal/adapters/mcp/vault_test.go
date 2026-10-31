@@ -17,7 +17,7 @@ func TestVaultPutGet_RoundTrip(t *testing.T) {
 	assert.Empty(t, vault.Get(""), "an empty id is just another key, not a wildcard")
 }
 
-func TestVault_ConcurrentAccessIsRaceClean(t *testing.T) {
+func TestVault_ConcurrentAccessIsRaceClean(_ *testing.T) {
 	vault := newEditCodeVault()
 
 	var wg sync.WaitGroup

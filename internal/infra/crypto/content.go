@@ -249,8 +249,10 @@ func (enc *ContentCipher) encrypt(plaintext, recordID, kind string) (string, err
 		return "", fmt.Errorf("seal: %w", err)
 	}
 
-	return strings.Join([]string{contentVersion, kind, enc.activeID,
-		base64.RawURLEncoding.EncodeToString(wrapped), base64.RawURLEncoding.EncodeToString(payload)}, "$"), nil
+	return strings.Join([]string{
+		contentVersion, kind, enc.activeID,
+		base64.RawURLEncoding.EncodeToString(wrapped), base64.RawURLEncoding.EncodeToString(payload),
+	}, "$"), nil
 }
 
 func (enc *ContentCipher) open(value, recordID string) (plaintext, kind string, err error) {
@@ -373,6 +375,8 @@ func (enc *ContentCipher) seal(gcm cipher.AEAD, plaintext, aad []byte) ([]byte, 
 // Raw legacy ciphertext is only accepted by the explicit migration API, never by normal reads.
 type ContentEncryptor struct{ *ContentCipher }
 
+// Decrypt opens a stored envelope for recordID. A wrapped legacy envelope also needs legacySlug,
+// whose hash must equal recordID.
 func (enc *ContentEncryptor) Decrypt(value, recordID, legacySlug string) (string, error) {
 	plaintext, kind, err := enc.open(value, recordID)
 	if err != nil {

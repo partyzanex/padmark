@@ -97,7 +97,8 @@ func setupAction(ctx context.Context, cmd *urcli.Command) error {
 		return fmt.Errorf("check insecure setup: %w", insecureErr)
 	}
 
-	httpClient := &http.Client{Timeout: cmd.Duration(FlagTimeout),
+	httpClient := &http.Client{
+		Timeout:   cmd.Duration(FlagTimeout),
 		Transport: nil, CheckRedirect: nil, Jar: nil,
 	}
 

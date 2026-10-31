@@ -5,8 +5,9 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/partyzanex/padmark/internal/clifactory"
 	"github.com/urfave/cli/v3"
+
+	"github.com/partyzanex/padmark/internal/clifactory"
 )
 
 func migrateCommand() *cli.Command {

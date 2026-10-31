@@ -10,7 +10,8 @@ import (
 // shorter than domain.MinEditCodeLength is rejected before any slug lookup or storage call.
 func (s *ManagerTestSuite) TestCreate_RejectsShortCustomEditCode() {
 	for _, code := range []string{"1", "1234567"} {
-		link, err := s.manager.Create(s.T().Context(), "https://example.com", CreateOptions{EditCode: code,
+		link, err := s.manager.Create(s.T().Context(), "https://example.com", CreateOptions{
+			EditCode:  code,
 			ExpiresAt: nil, Privacy: nil, OwnerID: nil, DirectRedirect: nil,
 			CustomHash: "", BurnAfterClick: false,
 		})
@@ -22,7 +23,8 @@ func (s *ManagerTestSuite) TestCreate_RejectsShortCustomEditCode() {
 
 // TestCreate_RejectsMalformedCustomEditCode: surrounding whitespace is rejected too.
 func (s *ManagerTestSuite) TestCreate_RejectsMalformedCustomEditCode() {
-	_, err := s.manager.Create(s.T().Context(), "https://example.com", CreateOptions{EditCode: "12345678 ",
+	_, err := s.manager.Create(s.T().Context(), "https://example.com", CreateOptions{
+		EditCode:  "12345678 ",
 		ExpiresAt: nil, Privacy: nil, OwnerID: nil, DirectRedirect: nil,
 		CustomHash: "", BurnAfterClick: false,
 	})
@@ -37,7 +39,8 @@ func (s *ManagerTestSuite) TestCreate_AcceptsMinLengthCustomEditCode() {
 	s.storage.EXPECT().Exists(gomock.Any(), gomock.Any()).Return(false, nil)
 	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
 
-	link, err := s.manager.Create(s.T().Context(), "https://example.com", CreateOptions{EditCode: "12345678",
+	link, err := s.manager.Create(s.T().Context(), "https://example.com", CreateOptions{
+		EditCode:  "12345678",
 		ExpiresAt: nil, Privacy: nil, OwnerID: nil, DirectRedirect: nil,
 		CustomHash: "", BurnAfterClick: false,
 	})

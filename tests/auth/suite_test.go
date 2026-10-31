@@ -371,13 +371,16 @@ func (s *AuthSuite) TestSession_DeleteByUserIDExcept_PreservesExceptedSession() 
 	s.Require().NoError(s.Users.Create(ctx, usr))
 
 	future := time.Now().Add(time.Hour)
-	keep := &domain.Session{SessionHash: "sess-keep", UserID: usr.ID, CreatedAt: time.Now(), ExpiresAt: future,
+	keep := &domain.Session{
+		SessionHash: "sess-keep", UserID: usr.ID, CreatedAt: time.Now(), ExpiresAt: future,
 		UserAgent: "", IP: "",
 	}
-	old1 := &domain.Session{SessionHash: "sess-old1", UserID: usr.ID, CreatedAt: time.Now(), ExpiresAt: future,
+	old1 := &domain.Session{
+		SessionHash: "sess-old1", UserID: usr.ID, CreatedAt: time.Now(), ExpiresAt: future,
 		UserAgent: "", IP: "",
 	}
-	old2 := &domain.Session{SessionHash: "sess-old2", UserID: usr.ID, CreatedAt: time.Now(), ExpiresAt: future,
+	old2 := &domain.Session{
+		SessionHash: "sess-old2", UserID: usr.ID, CreatedAt: time.Now(), ExpiresAt: future,
 		UserAgent: "", IP: "",
 	}
 

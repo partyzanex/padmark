@@ -106,7 +106,8 @@ func TestStartRedirectServer_BindFailureIsNonFatal(t *testing.T) {
 
 	var sink syncBuffer
 
-	log := slog.New(slog.NewTextHandler(&sink, &slog.HandlerOptions{Level: slog.LevelError,
+	log := slog.New(slog.NewTextHandler(&sink, &slog.HandlerOptions{
+		Level:     slog.LevelError,
 		AddSource: false, ReplaceAttr: nil,
 	}))
 

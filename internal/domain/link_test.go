@@ -19,7 +19,8 @@ func TestLink_Validate_NilPrivacy(t *testing.T) {
 
 func TestLink_Validate_InvalidPrivacy(t *testing.T) {
 	p := Privacy("secret")
-	link := &Link{Privacy: &p,
+	link := &Link{
+		Privacy:   &p,
 		CreatedAt: time.Time{}, ExpiresAt: nil, OwnerID: nil, DirectRedirect: nil,
 		ID: "", TargetURL: "", EditCode: "", Views: 0, BurnAfterClick: false,
 	}
@@ -31,17 +32,20 @@ func TestLink_ValidateOwnership(t *testing.T) {
 	owner := uuid.New()
 	ownerLevel, publicLevel := PrivacyOwner, PrivacyPublic
 
-	require.ErrorIs(t, (&Link{Privacy: &ownerLevel,
+	require.ErrorIs(t, (&Link{
+		Privacy:   &ownerLevel,
 		CreatedAt: time.Time{}, ExpiresAt: nil, OwnerID: nil, DirectRedirect: nil,
 		ID: "", TargetURL: "", EditCode: "", Views: 0, BurnAfterClick: false,
 	}).ValidateOwnership(), ErrOwnerPrivacyRequiresOwner,
 		"owner-only privacy on a link with no OwnerID must be rejected")
-	assert.NoError(t, (&Link{Privacy: &ownerLevel, OwnerID: &owner,
+	assert.NoError(t, (&Link{
+		Privacy: &ownerLevel, OwnerID: &owner,
 		CreatedAt: time.Time{}, ExpiresAt: nil, DirectRedirect: nil, ID: "",
 		TargetURL: "", EditCode: "", Views: 0, BurnAfterClick: false,
 	}).ValidateOwnership(),
 		"owner-only privacy on a link with an OwnerID is fine")
-	assert.NoError(t, (&Link{Privacy: &publicLevel,
+	assert.NoError(t, (&Link{
+		Privacy:   &publicLevel,
 		CreatedAt: time.Time{}, ExpiresAt: nil, OwnerID: nil, DirectRedirect: nil,
 		ID: "", TargetURL: "", EditCode: "", Views: 0, BurnAfterClick: false,
 	}).ValidateOwnership(),
@@ -61,7 +65,8 @@ func TestLink_EffectivePrivacy(t *testing.T) {
 	}).EffectivePrivacy(), "nil Privacy defaults to public")
 
 	owner := PrivacyOwner
-	assert.Equal(t, PrivacyOwner, (&Link{Privacy: &owner,
+	assert.Equal(t, PrivacyOwner, (&Link{
+		Privacy:   &owner,
 		CreatedAt: time.Time{}, ExpiresAt: nil, OwnerID: nil, DirectRedirect: nil,
 		ID: "", TargetURL: "", EditCode: "", Views: 0, BurnAfterClick: false,
 	}).EffectivePrivacy())
@@ -85,21 +90,25 @@ func TestLink_EffectiveDirectRedirect(t *testing.T) {
 			DirectRedirect: nil, ID: "", TargetURL: "", EditCode: "", Views: 0,
 			BurnAfterClick: false,
 		}, false, false},
-		{"anonymous override true is ignored without the flag", Link{DirectRedirect: &forceTrue,
-			CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
+		{"anonymous override true is ignored without the flag", Link{
+			DirectRedirect: &forceTrue,
+			CreatedAt:      time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
 			ID: "", TargetURL: "", EditCode: "", Views: 0,
 			BurnAfterClick: false,
 		}, false, false},
-		{"owned link redirects directly", Link{OwnerID: &owner,
+		{"owned link redirects directly", Link{
+			OwnerID:   &owner,
 			CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, DirectRedirect: nil,
 			ID: "", TargetURL: "", EditCode: "", Views: 0,
 			BurnAfterClick: false,
 		}, false, true},
-		{"owned link may opt back into the interstitial", Link{OwnerID: &owner, DirectRedirect: &forceFalse,
+		{"owned link may opt back into the interstitial", Link{
+			OwnerID: &owner, DirectRedirect: &forceFalse,
 			CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, ID: "",
 			TargetURL: "", EditCode: "", Views: 0, BurnAfterClick: false,
 		}, false, false},
-		{"owned override true stays direct", Link{OwnerID: &owner, DirectRedirect: &forceTrue,
+		{"owned override true stays direct", Link{
+			OwnerID: &owner, DirectRedirect: &forceTrue,
 			CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, ID: "",
 			TargetURL: "", EditCode: "", Views: 0, BurnAfterClick: false,
 		}, false, true},
@@ -109,22 +118,26 @@ func TestLink_EffectiveDirectRedirect(t *testing.T) {
 			DirectRedirect: nil, ID: "", TargetURL: "", EditCode: "", Views: 0,
 			BurnAfterClick: false,
 		}, true, true},
-		{"anonymous override false wins over a true default", Link{DirectRedirect: &forceFalse,
-			CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
+		{"anonymous override false wins over a true default", Link{
+			DirectRedirect: &forceFalse,
+			CreatedAt:      time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
 			ID: "", TargetURL: "", EditCode: "", Views: 0,
 			BurnAfterClick: false,
 		}, true, false},
-		{"anonymous override true with the flag on", Link{DirectRedirect: &forceTrue,
-			CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
+		{"anonymous override true with the flag on", Link{
+			DirectRedirect: &forceTrue,
+			CreatedAt:      time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
 			ID: "", TargetURL: "", EditCode: "", Views: 0,
 			BurnAfterClick: false,
 		}, true, true},
-		{"owned link with the flag on", Link{OwnerID: &owner,
+		{"owned link with the flag on", Link{
+			OwnerID:   &owner,
 			CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, DirectRedirect: nil,
 			ID: "", TargetURL: "", EditCode: "", Views: 0,
 			BurnAfterClick: false,
 		}, true, true},
-		{"owned override false wins over a true default", Link{OwnerID: &owner, DirectRedirect: &forceFalse,
+		{"owned override false wins over a true default", Link{
+			OwnerID: &owner, DirectRedirect: &forceFalse,
 			CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, ID: "",
 			TargetURL: "", EditCode: "", Views: 0, BurnAfterClick: false,
 		}, true, false},
@@ -149,12 +162,14 @@ func TestLink_VisibleTo(t *testing.T) {
 		authenticated bool
 		want          bool
 	}{
-		{"public visible to anonymous", &Link{Privacy: &public,
+		{"public visible to anonymous", &Link{
+			Privacy:   &public,
 			CreatedAt: time.Time{}, ExpiresAt: nil, OwnerID: nil, DirectRedirect: nil,
 			ID: "", TargetURL: "", EditCode: "", Views: 0,
 			BurnAfterClick: false,
 		}, uuid.Nil, false, true},
-		{"public visible to authenticated", &Link{Privacy: &public,
+		{"public visible to authenticated", &Link{
+			Privacy:   &public,
 			CreatedAt: time.Time{}, ExpiresAt: nil, OwnerID: nil, DirectRedirect: nil,
 			ID: "", TargetURL: "", EditCode: "", Views: 0,
 			BurnAfterClick: false,
@@ -164,41 +179,49 @@ func TestLink_VisibleTo(t *testing.T) {
 			DirectRedirect: nil, ID: "", TargetURL: "", EditCode: "", Views: 0,
 			BurnAfterClick: false,
 		}, uuid.Nil, false, true},
-		{"authenticated hides from anonymous", &Link{Privacy: &authenticated,
+		{"authenticated hides from anonymous", &Link{
+			Privacy:   &authenticated,
 			CreatedAt: time.Time{}, ExpiresAt: nil, OwnerID: nil, DirectRedirect: nil,
 			ID: "", TargetURL: "", EditCode: "", Views: 0,
 			BurnAfterClick: false,
 		}, uuid.Nil, false, false},
 		{
 			"authenticated visible to any authenticated caller",
-			&Link{Privacy: &authenticated, OwnerID: &owner,
+			&Link{
+				Privacy: &authenticated, OwnerID: &owner,
 				CreatedAt: time.Time{}, ExpiresAt: nil, DirectRedirect: nil, ID: "",
 				TargetURL: "", EditCode: "", Views: 0, BurnAfterClick: false,
 			}, other, true, true,
 		},
-		{"owner hides from anonymous", &Link{Privacy: &ownerOnly, OwnerID: &owner,
+		{"owner hides from anonymous", &Link{
+			Privacy: &ownerOnly, OwnerID: &owner,
 			CreatedAt: time.Time{}, ExpiresAt: nil, DirectRedirect: nil, ID: "",
 			TargetURL: "", EditCode: "", Views: 0, BurnAfterClick: false,
 		}, uuid.Nil, false, false},
-		{"owner hides from other authenticated caller", &Link{Privacy: &ownerOnly, OwnerID: &owner,
+		{"owner hides from other authenticated caller", &Link{
+			Privacy: &ownerOnly, OwnerID: &owner,
 			CreatedAt: time.Time{}, ExpiresAt: nil, DirectRedirect: nil, ID: "",
 			TargetURL: "", EditCode: "", Views: 0, BurnAfterClick: false,
 		}, other, true, false},
-		{"owner visible to the owner", &Link{Privacy: &ownerOnly, OwnerID: &owner,
+		{"owner visible to the owner", &Link{
+			Privacy: &ownerOnly, OwnerID: &owner,
 			CreatedAt: time.Time{}, ExpiresAt: nil, DirectRedirect: nil, ID: "",
 			TargetURL: "", EditCode: "", Views: 0, BurnAfterClick: false,
 		}, owner, true, true},
-		{"owner with nil OwnerID hides from anonymous", &Link{Privacy: &ownerOnly,
+		{"owner with nil OwnerID hides from anonymous", &Link{
+			Privacy:   &ownerOnly,
 			CreatedAt: time.Time{}, ExpiresAt: nil, OwnerID: nil, DirectRedirect: nil,
 			ID: "", TargetURL: "", EditCode: "", Views: 0,
 			BurnAfterClick: false,
 		}, uuid.Nil, false, false},
-		{"owner with nil OwnerID hides from authenticated caller", &Link{Privacy: &ownerOnly,
+		{"owner with nil OwnerID hides from authenticated caller", &Link{
+			Privacy:   &ownerOnly,
 			CreatedAt: time.Time{}, ExpiresAt: nil, OwnerID: nil, DirectRedirect: nil,
 			ID: "", TargetURL: "", EditCode: "", Views: 0,
 			BurnAfterClick: false,
 		}, other, true, false},
-		{"unrecognized privacy value fails closed", &Link{Privacy: &garbage, OwnerID: &owner,
+		{"unrecognized privacy value fails closed", &Link{
+			Privacy: &garbage, OwnerID: &owner,
 			CreatedAt: time.Time{}, ExpiresAt: nil, DirectRedirect: nil, ID: "",
 			TargetURL: "", EditCode: "", Views: 0, BurnAfterClick: false,
 		}, owner, true, false},
@@ -214,7 +237,8 @@ func TestLink_VisibleTo(t *testing.T) {
 func TestLink_OwnedBy(t *testing.T) {
 	owner := uuid.New()
 	other := uuid.New()
-	link := &Link{OwnerID: &owner,
+	link := &Link{
+		OwnerID:   &owner,
 		CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, DirectRedirect: nil,
 		ID: "", TargetURL: "", EditCode: "", Views: 0, BurnAfterClick: false,
 	}

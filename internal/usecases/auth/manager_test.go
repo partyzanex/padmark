@@ -9,13 +9,13 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/pquerna/otp"
 	"github.com/pquerna/otp/totp"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/mock/gomock"
 
 	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/infra/crypto"
-	"github.com/pquerna/otp"
 )
 
 func discardLog() *slog.Logger { return slog.New(slog.DiscardHandler) }
@@ -352,10 +352,12 @@ func (s *ManagerSuite) TestGetSession_ExpiredSession_ReturnsErrSessionExpired() 
 }
 
 func (s *ManagerSuite) TestGetSession_ValidSession_ReturnsUser() {
-	sess := &domain.Session{SessionHash: "s1", UserID: s.userID, ExpiresAt: time.Now().Add(time.Hour),
+	sess := &domain.Session{
+		SessionHash: "s1", UserID: s.userID, ExpiresAt: time.Now().Add(time.Hour),
 		CreatedAt: time.Time{}, UserAgent: "", IP: "",
 	}
-	usr := &domain.User{ID: s.userID, Username: "alice",
+	usr := &domain.User{
+		ID: s.userID, Username: "alice",
 		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
 		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
 	}
@@ -371,7 +373,8 @@ func (s *ManagerSuite) TestGetSession_ValidSession_ReturnsUser() {
 // ── GenerateInvite ──
 
 func (s *ManagerSuite) TestGenerateInvite_NonAdmin_ReturnsErrForbidden() {
-	nonAdmin := &domain.User{ID: s.userID, IsAdmin: false, CreatedAt: time.Time{},
+	nonAdmin := &domain.User{
+		ID: s.userID, IsAdmin: false, CreatedAt: time.Time{},
 		LastLoginAt: nil, Username: "", TOTPSecret: "", PasswordHash: "",
 		KDFSalt: nil, LastTOTPCounter: 0,
 	}
@@ -467,7 +470,8 @@ func (s *ManagerSuite) TestAcceptInvite_DuplicateUsername_ReturnsErrUserExistsWi
 	// GetByUsername finds existing user → ErrUserExists returned before RedeemInvite is called.
 	s.users.EXPECT().
 		GetByUsername(gomock.Any(), "existing").
-		Return(&domain.User{ID: uuid.New(), Username: "existing",
+		Return(&domain.User{
+			ID: uuid.New(), Username: "existing",
 			CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
 			KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
 		}, nil)
@@ -485,7 +489,8 @@ func (s *ManagerSuite) TestAcceptFirstAdmin_WeakPassword_ReturnsErrWeakPassword(
 }
 
 func (s *ManagerSuite) TestAcceptFirstAdmin_NonEmptyDB_ReturnsErrForbidden() {
-	s.users.EXPECT().List(gomock.Any()).Return([]*domain.User{{ID: uuid.New(),
+	s.users.EXPECT().List(gomock.Any()).Return([]*domain.User{{
+		ID:        uuid.New(),
 		CreatedAt: time.Time{}, LastLoginAt: nil, Username: "", TOTPSecret: "",
 		PasswordHash: "", KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
 	}}, nil)
@@ -528,7 +533,8 @@ func (s *ManagerSuite) TestAcceptFirstAdmin_RaceLoser_PropagatesErrUserExists() 
 
 func (s *ManagerSuite) TestChangePassword_WrongOldPassword_ReturnsErrInvalidPassword() {
 	usr, _ := s.testUser()
-	sess := &domain.Session{SessionHash: "sess", UserID: s.userID,
+	sess := &domain.Session{
+		SessionHash: "sess", UserID: s.userID,
 		CreatedAt: time.Time{}, ExpiresAt: time.Time{}, UserAgent: "", IP: "",
 	}
 
@@ -541,7 +547,8 @@ func (s *ManagerSuite) TestChangePassword_WrongOldPassword_ReturnsErrInvalidPass
 
 func (s *ManagerSuite) TestChangePassword_InvalidTOTP_ReturnsErrInvalidTOTP() {
 	usr, _ := s.testUser()
-	sess := &domain.Session{SessionHash: "sess", UserID: s.userID,
+	sess := &domain.Session{
+		SessionHash: "sess", UserID: s.userID,
 		CreatedAt: time.Time{}, ExpiresAt: time.Time{}, UserAgent: "", IP: "",
 	}
 
@@ -554,7 +561,8 @@ func (s *ManagerSuite) TestChangePassword_InvalidTOTP_ReturnsErrInvalidTOTP() {
 
 func (s *ManagerSuite) TestChangePassword_WeakNewPassword_ReturnsErrWeakPassword() {
 	usr, rawSecret := s.testUser()
-	sess := &domain.Session{SessionHash: "sess", UserID: s.userID,
+	sess := &domain.Session{
+		SessionHash: "sess", UserID: s.userID,
 		CreatedAt: time.Time{}, ExpiresAt: time.Time{}, UserAgent: "", IP: "",
 	}
 
@@ -571,7 +579,8 @@ func (s *ManagerSuite) TestChangePassword_WeakNewPassword_ReturnsErrWeakPassword
 
 func (s *ManagerSuite) TestChangePassword_Success_UpdatesPasswordAndRotatesSession() {
 	usr, rawSecret := s.testUser()
-	sess := &domain.Session{SessionHash: "sess", UserID: s.userID, UserAgent: "ua", IP: "1.2.3.4",
+	sess := &domain.Session{
+		SessionHash: "sess", UserID: s.userID, UserAgent: "ua", IP: "1.2.3.4",
 		CreatedAt: time.Time{}, ExpiresAt: time.Time{},
 	}
 
@@ -598,7 +607,8 @@ func (s *ManagerSuite) TestChangePassword_Success_UpdatesPasswordAndRotatesSessi
 
 func (s *ManagerSuite) TestChangePassword_RevocationFailureReturnsSessionAndWarning() {
 	usr, rawSecret := s.testUser()
-	sess := &domain.Session{SessionHash: "sess", UserID: s.userID, UserAgent: "ua", IP: "1.2.3.4",
+	sess := &domain.Session{
+		SessionHash: "sess", UserID: s.userID, UserAgent: "ua", IP: "1.2.3.4",
 		CreatedAt: time.Time{}, ExpiresAt: time.Time{},
 	}
 
@@ -630,7 +640,8 @@ func (s *ManagerSuite) TestChangePassword_RevokesAPITokens() {
 		s.Require().NoError(err)
 
 		usr, rawSecret := s.testUser()
-		sess := &domain.Session{SessionHash: "sess", UserID: s.userID,
+		sess := &domain.Session{
+			SessionHash: "sess", UserID: s.userID,
 			CreatedAt: time.Time{}, ExpiresAt: time.Time{}, UserAgent: "", IP: "",
 		}
 
@@ -681,8 +692,9 @@ func (s *ManagerSuite) TestGenerateInvite_Bearer_RequiresStepUp() {
 
 	s.users.EXPECT().GetByID(gomock.Any(), s.userID).Return(admin, nil).AnyTimes()
 
-	_, err := s.mgr.GenerateInvite(s.T().Context(), s.userID, Issuer{APITokenHash: "parent",
-		StepUp: StepUp{Password: "", TOTPCode: ""},
+	_, err := s.mgr.GenerateInvite(s.T().Context(), s.userID, Issuer{
+		APITokenHash: "parent",
+		StepUp:       StepUp{Password: "", TOTPCode: ""},
 	})
 	s.Require().ErrorIs(err, domain.ErrStepUpRequired, "a bearer without step-up mints no invite")
 
@@ -709,7 +721,8 @@ func (s *ManagerSuite) TestIsEmpty_NoUsers_ReturnsTrue() {
 }
 
 func (s *ManagerSuite) TestIsEmpty_HasUsers_ReturnsFalse() {
-	s.users.EXPECT().List(gomock.Any()).Return([]*domain.User{{ID: uuid.New(),
+	s.users.EXPECT().List(gomock.Any()).Return([]*domain.User{{
+		ID:        uuid.New(),
 		CreatedAt: time.Time{}, LastLoginAt: nil, Username: "", TOTPSecret: "",
 		PasswordHash: "", KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
 	}}, nil)
@@ -722,7 +735,8 @@ func (s *ManagerSuite) TestIsEmpty_HasUsers_ReturnsFalse() {
 // ── ListUsers ──
 
 func (s *ManagerSuite) TestListUsers_Admin_ReturnsUsers() {
-	users := []*domain.User{s.adminUser(), {ID: uuid.New(), Username: "bob",
+	users := []*domain.User{s.adminUser(), {
+		ID: uuid.New(), Username: "bob",
 		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
 		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
 	}}
@@ -737,7 +751,8 @@ func (s *ManagerSuite) TestListUsers_Admin_ReturnsUsers() {
 
 func (s *ManagerSuite) TestListUsers_NonAdmin_ReturnsErrForbidden() {
 	caller := uuid.New()
-	nonAdmin := &domain.User{ID: caller, IsAdmin: false, CreatedAt: time.Time{},
+	nonAdmin := &domain.User{
+		ID: caller, IsAdmin: false, CreatedAt: time.Time{},
 		LastLoginAt: nil, Username: "", TOTPSecret: "", PasswordHash: "",
 		KDFSalt: nil, LastTOTPCounter: 0,
 	}
@@ -777,7 +792,8 @@ func (s *ManagerSuite) TestRevokeUser_SelfRevoke_ReturnsErrForbidden() {
 func (s *ManagerSuite) TestRevokeUser_NonAdmin_ReturnsErrForbidden() {
 	caller := uuid.New()
 	target := uuid.New()
-	nonAdmin := &domain.User{ID: caller, IsAdmin: false, CreatedAt: time.Time{},
+	nonAdmin := &domain.User{
+		ID: caller, IsAdmin: false, CreatedAt: time.Time{},
 		LastLoginAt: nil, Username: "", TOTPSecret: "", PasswordHash: "",
 		KDFSalt: nil, LastTOTPCounter: 0,
 	}
@@ -811,7 +827,8 @@ func (s *ManagerSuite) TestRevokeUser_TargetLookupFails_WrapsError() {
 
 func (s *ManagerSuite) TestRevokeUser_LastAdminListFails_WrapsError() {
 	targetID := uuid.New()
-	target := &domain.User{ID: targetID, IsAdmin: true,
+	target := &domain.User{
+		ID: targetID, IsAdmin: true,
 		CreatedAt: time.Time{}, LastLoginAt: nil, Username: "", TOTPSecret: "",
 		PasswordHash: "", KDFSalt: nil, LastTOTPCounter: 0,
 	}
@@ -828,7 +845,8 @@ func (s *ManagerSuite) TestRevokeUser_LastAdminListFails_WrapsError() {
 
 func (s *ManagerSuite) TestRevokeUser_RevokeFails_WrapsError() {
 	targetID := uuid.New()
-	nonAdminTarget := &domain.User{ID: targetID, IsAdmin: false, CreatedAt: time.Time{},
+	nonAdminTarget := &domain.User{
+		ID: targetID, IsAdmin: false, CreatedAt: time.Time{},
 		LastLoginAt: nil, Username: "", TOTPSecret: "", PasswordHash: "",
 		KDFSalt: nil, LastTOTPCounter: 0,
 	}
@@ -845,7 +863,8 @@ func (s *ManagerSuite) TestRevokeUser_RevokeFails_WrapsError() {
 
 func (s *ManagerSuite) TestRevokeUser_LastAdmin_ReturnsErrForbidden() {
 	targetID := uuid.New()
-	target := &domain.User{ID: targetID, IsAdmin: true,
+	target := &domain.User{
+		ID: targetID, IsAdmin: true,
 		CreatedAt: time.Time{}, LastLoginAt: nil, Username: "", TOTPSecret: "",
 		PasswordHash: "", KDFSalt: nil, LastTOTPCounter: 0,
 	}
@@ -860,7 +879,8 @@ func (s *ManagerSuite) TestRevokeUser_LastAdmin_ReturnsErrForbidden() {
 
 func (s *ManagerSuite) TestRevokeUser_Admin_RevokesNonAdminTarget() {
 	targetID := uuid.New()
-	nonAdminTarget := &domain.User{ID: targetID, IsAdmin: false, CreatedAt: time.Time{},
+	nonAdminTarget := &domain.User{
+		ID: targetID, IsAdmin: false, CreatedAt: time.Time{},
 		LastLoginAt: nil, Username: "", TOTPSecret: "", PasswordHash: "",
 		KDFSalt: nil, LastTOTPCounter: 0,
 	}
@@ -874,7 +894,8 @@ func (s *ManagerSuite) TestRevokeUser_Admin_RevokesNonAdminTarget() {
 
 func (s *ManagerSuite) TestRevokeUser_Admin_RevokesSecondAdmin() {
 	admin2ID := uuid.New()
-	secondAdmin := &domain.User{ID: admin2ID, IsAdmin: true,
+	secondAdmin := &domain.User{
+		ID: admin2ID, IsAdmin: true,
 		CreatedAt: time.Time{}, LastLoginAt: nil, Username: "", TOTPSecret: "",
 		PasswordHash: "", KDFSalt: nil, LastTOTPCounter: 0,
 	}

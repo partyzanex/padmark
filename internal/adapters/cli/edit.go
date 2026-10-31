@@ -156,6 +156,9 @@ func buildUpdateReq(cmd *urcli.Command, content, editCode string) *padmark.Updat
 	return req
 }
 
+// handleUpdateNoteRes maps every UpdateNote response variant; exhaustive keeps the list complete.
+//
+//nolint:cyclop // one branch per generated HTTP response variant, as in mcp.mapUpdateNoteRes
 func handleUpdateNoteRes(res padmark.UpdateNoteRes) (*padmark.NoteResponse, error) {
 	switch typed := res.(type) {
 	case *padmark.NoteResponse:
@@ -170,6 +173,12 @@ func handleUpdateNoteRes(res padmark.UpdateNoteRes) (*padmark.NoteResponse, erro
 		return nil, ErrNoteNotFound
 	case *padmark.UpdateNoteUnprocessableEntity:
 		return nil, fmt.Errorf("%w: %s", ErrValidation, typed.Message)
+	case *padmark.UpdateNoteRequestEntityTooLarge:
+		return nil, fmt.Errorf("%w: %s", ErrContentTooLarge, typed.Message)
+	case *padmark.UpdateNoteUnsupportedMediaType:
+		return nil, fmt.Errorf("%w: %s", ErrBadRequest, typed.Message)
+	case *padmark.UpdateNoteTooManyRequests:
+		return nil, ErrRateLimited
 	case *padmark.UpdateNoteServiceUnavailable:
 		return nil, errorcontext.Wrap(serviceUnavailableError(padmark.ErrorResponse(*typed)), "decode update note response")
 	case *padmark.UpdateNoteInternalServerError:

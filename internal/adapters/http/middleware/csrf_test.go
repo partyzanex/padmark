@@ -8,8 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/partyzanex/padmark/tests/httptestutil"
 	"github.com/stretchr/testify/require"
+
+	"github.com/partyzanex/padmark/tests/httptestutil"
 )
 
 func TestVerifyCSRFToken_RejectsEmptySecret(t *testing.T) {

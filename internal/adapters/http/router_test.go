@@ -3,6 +3,7 @@ package http
 import (
 	"bytes"
 	"context"
+	"log/slog"
 	net_http "net/http"
 	"net/http/httptest"
 	"os"
@@ -48,7 +49,7 @@ func TestAPISpec_WriteError_DoesNotCorruptBody(t *testing.T) {
 	}
 	req, _ := net_http.NewRequest(net_http.MethodGet, "/api/openapi.yaml", nil)
 
-	APISpec(wer, req)
+	APISpec(slog.New(slog.DiscardHandler))(wer, req)
 
 	// http.Error writes "failed to write spec\n" — assert it is absent.
 	assert.NotContains(t, string(wer.body), "failed to write spec",
@@ -77,7 +78,7 @@ func TestAPISpec_OK_SetsContentType(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req, _ := net_http.NewRequest(net_http.MethodGet, "/api/openapi.yaml", nil)
 
-	APISpec(rec, req)
+	APISpec(slog.New(slog.DiscardHandler))(rec, req)
 
 	assert.Equal(t, net_http.StatusOK, rec.Code)
 	assert.Equal(t, "application/yaml", rec.Header().Get("Content-Type"))

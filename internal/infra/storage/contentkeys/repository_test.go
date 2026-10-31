@@ -152,7 +152,8 @@ func TestConvertLegacyCASAndTargetConflict(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "current", existing.Value, "the existing target is never overwritten")
 
-	_, err = repo.ConvertLegacy(ctx, keys.Row{Resource: "link", ID: "x", Value: "y",
+	_, err = repo.ConvertLegacy(ctx, keys.Row{
+		Resource: "link", ID: "x", Value: "y",
 		Legacy: nil, StoredEditCode: "",
 	}, "z", "v", "")
 	require.Error(t, err, "links are never converted")
@@ -200,7 +201,8 @@ func TestMarkLegacyTagsOnlyTheInspectedUntaggedNote(t *testing.T) {
 
 	_, err = repo.MarkLegacy(ctx, *tagged)
 	require.Error(t, err, "an already tagged note is refused")
-	_, err = repo.MarkLegacy(ctx, keys.Row{Resource: "link", ID: slug, Value: "x",
+	_, err = repo.MarkLegacy(ctx, keys.Row{
+		Resource: "link", ID: slug, Value: "x",
 		Legacy: nil, StoredEditCode: "",
 	})
 	require.Error(t, err, "links never carry v0.1.6 plaintext")

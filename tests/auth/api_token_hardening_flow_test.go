@@ -64,7 +64,8 @@ func newHardeningOwner(t *testing.T, env ownerFlowEnv) *hardeningOwner {
 	secret, _, err := crypto.NewSealer(testArgon2Params).Open(usr.TOTPSecret, []byte(ownerFlowPassword), usr.KDFSalt)
 	require.NoError(t, err)
 
-	owner := &hardeningOwner{totpSecret: secret, userID: usr.ID,
+	owner := &hardeningOwner{
+		totpSecret: secret, userID: usr.ID,
 		session: "", bearer: "",
 	}
 
@@ -100,8 +101,9 @@ func hardeningDo(t *testing.T, baseURL, method, path, bearer, session, body stri
 		req.Header.Set("Cookie", "padmark_session="+session)
 	}
 
-	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-		Transport: nil, Jar: nil, Timeout: 0,
+	client := &http.Client{
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+		Transport:     nil, Jar: nil, Timeout: 0,
 	}
 
 	resp, err := client.Do(req)
@@ -215,7 +217,8 @@ func TestAPITokenHardening_AdminPanelNeedsSession(t *testing.T) {
 	jar, err := cookiejar.New(nil)
 	require.NoError(t, err)
 
-	client := &http.Client{Jar: jar,
+	client := &http.Client{
+		Jar:       jar,
 		Transport: nil, CheckRedirect: nil, Timeout: 0,
 	}
 

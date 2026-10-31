@@ -11,13 +11,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/partyzanex/padmark/internal/usecases/auth"
-
 	"github.com/stretchr/testify/require"
 
 	adaptershttp "github.com/partyzanex/padmark/internal/adapters/http"
 	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/infra/linkcache"
+	"github.com/partyzanex/padmark/internal/usecases/auth"
 )
 
 func TestLinkCacheReplicas(t *testing.T) {
@@ -124,8 +123,9 @@ func TestLinkCacheReplicas(t *testing.T) {
 func replicaLinkRequest(t *testing.T) func(string, string, string, string, string, int) (http.Header, []byte) {
 	t.Helper()
 
-	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-		Transport: nil, Jar: nil, Timeout: 0,
+	client := &http.Client{
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+		Transport:     nil, Jar: nil, Timeout: 0,
 	}
 
 	return func(baseURL, method, path, bearer, body string, status int) (http.Header, []byte) {

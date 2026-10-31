@@ -100,9 +100,9 @@ func domainErrToDefaultPageData(err error) errorViewData {
 }
 
 // writeErrorPage renders the HTML error template for browser requests.
-func (h *common) writeErrorPage(w http.ResponseWriter, r *http.Request, err error) {
+func (c *common) writeErrorPage(w http.ResponseWriter, r *http.Request, err error) {
 	data := domainErrToPageData(err)
-	h.writeErrorPageData(w, r, &data)
+	c.writeErrorPageData(w, r, &data)
 }
 
 // writeNoteError renders an error respecting content negotiation: browsers get the HTML error
@@ -110,27 +110,27 @@ func (h *common) writeErrorPage(w http.ResponseWriter, r *http.Request, err erro
 // on the note-view path, where handlePrivateAuth runs before the format switch and so must not
 // assume HTML — otherwise a CLI reading e.g. an already-burned note receives an undecodable
 // text/html body instead of a clean 404.
-func (h *common) writeNoteError(w http.ResponseWriter, r *http.Request, err error) {
+func (c *common) writeNoteError(w http.ResponseWriter, r *http.Request, err error) {
 	if negotiate(r) == formatHTML {
-		h.writeErrorPage(w, r, err)
+		c.writeErrorPage(w, r, err)
 
 		return
 	}
 
-	h.writeError(w, r, err)
+	c.writeError(w, r, err)
 }
 
 // writeErrorPageData renders the HTML error template from explicit view data,
 // for cases that need a tailored title/description rather than a domain sentinel.
-func (h *common) writeErrorPageData(w http.ResponseWriter, r *http.Request, data *errorViewData) {
+func (c *common) writeErrorPageData(w http.ResponseWriter, r *http.Request, data *errorViewData) {
 	data.Nonce = middleware.NonceFromContext(r.Context())
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(data.Code)
 
-	tmplErr := h.errorTmpl.Execute(w, data)
+	tmplErr := c.errorTmpl.Execute(w, data)
 	if tmplErr != nil {
-		h.log.ErrorContext(r.Context(), "render error template", "err", tmplErr)
+		c.log.ErrorContext(r.Context(), "render error template", "err", tmplErr)
 	}
 }
 

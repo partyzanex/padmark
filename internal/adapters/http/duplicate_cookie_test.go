@@ -70,11 +70,13 @@ func (s *DuplicateCookieSuite) SetupTest() {
 
 	s.router = router
 
-	admin := &domain.User{ID: testAdminID, Username: "admin", IsAdmin: true,
+	admin := &domain.User{
+		ID: testAdminID, Username: "admin", IsAdmin: true,
 		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
 		KDFSalt: nil, LastTOTPCounter: 0,
 	}
-	attacker := &domain.User{ID: testUserID2, Username: "mallory", IsAdmin: false,
+	attacker := &domain.User{
+		ID: testUserID2, Username: "mallory", IsAdmin: false,
 		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
 		KDFSalt: nil, LastTOTPCounter: 0,
 	}

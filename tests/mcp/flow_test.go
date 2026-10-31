@@ -14,12 +14,9 @@ import (
 	"testing"
 	"time"
 
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
 	"github.com/uptrace/bun"
-
-	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
-
-	padmark "github.com/partyzanex/padmark/pkg/client"
 
 	adaptershttp "github.com/partyzanex/padmark/internal/adapters/http"
 	mcpx "github.com/partyzanex/padmark/internal/adapters/mcp"
@@ -32,6 +29,7 @@ import (
 	"github.com/partyzanex/padmark/internal/usecases/auth"
 	"github.com/partyzanex/padmark/internal/usecases/links"
 	"github.com/partyzanex/padmark/internal/usecases/notes"
+	padmark "github.com/partyzanex/padmark/pkg/client"
 )
 
 const flowPassword = "McpFlowP@ss123!"
@@ -56,7 +54,7 @@ func TestMCPFlow_AuthenticatedOwnerLifecycle(t *testing.T) {
 	stack := startTestPadmark(t)
 	envelope := issueEnvelopeToken(ctx, t, stack.auth, stack.users, stack.srv.URL)
 
-	sess := connectMCP(t, ctx, stack.srv.URL, envelope)
+	sess := connectMCP(ctx, t, stack.srv.URL, envelope)
 	defer sess.Close()
 
 	// ── check_server through the bearer path ──
@@ -122,7 +120,7 @@ func TestMCPFlow_Anonymous_PublicCreateAndPrivateAccessDenied(t *testing.T) {
 
 	stack := startTestPadmark(t)
 
-	sess := connectMCP(t, ctx, stack.srv.URL, "") // no token at all
+	sess := connectMCP(ctx, t, stack.srv.URL, "") // no token at all
 	defer sess.Close()
 
 	created := callOutput(ctx, t, sess, "create_note", map[string]any{
@@ -134,7 +132,8 @@ func TestMCPFlow_Anonymous_PublicCreateAndPrivateAccessDenied(t *testing.T) {
 	require.False(t, pub.IsError, toolText(pub))
 
 	gated := domain.PrivacyAuthenticated
-	gatedNote, err := stack.notes.Create(ctx, &domain.Note{Title: "gated", Content: "owner-only", Privacy: &gated,
+	gatedNote, err := stack.notes.Create(ctx, &domain.Note{
+		Title: "gated", Content: "owner-only", Privacy: &gated,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		OwnerID: nil, ID: "", ContentType: nil, EditCode: "",
 		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
@@ -261,7 +260,7 @@ func issueEnvelopeToken(
 
 // connectMCP wires the padmark-mcp Manager to the test server through the real generated
 // client (a bearer token when passed) and attaches an in-memory MCP client session.
-func connectMCP(t *testing.T, ctx context.Context, serverURL, token string) *mcpsdk.ClientSession {
+func connectMCP(ctx context.Context, t *testing.T, serverURL, token string) *mcpsdk.ClientSession {
 	t.Helper()
 
 	padmarkClient := newTestPadmarkClient(t, serverURL, token)
@@ -272,7 +271,8 @@ func connectMCP(t *testing.T, ctx context.Context, serverURL, token string) *mcp
 	srvSession, err := mgr.ConnectSession(ctx, serverTransport)
 	require.NoError(t, err)
 
-	client := mcpsdk.NewClient(&mcpsdk.Implementation{Name: "integration", Version: "0",
+	client := mcpsdk.NewClient(&mcpsdk.Implementation{
+		Name: "integration", Version: "0",
 		Title: "", Description: "", WebsiteURL: "", Icons: nil,
 	}, nil)
 
@@ -335,7 +335,8 @@ func callOutput(
 ) *mcpsdk.CallToolResult {
 	t.Helper()
 
-	res, err := sess.CallTool(ctx, &mcpsdk.CallToolParams{Name: name, Arguments: params,
+	res, err := sess.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name: name, Arguments: params,
 		Meta: nil, InputResponses: nil, RequestState: "",
 	})
 	require.NoError(t, err, "%s must succeed at the protocol level (tool errors are results, not protocol errors)", name)

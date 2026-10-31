@@ -4,6 +4,7 @@ package integration
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -60,13 +61,16 @@ func TestLinkRedirectPrivacyRace(t *testing.T) {
 		burn     bool
 		implicit bool
 	}{
-		{name: "ordinary",
+		{
+			name: "ordinary",
 			burn: false, implicit: false,
 		},
-		{name: "burn", burn: true,
+		{
+			name: "burn", burn: true,
 			implicit: false,
 		},
-		{name: "preview", implicit: true,
+		{
+			name: "preview", implicit: true,
 			burn: false,
 		},
 		{name: "burn_preview", burn: true, implicit: true},
@@ -98,7 +102,8 @@ func TestLinkRedirectPrivacyRace(t *testing.T) {
 				require.NoError(t, err)
 
 				repo := sqliterepo.NewLinkRepository(env.db, log)
-				paused := &pausedLinkRead{Storage: repo, read: make(chan struct{}), proceed: make(chan struct{}),
+				paused := &pausedLinkRead{
+					Storage: repo, read: make(chan struct{}), proceed: make(chan struct{}),
 					once: sync.Once{},
 				}
 
@@ -139,20 +144,15 @@ func TestLinkRedirectPrivacyRace(t *testing.T) {
 					request.Header.Set("Accept", "*/*")
 				}
 
-				client := &http.Client{Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error {
-					return http.ErrUseLastResponse
-				},
+				client := &http.Client{
+					Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error {
+						return http.ErrUseLastResponse
+					},
 					Transport: nil, Jar: nil,
 				}
-				response := make(chan *http.Response, 1)
-				failure := make(chan error, 1)
+				outcome := make(chan redirectResult, 1)
 
-				go func() {
-					result, doErr := client.Do(request)
-					response <- result
-
-					failure <- doErr
-				}()
+				go func() { outcome <- doRedirect(client, request) }()
 
 				select {
 				case <-paused.read:
@@ -161,31 +161,26 @@ func TestLinkRedirectPrivacyRace(t *testing.T) {
 				}
 
 				_, err = writer.Update(t.Context(), link.ID, "", owner.ID, privateURL,
-					links.UpdateOptions{Privacy: new(domain.PrivacyOwner),
+					links.UpdateOptions{
+						Privacy:   new(domain.PrivacyOwner),
 						ExpiresAt: nil, DirectRedirect: nil, ClearExpiry: false,
 						ResetDirectRedirect: false,
 					})
 				require.NoError(t, err)
 				resume()
 
-				resp := <-response
-
-				require.NoError(t, <-failure)
-
-				defer resp.Body.Close()
-
-				body, err := io.ReadAll(resp.Body)
-				require.NoError(t, err)
-				require.NotContains(t, resp.Header.Get("Location"), privateURL)
-				require.NotContains(t, string(body), privateURL)
-				require.GreaterOrEqual(t, resp.StatusCode, http.StatusBadRequest)
+				result := <-outcome
+				require.NoError(t, result.err)
+				require.NotContains(t, result.header.Get("Location"), privateURL)
+				require.NotContains(t, string(result.body), privateURL)
+				require.GreaterOrEqual(t, result.status, http.StatusBadRequest)
 				current, err := repo.GetByID(t.Context(), domain.HashSlug(link.ID))
 				require.NoError(t, err, "the unauthorized request must not consume the new private row")
 				require.Zero(t, current.Views, "the new private row must not receive an anonymous click")
 
 				request.Header.Set("Authorization", "Bearer "+key)
 				request.Header.Set("Accept", "application/json")
-				resp, err = client.Do(request)
+				resp, err := client.Do(request)
 				require.NoError(t, err)
 				require.NoError(t, resp.Body.Close())
 				require.Equal(t, http.StatusMovedPermanently, resp.StatusCode)
@@ -197,5 +192,27 @@ func TestLinkRedirectPrivacyRace(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// redirectResult is a read and closed response, so the request goroutine can hand it to the test.
+type redirectResult struct {
+	header http.Header
+	err    error
+	body   []byte
+	status int
+}
+
+func doRedirect(client *http.Client, request *http.Request) redirectResult {
+	response, err := client.Do(request)
+	if err != nil {
+		return redirectResult{header: nil, err: err, body: nil, status: 0}
+	}
+
+	body, readErr := io.ReadAll(response.Body)
+	closeErr := response.Body.Close()
+
+	return redirectResult{
+		header: response.Header, err: errors.Join(readErr, closeErr), body: body, status: response.StatusCode,
 	}
 }

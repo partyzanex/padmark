@@ -1,6 +1,7 @@
 package docs_test
 
 import (
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -25,7 +26,9 @@ func readDocument(t *testing.T, path string, handler http.HandlerFunc) string {
 }
 
 func TestIndexFileLists(t *testing.T) {
-	index := readDocument(t, "/llms.txt", adhttp.LLMsTxt)
+	discardLog := slog.New(slog.DiscardHandler)
+
+	index := readDocument(t, "/llms.txt", adhttp.LLMsTxt(discardLog))
 	require.True(t, strings.HasPrefix(index, "# "))
 
 	linkPattern := regexp.MustCompile(`^- \[[^\]]+\]\(([^)]+)\)(: .*)?$`)
@@ -61,14 +64,16 @@ func TestIndexFileLists(t *testing.T) {
 }
 
 func TestAgentDocumentsMatchOpenAPIRelease(t *testing.T) {
-	spec := readDocument(t, "/api/openapi.yaml", adhttp.APISpec)
+	discardLog := slog.New(slog.DiscardHandler)
+
+	spec := readDocument(t, "/api/openapi.yaml", adhttp.APISpec(discardLog))
 	versionPattern := regexp.MustCompile(`(?m)^  version: "?([^"\s]+)"?$`)
 	version := versionPattern.FindStringSubmatch(spec)
 	require.Len(t, version, 2)
 	require.Equal(t, buildinfo.Version(), version[1])
 
 	for path, handler := range map[string]http.HandlerFunc{
-		"/llms.txt": adhttp.LLMsTxt, "/api/reference.md": adhttp.APIReference,
+		"/llms.txt": adhttp.LLMsTxt(discardLog), "/api/reference.md": adhttp.APIReference(discardLog),
 	} {
 		document := readDocument(t, path, handler)
 		require.Contains(t, document, "release "+version[1], path)

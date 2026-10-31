@@ -125,7 +125,8 @@ func insertLegacy(t *testing.T, db *bun.DB, resource, slug string) keys.Row {
 	value, err := crypto.New().Encrypt("private content", slug)
 	require.NoError(t, err)
 
-	row := keys.Row{Resource: resource, ID: domain.HashSlug(slug), Value: value,
+	row := keys.Row{
+		Resource: resource, ID: domain.HashSlug(slug), Value: value,
 		Legacy: nil, StoredEditCode: "",
 	}
 	if resource == "note" {
@@ -510,13 +511,14 @@ func testRestartAfterFailure(t *testing.T, db *bun.DB) {
 
 	insertLegacy(t, db, "link", "a-link")
 
-	failing := &interceptStorage{Storage: repo, before: func(ctx context.Context, row keys.Row, index int) error {
-		if index == 2 {
-			return errors.New("simulated interruption")
-		}
+	failing := &interceptStorage{
+		Storage: repo, before: func(_ context.Context, _ keys.Row, index int) error {
+			if index == 2 {
+				return errors.New("simulated interruption")
+			}
 
-		return nil
-	},
+			return nil
+		},
 		count: 0,
 	}
 	report, err := manager(t, failing, ring).Migrate(ctx, false)
@@ -557,18 +559,19 @@ func testConcurrentCAS(t *testing.T, db *bun.DB) {
 	newer, err := cipher.Encrypt("concurrent update", note.ID)
 	require.NoError(t, err)
 
-	store := &interceptStorage{Storage: repo, before: func(ctx context.Context, row keys.Row, index int) error {
-		if row.Resource == "note" {
-			_, err := db.NewUpdate().Table("notes").Set("content = ?", newer).Set("views = views + 1").
-				Where("id = ?", row.ID).Exec(ctx)
+	store := &interceptStorage{
+		Storage: repo, before: func(ctx context.Context, row keys.Row, _ int) error {
+			if row.Resource == "note" {
+				_, err := db.NewUpdate().Table("notes").Set("content = ?", newer).Set("views = views + 1").
+					Where("id = ?", row.ID).Exec(ctx)
+
+				return err
+			}
+
+			_, err := db.NewDelete().Table("links").Where("id = ?", row.ID).Exec(ctx)
 
 			return err
-		}
-
-		_, err := db.NewDelete().Table("links").Where("id = ?", row.ID).Exec(ctx)
-
-		return err
-	},
+		},
 		count: 0,
 	}
 	report, err := manager(t, store, ring).Migrate(ctx, false)
@@ -650,10 +653,14 @@ func testConcurrentInitialize(t *testing.T, db *bun.DB) {
 	reset(t, db)
 	repo := keyrepo.New(db)
 	registries := []*keys.Registry{
-		{InstallationID: "11111111-1111-4111-8111-111111111111", Phase: keys.Pending,
-			Checks: map[string]string{"first": "first-check"}},
-		{InstallationID: "22222222-2222-4222-8222-222222222222", Phase: keys.Ready,
-			Checks: map[string]string{"second": "second-check"}},
+		{
+			InstallationID: "11111111-1111-4111-8111-111111111111", Phase: keys.Pending,
+			Checks: map[string]string{"first": "first-check"},
+		},
+		{
+			InstallationID: "22222222-2222-4222-8222-222222222222", Phase: keys.Ready,
+			Checks: map[string]string{"second": "second-check"},
+		},
 	}
 	results := make([]error, len(registries))
 

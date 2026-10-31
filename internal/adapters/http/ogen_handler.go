@@ -342,7 +342,7 @@ func createOneBulkLink(
 	if err != nil {
 		status, message := errorStatusMessage(err)
 		if status == http.StatusInternalServerError {
-			log.Error("create link failed (bulk)", slog.String("error", err.Error()))
+			log.ErrorContext(ctx, "create link failed (bulk)", slog.String("error", err.Error()))
 		}
 
 		return ogenapi.BulkLinkResult{

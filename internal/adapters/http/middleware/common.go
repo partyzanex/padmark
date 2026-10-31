@@ -89,6 +89,8 @@ func OriginFromCtx(ctx context.Context) RequestOrigin {
 	return origin
 }
 
+// WithRequestID gives each request a new UUID. It sends the ID in the X-Request-ID response
+// header and stores it in the request context for the logs.
 func WithRequestID(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id := uuid.NewString()
@@ -128,6 +130,8 @@ func (sr *statusRecorder) Write(b []byte) (int, error) {
 	return n, nil
 }
 
+// WithLogging writes one log record for each request with its status, duration and resolved user.
+// Requests for /static/ use the debug level.
 func WithLogging(log *slog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
@@ -191,6 +195,7 @@ func logRoute(path string) string {
 	return "note"
 }
 
+// WithBodyLimit limits a request body to maxBytes; a larger body fails when the handler reads it.
 func WithBodyLimit(maxBytes int64, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Body != nil && r.ContentLength != 0 {
@@ -201,6 +206,7 @@ func WithBodyLimit(maxBytes int64, next http.Handler) http.Handler {
 	})
 }
 
+// WithStaticCacheControl lets browsers and proxies cache a static asset for one day.
 func WithStaticCacheControl(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "public, max-age=86400")
@@ -256,6 +262,8 @@ func WithSecurityHeaders(forcedScheme string, trustedProxies []*net.IPNet, next 
 	})
 }
 
+// WithRecovery converts a handler panic into a 500 response and an error log record, so one
+// request cannot stop the server.
 func WithRecovery(log *slog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()

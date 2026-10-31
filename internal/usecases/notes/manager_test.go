@@ -40,7 +40,8 @@ func (identityHasher) Hash(code string) (string, error) { return code, nil }
 // variant the usecase picked for caller-supplied codes (see
 // TestCreate_UserSuppliedCodeUsesMemoryHardHash).
 func (identityHasher) HashUserProvided(code string) (string, error) { return "user:" + code, nil }
-func (identityHasher) Verify(hash, code string) bool                { return hash == code || hash == "user:"+code }
+
+func (identityHasher) Verify(hash, code string) bool { return hash == code || hash == "user:"+code }
 
 // failingEncryptor is a test double whose Decrypt always returns an error.
 type failingEncryptor struct{}
@@ -118,7 +119,8 @@ func TestManagerTestSuite(t *testing.T) {
 // Create
 
 func (s *ManagerTestSuite) TestCreate_OK() {
-	note := &domain.Note{Title: "hello", Content: "world",
+	note := &domain.Note{
+		Title: "hello", Content: "world",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
@@ -141,7 +143,8 @@ func (s *ManagerTestSuite) TestCreate_OK() {
 }
 
 func (s *ManagerTestSuite) TestCreate_WithCustomEditCode() {
-	note := &domain.Note{Title: "hello", Content: "world", EditCode: "MyCustomCode1",
+	note := &domain.Note{
+		Title: "hello", Content: "world", EditCode: "MyCustomCode1",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
 		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
@@ -160,7 +163,8 @@ func (s *ManagerTestSuite) TestCreate_WithCustomEditCode() {
 // hashed with the memory-hard variant (identityHasher.HashUserProvided → "user:" prefix)
 // because its entropy is not guaranteed.
 func (s *ManagerTestSuite) TestCreate_UserSuppliedCodeUsesMemoryHardHash() {
-	note := &domain.Note{Title: "hello", Content: "world", EditCode: "MyCustomCode1",
+	note := &domain.Note{
+		Title: "hello", Content: "world", EditCode: "MyCustomCode1",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
 		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
@@ -185,7 +189,8 @@ func (s *ManagerTestSuite) TestCreate_UserSuppliedCodeUsesMemoryHardHash() {
 // TestCreate_GeneratedCodeUsesFastHash pins the mirror invariant: a server-generated code
 // stays on the fast-hash path (identityHasher.Hash → no prefix).
 func (s *ManagerTestSuite) TestCreate_GeneratedCodeUsesFastHash() {
-	note := &domain.Note{Title: "hello", Content: "world",
+	note := &domain.Note{
+		Title: "hello", Content: "world",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
@@ -210,7 +215,8 @@ func (s *ManagerTestSuite) TestCreate_GeneratedCodeUsesFastHash() {
 }
 
 func (s *ManagerTestSuite) TestCreate_EmptyEditCodeIsGenerated() {
-	note := &domain.Note{Title: "hello", Content: "world", EditCode: "", CreatedAt: time.Time{},
+	note := &domain.Note{
+		Title: "hello", Content: "world", EditCode: "", CreatedAt: time.Time{},
 		UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
 		ID: "", ContentType: nil, Views: 0, BurnTTL: 0,
 		BurnAfterReading: false, ClearExpiry: false,
@@ -229,7 +235,8 @@ func (s *ManagerTestSuite) TestCreate_EmptyEditCodeIsGenerated() {
 func (s *ManagerTestSuite) TestCreate_CustomEditCodeUsedForUpdate() {
 	customCode := "MyCustomCode1"
 
-	note := &domain.Note{Title: "hello", Content: "world", EditCode: customCode,
+	note := &domain.Note{
+		Title: "hello", Content: "world", EditCode: customCode,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
 		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
@@ -264,7 +271,8 @@ func (s *ManagerTestSuite) TestCreate_CustomEditCodeUsedForUpdate() {
 func (s *ManagerTestSuite) TestCreate_CustomEditCodeWrongCodeForbidden() {
 	customCode := "MyCustomCode1"
 
-	note := &domain.Note{Title: "hello", Content: "world", EditCode: customCode,
+	note := &domain.Note{
+		Title: "hello", Content: "world", EditCode: customCode,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
 		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
@@ -293,7 +301,8 @@ func (s *ManagerTestSuite) TestCreate_CustomEditCodeWrongCodeForbidden() {
 }
 
 func (s *ManagerTestSuite) TestCreate_EmptyTitle() {
-	note := &domain.Note{Content: "body",
+	note := &domain.Note{
+		Content:   "body",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", Title: "",
 		ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
@@ -311,7 +320,8 @@ func (s *ManagerTestSuite) TestCreate_EmptyTitle() {
 }
 
 func (s *ManagerTestSuite) TestCreate_TitleTooLong() {
-	note := &domain.Note{Title: strings.Repeat("x", domain.MaxTitleLength+1), Content: "body",
+	note := &domain.Note{
+		Title: strings.Repeat("x", domain.MaxTitleLength+1), Content: "body",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
@@ -324,7 +334,8 @@ func (s *ManagerTestSuite) TestCreate_TitleTooLong() {
 }
 
 func (s *ManagerTestSuite) TestCreate_InvalidContentType() {
-	note := &domain.Note{Title: "hi", ContentType: new(domain.ContentType("application/pdf")),
+	note := &domain.Note{
+		Title: "hi", ContentType: new(domain.ContentType("application/pdf")),
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", Content: "",
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
@@ -341,7 +352,8 @@ func (s *ManagerTestSuite) TestCreate_InvalidContentType() {
 // back by anyone, including its own creator.
 func (s *ManagerTestSuite) TestCreate_OwnerPrivacy_NoOwnerID_Rejected() {
 	priv := domain.PrivacyOwner
-	note := &domain.Note{Title: "hi", Content: "body", Privacy: &priv,
+	note := &domain.Note{
+		Title: "hi", Content: "body", Privacy: &priv,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		OwnerID: nil, ID: "", ContentType: nil, EditCode: "",
 		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
@@ -356,7 +368,8 @@ func (s *ManagerTestSuite) TestCreate_OwnerPrivacy_NoOwnerID_Rejected() {
 // actually has an OwnerID (the HTTP layer sets this from the authenticated caller before Create).
 func (s *ManagerTestSuite) TestCreate_OwnerPrivacy_WithOwnerID_OK() {
 	priv := domain.PrivacyOwner
-	note := &domain.Note{Title: "hi", Content: "body", Privacy: &priv, OwnerID: new(testUserID1),
+	note := &domain.Note{
+		Title: "hi", Content: "body", Privacy: &priv, OwnerID: new(testUserID1),
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		ID: "", ContentType: nil, EditCode: "", Views: 0,
 		BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
@@ -372,7 +385,8 @@ func (s *ManagerTestSuite) TestCreate_OwnerPrivacy_WithOwnerID_OK() {
 }
 
 func (s *ManagerTestSuite) TestCreate_WithBurnTTL() {
-	note := &domain.Note{Title: "hello", Content: "world", BurnAfterReading: true, BurnTTL: 3600,
+	note := &domain.Note{
+		Title: "hello", Content: "world", BurnAfterReading: true, BurnTTL: 3600,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
 		OwnerID: nil, ID: "", ContentType: nil, EditCode: "", Views: 0,
 		ClearExpiry: false,
@@ -390,7 +404,8 @@ func (s *ManagerTestSuite) TestCreate_WithBurnTTL() {
 }
 
 func (s *ManagerTestSuite) TestCreate_WithSlug() {
-	note := &domain.Note{ID: "my-slug", Title: "hello", Content: "world",
+	note := &domain.Note{
+		ID: "my-slug", Title: "hello", Content: "world",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ContentType: nil, EditCode: "",
 		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
@@ -406,7 +421,8 @@ func (s *ManagerTestSuite) TestCreate_WithSlug() {
 }
 
 func (s *ManagerTestSuite) TestCreate_InvalidSlug() {
-	note := &domain.Note{ID: "bad slug!", Title: "hello",
+	note := &domain.Note{
+		ID: "bad slug!", Title: "hello",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, Content: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
@@ -424,7 +440,8 @@ func (s *ManagerTestSuite) TestCreate_CustomSlugDisabled() {
 	mgr := NewManager(s.storage, s.links, noopSlugLock{}, s.renderer, passthroughEncryptor{}, identityHasher{},
 		slog.New(slog.DiscardHandler), false)
 
-	_, err := mgr.Create(s.T().Context(), &domain.Note{ID: "my-slug", Title: "hello", Content: "world",
+	_, err := mgr.Create(s.T().Context(), &domain.Note{
+		ID: "my-slug", Title: "hello", Content: "world",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ContentType: nil, EditCode: "",
 		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
@@ -440,7 +457,8 @@ func (s *ManagerTestSuite) TestCreate_CustomSlugDisabled_AutoSlugStillWorks() {
 	s.expectSlugFree()
 	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
 
-	result, err := mgr.Create(s.T().Context(), &domain.Note{Title: "hello", Content: "world",
+	result, err := mgr.Create(s.T().Context(), &domain.Note{
+		Title: "hello", Content: "world",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
@@ -455,7 +473,8 @@ func (s *ManagerTestSuite) TestCreate_CustomSlugDisabled_AutoSlugStillWorks() {
 
 func (s *ManagerTestSuite) TestCreate_StorageError() {
 	storageErr := errors.New("db error")
-	note := &domain.Note{Title: "hi",
+	note := &domain.Note{
+		Title:     "hi",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", Content: "",
 		ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
@@ -477,7 +496,8 @@ func (s *ManagerTestSuite) TestCreate_StorageError() {
 func (s *ManagerTestSuite) TestCreate_EncryptError_RestoresPlaintext() {
 	mgr := NewManager(s.storage, s.links, noopSlugLock{}, s.renderer, errEncryptor{}, prefixHasher{},
 		slog.New(slog.DiscardHandler), true)
-	note := &domain.Note{Title: "t", Content: "secret body", EditCode: "mycode123456",
+	note := &domain.Note{
+		Title: "t", Content: "secret body", EditCode: "mycode123456",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
 		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
@@ -499,7 +519,8 @@ func (s *ManagerTestSuite) TestCreate_EncryptError_RestoresPlaintext() {
 func (s *ManagerTestSuite) TestCreate_StorageError_RestoresPlaintextAndPersistsEncrypted() {
 	mgr := NewManager(s.storage, s.links, noopSlugLock{}, s.renderer, prefixEncryptor{}, prefixHasher{},
 		slog.New(slog.DiscardHandler), true)
-	note := &domain.Note{Title: "t", Content: "body", EditCode: "code12345678", ID: "myslug",
+	note := &domain.Note{
+		Title: "t", Content: "body", EditCode: "code12345678", ID: "myslug",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ContentType: nil, Views: 0,
 		BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
@@ -540,7 +561,8 @@ func (s *ManagerTestSuite) TestUpdate_PersistsHashedEditCode_NotPlaintext() {
 	mgr := NewManager(s.storage, s.links, noopSlugLock{}, s.renderer, prefixEncryptor{}, prefixHasher{},
 		slog.New(slog.DiscardHandler), true)
 
-	existing := &domain.Note{ID: "myslug", EditCode: "hash:code12345678", Content: "enc:old",
+	existing := &domain.Note{
+		ID: "myslug", EditCode: "hash:code12345678", Content: "enc:old",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, Title: "", ContentType: nil,
 		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
@@ -583,7 +605,8 @@ func (s *ManagerTestSuite) TestUpdate_PersistsHashedEditCode_NotPlaintext() {
 func (s *ManagerTestSuite) TestHandleSetBurnExpiryErr_RefetchDecryptFails() {
 	mgr := NewManager(s.storage, s.links, noopSlugLock{}, s.renderer, failingEncryptor{}, identityHasher{},
 		slog.New(slog.DiscardHandler), true)
-	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("burn-x")).Return(&domain.Note{ID: "x", Content: "ct",
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("burn-x")).Return(&domain.Note{
+		ID: "x", Content: "ct",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, Title: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
@@ -598,7 +621,8 @@ func (s *ManagerTestSuite) TestHandleSetBurnExpiryErr_RefetchDecryptFails() {
 // Get
 
 func (s *ManagerTestSuite) TestGet_OK() {
-	want := &domain.Note{ID: "abc-123", Title: "a",
+	want := &domain.Note{
+		ID: "abc-123", Title: "a",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, Content: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
@@ -613,7 +637,8 @@ func (s *ManagerTestSuite) TestGet_OK() {
 }
 
 func (s *ManagerTestSuite) TestGet_BurnAfterReading() {
-	note := &domain.Note{ID: "abc-123", Title: "a", BurnAfterReading: true,
+	note := &domain.Note{
+		ID: "abc-123", Title: "a", BurnAfterReading: true,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
 		OwnerID: nil, Content: "", ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
 		ClearExpiry: false,
@@ -628,7 +653,8 @@ func (s *ManagerTestSuite) TestGet_BurnAfterReading() {
 }
 
 func (s *ManagerTestSuite) TestGet_BurnAfterReading_WithTTL() {
-	note := &domain.Note{ID: "abc-123", Title: "a", BurnAfterReading: true, BurnTTL: 3600,
+	note := &domain.Note{
+		ID: "abc-123", Title: "a", BurnAfterReading: true, BurnTTL: 3600,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
 		OwnerID: nil, Content: "", ContentType: nil, EditCode: "", Views: 0,
 		ClearExpiry: false,
@@ -644,7 +670,8 @@ func (s *ManagerTestSuite) TestGet_BurnAfterReading_WithTTL() {
 
 func (s *ManagerTestSuite) TestGet_Expired() {
 	past := time.Now().Add(-time.Minute)
-	note := &domain.Note{ID: "abc-123", Title: "a", ExpiresAt: &past,
+	note := &domain.Note{
+		ID: "abc-123", Title: "a", ExpiresAt: &past,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, Privacy: nil,
 		OwnerID: nil, Content: "", ContentType: nil, EditCode: "",
 		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
@@ -668,7 +695,8 @@ func (s *ManagerTestSuite) TestGet_NotFound() {
 // View
 
 func (s *ManagerTestSuite) TestView_OK() {
-	want := &domain.Note{ID: "abc-123", Title: "a", Views: 5,
+	want := &domain.Note{
+		ID: "abc-123", Title: "a", Views: 5,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, Content: "", ContentType: nil,
 		EditCode: "", BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
@@ -684,7 +712,8 @@ func (s *ManagerTestSuite) TestView_OK() {
 }
 
 func (s *ManagerTestSuite) TestView_BurnAfterReading() {
-	want := &domain.Note{ID: "abc-123", Title: "a", BurnAfterReading: true,
+	want := &domain.Note{
+		ID: "abc-123", Title: "a", BurnAfterReading: true,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
 		OwnerID: nil, Content: "", ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
 		ClearExpiry: false,
@@ -701,13 +730,15 @@ func (s *ManagerTestSuite) TestView_BurnAfterReading() {
 
 func (s *ManagerTestSuite) TestView_BurnAfterReading_WithTTL() {
 	future := time.Now().Add(30 * time.Minute)
-	stored := &domain.Note{ID: "abc-123", Title: "a", BurnAfterReading: true, BurnTTL: 1800,
+	stored := &domain.Note{
+		ID: "abc-123", Title: "a", BurnAfterReading: true, BurnTTL: 1800,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
 		OwnerID: nil, Content: "", ContentType: nil, EditCode: "", Views: 0,
 		ClearExpiry: false,
 	}
 	// Real storage flips burn_after_reading=false and sets expires_at on the timer-start read.
-	afterBurn := &domain.Note{ID: "abc-123", Title: "a", BurnAfterReading: false, BurnTTL: 1800, ExpiresAt: &future,
+	afterBurn := &domain.Note{
+		ID: "abc-123", Title: "a", BurnAfterReading: false, BurnTTL: 1800, ExpiresAt: &future,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, Privacy: nil, OwnerID: nil,
 		Content: "", ContentType: nil, EditCode: "", Views: 0, ClearExpiry: false,
 	}
@@ -746,7 +777,8 @@ func (s *ManagerTestSuite) TestUpdate_OK() {
 		Content: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
 		ClearExpiry: false,
 	}
-	note := &domain.Note{Title: "updated", Content: "body",
+	note := &domain.Note{
+		Title: "updated", Content: "body",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
@@ -787,7 +819,8 @@ func (s *ManagerTestSuite) TestUpdate_ResponseReportsPersistedPrivacyAndViews() 
 	}
 
 	// Caller omits privacy; it must be inherited, not defaulted to public.
-	note := &domain.Note{Title: "updated", Content: "body",
+	note := &domain.Note{
+		Title: "updated", Content: "body",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
@@ -805,7 +838,8 @@ func (s *ManagerTestSuite) TestUpdate_ResponseReportsPersistedPrivacyAndViews() 
 
 	// Explicit privacy still wins over the stored value.
 	newPrivacy := domain.PrivacyAuthenticated
-	explicit := &domain.Note{Title: "updated", Privacy: &newPrivacy,
+	explicit := &domain.Note{
+		Title: "updated", Privacy: &newPrivacy,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		OwnerID: nil, ID: "", Content: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
@@ -848,7 +882,8 @@ func (s *ManagerTestSuite) TestUpdate_EmptyTitle() {
 }
 
 func (s *ManagerTestSuite) TestUpdate_NotFound() {
-	note := &domain.Note{Title: "updated",
+	note := &domain.Note{
+		Title:     "updated",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", Content: "",
 		ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
@@ -872,7 +907,8 @@ func (s *ManagerTestSuite) TestUpdate_Forbidden() {
 		Privacy: nil, OwnerID: nil, Content: "", ContentType: nil,
 		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
 	}
-	note := &domain.Note{Title: "updated",
+	note := &domain.Note{
+		Title:     "updated",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", Content: "",
 		ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
@@ -899,7 +935,8 @@ func (s *ManagerTestSuite) TestUpdate_OwnerBypassesEditCode() {
 		Privacy: nil, Content: "", ContentType: nil, Views: 0,
 		BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
 	}
-	note := &domain.Note{Title: "updated", Content: "body",
+	note := &domain.Note{
+		Title: "updated", Content: "body",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
@@ -928,7 +965,8 @@ func (s *ManagerTestSuite) TestUpdate_NonOwnerCallerStillNeedsEditCode() {
 		Privacy: nil, Content: "", ContentType: nil, Views: 0,
 		BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
 	}
-	note := &domain.Note{Title: "hijacked",
+	note := &domain.Note{
+		Title:     "hijacked",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", Content: "",
 		ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
@@ -954,7 +992,8 @@ func (s *ManagerTestSuite) TestUpdate_AnonymousNoteAlwaysNeedsEditCode() {
 		Privacy: nil, OwnerID: nil, Content: "", ContentType: nil,
 		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
 	}
-	note := &domain.Note{Title: "hijacked",
+	note := &domain.Note{
+		Title:     "hijacked",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", Content: "",
 		ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
@@ -971,7 +1010,8 @@ func (s *ManagerTestSuite) TestUpdate_AnonymousNoteAlwaysNeedsEditCode() {
 // Delete
 
 func (s *ManagerTestSuite) TestDelete_OK() {
-	existing := &domain.Note{ID: "abc-123", EditCode: "secret123456",
+	existing := &domain.Note{
+		ID: "abc-123", EditCode: "secret123456",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, Title: "", Content: "",
 		ContentType: nil, Views: 0, BurnTTL: 0, BurnAfterReading: false,
@@ -994,7 +1034,8 @@ func (s *ManagerTestSuite) TestDelete_NotFound() {
 }
 
 func (s *ManagerTestSuite) TestDelete_Forbidden() {
-	existing := &domain.Note{ID: "abc-123", EditCode: "secret123456",
+	existing := &domain.Note{
+		ID: "abc-123", EditCode: "secret123456",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, Title: "", Content: "",
 		ContentType: nil, Views: 0, BurnTTL: 0, BurnAfterReading: false,
@@ -1009,7 +1050,8 @@ func (s *ManagerTestSuite) TestDelete_Forbidden() {
 
 // TestDelete_OwnerBypassesEditCode mirrors TestUpdate_OwnerBypassesEditCode for Delete.
 func (s *ManagerTestSuite) TestDelete_OwnerBypassesEditCode() {
-	existing := &domain.Note{ID: "abc-123", EditCode: "secret123456", OwnerID: new(testUserID1),
+	existing := &domain.Note{
+		ID: "abc-123", EditCode: "secret123456", OwnerID: new(testUserID1),
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, Title: "", Content: "", ContentType: nil,
 		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
@@ -1025,7 +1067,8 @@ func (s *ManagerTestSuite) TestDelete_OwnerBypassesEditCode() {
 // TestDelete_NonOwnerCallerStillNeedsEditCode mirrors TestUpdate_NonOwnerCallerStillNeedsEditCode
 // for Delete.
 func (s *ManagerTestSuite) TestDelete_NonOwnerCallerStillNeedsEditCode() {
-	existing := &domain.Note{ID: "abc-123", EditCode: "secret123456", OwnerID: new(testUserID1),
+	existing := &domain.Note{
+		ID: "abc-123", EditCode: "secret123456", OwnerID: new(testUserID1),
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, Title: "", Content: "", ContentType: nil,
 		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
@@ -1040,7 +1083,8 @@ func (s *ManagerTestSuite) TestDelete_NonOwnerCallerStillNeedsEditCode() {
 // GetRendered
 
 func (s *ManagerTestSuite) TestGetRendered_OK() {
-	note := &domain.Note{ID: "abc-123", Content: "# Hello",
+	note := &domain.Note{
+		ID: "abc-123", Content: "# Hello",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, Title: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
@@ -1060,7 +1104,8 @@ func (s *ManagerTestSuite) TestGetRendered_OK() {
 // ── content size cap ──
 
 func (s *ManagerTestSuite) TestCreate_ContentOverCap_Rejected() {
-	note := &domain.Note{Content: strings.Repeat("a", domain.MaxContentLength+1),
+	note := &domain.Note{
+		Content:   strings.Repeat("a", domain.MaxContentLength+1),
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", Title: "",
 		ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
@@ -1076,7 +1121,8 @@ func (s *ManagerTestSuite) TestCreate_ContentAtCap_Accepted() {
 	s.expectSlugFree()
 	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
 
-	note := &domain.Note{Content: strings.Repeat("a", domain.MaxContentLength),
+	note := &domain.Note{
+		Content:   strings.Repeat("a", domain.MaxContentLength),
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", Title: "",
 		ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
@@ -1089,7 +1135,8 @@ func (s *ManagerTestSuite) TestCreate_ContentAtCap_Accepted() {
 }
 
 func (s *ManagerTestSuite) TestUpdate_ContentOverCap_Rejected() {
-	note := &domain.Note{Content: strings.Repeat("é", domain.MaxContentLength+1),
+	note := &domain.Note{
+		Content:   strings.Repeat("é", domain.MaxContentLength+1),
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", Title: "",
 		ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
@@ -1138,7 +1185,8 @@ func (s *ManagerTestSuite) TestGetRendered_UnchangedNoteIsRenderedOnce() {
 
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).
 		DoAndReturn(func(context.Context, string) (*domain.Note, error) {
-			return &domain.Note{ID: "abc-123", Content: "# Hello", UpdatedAt: stamp,
+			return &domain.Note{
+				ID: "abc-123", Content: "# Hello", UpdatedAt: stamp,
 				CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
 				Title: "", ContentType: nil, EditCode: "", Views: 0,
 				BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
@@ -1160,7 +1208,8 @@ func (s *ManagerTestSuite) TestGetRendered_ReRendersAfterUpdate() {
 	s.manager.WithRenderCache(s.statefulRenderCache())
 
 	stamp := time.Now().Add(-time.Hour)
-	current := &domain.Note{ID: "abc-123", Content: "old", UpdatedAt: stamp, EditCode: "secret123456",
+	current := &domain.Note{
+		ID: "abc-123", Content: "old", UpdatedAt: stamp, EditCode: "secret123456",
 		CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
 		Title: "", ContentType: nil, Views: 0, BurnTTL: 0,
 		BurnAfterReading: false, ClearExpiry: false,
@@ -1174,10 +1223,11 @@ func (s *ManagerTestSuite) TestGetRendered_ReRendersAfterUpdate() {
 		}).AnyTimes()
 	s.storage.EXPECT().IncrementViews(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 	s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("abc-123"), gomock.Any()).
-		DoAndReturn(func(_ context.Context, _ string, note *domain.Note) error {
+		DoAndReturn(func(_ context.Context, _ string, _ *domain.Note) error {
 			// Stored state after the update; keep the old UpdatedAt to prove the explicit
 			// invalidation (not just the changed key) drops the entry.
-			current = &domain.Note{ID: "abc-123", Content: "new", UpdatedAt: stamp, EditCode: "secret123456",
+			current = &domain.Note{
+				ID: "abc-123", Content: "new", UpdatedAt: stamp, EditCode: "secret123456",
 				CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
 				Title: "", ContentType: nil, Views: 0, BurnTTL: 0,
 				BurnAfterReading: false, ClearExpiry: false,
@@ -1192,7 +1242,8 @@ func (s *ManagerTestSuite) TestGetRendered_ReRendersAfterUpdate() {
 	s.Require().NoError(err)
 	s.Equal("<p>old</p>", html)
 
-	_, err = s.manager.Update(s.T().Context(), "abc-123", "secret123456", uuid.Nil, &domain.Note{Content: "new",
+	_, err = s.manager.Update(s.T().Context(), "abc-123", "secret123456", uuid.Nil, &domain.Note{
+		Content:   "new",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", Title: "",
 		ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
@@ -1210,12 +1261,14 @@ func (s *ManagerTestSuite) TestGetRendered_ReRendersAfterUpdate() {
 func (s *ManagerTestSuite) TestGetRendered_ReRendersWhenUpdatedAtChanges() {
 	s.manager.WithRenderCache(s.statefulRenderCache())
 
-	first := &domain.Note{ID: "abc-123", Content: "v1", UpdatedAt: time.Now().Add(-time.Hour),
+	first := &domain.Note{
+		ID: "abc-123", Content: "v1", UpdatedAt: time.Now().Add(-time.Hour),
 		CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
 		Title: "", ContentType: nil, EditCode: "", Views: 0,
 		BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
 	}
-	second := &domain.Note{ID: "abc-123", Content: "v2", UpdatedAt: time.Now(),
+	second := &domain.Note{
+		ID: "abc-123", Content: "v2", UpdatedAt: time.Now(),
 		CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
 		Title: "", ContentType: nil, EditCode: "", Views: 0,
 		BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
@@ -1246,7 +1299,8 @@ func (s *ManagerTestSuite) TestGetRendered_BurnNotesAreNeverCached() {
 	cache.EXPECT().Set(gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
 	s.manager.WithRenderCache(cache)
 
-	note := &domain.Note{ID: "abc-123", Content: "# Hello", BurnAfterReading: true,
+	note := &domain.Note{
+		ID: "abc-123", Content: "# Hello", BurnAfterReading: true,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
 		OwnerID: nil, Title: "", ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
 		ClearExpiry: false,
@@ -1265,7 +1319,8 @@ func (s *ManagerTestSuite) TestDelete_DropsCachedRender() {
 	cache := NewMockRenderCache(s.ctrl)
 	s.manager.WithRenderCache(cache)
 
-	existing := &domain.Note{ID: "abc-123", EditCode: "secret123456",
+	existing := &domain.Note{
+		ID: "abc-123", EditCode: "secret123456",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, Title: "", Content: "",
 		ContentType: nil, Views: 0, BurnTTL: 0, BurnAfterReading: false,
@@ -1279,7 +1334,8 @@ func (s *ManagerTestSuite) TestDelete_DropsCachedRender() {
 }
 
 func (s *ManagerTestSuite) TestGetRendered_BurnAfterReading() {
-	note := &domain.Note{ID: "abc-123", Content: "# Hello", BurnAfterReading: true,
+	note := &domain.Note{
+		ID: "abc-123", Content: "# Hello", BurnAfterReading: true,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
 		OwnerID: nil, Title: "", ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
 		ClearExpiry: false,
@@ -1297,7 +1353,8 @@ func (s *ManagerTestSuite) TestGetRendered_BurnAfterReading() {
 
 func (s *ManagerTestSuite) TestGetRendered_Expired() {
 	past := time.Now().Add(-time.Minute)
-	note := &domain.Note{ID: "abc-123", Content: "# Hello", ExpiresAt: &past,
+	note := &domain.Note{
+		ID: "abc-123", Content: "# Hello", ExpiresAt: &past,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, Privacy: nil,
 		OwnerID: nil, Title: "", ContentType: nil, EditCode: "",
 		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
@@ -1320,7 +1377,8 @@ func (s *ManagerTestSuite) TestGetRendered_StorageError() {
 
 func (s *ManagerTestSuite) TestGetRendered_RenderError() {
 	renderErr := errors.New("render failed")
-	note := &domain.Note{ID: "abc-123", Content: "bad",
+	note := &domain.Note{
+		ID: "abc-123", Content: "bad",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, Title: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
@@ -1340,7 +1398,8 @@ func (s *ManagerTestSuite) TestGetRendered_RenderError() {
 
 func (s *ManagerTestSuite) TestGetRendered_PlainText_UsesRenderPlain() {
 	plain := domain.ContentTypePlain
-	note := &domain.Note{ID: "abc-123", Content: "<script>", ContentType: &plain,
+	note := &domain.Note{
+		ID: "abc-123", Content: "<script>", ContentType: &plain,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, Title: "", EditCode: "",
 		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
@@ -1359,7 +1418,8 @@ func (s *ManagerTestSuite) TestGetRendered_PlainText_UsesRenderPlain() {
 func (s *ManagerTestSuite) TestGetRendered_PlainText_RenderPlainError() {
 	renderErr := errors.New("render failed")
 	plain := domain.ContentTypePlain
-	note := &domain.Note{ID: "abc-123", Content: "text", ContentType: &plain,
+	note := &domain.Note{
+		ID: "abc-123", Content: "text", ContentType: &plain,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, Title: "", EditCode: "",
 		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
@@ -1378,7 +1438,8 @@ func (s *ManagerTestSuite) TestGetRendered_PlainText_RenderPlainError() {
 // Peek
 
 func (s *ManagerTestSuite) TestPeek_OK() {
-	note := &domain.Note{ID: "peek-id", Title: "t", Content: "c",
+	note := &domain.Note{
+		ID: "peek-id", Title: "t", Content: "c",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ContentType: nil, EditCode: "",
 		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
@@ -1407,7 +1468,8 @@ func (s *ManagerTestSuite) TestPeek_NotFound() {
 // For a plain TTL note (BurnAfterReading=false), multiple views must succeed.
 func (s *ManagerTestSuite) TestView_WithTTL_SecondViewSucceeds() {
 	future := time.Now().Add(time.Hour)
-	note := &domain.Note{ID: "ttl-note", Title: "t", Views: 0, ExpiresAt: &future,
+	note := &domain.Note{
+		ID: "ttl-note", Title: "t", Views: 0, ExpiresAt: &future,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, Privacy: nil,
 		OwnerID: nil, Content: "", ContentType: nil, EditCode: "",
 		BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
@@ -1422,7 +1484,8 @@ func (s *ManagerTestSuite) TestView_WithTTL_SecondViewSucceeds() {
 	s.Equal(1, result.Views)
 
 	// Second view — must NOT return ErrNotFound
-	note2 := &domain.Note{ID: "ttl-note", Title: "t", Views: 1, ExpiresAt: &future,
+	note2 := &domain.Note{
+		ID: "ttl-note", Title: "t", Views: 1, ExpiresAt: &future,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, Privacy: nil,
 		OwnerID: nil, Content: "", ContentType: nil, EditCode: "",
 		BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
@@ -1438,7 +1501,8 @@ func (s *ManagerTestSuite) TestView_WithTTL_SecondViewSucceeds() {
 // TestView_BurnAfterReading_NoIncrementViews verifies that burn-after-reading notes
 // are consumed (deleted) and IncrementViews is NOT called on the already-deleted note.
 func (s *ManagerTestSuite) TestView_BurnAfterReading_NoIncrementViews() {
-	note := &domain.Note{ID: "burn-note", Title: "t", BurnAfterReading: true,
+	note := &domain.Note{
+		ID: "burn-note", Title: "t", BurnAfterReading: true,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
 		OwnerID: nil, Content: "", ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
 		ClearExpiry: false,
@@ -1460,13 +1524,15 @@ func (s *ManagerTestSuite) TestView_BurnAfterReading_NoIncrementViews() {
 func (s *ManagerTestSuite) TestView_BurnAfterReading_WithBurnTTL_CountsViews() {
 	future := time.Now().Add(time.Hour)
 	// Real storage flips burn_after_reading=false and sets expires_at.
-	noteAfterBurn := &domain.Note{ID: "burn-ttl", Title: "t", BurnAfterReading: false, BurnTTL: 3600, ExpiresAt: &future,
+	noteAfterBurn := &domain.Note{
+		ID: "burn-ttl", Title: "t", BurnAfterReading: false, BurnTTL: 3600, ExpiresAt: &future,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, Privacy: nil, OwnerID: nil,
 		Content: "", ContentType: nil, EditCode: "", Views: 0, ClearExpiry: false,
 	}
 
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("burn-ttl")).
-		Return(&domain.Note{ID: "burn-ttl", Title: "t", BurnAfterReading: true, BurnTTL: 3600,
+		Return(&domain.Note{
+			ID: "burn-ttl", Title: "t", BurnAfterReading: true, BurnTTL: 3600,
 			CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
 			OwnerID: nil, Content: "", ContentType: nil, EditCode: "", Views: 0,
 			ClearExpiry: false,
@@ -1494,7 +1560,8 @@ func (s *ManagerTestSuite) TestView_BurnAfterReading_WithBurnTTL_CountsViews() {
 // Request B's note still exists — its burn timer was started by A. manager.Get must return
 // the note successfully; propagating ErrNotFound here is incorrect.
 func (s *ManagerTestSuite) TestGet_BurnTTL_Race_SetBurnExpiryNotFound() {
-	note := &domain.Note{ID: "burn-ttl-race", Title: "t", BurnAfterReading: true, BurnTTL: 3600,
+	note := &domain.Note{
+		ID: "burn-ttl-race", Title: "t", BurnAfterReading: true, BurnTTL: 3600,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
 		OwnerID: nil, Content: "", ContentType: nil, EditCode: "", Views: 0,
 		ClearExpiry: false,
@@ -1531,7 +1598,8 @@ func (s *ManagerTestSuite) TestGet_BurnTTL_Race_SetBurnExpiryNotFound() {
 // ViewPreloaded
 
 func (s *ManagerTestSuite) TestViewPreloaded_OK() {
-	note := &domain.Note{ID: "pre-1", Title: "a", Views: 2,
+	note := &domain.Note{
+		ID: "pre-1", Title: "a", Views: 2,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, Content: "", ContentType: nil,
 		EditCode: "", BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
@@ -1547,7 +1615,8 @@ func (s *ManagerTestSuite) TestViewPreloaded_OK() {
 }
 
 func (s *ManagerTestSuite) TestViewPreloaded_BurnAfterReading() {
-	note := &domain.Note{ID: "pre-2", BurnAfterReading: true,
+	note := &domain.Note{
+		ID: "pre-2", BurnAfterReading: true,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
 		OwnerID: nil, Title: "", Content: "", ContentType: nil, EditCode: "",
 		Views: 0, BurnTTL: 0, ClearExpiry: false,
@@ -1563,7 +1632,8 @@ func (s *ManagerTestSuite) TestViewPreloaded_BurnAfterReading() {
 
 func (s *ManagerTestSuite) TestViewPreloaded_Expired() {
 	past := time.Now().Add(-time.Minute)
-	note := &domain.Note{ID: "pre-3", ExpiresAt: &past,
+	note := &domain.Note{
+		ID: "pre-3", ExpiresAt: &past,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, Privacy: nil,
 		OwnerID: nil, Title: "", Content: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
@@ -1581,7 +1651,8 @@ func (s *ManagerTestSuite) TestViewPreloaded_Expired() {
 
 func (s *ManagerTestSuite) TestEnforceExpiry_ExpiredNoteIsDeleted() {
 	past := time.Now().Add(-time.Minute)
-	note := &domain.Note{ID: "ee-1", ExpiresAt: &past, BurnAfterReading: true,
+	note := &domain.Note{
+		ID: "ee-1", ExpiresAt: &past, BurnAfterReading: true,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, Privacy: nil, OwnerID: nil,
 		Title: "", Content: "", ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
 		ClearExpiry: false,
@@ -1598,17 +1669,20 @@ func (s *ManagerTestSuite) TestEnforceExpiry_LiveBurnNoteIsNotConsumed() {
 	future := time.Now().Add(time.Hour)
 
 	for _, note := range []*domain.Note{
-		{ID: "ee-2", BurnAfterReading: true,
+		{
+			ID: "ee-2", BurnAfterReading: true,
 			CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
 			OwnerID: nil, Title: "", Content: "", ContentType: nil, EditCode: "",
 			Views: 0, BurnTTL: 0, ClearExpiry: false,
 		},
-		{ID: "ee-3", BurnAfterReading: true, BurnTTL: 60,
+		{
+			ID: "ee-3", BurnAfterReading: true, BurnTTL: 60,
 			CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
 			OwnerID: nil, Title: "", Content: "", ContentType: nil, EditCode: "",
 			Views: 0, ClearExpiry: false,
 		},
-		{ID: "ee-4", ExpiresAt: &future,
+		{
+			ID: "ee-4", ExpiresAt: &future,
 			CreatedAt: time.Time{}, UpdatedAt: time.Time{}, Privacy: nil,
 			OwnerID: nil, Title: "", Content: "", ContentType: nil,
 			EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
@@ -1625,7 +1699,8 @@ func (s *ManagerTestSuite) TestEnforceExpiry_LiveBurnNoteIsNotConsumed() {
 // GetRenderedPreloaded
 
 func (s *ManagerTestSuite) TestGetRenderedPreloaded_OK() {
-	note := &domain.Note{ID: "rp-1", Content: "# Hello",
+	note := &domain.Note{
+		ID: "rp-1", Content: "# Hello",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, Title: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
@@ -1644,7 +1719,8 @@ func (s *ManagerTestSuite) TestGetRenderedPreloaded_OK() {
 
 func (s *ManagerTestSuite) TestGetRenderedPreloaded_Expired() {
 	past := time.Now().Add(-time.Minute)
-	note := &domain.Note{ID: "rp-2", ExpiresAt: &past, Content: "x",
+	note := &domain.Note{
+		ID: "rp-2", ExpiresAt: &past, Content: "x",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, Privacy: nil,
 		OwnerID: nil, Title: "", ContentType: nil, EditCode: "",
 		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
@@ -1664,7 +1740,8 @@ func (s *ManagerTestSuite) TestGetRenderedPreloaded_Expired() {
 // they must not trigger deletion or policy enforcement.
 func (s *ManagerTestSuite) TestPeek_ReturnsExpiredNote() {
 	past := time.Now().Add(-time.Minute)
-	note := &domain.Note{ID: "expired-peek", Title: "t", ExpiresAt: &past,
+	note := &domain.Note{
+		ID: "expired-peek", Title: "t", ExpiresAt: &past,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, Privacy: nil,
 		OwnerID: nil, Content: "", ContentType: nil, EditCode: "",
 		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
@@ -1693,7 +1770,8 @@ func (s *ManagerTestSuite) TestUpdate_PrivateNote_CorrectCode() {
 		OwnerID: nil, Content: "", ContentType: nil, Views: 0,
 		BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
 	}
-	note := &domain.Note{Title: "updated secret",
+	note := &domain.Note{
+		Title:     "updated secret",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", Content: "",
 		ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
@@ -1723,7 +1801,8 @@ func (s *ManagerTestSuite) TestUpdate_OwnerPrivacy_AnonymousExistingNote_Rejecte
 		Privacy: nil, OwnerID: nil, Content: "", ContentType: nil,
 		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
 	}
-	note := &domain.Note{Title: "updated", Privacy: &priv,
+	note := &domain.Note{
+		Title: "updated", Privacy: &priv,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		OwnerID: nil, ID: "", Content: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
@@ -1751,7 +1830,8 @@ func (s *ManagerTestSuite) TestUpdate_OwnerPrivacy_AlreadyOwnedNote_OK() {
 		Privacy: nil, Content: "", ContentType: nil, Views: 0,
 		BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
 	}
-	note := &domain.Note{Title: "updated", Privacy: &priv,
+	note := &domain.Note{
+		Title: "updated", Privacy: &priv,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		OwnerID: nil, ID: "", Content: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
@@ -1779,7 +1859,8 @@ func (s *ManagerTestSuite) TestUpdate_PrivateNote_WrongCode() {
 		OwnerID: nil, Content: "", ContentType: nil, Views: 0,
 		BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
 	}
-	note := &domain.Note{Title: "hijacked",
+	note := &domain.Note{
+		Title:     "hijacked",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", Content: "",
 		ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
@@ -1797,7 +1878,8 @@ func (s *ManagerTestSuite) TestUpdate_PrivateNote_WrongCode() {
 
 func (s *ManagerTestSuite) TestGet_BurnAfterReading_ConsumeError() {
 	consumeErr := errors.New("storage unavailable")
-	note := &domain.Note{ID: "burn-err", Title: "t", BurnAfterReading: true,
+	note := &domain.Note{
+		ID: "burn-err", Title: "t", BurnAfterReading: true,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
 		OwnerID: nil, Content: "", ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
 		ClearExpiry: false,
@@ -1813,7 +1895,8 @@ func (s *ManagerTestSuite) TestGet_BurnAfterReading_ConsumeError() {
 
 func (s *ManagerTestSuite) TestView_BurnAfterReading_ConsumeError() {
 	consumeErr := errors.New("storage unavailable")
-	note := &domain.Note{ID: "burn-err-view", Title: "t", BurnAfterReading: true,
+	note := &domain.Note{
+		ID: "burn-err-view", Title: "t", BurnAfterReading: true,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
 		OwnerID: nil, Content: "", ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
 		ClearExpiry: false,
@@ -1837,7 +1920,8 @@ func TestGet_DecryptionFailure(t *testing.T) {
 	mgr := NewManager(storage, links, noopSlugLock{}, renderer, failingEncryptor{}, identityHasher{},
 		slog.New(slog.DiscardHandler), true)
 
-	note := &domain.Note{ID: "enc-fail", Title: "t", Content: "ciphertext",
+	note := &domain.Note{
+		ID: "enc-fail", Title: "t", Content: "ciphertext",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ContentType: nil, EditCode: "",
 		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
@@ -1857,7 +1941,8 @@ func TestPeek_DecryptionFailure(t *testing.T) {
 	mgr := NewManager(storage, links, noopSlugLock{}, renderer, failingEncryptor{}, identityHasher{},
 		slog.New(slog.DiscardHandler), true)
 
-	note := &domain.Note{ID: "enc-fail-peek", Title: "t", Content: "ciphertext",
+	note := &domain.Note{
+		ID: "enc-fail-peek", Title: "t", Content: "ciphertext",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ContentType: nil, EditCode: "",
 		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
@@ -1880,7 +1965,8 @@ func TestGet_BurnAfterReading_DecryptionFailure(t *testing.T) {
 		slog.New(slog.DiscardHandler), true)
 
 	// decryptContent runs before burn.applyPolicy, so Consume is never reached.
-	raw := &domain.Note{ID: "burn-enc-fail", Title: "t", BurnAfterReading: true, Content: "ciphertext",
+	raw := &domain.Note{
+		ID: "burn-enc-fail", Title: "t", BurnAfterReading: true, Content: "ciphertext",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
 		OwnerID: nil, ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
 		ClearExpiry: false,
@@ -1903,7 +1989,8 @@ func TestGet_BurnTTL_DecryptionFailure(t *testing.T) {
 		slog.New(slog.DiscardHandler), true)
 
 	// decryptContent runs before burn.applyPolicy, so SetBurnExpiry is never reached.
-	raw := &domain.Note{ID: "burn-ttl-enc-fail", Title: "t", BurnAfterReading: true, BurnTTL: 3600, Content: "ciphertext",
+	raw := &domain.Note{
+		ID: "burn-ttl-enc-fail", Title: "t", BurnAfterReading: true, BurnTTL: 3600, Content: "ciphertext",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
 		OwnerID: nil, ContentType: nil, EditCode: "", Views: 0, ClearExpiry: false,
 	}
@@ -1921,19 +2008,22 @@ func (s *ManagerTestSuite) TestUpdateExplicitExpiry() {
 		update *domain.Note
 		want   *time.Time
 	}{
-		{"preserve", &domain.Note{Content: "body",
+		{"preserve", &domain.Note{
+			Content:   "body",
 			CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 			Privacy: nil, OwnerID: nil, ID: "", Title: "",
 			ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
 			BurnAfterReading: false, ClearExpiry: false,
 		}, &future},
-		{"clear", &domain.Note{Content: "body", ClearExpiry: true,
+		{"clear", &domain.Note{
+			Content: "body", ClearExpiry: true,
 			CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 			Privacy: nil, OwnerID: nil, ID: "", Title: "",
 			ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
 			BurnAfterReading: false,
 		}, nil},
-		{"replace", &domain.Note{Content: "body", ExpiresAt: &future,
+		{"replace", &domain.Note{
+			Content: "body", ExpiresAt: &future,
 			CreatedAt: time.Time{}, UpdatedAt: time.Time{}, Privacy: nil,
 			OwnerID: nil, ID: "", Title: "", ContentType: nil,
 			EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
@@ -1941,7 +2031,8 @@ func (s *ManagerTestSuite) TestUpdateExplicitExpiry() {
 		}, &future},
 	} {
 		s.Run(testCase.name, func() {
-			existing := &domain.Note{ID: domain.HashSlug("slug"), EditCode: "code", ExpiresAt: &future,
+			existing := &domain.Note{
+				ID: domain.HashSlug("slug"), EditCode: "code", ExpiresAt: &future,
 				CreatedAt: time.Time{}, UpdatedAt: time.Time{}, Privacy: nil,
 				OwnerID: nil, Title: "", Content: "", ContentType: nil,
 				Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
@@ -1971,13 +2062,15 @@ func (s *ManagerTestSuite) TestUpdateBurnImmediateExpiry() {
 		existing *domain.Note
 		want     *time.Time
 	}{
-		{"hard expiry kept", &domain.Note{EditCode: "code", ExpiresAt: &future,
+		{"hard expiry kept", &domain.Note{
+			EditCode: "code", ExpiresAt: &future,
 			CreatedAt: time.Time{}, UpdatedAt: time.Time{}, Privacy: nil,
 			OwnerID: nil, ID: "", Title: "", Content: "",
 			ContentType: nil, Views: 0, BurnTTL: 0, BurnAfterReading: false,
 			ClearExpiry: false,
 		}, &future},
-		{"no expiry stays none", &domain.Note{EditCode: "code",
+		{"no expiry stays none", &domain.Note{
+			EditCode:  "code",
 			CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 			Privacy: nil, OwnerID: nil, ID: "", Title: "",
 			Content: "", ContentType: nil, Views: 0, BurnTTL: 0,
@@ -1985,7 +2078,8 @@ func (s *ManagerTestSuite) TestUpdateBurnImmediateExpiry() {
 		}, nil},
 		{
 			"stale burn timer dropped",
-			&domain.Note{EditCode: "code", BurnAfterReading: true, BurnTTL: 600, ExpiresAt: &future,
+			&domain.Note{
+				EditCode: "code", BurnAfterReading: true, BurnTTL: 600, ExpiresAt: &future,
 				CreatedAt: time.Time{}, UpdatedAt: time.Time{}, Privacy: nil, OwnerID: nil,
 				ID: "", Title: "", Content: "", ContentType: nil, Views: 0,
 				ClearExpiry: false,
@@ -2002,7 +2096,8 @@ func (s *ManagerTestSuite) TestUpdateBurnImmediateExpiry() {
 					return nil
 				})
 
-			update := &domain.Note{Content: "body", BurnAfterReading: true,
+			update := &domain.Note{
+				Content: "body", BurnAfterReading: true,
 				CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
 				OwnerID: nil, ID: "", Title: "", ContentType: nil, EditCode: "",
 				Views: 0, BurnTTL: 0, ClearExpiry: false,
@@ -2016,10 +2111,12 @@ func (s *ManagerTestSuite) TestUpdateBurnImmediateExpiry() {
 func (s *ManagerTestSuite) TestDecryptionFailureLogsOnlyHashedSlug() {
 	var buf bytes.Buffer
 
-	log := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug,
+	log := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{
+		Level:     slog.LevelDebug,
 		AddSource: false, ReplaceAttr: nil,
 	}))
-	note := &domain.Note{ID: "secret-slug", Content: "invalid",
+	note := &domain.Note{
+		ID: "secret-slug", Content: "invalid",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, Title: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,

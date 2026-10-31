@@ -56,6 +56,8 @@ func (s *HandlerSuite) TestAPIDocs_ScriptsAreSameOrigin() {
 // redocBundleVersion returns the cache-busting token for the served Redoc bundle: the first 12
 // hex chars of its sha256, the same scheme as style.css?p=.
 func (s *HandlerSuite) redocBundleVersion() string {
+	s.T().Helper()
+
 	rec := s.serve(redocBundlePath)
 	s.Require().Equal(http.StatusOK, rec.Code)
 

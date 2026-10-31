@@ -250,7 +250,7 @@ type editPageCaller struct {
 
 // getEditPage requests the edit page without following redirects, so the gate's own response is
 // observed rather than whatever /login renders afterwards. Returns the response and its body.
-func getEditPage(t *testing.T, baseURL, noteID string, caller editPageCaller) (*http.Response, string) {
+func getEditPage(t *testing.T, baseURL, noteID string, caller editPageCaller) (int, http.Header, string) {
 	t.Helper()
 
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, baseURL+"/edit/"+noteID, nil)
@@ -261,9 +261,10 @@ func getEditPage(t *testing.T, baseURL, noteID string, caller editPageCaller) (*
 		req.Header.Set("Authorization", "Bearer "+caller.bearer)
 	}
 
-	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
-		return http.ErrUseLastResponse
-	},
+	client := &http.Client{
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
 		Transport: nil, Jar: nil, Timeout: 0,
 	}
 
@@ -275,7 +276,7 @@ func getEditPage(t *testing.T, baseURL, noteID string, caller editPageCaller) (*
 	raw, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
 
-	return resp, string(raw)
+	return resp.StatusCode, resp.Header, string(raw)
 }
 
 // TestOwnerEditFlow_EditPage_PrivacyGate exercises GET /edit/{id} through the real HTTP stack for
@@ -378,17 +379,17 @@ func TestOwnerEditFlow_EditPage_PrivacyGate(t *testing.T) {
 				`{"title":"t","content":"`+secret+`","privacy":"`+privacy+`"}`)
 
 			for _, want := range callers {
-				resp, body := getEditPage(t, env.baseURL, note.ID, want.caller)
+				status, header, body := getEditPage(t, env.baseURL, note.ID, want.caller)
 
-				require.Equal(t, want.want, resp.StatusCode, "%s on a %s note", want.caller.name, privacy)
+				require.Equal(t, want.want, status, "%s on a %s note", want.caller.name, privacy)
 
 				if want.want == http.StatusSeeOther {
-					require.Equal(t, "/login?next=%2Fedit%2F"+note.ID, resp.Header.Get("Location"),
+					require.Equal(t, "/login?next=%2Fedit%2F"+note.ID, header.Get("Location"),
 						"a denied anonymous browser is sent to the login page carrying its original target")
 				}
 
 				if want.want == http.StatusForbidden {
-					require.Empty(t, resp.Header.Get("Location"),
+					require.Empty(t, header.Get("Location"),
 						"a settled 403 must not bounce the caller anywhere")
 				}
 

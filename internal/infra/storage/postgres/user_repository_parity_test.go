@@ -178,7 +178,8 @@ func (s *ParitySuite) TestUser_RevokeClearsCredentialsAndOwnership() {
 		UserAgent: "", IP: "",
 	}))
 	_, err := NewAPITokenRepository(s.db).CreateIfUnderLimit(ctx,
-		&domain.APIToken{TokenHash: "token-hash", UserID: usr.ID, CreatedAt: now,
+		&domain.APIToken{
+			TokenHash: "token-hash", UserID: usr.ID, CreatedAt: now,
 			ExpiresAt: nil, LastUsedAt: nil, IssuedBy: nil,
 		}, 10)
 	s.Require().NoError(err)

@@ -211,7 +211,7 @@ func (h *NoteHandler) GetNote(w http.ResponseWriter, r *http.Request) {
 			h.log.ErrorContext(r.Context(), "write plain content", "id", domain.HashSlug(id), "err", err)
 		}
 
-	default:
+	case formatJSON:
 		note, err := h.viewNote(r, id, preloaded)
 		if err != nil {
 			h.writeError(w, r, err)

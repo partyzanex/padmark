@@ -148,6 +148,8 @@ func handleCreateLinkRes(res padmark.CreateLinkRes) (*padmark.CreateLinkResponse
 		return nil, fmt.Errorf("%w: %s", ErrRequestTooLarge, typed.Message)
 	case *padmark.CreateLinkUnprocessableEntity:
 		return nil, fmt.Errorf("%w: %s", ErrValidation, typed.Message)
+	case *padmark.CreateLinkUnsupportedMediaType:
+		return nil, fmt.Errorf("%w: %s", ErrBadRequest, typed.Message)
 	case *padmark.CreateLinkTooManyRequests:
 		return nil, ErrRateLimited
 	case *padmark.CreateLinkServiceUnavailable:

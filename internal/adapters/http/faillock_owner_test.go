@@ -15,7 +15,8 @@ import (
 
 //nolint:funlen // same attack and owner recovery across ogen notes, native notes and links
 func (s *HandlerSuite) TestFailLockout_AnonymousAttackDoesNotBlockOwner() {
-	owner := &domain.User{ID: uuid.New(), Username: "owner",
+	owner := &domain.User{
+		ID: uuid.New(), Username: "owner",
 		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
 		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
 	}

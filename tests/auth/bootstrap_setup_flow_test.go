@@ -60,7 +60,8 @@ func TestBootstrapSetup_AnonymousCannotClaimFirstAdmin(t *testing.T) {
 		jar, err := cookiejar.New(nil)
 		require.NoError(t, err)
 
-		client := &http.Client{Jar: jar,
+		client := &http.Client{
+			Jar:       jar,
 			Transport: nil, CheckRedirect: nil, Timeout: 0,
 		}
 
@@ -138,7 +139,8 @@ func postSetupForm(t *testing.T, baseURL string, fields url.Values) int {
 	jar, err := cookiejar.New(nil)
 	require.NoError(t, err)
 
-	client := &http.Client{Jar: jar,
+	client := &http.Client{
+		Jar:       jar,
 		Transport: nil, CheckRedirect: nil, Timeout: 0,
 	}
 

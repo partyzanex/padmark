@@ -51,14 +51,16 @@ func (h *PageHandler) APIDocsPage(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// APISpec handles GET /api/openapi.yaml — returns the raw OpenAPI spec.
-func APISpec(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "application/yaml")
+// APISpec returns the handler for GET /api/openapi.yaml, which serves the raw OpenAPI spec.
+func APISpec(log *slog.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/yaml")
 
-	_, err := w.Write(releaseOpenAPISpec)
-	if err != nil {
-		// Headers are already sent — changing the response is impossible.
-		// Only log the error; calling http.Error here would corrupt the body.
-		slog.Error("write openapi spec", "err", err)
+		_, err := w.Write(releaseOpenAPISpec)
+		if err != nil {
+			// Headers are already sent — changing the response is impossible.
+			// Only log the error; calling http.Error here would corrupt the body.
+			log.ErrorContext(r.Context(), "write openapi spec", "err", err)
+		}
 	}
 }

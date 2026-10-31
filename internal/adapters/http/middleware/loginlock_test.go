@@ -11,9 +11,10 @@ import (
 	"time"
 
 	"github.com/bluele/gcache"
-	"github.com/partyzanex/padmark/tests/httptestutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/partyzanex/padmark/tests/httptestutil"
 )
 
 // loginLockFixture wraps a stub login handler with WithLoginLockout on a fake clock. The stub
@@ -31,7 +32,8 @@ func newLoginLockFixture() *loginLockFixture {
 		fix.upstream.Add(1)
 
 		if r.FormValue("code") == "ok" {
-			http.SetCookie(w, &http.Cookie{Name: SessionCookieName, Value: "sess", MaxAge: 60,
+			http.SetCookie(w, &http.Cookie{
+				Name: SessionCookieName, Value: "sess", MaxAge: 60,
 				Quoted: false, Path: "", Domain: "", Expires: time.Time{}, RawExpires: "",
 				Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode,
 				Partitioned: false, Raw: "",
@@ -135,13 +137,15 @@ func TestSessionIssued(t *testing.T) {
 		want   bool
 	}{
 		//nolint:gosec // G124: test cookie, attributes irrelevant to sessionIssued
-		"live session": {cookie: &http.Cookie{Name: SessionCookieName, Value: "s", MaxAge: 60,
+		"live session": {cookie: &http.Cookie{
+			Name: SessionCookieName, Value: "s", MaxAge: 60,
 			Quoted: false, Path: "", Domain: "", Expires: time.Time{}, RawExpires: "",
 			Secure: false, HttpOnly: false, SameSite: 0, Partitioned: false, Raw: "",
 			Unparsed: nil,
 		}, want: true},
 		//nolint:gosec // G124: test cookie, attributes irrelevant to sessionIssued
-		"session delete": {cookie: &http.Cookie{Name: SessionCookieName, Value: "", MaxAge: -1,
+		"session delete": {cookie: &http.Cookie{
+			Name: SessionCookieName, Value: "", MaxAge: -1,
 			Quoted: false, Path: "", Domain: "", Expires: time.Time{}, RawExpires: "",
 			Secure: false, HttpOnly: false, SameSite: 0, Partitioned: false, Raw: "",
 			Unparsed: nil,

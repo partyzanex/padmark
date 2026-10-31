@@ -66,6 +66,8 @@ func newAuthManagerWithTokens(
 // disabledMgr returns a Manager whose API-token flow is not enabled; used to assert
 // domain.ErrFeatureNotSupported on every public entry point.
 func (suite *APITokenSuite) disabledMgr() *Manager {
+	suite.T().Helper()
+
 	mgr, err := NewManager(
 		suite.users,
 		NewMockInviteStore(suite.ctrl),
@@ -86,14 +88,16 @@ func (suite *APITokenSuite) disabledMgr() *Manager {
 // ── helpers ──
 
 func (suite *APITokenSuite) adminUser() *domain.User {
-	return &domain.User{ID: uuid.New(), Username: "admin", IsAdmin: true,
+	return &domain.User{
+		ID: uuid.New(), Username: "admin", IsAdmin: true,
 		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
 		KDFSalt: nil, LastTOTPCounter: 0,
 	}
 }
 
 func (suite *APITokenSuite) regularUser() *domain.User {
-	return &domain.User{ID: uuid.New(), Username: "alice", IsAdmin: false, CreatedAt: time.Time{},
+	return &domain.User{
+		ID: uuid.New(), Username: "alice", IsAdmin: false, CreatedAt: time.Time{},
 		LastLoginAt: nil, TOTPSecret: "", PasswordHash: "", KDFSalt: nil,
 		LastTOTPCounter: 0,
 	}
@@ -213,7 +217,8 @@ func (suite *APITokenSuite) TestResolveAPIToken_ExpiredToken_ReturnsErrNotFound(
 func (suite *APITokenSuite) TestResolveAPIToken_UpdateLastUsedFails_StillReturnsUser() {
 	ctx := suite.T().Context()
 	usr := suite.regularUser()
-	tok := &domain.APIToken{UserID: usr.ID, TokenHash: hashToken("plain"), CreatedAt: time.Now(),
+	tok := &domain.APIToken{
+		UserID: usr.ID, TokenHash: hashToken("plain"), CreatedAt: time.Now(),
 		ExpiresAt: nil, LastUsedAt: nil, IssuedBy: nil,
 	}
 
@@ -231,7 +236,8 @@ func (suite *APITokenSuite) TestResolveAPIToken_UpdateLastUsedFails_StillReturns
 func (suite *APITokenSuite) TestResolveAPIToken_Success_ReturnsUserAndRecordsLastUsed() {
 	ctx := suite.T().Context()
 	usr := suite.regularUser()
-	tok := &domain.APIToken{UserID: usr.ID, TokenHash: hashToken("plain"), CreatedAt: time.Now(),
+	tok := &domain.APIToken{
+		UserID: usr.ID, TokenHash: hashToken("plain"), CreatedAt: time.Now(),
 		ExpiresAt: nil, LastUsedAt: nil, IssuedBy: nil,
 	}
 
@@ -252,7 +258,8 @@ func (suite *APITokenSuite) TestResolveAPIToken_Success_ReturnsUserAndRecordsLas
 func (suite *APITokenSuite) TestResolveAPIToken_UserLookupFails_WrapsError() {
 	ctx := suite.T().Context()
 	userID := uuid.New()
-	tok := &domain.APIToken{UserID: userID, TokenHash: hashToken("plain"), CreatedAt: time.Now(),
+	tok := &domain.APIToken{
+		UserID: userID, TokenHash: hashToken("plain"), CreatedAt: time.Now(),
 		ExpiresAt: nil, LastUsedAt: nil, IssuedBy: nil,
 	}
 
@@ -285,15 +292,18 @@ func (suite *APITokenSuite) TestListAPITokens_Admin_ReturnsTokensWithUsernames()
 	admin := suite.adminUser()
 	aliceID := uuid.New()
 	tokens := []*domain.APIToken{
-		{TokenHash: "tok-1", UserID: aliceID, CreatedAt: time.Now(),
+		{
+			TokenHash: "tok-1", UserID: aliceID, CreatedAt: time.Now(),
 			ExpiresAt: nil, LastUsedAt: nil, IssuedBy: nil,
 		},
-		{TokenHash: "tok-2", UserID: uuid.New(), CreatedAt: time.Now(),
+		{
+			TokenHash: "tok-2", UserID: uuid.New(), CreatedAt: time.Now(),
 			ExpiresAt: nil, LastUsedAt: nil, IssuedBy: nil,
 		},
 	}
 	users := []*domain.User{
-		{ID: aliceID, Username: "alice",
+		{
+			ID: aliceID, Username: "alice",
 			CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
 			KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
 		},

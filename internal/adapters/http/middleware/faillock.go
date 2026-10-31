@@ -80,6 +80,7 @@ type FailLockoutCache struct {
 	locked *lockedSet[failLockoutKey]
 }
 
+// NewFailLockoutCache returns an empty, bounded lockout state for WithFailLockout.
 func NewFailLockoutCache() *FailLockoutCache {
 	return &FailLockoutCache{
 		Cache:  gcache.New(maxTrackedFailures).ARC().Build(),

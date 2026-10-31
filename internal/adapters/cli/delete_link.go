@@ -55,6 +55,8 @@ func handleDeleteLinkRes(res padmark.DeleteLinkRes) error {
 		return errLinkOwnershipRequired
 	case *padmark.DeleteLinkNotFound:
 		return ErrLinkNotFound
+	case *padmark.DeleteLinkTooManyRequests:
+		return ErrRateLimited
 	case *padmark.DeleteLinkServiceUnavailable:
 		return errorcontext.Wrap(
 			serviceUnavailableError(padmark.ErrorResponse(*typed)), "decode service unavailable response",

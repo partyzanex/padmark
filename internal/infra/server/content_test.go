@@ -5,9 +5,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/partyzanex/padmark/internal/clifactory"
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
+
+	"github.com/partyzanex/padmark/internal/clifactory"
 )
 
 func TestServerRequiresContentKeyringBeforeOpeningDatabase(t *testing.T) {

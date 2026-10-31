@@ -20,8 +20,9 @@ func TestStatusRecorder_WriteHeader_DelegatesOnce(t *testing.T) {
 	spy := &spyResponseWriter{
 		ResponseWriter: nil, writeHeaderCalls: 0, lastStatus: 0,
 	}
-	sre := &statusRecorder{ResponseWriter: spy,
-		status: 0, written: false,
+	sre := &statusRecorder{
+		ResponseWriter: spy,
+		status:         0, written: false,
 	}
 
 	sre.WriteHeader(net_http.StatusOK)
@@ -235,7 +236,8 @@ func TestWithLoggingNeverRecordsSecretPaths(t *testing.T) {
 		for _, path := range []string{"/top-secret-slug", "/notes/top-secret-slug", "/r/top-secret-slug"} {
 			var buf bytes.Buffer
 
-			log := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: level,
+			log := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{
+				Level:     level,
 				AddSource: false, ReplaceAttr: nil,
 			}))
 			handler := WithLogging(log, net_http.HandlerFunc(func(w net_http.ResponseWriter, _ *net_http.Request) {

@@ -55,8 +55,10 @@ func TestValidateUsername(t *testing.T) {
 		require.NoError(t, ValidateUsername(username), username)
 	}
 
-	invalid := []string{"", " alice", "alice ", ".alice", "a/b", "a:b", "a?x", "a\n", "a\x00", "a b", "a#b", "a&b",
-		"a%20b", string([]byte{0xff}), strings.Repeat("a", 65)}
+	invalid := []string{
+		"", " alice", "alice ", ".alice", "a/b", "a:b", "a?x", "a\n", "a\x00", "a b", "a#b", "a&b",
+		"a%20b", string([]byte{0xff}), strings.Repeat("a", 65),
+	}
 	for _, username := range invalid {
 		require.ErrorIs(t, ValidateUsername(username), ErrInvalidUsername, username)
 	}

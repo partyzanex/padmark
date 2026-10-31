@@ -4,6 +4,7 @@ import (
 	"errors"
 )
 
+// Errors that the MCP tools return for a disabled API, invalid input and server failures.
 var (
 	ErrAPIDisabled  = errors.New("API is disabled on this server (api_disabled); ask the operator to enable it")
 	ErrEmptyContent = errors.New("content must not be empty")
@@ -17,6 +18,7 @@ var (
 		"envelope and no --base-url was given")
 )
 
+// Errors that the MCP tools map from the server response variants.
 var (
 	ErrBadRequest         = errors.New("bad request")
 	ErrBurnReadRefused    = errors.New("refused")

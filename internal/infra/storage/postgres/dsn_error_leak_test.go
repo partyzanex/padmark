@@ -141,6 +141,8 @@ func (s *DSNErrorLeakSuite) TestDriverPingAndMigrate_RejectedDSNNeverEchoesPassw
 // captureOutput swaps os.Stderr (the server logger binds it at construction) and the default
 // slog logger for the duration of body and returns everything written to either.
 func (s *DSNErrorLeakSuite) captureOutput(body func()) string {
+	s.T().Helper()
+
 	reader, writer, err := os.Pipe()
 	s.Require().NoError(err)
 

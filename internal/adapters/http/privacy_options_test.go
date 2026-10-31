@@ -32,8 +32,10 @@ func TestPrivacyOptions(t *testing.T) {
 		{"no accounts: public only", false, false, domain.PrivacyPublic, []string{"public"}},
 		{"accounts, anonymous: no owner", true, false, domain.PrivacyPublic, []string{"public", "authenticated"}},
 		{"accounts, signed in: all", true, true, domain.PrivacyPublic, []string{"public", "authenticated", "owner"}},
-		{"no accounts, editing a v0.1.6 private note", false, false, domain.PrivacyAuthenticated,
-			[]string{"public", "authenticated"}},
+		{
+			"no accounts, editing a v0.1.6 private note", false, false, domain.PrivacyAuthenticated,
+			[]string{"public", "authenticated"},
+		},
 	}
 
 	for _, tcase := range cases {

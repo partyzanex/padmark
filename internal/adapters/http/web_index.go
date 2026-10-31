@@ -31,9 +31,9 @@ func newPageHandler(c *common, indexTmpl, successTmpl, apidocsTmpl *template.Tem
 // note/auth/admin collaborator.
 func (h *PageHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api", h.APIDocsPage)
-	mux.HandleFunc("GET /api/openapi.yaml", APISpec)
-	mux.HandleFunc("GET /api/reference.md", APIReference)
-	mux.HandleFunc("GET /llms.txt", LLMsTxt)
+	mux.HandleFunc("GET /api/openapi.yaml", APISpec(h.log))
+	mux.HandleFunc("GET /api/reference.md", APIReference(h.log))
+	mux.HandleFunc("GET /llms.txt", LLMsTxt(h.log))
 	// HTML pages declare /static/favicon.svg; a raw text/markdown view cannot, so the browser asks
 	// for /favicon.ico and would otherwise get a 404 from the note route.
 	mux.Handle("GET "+middleware.FaviconPath, http.RedirectHandler("/static/favicon.svg", http.StatusMovedPermanently))

@@ -60,22 +60,9 @@ func MigrateWithBackup(
 
 	path, _ := dbFilePath(dsn)
 	if path != "" {
-		applied, pending, countErr := countMigrations(ctx, provider)
-		if countErr != nil {
-			return nil, fmt.Errorf("count migrations: %w", countErr)
-		}
-
-		// A brand-new install (nothing applied yet) has no data worth a backup.
-		if applied > 0 && pending > 0 {
-			backupPath := path + ".bak-" + time.Now().Format(backupTimeLayout)
-
-			backupPath, backupErr := backupDB(ctx, db, backupPath, log)
-			if backupErr != nil {
-				return nil, fmt.Errorf("backup before migrations: %w", backupErr)
-			}
-
-			log.InfoContext(ctx, "database backed up before migrations",
-				"backup", backupPath, "pending", pending)
+		backupErr := backupBeforeMigrations(ctx, db, provider, path, log)
+		if backupErr != nil {
+			return nil, backupErr
 		}
 	}
 
@@ -85,6 +72,30 @@ func MigrateWithBackup(
 	}
 
 	return operationResult, nil
+}
+
+// backupBeforeMigrations backs up the database file at path when migrations are pending.
+// A brand-new install (nothing applied yet) has no data worth a backup.
+func backupBeforeMigrations(
+	ctx context.Context, db *bun.DB, provider *goose.Provider, path string, log *slog.Logger,
+) error {
+	applied, pending, err := countMigrations(ctx, provider)
+	if err != nil {
+		return fmt.Errorf("count migrations: %w", err)
+	}
+
+	if applied == 0 || pending == 0 {
+		return nil
+	}
+
+	backupPath, err := backupDB(ctx, db, path+".bak-"+time.Now().Format(backupTimeLayout), log)
+	if err != nil {
+		return fmt.Errorf("backup before migrations: %w", err)
+	}
+
+	log.InfoContext(ctx, "database backed up before migrations", "backup", backupPath, "pending", pending)
+
+	return nil
 }
 
 func up(ctx context.Context, provider *goose.Provider) ([]*goose.MigrationResult, error) {

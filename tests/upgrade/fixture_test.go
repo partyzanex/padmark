@@ -109,21 +109,25 @@ func postgresFixture() dialectFixture {
 // notes combines the dialect's generated values with the scenario both dumps share.
 func (f *dialectFixture) notes() []legacyNote {
 	notes := []legacyNote{
-		{title: "1 unicode and dollars", content: unicodeContent, contentType: "text/markdown",
+		{
+			title: "1 unicode and dollars", content: unicodeContent, contentType: "text/markdown",
 			slug: "", editCode: "", createdAt: "", expiresAt: "",
 			burnTTL: 0, views: 0, burn: false, private: false,
 			untaggedBySchema: false,
 		},
-		{title: "2 custom slug", content: "Custom slug, caller-chosen edit code.", contentType: "text/markdown",
+		{
+			title: "2 custom slug", content: "Custom slug, caller-chosen edit code.", contentType: "text/markdown",
 			slug: "", editCode: "", createdAt: "", expiresAt: "",
 			burnTTL: 0, views: 0, burn: false, private: false,
 			untaggedBySchema: false,
 		},
-		{title: "3 private", content: "private <b>plain</b> text", contentType: "text/plain", private: true,
+		{
+			title: "3 private", content: "private <b>plain</b> text", contentType: "text/plain", private: true,
 			slug: "", editCode: "", createdAt: "", expiresAt: "",
 			burnTTL: 0, views: 0, burn: false, untaggedBySchema: false,
 		},
-		{title: "4 burn after reading", content: "read me once", contentType: "text/markdown", burn: true,
+		{
+			title: "4 burn after reading", content: "read me once", contentType: "text/markdown", burn: true,
 			slug: "", editCode: "", createdAt: "", expiresAt: "",
 			burnTTL: 0, views: 0, private: false, untaggedBySchema: false,
 		},
@@ -141,7 +145,8 @@ func (f *dialectFixture) notes() []legacyNote {
 			slug: "", editCode: "", createdAt: "", views: 0,
 			burn: false, private: false, untaggedBySchema: false,
 		},
-		{title: "7 viewed once", content: base64Content, contentType: "text/markdown", views: 1,
+		{
+			title: "7 viewed once", content: base64Content, contentType: "text/markdown", views: 1,
 			slug: "", editCode: "", createdAt: "", expiresAt: "",
 			burnTTL: 0, burn: false, private: false, untaggedBySchema: false,
 		},

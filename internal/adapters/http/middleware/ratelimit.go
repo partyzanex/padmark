@@ -81,6 +81,8 @@ func allowRequest(w http.ResponseWriter, r *http.Request, log *slog.Logger, cach
 	return true
 }
 
+// WithRateLimit limits each client IP to rps requests per second with bursts up to burst.
+// trustedProxies decides which forwarded client IP is believed (see ClientIP).
 func WithRateLimit(rps, burst int, trustedProxies []*net.IPNet, log *slog.Logger, next http.Handler) http.Handler {
 	limiterCache := newIPRateLimiterCache(func() *rate.Limiter {
 		return rate.NewLimiter(rate.Limit(rps), burst)

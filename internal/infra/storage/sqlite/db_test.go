@@ -201,25 +201,32 @@ func TestDBFilePath(t *testing.T) {
 		{dsn: "file:/var/lib/p.db?mode=ro", path: "/var/lib/p.db", create: false},
 		{dsn: "file:/var/lib/p.db?mode=rw", path: "/var/lib/p.db", create: false},
 		{dsn: "", path: "", create: false},
-		{dsn: ":memory:",
+		{
+			dsn:  ":memory:",
 			path: "", create: false,
 		},
-		{dsn: "file::memory:",
+		{
+			dsn:  "file::memory:",
 			path: "", create: false,
 		},
-		{dsn: "file::memory:?cache=shared",
+		{
+			dsn:  "file::memory:?cache=shared",
 			path: "", create: false,
 		},
-		{dsn: "file:named?mode=memory&cache=shared",
+		{
+			dsn:  "file:named?mode=memory&cache=shared",
 			path: "", create: false,
 		},
-		{dsn: "file:/p.db?vfs=memdb",
+		{
+			dsn:  "file:/p.db?vfs=memdb",
 			path: "", create: false,
 		},
-		{dsn: "file:",
+		{
+			dsn:  "file:",
 			path: "", create: false,
 		},
-		{dsn: "file://otherhost/p.db",
+		{
+			dsn:  "file://otherhost/p.db",
 			path: "", create: false,
 		},
 	}
@@ -235,7 +242,8 @@ func TestDBFilePath(t *testing.T) {
 func recordingLogger() (*slog.Logger, *bytes.Buffer) {
 	buf := &bytes.Buffer{}
 
-	return slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug,
+	return slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{
+		Level:     slog.LevelDebug,
 		AddSource: false, ReplaceAttr: nil,
 	})), buf
 }

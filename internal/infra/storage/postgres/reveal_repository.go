@@ -44,8 +44,6 @@ func NewRevealRepository(db *bun.DB, log *slog.Logger) *RevealRepository {
 
 // Issue generates a one-time token bound to noteID with a 10-minute TTL.
 // Expired and consumed tokens are lazily cleaned up on each call.
-//
-
 func (s *RevealRepository) Issue(ctx context.Context, noteID string) (string, error) {
 	buf := make([]byte, revealTokenBytes)
 

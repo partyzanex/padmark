@@ -74,8 +74,10 @@ func TestServeRefusesSharedKeyringBeforeOpeningDatabase(t *testing.T) {
 
 	dsn := filepath.Join(t.TempDir(), "test.db")
 	path := writeSharedTestKeyring(t, 0o644)
-	err := NewApp().Run(t.Context(), []string{"padmark", "serve", "--storage", "sqlite",
-		"--dsn", dsn, "--content-keyring-file", path, "--addr", "invalid-listen-address"})
+	err := NewApp().Run(t.Context(), []string{
+		"padmark", "serve", "--storage", "sqlite",
+		"--dsn", dsn, "--content-keyring-file", path, "--addr", "invalid-listen-address",
+	})
 	require.ErrorIs(t, err, crypto.ErrKeyringPermissions)
 	require.ErrorContains(t, err, "--"+FlagAllowSharedKeyring)
 	require.NoFileExists(t, dsn, "a refused keyring must stop startup before the database is opened")

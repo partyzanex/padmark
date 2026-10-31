@@ -39,6 +39,8 @@ func (s *DisableAPISuite) TearDownTest() {
 }
 
 func (s *DisableAPISuite) newRouter(disableAPI bool) http.Handler {
+	s.T().Helper()
+
 	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog())
 	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
 

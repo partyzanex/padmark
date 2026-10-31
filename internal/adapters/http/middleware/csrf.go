@@ -90,6 +90,7 @@ func VerifyCSRFToken(token string, secret []byte, sessionID string) bool {
 	return hmac.Equal(gotMAC, expected)
 }
 
+// CSRFFromContext returns the CSRF token issued for this request, or "" when there is none.
 func CSRFFromContext(ctx context.Context) string {
 	v, _ := ctx.Value(keyCSRF).(string)
 
@@ -217,40 +218,38 @@ func crossSiteRequest(r *http.Request) bool {
 // Returns 403 on any failure.
 func CSRFGuard(secret []byte, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPost {
-			if crossSiteRequest(r) {
-				http.Error(w, "forbidden", http.StatusForbidden)
+		if r.Method == http.MethodPost && !csrfPostAllowed(w, r, secret) {
+			http.Error(w, "forbidden", http.StatusForbidden)
 
-				return
-			}
-
-			// Several same-name cookies are ambiguous (cookie tossing from a sibling subdomain):
-			// Request.Cookie would return the first, which the attacker can order, so refuse.
-			cookieValue, cookieOK := SingleCookieValue(r, csrfCookieName)
-			if !cookieOK || cookieValue == "" {
-				http.Error(w, "forbidden", http.StatusForbidden)
-
-				return
-			}
-
-			// Cap the body before parsing the form (gosec G120); the global limit also applies
-			// upstream, and guarded forms are tiny.
-			r.Body = http.MaxBytesReader(w, r.Body, maxCSRFFormBytes)
-			field := r.FormValue(csrfFieldName)
-
-			if !hmac.Equal([]byte(cookieValue), []byte(field)) {
-				http.Error(w, "forbidden", http.StatusForbidden)
-
-				return
-			}
-
-			if !VerifyCSRFToken(cookieValue, secret, ExtractSessionID(r)) {
-				http.Error(w, "forbidden", http.StatusForbidden)
-
-				return
-			}
+			return
 		}
 
 		next(w, r)
 	}
+}
+
+// csrfPostAllowed applies the CSRFGuard checks to a POST request. It caps r.Body before it parses
+// the form, so the handler that runs next reads the same capped body.
+func csrfPostAllowed(w http.ResponseWriter, r *http.Request, secret []byte) bool {
+	if crossSiteRequest(r) {
+		return false
+	}
+
+	// Several same-name cookies are ambiguous (cookie tossing from a sibling subdomain):
+	// Request.Cookie would return the first, which the attacker can order, so refuse.
+	cookieValue, cookieOK := SingleCookieValue(r, csrfCookieName)
+	if !cookieOK || cookieValue == "" {
+		return false
+	}
+
+	// Cap the body before parsing the form (gosec G120); the global limit also applies
+	// upstream, and guarded forms are tiny.
+	r.Body = http.MaxBytesReader(w, r.Body, maxCSRFFormBytes)
+	field := r.FormValue(csrfFieldName)
+
+	if !hmac.Equal([]byte(cookieValue), []byte(field)) {
+		return false
+	}
+
+	return VerifyCSRFToken(cookieValue, secret, ExtractSessionID(r))
 }

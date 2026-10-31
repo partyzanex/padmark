@@ -13,6 +13,7 @@ import (
 // The package godoc lives here, so the generated mocks must not add a second one.
 //go:generate go run go.uber.org/mock/mockgen@latest -source=manager.go -destination=manager_mocks_test.go -package=contentkeys -write_package_comment=false
 
+// Migration phases of the encryption state; batchSize bounds the records read per batch.
 const (
 	Pending   = "pending"
 	Ready     = "ready"
@@ -44,6 +45,8 @@ type LegacyNote struct {
 	EditCode string
 }
 
+// Registry is the stored encryption state: the installation ID, the migration phase and the
+// verification value of each registered key.
 type Registry struct {
 	Checks         map[string]string
 	InstallationID string
@@ -82,6 +85,8 @@ type EditCodeHasher interface {
 	IsStoredHash(value string) bool
 }
 
+// Keyring exposes the content key IDs and their verification values. KeyCheck and
+// VerifyKeyCheck errors are fail-hard: a key that cannot be verified must not encrypt content.
 type Keyring interface {
 	ActiveKey() string
 	KeyIDs() []string
@@ -131,6 +136,8 @@ type Candidate struct {
 	Reason   string `json:"reason"`
 }
 
+// Manager migrates, rewraps, converts and prunes encrypted records without the read and burn
+// lifecycle of notes and links.
 type Manager struct {
 	store   Storage
 	keys    Keyring
@@ -138,6 +145,7 @@ type Manager struct {
 	ciphers map[string]Cipher
 }
 
+// New returns a Manager with one cipher for notes and one for links.
 func New(store Storage, keys Keyring, notes, links Cipher, hasher EditCodeHasher) *Manager {
 	return &Manager{
 		store: store, keys: keys, hasher: hasher,

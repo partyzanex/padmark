@@ -87,8 +87,9 @@ func TestKeyRegistryCheck_BindsInstallationAndKeyID(t *testing.T) {
 }
 
 func TestKeyringCreation_ExclusiveAndPrivate(t *testing.T) {
-	ring := &ContentKeyring{Active: "first",
-		Keys: nil,
+	ring := &ContentKeyring{
+		Active: "first",
+		Keys:   nil,
 	}
 	require.NoError(t, ring.AddKey("first"))
 	require.Len(t, ring.Keys["first"], 32)

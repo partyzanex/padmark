@@ -12,6 +12,7 @@ import (
 // ContentType represents the content format of a note.
 type ContentType string
 
+// Content types that a note can have.
 const (
 	ContentTypeMarkdown ContentType = "text/markdown"
 	ContentTypePlain    ContentType = "text/plain"
@@ -27,6 +28,7 @@ func (ct ContentType) Valid() bool {
 	return false
 }
 
+// MaxTitleLength caps a note title in characters (runes), checked by Note.Validate.
 const MaxTitleLength = 500
 
 // MaxContentLength caps a note's content in characters (runes), checked by Note.Validate and
@@ -41,6 +43,7 @@ const MaxContentLength = 1 << 20
 // mirroring the ContentType convention below.
 type Privacy string
 
+// Privacy levels of a note or a link.
 const (
 	PrivacyPublic        Privacy = "public"
 	PrivacyAuthenticated Privacy = "authenticated"
@@ -57,6 +60,7 @@ func (p Privacy) Valid() bool {
 	return false
 }
 
+// Note is a stored Markdown or plain-text document with its access and lifetime settings.
 type Note struct {
 	CreatedAt time.Time
 	UpdatedAt time.Time

@@ -58,7 +58,8 @@ func (s *ManagerSuite) TestFollowConcurrentPrivacyChange() {
 		{name: "expired_then_renewed", burn: false, expired: true},
 	} {
 		s.Run(scenario.name, func() {
-			options := links.CreateOptions{OwnerID: &ownerID, BurnAfterClick: scenario.burn,
+			options := links.CreateOptions{
+				OwnerID: &ownerID, BurnAfterClick: scenario.burn,
 				ExpiresAt: nil, Privacy: nil, DirectRedirect: nil, CustomHash: "",
 				EditCode: "",
 			}
@@ -70,18 +71,11 @@ func (s *ManagerSuite) TestFollowConcurrentPrivacyChange() {
 			s.Require().NoError(createErr)
 
 			privateURL := "https://example.com/private?secret=hidden"
-			changing := &changedLinkRead{Storage: storage, afterRead: func() {
-				_, updateErr := s.LinkManager.Update(s.T().Context(), link.ID, "", ownerID, privateURL,
-					links.UpdateOptions{Privacy: new(domain.PrivacyOwner), ExpiresAt: new(time.Now().Add(time.Hour)),
-						DirectRedirect: nil, ClearExpiry: false, ResetDirectRedirect: false,
-					})
-				s.Require().NoError(updateErr)
-			},
-				once: sync.Once{},
-			}
+			changing := s.privatizeAfterRead(storage, link.ID, ownerID, privateURL)
 			reader := newLinkManager(s.T(), changing, checker, lock.NewLocker())
-			result, followErr := reader.Follow(s.T().Context(), link.ID, links.FollowOptions{AllowBurn: true,
-				CallerID: uuid.UUID{}, Authenticated: false,
+			result, followErr := reader.Follow(s.T().Context(), link.ID, links.FollowOptions{
+				AllowBurn: true,
+				CallerID:  uuid.UUID{}, Authenticated: false,
 			})
 			s.Require().ErrorIs(followErr, domain.ErrNotFound)
 			s.Nil(result, "a raced privacy change must not expose the new destination")
@@ -114,4 +108,25 @@ func (s *ManagerSuite) insertLinkOwner() uuid.UUID {
 	s.Require().NoError(err)
 
 	return ownerID
+}
+
+// privatizeAfterRead wraps storage so that the first successful read makes the link owner-only
+// with privateURL. The update commits between the reader's SELECT and its mutation.
+func (s *ManagerSuite) privatizeAfterRead(
+	storage links.Storage, linkID string, ownerID uuid.UUID, privateURL string,
+) *changedLinkRead {
+	s.T().Helper()
+
+	return &changedLinkRead{
+		Storage: storage,
+		once:    sync.Once{},
+		afterRead: func() {
+			_, updateErr := s.LinkManager.Update(s.T().Context(), linkID, "", ownerID, privateURL,
+				links.UpdateOptions{
+					Privacy: new(domain.PrivacyOwner), ExpiresAt: new(time.Now().Add(time.Hour)),
+					DirectRedirect: nil, ClearExpiry: false, ResetDirectRedirect: false,
+				})
+			s.Require().NoError(updateErr)
+		},
+	}
 }

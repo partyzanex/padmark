@@ -57,7 +57,8 @@ func TestWithFailLockout_CallerSuccessDoesNotResetOthers(t *testing.T) {
 		req.SetPathValue("id", "resource")
 
 		if caller != uuid.Nil {
-			req = req.WithContext(context.WithValue(req.Context(), keyUser, &domain.User{ID: caller,
+			req = req.WithContext(context.WithValue(req.Context(), keyUser, &domain.User{
+				ID:        caller,
 				CreatedAt: time.Time{}, LastLoginAt: nil, Username: "", TOTPSecret: "",
 				PasswordHash: "", KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
 			}))

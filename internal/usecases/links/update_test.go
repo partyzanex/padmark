@@ -69,7 +69,8 @@ func (s *ManagerTestSuite) TestUpdate_EditCodeAndOwnerChecks() {
 		{"other without code", other, "", false},
 	} {
 		s.Run(testCase.name, func() {
-			existing := &domain.Link{OwnerID: &owner, EditCode: "original",
+			existing := &domain.Link{
+				OwnerID: &owner, EditCode: "original",
 				CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, DirectRedirect: nil,
 				ID: "", TargetURL: "", Views: 0, BurnAfterClick: false,
 			}
@@ -112,13 +113,15 @@ func (s *ManagerTestSuite) TestUpdate_Validation() {
 		{domain.Privacy("invalid"), domain.ErrInvalidPrivacy},
 		{domain.PrivacyOwner, domain.ErrOwnerPrivacyRequiresOwner},
 	} {
-		s.storage.EXPECT().GetByID(gomock.Any(), domain.HashSlug("stable")).Return(&domain.Link{EditCode: "code",
+		s.storage.EXPECT().GetByID(gomock.Any(), domain.HashSlug("stable")).Return(&domain.Link{
+			EditCode:  "code",
 			CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
 			DirectRedirect: nil, ID: "", TargetURL: "", Views: 0,
 			BurnAfterClick: false,
 		}, nil)
 		_, err = s.manager.Update(s.T().Context(), "stable", "code", uuid.Nil, "https://example.com",
-			UpdateOptions{Privacy: &testCase.privacy,
+			UpdateOptions{
+				Privacy:   &testCase.privacy,
 				ExpiresAt: nil, DirectRedirect: nil, ClearExpiry: false,
 				ResetDirectRedirect: false,
 			})
@@ -135,7 +138,8 @@ func (s *ManagerTestSuite) TestUpdate_ConcurrentCacheFill() {
 	defer cancel()
 
 	dbID := domain.HashSlug("stable")
-	old := &domain.Link{ID: dbID, TargetURL: "https://example.com/old", EditCode: "code",
+	old := &domain.Link{
+		ID: dbID, TargetURL: "https://example.com/old", EditCode: "code",
 		CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
 		DirectRedirect: nil, Views: 0, BurnAfterClick: false,
 	}
@@ -190,7 +194,8 @@ func (s *ManagerTestSuite) TestUpdate_ConcurrentCacheFill() {
 	privacy := domain.PrivacyAuthenticated
 	go func() {
 		_, err := s.manager.Update(ctx, "stable", "code", uuid.Nil, "https://example.com/new",
-			UpdateOptions{Privacy: &privacy,
+			UpdateOptions{
+				Privacy:   &privacy,
 				ExpiresAt: nil, DirectRedirect: nil, ClearExpiry: false,
 				ResetDirectRedirect: false,
 			})

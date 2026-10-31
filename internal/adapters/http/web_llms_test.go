@@ -18,7 +18,7 @@ func TestLLMsTxt_OK_SetsContentType(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req, _ := http.NewRequest(http.MethodGet, "/llms.txt", nil)
 
-	adhttp.LLMsTxt(rec, req)
+	adhttp.LLMsTxt(discardLog())(rec, req)
 
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, "text/markdown; charset=utf-8", rec.Header().Get("Content-Type"))
@@ -33,10 +33,10 @@ func TestLLMsTxt_WriteError_DoesNotCorruptBody(t *testing.T) {
 	}
 	req, _ := http.NewRequest(http.MethodGet, "/llms.txt", nil)
 
-	adhttp.LLMsTxt(wer, req)
+	adhttp.LLMsTxt(discardLog())(wer, req)
 
 	expected := httptest.NewRecorder()
-	adhttp.LLMsTxt(expected, req)
+	adhttp.LLMsTxt(discardLog())(expected, req)
 	assert.Equal(t, expected.Body.Bytes(), wer.body,
 		"http.Error must not append text after a partial Write")
 	// WriteHeader must not have been called — no status change attempted.
@@ -53,7 +53,7 @@ type errorWriter struct {
 
 func (e *errorWriter) Header() http.Header { return http.Header{} }
 
-func (e *errorWriter) WriteHeader(status int) { e.writeHeaderCalls++ }
+func (e *errorWriter) WriteHeader(_ int) { e.writeHeaderCalls++ }
 
 func (e *errorWriter) Write(b []byte) (int, error) {
 	e.body = append(e.body, b...)
@@ -88,6 +88,8 @@ func (s *LLMsRouterSuite) TearDownTest() {
 }
 
 func (s *LLMsRouterSuite) newRouter() http.Handler {
+	s.T().Helper()
+
 	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog())
 	handler.WithAuthManager(NewMockAuthManager(s.ctrl))
 	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())

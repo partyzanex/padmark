@@ -7,9 +7,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/partyzanex/padmark/tests/httptestutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/partyzanex/padmark/tests/httptestutil"
 )
 
 var bindingTestSecret = []byte("padmark-test-csrf-secret-32bytes") //nolint:gochecknoglobals // test fixture

@@ -104,7 +104,8 @@ func replica(t *testing.T, db *bun.DB, gate *createGate) *httptest.Server {
 		testutil.ContentEncryptor(t, "link"), hasher, log, true)
 	handler := adhttp.NewHandler(noteManager, linkManager, log)
 	ogen := adhttp.NewOgenHandler(noteManager, linkManager, adhttp.NoPinger{}, log)
-	router, err := adhttp.NewRouter(handler, ogen, &adhttp.RouterOptions{MaxBodyBytes: 256 * 1024,
+	router, err := adhttp.NewRouter(handler, ogen, &adhttp.RouterOptions{
+		MaxBodyBytes: 256 * 1024,
 		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, CSRFSecret: nil,
 		AllowedHosts: nil, RateLimit: 0, RateBurst: 0, SessionTTL: 0, DisableAPI: false,
 		DirectRedirect: false,
@@ -122,7 +123,7 @@ type createResult struct {
 	status int
 }
 
-func postAsync(t *testing.T, ctx context.Context, url, body string) <-chan createResult {
+func postAsync(ctx context.Context, t *testing.T, url, body string) <-chan createResult {
 	t.Helper()
 
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(body))
@@ -163,8 +164,8 @@ func testConcurrentCreate(t *testing.T, db *bun.DB, open func(*testing.T) *bun.D
 	defer cancel()
 
 	slug := uuid.NewString()
-	noteResult := postAsync(t, ctx, noteServer.URL+"/notes", fmt.Sprintf(`{"slug":%q,"content":"note"}`, slug))
-	linkResult := postAsync(t, ctx, linkServer.URL+"/links",
+	noteResult := postAsync(ctx, t, noteServer.URL+"/notes", fmt.Sprintf(`{"slug":%q,"content":"note"}`, slug))
+	linkResult := postAsync(ctx, t, linkServer.URL+"/links",
 		fmt.Sprintf(`{"slug":%q,"target_url":"https://example.com/target"}`, slug))
 
 	for _, gate := range []*createGate{noteGate, linkGate} {

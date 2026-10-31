@@ -104,8 +104,10 @@ func TestServeRefusesSubstitutedContentKeyBeforeListening(t *testing.T) {
 	ring.Keys["key"] = bytes.Repeat([]byte{2}, 32)
 	file := filepath.Join(t.TempDir(), "wrong.json")
 	require.NoError(t, crypto.WriteContentKeyring(file, ring))
-	err = NewApp().Run(context.Background(), []string{"padmark", "serve", "--storage", "sqlite",
-		"--dsn", dsn, "--content-keyring-file", file, "--addr", "invalid-listen-address"})
+	err = NewApp().Run(context.Background(), []string{
+		"padmark", "serve", "--storage", "sqlite",
+		"--dsn", dsn, "--content-keyring-file", file, "--addr", "invalid-listen-address",
+	})
 	require.ErrorContains(t, err, "does not match")
 	require.NotContains(t, err.Error(), "listen")
 }

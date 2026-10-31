@@ -20,6 +20,8 @@ const privacyNeedsAccountsMessage = "privacy authenticated and owner need the ac
 	"which is disabled on this server; send privacy public or omit it"
 
 func (s *HandlerSuite) requirePrivacyNeedsAccounts(code int, body []byte) {
+	s.T().Helper()
+
 	s.Equal(http.StatusUnprocessableEntity, code)
 
 	var decoded struct {

@@ -1,10 +1,9 @@
 package http
 
 import (
+	_ "embed"
 	"net/http"
 	"time"
-
-	_ "embed"
 
 	"github.com/partyzanex/padmark/internal/adapters/http/middleware"
 	"github.com/partyzanex/padmark/internal/domain"

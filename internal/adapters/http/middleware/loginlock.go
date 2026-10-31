@@ -73,6 +73,7 @@ type LoginLockout struct {
 	mu sync.Mutex
 }
 
+// NewLoginLockout returns an empty, bounded login lockout state that measures time with clock.
 func NewLoginLockout(clock gcache.Clock) *LoginLockout {
 	return &LoginLockout{
 		cache:  gcache.New(maxTrackedLogins).ARC().Clock(clock).Build(),

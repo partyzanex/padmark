@@ -54,7 +54,7 @@ func TestSameOrigin_MalformedOriginIsForeign(t *testing.T) {
 
 // TestRequireSameOrigin_RejectsAndAllows drives the middleware itself.
 func TestRequireSameOrigin_RejectsAndAllows(t *testing.T) {
-	upstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusCreated)
 	})
 

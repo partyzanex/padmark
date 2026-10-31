@@ -14,8 +14,9 @@ import (
 func TestHandleGetLinkRes_NotFound_CleanMessage(t *testing.T) {
 	t.Parallel()
 
-	_, err := handleGetLinkRes(&padmark.GetLinkNotFound{Message: "not found",
-		Code: padmark.OptString{Value: "", Set: false},
+	_, err := handleGetLinkRes(&padmark.GetLinkNotFound{
+		Message: "not found",
+		Code:    padmark.OptString{Value: "", Set: false},
 	})
 	require.Error(t, err)
 	assert.Equal(t, "link not found", err.Error())
@@ -24,8 +25,9 @@ func TestHandleGetLinkRes_NotFound_CleanMessage(t *testing.T) {
 func TestHandleGetLinkRes_Gone_CleanMessage(t *testing.T) {
 	t.Parallel()
 
-	_, err := handleGetLinkRes(&padmark.GetLinkGone{Message: "link has expired",
-		Code: padmark.OptString{Value: "", Set: false},
+	_, err := handleGetLinkRes(&padmark.GetLinkGone{
+		Message: "link has expired",
+		Code:    padmark.OptString{Value: "", Set: false},
 	})
 	require.Error(t, err)
 	assert.Equal(t, "link has expired", err.Error())
@@ -34,7 +36,8 @@ func TestHandleGetLinkRes_Gone_CleanMessage(t *testing.T) {
 func TestHandleGetLinkRes_Success(t *testing.T) {
 	t.Parallel()
 
-	link := &padmark.LinkResponse{ID: "abc",
+	link := &padmark.LinkResponse{
+		ID: "abc",
 		TargetURL: url.URL{
 			Scheme: "", Opaque: "", User: nil, Host: "", Path: "", Fragment: "",
 			RawQuery: "", RawPath: "", RawFragment: "", ForceQuery: false, OmitHost: false,

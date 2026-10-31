@@ -78,7 +78,7 @@ func TestSetup_TTYWithoutPassword_FailsFast(t *testing.T) {
 
 	// os.Stdin in `go test` is not a char device, but the error path is the same: nothing piped
 	// and no flag → the command must refuse rather than block or prompt.
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
 		t.Error("server must not be reached without a password")
 	}))
 	defer srv.Close()

@@ -52,28 +52,36 @@ var fixtures = map[string]cipherFixture{
 	legacyValue: {
 		versioned: false, legacyErr: nil, kind: "", key: "", inspectErr: nil,
 	},
-	corruptValue: {legacyErr: errMalformed,
+	corruptValue: {
+		legacyErr: errMalformed,
 		versioned: false, kind: "", key: "", inspectErr: nil,
 	},
-	dollarValue: {legacyErr: errMalformed,
+	dollarValue: {
+		legacyErr: errMalformed,
 		versioned: false, kind: "", key: "", inspectErr: nil,
 	},
-	nativeValue: {versioned: true, kind: "p", key: activeKey,
+	nativeValue: {
+		versioned: true, kind: "p", key: activeKey,
 		legacyErr: nil, inspectErr: nil,
 	},
-	wrappedValue: {versioned: true, kind: "l", key: activeKey,
+	wrappedValue: {
+		versioned: true, kind: "l", key: activeKey,
 		legacyErr: nil, inspectErr: nil,
 	},
-	spareValue: {versioned: true, kind: "p", key: spareKey,
+	spareValue: {
+		versioned: true, kind: "p", key: spareKey,
 		legacyErr: nil, inspectErr: nil,
 	},
-	futureValue: {versioned: true, inspectErr: errMalformed,
+	futureValue: {
+		versioned: true, inspectErr: errMalformed,
 		legacyErr: nil, kind: "", key: "",
 	},
-	garbageValue: {versioned: true, inspectErr: errMalformed,
+	garbageValue: {
+		versioned: true, inspectErr: errMalformed,
 		legacyErr: nil, kind: "", key: "",
 	},
-	wrongKeyValue: {versioned: true, inspectErr: errDecryption,
+	wrongKeyValue: {
+		versioned: true, inspectErr: errDecryption,
 		legacyErr: nil, kind: "", key: "",
 	},
 }
@@ -82,7 +90,8 @@ func checkFor(keyID string) string { return "check-" + keyID }
 
 // newRow builds a record as a release since v0.2.0 stores it: notes carry a hashed edit code.
 func newRow(resource, slug, value string) Row {
-	row := Row{Resource: resource, ID: domain.HashSlug(slug), Value: value,
+	row := Row{
+		Resource: resource, ID: domain.HashSlug(slug), Value: value,
 		Legacy: nil, StoredEditCode: "",
 	}
 	if resource == resourceNote {
@@ -176,8 +185,11 @@ func (s *ManagerTestSuite) stubKeyring() {
 }
 
 func (s *ManagerTestSuite) fixture(value string) cipherFixture {
+	s.T().Helper()
+
 	if strings.HasPrefix(value, convertedPrefix) {
-		return cipherFixture{versioned: true, kind: "p", key: activeKey,
+		return cipherFixture{
+			versioned: true, kind: "p", key: activeKey,
 			legacyErr: nil, inspectErr: nil,
 		}
 	}

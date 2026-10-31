@@ -138,8 +138,9 @@ func burnHTTPGet(t *testing.T, url string, headers map[string]string, sessionID 
 		req.Header.Set("Cookie", "padmark_session="+sessionID)
 	}
 
-	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-		Transport: nil, Jar: nil, Timeout: 0,
+	client := &http.Client{
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+		Transport:     nil, Jar: nil, Timeout: 0,
 	}
 
 	resp, err := client.Do(req)
@@ -405,8 +406,9 @@ func burnHTTPDo(t *testing.T, method, url string, headers map[string]string) (in
 		req.Header.Set(name, value)
 	}
 
-	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-		Transport: nil, Jar: nil, Timeout: 0,
+	client := &http.Client{
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+		Transport:     nil, Jar: nil, Timeout: 0,
 	}
 
 	resp, err := client.Do(req)

@@ -11,10 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/partyzanex/padmark/internal/usecases/auth"
-
 	"github.com/stretchr/testify/require"
 
+	"github.com/partyzanex/padmark/internal/usecases/auth"
 	padmark "github.com/partyzanex/padmark/pkg/client"
 )
 

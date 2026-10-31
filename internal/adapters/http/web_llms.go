@@ -1,11 +1,10 @@
 package http
 
 import (
+	_ "embed"
 	"log/slog"
 	"net/http"
 	"strings"
-
-	_ "embed"
 
 	"github.com/partyzanex/padmark/internal/buildinfo"
 )
@@ -16,23 +15,24 @@ var llmsTxt []byte
 //go:embed spec/api-reference.md
 var apiReference []byte
 
-// LLMsTxt handles GET /llms.txt, the navigation index for agent-facing documentation.
-func LLMsTxt(w http.ResponseWriter, _ *http.Request) {
-	writeAgentDocument(w, llmsTxt)
+// LLMsTxt returns the handler for GET /llms.txt, the navigation index for agent-facing
+// documentation.
+func LLMsTxt(log *slog.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) { writeAgentDocument(w, r, log, llmsTxt) }
 }
 
-// APIReference handles GET /api/reference.md, the detailed agent-facing API guide.
-func APIReference(w http.ResponseWriter, _ *http.Request) {
-	writeAgentDocument(w, apiReference)
+// APIReference returns the handler for GET /api/reference.md, the detailed agent-facing API guide.
+func APIReference(log *slog.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) { writeAgentDocument(w, r, log, apiReference) }
 }
 
-func writeAgentDocument(w http.ResponseWriter, source []byte) {
+func writeAgentDocument(w http.ResponseWriter, r *http.Request, log *slog.Logger, source []byte) {
 	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
 
 	_, err := w.Write([]byte(strings.ReplaceAll(string(source), "{{VERSION}}", buildinfo.Version())))
 	if err != nil {
 		// Headers are already sent — changing the response is impossible.
 		// Only log the error; calling http.Error here would corrupt the body.
-		slog.Error("write agent documentation", "err", err)
+		log.ErrorContext(r.Context(), "write agent documentation", "err", err)
 	}
 }

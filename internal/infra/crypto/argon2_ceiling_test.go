@@ -31,15 +31,21 @@ func TestAcceptedCeiling(t *testing.T) {
 		cfg  Argon2Params
 		want Argon2Params
 	}{
-		{"low config is lifted to twice the default",
+		{
+			"low config is lifted to twice the default",
 			Argon2Params{Memory: 8 * 1024, Time: 1, Threads: 1},
-			Argon2Params{Memory: def.Memory * 2, Time: def.Time * 2, Threads: 2}},
-		{"higher config doubles itself",
+			Argon2Params{Memory: def.Memory * 2, Time: def.Time * 2, Threads: 2},
+		},
+		{
+			"higher config doubles itself",
 			Argon2Params{Memory: 96 * 1024, Time: 3, Threads: 2},
-			Argon2Params{Memory: 192 * 1024, Time: 6, Threads: 4}},
-		{"ceiling never exceeds the hard caps",
+			Argon2Params{Memory: 192 * 1024, Time: 6, Threads: 4},
+		},
+		{
+			"ceiling never exceeds the hard caps",
 			Argon2Params{Memory: MaxArgon2Memory, Time: MaxArgon2Time, Threads: MaxArgon2Threads},
-			Argon2Params{Memory: MaxArgon2Memory, Time: MaxArgon2Time, Threads: MaxArgon2Threads}},
+			Argon2Params{Memory: MaxArgon2Memory, Time: MaxArgon2Time, Threads: MaxArgon2Threads},
+		},
 	}
 
 	for _, testCase := range cases {
@@ -88,7 +94,8 @@ func TestHashers_LogAndRejectCostAboveCeiling(t *testing.T) {
 
 	var buf bytes.Buffer
 
-	log := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn,
+	log := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{
+		Level:     slog.LevelWarn,
 		AddSource: false, ReplaceAttr: nil,
 	}))
 

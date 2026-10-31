@@ -199,6 +199,8 @@ func handleCreateInviteRes(res padmark.CreateInviteRes) (string, error) {
 		return "", fmt.Errorf("%w: %s", ErrUnauthorized, typed.Message)
 	case *padmark.CreateInviteForbidden:
 		return "", fmt.Errorf("%w: %s", errAdminStepUpRequired, typed.Message)
+	case *padmark.CreateInviteTooManyRequests:
+		return "", ErrRateLimited
 	case *padmark.CreateInviteServiceUnavailable:
 		return "", errorcontext.Wrap(serviceUnavailableError(padmark.ErrorResponse(*typed)), "decode create invite response")
 	case *padmark.CreateInviteInternalServerError:

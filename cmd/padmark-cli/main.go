@@ -1,3 +1,4 @@
+// Command padmark-cli is the command-line client for a Padmark server.
 package main
 
 import (

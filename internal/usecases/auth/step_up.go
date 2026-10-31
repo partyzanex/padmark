@@ -1,4 +1,4 @@
-//go:generate go run go.uber.org/mock/mockgen@latest -source=step_up.go -destination=step_up_mocks_test.go -package=auth
+//go:generate go run go.uber.org/mock/mockgen@latest -source=step_up.go -destination=step_up_mocks_test.go -package=auth -write_package_comment=false
 
 package auth
 

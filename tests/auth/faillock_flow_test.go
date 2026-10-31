@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/partyzanex/padmark/internal/usecases/auth"
-
 	"github.com/stretchr/testify/require"
+
+	"github.com/partyzanex/padmark/internal/usecases/auth"
 )
 
 func TestFailLockoutPrincipals(t *testing.T) {
