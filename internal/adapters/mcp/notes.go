@@ -23,7 +23,8 @@ func createNoteTool() *mcpsdk.Tool {
 	return newTool("create_note",
 		"Create a Markdown (or plain-text) note on the configured padmark server and return it. The padmark "+
 			"edit_code is returned exactly once and is kept in the proxy for update/delete within this session; it "+
-			"is shown in the result only when reveal_edit_code is set (this keeps the one-time secret out of transcript).",
+			"is shown in the result only when reveal_edit_code is set (this keeps the one-time secret out of "+
+			"transcript).",
 		hints(false, false, false))
 }
 
@@ -58,6 +59,29 @@ func (m *Manager) createNote(
 		return nil, createNoteOutput{}, ErrEmptyContent
 	}
 
+	req := newCreateNoteRequest(&input)
+
+	res, err := m.client.CreateNote(ctx, req)
+	if err != nil {
+		return nil, createNoteOutput{}, errorcontext.Wrap(transportError("create note", err), "handle create note")
+	}
+
+	resp, apiErr := mapCreateNoteRes(res)
+	if apiErr != nil {
+		return nil, createNoteOutput{}, fmt.Errorf("map create note res: %w", apiErr)
+	}
+
+	out := m.noteOutputFromCreate(resp)
+	if input.RevealEditCode && resp.EditCode != "" {
+		out.revealEditCode(resp.EditCode)
+	}
+
+	return nil, out, nil
+}
+
+// newCreateNoteRequest maps the optional tool input fields to the padmark create request. A field
+// that the caller leaves unset is not sent.
+func newCreateNoteRequest(input *createNoteInput) *padmark.CreateNoteRequest {
 	req := new(padmark.CreateNoteRequest)
 	req.Content = input.Content
 
@@ -91,17 +115,7 @@ func (m *Manager) createNote(
 			padmark.CreateNoteRequestPrivacy(*input.Privacy))
 	}
 
-	res, err := m.client.CreateNote(ctx, req)
-	if err != nil {
-		return nil, createNoteOutput{}, errorcontext.Wrap(transportError("create note", err), "handle create note")
-	}
-
-	resp, apiErr := mapCreateNoteRes(res)
-	if apiErr != nil {
-		return nil, createNoteOutput{}, fmt.Errorf("map create note res: %w", apiErr)
-	}
-
-	return nil, m.noteOutputFromCreate(resp, input.RevealEditCode), nil
+	return req
 }
 
 func (m *Manager) getNote(

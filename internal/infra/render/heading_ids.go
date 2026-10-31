@@ -67,18 +67,7 @@ func slugify(raw []byte, kind ast.NodeKind) string {
 			continue
 		}
 
-		switch {
-		case util.IsAlphaNumeric(char):
-			if 'A' <= char && char <= 'Z' {
-				char += 'a' - 'A'
-			}
-
-			result = append(result, char)
-		case util.IsSpace(char) || char == '-' || char == '_':
-			result = append(result, '-')
-		default:
-			// Other ASCII characters are dropped from the ID.
-		}
+		result = appendSlugByte(result, char)
 	}
 
 	if len(result) > 0 {
@@ -90,4 +79,22 @@ func slugify(raw []byte, kind ast.NodeKind) string {
 	}
 
 	return "id"
+}
+
+// appendSlugByte appends the slug form of one ASCII byte to result. It drops every byte that
+// the slug form does not keep.
+func appendSlugByte(result []byte, char byte) []byte {
+	switch {
+	case util.IsAlphaNumeric(char):
+		if 'A' <= char && char <= 'Z' {
+			return append(result, char+'a'-'A')
+		}
+
+		return append(result, char)
+	case util.IsSpace(char) || char == '-' || char == '_':
+		return append(result, '-')
+	default:
+		// Other ASCII characters are dropped from the ID.
+		return result
+	}
 }

@@ -245,7 +245,7 @@ func (s *ManagerTestSuite) expectRegistry(registry *Registry) {
 	s.store.EXPECT().Registry(gomock.Any()).Return(registry, nil).AnyTimes()
 }
 
-// Migrate and prune
+// Migrate and prune.
 
 func (s *ManagerTestSuite) TestMigrateInitializesPendingWithCorruptRaw() {
 	ctx := s.T().Context()
@@ -491,7 +491,7 @@ func (s *ManagerTestSuite) TestPruneConflictPreservesConcurrentReplacement() {
 	s.expectRegistry(nil)
 	s.expectRows(&rows)
 	s.store.EXPECT().Delete(gomock.Any(), rows[0]).DoAndReturn(func(context.Context, Row) (bool, error) {
-		rows[0].Value = nativeValue // a concurrent writer replaced the value before the CAS delete
+		rows[0].Value = nativeValue // a concurrent writer replaced the value before the CAS delete.
 
 		return false, nil
 	})
@@ -519,7 +519,7 @@ func (s *ManagerTestSuite) TestPruneDeleteFailureKeepsRecord() {
 	s.Len(rows, 1)
 }
 
-// Convert
+// Convert.
 
 func (s *ManagerTestSuite) TestConvertSlugsCountsUniqueFailures() {
 	cases := map[string]string{
@@ -549,7 +549,7 @@ func (s *ManagerTestSuite) TestConvertSlugsCountsUniqueFailures() {
 				Return("", errDecryption).AnyTimes()
 
 			for _, dryRun := range []bool{true, false} {
-				rows[0].Value = wrappedValue // the next initial scan must pass
+				rows[0].Value = wrappedValue // the next initial scan must pass.
 
 				report, err := s.manager.ConvertSlugs(s.T().Context(),
 					strings.NewReader(strings.Repeat("original-slug\n", 2)), dryRun)
@@ -561,7 +561,7 @@ func (s *ManagerTestSuite) TestConvertSlugsCountsUniqueFailures() {
 	}
 }
 
-// Register and key removal
+// Register and key removal.
 
 func (s *ManagerTestSuite) TestRegisterAddsCheckOnce() {
 	ctx := s.T().Context()
@@ -627,7 +627,7 @@ func (s *ManagerTestSuite) TestKeyRemovalGates() {
 	s.Require().ErrorContains(s.manager.CanRemove(ctx, spareKey), "content migration required")
 }
 
-// Errors
+// Errors.
 
 func (s *ManagerTestSuite) TestWrapErrorAddsContextOnce() {
 	cause := errors.New("registry down")

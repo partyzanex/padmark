@@ -223,32 +223,49 @@ func (m *Manager) CanRemove(ctx context.Context, keyID string) error {
 
 func (m *Manager) walk(ctx context.Context, visit func(Row) error) error {
 	for _, resource := range []string{resourceNote, resourceLink} {
-		after := ""
-		for {
-			rows, err := m.store.Batch(ctx, resource, after, batchSize)
-			if err != nil {
-				return fmt.Errorf("scan encrypted records: %w", err)
-			}
+		err := m.walkResource(ctx, resource, visit)
+		if err != nil {
+			return err
+		}
+	}
 
-			if len(rows) == 0 {
-				break
-			}
+	return nil
+}
 
-			for i := range rows {
-				row := &rows[i]
+// walkResource visits every record of one resource in batches. It stops at the first error.
+func (m *Manager) walkResource(ctx context.Context, resource string, visit func(Row) error) error {
+	after := ""
 
-				err := ctx.Err()
-				if err != nil {
-					return Wrap(err)
-				}
+	for {
+		rows, err := m.store.Batch(ctx, resource, after, batchSize)
+		if err != nil {
+			return fmt.Errorf("scan encrypted records: %w", err)
+		}
 
-				err = visit(*row)
-				if err != nil {
-					return Wrap(err)
-				}
-			}
+		if len(rows) == 0 {
+			return nil
+		}
 
-			after = rows[len(rows)-1].ID
+		err = visitBatch(ctx, rows, visit)
+		if err != nil {
+			return err
+		}
+
+		after = rows[len(rows)-1].ID
+	}
+}
+
+// visitBatch calls visit for each row in order. It stops when the context ends or visit fails.
+func visitBatch(ctx context.Context, rows []Row, visit func(Row) error) error {
+	for i := range rows {
+		err := ctx.Err()
+		if err != nil {
+			return Wrap(err)
+		}
+
+		err = visit(rows[i])
+		if err != nil {
+			return Wrap(err)
 		}
 	}
 

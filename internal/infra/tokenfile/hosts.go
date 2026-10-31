@@ -78,7 +78,7 @@ func Origin(serverURL string) (string, error) {
 	case port != "":
 		host = net.JoinHostPort(host, port)
 	case strings.Contains(host, ":"):
-		host = "[" + host + "]" // IPv6 literal without a port keeps its brackets
+		host = "[" + host + "]" // IPv6 literal without a port keeps its brackets.
 	default:
 		// A host name or IPv4 address without a port needs no change.
 	}

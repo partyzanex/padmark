@@ -12,6 +12,9 @@ import (
 
 const maxKeyringSize = 64 << 10
 
+// sharedPermissionMask selects the group and other permission bits of a keyring file.
+const sharedPermissionMask = 0o077
+
 var errContentKeyringNotRegular = errors.New("content keyring must be a regular file")
 
 // ErrKeyringPermissions reports a keyring file that group or other users may access. The
@@ -47,6 +50,27 @@ func LoadContentKeyring(path string, log *slog.Logger, opts KeyringLoadOptions) 
 		return nil, fmt.Errorf("require regular keyring: %w", err)
 	}
 
+	data, err := readKeyringFile(path, log, opts)
+	if err != nil {
+		return nil, err
+	}
+
+	keyring, err := decodeKeyring(data)
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = NewContentCipher(keyring.Active, keyring.Keys, "note")
+	if err != nil {
+		return nil, fmt.Errorf("new content cipher: %w", err)
+	}
+
+	return keyring, nil
+}
+
+// readKeyringFile opens path, checks its permissions and returns its contents. The read stops
+// after maxKeyringSize+1 bytes, so an oversized file fails without a full read.
+func readKeyringFile(path string, log *slog.Logger, opts KeyringLoadOptions) ([]byte, error) {
 	file, err := os.Open(path) //nolint:gosec // explicit operator-supplied secret path
 	if err != nil {
 		return nil, fmt.Errorf("open content keyring: %w", err)
@@ -67,12 +91,18 @@ func LoadContentKeyring(path string, log *slog.Logger, opts KeyringLoadOptions) 
 		return nil, errKeyringUnreadableOrTooLarge
 	}
 
+	return data, nil
+}
+
+// decodeKeyring parses the strict JSON keyring document in data. It rejects unknown fields
+// and any content after the first JSON value.
+func decodeKeyring(data []byte) (*ContentKeyring, error) {
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
 
 	var keyring ContentKeyring
 
-	err = decoder.Decode(&keyring)
+	err := decoder.Decode(&keyring)
 	if err != nil {
 		return nil, errInvalidKeyringJSON
 	}
@@ -80,11 +110,6 @@ func LoadContentKeyring(path string, log *slog.Logger, opts KeyringLoadOptions) 
 	var extra any
 	if decoder.Decode(&extra) != io.EOF || decoder.InputOffset() > maxKeyringSize {
 		return nil, errInvalidKeyringDocument
-	}
-
-	_, err = NewContentCipher(keyring.Active, keyring.Keys, "note")
-	if err != nil {
-		return nil, fmt.Errorf("new content cipher: %w", err)
 	}
 
 	return &keyring, nil
@@ -121,9 +146,10 @@ func checkKeyringPermissions(path string, file *os.File, log *slog.Logger, opts 
 	}
 
 	perm := info.Mode().Perm()
-	if perm&0o077 != 0 {
+	if perm&sharedPermissionMask != 0 {
 		if !opts.AllowSharedPermissions {
-			return fmt.Errorf("content keyring %s has mode %04o, readable by other users; restrict it to 0600 or 0400: %w",
+			return fmt.Errorf(
+				"content keyring %s has mode %04o, readable by other users; restrict it to 0600 or 0400: %w",
 				path, uint32(perm), ErrKeyringPermissions)
 		}
 

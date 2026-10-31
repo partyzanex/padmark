@@ -56,37 +56,37 @@ func TestValidCustomSlug(t *testing.T) {
 		slug string
 		want bool
 	}{
-		// single segment (legacy shapes still valid)
+		// single segment (legacy shapes still valid).
 		{"my-slug", true},
 		{"a_b-C9", true},
 		{"file.name.md", true},
-		// path-like multi-segment
+		// path-like multi-segment.
 		{"project/GUIDE.md", true},
 		{"protocol-v1/README.md", true},
 		{"a/b/c/d.txt", true},
-		{strings.Repeat("a", 100), true}, // at length limit
-		{"a/b/c/d/e/f/g/h/i/j", true},    // at segment limit (10 segments)
-		{"llms", true},                   // "llms.txt" is reserved by exact segment, not by prefix
+		{strings.Repeat("a", 100), true}, // at length limit.
+		{"a/b/c/d/e/f/g/h/i/j", true},    // at segment limit (10 segments).
+		{"llms", true},                   // "llms.txt" is reserved by exact segment, not by prefix.
 		{"llms-notes", true},
 		{"llms/tips.md", true},
-		// rejected
+		// rejected.
 		{"", false},
-		{"bad slug!", false},              // space / punctuation
-		{"admin/x", false},                // reserved first segment
-		{"edit/note", false},              // reserved first segment
-		{"notes/x", false},                // reserved first segment
-		{"links/x", false},                // reserved first segment (links)
-		{"r/x", false},                    // reserved first segment (short-link redirect prefix)
-		{"llms.txt", false},               // reserved first segment (served file, agent docs)
-		{"llms.txt/x", false},             // reserved first segment — exact match also covers subpaths
-		{"../etc", false},                 // segment starts with dot (traversal-ish)
-		{".hidden", false},                // dotfile
-		{"a/.hidden", false},              // dotfile in a later segment
-		{"a//b", false},                   // empty segment
-		{"/leading", false},               // leading slash
-		{"trailing/", false},              // trailing slash
-		{strings.Repeat("a", 101), false}, // over length limit
-		{"a/b/c/d/e/f/g/h/i/j/k", false},  // over segment limit (11 segments, well under 100 chars)
+		{"bad slug!", false},              // space / punctuation.
+		{"admin/x", false},                // reserved first segment.
+		{"edit/note", false},              // reserved first segment.
+		{"notes/x", false},                // reserved first segment.
+		{"links/x", false},                // reserved first segment (links).
+		{"r/x", false},                    // reserved first segment (short-link redirect prefix).
+		{"llms.txt", false},               // reserved first segment (served file, agent docs).
+		{"llms.txt/x", false},             // reserved first segment — exact match also covers subpaths.
+		{"../etc", false},                 // segment starts with dot (traversal-ish).
+		{".hidden", false},                // dotfile.
+		{"a/.hidden", false},              // dotfile in a later segment.
+		{"a//b", false},                   // empty segment.
+		{"/leading", false},               // leading slash.
+		{"trailing/", false},              // trailing slash.
+		{strings.Repeat("a", 101), false}, // over length limit.
+		{"a/b/c/d/e/f/g/h/i/j/k", false},  // over segment limit (11 segments, well under 100 chars).
 	}
 
 	for _, tc := range cases {
@@ -95,7 +95,7 @@ func TestValidCustomSlug(t *testing.T) {
 }
 
 func TestResolveSlug_ReservedPrefix_ErrorNamesReservedPrefixes(t *testing.T) {
-	_, err := ResolveSlug("admin/x", true)
+	_, err := ResolveSlug("admin/x", CustomSlugsEnabled)
 
 	require.ErrorIs(t, err, ErrInvalidSlug)
 	assert.Contains(t, err.Error(), `reserved route name "admin"`)
@@ -103,7 +103,7 @@ func TestResolveSlug_ReservedPrefix_ErrorNamesReservedPrefixes(t *testing.T) {
 }
 
 func TestResolveSlug_InvalidShape_GenericMessage(t *testing.T) {
-	_, err := ResolveSlug("bad slug!", true)
+	_, err := ResolveSlug("bad slug!", CustomSlugsEnabled)
 
 	require.ErrorIs(t, err, ErrInvalidSlug)
 	assert.Equal(t, ErrInvalidSlug.Error(), err.Error(),
@@ -111,20 +111,20 @@ func TestResolveSlug_InvalidShape_GenericMessage(t *testing.T) {
 }
 
 func TestResolveSlug_EmptyCandidate_GeneratesRandomSlug(t *testing.T) {
-	slug, err := ResolveSlug("", false)
+	slug, err := ResolveSlug("", CustomSlugsDisabled)
 
-	require.NoError(t, err, "an empty candidate must always generate a slug, regardless of allowCustom")
+	require.NoError(t, err, "an empty candidate must always generate a slug, regardless of the custom setting")
 	assert.Len(t, slug, slugLength)
 }
 
 func TestResolveSlug_CustomDisabled_RejectsNonEmptyCandidate(t *testing.T) {
-	_, err := ResolveSlug("my-custom-slug", false)
+	_, err := ResolveSlug("my-custom-slug", CustomSlugsDisabled)
 
 	require.ErrorIs(t, err, ErrCustomSlugDisabled)
 }
 
 func TestResolveSlug_CustomEnabled_ReturnsCandidateUnchanged(t *testing.T) {
-	slug, err := ResolveSlug("my-custom-slug", true)
+	slug, err := ResolveSlug("my-custom-slug", CustomSlugsEnabled)
 
 	require.NoError(t, err)
 	assert.Equal(t, "my-custom-slug", slug)

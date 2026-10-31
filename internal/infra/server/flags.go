@@ -3,6 +3,7 @@ package server
 import (
 	"fmt"
 	"math"
+	"slices"
 	"time"
 
 	"github.com/urfave/cli/v3"
@@ -102,18 +103,18 @@ const (
 	DefaultDSN                = "padmark.db"
 	DefaultLogLevel           = "info"
 	DefaultLogFormat          = "json"
-	DefaultReadTimeout        = 30              // seconds
-	DefaultWriteTimeout       = 60              // seconds
-	DefaultMaxHeaderBytes     = 64 * 1024       // 64 KB
-	DefaultMaxBodyBytes       = 4 * 1024 * 1024 // 4 MB
-	DefaultRateLimit          = 10              // requests per second per IP
-	DefaultRateBurst          = 20              // max burst size per IP
+	DefaultReadTimeout        = 30              // seconds.
+	DefaultWriteTimeout       = 60              // seconds.
+	DefaultMaxHeaderBytes     = 64 * 1024       // 64 KB.
+	DefaultMaxBodyBytes       = 4 * 1024 * 1024 // 4 MB.
+	DefaultRateLimit          = 10              // requests per second per IP.
+	DefaultRateBurst          = 20              // max burst size per IP.
 	DefaultTOTPIssuer         = "padmark"
-	DefaultArgon2Memory       = 24 * 1024  // argon2id memory in KiB (24 MiB)
-	DefaultArgon2Time         = 2          // argon2id iterations (OWASP minimum at 64 MiB)
-	DefaultArgon2Threads      = 1          // argon2id parallelism
-	DefaultArgon2MemoryBudget = 128 * 1024 // KiB of argon2id workspace all concurrent derivations may hold (128 MiB)
-	DefaultAllowSharedKeyring = false      // refuse group/other-readable keyrings outside /run/secrets/
+	DefaultArgon2Memory       = 24 * 1024  // argon2id memory in KiB (24 MiB).
+	DefaultArgon2Time         = 2          // argon2id iterations (OWASP minimum at 64 MiB).
+	DefaultArgon2Threads      = 1          // argon2id parallelism.
+	DefaultArgon2MemoryBudget = 128 * 1024 // KiB of argon2id workspace all concurrent derivations may hold (128 MiB).
+	DefaultAllowSharedKeyring = false      // refuse group/other-readable keyrings outside /run/secrets/.
 	// DefaultDirectRedirect is off: an anonymous link must not be a free open redirector.
 	DefaultDirectRedirect = false
 )
@@ -123,9 +124,23 @@ const (
 // of a separately maintained literal that could silently drift out of sync with it.
 const DefaultSessionTTL = int(auth.DefaultSessionTTL / time.Second)
 
-// appFlags returns the full flag set for the serve subcommand.
-func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
-	return append([]cli.Flag{
+// appFlags returns the full flag set for the serve subcommand. The groups keep the flag order
+// of the single list that they replace.
+func appFlags() []cli.Flag {
+	return slices.Concat(
+		storageAndLogFlags(),
+		accessFlags(),
+		limitFlags(),
+		transportFlags(),
+		sessionFlags(),
+		miscFlags(),
+		argon2Flags(),
+	)
+}
+
+// storageAndLogFlags returns the content keyring, storage and logging flags.
+func storageAndLogFlags() []cli.Flag {
+	return []cli.Flag{
 		clifactory.StringFlag(func(flag *cli.StringFlag) {
 			flag.Name = FlagContentKeyring
 			flag.Sources = cli.EnvVars(EnvContentKeyring)
@@ -168,6 +183,12 @@ func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
 			flag.Value = DefaultLogFormat
 			flag.Usage = "Log format: json, text"
 		}),
+	}
+}
+
+// accessFlags returns the flags that control accounts, the REST API and public slugs.
+func accessFlags() []cli.Flag {
+	return []cli.Flag{
 		clifactory.BoolFlag(func(flag *cli.BoolFlag) {
 			flag.Name = FlagEnableAccounts
 			flag.Sources = cli.EnvVars(EnvEnableAccounts)
@@ -197,6 +218,12 @@ func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
 				"because human-readable public URLs are easier to guess. " +
 				"New content encryption keys are independent of the slug"
 		}),
+	}
+}
+
+// limitFlags returns the HTTP timeout, request size and rate limit flags.
+func limitFlags() []cli.Flag {
+	return []cli.Flag{
 		clifactory.IntFlag(func(flag *cli.IntFlag) {
 			flag.Name = FlagReadTimeout
 			flag.Sources = cli.EnvVars(EnvReadTimeout)
@@ -233,6 +260,12 @@ func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
 			flag.Value = DefaultRateBurst
 			flag.Usage = "Rate limit: max burst size per IP"
 		}),
+	}
+}
+
+// transportFlags returns the TLS, host, proxy and scheme flags.
+func transportFlags() []cli.Flag {
+	return []cli.Flag{
 		clifactory.StringFlag(func(flag *cli.StringFlag) {
 			flag.Name = FlagTLSCert
 			flag.Sources = cli.EnvVars(EnvTLSCert)
@@ -251,10 +284,10 @@ func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
 		clifactory.StringFlag(func(flag *cli.StringFlag) {
 			flag.Name = FlagAllowedHosts
 			flag.Sources = cli.EnvVars(EnvAllowedHosts)
-			flag.Usage = "Comma-separated Host allowlist (e.g. example.com,www.example.com), compared case-insensitively " +
-				"without the port; applies to the main listener (other Hosts get 421 Misdirected Request, " +
-				"/healthz and /readyz exempt) and to the HTTP→HTTPS redirect listener (400); " +
-				"empty = no Host check (legacy behaviour)"
+			flag.Usage = "Comma-separated Host allowlist (e.g. example.com,www.example.com), " +
+				"compared case-insensitively without the port; applies to the main listener " +
+				"(other Hosts get 421 Misdirected Request, /healthz and /readyz exempt) and to " +
+				"the HTTP→HTTPS redirect listener (400); empty = no Host check (legacy behaviour)"
 		}),
 		clifactory.StringFlag(func(flag *cli.StringFlag) {
 			flag.Name = FlagTrustedProxies
@@ -271,6 +304,12 @@ func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
 				"HSTS; set this when the reverse proxy's IP is not stable enough for --trusted-proxies " +
 				"(e.g. cloud load balancers, k8s ingress)"
 		}),
+	}
+}
+
+// sessionFlags returns the TOTP, session and removed-flag hint flags.
+func sessionFlags() []cli.Flag {
+	return []cli.Flag{
 		clifactory.StringFlag(func(flag *cli.StringFlag) {
 			flag.Name = FlagTOTPIssuer
 			flag.Sources = cli.EnvVars(EnvTOTPIssuer)
@@ -288,7 +327,8 @@ func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
 			flag.Name = FlagCookieMaxAge
 			flag.Sources = cli.EnvVars(EnvCookieMaxAge)
 			flag.Hidden = true
-			flag.Usage = "DEPRECATED: use --session-ttl; honoured as the session TTL (seconds) when --session-ttl is unset"
+			flag.Usage = "DEPRECATED: use --session-ttl; honoured as the session TTL (seconds) " +
+				"when --session-ttl is unset"
 		}),
 		clifactory.IntFlag(func(flag *cli.IntFlag) {
 			flag.Name = FlagSessionTTL
@@ -296,6 +336,12 @@ func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
 			flag.Value = DefaultSessionTTL
 			flag.Usage = "TOTP session TTL in seconds (default: 30 days)"
 		}),
+	}
+}
+
+// miscFlags returns the redirect, metrics and CSRF flags.
+func miscFlags() []cli.Flag {
+	return []cli.Flag{
 		clifactory.BoolFlag(func(flag *cli.BoolFlag) {
 			flag.Name = FlagDirectRedirect
 			flag.Sources = cli.EnvVars(EnvDirectRedirect)
@@ -322,7 +368,7 @@ func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
 				"multi-replica deployments 403 on every form. Set to a fixed random value " +
 				"(e.g. `openssl rand -base64 32`) shared across replicas to avoid that"
 		}),
-	}, argon2Flags()...)
+	}
 }
 
 // argon2Flags is shared by serve and the encryption commands: encryption migrate hashes the

@@ -202,7 +202,8 @@ func handleCreateInviteRes(res padmark.CreateInviteRes) (string, error) {
 	case *padmark.CreateInviteTooManyRequests:
 		return "", ErrRateLimited
 	case *padmark.CreateInviteServiceUnavailable:
-		return "", errorcontext.Wrap(serviceUnavailableError(padmark.ErrorResponse(*typed)), "decode create invite response")
+		return "", errorcontext.Wrap(
+			serviceUnavailableError(padmark.ErrorResponse(*typed)), "decode create invite response")
 	case *padmark.CreateInviteInternalServerError:
 		return "", fmt.Errorf("%w: %s", ErrServer, typed.Message)
 	default:

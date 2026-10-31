@@ -20,7 +20,7 @@ import (
 
 const flowPassword = "FlowP@ss123!"
 
-// ── AuthFlowSuite ──
+// ── AuthFlowSuite ──.
 
 // AuthFlowSuite runs end-to-end auth flows against real storage repos.
 // It embeds SQLiteAuthSuite to get a fresh in-memory DB per test.
@@ -38,7 +38,7 @@ func (s *AuthFlowSuite) SetupTest() {
 			Users:     s.Users,
 			Invites:   s.Invites,
 			Sessions:  s.Sessions,
-			APITokens: nil, // this suite exercises TOTP/session flows, not API tokens
+			APITokens: nil, // this suite exercises TOTP/session flows, not API tokens.
 		},
 		crypto.NewPasswordHasher(testArgon2Params),
 		crypto.NewSealer(testArgon2Params),

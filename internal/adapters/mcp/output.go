@@ -10,9 +10,10 @@ import (
 // tool-output structs. Plain types only — the MCP SDK infers the output JSON Schema from the
 // Out types, so they must stay free of custom-marshaling shapes.
 
-// noteOutputFromCreate includes the edit code: hidden unless the caller opted into revealing
-// this one-time secret; the vault copy is stored either way.
-func (m *Manager) noteOutputFromCreate(resp *padmark.CreateNoteResponse, reveal bool) createNoteOutput {
+// noteOutputFromCreate builds the create output with the edit code hidden. The caller calls
+// revealEditCode when the input opted into revealing this one-time secret. The vault copy is
+// stored either way.
+func (m *Manager) noteOutputFromCreate(resp *padmark.CreateNoteResponse) createNoteOutput {
 	out := createNoteOutput{
 		ID:               resp.ID,
 		Title:            resp.Title,
@@ -33,7 +34,7 @@ func (m *Manager) noteOutputFromCreate(resp *padmark.CreateNoteResponse, reveal 
 
 	code := resp.EditCode
 	if code != "" {
-		out.editCodeFields(code, reveal)
+		out.hideEditCode()
 	}
 
 	m.vault.Put(resp.ID, code)
@@ -63,8 +64,9 @@ func noteOutputFromNote(resp *padmark.NoteResponse) createNoteOutput {
 	return out
 }
 
-// linkOutputFromCreate includes the edit code, same reveal contract as notes.
-func (m *Manager) linkOutputFromCreate(headers *padmark.CreateLinkResponseHeaders, reveal bool) createLinkOutput {
+// linkOutputFromCreate builds the create output with the edit code hidden, the same contract as
+// noteOutputFromCreate. The caller calls revealEditCode to reveal the code.
+func (m *Manager) linkOutputFromCreate(headers *padmark.CreateLinkResponseHeaders) createLinkOutput {
 	resp := headers.Response
 
 	out := linkOutputFromLink(&padmark.LinkResponse{
@@ -82,7 +84,7 @@ func (m *Manager) linkOutputFromCreate(headers *padmark.CreateLinkResponseHeader
 
 	code := resp.EditCode
 	if code != "" {
-		out.editCodeFields(code, reveal)
+		out.hideEditCode()
 	}
 
 	m.vault.Put(resp.ID, code)
@@ -143,28 +145,33 @@ func (m *Manager) bulkLinkOutput(resp *padmark.BulkCreateLinksResponse) createBu
 	return out
 }
 
-// editCodeFields fills the edit-code fields of a create output per the reveal contract.
-func (out *createNoteOutput) editCodeFields(code string, reveal bool) {
-	out.EditCode, out.EditCodeNote = revealContract(code, reveal,
-		"edit_code stored by the proxy for this session; update/delete need no edit_code now")
+// revealedEditCodeNote tells the caller that a revealed edit code cannot be recovered later.
+const revealedEditCodeNote = "edit_code shown by opt-in request — it cannot be recovered later"
+
+// hideEditCode clears the edit code of a note create output. The hint says that the proxy holds
+// the code.
+func (out *createNoteOutput) hideEditCode() {
+	out.EditCode = ""
+	out.EditCodeNote = "edit_code stored by the proxy for this session; update/delete need no edit_code now"
 }
 
-// editCodeFields is the same reveal contract for link outputs.
-func (out *createLinkOutput) editCodeFields(code string, reveal bool) {
-	out.EditCode, out.EditCodeNote = revealContract(code, reveal,
-		"edit_code stored by the proxy for this session; delete_link needs no edit_code now")
+// revealEditCode shows the one-time edit code of a note create output.
+func (out *createNoteOutput) revealEditCode(code string) {
+	out.EditCode = code
+	out.EditCodeNote = revealedEditCodeNote
 }
 
-// revealContract returns the edit code and its note for a create output: by default only
-// hiddenNote, a hint that the proxy holds the code, is shown.
-//
-//nolint:revive // reveal is the caller's opt-in from the tool input
-func revealContract(code string, reveal bool, hiddenNote string) (editCode, note string) {
-	if reveal {
-		return code, "edit_code shown by opt-in request — it cannot be recovered later"
-	}
+// hideEditCode clears the edit code of a link create output. The hint says that the proxy holds
+// the code.
+func (out *createLinkOutput) hideEditCode() {
+	out.EditCode = ""
+	out.EditCodeNote = "edit_code stored by the proxy for this session; delete_link needs no edit_code now"
+}
 
-	return "", hiddenNote
+// revealEditCode shows the one-time edit code of a link create output.
+func (out *createLinkOutput) revealEditCode(code string) {
+	out.EditCode = code
+	out.EditCodeNote = revealedEditCodeNote
 }
 
 func optStrText(o padmark.OptString) string {

@@ -225,6 +225,9 @@ const (
 	minIPv6TrustedPrefix = 7
 )
 
+// bitsPerByte converts the byte length of an IP address into its bit length.
+const bitsPerByte = 8
+
 // overlyBroadProxyCIDRs returns the trusted-proxy entries wide enough to be a configuration
 // error, formatted for logging. Trusting an address means trusting the X-Forwarded-For and
 // X-Real-IP headers it sends; trusting a range that covers arbitrary clients therefore lets
@@ -242,7 +245,7 @@ func overlyBroadProxyCIDRs(proxies []*net.IPNet) []string {
 		ones, bits := cidr.Mask.Size()
 
 		limit := minIPv6TrustedPrefix
-		if bits == net.IPv4len*8 {
+		if bits == net.IPv4len*bitsPerByte {
 			limit = minIPv4TrustedPrefix
 		}
 

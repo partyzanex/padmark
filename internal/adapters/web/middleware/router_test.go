@@ -26,7 +26,7 @@ func TestStatusRecorder_WriteHeader_DelegatesOnce(t *testing.T) {
 	}
 
 	sre.WriteHeader(net_http.StatusOK)
-	sre.WriteHeader(net_http.StatusInternalServerError) // must be ignored
+	sre.WriteHeader(net_http.StatusInternalServerError) // must be ignored.
 
 	assert.Equal(t, 1, spy.writeHeaderCalls,
 		"underlying ResponseWriter.WriteHeader must be called exactly once")
@@ -91,7 +91,7 @@ func TestIsPublicRoute(t *testing.T) {
 		{net_http.MethodDelete, "/links/abc123", true},
 		{net_http.MethodGet, "/r/abc123", true},
 		{net_http.MethodGet, "/abc123", true},
-		{net_http.MethodGet, "/unknown-page", true}, // any non-reserved single segment is a candidate note slug by design
+		{net_http.MethodGet, "/unknown-page", true}, // any non-reserved single segment is a candidate note slug by design.
 		// Reserved first segments stay non-public even when multi-segment — regression guard so
 		// path-like slugs don't open up protected routes. /edit/{id} is the named route opened
 		// up (GET only — EditPage re-checks per-note privacy); non-GET methods on it are not.

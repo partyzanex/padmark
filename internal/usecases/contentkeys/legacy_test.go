@@ -107,7 +107,7 @@ func (s *ManagerTestSuite) TestMigrateConvertsLegacyPlaintextNotes() {
 		registry.Phase = phase
 
 		return nil
-	}).Times(4) // pending + ready, for each of the two runs
+	}).Times(4) // pending + ready, for each of the two runs.
 	s.expectRows(&rows)
 	s.hasher.EXPECT().HashUserProvided("Abcdefgh1234").Return("v1$generated", nil)
 	s.hasher.EXPECT().HashUserProvided("hunter2").Return("v1$custom", nil)

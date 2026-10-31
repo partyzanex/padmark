@@ -75,7 +75,7 @@ func (suite *APITokenSuite) disabledMgr() *Manager {
 			Users:     suite.users,
 			Invites:   NewMockInviteStore(suite.ctrl),
 			Sessions:  NewMockSessionStore(suite.ctrl),
-			APITokens: nil, // API-token flow disabled → methods return domain.ErrFeatureNotSupported
+			APITokens: nil, // API-token flow disabled → methods return domain.ErrFeatureNotSupported.
 		},
 		crypto.NewPasswordHasher(testArgon2Params),
 		crypto.NewSealer(testArgon2Params),
@@ -89,7 +89,7 @@ func (suite *APITokenSuite) disabledMgr() *Manager {
 	return mgr
 }
 
-// ── helpers ──
+// ── helpers ──.
 
 func (suite *APITokenSuite) adminUser() *domain.User {
 	return &domain.User{
@@ -107,7 +107,7 @@ func (suite *APITokenSuite) regularUser() *domain.User {
 	}
 }
 
-// ── CreateAPIToken ──
+// ── CreateAPIToken ──.
 
 func (suite *APITokenSuite) TestCreateAPIToken_Disabled_ReturnsErrFeatureNotSupported() {
 	_, err := suite.disabledMgr().CreateAPIToken(suite.T().Context(), uuid.New(), Issuer{
@@ -188,7 +188,7 @@ func (suite *APITokenSuite) TestCreateAPIToken_Success_ReturnsPlainKeyAndPersist
 	suite.Len(raw, apiTokenBytes)
 }
 
-// ── ResolveAPIToken ──
+// ── ResolveAPIToken ──.
 
 func (suite *APITokenSuite) TestResolveAPIToken_Disabled_ReturnsErrFeatureNotSupported() {
 	_, _, err := suite.disabledMgr().ResolveAPIToken(suite.T().Context(), "plain")
@@ -276,7 +276,7 @@ func (suite *APITokenSuite) TestResolveAPIToken_UserLookupFails_WrapsError() {
 	suite.ErrorContains(err, "get token user")
 }
 
-// ── ListAPITokens ──
+// ── ListAPITokens ──.
 
 func (suite *APITokenSuite) TestListAPITokens_Disabled_ReturnsErrFeatureNotSupported() {
 	_, err := suite.disabledMgr().ListAPITokens(suite.T().Context(), uuid.New())
@@ -364,7 +364,7 @@ func (suite *APITokenSuite) TestListAPITokens_UsersListFails_WrapsError() {
 	suite.ErrorContains(err, "list users")
 }
 
-// ── RevokeAPIToken ──
+// ── RevokeAPIToken ──.
 
 func (suite *APITokenSuite) TestRevokeAPIToken_Disabled_ReturnsErrFeatureNotSupported() {
 	err := suite.disabledMgr().RevokeAPIToken(suite.T().Context(), uuid.New(), "tok-1")
@@ -408,7 +408,7 @@ func (suite *APITokenSuite) TestRevokeAPIToken_AdminLookupFails_WrapsError() {
 	suite.ErrorContains(err, "get admin user")
 }
 
-// ── issuance rules (M-6): step-up for bearer issuers, lifetime, issued_by ──
+// ── issuance rules (M-6): step-up for bearer issuers, lifetime, issued_by ──.
 
 // stepUpMgr wires an APITokenManager whose step-up verifier is a mock, so the issuance rule is
 // tested on its own (SessionManager.VerifyStepUp has its own tests in ManagerSuite).

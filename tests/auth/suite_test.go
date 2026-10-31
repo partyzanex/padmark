@@ -59,7 +59,7 @@ type AuthSuite struct {
 	Sessions sessionRepo
 }
 
-// ── helpers ──
+// ── helpers ──.
 
 // testTOTPSecret is a well-known base32 test vector; not a real credential.
 //
@@ -85,7 +85,7 @@ func (s *AuthSuite) newAdminUser(username string) *domain.User {
 	return usr
 }
 
-// ── UserRepository ──
+// ── UserRepository ──.
 
 func (s *AuthSuite) TestUser_Create_GetByUsername() {
 	ctx := s.T().Context()
@@ -163,7 +163,7 @@ func (s *AuthSuite) TestUser_Revoke() {
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
-// ── InviteRepository ──
+// ── InviteRepository ──.
 
 func (s *AuthSuite) TestInvite_Issue_ReturnsToken() {
 	ctx := s.T().Context()
@@ -224,7 +224,7 @@ func (s *AuthSuite) TestInvite_Consume_NotFound() {
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
-// ── SessionRepository ──
+// ── SessionRepository ──.
 
 func (s *AuthSuite) TestSession_Create_Get() {
 	ctx := s.T().Context()

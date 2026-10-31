@@ -125,7 +125,7 @@ func TestAccountsFlow(t *testing.T) {
 
 	ctx := context.Background()
 
-	// ── storage + wiring (see testAPITokenFlow for the same pattern) ──
+	// ── storage + wiring (see testAPITokenFlow for the same pattern) ──.
 	db, err := sqliterepo.Open("file:accountsflow?mode=memory&cache=shared", slog.New(slog.DiscardHandler))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, db.Close()) })
@@ -184,7 +184,7 @@ func TestAccountsFlow(t *testing.T) {
 	srv := httptest.NewServer(router)
 	t.Cleanup(srv.Close)
 
-	// ── headless bootstrap: CLI setup creates the first admin and prints the URI once ──
+	// ── headless bootstrap: CLI setup creates the first admin and prints the URI once ──.
 	out := captureStdout(t, func() error {
 		return clicmd.NewApp().Run(ctx, []string{
 			"padmark-cli", "--url", srv.URL,
@@ -202,7 +202,7 @@ func TestAccountsFlow(t *testing.T) {
 
 	require.Equal(t, http.StatusForbidden, resp.StatusCode)
 
-	// ── admin gets a credential and self-serves a token over the generated route ──
+	// ── admin gets a credential and self-serves a token over the generated route ──.
 	admin, err := users.GetByUsername(ctx, "admin")
 	require.NoError(t, err)
 	require.True(t, admin.IsAdmin)
@@ -248,7 +248,7 @@ func TestAccountsFlow(t *testing.T) {
 	require.Equal(t, http.StatusForbidden, status, body)
 	require.Contains(t, body, `"code":"step_up_required"`)
 
-	// ── invites: admin issues (with step-up), member enrolls via CLI setup, replay is 410 ──
+	// ── invites: admin issues (with step-up), member enrolls via CLI setup, replay is 410 ──.
 	status, body = hardeningDo(t, srv.URL, http.MethodPost, "/api/invites", bearer, "",
 		`{"password":"`+apiFlowPassword+`","totp_code":"`+totpCodeAt(1)+`"}`)
 	require.Equal(t, http.StatusCreated, status, body)
@@ -285,7 +285,7 @@ func TestAccountsFlow(t *testing.T) {
 	require.Equal(t, http.StatusGone, resp.StatusCode)
 	_ = resp.Body.Close()
 
-	// ── non-admin cannot mint invites ──
+	// ── non-admin cannot mint invites ──.
 	member, err := users.GetByUsername(ctx, "member")
 	require.NoError(t, err)
 	require.False(t, member.IsAdmin)

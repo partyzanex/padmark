@@ -57,13 +57,13 @@ func TestMCPFlow_AuthenticatedOwnerLifecycle(t *testing.T) {
 	sess := connectMCP(ctx, t, stack.srv.URL, envelope)
 	defer sess.Close()
 
-	// ── check_server through the bearer path ──
+	// ── check_server through the bearer path ──.
 	status := callOutput(ctx, t, sess, "check_server", map[string]any{})
 	require.False(t, status.IsError, toolText(status))
 	require.True(t, boolField(status, "live"), "healthz must pass")
 	require.True(t, boolField(status, "ready"), "readyz must pass")
 
-	// ── create_note: owner-scoped, the one-time edit code must not be printed ──
+	// ── create_note: owner-scoped, the one-time edit code must not be printed ──.
 	created := callOutput(ctx, t, sess, "create_note", map[string]any{
 		"content": "secret runbook", "privacy": "owner",
 	})
@@ -73,19 +73,19 @@ func TestMCPFlow_AuthenticatedOwnerLifecycle(t *testing.T) {
 	noteID := resultID(created)
 	require.NotEmpty(t, noteID)
 
-	// ── update_note: no edit_code passed — the proxy's vault supplies it ──
+	// ── update_note: no edit_code passed — the proxy's vault supplies it ──.
 	updated := callOutput(ctx, t, sess, "update_note", map[string]any{
 		"id": noteID, "content": "secret runbook v2",
 	})
 	require.False(t, updated.IsError, "update_note must succeed via the vault edit code: %s", toolText(updated))
 	require.Contains(t, toolText(updated), "secret runbook v2")
 
-	// ── get_note with the owner token reads the owner-only note ──
+	// ── get_note with the owner token reads the owner-only note ──.
 	got := callOutput(ctx, t, sess, "get_note", map[string]any{"id": noteID})
 	require.False(t, got.IsError, toolText(got))
 	require.Contains(t, toolText(got), "secret runbook v2")
 
-	// ── short links: create → metadata (read-only) → delete via the vault ──
+	// ── short links: create → metadata (read-only) → delete via the vault ──.
 	link := callOutput(ctx, t, sess, "create_link", map[string]any{
 		"target_url": "https://example.com/long/path",
 	})
@@ -98,13 +98,13 @@ func TestMCPFlow_AuthenticatedOwnerLifecycle(t *testing.T) {
 	linkDeleted := callOutput(ctx, t, sess, "delete_link", map[string]any{"id": resultID(link)})
 	require.False(t, linkDeleted.IsError, "delete_link must succeed via the vault edit code: %s", toolText(linkDeleted))
 
-	// ── bulk: two valid targets, results in request order (best-effort contract) ──
+	// ── bulk: two valid targets, results in request order (best-effort contract) ──.
 	bulk := callOutput(ctx, t, sess, "create_links_bulk", map[string]any{
 		"target_urls": []string{"https://example.com/one", "https://example.com/two"},
 	})
 	require.False(t, bulk.IsError, toolText(bulk))
 
-	// ── delete_note: same vault contract; storage-side: the note is really gone ──
+	// ── delete_note: same vault contract; storage-side: the note is really gone ──.
 	deleted := callOutput(ctx, t, sess, "delete_note", map[string]any{"id": noteID})
 	require.False(t, deleted.IsError, toolText(deleted))
 
@@ -120,7 +120,7 @@ func TestMCPFlow_Anonymous_PublicCreateAndPrivateAccessDenied(t *testing.T) {
 
 	stack := startTestPadmark(t)
 
-	sess := connectMCP(ctx, t, stack.srv.URL, "") // no token at all
+	sess := connectMCP(ctx, t, stack.srv.URL, "") // no token at all.
 	defer sess.Close()
 
 	created := callOutput(ctx, t, sess, "create_note", map[string]any{
@@ -146,7 +146,7 @@ func TestMCPFlow_Anonymous_PublicCreateAndPrivateAccessDenied(t *testing.T) {
 		"the failure text carries the remediation (configure a token or use edit_code)")
 }
 
-// ── wiring (mirrors internal/infra/server's assembly and the tests/auth integration setup) ──
+// ── wiring (mirrors internal/infra/server's assembly and the tests/auth integration setup) ──.
 
 func startTestPadmark(t *testing.T) *testStack {
 	t.Helper()
@@ -329,7 +329,7 @@ func (tr *testBearer) RoundTrip(req *http.Request) (*http.Response, error) {
 	return tr.base.RoundTrip(req)
 }
 
-// ── tool-call helpers ──
+// ── tool-call helpers ──.
 
 func callOutput(
 	ctx context.Context, t *testing.T, sess *mcpsdk.ClientSession, name string,

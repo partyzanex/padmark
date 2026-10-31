@@ -86,7 +86,7 @@ func (r *UserRepository) Create(ctx context.Context, u *domain.User) error {
 func insertUser(ctx context.Context, conn bun.IDB, u *domain.User) error {
 	_, err := conn.NewInsert().Model(toUserRow(u)).Exec(ctx)
 	if err != nil {
-		// SQLite unique constraint violation: error string contains "UNIQUE constraint failed"
+		// SQLite unique constraint violation: error string contains "UNIQUE constraint failed".
 		if isUniqueViolation(err) {
 			return domain.ErrUserExists
 		}

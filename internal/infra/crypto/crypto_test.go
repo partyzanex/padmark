@@ -22,7 +22,7 @@ func TestDecrypt_MalformedCiphertext_IsTagged(t *testing.T) {
 	require.ErrorIs(t, err, domain.ErrMalformedCiphertext)
 
 	// Valid base64 but shorter than the GCM nonce.
-	_, err = enc.Decrypt("YWI=", "slug") // "ab"
+	_, err = enc.Decrypt("YWI=", "slug") // "ab".
 	require.Error(t, err)
 	require.ErrorIs(t, err, domain.ErrMalformedCiphertext)
 }
@@ -85,7 +85,7 @@ func TestEncryptor_SamePlaintextProducesDifferentCiphertexts(t *testing.T) {
 	ct2, err := enc.Encrypt("hello", "slug")
 	require.NoError(t, err)
 
-	// nonce is random — same plaintext must produce different ciphertexts
+	// nonce is random — same plaintext must produce different ciphertexts.
 	assert.NotEqual(t, ct1, ct2)
 }
 
@@ -103,7 +103,7 @@ func TestEncryptor_TamperedCiphertextFails(t *testing.T) {
 	ct, err := enc.Encrypt("secret", "slug")
 	require.NoError(t, err)
 
-	// flip last byte of base64-encoded ciphertext
+	// flip last byte of base64-encoded ciphertext.
 	tampered := []byte(ct)
 	tampered[len(tampered)-1] ^= 0x01
 	_, err = enc.Decrypt(string(tampered), "slug")
@@ -118,7 +118,7 @@ func TestEncryptor_InvalidBase64Fails(t *testing.T) {
 
 func TestEncryptor_TooShortCiphertextFails(t *testing.T) {
 	enc := crypto.New()
-	// valid base64 but too short to contain nonce + tag
-	_, err := enc.Decrypt("aGVsbG8=", "slug") // base64("hello")
+	// valid base64 but too short to contain nonce + tag.
+	_, err := enc.Decrypt("aGVsbG8=", "slug") // base64("hello").
 	assert.Error(t, err)
 }

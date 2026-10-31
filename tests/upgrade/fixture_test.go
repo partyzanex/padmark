@@ -19,8 +19,8 @@ type legacyNote struct {
 	title       string
 	content     string
 	contentType string
-	createdAt   string // RFC 3339, as dumped
-	expiresAt   string // RFC 3339; empty = no expiry
+	createdAt   string // RFC 3339, as dumped.
+	expiresAt   string // RFC 3339; empty = no expiry.
 	burnTTL     int64
 	views       int
 	burn        bool
@@ -165,10 +165,10 @@ func (f *dialectFixture) notes() []legacyNote {
 // 64 hex characters (which looks like a hashed ID) can carry a code that looks like a stored hash.
 // These notes are inserted into the dump with the v0.1.6 schema, before the schema migrations.
 const (
-	noteHexArgonPrefix = noteCount + iota // edit code "v1$...": tagged by the full-shape check
-	noteHexFastPrefix                     // edit code "s1$...": tagged by the full-shape check
-	noteHexHashShaped                     // edit code of the exact "s1$" hash shape: needs mark-legacy
-	noteWeakEditCode                      // caller-chosen 12-char alphanumeric code: must use argon2id
+	noteHexArgonPrefix = noteCount + iota // edit code "v1$...": tagged by the full-shape check.
+	noteHexFastPrefix                     // edit code "s1$...": tagged by the full-shape check.
+	noteHexHashShaped                     // edit code of the exact "s1$" hash shape: needs mark-legacy.
+	noteWeakEditCode                      // caller-chosen 12-char alphanumeric code: must use argon2id.
 )
 
 func weakEditCodeNote() legacyNote {

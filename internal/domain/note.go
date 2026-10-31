@@ -73,7 +73,7 @@ type Note struct {
 	ID               string
 	Title            string
 	Content          string
-	ContentType      *ContentType // nil means not set (keep existing on update); defaults to markdown on create
+	ContentType      *ContentType // nil means not set (keep existing on update); defaults to markdown on create.
 	EditCode         string
 	Views            int
 	BurnTTL          int64

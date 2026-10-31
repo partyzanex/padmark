@@ -90,7 +90,7 @@ func Secure(path string, errOut io.Writer) {
 
 	perm := info.Mode().Perm()
 	if perm&permGroupOther == 0 {
-		return // already owner-only; nothing to do
+		return // already owner-only; nothing to do.
 	}
 
 	msg := fmt.Sprintf("warning: token file %s was accessible by group/other (%#o); tightened to 600\n", path, perm)

@@ -29,11 +29,16 @@ const (
 	// MaxContentSize bounds allocations when opening untrusted stored envelopes.
 	MaxContentSize = 64 << 20
 	// Padded base64 encodes every started block of 3 bytes as 4 characters.
-	base64BlockBytes       = 3
-	base64BlockChars       = 4
+	base64BlockBytes = 3
+	base64BlockChars = 4
+	// contentFieldWrappedKey and contentFieldPayload are the indexes of the wrapped data key
+	// and the payload in an envelope split on "$".
+	contentFieldWrappedKey = 3
+	contentFieldPayload    = 4
 	maxLegacyPlaintext     = MaxContentSize + contentNonceSize + contentTagSize
 	maxLegacyContentSize   = (maxLegacyPlaintext + base64BlockBytes - 1) / base64BlockBytes * base64BlockChars
-	maxContentEnvelopeSize = 256 + 2*(maxLegacyContentSize+contentNonceSize+contentTagSize) // conservative base64 bound
+	// conservative base64 bound.
+	maxContentEnvelopeSize = 256 + 2*(maxLegacyContentSize+contentNonceSize+contentTagSize)
 )
 
 // ContentCipher encrypts content with a fresh random DEK on every write, wrapping that DEK
@@ -109,13 +114,20 @@ func validKeyID(id string) bool {
 	}
 
 	for _, char := range id {
-		if (char < 'a' || char > 'z') && (char < 'A' || char > 'Z') &&
-			(char < '0' || char > '9') && char != '-' && char != '_' {
+		if !isKeyIDRune(char) {
 			return false
 		}
 	}
 
 	return true
+}
+
+// isKeyIDRune reports whether char is an ASCII letter, digit, '-' or '_'.
+func isKeyIDRune(char rune) bool {
+	isLetter := (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z')
+	isDigit := char >= '0' && char <= '9'
+
+	return isLetter || isDigit || char == '-' || char == '_'
 }
 
 //nolint:ireturn // stdlib cipher.AEAD is the GCM API
@@ -180,7 +192,7 @@ func parseContentEnvelope(value string) (*parsedEnvelope, error) {
 		return nil, domain.ErrMalformedCiphertext
 	}
 
-	wrapped, err := decodeContentField(parts[3], wrappedKeySize, wrappedKeySize)
+	wrapped, err := decodeContentField(parts[contentFieldWrappedKey], wrappedKeySize, wrappedKeySize)
 	if err != nil {
 		return nil, fmt.Errorf("decode content field: %w", err)
 	}
@@ -190,7 +202,7 @@ func parseContentEnvelope(value string) (*parsedEnvelope, error) {
 		limit = maxLegacyContentSize
 	}
 
-	payload, err := decodeContentField(parts[4], contentNonceSize+contentTagSize,
+	payload, err := decodeContentField(parts[contentFieldPayload], contentNonceSize+contentTagSize,
 		limit+contentNonceSize+contentTagSize)
 	if err != nil {
 		return nil, fmt.Errorf("decode content field: %w", err)

@@ -128,7 +128,7 @@ func ensureDefaultKeyring(path string, log *slog.Logger) error {
 
 	err = crypto.WriteContentKeyring(path, keyring)
 	if errors.Is(err, os.ErrExist) {
-		return nil // another starter has atomically published the complete keyring
+		return nil // another starter has atomically published the complete keyring.
 	}
 
 	if err != nil {

@@ -192,15 +192,24 @@ const (
 	MsgUnauthorized = "unauthorized"
 )
 
+// isPublicPath reports whether path is served without an authentication check.
 func isPublicPath(path string) bool {
+	return isPublicPage(path) || isPublicEndpoint(path)
+}
+
+// isPublicPage reports whether path is a sign-in page, a static asset, or a documentation page.
+func isPublicPage(path string) bool {
 	return path == "/login" ||
 		path == "/setup" ||
 		path == "/logout" ||
 		path == "/totp-login" ||
 		strings.HasPrefix(path, "/static/") ||
-		path == apiDocsPath || path == apiSpecPath || path == llmsTxtPath || path == FaviconPath ||
-		path == apiReferencePath ||
-		path == "/healthz" || path == "/readyz"
+		path == apiDocsPath || path == apiSpecPath || path == llmsTxtPath || path == FaviconPath
+}
+
+// isPublicEndpoint reports whether path is the API reference or a health probe.
+func isPublicEndpoint(path string) bool {
+	return path == apiReferencePath || path == "/healthz" || path == "/readyz"
 }
 
 // isPublicRoute lets note and link resource requests through the auth middleware — reads

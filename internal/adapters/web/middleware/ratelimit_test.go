@@ -41,7 +41,7 @@ func newReq(remoteAddr, xff, xri string) *http.Request {
 	return req
 }
 
-// ClientIP
+// ClientIP.
 
 func TestClientIP_NoProxies_UsesRemoteAddr(t *testing.T) {
 	req := newReq("10.0.0.1:9000", "1.2.3.4", "")
@@ -220,7 +220,7 @@ func TestWithTOTPRateLimit_ProxyPresentButUntrusted_ClientsShareOneBucket(t *tes
 		"an unconfigured proxy collapses every client into the proxy's own bucket")
 }
 
-// WarnUnconfiguredProxy
+// WarnUnconfiguredProxy.
 
 // countingHandler records how many requests reached the wrapped handler.
 type countingHandler struct{ calls int }
@@ -302,7 +302,7 @@ func TestWarnUnconfiguredProxy_NoHeaderStaysSilent(t *testing.T) {
 	assert.Empty(t, buf.String(), "no forwarding header means no proxy to warn about")
 }
 
-// isTrustedProxy
+// isTrustedProxy.
 
 func TestIsTrustedProxy_Contained(t *testing.T) {
 	assert.True(t, isTrustedProxy("10.0.0.1", []*net.IPNet{parseCIDR(t, "10.0.0.0/8")}))
@@ -316,7 +316,7 @@ func TestIsTrustedProxy_InvalidIP(t *testing.T) {
 	assert.False(t, isTrustedProxy("not-an-ip", []*net.IPNet{parseCIDR(t, "10.0.0.0/8")}))
 }
 
-// WithTOTPRateLimit
+// WithTOTPRateLimit.
 
 func TestWithTOTPRateLimit_AllowsUnderLimit(t *testing.T) {
 	calls := 0
@@ -353,7 +353,7 @@ func TestWithTOTPRateLimit_BlocksOverLimit(t *testing.T) {
 		handler(httptest.NewRecorder(), req)
 	}
 
-	// one more must be rate-limited
+	// one more must be rate-limited.
 	req := httptest.NewRequest(http.MethodPost, "/totp-login", nil)
 	req.RemoteAddr = "5.5.5.5:9000"
 
@@ -397,14 +397,14 @@ func TestWithTOTPRateLimit_DifferentIPs_IndependentBuckets(t *testing.T) {
 	})
 	handler := WithTOTPRateLimit(nil, testDiscardLog(), inner)
 
-	// exhaust bucket for IP A
+	// exhaust bucket for IP A.
 	for range totpRatePerMin {
 		req := httptest.NewRequest(http.MethodPost, "/totp-login", nil)
 		req.RemoteAddr = "9.9.9.9:1000"
 		handler(httptest.NewRecorder(), req)
 	}
 
-	// IP B must still be allowed
+	// IP B must still be allowed.
 	req := httptest.NewRequest(http.MethodPost, "/totp-login", nil)
 	req.RemoteAddr = "8.8.8.8:1000"
 

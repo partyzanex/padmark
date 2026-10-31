@@ -89,6 +89,9 @@ var StaticHandler = http.FileServer(http.FS(staticFS))
 //nolint:gochecknoglobals // computed once from embedded static content
 var styleVersion = staticAssetVersion("static/style.css")
 
+// staticVersionHexLength is the number of hex characters kept from the asset SHA-256 digest.
+const staticVersionHexLength = 12
+
 func staticAssetVersion(path string) string {
 	data, err := staticFS.ReadFile(path)
 	if err != nil {
@@ -97,7 +100,7 @@ func staticAssetVersion(path string) string {
 
 	sum := sha256.Sum256(data)
 
-	return hex.EncodeToString(sum[:])[:12]
+	return hex.EncodeToString(sum[:])[:staticVersionHexLength]
 }
 
 // RevealTokenStore issues and consumes one-time reveal tokens for burn-after-reading notes.

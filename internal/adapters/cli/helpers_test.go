@@ -35,7 +35,7 @@ func isolateEnv(t *testing.T) string {
 	t.Helper()
 
 	for _, key := range []string{EnvURL, EnvToken, EnvTimeout, EnvEditCode, EnvBootstrapToken} {
-		t.Setenv(key, "") // registers the restore of the original value
+		t.Setenv(key, "") // registers the restore of the original value.
 		require.NoError(t, os.Unsetenv(key))
 	}
 

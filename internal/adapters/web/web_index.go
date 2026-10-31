@@ -72,17 +72,15 @@ type privacyOption struct {
 // authenticated only with the account system (otherwise nothing enforces it), owner only to a
 // signed-in user (an anonymous note has no owner). The current level of an edited note is always
 // listed, so saving without a change keeps it; without accounts its hint says it is not enforced.
-//
-//nolint:revive // accounts is the --enable-accounts setting that selects the offered levels
-func privacyOptions(accounts, signedIn bool, current domain.Privacy) []privacyOption {
+func privacyOptions(accounts accountMode, signedIn bool, current domain.Privacy) []privacyOption {
 	levels := []struct {
 		value   domain.Privacy
 		label   string
 		offered bool
 	}{
 		{domain.PrivacyPublic, "Public", true},
-		{domain.PrivacyAuthenticated, "Requires login", accounts},
-		{domain.PrivacyOwner, "Owner only", accounts && signedIn},
+		{domain.PrivacyAuthenticated, "Requires login", accounts == accountsOn},
+		{domain.PrivacyOwner, "Owner only", accounts == accountsOn && signedIn},
 	}
 
 	options := make([]privacyOption, 0, len(levels))
@@ -96,7 +94,7 @@ func privacyOptions(accounts, signedIn bool, current domain.Privacy) []privacyOp
 		}
 
 		option := privacyOption{Value: string(level.value), Label: level.label, Hint: "", Selected: selected}
-		if !accounts && level.value != domain.PrivacyPublic {
+		if accounts == accountsOff && level.value != domain.PrivacyPublic {
 			option.Hint = "Not enforced: accounts are off, anyone with the link can view"
 		}
 

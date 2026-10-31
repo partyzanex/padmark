@@ -63,27 +63,38 @@ func (m *UserAdminManager) RevokeUser(ctx context.Context, adminUserID, targetUs
 	}
 
 	if target.IsAdmin {
-		all, listErr := m.users.List(ctx)
-		if listErr != nil {
-			return fmt.Errorf("list users: %w", listErr)
-		}
-
-		remainingAdmins := 0
-
-		for _, u := range all {
-			if u.IsAdmin && u.ID != targetUserID {
-				remainingAdmins++
-			}
-		}
-
-		if remainingAdmins == 0 {
-			return domain.ErrForbidden
+		err = m.requireOtherAdmin(ctx, targetUserID)
+		if err != nil {
+			return err
 		}
 	}
 
 	err = m.users.Revoke(ctx, targetUserID)
 	if err != nil {
 		return fmt.Errorf("revoke user: %w", err)
+	}
+
+	return nil
+}
+
+// requireOtherAdmin returns domain.ErrForbidden when no admin other than targetUserID exists.
+// Removing the last admin would open the bootstrap hole.
+func (m *UserAdminManager) requireOtherAdmin(ctx context.Context, targetUserID uuid.UUID) error {
+	all, err := m.users.List(ctx)
+	if err != nil {
+		return fmt.Errorf("list users: %w", err)
+	}
+
+	remainingAdmins := 0
+
+	for _, u := range all {
+		if u.IsAdmin && u.ID != targetUserID {
+			remainingAdmins++
+		}
+	}
+
+	if remainingAdmins == 0 {
+		return domain.ErrForbidden
 	}
 
 	return nil

@@ -47,6 +47,12 @@ const maxOpenDelimiters = 256
 // of N definitions costs O(N²): 512 KiB of "[a]:b" lines took 7 s.
 const refDefWindowLines = 128
 
+// refDefMaxIndent is the largest indent, in spaces, of a link-reference definition line.
+const refDefMaxIndent = 3
+
+// byteValues is the number of possible byte values, the size of a lookup table indexed by byte.
+const byteValues = 256
+
 // Priorities extension.Strikethrough and extension.Linkify register their parsers at.
 const (
 	strikethroughPriority = 500
@@ -148,13 +154,13 @@ func (w *windowedLinkReferences) Transform(node *ast.Paragraph, reader text.Read
 		w.inner.Transform(node, reader, pctx)
 
 		if next == len(all) {
-			break // the wrapped transformer finished the paragraph
+			break // the wrapped transformer finished the paragraph.
 		}
 
 		if node.Parent() == nil {
 			// The whole window was definitions: put the paragraph back after them for the rest.
 			reattach(parent, sibling, node)
-			node.SetBlankPreviousLines(false) // as goldmark: only the first definition inherits it
+			node.SetBlankPreviousLines(false) // as goldmark: only the first definition inherits it.
 
 			pending = pending[:0]
 
@@ -180,7 +186,7 @@ func (w *windowedLinkReferences) Transform(node *ast.Paragraph, reader text.Read
 func refDefWindowStop(lines []text.Segment, source []byte, from int) int {
 	for idx := from; idx < len(lines); idx++ {
 		line := util.TrimLeftSpace(lines[idx].Value(source))
-		if indent := lines[idx].Len() - len(line); indent <= 3 && len(line) > 0 && line[0] == '[' {
+		if indent := lines[idx].Len() - len(line); indent <= refDefMaxIndent && len(line) > 0 && line[0] == '[' {
 			return idx
 		}
 	}
@@ -358,11 +364,11 @@ type linkifyGuard struct {
 
 	// emailLocal is goldmark's own set of e-mail local-part bytes, derived from
 	// util.FindEmailIndex so the guard never disagrees with the parser it wraps.
-	emailLocal [256]bool
+	emailLocal [byteValues]bool
 }
 
 func newLinkifyGuard(inner parser.InlineParser) *linkifyGuard {
-	guard := &linkifyGuard{InlineParser: inner, emailLocal: [256]bool{}}
+	guard := &linkifyGuard{InlineParser: inner, emailLocal: [byteValues]bool{}}
 
 	for char := range guard.emailLocal {
 		guard.emailLocal[char] = util.FindEmailIndex([]byte{byte(char), '@', 'x'}) > 0

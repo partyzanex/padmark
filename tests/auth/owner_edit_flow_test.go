@@ -135,7 +135,7 @@ func TestOwnerEditFlow_APITokenOwner_EditsAndDeletesWithoutEditCode(t *testing.T
 	env := newOwnerFlowEnv(t, "ownereditflow")
 	authMgr, users, srvURL := env.authMgr, env.users, env.baseURL
 
-	// ── two accounts: the note's owner, and an unrelated second user ──
+	// ── two accounts: the note's owner, and an unrelated second user ──.
 	_, err := authMgr.AcceptFirstAdmin(ctx, "owner", ownerFlowPassword)
 	require.NoError(t, err)
 
@@ -163,10 +163,10 @@ func TestOwnerEditFlow_APITokenOwner_EditsAndDeletesWithoutEditCode(t *testing.T
 	}, 0)
 	require.NoError(t, err)
 
-	// ── owner creates a note over the API-token-authenticated path ──
+	// ── owner creates a note over the API-token-authenticated path ──.
 	created := postNote(t, srvURL, ownerKey, `{"title":"t","content":"c"}`)
 
-	// ── owner edits it with NO edit_code — the token alone must be enough ──
+	// ── owner edits it with NO edit_code — the token alone must be enough ──.
 	updateReq, err := http.NewRequestWithContext(ctx, http.MethodPut,
 		srvURL+"/notes/"+created.ID, strings.NewReader(`{"title":"updated","content":"new body"}`))
 	require.NoError(t, err)
@@ -181,7 +181,7 @@ func TestOwnerEditFlow_APITokenOwner_EditsAndDeletesWithoutEditCode(t *testing.T
 	require.Equal(t, http.StatusOK, updateResp.StatusCode,
 		"the note's own API-token owner must be able to update it without edit_code")
 
-	// ── a different authenticated user, same request shape, must still be rejected ──
+	// ── a different authenticated user, same request shape, must still be rejected ──.
 	hijackReq, err := http.NewRequestWithContext(ctx, http.MethodPut,
 		srvURL+"/notes/"+created.ID, strings.NewReader(`{"title":"hijacked","content":"x"}`))
 	require.NoError(t, err)
@@ -196,7 +196,7 @@ func TestOwnerEditFlow_APITokenOwner_EditsAndDeletesWithoutEditCode(t *testing.T
 	require.Equal(t, http.StatusForbidden, hijackResp.StatusCode,
 		"the owner bypass must not extend to a different authenticated user without the edit_code")
 
-	// ── owner deletes it with NO edit_code ──
+	// ── owner deletes it with NO edit_code ──.
 	deleteReq, err := http.NewRequestWithContext(ctx, http.MethodDelete, srvURL+"/notes/"+created.ID, nil)
 	require.NoError(t, err)
 	deleteReq.Header.Set("Authorization", "Bearer "+ownerKey)
@@ -240,7 +240,7 @@ func postNote(t *testing.T, baseURL, bearerKey, body string) createdNote {
 	return note
 }
 
-// ── GET /edit/{id} privacy gate ──
+// ── GET /edit/{id} privacy gate ──.
 
 // editPageCaller is one way of asking for the edit page: which credential is presented, and
 // whether the client looks like a browser (Accept: text/html) or an API client.

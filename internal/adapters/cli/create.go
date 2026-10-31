@@ -65,7 +65,8 @@ func createCommand() *urcli.Command {
 			clifactory.StringFlag(func(flag *urcli.StringFlag) {
 				flag.Name = FlagEditCode
 				flag.Aliases = []string{"e"}
-				flag.Usage = "Custom edit code, 8-128 chars (random 12-char code generated if omitted). " + psWarnEditCode
+				flag.Usage = "Custom edit code, 8-128 chars (random 12-char code generated if omitted). " +
+					psWarnEditCode
 				flag.Sources = urcli.EnvVars(EnvEditCode)
 			}),
 		}
@@ -187,7 +188,8 @@ func handleCreateNoteRes(res padmark.CreateNoteRes) (*padmark.CreateNoteResponse
 	case *padmark.CreateNoteUnsupportedMediaType:
 		return nil, fmt.Errorf("%w: %s", ErrBadRequest, typed.Message)
 	case *padmark.CreateNoteServiceUnavailable:
-		return nil, errorcontext.Wrap(serviceUnavailableError(padmark.ErrorResponse(*typed)), "decode create note response")
+		return nil, errorcontext.Wrap(
+			serviceUnavailableError(padmark.ErrorResponse(*typed)), "decode create note response")
 	case *padmark.CreateNoteInternalServerError:
 		return nil, fmt.Errorf("%w: %s", ErrServer, typed.Message)
 	default:

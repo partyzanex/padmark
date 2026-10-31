@@ -12,10 +12,13 @@ import (
 // that drive the content-key migration and then read through the notes/links managers.
 // Never use this keyring in a running installation.
 func ContentKeyring() *crypto.ContentKeyring {
-	const testKeySize = 32
+	const (
+		testKeySize     = 32
+		testKeyFillByte = 42
+	)
 
 	return &crypto.ContentKeyring{
-		Active: "test", Keys: map[string][]byte{"test": bytes.Repeat([]byte{42}, testKeySize)},
+		Active: "test", Keys: map[string][]byte{"test": bytes.Repeat([]byte{testKeyFillByte}, testKeySize)},
 	}
 }
 

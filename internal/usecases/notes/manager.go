@@ -104,7 +104,7 @@ type Manager struct {
 	renderCache RenderCache
 	// allowCustomSlugs gates user-supplied (human-readable) slugs. When false, custom slugs are
 	// rejected and only server-generated random slugs are issued.
-	allowCustomSlugs bool
+	allowCustomSlugs domain.CustomSlugSetting
 }
 
 // NewManager creates a new Manager with required dependencies. allowCustomSlugs enables
@@ -126,7 +126,7 @@ func NewManager(
 		log:              log,
 		burn:             newBurner(storage, encryptor, log),
 		renderCache:      noRenderCache{},
-		allowCustomSlugs: allowCustomSlugs,
+		allowCustomSlugs: domain.CustomSlugSetting(allowCustomSlugs),
 	}
 }
 
@@ -214,7 +214,7 @@ func (m *Manager) Create(ctx context.Context, note *domain.Note) (*domain.Note, 
 	}
 
 	note.Content = encrypted
-	note.ID = domain.HashSlug(slug) // store hash, not slug
+	note.ID = domain.HashSlug(slug) // store hash, not slug.
 
 	err = m.storage.Create(ctx, note)
 	if err != nil {

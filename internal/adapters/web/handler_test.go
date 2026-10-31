@@ -282,7 +282,7 @@ func sessioned(r *http.Request) *http.Request {
 func (s *HandlerSuite) expectMutationGate() {
 	s.manager.EXPECT().Peek(gomock.Any(), gomock.Any()).DoAndReturn(
 		func(_ context.Context, id string) (*domain.Note, error) {
-			note := newTestNote("gate", "c") // nil privacy → public
+			note := newTestNote("gate", "c") // nil privacy → public.
 			note.ID = id
 
 			return note, nil
@@ -295,7 +295,7 @@ func (s *HandlerSuite) expectLinkMutationGate() {
 	s.linkManager.EXPECT().Peek(gomock.Any(), gomock.Any()).Return(newTestLink(), nil).AnyTimes()
 }
 
-// ── IndexPage ──
+// ── IndexPage ──.
 
 func (s *HandlerSuite) TestIndexPage() {
 	w := httptest.NewRecorder()
@@ -309,7 +309,7 @@ func (s *HandlerSuite) TestIndexPage() {
 	s.Contains(w.Body.String(), "Publish")
 }
 
-// ── EditPage ──
+// ── EditPage ──.
 
 func (s *HandlerSuite) TestEditPage_OK() {
 	note := newTestNote("edit me", "# hello")
@@ -390,7 +390,7 @@ func (s *HandlerSuite) TestEditPage_NotFound() {
 	s.Contains(w.Body.String(), "not found")
 }
 
-// ── SuccessPage ──
+// ── SuccessPage ──.
 
 func (s *HandlerSuite) TestSuccessPage_OK() {
 	w := httptest.NewRecorder()
@@ -505,7 +505,7 @@ func (s *HandlerSuite) TestSuccessPage_InvalidExpires() {
 	s.Contains(w.Body.String(), "never expires")
 }
 
-// ── CreateNote ──
+// ── CreateNote ──.
 
 func (s *HandlerSuite) TestCreateNote_OK() {
 	note := newTestNote("hello", "# world")
@@ -582,7 +582,7 @@ func (s *HandlerSuite) TestCreateNote_WithTTL() {
 		DoAndReturn(func(_ context.Context, n *domain.Note) (*domain.Note, error) {
 			s.True(n.BurnAfterReading)
 			s.Equal(int64(3600), n.BurnTTL)
-			s.Nil(n.ExpiresAt) // expiry is set on first read, not at creation
+			s.Nil(n.ExpiresAt) // expiry is set on first read, not at creation.
 			note.ID = n.ID
 
 			return note, nil
@@ -687,7 +687,7 @@ func (s *HandlerSuite) TestCreateNote_SlugConflict() {
 }
 
 func (s *HandlerSuite) TestCreateNote_InvalidContentType() {
-	// ogen validates the enum at schema level → 400
+	// ogen validates the enum at schema level → 400.
 	body := `{"title":"t","content":"c","content_type":"application/pdf"}`
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPost, "/notes", strings.NewReader(body))
@@ -725,7 +725,7 @@ func (s *HandlerSuite) TestCreateNote_BodyExceedsLimit_Returns413() {
 	s.Equal(http.StatusRequestEntityTooLarge, w.Code)
 }
 
-// ── ogen decode errors (pre-handler failures) ──
+// ── ogen decode errors (pre-handler failures) ──.
 
 // decodeErrorBody posts body to /notes with the given Content-Type and returns the status and
 // the decoded error envelope. It reads into a map rather than a typed struct so an absent
@@ -880,7 +880,7 @@ func (s *HandlerSuite) TestCreateNote_InternalError() {
 	s.Equal(http.StatusInternalServerError, w.Code)
 }
 
-// ── GetNote ──
+// ── GetNote ──.
 
 func (s *HandlerSuite) TestGetNote_JSON() {
 	note := newTestNote("my title", "**bold**")
@@ -1270,7 +1270,7 @@ func (s *HandlerSuite) TestGetNote_Private_JSON_Unauthorized() {
 	s.Equal(http.StatusUnauthorized, w.Code)
 }
 
-// ── Multi-segment (path-like) slug support ──
+// ── Multi-segment (path-like) slug support ──.
 
 func (s *HandlerSuite) TestGetNote_MultiSegmentSlug_PublicServed() {
 	// A path-like slug (project/GUIDE.md) is a public note: served without auth even though the
@@ -1362,7 +1362,7 @@ func (s *HandlerSuite) TestGetNote_Private_NotFound() {
 	s.Equal(http.StatusNotFound, w.Code)
 }
 
-// ── UpdateNote ──
+// ── UpdateNote ──.
 
 func (s *HandlerSuite) TestUpdateNote_OK() {
 	s.expectMutationGate()
@@ -1407,7 +1407,7 @@ func (s *HandlerSuite) TestUpdateNote_WithTTL() {
 		DoAndReturn(func(_ context.Context, _, _ string, _ uuid.UUID, n *domain.Note) (*domain.Note, error) {
 			s.True(n.BurnAfterReading)
 			s.Equal(int64(3600), n.BurnTTL)
-			s.Nil(n.ExpiresAt) // expiry is set on first read, not at update time
+			s.Nil(n.ExpiresAt) // expiry is set on first read, not at update time.
 
 			return updated, nil
 		})
@@ -1573,7 +1573,7 @@ func (s *HandlerSuite) TestUpdateNote_InvalidBody() {
 	s.Equal(http.StatusBadRequest, w.Code)
 }
 
-// ── DeleteNote ──
+// ── DeleteNote ──.
 
 func (s *HandlerSuite) TestDeleteNote_OK() {
 	s.expectMutationGate()
@@ -1642,7 +1642,7 @@ func (s *HandlerSuite) TestDeleteNote_Forbidden() {
 	s.Equal(http.StatusForbidden, w.Code)
 }
 
-// ── Health ──
+// ── Health ──.
 
 func (s *HandlerSuite) TestHealthz() {
 	w := httptest.NewRecorder()
@@ -1695,7 +1695,7 @@ func (s *HandlerSuite) TestReadyz_Error() {
 	s.Equal(http.StatusServiceUnavailable, w.Code)
 }
 
-// ── Middleware ──
+// ── Middleware ──.
 
 func (s *HandlerSuite) TestRequestIDHeader() {
 	s.manager.EXPECT().View(gomock.Any(), testID).Return(newTestNote("title", "content"), nil)
@@ -1747,7 +1747,7 @@ func (s *HandlerSuite) TestStaticAsset_AutofillOverride() {
 // TestTOTPLoginHandler_AccountsDisabled_Returns404 covers the nil-guard added so that the
 // account system is opt-in: with no auth manager configured, /totp-login must 404.
 func (s *HandlerSuite) TestTOTPLoginHandler_AccountsDisabled_Returns404() {
-	handler := web.NewHandler(s.manager, s.linkManager, discardLog()) // no WithAuthManager → accounts disabled
+	handler := web.NewHandler(s.manager, s.linkManager, discardLog()) // no WithAuthManager → accounts disabled.
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPost, "/totp-login", nil)
 
@@ -1759,7 +1759,7 @@ func (s *HandlerSuite) TestTOTPLoginHandler_AccountsDisabled_Returns404() {
 // TestChangePasswordPage_AccountsDisabled_Returns404 mirrors the TOTPLoginHandler nil-guard
 // test above for the GET /change-password page.
 func (s *HandlerSuite) TestChangePasswordPage_AccountsDisabled_Returns404() {
-	handler := web.NewHandler(s.manager, s.linkManager, discardLog()) // no WithAuthManager → accounts disabled
+	handler := web.NewHandler(s.manager, s.linkManager, discardLog()) // no WithAuthManager → accounts disabled.
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/change-password", nil)
 
@@ -1772,20 +1772,20 @@ func (s *HandlerSuite) TestChangePasswordPage_AccountsDisabled_Returns404() {
 // section 1): with no tokens and no auth manager (s.router = newRouter(nil)), public pages
 // are reachable and account pages are not exposed. Nothing redirects to /login.
 func (s *HandlerSuite) TestPublicMode_AccessMatrix() {
-	s.pinger.EXPECT().PingContext(gomock.Any()).Return(nil).AnyTimes() // for /readyz
+	s.pinger.EXPECT().PingContext(gomock.Any()).Return(nil).AnyTimes() // for /readyz.
 
 	cases := []struct {
 		path string
 		want int
 	}{
-		{"/", http.StatusOK},                      // editor — public
-		{"/healthz", http.StatusOK},               // liveness
-		{"/readyz", http.StatusOK},                // readiness
-		{"/api", http.StatusOK},                   // API docs
-		{"/static/style.css", http.StatusOK},      // static assets
-		{"/setup", http.StatusNotFound},           // accounts disabled
-		{"/change-password", http.StatusNotFound}, // accounts disabled
-		{"/admin", http.StatusForbidden},          // no session → forbidden
+		{"/", http.StatusOK},                      // editor — public.
+		{"/healthz", http.StatusOK},               // liveness.
+		{"/readyz", http.StatusOK},                // readiness.
+		{"/api", http.StatusOK},                   // API docs.
+		{"/static/style.css", http.StatusOK},      // static assets.
+		{"/setup", http.StatusNotFound},           // accounts disabled.
+		{"/change-password", http.StatusNotFound}, // accounts disabled.
+		{"/admin", http.StatusForbidden},          // no session → forbidden.
 	}
 
 	for _, testCase := range cases {
@@ -1799,7 +1799,7 @@ func (s *HandlerSuite) TestPublicMode_AccessMatrix() {
 	}
 }
 
-// ── Broken writer tests (cover error-log branches) ──
+// ── Broken writer tests (cover error-log branches) ──.
 
 type failWriter struct {
 	header http.Header
@@ -1893,7 +1893,7 @@ func (s *HandlerSuite) TestGetNote_JSON_WriteFail() {
 	s.NotNil(fwr)
 }
 
-// ── Rate limit ──
+// ── Rate limit ──.
 
 func (s *HandlerSuite) TestRateLimit_Exceeded() {
 	handler := web.NewHandler(s.manager, s.linkManager, discardLog())
@@ -1984,7 +1984,7 @@ func (s *HandlerSuite) TestRateLimit_DifferentIPs() {
 	s.Equal(http.StatusOK, send("203.0.113.2"))
 }
 
-// ── Fail lockout ──
+// ── Fail lockout ──.
 
 func (s *HandlerSuite) TestFailLockout_Lockout() {
 	s.expectMutationGate()
@@ -2153,7 +2153,7 @@ func (s *HandlerSuite) TestFailLockout_IndependentPerNoteID() {
 	s.Equal(http.StatusForbidden, w.Code)
 }
 
-// ── writeError default branch ──
+// ── writeError default branch ──.
 
 func (s *HandlerSuite) TestGetNote_Plain_Expired() {
 	s.manager.EXPECT().View(gomock.Any(), testID).Return(nil, domain.ErrExpired)
@@ -2207,7 +2207,7 @@ func (s *HandlerSuite) TestRecovery_Panic() {
 	s.Equal(http.StatusInternalServerError, w.Code)
 }
 
-// ── Auth middleware ──
+// ── Auth middleware ──.
 
 func (s *HandlerSuite) TestAuth_NoTokensConfigured() {
 	note := newTestNote("t", "c")
@@ -2410,7 +2410,7 @@ func (s *HandlerSuite) TestGetNote_AuthInstance_Unauthenticated_HidesEditButtons
 	s.NotContains(body, ">New<")
 }
 
-// ── Login ──
+// ── Login ──.
 
 func (s *HandlerSuite) TestLoginPage() {
 	w := httptest.NewRecorder()
@@ -2474,7 +2474,7 @@ func (s *HandlerSuite) TestAuth_APIClient_NoHeaders_Returns401() {
 	router := s.newRouterWithTOTPAuth()
 
 	w := httptest.NewRecorder()
-	// No Accept, no Sec-Fetch-Dest — typical API client (curl)
+	// No Accept, no Sec-Fetch-Dest — typical API client (curl).
 	r := httptest.NewRequest(http.MethodGet, "/success", nil)
 
 	router.ServeHTTP(w, r)
@@ -2495,7 +2495,7 @@ func (s *HandlerSuite) TestAuth_Browser_SecFetchDestDocument_Returns303() {
 	s.True(strings.HasPrefix(w.Header().Get("Location"), "/login"))
 }
 
-// ── API docs ──
+// ── API docs ──.
 
 func (s *HandlerSuite) TestAPIDocsPage() {
 	w := httptest.NewRecorder()
@@ -2578,7 +2578,7 @@ func (s *HandlerSuite) TestAPIDocsPage_Public() {
 	s.Equal(http.StatusOK, w.Code, "/api should be public")
 }
 
-// ── BurnInterstitial (GET /{id} + revealStore) ──
+// ── BurnInterstitial (GET /{id} + revealStore) ──.
 
 func (s *HandlerSuite) TestGetNote_BurnInterstitial_ShowsConfirmPage() {
 	note := newTestNote("secret", "burn me")
@@ -2678,7 +2678,7 @@ func (s *HandlerSuite) TestGetNote_BurnInterstitial_GracePeriod_SkipsInterstitia
 	s.Contains(w.Body.String(), "burn me")
 }
 
-// ── HandleReveal (POST /{id}) ──
+// ── HandleReveal (POST /{id}) ──.
 
 func (s *HandlerSuite) TestHandleReveal_OK() {
 	note := newTestNote("secret", "burn me")
@@ -2720,7 +2720,7 @@ func (s *HandlerSuite) TestHandleReveal_NoCSRF_Forbidden() {
 	r := httptest.NewRequest(http.MethodPost, "/notes/"+testID, strings.NewReader("token=tok-abc"))
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	r.Header.Set("Accept", "text/html")
-	// no padmark_csrf cookie / csrf_token field
+	// no padmark_csrf cookie / csrf_token field.
 
 	router.ServeHTTP(w, r)
 
@@ -2899,7 +2899,7 @@ func (s *HandlerSuite) TestMutationGate_AuthenticatedCaller_PassesGate_PersonalN
 
 	note := newTestNote("secret", "someone else's")
 	note.Privacy = new(domain.PrivacyOwner)
-	note.OwnerID = new(uuid.UUID) // owned by a user who is not in this request
+	note.OwnerID = new(uuid.UUID) // owned by a user who is not in this request.
 
 	router := s.newRouterWithTOTPAuth()
 	s.manager.EXPECT().

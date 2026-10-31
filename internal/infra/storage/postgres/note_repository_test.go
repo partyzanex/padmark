@@ -91,7 +91,7 @@ func newNote(id, title, content string) *domain.Note {
 	}
 }
 
-// ── Create ──
+// ── Create ──.
 
 func (s *RepositoryTestSuite) TestCreate_OK() {
 	err := s.repo.Create(s.T().Context(), newNote("c1", "hello", "world"))
@@ -181,7 +181,7 @@ func (s *RepositoryTestSuite) TestUpdate_PreservesOwnerID() {
 	s.Equal(ownerID, *got.OwnerID, "owner_id must be immutable via Update, even if a caller sets it")
 }
 
-// ── Get ──
+// ── Get ──.
 
 func (s *RepositoryTestSuite) TestGet_OK() {
 	ctx := s.T().Context()
@@ -220,7 +220,7 @@ func (s *RepositoryTestSuite) TestExists_False() {
 	s.False(exists)
 }
 
-// ── Update ──
+// ── Update ──.
 
 func (s *RepositoryTestSuite) TestUpdate_OK() {
 	ctx := s.T().Context()
@@ -422,7 +422,7 @@ func (s *RepositoryTestSuite) TestUpdate_ContentType_ExplicitChange() {
 	s.Equal(new(domain.ContentTypeMarkdown), got.ContentType, "content_type must be updated when explicitly set")
 }
 
-// ── IncrementViews ──
+// ── IncrementViews ──.
 
 func (s *RepositoryTestSuite) TestIncrementViews_OK() {
 	ctx := s.T().Context()
@@ -443,7 +443,7 @@ func (s *RepositoryTestSuite) TestIncrementViews_NotFound() {
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
-// ── Delete ──
+// ── Delete ──.
 
 func (s *RepositoryTestSuite) TestDelete_OK() {
 	ctx := s.T().Context()
@@ -461,7 +461,7 @@ func (s *RepositoryTestSuite) TestDelete_NotFound() {
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
-// Consume
+// Consume.
 
 func (s *RepositoryTestSuite) TestConsume_BurnAfterReading() {
 	ctx := s.T().Context()
@@ -502,7 +502,7 @@ func (s *RepositoryTestSuite) TestConsume_NotEligible() {
 	_, err := s.repo.Consume(ctx, "con-no")
 	s.Require().ErrorIs(err, domain.ErrNotFound)
 
-	// note must still exist
+	// note must still exist.
 	got, err := s.repo.Get(ctx, "con-no")
 	s.Require().NoError(err)
 	s.Equal("con-no", got.ID)
@@ -514,7 +514,7 @@ func (s *RepositoryTestSuite) TestConsume_NotFound() {
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
-// ── Migrate ──
+// ── Migrate ──.
 
 func (s *RepositoryTestSuite) TestMigrate_Idempotent() {
 	// Running Migrate again should not fail (all migrations already applied).
@@ -523,24 +523,24 @@ func (s *RepositoryTestSuite) TestMigrate_Idempotent() {
 	s.Require().NoError(err)
 }
 
-// ── Roundtrip ──
+// ── Roundtrip ──.
 
 func (s *RepositoryTestSuite) TestRoundtrip_CRUD() {
 	ctx := s.T().Context()
 
-	// Create
+	// Create.
 	n := newNote("rt1", "original", "# Hello")
 	n.EditCode = "edit123"
 	s.Require().NoError(s.repo.Create(ctx, n))
 
-	// Read
+	// Read.
 	got, err := s.repo.Get(ctx, "rt1")
 	s.Require().NoError(err)
 	s.Equal("original", got.Title)
 	s.Equal("# Hello", got.Content)
 	s.Equal("edit123", got.EditCode)
 
-	// Update
+	// Update.
 	updated := &domain.Note{
 		Title:       "updated",
 		Content:     "# Updated",
@@ -559,14 +559,14 @@ func (s *RepositoryTestSuite) TestRoundtrip_CRUD() {
 	s.Equal("updated", got.Title)
 	s.Equal(new(domain.ContentTypePlain), got.ContentType)
 
-	// Views
+	// Views.
 	s.Require().NoError(s.repo.IncrementViews(ctx, "rt1"))
 
 	got, err = s.repo.Get(ctx, "rt1")
 	s.Require().NoError(err)
 	s.Equal(1, got.Views)
 
-	// Delete
+	// Delete.
 	s.Require().NoError(s.repo.Delete(ctx, "rt1"))
 
 	_, err = s.repo.Get(ctx, "rt1")

@@ -44,13 +44,15 @@ func shortenCommand() *urcli.Command {
 			clifactory.StringFlag(func(flag *urcli.StringFlag) {
 				flag.Name = FlagEditCode
 				flag.Aliases = []string{"e"}
-				flag.Usage = "Custom edit code, 8-128 chars (random 12-char code generated if omitted). " + psWarnEditCode
+				flag.Usage = "Custom edit code, 8-128 chars (random 12-char code generated if omitted). " +
+					psWarnEditCode
 				flag.Sources = urcli.EnvVars(EnvEditCode)
 			}),
 			clifactory.BoolFlag(func(flag *urcli.BoolFlag) {
 				flag.Name = FlagDirectRedirect
 				flag.Usage = "Override the server's --direct-redirect default for this link only " +
-					"(--direct-redirect=false forces the transparency interstitial); omitted inherits the server default"
+					"(--direct-redirect=false forces the transparency interstitial); " +
+					"omitted inherits the server default"
 			}),
 		}
 		command.Action = shortenAction
@@ -133,30 +135,47 @@ func buildShortenReq(cmd *urcli.Command) (*padmark.CreateLinkRequest, error) {
 }
 
 func handleCreateLinkRes(res padmark.CreateLinkRes) (*padmark.CreateLinkResponse, error) {
-	switch typed := res.(type) {
-	case *padmark.CreateLinkResponseHeaders:
+	if typed, ok := res.(*padmark.CreateLinkResponseHeaders); ok {
 		resp := typed.Response
 
 		return &resp, nil
-	case *padmark.CreateLinkBadRequest:
-		return nil, fmt.Errorf("%w: %s", ErrBadRequest, typed.Message)
-	case *padmark.CreateLinkUnauthorized:
-		return nil, fmt.Errorf("%w: %s", ErrUnauthorized, typed.Message)
-	case *padmark.CreateLinkConflict:
-		return nil, fmt.Errorf("%w: %s", ErrSlugConflict, typed.Message)
-	case *padmark.CreateLinkRequestEntityTooLarge:
-		return nil, fmt.Errorf("%w: %s", ErrRequestTooLarge, typed.Message)
-	case *padmark.CreateLinkUnprocessableEntity:
-		return nil, fmt.Errorf("%w: %s", ErrValidation, typed.Message)
-	case *padmark.CreateLinkUnsupportedMediaType:
-		return nil, fmt.Errorf("%w: %s", ErrBadRequest, typed.Message)
-	case *padmark.CreateLinkTooManyRequests:
-		return nil, ErrRateLimited
+	}
+
+	err := createLinkClientError(res)
+	if err != nil {
+		return nil, err
+	}
+
+	switch typed := res.(type) {
 	case *padmark.CreateLinkServiceUnavailable:
-		return nil, errorcontext.Wrap(serviceUnavailableError(padmark.ErrorResponse(*typed)), "decode create link response")
+		return nil, errorcontext.Wrap(
+			serviceUnavailableError(padmark.ErrorResponse(*typed)), "decode create link response")
 	case *padmark.CreateLinkInternalServerError:
 		return nil, fmt.Errorf("%w: %s", ErrServer, typed.Message)
 	default:
 		return nil, fmt.Errorf("%w: %T", ErrUnexpectedResponse, res)
+	}
+}
+
+// createLinkClientError maps the client-error variants of a CreateLink response. It returns nil
+// for every other variant, so the caller handles those.
+func createLinkClientError(res padmark.CreateLinkRes) error {
+	switch typed := res.(type) {
+	case *padmark.CreateLinkBadRequest:
+		return fmt.Errorf("%w: %s", ErrBadRequest, typed.Message)
+	case *padmark.CreateLinkUnauthorized:
+		return fmt.Errorf("%w: %s", ErrUnauthorized, typed.Message)
+	case *padmark.CreateLinkConflict:
+		return fmt.Errorf("%w: %s", ErrSlugConflict, typed.Message)
+	case *padmark.CreateLinkRequestEntityTooLarge:
+		return fmt.Errorf("%w: %s", ErrRequestTooLarge, typed.Message)
+	case *padmark.CreateLinkUnprocessableEntity:
+		return fmt.Errorf("%w: %s", ErrValidation, typed.Message)
+	case *padmark.CreateLinkUnsupportedMediaType:
+		return fmt.Errorf("%w: %s", ErrBadRequest, typed.Message)
+	case *padmark.CreateLinkTooManyRequests:
+		return ErrRateLimited
+	default:
+		return nil
 	}
 }

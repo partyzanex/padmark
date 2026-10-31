@@ -95,7 +95,7 @@ func (s *APITokenRepositoryTestSuite) create(tok *domain.APIToken) {
 	s.Require().True(created)
 }
 
-// ── IssuedBy cascade / DeleteByUserID (M-6) ──
+// ── IssuedBy cascade / DeleteByUserID (M-6) ──.
 
 // TestRevokeByHash_CascadesToIssuedTokens: a token records the bearer that issued it; revoking
 // the issuer revokes the whole chain it minted, and nothing else.
@@ -157,7 +157,7 @@ func (s *APITokenRepositoryTestSuite) TestDeleteByUserID_RemovesOnlyThatUsersTok
 	s.Require().NoError(err)
 }
 
-// ── Create / GetByHash ──
+// ── Create / GetByHash ──.
 
 func (s *APITokenRepositoryTestSuite) TestCreate_GetByHash_RoundTrip() {
 	ctx := s.T().Context()
@@ -197,7 +197,7 @@ func (s *APITokenRepositoryTestSuite) TestCreate_WithExpiresAt_RoundTrip() {
 	s.WithinDuration(exp, *got.ExpiresAt, time.Second)
 }
 
-// ── List ──
+// ── List ──.
 
 func (s *APITokenRepositoryTestSuite) TestList_ReturnsNewestFirst() {
 	ctx := s.T().Context()
@@ -234,7 +234,7 @@ func (s *APITokenRepositoryTestSuite) TestList_Empty_ReturnsEmpty() {
 	s.Empty(tokens)
 }
 
-// ── CreateIfUnderLimit ──
+// ── CreateIfUnderLimit ──.
 
 func (s *APITokenRepositoryTestSuite) TestCreateIfUnderLimit_CountsOnlyThatUsersTokens() {
 	ctx := s.T().Context()
@@ -321,7 +321,7 @@ func (s *APITokenRepositoryTestSuite) TestCreateIfUnderLimit_ConcurrentRace_Neve
 	s.Equal(int64(limit), stored, "the stored row count must never exceed the limit under concurrency")
 }
 
-// ── RevokeByHash ──
+// ── RevokeByHash ──.
 
 func (s *APITokenRepositoryTestSuite) TestRevokeByHash_RemovesToken() {
 	ctx := s.T().Context()
@@ -341,7 +341,7 @@ func (s *APITokenRepositoryTestSuite) TestRevokeByHash_Unknown_ReturnsErrNotFoun
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
-// ── UpdateLastUsed ──
+// ── UpdateLastUsed ──.
 
 func (s *APITokenRepositoryTestSuite) TestUpdateLastUsed_SetsTimestamp() {
 	ctx := s.T().Context()
@@ -367,7 +367,7 @@ func (s *APITokenRepositoryTestSuite) TestUpdateLastUsed_UnknownHash_NoError() {
 	s.Require().NoError(err)
 }
 
-// ── Cascade ──
+// ── Cascade ──.
 
 // TestCreate_CascadesWithUser verifies that with foreign_keys enabled (as in production —
 // Open applies it via WithPragmas), deleting a user also removes their API tokens via

@@ -253,7 +253,7 @@ func TestLink_OwnedBy_AnonymousLink(t *testing.T) {
 		CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
 		DirectRedirect: nil, ID: "", TargetURL: "", EditCode: "", Views: 0,
 		BurnAfterClick: false,
-	} // OwnerID nil: created anonymously, or accounts disabled
+	} // OwnerID nil: created anonymously, or accounts disabled.
 
 	assert.False(t, link.OwnedBy(uuid.New()), "an unowned link must never match, even an authenticated caller")
 	assert.False(t, link.OwnedBy(uuid.Nil))

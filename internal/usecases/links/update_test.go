@@ -35,7 +35,7 @@ func (s *ManagerTestSuite) TestUpdate_PreservesStateAndEvictsCache() {
 			s.Equal(existing.DirectRedirect, link.DirectRedirect)
 			s.Equal(existing.CreatedAt, link.CreatedAt)
 			s.True(link.BurnAfterClick)
-			link.Views = 8 // storage reports a click recorded after GetByID
+			link.Views = 8 // storage reports a click recorded after GetByID.
 
 			return link, nil
 		})

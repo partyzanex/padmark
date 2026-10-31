@@ -116,7 +116,7 @@ func TestManagerTestSuite(t *testing.T) {
 	suite.Run(t, new(ManagerTestSuite))
 }
 
-// Create
+// Create.
 
 func (s *ManagerTestSuite) TestCreate_OK() {
 	note := &domain.Note{
@@ -249,7 +249,7 @@ func (s *ManagerTestSuite) TestCreate_CustomEditCodeUsedForUpdate() {
 	s.Require().NoError(err)
 	s.Equal(customCode, created.EditCode)
 
-	// Update with the custom code must succeed
+	// Update with the custom code must succeed.
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug(created.ID)).Return(created, nil)
 	s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug(created.ID), gomock.Any()).Return(nil)
 
@@ -284,7 +284,7 @@ func (s *ManagerTestSuite) TestCreate_CustomEditCodeWrongCodeForbidden() {
 	created, err := s.manager.Create(s.T().Context(), note)
 	s.Require().NoError(err)
 
-	// Update with wrong code must fail
+	// Update with wrong code must fail.
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug(created.ID)).Return(created, nil)
 
 	_, err = s.manager.Update(s.T().Context(), created.ID, "WrongCode1234", uuid.Nil, &domain.Note{
@@ -400,7 +400,7 @@ func (s *ManagerTestSuite) TestCreate_WithBurnTTL() {
 	s.Require().NoError(err)
 	s.True(result.BurnAfterReading)
 	s.Equal(int64(3600), result.BurnTTL)
-	s.Nil(result.ExpiresAt) // expiry is set on first read, not at creation
+	s.Nil(result.ExpiresAt) // expiry is set on first read, not at creation.
 }
 
 func (s *ManagerTestSuite) TestCreate_WithSlug() {
@@ -532,7 +532,7 @@ func (s *ManagerTestSuite) TestCreate_StorageError_RestoresPlaintextAndPersistsE
 
 	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).DoAndReturn(
 		func(_ context.Context, n *domain.Note) error {
-			atStore = *n // snapshot the row as it is persisted
+			atStore = *n // snapshot the row as it is persisted.
 
 			return errors.New("db error")
 		})
@@ -573,7 +573,7 @@ func (s *ManagerTestSuite) TestUpdate_PersistsHashedEditCode_NotPlaintext() {
 
 	s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("myslug"), gomock.Any()).DoAndReturn(
 		func(_ context.Context, _ string, n *domain.Note) error {
-			atStore = *n // snapshot the row as it is persisted
+			atStore = *n // snapshot the row as it is persisted.
 
 			return nil
 		})
@@ -618,7 +618,7 @@ func (s *ManagerTestSuite) TestHandleSetBurnExpiryErr_RefetchDecryptFails() {
 	s.Require().Error(err)
 }
 
-// Get
+// Get.
 
 func (s *ManagerTestSuite) TestGet_OK() {
 	want := &domain.Note{
@@ -692,7 +692,7 @@ func (s *ManagerTestSuite) TestGet_NotFound() {
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
-// View
+// View.
 
 func (s *ManagerTestSuite) TestView_OK() {
 	want := &domain.Note{
@@ -725,7 +725,7 @@ func (s *ManagerTestSuite) TestView_BurnAfterReading() {
 
 	s.Require().NoError(err)
 	s.Equal(want, note)
-	s.Equal(0, note.Views) // no increment for burn-after-reading
+	s.Equal(0, note.Views) // no increment for burn-after-reading.
 }
 
 func (s *ManagerTestSuite) TestView_BurnAfterReading_WithTTL() {
@@ -763,7 +763,7 @@ func (s *ManagerTestSuite) TestView_NotFound() {
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
-// Update
+// Update.
 
 func (s *ManagerTestSuite) TestUpdate_OK() {
 	existing := &domain.Note{
@@ -1007,7 +1007,7 @@ func (s *ManagerTestSuite) TestUpdate_AnonymousNoteAlwaysNeedsEditCode() {
 	s.ErrorIs(err, domain.ErrInvalidEditCode)
 }
 
-// Delete
+// Delete.
 
 func (s *ManagerTestSuite) TestDelete_OK() {
 	existing := &domain.Note{
@@ -1080,7 +1080,7 @@ func (s *ManagerTestSuite) TestDelete_NonOwnerCallerStillNeedsEditCode() {
 	s.ErrorIs(err, domain.ErrInvalidEditCode)
 }
 
-// GetRendered
+// GetRendered.
 
 func (s *ManagerTestSuite) TestGetRendered_OK() {
 	note := &domain.Note{
@@ -1101,7 +1101,7 @@ func (s *ManagerTestSuite) TestGetRendered_OK() {
 	s.Equal("<h1>Hello</h1>", html)
 }
 
-// ── content size cap ──
+// ── content size cap ──.
 
 func (s *ManagerTestSuite) TestCreate_ContentOverCap_Rejected() {
 	note := &domain.Note{
@@ -1148,7 +1148,7 @@ func (s *ManagerTestSuite) TestUpdate_ContentOverCap_Rejected() {
 	s.ErrorIs(err, domain.ErrContentTooLarge)
 }
 
-// ── render cache ──
+// ── render cache ──.
 
 // statefulRenderCache backs the generated MockRenderCache with a map so the tests observe real
 // get/set/delete behaviour rather than a script of calls.
@@ -1435,7 +1435,7 @@ func (s *ManagerTestSuite) TestGetRendered_PlainText_RenderPlainError() {
 	s.Contains(err.Error(), domain.HashSlug("abc-123"))
 }
 
-// Peek
+// Peek.
 
 func (s *ManagerTestSuite) TestPeek_OK() {
 	note := &domain.Note{
@@ -1460,7 +1460,7 @@ func (s *ManagerTestSuite) TestPeek_NotFound() {
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
-// View TTL regression tests
+// View TTL regression tests.
 
 // TestView_WithTTL_SecondViewSucceeds reproduces the bug where a note with ExpiresAt set
 // (but BurnAfterReading=false) was returning 404 on the second view because View was
@@ -1475,7 +1475,7 @@ func (s *ManagerTestSuite) TestView_WithTTL_SecondViewSucceeds() {
 		BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
 	}
 
-	// First view
+	// First view.
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("ttl-note")).Return(note, nil)
 	s.storage.EXPECT().IncrementViews(gomock.Any(), domain.HashSlug("ttl-note")).Return(nil)
 
@@ -1483,7 +1483,7 @@ func (s *ManagerTestSuite) TestView_WithTTL_SecondViewSucceeds() {
 	s.Require().NoError(err)
 	s.Equal(1, result.Views)
 
-	// Second view — must NOT return ErrNotFound
+	// Second view — must NOT return ErrNotFound.
 	note2 := &domain.Note{
 		ID: "ttl-note", Title: "t", Views: 1, ExpiresAt: &future,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, Privacy: nil,
@@ -1509,7 +1509,7 @@ func (s *ManagerTestSuite) TestView_BurnAfterReading_NoIncrementViews() {
 	}
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("burn-note")).Return(note, nil)
 	s.storage.EXPECT().Consume(gomock.Any(), domain.HashSlug("burn-note")).Return(note, nil)
-	// IncrementViews must NOT be called
+	// IncrementViews must NOT be called.
 
 	result, err := s.manager.View(s.T().Context(), "burn-note")
 	s.Require().NoError(err)
@@ -1595,7 +1595,7 @@ func (s *ManagerTestSuite) TestGet_BurnTTL_Race_SetBurnExpiryNotFound() {
 	s.NotNil(result.ExpiresAt)
 }
 
-// ViewPreloaded
+// ViewPreloaded.
 
 func (s *ManagerTestSuite) TestViewPreloaded_OK() {
 	note := &domain.Note{
@@ -1647,7 +1647,7 @@ func (s *ManagerTestSuite) TestViewPreloaded_Expired() {
 	s.ErrorIs(err, domain.ErrExpired)
 }
 
-// EnforceExpiry — expiry only, never burn
+// EnforceExpiry — expiry only, never burn.
 
 func (s *ManagerTestSuite) TestEnforceExpiry_ExpiredNoteIsDeleted() {
 	past := time.Now().Add(-time.Minute)
@@ -1696,7 +1696,7 @@ func (s *ManagerTestSuite) TestEnforceExpiry_LiveBurnNoteIsNotConsumed() {
 	}
 }
 
-// GetRenderedPreloaded
+// GetRenderedPreloaded.
 
 func (s *ManagerTestSuite) TestGetRenderedPreloaded_OK() {
 	note := &domain.Note{
@@ -1733,7 +1733,7 @@ func (s *ManagerTestSuite) TestGetRenderedPreloaded_Expired() {
 	s.ErrorIs(err, domain.ErrExpired)
 }
 
-// Peek — expiry policy is intentionally NOT applied
+// Peek — expiry policy is intentionally NOT applied.
 
 // TestPeek_ReturnsExpiredNote documents that Peek bypasses expiry policy by design.
 // Callers (e.g. auth middleware) use Peek to inspect note metadata without side effects;
@@ -1756,7 +1756,7 @@ func (s *ManagerTestSuite) TestPeek_ReturnsExpiredNote() {
 	s.Equal(note, result)
 }
 
-// Update — private notes
+// Update — private notes.
 
 func (s *ManagerTestSuite) TestUpdate_PrivateNote_CorrectCode() {
 	priv := domain.PrivacyAuthenticated
@@ -1874,7 +1874,7 @@ func (s *ManagerTestSuite) TestUpdate_PrivateNote_WrongCode() {
 	s.ErrorIs(err, domain.ErrInvalidEditCode)
 }
 
-// Consume error path
+// Consume error path.
 
 func (s *ManagerTestSuite) TestGet_BurnAfterReading_ConsumeError() {
 	consumeErr := errors.New("storage unavailable")
@@ -1910,7 +1910,7 @@ func (s *ManagerTestSuite) TestView_BurnAfterReading_ConsumeError() {
 	s.ErrorIs(err, consumeErr)
 }
 
-// Decryption failure
+// Decryption failure.
 
 func TestGet_DecryptionFailure(t *testing.T) {
 	ctrl := gomock.NewController(t)

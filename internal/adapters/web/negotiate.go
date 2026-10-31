@@ -42,10 +42,10 @@ const (
 
 // acceptEntry is one parsed media-range element of an Accept header.
 type acceptEntry struct {
-	mime  string  // lowercase "type/subtype"; a range may carry wildcards
-	q     float64 // effective quality clamped to [0, 1]; a value that never parses counts as 0
-	spec  uint8   // specExact = exact type/subtype, specWildcard = partial wildcard, specMatchAll = */*
-	order int     // position in the header — the final tie-breaker
+	mime  string  // lowercase "type/subtype"; a range may carry wildcards.
+	q     float64 // effective quality clamped to [0, 1]; a value that never parses counts as 0.
+	spec  uint8   // specExact = exact type/subtype, specWildcard = partial wildcard, specMatchAll = */*.
+	order int     // position in the header — the final tie-breaker.
 }
 
 // negotiate selects the response format for a request.
@@ -157,6 +157,9 @@ func parseAccept(accept string) []acceptEntry {
 	return entries
 }
 
+// float64BitSize is the bit size argument of strconv.ParseFloat for a float64 value.
+const float64BitSize = 64
+
 // acceptQuality parses the ";"-separated parameters of one media range and returns the q value.
 // An absent q means 1 (the RFC default); a malformed or negative value degrades to 0 — an
 // entry the server cannot understand must never silently win the negotiation.
@@ -167,7 +170,7 @@ func acceptQuality(params string) float64 {
 			continue
 		}
 
-		q, parseErr := strconv.ParseFloat(strings.TrimSpace(value), 64)
+		q, parseErr := strconv.ParseFloat(strings.TrimSpace(value), float64BitSize)
 		if parseErr != nil || q < 0 {
 			return 0
 		}
@@ -288,22 +291,16 @@ func formatCandidate(entries []acceptEntry, mimes []string) (acceptEntry, bool) 
 		}
 
 		if entry.q > 0 {
-			if int(entry.spec) > maxPositive {
-				maxPositive = int(entry.spec)
-			}
+			maxPositive = max(maxPositive, int(entry.spec))
 
-			// Strict comparisons only: for equal (q, spec) the earlier header position must
-			// win, and entries are visited in ascending order — so the first one stays.
-			if !found || entry.q > best.q || (entry.q == best.q && entry.spec > best.spec) {
+			if !found || outranks(entry, best) {
 				best, found = entry, true
 			}
 
 			continue
 		}
 
-		if int(entry.spec) > maxZero {
-			maxZero = int(entry.spec)
-		}
+		maxZero = max(maxZero, int(entry.spec))
 	}
 
 	if !found || maxZero > maxPositive {
@@ -311,4 +308,11 @@ func formatCandidate(entries []acceptEntry, mimes []string) (acceptEntry, bool) 
 	}
 
 	return best, true
+}
+
+// outranks reports whether the positive entry a beats the current best entry b. The comparison
+// is strict: for equal q and spec the earlier header position wins, and entries are visited in
+// ascending order, so the first one stays.
+func outranks(a, b acceptEntry) bool {
+	return a.q > b.q || (a.q == b.q && a.spec > b.spec)
 }

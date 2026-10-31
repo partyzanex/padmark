@@ -60,7 +60,8 @@ func migrateAction(ctx context.Context, cmd *cli.Command) error {
 	if storage == storagePostgres {
 		_, err = initPostgresStorage(ctx, db, log)
 	} else {
-		_, err = initSQLiteStorage(ctx, db, log, migrationOptions{dsn: dsn, skipBackup: cmd.Bool(FlagSkipMigrationBackup)})
+		_, err = initSQLiteStorage(
+			ctx, db, log, migrationOptions{dsn: dsn, skipBackup: cmd.Bool(FlagSkipMigrationBackup)})
 	}
 
 	if err != nil {

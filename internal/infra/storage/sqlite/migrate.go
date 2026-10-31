@@ -135,7 +135,7 @@ func backupDB(ctx context.Context, db *bun.DB, preferred string, log *slog.Logge
 
 	_, err = db.ExecContext(ctx, "VACUUM INTO "+quoted)
 	if err != nil {
-		removeErr := os.Remove(backupPath) // our own, partially written copy
+		removeErr := os.Remove(backupPath) // our own, partially written copy.
 		if removeErr != nil {
 			return "", fmt.Errorf("vacuum into: %w (remove partial backup: %w)", err, removeErr)
 		}

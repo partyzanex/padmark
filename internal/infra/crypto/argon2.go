@@ -15,6 +15,26 @@ const argon2KeyLen uint32 = 32
 
 const argon2SaltLen = 16
 
+// argon2MinMemoryPerLaneKiB is the smallest memory, in KiB, that argon2id accepts per thread.
+const argon2MinMemoryPerLaneKiB uint32 = 8
+
+// Indexes of the "$"-separated fields in an argon2id hash: version, memory, time, threads,
+// salt and key. argon2FieldCount is the total number of fields.
+const (
+	argon2FieldMemory  = 1
+	argon2FieldTime    = 2
+	argon2FieldThreads = 3
+	argon2FieldSalt    = 4
+	argon2FieldKey     = 5
+	argon2FieldCount   = 6
+)
+
+// decimalBase is the radix for the decimal numbers stored in an argon2id hash.
+const decimalBase = 10
+
+// uint32BitSize is the bit width that bounds the stored cost fields.
+const uint32BitSize = 32
+
 // defaultArgon2MemoryKiB is the built-in argon2id memory cost (64 MiB).
 const defaultArgon2MemoryKiB uint32 = 64 * 1024
 
@@ -24,7 +44,7 @@ const defaultArgon2Time uint32 = 2
 // Hard limits apply to stored costs as well as configuration, before allocating
 // any Argon2 workspace. Reject, rather than clamp: changing a cost changes the key.
 const (
-	MaxArgon2Memory  uint32 = 256 * 1024 // KiB, 256 MiB per derivation
+	MaxArgon2Memory  uint32 = 256 * 1024 // KiB, 256 MiB per derivation.
 	MaxArgon2Time    uint32 = 10
 	MaxArgon2Threads uint8  = 16
 	maxArgon2HashLen        = 256
@@ -46,9 +66,9 @@ const argon2CeilingFactor = 2
 // hashing. Memory is in KiB; raising memory or time increases brute-force cost (and CPU/RAM
 // per hash). Cost depends on these params, not on input length.
 type Argon2Params struct {
-	Memory  uint32 // KiB (e.g. 65536 = 64 MiB)
-	Time    uint32 // iterations
-	Threads uint8  // parallelism (CPU cores)
+	Memory  uint32 // KiB (e.g. 65536 = 64 MiB).
+	Time    uint32 // iterations.
+	Threads uint8  // parallelism (CPU cores).
 }
 
 // DefaultArgon2Params returns the built-in defaults (64 MiB, time=2, threads=1).
@@ -60,7 +80,7 @@ func DefaultArgon2Params() Argon2Params {
 // Validate checks an explicit cost; callers may apply defaults to configuration first.
 func (p Argon2Params) Validate() error {
 	if p.Threads == 0 || p.Threads > MaxArgon2Threads || p.Time == 0 || p.Time > MaxArgon2Time ||
-		p.Memory < 8*uint32(p.Threads) || p.Memory > MaxArgon2Memory {
+		p.Memory < argon2MinMemoryPerLaneKiB*uint32(p.Threads) || p.Memory > MaxArgon2Memory {
 		return errInvalidArgon2Cost
 	}
 
@@ -150,11 +170,11 @@ func verifyArgon2(storedHash, secret string, ceiling Argon2Params) (bool, error)
 	}
 
 	parts := strings.Split(storedHash, "$")
-	if len(parts) != 6 || parts[0] != "v1" {
+	if len(parts) != argon2FieldCount || parts[0] != "v1" {
 		return false, nil
 	}
 
-	params, err := parseArgon2Cost(parts[1], parts[2], parts[3])
+	params, err := parseArgon2Cost(parts[argon2FieldMemory], parts[argon2FieldTime], parts[argon2FieldThreads])
 	if err != nil {
 		return false, nil //nolint:nilerr // a malformed stored cost is a failed match, not an operational error
 	}
@@ -165,12 +185,12 @@ func verifyArgon2(storedHash, secret string, ceiling Argon2Params) (bool, error)
 
 	enc := base64.RawURLEncoding
 
-	salt, err := enc.DecodeString(parts[4])
+	salt, err := enc.DecodeString(parts[argon2FieldSalt])
 	if err != nil || len(salt) != argon2SaltLen {
 		return false, nil //nolint:nilerr // see above
 	}
 
-	expected, err := enc.DecodeString(parts[5])
+	expected, err := enc.DecodeString(parts[argon2FieldKey])
 	if err != nil || len(expected) != int(argon2KeyLen) {
 		return false, nil //nolint:nilerr // see above
 	}
@@ -184,7 +204,7 @@ func verifyArgon2(storedHash, secret string, ceiling Argon2Params) (bool, error)
 }
 
 func parseU32(s string) (uint32, error) {
-	v, err := strconv.ParseUint(s, 10, 32)
+	v, err := strconv.ParseUint(s, decimalBase, uint32BitSize)
 	if err != nil {
 		return 0, fmt.Errorf("parse u32: %w", err)
 	}

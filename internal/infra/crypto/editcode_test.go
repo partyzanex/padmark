@@ -87,7 +87,7 @@ func TestEditCodeHasher_DifferentSaltsPerHash(t *testing.T) {
 	hash2, err := hasher.Hash("same-code")
 	require.NoError(t, err)
 
-	// different salts → different stored hashes, but both verify
+	// different salts → different stored hashes, but both verify.
 	assert.NotEqual(t, hash1, hash2)
 	assert.True(t, hasher.Verify(hash1, "same-code"))
 	assert.True(t, hasher.Verify(hash2, "same-code"))
@@ -99,9 +99,9 @@ func TestEditCodeHasher_InvalidFormatFails(t *testing.T) {
 	for _, bad := range []string{
 		"",
 		"nodollar",
-		"v1$a$b$c",       // too few parts
-		"v1$a$b$c$d$e$f", // too many parts
-		"v2$a$b$c$d$e",   // wrong version
+		"v1$a$b$c",       // too few parts.
+		"v1$a$b$c$d$e$f", // too many parts.
+		"v2$a$b$c$d$e",   // wrong version.
 		"!!invalid!!",
 	} {
 		assert.False(t, hasher.Verify(bad, "code"), "expected false for %q", bad)

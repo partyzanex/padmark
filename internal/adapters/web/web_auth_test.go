@@ -209,7 +209,7 @@ func withCSRFFor(form url.Values, sessionID string) url.Values {
 	return form
 }
 
-// ── Login page ──
+// ── Login page ──.
 
 func (s *AuthHandlerSuite) TestLoginPage_TOTP_Mode() {
 	rec := httptest.NewRecorder()
@@ -218,7 +218,7 @@ func (s *AuthHandlerSuite) TestLoginPage_TOTP_Mode() {
 	s.router.ServeHTTP(rec, req)
 
 	s.Equal(http.StatusOK, rec.Code)
-	s.Contains(rec.Body.String(), "totp-login") // TOTP form action
+	s.Contains(rec.Body.String(), "totp-login") // TOTP form action.
 }
 
 // TestLoginPage_AlreadyAuthenticated_RedirectsHome verifies a signed-in user is not asked
@@ -260,7 +260,7 @@ func (s *AuthHandlerSuite) TestLoginPage_AlreadyAuthenticated_RedirectsToNext() 
 	s.Equal("/edit/abc", rec.Header().Get("Location"))
 }
 
-// ── Sign out control and session replacement ──
+// ── Sign out control and session replacement ──.
 
 // TestSignOutForm_RenderedOnSignedInPages — the pages only a signed-in user can reach carry a
 // POST /logout form with the CSRF token, so there is a way to end the session from the UI.
@@ -332,7 +332,7 @@ func (s *AuthHandlerSuite) TestTOTPLogin_ForwardsPresentedSessionForRevocation()
 	s.True(web.VerifyCSRFTokenForTest(csrfCookie.Value, authTestCSRFSecret, "sess-new"))
 }
 
-// ── TOTP login ──
+// ── TOTP login ──.
 
 func (s *AuthHandlerSuite) TestTOTPLogin_Success_SetsCookieAndRedirects() {
 	s.auth.EXPECT().Login(gomock.Any(), "alice", gomock.Any(), "123456", gomock.Any(), gomock.Any(), gomock.Any()).
@@ -401,7 +401,7 @@ func (s *AuthHandlerSuite) TestTOTPLogin_WithNext_RedirectsToNext() {
 	s.Equal("/admin", rec.Header().Get("Location"))
 }
 
-// ── Logout ──
+// ── Logout ──.
 
 func (s *AuthHandlerSuite) TestLogout_DeletesSessionAndClears() {
 	// /logout is a public path — middleware skips GetSession.
@@ -466,7 +466,7 @@ func (s *AuthHandlerSuite) TestLogout_NoSession_StillRedirects() {
 	s.Equal("/login", rec.Header().Get("Location"))
 }
 
-// ── Setup page ──
+// ── Setup page ──.
 
 func (s *AuthHandlerSuite) TestSetupPage_WithInviteToken_RendersForm() {
 	req := httptest.NewRequest(http.MethodGet, "/setup?invite=tok-abc", nil)
@@ -576,7 +576,7 @@ func (s *AuthHandlerSuite) TestSetupPage_NoToken_NotEmpty_Returns403() {
 	s.Contains(rec.Body.String(), "Setup is closed")
 }
 
-// ── Setup handler ──
+// ── Setup handler ──.
 
 const testPw = "ValidP@ss12!"
 
@@ -607,7 +607,7 @@ func (s *AuthHandlerSuite) TestSetupHandler_WithInvite_ShowsQR() {
 }
 
 func (s *AuthHandlerSuite) TestSetupHandler_FirstAdmin_ShowsQR() {
-	s.auth.EXPECT().IsEmpty(gomock.Any()).Return(true, nil) // bootstrap allowed: empty DB
+	s.auth.EXPECT().IsEmpty(gomock.Any()).Return(true, nil) // bootstrap allowed: empty DB.
 	s.auth.EXPECT().AcceptFirstAdmin(gomock.Any(), "root", gomock.Any()).
 		Return(&auth.Enrollment{
 			QRCode:  "data:image/png;base64,xyz",
@@ -723,17 +723,17 @@ func (s *AuthHandlerSuite) TestSetupHandler_DuplicateUsername_ShowsError() {
 	s.Contains(rec.Body.String(), "taken")
 }
 
-// ── Admin page ──
+// ── Admin page ──.
 
 func (s *AuthHandlerSuite) TestAdminPage_NoSession_Returns303() {
 	req := httptest.NewRequest(http.MethodGet, "/admin", nil)
-	req.Header.Set("Sec-Fetch-Dest", "document") // simulate browser navigation
+	req.Header.Set("Sec-Fetch-Dest", "document") // simulate browser navigation.
 
 	rec := httptest.NewRecorder()
 
 	s.router.ServeHTTP(rec, req)
 
-	// no session → authMgr == only auth → middleware blocks (no token either) → redirect to login
+	// no session → authMgr == only auth → middleware blocks (no token either) → redirect to login.
 	s.Equal(http.StatusSeeOther, rec.Code)
 }
 
@@ -803,7 +803,7 @@ func (s *AuthHandlerSuite) TestAdminPage_Admin_ListsAPIKeys() {
 	s.Contains(rec.Body.String(), "never used", "unused token renders 'never used'")
 }
 
-// ── Admin invite ──
+// ── Admin invite ──.
 
 func (s *AuthHandlerSuite) TestAdminInvite_GeneratesLink() {
 	usr := s.adminUser()
@@ -952,7 +952,7 @@ func (s *AuthHandlerSuite) TestAdminInvite_AdminDataFails_Returns500() {
 	s.Equal(http.StatusInternalServerError, rec.Code)
 }
 
-// ── Admin revoke ──
+// ── Admin revoke ──.
 
 func (s *AuthHandlerSuite) TestAdminRevoke_RevokesAndRedirects() {
 	usr := s.adminUser()
@@ -1040,7 +1040,7 @@ func (s *AuthHandlerSuite) TestAdminRevoke_GenericError_RedirectsWithGenericMess
 	s.Contains(loc, url.QueryEscape("Failed to revoke user."))
 }
 
-// ── Admin API keys ──
+// ── Admin API keys ──.
 
 // TestAdminCreateKey_Lifetime: the admin form's lifetime reaches the usecase as a session issue;
 // an unparsable value is passed on as invalid and the refusal is shown on the page.
@@ -1252,7 +1252,7 @@ func (s *AuthHandlerSuite) TestAdminRevokeKey_RevokeFails_RedirectsWithError() {
 	s.Contains(rec.Header().Get("Location"), "key_error")
 }
 
-// ── Session auth middleware ──
+// ── Session auth middleware ──.
 
 func (s *AuthHandlerSuite) TestSessionAuth_ValidSession_PassesThrough() {
 	usr := &domain.User{
@@ -1261,7 +1261,7 @@ func (s *AuthHandlerSuite) TestSessionAuth_ValidSession_PassesThrough() {
 		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
 	}
 	// GetSession called twice: once by middleware, once by handler (isAuthenticated check inside GetNote may differ)
-	// For GET / (IndexPage) which is always served — just once by middleware
+	// For GET / (IndexPage) which is always served — just once by middleware.
 	s.auth.EXPECT().GetSession(gomock.Any(), "sess1").Return(usr, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -1289,7 +1289,7 @@ func (s *AuthHandlerSuite) TestSessionAuth_ExpiredSession_RedirectsToLogin() {
 	s.Contains(rec.Header().Get("Location"), "/login")
 }
 
-// ── API-token auth middleware ──
+// ── API-token auth middleware ──.
 
 func (s *AuthHandlerSuite) TestAPITokenAuth_ValidBearer_PassesThrough() {
 	usr := &domain.User{
@@ -1452,7 +1452,7 @@ func (s *AuthHandlerSuite) TestGetNote_NotFound_BrowserClient_GetsHTMLPage() {
 	s.Contains(rec.Header().Get("Content-Type"), "text/html")
 }
 
-// ── Change password ──
+// ── Change password ──.
 
 func (s *AuthHandlerSuite) TestChangePasswordPage_Authenticated_RendersForm() {
 	usr := &domain.User{
@@ -1618,14 +1618,14 @@ func (s *AuthHandlerSuite) TestSetupHandler_PasswordMismatch_DoesNotCallAuthMgr(
 	s.Contains(rec.Body.String(), "do not match")
 }
 
-// ── CSRF guard ──
+// ── CSRF guard ──.
 
 func (s *AuthHandlerSuite) TestCSRFGuard_MissingToken_Returns403() {
 	// POST without CSRF cookie must be rejected before reaching the handler.
 	form := url.Values{"username": {"alice"}, "password": {testPw}, "code": {"123456"}}
 	req := httptest.NewRequest(http.MethodPost, "/totp-login", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	// no padmark_csrf cookie
+	// no padmark_csrf cookie.
 
 	rec := httptest.NewRecorder()
 
@@ -1640,7 +1640,7 @@ func (s *AuthHandlerSuite) TestCSRFGuard_TokenMismatch_Returns403() {
 	req := httptest.NewRequest(http.MethodPost, "/totp-login", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "text/html")
-	req.AddCookie(s.csrfCookie()) // cookie = testCSRFToken, field = "wrong-token"
+	req.AddCookie(s.csrfCookie()) // cookie = testCSRFToken, field = "wrong-token".
 
 	rec := httptest.NewRecorder()
 
@@ -1669,7 +1669,7 @@ func (s *AuthHandlerSuite) TestCSRFGuard_InvalidHMAC_Returns403() {
 	s.Equal(http.StatusForbidden, rec.Code)
 }
 
-// ── CSRF secret sharing across processes ──
+// ── CSRF secret sharing across processes ──.
 
 // newRouterWithCSRFSecret builds an independent router instance with the given CSRF secret. Two
 // of them stand in for two replicas, or for the same server before and after a restart.
@@ -1776,7 +1776,7 @@ func (s *AuthHandlerSuite) TestCSRF_NoSecret_TokenRejectedByOtherInstance() {
 		"the minting instance must still accept its own token")
 }
 
-// ── Session expiry ──
+// ── Session expiry ──.
 
 func (s *AuthHandlerSuite) TestTOTPLogin_SessionCookieMaxAge_Is30Days() {
 	s.auth.EXPECT().Login(gomock.Any(), "alice", gomock.Any(), "123456", gomock.Any(), gomock.Any(), gomock.Any()).
@@ -1837,7 +1837,7 @@ func (s *AuthHandlerSuite) TestTOTPLogin_SessionCookieMaxAge_TracksConfiguredSes
 	s.True(found, "session cookie must be set")
 }
 
-// ── Owner bypass for edit_code (session and API-token callers) ──
+// ── Owner bypass for edit_code (session and API-token callers) ──.
 
 // TestUpdateNote_SessionOwner_BypassesEditCode verifies that a browser session (the ogen
 // single-segment PUT /notes/{id} route) resolves the caller and lets the note's owner update it

@@ -175,6 +175,18 @@ linters:
     revive:
       confidence: 0.4
       enable-all-rules: true
+      rules:
+        - name: line-length-limit
+          arguments: [ 120 ]
+        - name: cognitive-complexity
+          arguments: [ 16 ]
+        - name: cyclomatic
+          arguments: [ 11 ]
+        - name: add-constant
+          arguments:
+            - allowInts: "0,1,2"
+              allowFloats: "0.0,1.0"
+              maxLitCount: "100"
 
   # Exclusions (migrated from v1 `issues.exclude`, `exclude-rules`, `exclude-dirs`).
   exclusions:
@@ -224,6 +236,7 @@ linters:
 
       - linters:
           - lll
+          - revive
         source: "^//go:generate "
 
       - path: _test\.go

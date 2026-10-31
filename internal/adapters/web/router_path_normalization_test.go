@@ -123,8 +123,8 @@ func (s *PathNormalizationSuite) serve(req *http.Request) *httptest.ResponseReco
 type nonCanonicalCase struct {
 	method   string
 	target   string
-	location string // expected Location for a ServeMux canonicalisation redirect
-	noteID   string // slug the note catch-all looked up, "" when it was not reached
+	location string // expected Location for a ServeMux canonicalisation redirect.
+	noteID   string // slug the note catch-all looked up, "" when it was not reached.
 	status   int
 }
 

@@ -111,7 +111,7 @@ func TestCheckInsecureToken(t *testing.T) {
 
 			var buf bytes.Buffer
 
-			err := checkInsecureToken(&buf, testCase.serverURL, testCase.token, testCase.allow)
+			err := checkInsecureToken(&buf, testCase.serverURL, testCase.token, insecureHTTPSetting(testCase.allow))
 
 			if testCase.wantErr {
 				require.ErrorIs(t, err, errInsecureTransport)

@@ -96,7 +96,7 @@ func (s *UserRepositoryTestSuite) newUser(username string) *domain.User {
 	}
 }
 
-// ── Create ──
+// ── Create ──.
 
 func (s *UserRepositoryTestSuite) TestCreate_GetByUsername_RoundTrip() {
 	ctx := s.T().Context()
@@ -136,14 +136,14 @@ func (s *UserRepositoryTestSuite) TestCreate_IsAdmin_StoredCorrectly() {
 	s.True(got.IsAdmin)
 }
 
-// ── GetByUsername ──
+// ── GetByUsername ──.
 
 func (s *UserRepositoryTestSuite) TestGetByUsername_NotFound_ReturnsErrNotFound() {
 	_, err := s.repo.GetByUsername(s.T().Context(), "nobody")
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
-// ── GetByID ──
+// ── GetByID ──.
 
 func (s *UserRepositoryTestSuite) TestGetByID_Found() {
 	ctx := s.T().Context()
@@ -161,7 +161,7 @@ func (s *UserRepositoryTestSuite) TestGetByID_NotFound_ReturnsErrNotFound() {
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
-// ── List ──
+// ── List ──.
 
 func (s *UserRepositoryTestSuite) TestList_Empty_ReturnsEmptySlice() {
 	users, err := s.repo.List(s.T().Context())
@@ -188,7 +188,7 @@ func (s *UserRepositoryTestSuite) TestList_OrderedByCreatedAt() {
 	s.Equal("eve", users[1].Username)
 }
 
-// ── UpdateLastLogin ──
+// ── UpdateLastLogin ──.
 
 func (s *UserRepositoryTestSuite) TestUpdateLastLogin_SetsField() {
 	ctx := s.T().Context()
@@ -209,7 +209,7 @@ func (s *UserRepositoryTestSuite) TestUpdateLastLogin_NonExistentUser_NoError() 
 	s.Require().NoError(err)
 }
 
-// ── Revoke ──
+// ── Revoke ──.
 
 func (s *UserRepositoryTestSuite) TestRevoke_RemovesUser() {
 	ctx := s.T().Context()
@@ -245,7 +245,7 @@ func (s *UserRepositoryTestSuite) TestRevoke_NonExistentUser_ReturnsErrForbidden
 	s.ErrorIs(err, domain.ErrForbidden)
 }
 
-// ── UpdatePassword ──
+// ── UpdatePassword ──.
 
 func (s *UserRepositoryTestSuite) TestUpdatePassword_UpdatesAllFields() {
 	ctx := s.T().Context()
@@ -291,7 +291,7 @@ func (s *UserRepositoryTestSuite) TestUpdatePassword_NonExistentUser_NoError() {
 	s.Require().NoError(err)
 }
 
-// ── Case-insensitive usernames ──
+// ── Case-insensitive usernames ──.
 
 // TestCreate_DuplicateUsernameDifferentCase_ReturnsErrUserExists pins that "Admin" cannot be
 // registered next to "admin": otherwise two accounts would differ only by case, which is an

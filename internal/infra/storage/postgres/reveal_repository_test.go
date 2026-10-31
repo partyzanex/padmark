@@ -74,7 +74,7 @@ func TestRevealRepositoryTestSuite(t *testing.T) {
 	suite.Run(t, new(RevealRepositoryTestSuite))
 }
 
-// ── Issue ──
+// ── Issue ──.
 
 func (s *RevealRepositoryTestSuite) TestIssue_ReturnsNonEmptyToken() {
 	tok, err := s.repo.Issue(s.T().Context(), "note-1")
@@ -157,7 +157,7 @@ func (s *RevealRepositoryTestSuite) TestConsume_StoredHashIsNotABearer() {
 	s.True(s.repo.Consume(ctx, tok, "note-leak"), "the raw token must still redeem")
 }
 
-// ── Consume ──
+// ── Consume ──.
 
 func (s *RevealRepositoryTestSuite) TestConsume_OK() {
 	ctx := s.T().Context()

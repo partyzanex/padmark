@@ -162,7 +162,7 @@ func (s *LoginLockoutSuite) TestLockedUsername_DoesNotAffectOtherUserOnSameIP() 
 	s.expectFailures("alice", loginLockThreshold)
 	s.failFromDistinctIPs("alice", loginLockThreshold)
 
-	sharedIP := "198.51.100.1:4000" // the first IP the alice attempts used
+	sharedIP := "198.51.100.1:4000" // the first IP the alice attempts used.
 
 	s.requireLocked(s.attemptWhileLocked(sharedIP, "alice"))
 

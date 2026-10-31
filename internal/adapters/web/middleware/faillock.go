@@ -104,7 +104,9 @@ func WithFailLockout(
 		key := newFailLockoutKey(r, trustedProxies)
 
 		if isFailLocked(cache, key) {
-			response.WriteJSONErrorStatus(w, r, log, http.StatusTooManyRequests, "too many failed attempts, try again later")
+			response.WriteJSONErrorStatus(
+				w, r, log, http.StatusTooManyRequests, "too many failed attempts, try again later",
+			)
 
 			return
 		}
@@ -114,27 +116,7 @@ func WithFailLockout(
 
 		switch {
 		case rec.status == http.StatusForbidden:
-			count := 0
-
-			prev, getErr := cache.Get(key)
-			if getErr == nil {
-				if prevCount, ok := prev.(int); ok {
-					count = prevCount
-				}
-			}
-
-			count++
-
-			if count >= maxFailedAttempts {
-				// Pin the lock outside the evictable counter cache.
-				cache.locked.lock(key, time.Now(), time.Now().Add(failLockoutDur))
-			}
-
-			setErr := cache.SetWithExpire(key, count, failLockoutDur)
-			if setErr != nil {
-				// ARC SetWithExpire never returns an error in practice; skip silently.
-				return
-			}
+			recordFailure(cache, key)
 		case rec.status < http.StatusBadRequest:
 			// Success resets only this caller's failures, preserving other buckets.
 			cache.Remove(key)
@@ -143,6 +125,32 @@ func WithFailLockout(
 			// Other 4xx and 5xx responses leave the failure count unchanged.
 		}
 	})
+}
+
+// recordFailure counts one failed attempt for key. It pins the lock once the count reaches
+// maxFailedAttempts.
+func recordFailure(cache *FailLockoutCache, key failLockoutKey) {
+	count := 0
+
+	prev, getErr := cache.Get(key)
+	if getErr == nil {
+		if prevCount, ok := prev.(int); ok {
+			count = prevCount
+		}
+	}
+
+	count++
+
+	if count >= maxFailedAttempts {
+		// Pin the lock outside the evictable counter cache.
+		cache.locked.lock(key, time.Now(), time.Now().Add(failLockoutDur))
+	}
+
+	setErr := cache.SetWithExpire(key, count, failLockoutDur)
+	if setErr != nil {
+		// ARC SetWithExpire never returns an error in practice; skip silently.
+		return
+	}
 }
 
 // isFailLocked reports whether key is locked, either pinned in the lock set or by a counter

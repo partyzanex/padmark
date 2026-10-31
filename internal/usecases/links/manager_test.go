@@ -74,7 +74,7 @@ func TestManagerTestSuite(t *testing.T) {
 	suite.Run(t, new(ManagerTestSuite))
 }
 
-// Create
+// Create.
 
 func (s *ManagerTestSuite) TestCreate_OK() {
 	s.notes.EXPECT().Exists(gomock.Any(), gomock.Any()).Return(false, nil)
@@ -333,7 +333,7 @@ func (s *ManagerTestSuite) TestCreate_StorageError() {
 	s.Require().Error(err)
 }
 
-// Redirect
+// Redirect.
 
 func (s *ManagerTestSuite) TestRedirect_OK() {
 	link := &domain.Link{
@@ -751,7 +751,7 @@ func (s *ManagerTestSuite) TestCreate_CustomAliasConflict_DoesNotRecordCollision
 	s.ErrorIs(err, domain.ErrSlugConflict)
 }
 
-// Delete
+// Delete.
 
 func (s *ManagerTestSuite) TestDelete_OwnerBypassesEditCode() {
 	owner := uuid.New()

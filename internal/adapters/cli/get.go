@@ -84,7 +84,8 @@ func handleGetNoteRes(res padmark.GetNoteRes) (*padmark.NoteResponse, error) {
 		// stripped it. The burn-after-reading note was not consumed.
 		return nil, fmt.Errorf("%w: %s — the note is still intact", ErrBurnReadRefused, typed.Message)
 	case *padmark.GetNoteServiceUnavailable:
-		return nil, errorcontext.Wrap(serviceUnavailableError(padmark.ErrorResponse(*typed)), "decode get note response")
+		return nil, errorcontext.Wrap(
+			serviceUnavailableError(padmark.ErrorResponse(*typed)), "decode get note response")
 	case *padmark.GetNoteInternalServerError:
 		return nil, fmt.Errorf("%w: %s", ErrServer, typed.Message)
 	default:

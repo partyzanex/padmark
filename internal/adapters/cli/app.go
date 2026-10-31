@@ -79,7 +79,7 @@ func newPadmarkClient(cmd *urcli.Command) (*padmark.Client, error) {
 		return nil, fmt.Errorf("resolve trusted server: %w", trustErr)
 	}
 
-	insecureErr := checkInsecureToken(commandErrWriter(cmd), serverURL, token, cmd.Bool(FlagAllowInsecureHTTP))
+	insecureErr := checkInsecureToken(commandErrWriter(cmd), serverURL, token, allowInsecureHTTP(cmd))
 	if insecureErr != nil {
 		return nil, fmt.Errorf("validate token transport: %w", insecureErr)
 	}
@@ -129,11 +129,23 @@ func isLoopbackHost(serverURL string) bool {
 	return err == nil && addr.IsLoopback()
 }
 
+// insecureHTTPSetting is the value of --allow-insecure-http. Its underlying type is bool, and the
+// named type keeps the setting out of bare bool parameters.
+type insecureHTTPSetting bool
+
+// insecureHTTPDenied refuses cleartext transport to a non-loopback host.
+const insecureHTTPDenied insecureHTTPSetting = false
+
+// allowInsecureHTTP reads the --allow-insecure-http setting of the command.
+func allowInsecureHTTP(cmd *urcli.Command) insecureHTTPSetting {
+	return insecureHTTPSetting(cmd.Bool(FlagAllowInsecureHTTP))
+}
+
 // checkInsecureToken guards a bearer token against cleartext transport. HTTPS or no token → nil.
 // Plain HTTP to a loopback host only warns on stderr, keeping local development working. Plain
 // HTTP to any other host is an error unless allowInsecure (--allow-insecure-http) is set, in
 // which case it warns and proceeds.
-func checkInsecureToken(errOut io.Writer, serverURL, token string, allowInsecure bool) error {
+func checkInsecureToken(errOut io.Writer, serverURL, token string, allowInsecure insecureHTTPSetting) error {
 	if token == "" {
 		return nil
 	}
@@ -145,15 +157,13 @@ func checkInsecureToken(errOut io.Writer, serverURL, token string, allowInsecure
 
 // checkInsecureTransport implements the shared policy for checkInsecureToken and
 // checkInsecureSetup; what names the credential in the message.
-//
-//nolint:revive // allowInsecure is the --allow-insecure-http setting; this function is its only policy
-func checkInsecureTransport(errOut io.Writer, serverURL, what string, allowInsecure bool) error {
+func checkInsecureTransport(errOut io.Writer, serverURL, what string, allowInsecure insecureHTTPSetting) error {
 	parsed, err := url.Parse(serverURL)
 	if err == nil && parsed.Scheme == "https" {
 		return nil
 	}
 
-	if !allowInsecure && !isLoopbackHost(serverURL) {
+	if allowInsecure == insecureHTTPDenied && !isLoopbackHost(serverURL) {
 		return fmt.Errorf("%w: %s to %s; use an https:// URL or pass --%s",
 			errInsecureTransport, what, serverURL, FlagAllowInsecureHTTP)
 	}

@@ -69,7 +69,12 @@ func (m *Manager) createLink(
 		return nil, createLinkOutput{}, fmt.Errorf("map create link res: %w", apiErr)
 	}
 
-	return nil, m.linkOutputFromCreate(resp, input.RevealEditCode), nil
+	out := m.linkOutputFromCreate(resp)
+	if input.RevealEditCode && resp.Response.EditCode != "" {
+		out.revealEditCode(resp.Response.EditCode)
+	}
+
+	return nil, out, nil
 }
 
 // newCreateLinkRequest converts the parsed tool input into an ogen request, leaving optional

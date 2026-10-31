@@ -33,6 +33,9 @@ const (
 	maxTrackedLogins = 10_000
 )
 
+// loginKeyLogBytes is the number of key bytes written to logs as a short fingerprint.
+const loginKeyLogBytes = 8
+
 // loginLockKey is the SHA-256 of the normalised username (see newLoginLockKey). Hashing keeps
 // every key the same small size whatever the client sent and keeps raw usernames, which are
 // user input, out of process memory dumps.
@@ -150,9 +153,11 @@ func WithLoginLockout(lock *LoginLockout, log *slog.Logger, next http.HandlerFun
 		retryAfter, allowed := lock.reserve(key)
 		if !allowed {
 			log.WarnContext(r.Context(), "login attempt rejected: username locked after repeated failures",
-				"username_sha256", hex.EncodeToString(key[:8]))
+				"username_sha256", hex.EncodeToString(key[:loginKeyLogBytes]))
 			w.Header().Set("Retry-After", strconv.Itoa(retryAfterSeconds(retryAfter)))
-			response.WriteJSONErrorStatus(w, r, log, http.StatusTooManyRequests, "too many failed attempts, try again later")
+			response.WriteJSONErrorStatus(
+				w, r, log, http.StatusTooManyRequests, "too many failed attempts, try again later",
+			)
 
 			return
 		}

@@ -40,7 +40,7 @@ func TestRepositoryTestSuite(t *testing.T) {
 	suite.Run(t, new(RepositoryTestSuite))
 }
 
-// Create
+// Create.
 
 func (s *RepositoryTestSuite) TestCreate_OK() {
 	domNote := &domain.Note{
@@ -86,7 +86,7 @@ func (s *RepositoryTestSuite) TestCreate_SetsID() {
 	s.Equal("id-2", result2.ID)
 }
 
-// Get
+// Get.
 
 func (s *RepositoryTestSuite) TestGet_OK() {
 	domNote := &domain.Note{
@@ -139,7 +139,7 @@ func (s *RepositoryTestSuite) TestExists_False() {
 	s.False(exists)
 }
 
-// Update
+// Update.
 
 func (s *RepositoryTestSuite) TestUpdate_OK() {
 	domNote := &domain.Note{
@@ -340,7 +340,7 @@ func (s *RepositoryTestSuite) TestUpdate_ContentType_ExplicitChange() {
 	s.Equal(new(domain.ContentTypeMarkdown), got.ContentType, "content_type must be updated when explicitly set")
 }
 
-// Delete
+// Delete.
 
 func (s *RepositoryTestSuite) TestDelete_OK() {
 	domNote := &domain.Note{
@@ -371,7 +371,7 @@ func (s *RepositoryTestSuite) TestDelete_NotFound() {
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
-// DuplicateSlug
+// DuplicateSlug.
 
 func (s *RepositoryTestSuite) TestCreate_DuplicateSlug() {
 	ctx := s.T().Context()
@@ -395,7 +395,7 @@ func (s *RepositoryTestSuite) TestCreate_DuplicateSlug() {
 	s.ErrorIs(err, domain.ErrSlugConflict)
 }
 
-// AllFields
+// AllFields.
 
 func (s *RepositoryTestSuite) TestCreate_AllFields() {
 	ctx := s.T().Context()
@@ -478,7 +478,7 @@ func (s *RepositoryTestSuite) TestUpdate_PreservesOwnerID() {
 	s.Equal(owner, *got.OwnerID, "owner_id must be immutable via Update, even if a caller sets it")
 }
 
-// IncrementViews
+// IncrementViews.
 
 func (s *RepositoryTestSuite) TestIncrementViews_OK() {
 	ctx := s.T().Context()
@@ -505,7 +505,7 @@ func (s *RepositoryTestSuite) TestIncrementViews_NotFound() {
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
-// Consume
+// Consume.
 
 func (s *RepositoryTestSuite) TestConsume_BurnAfterReading() {
 	ctx := s.T().Context()
@@ -562,7 +562,7 @@ func (s *RepositoryTestSuite) TestConsume_NotEligible() {
 	_, err := s.repo.Consume(ctx, "consume-no")
 	s.Require().ErrorIs(err, domain.ErrNotFound)
 
-	// note must still exist
+	// note must still exist.
 	got, err := s.repo.Get(ctx, "consume-no")
 	s.Require().NoError(err)
 	s.Equal("consume-no", got.ID)
@@ -574,7 +574,7 @@ func (s *RepositoryTestSuite) TestConsume_NotFound() {
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
-// Migrate
+// Migrate.
 
 func (s *RepositoryTestSuite) TestMigrate_OK() {
 	ctx := s.T().Context()

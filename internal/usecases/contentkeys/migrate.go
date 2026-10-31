@@ -79,7 +79,9 @@ func (m *Manager) Migrate(ctx context.Context) (Report, error) {
 		return report, Wrap(pendingErr)
 	}
 
-	err := m.walk(ctx, func(row Row) error { return errorcontext.Wrap(m.migrateRow(ctx, &row, &report), "migrate row") })
+	err := m.walk(ctx, func(row Row) error {
+		return errorcontext.Wrap(m.migrateRow(ctx, &row, &report), "migrate row")
+	})
 	if err != nil {
 		operationResult, operationErr := m.failureReport(ctx, &report, err)
 		if operationErr != nil {
@@ -247,38 +249,10 @@ func (m *Manager) convertSlug(ctx context.Context, slug string, run *slugConvers
 		}
 
 		found = true
-		cipher := m.ciphers[resource]
 
-		kind, err := inspectVersioned(cipher, row)
+		err = m.convertRecord(ctx, m.ciphers[resource], row, slug, run)
 		if err != nil {
-			recordFailure(run.failures, run.report, row)
-
-			continue
-		}
-
-		if kind == "p" {
-			continue
-		}
-
-		plain, err := cipher.Decrypt(row.Value, row.ID, slug)
-		if err != nil {
-			recordFailure(run.failures, run.report, row)
-
-			continue
-		}
-
-		if run.dryRun {
-			continue
-		}
-
-		value, err := cipher.Encrypt(plain, row.ID)
-		if err != nil {
-			return errEncryptConvertedRecord
-		}
-
-		replaceErr := m.replace(ctx, *row, value, run.report)
-		if replaceErr != nil {
-			return Wrap(replaceErr)
+			return err
 		}
 	}
 
@@ -287,6 +261,54 @@ func (m *Manager) convertSlug(ctx context.Context, slug string, run *slugConvers
 	}
 
 	return nil
+}
+
+// convertRecord re-encrypts one record under the current key. A dry run reads the record and
+// writes nothing. Records that cannot be decrypted with slug are recorded as failures instead.
+func (m *Manager) convertRecord(
+	ctx context.Context, cipher Cipher, row *Row, slug string, run *slugConversion,
+) error {
+	plain, ok := plaintextForConversion(cipher, row, slug, run)
+	if !ok || run.dryRun {
+		return nil
+	}
+
+	value, err := cipher.Encrypt(plain, row.ID)
+	if err != nil {
+		return errEncryptConvertedRecord
+	}
+
+	replaceErr := m.replace(ctx, *row, value, run.report)
+	if replaceErr != nil {
+		return Wrap(replaceErr)
+	}
+
+	return nil
+}
+
+// plaintextForConversion decrypts a versioned record with slug. It returns false for plaintext
+// records, which need no conversion. It returns false and records a failure when the record
+// cannot be inspected or decrypted.
+func plaintextForConversion(cipher Cipher, row *Row, slug string, run *slugConversion) (string, bool) {
+	kind, err := inspectVersioned(cipher, row)
+	if err != nil {
+		recordFailure(run.failures, run.report, row)
+
+		return "", false
+	}
+
+	if kind == "p" {
+		return "", false
+	}
+
+	plain, err := cipher.Decrypt(row.Value, row.ID, slug)
+	if err != nil {
+		recordFailure(run.failures, run.report, row)
+
+		return "", false
+	}
+
+	return plain, true
 }
 
 // inspectVersioned authenticates versioned envelopes only. Unversioned values cannot be

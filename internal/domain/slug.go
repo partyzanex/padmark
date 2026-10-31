@@ -91,14 +91,23 @@ func HasGeneratedEditCodeShape(code string) bool {
 	return true
 }
 
+// CustomSlugSetting is the value of the custom slug setting. Its underlying type is bool, so
+// the setting is a named type and not a bare bool parameter.
+type CustomSlugSetting bool
+
+const (
+	// CustomSlugsDisabled rejects user-supplied slugs.
+	CustomSlugsDisabled CustomSlugSetting = false
+	// CustomSlugsEnabled accepts user-supplied slugs that pass ValidCustomSlug.
+	CustomSlugsEnabled CustomSlugSetting = true
+)
+
 // ResolveSlug validates or generates a slug, returning the plaintext value to use as both the
 // resource's encryption key and the input to HashSlug. A user-supplied candidate is only
-// accepted when allowCustom is true; otherwise a non-empty candidate is rejected so callers
-// cannot pick low-entropy, guessable key material. An empty candidate always generates a fresh
-// random slug, regardless of allowCustom (custom aliases are optional, not mandatory).
-//
-//nolint:revive // allowCustom is the --custom-slugs setting; the domain owns this slug rule
-func ResolveSlug(candidate string, allowCustom bool) (string, error) {
+// accepted when custom is CustomSlugsEnabled; otherwise a non-empty candidate is rejected so
+// callers cannot pick low-entropy, guessable key material. An empty candidate always generates
+// a fresh random slug, regardless of custom (custom aliases are optional, not mandatory).
+func ResolveSlug(candidate string, custom CustomSlugSetting) (string, error) {
 	if candidate == "" {
 		slug, err := newSlug()
 		if err != nil {
@@ -108,7 +117,7 @@ func ResolveSlug(candidate string, allowCustom bool) (string, error) {
 		return slug, nil
 	}
 
-	if !allowCustom {
+	if custom == CustomSlugsDisabled {
 		return "", ErrCustomSlugDisabled
 	}
 

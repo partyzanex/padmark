@@ -18,7 +18,7 @@ func TestGenerateTOTPSecret_ReturnsNonEmptyBase32(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.NotEmpty(t, secret)
-	// base32 alphabet: A-Z and 2-7 only
+	// base32 alphabet: A-Z and 2-7 only.
 	assert.True(t, isBase32(secret), "secret must be valid base32: %q", secret)
 }
 
@@ -60,7 +60,7 @@ func TestValidateTOTP_WrongSecret(t *testing.T) {
 	_, err := crypto.GenerateTOTPSecret()
 	require.NoError(t, err)
 
-	code, err := totp.GenerateCode("JBSWY3DPEHPK3PXP", time.Now()) // different secret
+	code, err := totp.GenerateCode("JBSWY3DPEHPK3PXP", time.Now()) // different secret.
 	require.NoError(t, err)
 
 	assert.False(t, crypto.ValidateTOTP("DIFFERENTSECRETSECRETKEY", code))
@@ -70,7 +70,7 @@ func TestValidateTOTP_PreviousPeriodAccepted(t *testing.T) {
 	secret, err := crypto.GenerateTOTPSecret()
 	require.NoError(t, err)
 
-	// Code from 30s ago should be accepted by ±1 window
+	// Code from 30s ago should be accepted by ±1 window.
 	past := time.Now().Add(-30 * time.Second)
 	code, err := totp.GenerateCode(secret, past)
 	require.NoError(t, err)
@@ -82,7 +82,7 @@ func TestValidateTOTP_TwoPeriodsAgoRejected(t *testing.T) {
 	secret, err := crypto.GenerateTOTPSecret()
 	require.NoError(t, err)
 
-	// Code from 61s ago is outside the ±1 window
+	// Code from 61s ago is outside the ±1 window.
 	past := time.Now().Add(-61 * time.Second)
 	code, err := totp.GenerateCode(secret, past)
 	require.NoError(t, err)
@@ -113,7 +113,7 @@ func TestGenerateQRCodeDataURL_DifferentUsersProduceDifferentURLs(t *testing.T) 
 	assert.NotEqual(t, url1, url2)
 }
 
-// ValidateTOTPWithCounter
+// ValidateTOTPWithCounter.
 
 func TestValidateTOTPWithCounter_ValidCode_ReturnsCounterAndTrue(t *testing.T) {
 	secret, err := crypto.GenerateTOTPSecret()

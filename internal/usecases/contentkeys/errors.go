@@ -100,8 +100,9 @@ var (
 	errMigrationNotInitialized = errors.New("initialize encryption with migrate before registering another key")
 	errNoteAlreadyEnveloped    = errors.New("note already has an encryption envelope; there is nothing to convert")
 	errNoteChangedConcurrently = errors.New("note changed concurrently; stop all writers and retry")
-	errNoteIsLegacyCiphertext  = errors.New("note holds structurally valid legacy ciphertext; it is not v0.1.6 plaintext")
-	errReadSlugInput           = errors.New("could not read slug input (maximum line length 4096 bytes)")
-	errRecordNotVersioned      = errors.New("record is not a versioned envelope")
-	errRotationIncomplete      = errors.New("rotation incomplete; retry after stopping concurrent writers")
+	errNoteIsLegacyCiphertext  = errors.New(
+		"note holds structurally valid legacy ciphertext; it is not v0.1.6 plaintext")
+	errReadSlugInput      = errors.New("could not read slug input (maximum line length 4096 bytes)")
+	errRecordNotVersioned = errors.New("record is not a versioned envelope")
+	errRotationIncomplete = errors.New("rotation incomplete; retry after stopping concurrent writers")
 )

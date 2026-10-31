@@ -30,7 +30,7 @@ func connectTestClient(ctx context.Context, mgr *Manager) (*mcpsdk.ClientSession
 
 	clientSession, err := client.Connect(ctx, clientTransport, nil)
 	if err != nil {
-		_ = srvSession.Close() // a failed close must not mask the connect error
+		_ = srvSession.Close() // a failed close must not mask the connect error.
 
 		return nil, err
 	}
@@ -100,7 +100,7 @@ func isolateEnv(t *testing.T) {
 	t.Helper()
 
 	for _, key := range []string{EnvToken, EnvBaseURL, EnvTimeout, EnvLogLevel} {
-		t.Setenv(key, "") // registers the restore of the original value
+		t.Setenv(key, "") // registers the restore of the original value.
 		require.NoError(t, os.Unsetenv(key))
 	}
 

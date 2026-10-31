@@ -69,7 +69,7 @@ func (s *SessionRepositoryTestSuite) newSession(id string, userID uuid.UUID, ttl
 	}
 }
 
-// ── Create / Get ──
+// ── Create / Get ──.
 
 func (s *SessionRepositoryTestSuite) TestCreate_Get_RoundTrip() {
 	ctx := s.T().Context()
@@ -115,7 +115,7 @@ func (s *SessionRepositoryTestSuite) TestGet_ExactExpiryBoundary_ReturnsErrSessi
 		SessionHash: "sess-boundary",
 		UserID:      u3,
 		CreatedAt:   time.Now(),
-		ExpiresAt:   time.Now(), // exactly now — must be rejected
+		ExpiresAt:   time.Now(), // exactly now — must be rejected.
 		UserAgent:   "", IP: "",
 
 		BaseModel: bun.BaseModel{},
@@ -127,7 +127,7 @@ func (s *SessionRepositoryTestSuite) TestGet_ExactExpiryBoundary_ReturnsErrSessi
 	s.ErrorIs(err, domain.ErrSessionExpired, "session at exact expiry boundary must be rejected")
 }
 
-// ── Delete ──
+// ── Delete ──.
 
 func (s *SessionRepositoryTestSuite) TestDelete_RemovesSession() {
 	ctx := s.T().Context()
@@ -147,7 +147,7 @@ func (s *SessionRepositoryTestSuite) TestDelete_NonExistentSession_NoError() {
 	s.Require().NoError(err)
 }
 
-// ── DeleteByUserID ──
+// ── DeleteByUserID ──.
 
 func (s *SessionRepositoryTestSuite) TestDeleteByUserID_RemovesAllUserSessions() {
 	ctx := s.T().Context()
@@ -224,7 +224,7 @@ func (s *SessionRepositoryTestSuite) TestDeleteByUserID_NoSessions_IsIdempotent(
 	s.Require().NoError(err)
 }
 
-// ── DeleteExpired ──
+// ── DeleteExpired ──.
 
 func (s *SessionRepositoryTestSuite) TestDeleteExpired_RemovesExpiredKeepsActive() {
 	ctx := s.T().Context()

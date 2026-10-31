@@ -67,7 +67,7 @@ func requireAdmin(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// ── admin panel (GET /admin) ──
+// ── admin panel (GET /admin) ──.
 
 type adminViewData struct {
 	Nonce       string
@@ -100,7 +100,7 @@ func (h *AdminHandler) AdminPage(w http.ResponseWriter, r *http.Request) {
 	h.renderAdmin(w, r, &data)
 }
 
-// ── admin: generate invite (POST /admin/invite) ──
+// ── admin: generate invite (POST /admin/invite) ──.
 
 // AdminInviteHandler handles POST /admin/invite — generates a single-use invite link.
 // requireAdmin (RegisterRoutes) already guarantees the context user is a signed-in admin.
@@ -131,7 +131,7 @@ func (h *AdminHandler) AdminInviteHandler(w http.ResponseWriter, r *http.Request
 	h.renderAdmin(w, r, &data)
 }
 
-// ── admin: revoke user (POST /admin/users/{id}/revoke) ──
+// ── admin: revoke user (POST /admin/users/{id}/revoke) ──.
 
 // AdminRevokeHandler handles POST /admin/users/{id}/revoke — removes a user.
 // requireAdmin (RegisterRoutes) already guarantees the context user is a signed-in admin.
@@ -164,7 +164,7 @@ func (h *AdminHandler) AdminRevokeHandler(w http.ResponseWriter, r *http.Request
 	http.Redirect(w, r, "/admin", http.StatusSeeOther)
 }
 
-// ── admin: create API key (POST /admin/api-keys) ──
+// ── admin: create API key (POST /admin/api-keys) ──.
 
 // AdminCreateKeyHandler handles POST /admin/api-keys — issues an API key for the signed-in admin
 // and re-renders the admin page with the plain key shown exactly once. The plain key is never
@@ -229,7 +229,7 @@ func (h *AdminHandler) AdminCreateKeyHandler(w http.ResponseWriter, r *http.Requ
 	h.renderAdmin(w, r, &data)
 }
 
-// ── admin: revoke API key (POST /admin/api-keys/{id}/revoke) ──
+// ── admin: revoke API key (POST /admin/api-keys/{id}/revoke) ──.
 
 // AdminRevokeKeyHandler handles POST /admin/api-keys/{id}/revoke — deletes an API key by its
 // public ID (the token hash) and redirects back to /admin. requireAdmin (RegisterRoutes) already

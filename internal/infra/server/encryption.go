@@ -345,7 +345,8 @@ func writeKeyring(cmd *cli.Command, keyring *crypto.ContentKeyring) error {
 		output = os.Stdout
 	}
 
-	_, err := io.WriteString(output, "Keyring written; distribute the file to all replicas and back it up separately.\n")
+	_, err := io.WriteString(output,
+		"Keyring written; distribute the file to all replicas and back it up separately.\n")
 	if err != nil {
 		return fmt.Errorf("write keyring result: %w", err)
 	}
@@ -377,7 +378,8 @@ func prepareArgon2(cmd *cli.Command) (*crypto.EditCodeHasher, error) {
 }
 
 func validateContentEncryption(
-	ctx context.Context, db *bun.DB, keyring *crypto.ContentKeyring, hasher contentkeys.EditCodeHasher, log *slog.Logger,
+	ctx context.Context, db *bun.DB, keyring *crypto.ContentKeyring,
+	hasher contentkeys.EditCodeHasher, log *slog.Logger,
 ) error {
 	manager, err := newEncryptionManager(db, keyring, hasher)
 	if err != nil {

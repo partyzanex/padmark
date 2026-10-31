@@ -70,7 +70,7 @@ func newLinkManager(
 	)
 }
 
-// ── Create ──
+// ── Create ──.
 
 func (s *ManagerSuite) TestCreate_GeneratesSlugAndEditCode() {
 	note := &domain.Note{
@@ -249,7 +249,7 @@ func (s *ManagerSuite) TestCreate_EmptyTitleAllowed() {
 	s.Empty(result.Title)
 }
 
-// ── Get / expiry / burn ──
+// ── Get / expiry / burn ──.
 
 func (s *ManagerSuite) TestGet_OK() {
 	ctx := s.T().Context()
@@ -288,7 +288,7 @@ func (s *ManagerSuite) TestGet_Expired_DeletesNote() {
 	_, err = s.Manager.Get(ctx, created.ID)
 	s.Require().ErrorIs(err, domain.ErrExpired)
 
-	// note must be removed from storage
+	// note must be removed from storage.
 	_, err = s.Manager.Peek(ctx, created.ID)
 	s.ErrorIs(err, domain.ErrNotFound)
 }
@@ -335,7 +335,7 @@ func (s *ManagerSuite) TestGet_BurnAfterReading_WithTTL_StartsTimer() {
 	s.Require().NoError(err)
 }
 
-// ── Peek ──
+// ── Peek ──.
 
 func (s *ManagerSuite) TestPeek_ReturnsExpiredNoteWithoutDeleting() {
 	ctx := s.T().Context()
@@ -358,7 +358,7 @@ func (s *ManagerSuite) TestPeek_ReturnsExpiredNoteWithoutDeleting() {
 	s.Require().NoError(err)
 }
 
-// ── View ──
+// ── View ──.
 
 func (s *ManagerSuite) TestView_IncrementsViews() {
 	ctx := s.T().Context()
@@ -398,7 +398,7 @@ func (s *ManagerSuite) TestView_BurnAfterReading_NoViewsIncrement() {
 	s.Equal(0, got.Views)
 }
 
-// ── Update ──
+// ── Update ──.
 
 func (s *ManagerSuite) TestUpdate_PreservesMetadata() {
 	ctx := s.T().Context()
@@ -461,7 +461,7 @@ func (s *ManagerSuite) TestUpdate_NotFound() {
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
-// ── Delete ──
+// ── Delete ──.
 
 func (s *ManagerSuite) TestDelete_OK() {
 	ctx := s.T().Context()
@@ -497,7 +497,7 @@ func (s *ManagerSuite) TestDelete_Forbidden() {
 	s.ErrorIs(err, domain.ErrInvalidEditCode)
 }
 
-// ── GetRendered ──
+// ── GetRendered ──.
 
 func (s *ManagerSuite) TestGetRendered_Markdown() {
 	ctx := s.T().Context()
@@ -614,7 +614,7 @@ func (s *ManagerSuite) TestGetRendered_PlainText_HTMLEscaped() {
 	s.NotContains(rendered, "<b>")
 }
 
-// ── RevealStore ──
+// ── RevealStore ──.
 
 func (s *ManagerSuite) TestReveal_Issue_ReturnsNonEmptyToken() {
 	ctx := s.T().Context()
@@ -678,7 +678,7 @@ func (s *ManagerSuite) TestReveal_EndToEnd_BurnAfterReading() {
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
-// ── RevealStore edge cases ──
+// ── RevealStore edge cases ──.
 
 func (s *ManagerSuite) TestReveal_Consume_UnknownToken() {
 	ok := s.RevealStore.Consume(s.T().Context(), "no-such-token", "any-note")

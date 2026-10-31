@@ -21,7 +21,7 @@ type errorViewData struct {
 	Title     string
 	Desc      string
 	Detail    string
-	ErrorType string // errorTypeClient or errorTypeServer
+	ErrorType string // errorTypeClient or errorTypeServer.
 	Nonce     string
 	Code      int
 }

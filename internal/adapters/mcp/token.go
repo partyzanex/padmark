@@ -62,7 +62,7 @@ func newPadmarkClient(cmd *urcli.Command) (*padmark.Client, error) {
 		return nil, fmt.Errorf("validate trusted server: %w", trustErr)
 	}
 
-	insecureErr := checkInsecureToken(stderrWriter(cmd), serverURL, token, cmd.Bool(FlagAllowInsecureHTTP))
+	insecureErr := checkInsecureToken(stderrWriter(cmd), serverURL, token, allowInsecureHTTP(cmd))
 	if insecureErr != nil {
 		return nil, fmt.Errorf("validate token transport: %w", insecureErr)
 	}
@@ -103,13 +103,23 @@ func isLoopbackHost(serverURL string) bool {
 	return err == nil && addr.IsLoopback()
 }
 
+// insecureHTTPSetting is the value of --allow-insecure-http. Its underlying type is bool, and the
+// named type keeps the setting out of bare bool parameters.
+type insecureHTTPSetting bool
+
+// insecureHTTPDenied refuses cleartext transport to a non-loopback host.
+const insecureHTTPDenied insecureHTTPSetting = false
+
+// allowInsecureHTTP reads the --allow-insecure-http setting of the command.
+func allowInsecureHTTP(cmd *urcli.Command) insecureHTTPSetting {
+	return insecureHTTPSetting(cmd.Bool(FlagAllowInsecureHTTP))
+}
+
 // checkInsecureToken guards a bearer token against cleartext transport. HTTPS or no token → nil.
 // Plain HTTP to a loopback host only warns on stderr, keeping local development working. Plain
 // HTTP to any other host is an error unless allowInsecure (--allow-insecure-http) is set, in
 // which case it warns and proceeds.
-//
-//nolint:revive // allowInsecure is the --allow-insecure-http setting; this function is its only policy
-func checkInsecureToken(errOut io.Writer, serverURL, token string, allowInsecure bool) error {
+func checkInsecureToken(errOut io.Writer, serverURL, token string, allowInsecure insecureHTTPSetting) error {
 	if token == "" {
 		return nil
 	}
@@ -119,7 +129,7 @@ func checkInsecureToken(errOut io.Writer, serverURL, token string, allowInsecure
 		return nil
 	}
 
-	if !allowInsecure && !isLoopbackHost(serverURL) {
+	if allowInsecure == insecureHTTPDenied && !isLoopbackHost(serverURL) {
 		return fmt.Errorf("%w: bearer token to %s; use an https:// URL or pass --%s",
 			errInsecureTransport, serverURL, FlagAllowInsecureHTTP)
 	}

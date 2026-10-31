@@ -23,7 +23,7 @@ type Link struct {
 	// --direct-redirect. See EffectiveDirectRedirect.
 	DirectRedirect *bool
 	ID             string
-	TargetURL      string // ciphertext in storage, plaintext in domain after Decrypt
+	TargetURL      string // ciphertext in storage, plaintext in domain after Decrypt.
 	EditCode       string
 	Views          int
 	BurnAfterClick bool

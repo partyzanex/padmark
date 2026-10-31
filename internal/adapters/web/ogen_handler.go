@@ -42,7 +42,7 @@ func NewOgenHandler(manager NoteManager, linkManager LinkManager, pinger Pinger,
 		manager:              manager,
 		linkManager:          linkManager,
 		pinger:               pinger,
-		authMgr:              nil, // optional (WithAuthManager); /api/tokens and /api/invites answer 503 until attached
+		authMgr:              nil,
 		log:                  log,
 	}
 }
@@ -209,7 +209,9 @@ func (h *OgenHandler) DeleteNote(
 		return &ogenapi.DeleteNoteUnauthorized{}, nil
 	}
 
-	editCode := deleteEditCode(ctx, h.log, params.ID, params.XEditCode.Or(""), middleware.LegacyNoteEditCodeFromCtx(ctx))
+	editCode := deleteEditCode(
+		ctx, h.log, params.ID, params.XEditCode.Or(""), middleware.LegacyNoteEditCodeFromCtx(ctx),
+	)
 
 	err := h.manager.Delete(ctx, params.ID, editCode, middleware.CallerIDFromCtx(ctx))
 	if err != nil {
@@ -330,7 +332,7 @@ func buildCreateLinkOptions(ctx context.Context, req *ogenapi.CreateLinkRequest)
 // error is logged here too, mirroring mapCreateLinkError's default branch — otherwise a bulk-item
 // failure with no known cause would go unlogged, unlike the single-item path.
 func createOneBulkLink(
-	ctx context.Context, manager LinkManager, log *slog.Logger, accounts bool, item *ogenapi.CreateLinkRequest,
+	ctx context.Context, manager LinkManager, log *slog.Logger, accounts accountMode, item *ogenapi.CreateLinkRequest,
 ) ogenapi.BulkLinkResult {
 	var link *domain.Link
 
@@ -497,7 +499,7 @@ func (h *OgenHandler) Readyz(ctx context.Context) (ogenapi.ReadyzRes, error) {
 	return &ogenapi.ReadyzOK{}, nil
 }
 
-// ── account endpoints (POST /api/tokens, POST /api/invites) ──
+// ── account endpoints (POST /api/tokens, POST /api/invites) ──.
 
 // CreateAPIToken implements ogenapi.Handler — POST /api/tokens.
 func (h *OgenHandler) CreateAPIToken(
@@ -556,7 +558,9 @@ func (h *OgenHandler) CreateInvite(ctx context.Context, req ogenapi.OptStepUpReq
 		TotpCode: ogenapi.OptString{Value: "", Set: false},
 	})
 
-	tok, err := h.authMgr.GenerateInvite(ctx, usr.ID, issuerFromCtx(ctx, stepUp.Password.Or(""), stepUp.TotpCode.Or("")))
+	issuer := issuerFromCtx(ctx, stepUp.Password.Or(""), stepUp.TotpCode.Or(""))
+
+	tok, err := h.authMgr.GenerateInvite(ctx, usr.ID, issuer)
 	if err != nil {
 		return mapCreateInviteError(err, h.log), nil
 	}
@@ -671,7 +675,13 @@ func mapCreateInviteError(err error, log *slog.Logger) ogenapi.CreateInviteRes {
 // real mutation so the caller sees the same error (404) a read would produce, unchanged.
 // accountsEnabled reports whether the account system is attached (--enable-accounts): only then
 // can the authenticated and owner privacy levels be enforced.
-func (h *OgenHandler) accountsEnabled() bool { return h.authMgr != nil }
+func (h *OgenHandler) accountsEnabled() accountMode {
+	if h.authMgr == nil {
+		return accountsOff
+	}
+
+	return accountsOn
+}
 
 // Without the account system (accountsEnabled false) no privacy level is enforced on reads, as
 // in v0.1.6 without --auth-tokens, so the edit code alone decides, like the native PUT/DELETE gate.

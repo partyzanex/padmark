@@ -66,7 +66,8 @@ func handleGetLinkRes(res padmark.GetLinkRes) (*padmark.LinkResponse, error) {
 	case *padmark.GetLinkGone:
 		return nil, ErrLinkGone
 	case *padmark.GetLinkServiceUnavailable:
-		return nil, errorcontext.Wrap(serviceUnavailableError(padmark.ErrorResponse(*typed)), "decode get link response")
+		return nil, errorcontext.Wrap(
+			serviceUnavailableError(padmark.ErrorResponse(*typed)), "decode get link response")
 	case *padmark.GetLinkInternalServerError:
 		return nil, fmt.Errorf("%w: %s", ErrServer, typed.Message)
 	default:

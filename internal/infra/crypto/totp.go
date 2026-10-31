@@ -15,9 +15,9 @@ import (
 )
 
 const (
-	totpWindow  = 1   // allow ±1 period (30s each side)
-	totpPeriod  = 30  // RFC 6238 period in seconds
-	qrImageSize = 256 // QR code PNG size in pixels
+	totpWindow  = 1   // allow ±1 period (30s each side).
+	totpPeriod  = 30  // RFC 6238 period in seconds.
+	qrImageSize = 256 // QR code PNG size in pixels.
 )
 
 // GenerateTOTPSecret returns a new random base32-encoded TOTP secret (20 bytes).

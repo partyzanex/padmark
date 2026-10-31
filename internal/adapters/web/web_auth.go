@@ -77,7 +77,7 @@ func (h *AuthHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /change-password", h.guard(h.ChangePasswordHandler))
 }
 
-// ── login page (GET /login) ──
+// ── login page (GET /login) ──.
 
 type loginViewData struct {
 	Nonce     string
@@ -113,7 +113,7 @@ func (h *AuthHandler) LoginPage(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// ── TOTP login (POST /totp-login) ──
+// ── TOTP login (POST /totp-login) ──.
 
 // TOTPLoginHandler handles POST /totp-login — username + password + TOTP code → session cookie.
 func (h *AuthHandler) TOTPLoginHandler(w http.ResponseWriter, r *http.Request) {
@@ -176,7 +176,7 @@ func (h *AuthHandler) TOTPLoginHandler(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, dest, http.StatusSeeOther) //nolint:gosec // G710: dest validated by SafeNextURL
 }
 
-// ── logout (POST /logout) ──
+// ── logout (POST /logout) ──.
 
 // LogoutHandler handles POST /logout — deletes the TOTP session cookie.
 // Returns 500 if server-side session deletion fails to prevent the cookie being
@@ -216,7 +216,7 @@ func (h *AuthHandler) LogoutHandler(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }
 
-// ── setup (GET+POST /setup) ──
+// ── setup (GET+POST /setup) ──.
 
 type setupViewData struct {
 	Nonce        string
@@ -350,7 +350,7 @@ func (h *AuthHandler) SetupHandler(w http.ResponseWriter, r *http.Request) {
 	h.renderSetup(w, r, &data)
 }
 
-// ── change password (GET+POST /change-password) ──
+// ── change password (GET+POST /change-password) ──.
 
 type changePwViewData struct {
 	Nonce     string

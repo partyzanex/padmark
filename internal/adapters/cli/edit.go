@@ -157,33 +157,48 @@ func buildUpdateReq(cmd *urcli.Command, content, editCode string) *padmark.Updat
 }
 
 // handleUpdateNoteRes maps every UpdateNote response variant; exhaustive keeps the list complete.
-//
-//nolint:cyclop // one branch per generated HTTP response variant, as in mcp.mapUpdateNoteRes
 func handleUpdateNoteRes(res padmark.UpdateNoteRes) (*padmark.NoteResponse, error) {
-	switch typed := res.(type) {
-	case *padmark.NoteResponse:
+	if typed, ok := res.(*padmark.NoteResponse); ok {
 		return typed, nil
-	case *padmark.UpdateNoteBadRequest:
-		return nil, fmt.Errorf("%w: %s", ErrBadRequest, typed.Message)
-	case *padmark.UpdateNoteUnauthorized:
-		return nil, ErrUnauthorized
-	case *padmark.UpdateNoteForbidden:
-		return nil, errWrongEditCode
-	case *padmark.UpdateNoteNotFound:
-		return nil, ErrNoteNotFound
-	case *padmark.UpdateNoteUnprocessableEntity:
-		return nil, fmt.Errorf("%w: %s", ErrValidation, typed.Message)
-	case *padmark.UpdateNoteRequestEntityTooLarge:
-		return nil, fmt.Errorf("%w: %s", ErrContentTooLarge, typed.Message)
-	case *padmark.UpdateNoteUnsupportedMediaType:
-		return nil, fmt.Errorf("%w: %s", ErrBadRequest, typed.Message)
-	case *padmark.UpdateNoteTooManyRequests:
-		return nil, ErrRateLimited
+	}
+
+	err := updateNoteClientError(res)
+	if err != nil {
+		return nil, err
+	}
+
+	switch typed := res.(type) {
 	case *padmark.UpdateNoteServiceUnavailable:
-		return nil, errorcontext.Wrap(serviceUnavailableError(padmark.ErrorResponse(*typed)), "decode update note response")
+		return nil, errorcontext.Wrap(
+			serviceUnavailableError(padmark.ErrorResponse(*typed)), "decode update note response")
 	case *padmark.UpdateNoteInternalServerError:
 		return nil, fmt.Errorf("%w: %s", ErrServer, typed.Message)
 	default:
 		return nil, fmt.Errorf("%w: %T", ErrUnexpectedResponse, res)
+	}
+}
+
+// updateNoteClientError maps the client-error variants of an UpdateNote response. It returns nil
+// for every other variant, so the caller handles those.
+func updateNoteClientError(res padmark.UpdateNoteRes) error {
+	switch typed := res.(type) {
+	case *padmark.UpdateNoteBadRequest:
+		return fmt.Errorf("%w: %s", ErrBadRequest, typed.Message)
+	case *padmark.UpdateNoteUnauthorized:
+		return ErrUnauthorized
+	case *padmark.UpdateNoteForbidden:
+		return errWrongEditCode
+	case *padmark.UpdateNoteNotFound:
+		return ErrNoteNotFound
+	case *padmark.UpdateNoteUnprocessableEntity:
+		return fmt.Errorf("%w: %s", ErrValidation, typed.Message)
+	case *padmark.UpdateNoteRequestEntityTooLarge:
+		return fmt.Errorf("%w: %s", ErrContentTooLarge, typed.Message)
+	case *padmark.UpdateNoteUnsupportedMediaType:
+		return fmt.Errorf("%w: %s", ErrBadRequest, typed.Message)
+	case *padmark.UpdateNoteTooManyRequests:
+		return ErrRateLimited
+	default:
+		return nil
 	}
 }

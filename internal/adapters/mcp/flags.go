@@ -6,9 +6,9 @@ import "time"
 // the same credential and the same timeout semantics, and adapters never reach into each
 // other's packages, so the constants are duplicated here on purpose.
 const (
-	FlagToken   = "token" // same flag name and semantics as padmark-cli
+	FlagToken   = "token" // same flag name and semantics as padmark-cli.
 	FlagBaseURL = "base-url"
-	FlagTimeout = "timeout" // same flag name and semantics as padmark-cli
+	FlagTimeout = "timeout" // same flag name and semantics as padmark-cli.
 	// FlagAllowInsecureHTTP permits sending the token over plain HTTP to a non-loopback host.
 	FlagAllowInsecureHTTP = "allow-insecure-http"
 	// FlagLogLevel selects the minimum slog level; logs go to stderr only (stdout is the protocol).

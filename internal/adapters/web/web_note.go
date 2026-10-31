@@ -190,26 +190,7 @@ func (h *NoteHandler) GetNote(w http.ResponseWriter, r *http.Request) {
 		h.renderNoteHTML(w, r, id, preloaded)
 
 	case formatPlain:
-		note, err := h.viewNote(r, id, preloaded)
-		if err != nil {
-			h.writeError(w, r, err)
-
-			return
-		}
-
-		contentType := "text/plain; charset=utf-8"
-
-		if note.ContentType == nil || *note.ContentType == domain.ContentTypeMarkdown {
-			contentType = "text/markdown; charset=utf-8"
-		}
-
-		hdr := w.Header()
-		hdr.Set("Content-Type", contentType)
-
-		_, err = fmt.Fprint(w, note.Content) // raw content is intentional for text/plain and text/markdown
-		if err != nil {
-			h.log.ErrorContext(r.Context(), "write plain content", "id", domain.HashSlug(id), "err", err)
-		}
+		h.writePlainNote(w, r, id, preloaded)
 
 	case formatJSON:
 		note, err := h.viewNote(r, id, preloaded)
@@ -277,7 +258,9 @@ func (h *NoteHandler) UpdateNoteByPath(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	note, err := h.manager.Update(r.Context(), id, body.EditCode.Or(""), middleware.CallerIDFromCtx(r.Context()), payload)
+	note, err := h.manager.Update(
+		r.Context(), id, body.EditCode.Or(""), middleware.CallerIDFromCtx(r.Context()), payload,
+	)
 	if err != nil {
 		h.writeError(w, r, err)
 
@@ -367,6 +350,30 @@ func (h *NoteHandler) HandleReveal(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.renderNoteHTML(w, r, id, preloaded)
+}
+
+// writePlainNote writes the raw note content as text/plain or text/markdown.
+func (h *NoteHandler) writePlainNote(w http.ResponseWriter, r *http.Request, id string, preloaded *domain.Note) {
+	note, err := h.viewNote(r, id, preloaded)
+	if err != nil {
+		h.writeError(w, r, err)
+
+		return
+	}
+
+	contentType := "text/plain; charset=utf-8"
+
+	if note.ContentType == nil || *note.ContentType == domain.ContentTypeMarkdown {
+		contentType = "text/markdown; charset=utf-8"
+	}
+
+	hdr := w.Header()
+	hdr.Set("Content-Type", contentType)
+
+	_, err = fmt.Fprint(w, note.Content) // raw content is intentional for text/plain and text/markdown.
+	if err != nil {
+		h.log.ErrorContext(r.Context(), "write plain content", "id", domain.HashSlug(id), "err", err)
+	}
 }
 
 // gateAnonymousMutation enforces the note's read-level privacy for anonymous write callers

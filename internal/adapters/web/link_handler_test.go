@@ -90,7 +90,7 @@ func (s *HandlerSuite) newLinkRouterWithTOTPAuth() http.Handler {
 	return router
 }
 
-// ── POST /links ──
+// ── POST /links ──.
 
 func (s *HandlerSuite) TestCreateLink_OK() {
 	link := newTestLink()
@@ -141,7 +141,7 @@ func (s *HandlerSuite) TestCreateLink_SlugConflict() {
 	s.Equal(http.StatusConflict, w.Code)
 }
 
-// ── POST /links/bulk ──
+// ── POST /links/bulk ──.
 
 // testBulkLinkResult mirrors BulkLinkResult for decoding test responses.
 type testBulkLinkResult struct {
@@ -197,7 +197,7 @@ func (s *HandlerSuite) TestCreateLinksBulk_TooManyItems_Returns400() {
 	s.Equal(http.StatusBadRequest, w.Code)
 }
 
-// ── GET /links/{id} ──
+// ── GET /links/{id} ──.
 
 func (s *HandlerSuite) TestGetLink_OK() {
 	link := newTestLink()
@@ -327,7 +327,7 @@ func (s *HandlerSuite) TestGetLink_OwnerOnly_NonOwner_Unauthorized() {
 	s.Equal(http.StatusUnauthorized, w.Code)
 }
 
-// ── DELETE /links/{id} ──
+// ── DELETE /links/{id} ──.
 
 func (s *HandlerSuite) TestDeleteLink_OK() {
 	s.expectLinkMutationGate()
@@ -432,7 +432,7 @@ func (s *HandlerSuite) TestDeleteLink_OwnerBypass_NoEditCode() {
 	s.Equal(http.StatusNoContent, w.Code)
 }
 
-// ── GET /r/{id} ──
+// ── GET /r/{id} ──.
 
 // newLinkClickRequest builds GET /r/{id} the way a browser sends a deliberate link click — the
 // intent a burn_after_click link requires (see explicitRead).

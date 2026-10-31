@@ -65,7 +65,7 @@ func (s *ManagerSuite) TearDownTest() {
 	s.ctrl.Finish()
 }
 
-// ── helpers ──
+// ── helpers ──.
 
 func (s *ManagerSuite) adminUser() *domain.User {
 	return &domain.User{
@@ -141,7 +141,7 @@ func (s *ManagerSuite) userWithSealedSecret(seal func(rawSecret string, kdfSalt 
 	return usr, rawSecret
 }
 
-// ── Login ──
+// ── Login ──.
 
 func (s *ManagerSuite) TestLogin_InvalidUsername_ReturnsErrInvalidTOTP() {
 	s.users.EXPECT().
@@ -242,7 +242,7 @@ func (s *ManagerSuite) TestLogin_ReplayedTOTP_ReturnsErrInvalidTOTP() {
 	s.ErrorIs(err, domain.ErrInvalidTOTP)
 }
 
-// ── TOTP secret migration on login ──
+// ── TOTP secret migration on login ──.
 
 // TestLogin_LegacySeal_MigratesSecret pins the migration path for accounts whose TOTP secret
 // predates the versioned envelope: the login succeeds and the secret is rewritten in the
@@ -333,7 +333,7 @@ func (s *ManagerSuite) TestLogin_WrongTOTP_DoesNotMigrate() {
 	s.ErrorIs(err, domain.ErrInvalidTOTP)
 }
 
-// ── Logout ──
+// ── Logout ──.
 
 func (s *ManagerSuite) TestLogout_DeletesSession() {
 	s.sessions.EXPECT().Delete(gomock.Any(), hashToken("sess-1")).Return(nil)
@@ -341,7 +341,7 @@ func (s *ManagerSuite) TestLogout_DeletesSession() {
 	s.Require().NoError(s.mgr.Logout(s.T().Context(), "sess-1"))
 }
 
-// ── GetSession ──
+// ── GetSession ──.
 
 func (s *ManagerSuite) TestGetSession_ExpiredSession_ReturnsErrSessionExpired() {
 	s.sessions.EXPECT().
@@ -371,7 +371,7 @@ func (s *ManagerSuite) TestGetSession_ValidSession_ReturnsUser() {
 	s.Equal("alice", got.Username)
 }
 
-// ── GenerateInvite ──
+// ── GenerateInvite ──.
 
 func (s *ManagerSuite) TestGenerateInvite_NonAdmin_ReturnsErrForbidden() {
 	nonAdmin := &domain.User{
@@ -422,7 +422,7 @@ func (s *ManagerSuite) TestGenerateInvite_IssueFails_WrapsError() {
 	s.ErrorIs(err, boom)
 }
 
-// ── AcceptInvite ──
+// ── AcceptInvite ──.
 
 func (s *ManagerSuite) TestAcceptInvite_WeakPassword_ReturnsErrWeakPassword() {
 	_, err := s.mgr.AcceptInvite(s.T().Context(), "tok", "newuser", "weak")
@@ -482,7 +482,7 @@ func (s *ManagerSuite) TestAcceptInvite_DuplicateUsername_ReturnsErrUserExistsWi
 	s.ErrorIs(err, domain.ErrUserExists)
 }
 
-// ── AcceptFirstAdmin ──
+// ── AcceptFirstAdmin ──.
 
 func (s *ManagerSuite) TestAcceptFirstAdmin_WeakPassword_ReturnsErrWeakPassword() {
 	_, err := s.mgr.AcceptFirstAdmin(s.T().Context(), "admin", "tooshort")
@@ -530,7 +530,7 @@ func (s *ManagerSuite) TestAcceptFirstAdmin_RaceLoser_PropagatesErrUserExists() 
 	s.ErrorIs(err, domain.ErrUserExists)
 }
 
-// ── ChangePassword ──
+// ── ChangePassword ──.
 
 func (s *ManagerSuite) TestChangePassword_WrongOldPassword_ReturnsErrInvalidPassword() {
 	usr, _ := s.testUser()
@@ -669,7 +669,7 @@ func (s *ManagerSuite) TestChangePassword_RevokesAPITokens() {
 	}
 }
 
-// ── VerifyStepUp / GenerateInvite step-up (M-6) ──
+// ── VerifyStepUp / GenerateInvite step-up (M-6) ──.
 
 func (s *ManagerSuite) TestVerifyStepUp() {
 	usr, rawSecret := s.testUser()
@@ -712,7 +712,7 @@ func (s *ManagerSuite) TestGenerateInvite_Bearer_RequiresStepUp() {
 	s.Equal("tok-abc", tok)
 }
 
-// ── IsEmpty ──
+// ── IsEmpty ──.
 
 func (s *ManagerSuite) TestIsEmpty_NoUsers_ReturnsTrue() {
 	s.users.EXPECT().List(gomock.Any()).Return(nil, nil)
@@ -734,7 +734,7 @@ func (s *ManagerSuite) TestIsEmpty_HasUsers_ReturnsFalse() {
 	s.False(empty)
 }
 
-// ── ListUsers ──
+// ── ListUsers ──.
 
 func (s *ManagerSuite) TestListUsers_Admin_ReturnsUsers() {
 	users := []*domain.User{s.adminUser(), {
@@ -784,7 +784,7 @@ func (s *ManagerSuite) TestListUsers_ListFails_WrapsError() {
 	s.ErrorIs(err, boom)
 }
 
-// ── RevokeUser ──
+// ── RevokeUser ──.
 
 func (s *ManagerSuite) TestRevokeUser_SelfRevoke_ReturnsErrForbidden() {
 	// Self-revoke rejected before any DB call.

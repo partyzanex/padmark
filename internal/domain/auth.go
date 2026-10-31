@@ -11,10 +11,18 @@ import (
 	"github.com/google/uuid"
 )
 
+// maxUsernameBytes bounds the byte length of a username, so that a long input is rejected
+// before the rune count runs.
+const maxUsernameBytes = 256
+
+// maxUsernameRunes bounds the number of characters in a username.
+const maxUsernameRunes = 64
+
 // ValidateUsername applies to new accounts; existing names remain usable for login.
 // Names are exact, case-sensitive identifiers, never silently trimmed or normalized.
 func ValidateUsername(username string) error {
-	if !utf8.ValidString(username) || len(username) > 256 || utf8.RuneCountInString(username) > 64 || username == "" {
+	if !utf8.ValidString(username) || len(username) > maxUsernameBytes ||
+		utf8.RuneCountInString(username) > maxUsernameRunes || username == "" {
 		return ErrInvalidUsername
 	}
 

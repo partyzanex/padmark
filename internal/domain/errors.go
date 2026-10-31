@@ -58,8 +58,8 @@ var (
 	ErrSessionExpired  = errors.New("session has expired")
 	ErrInvalidPassword = errors.New("invalid password")
 	ErrWeakPassword    = errors.New("password does not meet complexity requirements")
-	ErrInvalidUsername = errors.New("username must be 1–64 characters: letters, digits, dot, underscore, @ or hyphen; " +
-		"start with a letter or digit")
+	ErrInvalidUsername = errors.New("username must be 1–64 characters: letters, digits, dot, underscore, @ or " +
+		"hyphen; start with a letter or digit")
 	ErrSessionRevocation   = errors.New("password changed, but older sessions or API tokens could not be revoked")
 	ErrFeatureNotSupported = errors.New("feature is not enabled")
 	ErrAPITokenLimit       = errors.New("api token limit reached")

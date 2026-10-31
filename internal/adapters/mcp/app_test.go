@@ -95,7 +95,7 @@ func TestMCPDebugLogLevel_LogsToStderrOnly(t *testing.T) {
 
 	session, err := client.Connect(t.Context(), &mcpsdk.IOTransport{
 		Reader: io.NopCloser(io.TeeReader(stdoutR, &stdout)),
-		Writer: stdinW, // closed by session.Close: the server sees EOF and Run returns
+		Writer: stdinW, // closed by session.Close: the server sees EOF and Run returns.
 
 		MaxLineLength: 0,
 	}, nil)

@@ -108,7 +108,9 @@ func (h *LinkHandler) Redirect(w http.ResponseWriter, r *http.Request) {
 func (h *LinkHandler) followLink(r *http.Request, id string) (*domain.Link, error) {
 	if h.authMgr != nil {
 		link, err := h.manager.Follow(r.Context(), id, links.FollowOptions{
-			CallerID: middleware.CallerIDFromCtx(r.Context()), Authenticated: h.isAuthenticated(r), AllowBurn: explicitRead(r),
+			CallerID:      middleware.CallerIDFromCtx(r.Context()),
+			Authenticated: h.isAuthenticated(r),
+			AllowBurn:     explicitRead(r),
 		})
 		if err != nil {
 			return nil, fmt.Errorf("follow link: %w", err)

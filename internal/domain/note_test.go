@@ -279,7 +279,7 @@ func TestNote_OwnedBy_AnonymousNote(t *testing.T) {
 		Privacy: nil, OwnerID: nil, ID: "", Title: "",
 		Content: "", ContentType: nil, EditCode: "", Views: 0,
 		BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
-	} // OwnerID nil: created anonymously, or accounts disabled
+	} // OwnerID nil: created anonymously, or accounts disabled.
 
 	assert.False(t, note.OwnedBy(uuid.New()), "an unowned note must never match, even an authenticated caller")
 	assert.False(t, note.OwnedBy(uuid.Nil))

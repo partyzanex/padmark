@@ -39,7 +39,8 @@ func TestPrivacyOptions(t *testing.T) {
 	}
 
 	for _, tcase := range cases {
-		assert.Equal(t, tcase.want, values(privacyOptions(tcase.accounts, tcase.signed, tcase.current)), tcase.name)
+		assert.Equal(t, tcase.want,
+			values(privacyOptions(accountMode(tcase.accounts), tcase.signed, tcase.current)), tcase.name)
 	}
 
 	edited := privacyOptions(false, false, domain.PrivacyAuthenticated)

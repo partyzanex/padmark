@@ -472,7 +472,7 @@ func TestRenderPathologicalMeasure(t *testing.T) {
 func logScaling(t *testing.T, name string, run func(size int) measurement) {
 	t.Helper()
 
-	const rps = 10 // server.DefaultRateLimit
+	const rps = 10 // server.DefaultRateLimit.
 
 	var (
 		points []string

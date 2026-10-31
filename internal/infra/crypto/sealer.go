@@ -17,6 +17,14 @@ const sealVersion = "v1"
 // version, memory, time, threads, ciphertext.
 const sealFieldCount = 5
 
+// Indexes of the envelope fields after splitting on "$". The version field is index 0.
+const (
+	sealFieldMemory     = 1
+	sealFieldTime       = 2
+	sealFieldThreads    = 3
+	sealFieldCiphertext = 4
+)
+
 const maxSealedSecretLen = 4096
 
 // legacyHKDFInfo is the HKDF info string of the pre-argon2id user-key derivation. It survives
@@ -161,12 +169,12 @@ func parseSealed(sealed string) (params Argon2Params, ciphertext string, ok bool
 		return none, "", false
 	}
 
-	params, err := parseArgon2Cost(parts[1], parts[2], parts[3])
+	params, err := parseArgon2Cost(parts[sealFieldMemory], parts[sealFieldTime], parts[sealFieldThreads])
 	if err != nil {
 		return none, "", false
 	}
 
-	return params, parts[4], true
+	return params, parts[sealFieldCiphertext], true
 }
 
 // deriveUserKeyHKDF reproduces the pre-argon2id user-key derivation (HKDF-SHA256, hex-encoded).

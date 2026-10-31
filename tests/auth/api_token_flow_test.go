@@ -36,7 +36,7 @@ func TestAPITokenFlow_AdminIssuesKey_CLICreatesNote(t *testing.T) {
 
 	ctx := context.Background()
 
-	// ── storage: fresh shared-cache in-memory DB, pragmas (incl. FK enforcement) via Open ──
+	// ── storage: fresh shared-cache in-memory DB, pragmas (incl. FK enforcement) via Open ──.
 	db, err := sqliterepo.Open("file:apitokenflow?mode=memory&cache=shared", slog.New(slog.DiscardHandler))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, db.Close()) })
@@ -44,7 +44,7 @@ func TestAPITokenFlow_AdminIssuesKey_CLICreatesNote(t *testing.T) {
 	_, err = sqliterepo.Migrate(ctx, db)
 	require.NoError(t, err)
 
-	// ── wiring (mirrors internal/infra/server assembly) ──
+	// ── wiring (mirrors internal/infra/server assembly) ──.
 	log := slog.New(slog.DiscardHandler)
 	users := sqliterepo.NewUserRepository(db)
 
@@ -100,7 +100,7 @@ func TestAPITokenFlow_AdminIssuesKey_CLICreatesNote(t *testing.T) {
 	srv := httptest.NewServer(router)
 	t.Cleanup(srv.Close)
 
-	// ── admin issues an API key ──
+	// ── admin issues an API key ──.
 	_, err = authMgr.AcceptFirstAdmin(ctx, "admin", apiFlowPassword)
 	require.NoError(t, err)
 
@@ -121,7 +121,7 @@ func TestAPITokenFlow_AdminIssuesKey_CLICreatesNote(t *testing.T) {
 
 	require.NoError(t, clicmd.NewApp().Run(ctx, []string{"padmark-cli", "--token", envelope, "trust"}))
 
-	// ── CLI creates a note with only the envelope token — no --url, the URL comes from the token ──
+	// ── CLI creates a note with only the envelope token — no --url, the URL comes from the token ──.
 	runErr := clicmd.NewApp().Run(ctx, []string{
 		"padmark-cli", "--token", envelope,
 		"create", "--title", "hello", "--content", "world from cli",
@@ -180,7 +180,7 @@ func TestAPITokenFlow_AdminIssuesKey_CLICreatesNote(t *testing.T) {
 		"CLI must read a PRIVATE note with its API token (regression: 401 on the public GET route)")
 
 	// ── regression: a missing note must surface as a clean typed "not found" error, not a
-	// content-type decode failure — the API error body must be JSON per the OpenAPI spec ──
+	// content-type decode failure — the API error body must be JSON per the OpenAPI spec ──.
 	missingErr := clicmd.NewApp().Run(ctx, []string{
 		"padmark-cli", "--token", envelope, "get", "no-such-note",
 	})

@@ -34,7 +34,9 @@ type Storage interface {
 	Consume(ctx context.Context, id string) (*domain.Link, error)
 	// ConsumeVisible atomically checks current visibility and expiry/burn eligibility before
 	// deleting and returning a row. allowBurn=false permits only expired rows.
-	ConsumeVisible(ctx context.Context, id string, callerID uuid.UUID, authenticated, allowBurn bool) (*domain.Link, error)
+	ConsumeVisible(
+		ctx context.Context, id string, callerID uuid.UUID, authenticated, allowBurn bool,
+	) (*domain.Link, error)
 	// IncrementViewsVisible refuses a row that is no longer visible to this reader.
 	IncrementViewsVisible(ctx context.Context, id string, callerID uuid.UUID, authenticated bool) error
 }
@@ -109,7 +111,7 @@ type Manager struct {
 	cache            Cache
 	metrics          Metrics
 	log              *slog.Logger
-	allowCustomSlugs bool
+	allowCustomSlugs domain.CustomSlugSetting
 }
 
 // NewManager creates a new Manager with required dependencies. allowCustomSlugs enables
@@ -135,7 +137,7 @@ func NewManager(
 		cache:            nil,
 		metrics:          nil,
 		log:              log,
-		allowCustomSlugs: allowCustomSlugs,
+		allowCustomSlugs: domain.CustomSlugSetting(allowCustomSlugs),
 	}
 }
 
@@ -574,7 +576,8 @@ func (m *Manager) resolveUniqueSlug(
 	// resource that owns the routing constraint, rather than narrowing the shared
 	// domain.ValidCustomSlug that multi-segment notes legitimately rely on.
 	if strings.Contains(customHash, "/") {
-		return "", nil, fmt.Errorf("custom link slug %q must be a single path segment (links are served at /r/{id}): %w",
+		return "", nil, fmt.Errorf(
+			"custom link slug %q must be a single path segment (links are served at /r/{id}): %w",
 			customHash, domain.ErrInvalidSlug)
 	}
 

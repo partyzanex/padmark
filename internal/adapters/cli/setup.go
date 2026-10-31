@@ -92,7 +92,7 @@ func setupAction(ctx context.Context, cmd *urcli.Command) error {
 	endpoint := serverURL + "/setup"
 
 	// Same policy as the token flow: secrets must not travel in cleartext silently.
-	insecureErr := checkInsecureSetup(commandErrWriter(cmd), endpoint, cmd.Bool(FlagAllowInsecureHTTP))
+	insecureErr := checkInsecureSetup(commandErrWriter(cmd), endpoint, allowInsecureHTTP(cmd))
 	if insecureErr != nil {
 		return fmt.Errorf("check insecure setup: %w", insecureErr)
 	}
@@ -122,7 +122,7 @@ func setupAction(ctx context.Context, cmd *urcli.Command) error {
 
 // checkInsecureSetup guards the initial admin's password (and the returned TOTP secret, an
 // equivalent credential) against cleartext transport with the same policy as checkInsecureToken.
-func checkInsecureSetup(errOut io.Writer, serverURL string, allowInsecure bool) error {
+func checkInsecureSetup(errOut io.Writer, serverURL string, allowInsecure insecureHTTPSetting) error {
 	return errorcontext.Wrap(
 		checkInsecureTransport(errOut, serverURL, "the initial admin password and TOTP secret", allowInsecure),
 		"validate setup transport",

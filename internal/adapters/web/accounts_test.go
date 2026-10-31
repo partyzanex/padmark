@@ -15,7 +15,7 @@ import (
 	"github.com/partyzanex/padmark/internal/usecases/auth"
 )
 
-// ── POST /setup — JSON (headless) branch ──
+// ── POST /setup — JSON (headless) branch ──.
 
 func (s *AuthHandlerSuite) postSetup(accept, body, secFetchSite string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(http.MethodPost, "/setup?raw=0", bytes.NewBufferString(body))
@@ -253,7 +253,7 @@ func (s *AuthHandlerSuite) TestSetupJSON_EmptyUsername_400() {
 	}
 }
 
-// ── POST /api/tokens, POST /api/invites ──
+// ── POST /api/tokens, POST /api/invites ──.
 
 func (s *AuthHandlerSuite) postOgen(path, bearer string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(http.MethodPost, path, nil)
@@ -424,7 +424,7 @@ func (s *AuthHandlerSuite) TestAccountEndpoints_FeatureNotEnabled_503() {
 	s.Contains(rec.Body.String(), "feature is not enabled")
 }
 
-// ── origin/CSRF hardening (P1: JSON setup, P2: account endpoints) ──
+// ── origin/CSRF hardening (P1: JSON setup, P2: account endpoints) ──.
 
 // TestSetupJSON_WrongContentType_Rejected415 pins the text/plain smuggle fix: a JSON body under
 // a CORS-safelisted Content-Type made a cross-site fetch preflight-free; requiring the
@@ -434,7 +434,7 @@ func (s *AuthHandlerSuite) TestSetupJSON_WrongContentType_Rejected415() {
 	req := httptest.NewRequest(http.MethodPost, "/setup",
 		bytes.NewBufferString(`{"username":"admin","password":"`+testPw+`","bootstrap_token":"`+testBootstrapToken+`"}`))
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Content-Type", "text/plain") // safelisted ⇒ no browser preflight
+	req.Header.Set("Content-Type", "text/plain") // safelisted ⇒ no browser preflight.
 
 	rec := httptest.NewRecorder()
 
@@ -453,7 +453,7 @@ func (s *AuthHandlerSuite) TestSetupJSON_CrossOriginHeader_Rejected403() {
 		bytes.NewBufferString(`{"username":"admin","password":"`+testPw+`","bootstrap_token":"`+testBootstrapToken+`"}`))
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Origin", "https://evil.example") // no Sec-Fetch-Site at all
+	req.Header.Set("Origin", "https://evil.example") // no Sec-Fetch-Site at all.
 
 	rec := httptest.NewRecorder()
 
@@ -476,7 +476,7 @@ func (s *AuthHandlerSuite) TestSetupJSON_SameOriginHeader_OK() {
 		bytes.NewBufferString(`{"username":"admin","password":"`+testPw+`","bootstrap_token":"`+testBootstrapToken+`"}`))
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Origin", "http://example.com") // httptest.NewRequest default host
+	req.Header.Set("Origin", "http://example.com") // httptest.NewRequest default host.
 
 	rec := httptest.NewRecorder()
 
@@ -557,7 +557,7 @@ func (s *AuthHandlerSuite) postOgenReq(path, bearer string) *http.Request {
 	return req
 }
 
-// ── step-up and lifetime on the issuing endpoints (M-6) ──
+// ── step-up and lifetime on the issuing endpoints (M-6) ──.
 
 // postOgenJSON posts a JSON body to an ogen route with an optional bearer key or session cookie.
 func (s *AuthHandlerSuite) postOgenJSON(path, bearer, session, body string) *httptest.ResponseRecorder {
