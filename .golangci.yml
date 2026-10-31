@@ -15,6 +15,7 @@ linters:
     # Use gomodguard_v2 and exhaustruct_v5 from the default set instead.
     - gomodguard
     - exhaustruct
+    - tagliatelle
 
   # Linters configuration (migrated from `linters-settings` in v1).
   settings:

@@ -18,7 +18,7 @@ import (
 	"github.com/pquerna/otp"
 )
 
-var discardLog = slog.New(slog.DiscardHandler) //nolint:gochecknoglobals // test helper
+func discardLog() *slog.Logger { return slog.New(slog.DiscardHandler) }
 
 // testArgon2Params uses minimal argon2id cost so these tests exercise real hash/verify logic
 // without paying crypto.DefaultArgon2Params' production-strength (64 MiB) cost on every one of
@@ -53,7 +53,7 @@ func (s *ManagerSuite) SetupTest() {
 	s.sessions = NewMockSessionStore(s.ctrl)
 	mgr, err := NewManager(s.users, s.invites, s.sessions, nil,
 		crypto.NewPasswordHasher(testArgon2Params),
-		crypto.NewSealer(testArgon2Params), crypto.NewTOTP(), discardLog, "padmark", 0)
+		crypto.NewSealer(testArgon2Params), crypto.NewTOTP(), discardLog(), "padmark", 0)
 	s.Require().NoError(err)
 	s.mgr = mgr
 	s.adminID = uuid.New()
@@ -626,7 +626,7 @@ func (s *ManagerSuite) TestChangePassword_RevokesAPITokens() {
 		apiTokens := NewMockAPITokenStore(s.ctrl)
 		mgr, err := NewManager(s.users, s.invites, s.sessions, apiTokens,
 			crypto.NewPasswordHasher(testArgon2Params),
-			crypto.NewSealer(testArgon2Params), crypto.NewTOTP(), discardLog, "padmark", 0)
+			crypto.NewSealer(testArgon2Params), crypto.NewTOTP(), discardLog(), "padmark", 0)
 		s.Require().NoError(err)
 
 		usr, rawSecret := s.testUser()

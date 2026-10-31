@@ -457,7 +457,7 @@ func (sess *uiSession) admin() string {
 	require.Equal(sess.t, http.StatusCreated, response.Status())
 
 	var body struct {
-		URI string `json:"otp_auth_uri"` //nolint:tagliatelle // the server names this field otp_auth_uri
+		URI string `json:"otp_auth_uri"`
 	}
 	sess.must(response.JSON(&body))
 	enrollment, err := url.Parse(body.URI)

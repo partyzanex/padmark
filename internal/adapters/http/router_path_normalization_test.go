@@ -51,10 +51,10 @@ func (s *PathNormalizationSuite) SetupTest() {
 	s.revealStore = NewMockRevealTokenStore(s.ctrl)
 	s.auth = NewMockAuthManager(s.ctrl)
 
-	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog).
+	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog()).
 		WithAuthManager(s.auth).
 		WithRevealStore(s.revealStore)
-	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, NewMockPinger(s.ctrl), discardLog)
+	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, NewMockPinger(s.ctrl), discardLog())
 
 	router, err := adhttp.NewRouter(handler, ogen, &adhttp.RouterOptions{
 		MaxBodyBytes: 256 * 1024,

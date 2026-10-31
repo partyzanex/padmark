@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-var testDiscardLog = slog.New(slog.DiscardHandler) //nolint:gochecknoglobals // test helper
+func testDiscardLog() *slog.Logger { return slog.New(slog.DiscardHandler) }
 
 func parseCIDR(tb testing.TB, cidr string) *net.IPNet {
 	tb.Helper()
@@ -143,7 +143,7 @@ func TestWithTOTPRateLimit_WideOpenProxies_SpoofedXRealIPDefeatsLimit(t *testing
 
 		w.WriteHeader(http.StatusOK)
 	})
-	handler := WithTOTPRateLimit([]*net.IPNet{parseCIDR(t, "0.0.0.0/0")}, testDiscardLog, inner)
+	handler := WithTOTPRateLimit([]*net.IPNet{parseCIDR(t, "0.0.0.0/0")}, testDiscardLog(), inner)
 
 	const attempts = totpRatePerMin * 3
 
@@ -168,7 +168,7 @@ func TestWithTOTPRateLimit_NoProxiesConfigured_SpoofedHeadersDoNotDefeatLimit(t 
 	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	handler := WithTOTPRateLimit(nil, testDiscardLog, inner)
+	handler := WithTOTPRateLimit(nil, testDiscardLog(), inner)
 
 	var lastCode int
 
@@ -197,7 +197,7 @@ func TestWithTOTPRateLimit_ProxyPresentButUntrusted_ClientsShareOneBucket(t *tes
 	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	handler := WithTOTPRateLimit(nil, testDiscardLog, inner)
+	handler := WithTOTPRateLimit(nil, testDiscardLog(), inner)
 
 	// Distinct real clients, each correctly announced by the proxy in X-Forwarded-For.
 	for i := range totpRatePerMin {
@@ -324,7 +324,7 @@ func TestWithTOTPRateLimit_AllowsUnderLimit(t *testing.T) {
 
 		w.WriteHeader(http.StatusOK)
 	})
-	handler := WithTOTPRateLimit(nil, testDiscardLog, inner)
+	handler := WithTOTPRateLimit(nil, testDiscardLog(), inner)
 
 	for range totpRatePerMin {
 		req := httptest.NewRequest(http.MethodPost, "/totp-login", nil)
@@ -343,7 +343,7 @@ func TestWithTOTPRateLimit_BlocksOverLimit(t *testing.T) {
 	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	handler := WithTOTPRateLimit(nil, testDiscardLog, inner)
+	handler := WithTOTPRateLimit(nil, testDiscardLog(), inner)
 
 	for range totpRatePerMin {
 		req := httptest.NewRequest(http.MethodPost, "/totp-login", nil)
@@ -374,7 +374,7 @@ func TestWithRateLimit_Exceeded_ReturnsJSONError(t *testing.T) {
 	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	handler := WithRateLimit(1, 1, nil, testDiscardLog, inner)
+	handler := WithRateLimit(1, 1, nil, testDiscardLog(), inner)
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.RemoteAddr = "7.7.7.7:9000"
@@ -394,7 +394,7 @@ func TestWithTOTPRateLimit_DifferentIPs_IndependentBuckets(t *testing.T) {
 	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	handler := WithTOTPRateLimit(nil, testDiscardLog, inner)
+	handler := WithTOTPRateLimit(nil, testDiscardLog(), inner)
 
 	// exhaust bucket for IP A
 	for range totpRatePerMin {

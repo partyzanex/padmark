@@ -88,9 +88,9 @@ func (s *LLMsRouterSuite) TearDownTest() {
 }
 
 func (s *LLMsRouterSuite) newRouter() http.Handler {
-	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog)
+	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog())
 	handler.WithAuthManager(NewMockAuthManager(s.ctrl))
-	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog)
+	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
 
 	opts := adhttp.RouterOptions{
 		MaxBodyBytes: 256 * 1024,

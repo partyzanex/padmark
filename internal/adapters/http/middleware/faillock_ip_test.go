@@ -49,7 +49,7 @@ func alwaysForbidden() http.Handler {
 // who exhausts maxFailedAttempts must not lock the resource for an anonymous editor at another
 // IP — anonymous buckets are keyed by client IP, not shared under uuid.Nil.
 func TestFailLockout_AnonymousBucketIsPerIP(t *testing.T) {
-	handler := WithFailLockout(NewFailLockoutCache(), nil, testDiscardLog, alwaysForbidden())
+	handler := WithFailLockout(NewFailLockoutCache(), nil, testDiscardLog(), alwaysForbidden())
 
 	for range maxFailedAttempts {
 		require.Equal(t, http.StatusForbidden, failLockoutProbe(handler, "10.0.0.1:4000", uuid.Nil))
@@ -65,7 +65,7 @@ func TestFailLockout_AnonymousBucketIsPerIP(t *testing.T) {
 // callers: their bucket is keyed by user ID alone, shared across every IP, session and token,
 // and independent of anonymous buckets at the same IP.
 func TestFailLockout_AuthenticatedBucketIgnoresIP(t *testing.T) {
-	handler := WithFailLockout(NewFailLockoutCache(), nil, testDiscardLog, alwaysForbidden())
+	handler := WithFailLockout(NewFailLockoutCache(), nil, testDiscardLog(), alwaysForbidden())
 	user := uuid.New()
 
 	for i := range maxFailedAttempts {
@@ -86,7 +86,7 @@ func TestFailLockout_AuthenticatedBucketIgnoresIP(t *testing.T) {
 // TestFailLockout_AnonymousIPv6GroupedBy64 pins that anonymous IPv6 callers share a bucket per
 // /64: rotating addresses inside one prefix must not mint fresh buckets.
 func TestFailLockout_AnonymousIPv6GroupedBy64(t *testing.T) {
-	handler := WithFailLockout(NewFailLockoutCache(), nil, testDiscardLog, alwaysForbidden())
+	handler := WithFailLockout(NewFailLockoutCache(), nil, testDiscardLog(), alwaysForbidden())
 
 	for range maxFailedAttempts {
 		require.Equal(t, http.StatusForbidden, failLockoutProbe(handler, "[2001:db8:1:2::1]:4000", uuid.Nil))
@@ -104,7 +104,7 @@ func TestFailLockout_AnonymousIPFromTrustedProxy(t *testing.T) {
 	_, proxyNet, err := net.ParseCIDR("10.1.0.0/16")
 	require.NoError(t, err)
 
-	handler := WithFailLockout(NewFailLockoutCache(), []*net.IPNet{proxyNet}, testDiscardLog, alwaysForbidden())
+	handler := WithFailLockout(NewFailLockoutCache(), []*net.IPNet{proxyNet}, testDiscardLog(), alwaysForbidden())
 	probe := func(forwardedFor string) int {
 		req := httptest.NewRequest(http.MethodPut, "/notes/resource", nil)
 		req.SetPathValue("id", "resource")

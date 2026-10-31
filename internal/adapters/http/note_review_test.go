@@ -22,7 +22,7 @@ func (s *HandlerSuite) TestOgenGetNotePrivacyBeforeView() {
 		note.BurnAfterReading = true
 		s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
 
-		handler := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog)
+		handler := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
 		result, err := handler.GetNote(s.T().Context(), ogenapi.GetNoteParams{ID: testID})
 		s.Require().NoError(err)
 		s.IsType(&ogenapi.GetNoteUnauthorized{
@@ -36,7 +36,7 @@ func (s *HandlerSuite) TestOgenGetNotePublicAppliesView() {
 	note := newTestNote("public", "body")
 	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
 	s.manager.EXPECT().ViewPreloaded(gomock.Any(), testID, note).Return(note, nil)
-	handler := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog)
+	handler := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
 	result, err := handler.GetNote(s.T().Context(), ogenapi.GetNoteParams{ID: testID})
 	s.Require().NoError(err)
 	s.IsType(new(ogenapi.NoteResponse), result)

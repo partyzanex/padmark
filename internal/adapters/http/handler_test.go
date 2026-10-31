@@ -56,7 +56,7 @@ func TestHandler(t *testing.T) {
 	suite.Run(t, new(HandlerSuite))
 }
 
-var discardLog = slog.New(slog.DiscardHandler) //nolint:gochecknoglobals // test helper
+func discardLog() *slog.Logger { return slog.New(slog.DiscardHandler) }
 
 func (s *HandlerSuite) SetupTest() {
 	s.ctrl = gomock.NewController(s.T())
@@ -70,8 +70,8 @@ func (s *HandlerSuite) SetupTest() {
 }
 
 func (s *HandlerSuite) newRouter() http.Handler {
-	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog)
-	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog)
+	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog())
+	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
 
 	opts := adhttp.RouterOptions{
 		MaxBodyBytes: 256 * 1024,
@@ -90,8 +90,8 @@ func (s *HandlerSuite) newRouter() http.Handler {
 // newRouterWithOptions builds a router with the given trusted proxies and forced scheme,
 // used to exercise scheme-detection precedence (auto-detect vs --public-scheme override).
 func (s *HandlerSuite) newRouterWithOptions(trustedProxies []*net.IPNet, forcedScheme string) http.Handler {
-	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog)
-	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog)
+	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog())
+	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
 
 	opts := adhttp.RouterOptions{
 		MaxBodyBytes:   256 * 1024,
@@ -111,8 +111,8 @@ func (s *HandlerSuite) newRouterWithOptions(trustedProxies []*net.IPNet, forcedS
 
 // newRouterWithAllowedHosts builds a router whose main listener only serves the given Hosts.
 func (s *HandlerSuite) newRouterWithAllowedHosts(hosts ...string) http.Handler {
-	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog)
-	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog)
+	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog())
+	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
 
 	opts := adhttp.RouterOptions{
 		MaxBodyBytes: 256 * 1024,
@@ -159,9 +159,9 @@ func (s *HandlerSuite) TestAllowedHosts_EnforcedOnMainListener() {
 // also the standard way to force "auth is configured" for tests that only need an anonymous
 // request to be treated as unauthenticated (no session/API-token credential presented).
 func (s *HandlerSuite) newRouterWithTOTPAuth() http.Handler {
-	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog).
+	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog()).
 		WithAuthManager(s.authMgr)
-	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog)
+	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
 
 	opts := adhttp.RouterOptions{
 		MaxBodyBytes: 256 * 1024,
@@ -180,10 +180,10 @@ func (s *HandlerSuite) newRouterWithTOTPAuth() http.Handler {
 // newRouterWithReveal builds a router with RevealStore and auth configured so that
 // unauthenticated HTML requests trigger the burn interstitial.
 func (s *HandlerSuite) newRouterWithReveal() http.Handler {
-	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog).
+	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog()).
 		WithAuthManager(s.authMgr).
 		WithRevealStore(s.revealStore)
-	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog)
+	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
 
 	opts := adhttp.RouterOptions{
 		MaxBodyBytes: 256 * 1024,
@@ -525,8 +525,8 @@ func (s *HandlerSuite) TestCreateNote_OK() {
 // enforced by the generated request validation, so an oversized body (well inside the 4 MiB
 // request limit) never reaches the manager.
 func (s *HandlerSuite) TestCreateNote_ContentOverCap_RejectedBeforeStorage() {
-	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog)
-	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog)
+	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog())
+	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
 
 	router, err := adhttp.NewRouter(handler, ogen, &adhttp.RouterOptions{
 		MaxBodyBytes: 4 * 1024 * 1024,
@@ -693,8 +693,8 @@ func (s *HandlerSuite) TestCreateNote_BodyExceedsLimit_Returns413() {
 	// MaxBodyBytes, enforced at the transport layer (http.MaxBytesReader). A body over that limit
 	// must surface as a clean 413, not an opaque decode error — checked here with a tiny limit.
 	// Manager.Create is never reached (no EXPECT): the body is rejected during ogen decoding.
-	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog)
-	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog)
+	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog())
+	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
 	opts := adhttp.RouterOptions{
 		MaxBodyBytes: 64,
 		CSRFSecret:   testCSRFSecret,
@@ -817,8 +817,8 @@ func (s *HandlerSuite) TestOgenDecodeErrors_LongContentTypeIsTruncated() {
 // already wrote the right shape before the handler was replaced, so this pins it against a
 // regression while the surrounding code changes.
 func (s *HandlerSuite) TestCreateNote_BodyExceedsLimit_UsesErrorResponseShape() {
-	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog)
-	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog)
+	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog())
+	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
 	opts := adhttp.RouterOptions{
 		MaxBodyBytes: 64,
 		CSRFSecret:   testCSRFSecret,
@@ -1655,8 +1655,8 @@ func (s *HandlerSuite) TestReadyz_OK() {
 }
 
 func (s *HandlerSuite) TestReadyz_NoPinger() {
-	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog)
-	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, adhttp.NoPinger{}, discardLog)
+	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog())
+	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, adhttp.NoPinger{}, discardLog())
 	opts := adhttp.RouterOptions{MaxBodyBytes: 256 * 1024,
 		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, CSRFSecret: nil,
 		AllowedHosts: nil, RateLimit: 0, RateBurst: 0, SessionTTL: 0, DisableAPI: false,
@@ -1736,7 +1736,7 @@ func (s *HandlerSuite) TestStaticAsset_AutofillOverride() {
 // TestTOTPLoginHandler_AccountsDisabled_Returns404 covers the nil-guard added so that the
 // account system is opt-in: with no auth manager configured, /totp-login must 404.
 func (s *HandlerSuite) TestTOTPLoginHandler_AccountsDisabled_Returns404() {
-	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog) // no WithAuthManager → accounts disabled
+	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog()) // no WithAuthManager → accounts disabled
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPost, "/totp-login", nil)
 
@@ -1748,7 +1748,7 @@ func (s *HandlerSuite) TestTOTPLoginHandler_AccountsDisabled_Returns404() {
 // TestChangePasswordPage_AccountsDisabled_Returns404 mirrors the TOTPLoginHandler nil-guard
 // test above for the GET /change-password page.
 func (s *HandlerSuite) TestChangePasswordPage_AccountsDisabled_Returns404() {
-	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog) // no WithAuthManager → accounts disabled
+	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog()) // no WithAuthManager → accounts disabled
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/change-password", nil)
 
@@ -1885,8 +1885,8 @@ func (s *HandlerSuite) TestGetNote_JSON_WriteFail() {
 // ── Rate limit ──
 
 func (s *HandlerSuite) TestRateLimit_Exceeded() {
-	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog)
-	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog)
+	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog())
+	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
 	opts := adhttp.RouterOptions{
 		MaxBodyBytes: 256 * 1024,
 		RateLimit:    1,
@@ -1918,8 +1918,8 @@ func (s *HandlerSuite) TestRateLimit_Exceeded_POSTLinks() {
 	link := newTestLink()
 	s.linkManager.EXPECT().Create(gomock.Any(), gomock.Any(), gomock.Any()).Return(link, nil)
 
-	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog)
-	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog)
+	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog())
+	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
 	opts := adhttp.RouterOptions{
 		MaxBodyBytes: 256 * 1024,
 		RateLimit:    1,
@@ -1947,8 +1947,8 @@ func (s *HandlerSuite) TestRateLimit_Exceeded_POSTLinks() {
 }
 
 func (s *HandlerSuite) TestRateLimit_DifferentIPs() {
-	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog)
-	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog)
+	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog())
+	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
 	opts := adhttp.RouterOptions{
 		MaxBodyBytes: 256 * 1024,
 		RateLimit:    1,
@@ -2548,9 +2548,8 @@ func (s *HandlerSuite) TestAPISpec_WriteFail() {
 }
 
 func (s *HandlerSuite) TestAPIDocsPage_Public() {
-	discardLog := slog.New(slog.DiscardHandler)
-	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog).WithAuthManager(s.authMgr)
-	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog)
+	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog()).WithAuthManager(s.authMgr)
+	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
 	opts := adhttp.RouterOptions{MaxBodyBytes: 256 * 1024,
 		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, CSRFSecret: nil,
 		AllowedHosts: nil, RateLimit: 0, RateBurst: 0, SessionTTL: 0, DisableAPI: false,

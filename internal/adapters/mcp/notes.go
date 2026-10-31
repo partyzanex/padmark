@@ -49,7 +49,8 @@ func deleteNoteTool() *mcpsdk.Tool {
 }
 
 func (m *Manager) createNote(
-	ctx context.Context, _ *mcpsdk.CallToolRequest, input createNoteInput, //nolint:gocritic,lll // In arrives by value; the SDK tool signature fixes this line
+	ctx context.Context, _ *mcpsdk.CallToolRequest,
+	input createNoteInput, //nolint:gocritic // hugeParam: the MCP SDK tool signature passes In by value
 ) (*mcpsdk.CallToolResult, createNoteOutput, error) {
 	// The padmark contract requires non-empty content; say so up front instead of paying a
 	// 400 round-trip for something the model can fix immediately.
@@ -120,7 +121,8 @@ func (m *Manager) getNote(
 }
 
 func (m *Manager) updateNote(
-	ctx context.Context, _ *mcpsdk.CallToolRequest, input updateNoteInput, //nolint:gocritic,lll // In arrives by value; the SDK tool signature fixes this line
+	ctx context.Context, _ *mcpsdk.CallToolRequest,
+	input updateNoteInput, //nolint:gocritic // hugeParam: the MCP SDK tool signature passes In by value
 ) (*mcpsdk.CallToolResult, createNoteOutput, error) {
 	editCode := editCodeFor(m.vault, input.ID, input.EditCode)
 

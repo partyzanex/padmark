@@ -68,9 +68,9 @@ func (s *AuthHandlerSuite) newRouterWithAuth() http.Handler {
 // newRouterWithBootstrapToken is newRouterWithAuth with an explicit bootstrap token; "" models an
 // operator who configured none (first-admin setup closed).
 func (s *AuthHandlerSuite) newRouterWithBootstrapToken(token string) http.Handler {
-	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog).
+	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog()).
 		WithAuthManager(s.auth)
-	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog)
+	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
 
 	opts := adhttp.RouterOptions{
 		MaxBodyBytes:   256 * 1024,
@@ -90,9 +90,9 @@ func (s *AuthHandlerSuite) newRouterWithBootstrapToken(token string) http.Handle
 // newRouterWithAuthAndScheme is newRouterWithAuth with --public-scheme forced, used to verify
 // that invite links and API-token envelopes honour the override behind a TLS-terminating proxy.
 func (s *AuthHandlerSuite) newRouterWithAuthAndScheme(forcedScheme string) http.Handler {
-	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog).
+	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog()).
 		WithAuthManager(s.auth)
-	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog)
+	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
 
 	opts := adhttp.RouterOptions{
 		MaxBodyBytes: 256 * 1024,
@@ -112,9 +112,9 @@ func (s *AuthHandlerSuite) newRouterWithAuthAndScheme(forcedScheme string) http.
 // newRouterWithAuthAndSessionTTL is newRouterWithAuth with a custom SessionTTL, used to verify
 // the TOTP session cookie's Max-Age tracks the configured --session-ttl instead of a fixed value.
 func (s *AuthHandlerSuite) newRouterWithAuthAndSessionTTL(ttl time.Duration) http.Handler {
-	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog).
+	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog()).
 		WithAuthManager(s.auth)
-	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog)
+	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
 
 	opts := adhttp.RouterOptions{
 		MaxBodyBytes: 256 * 1024,
@@ -165,17 +165,29 @@ func withCSRF(form url.Values) url.Values {
 
 // csrfTokens caches the per-session CSRF tokens: the token is bound to the session cookie value,
 // so a signed-in POST needs one minted for that session (the anonymous testCSRFToken is, by
-// design, rejected there).
-var csrfTokens sync.Map //nolint:gochecknoglobals // test fixture cache
+// design, rejected there). Each token has a random nonce, so the cache keeps the cookie and the
+// form value equal for one session.
+//
+//nolint:gochecknoglobals // test fixture cache
+var csrfTokens = csrfTokenCache{mu: sync.Mutex{}, tokens: map[string]string{}}
+
+// csrfTokenCache is a typed map: a sync.Map would need a type assertion on every read.
+type csrfTokenCache struct {
+	mu     sync.Mutex
+	tokens map[string]string
+}
 
 func csrfTokenFor(sessionID string) string {
-	if tok, ok := csrfTokens.Load(sessionID); ok {
-		return tok.(string) //nolint:forcetypeassert // only strings are stored
+	csrfTokens.mu.Lock()
+	defer csrfTokens.mu.Unlock()
+
+	token, ok := csrfTokens.tokens[sessionID]
+	if !ok {
+		token = adhttp.GenerateSessionCSRFTokenForTest(authTestCSRFSecret, sessionID)
+		csrfTokens.tokens[sessionID] = token
 	}
 
-	tok, _ := csrfTokens.LoadOrStore(sessionID, adhttp.GenerateSessionCSRFTokenForTest(authTestCSRFSecret, sessionID))
-
-	return tok.(string) //nolint:forcetypeassert // only strings are stored
+	return token
 }
 
 // csrfCookieFor is csrfCookie for a request that also carries sessionCookie(sessionID).
@@ -1636,9 +1648,9 @@ func (s *AuthHandlerSuite) TestCSRFGuard_InvalidHMAC_Returns403() {
 // newRouterWithCSRFSecret builds an independent router instance with the given CSRF secret. Two
 // of them stand in for two replicas, or for the same server before and after a restart.
 func (s *AuthHandlerSuite) newRouterWithCSRFSecret(secret []byte) http.Handler {
-	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog).
+	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog()).
 		WithAuthManager(s.auth)
-	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog)
+	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
 
 	opts := adhttp.RouterOptions{
 		MaxBodyBytes: 256 * 1024,

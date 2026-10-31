@@ -57,8 +57,13 @@ func trustAction(_ context.Context, cmd *urcli.Command) error {
 		path = "<config dir unavailable>"
 	}
 
-	// Advisory write to stderr; a failed message must not abort the success path.
-	fmt.Fprintf(stderrWriter(cmd), trustedOriginMsg, origin, path) //nolint:errcheck
+	// The confirmation is the command's only output (stderr, because stdout belongs to the MCP
+	// protocol), so a failed write fails the command. The origin is already recorded, and a retry
+	// is idempotent.
+	_, writeErr := fmt.Fprintf(stderrWriter(cmd), trustedOriginMsg, origin, path)
+	if writeErr != nil {
+		return fmt.Errorf("write trust confirmation: %w", writeErr)
+	}
 
 	return nil
 }

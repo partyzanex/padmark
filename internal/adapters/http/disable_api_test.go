@@ -39,8 +39,8 @@ func (s *DisableAPISuite) TearDownTest() {
 }
 
 func (s *DisableAPISuite) newRouter(disableAPI bool) http.Handler {
-	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog)
-	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog)
+	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog())
+	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
 
 	opts := adhttp.RouterOptions{
 		MaxBodyBytes: 256 * 1024,

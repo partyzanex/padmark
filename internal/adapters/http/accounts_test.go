@@ -369,8 +369,8 @@ func (s *AuthHandlerSuite) TestAccountEndpoints_RequireCredentials() {
 // like the rest of the machine surface: the middleware runs outside auth, so a valid bearer
 // key must not leak provisioning calls on a disabled instance.
 func (s *AuthHandlerSuite) TestAccountEndpoints_DisabledAPI_503() {
-	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog)
-	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog)
+	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog())
+	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
 
 	opts := adhttp.RouterOptions{
 		MaxBodyBytes: 256 * 1024,

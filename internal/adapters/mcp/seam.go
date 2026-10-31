@@ -14,10 +14,12 @@ import (
 type PadmarkClient interface {
 	CreateNote(ctx context.Context, request *padmark.CreateNoteRequest) (padmark.CreateNoteRes, error)
 	GetNote(ctx context.Context, params padmark.GetNoteParams) (padmark.GetNoteRes, error)
-	UpdateNote(ctx context.Context, request *padmark.UpdateNoteRequest, params padmark.UpdateNoteParams) (padmark.UpdateNoteRes, error) //nolint:lll // generated client signature, matched verbatim
+	UpdateNote(
+		ctx context.Context, request *padmark.UpdateNoteRequest, params padmark.UpdateNoteParams,
+	) (padmark.UpdateNoteRes, error)
 	DeleteNote(ctx context.Context, params padmark.DeleteNoteParams) (padmark.DeleteNoteRes, error)
 	CreateLink(ctx context.Context, request *padmark.CreateLinkRequest) (padmark.CreateLinkRes, error)
-	CreateLinksBulk(ctx context.Context, request *padmark.BulkCreateLinksRequest) (padmark.CreateLinksBulkRes, error) //nolint:lll // generated client signature, matched verbatim
+	CreateLinksBulk(ctx context.Context, request *padmark.BulkCreateLinksRequest) (padmark.CreateLinksBulkRes, error)
 	GetLink(ctx context.Context, params padmark.GetLinkParams) (padmark.GetLinkRes, error)
 	DeleteLink(ctx context.Context, params padmark.DeleteLinkParams) (padmark.DeleteLinkRes, error)
 	Healthz(ctx context.Context) error

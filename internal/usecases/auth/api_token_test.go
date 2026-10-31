@@ -54,7 +54,7 @@ func newAuthManagerWithTokens(
 		crypto.NewPasswordHasher(testArgon2Params),
 		crypto.NewSealer(testArgon2Params),
 		crypto.NewTOTP(),
-		discardLog,
+		discardLog(),
 		"padmark",
 		0,
 	)
@@ -74,7 +74,7 @@ func (suite *APITokenSuite) disabledMgr() *Manager {
 		crypto.NewPasswordHasher(testArgon2Params),
 		crypto.NewSealer(testArgon2Params),
 		crypto.NewTOTP(),
-		discardLog,
+		discardLog(),
 		"padmark",
 		0,
 	)
@@ -401,7 +401,7 @@ func (suite *APITokenSuite) TestRevokeAPIToken_AdminLookupFails_WrapsError() {
 func (suite *APITokenSuite) stepUpMgr() (*APITokenManager, *MockStepUpVerifier) {
 	verifier := NewMockStepUpVerifier(suite.ctrl)
 
-	return NewAPITokenManager(suite.apiTokens, suite.users, verifier, discardLog), verifier
+	return NewAPITokenManager(suite.apiTokens, suite.users, verifier, discardLog()), verifier
 }
 
 func (suite *APITokenSuite) TestCreateAPIToken_Bearer_WithoutStepUp_ReturnsErrStepUpRequired() {

@@ -46,8 +46,8 @@ type testLinkResponse struct {
 // newLinkRouter builds a router with DirectRedirect set explicitly, since RouterOptions'
 // zero value (false) would otherwise always exercise the interstitial path.
 func (s *HandlerSuite) newLinkRouter(directRedirect bool) http.Handler {
-	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog)
-	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog)
+	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog())
+	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
 
 	opts := adhttp.RouterOptions{
 		MaxBodyBytes:   256 * 1024,
@@ -67,9 +67,9 @@ func (s *HandlerSuite) newLinkRouter(directRedirect bool) http.Handler {
 // newLinkRouterWithTOTPAuth is newLinkRouter(true) with a TOTP AuthManager attached, for privacy
 // tests — none of them need the interstitial mode, only the 301 vs. denied distinction.
 func (s *HandlerSuite) newLinkRouterWithTOTPAuth() http.Handler {
-	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog).
+	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog()).
 		WithAuthManager(s.authMgr)
-	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog)
+	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
 
 	opts := adhttp.RouterOptions{
 		MaxBodyBytes:   256 * 1024,

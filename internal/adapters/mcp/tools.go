@@ -98,7 +98,7 @@ type deleteLinkInput struct {
 }
 
 type createBulkLinksInput struct {
-	TargetURLs []string `json:"target_urls" jsonschema:"URLs, 1 to 100, results in order"` //nolint:tagliatelle,lll // mirrors the openapi.yaml field name; tag pairs make the line long
+	TargetURLs []string `json:"target_urls" jsonschema:"URLs, 1 to 100, results in order"`
 }
 
 type createBulkLinksOutput struct {

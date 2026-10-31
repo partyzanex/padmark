@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/urfave/cli/v3"
 
@@ -119,9 +120,7 @@ const (
 // DefaultSessionTTL is the --session-ttl flag default, in seconds — derived from
 // auth.DefaultSessionTTL (the single source of truth for the session lifetime default) instead
 // of a separately maintained literal that could silently drift out of sync with it.
-//
-//nolint:gochecknoglobals // computed flag default, effectively constant
-var DefaultSessionTTL = int(auth.DefaultSessionTTL.Seconds())
+const DefaultSessionTTL = int(auth.DefaultSessionTTL / time.Second)
 
 // appFlags returns the full flag set for the serve subcommand.
 func appFlags() []cli.Flag { //nolint:funlen // declarative flag list

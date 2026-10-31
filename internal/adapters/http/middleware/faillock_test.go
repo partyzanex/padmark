@@ -28,7 +28,7 @@ func TestWithFailLockout_LockedOut_ReturnsJSONError(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	handler := WithFailLockout(cache, nil, testDiscardLog, inner)
+	handler := WithFailLockout(cache, nil, testDiscardLog(), inner)
 
 	req := httptest.NewRequest(http.MethodPut, "/notes/locked-note", nil)
 	req.SetPathValue("id", "locked-note")
@@ -51,7 +51,7 @@ func TestWithFailLockout_CallerSuccessDoesNotResetOthers(t *testing.T) {
 			w.WriteHeader(http.StatusForbidden)
 		}
 	})
-	handler := WithFailLockout(cache, nil, testDiscardLog, inner)
+	handler := WithFailLockout(cache, nil, testDiscardLog(), inner)
 	send := func(caller uuid.UUID, success bool) int {
 		req := httptest.NewRequest(http.MethodPut, "/notes/resource", nil)
 		req.SetPathValue("id", "resource")
@@ -103,7 +103,7 @@ func TestWithFailLockout_UnderThreshold_ReachesUpstream(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	handler := WithFailLockout(cache, nil, testDiscardLog, inner)
+	handler := WithFailLockout(cache, nil, testDiscardLog(), inner)
 
 	req := httptest.NewRequest(http.MethodPut, "/notes/almost-locked", nil)
 	req.SetPathValue("id", "almost-locked")

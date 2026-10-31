@@ -36,10 +36,10 @@ func (r *changedLinkRead) GetByID(ctx context.Context, id string) (*domain.Link,
 //nolint:ireturn // test factory selects backend implementations of the same usecase ports
 func (s *ManagerSuite) linkStorage() (links.Storage, links.NotesChecker) {
 	if s.DB.Dialect().Name() == dialect.PG {
-		return pgrepo.NewLinkRepository(s.DB, discardLog), pgrepo.NewNoteRepository(s.DB)
+		return pgrepo.NewLinkRepository(s.DB, discardLog()), pgrepo.NewNoteRepository(s.DB)
 	}
 
-	return sqliterepo.NewLinkRepository(s.DB, discardLog), sqliterepo.NewNoteRepository(s.DB)
+	return sqliterepo.NewLinkRepository(s.DB, discardLog()), sqliterepo.NewNoteRepository(s.DB)
 }
 
 // This suite runs against SQLite and PostgreSQL. A second manager commits between SELECT

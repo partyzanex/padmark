@@ -51,8 +51,8 @@ func (s *LoginLockoutSuite) SetupTest() {
 
 	manager := NewMockNoteManager(s.ctrl)
 	linkManager := NewMockLinkManager(s.ctrl)
-	handler := adhttp.NewHandler(manager, linkManager, discardLog).WithAuthManager(s.auth)
-	ogen := adhttp.NewOgenHandler(manager, linkManager, NewMockPinger(s.ctrl), discardLog)
+	handler := adhttp.NewHandler(manager, linkManager, discardLog()).WithAuthManager(s.auth)
+	ogen := adhttp.NewOgenHandler(manager, linkManager, NewMockPinger(s.ctrl), discardLog())
 
 	router, err := adhttp.NewRouter(handler, ogen, &adhttp.RouterOptions{
 		MaxBodyBytes: 256 * 1024,

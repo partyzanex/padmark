@@ -44,7 +44,7 @@ func newLoginLockFixture() *loginLockFixture {
 
 		http.Redirect(w, r, "/login?error=1", http.StatusSeeOther)
 	}
-	fix.handler = WithLoginLockout(NewLoginLockout(fix.clock), testDiscardLog, stub)
+	fix.handler = WithLoginLockout(NewLoginLockout(fix.clock), testDiscardLog(), stub)
 
 	return fix
 }

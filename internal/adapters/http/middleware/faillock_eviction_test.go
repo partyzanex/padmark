@@ -41,7 +41,7 @@ func failLockoutAttempt(handler http.Handler, id string) int {
 func lockedFailLockout(t *testing.T) http.Handler {
 	t.Helper()
 
-	handler := WithFailLockout(NewFailLockoutCache(), nil, testDiscardLog, alwaysForbidden())
+	handler := WithFailLockout(NewFailLockoutCache(), nil, testDiscardLog(), alwaysForbidden())
 
 	for range maxFailedAttempts {
 		require.Equal(t, http.StatusForbidden, failLockoutAttempt(handler, "victim"))

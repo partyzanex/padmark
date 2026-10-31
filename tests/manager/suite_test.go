@@ -24,7 +24,7 @@ import (
 	"github.com/partyzanex/padmark/internal/usecases/notes"
 )
 
-var discardLog = slog.New(slog.DiscardHandler) //nolint:gochecknoglobals // test helper
+func discardLog() *slog.Logger { return slog.New(slog.DiscardHandler) }
 
 type revealStore interface {
 	Issue(ctx context.Context, noteID string) (string, error)
@@ -55,7 +55,7 @@ func newManager(
 
 	return notes.NewManager(
 		storage, linkChecker, slugLock, render.NewRenderer(), testutil.ContentEncryptor(t, "note"),
-		crypto.NewEditCodeHasher(crypto.DefaultArgon2Params()), discardLog, true,
+		crypto.NewEditCodeHasher(crypto.DefaultArgon2Params()), discardLog(), true,
 	)
 }
 
@@ -66,7 +66,7 @@ func newLinkManager(
 
 	return links.NewManager(
 		storage, notesChecker, slugLock, testutil.ContentEncryptor(t, "link"),
-		crypto.NewEditCodeHasher(crypto.DefaultArgon2Params()), discardLog, true,
+		crypto.NewEditCodeHasher(crypto.DefaultArgon2Params()), discardLog(), true,
 	)
 }
 

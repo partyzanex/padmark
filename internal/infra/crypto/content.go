@@ -28,8 +28,11 @@ const (
 	maxKeyIDSize      = 64
 	// MaxContentSize bounds allocations when opening untrusted stored envelopes.
 	MaxContentSize = 64 << 20
-	//nolint:mnd // padded base64 length
-	maxLegacyContentSize   = (MaxContentSize + contentNonceSize + contentTagSize + 2) / 3 * 4
+	// Padded base64 encodes every started block of 3 bytes as 4 characters.
+	base64BlockBytes       = 3
+	base64BlockChars       = 4
+	maxLegacyPlaintext     = MaxContentSize + contentNonceSize + contentTagSize
+	maxLegacyContentSize   = (maxLegacyPlaintext + base64BlockBytes - 1) / base64BlockBytes * base64BlockChars
 	maxContentEnvelopeSize = 256 + 2*(maxLegacyContentSize+contentNonceSize+contentTagSize) // conservative base64 bound
 )
 
