@@ -88,15 +88,21 @@ func TestMCPDebugLogLevel_LogsToStderrOnly(t *testing.T) {
 		})
 	}()
 
-	client := mcpsdk.NewClient(&mcpsdk.Implementation{Name: "test-client", Version: "0"}, nil)
+	client := mcpsdk.NewClient(&mcpsdk.Implementation{Name: "test-client", Version: "0",
+		Title: "", Description: "", WebsiteURL: "", Icons: nil,
+	}, nil)
 
 	session, err := client.Connect(t.Context(), &mcpsdk.IOTransport{
 		Reader: io.NopCloser(io.TeeReader(stdoutR, &stdout)),
 		Writer: stdinW, // closed by session.Close: the server sees EOF and Run returns
+
+		MaxLineLength: 0,
 	}, nil)
 	require.NoError(t, err)
 
-	_, err = session.CallTool(t.Context(), &mcpsdk.CallToolParams{Name: "check_server"})
+	_, err = session.CallTool(t.Context(), &mcpsdk.CallToolParams{Name: "check_server",
+		Meta: nil, Arguments: nil, InputResponses: nil, RequestState: "",
+	})
 	require.NoError(t, err)
 
 	require.NoError(t, session.Close())

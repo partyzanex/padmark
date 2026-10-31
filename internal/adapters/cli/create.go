@@ -8,6 +8,7 @@ import (
 
 	urcli "github.com/urfave/cli/v3"
 
+	"github.com/partyzanex/padmark/internal/clifactory"
 	"github.com/partyzanex/padmark/internal/errorcontext"
 	padmark "github.com/partyzanex/padmark/pkg/client"
 )
@@ -21,55 +22,55 @@ const (
 )
 
 func createCommand() *urcli.Command {
-	return &urcli.Command{
-		Name:      "create",
-		Usage:     "Create a new note",
-		ArgsUsage: " ",
-		Flags: []urcli.Flag{
-			&urcli.StringFlag{
-				Name:    FlagTitle,
-				Aliases: []string{"t"},
-				Usage:   "Note title (derived from the first non-empty line of content if omitted)",
-			},
-			&urcli.StringFlag{
-				Name:    FlagContent,
-				Aliases: []string{"c"},
-				Usage:   "Note content (reads from stdin if neither --content nor --file is set)",
-			},
-			&urcli.StringFlag{
-				Name:    FlagFile,
-				Aliases: []string{"f"},
-				Usage:   "Read note content from `file`",
-			},
-			&urcli.StringFlag{
-				Name:  FlagSlug,
-				Usage: "Custom URL slug (letters, digits, hyphens, underscores)",
-			},
-			&urcli.BoolFlag{
-				Name:  FlagPlain,
-				Usage: "Use text/plain content type instead of text/markdown",
-			},
-			&urcli.StringFlag{
-				Name:  FlagPrivacy,
-				Usage: "Privacy level: public (default), authenticated, or owner",
-			},
-			&urcli.BoolFlag{
-				Name:  FlagBurn,
-				Usage: "Burn after reading: delete on first read (add --ttl for a grace period)",
-			},
-			&urcli.Int64Flag{
-				Name:  FlagTTL,
-				Usage: "Seconds the note survives after the first read (only with --burn)",
-			},
-			&urcli.StringFlag{
-				Name:    FlagEditCode,
-				Aliases: []string{"e"},
-				Usage:   "Custom edit code, 8-128 chars (random 12-char code generated if omitted). " + psWarnEditCode,
-				Sources: urcli.EnvVars(EnvEditCode),
-			},
-		},
-		Action: createAction,
-	}
+	return clifactory.Command(func(command *urcli.Command) {
+		command.Name = "create"
+		command.Usage = "Create a new note"
+		command.ArgsUsage = " "
+		command.Flags = []urcli.Flag{
+			clifactory.StringFlag(func(flag *urcli.StringFlag) {
+				flag.Name = FlagTitle
+				flag.Aliases = []string{"t"}
+				flag.Usage = "Note title (derived from the first non-empty line of content if omitted)"
+			}),
+			clifactory.StringFlag(func(flag *urcli.StringFlag) {
+				flag.Name = FlagContent
+				flag.Aliases = []string{"c"}
+				flag.Usage = "Note content (reads from stdin if neither --content nor --file is set)"
+			}),
+			clifactory.StringFlag(func(flag *urcli.StringFlag) {
+				flag.Name = FlagFile
+				flag.Aliases = []string{"f"}
+				flag.Usage = "Read note content from `file`"
+			}),
+			clifactory.StringFlag(func(flag *urcli.StringFlag) {
+				flag.Name = FlagSlug
+				flag.Usage = "Custom URL slug (letters, digits, hyphens, underscores)"
+			}),
+			clifactory.BoolFlag(func(flag *urcli.BoolFlag) {
+				flag.Name = FlagPlain
+				flag.Usage = "Use text/plain content type instead of text/markdown"
+			}),
+			clifactory.StringFlag(func(flag *urcli.StringFlag) {
+				flag.Name = FlagPrivacy
+				flag.Usage = "Privacy level: public (default), authenticated, or owner"
+			}),
+			clifactory.BoolFlag(func(flag *urcli.BoolFlag) {
+				flag.Name = FlagBurn
+				flag.Usage = "Burn after reading: delete on first read (add --ttl for a grace period)"
+			}),
+			clifactory.Int64Flag(func(flag *urcli.Int64Flag) {
+				flag.Name = FlagTTL
+				flag.Usage = "Seconds the note survives after the first read (only with --burn)"
+			}),
+			clifactory.StringFlag(func(flag *urcli.StringFlag) {
+				flag.Name = FlagEditCode
+				flag.Aliases = []string{"e"}
+				flag.Usage = "Custom edit code, 8-128 chars (random 12-char code generated if omitted). " + psWarnEditCode
+				flag.Sources = urcli.EnvVars(EnvEditCode)
+			}),
+		}
+		command.Action = createAction
+	})
 }
 
 // validateBurnTTL enforces the documented contract that --ttl (a grace period after the first
@@ -130,20 +131,10 @@ func buildCreateReq(cmd *urcli.Command, content string) *padmark.CreateNoteReque
 		title = firstLine(content)
 	}
 
-	req := &padmark.CreateNoteRequest{
-		// OptString/OptBool/OptInt64 ContentType/Slug/BurnAfterReading/TTL/EditCode/Privacy are
-		// zero (Set=false) — the server applies its defaults; only fields the CLI explicitly sets
-		// (Title, Slug via --slug, etc.) get a populated Opt.
-		Title:            padmark.OptString{Value: "", Set: false},
-		Content:          content,
-		ContentType:      padmark.OptCreateNoteRequestContentType{Value: "", Set: false},
-		Slug:             padmark.OptString{Value: "", Set: false},
-		BurnAfterReading: padmark.OptBool{Value: false, Set: false},
-		TTL:              padmark.OptInt64{Value: 0, Set: false},
-		EditCode:         padmark.OptString{Value: "", Set: false},
-		Privacy:          padmark.OptCreateNoteRequestPrivacy{Value: "", Set: false},
-		Private:          padmark.OptBool{Value: false, Set: false}, //nolint:staticcheck // deprecated alias, unused
-	}
+	// Optional fields stay unset until the caller supplies them; legacy aliases stay unused.
+	req := new(padmark.CreateNoteRequest)
+	req.Content = content
+
 	if title != "" {
 		req.Title = padmark.NewOptString(title)
 	}

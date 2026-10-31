@@ -13,6 +13,7 @@ import (
 
 	adhttp "github.com/partyzanex/padmark/internal/adapters/http"
 	"github.com/partyzanex/padmark/internal/domain"
+	"github.com/partyzanex/padmark/tests/httptestutil"
 )
 
 // loginLockThreshold mirrors the production per-username failure threshold on POST /totp-login.
@@ -56,6 +57,9 @@ func (s *LoginLockoutSuite) SetupTest() {
 	router, err := adhttp.NewRouter(handler, ogen, &adhttp.RouterOptions{
 		MaxBodyBytes: 256 * 1024,
 		CSRFSecret:   authTestCSRFSecret,
+
+		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, AllowedHosts: nil, RateLimit: 0,
+		RateBurst: 0, SessionTTL: 0, DisableAPI: false, DirectRedirect: false,
 	})
 	s.Require().NoError(err)
 
@@ -76,7 +80,7 @@ func (s *LoginLockoutSuite) login(remoteAddr, username, code string) *httptest.R
 	req := httptest.NewRequest(http.MethodPost, "/totp-login", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "text/html")
-	req.AddCookie(&http.Cookie{Name: "padmark_csrf", Value: testCSRFToken}) //nolint:gosec // G124: test cookie
+	req.AddCookie(httptestutil.RequestCookie("padmark_csrf", testCSRFToken))
 	req.RemoteAddr = remoteAddr
 
 	rec := httptest.NewRecorder()

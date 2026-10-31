@@ -2,12 +2,15 @@ package cli
 
 import (
 	"context"
+	url "net/url"
 	"testing"
+	time "time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	urcli "github.com/urfave/cli/v3"
 
+	"github.com/partyzanex/padmark/internal/clifactory"
 	padmark "github.com/partyzanex/padmark/pkg/client"
 )
 
@@ -19,16 +22,16 @@ func buildShortenReqFor(t *testing.T, args ...string) *padmark.CreateLinkRequest
 
 	var req *padmark.CreateLinkRequest
 
-	app := &urcli.Command{
-		Flags: shortenCommand().Flags,
-		Action: func(_ context.Context, cmd *urcli.Command) error {
+	app := clifactory.Command(func(command *urcli.Command) {
+		command.Flags = shortenCommand().Flags
+		command.Action = func(_ context.Context, cmd *urcli.Command) error {
 			var buildErr error
 
 			req, buildErr = buildShortenReq(cmd)
 
 			return buildErr
-		},
-	}
+		}
+	})
 
 	fullArgs := append([]string{testBin, "--" + FlagTargetURL, "https://example.com/dest"}, args...)
 	require.NoError(t, app.Run(t.Context(), fullArgs))
@@ -142,7 +145,9 @@ func TestBuildShortenReq_NoDirectRedirectFlag_OmitsField(t *testing.T) {
 func TestHandleCreateLinkRes_SlugConflict_CleanMessage(t *testing.T) {
 	t.Parallel()
 
-	_, err := handleCreateLinkRes(&padmark.CreateLinkConflict{Message: "slug already exists"})
+	_, err := handleCreateLinkRes(&padmark.CreateLinkConflict{Message: "slug already exists",
+		Code: padmark.OptString{Value: "", Set: false},
+	})
 	require.Error(t, err)
 	assert.Equal(t, "slug conflict: slug already exists", err.Error())
 }
@@ -150,9 +155,21 @@ func TestHandleCreateLinkRes_SlugConflict_CleanMessage(t *testing.T) {
 func TestHandleCreateLinkRes_Success(t *testing.T) {
 	t.Parallel()
 
-	link := padmark.CreateLinkResponse{ID: "abc"}
+	link := padmark.CreateLinkResponse{ID: "abc",
+		TargetURL: url.URL{
+			Scheme: "", Opaque: "", User: nil, Host: "", Path: "", Fragment: "",
+			RawQuery: "", RawPath: "", RawFragment: "", ForceQuery: false, OmitHost: false,
+		},
+		Views: 0, BurnAfterClick: false,
+		Privacy:        padmark.OptCreateLinkResponsePrivacy{Value: "", Set: false},
+		ExpiresAt:      padmark.OptNilDateTime{Value: time.Time{}, Set: false, Null: false},
+		DirectRedirect: padmark.OptNilBool{Value: false, Set: false, Null: false},
+		CreatedAt:      time.Time{}, EditCode: "",
+	}
 
-	got, err := handleCreateLinkRes(&padmark.CreateLinkResponseHeaders{Response: link})
+	got, err := handleCreateLinkRes(&padmark.CreateLinkResponseHeaders{Response: link,
+		Location: padmark.OptString{Value: "", Set: false},
+	})
 	require.NoError(t, err)
 	assert.Equal(t, &link, got)
 }

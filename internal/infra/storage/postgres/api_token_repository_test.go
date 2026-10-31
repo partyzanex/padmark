@@ -102,6 +102,8 @@ func (s *APITokenRepositoryTestSuite) createUser(suffix string) uuid.UUID {
 		PasswordHash: "hash",
 		KDFSalt:      []byte("saltsaltsalt1234"),
 		CreatedAt:    time.Now().Truncate(time.Second),
+
+		LastLoginAt: nil, LastTOTPCounter: 0, IsAdmin: false,
 	})
 	s.Require().NoError(err)
 
@@ -113,6 +115,8 @@ func (s *APITokenRepositoryTestSuite) newToken(userID uuid.UUID, hash string) *d
 		UserID:    userID,
 		TokenHash: hash,
 		CreatedAt: time.Now().Truncate(time.Second),
+
+		ExpiresAt: nil, LastUsedAt: nil, IssuedBy: nil,
 	}
 }
 

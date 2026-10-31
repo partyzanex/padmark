@@ -4,16 +4,21 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	time "time"
 
 	"github.com/google/uuid"
 	"go.uber.org/mock/gomock"
 
 	"github.com/partyzanex/padmark/internal/domain"
+	"github.com/partyzanex/padmark/tests/httptestutil"
 )
 
 //nolint:funlen // same attack and owner recovery across ogen notes, native notes and links
 func (s *HandlerSuite) TestFailLockout_AnonymousAttackDoesNotBlockOwner() {
-	owner := &domain.User{ID: uuid.New(), Username: "owner"}
+	owner := &domain.User{ID: uuid.New(), Username: "owner",
+		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
+		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
+	}
 
 	for _, testCase := range []struct {
 		resource, id, body string
@@ -51,7 +56,7 @@ func (s *HandlerSuite) TestFailLockout_AnonymousAttackDoesNotBlockOwner() {
 				r.Header.Set("Content-Type", "application/json")
 
 				if credential == "owner-session" {
-					r.AddCookie(&http.Cookie{Name: "padmark_session", Value: credential}) //nolint:gosec // G124: test cookie
+					r.AddCookie(httptestutil.RequestCookie("padmark_session", credential))
 				} else if credential != "" {
 					r.Header.Set("Authorization", "Bearer "+credential)
 				}

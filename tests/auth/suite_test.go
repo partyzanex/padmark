@@ -73,6 +73,8 @@ func (s *AuthSuite) newUser(username string) *domain.User {
 		TOTPSecret: testTOTPSecret,
 		IsAdmin:    false,
 		CreatedAt:  time.Now().Truncate(time.Second),
+
+		LastLoginAt: nil, PasswordHash: "", KDFSalt: nil, LastTOTPCounter: 0,
 	}
 }
 
@@ -256,6 +258,8 @@ func (s *AuthSuite) TestSession_Get_Expired_ReturnsErrSessionExpired() {
 		UserID:      usr.ID,
 		CreatedAt:   past,
 		ExpiresAt:   past,
+
+		UserAgent: "", IP: "",
 	}
 	s.Require().NoError(s.Sessions.Create(ctx, sess))
 
@@ -278,6 +282,8 @@ func (s *AuthSuite) TestSession_Delete() {
 		UserID:      usr.ID,
 		CreatedAt:   time.Now(),
 		ExpiresAt:   time.Now().Add(time.Hour),
+
+		UserAgent: "", IP: "",
 	}
 	s.Require().NoError(s.Sessions.Create(ctx, sess))
 	s.Require().NoError(s.Sessions.Delete(ctx, sess.SessionHash))
@@ -297,12 +303,16 @@ func (s *AuthSuite) TestSession_DeleteExpired() {
 		UserID:      usr.ID,
 		CreatedAt:   past,
 		ExpiresAt:   past,
+
+		UserAgent: "", IP: "",
 	}
 	active := &domain.Session{
 		SessionHash: "sess-dave-active",
 		UserID:      usr.ID,
 		CreatedAt:   time.Now(),
 		ExpiresAt:   time.Now().Add(time.Hour),
+
+		UserAgent: "", IP: "",
 	}
 
 	s.Require().NoError(s.Sessions.Create(ctx, expired))
@@ -340,6 +350,8 @@ func (s *AuthSuite) TestSession_DeleteByUserID_RemovesAllUserSessions() {
 		UserID:      other.ID,
 		CreatedAt:   time.Now(),
 		ExpiresAt:   future,
+
+		UserAgent: "", IP: "",
 	}))
 
 	s.Require().NoError(s.Sessions.DeleteByUserID(ctx, usr.ID))
@@ -359,9 +371,15 @@ func (s *AuthSuite) TestSession_DeleteByUserIDExcept_PreservesExceptedSession() 
 	s.Require().NoError(s.Users.Create(ctx, usr))
 
 	future := time.Now().Add(time.Hour)
-	keep := &domain.Session{SessionHash: "sess-keep", UserID: usr.ID, CreatedAt: time.Now(), ExpiresAt: future}
-	old1 := &domain.Session{SessionHash: "sess-old1", UserID: usr.ID, CreatedAt: time.Now(), ExpiresAt: future}
-	old2 := &domain.Session{SessionHash: "sess-old2", UserID: usr.ID, CreatedAt: time.Now(), ExpiresAt: future}
+	keep := &domain.Session{SessionHash: "sess-keep", UserID: usr.ID, CreatedAt: time.Now(), ExpiresAt: future,
+		UserAgent: "", IP: "",
+	}
+	old1 := &domain.Session{SessionHash: "sess-old1", UserID: usr.ID, CreatedAt: time.Now(), ExpiresAt: future,
+		UserAgent: "", IP: "",
+	}
+	old2 := &domain.Session{SessionHash: "sess-old2", UserID: usr.ID, CreatedAt: time.Now(), ExpiresAt: future,
+		UserAgent: "", IP: "",
+	}
 
 	s.Require().NoError(s.Sessions.Create(ctx, keep))
 	s.Require().NoError(s.Sessions.Create(ctx, old1))
@@ -389,6 +407,8 @@ func (s *AuthSuite) TestSession_DeleteByUserIDExcept_NoOtherSessions_IsIdempoten
 		UserID:      usr.ID,
 		CreatedAt:   time.Now(),
 		ExpiresAt:   time.Now().Add(time.Hour),
+
+		UserAgent: "", IP: "",
 	}
 	s.Require().NoError(s.Sessions.Create(ctx, sess))
 

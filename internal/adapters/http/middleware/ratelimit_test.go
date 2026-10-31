@@ -233,7 +233,9 @@ func (c *countingHandler) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 
 // newWarnRecorder returns a logger writing into buf, so a test can assert on what was logged.
 func newWarnRecorder(buf *bytes.Buffer) *slog.Logger {
-	return slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	return slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelWarn,
+		AddSource: false, ReplaceAttr: nil,
+	}))
 }
 
 // warnReq builds a request optionally carrying each forwarding header.
@@ -255,7 +257,9 @@ func warnReq(xff, xri string) *http.Request {
 func TestWarnUnconfiguredProxy_ForwardingHeaderWarnsOnce(t *testing.T) {
 	var buf bytes.Buffer
 
-	inner := &countingHandler{}
+	inner := &countingHandler{
+		calls: 0,
+	}
 	handler := WarnUnconfiguredProxy(newWarnRecorder(&buf), inner)
 
 	for range 3 {
@@ -270,7 +274,9 @@ func TestWarnUnconfiguredProxy_ForwardingHeaderWarnsOnce(t *testing.T) {
 func TestWarnUnconfiguredProxy_XRealIPAlsoWarns(t *testing.T) {
 	var buf bytes.Buffer
 
-	handler := WarnUnconfiguredProxy(newWarnRecorder(&buf), &countingHandler{})
+	handler := WarnUnconfiguredProxy(newWarnRecorder(&buf), &countingHandler{
+		calls: 0,
+	})
 	handler.ServeHTTP(httptest.NewRecorder(), warnReq("", "203.0.113.5"))
 
 	assert.Contains(t, buf.String(), "no proxy is trusted")
@@ -282,7 +288,9 @@ func TestWarnUnconfiguredProxy_XRealIPAlsoWarns(t *testing.T) {
 func TestWarnUnconfiguredProxy_NoHeaderStaysSilent(t *testing.T) {
 	var buf bytes.Buffer
 
-	inner := &countingHandler{}
+	inner := &countingHandler{
+		calls: 0,
+	}
 	handler := WarnUnconfiguredProxy(newWarnRecorder(&buf), inner)
 
 	for range 3 {

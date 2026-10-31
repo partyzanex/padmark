@@ -48,6 +48,10 @@ func TestCiphertextCASPreservesConcurrentReplacements(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, sqlite.NewNoteRepository(db).Create(t.Context(), &domain.Note{
 		ID: domain.HashSlug("slug"), Content: "old", EditCode: "hash", CreatedAt: time.Now(), UpdatedAt: time.Now(),
+
+		ExpiresAt: nil, Privacy: nil, OwnerID: nil, Title: "",
+		ContentType: nil, Views: 0, BurnTTL: 0, BurnAfterReading: false,
+		ClearExpiry: false,
 	}))
 	repo := repository.New(db)
 	row, err := repo.Get(t.Context(), "note", domain.HashSlug("slug"))
@@ -94,6 +98,10 @@ func TestConvertLegacyCASAndTargetConflict(t *testing.T) {
 	require.NoError(t, sqlite.NewNoteRepository(db).Create(ctx, &domain.Note{
 		ID: domain.HashSlug("taken-slug"), Content: "current", EditCode: "s1$hash",
 		CreatedAt: time.Now(), UpdatedAt: time.Now(),
+
+		ExpiresAt: nil, Privacy: nil, OwnerID: nil, Title: "",
+		ContentType: nil, Views: 0, BurnTTL: 0, BurnAfterReading: false,
+		ClearExpiry: false,
 	}))
 
 	repo := repository.New(db)
@@ -121,6 +129,8 @@ func TestConvertLegacyCASAndTargetConflict(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, keys.Row{
 		Resource: "note", ID: domain.HashSlug("legacy-slug"), Value: "pmc2$p$new", StoredEditCode: "v1$hash",
+
+		Legacy: nil,
 	}, *current)
 
 	var editCode string
@@ -142,7 +152,9 @@ func TestConvertLegacyCASAndTargetConflict(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "current", existing.Value, "the existing target is never overwritten")
 
-	_, err = repo.ConvertLegacy(ctx, keys.Row{Resource: "link", ID: "x", Value: "y"}, "z", "v", "")
+	_, err = repo.ConvertLegacy(ctx, keys.Row{Resource: "link", ID: "x", Value: "y",
+		Legacy: nil, StoredEditCode: "",
+	}, "z", "v", "")
 	require.Error(t, err, "links are never converted")
 }
 
@@ -188,6 +200,8 @@ func TestMarkLegacyTagsOnlyTheInspectedUntaggedNote(t *testing.T) {
 
 	_, err = repo.MarkLegacy(ctx, *tagged)
 	require.Error(t, err, "an already tagged note is refused")
-	_, err = repo.MarkLegacy(ctx, keys.Row{Resource: "link", ID: slug, Value: "x"})
+	_, err = repo.MarkLegacy(ctx, keys.Row{Resource: "link", ID: slug, Value: "x",
+		Legacy: nil, StoredEditCode: "",
+	})
 	require.Error(t, err, "links never carry v0.1.6 plaintext")
 }

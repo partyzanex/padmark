@@ -91,6 +91,8 @@ func (s *UserRepositoryTestSuite) newUser(username string) *domain.User {
 		KDFSalt:      []byte("saltsaltsalt1234"),
 		IsAdmin:      false,
 		CreatedAt:    time.Now().Truncate(time.Second),
+
+		LastLoginAt: nil, LastTOTPCounter: 0,
 	}
 }
 

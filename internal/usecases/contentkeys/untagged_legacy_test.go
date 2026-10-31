@@ -10,7 +10,9 @@ const hexSlug = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 
 // untaggedRow is a v0.1.6 note that no schema migration tagged: its edit code is plaintext.
 func untaggedRow(value, editCode string) Row {
-	return Row{Resource: resourceNote, ID: hexSlug, Value: value, StoredEditCode: editCode}
+	return Row{Resource: resourceNote, ID: hexSlug, Value: value, StoredEditCode: editCode,
+		Legacy: nil,
+	}
 }
 
 // TestUntaggedLegacyBlocksAndIsNeverPruned: an untagged v0.1.6 note whose edit code only starts
@@ -134,10 +136,14 @@ func (s *ManagerTestSuite) TestMarkLegacy_Refusals() {
 		want string
 	}{
 		{"missing note", nil, "note not found"},
-		{"envelope", &Row{Resource: resourceNote, ID: hexSlug, Value: nativeValue, StoredEditCode: storedHash},
+		{"envelope", &Row{Resource: resourceNote, ID: hexSlug, Value: nativeValue, StoredEditCode: storedHash,
+			Legacy: nil,
+		},
 			"encryption envelope"},
 		{"legacy ciphertext with a hashed code", &Row{
 			Resource: resourceNote, ID: hexSlug, Value: legacyValue, StoredEditCode: storedHash,
+
+			Legacy: nil,
 		}, "legacy ciphertext"},
 	}
 

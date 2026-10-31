@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/partyzanex/padmark/tests/httptestutil"
 	"github.com/stretchr/testify/require"
 )
 
@@ -35,7 +36,7 @@ func TestCSRFGuard_EmptySecretCannotAuthorizePOST(t *testing.T) {
 		form := url.Values{csrfFieldName: {forged}}
 		req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form.Encode()))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		req.AddCookie(&http.Cookie{Name: csrfCookieName, Value: forged}) //nolint:gosec // G124: test cookie
+		req.AddCookie(httptestutil.RequestCookie(csrfCookieName, forged))
 
 		called := false
 		guard := CSRFGuard(secret, func(w http.ResponseWriter, _ *http.Request) {

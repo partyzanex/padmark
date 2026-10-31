@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/partyzanex/padmark/internal/clifactory"
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
 )
@@ -32,11 +33,14 @@ func TestContentKeyringFlagAndEnv(t *testing.T) {
 		{[]string{"padmark"}, "/from/env.json"},
 		{[]string{"padmark", "--content-keyring-file", "/from/flag.json"}, "/from/flag.json"},
 	} {
-		app := &cli.Command{Flags: appFlags(), Action: func(_ context.Context, cmd *cli.Command) error {
-			require.Equal(t, item.want, cmd.String(FlagContentKeyring))
+		app := clifactory.Command(func(command *cli.Command) {
+			command.Flags = appFlags()
+			command.Action = func(_ context.Context, cmd *cli.Command) error {
+				require.Equal(t, item.want, cmd.String(FlagContentKeyring))
 
-			return nil
-		}}
+				return nil
+			}
+		})
 		require.NoError(t, app.Run(context.Background(), item.args))
 	}
 }

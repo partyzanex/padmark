@@ -104,7 +104,11 @@ func replica(t *testing.T, db *bun.DB, gate *createGate) *httptest.Server {
 		testutil.ContentEncryptor(t, "link"), hasher, log, true)
 	handler := adhttp.NewHandler(noteManager, linkManager, log)
 	ogen := adhttp.NewOgenHandler(noteManager, linkManager, adhttp.NoPinger{}, log)
-	router, err := adhttp.NewRouter(handler, ogen, &adhttp.RouterOptions{MaxBodyBytes: 256 * 1024})
+	router, err := adhttp.NewRouter(handler, ogen, &adhttp.RouterOptions{MaxBodyBytes: 256 * 1024,
+		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, CSRFSecret: nil,
+		AllowedHosts: nil, RateLimit: 0, RateBurst: 0, SessionTTL: 0, DisableAPI: false,
+		DirectRedirect: false,
+	})
 	require.NoError(t, err)
 
 	server := httptest.NewServer(router)

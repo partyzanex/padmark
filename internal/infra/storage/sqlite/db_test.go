@@ -200,14 +200,28 @@ func TestDBFilePath(t *testing.T) {
 		{dsn: "file:/var/lib/p.db?mode=rwc", path: "/var/lib/p.db", create: true},
 		{dsn: "file:/var/lib/p.db?mode=ro", path: "/var/lib/p.db", create: false},
 		{dsn: "file:/var/lib/p.db?mode=rw", path: "/var/lib/p.db", create: false},
-		{dsn: ""},
-		{dsn: ":memory:"},
-		{dsn: "file::memory:"},
-		{dsn: "file::memory:?cache=shared"},
-		{dsn: "file:named?mode=memory&cache=shared"},
-		{dsn: "file:/p.db?vfs=memdb"},
-		{dsn: "file:"},
-		{dsn: "file://otherhost/p.db"},
+		{dsn: "", path: "", create: false},
+		{dsn: ":memory:",
+			path: "", create: false,
+		},
+		{dsn: "file::memory:",
+			path: "", create: false,
+		},
+		{dsn: "file::memory:?cache=shared",
+			path: "", create: false,
+		},
+		{dsn: "file:named?mode=memory&cache=shared",
+			path: "", create: false,
+		},
+		{dsn: "file:/p.db?vfs=memdb",
+			path: "", create: false,
+		},
+		{dsn: "file:",
+			path: "", create: false,
+		},
+		{dsn: "file://otherhost/p.db",
+			path: "", create: false,
+		},
 	}
 
 	for _, tc := range cases {
@@ -221,7 +235,9 @@ func TestDBFilePath(t *testing.T) {
 func recordingLogger() (*slog.Logger, *bytes.Buffer) {
 	buf := &bytes.Buffer{}
 
-	return slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug})), buf
+	return slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug,
+		AddSource: false, ReplaceAttr: nil,
+	})), buf
 }
 
 // writeLooseDB creates an empty (valid, zero-page) database file with mode 0644, as an older

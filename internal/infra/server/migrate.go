@@ -5,32 +5,33 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/partyzanex/padmark/internal/clifactory"
 	"github.com/urfave/cli/v3"
 )
 
 func migrateCommand() *cli.Command {
-	return &cli.Command{ //nolint:exhaustruct_v5 // optional fields stay at zero values = features disabled
-		Name:   encryptionMigrate,
-		Usage:  "Apply pending database migrations and exit",
-		Flags:  migrateFlags(),
-		Action: migrateAction,
-	}
+	return clifactory.Command(func(command *cli.Command) {
+		command.Name = encryptionMigrate
+		command.Usage = "Apply pending database migrations and exit"
+		command.Flags = migrateFlags()
+		command.Action = migrateAction
+	})
 }
 
 func migrateFlags() []cli.Flag {
 	return []cli.Flag{
-		&cli.StringFlag{
-			Name:    FlagStorage,
-			Sources: cli.EnvVars(EnvStorage),
-			Value:   DefaultStorage,
-			Usage:   "Storage backend: sqlite, postgres",
-		},
-		&cli.StringFlag{
-			Name:    FlagDSN,
-			Sources: cli.EnvVars(EnvDSN),
-			Value:   DefaultDSN,
-			Usage:   "Database DSN",
-		},
+		clifactory.StringFlag(func(flag *cli.StringFlag) {
+			flag.Name = FlagStorage
+			flag.Sources = cli.EnvVars(EnvStorage)
+			flag.Value = DefaultStorage
+			flag.Usage = "Storage backend: sqlite, postgres"
+		}),
+		clifactory.StringFlag(func(flag *cli.StringFlag) {
+			flag.Name = FlagDSN
+			flag.Sources = cli.EnvVars(EnvDSN)
+			flag.Value = DefaultDSN
+			flag.Usage = "Database DSN"
+		}),
 		skipMigrationBackupFlag(),
 	}
 }

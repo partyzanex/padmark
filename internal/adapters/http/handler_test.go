@@ -19,6 +19,7 @@ import (
 
 	adhttp "github.com/partyzanex/padmark/internal/adapters/http"
 	"github.com/partyzanex/padmark/internal/domain"
+	"github.com/partyzanex/padmark/tests/httptestutil"
 )
 
 // testCSRFSecret is a fixed 32-byte CSRF secret shared across all handler tests.
@@ -75,6 +76,9 @@ func (s *HandlerSuite) newRouter() http.Handler {
 	opts := adhttp.RouterOptions{
 		MaxBodyBytes: 256 * 1024,
 		CSRFSecret:   testCSRFSecret,
+
+		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, AllowedHosts: nil, RateLimit: 0,
+		RateBurst: 0, SessionTTL: 0, DisableAPI: false, DirectRedirect: false,
 	}
 
 	router, err := adhttp.NewRouter(handler, ogen, &opts)
@@ -94,6 +98,9 @@ func (s *HandlerSuite) newRouterWithOptions(trustedProxies []*net.IPNet, forcedS
 		CSRFSecret:     testCSRFSecret,
 		TrustedProxies: trustedProxies,
 		ForcedScheme:   forcedScheme,
+
+		BootstrapToken: "", AllowedHosts: nil, RateLimit: 0, RateBurst: 0, SessionTTL: 0,
+		DisableAPI: false, DirectRedirect: false,
 	}
 
 	router, err := adhttp.NewRouter(handler, ogen, &opts)
@@ -111,6 +118,9 @@ func (s *HandlerSuite) newRouterWithAllowedHosts(hosts ...string) http.Handler {
 		MaxBodyBytes: 256 * 1024,
 		CSRFSecret:   testCSRFSecret,
 		AllowedHosts: hosts,
+
+		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, RateLimit: 0, RateBurst: 0,
+		SessionTTL: 0, DisableAPI: false, DirectRedirect: false,
 	}
 
 	router, err := adhttp.NewRouter(handler, ogen, &opts)
@@ -156,6 +166,9 @@ func (s *HandlerSuite) newRouterWithTOTPAuth() http.Handler {
 	opts := adhttp.RouterOptions{
 		MaxBodyBytes: 256 * 1024,
 		CSRFSecret:   testCSRFSecret,
+
+		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, AllowedHosts: nil, RateLimit: 0,
+		RateBurst: 0, SessionTTL: 0, DisableAPI: false, DirectRedirect: false,
 	}
 
 	router, err := adhttp.NewRouter(handler, ogen, &opts)
@@ -175,6 +188,9 @@ func (s *HandlerSuite) newRouterWithReveal() http.Handler {
 	opts := adhttp.RouterOptions{
 		MaxBodyBytes: 256 * 1024,
 		CSRFSecret:   testCSRFSecret,
+
+		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, AllowedHosts: nil, RateLimit: 0,
+		RateBurst: 0, SessionTTL: 0, DisableAPI: false, DirectRedirect: false,
 	}
 
 	router, err := adhttp.NewRouter(handler, ogen, &opts)
@@ -204,7 +220,7 @@ func (s *HandlerSuite) revealPOST(path, body string) *http.Request {
 	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(form))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "text/html")
-	req.AddCookie(&http.Cookie{Name: "padmark_csrf", Value: csrf}) //nolint:gosec // G124: test cookie
+	req.AddCookie(httptestutil.RequestCookie("padmark_csrf", csrf))
 
 	return req
 }
@@ -223,6 +239,9 @@ func newTestNote(title, content string) *domain.Note {
 		ContentType: new(domain.ContentTypeMarkdown),
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
+
+		ExpiresAt: nil, Privacy: nil, OwnerID: nil, EditCode: "",
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
 	}
 }
 
@@ -512,6 +531,9 @@ func (s *HandlerSuite) TestCreateNote_ContentOverCap_RejectedBeforeStorage() {
 	router, err := adhttp.NewRouter(handler, ogen, &adhttp.RouterOptions{
 		MaxBodyBytes: 4 * 1024 * 1024,
 		CSRFSecret:   testCSRFSecret,
+
+		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, AllowedHosts: nil, RateLimit: 0,
+		RateBurst: 0, SessionTTL: 0, DisableAPI: false, DirectRedirect: false,
 	})
 	s.Require().NoError(err)
 
@@ -676,6 +698,9 @@ func (s *HandlerSuite) TestCreateNote_BodyExceedsLimit_Returns413() {
 	opts := adhttp.RouterOptions{
 		MaxBodyBytes: 64,
 		CSRFSecret:   testCSRFSecret,
+
+		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, AllowedHosts: nil, RateLimit: 0,
+		RateBurst: 0, SessionTTL: 0, DisableAPI: false, DirectRedirect: false,
 	}
 	router, err := adhttp.NewRouter(handler, ogen, &opts)
 	s.Require().NoError(err)
@@ -797,6 +822,9 @@ func (s *HandlerSuite) TestCreateNote_BodyExceedsLimit_UsesErrorResponseShape() 
 	opts := adhttp.RouterOptions{
 		MaxBodyBytes: 64,
 		CSRFSecret:   testCSRFSecret,
+
+		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, AllowedHosts: nil, RateLimit: 0,
+		RateBurst: 0, SessionTTL: 0, DisableAPI: false, DirectRedirect: false,
 	}
 	router, err := adhttp.NewRouter(handler, ogen, &opts)
 	s.Require().NoError(err)
@@ -1337,6 +1365,9 @@ func (s *HandlerSuite) TestUpdateNote_OK() {
 		ContentType: new(domain.ContentTypePlain),
 		CreatedAt:   createdAt,
 		UpdatedAt:   time.Now(),
+
+		ExpiresAt: nil, Privacy: nil, OwnerID: nil, EditCode: "",
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
 	}
 	s.manager.EXPECT().Update(gomock.Any(), testID, "editcode1234", uuid.Nil, gomock.Any()).Return(updated, nil)
 
@@ -1626,7 +1657,11 @@ func (s *HandlerSuite) TestReadyz_OK() {
 func (s *HandlerSuite) TestReadyz_NoPinger() {
 	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog)
 	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, adhttp.NoPinger{}, discardLog)
-	opts := adhttp.RouterOptions{MaxBodyBytes: 256 * 1024}
+	opts := adhttp.RouterOptions{MaxBodyBytes: 256 * 1024,
+		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, CSRFSecret: nil,
+		AllowedHosts: nil, RateLimit: 0, RateBurst: 0, SessionTTL: 0, DisableAPI: false,
+		DirectRedirect: false,
+	}
 	router, err := adhttp.NewRouter(handler, ogen, &opts)
 	s.Require().NoError(err)
 
@@ -1760,7 +1795,9 @@ type failWriter struct {
 	code   int
 }
 
-func newFailWriter() *failWriter                 { return &failWriter{header: http.Header{}} }
+func newFailWriter() *failWriter {
+	return &failWriter{header: http.Header{}, code: 0}
+}
 func (fw *failWriter) Header() http.Header       { return fw.header }
 func (fw *failWriter) WriteHeader(code int)      { fw.code = code }
 func (fw *failWriter) Write([]byte) (int, error) { return 0, errors.New("write failed") }
@@ -1854,6 +1891,9 @@ func (s *HandlerSuite) TestRateLimit_Exceeded() {
 		MaxBodyBytes: 256 * 1024,
 		RateLimit:    1,
 		RateBurst:    1,
+
+		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, CSRFSecret: nil,
+		AllowedHosts: nil, SessionTTL: 0, DisableAPI: false, DirectRedirect: false,
 	}
 	router, err := adhttp.NewRouter(handler, ogen, &opts)
 	s.Require().NoError(err)
@@ -1884,6 +1924,9 @@ func (s *HandlerSuite) TestRateLimit_Exceeded_POSTLinks() {
 		MaxBodyBytes: 256 * 1024,
 		RateLimit:    1,
 		RateBurst:    1,
+
+		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, CSRFSecret: nil,
+		AllowedHosts: nil, SessionTTL: 0, DisableAPI: false, DirectRedirect: false,
 	}
 	router, err := adhttp.NewRouter(handler, ogen, &opts)
 	s.Require().NoError(err)
@@ -1910,6 +1953,9 @@ func (s *HandlerSuite) TestRateLimit_DifferentIPs() {
 		MaxBodyBytes: 256 * 1024,
 		RateLimit:    1,
 		RateBurst:    1,
+
+		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, CSRFSecret: nil,
+		AllowedHosts: nil, SessionTTL: 0, DisableAPI: false, DirectRedirect: false,
 	}
 	router, err := adhttp.NewRouter(handler, ogen, &opts)
 	s.Require().NoError(err)
@@ -2505,7 +2551,11 @@ func (s *HandlerSuite) TestAPIDocsPage_Public() {
 	discardLog := slog.New(slog.DiscardHandler)
 	handler := adhttp.NewHandler(s.manager, s.linkManager, discardLog).WithAuthManager(s.authMgr)
 	ogen := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog)
-	opts := adhttp.RouterOptions{MaxBodyBytes: 256 * 1024}
+	opts := adhttp.RouterOptions{MaxBodyBytes: 256 * 1024,
+		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, CSRFSecret: nil,
+		AllowedHosts: nil, RateLimit: 0, RateBurst: 0, SessionTTL: 0, DisableAPI: false,
+		DirectRedirect: false,
+	}
 	router, err := adhttp.NewRouter(handler, ogen, &opts)
 	s.Require().NoError(err)
 
@@ -2728,6 +2778,9 @@ func (s *HandlerSuite) TestHandleReveal_CrossNoteToken_TokenNotBurned() {
 		ContentType: new(domain.ContentTypeMarkdown),
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
+
+		ExpiresAt: nil, Privacy: nil, OwnerID: nil, EditCode: "",
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
 	}
 
 	s.manager.EXPECT().Peek(gomock.Any(), "wrong-note").Return(wrongNote, nil)
@@ -2933,7 +2986,10 @@ func (s *HandlerSuite) TestMutationGate_MultiSegmentPaths() {
 func (s *HandlerSuite) TestPrivateNote_TOTPMode_Authenticated() {
 	note := newTestNote("secret", "private content")
 	note.Privacy = new(domain.PrivacyAuthenticated)
-	usr := &domain.User{ID: uuid.New(), Username: "alice"}
+	usr := &domain.User{ID: uuid.New(), Username: "alice",
+		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
+		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
+	}
 
 	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
 	s.manager.EXPECT().GetRenderedPreloaded(gomock.Any(), testID, note).Return(note, "rendered", nil)
@@ -2945,7 +3001,7 @@ func (s *HandlerSuite) TestPrivateNote_TOTPMode_Authenticated() {
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
 	r.Header.Set("Accept", "text/html")
-	r.AddCookie(&http.Cookie{Name: "padmark_session", Value: "valid-sess"}) //nolint:gosec // G124: test cookie
+	r.AddCookie(httptestutil.RequestCookie("padmark_session", "valid-sess"))
 	router.ServeHTTP(w, r)
 
 	s.Equal(http.StatusOK, w.Code)
@@ -2954,7 +3010,10 @@ func (s *HandlerSuite) TestPrivateNote_TOTPMode_Authenticated() {
 // TestOwnerOnlyNote_Owner_Authorized verifies that a note with privacy: owner is readable by
 // the exact authenticated session that created it.
 func (s *HandlerSuite) TestOwnerOnlyNote_Owner_Authorized() {
-	owner := &domain.User{ID: uuid.New(), Username: "alice"}
+	owner := &domain.User{ID: uuid.New(), Username: "alice",
+		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
+		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
+	}
 
 	note := newTestNote("secret", "owner-only content")
 	note.Privacy = new(domain.PrivacyOwner)
@@ -2969,7 +3028,7 @@ func (s *HandlerSuite) TestOwnerOnlyNote_Owner_Authorized() {
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
 	r.Header.Set("Accept", "text/html")
-	r.AddCookie(&http.Cookie{Name: "padmark_session", Value: "valid-sess"}) //nolint:gosec // G124: test cookie
+	r.AddCookie(httptestutil.RequestCookie("padmark_session", "valid-sess"))
 	router.ServeHTTP(w, r)
 
 	s.Equal(http.StatusOK, w.Code)
@@ -2982,8 +3041,14 @@ func (s *HandlerSuite) TestOwnerOnlyNote_Owner_Authorized() {
 // The answer is 403, not the /login redirect an anonymous browser gets: this caller already has a
 // credential, just not the right one, so a login page would send them straight back here.
 func (s *HandlerSuite) TestOwnerOnlyNote_OtherAuthenticatedUser_Forbidden() {
-	owner := &domain.User{ID: uuid.New(), Username: "alice"}
-	other := &domain.User{ID: uuid.New(), Username: "bob"}
+	owner := &domain.User{ID: uuid.New(), Username: "alice",
+		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
+		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
+	}
+	other := &domain.User{ID: uuid.New(), Username: "bob",
+		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
+		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
+	}
 
 	note := newTestNote("secret", "owner-only content")
 	note.Privacy = new(domain.PrivacyOwner)
@@ -2997,7 +3062,7 @@ func (s *HandlerSuite) TestOwnerOnlyNote_OtherAuthenticatedUser_Forbidden() {
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
 	r.Header.Set("Accept", "text/html")
-	r.AddCookie(&http.Cookie{Name: "padmark_session", Value: "valid-sess"}) //nolint:gosec // G124: test cookie
+	r.AddCookie(httptestutil.RequestCookie("padmark_session", "valid-sess"))
 	router.ServeHTTP(w, r)
 
 	s.Equal(http.StatusForbidden, w.Code)
@@ -3009,7 +3074,10 @@ func (s *HandlerSuite) TestOwnerOnlyNote_OtherAuthenticatedUser_Forbidden() {
 // TestOwnerOnlyNote_Anonymous_Unauthorized verifies that a note with privacy: owner is not
 // readable by an unauthenticated caller.
 func (s *HandlerSuite) TestOwnerOnlyNote_Anonymous_Unauthorized() {
-	owner := &domain.User{ID: uuid.New(), Username: "alice"}
+	owner := &domain.User{ID: uuid.New(), Username: "alice",
+		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
+		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
+	}
 
 	note := newTestNote("secret", "owner-only content")
 	note.Privacy = new(domain.PrivacyOwner)
@@ -3031,7 +3099,10 @@ func (s *HandlerSuite) TestOwnerOnlyNote_Anonymous_Unauthorized() {
 // TestOwnerOnlyNote_Anonymous_Unauthorized: a browser request (Accept: text/html) to a
 // privacy: owner note from an anonymous caller must redirect to /login, not 401.
 func (s *HandlerSuite) TestOwnerOnlyNote_Anonymous_HTML_RedirectToLogin() {
-	owner := &domain.User{ID: uuid.New(), Username: "alice"}
+	owner := &domain.User{ID: uuid.New(), Username: "alice",
+		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
+		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
+	}
 
 	note := newTestNote("secret", "owner-only content")
 	note.Privacy = new(domain.PrivacyOwner)
@@ -3054,8 +3125,14 @@ func (s *HandlerSuite) TestOwnerOnlyNote_Anonymous_HTML_RedirectToLogin() {
 // note is gated exactly like GET /notes/{id} — a different authenticated caller must not see the
 // note's plaintext content in the editor form, even though they are logged in.
 func (s *HandlerSuite) TestEditPage_OwnerOnly_NonOwner_Forbidden() {
-	owner := &domain.User{ID: uuid.New(), Username: "alice"}
-	other := &domain.User{ID: uuid.New(), Username: "bob"}
+	owner := &domain.User{ID: uuid.New(), Username: "alice",
+		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
+		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
+	}
+	other := &domain.User{ID: uuid.New(), Username: "bob",
+		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
+		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
+	}
 
 	note := newTestNote("secret", "owner-only content")
 	note.Privacy = new(domain.PrivacyOwner)
@@ -3069,7 +3146,7 @@ func (s *HandlerSuite) TestEditPage_OwnerOnly_NonOwner_Forbidden() {
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/edit/"+testID, nil)
 	r.Header.Set("Accept", "text/html")
-	r.AddCookie(&http.Cookie{Name: "padmark_session", Value: "valid-sess"}) //nolint:gosec // G124: test cookie
+	r.AddCookie(httptestutil.RequestCookie("padmark_session", "valid-sess"))
 	router.ServeHTTP(w, r)
 
 	s.Equal(http.StatusForbidden, w.Code,
@@ -3082,7 +3159,10 @@ func (s *HandlerSuite) TestEditPage_OwnerOnly_NonOwner_Forbidden() {
 // TestEditPage_OwnerOnly_Owner_OK verifies that GET /edit/{id} for a privacy: owner note still
 // works normally for the exact authenticated session that created it.
 func (s *HandlerSuite) TestEditPage_OwnerOnly_Owner_OK() {
-	owner := &domain.User{ID: uuid.New(), Username: "alice"}
+	owner := &domain.User{ID: uuid.New(), Username: "alice",
+		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
+		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
+	}
 
 	note := newTestNote("secret", "owner-only content")
 	note.Privacy = new(domain.PrivacyOwner)
@@ -3097,7 +3177,7 @@ func (s *HandlerSuite) TestEditPage_OwnerOnly_Owner_OK() {
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/edit/"+testID, nil)
 	r.Header.Set("Accept", "text/html")
-	r.AddCookie(&http.Cookie{Name: "padmark_session", Value: "valid-sess"}) //nolint:gosec // G124: test cookie
+	r.AddCookie(httptestutil.RequestCookie("padmark_session", "valid-sess"))
 	router.ServeHTTP(w, r)
 
 	s.Equal(http.StatusOK, w.Code)
@@ -3132,7 +3212,10 @@ func (s *HandlerSuite) TestCanEdit_TOTPMode_Unauthenticated() {
 // user sees the edit button.
 func (s *HandlerSuite) TestCanEdit_TOTPMode_Authenticated() {
 	note := newTestNote("public note", "content")
-	usr := &domain.User{ID: uuid.New(), Username: "alice"}
+	usr := &domain.User{ID: uuid.New(), Username: "alice",
+		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
+		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
+	}
 
 	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
 	s.manager.EXPECT().GetRenderedPreloaded(gomock.Any(), testID, note).Return(note, "rendered", nil)
@@ -3144,7 +3227,7 @@ func (s *HandlerSuite) TestCanEdit_TOTPMode_Authenticated() {
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
 	r.Header.Set("Accept", "text/html")
-	r.AddCookie(&http.Cookie{Name: "padmark_session", Value: "valid-sess"}) //nolint:gosec // G124: test cookie
+	r.AddCookie(httptestutil.RequestCookie("padmark_session", "valid-sess"))
 	router.ServeHTTP(w, r)
 
 	s.Equal(http.StatusOK, w.Code)

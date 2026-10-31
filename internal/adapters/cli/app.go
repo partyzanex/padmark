@@ -13,18 +13,19 @@ import (
 
 	urcli "github.com/urfave/cli/v3"
 
+	"github.com/partyzanex/padmark/internal/clifactory"
 	"github.com/partyzanex/padmark/internal/errorcontext"
 	padmark "github.com/partyzanex/padmark/pkg/client"
 )
 
 // NewApp returns the root CLI command for padmark-cli.
 func NewApp() *urcli.Command {
-	return &urcli.Command{
-		Name:                  "padmark-cli",
-		Usage:                 "Command-line client for the Padmark notes service",
-		EnableShellCompletion: true,
-		Flags:                 globalFlags(),
-		Commands: []*urcli.Command{
+	return clifactory.Command(func(command *urcli.Command) {
+		command.Name = "padmark-cli"
+		command.Usage = "Command-line client for the Padmark notes service"
+		command.EnableShellCompletion = true
+		command.Flags = globalFlags()
+		command.Commands = []*urcli.Command{
 			createCommand(),
 			getCommand(),
 			editCommand(),
@@ -37,37 +38,37 @@ func NewApp() *urcli.Command {
 			createTokenCommand(),
 			createInviteCommand(),
 			trustCommand(),
-		},
-	}
+		}
+	})
 }
 
 func globalFlags() []urcli.Flag {
 	return []urcli.Flag{
-		&urcli.StringFlag{
-			Name:    FlagURL,
-			Aliases: []string{"u"},
-			Sources: urcli.EnvVars(EnvURL),
-			Value:   DefaultURL,
-			Usage:   "Padmark server URL",
-		},
-		&urcli.StringFlag{
-			Name:    FlagToken,
-			Sources: urcli.EnvVars(EnvToken),
-			Usage: "Bearer token (env: PADMARK_TOKEN; falls back to ~/.config/padmark/token). " +
-				"Flag values are visible in process listings (ps); prefer the env var or token file",
-		},
-		&urcli.DurationFlag{
-			Name:    FlagTimeout,
-			Sources: urcli.EnvVars(EnvTimeout),
-			Value:   DefaultTimeout,
-			Usage:   "Per-request HTTP timeout; 0 disables it (env: PADMARK_TIMEOUT)",
-		},
-		&urcli.BoolFlag{
-			Name:    FlagAllowInsecureHTTP,
-			Sources: urcli.EnvVars(EnvAllowInsecureHTTP),
-			Usage: "Allow sending a bearer token or setup password over plain HTTP to a non-loopback host " +
-				"(loopback hosts only warn); default refuses (env: PADMARK_ALLOW_INSECURE_HTTP)",
-		},
+		clifactory.StringFlag(func(flag *urcli.StringFlag) {
+			flag.Name = FlagURL
+			flag.Aliases = []string{"u"}
+			flag.Sources = urcli.EnvVars(EnvURL)
+			flag.Value = DefaultURL
+			flag.Usage = "Padmark server URL"
+		}),
+		clifactory.StringFlag(func(flag *urcli.StringFlag) {
+			flag.Name = FlagToken
+			flag.Sources = urcli.EnvVars(EnvToken)
+			flag.Usage = "Bearer token (env: PADMARK_TOKEN; falls back to ~/.config/padmark/token). " +
+				"Flag values are visible in process listings (ps); prefer the env var or token file"
+		}),
+		clifactory.DurationFlag(func(flag *urcli.DurationFlag) {
+			flag.Name = FlagTimeout
+			flag.Sources = urcli.EnvVars(EnvTimeout)
+			flag.Value = DefaultTimeout
+			flag.Usage = "Per-request HTTP timeout; 0 disables it (env: PADMARK_TIMEOUT)"
+		}),
+		clifactory.BoolFlag(func(flag *urcli.BoolFlag) {
+			flag.Name = FlagAllowInsecureHTTP
+			flag.Sources = urcli.EnvVars(EnvAllowInsecureHTTP)
+			flag.Usage = "Allow sending a bearer token or setup password over plain HTTP to a non-loopback host " +
+				"(loopback hosts only warn); default refuses (env: PADMARK_ALLOW_INSECURE_HTTP)"
+		}),
 	}
 }
 
@@ -84,7 +85,9 @@ func newPadmarkClient(cmd *urcli.Command) (*padmark.Client, error) {
 	}
 
 	transport := &bearerTransport{base: http.DefaultTransport, token: token}
-	httpClient := &http.Client{Transport: transport, Timeout: cmd.Duration(FlagTimeout)}
+	httpClient := &http.Client{Transport: transport, Timeout: cmd.Duration(FlagTimeout),
+		CheckRedirect: nil, Jar: nil,
+	}
 
 	cl, err := padmark.NewClient(serverURL, padmark.WithClient(httpClient))
 	if err != nil {

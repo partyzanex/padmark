@@ -134,7 +134,11 @@ func TestMCPFlow_Anonymous_PublicCreateAndPrivateAccessDenied(t *testing.T) {
 	require.False(t, pub.IsError, toolText(pub))
 
 	gated := domain.PrivacyAuthenticated
-	gatedNote, err := stack.notes.Create(ctx, &domain.Note{Title: "gated", Content: "owner-only", Privacy: &gated})
+	gatedNote, err := stack.notes.Create(ctx, &domain.Note{Title: "gated", Content: "owner-only", Privacy: &gated,
+		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
+		OwnerID: nil, ID: "", ContentType: nil, EditCode: "",
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+	})
 	require.NoError(t, err)
 
 	denied := callOutput(ctx, t, sess, "get_note", map[string]any{"id": gatedNote.ID})
@@ -170,6 +174,9 @@ func startTestPadmark(t *testing.T) *testStack {
 	router, err := adaptershttp.NewRouter(handler, ogen, &adaptershttp.RouterOptions{
 		MaxBodyBytes: 256 * 1024,
 		CSRFSecret:   []byte("padmark-test-csrf-secret-32bytes"),
+
+		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, AllowedHosts: nil, RateLimit: 0,
+		RateBurst: 0, SessionTTL: 0, DisableAPI: false, DirectRedirect: false,
 	})
 	require.NoError(t, err)
 
@@ -241,7 +248,9 @@ func issueEnvelopeToken(
 	admin, err := users.GetByUsername(ctx, "admin")
 	require.NoError(t, err)
 
-	apiKey, err := authMgr.CreateAPIToken(ctx, admin.ID, auth.Issuer{}, 0)
+	apiKey, err := authMgr.CreateAPIToken(ctx, admin.ID, auth.Issuer{
+		APITokenHash: "", StepUp: auth.StepUp{Password: "", TOTPCode: ""},
+	}, 0)
 	require.NoError(t, err)
 
 	envelope, err := domain.EncodeAPITokenEnvelope(baseURL, apiKey)
@@ -263,7 +272,9 @@ func connectMCP(t *testing.T, ctx context.Context, serverURL, token string) *mcp
 	srvSession, err := mgr.ConnectSession(ctx, serverTransport)
 	require.NoError(t, err)
 
-	client := mcpsdk.NewClient(&mcpsdk.Implementation{Name: "integration", Version: "0"}, nil)
+	client := mcpsdk.NewClient(&mcpsdk.Implementation{Name: "integration", Version: "0",
+		Title: "", Description: "", WebsiteURL: "", Icons: nil,
+	}, nil)
 
 	session, err := client.Connect(ctx, clientTransport, nil)
 	require.NoError(t, err)
@@ -291,12 +302,14 @@ func newTestPadmarkClient(t *testing.T, serverURL, token string) *padmark.Client
 	base, err := url.Parse(baseURL)
 	require.NoError(t, err)
 
-	cl, err := padmark.NewClient(base.String(), padmark.WithClient(&http.Client{
+	client, err := padmark.NewClient(base.String(), padmark.WithClient(&http.Client{
 		Transport: &testBearer{base: http.DefaultTransport, token: rawKey},
+
+		CheckRedirect: nil, Jar: nil, Timeout: 0,
 	}))
 	require.NoError(t, err)
 
-	return cl
+	return client
 }
 
 // testBearer injects Authorization: Bearer on every request; an empty token sends no header.
@@ -322,7 +335,9 @@ func callOutput(
 ) *mcpsdk.CallToolResult {
 	t.Helper()
 
-	res, err := sess.CallTool(ctx, &mcpsdk.CallToolParams{Name: name, Arguments: params})
+	res, err := sess.CallTool(ctx, &mcpsdk.CallToolParams{Name: name, Arguments: params,
+		Meta: nil, InputResponses: nil, RequestState: "",
+	})
 	require.NoError(t, err, "%s must succeed at the protocol level (tool errors are results, not protocol errors)", name)
 
 	return res

@@ -20,6 +20,7 @@ import (
 	adhttp "github.com/partyzanex/padmark/internal/adapters/http"
 	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/usecases/auth"
+	"github.com/partyzanex/padmark/tests/httptestutil"
 )
 
 // Fixed fake user IDs shared across this file's tests: each gomock EXPECT() that checks a
@@ -75,6 +76,9 @@ func (s *AuthHandlerSuite) newRouterWithBootstrapToken(token string) http.Handle
 		MaxBodyBytes:   256 * 1024,
 		CSRFSecret:     authTestCSRFSecret,
 		BootstrapToken: token,
+
+		ForcedScheme: "", TrustedProxies: nil, AllowedHosts: nil, RateLimit: 0, RateBurst: 0,
+		SessionTTL: 0, DisableAPI: false, DirectRedirect: false,
 	}
 
 	router, err := adhttp.NewRouter(handler, ogen, &opts)
@@ -94,6 +98,9 @@ func (s *AuthHandlerSuite) newRouterWithAuthAndScheme(forcedScheme string) http.
 		MaxBodyBytes: 256 * 1024,
 		CSRFSecret:   authTestCSRFSecret,
 		ForcedScheme: forcedScheme,
+
+		BootstrapToken: "", TrustedProxies: nil, AllowedHosts: nil, RateLimit: 0, RateBurst: 0,
+		SessionTTL: 0, DisableAPI: false, DirectRedirect: false,
 	}
 
 	router, err := adhttp.NewRouter(handler, ogen, &opts)
@@ -113,6 +120,9 @@ func (s *AuthHandlerSuite) newRouterWithAuthAndSessionTTL(ttl time.Duration) htt
 		MaxBodyBytes: 256 * 1024,
 		CSRFSecret:   authTestCSRFSecret,
 		SessionTTL:   ttl,
+
+		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, AllowedHosts: nil, RateLimit: 0,
+		RateBurst: 0, DisableAPI: false, DirectRedirect: false,
 	}
 
 	router, err := adhttp.NewRouter(handler, ogen, &opts)
@@ -122,7 +132,10 @@ func (s *AuthHandlerSuite) newRouterWithAuthAndSessionTTL(ttl time.Duration) htt
 }
 
 func (s *AuthHandlerSuite) adminUser() *domain.User {
-	return &domain.User{ID: testAdminID, Username: "admin", IsAdmin: true}
+	return &domain.User{ID: testAdminID, Username: "admin", IsAdmin: true,
+		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
+		KDFSalt: nil, LastTOTPCounter: 0,
+	}
 }
 
 // authTestCSRFSecret is a fixed 32-byte secret for auth handler tests.
@@ -137,11 +150,11 @@ const testBootstrapToken = "padmark-test-bootstrap-token-32chars"
 var testCSRFToken = adhttp.GenerateCSRFTokenForTest(authTestCSRFSecret) //nolint:gochecknoglobals // test fixture
 
 func (s *AuthHandlerSuite) sessionCookie(value string) *http.Cookie {
-	return &http.Cookie{Name: "padmark_session", Value: value} //nolint:gosec // G124: test cookie
+	return httptestutil.RequestCookie("padmark_session", value)
 }
 
 func (s *AuthHandlerSuite) csrfCookie() *http.Cookie {
-	return &http.Cookie{Name: "padmark_csrf", Value: testCSRFToken} //nolint:gosec // G124: test cookie
+	return httptestutil.RequestCookie("padmark_csrf", testCSRFToken)
 }
 
 func withCSRF(form url.Values) url.Values {
@@ -167,7 +180,7 @@ func csrfTokenFor(sessionID string) string {
 
 // csrfCookieFor is csrfCookie for a request that also carries sessionCookie(sessionID).
 func (s *AuthHandlerSuite) csrfCookieFor(sessionID string) *http.Cookie {
-	return &http.Cookie{Name: "padmark_csrf", Value: csrfTokenFor(sessionID)} //nolint:gosec // G124: test cookie
+	return httptestutil.RequestCookie("padmark_csrf", csrfTokenFor(sessionID))
 }
 
 // withCSRFFor is withCSRF for a request that also carries sessionCookie(sessionID).
@@ -192,7 +205,10 @@ func (s *AuthHandlerSuite) TestLoginPage_TOTP_Mode() {
 // TestLoginPage_AlreadyAuthenticated_RedirectsHome verifies a signed-in user is not asked
 // to log in again — /login redirects home instead of rendering the form.
 func (s *AuthHandlerSuite) TestLoginPage_AlreadyAuthenticated_RedirectsHome() {
-	s.auth.EXPECT().GetSession(gomock.Any(), "sess-ok").Return(&domain.User{ID: testUserID1}, nil)
+	s.auth.EXPECT().GetSession(gomock.Any(), "sess-ok").Return(&domain.User{ID: testUserID1,
+		CreatedAt: time.Time{}, LastLoginAt: nil, Username: "", TOTPSecret: "",
+		PasswordHash: "", KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
+	}, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/login", nil)
 	req.AddCookie(s.sessionCookie("sess-ok"))
@@ -207,7 +223,10 @@ func (s *AuthHandlerSuite) TestLoginPage_AlreadyAuthenticated_RedirectsHome() {
 
 // TestLoginPage_AlreadyAuthenticated_RedirectsToNext honours a safe ?next= target.
 func (s *AuthHandlerSuite) TestLoginPage_AlreadyAuthenticated_RedirectsToNext() {
-	s.auth.EXPECT().GetSession(gomock.Any(), "sess-ok").Return(&domain.User{ID: testUserID1}, nil)
+	s.auth.EXPECT().GetSession(gomock.Any(), "sess-ok").Return(&domain.User{ID: testUserID1,
+		CreatedAt: time.Time{}, LastLoginAt: nil, Username: "", TOTPSecret: "",
+		PasswordHash: "", KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
+	}, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/login?next=/edit/abc", nil)
 	req.AddCookie(s.sessionCookie("sess-ok"))
@@ -542,7 +561,9 @@ const testPw = "ValidP@ss12!"
 
 func (s *AuthHandlerSuite) TestSetupHandler_WithInvite_ShowsQR() {
 	s.auth.EXPECT().AcceptInvite(gomock.Any(), "good-tok", "newuser", gomock.Any()).
-		Return(&auth.Enrollment{QRCode: "data:image/png;base64,abc123"}, nil)
+		Return(&auth.Enrollment{QRCode: "data:image/png;base64,abc123",
+			TOTPURI: "",
+		}, nil)
 
 	form := withCSRF(url.Values{
 		"invite":           {"good-tok"},
@@ -566,7 +587,9 @@ func (s *AuthHandlerSuite) TestSetupHandler_WithInvite_ShowsQR() {
 func (s *AuthHandlerSuite) TestSetupHandler_FirstAdmin_ShowsQR() {
 	s.auth.EXPECT().IsEmpty(gomock.Any()).Return(true, nil) // bootstrap allowed: empty DB
 	s.auth.EXPECT().AcceptFirstAdmin(gomock.Any(), "root", gomock.Any()).
-		Return(&auth.Enrollment{QRCode: "data:image/png;base64,xyz"}, nil)
+		Return(&auth.Enrollment{QRCode: "data:image/png;base64,xyz",
+			TOTPURI: "",
+		}, nil)
 
 	form := withCSRF(url.Values{
 		"username":         {"root"},
@@ -692,7 +715,10 @@ func (s *AuthHandlerSuite) TestAdminPage_NoSession_Returns303() {
 }
 
 func (s *AuthHandlerSuite) TestAdminPage_NonAdmin_Returns403() {
-	nonAdmin := &domain.User{ID: testUserID1, Username: "alice", IsAdmin: false}
+	nonAdmin := &domain.User{ID: testUserID1, Username: "alice", IsAdmin: false,
+		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
+		KDFSalt: nil, LastTOTPCounter: 0,
+	}
 	s.auth.EXPECT().GetSession(gomock.Any(), "sess1").Return(nonAdmin, nil).Times(1)
 
 	req := httptest.NewRequest(http.MethodGet, "/admin", nil)
@@ -707,7 +733,10 @@ func (s *AuthHandlerSuite) TestAdminPage_NonAdmin_Returns403() {
 
 func (s *AuthHandlerSuite) TestAdminPage_Admin_ListsUsers() {
 	usr := s.adminUser()
-	users := []*domain.User{usr, {ID: testUserID2, Username: "bob"}}
+	users := []*domain.User{usr, {ID: testUserID2, Username: "bob",
+		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
+		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
+	}}
 
 	s.auth.EXPECT().GetSession(gomock.Any(), "admin-sess").Return(usr, nil).Times(1)
 	s.auth.EXPECT().ListUsers(gomock.Any(), testAdminID).Return(users, nil)
@@ -727,7 +756,9 @@ func (s *AuthHandlerSuite) TestAdminPage_Admin_ListsUsers() {
 func (s *AuthHandlerSuite) TestAdminPage_Admin_ListsAPIKeys() {
 	usr := s.adminUser()
 	tokens := []*auth.APITokenInfo{
-		{ID: "abcdef0123456789deadbeef", UserID: testAdminID, Username: "admin", CreatedAt: time.Now()},
+		{ID: "abcdef0123456789deadbeef", UserID: testAdminID, Username: "admin", CreatedAt: time.Now(),
+			ExpiresAt: nil, LastUsedAt: nil, IssuedBy: nil,
+		},
 	}
 
 	s.auth.EXPECT().GetSession(gomock.Any(), "admin-sess").Return(usr, nil).Times(1)
@@ -781,7 +812,7 @@ func (s *AuthHandlerSuite) adminInviteRequest(csrfSession string, headers map[st
 	req := httptest.NewRequest(http.MethodPost, "/admin/invite", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(s.sessionCookie("admin-sess"))
-	req.AddCookie(&http.Cookie{Name: "padmark_csrf", Value: token}) //nolint:gosec // G124: test cookie
+	req.AddCookie(httptestutil.RequestCookie("padmark_csrf", token))
 
 	for key, value := range headers {
 		req.Header.Set(key, value)
@@ -918,7 +949,10 @@ func (s *AuthHandlerSuite) TestAdminRevoke_RevokesAndRedirects() {
 }
 
 func (s *AuthHandlerSuite) TestAdminRevoke_NonAdmin_Returns403() {
-	nonAdmin := &domain.User{ID: testUserID1, Username: "alice", IsAdmin: false}
+	nonAdmin := &domain.User{ID: testUserID1, Username: "alice", IsAdmin: false,
+		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
+		KDFSalt: nil, LastTOTPCounter: 0,
+	}
 	s.auth.EXPECT().GetSession(gomock.Any(), "sess1").Return(nonAdmin, nil).Times(1)
 
 	form := withCSRFFor(url.Values{}, "sess1")
@@ -997,7 +1031,9 @@ func (s *AuthHandlerSuite) TestAdminCreateKey_Lifetime() {
 	} {
 		s.Run("ttl_days="+testCase.form, func() {
 			s.auth.EXPECT().GetSession(gomock.Any(), "admin-sess").Return(usr, nil)
-			s.auth.EXPECT().CreateAPIToken(gomock.Any(), testAdminID, auth.Issuer{}, testCase.ttl).
+			s.auth.EXPECT().CreateAPIToken(gomock.Any(), testAdminID, auth.Issuer{
+				APITokenHash: "", StepUp: auth.StepUp{Password: "", TOTPCode: ""},
+			}, testCase.ttl).
 				Return("plain-secret-key", testCase.err)
 			s.auth.EXPECT().ListUsers(gomock.Any(), testAdminID).Return([]*domain.User{usr}, nil)
 			s.auth.EXPECT().ListAPITokens(gomock.Any(), testAdminID).Return([]*auth.APITokenInfo{}, nil)
@@ -1088,7 +1124,10 @@ func (s *AuthHandlerSuite) TestAdminCreateKey_ForcedSchemeEmbedsHTTPS() {
 }
 
 func (s *AuthHandlerSuite) TestAdminCreateKey_NonAdmin_Returns403() {
-	nonAdmin := &domain.User{ID: testUserID1, Username: "alice", IsAdmin: false}
+	nonAdmin := &domain.User{ID: testUserID1, Username: "alice", IsAdmin: false,
+		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
+		KDFSalt: nil, LastTOTPCounter: 0,
+	}
 	s.auth.EXPECT().GetSession(gomock.Any(), "sess1").Return(nonAdmin, nil).Times(1)
 
 	form := withCSRFFor(url.Values{}, "sess1")
@@ -1124,7 +1163,10 @@ func (s *AuthHandlerSuite) TestAdminRevokeKey_RevokesAndRedirects() {
 }
 
 func (s *AuthHandlerSuite) TestAdminRevokeKey_NonAdmin_Returns403() {
-	nonAdmin := &domain.User{ID: testUserID1, Username: "alice", IsAdmin: false}
+	nonAdmin := &domain.User{ID: testUserID1, Username: "alice", IsAdmin: false,
+		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
+		KDFSalt: nil, LastTOTPCounter: 0,
+	}
 	s.auth.EXPECT().GetSession(gomock.Any(), "sess1").Return(nonAdmin, nil).Times(1)
 
 	form := withCSRFFor(url.Values{}, "sess1")
@@ -1184,7 +1226,10 @@ func (s *AuthHandlerSuite) TestAdminRevokeKey_RevokeFails_RedirectsWithError() {
 // ── Session auth middleware ──
 
 func (s *AuthHandlerSuite) TestSessionAuth_ValidSession_PassesThrough() {
-	usr := &domain.User{ID: testUserID1, Username: "alice"}
+	usr := &domain.User{ID: testUserID1, Username: "alice",
+		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
+		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
+	}
 	// GetSession called twice: once by middleware, once by handler (isAuthenticated check inside GetNote may differ)
 	// For GET / (IndexPage) which is always served — just once by middleware
 	s.auth.EXPECT().GetSession(gomock.Any(), "sess1").Return(usr, nil)
@@ -1217,7 +1262,10 @@ func (s *AuthHandlerSuite) TestSessionAuth_ExpiredSession_RedirectsToLogin() {
 // ── API-token auth middleware ──
 
 func (s *AuthHandlerSuite) TestAPITokenAuth_ValidBearer_PassesThrough() {
-	usr := &domain.User{ID: testUserID1, Username: "alice"}
+	usr := &domain.User{ID: testUserID1, Username: "alice",
+		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
+		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
+	}
 	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "good-api-key").Return(usr, "token-hash", nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -1280,7 +1328,10 @@ func (s *AuthHandlerSuite) TestAPITokenAuth_AdminBearer_RefusedByAdminPanel() {
 // "public" route (auth not required), so the middleware must still resolve an API-token Bearer
 // key there — otherwise the CLI, whose only credential is that key, gets 401 on a private note.
 func (s *AuthHandlerSuite) TestAPITokenAuth_PrivateNote_ValidBearer_Served() {
-	usr := &domain.User{ID: testUserID1, Username: "alice"}
+	usr := &domain.User{ID: testUserID1, Username: "alice",
+		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
+		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
+	}
 	priv := domain.PrivacyAuthenticated
 	note := newTestNote("secret", "# private")
 	note.Privacy = &priv
@@ -1326,7 +1377,10 @@ func (s *AuthHandlerSuite) TestAPITokenAuth_PrivateNote_UnknownBearer_Returns401
 // ({"message": ...}) matching the OpenAPI spec, so the ogen client decodes it into a typed error
 // instead of failing on an unexpected content type (was: text/plain, then text/html).
 func (s *AuthHandlerSuite) TestGetNote_NotFound_JSONClient_GetsJSONError() {
-	usr := &domain.User{ID: testUserID1, Username: "alice"}
+	usr := &domain.User{ID: testUserID1, Username: "alice",
+		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
+		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
+	}
 	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "good-api-key").Return(usr, "token-hash", nil)
 	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(nil, domain.ErrNotFound)
 
@@ -1368,7 +1422,10 @@ func (s *AuthHandlerSuite) TestGetNote_NotFound_BrowserClient_GetsHTMLPage() {
 // ── Change password ──
 
 func (s *AuthHandlerSuite) TestChangePasswordPage_Authenticated_RendersForm() {
-	usr := &domain.User{ID: testUserID1, Username: "alice"}
+	usr := &domain.User{ID: testUserID1, Username: "alice",
+		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
+		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
+	}
 	s.auth.EXPECT().GetSession(gomock.Any(), "sess1").Return(usr, nil).Times(1)
 
 	req := httptest.NewRequest(http.MethodGet, "/change-password", nil)
@@ -1383,7 +1440,10 @@ func (s *AuthHandlerSuite) TestChangePasswordPage_Authenticated_RendersForm() {
 }
 
 func (s *AuthHandlerSuite) TestChangePasswordHandler_Success_ShowsSuccessMessage() {
-	usr := &domain.User{ID: testUserID1, Username: "alice"}
+	usr := &domain.User{ID: testUserID1, Username: "alice",
+		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
+		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
+	}
 	s.auth.EXPECT().GetSession(gomock.Any(), "sess1").Return(usr, nil).Times(1)
 	s.auth.EXPECT().ChangePassword(gomock.Any(), "sess1", "OldP@ss12!", "NewP@ss12!", "123456").Return("new-sess-id", nil)
 
@@ -1419,7 +1479,10 @@ func (s *AuthHandlerSuite) TestChangePasswordHandler_Success_ShowsSuccessMessage
 }
 
 func (s *AuthHandlerSuite) TestChangePasswordHandler_Mismatch_ShowsError() {
-	usr := &domain.User{ID: testUserID1, Username: "alice"}
+	usr := &domain.User{ID: testUserID1, Username: "alice",
+		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
+		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
+	}
 	s.auth.EXPECT().GetSession(gomock.Any(), "sess1").Return(usr, nil).Times(1)
 
 	form := withCSRFFor(url.Values{
@@ -1441,7 +1504,10 @@ func (s *AuthHandlerSuite) TestChangePasswordHandler_Mismatch_ShowsError() {
 }
 
 func (s *AuthHandlerSuite) TestChangePasswordHandler_WrongOldPassword_ShowsError() {
-	usr := &domain.User{ID: testUserID1, Username: "alice"}
+	usr := &domain.User{ID: testUserID1, Username: "alice",
+		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
+		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
+	}
 	s.auth.EXPECT().GetSession(gomock.Any(), "sess1").Return(usr, nil).Times(1)
 	s.auth.EXPECT().ChangePassword(gomock.Any(), "sess1", "WrongP@ss12!", "NewP@ss12!", "123456").
 		Return("", domain.ErrInvalidPassword)
@@ -1466,7 +1532,10 @@ func (s *AuthHandlerSuite) TestChangePasswordHandler_WrongOldPassword_ShowsError
 }
 
 func (s *AuthHandlerSuite) TestChangePasswordHandler_InvalidTOTP_ShowsError() {
-	usr := &domain.User{ID: testUserID1, Username: "alice"}
+	usr := &domain.User{ID: testUserID1, Username: "alice",
+		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
+		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
+	}
 	s.auth.EXPECT().GetSession(gomock.Any(), "sess1").Return(usr, nil).Times(1)
 	s.auth.EXPECT().ChangePassword(gomock.Any(), "sess1", "OldP@ss12!", "NewP@ss12!", "badcode").
 		Return("", domain.ErrInvalidTOTP)
@@ -1553,7 +1622,7 @@ func (s *AuthHandlerSuite) TestCSRFGuard_InvalidHMAC_Returns403() {
 	req := httptest.NewRequest(http.MethodPost, "/totp-login", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	// Cookie == field (equality check passes) but the HMAC was signed with the wrong secret.
-	req.AddCookie(&http.Cookie{Name: "padmark_csrf", Value: forged}) //nolint:gosec // G124: test cookie
+	req.AddCookie(httptestutil.RequestCookie("padmark_csrf", forged))
 
 	rec := httptest.NewRecorder()
 
@@ -1574,6 +1643,9 @@ func (s *AuthHandlerSuite) newRouterWithCSRFSecret(secret []byte) http.Handler {
 	opts := adhttp.RouterOptions{
 		MaxBodyBytes: 256 * 1024,
 		CSRFSecret:   secret,
+
+		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, AllowedHosts: nil, RateLimit: 0,
+		RateBurst: 0, SessionTTL: 0, DisableAPI: false, DirectRedirect: false,
 	}
 
 	router, err := adhttp.NewRouter(handler, ogen, &opts)
@@ -1731,7 +1803,10 @@ func (s *AuthHandlerSuite) TestTOTPLogin_SessionCookieMaxAge_TracksConfiguredSes
 // single-segment PUT /notes/{id} route) resolves the caller and lets the note's owner update it
 // with no edit_code.
 func (s *AuthHandlerSuite) TestUpdateNote_SessionOwner_BypassesEditCode() {
-	s.auth.EXPECT().GetSession(gomock.Any(), "sess-owner").Return(&domain.User{ID: testUserID1}, nil)
+	s.auth.EXPECT().GetSession(gomock.Any(), "sess-owner").Return(&domain.User{ID: testUserID1,
+		CreatedAt: time.Time{}, LastLoginAt: nil, Username: "", TOTPSecret: "",
+		PasswordHash: "", KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
+	}, nil)
 	s.manager.EXPECT().Update(gomock.Any(), testID, "", testUserID1, gomock.Any()).
 		Return(newTestNote("t", "c"), nil)
 
@@ -1749,7 +1824,10 @@ func (s *AuthHandlerSuite) TestUpdateNote_SessionOwner_BypassesEditCode() {
 // TestUpdateNote_APITokenOwner_BypassesEditCode is the CLI/API-client counterpart: a Bearer API
 // token resolves to its owning user the same way a session does.
 func (s *AuthHandlerSuite) TestUpdateNote_APITokenOwner_BypassesEditCode() {
-	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "valid-key").Return(&domain.User{ID: testUserID1}, "token-hash", nil)
+	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "valid-key").Return(&domain.User{ID: testUserID1,
+		CreatedAt: time.Time{}, LastLoginAt: nil, Username: "", TOTPSecret: "",
+		PasswordHash: "", KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
+	}, "token-hash", nil)
 	s.manager.EXPECT().Update(gomock.Any(), testID, "", testUserID1, gomock.Any()).
 		Return(newTestNote("t", "c"), nil)
 
@@ -1767,7 +1845,10 @@ func (s *AuthHandlerSuite) TestUpdateNote_APITokenOwner_BypassesEditCode() {
 // TestDeleteNote_SessionOwner_BypassesEditCode mirrors TestUpdateNote_SessionOwner_BypassesEditCode
 // for DELETE.
 func (s *AuthHandlerSuite) TestDeleteNote_SessionOwner_BypassesEditCode() {
-	s.auth.EXPECT().GetSession(gomock.Any(), "sess-owner").Return(&domain.User{ID: testUserID1}, nil)
+	s.auth.EXPECT().GetSession(gomock.Any(), "sess-owner").Return(&domain.User{ID: testUserID1,
+		CreatedAt: time.Time{}, LastLoginAt: nil, Username: "", TOTPSecret: "",
+		PasswordHash: "", KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
+	}, nil)
 	s.manager.EXPECT().Delete(gomock.Any(), testID, "", testUserID1).Return(nil)
 
 	req := httptest.NewRequest(http.MethodDelete, "/notes/"+testID, nil)
@@ -1783,7 +1864,10 @@ func (s *AuthHandlerSuite) TestDeleteNote_SessionOwner_BypassesEditCode() {
 // another signed-in user: without the correct edit_code, a non-owner session gets the same
 // domain.ErrInvalidEditCode → 403 as an anonymous caller.
 func (s *AuthHandlerSuite) TestUpdateNote_SessionNonOwner_StillNeedsEditCode() {
-	s.auth.EXPECT().GetSession(gomock.Any(), "sess-other").Return(&domain.User{ID: testUserID2}, nil)
+	s.auth.EXPECT().GetSession(gomock.Any(), "sess-other").Return(&domain.User{ID: testUserID2,
+		CreatedAt: time.Time{}, LastLoginAt: nil, Username: "", TOTPSecret: "",
+		PasswordHash: "", KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
+	}, nil)
 	s.manager.EXPECT().Update(gomock.Any(), testID, "", testUserID2, gomock.Any()).
 		Return(nil, domain.ErrInvalidEditCode)
 
@@ -1803,7 +1887,10 @@ func (s *AuthHandlerSuite) TestUpdateNote_SessionNonOwner_StillNeedsEditCode() {
 func (s *AuthHandlerSuite) TestUpdateNoteByPath_SessionOwner_BypassesEditCode() {
 	const mid = "project/GUIDE.md"
 
-	s.auth.EXPECT().GetSession(gomock.Any(), "sess-owner").Return(&domain.User{ID: testUserID1}, nil)
+	s.auth.EXPECT().GetSession(gomock.Any(), "sess-owner").Return(&domain.User{ID: testUserID1,
+		CreatedAt: time.Time{}, LastLoginAt: nil, Username: "", TOTPSecret: "",
+		PasswordHash: "", KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
+	}, nil)
 	s.manager.EXPECT().Update(gomock.Any(), mid, "", testUserID1, gomock.Any()).
 		Return(newTestNote("Guide", "new body"), nil)
 
@@ -1819,7 +1906,10 @@ func (s *AuthHandlerSuite) TestUpdateNoteByPath_SessionOwner_BypassesEditCode() 
 }
 
 func (s *AuthHandlerSuite) TestChangePasswordRevocationWarningKeepsReplacementSession() {
-	usr := &domain.User{ID: testUserID1, Username: "alice"}
+	usr := &domain.User{ID: testUserID1, Username: "alice",
+		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
+		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
+	}
 	s.auth.EXPECT().GetSession(gomock.Any(), "sess1").Return(usr, nil)
 	s.auth.EXPECT().ChangePassword(gomock.Any(), "sess1", "OldP@ss12!", "NewP@ss12!", "123456").
 		Return("replacement-session", domain.ErrSessionRevocation)
@@ -1867,7 +1957,10 @@ func (s *AuthHandlerSuite) renderedCSRFField(body string) string {
 func (s *AuthHandlerSuite) TestChangePasswordHandler_RerenderCarriesRotatedCSRFToken() {
 	for _, changeErr := range []error{nil, domain.ErrSessionRevocation} {
 		s.Run(fmt.Sprintf("err=%v", changeErr), func() {
-			usr := &domain.User{ID: testUserID1, Username: "alice"}
+			usr := &domain.User{ID: testUserID1, Username: "alice",
+				CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
+				KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
+			}
 			s.auth.EXPECT().GetSession(gomock.Any(), "sess1").Return(usr, nil)
 			s.auth.EXPECT().ChangePassword(gomock.Any(), "sess1", "OldP@ss12!", "NewP@ss12!", "123456").
 				Return("new-sess-id", changeErr)
@@ -1907,7 +2000,10 @@ func (s *AuthHandlerSuite) TestChangePasswordHandler_RerenderCarriesRotatedCSRFT
 // TestChangePasswordHandler_FailureKeepsRequestCSRFToken — a rejected change does not rotate,
 // so the re-rendered form keeps the request's (still valid) token and sets no new cookie.
 func (s *AuthHandlerSuite) TestChangePasswordHandler_FailureKeepsRequestCSRFToken() {
-	usr := &domain.User{ID: testUserID1, Username: "alice"}
+	usr := &domain.User{ID: testUserID1, Username: "alice",
+		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
+		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
+	}
 	s.auth.EXPECT().GetSession(gomock.Any(), "sess1").Return(usr, nil)
 	s.auth.EXPECT().ChangePassword(gomock.Any(), "sess1", "WrongP@ss12!", "NewP@ss12!", "123456").
 		Return("", domain.ErrInvalidPassword)

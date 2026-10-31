@@ -39,7 +39,9 @@ func testAutomaticStartup(t *testing.T, db *bun.DB) {
 	row2 := insertLegacy(t, db, "note", "automatic-two")
 	row3 := insertLegacy(t, db, "link", "automatic-link")
 	ring := testKeyring()
-	broken := &interruptedAutoStore{Storage: repo}
+	broken := &interruptedAutoStore{Storage: repo,
+		calls: 0,
+	}
 	report, err := manager(t, broken, ring).MigrateIfNeeded(t.Context())
 	require.ErrorContains(t, err, "interrupted startup")
 	require.Equal(t, keys.Pending, report.State)

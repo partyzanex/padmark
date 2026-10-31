@@ -95,7 +95,9 @@ func TestServeRefusesSubstitutedContentKeyBeforeListening(t *testing.T) {
 	require.NoError(t, err)
 
 	ring := &crypto.ContentKeyring{Active: "key", Keys: map[string][]byte{"key": bytes.Repeat([]byte{1}, 32)}}
-	manager, err := newEncryptionManager(db, ring, crypto.NewEditCodeHasher(crypto.Argon2Params{}))
+	manager, err := newEncryptionManager(db, ring, crypto.NewEditCodeHasher(crypto.Argon2Params{
+		Memory: 0, Time: 0, Threads: 0,
+	}))
 	require.NoError(t, err)
 	require.NoError(t, manager.PrepareServe(t.Context()))
 
@@ -169,7 +171,9 @@ func TestEncryptionMigrateConvertsV016Database(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, db.Close()) })
 	require.NoError(t, validateContentEncryption(t.Context(), db, ring,
-		crypto.NewEditCodeHasher(crypto.Argon2Params{}), slog.New(slog.DiscardHandler)))
+		crypto.NewEditCodeHasher(crypto.Argon2Params{
+			Memory: 0, Time: 0, Threads: 0,
+		}), slog.New(slog.DiscardHandler)))
 }
 
 func TestEncryptionPruneRequiresExplicitCorruptFlag(t *testing.T) {
@@ -239,7 +243,9 @@ func assertEncryptionPruneRecovery(t *testing.T, dsn, keyfile string) {
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, db.Close()) })
 	require.NoError(t, validateContentEncryption(t.Context(), db, ring,
-		crypto.NewEditCodeHasher(crypto.Argon2Params{}), slog.New(slog.DiscardHandler)))
+		crypto.NewEditCodeHasher(crypto.Argon2Params{
+			Memory: 0, Time: 0, Threads: 0,
+		}), slog.New(slog.DiscardHandler)))
 	missing, err := keyrepo.New(db).Get(t.Context(), "note", "old-id")
 	require.NoError(t, err)
 	require.Nil(t, missing)
@@ -252,7 +258,9 @@ func TestValidateContentEncryptionAddsContextOnce(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, db.Close()) })
 
 	ring := &crypto.ContentKeyring{Active: "key", Keys: map[string][]byte{"key": bytes.Repeat([]byte{1}, 32)}}
-	err = validateContentEncryption(t.Context(), db, ring, crypto.NewEditCodeHasher(crypto.Argon2Params{}),
+	err = validateContentEncryption(t.Context(), db, ring, crypto.NewEditCodeHasher(crypto.Argon2Params{
+		Memory: 0, Time: 0, Threads: 0,
+	}),
 		slog.New(slog.DiscardHandler))
 	require.Error(t, err)
 	require.True(t, strings.HasPrefix(err.Error(), "content encryption: "), err.Error())

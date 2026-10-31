@@ -10,20 +10,18 @@ import (
 )
 
 func domainToResponse(note *domain.Note) *ogenapi.NoteResponse {
-	resp := &ogenapi.NoteResponse{
-		ID:               note.ID,
-		Title:            note.Title,
-		Content:          note.Content,
-		ContentType:      ogenapi.NoteResponseContentType(derefContentType(note.ContentType)),
-		Views:            note.Views,
-		BurnAfterReading: note.BurnAfterReading,
-		CreatedAt:        note.CreatedAt,
-		UpdatedAt:        note.UpdatedAt,
-		Privacy:          ogenapi.NewOptNoteResponsePrivacy(ogenapi.NoteResponsePrivacy(note.EffectivePrivacy())),
-		Private:          ogenapi.NewOptBool(privateFlag(note)), //nolint:staticcheck // deprecated alias emitted on purpose
-		// ExpiresAt populated below when note.ExpiresAt is non-nil; zero OptNilDateTime otherwise.
-		ExpiresAt: ogenapi.OptNilDateTime{Value: time.Time{}, Set: false, Null: false},
-	}
+	resp := new(ogenapi.NoteResponse)
+	resp.ID = note.ID
+	resp.Title = note.Title
+	resp.Content = note.Content
+	resp.ContentType = ogenapi.NoteResponseContentType(derefContentType(note.ContentType))
+	resp.Views = note.Views
+	resp.BurnAfterReading = note.BurnAfterReading
+	resp.CreatedAt = note.CreatedAt
+	resp.UpdatedAt = note.UpdatedAt
+	resp.Privacy = ogenapi.NewOptNoteResponsePrivacy(ogenapi.NoteResponsePrivacy(note.EffectivePrivacy()))
+	// Keep the v0.1.6 response alias through the generated model's accessor.
+	resp.SetPrivate(ogenapi.NewOptBool(privateFlag(note)))
 
 	if note.ExpiresAt != nil {
 		resp.ExpiresAt = ogenapi.NewOptNilDateTime(*note.ExpiresAt)
@@ -105,23 +103,19 @@ func domainLinkToCreateResponse(link *domain.Link, log *slog.Logger) ogenapi.Cre
 }
 
 func domainToCreateResponse(note *domain.Note) ogenapi.CreateNoteResponse {
-	resp := ogenapi.CreateNoteResponse{
-		ID:               note.ID,
-		Title:            note.Title,
-		Content:          note.Content,
-		ContentType:      ogenapi.CreateNoteResponseContentType(derefContentType(note.ContentType)),
-		EditCode:         note.EditCode,
-		Views:            note.Views,
-		BurnAfterReading: note.BurnAfterReading,
-		CreatedAt:        note.CreatedAt,
-		UpdatedAt:        note.UpdatedAt,
-		Privacy: ogenapi.NewOptCreateNoteResponsePrivacy(
-			ogenapi.CreateNoteResponsePrivacy(note.EffectivePrivacy()),
-		),
-		Private: ogenapi.NewOptBool(privateFlag(note)), //nolint:staticcheck // deprecated alias emitted on purpose
-		// ExpiresAt populated below when note.ExpiresAt is non-nil; zero OptNilDateTime otherwise.
-		ExpiresAt: ogenapi.OptNilDateTime{Value: time.Time{}, Set: false, Null: false},
-	}
+	var resp ogenapi.CreateNoteResponse
+
+	resp.ID = note.ID
+	resp.Title = note.Title
+	resp.Content = note.Content
+	resp.ContentType = ogenapi.CreateNoteResponseContentType(derefContentType(note.ContentType))
+	resp.EditCode = note.EditCode
+	resp.Views = note.Views
+	resp.BurnAfterReading = note.BurnAfterReading
+	resp.CreatedAt = note.CreatedAt
+	resp.UpdatedAt = note.UpdatedAt
+	resp.Privacy = ogenapi.NewOptCreateNoteResponsePrivacy(ogenapi.CreateNoteResponsePrivacy(note.EffectivePrivacy()))
+	resp.SetPrivate(ogenapi.NewOptBool(privateFlag(note)))
 
 	if note.ExpiresAt != nil {
 		resp.ExpiresAt = ogenapi.NewOptNilDateTime(*note.ExpiresAt)

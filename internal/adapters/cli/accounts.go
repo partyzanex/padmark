@@ -9,6 +9,7 @@ import (
 
 	urcli "github.com/urfave/cli/v3"
 
+	"github.com/partyzanex/padmark/internal/clifactory"
 	"github.com/partyzanex/padmark/internal/errorcontext"
 	padmark "github.com/partyzanex/padmark/pkg/client"
 )
@@ -22,15 +23,15 @@ var errStepUpNoTOTPCode = errors.New("--" + FlagTOTPCode + " is required: issuin
 // always authenticates with a bearer token, which the server lets issue only with a step-up.
 func stepUpFlags() []urcli.Flag {
 	return []urcli.Flag{
-		&urcli.StringFlag{
-			Name: FlagPassword,
-			Usage: "Account password for the step-up. Flag values are visible in process listings (ps); " +
-				"prefer piping the password to stdin",
-		},
-		&urcli.StringFlag{
-			Name:  FlagTOTPCode,
-			Usage: "Current 6-digit TOTP code from your authenticator (step-up; each code works once)",
-		},
+		clifactory.StringFlag(func(flag *urcli.StringFlag) {
+			flag.Name = FlagPassword
+			flag.Usage = "Account password for the step-up. Flag values are visible in process listings (ps); " +
+				"prefer piping the password to stdin"
+		}),
+		clifactory.StringFlag(func(flag *urcli.StringFlag) {
+			flag.Name = FlagTOTPCode
+			flag.Usage = "Current 6-digit TOTP code from your authenticator (step-up; each code works once)"
+		}),
 	}
 }
 
@@ -52,21 +53,22 @@ func readStepUp(cmd *urcli.Command) (password, totpCode string, err error) {
 // createTokenCommand and createInviteCommand are intentionally symmetric: one-time secret,
 // stderr advice, single-line stdout. ogen per-operation unions make shared extraction awkward.
 func createTokenCommand() *urcli.Command {
-	return &urcli.Command{
-		Name:  "create-token",
-		Usage: "Issue an API token for your own account and print it once",
-		Description: "POST /api/tokens: the returned pmk_… envelope is shown exactly once — " +
+	return clifactory.Command(func(command *urcli.Command) {
+		command.Name = "create-token"
+		command.Usage = "Issue an API token for your own account and print it once"
+		command.Description = "POST /api/tokens: the returned pmk_… envelope is shown exactly once — " +
 			"put it into ~/.config/padmark/token or PADMARK_TOKEN yourself; the CLI never writes " +
 			"the token file automatically. A user may hold at most 20 live tokens (revoke via /admin). " +
 			"Issuing with an API token requires a step-up: the account password (stdin or --password) " +
-			"and --totp-code. The new token is linked to the one used: revoking that one revokes it too.",
-		Flags: append(stepUpFlags(), &urcli.IntFlag{
-			Name:  FlagTTLDays,
-			Usage: "Lifetime of the new token in days; 0 = never expires",
-			Value: 0,
-		}),
-		Action: createTokenAction,
-	}
+			"and --totp-code. The new token is linked to the one used: revoking that one revokes it too."
+
+		command.Flags = append(stepUpFlags(), clifactory.IntFlag(func(flag *urcli.IntFlag) {
+			flag.Name = FlagTTLDays
+			flag.Usage = "Lifetime of the new token in days; 0 = never expires"
+			flag.Value = 0
+		}))
+		command.Action = createTokenAction
+	})
 }
 
 func createTokenAction(ctx context.Context, cmd *urcli.Command) error {
@@ -136,16 +138,16 @@ func handleCreateAPITokenRes(res padmark.CreateAPITokenRes) (string, error) {
 }
 
 func createInviteCommand() *urcli.Command {
-	return &urcli.Command{
-		Name:  "create-invite",
-		Usage: "Issue a single-use signup invite link (admin only)",
-		Description: "POST /api/invites: returns the invite URL shown once — the link expires " +
+	return clifactory.Command(func(command *urcli.Command) {
+		command.Name = "create-invite"
+		command.Usage = "Issue a single-use signup invite link (admin only)"
+		command.Description = "POST /api/invites: returns the invite URL shown once — the link expires " +
 			"and is single-use. The invitee signs up with `padmark-cli setup --invite <token>`. " +
 			"Issuing with an API token requires a step-up: the account password (stdin or --password) " +
-			"and --totp-code.",
-		Flags:  stepUpFlags(),
-		Action: createInviteAction,
-	}
+			"and --totp-code."
+		command.Flags = stepUpFlags()
+		command.Action = createInviteAction
+	})
 }
 
 func createInviteAction(ctx context.Context, cmd *urcli.Command) error {

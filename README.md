@@ -305,6 +305,8 @@ Install:
 go install github.com/partyzanex/padmark/cmd/padmark-cli@latest
 ```
 
+Human-readable CLI timestamps use UTC in RFC3339 format (for example, `2026-10-25T12:00:00Z`).
+
 Common commands:
 
 ```bash

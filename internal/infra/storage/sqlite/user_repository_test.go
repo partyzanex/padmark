@@ -50,6 +50,8 @@ func (s *UserRepositoryTestSuite) newUser(username string) *domain.User {
 		KDFSalt:      []byte("saltsaltsalt1234"),
 		IsAdmin:      false,
 		CreatedAt:    time.Now().Truncate(time.Second),
+
+		LastLoginAt: nil, LastTOTPCounter: 0,
 	}
 }
 
@@ -244,12 +246,16 @@ func TestRevoke_CascadesSessionsAndInvites(t *testing.T) {
 	usr := &domain.User{
 		ID: uuid.New(), Username: "usr", TOTPSecret: "s", PasswordHash: "h",
 		KDFSalt: []byte("saltsaltsalt1234"), IsAdmin: false, CreatedAt: time.Now().Truncate(time.Second),
+
+		LastLoginAt: nil, LastTOTPCounter: 0,
 	}
 	require.NoError(t, users.Create(ctx, usr))
 
 	require.NoError(t, sessions.Create(ctx, &domain.Session{
 		SessionHash: "sess-1", UserID: usr.ID,
 		CreatedAt: time.Now(), ExpiresAt: time.Now().Add(time.Hour),
+
+		UserAgent: "", IP: "",
 	}))
 
 	_, err = invites.Issue(ctx, usr.ID)

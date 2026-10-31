@@ -43,6 +43,8 @@ func TestMigrateSessionIDs_InvalidatesOldSessionsAndDowngradeHashes(t *testing.T
 	now := time.Now().Truncate(time.Second)
 	require.NoError(t, repo.Create(t.Context(), &domain.Session{
 		SessionHash: "hashed-era-digest", UserID: owner.ID, CreatedAt: now, ExpiresAt: now.Add(time.Hour),
+
+		UserAgent: "", IP: "",
 	}))
 	_, err = provider.Up(t.Context())
 	require.NoError(t, err)

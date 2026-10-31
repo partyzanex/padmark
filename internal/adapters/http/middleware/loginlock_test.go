@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/bluele/gcache"
+	"github.com/partyzanex/padmark/tests/httptestutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -30,7 +31,12 @@ func newLoginLockFixture() *loginLockFixture {
 		fix.upstream.Add(1)
 
 		if r.FormValue("code") == "ok" {
-			http.SetCookie(w, &http.Cookie{Name: SessionCookieName, Value: "sess", MaxAge: 60}) //nolint:gosec // test
+			http.SetCookie(w, &http.Cookie{Name: SessionCookieName, Value: "sess", MaxAge: 60,
+				Quoted: false, Path: "", Domain: "", Expires: time.Time{}, RawExpires: "",
+				Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode,
+				Partitioned: false, Raw: "",
+				Unparsed: nil,
+			})
 			http.Redirect(w, r, "/", http.StatusSeeOther)
 
 			return
@@ -129,11 +135,19 @@ func TestSessionIssued(t *testing.T) {
 		want   bool
 	}{
 		//nolint:gosec // G124: test cookie, attributes irrelevant to sessionIssued
-		"live session": {cookie: &http.Cookie{Name: SessionCookieName, Value: "s", MaxAge: 60}, want: true},
+		"live session": {cookie: &http.Cookie{Name: SessionCookieName, Value: "s", MaxAge: 60,
+			Quoted: false, Path: "", Domain: "", Expires: time.Time{}, RawExpires: "",
+			Secure: false, HttpOnly: false, SameSite: 0, Partitioned: false, Raw: "",
+			Unparsed: nil,
+		}, want: true},
 		//nolint:gosec // G124: test cookie, attributes irrelevant to sessionIssued
-		"session delete": {cookie: &http.Cookie{Name: SessionCookieName, Value: "", MaxAge: -1}, want: false},
-		//nolint:gosec // G124: test cookie, attributes irrelevant to sessionIssued
-		"other cookie": {cookie: &http.Cookie{Name: "padmark_csrf", Value: "tok"}, want: false},
+		"session delete": {cookie: &http.Cookie{Name: SessionCookieName, Value: "", MaxAge: -1,
+			Quoted: false, Path: "", Domain: "", Expires: time.Time{}, RawExpires: "",
+			Secure: false, HttpOnly: false, SameSite: 0, Partitioned: false, Raw: "",
+			Unparsed: nil,
+		}, want: false},
+
+		"other cookie": {cookie: httptestutil.RequestCookie("padmark_csrf", "tok"), want: false},
 		"no cookie":    {cookie: nil, want: false},
 	}
 

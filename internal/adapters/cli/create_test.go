@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 	urcli "github.com/urfave/cli/v3"
 
+	"github.com/partyzanex/padmark/internal/clifactory"
 	padmark "github.com/partyzanex/padmark/pkg/client"
 )
 
@@ -86,14 +87,14 @@ func buildCreateReqFor(t *testing.T, args ...string) *padmark.CreateNoteRequest 
 
 	var req *padmark.CreateNoteRequest
 
-	app := &urcli.Command{
-		Flags: createCommand().Flags,
-		Action: func(_ context.Context, cmd *urcli.Command) error {
+	app := clifactory.Command(func(command *urcli.Command) {
+		command.Flags = createCommand().Flags
+		command.Action = func(_ context.Context, cmd *urcli.Command) error {
 			req = buildCreateReq(cmd, "content")
 
 			return nil
-		},
-	}
+		}
+	})
 	require.NoError(t, app.Run(t.Context(), append([]string{testBin}, args...)))
 
 	return req

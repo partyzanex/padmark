@@ -23,7 +23,9 @@ func connectTestClient(ctx context.Context, mgr *Manager) (*mcpsdk.ClientSession
 		return nil, err
 	}
 
-	client := mcpsdk.NewClient(&mcpsdk.Implementation{Name: "test-client", Version: "0"}, nil)
+	client := mcpsdk.NewClient(&mcpsdk.Implementation{Name: "test-client", Version: "0",
+		Title: "", Description: "", WebsiteURL: "", Icons: nil,
+	}, nil)
 
 	clientSession, err := client.Connect(ctx, clientTransport, nil)
 	if err != nil {
@@ -37,20 +39,24 @@ func connectTestClient(ctx context.Context, mgr *Manager) (*mcpsdk.ClientSession
 
 // testNoteResponse builds a small successful note fixture for get/update paths.
 func testNoteResponse(id string) *padmark.NoteResponse {
-	return &padmark.NoteResponse{
-		ID: id, Title: "t", Content: "# hi",
-		ContentType: padmark.NoteResponseContentTypeTextMarkdown,
-	}
+	response := new(padmark.NoteResponse)
+	response.ID, response.Title, response.Content = id, "t", "# hi"
+	response.ContentType = padmark.NoteResponseContentTypeTextMarkdown
+
+	return response
 }
 
 // testCreateNoteHeaders builds the 201 variant padmark returns with a one-time edit code.
 func testCreateNoteHeaders(id, editCode string) *padmark.CreateNoteResponseHeaders {
+	var response padmark.CreateNoteResponse
+
+	response.ID, response.Title, response.Content = id, "t", "# hi"
+	response.ContentType = padmark.CreateNoteResponseContentTypeTextMarkdown
+	response.EditCode = editCode
+
 	return &padmark.CreateNoteResponseHeaders{
-		Response: padmark.CreateNoteResponse{
-			ID: id, Title: "t", Content: "# hi",
-			ContentType: padmark.CreateNoteResponseContentTypeTextMarkdown,
-			EditCode:    editCode,
-		},
+		Response: response,
+		Location: padmark.OptString{Value: "", Set: false},
 	}
 }
 

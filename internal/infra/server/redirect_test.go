@@ -69,6 +69,8 @@ func TestHTTPRedirectHandler(t *testing.T) {
 			allowed:    map[string]struct{}{"example.com": {}},
 			host:       "evil.com",
 			wantStatus: http.StatusBadRequest,
+
+			wantLoc: "",
 		},
 	}
 
@@ -104,7 +106,9 @@ func TestStartRedirectServer_BindFailureIsNonFatal(t *testing.T) {
 
 	var sink syncBuffer
 
-	log := slog.New(slog.NewTextHandler(&sink, &slog.HandlerOptions{Level: slog.LevelError}))
+	log := slog.New(slog.NewTextHandler(&sink, &slog.HandlerOptions{Level: slog.LevelError,
+		AddSource: false, ReplaceAttr: nil,
+	}))
 
 	// Must not panic and must return immediately (failure handled in its own goroutine).
 	startRedirectServer(context.Background(), addr, nil, log)

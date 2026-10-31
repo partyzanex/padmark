@@ -78,6 +78,9 @@ func newBurnGuaranteeEnv(t *testing.T, dbName string) ownerFlowEnv {
 		// links get the interstitial by default, so this models an operator running
 		// --direct-redirect=true.
 		DirectRedirect: true,
+
+		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, AllowedHosts: nil, RateLimit: 0,
+		RateBurst: 0, SessionTTL: 0, DisableAPI: false,
 	})
 	require.NoError(t, err)
 
@@ -135,7 +138,9 @@ func burnHTTPGet(t *testing.T, url string, headers map[string]string, sessionID 
 		req.Header.Set("Cookie", "padmark_session="+sessionID)
 	}
 
-	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+		Transport: nil, Jar: nil, Timeout: 0,
+	}
 
 	resp, err := client.Do(req)
 	require.NoError(t, err)
@@ -185,7 +190,9 @@ func burnOwnerSession(t *testing.T, env ownerFlowEnv) (sessionID, apiToken strin
 	sessionID, err = env.authMgr.Login(ctx, "owner", ownerFlowPassword, code, "Mozilla/5.0", "127.0.0.1", "")
 	require.NoError(t, err)
 
-	apiToken, err = env.authMgr.CreateAPIToken(ctx, owner.ID, auth.Issuer{}, 0)
+	apiToken, err = env.authMgr.CreateAPIToken(ctx, owner.ID, auth.Issuer{
+		APITokenHash: "", StepUp: auth.StepUp{Password: "", TOTPCode: ""},
+	}, 0)
 	require.NoError(t, err)
 
 	return sessionID, apiToken
@@ -250,6 +257,8 @@ func TestBurnGuarantee_ImageSubresourceDoesNotTriggerBurn(t *testing.T) {
 			name:   "public immediate-burn note, anonymous viewer",
 			fields: `"burn_after_reading":true`,
 			intact: "burn_after_reading",
+
+			bearer: "", viewerSession: "",
 		},
 		{
 			name:          "owner-only immediate-burn note, owner's own browser",
@@ -262,6 +271,8 @@ func TestBurnGuarantee_ImageSubresourceDoesNotTriggerBurn(t *testing.T) {
 			name:   "grace-period burn note: timer must not start",
 			fields: `"burn_after_reading":true,"ttl":3600`,
 			intact: "burn_after_reading AND expires_at IS NULL",
+
+			bearer: "", viewerSession: "",
 		},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -394,7 +405,9 @@ func burnHTTPDo(t *testing.T, method, url string, headers map[string]string) (in
 		req.Header.Set(name, value)
 	}
 
-	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+		Transport: nil, Jar: nil, Timeout: 0,
+	}
 
 	resp, err := client.Do(req)
 	require.NoError(t, err)

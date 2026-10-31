@@ -36,8 +36,12 @@ func TestMigrateAPITokenIssuer_DownKeepsTokens(t *testing.T) {
 	now := time.Now().Truncate(time.Second)
 
 	for _, tok := range []*domain.APIToken{
-		{UserID: owner.ID, TokenHash: parent, CreatedAt: now},
-		{UserID: owner.ID, TokenHash: "hash-child", CreatedAt: now, IssuedBy: &parent},
+		{UserID: owner.ID, TokenHash: parent, CreatedAt: now,
+			ExpiresAt: nil, LastUsedAt: nil, IssuedBy: nil,
+		},
+		{UserID: owner.ID, TokenHash: "hash-child", CreatedAt: now, IssuedBy: &parent,
+			ExpiresAt: nil, LastUsedAt: nil,
+		},
 	} {
 		created, createErr := repo.CreateIfUnderLimit(t.Context(), tok, testAPITokenLimit)
 		require.NoError(t, createErr)

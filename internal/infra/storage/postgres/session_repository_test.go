@@ -97,6 +97,8 @@ func (s *SessionRepositoryTestSuite) createUser(suffix string) uuid.UUID {
 		PasswordHash: "hash",
 		KDFSalt:      []byte("saltsaltsalt1234"),
 		CreatedAt:    time.Now().Truncate(time.Second),
+
+		LastLoginAt: nil, LastTOTPCounter: 0, IsAdmin: false,
 	})
 	s.Require().NoError(err)
 
@@ -158,8 +160,9 @@ func (s *SessionRepositoryTestSuite) TestGet_ExactExpiryBoundary_ReturnsErrSessi
 		UserID:      userID,
 		CreatedAt:   time.Now(),
 		ExpiresAt:   time.Now(), // exactly now — must be rejected
-		UserAgent:   "",
-		IP:          "",
+		UserAgent:   "", IP: "",
+
+		BaseModel: bun.BaseModel{},
 	}
 	_, err := s.db.NewInsert().Model(boundary).Exec(ctx)
 	s.Require().NoError(err)

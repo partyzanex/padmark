@@ -7,27 +7,28 @@ import (
 
 	urcli "github.com/urfave/cli/v3"
 
+	"github.com/partyzanex/padmark/internal/clifactory"
 	"github.com/partyzanex/padmark/internal/errorcontext"
 	padmark "github.com/partyzanex/padmark/pkg/client"
 )
 
 func getCommand() *urcli.Command {
-	return &urcli.Command{
-		Name:      "get",
-		Usage:     "Get a note by ID",
-		ArgsUsage: argsUsageID,
-		Flags: []urcli.Flag{
-			&urcli.BoolFlag{
-				Name:  FlagRaw,
-				Usage: "Print raw note content only (no metadata)",
-			},
-			&urcli.BoolFlag{
-				Name:  FlagJSON,
-				Usage: "Print the note as JSON",
-			},
-		},
-		Action: getAction,
-	}
+	return clifactory.Command(func(command *urcli.Command) {
+		command.Name = "get"
+		command.Usage = "Get a note by ID"
+		command.ArgsUsage = argsUsageID
+		command.Flags = []urcli.Flag{
+			clifactory.BoolFlag(func(flag *urcli.BoolFlag) {
+				flag.Name = FlagRaw
+				flag.Usage = "Print raw note content only (no metadata)"
+			}),
+			clifactory.BoolFlag(func(flag *urcli.BoolFlag) {
+				flag.Name = FlagJSON
+				flag.Usage = "Print the note as JSON"
+			}),
+		}
+		command.Action = getAction
+	})
 }
 
 func getAction(ctx context.Context, cmd *urcli.Command) error {

@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
 
+	"github.com/partyzanex/padmark/internal/clifactory"
 	"github.com/partyzanex/padmark/internal/infra/crypto"
 )
 
@@ -102,11 +103,14 @@ func TestAllowSharedKeyringFlagAndEnv(t *testing.T) {
 	} {
 		t.Setenv(EnvAllowSharedKeyring, item.env)
 
-		app := &cli.Command{Flags: appFlags(), Action: func(_ context.Context, cmd *cli.Command) error {
-			require.Equal(t, item.want, cmd.Bool(FlagAllowSharedKeyring))
+		app := clifactory.Command(func(command *cli.Command) {
+			command.Flags = appFlags()
+			command.Action = func(_ context.Context, cmd *cli.Command) error {
+				require.Equal(t, item.want, cmd.Bool(FlagAllowSharedKeyring))
 
-			return nil
-		}}
+				return nil
+			}
+		})
 		require.NoError(t, app.Run(t.Context(), item.args))
 	}
 }

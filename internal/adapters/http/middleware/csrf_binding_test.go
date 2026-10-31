@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/partyzanex/padmark/tests/httptestutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -39,10 +40,10 @@ func csrfPost(t *testing.T, token, sessionID string, headers map[string]string) 
 	form := url.Values{csrfFieldName: {token}}
 	req := httptest.NewRequest(http.MethodPost, "/admin/invite", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.AddCookie(&http.Cookie{Name: csrfCookieName, Value: token}) //nolint:gosec // G124: test cookie
+	req.AddCookie(httptestutil.RequestCookie(csrfCookieName, token))
 
 	if sessionID != "" {
-		req.AddCookie(&http.Cookie{Name: SessionCookieName, Value: sessionID}) //nolint:gosec // G124: test cookie
+		req.AddCookie(httptestutil.RequestCookie(SessionCookieName, sessionID))
 	}
 
 	for key, value := range headers {
@@ -129,8 +130,8 @@ func TestWithCSRFToken_ReissuesTokenWhenSessionChanges(t *testing.T) {
 	}))
 
 	req := httptest.NewRequest(http.MethodGet, "/admin", nil)
-	req.AddCookie(&http.Cookie{Name: csrfCookieName, Value: anon})        //nolint:gosec // G124: test cookie
-	req.AddCookie(&http.Cookie{Name: SessionCookieName, Value: "sess-1"}) //nolint:gosec // G124: test cookie
+	req.AddCookie(httptestutil.RequestCookie(csrfCookieName, anon))
+	req.AddCookie(httptestutil.RequestCookie(SessionCookieName, "sess-1"))
 
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)

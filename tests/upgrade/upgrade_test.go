@@ -304,6 +304,11 @@ func assertEditCodes(t *testing.T, manager *notes.Manager, fixture []legacyNote)
 		update := func(code string) error {
 			_, err := manager.Update(t.Context(), note.slug, code, uuid.Nil, &domain.Note{
 				Title: note.title + " (edited)", Content: "edited after the upgrade",
+
+				CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
+				Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
+				EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
+				ClearExpiry: false,
 			})
 
 			return err

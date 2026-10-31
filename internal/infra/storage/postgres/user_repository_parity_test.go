@@ -174,9 +174,13 @@ func (s *ParitySuite) TestUser_RevokeClearsCredentialsAndOwnership() {
 
 	s.Require().NoError(NewSessionRepository(s.db, s.discard).Create(ctx, &domain.Session{
 		SessionHash: "session-hash", UserID: usr.ID, CreatedAt: now, ExpiresAt: now.Add(time.Hour),
+
+		UserAgent: "", IP: "",
 	}))
 	_, err := NewAPITokenRepository(s.db).CreateIfUnderLimit(ctx,
-		&domain.APIToken{TokenHash: "token-hash", UserID: usr.ID, CreatedAt: now}, 10)
+		&domain.APIToken{TokenHash: "token-hash", UserID: usr.ID, CreatedAt: now,
+			ExpiresAt: nil, LastUsedAt: nil, IssuedBy: nil,
+		}, 10)
 	s.Require().NoError(err)
 	_, err = NewInviteRepository(s.db, s.discard).Issue(ctx, usr.ID)
 	s.Require().NoError(err)
@@ -186,6 +190,9 @@ func (s *ParitySuite) TestUser_RevokeClearsCredentialsAndOwnership() {
 	s.Require().NoError(NewNoteRepository(s.db).Create(ctx, owned))
 	s.Require().NoError(NewLinkRepository(s.db, s.discard).Create(ctx, &domain.Link{
 		ID: "owned-link", TargetURL: "ciphertext", CreatedAt: now, OwnerID: &usr.ID,
+
+		ExpiresAt: nil, Privacy: nil, DirectRedirect: nil, EditCode: "", Views: 0,
+		BurnAfterClick: false,
 	}))
 
 	s.Require().NoError(NewUserRepository(s.db).Revoke(ctx, usr.ID))

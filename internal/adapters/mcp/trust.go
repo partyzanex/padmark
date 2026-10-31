@@ -6,6 +6,7 @@ import (
 
 	urcli "github.com/urfave/cli/v3"
 
+	"github.com/partyzanex/padmark/internal/clifactory"
 	"github.com/partyzanex/padmark/internal/infra/tokenfile"
 )
 
@@ -18,11 +19,11 @@ const trustedOriginMsg = "trusted server %s (recorded in %s)\n"
 // It writes to stderr only, keeping stdout clean even if invoked by mistake next to a
 // protocol session.
 func trustCommand() *urcli.Command {
-	return &urcli.Command{
-		Name:   "trust",
-		Usage:  "Record the server pinned by the token (or --base-url) as trusted for pmk_ envelope tokens",
-		Action: trustAction,
-	}
+	return clifactory.Command(func(command *urcli.Command) {
+		command.Name = "trust"
+		command.Usage = "Record the server pinned by the token (or --base-url) as trusted for pmk_ envelope tokens"
+		command.Action = trustAction
+	})
 }
 
 // trustAction resolves what to trust in the same precedence as request routing: an explicit

@@ -85,6 +85,9 @@ func newNote(id, title, content string) *domain.Note {
 		ContentType: new(domain.ContentTypeMarkdown),
 		CreatedAt:   now,
 		UpdatedAt:   now,
+
+		ExpiresAt: nil, Privacy: nil, OwnerID: nil, EditCode: "",
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
 	}
 }
 
@@ -133,6 +136,8 @@ func (s *RepositoryTestSuite) createTestUser(ctx context.Context) uuid.UUID {
 	err := NewUserRepository(s.db).Create(ctx, &domain.User{
 		ID: id, Username: "owner-" + id.String(), TOTPSecret: "secret", PasswordHash: "hash",
 		CreatedAt: time.Now(),
+
+		LastLoginAt: nil, KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
 	})
 	s.Require().NoError(err)
 
@@ -227,6 +232,10 @@ func (s *RepositoryTestSuite) TestUpdate_OK() {
 		ContentType: new(domain.ContentTypePlain),
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
+
+		ExpiresAt: nil, Privacy: nil, OwnerID: nil, ID: "",
+		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
+		ClearExpiry: false,
 	}
 	err := s.repo.Update(ctx, "u1", updated)
 	s.Require().NoError(err)
@@ -250,6 +259,10 @@ func (s *RepositoryTestSuite) TestUpdate_ExpiresAt() {
 		ExpiresAt: &future,
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
+
+		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
+		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
+		ClearExpiry: false,
 	}
 
 	s.Require().NoError(s.repo.Update(ctx, "u2", updated))
@@ -270,6 +283,9 @@ func (s *RepositoryTestSuite) TestUpdate_BurnAfterReading() {
 		BurnAfterReading: true,
 		CreatedAt:        time.Now(),
 		UpdatedAt:        time.Now(),
+
+		ExpiresAt: nil, Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
+		EditCode: "", Views: 0, BurnTTL: 0, ClearExpiry: false,
 	}
 
 	s.Require().NoError(s.repo.Update(ctx, "u3", updated))
@@ -285,6 +301,10 @@ func (s *RepositoryTestSuite) TestUpdate_NotFound() {
 		Content:   "x",
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
+
+		ExpiresAt: nil, Privacy: nil, OwnerID: nil, ID: "",
+		ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
+		BurnAfterReading: false, ClearExpiry: false,
 	}
 
 	err := s.repo.Update(s.T().Context(), "nonexistent", note)
@@ -308,6 +328,10 @@ func (s *RepositoryTestSuite) TestUpdate_Privacy_Nil_PreservesExistingValue() {
 		Privacy:   nil,
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
+
+		ExpiresAt: nil, OwnerID: nil, ID: "", ContentType: nil,
+		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
+		ClearExpiry: false,
 	}
 	s.Require().NoError(s.repo.Update(ctx, "priv-nil-1", updated))
 
@@ -332,6 +356,10 @@ func (s *RepositoryTestSuite) TestUpdate_Privacy_ExplicitPublic_ClearsPrivacy() 
 		Privacy:   new(domain.PrivacyPublic),
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
+
+		ExpiresAt: nil, OwnerID: nil, ID: "", ContentType: nil,
+		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
+		ClearExpiry: false,
 	}
 	s.Require().NoError(s.repo.Update(ctx, "priv-false-1", updated))
 
@@ -355,6 +383,10 @@ func (s *RepositoryTestSuite) TestUpdate_ContentType_Nil_PreservesExistingValue(
 		ContentType: nil,
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
+
+		ExpiresAt: nil, Privacy: nil, OwnerID: nil, ID: "",
+		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
+		ClearExpiry: false,
 	}
 	s.Require().NoError(s.repo.Update(ctx, "ct-nil-pg", updated))
 
@@ -378,6 +410,10 @@ func (s *RepositoryTestSuite) TestUpdate_ContentType_ExplicitChange() {
 		ContentType: new(domain.ContentTypeMarkdown),
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
+
+		ExpiresAt: nil, Privacy: nil, OwnerID: nil, ID: "",
+		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
+		ClearExpiry: false,
 	}
 	s.Require().NoError(s.repo.Update(ctx, "ct-change-pg", updated))
 
@@ -511,6 +547,10 @@ func (s *RepositoryTestSuite) TestRoundtrip_CRUD() {
 		ContentType: new(domain.ContentTypePlain),
 		CreatedAt:   got.CreatedAt,
 		UpdatedAt:   time.Now(),
+
+		ExpiresAt: nil, Privacy: nil, OwnerID: nil, ID: "",
+		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
+		ClearExpiry: false,
 	}
 	s.Require().NoError(s.repo.Update(ctx, "rt1", updated))
 

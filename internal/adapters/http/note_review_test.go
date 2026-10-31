@@ -25,7 +25,9 @@ func (s *HandlerSuite) TestOgenGetNotePrivacyBeforeView() {
 		handler := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog)
 		result, err := handler.GetNote(s.T().Context(), ogenapi.GetNoteParams{ID: testID})
 		s.Require().NoError(err)
-		s.IsType(&ogenapi.GetNoteUnauthorized{}, result)
+		s.IsType(&ogenapi.GetNoteUnauthorized{
+			Message: "", Code: ogenapi.OptString{Value: "", Set: false},
+		}, result)
 		// No View/ViewPreloaded expectation: denied reads must not burn or increment views.
 	}
 }
@@ -37,7 +39,7 @@ func (s *HandlerSuite) TestOgenGetNotePublicAppliesView() {
 	handler := adhttp.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog)
 	result, err := handler.GetNote(s.T().Context(), ogenapi.GetNoteParams{ID: testID})
 	s.Require().NoError(err)
-	s.IsType(&ogenapi.NoteResponse{}, result)
+	s.IsType(new(ogenapi.NoteResponse), result)
 }
 
 func (s *HandlerSuite) TestNoteTTLBoundaryValidation() {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	time "time"
 
 	"go.uber.org/mock/gomock"
 
@@ -50,7 +51,9 @@ func (s *AuthHandlerSuite) enrollment(enr *auth.Enrollment) *auth.Enrollment {
 func (s *AuthHandlerSuite) TestSetupJSON_NoAccept_IsTheJSONBranch() {
 	s.auth.EXPECT().IsEmpty(gomock.Any()).Return(true, nil)
 	s.auth.EXPECT().AcceptFirstAdmin(gomock.Any(), "admin", testPw).
-		Return(s.enrollment(&auth.Enrollment{}), nil)
+		Return(s.enrollment(&auth.Enrollment{
+			TOTPURI: "", QRCode: "",
+		}), nil)
 
 	rec := s.postSetup("", `{"username":"admin","password":"`+testPw+`","bootstrap_token":"`+testBootstrapToken+`"}`, "")
 
@@ -72,7 +75,9 @@ func (s *AuthHandlerSuite) TestSetupJSON_NoAccept_IsTheJSONBranch() {
 // with an invite enrolls a non-admin user (is_admin false in the response).
 func (s *AuthHandlerSuite) TestSetupJSON_ExplicitJSONAccepted_CreatesWithInvite() {
 	s.auth.EXPECT().AcceptInvite(gomock.Any(), "tok-1", "member", testPw).
-		Return(s.enrollment(&auth.Enrollment{}), nil)
+		Return(s.enrollment(&auth.Enrollment{
+			TOTPURI: "", QRCode: "",
+		}), nil)
 
 	rec := s.postSetup("application/json",
 		`{"username":"member","password":"`+testPw+`","invite":"tok-1"}`, "")
@@ -168,7 +173,9 @@ func (s *AuthHandlerSuite) TestSetupJSON_BootstrapToken_Refusals() {
 // first-admin path — an invite is its own credential, even with no token configured.
 func (s *AuthHandlerSuite) TestSetupJSON_InviteNeedsNoBootstrapToken() {
 	s.auth.EXPECT().AcceptInvite(gomock.Any(), "tok", "bob", testPw).
-		Return(s.enrollment(&auth.Enrollment{}), nil)
+		Return(s.enrollment(&auth.Enrollment{
+			TOTPURI: "", QRCode: "",
+		}), nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/setup",
 		bytes.NewBufferString(`{"username":"bob","password":"`+testPw+`","invite":"tok"}`))
@@ -262,7 +269,10 @@ func (s *AuthHandlerSuite) postOgen(path, bearer string) *httptest.ResponseRecor
 // TestCreateAPIToken_ValidBearer_ReturnsEnvelope proves self-service issuance end-to-end over
 // the generated route: the envelope decodes to the request's own base URL and the plain key.
 func (s *AuthHandlerSuite) TestCreateAPIToken_ValidBearer_ReturnsEnvelope() {
-	usr := &domain.User{ID: testUserID1, Username: "alice"}
+	usr := &domain.User{ID: testUserID1, Username: "alice",
+		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
+		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
+	}
 	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "good-api-key").Return(usr, "token-hash", nil)
 	s.auth.EXPECT().CreateAPIToken(gomock.Any(), testUserID1, gomock.Any(), gomock.Any()).Return("plain-key-1", nil)
 
@@ -284,7 +294,10 @@ func (s *AuthHandlerSuite) TestCreateAPIToken_ValidBearer_ReturnsEnvelope() {
 
 // TestCreateAPIToken_TokenCap_429 — the 20-token cap maps to the documented quota status.
 func (s *AuthHandlerSuite) TestCreateAPIToken_TokenCap_429() {
-	usr := &domain.User{ID: testUserID1, Username: "alice"}
+	usr := &domain.User{ID: testUserID1, Username: "alice",
+		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
+		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
+	}
 	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "good-api-key").Return(usr, "token-hash", nil)
 	s.auth.EXPECT().CreateAPIToken(gomock.Any(), testUserID1, gomock.Any(), gomock.Any()).
 		Return("", domain.ErrAPITokenLimit)
@@ -334,7 +347,10 @@ func (s *AuthHandlerSuite) TestCreateInvite_ForcedScheme_Honoured() {
 
 // TestCreateInvite_NonAdmin_403 — a non-admin bearer gets the admin gate answered as JSON.
 func (s *AuthHandlerSuite) TestCreateInvite_NonAdmin_403() {
-	usr := &domain.User{ID: testUserID1, Username: "alice"}
+	usr := &domain.User{ID: testUserID1, Username: "alice",
+		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
+		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
+	}
 	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "good-api-key").Return(usr, "token-hash", nil)
 
 	rec := s.postOgen("/api/invites", "good-api-key")
@@ -360,6 +376,9 @@ func (s *AuthHandlerSuite) TestAccountEndpoints_DisabledAPI_503() {
 		MaxBodyBytes: 256 * 1024,
 		CSRFSecret:   authTestCSRFSecret,
 		DisableAPI:   true,
+
+		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, AllowedHosts: nil, RateLimit: 0,
+		RateBurst: 0, SessionTTL: 0, DirectRedirect: false,
 	}
 
 	router, err := adhttp.NewRouter(handler, ogen, &opts)
@@ -385,7 +404,10 @@ func (s *AuthHandlerSuite) TestAccountEndpoints_DisabledAPI_503() {
 // TestAccountEndpoints_FeatureNotEnabled_503 — with accounts enabled but the API-token store
 // not wired (auth.NewManager with a nil store), issuance fails the documented 503.
 func (s *AuthHandlerSuite) TestAccountEndpoints_FeatureNotEnabled_503() {
-	usr := &domain.User{ID: testUserID1, Username: "alice"}
+	usr := &domain.User{ID: testUserID1, Username: "alice",
+		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
+		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
+	}
 	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "good-api-key").Return(usr, "token-hash", nil)
 	s.auth.EXPECT().CreateAPIToken(gomock.Any(), testUserID1, gomock.Any(), gomock.Any()).
 		Return("", domain.ErrFeatureNotSupported)
@@ -440,7 +462,9 @@ func (s *AuthHandlerSuite) TestSetupJSON_CrossOriginHeader_Rejected403() {
 func (s *AuthHandlerSuite) TestSetupJSON_SameOriginHeader_OK() {
 	s.auth.EXPECT().IsEmpty(gomock.Any()).Return(true, nil)
 	s.auth.EXPECT().AcceptFirstAdmin(gomock.Any(), "admin", testPw).
-		Return(s.enrollment(&auth.Enrollment{}), nil)
+		Return(s.enrollment(&auth.Enrollment{
+			TOTPURI: "", QRCode: "",
+		}), nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/setup",
 		bytes.NewBufferString(`{"username":"admin","password":"`+testPw+`","bootstrap_token":"`+testBootstrapToken+`"}`))
@@ -461,7 +485,10 @@ func (s *AuthHandlerSuite) TestSetupJSON_SameOriginHeader_OK() {
 func (s *AuthHandlerSuite) TestCreateAPIToken_CrossOriginHeader_Rejected() {
 	// The auth middleware resolves the Bearer credential before the handler; only the mint
 	// itself must be blocked (the expectation for CreateAPIToken stays unset on purpose).
-	usr := &domain.User{ID: testUserID1, Username: "alice"}
+	usr := &domain.User{ID: testUserID1, Username: "alice",
+		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
+		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
+	}
 	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "good-api-key").Return(usr, "token-hash", nil)
 
 	req := s.postOgenReq("/api/tokens", "good-api-key")
@@ -478,7 +505,10 @@ func (s *AuthHandlerSuite) TestCreateAPIToken_CrossOriginHeader_Rejected() {
 
 // TestCreateAPIToken_SameOriginHeader_OK — the browser-side same-origin call keeps working.
 func (s *AuthHandlerSuite) TestCreateAPIToken_SameOriginHeader_OK() {
-	usr := &domain.User{ID: testUserID1, Username: "alice"}
+	usr := &domain.User{ID: testUserID1, Username: "alice",
+		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
+		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
+	}
 	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "good-api-key").Return(usr, "token-hash", nil)
 	s.auth.EXPECT().CreateAPIToken(gomock.Any(), testUserID1, gomock.Any(), gomock.Any()).Return("plain-key-1", nil)
 
@@ -544,7 +574,10 @@ func (s *AuthHandlerSuite) postOgenJSON(path, bearer, session, body string) *htt
 // TestCreateAPIToken_Bearer_PassesIssuerStepUpAndLifetime: a bearer caller is identified to the
 // usecase by its key's ID, together with the body's step-up and lifetime.
 func (s *AuthHandlerSuite) TestCreateAPIToken_Bearer_PassesIssuerStepUpAndLifetime() {
-	usr := &domain.User{ID: testUserID1, Username: "alice"}
+	usr := &domain.User{ID: testUserID1, Username: "alice",
+		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
+		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
+	}
 	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "good-api-key").Return(usr, "parent-hash", nil)
 	s.auth.EXPECT().CreateAPIToken(gomock.Any(), testUserID1, auth.Issuer{
 		APITokenHash: "parent-hash",
@@ -560,9 +593,14 @@ func (s *AuthHandlerSuite) TestCreateAPIToken_Bearer_PassesIssuerStepUpAndLifeti
 // TestCreateAPIToken_Session_IssuesWithoutBearer: a browser session is not a bearer — the usecase
 // sees no issuing key, so no step-up is demanded.
 func (s *AuthHandlerSuite) TestCreateAPIToken_Session_IssuesWithoutBearer() {
-	usr := &domain.User{ID: testUserID1, Username: "alice"}
+	usr := &domain.User{ID: testUserID1, Username: "alice",
+		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
+		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
+	}
 	s.auth.EXPECT().GetSession(gomock.Any(), "sess").Return(usr, nil)
-	s.auth.EXPECT().CreateAPIToken(gomock.Any(), testUserID1, auth.Issuer{}, 7).Return("plain-key-1", nil)
+	s.auth.EXPECT().CreateAPIToken(gomock.Any(), testUserID1, auth.Issuer{
+		APITokenHash: "", StepUp: auth.StepUp{Password: "", TOTPCode: ""},
+	}, 7).Return("plain-key-1", nil)
 
 	rec := s.postOgenJSON("/api/tokens", "", "sess", `{"ttl_days":7}`)
 
@@ -584,7 +622,10 @@ func (s *AuthHandlerSuite) TestCreateAPIToken_Refusals() {
 
 	for _, testCase := range cases {
 		s.Run(testCase.err.Error(), func() {
-			usr := &domain.User{ID: testUserID1, Username: "alice"}
+			usr := &domain.User{ID: testUserID1, Username: "alice",
+				CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
+				KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
+			}
 			s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "good-api-key").Return(usr, "parent-hash", nil)
 			s.auth.EXPECT().CreateAPIToken(gomock.Any(), testUserID1, gomock.Any(), gomock.Any()).
 				Return("", fmt.Errorf("wrapped: %w", testCase.err))
@@ -608,7 +649,9 @@ func (s *AuthHandlerSuite) TestCreateAPIToken_Refusals() {
 func (s *AuthHandlerSuite) TestCreateInvite_Bearer_StepUp() {
 	admin := s.adminUser()
 	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "admin-key").Return(admin, "parent-hash", nil).Times(2)
-	s.auth.EXPECT().GenerateInvite(gomock.Any(), testAdminID, auth.Issuer{APITokenHash: "parent-hash"}).
+	s.auth.EXPECT().GenerateInvite(gomock.Any(), testAdminID, auth.Issuer{APITokenHash: "parent-hash",
+		StepUp: auth.StepUp{Password: "", TOTPCode: ""},
+	}).
 		Return("", domain.ErrStepUpRequired)
 	s.auth.EXPECT().GenerateInvite(gomock.Any(), testAdminID, auth.Issuer{
 		APITokenHash: "parent-hash",

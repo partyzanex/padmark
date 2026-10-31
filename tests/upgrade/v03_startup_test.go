@@ -27,6 +27,7 @@ import (
 
 	"github.com/partyzanex/padmark/internal/domain"
 	sqliterepo "github.com/partyzanex/padmark/internal/infra/storage/sqlite"
+	"github.com/partyzanex/padmark/tests/httptestutil"
 	"github.com/partyzanex/padmark/tests/internal/servertest"
 )
 
@@ -200,7 +201,7 @@ func v03Request(t *testing.T, method, url, token, cookie, contentType, body stri
 	}
 
 	if cookie != "" {
-		request.AddCookie(&http.Cookie{Name: "padmark_session", Value: cookie}) //nolint:gosec // outgoing test cookie
+		request.AddCookie(httptestutil.RequestCookie("padmark_session", cookie))
 	}
 
 	if contentType != "" {
@@ -209,7 +210,9 @@ func v03Request(t *testing.T, method, url, token, cookie, contentType, body stri
 
 	client := &http.Client{Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error {
 		return http.ErrUseLastResponse
-	}}
+	},
+		Transport: nil, Jar: nil,
+	}
 	response, err := client.Do(request)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, response.Body.Close()) })
@@ -268,7 +271,9 @@ func v03Login(t *testing.T, baseURL string, form url.Values) *http.Response {
 	require.NoError(t, err)
 
 	client := &http.Client{Jar: jar, Timeout: 10 * time.Second,
-		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+		Transport:     nil,
+	}
 	defer client.CloseIdleConnections()
 
 	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, baseURL+"/login", nil)

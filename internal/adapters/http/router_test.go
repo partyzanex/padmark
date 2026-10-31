@@ -43,7 +43,9 @@ func (e *errorWriter) Write(b []byte) (int, error) {
 // TestAPISpec_WriteError_DoesNotCorruptBody verifies that when w.Write fails,
 // APISpec does not call http.Error and therefore does not append error text to the body.
 func TestAPISpec_WriteError_DoesNotCorruptBody(t *testing.T) {
-	wer := &errorWriter{}
+	wer := &errorWriter{
+		ResponseWriter: nil, writeHeaderCalls: 0, lastStatus: 0, body: nil,
+	}
 	req, _ := net_http.NewRequest(net_http.MethodGet, "/api/openapi.yaml", nil)
 
 	APISpec(wer, req)

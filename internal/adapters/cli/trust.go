@@ -6,6 +6,7 @@ import (
 
 	urcli "github.com/urfave/cli/v3"
 
+	"github.com/partyzanex/padmark/internal/clifactory"
 	"github.com/partyzanex/padmark/internal/infra/tokenfile"
 )
 
@@ -17,11 +18,11 @@ const trustedOriginMsg = "trusted server %s (recorded in %s)\n"
 // (piped stdin, scripts) and is the escape hatch for MCP-only setups: padmark-mcp cannot ask
 // questions over stdio, so a fresh envelope origin is trusted by running `trust` once.
 func trustCommand() *urcli.Command {
-	return &urcli.Command{
-		Name:   "trust",
-		Usage:  "Record the server pinned by the token (or --url) as trusted for pmk_ envelope tokens",
-		Action: trustAction,
-	}
+	return clifactory.Command(func(command *urcli.Command) {
+		command.Name = "trust"
+		command.Usage = "Record the server pinned by the token (or --url) as trusted for pmk_ envelope tokens"
+		command.Action = trustAction
+	})
 }
 
 // trustAction resolves what to trust in the same precedence as request routing: an explicit

@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"testing"
+	time "time"
 
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/mock/gomock"
@@ -45,7 +46,9 @@ func (s *ToolsSuite) callTool(ctx context.Context, name string, args map[string]
 
 	defer sess.Close()
 
-	res, err := sess.CallTool(ctx, &mcpsdk.CallToolParams{Name: name, Arguments: args})
+	res, err := sess.CallTool(ctx, &mcpsdk.CallToolParams{Name: name, Arguments: args,
+		Meta: nil, InputResponses: nil, RequestState: "",
+	})
 	s.Require().NoError(err, "%s tool call must succeed at protocol level", name)
 
 	return res
@@ -168,7 +171,10 @@ func (s *ToolsSuite) TestUpdateNote_ExplicitEditCodeWins() {
 func (s *ToolsSuite) TestDeleteNote_MapsNotFoundToRemediation() {
 	ctx := s.T().Context()
 
-	s.cl.EXPECT().DeleteNote(gomock.Any(), padmark.DeleteNoteParams{ID: "gone-note"}).
+	var params padmark.DeleteNoteParams
+
+	params.ID = "gone-note"
+	s.cl.EXPECT().DeleteNote(gomock.Any(), params).
 		Return((*padmark.DeleteNoteNotFound)(nil), nil)
 
 	res := s.callTool(ctx, "delete_note", map[string]any{"id": "gone-note"})
@@ -227,7 +233,9 @@ func checkServerOutputFromStructured(content any) *checkServerOutput {
 	}
 
 	if m, ok := content.(map[string]any); ok {
-		out := &checkServerOutput{}
+		out := &checkServerOutput{
+			Error: "", Live: false, Ready: false,
+		}
 		out.Live, _ = m["live"].(bool)
 		out.Ready, _ = m["ready"].(bool)
 
@@ -259,8 +267,25 @@ func (s *ToolsSuite) TestCreateLinksBulk_PassesItemsThrough() {
 
 	results := padmark.BulkCreateLinksResponse{Results: []padmark.BulkLinkResult{
 		{TargetURL: testURL(s.T(), "https://ok.example.com"), ID: padmark.NewOptString("link-ok"),
-			EditCode: padmark.NewOptString("bulk-code-1")},
-		{TargetURL: testURL(s.T(), "https://bad.example.com"), Error: padmark.NewOptString("invalid slug")},
+			EditCode:       padmark.NewOptString("bulk-code-1"),
+			Error:          padmark.OptString{Value: "", Set: false},
+			Views:          padmark.OptInt{Value: 0, Set: false},
+			BurnAfterClick: padmark.OptBool{Value: false, Set: false},
+			Privacy:        padmark.OptBulkLinkResultPrivacy{Value: "", Set: false},
+			ExpiresAt:      padmark.OptNilDateTime{Value: time.Time{}, Set: false, Null: false},
+			DirectRedirect: padmark.OptNilBool{Value: false, Set: false, Null: false},
+			CreatedAt:      padmark.OptDateTime{Value: time.Time{}, Set: false},
+		},
+		{TargetURL: testURL(s.T(), "https://bad.example.com"), Error: padmark.NewOptString("invalid slug"),
+			ID:             padmark.OptString{Value: "", Set: false},
+			EditCode:       padmark.OptString{Value: "", Set: false},
+			Views:          padmark.OptInt{Value: 0, Set: false},
+			BurnAfterClick: padmark.OptBool{Value: false, Set: false},
+			Privacy:        padmark.OptBulkLinkResultPrivacy{Value: "", Set: false},
+			ExpiresAt:      padmark.OptNilDateTime{Value: time.Time{}, Set: false, Null: false},
+			DirectRedirect: padmark.OptNilBool{Value: false, Set: false, Null: false},
+			CreatedAt:      padmark.OptDateTime{Value: time.Time{}, Set: false},
+		},
 	}}
 
 	s.cl.EXPECT().CreateLinksBulk(gomock.Any(), gomock.Any()).Return(&results, nil)
@@ -278,7 +303,9 @@ func (s *ToolsSuite) TestCreateLinksBulk_PassesItemsThrough() {
 
 // TestToolRegistration asserts the whole surface is reachable by name through tools/list.
 func TestToolRegistration(t *testing.T) {
-	suite.Run(t, &toolRegistrationSuite{})
+	suite.Run(t, &toolRegistrationSuite{
+		Assertions: nil, ctrl: nil,
+	})
 }
 
 type toolRegistrationSuite struct {
@@ -305,7 +332,9 @@ func (s *toolRegistrationSuite) TestAllNineToolsRegistered() {
 
 	defer sess.Close()
 
-	res, err := sess.ListTools(ctx, &mcpsdk.ListToolsParams{})
+	res, err := sess.ListTools(ctx, &mcpsdk.ListToolsParams{
+		Meta: nil, Cursor: "",
+	})
 	s.Require().NoError(err)
 
 	names := make(map[string]bool, len(res.Tools))

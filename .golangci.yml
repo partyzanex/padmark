@@ -12,7 +12,9 @@ linters:
     - paralleltest
     - tparallel
     - err113
-    - gomodguard_v2
+    # Use gomodguard_v2 and exhaustruct_v5 from the default set instead.
+    - gomodguard
+    - exhaustruct
 
   # Linters configuration (migrated from `linters-settings` in v1).
   settings:
@@ -32,10 +34,6 @@ linters:
 
     exhaustive:
       default-signifies-exhaustive: true
-
-    exhaustruct:
-      include:
-        - ^Config$
 
     gocyclo:
       min-complexity: 12

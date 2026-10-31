@@ -43,7 +43,10 @@ func (s *ManagerTestSuite) TestUpdate_PreservesStateAndEvictsCache() {
 	cache.EXPECT().Delete(existing.ID)
 	s.manager.WithCache(cache)
 
-	updated, err := s.manager.Update(ctx, "stable", "", owner, "https://example.com/new", UpdateOptions{})
+	updated, err := s.manager.Update(ctx, "stable", "", owner, "https://example.com/new", UpdateOptions{
+		ExpiresAt: nil, Privacy: nil, DirectRedirect: nil,
+		ClearExpiry: false, ResetDirectRedirect: false,
+	})
 	s.Require().NoError(err)
 	s.Equal("stable", updated.ID)
 	s.Equal(8, updated.Views)
@@ -66,16 +69,26 @@ func (s *ManagerTestSuite) TestUpdate_EditCodeAndOwnerChecks() {
 		{"other without code", other, "", false},
 	} {
 		s.Run(testCase.name, func() {
-			existing := &domain.Link{OwnerID: &owner, EditCode: "original"}
+			existing := &domain.Link{OwnerID: &owner, EditCode: "original",
+				CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, DirectRedirect: nil,
+				ID: "", TargetURL: "", Views: 0, BurnAfterClick: false,
+			}
 
 			s.storage.EXPECT().GetByID(gomock.Any(), domain.HashSlug("stable")).Return(existing, nil)
 
 			if testCase.ok {
-				s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("stable"), gomock.Any()).Return(&domain.Link{}, nil)
+				s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("stable"), gomock.Any()).Return(&domain.Link{
+					CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
+					DirectRedirect: nil, ID: "", TargetURL: "", EditCode: "",
+					Views: 0, BurnAfterClick: false,
+				}, nil)
 			}
 
 			_, err := s.manager.Update(s.T().Context(), "stable", testCase.code, testCase.caller,
-				"https://example.com", UpdateOptions{})
+				"https://example.com", UpdateOptions{
+					ExpiresAt: nil, Privacy: nil, DirectRedirect: nil,
+					ClearExpiry: false, ResetDirectRedirect: false,
+				})
 			if testCase.ok {
 				s.NoError(err)
 			} else {
@@ -86,7 +99,10 @@ func (s *ManagerTestSuite) TestUpdate_EditCodeAndOwnerChecks() {
 }
 
 func (s *ManagerTestSuite) TestUpdate_Validation() {
-	_, err := s.manager.Update(s.T().Context(), "stable", "code", uuid.Nil, "javascript:alert(1)", UpdateOptions{})
+	_, err := s.manager.Update(s.T().Context(), "stable", "code", uuid.Nil, "javascript:alert(1)", UpdateOptions{
+		ExpiresAt: nil, Privacy: nil, DirectRedirect: nil,
+		ClearExpiry: false, ResetDirectRedirect: false,
+	})
 	s.Require().ErrorIs(err, domain.ErrInvalidURL)
 
 	for _, testCase := range []struct {
@@ -96,9 +112,16 @@ func (s *ManagerTestSuite) TestUpdate_Validation() {
 		{domain.Privacy("invalid"), domain.ErrInvalidPrivacy},
 		{domain.PrivacyOwner, domain.ErrOwnerPrivacyRequiresOwner},
 	} {
-		s.storage.EXPECT().GetByID(gomock.Any(), domain.HashSlug("stable")).Return(&domain.Link{EditCode: "code"}, nil)
+		s.storage.EXPECT().GetByID(gomock.Any(), domain.HashSlug("stable")).Return(&domain.Link{EditCode: "code",
+			CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
+			DirectRedirect: nil, ID: "", TargetURL: "", Views: 0,
+			BurnAfterClick: false,
+		}, nil)
 		_, err = s.manager.Update(s.T().Context(), "stable", "code", uuid.Nil, "https://example.com",
-			UpdateOptions{Privacy: &testCase.privacy})
+			UpdateOptions{Privacy: &testCase.privacy,
+				ExpiresAt: nil, DirectRedirect: nil, ClearExpiry: false,
+				ResetDirectRedirect: false,
+			})
 		s.ErrorIs(err, testCase.err)
 	}
 }
@@ -112,7 +135,10 @@ func (s *ManagerTestSuite) TestUpdate_ConcurrentCacheFill() {
 	defer cancel()
 
 	dbID := domain.HashSlug("stable")
-	old := &domain.Link{ID: dbID, TargetURL: "https://example.com/old", EditCode: "code"}
+	old := &domain.Link{ID: dbID, TargetURL: "https://example.com/old", EditCode: "code",
+		CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
+		DirectRedirect: nil, Views: 0, BurnAfterClick: false,
+	}
 	readStarted, releaseRead, updateLockAttempt := make(chan struct{}), make(chan struct{}), make(chan struct{})
 	locker := lock.NewLocker()
 	observedLock := NewMockSlugLock(s.ctrl)
@@ -164,7 +190,10 @@ func (s *ManagerTestSuite) TestUpdate_ConcurrentCacheFill() {
 	privacy := domain.PrivacyAuthenticated
 	go func() {
 		_, err := s.manager.Update(ctx, "stable", "code", uuid.Nil, "https://example.com/new",
-			UpdateOptions{Privacy: &privacy})
+			UpdateOptions{Privacy: &privacy,
+				ExpiresAt: nil, DirectRedirect: nil, ClearExpiry: false,
+				ResetDirectRedirect: false,
+			})
 		updateDone <- err
 	}()
 

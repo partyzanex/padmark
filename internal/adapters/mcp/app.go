@@ -9,6 +9,7 @@ import (
 
 	urcli "github.com/urfave/cli/v3"
 
+	"github.com/partyzanex/padmark/internal/clifactory"
 	"github.com/partyzanex/padmark/internal/errorcontext"
 	"github.com/partyzanex/padmark/internal/infra/logging"
 )
@@ -18,45 +19,49 @@ import (
 // stdout. The default (no subcommand) action serves the MCP protocol over stdio, so stdout
 // remains a protocol-only surface: all advisories and logs go to stderr.
 func NewApp() *urcli.Command {
-	return &urcli.Command{
-		Name:  "padmark-mcp",
-		Usage: "Model Context Protocol server for the Padmark notes service (stdio transport)",
-		Commands: []*urcli.Command{
+	return clifactory.Command(func(command *urcli.Command) {
+		command.Name = "padmark-mcp"
+		command.Usage = "Model Context Protocol server for the Padmark notes service (stdio transport)"
+		command.Commands = []*urcli.Command{
 			trustCommand(),
-		},
-		Flags: []urcli.Flag{
-			&urcli.StringFlag{
-				Name: FlagLogLevel, Sources: urcli.EnvVars(EnvLogLevel), Value: DefaultLogLevel,
-				Usage: "Log level: debug, info, warn or error (stderr only)", Validator: logging.ValidateLevel,
-			},
-			&urcli.StringFlag{
-				Name:    FlagBaseURL,
-				Aliases: []string{"u"},
-				Sources: urcli.EnvVars(EnvBaseURL),
-				Value:   DefaultBaseURL,
-				Usage:   "Padmark server URL (overrides the URL embedded in a pmk_ envelope token)",
-			},
-			&urcli.StringFlag{
-				Name:    FlagToken,
-				Sources: urcli.EnvVars(EnvToken),
-				Usage: "Bearer token, pmk_ envelope accepted (env: PADMARK_TOKEN; falls back to ~/.config/padmark/token). " +
-					"Flag values are visible in process listings (ps); prefer the env var or token file",
-			},
-			&urcli.DurationFlag{
-				Name:    FlagTimeout,
-				Sources: urcli.EnvVars(EnvTimeout),
-				Value:   DefaultTimeout,
-				Usage:   "Per-request HTTP timeout; 0 disables it (env: PADMARK_TIMEOUT)",
-			},
-			&urcli.BoolFlag{
-				Name:    FlagAllowInsecureHTTP,
-				Sources: urcli.EnvVars(EnvAllowInsecureHTTP),
-				Usage: "Allow sending the bearer token over plain HTTP to a non-loopback host " +
-					"(loopback hosts only warn); default refuses (env: PADMARK_ALLOW_INSECURE_HTTP)",
-			},
-		},
-		Action: runAction,
-	}
+		}
+		command.Flags = []urcli.Flag{
+			clifactory.StringFlag(func(flag *urcli.StringFlag) {
+				flag.Name = FlagLogLevel
+				flag.Sources = urcli.EnvVars(EnvLogLevel)
+				flag.Value = DefaultLogLevel
+				flag.Usage = "Log level: debug, info, warn or error (stderr only)"
+				flag.Validator = logging.ValidateLevel
+			}),
+			clifactory.StringFlag(func(flag *urcli.StringFlag) {
+				flag.Name = FlagBaseURL
+				flag.Aliases = []string{"u"}
+				flag.Sources = urcli.EnvVars(EnvBaseURL)
+				flag.Value = DefaultBaseURL
+				flag.Usage = "Padmark server URL (overrides the URL embedded in a pmk_ envelope token)"
+			}),
+			clifactory.StringFlag(func(flag *urcli.StringFlag) {
+				flag.Name = FlagToken
+				flag.Sources = urcli.EnvVars(EnvToken)
+				flag.Usage = "Bearer token, pmk_ envelope accepted (env: PADMARK_TOKEN; " +
+					"falls back to ~/.config/padmark/token). " +
+					"Flag values are visible in process listings (ps); prefer the env var or token file"
+			}),
+			clifactory.DurationFlag(func(flag *urcli.DurationFlag) {
+				flag.Name = FlagTimeout
+				flag.Sources = urcli.EnvVars(EnvTimeout)
+				flag.Value = DefaultTimeout
+				flag.Usage = "Per-request HTTP timeout; 0 disables it (env: PADMARK_TIMEOUT)"
+			}),
+			clifactory.BoolFlag(func(flag *urcli.BoolFlag) {
+				flag.Name = FlagAllowInsecureHTTP
+				flag.Sources = urcli.EnvVars(EnvAllowInsecureHTTP)
+				flag.Usage = "Allow sending the bearer token over plain HTTP to a non-loopback host " +
+					"(loopback hosts only warn); default refuses (env: PADMARK_ALLOW_INSECURE_HTTP)"
+			}),
+		}
+		command.Action = runAction
+	})
 }
 
 // stderrWriter resolves the command's error output, falling back to os.Stderr when unset.
@@ -78,9 +83,8 @@ func runAction(ctx context.Context, cmd *urcli.Command) error {
 	}
 
 	log := slog.New(slog.NewTextHandler(stderrWriter(cmd), &slog.HandlerOptions{
-		Level:       level,
-		AddSource:   false,
-		ReplaceAttr: nil,
+		Level:     level,
+		AddSource: false, ReplaceAttr: nil,
 	}))
 
 	cl, err := newPadmarkClient(cmd)

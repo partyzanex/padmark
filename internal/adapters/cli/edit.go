@@ -8,57 +8,58 @@ import (
 
 	urcli "github.com/urfave/cli/v3"
 
+	"github.com/partyzanex/padmark/internal/clifactory"
 	"github.com/partyzanex/padmark/internal/errorcontext"
 	padmark "github.com/partyzanex/padmark/pkg/client"
 )
 
 func editCommand() *urcli.Command {
-	return &urcli.Command{
-		Name:      "edit",
-		Usage:     "Update an existing note",
-		ArgsUsage: argsUsageID,
-		Flags: []urcli.Flag{
-			&urcli.StringFlag{
-				Name:    FlagEditCode,
-				Aliases: []string{"e"},
-				Sources: urcli.EnvVars(EnvEditCode),
-				Usage: "Edit code returned at note creation (env: PADMARK_EDIT_CODE). Optional if " +
-					"--token identifies the note's owner. " + psWarnEditCode,
-			},
-			&urcli.StringFlag{
-				Name:    FlagTitle,
-				Aliases: []string{"t"},
-				Usage:   "New title (derived from the first non-empty line of content if omitted)",
-			},
-			&urcli.StringFlag{
-				Name:    FlagContent,
-				Aliases: []string{"c"},
-				Usage:   "New content (reads from stdin if neither --content nor --file is set)",
-			},
-			&urcli.StringFlag{
-				Name:    FlagFile,
-				Aliases: []string{"f"},
-				Usage:   "Read new content from `file`",
-			},
-			&urcli.BoolFlag{
-				Name:  FlagPlain,
-				Usage: "Set content type to text/plain",
-			},
-			&urcli.StringFlag{
-				Name:  FlagPrivacy,
-				Usage: "Privacy level: public, authenticated, or owner",
-			},
-			&urcli.BoolFlag{
-				Name:  FlagBurn,
-				Usage: "Enable burn-after-reading",
-			},
-			&urcli.Int64Flag{
-				Name:  FlagTTL,
-				Usage: "Grace period in seconds after first read (only with --burn)",
-			},
-		},
-		Action: editAction,
-	}
+	return clifactory.Command(func(command *urcli.Command) {
+		command.Name = "edit"
+		command.Usage = "Update an existing note"
+		command.ArgsUsage = argsUsageID
+		command.Flags = []urcli.Flag{
+			clifactory.StringFlag(func(flag *urcli.StringFlag) {
+				flag.Name = FlagEditCode
+				flag.Aliases = []string{"e"}
+				flag.Sources = urcli.EnvVars(EnvEditCode)
+				flag.Usage = "Edit code returned at note creation (env: PADMARK_EDIT_CODE). Optional if " +
+					"--token identifies the note's owner. " + psWarnEditCode
+			}),
+			clifactory.StringFlag(func(flag *urcli.StringFlag) {
+				flag.Name = FlagTitle
+				flag.Aliases = []string{"t"}
+				flag.Usage = "New title (derived from the first non-empty line of content if omitted)"
+			}),
+			clifactory.StringFlag(func(flag *urcli.StringFlag) {
+				flag.Name = FlagContent
+				flag.Aliases = []string{"c"}
+				flag.Usage = "New content (reads from stdin if neither --content nor --file is set)"
+			}),
+			clifactory.StringFlag(func(flag *urcli.StringFlag) {
+				flag.Name = FlagFile
+				flag.Aliases = []string{"f"}
+				flag.Usage = "Read new content from `file`"
+			}),
+			clifactory.BoolFlag(func(flag *urcli.BoolFlag) {
+				flag.Name = FlagPlain
+				flag.Usage = "Set content type to text/plain"
+			}),
+			clifactory.StringFlag(func(flag *urcli.StringFlag) {
+				flag.Name = FlagPrivacy
+				flag.Usage = "Privacy level: public, authenticated, or owner"
+			}),
+			clifactory.BoolFlag(func(flag *urcli.BoolFlag) {
+				flag.Name = FlagBurn
+				flag.Usage = "Enable burn-after-reading"
+			}),
+			clifactory.Int64Flag(func(flag *urcli.Int64Flag) {
+				flag.Name = FlagTTL
+				flag.Usage = "Grace period in seconds after first read (only with --burn)"
+			}),
+		}
+		command.Action = editAction
+	})
 }
 
 func editAction(ctx context.Context, cmd *urcli.Command) error {
@@ -120,18 +121,9 @@ func buildUpdateReq(cmd *urcli.Command, content, editCode string) *padmark.Updat
 		title = firstLine(content)
 	}
 
-	req := &padmark.UpdateNoteRequest{
-		// Opt fields zeroed: the server applies its defaults. Only the flags the CLI explicitly
-		// reads (--title, --edit-code, --burn, --ttl, --privacy) populate these later.
-		Title:            padmark.OptString{Value: "", Set: false},
-		Content:          content,
-		ContentType:      padmark.OptUpdateNoteRequestContentType{Value: "", Set: false},
-		EditCode:         padmark.OptString{Value: "", Set: false},
-		BurnAfterReading: padmark.OptBool{Value: false, Set: false},
-		TTL:              padmark.OptNilInt64{Value: 0, Set: false, Null: false},
-		Privacy:          padmark.OptUpdateNoteRequestPrivacy{Value: "", Set: false},
-		Private:          padmark.OptBool{Value: false, Set: false}, //nolint:staticcheck // deprecated alias, unused
-	}
+	req := new(padmark.UpdateNoteRequest)
+	req.Content = content
+
 	if editCode != "" {
 		req.EditCode = padmark.NewOptString(editCode)
 	}

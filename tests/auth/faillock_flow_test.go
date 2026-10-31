@@ -4,11 +4,12 @@ package integration
 
 import (
 	"encoding/json"
-	"github.com/partyzanex/padmark/internal/usecases/auth"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/partyzanex/padmark/internal/usecases/auth"
 
 	"github.com/stretchr/testify/require"
 )
@@ -20,17 +21,25 @@ func TestFailLockoutPrincipals(t *testing.T) {
 	require.NoError(t, err)
 	owner, err := env.users.GetByUsername(ctx, "owner")
 	require.NoError(t, err)
-	ownerKey, err := env.authMgr.CreateAPIToken(ctx, owner.ID, auth.Issuer{}, 0)
+	ownerKey, err := env.authMgr.CreateAPIToken(ctx, owner.ID, auth.Issuer{
+		APITokenHash: "", StepUp: auth.StepUp{Password: "", TOTPCode: ""},
+	}, 0)
 	require.NoError(t, err)
-	invite, err := env.authMgr.GenerateInvite(ctx, owner.ID, auth.Issuer{})
+	invite, err := env.authMgr.GenerateInvite(ctx, owner.ID, auth.Issuer{
+		APITokenHash: "", StepUp: auth.StepUp{Password: "", TOTPCode: ""},
+	})
 	require.NoError(t, err)
 	_, err = env.authMgr.AcceptInvite(ctx, invite, "attacker", ownerFlowPassword)
 	require.NoError(t, err)
 	attacker, err := env.users.GetByUsername(ctx, "attacker")
 	require.NoError(t, err)
-	attackerKey, err := env.authMgr.CreateAPIToken(ctx, attacker.ID, auth.Issuer{}, 0)
+	attackerKey, err := env.authMgr.CreateAPIToken(ctx, attacker.ID, auth.Issuer{
+		APITokenHash: "", StepUp: auth.StepUp{Password: "", TOTPCode: ""},
+	}, 0)
 	require.NoError(t, err)
-	rotatedKey, err := env.authMgr.CreateAPIToken(ctx, attacker.ID, auth.Issuer{}, 0)
+	rotatedKey, err := env.authMgr.CreateAPIToken(ctx, attacker.ID, auth.Issuer{
+		APITokenHash: "", StepUp: auth.StepUp{Password: "", TOTPCode: ""},
+	}, 0)
 	require.NoError(t, err)
 
 	for _, testCase := range []struct{ resource, body string }{

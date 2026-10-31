@@ -29,7 +29,9 @@ func TestPasswordHasher_EmbedsConfiguredParams(t *testing.T) {
 }
 
 func TestPasswordHasher_ZeroParamsFallBackToDefaults(t *testing.T) {
-	hasher := crypto.NewPasswordHasher(crypto.Argon2Params{}) // all-zero → defaults
+	hasher := crypto.NewPasswordHasher(crypto.Argon2Params{
+		Memory: 0, Time: 0, Threads: 0,
+	}) // all-zero → defaults
 
 	hash, err := hasher.Hash("xyz")
 	require.NoError(t, err)

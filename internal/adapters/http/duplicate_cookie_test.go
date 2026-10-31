@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	time "time"
 
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/mock/gomock"
@@ -14,6 +15,7 @@ import (
 	adhttp "github.com/partyzanex/padmark/internal/adapters/http"
 	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/usecases/auth"
+	"github.com/partyzanex/padmark/tests/httptestutil"
 )
 
 // Session IDs used by DuplicateCookieSuite: the victim's legitimate host-only session and the
@@ -60,13 +62,22 @@ func (s *DuplicateCookieSuite) SetupTest() {
 	router, err := adhttp.NewRouter(handler, ogen, &adhttp.RouterOptions{
 		MaxBodyBytes: 256 * 1024,
 		CSRFSecret:   authTestCSRFSecret,
+
+		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, AllowedHosts: nil, RateLimit: 0,
+		RateBurst: 0, SessionTTL: 0, DisableAPI: false, DirectRedirect: false,
 	})
 	s.Require().NoError(err)
 
 	s.router = router
 
-	admin := &domain.User{ID: testAdminID, Username: "admin", IsAdmin: true}
-	attacker := &domain.User{ID: testUserID2, Username: "mallory", IsAdmin: false}
+	admin := &domain.User{ID: testAdminID, Username: "admin", IsAdmin: true,
+		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
+		KDFSalt: nil, LastTOTPCounter: 0,
+	}
+	attacker := &domain.User{ID: testUserID2, Username: "mallory", IsAdmin: false,
+		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
+		KDFSalt: nil, LastTOTPCounter: 0,
+	}
 
 	// Permissive expectations: the tests assert on what was resolved/issued, so a request the
 	// desired behaviour would refuse must not abort the test through an unexpected mock call.
@@ -115,11 +126,11 @@ func (s *DuplicateCookieSuite) postInvite(formToken string, cookies ...*http.Coo
 }
 
 func csrfCookieValue(value string) *http.Cookie {
-	return &http.Cookie{Name: "padmark_csrf", Value: value} //nolint:gosec // G124: test cookie
+	return httptestutil.RequestCookie("padmark_csrf", value)
 }
 
 func sessionCookieValue(value string) *http.Cookie {
-	return &http.Cookie{Name: "padmark_session", Value: value} //nolint:gosec // G124: test cookie
+	return httptestutil.RequestCookie("padmark_session", value)
 }
 
 // TestDuplicateCSRFCookie_AttackerFirst_Rejected is INTENTIONALLY RED today (audit L-1).

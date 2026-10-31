@@ -53,7 +53,9 @@ func TestLoadServeKeyringCreatesThenReuses(t *testing.T) {
 
 	var logs bytes.Buffer
 
-	log := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	log := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn,
+		AddSource: false, ReplaceAttr: nil,
+	}))
 
 	first, err := loadServeKeyring("", "sqlite", dsn, false, log)
 	require.NoError(t, err)

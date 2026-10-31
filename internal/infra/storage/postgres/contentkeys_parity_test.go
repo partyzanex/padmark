@@ -61,6 +61,10 @@ func (s *ParitySuite) TestContentKeys_CiphertextCASPreservesConcurrentReplacemen
 	ctx := s.T().Context()
 	s.Require().NoError(NewNoteRepository(s.db).Create(ctx, &domain.Note{
 		ID: domain.HashSlug("slug"), Content: "old", EditCode: "hash", CreatedAt: time.Now(), UpdatedAt: time.Now(),
+
+		ExpiresAt: nil, Privacy: nil, OwnerID: nil, Title: "",
+		ContentType: nil, Views: 0, BurnTTL: 0, BurnAfterReading: false,
+		ClearExpiry: false,
 	}))
 
 	repo := contentkeys.New(s.db)
@@ -100,6 +104,10 @@ func (s *ParitySuite) TestContentKeys_ConvertLegacyCASAndTargetConflict() {
 	s.Require().NoError(NewNoteRepository(s.db).Create(ctx, &domain.Note{
 		ID: domain.HashSlug("taken-slug"), Content: "current", EditCode: "s1$hash",
 		CreatedAt: time.Now(), UpdatedAt: time.Now(),
+
+		ExpiresAt: nil, Privacy: nil, OwnerID: nil, Title: "",
+		ContentType: nil, Views: 0, BurnTTL: 0, BurnAfterReading: false,
+		ClearExpiry: false,
 	}))
 
 	repo := contentkeys.New(s.db)
@@ -122,6 +130,8 @@ func (s *ParitySuite) TestContentKeys_ConvertLegacyCASAndTargetConflict() {
 	s.Require().NoError(err)
 	s.Equal(keys.Row{
 		Resource: "note", ID: domain.HashSlug("legacy-slug"), Value: "pmc2$p$new", StoredEditCode: "v1$hash",
+
+		Legacy: nil,
 	}, *current)
 
 	taken, err := repo.Get(ctx, "note", "taken-slug")
@@ -144,6 +154,9 @@ func (s *ParitySuite) TestContentKeys_ConcurrentReplaceSingleWinner() {
 	ctx := s.T().Context()
 	s.Require().NoError(NewLinkRepository(s.db, s.discard).Create(ctx, &domain.Link{
 		ID: domain.HashSlug("link"), TargetURL: "old", CreatedAt: time.Now(),
+
+		ExpiresAt: nil, Privacy: nil, OwnerID: nil, DirectRedirect: nil,
+		EditCode: "", Views: 0, BurnAfterClick: false,
 	}))
 
 	repo := contentkeys.New(s.db)

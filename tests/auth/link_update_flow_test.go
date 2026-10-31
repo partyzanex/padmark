@@ -4,13 +4,14 @@ package integration
 
 import (
 	"encoding/json"
-	"github.com/partyzanex/padmark/internal/usecases/auth"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/partyzanex/padmark/internal/usecases/auth"
 
 	"github.com/stretchr/testify/require"
 
@@ -24,15 +25,21 @@ func TestLinkUpdateFlow(t *testing.T) {
 	require.NoError(t, err)
 	admin, err := env.users.GetByUsername(ctx, "admin")
 	require.NoError(t, err)
-	adminKey, err := env.authMgr.CreateAPIToken(ctx, admin.ID, auth.Issuer{}, 0)
+	adminKey, err := env.authMgr.CreateAPIToken(ctx, admin.ID, auth.Issuer{
+		APITokenHash: "", StepUp: auth.StepUp{Password: "", TOTPCode: ""},
+	}, 0)
 	require.NoError(t, err)
-	invite, err := env.authMgr.GenerateInvite(ctx, admin.ID, auth.Issuer{})
+	invite, err := env.authMgr.GenerateInvite(ctx, admin.ID, auth.Issuer{
+		APITokenHash: "", StepUp: auth.StepUp{Password: "", TOTPCode: ""},
+	})
 	require.NoError(t, err)
 	_, err = env.authMgr.AcceptInvite(ctx, invite, "owner", ownerFlowPassword)
 	require.NoError(t, err)
 	owner, err := env.users.GetByUsername(ctx, "owner")
 	require.NoError(t, err)
-	ownerKey, err := env.authMgr.CreateAPIToken(ctx, owner.ID, auth.Issuer{}, 0)
+	ownerKey, err := env.authMgr.CreateAPIToken(ctx, owner.ID, auth.Issuer{
+		APITokenHash: "", StepUp: auth.StepUp{Password: "", TOTPCode: ""},
+	}, 0)
 	require.NoError(t, err)
 
 	request := func(method, path, key, body string, status int) []byte {
@@ -50,6 +57,8 @@ func TestLinkUpdateFlow(t *testing.T) {
 
 		client := &http.Client{
 			CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse },
+
+			Transport: nil, Jar: nil, Timeout: 0,
 		}
 
 		resp, doErr := client.Do(req)
@@ -112,13 +121,19 @@ func TestLinkUpdateFlow(t *testing.T) {
 
 	require.NoError(t, err)
 
-	ttl := padmark.OptNilInt64{}
+	ttl := padmark.OptNilInt64{
+		Value: 0, Set: false, Null: false,
+	}
 	ttl.SetToNull()
 
-	direct := padmark.OptNilBool{}
+	direct := padmark.OptNilBool{
+		Value: false, Set: false, Null: false,
+	}
 	direct.SetToNull()
 	res, err := client.UpdateLink(ctx, &padmark.UpdateLinkRequest{
 		TargetURL: *target, EditCode: padmark.NewOptString(created.EditCode), TTL: ttl, DirectRedirect: direct,
+
+		Privacy: padmark.OptUpdateLinkRequestPrivacy{Value: "", Set: false},
 	}, padmark.UpdateLinkParams{ID: created.ID})
 	require.NoError(t, err)
 

@@ -8,51 +8,53 @@ import (
 
 	urcli "github.com/urfave/cli/v3"
 
+	"github.com/partyzanex/padmark/internal/clifactory"
 	"github.com/partyzanex/padmark/internal/errorcontext"
 	padmark "github.com/partyzanex/padmark/pkg/client"
 )
 
 func shortenCommand() *urcli.Command {
-	return &urcli.Command{
-		Name:      "shorten",
-		Usage:     "Create a new short link",
-		ArgsUsage: " ",
-		Flags: []urcli.Flag{
-			&urcli.StringFlag{
-				Name:     FlagTargetURL,
-				Required: true,
-				Usage:    "Destination URL (http/https only)",
-			},
-			&urcli.StringFlag{
-				Name:  FlagSlug,
-				Usage: "Custom URL slug (letters, digits, hyphens, underscores; single segment — links are served at /r/{id})",
-			},
-			&urcli.StringFlag{
-				Name:  FlagPrivacy,
-				Usage: "Privacy level: public (default), authenticated, or owner",
-			},
-			&urcli.BoolFlag{
-				Name:  FlagBurn,
-				Usage: "Burn after click: delete the link the moment it is first followed",
-			},
-			&urcli.Int64Flag{
-				Name:  FlagTTL,
-				Usage: "Seconds until the link expires, counted from creation (omit for no expiry)",
-			},
-			&urcli.StringFlag{
-				Name:    FlagEditCode,
-				Aliases: []string{"e"},
-				Usage:   "Custom edit code, 8-128 chars (random 12-char code generated if omitted). " + psWarnEditCode,
-				Sources: urcli.EnvVars(EnvEditCode),
-			},
-			&urcli.BoolFlag{
-				Name: FlagDirectRedirect,
-				Usage: "Override the server's --direct-redirect default for this link only " +
-					"(--direct-redirect=false forces the transparency interstitial); omitted inherits the server default",
-			},
-		},
-		Action: shortenAction,
-	}
+	return clifactory.Command(func(command *urcli.Command) {
+		command.Name = "shorten"
+		command.Usage = "Create a new short link"
+		command.ArgsUsage = " "
+		command.Flags = []urcli.Flag{
+			clifactory.StringFlag(func(flag *urcli.StringFlag) {
+				flag.Name = FlagTargetURL
+				flag.Required = true
+				flag.Usage = "Destination URL (http/https only)"
+			}),
+			clifactory.StringFlag(func(flag *urcli.StringFlag) {
+				flag.Name = FlagSlug
+				flag.Usage = "Custom URL slug (letters, digits, hyphens, underscores; " +
+					"single segment — links are served at /r/{id})"
+			}),
+			clifactory.StringFlag(func(flag *urcli.StringFlag) {
+				flag.Name = FlagPrivacy
+				flag.Usage = "Privacy level: public (default), authenticated, or owner"
+			}),
+			clifactory.BoolFlag(func(flag *urcli.BoolFlag) {
+				flag.Name = FlagBurn
+				flag.Usage = "Burn after click: delete the link the moment it is first followed"
+			}),
+			clifactory.Int64Flag(func(flag *urcli.Int64Flag) {
+				flag.Name = FlagTTL
+				flag.Usage = "Seconds until the link expires, counted from creation (omit for no expiry)"
+			}),
+			clifactory.StringFlag(func(flag *urcli.StringFlag) {
+				flag.Name = FlagEditCode
+				flag.Aliases = []string{"e"}
+				flag.Usage = "Custom edit code, 8-128 chars (random 12-char code generated if omitted). " + psWarnEditCode
+				flag.Sources = urcli.EnvVars(EnvEditCode)
+			}),
+			clifactory.BoolFlag(func(flag *urcli.BoolFlag) {
+				flag.Name = FlagDirectRedirect
+				flag.Usage = "Override the server's --direct-redirect default for this link only " +
+					"(--direct-redirect=false forces the transparency interstitial); omitted inherits the server default"
+			}),
+		}
+		command.Action = shortenAction
+	})
 }
 
 func shortenAction(ctx context.Context, cmd *urcli.Command) error {

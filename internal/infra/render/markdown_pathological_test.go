@@ -190,9 +190,13 @@ Another line with www.example.org/%d autolink and ~~strike~~.
 // N headings cost O(N²) Sprintf calls plus map lookups (parser.WithAutoHeadingID).
 func duplicateHeadings(size int) string { return fill("#\n", size) }
 
+func linearPathoCase(name string, gen func(int) string) pathoCase {
+	return pathoCase{name: name, gen: gen, probe: 0}
+}
+
 func pathoCases() []pathoCase {
 	return []pathoCase{
-		{name: "realistic_baseline", gen: realistic},
+		linearPathoCase("realistic_baseline", realistic),
 		// Super-linear on stock goldmark (exponent ≈ 2 between the last two measured sizes).
 		{name: "headings_duplicate", gen: duplicateHeadings, probe: 16 << 10},
 		{name: "brackets_link_pointy", gen: func(n int) string { return fill("[a](<b", n) }, probe: 256 << 10},
@@ -213,36 +217,38 @@ func pathoCases() []pathoCase {
 		// One line of N '>' re-scans the line prefix per level (text.reader.LineOffset).
 		{name: "blockquote_nested_1line", gen: func(n int) string { return fill(">", n) }, probe: 128 << 10},
 		// Mildly super-linear on stock goldmark (exponent 1.4–1.8): measured, not budget-tested.
-		{name: "list_nested_indent", gen: func(n int) string {
+		linearPathoCase("list_nested_indent", func(n int) string {
 			return staircase(n, 1000, func(d int) string { return strings.Repeat("  ", d) + "- x\n" })
-		}},
-		{name: "link_ref_defs", gen: linkRefDefs},
+		}),
+		linearPathoCase("link_ref_defs", linkRefDefs),
 		// Linear.
-		{name: "blockquote_nested_lines", gen: func(n int) string { return fill(strings.Repeat(">", 1000)+"x\n", n) }},
-		{name: "emphasis_openers_closers", gen: func(n int) string { return fill("*a ", n/2) + fill(" a*", n/2) }},
-		{name: "brackets_open", gen: func(n int) string { return fill("[", n) }},
-		{name: "brackets_close_paren", gen: func(n int) string { return fill("](", n) }},
-		{name: "brackets_image_open", gen: func(n int) string { return fill("![", n) }},
-		{name: "backtick_runs", gen: backtickRuns},
-		{name: "fence_go_huge", gen: func(n int) string { return fence("go", goSnippet, n) }},
-		{name: "fence_html_huge", gen: func(n int) string { return fence("html", htmlSnippet, n) }},
-		{name: "fence_go_many_small", gen: func(n int) string { return fill("```go\nfunc f() int { return 1 }\n```\n", n) }},
-		{name: "fence_many_langs", gen: manyLangFences},
-		{name: "html_div_nested_1line", gen: func(n int) string { return fill("<div>", n) }},
-		{name: "html_div_nested_lines", gen: func(n int) string { return fill("<div>\n", n) }},
-		{name: "html_inline_span", gen: func(n int) string { return fill("a<span>", n) }},
-		{name: "table_wide", gen: wideTable},
-		{name: "table_long", gen: func(n int) string { return "|a|b|c|\n|-|-|-|\n" + fill("|1|2|3|\n", n-16) }},
-		{name: "single_line_words", gen: func(n int) string { return fill("lorem ", n) }},
-		{name: "single_line_nospace", gen: func(n int) string { return fill("a", n) }},
-		{name: "entities_named", gen: func(n int) string { return fill("&amp;", n) }},
-		{name: "entities_numeric_invalid", gen: func(n int) string { return fill("&#x1F600;&#99999999;&bogus;", n) }},
-		{name: "linkify_urls", gen: func(n int) string { return fill("www.example.com ", n) }},
-		{name: "linkify_partial", gen: func(n int) string { return fill("http://", n) }},
-		{name: "hard_wraps", gen: func(n int) string { return fill("a\n", n) }},
-		{name: "headings_unique", gen: func(n int) string {
+		linearPathoCase("blockquote_nested_lines", func(n int) string { return fill(strings.Repeat(">", 1000)+"x\n", n) }),
+		linearPathoCase("emphasis_openers_closers", func(n int) string { return fill("*a ", n/2) + fill(" a*", n/2) }),
+		linearPathoCase("brackets_open", func(n int) string { return fill("[", n) }),
+		linearPathoCase("brackets_close_paren", func(n int) string { return fill("](", n) }),
+		linearPathoCase("brackets_image_open", func(n int) string { return fill("![", n) }),
+		linearPathoCase("backtick_runs", backtickRuns),
+		linearPathoCase("fence_go_huge", func(n int) string { return fence("go", goSnippet, n) }),
+		linearPathoCase("fence_html_huge", func(n int) string { return fence("html", htmlSnippet, n) }),
+		linearPathoCase("fence_go_many_small", func(n int) string {
+			return fill("```go\nfunc f() int { return 1 }\n```\n", n)
+		}),
+		linearPathoCase("fence_many_langs", manyLangFences),
+		linearPathoCase("html_div_nested_1line", func(n int) string { return fill("<div>", n) }),
+		linearPathoCase("html_div_nested_lines", func(n int) string { return fill("<div>\n", n) }),
+		linearPathoCase("html_inline_span", func(n int) string { return fill("a<span>", n) }),
+		linearPathoCase("table_wide", wideTable),
+		linearPathoCase("table_long", func(n int) string { return "|a|b|c|\n|-|-|-|\n" + fill("|1|2|3|\n", n-16) }),
+		linearPathoCase("single_line_words", func(n int) string { return fill("lorem ", n) }),
+		linearPathoCase("single_line_nospace", func(n int) string { return fill("a", n) }),
+		linearPathoCase("entities_named", func(n int) string { return fill("&amp;", n) }),
+		linearPathoCase("entities_numeric_invalid", func(n int) string { return fill("&#x1F600;&#99999999;&bogus;", n) }),
+		linearPathoCase("linkify_urls", func(n int) string { return fill("www.example.com ", n) }),
+		linearPathoCase("linkify_partial", func(n int) string { return fill("http://", n) }),
+		linearPathoCase("hard_wraps", func(n int) string { return fill("a\n", n) }),
+		linearPathoCase("headings_unique", func(n int) string {
 			return staircase(n, 1<<30, func(d int) string { return fmt.Sprintf("# h%d\n", d) })
-		}},
+		}),
 	}
 }
 

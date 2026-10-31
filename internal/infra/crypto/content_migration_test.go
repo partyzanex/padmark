@@ -87,7 +87,9 @@ func TestKeyRegistryCheck_BindsInstallationAndKeyID(t *testing.T) {
 }
 
 func TestKeyringCreation_ExclusiveAndPrivate(t *testing.T) {
-	ring := &ContentKeyring{Active: "first"}
+	ring := &ContentKeyring{Active: "first",
+		Keys: nil,
+	}
 	require.NoError(t, ring.AddKey("first"))
 	require.Len(t, ring.Keys["first"], 32)
 	require.NoError(t, ring.AddKey("second"))
@@ -125,16 +127,11 @@ func TestIsVersionedContent(t *testing.T) {
 		"pmc9$x$y$z$w":              true,
 		"pmc10$future":              true,
 		"pmc2$":                     true,
-		legacy:                      false,
-		"":                          false,
-		"pmc2":                      false,
-		"pmc$p$key$a$b":             false,
-		"pmcx$p$key$a$b":            false,
-		"PMC2$p$key$a$b":            false,
-		" pmc2$p$key$a$b":           false,
-		"price is $5":               false,
-		"$HOME":                     false,
-		"$x^2$ and pmc2$":           false,
+		legacy:                      false, "": false,
+		"pmc2": false, "pmc$p$key$a$b": false,
+		"pmcx$p$key$a$b": false, "PMC2$p$key$a$b": false,
+		" pmc2$p$key$a$b": false, "price is $5": false,
+		"$HOME": false, "$x^2$ and pmc2$": false,
 	}
 
 	for value, want := range cases {

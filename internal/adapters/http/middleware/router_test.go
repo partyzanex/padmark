@@ -17,8 +17,12 @@ import (
 // The second call must be a no-op: the underlying writer must not receive it, because
 // net/http logs a "superfluous response.WriteHeader call" warning when it happens.
 func TestStatusRecorder_WriteHeader_DelegatesOnce(t *testing.T) {
-	spy := &spyResponseWriter{}
-	sre := &statusRecorder{ResponseWriter: spy}
+	spy := &spyResponseWriter{
+		ResponseWriter: nil, writeHeaderCalls: 0, lastStatus: 0,
+	}
+	sre := &statusRecorder{ResponseWriter: spy,
+		status: 0, written: false,
+	}
 
 	sre.WriteHeader(net_http.StatusOK)
 	sre.WriteHeader(net_http.StatusInternalServerError) // must be ignored
@@ -231,7 +235,9 @@ func TestWithLoggingNeverRecordsSecretPaths(t *testing.T) {
 		for _, path := range []string{"/top-secret-slug", "/notes/top-secret-slug", "/r/top-secret-slug"} {
 			var buf bytes.Buffer
 
-			log := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: level}))
+			log := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: level,
+				AddSource: false, ReplaceAttr: nil,
+			}))
 			handler := WithLogging(log, net_http.HandlerFunc(func(w net_http.ResponseWriter, _ *net_http.Request) {
 				w.WriteHeader(net_http.StatusOK)
 			}))

@@ -14,6 +14,7 @@ import (
 	adhttp "github.com/partyzanex/padmark/internal/adapters/http"
 	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/usecases/links"
+	"github.com/partyzanex/padmark/tests/httptestutil"
 )
 
 const (
@@ -27,6 +28,9 @@ func newTestLink() *domain.Link {
 		TargetURL: testLinkTargetURL,
 		EditCode:  "editcode1234",
 		CreatedAt: newTestNote("", "").CreatedAt,
+
+		ExpiresAt: nil, Privacy: nil, OwnerID: nil, DirectRedirect: nil,
+		Views: 0, BurnAfterClick: false,
 	}
 }
 
@@ -49,6 +53,9 @@ func (s *HandlerSuite) newLinkRouter(directRedirect bool) http.Handler {
 		MaxBodyBytes:   256 * 1024,
 		CSRFSecret:     testCSRFSecret,
 		DirectRedirect: directRedirect,
+
+		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, AllowedHosts: nil, RateLimit: 0,
+		RateBurst: 0, SessionTTL: 0, DisableAPI: false,
 	}
 
 	router, err := adhttp.NewRouter(handler, ogen, &opts)
@@ -68,6 +75,9 @@ func (s *HandlerSuite) newLinkRouterWithTOTPAuth() http.Handler {
 		MaxBodyBytes:   256 * 1024,
 		CSRFSecret:     testCSRFSecret,
 		DirectRedirect: true,
+
+		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, AllowedHosts: nil, RateLimit: 0,
+		RateBurst: 0, SessionTTL: 0, DisableAPI: false,
 	}
 
 	router, err := adhttp.NewRouter(handler, ogen, &opts)
@@ -284,8 +294,14 @@ func (s *HandlerSuite) TestGetLink_ExpiredAndPrivate_Anonymous_Unauthorized() {
 }
 
 func (s *HandlerSuite) TestGetLink_OwnerOnly_NonOwner_Unauthorized() {
-	owner := &domain.User{ID: uuid.New(), Username: "alice"}
-	other := &domain.User{ID: uuid.New(), Username: "bob"}
+	owner := &domain.User{ID: uuid.New(), Username: "alice",
+		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
+		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
+	}
+	other := &domain.User{ID: uuid.New(), Username: "bob",
+		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
+		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
+	}
 
 	link := newTestLink()
 	link.Privacy = new(domain.PrivacyOwner)
@@ -298,7 +314,7 @@ func (s *HandlerSuite) TestGetLink_OwnerOnly_NonOwner_Unauthorized() {
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/links/"+testLinkID, nil)
-	r.AddCookie(&http.Cookie{Name: "padmark_session", Value: "valid-sess"}) //nolint:gosec // G124: test cookie
+	r.AddCookie(httptestutil.RequestCookie("padmark_session", "valid-sess"))
 
 	router.ServeHTTP(w, r)
 
@@ -390,7 +406,10 @@ func (s *HandlerSuite) TestDeleteLink_Gated_PublicLink_WrongEditCode() {
 }
 
 func (s *HandlerSuite) TestDeleteLink_OwnerBypass_NoEditCode() {
-	owner := &domain.User{ID: uuid.New(), Username: "alice"}
+	owner := &domain.User{ID: uuid.New(), Username: "alice",
+		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
+		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
+	}
 
 	s.linkManager.EXPECT().Delete(gomock.Any(), testLinkID, "", owner.ID).Return(nil)
 	s.authMgr.EXPECT().GetSession(gomock.Any(), "valid-sess").Return(owner, nil).Times(1)
@@ -399,7 +418,7 @@ func (s *HandlerSuite) TestDeleteLink_OwnerBypass_NoEditCode() {
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodDelete, "/links/"+testLinkID, nil)
-	r.AddCookie(&http.Cookie{Name: "padmark_session", Value: "valid-sess"}) //nolint:gosec // G124: test cookie
+	r.AddCookie(httptestutil.RequestCookie("padmark_session", "valid-sess"))
 
 	router.ServeHTTP(w, r)
 
@@ -638,7 +657,10 @@ func (s *HandlerSuite) TestRedirectLink_BurnAfterClick_ConsumedOnce() {
 // with a page rather than a bare 401. 403 rather than the /login redirect, because this caller is
 // already signed in and logging in again would land them right back here.
 func (s *HandlerSuite) TestRedirectLink_OwnerOnly_NonOwner_HTML_Forbidden() {
-	other := &domain.User{ID: uuid.New(), Username: "bob"}
+	other := &domain.User{ID: uuid.New(), Username: "bob",
+		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
+		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
+	}
 
 	s.linkManager.EXPECT().Follow(gomock.Any(), testLinkID, links.FollowOptions{
 		CallerID: other.ID, Authenticated: true, AllowBurn: true,
@@ -650,7 +672,7 @@ func (s *HandlerSuite) TestRedirectLink_OwnerOnly_NonOwner_HTML_Forbidden() {
 	w := httptest.NewRecorder()
 	r := newLinkClickRequest("/r/" + testLinkID)
 	r.Header.Set("Accept", "text/html")
-	r.AddCookie(&http.Cookie{Name: "padmark_session", Value: "valid-sess"}) //nolint:gosec // G124: test cookie
+	r.AddCookie(httptestutil.RequestCookie("padmark_session", "valid-sess"))
 
 	router.ServeHTTP(w, r)
 
@@ -663,7 +685,10 @@ func (s *HandlerSuite) TestRedirectLink_OwnerOnly_NonOwner_HTML_Forbidden() {
 // TestRedirectLink_OwnerOnly_Owner_Authorized is the positive counterpart: the link's own owner
 // may always follow it.
 func (s *HandlerSuite) TestRedirectLink_OwnerOnly_Owner_Authorized() {
-	owner := &domain.User{ID: uuid.New(), Username: "alice"}
+	owner := &domain.User{ID: uuid.New(), Username: "alice",
+		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
+		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
+	}
 
 	link := newTestLink()
 	link.Privacy = new(domain.PrivacyOwner)
@@ -678,7 +703,7 @@ func (s *HandlerSuite) TestRedirectLink_OwnerOnly_Owner_Authorized() {
 
 	w := httptest.NewRecorder()
 	r := newLinkClickRequest("/r/" + testLinkID)
-	r.AddCookie(&http.Cookie{Name: "padmark_session", Value: "valid-sess"}) //nolint:gosec // G124: test cookie
+	r.AddCookie(httptestutil.RequestCookie("padmark_session", "valid-sess"))
 
 	router.ServeHTTP(w, r)
 
@@ -749,7 +774,10 @@ func (s *HandlerSuite) TestRedirectLink_PrivacyAuthenticated_Unauthenticated() {
 // Authenticated: any valid session — not just the link's owner — may follow a privacy:
 // authenticated link.
 func (s *HandlerSuite) TestRedirectLink_PrivacyAuthenticated_Authenticated() {
-	usr := &domain.User{ID: uuid.New(), Username: "alice"}
+	usr := &domain.User{ID: uuid.New(), Username: "alice",
+		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
+		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
+	}
 
 	link := newTestLink()
 	link.Privacy = new(domain.PrivacyAuthenticated)
@@ -763,7 +791,7 @@ func (s *HandlerSuite) TestRedirectLink_PrivacyAuthenticated_Authenticated() {
 
 	w := httptest.NewRecorder()
 	r := newLinkClickRequest("/r/" + testLinkID)
-	r.AddCookie(&http.Cookie{Name: "padmark_session", Value: "valid-sess"}) //nolint:gosec // G124: test cookie
+	r.AddCookie(httptestutil.RequestCookie("padmark_session", "valid-sess"))
 
 	router.ServeHTTP(w, r)
 
@@ -774,7 +802,10 @@ func (s *HandlerSuite) TestRedirectLink_PrivacyAuthenticated_Authenticated() {
 // (added as a bug fix in the HTTP handlers section) also grants access to any authenticated
 // caller for privacy: authenticated, not just the link's owner.
 func (s *HandlerSuite) TestGetLink_PrivacyAuthenticated_Authenticated() {
-	usr := &domain.User{ID: uuid.New(), Username: "alice"}
+	usr := &domain.User{ID: uuid.New(), Username: "alice",
+		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
+		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
+	}
 
 	link := newTestLink()
 	link.Privacy = new(domain.PrivacyAuthenticated)
@@ -786,7 +817,7 @@ func (s *HandlerSuite) TestGetLink_PrivacyAuthenticated_Authenticated() {
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/links/"+testLinkID, nil)
-	r.AddCookie(&http.Cookie{Name: "padmark_session", Value: "valid-sess"}) //nolint:gosec // G124: test cookie
+	r.AddCookie(httptestutil.RequestCookie("padmark_session", "valid-sess"))
 
 	router.ServeHTTP(w, r)
 

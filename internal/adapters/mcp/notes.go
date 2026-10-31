@@ -57,17 +57,9 @@ func (m *Manager) createNote(
 		return nil, createNoteOutput{}, ErrEmptyContent
 	}
 
-	req := &padmark.CreateNoteRequest{
-		Content:          input.Content,
-		Title:            padmark.OptString{Value: "", Set: false},
-		ContentType:      padmark.OptCreateNoteRequestContentType{Value: "", Set: false},
-		Slug:             padmark.OptString{Value: "", Set: false},
-		BurnAfterReading: padmark.OptBool{Value: false, Set: false},
-		TTL:              padmark.OptInt64{Value: 0, Set: false},
-		EditCode:         padmark.OptString{Value: "", Set: false},
-		Privacy:          padmark.OptCreateNoteRequestPrivacy{Value: "", Set: false},
-		Private:          padmark.OptBool{Value: false, Set: false}, //nolint:staticcheck // deprecated alias, unused
-	}
+	req := new(padmark.CreateNoteRequest)
+	req.Content = input.Content
+
 	if input.Title != nil {
 		req.Title = padmark.NewOptString(*input.Title)
 	}
@@ -132,16 +124,9 @@ func (m *Manager) updateNote(
 ) (*mcpsdk.CallToolResult, createNoteOutput, error) {
 	editCode := editCodeFor(m.vault, input.ID, input.EditCode)
 
-	req := &padmark.UpdateNoteRequest{
-		Content:          input.Content,
-		Title:            padmark.OptString{Value: "", Set: false},
-		ContentType:      padmark.OptUpdateNoteRequestContentType{Value: "", Set: false},
-		EditCode:         padmark.OptString{Value: "", Set: false},
-		BurnAfterReading: padmark.OptBool{Value: false, Set: false},
-		TTL:              padmark.OptNilInt64{Value: 0, Set: false, Null: false},
-		Privacy:          padmark.OptUpdateNoteRequestPrivacy{Value: "", Set: false},
-		Private:          padmark.OptBool{Value: false, Set: false}, //nolint:staticcheck // deprecated alias, unused
-	}
+	req := new(padmark.UpdateNoteRequest)
+	req.Content = input.Content
+
 	if input.Title != nil {
 		req.Title = padmark.NewOptString(*input.Title)
 	}
@@ -184,12 +169,10 @@ func (m *Manager) updateNote(
 func (m *Manager) deleteNote(
 	ctx context.Context, _ *mcpsdk.CallToolRequest, input deleteNoteInput,
 ) (*mcpsdk.CallToolResult, deleteNoteOutput, error) {
-	params := padmark.DeleteNoteParams{
-		ID:        input.ID,
-		XEditCode: padmark.OptString{Value: "", Set: false},
-		// The deprecated query form stays unset: the code travels in X-Edit-Code only.
-		EditCode: padmark.OptString{Value: "", Set: false}, //nolint:staticcheck // deprecated field, never set
-	}
+	var params padmark.DeleteNoteParams
+
+	params.ID = input.ID
+
 	if code := editCodeFor(m.vault, input.ID, input.EditCode); code != "" {
 		// The header, not the query parameter — query strings land in access logs.
 		params.XEditCode = padmark.NewOptString(code)

@@ -42,8 +42,12 @@ func TestServerRejectsRemovedAuthTokens(t *testing.T) {
 		env  bool
 		args []string
 	}{
-		{name: "environment variable", env: true},
-		{name: "command line flag", args: []string{"--auth-tokens", secret}},
+		{name: "environment variable", env: true,
+			args: nil,
+		},
+		{name: "command line flag", args: []string{"--auth-tokens", secret},
+			env: false,
+		},
 	}
 
 	for _, testCase := range tests {

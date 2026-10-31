@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 	urcli "github.com/urfave/cli/v3"
 
+	"github.com/partyzanex/padmark/internal/clifactory"
 	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/infra/tokenfile"
 )
@@ -169,14 +170,14 @@ func resolvedURLFor(t *testing.T, args ...string) string {
 
 	var got string
 
-	app := &urcli.Command{
-		Flags: globalFlags(),
-		Action: func(_ context.Context, cmd *urcli.Command) error {
+	app := clifactory.Command(func(command *urcli.Command) {
+		command.Flags = globalFlags()
+		command.Action = func(_ context.Context, cmd *urcli.Command) error {
 			got = resolveServerURL(cmd)
 
 			return nil
-		},
-	}
+		}
+	})
 	require.NoError(t, app.Run(t.Context(), append([]string{"padmark-cli"}, args...)))
 
 	return got

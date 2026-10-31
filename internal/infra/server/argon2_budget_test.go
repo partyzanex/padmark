@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/partyzanex/padmark/internal/clifactory"
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
 )
@@ -23,15 +24,15 @@ func parseBudgetFlag(t *testing.T, args ...string) int {
 
 	var got int
 
-	cmd := &cli.Command{
-		Name:  "padmark",
-		Flags: appFlags(),
-		Action: func(_ context.Context, cmd *cli.Command) error {
+	cmd := clifactory.Command(func(command *cli.Command) {
+		command.Name = "padmark"
+		command.Flags = appFlags()
+		command.Action = func(_ context.Context, cmd *cli.Command) error {
 			got = cmd.Int(budgetFlagName)
 
 			return nil
-		},
-	}
+		}
+	})
 
 	require.NoError(t, cmd.Run(t.Context(), append([]string{"padmark"}, args...)))
 
@@ -54,8 +55,12 @@ func TestServerRejectsArgon2MemoryBudgetBelowArgon2Memory(t *testing.T) {
 		env  string
 		args []string
 	}{
-		{name: "flag", args: []string{"--argon2-memory", "65536", "--" + budgetFlagName, "32768"}},
-		{name: "env below default memory", env: "1024"},
+		{name: "flag", args: []string{"--argon2-memory", "65536", "--" + budgetFlagName, "32768"},
+			env: "",
+		},
+		{name: "env below default memory", env: "1024",
+			args: nil,
+		},
 	}
 
 	for _, testCase := range tests {

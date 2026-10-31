@@ -69,7 +69,7 @@ func registerOgenRoutes(
 
 	mux.Handle("POST /notes", ogenSrv)
 	mux.Handle("PUT /notes/{id}", locked(ogenSrv))
-	mux.Handle("DELETE /notes/{id}", locked(ogenSrv))
+	mux.Handle("DELETE /notes/{id}", locked(middleware.WithLegacyNoteEditCode(ogenSrv)))
 	mux.Handle("POST /links", ogenSrv)
 	mux.Handle("POST /links/bulk", ogenSrv)
 	mux.Handle("GET /links/{id}", ogenSrv)

@@ -68,6 +68,8 @@ func (s *APITokenRepositoryTestSuite) createUser(id uuid.UUID) {
 		PasswordHash: "hash",
 		KDFSalt:      []byte("saltsaltsalt1234"),
 		CreatedAt:    time.Now().Truncate(time.Second),
+
+		LastLoginAt: nil, LastTOTPCounter: 0, IsAdmin: false,
 	})
 	s.Require().NoError(err)
 }
@@ -77,6 +79,8 @@ func (s *APITokenRepositoryTestSuite) newToken(userID uuid.UUID, hash string) *d
 		UserID:    userID,
 		TokenHash: hash,
 		CreatedAt: time.Now().Truncate(time.Second),
+
+		ExpiresAt: nil, LastUsedAt: nil, IssuedBy: nil,
 	}
 }
 
@@ -389,11 +393,15 @@ func TestCreate_CascadesWithUser(t *testing.T) {
 	usr := &domain.User{
 		ID: uuid.New(), Username: "owner", TOTPSecret: "s", PasswordHash: "h",
 		KDFSalt: []byte("saltsaltsalt1234"), CreatedAt: time.Now().Truncate(time.Second),
+
+		LastLoginAt: nil, LastTOTPCounter: 0, IsAdmin: false,
 	}
 	require.NoError(t, users.Create(ctx, usr))
 
 	created, err := tokens.CreateIfUnderLimit(ctx, &domain.APIToken{
 		UserID: usr.ID, TokenHash: "hash-cascade", CreatedAt: time.Now().Truncate(time.Second),
+
+		ExpiresAt: nil, LastUsedAt: nil, IssuedBy: nil,
 	}, testAPITokenLimit)
 	require.NoError(t, err)
 	require.True(t, created)

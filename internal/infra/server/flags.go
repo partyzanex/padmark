@@ -5,6 +5,7 @@ import (
 
 	"github.com/urfave/cli/v3"
 
+	"github.com/partyzanex/padmark/internal/clifactory"
 	"github.com/partyzanex/padmark/internal/infra/crypto"
 	"github.com/partyzanex/padmark/internal/infra/logging"
 	"github.com/partyzanex/padmark/internal/usecases/auth"
@@ -125,202 +126,202 @@ var DefaultSessionTTL = int(auth.DefaultSessionTTL.Seconds())
 // appFlags returns the full flag set for the serve subcommand.
 func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
 	return append([]cli.Flag{
-		&cli.StringFlag{
-			Name:    FlagContentKeyring,
-			Sources: cli.EnvVars(EnvContentKeyring),
-			Usage: "JSON keyring file for content encryption; back up separately from the database. " +
+		clifactory.StringFlag(func(flag *cli.StringFlag) {
+			flag.Name = FlagContentKeyring
+			flag.Sources = cli.EnvVars(EnvContentKeyring)
+			flag.Usage = "JSON keyring file for content encryption; back up separately from the database. " +
 				"Defaults to <sqlite db dir>/padmark-keys.json or ./padmark-keys.json for postgres; " +
-				"serve creates a missing default file (container default: /data/padmark-keys.json)",
-		},
+				"serve creates a missing default file (container default: /data/padmark-keys.json)"
+		}),
 		allowSharedKeyringFlag(),
 		skipMigrationBackupFlag(),
-		&cli.StringFlag{
-			Name:    FlagAddr,
-			Sources: cli.EnvVars(EnvAddr),
-			Value:   DefaultAddr,
-			Usage:   "HTTP listen address",
-		},
-		&cli.StringFlag{
-			Name:    FlagStorage,
-			Sources: cli.EnvVars(EnvStorage),
-			Value:   DefaultStorage,
-			Usage:   "Storage backend: sqlite, postgres",
-		},
-		&cli.StringFlag{
-			Name:    FlagDSN,
-			Sources: cli.EnvVars(EnvDSN),
-			Value:   DefaultDSN,
-			Usage: "Database DSN (file path for sqlite, connection string for postgres). " +
+		clifactory.StringFlag(func(flag *cli.StringFlag) {
+			flag.Name = FlagAddr
+			flag.Sources = cli.EnvVars(EnvAddr)
+			flag.Value = DefaultAddr
+			flag.Usage = "HTTP listen address"
+		}),
+		clifactory.StringFlag(func(flag *cli.StringFlag) {
+			flag.Name = FlagStorage
+			flag.Sources = cli.EnvVars(EnvStorage)
+			flag.Value = DefaultStorage
+			flag.Usage = "Storage backend: sqlite, postgres"
+		}),
+		clifactory.StringFlag(func(flag *cli.StringFlag) {
+			flag.Name = FlagDSN
+			flag.Sources = cli.EnvVars(EnvDSN)
+			flag.Value = DefaultDSN
+			flag.Usage = "Database DSN (file path for sqlite, connection string for postgres). " +
 				"A postgres DSN carries the password and a command-line flag is visible to every local " +
-				"user in the process listing (ps); set it via PADMARK_DSN instead",
-		},
-		&cli.StringFlag{
-			Name:      FlagLogLevel,
-			Validator: logging.ValidateLevel,
-			Sources:   cli.EnvVars(EnvLogLevel),
-			Value:     DefaultLogLevel,
-			Usage:     "Log level: debug, info, warn, error",
-		},
-		&cli.StringFlag{
-			Name:    FlagLogFormat,
-			Sources: cli.EnvVars(EnvLogFormat),
-			Value:   DefaultLogFormat,
-			Usage:   "Log format: json, text",
-		},
-		&cli.BoolFlag{
-			Name:    FlagEnableAccounts,
-			Sources: cli.EnvVars(EnvEnableAccounts),
-			Value:   false,
-			Usage: "Enable the user-account system (TOTP login, /setup, /admin, private-note gating). " +
-				"Off by default: the site is fully public unless this is set",
-		},
-		&cli.BoolFlag{
-			Name:    FlagDisableAPI,
-			Sources: cli.EnvVars(EnvDisableAPI),
-			Value:   false,
-			Usage: "Disable the REST/JSON API (/notes*, /links*, /api, /api/openapi.yaml, /llms.txt, " +
+				"user in the process listing (ps); set it via PADMARK_DSN instead"
+		}),
+		clifactory.StringFlag(func(flag *cli.StringFlag) {
+			flag.Name = FlagLogLevel
+			flag.Validator = logging.ValidateLevel
+			flag.Sources = cli.EnvVars(EnvLogLevel)
+			flag.Value = DefaultLogLevel
+			flag.Usage = "Log level: debug, info, warn, error"
+		}),
+		clifactory.StringFlag(func(flag *cli.StringFlag) {
+			flag.Name = FlagLogFormat
+			flag.Sources = cli.EnvVars(EnvLogFormat)
+			flag.Value = DefaultLogFormat
+			flag.Usage = "Log format: json, text"
+		}),
+		clifactory.BoolFlag(func(flag *cli.BoolFlag) {
+			flag.Name = FlagEnableAccounts
+			flag.Sources = cli.EnvVars(EnvEnableAccounts)
+			flag.Value = false
+			flag.Usage = "Enable the user-account system (TOTP login, /setup, /admin, private-note gating). " +
+				"Off by default: the site is fully public unless this is set"
+		}),
+		clifactory.BoolFlag(func(flag *cli.BoolFlag) {
+			flag.Name = FlagDisableAPI
+			flag.Sources = cli.EnvVars(EnvDisableAPI)
+			flag.Value = false
+			flag.Usage = "Disable the REST/JSON API (/notes*, /links*, /api, /api/openapi.yaml, /llms.txt, " +
 				"/api/tokens, /api/invites): every request reaching the disabling middleware gets 503 with " +
 				"code=api_disabled. The web UI becomes read-only: viewing /{id} (incl. JSON/raw reads), " +
 				"/r/{id}, login/admin pages and health checks keep working, but publishing or saving from " +
-				"the editor fails with the API-disabled error (it calls POST /notes and PUT /notes/{id})",
-		},
-		&cli.BoolFlag{
-			Name:    FlagCustomSlugs,
-			Sources: cli.EnvVars(EnvCustomSlugs),
+				"the editor fails with the API-disabled error (it calls POST /notes and PUT /notes/{id})"
+		}),
+		clifactory.BoolFlag(func(flag *cli.BoolFlag) {
+			flag.Name = FlagCustomSlugs
+			flag.Sources = cli.EnvVars(EnvCustomSlugs)
 			// On by default like v0.1.6, which always accepted a slug; set false to issue only
 			// random slugs, because human-readable public URLs are easier to guess.
-			Value: true,
-			Usage: "Allow user-supplied human-readable slugs at note creation (e.g. project/GUIDE.md) " +
+			flag.Value = true
+			flag.Usage = "Allow user-supplied human-readable slugs at note creation (e.g. project/GUIDE.md) " +
 				"and at short-link creation (e.g. launch-2026, single segment only). " +
 				"On by default for v0.1.6 compatibility; set false to issue only random slugs, " +
 				"because human-readable public URLs are easier to guess. " +
-				"New content encryption keys are independent of the slug",
-		},
-		&cli.IntFlag{
-			Name:    FlagReadTimeout,
-			Sources: cli.EnvVars(EnvReadTimeout),
-			Value:   DefaultReadTimeout,
-			Usage:   "HTTP read timeout in seconds",
-		},
-		&cli.IntFlag{
-			Name:    FlagWriteTimeout,
-			Sources: cli.EnvVars(EnvWriteTimeout),
-			Value:   DefaultWriteTimeout,
-			Usage:   "HTTP write timeout in seconds",
-		},
-		&cli.IntFlag{
-			Name:    FlagMaxHeaderBytes,
-			Sources: cli.EnvVars(EnvMaxHeaderBytes),
-			Value:   DefaultMaxHeaderBytes,
-			Usage:   "Maximum size of request headers in bytes",
-		},
-		&cli.IntFlag{
-			Name:    FlagMaxBodyBytes,
-			Sources: cli.EnvVars(EnvMaxBodyBytes),
-			Value:   DefaultMaxBodyBytes,
-			Usage:   "Maximum size of request body in bytes",
-		},
-		&cli.IntFlag{
-			Name:    FlagRateLimit,
-			Sources: cli.EnvVars(EnvRateLimit),
-			Value:   DefaultRateLimit,
-			Usage:   "Rate limit: requests per second per IP (0 = disabled)",
-		},
-		&cli.IntFlag{
-			Name:    FlagRateBurst,
-			Sources: cli.EnvVars(EnvRateBurst),
-			Value:   DefaultRateBurst,
-			Usage:   "Rate limit: max burst size per IP",
-		},
-		&cli.StringFlag{
-			Name:    FlagTLSCert,
-			Sources: cli.EnvVars(EnvTLSCert),
-			Usage:   "Path to TLS certificate file (PEM); enables HTTPS when set together with --tls-key",
-		},
-		&cli.StringFlag{
-			Name:    FlagTLSKey,
-			Sources: cli.EnvVars(EnvTLSKey),
-			Usage:   "Path to TLS private key file (PEM); enables HTTPS when set together with --tls-cert",
-		},
-		&cli.StringFlag{
-			Name:    FlagHTTPRedirectAddr,
-			Sources: cli.EnvVars(EnvHTTPRedirectAddr),
-			Usage:   "Address for the HTTP→HTTPS redirect listener (e.g. :80); only active when TLS is enabled",
-		},
-		&cli.StringFlag{
-			Name:    FlagAllowedHosts,
-			Sources: cli.EnvVars(EnvAllowedHosts),
-			Usage: "Comma-separated Host allowlist (e.g. example.com,www.example.com), compared case-insensitively " +
+				"New content encryption keys are independent of the slug"
+		}),
+		clifactory.IntFlag(func(flag *cli.IntFlag) {
+			flag.Name = FlagReadTimeout
+			flag.Sources = cli.EnvVars(EnvReadTimeout)
+			flag.Value = DefaultReadTimeout
+			flag.Usage = "HTTP read timeout in seconds"
+		}),
+		clifactory.IntFlag(func(flag *cli.IntFlag) {
+			flag.Name = FlagWriteTimeout
+			flag.Sources = cli.EnvVars(EnvWriteTimeout)
+			flag.Value = DefaultWriteTimeout
+			flag.Usage = "HTTP write timeout in seconds"
+		}),
+		clifactory.IntFlag(func(flag *cli.IntFlag) {
+			flag.Name = FlagMaxHeaderBytes
+			flag.Sources = cli.EnvVars(EnvMaxHeaderBytes)
+			flag.Value = DefaultMaxHeaderBytes
+			flag.Usage = "Maximum size of request headers in bytes"
+		}),
+		clifactory.IntFlag(func(flag *cli.IntFlag) {
+			flag.Name = FlagMaxBodyBytes
+			flag.Sources = cli.EnvVars(EnvMaxBodyBytes)
+			flag.Value = DefaultMaxBodyBytes
+			flag.Usage = "Maximum size of request body in bytes"
+		}),
+		clifactory.IntFlag(func(flag *cli.IntFlag) {
+			flag.Name = FlagRateLimit
+			flag.Sources = cli.EnvVars(EnvRateLimit)
+			flag.Value = DefaultRateLimit
+			flag.Usage = "Rate limit: requests per second per IP (0 = disabled)"
+		}),
+		clifactory.IntFlag(func(flag *cli.IntFlag) {
+			flag.Name = FlagRateBurst
+			flag.Sources = cli.EnvVars(EnvRateBurst)
+			flag.Value = DefaultRateBurst
+			flag.Usage = "Rate limit: max burst size per IP"
+		}),
+		clifactory.StringFlag(func(flag *cli.StringFlag) {
+			flag.Name = FlagTLSCert
+			flag.Sources = cli.EnvVars(EnvTLSCert)
+			flag.Usage = "Path to TLS certificate file (PEM); enables HTTPS when set together with --tls-key"
+		}),
+		clifactory.StringFlag(func(flag *cli.StringFlag) {
+			flag.Name = FlagTLSKey
+			flag.Sources = cli.EnvVars(EnvTLSKey)
+			flag.Usage = "Path to TLS private key file (PEM); enables HTTPS when set together with --tls-cert"
+		}),
+		clifactory.StringFlag(func(flag *cli.StringFlag) {
+			flag.Name = FlagHTTPRedirectAddr
+			flag.Sources = cli.EnvVars(EnvHTTPRedirectAddr)
+			flag.Usage = "Address for the HTTP→HTTPS redirect listener (e.g. :80); only active when TLS is enabled"
+		}),
+		clifactory.StringFlag(func(flag *cli.StringFlag) {
+			flag.Name = FlagAllowedHosts
+			flag.Sources = cli.EnvVars(EnvAllowedHosts)
+			flag.Usage = "Comma-separated Host allowlist (e.g. example.com,www.example.com), compared case-insensitively " +
 				"without the port; applies to the main listener (other Hosts get 421 Misdirected Request, " +
 				"/healthz and /readyz exempt) and to the HTTP→HTTPS redirect listener (400); " +
-				"empty = no Host check (legacy behaviour)",
-		},
-		&cli.StringFlag{
-			Name:    FlagTrustedProxies,
-			Sources: cli.EnvVars(EnvTrustedProxies),
-			Usage: "Comma-separated list of trusted proxy CIDRs or IPs (e.g. 10.0.0.0/8,127.0.0.1); " +
-				"X-Forwarded-For and X-Real-IP are only trusted from these addresses",
-		},
-		&cli.StringFlag{
-			Name:    FlagPublicScheme,
-			Sources: cli.EnvVars(EnvPublicScheme),
-			Usage: "Force the scheme (http or https) used when building absolute links back to this " +
+				"empty = no Host check (legacy behaviour)"
+		}),
+		clifactory.StringFlag(func(flag *cli.StringFlag) {
+			flag.Name = FlagTrustedProxies
+			flag.Sources = cli.EnvVars(EnvTrustedProxies)
+			flag.Usage = "Comma-separated list of trusted proxy CIDRs or IPs (e.g. 10.0.0.0/8,127.0.0.1); " +
+				"X-Forwarded-For and X-Real-IP are only trusted from these addresses"
+		}),
+		clifactory.StringFlag(func(flag *cli.StringFlag) {
+			flag.Name = FlagPublicScheme
+			flag.Sources = cli.EnvVars(EnvPublicScheme)
+			flag.Usage = "Force the scheme (http or https) used when building absolute links back to this " +
 				"server (note URLs, invite links, API-token envelopes), instead of auto-detecting it " +
 				"from TLS/X-Forwarded-Proto; https also marks session/CSRF cookies Secure and enables " +
 				"HSTS; set this when the reverse proxy's IP is not stable enough for --trusted-proxies " +
-				"(e.g. cloud load balancers, k8s ingress)",
-		},
-		&cli.StringFlag{
-			Name:    FlagTOTPIssuer,
-			Sources: cli.EnvVars(EnvTOTPIssuer),
-			Value:   DefaultTOTPIssuer,
-			Usage:   "TOTP issuer name shown in the authenticator app (default: padmark)",
-		},
-		&cli.StringFlag{
-			Name:    FlagAuthTokens,
-			Sources: cli.EnvVars(EnvAuthTokens),
-			Hidden:  true,
-			Usage: "REMOVED: static bearer tokens were replaced by the account system; setting this " +
-				"fails startup (use --enable-accounts, " + EnvBootstrapToken + " and /setup)",
-		},
-		&cli.IntFlag{
-			Name:    FlagCookieMaxAge,
-			Sources: cli.EnvVars(EnvCookieMaxAge),
-			Hidden:  true,
-			Usage:   "DEPRECATED: use --session-ttl; honoured as the session TTL (seconds) when --session-ttl is unset",
-		},
-		&cli.IntFlag{
-			Name:    FlagSessionTTL,
-			Sources: cli.EnvVars(EnvSessionTTL),
-			Value:   DefaultSessionTTL,
-			Usage:   "TOTP session TTL in seconds (default: 30 days)",
-		},
-		&cli.BoolFlag{
-			Name:    FlagDirectRedirect,
-			Sources: cli.EnvVars(EnvDirectRedirect),
-			Value:   DefaultDirectRedirect,
-			Usage: "GET /r/{hash} behaviour for short links: true issues an immediate 301 to the " +
+				"(e.g. cloud load balancers, k8s ingress)"
+		}),
+		clifactory.StringFlag(func(flag *cli.StringFlag) {
+			flag.Name = FlagTOTPIssuer
+			flag.Sources = cli.EnvVars(EnvTOTPIssuer)
+			flag.Value = DefaultTOTPIssuer
+			flag.Usage = "TOTP issuer name shown in the authenticator app (default: padmark)"
+		}),
+		clifactory.StringFlag(func(flag *cli.StringFlag) {
+			flag.Name = FlagAuthTokens
+			flag.Sources = cli.EnvVars(EnvAuthTokens)
+			flag.Hidden = true
+			flag.Usage = "REMOVED: static bearer tokens were replaced by the account system; setting this " +
+				"fails startup (use --enable-accounts, " + EnvBootstrapToken + " and /setup)"
+		}),
+		clifactory.IntFlag(func(flag *cli.IntFlag) {
+			flag.Name = FlagCookieMaxAge
+			flag.Sources = cli.EnvVars(EnvCookieMaxAge)
+			flag.Hidden = true
+			flag.Usage = "DEPRECATED: use --session-ttl; honoured as the session TTL (seconds) when --session-ttl is unset"
+		}),
+		clifactory.IntFlag(func(flag *cli.IntFlag) {
+			flag.Name = FlagSessionTTL
+			flag.Sources = cli.EnvVars(EnvSessionTTL)
+			flag.Value = DefaultSessionTTL
+			flag.Usage = "TOTP session TTL in seconds (default: 30 days)"
+		}),
+		clifactory.BoolFlag(func(flag *cli.BoolFlag) {
+			flag.Name = FlagDirectRedirect
+			flag.Sources = cli.EnvVars(EnvDirectRedirect)
+			flag.Value = DefaultDirectRedirect
+			flag.Usage = "GET /r/{hash} behaviour for short links: true issues an immediate 301 to the " +
 				"target URL for every link; false (default) renders an interstitial page (meta-refresh + " +
 				"noscript fallback) showing the destination for links created anonymously, while links " +
-				"created by a signed-in owner still redirect directly (open-redirect/phishing hardening)",
-		},
-		&cli.StringFlag{
-			Name:    FlagMetricsAddr,
-			Sources: cli.EnvVars(EnvMetricsAddr),
-			Usage: "Address for a separate internal Prometheus /metrics listener (e.g. :9090); " +
+				"created by a signed-in owner still redirect directly (open-redirect/phishing hardening)"
+		}),
+		clifactory.StringFlag(func(flag *cli.StringFlag) {
+			flag.Name = FlagMetricsAddr
+			flag.Sources = cli.EnvVars(EnvMetricsAddr)
+			flag.Usage = "Address for a separate internal Prometheus /metrics listener (e.g. :9090); " +
 				"empty (default) disables it entirely. Bind this to a private interface only — " +
-				"metrics are never served on the main, public-facing listener",
-		},
-		&cli.StringFlag{
-			Name:    FlagCSRFSecret,
-			Sources: cli.EnvVars(EnvCSRFSecret),
-			Usage: "HMAC key for signing CSRF tokens (raw bytes, at least 32 characters). " +
+				"metrics are never served on the main, public-facing listener"
+		}),
+		clifactory.StringFlag(func(flag *cli.StringFlag) {
+			flag.Name = FlagCSRFSecret
+			flag.Sources = cli.EnvVars(EnvCSRFSecret)
+			flag.Usage = "HMAC key for signing CSRF tokens (raw bytes, at least 32 characters). " +
 				"Flag values are visible in process listings (ps); prefer PADMARK_CSRF_SECRET. " +
 				"Empty (default) generates a fresh random secret per process: forms survive only " +
 				"within one process lifetime, so restarts invalidate outstanding tokens and " +
 				"multi-replica deployments 403 on every form. Set to a fixed random value " +
-				"(e.g. `openssl rand -base64 32`) shared across replicas to avoid that",
-		},
+				"(e.g. `openssl rand -base64 32`) shared across replicas to avoid that"
+		}),
 	}, argon2Flags()...)
 }
 
@@ -328,66 +329,66 @@ func appFlags() []cli.Flag { //nolint:funlen // declarative flag list
 // caller-chosen edit codes of converted legacy notes with the same argon2id cost as serve.
 func argon2Flags() []cli.Flag {
 	return []cli.Flag{
-		&cli.IntFlag{
-			Name:      FlagArgon2Memory,
-			Validator: boundedCost(int(crypto.MaxArgon2Memory)),
-			Sources:   cli.EnvVars(EnvArgon2Memory),
-			Value:     DefaultArgon2Memory,
-			Usage: "argon2id memory cost in KiB for account passwords, caller-chosen edit codes and the " +
+		clifactory.IntFlag(func(flag *cli.IntFlag) {
+			flag.Name = FlagArgon2Memory
+			flag.Validator = boundedCost(int(crypto.MaxArgon2Memory))
+			flag.Sources = cli.EnvVars(EnvArgon2Memory)
+			flag.Value = DefaultArgon2Memory
+			flag.Usage = "argon2id memory cost in KiB for account passwords, caller-chosen edit codes and the " +
 				"per-user TOTP key (default: 24576 = 24 MiB); every derivation allocates this much, bounded " +
-				"overall by --argon2-memory-budget. Server-generated edit codes use a fast hash instead",
-		},
-		&cli.IntFlag{
-			Name:      FlagArgon2Time,
-			Validator: boundedCost(int(crypto.MaxArgon2Time)),
-			Sources:   cli.EnvVars(EnvArgon2Time),
-			Value:     DefaultArgon2Time,
-			Usage:     "argon2id time cost (iterations); raise when lowering memory to keep strength",
-		},
-		&cli.IntFlag{
-			Name:      FlagArgon2Threads,
-			Validator: boundedCost(int(crypto.MaxArgon2Threads)),
-			Sources:   cli.EnvVars(EnvArgon2Threads),
-			Value:     DefaultArgon2Threads,
-			Usage:     "argon2id parallelism (CPU threads per hash)",
-		},
-		&cli.IntFlag{
-			Name:      FlagArgon2MemoryBudget,
-			Validator: boundedCost(maxArgon2MemoryBudget),
-			Sources:   cli.EnvVars(EnvArgon2MemoryBudget),
-			Value:     DefaultArgon2MemoryBudget,
-			Usage: "total argon2id memory in KiB that concurrent password, edit-code and TOTP-key " +
+				"overall by --argon2-memory-budget. Server-generated edit codes use a fast hash instead"
+		}),
+		clifactory.IntFlag(func(flag *cli.IntFlag) {
+			flag.Name = FlagArgon2Time
+			flag.Validator = boundedCost(int(crypto.MaxArgon2Time))
+			flag.Sources = cli.EnvVars(EnvArgon2Time)
+			flag.Value = DefaultArgon2Time
+			flag.Usage = "argon2id time cost (iterations); raise when lowering memory to keep strength"
+		}),
+		clifactory.IntFlag(func(flag *cli.IntFlag) {
+			flag.Name = FlagArgon2Threads
+			flag.Validator = boundedCost(int(crypto.MaxArgon2Threads))
+			flag.Sources = cli.EnvVars(EnvArgon2Threads)
+			flag.Value = DefaultArgon2Threads
+			flag.Usage = "argon2id parallelism (CPU threads per hash)"
+		}),
+		clifactory.IntFlag(func(flag *cli.IntFlag) {
+			flag.Name = FlagArgon2MemoryBudget
+			flag.Validator = boundedCost(maxArgon2MemoryBudget)
+			flag.Sources = cli.EnvVars(EnvArgon2MemoryBudget)
+			flag.Value = DefaultArgon2MemoryBudget
+			flag.Usage = "total argon2id memory in KiB that concurrent password, edit-code and TOTP-key " +
 				"derivations may hold at once (default: 131072 = 128 MiB); further requests queue. " +
 				"Must be at least --argon2-memory. Size it below the container memory limit and set " +
-				"GOMEMLIMIT to about 75-80% of that limit",
-		},
+				"GOMEMLIMIT to about 75-80% of that limit"
+		}),
 	}
 }
 
 // skipMigrationBackupFlag is shared by serve and migrate, which both apply migrations.
 func skipMigrationBackupFlag() *cli.BoolFlag {
-	return &cli.BoolFlag{
-		Name:    FlagSkipMigrationBackup,
-		Sources: cli.EnvVars(EnvSkipMigrationBackup),
-		Value:   false,
-		Usage: "Do not back up the SQLite database before applying pending migrations. By default, when " +
+	return clifactory.BoolFlag(func(flag *cli.BoolFlag) {
+		flag.Name = FlagSkipMigrationBackup
+		flag.Sources = cli.EnvVars(EnvSkipMigrationBackup)
+		flag.Value = false
+		flag.Usage = "Do not back up the SQLite database before applying pending migrations. By default, when " +
 			"migrations are pending and the database is a file, a copy is written next to it as " +
 			"<db>.bak-<YYYYMMDD-HHMMSS> (mode 0600) first, because some migrations are irreversible. " +
-			"Set only if backups are managed elsewhere; ignored for postgres (use pg_dump)",
-	}
+			"Set only if backups are managed elsewhere; ignored for postgres (use pg_dump)"
+	})
 }
 
 // allowSharedKeyringFlag is shared by serve and the encryption commands, which load the same keyring.
 func allowSharedKeyringFlag() *cli.BoolFlag {
-	return &cli.BoolFlag{
-		Name:    FlagAllowSharedKeyring,
-		Sources: cli.EnvVars(EnvAllowSharedKeyring),
-		Value:   DefaultAllowSharedKeyring,
-		Usage: "Accept a content keyring file readable by group or other users (logged as a warning). " +
+	return clifactory.BoolFlag(func(flag *cli.BoolFlag) {
+		flag.Name = FlagAllowSharedKeyring
+		flag.Sources = cli.EnvVars(EnvAllowSharedKeyring)
+		flag.Value = DefaultAllowSharedKeyring
+		flag.Usage = "Accept a content keyring file readable by group or other users (logged as a warning). " +
 			"Startup otherwise refuses such a file; restrict it to 0600 or 0400 instead whenever possible. " +
 			"Only for secret managers that cannot provide an owner-only file; keyrings under /run/secrets/ " +
-			"(Docker/Compose secrets) are already exempt",
-	}
+			"(Docker/Compose secrets) are already exempt"
+	})
 }
 
 // maxArgon2MemoryBudget caps --argon2-memory-budget at 64 GiB (in KiB): it rejects typos and keeps

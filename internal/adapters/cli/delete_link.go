@@ -15,21 +15,7 @@ import (
 // literal hyphenated "delete-link.go"); the command name itself is still "delete-link", matching
 // the acceptance criteria's `padmark-cli delete-link <slug> --edit-code ...` usage.
 func deleteLinkCommand() *urcli.Command {
-	return &urcli.Command{
-		Name:      "delete-link",
-		Usage:     "Delete a short link",
-		ArgsUsage: argsUsageID,
-		Flags: []urcli.Flag{
-			&urcli.StringFlag{
-				Name:    FlagEditCode,
-				Aliases: []string{"e"},
-				Sources: urcli.EnvVars(EnvEditCode),
-				Usage: "Edit code returned at link creation (env: PADMARK_EDIT_CODE). Optional if " +
-					"--token identifies the link's owner. " + psWarnEditCode,
-			},
-		},
-		Action: deleteLinkAction,
-	}
+	return newDeleteCommand("delete-link", "Delete a short link", "link", deleteLinkAction)
 }
 
 // deleteLinkAction does not require --edit-code: the server also accepts the request when

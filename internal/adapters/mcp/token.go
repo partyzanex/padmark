@@ -68,7 +68,9 @@ func newPadmarkClient(cmd *urcli.Command) (*padmark.Client, error) {
 	}
 
 	transport := &bearerTransport{base: http.DefaultTransport, token: token}
-	httpClient := &http.Client{Transport: transport, Timeout: cmd.Duration(FlagTimeout)}
+	httpClient := &http.Client{Transport: transport, Timeout: cmd.Duration(FlagTimeout),
+		CheckRedirect: nil, Jar: nil,
+	}
 
 	cl, err := padmark.NewClient(serverURL, padmark.WithClient(httpClient))
 	if err != nil {

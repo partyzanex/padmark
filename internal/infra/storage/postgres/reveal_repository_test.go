@@ -106,6 +106,8 @@ func (s *RevealRepositoryTestSuite) TestIssue_SweepsExpiredTokens() {
 		TokenHash: "stale-token",
 		NoteID:    "note-stale",
 		ExpiresAt: time.Now().Add(-time.Hour),
+
+		BaseModel: bun.BaseModel{}, UsedAt: nil,
 	}
 	_, err := s.db.NewInsert().Model(stale).Exec(ctx)
 	s.Require().NoError(err)
@@ -210,6 +212,8 @@ func (s *RevealRepositoryTestSuite) TestConsume_ExpiredToken() {
 		TokenHash: domain.HashRevealToken("expired-token"),
 		NoteID:    "note-exp",
 		ExpiresAt: time.Now().Add(-time.Minute),
+
+		BaseModel: bun.BaseModel{}, UsedAt: nil,
 	}
 	_, err := s.db.NewInsert().Model(expired).Exec(ctx)
 	s.Require().NoError(err)
@@ -228,6 +232,8 @@ func (s *RevealRepositoryTestSuite) TestConsume_ExactExpiryBoundary_Rejected() {
 		TokenHash: domain.HashRevealToken("boundary-token"),
 		NoteID:    "note-boundary",
 		ExpiresAt: time.Now(),
+
+		BaseModel: bun.BaseModel{}, UsedAt: nil,
 	}
 	_, err := s.db.NewInsert().Model(boundary).Exec(ctx)
 	s.Require().NoError(err)

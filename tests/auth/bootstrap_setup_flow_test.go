@@ -60,7 +60,9 @@ func TestBootstrapSetup_AnonymousCannotClaimFirstAdmin(t *testing.T) {
 		jar, err := cookiejar.New(nil)
 		require.NoError(t, err)
 
-		client := &http.Client{Jar: jar}
+		client := &http.Client{Jar: jar,
+			Transport: nil, CheckRedirect: nil, Timeout: 0,
+		}
 
 		// A real browser flow: GET the form (CSRF cookie + token), then submit it.
 		page, err := client.Get(env.baseURL + "/setup")
@@ -114,6 +116,9 @@ func newBootstrapEnv(t *testing.T, dbName string) ownerFlowEnv {
 		MaxBodyBytes:   256 * 1024,
 		CSRFSecret:     []byte("padmark-test-csrf-secret-32bytes"),
 		BootstrapToken: bootstrapFlowToken,
+
+		ForcedScheme: "", TrustedProxies: nil, AllowedHosts: nil, RateLimit: 0, RateBurst: 0,
+		SessionTTL: 0, DisableAPI: false, DirectRedirect: false,
 	})
 	require.NoError(t, err)
 
@@ -133,7 +138,9 @@ func postSetupForm(t *testing.T, baseURL string, fields url.Values) int {
 	jar, err := cookiejar.New(nil)
 	require.NoError(t, err)
 
-	client := &http.Client{Jar: jar}
+	client := &http.Client{Jar: jar,
+		Transport: nil, CheckRedirect: nil, Timeout: 0,
+	}
 
 	page, err := client.Get(baseURL + "/setup")
 	require.NoError(t, err)

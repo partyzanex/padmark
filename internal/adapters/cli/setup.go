@@ -13,39 +13,40 @@ import (
 
 	urcli "github.com/urfave/cli/v3"
 
+	"github.com/partyzanex/padmark/internal/clifactory"
 	"github.com/partyzanex/padmark/internal/errorcontext"
 )
 
 func setupCommand() *urcli.Command {
-	return &urcli.Command{
-		Name:  "setup",
-		Usage: "Create the first admin account (or enroll via an invite) and print TOTP URI",
-		Description: "Headless account bootstrap: POSTs JSON to the server's /setup and prints " +
+	return clifactory.Command(func(command *urcli.Command) {
+		command.Name = "setup"
+		command.Usage = "Create the first admin account (or enroll via an invite) and print TOTP URI"
+		command.Description = "Headless account bootstrap: POSTs JSON to the server's /setup and prints " +
 			"the otpauth:// enrollment URI exactly once — scan it or save it, it cannot be " +
 			"recovered. Pass --username and --password; the password may also be piped to stdin " +
 			"(first line). Bootstrapping the first admin requires the server's bootstrap token in " +
 			"the " + EnvBootstrapToken + " environment variable. A non-empty --invite enrolls a new " +
-			"(non-admin) user instead and needs no bootstrap token.",
-		Flags: []urcli.Flag{
-			&urcli.StringFlag{
-				Name:  FlagUsername,
-				Usage: "Account username",
-			},
-			&urcli.StringFlag{
-				Name: FlagPassword,
-				Usage: "Account password (strength rules enforced by the server). " +
-					"Flag values are visible in process listings (ps); prefer piping the password to stdin",
-			},
-			&urcli.StringFlag{
-				Name:    FlagInvite,
-				Aliases: []string{"i"},
-				Usage: "Signup invite token (admin-created); empty = bootstrap the first admin. " +
+			"(non-admin) user instead and needs no bootstrap token."
+		command.Flags = []urcli.Flag{
+			clifactory.StringFlag(func(flag *urcli.StringFlag) {
+				flag.Name = FlagUsername
+				flag.Usage = "Account username"
+			}),
+			clifactory.StringFlag(func(flag *urcli.StringFlag) {
+				flag.Name = FlagPassword
+				flag.Usage = "Account password (strength rules enforced by the server). " +
+					"Flag values are visible in process listings (ps); prefer piping the password to stdin"
+			}),
+			clifactory.StringFlag(func(flag *urcli.StringFlag) {
+				flag.Name = FlagInvite
+				flag.Aliases = []string{"i"}
+				flag.Usage = "Signup invite token (admin-created); empty = bootstrap the first admin. " +
 					"Flag values are visible in process listings (ps) and there is no env/stdin alternative " +
-					"(stdin carries the password); the invite is single-use and this request spends it",
-			},
-		},
-		Action: setupAction,
-	}
+					"(stdin carries the password); the invite is single-use and this request spends it"
+			}),
+		}
+		command.Action = setupAction
+	})
 }
 
 func setupAction(ctx context.Context, cmd *urcli.Command) error {
@@ -96,7 +97,9 @@ func setupAction(ctx context.Context, cmd *urcli.Command) error {
 		return fmt.Errorf("check insecure setup: %w", insecureErr)
 	}
 
-	httpClient := &http.Client{Timeout: cmd.Duration(FlagTimeout)}
+	httpClient := &http.Client{Timeout: cmd.Duration(FlagTimeout),
+		Transport: nil, CheckRedirect: nil, Jar: nil,
+	}
 
 	req, reqErr := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(string(payload)))
 	if reqErr != nil {

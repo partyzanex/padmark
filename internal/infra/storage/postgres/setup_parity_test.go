@@ -90,6 +90,8 @@ func (s *ParitySuite) parityUser(username string) *domain.User {
 		PasswordHash: "test-hash",
 		KDFSalt:      []byte("test-salt"),
 		CreatedAt:    time.Now().UTC().Truncate(time.Microsecond),
+
+		LastLoginAt: nil, LastTOTPCounter: 0, IsAdmin: false,
 	}
 }
 

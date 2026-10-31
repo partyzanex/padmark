@@ -59,7 +59,7 @@ func (h *OgenHandler) CreateNote(
 	}
 
 	// A contradictory request is the caller's error (400) before any server capability (422).
-	privacy, err := resolvePrivacy(req.Private, optCreatePrivacyPtr(req.Privacy)) //nolint:staticcheck // deprecated alias
+	privacy, err := resolvePrivacy(req.GetPrivate(), optCreatePrivacyPtr(req.Privacy))
 	if err != nil {
 		v := ogenapi.CreateNoteBadRequest(errResp(err))
 
@@ -159,7 +159,7 @@ func (h *OgenHandler) UpdateNote(
 // noteUpdatePayload is shared by ogen and native multi-segment PUT routes. It fails with
 // errPrivateConflict when the deprecated `private` alias contradicts `privacy`.
 func noteUpdatePayload(req *ogenapi.UpdateNoteRequest) (*domain.Note, error) {
-	privacy, err := resolvePrivacy(req.Private, optUpdatePrivacyPtr(req.Privacy)) //nolint:staticcheck // deprecated alias
+	privacy, err := resolvePrivacy(req.GetPrivate(), optUpdatePrivacyPtr(req.Privacy))
 	if err != nil {
 		return nil, fmt.Errorf("resolve privacy: %w", err)
 	}
@@ -209,8 +209,7 @@ func (h *OgenHandler) DeleteNote(
 		return &ogenapi.DeleteNoteUnauthorized{}, nil
 	}
 
-	//nolint:staticcheck // deprecated v0.1.6 query form, kept for backward compatibility
-	editCode := deleteEditCode(ctx, h.log, params.ID, params.XEditCode.Or(""), params.EditCode.Or(""))
+	editCode := deleteEditCode(ctx, h.log, params.ID, params.XEditCode.Or(""), middleware.LegacyNoteEditCodeFromCtx(ctx))
 
 	err := h.manager.Delete(ctx, params.ID, editCode, middleware.CallerIDFromCtx(ctx))
 	if err != nil {

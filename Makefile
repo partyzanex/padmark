@@ -3,6 +3,9 @@ GOOSE        := $(CURDIR)/bin/goose
 DB_SQLITE    ?= ./padmark.db
 POSTGRES_DSN := postgres://padmark:padmark@localhost:5432/padmark?sslmode=disable
 
+# Let the selected Go toolchain locate its own standard library.
+unexport GOROOT
+
 include go.mk
 
 go.mk:

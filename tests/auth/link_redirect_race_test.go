@@ -60,9 +60,15 @@ func TestLinkRedirectPrivacyRace(t *testing.T) {
 		burn     bool
 		implicit bool
 	}{
-		{name: "ordinary"},
-		{name: "burn", burn: true},
-		{name: "preview", implicit: true},
+		{name: "ordinary",
+			burn: false, implicit: false,
+		},
+		{name: "burn", burn: true,
+			implicit: false,
+		},
+		{name: "preview", implicit: true,
+			burn: false,
+		},
 		{name: "burn_preview", burn: true, implicit: true},
 	} {
 		for _, cached := range []bool{false, true} {
@@ -85,11 +91,16 @@ func TestLinkRedirectPrivacyRace(t *testing.T) {
 				publicURL, privateURL := "https://example.com/public", "https://example.com/private?secret=hidden"
 				link, err := writer.Create(t.Context(), publicURL, links.CreateOptions{
 					OwnerID: &owner.ID, BurnAfterClick: scenario.burn,
+
+					ExpiresAt: nil, Privacy: nil, DirectRedirect: nil, CustomHash: "",
+					EditCode: "",
 				})
 				require.NoError(t, err)
 
 				repo := sqliterepo.NewLinkRepository(env.db, log)
-				paused := &pausedLinkRead{Storage: repo, read: make(chan struct{}), proceed: make(chan struct{})}
+				paused := &pausedLinkRead{Storage: repo, read: make(chan struct{}), proceed: make(chan struct{}),
+					once: sync.Once{},
+				}
 
 				reader := links.NewManager(paused, sqliterepo.NewNoteRepository(env.db), lock.NewLocker(),
 					testutil.ContentEncryptor(t, "link"), crypto.NewEditCodeHasher(testArgon2Params), log, false)
@@ -105,6 +116,10 @@ func TestLinkRedirectPrivacyRace(t *testing.T) {
 				ogen := adhttp.NewOgenHandler(notes, reader, adhttp.NoPinger{}, log)
 				router, err := adhttp.NewRouter(handler, ogen, &adhttp.RouterOptions{
 					MaxBodyBytes: 256 * 1024, DirectRedirect: true,
+
+					ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, CSRFSecret: nil,
+					AllowedHosts: nil, RateLimit: 0, RateBurst: 0, SessionTTL: 0,
+					DisableAPI: false,
 				})
 				require.NoError(t, err)
 
@@ -126,7 +141,9 @@ func TestLinkRedirectPrivacyRace(t *testing.T) {
 
 				client := &http.Client{Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error {
 					return http.ErrUseLastResponse
-				}}
+				},
+					Transport: nil, Jar: nil,
+				}
 				response := make(chan *http.Response, 1)
 				failure := make(chan error, 1)
 
@@ -144,7 +161,10 @@ func TestLinkRedirectPrivacyRace(t *testing.T) {
 				}
 
 				_, err = writer.Update(t.Context(), link.ID, "", owner.ID, privateURL,
-					links.UpdateOptions{Privacy: new(domain.PrivacyOwner)})
+					links.UpdateOptions{Privacy: new(domain.PrivacyOwner),
+						ExpiresAt: nil, DirectRedirect: nil, ClearExpiry: false,
+						ResetDirectRedirect: false,
+					})
 				require.NoError(t, err)
 				resume()
 

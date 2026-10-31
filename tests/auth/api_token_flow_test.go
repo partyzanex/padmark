@@ -89,6 +89,9 @@ func TestAPITokenFlow_AdminIssuesKey_CLICreatesNote(t *testing.T) {
 	router, err := adaptershttp.NewRouter(handler, ogen, &adaptershttp.RouterOptions{
 		MaxBodyBytes: 256 * 1024,
 		CSRFSecret:   []byte("padmark-test-csrf-secret-32bytes"),
+
+		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, AllowedHosts: nil, RateLimit: 0,
+		RateBurst: 0, SessionTTL: 0, DisableAPI: false, DirectRedirect: false,
 	})
 	require.NoError(t, err)
 
@@ -103,7 +106,9 @@ func TestAPITokenFlow_AdminIssuesKey_CLICreatesNote(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, admin.IsAdmin)
 
-	apiKey, err := authMgr.CreateAPIToken(ctx, admin.ID, auth.Issuer{}, 0)
+	apiKey, err := authMgr.CreateAPIToken(ctx, admin.ID, auth.Issuer{
+		APITokenHash: "", StepUp: auth.StepUp{Password: "", TOTPCode: ""},
+	}, 0)
 	require.NoError(t, err, "admin must be able to issue an API key — the store must be wired into auth.Manager")
 	require.NotEmpty(t, apiKey)
 
@@ -134,6 +139,10 @@ func TestAPITokenFlow_AdminIssuesKey_CLICreatesNote(t *testing.T) {
 		Title:   "gated",
 		Content: "requires login",
 		Privacy: &gatedPrv,
+
+		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
+		OwnerID: nil, ID: "", ContentType: nil, EditCode: "",
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
 	})
 	require.NoError(t, err)
 
@@ -155,6 +164,10 @@ func TestAPITokenFlow_AdminIssuesKey_CLICreatesNote(t *testing.T) {
 		Title:   "secret",
 		Content: "private body",
 		Privacy: &priv,
+
+		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
+		OwnerID: nil, ID: "", ContentType: nil, EditCode: "",
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
 	})
 	require.NoError(t, err)
 

@@ -8,15 +8,16 @@ import (
 
 	urcli "github.com/urfave/cli/v3"
 
+	"github.com/partyzanex/padmark/internal/clifactory"
 	padmark "github.com/partyzanex/padmark/pkg/client"
 )
 
 func pingCommand() *urcli.Command {
-	return &urcli.Command{
-		Name:   "ping",
-		Usage:  "Check server liveness and readiness",
-		Action: pingAction,
-	}
+	return clifactory.Command(func(command *urcli.Command) {
+		command.Name = "ping"
+		command.Usage = "Check server liveness and readiness"
+		command.Action = pingAction
+	})
 }
 
 func pingAction(ctx context.Context, cmd *urcli.Command) error {

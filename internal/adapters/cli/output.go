@@ -45,14 +45,11 @@ func printNote(w io.Writer, note *padmark.NoteResponse) error {
 	}
 
 	if exp, ok := note.ExpiresAt.Get(); ok {
-		//nolint:gosmopolitan // CLI tool: show local time for readability
-		ewr.printf("expires:\t%s\n", exp.Local().Format(time.DateTime))
+		ewr.printf("expires:\t%s\n", exp.UTC().Format(time.RFC3339))
 	}
 
-	//nolint:gosmopolitan // CLI tool: show local time for readability
-	ewr.printf("created:\t%s\n", note.CreatedAt.Local().Format(time.DateTime))
-	//nolint:gosmopolitan // CLI tool: show local time for readability
-	ewr.printf("updated:\t%s\n", note.UpdatedAt.Local().Format(time.DateTime))
+	ewr.printf("created:\t%s\n", note.CreatedAt.UTC().Format(time.RFC3339))
+	ewr.printf("updated:\t%s\n", note.UpdatedAt.UTC().Format(time.RFC3339))
 
 	if ewr.err != nil {
 		return fmt.Errorf("write note: %w", ewr.err)
@@ -100,16 +97,14 @@ func printLink(w io.Writer, link *padmark.LinkResponse) error {
 	}
 
 	if exp, ok := link.ExpiresAt.Get(); ok {
-		//nolint:gosmopolitan // CLI tool: show local time for readability
-		ewr.printf("expires:\t%s\n", exp.Local().Format(time.DateTime))
+		ewr.printf("expires:\t%s\n", exp.UTC().Format(time.RFC3339))
 	}
 
 	if dr, ok := link.DirectRedirect.Get(); ok {
 		ewr.printf("direct-redirect:\t%t (overrides the server default)\n", dr)
 	}
 
-	//nolint:gosmopolitan // CLI tool: show local time for readability
-	ewr.printf("created:\t%s\n", link.CreatedAt.Local().Format(time.DateTime))
+	ewr.printf("created:\t%s\n", link.CreatedAt.UTC().Format(time.RFC3339))
 
 	if ewr.err != nil {
 		return fmt.Errorf("write link: %w", ewr.err)
@@ -149,8 +144,7 @@ func printCreateLinkResult(w io.Writer, serverURL string, link *padmark.CreateLi
 	}
 
 	if exp, ok := link.ExpiresAt.Get(); ok {
-		//nolint:gosmopolitan // CLI tool: show local time for readability
-		erw.printf("expires:\t%s\n", exp.Local().Format(time.DateTime))
+		erw.printf("expires:\t%s\n", exp.UTC().Format(time.RFC3339))
 	}
 
 	if dr, ok := link.DirectRedirect.Get(); ok {
@@ -182,8 +176,7 @@ func printCreateResult(w io.Writer, serverURL string, note *padmark.CreateNoteRe
 	}
 
 	if exp, ok := note.ExpiresAt.Get(); ok {
-		//nolint:gosmopolitan // CLI tool: show local time for readability
-		erw.printf("expires:\t%s\n", exp.Local().Format(time.DateTime))
+		erw.printf("expires:\t%s\n", exp.UTC().Format(time.RFC3339))
 	}
 
 	if erw.err != nil {

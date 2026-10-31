@@ -177,6 +177,9 @@ func TestAccountsFlow(t *testing.T) {
 		MaxBodyBytes:   256 * 1024,
 		CSRFSecret:     []byte("padmark-test-csrf-secret-32bytes"),
 		BootstrapToken: accountsFlowBootstrapToken,
+
+		ForcedScheme: "", TrustedProxies: nil, AllowedHosts: nil, RateLimit: 0, RateBurst: 0,
+		SessionTTL: 0, DisableAPI: false, DirectRedirect: false,
 	})
 	require.NoError(t, err)
 
@@ -206,7 +209,9 @@ func TestAccountsFlow(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, admin.IsAdmin)
 
-	apiKey, err := authMgr.CreateAPIToken(ctx, admin.ID, auth.Issuer{}, 0)
+	apiKey, err := authMgr.CreateAPIToken(ctx, admin.ID, auth.Issuer{
+		APITokenHash: "", StepUp: auth.StepUp{Password: "", TOTPCode: ""},
+	}, 0)
 	require.NoError(t, err)
 
 	adminEnvelope, err := domain.EncodeAPITokenEnvelope(srv.URL, apiKey)
@@ -287,7 +292,9 @@ func TestAccountsFlow(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, member.IsAdmin)
 
-	memberKey, err := authMgr.CreateAPIToken(ctx, member.ID, auth.Issuer{}, 0)
+	memberKey, err := authMgr.CreateAPIToken(ctx, member.ID, auth.Issuer{
+		APITokenHash: "", StepUp: auth.StepUp{Password: "", TOTPCode: ""},
+	}, 0)
 	require.NoError(t, err)
 
 	resp = bearerPost(t, srv.URL, "/api/invites", memberKey)
@@ -345,10 +352,14 @@ func TestAccountsFlow(t *testing.T) {
 	// 429 (unit-tested); here it is checked at the usecase, since every further bearer issue
 	// would need another TOTP window.
 	for range 18 {
-		_, err = authMgr.CreateAPIToken(ctx, admin.ID, auth.Issuer{}, 0)
+		_, err = authMgr.CreateAPIToken(ctx, admin.ID, auth.Issuer{
+			APITokenHash: "", StepUp: auth.StepUp{Password: "", TOTPCode: ""},
+		}, 0)
 		require.NoError(t, err)
 	}
 
-	_, err = authMgr.CreateAPIToken(ctx, admin.ID, auth.Issuer{}, 0)
+	_, err = authMgr.CreateAPIToken(ctx, admin.ID, auth.Issuer{
+		APITokenHash: "", StepUp: auth.StepUp{Password: "", TOTPCode: ""},
+	}, 0)
 	require.ErrorIs(t, err, domain.ErrAPITokenLimit)
 }

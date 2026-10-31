@@ -109,6 +109,9 @@ func newOwnerFlowEnv(t *testing.T, dbName string) ownerFlowEnv {
 	router, err := adaptershttp.NewRouter(handler, ogen, &adaptershttp.RouterOptions{
 		MaxBodyBytes: 256 * 1024,
 		CSRFSecret:   []byte("padmark-test-csrf-secret-32bytes"),
+
+		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, AllowedHosts: nil, RateLimit: 0,
+		RateBurst: 0, SessionTTL: 0, DisableAPI: false, DirectRedirect: false,
 	})
 	require.NoError(t, err)
 
@@ -137,10 +140,14 @@ func TestOwnerEditFlow_APITokenOwner_EditsAndDeletesWithoutEditCode(t *testing.T
 	owner, err := users.GetByUsername(ctx, "owner")
 	require.NoError(t, err)
 
-	ownerKey, err := authMgr.CreateAPIToken(ctx, owner.ID, auth.Issuer{}, 0)
+	ownerKey, err := authMgr.CreateAPIToken(ctx, owner.ID, auth.Issuer{
+		APITokenHash: "", StepUp: auth.StepUp{Password: "", TOTPCode: ""},
+	}, 0)
 	require.NoError(t, err)
 
-	inviteTok, err := authMgr.GenerateInvite(ctx, owner.ID, auth.Issuer{})
+	inviteTok, err := authMgr.GenerateInvite(ctx, owner.ID, auth.Issuer{
+		APITokenHash: "", StepUp: auth.StepUp{Password: "", TOTPCode: ""},
+	})
 	require.NoError(t, err)
 
 	_, err = authMgr.AcceptInvite(ctx, inviteTok, "other", ownerFlowPassword)
@@ -149,7 +156,9 @@ func TestOwnerEditFlow_APITokenOwner_EditsAndDeletesWithoutEditCode(t *testing.T
 	other, err := users.GetByUsername(ctx, "other")
 	require.NoError(t, err)
 
-	otherKey, err := authMgr.CreateAPIToken(ctx, other.ID, auth.Issuer{}, 0)
+	otherKey, err := authMgr.CreateAPIToken(ctx, other.ID, auth.Issuer{
+		APITokenHash: "", StepUp: auth.StepUp{Password: "", TOTPCode: ""},
+	}, 0)
 	require.NoError(t, err)
 
 	// ── owner creates a note over the API-token-authenticated path ──
@@ -254,7 +263,9 @@ func getEditPage(t *testing.T, baseURL, noteID string, caller editPageCaller) (*
 
 	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
 		return http.ErrUseLastResponse
-	}}
+	},
+		Transport: nil, Jar: nil, Timeout: 0,
+	}
 
 	resp, err := client.Do(req)
 	require.NoError(t, err)
@@ -289,10 +300,14 @@ func TestOwnerEditFlow_EditPage_PrivacyGate(t *testing.T) {
 	owner, err := env.users.GetByUsername(ctx, "owner")
 	require.NoError(t, err)
 
-	ownerKey, err := env.authMgr.CreateAPIToken(ctx, owner.ID, auth.Issuer{}, 0)
+	ownerKey, err := env.authMgr.CreateAPIToken(ctx, owner.ID, auth.Issuer{
+		APITokenHash: "", StepUp: auth.StepUp{Password: "", TOTPCode: ""},
+	}, 0)
 	require.NoError(t, err)
 
-	inviteTok, err := env.authMgr.GenerateInvite(ctx, owner.ID, auth.Issuer{})
+	inviteTok, err := env.authMgr.GenerateInvite(ctx, owner.ID, auth.Issuer{
+		APITokenHash: "", StepUp: auth.StepUp{Password: "", TOTPCode: ""},
+	})
 	require.NoError(t, err)
 
 	_, err = env.authMgr.AcceptInvite(ctx, inviteTok, "other", ownerFlowPassword)
@@ -301,7 +316,9 @@ func TestOwnerEditFlow_EditPage_PrivacyGate(t *testing.T) {
 	other, err := env.users.GetByUsername(ctx, "other")
 	require.NoError(t, err)
 
-	otherKey, err := env.authMgr.CreateAPIToken(ctx, other.ID, auth.Issuer{}, 0)
+	otherKey, err := env.authMgr.CreateAPIToken(ctx, other.ID, auth.Issuer{
+		APITokenHash: "", StepUp: auth.StepUp{Password: "", TOTPCode: ""},
+	}, 0)
 	require.NoError(t, err)
 
 	anonBrowser := editPageCaller{name: "anonymous browser", accept: "text/html", bearer: ""}
@@ -315,6 +332,8 @@ func TestOwnerEditFlow_EditPage_PrivacyGate(t *testing.T) {
 	realBrowser := editPageCaller{
 		name:   "anonymous browser (full Accept)",
 		accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+
+		bearer: "",
 	}
 
 	// want is the expected status; a 303 additionally carries the login redirect. reachesContent

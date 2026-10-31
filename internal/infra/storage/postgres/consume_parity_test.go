@@ -120,6 +120,9 @@ func (s *ParitySuite) TestLink_ConcurrentConsumeSingleWinner() {
 	repo := NewLinkRepository(s.db, s.discard)
 	s.Require().NoError(repo.Create(ctx, &domain.Link{
 		ID: "click-race", TargetURL: "ciphertext", CreatedAt: time.Now(), BurnAfterClick: true,
+
+		ExpiresAt: nil, Privacy: nil, OwnerID: nil, DirectRedirect: nil,
+		EditCode: "", Views: 0,
 	}))
 
 	results := race(func(int) consumeOutcome {
@@ -179,9 +182,13 @@ func (s *ParitySuite) TestExpiry_ComparesInstantsNotWallClocks() {
 	usr := s.createParityUser("zones", false)
 	s.Require().NoError(sessions.Create(ctx, &domain.Session{
 		SessionHash: "east", UserID: usr.ID, CreatedAt: time.Now(), ExpiresAt: time.Now().Add(-time.Second).In(east),
+
+		UserAgent: "", IP: "",
 	}))
 	s.Require().NoError(sessions.Create(ctx, &domain.Session{
 		SessionHash: "west", UserID: usr.ID, CreatedAt: time.Now(), ExpiresAt: time.Now().Add(time.Hour).In(west),
+
+		UserAgent: "", IP: "",
 	}))
 
 	_, err = sessions.Get(ctx, "east")

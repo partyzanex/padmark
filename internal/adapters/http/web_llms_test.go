@@ -28,7 +28,9 @@ func TestLLMsTxt_OK_SetsContentType(t *testing.T) {
 // TestLLMsTxt_WriteError_DoesNotCorruptBody verifies that when w.Write fails, LLMsTxt does not
 // call http.Error and therefore does not append error text to the body — same contract as APISpec.
 func TestLLMsTxt_WriteError_DoesNotCorruptBody(t *testing.T) {
-	wer := &errorWriter{}
+	wer := &errorWriter{
+		writeHeaderCalls: 0, body: nil,
+	}
 	req, _ := http.NewRequest(http.MethodGet, "/llms.txt", nil)
 
 	adhttp.LLMsTxt(wer, req)
@@ -93,6 +95,9 @@ func (s *LLMsRouterSuite) newRouter() http.Handler {
 	opts := adhttp.RouterOptions{
 		MaxBodyBytes: 256 * 1024,
 		CSRFSecret:   testCSRFSecret,
+
+		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, AllowedHosts: nil, RateLimit: 0,
+		RateBurst: 0, SessionTTL: 0, DisableAPI: false, DirectRedirect: false,
 	}
 
 	router, err := adhttp.NewRouter(handler, ogen, &opts)

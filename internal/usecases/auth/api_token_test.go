@@ -86,17 +86,25 @@ func (suite *APITokenSuite) disabledMgr() *Manager {
 // ── helpers ──
 
 func (suite *APITokenSuite) adminUser() *domain.User {
-	return &domain.User{ID: uuid.New(), Username: "admin", IsAdmin: true}
+	return &domain.User{ID: uuid.New(), Username: "admin", IsAdmin: true,
+		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
+		KDFSalt: nil, LastTOTPCounter: 0,
+	}
 }
 
 func (suite *APITokenSuite) regularUser() *domain.User {
-	return &domain.User{ID: uuid.New(), Username: "alice", IsAdmin: false}
+	return &domain.User{ID: uuid.New(), Username: "alice", IsAdmin: false, CreatedAt: time.Time{},
+		LastLoginAt: nil, TOTPSecret: "", PasswordHash: "", KDFSalt: nil,
+		LastTOTPCounter: 0,
+	}
 }
 
 // ── CreateAPIToken ──
 
 func (suite *APITokenSuite) TestCreateAPIToken_Disabled_ReturnsErrFeatureNotSupported() {
-	_, err := suite.disabledMgr().CreateAPIToken(suite.T().Context(), uuid.New(), Issuer{}, 0)
+	_, err := suite.disabledMgr().CreateAPIToken(suite.T().Context(), uuid.New(), Issuer{
+		APITokenHash: "", StepUp: StepUp{Password: "", TOTPCode: ""},
+	}, 0)
 	suite.ErrorIs(err, domain.ErrFeatureNotSupported)
 }
 
@@ -105,7 +113,9 @@ func (suite *APITokenSuite) TestCreateAPIToken_UserNotFound_ReturnsErrNotFound()
 	ghost := uuid.New()
 	suite.users.EXPECT().GetByID(gomock.Any(), ghost).Return(nil, domain.ErrNotFound)
 
-	_, err := suite.mgr.CreateAPIToken(ctx, ghost, Issuer{}, 0)
+	_, err := suite.mgr.CreateAPIToken(ctx, ghost, Issuer{
+		APITokenHash: "", StepUp: StepUp{Password: "", TOTPCode: ""},
+	}, 0)
 	suite.ErrorIs(err, domain.ErrNotFound)
 }
 
@@ -117,7 +127,9 @@ func (suite *APITokenSuite) TestCreateAPIToken_StoreFails_WrapsError() {
 		CreateIfUnderLimit(gomock.Any(), gomock.Any(), maxAPITokensPerUser).
 		Return(false, errors.New("db down"))
 
-	_, err := suite.mgr.CreateAPIToken(ctx, usr.ID, Issuer{}, 0)
+	_, err := suite.mgr.CreateAPIToken(ctx, usr.ID, Issuer{
+		APITokenHash: "", StepUp: StepUp{Password: "", TOTPCode: ""},
+	}, 0)
 	suite.ErrorContains(err, "create api token")
 }
 
@@ -129,7 +141,9 @@ func (suite *APITokenSuite) TestCreateAPIToken_LimitReached_ReturnsErrAPITokenLi
 		CreateIfUnderLimit(gomock.Any(), gomock.Any(), maxAPITokensPerUser).
 		Return(false, nil)
 
-	_, err := suite.mgr.CreateAPIToken(ctx, usr.ID, Issuer{}, 0)
+	_, err := suite.mgr.CreateAPIToken(ctx, usr.ID, Issuer{
+		APITokenHash: "", StepUp: StepUp{Password: "", TOTPCode: ""},
+	}, 0)
 	suite.ErrorIs(err, domain.ErrAPITokenLimit)
 }
 
@@ -151,7 +165,9 @@ func (suite *APITokenSuite) TestCreateAPIToken_Success_ReturnsPlainKeyAndPersist
 			return true, nil
 		})
 
-	plain, err := suite.mgr.CreateAPIToken(ctx, usr.ID, Issuer{}, 0)
+	plain, err := suite.mgr.CreateAPIToken(ctx, usr.ID, Issuer{
+		APITokenHash: "", StepUp: StepUp{Password: "", TOTPCode: ""},
+	}, 0)
 	suite.Require().NoError(err)
 	suite.NotEmpty(plain)
 
@@ -185,6 +201,8 @@ func (suite *APITokenSuite) TestResolveAPIToken_ExpiredToken_ReturnsErrNotFound(
 		TokenHash: hashToken("plain"),
 		CreatedAt: time.Now(),
 		ExpiresAt: &exp,
+
+		LastUsedAt: nil, IssuedBy: nil,
 	}
 	suite.apiTokens.EXPECT().GetByHash(gomock.Any(), hashToken("plain")).Return(tok, nil)
 
@@ -195,7 +213,9 @@ func (suite *APITokenSuite) TestResolveAPIToken_ExpiredToken_ReturnsErrNotFound(
 func (suite *APITokenSuite) TestResolveAPIToken_UpdateLastUsedFails_StillReturnsUser() {
 	ctx := suite.T().Context()
 	usr := suite.regularUser()
-	tok := &domain.APIToken{UserID: usr.ID, TokenHash: hashToken("plain"), CreatedAt: time.Now()}
+	tok := &domain.APIToken{UserID: usr.ID, TokenHash: hashToken("plain"), CreatedAt: time.Now(),
+		ExpiresAt: nil, LastUsedAt: nil, IssuedBy: nil,
+	}
 
 	gomock.InOrder(
 		suite.apiTokens.EXPECT().GetByHash(gomock.Any(), hashToken("plain")).Return(tok, nil),
@@ -211,7 +231,9 @@ func (suite *APITokenSuite) TestResolveAPIToken_UpdateLastUsedFails_StillReturns
 func (suite *APITokenSuite) TestResolveAPIToken_Success_ReturnsUserAndRecordsLastUsed() {
 	ctx := suite.T().Context()
 	usr := suite.regularUser()
-	tok := &domain.APIToken{UserID: usr.ID, TokenHash: hashToken("plain"), CreatedAt: time.Now()}
+	tok := &domain.APIToken{UserID: usr.ID, TokenHash: hashToken("plain"), CreatedAt: time.Now(),
+		ExpiresAt: nil, LastUsedAt: nil, IssuedBy: nil,
+	}
 
 	gomock.InOrder(
 		suite.apiTokens.EXPECT().GetByHash(gomock.Any(), hashToken("plain")).Return(tok, nil),
@@ -230,7 +252,9 @@ func (suite *APITokenSuite) TestResolveAPIToken_Success_ReturnsUserAndRecordsLas
 func (suite *APITokenSuite) TestResolveAPIToken_UserLookupFails_WrapsError() {
 	ctx := suite.T().Context()
 	userID := uuid.New()
-	tok := &domain.APIToken{UserID: userID, TokenHash: hashToken("plain"), CreatedAt: time.Now()}
+	tok := &domain.APIToken{UserID: userID, TokenHash: hashToken("plain"), CreatedAt: time.Now(),
+		ExpiresAt: nil, LastUsedAt: nil, IssuedBy: nil,
+	}
 
 	gomock.InOrder(
 		suite.apiTokens.EXPECT().GetByHash(gomock.Any(), hashToken("plain")).Return(tok, nil),
@@ -261,11 +285,18 @@ func (suite *APITokenSuite) TestListAPITokens_Admin_ReturnsTokensWithUsernames()
 	admin := suite.adminUser()
 	aliceID := uuid.New()
 	tokens := []*domain.APIToken{
-		{TokenHash: "tok-1", UserID: aliceID, CreatedAt: time.Now()},
-		{TokenHash: "tok-2", UserID: uuid.New(), CreatedAt: time.Now()},
+		{TokenHash: "tok-1", UserID: aliceID, CreatedAt: time.Now(),
+			ExpiresAt: nil, LastUsedAt: nil, IssuedBy: nil,
+		},
+		{TokenHash: "tok-2", UserID: uuid.New(), CreatedAt: time.Now(),
+			ExpiresAt: nil, LastUsedAt: nil, IssuedBy: nil,
+		},
 	}
 	users := []*domain.User{
-		{ID: aliceID, Username: "alice"},
+		{ID: aliceID, Username: "alice",
+			CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
+			KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
+		},
 	}
 
 	gomock.InOrder(
@@ -379,7 +410,9 @@ func (suite *APITokenSuite) TestCreateAPIToken_Bearer_WithoutStepUp_ReturnsErrSt
 	suite.users.EXPECT().GetByID(gomock.Any(), usr.ID).Return(usr, nil).Times(3)
 	// No verifier call and no store call: nothing may be minted.
 
-	for _, stepUp := range []StepUp{{}, {Password: "pw"}, {TOTPCode: "123456"}} {
+	for _, stepUp := range []StepUp{{
+		Password: "", TOTPCode: "",
+	}, {Password: "pw", TOTPCode: ""}, {Password: "", TOTPCode: "123456"}} {
 		_, err := mgr.CreateAPIToken(suite.T().Context(), usr.ID, Issuer{APITokenHash: "parent", StepUp: stepUp}, 0)
 		suite.Require().ErrorIs(err, domain.ErrStepUpRequired)
 	}
@@ -433,7 +466,9 @@ func (suite *APITokenSuite) TestCreateAPIToken_Session_NoStepUpAndNoIssuer() {
 			return true, nil
 		})
 
-	_, err := mgr.CreateAPIToken(suite.T().Context(), usr.ID, Issuer{}, 0)
+	_, err := mgr.CreateAPIToken(suite.T().Context(), usr.ID, Issuer{
+		APITokenHash: "", StepUp: StepUp{Password: "", TOTPCode: ""},
+	}, 0)
 	suite.Require().NoError(err)
 	suite.Nil(stored.IssuedBy, "a browser session issues without step-up and without an issuer token")
 }
@@ -453,7 +488,9 @@ func (suite *APITokenSuite) TestCreateAPIToken_Lifetime() {
 				return true, nil
 			})
 
-		_, err := mgr.CreateAPIToken(suite.T().Context(), usr.ID, Issuer{}, ttlDays)
+		_, err := mgr.CreateAPIToken(suite.T().Context(), usr.ID, Issuer{
+			APITokenHash: "", StepUp: StepUp{Password: "", TOTPCode: ""},
+		}, ttlDays)
 		suite.Require().NoError(err)
 
 		if ttlDays == 0 {
@@ -467,7 +504,9 @@ func (suite *APITokenSuite) TestCreateAPIToken_Lifetime() {
 	}
 
 	for _, ttlDays := range []int{-1, MaxAPITokenTTLDays + 1} {
-		_, err := mgr.CreateAPIToken(suite.T().Context(), usr.ID, Issuer{}, ttlDays)
+		_, err := mgr.CreateAPIToken(suite.T().Context(), usr.ID, Issuer{
+			APITokenHash: "", StepUp: StepUp{Password: "", TOTPCode: ""},
+		}, ttlDays)
 		suite.Require().ErrorIs(err, domain.ErrInvalidAPITokenTTL)
 	}
 }

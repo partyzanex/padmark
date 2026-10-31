@@ -44,12 +44,18 @@ func dsnLeakCases(secret string) []dsnLeakCase {
 	creds := "padmark:" + secret
 
 	return []dsnLeakCase{
-		{name: "connection refused", dsn: "postgres://" + creds + "@127.0.0.1:1/padmark?sslmode=disable"},
+		{name: "connection refused", dsn: "postgres://" + creds + "@127.0.0.1:1/padmark?sslmode=disable",
+			parseTime: false,
+		},
 		{
 			name: "unresolvable host",
 			dsn:  "postgres://" + creds + "@padmark-db.invalid:5432/padmark?sslmode=disable&dial_timeout=3s",
+
+			parseTime: false,
 		},
-		{name: "out of range port", dsn: "postgres://" + creds + "@127.0.0.1:99999/padmark?sslmode=disable"},
+		{name: "out of range port", dsn: "postgres://" + creds + "@127.0.0.1:99999/padmark?sslmode=disable",
+			parseTime: false,
+		},
 		{name: "unsupported sslmode", dsn: "postgres://" + creds + "@127.0.0.1:1/padmark?sslmode=bogus", parseTime: true},
 		{name: "invalid timeout", dsn: "postgres://" + creds + "@127.0.0.1:1/padmark?timeout=forever", parseTime: true},
 		{name: "non-numeric port", dsn: "postgres://" + creds + "@127.0.0.1:abc/padmark", parseTime: true},

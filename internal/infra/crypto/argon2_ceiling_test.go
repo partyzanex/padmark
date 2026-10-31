@@ -88,7 +88,9 @@ func TestHashers_LogAndRejectCostAboveCeiling(t *testing.T) {
 
 	var buf bytes.Buffer
 
-	log := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	log := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn,
+		AddSource: false, ReplaceAttr: nil,
+	}))
 
 	assert.False(t, NewPasswordHasher(low).WithLogger(log).Verify(hugeCostHash(), "password"))
 	assert.Contains(t, buf.String(), "level=WARN")

@@ -14,6 +14,7 @@ import (
 	"github.com/uptrace/bun"
 	"github.com/urfave/cli/v3"
 
+	"github.com/partyzanex/padmark/internal/clifactory"
 	"github.com/partyzanex/padmark/internal/errorcontext"
 	"github.com/partyzanex/padmark/internal/infra/crypto"
 	keyrepo "github.com/partyzanex/padmark/internal/infra/storage/contentkeys"
@@ -37,11 +38,12 @@ const (
 )
 
 func encryptionCommand() *cli.Command {
-	flags := append(migrateFlags(), &cli.StringFlag{
-		Name: FlagContentKeyring, Sources: cli.EnvVars(EnvContentKeyring),
-		Usage: "Content keyring file; defaults to <sqlite db dir>/padmark-keys.json or ./padmark-keys.json " +
-			"for postgres (never created by encryption commands)",
-	}, allowSharedKeyringFlag())
+	flags := append(migrateFlags(), clifactory.StringFlag(func(flag *cli.StringFlag) {
+		flag.Name = FlagContentKeyring
+		flag.Sources = cli.EnvVars(EnvContentKeyring)
+		flag.Usage = "Content keyring file; defaults to <sqlite db dir>/padmark-keys.json or ./padmark-keys.json " +
+			"for postgres (never created by encryption commands)"
+	}), allowSharedKeyringFlag())
 	flags = append(flags, argon2Flags()...)
 
 	items := []struct{ name, usage string }{
@@ -66,37 +68,55 @@ func encryptionCommand() *cli.Command {
 	for i := range items {
 		item := &items[i]
 
-		operationFlags := []cli.Flag{
-			&cli.StringFlag{Name: flagKeyID, Usage: "Public key ID (required for key operations)"},
-			&cli.StringFlag{Name: flagKeyOutput, Usage: "New keyring filename; existing files are never overwritten"},
-			&cli.BoolFlag{Name: flagDryRun, Usage: "Inspect migration, rewrap, conversion or pruning without writes"},
-		}
-
-		if item.name == encryptionPrune {
-			operationFlags = append(operationFlags, &cli.BoolFlag{
-				Name: flagCorrupt, Usage: "Explicitly select malformed raw records for permanent deletion",
-			})
-		}
-
-		if item.name == encryptionMark {
-			operationFlags = append(operationFlags, &cli.StringFlag{
-				Name: flagNoteID, Usage: "Note ID from encryption prune --corrupt --dry-run (required)",
-			})
-		}
-
-		commands = append(commands, &cli.Command{ //nolint:exhaustruct_v5 // optional CLI hooks use their zero values
-			Name: item.name, Usage: item.usage, Action: encryptionAction,
-			Flags: operationFlags,
-		})
+		commands = append(commands, clifactory.Command(func(command *cli.Command) {
+			command.Name = item.name
+			command.Usage = item.usage
+			command.Action = encryptionAction
+			command.Flags = encryptionOperationFlags(item.name)
+		}))
 	}
 
-	return &cli.Command{ //nolint:exhaustruct_v5 // optional CLI hooks use their zero values
-		Name: "encryption", Usage: "Manage content keys, migration and rotation",
-		Description: "Apply schema migrations first with `padmark migrate`. Stop all servers and writers " +
+	return clifactory.Command(func(command *cli.Command) {
+		command.Name = "encryption"
+		command.Usage = "Manage content keys, migration and rotation"
+		command.Description = "Apply schema migrations first with `padmark migrate`. Stop all servers and writers " +
 			"before changing encryption state or retiring keys. Keep database and keyring backups. " +
-			"Key files are written only to new paths; distribute them explicitly to every replica.",
-		Flags: flags, Commands: commands,
+			"Key files are written only to new paths; distribute them explicitly to every replica."
+		command.Flags = flags
+		command.Commands = commands
+	})
+}
+
+func encryptionOperationFlags(name string) []cli.Flag {
+	flags := []cli.Flag{
+		clifactory.StringFlag(func(flag *cli.StringFlag) {
+			flag.Name = flagKeyID
+			flag.Usage = "Public key ID (required for key operations)"
+		}),
+		clifactory.StringFlag(func(flag *cli.StringFlag) {
+			flag.Name = flagKeyOutput
+			flag.Usage = "New keyring filename; existing files are never overwritten"
+		}),
+		clifactory.BoolFlag(func(flag *cli.BoolFlag) {
+			flag.Name = flagDryRun
+			flag.Usage = "Inspect migration, rewrap, conversion or pruning without writes"
+		}),
 	}
+	if name == encryptionPrune {
+		flags = append(flags, clifactory.BoolFlag(func(flag *cli.BoolFlag) {
+			flag.Name = flagCorrupt
+			flag.Usage = "Explicitly select malformed raw records for permanent deletion"
+		}))
+	}
+
+	if name == encryptionMark {
+		flags = append(flags, clifactory.StringFlag(func(flag *cli.StringFlag) {
+			flag.Name = flagNoteID
+			flag.Usage = "Note ID from encryption prune --corrupt --dry-run (required)"
+		}))
+	}
+
+	return flags
 }
 
 // newEncryptionManager builds the content-key manager. hasher hashes the plaintext edit codes

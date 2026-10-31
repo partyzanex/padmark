@@ -46,6 +46,9 @@ func (s *DisableAPISuite) newRouter(disableAPI bool) http.Handler {
 		MaxBodyBytes: 256 * 1024,
 		CSRFSecret:   testCSRFSecret,
 		DisableAPI:   disableAPI,
+
+		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, AllowedHosts: nil, RateLimit: 0,
+		RateBurst: 0, SessionTTL: 0, DirectRedirect: false,
 	}
 
 	router, err := adhttp.NewRouter(handler, ogen, &opts)

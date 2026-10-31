@@ -46,22 +46,22 @@ func (s *ManagerSuite) linkStorage() (links.Storage, links.NotesChecker) {
 // and the read's mutation, exercising each backend's actual visibility predicates.
 func (s *ManagerSuite) TestFollowConcurrentPrivacyChange() {
 	storage, checker := s.linkStorage()
-	ownerID := uuid.New()
-	_, err := s.DB.NewRaw("INSERT INTO users (id, username, totp_secret) VALUES (?, ?, ?)",
-		ownerID, ownerID.String(), "unused-test-secret").Exec(s.T().Context())
-	s.Require().NoError(err)
+	ownerID := s.insertLinkOwner()
 
 	for _, scenario := range []struct {
 		name    string
 		burn    bool
 		expired bool
 	}{
-		{name: "ordinary"},
-		{name: "burn", burn: true},
-		{name: "expired_then_renewed", expired: true},
+		{name: "ordinary", burn: false, expired: false},
+		{name: "burn", burn: true, expired: false},
+		{name: "expired_then_renewed", burn: false, expired: true},
 	} {
 		s.Run(scenario.name, func() {
-			options := links.CreateOptions{OwnerID: &ownerID, BurnAfterClick: scenario.burn}
+			options := links.CreateOptions{OwnerID: &ownerID, BurnAfterClick: scenario.burn,
+				ExpiresAt: nil, Privacy: nil, DirectRedirect: nil, CustomHash: "",
+				EditCode: "",
+			}
 			if scenario.expired {
 				options.ExpiresAt = new(time.Now().Add(-time.Hour))
 			}
@@ -72,11 +72,17 @@ func (s *ManagerSuite) TestFollowConcurrentPrivacyChange() {
 			privateURL := "https://example.com/private?secret=hidden"
 			changing := &changedLinkRead{Storage: storage, afterRead: func() {
 				_, updateErr := s.LinkManager.Update(s.T().Context(), link.ID, "", ownerID, privateURL,
-					links.UpdateOptions{Privacy: new(domain.PrivacyOwner), ExpiresAt: new(time.Now().Add(time.Hour))})
+					links.UpdateOptions{Privacy: new(domain.PrivacyOwner), ExpiresAt: new(time.Now().Add(time.Hour)),
+						DirectRedirect: nil, ClearExpiry: false, ResetDirectRedirect: false,
+					})
 				s.Require().NoError(updateErr)
-			}}
+			},
+				once: sync.Once{},
+			}
 			reader := newLinkManager(s.T(), changing, checker, lock.NewLocker())
-			result, followErr := reader.Follow(s.T().Context(), link.ID, links.FollowOptions{AllowBurn: true})
+			result, followErr := reader.Follow(s.T().Context(), link.ID, links.FollowOptions{AllowBurn: true,
+				CallerID: uuid.UUID{}, Authenticated: false,
+			})
 			s.Require().ErrorIs(followErr, domain.ErrNotFound)
 			s.Nil(result, "a raced privacy change must not expose the new destination")
 			stored, getErr := storage.GetByID(s.T().Context(), domain.HashSlug(link.ID))
@@ -97,4 +103,15 @@ func (s *ManagerSuite) TestFollowConcurrentPrivacyChange() {
 			}
 		})
 	}
+}
+
+func (s *ManagerSuite) insertLinkOwner() uuid.UUID {
+	s.T().Helper()
+
+	ownerID := uuid.New()
+	_, err := s.DB.NewRaw("INSERT INTO users (id, username, totp_secret) VALUES (?, ?, ?)",
+		ownerID, ownerID.String(), "unused-test-secret").Exec(s.T().Context())
+	s.Require().NoError(err)
+
+	return ownerID
 }

@@ -151,7 +151,9 @@ func (s *AuthFlowSuite) TestFlow_AcceptInvite_Login_GetSession() {
 	admin, err := s.Users.GetByUsername(ctx, "admin")
 	s.Require().NoError(err)
 
-	tok, err := s.mgr.GenerateInvite(ctx, admin.ID, auth.Issuer{})
+	tok, err := s.mgr.GenerateInvite(ctx, admin.ID, auth.Issuer{
+		APITokenHash: "", StepUp: auth.StepUp{Password: "", TOTPCode: ""},
+	})
 	s.Require().NoError(err)
 	s.NotEmpty(tok)
 

@@ -101,7 +101,9 @@ func manager(t *testing.T, store keys.Storage, ring *crypto.ContentKeyring) *key
 	links, err := ring.ForResource("link")
 	require.NoError(t, err)
 
-	return keys.New(store, ring, notes, links, crypto.NewEditCodeHasher(crypto.Argon2Params{}))
+	return keys.New(store, ring, notes, links, crypto.NewEditCodeHasher(crypto.Argon2Params{
+		Memory: 0, Time: 0, Threads: 0,
+	}))
 }
 
 func reset(t *testing.T, db *bun.DB) {
@@ -123,7 +125,9 @@ func insertLegacy(t *testing.T, db *bun.DB, resource, slug string) keys.Row {
 	value, err := crypto.New().Encrypt("private content", slug)
 	require.NoError(t, err)
 
-	row := keys.Row{Resource: resource, ID: domain.HashSlug(slug), Value: value}
+	row := keys.Row{Resource: resource, ID: domain.HashSlug(slug), Value: value,
+		Legacy: nil, StoredEditCode: "",
+	}
 	if resource == "note" {
 		row.StoredEditCode = legacyEditCode
 		_, err = db.NewRaw(`INSERT INTO notes
@@ -512,7 +516,9 @@ func testRestartAfterFailure(t *testing.T, db *bun.DB) {
 		}
 
 		return nil
-	}}
+	},
+		count: 0,
+	}
 	report, err := manager(t, failing, ring).Migrate(ctx, false)
 	require.Error(t, err)
 	require.Equal(t, 1, report.Changed)
@@ -562,7 +568,9 @@ func testConcurrentCAS(t *testing.T, db *bun.DB) {
 		_, err := db.NewDelete().Table("links").Where("id = ?", row.ID).Exec(ctx)
 
 		return err
-	}}
+	},
+		count: 0,
+	}
 	report, err := manager(t, store, ring).Migrate(ctx, false)
 	require.NoError(t, err)
 	require.Equal(t, 2, report.Conflicts)

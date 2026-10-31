@@ -7,23 +7,24 @@ import (
 
 	urcli "github.com/urfave/cli/v3"
 
+	"github.com/partyzanex/padmark/internal/clifactory"
 	"github.com/partyzanex/padmark/internal/errorcontext"
 	padmark "github.com/partyzanex/padmark/pkg/client"
 )
 
 func expandCommand() *urcli.Command {
-	return &urcli.Command{
-		Name:      "expand",
-		Usage:     "Get a short link's metadata by ID",
-		ArgsUsage: argsUsageID,
-		Flags: []urcli.Flag{
-			&urcli.BoolFlag{
-				Name:  FlagJSON,
-				Usage: "Print the link as JSON",
-			},
-		},
-		Action: expandAction,
-	}
+	return clifactory.Command(func(command *urcli.Command) {
+		command.Name = "expand"
+		command.Usage = "Get a short link's metadata by ID"
+		command.ArgsUsage = argsUsageID
+		command.Flags = []urcli.Flag{
+			clifactory.BoolFlag(func(flag *urcli.BoolFlag) {
+				flag.Name = FlagJSON
+				flag.Usage = "Print the link as JSON"
+			}),
+		}
+		command.Action = expandAction
+	})
 }
 
 func expandAction(ctx context.Context, cmd *urcli.Command) error {

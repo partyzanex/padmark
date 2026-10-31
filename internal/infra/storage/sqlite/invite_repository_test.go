@@ -20,6 +20,8 @@ func inviteTestUser(username string) *domain.User {
 	return &domain.User{
 		ID: uuid.New(), Username: username, CreatedAt: time.Now().UTC(),
 		TOTPSecret: "test-secret", PasswordHash: "test-hash", KDFSalt: []byte("test-salt"),
+
+		LastLoginAt: nil, LastTOTPCounter: 0, IsAdmin: false,
 	}
 }
 

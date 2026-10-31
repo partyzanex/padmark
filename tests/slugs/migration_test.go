@@ -63,6 +63,9 @@ func testBackfill(t *testing.T, db *bun.DB) {
 	_, linkRepo := repositories(db)
 	require.ErrorIs(t, linkRepo.Create(t.Context(), &domain.Link{
 		ID: id, TargetURL: "test ciphertext", CreatedAt: time.Now(),
+
+		ExpiresAt: nil, Privacy: nil, OwnerID: nil, DirectRedirect: nil,
+		EditCode: "", Views: 0, BurnAfterClick: false,
 	}), domain.ErrSlugConflict)
 
 	// The new registry is complete, not only the row added for this test.

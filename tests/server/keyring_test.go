@@ -72,7 +72,9 @@ func startServer(t *testing.T, binary string, args, environment []string) (bool,
 
 	t.Cleanup(func() { cancel(); <-done })
 
-	client := &http.Client{Timeout: 200 * time.Millisecond}
+	client := &http.Client{Timeout: 200 * time.Millisecond,
+		Transport: nil, CheckRedirect: nil, Jar: nil,
+	}
 	defer client.CloseIdleConnections()
 
 	ticker := time.NewTicker(25 * time.Millisecond)
@@ -108,12 +110,24 @@ func TestServerSharedKeyring(t *testing.T) {
 		args            []string
 		derived, starts bool
 	}{
-		{name: "flag", args: []string{"--allow-shared-keyring"}, starts: true},
-		{name: "env", args: []string{"serve"}, env: "true", starts: true},
-		{name: "default_path_flag", args: []string{"serve", "--allow-shared-keyring"}, derived: true, starts: true},
-		{name: "default_path_env", env: "true", derived: true, starts: true},
-		{name: "strict_default"},
-		{name: "flag_false_overrides_env", env: "true", args: []string{"serve", "--allow-shared-keyring=false"}},
+		{name: "flag", args: []string{"--allow-shared-keyring"}, starts: true,
+			env: "", derived: false,
+		},
+		{name: "env", args: []string{"serve"}, env: "true", starts: true,
+			derived: false,
+		},
+		{name: "default_path_flag", args: []string{"serve", "--allow-shared-keyring"}, derived: true, starts: true,
+			env: "",
+		},
+		{name: "default_path_env", env: "true", derived: true, starts: true,
+			args: nil,
+		},
+		{name: "strict_default",
+			env: "", args: nil, derived: false, starts: false,
+		},
+		{name: "flag_false_overrides_env", env: "true", args: []string{"serve", "--allow-shared-keyring=false"},
+			derived: false, starts: false,
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			directory := t.TempDir()

@@ -109,19 +109,42 @@ func postgresFixture() dialectFixture {
 // notes combines the dialect's generated values with the scenario both dumps share.
 func (f *dialectFixture) notes() []legacyNote {
 	notes := []legacyNote{
-		{title: "1 unicode and dollars", content: unicodeContent, contentType: "text/markdown"},
-		{title: "2 custom slug", content: "Custom slug, caller-chosen edit code.", contentType: "text/markdown"},
-		{title: "3 private", content: "private <b>plain</b> text", contentType: "text/plain", private: true},
-		{title: "4 burn after reading", content: "read me once", contentType: "text/markdown", burn: true},
+		{title: "1 unicode and dollars", content: unicodeContent, contentType: "text/markdown",
+			slug: "", editCode: "", createdAt: "", expiresAt: "",
+			burnTTL: 0, views: 0, burn: false, private: false,
+			untaggedBySchema: false,
+		},
+		{title: "2 custom slug", content: "Custom slug, caller-chosen edit code.", contentType: "text/markdown",
+			slug: "", editCode: "", createdAt: "", expiresAt: "",
+			burnTTL: 0, views: 0, burn: false, private: false,
+			untaggedBySchema: false,
+		},
+		{title: "3 private", content: "private <b>plain</b> text", contentType: "text/plain", private: true,
+			slug: "", editCode: "", createdAt: "", expiresAt: "",
+			burnTTL: 0, views: 0, burn: false, untaggedBySchema: false,
+		},
+		{title: "4 burn after reading", content: "read me once", contentType: "text/markdown", burn: true,
+			slug: "", editCode: "", createdAt: "", expiresAt: "",
+			burnTTL: 0, views: 0, private: false, untaggedBySchema: false,
+		},
 		{
 			title: "5 far future expiry", content: "expires in ten years", contentType: "text/markdown",
 			burnTTL: farFutureTTL, expiresAt: f.expires5,
+
+			slug: "", editCode: "", createdAt: "", views: 0,
+			burn: false, private: false, untaggedBySchema: false,
 		},
 		{
 			title: "6 already expired", content: "expired before the dump", contentType: "text/markdown",
 			burnTTL: 1, expiresAt: f.expires6,
+
+			slug: "", editCode: "", createdAt: "", views: 0,
+			burn: false, private: false, untaggedBySchema: false,
 		},
-		{title: "7 viewed once", content: base64Content, contentType: "text/markdown", views: 1},
+		{title: "7 viewed once", content: base64Content, contentType: "text/markdown", views: 1,
+			slug: "", editCode: "", createdAt: "", expiresAt: "",
+			burnTTL: 0, burn: false, private: false, untaggedBySchema: false,
+		},
 	}
 
 	for i := range notes {
@@ -148,6 +171,9 @@ func weakEditCodeNote() legacyNote {
 		slug: "weak-custom-edit-code", editCode: "password1234", title: "11 weak alphanumeric edit code",
 		content: "Caller-chosen code with the same shape as a generated code.", contentType: "text/plain",
 		createdAt: "2026-10-23T00:13:00.000004Z",
+
+		expiresAt: "", burnTTL: 0, views: 0, burn: false,
+		private: false, untaggedBySchema: false,
 	}
 }
 
@@ -159,16 +185,24 @@ func hexSlugNotes() []legacyNote {
 			slug: strings.Repeat("a", 64), editCode: "v1$old-user-code", title: "8 hex slug, v1$ code",
 			content: "64-hex custom slug, code starts like an argon2id hash", contentType: "text/markdown",
 			createdAt: "2026-10-23T00:13:00.000001Z",
+
+			expiresAt: "", burnTTL: 0, views: 0, burn: false,
+			private: false, untaggedBySchema: false,
 		},
 		{
 			slug: strings.Repeat("b", 64), editCode: "s1$old-user-code", title: "9 hex slug, s1$ code",
 			content: "64-hex custom slug, code starts like a fast hash", contentType: "text/plain",
 			createdAt: "2026-10-23T00:13:00.000002Z",
+
+			expiresAt: "", burnTTL: 0, views: 0, burn: false,
+			private: false, untaggedBySchema: false,
 		},
 		{
 			slug: strings.Repeat("c", 64), editCode: hashShaped, title: "10 hex slug, hash-shaped code",
 			content: "64-hex custom slug, code has the exact shape of a stored hash", contentType: "text/markdown",
 			createdAt: "2026-10-23T00:13:00.000003Z", untaggedBySchema: true,
+
+			expiresAt: "", burnTTL: 0, views: 0, burn: false, private: false,
 		},
 	}
 }

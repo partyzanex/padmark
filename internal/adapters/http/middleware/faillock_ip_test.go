@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	time "time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -26,7 +27,10 @@ func failLockoutProbe(handler http.Handler, remoteAddr string, callerID uuid.UUI
 	req.RemoteAddr = remoteAddr
 
 	if callerID != uuid.Nil {
-		req = req.WithContext(context.WithValue(req.Context(), keyUser, &domain.User{ID: callerID}))
+		req = req.WithContext(context.WithValue(req.Context(), keyUser, &domain.User{ID: callerID,
+			CreatedAt: time.Time{}, LastLoginAt: nil, Username: "", TOTPSecret: "",
+			PasswordHash: "", KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
+		}))
 	}
 
 	rec := httptest.NewRecorder()
