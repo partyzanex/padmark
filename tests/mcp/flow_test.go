@@ -18,8 +18,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/uptrace/bun"
 
-	adaptershttp "github.com/partyzanex/padmark/internal/adapters/http"
 	mcpx "github.com/partyzanex/padmark/internal/adapters/mcp"
+	"github.com/partyzanex/padmark/internal/adapters/web"
 	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/infra/crypto"
 	"github.com/partyzanex/padmark/internal/infra/lock"
@@ -168,9 +168,9 @@ func startTestPadmark(t *testing.T) *testStack {
 
 	notesMgr, linksMgr := newTestManagers(t, db, slugLock)
 
-	handler := adaptershttp.NewHandler(notesMgr, linksMgr, discardTestLogger()).WithAuthManager(authMgr)
-	ogen := adaptershttp.NewOgenHandler(notesMgr, linksMgr, adaptershttp.NoPinger{}, discardTestLogger())
-	router, err := adaptershttp.NewRouter(handler, ogen, &adaptershttp.RouterOptions{
+	handler := web.NewHandler(notesMgr, linksMgr, discardTestLogger()).WithAuthManager(authMgr)
+	ogen := web.NewOgenHandler(notesMgr, linksMgr, web.NoPinger{}, discardTestLogger())
+	router, err := web.NewRouter(handler, ogen, &web.RouterOptions{
 		MaxBodyBytes: 256 * 1024,
 		CSRFSecret:   []byte("padmark-test-csrf-secret-32bytes"),
 

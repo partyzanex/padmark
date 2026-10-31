@@ -18,7 +18,7 @@ const sessionIDBytes = 32
 
 // DefaultSessionTTL is how long a session stays valid when NewSessionManager is given no
 // override (sessionTTL <= 0). It is the single source of truth for the session lifetime default:
-// internal/infra/server's --session-ttl flag default and internal/adapters/http's session cookie
+// internal/infra/server's --session-ttl flag default and internal/adapters/web's session cookie
 // MaxAge (set via Handler.WithSessionTTL) both derive from this constant instead of each keeping
 // their own copy, which would otherwise drift out of sync with the actual server-side TTL.
 const DefaultSessionTTL = 30 * 24 * time.Hour

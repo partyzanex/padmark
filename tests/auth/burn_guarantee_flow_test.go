@@ -17,7 +17,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	adaptershttp "github.com/partyzanex/padmark/internal/adapters/http"
+	"github.com/partyzanex/padmark/internal/adapters/web"
 	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/infra/crypto"
 	sqliterepo "github.com/partyzanex/padmark/internal/infra/storage/sqlite"
@@ -69,11 +69,11 @@ func newBurnGuaranteeEnv(t *testing.T, dbName string) ownerFlowEnv {
 
 	notesMgr, linksMgr := newOwnerFlowManagers(t, db, log)
 
-	handler := adaptershttp.NewHandler(notesMgr, linksMgr, log).
+	handler := web.NewHandler(notesMgr, linksMgr, log).
 		WithRevealStore(sqliterepo.NewRevealRepository(db, log)).
 		WithAuthManager(authMgr)
-	ogen := adaptershttp.NewOgenHandler(notesMgr, linksMgr, adaptershttp.NoPinger{}, log)
-	router, err := adaptershttp.NewRouter(handler, ogen, &adaptershttp.RouterOptions{
+	ogen := web.NewOgenHandler(notesMgr, linksMgr, web.NoPinger{}, log)
+	router, err := web.NewRouter(handler, ogen, &web.RouterOptions{
 		MaxBodyBytes: 256 * 1024,
 		CSRFSecret:   []byte("padmark-test-csrf-secret-32bytes"),
 		// The burn-link flows create their links anonymously and follow them with a 301; anonymous

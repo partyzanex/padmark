@@ -26,7 +26,7 @@ const SlugMaxSegments = 10
 
 // ReservedSlugPrefixes returns the first path segments that name built-in routes. A custom slug
 // must not start with one, or its URL would resolve to that route (e.g. "edit/foo" → the editor)
-// instead of a note or link. internal/adapters/http.buildNamedRoutes uses this as the single
+// instead of a note or link. internal/adapters/web.buildNamedRoutes uses this as the single
 // source of truth for which first segments are routes rather than note/link slugs — shared here
 // (not left in the notes usecase package) because both notes.Manager and links.Manager need it,
 // and a usecase package may never import another usecase package.

@@ -117,7 +117,7 @@ type APITokenStore interface {
 
 // Manager composes the four narrower auth managers — SessionManager (session.go),
 // OnboardingManager (onboarding.go), UserAdminManager (user_admin.go), and APITokenManager
-// (api_token.go) — into the single seam internal/adapters/http.AuthManager consumes. Each
+// (api_token.go) — into the single seam internal/adapters/web.AuthManager consumes. Each
 // concern owns its own narrow dependency set and lives in its own file; Manager itself is pure
 // composition (Go embedding promotes each sub-manager's methods, so Manager needs no methods
 // of its own) so the four concerns stay independently readable and testable.

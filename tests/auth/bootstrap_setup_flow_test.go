@@ -16,7 +16,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	adaptershttp "github.com/partyzanex/padmark/internal/adapters/http"
+	"github.com/partyzanex/padmark/internal/adapters/web"
 )
 
 // Finding M-2: while no account exists, /setup without an invite creates the single, permanent
@@ -111,9 +111,9 @@ func newBootstrapEnv(t *testing.T, dbName string) ownerFlowEnv {
 	log := slog.New(slog.DiscardHandler)
 	notesMgr, linksMgr := newOwnerFlowManagers(t, env.db, log)
 
-	handler := adaptershttp.NewHandler(notesMgr, linksMgr, log).WithAuthManager(env.authMgr)
-	ogen := adaptershttp.NewOgenHandler(notesMgr, linksMgr, adaptershttp.NoPinger{}, log)
-	router, err := adaptershttp.NewRouter(handler, ogen, &adaptershttp.RouterOptions{
+	handler := web.NewHandler(notesMgr, linksMgr, log).WithAuthManager(env.authMgr)
+	ogen := web.NewOgenHandler(notesMgr, linksMgr, web.NoPinger{}, log)
+	router, err := web.NewRouter(handler, ogen, &web.RouterOptions{
 		MaxBodyBytes:   256 * 1024,
 		CSRFSecret:     []byte("padmark-test-csrf-secret-32bytes"),
 		BootstrapToken: bootstrapFlowToken,

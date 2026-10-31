@@ -1,7 +1,7 @@
 // Package linkcache provides an in-memory LRU cache for frequently-followed ("hot") short links,
 // implementing links.Cache (see links.Manager.WithCache). Reuses github.com/bluele/gcache — an
 // already-vendored dependency, the same library backing the fail-lockout cache in
-// internal/adapters/http/middleware_faillock.go — rather than introducing a second LRU library
+// internal/adapters/web/middleware_faillock.go — rather than introducing a second LRU library
 // for one more use of the same shape.
 package linkcache
 

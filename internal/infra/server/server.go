@@ -20,7 +20,7 @@ import (
 	"github.com/uptrace/bun"
 	"github.com/urfave/cli/v3"
 
-	adaptershttp "github.com/partyzanex/padmark/internal/adapters/http"
+	"github.com/partyzanex/padmark/internal/adapters/web"
 	"github.com/partyzanex/padmark/internal/errorcontext"
 	"github.com/partyzanex/padmark/internal/infra/crypto"
 	"github.com/partyzanex/padmark/internal/infra/linkcache"
@@ -140,8 +140,8 @@ func warnDeprecatedSessionFlags(ctx context.Context, cmd *cli.Command, log *slog
 func buildRouter(
 	ctx context.Context,
 	cmd *cli.Command,
-	handler *adaptershttp.Handler,
-	ogenHandler *adaptershttp.OgenHandler,
+	handler *web.Handler,
+	ogenHandler *web.OgenHandler,
 	log *slog.Logger,
 	bootstrapToken string,
 ) (http.Handler, error) {
@@ -186,7 +186,7 @@ func buildRouter(
 	}
 
 	warnDeprecatedSessionFlags(ctx, cmd, log)
-	opts := adaptershttp.RouterOptions{
+	opts := web.RouterOptions{
 		MaxBodyBytes:   cmd.Int(FlagMaxBodyBytes),
 		RateLimit:      cmd.Int(FlagRateLimit),
 		RateBurst:      cmd.Int(FlagRateBurst),
@@ -206,7 +206,7 @@ func buildRouter(
 		BootstrapToken: bootstrapToken,
 	}
 
-	router, err := adaptershttp.NewRouter(handler, ogenHandler, &opts)
+	router, err := web.NewRouter(handler, ogenHandler, &opts)
 	if err != nil {
 		return nil, fmt.Errorf("new router: %w", err)
 	}
@@ -423,8 +423,8 @@ func waitAndShutdown(serverCtx context.Context) error {
 // Returns an error when auth.NewManager's bootstrap-time crypto precompute fails — this only
 // runs once at startup, so the caller should treat it as fatal.
 func attachAccountSystem(
-	ctx context.Context, cmd *cli.Command, handler *adaptershttp.Handler, stores auth.Stores, log *slog.Logger,
-) (*adaptershttp.Handler, error) {
+	ctx context.Context, cmd *cli.Command, handler *web.Handler, stores auth.Stores, log *slog.Logger,
+) (*web.Handler, error) {
 	if !cmd.Bool(FlagEnableAccounts) {
 		log.InfoContext(ctx, "account system disabled (public mode); set --enable-accounts to enable login/admin")
 
@@ -466,7 +466,7 @@ func attachAccountSystem(
 }
 
 //nolint:ireturn // factory: returns different concrete impls (postgres vs sqlite) behind common interfaces
-func buildAuthRepos(storage string, db *bun.DB) (auth.Stores, adaptershttp.RevealTokenStore) {
+func buildAuthRepos(storage string, db *bun.DB) (auth.Stores, web.RevealTokenStore) {
 	switch storage {
 	case storagePostgres:
 		return auth.Stores{
@@ -536,7 +536,7 @@ type serverStorage struct {
 func buildHandlers(
 	ctx context.Context, cmd *cli.Command, store serverStorage, log *slog.Logger,
 	linkMetrics *linkmetrics.Metrics, keyring *crypto.ContentKeyring,
-) (*adaptershttp.Handler, *adaptershttp.OgenHandler, error) {
+) (*web.Handler, *web.OgenHandler, error) {
 	noteCipher, err := keyring.ForResource("note")
 	if err != nil {
 		return nil, nil, fmt.Errorf("note content cipher: %w", err)
@@ -577,7 +577,7 @@ func buildHandlers(
 
 	authStores, revealStore := buildAuthRepos(store.name, store.db)
 
-	handler := adaptershttp.NewHandler(manager, linkManager, log).
+	handler := web.NewHandler(manager, linkManager, log).
 		WithRevealStore(revealStore)
 
 	handler, err = attachAccountSystem(ctx, cmd, handler, authStores, log)
@@ -585,7 +585,7 @@ func buildHandlers(
 		return nil, nil, fmt.Errorf("attach account system: %w", err)
 	}
 
-	ogenHandler := adaptershttp.NewOgenHandler(manager, linkManager, store.db.DB, log)
+	ogenHandler := web.NewOgenHandler(manager, linkManager, store.db.DB, log)
 
 	return handler, ogenHandler, nil
 }

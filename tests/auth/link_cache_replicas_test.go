@@ -13,7 +13,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	adaptershttp "github.com/partyzanex/padmark/internal/adapters/http"
+	"github.com/partyzanex/padmark/internal/adapters/web"
 	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/infra/linkcache"
 	"github.com/partyzanex/padmark/internal/usecases/auth"
@@ -34,9 +34,9 @@ func TestLinkCacheReplicas(t *testing.T) {
 	notes, links := newOwnerFlowManagers(t, env.db, log)
 	cache := linkcache.NewDefault(log)
 	links.WithCache(cache)
-	handler := adaptershttp.NewHandler(notes, links, log).WithAuthManager(env.authMgr)
-	ogen := adaptershttp.NewOgenHandler(notes, links, adaptershttp.NoPinger{}, log)
-	router, err := adaptershttp.NewRouter(handler, ogen, &adaptershttp.RouterOptions{
+	handler := web.NewHandler(notes, links, log).WithAuthManager(env.authMgr)
+	ogen := web.NewOgenHandler(notes, links, web.NoPinger{}, log)
+	router, err := web.NewRouter(handler, ogen, &web.RouterOptions{
 		MaxBodyBytes: 256 * 1024,
 		CSRFSecret:   []byte("padmark-test-csrf-secret-32bytes"),
 

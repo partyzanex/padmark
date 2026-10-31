@@ -44,7 +44,7 @@ Dependencies point inward: adapters and infrastructure depend on usecases and do
 - **infra** (`internal/infra/`): SQLite/PostgreSQL repositories, rendering, crypto, caches,
   metrics and server composition/configuration in `infra/server/`.
 - **adapters** (`internal/adapters/`): HTTP, CLI and MCP. HTTP templates, CSS, JavaScript,
-  fonts, OpenAPI and `/llms.txt` are embedded from `adapters/http/`.
+  fonts, OpenAPI and `/llms.txt` are embedded from `adapters/web/`.
 
 ### Naming and dependency injection
 
@@ -55,8 +55,8 @@ Dependencies point inward: adapters and infrastructure depend on usecases and do
 - Each adapter defines its own interfaces instead of importing another adapter's interfaces.
 - Manual wiring lives in `internal/infra/server/server.go`, through `serverAction`,
   `buildHandlers` and `buildRouter`; do not introduce a DI framework.
-- HTTP middleware and its request context live in `internal/adapters/http/middleware/`.
-  Keep it independent of the parent HTTP package; shared JSON errors live in `http/response/`.
+- HTTP middleware and its request context live in `internal/adapters/web/middleware/`.
+  Keep it independent of the parent `web` package; shared JSON errors live in `web/response/`.
 - Notes and links share the same slug-lock instance for local preflight/cache coordination.
   Storage triggers enforce cross-process uniqueness through the `slug_namespace` primary key.
 - `NewHandler(manager, linkManager, log)` requires both managers.
@@ -108,7 +108,7 @@ Dependencies point inward: adapters and infrastructure depend on usecases and do
 
 - Unit tests live beside application packages and use `testify/suite`, `require` and gomock.
 - Generate mocks from consumer interfaces with the checked-in `//go:generate` directives;
-  HTTP mock directives may target `http_test`, not the implementation package.
+  HTTP mock directives may target `web_test`, not the implementation package.
 - Use `t.Context()` / `s.T().Context()` in tests, never a stored background context.
 - Integration suites in `tests/` and PostgreSQL repository tests use the `integration` tag.
   SQLite can use temporary/in-memory databases; PostgreSQL uses testcontainers and needs Docker.
@@ -136,8 +136,8 @@ Dependencies point inward: adapters and infrastructure depend on usecases and do
 
 ## Frontend guidelines
 
-- Current UI sources are `internal/adapters/http/templates/` and
-  `internal/adapters/http/static/style.css`, with page-specific nonce-protected styles/scripts.
+- Current UI sources are `internal/adapters/web/templates/` and
+  `internal/adapters/web/static/style.css`, with page-specific nonce-protected styles/scripts.
   There is no checked-in `docs/design/` mockup directory.
 - Read the affected template, shared styles and any design reference supplied for the task.
   `docs/screens/` contains example screenshots; browser regression PNGs live in

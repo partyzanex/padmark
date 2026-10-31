@@ -88,7 +88,7 @@ type Note struct {
 // plaintext URL identifier must not be persisted. New content envelopes authenticate this
 // identifier as AAD but derive no encryption keys from it.
 // It lives here rather than in internal/infra/crypto because both internal/usecases/notes and
-// internal/adapters/http need it and neither may import infra (onion architecture); domain is
+// internal/adapters/web need it and neither may import infra (onion architecture); domain is
 // the one layer both may import.
 //
 // Security note: this fast hash still permits offline guessing of human-readable URLs.

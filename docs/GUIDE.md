@@ -316,7 +316,7 @@ long-lived structs: pass a context to each operation instead.
 
 Unit tests live beside their application packages and use `testify/suite`, `require` and
 `go.uber.org/mock`. Generate mocks from the consumer interface's actual directive; an HTTP
-mock may target `http_test` rather than the implementation package.
+mock may target `web_test` rather than the implementation package.
 
 Application integration suites live in `tests/auth`, `manager`, `mcp`, `encryption` and
 `upgrade`, with `//go:build integration`. PostgreSQL repository tests use that tag too.

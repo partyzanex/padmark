@@ -11,7 +11,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	adhttp "github.com/partyzanex/padmark/internal/adapters/http"
+	"github.com/partyzanex/padmark/internal/adapters/web"
 	"github.com/partyzanex/padmark/internal/buildinfo"
 )
 
@@ -28,7 +28,7 @@ func readDocument(t *testing.T, path string, handler http.HandlerFunc) string {
 func TestIndexFileLists(t *testing.T) {
 	discardLog := slog.New(slog.DiscardHandler)
 
-	index := readDocument(t, "/llms.txt", adhttp.LLMsTxt(discardLog))
+	index := readDocument(t, "/llms.txt", web.LLMsTxt(discardLog))
 	require.True(t, strings.HasPrefix(index, "# "))
 
 	linkPattern := regexp.MustCompile(`^- \[[^\]]+\]\(([^)]+)\)(: .*)?$`)
@@ -66,14 +66,14 @@ func TestIndexFileLists(t *testing.T) {
 func TestAgentDocumentsMatchOpenAPIRelease(t *testing.T) {
 	discardLog := slog.New(slog.DiscardHandler)
 
-	spec := readDocument(t, "/api/openapi.yaml", adhttp.APISpec(discardLog))
+	spec := readDocument(t, "/api/openapi.yaml", web.APISpec(discardLog))
 	versionPattern := regexp.MustCompile(`(?m)^  version: "?([^"\s]+)"?$`)
 	version := versionPattern.FindStringSubmatch(spec)
 	require.Len(t, version, 2)
 	require.Equal(t, buildinfo.Version(), version[1])
 
 	for path, handler := range map[string]http.HandlerFunc{
-		"/llms.txt": adhttp.LLMsTxt(discardLog), "/api/reference.md": adhttp.APIReference(discardLog),
+		"/llms.txt": web.LLMsTxt(discardLog), "/api/reference.md": web.APIReference(discardLog),
 	} {
 		document := readDocument(t, path, handler)
 		require.Contains(t, document, "release "+version[1], path)

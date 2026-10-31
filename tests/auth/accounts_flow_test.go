@@ -20,7 +20,7 @@ import (
 	"github.com/uptrace/bun"
 
 	clicmd "github.com/partyzanex/padmark/internal/adapters/cli"
-	adaptershttp "github.com/partyzanex/padmark/internal/adapters/http"
+	"github.com/partyzanex/padmark/internal/adapters/web"
 	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/infra/crypto"
 	"github.com/partyzanex/padmark/internal/infra/lock"
@@ -169,9 +169,9 @@ func TestAccountsFlow(t *testing.T) {
 		false,
 	)
 
-	handler := adaptershttp.NewHandler(notesMgr, linksMgr, log).WithAuthManager(authMgr)
-	ogen := adaptershttp.NewOgenHandler(notesMgr, linksMgr, adaptershttp.NoPinger{}, log)
-	router, err := adaptershttp.NewRouter(handler, ogen, &adaptershttp.RouterOptions{
+	handler := web.NewHandler(notesMgr, linksMgr, log).WithAuthManager(authMgr)
+	ogen := web.NewOgenHandler(notesMgr, linksMgr, web.NoPinger{}, log)
+	router, err := web.NewRouter(handler, ogen, &web.RouterOptions{
 		MaxBodyBytes:   256 * 1024,
 		CSRFSecret:     []byte("padmark-test-csrf-secret-32bytes"),
 		BootstrapToken: accountsFlowBootstrapToken,

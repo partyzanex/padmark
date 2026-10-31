@@ -16,7 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/uptrace/bun"
 
-	adaptershttp "github.com/partyzanex/padmark/internal/adapters/http"
+	"github.com/partyzanex/padmark/internal/adapters/web"
 	"github.com/partyzanex/padmark/internal/infra/crypto"
 	"github.com/partyzanex/padmark/internal/infra/linkcache"
 	"github.com/partyzanex/padmark/internal/infra/lock"
@@ -106,9 +106,9 @@ func newOwnerFlowEnv(t *testing.T, dbName string) ownerFlowEnv {
 
 	notesMgr, linksMgr := newOwnerFlowManagers(t, db, log)
 
-	handler := adaptershttp.NewHandler(notesMgr, linksMgr, log).WithAuthManager(authMgr)
-	ogen := adaptershttp.NewOgenHandler(notesMgr, linksMgr, adaptershttp.NoPinger{}, log)
-	router, err := adaptershttp.NewRouter(handler, ogen, &adaptershttp.RouterOptions{
+	handler := web.NewHandler(notesMgr, linksMgr, log).WithAuthManager(authMgr)
+	ogen := web.NewOgenHandler(notesMgr, linksMgr, web.NoPinger{}, log)
+	router, err := web.NewRouter(handler, ogen, &web.RouterOptions{
 		MaxBodyBytes: 256 * 1024,
 		CSRFSecret:   []byte("padmark-test-csrf-secret-32bytes"),
 

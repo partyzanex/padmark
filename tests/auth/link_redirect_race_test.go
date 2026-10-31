@@ -16,7 +16,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	adhttp "github.com/partyzanex/padmark/internal/adapters/http"
+	"github.com/partyzanex/padmark/internal/adapters/web"
 	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/infra/crypto"
 	"github.com/partyzanex/padmark/internal/infra/linkcache"
@@ -117,9 +117,9 @@ func TestLinkRedirectPrivacyRace(t *testing.T) {
 					reader.WithCache(cache)
 				}
 
-				handler := adhttp.NewHandler(notes, reader, log).WithAuthManager(env.authMgr)
-				ogen := adhttp.NewOgenHandler(notes, reader, adhttp.NoPinger{}, log)
-				router, err := adhttp.NewRouter(handler, ogen, &adhttp.RouterOptions{
+				handler := web.NewHandler(notes, reader, log).WithAuthManager(env.authMgr)
+				ogen := web.NewOgenHandler(notes, reader, web.NoPinger{}, log)
+				router, err := web.NewRouter(handler, ogen, &web.RouterOptions{
 					MaxBodyBytes: 256 * 1024, DirectRedirect: true,
 
 					ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, CSRFSecret: nil,

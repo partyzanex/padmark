@@ -18,7 +18,7 @@ import (
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect"
 
-	adhttp "github.com/partyzanex/padmark/internal/adapters/http"
+	"github.com/partyzanex/padmark/internal/adapters/web"
 	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/infra/crypto"
 	"github.com/partyzanex/padmark/internal/infra/lock"
@@ -102,9 +102,9 @@ func replica(t *testing.T, db *bun.DB, gate *createGate) *httptest.Server {
 		render.NewRenderer(), testutil.ContentEncryptor(t, "note"), hasher, log, true)
 	linkManager := links.NewManager(&pausedLinks{Storage: linkRepo, gate: gate}, noteRepo, localLock,
 		testutil.ContentEncryptor(t, "link"), hasher, log, true)
-	handler := adhttp.NewHandler(noteManager, linkManager, log)
-	ogen := adhttp.NewOgenHandler(noteManager, linkManager, adhttp.NoPinger{}, log)
-	router, err := adhttp.NewRouter(handler, ogen, &adhttp.RouterOptions{
+	handler := web.NewHandler(noteManager, linkManager, log)
+	ogen := web.NewOgenHandler(noteManager, linkManager, web.NoPinger{}, log)
+	router, err := web.NewRouter(handler, ogen, &web.RouterOptions{
 		MaxBodyBytes: 256 * 1024,
 		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, CSRFSecret: nil,
 		AllowedHosts: nil, RateLimit: 0, RateBurst: 0, SessionTTL: 0, DisableAPI: false,
