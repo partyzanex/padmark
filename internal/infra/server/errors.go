@@ -20,6 +20,7 @@ var (
 )
 
 var (
+	errFlagOutOfRange        = errors.New("flag value out of range")
 	errInvalidArgon2Budget   = errors.New("insufficient argon2 memory budget")
 	errInvalidArgon2Cost     = errors.New("cost must be between")
 	errInvalidBootstrapToken = errors.New("invalid bootstrap token length")

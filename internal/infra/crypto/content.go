@@ -133,13 +133,21 @@ func contentGCM(key []byte) (cipher.AEAD, error) {
 	return gcm, nil
 }
 
-func wrappedKeyAAD(aad []byte, keyID string, payload []byte) []byte {
+// wrappedKeyAAD binds the wrapped DEK to the record AAD, the key ID and the payload digest.
+// Cipher construction already limits key IDs to maxKeyIDSize; the check repeats that bound
+// where the length narrows to uint16.
+func wrappedKeyAAD(aad []byte, keyID string, payload []byte) ([]byte, error) {
+	keyIDSize := len(keyID)
+	if keyIDSize > maxKeyIDSize {
+		return nil, fmt.Errorf("%w: %d bytes", ErrInvalidContentKeyID, keyIDSize)
+	}
+
 	result := append([]byte("padmark-dek-v2\x00"), aad...)
-	result = binary.BigEndian.AppendUint16(result, uint16(len(keyID))) //nolint:gosec // validated <= 64
+	result = binary.BigEndian.AppendUint16(result, uint16(keyIDSize))
 	result = append(result, keyID...)
 	digest := sha256.Sum256(payload)
 
-	return append(result, digest[:]...)
+	return append(result, digest[:]...), nil
 }
 
 // Encrypt writes pmc2$p$kid$wrappedDEK$payload. The supplied ID is the stored HashSlug ID,
@@ -231,7 +239,12 @@ func (enc *ContentCipher) encrypt(plaintext, recordID, kind string) (string, err
 		return "", fmt.Errorf("seal: %w", err)
 	}
 
-	wrapped, err := enc.seal(enc.keys[enc.activeID], dek, wrappedKeyAAD(aad, enc.activeID, payload))
+	keyAAD, err := wrappedKeyAAD(aad, enc.activeID, payload)
+	if err != nil {
+		return "", fmt.Errorf("wrapped key aad: %w", err)
+	}
+
+	wrapped, err := enc.seal(enc.keys[enc.activeID], dek, keyAAD)
 	if err != nil {
 		return "", fmt.Errorf("seal: %w", err)
 	}
@@ -287,7 +300,12 @@ func (enc *ContentCipher) unwrap(value, recordID string) (*unwrappedEnvelope, er
 		return nil, fmt.Errorf("content aadfor kind: %w", err)
 	}
 
-	dek, err := kek.Open(nil, wrapped[:contentNonceSize], wrapped[contentNonceSize:], wrappedKeyAAD(aad, keyID, payload))
+	keyAAD, err := wrappedKeyAAD(aad, keyID, payload)
+	if err != nil {
+		return nil, domain.ErrDecryptionFailed
+	}
+
+	dek, err := kek.Open(nil, wrapped[:contentNonceSize], wrapped[contentNonceSize:], keyAAD)
 	if err != nil {
 		return nil, domain.ErrDecryptionFailed
 	}

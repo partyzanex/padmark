@@ -21,6 +21,8 @@ const DefaultArgon2MemoryBudget uint32 = 128 * 1024
 type argon2Budget struct {
 	sem      *semaphore.Weighted
 	capacity int64
+	// kib keeps the configured budget in its original type, so reads need no narrowing.
+	kib uint32
 }
 
 // newArgon2Budget returns a budget of kib KiB; zero selects DefaultArgon2MemoryBudget.
@@ -29,7 +31,7 @@ func newArgon2Budget(kib uint32) *argon2Budget {
 		kib = DefaultArgon2MemoryBudget
 	}
 
-	return &argon2Budget{sem: semaphore.NewWeighted(int64(kib)), capacity: int64(kib)}
+	return &argon2Budget{sem: semaphore.NewWeighted(int64(kib)), capacity: int64(kib), kib: kib}
 }
 
 // weight clamps a derivation larger than the whole budget to the budget, so it waits for
@@ -83,7 +85,7 @@ func SetArgon2MemoryBudget(kib uint32) {
 
 // Argon2MemoryBudget returns the current process-wide argon2id workspace budget in KiB.
 func Argon2MemoryBudget() uint32 {
-	return uint32(currentArgon2Budget().capacity) //nolint:gosec // G115: capacity is built from a uint32
+	return currentArgon2Budget().kib
 }
 
 func currentArgon2Budget() *argon2Budget {

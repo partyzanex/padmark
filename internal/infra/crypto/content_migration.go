@@ -68,8 +68,12 @@ func (enc *ContentCipher) Rewrap(value, recordID string) (string, error) {
 		return value, nil
 	}
 
-	wrapped, err := enc.seal(enc.keys[enc.activeID], envelope.dek,
-		wrappedKeyAAD(envelope.aad, enc.activeID, envelope.payload))
+	keyAAD, err := wrappedKeyAAD(envelope.aad, enc.activeID, envelope.payload)
+	if err != nil {
+		return "", fmt.Errorf("wrapped key aad: %w", err)
+	}
+
+	wrapped, err := enc.seal(enc.keys[enc.activeID], envelope.dek, keyAAD)
 	if err != nil {
 		return "", fmt.Errorf("seal: %w", err)
 	}

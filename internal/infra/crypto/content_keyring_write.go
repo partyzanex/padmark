@@ -37,7 +37,7 @@ func (k *ContentKeyring) AddKey(id string) error {
 
 // WriteContentKeyring publishes a complete 0600 file exclusively, never overwriting a backup.
 // A temporary file in the same directory is fsynced before linking it into its final name.
-func WriteContentKeyring(path string, keyring *ContentKeyring) error {
+func WriteContentKeyring(path string, keyring *ContentKeyring) (err error) {
 	_, validateErr := NewContentCipher(keyring.Active, keyring.Keys, "note")
 	if validateErr != nil {
 		return fmt.Errorf("new content cipher: %w", validateErr)
@@ -57,7 +57,14 @@ func WriteContentKeyring(path string, keyring *ContentKeyring) error {
 	if err != nil {
 		return fmt.Errorf("create keyring file: %w", err)
 	}
-	defer os.Remove(file.Name()) //nolint:errcheck // best-effort removal of unpublished temporary file
+	// The temporary name keeps a copy of the keys even after the link publishes the file, so a
+	// failed removal leaves a secret on disk and fails the write.
+	defer func() {
+		removeErr := os.Remove(file.Name())
+		if removeErr != nil {
+			err = errors.Join(err, fmt.Errorf("remove temporary keyring file: %w", removeErr))
+		}
+	}()
 
 	_, writeErr := file.Write(data)
 	syncErr := file.Sync()

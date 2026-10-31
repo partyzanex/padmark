@@ -62,7 +62,10 @@ func TestContentCipher_FreshDEKsAndNonces(t *testing.T) {
 		kid, wrapped, payload, parseErr := parseContentEnvelope(sealed)
 		require.NoError(t, parseErr)
 
-		dek, openErr := enc.keys[kid].Open(nil, wrapped[:12], wrapped[12:], wrappedKeyAAD(aad, kid, payload))
+		keyAAD, aadErr := wrappedKeyAAD(aad, kid, payload)
+		require.NoError(t, aadErr)
+
+		dek, openErr := enc.keys[kid].Open(nil, wrapped[:12], wrapped[12:], keyAAD)
 		require.NoError(t, openErr)
 		require.Len(t, dek, 32)
 		require.NotEqual(t, previousKey, dek)

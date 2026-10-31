@@ -266,12 +266,19 @@ func allowedHostSet(raw string) map[string]struct{} {
 // stay unset: the handler writes one redirect line per request and never reads a body, while
 // the shared ReadHeaderTimeout/IdleTimeout constants still bound headers and keep-alive.
 func newRedirectServer(addr string, allowedHosts map[string]struct{}) *http.Server {
-	return &http.Server{ //nolint:exhaustruct_v5 // unset stdlib fields stay at zero = stdlib defaults apply
-		Addr:              addr,
-		Handler:           httpRedirectHandler(allowedHosts),
-		ReadHeaderTimeout: readHeaderTimeout,
-		IdleTimeout:       idleTimeout,
-	}
+	return newHTTPServer(addr, httpRedirectHandler(allowedHosts))
+}
+
+// newHTTPServer sets the address, the handler and the shared ReadHeaderTimeout/IdleTimeout
+// policy. The other http.Server fields keep their zero values, so the stdlib defaults apply.
+func newHTTPServer(addr string, handler http.Handler) *http.Server {
+	server := new(http.Server)
+	server.Addr = addr
+	server.Handler = handler
+	server.ReadHeaderTimeout = readHeaderTimeout
+	server.IdleTimeout = idleTimeout
+
+	return server
 }
 
 func startRedirectServer(ctx context.Context, addr string, allowedHosts map[string]struct{}, log *slog.Logger) {
@@ -298,15 +305,12 @@ func startRedirectServer(ctx context.Context, addr string, allowedHosts map[stri
 func newMetricsServer(addr string, reg *prometheus.Registry) *http.Server {
 	mux := http.NewServeMux()
 
-	metricsOpts := promhttp.HandlerOpts{} //nolint:exhaustruct_v5 // promhttp defaults apply
+	// The zero value selects the promhttp defaults.
+	var metricsOpts promhttp.HandlerOpts
+
 	mux.Handle("GET /metrics", promhttp.HandlerFor(reg, metricsOpts))
 
-	return &http.Server{ //nolint:exhaustruct_v5 // unset stdlib fields stay at zero = stdlib defaults apply
-		Addr:              addr,
-		Handler:           mux,
-		ReadHeaderTimeout: readHeaderTimeout,
-		IdleTimeout:       idleTimeout,
-	}
+	return newHTTPServer(addr, mux)
 }
 
 func startMetricsServer(ctx context.Context, addr string, reg *prometheus.Registry, log *slog.Logger) {
@@ -342,15 +346,12 @@ func listenAndServe(srv *http.Server, tlsCert, tlsKey string, cancel context.Can
 // limit come from operator flags; ReadHeaderTimeout and IdleTimeout are shared constants so
 // the main listener enforces the same policy as the auxiliary redirect and metrics listeners.
 func newMainServer(addr string, router http.Handler, readTimeout, writeTimeout, maxHeaderBytes int) *http.Server {
-	return &http.Server{ //nolint:exhaustruct_v5 // unset stdlib fields stay at zero = stdlib defaults apply
-		Addr:              addr,
-		Handler:           router,
-		ReadTimeout:       time.Duration(readTimeout) * time.Second,
-		WriteTimeout:      time.Duration(writeTimeout) * time.Second,
-		ReadHeaderTimeout: readHeaderTimeout,
-		IdleTimeout:       idleTimeout,
-		MaxHeaderBytes:    maxHeaderBytes,
-	}
+	server := newHTTPServer(addr, router)
+	server.ReadTimeout = time.Duration(readTimeout) * time.Second
+	server.WriteTimeout = time.Duration(writeTimeout) * time.Second
+	server.MaxHeaderBytes = maxHeaderBytes
+
+	return server
 }
 
 func runServer(ctx context.Context, cmd *cli.Command, router http.Handler, log *slog.Logger) error {
@@ -434,10 +435,15 @@ func attachAccountSystem(
 
 	ttl := sessionTTL(cmd)
 
+	argonParams, err := argon2ParamsFromFlags(cmd)
+	if err != nil {
+		return nil, fmt.Errorf("argon2 params: %w", err)
+	}
+
 	authMgr, err := auth.NewManager(
 		users, invites, sessions, apiTokens,
-		crypto.NewPasswordHasher(argon2ParamsFromFlags(cmd)).WithLogger(log),
-		crypto.NewSealer(argon2ParamsFromFlags(cmd)), crypto.NewTOTP(),
+		crypto.NewPasswordHasher(argonParams).WithLogger(log),
+		crypto.NewSealer(argonParams), crypto.NewTOTP(),
 		log, cmd.String(FlagTOTPIssuer), ttl,
 	)
 	if err != nil {
@@ -483,12 +489,17 @@ func buildAuthRepos(
 
 // argon2ParamsFromFlags reads the configurable argon2id cost from flags/env.
 // Zero values fall back to the built-in defaults inside the crypto constructors.
-func argon2ParamsFromFlags(cmd *cli.Command) crypto.Argon2Params {
-	return crypto.Argon2Params{
-		Memory:  uint32(cmd.Int(FlagArgon2Memory)), //nolint:gosec // G115: operator-set small cost value
-		Time:    uint32(cmd.Int(FlagArgon2Time)),   //nolint:gosec // G115: operator-set small cost value
-		Threads: uint8(cmd.Int(FlagArgon2Threads)), //nolint:gosec // G115: operator-set small cost value
+func argon2ParamsFromFlags(cmd *cli.Command) (crypto.Argon2Params, error) {
+	memory, memoryErr := uint32Flag(cmd, FlagArgon2Memory)
+	timeCost, timeErr := uint32Flag(cmd, FlagArgon2Time)
+	threads, threadsErr := uint8Flag(cmd, FlagArgon2Threads)
+
+	flagErr := errors.Join(memoryErr, timeErr, threadsErr)
+	if flagErr != nil {
+		return crypto.Argon2Params{Memory: 0, Time: 0, Threads: 0}, fmt.Errorf("read argon2 flags: %w", flagErr)
 	}
+
+	return crypto.Argon2Params{Memory: memory, Time: timeCost, Threads: threads}, nil
 }
 
 // newMetricsRegistry builds the Prometheus registry backing the optional /metrics listener,
@@ -496,7 +507,9 @@ func argon2ParamsFromFlags(cmd *cli.Command) crypto.Argon2Params {
 func newMetricsRegistry() (*prometheus.Registry, *linkmetrics.Metrics, error) {
 	reg := prometheus.NewRegistry()
 
-	procOpts := collectors.ProcessCollectorOpts{} //nolint:exhaustruct_v5 // collector defaults apply
+	// The zero value selects the collector defaults.
+	var procOpts collectors.ProcessCollectorOpts
+
 	reg.MustRegister(
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(procOpts),
@@ -528,6 +541,11 @@ func buildHandlers(
 		return nil, nil, fmt.Errorf("link content cipher: %w", err)
 	}
 
+	argonParams, err := argon2ParamsFromFlags(cmd)
+	if err != nil {
+		return nil, nil, fmt.Errorf("argon2 params: %w", err)
+	}
+
 	var checker links.NotesChecker
 
 	switch storage {
@@ -544,10 +562,10 @@ func buildHandlers(
 	slugLock := lock.NewLocker()
 
 	manager := notes.NewManager(repo, linkRepo, slugLock, render.NewRenderer(), noteCipher,
-		crypto.NewEditCodeHasher(argon2ParamsFromFlags(cmd)).WithLogger(log), log, cmd.Bool(FlagCustomSlugs)).
+		crypto.NewEditCodeHasher(argonParams).WithLogger(log), log, cmd.Bool(FlagCustomSlugs)).
 		WithRenderCache(rendercache.NewDefault(log))
 	linkManager := links.NewManager(linkRepo, checker, slugLock, linkCipher,
-		crypto.NewEditCodeHasher(argon2ParamsFromFlags(cmd)).WithLogger(log), log, cmd.Bool(FlagCustomSlugs)).
+		crypto.NewEditCodeHasher(argonParams).WithLogger(log), log, cmd.Bool(FlagCustomSlugs)).
 		WithCache(linkcache.NewDefault(log)).
 		WithMetrics(linkMetrics)
 
@@ -600,7 +618,10 @@ func serverAction(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	// Bound concurrent argon2id workspace before any hasher can run (validated above).
-	crypto.SetArgon2MemoryBudget(uint32(cmd.Int(FlagArgon2MemoryBudget))) //nolint:gosec // G115: bounded flag
+	hasher, err := prepareArgon2(cmd)
+	if err != nil {
+		return fmt.Errorf("prepare argon2: %w", err)
+	}
 
 	log := newLogger(cmd.String(FlagLogLevel), cmd.String(FlagLogFormat))
 
@@ -625,7 +646,7 @@ func serverAction(ctx context.Context, cmd *cli.Command) error {
 		return fmt.Errorf("init repos: %w", err)
 	}
 
-	err = validateContentEncryption(ctx, db, keyring, encryptionHasher(cmd), log)
+	err = validateContentEncryption(ctx, db, keyring, hasher, log)
 	if err != nil {
 		return fmt.Errorf("validate content encryption: %w", err)
 	}
@@ -649,13 +670,18 @@ func serverAction(ctx context.Context, cmd *cli.Command) error {
 		startMetricsServer(ctx, metricsAddr, metricsRegistry, log)
 	}
 
+	logServerStarted(ctx, cmd, log, storage, dsn)
+
+	return errorcontext.Wrap(runServer(ctx, cmd, router, log), "run server")
+}
+
+// logServerStarted records the listener, the storage backend and the redacted DSN at startup.
+func logServerStarted(ctx context.Context, cmd *cli.Command, log *slog.Logger, storage, dsn string) {
 	log.InfoContext(ctx, "server started",
 		"addr", cmd.String(FlagAddr), "url", listenerURL(cmd.String(FlagAddr), cmd.String(FlagTLSCert) != ""),
 		"storage", storage, "dsn", redactDSN(dsn),
 		"tls", cmd.String(FlagTLSCert) != "",
 	)
-
-	return errorcontext.Wrap(runServer(ctx, cmd, router, log), "run server")
 }
 
 // errRemovedAuthTokens is returned when the removed --auth-tokens / PADMARK_AUTH_TOKENS is set.
@@ -692,7 +718,12 @@ func validateStartupSecrets(cmd *cli.Command) (string, error) {
 
 // validateArgon2Config checks the argon2 cost bounds and the memory budget (fail-hard).
 func validateArgon2Config(cmd *cli.Command) error {
-	costErr := argon2ParamsFromFlags(cmd).Validate()
+	params, paramsErr := argon2ParamsFromFlags(cmd)
+	if paramsErr != nil {
+		return fmt.Errorf("argon2 params: %w", paramsErr)
+	}
+
+	costErr := params.Validate()
 	if costErr != nil {
 		return fmt.Errorf("validate argon2 configuration: %w", costErr)
 	}

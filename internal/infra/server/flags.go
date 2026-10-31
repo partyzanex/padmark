@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/urfave/cli/v3"
@@ -403,4 +404,25 @@ func boundedCost(maximum int) func(int) error {
 
 		return nil
 	}
+}
+
+// uint32Flag narrows an integer flag to uint32. The flag Validator already bounds the value;
+// the repeated range check keeps the conversion provably safe where it happens.
+func uint32Flag(cmd *cli.Command, name string) (uint32, error) {
+	value := cmd.Int(name)
+	if value < 0 || value > math.MaxUint32 {
+		return 0, fmt.Errorf("--%s=%d: %w", name, value, errFlagOutOfRange)
+	}
+
+	return uint32(value), nil
+}
+
+// uint8Flag narrows an integer flag to uint8, with the same range check as uint32Flag.
+func uint8Flag(cmd *cli.Command, name string) (uint8, error) {
+	value := cmd.Int(name)
+	if value < 0 || value > math.MaxUint8 {
+		return 0, fmt.Errorf("--%s=%d: %w", name, value, errFlagOutOfRange)
+	}
+
+	return uint8(value), nil
 }

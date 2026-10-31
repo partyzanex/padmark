@@ -82,9 +82,13 @@ func HashPassword(password string) (string, error) {
 
 // VerifyPassword reports whether password matches storedHash (reads embedded params).
 func VerifyPassword(storedHash, password string) bool {
-	// A cost above the ceiling is just a non-match for this config-less helper.
 	ceiling := DefaultArgon2Params().acceptedCeiling()
-	matched, _ := verifyArgon2(storedHash, password, ceiling) //nolint:errcheck // cost-too-high is a non-match here
+
+	matched, err := verifyArgon2(storedHash, password, ceiling)
+	if err != nil {
+		// A cost above the ceiling is just a non-match for this config-less helper.
+		return false
+	}
 
 	return matched
 }

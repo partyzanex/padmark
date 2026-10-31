@@ -1,6 +1,7 @@
 package tokenfile
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -37,11 +38,17 @@ func HostsPath() (string, error) {
 // write to is a trust store an attacker can append their own origin to.
 const permGroupOtherWrite os.FileMode = 0o022
 
-// defaultPorts maps the schemes whose default port is implied when absent, so an explicit
-// default port and the bare host pin the same origin.
-var defaultPorts = map[string]string{ //nolint:gochecknoglobals // read-only lookup table
-	"http":  "80",
-	"https": "443",
+// defaultPort returns the port a scheme implies when absent, so an explicit default port and
+// the bare host pin the same origin. Other schemes have no implied port.
+func defaultPort(scheme string) string {
+	switch scheme {
+	case "http":
+		return "80"
+	case "https":
+		return "443"
+	default:
+		return ""
+	}
 }
 
 // Origin reduces a server base URL to the canonical "scheme://host[:port]" string that trust
@@ -63,7 +70,7 @@ func Origin(serverURL string) (string, error) {
 	}
 
 	port := parsed.Port()
-	if port == defaultPorts[scheme] {
+	if port == defaultPort(scheme) {
 		port = ""
 	}
 
@@ -106,7 +113,7 @@ func IsKnownOrigin(origin string) bool {
 
 // readHostsFile returns the hosts file contents, or ok=false when the file must not be relied
 // on. The checks run on the open descriptor, so the file inspected is the file read.
-func readHostsFile() ([]byte, bool) {
+func readHostsFile() (data []byte, ok bool) {
 	path, err := HostsPath()
 	if err != nil {
 		return nil, false
@@ -117,14 +124,19 @@ func readHostsFile() ([]byte, bool) {
 		return nil, false
 	}
 
-	defer file.Close() //nolint:errcheck // read-only descriptor; the read result is what matters
+	// A failed close of the read-only descriptor also makes the contents unreliable.
+	defer func() {
+		if file.Close() != nil {
+			data, ok = nil, false
+		}
+	}()
 
 	info, err := file.Stat()
 	if err != nil || !trustworthyHostsMode(info.Mode()) {
 		return nil, false
 	}
 
-	data, err := io.ReadAll(file)
+	data, err = io.ReadAll(file)
 	if err != nil {
 		return nil, false
 	}
@@ -177,11 +189,16 @@ func AddKnownOrigin(origin string) error {
 		return fmt.Errorf("open known hosts: %w", err)
 	}
 
-	defer file.Close() //nolint:errcheck // read-only close on an append-only descriptor; the write error is what matters
-
 	_, writeErr := file.WriteString(origin + "\n")
+	closeErr := file.Close()
+
 	if writeErr != nil {
-		return fmt.Errorf("record trusted origin: %w", writeErr)
+		return fmt.Errorf("record trusted origin: %w", errors.Join(writeErr, closeErr))
+	}
+
+	// Close can report a write that the file system completes late.
+	if closeErr != nil {
+		return fmt.Errorf("close known hosts: %w", closeErr)
 	}
 
 	// OpenFile's perm only applies to creation; a pre-existing file keeps its old mode, so

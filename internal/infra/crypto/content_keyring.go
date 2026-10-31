@@ -54,9 +54,10 @@ func LoadContentKeyring(path string, log *slog.Logger, opts KeyringLoadOptions) 
 
 	permissionErr := checkKeyringPermissions(path, file, log, opts)
 	if permissionErr != nil {
-		file.Close() //nolint:errcheck,gosec // preserve the primary file validation error
+		// Join keeps the permission error first and still reports a failed close.
+		closeErr := file.Close()
 
-		return nil, fmt.Errorf("check keyring permissions: %w", permissionErr)
+		return nil, fmt.Errorf("check keyring permissions: %w", errors.Join(permissionErr, closeErr))
 	}
 
 	data, err := io.ReadAll(io.LimitReader(file, maxKeyringSize+1))
