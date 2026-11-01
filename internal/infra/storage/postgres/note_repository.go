@@ -282,6 +282,29 @@ func (r *NoteRepository) IncrementViews(ctx context.Context, id string) error {
 	return nil
 }
 
+// DeleteExpired removes a note only while it is still expired at the moment of the DELETE.
+// It returns domain.ErrNotFound when no such row exists, for example after its owner extended it.
+func (r *NoteRepository) DeleteExpired(ctx context.Context, id string) error {
+	result, err := r.db.NewDelete().Model((*note)(nil)).
+		Where("id = ?", id).
+		Where("expires_at IS NOT NULL AND expires_at <= ?", time.Now()).
+		Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("postgres delete expired: %w", err)
+	}
+
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("postgres rowsaffected: %w", err)
+	}
+
+	if affected == 0 {
+		return domain.ErrNotFound
+	}
+
+	return nil
+}
+
 // Delete removes a note by ID.
 func (r *NoteRepository) Delete(ctx context.Context, id string) error {
 	result, err := r.db.NewDelete().Model((*note)(nil)).Where("id = ?", id).Exec(ctx)

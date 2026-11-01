@@ -185,6 +185,29 @@ func (s *UserRepositoryTestSuite) TestUpdateLastLogin_NonExistentUser_NoError() 
 	s.Require().NoError(err)
 }
 
+// TestUpdateTOTPSecret_CompareAndSet covers audit finding R6: the reseal writes only while the
+// stored seal equals expected, so a reseal from before a password change writes nothing.
+func (s *UserRepositoryTestSuite) TestUpdateTOTPSecret_CompareAndSet() {
+	ctx := s.T().Context()
+	usr := s.newUser("reseal")
+	s.Require().NoError(s.repo.Create(ctx, usr))
+
+	s.Require().NoError(s.repo.UpdatePassword(ctx, usr.ID, "new-hash", []byte("new-salt"), "new-seal"))
+
+	updated, err := s.repo.UpdateTOTPSecret(ctx, usr.ID, usr.TOTPSecret, "stale-reseal")
+	s.Require().NoError(err)
+	s.False(updated)
+
+	updated, err = s.repo.UpdateTOTPSecret(ctx, usr.ID, "new-seal", "fresh-reseal")
+	s.Require().NoError(err)
+	s.True(updated)
+
+	got, err := s.repo.GetByID(ctx, usr.ID)
+	s.Require().NoError(err)
+	s.Equal("fresh-reseal", got.TOTPSecret)
+	s.Equal("new-hash", got.PasswordHash)
+}
+
 // ── Revoke ──.
 
 func (s *UserRepositoryTestSuite) TestRevoke_RemovesUser() {

@@ -84,6 +84,20 @@ func (mr *MockStorageMockRecorder) Delete(ctx, id any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Delete", reflect.TypeOf((*MockStorage)(nil).Delete), ctx, id)
 }
 
+// DeleteExpired mocks base method.
+func (m *MockStorage) DeleteExpired(ctx context.Context, id string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteExpired", ctx, id)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// DeleteExpired indicates an expected call of DeleteExpired.
+func (mr *MockStorageMockRecorder) DeleteExpired(ctx, id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteExpired", reflect.TypeOf((*MockStorage)(nil).DeleteExpired), ctx, id)
+}
+
 // Get mocks base method.
 func (m *MockStorage) Get(ctx context.Context, id string) (*domain.Note, error) {
 	m.ctrl.T.Helper()

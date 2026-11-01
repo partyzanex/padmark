@@ -718,7 +718,7 @@ func (s *ManagerTestSuite) TestGet_Expired() {
 		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
 	}
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(note, nil)
-	s.storage.EXPECT().Delete(gomock.Any(), domain.HashSlug("abc-123")).Return(nil)
+	s.storage.EXPECT().DeleteExpired(gomock.Any(), domain.HashSlug("abc-123")).Return(nil)
 
 	_, err := s.manager.Get(s.T().Context(), "abc-123")
 
@@ -1408,7 +1408,7 @@ func (s *ManagerTestSuite) TestGetRendered_Expired() {
 		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
 	}
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(note, nil)
-	s.storage.EXPECT().Delete(gomock.Any(), domain.HashSlug("abc-123")).Return(nil)
+	s.storage.EXPECT().DeleteExpired(gomock.Any(), domain.HashSlug("abc-123")).Return(nil)
 
 	_, _, err := s.manager.GetRendered(s.T().Context(), "abc-123")
 
@@ -1689,7 +1689,7 @@ func (s *ManagerTestSuite) TestViewPreloaded_Expired() {
 		ClearExpiry: false,
 	}
 
-	s.storage.EXPECT().Delete(gomock.Any(), domain.HashSlug("pre-3")).Return(nil)
+	s.storage.EXPECT().DeleteExpired(gomock.Any(), domain.HashSlug("pre-3")).Return(nil)
 
 	_, err := s.manager.ViewPreloaded(s.T().Context(), "pre-3", note)
 
@@ -1707,9 +1707,28 @@ func (s *ManagerTestSuite) TestEnforceExpiry_ExpiredNoteIsDeleted() {
 		ClearExpiry: false,
 	}
 
-	s.storage.EXPECT().Delete(gomock.Any(), domain.HashSlug("ee-1")).Return(nil)
+	s.storage.EXPECT().DeleteExpired(gomock.Any(), domain.HashSlug("ee-1")).Return(nil)
 
 	err := s.manager.EnforceExpiry(s.T().Context(), "ee-1", note)
+
+	s.ErrorIs(err, domain.ErrExpired)
+}
+
+// TestEnforceExpiry_ExtendedNoteIsKept covers audit finding R5: the snapshot is expired, but the
+// owner has extended the row since, so DeleteExpired finds nothing. The request still reports
+// ErrExpired from its snapshot, and the usecase never deletes the row by ID.
+func (s *ManagerTestSuite) TestEnforceExpiry_ExtendedNoteIsKept() {
+	past := time.Now().Add(-time.Minute)
+	stale := &domain.Note{
+		ID: "ee-ext", ExpiresAt: &past, BurnAfterReading: false,
+		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, Privacy: nil, OwnerID: nil,
+		Title: "", Content: "", ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
+		ClearExpiry: false,
+	}
+
+	s.storage.EXPECT().DeleteExpired(gomock.Any(), domain.HashSlug("ee-ext")).Return(domain.ErrNotFound)
+
+	err := s.manager.EnforceExpiry(s.T().Context(), "ee-ext", stale)
 
 	s.ErrorIs(err, domain.ErrExpired)
 }
@@ -1775,7 +1794,7 @@ func (s *ManagerTestSuite) TestGetRenderedPreloaded_Expired() {
 		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
 	}
 
-	s.storage.EXPECT().Delete(gomock.Any(), domain.HashSlug("rp-2")).Return(nil)
+	s.storage.EXPECT().DeleteExpired(gomock.Any(), domain.HashSlug("rp-2")).Return(nil)
 
 	_, _, err := s.manager.GetRenderedPreloaded(s.T().Context(), "rp-2", note)
 

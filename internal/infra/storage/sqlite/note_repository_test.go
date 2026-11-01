@@ -600,6 +600,41 @@ func (s *RepositoryTestSuite) TestBurn_PrivacyChanged_RowUntouched() {
 	s.Equal("burn-priv", got.ID)
 }
 
+// TestDeleteExpired_KeepsExtendedNote covers audit finding R5: DeleteExpired checks the expiry at
+// the moment of the DELETE, so a note extended after an old snapshot stays, and an expired one goes.
+func (s *RepositoryTestSuite) TestDeleteExpired_KeepsExtendedNote() {
+	ctx := s.T().Context()
+	future := time.Now().Add(time.Hour)
+	past := time.Now().Add(-time.Hour)
+
+	live := plainNote("del-exp-live")
+	live.ExpiresAt = &future
+	s.Require().NoError(s.repo.Create(ctx, live))
+
+	expired := plainNote("del-exp-old")
+	expired.ExpiresAt = &past
+	s.Require().NoError(s.repo.Create(ctx, expired))
+
+	s.Require().ErrorIs(s.repo.DeleteExpired(ctx, "del-exp-live"), domain.ErrNotFound)
+
+	_, err := s.repo.Get(ctx, "del-exp-live")
+	s.Require().NoError(err, "an extended note must stay")
+
+	s.Require().NoError(s.repo.DeleteExpired(ctx, "del-exp-old"))
+
+	_, err = s.repo.Get(ctx, "del-exp-old")
+	s.ErrorIs(err, domain.ErrNotFound)
+}
+
+// plainNote returns a public note without expiry or burn settings.
+func plainNote(id string) *domain.Note {
+	return &domain.Note{
+		ID: id, Title: "t", Content: "body", CreatedAt: time.Now(), UpdatedAt: time.Now(),
+		ExpiresAt: nil, Privacy: nil, OwnerID: nil, ContentType: nil, EditCode: "",
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+	}
+}
+
 func (s *RepositoryTestSuite) TestConsume_NotFound() {
 	_, err := s.repo.Consume(s.T().Context(), "consume-missing", domain.PrivacyPublic)
 

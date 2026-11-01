@@ -24,8 +24,10 @@ type UserStore interface {
 	// UpdateTOTPSecret replaces only the sealed TOTP secret, leaving the password hash and KDF
 	// salt untouched. It exists for the re-seal-on-login migration (see
 	// SessionManager.resealTOTPSecret), where the secret is rewritten under the current argon2
-	// cost but the credentials themselves do not change.
-	UpdateTOTPSecret(ctx context.Context, id uuid.UUID, totpSecret string) error
+	// cost but the credentials themselves do not change. It writes only while the stored seal
+	// equals expected and reports false otherwise, so a reseal started before a concurrent
+	// password change never overwrites the seal of the new password.
+	UpdateTOTPSecret(ctx context.Context, id uuid.UUID, expected, totpSecret string) (bool, error)
 	// UpdateTOTPCounter atomically advances the user's last accepted TOTP counter,
 	// returning false when counter is not strictly greater (replay). The conditional
 	// update is the cross-instance, restart-safe guard against TOTP code reuse.

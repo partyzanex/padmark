@@ -159,17 +159,18 @@ func (mr *MockUserStoreMockRecorder) UpdateTOTPCounter(ctx, id, counter any) *go
 }
 
 // UpdateTOTPSecret mocks base method.
-func (m *MockUserStore) UpdateTOTPSecret(ctx context.Context, id uuid.UUID, totpSecret string) error {
+func (m *MockUserStore) UpdateTOTPSecret(ctx context.Context, id uuid.UUID, expected, totpSecret string) (bool, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "UpdateTOTPSecret", ctx, id, totpSecret)
-	ret0, _ := ret[0].(error)
-	return ret0
+	ret := m.ctrl.Call(m, "UpdateTOTPSecret", ctx, id, expected, totpSecret)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
 }
 
 // UpdateTOTPSecret indicates an expected call of UpdateTOTPSecret.
-func (mr *MockUserStoreMockRecorder) UpdateTOTPSecret(ctx, id, totpSecret any) *gomock.Call {
+func (mr *MockUserStoreMockRecorder) UpdateTOTPSecret(ctx, id, expected, totpSecret any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateTOTPSecret", reflect.TypeOf((*MockUserStore)(nil).UpdateTOTPSecret), ctx, id, totpSecret)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateTOTPSecret", reflect.TypeOf((*MockUserStore)(nil).UpdateTOTPSecret), ctx, id, expected, totpSecret)
 }
 
 // MockInviteStore is a mock of InviteStore interface.

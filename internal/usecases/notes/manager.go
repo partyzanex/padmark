@@ -20,6 +20,8 @@ import (
 // Consume and SetBurnExpiry change the row only while its privacy still equals expected, the
 // level the reader was checked against; otherwise they return domain.ErrNotFound, so a burn
 // read can never return or delete a version whose access level changed after the check.
+// DeleteExpired removes a row only while it is still expired, and returns domain.ErrNotFound
+// otherwise: an expiry decision from an old snapshot never deletes a note that was extended.
 type Storage interface {
 	Create(ctx context.Context, note *domain.Note) error
 	Get(ctx context.Context, id string) (*domain.Note, error)
@@ -27,6 +29,7 @@ type Storage interface {
 	SetBurnExpiry(ctx context.Context, id string, expiresAt time.Time, expected domain.Privacy) (*domain.Note, error)
 	Update(ctx context.Context, id string, note *domain.Note) error
 	Delete(ctx context.Context, id string) error
+	DeleteExpired(ctx context.Context, id string) error
 	IncrementViews(ctx context.Context, id string) error
 }
 

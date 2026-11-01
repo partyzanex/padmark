@@ -48,13 +48,17 @@ func (b *burner) applyPolicy(ctx context.Context, id string, note *domain.Note) 
 
 // enforceExpiry is the expiry half of applyPolicy: an expired note (plain TTL or a started burn
 // timer) is deleted and ErrExpired returned. It never consumes a note or starts a burn timer.
+// The delete checks the expiry again in storage, because the snapshot can be old: if the owner
+// has extended the note since, the row stays and only this request sees the note as expired.
 func (b *burner) enforceExpiry(ctx context.Context, id string, note *domain.Note) error {
 	if note.ExpiresAt == nil || !time.Now().After(*note.ExpiresAt) {
 		return nil
 	}
 
-	delErr := b.storage.Delete(ctx, domain.HashSlug(id))
-	if delErr != nil {
+	delErr := b.storage.DeleteExpired(ctx, domain.HashSlug(id))
+	if errors.Is(delErr, domain.ErrNotFound) {
+		b.log.DebugContext(ctx, "expired note already deleted or extended", "id", domain.HashSlug(id))
+	} else if delErr != nil {
 		b.log.ErrorContext(ctx, "delete expired note", "id", domain.HashSlug(id), "err", delErr)
 	}
 

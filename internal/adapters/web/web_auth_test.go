@@ -1843,6 +1843,8 @@ func (s *AuthHandlerSuite) TestTOTPLogin_SessionCookieMaxAge_TracksConfiguredSes
 // single-segment PUT /notes/{id} route) resolves the caller and lets the note's owner update it
 // with no edit_code.
 func (s *AuthHandlerSuite) TestUpdateNote_SessionOwner_BypassesEditCode() {
+	s.expectPublicMutationGate()
+
 	s.auth.EXPECT().GetSession(gomock.Any(), "sess-owner").Return(&domain.User{
 		ID:        testUserID1,
 		CreatedAt: time.Time{}, LastLoginAt: nil, Username: "", TOTPSecret: "",
@@ -1865,6 +1867,8 @@ func (s *AuthHandlerSuite) TestUpdateNote_SessionOwner_BypassesEditCode() {
 // TestUpdateNote_APITokenOwner_BypassesEditCode is the CLI/API-client counterpart: a Bearer API
 // token resolves to its owning user the same way a session does.
 func (s *AuthHandlerSuite) TestUpdateNote_APITokenOwner_BypassesEditCode() {
+	s.expectPublicMutationGate()
+
 	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "valid-key").Return(&domain.User{
 		ID:        testUserID1,
 		CreatedAt: time.Time{}, LastLoginAt: nil, Username: "", TOTPSecret: "",
@@ -1887,6 +1891,8 @@ func (s *AuthHandlerSuite) TestUpdateNote_APITokenOwner_BypassesEditCode() {
 // TestDeleteNote_SessionOwner_BypassesEditCode mirrors TestUpdateNote_SessionOwner_BypassesEditCode
 // for DELETE.
 func (s *AuthHandlerSuite) TestDeleteNote_SessionOwner_BypassesEditCode() {
+	s.expectPublicMutationGate()
+
 	s.auth.EXPECT().GetSession(gomock.Any(), "sess-owner").Return(&domain.User{
 		ID:        testUserID1,
 		CreatedAt: time.Time{}, LastLoginAt: nil, Username: "", TOTPSecret: "",
@@ -1907,6 +1913,8 @@ func (s *AuthHandlerSuite) TestDeleteNote_SessionOwner_BypassesEditCode() {
 // another signed-in user: without the correct edit_code, a non-owner session gets the same
 // domain.ErrInvalidEditCode → 403 as an anonymous caller.
 func (s *AuthHandlerSuite) TestUpdateNote_SessionNonOwner_StillNeedsEditCode() {
+	s.expectPublicMutationGate()
+
 	s.auth.EXPECT().GetSession(gomock.Any(), "sess-other").Return(&domain.User{
 		ID:        testUserID2,
 		CreatedAt: time.Time{}, LastLoginAt: nil, Username: "", TOTPSecret: "",
@@ -1929,6 +1937,8 @@ func (s *AuthHandlerSuite) TestUpdateNote_SessionNonOwner_StillNeedsEditCode() {
 // TestUpdateNoteByPath_SessionOwner_BypassesEditCode is the native multi-segment-slug
 // counterpart of TestUpdateNote_SessionOwner_BypassesEditCode (PUT /notes/{id...}).
 func (s *AuthHandlerSuite) TestUpdateNoteByPath_SessionOwner_BypassesEditCode() {
+	s.expectPublicMutationGate()
+
 	const mid = "project/GUIDE.md"
 
 	s.auth.EXPECT().GetSession(gomock.Any(), "sess-owner").Return(&domain.User{
@@ -2103,4 +2113,10 @@ func (s *AuthHandlerSuite) TestSetupHandler_InvalidUsername_ShowsValidationMessa
 	s.Equal(http.StatusOK, rec.Code)
 	s.Contains(rec.Body.String(), "username must be 1–64 characters")
 	s.NotContains(rec.Body.String(), "Scan QR code")
+}
+
+// expectPublicMutationGate installs the Peek of the mutation gate: it returns a public note, so
+// the gate lets the request reach the mocked usecase, which decides ownership.
+func (s *AuthHandlerSuite) expectPublicMutationGate() {
+	s.manager.EXPECT().Peek(gomock.Any(), gomock.Any()).Return(newTestNote("gate", "c"), nil)
 }
