@@ -17,11 +17,14 @@ import (
 
 // Storage defines persistence operations for notes. Create must atomically claim the ID
 // across notes and links, returning domain.ErrSlugConflict if another resource owns it.
+// Consume and SetBurnExpiry change the row only while its privacy still equals expected, the
+// level the reader was checked against; otherwise they return domain.ErrNotFound, so a burn
+// read can never return or delete a version whose access level changed after the check.
 type Storage interface {
 	Create(ctx context.Context, note *domain.Note) error
 	Get(ctx context.Context, id string) (*domain.Note, error)
-	Consume(ctx context.Context, id string) (*domain.Note, error)
-	SetBurnExpiry(ctx context.Context, id string, expiresAt time.Time) (*domain.Note, error)
+	Consume(ctx context.Context, id string, expected domain.Privacy) (*domain.Note, error)
+	SetBurnExpiry(ctx context.Context, id string, expiresAt time.Time, expected domain.Privacy) (*domain.Note, error)
 	Update(ctx context.Context, id string, note *domain.Note) error
 	Delete(ctx context.Context, id string) error
 	IncrementViews(ctx context.Context, id string) error
@@ -322,6 +325,18 @@ func pinImmutableFields(note, existing *domain.Note) error {
 	return nil
 }
 
+// withRequested returns a copy of note to write with the privacy and content type that the caller
+// sent; a nil value keeps the stored column.
+func withRequested(
+	note *domain.Note, privacy *domain.Privacy, contentType *domain.ContentType,
+) *domain.Note {
+	write := *note
+	write.Privacy = privacy
+	write.ContentType = contentType
+
+	return &write
+}
+
 // backfillPersistedState copies the storage-persisted privacy and view count into the working
 // note before the update is written.
 func backfillPersistedState(note, existing *domain.Note) {
@@ -381,6 +396,11 @@ func (m *Manager) Update(
 		return nil, domain.ErrInvalidEditCode
 	}
 
+	// Omitted privacy and content type go to storage as nil, so COALESCE keeps the stored values.
+	// Writing the values of the existing snapshot back would undo a concurrent change, such as
+	// another update that has just made the note owner-only.
+	requestedPrivacy, requestedContentType := note.Privacy, note.ContentType
+
 	note.ID = id
 	note.CreatedAt = existing.CreatedAt
 	note.UpdatedAt = time.Now().UTC()
@@ -419,7 +439,7 @@ func (m *Manager) Update(
 		return nil, fmt.Errorf("encrypt content: %w", err)
 	}
 
-	err = m.storage.Update(ctx, dbID, note)
+	err = m.storage.Update(ctx, dbID, withRequested(note, requestedPrivacy, requestedContentType))
 	if err != nil {
 		return nil, fmt.Errorf("update note: %w", err)
 	}

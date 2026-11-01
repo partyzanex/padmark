@@ -470,7 +470,7 @@ func (s *RepositoryTestSuite) TestConsume_BurnAfterReading() {
 	n.BurnAfterReading = true
 	s.Require().NoError(s.repo.Create(ctx, n))
 
-	got, err := s.repo.Consume(ctx, "con-bar")
+	got, err := s.repo.Consume(ctx, "con-bar", domain.PrivacyPublic)
 	s.Require().NoError(err)
 	s.Equal("con-bar", got.ID)
 
@@ -486,7 +486,7 @@ func (s *RepositoryTestSuite) TestConsume_Expired() {
 	n.ExpiresAt = &past
 	s.Require().NoError(s.repo.Create(ctx, n))
 
-	got, err := s.repo.Consume(ctx, "con-exp")
+	got, err := s.repo.Consume(ctx, "con-exp", domain.PrivacyPublic)
 	s.Require().NoError(err)
 	s.Equal("con-exp", got.ID)
 
@@ -499,7 +499,7 @@ func (s *RepositoryTestSuite) TestConsume_NotEligible() {
 
 	s.Require().NoError(s.repo.Create(ctx, newNote("con-no", "plain", "me")))
 
-	_, err := s.repo.Consume(ctx, "con-no")
+	_, err := s.repo.Consume(ctx, "con-no", domain.PrivacyPublic)
 	s.Require().ErrorIs(err, domain.ErrNotFound)
 
 	// note must still exist.
@@ -508,8 +508,36 @@ func (s *RepositoryTestSuite) TestConsume_NotEligible() {
 	s.Equal("con-no", got.ID)
 }
 
+// TestBurn_PrivacyChanged_RowUntouched covers R2: a burn read checked against public must neither
+// return nor change a row whose privacy is now authenticated; the matching level still works.
+func (s *RepositoryTestSuite) TestBurn_PrivacyChanged_RowUntouched() {
+	ctx := s.T().Context()
+	authenticated := domain.PrivacyAuthenticated
+
+	n := newNote("burn-priv", "burn", "secret")
+	n.Privacy = &authenticated
+	n.BurnAfterReading = true
+	n.BurnTTL = 60
+	s.Require().NoError(s.repo.Create(ctx, n))
+
+	_, err := s.repo.SetBurnExpiry(ctx, "burn-priv", time.Now().Add(time.Minute), domain.PrivacyPublic)
+	s.Require().ErrorIs(err, domain.ErrNotFound)
+
+	_, err = s.repo.Consume(ctx, "burn-priv", domain.PrivacyPublic)
+	s.Require().ErrorIs(err, domain.ErrNotFound)
+
+	stored, err := s.repo.Get(ctx, "burn-priv")
+	s.Require().NoError(err)
+	s.True(stored.BurnAfterReading, "the timer must not start for a changed access level")
+	s.Nil(stored.ExpiresAt)
+
+	got, err := s.repo.Consume(ctx, "burn-priv", domain.PrivacyAuthenticated)
+	s.Require().NoError(err)
+	s.Equal("burn-priv", got.ID)
+}
+
 func (s *RepositoryTestSuite) TestConsume_NotFound() {
-	_, err := s.repo.Consume(s.T().Context(), "con-missing")
+	_, err := s.repo.Consume(s.T().Context(), "con-missing", domain.PrivacyPublic)
 
 	s.ErrorIs(err, domain.ErrNotFound)
 }

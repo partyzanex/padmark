@@ -42,18 +42,18 @@ func (m *MockStorage) EXPECT() *MockStorageMockRecorder {
 }
 
 // Consume mocks base method.
-func (m *MockStorage) Consume(ctx context.Context, id string) (*domain.Note, error) {
+func (m *MockStorage) Consume(ctx context.Context, id string, expected domain.Privacy) (*domain.Note, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Consume", ctx, id)
+	ret := m.ctrl.Call(m, "Consume", ctx, id, expected)
 	ret0, _ := ret[0].(*domain.Note)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // Consume indicates an expected call of Consume.
-func (mr *MockStorageMockRecorder) Consume(ctx, id any) *gomock.Call {
+func (mr *MockStorageMockRecorder) Consume(ctx, id, expected any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Consume", reflect.TypeOf((*MockStorage)(nil).Consume), ctx, id)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Consume", reflect.TypeOf((*MockStorage)(nil).Consume), ctx, id, expected)
 }
 
 // Create mocks base method.
@@ -114,18 +114,18 @@ func (mr *MockStorageMockRecorder) IncrementViews(ctx, id any) *gomock.Call {
 }
 
 // SetBurnExpiry mocks base method.
-func (m *MockStorage) SetBurnExpiry(ctx context.Context, id string, expiresAt time.Time) (*domain.Note, error) {
+func (m *MockStorage) SetBurnExpiry(ctx context.Context, id string, expiresAt time.Time, expected domain.Privacy) (*domain.Note, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "SetBurnExpiry", ctx, id, expiresAt)
+	ret := m.ctrl.Call(m, "SetBurnExpiry", ctx, id, expiresAt, expected)
 	ret0, _ := ret[0].(*domain.Note)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // SetBurnExpiry indicates an expected call of SetBurnExpiry.
-func (mr *MockStorageMockRecorder) SetBurnExpiry(ctx, id, expiresAt any) *gomock.Call {
+func (mr *MockStorageMockRecorder) SetBurnExpiry(ctx, id, expiresAt, expected any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetBurnExpiry", reflect.TypeOf((*MockStorage)(nil).SetBurnExpiry), ctx, id, expiresAt)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetBurnExpiry", reflect.TypeOf((*MockStorage)(nil).SetBurnExpiry), ctx, id, expiresAt, expected)
 }
 
 // Update mocks base method.
