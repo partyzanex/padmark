@@ -798,10 +798,11 @@ type CreateNoteRequest struct {
 	// If `ttl` is also provided the note is not deleted immediately but expires `ttl`
 	// seconds after the first read.
 	BurnAfterReading OptBool `json:"burn_after_reading"`
-	// Grace period in seconds after the first read before the note expires.
-	// Only meaningful when `burn_after_reading` is `true`.
-	// `0` means the note is deleted immediately when it is first revealed.
-	// Omitted means the same as `0` (immediate burn after reading).
+	// With `burn_after_reading: true`, the grace period in seconds after the first read
+	// before the note expires; `0` or omitted means the note is deleted immediately when
+	// it is first revealed. Without `burn_after_reading`, a positive value is the note's
+	// lifetime in seconds counted from creation (`expires_at` is set at once); `0` or
+	// omitted means the note never expires.
 	TTL OptInt64 `json:"ttl"`
 	// Optional custom edit code: 8–128 characters, without leading or trailing whitespace
 	// or control characters. Omit it to receive a random server-generated 12-character

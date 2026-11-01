@@ -55,12 +55,17 @@ func createCommand() *urcli.Command {
 				flag.Usage = "Privacy level: public (default), authenticated, or owner"
 			}),
 			clifactory.BoolFlag(func(flag *urcli.BoolFlag) {
+				flag.Name = FlagPrivate
+				flag.Usage = "Deprecated: same as --privacy authenticated (--private=false: public)"
+			}),
+			clifactory.BoolFlag(func(flag *urcli.BoolFlag) {
 				flag.Name = FlagBurn
 				flag.Usage = "Burn after reading: delete on first read (add --ttl for a grace period)"
 			}),
 			clifactory.Int64Flag(func(flag *urcli.Int64Flag) {
 				flag.Name = FlagTTL
-				flag.Usage = "Seconds the note survives after the first read (only with --burn)"
+				flag.Usage = "Lifetime in seconds from creation; with --burn, " +
+					"seconds the note survives after the first read"
 			}),
 			clifactory.StringFlag(func(flag *urcli.StringFlag) {
 				flag.Name = FlagEditCode
@@ -74,16 +79,48 @@ func createCommand() *urcli.Command {
 	})
 }
 
-// validateBurnTTL enforces the documented contract that --ttl (a grace period after the first
-// read) is only meaningful together with --burn. Without this, `create` silently dropped a
-// lone --ttl while `edit` silently sent it — an inconsistency. Both now reject it explicitly.
-func validateBurnTTL(cmd *urcli.Command) error {
-	if cmd.IsSet(FlagTTL) && !cmd.Bool(FlagBurn) {
-		return errBurnRequiredForTTL
+// legacyPrivacy maps the deprecated --private flag to a privacy level. It returns "" when the
+// flag is not given.
+func legacyPrivacy(cmd *urcli.Command) string {
+	if !cmd.IsSet(FlagPrivate) {
+		return ""
 	}
 
+	if cmd.Bool(FlagPrivate) {
+		return string(padmark.CreateNoteRequestPrivacyAuthenticated)
+	}
+
+	return string(padmark.CreateNoteRequestPrivacyPublic)
+}
+
+// privacyFlag returns the privacy level to send: --privacy, else the --private mapping, else "".
+func privacyFlag(cmd *urcli.Command) string {
+	if privacy := cmd.String(FlagPrivacy); privacy != "" {
+		return privacy
+	}
+
+	return legacyPrivacy(cmd)
+}
+
+// validatePrivacyFlags rejects --private together with a different --privacy, as the API
+// rejects a request whose private and privacy fields disagree.
+func validatePrivacyFlags(cmd *urcli.Command) error {
+	legacy := legacyPrivacy(cmd)
+	privacy := cmd.String(FlagPrivacy)
+
+	if legacy != "" && privacy != "" && legacy != privacy {
+		return errPrivateConflict
+	}
+
+	return nil
+}
+
+// validateTTL rejects an explicit non-positive --ttl. With --burn it is the grace period after
+// the first read; without --burn it is a lifetime (from creation for `create`, from the update
+// for `edit`), as in the API.
+func validateTTL(cmd *urcli.Command) error {
 	// Explicitly negative or zero TTL is a user error (an unset one legitimately means "no
-	// grace period"); silently dropping it would create a non-expiring burn note.
+	// expiry"); silently dropping it would create a note without the requested expiry.
 	if ttl := cmd.Int64(FlagTTL); cmd.IsSet(FlagTTL) && ttl <= 0 {
 		return errNonPositiveTTL
 	}
@@ -92,9 +129,14 @@ func validateBurnTTL(cmd *urcli.Command) error {
 }
 
 func createAction(ctx context.Context, cmd *urcli.Command) error {
-	err := validateBurnTTL(cmd)
+	err := validateTTL(cmd)
 	if err != nil {
-		return fmt.Errorf("validate burn TTL: %w", err)
+		return fmt.Errorf("validate TTL: %w", err)
+	}
+
+	err = validatePrivacyFlags(cmd)
+	if err != nil {
+		return fmt.Errorf("validate privacy: %w", err)
 	}
 
 	content, err := readContent(cmd)
@@ -150,7 +192,7 @@ func buildCreateReq(cmd *urcli.Command, content string) *padmark.CreateNoteReque
 		req.Slug = padmark.NewOptString(slug)
 	}
 
-	if p := cmd.String(FlagPrivacy); p != "" {
+	if p := privacyFlag(cmd); p != "" {
 		req.Privacy = padmark.NewOptCreateNoteRequestPrivacy(padmark.CreateNoteRequestPrivacy(p))
 	}
 
@@ -160,10 +202,10 @@ func buildCreateReq(cmd *urcli.Command, content string) *padmark.CreateNoteReque
 
 	if cmd.Bool(FlagBurn) {
 		req.BurnAfterReading = padmark.NewOptBool(true)
+	}
 
-		if ttl := cmd.Int64(FlagTTL); ttl > 0 {
-			req.TTL = padmark.NewOptInt64(ttl)
-		}
+	if ttl := cmd.Int64(FlagTTL); ttl > 0 {
+		req.TTL = padmark.NewOptInt64(ttl)
 	}
 
 	return req

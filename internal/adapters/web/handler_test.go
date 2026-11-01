@@ -602,6 +602,57 @@ func (s *HandlerSuite) TestCreateNote_WithTTL() {
 	s.True(resp.BurnAfterReading)
 }
 
+// TestCreateNote_LifetimeWithoutBurn: without burn_after_reading, ttl is the note's lifetime
+// counted from creation.
+func (s *HandlerSuite) TestCreateNote_LifetimeWithoutBurn() {
+	note := newTestNote("expiring", "content")
+	before := time.Now().UTC()
+
+	s.manager.EXPECT().Create(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, n *domain.Note) (*domain.Note, error) {
+			s.False(n.BurnAfterReading)
+			s.Zero(n.BurnTTL)
+			s.Require().NotNil(n.ExpiresAt)
+			s.WithinDuration(before.Add(time.Hour), *n.ExpiresAt, 5*time.Second)
+			note.ID = n.ID
+			note.ExpiresAt = n.ExpiresAt
+
+			return note, nil
+		})
+
+	body := `{"title":"expiring","content":"content","ttl":3600}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/notes", strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusCreated, w.Code)
+}
+
+// TestCreateNote_ZeroTTLWithoutBurn_NoExpiry: ttl 0 without burn keeps the note without expiry.
+func (s *HandlerSuite) TestCreateNote_ZeroTTLWithoutBurn_NoExpiry() {
+	note := newTestNote("plain", "content")
+
+	s.manager.EXPECT().Create(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, n *domain.Note) (*domain.Note, error) {
+			s.Nil(n.ExpiresAt)
+			s.Zero(n.BurnTTL)
+			note.ID = n.ID
+
+			return note, nil
+		})
+
+	body := `{"title":"plain","content":"content","ttl":0}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/notes", strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusCreated, w.Code)
+}
+
 func (s *HandlerSuite) TestCreateNote_ImmediateBurn() {
 	note := newTestNote("burn", "content")
 	note.BurnAfterReading = true

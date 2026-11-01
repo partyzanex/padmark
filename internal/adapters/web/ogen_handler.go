@@ -52,11 +52,7 @@ func (h *OgenHandler) CreateNote(
 	ctx context.Context, req *ogenapi.CreateNoteRequest,
 ) (ogenapi.CreateNoteRes, error) {
 	burnAfterReading := req.BurnAfterReading.Or(false)
-
-	var burnTTL int64
-	if burnAfterReading && req.TTL.IsSet() && req.TTL.Value >= 0 {
-		burnTTL = req.TTL.Value
-	}
+	burnTTL, expiresAt := createNoteExpiry(req)
 
 	// A contradictory request is the caller's error (400) before any server capability (422).
 	privacy, err := resolvePrivacy(req.GetPrivate(), optCreatePrivacyPtr(req.Privacy))
@@ -73,11 +69,11 @@ func (h *OgenHandler) CreateNote(
 
 	note, err := h.manager.Create(ctx, &domain.Note{
 		ClearExpiry: false,
-		// CreateNote fills CreatedAt/UpdatedAt; ExpiresAt is server-derived (--ttl on the CLI)
-		// and Views starts at 0. Privacy/OwnerID/EditCode/ContentType carry through from the request.
+		// CreateNote fills CreatedAt/UpdatedAt and Views starts at 0.
+		// Privacy/OwnerID/EditCode/ContentType carry through from the request.
 		CreatedAt:        time.Time{},
 		UpdatedAt:        time.Time{},
-		ExpiresAt:        nil,
+		ExpiresAt:        expiresAt,
 		Privacy:          privacy,
 		OwnerID:          middleware.OwnerIDFromCtx(ctx),
 		ID:               req.Slug.Or(""),
@@ -387,8 +383,28 @@ func createOneBulkLink(
 	return result
 }
 
-// ttlToExpiresAt converts CreateLinkRequest.ttl (seconds from now) to an absolute expiry
-// timestamp. nil (omitted) means the link never expires.
+// createNoteExpiry reads CreateNoteRequest.ttl. With burn_after_reading it is the grace period
+// after the first read; without it, a positive ttl is the note's lifetime from creation, the
+// same meaning as for links and for UpdateNoteRequest.ttl.
+func createNoteExpiry(req *ogenapi.CreateNoteRequest) (int64, *time.Time) {
+	ttl := req.TTL
+	if !ttl.IsSet() || ttl.Value < 0 {
+		return 0, nil
+	}
+
+	if req.BurnAfterReading.Or(false) {
+		return ttl.Value, nil
+	}
+
+	if ttl.Value == 0 {
+		return 0, nil
+	}
+
+	return 0, ttlToExpiresAt(ttl)
+}
+
+// ttlToExpiresAt converts a ttl (seconds from now) to an absolute expiry timestamp.
+// nil (omitted) means no expiry.
 func ttlToExpiresAt(ttl ogenapi.OptInt64) *time.Time {
 	if !ttl.IsSet() {
 		return nil

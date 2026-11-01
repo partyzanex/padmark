@@ -50,12 +50,16 @@ func editCommand() *urcli.Command {
 				flag.Usage = "Privacy level: public, authenticated, or owner"
 			}),
 			clifactory.BoolFlag(func(flag *urcli.BoolFlag) {
+				flag.Name = FlagPrivate
+				flag.Usage = "Deprecated: same as --privacy authenticated (--private=false: public)"
+			}),
+			clifactory.BoolFlag(func(flag *urcli.BoolFlag) {
 				flag.Name = FlagBurn
 				flag.Usage = "Enable burn-after-reading"
 			}),
 			clifactory.Int64Flag(func(flag *urcli.Int64Flag) {
 				flag.Name = FlagTTL
-				flag.Usage = "Grace period in seconds after first read (only with --burn)"
+				flag.Usage = "Lifetime in seconds from this update; with --burn, grace period after first read"
 			}),
 		}
 		command.Action = editAction
@@ -63,9 +67,14 @@ func editCommand() *urcli.Command {
 }
 
 func editAction(ctx context.Context, cmd *urcli.Command) error {
-	err := validateBurnTTL(cmd)
+	err := validateTTL(cmd)
 	if err != nil {
-		return fmt.Errorf("validate burn TTL: %w", err)
+		return fmt.Errorf("validate TTL: %w", err)
+	}
+
+	err = validatePrivacyFlags(cmd)
+	if err != nil {
+		return fmt.Errorf("validate privacy: %w", err)
 	}
 
 	id, editCode, err := editActionArgs(cmd)
@@ -138,19 +147,17 @@ func buildUpdateReq(cmd *urcli.Command, content, editCode string) *padmark.Updat
 		)
 	}
 
-	if cmd.IsSet(FlagPrivacy) {
-		req.Privacy = padmark.NewOptUpdateNoteRequestPrivacy(padmark.UpdateNoteRequestPrivacy(cmd.String(FlagPrivacy)))
+	if p := privacyFlag(cmd); p != "" {
+		req.Privacy = padmark.NewOptUpdateNoteRequestPrivacy(padmark.UpdateNoteRequestPrivacy(p))
 	}
 
 	if cmd.IsSet(FlagBurn) {
 		req.BurnAfterReading = padmark.NewOptBool(cmd.Bool(FlagBurn))
 	}
 
-	// TTL only with --burn (enforced by validateBurnTTL), matching `create`'s contract.
-	if cmd.Bool(FlagBurn) {
-		if ttl := cmd.Int64(FlagTTL); ttl > 0 {
-			req.TTL = padmark.NewOptNilInt64(ttl)
-		}
+	// With --burn the API reads TTL as the post-read grace period, otherwise as a hard expiry.
+	if ttl := cmd.Int64(FlagTTL); ttl > 0 {
+		req.TTL = padmark.NewOptNilInt64(ttl)
 	}
 
 	return req

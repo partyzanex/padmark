@@ -325,8 +325,12 @@ padmark-cli create --title "Runbook" --content "..." --slug deploy-notes
 # Burn-after-reading with a 1-hour window after first read
 padmark-cli create --title "Secret" --content "eyes only" --burn --ttl 3600
 
+# Deleted 30 days after creation
+padmark-cli create --title "Handoff" --content "..." --ttl 2592000
+
 # Requires login to read (any signed-in caller, not just the creator — see "API keys" below)
 padmark-cli create --title "Internal" --content "..." --privacy authenticated
+# The v0.1.6 flag --private still works as a deprecated alias of --privacy authenticated.
 
 # Owner-only: readable through sessions/API tokens for the account that created it
 padmark-cli create --title "Just for me" --content "..." --privacy owner

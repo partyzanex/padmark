@@ -37,6 +37,13 @@ That baseline is not the latest released version.
 - Short links answer at `/{id}`, like notes: the server serves the note with that `id` or, when
   there is none, the link. `POST /links` returns `Location: /{id}`, and the web UI, CLI and MCP
   show the short URL. The older `/r/{id}` URLs keep working.
+- The note page shows the Edit link to every reader who can see the note, anonymous readers
+  included: the author of an anonymous note edits it with its edit code, which the server checks.
+- `POST /notes` accepts `ttl` without `burn_after_reading` as the note's lifetime from creation.
+  `padmark-cli create` and `edit` accept `--ttl` without `--burn`, and the MCP `create_note`
+  tool passes it through.
+- `padmark-cli create` and `edit` accept the v0.1.6 `--private` flag again as a deprecated
+  alias: `--private` is `--privacy authenticated`, `--private=false` is `--privacy public`.
 
 ### Upgrading v0.3.2/v0.3.3 to v0.4.0
 
