@@ -65,9 +65,12 @@ func (r *APITokenRepository) CreateIfUnderLimit(ctx context.Context, token *doma
 	var created bool
 
 	err := r.db.RunInTx(ctx, nil, func(ctx context.Context, btx bun.Tx) error {
+		// Only live tokens count: an expired key no longer authenticates, so it must not hold a
+		// place in the quota. Expired rows stay, because tokens they issued may still be live.
 		count, countErr := btx.NewSelect().
 			Model((*apiTokenRow)(nil)).
 			Where("user_id = ?", token.UserID).
+			Where("expires_at IS NULL OR expires_at > ?", time.Now()).
 			Count(ctx)
 		if countErr != nil {
 			return fmt.Errorf("count api tokens: %w", countErr)

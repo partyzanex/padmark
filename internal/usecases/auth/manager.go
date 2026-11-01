@@ -98,8 +98,8 @@ type TOTPManager interface {
 
 // APITokenStore persists CLI API tokens keyed by their SHA-256 hash. The plain key is never stored.
 type APITokenStore interface {
-	// CreateIfUnderLimit atomically counts t.UserID's existing tokens and inserts t only if that
-	// count is below limit, reporting false (no error) when the limit is already reached. The
+	// CreateIfUnderLimit atomically counts t.UserID's live (unexpired) tokens and inserts t only
+	// if that count is below limit, reporting false (no error) when the limit is already reached. The
 	// count-then-insert must be a single atomic operation — two concurrent issuance requests each
 	// doing a separate count check followed by an unconditional insert could both pass the check
 	// before either insert lands, letting the user exceed the limit.
