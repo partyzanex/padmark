@@ -16,9 +16,9 @@ the original API base explicitly. A decoded token envelope can also supply its `
 - `POST /notes` — create a note. Body: `content` (required), optional `title`, `content_type`
   (`text/markdown` | `text/plain`), `slug` (custom slugs may be disabled on the instance),
   `burn_after_reading`, `ttl`, `privacy` (`public` | `authenticated` | `owner`), `edit_code`.
-  `ttl` is only meaningful with `burn_after_reading: true` (post-read grace period in seconds;
-  omitted or 0 means immediate burn) and is silently ignored otherwise — a new note never gets
-  a hard expiry from the request. Responds `201` with the note and `Location: /{id}`; `409`
+  With `burn_after_reading: true`, `ttl` is the post-read grace period in seconds (omitted or
+  0 means immediate burn). Without it, a positive `ttl` is the note's lifetime counted from
+  creation; omitted or 0 means no expiry. Responds `201` with the note and `Location: /{id}`; `409`
   when the slug is taken, `422` for an invalid slug or `privacy: owner` without a credential.
 - `GET /notes/{id}` — read a note as JSON (send `Accept: application/json`). Incrementing
   `views` is a side effect of every read. A burn note with no grace period is destroyed by
@@ -35,8 +35,8 @@ the original API base explicitly. A decoded token envelope can also supply its `
   `content_type`, `burn_after_reading`, `ttl`, `privacy`, `edit_code`; the slug cannot be
   changed. Pass the `edit_code` in the body, or omit it when authenticated as the note's
   owner. `401` for an anonymous caller on a note whose `privacy` requires a credential, `403`
-  on a wrong edit code (or a non-owner without one). Unlike `POST`, a non-burn `ttl` is
-  applied here as a hard expiry counted from the update: `ttl: N` sets it, `ttl: 0` expires
+  on a wrong edit code (or a non-owner without one). As in `POST`, a non-burn `ttl` is
+  a hard expiry, here counted from the update: `ttl: N` sets it, `ttl: 0` expires
   immediately, omitted preserves the current expiry (except that disabling an existing burn
   timer clears its expiry), and `ttl: null` removes it. With burn, `ttl` is the post-read
   grace period; omitted, null or 0 means immediate burn.

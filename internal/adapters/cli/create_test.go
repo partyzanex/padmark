@@ -116,3 +116,36 @@ func TestBuildCreateReq_NoPrivacyFlag_OmitsField(t *testing.T) {
 
 	assert.False(t, req.Privacy.IsSet(), "privacy must be omitted, not sent as public")
 }
+
+// TestBuildCreateReq_DeprecatedPrivate covers the v0.1.6 --private flag: it becomes the matching
+// privacy level, and an explicit --privacy wins.
+func TestBuildCreateReq_DeprecatedPrivate(t *testing.T) {
+	t.Parallel()
+
+	req := buildCreateReqFor(t, "--private")
+	require.True(t, req.Privacy.IsSet())
+	assert.Equal(t, padmark.CreateNoteRequestPrivacyAuthenticated, req.Privacy.Value)
+
+	req = buildCreateReqFor(t, "--private=false")
+	require.True(t, req.Privacy.IsSet())
+	assert.Equal(t, padmark.CreateNoteRequestPrivacyPublic, req.Privacy.Value)
+
+	req = buildCreateReqFor(t, "--private", "--privacy", "authenticated")
+	assert.Equal(t, padmark.CreateNoteRequestPrivacyAuthenticated, req.Privacy.Value)
+}
+
+// TestValidatePrivacyFlags_Conflict verifies that --private with a different --privacy fails
+// before any request, for both create and edit.
+func TestValidatePrivacyFlags_Conflict(t *testing.T) {
+	isolateEnv(t)
+
+	for _, args := range [][]string{
+		{cmdCreate, "--private", "--privacy", "owner", "--content", "x"},
+		{cmdEdit, "some-id", "--private=false", "--privacy", "authenticated", "--content", "x"},
+	} {
+		err := runCLI(t.Context(), args...)
+
+		require.Error(t, err)
+		assert.ErrorIs(t, err, errPrivateConflict)
+	}
+}

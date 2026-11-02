@@ -15,7 +15,9 @@ func main() {
 	err := app.Run(context.Background(), os.Args)
 	if err != nil {
 		// stderr only: stdout belongs to the MCP protocol.
-		fmt.Fprintln(os.Stderr, "error:", err)
+		// The process exits next: a failed write to stderr has no other place to go.
+		_, _ = fmt.Fprintln(os.Stderr, "error:", err)
+
 		os.Exit(1)
 	}
 }

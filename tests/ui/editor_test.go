@@ -33,23 +33,27 @@ func TestEditor(t *testing.T) {
 			sess.must(sess.expect.Locator(sess.page.Locator("html")).ToHaveAttribute("data-theme", theme))
 			activeButton := sess.page.Locator(fmt.Sprintf(`.theme-btn[data-theme="%s"]`, theme))
 			sess.must(sess.expect.Locator(activeButton).ToHaveClass(regexp.MustCompile("active")))
-		}})
+		},
+			accounts: false, allowedStatuses: nil,
+		})
 	}
 
 	cases = append(cases,
-		scenario{name: "Toolbar", run: testToolbar},
-		scenario{name: "Options", run: testOptions},
+		scenario{name: "Toolbar", run: testToolbar, accounts: false, allowedStatuses: nil},
+		scenario{name: "Options", run: testOptions, accounts: false, allowedStatuses: nil},
 		scenario{name: "PrivacyNeedsAccounts", allowedStatuses: []int{http.StatusUnprocessableEntity},
-			run: testPrivacyNeedsAccounts},
-		scenario{name: "EmptyContent", run: testEmptyContent},
-		scenario{name: "PublishAndView", run: testPublishAndView},
-		scenario{name: "EditAndSave", run: testEditAndSave},
-		scenario{name: "PreserveCustomBurnTTL", run: testPreserveCustomBurnTTL},
-		scenario{name: "OneTimeEditCode", run: testOneTimeEditCode},
-		scenario{name: "Reveal", run: testReveal},
-		scenario{name: "PublishFailure", allowedStatuses: []int{503}, run: testPublishFailure},
-		scenario{name: "InvalidEditCode", allowedStatuses: []int{403}, run: testInvalidEditCode},
-		scenario{name: "NotFound", allowedStatuses: []int{404}, run: testNotFound},
+			run:      testPrivacyNeedsAccounts,
+			accounts: false,
+		},
+		scenario{name: "EmptyContent", run: testEmptyContent, accounts: false, allowedStatuses: nil},
+		scenario{name: "PublishAndView", run: testPublishAndView, accounts: false, allowedStatuses: nil},
+		scenario{name: "EditAndSave", run: testEditAndSave, accounts: false, allowedStatuses: nil},
+		scenario{name: "PreserveCustomBurnTTL", run: testPreserveCustomBurnTTL, accounts: false, allowedStatuses: nil},
+		scenario{name: "OneTimeEditCode", run: testOneTimeEditCode, accounts: false, allowedStatuses: nil},
+		scenario{name: "Reveal", run: testReveal, accounts: false, allowedStatuses: nil},
+		scenario{name: "PublishFailure", allowedStatuses: []int{503}, run: testPublishFailure, accounts: false},
+		scenario{name: "InvalidEditCode", allowedStatuses: []int{403}, run: testInvalidEditCode, accounts: false},
+		scenario{name: "NotFound", allowedStatuses: []int{404}, run: testNotFound, accounts: false},
 	)
 	runScenarios(t, cases)
 }
@@ -95,12 +99,18 @@ func testPrivacyNeedsAccounts(sess *uiSession) {
 
 	refused, err := request.Post("/notes", playwright.APIRequestContextPostOptions{
 		Headers: headers, Data: map[string]any{"content": "protected?", "privacy": "authenticated"},
+
+		FailOnStatusCode: nil, Form: nil, IgnoreHttpsErrors: nil, MaxRedirects: nil,
+		MaxRetries: nil, Multipart: nil, Params: nil, Timeout: nil,
 	})
 	sess.must(err)
 	require.Equal(sess.t, http.StatusUnprocessableEntity, refused.Status())
 
 	created, err := request.Post("/notes", playwright.APIRequestContextPostOptions{
 		Headers: headers, Data: map[string]any{"content": "v0.1.6 private", "private": true},
+
+		FailOnStatusCode: nil, Form: nil, IgnoreHttpsErrors: nil, MaxRedirects: nil,
+		MaxRetries: nil, Multipart: nil, Params: nil, Timeout: nil,
 	})
 	sess.must(err)
 	require.Equal(sess.t, http.StatusCreated, created.Status())
@@ -111,7 +121,12 @@ func testPrivacyNeedsAccounts(sess *uiSession) {
 
 	sess.must(created.JSON(&note))
 
-	read, err := request.Get("/notes/"+note.ID, playwright.APIRequestContextGetOptions{Headers: headers})
+	read, err := request.Get("/notes/"+note.ID, playwright.APIRequestContextGetOptions{
+		Headers: headers,
+
+		Data: nil, FailOnStatusCode: nil, Form: nil, IgnoreHttpsErrors: nil, MaxRedirects: nil,
+		MaxRetries: nil, Multipart: nil, Params: nil, Timeout: nil,
+	})
 	sess.must(err)
 	require.Equal(sess.t, http.StatusOK, read.Status())
 }
@@ -187,6 +202,9 @@ func testPreserveCustomBurnTTL(sess *uiSession) {
 		Headers: headers, Data: map[string]any{
 			"content": "Original content", "burn_after_reading": true, "ttl": 123,
 		},
+
+		FailOnStatusCode: nil, Form: nil, IgnoreHttpsErrors: nil, MaxRedirects: nil,
+		MaxRetries: nil, Multipart: nil, Params: nil, Timeout: nil,
 	})
 	sess.must(err)
 	require.Equal(sess.t, http.StatusCreated, created.Status())
@@ -208,7 +226,12 @@ func testPreserveCustomBurnTTL(sess *uiSession) {
 	// Saving must preserve a grace period, so both subsequent reads succeed rather than
 	// consuming the note on the first read as an accidental ttl=0 would do.
 	for range 2 {
-		read, readErr := request.Get("/notes/"+note.ID, playwright.APIRequestContextGetOptions{Headers: headers})
+		read, readErr := request.Get("/notes/"+note.ID, playwright.APIRequestContextGetOptions{
+			Headers: headers,
+
+			Data: nil, FailOnStatusCode: nil, Form: nil, IgnoreHttpsErrors: nil, MaxRedirects: nil,
+			MaxRetries: nil, Multipart: nil, Params: nil, Timeout: nil,
+		})
 		sess.must(readErr)
 		require.Equal(sess.t, http.StatusOK, read.Status())
 
@@ -254,6 +277,8 @@ func testPublishFailure(sess *uiSession) {
 		err := route.Fulfill(playwright.RouteFulfillOptions{
 			Status: new(503), ContentType: new("application/json"),
 			Body: `{"message":"Please try again"}`,
+
+			Headers: nil, Path: nil, Response: nil,
 		})
 		if err != nil {
 			sess.errorf("fulfill simulated failure: %v", err)

@@ -13,13 +13,13 @@ import (
 
 func TestAccounts(t *testing.T) {
 	runScenarios(t, []scenario{
-		{name: "Setup", accounts: true, run: testSetup},
-		{name: "SetupSubmit", accounts: true, run: testSetupSubmit},
-		{name: "Login", accounts: true, run: testLogin},
-		{name: "AdminForms", accounts: true, run: testAdminForms},
-		{name: "RevokeUser", accounts: true, run: testRevokeUser},
-		{name: "ChangePassword", accounts: true, run: testChangePassword},
-		{name: "PrivacyOptions", accounts: true, run: testPrivacyOptions},
+		{name: "Setup", accounts: true, run: testSetup, allowedStatuses: nil},
+		{name: "SetupSubmit", accounts: true, run: testSetupSubmit, allowedStatuses: nil},
+		{name: "Login", accounts: true, run: testLogin, allowedStatuses: nil},
+		{name: "AdminForms", accounts: true, run: testAdminForms, allowedStatuses: nil},
+		{name: "RevokeUser", accounts: true, run: testRevokeUser, allowedStatuses: nil},
+		{name: "ChangePassword", accounts: true, run: testChangePassword, allowedStatuses: nil},
+		{name: "PrivacyOptions", accounts: true, run: testPrivacyOptions, allowedStatuses: nil},
 	})
 }
 
@@ -145,11 +145,18 @@ func testRevokeUser(sess *uiSession) {
 		Data: map[string]string{
 			"username": "invited-user", "password": password, "invite": inviteURL.Query().Get("invite"),
 		},
+
+		FailOnStatusCode: nil, Form: nil, IgnoreHttpsErrors: nil, MaxRedirects: nil,
+		MaxRetries: nil, Multipart: nil, Params: nil, Timeout: nil,
 	})
 	sess.must(err)
 	require.Equal(sess.t, http.StatusCreated, response.Status())
 	sess.gotoPage("/admin")
-	user := sess.page.Locator(".user-row").Filter(playwright.LocatorFilterOptions{HasText: "invited-user"})
+	user := sess.page.Locator(".user-row").Filter(playwright.LocatorFilterOptions{
+		HasText: "invited-user",
+
+		Has: nil, HasNot: nil, HasNotText: nil, Visible: nil,
+	})
 	sess.must(sess.expect.Locator(user).ToBeVisible())
 	sess.must(user.Locator("button").Click())
 	invitedName := sess.page.GetByText("invited-user", playwright.PageGetByTextOptions{Exact: new(true)})

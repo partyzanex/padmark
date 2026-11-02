@@ -98,7 +98,7 @@ func linkOutputFromLink(resp *padmark.LinkResponse) createLinkOutput {
 		TargetURL:      resp.TargetURL.String(),
 		Views:          resp.Views,
 		BurnAfterClick: resp.BurnAfterClick,
-		CreatedAt:      "",
+		CreatedAt:      timeText(resp.CreatedAt),
 		ExpiresAt:      nilTimeText(resp.ExpiresAt),
 		Privacy:        "",
 		DirectRedirect: nil,

@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"sync"
+	"sync/atomic"
 	"testing"
 	time "time"
 
@@ -114,4 +116,85 @@ func TestWithFailLockout_UnderThreshold_ReachesUpstream(t *testing.T) {
 
 	assert.True(t, called)
 	assert.Equal(t, http.StatusOK, rec.Code)
+}
+
+// TestWithFailLockout_ParallelBurst_StopsAtThreshold covers audit finding R8: attempts are counted
+// before the edit-code check, so a parallel burst from one bucket passes at most
+// maxFailedAttempts requests to the handler, and the rest get 429.
+func TestWithFailLockout_ParallelBurst_StopsAtThreshold(t *testing.T) {
+	t.Parallel()
+
+	const requests = 20
+
+	var (
+		entered atomic.Int32
+		wg      sync.WaitGroup
+	)
+
+	release := make(chan struct{})
+	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		entered.Add(1)
+		<-release
+		w.WriteHeader(http.StatusForbidden)
+	})
+	handler := WithFailLockout(NewFailLockoutCache(), nil, testDiscardLog(), inner)
+
+	codes := make(chan int, requests)
+
+	for range requests {
+		wg.Go(func() {
+			req := httptest.NewRequest(http.MethodPut, "/notes/same", nil)
+			req.SetPathValue("id", "same")
+
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+
+			codes <- rec.Code
+		})
+	}
+
+	// The rejected requests finish without the handler; wait for them before the release.
+	require.Eventually(t, func() bool { return len(codes) == requests-maxFailedAttempts },
+		5*time.Second, time.Millisecond)
+	close(release)
+	wg.Wait()
+	close(codes)
+
+	assert.Equal(t, int32(maxFailedAttempts), entered.Load())
+
+	tooMany := 0
+
+	for code := range codes {
+		if code == http.StatusTooManyRequests {
+			tooMany++
+		}
+	}
+
+	assert.Equal(t, requests-maxFailedAttempts, tooMany)
+}
+
+// TestWithFailLockout_NonFailureRefundsAttempt verifies that responses other than 403, such as
+// the 401 of the privacy gate or a 404, take the reserved attempt back and never lock the bucket.
+func TestWithFailLockout_NonFailureRefundsAttempt(t *testing.T) {
+	t.Parallel()
+
+	calls := 0
+	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+
+		w.WriteHeader(http.StatusNotFound)
+	})
+	handler := WithFailLockout(NewFailLockoutCache(), nil, testDiscardLog(), inner)
+
+	for range 2 * maxFailedAttempts {
+		req := httptest.NewRequest(http.MethodDelete, "/notes/missing", nil)
+		req.SetPathValue("id", "missing")
+
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusNotFound, rec.Code)
+	}
+
+	assert.Equal(t, 2*maxFailedAttempts, calls)
 }

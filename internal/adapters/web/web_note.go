@@ -10,8 +10,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/google/uuid"
-
 	"github.com/partyzanex/padmark/internal/adapters/web/middleware"
 	"github.com/partyzanex/padmark/internal/adapters/web/ogenapi"
 	"github.com/partyzanex/padmark/internal/adapters/web/response"
@@ -191,7 +189,7 @@ func (h *NoteHandler) UpdateNoteByPath(w http.ResponseWriter, r *http.Request) {
 
 	id := r.PathValue("id")
 
-	if h.gateAnonymousMutation(w, r, id) {
+	if h.gateMutation(w, r, id) {
 		return
 	}
 
@@ -248,7 +246,7 @@ func (h *NoteHandler) UpdateNoteByPath(w http.ResponseWriter, r *http.Request) {
 func (h *NoteHandler) DeleteNoteByPath(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	if h.gateAnonymousMutation(w, r, id) {
+	if h.gateMutation(w, r, id) {
 		return
 	}
 
@@ -380,19 +378,14 @@ func (h *NoteHandler) writePlainNote(w http.ResponseWriter, r *http.Request, id 
 	}
 }
 
-// gateAnonymousMutation enforces the note's read-level privacy for anonymous write callers
-// (PUT/DELETE): someone who could not read the note may not mutate it via edit code either —
+// gateMutation enforces the note's read-level privacy for every write caller (PUT/DELETE):
+// someone who could not read the note may not mutate it via edit code either, signed in or not —
 // the mutation counterpart of handlePrivateAuth, applied by UpdateNoteByPath and
-// DeleteNoteByPath. Authenticated callers always proceed; their ownership still decides inside
-// the usecase (OwnedBy / ValidateOwnership). A failed Peek defers to the real mutation so the
-// caller sees the same error (404) a read would produce. Reports whether the response has been
-// written (gate refused the request).
-func (h *NoteHandler) gateAnonymousMutation(w http.ResponseWriter, r *http.Request, id string) bool {
+// DeleteNoteByPath. A failed Peek defers to the real mutation so the caller sees the same error
+// (404) a read would produce. Reports whether the response has been written (gate refused the
+// request).
+func (h *NoteHandler) gateMutation(w http.ResponseWriter, r *http.Request, id string) bool {
 	if h.authMgr == nil {
-		return false
-	}
-
-	if middleware.CallerIDFromCtx(r.Context()) != uuid.Nil || h.isAuthenticated(r) {
 		return false
 	}
 
@@ -401,7 +394,7 @@ func (h *NoteHandler) gateAnonymousMutation(w http.ResponseWriter, r *http.Reque
 		return false
 	}
 
-	if note.VisibleTo(uuid.Nil, false) {
+	if note.VisibleTo(middleware.CallerIDFromCtx(r.Context()), h.isAuthenticated(r)) {
 		return false
 	}
 

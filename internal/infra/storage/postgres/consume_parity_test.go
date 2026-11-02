@@ -46,7 +46,7 @@ func (s *ParitySuite) TestNote_ConcurrentConsumeSingleWinner() {
 	s.Require().NoError(repo.Create(ctx, burn))
 
 	results := race(func(int) consumeOutcome {
-		got, err := repo.Consume(ctx, "burn-race")
+		got, err := repo.Consume(ctx, "burn-race", domain.PrivacyPublic)
 
 		return consumeOutcome{err: err, ok: err == nil && got.Content == "secret"}
 	})
@@ -67,16 +67,16 @@ func (s *ParitySuite) TestNote_SetBurnExpiryStartsTimerOnce() {
 
 	expiresAt := time.Now().Add(time.Minute).Truncate(time.Microsecond)
 
-	got, err := repo.SetBurnExpiry(ctx, "burn-ttl", expiresAt)
+	got, err := repo.SetBurnExpiry(ctx, "burn-ttl", expiresAt, domain.PrivacyPublic)
 	s.Require().NoError(err)
 	s.False(got.BurnAfterReading)
 	s.Require().NotNil(got.ExpiresAt)
 	s.True(expiresAt.Equal(*got.ExpiresAt))
 
-	_, err = repo.SetBurnExpiry(ctx, "burn-ttl", expiresAt.Add(time.Hour))
+	_, err = repo.SetBurnExpiry(ctx, "burn-ttl", expiresAt.Add(time.Hour), domain.PrivacyPublic)
 	s.Require().ErrorIs(err, domain.ErrNotFound, "the grace timer must not be restartable")
 
-	_, err = repo.Consume(ctx, "burn-ttl")
+	_, err = repo.Consume(ctx, "burn-ttl", domain.PrivacyPublic)
 	s.Require().ErrorIs(err, domain.ErrNotFound, "a note inside its grace period is not consumable")
 }
 
@@ -85,10 +85,10 @@ func (s *ParitySuite) TestNote_SetBurnExpiryIgnoresNonBurnAndUnknownNotes() {
 	repo := NewNoteRepository(s.db)
 	s.Require().NoError(repo.Create(ctx, newNote("plain", "t", "c")))
 
-	_, err := repo.SetBurnExpiry(ctx, "plain", time.Now().Add(time.Minute))
+	_, err := repo.SetBurnExpiry(ctx, "plain", time.Now().Add(time.Minute), domain.PrivacyPublic)
 	s.Require().ErrorIs(err, domain.ErrNotFound)
 
-	_, err = repo.SetBurnExpiry(ctx, "missing", time.Now().Add(time.Minute))
+	_, err = repo.SetBurnExpiry(ctx, "missing", time.Now().Add(time.Minute), domain.PrivacyPublic)
 	s.Require().ErrorIs(err, domain.ErrNotFound)
 
 	got, err := repo.Get(ctx, "plain")
@@ -105,7 +105,8 @@ func (s *ParitySuite) TestNote_ConcurrentSetBurnExpirySingleWinner() {
 	s.Require().NoError(repo.Create(ctx, burn))
 
 	results := race(func(attempt int) consumeOutcome {
-		_, err := repo.SetBurnExpiry(ctx, "ttl-race", time.Now().Add(time.Duration(attempt+1)*time.Minute))
+		expiresAt := time.Now().Add(time.Duration(attempt+1) * time.Minute)
+		_, err := repo.SetBurnExpiry(ctx, "ttl-race", expiresAt, domain.PrivacyPublic)
 
 		return consumeOutcome{err: err, ok: err == nil}
 	})
@@ -168,10 +169,10 @@ func (s *ParitySuite) TestExpiry_ComparesInstantsNotWallClocks() {
 	live.ExpiresAt = &future
 	s.Require().NoError(notes.Create(ctx, live))
 
-	_, err := notes.Consume(ctx, "expired-east")
+	_, err := notes.Consume(ctx, "expired-east", domain.PrivacyPublic)
 	s.Require().NoError(err, "a past instant in UTC+14 is expired")
 
-	_, err = notes.Consume(ctx, "live-west")
+	_, err = notes.Consume(ctx, "live-west", domain.PrivacyPublic)
 	s.Require().ErrorIs(err, domain.ErrNotFound, "a future instant in UTC-12 is not expired")
 
 	got, err := notes.Get(ctx, "live-west")

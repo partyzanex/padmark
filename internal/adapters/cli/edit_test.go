@@ -57,3 +57,15 @@ func TestBuildUpdateReq_NoPrivacyFlag_OmitsField(t *testing.T) {
 
 	assert.False(t, req.Privacy.IsSet(), "privacy must be omitted when not passed, not sent as public")
 }
+
+// TestBuildUpdateReq_DeprecatedPrivate covers the v0.1.6 --private flag on edit.
+func TestBuildUpdateReq_DeprecatedPrivate(t *testing.T) {
+	t.Parallel()
+
+	req := buildUpdateReqFor(t, "--private")
+	require.True(t, req.Privacy.IsSet())
+	assert.Equal(t, padmark.UpdateNoteRequestPrivacyAuthenticated, req.Privacy.Value)
+
+	req = buildUpdateReqFor(t)
+	assert.False(t, req.Privacy.IsSet(), "privacy must be omitted when no flag is given")
+}

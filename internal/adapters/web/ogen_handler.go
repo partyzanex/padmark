@@ -9,8 +9,6 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/google/uuid"
-
 	"github.com/partyzanex/padmark/internal/adapters/web/middleware"
 	"github.com/partyzanex/padmark/internal/adapters/web/ogenapi"
 	"github.com/partyzanex/padmark/internal/domain"
@@ -52,11 +50,7 @@ func (h *OgenHandler) CreateNote(
 	ctx context.Context, req *ogenapi.CreateNoteRequest,
 ) (ogenapi.CreateNoteRes, error) {
 	burnAfterReading := req.BurnAfterReading.Or(false)
-
-	var burnTTL int64
-	if burnAfterReading && req.TTL.IsSet() && req.TTL.Value >= 0 {
-		burnTTL = req.TTL.Value
-	}
+	burnTTL, expiresAt := createNoteExpiry(req)
 
 	// A contradictory request is the caller's error (400) before any server capability (422).
 	privacy, err := resolvePrivacy(req.GetPrivate(), optCreatePrivacyPtr(req.Privacy))
@@ -73,11 +67,11 @@ func (h *OgenHandler) CreateNote(
 
 	note, err := h.manager.Create(ctx, &domain.Note{
 		ClearExpiry: false,
-		// CreateNote fills CreatedAt/UpdatedAt; ExpiresAt is server-derived (--ttl on the CLI)
-		// and Views starts at 0. Privacy/OwnerID/EditCode/ContentType carry through from the request.
+		// CreateNote fills CreatedAt/UpdatedAt and Views starts at 0.
+		// Privacy/OwnerID/EditCode/ContentType carry through from the request.
 		CreatedAt:        time.Time{},
 		UpdatedAt:        time.Time{},
-		ExpiresAt:        nil,
+		ExpiresAt:        expiresAt,
 		Privacy:          privacy,
 		OwnerID:          middleware.OwnerIDFromCtx(ctx),
 		ID:               req.Slug.Or(""),
@@ -142,7 +136,7 @@ func (h *OgenHandler) UpdateNote(
 		return mapUpdateError(err, h.log), nil
 	}
 
-	if !h.anonymousNoteMutationAllowed(ctx, params.ID) {
+	if !h.noteMutationAllowed(ctx, params.ID) {
 		v := ogenapi.UpdateNoteUnauthorized{}
 
 		return &v, nil
@@ -205,7 +199,7 @@ func noteUpdatePayload(req *ogenapi.UpdateNoteRequest) (*domain.Note, error) {
 func (h *OgenHandler) DeleteNote(
 	ctx context.Context, params ogenapi.DeleteNoteParams,
 ) (ogenapi.DeleteNoteRes, error) {
-	if !h.anonymousNoteMutationAllowed(ctx, params.ID) {
+	if !h.noteMutationAllowed(ctx, params.ID) {
 		return &ogenapi.DeleteNoteUnauthorized{}, nil
 	}
 
@@ -297,7 +291,7 @@ func (h *OgenHandler) GetLink(
 func (h *OgenHandler) DeleteLink(
 	ctx context.Context, params ogenapi.DeleteLinkParams,
 ) (ogenapi.DeleteLinkRes, error) {
-	if !h.anonymousLinkMutationAllowed(ctx, params.ID) {
+	if !h.linkMutationAllowed(ctx, params.ID) {
 		return &ogenapi.DeleteLinkUnauthorized{}, nil
 	}
 
@@ -387,8 +381,28 @@ func createOneBulkLink(
 	return result
 }
 
-// ttlToExpiresAt converts CreateLinkRequest.ttl (seconds from now) to an absolute expiry
-// timestamp. nil (omitted) means the link never expires.
+// createNoteExpiry reads CreateNoteRequest.ttl. With burn_after_reading it is the grace period
+// after the first read; without it, a positive ttl is the note's lifetime from creation, the
+// same meaning as for links and for UpdateNoteRequest.ttl.
+func createNoteExpiry(req *ogenapi.CreateNoteRequest) (int64, *time.Time) {
+	ttl := req.TTL
+	if !ttl.IsSet() || ttl.Value < 0 {
+		return 0, nil
+	}
+
+	if req.BurnAfterReading.Or(false) {
+		return ttl.Value, nil
+	}
+
+	if ttl.Value == 0 {
+		return 0, nil
+	}
+
+	return 0, ttlToExpiresAt(ttl)
+}
+
+// ttlToExpiresAt converts a ttl (seconds from now) to an absolute expiry timestamp.
+// nil (omitted) means no expiry.
 func ttlToExpiresAt(ttl ogenapi.OptInt64) *time.Time {
 	if !ttl.IsSet() {
 		return nil
@@ -667,12 +681,6 @@ func mapCreateInviteError(err error, log *slog.Logger) ogenapi.CreateInviteRes {
 	}
 }
 
-// anonymousNoteMutationAllowed reports whether an anonymous caller may attempt to mutate a
-// note (PUT/DELETE): the note's read-level privacy must admit anonymous callers, mirroring
-// the read gate (handlePrivateAuth → Note.VisibleTo) — someone who could not read the note
-// may not edit it via edit code either. Authenticated callers always pass; their ownership
-// still decides inside the usecase (OwnedBy / ValidateOwnership). A failed Peek defers to the
-// real mutation so the caller sees the same error (404) a read would produce, unchanged.
 // accountsEnabled reports whether the account system is attached (--enable-accounts): only then
 // can the authenticated and owner privacy levels be enforced.
 func (h *OgenHandler) accountsEnabled() accountMode {
@@ -683,10 +691,15 @@ func (h *OgenHandler) accountsEnabled() accountMode {
 	return accountsOn
 }
 
-// Without the account system (accountsEnabled false) no privacy level is enforced on reads, as
-// in v0.1.6 without --auth-tokens, so the edit code alone decides, like the native PUT/DELETE gate.
-func (h *OgenHandler) anonymousNoteMutationAllowed(ctx context.Context, id string) bool {
-	if !h.accountsEnabled() || middleware.CallerIDFromCtx(ctx) != uuid.Nil {
+// noteMutationAllowed reports whether the caller may attempt to mutate a note (PUT/DELETE): the
+// note's read-level privacy must admit this caller, as on GetNote. An edit code proves the right
+// to change a note the caller can read; it never opens a note that privacy hides, such as another
+// account's owner-only note. The denial is 401, like the read, so it never counts as a wrong edit
+// code for the fail lockout. A failed Peek defers to the real mutation so the caller sees the
+// same error (404) a read would produce. Without the account system no privacy level is enforced
+// on reads, as in v0.1.6 without --auth-tokens, so the edit code alone decides.
+func (h *OgenHandler) noteMutationAllowed(ctx context.Context, id string) bool {
+	if !h.accountsEnabled() {
 		return true
 	}
 
@@ -695,13 +708,13 @@ func (h *OgenHandler) anonymousNoteMutationAllowed(ctx context.Context, id strin
 		return true
 	}
 
-	return note.VisibleTo(uuid.Nil, false)
+	return note.VisibleTo(middleware.CallerIDFromCtx(ctx), middleware.AuthenticatedFromCtx(ctx))
 }
 
-// anonymousLinkMutationAllowed is the links counterpart of anonymousNoteMutationAllowed
+// linkMutationAllowed is the links counterpart of noteMutationAllowed
 // (see GetLink's VisibleTo check for the read-path symmetry).
-func (h *OgenHandler) anonymousLinkMutationAllowed(ctx context.Context, id string) bool {
-	if !h.accountsEnabled() || middleware.CallerIDFromCtx(ctx) != uuid.Nil {
+func (h *OgenHandler) linkMutationAllowed(ctx context.Context, id string) bool {
+	if !h.accountsEnabled() {
 		return true
 	}
 
@@ -710,5 +723,5 @@ func (h *OgenHandler) anonymousLinkMutationAllowed(ctx context.Context, id strin
 		return true
 	}
 
-	return link.VisibleTo(uuid.Nil, false)
+	return link.VisibleTo(middleware.CallerIDFromCtx(ctx), middleware.AuthenticatedFromCtx(ctx))
 }

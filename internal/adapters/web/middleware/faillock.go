@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/bluele/gcache"
@@ -17,7 +18,7 @@ const (
 	// which this bucket (see failLockoutKey) is locked for failLockoutDur.
 	maxFailedAttempts = 10
 
-	// failLockoutDur runs from the last 403 for this bucket.
+	// failLockoutDur runs from the last counted attempt for this bucket.
 	// Requests rejected with 429 do not extend the lockout.
 	failLockoutDur = 5 * time.Minute
 
@@ -74,10 +75,16 @@ func newFailLockoutKey(r *http.Request, trustedProxies []*net.IPNet) failLockout
 // passes, because ARC would otherwise evict it once an attacker touches maxTrackedFailures other
 // buckets twice each, restarting its counter at zero. Memory is bounded: counters by
 // maxTrackedFailures, locks by maxLockedBuckets (and in practice by the failures per duration).
+//
+// A counter includes the attempts still in flight: reserve counts an attempt before the handler
+// checks the edit code, and refund takes it back when the response was not a failure. mu makes
+// each of these read-modify-write steps atomic, so a parallel burst cannot pass more than
+// maxFailedAttempts attempts to the edit-code check. It guards only the in-memory state.
 type FailLockoutCache struct {
 	gcache.Cache
 
 	locked *lockedSet[failLockoutKey]
+	mu     sync.Mutex
 }
 
 // NewFailLockoutCache returns an empty, bounded lockout state for WithFailLockout.
@@ -85,6 +92,88 @@ func NewFailLockoutCache() *FailLockoutCache {
 	return &FailLockoutCache{
 		Cache:  gcache.New(maxTrackedFailures).ARC().Build(),
 		locked: newLockedSet[failLockoutKey](),
+		mu:     sync.Mutex{},
+	}
+}
+
+// reserve counts one attempt for key before it is attempted, unless key is locked. It reports
+// false when the bucket is locked or its counted and in-flight attempts reached the threshold.
+func (c *FailLockoutCache) reserve(key failLockoutKey) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if _, locked := c.locked.remaining(key, time.Now()); locked {
+		return false
+	}
+
+	count := c.count(key)
+	if count >= maxFailedAttempts {
+		return false
+	}
+
+	c.store(key, count+1)
+
+	return true
+}
+
+// confirm keeps the reserved attempt as a failure and pins the lock once the bucket reached
+// maxFailedAttempts.
+func (c *FailLockoutCache) confirm(key failLockoutKey) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.count(key) >= maxFailedAttempts {
+		// Pin the lock outside the evictable counter cache.
+		c.locked.lock(key, time.Now(), time.Now().Add(failLockoutDur))
+	}
+}
+
+// refund takes back a reserved attempt whose response was not a failure.
+func (c *FailLockoutCache) refund(key failLockoutKey) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	count := c.count(key)
+	if count <= 1 {
+		c.Remove(key)
+
+		return
+	}
+
+	c.store(key, count-1)
+}
+
+// reset clears key after a successful mutation.
+func (c *FailLockoutCache) reset(key failLockoutKey) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.Remove(key)
+	c.locked.unlock(key)
+}
+
+// count returns the attempts counted for key; the caller holds mu.
+func (c *FailLockoutCache) count(key failLockoutKey) int {
+	cached, err := c.Get(key)
+	if err != nil {
+		return 0
+	}
+
+	count, ok := cached.(int)
+	if !ok {
+		return 0
+	}
+
+	return count
+}
+
+// store saves count for key; the caller holds mu.
+func (c *FailLockoutCache) store(key failLockoutKey, count int) {
+	setErr := c.SetWithExpire(key, count, failLockoutDur)
+	if setErr != nil {
+		// ARC SetWithExpire never returns an error in practice; on failure the attempt simply
+		// goes uncounted rather than locking anyone out.
+		return
 	}
 }
 
@@ -103,7 +192,7 @@ func WithFailLockout(
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		key := newFailLockoutKey(r, trustedProxies)
 
-		if isFailLocked(cache, key) {
+		if !cache.reserve(key) {
 			response.WriteJSONErrorStatus(
 				w, r, log, http.StatusTooManyRequests, "too many failed attempts, try again later",
 			)
@@ -116,56 +205,13 @@ func WithFailLockout(
 
 		switch {
 		case rec.status == http.StatusForbidden:
-			recordFailure(cache, key)
+			cache.confirm(key)
 		case rec.status < http.StatusBadRequest:
 			// Success resets only this caller's failures, preserving other buckets.
-			cache.Remove(key)
-			cache.locked.unlock(key)
+			cache.reset(key)
 		default:
-			// Other 4xx and 5xx responses leave the failure count unchanged.
+			// Other 4xx and 5xx responses are not failed edit codes: the attempt is taken back.
+			cache.refund(key)
 		}
 	})
-}
-
-// recordFailure counts one failed attempt for key. It pins the lock once the count reaches
-// maxFailedAttempts.
-func recordFailure(cache *FailLockoutCache, key failLockoutKey) {
-	count := 0
-
-	prev, getErr := cache.Get(key)
-	if getErr == nil {
-		if prevCount, ok := prev.(int); ok {
-			count = prevCount
-		}
-	}
-
-	count++
-
-	if count >= maxFailedAttempts {
-		// Pin the lock outside the evictable counter cache.
-		cache.locked.lock(key, time.Now(), time.Now().Add(failLockoutDur))
-	}
-
-	setErr := cache.SetWithExpire(key, count, failLockoutDur)
-	if setErr != nil {
-		// ARC SetWithExpire never returns an error in practice; skip silently.
-		return
-	}
-}
-
-// isFailLocked reports whether key is locked, either pinned in the lock set or by a counter
-// that already reached the threshold.
-func isFailLocked(cache *FailLockoutCache, key failLockoutKey) bool {
-	if _, locked := cache.locked.remaining(key, time.Now()); locked {
-		return true
-	}
-
-	cached, err := cache.Get(key)
-	if err != nil {
-		return false
-	}
-
-	count, ok := cached.(int)
-
-	return ok && count >= maxFailedAttempts
 }

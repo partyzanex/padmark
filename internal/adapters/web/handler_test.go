@@ -602,6 +602,57 @@ func (s *HandlerSuite) TestCreateNote_WithTTL() {
 	s.True(resp.BurnAfterReading)
 }
 
+// TestCreateNote_LifetimeWithoutBurn: without burn_after_reading, ttl is the note's lifetime
+// counted from creation.
+func (s *HandlerSuite) TestCreateNote_LifetimeWithoutBurn() {
+	note := newTestNote("expiring", "content")
+	before := time.Now().UTC()
+
+	s.manager.EXPECT().Create(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, n *domain.Note) (*domain.Note, error) {
+			s.False(n.BurnAfterReading)
+			s.Zero(n.BurnTTL)
+			s.Require().NotNil(n.ExpiresAt)
+			s.WithinDuration(before.Add(time.Hour), *n.ExpiresAt, 5*time.Second)
+			note.ID = n.ID
+			note.ExpiresAt = n.ExpiresAt
+
+			return note, nil
+		})
+
+	body := `{"title":"expiring","content":"content","ttl":3600}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/notes", strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusCreated, w.Code)
+}
+
+// TestCreateNote_ZeroTTLWithoutBurn_NoExpiry: ttl 0 without burn keeps the note without expiry.
+func (s *HandlerSuite) TestCreateNote_ZeroTTLWithoutBurn_NoExpiry() {
+	note := newTestNote("plain", "content")
+
+	s.manager.EXPECT().Create(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, n *domain.Note) (*domain.Note, error) {
+			s.Nil(n.ExpiresAt)
+			s.Zero(n.BurnTTL)
+			note.ID = n.ID
+
+			return note, nil
+		})
+
+	body := `{"title":"plain","content":"content","ttl":0}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/notes", strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusCreated, w.Code)
+}
+
 func (s *HandlerSuite) TestCreateNote_ImmediateBurn() {
 	note := newTestNote("burn", "content")
 	note.BurnAfterReading = true
@@ -2848,7 +2899,7 @@ func (s *HandlerSuite) TestPrivateNote_TOTPMode_Unauthenticated() {
 
 // ── Anonymous mutation privacy gate (PUT/DELETE) ──
 //
-// The gate (anonymousNoteMutationAllowed / gateAnonymousMutation) implements the restored
+// The gate (noteMutationAllowed / gateMutation) implements the restored
 // semantics: an anonymous caller may mutate a note with an edit code if and only if they could
 // also read it. The tests below exercise every branch: refused (private), deferred (Peek error),
 // passed for an authenticated caller, and no interaction with the fail-lockout.
@@ -2892,32 +2943,37 @@ func (s *HandlerSuite) TestMutationGate_AnonymousDelete_OwnerNote() {
 	s.Equal(http.StatusUnauthorized, w.Code)
 }
 
-// TestMutationGate_AuthenticatedCaller_PassesGate verifies that a signed-in caller is never
-// refused by the gate — even on a privacy=owner note they do not own. The gate short-circuits
-// on the caller ID without a Peek and steps aside; ownership is decided inside the usecase (a
-// non-owner without the edit code gets 403 there).
-func (s *HandlerSuite) TestMutationGate_AuthenticatedCaller_PassesGate_PersonalNote() {
+// TestMutationGate_SignedInNonOwner_OwnerNote covers audit finding R4: a signed-in caller who
+// cannot read another account's privacy=owner note may not update or delete it, even with the
+// right edit code. The gate answers 401 like the read, and the usecase is never called.
+func (s *HandlerSuite) TestMutationGate_SignedInNonOwner_OwnerNote() {
 	usr := newTestUser("bob")
 
 	note := newTestNote("secret", "someone else's")
 	note.Privacy = new(domain.PrivacyOwner)
-	note.OwnerID = new(uuid.UUID) // owned by a user who is not in this request.
+	note.OwnerID = new(uuid.New()) // owned by a user who is not in this request.
 
-	router := s.newRouterWithTOTPAuth()
-	s.manager.EXPECT().
-		Update(gomock.Any(), testID, "", usr.ID, gomock.Any()).
-		Return(nil, domain.ErrForbidden)
-	s.authMgr.EXPECT().GetSession(gomock.Any(), "valid-sess").Return(usr, nil).Times(1)
+	// The single-segment path is the ogen route; the multi-segment path is the native one.
+	for _, path := range []string{"/notes/" + testID, "/notes/project/GUIDE.md"} {
+		for _, method := range []string{http.MethodPut, http.MethodDelete} {
+			s.Run(method+path, func() {
+				router := s.newRouterWithTOTPAuth()
+				s.manager.EXPECT().Peek(gomock.Any(), gomock.Any()).Return(note, nil)
+				s.authMgr.EXPECT().GetSession(gomock.Any(), "valid-sess").Return(usr, nil)
 
-	w := httptest.NewRecorder()
-	body := `{"title":"t","content":"c"}`
-	r := sessioned(httptest.NewRequest(http.MethodPut, "/notes/"+testID, strings.NewReader(body)))
-	r.Header.Set("Content-Type", "application/json")
-	r.Header.Set("Accept", "application/json")
+				body := `{"title":"t","content":"c","privacy":"public","edit_code":"right-code"}`
+				r := sessioned(httptest.NewRequest(method, path, strings.NewReader(body)))
+				r.Header.Set("Content-Type", "application/json")
+				r.Header.Set("Accept", "application/json")
+				r.Header.Set("X-Edit-Code", "right-code")
 
-	router.ServeHTTP(w, r)
+				w := httptest.NewRecorder()
+				router.ServeHTTP(w, r)
 
-	s.Equal(http.StatusForbidden, w.Code)
+				s.Equal(http.StatusUnauthorized, w.Code)
+			})
+		}
+	}
 }
 
 // TestMutationGate_PeekError_DefersToMutation verifies the gate's fail-open behaviour on a

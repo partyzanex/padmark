@@ -519,7 +519,7 @@ func (s *RepositoryTestSuite) TestConsume_BurnAfterReading() {
 	}
 	s.Require().NoError(s.repo.Create(ctx, n))
 
-	got, err := s.repo.Consume(ctx, "consume-bar")
+	got, err := s.repo.Consume(ctx, "consume-bar", domain.PrivacyPublic)
 	s.Require().NoError(err)
 	s.Equal("consume-bar", got.ID)
 
@@ -540,7 +540,7 @@ func (s *RepositoryTestSuite) TestConsume_Expired() {
 	}
 	s.Require().NoError(s.repo.Create(ctx, n))
 
-	got, err := s.repo.Consume(ctx, "consume-exp")
+	got, err := s.repo.Consume(ctx, "consume-exp", domain.PrivacyPublic)
 	s.Require().NoError(err)
 	s.Equal("consume-exp", got.ID)
 
@@ -559,7 +559,7 @@ func (s *RepositoryTestSuite) TestConsume_NotEligible() {
 	}
 	s.Require().NoError(s.repo.Create(ctx, n))
 
-	_, err := s.repo.Consume(ctx, "consume-no")
+	_, err := s.repo.Consume(ctx, "consume-no", domain.PrivacyPublic)
 	s.Require().ErrorIs(err, domain.ErrNotFound)
 
 	// note must still exist.
@@ -568,8 +568,75 @@ func (s *RepositoryTestSuite) TestConsume_NotEligible() {
 	s.Equal("consume-no", got.ID)
 }
 
+// TestBurn_PrivacyChanged_RowUntouched covers R2: a burn read checked against public must neither
+// return nor change a row whose privacy is now authenticated; the matching level still works.
+func (s *RepositoryTestSuite) TestBurn_PrivacyChanged_RowUntouched() {
+	ctx := s.T().Context()
+	authenticated := domain.PrivacyAuthenticated
+
+	n := &domain.Note{
+		ID: "burn-priv", Title: "burn", Content: "secret", CreatedAt: time.Now(), UpdatedAt: time.Now(),
+		ExpiresAt: nil, Privacy: nil, OwnerID: nil, ContentType: nil, EditCode: "",
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+	}
+	n.Privacy = &authenticated
+	n.BurnAfterReading = true
+	n.BurnTTL = 60
+	s.Require().NoError(s.repo.Create(ctx, n))
+
+	_, err := s.repo.SetBurnExpiry(ctx, "burn-priv", time.Now().Add(time.Minute), domain.PrivacyPublic)
+	s.Require().ErrorIs(err, domain.ErrNotFound)
+
+	_, err = s.repo.Consume(ctx, "burn-priv", domain.PrivacyPublic)
+	s.Require().ErrorIs(err, domain.ErrNotFound)
+
+	stored, err := s.repo.Get(ctx, "burn-priv")
+	s.Require().NoError(err)
+	s.True(stored.BurnAfterReading, "the timer must not start for a changed access level")
+	s.Nil(stored.ExpiresAt)
+
+	got, err := s.repo.Consume(ctx, "burn-priv", domain.PrivacyAuthenticated)
+	s.Require().NoError(err)
+	s.Equal("burn-priv", got.ID)
+}
+
+// TestDeleteExpired_KeepsExtendedNote covers audit finding R5: DeleteExpired checks the expiry at
+// the moment of the DELETE, so a note extended after an old snapshot stays, and an expired one goes.
+func (s *RepositoryTestSuite) TestDeleteExpired_KeepsExtendedNote() {
+	ctx := s.T().Context()
+	future := time.Now().Add(time.Hour)
+	past := time.Now().Add(-time.Hour)
+
+	live := plainNote("del-exp-live")
+	live.ExpiresAt = &future
+	s.Require().NoError(s.repo.Create(ctx, live))
+
+	expired := plainNote("del-exp-old")
+	expired.ExpiresAt = &past
+	s.Require().NoError(s.repo.Create(ctx, expired))
+
+	s.Require().ErrorIs(s.repo.DeleteExpired(ctx, "del-exp-live"), domain.ErrNotFound)
+
+	_, err := s.repo.Get(ctx, "del-exp-live")
+	s.Require().NoError(err, "an extended note must stay")
+
+	s.Require().NoError(s.repo.DeleteExpired(ctx, "del-exp-old"))
+
+	_, err = s.repo.Get(ctx, "del-exp-old")
+	s.ErrorIs(err, domain.ErrNotFound)
+}
+
+// plainNote returns a public note without expiry or burn settings.
+func plainNote(id string) *domain.Note {
+	return &domain.Note{
+		ID: id, Title: "t", Content: "body", CreatedAt: time.Now(), UpdatedAt: time.Now(),
+		ExpiresAt: nil, Privacy: nil, OwnerID: nil, ContentType: nil, EditCode: "",
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+	}
+}
+
 func (s *RepositoryTestSuite) TestConsume_NotFound() {
-	_, err := s.repo.Consume(s.T().Context(), "consume-missing")
+	_, err := s.repo.Consume(s.T().Context(), "consume-missing", domain.PrivacyPublic)
 
 	s.ErrorIs(err, domain.ErrNotFound)
 }

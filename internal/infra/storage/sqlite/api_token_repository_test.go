@@ -262,6 +262,28 @@ func (s *APITokenRepositoryTestSuite) TestCreateIfUnderLimit_CountsOnlyThatUsers
 	s.Equal(int64(2), count, "the refused call must not have inserted a row")
 }
 
+// TestCreateIfUnderLimit_ExpiredTokensDoNotCount covers audit finding R9: expired keys no longer
+// authenticate, so they must not hold places in the quota, while a live key still does.
+func (s *APITokenRepositoryTestSuite) TestCreateIfUnderLimit_ExpiredTokensDoNotCount() {
+	ctx := s.T().Context()
+	owner := uuid.New()
+	s.createUser(owner)
+
+	past := time.Now().Add(-time.Hour)
+
+	expired := s.newToken(owner, "expired-1")
+	expired.ExpiresAt = &past
+	s.create(expired)
+
+	created, err := s.repo.CreateIfUnderLimit(ctx, s.newToken(owner, "live-1"), 1)
+	s.Require().NoError(err)
+	s.True(created, "an expired key must not fill the quota")
+
+	created, err = s.repo.CreateIfUnderLimit(ctx, s.newToken(owner, "live-2"), 1)
+	s.Require().NoError(err)
+	s.False(created, "a live key still fills the quota")
+}
+
 func (s *APITokenRepositoryTestSuite) TestCreateIfUnderLimit_AtLimit_Refuses() {
 	ctx := s.T().Context()
 	owner := uuid.New()

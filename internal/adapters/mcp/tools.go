@@ -16,7 +16,7 @@ type createNoteInput struct {
 	ContentType      *string `json:"content_type,omitempty"       jsonschema:"text/markdown (default) or text/plain"`
 	Slug             *string `json:"slug,omitempty"               jsonschema:"Custom URL slug, may be disabled"`
 	BurnAfterReading *bool   `json:"burn_after_reading,omitempty" jsonschema:"Destroy the note on first read"`
-	TTL              *int64  `json:"ttl,omitempty"                jsonschema:"Post-read TTL in seconds (with burn)"`
+	TTL              *int64  `json:"ttl,omitempty"                jsonschema:"Lifetime in seconds (burn: after 1 read)"`
 	EditCode         *string `json:"edit_code,omitempty"          jsonschema:"8-128 char edit code, else random"`
 	Privacy          *string `json:"privacy,omitempty"            jsonschema:"public, authenticated, or owner"`
 	Content          string  `json:"content"                      jsonschema:"Note body; Markdown or plain text"`

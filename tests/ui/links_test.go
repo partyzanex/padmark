@@ -21,11 +21,11 @@ type linkMetadata struct {
 
 func TestLinks(t *testing.T) {
 	runScenarios(t, []scenario{
-		{name: "CreateEditDelete", run: testLinkCreateEditDelete},
-		{name: "Validation", run: testLinkValidation},
-		{name: "FailureRetry", allowedStatuses: []int{503}, run: testLinkFailureRetry},
-		{name: "BurnAfterClick", allowedStatuses: []int{404}, run: testLinkBurnAfterClick},
-		{name: "PrivacyAndOwnership", accounts: true, run: testLinkPrivacyAndOwnership},
+		{name: "CreateEditDelete", run: testLinkCreateEditDelete, accounts: false, allowedStatuses: nil},
+		{name: "Validation", run: testLinkValidation, accounts: false, allowedStatuses: nil},
+		{name: "FailureRetry", allowedStatuses: []int{503}, run: testLinkFailureRetry, accounts: false},
+		{name: "BurnAfterClick", allowedStatuses: []int{404}, run: testLinkBurnAfterClick, accounts: false},
+		{name: "PrivacyAndOwnership", accounts: true, run: testLinkPrivacyAndOwnership, allowedStatuses: nil},
 	})
 }
 
@@ -153,6 +153,8 @@ func testLinkFailureRetry(sess *uiSession) {
 	sess.must(sess.page.Route("**/links", func(route playwright.Route) {
 		sess.must(route.Fulfill(playwright.RouteFulfillOptions{
 			Status: new(503), ContentType: new("application/json"), Body: `{"message":"Please try again"}`,
+
+			Headers: nil, Path: nil, Response: nil,
 		}))
 	}))
 	sess.button("Create link")
@@ -199,6 +201,10 @@ func testLinkPrivacyAndOwnership(sess *uiSession) {
 
 	anonymous, err := runner.playwright.Request.NewContext(playwright.APIRequestNewContextOptions{
 		BaseURL: new(sess.baseURL),
+
+		ClientCertificates: nil, ExtraHttpHeaders: nil, FailOnStatusCode: nil,
+		HttpCredentials: nil, IgnoreHttpsErrors: nil, MaxRedirects: nil, Proxy: nil,
+		StorageState: nil, StorageStatePath: nil, Timeout: nil, UserAgent: nil,
 	})
 	sess.must(err)
 
@@ -206,6 +212,9 @@ func testLinkPrivacyAndOwnership(sess *uiSession) {
 
 	response, err := anonymous.Get("/links/"+id+"/edit", playwright.APIRequestContextGetOptions{
 		Headers: map[string]string{"Accept": "text/html"}, MaxRedirects: new(0),
+
+		Data: nil, FailOnStatusCode: nil, Form: nil, IgnoreHttpsErrors: nil, MaxRetries: nil,
+		Multipart: nil, Params: nil, Timeout: nil,
 	})
 	sess.must(err)
 	require.Equal(sess.t, http.StatusSeeOther, response.Status())
