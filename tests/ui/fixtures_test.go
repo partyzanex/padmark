@@ -107,6 +107,14 @@ func newUI(t *testing.T, screen viewport, test scenario) *uiSession {
 		IsMobile:          new(device.IsMobile), HasTouch: new(device.HasTouch),
 		Locale: new("en-US"), TimezoneId: new("UTC"),
 		ColorScheme: playwright.ColorSchemeDark, ReducedMotion: playwright.ReducedMotionReduce,
+
+		AcceptDownloads: nil, BypassCSP: nil, ClientCertificates: nil, Contrast: nil,
+		ExtraHttpHeaders: nil, ForcedColors: nil, Geolocation: nil, HttpCredentials: nil,
+		IgnoreHttpsErrors: nil, JavaScriptEnabled: nil, NoViewport: nil, Offline: nil,
+		Permissions: nil, Proxy: nil, RecordHarContent: nil, RecordHarMode: nil,
+		RecordHarOmitContent: nil, RecordHarPath: nil, RecordHarURLFilter: nil, RecordVideo: nil,
+		Screen: nil, ServiceWorkers: nil, StorageState: nil, StorageStatePath: nil,
+		StrictSelectors: nil,
 	})
 	require.NoError(t, err)
 	context.SetDefaultTimeout(5_000)
@@ -119,11 +127,15 @@ func newUI(t *testing.T, screen viewport, test scenario) *uiSession {
 		t: t, browserContext: context, screen: screen, baseURL: baseURL,
 		expect:    playwright.NewPlaywrightAssertions(),
 		artifacts: filepath.Join("artifacts", strings.ReplaceAll(t.Name(), "/", "-")),
+
+		page: nil, errors: safeLog{mu: sync.Mutex{}, buffer: bytes.Buffer{}},
 	}
 	require.NoError(t, os.MkdirAll(sess.artifacts, 0o700))
 	sess.collectBrowserErrors(test.allowedStatuses)
 	require.NoError(t, context.Tracing().Start(playwright.TracingStartOptions{
 		Screenshots: new(true), Snapshots: new(true), Sources: new(true),
+
+		Live: nil, Name: nil, Title: nil,
 	}))
 	t.Cleanup(func() { sess.finish(started, serverLog) })
 
@@ -186,6 +198,9 @@ func (sess *uiSession) finish(started time.Time, serverLog *safeLog) {
 		_, screenshotErr := sess.page.Screenshot(playwright.PageScreenshotOptions{
 			Path: new(filepath.Join(sess.artifacts, "failure.png")), FullPage: new(true),
 			Animations: playwright.ScreenshotAnimationsDisabled, Scale: playwright.ScreenshotScaleCss,
+
+			Caret: nil, Clip: nil, Mask: nil, MaskColor: nil, OmitBackground: nil, Quality: nil,
+			Style: nil, Timeout: nil, Type: nil,
 		})
 		if screenshotErr != nil {
 			t.Log("capture failure:", screenshotErr)
@@ -217,6 +232,8 @@ func (sess *uiSession) finish(started time.Time, serverLog *safeLog) {
 	runner.report.add(result{
 		Name: t.Name(), Failed: t.Failed(), Directory: sess.artifacts,
 		Duration: time.Since(started).Round(time.Millisecond).String(),
+
+		Files: nil,
 	})
 }
 
@@ -277,7 +294,7 @@ func launchServer(t *testing.T, env []string, directory, keyring string, account
 		"--custom-slugs", "--rate-limit", "0", "--argon2-memory", "8192", "--argon2-time", "1")
 
 	command.Env = append(slices.Clone(env), "PADMARK_BOOTSTRAP_TOKEN="+bootstrapToken, supervisorEnv+"=1")
-	logs := &safeLog{}
+	logs := &safeLog{mu: sync.Mutex{}, buffer: bytes.Buffer{}}
 	command.Stdout, command.Stderr = logs, logs
 	// Nothing is written to this pipe: it only closes when this process exits (or below).
 	stdin, err := command.StdinPipe()
@@ -317,7 +334,7 @@ func launchServer(t *testing.T, env []string, directory, keyring string, account
 func waitReady(t *testing.T, baseURL string, done <-chan struct{}, exitErr func() error, logs *safeLog) error {
 	t.Helper()
 
-	client := &http.Client{Timeout: 500 * time.Millisecond}
+	client := &http.Client{Timeout: 500 * time.Millisecond, Transport: nil, CheckRedirect: nil, Jar: nil}
 	defer client.CloseIdleConnections()
 
 	ticker := time.NewTicker(25 * time.Millisecond)
@@ -372,7 +389,10 @@ func (sess *uiSession) click(selector string) {
 }
 func (sess *uiSession) selectOption(selector, value string) {
 	sess.t.Helper()
-	_, err := sess.page.Locator(selector).SelectOption(playwright.SelectOptionValues{Values: &[]string{value}})
+	_, err := sess.page.Locator(selector).SelectOption(playwright.SelectOptionValues{
+		Values:         &[]string{value},
+		ValuesOrLabels: nil, Indexes: nil, Labels: nil, Elements: nil,
+	})
 	sess.must(err)
 }
 func (sess *uiSession) text(selector, value string) {
@@ -399,7 +419,12 @@ func (sess *uiSession) eval(expression string) any {
 
 //nolint:ireturn // playwright-go returns an interface
 func (sess *uiSession) role(role *playwright.AriaRole, name string) playwright.Locator {
-	return sess.page.GetByRole(*role, playwright.PageGetByRoleOptions{Name: name, Exact: new(true)})
+	return sess.page.GetByRole(*role, playwright.PageGetByRoleOptions{
+		Name: name, Exact: new(true),
+
+		Checked: nil, Description: nil, Disabled: nil, Expanded: nil, IncludeHidden: nil,
+		Level: nil, Pressed: nil, Selected: nil,
+	})
 }
 func (sess *uiSession) button(name string) {
 	sess.t.Helper()
@@ -452,6 +477,9 @@ func (sess *uiSession) admin() string {
 	response, err := sess.browserContext.Request().Post("/setup", playwright.APIRequestContextPostOptions{
 		Headers: map[string]string{"Accept": "application/json"},
 		Data:    map[string]string{"username": "ui-admin", "password": password, "bootstrap_token": bootstrapToken},
+
+		FailOnStatusCode: nil, Form: nil, IgnoreHttpsErrors: nil, MaxRedirects: nil,
+		MaxRetries: nil, Multipart: nil, Params: nil, Timeout: nil,
 	})
 	sess.must(err)
 	require.Equal(sess.t, http.StatusCreated, response.Status())

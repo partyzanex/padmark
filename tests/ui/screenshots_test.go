@@ -36,6 +36,9 @@ func (sess *uiSession) screenshot(name string, masks ...string) {
 	options := playwright.PageScreenshotOptions{
 		FullPage: new(true), Animations: playwright.ScreenshotAnimationsDisabled,
 		Scale: playwright.ScreenshotScaleCss, Caret: playwright.ScreenshotCaretHide,
+
+		Clip: nil, Mask: nil, MaskColor: nil, OmitBackground: nil, Path: nil, Quality: nil,
+		Style: nil, Timeout: nil, Type: nil,
 	}
 	for _, selector := range masks {
 		options.Mask = append(options.Mask, sess.page.Locator(selector))

@@ -187,6 +187,11 @@ func startBrowser() (func(), error) {
 
 	runner.browser, err = runner.playwright.Chromium.Launch(playwright.BrowserTypeLaunchOptions{
 		Headless: new(!*withBrowser),
+
+		Args: nil, ArtifactsDir: nil, Channel: nil, ChromiumSandbox: nil, DownloadsPath: nil,
+		Env: nil, ExecutablePath: nil, FirefoxUserPrefs: nil, HandleSIGHUP: nil, HandleSIGINT: nil,
+		HandleSIGTERM: nil, IgnoreAllDefaultArgs: nil, IgnoreDefaultArgs: nil, Proxy: nil,
+		SlowMo: nil, Timeout: nil, TracesDir: nil,
 	})
 	if err != nil {
 		_ = runner.playwright.Stop()
