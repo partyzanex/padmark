@@ -18,13 +18,20 @@ That baseline is not the latest released version.
   configurable API disabling.
 - Web UI redesign: one token set for the light/dim/dark themes, self-hosted Onest interface
   font, editor and short-link pages with a settings panel, privacy cards and switches, a new
-  note header, success, sign-in and admin pages, and phone-width layouts.
+  note header, success, sign-in and admin pages, and phone-width layouts. The note and
+  short-link editor cards fill the free screen height, with the card footer at the bottom.
+  Both forms share one head layout (icon, Onest title font, `Slug /` field and toolbar
+  height), so the head does not move when the user switches forms; the note edit form shows
+  its slug read-only.
 - Installation-key content envelopes, key-management commands and resumable schema/content
   upgrade support, including conversion of tagged v0.1.6 plaintext notes.
 - Headless account provisioning, the MCP proxy and `/llms.txt`.
 - Bootstrap/step-up protection, session/key revocation, CSRF/lockout hardening, argon2 memory
   budgeting, content/rendering limits and operational configuration checks.
 - The separate Go browser-test module, desktop/mobile PNG comparisons and CI integration.
+- Write / Split / Preview views in the note editor. The browser renders the preview with
+  vendored marked 18.1.2 and sanitizes it with DOMPurify 3.4.17; no server endpoint is added.
+  The last view is remembered per browser; phone width offers only Write and Preview.
 - Browser forms for creating, editing and deleting short links, including privacy, redirect
   mode, expiration and burn-after-click settings. Editing preserves expiry unless changed.
 - API documentation reports the application release version, shared with `--version` and

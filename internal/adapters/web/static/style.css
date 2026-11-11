@@ -571,10 +571,12 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
    Create pages: editor card + settings panel
    ================================================================ */
 .create-layout {
+    /* The layout takes the free wrapper height, so the editor card reaches the site footer. */
+    flex: 1 0 auto;
     display: flex;
     flex-wrap: wrap;
     gap: 24px;
-    align-items: flex-start;
+    align-items: stretch;
     padding: 12px 0 56px;
 }
 
@@ -582,6 +584,8 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     flex: 999 1 640px;
     min-width: 0;
     overflow: hidden;
+    display: flex;
+    flex-direction: column;
 }
 
 .editor-head {
@@ -591,36 +595,25 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     gap: 10px;
 }
 
-.title-input {
-    width: 100%;
-    border: 0;
-    background: transparent;
-    padding: 0;
-    outline: none;
-    font-family: var(--font-display);
-    font-size: 30.5px;
-    font-weight: 600;
-    letter-spacing: -0.015em;
-    line-height: 1.2;
-}
+/* The note and short-link heads share one structure, so switching forms moves nothing. */
+.head-row { display: flex; align-items: center; gap: 12px; }
+.head-row > svg { width: 22px; height: 22px; flex: none; color: var(--muted); }
 
-.dest-row { display: flex; align-items: center; gap: 12px; }
-.dest-row > svg { width: 22px; height: 22px; flex: none; color: var(--muted); }
-
-.dest-input {
+.head-input {
     flex: 1;
     min-width: 0;
     border: 0;
     background: transparent;
     padding: 0;
     outline: none;
-    font-size: 24.5px;
-    font-weight: 500;
-    letter-spacing: -0.01em;
-    line-height: 1.25;
+    font-family: var(--font-ui);
+    font-size: 30.5px;
+    font-weight: 600;
+    letter-spacing: -0.015em;
+    line-height: 1.2;
 }
 
-/* "URL /" + slug: one bordered field. */
+/* "Slug /" + slug: one bordered field. */
 .slug-field {
     display: flex;
     align-items: center;
@@ -656,7 +649,8 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     justify-content: space-between;
     gap: 10px;
     flex-wrap: wrap;
-    min-height: 54px;
+    /* A 40px control, the padding and both borders: the same height with or without controls. */
+    min-height: 58px;
     padding: 8px 12px 8px 16px;
     border-top: 1px solid var(--line);
     border-bottom: 1px solid var(--line);
@@ -684,12 +678,85 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .toolbar-italic { font-style: italic; font-family: var(--font-serif); font-size: 15px; font-weight: 400; }
 
 .toolbar-sep { width: 1px; height: 20px; background: var(--line-2); margin: 0 4px; }
+.toolbar-btn:disabled { opacity: .4; cursor: default; }
+.toolbar-btn:disabled:hover { background: transparent; color: var(--ink-2); }
+
+/* Editor view: Write · Split · Preview, segmented like the theme switcher. */
+.view-tabs {
+    display: flex;
+    gap: 2px;
+    padding: 3px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--bg);
+}
+
+.view-tab {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 32px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--muted);
+    font-size: 12.5px;
+    font-weight: 500;
+}
+
+.view-tab:hover { color: var(--ink); }
+
+.view-tab.active {
+    background: var(--surface);
+    color: var(--ink);
+    box-shadow: var(--seg-shadow);
+}
+
+.view-tab svg { width: 15px; height: 15px; flex: none; }
+
+/* Split puts the preview beside the textarea and stacks it when the card is too narrow. */
+.editor-body {
+    flex: 1 0 auto;
+    container-type: inline-size;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    background: var(--surface);
+}
+
+.editor-body[data-view="split"] { grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); }
+
+/* The classes beat the [data-theme] .prose.markdown-body sizes of the note view. */
+.editor-body > .editor-preview.prose.markdown-body {
+    min-width: 0;
+    min-height: 470px;
+    padding: 22px 32px 28px;
+    font-size: 16px;
+    line-height: 1.65;
+}
+
+.editor-body[data-view="split"] > .editor-preview { border-top: 1px solid var(--line); }
+
+/* Side by side, the textarea sets the row height and the preview scrolls in it. */
+@container (min-width: 640px) {
+    .editor-body[data-view="split"] > .editor-preview {
+        contain: size;
+        overflow-y: auto;
+        border-top: 0;
+        border-left: 1px solid var(--line);
+    }
+}
+
+.editor-preview .editor-preview-empty { color: var(--muted); font-style: italic; }
 
 .editor-textarea {
     display: block;
+    /* A grid item textarea keeps its own height unless the stretch is explicit. */
+    align-self: stretch;
     width: 100%;
     min-height: 470px;
-    resize: vertical;
+    /* The card fills the screen height, so the textarea scrolls and has no resize handle. */
+    resize: none;
     border: 0;
     outline: none;
     padding: 22px 28px;
@@ -721,6 +788,7 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* ── Short-link preview ── */
 .link-preview {
+    flex: 1 0 auto;
     min-height: 300px;
     padding: 32px 28px;
     display: flex;
@@ -1550,8 +1618,7 @@ a.copy-value:hover { color: var(--accent-text); }
     .nav-tab { flex: 1; justify-content: center; height: 40px; }
     .create-layout { padding-top: 4px; gap: 16px; }
     .editor-head { padding: 18px 18px 14px; }
-    .title-input { font-size: 24px; }
-    .dest-input { font-size: 19px; }
+    .head-input { font-size: 24px; }
     .slug-field { align-self: stretch; height: 36px; }
     .slug-field input { flex: 1; width: auto; }
     .header-link { padding: 0 8px; }
@@ -1562,6 +1629,12 @@ a.copy-value:hover { color: var(--accent-text); }
     .toolbar-actions > :first-child { margin-left: auto; }
     .toolbar-btn { flex: none; width: 40px; height: 44px; }
     .editor-textarea { min-height: 320px; padding: 18px; }
+    .view-tabs { flex: none; }
+    .view-tab { height: 34px; }
+    /* Phone width has no room for Split; the tabs show text only. */
+    .view-tab svg,
+    .view-tab[data-view="split"] { display: none; }
+    .editor-body > .editor-preview.prose.markdown-body { min-height: 320px; padding: 18px 20px; }
     .link-preview { min-height: 0; padding: 24px 18px; }
     .link-preview-short { font-size: 17px; }
     .settings-card { padding: 20px; }

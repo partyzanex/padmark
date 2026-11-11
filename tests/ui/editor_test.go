@@ -40,6 +40,7 @@ func TestEditor(t *testing.T) {
 
 	cases = append(cases,
 		scenario{name: "Toolbar", run: testToolbar, accounts: false, allowedStatuses: nil},
+		scenario{name: "FillsHeight", run: testEditorFillsHeight, accounts: false, allowedStatuses: nil},
 		scenario{name: "Options", run: testOptions, accounts: false, allowedStatuses: nil},
 		scenario{name: "PrivacyNeedsAccounts", allowedStatuses: []int{http.StatusUnprocessableEntity},
 			run:      testPrivacyNeedsAccounts,
@@ -183,7 +184,7 @@ func testEditAndSave(sess *uiSession) {
 	sess.value("#titleInput", "UI test note")
 	sess.value("#editor", "# Hello\n\nThis is **Markdown**.")
 	sess.expectLayout("#editor", "#titleInput", "#editCodeInput", "#submitBtn")
-	sess.screenshot("edit.png")
+	sess.screenshot("edit.png", "#slugInput")
 	sess.button("Save")
 	sess.text("#submitBtn", "Edit code required")
 	sess.fill("#editCodeInput", code)
@@ -312,4 +313,58 @@ func testNotFound(sess *uiSession) {
 	sess.screenshot("not-found.png")
 	sess.link("Create new paste")
 	sess.visible("#editor")
+}
+
+func testEditorFillsHeight(sess *uiSession) {
+	sess.gotoPage("/")
+	require.Equal(sess.t, "none", sess.eval(`() => getComputedStyle(document.getElementById("editor")).resize`),
+		"the textarea has no resize handle")
+	sess.expectFullHeight()
+	sess.selectView("Preview")
+	sess.expectFullHeight()
+
+	if sess.screen.name != "desktop" {
+		return
+	}
+
+	// The settings panel is taller than the default screen, so a tall screen shows the extra height.
+	const tallHeight = 1200
+	sess.must(sess.page.SetViewportSize(sess.screen.width, tallHeight))
+	sess.selectView("Write")
+	sess.expectFullHeight()
+
+	siteFooterBox, err := sess.page.Locator(".site-footer").BoundingBox()
+	sess.must(err)
+	require.InDelta(sess.t, float64(tallHeight), siteFooterBox.Y+siteFooterBox.Height, 1,
+		"the page fits the screen height")
+
+	editorBox, err := sess.page.Locator("#editor").BoundingBox()
+	sess.must(err)
+	require.Greater(sess.t, editorBox.Height, float64(470), "the textarea takes the extra height")
+	sess.must(sess.page.SetViewportSize(sess.screen.width, sess.screen.height))
+}
+
+// expectFullHeight checks that the editor card fills the free page height above the site footer
+// and that the card footer stays at the bottom of the card.
+func (sess *uiSession) expectFullHeight() {
+	sess.t.Helper()
+	sess.eval("() => document.fonts.ready")
+
+	cardBox, err := sess.page.Locator(".editor-card").BoundingBox()
+	sess.must(err)
+	footerBox, err := sess.page.Locator(".editor-card .editor-footer").BoundingBox()
+	sess.must(err)
+	require.InDelta(sess.t, cardBox.Y+cardBox.Height-1, footerBox.Y+footerBox.Height, 1,
+		"the editor footer is at the bottom of the card")
+
+	if sess.screen.name != "desktop" {
+		return
+	}
+
+	pageBottom, ok := sess.eval(`() => {
+		const layout = document.querySelector(".create-layout");
+		return Math.round(layout.getBoundingClientRect().bottom - parseFloat(getComputedStyle(layout).paddingBottom));
+	}`).(int)
+	require.True(sess.t, ok, "the layout bottom must be an int")
+	require.InDelta(sess.t, float64(pageBottom), cardBox.Y+cardBox.Height, 1, "the editor card fills the free height")
 }

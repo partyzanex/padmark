@@ -71,6 +71,7 @@ func (sess *uiSession) createTestLink() (string, string) {
 	sess.click("#burnLabel")
 	sess.expectLayout(".header", "#targetInput", "#slugInput", "#editCodeInput", "#privacySelect",
 		"#redirectSelect", "#ttlInput", "#burnLabel", "#submitBtn")
+	sess.expectFullHeight()
 	sess.screenshot("link-editor.png", "#previewHost")
 	sess.button("Create link")
 	id, code := sess.createdLink()

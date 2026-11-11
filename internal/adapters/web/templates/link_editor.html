@@ -16,10 +16,10 @@
         <section class="card editor-card" aria-labelledby="linkHeading">
             <h1 class="sr-only" id="linkHeading">{{if .EditMode}}Edit link{{else}}Create a short link{{end}}</h1>
             <div class="editor-head">
-                <div class="dest-row">
+                <div class="head-row">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.07 0l2.83-2.83a5 5 0 0 0-7.07-7.07L11.5 4.5"/><path d="M14 11a5 5 0 0 0-7.07 0L4.1 13.83a5 5 0 0 0 7.07 7.07l1.33-1.4"/></svg>
                     <label for="targetInput" class="sr-only">Destination URL</label>
-                    <input type="url" class="dest-input" id="targetInput" placeholder="https://example.com/some/long/path" value="{{.TargetURL}}" required>
+                    <input type="url" class="head-input" id="targetInput" placeholder="https://example.com/some/long/path" value="{{.TargetURL}}" required>
                 </div>
                 <div class="slug-field">
                     <label for="slugInput" class="slug-prefix">Slug&#160;&#160;/</label>
