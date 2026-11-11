@@ -115,6 +115,10 @@ func newCreateNoteRequest(input *createNoteInput) *padmark.CreateNoteRequest {
 			padmark.CreateNoteRequestPrivacy(*input.Privacy))
 	}
 
+	if input.ShowContents != nil {
+		req.ShowContents = padmark.NewOptBool(*input.ShowContents)
+	}
+
 	return req
 }
 
@@ -163,6 +167,10 @@ func (m *Manager) updateNote(
 	if input.Privacy != nil {
 		req.Privacy = padmark.NewOptUpdateNoteRequestPrivacy(
 			padmark.UpdateNoteRequestPrivacy(*input.Privacy))
+	}
+
+	if input.ShowContents != nil {
+		req.ShowContents = padmark.NewOptBool(*input.ShowContents)
 	}
 
 	if editCode != "" {

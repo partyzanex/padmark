@@ -63,6 +63,7 @@ Every note has:
 | `burn_after_reading` | Delete the note on first read |
 | `ttl` | On create: post-read grace period with burn. On update without burn: seconds until hard expiry |
 | `privacy` | Who can read it: `public` (default), `authenticated`, or `owner` |
+| `show_contents` | Show an "On this page" sidebar with the note's level-2 and level-3 headings (default `false`; an update without it keeps the current value) |
 
 > **Keep your `edit_code` safe.** It's shown once at creation and cannot be recovered. Exception:
 > if you created the note while authenticated, any session or API token for that account edits
@@ -325,14 +326,21 @@ padmark-cli create --title "Runbook" --content "..." --slug deploy-notes
 # Burn-after-reading with a 1-hour window after first read
 padmark-cli create --title "Secret" --content "eyes only" --burn --ttl 3600
 
+# Deleted 30 days after creation
+padmark-cli create --title "Handoff" --content "..." --ttl 2592000
+
 # Requires login to read (any signed-in caller, not just the creator — see "API keys" below)
 padmark-cli create --title "Internal" --content "..." --privacy authenticated
+# The v0.1.6 flag --private still works as a deprecated alias of --privacy authenticated.
 
 # Owner-only: readable through sessions/API tokens for the account that created it
 padmark-cli create --title "Just for me" --content "..." --privacy owner
 
 # Plain text instead of markdown
 padmark-cli create --title "Log dump" --content "..." --plain
+
+# "On this page" sidebar from the note headings (edit: --contents=false hides it; omit to keep)
+padmark-cli create --title "Runbook" --file runbook.md --contents
 
 # Fetch a note (JSON, raw, or default)
 padmark-cli get abc123def4

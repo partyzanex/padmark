@@ -54,6 +54,8 @@ type editorViewData struct {
 	EditMode         bool
 	BurnAfterReading bool
 	IsOwner          bool
+	// ShowContents pre-sets the "Contents sidebar" switch: the stored value in edit mode.
+	ShowContents bool
 	// ContentWithheld marks a burn-after-reading note opened in the editor: its content is not
 	// pre-filled (the editor must not read it without burning it), and saving replaces it.
 	ContentWithheld bool
@@ -121,6 +123,7 @@ func (h *PageHandler) IndexPage(w http.ResponseWriter, r *http.Request) {
 		EditMode:         false,
 		BurnAfterReading: false,
 		IsOwner:          false,
+		ShowContents:     false,
 		ContentWithheld:  false,
 	})
 	if err != nil {

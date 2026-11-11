@@ -1,3 +1,5 @@
+// Command report serves the browser-test report from artifacts/ on a local address and opens it
+// in the default browser.
 package main
 
 import (
@@ -89,9 +91,8 @@ func openBrowser(ctx context.Context, address string) {
 		open = exec.CommandContext(ctx, "xdg-open", address)
 	case "windows":
 		open = exec.CommandContext(ctx, "rundll32", "url.dll,FileProtocolHandler", address)
-	}
-
-	if open == nil {
+	default:
+		// No known opener on this system: the address is already printed for the user.
 		return
 	}
 

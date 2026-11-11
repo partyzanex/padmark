@@ -798,10 +798,11 @@ type CreateNoteRequest struct {
 	// If `ttl` is also provided the note is not deleted immediately but expires `ttl`
 	// seconds after the first read.
 	BurnAfterReading OptBool `json:"burn_after_reading"`
-	// Grace period in seconds after the first read before the note expires.
-	// Only meaningful when `burn_after_reading` is `true`.
-	// `0` means the note is deleted immediately when it is first revealed.
-	// Omitted means the same as `0` (immediate burn after reading).
+	// With `burn_after_reading: true`, the grace period in seconds after the first read
+	// before the note expires; `0` or omitted means the note is deleted immediately when
+	// it is first revealed. Without `burn_after_reading`, a positive value is the note's
+	// lifetime in seconds counted from creation (`expires_at` is set at once); `0` or
+	// omitted means the note never expires.
 	TTL OptInt64 `json:"ttl"`
 	// Optional custom edit code: 8–128 characters, without leading or trailing whitespace
 	// or control characters. Omit it to receive a random server-generated 12-character
@@ -827,6 +828,10 @@ type CreateNoteRequest struct {
 	//
 	// Deprecated: schema marks this property as deprecated.
 	Private OptBool `json:"private"`
+	// When `true` the HTML view of the note shows an "On this page" sidebar with links to
+	// the note's level-2 and level-3 headings. Omitted means `false`. The option changes
+	// only the HTML view; JSON and raw reads return the content unchanged.
+	ShowContents OptBool `json:"show_contents"`
 }
 
 // GetTitle returns the value of Title.
@@ -874,6 +879,11 @@ func (s *CreateNoteRequest) GetPrivate() OptBool {
 	return s.Private
 }
 
+// GetShowContents returns the value of ShowContents.
+func (s *CreateNoteRequest) GetShowContents() OptBool {
+	return s.ShowContents
+}
+
 // SetTitle sets the value of Title.
 func (s *CreateNoteRequest) SetTitle(val OptString) {
 	s.Title = val
@@ -917,6 +927,11 @@ func (s *CreateNoteRequest) SetPrivacy(val OptCreateNoteRequestPrivacy) {
 // SetPrivate sets the value of Private.
 func (s *CreateNoteRequest) SetPrivate(val OptBool) {
 	s.Private = val
+}
+
+// SetShowContents sets the value of ShowContents.
+func (s *CreateNoteRequest) SetShowContents(val OptBool) {
+	s.ShowContents = val
 }
 
 // MIME type of `content`; controls rendering on the view page.
@@ -1047,6 +1062,9 @@ type CreateNoteResponse struct {
 	//
 	// Deprecated: schema marks this property as deprecated.
 	Private OptBool `json:"private"`
+	// `true` when the HTML view shows the "On this page" sidebar (see
+	// `CreateNoteRequest.show_contents`). Notes created before this option have `false`.
+	ShowContents OptBool `json:"show_contents"`
 	// ISO 8601 timestamp after which the note is inaccessible.
 	// Set on the first read for burn-after-reading notes that have a TTL.
 	// `null` for notes that are not expiring.
@@ -1098,6 +1116,11 @@ func (s *CreateNoteResponse) GetPrivacy() OptCreateNoteResponsePrivacy {
 // GetPrivate returns the value of Private.
 func (s *CreateNoteResponse) GetPrivate() OptBool {
 	return s.Private
+}
+
+// GetShowContents returns the value of ShowContents.
+func (s *CreateNoteResponse) GetShowContents() OptBool {
+	return s.ShowContents
 }
 
 // GetExpiresAt returns the value of ExpiresAt.
@@ -1158,6 +1181,11 @@ func (s *CreateNoteResponse) SetPrivacy(val OptCreateNoteResponsePrivacy) {
 // SetPrivate sets the value of Private.
 func (s *CreateNoteResponse) SetPrivate(val OptBool) {
 	s.Private = val
+}
+
+// SetShowContents sets the value of ShowContents.
+func (s *CreateNoteResponse) SetShowContents(val OptBool) {
+	s.ShowContents = val
 }
 
 // SetExpiresAt sets the value of ExpiresAt.
@@ -1637,6 +1665,9 @@ type NoteResponse struct {
 	//
 	// Deprecated: schema marks this property as deprecated.
 	Private OptBool `json:"private"`
+	// `true` when the HTML view shows the "On this page" sidebar (see
+	// `CreateNoteRequest.show_contents`). Notes created before this option have `false`.
+	ShowContents OptBool `json:"show_contents"`
 	// ISO 8601 timestamp after which the note is inaccessible.
 	// Set on the first read for burn-after-reading notes that have a TTL.
 	// `null` for notes that are not expiring.
@@ -1685,6 +1716,11 @@ func (s *NoteResponse) GetPrivacy() OptNoteResponsePrivacy {
 // GetPrivate returns the value of Private.
 func (s *NoteResponse) GetPrivate() OptBool {
 	return s.Private
+}
+
+// GetShowContents returns the value of ShowContents.
+func (s *NoteResponse) GetShowContents() OptBool {
+	return s.ShowContents
 }
 
 // GetExpiresAt returns the value of ExpiresAt.
@@ -1740,6 +1776,11 @@ func (s *NoteResponse) SetPrivacy(val OptNoteResponsePrivacy) {
 // SetPrivate sets the value of Private.
 func (s *NoteResponse) SetPrivate(val OptBool) {
 	s.Private = val
+}
+
+// SetShowContents sets the value of ShowContents.
+func (s *NoteResponse) SetShowContents(val OptBool) {
+	s.ShowContents = val
 }
 
 // SetExpiresAt sets the value of ExpiresAt.
@@ -3107,6 +3148,9 @@ type UpdateNoteRequest struct {
 	//
 	// Deprecated: schema marks this property as deprecated.
 	Private OptBool `json:"private"`
+	// Update the "On this page" sidebar option (see `CreateNoteRequest.show_contents`).
+	// Omitted keeps the note's current value.
+	ShowContents OptBool `json:"show_contents"`
 }
 
 // GetTitle returns the value of Title.
@@ -3149,6 +3193,11 @@ func (s *UpdateNoteRequest) GetPrivate() OptBool {
 	return s.Private
 }
 
+// GetShowContents returns the value of ShowContents.
+func (s *UpdateNoteRequest) GetShowContents() OptBool {
+	return s.ShowContents
+}
+
 // SetTitle sets the value of Title.
 func (s *UpdateNoteRequest) SetTitle(val OptString) {
 	s.Title = val
@@ -3187,6 +3236,11 @@ func (s *UpdateNoteRequest) SetPrivacy(val OptUpdateNoteRequestPrivacy) {
 // SetPrivate sets the value of Private.
 func (s *UpdateNoteRequest) SetPrivate(val OptBool) {
 	s.Private = val
+}
+
+// SetShowContents sets the value of ShowContents.
+func (s *UpdateNoteRequest) SetShowContents(val OptBool) {
+	s.ShowContents = val
 }
 
 // New content type; defaults to the note's current type when omitted.

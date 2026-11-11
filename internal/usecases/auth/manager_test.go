@@ -175,6 +175,7 @@ func (s *ManagerSuite) TestLogin_ValidTOTP_CreatesSession() {
 	s.Require().NoError(codeErr)
 
 	s.users.EXPECT().GetByUsername(gomock.Any(), "alice").Return(usr, nil)
+	s.users.EXPECT().GetByID(gomock.Any(), usr.ID).Return(usr, nil) // confirmCredentials re-reads the user.
 	s.users.EXPECT().UpdateTOTPCounter(gomock.Any(), s.userID, gomock.Any()).Return(true, nil)
 	s.sessions.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
 	s.users.EXPECT().UpdateLastLogin(gomock.Any(), s.userID, gomock.Any()).Return(nil)
@@ -194,6 +195,7 @@ func (s *ManagerSuite) TestLogin_RevokesPreviousSession() {
 	s.Require().NoError(codeErr)
 
 	s.users.EXPECT().GetByUsername(gomock.Any(), "alice").Return(usr, nil)
+	s.users.EXPECT().GetByID(gomock.Any(), usr.ID).Return(usr, nil) // confirmCredentials re-reads the user.
 	s.users.EXPECT().UpdateTOTPCounter(gomock.Any(), s.userID, gomock.Any()).Return(true, nil)
 
 	gomock.InOrder(
@@ -217,6 +219,7 @@ func (s *ManagerSuite) TestLogin_PreviousSessionDeleteFailure_DoesNotFailLogin()
 	s.Require().NoError(codeErr)
 
 	s.users.EXPECT().GetByUsername(gomock.Any(), "alice").Return(usr, nil)
+	s.users.EXPECT().GetByID(gomock.Any(), usr.ID).Return(usr, nil) // confirmCredentials re-reads the user.
 	s.users.EXPECT().UpdateTOTPCounter(gomock.Any(), s.userID, gomock.Any()).Return(true, nil)
 	s.sessions.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
 	s.sessions.EXPECT().Delete(gomock.Any(), hashToken("old-session")).Return(errors.New("db down"))
@@ -257,13 +260,14 @@ func (s *ManagerSuite) TestLogin_LegacySeal_MigratesSecret() {
 	var resealed string
 
 	s.users.EXPECT().GetByUsername(gomock.Any(), "alice").Return(usr, nil)
+	s.users.EXPECT().GetByID(gomock.Any(), usr.ID).Return(usr, nil) // confirmCredentials re-reads the user.
 	s.users.EXPECT().UpdateTOTPCounter(gomock.Any(), s.userID, gomock.Any()).Return(true, nil)
 	s.users.EXPECT().
-		UpdateTOTPSecret(gomock.Any(), s.userID, gomock.Any()).
-		DoAndReturn(func(_ context.Context, _ uuid.UUID, secret string) error {
+		UpdateTOTPSecret(gomock.Any(), s.userID, usr.TOTPSecret, gomock.Any()).
+		DoAndReturn(func(_ context.Context, _ uuid.UUID, _, secret string) (bool, error) {
 			resealed = secret
 
-			return nil
+			return true, nil
 		})
 	s.sessions.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
 	s.users.EXPECT().UpdateLastLogin(gomock.Any(), s.userID, gomock.Any()).Return(nil)
@@ -293,6 +297,7 @@ func (s *ManagerSuite) TestLogin_CurrentSeal_DoesNotRewrite() {
 	s.Require().NoError(codeErr)
 
 	s.users.EXPECT().GetByUsername(gomock.Any(), "alice").Return(usr, nil)
+	s.users.EXPECT().GetByID(gomock.Any(), usr.ID).Return(usr, nil) // confirmCredentials re-reads the user.
 	s.users.EXPECT().UpdateTOTPCounter(gomock.Any(), s.userID, gomock.Any()).Return(true, nil)
 	s.sessions.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
 	s.users.EXPECT().UpdateLastLogin(gomock.Any(), s.userID, gomock.Any()).Return(nil)
@@ -311,10 +316,11 @@ func (s *ManagerSuite) TestLogin_LegacySeal_ResealFailureDoesNotFailLogin() {
 	s.Require().NoError(codeErr)
 
 	s.users.EXPECT().GetByUsername(gomock.Any(), "alice").Return(usr, nil)
+	s.users.EXPECT().GetByID(gomock.Any(), usr.ID).Return(usr, nil) // confirmCredentials re-reads the user.
 	s.users.EXPECT().UpdateTOTPCounter(gomock.Any(), s.userID, gomock.Any()).Return(true, nil)
 	s.users.EXPECT().
-		UpdateTOTPSecret(gomock.Any(), s.userID, gomock.Any()).
-		Return(errors.New("db down"))
+		UpdateTOTPSecret(gomock.Any(), s.userID, gomock.Any(), gomock.Any()).
+		Return(false, errors.New("db down"))
 	s.sessions.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
 	s.users.EXPECT().UpdateLastLogin(gomock.Any(), s.userID, gomock.Any()).Return(nil)
 
@@ -591,12 +597,13 @@ func (s *ManagerSuite) TestChangePassword_Success_UpdatesPasswordAndRotatesSessi
 	s.sessions.EXPECT().Get(gomock.Any(), hashToken("sess")).Return(sess, nil)
 	s.users.EXPECT().GetByID(gomock.Any(), s.userID).Return(usr, nil)
 	s.users.EXPECT().UpdateTOTPCounter(gomock.Any(), s.userID, gomock.Any()).Return(true, nil)
-	s.users.EXPECT().UpdatePassword(gomock.Any(), s.userID, gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(nil)
-	// Create must be called BEFORE DeleteByUserIDExcept (atomicity fix).
-	// DeleteByUserIDExcept preserves the new session while wiping old ones.
+	// The replacement session comes first, then the credentials, then the revocation (R7):
+	// a failure before UpdatePassword changes nothing. DeleteByUserIDExcept preserves the new
+	// session while wiping old ones.
 	gomock.InOrder(
 		s.sessions.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil),
+		s.users.EXPECT().UpdatePassword(gomock.Any(), s.userID, gomock.Any(), gomock.Any(), gomock.Any()).
+			Return(nil),
 		s.sessions.EXPECT().DeleteByUserIDExcept(gomock.Any(), s.userID, gomock.Any()).Return(nil),
 	)
 
@@ -628,6 +635,121 @@ func (s *ManagerSuite) TestChangePassword_RevocationFailureReturnsSessionAndWarn
 	newSessID, err := s.mgr.ChangePassword(s.T().Context(), "sess", testPassword, "NewP@ssw0rd!", code)
 	s.Require().ErrorIs(err, domain.ErrSessionRevocation)
 	s.NotEmpty(newSessID)
+}
+
+// TestChangePassword_SessionCreateFailure_KeepsOldPassword covers audit finding R7: when the
+// replacement session cannot be stored, the password is not changed at all, so the old password,
+// sessions and API tokens stay consistent and the user can retry.
+func (s *ManagerSuite) TestChangePassword_SessionCreateFailure_KeepsOldPassword() {
+	usr, rawSecret := s.testUser()
+	sess := &domain.Session{
+		SessionHash: "sess", UserID: s.userID, UserAgent: "ua", IP: "1.2.3.4",
+		CreatedAt: time.Time{}, ExpiresAt: time.Time{},
+	}
+
+	code, err := totp.GenerateCode(rawSecret, time.Now())
+	s.Require().NoError(err)
+
+	s.sessions.EXPECT().Get(gomock.Any(), hashToken("sess")).Return(sess, nil)
+	s.users.EXPECT().GetByID(gomock.Any(), s.userID).Return(usr, nil)
+	s.users.EXPECT().UpdateTOTPCounter(gomock.Any(), s.userID, gomock.Any()).Return(true, nil)
+	s.sessions.EXPECT().Create(gomock.Any(), gomock.Any()).Return(errors.New("db down"))
+
+	newSessID, err := s.mgr.ChangePassword(s.T().Context(), "sess", testPassword, "NewP@ssw0rd!", code)
+	s.Require().Error(err)
+	s.Require().NotErrorIs(err, domain.ErrSessionRevocation)
+	s.Empty(newSessID)
+}
+
+// TestChangePassword_UpdateFailure_DeletesReplacementSession covers the other R7 path: when the
+// credentials cannot be written, the replacement session is deleted, because the old password is
+// still in force.
+func (s *ManagerSuite) TestChangePassword_UpdateFailure_DeletesReplacementSession() {
+	usr, rawSecret := s.testUser()
+	sess := &domain.Session{
+		SessionHash: "sess", UserID: s.userID, UserAgent: "ua", IP: "1.2.3.4",
+		CreatedAt: time.Time{}, ExpiresAt: time.Time{},
+	}
+
+	code, err := totp.GenerateCode(rawSecret, time.Now())
+	s.Require().NoError(err)
+
+	var created string
+
+	s.sessions.EXPECT().Get(gomock.Any(), hashToken("sess")).Return(sess, nil)
+	s.users.EXPECT().GetByID(gomock.Any(), s.userID).Return(usr, nil)
+	s.users.EXPECT().UpdateTOTPCounter(gomock.Any(), s.userID, gomock.Any()).Return(true, nil)
+	s.sessions.EXPECT().Create(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ context.Context, newSess *domain.Session) error {
+			created = newSess.SessionHash
+
+			return nil
+		})
+	s.users.EXPECT().UpdatePassword(gomock.Any(), s.userID, gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(errors.New("db down"))
+	s.sessions.EXPECT().Delete(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ context.Context, sessionHash string) error {
+			s.Equal(created, sessionHash, "the replacement session must be deleted")
+
+			return nil
+		})
+
+	newSessID, err := s.mgr.ChangePassword(s.T().Context(), "sess", testPassword, "NewP@ssw0rd!", code)
+	s.Require().Error(err)
+	s.Empty(newSessID)
+}
+
+// TestLogin_PasswordChangedAfterCheck_DeletesSession covers audit finding R6: a login that
+// verified the old password while a password change completed must not keep its new session.
+func (s *ManagerSuite) TestLogin_PasswordChangedAfterCheck_DeletesSession() {
+	usr, rawSecret := s.testUser()
+	changed := *usr
+	changed.PasswordHash = "hash-of-the-new-password"
+
+	totpCode, codeErr := totp.GenerateCode(rawSecret, time.Now())
+	s.Require().NoError(codeErr)
+
+	var created string
+
+	s.users.EXPECT().GetByUsername(gomock.Any(), "alice").Return(usr, nil)
+	s.users.EXPECT().UpdateTOTPCounter(gomock.Any(), s.userID, gomock.Any()).Return(true, nil)
+	s.sessions.EXPECT().Create(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ context.Context, newSess *domain.Session) error {
+			created = newSess.SessionHash
+
+			return nil
+		})
+	s.users.EXPECT().GetByID(gomock.Any(), usr.ID).Return(&changed, nil)
+	s.sessions.EXPECT().Delete(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ context.Context, sessionHash string) error {
+			s.Equal(created, sessionHash, "the session of the stale login must be deleted")
+
+			return nil
+		})
+
+	sessID, err := s.mgr.Login(s.T().Context(), "alice", testPassword, totpCode, "UA", "127.0.0.1", "")
+	s.Require().ErrorIs(err, domain.ErrInvalidTOTP)
+	s.Empty(sessID)
+}
+
+// TestLogin_StaleReseal_SkipsWrite covers the reseal half of R6: when the compare-and-set finds
+// another seal, the login still succeeds and nothing else is written.
+func (s *ManagerSuite) TestLogin_StaleReseal_SkipsWrite() {
+	usr, rawSecret := s.legacyTestUser()
+
+	totpCode, codeErr := totp.GenerateCode(rawSecret, time.Now())
+	s.Require().NoError(codeErr)
+
+	s.users.EXPECT().GetByUsername(gomock.Any(), "alice").Return(usr, nil)
+	s.users.EXPECT().GetByID(gomock.Any(), usr.ID).Return(usr, nil)
+	s.users.EXPECT().UpdateTOTPCounter(gomock.Any(), s.userID, gomock.Any()).Return(true, nil)
+	s.users.EXPECT().UpdateTOTPSecret(gomock.Any(), s.userID, usr.TOTPSecret, gomock.Any()).Return(false, nil)
+	s.sessions.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
+	s.users.EXPECT().UpdateLastLogin(gomock.Any(), s.userID, gomock.Any()).Return(nil)
+
+	sessID, err := s.mgr.Login(s.T().Context(), "alice", testPassword, totpCode, "UA", "127.0.0.1", "")
+	s.Require().NoError(err)
+	s.NotEmpty(sessID)
 }
 
 // TestChangePassword_RevokesAPITokens: a password change also revokes every API token of the

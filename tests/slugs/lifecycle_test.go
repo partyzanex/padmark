@@ -11,6 +11,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect"
+
+	"github.com/partyzanex/padmark/internal/domain"
 )
 
 func insertResource(ctx context.Context, db bun.IDB, table, id string) error {
@@ -100,7 +102,7 @@ func removeResource(t *testing.T, db *bun.DB, table, id, operation string) {
 		link.ID, link.ExpiresAt = uuid.NewString(), nil
 		require.NoError(t, linkRepo.Create(t.Context(), link))
 	} else if table == "notes" {
-		_, err := noteRepo.Consume(t.Context(), id)
+		_, err := noteRepo.Consume(t.Context(), id, domain.PrivacyPublic)
 		require.NoError(t, err)
 	} else {
 		_, err := linkRepo.Consume(t.Context(), id)

@@ -21,18 +21,18 @@ type linkMetadata struct {
 
 func TestLinks(t *testing.T) {
 	runScenarios(t, []scenario{
-		{name: "CreateEditDelete", run: testLinkCreateEditDelete},
-		{name: "Validation", run: testLinkValidation},
-		{name: "FailureRetry", allowedStatuses: []int{503}, run: testLinkFailureRetry},
-		{name: "BurnAfterClick", allowedStatuses: []int{404}, run: testLinkBurnAfterClick},
-		{name: "PrivacyAndOwnership", accounts: true, run: testLinkPrivacyAndOwnership},
+		{name: "CreateEditDelete", run: testLinkCreateEditDelete, accounts: false, allowedStatuses: nil},
+		{name: "Validation", run: testLinkValidation, accounts: false, allowedStatuses: nil},
+		{name: "FailureRetry", allowedStatuses: []int{503}, run: testLinkFailureRetry, accounts: false},
+		{name: "BurnAfterClick", allowedStatuses: []int{404}, run: testLinkBurnAfterClick, accounts: false},
+		{name: "PrivacyAndOwnership", accounts: true, run: testLinkPrivacyAndOwnership, allowedStatuses: nil},
 	})
 }
 
 func (sess *uiSession) createdLink() (string, string) {
 	sess.t.Helper()
 	sess.must(sess.expect.Page(sess.page).ToHaveURL(regexpURL("/success?")))
-	sess.text(".success-title", "Link created")
+	sess.text(".success-title", "Your link is live")
 	current, err := url.Parse(sess.page.URL())
 	sess.must(err)
 
@@ -60,7 +60,7 @@ func (sess *uiSession) readLink(id string) linkMetadata {
 func (sess *uiSession) createTestLink() (string, string) {
 	sess.t.Helper()
 	sess.gotoPage("/")
-	sess.link("Links")
+	sess.link("Short link")
 	sess.expectPrivacyOptions("public")
 	sess.fill("#targetInput", "https://example.com/original?value=1")
 	sess.fill("#slugInput", "ui-link")
@@ -71,7 +71,8 @@ func (sess *uiSession) createTestLink() (string, string) {
 	sess.click("#burnLabel")
 	sess.expectLayout(".header", "#targetInput", "#slugInput", "#editCodeInput", "#privacySelect",
 		"#redirectSelect", "#ttlInput", "#burnLabel", "#submitBtn")
-	sess.screenshot("link-editor.png")
+	sess.expectFullHeight()
+	sess.screenshot("link-editor.png", "#previewHost")
 	sess.button("Create link")
 	id, code := sess.createdLink()
 	require.Equal(sess.t, "ui-link", id)
@@ -93,7 +94,7 @@ func testLinkCreateEditDelete(sess *uiSession) {
 	sess.value("#redirectSelect", "false")
 	sess.value("#expirySelect", "keep")
 	sess.must(sess.expect.Locator(sess.page.Locator("#burnCheck")).ToBeDisabled())
-	sess.screenshot("link-edit.png", "#expiryHint")
+	sess.screenshot("link-edit.png", "#expiryHint", "#previewHost")
 	sess.button("Save link")
 	sess.text("#linkError", "Edit code required")
 	sess.fill("#editCodeInput", code)
@@ -153,6 +154,8 @@ func testLinkFailureRetry(sess *uiSession) {
 	sess.must(sess.page.Route("**/links", func(route playwright.Route) {
 		sess.must(route.Fulfill(playwright.RouteFulfillOptions{
 			Status: new(503), ContentType: new("application/json"), Body: `{"message":"Please try again"}`,
+
+			Headers: nil, Path: nil, Response: nil,
 		}))
 	}))
 	sess.button("Create link")
@@ -184,8 +187,8 @@ func testLinkPrivacyAndOwnership(sess *uiSession) {
 	sess.admin()
 	sess.gotoPage("/links")
 	sess.expectPrivacyOptions("public", "authenticated", "owner")
-	sess.selectOption("#privacySelect", "owner")
-	sess.text("#privacyHint", "Only you can follow")
+	sess.choosePrivacy("owner")
+	sess.must(sess.expect.Locator(sess.page.Locator("#privacy-owner")).ToBeChecked())
 	sess.fill("#targetInput", "https://example.com/private?secret=keep-private")
 	sess.selectOption("#redirectSelect", "true")
 	sess.button("Create link")
@@ -199,6 +202,10 @@ func testLinkPrivacyAndOwnership(sess *uiSession) {
 
 	anonymous, err := runner.playwright.Request.NewContext(playwright.APIRequestNewContextOptions{
 		BaseURL: new(sess.baseURL),
+
+		ClientCertificates: nil, ExtraHttpHeaders: nil, FailOnStatusCode: nil,
+		HttpCredentials: nil, IgnoreHttpsErrors: nil, MaxRedirects: nil, Proxy: nil,
+		StorageState: nil, StorageStatePath: nil, Timeout: nil, UserAgent: nil,
 	})
 	sess.must(err)
 
@@ -206,6 +213,9 @@ func testLinkPrivacyAndOwnership(sess *uiSession) {
 
 	response, err := anonymous.Get("/links/"+id+"/edit", playwright.APIRequestContextGetOptions{
 		Headers: map[string]string{"Accept": "text/html"}, MaxRedirects: new(0),
+
+		Data: nil, FailOnStatusCode: nil, Form: nil, IgnoreHttpsErrors: nil, MaxRetries: nil,
+		Multipart: nil, Params: nil, Timeout: nil,
 	})
 	sess.must(err)
 	require.Equal(sess.t, http.StatusSeeOther, response.Status())

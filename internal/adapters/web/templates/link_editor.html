@@ -8,87 +8,121 @@
     <link rel="stylesheet" href="/static/style.css?p={{styleVersion}}">
 </head>
 <body>
-<div class="wrapper wrapper--wide">
-    {{template "header"}}
+<div class="wrapper">
+    {{if .EditMode}}{{template "header" ""}}{{else}}{{template "header" "link"}}{{end}}
 
-    <form id="linkForm" class="link-form" autocomplete="off">
-        <h1 class="link-heading">{{if .EditMode}}Edit link{{else}}Create a short link{{end}}</h1>
-        <p class="shortcut-hint">{{if .EditMode}}Update the destination and access settings without following the link.{{else}}Share a shorter URL with control over access and expiration.{{end}}</p>
-
-        <div class="field-group">
-            <label class="field-label" for="targetInput">Destination URL</label>
-            <input type="url" class="field-input" id="targetInput" placeholder="https://example.com/some/long/path" value="{{.TargetURL}}" required>
-        </div>
-
-        <div class="options-row">
-            <div class="field-group">
-                <label class="field-label" for="slugInput">Slug <span class="optional">· {{if .EditMode}}fixed{{else}}optional{{end}}</span></label>
-                <input type="text" class="field-input" id="slugInput" name="link_slug" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="my-link" value="{{.ID}}" pattern="[a-zA-Z0-9_\-]+" title="Letters, numbers, hyphens and underscores only"{{if .EditMode}} readonly{{end}}>
-            </div>
-            <div class="field-group">
-                <label class="field-label" for="editCodeInput">Edit code <span class="optional">· {{if .EditMode}}{{if .IsOwner}}optional for you{{else}}required to save{{end}}{{else}}optional{{end}}</span></label>
-                <input type="password" class="field-input" id="editCodeInput" name="link_edit_code" autocomplete="new-password" placeholder="{{if .EditMode}}Original edit code{{else}}Leave blank to generate{{end}}"{{if not .EditMode}} minlength="8" maxlength="128"{{end}}>
-            </div>
-        </div>
-
-        <div class="options-row">
-            <div class="field-group">
-                <label class="field-label" for="privacySelect">Privacy</label>
-                <div class="select-wrap">
-                    <select class="field-select" id="privacySelect">
-                        {{range .PrivacyOptions}}<option value="{{.Value}}"{{if .Hint}} data-hint="{{.Hint}}"{{end}}{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
-                    </select>
+    <main>
+    <form id="linkForm" class="create-layout" autocomplete="off">
+        <section class="card editor-card" aria-labelledby="linkHeading">
+            <h1 class="sr-only" id="linkHeading">{{if .EditMode}}Edit link{{else}}Create a short link{{end}}</h1>
+            <div class="editor-head">
+                <div class="head-row">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.07 0l2.83-2.83a5 5 0 0 0-7.07-7.07L11.5 4.5"/><path d="M14 11a5 5 0 0 0-7.07 0L4.1 13.83a5 5 0 0 0 7.07 7.07l1.33-1.4"/></svg>
+                    <label for="targetInput" class="sr-only">Destination URL</label>
+                    <input type="url" class="head-input" id="targetInput" placeholder="https://example.com/some/long/path" value="{{.TargetURL}}" required>
                 </div>
-                <span class="shortcut-hint" id="privacyHint"></span>
-            </div>
-            <div class="field-group">
-                <label class="field-label" for="redirectSelect">Redirect mode</label>
-                <div class="select-wrap">
-                    <select class="field-select" id="redirectSelect">
-                        <option value="inherit"{{if eq .DirectRedirect "inherit"}} selected{{end}}>Server default</option>
-                        <option value="false"{{if eq .DirectRedirect "false"}} selected{{end}}>Show destination first</option>
-                        <option value="true"{{if eq .DirectRedirect "true"}} selected{{end}}>Redirect immediately</option>
-                    </select>
+                <div class="slug-field">
+                    <label for="slugInput" class="slug-prefix">Slug&#160;&#160;/</label>
+                    <input type="text" id="slugInput" name="link_slug" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="{{if .EditMode}}{{.ID}}{{else}}auto-generated{{end}}" value="{{.ID}}" pattern="[a-zA-Z0-9_\-]+" title="Letters, numbers, hyphens and underscores only"{{if .EditMode}} readonly{{end}}>
                 </div>
-                <span class="shortcut-hint">Immediate redirects require an owner or server support.</span>
             </div>
-        </div>
 
-        <div class="options-row">
-            <div class="field-group">
-                <label class="field-label" for="expirySelect">Expiration</label>
-                <div class="select-wrap">
+            <div class="editor-toolbar">
+                <span class="lbl">Preview</span>
+                <a class="btn-ghost" id="openTarget" href="#" target="_blank" rel="noopener noreferrer" hidden>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>
+                    Open destination
+                </a>
+            </div>
+
+            <div class="link-preview" aria-live="polite">
+                <div class="link-preview-block">
+                    <span class="link-preview-caption">Your short link will look like this</span>
+                    <span class="link-preview-short"><span id="previewHost"></span><strong id="previewSlug"></strong></span>
+                    <span class="link-preview-caption" id="previewSlugHint"></span>
+                </div>
+                <div class="link-preview-arrow" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v16M6 14l6 6 6-6"/></svg>
+                    redirects to
+                </div>
+                <div class="link-preview-block">
+                    <span class="link-preview-caption">Destination</span>
+                    <span class="link-preview-target" id="previewTarget"></span>
+                </div>
+            </div>
+
+            <div class="editor-footer">
+                <span>Destination · <span id="targetLength">0 characters</span></span>
+                <a href="/api">Create links via API</a>
+            </div>
+        </section>
+
+        <aside class="settings-panel" aria-label="Link settings">
+            <section class="card settings-card">
+                <fieldset class="privacy-options" id="privacySelect">
+                    <legend class="lbl">Who can follow</legend>
+                    {{template "privacy-options" .PrivacyOptions}}
+                </fieldset>
+
+                <div class="field-group">
+                    <label class="field-label" for="expirySelect">Expires</label>
                     <select class="field-select" id="expirySelect">
                         {{if .EditMode}}<option value="keep">Keep current expiration</option>{{end}}
                         <option value="never">Never expires</option>
                         <option value="seconds">After a duration</option>
                     </select>
+                    <span class="field-hint" id="expiryHint">{{if .EditMode}}{{.ExpiresLabel}}{{else}}Counted from creation, independently of burn after click.{{end}}</span>
                 </div>
-                <span class="shortcut-hint" id="expiryHint">{{if .EditMode}}{{.ExpiresLabel}}{{else}}Counted from creation, independently of burn after click.{{end}}</span>
-            </div>
-            <div class="field-group" id="ttlGroup" hidden>
-                <label class="field-label" for="ttlInput">Lifetime in seconds</label>
-                <input type="number" class="field-input" id="ttlInput" min="1" max="9223372036" step="1" placeholder="86400" disabled>
-            </div>
-        </div>
 
-        <div class="burn-row">
-            <label class="burn-checkbox" id="burnLabel">
-                <input type="checkbox" id="burnCheck"{{if .BurnAfterClick}} checked{{end}}{{if .EditMode}} disabled{{end}}>
-                <span class="checkmark"></span>
-                <span class="burn-text">Burn after the first click</span>
-            </label>
-        </div>
-        {{if .EditMode}}<p class="shortcut-hint">Burn after click is fixed when the link is created.</p>{{end}}
+                <div class="field-group" id="ttlGroup" hidden>
+                    <label class="field-label" for="ttlInput">Lifetime in seconds</label>
+                    <input type="number" class="field-input field-input--mono" id="ttlInput" min="1" max="9223372036" step="1" placeholder="86400" disabled>
+                </div>
 
-        <p id="linkError" class="link-error" role="alert" hidden></p>
-        <p id="linkStatus" class="shortcut-hint" role="status"></p>
-        <div class="publish-row">
-            <button type="submit" class="btn-publish" id="submitBtn">{{if .EditMode}}Save link{{else}}Create link{{end}}</button>
-            {{if .EditMode}}<button type="button" class="btn-ghost" id="deleteBtn">Delete link</button>{{end}}
-            <a href="/" class="btn-ghost">Create a note</a>
-        </div>
+                <div class="setting-group">
+                    <label class="setting-row" id="burnLabel">
+                        <span class="setting-icon setting-icon--warn" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 22c4 0 7-2.7 7-7 0-4-3-6.5-4.5-9.5C13 7 12.5 9 11 10 10.5 8 9.5 6.5 8 5c0 3-3 5.5-3 10 0 4.3 3 7 7 7z"/></svg>
+                        </span>
+                        <span class="setting-text">
+                            <span class="setting-title">Burn after first click</span>
+                            <span class="setting-desc">{{if .EditMode}}Fixed when the link is created{{else}}Stops working once followed{{end}}</span>
+                        </span>
+                        <input type="checkbox" class="switch" role="switch" id="burnCheck"{{if .BurnAfterClick}} checked{{end}}{{if .EditMode}} disabled{{end}}>
+                    </label>
+                </div>
+
+                <div class="field-group">
+                    <label class="field-label" for="redirectSelect">Redirect mode</label>
+                    <select class="field-select" id="redirectSelect">
+                        <option value="inherit"{{if eq .DirectRedirect "inherit"}} selected{{end}}>Server default</option>
+                        <option value="false"{{if eq .DirectRedirect "false"}} selected{{end}}>Show destination first</option>
+                        <option value="true"{{if eq .DirectRedirect "true"}} selected{{end}}>Redirect immediately</option>
+                    </select>
+                    <span class="field-hint">Immediate redirects require an owner or server support.</span>
+                </div>
+
+                <div class="field-group">
+                    <label class="field-label" for="editCodeInput">Edit code <span class="optional">· {{if .EditMode}}{{if .IsOwner}}optional for you{{else}}required to save{{end}}{{else}}optional{{end}}</span></label>
+                    <div class="field-box">
+                        <input type="password" id="editCodeInput" name="link_edit_code" autocomplete="new-password" placeholder="{{if .EditMode}}Original edit code{{else}}Generated if blank{{end}}"{{if not .EditMode}} minlength="8" maxlength="128"{{end}}>
+                    </div>
+                </div>
+
+                <div class="settings-divider"></div>
+
+                <p id="linkError" class="form-error" role="alert" hidden></p>
+                <div class="publish-block">
+                    <button type="submit" class="btn-publish" id="submitBtn" data-kbd="Ctrl ↵">{{if .EditMode}}Save link{{else}}Create link{{end}}</button>
+                    <p id="linkStatus" class="form-status" role="status"></p>
+                    {{if .EditMode}}<button type="button" class="btn-danger" id="deleteBtn">Delete link</button>{{else}}<p class="publish-note">You'll get the short link and an edit code.</p>{{end}}
+                </div>
+            </section>
+        </aside>
     </form>
+    </main>
+
+    {{template "footer"}}
 </div>
 
 <script nonce="{{.Nonce}}">
@@ -101,20 +135,38 @@
     const submitButton = document.getElementById('submitBtn');
     const errorBox = document.getElementById('linkError');
     const statusBox = document.getElementById('linkStatus');
-    const privacySelect = document.getElementById('privacySelect');
+    const privacyValue = () => {
+        const checked = document.querySelector('input[name="privacy"]:checked');
+        return checked ? checked.value : 'public';
+    };
     const redirectSelect = document.getElementById('redirectSelect');
     const expirySelect = document.getElementById('expirySelect');
     const ttlInput = document.getElementById('ttlInput');
-    let initialPrivacy = privacySelect.value;
+    let initialPrivacy = privacyValue();
     let initialRedirect = redirectSelect.value;
 
-    function updatePrivacyHint() {
-        const option = privacySelect.selectedOptions[0];
-        const hints = {public: 'Anyone can follow', authenticated: 'Requires login to follow', owner: 'Only you can follow'};
-        document.getElementById('privacyHint').textContent = option.dataset.hint || hints[option.value];
+    // The preview shows the short link and its destination while the user types.
+    const targetInput = document.getElementById('targetInput');
+    const slugInput = document.getElementById('slugInput');
+    function updatePreview() {
+        const target = targetInput.value.trim();
+        const slug = slugInput.value.trim();
+        document.getElementById('previewHost').textContent = location.host + '/';
+        document.getElementById('previewSlug').textContent = slug || 'x7k2p';
+        document.getElementById('previewSlugHint').textContent = editMode
+            ? 'The slug is fixed when the link is created.'
+            : (slug ? 'The ending is your custom slug.' : 'Random ending. Type a slug above to pick your own.');
+        document.getElementById('previewTarget').textContent = target || 'Paste a destination URL above';
+        document.getElementById('targetLength').textContent = target.length + ' character' + (target.length === 1 ? '' : 's');
+        const open = document.getElementById('openTarget');
+        let valid = false;
+        try { valid = ['http:', 'https:'].includes(new URL(target).protocol); } catch (_) { /* not a URL yet */ }
+        open.hidden = !valid;
+        if (valid) open.href = target;
     }
-    privacySelect.addEventListener('change', updatePrivacyHint);
-    updatePrivacyHint();
+    targetInput.addEventListener('input', updatePreview);
+    slugInput.addEventListener('input', updatePreview);
+    updatePreview();
 
     function updateExpiry() {
         const enabled = expirySelect.value === 'seconds';
@@ -158,7 +210,7 @@
                 if (slug) payload.slug = slug;
                 payload.burn_after_click = document.getElementById('burnCheck').checked;
             }
-            if (!editMode || privacySelect.value !== initialPrivacy) payload.privacy = privacySelect.value;
+            if (!editMode || privacyValue() !== initialPrivacy) payload.privacy = privacyValue();
             if (!editMode || redirectSelect.value !== initialRedirect) {
                 payload.direct_redirect = redirectSelect.value === 'inherit' ? null : redirectSelect.value === 'true';
             }
@@ -168,7 +220,7 @@
             submitButton.disabled = true;
             const link = await apiRequest(editMode ? 'PUT' : 'POST', '/links' + (editMode ? '/' + encodeURIComponent(linkID) : ''), payload);
             if (editMode) {
-                initialPrivacy = privacySelect.value;
+                initialPrivacy = privacyValue();
                 initialRedirect = redirectSelect.value;
                 expirySelect.value = 'keep';
                 updateExpiry();
@@ -180,6 +232,7 @@
                 if (link.burn_after_click) params.set('burn', '1');
                 if (link.expires_at) params.set('expires', link.expires_at);
                 else if (link.burn_after_click) params.set('expires', 'immediately');
+                if (link.privacy) params.set('privacy', link.privacy);
                 location.href = '/success?' + params;
             }
         } catch (error) { showError(error); }

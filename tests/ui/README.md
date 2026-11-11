@@ -8,7 +8,8 @@ server's database and keyring go to the system temporary directory and are remov
 after the run.
 
 Every scenario runs on desktop (1280 × 900) and mobile (390 × 844).
-They cover field entry, editor formatting, validation,
+They cover field entry, editor formatting, the Write/Split/Preview views and preview
+sanitization, validation,
 publish/save, clipboard actions, raw view, burn confirmation, theme persistence,
 setup/login, password changes, admin invites, keys and user revocation. Link scenarios cover
 creation, validation, failure/retry, editing/deletion, expiry preservation/reset, redirect
@@ -61,7 +62,8 @@ with `-headed` is refused for the same reason.
 
 ## Writing scenarios
 
-Scenarios are ordinary Go functions in `editor_test.go`, `links_test.go` and `accounts_test.go`.
+Scenarios are ordinary Go functions in `editor_test.go`, `editor_preview_test.go`, `links_test.go`
+and `accounts_test.go`.
 Add a case to `TestEditor`, `TestLinks` or `TestAccounts`; `runScenarios` runs it at both screen
 sizes with a fresh server, context, diagnostics and failure artifacts.
 

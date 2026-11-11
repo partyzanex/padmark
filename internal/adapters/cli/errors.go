@@ -22,7 +22,7 @@ var (
 	ErrNoteNotFound          = fmt.Errorf("note %w", ErrNotFound)
 	ErrRateLimited           = errors.New("rate limit exceeded, try again later")
 	ErrUnauthorized          = errors.New("unauthorized")
-	errBurnRequiredForTTL    = errors.New("--ttl requires --burn (it sets the grace period after the first read)")
+	errPrivateConflict       = errors.New("--private conflicts with --privacy; use --privacy only")
 	errContentRequired       = errors.New("no content provided: pass --content, --file, or pipe content via stdin")
 	errLinkIDRequired        = errors.New("link ID is required as the first argument")
 	errLinkOwnershipRequired = fmt.Errorf("%w: wrong edit code or --token is not the link's owner", ErrForbidden)

@@ -65,6 +65,7 @@ func (h *NoteHandler) EditPage(w http.ResponseWriter, r *http.Request) {
 		PrivacyOptions:   privacyOptions(h.authMgr != nil, h.signedIn(r), note.EffectivePrivacy()),
 		Nonce:            middleware.NonceFromContext(r.Context()),
 		IsOwner:          isOwner,
+		ShowContents:     note.ContentsSidebar(),
 	})
 	if err != nil {
 		h.log.ErrorContext(r.Context(), "render edit template", "id", domain.HashSlug(id), "err", err)

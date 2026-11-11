@@ -22,6 +22,7 @@ func domainToResponse(note *domain.Note) *ogenapi.NoteResponse {
 	resp.Privacy = ogenapi.NewOptNoteResponsePrivacy(ogenapi.NoteResponsePrivacy(note.EffectivePrivacy()))
 	// Keep the v0.1.6 response alias through the generated model's accessor.
 	resp.SetPrivate(ogenapi.NewOptBool(privateFlag(note)))
+	resp.ShowContents = ogenapi.NewOptBool(note.ContentsSidebar())
 
 	if note.ExpiresAt != nil {
 		resp.ExpiresAt = ogenapi.NewOptNilDateTime(*note.ExpiresAt)
@@ -116,6 +117,7 @@ func domainToCreateResponse(note *domain.Note) ogenapi.CreateNoteResponse {
 	resp.UpdatedAt = note.UpdatedAt
 	resp.Privacy = ogenapi.NewOptCreateNoteResponsePrivacy(ogenapi.CreateNoteResponsePrivacy(note.EffectivePrivacy()))
 	resp.SetPrivate(ogenapi.NewOptBool(privateFlag(note)))
+	resp.ShowContents = ogenapi.NewOptBool(note.ContentsSidebar())
 
 	if note.ExpiresAt != nil {
 		resp.ExpiresAt = ogenapi.NewOptNilDateTime(*note.ExpiresAt)

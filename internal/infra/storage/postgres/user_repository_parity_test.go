@@ -140,13 +140,33 @@ func (s *ParitySuite) TestUser_UpdateTOTPSecretLeavesCredentialsAlone() {
 	repo := NewUserRepository(s.db)
 	usr := s.createParityUser("reseal", false)
 
-	s.Require().NoError(repo.UpdateTOTPSecret(ctx, usr.ID, "resealed-secret"))
+	updated, err := repo.UpdateTOTPSecret(ctx, usr.ID, usr.TOTPSecret, "resealed-secret")
+	s.Require().NoError(err)
+	s.True(updated)
 
 	got, err := repo.GetByID(ctx, usr.ID)
 	s.Require().NoError(err)
 	s.Equal("resealed-secret", got.TOTPSecret)
 	s.Equal(usr.PasswordHash, got.PasswordHash)
 	s.Equal(usr.KDFSalt, got.KDFSalt)
+}
+
+// TestUser_UpdateTOTPSecret_StaleExpectedWritesNothing covers audit finding R6: a reseal that read
+// the seal before a password change must not overwrite the seal of the new password.
+func (s *ParitySuite) TestUser_UpdateTOTPSecret_StaleExpectedWritesNothing() {
+	ctx := s.T().Context()
+	repo := NewUserRepository(s.db)
+	usr := s.createParityUser("reseal-stale", false)
+
+	s.Require().NoError(repo.UpdatePassword(ctx, usr.ID, "new-hash", []byte("new-salt"), "new-seal"))
+
+	updated, err := repo.UpdateTOTPSecret(ctx, usr.ID, usr.TOTPSecret, "stale-reseal")
+	s.Require().NoError(err)
+	s.False(updated)
+
+	got, err := repo.GetByID(ctx, usr.ID)
+	s.Require().NoError(err)
+	s.Equal("new-seal", got.TOTPSecret)
 }
 
 // TestUser_UsernameIsCaseInsensitive pins the behaviour the SQLite tests establish: usernames

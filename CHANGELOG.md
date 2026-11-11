@@ -16,12 +16,22 @@ That baseline is not the latest released version.
 
 - Account ownership and the `public`/`authenticated`/`owner` privacy model; short links and
   configurable API disabling.
+- Web UI redesign: one token set for the light/dim/dark themes, self-hosted Onest interface
+  font, editor and short-link pages with a settings panel, privacy cards and switches, a new
+  note header, success, sign-in and admin pages, and phone-width layouts. The note and
+  short-link editor cards fill the free screen height, with the card footer at the bottom.
+  Both forms share one head layout (icon, Onest title font, `Slug /` field and toolbar
+  height), so the head does not move when the user switches forms; the note edit form shows
+  its slug read-only.
 - Installation-key content envelopes, key-management commands and resumable schema/content
   upgrade support, including conversion of tagged v0.1.6 plaintext notes.
 - Headless account provisioning, the MCP proxy and `/llms.txt`.
 - Bootstrap/step-up protection, session/key revocation, CSRF/lockout hardening, argon2 memory
   budgeting, content/rendering limits and operational configuration checks.
 - The separate Go browser-test module, desktop/mobile PNG comparisons and CI integration.
+- Write / Split / Preview views in the note editor. The browser renders the preview with
+  vendored marked 18.1.2 and sanitizes it with DOMPurify 3.4.17; no server endpoint is added.
+  The last view is remembered per browser; phone width offers only Write and Preview.
 - Browser forms for creating, editing and deleting short links, including privacy, redirect
   mode, expiration and burn-after-click settings. Editing preserves expiry unless changed.
 - API documentation reports the application release version, shared with `--version` and
@@ -37,6 +47,20 @@ That baseline is not the latest released version.
 - Short links answer at `/{id}`, like notes: the server serves the note with that `id` or, when
   there is none, the link. `POST /links` returns `Location: /{id}`, and the web UI, CLI and MCP
   show the short URL. The older `/r/{id}` URLs keep working.
+- The note page shows the Edit link to every reader who can see the note, anonymous readers
+  included: the author of an anonymous note edits it with its edit code, which the server checks.
+- `POST /notes` accepts `ttl` without `burn_after_reading` as the note's lifetime from creation.
+  `padmark-cli create` and `edit` accept `--ttl` without `--burn`, and the MCP `create_note`
+  tool passes it through.
+- `padmark-cli create` and `edit` accept the v0.1.6 `--private` flag again as a deprecated
+  alias: `--private` is `--privacy authenticated`, `--private=false` is `--privacy public`.
+- Optional "Contents sidebar" for notes: with `show_contents: true` the note view shows an
+  "On this page" column with links to the h2/h3 headings and marks the current section. The
+  editor has a "Contents sidebar" switch; `padmark-cli create`/`edit` accept `--contents`, and
+  the MCP `create_note`/`update_note` tools accept `show_contents`. The field defaults to
+  `false`, an update without it keeps the stored value, and responses add `show_contents`.
+  The migration `20261110000001_notes_show_contents.sql` adds the column with `false` for
+  existing notes.
 
 ### Upgrading v0.3.2/v0.3.3 to v0.4.0
 

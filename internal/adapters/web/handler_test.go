@@ -251,7 +251,7 @@ func newTestNote(title, content string) *domain.Note {
 		UpdatedAt:   time.Now(),
 
 		ExpiresAt: nil, Privacy: nil, OwnerID: nil, EditCode: "",
-		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 }
 
@@ -334,8 +334,8 @@ func (s *HandlerSuite) TestEditPage_OK() {
 	s.Contains(body, "# hello")
 	s.Contains(body, "Save")
 	// Without accounts the stored level stays selectable but says it is not enforced (review R2).
-	s.Contains(body, `value="authenticated" data-hint="Not enforced: accounts are off, `+
-		`anyone with the link can view" selected`)
+	s.Contains(body, `value="authenticated" checked>`)
+	s.Contains(body, "Not enforced: accounts are off, anyone with the link can view")
 }
 
 // TestEditPage_BurnNote_ContentWithheld: the editor never burns, so it must not pre-fill a
@@ -405,6 +405,23 @@ func (s *HandlerSuite) TestSuccessPage_OK() {
 	s.Contains(w.Body.String(), "never expires")
 }
 
+func (s *HandlerSuite) TestSuccessPage_Privacy() {
+	for query, expected := range map[string]string{
+		"&privacy=owner":         "Only you can open it.",
+		"&privacy=authenticated": "Signed-in users with the link can open it.",
+		"&privacy=bogus":         "Anyone with the link can open it.",
+		"":                       "Anyone with the link can open it.",
+	} {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodGet, "/success?id=abc"+query, nil)
+
+		s.router.ServeHTTP(w, r)
+
+		s.Equal(http.StatusOK, w.Code, query)
+		s.Contains(w.Body.String(), expected, query)
+	}
+}
+
 func (s *HandlerSuite) TestSuccessPage_NoID() {
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/success", nil)
@@ -425,7 +442,7 @@ func (s *HandlerSuite) TestSuccessPage_WithBurnAndExpires() {
 	s.Equal(http.StatusOK, w.Code)
 
 	body := w.Body.String()
-	s.Contains(body, "Burn after reading")
+	s.Contains(body, "Burns after reading")
 	s.Contains(body, "expires Jun 15, 2026")
 	// edit code is stored in sessionStorage before redirect and read by client-side JS;
 	// it is never rendered into the HTML by the server.
@@ -600,6 +617,57 @@ func (s *HandlerSuite) TestCreateNote_WithTTL() {
 	var resp testNoteResponse
 	s.Require().NoError(json.NewDecoder(w.Body).Decode(&resp))
 	s.True(resp.BurnAfterReading)
+}
+
+// TestCreateNote_LifetimeWithoutBurn: without burn_after_reading, ttl is the note's lifetime
+// counted from creation.
+func (s *HandlerSuite) TestCreateNote_LifetimeWithoutBurn() {
+	note := newTestNote("expiring", "content")
+	before := time.Now().UTC()
+
+	s.manager.EXPECT().Create(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, n *domain.Note) (*domain.Note, error) {
+			s.False(n.BurnAfterReading)
+			s.Zero(n.BurnTTL)
+			s.Require().NotNil(n.ExpiresAt)
+			s.WithinDuration(before.Add(time.Hour), *n.ExpiresAt, 5*time.Second)
+			note.ID = n.ID
+			note.ExpiresAt = n.ExpiresAt
+
+			return note, nil
+		})
+
+	body := `{"title":"expiring","content":"content","ttl":3600}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/notes", strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusCreated, w.Code)
+}
+
+// TestCreateNote_ZeroTTLWithoutBurn_NoExpiry: ttl 0 without burn keeps the note without expiry.
+func (s *HandlerSuite) TestCreateNote_ZeroTTLWithoutBurn_NoExpiry() {
+	note := newTestNote("plain", "content")
+
+	s.manager.EXPECT().Create(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, n *domain.Note) (*domain.Note, error) {
+			s.Nil(n.ExpiresAt)
+			s.Zero(n.BurnTTL)
+			note.ID = n.ID
+
+			return note, nil
+		})
+
+	body := `{"title":"plain","content":"content","ttl":0}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/notes", strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+
+	s.router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusCreated, w.Code)
 }
 
 func (s *HandlerSuite) TestCreateNote_ImmediateBurn() {
@@ -1379,7 +1447,7 @@ func (s *HandlerSuite) TestUpdateNote_OK() {
 		UpdatedAt:   time.Now(),
 
 		ExpiresAt: nil, Privacy: nil, OwnerID: nil, EditCode: "",
-		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 	s.manager.EXPECT().Update(gomock.Any(), testID, "editcode1234", uuid.Nil, gomock.Any()).Return(updated, nil)
 
@@ -2409,7 +2477,7 @@ func (s *HandlerSuite) TestGetNote_AuthInstance_Unauthenticated_ShowsEditButtons
 
 	body := w.Body.String()
 	s.Contains(body, `href="/edit/`)
-	s.Contains(body, ">New<")
+	s.Contains(body, ">New note<")
 }
 
 // ── Login ──.
@@ -2421,7 +2489,7 @@ func (s *HandlerSuite) TestLoginPage() {
 	s.router.ServeHTTP(w, r)
 
 	s.Equal(http.StatusOK, w.Code)
-	s.Contains(w.Body.String(), "Sign in with TOTP")
+	s.Contains(w.Body.String(), `<h1 class="login-title">Sign in</h1>`)
 }
 
 func (s *HandlerSuite) TestLoginPage_Error() {
@@ -2793,7 +2861,7 @@ func (s *HandlerSuite) TestHandleReveal_CrossNoteToken_TokenNotBurned() {
 		UpdatedAt:   time.Now(),
 
 		ExpiresAt: nil, Privacy: nil, OwnerID: nil, EditCode: "",
-		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 
 	s.manager.EXPECT().Peek(gomock.Any(), "wrong-note").Return(wrongNote, nil)
@@ -2848,7 +2916,7 @@ func (s *HandlerSuite) TestPrivateNote_TOTPMode_Unauthenticated() {
 
 // ── Anonymous mutation privacy gate (PUT/DELETE) ──
 //
-// The gate (anonymousNoteMutationAllowed / gateAnonymousMutation) implements the restored
+// The gate (noteMutationAllowed / gateMutation) implements the restored
 // semantics: an anonymous caller may mutate a note with an edit code if and only if they could
 // also read it. The tests below exercise every branch: refused (private), deferred (Peek error),
 // passed for an authenticated caller, and no interaction with the fail-lockout.
@@ -2892,32 +2960,37 @@ func (s *HandlerSuite) TestMutationGate_AnonymousDelete_OwnerNote() {
 	s.Equal(http.StatusUnauthorized, w.Code)
 }
 
-// TestMutationGate_AuthenticatedCaller_PassesGate verifies that a signed-in caller is never
-// refused by the gate — even on a privacy=owner note they do not own. The gate short-circuits
-// on the caller ID without a Peek and steps aside; ownership is decided inside the usecase (a
-// non-owner without the edit code gets 403 there).
-func (s *HandlerSuite) TestMutationGate_AuthenticatedCaller_PassesGate_PersonalNote() {
+// TestMutationGate_SignedInNonOwner_OwnerNote covers audit finding R4: a signed-in caller who
+// cannot read another account's privacy=owner note may not update or delete it, even with the
+// right edit code. The gate answers 401 like the read, and the usecase is never called.
+func (s *HandlerSuite) TestMutationGate_SignedInNonOwner_OwnerNote() {
 	usr := newTestUser("bob")
 
 	note := newTestNote("secret", "someone else's")
 	note.Privacy = new(domain.PrivacyOwner)
-	note.OwnerID = new(uuid.UUID) // owned by a user who is not in this request.
+	note.OwnerID = new(uuid.New()) // owned by a user who is not in this request.
 
-	router := s.newRouterWithTOTPAuth()
-	s.manager.EXPECT().
-		Update(gomock.Any(), testID, "", usr.ID, gomock.Any()).
-		Return(nil, domain.ErrForbidden)
-	s.authMgr.EXPECT().GetSession(gomock.Any(), "valid-sess").Return(usr, nil).Times(1)
+	// The single-segment path is the ogen route; the multi-segment path is the native one.
+	for _, path := range []string{"/notes/" + testID, "/notes/project/GUIDE.md"} {
+		for _, method := range []string{http.MethodPut, http.MethodDelete} {
+			s.Run(method+path, func() {
+				router := s.newRouterWithTOTPAuth()
+				s.manager.EXPECT().Peek(gomock.Any(), gomock.Any()).Return(note, nil)
+				s.authMgr.EXPECT().GetSession(gomock.Any(), "valid-sess").Return(usr, nil)
 
-	w := httptest.NewRecorder()
-	body := `{"title":"t","content":"c"}`
-	r := sessioned(httptest.NewRequest(http.MethodPut, "/notes/"+testID, strings.NewReader(body)))
-	r.Header.Set("Content-Type", "application/json")
-	r.Header.Set("Accept", "application/json")
+				body := `{"title":"t","content":"c","privacy":"public","edit_code":"right-code"}`
+				r := sessioned(httptest.NewRequest(method, path, strings.NewReader(body)))
+				r.Header.Set("Content-Type", "application/json")
+				r.Header.Set("Accept", "application/json")
+				r.Header.Set("X-Edit-Code", "right-code")
 
-	router.ServeHTTP(w, r)
+				w := httptest.NewRecorder()
+				router.ServeHTTP(w, r)
 
-	s.Equal(http.StatusForbidden, w.Code)
+				s.Equal(http.StatusUnauthorized, w.Code)
+			})
+		}
+	}
 }
 
 // TestMutationGate_PeekError_DefersToMutation verifies the gate's fail-open behaviour on a

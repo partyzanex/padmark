@@ -62,6 +62,12 @@ func (m *Manager) Update(
 		return nil, fmt.Errorf("encrypt target url: %w", err)
 	}
 
+	// An omitted privacy goes to storage as nil, so COALESCE keeps the stored level: another
+	// replica may have changed it after GetByID, and slugLock serializes only this process.
+	if opts.Privacy == nil {
+		updated.Privacy = nil
+	}
+
 	persisted, err := m.storage.Update(ctx, dbID, updated)
 	if err != nil {
 		return nil, fmt.Errorf("update link: %w", err)

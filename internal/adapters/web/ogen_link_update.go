@@ -31,7 +31,7 @@ func (h *OgenHandler) UpdateLink(
 		return mapUpdateLinkError(err, h.log), nil
 	}
 
-	if !h.anonymousLinkMutationAllowed(ctx, params.ID) {
+	if !h.linkMutationAllowed(ctx, params.ID) {
 		return &ogenapi.UpdateLinkUnauthorized{}, nil
 	}
 

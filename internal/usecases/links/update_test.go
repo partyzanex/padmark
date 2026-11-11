@@ -30,7 +30,7 @@ func (s *ManagerTestSuite) TestUpdate_PreservesStateAndEvictsCache() {
 			s.Equal("https://example.com/new", link.TargetURL)
 			s.Equal("original", link.EditCode)
 			s.Equal(existing.OwnerID, link.OwnerID)
-			s.Equal(existing.Privacy, link.Privacy)
+			s.Nil(link.Privacy, "an omitted privacy must reach storage as nil, so COALESCE keeps it")
 			s.Equal(existing.ExpiresAt, link.ExpiresAt)
 			s.Equal(existing.DirectRedirect, link.DirectRedirect)
 			s.Equal(existing.CreatedAt, link.CreatedAt)

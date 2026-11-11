@@ -8,17 +8,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestValidateBurnTTL_LoneTTLRejected verifies that --ttl without --burn is rejected with a
-// clear message, for both `create` and `edit` (the contract: --ttl only with --burn).
-func TestValidateBurnTTL_LoneTTLRejected(t *testing.T) {
+// TestValidateTTL_LoneTTLAccepted verifies that --ttl without --burn passes validation for both
+// `create` and `edit`: it is a lifetime there. The commands fail later for unrelated reasons.
+func TestValidateTTL_LoneTTLAccepted(t *testing.T) {
 	isolateEnv(t)
 
 	cases := []struct {
 		name string
 		args []string
 	}{
-		{cmdCreate, []string{cmdCreate, "--ttl", "60"}},
-		{cmdEdit, []string{cmdEdit, "some-id", "--edit-code", "code", "--ttl", "60"}},
+		{cmdCreate, []string{cmdCreate, "--ttl", "60", "--content", ""}},
+		{cmdEdit, []string{cmdEdit, "some-id", "--edit-code", "code", "--ttl", "60", "--content", ""}},
 	}
 
 	for _, testCase := range cases {
@@ -26,21 +26,21 @@ func TestValidateBurnTTL_LoneTTLRejected(t *testing.T) {
 			err := runCLI(t.Context(), testCase.args...)
 
 			require.Error(t, err)
-			assert.Contains(t, err.Error(), "--ttl requires --burn")
+			assert.NotContains(t, err.Error(), "TTL")
 		})
 	}
 }
 
-// TestValidateBurnTTL_TTLWithBurnPasses verifies the validation does NOT trip when --burn is
-// present: the command proceeds past validateBurnTTL and fails later for an unrelated reason
+// TestValidateTTL_TTLWithBurnPasses verifies the validation does NOT trip when --burn is
+// present: the command proceeds past validateTTL and fails later for an unrelated reason
 // (empty content), proving the TTL contract check passed.
-func TestValidateBurnTTL_TTLWithBurnPasses(t *testing.T) {
+func TestValidateTTL_TTLWithBurnPasses(t *testing.T) {
 	isolateEnv(t)
 
 	err := runCLI(t.Context(), cmdCreate, "--burn", "--ttl", "60", "--content", "")
 
 	require.Error(t, err)
-	assert.NotContains(t, err.Error(), "--ttl requires --burn",
+	assert.NotContains(t, err.Error(), "TTL",
 		"validation must pass when --burn is set; failure must come from later checks")
 }
 

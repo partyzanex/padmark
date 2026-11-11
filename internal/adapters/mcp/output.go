@@ -27,6 +27,7 @@ func (m *Manager) noteOutputFromCreate(resp *padmark.CreateNoteResponse) createN
 		Privacy:          "",
 		EditCode:         "",
 		EditCodeNote:     "",
+		ShowContents:     resp.ShowContents.Or(false),
 	}
 	if resp.Privacy.Set {
 		out.Privacy = string(resp.Privacy.Value)
@@ -56,6 +57,7 @@ func noteOutputFromNote(resp *padmark.NoteResponse) createNoteOutput {
 		Privacy:          "",
 		EditCode:         "",
 		EditCodeNote:     "",
+		ShowContents:     resp.ShowContents.Or(false),
 	}
 	if resp.Privacy.Set {
 		out.Privacy = string(resp.Privacy.Value)
@@ -98,7 +100,7 @@ func linkOutputFromLink(resp *padmark.LinkResponse) createLinkOutput {
 		TargetURL:      resp.TargetURL.String(),
 		Views:          resp.Views,
 		BurnAfterClick: resp.BurnAfterClick,
-		CreatedAt:      "",
+		CreatedAt:      timeText(resp.CreatedAt),
 		ExpiresAt:      nilTimeText(resp.ExpiresAt),
 		Privacy:        "",
 		DirectRedirect: nil,

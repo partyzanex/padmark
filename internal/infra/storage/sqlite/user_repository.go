@@ -228,18 +228,27 @@ func (r *UserRepository) UpdatePassword(
 	return nil
 }
 
-// UpdateTOTPSecret replaces only the sealed TOTP secret for the given user ID. The password hash
-// and KDF salt are deliberately left alone: this is the re-seal-on-login migration path, where
-// the secret is rewritten under the current argon2 cost while the credentials stay as they are.
-func (r *UserRepository) UpdateTOTPSecret(ctx context.Context, id uuid.UUID, totpSecret string) error {
-	_, err := r.db.NewUpdate().
+// UpdateTOTPSecret replaces only the sealed TOTP secret for the given user ID, and only while the
+// stored seal still equals expected. The password hash and KDF salt are deliberately left alone:
+// this is the re-seal-on-login migration path. The condition makes it a compare-and-set: after a
+// concurrent password change the seal differs, so the old reseal reports false and writes nothing.
+func (r *UserRepository) UpdateTOTPSecret(
+	ctx context.Context, id uuid.UUID, expected, totpSecret string,
+) (bool, error) {
+	res, err := r.db.NewUpdate().
 		TableExpr("users").
 		Set("totp_secret = ?", totpSecret).
 		Where("id = ?", id).
+		Where("totp_secret = ?", expected).
 		Exec(ctx)
 	if err != nil {
-		return fmt.Errorf("update totp secret: %w", err)
+		return false, fmt.Errorf("update totp secret: %w", err)
 	}
 
-	return nil
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("rows affected: %w", err)
+	}
+
+	return affected > 0, nil
 }
