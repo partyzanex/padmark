@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/partyzanex/padmark/internal/adapters/web/middleware"
+	"github.com/partyzanex/padmark/internal/domain"
 )
 
 //go:embed templates/success.html
@@ -15,6 +16,7 @@ type successViewData struct {
 	ID               string
 	URL              string
 	ExpiresLabel     string
+	Privacy          string
 	Nonce            string
 	BurnAfterReading bool
 	IsLink           bool
@@ -44,6 +46,12 @@ func (h *PageHandler) SuccessPage(w http.ResponseWriter, r *http.Request) {
 
 	burn := query.Get("burn") == "1"
 
+	// The privacy level only selects the page's wording; an unknown value shows the public text.
+	privacy := domain.Privacy(query.Get("privacy"))
+	if !privacy.Valid() {
+		privacy = domain.PrivacyPublic
+	}
+
 	expiresLabel := "never expires"
 
 	raw := query.Get("expires")
@@ -68,6 +76,7 @@ func (h *PageHandler) SuccessPage(w http.ResponseWriter, r *http.Request) {
 		ID:               id,
 		URL:              noteURL,
 		ExpiresLabel:     expiresLabel,
+		Privacy:          string(privacy),
 		BurnAfterReading: burn,
 		Nonce:            middleware.NonceFromContext(r.Context()),
 		IsLink:           isLink,

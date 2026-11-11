@@ -23,7 +23,7 @@ func TestEditor(t *testing.T) {
 			sess.fill("#editor", "# Release notes\n\nA small **Markdown** example.")
 
 			themeTitle := strings.ToUpper(theme[:1]) + theme[1:]
-			sess.must(sess.page.GetByTitle(themeTitle, playwright.PageGetByTitleOptions{Exact: new(true)}).Click())
+			sess.button(themeTitle + " theme")
 			sess.must(sess.expect.Locator(sess.page.Locator("html")).ToHaveAttribute("data-theme", theme))
 			sess.expectLayout(".header", ".logo", "#themeSwitcher", ".header-links", "#editor", "#titleInput",
 				"#slugInput", "#burnLabel", "#privacySelect", "#submitBtn")
@@ -31,7 +31,7 @@ func TestEditor(t *testing.T) {
 			_, err := sess.page.Reload()
 			sess.must(err)
 			sess.must(sess.expect.Locator(sess.page.Locator("html")).ToHaveAttribute("data-theme", theme))
-			activeButton := sess.page.Locator(fmt.Sprintf(`.theme-btn[data-theme="%s"]`, theme))
+			activeButton := sess.page.Locator(fmt.Sprintf(`.theme-btn[data-theme-value="%s"]`, theme))
 			sess.must(sess.expect.Locator(activeButton).ToHaveClass(regexp.MustCompile("active")))
 		},
 			accounts: false, allowedStatuses: nil,
@@ -87,7 +87,7 @@ func testOptions(sess *uiSession) {
 
 	// Without the account system nothing enforces a protected level, so only public is offered.
 	sess.expectPrivacyOptions("public")
-	sess.text("#privacyHint", "Anyone can view")
+	sess.must(sess.expect.Locator(sess.page.Locator("#privacy-public")).ToBeChecked())
 }
 
 // testPrivacyNeedsAccounts pins review R2 in the default configuration: the API refuses a
@@ -143,7 +143,7 @@ func testEmptyContent(sess *uiSession) {
 	})
 	sess.fill("#titleInput", "Empty note")
 	sess.fill("#editor", "   ")
-	sess.button("Publish")
+	sess.button("Publish note")
 	sess.text("#submitBtn", "Enter some text first")
 	sess.must(sess.expect.Locator(sess.page.Locator("#submitBtn")).ToBeEnabled())
 	require.Empty(sess.t, submissions.String())
@@ -151,8 +151,8 @@ func testEmptyContent(sess *uiSession) {
 
 func testPublishAndView(sess *uiSession) {
 	code, noteURL := sess.publishNote()
-	sess.expectLayout(".header", ".success-card", "#editCodeBlock", ".actions-row")
-	sess.screenshot("created.png", ".copy-value")
+	sess.expectLayout(".header", ".success-card", "#editCodeBlock", ".action-row")
+	sess.screenshot("created.png", ".copy-value", "#editCodeValue")
 	sess.must(sess.browserContext.GrantPermissions([]string{"clipboard-read", "clipboard-write"}))
 	sess.click("#editCodeCopyBtn")
 	sess.text("#editCodeCopyBtn", "Copied")
@@ -164,10 +164,10 @@ func testPublishAndView(sess *uiSession) {
 	relative, err := url.Parse(noteURL)
 	sess.must(err)
 	require.Equal(sess.t, base.ResolveReference(relative).String(), sess.eval("() => navigator.clipboard.readText()"))
-	sess.link("Go to paste")
+	sess.link("Open note")
 	sess.must(sess.expect.Locator(sess.role(playwright.AriaRoleHeading, "Hello")).ToBeVisible())
 	sess.text(".markdown-body strong", "Markdown")
-	sess.expectLayout(".header", ".meta-bar", ".article-card", ".paste-footer")
+	sess.expectLayout(".header", ".article-meta", ".article-card", ".site-footer")
 	sess.screenshot("note.png")
 	raw, err := sess.page.ExpectPopup(func() error { return sess.role(playwright.AriaRoleLink, "Raw").First().Click() })
 	sess.must(err)
@@ -178,7 +178,7 @@ func testPublishAndView(sess *uiSession) {
 
 func testEditAndSave(sess *uiSession) {
 	code, _ := sess.publishNote()
-	sess.link("Go to paste")
+	sess.link("Open note")
 	sess.link("Edit")
 	sess.value("#titleInput", "UI test note")
 	sess.value("#editor", "# Hello\n\nThis is **Markdown**.")
@@ -251,7 +251,7 @@ func testOneTimeEditCode(sess *uiSession) {
 	_, err := sess.page.Reload()
 	sess.must(err)
 	sess.must(sess.expect.Locator(sess.page.Locator("#editCodeBlock")).ToBeHidden())
-	sess.must(sess.expect.Locator(sess.role(playwright.AriaRoleLink, "Go to paste")).ToBeVisible())
+	sess.must(sess.expect.Locator(sess.role(playwright.AriaRoleLink, "Open note")).ToBeVisible())
 }
 
 func testReveal(sess *uiSession) {
@@ -259,12 +259,12 @@ func testReveal(sess *uiSession) {
 	sess.fill("#editor", "# One-time message")
 	sess.click("#burnLabel")
 	sess.selectOption("#burnTime", "0")
-	sess.button("Publish")
+	sess.button("Publish note")
 	sess.must(sess.expect.Page(sess.page).ToHaveURL(regexpURL("/success?")))
-	sess.link("Go to paste")
+	sess.link("Open note")
 	sess.text(".confirm-title", "One-time document")
 	sess.must(sess.expect.Locator(sess.page.Locator(".markdown-body")).ToHaveCount(0))
-	sess.expectLayout(".header", ".article-card", ".confirm-actions")
+	sess.expectLayout(".header", ".confirm-card", ".confirm-actions")
 	sess.screenshot("reveal.png")
 	sess.button("Reveal and burn")
 	sess.must(sess.expect.Locator(sess.role(playwright.AriaRoleHeading, "One-time message")).ToBeVisible())
@@ -284,7 +284,7 @@ func testPublishFailure(sess *uiSession) {
 			sess.errorf("fulfill simulated failure: %v", err)
 		}
 	}))
-	sess.button("Publish")
+	sess.button("Publish note")
 	sess.text("#submitBtn", "Please try again")
 	sess.must(sess.expect.Locator(sess.page.Locator("#submitBtn")).ToBeEnabled())
 	sess.value("#editor", "Keep this draft")
@@ -295,7 +295,7 @@ func testPublishFailure(sess *uiSession) {
 
 func testInvalidEditCode(sess *uiSession) {
 	sess.publishNote()
-	sess.link("Go to paste")
+	sess.link("Open note")
 	sess.link("Edit")
 	sess.fill("#editCodeInput", "wrong-edit-code")
 	sess.fill("#editor", "Unsaved draft")

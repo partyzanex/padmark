@@ -395,6 +395,12 @@ func (sess *uiSession) selectOption(selector, value string) {
 	})
 	sess.must(err)
 }
+
+// choosePrivacy selects the privacy card with the given level value.
+func (sess *uiSession) choosePrivacy(value string) {
+	sess.t.Helper()
+	sess.must(sess.page.Locator("#privacy-" + value).Check())
+}
 func (sess *uiSession) text(selector, value string) {
 	sess.t.Helper()
 	sess.must(sess.expect.Locator(sess.page.Locator(selector)).ToHaveText(value))
@@ -460,12 +466,12 @@ func (sess *uiSession) publishNote() (string, string) {
 	sess.gotoPage("/")
 	sess.fill("#titleInput", "UI test note")
 	sess.fill("#editor", "# Hello\n\nThis is **Markdown**.")
-	sess.button("Publish")
+	sess.button("Publish note")
 	sess.must(sess.expect.Page(sess.page).ToHaveURL(regexpURL("/success?")))
 	sess.must(sess.expect.Locator(sess.page.Locator("#editCodeValue")).ToHaveText(nonempty))
 	code, err := sess.page.Locator("#editCodeValue").InnerText()
 	sess.must(err)
-	link, err := sess.role(playwright.AriaRoleLink, "Go to paste").GetAttribute("href")
+	link, err := sess.role(playwright.AriaRoleLink, "Open note").GetAttribute("href")
 	sess.must(err)
 	require.NotEmpty(sess.t, link)
 
@@ -512,11 +518,11 @@ func (sess *uiSession) code(secret string, at time.Time) string {
 	return code
 }
 
-// expectPrivacyOptions checks the values the editor's privacy select offers, in order.
+// expectPrivacyOptions checks the values the editor's privacy cards offer, in order.
 func (sess *uiSession) expectPrivacyOptions(values ...string) {
 	sess.t.Helper()
 
-	options := sess.page.Locator("#privacySelect option")
+	options := sess.page.Locator(`#privacySelect input[name="privacy"]`)
 	sess.must(sess.expect.Locator(options).ToHaveCount(len(values)))
 
 	for index, value := range values {

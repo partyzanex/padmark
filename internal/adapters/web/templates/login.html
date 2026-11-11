@@ -6,59 +6,22 @@
     <title>Padmark — Login</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <link rel="stylesheet" href="/static/style.css?p={{styleVersion}}">
-    <style nonce="{{.Nonce}}">
-        .login-center {
-            flex: 1;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-        .login-card {
-            width: 100%;
-            max-width: 380px;
-            background: var(--bg-surface);
-            border: 1px solid var(--border-subtle);
-            border-radius: var(--radius-lg);
-            padding: 36px 32px;
-            animation: fade-up 0.5s ease both;
-        }
-        .login-title {
-            font-family: var(--font-display);
-            font-size: 1.15rem;
-            font-weight: 600;
-            color: var(--text-primary);
-            margin-bottom: 6px;
-        }
-        .login-desc {
-            font-family: var(--font-mono);
-            font-size: 0.72rem;
-            color: var(--text-muted);
-            margin-bottom: 24px;
-        }
-        .login-error {
-            font-family: var(--font-mono);
-            font-size: 0.72rem;
-            color: var(--err-red);
-            margin-bottom: 16px;
-        }
-        .login-btn {
-            width: 100%;
-            margin-top: 16px;
-        }
-    </style>
 </head>
 <body>
-<div class="wrapper wrapper--centered">
+<div class="wrapper">
 
-    {{template "header"}}
+    {{template "header" ""}}
 
-    <div class="login-center">
-        <div class="login-card">
-            <div class="login-title">Sign in with TOTP</div>
-            <div class="login-desc">Enter your username and the 6-digit code from your authenticator app.</div>
+    <main class="login-center">
+        <div class="card login-card">
+            <div class="login-head">
+                <span class="login-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></span>
+                <h1 class="login-title">Sign in</h1>
+                <p class="login-desc">Your username, password and the 6-digit code from your authenticator app.</p>
+            </div>
 
             {{if .Error}}
-            <div class="login-error">Invalid credentials. Please try again.</div>
+            <div class="login-error" role="alert">Invalid credentials. Please try again.</div>
             {{end}}
 
             <form method="POST" action="/totp-login">
@@ -69,21 +32,22 @@
                     <input type="text" class="field-input" name="username" id="username"
                            placeholder="Your username" autofocus required autocomplete="username">
                 </div>
-                <div class="field-group field-group-spaced">
+                <div class="field-group">
                     <label class="field-label" for="password">Password</label>
                     <input type="password" class="field-input" name="password" id="password"
                            placeholder="Your password" required autocomplete="current-password">
                 </div>
-                <div class="field-group field-group-spaced">
-                    <label class="field-label" for="code">TOTP code</label>
-                    <input type="text" class="field-input" name="code" id="code"
-                           placeholder="6-digit code" inputmode="numeric" pattern="[0-9]{6}"
+                <div class="field-group">
+                    <label class="field-label" for="code">Authenticator code</label>
+                    <input type="text" class="field-input field-input--code" name="code" id="code"
+                           placeholder="000000" inputmode="numeric" pattern="[0-9]{6}" maxlength="6"
                            required autocomplete="one-time-code">
                 </div>
-                <button type="submit" class="btn-publish login-btn">Sign in</button>
+                <button type="submit" class="btn-publish">Sign in</button>
             </form>
+            <p class="login-foot">No account? Ask an admin for an invite. · <a href="/">Back to Padmark</a></p>
         </div>
-    </div>
+    </main>
 
 </div>
 

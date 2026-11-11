@@ -32,7 +32,7 @@ func TestLinks(t *testing.T) {
 func (sess *uiSession) createdLink() (string, string) {
 	sess.t.Helper()
 	sess.must(sess.expect.Page(sess.page).ToHaveURL(regexpURL("/success?")))
-	sess.text(".success-title", "Link created")
+	sess.text(".success-title", "Your link is live")
 	current, err := url.Parse(sess.page.URL())
 	sess.must(err)
 
@@ -60,7 +60,7 @@ func (sess *uiSession) readLink(id string) linkMetadata {
 func (sess *uiSession) createTestLink() (string, string) {
 	sess.t.Helper()
 	sess.gotoPage("/")
-	sess.link("Links")
+	sess.link("Short link")
 	sess.expectPrivacyOptions("public")
 	sess.fill("#targetInput", "https://example.com/original?value=1")
 	sess.fill("#slugInput", "ui-link")
@@ -71,7 +71,7 @@ func (sess *uiSession) createTestLink() (string, string) {
 	sess.click("#burnLabel")
 	sess.expectLayout(".header", "#targetInput", "#slugInput", "#editCodeInput", "#privacySelect",
 		"#redirectSelect", "#ttlInput", "#burnLabel", "#submitBtn")
-	sess.screenshot("link-editor.png")
+	sess.screenshot("link-editor.png", "#previewHost")
 	sess.button("Create link")
 	id, code := sess.createdLink()
 	require.Equal(sess.t, "ui-link", id)
@@ -93,7 +93,7 @@ func testLinkCreateEditDelete(sess *uiSession) {
 	sess.value("#redirectSelect", "false")
 	sess.value("#expirySelect", "keep")
 	sess.must(sess.expect.Locator(sess.page.Locator("#burnCheck")).ToBeDisabled())
-	sess.screenshot("link-edit.png", "#expiryHint")
+	sess.screenshot("link-edit.png", "#expiryHint", "#previewHost")
 	sess.button("Save link")
 	sess.text("#linkError", "Edit code required")
 	sess.fill("#editCodeInput", code)
@@ -186,8 +186,8 @@ func testLinkPrivacyAndOwnership(sess *uiSession) {
 	sess.admin()
 	sess.gotoPage("/links")
 	sess.expectPrivacyOptions("public", "authenticated", "owner")
-	sess.selectOption("#privacySelect", "owner")
-	sess.text("#privacyHint", "Only you can follow")
+	sess.choosePrivacy("owner")
+	sess.must(sess.expect.Locator(sess.page.Locator("#privacy-owner")).ToBeChecked())
 	sess.fill("#targetInput", "https://example.com/private?secret=keep-private")
 	sess.selectOption("#redirectSelect", "true")
 	sess.button("Create link")

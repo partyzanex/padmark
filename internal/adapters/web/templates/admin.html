@@ -6,197 +6,156 @@
     <title>Padmark — Admin</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <link rel="stylesheet" href="/static/style.css?p={{styleVersion}}">
-    <style nonce="{{.Nonce}}">
-        .admin-wrap {
-            max-width: 720px;
-            margin: 48px auto;
-            padding: 0 24px;
-        }
-        .admin-title {
-            font-family: var(--font-display);
-            font-size: 1.3rem;
-            font-weight: 600;
-            color: var(--text-primary);
-            margin-bottom: 8px;
-        }
-        .admin-section {
-            background: var(--bg-surface);
-            border: 1px solid var(--border-subtle);
-            border-radius: var(--radius-lg);
-            padding: 24px;
-            margin-bottom: 24px;
-        }
-        .admin-section-title {
-            font-family: var(--font-mono);
-            font-size: 0.75rem;
-            font-weight: 600;
-            color: var(--text-muted);
-            text-transform: uppercase;
-            letter-spacing: 0.08em;
-            margin-bottom: 16px;
-        }
-        .user-row {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 16px;
-            padding: 10px 0;
-            border-bottom: 1px solid var(--border-subtle);
-            font-family: var(--font-mono);
-            font-size: 0.8rem;
-        }
-        .user-row:last-child { border-bottom: none; }
-        .user-name { color: var(--text-primary); }
-        .user-badge {
-            font-size: 0.65rem;
-            background: var(--accent-dim);
-            color: var(--accent);
-            border-radius: 4px;
-            padding: 2px 6px;
-            margin-left: 8px;
-        }
-        .user-meta { color: var(--text-muted); font-size: 0.7rem; }
-        .btn-revoke {
-            font-family: var(--font-mono);
-            font-size: 0.72rem;
-            color: var(--err-red);
-            background: none;
-            border: 1px solid var(--err-red);
-            border-radius: var(--radius-sm);
-            padding: 3px 10px;
-            cursor: pointer;
-        }
-        .btn-revoke:hover { background: var(--err-red); color: var(--bg-base); }
-        .invite-link {
-            font-family: var(--font-mono);
-            font-size: 0.72rem;
-            color: var(--accent);
-            word-break: break-all;
-            background: var(--bg-base);
-            border-radius: var(--radius-sm);
-            padding: 10px;
-            margin-top: 12px;
-        }
-        .msg-ok {
-            font-family: var(--font-mono);
-            font-size: 0.72rem;
-            color: var(--success-green, #4caf50);
-            margin-bottom: 12px;
-        }
-        .msg-err {
-            font-family: var(--font-mono);
-            font-size: 0.72rem;
-            color: var(--err-red);
-            margin-bottom: 12px;
-        }
-        .btn-row {
-            margin: 12px 0 0;
-        }
-    </style>
 </head>
 <body>
 <div class="wrapper">
 
-    {{template "header"}}
+    {{template "header" ""}}
 
-    <div class="admin-wrap">
-        <div class="admin-title">Admin panel</div>
-
-        <div class="admin-section">
-            {{template "signout" .}}
-        </div>
-
-        <div class="admin-section">
-            <div class="admin-section-title">Generate invite link</div>
-            {{if .InviteURL}}
-            <div class="msg-ok">Invite link generated — copy it now, it will not be shown again:</div>
-            <div class="copy-row">
-                <span class="copy-value" id="inviteLinkValue">{{.InviteURL}}</span>
-                <button type="button" class="copy-btn" id="inviteLinkCopyBtn">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-                    Copy
-                </button>
+    <main class="admin-wrap">
+        <nav class="admin-side" aria-label="Admin sections">
+            <h1 class="admin-title">Admin</h1>
+            <a href="#users" class="side-link">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="9" cy="8" r="4"/><path d="M2 21a7 7 0 0 1 14 0M16 4a4 4 0 0 1 0 8M22 21a7 7 0 0 0-4-6.3"/></svg>
+                Users<span class="side-count">{{len .Users}}</span>
+            </a>
+            <a href="#keys" class="side-link">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="15" r="4"/><path d="m11 12 9-9M17 6l3 3M15 8l2 2"/></svg>
+                API keys<span class="side-count">{{len .APITokens}}</span>
+            </a>
+            <a href="/change-password" class="side-link">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+                Change password
+            </a>
+            <div class="admin-account">
+                <span class="admin-account-name"><strong>Signed in</strong><span>Admin</span></span>
+                {{template "signout" .}}
             </div>
-            {{end}}
-            {{if .InviteError}}
-            <div class="msg-err">{{.InviteError}}</div>
-            {{end}}
-            <div class="btn-row">
-                <form method="POST" action="/admin/invite" class="admin-invite-form">
-                    <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
-                    <button type="submit" class="btn-publish">Generate invite</button>
-                </form>
-            </div>
-        </div>
+        </nav>
 
-        <div class="admin-section">
-            <div class="admin-section-title">Users</div>
-            {{if .RevokeError}}
-            <div class="msg-err">{{.RevokeError}}</div>
-            {{end}}
-            {{range .Users}}
-            <div class="user-row">
-                <div>
-                    <span class="user-name">{{.Username}}</span>
-                    {{if .IsAdmin}}<span class="user-badge">admin</span>{{end}}
-                    <div class="user-meta">{{.ID}}</div>
+        <div class="admin-main">
+            <section class="card admin-section" id="users" aria-labelledby="usersTitle">
+                <div class="admin-section-head">
+                    <div class="admin-section-text">
+                        <h2 class="admin-section-title" id="usersTitle">Users</h2>
+                        <p class="admin-section-desc">People who can sign in and read login-only notes.</p>
+                    </div>
+                    <form method="POST" action="/admin/invite" class="admin-invite-form">
+                        <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+                        <button type="submit" class="btn-primary">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+                            Generate invite
+                        </button>
+                    </form>
                 </div>
-                {{if not .IsAdmin}}
-                <form method="POST" action="/admin/users/{{.ID}}/revoke">
-                    <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
-                    <button type="submit" class="btn-revoke">Revoke</button>
-                </form>
-                {{end}}
-            </div>
-            {{else}}
-            <div class="admin-empty">No users.</div>
-            {{end}}
-        </div>
-
-        <div class="admin-section">
-            <div class="admin-section-title">API keys</div>
-            {{if .NewKey}}
-            <div class="msg-ok">API key created — copy it now, it will not be shown again:</div>
-            <div class="copy-row">
-                <span class="copy-value" id="apiKeyValue">{{.NewKey}}</span>
-                <button type="button" class="copy-btn" id="apiKeyCopyBtn">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-                    Copy
-                </button>
-            </div>
-            {{end}}
-            {{if .KeyError}}
-            <div class="msg-err">{{.KeyError}}</div>
-            {{end}}
-            {{range .APITokens}}
-            <div class="user-row">
-                <div>
-                    <span class="user-name">{{slice .ID 0 12}}…</span>
-                    <div class="user-meta">
-                        {{.Username}} · created {{.CreatedAt.Format "2006-01-02 15:04"}} ·
-                        {{if .ExpiresAt}}expires {{.ExpiresAt.Format "2006-01-02 15:04"}}{{else}}never expires{{end}} ·
-                        {{if .IssuedBy}}issued by key {{slice .IssuedBy 0 12}}…{{else}}issued from a browser session{{end}} ·
-                        {{if .LastUsedAt}}used {{.LastUsedAt.Format "2006-01-02 15:04"}}{{else}}never used{{end}}
+                {{if .InviteURL}}
+                <div class="admin-notice">
+                    <span class="admin-notice-title">One-time invite link — copy it now, it will not be shown again</span>
+                    <div class="copy-row">
+                        <div class="copy-field"><span class="copy-value" id="inviteLinkValue">{{.InviteURL}}</span></div>
+                        <button type="button" class="btn-ghost" id="inviteLinkCopyBtn">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
+                            Copy
+                        </button>
                     </div>
                 </div>
-                <form method="POST" action="/admin/api-keys/{{.ID}}/revoke">
-                    <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
-                    <button type="submit" class="btn-revoke">Revoke</button>
-                </form>
-            </div>
-            {{else}}
-            <div class="user-row">No API keys.</div>
-            {{end}}
-            <div class="btn-row">
-                <form method="POST" action="/admin/api-keys" class="admin-key-form">
-                    <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
-                    <label class="field-label" for="ttl_days">Lifetime, days (0 = never expires)</label>
-                    <input type="number" class="field-input" name="ttl_days" id="ttl_days" min="0" max="3650" value="0" required>
-                    <button type="submit" class="btn-publish">Create key</button>
-                </form>
-            </div>
+                {{end}}
+                {{if .InviteError}}<div class="msg-err" role="alert">{{.InviteError}}</div>{{end}}
+                {{if .RevokeError}}<div class="msg-err" role="alert">{{.RevokeError}}</div>{{end}}
+                <div class="table-wrap">
+                    {{if .Users}}
+                    <table class="admin-table">
+                        <thead><tr><th scope="col">User</th><th scope="col">ID</th><th scope="col">Role</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
+                        <tbody>
+                        {{range .Users}}
+                        <tr class="user-row">
+                            <td>
+                                <span class="user-cell">
+                                    <span class="avatar{{if .IsAdmin}} avatar--admin{{end}}" aria-hidden="true"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg></span>
+                                    <span class="user-name">{{.Username}}</span>
+                                </span>
+                            </td>
+                            <td class="cell-mono"><span class="user-meta">{{.ID}}</span></td>
+                            <td>{{if .IsAdmin}}<span class="role-badge role-badge--admin">Admin</span>{{else}}<span class="role-badge">User</span>{{end}}</td>
+                            <td class="cell-actions">
+                                {{if .IsAdmin}}<span class="cell-muted">—</span>{{else}}
+                                <form method="POST" action="/admin/users/{{.ID}}/revoke">
+                                    <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+                                    <button type="submit" class="btn-revoke">Revoke access</button>
+                                </form>
+                                {{end}}
+                            </td>
+                        </tr>
+                        {{end}}
+                        </tbody>
+                    </table>
+                    {{else}}
+                    <div class="admin-empty">No users.</div>
+                    {{end}}
+                </div>
+            </section>
+
+            <section class="card admin-section" id="keys" aria-labelledby="keysTitle">
+                <div class="admin-section-head">
+                    <div class="admin-section-text">
+                        <h2 class="admin-section-title" id="keysTitle">API keys</h2>
+                        <p class="admin-section-desc">Keys act as their owner. Revoke any you don't recognise.</p>
+                    </div>
+                    <form method="POST" action="/admin/api-keys" class="admin-key-form">
+                        <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+                        <div class="field-group">
+                            <label class="field-hint" for="ttl_days">Lifetime, days · 0 = never</label>
+                            <input type="number" class="field-input" name="ttl_days" id="ttl_days" min="0" max="3650" value="0" required>
+                        </div>
+                        <button type="submit" class="btn-ghost">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+                            Create key
+                        </button>
+                    </form>
+                </div>
+                {{if .NewKey}}
+                <div class="admin-notice admin-notice--warn">
+                    <span class="admin-notice-title">Copy the new key now — it's shown only once.</span>
+                    <div class="copy-row">
+                        <div class="copy-field"><span class="copy-value" id="apiKeyValue">{{.NewKey}}</span></div>
+                        <button type="button" class="btn-ghost" id="apiKeyCopyBtn">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
+                            Copy
+                        </button>
+                    </div>
+                </div>
+                {{end}}
+                {{if .KeyError}}<div class="msg-err" role="alert">{{.KeyError}}</div>{{end}}
+                <div class="table-wrap">
+                    {{if .APITokens}}
+                    <table class="admin-table">
+                        <thead><tr><th scope="col">Key</th><th scope="col">Owner</th><th scope="col">Created</th><th scope="col">Last used</th><th scope="col">Expires</th><th scope="col">Issued from</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
+                        <tbody>
+                        {{range .APITokens}}
+                        <tr class="key-row">
+                            <td class="key-prefix">{{slice .ID 0 12}}<span>…</span></td>
+                            <td>{{.Username}}</td>
+                            <td>{{.CreatedAt.Format "2006-01-02 15:04"}}</td>
+                            <td>{{if .LastUsedAt}}{{.LastUsedAt.Format "2006-01-02 15:04"}}{{else}}Never used{{end}}</td>
+                            <td>{{if .ExpiresAt}}{{.ExpiresAt.Format "2006-01-02 15:04"}}{{else}}Never{{end}}</td>
+                            <td class="cell-muted">{{if .IssuedBy}}Key {{slice .IssuedBy 0 12}}…{{else}}Browser session{{end}}</td>
+                            <td class="cell-actions">
+                                <form method="POST" action="/admin/api-keys/{{.ID}}/revoke">
+                                    <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+                                    <button type="submit" class="btn-revoke" aria-label="Revoke key {{slice .ID 0 12}}">Revoke</button>
+                                </form>
+                            </td>
+                        </tr>
+                        {{end}}
+                        </tbody>
+                    </table>
+                    {{else}}
+                    <div class="admin-empty">No API keys.</div>
+                    {{end}}
+                </div>
+            </section>
         </div>
-    </div>
+    </main>
 
 </div>
 

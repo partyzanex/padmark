@@ -29,10 +29,10 @@ func testPrivacyOptions(sess *uiSession) {
 	sess.admin()
 	sess.gotoPage("/")
 	sess.expectPrivacyOptions("public", "authenticated", "owner")
-	sess.selectOption("#privacySelect", "owner")
-	sess.text("#privacyHint", "Only you can view")
-	sess.selectOption("#privacySelect", "authenticated")
-	sess.text("#privacyHint", "Requires login to view")
+	sess.choosePrivacy("owner")
+	sess.must(sess.expect.Locator(sess.page.Locator("#privacy-owner")).ToBeChecked())
+	sess.choosePrivacy("authenticated")
+	sess.must(sess.expect.Locator(sess.page.Locator("#privacy-authenticated")).ToBeChecked())
 }
 
 func testSetup(sess *uiSession) {

@@ -7,36 +7,35 @@
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <link rel="stylesheet" href="/static/style.css?p={{styleVersion}}">
 </head>
-<body class="bg-error">
-<div class="wrapper wrapper--centered">
+<body>
+<div class="wrapper">
 
-    {{template "header"}}
+    {{template "header" ""}}
 
-    <div class="error-center">
-        <div class="error-content" data-type="{{.ErrorType}}">
-            <div class="error-code">{{.Code}}</div>
-            <div class="error-title">{{.Title}}</div>
-            <div class="error-desc">{{.Desc}}</div>
+    <main class="center-main">
+        <section class="card error-content" data-type="{{.ErrorType}}" aria-labelledby="errorTitle">
+            <span class="error-code">{{.Code}}</span>
+            <h1 class="error-title" id="errorTitle">{{.Title}}</h1>
+            <p class="error-desc">{{.Desc}}</p>
 
             <div class="error-actions">
                 <a href="/" class="btn-primary">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
                     Create new paste
                 </a>
-                <a href="/" class="btn-ghost">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
-                    Home
-                </a>
+                <a href="/" class="btn-ghost">Home</a>
             </div>
 
             {{if .Detail}}
             <div class="error-detail">
-                <div class="error-detail-label">Details</div>
-                <div class="error-detail-text">{{.Detail}}</div>
+                <span class="lbl">Details</span>
+                <span class="error-detail-text">{{.Detail}}</span>
             </div>
             {{end}}
-        </div>
-    </div>
+        </section>
+    </main>
+
+    {{template "footer"}}
 
 </div>
 

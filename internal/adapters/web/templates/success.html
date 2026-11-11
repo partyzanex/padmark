@@ -7,89 +7,112 @@
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <link rel="stylesheet" href="/static/style.css?p={{styleVersion}}">
 </head>
-<body class="bg-success">
+<body>
 <div class="wrapper">
 
-    {{template "header"}}
+    {{template "header" ""}}
 
-    <div class="success-card">
-        <div class="success-banner">
-            <div class="success-icon">
-                <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+    <main class="center-main">
+        <section class="card success-card" aria-labelledby="successTitle">
+            <div class="success-head">
+                <span class="success-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>
+                </span>
+                <h1 class="success-title" id="successTitle">{{if .IsLink}}Your link is live{{else}}Your note is live{{end}}</h1>
+                <p class="success-subtitle">{{if eq .Privacy "owner"}}Only you can open it.{{else if eq .Privacy "authenticated"}}Signed-in users with the link can open it.{{else}}Anyone with the link can open it.{{end}}</p>
             </div>
-            <div>
-                <div class="success-title">{{if .IsLink}}Link{{else}}Paste{{end}} created</div>
-                <div class="success-subtitle">just now · {{.ExpiresLabel}}</div>
-            </div>
-        </div>
 
-        <div class="card-body">
-            <div class="field-block">
-                <span class="field-block-label">View link</span>
+            <div class="share-block">
+                <span class="lbl" id="shareLabel">{{if .IsLink}}Short link{{else}}Share link{{end}}</span>
                 <div class="copy-row">
-                    <a href="{{.URL}}" class="copy-value">{{.URL}}</a>
-                    <button class="copy-btn" id="copyLinkBtn" data-url="{{.URL}}">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-                        Copy
+                    <div class="copy-field">
+                        <a href="{{.URL}}" class="copy-value" aria-describedby="shareLabel">{{.URL}}</a>
+                    </div>
+                    <button type="button" class="btn-primary copy-btn" id="copyLinkBtn" data-url="{{.URL}}">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
+                        Copy link
                     </button>
+                </div>
+                <div class="action-row">
+                    <a href="{{.URL}}" class="btn-ghost">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>
+                        {{if .IsLink}}Open link{{else}}Open note{{end}}
+                    </a>
+                    {{if .IsLink}}
+                    <a href="/links/{{.ID}}/edit" class="btn-ghost">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></svg>
+                        Edit link
+                    </a>
+                    {{else}}
+                    <a href="{{.URL}}?raw=1" class="btn-ghost">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="m10 13-2 2 2 2M14 13l2 2-2 2"/></svg>
+                        Raw
+                    </a>
+                    {{end}}
                 </div>
             </div>
 
-            <div class="card-divider"></div>
-
-            <div class="field-block" id="editCodeBlock">
-                <span class="field-block-label">Edit code</span>
-                <div class="copy-row secret-row">
-                    <span class="copy-value" id="editCodeValue"></span>
-                    <button class="copy-btn" id="editCodeCopyBtn">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            <div class="secret-block" id="editCodeBlock">
+                <div class="secret-head">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="15" r="4"/><path d="m11 12 9-9M17 6l3 3M15 8l2 2"/></svg>
+                    <h2>Edit code</h2>
+                </div>
+                <div class="secret-row">
+                    <code class="secret-value" id="editCodeValue"></code>
+                    <button type="button" class="btn-ghost secret-copy" id="editCodeCopyBtn">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
                         Copy
                     </button>
                 </div>
+                <p class="secret-note">Save it now — you'll need it to edit or delete this {{if .IsLink}}link{{else}}note{{end}}. It cannot be recovered.</p>
             </div>
 
-            <div class="warning-block">
-                <span class="warning-icon">⚠</span>
-                <span class="warning-text">Save this code — you need it to edit or delete the {{if .IsLink}}link{{else}}paste{{end}}. It cannot be recovered.</span>
-            </div>
+            <ul class="chip-list" aria-label="{{if .IsLink}}Link{{else}}Note{{end}} settings">
+                <li class="chip">
+                    {{if eq .Privacy "owner"}}
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>Owner only
+                    {{else if eq .Privacy "authenticated"}}
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>Requires login
+                    {{else}}
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>Public
+                    {{end}}
+                </li>
+                <li class="chip">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+                    <span class="chip-text">{{.ExpiresLabel}}</span>
+                </li>
+                {{if .BurnAfterReading}}
+                <li class="chip chip--warn">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M12 22c4 0 7-2.7 7-7 0-4-3-6.5-4.5-9.5C13 7 12.5 9 11 10 10.5 8 9.5 6.5 8 5c0 3-3 5.5-3 10 0 4.3 3 7 7 7z"/></svg>
+                    {{if .IsLink}}Burns after the first click{{else}}Burns after reading{{end}}
+                </li>
+                {{end}}
+            </ul>
 
-            {{if .BurnAfterReading}}
-            <div class="card-divider"></div>
-            <div class="warning-block">
-                <span class="warning-icon">🔥</span>
-                <span class="warning-text">{{if .IsLink}}Burn after click — this link will be permanently deleted after the first transition.{{else}}Burn after reading — this note will be permanently deleted once it is revealed.{{end}}</span>
+            <div class="card-links">
+                <a href="/">Write another note</a>
+                <a href="/links">Shorten a link</a>
             </div>
-            {{end}}
-        </div>
+        </section>
+    </main>
 
-        <div class="actions-row">
-            <a href="{{.URL}}" class="btn-primary">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-                {{if .IsLink}}Open link{{else}}Go to paste{{end}}
-            </a>
-            <a href="{{if .IsLink}}/links{{else}}/{{end}}" class="btn-ghost">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                Create another
-            </a>
-            {{if .IsLink}}<a href="/links/{{.ID}}/edit" class="btn-ghost">Edit link</a>{{end}}
-        </div>
-    </div>
+    {{template "footer"}}
 
 </div>
 
 <script nonce="{{.Nonce}}">
     {{template "theme-js"}}
 
-    function flashCopied(btn, orig) {
+    function flashCopied(btn, orig, label) {
         btn.classList.add('copied');
-        btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> Copied`;
+        btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>` + label;
         setTimeout(() => { btn.innerHTML = orig; btn.classList.remove('copied'); }, 2000);
     }
 
-    function copyText(btn, text) {
+    function copyText(btn, text, label) {
         const orig = btn.innerHTML;
         if (navigator.clipboard) {
-            navigator.clipboard.writeText(text).then(() => flashCopied(btn, orig));
+            navigator.clipboard.writeText(text).then(() => flashCopied(btn, orig, label));
         } else {
             const el = document.createElement('textarea');
             el.value = text;
@@ -97,14 +120,14 @@
             el.select();
             document.execCommand('copy');
             document.body.removeChild(el);
-            flashCopied(btn, orig);
+            flashCopied(btn, orig, label);
         }
     }
 
     (function () {
         const copyLinkBtn = document.getElementById('copyLinkBtn');
         copyLinkBtn.addEventListener('click', function () {
-            copyText(this, this.dataset.url);
+            copyText(this, this.dataset.url, ' Copied');
         });
 
         const id = new URLSearchParams(location.search).get('id');
@@ -114,11 +137,11 @@
             sessionStorage.removeItem(key);
             document.getElementById('editCodeValue').textContent = code;
             document.getElementById('editCodeCopyBtn').addEventListener('click', function () {
-                copyText(this, code);
+                copyText(this, code, ' Copied');
             });
         } else {
             // edit code not available (e.g. page was refreshed) — hide the block
-            document.getElementById('editCodeBlock').style.display = 'none';
+            document.getElementById('editCodeBlock').hidden = true;
         }
     })();
 </script>

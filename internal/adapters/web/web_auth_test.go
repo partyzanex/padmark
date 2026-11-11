@@ -800,7 +800,7 @@ func (s *AuthHandlerSuite) TestAdminPage_Admin_ListsAPIKeys() {
 
 	s.Equal(http.StatusOK, rec.Code)
 	s.Contains(rec.Body.String(), "abcdef012345", "token hash prefix (first 12 chars) is shown")
-	s.Contains(rec.Body.String(), "never used", "unused token renders 'never used'")
+	s.Contains(rec.Body.String(), "Never used", "unused token renders 'Never used'")
 }
 
 // ── Admin invite ──.

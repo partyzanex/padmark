@@ -334,8 +334,8 @@ func (s *HandlerSuite) TestEditPage_OK() {
 	s.Contains(body, "# hello")
 	s.Contains(body, "Save")
 	// Without accounts the stored level stays selectable but says it is not enforced (review R2).
-	s.Contains(body, `value="authenticated" data-hint="Not enforced: accounts are off, `+
-		`anyone with the link can view" selected`)
+	s.Contains(body, `value="authenticated" checked>`)
+	s.Contains(body, "Not enforced: accounts are off, anyone with the link can view")
 }
 
 // TestEditPage_BurnNote_ContentWithheld: the editor never burns, so it must not pre-fill a
@@ -405,6 +405,23 @@ func (s *HandlerSuite) TestSuccessPage_OK() {
 	s.Contains(w.Body.String(), "never expires")
 }
 
+func (s *HandlerSuite) TestSuccessPage_Privacy() {
+	for query, expected := range map[string]string{
+		"&privacy=owner":         "Only you can open it.",
+		"&privacy=authenticated": "Signed-in users with the link can open it.",
+		"&privacy=bogus":         "Anyone with the link can open it.",
+		"":                       "Anyone with the link can open it.",
+	} {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodGet, "/success?id=abc"+query, nil)
+
+		s.router.ServeHTTP(w, r)
+
+		s.Equal(http.StatusOK, w.Code, query)
+		s.Contains(w.Body.String(), expected, query)
+	}
+}
+
 func (s *HandlerSuite) TestSuccessPage_NoID() {
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/success", nil)
@@ -425,7 +442,7 @@ func (s *HandlerSuite) TestSuccessPage_WithBurnAndExpires() {
 	s.Equal(http.StatusOK, w.Code)
 
 	body := w.Body.String()
-	s.Contains(body, "Burn after reading")
+	s.Contains(body, "Burns after reading")
 	s.Contains(body, "expires Jun 15, 2026")
 	// edit code is stored in sessionStorage before redirect and read by client-side JS;
 	// it is never rendered into the HTML by the server.
@@ -2460,7 +2477,7 @@ func (s *HandlerSuite) TestGetNote_AuthInstance_Unauthenticated_ShowsEditButtons
 
 	body := w.Body.String()
 	s.Contains(body, `href="/edit/`)
-	s.Contains(body, ">New<")
+	s.Contains(body, ">New note<")
 }
 
 // ── Login ──.
@@ -2472,7 +2489,7 @@ func (s *HandlerSuite) TestLoginPage() {
 	s.router.ServeHTTP(w, r)
 
 	s.Equal(http.StatusOK, w.Code)
-	s.Contains(w.Body.String(), "Sign in with TOTP")
+	s.Contains(w.Body.String(), `<h1 class="login-title">Sign in</h1>`)
 }
 
 func (s *HandlerSuite) TestLoginPage_Error() {

@@ -144,7 +144,8 @@ Dependencies point inward: adapters and infrastructure depend on usecases and do
   `tests/ui/testdata/screenshots/`.
 - Preserve the established design unless the task requests a visual change. Reuse its CSS
   variables, spacing, classes and existing colors instead of introducing another style system.
-- Fonts are self-hosted Source Serif 4 (display/prose) and JetBrains Mono (monospace UI/code).
+- Fonts are self-hosted Onest (interface), Source Serif 4 (display/prose) and JetBrains Mono
+  (code, slugs, labels).
   Themes are `light`, `dim` (default) and `dark`, selected through `[data-theme]`.
 - Use `html/template`, keep CSP-compatible script/style loading, and check affected forms and
   desktop/mobile screenshots with `make test-ui` after a frontend change.
