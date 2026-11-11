@@ -48,6 +48,8 @@ func TestEditor(t *testing.T) {
 		},
 		scenario{name: "EmptyContent", run: testEmptyContent, accounts: false, allowedStatuses: nil},
 		scenario{name: "PublishAndView", run: testPublishAndView, accounts: false, allowedStatuses: nil},
+		scenario{name: "ContentsSidebar", run: testContentsSidebar, accounts: false, allowedStatuses: nil},
+		scenario{name: "NoContentsSidebar", run: testNoContentsSidebar, accounts: false, allowedStatuses: nil},
 		scenario{name: "EditAndSave", run: testEditAndSave, accounts: false, allowedStatuses: nil},
 		scenario{name: "PreserveCustomBurnTTL", run: testPreserveCustomBurnTTL, accounts: false, allowedStatuses: nil},
 		scenario{name: "OneTimeEditCode", run: testOneTimeEditCode, accounts: false, allowedStatuses: nil},
@@ -313,6 +315,129 @@ func testNotFound(sess *uiSession) {
 	sess.screenshot("not-found.png")
 	sess.link("Create new paste")
 	sess.visible("#editor")
+}
+
+// contentsNote has h2 and h3 headings and enough text to scroll, so a sidebar jump moves the page.
+func contentsNote() string {
+	filler := strings.Repeat("A paragraph that makes the section long enough to scroll.\n\n", 12)
+
+	return "# Guide\n\nIntro.\n\n## First part\n\n" + filler + "### Detail\n\n" + filler +
+		"## Second part\n\n" + filler
+}
+
+// publishContentsNote publishes contentsNote with the sidebar switch set as requested. It returns
+// the edit code from the success page and opens the note.
+func (sess *uiSession) publishContentsNote(showContents bool) string {
+	sess.t.Helper()
+	sess.gotoPage("/")
+	sess.fill("#titleInput", "Guide")
+	sess.fill("#editor", contentsNote())
+	sess.must(sess.expect.Locator(sess.page.Locator("#contentsCheck")).Not().ToBeChecked())
+
+	if showContents {
+		sess.click("#contentsLabel")
+		sess.must(sess.expect.Locator(sess.page.Locator("#contentsCheck")).ToBeChecked())
+	}
+
+	sess.button("Publish note")
+	sess.must(sess.expect.Page(sess.page).ToHaveURL(regexpURL("/success?")))
+	sess.must(sess.expect.Locator(sess.page.Locator("#editCodeValue")).ToHaveText(nonempty))
+	code, err := sess.page.Locator("#editCodeValue").InnerText()
+	sess.must(err)
+	sess.link("Open note")
+	sess.must(sess.expect.Locator(sess.role(playwright.AriaRoleHeading, "Second part")).ToBeAttached())
+
+	return strings.TrimSpace(code)
+}
+
+// putBodies records the JSON body of each PUT request, so a test can check which fields the
+// editor sent.
+func (sess *uiSession) putBodies() *safeLog {
+	var bodies safeLog
+
+	sess.page.OnRequest(func(request playwright.Request) {
+		if request.Method() != http.MethodPut {
+			return
+		}
+
+		body, err := request.PostData()
+		if err == nil {
+			_, _ = fmt.Fprintln(&bodies, body)
+		}
+	})
+
+	return &bodies
+}
+
+func testContentsSidebar(sess *uiSession) {
+	code := sess.publishContentsNote(true)
+
+	nav := sess.role(playwright.AriaRoleNavigation, "On this page")
+	sess.must(sess.expect.Locator(nav).ToBeVisible())
+	links := sess.page.Locator(".note-toc-link")
+	sess.must(sess.expect.Locator(links).ToHaveText([]string{"First part", "Detail", "Second part"}))
+	sess.must(sess.expect.Locator(sess.page.Locator(".note-toc-item--sub")).ToHaveText("Detail"))
+	sess.must(sess.expect.Locator(links.First()).ToHaveAttribute("aria-current", "location"))
+	sess.expectLayout(".header", ".note-toc", ".article-card", ".site-footer")
+	sess.expectContentsPlacement()
+	sess.screenshot("note-toc.png")
+
+	sess.link("Second part")
+	sess.must(sess.expect.Page(sess.page).ToHaveURL(regexp.MustCompile(`#second-part$`)))
+	sess.must(sess.expect.Locator(sess.role(playwright.AriaRoleHeading, "Second part")).ToBeInViewport())
+	sess.must(sess.expect.Locator(links.Last()).ToHaveAttribute("aria-current", "location"))
+
+	// Edit mode pre-sets the stored value and sends it only after a change.
+	bodies := sess.putBodies()
+	sess.link("Edit")
+	sess.must(sess.expect.Locator(sess.page.Locator("#contentsCheck")).ToBeChecked())
+	sess.fill("#editCodeInput", code)
+	sess.button("Save")
+	sess.must(sess.expect.Page(sess.page).Not().ToHaveURL(regexpURL("/edit/")))
+	sess.must(sess.expect.Locator(nav).ToBeVisible())
+	require.NotContains(sess.t, bodies.String(), "show_contents")
+
+	sess.link("Edit")
+	sess.click("#contentsLabel")
+	sess.must(sess.expect.Locator(sess.page.Locator("#contentsCheck")).Not().ToBeChecked())
+	sess.fill("#editCodeInput", code)
+	sess.button("Save")
+	sess.must(sess.expect.Page(sess.page).Not().ToHaveURL(regexpURL("/edit/")))
+	sess.must(sess.expect.Locator(sess.role(playwright.AriaRoleHeading, "Second part")).ToBeAttached())
+	sess.must(sess.expect.Locator(sess.page.Locator(".note-toc")).ToHaveCount(0))
+	require.Contains(sess.t, bodies.String(), `"show_contents":false`)
+}
+
+// expectContentsPlacement checks the sidebar position: beside the article on desktop and above
+// it on a phone.
+func (sess *uiSession) expectContentsPlacement() {
+	sess.t.Helper()
+
+	navBox, err := sess.page.Locator(".note-toc").BoundingBox()
+	sess.must(err)
+	articleBox, err := sess.page.Locator(".article-card").BoundingBox()
+	sess.must(err)
+
+	if sess.screen.name == "mobile" {
+		require.LessOrEqual(sess.t, navBox.Y+navBox.Height, articleBox.Y, "the sidebar is above the article")
+
+		return
+	}
+
+	require.LessOrEqual(sess.t, navBox.X+navBox.Width, articleBox.X, "the sidebar is beside the article")
+}
+
+func testNoContentsSidebar(sess *uiSession) {
+	sess.publishContentsNote(false)
+	sess.must(sess.expect.Locator(sess.role(playwright.AriaRoleHeading, "First part")).ToBeVisible())
+	sess.must(sess.expect.Locator(sess.page.Locator(".note-toc")).ToHaveCount(0))
+	sess.must(sess.expect.Locator(sess.page.Locator(".note-layout--toc")).ToHaveCount(0))
+
+	articleBox, err := sess.page.Locator(".article-card").BoundingBox()
+	sess.must(err)
+	layoutBox, err := sess.page.Locator(".note-layout").BoundingBox()
+	sess.must(err)
+	require.InDelta(sess.t, layoutBox.Width, articleBox.Width, 1, "the article takes the full width")
 }
 
 func testEditorFillsHeight(sess *uiSession) {

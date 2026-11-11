@@ -82,6 +82,7 @@ func (h *OgenHandler) CreateNote(
 		Views:            0,
 		BurnTTL:          burnTTL,
 		BurnAfterReading: burnAfterReading,
+		ShowContents:     optBoolPtr(req.ShowContents),
 	})
 	if err != nil {
 		return mapCreateError(err, h.log), nil
@@ -188,6 +189,7 @@ func noteUpdatePayload(req *ogenapi.UpdateNoteRequest) (*domain.Note, error) {
 		Views:            0,
 		BurnTTL:          burnTTL,
 		BurnAfterReading: burnAfterReading,
+		ShowContents:     optBoolPtr(req.ShowContents),
 		// null removes the hard expiry only when burn is off. With burn_after_reading the spec makes
 		// omitted, null and 0 equivalent (immediate burn), so null must not also drop an existing
 		// hard expiry that omitted/0 keep.
@@ -494,6 +496,16 @@ func optUpdateContentTypePtr(o ogenapi.OptUpdateNoteRequestContentType) *domain.
 	ct := domain.ContentType(o.Value)
 
 	return &ct
+}
+
+// optBoolPtr converts an optional request flag to *bool. Nil means "not set": manager.Create
+// stores false, and storage.Update keeps the stored value through COALESCE.
+func optBoolPtr(o ogenapi.OptBool) *bool {
+	if !o.IsSet() {
+		return nil
+	}
+
+	return new(o.Value)
 }
 
 // Healthz implements ogenapi.Handler.

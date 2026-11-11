@@ -180,6 +180,11 @@ func (m *Manager) Create(ctx context.Context, note *domain.Note) (*domain.Note, 
 		note.ContentType = &ct
 	}
 
+	// An old client does not send the option, so a new note keeps the full-width view.
+	if note.ShowContents == nil {
+		note.ShowContents = new(false)
+	}
+
 	err := validateForCreate(note)
 	if err != nil {
 		return nil, fmt.Errorf("validate for create: %w", err)
@@ -328,23 +333,38 @@ func pinImmutableFields(note, existing *domain.Note) error {
 	return nil
 }
 
-// withRequested returns a copy of note to write with the privacy and content type that the caller
-// sent; a nil value keeps the stored column.
-func withRequested(
-	note *domain.Note, privacy *domain.Privacy, contentType *domain.ContentType,
-) *domain.Note {
+// requestedFields holds the optional update fields that the caller sent. A nil value keeps the
+// stored column, because storage writes it through COALESCE.
+type requestedFields struct {
+	privacy      *domain.Privacy
+	contentType  *domain.ContentType
+	showContents *bool
+}
+
+// requestedOf records the optional fields of note before Update fills them from storage.
+func requestedOf(note *domain.Note) requestedFields {
+	return requestedFields{privacy: note.Privacy, contentType: note.ContentType, showContents: note.ShowContents}
+}
+
+// withRequested returns a copy of note to write with the optional fields that the caller sent.
+func withRequested(note *domain.Note, requested requestedFields) *domain.Note {
 	write := *note
-	write.Privacy = privacy
-	write.ContentType = contentType
+	write.Privacy = requested.privacy
+	write.ContentType = requested.contentType
+	write.ShowContents = requested.showContents
 
 	return &write
 }
 
-// backfillPersistedState copies the storage-persisted privacy and view count into the working
-// note before the update is written.
+// backfillPersistedState copies the storage-persisted privacy, contents-sidebar option and view
+// count into the working note before the update is written.
 func backfillPersistedState(note, existing *domain.Note) {
 	if note.Privacy == nil {
 		note.Privacy = existing.Privacy
+	}
+
+	if note.ShowContents == nil {
+		note.ShowContents = existing.ShowContents
 	}
 
 	note.Views = existing.Views
@@ -399,10 +419,10 @@ func (m *Manager) Update(
 		return nil, domain.ErrInvalidEditCode
 	}
 
-	// Omitted privacy and content type go to storage as nil, so COALESCE keeps the stored values.
-	// Writing the values of the existing snapshot back would undo a concurrent change, such as
-	// another update that has just made the note owner-only.
-	requestedPrivacy, requestedContentType := note.Privacy, note.ContentType
+	// Omitted privacy, content type and contents-sidebar option go to storage as nil, so COALESCE
+	// keeps the stored values. Writing the values of the existing snapshot back would undo a
+	// concurrent change, such as another update that has just made the note owner-only.
+	requested := requestedOf(note)
 
 	note.ID = id
 	note.CreatedAt = existing.CreatedAt
@@ -442,7 +462,7 @@ func (m *Manager) Update(
 		return nil, fmt.Errorf("encrypt content: %w", err)
 	}
 
-	err = m.storage.Update(ctx, dbID, withRequested(note, requestedPrivacy, requestedContentType))
+	err = m.storage.Update(ctx, dbID, withRequested(note, requested))
 	if err != nil {
 		return nil, fmt.Errorf("update note: %w", err)
 	}

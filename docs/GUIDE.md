@@ -103,6 +103,9 @@ The full models are in [note.go](../internal/domain/note.go) and
   has the same owner identity; an administrator is not automatically another user's owner.
 - `ValidateOwnership` rejects owner-only privacy without an owner.
 - `ClearExpiry` is an update instruction, not a persisted column.
+- `ShowContents` (the "On this page" sidebar) is a pointer: nil means not set. Create stores
+  false; Update sends nil to storage, which keeps the stored column through `COALESCE`, as for
+  `Privacy` and `ContentType`.
 - Note content and title limits are shared with the OpenAPI contract.
 
 Sentinel errors live in [errors.go](../internal/domain/errors.go), for example:

@@ -17,8 +17,11 @@ const (
 	FlagPrivacy           = "privacy"
 	// FlagPrivate is the deprecated v0.1.6 flag: true means --privacy authenticated, false means
 	// --privacy public. It is kept so that scripts written for v0.1.6 keep working.
-	FlagPrivate  = "private"
-	FlagBurn     = "burn"
+	FlagPrivate = "private"
+	FlagBurn    = "burn"
+	// FlagContents turns on the "On this page" sidebar of the note view. On edit, cmd.IsSet
+	// tells "not passed" (keep the stored value) from an explicit --contents=false.
+	FlagContents = "contents"
 	FlagTTL      = "ttl"
 	FlagEditCode = "edit-code"
 	FlagRaw      = "raw"

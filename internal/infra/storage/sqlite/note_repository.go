@@ -30,6 +30,7 @@ type note struct {
 	Views            int        `bun:"views"`
 	BurnTTL          int64      `bun:"burn_ttl"`
 	BurnAfterReading bool       `bun:"burn_after_reading"`
+	ShowContents     bool       `bun:"show_contents,notnull,default:false"`
 }
 
 // NoteRepository implements notes.Storage using SQLite.
@@ -58,6 +59,7 @@ func toDomain(dbNote *note) *domain.Note {
 		BurnAfterReading: dbNote.BurnAfterReading,
 		Privacy:          privacyPtr(dbNote.Privacy),
 		OwnerID:          dbNote.OwnerID,
+		ShowContents:     new(dbNote.ShowContents),
 	}
 }
 
@@ -106,6 +108,7 @@ func (r *NoteRepository) Create(ctx context.Context, domNote *domain.Note) error
 		Privacy:          privacyVal(domNote.Privacy),
 		OwnerID:          domNote.OwnerID,
 		Views:            domNote.Views,
+		ShowContents:     domNote.ContentsSidebar(),
 	}
 
 	_, err := r.db.NewInsert().Model(dbNote).Exec(ctx)
@@ -201,7 +204,7 @@ func (r *NoteRepository) SetBurnExpiry(
 	return toDomain(&dbNote), nil
 }
 
-// Update modifies an existing note.
+// Update modifies an existing note. A nil content type, privacy or ShowContents keeps the stored value.
 func (r *NoteRepository) Update(ctx context.Context, id string, domNote *domain.Note) error {
 	dbNote := &note{
 		BaseModel:        bun.BaseModel{},
@@ -218,6 +221,7 @@ func (r *NoteRepository) Update(ctx context.Context, id string, domNote *domain.
 		EditCode:         domNote.EditCode,
 		Privacy:          privacyVal(domNote.Privacy),
 		Views:            domNote.Views,
+		ShowContents:     domNote.ContentsSidebar(),
 	}
 
 	var ctVal *string
@@ -239,6 +243,7 @@ func (r *NoteRepository) Update(ctx context.Context, id string, domNote *domain.
 		Column("title", "content", "expires_at", "burn_ttl", "burn_after_reading", "updated_at").
 		Set("content_type = COALESCE(?, content_type)", ctVal).
 		Set("privacy = COALESCE(?, privacy)", pVal).
+		Set("show_contents = COALESCE(?, show_contents)", domNote.ShowContents).
 		Where("id = ?", id).
 		Exec(ctx)
 	if err != nil {

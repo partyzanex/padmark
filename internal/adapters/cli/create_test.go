@@ -149,3 +149,14 @@ func TestValidatePrivacyFlags_Conflict(t *testing.T) {
 		assert.ErrorIs(t, err, errPrivateConflict)
 	}
 }
+
+func TestBuildCreateReq_Contents(t *testing.T) {
+	t.Parallel()
+
+	req := buildCreateReqFor(t)
+	assert.False(t, req.ShowContents.IsSet(), "without --contents the server default applies")
+
+	req = buildCreateReqFor(t, "--contents")
+	require.True(t, req.ShowContents.IsSet())
+	assert.True(t, req.ShowContents.Value)
+}

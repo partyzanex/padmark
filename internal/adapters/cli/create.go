@@ -62,6 +62,10 @@ func createCommand() *urcli.Command {
 				flag.Name = FlagBurn
 				flag.Usage = "Burn after reading: delete on first read (add --ttl for a grace period)"
 			}),
+			clifactory.BoolFlag(func(flag *urcli.BoolFlag) {
+				flag.Name = FlagContents
+				flag.Usage = "Show an \"On this page\" sidebar with links to the note headings"
+			}),
 			clifactory.Int64Flag(func(flag *urcli.Int64Flag) {
 				flag.Name = FlagTTL
 				flag.Usage = "Lifetime in seconds from creation; with --burn, " +
@@ -202,6 +206,10 @@ func buildCreateReq(cmd *urcli.Command, content string) *padmark.CreateNoteReque
 
 	if cmd.Bool(FlagBurn) {
 		req.BurnAfterReading = padmark.NewOptBool(true)
+	}
+
+	if cmd.Bool(FlagContents) {
+		req.ShowContents = padmark.NewOptBool(true)
 	}
 
 	if ttl := cmd.Int64(FlagTTL); ttl > 0 {

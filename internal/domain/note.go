@@ -69,7 +69,10 @@ type Note struct {
 	// OwnerID is the ID of the user who created the note while authenticated (session or API
 	// token); nil for anonymous notes. Lets Update/Delete bypass EditCode for the exact creator
 	// — see notes.Manager.Update/Delete.
-	OwnerID          *uuid.UUID
+	OwnerID *uuid.UUID
+	// ShowContents turns on the "On this page" sidebar in the note view. Nil means not set:
+	// Create stores false, and Update keeps the stored value.
+	ShowContents     *bool
 	ID               string
 	Title            string
 	Content          string
@@ -149,6 +152,11 @@ func (n *Note) EffectivePrivacy() Privacy {
 	}
 
 	return *n.Privacy
+}
+
+// ContentsSidebar returns n.ShowContents, with false when the value is not set.
+func (n *Note) ContentsSidebar() bool {
+	return n.ShowContents != nil && *n.ShowContents
 }
 
 // VisibleTo reports whether a caller may read n given its privacy level: PrivacyOwner requires

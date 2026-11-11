@@ -12,7 +12,7 @@
 
     {{template "header" ""}}
 
-    <main class="note-layout">
+    <main class="note-layout{{if and .ShowContents (not .NeedsConfirmation)}} note-layout--toc{{end}}">
     {{if .NeedsConfirmation}}
     <section class="card confirm-card" aria-labelledby="confirmTitle">
         <span class="confirm-icon" aria-hidden="true">
@@ -42,6 +42,12 @@
         </div>
     </section>
     {{else}}
+    {{if .ShowContents}}
+    <nav class="note-toc" id="noteToc" aria-label="On this page" hidden>
+        <span class="lbl note-toc-title" id="noteTocTitle">On this page</span>
+        <ol class="note-toc-list" id="noteTocList" aria-labelledby="noteTocTitle"></ol>
+    </nav>
+    {{end}}
     <article class="card article-card">
         <header class="article-header">
             <div class="article-title-row">
@@ -231,23 +237,91 @@
 
     // Heading IDs and user-written ids live in the "user-content-" namespace (DOM-clobbering
     // protection), so in-document links like [x](#my-heading) are resolved against that prefix.
+    const userContentPrefix = 'user-content-';
+
+    function jump(name, push) {
+        let id;
+        try { id = decodeURIComponent(name); } catch (e) { return false; }
+        const target = document.getElementById(userContentPrefix + id);
+        if (!target) return false;
+        target.scrollIntoView();
+        if (push) history.pushState(null, '', '#' + name);
+        return true;
+    }
+
+    {{if .ShowContents}}
+    // The "On this page" sidebar lists the h2 and h3 headings of the rendered note. The column
+    // stays hidden when the note has no such headings, so the article keeps its full width.
     (function () {
-        function jump(name, push) {
-            let id;
-            try { id = decodeURIComponent(name); } catch (e) { return false; }
-            const target = document.getElementById('user-content-' + id);
-            if (!target) return false;
-            target.scrollIntoView();
-            if (push) history.pushState(null, '', '#' + name);
-            return true;
-        }
-        document.querySelectorAll('.markdown-body a[href^="#"]').forEach(function (link) {
-            link.addEventListener('click', function (ev) {
-                if (jump(link.getAttribute('href').slice(1), true)) ev.preventDefault();
-            });
+        const nav = document.getElementById('noteToc');
+        const list = document.getElementById('noteTocList');
+        const selector = '.prose.markdown-body h2[id^="' + userContentPrefix + '"], ' +
+            '.prose.markdown-body h3[id^="' + userContentPrefix + '"]';
+        const headings = Array.prototype.filter.call(document.querySelectorAll(selector), function (h) {
+            return !h.hidden && h.textContent.trim() !== '';
         });
-        if (location.hash.length > 1) jump(location.hash.slice(1), false);
+        if (!nav || !list || headings.length === 0) return;
+
+        const links = new Map();
+        let active = null;
+
+        function setActive(link) {
+            if (active === link) return;
+            if (active) {
+                active.classList.remove('active');
+                active.removeAttribute('aria-current');
+            }
+            active = link;
+            if (link) {
+                link.classList.add('active');
+                link.setAttribute('aria-current', 'location');
+            }
+        }
+
+        headings.forEach(function (heading) {
+            const item = document.createElement('li');
+            item.className = heading.tagName === 'H3' ? 'note-toc-item note-toc-item--sub' : 'note-toc-item';
+            const link = document.createElement('a');
+            const name = heading.id.slice(userContentPrefix.length);
+            link.className = 'note-toc-link';
+            link.href = '#' + name;
+            link.textContent = heading.textContent.trim();
+            link.addEventListener('click', function (ev) {
+                if (jump(name, true)) {
+                    ev.preventDefault();
+                    setActive(link);
+                }
+            });
+            item.appendChild(link);
+            list.appendChild(item);
+            links.set(heading, link);
+        });
+        nav.hidden = false;
+
+        // The current section is the last heading above the top 40% of the viewport.
+        function update() {
+            const line = window.innerHeight * 0.4;
+            let current = headings[0];
+            headings.forEach(function (heading) {
+                if (heading.getBoundingClientRect().top <= line) current = heading;
+            });
+            setActive(links.get(current));
+        }
+
+        update();
+        if ('IntersectionObserver' in window) {
+            const observer = new IntersectionObserver(update, { rootMargin: '0px 0px -60% 0px', threshold: [0, 1] });
+            headings.forEach(function (heading) { observer.observe(heading); });
+        }
     })();
+    {{end}}
+
+    document.querySelectorAll('.markdown-body a[href^="#"]').forEach(function (link) {
+        link.addEventListener('click', function (ev) {
+            if (jump(link.getAttribute('href').slice(1), true)) ev.preventDefault();
+        });
+    });
+    if (location.hash.length > 1) jump(location.hash.slice(1), false);
     {{end}}
 </script>
 </body>

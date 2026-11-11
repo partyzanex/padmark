@@ -251,7 +251,7 @@ func newTestNote(title, content string) *domain.Note {
 		UpdatedAt:   time.Now(),
 
 		ExpiresAt: nil, Privacy: nil, OwnerID: nil, EditCode: "",
-		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 }
 
@@ -1447,7 +1447,7 @@ func (s *HandlerSuite) TestUpdateNote_OK() {
 		UpdatedAt:   time.Now(),
 
 		ExpiresAt: nil, Privacy: nil, OwnerID: nil, EditCode: "",
-		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 	s.manager.EXPECT().Update(gomock.Any(), testID, "editcode1234", uuid.Nil, gomock.Any()).Return(updated, nil)
 
@@ -2861,7 +2861,7 @@ func (s *HandlerSuite) TestHandleReveal_CrossNoteToken_TokenNotBurned() {
 		UpdatedAt:   time.Now(),
 
 		ExpiresAt: nil, Privacy: nil, OwnerID: nil, EditCode: "",
-		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 
 	s.manager.EXPECT().Peek(gomock.Any(), "wrong-note").Return(wrongNote, nil)

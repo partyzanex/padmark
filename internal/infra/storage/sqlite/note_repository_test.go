@@ -52,7 +52,7 @@ func (s *RepositoryTestSuite) TestCreate_OK() {
 		UpdatedAt:   time.Now(),
 
 		ExpiresAt: nil, Privacy: nil, OwnerID: nil, EditCode: "",
-		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 
 	err := s.repo.Create(s.T().Context(), domNote)
@@ -65,13 +65,13 @@ func (s *RepositoryTestSuite) TestCreate_SetsID() {
 		ID: "id-1", Title: "a", Content: "b", CreatedAt: time.Now(), UpdatedAt: time.Now(),
 		ExpiresAt: nil, Privacy: nil, OwnerID: nil, ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	}
 	note2 := &domain.Note{
 		ID: "id-2", Title: "c", Content: "d", CreatedAt: time.Now(), UpdatedAt: time.Now(),
 		ExpiresAt: nil, Privacy: nil, OwnerID: nil, ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	}
 
 	s.Require().NoError(s.repo.Create(s.T().Context(), note1))
@@ -98,7 +98,7 @@ func (s *RepositoryTestSuite) TestGet_OK() {
 		UpdatedAt:   time.Now(),
 
 		ExpiresAt: nil, Privacy: nil, OwnerID: nil, EditCode: "",
-		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 	s.Require().NoError(s.repo.Create(s.T().Context(), domNote))
 
@@ -123,7 +123,7 @@ func (s *RepositoryTestSuite) TestExists_True() {
 		ID: "exists-1", Title: "t", Content: "c", CreatedAt: time.Now(), UpdatedAt: time.Now(),
 		ExpiresAt: nil, Privacy: nil, OwnerID: nil, ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	}
 	s.Require().NoError(s.repo.Create(ctx, n))
 
@@ -151,7 +151,7 @@ func (s *RepositoryTestSuite) TestUpdate_OK() {
 		UpdatedAt:   time.Now(),
 
 		ExpiresAt: nil, Privacy: nil, OwnerID: nil, EditCode: "",
-		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 	s.Require().NoError(s.repo.Create(s.T().Context(), domNote))
 
@@ -164,7 +164,7 @@ func (s *RepositoryTestSuite) TestUpdate_OK() {
 
 		ExpiresAt: nil, Privacy: nil, OwnerID: nil, ID: "",
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	}
 	err := s.repo.Update(s.T().Context(), domNote.ID, updated)
 
@@ -183,7 +183,7 @@ func (s *RepositoryTestSuite) TestUpdate_NotFound() {
 		Title: "test", Content: "test", CreatedAt: time.Now(), UpdatedAt: time.Now(),
 		ExpiresAt: nil, Privacy: nil, OwnerID: nil, ID: "",
 		ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
-		BurnAfterReading: false, ClearExpiry: false,
+		BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 
 	err := s.repo.Update(s.T().Context(), "nonexistent", domNote)
@@ -206,7 +206,7 @@ func (s *RepositoryTestSuite) TestUpdate_Privacy_Nil_PreservesExistingValue() {
 		UpdatedAt:   time.Now(),
 
 		ExpiresAt: nil, OwnerID: nil, EditCode: "", Views: 0,
-		BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 	s.Require().NoError(s.repo.Create(ctx, note))
 
@@ -220,7 +220,7 @@ func (s *RepositoryTestSuite) TestUpdate_Privacy_Nil_PreservesExistingValue() {
 
 		ExpiresAt: nil, OwnerID: nil, ID: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	}
 	s.Require().NoError(s.repo.Update(ctx, "priv-nil-1", updated))
 
@@ -245,7 +245,7 @@ func (s *RepositoryTestSuite) TestUpdate_Privacy_ExplicitPublic_ClearsPrivacy() 
 		UpdatedAt:   time.Now(),
 
 		ExpiresAt: nil, OwnerID: nil, EditCode: "", Views: 0,
-		BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 	s.Require().NoError(s.repo.Create(ctx, note))
 
@@ -258,7 +258,7 @@ func (s *RepositoryTestSuite) TestUpdate_Privacy_ExplicitPublic_ClearsPrivacy() 
 
 		ExpiresAt: nil, OwnerID: nil, ID: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	}
 	s.Require().NoError(s.repo.Update(ctx, "priv-false-1", updated))
 
@@ -282,7 +282,7 @@ func (s *RepositoryTestSuite) TestUpdate_ContentType_Nil_PreservesExistingValue(
 		UpdatedAt:   time.Now(),
 
 		ExpiresAt: nil, Privacy: nil, OwnerID: nil, EditCode: "",
-		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 	s.Require().NoError(s.repo.Create(ctx, note))
 
@@ -295,7 +295,7 @@ func (s *RepositoryTestSuite) TestUpdate_ContentType_Nil_PreservesExistingValue(
 
 		ExpiresAt: nil, Privacy: nil, OwnerID: nil, ID: "",
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	}
 	s.Require().NoError(s.repo.Update(ctx, "ct-nil-1", updated))
 
@@ -318,7 +318,7 @@ func (s *RepositoryTestSuite) TestUpdate_ContentType_ExplicitChange() {
 		UpdatedAt:   time.Now(),
 
 		ExpiresAt: nil, Privacy: nil, OwnerID: nil, EditCode: "",
-		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 	s.Require().NoError(s.repo.Create(ctx, note))
 
@@ -331,7 +331,7 @@ func (s *RepositoryTestSuite) TestUpdate_ContentType_ExplicitChange() {
 
 		ExpiresAt: nil, Privacy: nil, OwnerID: nil, ID: "",
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	}
 	s.Require().NoError(s.repo.Update(ctx, "ct-change-1", updated))
 
@@ -352,7 +352,7 @@ func (s *RepositoryTestSuite) TestDelete_OK() {
 
 		ExpiresAt: nil, Privacy: nil, OwnerID: nil, ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	}
 	s.Require().NoError(s.repo.Create(s.T().Context(), domNote))
 
@@ -380,7 +380,7 @@ func (s *RepositoryTestSuite) TestCreate_DuplicateSlug() {
 		ID: "dup-1", Title: "a", Content: "b", CreatedAt: time.Now(), UpdatedAt: time.Now(),
 		ExpiresAt: nil, Privacy: nil, OwnerID: nil, ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	}
 	s.Require().NoError(s.repo.Create(ctx, n))
 
@@ -388,7 +388,7 @@ func (s *RepositoryTestSuite) TestCreate_DuplicateSlug() {
 		ID: "dup-1", Title: "c", Content: "d", CreatedAt: time.Now(), UpdatedAt: time.Now(),
 		ExpiresAt: nil, Privacy: nil, OwnerID: nil, ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	}
 	err := s.repo.Create(ctx, dup)
 
@@ -415,7 +415,7 @@ func (s *RepositoryTestSuite) TestCreate_AllFields() {
 		CreatedAt:        time.Now(),
 		UpdatedAt:        time.Now(),
 
-		Privacy: nil, Views: 0, ClearExpiry: false,
+		Privacy: nil, Views: 0, ClearExpiry: false, ShowContents: nil,
 	}
 	s.Require().NoError(s.repo.Create(ctx, note))
 
@@ -439,7 +439,7 @@ func (s *RepositoryTestSuite) TestCreate_NoOwnerID() {
 		ID: "anon", Title: "t", Content: "c", CreatedAt: time.Now(), UpdatedAt: time.Now(),
 		ExpiresAt: nil, Privacy: nil, OwnerID: nil, ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	}
 	s.Require().NoError(s.repo.Create(ctx, note))
 
@@ -460,7 +460,7 @@ func (s *RepositoryTestSuite) TestUpdate_PreservesOwnerID() {
 		CreatedAt: time.Now(), UpdatedAt: time.Now(),
 
 		ExpiresAt: nil, Privacy: nil, ContentType: nil, EditCode: "",
-		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 	s.Require().NoError(s.repo.Create(ctx, note))
 
@@ -469,7 +469,7 @@ func (s *RepositoryTestSuite) TestUpdate_PreservesOwnerID() {
 
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, ID: "", ContentType: nil, EditCode: "",
-		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}))
 
 	got, err := s.repo.Get(ctx, "owned")
@@ -487,7 +487,7 @@ func (s *RepositoryTestSuite) TestIncrementViews_OK() {
 		ID: "views-ok", Title: "t", Content: "c", CreatedAt: time.Now(), UpdatedAt: time.Now(),
 		ExpiresAt: nil, Privacy: nil, OwnerID: nil, ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	}
 	s.Require().NoError(s.repo.Create(ctx, n))
 
@@ -515,7 +515,7 @@ func (s *RepositoryTestSuite) TestConsume_BurnAfterReading() {
 		BurnAfterReading: true, CreatedAt: time.Now(), UpdatedAt: time.Now(),
 
 		ExpiresAt: nil, Privacy: nil, OwnerID: nil, ContentType: nil, EditCode: "",
-		Views: 0, BurnTTL: 0, ClearExpiry: false,
+		Views: 0, BurnTTL: 0, ClearExpiry: false, ShowContents: nil,
 	}
 	s.Require().NoError(s.repo.Create(ctx, n))
 
@@ -536,7 +536,7 @@ func (s *RepositoryTestSuite) TestConsume_Expired() {
 		ExpiresAt: &past, CreatedAt: time.Now(), UpdatedAt: time.Now(),
 
 		Privacy: nil, OwnerID: nil, ContentType: nil, EditCode: "",
-		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 	s.Require().NoError(s.repo.Create(ctx, n))
 
@@ -555,7 +555,7 @@ func (s *RepositoryTestSuite) TestConsume_NotEligible() {
 		ID: "consume-no", Title: "plain", Content: "me", CreatedAt: time.Now(), UpdatedAt: time.Now(),
 		ExpiresAt: nil, Privacy: nil, OwnerID: nil, ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	}
 	s.Require().NoError(s.repo.Create(ctx, n))
 
@@ -577,7 +577,7 @@ func (s *RepositoryTestSuite) TestBurn_PrivacyChanged_RowUntouched() {
 	n := &domain.Note{
 		ID: "burn-priv", Title: "burn", Content: "secret", CreatedAt: time.Now(), UpdatedAt: time.Now(),
 		ExpiresAt: nil, Privacy: nil, OwnerID: nil, ContentType: nil, EditCode: "",
-		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 	n.Privacy = &authenticated
 	n.BurnAfterReading = true
@@ -631,7 +631,7 @@ func plainNote(id string) *domain.Note {
 	return &domain.Note{
 		ID: id, Title: "t", Content: "body", CreatedAt: time.Now(), UpdatedAt: time.Now(),
 		ExpiresAt: nil, Privacy: nil, OwnerID: nil, ContentType: nil, EditCode: "",
-		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 }
 

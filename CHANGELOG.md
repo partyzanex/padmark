@@ -54,6 +54,13 @@ That baseline is not the latest released version.
   tool passes it through.
 - `padmark-cli create` and `edit` accept the v0.1.6 `--private` flag again as a deprecated
   alias: `--private` is `--privacy authenticated`, `--private=false` is `--privacy public`.
+- Optional "Contents sidebar" for notes: with `show_contents: true` the note view shows an
+  "On this page" column with links to the h2/h3 headings and marks the current section. The
+  editor has a "Contents sidebar" switch; `padmark-cli create`/`edit` accept `--contents`, and
+  the MCP `create_note`/`update_note` tools accept `show_contents`. The field defaults to
+  `false`, an update without it keeps the stored value, and responses add `show_contents`.
+  The migration `20261110000001_notes_show_contents.sql` adds the column with `false` for
+  existing notes.
 
 ### Upgrading v0.3.2/v0.3.3 to v0.4.0
 

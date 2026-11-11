@@ -15,7 +15,8 @@ the original API base explicitly. A decoded token envelope can also supply its `
 
 - `POST /notes` — create a note. Body: `content` (required), optional `title`, `content_type`
   (`text/markdown` | `text/plain`), `slug` (custom slugs may be disabled on the instance),
-  `burn_after_reading`, `ttl`, `privacy` (`public` | `authenticated` | `owner`), `edit_code`.
+  `burn_after_reading`, `ttl`, `privacy` (`public` | `authenticated` | `owner`), `edit_code`,
+  `show_contents` (default `false`: `true` adds an "On this page" sidebar to the HTML view).
   With `burn_after_reading: true`, `ttl` is the post-read grace period in seconds (omitted or
   0 means immediate burn). Without it, a positive `ttl` is the note's lifetime counted from
   creation; omitted or 0 means no expiry. Responds `201` with the note and `Location: /{id}`; `409`
@@ -32,7 +33,8 @@ the original API base explicitly. A decoded token envelope can also supply its `
   note's `privacy` requires a credential the request didn't supply, `404` for a wrong id, `410`
   for an expired note.
 - `PUT /notes/{id}` — replace a note. Body: `content` (required), optional `title`,
-  `content_type`, `burn_after_reading`, `ttl`, `privacy`, `edit_code`; the slug cannot be
+  `content_type`, `burn_after_reading`, `ttl`, `privacy`, `show_contents` (omitted keeps the
+  current value), `edit_code`; the slug cannot be
   changed. Pass the `edit_code` in the body, or omit it when authenticated as the note's
   owner. `401` for an anonymous caller on a note whose `privacy` requires a credential, `403`
   on a wrong edit code (or a non-owner without one). As in `POST`, a non-burn `ttl` is

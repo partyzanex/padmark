@@ -124,7 +124,7 @@ func (s *ManagerTestSuite) TestCreate_OK() {
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	}
 
 	s.expectSlugFree()
@@ -147,7 +147,7 @@ func (s *ManagerTestSuite) TestCreate_WithCustomEditCode() {
 		Title: "hello", Content: "world", EditCode: "MyCustomCode1",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
-		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 
 	s.expectSlugFree()
@@ -167,7 +167,7 @@ func (s *ManagerTestSuite) TestCreate_UserSuppliedCodeUsesMemoryHardHash() {
 		Title: "hello", Content: "world", EditCode: "MyCustomCode1",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
-		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 
 	var storedHash string
@@ -194,7 +194,7 @@ func (s *ManagerTestSuite) TestCreate_GeneratedCodeUsesFastHash() {
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	}
 
 	var storedHash string
@@ -219,7 +219,7 @@ func (s *ManagerTestSuite) TestCreate_EmptyEditCodeIsGenerated() {
 		Title: "hello", Content: "world", EditCode: "", CreatedAt: time.Time{},
 		UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
 		ID: "", ContentType: nil, Views: 0, BurnTTL: 0,
-		BurnAfterReading: false, ClearExpiry: false,
+		BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 
 	s.expectSlugFree()
@@ -239,7 +239,7 @@ func (s *ManagerTestSuite) TestCreate_CustomEditCodeUsedForUpdate() {
 		Title: "hello", Content: "world", EditCode: customCode,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
-		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 
 	s.expectSlugFree()
@@ -260,7 +260,7 @@ func (s *ManagerTestSuite) TestCreate_CustomEditCodeUsedForUpdate() {
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	})
 
 	s.Require().NoError(err)
@@ -275,7 +275,7 @@ func (s *ManagerTestSuite) TestCreate_CustomEditCodeWrongCodeForbidden() {
 		Title: "hello", Content: "world", EditCode: customCode,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
-		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 
 	s.expectSlugFree()
@@ -294,7 +294,7 @@ func (s *ManagerTestSuite) TestCreate_CustomEditCodeWrongCodeForbidden() {
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	})
 
 	s.ErrorIs(err, domain.ErrInvalidEditCode)
@@ -306,7 +306,7 @@ func (s *ManagerTestSuite) TestCreate_EmptyTitle() {
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", Title: "",
 		ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
-		BurnAfterReading: false, ClearExpiry: false,
+		BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 
 	s.expectSlugFree()
@@ -325,7 +325,7 @@ func (s *ManagerTestSuite) TestCreate_TitleTooLong() {
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	}
 
 	_, err := s.manager.Create(s.T().Context(), note)
@@ -339,7 +339,7 @@ func (s *ManagerTestSuite) TestCreate_InvalidContentType() {
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", Content: "",
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	}
 
 	_, err := s.manager.Create(s.T().Context(), note)
@@ -356,7 +356,7 @@ func (s *ManagerTestSuite) TestCreate_OwnerPrivacy_NoOwnerID_Rejected() {
 		Title: "hi", Content: "body", Privacy: &priv,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		OwnerID: nil, ID: "", ContentType: nil, EditCode: "",
-		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 
 	_, err := s.manager.Create(s.T().Context(), note)
@@ -372,7 +372,7 @@ func (s *ManagerTestSuite) TestCreate_OwnerPrivacy_WithOwnerID_OK() {
 		Title: "hi", Content: "body", Privacy: &priv, OwnerID: new(testUserID1),
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		ID: "", ContentType: nil, EditCode: "", Views: 0,
-		BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 
 	s.expectSlugFree()
@@ -389,7 +389,7 @@ func (s *ManagerTestSuite) TestCreate_WithBurnTTL() {
 		Title: "hello", Content: "world", BurnAfterReading: true, BurnTTL: 3600,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
 		OwnerID: nil, ID: "", ContentType: nil, EditCode: "", Views: 0,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	}
 
 	s.expectSlugFree()
@@ -408,7 +408,7 @@ func (s *ManagerTestSuite) TestCreate_WithSlug() {
 		ID: "my-slug", Title: "hello", Content: "world",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ContentType: nil, EditCode: "",
-		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 
 	s.expectSlugFree()
@@ -426,7 +426,7 @@ func (s *ManagerTestSuite) TestCreate_InvalidSlug() {
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, Content: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	}
 
 	_, err := s.manager.Create(s.T().Context(), note)
@@ -444,7 +444,7 @@ func (s *ManagerTestSuite) TestCreate_CustomSlugDisabled() {
 		ID: "my-slug", Title: "hello", Content: "world",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ContentType: nil, EditCode: "",
-		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	})
 
 	s.ErrorIs(err, domain.ErrCustomSlugDisabled)
@@ -462,7 +462,7 @@ func (s *ManagerTestSuite) TestCreate_CustomSlugDisabled_AutoSlugStillWorks() {
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	})
 
 	s.Require().NoError(err)
@@ -478,7 +478,7 @@ func (s *ManagerTestSuite) TestCreate_StorageError() {
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", Content: "",
 		ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
-		BurnAfterReading: false, ClearExpiry: false,
+		BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 
 	s.expectSlugFree()
@@ -500,7 +500,7 @@ func (s *ManagerTestSuite) TestCreate_EncryptError_RestoresPlaintext() {
 		Title: "t", Content: "secret body", EditCode: "mycode123456",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
-		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 
 	s.expectSlugFree()
@@ -523,7 +523,7 @@ func (s *ManagerTestSuite) TestCreate_StorageError_RestoresPlaintextAndPersistsE
 		Title: "t", Content: "body", EditCode: "code12345678", ID: "myslug",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ContentType: nil, Views: 0,
-		BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 
 	s.expectSlugFree()
@@ -565,7 +565,7 @@ func (s *ManagerTestSuite) TestUpdate_PersistsHashedEditCode_NotPlaintext() {
 		ID: "myslug", EditCode: "hash:code12345678", Content: "enc:old",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, Title: "", ContentType: nil,
-		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("myslug")).Return(existing, nil)
 
@@ -585,7 +585,7 @@ func (s *ManagerTestSuite) TestUpdate_PersistsHashedEditCode_NotPlaintext() {
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	})
 	s.Require().NoError(err)
 
@@ -610,7 +610,7 @@ func (s *ManagerTestSuite) TestHandleSetBurnExpiryErr_RefetchDecryptFails() {
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, Title: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	}, nil)
 
 	_, err := mgr.burn.handleSetExpiryErr(s.T().Context(), "burn-x", domain.PrivacyPublic, domain.ErrNotFound)
@@ -627,7 +627,7 @@ func (s *ManagerTestSuite) TestViewPreloaded_BurnUsesCheckedPrivacy() {
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: &authenticated, OwnerID: nil, Title: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: true,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	}
 
 	s.storage.EXPECT().Consume(gomock.Any(), domain.HashSlug("burn-x"), domain.PrivacyAuthenticated).
@@ -649,7 +649,7 @@ func (s *ManagerTestSuite) TestHandleSetBurnExpiryErr_PrivacyChanged() {
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: &owner, OwnerID: nil, Title: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 60, BurnAfterReading: true,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	}, nil)
 
 	got, err := s.manager.burn.handleSetExpiryErr(s.T().Context(), "burn-x", domain.PrivacyPublic, domain.ErrNotFound)
@@ -666,7 +666,7 @@ func (s *ManagerTestSuite) TestGet_OK() {
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, Content: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	}
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(want, nil)
 
@@ -681,7 +681,7 @@ func (s *ManagerTestSuite) TestGet_BurnAfterReading() {
 		ID: "abc-123", Title: "a", BurnAfterReading: true,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
 		OwnerID: nil, Content: "", ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	}
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(note, nil)
 	s.storage.EXPECT().Consume(gomock.Any(), domain.HashSlug("abc-123"), gomock.Any()).Return(note, nil)
@@ -697,7 +697,7 @@ func (s *ManagerTestSuite) TestGet_BurnAfterReading_WithTTL() {
 		ID: "abc-123", Title: "a", BurnAfterReading: true, BurnTTL: 3600,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
 		OwnerID: nil, Content: "", ContentType: nil, EditCode: "", Views: 0,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	}
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(note, nil)
 	s.storage.EXPECT().SetBurnExpiry(gomock.Any(), domain.HashSlug("abc-123"), gomock.Any(), gomock.Any()).
@@ -715,7 +715,7 @@ func (s *ManagerTestSuite) TestGet_Expired() {
 		ID: "abc-123", Title: "a", ExpiresAt: &past,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, Privacy: nil,
 		OwnerID: nil, Content: "", ContentType: nil, EditCode: "",
-		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(note, nil)
 	s.storage.EXPECT().DeleteExpired(gomock.Any(), domain.HashSlug("abc-123")).Return(nil)
@@ -740,7 +740,7 @@ func (s *ManagerTestSuite) TestView_OK() {
 		ID: "abc-123", Title: "a", Views: 5,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, Content: "", ContentType: nil,
-		EditCode: "", BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		EditCode: "", BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(want, nil)
 	s.storage.EXPECT().IncrementViews(gomock.Any(), domain.HashSlug("abc-123")).Return(nil)
@@ -757,7 +757,7 @@ func (s *ManagerTestSuite) TestView_BurnAfterReading() {
 		ID: "abc-123", Title: "a", BurnAfterReading: true,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
 		OwnerID: nil, Content: "", ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	}
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(want, nil)
 	s.storage.EXPECT().Consume(gomock.Any(), domain.HashSlug("abc-123"), gomock.Any()).Return(want, nil)
@@ -775,13 +775,13 @@ func (s *ManagerTestSuite) TestView_BurnAfterReading_WithTTL() {
 		ID: "abc-123", Title: "a", BurnAfterReading: true, BurnTTL: 1800,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
 		OwnerID: nil, Content: "", ContentType: nil, EditCode: "", Views: 0,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	}
 	// Real storage flips burn_after_reading=false and sets expires_at on the timer-start read.
 	afterBurn := &domain.Note{
 		ID: "abc-123", Title: "a", BurnAfterReading: false, BurnTTL: 1800, ExpiresAt: &future,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, Privacy: nil, OwnerID: nil,
-		Content: "", ContentType: nil, EditCode: "", Views: 0, ClearExpiry: false,
+		Content: "", ContentType: nil, EditCode: "", Views: 0, ClearExpiry: false, ShowContents: nil,
 	}
 
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(stored, nil)
@@ -817,14 +817,14 @@ func (s *ManagerTestSuite) TestUpdate_OK() {
 
 		UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
 		Content: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	}
 	note := &domain.Note{
 		Title: "updated", Content: "body",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	}
 
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(existing, nil)
@@ -857,7 +857,7 @@ func (s *ManagerTestSuite) TestUpdate_ResponseReportsPersistedPrivacyAndViews() 
 
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Content: "", ContentType: nil, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	}
 
 	// Caller omits privacy; it must be inherited, not defaulted to public.
@@ -866,7 +866,7 @@ func (s *ManagerTestSuite) TestUpdate_ResponseReportsPersistedPrivacyAndViews() 
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	}
 
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(existing, nil)
@@ -891,7 +891,7 @@ func (s *ManagerTestSuite) TestUpdate_ResponseReportsPersistedPrivacyAndViews() 
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		OwnerID: nil, ID: "", Content: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	}
 
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(existing, nil)
@@ -912,7 +912,7 @@ func (s *ManagerTestSuite) TestUpdate_EmptyTitle() {
 
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ContentType: nil, Views: 0,
-		BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(existing, nil)
@@ -922,7 +922,7 @@ func (s *ManagerTestSuite) TestUpdate_EmptyTitle() {
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", Title: "",
 		Content: "", ContentType: nil, EditCode: "", Views: 0,
-		BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	})
 
 	s.Require().NoError(err)
@@ -935,7 +935,7 @@ func (s *ManagerTestSuite) TestUpdate_NotFound() {
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", Content: "",
 		ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
-		BurnAfterReading: false, ClearExpiry: false,
+		BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("missing")).Return(nil, domain.ErrNotFound)
@@ -953,14 +953,14 @@ func (s *ManagerTestSuite) TestUpdate_Forbidden() {
 
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, Content: "", ContentType: nil,
-		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 	note := &domain.Note{
 		Title:     "updated",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", Content: "",
 		ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
-		BurnAfterReading: false, ClearExpiry: false,
+		BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(existing, nil)
@@ -981,14 +981,14 @@ func (s *ManagerTestSuite) TestUpdate_OwnerBypassesEditCode() {
 
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, Content: "", ContentType: nil, Views: 0,
-		BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 	note := &domain.Note{
 		Title: "updated", Content: "body",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	}
 
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(existing, nil)
@@ -1011,14 +1011,14 @@ func (s *ManagerTestSuite) TestUpdate_NonOwnerCallerStillNeedsEditCode() {
 
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, Content: "", ContentType: nil, Views: 0,
-		BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 	note := &domain.Note{
 		Title:     "hijacked",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", Content: "",
 		ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
-		BurnAfterReading: false, ClearExpiry: false,
+		BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(existing, nil)
@@ -1038,14 +1038,14 @@ func (s *ManagerTestSuite) TestUpdate_AnonymousNoteAlwaysNeedsEditCode() {
 
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, Content: "", ContentType: nil,
-		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 	note := &domain.Note{
 		Title:     "hijacked",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", Content: "",
 		ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
-		BurnAfterReading: false, ClearExpiry: false,
+		BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(existing, nil)
@@ -1063,7 +1063,7 @@ func (s *ManagerTestSuite) TestDelete_OK() {
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, Title: "", Content: "",
 		ContentType: nil, Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	}
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(existing, nil)
 	s.storage.EXPECT().Delete(gomock.Any(), domain.HashSlug("abc-123")).Return(nil)
@@ -1087,7 +1087,7 @@ func (s *ManagerTestSuite) TestDelete_Forbidden() {
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, Title: "", Content: "",
 		ContentType: nil, Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	}
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(existing, nil)
 
@@ -1102,7 +1102,7 @@ func (s *ManagerTestSuite) TestDelete_OwnerBypassesEditCode() {
 		ID: "abc-123", EditCode: "secret123456", OwnerID: new(testUserID1),
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, Title: "", Content: "", ContentType: nil,
-		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(existing, nil)
 	s.storage.EXPECT().Delete(gomock.Any(), domain.HashSlug("abc-123")).Return(nil)
@@ -1119,7 +1119,7 @@ func (s *ManagerTestSuite) TestDelete_NonOwnerCallerStillNeedsEditCode() {
 		ID: "abc-123", EditCode: "secret123456", OwnerID: new(testUserID1),
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, Title: "", Content: "", ContentType: nil,
-		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(existing, nil)
 
@@ -1136,7 +1136,7 @@ func (s *ManagerTestSuite) TestGetRendered_OK() {
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, Title: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	}
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(note, nil)
 	s.storage.EXPECT().IncrementViews(gomock.Any(), domain.HashSlug("abc-123")).Return(nil)
@@ -1157,7 +1157,7 @@ func (s *ManagerTestSuite) TestCreate_ContentOverCap_Rejected() {
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", Title: "",
 		ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
-		BurnAfterReading: false, ClearExpiry: false,
+		BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 
 	_, err := s.manager.Create(s.T().Context(), note)
@@ -1174,7 +1174,7 @@ func (s *ManagerTestSuite) TestCreate_ContentAtCap_Accepted() {
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", Title: "",
 		ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
-		BurnAfterReading: false, ClearExpiry: false,
+		BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 
 	_, err := s.manager.Create(s.T().Context(), note)
@@ -1188,7 +1188,7 @@ func (s *ManagerTestSuite) TestUpdate_ContentOverCap_Rejected() {
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", Title: "",
 		ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
-		BurnAfterReading: false, ClearExpiry: false,
+		BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 
 	_, err := s.manager.Update(s.T().Context(), "abc-123", "secret123456", uuid.Nil, note)
@@ -1237,7 +1237,7 @@ func (s *ManagerTestSuite) TestGetRendered_UnchangedNoteIsRenderedOnce() {
 				ID: "abc-123", Content: "# Hello", UpdatedAt: stamp,
 				CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
 				Title: "", ContentType: nil, EditCode: "", Views: 0,
-				BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+				BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 			}, nil
 		}).Times(2)
 	s.storage.EXPECT().IncrementViews(gomock.Any(), domain.HashSlug("abc-123")).Return(nil).Times(2)
@@ -1260,7 +1260,7 @@ func (s *ManagerTestSuite) TestGetRendered_ReRendersAfterUpdate() {
 		ID: "abc-123", Content: "old", UpdatedAt: stamp, EditCode: "secret123456",
 		CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
 		Title: "", ContentType: nil, Views: 0, BurnTTL: 0,
-		BurnAfterReading: false, ClearExpiry: false,
+		BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).
@@ -1278,7 +1278,7 @@ func (s *ManagerTestSuite) TestGetRendered_ReRendersAfterUpdate() {
 				ID: "abc-123", Content: "new", UpdatedAt: stamp, EditCode: "secret123456",
 				CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
 				Title: "", ContentType: nil, Views: 0, BurnTTL: 0,
-				BurnAfterReading: false, ClearExpiry: false,
+				BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 			}
 
 			return nil
@@ -1295,7 +1295,7 @@ func (s *ManagerTestSuite) TestGetRendered_ReRendersAfterUpdate() {
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", Title: "",
 		ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
-		BurnAfterReading: false, ClearExpiry: false,
+		BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	})
 	s.Require().NoError(err)
 
@@ -1313,13 +1313,13 @@ func (s *ManagerTestSuite) TestGetRendered_ReRendersWhenUpdatedAtChanges() {
 		ID: "abc-123", Content: "v1", UpdatedAt: time.Now().Add(-time.Hour),
 		CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
 		Title: "", ContentType: nil, EditCode: "", Views: 0,
-		BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 	second := &domain.Note{
 		ID: "abc-123", Content: "v2", UpdatedAt: time.Now(),
 		CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
 		Title: "", ContentType: nil, EditCode: "", Views: 0,
-		BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 
 	gomock.InOrder(
@@ -1351,7 +1351,7 @@ func (s *ManagerTestSuite) TestGetRendered_BurnNotesAreNeverCached() {
 		ID: "abc-123", Content: "# Hello", BurnAfterReading: true,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
 		OwnerID: nil, Title: "", ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	}
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(note, nil)
 	s.storage.EXPECT().Consume(gomock.Any(), domain.HashSlug("abc-123"), gomock.Any()).Return(note, nil)
@@ -1372,7 +1372,7 @@ func (s *ManagerTestSuite) TestDelete_DropsCachedRender() {
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, Title: "", Content: "",
 		ContentType: nil, Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	}
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(existing, nil)
 	s.storage.EXPECT().Delete(gomock.Any(), domain.HashSlug("abc-123")).Return(nil)
@@ -1386,7 +1386,7 @@ func (s *ManagerTestSuite) TestGetRendered_BurnAfterReading() {
 		ID: "abc-123", Content: "# Hello", BurnAfterReading: true,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
 		OwnerID: nil, Title: "", ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	}
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(note, nil)
 	s.storage.EXPECT().Consume(gomock.Any(), domain.HashSlug("abc-123"), gomock.Any()).Return(note, nil)
@@ -1405,7 +1405,7 @@ func (s *ManagerTestSuite) TestGetRendered_Expired() {
 		ID: "abc-123", Content: "# Hello", ExpiresAt: &past,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, Privacy: nil,
 		OwnerID: nil, Title: "", ContentType: nil, EditCode: "",
-		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(note, nil)
 	s.storage.EXPECT().DeleteExpired(gomock.Any(), domain.HashSlug("abc-123")).Return(nil)
@@ -1430,7 +1430,7 @@ func (s *ManagerTestSuite) TestGetRendered_RenderError() {
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, Title: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	}
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(note, nil)
 	s.storage.EXPECT().IncrementViews(gomock.Any(), domain.HashSlug("abc-123")).Return(nil)
@@ -1450,7 +1450,7 @@ func (s *ManagerTestSuite) TestGetRendered_PlainText_UsesRenderPlain() {
 		ID: "abc-123", Content: "<script>", ContentType: &plain,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, Title: "", EditCode: "",
-		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(note, nil)
 	s.storage.EXPECT().IncrementViews(gomock.Any(), domain.HashSlug("abc-123")).Return(nil)
@@ -1470,7 +1470,7 @@ func (s *ManagerTestSuite) TestGetRendered_PlainText_RenderPlainError() {
 		ID: "abc-123", Content: "text", ContentType: &plain,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, Title: "", EditCode: "",
-		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(note, nil)
 	s.storage.EXPECT().IncrementViews(gomock.Any(), domain.HashSlug("abc-123")).Return(nil)
@@ -1490,7 +1490,7 @@ func (s *ManagerTestSuite) TestPeek_OK() {
 		ID: "peek-id", Title: "t", Content: "c",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ContentType: nil, EditCode: "",
-		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("peek-id")).Return(note, nil)
 
@@ -1520,7 +1520,7 @@ func (s *ManagerTestSuite) TestView_WithTTL_SecondViewSucceeds() {
 		ID: "ttl-note", Title: "t", Views: 0, ExpiresAt: &future,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, Privacy: nil,
 		OwnerID: nil, Content: "", ContentType: nil, EditCode: "",
-		BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 
 	// First view.
@@ -1536,7 +1536,7 @@ func (s *ManagerTestSuite) TestView_WithTTL_SecondViewSucceeds() {
 		ID: "ttl-note", Title: "t", Views: 1, ExpiresAt: &future,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, Privacy: nil,
 		OwnerID: nil, Content: "", ContentType: nil, EditCode: "",
-		BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("ttl-note")).Return(note2, nil)
 	s.storage.EXPECT().IncrementViews(gomock.Any(), domain.HashSlug("ttl-note")).Return(nil)
@@ -1553,7 +1553,7 @@ func (s *ManagerTestSuite) TestView_BurnAfterReading_NoIncrementViews() {
 		ID: "burn-note", Title: "t", BurnAfterReading: true,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
 		OwnerID: nil, Content: "", ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	}
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("burn-note")).Return(note, nil)
 	s.storage.EXPECT().Consume(gomock.Any(), domain.HashSlug("burn-note"), gomock.Any()).Return(note, nil)
@@ -1575,7 +1575,7 @@ func (s *ManagerTestSuite) TestView_BurnAfterReading_WithBurnTTL_CountsViews() {
 	noteAfterBurn := &domain.Note{
 		ID: "burn-ttl", Title: "t", BurnAfterReading: false, BurnTTL: 3600, ExpiresAt: &future,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, Privacy: nil, OwnerID: nil,
-		Content: "", ContentType: nil, EditCode: "", Views: 0, ClearExpiry: false,
+		Content: "", ContentType: nil, EditCode: "", Views: 0, ClearExpiry: false, ShowContents: nil,
 	}
 
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("burn-ttl")).
@@ -1583,7 +1583,7 @@ func (s *ManagerTestSuite) TestView_BurnAfterReading_WithBurnTTL_CountsViews() {
 			ID: "burn-ttl", Title: "t", BurnAfterReading: true, BurnTTL: 3600,
 			CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
 			OwnerID: nil, Content: "", ContentType: nil, EditCode: "", Views: 0,
-			ClearExpiry: false,
+			ClearExpiry: false, ShowContents: nil,
 		}, nil)
 	s.storage.EXPECT().SetBurnExpiry(gomock.Any(), domain.HashSlug("burn-ttl"), gomock.Any(), gomock.Any()).
 		Return(noteAfterBurn, nil)
@@ -1613,7 +1613,7 @@ func (s *ManagerTestSuite) TestGet_BurnTTL_Race_SetBurnExpiryNotFound() {
 		ID: "burn-ttl-race", Title: "t", BurnAfterReading: true, BurnTTL: 3600,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
 		OwnerID: nil, Content: "", ContentType: nil, EditCode: "", Views: 0,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	}
 
 	// Request B's perspective: it read the note before A's SetBurnExpiry committed.
@@ -1632,7 +1632,7 @@ func (s *ManagerTestSuite) TestGet_BurnTTL_Race_SetBurnExpiryNotFound() {
 		ExpiresAt:        &future,
 
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, Privacy: nil, OwnerID: nil,
-		Content: "", ContentType: nil, EditCode: "", Views: 0, ClearExpiry: false,
+		Content: "", ContentType: nil, EditCode: "", Views: 0, ClearExpiry: false, ShowContents: nil,
 	}
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("burn-ttl-race")).Return(noteAfterBurn, nil)
 
@@ -1651,7 +1651,7 @@ func (s *ManagerTestSuite) TestViewPreloaded_OK() {
 		ID: "pre-1", Title: "a", Views: 2,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, Content: "", ContentType: nil,
-		EditCode: "", BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		EditCode: "", BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 
 	s.storage.EXPECT().IncrementViews(gomock.Any(), domain.HashSlug("pre-1")).Return(nil)
@@ -1668,7 +1668,7 @@ func (s *ManagerTestSuite) TestViewPreloaded_BurnAfterReading() {
 		ID: "pre-2", BurnAfterReading: true,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
 		OwnerID: nil, Title: "", Content: "", ContentType: nil, EditCode: "",
-		Views: 0, BurnTTL: 0, ClearExpiry: false,
+		Views: 0, BurnTTL: 0, ClearExpiry: false, ShowContents: nil,
 	}
 	s.storage.EXPECT().Consume(gomock.Any(), domain.HashSlug("pre-2"), gomock.Any()).Return(note, nil)
 
@@ -1686,7 +1686,7 @@ func (s *ManagerTestSuite) TestViewPreloaded_Expired() {
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, Privacy: nil,
 		OwnerID: nil, Title: "", Content: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	}
 
 	s.storage.EXPECT().DeleteExpired(gomock.Any(), domain.HashSlug("pre-3")).Return(nil)
@@ -1704,7 +1704,7 @@ func (s *ManagerTestSuite) TestEnforceExpiry_ExpiredNoteIsDeleted() {
 		ID: "ee-1", ExpiresAt: &past, BurnAfterReading: true,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, Privacy: nil, OwnerID: nil,
 		Title: "", Content: "", ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	}
 
 	s.storage.EXPECT().DeleteExpired(gomock.Any(), domain.HashSlug("ee-1")).Return(nil)
@@ -1723,7 +1723,7 @@ func (s *ManagerTestSuite) TestEnforceExpiry_ExtendedNoteIsKept() {
 		ID: "ee-ext", ExpiresAt: &past, BurnAfterReading: false,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, Privacy: nil, OwnerID: nil,
 		Title: "", Content: "", ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	}
 
 	s.storage.EXPECT().DeleteExpired(gomock.Any(), domain.HashSlug("ee-ext")).Return(domain.ErrNotFound)
@@ -1741,20 +1741,20 @@ func (s *ManagerTestSuite) TestEnforceExpiry_LiveBurnNoteIsNotConsumed() {
 			ID: "ee-2", BurnAfterReading: true,
 			CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
 			OwnerID: nil, Title: "", Content: "", ContentType: nil, EditCode: "",
-			Views: 0, BurnTTL: 0, ClearExpiry: false,
+			Views: 0, BurnTTL: 0, ClearExpiry: false, ShowContents: nil,
 		},
 		{
 			ID: "ee-3", BurnAfterReading: true, BurnTTL: 60,
 			CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
 			OwnerID: nil, Title: "", Content: "", ContentType: nil, EditCode: "",
-			Views: 0, ClearExpiry: false,
+			Views: 0, ClearExpiry: false, ShowContents: nil,
 		},
 		{
 			ID: "ee-4", ExpiresAt: &future,
 			CreatedAt: time.Time{}, UpdatedAt: time.Time{}, Privacy: nil,
 			OwnerID: nil, Title: "", Content: "", ContentType: nil,
 			EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
-			ClearExpiry: false,
+			ClearExpiry: false, ShowContents: nil,
 		},
 	} {
 		// No storage call at all: no Consume, no SetBurnExpiry, no Delete, no IncrementViews.
@@ -1772,7 +1772,7 @@ func (s *ManagerTestSuite) TestGetRenderedPreloaded_OK() {
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, Title: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	}
 
 	s.storage.EXPECT().IncrementViews(gomock.Any(), domain.HashSlug("rp-1")).Return(nil)
@@ -1791,7 +1791,7 @@ func (s *ManagerTestSuite) TestGetRenderedPreloaded_Expired() {
 		ID: "rp-2", ExpiresAt: &past, Content: "x",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, Privacy: nil,
 		OwnerID: nil, Title: "", ContentType: nil, EditCode: "",
-		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 
 	s.storage.EXPECT().DeleteExpired(gomock.Any(), domain.HashSlug("rp-2")).Return(nil)
@@ -1812,7 +1812,7 @@ func (s *ManagerTestSuite) TestPeek_ReturnsExpiredNote() {
 		ID: "expired-peek", Title: "t", ExpiresAt: &past,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, Privacy: nil,
 		OwnerID: nil, Content: "", ContentType: nil, EditCode: "",
-		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("expired-peek")).Return(note, nil)
@@ -1836,14 +1836,14 @@ func (s *ManagerTestSuite) TestUpdate_PrivateNote_CorrectCode() {
 
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		OwnerID: nil, Content: "", ContentType: nil, Views: 0,
-		BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 	note := &domain.Note{
 		Title:     "updated secret",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", Content: "",
 		ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
-		BurnAfterReading: false, ClearExpiry: false,
+		BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("priv-1")).Return(existing, nil)
@@ -1867,14 +1867,14 @@ func (s *ManagerTestSuite) TestUpdate_OwnerPrivacy_AnonymousExistingNote_Rejecte
 
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, Content: "", ContentType: nil,
-		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 	note := &domain.Note{
 		Title: "updated", Privacy: &priv,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		OwnerID: nil, ID: "", Content: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	}
 
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("anon-1")).Return(existing, nil)
@@ -1896,14 +1896,14 @@ func (s *ManagerTestSuite) TestUpdate_OwnerPrivacy_AlreadyOwnedNote_OK() {
 
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, Content: "", ContentType: nil, Views: 0,
-		BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 	note := &domain.Note{
 		Title: "updated", Privacy: &priv,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		OwnerID: nil, ID: "", Content: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	}
 
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("owned-1")).Return(existing, nil)
@@ -1925,14 +1925,14 @@ func (s *ManagerTestSuite) TestUpdate_PrivateNote_WrongCode() {
 
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		OwnerID: nil, Content: "", ContentType: nil, Views: 0,
-		BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 	note := &domain.Note{
 		Title:     "hijacked",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", Content: "",
 		ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
-		BurnAfterReading: false, ClearExpiry: false,
+		BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("priv-2")).Return(existing, nil)
@@ -1950,7 +1950,7 @@ func (s *ManagerTestSuite) TestGet_BurnAfterReading_ConsumeError() {
 		ID: "burn-err", Title: "t", BurnAfterReading: true,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
 		OwnerID: nil, Content: "", ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	}
 
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("burn-err")).Return(note, nil)
@@ -1967,7 +1967,7 @@ func (s *ManagerTestSuite) TestView_BurnAfterReading_ConsumeError() {
 		ID: "burn-err-view", Title: "t", BurnAfterReading: true,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
 		OwnerID: nil, Content: "", ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	}
 
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("burn-err-view")).Return(note, nil)
@@ -1992,7 +1992,7 @@ func TestGet_DecryptionFailure(t *testing.T) {
 		ID: "enc-fail", Title: "t", Content: "ciphertext",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ContentType: nil, EditCode: "",
-		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 	storage.EXPECT().Get(gomock.Any(), domain.HashSlug("enc-fail")).Return(note, nil)
 
@@ -2013,7 +2013,7 @@ func TestPeek_DecryptionFailure(t *testing.T) {
 		ID: "enc-fail-peek", Title: "t", Content: "ciphertext",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ContentType: nil, EditCode: "",
-		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 	storage.EXPECT().Get(gomock.Any(), domain.HashSlug("enc-fail-peek")).Return(note, nil)
 
@@ -2037,7 +2037,7 @@ func TestGet_BurnAfterReading_DecryptionFailure(t *testing.T) {
 		ID: "burn-enc-fail", Title: "t", BurnAfterReading: true, Content: "ciphertext",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
 		OwnerID: nil, ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	}
 	storage.EXPECT().Get(gomock.Any(), domain.HashSlug("burn-enc-fail")).Return(raw, nil)
 
@@ -2060,7 +2060,7 @@ func TestGet_BurnTTL_DecryptionFailure(t *testing.T) {
 	raw := &domain.Note{
 		ID: "burn-ttl-enc-fail", Title: "t", BurnAfterReading: true, BurnTTL: 3600, Content: "ciphertext",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
-		OwnerID: nil, ContentType: nil, EditCode: "", Views: 0, ClearExpiry: false,
+		OwnerID: nil, ContentType: nil, EditCode: "", Views: 0, ClearExpiry: false, ShowContents: nil,
 	}
 	storage.EXPECT().Get(gomock.Any(), domain.HashSlug("burn-ttl-enc-fail")).Return(raw, nil)
 
@@ -2081,21 +2081,21 @@ func (s *ManagerTestSuite) TestUpdateExplicitExpiry() {
 			CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 			Privacy: nil, OwnerID: nil, ID: "", Title: "",
 			ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
-			BurnAfterReading: false, ClearExpiry: false,
+			BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 		}, &future},
 		{"clear", &domain.Note{
 			Content: "body", ClearExpiry: true,
 			CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 			Privacy: nil, OwnerID: nil, ID: "", Title: "",
 			ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
-			BurnAfterReading: false,
+			BurnAfterReading: false, ShowContents: nil,
 		}, nil},
 		{"replace", &domain.Note{
 			Content: "body", ExpiresAt: &future,
 			CreatedAt: time.Time{}, UpdatedAt: time.Time{}, Privacy: nil,
 			OwnerID: nil, ID: "", Title: "", ContentType: nil,
 			EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
-			ClearExpiry: false,
+			ClearExpiry: false, ShowContents: nil,
 		}, &future},
 	} {
 		s.Run(testCase.name, func() {
@@ -2103,7 +2103,7 @@ func (s *ManagerTestSuite) TestUpdateExplicitExpiry() {
 				ID: domain.HashSlug("slug"), EditCode: "code", ExpiresAt: &future,
 				CreatedAt: time.Time{}, UpdatedAt: time.Time{}, Privacy: nil,
 				OwnerID: nil, Title: "", Content: "", ContentType: nil,
-				Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+				Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 			}
 			s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("slug")).Return(existing, nil)
 			s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("slug"), gomock.Any()).
@@ -2135,14 +2135,14 @@ func (s *ManagerTestSuite) TestUpdateBurnImmediateExpiry() {
 			CreatedAt: time.Time{}, UpdatedAt: time.Time{}, Privacy: nil,
 			OwnerID: nil, ID: "", Title: "", Content: "",
 			ContentType: nil, Views: 0, BurnTTL: 0, BurnAfterReading: false,
-			ClearExpiry: false,
+			ClearExpiry: false, ShowContents: nil,
 		}, &future},
 		{"no expiry stays none", &domain.Note{
 			EditCode:  "code",
 			CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 			Privacy: nil, OwnerID: nil, ID: "", Title: "",
 			Content: "", ContentType: nil, Views: 0, BurnTTL: 0,
-			BurnAfterReading: false, ClearExpiry: false,
+			BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 		}, nil},
 		{
 			"stale burn timer dropped",
@@ -2150,7 +2150,7 @@ func (s *ManagerTestSuite) TestUpdateBurnImmediateExpiry() {
 				EditCode: "code", BurnAfterReading: true, BurnTTL: 600, ExpiresAt: &future,
 				CreatedAt: time.Time{}, UpdatedAt: time.Time{}, Privacy: nil, OwnerID: nil,
 				ID: "", Title: "", Content: "", ContentType: nil, Views: 0,
-				ClearExpiry: false,
+				ClearExpiry: false, ShowContents: nil,
 			},
 			nil,
 		},
@@ -2168,7 +2168,7 @@ func (s *ManagerTestSuite) TestUpdateBurnImmediateExpiry() {
 				Content: "body", BurnAfterReading: true,
 				CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
 				OwnerID: nil, ID: "", Title: "", ContentType: nil, EditCode: "",
-				Views: 0, BurnTTL: 0, ClearExpiry: false,
+				Views: 0, BurnTTL: 0, ClearExpiry: false, ShowContents: nil,
 			}
 			_, err := s.manager.Update(s.T().Context(), "slug", "code", uuid.Nil, update)
 			s.Require().NoError(err)
@@ -2188,7 +2188,7 @@ func (s *ManagerTestSuite) TestDecryptionFailureLogsOnlyHashedSlug() {
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, Title: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	}
 	err := decryptContent(s.T().Context(), failingEncryptor{}, log, note)
 	s.Require().ErrorIs(err, domain.ErrNotFound)

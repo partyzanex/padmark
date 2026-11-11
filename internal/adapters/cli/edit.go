@@ -57,6 +57,10 @@ func editCommand() *urcli.Command {
 				flag.Name = FlagBurn
 				flag.Usage = "Enable burn-after-reading"
 			}),
+			clifactory.BoolFlag(func(flag *urcli.BoolFlag) {
+				flag.Name = FlagContents
+				flag.Usage = "Show the \"On this page\" sidebar (--contents=false hides it; omit to keep)"
+			}),
 			clifactory.Int64Flag(func(flag *urcli.Int64Flag) {
 				flag.Name = FlagTTL
 				flag.Usage = "Lifetime in seconds from this update; with --burn, grace period after first read"
@@ -153,6 +157,10 @@ func buildUpdateReq(cmd *urcli.Command, content, editCode string) *padmark.Updat
 
 	if cmd.IsSet(FlagBurn) {
 		req.BurnAfterReading = padmark.NewOptBool(cmd.Bool(FlagBurn))
+	}
+
+	if cmd.IsSet(FlagContents) {
+		req.ShowContents = padmark.NewOptBool(cmd.Bool(FlagContents))
 	}
 
 	// With --burn the API reads TTL as the post-read grace period, otherwise as a hard expiry.

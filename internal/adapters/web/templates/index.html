@@ -108,6 +108,17 @@
                     </div>
                 </div>
 
+                <label class="setting-row" id="contentsLabel">
+                    <span class="setting-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 6h3M4 12h3M4 18h3M11 6h9M13 12h7M13 18h7"/></svg>
+                    </span>
+                    <span class="setting-text">
+                        <span class="setting-title">Contents sidebar</span>
+                        <span class="setting-desc">“On this page” from headings</span>
+                    </span>
+                    <input type="checkbox" class="switch" role="switch" id="contentsCheck"{{if .ShowContents}} checked{{end}}>
+                </label>
+
                 {{if .EditMode}}
                 <div class="field-group">
                     <label class="field-label" for="editCodeInput">Edit code <span class="optional">· {{if .IsOwner}}optional, you created this note{{else}}required{{end}}</span></label>
@@ -211,6 +222,15 @@
         return privacy === initialPrivacy ? undefined : privacy;
     }
 
+    // Editing keeps the stored sidebar option unless the user changes the switch, the same
+    // contract as privacy: an unchanged value is not sent.
+    const initialContents = document.getElementById('contentsCheck').checked;
+
+    function changedContents() {
+        const showContents = document.getElementById('contentsCheck').checked;
+        return showContents === initialContents ? undefined : showContents;
+    }
+
     function getTTL() {
         if (!document.getElementById('burnCheck').checked) return 0;
         return parseInt(document.getElementById('burnTime').value);
@@ -234,7 +254,10 @@
         btn.textContent = 'Publishing…';
         btn.disabled = true;
 
-        const payload = { title, content, burn_after_reading: burnAfterReading, privacy: getPrivacy() };
+        const payload = {
+            title, content, burn_after_reading: burnAfterReading, privacy: getPrivacy(),
+            show_contents: document.getElementById('contentsCheck').checked
+        };
         if (slug) payload.slug = slug;
         if (burnAfterReading) payload.ttl = ttl;
 
@@ -279,7 +302,10 @@
         btn.disabled = true;
 
         const burn = document.getElementById('burnCheck').checked;
-        const payload = { title: title || 'Untitled', content, edit_code: editCode, burn_after_reading: burn, privacy: changedPrivacy() };
+        const payload = {
+            title: title || 'Untitled', content, edit_code: editCode, burn_after_reading: burn,
+            privacy: changedPrivacy(), show_contents: changedContents()
+        };
         if (burn) payload.ttl = ttl;
 
         try {

@@ -51,7 +51,7 @@ func TestCiphertextCASPreservesConcurrentReplacements(t *testing.T) {
 
 		ExpiresAt: nil, Privacy: nil, OwnerID: nil, Title: "",
 		ContentType: nil, Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	}))
 	repo := repository.New(db)
 	row, err := repo.Get(t.Context(), "note", domain.HashSlug("slug"))
@@ -101,7 +101,7 @@ func TestConvertLegacyCASAndTargetConflict(t *testing.T) {
 
 		ExpiresAt: nil, Privacy: nil, OwnerID: nil, Title: "",
 		ContentType: nil, Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	}))
 
 	repo := repository.New(db)

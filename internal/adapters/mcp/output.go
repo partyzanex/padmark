@@ -27,6 +27,7 @@ func (m *Manager) noteOutputFromCreate(resp *padmark.CreateNoteResponse) createN
 		Privacy:          "",
 		EditCode:         "",
 		EditCodeNote:     "",
+		ShowContents:     resp.ShowContents.Or(false),
 	}
 	if resp.Privacy.Set {
 		out.Privacy = string(resp.Privacy.Value)
@@ -56,6 +57,7 @@ func noteOutputFromNote(resp *padmark.NoteResponse) createNoteOutput {
 		Privacy:          "",
 		EditCode:         "",
 		EditCodeNote:     "",
+		ShowContents:     resp.ShowContents.Or(false),
 	}
 	if resp.Privacy.Set {
 		out.Privacy = string(resp.Privacy.Value)

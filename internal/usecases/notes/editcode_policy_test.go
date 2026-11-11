@@ -17,7 +17,7 @@ func (s *ManagerTestSuite) TestCreate_RejectsShortCustomEditCode() {
 			Title: "hello", Content: "world", EditCode: code,
 			CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 			Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
-			Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+			Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 		}
 
 		result, err := s.manager.Create(s.T().Context(), note)
@@ -34,7 +34,7 @@ func (s *ManagerTestSuite) TestCreate_RejectsMalformedCustomEditCode() {
 		Title: "hello", Content: "world", EditCode: " 12345678",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
-		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 
 	_, err := s.manager.Create(s.T().Context(), note)
@@ -49,7 +49,7 @@ func (s *ManagerTestSuite) TestCreate_AcceptsMinLengthCustomEditCode() {
 		Title: "hello", Content: "world", EditCode: "12345678",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
-		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 
 	s.expectSlugFree()

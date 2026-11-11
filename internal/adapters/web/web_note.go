@@ -83,6 +83,8 @@ type noteViewData struct {
 	Views             int
 	CanEdit           bool
 	NeedsConfirmation bool
+	// ShowContents adds the "On this page" sidebar; the burn confirmation page never shows it.
+	ShowContents bool
 }
 
 func toNoteViewData(note *domain.Note, rendered string) noteViewData {
@@ -115,6 +117,7 @@ func toNoteViewData(note *domain.Note, rendered string) noteViewData {
 		ConfirmToken:      "",
 		CanEdit:           false,
 		NeedsConfirmation: false,
+		ShowContents:      note.ContentsSidebar(),
 	}
 }
 
@@ -130,7 +133,8 @@ type noteJSON struct {
 	Views            int                `json:"views"`
 	BurnAfterReading bool               `json:"burn_after_reading"`
 	// Private is the deprecated v0.1.6 flag, true when Privacy is not public.
-	Private bool `json:"private"`
+	Private      bool `json:"private"`
+	ShowContents bool `json:"show_contents"`
 }
 
 func toNoteJSON(note *domain.Note) noteJSON {
@@ -146,6 +150,7 @@ func toNoteJSON(note *domain.Note) noteJSON {
 		BurnAfterReading: note.BurnAfterReading,
 		Privacy:          note.EffectivePrivacy(),
 		Private:          privateFlag(note),
+		ShowContents:     note.ContentsSidebar(),
 	}
 }
 
@@ -168,6 +173,8 @@ func toBurnInterstitialViewData(note *domain.Note, tok string) noteViewData {
 		RawContent: "",
 		ExpiresISO: "",
 		CanEdit:    false,
+		// The interstitial does not show the note, so it has no headings to list.
+		ShowContents: false,
 	}
 }
 

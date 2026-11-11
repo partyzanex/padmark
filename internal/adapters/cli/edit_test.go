@@ -69,3 +69,20 @@ func TestBuildUpdateReq_DeprecatedPrivate(t *testing.T) {
 	req = buildUpdateReqFor(t)
 	assert.False(t, req.Privacy.IsSet(), "privacy must be omitted when no flag is given")
 }
+
+// TestBuildUpdateReq_Contents checks that edit keeps the stored sidebar option unless the flag
+// is passed, and that --contents=false is sent.
+func TestBuildUpdateReq_Contents(t *testing.T) {
+	t.Parallel()
+
+	req := buildUpdateReqFor(t)
+	assert.False(t, req.ShowContents.IsSet(), "show_contents must be omitted when the flag is not passed")
+
+	req = buildUpdateReqFor(t, "--contents")
+	require.True(t, req.ShowContents.IsSet())
+	assert.True(t, req.ShowContents.Value)
+
+	req = buildUpdateReqFor(t, "--contents=false")
+	require.True(t, req.ShowContents.IsSet())
+	assert.False(t, req.ShowContents.Value)
+}

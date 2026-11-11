@@ -19,6 +19,7 @@ type createNoteInput struct {
 	TTL              *int64  `json:"ttl,omitempty"                jsonschema:"Lifetime in seconds (burn: after 1 read)"`
 	EditCode         *string `json:"edit_code,omitempty"          jsonschema:"8-128 char edit code, else random"`
 	Privacy          *string `json:"privacy,omitempty"            jsonschema:"public, authenticated, or owner"`
+	ShowContents     *bool   `json:"show_contents,omitempty"      jsonschema:"Show an On this page sidebar"`
 	Content          string  `json:"content"                      jsonschema:"Note body; Markdown or plain text"`
 	RevealEditCode   bool    `json:"reveal_edit_code,omitempty"   jsonschema:"Reveal the one-time edit code"`
 }
@@ -36,6 +37,7 @@ type createNoteOutput struct {
 	EditCodeNote     string `json:"edit_code_note,omitempty"`
 	Views            int    `json:"views"`
 	BurnAfterReading bool   `json:"burn_after_reading"`
+	ShowContents     bool   `json:"show_contents"`
 }
 
 type getNoteInput struct {
@@ -48,6 +50,7 @@ type updateNoteInput struct {
 	BurnAfterReading *bool   `json:"burn_after_reading,omitempty" jsonschema:"New burn-after-reading setting"`
 	TTL              *int64  `json:"ttl,omitempty"                jsonschema:"Post-read grace (burn) or hard expiry"`
 	Privacy          *string `json:"privacy,omitempty"            jsonschema:"New privacy level"`
+	ShowContents     *bool   `json:"show_contents,omitempty"      jsonschema:"New sidebar setting; omit to keep"`
 	EditCode         *string `json:"edit_code,omitempty"          jsonschema:"Omit when the proxy holds it"`
 	ID               string  `json:"id"                           jsonschema:"Note ID (its URL slug)"`
 	Content          string  `json:"content"                      jsonschema:"New note body (full replace)"`
