@@ -441,6 +441,75 @@ func (sess *uiSession) link(name string) {
 	sess.must(sess.role(playwright.AriaRoleLink, name).Click())
 }
 
+// mobile reports whether the scenario runs at phone width.
+func (sess *uiSession) mobile() bool { return sess.screen.name == "mobile" }
+
+// openSettings shows the publish settings. Phone width keeps them in a bottom sheet behind the
+// "Settings" button; wide screens show them beside the editor, so the call does nothing there.
+func (sess *uiSession) openSettings() {
+	sess.t.Helper()
+
+	if !sess.mobile() {
+		return
+	}
+
+	sess.click("#settingsToggle")
+	sess.visible("#sheetClose")
+}
+
+// closeSettings closes the settings sheet of phone width.
+func (sess *uiSession) closeSettings() {
+	sess.t.Helper()
+
+	if !sess.mobile() {
+		return
+	}
+
+	sess.click("#sheetClose")
+	sess.must(sess.expect.Locator(sess.page.Locator("#sheetClose")).ToBeHidden())
+}
+
+// chooseTheme selects a theme: one of three buttons on wide screens, the cycle button on a phone.
+func (sess *uiSession) chooseTheme(theme string) {
+	sess.t.Helper()
+
+	if !sess.mobile() {
+		sess.button(strings.ToUpper(theme[:1]) + theme[1:] + " theme")
+
+		return
+	}
+
+	// The cycle has three themes, thus two clicks reach each other theme.
+	for range 2 {
+		current, err := sess.page.Locator("html").GetAttribute("data-theme")
+		sess.must(err)
+
+		if current == theme {
+			return
+		}
+
+		sess.click("#themeCycle")
+	}
+}
+
+// openEditor follows the Edit action of the note header; the page footer has an Edit link too.
+func (sess *uiSession) openEditor() {
+	sess.t.Helper()
+	sess.click(`.meta-actions a[href^="/edit/"]`)
+}
+
+// shownEditCode reveals the masked edit code of the success page and returns it.
+func (sess *uiSession) shownEditCode() string {
+	sess.t.Helper()
+	sess.button("Show")
+	sess.text("#editCodeRevealBtn", "Hide")
+	sess.must(sess.expect.Locator(sess.page.Locator("#editCodeValue")).ToHaveText(nonempty))
+	code, err := sess.page.Locator("#editCodeValue").InnerText()
+	sess.must(err)
+
+	return strings.TrimSpace(code)
+}
+
 func (sess *uiSession) expectLayout(selectors ...string) {
 	sess.t.Helper()
 	sess.eval("() => document.fonts.ready")
@@ -468,14 +537,12 @@ func (sess *uiSession) publishNote() (string, string) {
 	sess.fill("#editor", "# Hello\n\nThis is **Markdown**.")
 	sess.button("Publish note")
 	sess.must(sess.expect.Page(sess.page).ToHaveURL(regexpURL("/success?")))
-	sess.must(sess.expect.Locator(sess.page.Locator("#editCodeValue")).ToHaveText(nonempty))
-	code, err := sess.page.Locator("#editCodeValue").InnerText()
-	sess.must(err)
+	code := sess.shownEditCode()
 	link, err := sess.role(playwright.AriaRoleLink, "Open note").GetAttribute("href")
 	sess.must(err)
 	require.NotEmpty(sess.t, link)
 
-	return strings.TrimSpace(code), link
+	return code, link
 }
 
 func (sess *uiSession) admin() string {

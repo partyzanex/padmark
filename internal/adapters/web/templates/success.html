@@ -10,7 +10,7 @@
 <body>
 <div class="wrapper">
 
-    {{template "header" ""}}
+    {{template "header" .Header}}
 
     <main class="center-main">
         <section class="card success-card" aria-labelledby="successTitle">
@@ -34,6 +34,10 @@
                     </button>
                 </div>
                 <div class="action-row">
+                    <button type="button" class="btn-ghost" id="shareBtn" data-url="{{.URL}}" hidden>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 8l5-5 5 5M5 14v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5"/></svg>
+                        Share
+                    </button>
                     <a href="{{.URL}}" class="btn-ghost">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>
                         {{if .IsLink}}Open link{{else}}Open note{{end}}
@@ -59,9 +63,9 @@
                 </div>
                 <div class="secret-row">
                     <code class="secret-value" id="editCodeValue"></code>
-                    <button type="button" class="btn-ghost secret-copy" id="editCodeCopyBtn">
+                    <button type="button" class="btn-ghost" id="editCodeRevealBtn" aria-pressed="false">Show</button>
+                    <button type="button" class="btn-icon" id="editCodeCopyBtn" aria-label="Copy edit code">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
-                        Copy
                     </button>
                 </div>
                 <p class="secret-note">Save it now — you'll need it to edit or delete this {{if .IsLink}}link{{else}}note{{end}}. It cannot be recovered.</p>
@@ -72,7 +76,7 @@
                     {{if eq .Privacy "owner"}}
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>Owner only
                     {{else if eq .Privacy "authenticated"}}
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>Requires login
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>Login required
                     {{else}}
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>Public
                     {{end}}
@@ -130,14 +134,33 @@
             copyText(this, this.dataset.url, ' Copied');
         });
 
+        // The system share sheet is offered where the browser has one (phones).
+        const shareBtn = document.getElementById('shareBtn');
+        if (navigator.share) {
+            shareBtn.hidden = false;
+            shareBtn.addEventListener('click', function () {
+                navigator.share({ url: this.dataset.url }).catch(() => { /* the user closed the sheet */ });
+            });
+        }
+
         const id = new URLSearchParams(location.search).get('id');
         const key = ({{.IsLink}} ? 'padmark_link_edit_' : 'padmark_edit_') + id;
         const code = sessionStorage.getItem(key);
         if (code) {
             sessionStorage.removeItem(key);
-            document.getElementById('editCodeValue').textContent = code;
+            // The code starts masked, so it is not readable over the shoulder; "Show" reveals it.
+            const value = document.getElementById('editCodeValue');
+            const reveal = document.getElementById('editCodeRevealBtn');
+            const masked = code.replace(/[^-]/g, '•');
+            value.textContent = masked;
+            reveal.addEventListener('click', function () {
+                const shown = this.getAttribute('aria-pressed') !== 'true';
+                this.setAttribute('aria-pressed', String(shown));
+                this.textContent = shown ? 'Hide' : 'Show';
+                value.textContent = shown ? code : masked;
+            });
             document.getElementById('editCodeCopyBtn').addEventListener('click', function () {
-                copyText(this, code, ' Copied');
+                copyText(this, code, '');
             });
         } else {
             // edit code not available (e.g. page was refreshed) — hide the block

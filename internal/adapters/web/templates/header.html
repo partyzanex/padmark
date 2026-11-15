@@ -1,23 +1,48 @@
-{{/* header renders the site header. Its argument names the current create page:
-     "note", "link" or "" for other pages; that tab gets aria-current="page". */}}
+{{/* header renders the site header from a headerView (see web_header.go). Kind selects the
+     controls: the create tabs, the "New" button of reader pages or the admin links. The account
+     block replaces "Sign in" for a signed-in user. On phone width the links and the account
+     block move into the menu under #menuBtn, and one button cycles the theme. */}}
 {{define "header"}}
 <header class="header">
     <a href="/" class="logo" aria-label="Padmark — home">Padmark<span class="logo-dot">.</span></a>
-    <nav class="nav-create" aria-label="Create">
-        <a href="/" class="nav-tab"{{if eq . "note"}} aria-current="page"{{end}}>
+    {{- if .Tabs}}
+    <nav class="nav-create{{if eq .Kind "login"}} nav-create--wide{{end}}" aria-label="Create">
+        <a href="/" class="nav-tab"{{if eq .Kind "note"}} aria-current="page"{{end}}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h4"/></svg>
             Note
         </a>
-        <a href="/links" class="nav-tab"{{if eq . "link"}} aria-current="page"{{end}}>
+        <a href="/links" class="nav-tab"{{if eq .Kind "link"}} aria-current="page"{{end}}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.07 0l2.83-2.83a5 5 0 0 0-7.07-7.07L11.5 4.5"/><path d="M14 11a5 5 0 0 0-7.07 0L4.1 13.83a5 5 0 0 0 7.07 7.07l1.33-1.4"/></svg>
             Short link
         </a>
     </nav>
+    {{- end}}
     <div class="header-spacer"></div>
-    <nav class="header-links" aria-label="Resources">
-        <a href="/api" class="header-link">API</a>
-        <a href="https://github.com/partyzanex/padmark" class="header-link" target="_blank" rel="noopener noreferrer">GitHub</a>
-    </nav>
+    <div class="header-menu" id="headerMenu">
+        <nav class="header-links" aria-label="Resources">
+            {{- if eq .Kind "admin"}}
+            <a href="/" class="header-link">New note</a>
+            {{- end}}
+            <a href="/api" class="header-link">API</a>
+            {{- if ne .Kind "admin"}}
+            <a href="https://github.com/partyzanex/padmark" class="header-link" target="_blank" rel="noopener noreferrer">GitHub</a>
+            {{- end}}
+        </nav>
+        {{- if .SignedIn}}
+        <div class="account">
+            <span class="account-avatar" aria-hidden="true">{{.Initial}}</span>
+            <a href="{{if .IsAdmin}}/admin{{else}}/change-password{{end}}" class="account-name"><strong>{{.Username}}</strong><span>{{if .IsAdmin}}Admin{{else}}User{{end}}</span></a>
+            <form method="POST" action="/logout">
+                <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+                <button type="submit" class="account-signout" aria-label="Sign out">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 16l-4-4 4-4M6 12h10"/></svg>
+                </button>
+            </form>
+        </div>
+        {{- else if and .Accounts .Tabs}}
+        <a href="/login" class="btn-ghost header-signin"{{if eq .Kind "login"}} aria-current="page"{{end}}>Sign in</a>
+        {{- end}}
+    </div>
     <div class="theme-switcher" id="themeSwitcher" role="group" aria-label="Theme">
         <button type="button" class="theme-btn" data-theme-value="light" aria-label="Light theme" aria-pressed="false">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
@@ -29,6 +54,24 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/></svg>
         </button>
     </div>
+    <button type="button" class="header-icon theme-cycle" id="themeCycle" aria-label="Theme: dim. Switch theme">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 3.5a8.5 8.5 0 0 1 0 17z" fill="currentColor"/></svg>
+    </button>
+    {{- if eq .Kind "view"}}
+    <a href="/" class="btn-primary header-new" aria-label="New note">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+        <span>New</span>
+    </a>
+    {{- end}}
+    {{- if or .SignedIn (ne .Kind "view")}}
+    <button type="button" class="header-icon header-menu-btn" id="menuBtn" aria-label="{{if .SignedIn}}Account: {{.Username}}{{else}}Menu{{end}}" aria-expanded="false" aria-controls="headerMenu">
+        {{- if .SignedIn}}
+        <span class="account-avatar" aria-hidden="true">{{.Initial}}</span>
+        {{- else}}
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+        {{- end}}
+    </button>
+    {{- end}}
 </header>
 {{end}}
 
@@ -60,13 +103,75 @@
 {{- end}}
 {{end}}
 
-{{/* signout renders the POST /logout form. It needs a view model with CSRFToken, so it is
-     included only by pages that exist solely for signed-in users (admin, change-password). */}}
+{{/* signout renders the POST /logout form for phone width, where the account block of the
+     header is inside the menu. It needs a view model with CSRFToken, so it is included only by
+     pages that exist solely for signed-in users (admin, change-password). */}}
 {{define "signout"}}
-<form method="POST" action="/logout">
+<form method="POST" action="/logout" class="signout-form">
     <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
-    <button type="submit" class="btn-ghost">Sign out</button>
+    <button type="submit" class="btn-ghost">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 16l-4-4 4-4M6 12h10"/></svg>
+        Sign out
+    </button>
 </form>
+{{end}}
+
+{{/* sheet-head renders the head of the settings bottom sheet; only phone width shows it.
+     Its argument is the sheet title. */}}
+{{define "sheet-head"}}
+<div class="sheet-head">
+    <span class="sheet-grabber" aria-hidden="true"></span>
+    <div class="sheet-title-row">
+        <h2 class="sheet-title" id="sheetTitle">{{.}}</h2>
+        <button type="button" class="sheet-close" id="sheetClose" aria-label="Close settings">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+        </button>
+    </div>
+</div>
+{{end}}
+
+{{/* settings-toggle renders the button of the phone bar that opens the settings sheet. The page
+     script writes the current settings to #settingsSummary. */}}
+{{define "settings-toggle"}}
+<button type="button" class="settings-toggle" id="settingsToggle" aria-haspopup="dialog" aria-expanded="false" aria-controls="settingsSheet">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>
+    <span class="settings-toggle-text"><strong>Settings</strong><span id="settingsSummary"></span></span>
+</button>
+{{end}}
+
+{{/* sheet-js opens and closes the settings sheet of the create pages and supplies
+     generateEditCode for the "Generate edit code" button. */}}
+{{define "sheet-js"}}
+    (function () {
+        const toggle = document.getElementById('settingsToggle');
+        const backdrop = document.getElementById('sheetBackdrop');
+
+        function setOpen(open) {
+            document.body.classList.toggle('sheet-open', open);
+            toggle.setAttribute('aria-expanded', String(open));
+            backdrop.hidden = !open;
+        }
+
+        toggle.addEventListener('click', () => setOpen(true));
+        document.getElementById('sheetClose').addEventListener('click', () => setOpen(false));
+        backdrop.addEventListener('click', () => setOpen(false));
+        document.addEventListener('keydown', ev => {
+            if (ev.key === 'Escape') setOpen(false);
+        });
+        // The browser cannot focus an invalid field in a closed sheet and then blocks the submit
+        // without a message. "invalid" does not bubble, thus the listener uses the capture phase.
+        document.getElementById('settingsSheet').addEventListener('invalid', () => setOpen(true), true);
+    })();
+
+    // generateEditCode returns a random code of three groups of four characters. The alphabet
+    // has 32 characters without the look-alike 0/O and 1/I; 256 % 32 === 0, thus the choice
+    // has no bias.
+    function generateEditCode() {
+        const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+        const bytes = crypto.getRandomValues(new Uint8Array(12));
+        const chars = Array.from(bytes, byte => alphabet[byte % 32]);
+        return [chars.slice(0, 4), chars.slice(4, 8), chars.slice(8, 12)].map(group => group.join('')).join('-');
+    }
 {{end}}
 
 {{define "theme-js"}}
@@ -78,6 +183,7 @@
             btn.classList.toggle('active', on);
             btn.setAttribute('aria-pressed', String(on));
         });
+        document.getElementById('themeCycle').setAttribute('aria-label', 'Theme: ' + theme + '. Switch theme');
     }
 
     function setTheme(theme) {
@@ -98,4 +204,30 @@
     document.querySelectorAll('.theme-btn').forEach(btn => {
         btn.addEventListener('click', () => setTheme(btn.dataset.themeValue));
     });
+
+    // Phone width has one theme button; it goes through the themes in a circle.
+    document.getElementById('themeCycle').addEventListener('click', () => {
+        const current = themes.indexOf(document.documentElement.getAttribute('data-theme'));
+        setTheme(themes[(current + 1) % themes.length]);
+    });
+
+    // Phone width keeps the header links and the account block in a menu under #menuBtn.
+    (function () {
+        const btn = document.getElementById('menuBtn');
+        const menu = document.getElementById('headerMenu');
+        if (!btn) return;
+
+        function setOpen(open) {
+            menu.classList.toggle('open', open);
+            btn.setAttribute('aria-expanded', String(open));
+        }
+
+        btn.addEventListener('click', () => setOpen(!menu.classList.contains('open')));
+        document.addEventListener('click', ev => {
+            if (!menu.contains(ev.target) && !btn.contains(ev.target)) setOpen(false);
+        });
+        document.addEventListener('keydown', ev => {
+            if (ev.key === 'Escape') setOpen(false);
+        });
+    })();
 {{end}}

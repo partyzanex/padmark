@@ -2499,7 +2499,7 @@ func (s *HandlerSuite) TestLoginPage_Error() {
 	s.router.ServeHTTP(w, r)
 
 	s.Equal(http.StatusOK, w.Code)
-	s.Contains(w.Body.String(), "Invalid credentials")
+	s.Contains(w.Body.String(), "That didn't work.")
 }
 
 func (s *HandlerSuite) TestLoginPage_WriteFail() {

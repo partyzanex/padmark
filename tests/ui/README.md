@@ -79,6 +79,11 @@ func testExample(e *ui) {
 }
 ```
 
+Phone width keeps the publish settings in a bottom sheet and the header links in a menu.
+Use `openSettings`/`closeSettings` around actions on a setting, `chooseTheme` for the theme and
+`shownEditCode` to read the masked edit code of the success page; these helpers do the right
+thing at both screen sizes.
+
 Assertions use Playwright's waiting assertions and `testify/require`. Prefer semantic
 role/label locators where available and stable IDs for editor controls. Check the
 visible result after submitting. Avoid fixed sleeps and dependencies between cases.

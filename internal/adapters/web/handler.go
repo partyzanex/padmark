@@ -260,18 +260,13 @@ func (c *common) isAuthenticated(r *http.Request) bool {
 	return false
 }
 
-// signedIn reports whether the request carries a valid credential of the account system. Unlike
-// isAuthenticated it is false when accounts are off: then nobody can sign in.
-func (c *common) signedIn(r *http.Request) bool {
-	return c.authMgr != nil && c.isAuthenticated(r)
-}
-
 // parseTmpl parses a page template together with the shared header partial.
 func parseTmpl(name, src string) *template.Template {
 	return template.Must(
 		template.Must(template.New(name).Funcs(template.FuncMap{
 			"styleVersion": func() string { return styleVersion },
 			"assetVersion": assetVersions(),
+			"initial":      initial,
 		}).Parse(src)).Parse(headerTmplSrc),
 	)
 }

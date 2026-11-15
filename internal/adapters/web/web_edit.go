@@ -53,7 +53,10 @@ func (h *NoteHandler) EditPage(w http.ResponseWriter, r *http.Request) {
 	usr := middleware.UserFromContext(r)
 	isOwner := usr != nil && note.OwnedBy(usr.ID)
 
+	header := h.header(r, headerKindPlain)
+
 	err = h.indexTmpl.Execute(w, editorViewData{
+		Header:           header,
 		ID:               note.ID,
 		Title:            note.Title,
 		Content:          content,
@@ -62,7 +65,7 @@ func (h *NoteHandler) EditPage(w http.ResponseWriter, r *http.Request) {
 		EditMode:         true,
 		BurnAfterReading: note.BurnAfterReading || note.BurnTTL > 0,
 		Privacy:          string(note.EffectivePrivacy()),
-		PrivacyOptions:   privacyOptions(h.authMgr != nil, h.signedIn(r), note.EffectivePrivacy()),
+		PrivacyOptions:   privacyOptions(h.authMgr != nil, header.SignedIn(), note.EffectivePrivacy()),
 		Nonce:            middleware.NonceFromContext(r.Context()),
 		IsOwner:          isOwner,
 		ShowContents:     note.ContentsSidebar(),

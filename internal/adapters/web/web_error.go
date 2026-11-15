@@ -21,8 +21,9 @@ type errorViewData struct {
 	Title     string
 	Desc      string
 	Detail    string
-	ErrorType string // errorTypeClient or errorTypeServer.
+	ErrorType string
 	Nonce     string
+	Header    headerView
 	Code      int
 }
 
@@ -30,6 +31,7 @@ func domainErrToPageData(err error) errorViewData {
 	switch {
 	case errors.Is(err, domain.ErrNotFound):
 		return errorViewData{
+			Header:    noHeader(),
 			Code:      http.StatusNotFound,
 			ErrorType: errorTypeClient,
 			Title:     "Paste not found",
@@ -40,6 +42,7 @@ func domainErrToPageData(err error) errorViewData {
 		}
 	case errors.Is(err, domain.ErrInvalidEditCode):
 		return errorViewData{
+			Header:    noHeader(),
 			Code:      http.StatusForbidden,
 			ErrorType: errorTypeClient,
 			Title:     "Forbidden",
@@ -49,6 +52,7 @@ func domainErrToPageData(err error) errorViewData {
 		}
 	case errors.Is(err, domain.ErrForbidden):
 		return errorViewData{
+			Header:    noHeader(),
 			Code:      http.StatusForbidden,
 			ErrorType: errorTypeClient,
 			Title:     "Forbidden",
@@ -58,6 +62,7 @@ func domainErrToPageData(err error) errorViewData {
 		}
 	case errors.Is(err, domain.ErrExpired):
 		return errorViewData{
+			Header:    noHeader(),
 			Title:     "Paste expired",
 			Desc:      "This paste had a limited lifetime and has been automatically deleted after expiration.",
 			Detail:    "",
@@ -80,6 +85,7 @@ func domainErrToDefaultPageData(err error) errorViewData {
 	status, message := domainErrStatus(err)
 	if message == "" {
 		return errorViewData{
+			Header:    noHeader(),
 			Code:      http.StatusInternalServerError,
 			ErrorType: errorTypeServer,
 			Title:     "Internal server error",
@@ -90,6 +96,7 @@ func domainErrToDefaultPageData(err error) errorViewData {
 	}
 
 	return errorViewData{
+		Header:    noHeader(),
 		Code:      status,
 		ErrorType: errorTypeClient,
 		Title:     "Request rejected",
@@ -124,6 +131,7 @@ func (c *common) writeNoteError(w http.ResponseWriter, r *http.Request, err erro
 // for cases that need a tailored title/description rather than a domain sentinel.
 func (c *common) writeErrorPageData(w http.ResponseWriter, r *http.Request, data *errorViewData) {
 	data.Nonce = middleware.NonceFromContext(r.Context())
+	data.Header = c.header(r, headerKindPlain)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(data.Code)
@@ -140,6 +148,7 @@ func (c *common) writeErrorPageData(w http.ResponseWriter, r *http.Request, data
 // invite an action that would change nothing.
 func privateToOtherPageData() errorViewData {
 	return errorViewData{
+		Header:    noHeader(),
 		Code:      http.StatusForbidden,
 		ErrorType: errorTypeClient,
 		Title:     "Not yours",
@@ -153,6 +162,7 @@ func privateToOtherPageData() errorViewData {
 // after the first admin already exists (the bootstrap endpoint is closed).
 func setupClosedPageData() errorViewData {
 	return errorViewData{
+		Header:    noHeader(),
 		Code:      http.StatusForbidden,
 		ErrorType: errorTypeClient,
 		Title:     "Setup is closed",
@@ -166,6 +176,7 @@ func setupClosedPageData() errorViewData {
 // bootstrap token, so nobody can prove ownership of the server.
 func setupDisabledPageData() errorViewData {
 	return errorViewData{
+		Header:    noHeader(),
 		Code:      http.StatusForbidden,
 		ErrorType: errorTypeClient,
 		Title:     "Setup is disabled",

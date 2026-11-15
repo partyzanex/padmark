@@ -1,0 +1,62 @@
+/* Padmark design tokens: light (.pm), dim (.pm.dim), dark (.pm.dark) */
+
+.pm {
+  --bg:#F3F4F6;
+  --surface:#FFFFFF;
+  --sunken:#F7F8FA;
+  --ink:#14151A;
+  --ink-2:#3B3E48;
+  --muted:#5D6170;
+  --line:#E2E4EA;
+  --line-2:#CDD0D8;
+  --accent:#4A3AE0;
+  --on-accent:#FFFFFF;
+  --accent-soft:#ECEAFF;
+  --accent-text:#3A2BC4;
+  --warn:#9A4A06;
+  --warn-soft:#FFF1E0;
+  --code-bg:#F0F1F4;
+  --shadow:0 1px 2px rgba(20,21,26,.05),0 10px 30px -14px rgba(20,21,26,.14);
+  font-family:'Onest',system-ui,-apple-system,'Segoe UI',sans-serif;
+  color:var(--ink);
+  background:var(--bg);
+  -webkit-font-smoothing:antialiased;
+}
+
+.pm.dim {
+  --bg:#26272F;
+  --surface:#2F3039;
+  --sunken:#2A2B33;
+  --ink:#ECEDF2;
+  --ink-2:#CDCFD8;
+  --muted:#A9ACB8;
+  --line:#3D3F4A;
+  --line-2:#4F525E;
+  --accent:#9C92FF;
+  --on-accent:#14151A;
+  --accent-soft:#37335C;
+  --accent-text:#BDB6FF;
+  --warn:#F2A766;
+  --warn-soft:#43321F;
+  --code-bg:#353640;
+  --shadow:0 1px 2px rgba(0,0,0,.3),0 14px 34px -16px rgba(0,0,0,.6);
+}
+
+.pm.dark {
+  --bg:#0A0B0E;
+  --surface:#121318;
+  --sunken:#0E0F13;
+  --ink:#EDEEF2;
+  --ink-2:#C4C6CF;
+  --muted:#9295A2;
+  --line:#22242C;
+  --line-2:#30323C;
+  --accent:#8E83FF;
+  --on-accent:#0A0B0E;
+  --accent-soft:#1E1B3A;
+  --accent-text:#ADA5FF;
+  --warn:#F2A766;
+  --warn-soft:#2D2116;
+  --code-bg:#1A1B22;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 14px 34px -16px rgba(0,0,0,.8);
+}

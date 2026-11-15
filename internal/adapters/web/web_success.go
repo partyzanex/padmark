@@ -18,6 +18,7 @@ type successViewData struct {
 	ExpiresLabel     string
 	Privacy          string
 	Nonce            string
+	Header           headerView
 	BurnAfterReading bool
 	IsLink           bool
 }
@@ -73,6 +74,7 @@ func (h *PageHandler) SuccessPage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
 	err := h.successTmpl.Execute(w, successViewData{
+		Header:           h.header(r, headerKindView),
 		ID:               id,
 		URL:              noteURL,
 		ExpiresLabel:     expiresLabel,

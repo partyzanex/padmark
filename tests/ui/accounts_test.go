@@ -29,6 +29,7 @@ func testPrivacyOptions(sess *uiSession) {
 	sess.admin()
 	sess.gotoPage("/")
 	sess.expectPrivacyOptions("public", "authenticated", "owner")
+	sess.openSettings()
 	sess.choosePrivacy("owner")
 	sess.must(sess.expect.Locator(sess.page.Locator("#privacy-owner")).ToBeChecked())
 	sess.choosePrivacy("authenticated")
@@ -91,7 +92,7 @@ func testLogin(sess *uiSession) {
 	sess.must(sess.expect.Page(sess.page).ToHaveURL(sess.baseURL + "/login"))
 	sess.fill("#code", "123456")
 	sess.button("Sign in")
-	sess.text(".login-error", "Invalid credentials. Please try again.")
+	sess.text(".login-error", "That didn't work. Check all three fields — the code changes every 30 seconds.")
 	sess.must(sess.expect.Locator(sess.page.Locator("#username")).ToBeEditable())
 }
 
@@ -101,7 +102,7 @@ func testAdminForms(sess *uiSession) {
 	sess.expectLayout(".header", ".admin-wrap", ".admin-invite-form", ".admin-key-form", "#ttl_days")
 	sess.screenshot("admin.png", ".user-meta")
 	sess.must(sess.browserContext.GrantPermissions([]string{"clipboard-read", "clipboard-write"}))
-	sess.button("Generate invite")
+	sess.button("Invite user")
 	inviteLink := sess.page.Locator("#inviteLinkValue")
 	sess.must(sess.expect.Locator(inviteLink).ToHaveText(regexp.MustCompile(`/setup\?invite=.+`)))
 	invite, err := sess.page.Locator("#inviteLinkValue").InnerText()
@@ -135,7 +136,7 @@ func testAdminForms(sess *uiSession) {
 
 func testRevokeUser(sess *uiSession) {
 	sess.admin()
-	sess.button("Generate invite")
+	sess.button("Invite user")
 	invite, err := sess.page.Locator("#inviteLinkValue").InnerText()
 	sess.must(err)
 	inviteURL, err := url.Parse(invite)

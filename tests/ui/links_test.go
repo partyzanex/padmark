@@ -38,11 +38,8 @@ func (sess *uiSession) createdLink() (string, string) {
 
 	id := current.Query().Get("id")
 	require.NotEmpty(sess.t, id)
-	sess.must(sess.expect.Locator(sess.page.Locator("#editCodeValue")).ToHaveText(nonempty))
-	code, err := sess.page.Locator("#editCodeValue").InnerText()
-	sess.must(err)
 
-	return id, code
+	return id, sess.shownEditCode()
 }
 
 func (sess *uiSession) readLink(id string) linkMetadata {
@@ -64,14 +61,15 @@ func (sess *uiSession) createTestLink() (string, string) {
 	sess.expectPrivacyOptions("public")
 	sess.fill("#targetInput", "https://example.com/original?value=1")
 	sess.fill("#slugInput", "ui-link")
+	sess.openSettings()
 	sess.fill("#editCodeInput", "Link-Edit-Code42!")
 	sess.selectOption("#expirySelect", "seconds")
 	sess.fill("#ttlInput", "123")
 	sess.selectOption("#redirectSelect", "false")
 	sess.click("#burnLabel")
-	sess.expectLayout(".header", "#targetInput", "#slugInput", "#editCodeInput", "#privacySelect",
-		"#redirectSelect", "#ttlInput", "#burnLabel", "#submitBtn")
-	sess.expectFullHeight()
+	sess.expectLayout("#editCodeInput", "#privacySelect", "#redirectSelect", "#ttlInput", "#burnLabel")
+	sess.closeSettings()
+	sess.expectLayout(".header", "#targetInput", "#slugInput", "#submitBtn")
 	sess.screenshot("link-editor.png", "#previewHost")
 	sess.button("Create link")
 	id, code := sess.createdLink()
@@ -81,6 +79,15 @@ func (sess *uiSession) createTestLink() (string, string) {
 	sess.screenshot("link-created.png", ".copy-value", ".success-subtitle")
 
 	return id, code
+}
+
+// setLinkOptions selects the expiration and the redirect mode in the link settings.
+func (sess *uiSession) setLinkOptions(expiry, redirect string) {
+	sess.t.Helper()
+	sess.openSettings()
+	sess.selectOption("#expirySelect", expiry)
+	sess.selectOption("#redirectSelect", redirect)
+	sess.closeSettings()
 }
 
 func testLinkCreateEditDelete(sess *uiSession) {
@@ -97,7 +104,9 @@ func testLinkCreateEditDelete(sess *uiSession) {
 	sess.screenshot("link-edit.png", "#expiryHint", "#previewHost")
 	sess.button("Save link")
 	sess.text("#linkError", "Edit code required")
+	sess.openSettings()
 	sess.fill("#editCodeInput", code)
+	sess.closeSettings()
 	sess.fill("#targetInput", "https://example.com/updated")
 	sess.must(sess.page.Locator("#targetInput").Press("Control+Enter"))
 	sess.text("#linkStatus", "Link saved")
@@ -108,8 +117,7 @@ func testLinkCreateEditDelete(sess *uiSession) {
 	require.True(sess.t, saved.BurnAfterClick)
 	require.NotNil(sess.t, saved.DirectRedirect)
 	require.False(sess.t, *saved.DirectRedirect)
-	sess.selectOption("#expirySelect", "never")
-	sess.selectOption("#redirectSelect", "inherit")
+	sess.setLinkOptions("never", "inherit")
 	sess.button("Save link")
 	sess.text("#linkStatus", "Link saved")
 	saved = sess.readLink(id)
@@ -135,6 +143,8 @@ func testLinkValidation(sess *uiSession) {
 	sess.button("Create link")
 	sess.visible("#slugInput:invalid")
 	sess.fill("#slugInput", "valid-slug")
+	// The sheet stays open to the end: the main action is in view above it.
+	sess.openSettings()
 	sess.fill("#editCodeInput", "short")
 	sess.button("Create link")
 	sess.visible("#editCodeInput:invalid")
@@ -170,7 +180,9 @@ func testLinkFailureRetry(sess *uiSession) {
 func testLinkBurnAfterClick(sess *uiSession) {
 	sess.gotoPage("/links")
 	sess.fill("#targetInput", sess.baseURL+"/healthz")
+	sess.openSettings()
 	sess.click("#burnLabel")
+	sess.closeSettings()
 	sess.button("Create link")
 	id, _ := sess.createdLink()
 	metadata := sess.readLink(id)
@@ -187,10 +199,12 @@ func testLinkPrivacyAndOwnership(sess *uiSession) {
 	sess.admin()
 	sess.gotoPage("/links")
 	sess.expectPrivacyOptions("public", "authenticated", "owner")
+	sess.fill("#targetInput", "https://example.com/private?secret=keep-private")
+	sess.openSettings()
 	sess.choosePrivacy("owner")
 	sess.must(sess.expect.Locator(sess.page.Locator("#privacy-owner")).ToBeChecked())
-	sess.fill("#targetInput", "https://example.com/private?secret=keep-private")
 	sess.selectOption("#redirectSelect", "true")
+	sess.closeSettings()
 	sess.button("Create link")
 	id, _ := sess.createdLink()
 	metadata := sess.readLink(id)

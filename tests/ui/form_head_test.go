@@ -9,11 +9,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// formHeadParts are the parts above the editor body that must not move when the user switches
-// between the note and short-link forms.
+// formHeadParts are the header parts that must not move when the user switches between the note
+// and short-link forms. The cards below the header have different content in each form.
 var formHeadParts = []string{ //nolint:gochecknoglobals // A fixed selector list shared by the scenarios.
-	".header", ".editor-head", ".head-row > svg", ".head-input", ".slug-field", ".slug-prefix",
-	"#slugInput", ".editor-toolbar",
+	".header", ".logo",
 }
 
 type layoutBox struct {
@@ -25,7 +24,8 @@ type layoutBox struct {
 
 type formHead struct {
 	Boxes map[string]layoutBox `json:"boxes"`
-	Font  string               `json:"font"`
+	// CardTop is the top edge of the form card.
+	CardTop float64 `json:"card_top"`
 }
 
 func TestFormHead(t *testing.T) {
@@ -60,7 +60,7 @@ func testFormHeadEdit(sess *uiSession) {
 	sess.expectSameHead(note, sess.formHead())
 }
 
-// formHead measures the head parts and the head input font after the fonts load.
+// formHead measures the header parts and the top edge of the form card after the fonts load.
 func (sess *uiSession) formHead() formHead {
 	sess.t.Helper()
 	sess.eval("() => document.fonts.ready")
@@ -71,9 +71,8 @@ func (sess *uiSession) formHead() formHead {
 			const rect = document.querySelector(selector).getBoundingClientRect();
 			boxes[selector] = {x: rect.x, y: rect.y, width: rect.width, height: rect.height};
 		}
-		const style = getComputedStyle(document.querySelector(".head-input"));
-		const font = [style.fontFamily, style.fontSize, style.fontWeight, style.lineHeight, style.letterSpacing];
-		return JSON.stringify({boxes, font: font.join(" ")});
+		const cardTop = document.querySelector(".editor-card").getBoundingClientRect().y;
+		return JSON.stringify({boxes, card_top: cardTop});
 	}`, formHeadParts)
 	sess.must(err)
 
@@ -88,7 +87,7 @@ func (sess *uiSession) formHead() formHead {
 
 func (sess *uiSession) expectSameHead(note, link formHead) {
 	sess.t.Helper()
-	require.Equal(sess.t, note.Font, link.Font, "the head inputs use the same font")
+	require.InDelta(sess.t, note.CardTop, link.CardTop, 0.5, "the form cards start at the same height")
 
 	for _, selector := range formHeadParts {
 		want, got := note.Boxes[selector], link.Boxes[selector]

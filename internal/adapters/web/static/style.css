@@ -54,24 +54,25 @@ html { font-size: 16px; }
 /* ================================================================
    Design tokens. One set of variables for the three themes:
    dim is the default, light and dark override it through [data-theme].
+   The values come from docs/design/tokens.css.
    ================================================================ */
 :root,
 [data-theme="dim"] {
-    --bg:          #3A3B44;
-    --surface:     #44454F;
-    --sunken:      #3F4049;
-    --ink:         #F1F2F6;
-    --ink-2:       #D5D7DF;
-    --muted:       #BABDC8;
-    --line:        #55575F;
-    --line-2:      #696C76;
+    --bg:          #26272F;
+    --surface:     #2F3039;
+    --sunken:      #2A2B33;
+    --ink:         #ECEDF2;
+    --ink-2:       #CDCFD8;
+    --muted:       #A9ACB8;
+    --line:        #3D3F4A;
+    --line-2:      #4F525E;
     --accent:      #9C92FF;
     --on-accent:   #14151A;
-    --accent-soft: #4D4878;
-    --accent-text: #C9C3FF;
-    --warn:        #F6B57E;
-    --warn-soft:   #5C4630;
-    --code-bg:     #4B4C56;
+    --accent-soft: #37335C;
+    --accent-text: #BDB6FF;
+    --warn:        #F2A766;
+    --warn-soft:   #43321F;
+    --code-bg:     #353640;
     --shadow:      0 1px 2px rgba(0,0,0,.3), 0 14px 34px -16px rgba(0,0,0,.6);
     --seg-shadow:  0 1px 2px rgba(0,0,0,.14);
 
@@ -135,7 +136,8 @@ html { font-size: 16px; }
 }
 
 /* ================================================================
-   Base
+   Base. Font sizes come only from the scale 11 / 12 / 13 / 14 / 15 / 17 / 20 / 24 / 28 / 32;
+   phone-width inputs use 16px so that iOS does not zoom the page on focus.
    ================================================================ */
 body {
     font-family: var(--font-ui);
@@ -191,21 +193,22 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
    Layout
    ================================================================ */
 .wrapper {
+    --page-pad: clamp(16px, 4vw, 40px);
     width: 100%;
-    max-width: 1280px;
+    max-width: 1200px;
     min-height: 100vh;
     margin: 0 auto;
-    padding: 0 clamp(16px, 4vw, 40px);
+    padding: 0 var(--page-pad);
     display: flex;
     flex-direction: column;
 }
 
-.wrapper--note { max-width: 1180px; }
+.wrapper--note { max-width: 1120px; }
 
 .card {
     background: var(--surface);
     border: 1px solid var(--line);
-    border-radius: 18px;
+    border-radius: 12px;
     box-shadow: var(--shadow);
 }
 
@@ -213,17 +216,18 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
    Header
    ================================================================ */
 .header {
+    position: relative;
     display: flex;
     align-items: center;
     gap: 20px;
     flex-wrap: wrap;
-    padding: 22px 0;
+    padding: 16px 0;
 }
 
 .logo {
     font-family: var(--font-display);
     font-weight: 700;
-    font-size: 25.5px;
+    font-size: 24px;
     letter-spacing: -0.02em;
     line-height: 1;
     color: var(--ink);
@@ -241,7 +245,7 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     padding: 3px;
     background: var(--surface);
     border: 1px solid var(--line);
-    border-radius: 11px;
+    border-radius: 9px;
 }
 
 .nav-tab {
@@ -251,7 +255,7 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     height: 34px;
     padding: 0 14px;
     border-radius: 8px;
-    font-size: 13.5px;
+    font-size: 13px;
     font-weight: 500;
     color: var(--muted);
 }
@@ -266,7 +270,11 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .nav-tab svg { width: 16px; height: 16px; flex: none; }
 
-.header-links { display: flex; gap: 2px; align-items: center; }
+/* The menu wrapper has no box on wide screens: its children are header items, and `order`
+   puts the theme switcher between the links and the account block. */
+.header-menu { display: contents; }
+
+.header-links { order: 1; display: flex; gap: 2px; align-items: center; }
 
 .header-link {
     height: 36px;
@@ -274,7 +282,7 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     align-items: center;
     padding: 0 12px;
     border-radius: 8px;
-    font-size: 13.5px;
+    font-size: 13px;
     color: var(--muted);
 }
 
@@ -282,6 +290,7 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* ── Theme switcher: sun · half · moon ── */
 .theme-switcher {
+    order: 2;
     display: flex;
     gap: 2px;
     padding: 3px;
@@ -311,6 +320,93 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .theme-btn svg { width: 16px; height: 16px; }
 
+/* "New" on reader pages and "Sign in" on the create pages: the last header control. */
+.header-new {
+    order: 3;
+    height: 38px;
+    gap: 6px;
+    padding: 0 14px;
+    border-radius: 9px;
+}
+
+.header-signin {
+    order: 4;
+    height: 38px;
+    border-radius: 9px;
+    background: transparent;
+}
+
+.header-signin[aria-current="page"] {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    color: var(--accent-text);
+    font-weight: 600;
+}
+
+/* Account block: avatar, name with role, sign out. */
+.account {
+    order: 4;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 3px 3px 3px 4px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--surface);
+}
+
+.account-avatar {
+    width: 32px;
+    height: 32px;
+    flex: none;
+    border-radius: 9px;
+    display: grid;
+    place-items: center;
+    background: var(--accent-soft);
+    color: var(--accent-text);
+    font-weight: 700;
+    font-size: 13px;
+    text-transform: uppercase;
+}
+
+.account-name { display: flex; flex-direction: column; min-width: 0; line-height: 1.2; color: var(--ink); }
+.account-name strong { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+.account-name span { font-size: 11px; color: var(--muted); }
+.account form { display: flex; }
+
+.account-signout {
+    width: 36px;
+    height: 36px;
+    border: 0;
+    border-radius: 9px;
+    display: grid;
+    place-items: center;
+    background: transparent;
+    color: var(--muted);
+}
+
+.account-signout:hover { background: var(--sunken); color: var(--ink); }
+.account-signout svg { width: 17px; height: 17px; }
+
+/* Icon buttons of the phone header: theme cycle and menu. Wide screens do not show them. */
+.header-icon {
+    display: none;
+    width: 44px;
+    height: 44px;
+    flex: none;
+    border: 0;
+    border-radius: 10px;
+    place-items: center;
+    background: transparent;
+    color: var(--ink-2);
+}
+
+.header-icon svg { width: 20px; height: 20px; }
+
+/* Sign-out form in the page body: only phone width shows it (see the "signout" template). */
+.signout-form,
+.login-card .signout-form { display: none; }
+
 /* ================================================================
    Footer
    ================================================================ */
@@ -320,9 +416,9 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     justify-content: space-between;
     gap: 12px;
     flex-wrap: wrap;
-    padding: 20px 0 32px;
+    padding: 16px 0 24px;
     border-top: 1px solid var(--line);
-    font-size: 12.5px;
+    font-size: 12px;
     color: var(--muted);
 }
 
@@ -339,13 +435,13 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     align-items: center;
     justify-content: center;
     gap: 8px;
-    height: 40px;
+    height: 36px;
     padding: 0 16px;
     border: 0;
     border-radius: 10px;
     background: var(--accent);
     color: var(--on-accent);
-    font-size: 13.5px;
+    font-size: 13px;
     font-weight: 600;
     white-space: nowrap;
     transition: filter .15s ease, opacity .15s ease;
@@ -356,12 +452,11 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .btn-primary:disabled,
 .btn-publish:disabled { opacity: .7; cursor: default; }
 
-/* The main action of a form: full width, taller. */
+/* The main action of a form: full width, 44px. */
 .btn-publish {
     width: 100%;
-    height: 50px;
-    border-radius: 12px;
-    font-size: 14.5px;
+    height: 44px;
+    font-size: 14px;
     gap: 12px;
 }
 
@@ -378,19 +473,20 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 }
 
 .btn-publish.is-error { background: var(--warn); color: var(--on-accent); }
+.btn-publish svg { width: 17px; height: 17px; flex: none; }
 
 .btn-ghost {
     display: inline-flex;
     align-items: center;
     justify-content: center;
     gap: 7px;
-    height: 40px;
+    height: 36px;
     padding: 0 14px;
     border: 1px solid var(--line-2);
     border-radius: 10px;
     background: var(--surface);
     color: var(--ink);
-    font-size: 13.5px;
+    font-size: 13px;
     font-weight: 500;
     white-space: nowrap;
 }
@@ -401,13 +497,14 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .btn-revoke {
     display: inline-flex;
     align-items: center;
+    justify-content: center;
     height: 34px;
     padding: 0 12px;
     border-radius: 8px;
     border: 1px solid var(--line-2);
     background: transparent;
     color: var(--warn);
-    font-size: 12.5px;
+    font-size: 12px;
     font-weight: 600;
     white-space: nowrap;
 }
@@ -416,8 +513,8 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .btn-revoke:hover { background: var(--warn-soft); }
 
 .btn-icon {
-    width: 44px;
-    height: 44px;
+    width: 40px;
+    height: 40px;
     flex: none;
     display: grid;
     place-items: center;
@@ -431,8 +528,8 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .btn-icon:hover { background: var(--sunken); }
 
 .btn-primary svg,
-.btn-ghost svg,
-.btn-icon svg { width: 16px; height: 16px; flex: none; }
+.btn-ghost svg { width: 16px; height: 16px; flex: none; }
+.btn-icon svg { width: 17px; height: 17px; flex: none; }
 
 /* ================================================================
    Form fields
@@ -447,12 +544,12 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .field-input,
 .field-select {
     width: 100%;
-    height: 42px;
+    height: 38px;
     padding: 0 12px;
     border: 1px solid var(--line-2);
     border-radius: 9px;
     background: var(--surface);
-    font-size: 13.5px;
+    font-size: 13px;
     outline: none;
     transition: border-color .15s, box-shadow .15s;
 }
@@ -466,7 +563,7 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 }
 
 .field-input:read-only { color: var(--muted); }
-.field-input--mono { font-family: var(--font-mono); font-size: 13px; }
+.field-input--mono { font-family: var(--font-mono); }
 
 .field-hint {
     font-size: 12px;
@@ -520,7 +617,7 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .pw-toggle {
     position: absolute;
     top: 50%;
-    right: 4px;
+    right: 1px;
     transform: translateY(-50%);
     display: grid;
     place-items: center;
@@ -575,9 +672,9 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     flex: 1 0 auto;
     display: flex;
     flex-wrap: wrap;
-    gap: 24px;
+    gap: 20px;
     align-items: stretch;
-    padding: 12px 0 56px;
+    padding: 8px 0 40px;
 }
 
 .editor-card {
@@ -589,31 +686,28 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 }
 
 .editor-head {
-    padding: 26px 28px 18px;
+    padding: 20px 24px 14px;
     display: flex;
     flex-direction: column;
     gap: 10px;
 }
 
-/* The note and short-link heads share one structure, so switching forms moves nothing. */
-.head-row { display: flex; align-items: center; gap: 12px; }
-.head-row > svg { width: 22px; height: 22px; flex: none; color: var(--muted); }
-
+/* Note title: a bare serif input on the card. */
 .head-input {
-    flex: 1;
+    width: 100%;
     min-width: 0;
     border: 0;
     background: transparent;
     padding: 0;
     outline: none;
-    font-family: var(--font-ui);
-    font-size: 30.5px;
+    font-family: var(--font-display);
+    font-size: 32px;
     font-weight: 600;
     letter-spacing: -0.015em;
     line-height: 1.2;
 }
 
-/* "Slug /" + slug: one bordered field. */
+/* "URL /" + slug: one bordered field. */
 .slug-field {
     display: flex;
     align-items: center;
@@ -624,7 +718,7 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     border-radius: 8px;
     background: var(--sunken);
     font-family: var(--font-mono);
-    font-size: 12.5px;
+    font-size: 12px;
     transition: border-color .15s, box-shadow .15s;
 }
 
@@ -649,8 +743,6 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     justify-content: space-between;
     gap: 10px;
     flex-wrap: wrap;
-    /* A 40px control, the padding and both borders: the same height with or without controls. */
-    min-height: 58px;
     padding: 8px 12px 8px 16px;
     border-top: 1px solid var(--line);
     border-bottom: 1px solid var(--line);
@@ -668,7 +760,7 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     border-radius: 8px;
     background: transparent;
     color: var(--ink-2);
-    font-size: 13.5px;
+    font-size: 13px;
     font-weight: 700;
 }
 
@@ -701,7 +793,7 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     border-radius: 7px;
     background: transparent;
     color: var(--muted);
-    font-size: 12.5px;
+    font-size: 12px;
     font-weight: 500;
 }
 
@@ -730,10 +822,21 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .editor-body > .editor-preview.prose.markdown-body {
     min-width: 0;
     min-height: 470px;
-    padding: 22px 32px 28px;
-    font-size: 16px;
+    padding: 18px 24px 22px;
+    font-size: 15px;
     line-height: 1.65;
 }
+
+/* The preview is smaller than the note view, thus its headings are one step down the scale. */
+.editor-preview.prose.markdown-body h1,
+.editor-preview.prose.markdown-body h2 { margin: 28px 0 10px; padding-bottom: 0; border-bottom: 0; }
+.editor-preview.prose.markdown-body h1 { font-size: 24px; }
+.editor-preview.prose.markdown-body h2 { font-size: 20px; }
+.editor-preview.prose.markdown-body h3 { font-size: 17px; margin: 24px 0 8px; }
+.editor-preview.prose.markdown-body h4 { font-size: 15px; margin: 20px 0 8px; }
+.editor-preview.prose.markdown-body p { margin: 0 0 14px; }
+.editor-preview.prose.markdown-body pre { font-size: 12px; line-height: 1.6; padding: 14px 16px; margin: 0 0 18px; }
+.editor-preview.prose.markdown-body .contains-task-list { font-size: 14px; }
 
 .editor-body[data-view="split"] > .editor-preview { border-top: 1px solid var(--line); }
 
@@ -759,7 +862,7 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     resize: none;
     border: 0;
     outline: none;
-    padding: 22px 28px;
+    padding: 18px 24px;
     background: var(--surface);
     font-family: var(--font-mono);
     font-size: 13px;
@@ -777,7 +880,7 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     border-top: 1px solid var(--line);
     background: var(--sunken);
     font-family: var(--font-mono);
-    font-size: 11.5px;
+    font-size: 11px;
     color: var(--muted);
 }
 
@@ -786,53 +889,96 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .format-hint { display: flex; align-items: center; gap: 6px; }
 .format-hint svg { width: 14px; height: 14px; }
 
-/* ── Short-link preview ── */
-.link-preview {
-    flex: 1 0 auto;
-    min-height: 300px;
-    padding: 32px 28px;
-    display: flex;
-    flex-direction: column;
-    gap: 18px;
-}
+/* ── Short-link card: destination, slug and the resulting link ── */
+.editor-card--link { align-self: flex-start; }
 
-.link-preview-block { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.link-preview-caption { font-size: 12.5px; color: var(--muted); }
-
-.link-preview-short {
-    font-family: var(--font-mono);
-    font-size: 21px;
-    color: var(--ink);
-    word-break: break-all;
-}
-
-.link-preview-short strong { font-weight: 600; color: var(--accent-text); }
-
-.link-preview-target {
-    font-family: var(--font-mono);
-    font-size: 14px;
-    color: var(--ink-2);
-    word-break: break-all;
-}
-
-.link-preview-arrow { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12.5px; }
-.link-preview-arrow svg { width: 18px; height: 18px; }
-
-/* ── Settings panel ── */
-.settings-panel {
-    flex: 1 1 300px;
-    min-width: 0;
+.link-fields {
+    padding: 20px 24px;
     display: flex;
     flex-direction: column;
     gap: 16px;
 }
 
-.settings-card {
-    padding: 22px;
+.field-input--dest { height: 44px; font-size: 15px; }
+
+/* "/" + slug: one bordered field. */
+.slug-box {
+    display: flex;
+    align-items: center;
+    max-width: 360px;
+    height: 38px;
+    border: 1px solid var(--line-2);
+    border-radius: 9px;
+    background: var(--surface);
+    font-family: var(--font-mono);
+    font-size: 13px;
+    transition: border-color .15s, box-shadow .15s;
+}
+
+.slug-box:focus-within {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.slug-box > span { padding: 0 2px 0 12px; color: var(--muted); }
+
+.slug-box input {
+    flex: 1;
+    min-width: 0;
+    height: 100%;
+    border: 0;
+    background: transparent;
+    outline: none;
+    padding: 0 12px 0 2px;
+}
+
+.slug-box input:read-only { color: var(--muted); }
+
+.link-strip {
+    display: flex;
+    align-items: baseline;
+    gap: 6px 16px;
+    flex-wrap: wrap;
+    padding: 12px 24px;
+    border-top: 1px solid var(--line);
+    background: var(--sunken);
+}
+
+.link-strip-caption { font-size: 13px; color: var(--muted); }
+
+.link-strip-short {
+    font-family: var(--font-mono);
+    font-size: 15px;
+    color: var(--ink);
+    word-break: break-all;
+}
+
+.link-strip-short strong { font-weight: 600; color: var(--accent-text); }
+.link-strip-hint { margin-left: auto; font-size: 12px; color: var(--muted); }
+
+/* ── Settings panel: one card with the settings and the publish block ── */
+.settings-panel {
+    flex: 1 1 300px;
+    min-width: 0;
+    align-self: flex-start;
+    padding: 18px;
     display: flex;
     flex-direction: column;
-    gap: 22px;
+    gap: 18px;
 }
+
+.settings-card,
+.setting-list,
+.publish-bar {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+}
+
+/* Phone width shows the settings as a bottom sheet; these parts belong to the sheet only. */
+.sheet-head,
+.sheet-backdrop,
+.settings-toggle { display: none; }
 
 .privacy-options {
     border: 0;
@@ -851,7 +997,7 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     gap: 12px;
     align-items: flex-start;
     padding: 12px 14px;
-    border-radius: 12px;
+    border-radius: 10px;
     border: 1px solid var(--line);
     background: var(--surface);
     cursor: pointer;
@@ -876,7 +1022,7 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .privacy-option-text { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
 .privacy-option-title { font-weight: 600; font-size: 14px; }
-.privacy-option-desc { font-size: 12.5px; color: var(--muted); }
+.privacy-option-desc { font-size: 12px; color: var(--muted); }
 
 .privacy-option > svg {
     width: 18px;
@@ -912,11 +1058,12 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .setting-text { display: flex; flex-direction: column; gap: 1px; flex: 1; min-width: 0; }
 .setting-title { font-weight: 600; font-size: 14px; }
-.setting-desc { font-size: 12.5px; color: var(--muted); }
+.setting-desc { font-size: 12px; color: var(--muted); }
 
 .setting-group { display: flex; flex-direction: column; gap: 12px; }
 .setting-sub { display: flex; flex-direction: column; gap: 6px; padding-left: 48px; }
-.setting-sub > label { font-size: 12.5px; color: var(--muted); }
+.setting-sub > label { font-size: 12px; color: var(--muted); }
+.setting-sub .field-select { height: 36px; }
 
 /* The burn delay is offered only while burn after reading is on. */
 .burn-time-wrap:not(.active) { display: none; }
@@ -925,7 +1072,7 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .field-box {
     display: flex;
     align-items: center;
-    height: 42px;
+    height: 38px;
     padding: 0 3px 0 12px;
     border: 1px solid var(--line-2);
     border-radius: 9px;
@@ -944,6 +1091,21 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     font-size: 13px;
 }
 
+.field-box-btn {
+    width: 32px;
+    height: 32px;
+    flex: none;
+    display: grid;
+    place-items: center;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--muted);
+}
+
+.field-box-btn:hover { background: var(--sunken); color: var(--ink); }
+.field-box-btn svg { width: 16px; height: 16px; }
+
 .settings-divider { height: 1px; background: var(--line); }
 
 .publish-block { display: flex; flex-direction: column; gap: 10px; }
@@ -956,14 +1118,14 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .form-error {
     padding: 12px 14px;
-    border-radius: 12px;
+    border-radius: 10px;
     background: var(--warn-soft);
     color: var(--ink);
     font-size: 13px;
     line-height: 1.45;
 }
 
-.form-status { font-size: 12.5px; color: var(--muted); text-align: center; }
+.form-status { font-size: 12px; color: var(--muted); text-align: center; }
 .form-status:empty { display: none; }
 
 /* ================================================================
@@ -972,14 +1134,16 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .note-layout {
     display: flex;
     justify-content: center;
-    padding: 16px 0 48px;
+    align-items: flex-start;
+    gap: 24px;
+    padding: 12px 0 40px;
 }
 
 .article-card {
     flex: 1 1 620px;
     min-width: 0;
-    border-radius: 20px;
-    padding: clamp(20px, 3.5vw, 36px) clamp(20px, 6vw, 72px) clamp(24px, 5vw, 56px);
+    border-radius: 14px;
+    padding: clamp(18px, 3vw, 28px) clamp(18px, 5vw, 56px) clamp(22px, 4vw, 44px);
 }
 
 .article-header {
@@ -998,7 +1162,7 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     flex: 1 1 auto;
     min-width: 0;
     font-family: var(--font-display);
-    font-size: clamp(23px, 2.47vw, 28.5px);
+    font-size: clamp(24px, 2.47vw, 28px);
     font-weight: 600;
     letter-spacing: -0.015em;
     line-height: 1.25;
@@ -1017,7 +1181,7 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     border-radius: 999px;
     background: var(--accent-soft);
     color: var(--accent-text);
-    font-size: 11.5px;
+    font-size: 11px;
     font-weight: 600;
     white-space: nowrap;
 }
@@ -1051,7 +1215,7 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     gap: 2px;
     padding: 3px;
     border: 1px solid var(--line);
-    border-radius: 11px;
+    border-radius: 9px;
     background: var(--surface);
 }
 
@@ -1059,6 +1223,7 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     height: 32px;
     display: flex;
     align-items: center;
+    justify-content: center;
     gap: 6px;
     padding: 0 10px;
     border: 0;
@@ -1078,17 +1243,17 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .confirm-card {
     max-width: 660px;
     margin: 0 auto;
-    padding: clamp(24px, 4vw, 40px);
+    padding: clamp(20px, 3.5vw, 36px);
     display: flex;
     flex-direction: column;
     gap: 18px;
-    border-radius: 22px;
+    border-radius: 14px;
 }
 
 .confirm-icon {
     width: 48px;
     height: 48px;
-    border-radius: 14px;
+    border-radius: 10px;
     display: grid;
     place-items: center;
     background: var(--warn-soft);
@@ -1099,17 +1264,18 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .confirm-title {
     font-family: var(--font-display);
-    font-size: 28.5px;
+    font-size: 28px;
     font-weight: 600;
     letter-spacing: -0.015em;
     line-height: 1.2;
 }
 
-.confirm-body { display: flex; flex-direction: column; gap: 10px; font-size: 14.5px; line-height: 1.6; color: var(--ink-2); }
+.confirm-body { display: flex; flex-direction: column; gap: 10px; font-size: 14px; line-height: 1.6; color: var(--ink-2); }
 .confirm-hint { font-size: 13px; color: var(--muted); }
 .confirm-actions { display: flex; gap: 10px; flex-wrap: wrap; padding-top: 4px; }
 .confirm-form { display: inline-flex; }
-.confirm-actions .btn-primary { height: 46px; padding: 0 20px; border-radius: 12px; }
+.confirm-actions .btn-primary,
+.confirm-actions .btn-ghost { height: 44px; padding: 0 20px; font-size: 14px; }
 .confirm-actions svg { width: 17px; height: 17px; }
 
 /* ================================================================
@@ -1120,17 +1286,17 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     display: flex;
     justify-content: center;
     align-items: flex-start;
-    padding: 48px 0 80px;
+    padding: 40px 0 64px;
 }
 
 .success-card {
     width: 100%;
     max-width: 660px;
-    border-radius: 22px;
-    padding: clamp(24px, 4vw, 44px);
+    border-radius: 14px;
+    padding: clamp(20px, 3.5vw, 36px);
     display: flex;
     flex-direction: column;
-    gap: 28px;
+    gap: 22px;
 }
 
 .success-head { display: flex; flex-direction: column; gap: 14px; align-items: flex-start; }
@@ -1138,7 +1304,7 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .success-icon {
     width: 48px;
     height: 48px;
-    border-radius: 14px;
+    border-radius: 10px;
     display: grid;
     place-items: center;
     background: var(--accent-soft);
@@ -1149,13 +1315,13 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .success-title {
     font-family: var(--font-display);
-    font-size: 32.5px;
+    font-size: 32px;
     font-weight: 600;
     letter-spacing: -0.015em;
     line-height: 1.15;
 }
 
-.success-subtitle { font-size: 14.5px; color: var(--muted); }
+.success-subtitle { font-size: 14px; color: var(--muted); line-height: 1.45; }
 
 .share-block { display: flex; flex-direction: column; gap: 10px; }
 .copy-row { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -1166,10 +1332,10 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     min-width: 0;
     display: flex;
     align-items: center;
-    min-height: 50px;
+    min-height: 44px;
     padding: 0 14px;
     border: 1px solid var(--line-2);
-    border-radius: 12px;
+    border-radius: 10px;
     background: var(--sunken);
 }
 
@@ -1179,18 +1345,16 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     font-size: 14px;
     color: var(--ink);
     overflow-wrap: anywhere;
-    padding: 12px 0;
+    padding: 10px 0;
 }
 
 a.copy-value:hover { color: var(--accent-text); }
 
 .copy-btn {
-    height: 50px;
+    height: 44px;
     padding: 0 20px;
-    border-radius: 12px;
+    font-size: 14px;
 }
-
-.copy-btn svg { width: 17px; height: 17px; }
 
 /* Edit code: shown once, so it sits in the warning colour. */
 .secret-block {
@@ -1198,7 +1362,7 @@ a.copy-value:hover { color: var(--accent-text); }
     flex-direction: column;
     gap: 12px;
     padding: 18px;
-    border-radius: 14px;
+    border-radius: 10px;
     background: var(--warn-soft);
     color: var(--ink);
 }
@@ -1223,7 +1387,8 @@ a.copy-value:hover { color: var(--accent-text); }
     overflow-wrap: anywhere;
 }
 
-.secret-note { font-size: 13px; color: var(--ink-2); }
+.secret-row .btn-ghost { height: 40px; }
+.secret-note { font-size: 13px; color: var(--ink-2); line-height: 1.45; }
 
 .chip-list { list-style: none; display: flex; flex-wrap: wrap; gap: 8px; }
 
@@ -1235,7 +1400,7 @@ a.copy-value:hover { color: var(--accent-text); }
     padding: 4px 12px;
     border-radius: 999px;
     border: 1px solid var(--line);
-    font-size: 12.5px;
+    font-size: 12px;
     color: var(--ink-2);
 }
 
@@ -1248,7 +1413,7 @@ a.copy-value:hover { color: var(--accent-text); }
     flex-wrap: wrap;
     padding-top: 20px;
     border-top: 1px solid var(--line);
-    font-size: 13.5px;
+    font-size: 13px;
     font-weight: 500;
 }
 
@@ -1260,38 +1425,38 @@ a.copy-value:hover { color: var(--accent-text); }
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 40px 0 80px;
+    padding: 32px 0 64px;
 }
 
 .login-card {
     width: 100%;
     max-width: 420px;
-    border-radius: 22px;
-    padding: clamp(24px, 5vw, 36px);
+    border-radius: 14px;
+    padding: clamp(20px, 4vw, 28px);
     display: flex;
     flex-direction: column;
-    gap: 20px;
+    gap: 16px;
 }
 
-.login-card form { display: flex; flex-direction: column; gap: 20px; }
+.login-card form { display: flex; flex-direction: column; gap: 16px; }
 .login-head { display: flex; flex-direction: column; gap: 8px; }
 
 .login-icon {
-    width: 44px;
-    height: 44px;
+    width: 40px;
+    height: 40px;
     margin-bottom: 6px;
-    border-radius: 12px;
+    border-radius: 10px;
     display: grid;
     place-items: center;
     background: var(--accent-soft);
     color: var(--accent-text);
 }
 
-.login-icon svg { width: 22px; height: 22px; }
+.login-icon svg { width: 20px; height: 20px; }
 
 .login-title {
     font-family: var(--font-display);
-    font-size: 28.5px;
+    font-size: 28px;
     font-weight: 600;
     letter-spacing: -0.015em;
     line-height: 1.2;
@@ -1302,17 +1467,16 @@ a.copy-value:hover { color: var(--accent-text); }
 .login-card .field-group { gap: 8px; }
 
 .login-card .field-input {
-    height: 46px;
+    height: 40px;
     padding: 0 14px;
-    border-radius: 11px;
     background: var(--sunken);
     font-size: 14px;
 }
 
 .login-card .field-input--code {
-    height: 56px;
+    height: 48px;
     font-family: var(--font-mono);
-    font-size: 23px;
+    font-size: 24px;
     font-weight: 600;
     letter-spacing: .5em;
     text-align: center;
@@ -1320,29 +1484,33 @@ a.copy-value:hover { color: var(--accent-text); }
 
 .login-error,
 .login-success {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
     padding: 12px 14px;
-    border-radius: 12px;
+    border-radius: 10px;
     background: var(--warn-soft);
     color: var(--ink);
     font-size: 13px;
     line-height: 1.45;
 }
 
+.login-error svg { width: 18px; height: 18px; flex: none; margin-top: 1px; color: var(--warn); }
+.login-error strong { font-weight: 600; }
 .login-success { background: var(--accent-soft); color: var(--accent-text); }
 
 .login-foot { text-align: center; font-size: 13px; color: var(--muted); }
-.login-card > form[action="/logout"] { align-items: center; }
 
 .qr-section { display: flex; flex-direction: column; align-items: center; gap: 14px; }
 
 .qr-section img {
-    border-radius: 14px;
+    border-radius: 10px;
     border: 1px solid var(--line);
     background: #FFFFFF;
     padding: 10px;
 }
 
-.qr-instruction { font-size: 13.5px; color: var(--muted); text-align: center; line-height: 1.5; }
+.qr-instruction { font-size: 13px; color: var(--muted); text-align: center; line-height: 1.5; }
 
 /* ================================================================
    Admin
@@ -1350,9 +1518,9 @@ a.copy-value:hover { color: var(--accent-text); }
 .admin-wrap {
     display: flex;
     flex-wrap: wrap;
-    gap: 32px;
+    gap: 24px;
     align-items: flex-start;
-    padding: 28px 0 64px;
+    padding: 20px 0 48px;
 }
 
 .admin-side {
@@ -1360,53 +1528,50 @@ a.copy-value:hover { color: var(--accent-text); }
     max-width: 100%;
     display: flex;
     flex-direction: column;
-    gap: 4px;
 }
 
 .admin-title {
     margin: 0 0 14px 12px;
     font-family: var(--font-display);
-    font-size: 28.5px;
+    font-size: 28px;
     font-weight: 600;
     letter-spacing: -0.015em;
 }
+
+.admin-tabs { display: flex; flex-direction: column; gap: 4px; }
 
 .side-link {
     display: flex;
     align-items: center;
     gap: 10px;
-    height: 40px;
+    height: 36px;
     padding: 0 12px;
     border-radius: 10px;
     border: 1px solid transparent;
     color: var(--muted);
-    font-size: 13.5px;
+    font-size: 13px;
     font-weight: 500;
 }
 
 .side-link:hover { color: var(--ink); background: var(--surface); }
+
+.side-link[aria-current="true"] {
+    background: var(--surface);
+    border-color: var(--line);
+    color: var(--ink);
+    font-weight: 600;
+}
+
 .side-link svg { width: 17px; height: 17px; flex: none; }
+.side-short { display: none; }
 
 .side-count {
     margin-left: auto;
     font-family: var(--font-mono);
-    font-size: 11.5px;
+    font-size: 11px;
+    font-weight: 500;
     color: var(--muted);
 }
-
-.admin-account {
-    margin-top: 14px;
-    padding: 12px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    border-top: 1px solid var(--line);
-}
-
-.admin-account-name { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.2; }
-.admin-account-name strong { font-size: 13px; font-weight: 600; }
-.admin-account-name span { font-size: 11px; color: var(--muted); }
-.admin-account .btn-ghost { height: 36px; padding: 0 12px; font-size: 12.5px; }
 
 .admin-main {
     flex: 999 1 640px;
@@ -1424,8 +1589,10 @@ a.copy-value:hover { color: var(--accent-text); }
     justify-content: space-between;
     gap: 16px;
     flex-wrap: wrap;
-    padding: 20px 20px 16px;
+    padding: 16px 18px 12px;
 }
+
+.admin-section-head--center { align-items: center; }
 
 .admin-section-text { display: flex; flex-direction: column; gap: 2px; }
 .admin-section-title { font-size: 17px; font-weight: 600; }
@@ -1440,19 +1607,20 @@ a.copy-value:hover { color: var(--accent-text); }
 }
 
 .admin-key-form .field-group { gap: 4px; }
-.admin-key-form .field-hint { font-size: 12px; }
+.admin-key-form .btn-ghost { padding: 0 16px; font-weight: 600; }
 
 .admin-key-form .field-input {
     width: 150px;
-    height: 40px;
+    height: 36px;
     border-radius: 10px;
     font-family: var(--font-mono);
 }
 
+/* A one-time secret: the invite link (accent) or the new API key (warning). */
 .admin-notice {
-    margin: 0 20px 16px;
+    margin: 0 18px 12px;
     padding: 14px;
-    border-radius: 12px;
+    border-radius: 10px;
     background: var(--accent-soft);
     display: flex;
     flex-direction: column;
@@ -1460,24 +1628,42 @@ a.copy-value:hover { color: var(--accent-text); }
 }
 
 .admin-notice-title { font-size: 13px; font-weight: 600; color: var(--accent-text); }
-.admin-notice--warn { background: var(--warn-soft); }
-.admin-notice--warn .admin-notice-title { color: var(--ink); }
 
 .admin-notice .copy-field {
     flex: 1 1 260px;
-    min-height: 42px;
-    border-radius: 10px;
+    min-height: 38px;
     background: var(--surface);
     padding: 0 12px;
 }
 
 .admin-notice .copy-value { font-size: 13px; padding: 8px 0; }
-.admin-notice .btn-ghost { height: 42px; }
+.admin-notice .btn-ghost { height: 38px; }
+
+.admin-notice--warn {
+    flex-direction: row;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+    background: var(--warn-soft);
+}
+
+.admin-notice--warn > svg { width: 18px; height: 18px; flex: none; color: var(--warn); }
+.admin-notice--warn .admin-notice-title { flex: 1 1 260px; font-weight: 400; color: var(--ink); }
+
+.admin-notice--warn .copy-value {
+    font-size: 12px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+}
+
+.admin-notice--warn .btn-ghost { height: 36px; padding: 0 12px; border-radius: 8px; font-size: 12px; font-weight: 600; }
 
 .msg-err {
-    margin: 0 20px 16px;
+    margin: 0 18px 12px;
     padding: 12px 14px;
-    border-radius: 12px;
+    border-radius: 10px;
     background: var(--warn-soft);
     color: var(--ink);
     font-size: 13px;
@@ -1497,15 +1683,15 @@ a.copy-value:hover { color: var(--accent-text); }
     letter-spacing: .06em;
     text-transform: uppercase;
     color: var(--muted);
-    padding: 12px 20px;
+    padding: 10px 18px;
     border-bottom: 1px solid var(--line);
     white-space: nowrap;
 }
 
 .admin-table td {
-    padding: 14px 20px;
+    padding: 11px 18px;
     border-bottom: 1px solid var(--line);
-    font-size: 13.5px;
+    font-size: 13px;
     vertical-align: middle;
     white-space: nowrap;
     color: var(--ink-2);
@@ -1514,7 +1700,8 @@ a.copy-value:hover { color: var(--accent-text); }
 .admin-table tr:last-child td { border-bottom: 0; }
 .admin-table .cell-actions { text-align: right; }
 .admin-table .cell-mono { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
-.admin-table .cell-muted { color: var(--muted); font-size: 12.5px; }
+.admin-table .cell-muted { color: var(--muted); font-size: 12px; }
+.admin-table .cell-owner { color: var(--ink); }
 
 .user-cell { display: flex; align-items: center; gap: 10px; }
 
@@ -1529,12 +1716,13 @@ a.copy-value:hover { color: var(--accent-text); }
     border: 1px solid var(--line);
     color: var(--ink-2);
     font-weight: 700;
-    font-size: 12.5px;
+    font-size: 12px;
     text-transform: uppercase;
 }
 
 .avatar--admin { background: var(--accent-soft); border-color: transparent; color: var(--accent-text); }
 .user-name { font-weight: 600; color: var(--ink); }
+.user-you { font-size: 11px; color: var(--muted); }
 
 .role-badge {
     display: inline-flex;
@@ -1544,16 +1732,16 @@ a.copy-value:hover { color: var(--accent-text); }
     border-radius: 999px;
     border: 1px solid var(--line-2);
     color: var(--ink-2);
-    font-size: 11.5px;
+    font-size: 11px;
     font-weight: 500;
 }
 
 .role-badge--admin { border-color: transparent; background: var(--accent-soft); color: var(--accent-text); font-weight: 600; }
 
-.key-prefix { font-family: var(--font-mono); font-size: 12.5px; font-weight: 600; color: var(--ink); }
+.key-prefix { font-family: var(--font-mono); font-size: 12px; font-weight: 600; color: var(--ink); }
 .key-prefix span { color: var(--muted); font-weight: 400; }
 
-.admin-empty { padding: 18px 20px; font-size: 13.5px; color: var(--muted); }
+.admin-empty { padding: 16px 18px; font-size: 13px; color: var(--muted); }
 
 /* ================================================================
    Error page
@@ -1561,8 +1749,8 @@ a.copy-value:hover { color: var(--accent-text); }
 .error-content {
     width: 100%;
     max-width: 560px;
-    border-radius: 22px;
-    padding: clamp(24px, 4vw, 44px);
+    border-radius: 14px;
+    padding: clamp(20px, 3.5vw, 36px);
     display: flex;
     flex-direction: column;
     gap: 14px;
@@ -1585,20 +1773,20 @@ a.copy-value:hover { color: var(--accent-text); }
 
 .error-title {
     font-family: var(--font-display);
-    font-size: 32.5px;
+    font-size: 32px;
     font-weight: 600;
     letter-spacing: -0.015em;
     line-height: 1.15;
 }
 
-.error-desc { font-size: 14.5px; color: var(--muted); line-height: 1.55; }
+.error-desc { font-size: 14px; color: var(--muted); line-height: 1.55; }
 .error-actions { display: flex; gap: 8px; flex-wrap: wrap; padding-top: 10px; }
 
 .error-detail {
     width: 100%;
     margin-top: 8px;
     padding: 14px;
-    border-radius: 12px;
+    border-radius: 10px;
     background: var(--sunken);
     border: 1px solid var(--line);
     display: flex;
@@ -1606,14 +1794,15 @@ a.copy-value:hover { color: var(--accent-text); }
     gap: 6px;
 }
 
-.error-detail-text { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink-2); overflow-wrap: anywhere; }
+.error-detail-text { font-family: var(--font-mono); font-size: 12px; color: var(--ink-2); overflow-wrap: anywhere; }
 
-/* "On this page": a sticky column beside the article on wide screens, a card above it otherwise.
-   The note-layout--toc modifier is present only when the author turned the sidebar on. */
-.note-layout--toc { gap: 32px; align-items: flex-start; }
-
+/* ================================================================
+   "On this page": a sticky column beside the article on wide screens, a drop-down list above
+   it otherwise. The nav is present only when the author turned the sidebar on.
+   ================================================================ */
 .note-toc { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .note-toc-title { padding: 0 10px 8px; }
+.note-toc-toggle { display: none; }
 
 .note-toc-list {
     list-style: none;
@@ -1628,7 +1817,7 @@ a.copy-value:hover { color: var(--accent-text); }
     display: block;
     padding: 7px 10px;
     border-radius: 8px;
-    font-size: 13.5px;
+    font-size: 13px;
     line-height: 1.35;
     color: var(--muted);
     overflow-wrap: anywhere;
@@ -1636,11 +1825,11 @@ a.copy-value:hover { color: var(--accent-text); }
 
 .note-toc-link:hover { color: var(--ink); background: var(--sunken); }
 .note-toc-link.active { color: var(--accent-text); background: var(--accent-soft); font-weight: 500; }
-.note-toc-item--sub .note-toc-link { padding-left: 22px; font-size: 13px; }
+.note-toc-item--sub .note-toc-link { padding-left: 22px; }
 
 @media (min-width: 960px) {
     .note-toc {
-        flex: 0 0 220px;
+        flex: 0 0 190px;
         position: sticky;
         top: 16px;
         max-height: calc(100vh - 32px);
@@ -1650,56 +1839,505 @@ a.copy-value:hover { color: var(--accent-text); }
 }
 
 @media (max-width: 959px) {
-    .note-layout--toc { flex-direction: column; align-items: stretch; gap: 16px; }
+    .note-layout--toc { flex-direction: column; align-items: stretch; gap: 12px; }
     /* In a column the article flex-basis would be a height; size the card by its content. */
     .note-layout--toc > .article-card { flex: none; }
 
     .note-toc {
-        padding: 14px 6px 6px;
+        gap: 0;
         background: var(--surface);
         border: 1px solid var(--line);
-        border-radius: 14px;
+        border-radius: 10px;
+        overflow: hidden;
     }
+
+    .note-toc-title { display: none; }
+
+    .note-toc-toggle {
+        width: 100%;
+        height: 48px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 0 14px;
+        border: 0;
+        background: transparent;
+        text-align: left;
+    }
+
+    .note-toc-toggle > svg:first-child { width: 17px; height: 17px; flex: none; color: var(--accent-text); }
+    .note-toc-toggle .lbl { flex: none; }
+
+    .note-toc-current {
+        flex: 1;
+        min-width: 0;
+        font-size: 13px;
+        font-weight: 500;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .note-toc-chevron { width: 16px; height: 16px; flex: none; color: var(--muted); transition: transform .15s; }
+    .note-toc.open .note-toc-chevron { transform: rotate(180deg); }
+
+    .note-toc-list { gap: 0; padding: 6px; border-top: 1px solid var(--line); }
+    .note-toc:not(.open) .note-toc-list { display: none; }
+
+    .note-toc-link {
+        display: flex;
+        align-items: center;
+        min-height: 44px;
+        padding: 6px 12px;
+        border-radius: 9px;
+        font-size: 14px;
+        color: var(--ink-2);
+    }
+
+    .note-toc-item--sub .note-toc-link { padding-left: 26px; }
 }
 
 /* ================================================================
-   Phone width: menus stack, toolbars wrap, wide tables scroll.
+   Phone width: a 52px header bar, 48px buttons, tap targets of 44px or more, 16px inputs.
+   The publish settings are a bottom sheet over a fixed bar; wide tables become lists.
    ================================================================ */
 @media (max-width: 640px) {
-    .header { gap: 12px; padding: 14px 0; }
-    .logo { font-size: 22px; }
-    .nav-create { order: 10; width: 100%; }
-    .nav-tab { flex: 1; justify-content: center; height: 40px; }
-    .create-layout { padding-top: 4px; gap: 16px; }
+    .wrapper { --page-pad: 16px; }
+    .wrapper--note,
+    .wrapper--admin { --page-pad: 12px; }
+
+    /* ── Header bar ── */
+    .header {
+        isolation: isolate;
+        gap: 2px;
+        margin: 0 calc(-1 * var(--page-pad));
+        padding: 0 8px 0 18px;
+    }
+
+    /* The bar background covers only the first row: the create tabs wrap below it. */
+    .header::before {
+        content: '';
+        position: absolute;
+        z-index: -1;
+        inset: 0 0 auto;
+        height: 52px;
+        background: var(--surface);
+        border-bottom: 1px solid var(--line);
+    }
+
+    .logo { display: flex; align-items: center; height: 52px; font-size: 20px; }
+    .theme-switcher { display: none; }
+    .header-icon { display: grid; }
+
+    .nav-create {
+        order: 10;
+        width: calc(100% - 6px);
+        margin: 12px 8px 0 -2px;
+        border-radius: 10px;
+    }
+
+    .nav-tab { flex: 1; justify-content: center; height: 40px; border-radius: 9px; }
+
+    .header-new { width: 44px; height: 44px; margin-left: 4px; padding: 0; border-radius: 10px; }
+    .header-new span { display: none; }
+    .header-new svg { width: 20px; height: 20px; }
+
+    .header-menu {
+        position: absolute;
+        z-index: 30;
+        top: 56px;
+        right: 8px;
+        min-width: 220px;
+        display: none;
+        flex-direction: column;
+        gap: 2px;
+        padding: 6px;
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        box-shadow: var(--shadow);
+    }
+
+    .header-menu.open { display: flex; }
+    .header-links { flex-direction: column; align-items: stretch; }
+    .header-link { height: 44px; font-size: 14px; color: var(--ink-2); }
+    .header-signin { height: 44px; justify-content: flex-start; padding: 0 12px; border: 0; border-radius: 8px; font-size: 14px; }
+
+    .account {
+        margin-top: 4px;
+        padding: 8px 0 2px 6px;
+        border: 0;
+        border-top: 1px solid var(--line);
+        border-radius: 0;
+        background: transparent;
+    }
+
+    .account-name { flex: 1; }
+    .account-signout { width: 44px; height: 44px; }
+
+    .site-footer { display: none; }
+    .wrapper--note .site-footer { display: flex; border-top: 0; padding: 18px 4px 28px; }
+
+    .signout-form,
+    .login-card .signout-form { display: flex; flex: none; margin-top: auto; }
+    .signout-form .btn-ghost { width: 100%; height: 48px; background: transparent; color: var(--ink-2); }
+    /* The sign-in page is one form on the page; the create tabs are one tap away through the logo. */
+    .nav-create--wide { display: none; }
+
+    /* ── Create pages ── */
+    .create-layout {
+        gap: 0;
+        padding: 12px 0 calc(76px + env(safe-area-inset-bottom));
+    }
+
+    /* The note card runs under the fixed bar, so it has no bottom edge. */
+    .editor-card { border-radius: 12px 12px 0 0; border-bottom: 0; box-shadow: none; }
+    .editor-card--link { flex: 0 0 100%; border-radius: 12px; border-bottom: 1px solid var(--line); }
+
     .editor-head { padding: 18px 18px 14px; }
     .head-input { font-size: 24px; }
-    .slug-field { align-self: stretch; height: 36px; }
+    .slug-field { align-self: stretch; height: 36px; border-radius: 9px; }
     .slug-field input { flex: 1; width: auto; }
-    .header-link { padding: 0 8px; }
-    .editor-toolbar { flex-wrap: nowrap; padding: 6px 8px 6px 12px; }
-    .toolbar-actions { flex: 1; min-width: 0; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+
+    .editor-toolbar { flex-wrap: nowrap; gap: 8px; padding: 6px 8px 6px 12px; }
+    .toolbar-actions { flex: 1; min-width: 0; gap: 0; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+    .toolbar-actions::-webkit-scrollbar { display: none; }
     /* An auto margin keeps the buttons right-aligned and resolves to 0 when they overflow,
        so the first buttons stay reachable by scrolling (justify-content: flex-end would not). */
     .toolbar-actions > :first-child { margin-left: auto; }
     .toolbar-btn { flex: none; width: 40px; height: 44px; }
-    .editor-textarea { min-height: 320px; padding: 18px; }
+    .toolbar-italic { font-size: 17px; }
+    .toolbar-sep { display: none; }
     .view-tabs { flex: none; }
     .view-tab { height: 34px; }
     /* Phone width has no room for Split; the tabs show text only. */
     .view-tab svg,
     .view-tab[data-view="split"] { display: none; }
-    .editor-body > .editor-preview.prose.markdown-body { min-height: 320px; padding: 18px 20px; }
-    .link-preview { min-height: 0; padding: 24px 18px; }
-    .link-preview-short { font-size: 17px; }
-    .settings-card { padding: 20px; }
+
+    .editor-textarea { min-height: 320px; padding: 16px 18px 40px; line-height: 1.7; }
+    .editor-body > .editor-preview.prose.markdown-body { min-height: 320px; padding: 16px 20px 40px; font-size: 16px; }
+    .editor-footer { display: none; }
+
+    .link-fields { padding: 16px; gap: 14px; }
+    .field-input--dest { height: 48px; border-radius: 10px; font-size: 16px; }
+    .slug-box { max-width: none; height: 44px; border-radius: 10px; font-size: 16px; }
+    .link-strip { flex-direction: column; align-items: stretch; gap: 4px; padding: 12px 16px; }
+    .link-strip-caption { font-size: 12px; }
+    .link-strip-hint { margin-left: 0; }
+
+    /* ── Fixed bar: settings button + the main action ── */
+    .settings-panel { display: contents; }
+    .settings-divider { display: none; }
+
+    .publish-bar {
+        position: fixed;
+        z-index: 20;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        flex-direction: row;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px;
+        padding: 12px 16px calc(16px + env(safe-area-inset-bottom));
+        background: var(--surface);
+        border-top: 1px solid var(--line);
+        box-shadow: 0 -8px 24px -16px rgba(0,0,0,.25);
+    }
+
+    .publish-block { display: contents; }
+    .publish-note { display: none; }
+    .publish-bar .form-error,
+    .publish-bar .form-status { order: -1; flex: 0 0 100%; }
+    .publish-bar .btn-danger { flex: 0 0 100%; height: 44px; border-radius: 10px; }
+
+    .settings-toggle {
+        flex: 1;
+        min-width: 0;
+        height: 48px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 0 14px;
+        border: 1px solid var(--line-2);
+        border-radius: 10px;
+        background: var(--surface);
+        color: var(--ink);
+        text-align: left;
+    }
+
+    .settings-toggle svg { width: 18px; height: 18px; flex: none; color: var(--muted); }
+    .settings-toggle-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
+    .settings-toggle-text strong { font-size: 13px; font-weight: 600; }
+
+    .settings-toggle-text span {
+        font-size: 11px;
+        color: var(--muted);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .publish-bar .btn-publish { flex: none; width: auto; height: 48px; padding: 0 22px; }
+    .btn-publish[data-kbd]::after { display: none; }
+
+    /* ── Bottom sheet with the publish settings ── */
+    .settings-card {
+        position: fixed;
+        z-index: 40;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        max-height: calc(100dvh - 32px);
+        overflow-y: auto;
+        gap: 20px;
+        padding: 10px 20px calc(96px + env(safe-area-inset-bottom));
+        background: var(--surface);
+        border-radius: 16px 16px 0 0;
+        box-shadow: 0 -12px 40px rgba(0,0,0,.25);
+        visibility: hidden;
+        transform: translateY(100%);
+        transition: transform .2s ease, visibility .2s;
+    }
+
+    .sheet-open .settings-card { visibility: visible; transform: none; }
+    .sheet-backdrop { display: block; position: fixed; z-index: 39; inset: 0; background: rgba(10,11,14,.48); }
+
+    /* With the sheet open the bar holds only the main action and looks like the sheet's end. */
+    .sheet-open .publish-bar { z-index: 41; border-top: 0; box-shadow: none; }
+    .sheet-open .settings-toggle { display: none; }
+    .sheet-open .publish-bar .btn-publish { flex: 1; font-size: 16px; }
+
+    .sheet-head { display: flex; flex-direction: column; gap: 4px; }
+    .sheet-grabber { align-self: center; width: 40px; height: 5px; border-radius: 999px; background: var(--line-2); }
+    .sheet-title-row { display: flex; align-items: center; justify-content: space-between; }
+    .sheet-title { font-family: var(--font-display); font-size: 20px; font-weight: 600; }
+
+    .sheet-close {
+        width: 44px;
+        height: 44px;
+        margin-right: -10px;
+        border: 0;
+        border-radius: 10px;
+        display: grid;
+        place-items: center;
+        background: transparent;
+        color: var(--muted);
+    }
+
+    .sheet-close svg { width: 20px; height: 20px; }
+
+    .privacy-option input { width: 18px; height: 18px; margin-top: 2px; }
+    .privacy-option > svg { display: none; }
+
+    /* The switches share one bordered box; a line divides the rows. */
+    .setting-list { gap: 0; border: 1px solid var(--line); border-radius: 10px; }
+    .setting-list > * + * { border-top: 1px solid var(--line); }
+    .setting-row { padding: 14px; }
+    .setting-icon { display: none; }
+    .setting-group { gap: 0; }
+    .setting-sub { padding: 0 14px 14px; }
+    .setting-sub .field-select,
+    .field-select { height: 44px; border-radius: 10px; font-size: 16px; }
+    .field-input { height: 48px; border-radius: 10px; font-size: 16px; }
+    .field-box { height: 48px; padding: 0 2px 0 12px; border-radius: 10px; }
+    .field-box input { font-size: 16px; }
+    .field-box-btn { width: 44px; height: 44px; border-radius: 10px; }
+
     .switch { width: 52px; height: 32px; }
     .switch::before { width: 26px; height: 26px; }
     .switch:checked::before { transform: translateX(20px); }
-    .meta-actions { width: 100%; justify-content: space-between; }
-    .center-main { padding: 24px 0 56px; }
+
+    /* ── Note view ── */
+    .note-layout { padding: 12px 0 0; }
+    .article-card { border-radius: 12px; padding: 20px 20px 28px; box-shadow: none; }
+    .article-header { gap: 10px; padding-bottom: 14px; margin-bottom: 20px; }
+    /* The badge goes above the title. */
+    .article-title-row { flex-direction: column-reverse; align-items: flex-start; gap: 10px; }
+    .article-title { font-size: 24px; line-height: 1.2; }
+    .badge { margin-top: 0; }
+
+    /* The details are one line of text: no icons, a dot between the items. */
+    .meta-info { gap: 0 6px; font-size: 11px; line-height: 1.6; }
+    .meta-tag svg { display: none; }
+    .meta-tag:not(:last-child)::after { content: '·'; }
+
+    .meta-actions {
+        width: 100%;
+        display: grid;
+        grid-auto-flow: column;
+        grid-auto-columns: minmax(0, 1fr);
+        gap: 6px;
+        margin-top: 4px;
+        padding: 0;
+        border: 0;
+        background: transparent;
+    }
+
+    .meta-btn {
+        height: 44px;
+        padding: 0;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: var(--sunken);
+        font-size: 12px;
+    }
+
+    .meta-btn svg,
+    .meta-sep { display: none; }
+
+    .confirm-card { padding: 20px; }
+    .confirm-actions .btn-primary,
+    .confirm-actions .btn-ghost { height: 48px; }
+
+    /* ── Success, redirect and error pages: no card, the content sits on the page ── */
+    .center-main { align-items: stretch; padding: 28px 0; }
+
+    .success-card,
+    .error-content,
+    .login-card {
+        max-width: none;
+        padding: 0 4px;
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+        box-shadow: none;
+    }
+
+    .success-card { flex: 1; gap: 24px; }
+    .success-head { gap: 12px; }
     .success-title,
-    .error-title { font-size: 26px; }
-    .admin-wrap { gap: 20px; padding-top: 12px; }
+    .error-title { font-size: 28px; }
+
+    .copy-row { flex-direction: column; }
+    .copy-field { flex: none; min-height: 48px; }
+    .copy-btn { height: 48px; }
+
+    .action-row { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); }
+    .action-row .btn-ghost,
+    .action-row .btn-primary { height: 48px; padding: 0 8px; }
+    .error-actions .btn-ghost,
+    .error-actions .btn-primary { height: 48px; padding: 0 18px; }
+
+    .secret-block { padding: 16px; border-radius: 12px; }
+    .secret-row { flex-wrap: nowrap; }
+    .secret-value { flex: 1; font-size: 15px; letter-spacing: .1em; padding: 12px; }
+    .secret-row .btn-ghost { height: 46px; }
+    .secret-row .btn-icon { width: 46px; height: 46px; }
+
+    .card-links {
+        margin-top: auto;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+        padding-top: 0;
+        border-top: 0;
+        font-weight: 600;
+    }
+
+    .card-links a {
+        height: 48px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 10px;
+        background: var(--accent-soft);
+    }
+
+    /* ── Sign in, setup, change password: a page-wide form ── */
+    .login-center { align-items: stretch; padding: 32px 0 28px; }
+    .login-card { gap: 18px; }
+    .login-card form { flex: 1; gap: 18px; }
+    .login-card form > .btn-publish { margin-top: auto; }
+    .login-icon { width: 44px; height: 44px; }
+    .login-icon svg { width: 22px; height: 22px; }
+    .login-card .field-input { height: 48px; border-radius: 10px; background: var(--surface); font-size: 16px; }
+    .login-card .field-input--code { height: 52px; font-size: 24px; letter-spacing: .45em; }
+    .login-card .field-input:-webkit-autofill,
+    .login-card .field-input:autofill { --autofill-bg: var(--surface); }
+    .pw-toggle { width: 44px; height: 44px; right: 2px; border-radius: 10px; }
+    .btn-publish { height: 48px; font-size: 16px; }
+    .publish-bar .btn-publish { font-size: 14px; }
+
+    /* ── Admin: section tabs and lists ── */
+    .admin-wrap { flex: 1; flex-direction: column; flex-wrap: nowrap; align-items: stretch; gap: 16px; padding: 22px 0 28px; }
+    .admin-side { flex: none; gap: 14px; padding: 0 4px; }
+    .admin-title { margin: 0; }
+    .admin-main { flex: none; gap: 16px; }
+
+    .admin-tabs {
+        flex-direction: row;
+        gap: 2px;
+        padding: 3px;
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+    }
+
+    .side-link { flex: 1; min-width: 0; justify-content: center; gap: 6px; height: 40px; padding: 0 6px; border: 0; border-radius: 9px; }
+    .side-link:hover { background: transparent; }
+    .side-link[aria-current="true"] { background: var(--accent-soft); color: var(--accent-text); }
+    .side-link[aria-current="true"] .side-count { color: inherit; }
+    .side-link svg,
+    .side-long { display: none; }
+    .side-short { display: inline; }
+    .side-count { margin-left: 0; }
+
+    .admin-section { box-shadow: none; }
+    .admin-section-head { align-items: center; gap: 12px; padding: 16px 16px 12px; }
+    .admin-section-title { font-size: 17px; }
+    .admin-section-desc--wide { display: none; }
+    .admin-section-head .btn-primary { height: 44px; padding: 0 14px; border-radius: 9px; }
+
+    .admin-key-form { flex: 1 0 100%; flex-wrap: nowrap; }
+    .admin-key-form .field-group { flex: 1; }
+    .admin-key-form .field-input { width: 100%; height: 48px; border-radius: 9px; font-size: 16px; }
+    .admin-key-form .btn-ghost { height: 48px; border-radius: 9px; }
+
+    .admin-notice { margin: 0 12px 12px; padding: 12px; gap: 8px; }
+    .admin-notice .copy-row { flex-direction: row; flex-wrap: nowrap; gap: 6px; }
+    .admin-notice .copy-field { flex: 1; min-height: 44px; padding: 0 10px; }
+    .admin-notice .copy-value { font-size: 12px; }
+    .admin-notice .btn-ghost,
+    .admin-notice--warn .btn-ghost { height: 44px; border-radius: 10px; }
+    .admin-notice--warn .copy-value { flex: 1 1 100%; padding: 12px 10px; border-radius: 9px; }
+    .msg-err { margin: 0 12px 12px; }
+
+    /* A table row is a list row: the first cell is the title, the others are one line of
+       details, and the action stays at the right edge. */
+    .table-wrap { overflow-x: visible; }
+    .admin-table,
+    .admin-table tbody { display: block; }
+    .admin-table thead { display: none; }
+
+    .admin-table tr {
+        position: relative;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 2px 6px;
+        padding: 14px 16px;
+        border-bottom: 1px solid var(--line);
+    }
+
+    .admin-table tr:last-child { border-bottom: 0; }
+    .admin-table td { display: block; padding: 0; border: 0; white-space: normal; font-size: 12px; color: var(--muted); }
+    .admin-table td:first-child { font-size: 14px; }
+    .admin-table .cell-mono { font-size: 11px; }
+    .admin-table .cell-actions { position: absolute; top: 50%; right: 16px; transform: translateY(-50%); }
+    .admin-table .cell-actions:has(.cell-muted) { display: none; }
+    .btn-revoke { height: 44px; border-radius: 10px; }
+
+    /* Users: the avatar spans both lines; the role is beside the name and the ID is below. */
+    .admin-table .user-row { padding-left: 66px; padding-right: 130px; }
+    .user-row .avatar { position: absolute; left: 16px; top: 50%; transform: translateY(-50%); width: 38px; height: 38px; border-radius: 10px; font-size: 14px; }
+    .user-row .cell-mono { order: 1; flex: 0 0 100%; }
+    .role-badge { height: 20px; padding: 0 7px; }
+
+    /* Keys: the prefix is the title; a dot divides the details, each with its column name. */
+    .admin-table .key-row { padding-right: 96px; }
+    .admin-table .key-prefix { flex: 0 0 100%; font-size: 13px; }
+    .key-row td + td + td:not(.cell-actions)::before { content: '· ' attr(data-label) ' '; }
 }
 
 /* ================================================================
@@ -2352,7 +2990,7 @@ a.copy-value:hover { color: var(--accent-text); }
 
     background-color: transparent;
     font-family: var(--font-serif);
-    font-size: 17.5px;
+    font-size: 17px;
     line-height: 1.7;
     color: var(--ink);
     text-wrap: pretty;
@@ -2373,20 +3011,20 @@ a.copy-value:hover { color: var(--accent-text); }
 
 .prose.markdown-body h1 {
     font-size: 28px;
-    margin: 40px 0 14px;
+    margin: 32px 0 12px;
     padding-bottom: 10px;
     border-bottom: 1px solid var(--line);
 }
 
 .prose.markdown-body h2 {
-    font-size: 24.5px;
-    margin: 40px 0 14px;
+    font-size: 24px;
+    margin: 32px 0 12px;
     padding-bottom: 10px;
     border-bottom: 1px solid var(--line);
 }
 
-.prose.markdown-body h3 { font-size: 20px; margin: 32px 0 12px; }
-.prose.markdown-body h4 { font-size: 17.5px; margin: 28px 0 10px; }
+.prose.markdown-body h3 { font-size: 20px; margin: 28px 0 10px; }
+.prose.markdown-body h4 { font-size: 17px; margin: 24px 0 10px; }
 
 .prose.markdown-body p { margin: 0 0 16px; }
 .prose.markdown-body ul,
@@ -2418,10 +3056,10 @@ a.copy-value:hover { color: var(--accent-text); }
     margin: 0 0 20px;
     padding: 16px 18px;
     border: 1px solid var(--line);
-    border-radius: 12px;
+    border-radius: 10px;
     background: var(--code-bg);
     font-family: var(--font-mono);
-    font-size: 13.5px;
+    font-size: 13px;
     line-height: 1.7;
     overflow-x: auto;
     color: var(--ink);
@@ -2452,7 +3090,7 @@ a.copy-value:hover { color: var(--accent-text); }
     border-collapse: separate;
     border-spacing: 0;
     border: 1px solid var(--line);
-    border-radius: 12px;
+    border-radius: 10px;
     font-family: var(--font-ui);
     font-size: 14px;
     line-height: 1.5;
@@ -2484,37 +3122,35 @@ a.copy-value:hover { color: var(--accent-text); }
     vertical-align: -3px;
 }
 
-.prose.markdown-body img { border-radius: 12px; }
+.prose.markdown-body img { border-radius: 10px; }
 
 .copy-code-btn {
     position: absolute;
-    top: 8px;
-    right: 8px;
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    height: 30px;
-    padding: 0 10px;
-    background: var(--surface);
-    border: 1px solid var(--line);
+    top: 6px;
+    right: 6px;
+    display: grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    background: var(--code-bg);
+    border: 0;
     border-radius: 7px;
     color: var(--muted);
-    font-family: var(--font-ui);
-    font-size: 12px;
-    font-weight: 500;
-    opacity: 0;
-    transition: opacity .15s ease;
 }
 
-.copy-code-btn svg { width: 13px; height: 13px; }
-.copy-code-btn:hover { color: var(--ink); }
-.copy-code-btn:focus-visible,
-.markdown-body pre:hover > .copy-code-btn { opacity: 1; }
+.copy-code-btn svg { width: 15px; height: 15px; }
+.copy-code-btn:hover { background: var(--sunken); color: var(--ink); }
 .copied { color: var(--accent-text); }
 
 @media (max-width: 640px) {
-    .prose.markdown-body { font-size: 16.5px; }
-    .prose.markdown-body h2 { font-size: 21px; }
+    .prose.markdown-body h1 { font-size: 24px; }
+    .prose.markdown-body h2 { font-size: 20px; padding-bottom: 8px; }
+    .prose.markdown-body h3 { font-size: 17px; }
+    .prose.markdown-body li { margin: 5px 0; }
+    .prose.markdown-body .contains-task-list { font-size: 14px; }
+    .prose.markdown-body input[type="checkbox"] { width: 18px; height: 18px; }
+    .copy-code-btn { width: 44px; height: 44px; top: 0; right: 0; }
 }
 
 /* ================================================================
@@ -2603,16 +3239,8 @@ a.copy-value:hover { color: var(--accent-text); }
 /* GenericUnderline */ .chroma-chroma.chroma-dark .chroma-gl { text-decoration: underline }
 /* TextWhitespace */ .chroma-chroma.chroma-dark .chroma-w { color: #6e7681 }
 
-/* CSP-compatible replacements for inline presentation attributes. */
-.field-group-spaced { margin-top: 12px; }
-.admin-invite-form { margin-top: 16px; }
-.admin-key-form { margin-top: 24px; }
-.admin-empty { font-family: var(--font-mono); font-size: 0.75rem; color: var(--text-muted); }
-.toolbar-italic { font-style: italic; }
-
 /* Success-page expiry labels are lower case for the sentence form; a chip starts with a capital. */
 .chip-text { display: inline-block; }
 .chip-text::first-letter { text-transform: uppercase; }
-.publish-block .btn-danger { justify-content: center; height: 40px; }
-.secret-copy { height: 44px; }
+.publish-block .btn-danger { height: 36px; }
 .prose.markdown-body > h1[hidden]:first-child + * { margin-top: 0; }

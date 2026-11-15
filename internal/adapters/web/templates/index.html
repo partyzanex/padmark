@@ -8,20 +8,17 @@
     <link rel="stylesheet" href="/static/style.css?p={{styleVersion}}">
 </head>
 <body>
-<div class="wrapper">
+<div class="wrapper wrapper--create">
 
-    {{if .EditMode}}{{template "header" ""}}{{else}}{{template "header" "note"}}{{end}}
+    {{template "header" .Header}}
 
     <main class="create-layout">
         <section class="card editor-card" aria-label="Note editor">
             <div class="editor-head">
-                <div class="head-row">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h4"/></svg>
-                    <label for="titleInput" class="sr-only">Title</label>
-                    <input type="text" class="head-input" placeholder="Untitled note" id="titleInput" value="{{.Title}}">
-                </div>
+                <label for="titleInput" class="sr-only">Title</label>
+                <input type="text" class="head-input" placeholder="Untitled note" id="titleInput" value="{{.Title}}">
                 <div class="slug-field">
-                    <label for="slugInput" class="slug-prefix">Slug&#160;&#160;/</label>
+                    <label for="slugInput" class="slug-prefix">URL&#160;&#160;/</label>
                     <input type="text" id="slugInput" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="{{if .EditMode}}{{.ID}}{{else}}auto-generated{{end}}" value="{{.ID}}"
                            pattern="[a-zA-Z0-9_\-]+" title="Letters, numbers, hyphens and underscores only"{{if .EditMode}} readonly{{end}}>
                 </div>
@@ -73,69 +70,86 @@
 
             <div class="editor-footer">
                 <span><span id="charCount">0 characters</span> · <span id="wordCount">0 words</span></span>
-                <span class="format-hint">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M6 15V9l3 3 3-3v6M17 9v6M15 13l2 2 2-2"/></svg>
-                    Markdown supported
-                </span>
+                <a class="format-hint" href="https://commonmark.org/help/" target="_blank" rel="noopener noreferrer">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M6 15V9l2.5 3L11 9v6M16 9v6M14 13l2 2 2-2"/></svg>
+                    Markdown guide
+                </a>
             </div>
         </section>
 
-        <aside class="settings-panel" aria-label="Publish settings">
-            <section class="card settings-card">
+        <aside class="card settings-panel" aria-label="Publish settings">
+            <section class="settings-card" id="settingsSheet" aria-labelledby="sheetTitle">
+                {{template "sheet-head" "Publish settings"}}
+
                 <fieldset class="privacy-options" id="privacySelect">
                     <legend class="lbl">Who can read</legend>
                     {{template "privacy-options" .PrivacyOptions}}
                 </fieldset>
 
-                <div class="setting-group">
-                    <label class="setting-row" id="burnLabel">
-                        <span class="setting-icon setting-icon--warn" aria-hidden="true">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 22c4 0 7-2.7 7-7 0-4-3-6.5-4.5-9.5C13 7 12.5 9 11 10 10.5 8 9.5 6.5 8 5c0 3-3 5.5-3 10 0 4.3 3 7 7 7z"/></svg>
+                <div class="setting-list">
+                    <div class="setting-group">
+                        <label class="setting-row" id="burnLabel">
+                            <span class="setting-icon setting-icon--warn" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 22c4 0 7-2.7 7-7 0-4-3-6.5-4.5-9.5C13 7 12.5 9 11 10 10.5 8 9.5 6.5 8 5c0 3-3 5.5-3 10 0 4.3 3 7 7 7z"/></svg>
+                            </span>
+                            <span class="setting-text">
+                                <span class="setting-title">Burn after reading</span>
+                                <span class="setting-desc">Delete once it's opened</span>
+                            </span>
+                            <input type="checkbox" class="switch" role="switch" id="burnCheck"{{if .BurnAfterReading}} checked{{end}}>
+                        </label>
+                        <div class="setting-sub burn-time-wrap{{if .BurnAfterReading}} active{{end}}" id="burnTimeWrap">
+                            <label for="burnTime">Delete</label>
+                            <select class="field-select" id="burnTime"{{if not .BurnAfterReading}} disabled{{end}}>
+                                {{range .TTLOptions}}
+                                <option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>
+                                {{end}}
+                            </select>
+                        </div>
+                    </div>
+
+                    <label class="setting-row" id="contentsLabel">
+                        <span class="setting-icon" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 6h3M4 12h3M4 18h3M11 6h9M13 12h7M13 18h7"/></svg>
                         </span>
                         <span class="setting-text">
-                            <span class="setting-title">Burn after reading</span>
-                            <span class="setting-desc">Delete once it's opened</span>
+                            <span class="setting-title">Contents sidebar</span>
+                            <span class="setting-desc">“On this page” from headings</span>
                         </span>
-                        <input type="checkbox" class="switch" role="switch" id="burnCheck"{{if .BurnAfterReading}} checked{{end}}>
+                        <input type="checkbox" class="switch" role="switch" id="contentsCheck"{{if .ShowContents}} checked{{end}}>
                     </label>
-                    <div class="setting-sub burn-time-wrap{{if .BurnAfterReading}} active{{end}}" id="burnTimeWrap">
-                        <label for="burnTime">Delete</label>
-                        <select class="field-select" id="burnTime"{{if not .BurnAfterReading}} disabled{{end}}>
-                            {{range .TTLOptions}}
-                            <option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>
-                            {{end}}
-                        </select>
-                    </div>
                 </div>
 
-                <label class="setting-row" id="contentsLabel">
-                    <span class="setting-icon" aria-hidden="true">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 6h3M4 12h3M4 18h3M11 6h9M13 12h7M13 18h7"/></svg>
-                    </span>
-                    <span class="setting-text">
-                        <span class="setting-title">Contents sidebar</span>
-                        <span class="setting-desc">“On this page” from headings</span>
-                    </span>
-                    <input type="checkbox" class="switch" role="switch" id="contentsCheck"{{if .ShowContents}} checked{{end}}>
-                </label>
-
-                {{if .EditMode}}
                 <div class="field-group">
+                    {{if .EditMode}}
                     <label class="field-label" for="editCodeInput">Edit code <span class="optional">· {{if .IsOwner}}optional, you created this note{{else}}required{{end}}</span></label>
                     <div class="field-box">
-                        <input type="text" id="editCodeInput" placeholder="Paste your edit code" autocomplete="off" spellcheck="false">
+                        <input type="text" id="editCodeInput" placeholder="Paste your edit code" autocomplete="off" autocapitalize="none" spellcheck="false">
                     </div>
+                    {{else}}
+                    <label class="field-label" for="editCodeInput">Edit code</label>
+                    <div class="field-box">
+                        <input type="text" id="editCodeInput" placeholder="Generated if blank" autocomplete="off" autocapitalize="none" spellcheck="false" minlength="8" maxlength="128">
+                        <button type="button" class="field-box-btn" id="editCodeGenerate" aria-label="Generate edit code">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.6-4.5L4 8M4 4v4h4M4 13a8 8 0 0 0 14.6 4.5L20 16M20 20v-4h-4"/></svg>
+                        </button>
+                    </div>
+                    <span class="field-hint">Lets you edit or delete the note later.</span>
+                    {{end}}
                 </div>
-                {{end}}
+            </section>
 
-                <div class="settings-divider"></div>
+            <div class="settings-divider"></div>
 
+            <div class="publish-bar">
+                {{template "settings-toggle"}}
                 <div class="publish-block">
                     <button type="button" class="btn-publish" id="submitBtn" data-kbd="Ctrl ↵">{{if .EditMode}}Save{{else}}Publish note{{end}}</button>
                     <p class="publish-note">{{if .EditMode}}Saving replaces the content of this note.{{else}}You'll get a share link and an edit code.{{end}}</p>
                 </div>
-            </section>
+            </div>
         </aside>
+        <div class="sheet-backdrop" id="sheetBackdrop" hidden></div>
     </main>
 
     {{template "footer"}}
@@ -162,6 +176,7 @@
     updateCount();
 
     {{template "theme-js"}}
+    {{template "sheet-js"}}
 
     function insertMd(before, after) {
         const ta = document.getElementById('editor');
@@ -242,9 +257,12 @@
         const titleInput = document.getElementById('titleInput').value.trim();
         const slug = document.getElementById('slugInput').value.trim();
         const burnAfterReading = document.getElementById('burnCheck').checked;
+        const editCode = document.getElementById('editCodeInput').value.trim();
         const ttl = getTTL();
 
         if (!content) { flashError(btn, 'Enter some text first'); return; }
+        // The server accepts a chosen edit code of 8 to 128 characters; a blank field gets a random code.
+        if (editCode && editCode.length < 8) { flashError(btn, 'Edit code: 8 characters or more'); return; }
 
         let title = titleInput;
         if (!title) {
@@ -259,6 +277,7 @@
             show_contents: document.getElementById('contentsCheck').checked
         };
         if (slug) payload.slug = slug;
+        if (editCode) payload.edit_code = editCode;
         if (burnAfterReading) payload.ttl = ttl;
 
         try {
@@ -328,6 +347,23 @@
             flashError(btn, err.message || 'Error — try again');
         }
     }
+
+    // The settings button of the phone bar shows the chosen level and the main switch state.
+    function updateSummary() {
+        const checked = document.querySelector('input[name="privacy"]:checked');
+        const level = checked ? checked.closest('.privacy-option').querySelector('.privacy-option-title').textContent : 'Public';
+        const burn = document.getElementById('burnCheck').checked;
+        const contents = document.getElementById('contentsCheck').checked;
+        document.getElementById('settingsSummary').textContent =
+            level + ' · ' + (burn ? 'burns after reading' : contents ? 'contents on' : 'contents off');
+    }
+    updateSummary();
+    document.getElementById('settingsSheet').addEventListener('change', updateSummary);
+
+    const generateButton = document.getElementById('editCodeGenerate');
+    if (generateButton) generateButton.addEventListener('click', () => {
+        document.getElementById('editCodeInput').value = generateEditCode();
+    });
 
     document.getElementById('editor').addEventListener('input', updateCount);
     document.getElementById('burnCheck').addEventListener('change', toggleBurn);

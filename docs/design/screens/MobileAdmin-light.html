@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Padmark mobile — Admin (light)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;0,8..60,700;1,8..60,400&amp;display=swap">
+<style>
+body{margin:0}
+.pm{--bg:#F3F4F6;--surface:#FFFFFF;--sunken:#F7F8FA;--ink:#14151A;--ink-2:#3B3E48;--muted:#5D6170;--line:#E2E4EA;--line-2:#CDD0D8;--accent:#4A3AE0;--on-accent:#FFFFFF;--accent-soft:#ECEAFF;--accent-text:#3A2BC4;--warn:#9A4A06;--warn-soft:#FFF1E0;--code-bg:#F0F1F4;--shadow:0 1px 2px rgba(20,21,26,.05),0 10px 30px -14px rgba(20,21,26,.14);font-family:'Onest',system-ui,-apple-system,'Segoe UI',sans-serif;color:var(--ink);background:var(--bg);-webkit-font-smoothing:antialiased}
+.pm.dim{--bg:#26272F;--surface:#2F3039;--sunken:#2A2B33;--ink:#ECEDF2;--ink-2:#CDCFD8;--muted:#A9ACB8;--line:#3D3F4A;--line-2:#4F525E;--accent:#9C92FF;--on-accent:#14151A;--accent-soft:#37335C;--accent-text:#BDB6FF;--warn:#F2A766;--warn-soft:#43321F;--code-bg:#353640;--shadow:0 1px 2px rgba(0,0,0,.3),0 14px 34px -16px rgba(0,0,0,.6)}
+.pm.dark{--bg:#0A0B0E;--surface:#121318;--sunken:#0E0F13;--ink:#EDEEF2;--ink-2:#C4C6CF;--muted:#9295A2;--line:#22242C;--line-2:#30323C;--accent:#8E83FF;--on-accent:#0A0B0E;--accent-soft:#1E1B3A;--accent-text:#ADA5FF;--warn:#F2A766;--warn-soft:#2D2116;--code-bg:#1A1B22;--shadow:0 1px 2px rgba(0,0,0,.4),0 14px 34px -16px rgba(0,0,0,.8)}
+.pm *{box-sizing:border-box}
+.pm input,.pm textarea,.pm select,.pm button{font:inherit;color:inherit}
+.pm button{cursor:pointer}
+.pm a{color:var(--accent-text);text-decoration:none}
+.pm .field:focus,.pm .field:focus-within{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.pm button:focus-visible,.pm a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.pm .lbl{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+</style>
+</helmet>
+<div class="pm {{theme}}" style="width: 390px; height: 1300px; position: relative; overflow: hidden; display: flex; flex-direction: column">
+
+<header style="display: flex; align-items: center; gap: 2px; height: 52px; padding: 0 8px 0 18px; background: var(--surface); border-bottom: 1px solid var(--line); flex: none">
+<a href="MobileEditor.dc.html" aria-label="Padmark — home" style="font-family: 'Source Serif 4', Georgia, serif; font-weight: 700; font-size: 20px; letter-spacing: -0.02em; color: var(--ink); line-height: 1">Padmark<span style="color: var(--accent)">.</span></a>
+<div style="flex: 1"></div>
+<button type="button" aria-label="{{themeLabel}}" onClick="{{cycleTheme}}" style="width: 44px; height: 44px; border: 0; border-radius: 10px; background: transparent; color: var(--ink-2); display: grid; place-items: center"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="8.5"></circle><path d="M12 3.5a8.5 8.5 0 0 1 0 17z" fill="currentColor"></path></svg></button>
+<button type="button" aria-label="Account: alex, admin" style="width: 44px; height: 44px; border: 0; border-radius: 10px; background: transparent; display: grid; place-items: center"><span aria-hidden="true" style="width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent-text); font-weight: 700; font-size: 13px">A</span></button>
+</header>
+
+<main style="flex: 1; display: flex; flex-direction: column; gap: 16px; padding: 22px 12px 28px">
+<div style="display: flex; flex-direction: column; gap: 14px; padding: 0 4px">
+<h1 style="margin: 0; font-family: 'Source Serif 4', Georgia, serif; font-size: 28px; font-weight: 600; letter-spacing: -0.015em">Admin</h1>
+<nav aria-label="Admin sections" style="display: flex; gap: 2px; padding: 3px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px">
+<a href="#m-users" aria-current="true" style="flex: 1; height: 40px; display: flex; align-items: center; justify-content: center; gap: 6px; border-radius: 9px; font-size: 13px; font-weight: 600; background: var(--accent-soft); color: var(--accent-text)">Users <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px">2</span></a>
+<a href="#m-keys" style="flex: 1; height: 40px; display: flex; align-items: center; justify-content: center; gap: 6px; border-radius: 9px; font-size: 13px; font-weight: 500; color: var(--muted)">API keys <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px">3</span></a>
+</nav>
+</div>
+
+<section id="m-users" aria-labelledby="m-users-h" style="background: var(--surface); border: 1px solid var(--line); border-radius: 12px; overflow: hidden">
+<div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 16px 12px">
+<h2 id="m-users-h" style="margin: 0; font-size: 16px; font-weight: 600">Users</h2>
+<button type="button" onClick="{{invite}}" style="height: 44px; padding: 0 14px; border: 0; border-radius: 9px; background: var(--accent); color: var(--on-accent); display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>Invite</button>
+</div>
+<sc-if value="{{invited}}" hint-placeholder-val="{{ false }}">
+<div style="margin: 0 12px 12px; padding: 12px; border-radius: 10px; background: var(--accent-soft); display: flex; flex-direction: column; gap: 8px">
+<label for="m-invite" style="font-size: 12px; font-weight: 600; color: var(--accent-text)">One-time invite link</label>
+<div style="display: flex; gap: 6px">
+<input id="m-invite" readonly value="[your-host]/invite/••••••" style="flex: 1; min-width: 0; height: 44px; padding: 0 10px; border: 1px solid var(--line-2); border-radius: 10px; background: var(--surface); font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; outline: none">
+<button type="button" style="height: 44px; padding: 0 12px; border: 1px solid var(--line-2); border-radius: 10px; background: var(--surface); font-size: 13px; font-weight: 500">Copy</button>
+</div>
+</div>
+</sc-if>
+<ul style="list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line)">
+<li style="display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--line)">
+<span aria-hidden="true" style="width: 38px; height: 38px; flex: none; border-radius: 10px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent-text); font-weight: 700">A</span>
+<span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px"><span style="display: flex; align-items: center; gap: 8px"><span style="font-weight: 600; font-size: 14px">alex</span><span style="height: 20px; padding: 0 7px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-text); font-size: 11px; font-weight: 600; display: inline-flex; align-items: center">Admin</span></span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: var(--muted)">3f1c9a20…7b2e · you</span></span>
+</li>
+<li style="display: flex; align-items: center; gap: 12px; padding: 14px 16px">
+<span aria-hidden="true" style="width: 38px; height: 38px; flex: none; border-radius: 10px; display: grid; place-items: center; background: var(--sunken); border: 1px solid var(--line); color: var(--ink-2); font-weight: 700">M</span>
+<span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px"><span style="font-weight: 600; font-size: 14px">maria</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: var(--muted)">b80e4d17…c4a1</span></span>
+<button type="button" aria-label="Revoke access for maria" style="height: 44px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--line-2); background: transparent; color: var(--warn); font-size: 12px; font-weight: 600">Revoke</button>
+</li>
+</ul>
+</section>
+
+<section id="m-keys" aria-labelledby="m-keys-h" style="background: var(--surface); border: 1px solid var(--line); border-radius: 12px; overflow: hidden">
+<div style="display: flex; flex-direction: column; gap: 4px; padding: 16px 16px 12px">
+<h2 id="m-keys-h" style="margin: 0; font-size: 16px; font-weight: 600">API keys</h2>
+<p style="margin: 0; font-size: 13px; color: var(--muted)">Keys act as their owner. Revoke any you don't recognise.</p>
+</div>
+<ul style="list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line)">
+<sc-for list="{{keys}}" as="k" hint-placeholder-count="3">
+<li style="display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--line)">
+<span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px">
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; font-weight: 600">{{k.prefix}}<span style="color: var(--muted); font-weight: 400">…</span></span>
+<span style="font-size: 12px; color: var(--muted); line-height: 1.4">{{k.owner}} · created {{k.created}} · used {{k.used}} · never expires</span>
+</span>
+<button type="button" aria-label="Revoke key {{k.prefix}}" style="height: 44px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--line-2); background: transparent; color: var(--warn); font-size: 12px; font-weight: 600">Revoke</button>
+</li>
+</sc-for>
+</ul>
+<form style="display: flex; flex-direction: column; gap: 8px; padding: 16px">
+<label for="m-life" style="font-size: 12px; color: var(--muted)">Lifetime, days · 0 = never</label>
+<div style="display: flex; gap: 8px">
+<input id="m-life" class="field" type="number" inputmode="numeric" min="0" value="{{life}}" onChange="{{onLife}}" style="flex: 1; min-width: 0; height: 48px; padding: 0 12px; border: 1px solid var(--line-2); border-radius: 9px; background: var(--surface); font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 16px">
+<button type="button" onClick="{{createKey}}" style="height: 48px; padding: 0 16px; border: 1px solid var(--line-2); border-radius: 9px; background: var(--surface); font-size: 13px; font-weight: 600">Create key</button>
+</div>
+<sc-if value="{{created}}" hint-placeholder-val="{{ false }}">
+<div role="status" style="margin-top: 4px; padding: 12px; border-radius: 10px; background: var(--warn-soft); display: flex; flex-direction: column; gap: 8px; font-size: 13px">
+<span>Copy the new key now — it's shown only once.</span>
+<div style="display: flex; gap: 6px"><code style="flex: 1; min-width: 0; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; padding: 12px 10px; border-radius: 9px; background: var(--surface); border: 1px solid var(--line)">pm_••••••••••••</code><button type="button" style="height: 44px; padding: 0 12px; border: 1px solid var(--line-2); border-radius: 9px; background: var(--surface); font-size: 12px; font-weight: 600">Copy</button></div>
+</div>
+</sc-if>
+</form>
+</section>
+
+<a href="MobileSignIn-light.dc.html" style="margin-top: auto; height: 48px; border-radius: 10px; border: 1px solid var(--line-2); display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--ink-2); font-size: 13px; font-weight: 500"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 16l-4-4 4-4M6 12h10"></path></svg>Sign out</a>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["light","dim","dark"],"default":"light"},"$preview":{"width":390,"height":1300}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const s = this.state || {};
+    const order = ['light', 'dim', 'dark'];
+    const theme = s.theme || this.props.theme || 'light';
+    return {
+      theme,
+      themeLabel: 'Theme: ' + theme + ' (tap to change)',
+      cycleTheme: () => this.setState({ theme: order[(order.indexOf(theme) + 1) % 3] }),
+      invited: !!s.invited,
+      invite: () => this.setState({ invited: true }),
+      created: !!s.created,
+      createKey: () => this.setState({ created: true }),
+      life: s.life != null ? s.life : '0',
+      onLife: (e) => this.setState({ life: e.target.value }),
+      keys: [
+        { prefix: 'pm_7Hq2', owner: 'alex', created: 'Nov 1', used: 'Nov 1, 03:22' },
+        { prefix: 'pm_Lx9a', owner: 'alex', created: 'Oct 31', used: 'Nov 1, 01:53' },
+        { prefix: 'pm_c4Tn', owner: 'alex', created: 'Oct 31', used: 'today, 11:56' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -44,7 +44,7 @@ func TestPrivacyOptions(t *testing.T) {
 	}
 
 	edited := privacyOptions(false, false, domain.PrivacyAuthenticated)
-	assert.Equal(t, privacyOption{Value: "authenticated", Label: "Requires login", Hint: notEnforced, Selected: true},
+	assert.Equal(t, privacyOption{Value: "authenticated", Label: "Login required", Hint: notEnforced, Selected: true},
 		edited[1], "the kept level says it is not enforced")
 	assert.False(t, edited[0].Selected)
 	assert.Empty(t, privacyOptions(true, false, domain.PrivacyAuthenticated)[1].Hint,

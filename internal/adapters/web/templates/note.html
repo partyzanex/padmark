@@ -10,7 +10,7 @@
 <body>
 <div class="wrapper wrapper--note">
 
-    {{template "header" ""}}
+    {{template "header" .Header}}
 
     <main class="note-layout{{if and .ShowContents (not .NeedsConfirmation)}} note-layout--toc{{end}}">
     {{if .NeedsConfirmation}}
@@ -44,8 +44,14 @@
     {{else}}
     {{if .ShowContents}}
     <nav class="note-toc" id="noteToc" aria-label="On this page" hidden>
-        <span class="lbl note-toc-title" id="noteTocTitle">On this page</span>
-        <ol class="note-toc-list" id="noteTocList" aria-labelledby="noteTocTitle"></ol>
+        <span class="lbl note-toc-title">On this page</span>
+        <button type="button" class="note-toc-toggle" id="noteTocToggle" aria-expanded="false" aria-controls="noteTocList">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 6h3M4 12h3M4 18h3M11 6h9M13 12h7M13 18h7"/></svg>
+            <span class="lbl">On this page</span>
+            <span class="note-toc-current" id="noteTocCurrent"></span>
+            <svg class="note-toc-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+        </button>
+        <ol class="note-toc-list" id="noteTocList"></ol>
     </nav>
     {{end}}
     <article class="card article-card">
@@ -55,7 +61,7 @@
                 {{if eq .Privacy "owner"}}
                 <span class="badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>Owner only</span>
                 {{else if ne .Privacy "public"}}
-                <span class="badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>Requires login</span>
+                <span class="badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>Login required</span>
                 {{end}}
             </div>
             <div class="article-meta">
@@ -111,6 +117,7 @@
         <span>Published with Padmark</span>
         <span class="site-footer-links">
             {{if not .NeedsConfirmation}}<a href="/{{.ID}}?raw=1" target="_blank" rel="noopener">Raw</a>{{end}}
+            {{if .CanEdit}}<a href="/edit/{{.ID}}">Edit</a>{{end}}
             <a href="/">New note</a>
         </span>
     </footer>
@@ -177,10 +184,11 @@
         document.getElementById('contentSizeLabel').textContent = label;
     })();
 
-    function flashCopied(btn) {
+    // flashCopied shows a check mark for two seconds; label is the text after it (default " Copied").
+    function flashCopied(btn, label) {
         const orig = btn.innerHTML;
         btn.classList.add('copied');
-        btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> Copied`;
+        btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>` + (label === undefined ? ' Copied' : label);
         setTimeout(() => { btn.innerHTML = orig; btn.classList.remove('copied'); }, 2000);
     }
 
@@ -215,13 +223,15 @@
 
     document.querySelectorAll('.markdown-body pre').forEach(function (pre) {
         const btn = document.createElement('button');
+        btn.type = 'button';
         btn.className = 'copy-code-btn';
-        btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy';
+        btn.setAttribute('aria-label', 'Copy code');
+        btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>';
         btn.addEventListener('click', function () {
             const code = pre.querySelector('code');
             const text = (code || pre).textContent;
             if (navigator.clipboard) {
-                navigator.clipboard.writeText(text).then(function () { flashCopied(btn); });
+                navigator.clipboard.writeText(text).then(function () { flashCopied(btn, ''); });
             } else {
                 const el = document.createElement('textarea');
                 el.value = text;
@@ -229,7 +239,7 @@
                 el.select();
                 document.execCommand('copy');
                 document.body.removeChild(el);
-                flashCopied(btn);
+                flashCopied(btn, '');
             }
         });
         pre.appendChild(btn);
@@ -255,6 +265,8 @@
     (function () {
         const nav = document.getElementById('noteToc');
         const list = document.getElementById('noteTocList');
+        const toggle = document.getElementById('noteTocToggle');
+        const currentLabel = document.getElementById('noteTocCurrent');
         const selector = '.prose.markdown-body h2[id^="' + userContentPrefix + '"], ' +
             '.prose.markdown-body h3[id^="' + userContentPrefix + '"]';
         const headings = Array.prototype.filter.call(document.querySelectorAll(selector), function (h) {
@@ -275,8 +287,16 @@
             if (link) {
                 link.classList.add('active');
                 link.setAttribute('aria-current', 'location');
+                currentLabel.textContent = link.textContent;
             }
         }
+
+        // Narrow screens show the list as a drop-down under the toggle.
+        function setOpen(open) {
+            nav.classList.toggle('open', open);
+            toggle.setAttribute('aria-expanded', String(open));
+        }
+        toggle.addEventListener('click', function () { setOpen(!nav.classList.contains('open')); });
 
         headings.forEach(function (heading) {
             const item = document.createElement('li');
@@ -291,6 +311,7 @@
                     ev.preventDefault();
                     setActive(link);
                 }
+                setOpen(false);
             });
             item.appendChild(link);
             list.appendChild(item);

@@ -22,11 +22,9 @@ func TestEditor(t *testing.T) {
 			sess.fill("#slugInput", "release-notes")
 			sess.fill("#editor", "# Release notes\n\nA small **Markdown** example.")
 
-			themeTitle := strings.ToUpper(theme[:1]) + theme[1:]
-			sess.button(themeTitle + " theme")
+			sess.chooseTheme(theme)
 			sess.must(sess.expect.Locator(sess.page.Locator("html")).ToHaveAttribute("data-theme", theme))
-			sess.expectLayout(".header", ".logo", "#themeSwitcher", ".header-links", "#editor", "#titleInput",
-				"#slugInput", "#burnLabel", "#privacySelect", "#submitBtn")
+			sess.expectLayout(sess.editorParts()...)
 			sess.screenshot("editor-" + theme + ".png")
 			_, err := sess.page.Reload()
 			sess.must(err)
@@ -42,6 +40,8 @@ func TestEditor(t *testing.T) {
 		scenario{name: "Toolbar", run: testToolbar, accounts: false, allowedStatuses: nil},
 		scenario{name: "FillsHeight", run: testEditorFillsHeight, accounts: false, allowedStatuses: nil},
 		scenario{name: "Options", run: testOptions, accounts: false, allowedStatuses: nil},
+		scenario{name: "PhoneMenu", run: testPhoneMenu, accounts: false, allowedStatuses: nil},
+		scenario{name: "ChosenEditCode", run: testChosenEditCode, accounts: false, allowedStatuses: nil},
 		scenario{name: "PrivacyNeedsAccounts", allowedStatuses: []int{http.StatusUnprocessableEntity},
 			run:      testPrivacyNeedsAccounts,
 			accounts: false,
@@ -59,6 +59,22 @@ func TestEditor(t *testing.T) {
 		scenario{name: "NotFound", allowedStatuses: []int{404}, run: testNotFound, accounts: false},
 	)
 	runScenarios(t, cases)
+}
+
+// editorParts lists the editor controls that a screen size shows without a further action.
+// Phone width keeps the header links in the menu and the publish settings in the sheet.
+func (sess *uiSession) editorParts() []string {
+	if sess.mobile() {
+		return []string{
+			".header", ".logo", "#themeCycle", "#menuBtn", "#editor", "#titleInput", "#slugInput",
+			"#settingsToggle", "#submitBtn",
+		}
+	}
+
+	return []string{
+		".header", ".logo", "#themeSwitcher", ".header-links", "#editor", "#titleInput", "#slugInput",
+		"#burnLabel", "#privacySelect", "#submitBtn",
+	}
 }
 
 func testToolbar(sess *uiSession) {
@@ -79,6 +95,13 @@ func testToolbar(sess *uiSession) {
 
 func testOptions(sess *uiSession) {
 	sess.gotoPage("/")
+	sess.openSettings()
+
+	if sess.mobile() {
+		sess.expectLayout("#settingsSheet", "#privacySelect", "#burnLabel", "#contentsLabel", "#editCodeInput", "#submitBtn")
+		sess.screenshot("settings-sheet.png")
+	}
+
 	sess.must(sess.expect.Locator(sess.page.Locator("#burnTime")).ToBeDisabled())
 	sess.click("#burnLabel")
 	sess.must(sess.expect.Locator(sess.page.Locator("#burnCheck")).ToBeChecked())
@@ -91,6 +114,59 @@ func testOptions(sess *uiSession) {
 	// Without the account system nothing enforces a protected level, so only public is offered.
 	sess.expectPrivacyOptions("public")
 	sess.must(sess.expect.Locator(sess.page.Locator("#privacy-public")).ToBeChecked())
+}
+
+// testPhoneMenu checks the header menu of phone width: it holds the links that wide screens show
+// in the header, and Escape closes it.
+func testPhoneMenu(sess *uiSession) {
+	sess.gotoPage("/")
+
+	api := sess.page.Locator(".header-links").GetByRole(*playwright.AriaRoleLink, playwright.LocatorGetByRoleOptions{
+		Name: "API", Exact: new(true),
+
+		Checked: nil, Description: nil, Disabled: nil, Expanded: nil, IncludeHidden: nil,
+		Level: nil, Pressed: nil, Selected: nil,
+	})
+
+	if !sess.mobile() {
+		sess.must(sess.expect.Locator(api).ToBeVisible())
+		sess.must(sess.expect.Locator(sess.page.Locator("#menuBtn")).ToBeHidden())
+
+		return
+	}
+
+	sess.must(sess.expect.Locator(api).ToBeHidden())
+	sess.click("#menuBtn")
+	sess.must(sess.expect.Locator(sess.page.Locator("#menuBtn")).ToHaveAttribute("aria-expanded", "true"))
+	sess.must(sess.expect.Locator(api).ToBeVisible())
+	sess.expectLayout("#headerMenu")
+	sess.must(sess.page.Keyboard().Press("Escape"))
+	sess.must(sess.expect.Locator(api).ToBeHidden())
+	sess.must(sess.expect.Locator(sess.page.Locator("#menuBtn")).ToHaveAttribute("aria-expanded", "false"))
+}
+
+// testChosenEditCode checks the edit code field of a new note: a short code is refused before a
+// request, and a generated code is the code that the success page shows.
+func testChosenEditCode(sess *uiSession) {
+	sess.gotoPage("/")
+	sess.fill("#editor", "A note with a chosen edit code")
+	sess.openSettings()
+	sess.fill("#editCodeInput", "short")
+	sess.button("Publish note")
+	sess.text("#submitBtn", "Edit code: 8 characters or more")
+	sess.must(sess.expect.Page(sess.page).ToHaveURL(sess.baseURL + "/"))
+
+	sess.click("#editCodeGenerate")
+	sess.must(sess.expect.Locator(sess.page.Locator("#editCodeInput")).ToHaveValue(
+		regexp.MustCompile(`^[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}$`)))
+	generated, err := sess.page.Locator("#editCodeInput").InputValue()
+	sess.must(err)
+
+	// The button shows the refusal for a short time; wait for the label of the main action.
+	sess.text("#submitBtn", "Publish note")
+	sess.button("Publish note")
+	sess.must(sess.expect.Page(sess.page).ToHaveURL(regexpURL("/success?")))
+	require.Equal(sess.t, generated, sess.shownEditCode())
 }
 
 // testPrivacyNeedsAccounts pins review R2 in the default configuration: the API refuses a
@@ -158,7 +234,7 @@ func testPublishAndView(sess *uiSession) {
 	sess.screenshot("created.png", ".copy-value", "#editCodeValue")
 	sess.must(sess.browserContext.GrantPermissions([]string{"clipboard-read", "clipboard-write"}))
 	sess.click("#editCodeCopyBtn")
-	sess.text("#editCodeCopyBtn", "Copied")
+	sess.must(sess.expect.Locator(sess.page.Locator("#editCodeCopyBtn")).ToHaveClass(regexp.MustCompile("copied")))
 	require.Equal(sess.t, code, sess.eval("() => navigator.clipboard.readText()"))
 	sess.click("#copyLinkBtn")
 	sess.text("#copyLinkBtn", "Copied")
@@ -182,14 +258,17 @@ func testPublishAndView(sess *uiSession) {
 func testEditAndSave(sess *uiSession) {
 	code, _ := sess.publishNote()
 	sess.link("Open note")
-	sess.link("Edit")
+	sess.openEditor()
 	sess.value("#titleInput", "UI test note")
 	sess.value("#editor", "# Hello\n\nThis is **Markdown**.")
-	sess.expectLayout("#editor", "#titleInput", "#editCodeInput", "#submitBtn")
+	sess.expectLayout("#editor", "#titleInput", "#submitBtn")
 	sess.screenshot("edit.png", "#slugInput")
 	sess.button("Save")
 	sess.text("#submitBtn", "Edit code required")
+	sess.openSettings()
+	sess.expectLayout("#editCodeInput")
 	sess.fill("#editCodeInput", code)
+	sess.closeSettings()
 	sess.fill("#titleInput", "Updated title")
 	sess.fill("#editor", "# Updated\n\nSaved in the browser.")
 	sess.must(sess.page.Locator("#editor").Press("Control+Enter"))
@@ -222,7 +301,9 @@ func testPreserveCustomBurnTTL(sess *uiSession) {
 	sess.must(sess.expect.Locator(sess.page.Locator("#burnCheck")).ToBeChecked())
 	sess.value("#burnTime", "123")
 	sess.fill("#editor", "Updated content")
+	sess.openSettings()
 	sess.fill("#editCodeInput", note.EditCode)
+	sess.closeSettings()
 	sess.button("Save")
 	sess.must(sess.expect.Page(sess.page).ToHaveURL(regexp.MustCompile("/" + regexp.QuoteMeta(note.ID) + "$")))
 
@@ -260,8 +341,10 @@ func testOneTimeEditCode(sess *uiSession) {
 func testReveal(sess *uiSession) {
 	sess.gotoPage("/")
 	sess.fill("#editor", "# One-time message")
+	sess.openSettings()
 	sess.click("#burnLabel")
 	sess.selectOption("#burnTime", "0")
+	sess.closeSettings()
 	sess.button("Publish note")
 	sess.must(sess.expect.Page(sess.page).ToHaveURL(regexpURL("/success?")))
 	sess.link("Open note")
@@ -299,8 +382,10 @@ func testPublishFailure(sess *uiSession) {
 func testInvalidEditCode(sess *uiSession) {
 	sess.publishNote()
 	sess.link("Open note")
-	sess.link("Edit")
+	sess.openEditor()
+	sess.openSettings()
 	sess.fill("#editCodeInput", "wrong-edit-code")
+	sess.closeSettings()
 	sess.fill("#editor", "Unsaved draft")
 	sess.button("Save")
 	sess.text("#submitBtn", "Invalid edit code")
@@ -335,19 +420,19 @@ func (sess *uiSession) publishContentsNote(showContents bool) string {
 	sess.must(sess.expect.Locator(sess.page.Locator("#contentsCheck")).Not().ToBeChecked())
 
 	if showContents {
+		sess.openSettings()
 		sess.click("#contentsLabel")
 		sess.must(sess.expect.Locator(sess.page.Locator("#contentsCheck")).ToBeChecked())
+		sess.closeSettings()
 	}
 
 	sess.button("Publish note")
 	sess.must(sess.expect.Page(sess.page).ToHaveURL(regexpURL("/success?")))
-	sess.must(sess.expect.Locator(sess.page.Locator("#editCodeValue")).ToHaveText(nonempty))
-	code, err := sess.page.Locator("#editCodeValue").InnerText()
-	sess.must(err)
+	code := sess.shownEditCode()
 	sess.link("Open note")
 	sess.must(sess.expect.Locator(sess.role(playwright.AriaRoleHeading, "Second part")).ToBeAttached())
 
-	return strings.TrimSpace(code)
+	return code
 }
 
 // putBodies records the JSON body of each PUT request, so a test can check which fields the
@@ -382,6 +467,11 @@ func testContentsSidebar(sess *uiSession) {
 	sess.expectContentsPlacement()
 	sess.screenshot("note-toc.png")
 
+	if sess.mobile() {
+		// Phone width shows the list as a drop-down under the "On this page" button.
+		sess.click("#noteTocToggle")
+	}
+
 	sess.link("Second part")
 	sess.must(sess.expect.Page(sess.page).ToHaveURL(regexp.MustCompile(`#second-part$`)))
 	sess.must(sess.expect.Locator(sess.role(playwright.AriaRoleHeading, "Second part")).ToBeInViewport())
@@ -389,18 +479,22 @@ func testContentsSidebar(sess *uiSession) {
 
 	// Edit mode pre-sets the stored value and sends it only after a change.
 	bodies := sess.putBodies()
-	sess.link("Edit")
+	sess.openEditor()
 	sess.must(sess.expect.Locator(sess.page.Locator("#contentsCheck")).ToBeChecked())
+	sess.openSettings()
 	sess.fill("#editCodeInput", code)
+	sess.closeSettings()
 	sess.button("Save")
 	sess.must(sess.expect.Page(sess.page).Not().ToHaveURL(regexpURL("/edit/")))
 	sess.must(sess.expect.Locator(nav).ToBeVisible())
 	require.NotContains(sess.t, bodies.String(), "show_contents")
 
-	sess.link("Edit")
+	sess.openEditor()
+	sess.openSettings()
 	sess.click("#contentsLabel")
 	sess.must(sess.expect.Locator(sess.page.Locator("#contentsCheck")).Not().ToBeChecked())
 	sess.fill("#editCodeInput", code)
+	sess.closeSettings()
 	sess.button("Save")
 	sess.must(sess.expect.Page(sess.page).Not().ToHaveURL(regexpURL("/edit/")))
 	sess.must(sess.expect.Locator(sess.role(playwright.AriaRoleHeading, "Second part")).ToBeAttached())
@@ -470,21 +564,27 @@ func testEditorFillsHeight(sess *uiSession) {
 }
 
 // expectFullHeight checks that the editor card fills the free page height above the site footer
-// and that the card footer stays at the bottom of the card.
+// and that the card footer stays at the bottom of the card. Phone width has no card footer and
+// no site footer: there the card reaches the fixed bar with the main action.
 func (sess *uiSession) expectFullHeight() {
 	sess.t.Helper()
 	sess.eval("() => document.fonts.ready")
 
 	cardBox, err := sess.page.Locator(".editor-card").BoundingBox()
 	sess.must(err)
+
+	if sess.mobile() {
+		barBox, barErr := sess.page.Locator(".publish-bar").BoundingBox()
+		sess.must(barErr)
+		require.InDelta(sess.t, barBox.Y, cardBox.Y+cardBox.Height, 1, "the editor card reaches the bar")
+
+		return
+	}
+
 	footerBox, err := sess.page.Locator(".editor-card .editor-footer").BoundingBox()
 	sess.must(err)
 	require.InDelta(sess.t, cardBox.Y+cardBox.Height-1, footerBox.Y+footerBox.Height, 1,
 		"the editor footer is at the bottom of the card")
-
-	if sess.screen.name != "desktop" {
-		return
-	}
 
 	pageBottom, ok := sess.eval(`() => {
 		const layout = document.querySelector(".create-layout");

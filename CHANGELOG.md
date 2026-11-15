@@ -18,11 +18,21 @@ That baseline is not the latest released version.
   configurable API disabling.
 - Web UI redesign: one token set for the light/dim/dark themes, self-hosted Onest interface
   font, editor and short-link pages with a settings panel, privacy cards and switches, a new
-  note header, success, sign-in and admin pages, and phone-width layouts. The note and
-  short-link editor cards fill the free screen height, with the card footer at the bottom.
-  Both forms share one head layout (icon, Onest title font, `Slug /` field and toolbar
-  height), so the head does not move when the user switches forms; the note edit form shows
-  its slug read-only.
+  note header, success, sign-in and admin pages, and phone-width layouts. The note editor
+  card fills the free screen height, with the card footer at the bottom; the note edit form
+  shows its slug read-only.
+- Second design iteration from `docs/design/` (hand-off notes, tokens and screen mockups):
+  a darker dim theme; font sizes only from the scale 11/12/13/14/15/17/20/24/28/32; 44px main
+  buttons, 36–40px fields, 12–14px card corners and a 1200px page (1120px for a note). The
+  short-link form is a card with labelled destination and slug fields and a line that shows
+  the resulting link; its expiration has presets (1 hour, 1, 7 and 30 days) beside a custom
+  lifetime. A new note accepts a chosen edit code, with a button that generates one; the
+  success page masks the edit code until "Show". The header shows "Sign in" or an account
+  block with sign-out, "New" on reader pages and admin links in the admin panel. The privacy
+  level `authenticated` is labelled "Login required".
+- Phone-width interface: a 52px header bar with one theme button and a menu, a fixed bar with
+  "Settings" and the main action, the publish settings in a bottom sheet, the "On this page"
+  list as a drop-down above the note, admin tables as lists, and 44px or larger tap targets.
 - Installation-key content envelopes, key-management commands and resumable schema/content
   upgrade support, including conversion of tagged v0.1.6 plaintext notes.
 - Headless account provisioning, the MCP proxy and `/llms.txt`.

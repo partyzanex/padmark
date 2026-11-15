@@ -13,6 +13,7 @@ import (
 var linkEditorTmplSrc string
 
 type linkEditorViewData struct {
+	Header         headerView
 	ID             string
 	TargetURL      string
 	Nonce          string
@@ -26,10 +27,12 @@ type linkEditorViewData struct {
 
 // CreateLinkPage renders the short-link form without following any link.
 func (h *LinkHandler) CreateLinkPage(w http.ResponseWriter, r *http.Request) {
+	header := h.header(r, headerKindLink)
 	data := linkEditorViewData{
-		ID: "", TargetURL: "", Nonce: middleware.NonceFromContext(r.Context()),
+		Header: header,
+		ID:     "", TargetURL: "", Nonce: middleware.NonceFromContext(r.Context()),
 		DirectRedirect: "inherit", ExpiresLabel: "", EditMode: false, IsOwner: false, BurnAfterClick: false,
-		PrivacyOptions: privacyOptions(h.authMgr != nil, h.signedIn(r), domain.PrivacyPublic),
+		PrivacyOptions: privacyOptions(h.authMgr != nil, header.SignedIn(), domain.PrivacyPublic),
 	}
 	h.renderLinkEditor(w, r, &data)
 }
@@ -57,11 +60,14 @@ func (h *LinkHandler) EditLinkPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	header := h.header(r, headerKindPlain)
+
 	data := linkEditorViewData{
-		ID: id, TargetURL: link.TargetURL, Nonce: middleware.NonceFromContext(r.Context()),
+		Header: header,
+		ID:     id, TargetURL: link.TargetURL, Nonce: middleware.NonceFromContext(r.Context()),
 		DirectRedirect: "inherit", ExpiresLabel: "Never expires", EditMode: true,
 		IsOwner: link.OwnedBy(middleware.CallerIDFromCtx(r.Context())), BurnAfterClick: link.BurnAfterClick,
-		PrivacyOptions: privacyOptions(h.authMgr != nil, h.signedIn(r), link.EffectivePrivacy()),
+		PrivacyOptions: privacyOptions(h.authMgr != nil, header.SignedIn(), link.EffectivePrivacy()),
 	}
 	if link.DirectRedirect != nil {
 		data.DirectRedirect = "false"

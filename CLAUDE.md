@@ -138,7 +138,8 @@ Dependencies point inward: adapters and infrastructure depend on usecases and do
 
 - Current UI sources are `internal/adapters/web/templates/` and
   `internal/adapters/web/static/style.css`, with page-specific nonce-protected styles/scripts.
-  There is no checked-in `docs/design/` mockup directory.
+  The design source is `docs/design/`: `HANDOFF.md` (decisions to keep), `tokens.css` (theme
+  colors) and `screens/` (canvas-editor mockups, not templates).
 - Read the affected template, shared styles and any design reference supplied for the task.
   `docs/screens/` contains example screenshots; browser regression PNGs live in
   `tests/ui/testdata/screenshots/`.

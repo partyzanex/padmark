@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Padmark mobile — Sign in (light)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;0,8..60,700;1,8..60,400&amp;display=swap">
+<style>
+body{margin:0}
+.pm{--bg:#F3F4F6;--surface:#FFFFFF;--sunken:#F7F8FA;--ink:#14151A;--ink-2:#3B3E48;--muted:#5D6170;--line:#E2E4EA;--line-2:#CDD0D8;--accent:#4A3AE0;--on-accent:#FFFFFF;--accent-soft:#ECEAFF;--accent-text:#3A2BC4;--warn:#9A4A06;--warn-soft:#FFF1E0;--code-bg:#F0F1F4;--shadow:0 1px 2px rgba(20,21,26,.05),0 10px 30px -14px rgba(20,21,26,.14);font-family:'Onest',system-ui,-apple-system,'Segoe UI',sans-serif;color:var(--ink);background:var(--bg);-webkit-font-smoothing:antialiased}
+.pm.dim{--bg:#26272F;--surface:#2F3039;--sunken:#2A2B33;--ink:#ECEDF2;--ink-2:#CDCFD8;--muted:#A9ACB8;--line:#3D3F4A;--line-2:#4F525E;--accent:#9C92FF;--on-accent:#14151A;--accent-soft:#37335C;--accent-text:#BDB6FF;--warn:#F2A766;--warn-soft:#43321F;--code-bg:#353640;--shadow:0 1px 2px rgba(0,0,0,.3),0 14px 34px -16px rgba(0,0,0,.6)}
+.pm.dark{--bg:#0A0B0E;--surface:#121318;--sunken:#0E0F13;--ink:#EDEEF2;--ink-2:#C4C6CF;--muted:#9295A2;--line:#22242C;--line-2:#30323C;--accent:#8E83FF;--on-accent:#0A0B0E;--accent-soft:#1E1B3A;--accent-text:#ADA5FF;--warn:#F2A766;--warn-soft:#2D2116;--code-bg:#1A1B22;--shadow:0 1px 2px rgba(0,0,0,.4),0 14px 34px -16px rgba(0,0,0,.8)}
+.pm *{box-sizing:border-box}
+.pm input,.pm textarea,.pm select,.pm button{font:inherit;color:inherit}
+.pm button{cursor:pointer}
+.pm a{color:var(--accent-text);text-decoration:none}
+.pm ::placeholder{color:var(--muted)}
+.pm .field:focus,.pm .field:focus-within{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.pm button:focus-visible,.pm a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.pm .lbl{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+</style>
+</helmet>
+<div class="pm {{theme}}" style="width: 390px; height: 844px; position: relative; overflow: hidden; display: flex; flex-direction: column">
+
+<header style="display: flex; align-items: center; gap: 2px; height: 52px; padding: 0 8px 0 18px; background: var(--surface); border-bottom: 1px solid var(--line); flex: none">
+<a href="MobileEditor.dc.html" aria-label="Padmark — home" style="font-family: 'Source Serif 4', Georgia, serif; font-weight: 700; font-size: 20px; letter-spacing: -0.02em; color: var(--ink); line-height: 1">Padmark<span style="color: var(--accent)">.</span></a>
+<div style="flex: 1"></div>
+<button type="button" aria-label="{{themeLabel}}" onClick="{{cycleTheme}}" style="width: 44px; height: 44px; border: 0; border-radius: 10px; background: transparent; color: var(--ink-2); display: grid; place-items: center"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="8.5"></circle><path d="M12 3.5a8.5 8.5 0 0 1 0 17z" fill="currentColor"></path></svg></button>
+<button type="button" aria-label="Menu" style="width: 44px; height: 44px; border: 0; border-radius: 10px; background: transparent; color: var(--ink-2); display: grid; place-items: center"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"></path></svg></button>
+</header>
+
+<form aria-labelledby="m-signin-h" style="flex: 1; display: flex; flex-direction: column; gap: 18px; padding: 32px 20px 28px">
+<div style="display: flex; flex-direction: column; gap: 8px">
+<span aria-hidden="true" style="width: 44px; height: 44px; border-radius: 10px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent-text); margin-bottom: 6px"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 3 4 6v6c0 4.5 3.4 8 8 9 4.6-1 8-4.5 8-9V6z"></path><path d="m9 12 2 2 4-4" stroke-linecap="round"></path></svg></span>
+<h1 id="m-signin-h" style="margin: 0; font-family: 'Source Serif 4', Georgia, serif; font-size: 28px; font-weight: 600; letter-spacing: -0.015em">Sign in</h1>
+<p style="margin: 0; font-size: 14px; color: var(--muted); line-height: 1.5">Username, password and the 6-digit code from your authenticator app.</p>
+</div>
+
+<sc-if value="{{err}}" hint-placeholder-val="{{ true }}">
+<div role="alert" style="display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border-radius: 10px; background: var(--warn-soft); font-size: 13px; line-height: 1.45">
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true" style="color: var(--warn); flex: none; margin-top: 1px"><circle cx="12" cy="12" r="9"></circle><path d="M12 8v5M12 16.5v.01"></path></svg>
+<span><strong style="font-weight: 600">That didn't work.</strong> Check all three fields — the code changes every 30 seconds.</span>
+</div>
+</sc-if>
+
+<div style="display: flex; flex-direction: column; gap: 8px">
+<label for="m-user" class="lbl">Username</label>
+<input id="m-user" class="field" autocomplete="username" autocapitalize="off" placeholder="Your username" style="height: 48px; padding: 0 14px; border: 1px solid var(--line-2); border-radius: 10px; background: var(--surface); font-size: 16px">
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 8px">
+<label for="m-pass" class="lbl">Password</label>
+<div class="field" style="display: flex; align-items: center; height: 48px; padding: 0 4px 0 14px; border: 1px solid var(--line-2); border-radius: 10px; background: var(--surface)">
+<input id="m-pass" type="{{passType}}" autocomplete="current-password" placeholder="Your password" style="flex: 1; min-width: 0; border: 0; outline: none; background: transparent; height: 100%; font-size: 16px">
+<button type="button" aria-label="{{passLabel}}" aria-pressed="{{showStr}}" onClick="{{togglePass}}" style="width: 44px; height: 44px; border: 0; border-radius: 10px; background: transparent; color: var(--muted); display: grid; place-items: center"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"></path><circle cx="12" cy="12" r="3"></circle></svg></button>
+</div>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 8px">
+<label for="m-totp" class="lbl">Authenticator code</label>
+<input id="m-totp" class="field" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="000000" style="height: 52px; padding: 0 14px; border: 1px solid var(--line-2); border-radius: 10px; background: var(--surface); font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 24px; font-weight: 600; letter-spacing: .45em; text-align: center">
+</div>
+
+<div style="margin-top: auto; display: flex; flex-direction: column; gap: 14px">
+<button type="button" onClick="{{submit}}" style="height: 48px; border: 0; border-radius: 10px; background: var(--accent); color: var(--on-accent); font-weight: 600; font-size: 16px">Sign in</button>
+<p style="margin: 0; text-align: center; font-size: 13px; color: var(--muted)">No account? Ask an admin for an invite.</p>
+</div>
+</form>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["light","dim","dark"],"default":"light"},"showError":{"editor":"boolean","default":true},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const s = this.state || {};
+    const order = ['light', 'dim', 'dark'];
+    const theme = s.theme || this.props.theme || 'light';
+    const show = !!s.show;
+    return {
+      theme,
+      themeLabel: 'Theme: ' + theme + ' (tap to change)',
+      cycleTheme: () => this.setState({ theme: order[(order.indexOf(theme) + 1) % 3] }),
+      err: s.err != null ? s.err : (this.props.showError ?? true),
+      submit: () => this.setState({ err: true }),
+      passType: show ? 'text' : 'password',
+      passLabel: show ? 'Hide password' : 'Show password',
+      showStr: String(show),
+      togglePass: () => this.setState({ show: !show })
+    };
+  }
+}
+</script>
+</body>
+</html>

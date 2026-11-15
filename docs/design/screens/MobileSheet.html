@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Padmark mobile — Publish settings</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;0,8..60,700;1,8..60,400&amp;display=swap">
+<style>
+body{margin:0}
+.pm{--bg:#F3F4F6;--surface:#FFFFFF;--sunken:#F7F8FA;--ink:#14151A;--ink-2:#3B3E48;--muted:#5D6170;--line:#E2E4EA;--line-2:#CDD0D8;--accent:#4A3AE0;--on-accent:#FFFFFF;--accent-soft:#ECEAFF;--accent-text:#3A2BC4;--warn:#9A4A06;--warn-soft:#FFF1E0;--code-bg:#F0F1F4;--shadow:0 1px 2px rgba(20,21,26,.05),0 10px 30px -14px rgba(20,21,26,.14);font-family:'Onest',system-ui,-apple-system,'Segoe UI',sans-serif;color:var(--ink);background:var(--bg);-webkit-font-smoothing:antialiased}
+.pm.dim{--bg:#26272F;--surface:#2F3039;--sunken:#2A2B33;--ink:#ECEDF2;--ink-2:#CDCFD8;--muted:#A9ACB8;--line:#3D3F4A;--line-2:#4F525E;--accent:#9C92FF;--on-accent:#14151A;--accent-soft:#37335C;--accent-text:#BDB6FF;--warn:#F2A766;--warn-soft:#43321F;--code-bg:#353640;--shadow:0 1px 2px rgba(0,0,0,.3),0 14px 34px -16px rgba(0,0,0,.6)}
+.pm.dark{--bg:#0A0B0E;--surface:#121318;--sunken:#0E0F13;--ink:#EDEEF2;--ink-2:#C4C6CF;--muted:#9295A2;--line:#22242C;--line-2:#30323C;--accent:#8E83FF;--on-accent:#0A0B0E;--accent-soft:#1E1B3A;--accent-text:#ADA5FF;--warn:#F2A766;--warn-soft:#2D2116;--code-bg:#1A1B22;--shadow:0 1px 2px rgba(0,0,0,.4),0 14px 34px -16px rgba(0,0,0,.8)}
+.pm *{box-sizing:border-box}
+.pm input,.pm textarea,.pm select,.pm button{font:inherit;color:inherit}
+.pm button{cursor:pointer}
+.pm a{color:var(--accent-text);text-decoration:none}
+.pm .field:focus,.pm .field:focus-within{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.pm button:focus-visible,.pm a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.pm .lbl{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+</style>
+</helmet>
+<div class="pm {{theme}}" style="width: 390px; height: 844px; position: relative; overflow: hidden; display: flex; flex-direction: column">
+
+<div aria-hidden="true" style="display: flex; flex-direction: column; flex: 1">
+<div style="display: flex; align-items: center; height: 52px; padding: 0 18px; background: var(--surface); border-bottom: 1px solid var(--line)"><span style="font-family: 'Source Serif 4', Georgia, serif; font-weight: 700; font-size: 20px; letter-spacing: -0.02em">Padmark<span style="color: var(--accent)">.</span></span></div>
+<div style="margin: 12px 16px 0; height: 48px; border-radius: 10px; background: var(--surface); border: 1px solid var(--line)"></div>
+<div style="flex: 1; margin: 12px 16px 0; padding: 18px; border-radius: 12px 12px 0 0; background: var(--surface); border: 1px solid var(--line); border-bottom: 0">
+<div style="font-family: 'Source Serif 4', Georgia, serif; font-size: 24px; font-weight: 600">Чек-лист перед релизом</div>
+<div style="margin-top: 18px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; line-height: 1.7; color: var(--ink-2)">Короткая памятка для дежурного…<br>## Перед деплоем<br>- [x] Прогнать миграции</div>
+</div>
+</div>
+
+<a href="MobileEditor.dc.html" aria-label="Close settings" style="position: absolute; inset: 0; background: rgba(10,11,14,.48)"></a>
+
+<section role="dialog" aria-modal="true" aria-labelledby="m-sheet-h" style="position: absolute; left: 0; right: 0; bottom: 0; background: var(--surface); border-radius: 16px 16px 0 0; box-shadow: 0 -12px 40px rgba(0,0,0,.25); padding: 10px 20px 28px; display: flex; flex-direction: column; gap: 20px">
+<span aria-hidden="true" style="align-self: center; width: 40px; height: 5px; border-radius: 999px; background: var(--line-2)"></span>
+<div style="display: flex; align-items: center; justify-content: space-between; margin-top: -6px">
+<h2 id="m-sheet-h" style="margin: 0; font-family: 'Source Serif 4', Georgia, serif; font-size: 20px; font-weight: 600">Publish settings</h2>
+<a href="MobileEditor.dc.html" aria-label="Close" style="width: 44px; height: 44px; margin-right: -10px; border-radius: 10px; display: grid; place-items: center; color: var(--muted)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"></path></svg></a>
+</div>
+
+<fieldset style="border: 0; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; min-width: 0">
+<legend class="lbl" style="padding: 0; margin-bottom: 10px">Who can read</legend>
+<label style="{{optPub}}">
+<input type="radio" name="m-privacy" checked="{{isPub}}" onChange="{{setPub}}" style="accent-color: var(--accent); width: 18px; height: 18px; margin: 2px 0 0">
+<span style="display: flex; flex-direction: column; gap: 2px"><span style="font-weight: 600; font-size: 14px">Public</span><span style="font-size: 12px; color: var(--muted)">Anyone with the link</span></span>
+</label>
+<label style="{{optLog}}">
+<input type="radio" name="m-privacy" checked="{{isLog}}" onChange="{{setLog}}" style="accent-color: var(--accent); width: 18px; height: 18px; margin: 2px 0 0">
+<span style="display: flex; flex-direction: column; gap: 2px"><span style="font-weight: 600; font-size: 14px">Login required</span><span style="font-size: 12px; color: var(--muted)">Only signed-in users</span></span>
+</label>
+<label style="{{optOwn}}">
+<input type="radio" name="m-privacy" checked="{{isOwn}}" onChange="{{setOwn}}" style="accent-color: var(--accent); width: 18px; height: 18px; margin: 2px 0 0">
+<span style="display: flex; flex-direction: column; gap: 2px"><span style="font-weight: 600; font-size: 14px">Owner only</span><span style="font-size: 12px; color: var(--muted)">Only you, as the author</span></span>
+</label>
+</fieldset>
+
+<div style="display: flex; flex-direction: column; gap: 0; border: 1px solid var(--line); border-radius: 10px">
+<div style="display: flex; align-items: center; gap: 12px; padding: 14px">
+<span id="m-burn-lbl" style="display: flex; flex-direction: column; gap: 1px; flex: 1"><span style="font-weight: 600; font-size: 14px">Burn after reading</span><span style="font-size: 12px; color: var(--muted)">Delete once it's opened</span></span>
+<button type="button" role="switch" aria-checked="{{burnStr}}" aria-labelledby="m-burn-lbl" onClick="{{toggleBurn}}" style="flex: none; width: 52px; height: 32px; border-radius: 999px; border: 0; padding: 3px; display: flex; {{burnTrack}}"><span style="width: 26px; height: 26px; border-radius: 999px; background: #FFFFFF; box-shadow: 0 1px 3px rgba(0,0,0,.25); transition: transform .15s; {{burnKnob}}"></span></button>
+</div>
+<sc-if value="{{burn}}" hint-placeholder-val="{{ false }}">
+<div style="padding: 0 14px 14px; position: relative">
+<label for="m-burn-when" class="lbl" style="display: block; margin-bottom: 6px">Delete</label>
+<select id="m-burn-when" class="field" style="appearance: none; -webkit-appearance: none; width: 100%; height: 44px; padding: 0 36px 0 12px; border: 1px solid var(--line-2); border-radius: 10px; background: var(--surface); font-size: 14px">
+<option>Immediately after first view</option>
+<option>5 minutes after first view</option>
+<option>1 hour after first view</option>
+</select>
+</div>
+</sc-if>
+<div style="height: 1px; background: var(--line)"></div>
+<div style="display: flex; align-items: center; gap: 12px; padding: 14px">
+<span id="m-toc-lbl" style="display: flex; flex-direction: column; gap: 1px; flex: 1"><span style="font-weight: 600; font-size: 14px">Contents</span><span style="font-size: 12px; color: var(--muted)">“On this page” from headings</span></span>
+<button type="button" role="switch" aria-checked="{{tocStr}}" aria-labelledby="m-toc-lbl" onClick="{{toggleToc}}" style="flex: none; width: 52px; height: 32px; border-radius: 999px; border: 0; padding: 3px; display: flex; {{tocTrack}}"><span style="width: 26px; height: 26px; border-radius: 999px; background: #FFFFFF; box-shadow: 0 1px 3px rgba(0,0,0,.25); transition: transform .15s; {{tocKnob}}"></span></button>
+</div>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 6px">
+<label for="m-ncode" class="lbl">Edit code</label>
+<div class="field" style="display: flex; align-items: center; height: 48px; padding: 0 2px 0 12px; border: 1px solid var(--line-2); border-radius: 10px; background: var(--surface)">
+<input id="m-ncode" placeholder="Generated if blank" autocapitalize="off" style="flex: 1; min-width: 0; border: 0; outline: none; background: transparent; height: 100%; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 16px">
+<button type="button" aria-label="Generate edit code" style="width: 44px; height: 44px; border: 0; border-radius: 10px; background: transparent; color: var(--muted); display: grid; place-items: center"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.6-4.5L4 8M4 4v4h4M4 13a8 8 0 0 0 14.6 4.5L20 16M20 20v-4h-4"></path></svg></button>
+</div>
+<span style="font-size: 12px; color: var(--muted)">Lets you edit or delete the note later.</span>
+</div>
+
+<a href="MobilePublished-light.dc.html" style="height: 48px; border-radius: 10px; background: var(--accent); color: var(--on-accent); display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 16px">Publish note</a>
+</section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["light","dim","dark"],"default":"light"},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const s = this.state || {};
+    const theme = s.theme || this.props.theme || 'light';
+    const privacy = s.privacy || 'public';
+    const burn = !!s.burn;
+    const toc = s.toc != null ? s.toc : true;
+    const opt = (on) => 'display: flex; gap: 12px; align-items: flex-start; padding: 14px; border-radius: 10px; cursor: pointer; border: 1px solid ' +
+      (on ? 'var(--accent); background: var(--accent-soft)' : 'var(--line); background: var(--surface)');
+    const track = (on) => on ? 'background: var(--accent)' : 'background: var(--line-2)';
+    const knob = (on) => on ? 'transform: translateX(20px)' : 'transform: translateX(0)';
+    return {
+      theme,
+      isPub: privacy === 'public', isLog: privacy === 'login', isOwn: privacy === 'owner',
+      optPub: opt(privacy === 'public'), optLog: opt(privacy === 'login'), optOwn: opt(privacy === 'owner'),
+      setPub: () => this.setState({ privacy: 'public' }),
+      setLog: () => this.setState({ privacy: 'login' }),
+      setOwn: () => this.setState({ privacy: 'owner' }),
+      burn, burnStr: String(burn), burnTrack: track(burn), burnKnob: knob(burn),
+      toggleBurn: () => this.setState({ burn: !burn }),
+      tocStr: String(toc), tocTrack: track(toc), tocKnob: knob(toc),
+      toggleToc: () => this.setState({ toc: !toc })
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -68,23 +68,23 @@ func (h *NoteHandler) RegisterRoutes(mux *http.ServeMux) {
 }
 
 type noteViewData struct {
-	ExpiresISO        string
+	Nonce             string
+	Body              template.HTML
 	CSRFToken         string
 	ID                string
 	CreatedAt         string
 	CreatedISO        string
 	ExpiresLabel      string
 	Title             string
-	Nonce             string
-	Body              template.HTML
+	ExpiresISO        string
 	ConfirmToken      string
-	RawContent        string
 	Privacy           string
+	RawContent        string
+	Header            headerView
 	Views             int
 	CanEdit           bool
 	NeedsConfirmation bool
-	// ShowContents adds the "On this page" sidebar; the burn confirmation page never shows it.
-	ShowContents bool
+	ShowContents      bool
 }
 
 func toNoteViewData(note *domain.Note, rendered string) noteViewData {
@@ -100,6 +100,7 @@ func toNoteViewData(note *domain.Note, rendered string) noteViewData {
 	}
 
 	return noteViewData{
+		Header:       noHeader(),
 		ID:           note.ID,
 		Title:        note.Title,
 		Body:         template.HTML(rendered), //nolint:gosec // content is bluemonday-sanitized
@@ -156,6 +157,7 @@ func toNoteJSON(note *domain.Note) noteJSON {
 
 func toBurnInterstitialViewData(note *domain.Note, tok string) noteViewData {
 	return noteViewData{
+		Header:            noHeader(),
 		ID:                note.ID,
 		Title:             note.Title,
 		CreatedAt:         note.CreatedAt.Format("Jan 2, 2006, 3:04 PM"),
@@ -468,6 +470,7 @@ func (h *NoteHandler) renderNoteHTML(w http.ResponseWriter, r *http.Request, id 
 
 	data := toNoteViewData(note, rendered)
 	data.Nonce = middleware.NonceFromContext(r.Context())
+	data.Header = h.header(r, headerKindView)
 	// Every reader sees the Edit link: the author of an anonymous note edits it with the edit
 	// code, and PUT checks that code on the server. VisibleTo hides the link of a privacy=owner
 	// note from a caller who is not its owner (see EditPage's doc comment).
@@ -588,6 +591,7 @@ func (h *NoteHandler) handleBurnInterstitial(
 
 	data := toBurnInterstitialViewData(note, tok)
 	data.Nonce = middleware.NonceFromContext(r.Context())
+	data.Header = h.header(r, headerKindView)
 	data.CSRFToken = middleware.CSRFFromContext(r.Context())
 
 	execErr := h.noteTmpl.Execute(w, data)

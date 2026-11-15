@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Padmark mobile — Note view</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;0,8..60,700;1,8..60,400&amp;display=swap">
+<style>
+body{margin:0}
+.pm{--bg:#F3F4F6;--surface:#FFFFFF;--sunken:#F7F8FA;--ink:#14151A;--ink-2:#3B3E48;--muted:#5D6170;--line:#E2E4EA;--line-2:#CDD0D8;--accent:#4A3AE0;--on-accent:#FFFFFF;--accent-soft:#ECEAFF;--accent-text:#3A2BC4;--warn:#9A4A06;--warn-soft:#FFF1E0;--code-bg:#F0F1F4;--shadow:0 1px 2px rgba(20,21,26,.05),0 10px 30px -14px rgba(20,21,26,.14);font-family:'Onest',system-ui,-apple-system,'Segoe UI',sans-serif;color:var(--ink);background:var(--bg);-webkit-font-smoothing:antialiased}
+.pm.dim{--bg:#26272F;--surface:#2F3039;--sunken:#2A2B33;--ink:#ECEDF2;--ink-2:#CDCFD8;--muted:#A9ACB8;--line:#3D3F4A;--line-2:#4F525E;--accent:#9C92FF;--on-accent:#14151A;--accent-soft:#37335C;--accent-text:#BDB6FF;--warn:#F2A766;--warn-soft:#43321F;--code-bg:#353640;--shadow:0 1px 2px rgba(0,0,0,.3),0 14px 34px -16px rgba(0,0,0,.6)}
+.pm.dark{--bg:#0A0B0E;--surface:#121318;--sunken:#0E0F13;--ink:#EDEEF2;--ink-2:#C4C6CF;--muted:#9295A2;--line:#22242C;--line-2:#30323C;--accent:#8E83FF;--on-accent:#0A0B0E;--accent-soft:#1E1B3A;--accent-text:#ADA5FF;--warn:#F2A766;--warn-soft:#2D2116;--code-bg:#1A1B22;--shadow:0 1px 2px rgba(0,0,0,.4),0 14px 34px -16px rgba(0,0,0,.8)}
+.pm *{box-sizing:border-box}
+.pm input,.pm textarea,.pm select,.pm button{font:inherit;color:inherit}
+.pm button{cursor:pointer}
+.pm a{color:var(--accent-text);text-decoration:none}
+.pm button:focus-visible,.pm a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.pm .lbl{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.pm .prose h2{font-family:'Source Serif 4',Georgia,serif;font-size:20px;font-weight:600;letter-spacing:-.01em;line-height:1.25;margin:32px 0 12px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+.pm .prose p{margin:0 0 14px}
+.pm .prose ol{margin:0 0 16px;padding-left:22px}
+.pm .prose li{margin:5px 0}
+.pm .prose code{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:.82em;background:var(--code-bg);border:1px solid var(--line);padding:1px 5px;border-radius:5px}
+</style>
+</helmet>
+<div class="pm {{theme}}" style="width: 390px; height: 1700px; position: relative; overflow: hidden; display: flex; flex-direction: column">
+
+<header lang="en" style="display: flex; align-items: center; gap: 2px; height: 52px; padding: 0 8px 0 18px; background: var(--surface); border-bottom: 1px solid var(--line); flex: none">
+<a href="MobileEditor.dc.html" aria-label="Padmark — home" style="font-family: 'Source Serif 4', Georgia, serif; font-weight: 700; font-size: 20px; letter-spacing: -0.02em; color: var(--ink); line-height: 1">Padmark<span style="color: var(--accent)">.</span></a>
+<div style="flex: 1"></div>
+<button type="button" aria-label="{{themeLabel}}" onClick="{{cycleTheme}}" style="width: 44px; height: 44px; border: 0; border-radius: 10px; background: transparent; color: var(--ink-2); display: grid; place-items: center"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="8.5"></circle><path d="M12 3.5a8.5 8.5 0 0 1 0 17z" fill="currentColor"></path></svg></button>
+<a href="MobileEditor.dc.html" aria-label="New note" style="width: 44px; height: 44px; border-radius: 10px; background: var(--accent); color: var(--on-accent); display: grid; place-items: center; margin-left: 4px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg></a>
+</header>
+
+<main style="flex: 1; display: flex; flex-direction: column; gap: 12px; padding: 12px 12px 0">
+
+<sc-if value="{{toc}}" hint-placeholder-val="{{ true }}">
+<nav aria-label="On this page" style="background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden">
+<button type="button" aria-expanded="{{openStr}}" aria-controls="m-toc-list" onClick="{{toggleOpen}}" style="width: 100%; height: 48px; display: flex; align-items: center; gap: 10px; padding: 0 14px; border: 0; background: transparent; text-align: left">
+<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true" style="color: var(--accent-text)"><path d="M4 6h3M4 12h3M4 18h3M11 6h9M13 12h7M13 18h7"></path></svg>
+<span lang="en" class="lbl" style="flex: none">On this page</span>
+<span style="flex: 1; min-width: 0; font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">Перед деплоем</span>
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" style="color: var(--muted); transition: transform .15s; {{chev}}"><path d="m6 9 6 6 6-6"></path></svg>
+</button>
+<sc-if value="{{open}}" hint-placeholder-val="{{ true }}">
+<div id="m-toc-list" style="display: flex; flex-direction: column; padding: 0 6px 6px; border-top: 1px solid var(--line)">
+<a href="#before" style="display: flex; align-items: center; height: 44px; padding: 0 12px; margin-top: 6px; border-radius: 9px; font-size: 14px; font-weight: 500; background: var(--accent-soft); color: var(--accent-text)">Перед деплоем</a>
+<a href="#deploy" style="display: flex; align-items: center; height: 44px; padding: 0 12px; border-radius: 9px; font-size: 14px; color: var(--ink-2)">Деплой</a>
+<a href="#rollback" style="display: flex; align-items: center; height: 44px; padding: 0 12px; border-radius: 9px; font-size: 14px; color: var(--ink-2)">Откат</a>
+</div>
+</sc-if>
+</nav>
+</sc-if>
+
+<article class="prose" style="background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 20px 20px 28px; font-family: 'Source Serif 4', Georgia, serif; font-size: 17px; line-height: 1.7; color: var(--ink); text-wrap: pretty">
+<header style="display: flex; flex-direction: column; gap: 10px; padding-bottom: 14px; margin-bottom: 20px; border-bottom: 1px solid var(--line); font-family: 'Onest', system-ui, sans-serif; line-height: 1.4">
+<span lang="en" style="align-self: flex-start; display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 9px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-text); font-size: 11px; font-weight: 600"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg>Login required</span>
+<h1 style="margin: 0; font-family: 'Source Serif 4', Georgia, serif; font-size: 24px; font-weight: 600; letter-spacing: -0.015em; line-height: 1.2">Чек-лист перед релизом</h1>
+<p lang="en" style="margin: 0; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: var(--muted); line-height: 1.6">Nov 10, 2026 · 3 views · 2.1 KB · expires Feb 8, 2027</p>
+<div role="group" aria-label="Note actions" lang="en" style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin-top: 4px">
+<button type="button" onClick="{{copy}}" style="height: 44px; border-radius: 10px; border: 1px solid var(--line); background: var(--sunken); font-size: 12px; font-weight: 500; color: var(--ink-2)">{{copyLabel}}</button>
+<a href="#raw" style="height: 44px; border-radius: 10px; border: 1px solid var(--line); background: var(--sunken); font-size: 12px; font-weight: 500; color: var(--ink-2); display: flex; align-items: center; justify-content: center">Raw</a>
+<button type="button" style="height: 44px; border-radius: 10px; border: 1px solid var(--line); background: var(--sunken); font-size: 12px; font-weight: 500; color: var(--ink-2)">Link</button>
+<a href="MobileEditor.dc.html" style="height: 44px; border-radius: 10px; border: 1px solid var(--line); background: var(--sunken); font-size: 12px; font-weight: 500; color: var(--ink-2); display: flex; align-items: center; justify-content: center">Edit</a>
+</div>
+</header>
+
+<p style="font-size: 17px; line-height: 1.6; color: var(--ink-2)">Короткая памятка для дежурного. <strong>Никогда не вставляйте токены</strong> в публичные заметки — для этого есть режим <em>Login required</em>.</p>
+
+<h2 id="before" style="margin-top: 24px">Перед деплоем</h2>
+<div style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px; font-family: 'Onest', system-ui, sans-serif; font-size: 14px; line-height: 1.4">
+<label style="display: flex; gap: 12px; align-items: center"><input type="checkbox" checked disabled style="accent-color: var(--accent); width: 18px; height: 18px; margin: 0; flex: none"><span style="color: var(--muted); text-decoration: line-through">Прогнать миграции на стейдже</span></label>
+<label style="display: flex; gap: 12px; align-items: center"><input type="checkbox" checked disabled style="accent-color: var(--accent); width: 18px; height: 18px; margin: 0; flex: none"><span style="color: var(--muted); text-decoration: line-through">Сверить переменные окружения</span></label>
+<label style="display: flex; gap: 12px; align-items: center"><input type="checkbox" disabled style="accent-color: var(--accent); width: 18px; height: 18px; margin: 0; flex: none"><span>Обновить changelog</span></label>
+</div>
+
+<h2 id="deploy">Деплой</h2>
+<p>Запускаем из корня репозитория. Переменная <code>ENV</code> обязательна — без неё скрипт остановится.</p>
+<figure style="margin: 0 0 18px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--code-bg)">
+<figcaption lang="en" style="display: flex; align-items: center; justify-content: space-between; padding: 0 0 0 12px; border-bottom: 1px solid var(--line); font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: var(--muted)">bash<button type="button" aria-label="Copy code" style="width: 44px; height: 40px; border: 0; background: transparent; color: var(--muted); display: grid; place-items: center"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"></rect><path d="M5 15V5a2 2 0 0 1 2-2h10"></path></svg></button></figcaption>
+<pre style="margin: 0; padding: 14px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; line-height: 1.7; overflow-x: auto"><span style="color: var(--muted)">$</span> make deploy ENV=staging
+<span style="color: var(--muted)">$</span> make smoke ENV=staging</pre>
+</figure>
+
+<div style="overflow-x: auto; margin: 0 0 18px; border: 1px solid var(--line); border-radius: 10px">
+<table style="width: 100%; min-width: 360px; border-collapse: collapse; font-family: 'Onest', system-ui, sans-serif; font-size: 13px; line-height: 1.45">
+<thead><tr style="background: var(--sunken)"><th scope="col" style="text-align: left; padding: 9px 12px; font-weight: 600; border-bottom: 1px solid var(--line)">Среда</th><th scope="col" style="text-align: left; padding: 9px 12px; font-weight: 600; border-bottom: 1px solid var(--line)">Кто подтверждает</th><th scope="col" style="text-align: left; padding: 9px 12px; font-weight: 600; border-bottom: 1px solid var(--line)">Окно</th></tr></thead>
+<tbody>
+<tr><td style="padding: 9px 12px; border-bottom: 1px solid var(--line)"><code>staging</code></td><td style="padding: 9px 12px; border-bottom: 1px solid var(--line)">Дежурный</td><td style="padding: 9px 12px; border-bottom: 1px solid var(--line)">Любое время</td></tr>
+<tr><td style="padding: 9px 12px"><code>production</code></td><td style="padding: 9px 12px">Тимлид</td><td style="padding: 9px 12px">Будни, до 16:00</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="rollback">Откат</h2>
+<blockquote style="margin: 0 0 16px; padding: 2px 0 2px 16px; border-left: 3px solid var(--accent); color: var(--ink-2); font-style: italic">Если что-то пошло не так — откатываемся и пишем в канал релизов. Разбираемся после.</blockquote>
+<ol>
+<li>Вернуть предыдущий тег: <code>make rollback</code></li>
+<li>Проверить, что алерты погасли</li>
+<li>Записать, что случилось, в <a href="#changelog" style="text-decoration: underline; text-underline-offset: 3px">changelog</a></li>
+</ol>
+</article>
+
+<footer lang="en" style="margin-top: auto; padding: 18px 4px 28px; display: flex; justify-content: space-between; font-size: 12px; color: var(--muted)">
+<span>Published with Padmark</span>
+<span style="display: flex; gap: 14px"><a href="#raw" style="color: var(--muted)">Raw</a><a href="MobileEditor.dc.html" style="color: var(--muted)">New note</a></span>
+</footer>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["light","dim","dark"],"default":"light"},"toc":{"editor":"boolean","default":true},"$preview":{"width":390,"height":1700}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const s = this.state || {};
+    const order = ['light', 'dim', 'dark'];
+    const theme = s.theme || this.props.theme || 'light';
+    const open = s.open != null ? s.open : true;
+    return {
+      theme,
+      themeLabel: 'Theme: ' + theme + ' (tap to change)',
+      cycleTheme: () => this.setState({ theme: order[(order.indexOf(theme) + 1) % 3] }),
+      toc: this.props.toc ?? true,
+      open, openStr: String(open),
+      toggleOpen: () => this.setState({ open: !open }),
+      chev: open ? 'transform: rotate(180deg)' : 'transform: rotate(0deg)',
+      copyLabel: s.copied ? 'Copied' : 'Copy',
+      copy: () => this.setState({ copied: true })
+    };
+  }
+}
+</script>
+</body>
+</html>
