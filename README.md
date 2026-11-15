@@ -481,8 +481,8 @@ including authentication, errors, burn behavior and a safe discovery example.
 These documents are embedded in the same binary. Use all three from the target instance;
 links are relative to that instance's origin, which must be retained when copying the text.
 The API documentation reports the application release version, also shown by `padmark-server --version`.
-Release images receive it from the Git tag during the build; source builds default to the current
-release draft (`0.4.0`). A manual Docker build can set `--build-arg APP_VERSION=0.4.0`.
+Release images receive it from the Git tag during the build; source builds use the version in
+`internal/buildinfo` (`0.4.0`). A manual Docker build can set `--build-arg APP_VERSION=0.4.0`.
 
 **Short links**
 
@@ -1146,9 +1146,8 @@ cost until the password is changed. The change costs RAM and CPU per login, not 
 
 ## Development
 
-This checkout includes unreleased development; [CHANGELOG.md](CHANGELOG.md) separates the
-current draft from tagged releases. References to `v0.1.6` describe historical migration
-fixtures rather than the current release number.
+[CHANGELOG.md](CHANGELOG.md) lists the changes of each release. References to `v0.1.6`
+describe historical migration fixtures rather than the current release number.
 
 Use Go 1.27.3 (see [`go.mod`](go.mod)). The application module and browser-test module have
 separate dependencies and test commands:
