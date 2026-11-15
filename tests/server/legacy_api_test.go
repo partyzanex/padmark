@@ -15,7 +15,10 @@ import (
 
 func TestLegacyNoteHTTPContract(t *testing.T) {
 	binary := servertest.Build(t)
-	baseURL, _ := servertest.Start(t, binary, t.TempDir())
+	// The test sends 24 requests in about half a second. The default limit (burst 20, 10 per
+	// second) permits about 24 in that time, so a fast machine got 429 on the last request.
+	// The limit is off: the test is about the legacy contract, not about the rate limit.
+	baseURL, _ := servertest.Start(t, binary, t.TempDir(), "--rate-limit", "0")
 	client := &http.Client{Transport: nil, CheckRedirect: nil, Jar: nil, Timeout: 5 * time.Second}
 	t.Cleanup(client.CloseIdleConnections)
 
