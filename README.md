@@ -10,9 +10,9 @@ Self-hosted Markdown graveyard for AI agents and beyond.
 |---|---|---|
 | ![Create](docs/screens/create.png) | ![View](docs/screens/view.png) | ![Edit](docs/screens/edit.png) |
 
-| View (dark) | View (light) | Created |
+| View (dark) | Create (light) | Created |
 |---|---|---|
-| ![View dark](docs/screens/view_dark.png) | ![Edit light](docs/screens/edit_light.png) | ![Created](docs/screens/created.png) |
+| ![View dark](docs/screens/view_dark.png) | ![Create light](docs/screens/edit_light.png) | ![Created](docs/screens/created.png) |
 
 ---
 
@@ -296,8 +296,21 @@ containers are recreated. Retain and back up both.
 
 ### 1. Web UI
 
-Go to `/`, write your note, optionally set a title and slug, hit **Publish**.
-You'll get a URL and your `edit_code`. Done.
+Go to `/`, write your note and select **Publish note**. You get a URL and your `edit_code`.
+
+- **Editor.** The Write, Split and Preview views show the Markdown source, the result, or both.
+  A title and a slug are optional. A note without a title takes the first text line as its
+  title, at most 80 characters.
+- **Settings.** The panel beside the editor sets who can read the note, burn after reading,
+  the "On this page" contents sidebar and the edit code. You can type an edit code of 8 to 128
+  characters or generate one; a blank field gets a random code.
+- **Result.** The success page shows the share link and hides the edit code until you select
+  **Show**. Save the edit code: the server cannot show it again.
+- **Errors.** When a note or a link is refused, the form shows the reason in a block above the
+  main button and keeps your text.
+- **Phone.** The settings open in a sheet from the bottom bar; the header has a menu and one
+  theme button.
+- **Themes.** Light, dim (default) and dark.
 
 ---
 
@@ -473,8 +486,9 @@ release draft (`0.4.0`). A manual Docker build can set `--build-arg APP_VERSION=
 
 **Short links**
 
-Open **Links** in the header (`/links`) to create a short URL. The form includes the destination,
-optional slug/edit code, privacy, redirect mode, expiration in seconds and burn after click.
+Open **Short link** in the header (`/links`) to create a short URL. The form includes the destination,
+optional slug/edit code, privacy, redirect mode, expiration and burn after click. The expiration
+is a preset (1 hour, 1, 7 or 30 days) or a lifetime in seconds.
 TTL counts from creation; burn after click is independent. After creation, copy the short URL
 and the one-time edit code. **Edit link** opens `/links/{id}/edit`, where you can update or delete
 the link without following it. Saving preserves the existing expiration unless explicitly changed;

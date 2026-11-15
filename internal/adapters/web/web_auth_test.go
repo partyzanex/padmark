@@ -753,6 +753,9 @@ func (s *AuthHandlerSuite) TestAdminPage_NonAdmin_Returns403() {
 	s.router.ServeHTTP(rec, req)
 
 	s.Equal(http.StatusForbidden, rec.Code)
+	// The refusal is the HTML error page, not a bare text line.
+	s.Contains(rec.Header().Get("Content-Type"), "text/html")
+	s.Contains(rec.Body.String(), `<h1 class="error-title" id="errorTitle">Forbidden</h1>`)
 }
 
 func (s *AuthHandlerSuite) TestAdminPage_Admin_ListsUsers() {

@@ -71,6 +71,12 @@ sizes with a fresh server, context, diagnostics and failure artifacts.
 logo, the left and right content edges and the top edge of the editor and article cards.
 Add each new page to its scenarios, so a page that moves the frame fails the test.
 
+`TestErrors` in `errors_test.go` opens each error of the web interface: the note and short-link
+forms, simulated server replies, the setup, sign-in, invite and change-password forms, the admin
+panel and the error pages. `expectError(selector, text)` checks the text and makes sure that the
+element is in the viewport, is inside the screen width and does not clip its content.
+Add each new error message to a scenario of that test.
+
 ```go
 func testExample(e *ui) {
     e.gotoPage("/")

@@ -16,7 +16,7 @@
         <section class="card editor-card" aria-label="Note editor">
             <div class="editor-head">
                 <label for="titleInput" class="sr-only">Title</label>
-                <input type="text" class="head-input" placeholder="Untitled note" id="titleInput" value="{{.Title}}">
+                <input type="text" class="head-input" placeholder="Untitled note" id="titleInput" value="{{.Title}}" maxlength="500">
                 <div class="slug-field">
                     <label for="slugInput" class="slug-prefix">URL&#160;&#160;/</label>
                     <input type="text" id="slugInput" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="{{if .EditMode}}{{.ID}}{{else}}auto-generated{{end}}" value="{{.ID}}"
@@ -142,6 +142,7 @@
             <div class="settings-divider"></div>
 
             <div class="publish-bar">
+                <p id="noteError" class="form-error" role="alert" hidden></p>
                 {{template "settings-toggle"}}
                 <div class="publish-block">
                     <button type="button" class="btn-publish" id="submitBtn" data-kbd="Ctrl ↵">{{if .EditMode}}Save{{else}}Publish note{{end}}</button>
@@ -197,11 +198,29 @@
         ta.dispatchEvent(new Event('input'));
     }
 
-    function flashError(btn, msg) {
-        btn.textContent = msg;
-        btn.classList.add('is-error');
+    // The error block shows the full reason and keeps it until the next attempt. The button
+    // does not wrap its text, so a long server message is not readable there.
+    const errorBox = document.getElementById('noteError');
+
+    function showError(btn, msg) {
+        errorBox.textContent = msg;
+        errorBox.hidden = false;
+        btn.textContent = submitLabel;
         btn.disabled = false;
-        setTimeout(() => { btn.textContent = submitLabel; btn.classList.remove('is-error'); }, 2500);
+    }
+
+    // deriveTitle makes the title of a note that has no title: the first text line without the
+    // heading marks. The server refuses a title of more than 500 characters, and the first line
+    // of pasted text can be a full paragraph, so the derived title is one short line.
+    const derivedTitleLength = 80;
+
+    function deriveTitle(content) {
+        const line = content.split('\n').map(l => l.replace(/^#+\s*/, '').trim()).find(l => l.length > 0);
+        if (!line) return 'Untitled';
+        // Array.from counts characters, not UTF-16 units, so the cut does not split an emoji.
+        const chars = Array.from(line);
+        if (chars.length <= derivedTitleLength) return line;
+        return chars.slice(0, derivedTitleLength).join('').trimEnd() + '…';
     }
 
     // errorMessage reads the server's JSON error body ({"message": ...}) from a failed response so
@@ -260,14 +279,12 @@
         const editCode = document.getElementById('editCodeInput').value.trim();
         const ttl = getTTL();
 
-        if (!content) { flashError(btn, 'Enter some text first'); return; }
+        errorBox.hidden = true;
+        if (!content) { showError(btn, 'Enter some text first'); return; }
         // The server accepts a chosen edit code of 8 to 128 characters; a blank field gets a random code.
-        if (editCode && editCode.length < 8) { flashError(btn, 'Edit code: 8 characters or more'); return; }
+        if (editCode && editCode.length < 8) { showError(btn, 'Edit code: 8 characters or more'); return; }
 
-        let title = titleInput;
-        if (!title) {
-            title = content.split('\n').map(l => l.replace(/^#+\s*/, '').trim()).find(l => l.length > 0) || 'Untitled';
-        }
+        const title = titleInput || deriveTitle(content);
 
         btn.textContent = 'Publishing…';
         btn.disabled = true;
@@ -303,7 +320,7 @@
             if (note.privacy) params.set('privacy', note.privacy);
             window.location.href = '/success?' + params.toString();
         } catch (err) {
-            flashError(btn, err.message || 'Error — try again');
+            showError(btn, err.message || 'Error — try again');
         }
     }
 
@@ -314,8 +331,9 @@
         const editCode = document.getElementById('editCodeInput').value.trim();
         const ttl = getTTL();
 
-        if (!content) { flashError(btn, 'Enter some text first'); return; }
-        if (!editCode && !isOwner) { flashError(btn, 'Edit code required'); return; }
+        errorBox.hidden = true;
+        if (!content) { showError(btn, 'Enter some text first'); return; }
+        if (!editCode && !isOwner) { showError(btn, 'Edit code required'); return; }
 
         btn.textContent = 'Saving…';
         btn.disabled = true;
@@ -344,7 +362,7 @@
 
             window.location.href = '/' + noteID;
         } catch (err) {
-            flashError(btn, err.message || 'Error — try again');
+            showError(btn, err.message || 'Error — try again');
         }
     }
 

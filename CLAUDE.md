@@ -119,6 +119,8 @@ Dependencies point inward: adapters and infrastructure depend on usecases and do
   screenshot changes before updating references; baseline images record the current UI.
 - `TestPageFrame` keeps the header, the logo and the content edges in the same place on all
   pages. Add each new page to that test.
+- `TestErrors` opens each error that the web interface shows and checks that the user can read
+  it on the page. Add each new error message to that test with `expectError`.
 - Mock metrics with `.AnyTimes()` when exact metric call counts are outside the test's scope.
 
 ## Linting and generated files

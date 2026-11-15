@@ -55,6 +55,7 @@ func TestEditor(t *testing.T) {
 		scenario{name: "OneTimeEditCode", run: testOneTimeEditCode, accounts: false, allowedStatuses: nil},
 		scenario{name: "Reveal", run: testReveal, accounts: false, allowedStatuses: nil},
 		scenario{name: "PublishFailure", allowedStatuses: []int{503}, run: testPublishFailure, accounts: false},
+		scenario{name: "LongFirstLine", run: testLongFirstLine, accounts: false, allowedStatuses: nil},
 		scenario{name: "InvalidEditCode", allowedStatuses: []int{403}, run: testInvalidEditCode, accounts: false},
 		scenario{name: "NotFound", allowedStatuses: []int{404}, run: testNotFound, accounts: false},
 	)
@@ -153,7 +154,7 @@ func testChosenEditCode(sess *uiSession) {
 	sess.openSettings()
 	sess.fill("#editCodeInput", "short")
 	sess.button("Publish note")
-	sess.text("#submitBtn", "Edit code: 8 characters or more")
+	sess.text("#noteError", "Edit code: 8 characters or more")
 	sess.must(sess.expect.Page(sess.page).ToHaveURL(sess.baseURL + "/"))
 
 	sess.click("#editCodeGenerate")
@@ -162,8 +163,6 @@ func testChosenEditCode(sess *uiSession) {
 	generated, err := sess.page.Locator("#editCodeInput").InputValue()
 	sess.must(err)
 
-	// The button shows the refusal for a short time; wait for the label of the main action.
-	sess.text("#submitBtn", "Publish note")
 	sess.button("Publish note")
 	sess.must(sess.expect.Page(sess.page).ToHaveURL(regexpURL("/success?")))
 	require.Equal(sess.t, generated, sess.shownEditCode())
@@ -223,7 +222,7 @@ func testEmptyContent(sess *uiSession) {
 	sess.fill("#titleInput", "Empty note")
 	sess.fill("#editor", "   ")
 	sess.button("Publish note")
-	sess.text("#submitBtn", "Enter some text first")
+	sess.text("#noteError", "Enter some text first")
 	sess.must(sess.expect.Locator(sess.page.Locator("#submitBtn")).ToBeEnabled())
 	require.Empty(sess.t, submissions.String())
 }
@@ -264,7 +263,7 @@ func testEditAndSave(sess *uiSession) {
 	sess.expectLayout("#editor", "#titleInput", "#submitBtn")
 	sess.screenshot("edit.png", "#slugInput")
 	sess.button("Save")
-	sess.text("#submitBtn", "Edit code required")
+	sess.text("#noteError", "Edit code required")
 	sess.openSettings()
 	sess.expectLayout("#editCodeInput")
 	sess.fill("#editCodeInput", code)
@@ -371,12 +370,31 @@ func testPublishFailure(sess *uiSession) {
 		}
 	}))
 	sess.button("Publish note")
-	sess.text("#submitBtn", "Please try again")
+	sess.text("#noteError", "Please try again")
+	sess.text("#submitBtn", "Publish note")
 	sess.must(sess.expect.Locator(sess.page.Locator("#submitBtn")).ToBeEnabled())
 	sess.value("#editor", "Keep this draft")
 	sess.must(sess.page.Unroute("**/notes"))
-	sess.button("Please try again")
+	sess.button("Publish note")
 	sess.must(sess.expect.Page(sess.page).ToHaveURL(regexpURL("/success?")))
+}
+
+// derivedTitleLength is the largest length of a title that the editor takes from the text.
+const derivedTitleLength = 80
+
+// testLongFirstLine: a note without a title takes its title from the first text line. A first
+// line longer than the server limit of 500 characters must not stop the publication.
+func testLongFirstLine(sess *uiSession) {
+	line := strings.Repeat("long first line ", 40)
+	require.Greater(sess.t, len(line), 500)
+
+	sess.gotoPage("/")
+	sess.must(sess.expect.Locator(sess.page.Locator("#titleInput")).ToHaveAttribute("maxlength", "500"))
+	sess.fill("#editor", line+"\n\nSecond paragraph.")
+	sess.button("Publish note")
+	sess.must(sess.expect.Page(sess.page).ToHaveURL(regexpURL("/success?")))
+	sess.link("Open note")
+	sess.text(".article-title", strings.TrimSpace(line[:derivedTitleLength])+"…")
 }
 
 func testInvalidEditCode(sess *uiSession) {
@@ -388,7 +406,7 @@ func testInvalidEditCode(sess *uiSession) {
 	sess.closeSettings()
 	sess.fill("#editor", "Unsaved draft")
 	sess.button("Save")
-	sess.text("#submitBtn", "Invalid edit code")
+	sess.text("#noteError", "Invalid edit code")
 	sess.must(sess.expect.Locator(sess.page.Locator("#submitBtn")).ToBeEnabled())
 	sess.value("#editor", "Unsaved draft")
 }

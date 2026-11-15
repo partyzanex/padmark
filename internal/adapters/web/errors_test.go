@@ -97,3 +97,16 @@ func TestDomainErrToPageData_NotFound_HasSpecificCopy(t *testing.T) {
 	assert.Equal(t, net_http.StatusNotFound, data.Code)
 	assert.Equal(t, "Paste not found", data.Title)
 }
+
+// TestErrResp_HidesWrapPrefixes: a reply names the domain cause. It does not name the internal
+// operations that wrapped the cause.
+func TestErrResp_HidesWrapPrefixes(t *testing.T) {
+	t.Parallel()
+
+	wrapped := fmt.Errorf("create note: %w", fmt.Errorf("resolve unique slug: %w", domain.ErrSlugConflict))
+	assert.Equal(t, domain.ErrSlugConflict.Error(), errResp(wrapped).Message)
+
+	// An adapter error is not in the domain table; its text is the client-facing message.
+	adapterErr := errors.New("privacy and private disagree")
+	assert.Equal(t, adapterErr.Error(), errResp(adapterErr).Message)
+}

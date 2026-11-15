@@ -36,6 +36,15 @@ That baseline is not the latest released version.
 - One page frame for all pages: the same 1200px page width (the note view was 1120px), the
   same header height and the same top edge of the editor and article cards. The page keeps
   space for the vertical scrollbar, so the width does not change between short and long pages.
+- The note editor shows a publish or save error in a block above the main button and keeps it
+  until the next attempt; the button no longer shows the error text for a short time. A note
+  without a title takes at most 80 characters of its first text line as the title, so pasted
+  text with a long first line is published; the title field accepts 500 characters at most.
+- An API error names only its cause: the reply no longer starts with the names of internal
+  operations (for example `create note: slug is already taken` is now `slug is already taken`).
+  A signed-in user who is not an admin gets the HTML error page on `/admin`, not a text line.
+- Browser tests (`TestErrors`) open each error of the web interface and check that the page
+  shows it in full.
 - Installation-key content envelopes, key-management commands and resumable schema/content
   upgrade support, including conversion of tagged v0.1.6 plaintext notes.
 - Headless account provisioning, the MCP proxy and `/llms.txt`.
