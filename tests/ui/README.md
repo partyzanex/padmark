@@ -8,7 +8,8 @@ server's database and keyring go to the system temporary directory and are remov
 after the run.
 
 Every scenario runs on desktop (1280 × 900) and mobile (390 × 844).
-They cover field entry, editor formatting, validation,
+They cover field entry, editor formatting, the Write/Split/Preview views and preview
+sanitization, validation,
 publish/save, clipboard actions, raw view, burn confirmation, theme persistence,
 setup/login, password changes, admin invites, keys and user revocation. Link scenarios cover
 creation, validation, failure/retry, editing/deletion, expiry preservation/reset, redirect
@@ -61,9 +62,20 @@ with `-headed` is refused for the same reason.
 
 ## Writing scenarios
 
-Scenarios are ordinary Go functions in `editor_test.go`, `links_test.go` and `accounts_test.go`.
+Scenarios are ordinary Go functions in `editor_test.go`, `editor_preview_test.go`, `links_test.go`
+and `accounts_test.go`.
 Add a case to `TestEditor`, `TestLinks` or `TestAccounts`; `runScenarios` runs it at both screen
 sizes with a fresh server, context, diagnostics and failure artifacts.
+
+`TestPageFrame` in `page_frame_test.go` compares the page frame of all pages: the header, the
+logo, the left and right content edges and the top edge of the editor and article cards.
+Add each new page to its scenarios, so a page that moves the frame fails the test.
+
+`TestErrors` in `errors_test.go` opens each error of the web interface: the note and short-link
+forms, simulated server replies, the setup, sign-in, invite and change-password forms, the admin
+panel and the error pages. `expectError(selector, text)` checks the text and makes sure that the
+element is in the viewport, is inside the screen width and does not clip its content.
+Add each new error message to a scenario of that test.
 
 ```go
 func testExample(e *ui) {
@@ -76,6 +88,11 @@ func testExample(e *ui) {
     e.visible(".markdown-body h1")
 }
 ```
+
+Phone width keeps the publish settings in a bottom sheet and the header links in a menu.
+Use `openSettings`/`closeSettings` around actions on a setting, `chooseTheme` for the theme and
+`shownEditCode` to read the masked edit code of the success page; these helpers do the right
+thing at both screen sizes.
 
 Assertions use Playwright's waiting assertions and `testify/require`. Prefer semantic
 role/label locators where available and stable IDs for editor controls. Check the

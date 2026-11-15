@@ -17,13 +17,19 @@ import (
 
 // Storage defines persistence operations for notes. Create must atomically claim the ID
 // across notes and links, returning domain.ErrSlugConflict if another resource owns it.
+// Consume and SetBurnExpiry change the row only while its privacy still equals expected, the
+// level the reader was checked against; otherwise they return domain.ErrNotFound, so a burn
+// read can never return or delete a version whose access level changed after the check.
+// DeleteExpired removes a row only while it is still expired, and returns domain.ErrNotFound
+// otherwise: an expiry decision from an old snapshot never deletes a note that was extended.
 type Storage interface {
 	Create(ctx context.Context, note *domain.Note) error
 	Get(ctx context.Context, id string) (*domain.Note, error)
-	Consume(ctx context.Context, id string) (*domain.Note, error)
-	SetBurnExpiry(ctx context.Context, id string, expiresAt time.Time) (*domain.Note, error)
+	Consume(ctx context.Context, id string, expected domain.Privacy) (*domain.Note, error)
+	SetBurnExpiry(ctx context.Context, id string, expiresAt time.Time, expected domain.Privacy) (*domain.Note, error)
 	Update(ctx context.Context, id string, note *domain.Note) error
 	Delete(ctx context.Context, id string) error
+	DeleteExpired(ctx context.Context, id string) error
 	IncrementViews(ctx context.Context, id string) error
 }
 
@@ -174,6 +180,11 @@ func (m *Manager) Create(ctx context.Context, note *domain.Note) (*domain.Note, 
 		note.ContentType = &ct
 	}
 
+	// An old client does not send the option, so a new note keeps the full-width view.
+	if note.ShowContents == nil {
+		note.ShowContents = new(false)
+	}
+
 	err := validateForCreate(note)
 	if err != nil {
 		return nil, fmt.Errorf("validate for create: %w", err)
@@ -322,11 +333,38 @@ func pinImmutableFields(note, existing *domain.Note) error {
 	return nil
 }
 
-// backfillPersistedState copies the storage-persisted privacy and view count into the working
-// note before the update is written.
+// requestedFields holds the optional update fields that the caller sent. A nil value keeps the
+// stored column, because storage writes it through COALESCE.
+type requestedFields struct {
+	privacy      *domain.Privacy
+	contentType  *domain.ContentType
+	showContents *bool
+}
+
+// requestedOf records the optional fields of note before Update fills them from storage.
+func requestedOf(note *domain.Note) requestedFields {
+	return requestedFields{privacy: note.Privacy, contentType: note.ContentType, showContents: note.ShowContents}
+}
+
+// withRequested returns a copy of note to write with the optional fields that the caller sent.
+func withRequested(note *domain.Note, requested requestedFields) *domain.Note {
+	write := *note
+	write.Privacy = requested.privacy
+	write.ContentType = requested.contentType
+	write.ShowContents = requested.showContents
+
+	return &write
+}
+
+// backfillPersistedState copies the storage-persisted privacy, contents-sidebar option and view
+// count into the working note before the update is written.
 func backfillPersistedState(note, existing *domain.Note) {
 	if note.Privacy == nil {
 		note.Privacy = existing.Privacy
+	}
+
+	if note.ShowContents == nil {
+		note.ShowContents = existing.ShowContents
 	}
 
 	note.Views = existing.Views
@@ -381,6 +419,11 @@ func (m *Manager) Update(
 		return nil, domain.ErrInvalidEditCode
 	}
 
+	// Omitted privacy, content type and contents-sidebar option go to storage as nil, so COALESCE
+	// keeps the stored values. Writing the values of the existing snapshot back would undo a
+	// concurrent change, such as another update that has just made the note owner-only.
+	requested := requestedOf(note)
+
 	note.ID = id
 	note.CreatedAt = existing.CreatedAt
 	note.UpdatedAt = time.Now().UTC()
@@ -419,7 +462,7 @@ func (m *Manager) Update(
 		return nil, fmt.Errorf("encrypt content: %w", err)
 	}
 
-	err = m.storage.Update(ctx, dbID, note)
+	err = m.storage.Update(ctx, dbID, withRequested(note, requested))
 	if err != nil {
 		return nil, fmt.Errorf("update note: %w", err)
 	}

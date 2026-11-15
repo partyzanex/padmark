@@ -24,6 +24,7 @@ const maxHashRetries = 5
 
 // Storage defines persistence operations for links. Create must atomically claim the ID
 // across notes and links, returning domain.ErrSlugConflict if another resource owns it.
+// Update keeps the stored privacy when link.Privacy is nil and returns the row as stored.
 type Storage interface {
 	Create(ctx context.Context, link *domain.Link) error
 	Update(ctx context.Context, id string, link *domain.Link) (*domain.Link, error)

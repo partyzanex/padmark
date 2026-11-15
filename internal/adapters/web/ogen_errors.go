@@ -39,7 +39,14 @@ const notImplementedMessage = "not implemented"
 // inflate an error response at will.
 const maxEchoedContentType = 64
 
+// errResp builds the client reply for err. An error that wraps a domain sentinel gets the short
+// message of the sentinel: the wrap prefixes name internal operations ("create note: ...") and
+// must not reach a client. Other errors are adapter errors that hold a client-facing text.
 func errResp(err error) ogenapi.ErrorResponse {
+	if _, message := domainErrStatus(err); message != "" {
+		return errorResponse(message)
+	}
+
 	return errorResponse(err.Error())
 }
 

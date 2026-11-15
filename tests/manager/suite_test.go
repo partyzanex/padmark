@@ -78,7 +78,7 @@ func (s *ManagerSuite) TestCreate_GeneratesSlugAndEditCode() {
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	}
 
 	result, err := s.Manager.Create(s.T().Context(), note)
@@ -96,7 +96,7 @@ func (s *ManagerSuite) TestCreate_CustomSlug() {
 		ID: "my-slug", Title: "t", Content: "c",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ContentType: nil, EditCode: "",
-		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 
 	result, err := s.Manager.Create(s.T().Context(), note)
@@ -113,7 +113,7 @@ func (s *ManagerSuite) TestContentEnvelope_StoredPayloadNeedsKeyringNotSlug() {
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, Title: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	})
 	s.Require().NoError(err)
 	link, err := s.LinkManager.Create(ctx, "https://example.com/private", links.CreateOptions{
@@ -151,7 +151,7 @@ func (s *ManagerSuite) TestContentEnvelope_LegacyReadAndNoteUpdate() {
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, Title: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	})
 	s.Require().NoError(err)
 
@@ -174,7 +174,7 @@ func (s *ManagerSuite) TestContentEnvelope_LegacyReadAndNoteUpdate() {
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", Title: "",
 		ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
-		BurnAfterReading: false, ClearExpiry: false,
+		BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	})
 	s.Require().NoError(err)
 	s.Require().NoError(s.DB.NewSelect().Table("notes").Column("content").Where("id = ?", id).Scan(ctx, &stored))
@@ -205,7 +205,7 @@ func (s *ManagerSuite) TestCreate_InvalidSlug() {
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, Content: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	}
 
 	_, err := s.Manager.Create(s.T().Context(), note)
@@ -219,7 +219,7 @@ func (s *ManagerSuite) TestCreate_SlugConflict() {
 		ID: "dup", Title: "t", Content: "c",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ContentType: nil, EditCode: "",
-		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 
 	_, err := s.Manager.Create(ctx, note)
@@ -229,7 +229,7 @@ func (s *ManagerSuite) TestCreate_SlugConflict() {
 		ID: "dup", Title: "t2", Content: "c2",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ContentType: nil, EditCode: "",
-		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	})
 
 	s.ErrorIs(err, domain.ErrSlugConflict)
@@ -241,7 +241,7 @@ func (s *ManagerSuite) TestCreate_EmptyTitleAllowed() {
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", Title: "",
 		ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
-		BurnAfterReading: false, ClearExpiry: false,
+		BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	})
 
 	s.Require().NoError(err)
@@ -258,7 +258,7 @@ func (s *ManagerSuite) TestGet_OK() {
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	})
 	s.Require().NoError(err)
 
@@ -281,7 +281,7 @@ func (s *ManagerSuite) TestGet_Expired_DeletesNote() {
 		Title: "t", Content: "c", ExpiresAt: &past,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, Privacy: nil,
 		OwnerID: nil, ID: "", ContentType: nil, EditCode: "",
-		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	})
 	s.Require().NoError(err)
 
@@ -300,7 +300,7 @@ func (s *ManagerSuite) TestGet_BurnAfterReading_ConsumedOnFirstRead() {
 
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
 		OwnerID: nil, ID: "", ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	})
 	s.Require().NoError(err)
 
@@ -319,7 +319,7 @@ func (s *ManagerSuite) TestGet_BurnAfterReading_WithTTL_StartsTimer() {
 
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
 		OwnerID: nil, ID: "", ContentType: nil, EditCode: "", Views: 0,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	})
 	s.Require().NoError(err)
 
@@ -344,7 +344,7 @@ func (s *ManagerSuite) TestPeek_ReturnsExpiredNoteWithoutDeleting() {
 		Title: "t", Content: "c", ExpiresAt: &past,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, Privacy: nil,
 		OwnerID: nil, ID: "", ContentType: nil, EditCode: "",
-		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	})
 	s.Require().NoError(err)
 
@@ -367,7 +367,7 @@ func (s *ManagerSuite) TestView_IncrementsViews() {
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	})
 	s.Require().NoError(err)
 
@@ -389,7 +389,7 @@ func (s *ManagerSuite) TestView_BurnAfterReading_NoViewsIncrement() {
 
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
 		OwnerID: nil, ID: "", ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	})
 	s.Require().NoError(err)
 
@@ -407,7 +407,7 @@ func (s *ManagerSuite) TestUpdate_PreservesMetadata() {
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	})
 	s.Require().NoError(err)
 
@@ -417,7 +417,7 @@ func (s *ManagerSuite) TestUpdate_PreservesMetadata() {
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	})
 
 	s.Require().NoError(err)
@@ -433,7 +433,7 @@ func (s *ManagerSuite) TestUpdate_Forbidden() {
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	})
 	s.Require().NoError(err)
 
@@ -442,7 +442,7 @@ func (s *ManagerSuite) TestUpdate_Forbidden() {
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	})
 
 	s.ErrorIs(err, domain.ErrInvalidEditCode)
@@ -455,7 +455,7 @@ func (s *ManagerSuite) TestUpdate_NotFound() {
 			CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 			Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
 			EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
-			ClearExpiry: false,
+			ClearExpiry: false, ShowContents: nil,
 		})
 
 	s.ErrorIs(err, domain.ErrNotFound)
@@ -470,7 +470,7 @@ func (s *ManagerSuite) TestDelete_OK() {
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	})
 	s.Require().NoError(err)
 
@@ -488,7 +488,7 @@ func (s *ManagerSuite) TestDelete_Forbidden() {
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	})
 	s.Require().NoError(err)
 
@@ -506,7 +506,7 @@ func (s *ManagerSuite) TestGetRendered_Markdown() {
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	})
 	s.Require().NoError(err)
 
@@ -530,7 +530,7 @@ func (s *ManagerSuite) TestUpdate_ClearsBurnExpiryWhenBurnDisabled() {
 
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
 		OwnerID: nil, ID: "", ContentType: nil, EditCode: "", Views: 0,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	})
 	s.Require().NoError(err)
 
@@ -548,7 +548,7 @@ func (s *ManagerSuite) TestUpdate_ClearsBurnExpiryWhenBurnDisabled() {
 
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
 		OwnerID: nil, ID: "", ContentType: nil, EditCode: "", Views: 0,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	})
 	s.Require().NoError(err)
 
@@ -568,7 +568,7 @@ func (s *ManagerSuite) TestUpdate_PreservesEditCode() {
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	})
 	s.Require().NoError(err)
 
@@ -579,7 +579,7 @@ func (s *ManagerSuite) TestUpdate_PreservesEditCode() {
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	})
 	s.Require().NoError(err)
 
@@ -589,7 +589,7 @@ func (s *ManagerSuite) TestUpdate_PreservesEditCode() {
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	})
 	s.Require().NoError(err, "edit code must remain valid after an update (hash unchanged)")
 }
@@ -602,7 +602,7 @@ func (s *ManagerSuite) TestGetRendered_PlainText_HTMLEscaped() {
 
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", EditCode: "",
-		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	})
 	s.Require().NoError(err)
 
@@ -623,7 +623,7 @@ func (s *ManagerSuite) TestReveal_Issue_ReturnsNonEmptyToken() {
 		Title: "t", Content: "c", BurnAfterReading: true,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
 		OwnerID: nil, ID: "", ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	})
 	s.Require().NoError(err)
 
@@ -640,7 +640,7 @@ func (s *ManagerSuite) TestReveal_Consume_ReturnsNoteID() {
 		Title: "t", Content: "c", BurnAfterReading: true,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
 		OwnerID: nil, ID: "", ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	})
 	s.Require().NoError(err)
 
@@ -659,7 +659,7 @@ func (s *ManagerSuite) TestReveal_EndToEnd_BurnAfterReading() {
 		Title: "burn", Content: "secret", BurnAfterReading: true,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
 		OwnerID: nil, ID: "", ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	})
 	s.Require().NoError(err)
 
@@ -693,7 +693,7 @@ func (s *ManagerSuite) TestReveal_Consume_AlreadyUsed() {
 		Title: "t", Content: "c", BurnAfterReading: true,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
 		OwnerID: nil, ID: "", ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	})
 	s.Require().NoError(err)
 
@@ -714,7 +714,7 @@ func (s *ManagerSuite) TestReveal_Consume_TokenNotReusableAfterNoteBurned() {
 		Title: "t", Content: "c", BurnAfterReading: true,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
 		OwnerID: nil, ID: "", ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	})
 	s.Require().NoError(err)
 
@@ -740,7 +740,7 @@ func (s *ManagerSuite) TestReveal_IssueMultiple_EachConsumedOnce() {
 		Title: "t", Content: "c", BurnAfterReading: true,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
 		OwnerID: nil, ID: "", ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	})
 	s.Require().NoError(err)
 
@@ -778,7 +778,7 @@ func (s *ManagerSuite) TestCrossTableSlugUniqueness_NoteFirst_ThenLinkConflicts(
 		ID: "shared-slug", Title: "t", Content: "c",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ContentType: nil, EditCode: "",
-		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	})
 	s.Require().NoError(err)
 
@@ -804,7 +804,7 @@ func (s *ManagerSuite) TestCrossTableSlugUniqueness_LinkFirst_ThenNoteConflicts(
 		ID: "shared-slug", Title: "t", Content: "c",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ContentType: nil, EditCode: "",
-		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	})
 	s.ErrorIs(err, domain.ErrSlugConflict)
 }
@@ -833,7 +833,7 @@ func (s *ManagerSuite) TestCrossTableSlugUniqueness_ConcurrentCreate() {
 				ID: slug, Title: "t", Content: "c",
 				CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 				Privacy: nil, OwnerID: nil, ContentType: nil, EditCode: "",
-				Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+				Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 			})
 		}()
 
@@ -968,7 +968,7 @@ func (s *ManagerSuite) TestUpdatePlainExpiryPersists() {
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, Privacy: nil,
 		OwnerID: nil, ID: "", Title: "", ContentType: nil,
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	})
 	s.Require().NoError(err)
 
@@ -977,7 +977,7 @@ func (s *ManagerSuite) TestUpdatePlainExpiryPersists() {
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", Title: "",
 		ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
-		BurnAfterReading: false, ClearExpiry: false,
+		BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	})
 	s.Require().NoError(err)
 	stored, err := s.Manager.Peek(s.T().Context(), created.ID)
@@ -992,7 +992,7 @@ func (s *ManagerSuite) TestUpdatePlainExpiryPersists() {
 			CreatedAt: time.Time{}, UpdatedAt: time.Time{}, Privacy: nil,
 			OwnerID: nil, ID: "", Title: "", ContentType: nil,
 			EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
-			ClearExpiry: false,
+			ClearExpiry: false, ShowContents: nil,
 		})
 	s.Require().NoError(err)
 	stored, err = s.Manager.Peek(s.T().Context(), created.ID)
@@ -1006,7 +1006,7 @@ func (s *ManagerSuite) TestUpdatePlainExpiryPersists() {
 			CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 			Privacy: nil, OwnerID: nil, ID: "", Title: "",
 			ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
-			BurnAfterReading: false,
+			BurnAfterReading: false, ShowContents: nil,
 		})
 	s.Require().NoError(err)
 	stored, err = s.Manager.Peek(s.T().Context(), created.ID)

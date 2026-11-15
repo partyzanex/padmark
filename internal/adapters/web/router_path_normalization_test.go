@@ -269,7 +269,7 @@ func (s *PathNormalizationSuite) TestPercentEncodedPrivateSlug_StillGated() {
 		ID: "secret", Content: "top secret", Privacy: &privacy,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		OwnerID: nil, Title: "", ContentType: nil, EditCode: "",
-		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false,
+		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 
 	for _, target := range []string{"/%73ecret", "/notes/%73ecret", "/edit/%73ecret", "/%73ecret%2Fsub"} {

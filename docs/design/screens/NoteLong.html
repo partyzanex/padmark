@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Padmark — Note view, long title</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;0,8..60,700;1,8..60,400&amp;display=swap">
+<style>
+body{margin:0}
+.pm{--bg:#F3F4F6;--surface:#FFFFFF;--sunken:#F7F8FA;--ink:#14151A;--ink-2:#3B3E48;--muted:#5D6170;--line:#E2E4EA;--line-2:#CDD0D8;--accent:#4A3AE0;--on-accent:#FFFFFF;--accent-soft:#ECEAFF;--accent-text:#3A2BC4;--warn:#9A4A06;--warn-soft:#FFF1E0;--code-bg:#F0F1F4;--shadow:0 1px 2px rgba(20,21,26,.05),0 10px 30px -14px rgba(20,21,26,.14);font-family:'Onest',system-ui,-apple-system,'Segoe UI',sans-serif;color:var(--ink);background:var(--bg);-webkit-font-smoothing:antialiased}
+.pm.dim{--bg:#26272F;--surface:#2F3039;--sunken:#2A2B33;--ink:#ECEDF2;--ink-2:#CDCFD8;--muted:#A9ACB8;--line:#3D3F4A;--line-2:#4F525E;--accent:#9C92FF;--on-accent:#14151A;--accent-soft:#37335C;--accent-text:#BDB6FF;--warn:#F2A766;--warn-soft:#43321F;--code-bg:#353640;--shadow:0 1px 2px rgba(0,0,0,.3),0 14px 34px -16px rgba(0,0,0,.6)}
+.pm.dark{--bg:#0A0B0E;--surface:#121318;--sunken:#0E0F13;--ink:#EDEEF2;--ink-2:#C4C6CF;--muted:#9295A2;--line:#22242C;--line-2:#30323C;--accent:#8E83FF;--on-accent:#0A0B0E;--accent-soft:#1E1B3A;--accent-text:#ADA5FF;--warn:#F2A766;--warn-soft:#2D2116;--code-bg:#1A1B22;--shadow:0 1px 2px rgba(0,0,0,.4),0 14px 34px -16px rgba(0,0,0,.8)}
+.pm *{box-sizing:border-box}
+.pm input,.pm textarea,.pm select,.pm button{font:inherit;color:inherit}
+.pm button{cursor:pointer}
+.pm a{color:var(--accent-text);text-decoration:none}
+.pm a:hover{color:var(--ink)}
+.pm .nav:hover{color:var(--ink);background:var(--sunken)}
+.pm .ghost:hover{background:var(--sunken);color:var(--ink)}
+.pm .primary:hover{filter:brightness(1.08)}
+.pm button:focus-visible,.pm a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.pm .lbl{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.pm .prose h2{font-family:'Source Serif 4',Georgia,serif;font-size:24px;font-weight:600;letter-spacing:-.01em;line-height:1.25;margin:32px 0 12px;padding-bottom:10px;border-bottom:1px solid var(--line)}
+.pm .prose p{margin:0 0 16px}
+.pm .prose ul,.pm .prose ol{margin:0 0 18px;padding-left:22px}
+.pm .prose li{margin:6px 0}
+.pm .prose code{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:.82em;background:var(--code-bg);border:1px solid var(--line);padding:1px 6px;border-radius:5px}
+.pm .prose a{text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:3px}
+.pm .toc:hover{color:var(--ink);background:var(--sunken)}
+.pm .prose header li{margin:0}
+</style>
+</helmet>
+<div class="pm {{theme}}" style="min-height: 100vh; display: flex; flex-direction: column">
+<div style="flex: 1; width: 100%; display: flex; flex-direction: column; max-width: 1120px; margin: 0 auto; padding: 0 clamp(16px, 4vw, 40px)">
+
+<header style="display: flex; align-items: center; gap: 20px; flex-wrap: wrap; padding: 16px 0">
+<a href="Main.dc.html" aria-label="Padmark — home" style="font-family: 'Source Serif 4', Georgia, serif; font-weight: 700; font-size: 24px; letter-spacing: -0.02em; color: var(--ink); line-height: 1">Padmark<span style="color: var(--accent)">.</span></a>
+<div style="flex: 1"></div>
+<nav aria-label="Resources" style="display: flex; gap: 2px; align-items: center">
+<a class="nav" href="#api" style="height: 36px; display: flex; align-items: center; padding: 0 12px; border-radius: 8px; font-size: 13px; color: var(--muted)">API</a>
+<a class="nav" href="https://github.com" style="height: 36px; display: flex; align-items: center; padding: 0 12px; border-radius: 8px; font-size: 13px; color: var(--muted)">GitHub</a>
+</nav>
+<div role="group" aria-label="Theme" style="display: flex; gap: 2px; padding: 3px; border: 1px solid var(--line); border-radius: 999px; background: var(--sunken)">
+<button type="button" aria-label="Light theme" aria-pressed="{{pL}}" onClick="{{setL}}" style="width: 32px; height: 32px; border: 0; border-radius: 999px; display: grid; place-items: center; {{tL}}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"></path></svg></button>
+<button type="button" aria-label="Dim theme" aria-pressed="{{pD}}" onClick="{{setD}}" style="width: 32px; height: 32px; border: 0; border-radius: 999px; display: grid; place-items: center; {{tD}}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="8.5"></circle><path d="M12 3.5a8.5 8.5 0 0 1 0 17z" fill="currentColor"></path></svg></button>
+<button type="button" aria-label="Dark theme" aria-pressed="{{pK}}" onClick="{{setK}}" style="width: 32px; height: 32px; border: 0; border-radius: 999px; display: grid; place-items: center; {{tK}}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"></path></svg></button>
+</div>
+<a class="primary" href="Main.dc.html" style="height: 38px; display: flex; align-items: center; gap: 6px; padding: 0 14px; border-radius: 9px; background: var(--accent); color: var(--on-accent); font-size: 13px; font-weight: 600"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>New</a>
+</header>
+
+<div style="display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start; justify-content: center; padding: 12px 0 40px">
+
+<sc-if value="{{toc}}" hint-placeholder-val="{{ true }}">
+<nav aria-label="On this page" style="flex: 1 1 190px; min-width: 0; display: flex; flex-direction: column; gap: 2px; padding-top: 6px">
+<span class="lbl" lang="en" style="padding: 0 10px 8px">On this page</span>
+<a class="toc" href="#before" style="padding: 7px 10px; border-radius: 8px; font-size: 13px; color: var(--accent-text); background: var(--accent-soft); font-weight: 500">Перед деплоем</a>
+<a class="toc" href="#deploy" style="padding: 7px 10px; border-radius: 8px; font-size: 13px; color: var(--muted)">Деплой</a>
+<a class="toc" href="#rollback" style="padding: 7px 10px; border-radius: 8px; font-size: 13px; color: var(--muted)">Откат</a>
+</nav>
+</sc-if>
+
+<article class="prose" style="flex: 999 1 620px; min-width: 0; max-width: {{articleMax}}; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); padding: clamp(18px, 3vw, 28px) clamp(18px, 5vw, 56px) clamp(22px, 4vw, 44px); font-family: 'Source Serif 4', Georgia, serif; font-size: 17px; line-height: 1.7; color: var(--ink); text-wrap: pretty">
+<header style="display: flex; flex-direction: column; gap: 8px; padding-bottom: 16px; margin-bottom: 26px; border-bottom: 1px solid var(--line); font-family: 'Onest', system-ui, sans-serif; line-height: 1.4">
+<div style="display: flex; align-items: flex-start; gap: 16px">
+<h1 style="flex: 1 1 auto; min-width: 0; margin: 0; font-family: 'Source Serif 4', Georgia, serif; font-size: clamp(24px, 2.47vw, 28px); font-weight: 600; letter-spacing: -0.015em; line-height: 1.25; text-wrap: balance">Чек-лист перед релизом мобильного приложения: миграции, переменные окружения, smoke-тесты на стейдже и порядок отката, если что-то пошло не так</h1>
+<span lang="en" style="flex: none; margin-top: 5px; display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 9px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-text); font-size: 11px; font-weight: 600"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg>Login required</span>
+</div>
+<div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap">
+<ul aria-label="Note details" lang="en" style="list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 18px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: var(--muted)">
+<li style="display: flex; align-items: center; gap: 6px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"></rect><path d="M3 10h18M8 3v4M16 3v4"></path></svg>Nov 10, 2026 · 08:56</li>
+<li style="display: flex; align-items: center; gap: 6px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"></path><circle cx="12" cy="12" r="3"></circle></svg>3 views</li>
+<li style="display: flex; align-items: center; gap: 6px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"></path><path d="M14 3v5h5"></path></svg>2.1 KB</li>
+<li style="display: flex; align-items: center; gap: 6px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>Expires Feb 8, 2027</li>
+</ul>
+<div role="group" aria-label="Note actions" lang="en" style="display: flex; gap: 2px; padding: 3px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface)">
+<button class="ghost" type="button" onClick="{{copy}}" style="height: 32px; display: flex; align-items: center; gap: 6px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; font-size: 13px; font-weight: 500; color: var(--ink-2)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"></rect><path d="M5 15V5a2 2 0 0 1 2-2h10"></path></svg>{{copyLabel}}</button>
+<a class="ghost" href="#raw" style="height: 32px; display: flex; align-items: center; gap: 6px; padding: 0 10px; border-radius: 8px; font-size: 13px; font-weight: 500; color: var(--ink-2)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"></path><path d="M14 3v5h5"></path><path d="m10 13-2 2 2 2M14 13l2 2-2 2"></path></svg>Raw</a>
+<button class="ghost" type="button" style="height: 32px; display: flex; align-items: center; gap: 6px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; font-size: 13px; font-weight: 500; color: var(--ink-2)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.07 0l2.83-2.83a5 5 0 0 0-7.07-7.07L11.5 4.5"></path><path d="M14 11a5 5 0 0 0-7.07 0L4.1 13.83a5 5 0 0 0 7.07 7.07l1.33-1.4"></path></svg>Link</button>
+<span aria-hidden="true" style="width: 1px; background: var(--line); margin: 6px 2px"></span>
+<a class="ghost" href="Main.dc.html" style="height: 32px; display: flex; align-items: center; gap: 6px; padding: 0 10px; border-radius: 8px; font-size: 13px; font-weight: 500; color: var(--ink-2)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"></path><path d="m13.5 6.5 4 4"></path></svg>Edit</a>
+</div>
+</div>
+</header>
+<p style="font-size: 20px; line-height: 1.6; color: var(--ink-2)">Короткая памятка для дежурного. <strong>Никогда не вставляйте токены</strong> в публичные заметки — для этого есть режим <em>Login required</em>.</p>
+
+<h2 id="before" style="margin-top: 28px">Перед деплоем</h2>
+<ul style="list-style: none; padding-left: 0; font-family: 'Onest', system-ui, sans-serif; font-size: 15px">
+<li style="display: flex; gap: 12px; align-items: center"><input type="checkbox" checked disabled aria-label="Done" style="accent-color: var(--accent); width: 17px; height: 17px; margin: 0"><span style="color: var(--muted); text-decoration: line-through">Прогнать миграции на стейдже</span></li>
+<li style="display: flex; gap: 12px; align-items: center"><input type="checkbox" checked disabled aria-label="Done" style="accent-color: var(--accent); width: 17px; height: 17px; margin: 0"><span style="color: var(--muted); text-decoration: line-through">Сверить переменные окружения</span></li>
+<li style="display: flex; gap: 12px; align-items: center"><input type="checkbox" disabled aria-label="Not done" style="accent-color: var(--accent); width: 17px; height: 17px; margin: 0"><span>Обновить changelog</span></li>
+</ul>
+
+<h2 id="deploy">Деплой</h2>
+<p>Запускаем из корня репозитория. Переменная <code>ENV</code> обязательна — без неё скрипт остановится.</p>
+<figure style="margin: 0 0 20px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--code-bg)">
+<figcaption lang="en" style="display: flex; align-items: center; justify-content: space-between; padding: 6px 6px 6px 14px; border-bottom: 1px solid var(--line); font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: var(--muted)">bash<button class="ghost" type="button" aria-label="Copy code" style="width: 32px; height: 32px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); display: grid; place-items: center"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"></rect><path d="M5 15V5a2 2 0 0 1 2-2h10"></path></svg></button></figcaption>
+<pre style="margin: 0; padding: 16px 18px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; line-height: 1.7; overflow-x: auto; color: var(--ink)"><span style="color: var(--muted)">$</span> make deploy ENV=staging
+<span style="color: var(--muted)">$</span> make smoke ENV=staging</pre>
+</figure>
+
+<div style="overflow-x: auto; margin: 0 0 20px; border: 1px solid var(--line); border-radius: 10px">
+<table style="width: 100%; border-collapse: collapse; font-family: 'Onest', system-ui, sans-serif; font-size: 14px; line-height: 1.5">
+<thead><tr style="background: var(--sunken)"><th scope="col" style="text-align: left; padding: 10px 16px; font-weight: 600; border-bottom: 1px solid var(--line)">Среда</th><th scope="col" style="text-align: left; padding: 10px 16px; font-weight: 600; border-bottom: 1px solid var(--line)">Кто подтверждает</th><th scope="col" style="text-align: left; padding: 10px 16px; font-weight: 600; border-bottom: 1px solid var(--line)">Окно</th></tr></thead>
+<tbody>
+<tr><td style="padding: 10px 16px; border-bottom: 1px solid var(--line)"><code>staging</code></td><td style="padding: 10px 16px; border-bottom: 1px solid var(--line)">Дежурный</td><td style="padding: 10px 16px; border-bottom: 1px solid var(--line)">Любое время</td></tr>
+<tr><td style="padding: 10px 16px"><code>production</code></td><td style="padding: 10px 16px">Тимлид</td><td style="padding: 10px 16px">Будни, до 16:00</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="rollback">Откат</h2>
+<blockquote style="margin: 0 0 18px; padding: 4px 0 4px 20px; border-left: 3px solid var(--accent); color: var(--ink-2); font-style: italic">Если что-то пошло не так — откатываемся и пишем в канал релизов. Разбираемся после.</blockquote>
+<ol>
+<li>Вернуть предыдущий тег: <code>make rollback</code></li>
+<li>Проверить, что алерты погасли</li>
+<li>Записать, что случилось, в <a href="#changelog">changelog</a></li>
+</ol>
+</article>
+</div>
+
+<footer lang="en" style="margin-top: auto; display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 16px 0 24px; border-top: 1px solid var(--line); font-size: 12px; color: var(--muted)">
+<span>Published with Padmark</span>
+<span style="display: flex; gap: 16px"><a href="#raw" style="color: var(--muted)">Raw</a><a href="Main.dc.html" style="color: var(--muted)">Edit</a><a href="Main.dc.html" style="color: var(--muted)">New note</a></span>
+</footer>
+
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["light","dim","dark"],"default":"light"},"toc":{"editor":"boolean","default":true},"$preview":{"width":1440,"height":1560}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const s = this.state || {};
+    const theme = s.theme || this.props.theme || 'light';
+    const seg = (on) => on
+      ? 'background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,.14)'
+      : 'background: transparent; color: var(--muted)';
+    return {
+      theme,
+      tL: seg(theme === 'light'), tD: seg(theme === 'dim'), tK: seg(theme === 'dark'),
+      pL: String(theme === 'light'), pD: String(theme === 'dim'), pK: String(theme === 'dark'),
+      setL: () => this.setState({ theme: 'light' }),
+      setD: () => this.setState({ theme: 'dim' }),
+      setK: () => this.setState({ theme: 'dark' }),
+      copyLabel: s.copied ? 'Copied' : 'Copy',
+      copy: () => this.setState({ copied: true }),
+      toc: this.props.toc ?? true,
+      articleMax: 'none'
+    };
+  }
+}
+</script>
+</body>
+</html>

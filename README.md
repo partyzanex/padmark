@@ -10,9 +10,9 @@ Self-hosted Markdown graveyard for AI agents and beyond.
 |---|---|---|
 | ![Create](docs/screens/create.png) | ![View](docs/screens/view.png) | ![Edit](docs/screens/edit.png) |
 
-| View (dark) | View (light) | Created |
+| View (dark) | Create (light) | Created |
 |---|---|---|
-| ![View dark](docs/screens/view_dark.png) | ![Edit light](docs/screens/edit_light.png) | ![Created](docs/screens/created.png) |
+| ![View dark](docs/screens/view_dark.png) | ![Create light](docs/screens/edit_light.png) | ![Created](docs/screens/created.png) |
 
 ---
 
@@ -63,6 +63,7 @@ Every note has:
 | `burn_after_reading` | Delete the note on first read |
 | `ttl` | On create: post-read grace period with burn. On update without burn: seconds until hard expiry |
 | `privacy` | Who can read it: `public` (default), `authenticated`, or `owner` |
+| `show_contents` | Show an "On this page" sidebar with the note's level-2 and level-3 headings (default `false`; an update without it keeps the current value) |
 
 > **Keep your `edit_code` safe.** It's shown once at creation and cannot be recovered. Exception:
 > if you created the note while authenticated, any session or API token for that account edits
@@ -295,8 +296,21 @@ containers are recreated. Retain and back up both.
 
 ### 1. Web UI
 
-Go to `/`, write your note, optionally set a title and slug, hit **Publish**.
-You'll get a URL and your `edit_code`. Done.
+Go to `/`, write your note and select **Publish note**. You get a URL and your `edit_code`.
+
+- **Editor.** The Write, Split and Preview views show the Markdown source, the result, or both.
+  A title and a slug are optional. A note without a title takes the first text line as its
+  title, at most 80 characters.
+- **Settings.** The panel beside the editor sets who can read the note, burn after reading,
+  the "On this page" contents sidebar and the edit code. You can type an edit code of 8 to 128
+  characters or generate one; a blank field gets a random code.
+- **Result.** The success page shows the share link and hides the edit code until you select
+  **Show**. Save the edit code: the server cannot show it again.
+- **Errors.** When a note or a link is refused, the form shows the reason in a block above the
+  main button and keeps your text.
+- **Phone.** The settings open in a sheet from the bottom bar; the header has a menu and one
+  theme button.
+- **Themes.** Light, dim (default) and dark.
 
 ---
 
@@ -325,14 +339,21 @@ padmark-cli create --title "Runbook" --content "..." --slug deploy-notes
 # Burn-after-reading with a 1-hour window after first read
 padmark-cli create --title "Secret" --content "eyes only" --burn --ttl 3600
 
+# Deleted 30 days after creation
+padmark-cli create --title "Handoff" --content "..." --ttl 2592000
+
 # Requires login to read (any signed-in caller, not just the creator — see "API keys" below)
 padmark-cli create --title "Internal" --content "..." --privacy authenticated
+# The v0.1.6 flag --private still works as a deprecated alias of --privacy authenticated.
 
 # Owner-only: readable through sessions/API tokens for the account that created it
 padmark-cli create --title "Just for me" --content "..." --privacy owner
 
 # Plain text instead of markdown
 padmark-cli create --title "Log dump" --content "..." --plain
+
+# "On this page" sidebar from the note headings (edit: --contents=false hides it; omit to keep)
+padmark-cli create --title "Runbook" --file runbook.md --contents
 
 # Fetch a note (JSON, raw, or default)
 padmark-cli get abc123def4
@@ -460,13 +481,14 @@ including authentication, errors, burn behavior and a safe discovery example.
 These documents are embedded in the same binary. Use all three from the target instance;
 links are relative to that instance's origin, which must be retained when copying the text.
 The API documentation reports the application release version, also shown by `padmark-server --version`.
-Release images receive it from the Git tag during the build; source builds default to the current
-release draft (`0.4.0`). A manual Docker build can set `--build-arg APP_VERSION=0.4.0`.
+Release images receive it from the Git tag during the build; source builds use the version in
+`internal/buildinfo` (`0.4.0`). A manual Docker build can set `--build-arg APP_VERSION=0.4.0`.
 
 **Short links**
 
-Open **Links** in the header (`/links`) to create a short URL. The form includes the destination,
-optional slug/edit code, privacy, redirect mode, expiration in seconds and burn after click.
+Open **Short link** in the header (`/links`) to create a short URL. The form includes the destination,
+optional slug/edit code, privacy, redirect mode, expiration and burn after click. The expiration
+is a preset (1 hour, 1, 7 or 30 days) or a lifetime in seconds.
 TTL counts from creation; burn after click is independent. After creation, copy the short URL
 and the one-time edit code. **Edit link** opens `/links/{id}/edit`, where you can update or delete
 the link without following it. Saving preserves the existing expiration unless explicitly changed;
@@ -1124,9 +1146,8 @@ cost until the password is changed. The change costs RAM and CPU per login, not 
 
 ## Development
 
-This checkout includes unreleased development; [CHANGELOG.md](CHANGELOG.md) separates the
-current draft from tagged releases. References to `v0.1.6` describe historical migration
-fixtures rather than the current release number.
+[CHANGELOG.md](CHANGELOG.md) lists the changes of each release. References to `v0.1.6`
+describe historical migration fixtures rather than the current release number.
 
 Use Go 1.27.3 (see [`go.mod`](go.mod)). The application module and browser-test module have
 separate dependencies and test commands:

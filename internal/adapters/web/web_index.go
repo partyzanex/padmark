@@ -44,6 +44,7 @@ func (h *PageHandler) RegisterRoutes(mux *http.ServeMux) {
 
 // editorViewData is shared by IndexPage (create) and EditPage (edit).
 type editorViewData struct {
+	Header           headerView
 	ID               string
 	Title            string
 	Content          string
@@ -54,6 +55,8 @@ type editorViewData struct {
 	EditMode         bool
 	BurnAfterReading bool
 	IsOwner          bool
+	// ShowContents pre-sets the "Contents sidebar" switch: the stored value in edit mode.
+	ShowContents bool
 	// ContentWithheld marks a burn-after-reading note opened in the editor: its content is not
 	// pre-filled (the editor must not read it without burning it), and saving replaces it.
 	ContentWithheld bool
@@ -79,7 +82,7 @@ func privacyOptions(accounts accountMode, signedIn bool, current domain.Privacy)
 		offered bool
 	}{
 		{domain.PrivacyPublic, "Public", true},
-		{domain.PrivacyAuthenticated, "Requires login", accounts == accountsOn},
+		{domain.PrivacyAuthenticated, "Login required", accounts == accountsOn},
 		{domain.PrivacyOwner, "Owner only", accounts == accountsOn && signedIn},
 	}
 
@@ -108,10 +111,13 @@ func privacyOptions(accounts accountMode, signedIn bool, current domain.Privacy)
 func (h *PageHandler) IndexPage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
+	header := h.header(r, headerKindNote)
+
 	err := h.indexTmpl.Execute(w, editorViewData{
+		Header:         header,
 		Nonce:          middleware.NonceFromContext(r.Context()),
 		Privacy:        string(domain.PrivacyPublic),
-		PrivacyOptions: privacyOptions(h.authMgr != nil, h.signedIn(r), domain.PrivacyPublic),
+		PrivacyOptions: privacyOptions(h.authMgr != nil, header.SignedIn(), domain.PrivacyPublic),
 		// ID/Title/Content blank — fresh editor. EditMode/BurnAfterReading/IsOwner are zero defaults
 		// (Create form, not owner view).
 		ID:               "",
@@ -121,6 +127,7 @@ func (h *PageHandler) IndexPage(w http.ResponseWriter, r *http.Request) {
 		EditMode:         false,
 		BurnAfterReading: false,
 		IsOwner:          false,
+		ShowContents:     false,
 		ContentWithheld:  false,
 	})
 	if err != nil {

@@ -121,8 +121,9 @@ func (s *AuthFlowSuite) TestFlow_LegacySealedSecret_MigratesOnLogin() {
 	legacySealed, err := crypto.New().Encrypt(rawSecret, derivedKey)
 	s.Require().NoError(err)
 
-	err = s.Users.UpdateTOTPSecret(ctx, usr.ID, legacySealed)
+	updated, err := s.Users.UpdateTOTPSecret(ctx, usr.ID, usr.TOTPSecret, legacySealed)
 	s.Require().NoError(err)
+	s.Require().True(updated)
 
 	code, err := totp.GenerateCode(rawSecret, time.Now())
 	s.Require().NoError(err)

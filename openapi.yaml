@@ -790,10 +790,11 @@ components:
           minimum: 0
           maximum: 9223372036
           description: |
-            Grace period in seconds after the first read before the note expires.
-            Only meaningful when `burn_after_reading` is `true`.
-            `0` means the note is deleted immediately when it is first revealed.
-            Omitted means the same as `0` (immediate burn after reading).
+            With `burn_after_reading: true`, the grace period in seconds after the first read
+            before the note expires; `0` or omitted means the note is deleted immediately when
+            it is first revealed. Without `burn_after_reading`, a positive value is the note's
+            lifetime in seconds counted from creation (`expires_at` is set at once); `0` or
+            omitted means the note never expires.
           example: 3600
         edit_code:
           type: string
@@ -828,6 +829,13 @@ components:
             `authenticated`, `false` means `public`. Sending both `private` and `privacy` is
             allowed only when they agree (`true` with `authenticated` or `owner`, `false` with
             `public`); a disagreeing pair is rejected with `400`. Omitted leaves `privacy` alone.
+        show_contents:
+          type: boolean
+          default: false
+          description: |
+            When `true` the HTML view of the note shows an "On this page" sidebar with links to
+            the note's level-2 and level-3 headings. Omitted means `false`. The option changes
+            only the HTML view; JSON and raw reads return the content unchanged.
 
     UpdateNoteRequest:
       type: object
@@ -882,6 +890,11 @@ components:
             `authenticated`, `false` means `public`. Sending both `private` and `privacy` is
             allowed only when they agree (`true` with `authenticated` or `owner`, `false` with
             `public`); a disagreeing pair is rejected with `400`. Omitted keeps the current level.
+        show_contents:
+          type: boolean
+          description: |
+            Update the "On this page" sidebar option (see `CreateNoteRequest.show_contents`).
+            Omitted keeps the note's current value.
 
     NoteResponse:
       type: object
@@ -925,6 +938,11 @@ components:
           description: |
             Deprecated, read-only: `true` when `privacy` is not `public`. Emitted for clients
             written against v0.1.6; use `privacy`.
+        show_contents:
+          type: boolean
+          description: |
+            `true` when the HTML view shows the "On this page" sidebar (see
+            `CreateNoteRequest.show_contents`). Notes created before this option have `false`.
         expires_at:
           type: string
           format: date-time

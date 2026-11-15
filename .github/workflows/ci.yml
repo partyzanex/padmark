@@ -44,6 +44,15 @@ jobs:
         with:
           version: ${{ env.GOLANGCI_LINT_VERSION }}
 
+      # tests/ui is a separate Go module outside the root ./..., so it is linted on its own,
+      # with the same pinned version and the root configuration.
+      - name: Lint browser UI tests
+        uses: golangci/golangci-lint-action@v7
+        with:
+          version: ${{ env.GOLANGCI_LINT_VERSION }}
+          working-directory: tests/ui
+          args: --config ../../.golangci.yml
+
   test:
     name: Test
     needs: [prepare]

@@ -314,6 +314,31 @@ func (s *LinkRepositoryTestSuite) TestDelete_NotFound() {
 
 // TestUpdate_EditableColumnsOnly verifies a stale update cannot reset views or
 // overwrite immutable fields; nullable overrides can be cleared explicitly.
+// TestUpdate_NilPrivacy_KeepsStoredLevel covers R3: an update that omits privacy must keep the
+// level stored now, which another replica may have changed after this one read the row.
+func (s *LinkRepositoryTestSuite) TestUpdate_NilPrivacy_KeepsStoredLevel() {
+	ctx := s.T().Context()
+	authenticated := domain.PrivacyAuthenticated
+	original := &domain.Link{
+		ID: "keep-privacy", TargetURL: "old ciphertext", CreatedAt: time.Now().UTC().Truncate(time.Second),
+		EditCode: "hash", Views: 0, BurnAfterClick: false, ExpiresAt: nil, DirectRedirect: nil,
+		Privacy: &authenticated, OwnerID: nil,
+	}
+	s.Require().NoError(s.repo.Create(ctx, original))
+
+	updated, err := s.repo.Update(ctx, original.ID, &domain.Link{
+		TargetURL: "new ciphertext", Privacy: nil,
+		CreatedAt: time.Time{}, ExpiresAt: nil, OwnerID: nil, DirectRedirect: nil,
+		ID: "", EditCode: "", Views: 0, BurnAfterClick: false,
+	})
+	s.Require().NoError(err)
+	s.Equal(authenticated, updated.EffectivePrivacy())
+
+	stored, err := s.repo.GetByID(ctx, original.ID)
+	s.Require().NoError(err)
+	s.Equal(authenticated, stored.EffectivePrivacy())
+}
+
 func (s *LinkRepositoryTestSuite) TestUpdate_EditableColumnsOnly() {
 	ctx := s.T().Context()
 	expiry := time.Now().Add(time.Hour).UTC().Truncate(time.Second)

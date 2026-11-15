@@ -411,6 +411,36 @@ func (s *HandlerSuite) TestDeleteLink_Gated_PublicLink_WrongEditCode() {
 	s.Equal(http.StatusForbidden, w.Code)
 }
 
+// TestLinkMutationGate_SignedInNonOwner_OwnerLink covers audit finding R4 for links: a signed-in
+// caller who cannot read another account's privacy=owner link may not update or delete it with
+// the edit code. The gate answers 401 and the usecase is never called.
+func (s *HandlerSuite) TestLinkMutationGate_SignedInNonOwner_OwnerLink() {
+	usr := newTestUser("bob")
+
+	link := newTestLink()
+	link.Privacy = new(domain.PrivacyOwner)
+	link.OwnerID = new(uuid.New())
+
+	for _, method := range []string{http.MethodPut, http.MethodDelete} {
+		s.Run(method, func() {
+			router := s.newRouterWithTOTPAuth()
+			s.linkManager.EXPECT().Peek(gomock.Any(), testLinkID).Return(link, nil)
+			s.authMgr.EXPECT().GetSession(gomock.Any(), "valid-sess").Return(usr, nil)
+
+			body := `{"target_url":"https://example.com/new","privacy":"public","edit_code":"right-code"}`
+			r := sessioned(httptest.NewRequest(method, "/links/"+testLinkID, strings.NewReader(body)))
+			r.Header.Set("Content-Type", "application/json")
+			r.Header.Set("Accept", "application/json")
+			r.Header.Set("X-Edit-Code", "right-code")
+
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, r)
+
+			s.Equal(http.StatusUnauthorized, w.Code)
+		})
+	}
+}
+
 func (s *HandlerSuite) TestDeleteLink_OwnerBypass_NoEditCode() {
 	owner := &domain.User{
 		ID: uuid.New(), Username: "alice",
@@ -418,6 +448,7 @@ func (s *HandlerSuite) TestDeleteLink_OwnerBypass_NoEditCode() {
 		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
 	}
 
+	s.expectLinkMutationGate()
 	s.linkManager.EXPECT().Delete(gomock.Any(), testLinkID, "", owner.ID).Return(nil)
 	s.authMgr.EXPECT().GetSession(gomock.Any(), "valid-sess").Return(owner, nil).Times(1)
 

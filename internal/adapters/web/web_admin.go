@@ -35,41 +35,17 @@ func newAdminHandler(c *common, adminTmpl *template.Template) *AdminHandler {
 // Every route is wrapped in requireAdmin, so each handler below can assume the context user is
 // a signed-in admin instead of re-checking it.
 func (h *AdminHandler) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /admin", requireAdmin(h.AdminPage))
-	mux.HandleFunc("POST /admin/invite", h.guard(requireAdmin(h.AdminInviteHandler)))
-	mux.HandleFunc("POST /admin/users/{id}/revoke", h.guard(requireAdmin(h.AdminRevokeHandler)))
-	mux.HandleFunc("POST /admin/api-keys", h.guard(requireAdmin(h.AdminCreateKeyHandler)))
-	mux.HandleFunc("POST /admin/api-keys/{id}/revoke", h.guard(requireAdmin(h.AdminRevokeKeyHandler)))
-}
-
-// requireAdmin wraps next so it only runs for a request whose context user (resolved by the auth
-// middleware, see middleware_auth.go) is a signed-in admin; anonymous or non-admin requests get
-// 403. Every admin route uses this instead of repeating the same UserFromContext/IsAdmin check.
-func requireAdmin(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		usr := middleware.UserFromContext(r)
-		if usr == nil || !usr.IsAdmin {
-			http.Error(w, "forbidden", http.StatusForbidden)
-
-			return
-		}
-
-		// The admin panel is a browser UI: a bearer API token must not reach it. Its forms mint
-		// keys and invites and revoke users, and a CSRF token is available to anyone, so a leaked
-		// key would otherwise bypass the step-up the JSON issuance endpoints demand.
-		if middleware.APITokenHashFromCtx(r.Context()) != "" {
-			http.Error(w, "the admin panel requires a browser session", http.StatusForbidden)
-
-			return
-		}
-
-		next(w, r)
-	}
+	mux.HandleFunc("GET /admin", h.requireAdmin(h.AdminPage))
+	mux.HandleFunc("POST /admin/invite", h.guard(h.requireAdmin(h.AdminInviteHandler)))
+	mux.HandleFunc("POST /admin/users/{id}/revoke", h.guard(h.requireAdmin(h.AdminRevokeHandler)))
+	mux.HandleFunc("POST /admin/api-keys", h.guard(h.requireAdmin(h.AdminCreateKeyHandler)))
+	mux.HandleFunc("POST /admin/api-keys/{id}/revoke", h.guard(h.requireAdmin(h.AdminRevokeKeyHandler)))
 }
 
 // ── admin panel (GET /admin) ──.
 
 type adminViewData struct {
+	Header      headerView
 	Nonce       string
 	InviteURL   string
 	InviteError string
@@ -259,6 +235,7 @@ func (h *AdminHandler) AdminRevokeKeyHandler(w http.ResponseWriter, r *http.Requ
 // and API-token lists. Both lists require admin rights, already verified by the caller.
 func (h *AdminHandler) adminData(r *http.Request, adminID uuid.UUID) (adminViewData, error) {
 	data := adminViewData{
+		Header:    h.header(r, headerKindAdmin),
 		Nonce:     middleware.NonceFromContext(r.Context()),
 		CSRFToken: middleware.CSRFFromContext(r.Context()),
 		// Status/action fields zeroed: populated by the per-action POST handler before re-render on failure
@@ -295,5 +272,31 @@ func (h *AdminHandler) renderAdmin(w http.ResponseWriter, r *http.Request, data 
 	err := h.adminTmpl.Execute(w, data)
 	if err != nil {
 		h.log.ErrorContext(r.Context(), "render admin template", "err", err)
+	}
+}
+
+// requireAdmin wraps next so it only runs for a request whose context user (resolved by the auth
+// middleware, see middleware_auth.go) is a signed-in admin; anonymous or non-admin requests get
+// 403. Every admin route uses this instead of repeating the same UserFromContext/IsAdmin check.
+// The panel is a browser UI, so the refusal is the HTML error page with the site header.
+func (h *AdminHandler) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		usr := middleware.UserFromContext(r)
+		if usr == nil || !usr.IsAdmin {
+			h.writeErrorPage(w, r, domain.ErrForbidden)
+
+			return
+		}
+
+		// The admin panel is a browser UI: a bearer API token must not reach it. Its forms mint
+		// keys and invites and revoke users, and a CSRF token is available to anyone, so a leaked
+		// key would otherwise bypass the step-up the JSON issuance endpoints demand.
+		if middleware.APITokenHashFromCtx(r.Context()) != "" {
+			http.Error(w, "the admin panel requires a browser session", http.StatusForbidden)
+
+			return
+		}
+
+		next(w, r)
 	}
 }

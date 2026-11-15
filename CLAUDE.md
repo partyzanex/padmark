@@ -117,6 +117,10 @@ Dependencies point inward: adapters and infrastructure depend on usecases and do
   See [tests/ui/README.md](tests/ui/README.md) before changing the harness or PNG references.
 - UI assertions cover form behavior, browser diagnostics and desktop/mobile layout. Review
   screenshot changes before updating references; baseline images record the current UI.
+- `TestPageFrame` keeps the header, the logo and the content edges in the same place on all
+  pages. Add each new page to that test.
+- `TestErrors` opens each error that the web interface shows and checks that the user can read
+  it on the page. Add each new error message to that test with `expectError`.
 - Mock metrics with `.AnyTimes()` when exact metric call counts are outside the test's scope.
 
 ## Linting and generated files
@@ -138,13 +142,15 @@ Dependencies point inward: adapters and infrastructure depend on usecases and do
 
 - Current UI sources are `internal/adapters/web/templates/` and
   `internal/adapters/web/static/style.css`, with page-specific nonce-protected styles/scripts.
-  There is no checked-in `docs/design/` mockup directory.
+  The design source is `docs/design/`: `HANDOFF.md` (decisions to keep), `tokens.css` (theme
+  colors) and `screens/` (canvas-editor mockups, not templates).
 - Read the affected template, shared styles and any design reference supplied for the task.
   `docs/screens/` contains example screenshots; browser regression PNGs live in
   `tests/ui/testdata/screenshots/`.
 - Preserve the established design unless the task requests a visual change. Reuse its CSS
   variables, spacing, classes and existing colors instead of introducing another style system.
-- Fonts are self-hosted Source Serif 4 (display/prose) and JetBrains Mono (monospace UI/code).
+- Fonts are self-hosted Onest (interface), Source Serif 4 (display/prose) and JetBrains Mono
+  (code, slugs, labels).
   Themes are `light`, `dim` (default) and `dark`, selected through `[data-theme]`.
 - Use `html/template`, keep CSP-compatible script/style loading, and check affected forms and
   desktop/mobile screenshots with `make test-ui` after a frontend change.

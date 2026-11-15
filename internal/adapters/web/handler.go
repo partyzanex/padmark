@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -259,19 +260,37 @@ func (c *common) isAuthenticated(r *http.Request) bool {
 	return false
 }
 
-// signedIn reports whether the request carries a valid credential of the account system. Unlike
-// isAuthenticated it is false when accounts are off: then nobody can sign in.
-func (c *common) signedIn(r *http.Request) bool {
-	return c.authMgr != nil && c.isAuthenticated(r)
-}
-
 // parseTmpl parses a page template together with the shared header partial.
 func parseTmpl(name, src string) *template.Template {
 	return template.Must(
 		template.Must(template.New(name).Funcs(template.FuncMap{
 			"styleVersion": func() string { return styleVersion },
+			"assetVersion": assetVersions(),
+			"initial":      initial,
 		}).Parse(src)).Parse(headerTmplSrc),
 	)
+}
+
+// assetVersions returns the template function that gives the cache-busting version of a file in
+// static/, with the same scheme as styleVersion. Each file is hashed once, on first use. Templates
+// execute concurrently, thus a mutex guards the cache.
+func assetVersions() func(name string) string {
+	var lock sync.Mutex
+
+	versions := make(map[string]string)
+
+	return func(name string) string {
+		lock.Lock()
+		defer lock.Unlock()
+
+		version, ok := versions[name]
+		if !ok {
+			version = staticAssetVersion("static/" + name)
+			versions[name] = version
+		}
+
+		return version
+	}
 }
 
 // Handler composes the five concern-specific handlers — NoteHandler (web_note.go, web_edit.go),

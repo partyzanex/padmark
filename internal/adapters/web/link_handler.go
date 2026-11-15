@@ -52,6 +52,7 @@ func (h *LinkHandler) RegisterRoutes(mux *http.ServeMux) {
 type redirectViewData struct {
 	TargetURL string
 	Nonce     string
+	Header    headerView
 }
 
 // Redirect handles GET /r/{id}, the older short-link URL (Handler.GetNoteOrLink serves GET /{id}
@@ -101,7 +102,11 @@ func (h *LinkHandler) respondLink(w http.ResponseWriter, r *http.Request, id str
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
-	data := redirectViewData{TargetURL: link.TargetURL, Nonce: middleware.NonceFromContext(r.Context())}
+	data := redirectViewData{
+		Header:    h.header(r, headerKindPlain),
+		TargetURL: link.TargetURL,
+		Nonce:     middleware.NonceFromContext(r.Context()),
+	}
 
 	execErr := h.tmpl.Execute(w, data)
 	if execErr != nil {

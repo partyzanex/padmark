@@ -5,27 +5,42 @@ All notable changes to this project. The format is inspired by
 
 ## v0.4.0 — unreleased
 
-The current release draft is v0.4.0. Existing Git tags already reach **v0.3.3** (`b32ab62`);
-summaries of the previously tagged v0.2.x/v0.3.x releases are recorded below.
+v0.4.0 follows **v0.3.3** (`b32ab62`); summaries of the previously tagged v0.2.x/v0.3.x
+releases are recorded below.
 
 The upgrade comparison and cumulative feature overview use historical **v0.1.6** (`d2e5e8f`)
 as their baseline because its real database dumps exercise the plaintext-to-encrypted upgrade.
 That baseline is not the latest released version.
 
-### Pending changes beyond v0.3.3
+### Changes since v0.3.3
 
-- Account ownership and the `public`/`authenticated`/`owner` privacy model; short links and
-  configurable API disabling.
+#### Added
+
+- Account ownership and the `public`/`authenticated`/`owner` privacy model; configurable API
+  disabling.
+- Short links with browser forms for creating, editing and deleting them, including privacy,
+  redirect mode, expiration and burn-after-click settings. The expiration has presets (1 hour,
+  1, 7 and 30 days) beside a custom lifetime. Editing preserves expiry unless changed.
+- Short links answer at `/{id}`, like notes: the server serves the note with that `id` or, when
+  there is none, the link. `POST /links` returns `Location: /{id}`, and the web UI, CLI and MCP
+  show the short URL. The older `/r/{id}` URLs keep working.
+- Write / Split / Preview views in the note editor. The browser renders the preview with
+  vendored marked 18.1.2 and sanitizes it with DOMPurify 3.4.17; no server endpoint is added.
+  The last view is remembered per browser; phone width offers only Write and Preview.
+- Optional "Contents sidebar" for notes: with `show_contents: true` the note view shows an
+  "On this page" column with links to the h2/h3 headings and marks the current section. The
+  editor has a "Contents sidebar" switch; `padmark-cli create`/`edit` accept `--contents`, and
+  the MCP `create_note`/`update_note` tools accept `show_contents`. The field defaults to
+  `false`, an update without it keeps the stored value, and responses add `show_contents`.
+  The migration `20261110000001_notes_show_contents.sql` adds the column with `false` for
+  existing notes.
+- `POST /notes` accepts `ttl` without `burn_after_reading` as the note's lifetime from creation.
+  `padmark-cli create` and `edit` accept `--ttl` without `--burn`, and the MCP `create_note`
+  tool passes it through.
+- A new note accepts a chosen edit code in the web UI, with a button that generates one.
+- Headless account provisioning, the MCP proxy and `/llms.txt`.
 - Installation-key content envelopes, key-management commands and resumable schema/content
   upgrade support, including conversion of tagged v0.1.6 plaintext notes.
-- Headless account provisioning, the MCP proxy and `/llms.txt`.
-- Bootstrap/step-up protection, session/key revocation, CSRF/lockout hardening, argon2 memory
-  budgeting, content/rendering limits and operational configuration checks.
-- The separate Go browser-test module, desktop/mobile PNG comparisons and CI integration.
-- Browser forms for creating, editing and deleting short links, including privacy, redirect
-  mode, expiration and burn-after-click settings. Editing preserves expiry unless changed.
-- API documentation reports the application release version, shared with `--version` and
-  injected from the release tag when building container images.
 - Automatic startup content migration with a persisted `pending`/`ready` state. A restart
   resumes unfinished rows and skips migration writes once ready. PostgreSQL containers
   generate their default keyring on the persistent `/data` volume; no in-container command
@@ -34,9 +49,54 @@ That baseline is not the latest released version.
   from different server replicas. Reservations are released atomically on deletion or burn.
   If existing native records already collide, the schema migration stops and preserves both
   records; resolve the collision explicitly before retrying.
-- Short links answer at `/{id}`, like notes: the server serves the note with that `id` or, when
-  there is none, the link. `POST /links` returns `Location: /{id}`, and the web UI, CLI and MCP
-  show the short URL. The older `/r/{id}` URLs keep working.
+- API documentation reports the application release version, shared with `--version` and
+  injected from the release tag when building container images.
+- `padmark-cli create` and `edit` accept the v0.1.6 `--private` flag again as a deprecated
+  alias: `--private` is `--privacy authenticated`, `--private=false` is `--privacy public`.
+
+#### Changed
+
+- Web UI redesign from `docs/design/` (hand-off notes, tokens and screen mockups): one token
+  set for the light/dim/dark themes, self-hosted Onest interface font, font sizes only from
+  the scale 11/12/13/14/15/17/20/24/28/32, 44px main buttons, 36–40px fields and 12–14px card
+  corners. The editor and short-link pages have a settings panel with privacy cards and
+  switches. The short-link form is a card with labelled destination and slug fields and a line
+  that shows the resulting link. The note header, success, sign-in and admin pages are new.
+  The header shows "Sign in" or an account block with sign-out, "New" on reader pages and
+  admin links in the admin panel. The success page masks the edit code until "Show". The
+  privacy level `authenticated` is labelled "Login required". The note editor card fills the
+  free screen height, with the card footer at the bottom; the note edit form shows its slug
+  read-only.
+- One page frame for all pages: the same 1200px page width, the same header height and the
+  same top edge of the editor and article cards. The page keeps space for the vertical
+  scrollbar, so the width does not change between short and long pages.
+- Phone-width interface: a 52px header bar with one theme button and a menu, a fixed bar with
+  "Settings" and the main action, the publish settings in a bottom sheet, the "On this page"
+  list as a drop-down above the note, admin tables as lists, and 44px or larger tap targets.
+- The note page shows the Edit link to every reader who can see the note, anonymous readers
+  included: the author of an anonymous note edits it with its edit code, which the server checks.
+- The note editor shows a publish or save error in a block above the main button and keeps it
+  until the next attempt. A note without a title takes at most 80 characters of its first text
+  line as the title; the title field accepts 500 characters at most.
+
+#### Fixed
+
+- Pasted text with a first line of more than 500 characters is published: the title that
+  comes from that line no longer exceeds the server limit.
+- An API error names only its cause: the reply no longer starts with the names of internal
+  operations (for example `create note: slug is already taken` is now `slug is already taken`).
+- A signed-in user who is not an admin gets the HTML error page on `/admin`, not a text line.
+
+#### Security
+
+- Bootstrap/step-up protection, session/key revocation, CSRF/lockout hardening, argon2 memory
+  budgeting, content/rendering limits and operational configuration checks.
+
+#### Tests
+
+- The separate Go browser-test module, desktop/mobile PNG comparisons and CI integration.
+- `TestPageFrame` compares the page frame of all pages; `TestErrors` opens each error of the
+  web interface and checks that the page shows it in full.
 
 ### Upgrading v0.3.2/v0.3.3 to v0.4.0
 
@@ -230,7 +290,7 @@ Low and other:
 
 - Self-host Source Serif 4 and JetBrains Mono fonts and remove the Google Fonts CDN dependency.
 - Use `MaxBodyBytes` as the note-size bound instead of the earlier fixed 1 MiB limit.
-  The current unreleased version adds an explicit content-character limit and rendering guards.
+  v0.4.0 adds an explicit content-character limit and rendering guards.
 
 ## v0.3.2 — 2026-07-12
 

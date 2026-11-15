@@ -23,6 +23,8 @@ FROM scratch
 
 # Run as an unprivileged user.
 COPY --from=builder /etc/passwd /etc/passwd
+# Root CAs let the server verify TLS peers, such as PostgreSQL with sslmode=verify-full.
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 USER nobody
 
 COPY --from=builder /bin/padmark-server /usr/local/bin/padmark-server

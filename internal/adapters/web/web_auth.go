@@ -83,6 +83,7 @@ type loginViewData struct {
 	Nonce     string
 	Next      string
 	CSRFToken string
+	Header    headerView
 	Error     bool
 }
 
@@ -103,6 +104,7 @@ func (h *AuthHandler) LoginPage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
 	err := h.loginTmpl.Execute(w, loginViewData{
+		Header:    h.header(r, headerKindLogin),
 		Error:     r.URL.Query().Get("error") == "1",
 		Nonce:     middleware.NonceFromContext(r.Context()),
 		Next:      middleware.SafeNextURL(r.URL.Query().Get("next")),
@@ -223,7 +225,8 @@ type setupViewData struct {
 	Token        string
 	Error        string
 	CSRFToken    string
-	QRCode       template.URL // data: URL; template.URL bypasses html/template sanitization
+	QRCode       template.URL
+	Header       headerView
 	IsFirstAdmin bool
 }
 
@@ -250,6 +253,7 @@ func (h *AuthHandler) SetupPage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
 	renderErr := h.setupTmpl.Execute(w, setupViewData{
+		Header:       h.header(r, headerKindPlain),
 		Nonce:        middleware.NonceFromContext(r.Context()),
 		Token:        token,
 		IsFirstAdmin: token == "",
@@ -307,6 +311,7 @@ func (h *AuthHandler) SetupHandler(w http.ResponseWriter, r *http.Request) {
 	token := r.FormValue("invite")
 
 	data := setupViewData{
+		Header:       h.header(r, headerKindPlain),
 		Nonce:        middleware.NonceFromContext(r.Context()),
 		CSRFToken:    middleware.CSRFFromContext(r.Context()),
 		Token:        token,
@@ -356,6 +361,7 @@ type changePwViewData struct {
 	Nonce     string
 	Error     string
 	CSRFToken string
+	Header    headerView
 	Success   bool
 }
 
@@ -370,6 +376,7 @@ func (h *AuthHandler) ChangePasswordPage(w http.ResponseWriter, r *http.Request)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
 	renderErr := h.changePwTmpl.Execute(w, changePwViewData{
+		Header:    h.header(r, headerKindPlain),
 		Nonce:     middleware.NonceFromContext(r.Context()),
 		CSRFToken: middleware.CSRFFromContext(r.Context()),
 		// Error/Success populated by the caller before re-render on failure; zero on GET.
@@ -399,6 +406,7 @@ func (h *AuthHandler) ChangePasswordHandler(w http.ResponseWriter, r *http.Reque
 	totpCode := r.FormValue("totp_code")
 
 	data := changePwViewData{
+		Header:    h.header(r, headerKindPlain),
 		Nonce:     middleware.NonceFromContext(r.Context()),
 		CSRFToken: middleware.CSRFFromContext(r.Context()),
 		// Error/Success populated below on failure/success branches; zero on initial render.
@@ -415,6 +423,8 @@ func (h *AuthHandler) ChangePasswordHandler(w http.ResponseWriter, r *http.Reque
 	// carry the new token or resubmitting from this page fails the double-submit check (403).
 	if rotatedCSRF != "" {
 		data.CSRFToken = rotatedCSRF
+		// The sign-out form of the header is on the same page and needs the same token.
+		data.Header.CSRFToken = rotatedCSRF
 	}
 
 	data.Error = errMsg

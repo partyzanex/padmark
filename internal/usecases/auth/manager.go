@@ -24,8 +24,10 @@ type UserStore interface {
 	// UpdateTOTPSecret replaces only the sealed TOTP secret, leaving the password hash and KDF
 	// salt untouched. It exists for the re-seal-on-login migration (see
 	// SessionManager.resealTOTPSecret), where the secret is rewritten under the current argon2
-	// cost but the credentials themselves do not change.
-	UpdateTOTPSecret(ctx context.Context, id uuid.UUID, totpSecret string) error
+	// cost but the credentials themselves do not change. It writes only while the stored seal
+	// equals expected and reports false otherwise, so a reseal started before a concurrent
+	// password change never overwrites the seal of the new password.
+	UpdateTOTPSecret(ctx context.Context, id uuid.UUID, expected, totpSecret string) (bool, error)
 	// UpdateTOTPCounter atomically advances the user's last accepted TOTP counter,
 	// returning false when counter is not strictly greater (replay). The conditional
 	// update is the cross-instance, restart-safe guard against TOTP code reuse.
@@ -96,8 +98,8 @@ type TOTPManager interface {
 
 // APITokenStore persists CLI API tokens keyed by their SHA-256 hash. The plain key is never stored.
 type APITokenStore interface {
-	// CreateIfUnderLimit atomically counts t.UserID's existing tokens and inserts t only if that
-	// count is below limit, reporting false (no error) when the limit is already reached. The
+	// CreateIfUnderLimit atomically counts t.UserID's live (unexpired) tokens and inserts t only
+	// if that count is below limit, reporting false (no error) when the limit is already reached. The
 	// count-then-insert must be a single atomic operation — two concurrent issuance requests each
 	// doing a separate count check followed by an unconditional insert could both pass the check
 	// before either insert lands, letting the user exceed the limit.

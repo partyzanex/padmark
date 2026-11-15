@@ -10,8 +10,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/google/uuid"
-
 	"github.com/partyzanex/padmark/internal/adapters/web/middleware"
 	"github.com/partyzanex/padmark/internal/adapters/web/ogenapi"
 	"github.com/partyzanex/padmark/internal/adapters/web/response"
@@ -70,21 +68,23 @@ func (h *NoteHandler) RegisterRoutes(mux *http.ServeMux) {
 }
 
 type noteViewData struct {
-	ExpiresISO        string
+	Nonce             string
+	Body              template.HTML
 	CSRFToken         string
 	ID                string
 	CreatedAt         string
 	CreatedISO        string
 	ExpiresLabel      string
 	Title             string
-	Nonce             string
-	Body              template.HTML
+	ExpiresISO        string
 	ConfirmToken      string
-	RawContent        string
 	Privacy           string
+	RawContent        string
+	Header            headerView
 	Views             int
 	CanEdit           bool
 	NeedsConfirmation bool
+	ShowContents      bool
 }
 
 func toNoteViewData(note *domain.Note, rendered string) noteViewData {
@@ -100,6 +100,7 @@ func toNoteViewData(note *domain.Note, rendered string) noteViewData {
 	}
 
 	return noteViewData{
+		Header:       noHeader(),
 		ID:           note.ID,
 		Title:        note.Title,
 		Body:         template.HTML(rendered), //nolint:gosec // content is bluemonday-sanitized
@@ -117,6 +118,7 @@ func toNoteViewData(note *domain.Note, rendered string) noteViewData {
 		ConfirmToken:      "",
 		CanEdit:           false,
 		NeedsConfirmation: false,
+		ShowContents:      note.ContentsSidebar(),
 	}
 }
 
@@ -132,7 +134,8 @@ type noteJSON struct {
 	Views            int                `json:"views"`
 	BurnAfterReading bool               `json:"burn_after_reading"`
 	// Private is the deprecated v0.1.6 flag, true when Privacy is not public.
-	Private bool `json:"private"`
+	Private      bool `json:"private"`
+	ShowContents bool `json:"show_contents"`
 }
 
 func toNoteJSON(note *domain.Note) noteJSON {
@@ -148,11 +151,13 @@ func toNoteJSON(note *domain.Note) noteJSON {
 		BurnAfterReading: note.BurnAfterReading,
 		Privacy:          note.EffectivePrivacy(),
 		Private:          privateFlag(note),
+		ShowContents:     note.ContentsSidebar(),
 	}
 }
 
 func toBurnInterstitialViewData(note *domain.Note, tok string) noteViewData {
 	return noteViewData{
+		Header:            noHeader(),
 		ID:                note.ID,
 		Title:             note.Title,
 		CreatedAt:         note.CreatedAt.Format("Jan 2, 2006, 3:04 PM"),
@@ -170,6 +175,8 @@ func toBurnInterstitialViewData(note *domain.Note, tok string) noteViewData {
 		RawContent: "",
 		ExpiresISO: "",
 		CanEdit:    false,
+		// The interstitial does not show the note, so it has no headings to list.
+		ShowContents: false,
 	}
 }
 
@@ -191,7 +198,7 @@ func (h *NoteHandler) UpdateNoteByPath(w http.ResponseWriter, r *http.Request) {
 
 	id := r.PathValue("id")
 
-	if h.gateAnonymousMutation(w, r, id) {
+	if h.gateMutation(w, r, id) {
 		return
 	}
 
@@ -248,7 +255,7 @@ func (h *NoteHandler) UpdateNoteByPath(w http.ResponseWriter, r *http.Request) {
 func (h *NoteHandler) DeleteNoteByPath(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	if h.gateAnonymousMutation(w, r, id) {
+	if h.gateMutation(w, r, id) {
 		return
 	}
 
@@ -380,19 +387,14 @@ func (h *NoteHandler) writePlainNote(w http.ResponseWriter, r *http.Request, id 
 	}
 }
 
-// gateAnonymousMutation enforces the note's read-level privacy for anonymous write callers
-// (PUT/DELETE): someone who could not read the note may not mutate it via edit code either —
+// gateMutation enforces the note's read-level privacy for every write caller (PUT/DELETE):
+// someone who could not read the note may not mutate it via edit code either, signed in or not —
 // the mutation counterpart of handlePrivateAuth, applied by UpdateNoteByPath and
-// DeleteNoteByPath. Authenticated callers always proceed; their ownership still decides inside
-// the usecase (OwnedBy / ValidateOwnership). A failed Peek defers to the real mutation so the
-// caller sees the same error (404) a read would produce. Reports whether the response has been
-// written (gate refused the request).
-func (h *NoteHandler) gateAnonymousMutation(w http.ResponseWriter, r *http.Request, id string) bool {
+// DeleteNoteByPath. A failed Peek defers to the real mutation so the caller sees the same error
+// (404) a read would produce. Reports whether the response has been written (gate refused the
+// request).
+func (h *NoteHandler) gateMutation(w http.ResponseWriter, r *http.Request, id string) bool {
 	if h.authMgr == nil {
-		return false
-	}
-
-	if middleware.CallerIDFromCtx(r.Context()) != uuid.Nil || h.isAuthenticated(r) {
 		return false
 	}
 
@@ -401,7 +403,7 @@ func (h *NoteHandler) gateAnonymousMutation(w http.ResponseWriter, r *http.Reque
 		return false
 	}
 
-	if note.VisibleTo(uuid.Nil, false) {
+	if note.VisibleTo(middleware.CallerIDFromCtx(r.Context()), h.isAuthenticated(r)) {
 		return false
 	}
 
@@ -468,6 +470,7 @@ func (h *NoteHandler) renderNoteHTML(w http.ResponseWriter, r *http.Request, id 
 
 	data := toNoteViewData(note, rendered)
 	data.Nonce = middleware.NonceFromContext(r.Context())
+	data.Header = h.header(r, headerKindView)
 	// Every reader sees the Edit link: the author of an anonymous note edits it with the edit
 	// code, and PUT checks that code on the server. VisibleTo hides the link of a privacy=owner
 	// note from a caller who is not its owner (see EditPage's doc comment).
@@ -588,6 +591,7 @@ func (h *NoteHandler) handleBurnInterstitial(
 
 	data := toBurnInterstitialViewData(note, tok)
 	data.Nonce = middleware.NonceFromContext(r.Context())
+	data.Header = h.header(r, headerKindView)
 	data.CSRFToken = middleware.CSRFFromContext(r.Context())
 
 	execErr := h.noteTmpl.Execute(w, data)

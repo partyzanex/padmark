@@ -48,13 +48,17 @@ func (b *burner) applyPolicy(ctx context.Context, id string, note *domain.Note) 
 
 // enforceExpiry is the expiry half of applyPolicy: an expired note (plain TTL or a started burn
 // timer) is deleted and ErrExpired returned. It never consumes a note or starts a burn timer.
+// The delete checks the expiry again in storage, because the snapshot can be old: if the owner
+// has extended the note since, the row stays and only this request sees the note as expired.
 func (b *burner) enforceExpiry(ctx context.Context, id string, note *domain.Note) error {
 	if note.ExpiresAt == nil || !time.Now().After(*note.ExpiresAt) {
 		return nil
 	}
 
-	delErr := b.storage.Delete(ctx, domain.HashSlug(id))
-	if delErr != nil {
+	delErr := b.storage.DeleteExpired(ctx, domain.HashSlug(id))
+	if errors.Is(delErr, domain.ErrNotFound) {
+		b.log.DebugContext(ctx, "expired note already deleted or extended", "id", domain.HashSlug(id))
+	} else if delErr != nil {
 		b.log.ErrorContext(ctx, "delete expired note", "id", domain.HashSlug(id), "err", delErr)
 	}
 
@@ -89,7 +93,7 @@ func (b *burner) burnNote(ctx context.Context, id string, note *domain.Note) (*d
 		return operationResult, nil
 	}
 
-	consumed, consumeErr := b.storage.Consume(ctx, domain.HashSlug(id))
+	consumed, consumeErr := b.storage.Consume(ctx, domain.HashSlug(id), note.EffectivePrivacy())
 	if consumeErr != nil {
 		return nil, fmt.Errorf("burn after reading: %w", consumeErr)
 	}
@@ -109,9 +113,11 @@ func (b *burner) burnNote(ctx context.Context, id string, note *domain.Note) (*d
 func (b *burner) startTimer(ctx context.Context, id string, note *domain.Note) (*domain.Note, error) {
 	expiresAt := time.Now().UTC().Add(time.Duration(note.BurnTTL) * time.Second)
 
-	updated, burnErr := b.storage.SetBurnExpiry(ctx, domain.HashSlug(id), expiresAt)
+	expected := note.EffectivePrivacy()
+
+	updated, burnErr := b.storage.SetBurnExpiry(ctx, domain.HashSlug(id), expiresAt, expected)
 	if burnErr != nil {
-		operationResult, operationErr := b.handleSetExpiryErr(ctx, id, burnErr)
+		operationResult, operationErr := b.handleSetExpiryErr(ctx, id, expected, burnErr)
 		if operationErr != nil {
 			return operationResult, fmt.Errorf("handle set expiry err: %w", operationErr)
 		}
@@ -131,7 +137,12 @@ func (b *burner) startTimer(ctx context.Context, id string, note *domain.Note) (
 	return updated, nil
 }
 
-func (b *burner) handleSetExpiryErr(ctx context.Context, id string, burnErr error) (*domain.Note, error) {
+// handleSetExpiryErr serves a note whose timer a concurrent reader already started. It returns
+// the current row only while its privacy is still expected: a changed access level means the
+// reader's check no longer applies, so the read fails as not found.
+func (b *burner) handleSetExpiryErr(
+	ctx context.Context, id string, expected domain.Privacy, burnErr error,
+) (*domain.Note, error) {
 	if !errors.Is(burnErr, domain.ErrNotFound) {
 		return nil, fmt.Errorf("burn after reading: %w", burnErr)
 	}
@@ -139,6 +150,10 @@ func (b *burner) handleSetExpiryErr(ctx context.Context, id string, burnErr erro
 	current, getErr := b.storage.Get(ctx, domain.HashSlug(id))
 	if getErr != nil {
 		return nil, fmt.Errorf("burn after reading (re-fetch): %w", getErr)
+	}
+
+	if current.EffectivePrivacy() != expected {
+		return nil, fmt.Errorf("burn after reading (re-fetch): %w", domain.ErrNotFound)
 	}
 
 	current.ID = id

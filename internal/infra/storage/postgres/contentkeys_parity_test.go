@@ -64,7 +64,7 @@ func (s *ParitySuite) TestContentKeys_CiphertextCASPreservesConcurrentReplacemen
 
 		ExpiresAt: nil, Privacy: nil, OwnerID: nil, Title: "",
 		ContentType: nil, Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	}))
 
 	repo := contentkeys.New(s.db)
@@ -107,7 +107,7 @@ func (s *ParitySuite) TestContentKeys_ConvertLegacyCASAndTargetConflict() {
 
 		ExpiresAt: nil, Privacy: nil, OwnerID: nil, Title: "",
 		ContentType: nil, Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false,
+		ClearExpiry: false, ShowContents: nil,
 	}))
 
 	repo := contentkeys.New(s.db)

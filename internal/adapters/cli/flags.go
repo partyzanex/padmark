@@ -15,11 +15,17 @@ const (
 	FlagSlug              = "slug"
 	FlagPlain             = "plain"
 	FlagPrivacy           = "privacy"
-	FlagBurn              = "burn"
-	FlagTTL               = "ttl"
-	FlagEditCode          = "edit-code"
-	FlagRaw               = "raw"
-	FlagJSON              = "json"
+	// FlagPrivate is the deprecated v0.1.6 flag: true means --privacy authenticated, false means
+	// --privacy public. It is kept so that scripts written for v0.1.6 keep working.
+	FlagPrivate = "private"
+	FlagBurn    = "burn"
+	// FlagContents turns on the "On this page" sidebar of the note view. On edit, cmd.IsSet
+	// tells "not passed" (keep the stored value) from an explicit --contents=false.
+	FlagContents = "contents"
+	FlagTTL      = "ttl"
+	FlagEditCode = "edit-code"
+	FlagRaw      = "raw"
+	FlagJSON     = "json"
 	// FlagTargetURL is the short link's destination. Named "target-url", not "url" — the global
 	// --url flag already means the padmark server address; reusing it for the link destination
 	// would collide (see the CLI section in TODO.md for this deviation from the original draft).

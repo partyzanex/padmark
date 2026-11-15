@@ -275,6 +275,7 @@ func assertNotesReadable(t *testing.T, manager *notes.Manager, fixture []legacyN
 			assert.Equal(t, want.burn, got.BurnAfterReading)
 			assert.Equal(t, want.burnTTL, got.BurnTTL)
 			assert.Nil(t, got.OwnerID, "legacy notes stay anonymous")
+			assert.False(t, got.ContentsSidebar(), "upgraded v0.1.6 notes keep the full-width view")
 
 			privacy := domain.PrivacyPublic
 			if want.private {
@@ -308,7 +309,7 @@ func assertEditCodes(t *testing.T, manager *notes.Manager, fixture []legacyNote)
 				CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 				Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
 				EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
-				ClearExpiry: false,
+				ClearExpiry: false, ShowContents: nil,
 			})
 
 			return err

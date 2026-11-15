@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"net/netip"
 	"net/url"
 	"os"
@@ -84,10 +83,9 @@ func newPadmarkClient(cmd *urcli.Command) (*padmark.Client, error) {
 		return nil, fmt.Errorf("validate token transport: %w", insecureErr)
 	}
 
-	transport := &bearerTransport{base: http.DefaultTransport, token: token}
-	httpClient := &http.Client{
-		Transport: transport, Timeout: cmd.Duration(FlagTimeout),
-		CheckRedirect: nil, Jar: nil,
+	httpClient, err := newBearerClient(serverURL, token, cmd.Duration(FlagTimeout))
+	if err != nil {
+		return nil, fmt.Errorf("create http client: %w", err)
 	}
 
 	cl, err := padmark.NewClient(serverURL, padmark.WithClient(httpClient))
@@ -176,35 +174,6 @@ func checkInsecureTransport(errOut io.Writer, serverURL, what string, allowInsec
 		what, serverURL)
 
 	return nil
-}
-
-// bearerTransport injects an Authorization: Bearer header when a token is configured, and
-// Accept: application/json when the request names none: the generated client sends no Accept,
-// and the server refuses a burn-after-reading read that does not state its format explicitly.
-// base is listed first to group pointer-sized fields contiguously (govet fieldalignment).
-type bearerTransport struct {
-	base  http.RoundTripper
-	token string
-}
-
-func (tr *bearerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	// RoundTrip must not modify the caller's request, so the headers go on a clone.
-	clone := req.Clone(req.Context())
-
-	if tr.token != "" {
-		clone.Header.Set("Authorization", "Bearer "+tr.token)
-	}
-
-	if clone.Header.Get("Accept") == "" {
-		clone.Header.Set("Accept", "application/json")
-	}
-
-	resp, err := tr.base.RoundTrip(clone)
-	if err != nil {
-		return nil, fmt.Errorf("http: %w", err)
-	}
-
-	return resp, nil
 }
 
 // readContent reads note content from --content flag, --file flag, or stdin (in that order).

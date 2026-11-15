@@ -44,6 +44,10 @@ func printNote(w io.Writer, note *padmark.NoteResponse) error {
 		ewr.printf("burn:\tyes\n")
 	}
 
+	if note.ShowContents.Or(false) {
+		ewr.printf("contents:\tyes\n")
+	}
+
 	if exp, ok := note.ExpiresAt.Get(); ok {
 		ewr.printf("expires:\t%s\n", exp.UTC().Format(time.RFC3339))
 	}
