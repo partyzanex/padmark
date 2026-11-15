@@ -67,6 +67,10 @@ and `accounts_test.go`.
 Add a case to `TestEditor`, `TestLinks` or `TestAccounts`; `runScenarios` runs it at both screen
 sizes with a fresh server, context, diagnostics and failure artifacts.
 
+`TestPageFrame` in `page_frame_test.go` compares the page frame of all pages: the header, the
+logo, the left and right content edges and the top edge of the editor and article cards.
+Add each new page to its scenarios, so a page that moves the frame fails the test.
+
 ```go
 func testExample(e *ui) {
     e.gotoPage("/")

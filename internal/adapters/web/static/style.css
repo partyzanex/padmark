@@ -49,7 +49,8 @@
 /* ── Reset ── */
 *,*::before,*::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-html { font-size: 16px; }
+/* The reserved gutter keeps the page width the same with and without a vertical scrollbar. */
+html { font-size: 16px; scrollbar-gutter: stable; }
 
 /* ================================================================
    Design tokens. One set of variables for the three themes:
@@ -203,8 +204,6 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     flex-direction: column;
 }
 
-.wrapper--note { max-width: 1120px; }
-
 .card {
     background: var(--surface);
     border: 1px solid var(--line);
@@ -221,6 +220,8 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     align-items: center;
     gap: 20px;
     flex-wrap: wrap;
+    /* One height for each page: the header controls have different heights (40 to 44px). */
+    min-height: 76px;
     padding: 16px 0;
 }
 
@@ -1136,7 +1137,8 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     justify-content: center;
     align-items: flex-start;
     gap: 24px;
-    padding: 12px 0 40px;
+    /* The same top padding as .create-layout: the card stays in place between view and edit. */
+    padding: 8px 0 40px;
 }
 
 .article-card {
@@ -1903,13 +1905,12 @@ a.copy-value:hover { color: var(--accent-text); }
    ================================================================ */
 @media (max-width: 640px) {
     .wrapper { --page-pad: 16px; }
-    .wrapper--note,
-    .wrapper--admin { --page-pad: 12px; }
 
     /* ── Header bar ── */
     .header {
         isolation: isolate;
         gap: 2px;
+        min-height: 0;
         margin: 0 calc(-1 * var(--page-pad));
         padding: 0 8px 0 18px;
     }

@@ -23,7 +23,7 @@ That baseline is not the latest released version.
   shows its slug read-only.
 - Second design iteration from `docs/design/` (hand-off notes, tokens and screen mockups):
   a darker dim theme; font sizes only from the scale 11/12/13/14/15/17/20/24/28/32; 44px main
-  buttons, 36–40px fields, 12–14px card corners and a 1200px page (1120px for a note). The
+  buttons, 36–40px fields, 12–14px card corners and a 1200px page. The
   short-link form is a card with labelled destination and slug fields and a line that shows
   the resulting link; its expiration has presets (1 hour, 1, 7 and 30 days) beside a custom
   lifetime. A new note accepts a chosen edit code, with a button that generates one; the
@@ -33,6 +33,9 @@ That baseline is not the latest released version.
 - Phone-width interface: a 52px header bar with one theme button and a menu, a fixed bar with
   "Settings" and the main action, the publish settings in a bottom sheet, the "On this page"
   list as a drop-down above the note, admin tables as lists, and 44px or larger tap targets.
+- One page frame for all pages: the same 1200px page width (the note view was 1120px), the
+  same header height and the same top edge of the editor and article cards. The page keeps
+  space for the vertical scrollbar, so the width does not change between short and long pages.
 - Installation-key content envelopes, key-management commands and resumable schema/content
   upgrade support, including conversion of tagged v0.1.6 plaintext notes.
 - Headless account provisioning, the MCP proxy and `/llms.txt`.

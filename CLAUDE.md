@@ -117,6 +117,8 @@ Dependencies point inward: adapters and infrastructure depend on usecases and do
   See [tests/ui/README.md](tests/ui/README.md) before changing the harness or PNG references.
 - UI assertions cover form behavior, browser diagnostics and desktop/mobile layout. Review
   screenshot changes before updating references; baseline images record the current UI.
+- `TestPageFrame` keeps the header, the logo and the content edges in the same place on all
+  pages. Add each new page to that test.
 - Mock metrics with `.AnyTimes()` when exact metric call counts are outside the test's scope.
 
 ## Linting and generated files
