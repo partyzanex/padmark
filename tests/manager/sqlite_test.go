@@ -18,7 +18,16 @@ import (
 type SQLiteManagerSuite struct {
 	ManagerSuite
 
-	db *bun.DB
+	objects *objectStore
+	db      *bun.DB
+}
+
+func (s *SQLiteManagerSuite) SetupSuite() {
+	s.objects = startObjectStore(&s.Suite)
+}
+
+func (s *SQLiteManagerSuite) TearDownSuite() {
+	s.objects.stop(&s.Suite)
 }
 
 func (s *SQLiteManagerSuite) SetupTest() {
@@ -41,6 +50,9 @@ func (s *SQLiteManagerSuite) SetupTest() {
 	s.LinkManager = newLinkManager(s.T(),
 		sqliterepo.NewLinkRepository(s.db, slog.Default()), sqliterepo.NewNoteRepository(s.db), slugLock,
 	)
+	s.FileManager = newFileManager(&s.Suite, sqliterepo.NewFileRepository(s.db), sqliterepo.NewNoteRepository(s.db),
+		sqliterepo.NewLinkRepository(s.db, slog.Default()), slugLock, s.objects.store)
+	s.Objects = s.objects.store
 	s.RevealStore = sqliterepo.NewRevealRepository(s.db, slog.Default())
 	s.DB = s.db
 }
