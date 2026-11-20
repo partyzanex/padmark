@@ -30,8 +30,8 @@ type formHead struct {
 
 func TestFormHead(t *testing.T) {
 	runScenarios(t, []scenario{
-		{name: "Create", run: testFormHeadCreate, accounts: false, allowedStatuses: nil},
-		{name: "Edit", run: testFormHeadEdit, accounts: false, allowedStatuses: nil},
+		{name: "Create", run: testFormHeadCreate, accounts: false, files: false, allowedStatuses: nil},
+		{name: "Edit", run: testFormHeadEdit, accounts: false, files: false, allowedStatuses: nil},
 	})
 }
 

@@ -21,11 +21,11 @@ type linkMetadata struct {
 
 func TestLinks(t *testing.T) {
 	runScenarios(t, []scenario{
-		{name: "CreateEditDelete", run: testLinkCreateEditDelete, accounts: false, allowedStatuses: nil},
-		{name: "Validation", run: testLinkValidation, accounts: false, allowedStatuses: nil},
-		{name: "FailureRetry", allowedStatuses: []int{503}, run: testLinkFailureRetry, accounts: false},
-		{name: "BurnAfterClick", allowedStatuses: []int{404}, run: testLinkBurnAfterClick, accounts: false},
-		{name: "PrivacyAndOwnership", accounts: true, run: testLinkPrivacyAndOwnership, allowedStatuses: nil},
+		{name: "CreateEditDelete", run: testLinkCreateEditDelete, accounts: false, files: false, allowedStatuses: nil},
+		{name: "Validation", run: testLinkValidation, accounts: false, files: false, allowedStatuses: nil},
+		{name: "FailureRetry", allowedStatuses: []int{503}, run: testLinkFailureRetry, accounts: false, files: false},
+		{name: "BurnAfterClick", allowedStatuses: []int{404}, run: testLinkBurnAfterClick, accounts: false, files: false},
+		{name: "PrivacyAndOwnership", accounts: true, files: false, run: testLinkPrivacyAndOwnership, allowedStatuses: nil},
 	})
 }
 
