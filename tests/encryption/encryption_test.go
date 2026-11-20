@@ -100,8 +100,10 @@ func manager(t *testing.T, store keys.Storage, ring *crypto.ContentKeyring) *key
 	require.NoError(t, err)
 	links, err := ring.ForResource("link")
 	require.NoError(t, err)
+	files, err := ring.ForResource("file")
+	require.NoError(t, err)
 
-	return keys.New(store, ring, notes, links, crypto.NewEditCodeHasher(crypto.Argon2Params{
+	return keys.New(store, ring, notes, links, files, crypto.NewEditCodeHasher(crypto.Argon2Params{
 		Memory: 0, Time: 0, Threads: 0,
 	}))
 }

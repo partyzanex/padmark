@@ -23,6 +23,7 @@ import (
 	"github.com/partyzanex/padmark/internal/adapters/web"
 	"github.com/partyzanex/padmark/internal/errorcontext"
 	"github.com/partyzanex/padmark/internal/infra/crypto"
+	"github.com/partyzanex/padmark/internal/infra/filemetrics"
 	"github.com/partyzanex/padmark/internal/infra/linkcache"
 	"github.com/partyzanex/padmark/internal/infra/linkmetrics"
 	"github.com/partyzanex/padmark/internal/infra/lock"
@@ -31,6 +32,7 @@ import (
 	"github.com/partyzanex/padmark/internal/infra/storage/postgres"
 	"github.com/partyzanex/padmark/internal/infra/storage/sqlite"
 	"github.com/partyzanex/padmark/internal/usecases/auth"
+	"github.com/partyzanex/padmark/internal/usecases/files"
 	"github.com/partyzanex/padmark/internal/usecases/links"
 	"github.com/partyzanex/padmark/internal/usecases/notes"
 )
@@ -500,9 +502,18 @@ func argon2ParamsFromFlags(cmd *cli.Command) (crypto.Argon2Params, error) {
 	return crypto.Argon2Params{Memory: memory, Time: timeCost, Threads: threads}, nil
 }
 
+// serverMetrics holds the Prometheus registry and the metrics of the managers in it.
+type serverMetrics struct {
+	registry *prometheus.Registry
+	links    *linkmetrics.Metrics
+	files    *filemetrics.Metrics
+}
+
 // newMetricsRegistry builds the Prometheus registry backing the optional /metrics listener,
-// pre-registered with the standard Go/process collectors plus the links.Metrics counters.
-func newMetricsRegistry() (*prometheus.Registry, *linkmetrics.Metrics, error) {
+// pre-registered with the standard Go/process collectors plus the links.Metrics and
+// files.Metrics collectors. The file metrics are registered also when files are off: then they
+// stay at zero, and the /metrics output has the same names on each server.
+func newMetricsRegistry() (serverMetrics, error) {
 	reg := prometheus.NewRegistry()
 
 	// The zero value selects the collector defaults.
@@ -515,10 +526,15 @@ func newMetricsRegistry() (*prometheus.Registry, *linkmetrics.Metrics, error) {
 
 	linkMetrics, err := linkmetrics.NewRegistered(reg)
 	if err != nil {
-		return nil, nil, fmt.Errorf("register link metrics: %w", err)
+		return serverMetrics{registry: nil, links: nil, files: nil}, fmt.Errorf("register link metrics: %w", err)
 	}
 
-	return reg, linkMetrics, nil
+	fileMetrics, err := filemetrics.NewRegistered(reg)
+	if err != nil {
+		return serverMetrics{registry: nil, links: nil, files: nil}, fmt.Errorf("register file metrics: %w", err)
+	}
+
+	return serverMetrics{registry: reg, links: linkMetrics, files: fileMetrics}, nil
 }
 
 // serverStorage is the opened storage backend: its name, the connection and the content
@@ -527,6 +543,7 @@ type serverStorage struct {
 	db    *bun.DB
 	notes notes.Storage
 	links links.Storage
+	files files.Storage
 	name  string
 }
 
@@ -535,7 +552,7 @@ type serverStorage struct {
 // link cache/metrics collaborators.
 func buildHandlers(
 	ctx context.Context, cmd *cli.Command, store serverStorage, log *slog.Logger,
-	linkMetrics *linkmetrics.Metrics, keyring *crypto.ContentKeyring,
+	metrics serverMetrics, keyring *crypto.ContentKeyring,
 ) (*web.Handler, *web.OgenHandler, error) {
 	noteCipher, err := keyring.ForResource("note")
 	if err != nil {
@@ -573,7 +590,7 @@ func buildHandlers(
 	linkManager := links.NewManager(store.links, checker, slugLock, linkCipher,
 		crypto.NewEditCodeHasher(argonParams).WithLogger(log), log, cmd.Bool(FlagCustomSlugs)).
 		WithCache(linkcache.NewDefault(log)).
-		WithMetrics(linkMetrics)
+		WithMetrics(metrics.links)
 
 	authStores, revealStore := buildAuthRepos(store.name, store.db)
 
@@ -583,6 +600,14 @@ func buildHandlers(
 	handler, err = attachAccountSystem(ctx, cmd, handler, authStores, log)
 	if err != nil {
 		return nil, nil, fmt.Errorf("attach account system: %w", err)
+	}
+
+	err = attachFiles(ctx, cmd, handler, store, keyring, &fileDeps{
+		slugLock: slugLock, notes: checker, links: store.links,
+		hasher: crypto.NewEditCodeHasher(argonParams).WithLogger(log), metrics: metrics.files,
+	}, log)
+	if err != nil {
+		return nil, nil, fmt.Errorf("attach files: %w", err)
 	}
 
 	ogenHandler := web.NewOgenHandler(manager, linkManager, store.db.DB, log)
@@ -595,7 +620,7 @@ func buildHandlers(
 func initRepos(
 	ctx context.Context, storage string, db *bun.DB, log *slog.Logger, opts migrationOptions,
 ) (serverStorage, error) {
-	store := serverStorage{db: db, notes: nil, links: nil, name: storage}
+	store := serverStorage{db: db, notes: nil, links: nil, files: nil, name: storage}
 
 	switch storage {
 	case storagePostgres:
@@ -604,14 +629,14 @@ func initRepos(
 			return store, fmt.Errorf("init postgres storage: %w", err)
 		}
 
-		store.notes, store.links = repo, newPostgresLinkRepository(db)
+		store.notes, store.links, store.files = repo, newPostgresLinkRepository(db), postgres.NewFileRepository(db)
 	default:
 		repo, err := initSQLiteStorage(ctx, db, log, opts)
 		if err != nil {
 			return store, fmt.Errorf("init sqlite storage: %w", err)
 		}
 
-		store.notes, store.links = repo, newSQLiteLinkRepository(db)
+		store.notes, store.links, store.files = repo, newSQLiteLinkRepository(db), sqlite.NewFileRepository(db)
 	}
 
 	return store, nil
@@ -657,12 +682,12 @@ func serverAction(ctx context.Context, cmd *cli.Command) error {
 		return fmt.Errorf("validate content encryption: %w", err)
 	}
 
-	metricsRegistry, linkMetrics, err := newMetricsRegistry()
+	metrics, err := newMetricsRegistry()
 	if err != nil {
 		return fmt.Errorf("create metrics registry: %w", err)
 	}
 
-	handler, ogenHandler, err := buildHandlers(ctx, cmd, store, log, linkMetrics, keyring)
+	handler, ogenHandler, err := buildHandlers(ctx, cmd, store, log, metrics, keyring)
 	if err != nil {
 		return fmt.Errorf("build request handlers: %w", err)
 	}
@@ -673,7 +698,7 @@ func serverAction(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	if metricsAddr := cmd.String(FlagMetricsAddr); metricsAddr != "" {
-		startMetricsServer(ctx, metricsAddr, metricsRegistry, log)
+		startMetricsServer(ctx, metricsAddr, metrics.registry, log)
 	}
 
 	logServerStarted(ctx, cmd, log, storage, dsn)

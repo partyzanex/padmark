@@ -48,6 +48,12 @@ const (
 	FlagContentKeyring      = "content-keyring-file"
 	FlagAllowSharedKeyring  = "allow-shared-keyring"
 	FlagSkipMigrationBackup = "skip-migration-backup"
+	FlagS3Endpoint          = "s3-endpoint"
+	FlagS3Bucket            = "s3-bucket"
+	FlagS3Region            = "s3-region"
+	FlagS3PathStyle         = "s3-path-style"
+	FlagMaxFileSize         = "max-file-size"
+	FlagFilesSweepInterval  = "files-sweep-interval"
 	// FlagAuthTokens is the removed v0.1.6 static bearer-token flag; it is still defined (hidden)
 	// so that using it fails startup with a migration hint instead of being ignored.
 	FlagAuthTokens = "auth-tokens" //nolint:gosec // flag name, not a credential
@@ -89,8 +95,18 @@ const (
 	EnvContentKeyring      = "PADMARK_CONTENT_KEYRING_FILE"
 	EnvAllowSharedKeyring  = "PADMARK_ALLOW_SHARED_KEYRING"
 	EnvSkipMigrationBackup = "PADMARK_SKIP_MIGRATION_BACKUP"
-	EnvAuthTokens          = "PADMARK_AUTH_TOKENS" //nolint:gosec // env var name, not a credential
-	EnvCookieMaxAge        = "PADMARK_COOKIE_MAX_AGE"
+	EnvS3Endpoint          = "PADMARK_S3_ENDPOINT"
+	EnvS3Bucket            = "PADMARK_S3_BUCKET"
+	EnvS3Region            = "PADMARK_S3_REGION"
+	EnvS3PathStyle         = "PADMARK_S3_PATH_STYLE"
+	EnvMaxFileSize         = "PADMARK_MAX_FILE_SIZE"
+	EnvFilesSweepInterval  = "PADMARK_FILES_SWEEP_INTERVAL"
+	// EnvS3AccessKey and EnvS3SecretKey are the object storage credentials. They are read from
+	// the environment only — never a flag, so they cannot show up in process listings.
+	EnvS3AccessKey  = "PADMARK_S3_ACCESS_KEY"
+	EnvS3SecretKey  = "PADMARK_S3_SECRET_KEY" //nolint:gosec // G101: env var name, not an inline credential
+	EnvAuthTokens   = "PADMARK_AUTH_TOKENS"   //nolint:gosec // env var name, not a credential
+	EnvCookieMaxAge = "PADMARK_COOKIE_MAX_AGE"
 	// EnvBootstrapToken authorises creating the first admin via /setup without an invite. It is
 	// read from the environment only — never a flag, so it cannot show up in process listings.
 	EnvBootstrapToken = "PADMARK_BOOTSTRAP_TOKEN" //nolint:gosec // G101: env var name, not an inline credential
@@ -117,6 +133,13 @@ const (
 	DefaultAllowSharedKeyring = false      // refuse group/other-readable keyrings outside /run/secrets/.
 	// DefaultDirectRedirect is off: an anonymous link must not be a free open redirector.
 	DefaultDirectRedirect = false
+	DefaultS3Region       = "us-east-1"
+	// DefaultS3PathStyle is on because most self-hosted S3 servers do not serve bucket
+	// subdomains.
+	DefaultS3PathStyle = true
+	DefaultMaxFileSize = 100 << 20 // 100 MiB.
+	// DefaultFilesSweepInterval is the period of the background sweep of expired files.
+	DefaultFilesSweepInterval = time.Hour
 )
 
 // DefaultSessionTTL is the --session-ttl flag default, in seconds — derived from
@@ -135,7 +158,67 @@ func appFlags() []cli.Flag {
 		sessionFlags(),
 		miscFlags(),
 		argon2Flags(),
+		fileStorageFlags(),
 	)
+}
+
+// fileStorageFlags returns the object storage flags for files. The access key and the secret
+// key come only from EnvS3AccessKey and EnvS3SecretKey.
+func fileStorageFlags() []cli.Flag {
+	return []cli.Flag{
+		clifactory.StringFlag(func(flag *cli.StringFlag) {
+			flag.Name = FlagS3Endpoint
+			flag.Sources = cli.EnvVars(EnvS3Endpoint)
+			flag.Usage = "S3-compatible object storage URL for files, for example https://s3.example.com:9000. " +
+				"Empty (default) turns file publishing off. Set " + EnvS3AccessKey + " and " +
+				EnvS3SecretKey + " in the environment"
+		}),
+		clifactory.StringFlag(func(flag *cli.StringFlag) {
+			flag.Name = FlagS3Bucket
+			flag.Sources = cli.EnvVars(EnvS3Bucket)
+			flag.Usage = "Bucket for files; it must exist. Required with --" + FlagS3Endpoint
+		}),
+		clifactory.StringFlag(func(flag *cli.StringFlag) {
+			flag.Name = FlagS3Region
+			flag.Sources = cli.EnvVars(EnvS3Region)
+			flag.Value = DefaultS3Region
+			flag.Usage = "Region of the bucket for the request signature"
+		}),
+		clifactory.BoolFlag(func(flag *cli.BoolFlag) {
+			flag.Name = FlagS3PathStyle
+			flag.Sources = cli.EnvVars(EnvS3PathStyle)
+			flag.Value = DefaultS3PathStyle
+			flag.Usage = "Use path-style addresses (https://host/bucket/key). Set false for virtual-host " +
+				"addresses (https://bucket.host/key)"
+		}),
+		clifactory.Int64Flag(func(flag *cli.Int64Flag) {
+			flag.Name = FlagMaxFileSize
+			flag.Sources = cli.EnvVars(EnvMaxFileSize)
+			flag.Value = DefaultMaxFileSize
+			flag.Validator = func(value int64) error {
+				if value < 1 {
+					return errInvalidMaxFileSize
+				}
+
+				return nil
+			}
+			flag.Usage = "Largest file in bytes that POST /files accepts (default: 104857600 = 100 MiB)"
+		}),
+		clifactory.DurationFlag(func(flag *cli.DurationFlag) {
+			flag.Name = FlagFilesSweepInterval
+			flag.Sources = cli.EnvVars(EnvFilesSweepInterval)
+			flag.Value = DefaultFilesSweepInterval
+			flag.Validator = func(value time.Duration) error {
+				if value < 0 {
+					return errInvalidSweepInterval
+				}
+
+				return nil
+			}
+			flag.Usage = "Period of the background removal of expired files and their objects, for example 30m. " +
+				"0 turns the background removal off; each upload still removes expired files"
+		}),
+	}
 }
 
 // storageAndLogFlags returns the content keyring, storage and logging flags.

@@ -184,7 +184,11 @@ const (
 	// linkCreatePath and notesCreatePath are the collection roots (POST create); isPublicRoute
 	// admits them alongside the resource paths below. editPathPrefix covers GET /edit/{id},
 	// whose per-note privacy check lives in EditPage.
-	linkCreatePath  = "links"
+	linkCreatePath = "links"
+	// filesPath is the file collection root (POST upload); filesPrefix covers the file
+	// resources under it. Per-file privacy and ownership are enforced downstream.
+	filesPath       = "files"
+	filesPrefix     = "files/"
 	editPathPrefix  = "edit/"
 	notesCreatePath = "notes"
 
@@ -226,6 +230,10 @@ func isPublicRoute(r *http.Request, namedRoutes map[string]struct{}) bool {
 	path := strings.TrimPrefix(r.URL.Path, "/")
 
 	switch {
+	case path == filesPath || strings.HasPrefix(path, filesPrefix):
+		// POST /files, GET /files/{id}, GET /files/{id}/download, DELETE /files/{id}: like links,
+		// the file usecase checks privacy, and the edit code or the owner for a delete.
+		return true
 	case isLinkPath(path) || path == linkCreatePath:
 		// GET /r/{id} (GET /{id} is a note path below), GET/PUT/DELETE /links/{id}, POST /links,
 		// POST /links/bulk — per-link privacy and per-link ownership are enforced downstream.

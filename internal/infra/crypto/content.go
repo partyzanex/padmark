@@ -15,6 +15,13 @@ import (
 	"github.com/partyzanex/padmark/internal/domain"
 )
 
+// Resource bytes in the content AAD. They are part of stored ciphertexts: do not change them.
+const (
+	contentResourceNote byte = 1
+	contentResourceLink byte = 2
+	contentResourceFile byte = 3
+)
+
 const (
 	// contentVersionTag prefixes every envelope version tag ("pmc" + decimal digits).
 	contentVersionTag = "pmc"
@@ -51,10 +58,10 @@ type ContentCipher struct {
 	resource string
 }
 
-// NewContentCipher binds a keyring to either "note" or "link". The keyring is copied into
+// NewContentCipher binds a keyring to "note", "link" or "file". The keyring is copied into
 // AES instances, so mutating the caller's map or byte slices cannot change a live cipher.
 func NewContentCipher(activeID string, keys map[string][]byte, resource string) (*ContentCipher, error) {
-	if resource != "note" && resource != "link" {
+	if resource != "note" && resource != "link" && resource != "file" {
 		return nil, errInvalidContentResource
 	}
 
@@ -365,9 +372,15 @@ func (enc *ContentCipher) contentAADForKind(recordID, kind string) ([]byte, erro
 		return nil, errInvalidContentRecordID
 	}
 
-	resource := byte(1)
-	if enc.resource == "link" {
-		resource = 2
+	var resource byte
+
+	switch enc.resource {
+	case "link":
+		resource = contentResourceLink
+	case "file":
+		resource = contentResourceFile
+	default:
+		resource = contentResourceNote
 	}
 
 	aad := append([]byte("padmark-content-v2\x00"+kind), resource)

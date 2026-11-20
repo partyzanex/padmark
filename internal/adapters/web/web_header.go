@@ -14,6 +14,8 @@ const (
 	headerKindNote = "note"
 	// headerKindLink marks the short-link editor: the "Short link" tab is current.
 	headerKindLink = "link"
+	// headerKindFile marks the upload page: the "File" tab is current.
+	headerKindFile = "file"
 	// headerKindLogin marks the sign-in page: the "Sign in" button is current.
 	headerKindLogin = "login"
 	// headerKindView marks reader pages (note view, success): a "New" button replaces the tabs.
@@ -36,6 +38,8 @@ type headerView struct {
 	// Accounts is true when the account system is attached; the "Sign in" button needs it.
 	Accounts bool
 	IsAdmin  bool
+	// FilesEnabled is true when object storage is configured; the "File" tab needs it.
+	FilesEnabled bool
 }
 
 // SignedIn reports whether the header shows the account block.
@@ -43,7 +47,8 @@ func (v headerView) SignedIn() bool {
 	return v.Username != ""
 }
 
-// Tabs reports whether the header shows the "Note" and "Short link" create tabs.
+// Tabs reports whether the header shows the create tabs: "Note", "Short link" and, when files
+// are on, "File".
 func (v headerView) Tabs() bool {
 	return v.Kind != headerKindView && v.Kind != headerKindAdmin
 }
@@ -67,7 +72,9 @@ func initial(name string) string {
 // noHeader returns the zero header for view-model builders that have no request. The renderer
 // replaces it with common.header before the template runs.
 func noHeader() headerView {
-	return headerView{Kind: headerKindPlain, Username: "", CSRFToken: "", Accounts: false, IsAdmin: false}
+	return headerView{
+		Kind: headerKindPlain, Username: "", CSRFToken: "", Accounts: false, IsAdmin: false, FilesEnabled: false,
+	}
 }
 
 // header assembles the header data of a page. kind is one of the headerKind* values.
@@ -78,6 +85,8 @@ func (c *common) header(r *http.Request, kind string) headerView {
 		CSRFToken: middleware.CSRFFromContext(r.Context()),
 		Accounts:  c.authMgr != nil,
 		IsAdmin:   false,
+		// The file tab and the footer text follow the configuration, not the user.
+		FilesEnabled: c.fileMgr != nil,
 	}
 
 	usr := c.currentUser(r)

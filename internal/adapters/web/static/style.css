@@ -3245,3 +3245,128 @@ a.copy-value:hover { color: var(--accent-text); }
 .chip-text::first-letter { text-transform: uppercase; }
 .publish-block .btn-danger { height: 36px; }
 .prose.markdown-body > h1[hidden]:first-child + * { margin-top: 0; }
+
+/* ================================================================
+   Files: upload page, file page and edit page
+   ================================================================ */
+.editor-footer-links { display: flex; gap: 16px; flex-wrap: wrap; }
+
+/* The file field is a label around a hidden input: a click or Enter opens the file picker. */
+.drop-zone {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    min-height: 96px;
+    padding: 18px;
+    border: 1.5px dashed var(--line-2);
+    border-radius: 12px;
+    background: var(--sunken);
+    cursor: pointer;
+    transition: border-color .15s, background .15s;
+}
+
+.drop-zone:hover,
+.drop-zone--over { border-color: var(--accent); background: var(--accent-soft); }
+.drop-zone:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+.drop-zone--picked { border-style: solid; }
+
+.drop-zone-input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.drop-zone-icon,
+.file-icon {
+    width: 44px;
+    height: 44px;
+    flex: none;
+    display: grid;
+    place-items: center;
+    border-radius: 10px;
+    background: var(--accent-soft);
+    color: var(--accent-text);
+}
+
+.drop-zone-icon svg,
+.file-icon svg { width: 22px; height: 22px; }
+
+.drop-zone-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+
+.drop-zone-title {
+    font-size: 15px;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+.drop-zone-hint { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+
+/* Upload progress with the cancel button, above the main action. */
+.upload-progress { display: flex; flex-direction: column; gap: 10px; }
+.upload-progress-row { display: flex; align-items: center; gap: 12px; }
+
+.upload-progress-bar {
+    flex: 1;
+    min-width: 0;
+    height: 8px;
+    border: 0;
+    border-radius: 999px;
+    background: var(--sunken);
+    overflow: hidden;
+    appearance: none;
+}
+
+.upload-progress-bar::-webkit-progress-bar { background: var(--sunken); border-radius: 999px; }
+.upload-progress-bar::-webkit-progress-value { background: var(--accent); border-radius: 999px; }
+.upload-progress-bar::-moz-progress-bar { background: var(--accent); border-radius: 999px; }
+
+.upload-progress-text {
+    flex: none;
+    min-width: 40px;
+    text-align: right;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--muted);
+}
+
+.upload-progress .btn-danger { height: 36px; }
+
+/* File page and the file part of the edit page. */
+.file-head { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.file-head-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+
+.file-title {
+    font-family: var(--font-display);
+    font-size: 28px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    line-height: 1.2;
+    overflow-wrap: anywhere;
+}
+
+.file-name { font-size: 17px; font-weight: 600; overflow-wrap: anywhere; }
+.file-size { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
+.file-actions .btn-primary { height: 44px; padding: 0 22px; font-size: 14px; }
+.file-actions .btn-ghost { height: 44px; }
+
+.success-file { display: flex; gap: 10px; flex-wrap: wrap; align-items: baseline; font-size: 14px; }
+.success-file strong { font-weight: 600; overflow-wrap: anywhere; }
+.success-file span { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+
+@media (max-width: 640px) {
+    /* Three create tabs share the bar: less padding keeps "Short link" on one line. */
+    .nav-tab { gap: 6px; padding: 0 8px; white-space: nowrap; }
+
+    .drop-zone { min-height: 88px; padding: 16px; }
+    .drop-zone-title { font-size: 16px; }
+
+    .publish-bar .upload-progress { order: -1; flex: 0 0 100%; }
+    .upload-progress .btn-danger { height: 44px; border-radius: 10px; }
+
+    .file-title { font-size: 24px; }
+    .file-actions .btn-primary,
+    .file-actions .btn-ghost { height: 48px; padding: 0 8px; }
+}

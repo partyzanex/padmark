@@ -135,7 +135,12 @@ func newEncryptionManager(
 		return nil, contentkeys.Wrap(err)
 	}
 
-	return contentkeys.New(keyrepo.New(db), keyring, notes, links, hasher), nil
+	files, err := keyring.ForResource("file")
+	if err != nil {
+		return nil, contentkeys.Wrap(err)
+	}
+
+	return contentkeys.New(keyrepo.New(db), keyring, notes, links, files, hasher), nil
 }
 
 func validateEncryptionFlags(cmd *cli.Command) error {

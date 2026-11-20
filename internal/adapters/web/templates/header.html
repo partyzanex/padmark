@@ -1,5 +1,6 @@
 {{/* header renders the site header from a headerView (see web_header.go). Kind selects the
-     controls: the create tabs, the "New" button of reader pages or the admin links. The account
+     controls: the create tabs, the "New" button of reader pages or the admin links. The "File"
+     tab is shown only when FilesEnabled is set. The account
      block replaces "Sign in" for a signed-in user. On phone width the links and the account
      block move into the menu under #menuBtn, and one button cycles the theme. */}}
 {{define "header"}}
@@ -15,6 +16,12 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.07 0l2.83-2.83a5 5 0 0 0-7.07-7.07L11.5 4.5"/><path d="M14 11a5 5 0 0 0-7.07 0L4.1 13.83a5 5 0 0 0 7.07 7.07l1.33-1.4"/></svg>
             Short link
         </a>
+        {{- if .FilesEnabled}}
+        <a href="/files" class="nav-tab"{{if eq .Kind "file"}} aria-current="page"{{end}}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M12 18v-6M9 15l3-3 3 3"/></svg>
+            File
+        </a>
+        {{- end}}
     </nav>
     {{- end}}
     <div class="header-spacer"></div>
@@ -75,9 +82,10 @@
 </header>
 {{end}}
 
+{{/* footer takes the headerView of the page: FilesEnabled selects the text. */}}
 {{define "footer"}}
 <footer class="site-footer">
-    <span>Padmark — Markdown notes &amp; short links</span>
+    <span>Padmark — Markdown notes{{if .FilesEnabled}}, short links &amp; files{{else}} &amp; short links{{end}}</span>
     <span class="site-footer-links"><a href="/api">API</a><a href="https://github.com/partyzanex/padmark" target="_blank" rel="noopener noreferrer">Source on GitHub</a></span>
 </footer>
 {{end}}
@@ -230,4 +238,35 @@
             if (ev.key === 'Escape') setOpen(false);
         });
     })();
+{{end}}
+
+{{/* file-errors-js supplies fileErrorMessage for the upload and edit pages: it turns a failed
+     file request into the text of #fileError. The quoted server messages are the texts of the
+     domain errors; templates_test.go keeps them the same. */}}
+{{define "file-errors-js"}}
+    function fileErrorMessage(status, body, maxSizeLabel) {
+        const message = body && typeof body.message === 'string' ? body.message : '';
+        switch (status) {
+        case 0:
+            return 'The connection failed. Check the network and try again.';
+        case 401:
+            return 'Sign in to change this file.';
+        case 403:
+            return message === 'invalid edit code' ? 'The edit code is not correct.' : (message || 'You cannot change this file.');
+        case 404:
+        case 410:
+            return 'The file was deleted or its lifetime ended.';
+        case 409:
+            return 'This slug is already taken. Choose another slug.';
+        case 413:
+            // The edit page does not know the limit; it gives the text without the number.
+            return maxSizeLabel ? 'The file is larger than the server limit (' + maxSizeLabel + ').' : 'The file is larger than the server limit.';
+        case 422:
+            return message === 'file name must be 1-255 bytes' ? 'The file name is not valid.' : (message || 'The server did not accept these settings.');
+        case 503:
+            return message === 'file storage is unavailable' ? 'File storage is unavailable. Try again later.' : 'File publishing is turned off on this server.';
+        default:
+            return message || 'The request failed. Try again.';
+        }
+    }
 {{end}}

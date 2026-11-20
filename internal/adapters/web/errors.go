@@ -53,6 +53,9 @@ func domainErrStatus(err error) (status int, message string) {
 		{domain.ErrInvalidURL, http.StatusBadRequest},
 		{domain.ErrAPITokenLimit, http.StatusTooManyRequests},
 		{domain.ErrFeatureNotSupported, http.StatusServiceUnavailable},
+		{domain.ErrFileTooLarge, http.StatusRequestEntityTooLarge},
+		{domain.ErrInvalidFileName, http.StatusUnprocessableEntity},
+		{domain.ErrStorageUnavailable, http.StatusServiceUnavailable},
 	}
 
 	for _, entry := range entries {

@@ -23,6 +23,10 @@ const (
 const (
 	resourceNote = "note"
 	resourceLink = "link"
+	// resourceFile is the sealed metadata of a file: its name and its content key. The file
+	// content in object storage uses that content key, so a rewrap of the metadata is enough
+	// for a key rotation.
+	resourceFile = "file"
 )
 
 // Row is one stored record as the migration protocol sees it. Legacy is set only for notes
@@ -118,10 +122,10 @@ type Manager struct {
 }
 
 // New returns a Manager with one cipher for notes and one for links.
-func New(store Storage, keys Keyring, notes, links Cipher, hasher EditCodeHasher) *Manager {
+func New(store Storage, keys Keyring, notes, links, files Cipher, hasher EditCodeHasher) *Manager {
 	return &Manager{
 		store: store, keys: keys, hasher: hasher,
-		ciphers: map[string]Cipher{resourceNote: notes, resourceLink: links},
+		ciphers: map[string]Cipher{resourceNote: notes, resourceLink: links, resourceFile: files},
 	}
 }
 
@@ -222,7 +226,7 @@ func (m *Manager) CanRemove(ctx context.Context, keyID string) error {
 }
 
 func (m *Manager) walk(ctx context.Context, visit func(Row) error) error {
-	for _, resource := range []string{resourceNote, resourceLink} {
+	for _, resource := range []string{resourceNote, resourceLink, resourceFile} {
 		err := m.walkResource(ctx, resource, visit)
 		if err != nil {
 			return err

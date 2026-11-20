@@ -131,6 +131,8 @@ func resourceColumns(resource string) (table, column string, err error) {
 		return "notes", "content", nil
 	case "link":
 		return "links", "target_url", nil
+	case "file":
+		return "files", "sealed_meta", nil
 	default:
 		return "", "", errInvalidResource
 	}

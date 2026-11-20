@@ -119,6 +119,27 @@ func (sr *statusRecorder) WriteHeader(status int) {
 	sr.ResponseWriter.WriteHeader(status)
 }
 
+// SetReadDeadline lets http.ResponseController reach the connection through this wrapper, so
+// that a file transfer can extend its deadlines.
+func (sr *statusRecorder) SetReadDeadline(deadline time.Time) error {
+	err := http.NewResponseController(sr.ResponseWriter).SetReadDeadline(deadline)
+	if err != nil {
+		return fmt.Errorf("set read deadline: %w", err)
+	}
+
+	return nil
+}
+
+// SetWriteDeadline lets http.ResponseController reach the connection through this wrapper.
+func (sr *statusRecorder) SetWriteDeadline(deadline time.Time) error {
+	err := http.NewResponseController(sr.ResponseWriter).SetWriteDeadline(deadline)
+	if err != nil {
+		return fmt.Errorf("set write deadline: %w", err)
+	}
+
+	return nil
+}
+
 func (sr *statusRecorder) Write(b []byte) (int, error) {
 	if !sr.written {
 		sr.status = http.StatusOK
@@ -200,7 +221,19 @@ func logRoute(path string) string {
 
 // WithBodyLimit limits a request body to maxBytes; a larger body fails when the handler reads it.
 func WithBodyLimit(maxBytes int64, next http.Handler) http.Handler {
+	return WithBodyLimitExcept(maxBytes, nil, next)
+}
+
+// WithBodyLimitExcept is WithBodyLimit for all requests except those for which exempt returns
+// true. An exempt handler must apply its own limit; the file upload uses --max-file-size.
+func WithBodyLimitExcept(maxBytes int64, exempt func(*http.Request) bool, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if exempt != nil && exempt(r) {
+			next.ServeHTTP(w, r)
+
+			return
+		}
+
 		if r.Body != nil && r.ContentLength != 0 {
 			r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
 		}

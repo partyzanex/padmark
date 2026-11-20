@@ -186,3 +186,41 @@ func setupDisabledPageData() errorViewData {
 		Nonce:  "",
 	}
 }
+
+// File error texts. The upload and edit pages show the same texts in #fileError, see the
+// "file-errors-js" template.
+const (
+	fileGoneDesc        = "The file was deleted or its lifetime ended."
+	fileStorageDesc     = "File storage is unavailable. Try again later."
+	fileInvalidNameDesc = "The file name is not valid."
+	filesOffDesc        = "File publishing is turned off on this server."
+)
+
+// fileErrToPageData is domainErrToPageData with the texts for files. maxSize is the server
+// limit for the "too large" text; 0 omits the number.
+func fileErrToPageData(err error, maxSize int64) errorViewData {
+	status, _ := domainErrStatus(err)
+	data := errorViewData{
+		Header: noHeader(), Code: status, ErrorType: errorTypeClient, Title: "", Desc: "", Detail: "", Nonce: "",
+	}
+
+	switch {
+	case errors.Is(err, domain.ErrNotFound), errors.Is(err, domain.ErrExpired):
+		data.Title, data.Desc = "File not found", fileGoneDesc
+	case errors.Is(err, domain.ErrFileTooLarge):
+		data.Title, data.Desc = "File too large", "The file is larger than the server limit."
+		if maxSize > 0 {
+			data.Desc = "The file is larger than the server limit (" + formatSize(maxSize) + ")."
+		}
+	case errors.Is(err, domain.ErrStorageUnavailable):
+		data.ErrorType, data.Title, data.Desc = errorTypeServer, "File storage unavailable", fileStorageDesc
+	case errors.Is(err, domain.ErrInvalidFileName):
+		data.Title, data.Desc = "Invalid file name", fileInvalidNameDesc
+	case errors.Is(err, domain.ErrFeatureNotSupported):
+		data.ErrorType, data.Title, data.Desc = errorTypeServer, "Files are off", filesOffDesc
+	default:
+		return domainErrToPageData(err)
+	}
+
+	return data
+}

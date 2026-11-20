@@ -55,3 +55,30 @@ func TestEditorMatchesEditCodeErrorMessage(t *testing.T) {
 
 	assert.Contains(t, string(src), "msg === '"+domain.ErrInvalidEditCode.Error()+"'")
 }
+
+// TestFileErrorScriptMatchesDomainErrors pins the file pages' error texts: fileErrorMessage in
+// header.html selects a text by the exact server message of these domain errors. Renaming a
+// sentinel's text must update the template too.
+func TestFileErrorScriptMatchesDomainErrors(t *testing.T) {
+	src, err := os.ReadFile("templates/header.html")
+	require.NoError(t, err)
+
+	for _, sentinel := range []error{domain.ErrInvalidEditCode, domain.ErrInvalidFileName, domain.ErrStorageUnavailable} {
+		assert.Contains(t, string(src), "message === '"+sentinel.Error()+"'")
+	}
+}
+
+// TestFileTemplatesUseErrorScript: the upload and edit pages show errors in #fileError through
+// the shared fileErrorMessage, so both pages show the same texts.
+func TestFileTemplatesUseErrorScript(t *testing.T) {
+	pkgDir := os.DirFS(".")
+
+	for _, file := range []string{"templates/file_editor.html", "templates/file_edit.html"} {
+		src, err := fs.ReadFile(pkgDir, file)
+		require.NoError(t, err)
+
+		assert.Contains(t, string(src), `{{template "file-errors-js"}}`, file)
+		assert.Contains(t, string(src), `id="fileError"`, file)
+		assert.Contains(t, string(src), "fileErrorMessage(", file)
+	}
+}

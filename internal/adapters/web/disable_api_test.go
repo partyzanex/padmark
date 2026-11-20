@@ -6,11 +6,13 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/mock/gomock"
 
 	"github.com/partyzanex/padmark/internal/adapters/web"
+	"github.com/partyzanex/padmark/internal/domain"
 	padmark "github.com/partyzanex/padmark/pkg/client"
 )
 
@@ -83,6 +85,7 @@ func (s *DisableAPISuite) TestAPIPaths_Return503WithCode() {
 		{"link read single-segment", http.MethodGet, "/links/" + testID, ""},
 		{"link update single-segment", http.MethodPut, "/links/" + testID, `{"target_url":"https://example.com"}`},
 		{"link delete single-segment", http.MethodDelete, "/links/" + testID, ""},
+		{"file update", http.MethodPut, "/files/" + testID, `{"ttl":null}`},
 		{"token create", http.MethodPost, "/api/tokens", ""},
 		{"invite create", http.MethodPost, "/api/invites", ""},
 		{"api docs", http.MethodGet, "/api", ""},
@@ -196,4 +199,62 @@ func (s *DisableAPISuite) TestGeneratedClient_DistinguishesDisabledAPIFromReadin
 	s.Require().True(isUnavailable, "expected readiness error, got %T", readiness)
 	s.False(unavailable.Code.IsSet(), "a database failure must not look like a disabled API")
 	s.Equal("db unavailable", unavailable.Message)
+}
+
+// TestFilePages_VisibleWhileAPIDisabled: with --disable-api the file pages still render, but
+// upload, metadata, change and delete answer 503 without a call to the file usecase.
+func (s *DisableAPISuite) TestFilePages_VisibleWhileAPIDisabled() {
+	fileMgr := NewMockFileManager(s.ctrl)
+	fileMgr.EXPECT().MaxSize().Return(int64(1 << 20)).AnyTimes()
+	fileMgr.EXPECT().Peek(gomock.Any(), testID).Return(&domain.File{
+		CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil, ID: testID, ObjectKey: "",
+		SealedMeta: "", Name: "a.txt", ContentKey: nil, EditCode: "hash", Size: 3, Downloads: 0,
+		BurnAfterDownload: false,
+	}, nil)
+
+	handler := web.NewHandler(s.manager, s.linkManager, discardLog()).WithFileManager(fileMgr)
+	ogen := web.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
+	opts := web.RouterOptions{
+		MaxBodyBytes: 256 * 1024,
+		CSRFSecret:   testCSRFSecret,
+		DisableAPI:   true,
+
+		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, AllowedHosts: nil, RateLimit: 0,
+		RateBurst: 0, SessionTTL: 0, DirectRedirect: false,
+	}
+
+	router, err := web.NewRouter(handler, ogen, &opts)
+	s.Require().NoError(err)
+
+	pages := []string{"/files", "/files/" + testID + "/edit"}
+	for _, path := range pages {
+		s.Run("page "+path, func() {
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			req.Header.Set("Accept", "text/html")
+
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+
+			s.Equal(http.StatusOK, rec.Code)
+		})
+	}
+
+	closed := []struct {
+		method string
+		path   string
+	}{
+		{http.MethodPost, "/files"},
+		{http.MethodGet, "/files/" + testID},
+		{http.MethodPut, "/files/" + testID},
+		{http.MethodDelete, "/files/" + testID},
+	}
+	for _, test := range closed {
+		s.Run(test.method+" "+test.path, func() {
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, httptest.NewRequest(test.method, test.path, strings.NewReader("")))
+
+			s.Equal(http.StatusServiceUnavailable, rec.Code)
+			s.JSONEq(`{"message":"API is disabled","code":"api_disabled"}`, rec.Body.String())
+		})
+	}
 }

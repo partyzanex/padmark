@@ -164,9 +164,12 @@ func (NoPinger) PingContext(_ context.Context) error { return nil }
 // Handler facade's With* methods. A single *common instance is embedded (by pointer) in the
 // facade and in each concern handler, so a With* call is visible everywhere immediately.
 type common struct {
-	log            *slog.Logger
-	errorTmpl      *template.Template
-	authMgr        AuthManager
+	log       *slog.Logger
+	errorTmpl *template.Template
+	authMgr   AuthManager
+	// fileMgr is the file usecase, or nil when files are off. The header shows the file tab
+	// and the success page reads the file name only when it is set (see WithFileManager).
+	fileMgr        FileManager
 	forcedScheme   string
 	csrfSecret     []byte
 	trustedProxies []*net.IPNet
@@ -306,6 +309,10 @@ type Handler struct {
 	*AuthHandler
 	*AdminHandler
 	*PageHandler
+
+	// files is not embedded: its RegisterRoutes and Delete would be ambiguous with the methods
+	// of the other concern handlers.
+	files *FileHandler
 }
 
 // NewHandler creates a Handler with required dependencies.
@@ -337,15 +344,21 @@ func NewHandler(manager NoteManager, linkManager LinkManager, log *slog.Logger) 
 		sessionTTL:     0,
 		// Set by WithBootstrapToken; nil keeps first-admin setup closed.
 		bootstrapDigest: nil,
+		// Set by WithFileManager; nil keeps the file pages off.
+		fileMgr: nil,
 	}
+
+	noteHandler := newNoteHandler(cmn, manager, noteTmpl, indexTmpl)
 
 	return &Handler{
 		common:       cmn,
-		NoteHandler:  newNoteHandler(cmn, manager, noteTmpl, indexTmpl),
+		NoteHandler:  noteHandler,
 		LinkHandler:  newLinkHandler(cmn, linkManager, redirectTmpl, linkEditor),
 		AuthHandler:  newAuthHandler(cmn, loginTmpl, setupTmpl, changePwTmpl),
 		AdminHandler: newAdminHandler(cmn, adminTmpl),
 		PageHandler:  newPageHandler(cmn, indexTmpl, successTmpl, apidocsTmpl),
+		// Files share the edit-code lockout with notes and links: one slug namespace.
+		files: newFileHandler(cmn, noteHandler.lockout),
 	}
 }
 

@@ -59,6 +59,12 @@ type RouteRegistrar interface {
 // tracking is consistent for a note or link regardless of which route variant a client hits — a
 // single cache keyed by path ID plus caller works since notes and links share one global slug
 // namespace (a note and a link can never have the same ID, see domain.HashSlug/ErrSlugConflict).
+//
+// The /files operations are in openapi.yaml, but they are not registered here. The generated
+// server parses the full multipart body (ParseMultipartForm: memory and temporary files) before
+// the handler starts, and a file can be many gigabytes. FileHandler.RegisterRoutes serves
+// /files* and streams the content to and from object storage. The generated file methods stay
+// on ogenapi.UnimplementedHandler, which OgenHandler embeds; no route reaches them.
 func registerOgenRoutes(
 	mux *http.ServeMux, ogenSrv http.Handler, lockout *middleware.FailLockoutCache,
 	trustedProxies []*net.IPNet, log *slog.Logger,
@@ -96,6 +102,7 @@ func registerAllRoutes(mux *http.ServeMux, handler *Handler, ogenSrv http.Handle
 		handler.AuthHandler,
 		handler.AdminHandler,
 		handler.PageHandler,
+		handler.files,
 	}
 	for _, registrar := range registrars {
 		registrar.RegisterRoutes(mux)
@@ -170,7 +177,7 @@ func wrapMiddleware(
 	stack = middleware.NewAuthMiddleware(buildNamedRoutes(), checker, stack)
 	stack = middleware.WithCSRFToken(csrfSecret, opts.ForcedScheme, opts.TrustedProxies, stack)
 
-	stack = middleware.WithBodyLimit(int64(opts.MaxBodyBytes), stack)
+	stack = middleware.WithBodyLimitExcept(int64(opts.MaxBodyBytes), isFileUpload, stack)
 
 	if opts.RateLimit > 0 {
 		stack = middleware.WithRateLimit(opts.RateLimit, opts.RateBurst, opts.TrustedProxies, handler.log, stack)

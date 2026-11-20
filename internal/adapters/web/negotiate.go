@@ -316,3 +316,25 @@ func formatCandidate(entries []acceptEntry, mimes []string) (acceptEntry, bool) 
 func outranks(a, b acceptEntry) bool {
 	return a.q > b.q || (a.q == b.q && a.spec > b.spec)
 }
+
+// wantsFilePage reports whether GET /{id} for a file shows the file page instead of the
+// content. A browser asks for text/html, so it gets the page and does not consume a
+// burn-after-download file by accident. The content goes to a client that does not prefer HTML
+// (curl sends */*, which selects JSON), or that names application/octet-stream exactly with a
+// higher q than HTML, or with the same q earlier in the header.
+func wantsFilePage(r *http.Request) bool {
+	if negotiate(r) != formatHTML {
+		return false
+	}
+
+	entries := parseAccept(r.Header.Get("Accept"))
+
+	html, _ := formatCandidate(entries, []string{mimeHTML})
+
+	binary, ok := formatCandidate(entries, []string{mimeBinary})
+	if !ok || binary.spec != specExact {
+		return true
+	}
+
+	return binary.q < html.q || (binary.q == html.q && html.order < binary.order)
+}

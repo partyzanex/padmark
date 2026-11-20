@@ -166,3 +166,42 @@ func TestExplicitRead(t *testing.T) {
 		})
 	}
 }
+
+// TestWantsFilePage pins which GET /{id} requests for a file get the file page and which get the
+// content. A browser gets the page; curl, a missing Accept and a binary request get the content.
+func TestWantsFilePage(t *testing.T) {
+	cases := []struct {
+		name   string
+		accept string
+		raw    bool
+		page   bool
+	}{
+		{"browser navigation", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", false, true},
+		{"plain html", "text/html", false, true},
+		{"binary", "application/octet-stream", false, false},
+		{"curl wildcard", "*/*", false, false},
+		{"no accept", "", false, false},
+		{"json", "application/json", false, false},
+		{"binary preferred by q", "text/html;q=0.5, application/octet-stream", false, false},
+		{"html preferred by q", "application/octet-stream;q=0.5, text/html", false, true},
+		{"binary first at equal q", "application/octet-stream, text/html", false, false},
+		{"html first at equal q", "text/html, application/octet-stream", false, true},
+		{"raw view", "text/html", true, false},
+	}
+
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			path := "/abc"
+			if test.raw {
+				path += "?raw=1"
+			}
+
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			if test.accept != "" {
+				req.Header.Set("Accept", test.accept)
+			}
+
+			require.Equal(t, test.page, wantsFilePage(req))
+		})
+	}
+}

@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dim">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Padmark — Edit file</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="stylesheet" href="/static/style.css?p={{styleVersion}}">
+</head>
+<body>
+<div class="wrapper wrapper--create">
+    {{template "header" .Header}}
+
+    <main>
+    <form id="fileEditForm" class="create-layout" autocomplete="off">
+        <section class="card editor-card editor-card--link" aria-labelledby="fileHeading">
+            <h1 class="sr-only" id="fileHeading">Edit file</h1>
+            <div class="link-fields">
+                <div class="file-head">
+                    <span class="file-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>
+                    </span>
+                    <div class="file-head-text">
+                        <span class="file-name" id="fileName">{{.Name}}</span>
+                        <span class="file-size" id="fileSize">{{.SizeLabel}} · the content and the name are fixed</span>
+                    </div>
+                </div>
+            </div>
+            <div class="link-strip">
+                <span class="link-strip-caption">File link</span>
+                <a class="link-strip-short" href="{{.URL}}">{{.URL}}</a>
+            </div>
+        </section>
+
+        <aside class="card settings-panel" aria-label="File settings">
+            <section class="settings-card" id="settingsSheet" aria-labelledby="sheetTitle">
+                {{template "sheet-head" "File settings"}}
+
+                <fieldset class="privacy-options" id="privacySelect">
+                    <legend class="lbl">Who can download</legend>
+                    {{template "privacy-options" .PrivacyOptions}}
+                </fieldset>
+
+                <div class="field-group">
+                    <label class="field-label" for="expirySelect">Expires</label>
+                    <select class="field-select" id="expirySelect">
+                        <option value="keep">Keep current expiration</option>
+                        <option value="never">Never</option>
+                        <option value="3600">In 1 hour</option>
+                        <option value="86400">In 1 day</option>
+                        <option value="604800">In 7 days</option>
+                        <option value="2592000">In 30 days</option>
+                        <option value="seconds">Custom, in seconds</option>
+                    </select>
+                    <span class="field-hint" id="expiryHint">{{.ExpiresLabel}}</span>
+                </div>
+
+                <div class="field-group" id="ttlGroup" hidden>
+                    <label class="field-label" for="ttlInput">Lifetime in seconds</label>
+                    <input type="number" class="field-input field-input--mono" id="ttlInput" min="1" max="9223372036" step="1" placeholder="86400" disabled>
+                </div>
+
+                <div class="setting-list">
+                    <label class="setting-row" id="burnLabel">
+                        <span class="setting-icon setting-icon--warn" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 22c4 0 7-2.7 7-7 0-4-3-6.5-4.5-9.5C13 7 12.5 9 11 10 10.5 8 9.5 6.5 8 5c0 3-3 5.5-3 10 0 4.3 3 7 7 7z"/></svg>
+                        </span>
+                        <span class="setting-text">
+                            <span class="setting-title">Delete after first download</span>
+                            <span class="setting-desc">The file page warns before the download</span>
+                        </span>
+                        <input type="checkbox" class="switch" role="switch" id="burnCheck"{{if .Burn}} checked{{end}}>
+                    </label>
+                </div>
+
+                <div class="field-group">
+                    <label class="field-label" for="editCodeInput">Edit code <span class="optional">· {{if .IsOwner}}optional for you{{else}}required to save{{end}}</span></label>
+                    <div class="field-box">
+                        <input type="password" id="editCodeInput" name="file_edit_code" autocomplete="new-password" placeholder="Original edit code">
+                    </div>
+                </div>
+            </section>
+
+            <div class="settings-divider"></div>
+
+            <div class="publish-bar">
+                <p id="fileError" class="form-error" role="alert" hidden></p>
+                {{template "settings-toggle"}}
+                <div class="publish-block">
+                    <button type="submit" class="btn-publish" id="saveBtn" data-kbd="Ctrl ↵">Save file</button>
+                    <p id="fileStatus" class="form-status" role="status"></p>
+                    <button type="button" class="btn-danger" id="deleteBtn">Delete file</button>
+                </div>
+            </div>
+        </aside>
+        <div class="sheet-backdrop" id="sheetBackdrop" hidden></div>
+    </form>
+    </main>
+
+    {{template "footer" .Header}}
+</div>
+
+<script nonce="{{.Nonce}}">
+    {{template "theme-js"}}
+    {{template "sheet-js"}}
+    {{template "file-errors-js"}}
+
+    const fileID = {{.ID}};
+    const isOwner = {{.IsOwner}};
+    const form = document.getElementById('fileEditForm');
+    const saveButton = document.getElementById('saveBtn');
+    const deleteButton = document.getElementById('deleteBtn');
+    const errorBox = document.getElementById('fileError');
+    const statusBox = document.getElementById('fileStatus');
+    const expirySelect = document.getElementById('expirySelect');
+    const ttlInput = document.getElementById('ttlInput');
+    const burnCheck = document.getElementById('burnCheck');
+    const privacyValue = () => {
+        const checked = document.querySelector('input[name="privacy"]:checked');
+        return checked ? checked.value : 'public';
+    };
+    let initialPrivacy = privacyValue();
+    let initialBurn = burnCheck.checked;
+
+    function showError(message) {
+        errorBox.textContent = message;
+        errorBox.hidden = false;
+    }
+
+    // The presets hold a lifetime in seconds; "seconds" opens the field for another value.
+    function updateExpiry() {
+        const enabled = expirySelect.value === 'seconds';
+        document.getElementById('ttlGroup').hidden = !enabled;
+        ttlInput.disabled = !enabled;
+        ttlInput.required = enabled;
+    }
+    expirySelect.addEventListener('change', updateExpiry);
+    updateExpiry();
+
+    function updateSummary() {
+        const checked = document.querySelector('input[name="privacy"]:checked');
+        const level = checked ? checked.closest('.privacy-option').querySelector('.privacy-option-title').textContent : 'Public';
+        const expiry = expirySelect.value === 'keep' ? document.getElementById('expiryHint').textContent.toLowerCase()
+            : expirySelect.options[expirySelect.selectedIndex].text.toLowerCase();
+        document.getElementById('settingsSummary').textContent = level + ' · ' + expiry;
+    }
+    updateSummary();
+    document.getElementById('settingsSheet').addEventListener('change', updateSummary);
+
+    // fileRequest sends the edit code only in the X-Edit-Code header, as the API asks.
+    async function fileRequest(method, payload) {
+        const headers = {'Accept': 'application/json'};
+        if (payload) headers['Content-Type'] = 'application/json';
+        const code = document.getElementById('editCodeInput').value;
+        if (code) headers['X-Edit-Code'] = code;
+        let response;
+        try {
+            response = await fetch('/files/' + encodeURIComponent(fileID), {method, headers, body: payload ? JSON.stringify(payload) : undefined});
+        } catch (_) {
+            throw new Error(fileErrorMessage(0, null, ''));
+        }
+        if (!response.ok) {
+            let body = null;
+            try { body = await response.json(); } catch (_) {}
+            throw new Error(fileErrorMessage(response.status, body, ''));
+        }
+        return response.status === 204 ? null : response.json();
+    }
+
+    function needCode() {
+        if (isOwner || document.getElementById('editCodeInput').value) return false;
+        showError('Edit code required');
+        return true;
+    }
+
+    form.addEventListener('submit', async event => {
+        event.preventDefault();
+        errorBox.hidden = true;
+        statusBox.textContent = '';
+        if (needCode()) return;
+        const payload = {};
+        if (privacyValue() !== initialPrivacy) payload.privacy = privacyValue();
+        if (burnCheck.checked !== initialBurn) payload.burn_after_download = burnCheck.checked;
+        if (expirySelect.value === 'seconds') payload.ttl = Number(ttlInput.value);
+        else if (/^\d+$/.test(expirySelect.value)) payload.ttl = Number(expirySelect.value);
+        else if (expirySelect.value === 'never') payload.ttl = null;
+
+        saveButton.disabled = true;
+        try {
+            const file = await fileRequest('PUT', payload);
+            initialPrivacy = file.privacy || privacyValue();
+            initialBurn = Boolean(file.burn_after_download);
+            expirySelect.value = 'keep';
+            updateExpiry();
+            document.getElementById('expiryHint').textContent = file.expires_at
+                ? 'Expires ' + new Date(file.expires_at).toUTCString() : 'Never expires';
+            updateSummary();
+            statusBox.textContent = 'File saved';
+        } catch (error) { showError(error.message); }
+        finally { saveButton.disabled = false; }
+    });
+
+    deleteButton.addEventListener('click', async () => {
+        errorBox.hidden = true;
+        if (needCode()) return;
+        if (!confirm('Permanently delete this file?')) return;
+        deleteButton.disabled = true;
+        saveButton.disabled = true;
+        try {
+            await fileRequest('DELETE', null);
+            location.href = '/files';
+        } catch (error) { showError(error.message); }
+        finally { deleteButton.disabled = false; saveButton.disabled = false; }
+    });
+
+    document.addEventListener('keydown', event => {
+        if ((event.ctrlKey || event.metaKey) && event.key === 'Enter' && !saveButton.disabled) {
+            event.preventDefault();
+            form.requestSubmit();
+        }
+    });
+</script>
+</body>
+</html>
