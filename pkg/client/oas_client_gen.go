@@ -45,6 +45,19 @@ type Invoker interface {
 	//
 	// POST /api/tokens
 	CreateAPIToken(ctx context.Context, request OptCreateAPITokenRequest) (CreateAPITokenRes, error)
+	// CreateFile invokes createFile operation.
+	//
+	// Uploads one file and returns its description with the one-time `edit_code`.
+	// Send `multipart/form-data`. Put the optional text fields `ttl`, `privacy`,
+	// `burn_after_download`, `slug` and `edit_code` first. Put the `file` part last.
+	// The server reads only the fields before `file` and ignores fields after it.
+	// The server streams the file to object storage and does not keep it in memory.
+	// Each text field can have a maximum of 1024 bytes. If `slug` is omitted, the server
+	// generates a 10-character random slug. The file name comes from the `filename` of the
+	// `file` part.
+	//
+	// POST /files
+	CreateFile(ctx context.Context, request *CreateFileRequestMultipart) (CreateFileRes, error)
 	// CreateInvite invokes createInvite operation.
 	//
 	// The JSON counterpart of the admin panel's `POST /admin/invite`. Requires an **admin**
@@ -84,6 +97,14 @@ type Invoker interface {
 	//
 	// POST /notes
 	CreateNote(ctx context.Context, request *CreateNoteRequest) (CreateNoteRes, error)
+	// DeleteFile invokes deleteFile operation.
+	//
+	// Deletes the file record and its stored content. Send the edit code in the
+	// `X-Edit-Code` header. The account that uploaded the file can omit the edit code.
+	// The server ignores an `edit_code` query parameter.
+	//
+	// DELETE /files/{id}
+	DeleteFile(ctx context.Context, params DeleteFileParams) (DeleteFileRes, error)
 	// DeleteLink invokes deleteLink operation.
 	//
 	// Permanently deletes the link. The edit code must be supplied as the `X-Edit-Code`
@@ -109,6 +130,27 @@ type Invoker interface {
 	//
 	// DELETE /notes/{id}
 	DeleteNote(ctx context.Context, params DeleteNoteParams) (DeleteNoteRes, error)
+	// GetFile invokes getFile operation.
+	//
+	// Returns the file description as JSON. This read does not download the content, does not
+	// increment `downloads` and does not consume a `burn_after_download` file.
+	//
+	// GET /files/{id}
+	GetFile(ctx context.Context, params GetFileParams) (GetFileRes, error)
+	// GetFileContent invokes getFileContent operation.
+	//
+	// Sends the file content as `application/octet-stream` with
+	// `Content-Disposition: attachment`. Each download increments `downloads`. `HEAD` sends
+	// only the headers and does not count a download.
+	// A `burn_after_download` file is deleted after this download. Send
+	// `Accept: application/octet-stream` to show that the download is deliberate. Without a
+	// deliberate `Accept`, the server answers `409` with code `burn_read_not_explicit` and
+	// the file stays.
+	// If the transfer stops after the server sends the headers, the client gets fewer bytes
+	// than `Content-Length`. Discard such a file.
+	//
+	// GET /files/{id}/download
+	GetFileContent(ctx context.Context, params GetFileContentParams) (GetFileContentRes, error)
 	// GetLink invokes getLink operation.
 	//
 	// Returns the link as JSON, including its decrypted `target_url`. This is a metadata-only
@@ -148,6 +190,16 @@ type Invoker interface {
 	//
 	// GET /readyz
 	Readyz(ctx context.Context) (ReadyzRes, error)
+	// UpdateFile invokes updateFile operation.
+	//
+	// Changes the expiry, the privacy level and the burn-after-download rule of a file.
+	// It does not change the content, the name, the slug, the owner or `downloads`.
+	// An omitted field keeps its current value. Send the edit code in the `X-Edit-Code`
+	// header. The account that uploaded the file can omit the edit code. Returns the changed
+	// file description. The edit code is not returned again.
+	//
+	// PUT /files/{id}
+	UpdateFile(ctx context.Context, request *UpdateFileRequest, params UpdateFileParams) (UpdateFileRes, error)
 	// UpdateLink invokes updateLink operation.
 	//
 	// Replaces the destination URL, preserving the slug, edit code, click count, owner,
@@ -293,6 +345,90 @@ func (c *Client) sendCreateAPIToken(ctx context.Context, request OptCreateAPITok
 
 	stage = "DecodeResponse"
 	result, err := decodeCreateAPITokenResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
+// CreateFile invokes createFile operation.
+//
+// Uploads one file and returns its description with the one-time `edit_code`.
+// Send `multipart/form-data`. Put the optional text fields `ttl`, `privacy`,
+// `burn_after_download`, `slug` and `edit_code` first. Put the `file` part last.
+// The server reads only the fields before `file` and ignores fields after it.
+// The server streams the file to object storage and does not keep it in memory.
+// Each text field can have a maximum of 1024 bytes. If `slug` is omitted, the server
+// generates a 10-character random slug. The file name comes from the `filename` of the
+// `file` part.
+//
+// POST /files
+func (c *Client) CreateFile(ctx context.Context, request *CreateFileRequestMultipart) (CreateFileRes, error) {
+	res, err := c.sendCreateFile(ctx, request)
+	return res, err
+}
+
+func (c *Client) sendCreateFile(ctx context.Context, request *CreateFileRequestMultipart) (res CreateFileRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("createFile"),
+		semconv.HTTPRequestMethodKey.String("POST"),
+		semconv.URLTemplateKey.String("/files"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, CreateFileOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [1]string
+	pathParts[0] = "/files"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "POST", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+	if err := encodeCreateFileRequest(request, r); err != nil {
+		return res, errors.Wrap(err, "encode request")
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeCreateFileResponse(resp)
 	if err != nil {
 		return res, errors.Wrap(err, "decode response")
 	}
@@ -623,6 +759,117 @@ func (c *Client) sendCreateNote(ctx context.Context, request *CreateNoteRequest)
 	return result, nil
 }
 
+// DeleteFile invokes deleteFile operation.
+//
+// Deletes the file record and its stored content. Send the edit code in the
+// `X-Edit-Code` header. The account that uploaded the file can omit the edit code.
+// The server ignores an `edit_code` query parameter.
+//
+// DELETE /files/{id}
+func (c *Client) DeleteFile(ctx context.Context, params DeleteFileParams) (DeleteFileRes, error) {
+	res, err := c.sendDeleteFile(ctx, params)
+	return res, err
+}
+
+func (c *Client) sendDeleteFile(ctx context.Context, params DeleteFileParams) (res DeleteFileRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("deleteFile"),
+		semconv.HTTPRequestMethodKey.String("DELETE"),
+		semconv.URLTemplateKey.String("/files/{id}"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, DeleteFileOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [2]string
+	pathParts[0] = "/files/"
+	{
+		// Encode "id" parameter.
+		e := uri.NewPathEncoder(uri.PathEncoderConfig{
+			Param:   "id",
+			Style:   uri.PathStyleSimple,
+			Explode: false,
+		})
+		if err := func() error {
+			return e.EncodeValue(conv.StringToString(params.ID))
+		}(); err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		encoded, err := e.Result()
+		if err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		pathParts[1] = encoded
+	}
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "DELETE", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	stage = "EncodeHeaderParams"
+	h := uri.NewHeaderEncoder(r.Header)
+	{
+		cfg := uri.HeaderParameterEncodingConfig{
+			Name:    "X-Edit-Code",
+			Explode: false,
+		}
+		if err := h.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.XEditCode.Get(); ok {
+				return e.EncodeValue(conv.StringToString(val))
+			}
+			return nil
+		}); err != nil {
+			return res, errors.Wrap(err, "encode header")
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeDeleteFileResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
 // DeleteLink invokes deleteLink operation.
 //
 // Permanently deletes the link. The edit code must be supplied as the `X-Edit-Code`
@@ -868,6 +1115,200 @@ func (c *Client) sendDeleteNote(ctx context.Context, params DeleteNoteParams) (r
 
 	stage = "DecodeResponse"
 	result, err := decodeDeleteNoteResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
+// GetFile invokes getFile operation.
+//
+// Returns the file description as JSON. This read does not download the content, does not
+// increment `downloads` and does not consume a `burn_after_download` file.
+//
+// GET /files/{id}
+func (c *Client) GetFile(ctx context.Context, params GetFileParams) (GetFileRes, error) {
+	res, err := c.sendGetFile(ctx, params)
+	return res, err
+}
+
+func (c *Client) sendGetFile(ctx context.Context, params GetFileParams) (res GetFileRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("getFile"),
+		semconv.HTTPRequestMethodKey.String("GET"),
+		semconv.URLTemplateKey.String("/files/{id}"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, GetFileOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [2]string
+	pathParts[0] = "/files/"
+	{
+		// Encode "id" parameter.
+		e := uri.NewPathEncoder(uri.PathEncoderConfig{
+			Param:   "id",
+			Style:   uri.PathStyleSimple,
+			Explode: false,
+		})
+		if err := func() error {
+			return e.EncodeValue(conv.StringToString(params.ID))
+		}(); err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		encoded, err := e.Result()
+		if err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		pathParts[1] = encoded
+	}
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "GET", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeGetFileResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
+// GetFileContent invokes getFileContent operation.
+//
+// Sends the file content as `application/octet-stream` with
+// `Content-Disposition: attachment`. Each download increments `downloads`. `HEAD` sends
+// only the headers and does not count a download.
+// A `burn_after_download` file is deleted after this download. Send
+// `Accept: application/octet-stream` to show that the download is deliberate. Without a
+// deliberate `Accept`, the server answers `409` with code `burn_read_not_explicit` and
+// the file stays.
+// If the transfer stops after the server sends the headers, the client gets fewer bytes
+// than `Content-Length`. Discard such a file.
+//
+// GET /files/{id}/download
+func (c *Client) GetFileContent(ctx context.Context, params GetFileContentParams) (GetFileContentRes, error) {
+	res, err := c.sendGetFileContent(ctx, params)
+	return res, err
+}
+
+func (c *Client) sendGetFileContent(ctx context.Context, params GetFileContentParams) (res GetFileContentRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("getFileContent"),
+		semconv.HTTPRequestMethodKey.String("GET"),
+		semconv.URLTemplateKey.String("/files/{id}/download"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, GetFileContentOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [3]string
+	pathParts[0] = "/files/"
+	{
+		// Encode "id" parameter.
+		e := uri.NewPathEncoder(uri.PathEncoderConfig{
+			Param:   "id",
+			Style:   uri.PathStyleSimple,
+			Explode: false,
+		})
+		if err := func() error {
+			return e.EncodeValue(conv.StringToString(params.ID))
+		}(); err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		encoded, err := e.Result()
+		if err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		pathParts[1] = encoded
+	}
+	pathParts[2] = "/download"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "GET", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeGetFileContentResponse(resp)
 	if err != nil {
 		return res, errors.Wrap(err, "decode response")
 	}
@@ -1215,6 +1656,122 @@ func (c *Client) sendReadyz(ctx context.Context) (res ReadyzRes, err error) {
 
 	stage = "DecodeResponse"
 	result, err := decodeReadyzResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
+// UpdateFile invokes updateFile operation.
+//
+// Changes the expiry, the privacy level and the burn-after-download rule of a file.
+// It does not change the content, the name, the slug, the owner or `downloads`.
+// An omitted field keeps its current value. Send the edit code in the `X-Edit-Code`
+// header. The account that uploaded the file can omit the edit code. Returns the changed
+// file description. The edit code is not returned again.
+//
+// PUT /files/{id}
+func (c *Client) UpdateFile(ctx context.Context, request *UpdateFileRequest, params UpdateFileParams) (UpdateFileRes, error) {
+	res, err := c.sendUpdateFile(ctx, request, params)
+	return res, err
+}
+
+func (c *Client) sendUpdateFile(ctx context.Context, request *UpdateFileRequest, params UpdateFileParams) (res UpdateFileRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("updateFile"),
+		semconv.HTTPRequestMethodKey.String("PUT"),
+		semconv.URLTemplateKey.String("/files/{id}"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, UpdateFileOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [2]string
+	pathParts[0] = "/files/"
+	{
+		// Encode "id" parameter.
+		e := uri.NewPathEncoder(uri.PathEncoderConfig{
+			Param:   "id",
+			Style:   uri.PathStyleSimple,
+			Explode: false,
+		})
+		if err := func() error {
+			return e.EncodeValue(conv.StringToString(params.ID))
+		}(); err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		encoded, err := e.Result()
+		if err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		pathParts[1] = encoded
+	}
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "PUT", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+	if err := encodeUpdateFileRequest(request, r); err != nil {
+		return res, errors.Wrap(err, "encode request")
+	}
+
+	stage = "EncodeHeaderParams"
+	h := uri.NewHeaderEncoder(r.Header)
+	{
+		cfg := uri.HeaderParameterEncodingConfig{
+			Name:    "X-Edit-Code",
+			Explode: false,
+		}
+		if err := h.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.XEditCode.Get(); ok {
+				return e.EncodeValue(conv.StringToString(val))
+			}
+			return nil
+		}); err != nil {
+			return res, errors.Wrap(err, "encode header")
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeUpdateFileResponse(resp)
 	if err != nil {
 		return res, errors.Wrap(err, "decode response")
 	}

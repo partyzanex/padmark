@@ -34,6 +34,22 @@ func (UnimplementedHandler) CreateAPIToken(ctx context.Context, req OptCreateAPI
 	return r, ht.ErrNotImplemented
 }
 
+// CreateFile implements createFile operation.
+//
+// Uploads one file and returns its description with the one-time `edit_code`.
+// Send `multipart/form-data`. Put the optional text fields `ttl`, `privacy`,
+// `burn_after_download`, `slug` and `edit_code` first. Put the `file` part last.
+// The server reads only the fields before `file` and ignores fields after it.
+// The server streams the file to object storage and does not keep it in memory.
+// Each text field can have a maximum of 1024 bytes. If `slug` is omitted, the server
+// generates a 10-character random slug. The file name comes from the `filename` of the
+// `file` part.
+//
+// POST /files
+func (UnimplementedHandler) CreateFile(ctx context.Context, req *CreateFileRequestMultipart) (r CreateFileRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
 // CreateInvite implements createInvite operation.
 //
 // The JSON counterpart of the admin panel's `POST /admin/invite`. Requires an **admin**
@@ -85,6 +101,17 @@ func (UnimplementedHandler) CreateNote(ctx context.Context, req *CreateNoteReque
 	return r, ht.ErrNotImplemented
 }
 
+// DeleteFile implements deleteFile operation.
+//
+// Deletes the file record and its stored content. Send the edit code in the
+// `X-Edit-Code` header. The account that uploaded the file can omit the edit code.
+// The server ignores an `edit_code` query parameter.
+//
+// DELETE /files/{id}
+func (UnimplementedHandler) DeleteFile(ctx context.Context, params DeleteFileParams) (r DeleteFileRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
 // DeleteLink implements deleteLink operation.
 //
 // Permanently deletes the link. The edit code must be supplied as the `X-Edit-Code`
@@ -113,6 +140,33 @@ func (UnimplementedHandler) DeleteLink(ctx context.Context, params DeleteLinkPar
 //
 // DELETE /notes/{id}
 func (UnimplementedHandler) DeleteNote(ctx context.Context, params DeleteNoteParams) (r DeleteNoteRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
+// GetFile implements getFile operation.
+//
+// Returns the file description as JSON. This read does not download the content, does not
+// increment `downloads` and does not consume a `burn_after_download` file.
+//
+// GET /files/{id}
+func (UnimplementedHandler) GetFile(ctx context.Context, params GetFileParams) (r GetFileRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
+// GetFileContent implements getFileContent operation.
+//
+// Sends the file content as `application/octet-stream` with
+// `Content-Disposition: attachment`. Each download increments `downloads`. `HEAD` sends
+// only the headers and does not count a download.
+// A `burn_after_download` file is deleted after this download. Send
+// `Accept: application/octet-stream` to show that the download is deliberate. Without a
+// deliberate `Accept`, the server answers `409` with code `burn_read_not_explicit` and
+// the file stays.
+// If the transfer stops after the server sends the headers, the client gets fewer bytes
+// than `Content-Length`. Discard such a file.
+//
+// GET /files/{id}/download
+func (UnimplementedHandler) GetFileContent(ctx context.Context, params GetFileContentParams) (r GetFileContentRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 
@@ -164,6 +218,19 @@ func (UnimplementedHandler) Healthz(ctx context.Context) error {
 //
 // GET /readyz
 func (UnimplementedHandler) Readyz(ctx context.Context) (r ReadyzRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
+// UpdateFile implements updateFile operation.
+//
+// Changes the expiry, the privacy level and the burn-after-download rule of a file.
+// It does not change the content, the name, the slug, the owner or `downloads`.
+// An omitted field keeps its current value. Send the edit code in the `X-Edit-Code`
+// header. The account that uploaded the file can omit the edit code. Returns the changed
+// file description. The edit code is not returned again.
+//
+// PUT /files/{id}
+func (UnimplementedHandler) UpdateFile(ctx context.Context, req *UpdateFileRequest, params UpdateFileParams) (r UpdateFileRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 

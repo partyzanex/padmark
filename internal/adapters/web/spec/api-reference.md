@@ -1,6 +1,6 @@
 # Padmark API reference
 
-Self-hosted markdown notes and short links. One URL, many consumers: a browser sees the same
+Self-hosted markdown notes, short links and files. One URL, many consumers: a browser sees the same
 `/{id}` path as a rendered page, a machine client that sends `Accept: application/json` gets
 structured JSON. This reference describes release {{VERSION}}. The request/response schemas
 are at [OpenAPI](/api/openapi.yaml), embedded in the same server build. The browser-facing
@@ -82,6 +82,54 @@ or control characters (`400` if too short/long, `422` otherwise).
   `*/*`, with `HEAD` or as an embedded subresource it answers `409`
   (`code: burn_read_not_explicit`) and stays intact.
 
+## Files
+
+Files are optional. Without object storage on the server, each `/files` operation answers
+`503`. A file uses the same `privacy` levels, edit codes and ownership rules as a note. A file
+shares the slug namespace with notes and links. The server keeps each file encrypted.
+
+- `POST /files` — upload one file as `multipart/form-data`, not JSON. Optional text fields:
+  `ttl` (lifetime in seconds from the upload; omitted means no expiry), `privacy`,
+  `burn_after_download` (`true` or `false`), `slug` (one path segment) and `edit_code`.
+  Send these fields before the `file` part: the server ignores fields after `file`. The
+  `filename` of the part becomes the file name (1–255 bytes). The server streams the file to
+  storage, and `--max-file-size` limits its size. Responds `201` with the file description,
+  the one-time `edit_code` and `Location: /{id}`. Errors: `400` for a form without a `file`
+  part or a field that is not valid, `409` when the slug is taken, `413` above the size limit,
+  `422` for an invalid slug, name or privacy level.
+- `GET /files/{id}` — the file description as JSON: `id`, `url`, `name`, `size`, `privacy`,
+  `downloads`, `burn_after_download`, `created_at` and `expires_at` (absent without expiry).
+  It does not download the content and does not count a download. `401` when the file's
+  `privacy` requires a credential, `404` for a wrong id, `410` for an expired file.
+- `GET /files/{id}/download` — the content as `application/octet-stream` with
+  `Content-Disposition: attachment` and `Content-Length`. Each download increments
+  `downloads`. A `burn_after_download` file is deleted by its first deliberate download: send
+  `Accept: application/octet-stream`. Without it, the server answers `409`
+  (`code: burn_read_not_explicit`) and the file stays. `GET /{id}` also downloads the file.
+  When the transfer stops early, the client gets fewer bytes than `Content-Length`; discard
+  that data.
+- `PUT /files/{id}` — change the access rules. JSON body with optional `ttl` (seconds from
+  this change; `null` removes the expiry, `0` expires now), `privacy` and
+  `burn_after_download`. An omitted field keeps its value. The content, name and owner do not
+  change. Send the edit code only in the `X-Edit-Code` header, or omit it as the owner; an
+  `edit_code` field in the body gets `400`. Responds `200` with the file description.
+- `DELETE /files/{id}` — delete the file and its content. Send `X-Edit-Code`, or omit it as
+  the owner. The server ignores an `edit_code` query parameter. Responds `204`.
+
+`PUT` and `DELETE` use the same `401`/`403`/`429` rules as links. Upload a file with curl.
+curl sends the parts in the order of the `-F` options, so put `-F file=@…` last:
+
+```sh
+curl --fail-with-body -H "Authorization: Bearer $PADMARK_TOKEN" \
+  -F ttl=86400 -F privacy=authenticated -F file=@report.pdf "$PADMARK_URL/files"
+```
+
+Download it with the name from `Content-Disposition`:
+
+```sh
+curl --fail -OJ -H "Accept: application/octet-stream" "$PADMARK_URL/files/$FILE_ID/download"
+```
+
 ## Authentication
 
 Access depends on each note/link's `privacy`: `public` permits anyone, `authenticated` permits
@@ -148,7 +196,8 @@ curl --fail --silent --show-error "$PADMARK_URL/healthz"
 ```
 
 Do not probe a note or follow a short URL just to test connectivity: those requests can increment
-views or consume burn content. Authorization is enforced by the server, not by this document.
+views or consume burn content. Do not download a file to test connectivity: a download
+increments `downloads` and can delete a burn-after-download file. Authorization is enforced by the server, not by this document.
 
 ## Health
 

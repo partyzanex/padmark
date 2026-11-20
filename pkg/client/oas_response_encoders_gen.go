@@ -3,6 +3,7 @@
 package client
 
 import (
+	"io"
 	"net/http"
 
 	"github.com/go-faster/errors"
@@ -94,6 +95,163 @@ func encodeCreateAPITokenResponse(response CreateAPITokenRes, w http.ResponseWri
 		return nil
 
 	case *CreateAPITokenServiceUnavailable:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(503)
+		span.SetStatus(codes.Error, http.StatusText(503))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	default:
+		return errors.Errorf("unexpected response type: %T", response)
+	}
+}
+
+func encodeCreateFileResponse(response CreateFileRes, w http.ResponseWriter, span trace.Span) error {
+	switch response := response.(type) {
+	case *CreateFileResponseHeaders:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.Header().Set("Access-Control-Expose-Headers", "Location")
+		// Encoding response headers.
+		{
+			h := uri.NewHeaderEncoder(w.Header())
+			// Encode "Location" header.
+			{
+				cfg := uri.HeaderParameterEncodingConfig{
+					Name:    "Location",
+					Explode: false,
+				}
+				if err := h.EncodeParam(cfg, func(e uri.Encoder) error {
+					if val, ok := response.Location.Get(); ok {
+						return e.EncodeValue(conv.StringToString(val))
+					}
+					return nil
+				}); err != nil {
+					return errors.Wrap(err, "encode Location header")
+				}
+			}
+		}
+		w.WriteHeader(201)
+		span.SetStatus(codes.Ok, http.StatusText(201))
+
+		e := new(jx.Encoder)
+		response.Response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	case *CreateFileBadRequest:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(400)
+		span.SetStatus(codes.Error, http.StatusText(400))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	case *CreateFileUnauthorized:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(401)
+		span.SetStatus(codes.Error, http.StatusText(401))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	case *CreateFileForbidden:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(403)
+		span.SetStatus(codes.Error, http.StatusText(403))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	case *CreateFileConflict:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(409)
+		span.SetStatus(codes.Error, http.StatusText(409))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	case *CreateFileRequestEntityTooLarge:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(413)
+		span.SetStatus(codes.Error, http.StatusText(413))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	case *CreateFileUnprocessableEntity:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(422)
+		span.SetStatus(codes.Error, http.StatusText(422))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	case *CreateFileTooManyRequests:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(429)
+		span.SetStatus(codes.Error, http.StatusText(429))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	case *CreateFileInternalServerError:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(500)
+		span.SetStatus(codes.Error, http.StatusText(500))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	case *CreateFileServiceUnavailable:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(503)
 		span.SetStatus(codes.Error, http.StatusText(503))
@@ -608,6 +766,97 @@ func encodeCreateNoteResponse(response CreateNoteRes, w http.ResponseWriter, spa
 	}
 }
 
+func encodeDeleteFileResponse(response DeleteFileRes, w http.ResponseWriter, span trace.Span) error {
+	switch response := response.(type) {
+	case *DeleteFileNoContent:
+		w.WriteHeader(204)
+		span.SetStatus(codes.Ok, http.StatusText(204))
+
+		return nil
+
+	case *DeleteFileUnauthorized:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(401)
+		span.SetStatus(codes.Error, http.StatusText(401))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	case *DeleteFileForbidden:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(403)
+		span.SetStatus(codes.Error, http.StatusText(403))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	case *DeleteFileNotFound:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(404)
+		span.SetStatus(codes.Error, http.StatusText(404))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	case *DeleteFileTooManyRequests:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(429)
+		span.SetStatus(codes.Error, http.StatusText(429))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	case *DeleteFileInternalServerError:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(500)
+		span.SetStatus(codes.Error, http.StatusText(500))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	case *DeleteFileServiceUnavailable:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(503)
+		span.SetStatus(codes.Error, http.StatusText(503))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	default:
+		return errors.Errorf("unexpected response type: %T", response)
+	}
+}
+
 func encodeDeleteLinkResponse(response DeleteLinkRes, w http.ResponseWriter, span trace.Span) error {
 	switch response := response.(type) {
 	case *DeleteLinkNoContent:
@@ -759,6 +1008,226 @@ func encodeDeleteNoteResponse(response DeleteNoteRes, w http.ResponseWriter, spa
 		return nil
 
 	case *DeleteNoteServiceUnavailable:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(503)
+		span.SetStatus(codes.Error, http.StatusText(503))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	default:
+		return errors.Errorf("unexpected response type: %T", response)
+	}
+}
+
+func encodeGetFileResponse(response GetFileRes, w http.ResponseWriter, span trace.Span) error {
+	switch response := response.(type) {
+	case *FileInfo:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(200)
+		span.SetStatus(codes.Ok, http.StatusText(200))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	case *GetFileUnauthorized:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(401)
+		span.SetStatus(codes.Error, http.StatusText(401))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	case *GetFileNotFound:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(404)
+		span.SetStatus(codes.Error, http.StatusText(404))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	case *GetFileGone:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(410)
+		span.SetStatus(codes.Error, http.StatusText(410))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	case *GetFileInternalServerError:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(500)
+		span.SetStatus(codes.Error, http.StatusText(500))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	case *GetFileServiceUnavailable:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(503)
+		span.SetStatus(codes.Error, http.StatusText(503))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	default:
+		return errors.Errorf("unexpected response type: %T", response)
+	}
+}
+
+func encodeGetFileContentResponse(response GetFileContentRes, w http.ResponseWriter, span trace.Span) error {
+	switch response := response.(type) {
+	case *GetFileContentOKHeaders:
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Access-Control-Expose-Headers", "Content-Disposition")
+		// Encoding response headers.
+		{
+			h := uri.NewHeaderEncoder(w.Header())
+			// Encode "Content-Disposition" header.
+			{
+				cfg := uri.HeaderParameterEncodingConfig{
+					Name:    "Content-Disposition",
+					Explode: false,
+				}
+				if err := h.EncodeParam(cfg, func(e uri.Encoder) error {
+					if val, ok := response.ContentDisposition.Get(); ok {
+						return e.EncodeValue(conv.StringToString(val))
+					}
+					return nil
+				}); err != nil {
+					return errors.Wrap(err, "encode Content-Disposition header")
+				}
+			}
+			// Encode "Content-Length" header.
+			{
+				cfg := uri.HeaderParameterEncodingConfig{
+					Name:    "Content-Length",
+					Explode: false,
+				}
+				if err := h.EncodeParam(cfg, func(e uri.Encoder) error {
+					if val, ok := response.ContentLength.Get(); ok {
+						return e.EncodeValue(conv.Int64ToString(val))
+					}
+					return nil
+				}); err != nil {
+					return errors.Wrap(err, "encode Content-Length header")
+				}
+			}
+		}
+		w.WriteHeader(200)
+		span.SetStatus(codes.Ok, http.StatusText(200))
+
+		writer := w
+		if closer, ok := response.Response.Data.(io.Closer); ok {
+			defer closer.Close()
+		}
+		if _, err := io.Copy(writer, response.Response); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	case *GetFileContentUnauthorized:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(401)
+		span.SetStatus(codes.Error, http.StatusText(401))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	case *GetFileContentNotFound:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(404)
+		span.SetStatus(codes.Error, http.StatusText(404))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	case *GetFileContentConflict:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(409)
+		span.SetStatus(codes.Error, http.StatusText(409))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	case *GetFileContentGone:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(410)
+		span.SetStatus(codes.Error, http.StatusText(410))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	case *GetFileContentInternalServerError:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(500)
+		span.SetStatus(codes.Error, http.StatusText(500))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	case *GetFileContentServiceUnavailable:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(503)
 		span.SetStatus(codes.Error, http.StatusText(503))
@@ -975,6 +1444,143 @@ func encodeReadyzResponse(response ReadyzRes, w http.ResponseWriter, span trace.
 		return nil
 
 	case *ErrorResponse:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(503)
+		span.SetStatus(codes.Error, http.StatusText(503))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	default:
+		return errors.Errorf("unexpected response type: %T", response)
+	}
+}
+
+func encodeUpdateFileResponse(response UpdateFileRes, w http.ResponseWriter, span trace.Span) error {
+	switch response := response.(type) {
+	case *FileInfo:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(200)
+		span.SetStatus(codes.Ok, http.StatusText(200))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	case *UpdateFileBadRequest:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(400)
+		span.SetStatus(codes.Error, http.StatusText(400))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	case *UpdateFileUnauthorized:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(401)
+		span.SetStatus(codes.Error, http.StatusText(401))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	case *UpdateFileForbidden:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(403)
+		span.SetStatus(codes.Error, http.StatusText(403))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	case *UpdateFileNotFound:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(404)
+		span.SetStatus(codes.Error, http.StatusText(404))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	case *UpdateFileRequestEntityTooLarge:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(413)
+		span.SetStatus(codes.Error, http.StatusText(413))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	case *UpdateFileUnprocessableEntity:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(422)
+		span.SetStatus(codes.Error, http.StatusText(422))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	case *UpdateFileTooManyRequests:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(429)
+		span.SetStatus(codes.Error, http.StatusText(429))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	case *UpdateFileInternalServerError:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(500)
+		span.SetStatus(codes.Error, http.StatusText(500))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	case *UpdateFileServiceUnavailable:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(503)
 		span.SetStatus(codes.Error, http.StatusText(503))

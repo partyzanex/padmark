@@ -3,10 +3,12 @@
 package ogenapi
 
 import (
+	"io"
 	"net/url"
 	"time"
 
 	"github.com/go-faster/errors"
+	ht "github.com/ogen-go/ogen/http"
 )
 
 // Ref: #/components/schemas/BulkCreateLinksRequest
@@ -304,6 +306,379 @@ func (*CreateAPITokenUnauthorized) createAPITokenRes() {}
 type CreateAPITokenUnprocessableEntity ErrorResponse
 
 func (*CreateAPITokenUnprocessableEntity) createAPITokenRes() {}
+
+type CreateFileBadRequest ErrorResponse
+
+func (*CreateFileBadRequest) createFileRes() {}
+
+type CreateFileConflict ErrorResponse
+
+func (*CreateFileConflict) createFileRes() {}
+
+type CreateFileForbidden ErrorResponse
+
+func (*CreateFileForbidden) createFileRes() {}
+
+type CreateFileInternalServerError ErrorResponse
+
+func (*CreateFileInternalServerError) createFileRes() {}
+
+type CreateFileRequestEntityTooLarge ErrorResponse
+
+func (*CreateFileRequestEntityTooLarge) createFileRes() {}
+
+// The upload form. Send the text fields before the `file` part: the server ignores
+// fields after `file`.
+// Ref: #/components/schemas/CreateFileRequest
+type CreateFileRequestMultipart struct {
+	// Lifetime of the file in seconds, counted from the upload. Omitted means the file
+	// does not expire.
+	TTL OptInt64 `json:"ttl"`
+	// Who may read and download the file. Omitted means `public`. See
+	// `CreateNoteRequest.privacy` for each value.
+	Privacy OptCreateFileRequestMultipartPrivacy `json:"privacy"`
+	// When `true`, the server deletes the file after the first deliberate download.
+	BurnAfterDownload OptBool `json:"burn_after_download"`
+	// Custom identifier: one path segment. The first segment rules of
+	// `CreateNoteRequest.slug` apply. Returns `409` if a note, link or file has the slug.
+	Slug OptString `json:"slug"`
+	// Optional custom edit code, with the rules of `CreateNoteRequest.edit_code`. Omit it
+	// to get a random 12-character code.
+	EditCode OptString `json:"edit_code"`
+	// The file content. Send it as the last part. The `filename` of the part becomes the
+	// file name (1–255 bytes).
+	File ht.MultipartFile `json:"file"`
+}
+
+// GetTTL returns the value of TTL.
+func (s *CreateFileRequestMultipart) GetTTL() OptInt64 {
+	return s.TTL
+}
+
+// GetPrivacy returns the value of Privacy.
+func (s *CreateFileRequestMultipart) GetPrivacy() OptCreateFileRequestMultipartPrivacy {
+	return s.Privacy
+}
+
+// GetBurnAfterDownload returns the value of BurnAfterDownload.
+func (s *CreateFileRequestMultipart) GetBurnAfterDownload() OptBool {
+	return s.BurnAfterDownload
+}
+
+// GetSlug returns the value of Slug.
+func (s *CreateFileRequestMultipart) GetSlug() OptString {
+	return s.Slug
+}
+
+// GetEditCode returns the value of EditCode.
+func (s *CreateFileRequestMultipart) GetEditCode() OptString {
+	return s.EditCode
+}
+
+// GetFile returns the value of File.
+func (s *CreateFileRequestMultipart) GetFile() ht.MultipartFile {
+	return s.File
+}
+
+// SetTTL sets the value of TTL.
+func (s *CreateFileRequestMultipart) SetTTL(val OptInt64) {
+	s.TTL = val
+}
+
+// SetPrivacy sets the value of Privacy.
+func (s *CreateFileRequestMultipart) SetPrivacy(val OptCreateFileRequestMultipartPrivacy) {
+	s.Privacy = val
+}
+
+// SetBurnAfterDownload sets the value of BurnAfterDownload.
+func (s *CreateFileRequestMultipart) SetBurnAfterDownload(val OptBool) {
+	s.BurnAfterDownload = val
+}
+
+// SetSlug sets the value of Slug.
+func (s *CreateFileRequestMultipart) SetSlug(val OptString) {
+	s.Slug = val
+}
+
+// SetEditCode sets the value of EditCode.
+func (s *CreateFileRequestMultipart) SetEditCode(val OptString) {
+	s.EditCode = val
+}
+
+// SetFile sets the value of File.
+func (s *CreateFileRequestMultipart) SetFile(val ht.MultipartFile) {
+	s.File = val
+}
+
+// Who may read and download the file. Omitted means `public`. See
+// `CreateNoteRequest.privacy` for each value.
+type CreateFileRequestMultipartPrivacy string
+
+const (
+	CreateFileRequestMultipartPrivacyPublic        CreateFileRequestMultipartPrivacy = "public"
+	CreateFileRequestMultipartPrivacyAuthenticated CreateFileRequestMultipartPrivacy = "authenticated"
+	CreateFileRequestMultipartPrivacyOwner         CreateFileRequestMultipartPrivacy = "owner"
+)
+
+// AllValues returns all CreateFileRequestMultipartPrivacy values.
+func (CreateFileRequestMultipartPrivacy) AllValues() []CreateFileRequestMultipartPrivacy {
+	return []CreateFileRequestMultipartPrivacy{
+		CreateFileRequestMultipartPrivacyPublic,
+		CreateFileRequestMultipartPrivacyAuthenticated,
+		CreateFileRequestMultipartPrivacyOwner,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s CreateFileRequestMultipartPrivacy) MarshalText() ([]byte, error) {
+	switch s {
+	case CreateFileRequestMultipartPrivacyPublic:
+		return []byte(s), nil
+	case CreateFileRequestMultipartPrivacyAuthenticated:
+		return []byte(s), nil
+	case CreateFileRequestMultipartPrivacyOwner:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *CreateFileRequestMultipartPrivacy) UnmarshalText(data []byte) error {
+	switch CreateFileRequestMultipartPrivacy(data) {
+	case CreateFileRequestMultipartPrivacyPublic:
+		*s = CreateFileRequestMultipartPrivacyPublic
+		return nil
+	case CreateFileRequestMultipartPrivacyAuthenticated:
+		*s = CreateFileRequestMultipartPrivacyAuthenticated
+		return nil
+	case CreateFileRequestMultipartPrivacyOwner:
+		*s = CreateFileRequestMultipartPrivacyOwner
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
+// Merged schema.
+// Ref: #/components/schemas/CreateFileResponse
+type CreateFileResponse struct {
+	// Unique slug of the file.
+	ID string `json:"id"`
+	// Absolute short URL of the file (`{base}/{id}`). The content is also available at
+	// `/files/{id}/download`.
+	URL url.URL `json:"url"`
+	// Original file name.
+	Name string `json:"name"`
+	// File size in bytes.
+	Size int64 `json:"size"`
+	// Who may read and download the file.
+	Privacy CreateFileResponsePrivacy `json:"privacy"`
+	// Number of downloads.
+	Downloads int `json:"downloads"`
+	// `true` when the server deletes the file after the first download.
+	BurnAfterDownload bool `json:"burn_after_download"`
+	// Time after which the file is not available. Absent for a file that does not expire.
+	ExpiresAt OptNilDateTime `json:"expires_at"`
+	// Upload time (UTC).
+	CreatedAt time.Time `json:"created_at"`
+	// One-time secret for `PUT` and `DELETE`. The server returns it only in this
+	// response. Keep it.
+	EditCode string `json:"edit_code"`
+}
+
+// GetID returns the value of ID.
+func (s *CreateFileResponse) GetID() string {
+	return s.ID
+}
+
+// GetURL returns the value of URL.
+func (s *CreateFileResponse) GetURL() url.URL {
+	return s.URL
+}
+
+// GetName returns the value of Name.
+func (s *CreateFileResponse) GetName() string {
+	return s.Name
+}
+
+// GetSize returns the value of Size.
+func (s *CreateFileResponse) GetSize() int64 {
+	return s.Size
+}
+
+// GetPrivacy returns the value of Privacy.
+func (s *CreateFileResponse) GetPrivacy() CreateFileResponsePrivacy {
+	return s.Privacy
+}
+
+// GetDownloads returns the value of Downloads.
+func (s *CreateFileResponse) GetDownloads() int {
+	return s.Downloads
+}
+
+// GetBurnAfterDownload returns the value of BurnAfterDownload.
+func (s *CreateFileResponse) GetBurnAfterDownload() bool {
+	return s.BurnAfterDownload
+}
+
+// GetExpiresAt returns the value of ExpiresAt.
+func (s *CreateFileResponse) GetExpiresAt() OptNilDateTime {
+	return s.ExpiresAt
+}
+
+// GetCreatedAt returns the value of CreatedAt.
+func (s *CreateFileResponse) GetCreatedAt() time.Time {
+	return s.CreatedAt
+}
+
+// GetEditCode returns the value of EditCode.
+func (s *CreateFileResponse) GetEditCode() string {
+	return s.EditCode
+}
+
+// SetID sets the value of ID.
+func (s *CreateFileResponse) SetID(val string) {
+	s.ID = val
+}
+
+// SetURL sets the value of URL.
+func (s *CreateFileResponse) SetURL(val url.URL) {
+	s.URL = val
+}
+
+// SetName sets the value of Name.
+func (s *CreateFileResponse) SetName(val string) {
+	s.Name = val
+}
+
+// SetSize sets the value of Size.
+func (s *CreateFileResponse) SetSize(val int64) {
+	s.Size = val
+}
+
+// SetPrivacy sets the value of Privacy.
+func (s *CreateFileResponse) SetPrivacy(val CreateFileResponsePrivacy) {
+	s.Privacy = val
+}
+
+// SetDownloads sets the value of Downloads.
+func (s *CreateFileResponse) SetDownloads(val int) {
+	s.Downloads = val
+}
+
+// SetBurnAfterDownload sets the value of BurnAfterDownload.
+func (s *CreateFileResponse) SetBurnAfterDownload(val bool) {
+	s.BurnAfterDownload = val
+}
+
+// SetExpiresAt sets the value of ExpiresAt.
+func (s *CreateFileResponse) SetExpiresAt(val OptNilDateTime) {
+	s.ExpiresAt = val
+}
+
+// SetCreatedAt sets the value of CreatedAt.
+func (s *CreateFileResponse) SetCreatedAt(val time.Time) {
+	s.CreatedAt = val
+}
+
+// SetEditCode sets the value of EditCode.
+func (s *CreateFileResponse) SetEditCode(val string) {
+	s.EditCode = val
+}
+
+// CreateFileResponseHeaders wraps CreateFileResponse with response headers.
+type CreateFileResponseHeaders struct {
+	Location OptString
+	Response CreateFileResponse
+}
+
+// GetLocation returns the value of Location.
+func (s *CreateFileResponseHeaders) GetLocation() OptString {
+	return s.Location
+}
+
+// GetResponse returns the value of Response.
+func (s *CreateFileResponseHeaders) GetResponse() CreateFileResponse {
+	return s.Response
+}
+
+// SetLocation sets the value of Location.
+func (s *CreateFileResponseHeaders) SetLocation(val OptString) {
+	s.Location = val
+}
+
+// SetResponse sets the value of Response.
+func (s *CreateFileResponseHeaders) SetResponse(val CreateFileResponse) {
+	s.Response = val
+}
+
+func (*CreateFileResponseHeaders) createFileRes() {}
+
+// Who may read and download the file.
+type CreateFileResponsePrivacy string
+
+const (
+	CreateFileResponsePrivacyPublic        CreateFileResponsePrivacy = "public"
+	CreateFileResponsePrivacyAuthenticated CreateFileResponsePrivacy = "authenticated"
+	CreateFileResponsePrivacyOwner         CreateFileResponsePrivacy = "owner"
+)
+
+// AllValues returns all CreateFileResponsePrivacy values.
+func (CreateFileResponsePrivacy) AllValues() []CreateFileResponsePrivacy {
+	return []CreateFileResponsePrivacy{
+		CreateFileResponsePrivacyPublic,
+		CreateFileResponsePrivacyAuthenticated,
+		CreateFileResponsePrivacyOwner,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s CreateFileResponsePrivacy) MarshalText() ([]byte, error) {
+	switch s {
+	case CreateFileResponsePrivacyPublic:
+		return []byte(s), nil
+	case CreateFileResponsePrivacyAuthenticated:
+		return []byte(s), nil
+	case CreateFileResponsePrivacyOwner:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *CreateFileResponsePrivacy) UnmarshalText(data []byte) error {
+	switch CreateFileResponsePrivacy(data) {
+	case CreateFileResponsePrivacyPublic:
+		*s = CreateFileResponsePrivacyPublic
+		return nil
+	case CreateFileResponsePrivacyAuthenticated:
+		*s = CreateFileResponsePrivacyAuthenticated
+		return nil
+	case CreateFileResponsePrivacyOwner:
+		*s = CreateFileResponsePrivacyOwner
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
+type CreateFileServiceUnavailable ErrorResponse
+
+func (*CreateFileServiceUnavailable) createFileRes() {}
+
+type CreateFileTooManyRequests ErrorResponse
+
+func (*CreateFileTooManyRequests) createFileRes() {}
+
+type CreateFileUnauthorized ErrorResponse
+
+func (*CreateFileUnauthorized) createFileRes() {}
+
+type CreateFileUnprocessableEntity ErrorResponse
+
+func (*CreateFileUnprocessableEntity) createFileRes() {}
 
 type CreateInviteForbidden ErrorResponse
 
@@ -1344,6 +1719,35 @@ type CreateNoteUnsupportedMediaType ErrorResponse
 
 func (*CreateNoteUnsupportedMediaType) createNoteRes() {}
 
+type DeleteFileForbidden ErrorResponse
+
+func (*DeleteFileForbidden) deleteFileRes() {}
+
+type DeleteFileInternalServerError ErrorResponse
+
+func (*DeleteFileInternalServerError) deleteFileRes() {}
+
+// DeleteFileNoContent is response for DeleteFile operation.
+type DeleteFileNoContent struct{}
+
+func (*DeleteFileNoContent) deleteFileRes() {}
+
+type DeleteFileNotFound ErrorResponse
+
+func (*DeleteFileNotFound) deleteFileRes() {}
+
+type DeleteFileServiceUnavailable ErrorResponse
+
+func (*DeleteFileServiceUnavailable) deleteFileRes() {}
+
+type DeleteFileTooManyRequests ErrorResponse
+
+func (*DeleteFileTooManyRequests) deleteFileRes() {}
+
+type DeleteFileUnauthorized ErrorResponse
+
+func (*DeleteFileUnauthorized) deleteFileRes() {}
+
 type DeleteLinkForbidden ErrorResponse
 
 func (*DeleteLinkForbidden) deleteLinkRes() {}
@@ -1434,6 +1838,268 @@ func (s *ErrorResponse) SetCode(val OptString) {
 }
 
 func (*ErrorResponse) readyzRes() {}
+
+// Ref: #/components/schemas/FileInfo
+type FileInfo struct {
+	// Unique slug of the file.
+	ID string `json:"id"`
+	// Absolute short URL of the file (`{base}/{id}`). The content is also available at
+	// `/files/{id}/download`.
+	URL url.URL `json:"url"`
+	// Original file name.
+	Name string `json:"name"`
+	// File size in bytes.
+	Size int64 `json:"size"`
+	// Who may read and download the file.
+	Privacy FileInfoPrivacy `json:"privacy"`
+	// Number of downloads.
+	Downloads int `json:"downloads"`
+	// `true` when the server deletes the file after the first download.
+	BurnAfterDownload bool `json:"burn_after_download"`
+	// Time after which the file is not available. Absent for a file that does not expire.
+	ExpiresAt OptNilDateTime `json:"expires_at"`
+	// Upload time (UTC).
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// GetID returns the value of ID.
+func (s *FileInfo) GetID() string {
+	return s.ID
+}
+
+// GetURL returns the value of URL.
+func (s *FileInfo) GetURL() url.URL {
+	return s.URL
+}
+
+// GetName returns the value of Name.
+func (s *FileInfo) GetName() string {
+	return s.Name
+}
+
+// GetSize returns the value of Size.
+func (s *FileInfo) GetSize() int64 {
+	return s.Size
+}
+
+// GetPrivacy returns the value of Privacy.
+func (s *FileInfo) GetPrivacy() FileInfoPrivacy {
+	return s.Privacy
+}
+
+// GetDownloads returns the value of Downloads.
+func (s *FileInfo) GetDownloads() int {
+	return s.Downloads
+}
+
+// GetBurnAfterDownload returns the value of BurnAfterDownload.
+func (s *FileInfo) GetBurnAfterDownload() bool {
+	return s.BurnAfterDownload
+}
+
+// GetExpiresAt returns the value of ExpiresAt.
+func (s *FileInfo) GetExpiresAt() OptNilDateTime {
+	return s.ExpiresAt
+}
+
+// GetCreatedAt returns the value of CreatedAt.
+func (s *FileInfo) GetCreatedAt() time.Time {
+	return s.CreatedAt
+}
+
+// SetID sets the value of ID.
+func (s *FileInfo) SetID(val string) {
+	s.ID = val
+}
+
+// SetURL sets the value of URL.
+func (s *FileInfo) SetURL(val url.URL) {
+	s.URL = val
+}
+
+// SetName sets the value of Name.
+func (s *FileInfo) SetName(val string) {
+	s.Name = val
+}
+
+// SetSize sets the value of Size.
+func (s *FileInfo) SetSize(val int64) {
+	s.Size = val
+}
+
+// SetPrivacy sets the value of Privacy.
+func (s *FileInfo) SetPrivacy(val FileInfoPrivacy) {
+	s.Privacy = val
+}
+
+// SetDownloads sets the value of Downloads.
+func (s *FileInfo) SetDownloads(val int) {
+	s.Downloads = val
+}
+
+// SetBurnAfterDownload sets the value of BurnAfterDownload.
+func (s *FileInfo) SetBurnAfterDownload(val bool) {
+	s.BurnAfterDownload = val
+}
+
+// SetExpiresAt sets the value of ExpiresAt.
+func (s *FileInfo) SetExpiresAt(val OptNilDateTime) {
+	s.ExpiresAt = val
+}
+
+// SetCreatedAt sets the value of CreatedAt.
+func (s *FileInfo) SetCreatedAt(val time.Time) {
+	s.CreatedAt = val
+}
+
+func (*FileInfo) getFileRes()    {}
+func (*FileInfo) updateFileRes() {}
+
+// Who may read and download the file.
+type FileInfoPrivacy string
+
+const (
+	FileInfoPrivacyPublic        FileInfoPrivacy = "public"
+	FileInfoPrivacyAuthenticated FileInfoPrivacy = "authenticated"
+	FileInfoPrivacyOwner         FileInfoPrivacy = "owner"
+)
+
+// AllValues returns all FileInfoPrivacy values.
+func (FileInfoPrivacy) AllValues() []FileInfoPrivacy {
+	return []FileInfoPrivacy{
+		FileInfoPrivacyPublic,
+		FileInfoPrivacyAuthenticated,
+		FileInfoPrivacyOwner,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s FileInfoPrivacy) MarshalText() ([]byte, error) {
+	switch s {
+	case FileInfoPrivacyPublic:
+		return []byte(s), nil
+	case FileInfoPrivacyAuthenticated:
+		return []byte(s), nil
+	case FileInfoPrivacyOwner:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *FileInfoPrivacy) UnmarshalText(data []byte) error {
+	switch FileInfoPrivacy(data) {
+	case FileInfoPrivacyPublic:
+		*s = FileInfoPrivacyPublic
+		return nil
+	case FileInfoPrivacyAuthenticated:
+		*s = FileInfoPrivacyAuthenticated
+		return nil
+	case FileInfoPrivacyOwner:
+		*s = FileInfoPrivacyOwner
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
+type GetFileContentConflict ErrorResponse
+
+func (*GetFileContentConflict) getFileContentRes() {}
+
+type GetFileContentGone ErrorResponse
+
+func (*GetFileContentGone) getFileContentRes() {}
+
+type GetFileContentInternalServerError ErrorResponse
+
+func (*GetFileContentInternalServerError) getFileContentRes() {}
+
+type GetFileContentNotFound ErrorResponse
+
+func (*GetFileContentNotFound) getFileContentRes() {}
+
+type GetFileContentOK struct {
+	Data io.Reader
+}
+
+// Read reads data from the Data reader.
+//
+// Kept to satisfy the io.Reader interface.
+func (s GetFileContentOK) Read(p []byte) (n int, err error) {
+	if s.Data == nil {
+		return 0, io.EOF
+	}
+	return s.Data.Read(p)
+}
+
+// GetFileContentOKHeaders wraps GetFileContentOK with response headers.
+type GetFileContentOKHeaders struct {
+	ContentDisposition OptString
+	ContentLength      OptInt64
+	Response           GetFileContentOK
+}
+
+// GetContentDisposition returns the value of ContentDisposition.
+func (s *GetFileContentOKHeaders) GetContentDisposition() OptString {
+	return s.ContentDisposition
+}
+
+// GetContentLength returns the value of ContentLength.
+func (s *GetFileContentOKHeaders) GetContentLength() OptInt64 {
+	return s.ContentLength
+}
+
+// GetResponse returns the value of Response.
+func (s *GetFileContentOKHeaders) GetResponse() GetFileContentOK {
+	return s.Response
+}
+
+// SetContentDisposition sets the value of ContentDisposition.
+func (s *GetFileContentOKHeaders) SetContentDisposition(val OptString) {
+	s.ContentDisposition = val
+}
+
+// SetContentLength sets the value of ContentLength.
+func (s *GetFileContentOKHeaders) SetContentLength(val OptInt64) {
+	s.ContentLength = val
+}
+
+// SetResponse sets the value of Response.
+func (s *GetFileContentOKHeaders) SetResponse(val GetFileContentOK) {
+	s.Response = val
+}
+
+func (*GetFileContentOKHeaders) getFileContentRes() {}
+
+type GetFileContentServiceUnavailable ErrorResponse
+
+func (*GetFileContentServiceUnavailable) getFileContentRes() {}
+
+type GetFileContentUnauthorized ErrorResponse
+
+func (*GetFileContentUnauthorized) getFileContentRes() {}
+
+type GetFileGone ErrorResponse
+
+func (*GetFileGone) getFileRes() {}
+
+type GetFileInternalServerError ErrorResponse
+
+func (*GetFileInternalServerError) getFileRes() {}
+
+type GetFileNotFound ErrorResponse
+
+func (*GetFileNotFound) getFileRes() {}
+
+type GetFileServiceUnavailable ErrorResponse
+
+func (*GetFileServiceUnavailable) getFileRes() {}
+
+type GetFileUnauthorized ErrorResponse
+
+func (*GetFileUnauthorized) getFileRes() {}
 
 type GetLinkGone ErrorResponse
 
@@ -2025,6 +2691,52 @@ func (o OptCreateAPITokenRequest) Get() (v CreateAPITokenRequest, ok bool) {
 
 // Or returns value if set, or given parameter if does not.
 func (o OptCreateAPITokenRequest) Or(d CreateAPITokenRequest) CreateAPITokenRequest {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptCreateFileRequestMultipartPrivacy returns new OptCreateFileRequestMultipartPrivacy with value set to v.
+func NewOptCreateFileRequestMultipartPrivacy(v CreateFileRequestMultipartPrivacy) OptCreateFileRequestMultipartPrivacy {
+	return OptCreateFileRequestMultipartPrivacy{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptCreateFileRequestMultipartPrivacy is optional CreateFileRequestMultipartPrivacy.
+type OptCreateFileRequestMultipartPrivacy struct {
+	Value CreateFileRequestMultipartPrivacy
+	Set   bool
+}
+
+// IsSet returns true if OptCreateFileRequestMultipartPrivacy was set.
+func (o OptCreateFileRequestMultipartPrivacy) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptCreateFileRequestMultipartPrivacy) Reset() {
+	var v CreateFileRequestMultipartPrivacy
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptCreateFileRequestMultipartPrivacy) SetTo(v CreateFileRequestMultipartPrivacy) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptCreateFileRequestMultipartPrivacy) Get() (v CreateFileRequestMultipartPrivacy, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptCreateFileRequestMultipartPrivacy) Or(d CreateFileRequestMultipartPrivacy) CreateFileRequestMultipartPrivacy {
 	if v, ok := o.Get(); ok {
 		return v
 	}
@@ -2772,6 +3484,52 @@ func (o OptString) Or(d string) string {
 	return d
 }
 
+// NewOptUpdateFileRequestPrivacy returns new OptUpdateFileRequestPrivacy with value set to v.
+func NewOptUpdateFileRequestPrivacy(v UpdateFileRequestPrivacy) OptUpdateFileRequestPrivacy {
+	return OptUpdateFileRequestPrivacy{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptUpdateFileRequestPrivacy is optional UpdateFileRequestPrivacy.
+type OptUpdateFileRequestPrivacy struct {
+	Value UpdateFileRequestPrivacy
+	Set   bool
+}
+
+// IsSet returns true if OptUpdateFileRequestPrivacy was set.
+func (o OptUpdateFileRequestPrivacy) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptUpdateFileRequestPrivacy) Reset() {
+	var v UpdateFileRequestPrivacy
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptUpdateFileRequestPrivacy) SetTo(v UpdateFileRequestPrivacy) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptUpdateFileRequestPrivacy) Get() (v UpdateFileRequestPrivacy, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptUpdateFileRequestPrivacy) Or(d UpdateFileRequestPrivacy) UpdateFileRequestPrivacy {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
 // NewOptUpdateLinkRequestPrivacy returns new OptUpdateLinkRequestPrivacy with value set to v.
 func NewOptUpdateLinkRequestPrivacy(v UpdateLinkRequestPrivacy) OptUpdateLinkRequestPrivacy {
 	return OptUpdateLinkRequestPrivacy{
@@ -2944,6 +3702,135 @@ func (s *StepUpRequest) SetPassword(val OptString) {
 func (s *StepUpRequest) SetTotpCode(val OptString) {
 	s.TotpCode = val
 }
+
+type UpdateFileBadRequest ErrorResponse
+
+func (*UpdateFileBadRequest) updateFileRes() {}
+
+type UpdateFileForbidden ErrorResponse
+
+func (*UpdateFileForbidden) updateFileRes() {}
+
+type UpdateFileInternalServerError ErrorResponse
+
+func (*UpdateFileInternalServerError) updateFileRes() {}
+
+type UpdateFileNotFound ErrorResponse
+
+func (*UpdateFileNotFound) updateFileRes() {}
+
+// The changes to the access rules. An omitted field keeps its current value.
+// Ref: #/components/schemas/UpdateFileRequest
+type UpdateFileRequest struct {
+	// Seconds until expiry, counted from this change. Omitted keeps the current expiry,
+	// `null` removes it, and `0` makes the file expire now.
+	TTL OptNilInt64 `json:"ttl"`
+	// New privacy level. `owner` requires a file with an owner, otherwise the server
+	// answers `422`.
+	Privacy OptUpdateFileRequestPrivacy `json:"privacy"`
+	// New burn-after-download rule.
+	BurnAfterDownload OptBool `json:"burn_after_download"`
+}
+
+// GetTTL returns the value of TTL.
+func (s *UpdateFileRequest) GetTTL() OptNilInt64 {
+	return s.TTL
+}
+
+// GetPrivacy returns the value of Privacy.
+func (s *UpdateFileRequest) GetPrivacy() OptUpdateFileRequestPrivacy {
+	return s.Privacy
+}
+
+// GetBurnAfterDownload returns the value of BurnAfterDownload.
+func (s *UpdateFileRequest) GetBurnAfterDownload() OptBool {
+	return s.BurnAfterDownload
+}
+
+// SetTTL sets the value of TTL.
+func (s *UpdateFileRequest) SetTTL(val OptNilInt64) {
+	s.TTL = val
+}
+
+// SetPrivacy sets the value of Privacy.
+func (s *UpdateFileRequest) SetPrivacy(val OptUpdateFileRequestPrivacy) {
+	s.Privacy = val
+}
+
+// SetBurnAfterDownload sets the value of BurnAfterDownload.
+func (s *UpdateFileRequest) SetBurnAfterDownload(val OptBool) {
+	s.BurnAfterDownload = val
+}
+
+type UpdateFileRequestEntityTooLarge ErrorResponse
+
+func (*UpdateFileRequestEntityTooLarge) updateFileRes() {}
+
+// New privacy level. `owner` requires a file with an owner, otherwise the server
+// answers `422`.
+type UpdateFileRequestPrivacy string
+
+const (
+	UpdateFileRequestPrivacyPublic        UpdateFileRequestPrivacy = "public"
+	UpdateFileRequestPrivacyAuthenticated UpdateFileRequestPrivacy = "authenticated"
+	UpdateFileRequestPrivacyOwner         UpdateFileRequestPrivacy = "owner"
+)
+
+// AllValues returns all UpdateFileRequestPrivacy values.
+func (UpdateFileRequestPrivacy) AllValues() []UpdateFileRequestPrivacy {
+	return []UpdateFileRequestPrivacy{
+		UpdateFileRequestPrivacyPublic,
+		UpdateFileRequestPrivacyAuthenticated,
+		UpdateFileRequestPrivacyOwner,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s UpdateFileRequestPrivacy) MarshalText() ([]byte, error) {
+	switch s {
+	case UpdateFileRequestPrivacyPublic:
+		return []byte(s), nil
+	case UpdateFileRequestPrivacyAuthenticated:
+		return []byte(s), nil
+	case UpdateFileRequestPrivacyOwner:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *UpdateFileRequestPrivacy) UnmarshalText(data []byte) error {
+	switch UpdateFileRequestPrivacy(data) {
+	case UpdateFileRequestPrivacyPublic:
+		*s = UpdateFileRequestPrivacyPublic
+		return nil
+	case UpdateFileRequestPrivacyAuthenticated:
+		*s = UpdateFileRequestPrivacyAuthenticated
+		return nil
+	case UpdateFileRequestPrivacyOwner:
+		*s = UpdateFileRequestPrivacyOwner
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
+type UpdateFileServiceUnavailable ErrorResponse
+
+func (*UpdateFileServiceUnavailable) updateFileRes() {}
+
+type UpdateFileTooManyRequests ErrorResponse
+
+func (*UpdateFileTooManyRequests) updateFileRes() {}
+
+type UpdateFileUnauthorized ErrorResponse
+
+func (*UpdateFileUnauthorized) updateFileRes() {}
+
+type UpdateFileUnprocessableEntity ErrorResponse
+
+func (*UpdateFileUnprocessableEntity) updateFileRes() {}
 
 type UpdateLinkBadRequest ErrorResponse
 

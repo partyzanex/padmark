@@ -26,6 +26,19 @@ type Handler interface {
 	//
 	// POST /api/tokens
 	CreateAPIToken(ctx context.Context, req OptCreateAPITokenRequest) (CreateAPITokenRes, error)
+	// CreateFile implements createFile operation.
+	//
+	// Uploads one file and returns its description with the one-time `edit_code`.
+	// Send `multipart/form-data`. Put the optional text fields `ttl`, `privacy`,
+	// `burn_after_download`, `slug` and `edit_code` first. Put the `file` part last.
+	// The server reads only the fields before `file` and ignores fields after it.
+	// The server streams the file to object storage and does not keep it in memory.
+	// Each text field can have a maximum of 1024 bytes. If `slug` is omitted, the server
+	// generates a 10-character random slug. The file name comes from the `filename` of the
+	// `file` part.
+	//
+	// POST /files
+	CreateFile(ctx context.Context, req *CreateFileRequestMultipart) (CreateFileRes, error)
 	// CreateInvite implements createInvite operation.
 	//
 	// The JSON counterpart of the admin panel's `POST /admin/invite`. Requires an **admin**
@@ -65,6 +78,14 @@ type Handler interface {
 	//
 	// POST /notes
 	CreateNote(ctx context.Context, req *CreateNoteRequest) (CreateNoteRes, error)
+	// DeleteFile implements deleteFile operation.
+	//
+	// Deletes the file record and its stored content. Send the edit code in the
+	// `X-Edit-Code` header. The account that uploaded the file can omit the edit code.
+	// The server ignores an `edit_code` query parameter.
+	//
+	// DELETE /files/{id}
+	DeleteFile(ctx context.Context, params DeleteFileParams) (DeleteFileRes, error)
 	// DeleteLink implements deleteLink operation.
 	//
 	// Permanently deletes the link. The edit code must be supplied as the `X-Edit-Code`
@@ -90,6 +111,27 @@ type Handler interface {
 	//
 	// DELETE /notes/{id}
 	DeleteNote(ctx context.Context, params DeleteNoteParams) (DeleteNoteRes, error)
+	// GetFile implements getFile operation.
+	//
+	// Returns the file description as JSON. This read does not download the content, does not
+	// increment `downloads` and does not consume a `burn_after_download` file.
+	//
+	// GET /files/{id}
+	GetFile(ctx context.Context, params GetFileParams) (GetFileRes, error)
+	// GetFileContent implements getFileContent operation.
+	//
+	// Sends the file content as `application/octet-stream` with
+	// `Content-Disposition: attachment`. Each download increments `downloads`. `HEAD` sends
+	// only the headers and does not count a download.
+	// A `burn_after_download` file is deleted after this download. Send
+	// `Accept: application/octet-stream` to show that the download is deliberate. Without a
+	// deliberate `Accept`, the server answers `409` with code `burn_read_not_explicit` and
+	// the file stays.
+	// If the transfer stops after the server sends the headers, the client gets fewer bytes
+	// than `Content-Length`. Discard such a file.
+	//
+	// GET /files/{id}/download
+	GetFileContent(ctx context.Context, params GetFileContentParams) (GetFileContentRes, error)
 	// GetLink implements getLink operation.
 	//
 	// Returns the link as JSON, including its decrypted `target_url`. This is a metadata-only
@@ -129,6 +171,16 @@ type Handler interface {
 	//
 	// GET /readyz
 	Readyz(ctx context.Context) (ReadyzRes, error)
+	// UpdateFile implements updateFile operation.
+	//
+	// Changes the expiry, the privacy level and the burn-after-download rule of a file.
+	// It does not change the content, the name, the slug, the owner or `downloads`.
+	// An omitted field keeps its current value. Send the edit code in the `X-Edit-Code`
+	// header. The account that uploaded the file can omit the edit code. Returns the changed
+	// file description. The edit code is not returned again.
+	//
+	// PUT /files/{id}
+	UpdateFile(ctx context.Context, req *UpdateFileRequest, params UpdateFileParams) (UpdateFileRes, error)
 	// UpdateLink implements updateLink operation.
 	//
 	// Replaces the destination URL, preserving the slug, edit code, click count, owner,

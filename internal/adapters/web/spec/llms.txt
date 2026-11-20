@@ -1,6 +1,6 @@
 # Padmark
 
-> Self-hosted Markdown notes, short links and account-based access. API release {{VERSION}}.
+> Self-hosted Markdown notes, short links, files and account-based access. API release {{VERSION}}.
 
 The API base is the origin serving this file (scheme, host and optional port). Resolve the
 root-relative links below against that origin. If copying this index elsewhere, record that
@@ -10,6 +10,10 @@ use the target instance's documents together when checking API compatibility.
 Reading a note increments `views` and can start or complete burn-after-reading. Following
 `/{id}` can consume a burn-after-click link. Use documentation or `/healthz` for discovery;
 read content or follow redirects only when the user intends it.
+
+Downloading a file increments `downloads` and can delete a burn-after-download file. Use
+`GET /files/{id}` to read the file description without a download. Files are optional on each
+server: `503` on `/files` means that the server has no object storage.
 
 An issued `pmk_…` value is an envelope: decode its base64url JSON, use `url` as the API base,
 and send only its `token` field as `Authorization: Bearer <key>`. Do not send the envelope.
@@ -23,6 +27,12 @@ these rules. Save a returned edit code at creation: it is shown only once.
 
 - [API reference](/api/reference.md): Notes, links, authentication, TTL and burn behavior, errors, and a safe discovery example.
 - [OpenAPI contract](/api/openapi.yaml): Request and response schemas for this release; redirect and headless setup workflows are covered in the reference.
+
+## Files
+
+- [Upload a file](/api/reference.md#files): `POST /files` as `multipart/form-data`. Send the text fields before the `file` part. A file above the server limit gets `413`.
+- [Download a file](/api/reference.md#files): `GET /files/{id}/download` with `Accept: application/octet-stream`. The download can delete a burn-after-download file.
+- [Change or delete a file](/api/reference.md#files): `PUT /files/{id}` changes TTL, privacy and the burn rule; `DELETE /files/{id}` deletes the file. Send the edit code in `X-Edit-Code`.
 
 ## Optional
 
