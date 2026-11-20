@@ -3,6 +3,97 @@
 All notable changes to this project. The format is inspired by
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## v0.5.0 — unreleased
+
+v0.5.0 follows **v0.4.0**.
+
+### Added
+
+- File publishing in S3-compatible storage (S3: Simple Storage Service): `POST /files`
+  (multipart upload), `GET /{id}` and `GET /files/{id}/download` (attachment),
+  `GET /files/{id}` (metadata) and `DELETE /files/{id}` (`X-Edit-Code` or the owner). Files
+  have the same slug namespace, privacy levels, TTL, edit codes and burn rule
+  (`burn_after_download`) as notes and links.
+- The server encrypts each file with its own key (AES-256-GCM in 64 KiB chunks); the database
+  keeps the key and the file name sealed with the installation keyring. Key rotation includes
+  files.
+- New settings: `--s3-endpoint`, `--s3-bucket`, `--s3-region`, `--s3-path-style`,
+  `--max-file-size`, and the environment-only `PADMARK_S3_ACCESS_KEY` / `PADMARK_S3_SECRET_KEY`.
+- `PUT /files/{id}` changes the expiry, the privacy and the `burn_after_download` rule of a
+  file. `ttl` counts from the change, `"ttl": null` removes the expiry, and an omitted field
+  keeps its value. The content, the name and the owner do not change. The edit code comes only
+  from `X-Edit-Code`; a signed-in owner can omit it. The edit-code lockout applies.
+- `GET /{id}` of a file gives a browser (`Accept: text/html`) a file page with a **Download**
+  button. The page does not count a download and does not delete a `burn_after_download` file.
+  Other clients get the content, also `curl` with `Accept: */*`.
+- Web pages for files: the upload page `/files` (drop area, progress bar, **Cancel upload**),
+  the success page for a file and the edit page `/files/{id}/edit`. The header shows a **File**
+  tab only when files are on. The pages show each file error, for example a file that is too
+  large or a storage failure.
+- `openapi.yaml` describes the `/files` operations. `/llms.txt` and `/api/reference.md` have a
+  files part. A streaming handler serves `/files`, not the generated ogen server
+  ([ADR-0002](docs/adr/0002-files-outside-ogen.md)).
+- `pkg/client` adds `UploadFile` and `DownloadFile`. They stream the file and do not keep it in
+  memory. The generated `CreateFile` sends the form fields after the file, so the server does
+  not see them, and `GetFileContent` reads the full body into memory. Do not use these two.
+  The other client changes only add names.
+- CLI (command-line interface) commands `upload`, `download`, `file-info`, `update-file` and
+  `delete-file`. `upload -` reads stdin and needs `--name`. `download` accepts an ID or a URL,
+  writes to a temporary file, renames it after a full download, and replaces a file only with
+  `--force`. `-o -` writes to stdout. For `upload` and `download`, `--timeout` limits only the
+  wait for the response headers.
+- MCP (Model Context Protocol) tools `upload_file`, `get_file`, `update_file` and
+  `delete_file`. `upload_file` reads only regular files under `--upload-root` /
+  `PADMARK_MCP_UPLOAD_ROOT`; an empty value (the default) refuses all uploads. The session
+  vault keeps file edit codes as for notes and links.
+- File metrics on the `--metrics-addr` listener: `padmark_files_uploads_total`,
+  `padmark_files_downloads_total`, `padmark_files_deleted_total{reason}` (`user`, `burn`,
+  `expired`), the `padmark_files_upload_bytes` histogram and
+  `padmark_files_storage_errors_total{op}` (`put`, `stat`, `get`, `delete`).
+- A background sweep removes expired files and their objects every `--files-sweep-interval` /
+  `PADMARK_FILES_SWEEP_INTERVAL` (default `1h`; `0` turns it off). Each upload also removes
+  expired files. The shutdown manager stops the loop before the database closes.
+- Documentation: "Files setup" in the README (bucket policy, lifecycle rule for incomplete
+  multipart uploads, reverse proxy limits), commented `PADMARK_S3_*` lines in
+  `docker-compose.yml`, and the first architecture decision records (ADRs) in `docs/adr/`.
+
+### Changed
+
+- `files` is a reserved first slug segment. A note slug that starts with `files/` stops being
+  reachable.
+- The schema migration `20261118000001_files` adds the `files` table and rebuilds the SQLite
+  `slug_namespace` table and its triggers. Back up the database before the upgrade.
+- `--disable-api` also turns off the file API. The `GET`/`HEAD` pages `/files`,
+  `/files/{id}/edit` and `/files/{id}/download` and the file page at `/{id}` stay available;
+  upload, change and delete are off.
+- The footer text is "Markdown notes, short links & files" when files are on.
+
+### Security
+
+- `POST /files`, `PUT /files/{id}` and `DELETE /files/{id}` reject a request with a foreign
+  `Origin`, because a cross-site form can send a multipart body without a CORS (cross-origin
+  resource sharing) preflight.
+- The S3 client has a 10-second dial, a 10-second TLS (Transport Layer Security) handshake,
+  a 30-second wait for the response headers and 3 attempts. A storage server that does not
+  respond thus does not hold a request for about 10 minutes, as with the `minio-go` defaults.
+- Error texts of the S3 adapter replace the object key with `<object-key>`. Logs do not contain
+  file names, object keys or edit codes.
+- A download is an attachment of type `application/octet-stream` with
+  `X-Content-Type-Options: nosniff` and `Cache-Control: private, no-store`. The
+  `Content-Disposition` names cannot add a parameter or a header.
+- An S3 failure before the response starts gives `503`, not `500`. When an object delete
+  fails after the record is gone, the server logs a warning and increments
+  `padmark_files_storage_errors_total{op="delete"}`.
+- A plain `http://` S3 endpoint other than a loopback address gives a warning at startup.
+
+### Tests
+
+- `tests/files` runs the file life cycle through HTTP with SQLite and an S3 container, with a
+  server restart and a content key rotation. `tests/manager`, `tests/cli`, `tests/mcp` and the
+  `s3store` adapter tests also use `adobe/s3mock:3.12.0` and need Docker.
+- `tests/upgrade` upgrades real v0.4.0 SQLite and PostgreSQL dumps to v0.5.0. The notes and
+  links stay readable, and the record counts do not change.
+
 ## v0.4.0 — unreleased
 
 v0.4.0 follows **v0.3.3** (`b32ab62`); summaries of the previously tagged v0.2.x/v0.3.x

@@ -33,8 +33,8 @@ and domain, rather than the domain depending on an HTTP server, database or cryp
 | Layer | Responsibility | Dependencies |
 |---|---|---|
 | Domain | Entities, validation, ownership and sentinel errors | stdlib and `github.com/google/uuid` for account IDs |
-| Usecases | Notes, links, accounts, content-key migration/rotation | Domain and consumer-defined interfaces |
-| Infrastructure | Storage, encryption, rendering, caching, server composition | Implements usecase interfaces |
+| Usecases | Notes, links, files, accounts, content-key migration/rotation | Domain and consumer-defined interfaces |
+| Infrastructure | Storage (SQL and S3, the Simple Storage Service protocol), encryption, rendering, caching, metrics, server composition | Implements usecase interfaces |
 | Adapters | HTTP, CLI and MCP protocols | Their own interfaces to usecases |
 
 Interfaces belong beside their consumers. Constructors return concrete types and take
@@ -53,33 +53,36 @@ padmark/
 │   ├── padmark-cli/             # HTTP client CLI
 │   └── padmark-mcp/             # stdio MCP proxy
 ├── internal/
-│   ├── domain/                 # Notes, links, accounts, errors and token envelopes
+│   ├── domain/                 # Notes, links, files, accounts, errors and token envelopes
 │   ├── usecases/
 │   │   ├── notes/              # Note lifecycle, burn/read policy, rendering coordination
 │   │   ├── links/              # Short-link lifecycle and redirect policy
+│   │   ├── files/              # File upload, download, update, delete and expiry sweep
 │   │   ├── auth/               # Sessions, TOTP, onboarding, invites and API tokens
 │   │   └── contentkeys/        # Installation-key migration and rotation
 │   ├── infra/
 │   │   ├── server/             # CLI configuration, composition and listeners
-│   │   ├── storage/            # sqlite/, postgres/, contentkeys/
-│   │   ├── crypto/             # Hashes, TOTP sealing, keyrings and content envelopes
+│   │   ├── storage/            # sqlite/, postgres/, contentkeys/, s3store/ (object storage)
+│   │   ├── crypto/             # Hashes, TOTP sealing, keyrings, content envelopes, FileCipher
 │   │   ├── render/             # Markdown rendering and sanitization
 │   │   ├── rendercache/        # Rendered-note cache
 │   │   ├── linkcache/          # Decrypted public-link target cache
-│   │   └── linkmetrics/        # Prometheus link counters
+│   │   ├── linkmetrics/        # Prometheus link counters
+│   │   └── filemetrics/        # Prometheus file counters and upload-size histogram
 │   └── adapters/
-│       ├── http/               # Handlers, router, templates/, static/, spec/
+│       ├── web/                # Handlers, router, templates/, static/, spec/
 │       ├── cli/                # CLI commands and HTTP client setup
 │       └── mcp/                # MCP tools and HTTP proxy
 ├── migrations/
 │   ├── sqlite/                 # SQL files and embedded FS
 │   └── postgres/               # SQL files and embedded FS
-├── pkg/client/                 # Generated OpenAPI client/server types
+├── pkg/client/                 # Generated OpenAPI client; files_stream.go streams files
 ├── tests/
-│   ├── auth/, manager/, mcp/, encryption/  # Application integration suites
-│   ├── upgrade/, fixtures/     # Real v0.1.6 upgrade path and database dumps
+│   ├── auth/, manager/, mcp/, cli/, encryption/  # Application integration suites
+│   ├── files/                 # File life cycle with SQLite and an S3 test container
+│   ├── upgrade/, fixtures/     # Real v0.1.6–v0.4.0 upgrade paths and database dumps
 │   └── ui/                    # Separate Go module, browser tests and testdata/screenshots/
-├── docs/
+├── docs/                       # GUIDE.md, adr/ (decision records), design/, plans/
 ├── openapi.yaml                # API source, embedded into HTTP adapter via generation
 ├── Makefile                    # Project commands, includes downloaded go.mk
 ├── Dockerfile                  # Go builder → unprivileged scratch runtime
@@ -95,8 +98,9 @@ The domain contains no persistence or transport interfaces. Notes use string ide
 the public slug is hashed with `domain.HashSlug` for storage. Account ownership uses
 `*uuid.UUID`; an anonymous note/link has no owner.
 
-The full models are in [note.go](../internal/domain/note.go) and
-[link.go](../internal/domain/link.go). Relevant rules include:
+The full models are in [note.go](../internal/domain/note.go),
+[link.go](../internal/domain/link.go) and [file.go](../internal/domain/file.go). Relevant rules
+include:
 
 - `PrivacyPublic`, `PrivacyAuthenticated`, `PrivacyOwner` determine visibility.
 - `OwnedBy` compares account IDs. Any valid session or API token for the creating account
@@ -107,6 +111,14 @@ The full models are in [note.go](../internal/domain/note.go) and
   false; Update sends nil to storage, which keeps the stored column through `COALESCE`, as for
   `Privacy` and `ContentType`.
 - Note content and title limits are shared with the OpenAPI contract.
+- `domain.File` has the same `Privacy`, `OwnerID`, `ExpiresAt`, `OwnedBy`, `VisibleTo`,
+  `Expired`, `Validate` and `ValidateOwnership` rules as a note. `Name` and `ContentKey` are
+  set only after decryption: storage keeps them inside `SealedMeta`. `ObjectKey` is the random
+  object name in the bucket.
+- `CleanFileName` removes a directory part and control characters from a file name.
+  `MaxFileNameLength` is 255 bytes.
+- File errors are `ErrFileTooLarge` (413), `ErrInvalidFileName` (422) and
+  `ErrStorageUnavailable` (503). `ErrFeatureNotSupported` (503) means that files are off.
 
 Sentinel errors live in [errors.go](../internal/domain/errors.go), for example:
 
@@ -144,11 +156,35 @@ checker, the shared slug lock, a renderer, an encryptor, an edit-code hasher, lo
 custom-slug setting. Its optional render cache defaults to a no-op implementation.
 The link manager follows the same namespace/ownership model.
 
-Notes and links share the **same slug-lock instance** to serialize local preflight checks
+Notes, links and files share the **same slug-lock instance** to serialize local preflight checks
 and coordinate link-cache eviction. Cross-process uniqueness is enforced by the database:
 resource triggers atomically reserve the hashed ID in `slug_namespace`, whose primary key
-is shared by both resource types. A losing create returns `ErrSlugConflict` (HTTP 409).
+is shared by all three resource types. A losing create returns `ErrSlugConflict` (HTTP 409).
 Deleting or consuming a resource releases its reservation in the same transaction.
+
+[files.Manager](../internal/usecases/files/manager.go) uses the same slug lock, the note and
+link slug checkers and the edit-code hasher. Its other ports are `Storage` (records),
+`ObjectStore` (the bucket), `StreamCipher` (`crypto.FileCipher`), `Encryptor` (the keyring for
+`sealed_meta`) and `Metrics`. The default `Metrics` records nothing; `WithMetrics` attaches the
+Prometheus implementation.
+
+An upload has this sequence:
+
+1. `Create` cleans the name and hashes the edit code.
+2. `upload` makes a random content key. Then it connects the cipher and `ObjectStore.Put`
+   through `io.Pipe`. The cipher goroutine encrypts the request body while `Put` sends it, so
+   the server keeps no full file in memory.
+   A size counter stops the stream at `--max-file-size` with `ErrFileTooLarge`.
+3. `sweepOnUpload` removes expired files. A failure is fail-soft: it is only logged.
+4. `insert` takes the slug lock only for the record insert, because the upload can be long.
+   When the insert fails, the manager deletes the new object.
+
+`Peek` reads a record without access rules. `Info` applies privacy and expiry. `Download`
+checks that the object exists before it changes the record, so a missing object does not
+consume a `burn_after_download` file. Without `AllowBurn` such a file stays, and `Download`
+returns `ErrBurnIntentRequired`. `Update` changes only the expiry, privacy and burn rule.
+`Delete` and `SweepExpired` delete the record first and the object second. An object delete
+error is fail-soft: the manager logs it and increments the `delete` storage error counter.
 
 The auth package separates sessions, onboarding, account administration and API-token
 operations. Content-key maintenance has its own manager and storage/cipher ports; it must
@@ -160,7 +196,8 @@ not make the note manager depend on infrastructure crypto implementations.
 
 Production storage implementations are in `internal/infra/storage/sqlite` and `postgres`.
 Both use Bun and have concrete constructors such as `NewNoteRepository`,
-`NewLinkRepository` and `NewUserRepository`. There is no production in-memory storage backend.
+`NewLinkRepository`, `NewUserRepository` and the file repository. There is no production
+in-memory storage backend.
 
 Translate storage errors to domain errors at the repository boundary. Preserve atomic
 consume/expiry/update semantics across both backends; do not implement a destructive read
@@ -182,6 +219,28 @@ automatically before listening. The persisted `pending`/`ready` state resumes in
 work and skips writes on ready restarts. The optional `encryption migrate` command uses the
 same conversion of v0.1.6 plaintext and wrapping of older ciphertext. See
 [the upgrade checklist](../CHANGELOG.md#upgrade-checklist-from-v016) before changing that path.
+
+The `20261118000001_files` migration adds the `files` table. It keeps the hashed ID,
+`object_key`, `sealed_meta`, privacy, the edit-code hash, size, download count, burn rule,
+expiry and owner. The migration adds `files` to the `resource` values of `slug_namespace`, and
+the file triggers reserve and release IDs as for notes and links. SQLite cannot change a
+`CHECK` constraint, so the SQLite migration builds `slug_namespace` again with its triggers.
+
+### Object storage
+
+[s3store](../internal/infra/storage/s3store/store.go) implements `files.ObjectStore` with
+`minio-go` v7. It works with each S3-compatible server. `Ping` calls `BucketExists` at startup.
+`Put` always uses a multipart upload with 16 MiB parts, because the encrypted size is not known
+in advance. `Stat` and `WriteTo` return `domain.ErrNotFound` for a missing object.
+
+The client limits are: a 10-second dial, a 10-second TLS handshake, a 30-second wait for the
+response headers and 3 attempts. There is no total request timeout, because a large transfer
+can be long. Error texts replace the object key with `<object-key>`, because the logs must not
+show where a file is. A plain `http://` endpoint other than a loopback address gives a warning
+at startup.
+
+`minio-go` cancels a failed multipart upload, but it ignores the result of the cancel request.
+The README tells the operator to add an `AbortIncompleteMultipartUpload` lifecycle rule.
 
 ### Rendering and caches
 
@@ -218,6 +277,31 @@ support path-like note slugs. Keep their status codes, validation and ownership 
 aligned. Edit codes for deletion come from `X-Edit-Code`; the deprecated `edit_code` query
 parameter is a fallback for v0.1.6 clients only (`deleteEditCode`).
 
+`FileHandler` serves all `/files` routes by hand, not through ogen
+([ADR-0002](adr/0002-files-outside-ogen.md)):
+
+| Route | Use |
+|---|---|
+| `GET /files` | Upload page (`file_editor.html`): drop area, `XMLHttpRequest` progress, cancel |
+| `POST /files` | Multipart upload; the text fields must come before the `file` part |
+| `GET /files/{id}` | Metadata in JSON; no download count |
+| `GET /files/{id}/download` | Content as an attachment |
+| `GET /files/{id}/edit` | Edit page (`file_edit.html`) for expiry, privacy, burn rule and delete |
+| `PUT /files/{id}` | JSON `ttl`, `privacy`, `burn_after_download`; edit code in `X-Edit-Code` |
+| `DELETE /files/{id}` | Delete; edit code in `X-Edit-Code` or the owner |
+
+`POST`, `PUT` and `DELETE` have `RequireSameOrigin`; `PUT` and `DELETE` also have the edit-code
+lockout. The upload has its own body limit (`--max-file-size` plus 1 MiB for the form) and
+one-hour read and write deadlines. A download sends `application/octet-stream`,
+`Content-Disposition` with an ASCII name and `filename*=UTF-8''…`, `nosniff` and
+`Cache-Control: private, no-store`. Without a file manager, the API routes answer 503 and the
+pages show the "files are off" error. `--disable-api` keeps only the `GET`/`HEAD` pages
+`/files`, `/files/{id}/edit` and `/files/{id}/download` (`isFilePage`).
+
+`GetNoteOrLink` calls `serveFileIfExists` for a single-segment slug. `wantsFilePage` sends a
+browser to the file page (`file.html`). Other clients, `*/*` included, get the content. The
+success page has the kind `file`, and the header shows the **File** tab only when files are on.
+
 `domain.ReservedSlugPrefixes()` is the source of truth for named first-segment routes.
 Registering a new prefix without reserving it can send that route into note resolution.
 
@@ -229,7 +313,8 @@ replace the parser with substring checks.
 
 Burn reads additionally require deliberate intent. Missing or wildcard-only `Accept`, `HEAD`
 and browser subresource requests do not consume a note/link. Browser note reads first show
-a confirmation form. A raw-query flag alone does not prove intent.
+a confirmation form. A raw-query flag alone does not prove intent. For files,
+`explicitDownload` also accepts an exact `Accept: application/octet-stream`.
 
 ### CLI and MCP
 
@@ -238,6 +323,16 @@ databases. Both accept the API-token envelope format and use the same token/URL 
 rules. `/llms.txt` is an embedded navigation index linking to `/api/reference.md` (the
 detailed API guide) and `/api/openapi.yaml` (schemas). All three describe the same build;
 update the reference with API behavior and keep the index's safety guidance current.
+
+The CLI file commands are `upload`, `download`, `file-info`, `update-file` and `delete-file`.
+`upload` and `download` use `UploadFile` and `DownloadFile` of `pkg/client`; for them,
+`--timeout` limits only the wait for the response headers. `download` writes to a temporary
+file and renames it after a full download.
+
+The MCP file tools are `upload_file`, `get_file`, `update_file` and `delete_file`.
+`upload_file` reads only regular files under `--upload-root` (`PADMARK_MCP_UPLOAD_ROOT`); an
+empty root refuses all uploads. The session vault keeps file edit codes as for notes and links.
+`mcp.NewManager` takes the generated client twice: as `PadmarkClient` and as `FileClient`.
 
 ## 7. CLI and Configuration
 
@@ -258,7 +353,23 @@ encryption tools never create one.
 
 `--disable-api` disables the REST endpoints, API docs and `/llms.txt`. The editor becomes
 read-only because publish/save use the REST endpoints. Browser note views, link redirects,
-account/admin forms and health endpoints remain available.
+account/admin forms and health endpoints remain available. The file pages and the download
+stay available; upload, change and delete are off.
+
+The file flags are in `fileStorageFlags()`:
+
+| Flag | Environment variable | Default |
+|---|---|---|
+| `--s3-endpoint` | `PADMARK_S3_ENDPOINT` | empty: files are off |
+| `--s3-bucket` | `PADMARK_S3_BUCKET` | none; necessary with `--s3-endpoint` |
+| `--s3-region` | `PADMARK_S3_REGION` | `us-east-1` |
+| `--s3-path-style` | `PADMARK_S3_PATH_STYLE` | `true` |
+| `--max-file-size` | `PADMARK_MAX_FILE_SIZE` | `104857600` (100 MiB) |
+| `--files-sweep-interval` | `PADMARK_FILES_SWEEP_INTERVAL` | `1h`; `0` turns the sweep loop off |
+
+The S3 keys come only from `PADMARK_S3_ACCESS_KEY` and `PADMARK_S3_SECRET_KEY`. There are no
+flags for them, because `ps` shows flags. The MCP proxy reads `--upload-root` /
+`PADMARK_MCP_UPLOAD_ROOT`.
 
 ## 8. Dependency Injection
 
@@ -269,6 +380,8 @@ Manual wiring lives in [server.go](../internal/infra/server/server.go), chiefly
 2. Load the keyring, open storage, apply schema migrations and validate content encryption.
 3. Construct repositories, ciphers, renderer, shared slug lock, caches and metrics.
 4. Build note/link/auth managers and inject them into the HTTP handlers/router.
+   `attachFiles` in [files.go](../internal/infra/server/files.go) builds `files.Manager` only
+   when `--s3-endpoint` is set. A set but wrong S3 configuration stops startup (fail-hard).
 5. Start configured listeners and register shutdown/cleanup work.
 
 Required dependencies use constructors; optional facilities can use explicit `With...`
@@ -300,6 +413,15 @@ port. `NewRegistered(reg)` registers these counters with a supplied Prometheus r
 - `padmark_links_redirects_total`
 - `padmark_links_collisions_total`
 
+[filemetrics](../internal/infra/filemetrics/metrics.go) implements `files.Metrics` with the
+same `New()` and `NewRegistered(reg)` pattern. The server registers it also when files are off:
+
+- `padmark_files_uploads_total`
+- `padmark_files_downloads_total`
+- `padmark_files_deleted_total` with the label `reason`: `user`, `burn` or `expired`
+- `padmark_files_upload_bytes`, a histogram with the bounds 1, 4, 16, 64 and 256 MiB and 1 GiB
+- `padmark_files_storage_errors_total` with the label `op`: `put`, `stat`, `get` or `delete`
+
 The separate `--metrics-addr` listener is disabled by default. It also exposes standard
 Go/process collectors; metrics are not served on the public HTTP listener.
 Use mocks with `.AnyTimes()` or a no-op metrics implementation when metric call counts are
@@ -310,6 +432,11 @@ not the subject of a test.
 The server registers listener shutdown with `github.com/partyzanex/shutdown` and releases
 its infrastructure resources. Keep shutdown bounded and handle `http.ErrServerClosed` as
 the normal outcome of closing an HTTP server.
+
+The file sweep loop (`startFileSweep`) adds a close function to the same shutdown manager.
+The close function cancels the loop and waits for the current sweep, so the loop stops before
+the database closes. A sweep error is fail-soft: the loop logs it and tries again at the next
+tick.
 
 Background workers should make repeated close calls safe, for example with `sync.Once`.
 Do not hold a mutex while waiting for network I/O, and do not store `context.Context` in
@@ -323,10 +450,23 @@ Unit tests live beside their application packages and use `testify/suite`, `requ
 `go.uber.org/mock`. Generate mocks from the consumer interface's actual directive; an HTTP
 mock may target `web_test` rather than the implementation package.
 
-Application integration suites live in `tests/auth`, `manager`, `mcp`, `encryption` and
-`upgrade`, with `//go:build integration`. PostgreSQL repository tests use that tag too.
-SQLite suites can use temporary/in-memory databases; PostgreSQL suites use testcontainers
-and need Docker. Upgrade suites load dumps produced by the real v0.1.6 binary.
+Application integration suites live in `tests/auth`, `cli`, `files`, `manager`, `mcp`,
+`encryption` and `upgrade`, with `//go:build integration`. PostgreSQL repository tests use that
+tag too. SQLite suites can use temporary/in-memory databases; PostgreSQL suites use
+testcontainers and need Docker. Upgrade suites load dumps produced by real released binaries,
+from v0.1.6 to v0.4.0.
+
+File tests need an S3 server. They start the container `adobe/s3mock:3.12.0` through
+testcontainers, so they need Docker too. These tests use it:
+
+- `internal/infra/storage/s3store`: the adapter against a real S3 API.
+- `tests/files`: upload, `GET /{id}`, download, update and delete through HTTP; a server
+  restart; a content key rotation.
+- `tests/manager`: the file suite for SQLite and PostgreSQL.
+- `tests/cli` and `tests/mcp`: the file commands and tools against a real server.
+
+`tests/upgrade` checks the v0.4.0 to v0.5.0 upgrade with the real v0.4.0 dumps; it needs no S3
+server. Unit tests of `files.Manager` and `FileHandler` use mockgen mocks and no container.
 
 Use `t.Context()` / `s.T().Context()`, clean state between tests and use polling assertions
 for asynchronous behavior. Do not store a context in a suite field or share mutable test data.
@@ -382,6 +522,16 @@ their report/failure artifacts. Docker publishing waits for all those jobs.
 - Notes and link targets use installation-key content envelopes. Generated edit codes use
   salted SHA-256; caller-chosen codes use the configured argon2id cost. Verification uses
   recorded parameters within the accepted ceiling.
+- File content uses the `pmf1` stream format with a random key for each file
+  ([ADR-0001](adr/0001-file-encryption-format.md)). `files.sealed_meta` keeps that key and the
+  name in a keyring envelope of the `file` resource, so key rotation rewraps files without a
+  change to the objects. Object keys are random UUIDs (universally unique identifiers).
+- A download is always an attachment of type `application/octet-stream` with `nosniff`, so a
+  browser never runs an uploaded HTML or SVG file. `attachmentDisposition` gives an ASCII name
+  and a UTF-8 `filename*` name, as RFC 6266 recommends. A quote, a semicolon, a backslash or a
+  line break in a name cannot add a parameter or a header.
+- Logs do not contain file names, object keys, edit codes or S3 keys. `s3store` removes the
+  object key from error texts.
 - Stop writers before schema/content migration and key rotation. See
   [key management](../README.md#content-key-management-migration-and-rotation) for the supported
   order, legacy plaintext conversion, corrupt-record diagnostics and backup handling.
@@ -442,6 +592,13 @@ Compose uses PostgreSQL with `db_data` and `content_keys` named volumes and requ
 `POSTGRES_PASSWORD`. Startup migrates schema/content without commands inside the container.
 Retain the same keys on every restart/replica; stop old-version writers during the upgrade.
 
+File publishing needs an S3 bucket and a key with `s3:ListBucket` on the bucket and
+`s3:PutObject`, `s3:GetObject`, `s3:DeleteObject` and `s3:AbortMultipartUpload` on its
+objects. The Compose file has commented `PADMARK_S3_*` lines; the keys come from `.env`. A
+reverse proxy must accept bodies up to `--max-file-size` plus 1 MiB and must wait one hour for
+a transfer. See [Files setup](../README.md#files-setup) for the policy, the lifecycle rule and
+an nginx example. Back up the bucket together with the database and the keyring.
+
 Schema/content maintenance and container upgrades need consistent backups. A PostgreSQL
 data directory cannot be opened by an older major version. Consult the
 [v0.1.6 checklist](../CHANGELOG.md#upgrade-checklist-from-v016) before upgrading existing data.
@@ -464,6 +621,7 @@ make test-ui-report
 | HTTP contract | ogen + openapi.yaml |
 | Markdown / sanitization | Goldmark + Chroma / Bluemonday |
 | Persistence | Bun + pgdriver or modernc SQLite; embedded goose SQL migrations |
+| File content | minio-go v7 (S3 API); AES-256-GCM `pmf1` stream |
 | Content / account secrets | Installation-key AES-GCM envelopes; argon2id; TOTP |
-| Unit/integration tests | testify, gomock, testcontainers |
+| Unit/integration tests | testify, gomock, testcontainers, `adobe/s3mock` |
 | Browser tests | playwright-go, Go testing/require, Go pixelmatch |
