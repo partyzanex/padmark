@@ -1,10 +1,14 @@
 package mcp
 
 import (
+	"path/filepath"
 	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/mock/gomock"
+
+	padmark "github.com/partyzanex/padmark/pkg/client"
 )
 
 func TestVaultPutGet_RoundTrip(t *testing.T) {
@@ -32,4 +36,25 @@ func TestVault_ConcurrentAccessIsRaceClean(_ *testing.T) {
 	}
 
 	wg.Wait()
+}
+
+// TestDeleteFile_UsesSessionVaultCode uploads a file and deletes it without an edit_code: the
+// proxy sends the code that it stored at the upload. It is a ToolsSuite method (tools_test.go).
+func (s *ToolsSuite) TestDeleteFile_UsesSessionVaultCode() {
+	ctx := s.T().Context()
+	root := s.useUploadRoot()
+	s.writeFile(filepath.Join(root, "a.txt"), "x")
+
+	s.files.EXPECT().UploadFile(gomock.Any(), "a.txt", gomock.Any(), gomock.Any()).
+		Return(testCreateFileResponse(s, "file123abc", "session-code-1"), nil)
+	s.files.EXPECT().DeleteFile(gomock.Any(), padmark.DeleteFileParams{
+		ID: "file123abc", XEditCode: padmark.NewOptString("session-code-1"),
+	}).Return(&padmark.DeleteFileNoContent{}, nil)
+
+	uploaded := s.callTool(ctx, "upload_file", map[string]any{"path": "a.txt"})
+	s.Require().False(uploaded.IsError, s.successText(uploaded))
+
+	deleted := s.callTool(ctx, "delete_file", map[string]any{"id": "file123abc"})
+
+	s.Contains(s.successText(deleted), `"deleted":true`)
 }

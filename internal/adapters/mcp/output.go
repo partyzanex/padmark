@@ -1,6 +1,8 @@
 package mcp
 
 import (
+	"net/url"
+	"path"
 	"time"
 
 	padmark "github.com/partyzanex/padmark/pkg/client"
@@ -145,6 +147,82 @@ func (m *Manager) bulkLinkOutput(resp *padmark.BulkCreateLinksResponse) createBu
 	}
 
 	return out
+}
+
+// fileOutput is the result of the file tools. The tools return links, not the content: an
+// agent gives the link to a person or downloads it with its own HTTP tool.
+type fileOutput struct {
+	ID                string `json:"id"`
+	URL               string `json:"url"`
+	DownloadURL       string `json:"download_url"`
+	Name              string `json:"name"`
+	Privacy           string `json:"privacy,omitempty"`
+	ExpiresAt         string `json:"expires_at,omitempty"`
+	CreatedAt         string `json:"created_at,omitempty"`
+	EditCode          string `json:"edit_code,omitempty"`
+	EditCodeNote      string `json:"edit_code_note,omitempty"`
+	Size              int64  `json:"size"`
+	Downloads         int    `json:"downloads"`
+	BurnAfterDownload bool   `json:"burn_after_download"`
+}
+
+// fileOutputFromCreate builds the upload output with the edit code hidden, the same contract as
+// noteOutputFromCreate. The caller calls revealEditCode to reveal the code.
+func (m *Manager) fileOutputFromCreate(resp *padmark.CreateFileResponse) fileOutput {
+	out := fileOutputFromInfo(&padmark.FileInfo{
+		ID:                resp.ID,
+		URL:               resp.URL,
+		Name:              resp.Name,
+		Size:              resp.Size,
+		Privacy:           padmark.FileInfoPrivacy(resp.Privacy),
+		Downloads:         resp.Downloads,
+		BurnAfterDownload: resp.BurnAfterDownload,
+		ExpiresAt:         resp.ExpiresAt,
+		CreatedAt:         resp.CreatedAt,
+	})
+
+	code := resp.EditCode
+	if code != "" {
+		out.EditCodeNote = "edit_code stored by the proxy for this session; update_file and delete_file " +
+			"need no edit_code now"
+	}
+
+	m.vault.Put(resp.ID, code)
+
+	return out
+}
+
+func fileOutputFromInfo(info *padmark.FileInfo) fileOutput {
+	return fileOutput{
+		ID:                info.ID,
+		URL:               info.URL.String(),
+		DownloadURL:       fileDownloadURL(&info.URL, info.ID),
+		Name:              info.Name,
+		Privacy:           string(info.Privacy),
+		ExpiresAt:         nilTimeText(info.ExpiresAt),
+		CreatedAt:         timeText(info.CreatedAt),
+		EditCode:          "",
+		EditCodeNote:      "",
+		Size:              info.Size,
+		Downloads:         info.Downloads,
+		BurnAfterDownload: info.BurnAfterDownload,
+	}
+}
+
+// fileDownloadURL derives <server>/files/{id}/download from the page URL <server>/{id}. The
+// server sends only the page URL; the download path is part of the API contract.
+func fileDownloadURL(page *url.URL, id string) string {
+	download := *page
+	download.Path = path.Join(path.Dir(page.Path), "files", id, "download")
+	download.RawPath = ""
+
+	return download.String()
+}
+
+// revealEditCode shows the one-time edit code of a file upload output.
+func (out *fileOutput) revealEditCode(code string) {
+	out.EditCode = code
+	out.EditCodeNote = revealedEditCodeNote
 }
 
 // revealedEditCodeNote tells the caller that a revealed edit code cannot be recovered later.

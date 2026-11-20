@@ -13,6 +13,8 @@ const (
 	FlagAllowInsecureHTTP = "allow-insecure-http"
 	// FlagLogLevel selects the minimum slog level; logs go to stderr only (stdout is the protocol).
 	FlagLogLevel = "log-level"
+	// FlagUploadRoot is the only local directory from which upload_file reads files.
+	FlagUploadRoot = "upload-root"
 )
 
 // Environment variable names, shared with padmark-cli: one .env (PADMARK_TOKEN, PADMARK_URL,
@@ -25,7 +27,14 @@ const (
 	EnvAllowInsecureHTTP = "PADMARK_ALLOW_INSECURE_HTTP"
 	// EnvLogLevel is the same variable the padmark server reads for its log level.
 	EnvLogLevel = "PADMARK_LOG_LEVEL"
+	// EnvUploadRoot is the environment source of --upload-root. Only padmark-mcp reads it.
+	EnvUploadRoot = "PADMARK_MCP_UPLOAD_ROOT"
 )
+
+// DefaultUploadRoot is empty: upload_file refuses all paths until the operator sets a root.
+// The agent host selects the working directory of a stdio server, often the home directory.
+// A working-directory default could then send ~/.ssh or ~/.aws to a public URL.
+const DefaultUploadRoot = ""
 
 // DefaultLogLevel keeps per-call debug records out of stderr unless asked for.
 const DefaultLogLevel = "info"

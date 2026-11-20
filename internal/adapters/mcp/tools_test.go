@@ -16,10 +16,11 @@ import (
 type ToolsSuite struct {
 	suite.Suite
 
-	ctrl *gomock.Controller
-	cl   *MockPadmarkClient
-	mgr  *Manager
-	log  *slog.Logger
+	ctrl  *gomock.Controller
+	cl    *MockPadmarkClient
+	files *MockFileClient
+	mgr   *Manager
+	log   *slog.Logger
 }
 
 func TestTools(t *testing.T) {
@@ -29,8 +30,9 @@ func TestTools(t *testing.T) {
 func (s *ToolsSuite) SetupTest() {
 	s.ctrl = gomock.NewController(s.T())
 	s.cl = NewMockPadmarkClient(s.ctrl)
+	s.files = NewMockFileClient(s.ctrl)
 	s.log = slog.New(slog.DiscardHandler)
-	s.mgr = NewManager(s.cl, s.log)
+	s.mgr = NewManager(s.cl, s.files, s.log)
 }
 
 func (s *ToolsSuite) TearDownTest() {
@@ -330,10 +332,10 @@ func (s *toolRegistrationSuite) TearDownTest() {
 	s.ctrl.Finish()
 }
 
-func (s *toolRegistrationSuite) TestAllNineToolsRegistered() {
+func (s *toolRegistrationSuite) TestAllToolsRegistered() {
 	ctx := s.T().Context()
 
-	mgr := NewManager(NewMockPadmarkClient(s.ctrl), slog.New(slog.DiscardHandler))
+	mgr := NewManager(NewMockPadmarkClient(s.ctrl), NewMockFileClient(s.ctrl), slog.New(slog.DiscardHandler))
 
 	sess, err := connectTestClient(ctx, mgr)
 	s.Require().NoError(err)
@@ -358,6 +360,7 @@ func (s *toolRegistrationSuite) TestAllNineToolsRegistered() {
 	for _, want := range []string{
 		"create_note", "get_note", "update_note", "delete_note",
 		"create_link", "create_links_bulk", "get_link", "delete_link", "check_server",
+		"upload_file", "get_file", "update_file", "delete_file",
 	} {
 		s.Truef(names[want], "tool %q is registered", want)
 	}
@@ -367,4 +370,10 @@ func (s *toolRegistrationSuite) TestAllNineToolsRegistered() {
 	// get_link is read-only: burn-after-click fires on GET /{id}, not on metadata.
 	s.Truef(annotations["get_link"].ReadOnlyHint, "get_link metadata is read-only")
 	s.Falsef(annotations["delete_note"].ReadOnlyHint, "delete_note mutates")
+
+	// get_file reads metadata only: it does not count a download or burn a burn-after-download file.
+	s.Truef(annotations["get_file"].ReadOnlyHint, "get_file metadata is read-only")
+	s.Falsef(annotations["upload_file"].ReadOnlyHint, "upload_file creates a file")
+	s.Falsef(*annotations["upload_file"].DestructiveHint, "upload_file only adds a file")
+	s.Truef(*annotations["delete_file"].DestructiveHint, "delete_file removes a file")
 }

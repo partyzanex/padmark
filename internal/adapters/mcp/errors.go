@@ -18,6 +18,20 @@ var (
 		"envelope and no --base-url was given")
 )
 
+// Errors that upload_file and update_file return before a server call. Each text tells the
+// model or the operator what to change.
+var (
+	ErrUploadsOff = errors.New("upload_file is off: the operator must start padmark-mcp with " +
+		"--upload-root (env " + EnvUploadRoot + ") set to the directory to share")
+	ErrPathOutsideRoot    = errors.New("the path is outside the upload root; use a file in the upload root")
+	ErrNotRegularFile     = errors.New("the path is not a regular file")
+	errEmptyPath          = errors.New("path must not be empty")
+	errFileReplaced       = errors.New("the file changed while it was opened; try again")
+	errUploadRootNotDir   = errors.New("is not a directory")
+	errNoFileChange       = errors.New("nothing to change: set ttl, clear_expiry, privacy or burn_after_download")
+	errTTLWithClearExpiry = errors.New("set ttl or clear_expiry, not both")
+)
+
 // Errors that the MCP tools map from the server response variants.
 var (
 	ErrBadRequest         = errors.New("bad request")

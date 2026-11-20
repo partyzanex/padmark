@@ -59,6 +59,13 @@ func NewApp() *urcli.Command {
 				flag.Usage = "Allow sending the bearer token over plain HTTP to a non-loopback host " +
 					"(loopback hosts only warn); default refuses (env: PADMARK_ALLOW_INSECURE_HTTP)"
 			}),
+			clifactory.StringFlag(func(flag *urcli.StringFlag) {
+				flag.Name = FlagUploadRoot
+				flag.Sources = urcli.EnvVars(EnvUploadRoot)
+				flag.Value = DefaultUploadRoot
+				flag.Usage = "Directory from which upload_file may read files; empty turns uploads off " +
+					"(env: PADMARK_MCP_UPLOAD_ROOT)"
+			}),
 		}
 		command.Action = runAction
 	})
@@ -87,10 +94,15 @@ func runAction(ctx context.Context, cmd *urcli.Command) error {
 		AddSource: false, ReplaceAttr: nil,
 	}))
 
+	uploadRoot, err := resolveUploadRoot(cmd.String(FlagUploadRoot))
+	if err != nil {
+		return fmt.Errorf("check --%s: %w", FlagUploadRoot, err)
+	}
+
 	cl, err := newPadmarkClient(cmd)
 	if err != nil {
 		return fmt.Errorf("create API client: %w", err)
 	}
 
-	return errorcontext.Wrap(NewManager(cl, log).Run(ctx), "run server")
+	return errorcontext.Wrap(NewManager(cl, cl, log, WithUploadRoot(uploadRoot)).Run(ctx), "run server")
 }

@@ -28,22 +28,43 @@ func version() string {
 // by the MCP SDK; this type is only the composition and shared state.
 type Manager struct {
 	client PadmarkClient
+	files  FileClient
 	vault  *editCodeVault
 	log    *slog.Logger
 	srv    *mcpsdk.Server
+	// uploadRoot is the only directory that upload_file reads from. Empty turns uploads off.
+	uploadRoot string
+}
+
+// Option sets an optional Manager setting.
+type Option func(*Manager)
+
+// WithUploadRoot lets upload_file read regular files under root, also through symbolic links
+// that stay under root. Without this option, upload_file refuses every path.
+func WithUploadRoot(root string) Option {
+	return func(m *Manager) {
+		m.uploadRoot = root
+	}
 }
 
 // NewManager builds an MCP server exposing padmark's REST surface as tools, targeting the
-// padmark instance the client is pointed at. No connection is opened here (no eager ping):
+// padmark instance the client is pointed at. The generated client is usually both client and
+// files. No connection is opened here (no eager ping):
 // server/network failures surface per tool call as structured results with remediation hints
 // (fail-soft) — a stdio process that dies on a missing server just breaks the agent's whole
 // tool set, and padmark may legitimately be started later.
-func NewManager(client PadmarkClient, log *slog.Logger) *Manager {
+func NewManager(client PadmarkClient, files FileClient, log *slog.Logger, opts ...Option) *Manager {
 	m := &Manager{
-		client: client,
-		vault:  newEditCodeVault(),
-		log:    log,
-		srv:    nil,
+		client:     client,
+		files:      files,
+		vault:      newEditCodeVault(),
+		log:        log,
+		srv:        nil,
+		uploadRoot: DefaultUploadRoot,
+	}
+
+	for _, opt := range opts {
+		opt(m)
 	}
 
 	srv := mcpsdk.NewServer(&mcpsdk.Implementation{
@@ -94,6 +115,7 @@ func (m *Manager) ConnectSession(ctx context.Context, transport mcpsdk.Transport
 func (m *Manager) registerTools(srv *mcpsdk.Server) {
 	registerNoteTools(srv, m)
 	registerLinkTools(srv, m)
+	registerFileTools(srv, m)
 
 	mcpsdk.AddTool[checkServerInput, checkServerOutput](srv, checkServerTool(), m.checkServer)
 }
