@@ -15,14 +15,16 @@ import (
 //go:embed templates/redirect.html
 var redirectTmplSrc string
 
-// LinkHandler serves the browser's link editor and redirect routes. OgenHandler serves
-// the JSON API, mirroring the split between note pages and note API operations.
+// LinkHandler serves the browser's link page, link editor and redirect routes. OgenHandler
+// serves the JSON API, mirroring the split between note pages and note API operations.
 type LinkHandler struct {
 	*common
 
 	manager LinkManager
 	tmpl    *template.Template
 	editor  *template.Template
+	// view is the page of a short link (link.html), the counterpart of the note page.
+	view *template.Template
 
 	// directRedirect selects the short-link redirect's response mode: true issues an immediate 301 to the
 	// target URL, false renders the interstitial (redirect.html). Set via Handler.WithDirectRedirect
@@ -31,22 +33,25 @@ type LinkHandler struct {
 	directRedirect bool
 }
 
-func newLinkHandler(c *common, manager LinkManager, tmpl, editor *template.Template) *LinkHandler {
+func newLinkHandler(c *common, manager LinkManager, tmpl, editor, view *template.Template) *LinkHandler {
 	return &LinkHandler{
 		common:  c,
 		manager: manager,
 		tmpl:    tmpl,
 		editor:  editor,
+		view:    view,
 		// directRedirect zero = false = interstitial mode; WithDirectRedirect overrides at router build.
 		directRedirect: false,
 	}
 }
 
-// RegisterRoutes registers creation/editing pages and the short-link redirect route.
+// RegisterRoutes registers the create page, the old editor URL and the short-link redirect
+// route. The link page GET /links/{id} shares its path with the JSON API, so registerAllRoutes
+// registers it (see htmlOr); the editor is at GET /edit/{id} (Handler.EditPage).
 func (h *LinkHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /r/{id}", h.Redirect)
 	mux.HandleFunc("GET /links", h.CreateLinkPage)
-	mux.HandleFunc("GET /links/{id}/edit", h.EditLinkPage)
+	mux.HandleFunc("GET /links/{id}/edit", redirectToEditor)
 }
 
 type redirectViewData struct {

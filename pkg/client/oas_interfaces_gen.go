@@ -5,6 +5,10 @@ type CreateAPITokenRes interface {
 	createAPITokenRes()
 }
 
+type CreateFileRes interface {
+	createFileRes()
+}
+
 type CreateInviteRes interface {
 	createInviteRes()
 }
@@ -21,12 +25,24 @@ type CreateNoteRes interface {
 	createNoteRes()
 }
 
+type DeleteFileRes interface {
+	deleteFileRes()
+}
+
 type DeleteLinkRes interface {
 	deleteLinkRes()
 }
 
 type DeleteNoteRes interface {
 	deleteNoteRes()
+}
+
+type GetFileContentRes interface {
+	getFileContentRes()
+}
+
+type GetFileRes interface {
+	getFileRes()
 }
 
 type GetLinkRes interface {
@@ -39,6 +55,10 @@ type GetNoteRes interface {
 
 type ReadyzRes interface {
 	readyzRes()
+}
+
+type UpdateFileRes interface {
+	updateFileRes()
 }
 
 type UpdateLinkRes interface {

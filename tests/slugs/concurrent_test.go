@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -33,10 +34,25 @@ import (
 type createGate struct {
 	ready   chan struct{}
 	proceed chan struct{}
+	// once closes ready on the first wait. A manager can call Create again on the same gate: a
+	// note or link create tries once more after it removes an expired file.
+	once sync.Once
+}
+
+func newGate() *createGate {
+	return &createGate{ready: make(chan struct{}), proceed: make(chan struct{}), once: sync.Once{}}
+}
+
+// openGate returns a gate that does not pause the create.
+func openGate() *createGate {
+	gate := newGate()
+	close(gate.proceed)
+
+	return gate
 }
 
 func (g *createGate) wait(ctx context.Context) error {
-	close(g.ready)
+	g.once.Do(func() { close(g.ready) })
 
 	select {
 	case <-g.proceed:
@@ -155,8 +171,7 @@ func testConcurrentCreate(t *testing.T, db *bun.DB, open func(*testing.T) *bun.D
 
 	// Separate pools, locks, handlers and listeners model independent replicas. The gate is
 	// after both managers' preflight checks and before their actual repository INSERT.
-	noteGate := &createGate{ready: make(chan struct{}), proceed: make(chan struct{})}
-	linkGate := &createGate{ready: make(chan struct{}), proceed: make(chan struct{})}
+	noteGate, linkGate := newGate(), newGate()
 	noteServer := replica(t, open(t), noteGate)
 	linkServer := replica(t, open(t), linkGate)
 

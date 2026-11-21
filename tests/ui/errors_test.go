@@ -3,6 +3,7 @@ package ui_test
 import (
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -36,19 +37,29 @@ func TestErrors(t *testing.T) {
 	}
 
 	runScenarios(t, []scenario{
-		{name: "NoteEditor", run: testNoteEditorErrors, accounts: false, allowedStatuses: rejections},
-		{name: "NoteEdit", run: testNoteEditErrors, accounts: false, allowedStatuses: rejections},
-		{name: "NoteServerReplies", run: testNoteServerReplies, accounts: false, allowedStatuses: rejections},
-		{name: "LinkEditor", run: testLinkEditorErrors, accounts: false, allowedStatuses: rejections},
-		{name: "LinkEdit", run: testLinkEditErrors, accounts: false, allowedStatuses: rejections},
-		{name: "LinkServerReplies", run: testLinkServerReplies, accounts: false, allowedStatuses: rejections},
-		{name: "ErrorPages", run: testErrorPages, accounts: false, allowedStatuses: pageStatuses()},
-		{name: "Setup", run: testSetupErrors, accounts: true, allowedStatuses: pageStatuses()},
-		{name: "Login", run: testLoginErrors, accounts: true, allowedStatuses: nil},
-		{name: "Invite", run: testInviteErrors, accounts: true, allowedStatuses: nil},
-		{name: "ChangePassword", run: testChangePasswordErrors, accounts: true, allowedStatuses: nil},
-		{name: "Admin", run: testAdminErrors, accounts: true, allowedStatuses: nil},
-		{name: "AccessPages", run: testAccessErrorPages, accounts: true, allowedStatuses: pageStatuses()},
+		{name: "NoteEditor", run: testNoteEditorErrors, accounts: false, files: false, allowedStatuses: rejections},
+		{name: "NoteEdit", run: testNoteEditErrors, accounts: false, files: false, allowedStatuses: rejections},
+		{name: "NoteServerReplies", run: testNoteServerReplies, accounts: false, files: false, allowedStatuses: rejections},
+		{name: "LinkEditor", run: testLinkEditorErrors, accounts: false, files: false, allowedStatuses: rejections},
+		{name: "LinkEdit", run: testLinkEditErrors, accounts: false, files: false, allowedStatuses: rejections},
+		{name: "LinkServerReplies", run: testLinkServerReplies, accounts: false, files: false, allowedStatuses: rejections},
+		{name: "ErrorPages", run: testErrorPages, accounts: false, files: false, allowedStatuses: pageStatuses()},
+		{name: "Setup", run: testSetupErrors, accounts: true, files: false, allowedStatuses: pageStatuses()},
+		{name: "Login", run: testLoginErrors, accounts: true, files: false, allowedStatuses: nil},
+		{name: "Invite", run: testInviteErrors, accounts: true, files: false, allowedStatuses: nil},
+		{name: "ChangePassword", run: testChangePasswordErrors, accounts: true, files: false, allowedStatuses: nil},
+		{name: "Admin", run: testAdminErrors, accounts: true, files: false, allowedStatuses: nil},
+		{name: "AccessPages", run: testAccessErrorPages, accounts: true, files: false, allowedStatuses: pageStatuses()},
+		{name: "FileEditor", run: testFileEditorErrors, files: true, accounts: false, allowedStatuses: rejections},
+		{
+			name: "FileEdit", run: testFileEditErrors, files: true, accounts: false,
+			allowedStatuses: append(slices.Clone(rejections), http.StatusUnauthorized, http.StatusNotFound, http.StatusGone),
+		},
+		{name: "FileErrorPages", run: testFileErrorPages, files: true, accounts: false, allowedStatuses: pageStatuses()},
+		{
+			name: "FilesOff", run: testFilesOff, accounts: false, files: false,
+			allowedStatuses: []int{http.StatusServiceUnavailable},
+		},
 	})
 }
 
@@ -345,10 +356,11 @@ func testLinkEditErrors(sess *uiSession) {
 	sess.fill("#targetInput", "https://example.com/edit-errors")
 	sess.button("Create link")
 	sess.createdLink()
-	sess.link("Edit link")
+	sess.link("Open link")
+	sess.openEditor()
 	sess.page.OnDialog(func(dialog playwright.Dialog) { sess.must(dialog.Accept()) })
 
-	sess.button("Save link")
+	sess.button("Save")
 	sess.expectError("#linkError", "Edit code required")
 
 	sess.button("Delete link")
@@ -357,7 +369,7 @@ func testLinkEditErrors(sess *uiSession) {
 	sess.openSettings()
 	sess.fill("#editCodeInput", wrongEditCode)
 	sess.closeSettings()
-	sess.button("Save link")
+	sess.button("Save")
 	sess.expectError("#linkError", "invalid edit code")
 
 	sess.button("Delete link")
@@ -402,7 +414,7 @@ const (
 
 // testErrorPages: the error pages of the note and short-link routes without accounts.
 func testErrorPages(sess *uiSession) {
-	for _, path := range []string{"/missing-ui-note", "/edit/missing-ui-note", "/links/missing-ui-link/edit"} {
+	for _, path := range []string{"/missing-ui-note", "/edit/missing-ui-note", "/links/missing-ui-link"} {
 		sess.gotoPage(path)
 		sess.expectErrorPage("404", notFoundTitle, notFoundDesc)
 	}
@@ -420,7 +432,7 @@ func testErrorPages(sess *uiSession) {
 	sess.post("/links", map[string]any{"target_url": "https://example.com/short", "slug": "short-link", "ttl": 1})
 	sess.post("/links", map[string]any{"target_url": "https://example.com/short", "slug": "short-edit", "ttl": 1})
 
-	for _, path := range []string{"/short-note", "/short-link", "/links/short-edit/edit"} {
+	for _, path := range []string{"/short-note", "/short-link", "/links/short-edit", "/edit/short-edit"} {
 		sess.awaitErrorCode(path, "410")
 		sess.expectErrorPage("410", expiredTitle, expiredDesc)
 	}
@@ -650,4 +662,197 @@ func testAccessErrorPages(sess *uiSession) {
 
 	sess.gotoPage("/admin")
 	sess.expectErrorPage("403", "Forbidden", "You don't have permission to perform this action.")
+}
+
+// The texts of #fileError on the upload and edit pages of a file.
+const (
+	fileTooLargeMessage = "The file is larger than the server limit (1 MiB)."
+	fileSlugTaken       = "This slug is already taken. Choose another slug."
+	fileStorageMessage  = "File storage is unavailable. Try again later."
+	filesOffMessage     = "File publishing is turned off on this server."
+	fileNetworkMessage  = "The connection failed. Check the network and try again."
+	fileWrongEditCode   = "The edit code is not correct."
+)
+
+// fileReply is a simulated reply with a JSON body for the file forms.
+func fileReply(name string, status int, message, want string) serverReply {
+	return serverReply{
+		name: name, status: status, contentType: "application/json",
+		body: `{"message":"` + message + `"}`, abort: false, want: want,
+	}
+}
+
+// fileServerReplies are the failed replies that the upload and edit pages of a file translate.
+// tooLarge is the text of a 413 reply: only the upload page knows the size limit.
+func fileServerReplies(tooLarge string) []serverReply {
+	return []serverReply{
+		fileReply("conflict", http.StatusConflict, "slug is already taken", fileSlugTaken),
+		fileReply("too large", http.StatusRequestEntityTooLarge, "file is too large", tooLarge),
+		fileReply("file name", http.StatusUnprocessableEntity, "file name must be 1-255 bytes",
+			"The file name is not valid."),
+		fileReply("validation", http.StatusUnprocessableEntity, "invalid ttl", "invalid ttl"),
+		{
+			name: "validation without text", status: http.StatusUnprocessableEntity, contentType: "text/plain",
+			body: "bad request", abort: false, want: "The server did not accept these settings.",
+		},
+		fileReply("storage unavailable", http.StatusServiceUnavailable, "file storage is unavailable",
+			fileStorageMessage),
+		fileReply("files off", http.StatusServiceUnavailable, "feature not supported", filesOffMessage),
+		fileReply("cross-origin", http.StatusForbidden, "cross-origin request rejected",
+			"cross-origin request rejected"),
+		{
+			name: "not JSON", status: http.StatusInternalServerError, contentType: "text/plain",
+			body: "upstream failure", abort: false, want: "The request failed. Try again.",
+		},
+	}
+}
+
+// testFileEditorErrors: the errors of the upload page, from the page checks and from the server.
+func testFileEditorErrors(sess *uiSession) {
+	// Notes, short links and files share one slug namespace.
+	sess.createNote("taken-file")
+	sess.gotoPage("/files")
+
+	sess.button("Upload file")
+	sess.expectError("#fileError", "Choose a file to upload.")
+
+	// The page checks the size when the user selects the file and again before the upload.
+	sess.chooseFile("large.bin", make([]byte, maxFileSize+1))
+	sess.expectError("#fileError", fileTooLargeMessage)
+	sess.button("Upload file")
+	sess.expectError("#fileError", fileTooLargeMessage)
+
+	sess.chooseFile(testFileName, testFileContent())
+	sess.must(sess.expect.Locator(sess.page.Locator("#fileError")).ToBeHidden())
+
+	sess.fill("#slugInput", "taken-file")
+	sess.button("Upload file")
+	sess.expectError("#fileError", fileSlugTaken)
+
+	sess.fill("#slugInput", "login")
+	sess.button("Upload file")
+	sess.expectErrorContains("#fileError", invalidSlugMessage)
+	sess.fill("#slugInput", "")
+
+	for _, reply := range fileServerReplies(fileTooLargeMessage) {
+		sess.simulate("**/files", reply)
+		sess.button("Upload file")
+		sess.expectReply("#fileError", reply)
+		sess.must(sess.expect.Locator(sess.page.Locator("#uploadProgress")).ToBeHidden())
+		sess.must(sess.expect.Locator(sess.page.Locator("#submitBtn")).ToBeEnabled())
+		sess.text("#fileName", testFileName)
+	}
+
+	// XMLHttpRequest takes a canceled request (ERR_ABORTED) as a cancel of the user, so a broken
+	// connection needs a different network error.
+	sess.allowFailure("net::ERR_FAILED")
+	sess.must(sess.page.Unroute("**/files"))
+	sess.must(sess.page.Route("**/files", func(route playwright.Route) {
+		err := route.Abort("failed")
+		if err != nil {
+			sess.errorf("abort upload: %v", err)
+		}
+	}))
+	sess.button("Upload file")
+	sess.expectError("#fileError", fileNetworkMessage)
+	sess.must(sess.expect.Locator(sess.page.Locator("#submitBtn")).ToBeEnabled())
+
+	// A correct attempt after the errors uploads the file.
+	sess.must(sess.page.Unroute("**/files"))
+	sess.button("Upload file")
+	sess.uploadedFile()
+}
+
+// testFileEditErrors: the errors of the edit page of a file.
+func testFileEditErrors(sess *uiSession) {
+	id, _ := sess.uploadTestFile()
+	sess.openFileEditor()
+	sess.page.OnDialog(func(dialog playwright.Dialog) { sess.must(dialog.Accept()) })
+
+	sess.button("Save")
+	sess.expectError("#fileError", "Edit code required")
+
+	sess.button("Delete file")
+	sess.expectError("#fileError", "Edit code required")
+
+	sess.openSettings()
+	sess.fill("#editCodeInput", wrongEditCode)
+	sess.closeSettings()
+	sess.button("Save")
+	sess.expectError("#fileError", fileWrongEditCode)
+
+	sess.button("Delete file")
+	sess.expectError("#fileError", fileWrongEditCode)
+
+	replies := append(fileServerReplies("The file is larger than the server limit."),
+		fileReply("sign in", http.StatusUnauthorized, "unauthorized", "Sign in to change this file."),
+		fileReply("not found", http.StatusNotFound, "not found", fileGoneDesc),
+		fileReply("expired", http.StatusGone, "expired", fileGoneDesc),
+		serverReply{name: "no connection", status: 0, contentType: "", body: "", abort: true, want: fileNetworkMessage},
+	)
+	for _, reply := range replies {
+		sess.simulate("**/files/"+id, reply)
+		sess.button("Save")
+		sess.expectReply("#fileError", reply)
+		sess.must(sess.expect.Locator(sess.page.Locator("#saveBtn")).ToBeEnabled())
+	}
+
+	sess.simulate("**/files/"+id, fileReply("not found", http.StatusNotFound, "not found", fileGoneDesc))
+	sess.button("Delete file")
+	sess.expectError("#fileError", fileGoneDesc)
+	sess.must(sess.expect.Locator(sess.page.Locator("#deleteBtn")).ToBeEnabled())
+	sess.must(sess.expect.Page(sess.page).ToHaveURL(sess.baseURL + "/edit/" + id))
+}
+
+// testFileErrorPages: the error pages of a missing file and of an expired file.
+func testFileErrorPages(sess *uiSession) {
+	sess.gotoPage("/files/missing-ui-file/download")
+	sess.expectErrorPage("404", fileGoneTitle, fileGoneDesc)
+
+	// The editor of each record is at /edit/{id}; without a record it is a missing note, as for a
+	// short link. The old editor URL goes there.
+	for _, path := range []string{"/edit/missing-ui-file", "/files/missing-ui-file/edit"} {
+		sess.gotoPage(path)
+		sess.expectErrorPage("404", notFoundTitle, notFoundDesc)
+	}
+
+	// The script uploads the file without the success page: that page reads the file, and a
+	// reader of an expired file deletes it.
+	id, isText := sess.eval(`async () => {
+		const data = new FormData();
+		data.append('ttl', '1');
+		data.append('file', new Blob(['Short life']), 'short-life.txt');
+		const response = await fetch('/files', {method: 'POST', headers: {Accept: 'application/json'}, body: data});
+		return (await response.json()).id;
+	}`).(string)
+	require.True(sess.t, isText, "the upload returns the file ID")
+
+	// The edit page reads only the record, so it shows the expiry without a change to the file.
+	sess.awaitErrorCode("/edit/"+id, "410")
+	sess.expectErrorPage("410", fileGoneTitle, fileGoneDesc)
+
+	// The first reader of the file page deletes the expired file; then the file is not found.
+	sess.gotoPage("/" + id)
+	sess.expectErrorPage("410", fileGoneTitle, fileGoneDesc)
+
+	sess.gotoPage("/files/" + id + "/download")
+	sess.expectErrorPage("404", fileGoneTitle, fileGoneDesc)
+	sess.gotoPage("/edit/" + id)
+	sess.expectErrorPage("404", notFoundTitle, notFoundDesc)
+
+	// Without the file record, the short address is a missing note.
+	sess.gotoPage("/" + id)
+	sess.expectErrorPage("404", notFoundTitle, notFoundDesc)
+}
+
+// testFilesOff: a server without object storage has no file tab and shows the page of files off.
+func testFilesOff(sess *uiSession) {
+	sess.gotoPage("/")
+	sess.must(sess.expect.Locator(sess.page.Locator(`a.nav-tab[href="/files"]`)).ToHaveCount(0))
+	sess.text(".site-footer > span:first-child", "Padmark — Markdown notes & short links")
+
+	for _, path := range []string{"/files", "/files/any-file/edit"} {
+		sess.gotoPage(path)
+		sess.expectErrorPage("503", "Files are off", filesOffMessage)
+	}
 }

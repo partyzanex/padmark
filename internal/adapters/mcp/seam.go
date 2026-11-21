@@ -11,6 +11,7 @@ import (
 // PadmarkClient is the subset of the generated ogen client (*padmark.Client) the tools need.
 // A seam by the project's DIP convention: declared next to the consumer (this package),
 // implemented by the concrete generated client, replaced by a generated mock in unit tests.
+// The file tools use the separate FileClient seam (files.go), so that each seam stays small.
 type PadmarkClient interface {
 	CreateNote(ctx context.Context, request *padmark.CreateNoteRequest) (padmark.CreateNoteRes, error)
 	GetNote(ctx context.Context, params padmark.GetNoteParams) (padmark.GetNoteRes, error)

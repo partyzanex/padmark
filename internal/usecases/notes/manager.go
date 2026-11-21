@@ -94,6 +94,20 @@ type EditCodeHasher interface {
 	Verify(storedHash, code string) bool
 }
 
+// ExpiredFileReleaser removes an expired file that still holds a slug, because the file sweep
+// did not run yet. files.Manager implements it; the default releases nothing. Errors are
+// fail-soft: Create keeps its slug conflict and logs the error.
+type ExpiredFileReleaser interface {
+	// ReleaseExpiredSlug removes the expired file with the record ID id. It returns true when
+	// it removed the file.
+	ReleaseExpiredSlug(ctx context.Context, id string) (bool, error)
+}
+
+// noExpiredFiles is the default ExpiredFileReleaser, for a server without file publishing.
+type noExpiredFiles struct{}
+
+func (noExpiredFiles) ReleaseExpiredSlug(context.Context, string) (bool, error) { return false, nil }
+
 // Manager implements note business logic: CRUD, slug resolution, and encryption coordination.
 // Burn-after-reading / on-read expiry policy is delegated to burn (see burn.go) so that state
 // machine stays independently readable and testable instead of growing inline here.
@@ -108,6 +122,8 @@ type Manager struct {
 	burn      *burner
 	// renderCache defaults to noRenderCache; attach a real one with WithRenderCache.
 	renderCache RenderCache
+	// expiredFiles defaults to noExpiredFiles; attach files.Manager with WithExpiredFiles.
+	expiredFiles ExpiredFileReleaser
 	// allowCustomSlugs gates user-supplied (human-readable) slugs. When false, custom slugs are
 	// rejected and only server-generated random slugs are issued.
 	allowCustomSlugs domain.CustomSlugSetting
@@ -132,8 +148,17 @@ func NewManager(
 		log:              log,
 		burn:             newBurner(storage, encryptor, log),
 		renderCache:      noRenderCache{},
+		expiredFiles:     noExpiredFiles{},
 		allowCustomSlugs: domain.CustomSlugSetting(allowCustomSlugs),
 	}
+}
+
+// WithExpiredFiles attaches the file manager, so that an expired file that the sweep did not
+// remove yet does not block a note with the same slug. Call it at composition time.
+func (m *Manager) WithExpiredFiles(releaser ExpiredFileReleaser) *Manager {
+	m.expiredFiles = releaser
+
+	return m
 }
 
 // WithRenderCache attaches a RenderCache for rendered note HTML. The default caches nothing, so
@@ -227,7 +252,7 @@ func (m *Manager) Create(ctx context.Context, note *domain.Note) (*domain.Note, 
 	note.Content = encrypted
 	note.ID = domain.HashSlug(slug) // store hash, not slug.
 
-	err = m.storage.Create(ctx, note)
+	err = m.createReleasingExpiredFile(ctx, note)
 	if err != nil {
 		return nil, fmt.Errorf("create note: %w", err)
 	}
@@ -665,4 +690,32 @@ func decryptContent(ctx context.Context, enc Encryptor, log *slog.Logger, note *
 	note.Content = plaintext
 
 	return nil
+}
+
+// createReleasingExpiredFile calls storage.Create. On a slug conflict, it asks the file manager
+// to remove an expired file with the same ID and tries once more. The storage triggers check
+// the slug again, so the retry is safe across server processes.
+func (m *Manager) createReleasingExpiredFile(ctx context.Context, note *domain.Note) error {
+	err := m.storage.Create(ctx, note)
+	if errors.Is(err, domain.ErrSlugConflict) && m.releaseExpiredFile(ctx, note.ID) {
+		err = m.storage.Create(ctx, note)
+	}
+
+	if err != nil {
+		return fmt.Errorf("store note: %w", err)
+	}
+
+	return nil
+}
+
+// releaseExpiredFile reports whether the file manager removed an expired file with id.
+func (m *Manager) releaseExpiredFile(ctx context.Context, id string) bool {
+	released, err := m.expiredFiles.ReleaseExpiredSlug(ctx, id)
+	if err != nil {
+		m.log.WarnContext(ctx, "release expired file slug", "id", id, "err", err)
+
+		return false
+	}
+
+	return released
 }

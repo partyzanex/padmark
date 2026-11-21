@@ -76,4 +76,10 @@ var (
 	// ErrInvalidAPITokenTTL reports an API token lifetime outside 0 (never expires) …
 	// MaxAPITokenTTLDays.
 	ErrInvalidAPITokenTTL = errors.New("api token lifetime out of range")
+	// ErrFileTooLarge reports an upload that is larger than the server limit (--max-file-size).
+	ErrFileTooLarge = errors.New("file exceeds maximum size")
+	// ErrInvalidFileName reports an empty file name, or one that is longer than MaxFileNameLength.
+	ErrInvalidFileName = errors.New("file name must be 1-255 bytes")
+	// ErrStorageUnavailable reports that the object storage for files did not complete an operation.
+	ErrStorageUnavailable = errors.New("file storage is unavailable")
 )

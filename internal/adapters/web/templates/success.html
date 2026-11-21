@@ -3,8 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Padmark — {{if .IsLink}}Link{{else}}Paste{{end}} created</title>
+    <title>Padmark — {{if .IsLink}}Link{{else if .IsFile}}File{{else}}Paste{{end}} created</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    {{template "theme-head" .Nonce}}
     <link rel="stylesheet" href="/static/style.css?p={{styleVersion}}">
 </head>
 <body>
@@ -18,12 +19,17 @@
                 <span class="success-icon" aria-hidden="true">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>
                 </span>
-                <h1 class="success-title" id="successTitle">{{if .IsLink}}Your link is live{{else}}Your note is live{{end}}</h1>
+                <h1 class="success-title" id="successTitle">{{if .IsLink}}Your link is live{{else if .IsFile}}Your file is live{{else}}Your note is live{{end}}</h1>
+                {{- if .SettingsKnown}}
                 <p class="success-subtitle">{{if eq .Privacy "owner"}}Only you can open it.{{else if eq .Privacy "authenticated"}}Signed-in users with the link can open it.{{else}}Anyone with the link can open it.{{end}}</p>
+                {{- end}}
+                {{- if and .IsFile .FileName}}
+                <p class="success-file" id="successFile"><strong>{{.FileName}}</strong><span>{{.SizeLabel}}</span></p>
+                {{- end}}
             </div>
 
             <div class="share-block">
-                <span class="lbl" id="shareLabel">{{if .IsLink}}Short link{{else}}Share link{{end}}</span>
+                <span class="lbl" id="shareLabel">{{if .IsLink}}Short link{{else if .IsFile}}File link{{else}}Share link{{end}}</span>
                 <div class="copy-row">
                     <div class="copy-field">
                         <a href="{{.URL}}" class="copy-value" aria-describedby="shareLabel">{{.URL}}</a>
@@ -38,16 +44,13 @@
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 8l5-5 5 5M5 14v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5"/></svg>
                         Share
                     </button>
-                    <a href="{{.URL}}" class="btn-ghost">
+                    {{/* The actions are the same for each kind of record: the button opens the page of
+                         the record, where Edit is, as for a note. */}}
+                    <a href="{{.OpenURL}}" class="btn-ghost" id="openRecordLink">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>
-                        {{if .IsLink}}Open link{{else}}Open note{{end}}
+                        {{if .IsLink}}Open link{{else if .IsFile}}Open file{{else}}Open note{{end}}
                     </a>
-                    {{if .IsLink}}
-                    <a href="/links/{{.ID}}/edit" class="btn-ghost">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></svg>
-                        Edit link
-                    </a>
-                    {{else}}
+                    {{if not (or .IsLink .IsFile)}}
                     <a href="{{.URL}}?raw=1" class="btn-ghost">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="m10 13-2 2 2 2M14 13l2 2-2 2"/></svg>
                         Raw
@@ -68,10 +71,12 @@
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
                     </button>
                 </div>
-                <p class="secret-note">Save it now — you'll need it to edit or delete this {{if .IsLink}}link{{else}}note{{end}}. It cannot be recovered.</p>
+                <p class="secret-note">Save it now — you'll need it to edit or delete this {{if .IsLink}}link{{else if .IsFile}}file{{else}}note{{end}}. {{if .IsFile}}It is shown only once and cannot be recovered.{{else}}It cannot be recovered.{{end}}</p>
             </div>
 
-            <ul class="chip-list" aria-label="{{if .IsLink}}Link{{else}}Note{{end}} settings">
+            {{- if or .SettingsKnown .BurnAfterReading}}
+            <ul class="chip-list" aria-label="{{if .IsLink}}Link{{else if .IsFile}}File{{else}}Note{{end}} settings">
+                {{- if .SettingsKnown}}
                 <li class="chip">
                     {{if eq .Privacy "owner"}}
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>Owner only
@@ -85,22 +90,27 @@
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
                     <span class="chip-text">{{.ExpiresLabel}}</span>
                 </li>
+                {{- end}}
                 {{if .BurnAfterReading}}
                 <li class="chip chip--warn">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M12 22c4 0 7-2.7 7-7 0-4-3-6.5-4.5-9.5C13 7 12.5 9 11 10 10.5 8 9.5 6.5 8 5c0 3-3 5.5-3 10 0 4.3 3 7 7 7z"/></svg>
-                    {{if .IsLink}}Burns after the first click{{else}}Burns after reading{{end}}
+                    {{if .IsLink}}Burns after the first click{{else if .IsFile}}Deleted after the first download{{else}}Burns after reading{{end}}
                 </li>
                 {{end}}
             </ul>
+            {{- end}}
 
             <div class="card-links">
                 <a href="/">Write another note</a>
                 <a href="/links">Shorten a link</a>
+                {{- if .Header.FilesEnabled}}
+                <a href="/files">Upload a file</a>
+                {{- end}}
             </div>
         </section>
     </main>
 
-    {{template "footer"}}
+    {{template "footer" .Header}}
 
 </div>
 
@@ -144,7 +154,7 @@
         }
 
         const id = new URLSearchParams(location.search).get('id');
-        const key = ({{.IsLink}} ? 'padmark_link_edit_' : 'padmark_edit_') + id;
+        const key = ({{.IsLink}} ? 'padmark_link_edit_' : {{.IsFile}} ? 'padmark_file_edit_' : 'padmark_edit_') + id;
         const code = sessionStorage.getItem(key);
         if (code) {
             sessionStorage.removeItem(key);

@@ -17,8 +17,9 @@ const noCard = -1
 
 // The number of pages that each scenario measures.
 const (
-	notesFramePages    = 10
+	notesFramePages    = 11
 	accountsFramePages = 4
+	filesFramePages    = 6
 )
 
 // pageFrame holds the parts of a page that must stay in place when the user goes to a different
@@ -41,8 +42,11 @@ type framedPage struct {
 
 func TestPageFrame(t *testing.T) {
 	runScenarios(t, []scenario{
-		{name: "Notes", run: testPageFrameNotes, accounts: false, allowedStatuses: []int{http.StatusNotFound}},
-		{name: "Accounts", run: testPageFrameAccounts, accounts: true, allowedStatuses: nil},
+		{name: "Notes", run: testPageFrameNotes, accounts: false, files: false, allowedStatuses: []int{http.StatusNotFound}},
+		{name: "Accounts", run: testPageFrameAccounts, accounts: true, files: false, allowedStatuses: nil},
+		// The header of a server with files has the "File" tab, so the file pages are compared
+		// with the note editor of the same server.
+		{name: "Files", run: testPageFrameFiles, files: true, accounts: false, allowedStatuses: nil},
 	})
 }
 
@@ -81,7 +85,11 @@ func testPageFrameNotes(sess *uiSession) {
 	linkID, _ := sess.createdLink()
 	pages = append(pages, sess.frame("published link"))
 
-	sess.gotoPage("/links/" + linkID + "/edit")
+	sess.gotoPage("/links/" + linkID)
+	sess.visible("#linkTitle")
+	pages = append(pages, sess.frame("link"))
+
+	sess.gotoPage("/edit/" + linkID)
 	pages = append(pages, sess.frame("link edit"))
 
 	sess.gotoPage("/missing-ui-note")
@@ -106,6 +114,33 @@ func testPageFrameAccounts(sess *uiSession) {
 
 	sess.gotoPage("/change-password")
 	pages = append(pages, sess.frame("change password"))
+
+	sess.expectSameFrame(pages)
+}
+
+// testPageFrameFiles: the pages of the file flow have the same frame as the note editor.
+func testPageFrameFiles(sess *uiSession) {
+	pages := make([]framedPage, 0, filesFramePages)
+
+	sess.gotoPage("/")
+	pages = append(pages, sess.frame("note editor"))
+
+	sess.gotoPage("/links")
+	pages = append(pages, sess.frame("link editor"))
+
+	sess.gotoPage("/files")
+	pages = append(pages, sess.frame("file upload"))
+
+	id, _ := sess.uploadTestFile()
+	pages = append(pages, sess.frame("uploaded file"))
+
+	sess.gotoPage("/" + id)
+	sess.visible("#downloadBtn")
+	pages = append(pages, sess.frame("file"))
+
+	sess.gotoPage("/edit/" + id)
+	sess.visible("#saveBtn")
+	pages = append(pages, sess.frame("file edit"))
 
 	sess.expectSameFrame(pages)
 }

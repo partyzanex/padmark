@@ -30,12 +30,48 @@ services:
       PADMARK_DSN: "postgres://padmark:${POSTGRES_PASSWORD}@db:5432/padmark?sslmode=disable"
       PADMARK_ADDR: ":8080"
       PADMARK_LOG_FORMAT: json
+      # File publishing through the s3 service below; see "Files setup" in README.md.
+      # The endpoint is plain HTTP inside the Compose network. padmark refuses plain HTTP to a
+      # host that is not loopback unless PADMARK_S3_ALLOW_INSECURE is true; it then logs a WARN.
+      PADMARK_S3_ENDPOINT: "http://s3:9000"
+      PADMARK_S3_ALLOW_INSECURE: "true"
+      PADMARK_S3_BUCKET: "padmark-files"
+      PADMARK_S3_ACCESS_KEY: "${PADMARK_S3_ACCESS_KEY:?Set PADMARK_S3_ACCESS_KEY in .env}"
+      PADMARK_S3_SECRET_KEY: "${PADMARK_S3_SECRET_KEY:?Set PADMARK_S3_SECRET_KEY in .env}"
     volumes:
       - content_keys:/data
     depends_on:
       db:
         condition: service_healthy
+      s3:
+        condition: service_healthy
     restart: unless-stopped
+    networks:
+      - padmark
+
+  s3:
+    # S3-compatible storage for files. RustFS replaces MinIO here: the MinIO images need a
+    # registry login. padmark creates its bucket at the first start.
+    image: rustfs/rustfs:1.0.6
+    restart: unless-stopped
+    environment:
+      # These are the root keys of RustFS, and padmark uses the same keys. For production, give
+      # padmark a key that has access only to its bucket; see "Files setup" in README.md.
+      RUSTFS_ACCESS_KEY: "${PADMARK_S3_ACCESS_KEY:?Set PADMARK_S3_ACCESS_KEY in .env}"
+      RUSTFS_SECRET_KEY: "${PADMARK_S3_SECRET_KEY:?Set PADMARK_S3_SECRET_KEY in .env}"
+    volumes:
+      - s3_data:/data
+    # padmark checks the bucket at startup and stops when the S3 API does not respond, so it
+    # waits for this check. The image contains curl.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:9000/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    # Loopback-only: the S3 API (9000) and the web console (9001) for local checks from the host.
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
     networks:
       - padmark
 
@@ -45,3 +81,4 @@ networks:
 volumes:
   db_data:
   content_keys:
+  s3_data:

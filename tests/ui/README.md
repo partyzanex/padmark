@@ -12,23 +12,37 @@ They cover field entry, editor formatting, the Write/Split/Preview views and pre
 sanitization, validation,
 publish/save, clipboard actions, raw view, burn confirmation, theme persistence,
 setup/login, password changes, admin invites, keys and user revocation. Link scenarios cover
-creation, validation, failure/retry, editing/deletion, expiry preservation/reset, redirect
-settings, burn after click and owner-only access to the editor.
+creation, the link page, validation, failure/retry, editing/deletion, expiry
+preservation/reset, redirect settings, burn after click and owner-only access to the link page
+and the editor. File scenarios cover upload,
+the result page, the file page, download with a byte comparison, burn after download, changes
+to the lifetime, the privacy and burn after download, deletion with the edit code and by the
+owner, private files without a session and a canceled upload.
 
 Each scenario starts a real Padmark server with its own temporary SQLite database,
 keyring and browser context. Inherited `PADMARK_*` settings are removed from the
 server environment. Test servers use lower Argon2 costs. The test binary starts each
 server through a copy of itself that kills the server when the test process exits,
 also after a `-timeout` panic. A start that loses its port to a parallel server is
-retried on a new port. Every scenario fails on
+retried on a new port.
+
+Scenarios with `files: true` also get object storage: one `adobe/s3mock:3.12.0` container for
+the full run, with the throwaway test keys in `PADMARK_S3_ACCESS_KEY` and
+`PADMARK_S3_SECRET_KEY` and an upload limit of 1 MiB. The first file scenario starts the
+container through testcontainers, and the run removes it at the end. These scenarios need
+Docker; a run without them, for example `-run TestEditor`, does not. The other scenarios keep
+files off, because the header then has no "File" tab and their references stay the same.
+
+Every scenario fails on
 uncaught JavaScript errors, console errors, HTTP errors and failed resource requests.
 Intentional HTTP errors must be allowed explicitly; missing static resources always
-fail. One simulated 503 checks the editor's failure/retry UI.
+fail. One simulated 503 checks the editor's failure/retry UI. A scenario that breaks a request
+on purpose calls `allowFailure` with the network error, for example `net::ERR_FAILED`.
 
 ## Run
 
-Requires the Go version in the root `go.mod`. A separate Node.js/npm installation is
-not required: playwright-go downloads its internal Node.js driver and Chromium into
+Requires the Go version in the root `go.mod` and Docker for the file scenarios. A separate
+Node.js/npm installation is not required: playwright-go downloads its internal Node.js driver and Chromium into
 `tests/ui/.cache/`. This is still a Playwright driver internally, not a pure Go browser
 engine. Minimal Linux hosts also need Chromium's OS libraries; the CI container
 already includes those libraries and the matching browser.
@@ -62,19 +76,26 @@ with `-headed` is refused for the same reason.
 
 ## Writing scenarios
 
-Scenarios are ordinary Go functions in `editor_test.go`, `editor_preview_test.go`, `links_test.go`
-and `accounts_test.go`.
-Add a case to `TestEditor`, `TestLinks` or `TestAccounts`; `runScenarios` runs it at both screen
-sizes with a fresh server, context, diagnostics and failure artifacts.
+Scenarios are ordinary Go functions in `editor_test.go`, `editor_preview_test.go`, `links_test.go`,
+`files_test.go` and `accounts_test.go`.
+Add a case to `TestEditor`, `TestLinks`, `TestFiles` or `TestAccounts`; `runScenarios` runs it at
+both screen sizes with a fresh server, context, diagnostics and failure artifacts. Set
+`files: true` only for a scenario that needs files.
 
 `TestPageFrame` in `page_frame_test.go` compares the page frame of all pages: the header, the
 logo, the left and right content edges and the top edge of the editor and article cards.
-Add each new page to its scenarios, so a page that moves the frame fails the test.
+Add each new page to its scenarios, so a page that moves the frame fails the test. The `Files`
+scenario compares the file pages with the note editor of a server with files.
+
+`TestThemeFirstPaint` in `theme_paint_test.go` saves the light theme and opens the pages, also
+through the "New" and "Edit" actions. It records `data-theme` when the parser makes `<body>`,
+before the body scripts run, and requires the saved theme: a page must not paint the default
+theme first.
 
 `TestErrors` in `errors_test.go` opens each error of the web interface: the note and short-link
-forms, simulated server replies, the setup, sign-in, invite and change-password forms, the admin
-panel and the error pages. `expectError(selector, text)` checks the text and makes sure that the
-element is in the viewport, is inside the screen width and does not clip its content.
+and file forms, simulated server replies, the setup, sign-in, invite and change-password forms,
+the admin panel and the error pages, also the pages of a missing, an expired and a disabled file.
+`expectError(selector, text)` checks the text and makes sure that the element is in the viewport, is inside the screen width and does not clip its content.
 Add each new error message to a scenario of that test.
 
 ```go

@@ -13,13 +13,13 @@ import (
 
 func TestAccounts(t *testing.T) {
 	runScenarios(t, []scenario{
-		{name: "Setup", accounts: true, run: testSetup, allowedStatuses: nil},
-		{name: "SetupSubmit", accounts: true, run: testSetupSubmit, allowedStatuses: nil},
-		{name: "Login", accounts: true, run: testLogin, allowedStatuses: nil},
-		{name: "AdminForms", accounts: true, run: testAdminForms, allowedStatuses: nil},
-		{name: "RevokeUser", accounts: true, run: testRevokeUser, allowedStatuses: nil},
-		{name: "ChangePassword", accounts: true, run: testChangePassword, allowedStatuses: nil},
-		{name: "PrivacyOptions", accounts: true, run: testPrivacyOptions, allowedStatuses: nil},
+		{name: "Setup", accounts: true, files: false, run: testSetup, allowedStatuses: nil},
+		{name: "SetupSubmit", accounts: true, files: false, run: testSetupSubmit, allowedStatuses: nil},
+		{name: "Login", accounts: true, files: false, run: testLogin, allowedStatuses: nil},
+		{name: "AdminForms", accounts: true, files: false, run: testAdminForms, allowedStatuses: nil},
+		{name: "RevokeUser", accounts: true, files: false, run: testRevokeUser, allowedStatuses: nil},
+		{name: "ChangePassword", accounts: true, files: false, run: testChangePassword, allowedStatuses: nil},
+		{name: "PrivacyOptions", accounts: true, files: false, run: testPrivacyOptions, allowedStatuses: nil},
 	})
 }
 

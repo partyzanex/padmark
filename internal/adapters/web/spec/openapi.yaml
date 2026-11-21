@@ -99,6 +99,21 @@ info:
     fetch (`Sec-Fetch-Dest` other than `document`/`empty`, e.g. `<img src="/{id}">`) gets
     `409` (`code: burn_read_not_explicit`) and leaves the link intact, so link unfurlers and
     mail scanners cannot burn it. Ordinary links redirect any client as before.
+    ## Files
+
+    `POST /files` uploads one file as `multipart/form-data`. The server streams the file to
+    object storage and keeps it encrypted. Files are optional: without object storage
+    (`--s3-endpoint`, `--s3-bucket`), each `/files` operation answers `503`. Files use the same
+    `privacy` levels, edit codes and ownership rules as notes and links. A file shares the slug
+    namespace with notes and links, so `GET /{id}` also downloads a file. The size limit is
+    `--max-file-size`. A streaming handler serves the `/files` operations, not the generated
+    JSON server.
+
+    A `burn_after_download` file is deleted after the first deliberate download. A client without
+    browser fetch metadata consumes it with an exact `Accept` (for example
+    `application/octet-stream`). A browser consumes it only through the download form of the file
+    page, which has a CSRF token. Other requests get `409` with code `burn_read_not_explicit`, and
+    the file stays; a browser goes to the file page (`303`).
   version: 0.4.0
 
 servers:
@@ -109,6 +124,10 @@ tags:
     description: CRUD operations on notes
   - name: links
     description: Short-link creation, lookup, and deletion (see the "Short links" section above)
+  - name: files
+    description: >
+      File upload, description, download, change and deletion. Requires object storage on the
+      server (see the "Files" section above).
   - name: health
     description: Liveness and readiness probes
   - name: accounts
@@ -454,7 +473,9 @@ paths:
         Returns the link as JSON, including its decrypted `target_url`. This is a metadata-only
         read: it does not increment `views`, does not consume a `burn_after_click` link, and does
         not follow the redirect — visiting `GET /{id}` does all of that. See the "Short links"
-        section above.
+        section above. A client whose `Accept` header prefers `text/html` gets the browser page
+        of the link instead, with the same privacy and expiry rules; send `Accept:
+        application/json` to get this response.
       tags: [links]
       parameters:
         - $ref: "#/components/parameters/linkId"
@@ -591,6 +612,302 @@ paths:
           $ref: "#/components/responses/Error"
         "503":
           $ref: "#/components/responses/APIDisabled"
+
+  /files:
+    post:
+      operationId: createFile
+      summary: Upload a file
+      description: |
+        Uploads one file and returns its description with the one-time `edit_code`.
+        Send `multipart/form-data`. Put the optional text fields `ttl`, `privacy`,
+        `burn_after_download`, `slug` and `edit_code` first. Put the `file` part last.
+        A part after `file` gives `400`, and the server does not keep the file.
+        The server streams the file to object storage and does not keep it in memory.
+        Each text field can have a maximum of 1024 bytes and can occur one time. An unknown
+        field name or a repeated field gives `400`. All data before the `file` part,
+        part headers included, can have a maximum of 64 KiB. If `slug` is omitted, the server
+        generates a 10-character random slug. The file name comes from the `filename` of the
+        `file` part.
+
+        A `Content-Length` above the limit gets `413` before the server reads the body. An
+        upload that sends no data for the idle timeout (60 seconds by default) gets `408`.
+        The server limits the number of uploads at the same time, in total and for each client
+        IP address. A full limit gives `503` (server) or `429` (client) with `Retry-After`.
+        An error response before the end of the body has `Connection: close`.
+
+        A bearer token that is not valid does not give `401`: the server ignores it and the
+        file has no owner, as for `POST /notes` and `POST /links`.
+      tags: [files]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/CreateFileRequest"
+      responses:
+        "201":
+          description: File uploaded
+          headers:
+            Location:
+              description: Short URL of the file (`/{id}`)
+              schema:
+                type: string
+                example: /abcde12345
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateFileResponse"
+        "400":
+          description: |
+            The body is not `multipart/form-data`, it has no `file` part, a text field is
+            not valid (for example, `ttl` is not a number of seconds), a field name is unknown
+            or repeated, the data before the `file` part is larger than 64 KiB, a part follows
+            the `file` part, or the multipart body is malformed or ends before its closing
+            boundary
+          $ref: "#/components/responses/Error"
+        "401":
+          description: |
+            Not used. A bearer token that is not valid does not give `401`; the server ignores
+            it and makes a file without an owner.
+          $ref: "#/components/responses/Error"
+        "403":
+          description: The `Origin` header names a different site
+          $ref: "#/components/responses/Error"
+        "409":
+          description: A note, link or file with the requested slug already exists
+          $ref: "#/components/responses/Error"
+        "413":
+          description: |
+            The file is larger than the server limit (`--max-file-size`), or the declared
+            `Content-Length` is larger than that limit plus 1 MiB for the form
+          $ref: "#/components/responses/Error"
+        "422":
+          description: |
+            The slug, the file name or the privacy level is not valid. `privacy: owner` without
+            a credential also gets `422`.
+          $ref: "#/components/responses/Error"
+        "429":
+          description: |
+            Rate limit exceeded, or this client has the maximum number of uploads in progress
+            (with `Retry-After`)
+          $ref: "#/components/responses/Error"
+        "500":
+          $ref: "#/components/responses/Error"
+        "503":
+          description: |
+            Files are not enabled, the object storage is not available, the server has the
+            maximum number of uploads in progress (with `Retry-After`), or the API is disabled
+            (`code: api_disabled`)
+          $ref: "#/components/responses/Error"
+
+  /files/{id}:
+    get:
+      operationId: getFile
+      summary: Get the description of a file
+      description: |
+        Returns the file description as JSON. This read does not download the content, does not
+        increment `downloads` and does not consume a `burn_after_download` file.
+      tags: [files]
+      parameters:
+        - $ref: "#/components/parameters/fileId"
+      responses:
+        "200":
+          description: File found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileInfo"
+        "401":
+          description: The privacy level of the file requires a credential that the request does not have
+          $ref: "#/components/responses/Error"
+        "404":
+          description: File not found
+          $ref: "#/components/responses/Error"
+        "410":
+          description: The file has expired
+          $ref: "#/components/responses/Error"
+        "500":
+          $ref: "#/components/responses/Error"
+        "503":
+          description: |
+            Files are not enabled, the object storage is not available, or the API is disabled
+            (`code: api_disabled`)
+          $ref: "#/components/responses/Error"
+
+    put:
+      operationId: updateFile
+      summary: Change the access rules of a file
+      description: |
+        Changes the expiry, the privacy level and the burn-after-download rule of a file.
+        It does not change the content, the name, the slug, the owner or `downloads`.
+        An omitted field keeps its current value. Send the edit code in the `X-Edit-Code`
+        header. The account that uploaded the file can omit the edit code. Returns the changed
+        file description. The edit code is not returned again.
+      tags: [files]
+      parameters:
+        - $ref: "#/components/parameters/fileId"
+        - name: X-Edit-Code
+          in: header
+          description: Edit code returned at upload.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateFileRequest"
+      responses:
+        "200":
+          description: File changed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileInfo"
+        "400":
+          description: |
+            The body is not valid JSON, or it has an unknown field. Send the edit code only in
+            `X-Edit-Code`: an `edit_code` field in the body gets `400`.
+          $ref: "#/components/responses/Error"
+        "401":
+          description: |
+            The privacy level of the file requires a credential that the request does not have.
+            A wrong edit code is `403`, not `401`.
+          $ref: "#/components/responses/Error"
+        "403":
+          description: Wrong edit code, or a cross-site `Origin`
+          $ref: "#/components/responses/Error"
+        "404":
+          description: File not found or expired
+          $ref: "#/components/responses/Error"
+        "413":
+          description: Request body exceeds the server limit (configurable, default 4 MB)
+          $ref: "#/components/responses/Error"
+        "422":
+          description: |
+            `ttl` or `privacy` is not valid. `privacy: owner` for a file without an owner also
+            gets `422`.
+          $ref: "#/components/responses/Error"
+        "429":
+          description: |
+            Rate limit exceeded, or too many wrong edit codes for this file (10 in a 5-minute
+            window)
+          $ref: "#/components/responses/Error"
+        "500":
+          $ref: "#/components/responses/Error"
+        "503":
+          description: |
+            Files are not enabled, the object storage is not available, or the API is disabled
+            (`code: api_disabled`)
+          $ref: "#/components/responses/Error"
+
+    delete:
+      operationId: deleteFile
+      summary: Delete a file
+      description: |
+        Deletes the file record and its stored content. Send the edit code in the
+        `X-Edit-Code` header. The account that uploaded the file can omit the edit code.
+        The server ignores an `edit_code` query parameter.
+      tags: [files]
+      parameters:
+        - $ref: "#/components/parameters/fileId"
+        - name: X-Edit-Code
+          in: header
+          description: Edit code returned at upload.
+          schema:
+            type: string
+      responses:
+        "204":
+          description: File deleted
+        "401":
+          description: |
+            The privacy level of the file requires a credential that the request does not have.
+            A wrong edit code is `403`, not `401`.
+          $ref: "#/components/responses/Error"
+        "403":
+          description: Wrong edit code, or a cross-site `Origin`
+          $ref: "#/components/responses/Error"
+        "404":
+          description: File not found
+          $ref: "#/components/responses/Error"
+        "429":
+          description: |
+            Rate limit exceeded, or too many wrong edit codes for this file (10 in a 5-minute
+            window)
+          $ref: "#/components/responses/Error"
+        "500":
+          $ref: "#/components/responses/Error"
+        "503":
+          description: |
+            Files are not enabled, the object storage is not available, or the API is disabled
+            (`code: api_disabled`)
+          $ref: "#/components/responses/Error"
+
+  /files/{id}/download:
+    get:
+      operationId: getFileContent
+      summary: Download the content of a file
+      description: |
+        Sends the file content as `application/octet-stream` with
+        `Content-Disposition: attachment`. Each download increments `downloads`. `HEAD` sends
+        only the headers and does not count a download.
+
+        A `burn_after_download` file is deleted after this download. Send
+        `Accept: application/octet-stream` to show that the download is deliberate. Without a
+        deliberate `Accept`, the server answers `409` with code `burn_read_not_explicit` and
+        the file stays. A request with browser fetch metadata (`Sec-Fetch-Site`) or a prefetch
+        never consumes the file: a browser that asks for HTML goes to the file page (`303`),
+        whose download form (`POST` with a CSRF token) consumes it.
+
+        If object storage fails before the first byte, the server answers `503` without the
+        download headers. If the transfer stops after the first byte, the server closes the
+        connection, and the client gets fewer bytes than `Content-Length`. Discard such a
+        file. A download that makes no progress for the idle timeout (60 seconds by default)
+        stops in the same way.
+      tags: [files]
+      parameters:
+        - $ref: "#/components/parameters/fileId"
+      responses:
+        "200":
+          description: File content
+          headers:
+            Content-Disposition:
+              description: "`attachment` with the original file name in `filename`"
+              schema:
+                type: string
+                example: attachment; filename=report.pdf
+            Content-Length:
+              description: File size in bytes
+              schema:
+                type: integer
+                format: int64
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "401":
+          description: The privacy level of the file requires a credential that the request does not have
+          $ref: "#/components/responses/Error"
+        "404":
+          description: File not found
+          $ref: "#/components/responses/Error"
+        "409":
+          description: |
+            A `burn_after_download` file requested without a deliberate `Accept`
+            (code `burn_read_not_explicit`). The file stays. Send
+            `Accept: application/octet-stream`.
+          $ref: "#/components/responses/Error"
+        "410":
+          description: The file has expired
+          $ref: "#/components/responses/Error"
+        "500":
+          $ref: "#/components/responses/Error"
+        "503":
+          description: |
+            Files are not enabled, the object storage is not available, or the API is disabled
+            (`code: api_disabled`)
+          $ref: "#/components/responses/Error"
 
   /healthz:
     get:
@@ -741,6 +1058,15 @@ components:
       in: path
       required: true
       description: Link ID (slug) — 10-char random string or the custom slug chosen at creation
+      schema:
+        type: string
+        example: abcde12345
+
+    fileId:
+      name: id
+      in: path
+      required: true
+      description: File ID (slug). It is a 10-character random string or the custom slug chosen at upload.
       schema:
         type: string
         example: abcde12345
@@ -1202,6 +1528,136 @@ components:
           description: Same length and order as the request's `links` array
           items:
             $ref: "#/components/schemas/BulkLinkResult"
+
+    CreateFileRequest:
+      type: object
+      required: [file]
+      description: |
+        The upload form. Send the text fields before the `file` part: a part after `file`
+        gives `400`. Each field can occur one time; other field names give `400`.
+      properties:
+        ttl:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 9223372036
+          description: |
+            Lifetime of the file in seconds, counted from the start of the upload. Omitted means
+            the file does not expire. `0` makes a file that is already expired: the upload
+            succeeds, but each read answers `410` and deletes the file.
+          example: 86400
+        privacy:
+          type: string
+          enum: ["public", "authenticated", "owner"]
+          description: |
+            Who may read and download the file. Omitted means `public`. See
+            `CreateNoteRequest.privacy` for each value.
+        burn_after_download:
+          type: boolean
+          default: false
+          description: |
+            When `true`, the server deletes the file after the first deliberate download.
+        slug:
+          type: string
+          description: |
+            Custom identifier: one path segment. The first segment rules of
+            `CreateNoteRequest.slug` apply. Returns `409` if a note, link or file has the slug.
+          example: report-2026
+        edit_code:
+          type: string
+          minLength: 8
+          maxLength: 128
+          description: |
+            Optional custom edit code, with the rules of `CreateNoteRequest.edit_code`. Omit it
+            to get a random 12-character code.
+        file:
+          type: string
+          format: binary
+          description: |
+            The file content. Send it as the last part. The `filename` of the part becomes the
+            file name (1–255 bytes).
+
+    UpdateFileRequest:
+      type: object
+      description: The changes to the access rules. An omitted field keeps its current value.
+      properties:
+        ttl:
+          type: integer
+          format: int64
+          nullable: true
+          minimum: 0
+          maximum: 9223372036
+          description: |
+            Seconds until expiry, counted from this change. Omitted keeps the current expiry,
+            `null` removes it, and `0` makes the file expire now.
+          example: 86400
+        privacy:
+          type: string
+          enum: ["public", "authenticated", "owner"]
+          description: |
+            New privacy level. `owner` requires a file with an owner, otherwise the server
+            answers `422`.
+        burn_after_download:
+          type: boolean
+          description: New burn-after-download rule.
+
+    FileInfo:
+      type: object
+      required: [id, url, name, size, privacy, downloads, burn_after_download, created_at]
+      properties:
+        id:
+          type: string
+          description: Unique slug of the file
+          example: abcde12345
+        url:
+          type: string
+          format: uri
+          description: |
+            Absolute short URL of the file (`{base}/{id}`). The content is also available at
+            `/files/{id}/download`.
+          example: https://padmark.example.com/abcde12345
+        name:
+          type: string
+          description: Original file name
+          example: report.pdf
+        size:
+          type: integer
+          format: int64
+          description: File size in bytes
+          example: 1048576
+        privacy:
+          type: string
+          enum: ["public", "authenticated", "owner"]
+          description: Who may read and download the file
+        downloads:
+          type: integer
+          description: Number of downloads
+          example: 0
+        burn_after_download:
+          type: boolean
+          description: "`true` when the server deletes the file after the first download"
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Time after which the file is not available. Absent for a file that does not expire.
+        created_at:
+          type: string
+          format: date-time
+          description: Upload time (UTC)
+
+    CreateFileResponse:
+      allOf:
+        - $ref: "#/components/schemas/FileInfo"
+        - type: object
+          required: [edit_code]
+          properties:
+            edit_code:
+              type: string
+              description: |
+                One-time secret for `PUT` and `DELETE`. The server returns it only in this
+                response. Keep it.
+              example: JmNkn0LdjbMw
 
     ErrorResponse:
       type: object

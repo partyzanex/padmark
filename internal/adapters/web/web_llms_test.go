@@ -168,3 +168,34 @@ func (s *LLMsRouterSuite) TestSpecURLAdvertised() {
 	s.Contains(rec.Body.String(), "/api/openapi.yaml")
 	s.Contains(rec.Body.String(), "/api/reference.md")
 }
+
+// TestFilesSectionAdvertised verifies that llms.txt has the Files section and that its links
+// point to the Files section of the reference.
+func (s *LLMsRouterSuite) TestFilesSectionAdvertised() {
+	router := s.newRouter()
+
+	index := s.get(router, "/llms.txt")
+	s.Contains(index, "\n## Files\n")
+
+	for _, text := range []string{
+		"(/api/reference.md#files)", "`POST /files`", "multipart/form-data",
+		"`GET /files/{id}/download`", "Accept: application/octet-stream",
+		"`PUT /files/{id}`", "`DELETE /files/{id}`", "X-Edit-Code", "`413`",
+	} {
+		s.Contains(index, text)
+	}
+
+	s.Contains(s.get(router, "/api/reference.md"), "\n## Files\n", "the #files anchor must exist")
+}
+
+func (s *LLMsRouterSuite) get(router http.Handler, path string) string {
+	s.T().Helper()
+
+	req := httptest.NewRequestWithContext(s.T().Context(), http.MethodGet, path, nil)
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+	s.Require().Equal(http.StatusOK, rec.Code, path)
+
+	return rec.Body.String()
+}

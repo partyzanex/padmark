@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -43,8 +44,11 @@ var nonempty = regexp.MustCompile(`\S+`)
 func regexpURL(path string) *regexp.Regexp { return regexp.MustCompile(regexp.QuoteMeta(path)) }
 
 type scenario struct {
-	name            string
-	accounts        bool
+	name     string
+	accounts bool
+	// files turns on file publishing: the server gets the S3 mock storage. The header then shows
+	// the "File" tab, so only the file scenarios use it and the other references stay the same.
+	files           bool
 	allowedStatuses []int
 	run             func(*uiSession)
 }
@@ -73,7 +77,35 @@ type uiSession struct {
 	baseURL        string
 	artifacts      string
 	errors         safeLog
+	// failures are the network failures that the scenario causes on purpose.
+	failures failureList
 }
+
+// failureList holds network failure texts, for example "net::ERR_FAILED". The browser event
+// handlers read it from other goroutines, so a mutex protects it.
+type failureList struct {
+	mu    sync.Mutex
+	items []string
+}
+
+func (list *failureList) add(failure string) {
+	list.mu.Lock()
+	defer list.mu.Unlock()
+
+	list.items = append(list.items, failure)
+}
+
+// allows reports whether the text contains one of the failures.
+func (list *failureList) allows(text string) bool {
+	list.mu.Lock()
+	defer list.mu.Unlock()
+
+	return slices.ContainsFunc(list.items, func(failure string) bool { return strings.Contains(text, failure) })
+}
+
+// allowFailure permits the network failure in the browser diagnostics of the scenario. Use it
+// only for a failure that the scenario causes, for example with route.Abort.
+func (sess *uiSession) allowFailure(failure string) { sess.failures.add(failure) }
 
 type safeLog struct {
 	mu     sync.Mutex
@@ -97,7 +129,7 @@ func newUI(t *testing.T, screen viewport, test scenario) *uiSession {
 	t.Helper()
 
 	started := time.Now()
-	baseURL, serverLog := startServer(t, test.accounts)
+	baseURL, serverLog := startServer(t, test)
 	device := runner.playwright.Devices[screen.device]
 	context, err := runner.browser.NewContext(playwright.BrowserNewContextOptions{
 		BaseURL:           new(baseURL),
@@ -129,6 +161,7 @@ func newUI(t *testing.T, screen viewport, test scenario) *uiSession {
 		artifacts: filepath.Join("artifacts", strings.ReplaceAll(t.Name(), "/", "-")),
 
 		page: nil, errors: safeLog{mu: sync.Mutex{}, buffer: bytes.Buffer{}},
+		failures: failureList{mu: sync.Mutex{}, items: nil},
 	}
 	require.NoError(t, os.MkdirAll(sess.artifacts, 0o700))
 	sess.collectBrowserErrors(test.allowedStatuses)
@@ -156,14 +189,9 @@ func (sess *uiSession) collectBrowserErrors(allowedStatuses []int) {
 		}
 
 		text := message.Text()
-		for _, status := range allowedStatuses {
-			if strings.HasPrefix(text, "Failed to load resource:") &&
-				strings.Contains(text, fmt.Sprintf("status of %d", status)) {
-				return
-			}
+		if !sess.expectedResourceError(text, allowedStatuses) {
+			sess.errorf("Console: %s", text)
 		}
-
-		sess.errorf("Console: %s", text)
 	})
 	sess.browserContext.OnResponse(func(response playwright.Response) {
 		if response.Status() < 400 {
@@ -180,9 +208,25 @@ func (sess *uiSession) collectBrowserErrors(allowedStatuses []int) {
 	})
 	sess.browserContext.OnRequestFailed(func(request playwright.Request) {
 		failure := fmt.Sprint(request.Failure())
-		if !strings.Contains(failure, "ERR_ABORTED") {
+		if !strings.Contains(failure, "ERR_ABORTED") && !sess.failures.allows(failure) {
 			sess.errorf("Network: %s: %s", request.URL(), failure)
 		}
+	})
+}
+
+// expectedResourceError reports whether the console text is a failed resource load that the
+// scenario permits: an allowed HTTP status or a failure that the scenario causes.
+func (sess *uiSession) expectedResourceError(text string, allowedStatuses []int) bool {
+	if !strings.HasPrefix(text, "Failed to load resource:") {
+		return false
+	}
+
+	if sess.failures.allows(text) {
+		return true
+	}
+
+	return slices.ContainsFunc(allowedStatuses, func(status int) bool {
+		return strings.Contains(text, fmt.Sprintf("status of %d", status))
 	})
 }
 
@@ -243,7 +287,7 @@ const serverStartAttempts = 3
 // errAddressInUse marks a server start that lost its port; startServer retries it.
 var errAddressInUse = errors.New("address already in use")
 
-func startServer(t *testing.T, accounts bool) (string, *safeLog) {
+func startServer(t *testing.T, test scenario) (string, *safeLog) {
 	t.Helper()
 	// t.TempDir is removed after the server cleanup below, which runs first (LIFO).
 	directory := t.TempDir()
@@ -262,9 +306,24 @@ func startServer(t *testing.T, accounts bool) (string, *safeLog) {
 	keygen.Env = env
 	output, err := keygen.CombinedOutput()
 	require.NoError(t, err, "generate test keyring: %s", output)
+
+	args := []string{
+		"--storage", "sqlite", "--dsn", filepath.Join(directory, "test.db"),
+		"--content-keyring-file", keyring, fmt.Sprintf("--enable-accounts=%t", test.accounts),
+		"--custom-slugs", "--rate-limit", "0", "--argon2-memory", "8192", "--argon2-time", "1",
+	}
+	// The inherited PADMARK_* values are removed above, so the server gets only these keys.
+	if test.files {
+		endpoint, storageErr := runner.storage.start()
+		require.NoError(t, storageErr, "start the S3 mock storage; the file scenarios need Docker")
+
+		args = append(args, "--s3-endpoint", endpoint, "--s3-bucket", s3Bucket, "--s3-path-style",
+			"--max-file-size", strconv.Itoa(maxFileSize))
+		env = append(env, "PADMARK_S3_ACCESS_KEY="+s3AccessKey, "PADMARK_S3_SECRET_KEY="+s3SigningKey)
+	}
 	// The free port is released before the server binds it, so a parallel server can take it first.
 	for attempt := 1; ; attempt++ {
-		baseURL, logs, launchErr := launchServer(t, env, directory, keyring, accounts)
+		baseURL, logs, launchErr := launchServer(t, env, args)
 		if launchErr == nil {
 			return baseURL, logs
 		}
@@ -276,7 +335,7 @@ func startServer(t *testing.T, accounts bool) (string, *safeLog) {
 }
 
 // launchServer starts one server through the supervisor (see supervisorEnv) and waits until it is ready.
-func launchServer(t *testing.T, env []string, directory, keyring string, accounts bool) (string, *safeLog, error) {
+func launchServer(t *testing.T, env, args []string) (string, *safeLog, error) {
 	t.Helper()
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -288,10 +347,8 @@ func launchServer(t *testing.T, env []string, directory, keyring string, account
 	self, err := os.Executable()
 	require.NoError(t, err)
 
-	command := exec.Command(self, runner.binary, //nolint:gosec // G204: the test re-runs its own binary
-		"--addr", address, "--storage", "sqlite", "--dsn", filepath.Join(directory, "test.db"),
-		"--content-keyring-file", keyring, fmt.Sprintf("--enable-accounts=%t", accounts),
-		"--custom-slugs", "--rate-limit", "0", "--argon2-memory", "8192", "--argon2-time", "1")
+	command := exec.Command(self, //nolint:gosec // G204: the test re-runs its own binary
+		append([]string{runner.binary, "--addr", address}, args...)...)
 
 	command.Env = append(slices.Clone(env), "PADMARK_BOOTSTRAP_TOKEN="+bootstrapToken, supervisorEnv+"=1")
 	logs := &safeLog{mu: sync.Mutex{}, buffer: bytes.Buffer{}}

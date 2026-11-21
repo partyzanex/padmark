@@ -8,30 +8,32 @@ import (
 	"github.com/partyzanex/padmark/internal/domain"
 )
 
-// EditPage handles GET /edit/{id} and renders the note editor pre-filled with existing content.
+// editNote renders the note editor pre-filled with existing content; Handler.EditPage calls it
+// for GET /edit/{id...} when the slug names a note. peeked and peekErr are the result of the
+// Peek that Handler.EditPage did, so the note is not read a second time.
 // Gated by the same privacy check as GetNote (handlePrivateAuth) — without it, an authenticated
 // caller who is not the note's owner could read a privacy=owner note's plaintext content here,
 // bypassing the read restriction that GET /notes/{id} enforces. The editor never burns, so it
 // must not become a side door around the read policy either: an expired note is deleted and
 // answered 410, and a burn-after-reading note's content is withheld (saving replaces it).
-func (h *NoteHandler) EditPage(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-
-	preloaded, handled := h.handlePrivateAuth(w, r, id, nil)
-	if handled {
-		return
-	}
-
-	note := preloaded
-	if note == nil {
-		var err error
-
-		note, err = h.manager.Peek(r.Context(), id)
-		if err != nil {
-			h.writeErrorPage(w, r, err)
+func (h *NoteHandler) editNote(w http.ResponseWriter, r *http.Request, id string, peeked *domain.Note, peekErr error) {
+	if peekErr != nil {
+		// The same answers as before the dispatch: with accounts, handlePrivateAuth negotiated
+		// the format of the error; without accounts the editor showed the error page.
+		if h.authMgr != nil {
+			h.writeNoteError(w, r, peekErr)
 
 			return
 		}
+
+		h.writeErrorPage(w, r, peekErr)
+
+		return
+	}
+
+	note, handled := h.handlePrivateAuth(w, r, id, peeked)
+	if handled {
+		return
 	}
 
 	err := h.manager.EnforceExpiry(r.Context(), id, note)

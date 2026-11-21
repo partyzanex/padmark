@@ -2,7 +2,11 @@ package mcp
 
 import (
 	"cmp"
+	"context"
+	"errors"
 	"fmt"
+	"net"
+	"net/http"
 
 	"github.com/partyzanex/padmark/internal/errorcontext"
 	padmark "github.com/partyzanex/padmark/pkg/client"
@@ -227,6 +231,168 @@ func mapDeleteRes(res any, resource string) error {
 		return ErrServer
 	default:
 		return errorcontext.Wrap(unexpectedRes(res), "decode deletion response")
+	}
+}
+
+// uploadError maps an UploadFile error. The streaming client returns *padmark.APIError for a
+// status error, ErrInvalidUploadOptions for a bad option, and a plain error for the transport.
+func uploadError(err error) error {
+	if apiErr, ok := errors.AsType[*padmark.APIError](err); ok {
+		return errorcontext.Wrap(fileStatusError(apiErr), "decode upload file response")
+	}
+
+	if errors.Is(err, padmark.ErrInvalidUploadOptions) {
+		return fmt.Errorf("upload file: %w", err)
+	}
+
+	// The server answered too late, so the server is running: the transport text would be wrong.
+	if isTimeout(err) {
+		return fmt.Errorf("upload file: %w: %w", ErrUploadTimeout, err)
+	}
+
+	if errors.Is(err, context.Canceled) {
+		return fmt.Errorf("upload file: the upload was cancelled: %w", err)
+	}
+
+	return errorcontext.Wrap(transportError("upload file", err), "handle upload file")
+}
+
+// isTimeout reports whether err is a deadline of the context or a network timeout, such as the
+// response header timeout of the transfer client.
+func isTimeout(err error) bool {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+
+	netErr, ok := errors.AsType[net.Error](err)
+
+	return ok && netErr.Timeout()
+}
+
+// fileStatusError turns the status of an upload response into the error text for the model.
+func fileStatusError(apiErr *padmark.APIError) error {
+	switch apiErr.StatusCode {
+	case http.StatusBadRequest:
+		return apiStatus(ErrBadRequest, apiErr.Message)
+	case http.StatusUnauthorized:
+		return unauthorizedErr()
+	case http.StatusForbidden:
+		return apiStatus(ErrForbidden, apiErr.Message)
+	case http.StatusConflict:
+		return conflictErr()
+	case http.StatusRequestEntityTooLarge:
+		// The server message gives the limit in bytes.
+		return apiStatus(ErrContentTooLarge, apiErr.Message)
+	case http.StatusUnprocessableEntity:
+		return apiStatus(ErrRejected, apiErr.Message)
+	case http.StatusTooManyRequests:
+		return rateLimitedErr("file uploads")
+	case http.StatusServiceUnavailable:
+		return fileUnavailableError(padmark.ErrorResponse{
+			Message: apiErr.Message, Code: padmark.NewOptString(apiErr.Code),
+		})
+	case http.StatusInternalServerError:
+		return serverErr()
+	default:
+		return fmt.Errorf("%w: status %d: %s", ErrUnexpectedResponse, apiErr.StatusCode, apiErr.Message)
+	}
+}
+
+// fileUnavailableError reports a 503 of a file operation. Other than an operator-disabled API,
+// it means that the server has no object storage, or that the storage does not respond.
+func fileUnavailableError(response padmark.ErrorResponse) error {
+	if response.Code.Or("") == "api_disabled" {
+		return ErrAPIDisabled
+	}
+
+	return fmt.Errorf("%w: %s — file storage is off or not available on this server; "+
+		"ask the operator to check the S3 settings", ErrServiceUnavailable,
+		cmp.Or(response.Message, "no details provided"))
+}
+
+func mapGetFileRes(res padmark.GetFileRes) (*padmark.FileInfo, error) {
+	switch typed := res.(type) {
+	case *padmark.FileInfo:
+		return typed, nil
+	case *padmark.GetFileUnauthorized:
+		return nil, errorcontext.Wrap(unauthorizedErr(), "decode get file response")
+	case *padmark.GetFileNotFound:
+		return nil, errorcontext.Wrap(notFoundErr("file"), "decode get file response")
+	case *padmark.GetFileGone:
+		return nil, errorcontext.Wrap(apiStatus(ErrGone, typed.Message), "decode get file response")
+	case *padmark.GetFileServiceUnavailable:
+		return nil, errorcontext.Wrap(
+			fileUnavailableError(padmark.ErrorResponse(*typed)), "decode get file response")
+	case *padmark.GetFileInternalServerError:
+		return nil, errorcontext.Wrap(serverErr(), "decode get file response")
+	default:
+		return nil, errorcontext.Wrap(unexpectedRes(res), "decode get file response")
+	}
+}
+
+func mapUpdateFileRes(res padmark.UpdateFileRes) (*padmark.FileInfo, error) {
+	if typed, ok := res.(*padmark.FileInfo); ok {
+		return typed, nil
+	}
+
+	err := mapUpdateFileClientErr(res)
+	if err != nil {
+		return nil, err
+	}
+
+	switch typed := res.(type) {
+	case *padmark.UpdateFileServiceUnavailable:
+		return nil, errorcontext.Wrap(
+			fileUnavailableError(padmark.ErrorResponse(*typed)), "decode update file response")
+	case *padmark.UpdateFileInternalServerError:
+		return nil, errorcontext.Wrap(serverErr(), "decode update file response")
+	default:
+		return nil, errorcontext.Wrap(unexpectedRes(res), "decode update file response")
+	}
+}
+
+// mapUpdateFileClientErr maps the client-error variants of an UpdateFile response. It returns nil
+// for every other variant, so the caller handles those.
+func mapUpdateFileClientErr(res padmark.UpdateFileRes) error {
+	switch typed := res.(type) {
+	case *padmark.UpdateFileBadRequest:
+		return errorcontext.Wrap(apiStatus(ErrBadRequest, typed.Message), "decode update file response")
+	case *padmark.UpdateFileUnauthorized:
+		return errorcontext.Wrap(unauthorizedErr(), "decode update file response")
+	case *padmark.UpdateFileForbidden:
+		return errorcontext.Wrap(forbiddenErr("file"), "decode update file response")
+	case *padmark.UpdateFileNotFound:
+		return errorcontext.Wrap(notFoundErr("file"), "decode update file response")
+	case *padmark.UpdateFileRequestEntityTooLarge:
+		return errorcontext.Wrap(apiStatus(ErrContentTooLarge, typed.Message), "decode update file response")
+	case *padmark.UpdateFileUnprocessableEntity:
+		return errorcontext.Wrap(apiStatus(ErrRejected, typed.Message), "decode update file response")
+	case *padmark.UpdateFileTooManyRequests:
+		return errorcontext.Wrap(rateLimitedErr("file updates"), "decode update file response")
+	default:
+		return nil
+	}
+}
+
+func mapDeleteFileRes(res padmark.DeleteFileRes) error {
+	switch typed := res.(type) {
+	case *padmark.DeleteFileNoContent:
+		return nil
+	case *padmark.DeleteFileUnauthorized:
+		return errorcontext.Wrap(unauthorizedErr(), "decode delete file response")
+	case *padmark.DeleteFileForbidden:
+		return errorcontext.Wrap(forbiddenErr("file"), "decode delete file response")
+	case *padmark.DeleteFileNotFound:
+		return errorcontext.Wrap(notFoundErr("file"), "decode delete file response")
+	case *padmark.DeleteFileTooManyRequests:
+		return errorcontext.Wrap(rateLimitedErr("file deletes"), "decode delete file response")
+	case *padmark.DeleteFileServiceUnavailable:
+		return errorcontext.Wrap(
+			fileUnavailableError(padmark.ErrorResponse(*typed)), "decode delete file response")
+	case *padmark.DeleteFileInternalServerError:
+		return ErrServer
+	default:
+		return errorcontext.Wrap(unexpectedRes(res), "decode delete file response")
 	}
 }
 

@@ -207,3 +207,40 @@ func TestMarkLegacyTagsOnlyTheInspectedUntaggedNote(t *testing.T) {
 	})
 	require.Error(t, err, "links never carry v0.1.6 plaintext")
 }
+
+// TestFileMetadataIsARotationResource makes sure that key rotation reads and rewrites the
+// sealed metadata of files. Without it, a retired key would make the files unreadable. Delete
+// never removes a file record (R-27).
+func TestFileMetadataIsARotationResource(t *testing.T) {
+	db, err := sqlite.Open(filepath.Join(t.TempDir(), "files.db"), slog.New(slog.DiscardHandler))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, db.Close()) })
+	_, err = sqlite.Migrate(t.Context(), db)
+	require.NoError(t, err)
+	require.NoError(t, sqlite.NewFileRepository(db).Create(t.Context(), &domain.File{
+		CreatedAt: time.Now(), ExpiresAt: nil, Privacy: nil, OwnerID: nil, ID: domain.HashSlug("file"),
+		ObjectKey: "object", SealedMeta: "old", Name: "", ContentKey: nil, EditCode: "", Size: 0,
+		Downloads: 0, BurnAfterDownload: false,
+	}))
+
+	repo := repository.New(db)
+	rows, err := repo.Batch(t.Context(), "file", "", 10)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.Equal(t, "old", rows[0].Value)
+
+	deleted, err := repo.Delete(t.Context(), rows[0])
+	require.Error(t, err, "the object would stay in the bucket without its content key")
+	require.False(t, deleted)
+
+	changed, err := repo.Replace(t.Context(), rows[0], "new")
+	require.NoError(t, err)
+	require.True(t, changed)
+
+	row, err := repo.Get(t.Context(), "file", domain.HashSlug("file"))
+	require.NoError(t, err)
+	require.Equal(t, keys.Row{
+		Resource: "file", ID: domain.HashSlug("file"), Value: "new",
+		Legacy: nil, StoredEditCode: "",
+	}, *row)
+}

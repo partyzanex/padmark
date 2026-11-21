@@ -14,11 +14,12 @@ var ErrConvertTargetExists = errors.New("converted legacy note ID already exists
 var errInvalidRecords = errors.New("encrypted records failed validation; check keyring and database integrity")
 
 // invalidRecordsError suggests prune only when every failure is malformed raw data;
-// prune refuses to run while any versioned envelope fails or any untagged v0.1.6 note
-// remains, so recommending it then would send the operator in a circle. Untagged v0.1.6
-// notes get the explicit conversion instead: prune never deletes them.
+// prune refuses to run while any versioned envelope fails, any untagged v0.1.6 note or any
+// damaged file record remains, so recommending it then would send the operator in a circle.
+// Untagged v0.1.6 notes get the explicit conversion instead, and damaged file records manual
+// work: prune never deletes them.
 func invalidRecordsError(report *Report) error {
-	if report.Failed > report.CorruptRaw+report.UntaggedLegacy {
+	if report.Failed > report.CorruptRaw+report.UntaggedLegacy+report.CorruptFile {
 		return fmt.Errorf("%w; versioned envelopes failed authentication (missing or wrong key, "+
 			"tampering, or an unsupported format version): restore the matching keyring or a database backup; "+
 			"encryption prune never deletes versioned records and refuses to run until they authenticate",
@@ -30,6 +31,14 @@ func invalidRecordsError(report *Report) error {
 			"conversion: list them with encryption prune --corrupt --dry-run (reason untagged_legacy), "+
 			"tag each with encryption mark-legacy --id <id>, then rerun encryption migrate",
 			errInvalidRecords, report.UntaggedLegacy)
+	}
+
+	if report.CorruptFile != 0 {
+		return fmt.Errorf("%w; %d file records hold sealed metadata without a version tag. "+
+			"encryption prune never deletes a file record, because its object in the bucket would stay "+
+			"without a key: list the IDs with encryption prune --corrupt --dry-run (reason corrupt_file) "+
+			"and read object_key of each files row, then restore the database from a backup, "+
+			"or delete each record and its object by hand", errInvalidRecords, report.CorruptFile)
 	}
 
 	if report.CorruptRaw != 0 {

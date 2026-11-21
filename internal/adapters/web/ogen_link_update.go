@@ -50,7 +50,7 @@ func (h *OgenHandler) UpdateLink(
 	opts.Privacy = requested
 
 	link, err := h.linkManager.Update(ctx, params.ID, req.EditCode.Or(""), middleware.CallerIDFromCtx(ctx),
-		req.TargetURL.String(), opts)
+		requestTargetURL(&req.TargetURL), opts)
 	if err != nil {
 		return mapUpdateLinkError(err, h.log), nil
 	}

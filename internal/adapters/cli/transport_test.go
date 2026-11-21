@@ -139,3 +139,30 @@ func TestBearerClient_TooManyRedirects(t *testing.T) {
 
 	require.ErrorIs(t, err, errTooManyRedirects)
 }
+
+// TestTransferClient_HeaderTimeoutOnly: the client of upload and download has no total timeout,
+// because http.Client.Timeout also stops a long body transfer. --timeout limits only the wait for
+// the response headers, and the token still goes only to the server origin.
+func TestTransferClient_HeaderTimeoutOnly(t *testing.T) {
+	t.Parallel()
+
+	server := newAuthRecorder(t, ok)
+
+	client, err := newTransferClient(server.server.URL, testBearer, time.Minute)
+	require.NoError(t, err)
+
+	assert.Zero(t, client.Timeout, "a total timeout would stop a large file transfer")
+
+	transport, isBearer := client.Transport.(*bearerTransport)
+	require.True(t, isBearer)
+
+	base, isHTTP := transport.base.(*http.Transport)
+	require.True(t, isHTTP)
+	assert.Equal(t, time.Minute, base.ResponseHeaderTimeout)
+	assert.NotSame(t, http.DefaultTransport, base, "the shared default transport must not change")
+
+	resp, err := getWith(t, client, server.server.URL+"/files/abc/download")
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+	assert.Equal(t, []string{"Bearer " + testBearer}, server.headers())
+}

@@ -30,8 +30,8 @@ type formHead struct {
 
 func TestFormHead(t *testing.T) {
 	runScenarios(t, []scenario{
-		{name: "Create", run: testFormHeadCreate, accounts: false, allowedStatuses: nil},
-		{name: "Edit", run: testFormHeadEdit, accounts: false, allowedStatuses: nil},
+		{name: "Create", run: testFormHeadCreate, accounts: false, files: false, allowedStatuses: nil},
+		{name: "Edit", run: testFormHeadEdit, accounts: false, files: false, allowedStatuses: nil},
 	})
 }
 
@@ -56,7 +56,7 @@ func testFormHeadEdit(sess *uiSession) {
 	sess.gotoPage("/edit/" + strings.TrimPrefix(parsed.Path, "/"))
 	sess.must(sess.expect.Locator(sess.page.Locator("#slugInput")).ToHaveAttribute("readonly", ""))
 	note := sess.formHead()
-	sess.gotoPage("/links/" + linkID + "/edit")
+	sess.gotoPage("/edit/" + linkID)
 	sess.expectSameHead(note, sess.formHead())
 }
 

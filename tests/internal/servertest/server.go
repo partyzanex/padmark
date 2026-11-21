@@ -45,6 +45,15 @@ func Build(t *testing.T, buildFlags ...string) string {
 func Start(t *testing.T, binary, directory string, args ...string) (baseURL string, stop func()) {
 	t.Helper()
 
+	return StartWithEnv(t, binary, directory, nil, args...)
+}
+
+// StartWithEnv is Start with more environment variables for the server process, in the
+// KEY=value form. Use it for settings that the server reads only from the environment, for
+// example the S3 keys of a test container. The PADMARK_* variables of the developer stay out.
+func StartWithEnv(t *testing.T, binary, directory string, env []string, args ...string) (baseURL string, stop func()) {
+	t.Helper()
+
 	listener, err := new(net.ListenConfig).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 
@@ -55,7 +64,7 @@ func Start(t *testing.T, binary, directory string, args ...string) (baseURL stri
 
 	var output bytes.Buffer
 
-	stop, done := startProcess(t, binary, directory, commandArgs, &output)
+	stop, done := startProcess(t, binary, directory, commandArgs, env, &output)
 	baseURL = "http://" + address
 
 	waitReady(t, baseURL, done, &output, stop)
@@ -66,7 +75,7 @@ func Start(t *testing.T, binary, directory string, args ...string) (baseURL stri
 // startProcess starts the server binary and writes its output to output. It returns a stop
 // function, which is also the test cleanup, and a channel that closes when the process exits.
 func startProcess(
-	t *testing.T, binary, directory string, commandArgs []string, output *bytes.Buffer,
+	t *testing.T, binary, directory string, commandArgs, env []string, output *bytes.Buffer,
 ) (stop func(), done <-chan struct{}) {
 	t.Helper()
 
@@ -79,6 +88,8 @@ func startProcess(
 			command.Env = append(command.Env, value)
 		}
 	}
+
+	command.Env = append(command.Env, env...)
 
 	command.Stdout, command.Stderr = output, output
 	require.NoError(t, command.Start())

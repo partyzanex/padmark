@@ -31,7 +31,7 @@ func shortenCommand() *urcli.Command {
 			}),
 			clifactory.StringFlag(func(flag *urcli.StringFlag) {
 				flag.Name = FlagPrivacy
-				flag.Usage = "Privacy level: public (default), authenticated, or owner"
+				flag.Usage = usagePrivacyDefaultPublic
 			}),
 			clifactory.BoolFlag(func(flag *urcli.BoolFlag) {
 				flag.Name = FlagBurn

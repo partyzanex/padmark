@@ -85,11 +85,12 @@ func negotiate(r *http.Request) format {
 // A missing Accept, a wildcard-only Accept (*/*, text/*), a HEAD request or a browser
 // subresource fetch (an <img src> sends Sec-Fetch-Dest: image and an Accept ending in */*) is
 // what link unfurlers, mail scanners and cross-note embeds produce — none of them must burn a
-// note. Explicit means: GET, Sec-Fetch-Dest absent, "document" or "empty" (fetch), and an
-// Accept media range with q>0 that names a format padmark serves exactly (no wildcard).
-// ?raw=1 alone is not intent: it is part of the URL, so an embed can carry it too.
+// note. Explicit means: GET, not a prefetch, Sec-Fetch-Dest absent, "document" or "empty"
+// (fetch), and an Accept media range with q>0 that names a format padmark serves exactly (no
+// wildcard). ?raw=1 alone is not intent: it is part of the URL, so an embed can carry it too.
+// A file download has stricter rules, see explicitDownload.
 func explicitRead(r *http.Request) bool {
-	if r.Method != http.MethodGet {
+	if r.Method != http.MethodGet || isPrefetch(r) {
 		return false
 	}
 
@@ -99,7 +100,11 @@ func explicitRead(r *http.Request) bool {
 		return false
 	}
 
-	entries := parseAccept(r.Header.Get("Accept"))
+	return namesServedFormat(parseAccept(r.Header.Get("Accept")))
+}
+
+// namesServedFormat reports whether an acceptable entry names a format padmark serves exactly.
+func namesServedFormat(entries []acceptEntry) bool {
 	for idx := range entries {
 		entry := &entries[idx]
 		if entry.q <= 0 || entry.spec != specExact {
@@ -108,6 +113,23 @@ func explicitRead(r *http.Request) bool {
 
 		switch entry.mime {
 		case mimeJSON, mimeHTML, mimePlain, mimeMarkdown:
+			return true
+		}
+	}
+
+	return false
+}
+
+// isPrefetch reports whether a browser sends r only to prepare a navigation that can follow:
+// a prefetch or a prerender. Chromium sends "Sec-Purpose: prefetch" (or "prefetch;prerender"),
+// older browsers send "Purpose: prefetch" and old Firefox sends "X-Moz: prefetch". No user asked
+// for the resource yet, so such a request must not consume a burn resource.
+func isPrefetch(r *http.Request) bool {
+	for _, name := range []string{"Sec-Purpose", "Purpose", "X-Moz"} {
+		// Sec-Purpose is a structured list: the first item names the purpose, and parameters
+		// such as ";prerender" can follow it.
+		token, _, _ := strings.Cut(r.Header.Get(name), ";")
+		if strings.EqualFold(strings.TrimSpace(token), "prefetch") {
 			return true
 		}
 	}
@@ -315,4 +337,26 @@ func formatCandidate(entries []acceptEntry, mimes []string) (acceptEntry, bool) 
 // ascending order, so the first one stays.
 func outranks(a, b acceptEntry) bool {
 	return a.q > b.q || (a.q == b.q && a.spec > b.spec)
+}
+
+// wantsFilePage reports whether GET /{id} for a file shows the file page instead of the
+// content. A browser asks for text/html, so it gets the page and does not consume a
+// burn-after-download file by accident. The content goes to a client that does not prefer HTML
+// (curl sends */*, which selects JSON), or that names application/octet-stream exactly with a
+// higher q than HTML, or with the same q earlier in the header.
+func wantsFilePage(r *http.Request) bool {
+	if negotiate(r) != formatHTML {
+		return false
+	}
+
+	entries := parseAccept(r.Header.Get("Accept"))
+
+	html, _ := formatCandidate(entries, []string{mimeHTML})
+
+	binary, ok := formatCandidate(entries, []string{mimeBinary})
+	if !ok || binary.spec != specExact {
+		return true
+	}
+
+	return binary.q < html.q || (binary.q == html.q && html.order < binary.order)
 }

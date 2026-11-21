@@ -136,6 +136,7 @@ type ManagerTestSuite struct {
 	keys        *MockKeyring
 	notes       *MockCipher
 	links       *MockCipher
+	files       *MockCipher
 	hasher      *MockEditCodeHasher
 	manager     *Manager
 	keyIDs      []string
@@ -148,16 +149,18 @@ func (s *ManagerTestSuite) SetupTest() {
 	s.keys = NewMockKeyring(s.ctrl)
 	s.notes = NewMockCipher(s.ctrl)
 	s.links = NewMockCipher(s.ctrl)
+	s.files = NewMockCipher(s.ctrl)
 	s.keyIDs = []string{activeKey}
 	s.substituted = make(map[string]bool)
 	s.stubKeyring()
 	s.stubCipher(s.notes)
 	s.stubCipher(s.links)
+	s.stubCipher(s.files)
 	s.hasher = NewMockEditCodeHasher(s.ctrl)
 	s.hasher.EXPECT().IsStoredHash(gomock.Any()).DoAndReturn(func(value string) bool {
 		return value == storedHash
 	}).AnyTimes()
-	s.manager = New(s.store, s.keys, s.notes, s.links, s.hasher)
+	s.manager = New(s.store, s.keys, s.notes, s.links, s.files, s.hasher)
 }
 
 func (s *ManagerTestSuite) SetupSubTest() { s.SetupTest() }

@@ -53,7 +53,8 @@ func newNoteHandler(c *common, manager NoteManager, noteTmpl, indexTmpl *templat
 // ogen PUT/DELETE /notes/{id} routes (registerOgenRoutes) stay single-segment (generated router
 // limitation); these native {id...} handlers bridge update/delete for path-like slugs, so by
 // ServeMux specificity single-segment IDs keep going to ogen and multi-segment to these.
-// GET /{id...} is registered by Handler.GetNoteOrLink, because a bare slug can also name a link.
+// GET /{id...} and GET /edit/{id...} are registered by Handler.GetNoteOrLink and
+// Handler.EditPage, because a bare slug can also name a short link or a file.
 func (h *NoteHandler) RegisterRoutes(mux *http.ServeMux) {
 	locked := func(next http.HandlerFunc) http.Handler {
 		return middleware.RequireSameOrigin(h.log, middleware.WithFailLockout(h.lockout, h.trustedProxies, h.log, next))
@@ -63,7 +64,6 @@ func (h *NoteHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.Handle("DELETE /notes/{id...}", locked(h.DeleteNoteByPath))
 	mux.HandleFunc("GET /notes/{id...}", h.GetNote)
 	mux.HandleFunc("POST /notes/{id...}", h.guard(h.HandleReveal))
-	mux.HandleFunc("GET /edit/{id...}", h.EditPage)
 	mux.HandleFunc("POST /{id...}", h.guard(h.HandleReveal))
 }
 
@@ -87,15 +87,22 @@ type noteViewData struct {
 	ShowContents      bool
 }
 
+// Layouts of the dates on the reader pages of notes, short links and files. The page script
+// replaces each date with the local time of the reader.
+const (
+	readerDateLayout   = "Jan 2, 2006, 3:04 PM"
+	readerExpiryLayout = "Jan 2, 2006"
+)
+
 func toNoteViewData(note *domain.Note, rendered string) noteViewData {
-	created := note.CreatedAt.Format("Jan 2, 2006, 3:04 PM")
+	created := note.CreatedAt.Format(readerDateLayout)
 	createdISO := note.CreatedAt.UTC().Format(time.RFC3339)
 
 	expires := "Never expires"
 	expiresISO := ""
 
 	if note.ExpiresAt != nil {
-		expires = "Expires " + note.ExpiresAt.Format("Jan 2, 2006")
+		expires = "Expires " + note.ExpiresAt.Format(readerExpiryLayout)
 		expiresISO = note.ExpiresAt.UTC().Format(time.RFC3339)
 	}
 
@@ -160,7 +167,7 @@ func toBurnInterstitialViewData(note *domain.Note, tok string) noteViewData {
 		Header:            noHeader(),
 		ID:                note.ID,
 		Title:             note.Title,
-		CreatedAt:         note.CreatedAt.Format("Jan 2, 2006, 3:04 PM"),
+		CreatedAt:         note.CreatedAt.Format(readerDateLayout),
 		CreatedISO:        note.CreatedAt.UTC().Format(time.RFC3339),
 		Views:             note.Views,
 		ExpiresLabel:      "Burns after reading",
@@ -544,11 +551,14 @@ func (h *NoteHandler) refuseImplicitBurnRead(
 }
 
 // writeBurnReadNotExplicit answers an access to a burn resource (burn-after-reading note,
-// burn_after_click link) that lacked deliberate intent: 409 with a stable code; nothing burned.
+// burn_after_click link, burn-after-download file) that lacked deliberate intent: 409 with a
+// stable code; nothing burned. The text names each Accept type that counts as intent: the file
+// download also accepts application/octet-stream (explicitDownload).
 func writeBurnReadNotExplicit(w http.ResponseWriter, r *http.Request, log *slog.Logger) {
 	response.WriteJSONErrorCode(w, r, log, http.StatusConflict,
 		"burn resource: accessing it destroys it, so the request must be a deliberate one — a browser "+
-			"navigation, or an Accept naming application/json, text/markdown, text/plain or text/html",
+			"navigation (for a file download: a click on the file page), or an Accept naming "+
+			"application/json, text/markdown, text/plain, text/html or, for a file, application/octet-stream",
 		burnReadNotExplicitCode)
 }
 

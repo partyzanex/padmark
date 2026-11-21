@@ -184,9 +184,15 @@ const (
 	// linkCreatePath and notesCreatePath are the collection roots (POST create); isPublicRoute
 	// admits them alongside the resource paths below. editPathPrefix covers GET /edit/{id},
 	// whose per-note privacy check lives in EditPage.
-	linkCreatePath  = "links"
+	linkCreatePath = "links"
+	// filesPath is the file collection root (POST upload); filesPrefix covers the file
+	// resources under it. Per-file privacy and ownership are enforced downstream.
+	filesPath       = "files"
+	filesPrefix     = "files/"
 	editPathPrefix  = "edit/"
 	notesCreatePath = "notes"
+	// successPath is the page after a create (GET only). See isPublicRoute.
+	successPath = "success"
 
 	// MsgUnauthorized is the shared client-facing message for every 401 the adapter writes.
 	MsgUnauthorized = "unauthorized"
@@ -226,17 +232,17 @@ func isPublicRoute(r *http.Request, namedRoutes map[string]struct{}) bool {
 	path := strings.TrimPrefix(r.URL.Path, "/")
 
 	switch {
+	case path == filesPath || strings.HasPrefix(path, filesPrefix):
+		// POST /files, GET /files/{id}, GET /files/{id}/download, DELETE /files/{id}: like links,
+		// the file usecase checks privacy, and the edit code or the owner for a delete.
+		return true
 	case isLinkPath(path) || path == linkCreatePath:
 		// GET /r/{id} (GET /{id} is a note path below), GET/PUT/DELETE /links/{id}, POST /links,
 		// POST /links/bulk — per-link privacy and per-link ownership are enforced downstream.
 		// Unlike note paths these have a fixed, unambiguous prefix, so no namedRoutes
 		// disambiguation is needed.
 		return true
-	case r.Method == http.MethodGet && strings.HasPrefix(path, editPathPrefix):
-		// GET /edit/{id} (the only method the route serves): the editor re-runs the same
-		// per-note privacy check as GET view (EditPage → handlePrivateAuth), so anonymous
-		// access to a public note's edit form is safe — saving still requires the edit code
-		// on the PUT.
+	case r.Method == http.MethodGet && isPublicPageRoute(path):
 		return true
 	case path == notesCreatePath || isNoteIDPath(path, namedRoutes):
 		// Note resource routes, any method: GET view, POST reveal, PUT/DELETE /notes/{id...}
@@ -247,6 +253,20 @@ func isPublicRoute(r *http.Request, namedRoutes map[string]struct{}) bool {
 	default:
 		return false
 	}
+}
+
+// isPublicPageRoute reports whether trimmed (the request path without its leading slash) is a
+// named page that a GET may open without a session:
+//
+//   - GET /edit/{id}: the editor re-runs the same per-note privacy check as GET view
+//     (EditPage → handlePrivateAuth), so anonymous access to a public note's edit form is
+//     safe — saving still requires the edit code on the PUT.
+//   - GET /success: an anonymous author creates a link or uploads a file, and this page shows
+//     the link and the edit code. The edit code comes from sessionStorage, not from the server.
+//     The page reads a file only through the privacy check (Info), and it takes all other
+//     values from its own query, so it shows nothing that the caller cannot read.
+func isPublicPageRoute(trimmed string) bool {
+	return strings.HasPrefix(trimmed, editPathPrefix) || trimmed == successPath
 }
 
 // isLinkPath reports whether trimmed (the request path without its leading slash) addresses a

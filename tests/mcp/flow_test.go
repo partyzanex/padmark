@@ -7,15 +7,20 @@ package mcpintegration
 
 import (
 	"context"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
+	"github.com/testcontainers/testcontainers-go"
+	"github.com/testcontainers/testcontainers-go/wait"
 	"github.com/uptrace/bun"
 
 	mcpx "github.com/partyzanex/padmark/internal/adapters/mcp"
@@ -24,15 +29,24 @@ import (
 	"github.com/partyzanex/padmark/internal/infra/crypto"
 	"github.com/partyzanex/padmark/internal/infra/lock"
 	"github.com/partyzanex/padmark/internal/infra/render"
+	"github.com/partyzanex/padmark/internal/infra/storage/s3store"
 	sqliterepo "github.com/partyzanex/padmark/internal/infra/storage/sqlite"
 	"github.com/partyzanex/padmark/internal/testutil"
 	"github.com/partyzanex/padmark/internal/usecases/auth"
+	"github.com/partyzanex/padmark/internal/usecases/files"
 	"github.com/partyzanex/padmark/internal/usecases/links"
 	"github.com/partyzanex/padmark/internal/usecases/notes"
 	padmark "github.com/partyzanex/padmark/pkg/client"
 )
 
 const flowPassword = "McpFlowP@ss123!"
+
+// Values for the throwaway S3-compatible container only; s3mock accepts any credentials.
+const (
+	flowS3AccessKey = "padmark-test"
+	flowS3SecretKey = "padmark-test-secret"
+	flowS3Bucket    = "padmark-files"
+)
 
 var flowArgon2 = crypto.Argon2Params{Memory: 8 * 1024, Time: 1, Threads: 1} //nolint:gochecknoglobals // test fixture
 
@@ -146,9 +160,159 @@ func TestMCPFlow_Anonymous_PublicCreateAndPrivateAccessDenied(t *testing.T) {
 		"the failure text carries the remediation (configure a token or use edit_code)")
 }
 
+// TestMCPFlow_FileLifecycle drives the file tools against the server with an S3-compatible
+// container: upload from the upload root → metadata → change → download by URL → delete with
+// the vault edit code → not found. A path outside the upload root never reaches the server.
+func TestMCPFlow_FileLifecycle(t *testing.T) {
+	ctx := context.Background()
+
+	stack := startTestPadmarkWithFiles(t, startS3Mock(ctx, t))
+
+	root := t.TempDir()
+	content := []byte("quarterly numbers\n")
+	require.NoError(t, os.WriteFile(filepath.Join(root, "report.txt"), content, 0o600))
+
+	outside := filepath.Join(t.TempDir(), "secret.txt")
+	require.NoError(t, os.WriteFile(outside, []byte("secret"), 0o600))
+
+	sess := connectMCP(ctx, t, stack.srv.URL, "", mcpx.WithUploadRoot(root))
+	defer sess.Close()
+
+	refused := callOutput(ctx, t, sess, "upload_file", map[string]any{"path": outside})
+	require.True(t, refused.IsError, "a path outside the upload root is refused")
+	require.Contains(t, toolText(refused), "outside the upload root")
+
+	// A missing path outside the root gets the same text, so the error does not show which
+	// files exist outside the root.
+	missing := callOutput(ctx, t, sess, "upload_file", map[string]any{
+		"path": filepath.Join(filepath.Dir(outside), "missing.txt"),
+	})
+	require.True(t, missing.IsError)
+	require.Equal(t, toolText(refused), toolText(missing))
+	require.NotContains(t, toolText(missing), filepath.Dir(outside))
+
+	require.NoError(t, os.WriteFile(filepath.Join(root, ".env"), []byte("TOKEN=x"), 0o600))
+	hidden := callOutput(ctx, t, sess, "upload_file", map[string]any{"path": ".env"})
+	require.True(t, hidden.IsError, "a name that starts with a dot is refused by default")
+	require.Contains(t, toolText(hidden), "starts with a dot")
+
+	slug := callOutput(ctx, t, sess, "upload_file", map[string]any{"path": "report.txt", "slug": "known-id"})
+	require.True(t, slug.IsError, "a slug from the agent is refused by default")
+	require.Contains(t, toolText(slug), "slug is off")
+
+	uploaded := callOutput(ctx, t, sess, "upload_file", map[string]any{"path": "report.txt", "ttl": 3600})
+	require.False(t, uploaded.IsError, toolText(uploaded))
+	require.NotContains(t, toolText(uploaded), `"edit_code":`, "the one-time edit code is not printed by default")
+
+	fileID := resultID(uploaded)
+	require.NotEmpty(t, fileID)
+	require.Equal(t, stack.srv.URL+"/"+fileID, stringField(uploaded, "url"))
+	require.Equal(t, stack.srv.URL+"/files/"+fileID+"/download", stringField(uploaded, "download_url"))
+	require.NotEmpty(t, stringField(uploaded, "expires_at"))
+
+	info := callOutput(ctx, t, sess, "get_file", map[string]any{"id": fileID})
+	require.False(t, info.IsError, toolText(info))
+	require.Equal(t, "report.txt", stringField(info, "name"))
+	require.InDelta(t, float64(len(content)), numberField(info, "size"), 0)
+
+	updated := callOutput(ctx, t, sess, "update_file", map[string]any{
+		"id": fileID, "clear_expiry": true, "privacy": "public",
+	})
+	require.False(t, updated.IsError, "update_file must succeed via the vault edit code: %s", toolText(updated))
+	require.Empty(t, stringField(updated, "expires_at"), "clear_expiry removes the expiry")
+
+	require.Equal(t, content, downloadFile(ctx, t, stringField(uploaded, "download_url")))
+
+	deleted := callOutput(ctx, t, sess, "delete_file", map[string]any{"id": fileID})
+	require.False(t, deleted.IsError, "delete_file must succeed via the vault edit code: %s", toolText(deleted))
+
+	after := callOutput(ctx, t, sess, "get_file", map[string]any{"id": fileID})
+	require.True(t, after.IsError, "the file is deleted")
+	require.Contains(t, toolText(after), "not found")
+}
+
+// TestMCPFlow_FileUploadWithTokenDefaultsToOwner checks that an upload with a token and without
+// a privacy field is private to the account of the token: an anonymous reader cannot see it.
+func TestMCPFlow_FileUploadWithTokenDefaultsToOwner(t *testing.T) {
+	ctx := context.Background()
+
+	stack := startTestPadmarkWithFiles(t, startS3Mock(ctx, t))
+	envelope := issueEnvelopeToken(ctx, t, stack.auth, stack.users, stack.srv.URL)
+
+	root := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(root, "plan.txt"), []byte("plan\n"), 0o600))
+
+	sess := connectMCP(ctx, t, stack.srv.URL, envelope, mcpx.WithUploadRoot(root), mcpx.WithAccountToken())
+	defer sess.Close()
+
+	uploaded := callOutput(ctx, t, sess, "upload_file", map[string]any{"path": "plan.txt"})
+	require.False(t, uploaded.IsError, toolText(uploaded))
+	require.Equal(t, "owner", stringField(uploaded, "privacy"))
+
+	anonymous := connectMCP(ctx, t, stack.srv.URL, "")
+	defer anonymous.Close()
+
+	denied := callOutput(ctx, t, anonymous, "get_file", map[string]any{"id": resultID(uploaded)})
+	require.True(t, denied.IsError, "an anonymous reader cannot read an owner file: %s", toolText(denied))
+}
+
+// startS3Mock starts an S3-compatible container with the test bucket and returns its endpoint.
+// adobe/s3mock creates the bucket at startup and does not check signatures.
+func startS3Mock(ctx context.Context, t *testing.T) string {
+	t.Helper()
+
+	container, err := testcontainers.Run(ctx, "adobe/s3mock:3.12.0",
+		testcontainers.WithEnv(map[string]string{"initialBuckets": flowS3Bucket}),
+		testcontainers.WithExposedPorts("9090/tcp"),
+		testcontainers.WithWaitStrategy(wait.ForListeningPort("9090/tcp").WithStartupTimeout(time.Minute)),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, testcontainers.TerminateContainer(container)) })
+
+	hostPort, err := container.PortEndpoint(ctx, "9090/tcp", "")
+	require.NoError(t, err)
+
+	return "http://" + hostPort
+}
+
+// downloadFile reads the file content through the download URL, as an agent HTTP tool does.
+func downloadFile(ctx context.Context, t *testing.T, target string) []byte {
+	t.Helper()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, http.NoBody)
+	require.NoError(t, err)
+	req.Header.Set("Accept", "application/octet-stream")
+
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+
+	defer func() { require.NoError(t, resp.Body.Close()) }()
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	data, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+
+	return data
+}
+
 // ── wiring (mirrors internal/infra/server's assembly and the tests/auth integration setup) ──.
 
 func startTestPadmark(t *testing.T) *testStack {
+	t.Helper()
+
+	return startStack(t, "")
+}
+
+// startTestPadmarkWithFiles starts the stack with file publishing on the given S3 endpoint.
+func startTestPadmarkWithFiles(t *testing.T, s3Endpoint string) *testStack {
+	t.Helper()
+
+	return startStack(t, s3Endpoint)
+}
+
+// startStack starts the server stack. An empty s3Endpoint keeps files off, as in production.
+func startStack(t *testing.T, s3Endpoint string) *testStack {
 	t.Helper()
 
 	ctx := context.Background()
@@ -169,6 +333,10 @@ func startTestPadmark(t *testing.T) *testStack {
 	notesMgr, linksMgr := newTestManagers(t, db, slugLock)
 
 	handler := web.NewHandler(notesMgr, linksMgr, discardTestLogger()).WithAuthManager(authMgr)
+	if s3Endpoint != "" {
+		handler.WithFileManager(newTestFileManager(t, db, slugLock, s3Endpoint))
+	}
+
 	ogen := web.NewOgenHandler(notesMgr, linksMgr, web.NoPinger{}, discardTestLogger())
 	router, err := web.NewRouter(handler, ogen, &web.RouterOptions{
 		MaxBodyBytes: 256 * 1024,
@@ -235,6 +403,31 @@ func newTestManagers(t *testing.T, db *bun.DB, slugLock *lock.Locker) (*notes.Ma
 	return notesMgr, linksMgr
 }
 
+// newTestFileManager mirrors attachFiles in internal/infra/server with the test fixtures.
+func newTestFileManager(t *testing.T, db *bun.DB, slugLock *lock.Locker, endpoint string) *files.Manager {
+	t.Helper()
+
+	objects, err := s3store.New(&s3store.Config{
+		Endpoint: endpoint, Bucket: flowS3Bucket, Region: "us-east-1",
+		AccessKey: flowS3AccessKey, SecretKey: flowS3SecretKey, PathStyle: true,
+	}, discardTestLogger())
+	require.NoError(t, err)
+	_, err = objects.EnsureBucket(context.Background())
+	require.NoError(t, err)
+
+	return files.NewManager(&files.Deps{
+		Storage:   sqliterepo.NewFileRepository(db),
+		Objects:   objects,
+		Cipher:    crypto.NewFileCipher(),
+		Encryptor: testutil.ContentEncryptor(t, "file"),
+		Hasher:    crypto.NewEditCodeHasher(crypto.DefaultArgon2Params()),
+		SlugLock:  slugLock,
+		Notes:     sqliterepo.NewNoteRepository(db),
+		Links:     sqliterepo.NewLinkRepository(db, discardTestLogger()),
+		Log:       discardTestLogger(),
+	}, 1<<20, true)
+}
+
 // issueEnvelopeToken creates the first admin + an API key, returning the envelope the admin
 // panel hands the user (the raw key packed together with the server's base URL).
 func issueEnvelopeToken(
@@ -262,11 +455,13 @@ func issueEnvelopeToken(
 
 // connectMCP wires the padmark-mcp Manager to the test server through the real generated
 // client (a bearer token when passed) and attaches an in-memory MCP client session.
-func connectMCP(ctx context.Context, t *testing.T, serverURL, token string) *mcpsdk.ClientSession {
+func connectMCP(
+	ctx context.Context, t *testing.T, serverURL, token string, opts ...mcpx.Option,
+) *mcpsdk.ClientSession {
 	t.Helper()
 
 	padmarkClient := newTestPadmarkClient(t, serverURL, token)
-	mgr := mcpx.NewManager(padmarkClient, slog.New(slog.DiscardHandler))
+	mgr := mcpx.NewManager(padmarkClient, padmarkClient, slog.New(slog.DiscardHandler), opts...)
 
 	clientTransport, serverTransport := mcpsdk.NewInMemoryTransports()
 
@@ -366,6 +561,26 @@ func resultID(res *mcpsdk.CallToolResult) string {
 	}
 
 	return ""
+}
+
+func stringField(res *mcpsdk.CallToolResult, key string) string {
+	if m, ok := res.StructuredContent.(map[string]any); ok {
+		if v, ok := m[key].(string); ok {
+			return v
+		}
+	}
+
+	return ""
+}
+
+func numberField(res *mcpsdk.CallToolResult, key string) float64 {
+	if m, ok := res.StructuredContent.(map[string]any); ok {
+		if v, ok := m[key].(float64); ok {
+			return v
+		}
+	}
+
+	return 0
 }
 
 func boolField(res *mcpsdk.CallToolResult, key string) bool {

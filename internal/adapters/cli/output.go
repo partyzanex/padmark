@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/url"
+	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -190,6 +192,96 @@ func printCreateResult(w io.Writer, serverURL string, note *padmark.CreateNoteRe
 	flushErr := twr.Flush()
 	if flushErr != nil {
 		return fmt.Errorf("flush: %w", flushErr)
+	}
+
+	return nil
+}
+
+// filesPathSegment is the first path segment of the file API.
+const filesPathSegment = "files"
+
+// fileDownloadURL returns the download address of a file. The upload response has no
+// download_url field, so the CLI builds it from the server URL that it used for the request.
+func fileDownloadURL(serverURL, id string) string {
+	return strings.TrimRight(serverURL, "/") + "/" + filesPathSegment + "/" + url.PathEscape(id) + "/download"
+}
+
+// printCreateFileResult prints the result of `upload`. The edit code is in the output because
+// the server returns it only once.
+func printCreateFileResult(w io.Writer, serverURL string, file *padmark.CreateFileResponse) error {
+	twr := tabwriter.NewWriter(w, twMinWidth, twTabWidth, twPadding, ' ', 0)
+	erw := &errWriter{w: twr, err: nil}
+
+	erw.printf("id:\t%s\n", file.ID)
+	erw.printf("url:\t%s\n", file.URL.String())
+	erw.printf("download:\t%s\n", fileDownloadURL(serverURL, file.ID))
+	erw.printf("name:\t%s\n", file.Name)
+	erw.printf("size:\t%d\n", file.Size)
+	erw.printf("edit-code:\t%s\n", file.EditCode)
+
+	if file.BurnAfterDownload {
+		erw.printf("burn:\tyes\n")
+	}
+
+	if exp, ok := file.ExpiresAt.Get(); ok {
+		erw.printf("expires:\t%s\n", exp.UTC().Format(time.RFC3339))
+	}
+
+	if erw.err != nil {
+		return fmt.Errorf("write result: %w", erw.err)
+	}
+
+	flushErr := twr.Flush()
+	if flushErr != nil {
+		return fmt.Errorf("flush: %w", flushErr)
+	}
+
+	return nil
+}
+
+// printFile prints the metadata of a file (file-info and update-file).
+func printFile(w io.Writer, serverURL string, file *padmark.FileInfo) error {
+	twr := tabwriter.NewWriter(w, twMinWidth, twTabWidth, twPadding, ' ', 0)
+	ewr := &errWriter{w: twr, err: nil}
+
+	ewr.printf("id:\t%s\n", file.ID)
+	ewr.printf("url:\t%s\n", file.URL.String())
+	ewr.printf("download:\t%s\n", fileDownloadURL(serverURL, file.ID))
+	ewr.printf("name:\t%s\n", file.Name)
+	ewr.printf("size:\t%d\n", file.Size)
+	ewr.printf("privacy:\t%s\n", file.Privacy)
+	ewr.printf("downloads:\t%d\n", file.Downloads)
+
+	if file.BurnAfterDownload {
+		ewr.printf("burn:\tyes\n")
+	}
+
+	if exp, ok := file.ExpiresAt.Get(); ok {
+		ewr.printf("expires:\t%s\n", exp.UTC().Format(time.RFC3339))
+	}
+
+	ewr.printf("created:\t%s\n", file.CreatedAt.UTC().Format(time.RFC3339))
+
+	if ewr.err != nil {
+		return fmt.Errorf("write file: %w", ewr.err)
+	}
+
+	flushErr := twr.Flush()
+	if flushErr != nil {
+		return fmt.Errorf("flush: %w", flushErr)
+	}
+
+	return nil
+}
+
+// printFileJSON prints an upload result or file metadata as JSON for --json.
+func printFileJSON(w io.Writer, file json.Marshaler) error {
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+
+	err := enc.Encode(file)
+	if err != nil {
+		return fmt.Errorf("encode JSON: %w", err)
 	}
 
 	return nil

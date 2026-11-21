@@ -119,3 +119,30 @@ func (s *HandlerSuite) TestHeader_ReaderPage_HasNewButton() {
 	s.Contains(rec.Body.String(), `class="btn-primary header-new"`)
 	s.NotContains(rec.Body.String(), `class="nav-create`)
 }
+
+// TestHeader_FilesOff_NoFileTab: without object storage the header has no "File" tab and the
+// footer does not name files.
+func (s *HandlerSuite) TestHeader_FilesOff_NoFileTab() {
+	rec := getPage(s.router, "/", "")
+	body := rec.Body.String()
+
+	s.Require().Equal(http.StatusOK, rec.Code)
+	s.NotContains(body, `href="/files"`)
+	s.Contains(body, "Markdown notes &amp; short links")
+}
+
+// TestHeader_FilesOn_ShowsFileTab: with files on, every create page has the "File" tab; it is
+// current only on the upload page. The note editor links to the upload page.
+func (s *FileHandlerSuite) TestHeader_FilesOn_ShowsFileTab() {
+	rec := getPage(s.router, "/", "")
+	body := rec.Body.String()
+
+	s.Require().Equal(http.StatusOK, rec.Code)
+	s.Contains(body, `<a href="/files" class="nav-tab">`)
+	s.Contains(body, `id="uploadFileLink"`)
+	s.Contains(body, "Markdown notes, short links &amp; files")
+
+	rec = getPage(s.router, "/links", "")
+	s.Require().Equal(http.StatusOK, rec.Code)
+	s.Contains(rec.Body.String(), `<a href="/files" class="nav-tab">`)
+}

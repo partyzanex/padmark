@@ -47,6 +47,14 @@ const (
 	FlagTOTPCode = "totp-code"
 	// FlagTTLDays is the lifetime of a new API token in days; 0 = never expires.
 	FlagTTLDays = "ttl-days"
+	// FlagName is the file name for `upload`. It is necessary when the content comes from stdin.
+	FlagName = "name"
+	// FlagOutput is the destination path for `download`. The value "-" writes to stdout.
+	FlagOutput = "output"
+	// FlagForce lets `download` replace a file that exists.
+	FlagForce = "force"
+	// FlagClearExpiry removes the expiry of a file in `update-file`.
+	FlagClearExpiry = "clear-expiry"
 )
 
 // Environment variable names.
@@ -65,6 +73,12 @@ const (
 // psWarnEditCode is appended to every --edit-code usage text: an edit code is a credential for
 // the note or link, and flag values are visible to other local users in process listings.
 const psWarnEditCode = "Flag values are visible in process listings (ps); prefer the " + EnvEditCode + " env var"
+
+// usagePrivacyDefaultPublic is the --privacy usage text of the commands that create a resource.
+const usagePrivacyDefaultPublic = "Privacy level: public (default), authenticated, or owner"
+
+// argsUsageFileID is the argument usage of the commands that take a file ID or file URL.
+const argsUsageFileID = "<id|url>"
 
 // DefaultURL is the default padmark server address.
 const DefaultURL = "http://localhost:8080"

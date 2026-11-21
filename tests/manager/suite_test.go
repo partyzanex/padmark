@@ -19,7 +19,9 @@ import (
 	"github.com/partyzanex/padmark/internal/infra/crypto"
 	"github.com/partyzanex/padmark/internal/infra/lock"
 	"github.com/partyzanex/padmark/internal/infra/render"
+	"github.com/partyzanex/padmark/internal/infra/storage/s3store"
 	"github.com/partyzanex/padmark/internal/testutil"
+	"github.com/partyzanex/padmark/internal/usecases/files"
 	"github.com/partyzanex/padmark/internal/usecases/links"
 	"github.com/partyzanex/padmark/internal/usecases/notes"
 )
@@ -32,8 +34,8 @@ type revealStore interface {
 }
 
 // ManagerSuite is the storage-agnostic business-logic integration suite.
-// Embed it in a storage-specific suite that sets Manager, LinkManager, RevealStore, and DB in
-// SetupTest. DB is the raw handle, exposed only for tests that need to bypass the repository's
+// Embed it in a storage-specific suite that sets Manager, LinkManager, FileManager, Objects,
+// RevealStore, and DB in SetupTest. DB is the raw handle, exposed only for tests that need to bypass the repository's
 // decrypt path and inspect exactly what ended up on disk (e.g. the encryption-at-rest check
 // below) — everyday business-logic tests should go through Manager/LinkManager instead.
 type ManagerSuite struct {
@@ -41,6 +43,8 @@ type ManagerSuite struct {
 
 	Manager     *notes.Manager
 	LinkManager *links.Manager
+	FileManager *files.Manager
+	Objects     *s3store.Store
 	RevealStore revealStore
 	DB          *bun.DB
 }

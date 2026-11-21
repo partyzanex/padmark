@@ -4,9 +4,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"net/netip"
 	"net/url"
 	"strings"
+	"time"
 
 	urcli "github.com/urfave/cli/v3"
 
@@ -48,10 +50,22 @@ func pickServerURL(cmd *urcli.Command, embeddedURL string) string {
 	return cmd.String(FlagBaseURL)
 }
 
-// newPadmarkClient builds the generated ogen client pointed at the resolved server URL, with
+// padmarkClients are the API clients of one proxy process. Both point at the same server with
+// the same token. They differ only in their HTTP timeouts.
+type padmarkClients struct {
+	// api serves all tools other than upload_file. --timeout limits each full request.
+	api *padmark.Client
+	// files serves the file tools. --timeout limits only the wait for the response headers,
+	// so a large upload is not stopped (newTransferClient).
+	files *padmark.Client
+	// hasToken is true when the clients send a bearer token.
+	hasToken bool
+}
+
+// newPadmarkClients builds the generated ogen clients pointed at the resolved server URL, with
 // the raw bearer key injected on every request (the client itself sends no Authorization —
 // the API spec carries no per-operation security). No connection is opened here.
-func newPadmarkClient(cmd *urcli.Command) (*padmark.Client, error) {
+func newPadmarkClients(cmd *urcli.Command) (*padmarkClients, error) {
 	token, embeddedURL := splitToken(resolveToken(cmd))
 
 	serverURL := pickServerURL(cmd, embeddedURL)
@@ -66,7 +80,27 @@ func newPadmarkClient(cmd *urcli.Command) (*padmark.Client, error) {
 		return nil, fmt.Errorf("validate token transport: %w", insecureErr)
 	}
 
-	httpClient, err := newBearerClient(serverURL, token, cmd.Duration(FlagTimeout))
+	timeout := cmd.Duration(FlagTimeout)
+
+	api, err := newClientWith(serverURL, token, timeout, newBearerClient)
+	if err != nil {
+		return nil, err
+	}
+
+	files, err := newClientWith(serverURL, token, timeout, newTransferClient)
+	if err != nil {
+		return nil, err
+	}
+
+	return &padmarkClients{api: api, files: files, hasToken: token != ""}, nil
+}
+
+// newClientWith builds one API client with the HTTP client that newHTTPClient returns.
+func newClientWith(
+	serverURL, token string, timeout time.Duration,
+	newHTTPClient func(serverURL, token string, timeout time.Duration) (*http.Client, error),
+) (*padmark.Client, error) {
+	httpClient, err := newHTTPClient(serverURL, token, timeout)
 	if err != nil {
 		return nil, fmt.Errorf("create http client: %w", err)
 	}

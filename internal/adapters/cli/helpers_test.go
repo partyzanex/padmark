@@ -1,9 +1,14 @@
 package cli
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -46,4 +51,57 @@ func isolateEnv(t *testing.T) string {
 	t.Setenv("XDG_CONFIG_HOME", configDir)
 
 	return configDir
+}
+
+// runCLIOutput runs the root command and returns what the command wrote to its standard output.
+func runCLIOutput(ctx context.Context, args ...string) (string, error) {
+	var out bytes.Buffer
+
+	app := NewApp()
+	app.Writer = &out
+	app.ErrWriter = io.Discard
+
+	err := app.Run(ctx, append([]string{testBin}, args...))
+
+	return out.String(), err
+}
+
+// fileInfoJSON is a GET /files/{id} response body for the tests. json.Marshal escapes the name
+// as JSON; Go %q escapes such as \x01 are not valid JSON.
+func fileInfoJSON(t *testing.T, id, name string) string {
+	t.Helper()
+
+	body, err := json.Marshal(map[string]any{
+		"id": id, "url": "https://pad.example/" + id, "name": name, "size": 5, "privacy": "public",
+		"downloads": 0, "burn_after_download": false, "created_at": "2026-11-20T10:00:00Z",
+	})
+	require.NoError(t, err)
+
+	return string(body)
+}
+
+// writeTestResponse writes a response with a JSON body.
+func writeTestResponse(t *testing.T, w http.ResponseWriter, status int, body string) {
+	t.Helper()
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+
+	_, err := io.WriteString(w, body)
+	if err != nil {
+		t.Errorf("write test response: %v", err)
+	}
+}
+
+// outputFields reads the "key: value" lines of a text result.
+func outputFields(out string) map[string]string {
+	fields := make(map[string]string)
+
+	for line := range strings.SplitSeq(out, "\n") {
+		if key, value, ok := strings.Cut(line, ":"); ok {
+			fields[key] = strings.TrimSpace(value)
+		}
+	}
+
+	return fields
 }

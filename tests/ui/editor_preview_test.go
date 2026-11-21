@@ -17,13 +17,16 @@ const previewPlaceholder = "Nothing to preview yet."
 
 func TestEditorPreview(t *testing.T) {
 	runScenarios(t, []scenario{
-		{name: "ViewTabs", run: testViewTabs, accounts: false, allowedStatuses: nil},
-		{name: "LiveUpdate", run: testPreviewLiveUpdate, accounts: false, allowedStatuses: nil},
-		{name: "ServerParity", run: testPreviewServerParity, accounts: false, allowedStatuses: nil},
+		{name: "ViewTabs", run: testViewTabs, accounts: false, files: false, allowedStatuses: nil},
+		{name: "LiveUpdate", run: testPreviewLiveUpdate, accounts: false, files: false, allowedStatuses: nil},
+		{name: "ServerParity", run: testPreviewServerParity, accounts: false, files: false, allowedStatuses: nil},
 		// The <img src=x> request gets the note route's 404; the image error must not run a script.
-		{name: "Sanitize", run: testPreviewSanitize, accounts: false, allowedStatuses: []int{http.StatusNotFound}},
-		{name: "RememberChoice", run: testPreviewRememberChoice, accounts: false, allowedStatuses: nil},
-		{name: "PublishFromPreview", run: testPublishFromPreview, accounts: false, allowedStatuses: nil},
+		{
+			name: "Sanitize", run: testPreviewSanitize, accounts: false, files: false,
+			allowedStatuses: []int{http.StatusNotFound},
+		},
+		{name: "RememberChoice", run: testPreviewRememberChoice, accounts: false, files: false, allowedStatuses: nil},
+		{name: "PublishFromPreview", run: testPublishFromPreview, accounts: false, files: false, allowedStatuses: nil},
 	})
 }
 

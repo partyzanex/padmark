@@ -2,12 +2,14 @@ package middleware
 
 import (
 	"bytes"
+	"io"
 	"log/slog"
 	net_http "net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/partyzanex/padmark/internal/domain"
 )
@@ -101,7 +103,10 @@ func TestIsPublicRoute(t *testing.T) {
 		{net_http.MethodPut, "/edit/abc", false},
 		{net_http.MethodGet, "/admin/users", false},
 		{net_http.MethodGet, "/notes/edit/x", false},
-		{net_http.MethodGet, "/success", false},
+		// GET /success is public: an anonymous author of a link or a file must see the edit code.
+		{net_http.MethodGet, "/success", true},
+		{net_http.MethodPost, "/success", false},
+		{net_http.MethodGet, "/success/x", false},
 		{net_http.MethodGet, "/", false},
 		{net_http.MethodGet, "/login", false},
 		{net_http.MethodGet, "/api", false},
@@ -133,6 +138,68 @@ func TestWithRecovery_RecoversPanicAndLogs(t *testing.T) {
 
 	assert.Equal(t, net_http.StatusInternalServerError, rec.Code)
 	assert.Contains(t, buf.String(), "panic recovered")
+}
+
+// TestWithRecovery_AbortHandlerPanicsAgain checks that an intentional abort (a download that
+// stops after the first byte) goes to net/http without a "panic recovered" record or a 500.
+func TestWithRecovery_AbortHandlerPanicsAgain(t *testing.T) {
+	var buf bytes.Buffer
+
+	log := slog.New(slog.NewJSONHandler(&buf, nil))
+	aborting := net_http.HandlerFunc(func(w net_http.ResponseWriter, _ *net_http.Request) {
+		w.WriteHeader(net_http.StatusOK)
+		panic(net_http.ErrAbortHandler)
+	})
+
+	handler := WithRecovery(log, aborting)
+	rec := httptest.NewRecorder()
+
+	assert.PanicsWithValue(t, net_http.ErrAbortHandler, func() {
+		handler.ServeHTTP(rec, httptest.NewRequest(net_http.MethodGet, "/files/abc/download", nil))
+	})
+	assert.Equal(t, net_http.StatusOK, rec.Code, "the started response must not change to 500")
+	assert.Empty(t, buf.String(), "an intentional abort must not write a log record")
+}
+
+// TestWithRecovery_AbortAfterFlushGivesShortBody runs an abort through the real server and the
+// logging wrapper. A handler that flushes before it aborts gives the client the status and a
+// short body; WithRecovery writes no record.
+func TestWithRecovery_AbortAfterFlushGivesShortBody(t *testing.T) {
+	var buf bytes.Buffer
+
+	log := slog.New(slog.NewJSONHandler(&buf, nil))
+	aborting := net_http.HandlerFunc(func(w net_http.ResponseWriter, _ *net_http.Request) {
+		w.Header().Set("Content-Length", "10")
+		_, _ = w.Write([]byte("hel"))
+
+		flushErr := net_http.NewResponseController(w).Flush()
+		if flushErr != nil {
+			t.Errorf("flush through the middleware: %v", flushErr)
+		}
+
+		panic(net_http.ErrAbortHandler)
+	})
+
+	server := httptest.NewServer(WithLogging(log, WithRecovery(log, aborting)))
+	defer server.Close()
+
+	req, err := net_http.NewRequestWithContext(t.Context(), net_http.MethodGet, server.URL+"/files/abc/download", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := server.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer resp.Body.Close()
+
+	_, err = io.ReadAll(resp.Body)
+
+	require.ErrorIs(t, err, io.ErrUnexpectedEOF)
+	assert.Equal(t, net_http.StatusOK, resp.StatusCode)
+	assert.NotContains(t, buf.String(), "panic recovered")
 }
 
 // TestWithRecovery_OutermostLayerCoversMiddlewarePanic guards the fix for a panic occurring

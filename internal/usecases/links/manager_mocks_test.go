@@ -494,3 +494,42 @@ func (mr *MockMetricsMockRecorder) IncRedirects() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IncRedirects", reflect.TypeOf((*MockMetrics)(nil).IncRedirects))
 }
+
+// MockExpiredFileReleaser is a mock of ExpiredFileReleaser interface.
+type MockExpiredFileReleaser struct {
+	ctrl     *gomock.Controller
+	recorder *MockExpiredFileReleaserMockRecorder
+	isgomock struct{}
+}
+
+// MockExpiredFileReleaserMockRecorder is the mock recorder for MockExpiredFileReleaser.
+type MockExpiredFileReleaserMockRecorder struct {
+	mock *MockExpiredFileReleaser
+}
+
+// NewMockExpiredFileReleaser creates a new mock instance.
+func NewMockExpiredFileReleaser(ctrl *gomock.Controller) *MockExpiredFileReleaser {
+	mock := &MockExpiredFileReleaser{ctrl: ctrl}
+	mock.recorder = &MockExpiredFileReleaserMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockExpiredFileReleaser) EXPECT() *MockExpiredFileReleaserMockRecorder {
+	return m.recorder
+}
+
+// ReleaseExpiredSlug mocks base method.
+func (m *MockExpiredFileReleaser) ReleaseExpiredSlug(ctx context.Context, id string) (bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ReleaseExpiredSlug", ctx, id)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ReleaseExpiredSlug indicates an expected call of ReleaseExpiredSlug.
+func (mr *MockExpiredFileReleaserMockRecorder) ReleaseExpiredSlug(ctx, id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReleaseExpiredSlug", reflect.TypeOf((*MockExpiredFileReleaser)(nil).ReleaseExpiredSlug), ctx, id)
+}

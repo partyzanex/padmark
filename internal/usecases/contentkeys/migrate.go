@@ -57,8 +57,9 @@ func (m *Manager) replace(ctx context.Context, row Row, value string, report *Re
 	return nil
 }
 
-// Migrate adds the installation-key envelope to every structurally valid raw legacy row and
-// converts every tagged v0.1.6 plaintext note in place (see convertLegacy).
+// Migrate adds the installation-key envelope to every structurally valid raw legacy note or
+// link and converts every tagged v0.1.6 plaintext note in place (see convertLegacy). It never
+// wraps a file record.
 // A failure leaves phase=pending; committed rows are checked and skipped on the next run.
 // Status is the dry run of Migrate: it reports the same counts without changes.
 func (m *Manager) Migrate(ctx context.Context) (Report, error) {
@@ -119,9 +120,10 @@ func (m *Manager) migrateRow(ctx context.Context, row *Row, report *Report) erro
 	}
 
 	// An untagged v0.1.6 note is plaintext: wrapping it as legacy ciphertext would make it
-	// unreadable. The final Status reports it until MarkLegacy tags it.
+	// unreadable. The final Status reports it until MarkLegacy tags it. A file record is never
+	// legacy ciphertext: a wrap would hide the damage, so the final Status counts it as failed.
 	cipher := m.ciphers[row.Resource]
-	if cipher.Versioned(row.Value) || m.untaggedLegacy(row) {
+	if cipher.Versioned(row.Value) || m.untaggedLegacy(row) || row.Resource == resourceFile {
 		return nil
 	}
 
@@ -142,6 +144,8 @@ func (m *Manager) PreviewRewrap(ctx context.Context) (Report, error) {
 }
 
 // Rewrap only changes DEK wrappers. Interrupted rotations remain readable with both keys.
+// For a file, the content key inside sealed_meta stays the same, so the bucket objects do not
+// change; an old keyring with an old database copy still opens them (see ADR-0001).
 func (m *Manager) Rewrap(ctx context.Context) (Report, error) {
 	report, err := m.readyReport(ctx)
 	if err != nil {

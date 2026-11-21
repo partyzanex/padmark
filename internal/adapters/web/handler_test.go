@@ -378,8 +378,11 @@ func (s *HandlerSuite) TestEditPage_Expired_Gone() {
 	s.NotContains(w.Body.String(), "stale-content")
 }
 
+// TestEditPage_NotFound: /edit/{id} is the editor of a note, a short link or a file. When no
+// record has the slug, the page is the note "not found" page.
 func (s *HandlerSuite) TestEditPage_NotFound() {
 	s.manager.EXPECT().Peek(gomock.Any(), "missing").Return(nil, domain.ErrNotFound)
+	s.linkManager.EXPECT().Peek(gomock.Any(), "missing").Return(nil, domain.ErrNotFound)
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/edit/missing", nil)
@@ -403,6 +406,25 @@ func (s *HandlerSuite) TestSuccessPage_OK() {
 	s.Contains(w.Body.String(), "Paste created")
 	s.Contains(w.Body.String(), "http://example.com/abc")
 	s.Contains(w.Body.String(), "never expires")
+}
+
+// TestSuccessPage_Link: the result of a new short link shares /{id} and opens the link page
+// /links/{id}, because /{id} is the redirect. As for a note, the page has no Edit action, and
+// "New" opens the create page of the same kind.
+func (s *HandlerSuite) TestSuccessPage_Link() {
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/success?kind=link&id=abc", nil)
+
+	s.router.ServeHTTP(w, r)
+
+	body := w.Body.String()
+	s.Equal(http.StatusOK, w.Code)
+	s.Contains(body, "Link created")
+	s.Contains(body, "Your link is live")
+	s.Contains(body, `<a href="http://example.com/abc" class="copy-value"`)
+	s.Contains(body, `href="/links/abc" class="btn-ghost" id="openRecordLink"`)
+	s.NotContains(body, "/edit/abc")
+	s.Contains(body, `href="/links" class="btn-primary header-new" aria-label="New link"`)
 }
 
 func (s *HandlerSuite) TestSuccessPage_Privacy() {
@@ -2529,7 +2551,8 @@ func (s *HandlerSuite) TestAuth_MissingToken_NextContainsOriginalURL() {
 	router := s.newRouterWithTOTPAuth()
 
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet, "/success?foo=bar", nil)
+	// /change-password stays a protected page; /success is public (anonymous creates).
+	r := httptest.NewRequest(http.MethodGet, "/change-password?foo=bar", nil)
 	r.Header.Set("Accept", "text/html")
 
 	router.ServeHTTP(w, r)
@@ -2537,7 +2560,7 @@ func (s *HandlerSuite) TestAuth_MissingToken_NextContainsOriginalURL() {
 	s.Equal(http.StatusSeeOther, w.Code)
 	loc := w.Header().Get("Location")
 	s.True(strings.HasPrefix(loc, "/login?next="), "must redirect to login with next")
-	s.Contains(loc, "%2Fsuccess")
+	s.Contains(loc, "%2Fchange-password")
 }
 
 func (s *HandlerSuite) TestAuth_APIClient_NoHeaders_Returns401() {
@@ -2545,7 +2568,7 @@ func (s *HandlerSuite) TestAuth_APIClient_NoHeaders_Returns401() {
 
 	w := httptest.NewRecorder()
 	// No Accept, no Sec-Fetch-Dest — typical API client (curl).
-	r := httptest.NewRequest(http.MethodGet, "/success", nil)
+	r := httptest.NewRequest(http.MethodGet, "/change-password", nil)
 
 	router.ServeHTTP(w, r)
 
@@ -2556,7 +2579,7 @@ func (s *HandlerSuite) TestAuth_Browser_SecFetchDestDocument_Returns303() {
 	router := s.newRouterWithTOTPAuth()
 
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet, "/success", nil)
+	r := httptest.NewRequest(http.MethodGet, "/change-password", nil)
 	r.Header.Set("Sec-Fetch-Dest", "document")
 
 	router.ServeHTTP(w, r)

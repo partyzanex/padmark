@@ -22,6 +22,7 @@ type PostgresManagerSuite struct {
 	ManagerSuite
 
 	container *tcpostgres.PostgresContainer
+	objects   *objectStore
 	db        *bun.DB
 }
 
@@ -46,6 +47,8 @@ func (s *PostgresManagerSuite) SetupSuite() {
 	s.Require().NoError(s.db.PingContext(ctx))
 	_, migrateErr := pgrepo.Migrate(ctx, s.db)
 	s.Require().NoError(migrateErr)
+
+	s.objects = startObjectStore(&s.Suite)
 }
 
 func (s *PostgresManagerSuite) TearDownSuite() {
@@ -56,12 +59,14 @@ func (s *PostgresManagerSuite) TearDownSuite() {
 	if s.container != nil {
 		s.NoError(testcontainers.TerminateContainer(s.container))
 	}
+
+	s.objects.stop(&s.Suite)
 }
 
 func (s *PostgresManagerSuite) SetupTest() {
 	ctx := s.T().Context()
 
-	for _, tbl := range []string{"notes", "links", "reveal_tokens"} {
+	for _, tbl := range []string{"notes", "links", "files", "reveal_tokens"} {
 		_, err := s.db.NewTruncateTable().TableExpr(tbl).Cascade().Exec(ctx)
 		s.Require().NoError(err)
 	}
@@ -72,6 +77,9 @@ func (s *PostgresManagerSuite) SetupTest() {
 	s.LinkManager = newLinkManager(s.T(),
 		pgrepo.NewLinkRepository(s.db, slog.Default()), pgrepo.NewNoteRepository(s.db), slugLock,
 	)
+	s.FileManager = newFileManager(&s.Suite, pgrepo.NewFileRepository(s.db), pgrepo.NewNoteRepository(s.db),
+		pgrepo.NewLinkRepository(s.db, slog.Default()), slugLock, s.objects.store)
+	s.Objects = s.objects.store
 	s.RevealStore = pgrepo.NewRevealRepository(s.db, slog.Default())
 	s.DB = s.db
 }

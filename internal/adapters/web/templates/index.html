@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Padmark{{if .EditMode}} — Edit{{end}}</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    {{template "theme-head" .Nonce}}
     <link rel="stylesheet" href="/static/style.css?p={{styleVersion}}">
 </head>
 <body>
@@ -70,10 +71,18 @@
 
             <div class="editor-footer">
                 <span><span id="charCount">0 characters</span> · <span id="wordCount">0 words</span></span>
-                <a class="format-hint" href="https://commonmark.org/help/" target="_blank" rel="noopener noreferrer">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M6 15V9l2.5 3L11 9v6M16 9v6M14 13l2 2 2-2"/></svg>
-                    Markdown guide
-                </a>
+                <span class="editor-footer-links">
+                    {{- if and .Header.FilesEnabled (not .EditMode)}}
+                    <a class="format-hint" href="/files" id="uploadFileLink">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M12 18v-6M9 15l3-3 3 3"/></svg>
+                        Upload a file
+                    </a>
+                    {{- end}}
+                    <a class="format-hint" href="https://commonmark.org/help/" target="_blank" rel="noopener noreferrer">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M6 15V9l2.5 3L11 9v6M16 9v6M14 13l2 2 2-2"/></svg>
+                        Markdown guide
+                    </a>
+                </span>
             </div>
         </section>
 
@@ -153,7 +162,7 @@
         <div class="sheet-backdrop" id="sheetBackdrop" hidden></div>
     </main>
 
-    {{template "footer"}}
+    {{template "footer" .Header}}
 
 </div>
 

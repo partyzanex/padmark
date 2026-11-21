@@ -11,6 +11,14 @@ func (s *CreateAPITokenRequest) setDefaults() {
 }
 
 // setDefaults set default value of fields.
+func (s *CreateFileRequestMultipart) setDefaults() {
+	{
+		val := bool(false)
+		s.BurnAfterDownload.SetTo(val)
+	}
+}
+
+// setDefaults set default value of fields.
 func (s *CreateLinkRequest) setDefaults() {
 	{
 		val := bool(false)

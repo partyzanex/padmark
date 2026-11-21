@@ -5,15 +5,18 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"net/netip"
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	urcli "github.com/urfave/cli/v3"
 
 	"github.com/partyzanex/padmark/internal/clifactory"
 	"github.com/partyzanex/padmark/internal/errorcontext"
+	"github.com/partyzanex/padmark/internal/infra/tokenfile"
 	padmark "github.com/partyzanex/padmark/pkg/client"
 )
 
@@ -32,6 +35,11 @@ func NewApp() *urcli.Command {
 			shortenCommand(),
 			expandCommand(),
 			deleteLinkCommand(),
+			uploadCommand(),
+			downloadCommand(),
+			fileInfoCommand(),
+			updateFileCommand(),
+			deleteFileCommand(),
 			pingCommand(),
 			setupCommand(),
 			createTokenCommand(),
@@ -72,6 +80,20 @@ func globalFlags() []urcli.Flag {
 }
 
 func newPadmarkClient(cmd *urcli.Command) (*padmark.Client, error) {
+	return newClientWith(cmd, newBearerClient)
+}
+
+// newFileTransferClient returns the API client for `upload` and `download`. Its HTTP client
+// uses --timeout only for the response headers, so a large file body is not stopped.
+func newFileTransferClient(cmd *urcli.Command) (*padmark.Client, error) {
+	return newClientWith(cmd, newTransferClient)
+}
+
+// newClientWith resolves the server and the token, checks the transport and builds the API
+// client with the HTTP client that newHTTPClient returns.
+func newClientWith(
+	cmd *urcli.Command, newHTTPClient func(serverURL, token string, timeout time.Duration) (*http.Client, error),
+) (*padmark.Client, error) {
 	// An envelope token carries its own server URL; an explicit --url/PADMARK_URL still wins.
 	token, serverURL, trustErr := resolveTrustedServer(cmd)
 	if trustErr != nil {
@@ -83,7 +105,7 @@ func newPadmarkClient(cmd *urcli.Command) (*padmark.Client, error) {
 		return nil, fmt.Errorf("validate token transport: %w", insecureErr)
 	}
 
-	httpClient, err := newBearerClient(serverURL, token, cmd.Duration(FlagTimeout))
+	httpClient, err := newHTTPClient(serverURL, token, cmd.Duration(FlagTimeout))
 	if err != nil {
 		return nil, fmt.Errorf("create http client: %w", err)
 	}
@@ -94,6 +116,15 @@ func newPadmarkClient(cmd *urcli.Command) (*padmark.Client, error) {
 	}
 
 	return cl, nil
+}
+
+// commandWriter resolves the command's standard output, falling back to os.Stdout when unset.
+func commandWriter(cmd *urcli.Command) io.Writer {
+	if out := cmd.Root().Writer; out != nil {
+		return out
+	}
+
+	return os.Stdout
 }
 
 // commandErrWriter resolves the command's error output, falling back to os.Stderr when unset.
@@ -232,6 +263,93 @@ func linkIDArg(cmd *urcli.Command) (string, error) {
 	return id, nil
 }
 
+// fileIDArg returns the file ID from the first positional argument. The argument can also be
+// the file URL that `upload` prints: /{id}, /files/{id} or /files/{id}/download. The CLI sends
+// the request to --url, so a URL argument must have the same origin as --url. Otherwise
+// `delete-file https://other.example/x` would delete the file "x" on the configured server.
+func fileIDArg(cmd *urcli.Command) (string, error) {
+	arg := strings.TrimSpace(cmd.Args().Get(0))
+	if arg == "" {
+		return "", errFileIDRequired
+	}
+
+	if !strings.Contains(arg, "://") {
+		return checkFileID(arg)
+	}
+
+	err := checkFileURLOrigin(arg, resolveServerURL(cmd))
+	if err != nil {
+		return "", err
+	}
+
+	id, err := fileIDFromURL(arg)
+	if err != nil {
+		return "", err
+	}
+
+	return checkFileID(id)
+}
+
+// checkFileID refuses "." and "..". The client puts the ID in a URL path, where these values
+// change the route.
+func checkFileID(id string) (string, error) {
+	if id == "." || id == ".." {
+		return "", fmt.Errorf("%w: %q", errInvalidFileID, id)
+	}
+
+	return id, nil
+}
+
+// checkFileURLOrigin compares the origin (scheme, host and port) of a file URL with the origin
+// of the server URL.
+func checkFileURLOrigin(fileURL, serverURL string) error {
+	fileOrigin, err := tokenfile.Origin(fileURL)
+	if err != nil {
+		return fmt.Errorf("%w: %w", errFileURL, err)
+	}
+
+	serverOrigin, err := tokenfile.Origin(serverURL)
+	if err != nil {
+		return fmt.Errorf("resolve server URL: %w", err)
+	}
+
+	if fileOrigin != serverOrigin {
+		return fmt.Errorf("%w: the URL is on %s, the server is %s; pass --url %s",
+			errFileURLOrigin, fileOrigin, serverOrigin, fileOrigin)
+	}
+
+	return nil
+}
+
+// fileIDFromURL reads the file ID from the path of a file URL.
+func fileIDFromURL(raw string) (string, error) {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return "", fmt.Errorf("%w: %w", errFileURL, err)
+	}
+
+	id := strings.Trim(parsed.Path, "/")
+	if rest, ok := strings.CutPrefix(id, filesPathSegment+"/"); ok {
+		id = strings.TrimSuffix(rest, "/download")
+	}
+
+	if id == "" || id == filesPathSegment || strings.Contains(id, "/") {
+		return "", fmt.Errorf("%w: %s", errFileURL, raw)
+	}
+
+	return id, nil
+}
+
+// optEditCode returns the X-Edit-Code header value. An empty code omits the header, so the
+// server can identify the owner by --token.
+func optEditCode(editCode string) padmark.OptString {
+	if editCode == "" {
+		return padmark.OptString{Value: "", Set: false}
+	}
+
+	return padmark.NewOptString(editCode)
+}
+
 // runDeleteCommand implements the "resolve ID → delete → print confirmation" flow shared by
 // `delete` (notes) and `delete-link` (links). Only this skeleton is shared: ogen generates
 // distinct params/response-union/client-method types per operation, so the resource-specific
@@ -255,7 +373,7 @@ func runDeleteCommand(
 		return fmt.Errorf("delete resource: %w", err)
 	}
 
-	ew := &errWriter{w: os.Stdout, err: nil}
+	ew := &errWriter{w: commandWriter(cmd), err: nil}
 	ew.printf("deleted %s\n", id)
 
 	if ew.err != nil {

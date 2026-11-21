@@ -32,32 +32,39 @@ func TestEditor(t *testing.T) {
 			activeButton := sess.page.Locator(fmt.Sprintf(`.theme-btn[data-theme-value="%s"]`, theme))
 			sess.must(sess.expect.Locator(activeButton).ToHaveClass(regexp.MustCompile("active")))
 		},
-			accounts: false, allowedStatuses: nil,
+			accounts: false, files: false, allowedStatuses: nil,
 		})
 	}
 
 	cases = append(cases,
-		scenario{name: "Toolbar", run: testToolbar, accounts: false, allowedStatuses: nil},
-		scenario{name: "FillsHeight", run: testEditorFillsHeight, accounts: false, allowedStatuses: nil},
-		scenario{name: "Options", run: testOptions, accounts: false, allowedStatuses: nil},
-		scenario{name: "PhoneMenu", run: testPhoneMenu, accounts: false, allowedStatuses: nil},
-		scenario{name: "ChosenEditCode", run: testChosenEditCode, accounts: false, allowedStatuses: nil},
+		scenario{name: "Toolbar", run: testToolbar, accounts: false, files: false, allowedStatuses: nil},
+		scenario{name: "FillsHeight", run: testEditorFillsHeight, accounts: false, files: false, allowedStatuses: nil},
+		scenario{name: "Options", run: testOptions, accounts: false, files: false, allowedStatuses: nil},
+		scenario{name: "PhoneMenu", run: testPhoneMenu, accounts: false, files: false, allowedStatuses: nil},
+		scenario{name: "ChosenEditCode", run: testChosenEditCode, accounts: false, files: false, allowedStatuses: nil},
 		scenario{name: "PrivacyNeedsAccounts", allowedStatuses: []int{http.StatusUnprocessableEntity},
 			run:      testPrivacyNeedsAccounts,
-			accounts: false,
+			accounts: false, files: false,
 		},
-		scenario{name: "EmptyContent", run: testEmptyContent, accounts: false, allowedStatuses: nil},
-		scenario{name: "PublishAndView", run: testPublishAndView, accounts: false, allowedStatuses: nil},
-		scenario{name: "ContentsSidebar", run: testContentsSidebar, accounts: false, allowedStatuses: nil},
-		scenario{name: "NoContentsSidebar", run: testNoContentsSidebar, accounts: false, allowedStatuses: nil},
-		scenario{name: "EditAndSave", run: testEditAndSave, accounts: false, allowedStatuses: nil},
-		scenario{name: "PreserveCustomBurnTTL", run: testPreserveCustomBurnTTL, accounts: false, allowedStatuses: nil},
-		scenario{name: "OneTimeEditCode", run: testOneTimeEditCode, accounts: false, allowedStatuses: nil},
-		scenario{name: "Reveal", run: testReveal, accounts: false, allowedStatuses: nil},
-		scenario{name: "PublishFailure", allowedStatuses: []int{503}, run: testPublishFailure, accounts: false},
-		scenario{name: "LongFirstLine", run: testLongFirstLine, accounts: false, allowedStatuses: nil},
-		scenario{name: "InvalidEditCode", allowedStatuses: []int{403}, run: testInvalidEditCode, accounts: false},
-		scenario{name: "NotFound", allowedStatuses: []int{404}, run: testNotFound, accounts: false},
+		scenario{name: "EmptyContent", run: testEmptyContent, accounts: false, files: false, allowedStatuses: nil},
+		scenario{name: "PublishAndView", run: testPublishAndView, accounts: false, files: false, allowedStatuses: nil},
+		scenario{name: "ContentsSidebar", run: testContentsSidebar, accounts: false, files: false, allowedStatuses: nil},
+		scenario{name: "NoContentsSidebar", run: testNoContentsSidebar, accounts: false, files: false, allowedStatuses: nil},
+		scenario{name: "EditAndSave", run: testEditAndSave, accounts: false, files: false, allowedStatuses: nil},
+		scenario{
+			name: "PreserveCustomBurnTTL", run: testPreserveCustomBurnTTL, accounts: false, files: false,
+			allowedStatuses: nil,
+		},
+		scenario{name: "OneTimeEditCode", run: testOneTimeEditCode, accounts: false, files: false, allowedStatuses: nil},
+		scenario{name: "Reveal", run: testReveal, accounts: false, files: false, allowedStatuses: nil},
+		scenario{
+			name: "PublishFailure", allowedStatuses: []int{503}, run: testPublishFailure, accounts: false, files: false,
+		},
+		scenario{name: "LongFirstLine", run: testLongFirstLine, accounts: false, files: false, allowedStatuses: nil},
+		scenario{
+			name: "InvalidEditCode", allowedStatuses: []int{403}, run: testInvalidEditCode, accounts: false, files: false,
+		},
+		scenario{name: "NotFound", allowedStatuses: []int{404}, run: testNotFound, accounts: false, files: false},
 	)
 	runScenarios(t, cases)
 }

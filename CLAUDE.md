@@ -4,10 +4,10 @@ Project guidance for development and maintenance of this repository.
 
 ## Project
 
-**padmark** is a Go service for Markdown notes, short links and account-based access,
-with HTML/JSON/raw content negotiation and encrypted storage. Use Go 1.27.3 as specified
-in [go.mod](go.mod). Read [README.md](README.md) for operation and
-[docs/GUIDE.md](docs/GUIDE.md) for architecture.
+**padmark** is a Go service for Markdown notes, short links, optional S3 files and
+account-based access, with HTML/JSON/raw content negotiation and encrypted storage. Use Go
+1.27.3 as specified in [go.mod](go.mod). Read [README.md](README.md) for operation,
+[docs/GUIDE.md](docs/GUIDE.md) for architecture and [docs/adr/](docs/adr/README.md) for decisions.
 
 ## Commands
 
@@ -39,8 +39,10 @@ Dependencies point inward: adapters and infrastructure depend on usecases and do
 
 - **domain** (`internal/domain/`): entities, validation and sentinel errors; no interfaces.
   Dependencies are stdlib plus `github.com/google/uuid` for account ownership IDs.
-- **usecases** (`internal/usecases/`): note/link lifecycle, account management and content-key
+- **usecases** (`internal/usecases/`): note/link/file lifecycle, account management and content-key
   migration/rotation. Each consumer defines its dependency interfaces beside its implementation.
+- **files**: optional; `internal/usecases/files` streams uploads through `crypto.FileCipher` to
+  `infra/storage/s3store`. `files.sealed_meta` (name + content key) is a key-rotation resource.
 - **infra** (`internal/infra/`): SQLite/PostgreSQL repositories, rendering, crypto, caches,
   metrics and server composition/configuration in `infra/server/`.
 - **adapters** (`internal/adapters/`): HTTP, CLI and MCP. HTTP templates, CSS, JavaScript,
@@ -57,7 +59,7 @@ Dependencies point inward: adapters and infrastructure depend on usecases and do
   `buildHandlers` and `buildRouter`; do not introduce a DI framework.
 - HTTP middleware and its request context live in `internal/adapters/web/middleware/`.
   Keep it independent of the parent `web` package; shared JSON errors live in `web/response/`.
-- Notes and links share the same slug-lock instance for local preflight/cache coordination.
+- Notes, links and files share the same slug-lock instance for local preflight/cache coordination.
   Storage triggers enforce cross-process uniqueness through the `slug_namespace` primary key.
 - `NewHandler(manager, linkManager, log)` requires both managers.
   `NewRouter(handler, ogenHandler, opts)` receives `*RouterOptions` and returns `(http.Handler, error)`.
@@ -78,6 +80,10 @@ Dependencies point inward: adapters and infrastructure depend on usecases and do
 - Keep installation keys and real credentials out of the repository. Test credentials must
   belong only to isolated fixtures. Back up database and keyring separately.
 - SQL migrations live in `migrations/sqlite/` and `migrations/postgres/` and are embedded per dialect.
+- `--s3-endpoint` turns files on; `attachFiles` (`infra/server/files.go`) creates a missing
+  bucket and stops startup when the key has no access or cannot create it. S3 keys come only from `PADMARK_S3_ACCESS_KEY` / `PADMARK_S3_SECRET_KEY`.
+  Other flags: `--s3-bucket`, `--s3-region`, `--s3-path-style`, `--max-file-size`,
+  `--files-sweep-interval` (`0` = no background sweep).
 
 ### HTTP and access control
 
@@ -90,6 +96,13 @@ Dependencies point inward: adapters and infrastructure depend on usecases and do
   Note views, link redirects, account/admin forms and health checks remain available.
 - Delete credentials use `X-Edit-Code`. Notes retain the deprecated query-string fallback
   for v0.1.6 clients; links ignore query-string edit codes.
+- `FileHandler` serves `/files*` by hand, not ogen (`docs/adr/0002-files-outside-ogen.md`).
+  Pages: `/files` (upload), `/edit/{id}` (editor), file page at `/{id}` for `Accept: text/html`;
+  other clients get the content. `--disable-api` keeps only the GET/HEAD file pages.
+- CLI file commands: `upload`, `download`, `file-info`, `update-file`, `delete-file`. MCP file
+  tools: `upload_file` (needs `--upload-root` / `PADMARK_MCP_UPLOAD_ROOT`), `get_file`,
+  `update_file`, `delete_file`. Use `pkg/client` `UploadFile`/`DownloadFile`, not the
+  generated `CreateFile`/`GetFileContent`.
 - Translate domain errors centrally through `errors.go`/`ogen_errors.go`; JSON responses use
   `{"message": ..., "code"?: ...}`. Do not expose wrapped internal errors to clients.
 
@@ -112,6 +125,8 @@ Dependencies point inward: adapters and infrastructure depend on usecases and do
 - Use `t.Context()` / `s.T().Context()` in tests, never a stored background context.
 - Integration suites in `tests/` and PostgreSQL repository tests use the `integration` tag.
   SQLite can use temporary/in-memory databases; PostgreSQL uses testcontainers and needs Docker.
+- File suites (`tests/files`, `tests/manager`, `tests/cli`, `tests/mcp`, `s3store`) start
+  `adobe/s3mock:3.12.0` and need Docker.
 - Clean state between tests. Use polling/waiting assertions instead of fixed sleeps.
 - Browser tests are Go scenarios in `tests/ui/`, with separate dependencies and their own Makefile.
   See [tests/ui/README.md](tests/ui/README.md) before changing the harness or PNG references.

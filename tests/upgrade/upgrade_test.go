@@ -69,7 +69,10 @@ func newKeyManager(t *testing.T, db *bun.DB) *contentkeys.Manager {
 	linkCipher, err := ring.ForResource("link")
 	require.NoError(t, err)
 
-	return contentkeys.New(keyrepo.New(db), ring, noteCipher, linkCipher,
+	fileCipher, err := ring.ForResource("file")
+	require.NoError(t, err)
+
+	return contentkeys.New(keyrepo.New(db), ring, noteCipher, linkCipher, fileCipher,
 		crypto.NewEditCodeHasher(crypto.DefaultArgon2Params()))
 }
 

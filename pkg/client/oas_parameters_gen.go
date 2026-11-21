@@ -14,6 +14,123 @@ import (
 	"github.com/ogen-go/ogen/validate"
 )
 
+// DeleteFileParams is parameters of deleteFile operation.
+type DeleteFileParams struct {
+	// File ID (slug). It is a 10-character random string or the custom slug chosen at upload.
+	ID string
+	// Edit code returned at upload.
+	XEditCode OptString `json:",omitempty,omitzero"`
+}
+
+func unpackDeleteFileParams(packed middleware.Parameters) (params DeleteFileParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "id",
+			In:   "path",
+		}
+		params.ID = packed[key].(string)
+	}
+	{
+		key := middleware.ParameterKey{
+			Name: "X-Edit-Code",
+			In:   "header",
+		}
+		if v, ok := packed[key]; ok {
+			params.XEditCode = v.(OptString)
+		}
+	}
+	return params
+}
+
+func decodeDeleteFileParams(args [1]string, argsEscaped bool, r *http.Request) (params DeleteFileParams, _ error) {
+	h := uri.NewHeaderDecoder(r.Header)
+	// Decode path: id.
+	if err := func() error {
+		param := args[0]
+		if argsEscaped {
+			unescaped, err := url.PathUnescape(args[0])
+			if err != nil {
+				return errors.Wrap(err, "unescape path")
+			}
+			param = unescaped
+		}
+		if len(param) > 0 {
+			d := uri.NewPathDecoder(uri.PathDecoderConfig{
+				Param:   "id",
+				Value:   param,
+				Style:   uri.PathStyleSimple,
+				Explode: false,
+			})
+
+			if err := func() error {
+				val, err := d.DecodeValue()
+				if err != nil {
+					return err
+				}
+
+				c, err := conv.ToString(val)
+				if err != nil {
+					return err
+				}
+
+				params.ID = c
+				return nil
+			}(); err != nil {
+				return err
+			}
+		} else {
+			return validate.ErrFieldRequired
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "id",
+			In:   "path",
+			Err:  err,
+		}
+	}
+	// Decode header: X-Edit-Code.
+	if err := func() error {
+		cfg := uri.HeaderParameterDecodingConfig{
+			Name:    "X-Edit-Code",
+			Explode: false,
+		}
+		if err := h.HasParam(cfg); err == nil {
+			if err := h.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotXEditCodeVal string
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToString(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotXEditCodeVal = c
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.XEditCode.SetTo(paramsDotXEditCodeVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "X-Edit-Code",
+			In:   "header",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
 // DeleteLinkParams is parameters of deleteLink operation.
 type DeleteLinkParams struct {
 	// Link ID (slug) — 10-char random string or the custom slug chosen at creation.
@@ -304,6 +421,138 @@ func decodeDeleteNoteParams(args [1]string, argsEscaped bool, r *http.Request) (
 	return params, nil
 }
 
+// GetFileParams is parameters of getFile operation.
+type GetFileParams struct {
+	// File ID (slug). It is a 10-character random string or the custom slug chosen at upload.
+	ID string
+}
+
+func unpackGetFileParams(packed middleware.Parameters) (params GetFileParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "id",
+			In:   "path",
+		}
+		params.ID = packed[key].(string)
+	}
+	return params
+}
+
+func decodeGetFileParams(args [1]string, argsEscaped bool, r *http.Request) (params GetFileParams, _ error) {
+	// Decode path: id.
+	if err := func() error {
+		param := args[0]
+		if argsEscaped {
+			unescaped, err := url.PathUnescape(args[0])
+			if err != nil {
+				return errors.Wrap(err, "unescape path")
+			}
+			param = unescaped
+		}
+		if len(param) > 0 {
+			d := uri.NewPathDecoder(uri.PathDecoderConfig{
+				Param:   "id",
+				Value:   param,
+				Style:   uri.PathStyleSimple,
+				Explode: false,
+			})
+
+			if err := func() error {
+				val, err := d.DecodeValue()
+				if err != nil {
+					return err
+				}
+
+				c, err := conv.ToString(val)
+				if err != nil {
+					return err
+				}
+
+				params.ID = c
+				return nil
+			}(); err != nil {
+				return err
+			}
+		} else {
+			return validate.ErrFieldRequired
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "id",
+			In:   "path",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
+// GetFileContentParams is parameters of getFileContent operation.
+type GetFileContentParams struct {
+	// File ID (slug). It is a 10-character random string or the custom slug chosen at upload.
+	ID string
+}
+
+func unpackGetFileContentParams(packed middleware.Parameters) (params GetFileContentParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "id",
+			In:   "path",
+		}
+		params.ID = packed[key].(string)
+	}
+	return params
+}
+
+func decodeGetFileContentParams(args [1]string, argsEscaped bool, r *http.Request) (params GetFileContentParams, _ error) {
+	// Decode path: id.
+	if err := func() error {
+		param := args[0]
+		if argsEscaped {
+			unescaped, err := url.PathUnescape(args[0])
+			if err != nil {
+				return errors.Wrap(err, "unescape path")
+			}
+			param = unescaped
+		}
+		if len(param) > 0 {
+			d := uri.NewPathDecoder(uri.PathDecoderConfig{
+				Param:   "id",
+				Value:   param,
+				Style:   uri.PathStyleSimple,
+				Explode: false,
+			})
+
+			if err := func() error {
+				val, err := d.DecodeValue()
+				if err != nil {
+					return err
+				}
+
+				c, err := conv.ToString(val)
+				if err != nil {
+					return err
+				}
+
+				params.ID = c
+				return nil
+			}(); err != nil {
+				return err
+			}
+		} else {
+			return validate.ErrFieldRequired
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "id",
+			In:   "path",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
 // GetLinkParams is parameters of getLink operation.
 type GetLinkParams struct {
 	// Link ID (slug) — 10-char random string or the custom slug chosen at creation.
@@ -430,6 +679,123 @@ func decodeGetNoteParams(args [1]string, argsEscaped bool, r *http.Request) (par
 		return params, &ogenerrors.DecodeParamError{
 			Name: "id",
 			In:   "path",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
+// UpdateFileParams is parameters of updateFile operation.
+type UpdateFileParams struct {
+	// File ID (slug). It is a 10-character random string or the custom slug chosen at upload.
+	ID string
+	// Edit code returned at upload.
+	XEditCode OptString `json:",omitempty,omitzero"`
+}
+
+func unpackUpdateFileParams(packed middleware.Parameters) (params UpdateFileParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "id",
+			In:   "path",
+		}
+		params.ID = packed[key].(string)
+	}
+	{
+		key := middleware.ParameterKey{
+			Name: "X-Edit-Code",
+			In:   "header",
+		}
+		if v, ok := packed[key]; ok {
+			params.XEditCode = v.(OptString)
+		}
+	}
+	return params
+}
+
+func decodeUpdateFileParams(args [1]string, argsEscaped bool, r *http.Request) (params UpdateFileParams, _ error) {
+	h := uri.NewHeaderDecoder(r.Header)
+	// Decode path: id.
+	if err := func() error {
+		param := args[0]
+		if argsEscaped {
+			unescaped, err := url.PathUnescape(args[0])
+			if err != nil {
+				return errors.Wrap(err, "unescape path")
+			}
+			param = unescaped
+		}
+		if len(param) > 0 {
+			d := uri.NewPathDecoder(uri.PathDecoderConfig{
+				Param:   "id",
+				Value:   param,
+				Style:   uri.PathStyleSimple,
+				Explode: false,
+			})
+
+			if err := func() error {
+				val, err := d.DecodeValue()
+				if err != nil {
+					return err
+				}
+
+				c, err := conv.ToString(val)
+				if err != nil {
+					return err
+				}
+
+				params.ID = c
+				return nil
+			}(); err != nil {
+				return err
+			}
+		} else {
+			return validate.ErrFieldRequired
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "id",
+			In:   "path",
+			Err:  err,
+		}
+	}
+	// Decode header: X-Edit-Code.
+	if err := func() error {
+		cfg := uri.HeaderParameterDecodingConfig{
+			Name:    "X-Edit-Code",
+			Explode: false,
+		}
+		if err := h.HasParam(cfg); err == nil {
+			if err := h.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotXEditCodeVal string
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToString(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotXEditCodeVal = c
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.XEditCode.SetTo(paramsDotXEditCodeVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "X-Edit-Code",
+			In:   "header",
 			Err:  err,
 		}
 	}

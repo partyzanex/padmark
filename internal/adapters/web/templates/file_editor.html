@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dim">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Padmark — Upload file</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    {{template "theme-head" .Nonce}}
+    <link rel="stylesheet" href="/static/style.css?p={{styleVersion}}">
+</head>
+<body>
+<div class="wrapper wrapper--create">
+    {{template "header" .Header}}
+
+    <main>
+    <form id="fileForm" class="create-layout" autocomplete="off" data-max-size="{{.MaxSize}}" data-max-label="{{.MaxSizeLabel}}">
+        <section class="card editor-card editor-card--link" aria-labelledby="fileHeading">
+            <h1 class="sr-only" id="fileHeading">Upload a file</h1>
+            <div class="link-fields">
+                <div class="field-group">
+                    <span class="field-label" id="fileLabel">File</span>
+                    <label class="drop-zone" id="dropZone" for="fileInput">
+                        <input type="file" class="drop-zone-input" id="fileInput" aria-labelledby="fileLabel" aria-describedby="fileLimit">
+                        <span class="drop-zone-icon" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg>
+                        </span>
+                        <span class="drop-zone-text">
+                            <strong class="drop-zone-title" id="fileName">Choose a file or drop it here</strong>
+                            <span class="drop-zone-hint" id="fileSize">Any type; the server keeps it encrypted</span>
+                        </span>
+                    </label>
+                    <span class="field-hint" id="fileLimit">Maximum: {{.MaxSizeLabel}}</span>
+                </div>
+                <div class="field-group">
+                    <label class="field-label" for="slugInput">Slug <span class="optional">· optional</span></label>
+                    <div class="slug-box">
+                        <span aria-hidden="true">/</span>
+                        <input type="text" id="slugInput" name="file_slug" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="auto-generated" pattern="[a-zA-Z0-9_\-]+" title="Letters, numbers, hyphens and underscores only">
+                    </div>
+                </div>
+            </div>
+            <div class="link-strip" aria-live="polite">
+                <span class="link-strip-caption">Your file link</span>
+                <span class="link-strip-short"><span id="previewHost"></span><strong id="previewSlug"></strong></span>
+                <span class="link-strip-hint" id="previewSlugHint"></span>
+            </div>
+        </section>
+
+        <aside class="card settings-panel" aria-label="Publish settings">
+            <section class="settings-card" id="settingsSheet" aria-labelledby="sheetTitle">
+                {{template "sheet-head" "Publish settings"}}
+
+                <fieldset class="privacy-options" id="privacySelect">
+                    <legend class="lbl">Who can download</legend>
+                    {{template "privacy-options" .PrivacyOptions}}
+                </fieldset>
+
+                <div class="field-group">
+                    <label class="field-label" for="expirySelect">Expires</label>
+                    <select class="field-select" id="expirySelect">
+                        <option value="never">Never</option>
+                        <option value="3600">In 1 hour</option>
+                        <option value="86400">In 1 day</option>
+                        <option value="604800">In 7 days</option>
+                        <option value="2592000">In 30 days</option>
+                        <option value="seconds">Custom, in seconds</option>
+                    </select>
+                    <span class="field-hint">{{.ExpiresLabel}}</span>
+                </div>
+
+                <div class="field-group" id="ttlGroup" hidden>
+                    <label class="field-label" for="ttlInput">Lifetime in seconds</label>
+                    <input type="number" class="field-input field-input--mono" id="ttlInput" min="1" max="9223372036" step="1" placeholder="86400" disabled>
+                </div>
+
+                <div class="setting-list">
+                    <label class="setting-row" id="burnLabel">
+                        <span class="setting-icon setting-icon--warn" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 22c4 0 7-2.7 7-7 0-4-3-6.5-4.5-9.5C13 7 12.5 9 11 10 10.5 8 9.5 6.5 8 5c0 3-3 5.5-3 10 0 4.3 3 7 7 7z"/></svg>
+                        </span>
+                        <span class="setting-text">
+                            <span class="setting-title">Delete after first download</span>
+                            <span class="setting-desc">The file page warns before the download</span>
+                        </span>
+                        <input type="checkbox" class="switch" role="switch" id="burnCheck">
+                    </label>
+                </div>
+
+                <div class="field-group">
+                    <label class="field-label" for="editCodeInput">Edit code</label>
+                    <div class="field-box">
+                        <input type="text" id="editCodeInput" name="file_edit_code" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Generated if blank" minlength="8" maxlength="128">
+                        <button type="button" class="field-box-btn" id="editCodeGenerate" aria-label="Generate edit code">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.6-4.5L4 8M4 4v4h4M4 13a8 8 0 0 0 14.6 4.5L20 16M20 20v-4h-4"/></svg>
+                        </button>
+                    </div>
+                    <span class="field-hint">Lets you edit or delete the file later.</span>
+                </div>
+            </section>
+
+            <div class="settings-divider"></div>
+
+            <div class="publish-bar">
+                <p id="fileError" class="form-error" role="alert" hidden></p>
+                <div class="upload-progress" id="uploadProgress" hidden>
+                    <div class="upload-progress-row">
+                        <progress class="upload-progress-bar" id="progressBar" max="100" value="0" aria-labelledby="progressText"></progress>
+                        <span class="upload-progress-text" id="progressText" role="status">0%</span>
+                    </div>
+                    <button type="button" class="btn-danger" id="cancelBtn">Cancel upload</button>
+                </div>
+                {{template "settings-toggle"}}
+                <div class="publish-block">
+                    <button type="submit" class="btn-publish" id="submitBtn" data-kbd="Ctrl ↵">Upload file</button>
+                    <p id="fileStatus" class="form-status" role="status"></p>
+                    <p class="publish-note">You'll get the file link and an edit code.</p>
+                </div>
+            </div>
+        </aside>
+        <div class="sheet-backdrop" id="sheetBackdrop" hidden></div>
+    </form>
+    </main>
+
+    {{template "footer" .Header}}
+</div>
+
+<script nonce="{{.Nonce}}">
+    {{template "theme-js"}}
+    {{template "sheet-js"}}
+    {{template "file-errors-js"}}
+
+    const form = document.getElementById('fileForm');
+    const maxSize = Number(form.dataset.maxSize);
+    const maxSizeLabel = form.dataset.maxLabel;
+    const fileInput = document.getElementById('fileInput');
+    const dropZone = document.getElementById('dropZone');
+    const submitButton = document.getElementById('submitBtn');
+    const cancelButton = document.getElementById('cancelBtn');
+    const errorBox = document.getElementById('fileError');
+    const statusBox = document.getElementById('fileStatus');
+    const progressBox = document.getElementById('uploadProgress');
+    const progressBar = document.getElementById('progressBar');
+    const progressText = document.getElementById('progressText');
+    const expirySelect = document.getElementById('expirySelect');
+    const ttlInput = document.getElementById('ttlInput');
+    const slugInput = document.getElementById('slugInput');
+    let upload = null;
+
+    // formatSize gives the same binary units as the server labels.
+    function formatSize(size) {
+        if (size < 1024) return size + ' B';
+        const units = ['KiB', 'MiB', 'GiB', 'TiB'];
+        let value = size / 1024;
+        let unit = 0;
+        while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit++; }
+        return value.toFixed(1).replace(/\.0$/, '') + ' ' + units[unit];
+    }
+
+    function showError(message) {
+        errorBox.textContent = message;
+        errorBox.hidden = false;
+    }
+
+    // The zone shows the name and the size of the chosen file.
+    function updatePicked() {
+        const file = fileInput.files[0];
+        dropZone.classList.toggle('drop-zone--picked', Boolean(file));
+        document.getElementById('fileName').textContent = file ? file.name : 'Choose a file or drop it here';
+        document.getElementById('fileSize').textContent = file ? formatSize(file.size) : 'Any type; the server keeps it encrypted';
+        errorBox.hidden = true;
+        if (file && file.size > maxSize) showError(fileErrorMessage(413, null, maxSizeLabel));
+    }
+    fileInput.addEventListener('change', updatePicked);
+
+    // A file dropped anywhere on the page goes into the file field; the browser does not open it.
+    document.addEventListener('dragover', event => {
+        event.preventDefault();
+        dropZone.classList.add('drop-zone--over');
+    });
+    document.addEventListener('dragleave', event => {
+        if (!event.relatedTarget) dropZone.classList.remove('drop-zone--over');
+    });
+    document.addEventListener('drop', event => {
+        event.preventDefault();
+        dropZone.classList.remove('drop-zone--over');
+        if (upload || !event.dataTransfer || event.dataTransfer.files.length === 0) return;
+        fileInput.files = event.dataTransfer.files;
+        updatePicked();
+    });
+
+    // The strip under the fields shows the file link while the user types the slug.
+    function updatePreview() {
+        const slug = slugInput.value.trim();
+        document.getElementById('previewHost').textContent = location.host + '/';
+        document.getElementById('previewSlug').textContent = slug || 'x7k2p';
+        document.getElementById('previewSlugHint').textContent = slug ? 'Ends with your custom slug' : 'Random ending unless you set a slug';
+    }
+    slugInput.addEventListener('input', updatePreview);
+    updatePreview();
+
+    // The presets hold a lifetime in seconds; "seconds" opens the field for another value.
+    function updateExpiry() {
+        const enabled = expirySelect.value === 'seconds';
+        document.getElementById('ttlGroup').hidden = !enabled;
+        ttlInput.disabled = !enabled;
+        ttlInput.required = enabled;
+    }
+    expirySelect.addEventListener('change', updateExpiry);
+    updateExpiry();
+
+    // The settings button of the phone bar shows the chosen level and the expiration.
+    function updateSummary() {
+        const checked = document.querySelector('input[name="privacy"]:checked');
+        const level = checked ? checked.closest('.privacy-option').querySelector('.privacy-option-title').textContent : 'Public';
+        const expiry = expirySelect.value === 'never' ? 'never expires'
+            : expirySelect.options[expirySelect.selectedIndex].text.toLowerCase();
+        document.getElementById('settingsSummary').textContent = level + ' · ' + expiry;
+    }
+    updateSummary();
+    document.getElementById('settingsSheet').addEventListener('change', updateSummary);
+
+    document.getElementById('editCodeGenerate').addEventListener('click', () => {
+        document.getElementById('editCodeInput').value = generateEditCode();
+    });
+
+    function setUploading(active) {
+        submitButton.disabled = active;
+        fileInput.disabled = active;
+        progressBox.hidden = !active;
+        if (active) {
+            progressBar.value = 0;
+            progressText.textContent = '0%';
+        }
+    }
+
+    // The server reads the fields before the file part, so the file goes last.
+    function buildForm(file) {
+        const data = new FormData();
+        if (expirySelect.value === 'seconds') data.append('ttl', ttlInput.value);
+        else if (/^\d+$/.test(expirySelect.value)) data.append('ttl', expirySelect.value);
+        const checked = document.querySelector('input[name="privacy"]:checked');
+        data.append('privacy', checked ? checked.value : 'public');
+        data.append('burn_after_download', String(document.getElementById('burnCheck').checked));
+        const slug = slugInput.value.trim();
+        if (slug) data.append('slug', slug);
+        const code = document.getElementById('editCodeInput').value;
+        if (code) data.append('edit_code', code);
+        data.append('file', file, file.name);
+        return data;
+    }
+
+    function finish(file) {
+        if (file.edit_code) sessionStorage.setItem('padmark_file_edit_' + file.id, file.edit_code);
+        // The success page reads the file record. If that read fails, it shows these values from
+        // the upload response, as the note and link pages do.
+        const params = new URLSearchParams({kind: 'file', id: file.id});
+        if (file.burn_after_download) params.set('burn', '1');
+        if (file.expires_at) params.set('expires', file.expires_at);
+        if (file.privacy) params.set('privacy', file.privacy);
+        location.href = '/success?' + params;
+    }
+
+    // XMLHttpRequest reports the upload progress; fetch does not.
+    form.addEventListener('submit', event => {
+        event.preventDefault();
+        if (upload) return;
+        errorBox.hidden = true;
+        statusBox.textContent = '';
+        const file = fileInput.files[0];
+        if (!file) { showError('Choose a file to upload.'); return; }
+        if (file.size > maxSize) { showError(fileErrorMessage(413, null, maxSizeLabel)); return; }
+
+        const xhr = new XMLHttpRequest();
+        upload = xhr;
+        xhr.open('POST', '/files');
+        xhr.setRequestHeader('Accept', 'application/json');
+        xhr.responseType = 'json';
+        xhr.upload.addEventListener('progress', ev => {
+            if (!ev.lengthComputable) return;
+            const percent = Math.min(100, Math.floor(ev.loaded * 100 / ev.total));
+            progressBar.value = percent;
+            progressText.textContent = percent + '%';
+        });
+        xhr.addEventListener('load', () => {
+            upload = null;
+            if (xhr.status === 201 && xhr.response) { finish(xhr.response); return; }
+            setUploading(false);
+            showError(fileErrorMessage(xhr.status, xhr.response, maxSizeLabel));
+        });
+        xhr.addEventListener('error', () => {
+            upload = null;
+            setUploading(false);
+            showError(fileErrorMessage(0, null, maxSizeLabel));
+        });
+        xhr.addEventListener('abort', () => {
+            upload = null;
+            setUploading(false);
+            statusBox.textContent = 'Upload canceled';
+        });
+        setUploading(true);
+        xhr.send(buildForm(file));
+    });
+
+    cancelButton.addEventListener('click', () => {
+        if (upload) upload.abort();
+    });
+
+    document.addEventListener('keydown', event => {
+        if ((event.ctrlKey || event.metaKey) && event.key === 'Enter' && !submitButton.disabled) {
+            event.preventDefault();
+            form.requestSubmit();
+        }
+    });
+</script>
+</body>
+</html>

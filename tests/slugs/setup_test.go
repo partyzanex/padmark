@@ -70,7 +70,17 @@ func runSlugNamespace(t *testing.T, db *bun.DB, open func(*testing.T) *bun.DB) {
 		})
 	}
 
+	objects := startObjects(t)
+
+	for _, winner := range []string{"notes", "links", "files", "simultaneous"} {
+		t.Run("concurrent_files_"+winner, func(t *testing.T) {
+			testConcurrentFileCreate(t, db, open, objects, winner)
+		})
+	}
+
 	t.Run("release", func(t *testing.T) { testRelease(t, db) })
+	t.Run("release_files", func(t *testing.T) { testFileRelease(t, db, objects) })
+	t.Run("expired_file_slug", func(t *testing.T) { testExpiredFileSlug(t, db, objects) })
 	t.Run("rollback", func(t *testing.T) { testRollback(t, db) })
 	t.Run("id_change", func(t *testing.T) { testIDChange(t, db) })
 	t.Run("legacy_conversion", func(t *testing.T) { testLegacyConversion(t, db) })

@@ -7,6 +7,7 @@ import (
 var (
 	errCiphertextConflict          = errors.New("ciphertext compare-and-swap failed")
 	errCorruptRawConflict          = errors.New("corrupt raw compare-and-delete failed")
+	errFileDeleteRefused           = errors.New("a file record is never deleted by the encryption tools")
 	errInvalidResource             = errors.New("invalid encryption resource")
 	errLegacyMarkConflict          = errors.New("legacy note mark compare-and-swap failed")
 	errLegacyNoteConflict          = errors.New("legacy note compare-and-swap failed")
