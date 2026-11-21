@@ -17,11 +17,10 @@ import (
 type ToolsSuite struct {
 	suite.Suite
 
-	ctrl  *gomock.Controller
-	cl    *MockPadmarkClient
-	files *MockFileClient
-	mgr   *Manager
-	log   *slog.Logger
+	ctrl *gomock.Controller
+	cl   *MockPadmarkClient
+	mgr  *Manager
+	log  *slog.Logger
 }
 
 func TestTools(t *testing.T) {
@@ -31,9 +30,8 @@ func TestTools(t *testing.T) {
 func (s *ToolsSuite) SetupTest() {
 	s.ctrl = gomock.NewController(s.T())
 	s.cl = NewMockPadmarkClient(s.ctrl)
-	s.files = NewMockFileClient(s.ctrl)
 	s.log = slog.New(slog.DiscardHandler)
-	s.mgr = NewManager(s.cl, s.files, s.log)
+	s.mgr = NewManager(s.cl, s.log)
 }
 
 func (s *ToolsSuite) TearDownTest() {
@@ -336,7 +334,7 @@ func (s *toolRegistrationSuite) TearDownTest() {
 func (s *toolRegistrationSuite) TestAllToolsRegistered() {
 	ctx := s.T().Context()
 
-	mgr := NewManager(NewMockPadmarkClient(s.ctrl), NewMockFileClient(s.ctrl), slog.New(slog.DiscardHandler))
+	mgr := NewManager(NewMockPadmarkClient(s.ctrl), slog.New(slog.DiscardHandler))
 
 	sess, err := connectTestClient(ctx, mgr)
 	s.Require().NoError(err)
@@ -396,8 +394,7 @@ func (s *toolRegistrationSuite) TestUploadFileDescriptionNamesDefaultPrivacy() {
 	for name, testCase := range cases {
 		s.Run(name, func() {
 			ctx := s.T().Context()
-			mgr := NewManager(NewMockPadmarkClient(s.ctrl), NewMockFileClient(s.ctrl),
-				slog.New(slog.DiscardHandler), testCase.opts...)
+			mgr := NewManager(NewMockPadmarkClient(s.ctrl), slog.New(slog.DiscardHandler), testCase.opts...)
 
 			sess, err := connectTestClient(ctx, mgr)
 			s.Require().NoError(err)

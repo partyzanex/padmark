@@ -192,6 +192,17 @@ func testNoteEditErrors(sess *uiSession) {
 	sess.expectError("#noteError", "Invalid edit code")
 	sess.value("#editor", "Unsaved draft")
 	sess.text("#submitBtn", "Save")
+
+	// "Delete note" checks the edit code in the same way.
+	sess.page.OnDialog(func(dialog playwright.Dialog) { sess.must(dialog.Accept()) })
+	sess.button("Delete note")
+	sess.expectError("#noteError", "Invalid edit code")
+	sess.must(sess.expect.Locator(sess.page.Locator("#deleteBtn")).ToBeEnabled())
+	sess.openSettings()
+	sess.fill("#editCodeInput", "")
+	sess.closeSettings()
+	sess.button("Delete note")
+	sess.expectError("#noteError", "Edit code required")
 }
 
 // serverReply is a simulated reply to a form request and the error text that the form must show.

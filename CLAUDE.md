@@ -103,6 +103,9 @@ Dependencies point inward: adapters and infrastructure depend on usecases and do
   tools: `upload_file` (needs `--upload-root` / `PADMARK_MCP_UPLOAD_ROOT`), `get_file`,
   `update_file`, `delete_file`. Use `pkg/client` `UploadFile`/`DownloadFile`, not the
   generated `CreateFile`/`GetFileContent`.
+- The CLI and the MCP proxy each have one `*padmark.Client` for their one server. Its HTTP
+  client uses `--timeout` only for the response headers. Ordinary calls add a context deadline
+  (`requestContext` in the CLI, `limitCall` in MCP); file uploads and downloads do not.
 - Translate domain errors centrally through `errors.go`/`ogen_errors.go`; JSON responses use
   `{"message": ..., "code"?: ...}`. Do not expose wrapped internal errors to clients.
 
@@ -113,6 +116,7 @@ Dependencies point inward: adapters and infrastructure depend on usecases and do
 - Required dependencies need no repeated nil checks. Use mocks or no-op implementations in tests.
 - Add interfaces for testing, multiple implementations or cross-package decoupling.
 - Do not hold a mutex across network I/O.
+- Do not write compile-time interface assertions such as `var _ I = (*T)(nil)`; `make lint` refuses them.
 - Use `log/slog` (JSON in production, text for local debugging).
 - Prefer `for range N`, `t.Context()` / `s.T().Context()` and `sync.WaitGroup.Go` where applicable.
   Run and review `go fix ./...` when upgrading the toolchain.

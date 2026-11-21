@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"time"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -27,20 +28,13 @@ func version() string {
 // goes through and the session's edit-code vault. The tool surface and its transport are owned
 // by the MCP SDK; this type is only the composition and shared state.
 type Manager struct {
-	client PadmarkClient
-	files  FileClient
-	vault  *editCodeVault
-	log    *slog.Logger
-	srv    *mcpsdk.Server
-	// uploadRoot is the only directory that upload_file reads from. Empty turns uploads off.
-	uploadRoot string
-	// uploadHidden permits upload paths with names that start with a dot.
-	uploadHidden hiddenPaths
-	// uploadSlug permits the slug field of upload_file.
-	uploadSlug bool
-	// hasToken is true when the proxy sends a bearer token. upload_file then uses "owner" as
-	// its default privacy.
-	hasToken bool
+	client      PadmarkClient
+	vault       *editCodeVault
+	log         *slog.Logger
+	srv         *mcpsdk.Server
+	uploadRoot  string
+	callTimeout time.Duration
+	hasToken    bool
 }
 
 // Option sets an optional Manager setting.
@@ -54,23 +48,16 @@ func WithUploadRoot(root string) Option {
 	}
 }
 
-// WithUploadHidden lets upload_file read paths with names that start with a dot, such as .env.
-// Without this option, upload_file refuses them, because such names often hold secrets.
-func WithUploadHidden() Option {
+// WithCallTimeout sets the time limit of each tool call other than upload_file. The limit
+// covers all requests of the call and the read of their response bodies. A zero timeout turns
+// the limit off. Without this option, the limit is DefaultTimeout.
+func WithCallTimeout(timeout time.Duration) Option {
 	return func(m *Manager) {
-		m.uploadHidden = hiddenPathsAllowed
+		m.callTimeout = timeout
 	}
 }
 
-// WithUploadSlug lets upload_file send the slug that the agent gives. Without this option,
-// upload_file refuses a slug, so injected text cannot select the address of a file.
-func WithUploadSlug() Option {
-	return func(m *Manager) {
-		m.uploadSlug = true
-	}
-}
-
-// WithAccountToken tells the manager that the clients send a bearer token. upload_file then
+// WithAccountToken tells the manager that the client sends a bearer token. upload_file then
 // makes "owner" its default privacy: only the account of the token can read a file that the
 // agent uploads without a privacy field.
 func WithAccountToken() Option {
@@ -80,22 +67,20 @@ func WithAccountToken() Option {
 }
 
 // NewManager builds an MCP server exposing padmark's REST surface as tools, targeting the
-// padmark instance the client is pointed at. The generated client is usually both client and
-// files. No connection is opened here (no eager ping):
+// padmark instance the client is pointed at. The proxy has one client for its one server.
+// No connection is opened here (no eager ping):
 // server/network failures surface per tool call as structured results with remediation hints
 // (fail-soft) — a stdio process that dies on a missing server just breaks the agent's whole
 // tool set, and padmark may legitimately be started later.
-func NewManager(client PadmarkClient, files FileClient, log *slog.Logger, opts ...Option) *Manager {
+func NewManager(client PadmarkClient, log *slog.Logger, opts ...Option) *Manager {
 	m := &Manager{
-		client:       client,
-		files:        files,
-		vault:        newEditCodeVault(),
-		log:          log,
-		srv:          nil,
-		uploadRoot:   DefaultUploadRoot,
-		uploadHidden: hiddenPaths(DefaultUploadAllowHidden),
-		uploadSlug:   DefaultUploadAllowSlug,
-		hasToken:     false,
+		client:      client,
+		vault:       newEditCodeVault(),
+		log:         log,
+		srv:         nil,
+		uploadRoot:  DefaultUploadRoot,
+		callTimeout: DefaultTimeout,
+		hasToken:    false,
 	}
 
 	for _, opt := range opts {
@@ -152,5 +137,5 @@ func (m *Manager) registerTools(srv *mcpsdk.Server) {
 	registerLinkTools(srv, m)
 	registerFileTools(srv, m)
 
-	mcpsdk.AddTool[checkServerInput, checkServerOutput](srv, checkServerTool(), m.checkServer)
+	mcpsdk.AddTool[checkServerInput, checkServerOutput](srv, checkServerTool(), limitCall(m, m.checkServer))
 }

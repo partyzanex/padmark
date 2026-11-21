@@ -499,7 +499,7 @@ also stops for user info, a path, a query or a fragment in it.
 **Transfer limits.** Uploads and downloads do not use `--read-timeout` and `--write-timeout`.
 A transfer that moves no data for `--file-idle-timeout` (60 seconds by default) stops; a stalled
 upload gets `408`. Each chunk of data moves this deadline forward, up to a total limit of one
-hour for each transfer. The server accepts at most `--max-uploads` uploads (32 by default) at the
+hour for each transfer. The server accepts at most `--max-uploads` uploads (8 by default) at the
 same time and answers `503` to more. One client IP address gets at most
 `--max-uploads-per-client` uploads (4 by default) and `429` for more. Both answers have
 `Retry-After: 10`. Behind a reverse proxy, set `--trusted-proxies`; otherwise all clients share
@@ -627,7 +627,7 @@ padmark-cli --token <envelope-token> delete abc123def4
 # Check server health
 padmark-cli ping
 
-# Bound each request (default 30s; 0 disables)
+# Limit the API calls of a command (default 30s; 0 disables)
 padmark-cli --timeout 5s get abc123def4
 ```
 
@@ -856,7 +856,8 @@ Tools: `create_note`, `get_note`, `update_note`, `delete_note`, `create_link`,
 
 Configure with the same credential and defaults as the CLI: `--token` / `PADMARK_TOKEN`
 (a `pmk_…` envelope works — it carries the server URL too), `--base-url` / `PADMARK_URL`
-(default `http://localhost:8080`), `--timeout` / `PADMARK_TIMEOUT`, `--allow-insecure-http` /
+(default `http://localhost:8080`), `--timeout` / `PADMARK_TIMEOUT` (time limit of each tool call,
+default `30s`, `0` disables it), `--allow-insecure-http` /
 `PADMARK_ALLOW_INSECURE_HTTP` (the token is refused over plain HTTP to a non-loopback host unless set).
 
 `upload_file` reads only local files under one directory. Set that directory with
@@ -869,10 +870,12 @@ also when the path does not exist.
 
 The proxy limits `upload_file` further:
 
-- A path with a name that starts with a dot (`.env`, `.git/config`) is refused. Set
-  `--upload-allow-hidden` / `PADMARK_MCP_UPLOAD_ALLOW_HIDDEN` to permit it.
-- A `slug` from the agent is refused, so injected text cannot select the file address. Set
-  `--upload-allow-slug` / `PADMARK_MCP_UPLOAD_ALLOW_SLUG` to permit it.
+- A path with a name that starts with a dot (`.env`, `.git/config`) is always refused. This
+  also applies to a link with a plain name that points to such a path. To share such a file,
+  copy it under a name without the dot and set `name` to the original name.
+- `upload_file` accepts `slug` as `create_note` and `create_link` do. The server flag
+  `--custom-slugs` / `PADMARK_CUSTOM_SLUGS` controls slugs for all three. With
+  `--custom-slugs=false`, the server refuses the slug and the tool returns that error.
 - Without `privacy`, an upload with a token is `owner`; without a token it is `public`. The
   tool description tells the agent which default applies.
 - `ttl` must be 1 to 9223372036 seconds. Omit it for no expiry.
@@ -1395,7 +1398,7 @@ There is no destructive encryption down-migration, and older binaries cannot rea
 | `--log-format` | `PADMARK_LOG_FORMAT` | `json` | `json` or `text` |
 | `--trusted-proxies` | `PADMARK_TRUSTED_PROXIES` | — | Proxy CIDRs/IPs whose `X-Forwarded-For` / `X-Real-IP` is believed when resolving the real client IP; also the addresses whose `X-Forwarded-Proto` is trusted when building absolute links (note URLs, invite links, API-token envelopes). Set it to the proxy's own addresses and nothing wider — see [Getting `--trusted-proxies` wrong](#getting---trusted-proxies-wrong) |
 | `--public-scheme` | `PADMARK_PUBLIC_SCHEME` | — | Force `http` or `https` for absolute links back to this server, bypassing TLS/`X-Forwarded-Proto` detection; `https` also marks session/CSRF cookies `Secure` and enables HSTS. Use this instead of `--trusted-proxies` when the proxy's IP isn't stable (cloud load balancers, k8s ingress) |
-| `--custom-slugs` | `PADMARK_CUSTOM_SLUGS` | `true` | Allow user-supplied human-readable slugs/link aliases (e.g. `project/GUIDE.md`) at creation. On by default, as in v0.1.6; set `false` to issue only random slugs, because public human-readable URLs are easy to guess. New content keys are independent of the slug; existing legacy ciphertext keeps its old protection until migrated. A slug's first path segment must not be a reserved route name: `login`, `setup`, `logout`, `totp-login`, `admin`, `api`, `success`, `healthz`, `readyz`, `notes`, `edit`, `change-password`, `static`, `links`, `r`, `files`, and the exact segments `llms.txt` and `favicon.ico` |
+| `--custom-slugs` | `PADMARK_CUSTOM_SLUGS` | `true` | Allow user-supplied human-readable slugs/link aliases (e.g. `project/GUIDE.md`) at creation of notes, links and files. On by default, as in v0.1.6; set `false` to issue only random slugs, because public human-readable URLs are easy to guess. New content keys are independent of the slug; existing legacy ciphertext keeps its old protection until migrated. A slug's first path segment must not be a reserved route name: `login`, `setup`, `logout`, `totp-login`, `admin`, `api`, `success`, `healthz`, `readyz`, `notes`, `edit`, `change-password`, `static`, `links`, `r`, `files`, and the exact segments `llms.txt` and `favicon.ico` |
 | `--direct-redirect` | `PADMARK_DIRECT_REDIRECT` | `false` | `GET /{id}` behavior for short links. **Default changed from `true` to `false`:** links created anonymously now render an interstitial page (meta-refresh + `<noscript>` fallback) showing the destination, so the instance is not an open redirector; links created by a signed-in owner still get an immediate `301`. Set `true` to restore the `301` for every link |
 | `--s3-endpoint` | `PADMARK_S3_ENDPOINT` | — | S3-compatible storage URL for files, for example `https://s3.example.com:9000`. Empty (default) turns file publishing off. Startup creates a missing bucket; it fails when the credentials are wrong or the bucket cannot be created. A plain `http://` endpoint on a host other than `localhost` or a loopback IP stops startup, unless `--s3-allow-insecure` is set. The URL must not contain user info, a path, a query or a fragment |
 | `--s3-allow-insecure` | `PADMARK_S3_ALLOW_INSECURE` | `false` | Permit a plain `http://` `--s3-endpoint` on a host that is not loopback, for example a Compose service. The server logs a warning at startup |
@@ -1406,7 +1409,7 @@ There is no destructive encryption down-migration, and older binaries cannot rea
 | `--max-file-size` | `PADMARK_MAX_FILE_SIZE` | `104857600` | Largest file in bytes that `POST /files` accepts (100 MiB). The maximum value is `51539607552` (48 GiB), because of the 5 MiB upload parts and the S3 limit of 10 000 parts. `--max-body-bytes` does not apply to the upload; uploads and downloads use `--file-idle-timeout` and a total limit of one hour in place of the read and write timeouts |
 | `--files-sweep-interval` | `PADMARK_FILES_SWEEP_INTERVAL` | `1h` | Period of the background removal of expired files and their objects, for example `30m`. `0` turns the background removal off; each upload still removes expired files. A negative value stops startup. The server also removes expired files once at startup, without a wait for the first interval |
 | `--file-idle-timeout` | `PADMARK_FILE_IDLE_TIMEOUT` | `1m` | Stop a file upload or download that moves no data for this time. Each chunk of data moves the deadline forward, up to a total limit of one hour for each transfer. A stalled upload gets `408`. `0` selects the default; a negative value stops startup |
-| `--max-uploads` | `PADMARK_MAX_UPLOADS` | `32` | Uploads that the server accepts at the same time. Each upload holds one 5 MiB part buffer in memory. More uploads get `503` with `Retry-After: 10`. `0` selects the default; a negative value stops startup |
+| `--max-uploads` | `PADMARK_MAX_UPLOADS` | `8` | Uploads that the server accepts at the same time. Each upload holds one 5 MiB part buffer in memory. More uploads get `503` with `Retry-After: 10`. `0` selects the default; a negative value stops startup |
 | `--max-uploads-per-client` | `PADMARK_MAX_UPLOADS_PER_CLIENT` | `4` | Uploads from one client IP address at the same time (the address obeys `--trusted-proxies`). More uploads get `429` with `Retry-After: 10`. `0` selects the default; a negative value stops startup |
 | `--shutdown-timeout` | `PADMARK_SHUTDOWN_TIMEOUT` | `10s` | Limit of each shutdown phase. The listeners first get this time for open requests, such as file transfers; then background work, such as the file sweep, gets the same time to stop before the database closes. For a larger value, also increase the stop grace period of the container (`docker stop` waits 10 seconds before `SIGKILL`) |
 | `--metrics-addr` | `PADMARK_METRICS_ADDR` | — | Address for a separate internal Prometheus `/metrics` listener (e.g. `:9090`); empty (default) disables it entirely. Exposes `padmark_links_created_total`, `padmark_links_redirects_total`, `padmark_links_collisions_total`, the file metrics `padmark_files_uploads_total`, `padmark_files_downloads_total`, `padmark_files_deleted_total{reason}`, `padmark_files_upload_bytes` and `padmark_files_storage_errors_total{op}`, plus standard Go/process collectors. Bind this to a private interface only — metrics are never served on the main, public-facing listener |
@@ -1501,7 +1504,7 @@ cost until the password is changed. The change costs RAM and CPU per login, not 
 |---|---|
 | `--url`, `-u` | Padmark server URL (env: `PADMARK_URL`, default `http://localhost:8080`) |
 | `--token` | Bearer token for authentication (env: `PADMARK_TOKEN`; falls back to `~/.config/padmark/token`) |
-| `--timeout` | Per-request HTTP timeout; `0` disables it (env: `PADMARK_TIMEOUT`, default `30s`). For `upload` and `download` it limits only the wait for the response headers |
+| `--timeout` | Time limit of the API calls of a command; `0` disables it (env: `PADMARK_TIMEOUT`, default `30s`). For `upload` and `download` it limits only the wait for the response headers |
 | `--allow-insecure-http` | Permit a token or setup password over plain HTTP to a non-loopback host (env: `PADMARK_ALLOW_INSECURE_HTTP`, default `false`) |
 
 ---

@@ -160,7 +160,7 @@ func (sess *uiSession) openUploadPage() {
 
 	sess.must(sess.expect.Locator(tab).ToHaveAttribute("aria-current", "page"))
 	sess.must(sess.expect.Page(sess.page).ToHaveURL(sess.baseURL + "/files"))
-	sess.text("#fileLimit", "Maximum: 1 MiB")
+	sess.text("#fileLimit", "Up to 1 MiB")
 }
 
 // fillUploadForm selects the test file and sets the slug and the edit code of the upload page.

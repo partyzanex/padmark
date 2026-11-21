@@ -18,43 +18,35 @@ var (
 	errDefaultTransport    = errors.New("http.DefaultTransport is not an *http.Transport")
 )
 
-// newBearerClient returns an HTTP client for serverURL. It sends the bearer token only to the
+// newHTTPClient returns the one HTTP client of the proxy. It sends the bearer token only to the
 // origin (scheme, host and port) of serverURL and refuses each redirect to a different origin,
 // so a redirect cannot carry the token, edit codes or passwords to a server that was not checked.
-func newBearerClient(serverURL, token string, timeout time.Duration) (*http.Client, error) {
-	return newOriginClient(serverURL, token, http.DefaultTransport, timeout)
-}
-
-// newTransferClient returns the HTTP client of upload_file. The tool sends a file body of any
-// size, so the client has no total timeout: http.Client.Timeout also limits the body transfer
-// and would stop a large file on a slow link. headerTimeout limits the wait for the response
-// headers. net/http starts that wait after it writes the full request body, so a slow upload
-// is not stopped. The dial and TLS handshake limits of http.DefaultTransport stay. A zero
-// headerTimeout turns the header limit off, as --timeout 0 does for the other tools.
-func newTransferClient(serverURL, token string, headerTimeout time.Duration) (*http.Client, error) {
+//
+// The client has no total timeout: http.Client.Timeout also limits the body transfer and would
+// stop a large upload on a slow link. headerTimeout limits the wait for the response headers.
+// net/http starts that wait after it writes the full request body, so a slow upload is not
+// stopped. The tools other than upload_file get a deadline for the full call (limitCall). The
+// dial and TLS handshake limits of http.DefaultTransport stay. A zero headerTimeout turns the
+// header limit off, as --timeout 0 does.
+func newHTTPClient(serverURL, token string, headerTimeout time.Duration) (*http.Client, error) {
 	defaults, ok := http.DefaultTransport.(*http.Transport)
 	if !ok {
 		return nil, errDefaultTransport
 	}
 
-	base := defaults.Clone()
-	base.ResponseHeaderTimeout = headerTimeout
-
-	return newOriginClient(serverURL, token, base, 0)
-}
-
-// newOriginClient is newBearerClient with a given base transport.
-func newOriginClient(serverURL, token string, base http.RoundTripper, timeout time.Duration) (*http.Client, error) {
 	origin, err := tokenfile.Origin(serverURL)
 	if err != nil {
 		return nil, fmt.Errorf("server origin: %w", err)
 	}
 
+	base := defaults.Clone()
+	base.ResponseHeaderTimeout = headerTimeout
+
 	return &http.Client{
 		Transport:     &bearerTransport{base: base, origin: origin, token: token},
 		CheckRedirect: sameOriginRedirects(origin),
 		Jar:           nil,
-		Timeout:       timeout,
+		Timeout:       0,
 	}, nil
 }
 

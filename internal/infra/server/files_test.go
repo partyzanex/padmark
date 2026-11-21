@@ -194,7 +194,7 @@ func (s *FileFlagsSuite) TestDefaults() {
 	s.Equal(DefaultShutdownTimeout, cmd.Duration(FlagShutdownTimeout))
 	s.False(cmd.Bool(FlagS3AllowInsecure))
 	s.Equal(web.FileTransferLimits{
-		IdleTimeout: time.Minute, MaxUploads: 32, MaxUploadsPerClient: 4,
+		IdleTimeout: time.Minute, MaxUploads: 8, MaxUploadsPerClient: 4,
 	}, fileTransferLimitsFromFlags(cmd))
 }
 

@@ -309,6 +309,23 @@ func (s *HandlerSuite) TestIndexPage() {
 	s.Contains(w.Body.String(), "Publish")
 }
 
+// TestCreateLinkPage_AnonymousWithAccounts: with accounts a signed-out user sees the protected
+// levels disabled, and a sign-in link returns the user to the form. The note editor needs a
+// session with accounts, so the short-link form is the anonymous form.
+func (s *HandlerSuite) TestCreateLinkPage_AnonymousWithAccounts() {
+	w := httptest.NewRecorder()
+	s.newRouterWithTOTPAuth().ServeHTTP(w, linkPageRequest("/links"))
+
+	s.Require().Equal(http.StatusOK, w.Code)
+
+	body := w.Body.String()
+	s.Contains(body, `id="privacy-public" value="public" checked>`)
+	s.Contains(body, `id="privacy-authenticated" value="authenticated" disabled>`)
+	s.Contains(body, `id="privacy-owner" value="owner" disabled>`)
+	s.Contains(body, `href="/login?next=%2Flinks"`)
+	s.Contains(body, "Sign in to restrict access")
+}
+
 // ── EditPage ──.
 
 func (s *HandlerSuite) TestEditPage_OK() {
@@ -336,6 +353,25 @@ func (s *HandlerSuite) TestEditPage_OK() {
 	// Without accounts the stored level stays selectable but says it is not enforced (review R2).
 	s.Contains(body, `value="authenticated" checked>`)
 	s.Contains(body, "Not enforced: accounts are off, anyone with the link can view")
+}
+
+// TestEditPage_FixedSlugAndDelete: the note editor shows the slug as fixed text and has the
+// "Delete note" action, as the link and file editors do.
+func (s *HandlerSuite) TestEditPage_FixedSlugAndDelete() {
+	note := newTestNote("edit me", "# hello")
+
+	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
+	s.manager.EXPECT().EnforceExpiry(gomock.Any(), testID, note).Return(nil)
+
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/edit/"+testID, nil))
+
+	s.Require().Equal(http.StatusOK, w.Code)
+
+	body := w.Body.String()
+	s.Contains(body, `id="slugFixed"`)
+	s.NotContains(body, `id="slugInput"`)
+	s.Contains(body, `<button type="button" class="btn-danger" id="deleteBtn">Delete note</button>`)
 }
 
 // TestEditPage_BurnNote_ContentWithheld: the editor never burns, so it must not pre-fill a

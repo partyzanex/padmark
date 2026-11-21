@@ -5,6 +5,7 @@ import (
 	"context"
 	"log/slog"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -137,55 +138,44 @@ func TestCheckInsecureToken(t *testing.T) {
 func TestNewPadmarkClient_RefusesInsecureRemote(t *testing.T) {
 	isolateEnv(t)
 
-	_, err := newPadmarkClients(newTestCmd(t, "--base-url", "http://example.com", "--token", "secret"))
+	_, _, err := newPadmarkClient(newTestCmd(t, "--base-url", "http://example.com", "--token", "secret"))
 	require.ErrorIs(t, err, errInsecureTransport)
 
-	_, err = newPadmarkClients(newTestCmd(t,
+	_, _, err = newPadmarkClient(newTestCmd(t,
 		"--base-url", "http://example.com", "--token", "secret", "--allow-insecure-http"))
 	require.NoError(t, err)
 }
 
-// TestNewPadmarkClients_ReportsToken checks the token state that selects the default privacy of
-// upload_file, and that the API and file clients are different clients.
-func TestNewPadmarkClients_ReportsToken(t *testing.T) {
-	isolateEnv(t)
-
-	clients, err := newPadmarkClients(newTestCmd(t, "--base-url", "https://example.com", "--token", "secret"))
-	require.NoError(t, err)
-	assert.True(t, clients.hasToken)
-	assert.NotSame(t, clients.api, clients.files, "the file client has its own HTTP timeouts")
-
-	clients, err = newPadmarkClients(newTestCmd(t, "--base-url", "https://example.com"))
-	require.NoError(t, err)
-	assert.False(t, clients.hasToken)
-}
-
-// TestManagerOptions_ReadsUploadFlags checks the wiring of the upload flags and their
-// environment sources into the manager.
-func TestManagerOptions_ReadsUploadFlags(t *testing.T) {
+// TestNewPadmarkClient_TokenSelectsOwnerPrivacy checks that the token state goes into the
+// manager options: with a token, upload_file uses "owner" as its default privacy.
+func TestNewPadmarkClient_TokenSelectsOwnerPrivacy(t *testing.T) {
 	isolateEnv(t)
 
 	log := slog.New(slog.DiscardHandler)
 
-	anonymous := &padmarkClients{api: nil, files: nil, hasToken: false}
-	withToken := &padmarkClients{api: nil, files: nil, hasToken: true}
+	client, opts, err := newPadmarkClient(newTestCmd(t, "--base-url", "https://example.com", "--token", "secret"))
+	require.NoError(t, err)
+	require.NotNil(t, client)
 
-	defaults := NewManager(nil, nil, log, managerOptions(newTestCmd(t), "/share", anonymous)...)
-	assert.Equal(t, "/share", defaults.uploadRoot)
-	assert.Equal(t, hiddenPathsDenied, defaults.uploadHidden)
-	assert.False(t, defaults.uploadSlug)
-	assert.False(t, defaults.hasToken)
+	owner := NewManager(client, log, append(opts, WithUploadRoot("/share"))...)
+	assert.Equal(t, "/share", owner.uploadRoot)
+	assert.True(t, owner.hasToken)
 
-	flags := newTestCmd(t, "--"+FlagUploadAllowHidden, "--"+FlagUploadAllowSlug)
-	permitted := NewManager(nil, nil, log, managerOptions(flags, "/share", withToken)...)
-	assert.Equal(t, hiddenPathsAllowed, permitted.uploadHidden)
-	assert.True(t, permitted.uploadSlug)
-	assert.True(t, permitted.hasToken)
+	client, opts, err = newPadmarkClient(newTestCmd(t, "--base-url", "https://example.com"))
+	require.NoError(t, err)
+	assert.Empty(t, opts, "no token gives no account option")
 
-	t.Setenv(EnvUploadAllowHidden, "true")
-	t.Setenv(EnvUploadAllowSlug, "true")
+	anonymous := NewManager(client, log, opts...)
+	assert.False(t, anonymous.hasToken)
+}
 
-	fromEnv := NewManager(nil, nil, log, managerOptions(newTestCmd(t), "/share", anonymous)...)
-	assert.Equal(t, hiddenPathsAllowed, fromEnv.uploadHidden)
-	assert.True(t, fromEnv.uploadSlug)
+// TestWithCallTimeout_SetsLimit checks the default call limit and the option that changes it.
+func TestWithCallTimeout_SetsLimit(t *testing.T) {
+	t.Parallel()
+
+	log := slog.New(slog.DiscardHandler)
+
+	assert.Equal(t, DefaultTimeout, NewManager(nil, log).callTimeout)
+	assert.Equal(t, time.Second, NewManager(nil, log, WithCallTimeout(time.Second)).callTimeout)
+	assert.Zero(t, NewManager(nil, log, WithCallTimeout(0)).callTimeout)
 }

@@ -637,8 +637,8 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     -webkit-appearance: none;
     flex: none;
     position: relative;
-    width: 48px;
-    height: 28px;
+    width: 40px;
+    height: 24px;
     margin: 0;
     border-radius: 999px;
     background: var(--line-2);
@@ -649,10 +649,10 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .switch::before {
     content: '';
     position: absolute;
-    top: 3px;
-    left: 3px;
-    width: 22px;
-    height: 22px;
+    top: 2px;
+    left: 2px;
+    width: 20px;
+    height: 20px;
     border-radius: 999px;
     background: #FFFFFF;
     box-shadow: 0 1px 3px rgba(0,0,0,.25);
@@ -660,13 +660,15 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 }
 
 .switch:checked { background: var(--accent); }
-.switch:checked::before { transform: translateX(20px); }
+.switch:checked::before { transform: translateX(16px); }
 .switch:disabled { cursor: default; opacity: .55; }
 .switch:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* ================================================================
    Create pages: editor card + settings panel
    ================================================================ */
+/* The card and the settings panel are columns of one height: the row stretches both, the card
+   gives the free height to its main part, and the panel puts its main action at the bottom. */
 .create-layout {
     /* The layout takes the free wrapper height, so the editor card reaches the site footer. */
     flex: 1 0 auto;
@@ -678,7 +680,7 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 }
 
 .editor-card {
-    flex: 999 1 640px;
+    flex: 999 1 560px;
     min-width: 0;
     overflow: hidden;
     display: flex;
@@ -735,7 +737,11 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     padding: 0 12px 0 2px;
 }
 
-.slug-field input:read-only { color: var(--muted); }
+/* The edit page shows the fixed slug as text with a lock. */
+.slug-field--fixed { gap: 6px; padding-right: 10px; color: var(--ink-2); }
+.slug-field--fixed .slug-prefix { padding-right: 0; }
+.slug-value { overflow-wrap: anywhere; }
+.slug-field--fixed .lock-icon { width: 13px; height: 13px; flex: none; color: var(--muted); }
 
 .editor-toolbar {
     display: flex;
@@ -821,7 +827,7 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 /* The classes beat the [data-theme] .prose.markdown-body sizes of the note view. */
 .editor-body > .editor-preview.prose.markdown-body {
     min-width: 0;
-    min-height: 470px;
+    min-height: 380px;
     padding: 18px 24px 22px;
     font-size: 15px;
     line-height: 1.65;
@@ -857,7 +863,7 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     /* A grid item textarea keeps its own height unless the stretch is explicit. */
     align-self: stretch;
     width: 100%;
-    min-height: 470px;
+    min-height: 380px;
     /* The card fills the screen height, so the textarea scrolls and has no resize handle. */
     resize: none;
     border: 0;
@@ -889,17 +895,88 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .format-hint { display: flex; align-items: center; gap: 6px; }
 .format-hint svg { width: 14px; height: 14px; }
 
-/* ── Short-link card: destination, slug and the resulting link ── */
-.editor-card--link { align-self: flex-start; }
-
+/* ── Short-link and file cards: the fields, then the result of the form ── */
 .link-fields {
-    padding: 20px 24px;
+    padding: 20px 22px;
     display: flex;
     flex-direction: column;
     gap: 16px;
+    min-width: 0;
 }
 
-.field-input--dest { height: 44px; font-size: 15px; }
+/* The file card gives the free height to the drop zone. */
+.link-fields--grow { flex: 1; }
+
+/* The destination wraps at each character, so a long URL is visible in full. */
+.field-input--dest {
+    display: block;
+    height: 84px;
+    padding: 10px 12px;
+    resize: none;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    line-height: 1.55;
+    word-break: break-all;
+}
+
+/* JetBrains Mono joins "//" into a ligature with a gap after the colon; a URL shows each character. */
+.field-input--dest,
+.preview-short,
+.preview-url,
+.link-strip-short { font-variant-ligatures: none; }
+
+/* The live preview of a short link fills the free height of the card. */
+.link-preview {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 16px;
+    min-width: 0;
+    padding: 24px 22px;
+    border-top: 1px solid var(--line);
+    background: var(--sunken);
+}
+
+.preview-item { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.preview-caption { font-size: 12px; color: var(--muted); }
+
+.preview-short {
+    font-family: var(--font-mono);
+    font-size: 20px;
+    color: var(--ink);
+    word-break: break-all;
+}
+
+.preview-short strong { font-weight: 600; color: var(--accent-text); }
+
+.preview-mode { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+.preview-mode svg { width: 15px; height: 15px; flex: none; }
+.preview-host { font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
+
+.preview-url {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--muted);
+    word-break: break-all;
+}
+
+.preview-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.preview-chip {
+    display: inline-flex;
+    align-items: center;
+    height: 24px;
+    padding: 0 9px;
+    border: 1px solid var(--line-2);
+    border-radius: 999px;
+    background: var(--surface);
+    font-size: 12px;
+    color: var(--ink-2);
+    white-space: nowrap;
+}
+
+.preview-chip--warn { border-color: var(--warn); background: var(--warn-soft); color: var(--warn); }
 
 /* "/" + slug: one bordered field. */
 .slug-box {
@@ -959,12 +1036,13 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 /* ── Settings panel: one card with the settings and the publish block ── */
 .settings-panel {
     flex: 1 1 300px;
-    min-width: 0;
-    align-self: flex-start;
+    /* The panel keeps the setting titles on one line. */
+    min-width: 300px;
+    max-width: 100%;
     padding: 18px;
     display: flex;
     flex-direction: column;
-    gap: 18px;
+    gap: 16px;
 }
 
 .settings-card,
@@ -972,7 +1050,7 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .publish-bar {
     display: flex;
     flex-direction: column;
-    gap: 18px;
+    gap: 16px;
 }
 
 /* Phone width shows the settings as a bottom sheet; these parts belong to the sheet only. */
@@ -990,51 +1068,61 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     gap: 8px;
 }
 
-.privacy-options legend { padding: 0; margin-bottom: 10px; }
+.privacy-options legend { padding: 0; margin-bottom: 8px; }
+
+/* The privacy levels are rows of one bordered list. */
+.privacy-list {
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    overflow: hidden;
+}
 
 .privacy-option {
     display: flex;
-    gap: 12px;
-    align-items: flex-start;
-    padding: 12px 14px;
-    border-radius: 10px;
-    border: 1px solid var(--line);
-    background: var(--surface);
+    gap: 10px;
+    align-items: center;
+    min-height: 48px;
+    padding: 8px 12px;
+    background: transparent;
     cursor: pointer;
 }
 
-.privacy-option:hover { border-color: var(--line-2); }
-
-.privacy-option:has(input:checked) {
-    border-color: var(--accent);
-    background: var(--accent-soft);
-}
-
-.privacy-option:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+.privacy-option + .privacy-option { border-top: 1px solid var(--line); }
+.privacy-option:hover { background: var(--sunken); }
+.privacy-option:has(input:checked) { background: var(--accent-soft); }
+.privacy-option:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: -2px; }
 
 .privacy-option input {
     accent-color: var(--accent);
     width: 16px;
     height: 16px;
-    margin: 3px 0 0;
+    margin: 0;
     flex: none;
 }
 
-.privacy-option-text { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
-.privacy-option-title { font-weight: 600; font-size: 14px; }
+.privacy-option-text { display: flex; flex-direction: column; gap: 1px; flex: 1; min-width: 0; }
+.privacy-option-title { font-weight: 600; font-size: 13px; }
 .privacy-option-desc { font-size: 12px; color: var(--muted); }
 
-.privacy-option > svg {
-    width: 18px;
-    height: 18px;
-    flex: none;
-    margin-top: 1px;
-    color: var(--muted);
+/* A level that needs a signed-in user stays in the list, disabled. */
+.privacy-option--disabled { cursor: not-allowed; }
+.privacy-option--disabled:hover { background: transparent; }
+.privacy-option--disabled .privacy-option-text { opacity: .55; }
+
+.privacy-signin {
+    display: inline-flex;
+    align-items: center;
+    align-self: flex-start;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 500;
 }
 
-.privacy-option:has(input:checked) > svg { color: var(--accent-text); }
+.privacy-signin .lock-icon { width: 14px; height: 14px; flex: none; }
 
-/* Icon tile + two-line text + switch. */
+/* Two-line text + switch. */
 .setting-row {
     display: flex;
     align-items: center;
@@ -1042,26 +1130,14 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     cursor: pointer;
 }
 
-.setting-icon {
-    width: 36px;
-    height: 36px;
-    flex: none;
-    border-radius: 10px;
-    display: grid;
-    place-items: center;
-    background: var(--accent-soft);
-    color: var(--accent-text);
-}
-
-.setting-icon svg { width: 18px; height: 18px; }
-.setting-icon--warn { background: var(--warn-soft); color: var(--warn); }
+.setting-row--fixed { cursor: default; }
 
 .setting-text { display: flex; flex-direction: column; gap: 1px; flex: 1; min-width: 0; }
-.setting-title { font-weight: 600; font-size: 14px; }
+.setting-title { font-weight: 600; font-size: 13px; }
 .setting-desc { font-size: 12px; color: var(--muted); }
 
 .setting-group { display: flex; flex-direction: column; gap: 12px; }
-.setting-sub { display: flex; flex-direction: column; gap: 6px; padding-left: 48px; }
+.setting-sub { display: flex; flex-direction: column; gap: 6px; }
 .setting-sub > label { font-size: 12px; color: var(--muted); }
 .setting-sub .field-select { height: 36px; }
 
@@ -1106,9 +1182,47 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .field-box-btn:hover { background: var(--sunken); color: var(--ink); }
 .field-box-btn svg { width: 16px; height: 16px; }
 
-.settings-divider { height: 1px; background: var(--line); }
+/* A value that the user cannot change: text with a lock, not a field. */
+.fixed-value {
+    display: inline-flex;
+    align-items: center;
+    align-self: flex-start;
+    flex: none;
+    gap: 6px;
+    max-width: 100%;
+    min-height: 32px;
+    padding: 4px 10px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--sunken);
+    font-family: var(--font-mono);
+    font-size: 13px;
+    color: var(--ink-2);
+    overflow-wrap: anywhere;
+}
+
+.fixed-value .lock-icon { width: 13px; height: 13px; flex: none; color: var(--muted); }
+
+/* The custom lifetime: a number and a unit on one line. */
+.ttl-custom { display: flex; gap: 8px; }
+.ttl-custom .field-input { flex: 1 1 0; min-width: 0; }
+.ttl-custom .field-select { flex: 0 0 116px; width: auto; }
+
+/* The auto margin puts the divider and the main action at the bottom of the panel, on the line
+   of the bottom edge of the card. */
+.settings-divider { height: 1px; margin-top: auto; background: var(--line); }
 
 .publish-block { display: flex; flex-direction: column; gap: 10px; }
+
+/* The edit pages put "Delete" below the main action, after a divider. */
+.danger-block {
+    display: flex;
+    flex-direction: column;
+    padding-top: 16px;
+    border-top: 1px solid var(--line);
+}
+
+.danger-block .btn-danger { height: 36px; }
 
 .publish-note {
     font-size: 12px;
@@ -2020,7 +2134,10 @@ a.copy-value:hover { color: var(--accent-text); }
     .editor-footer { display: none; }
 
     .link-fields { padding: 16px; gap: 14px; }
-    .field-input--dest { height: 48px; border-radius: 10px; font-size: 16px; }
+    /* Two classes beat the 48px .field-input rule of phone width. */
+    .field-input.field-input--dest { height: 96px; padding: 10px 12px; border-radius: 10px; font-size: 16px; }
+    .link-preview { gap: 12px; padding: 16px; }
+    .preview-short { font-size: 17px; }
     .slug-box { max-width: none; height: 44px; border-radius: 10px; font-size: 16px; }
     .link-strip { flex-direction: column; align-items: stretch; gap: 4px; padding: 12px 16px; }
     .link-strip-caption { font-size: 12px; }
@@ -2046,7 +2163,8 @@ a.copy-value:hover { color: var(--accent-text); }
         box-shadow: 0 -8px 24px -16px rgba(0,0,0,.25);
     }
 
-    .publish-block { display: contents; }
+    .publish-block,
+    .danger-block { display: contents; }
     .publish-note { display: none; }
     .publish-bar .form-error,
     .publish-bar .form-status { order: -1; flex: 0 0 100%; }
@@ -2128,14 +2246,19 @@ a.copy-value:hover { color: var(--accent-text); }
 
     .sheet-close svg { width: 20px; height: 20px; }
 
-    .privacy-option input { width: 18px; height: 18px; margin-top: 2px; }
-    .privacy-option > svg { display: none; }
+    .privacy-option { min-height: 56px; padding: 10px 14px; gap: 12px; }
+    .privacy-option input { width: 18px; height: 18px; }
+    .privacy-option-title { font-size: 14px; }
+    .privacy-signin { min-height: 44px; font-size: 13px; }
 
     /* The switches share one bordered box; a line divides the rows. */
     .setting-list { gap: 0; border: 1px solid var(--line); border-radius: 10px; }
     .setting-list > * + * { border-top: 1px solid var(--line); }
     .setting-row { padding: 14px; }
-    .setting-icon { display: none; }
+    .setting-title { font-size: 14px; }
+    .fixed-value { font-size: 16px; min-height: 44px; border-radius: 10px; }
+    .slug-field--fixed { font-size: 16px; }
+    .ttl-custom .field-select { flex-basis: 128px; }
     .setting-group { gap: 0; }
     .setting-sub { padding: 0 14px 14px; }
     .setting-sub .field-select,
@@ -3243,7 +3366,6 @@ a.copy-value:hover { color: var(--accent-text); }
 /* Success-page expiry labels are lower case for the sentence form; a chip starts with a capital. */
 .chip-text { display: inline-block; }
 .chip-text::first-letter { text-transform: uppercase; }
-.publish-block .btn-danger { height: 36px; }
 .prose.markdown-body > h1[hidden]:first-child + * { margin-top: 0; }
 
 /* ================================================================
@@ -3251,25 +3373,55 @@ a.copy-value:hover { color: var(--accent-text); }
    ================================================================ */
 .editor-footer-links { display: flex; gap: 16px; flex-wrap: wrap; }
 
-/* The file field is a label around a hidden input: a click or Enter opens the file picker. */
+/* The drop zone takes the free height of the file card. Without a file the zone is a label of
+   the hidden input: a click or Enter opens the file picker. The chosen file shows in its centre. */
 .drop-zone {
     position: relative;
+    flex: 1;
+    min-height: 220px;
     display: flex;
-    align-items: center;
-    gap: 14px;
-    min-height: 96px;
-    padding: 18px;
+    flex-direction: column;
     border: 1.5px dashed var(--line-2);
     border-radius: 12px;
-    background: var(--sunken);
-    cursor: pointer;
+    background: transparent;
     transition: border-color .15s, background .15s;
 }
 
 .drop-zone:hover,
 .drop-zone--over { border-color: var(--accent); background: var(--accent-soft); }
 .drop-zone:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
-.drop-zone--picked { border-style: solid; }
+
+.drop-zone--picked,
+.drop-zone--picked:hover {
+    border: 1px solid var(--line);
+    background: var(--sunken);
+}
+
+.drop-zone--picked.drop-zone--over { border-color: var(--accent); background: var(--accent-soft); }
+
+.drop-zone-empty,
+.file-card {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 20px;
+    text-align: center;
+}
+
+.drop-zone-empty { cursor: pointer; color: var(--ink-2); }
+.file-card { gap: 12px; }
+.file-card-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; max-width: 100%; }
+.file-card-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+.file-card-actions .btn-ghost { height: 32px; padding: 0 12px; border-radius: 8px; }
+.file-card-actions .btn-ghost svg { width: 14px; height: 14px; }
+.file-meta { font-family: var(--font-mono); font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.file-meta-limit { white-space: nowrap; }
+
+.fixed-note { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.fixed-note .lock-icon { width: 13px; height: 13px; flex: none; }
 
 .drop-zone-input {
     position: absolute;
@@ -3281,28 +3433,29 @@ a.copy-value:hover { color: var(--accent-text); }
 
 .drop-zone-icon,
 .file-icon {
-    width: 44px;
-    height: 44px;
+    width: 52px;
+    height: 52px;
     flex: none;
     display: grid;
     place-items: center;
-    border-radius: 10px;
+    border-radius: 14px;
     background: var(--accent-soft);
     color: var(--accent-text);
 }
 
-.drop-zone-icon svg,
-.file-icon svg { width: 22px; height: 22px; }
-
-.drop-zone-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.file-icon { width: 56px; height: 56px; }
+.drop-zone-icon svg { width: 24px; height: 24px; }
+.file-icon svg { width: 26px; height: 26px; }
 
 .drop-zone-title {
     font-size: 15px;
     font-weight: 600;
+    color: var(--ink);
     overflow-wrap: anywhere;
 }
 
-.drop-zone-hint { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+.drop-zone-browse { color: var(--accent-text); }
+.drop-zone-hint { font-size: 12px; color: var(--muted); }
 
 /* Upload progress with the cancel button, above the main action. */
 .upload-progress { display: flex; flex-direction: column; gap: 10px; }
@@ -3334,9 +3487,7 @@ a.copy-value:hover { color: var(--accent-text); }
 
 .upload-progress .btn-danger { height: 36px; }
 
-/* File page and the file part of the edit page. */
-.file-head { display: flex; align-items: center; gap: 14px; min-width: 0; }
-.file-head-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+/* File page. */
 
 .file-title {
     font-family: var(--font-display);
@@ -3348,7 +3499,6 @@ a.copy-value:hover { color: var(--accent-text); }
 }
 
 .file-name { font-size: 17px; font-weight: 600; overflow-wrap: anywhere; }
-.file-size { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
 .file-actions .btn-primary { height: 44px; padding: 0 22px; font-size: 14px; }
 .file-actions .btn-ghost { height: 44px; }
 
@@ -3360,8 +3510,10 @@ a.copy-value:hover { color: var(--accent-text); }
     /* Three create tabs share the bar: less padding keeps "Short link" on one line. */
     .nav-tab { gap: 6px; padding: 0 8px; white-space: nowrap; }
 
-    .drop-zone { min-height: 88px; padding: 16px; }
-    .drop-zone-title { font-size: 16px; }
+    .drop-zone { min-height: 180px; }
+    .drop-zone-empty,
+    .file-card { padding: 16px; }
+    .file-card-actions .btn-ghost { height: 44px; padding: 0 16px; border-radius: 10px; }
 
     .publish-bar .upload-progress { order: -1; flex: 0 0 100%; }
     .upload-progress .btn-danger { height: 44px; border-radius: 10px; }

@@ -154,12 +154,15 @@ func createAction(ctx context.Context, cmd *urcli.Command) error {
 
 	req := buildCreateReq(cmd, content)
 
-	cl, err := newPadmarkClient(cmd)
+	apiClient, err := newPadmarkClient(cmd)
 	if err != nil {
 		return fmt.Errorf("create API client: %w", err)
 	}
 
-	res, err := cl.CreateNote(ctx, req)
+	callCtx, cancel := requestContext(ctx, cmd)
+	defer cancel()
+
+	res, err := apiClient.CreateNote(callCtx, req)
 	if err != nil {
 		return fmt.Errorf("create note: %w", err)
 	}

@@ -50,12 +50,12 @@ func newFilePages() *filePages {
 
 // fileEditorViewData is the data of the upload page.
 type fileEditorViewData struct {
-	Header         headerView
-	Nonce          string
-	MaxSizeLabel   string
-	ExpiresLabel   string
-	PrivacyOptions []privacyOption
-	MaxSize        int64
+	Access       privacyChoice
+	Nonce        string
+	MaxSizeLabel string
+	ExpiresLabel string
+	Header       headerView
+	MaxSize      int64
 }
 
 // fileViewData is the data of the file page that a browser gets on GET /{id}.
@@ -82,16 +82,16 @@ type fileViewData struct {
 
 // fileEditViewData is the data of the page that changes the settings of a file.
 type fileEditViewData struct {
-	Header         headerView
-	ID             string
-	Name           string
-	URL            string
-	SizeLabel      string
-	ExpiresLabel   string
-	Nonce          string
-	PrivacyOptions []privacyOption
-	Burn           bool
-	IsOwner        bool
+	Access       privacyChoice
+	ID           string
+	Name         string
+	URL          string
+	SizeLabel    string
+	ExpiresLabel string
+	Nonce        string
+	Header       headerView
+	Burn         bool
+	IsOwner      bool
 }
 
 // CreateFilePage handles GET /files: the upload form. Without object storage the page tells
@@ -105,12 +105,12 @@ func (h *FileHandler) CreateFilePage(w http.ResponseWriter, r *http.Request) {
 
 	header := h.header(r, headerKindFile)
 	data := fileEditorViewData{
-		Header:         header,
-		Nonce:          middleware.NonceFromContext(r.Context()),
-		MaxSize:        h.manager.MaxSize(),
-		MaxSizeLabel:   formatSize(h.manager.MaxSize()),
-		ExpiresLabel:   "Counted from the upload.",
-		PrivacyOptions: privacyOptions(h.authMgr != nil, header.SignedIn(), domain.PrivacyPublic),
+		Header:       header,
+		Nonce:        middleware.NonceFromContext(r.Context()),
+		MaxSize:      h.manager.MaxSize(),
+		MaxSizeLabel: formatSize(h.manager.MaxSize()),
+		ExpiresLabel: "Counted from the upload.",
+		Access:       h.privacyChoice(r, header, domain.PrivacyPublic),
 	}
 
 	h.render(w, r, h.pages.editor, &data)
@@ -211,16 +211,16 @@ func (h *FileHandler) editFile(w http.ResponseWriter, r *http.Request, slug stri
 
 	header := h.header(r, headerKindPlain)
 	data := fileEditViewData{
-		Header:         header,
-		ID:             slug,
-		Name:           file.Name,
-		URL:            h.scheme(r) + "://" + r.Host + "/" + slug,
-		SizeLabel:      formatSize(file.Size),
-		ExpiresLabel:   fileExpiresLabel(file.ExpiresAt),
-		Nonce:          middleware.NonceFromContext(r.Context()),
-		PrivacyOptions: privacyOptions(h.authMgr != nil, header.SignedIn(), file.EffectivePrivacy()),
-		Burn:           file.BurnAfterDownload,
-		IsOwner:        file.OwnedBy(callerID),
+		Header:       header,
+		ID:           slug,
+		Name:         file.Name,
+		URL:          h.scheme(r) + "://" + r.Host + "/" + slug,
+		SizeLabel:    formatSize(file.Size),
+		ExpiresLabel: fileExpiresLabel(file.ExpiresAt),
+		Nonce:        middleware.NonceFromContext(r.Context()),
+		Access:       h.privacyChoice(r, header, file.EffectivePrivacy()),
+		Burn:         file.BurnAfterDownload,
+		IsOwner:      file.OwnedBy(callerID),
 	}
 
 	h.render(w, r, h.pages.edit, &data)

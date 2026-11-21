@@ -193,12 +193,13 @@ func TestMCPFlow_FileLifecycle(t *testing.T) {
 
 	require.NoError(t, os.WriteFile(filepath.Join(root, ".env"), []byte("TOKEN=x"), 0o600))
 	hidden := callOutput(ctx, t, sess, "upload_file", map[string]any{"path": ".env"})
-	require.True(t, hidden.IsError, "a name that starts with a dot is refused by default")
+	require.True(t, hidden.IsError, "a name that starts with a dot is always refused")
 	require.Contains(t, toolText(hidden), "starts with a dot")
 
+	// The proxy sends the slug. The test server has custom slugs off, so the server refuses it.
 	slug := callOutput(ctx, t, sess, "upload_file", map[string]any{"path": "report.txt", "slug": "known-id"})
-	require.True(t, slug.IsError, "a slug from the agent is refused by default")
-	require.Contains(t, toolText(slug), "slug is off")
+	require.True(t, slug.IsError, "the server refuses a slug with custom slugs off")
+	require.Contains(t, toolText(slug), "custom slugs are disabled on this server")
 
 	uploaded := callOutput(ctx, t, sess, "upload_file", map[string]any{"path": "report.txt", "ttl": 3600})
 	require.False(t, uploaded.IsError, toolText(uploaded))
@@ -404,6 +405,7 @@ func newTestManagers(t *testing.T, db *bun.DB, slugLock *lock.Locker) (*notes.Ma
 }
 
 // newTestFileManager mirrors attachFiles in internal/infra/server with the test fixtures.
+// Custom slugs are off, as for the notes and links of this stack.
 func newTestFileManager(t *testing.T, db *bun.DB, slugLock *lock.Locker, endpoint string) *files.Manager {
 	t.Helper()
 
@@ -425,7 +427,7 @@ func newTestFileManager(t *testing.T, db *bun.DB, slugLock *lock.Locker, endpoin
 		Notes:     sqliterepo.NewNoteRepository(db),
 		Links:     sqliterepo.NewLinkRepository(db, discardTestLogger()),
 		Log:       discardTestLogger(),
-	}, 1<<20, true)
+	}, 1<<20, false)
 }
 
 // issueEnvelopeToken creates the first admin + an API key, returning the envelope the admin
@@ -461,7 +463,7 @@ func connectMCP(
 	t.Helper()
 
 	padmarkClient := newTestPadmarkClient(t, serverURL, token)
-	mgr := mcpx.NewManager(padmarkClient, padmarkClient, slog.New(slog.DiscardHandler), opts...)
+	mgr := mcpx.NewManager(padmarkClient, slog.New(slog.DiscardHandler), opts...)
 
 	clientTransport, serverTransport := mcpsdk.NewInMemoryTransports()
 

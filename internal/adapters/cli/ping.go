@@ -26,17 +26,20 @@ func pingAction(ctx context.Context, cmd *urcli.Command) error {
 		return fmt.Errorf("create API client: %w", err)
 	}
 
+	callCtx, cancel := requestContext(ctx, cmd)
+	defer cancel()
+
 	erw := &errWriter{w: os.Stdout, err: nil}
 	erw.printf("server: %s\n", resolveServerURL(cmd))
 
-	liveErr := checkLiveness(ctx, padmarkClient)
+	liveErr := checkLiveness(callCtx, padmarkClient)
 	if liveErr != nil {
 		erw.printf("healthz: FAIL (%s)\n", liveErr)
 	} else {
 		erw.printf("healthz: OK\n")
 	}
 
-	readyErr := checkReadiness(ctx, padmarkClient)
+	readyErr := checkReadiness(callCtx, padmarkClient)
 	if readyErr != nil {
 		erw.printf("readyz:  FAIL (%s)\n", readyErr)
 	} else {

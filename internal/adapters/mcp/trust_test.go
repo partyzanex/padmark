@@ -22,14 +22,14 @@ func envelopeToken(t *testing.T, baseURL string) string {
 	return token
 }
 
-// runClientOnly replaces the root action with its guarded first step (newPadmarkClients) so
+// runClientOnly replaces the root action with its guarded first step (newPadmarkClient) so
 // tests exercise the trust gate without entering the stdio protocol loop: the loop reads the
-// real process stdin and is not hermetic. newPadmarkClients performs no network I/O, so a nil
+// real process stdin and is not hermetic. newPadmarkClient performs no network I/O, so a nil
 // error here means the gate let the pinned (or explicit) URL through.
 func runClientOnly(ctx context.Context, args ...string) error {
 	app := NewApp()
 	app.Action = func(_ context.Context, cmd *urcli.Command) error {
-		_, err := newPadmarkClients(cmd)
+		_, _, err := newPadmarkClient(cmd)
 
 		return err
 	}

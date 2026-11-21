@@ -51,7 +51,7 @@ func downloadAction(ctx context.Context, cmd *urcli.Command) error {
 		return fmt.Errorf("read file ID: %w", err)
 	}
 
-	apiClient, err := newFileTransferClient(cmd)
+	apiClient, err := newPadmarkClient(cmd)
 	if err != nil {
 		return fmt.Errorf("create API client: %w", err)
 	}

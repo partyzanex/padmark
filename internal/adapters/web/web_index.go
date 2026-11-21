@@ -4,6 +4,8 @@ import (
 	_ "embed"
 	"html/template"
 	"net/http"
+	"net/url"
+	"slices"
 
 	"github.com/partyzanex/padmark/internal/adapters/web/middleware"
 	"github.com/partyzanex/padmark/internal/domain"
@@ -50,7 +52,7 @@ type editorViewData struct {
 	Content          string
 	Nonce            string
 	Privacy          string
-	PrivacyOptions   []privacyOption
+	Access           privacyChoice
 	TTLOptions       []ttlOption
 	EditMode         bool
 	BurnAfterReading bool
@@ -62,19 +64,28 @@ type editorViewData struct {
 	ContentWithheld bool
 }
 
-// privacyOption is one entry of the editor's privacy select. Hint, when set, replaces the
-// default hint text for that level.
+// privacyOption is one row of the editor's privacy list. Hint, when set, replaces the default
+// description of that level. Disabled shows a level that only a signed-in user can choose.
 type privacyOption struct {
 	Value    string
 	Label    string
 	Hint     string
 	Selected bool
+	Disabled bool
 }
 
-// privacyOptions lists the privacy levels the editor offers (review R2): public always,
-// authenticated only with the account system (otherwise nothing enforces it), owner only to a
-// signed-in user (an anonymous note has no owner). The current level of an edited note is always
-// listed, so saving without a change keeps it; without accounts its hint says it is not enforced.
+// privacyChoice is the argument of the "privacy-options" template: the rows of the list and the
+// sign-in link that enables the disabled rows.
+type privacyChoice struct {
+	SignInURL string
+	Options   []privacyOption
+}
+
+// privacyOptions lists the privacy levels of the editor (review R2). Public is always available.
+// Without accounts nothing enforces the other levels, so the list hides them. With accounts a
+// signed-out user sees them disabled: the sign-in link of the form enables them. The current
+// level of an edited record is always available, so saving without a change keeps it; without
+// accounts its hint says it is not enforced.
 func privacyOptions(accounts accountMode, signedIn bool, current domain.Privacy) []privacyOption {
 	levels := []struct {
 		value   domain.Privacy
@@ -82,7 +93,7 @@ func privacyOptions(accounts accountMode, signedIn bool, current domain.Privacy)
 		offered bool
 	}{
 		{domain.PrivacyPublic, "Public", true},
-		{domain.PrivacyAuthenticated, "Login required", accounts == accountsOn},
+		{domain.PrivacyAuthenticated, "Login required", accounts == accountsOn && signedIn},
 		{domain.PrivacyOwner, "Owner only", accounts == accountsOn && signedIn},
 	}
 
@@ -92,11 +103,15 @@ func privacyOptions(accounts accountMode, signedIn bool, current domain.Privacy)
 		level := &levels[index]
 
 		selected := level.value == current
-		if !level.offered && !selected {
+		available := level.offered || selected
+
+		if !available && accounts == accountsOff {
 			continue
 		}
 
-		option := privacyOption{Value: string(level.value), Label: level.label, Hint: "", Selected: selected}
+		option := privacyOption{
+			Value: string(level.value), Label: level.label, Hint: "", Selected: selected, Disabled: !available,
+		}
 		if accounts == accountsOff && level.value != domain.PrivacyPublic {
 			option.Hint = "Not enforced: accounts are off, anyone with the link can view"
 		}
@@ -107,6 +122,24 @@ func privacyOptions(accounts accountMode, signedIn bool, current domain.Privacy)
 	return options
 }
 
+// newPrivacyChoice returns the privacy list of a form at requestURI. When the list has a
+// disabled row, the sign-in link returns the user to requestURI.
+func newPrivacyChoice(accounts accountMode, signedIn bool, current domain.Privacy, requestURI string) privacyChoice {
+	options := privacyOptions(accounts, signedIn, current)
+	choice := privacyChoice{Options: options, SignInURL: ""}
+
+	if slices.ContainsFunc(options, func(option privacyOption) bool { return option.Disabled }) {
+		choice.SignInURL = "/login?next=" + url.QueryEscape(requestURI)
+	}
+
+	return choice
+}
+
+// privacyChoice returns the privacy list of the form that r opens, for the user of header.
+func (c *common) privacyChoice(r *http.Request, header headerView, current domain.Privacy) privacyChoice {
+	return newPrivacyChoice(c.authMgr != nil, header.SignedIn(), current, r.URL.RequestURI())
+}
+
 // IndexPage handles GET / — serves the note editor.
 func (h *PageHandler) IndexPage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -114,10 +147,10 @@ func (h *PageHandler) IndexPage(w http.ResponseWriter, r *http.Request) {
 	header := h.header(r, headerKindNote)
 
 	err := h.indexTmpl.Execute(w, editorViewData{
-		Header:         header,
-		Nonce:          middleware.NonceFromContext(r.Context()),
-		Privacy:        string(domain.PrivacyPublic),
-		PrivacyOptions: privacyOptions(h.authMgr != nil, header.SignedIn(), domain.PrivacyPublic),
+		Header:  header,
+		Nonce:   middleware.NonceFromContext(r.Context()),
+		Privacy: string(domain.PrivacyPublic),
+		Access:  h.privacyChoice(r, header, domain.PrivacyPublic),
 		// ID/Title/Content blank — fresh editor. EditMode/BurnAfterReading/IsOwner are zero defaults
 		// (Create form, not owner view).
 		ID:               "",

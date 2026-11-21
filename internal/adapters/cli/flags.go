@@ -83,6 +83,7 @@ const argsUsageFileID = "<id|url>"
 // DefaultURL is the default padmark server address.
 const DefaultURL = "http://localhost:8080"
 
-// DefaultTimeout bounds each request so commands fail fast instead of hanging on a slow or
-// unresponsive server. Override with --timeout (0 disables the bound).
+// DefaultTimeout limits the API calls of each command, so the command fails fast on a slow or
+// unresponsive server. For upload and download, it limits only the wait for the response
+// headers. Override with --timeout (0 disables the limit).
 const DefaultTimeout = 30 * time.Second

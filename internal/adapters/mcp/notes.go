@@ -13,10 +13,10 @@ import (
 
 // registerNoteTools adds the note tools to the server.
 func registerNoteTools(srv *mcpsdk.Server, m *Manager) {
-	mcpsdk.AddTool[createNoteInput, createNoteOutput](srv, createNoteTool(), m.createNote)
-	mcpsdk.AddTool[getNoteInput, createNoteOutput](srv, getNoteTool(), m.getNote)
-	mcpsdk.AddTool[updateNoteInput, createNoteOutput](srv, updateNoteTool(), m.updateNote)
-	mcpsdk.AddTool[deleteNoteInput, deleteNoteOutput](srv, deleteNoteTool(), m.deleteNote)
+	mcpsdk.AddTool[createNoteInput, createNoteOutput](srv, createNoteTool(), limitCall(m, m.createNote))
+	mcpsdk.AddTool[getNoteInput, createNoteOutput](srv, getNoteTool(), limitCall(m, m.getNote))
+	mcpsdk.AddTool[updateNoteInput, createNoteOutput](srv, updateNoteTool(), limitCall(m, m.updateNote))
+	mcpsdk.AddTool[deleteNoteInput, deleteNoteOutput](srv, deleteNoteTool(), limitCall(m, m.deleteNote))
 }
 
 func createNoteTool() *mcpsdk.Tool {

@@ -37,12 +37,15 @@ func getAction(ctx context.Context, cmd *urcli.Command) error {
 		return fmt.Errorf("read note ID: %w", err)
 	}
 
-	cl, err := newPadmarkClient(cmd)
+	apiClient, err := newPadmarkClient(cmd)
 	if err != nil {
 		return fmt.Errorf("create API client: %w", err)
 	}
 
-	res, err := cl.GetNote(ctx, padmark.GetNoteParams{ID: id})
+	callCtx, cancel := requestContext(ctx, cmd)
+	defer cancel()
+
+	res, err := apiClient.GetNote(callCtx, padmark.GetNoteParams{ID: id})
 	if err != nil {
 		return fmt.Errorf("get note: %w", err)
 	}

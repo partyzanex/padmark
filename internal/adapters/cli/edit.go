@@ -97,12 +97,15 @@ func editAction(ctx context.Context, cmd *urcli.Command) error {
 
 	req := buildUpdateReq(cmd, content, editCode)
 
-	cl, err := newPadmarkClient(cmd)
+	apiClient, err := newPadmarkClient(cmd)
 	if err != nil {
 		return fmt.Errorf("create API client: %w", err)
 	}
 
-	res, err := cl.UpdateNote(ctx, req, padmark.UpdateNoteParams{ID: id})
+	callCtx, cancel := requestContext(ctx, cmd)
+	defer cancel()
+
+	res, err := apiClient.UpdateNote(callCtx, req, padmark.UpdateNoteParams{ID: id})
 	if err != nil {
 		return fmt.Errorf("update note: %w", err)
 	}

@@ -64,9 +64,12 @@ func updateFileAction(ctx context.Context, cmd *urcli.Command) error {
 		return fmt.Errorf("create API client: %w", err)
 	}
 
+	callCtx, cancel := requestContext(ctx, cmd)
+	defer cancel()
+
 	params := padmark.UpdateFileParams{ID: id, XEditCode: optEditCode(cmd.String(FlagEditCode))}
 
-	res, err := apiClient.UpdateFile(ctx, req, params)
+	res, err := apiClient.UpdateFile(callCtx, req, params)
 	if err != nil {
 		return fmt.Errorf("update file: %w", err)
 	}

@@ -73,7 +73,7 @@ func uploadAction(ctx context.Context, cmd *urcli.Command) (err error) {
 
 	defer func() { err = errors.Join(err, source.close()) }()
 
-	apiClient, err := newFileTransferClient(cmd)
+	apiClient, err := newPadmarkClient(cmd)
 	if err != nil {
 		return fmt.Errorf("create API client: %w", err)
 	}

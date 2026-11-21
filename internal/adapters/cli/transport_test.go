@@ -55,9 +55,9 @@ func getWith(t *testing.T, client *http.Client, rawURL string) (*http.Response, 
 	return client.Do(req)
 }
 
-// TestBearerClient_SameOriginRedirect_KeepsToken: a redirect on the same origin is followed and
+// TestHTTPClient_SameOriginRedirect_KeepsToken: a redirect on the same origin is followed and
 // still carries the token.
-func TestBearerClient_SameOriginRedirect_KeepsToken(t *testing.T) {
+func TestHTTPClient_SameOriginRedirect_KeepsToken(t *testing.T) {
 	t.Parallel()
 
 	server := newAuthRecorder(t, func(w http.ResponseWriter, r *http.Request) {
@@ -70,7 +70,7 @@ func TestBearerClient_SameOriginRedirect_KeepsToken(t *testing.T) {
 		ok(w, r)
 	})
 
-	client, err := newBearerClient(server.server.URL, testBearer, time.Minute)
+	client, err := newHTTPClient(server.server.URL, testBearer, time.Minute)
 	require.NoError(t, err)
 
 	resp, err := getWith(t, client, server.server.URL+"/start")
@@ -81,9 +81,9 @@ func TestBearerClient_SameOriginRedirect_KeepsToken(t *testing.T) {
 	assert.Equal(t, []string{"Bearer " + testBearer, "Bearer " + testBearer}, server.headers())
 }
 
-// TestBearerClient_CrossOriginRedirect_Refused: a redirect to another origin (here another port)
+// TestHTTPClient_CrossOriginRedirect_Refused: a redirect to another origin (here another port)
 // is refused, and the other server never receives a request.
-func TestBearerClient_CrossOriginRedirect_Refused(t *testing.T) {
+func TestHTTPClient_CrossOriginRedirect_Refused(t *testing.T) {
 	t.Parallel()
 
 	other := newAuthRecorder(t, ok)
@@ -91,7 +91,7 @@ func TestBearerClient_CrossOriginRedirect_Refused(t *testing.T) {
 		http.Redirect(w, r, other.server.URL+"/steal", http.StatusFound)
 	})
 
-	client, err := newBearerClient(server.server.URL, testBearer, time.Minute)
+	client, err := newHTTPClient(server.server.URL, testBearer, time.Minute)
 	require.NoError(t, err)
 
 	resp, err := getWith(t, client, server.server.URL+"/start")
@@ -103,15 +103,15 @@ func TestBearerClient_CrossOriginRedirect_Refused(t *testing.T) {
 	assert.Empty(t, other.headers(), "the other origin must not receive any request")
 }
 
-// TestBearerClient_OtherOrigin_NoToken: a direct request to another origin goes out without the
+// TestHTTPClient_OtherOrigin_NoToken: a direct request to another origin goes out without the
 // token, so the transport itself never leaks it.
-func TestBearerClient_OtherOrigin_NoToken(t *testing.T) {
+func TestHTTPClient_OtherOrigin_NoToken(t *testing.T) {
 	t.Parallel()
 
 	server := newAuthRecorder(t, ok)
 	other := newAuthRecorder(t, ok)
 
-	client, err := newBearerClient(server.server.URL, testBearer, time.Minute)
+	client, err := newHTTPClient(server.server.URL, testBearer, time.Minute)
 	require.NoError(t, err)
 
 	resp, err := getWith(t, client, other.server.URL+"/x")
@@ -121,15 +121,15 @@ func TestBearerClient_OtherOrigin_NoToken(t *testing.T) {
 	assert.Equal(t, []string{""}, other.headers())
 }
 
-// TestBearerClient_TooManyRedirects: a redirect loop on the same origin stops at the limit.
-func TestBearerClient_TooManyRedirects(t *testing.T) {
+// TestHTTPClient_TooManyRedirects: a redirect loop on the same origin stops at the limit.
+func TestHTTPClient_TooManyRedirects(t *testing.T) {
 	t.Parallel()
 
 	server := newAuthRecorder(t, func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/loop", http.StatusFound)
 	})
 
-	client, err := newBearerClient(server.server.URL, testBearer, time.Minute)
+	client, err := newHTTPClient(server.server.URL, testBearer, time.Minute)
 	require.NoError(t, err)
 
 	resp, err := getWith(t, client, server.server.URL+"/loop")
@@ -140,15 +140,16 @@ func TestBearerClient_TooManyRedirects(t *testing.T) {
 	require.ErrorIs(t, err, errTooManyRedirects)
 }
 
-// TestTransferClient_HeaderTimeoutOnly: the client of upload and download has no total timeout,
-// because http.Client.Timeout also stops a long body transfer. --timeout limits only the wait for
-// the response headers, and the token still goes only to the server origin.
-func TestTransferClient_HeaderTimeoutOnly(t *testing.T) {
+// TestHTTPClient_HeaderTimeoutOnly: the one client of the CLI has no total timeout, because
+// http.Client.Timeout also stops a long body transfer in upload and download. --timeout limits
+// only the wait for the response headers, and the token still goes only to the server origin.
+// The other commands get their full-call limit from requestContext.
+func TestHTTPClient_HeaderTimeoutOnly(t *testing.T) {
 	t.Parallel()
 
 	server := newAuthRecorder(t, ok)
 
-	client, err := newTransferClient(server.server.URL, testBearer, time.Minute)
+	client, err := newHTTPClient(server.server.URL, testBearer, time.Minute)
 	require.NoError(t, err)
 
 	assert.Zero(t, client.Timeout, "a total timeout would stop a large file transfer")

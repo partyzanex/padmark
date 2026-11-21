@@ -64,11 +64,15 @@ func (sess *uiSession) createTestLink() (string, string) {
 	sess.fill("#slugInput", "ui-link")
 	sess.openSettings()
 	sess.fill("#editCodeInput", "Link-Edit-Code42!")
-	sess.selectOption("#expirySelect", "seconds")
-	sess.fill("#ttlInput", "123")
+	// The custom lifetime is a number and a unit; the page sends 2 minutes as 120 seconds.
+	sess.selectOption("#expirySelect", "custom")
+	sess.fill("#ttlAmount", "2")
+	sess.selectOption("#ttlUnit", "60")
 	sess.selectOption("#redirectSelect", "false")
 	sess.click("#burnLabel")
-	sess.expectLayout("#editCodeInput", "#privacySelect", "#redirectSelect", "#ttlInput", "#burnLabel")
+	sess.expectLayout("#editCodeInput", "#privacySelect", "#redirectSelect", "#ttlAmount", "#ttlUnit", "#burnLabel")
+	sess.text("#chipExpiry", "Expires in 2 minutes")
+	sess.visible("#chipBurn")
 	sess.closeSettings()
 	sess.expectLayout(".header", "#targetInput", "#slugInput", "#submitBtn")
 	sess.screenshot("link-editor.png", "#previewHost")
@@ -96,19 +100,14 @@ func testLinkCreateEditDelete(sess *uiSession) {
 	original := sess.readLink(id)
 	require.True(sess.t, original.BurnAfterClick)
 	require.NotNil(sess.t, original.ExpiresAt)
-	require.WithinDuration(sess.t, time.Now().Add(123*time.Second), *original.ExpiresAt, 10*time.Second)
+	require.WithinDuration(sess.t, time.Now().Add(120*time.Second), *original.ExpiresAt, 10*time.Second)
 	// As for a note: the result page opens the page of the link, and Edit is there.
 	sess.link("Open link")
 	sess.expectLinkPage(id, original.TargetURL)
 	// The title has the port of the test server, and the expiry has the time of the run.
 	sess.screenshot("link.png", "#linkTitle", "#expiresTag")
 	sess.openEditor()
-	sess.must(sess.expect.Page(sess.page).ToHaveURL(sess.baseURL + "/edit/" + id))
-	sess.value("#targetInput", original.TargetURL)
-	sess.value("#redirectSelect", "false")
-	sess.value("#expirySelect", "keep")
-	sess.must(sess.expect.Locator(sess.page.Locator("#burnCheck")).ToBeDisabled())
-	sess.screenshot("link-edit.png", "#expiryHint", "#previewHost")
+	sess.expectLinkEditPage(id, original.TargetURL)
 	sess.button("Save")
 	sess.text("#linkError", "Edit code required")
 	sess.openSettings()
@@ -135,6 +134,28 @@ func testLinkCreateEditDelete(sess *uiSession) {
 	require.Nil(sess.t, saved.DirectRedirect)
 	sess.editLinkWithCode(code)
 	sess.deleteLink(id)
+}
+
+// expectLinkEditPage checks the editor of the link that createTestLink made: the saved values
+// and the fixed values of a link after create.
+func (sess *uiSession) expectLinkEditPage(id, target string) {
+	sess.t.Helper()
+	sess.must(sess.expect.Page(sess.page).ToHaveURL(sess.baseURL + "/edit/" + id))
+	sess.value("#targetInput", target)
+	sess.value("#redirectSelect", "false")
+	sess.value("#expirySelect", "keep")
+	// After create, the slug and burn after click are fixed text, not fields.
+	sess.must(sess.expect.Locator(sess.page.Locator("#burnCheck")).ToHaveCount(0))
+	sess.must(sess.expect.Locator(sess.page.Locator("#burnFixed")).ToContainText("On"))
+	sess.text("#slugFixed", "/"+id)
+	// The expiry hint, its chip and the phone summary show the time of the run. A fixed time
+	// keeps the width of the chips the same in each run.
+	sess.eval(`() => {
+		for (const node of document.querySelectorAll('#expiryHint, #chipExpiry, #settingsSummary')) {
+			node.textContent = node.textContent.replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z/, '2026-10-24T12:00:00Z');
+		}
+	}`)
+	sess.screenshot("link-edit.png", "#previewHost")
 }
 
 // expectLinkPage checks the page of a short link: the address, the destination and the actions.
@@ -188,10 +209,10 @@ func testLinkValidation(sess *uiSession) {
 	sess.button("Create link")
 	sess.visible("#editCodeInput:invalid")
 	sess.fill("#editCodeInput", "")
-	sess.selectOption("#expirySelect", "seconds")
-	sess.fill("#ttlInput", "0")
+	sess.selectOption("#expirySelect", "custom")
+	sess.fill("#ttlAmount", "0")
 	sess.button("Create link")
-	sess.visible("#ttlInput:invalid")
+	sess.visible("#ttlAmount:invalid")
 	sess.selectOption("#expirySelect", "never")
 	sess.button("Create link")
 	sess.createdLink()

@@ -368,7 +368,8 @@ func accessFlags() []cli.Flag {
 			// random slugs, because human-readable public URLs are easier to guess.
 			flag.Value = true
 			flag.Usage = "Allow user-supplied human-readable slugs at note creation (e.g. project/GUIDE.md) " +
-				"and at short-link creation (e.g. launch-2026, single segment only). " +
+				"at short-link creation (e.g. launch-2026, single segment only) " +
+				"and at file upload (single segment only). " +
 				"On by default for v0.1.6 compatibility; set false to issue only random slugs, " +
 				"because human-readable public URLs are easier to guess. " +
 				"New content encryption keys are independent of the slug"

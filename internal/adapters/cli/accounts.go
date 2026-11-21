@@ -82,11 +82,16 @@ func createTokenAction(ctx context.Context, cmd *urcli.Command) error {
 		return fmt.Errorf("read step up: %w", err)
 	}
 
-	res, clientErr := apiClient.CreateAPIToken(ctx, padmark.NewOptCreateAPITokenRequest(padmark.CreateAPITokenRequest{
+	callCtx, cancel := requestContext(ctx, cmd)
+	defer cancel()
+
+	req := padmark.NewOptCreateAPITokenRequest(padmark.CreateAPITokenRequest{
 		TTLDays:  padmark.NewOptInt(cmd.Int(FlagTTLDays)),
 		Password: padmark.NewOptString(password),
 		TotpCode: padmark.NewOptString(totpCode),
-	}))
+	})
+
+	res, clientErr := apiClient.CreateAPIToken(callCtx, req)
 	if clientErr != nil {
 		return fmt.Errorf("create token: %w", clientErr)
 	}
@@ -161,7 +166,10 @@ func createInviteAction(ctx context.Context, cmd *urcli.Command) error {
 		return fmt.Errorf("read step up: %w", err)
 	}
 
-	res, clientErr := apiClient.CreateInvite(ctx, padmark.NewOptStepUpRequest(padmark.StepUpRequest{
+	callCtx, cancel := requestContext(ctx, cmd)
+	defer cancel()
+
+	res, clientErr := apiClient.CreateInvite(callCtx, padmark.NewOptStepUpRequest(padmark.StepUpRequest{
 		Password: padmark.NewOptString(password),
 		TotpCode: padmark.NewOptString(totpCode),
 	}))

@@ -13,10 +13,12 @@ import (
 
 // registerLinkTools adds the short-link tools to the server.
 func registerLinkTools(srv *mcpsdk.Server, m *Manager) {
-	mcpsdk.AddTool[createLinkInput, createLinkOutput](srv, createLinkTool(), m.createLink)
-	mcpsdk.AddTool[createBulkLinksInput, createBulkLinksOutput](srv, createLinksBulkTool(), m.createLinksBulk)
-	mcpsdk.AddTool[getLinkInput, createLinkOutput](srv, getLinkTool(), m.getLink)
-	mcpsdk.AddTool[deleteLinkInput, deleteNoteOutput](srv, deleteLinkTool(), m.deleteLink)
+	mcpsdk.AddTool[createLinkInput, createLinkOutput](srv, createLinkTool(), limitCall(m, m.createLink))
+	mcpsdk.AddTool[createBulkLinksInput, createBulkLinksOutput](
+		srv, createLinksBulkTool(), limitCall(m, m.createLinksBulk),
+	)
+	mcpsdk.AddTool[getLinkInput, createLinkOutput](srv, getLinkTool(), limitCall(m, m.getLink))
+	mcpsdk.AddTool[deleteLinkInput, deleteNoteOutput](srv, deleteLinkTool(), limitCall(m, m.deleteLink))
 }
 
 func createLinkTool() *mcpsdk.Tool {

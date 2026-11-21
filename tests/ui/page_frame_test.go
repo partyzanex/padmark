@@ -69,7 +69,7 @@ func testPageFrameNotes(sess *uiSession) {
 	pages = append(pages, sess.frame("short note"))
 
 	sess.openEditor()
-	sess.must(sess.expect.Locator(sess.page.Locator("#slugInput")).ToHaveAttribute("readonly", ""))
+	sess.visible("#slugFixed")
 	pages = append(pages, sess.frame("note edit"))
 
 	// These notes are longer than the screen, so the browser can show a vertical scrollbar.

@@ -16,20 +16,33 @@
     <form id="fileForm" class="create-layout" autocomplete="off" data-max-size="{{.MaxSize}}" data-max-label="{{.MaxSizeLabel}}">
         <section class="card editor-card editor-card--link" aria-labelledby="fileHeading">
             <h1 class="sr-only" id="fileHeading">Upload a file</h1>
-            <div class="link-fields">
-                <div class="field-group">
-                    <span class="field-label" id="fileLabel">File</span>
-                    <label class="drop-zone" id="dropZone" for="fileInput">
-                        <input type="file" class="drop-zone-input" id="fileInput" aria-labelledby="fileLabel" aria-describedby="fileLimit">
+            <div class="link-fields link-fields--grow">
+                <span class="field-label" id="fileLabel">File</span>
+                <div class="drop-zone" id="dropZone">
+                    <input type="file" class="drop-zone-input" id="fileInput" aria-labelledby="fileLabel" aria-describedby="fileLimit">
+                    <label class="drop-zone-empty" for="fileInput" id="dropEmpty">
                         <span class="drop-zone-icon" aria-hidden="true">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M5 15v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/></svg>
                         </span>
-                        <span class="drop-zone-text">
-                            <strong class="drop-zone-title" id="fileName">Choose a file or drop it here</strong>
-                            <span class="drop-zone-hint" id="fileSize">Any type; the server keeps it encrypted</span>
-                        </span>
+                        <span class="drop-zone-title">Drop a file here or <span class="drop-zone-browse">browse</span></span>
+                        <span class="drop-zone-hint"><span id="fileLimit">Up to {{.MaxSizeLabel}}</span> · the name and content can't be changed later</span>
                     </label>
-                    <span class="field-hint" id="fileLimit">Maximum: {{.MaxSizeLabel}}</span>
+                    <div class="file-card" id="filePicked" hidden>
+                        <span class="file-icon" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M12 17v-6M9.5 13.5 12 11l2.5 2.5"/></svg>
+                        </span>
+                        <span class="file-card-text">
+                            <strong class="file-name" id="fileName"></strong>
+                            <span class="file-meta"><span id="fileSize"></span><span id="fileType"></span> <span class="file-meta-limit">· max {{.MaxSizeLabel}}</span></span>
+                        </span>
+                        <span class="file-card-actions">
+                            <button type="button" class="btn-ghost" id="replaceBtn">Replace</button>
+                            <button type="button" class="btn-ghost" id="removeBtn">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+                                Remove
+                            </button>
+                        </span>
+                    </div>
                 </div>
                 <div class="field-group">
                     <label class="field-label" for="slugInput">Slug <span class="optional">· optional</span></label>
@@ -52,7 +65,7 @@
 
                 <fieldset class="privacy-options" id="privacySelect">
                     <legend class="lbl">Who can download</legend>
-                    {{template "privacy-options" .PrivacyOptions}}
+                    {{template "privacy-options" .Access}}
                 </fieldset>
 
                 <div class="field-group">
@@ -63,23 +76,17 @@
                         <option value="86400">In 1 day</option>
                         <option value="604800">In 7 days</option>
                         <option value="2592000">In 30 days</option>
-                        <option value="seconds">Custom, in seconds</option>
+                        <option value="custom">Custom…</option>
                     </select>
-                    <span class="field-hint">{{.ExpiresLabel}}</span>
+                    <span class="field-hint" id="expiryHint">{{.ExpiresLabel}}</span>
                 </div>
 
-                <div class="field-group" id="ttlGroup" hidden>
-                    <label class="field-label" for="ttlInput">Lifetime in seconds</label>
-                    <input type="number" class="field-input field-input--mono" id="ttlInput" min="1" max="9223372036" step="1" placeholder="86400" disabled>
-                </div>
+                {{template "expiry-custom"}}
 
                 <div class="setting-list">
                     <label class="setting-row" id="burnLabel">
-                        <span class="setting-icon setting-icon--warn" aria-hidden="true">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 22c4 0 7-2.7 7-7 0-4-3-6.5-4.5-9.5C13 7 12.5 9 11 10 10.5 8 9.5 6.5 8 5c0 3-3 5.5-3 10 0 4.3 3 7 7 7z"/></svg>
-                        </span>
                         <span class="setting-text">
-                            <span class="setting-title">Delete after first download</span>
+                            <span class="setting-title">Burn after first download</span>
                             <span class="setting-desc">The file page warns before the download</span>
                         </span>
                         <input type="checkbox" class="switch" role="switch" id="burnCheck">
@@ -128,6 +135,7 @@
     {{template "theme-js"}}
     {{template "sheet-js"}}
     {{template "file-errors-js"}}
+    {{template "expiry-js"}}
 
     const form = document.getElementById('fileForm');
     const maxSize = Number(form.dataset.maxSize);
@@ -141,8 +149,6 @@
     const progressBox = document.getElementById('uploadProgress');
     const progressBar = document.getElementById('progressBar');
     const progressText = document.getElementById('progressText');
-    const expirySelect = document.getElementById('expirySelect');
-    const ttlInput = document.getElementById('ttlInput');
     const slugInput = document.getElementById('slugInput');
     let upload = null;
 
@@ -161,16 +167,26 @@
         errorBox.hidden = false;
     }
 
-    // The zone shows the name and the size of the chosen file.
+    // The zone shows the chosen file in its centre: the name, the size and the type.
     function updatePicked() {
         const file = fileInput.files[0];
         dropZone.classList.toggle('drop-zone--picked', Boolean(file));
-        document.getElementById('fileName').textContent = file ? file.name : 'Choose a file or drop it here';
-        document.getElementById('fileSize').textContent = file ? formatSize(file.size) : 'Any type; the server keeps it encrypted';
+        document.getElementById('dropEmpty').hidden = Boolean(file);
+        document.getElementById('filePicked').hidden = !file;
+        document.getElementById('fileName').textContent = file ? file.name : '';
+        document.getElementById('fileSize').textContent = file ? formatSize(file.size) : '';
+        document.getElementById('fileType').textContent = file && file.type ? ' · ' + file.type : '';
         errorBox.hidden = true;
         if (file && file.size > maxSize) showError(fileErrorMessage(413, null, maxSizeLabel));
     }
     fileInput.addEventListener('change', updatePicked);
+
+    document.getElementById('replaceBtn').addEventListener('click', () => fileInput.click());
+    document.getElementById('removeBtn').addEventListener('click', () => {
+        fileInput.value = '';
+        updatePicked();
+        fileInput.focus();
+    });
 
     // A file dropped anywhere on the page goes into the file field; the browser does not open it.
     document.addEventListener('dragover', event => {
@@ -198,26 +214,13 @@
     slugInput.addEventListener('input', updatePreview);
     updatePreview();
 
-    // The presets hold a lifetime in seconds; "seconds" opens the field for another value.
-    function updateExpiry() {
-        const enabled = expirySelect.value === 'seconds';
-        document.getElementById('ttlGroup').hidden = !enabled;
-        ttlInput.disabled = !enabled;
-        ttlInput.required = enabled;
-    }
-    expirySelect.addEventListener('change', updateExpiry);
-    updateExpiry();
-
     // The settings button of the phone bar shows the chosen level and the expiration.
     function updateSummary() {
-        const checked = document.querySelector('input[name="privacy"]:checked');
-        const level = checked ? checked.closest('.privacy-option').querySelector('.privacy-option-title').textContent : 'Public';
-        const expiry = expirySelect.value === 'never' ? 'never expires'
-            : expirySelect.options[expirySelect.selectedIndex].text.toLowerCase();
-        document.getElementById('settingsSummary').textContent = level + ' · ' + expiry;
+        document.getElementById('settingsSummary').textContent = privacyText() + ' · ' + expirySummary();
     }
     updateSummary();
     document.getElementById('settingsSheet').addEventListener('change', updateSummary);
+    document.getElementById('settingsSheet').addEventListener('input', updateSummary);
 
     document.getElementById('editCodeGenerate').addEventListener('click', () => {
         document.getElementById('editCodeInput').value = generateEditCode();
@@ -226,6 +229,8 @@
     function setUploading(active) {
         submitButton.disabled = active;
         fileInput.disabled = active;
+        document.getElementById('replaceBtn').disabled = active;
+        document.getElementById('removeBtn').disabled = active;
         progressBox.hidden = !active;
         if (active) {
             progressBar.value = 0;
@@ -236,8 +241,8 @@
     // The server reads the fields before the file part, so the file goes last.
     function buildForm(file) {
         const data = new FormData();
-        if (expirySelect.value === 'seconds') data.append('ttl', ttlInput.value);
-        else if (/^\d+$/.test(expirySelect.value)) data.append('ttl', expirySelect.value);
+        const ttl = expirySeconds();
+        if (typeof ttl === 'number') data.append('ttl', String(ttl));
         const checked = document.querySelector('input[name="privacy"]:checked');
         data.append('privacy', checked ? checked.value : 'public');
         data.append('burn_after_download', String(document.getElementById('burnCheck').checked));

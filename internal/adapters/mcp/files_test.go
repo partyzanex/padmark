@@ -27,7 +27,7 @@ func (s *ToolsSuite) TestUploadFile_SendsContentAndHidesEditCode() {
 	s.writeFile(filepath.Join(root, "report.txt"), "hello")
 
 	noOptions := padmark.UploadFileOptions{TTL: 0, Privacy: "", Slug: "", EditCode: "", BurnAfterDownload: false}
-	s.files.EXPECT().UploadFile(gomock.Any(), "report.txt", gomock.Any(), noOptions).
+	s.cl.EXPECT().UploadFile(gomock.Any(), "report.txt", gomock.Any(), noOptions).
 		DoAndReturn(func(_ context.Context, _ string, body io.Reader, _ padmark.UploadFileOptions) (
 			*padmark.CreateFileResponse, error,
 		) {
@@ -49,14 +49,14 @@ func (s *ToolsSuite) TestUploadFile_SendsContentAndHidesEditCode() {
 
 func (s *ToolsSuite) TestUploadFile_PassesOptionsAndRevealsEditCode() {
 	ctx := s.T().Context()
-	root := s.useUploadRoot(WithUploadSlug())
+	root := s.useUploadRoot()
 	s.Require().NoError(os.Mkdir(filepath.Join(root, "sub"), 0o700))
 	s.writeFile(filepath.Join(root, "sub", "a.bin"), "x")
 
 	want := padmark.UploadFileOptions{
 		TTL: time.Minute, Privacy: "owner", Slug: "my-file", EditCode: "custom-code-1", BurnAfterDownload: true,
 	}
-	s.files.EXPECT().UploadFile(gomock.Any(), "renamed.bin", gomock.Any(), want).
+	s.cl.EXPECT().UploadFile(gomock.Any(), "renamed.bin", gomock.Any(), want).
 		Return(testCreateFileResponse(s, "my-file", "custom-code-1"), nil)
 
 	out := s.successText(s.callTool(ctx, "upload_file", map[string]any{
@@ -73,7 +73,7 @@ func (s *ToolsSuite) TestUploadFile_SymlinkInsideRootKeepsLinkName() {
 	s.writeFile(filepath.Join(root, "blob-1"), "data")
 	s.Require().NoError(os.Symlink(filepath.Join(root, "blob-1"), filepath.Join(root, "report.pdf")))
 
-	s.files.EXPECT().UploadFile(gomock.Any(), "report.pdf", gomock.Any(), gomock.Any()).
+	s.cl.EXPECT().UploadFile(gomock.Any(), "report.pdf", gomock.Any(), gomock.Any()).
 		Return(testCreateFileResponse(s, "file123abc", "code-12345678"), nil)
 
 	res := s.callTool(ctx, "upload_file", map[string]any{"path": "report.pdf"})
@@ -155,7 +155,7 @@ func (s *ToolsSuite) TestUploadFile_MapsServerErrors() {
 
 	for name, testCase := range cases {
 		s.Run(name, func() {
-			s.files.EXPECT().UploadFile(gomock.Any(), "a.txt", gomock.Any(), gomock.Any()).Return(nil, testCase.err)
+			s.cl.EXPECT().UploadFile(gomock.Any(), "a.txt", gomock.Any(), gomock.Any()).Return(nil, testCase.err)
 
 			res := s.callTool(s.T().Context(), "upload_file", map[string]any{"path": "a.txt"})
 
@@ -167,7 +167,7 @@ func (s *ToolsSuite) TestUploadFile_MapsServerErrors() {
 func (s *ToolsSuite) TestGetFile_ReturnsMetadata() {
 	ctx := s.T().Context()
 
-	s.files.EXPECT().GetFile(gomock.Any(), padmark.GetFileParams{ID: "file123abc"}).
+	s.cl.EXPECT().GetFile(gomock.Any(), padmark.GetFileParams{ID: "file123abc"}).
 		Return(testFileInfo(s, "file123abc"), nil)
 
 	res := s.callTool(ctx, "get_file", map[string]any{"id": "file123abc"})
@@ -189,7 +189,7 @@ func (s *ToolsSuite) TestGetFile_MapsErrors() {
 
 	for name, testCase := range cases {
 		s.Run(name, func() {
-			s.files.EXPECT().GetFile(gomock.Any(), gomock.Any()).Return(testCase.res, nil)
+			s.cl.EXPECT().GetFile(gomock.Any(), gomock.Any()).Return(testCase.res, nil)
 
 			res := s.callTool(s.T().Context(), "get_file", map[string]any{"id": "file123abc"})
 
@@ -203,7 +203,7 @@ func (s *ToolsSuite) TestUpdateFile_ClearsExpiryWithVaultCode() {
 	s.mgr.vault.Put("file123abc", "vault-code-01")
 
 	params := padmark.UpdateFileParams{ID: "file123abc", XEditCode: padmark.NewOptString("vault-code-01")}
-	s.files.EXPECT().UpdateFile(gomock.Any(), gomock.Any(), params).
+	s.cl.EXPECT().UpdateFile(gomock.Any(), gomock.Any(), params).
 		DoAndReturn(func(_ context.Context, req *padmark.UpdateFileRequest, _ padmark.UpdateFileParams) (
 			padmark.UpdateFileRes, error,
 		) {
@@ -226,7 +226,7 @@ func (s *ToolsSuite) TestUpdateFile_SendsTTLAndExplicitCode() {
 	s.mgr.vault.Put("file123abc", "vault-code-01")
 
 	params := padmark.UpdateFileParams{ID: "file123abc", XEditCode: padmark.NewOptString("explicit-code")}
-	s.files.EXPECT().UpdateFile(gomock.Any(), gomock.Any(), params).
+	s.cl.EXPECT().UpdateFile(gomock.Any(), gomock.Any(), params).
 		DoAndReturn(func(_ context.Context, req *padmark.UpdateFileRequest, _ padmark.UpdateFileParams) (
 			padmark.UpdateFileRes, error,
 		) {
@@ -265,7 +265,7 @@ func (s *ToolsSuite) TestUpdateFile_RefusesBadInput() {
 }
 
 func (s *ToolsSuite) TestUpdateFile_MapsForbidden() {
-	s.files.EXPECT().UpdateFile(gomock.Any(), gomock.Any(), gomock.Any()).
+	s.cl.EXPECT().UpdateFile(gomock.Any(), gomock.Any(), gomock.Any()).
 		Return(&padmark.UpdateFileForbidden{Message: "", Code: noCode()}, nil)
 
 	res := s.callTool(s.T().Context(), "update_file", map[string]any{"id": "f", "privacy": "public"})
@@ -275,7 +275,7 @@ func (s *ToolsSuite) TestUpdateFile_MapsForbidden() {
 
 func (s *ToolsSuite) TestDeleteFile_WithoutCodeSendsNoHeader() {
 	params := padmark.DeleteFileParams{ID: "owned-file", XEditCode: padmark.OptString{Value: "", Set: false}}
-	s.files.EXPECT().DeleteFile(gomock.Any(), params).Return(&padmark.DeleteFileNoContent{}, nil)
+	s.cl.EXPECT().DeleteFile(gomock.Any(), params).Return(&padmark.DeleteFileNoContent{}, nil)
 
 	res := s.callTool(s.T().Context(), "delete_file", map[string]any{"id": "owned-file"})
 
@@ -298,7 +298,7 @@ func (s *ToolsSuite) TestDeleteFile_MapsErrors() {
 
 	for name, testCase := range cases {
 		s.Run(name, func() {
-			s.files.EXPECT().DeleteFile(gomock.Any(), gomock.Any()).Return(testCase.res, nil)
+			s.cl.EXPECT().DeleteFile(gomock.Any(), gomock.Any()).Return(testCase.res, nil)
 
 			res := s.callTool(s.T().Context(), "delete_file", map[string]any{"id": "f"})
 
@@ -354,7 +354,7 @@ func (s *ToolsSuite) TestUploadFile_MissingFileInRootKeepsItsText() {
 	s.Equal(`open upload file: "`+filepath.Join("sub", "a.txt")+`": `+errNoSuchFile.Error(), s.errorTextOf(res))
 }
 
-// TestUploadFile_RefusesHiddenPaths covers the default refusal of names that start with a dot.
+// TestUploadFile_RefusesHiddenPaths covers the refusal of names that start with a dot.
 // No case reaches the server.
 func (s *ToolsSuite) TestUploadFile_RefusesHiddenPaths() {
 	root := s.useUploadRoot()
@@ -380,18 +380,6 @@ func (s *ToolsSuite) TestUploadFile_RefusesHiddenPaths() {
 	}
 }
 
-func (s *ToolsSuite) TestUploadFile_AllowsHiddenPathsWithOption() {
-	root := s.useUploadRoot(WithUploadHidden())
-	s.writeFile(filepath.Join(root, ".env"), "TOKEN=x")
-
-	s.files.EXPECT().UploadFile(gomock.Any(), ".env", gomock.Any(), gomock.Any()).
-		Return(testCreateFileResponse(s, "file123abc", "code-12345678"), nil)
-
-	res := s.callTool(s.T().Context(), "upload_file", map[string]any{"path": ".env"})
-
-	s.False(res.IsError, "the operator permitted hidden names")
-}
-
 // TestUploadFile_DefaultPrivacy checks the privacy that the proxy sends without a privacy field.
 func (s *ToolsSuite) TestUploadFile_DefaultPrivacy() {
 	cases := map[string]struct {
@@ -413,7 +401,7 @@ func (s *ToolsSuite) TestUploadFile_DefaultPrivacy() {
 			root := s.useUploadRoot(testCase.opts...)
 			s.writeFile(filepath.Join(root, "a.txt"), "x")
 
-			s.files.EXPECT().UploadFile(gomock.Any(), "a.txt", gomock.Any(), gomock.Any()).
+			s.cl.EXPECT().UploadFile(gomock.Any(), "a.txt", gomock.Any(), gomock.Any()).
 				DoAndReturn(func(_ context.Context, _ string, _ io.Reader, opts padmark.UploadFileOptions) (
 					*padmark.CreateFileResponse, error,
 				) {
@@ -430,13 +418,48 @@ func (s *ToolsSuite) TestUploadFile_DefaultPrivacy() {
 	}
 }
 
-func (s *ToolsSuite) TestUploadFile_RefusesSlugByDefault() {
+// TestUploadFile_PassesSlug checks that the proxy sends the slug of the agent to the server, as
+// create_note and create_link do. Only the server flag --custom-slugs can refuse it.
+func (s *ToolsSuite) TestUploadFile_PassesSlug() {
 	root := s.useUploadRoot()
 	s.writeFile(filepath.Join(root, "a.txt"), "x")
 
+	s.cl.EXPECT().UploadFile(gomock.Any(), "a.txt", gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, _ string, _ io.Reader, opts padmark.UploadFileOptions) (
+			*padmark.CreateFileResponse, error,
+		) {
+			s.Equal("known-id", opts.Slug)
+
+			return testCreateFileResponse(s, "known-id", "code-12345678"), nil
+		})
+
 	res := s.callTool(s.T().Context(), "upload_file", map[string]any{"path": "a.txt", "slug": "known-id"})
 
-	s.Equal(ErrSlugOff.Error(), s.errorTextOf(res))
+	s.Contains(s.successText(res), `"id":"known-id"`)
+}
+
+// TestUploadFile_ReturnsCustomSlugsOffError checks that the server decides about a slug. With
+// --custom-slugs=false the server returns 422, and the model gets the same text as for notes.
+func (s *ToolsSuite) TestUploadFile_ReturnsCustomSlugsOffError() {
+	root := s.useUploadRoot()
+	s.writeFile(filepath.Join(root, "a.txt"), "x")
+
+	serverErr := &padmark.APIError{
+		Message: "custom slugs are disabled on this server", Code: "", StatusCode: http.StatusUnprocessableEntity,
+	}
+
+	s.cl.EXPECT().UploadFile(gomock.Any(), "a.txt", gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, _ string, _ io.Reader, opts padmark.UploadFileOptions) (
+			*padmark.CreateFileResponse, error,
+		) {
+			s.Equal("known-id", opts.Slug)
+
+			return nil, serverErr
+		})
+
+	res := s.callTool(s.T().Context(), "upload_file", map[string]any{"path": "a.txt", "slug": "known-id"})
+
+	s.Contains(s.errorTextOf(res), "rejected: custom slugs are disabled on this server")
 }
 
 // TestUploadFile_RefusesTTLOutOfRange checks the TTL range before the conversion to
@@ -458,7 +481,7 @@ func (s *ToolsSuite) TestUploadFile_AcceptsMaximumTTL() {
 	root := s.useUploadRoot()
 	s.writeFile(filepath.Join(root, "a.txt"), "x")
 
-	s.files.EXPECT().UploadFile(gomock.Any(), "a.txt", gomock.Any(), gomock.Any()).
+	s.cl.EXPECT().UploadFile(gomock.Any(), "a.txt", gomock.Any(), gomock.Any()).
 		DoAndReturn(func(_ context.Context, _ string, _ io.Reader, opts padmark.UploadFileOptions) (
 			*padmark.CreateFileResponse, error,
 		) {
@@ -480,7 +503,7 @@ func (s *ToolsSuite) TestUploadFile_MapsTimeoutAndReadErrors() {
 	s.writeFile(filepath.Join(root, "a.txt"), "x")
 
 	s.Run("header timeout", func() {
-		s.files.EXPECT().UploadFile(gomock.Any(), "a.txt", gomock.Any(), gomock.Any()).
+		s.cl.EXPECT().UploadFile(gomock.Any(), "a.txt", gomock.Any(), gomock.Any()).
 			Return(nil, &url.Error{Op: "Post", URL: "http://pad.example.com/files", Err: timeoutError{}})
 
 		text := s.errorTextOf(s.callTool(s.T().Context(), "upload_file", map[string]any{"path": "a.txt"}))
@@ -490,7 +513,7 @@ func (s *ToolsSuite) TestUploadFile_MapsTimeoutAndReadErrors() {
 	})
 
 	s.Run("context deadline", func() {
-		s.files.EXPECT().UploadFile(gomock.Any(), "a.txt", gomock.Any(), gomock.Any()).
+		s.cl.EXPECT().UploadFile(gomock.Any(), "a.txt", gomock.Any(), gomock.Any()).
 			Return(nil, fmt.Errorf("send upload request: %w", context.DeadlineExceeded))
 
 		text := s.errorTextOf(s.callTool(s.T().Context(), "upload_file", map[string]any{"path": "a.txt"}))
@@ -501,7 +524,7 @@ func (s *ToolsSuite) TestUploadFile_MapsTimeoutAndReadErrors() {
 	s.Run("local read error", func() {
 		diskErr := errors.New("input/output error")
 
-		s.files.EXPECT().UploadFile(gomock.Any(), "a.txt", gomock.Any(), gomock.Any()).
+		s.cl.EXPECT().UploadFile(gomock.Any(), "a.txt", gomock.Any(), gomock.Any()).
 			DoAndReturn(func(_ context.Context, _ string, body io.Reader, _ padmark.UploadFileOptions) (
 				*padmark.CreateFileResponse, error,
 			) {
@@ -542,7 +565,7 @@ func noCode() padmark.OptString {
 // and returns the root.
 func (s *ToolsSuite) useUploadRoot(opts ...Option) string {
 	root := s.T().TempDir()
-	s.mgr = NewManager(s.cl, s.files, s.log, append([]Option{WithUploadRoot(root)}, opts...)...)
+	s.mgr = NewManager(s.cl, s.log, append([]Option{WithUploadRoot(root)}, opts...)...)
 
 	return root
 }

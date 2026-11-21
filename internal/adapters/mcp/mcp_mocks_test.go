@@ -10,6 +10,7 @@ package mcp
 
 import (
 	context "context"
+	io "io"
 	reflect "reflect"
 
 	client "github.com/partyzanex/padmark/pkg/client"
@@ -85,6 +86,21 @@ func (mr *MockPadmarkClientMockRecorder) CreateNote(ctx, request any) *gomock.Ca
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateNote", reflect.TypeOf((*MockPadmarkClient)(nil).CreateNote), ctx, request)
 }
 
+// DeleteFile mocks base method.
+func (m *MockPadmarkClient) DeleteFile(ctx context.Context, params client.DeleteFileParams) (client.DeleteFileRes, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteFile", ctx, params)
+	ret0, _ := ret[0].(client.DeleteFileRes)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// DeleteFile indicates an expected call of DeleteFile.
+func (mr *MockPadmarkClientMockRecorder) DeleteFile(ctx, params any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteFile", reflect.TypeOf((*MockPadmarkClient)(nil).DeleteFile), ctx, params)
+}
+
 // DeleteLink mocks base method.
 func (m *MockPadmarkClient) DeleteLink(ctx context.Context, params client.DeleteLinkParams) (client.DeleteLinkRes, error) {
 	m.ctrl.T.Helper()
@@ -113,6 +129,21 @@ func (m *MockPadmarkClient) DeleteNote(ctx context.Context, params client.Delete
 func (mr *MockPadmarkClientMockRecorder) DeleteNote(ctx, params any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteNote", reflect.TypeOf((*MockPadmarkClient)(nil).DeleteNote), ctx, params)
+}
+
+// GetFile mocks base method.
+func (m *MockPadmarkClient) GetFile(ctx context.Context, params client.GetFileParams) (client.GetFileRes, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetFile", ctx, params)
+	ret0, _ := ret[0].(client.GetFileRes)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetFile indicates an expected call of GetFile.
+func (mr *MockPadmarkClientMockRecorder) GetFile(ctx, params any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetFile", reflect.TypeOf((*MockPadmarkClient)(nil).GetFile), ctx, params)
 }
 
 // GetLink mocks base method.
@@ -174,6 +205,21 @@ func (mr *MockPadmarkClientMockRecorder) Readyz(ctx any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Readyz", reflect.TypeOf((*MockPadmarkClient)(nil).Readyz), ctx)
 }
 
+// UpdateFile mocks base method.
+func (m *MockPadmarkClient) UpdateFile(ctx context.Context, request *client.UpdateFileRequest, params client.UpdateFileParams) (client.UpdateFileRes, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdateFile", ctx, request, params)
+	ret0, _ := ret[0].(client.UpdateFileRes)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// UpdateFile indicates an expected call of UpdateFile.
+func (mr *MockPadmarkClientMockRecorder) UpdateFile(ctx, request, params any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateFile", reflect.TypeOf((*MockPadmarkClient)(nil).UpdateFile), ctx, request, params)
+}
+
 // UpdateNote mocks base method.
 func (m *MockPadmarkClient) UpdateNote(ctx context.Context, request *client.UpdateNoteRequest, params client.UpdateNoteParams) (client.UpdateNoteRes, error) {
 	m.ctrl.T.Helper()
@@ -187,4 +233,324 @@ func (m *MockPadmarkClient) UpdateNote(ctx context.Context, request *client.Upda
 func (mr *MockPadmarkClientMockRecorder) UpdateNote(ctx, request, params any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateNote", reflect.TypeOf((*MockPadmarkClient)(nil).UpdateNote), ctx, request, params)
+}
+
+// UploadFile mocks base method.
+func (m *MockPadmarkClient) UploadFile(ctx context.Context, name string, body io.Reader, opts client.UploadFileOptions) (*client.CreateFileResponse, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UploadFile", ctx, name, body, opts)
+	ret0, _ := ret[0].(*client.CreateFileResponse)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// UploadFile indicates an expected call of UploadFile.
+func (mr *MockPadmarkClientMockRecorder) UploadFile(ctx, name, body, opts any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UploadFile", reflect.TypeOf((*MockPadmarkClient)(nil).UploadFile), ctx, name, body, opts)
+}
+
+// MockNoteAPI is a mock of NoteAPI interface.
+type MockNoteAPI struct {
+	ctrl     *gomock.Controller
+	recorder *MockNoteAPIMockRecorder
+	isgomock struct{}
+}
+
+// MockNoteAPIMockRecorder is the mock recorder for MockNoteAPI.
+type MockNoteAPIMockRecorder struct {
+	mock *MockNoteAPI
+}
+
+// NewMockNoteAPI creates a new mock instance.
+func NewMockNoteAPI(ctrl *gomock.Controller) *MockNoteAPI {
+	mock := &MockNoteAPI{ctrl: ctrl}
+	mock.recorder = &MockNoteAPIMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockNoteAPI) EXPECT() *MockNoteAPIMockRecorder {
+	return m.recorder
+}
+
+// CreateNote mocks base method.
+func (m *MockNoteAPI) CreateNote(ctx context.Context, request *client.CreateNoteRequest) (client.CreateNoteRes, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CreateNote", ctx, request)
+	ret0, _ := ret[0].(client.CreateNoteRes)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// CreateNote indicates an expected call of CreateNote.
+func (mr *MockNoteAPIMockRecorder) CreateNote(ctx, request any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateNote", reflect.TypeOf((*MockNoteAPI)(nil).CreateNote), ctx, request)
+}
+
+// DeleteNote mocks base method.
+func (m *MockNoteAPI) DeleteNote(ctx context.Context, params client.DeleteNoteParams) (client.DeleteNoteRes, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteNote", ctx, params)
+	ret0, _ := ret[0].(client.DeleteNoteRes)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// DeleteNote indicates an expected call of DeleteNote.
+func (mr *MockNoteAPIMockRecorder) DeleteNote(ctx, params any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteNote", reflect.TypeOf((*MockNoteAPI)(nil).DeleteNote), ctx, params)
+}
+
+// GetNote mocks base method.
+func (m *MockNoteAPI) GetNote(ctx context.Context, params client.GetNoteParams) (client.GetNoteRes, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetNote", ctx, params)
+	ret0, _ := ret[0].(client.GetNoteRes)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetNote indicates an expected call of GetNote.
+func (mr *MockNoteAPIMockRecorder) GetNote(ctx, params any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetNote", reflect.TypeOf((*MockNoteAPI)(nil).GetNote), ctx, params)
+}
+
+// UpdateNote mocks base method.
+func (m *MockNoteAPI) UpdateNote(ctx context.Context, request *client.UpdateNoteRequest, params client.UpdateNoteParams) (client.UpdateNoteRes, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdateNote", ctx, request, params)
+	ret0, _ := ret[0].(client.UpdateNoteRes)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// UpdateNote indicates an expected call of UpdateNote.
+func (mr *MockNoteAPIMockRecorder) UpdateNote(ctx, request, params any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateNote", reflect.TypeOf((*MockNoteAPI)(nil).UpdateNote), ctx, request, params)
+}
+
+// MockLinkAPI is a mock of LinkAPI interface.
+type MockLinkAPI struct {
+	ctrl     *gomock.Controller
+	recorder *MockLinkAPIMockRecorder
+	isgomock struct{}
+}
+
+// MockLinkAPIMockRecorder is the mock recorder for MockLinkAPI.
+type MockLinkAPIMockRecorder struct {
+	mock *MockLinkAPI
+}
+
+// NewMockLinkAPI creates a new mock instance.
+func NewMockLinkAPI(ctrl *gomock.Controller) *MockLinkAPI {
+	mock := &MockLinkAPI{ctrl: ctrl}
+	mock.recorder = &MockLinkAPIMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockLinkAPI) EXPECT() *MockLinkAPIMockRecorder {
+	return m.recorder
+}
+
+// CreateLink mocks base method.
+func (m *MockLinkAPI) CreateLink(ctx context.Context, request *client.CreateLinkRequest) (client.CreateLinkRes, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CreateLink", ctx, request)
+	ret0, _ := ret[0].(client.CreateLinkRes)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// CreateLink indicates an expected call of CreateLink.
+func (mr *MockLinkAPIMockRecorder) CreateLink(ctx, request any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateLink", reflect.TypeOf((*MockLinkAPI)(nil).CreateLink), ctx, request)
+}
+
+// CreateLinksBulk mocks base method.
+func (m *MockLinkAPI) CreateLinksBulk(ctx context.Context, request *client.BulkCreateLinksRequest) (client.CreateLinksBulkRes, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CreateLinksBulk", ctx, request)
+	ret0, _ := ret[0].(client.CreateLinksBulkRes)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// CreateLinksBulk indicates an expected call of CreateLinksBulk.
+func (mr *MockLinkAPIMockRecorder) CreateLinksBulk(ctx, request any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateLinksBulk", reflect.TypeOf((*MockLinkAPI)(nil).CreateLinksBulk), ctx, request)
+}
+
+// DeleteLink mocks base method.
+func (m *MockLinkAPI) DeleteLink(ctx context.Context, params client.DeleteLinkParams) (client.DeleteLinkRes, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteLink", ctx, params)
+	ret0, _ := ret[0].(client.DeleteLinkRes)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// DeleteLink indicates an expected call of DeleteLink.
+func (mr *MockLinkAPIMockRecorder) DeleteLink(ctx, params any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteLink", reflect.TypeOf((*MockLinkAPI)(nil).DeleteLink), ctx, params)
+}
+
+// GetLink mocks base method.
+func (m *MockLinkAPI) GetLink(ctx context.Context, params client.GetLinkParams) (client.GetLinkRes, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetLink", ctx, params)
+	ret0, _ := ret[0].(client.GetLinkRes)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetLink indicates an expected call of GetLink.
+func (mr *MockLinkAPIMockRecorder) GetLink(ctx, params any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetLink", reflect.TypeOf((*MockLinkAPI)(nil).GetLink), ctx, params)
+}
+
+// MockFileAPI is a mock of FileAPI interface.
+type MockFileAPI struct {
+	ctrl     *gomock.Controller
+	recorder *MockFileAPIMockRecorder
+	isgomock struct{}
+}
+
+// MockFileAPIMockRecorder is the mock recorder for MockFileAPI.
+type MockFileAPIMockRecorder struct {
+	mock *MockFileAPI
+}
+
+// NewMockFileAPI creates a new mock instance.
+func NewMockFileAPI(ctrl *gomock.Controller) *MockFileAPI {
+	mock := &MockFileAPI{ctrl: ctrl}
+	mock.recorder = &MockFileAPIMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockFileAPI) EXPECT() *MockFileAPIMockRecorder {
+	return m.recorder
+}
+
+// DeleteFile mocks base method.
+func (m *MockFileAPI) DeleteFile(ctx context.Context, params client.DeleteFileParams) (client.DeleteFileRes, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteFile", ctx, params)
+	ret0, _ := ret[0].(client.DeleteFileRes)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// DeleteFile indicates an expected call of DeleteFile.
+func (mr *MockFileAPIMockRecorder) DeleteFile(ctx, params any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteFile", reflect.TypeOf((*MockFileAPI)(nil).DeleteFile), ctx, params)
+}
+
+// GetFile mocks base method.
+func (m *MockFileAPI) GetFile(ctx context.Context, params client.GetFileParams) (client.GetFileRes, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetFile", ctx, params)
+	ret0, _ := ret[0].(client.GetFileRes)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetFile indicates an expected call of GetFile.
+func (mr *MockFileAPIMockRecorder) GetFile(ctx, params any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetFile", reflect.TypeOf((*MockFileAPI)(nil).GetFile), ctx, params)
+}
+
+// UpdateFile mocks base method.
+func (m *MockFileAPI) UpdateFile(ctx context.Context, request *client.UpdateFileRequest, params client.UpdateFileParams) (client.UpdateFileRes, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdateFile", ctx, request, params)
+	ret0, _ := ret[0].(client.UpdateFileRes)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// UpdateFile indicates an expected call of UpdateFile.
+func (mr *MockFileAPIMockRecorder) UpdateFile(ctx, request, params any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateFile", reflect.TypeOf((*MockFileAPI)(nil).UpdateFile), ctx, request, params)
+}
+
+// UploadFile mocks base method.
+func (m *MockFileAPI) UploadFile(ctx context.Context, name string, body io.Reader, opts client.UploadFileOptions) (*client.CreateFileResponse, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UploadFile", ctx, name, body, opts)
+	ret0, _ := ret[0].(*client.CreateFileResponse)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// UploadFile indicates an expected call of UploadFile.
+func (mr *MockFileAPIMockRecorder) UploadFile(ctx, name, body, opts any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UploadFile", reflect.TypeOf((*MockFileAPI)(nil).UploadFile), ctx, name, body, opts)
+}
+
+// MockProbeAPI is a mock of ProbeAPI interface.
+type MockProbeAPI struct {
+	ctrl     *gomock.Controller
+	recorder *MockProbeAPIMockRecorder
+	isgomock struct{}
+}
+
+// MockProbeAPIMockRecorder is the mock recorder for MockProbeAPI.
+type MockProbeAPIMockRecorder struct {
+	mock *MockProbeAPI
+}
+
+// NewMockProbeAPI creates a new mock instance.
+func NewMockProbeAPI(ctrl *gomock.Controller) *MockProbeAPI {
+	mock := &MockProbeAPI{ctrl: ctrl}
+	mock.recorder = &MockProbeAPIMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockProbeAPI) EXPECT() *MockProbeAPIMockRecorder {
+	return m.recorder
+}
+
+// Healthz mocks base method.
+func (m *MockProbeAPI) Healthz(ctx context.Context) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Healthz", ctx)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// Healthz indicates an expected call of Healthz.
+func (mr *MockProbeAPIMockRecorder) Healthz(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Healthz", reflect.TypeOf((*MockProbeAPI)(nil).Healthz), ctx)
+}
+
+// Readyz mocks base method.
+func (m *MockProbeAPI) Readyz(ctx context.Context) (client.ReadyzRes, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Readyz", ctx)
+	ret0, _ := ret[0].(client.ReadyzRes)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Readyz indicates an expected call of Readyz.
+func (mr *MockProbeAPIMockRecorder) Readyz(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Readyz", reflect.TypeOf((*MockProbeAPI)(nil).Readyz), ctx)
 }

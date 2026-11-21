@@ -41,17 +41,6 @@ func resolveUploadRoot(raw string) (string, error) {
 	return abs, nil
 }
 
-// hiddenPaths is the value of --upload-allow-hidden. The named type keeps the setting out of
-// bare bool parameters.
-type hiddenPaths bool
-
-const (
-	// hiddenPathsDenied refuses each path element that starts with a dot.
-	hiddenPathsDenied hiddenPaths = false
-	// hiddenPathsAllowed permits path elements that start with a dot.
-	hiddenPathsAllowed hiddenPaths = true
-)
-
 // openUploadFile opens a regular file under root for upload_file and returns the file and its
 // upload name. A relative path is relative to root, not to the working directory, because the
 // agent host selects the working directory. The caller closes the file.
@@ -62,7 +51,7 @@ const (
 // under root to a file outside root gets the same error. After the open, the function compares
 // the opened file with the checked file. This prevents a time-of-check to time-of-use (TOCTOU)
 // swap of the path between the two steps.
-func openUploadFile(root, path string, hidden hiddenPaths) (*os.File, string, error) {
+func openUploadFile(root, path string) (*os.File, string, error) {
 	if root == "" {
 		return nil, "", ErrUploadsOff
 	}
@@ -82,7 +71,7 @@ func openUploadFile(root, path string, hidden hiddenPaths) (*os.File, string, er
 		return nil, "", ErrPathOutsideRoot
 	}
 
-	err = refuseHidden(lexicalRel, hidden)
+	err = refuseHidden(lexicalRel)
 	if err != nil {
 		return nil, "", err
 	}
@@ -100,7 +89,7 @@ func openUploadFile(root, path string, hidden hiddenPaths) (*os.File, string, er
 	}
 
 	// A link with a plain name can point to a hidden file, so the resolved path gets the check too.
-	err = refuseHidden(rel, hidden)
+	err = refuseHidden(rel)
 	if err != nil {
 		return nil, "", err
 	}
@@ -114,10 +103,11 @@ func openUploadFile(root, path string, hidden hiddenPaths) (*os.File, string, er
 	return file, filepath.Base(target), nil
 }
 
-// refuseHidden returns ErrHiddenPath when an element of rel starts with a dot, unless hidden
-// permits it.
-func refuseHidden(rel string, hidden hiddenPaths) error {
-	if hidden == hiddenPathsDenied && hasHiddenElement(rel) {
+// refuseHidden returns ErrHiddenPath when an element of rel starts with a dot. Such names, for
+// example .env, .git or .ssh, often hold secrets, and an agent that follows injected text can
+// ask for them. No setting turns this check off.
+func refuseHidden(rel string) error {
+	if hasHiddenElement(rel) {
 		return ErrHiddenPath
 	}
 

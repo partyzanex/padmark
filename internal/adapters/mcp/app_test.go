@@ -25,6 +25,28 @@ func TestMCPRejectsUnknownLogLevel(t *testing.T) {
 	require.ErrorContains(t, err, "invalid log level")
 }
 
+// TestMCPRejectsRemovedHiddenFlag checks that no flag turns off the refusal of names that start
+// with a dot. The unreleased v0.5.0 had such a flag; a configuration with it must stop the proxy.
+func TestMCPRejectsRemovedHiddenFlag(t *testing.T) {
+	isolateEnv(t)
+
+	app := NewApp()
+	app.Writer, app.ErrWriter = io.Discard, io.Discard
+	err := app.Run(t.Context(), []string{"padmark-mcp", "--upload-allow-hidden"})
+	require.ErrorContains(t, err, "flag provided but not defined")
+}
+
+// TestMCPRejectsRemovedSlugFlag checks that the proxy has no slug limit of its own. The unreleased
+// v0.5.0 had such a flag; the server flag --custom-slugs now controls slugs for all records.
+func TestMCPRejectsRemovedSlugFlag(t *testing.T) {
+	isolateEnv(t)
+
+	app := NewApp()
+	app.Writer, app.ErrWriter = io.Discard, io.Discard
+	err := app.Run(t.Context(), []string{"padmark-mcp", "--upload-allow-slug"})
+	require.ErrorContains(t, err, "flag provided but not defined")
+}
+
 // lockedBuffer is a bytes.Buffer safe to write from the server/client goroutines while the
 // test reads it.
 type lockedBuffer struct {

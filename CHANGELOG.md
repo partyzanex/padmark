@@ -58,7 +58,7 @@ v0.5.0 follows **v0.4.0**.
 - File transfer limits: `--file-idle-timeout` / `PADMARK_FILE_IDLE_TIMEOUT` (default `1m`)
   stops an upload or a download that moves no data for that time; a stalled upload gets `408`.
   Each chunk of data moves the deadline forward, up to a total limit of one hour.
-  `--max-uploads` / `PADMARK_MAX_UPLOADS` (default `32`) limits the uploads at the same time
+  `--max-uploads` / `PADMARK_MAX_UPLOADS` (default `8`) limits the uploads at the same time
   (`503`), and `--max-uploads-per-client` / `PADMARK_MAX_UPLOADS_PER_CLIENT` (default `4`)
   limits them for one client IP address (`429`). Both answers have `Retry-After: 10`. `0`
   selects the default; a negative value stops startup.

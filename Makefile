@@ -27,6 +27,21 @@ run: build
 test:
 	go test -v -count=1 -race -tags=integration ./... -coverprofile=cover.out
 
+# The pattern needs a type between "_" and "=", so "var _ = f()" and "_ = c.Close()" do not match.
+# Generated files (*_gen.go) are excluded because ogen writes the assertions again on "make gen".
+.PHONY: check-iface-assert
+check-iface-assert:
+	@if grep -rnE --include='*.go' --exclude='*_gen.go' --exclude-dir=vendor --exclude-dir=bin \
+		--exclude-dir=.git '^[[:space:]]*(var[[:space:]]+)?_[[:space:]]+[^[:space:]=:]+[[:space:]]*=' .; then \
+		echo 'error: remove compile-time interface assertions such as "var _ I = (*T)(nil)"' >&2; \
+		exit 1; \
+	fi
+
+# lint-default comes from go.mk. The assertion check runs first.
+.PHONY: lint
+lint: check-iface-assert
+	$(MAKE) lint-default
+
 UI_ARGS ?=
 
 .PHONY: test-ui-setup test-ui test-ui-headed test-ui-debug test-ui-update test-ui-report test-ui-lint

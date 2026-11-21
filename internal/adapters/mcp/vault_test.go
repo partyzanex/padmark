@@ -45,9 +45,9 @@ func (s *ToolsSuite) TestDeleteFile_UsesSessionVaultCode() {
 	root := s.useUploadRoot()
 	s.writeFile(filepath.Join(root, "a.txt"), "x")
 
-	s.files.EXPECT().UploadFile(gomock.Any(), "a.txt", gomock.Any(), gomock.Any()).
+	s.cl.EXPECT().UploadFile(gomock.Any(), "a.txt", gomock.Any(), gomock.Any()).
 		Return(testCreateFileResponse(s, "file123abc", "session-code-1"), nil)
-	s.files.EXPECT().DeleteFile(gomock.Any(), padmark.DeleteFileParams{
+	s.cl.EXPECT().DeleteFile(gomock.Any(), padmark.DeleteFileParams{
 		ID: "file123abc", XEditCode: padmark.NewOptString("session-code-1"),
 	}).Return(&padmark.DeleteFileNoContent{}, nil)
 

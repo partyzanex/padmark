@@ -14,26 +14,6 @@ import (
 	padmark "github.com/partyzanex/padmark/pkg/client"
 )
 
-//go:generate go run go.uber.org/mock/mockgen@latest -source=files.go -destination=files_mocks_test.go -package=mcp -write_package_comment=false
-
-// FileClient is the part of the padmark client that the file tools need. It is separate from
-// PadmarkClient, so that each seam has a small set of methods. *padmark.Client implements both.
-// Errors are fail-hard for each call: the tool returns the error to the agent as its result.
-type FileClient interface {
-	// UploadFile is the hand-written streaming upload of pkg/client. The generated CreateFile
-	// sends the file part before the option fields, so the server would ignore the options.
-	UploadFile(
-		ctx context.Context, name string, body io.Reader, opts padmark.UploadFileOptions,
-	) (*padmark.CreateFileResponse, error)
-	GetFile(ctx context.Context, params padmark.GetFileParams) (padmark.GetFileRes, error)
-	UpdateFile(
-		ctx context.Context, request *padmark.UpdateFileRequest, params padmark.UpdateFileParams,
-	) (padmark.UpdateFileRes, error)
-	DeleteFile(ctx context.Context, params padmark.DeleteFileParams) (padmark.DeleteFileRes, error)
-}
-
-var _ FileClient = (*padmark.Client)(nil)
-
 // maxTTLSeconds is the largest TTL in seconds that time.Duration can hold. The server uses the
 // same limit (9223372036). A larger value would overflow in the conversion to time.Duration.
 const maxTTLSeconds = math.MaxInt64 / int64(time.Second)
@@ -41,11 +21,15 @@ const maxTTLSeconds = math.MaxInt64 / int64(time.Second)
 // registerFileTools adds the file tools to the server. There is no download tool: the tools
 // return the page and download URLs, and an agent or a person opens them directly. The tool
 // result would otherwise carry a file of any size and type through the model context.
+//
+// upload_file is the only tool without the call deadline (limitCall): it sends a file body of
+// any size, so only the response header timeout of the HTTP client limits it. The other file
+// tools send and receive small JSON bodies.
 func registerFileTools(srv *mcpsdk.Server, m *Manager) {
 	mcpsdk.AddTool[uploadFileInput, fileOutput](srv, uploadFileTool(m.uploadDefaultPrivacy()), m.uploadFile)
-	mcpsdk.AddTool[getFileInput, fileOutput](srv, getFileTool(), m.getFile)
-	mcpsdk.AddTool[updateFileInput, fileOutput](srv, updateFileTool(), m.updateFile)
-	mcpsdk.AddTool[deleteFileInput, deleteNoteOutput](srv, deleteFileTool(), m.deleteFile)
+	mcpsdk.AddTool[getFileInput, fileOutput](srv, getFileTool(), limitCall(m, m.getFile))
+	mcpsdk.AddTool[updateFileInput, fileOutput](srv, updateFileTool(), limitCall(m, m.updateFile))
+	mcpsdk.AddTool[deleteFileInput, deleteNoteOutput](srv, deleteFileTool(), limitCall(m, m.deleteFile))
 }
 
 // uploadFileTool tells the agent the default privacy, because a public file is readable by
@@ -54,9 +38,9 @@ func uploadFileTool(defaultPrivacy string) *mcpsdk.Tool {
 	return newTool("upload_file",
 		"Upload a local file and get its page URL and download URL. The path must be a regular file "+
 			"under the upload root that the operator set with --upload-root; a relative path is relative "+
-			"to that root. Names that start with a dot are refused unless the operator permits them. "+
+			"to that root. Names that start with a dot are always refused. "+
 			defaultPrivacyText(defaultPrivacy)+" "+
-			"Without ttl, the file does not expire. A slug is refused unless the operator permits it. "+
+			"Without ttl, the file does not expire. "+
 			"The edit_code is returned once and the proxy keeps it for this session. The "+
 			"result shows it only when reveal_edit_code is set.",
 		hints(false, false, false))
@@ -104,7 +88,7 @@ func (m *Manager) uploadFile(
 		return nil, fileOutput{}, err
 	}
 
-	file, name, err := openUploadFile(m.uploadRoot, input.Path, m.uploadHidden)
+	file, name, err := openUploadFile(m.uploadRoot, input.Path)
 	if err != nil {
 		return nil, fileOutput{}, fmt.Errorf("open upload file: %w", err)
 	}
@@ -123,7 +107,7 @@ func (m *Manager) uploadFile(
 
 	body := &readErrRecorder{reader: file, err: nil}
 
-	resp, err := m.files.UploadFile(ctx, name, body, opts)
+	resp, err := m.client.UploadFile(ctx, name, body, opts)
 	if err != nil {
 		// UploadFile returns after it stops to read body, so body.err is safe to read here.
 		if body.err != nil {
@@ -202,10 +186,6 @@ func (m *Manager) uploadOptions(input uploadFileInput) (padmark.UploadFileOption
 	}
 
 	if input.Slug != nil && *input.Slug != "" {
-		if !m.uploadSlug {
-			return opts, ErrSlugOff
-		}
-
 		opts.Slug = *input.Slug
 	}
 
@@ -223,7 +203,7 @@ func (m *Manager) uploadOptions(input uploadFileInput) (padmark.UploadFileOption
 func (m *Manager) getFile(
 	ctx context.Context, _ *mcpsdk.CallToolRequest, input getFileInput,
 ) (*mcpsdk.CallToolResult, fileOutput, error) {
-	res, err := m.files.GetFile(ctx, padmark.GetFileParams{ID: input.ID})
+	res, err := m.client.GetFile(ctx, padmark.GetFileParams{ID: input.ID})
 	if err != nil {
 		return nil, fileOutput{}, errorcontext.Wrap(transportError("get file", err), "handle get file")
 	}
@@ -244,7 +224,7 @@ func (m *Manager) updateFile(
 		return nil, fileOutput{}, err
 	}
 
-	res, err := m.files.UpdateFile(ctx, req, padmark.UpdateFileParams{
+	res, err := m.client.UpdateFile(ctx, req, padmark.UpdateFileParams{
 		ID:        input.ID,
 		XEditCode: editCodeParam(m.vault, input.ID, input.EditCode),
 	})
@@ -317,7 +297,7 @@ func updateTTL(input updateFileInput) (padmark.OptNilInt64, error) {
 func (m *Manager) deleteFile(
 	ctx context.Context, _ *mcpsdk.CallToolRequest, input deleteFileInput,
 ) (*mcpsdk.CallToolResult, deleteNoteOutput, error) {
-	res, err := m.files.DeleteFile(ctx, padmark.DeleteFileParams{
+	res, err := m.client.DeleteFile(ctx, padmark.DeleteFileParams{
 		ID:        input.ID,
 		XEditCode: editCodeParam(m.vault, input.ID, input.EditCode),
 	})

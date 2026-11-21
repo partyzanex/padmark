@@ -177,7 +177,10 @@ func (s *HandlerSuite) TestEditPage_Link() {
 
 	s.Require().Equal(http.StatusOK, rec.Code)
 	s.Contains(body, `id="targetInput"`)
-	s.Contains(body, `value="`+testLinkTargetURL+`"`)
+	s.Contains(body, `>`+testLinkTargetURL+`</textarea>`)
+	s.Contains(body, `id="slugFixed"`)
+	s.Contains(body, `id="burnFixed"`)
+	s.NotContains(body, `id="slugInput"`, "the slug of a link is fixed after create")
 	s.Contains(body, `data-kbd="Ctrl ↵">Save</button>`)
 	s.Contains(body, `placeholder="Paste your edit code"`)
 	s.Contains(body, "Edit code <span class=\"optional\">· required</span>")

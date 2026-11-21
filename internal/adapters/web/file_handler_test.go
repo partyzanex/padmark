@@ -720,7 +720,7 @@ func (s *FileHandlerSuite) TestCreateFilePage() {
 	s.Contains(body, `id="burnCheck"`)
 	s.Contains(body, `id="slugInput"`)
 	s.Contains(body, `id="editCodeInput"`)
-	s.Contains(body, "Maximum: 1 MiB")
+	s.Contains(body, `<span id="fileLimit">Up to 1 MiB</span>`)
 	s.Contains(body, `data-max-size="1048576"`)
 	s.Contains(body, `<a href="/files" class="nav-tab" aria-current="page">`)
 	s.Contains(body, "Markdown notes, short links &amp; files")

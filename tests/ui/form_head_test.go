@@ -54,7 +54,7 @@ func testFormHeadEdit(sess *uiSession) {
 	linkID, _ := sess.createdLink()
 
 	sess.gotoPage("/edit/" + strings.TrimPrefix(parsed.Path, "/"))
-	sess.must(sess.expect.Locator(sess.page.Locator("#slugInput")).ToHaveAttribute("readonly", ""))
+	sess.visible("#slugFixed")
 	note := sess.formHead()
 	sess.gotoPage("/edit/" + linkID)
 	sess.expectSameHead(note, sess.formHead())

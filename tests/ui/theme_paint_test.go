@@ -57,7 +57,7 @@ func testThemePaintNotes(sess *uiSession) {
 
 	sess.gotoPage(parsed.Path)
 	sess.openEditor()
-	sess.must(sess.expect.Locator(sess.page.Locator("#slugInput")).ToHaveAttribute("readonly", ""))
+	sess.visible("#slugFixed")
 	sess.expectPaintTheme("note edit")
 
 	sess.gotoPage("/links")

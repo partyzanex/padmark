@@ -51,6 +51,7 @@ func TestEditor(t *testing.T) {
 		scenario{name: "ContentsSidebar", run: testContentsSidebar, accounts: false, files: false, allowedStatuses: nil},
 		scenario{name: "NoContentsSidebar", run: testNoContentsSidebar, accounts: false, files: false, allowedStatuses: nil},
 		scenario{name: "EditAndSave", run: testEditAndSave, accounts: false, files: false, allowedStatuses: nil},
+		scenario{name: "DeleteNote", run: testDeleteNote, accounts: false, files: false, allowedStatuses: nil},
 		scenario{
 			name: "PreserveCustomBurnTTL", run: testPreserveCustomBurnTTL, accounts: false, files: false,
 			allowedStatuses: nil,
@@ -268,7 +269,7 @@ func testEditAndSave(sess *uiSession) {
 	sess.value("#titleInput", "UI test note")
 	sess.value("#editor", "# Hello\n\nThis is **Markdown**.")
 	sess.expectLayout("#editor", "#titleInput", "#submitBtn")
-	sess.screenshot("edit.png", "#slugInput")
+	sess.screenshot("edit.png", "#slugFixed")
 	sess.button("Save")
 	sess.text("#noteError", "Edit code required")
 	sess.openSettings()
@@ -281,6 +282,27 @@ func testEditAndSave(sess *uiSession) {
 	sess.must(sess.expect.Page(sess.page).Not().ToHaveURL(regexpURL("/edit/")))
 	sess.must(sess.expect.Page(sess.page).ToHaveTitle("Updated title — Padmark"))
 	sess.must(sess.expect.Locator(sess.role(playwright.AriaRoleHeading, "Updated")).ToBeVisible())
+}
+
+// testDeleteNote: "Delete note" asks for a confirmation, deletes the note with the edit code and
+// opens a new note editor, as the link and file editors do.
+func testDeleteNote(sess *uiSession) {
+	code, noteURL := sess.publishNote()
+	parsed, err := url.Parse(noteURL)
+	sess.must(err)
+
+	sess.link("Open note")
+	sess.openEditor()
+	sess.openSettings()
+	sess.fill("#editCodeInput", code)
+	sess.closeSettings()
+	sess.page.OnDialog(func(dialog playwright.Dialog) { sess.must(dialog.Accept()) })
+	sess.button("Delete note")
+	sess.must(sess.expect.Page(sess.page).ToHaveURL(sess.baseURL + "/"))
+
+	deleted, err := sess.browserContext.Request().Get("/notes" + parsed.Path)
+	sess.must(err)
+	require.Equal(sess.t, http.StatusNotFound, deleted.Status())
 }
 
 func testPreserveCustomBurnTTL(sess *uiSession) {

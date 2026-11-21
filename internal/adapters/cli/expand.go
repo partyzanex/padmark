@@ -33,12 +33,15 @@ func expandAction(ctx context.Context, cmd *urcli.Command) error {
 		return fmt.Errorf("read link ID: %w", err)
 	}
 
-	cl, err := newPadmarkClient(cmd)
+	apiClient, err := newPadmarkClient(cmd)
 	if err != nil {
 		return fmt.Errorf("create API client: %w", err)
 	}
 
-	res, err := cl.GetLink(ctx, padmark.GetLinkParams{ID: id})
+	callCtx, cancel := requestContext(ctx, cmd)
+	defer cancel()
+
+	res, err := apiClient.GetLink(callCtx, padmark.GetLinkParams{ID: id})
 	if err != nil {
 		return fmt.Errorf("get link: %w", err)
 	}

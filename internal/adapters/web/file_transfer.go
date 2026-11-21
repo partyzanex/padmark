@@ -18,7 +18,7 @@ const (
 	DefaultFileIdleTimeout = time.Minute
 	// DefaultMaxUploads is the number of uploads that the server accepts at the same time. Each
 	// upload holds one object-storage part buffer in memory.
-	DefaultMaxUploads = 32
+	DefaultMaxUploads = 8
 	// DefaultMaxUploadsPerClient is the number of uploads from one client IP address at the same
 	// time.
 	DefaultMaxUploadsPerClient = 4

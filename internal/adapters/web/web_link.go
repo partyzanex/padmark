@@ -18,16 +18,17 @@ var linkEditorTmplSrc string
 var linkTmplSrc string
 
 type linkEditorViewData struct {
-	Header         headerView
+	Access         privacyChoice
 	ID             string
 	TargetURL      string
 	Nonce          string
 	DirectRedirect string
 	ExpiresLabel   string
-	PrivacyOptions []privacyOption
+	Header         headerView
 	EditMode       bool
 	IsOwner        bool
 	BurnAfterClick bool
+	DirectAllowed  bool
 }
 
 // linkViewData is the data of the page of a short link (link.html).
@@ -59,7 +60,9 @@ func (h *LinkHandler) CreateLinkPage(w http.ResponseWriter, r *http.Request) {
 		Header: header,
 		ID:     "", TargetURL: "", Nonce: middleware.NonceFromContext(r.Context()),
 		DirectRedirect: "inherit", ExpiresLabel: "", EditMode: false, IsOwner: false, BurnAfterClick: false,
-		PrivacyOptions: privacyOptions(h.authMgr != nil, header.SignedIn(), domain.PrivacyPublic),
+		Access: h.privacyChoice(r, header, domain.PrivacyPublic),
+		// A signed-in user becomes the owner of the new link.
+		DirectAllowed: h.directRedirect || header.SignedIn(),
 	}
 	h.renderLinkEditor(w, r, &data)
 }
@@ -174,7 +177,8 @@ func (h *LinkHandler) editLink(w http.ResponseWriter, r *http.Request, id string
 		ID:     id, TargetURL: link.TargetURL, Nonce: middleware.NonceFromContext(r.Context()),
 		DirectRedirect: "inherit", ExpiresLabel: neverExpiresLabel, EditMode: true,
 		IsOwner: link.OwnedBy(middleware.CallerIDFromCtx(r.Context())), BurnAfterClick: link.BurnAfterClick,
-		PrivacyOptions: privacyOptions(h.authMgr != nil, header.SignedIn(), link.EffectivePrivacy()),
+		Access:        h.privacyChoice(r, header, link.EffectivePrivacy()),
+		DirectAllowed: h.directRedirect || link.OwnerID != nil,
 	}
 	if link.DirectRedirect != nil {
 		data.DirectRedirect = "false"

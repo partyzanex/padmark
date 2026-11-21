@@ -343,7 +343,7 @@ download form `POST /files/{id}/download` (`isFilePage`).
 (`--file-idle-timeout`, 60 seconds by default). Each chunk of data moves the deadline forward,
 but never past a total limit of one hour from the start (`fileTransferTimeout`). An upload
 that stops for the idle time answers 408. `uploadLimiter` accepts at most `--max-uploads`
-uploads (32 by default) at the same time; more get 503. One client IP address (`ClientIP`,
+uploads (8 by default) at the same time; more get 503. One client IP address (`ClientIP`,
 which obeys `--trusted-proxies`) gets at most `--max-uploads-per-client` (4 by default); more
 get 429. Both answers have `Retry-After: 10`. Each upload holds one 5 MiB part buffer, so the
 limit also limits memory. When `Send` fails after the first byte, the handler panics with
@@ -387,18 +387,23 @@ detailed API guide) and `/api/openapi.yaml` (schemas). All three describe the sa
 update the reference with API behavior and keep the index's safety guidance current.
 
 The CLI file commands are `upload`, `download`, `file-info`, `update-file` and `delete-file`.
-`upload` and `download` use `UploadFile` and `DownloadFile` of `pkg/client`; for them,
-`--timeout` limits only the wait for the response headers. `download` writes to a temporary
-file and renames it after a full download.
+The CLI has one generated client for its one server. Its HTTP client has no total timeout:
+`--timeout` sets only the wait for the response headers. The other commands get the full-call
+limit from a context deadline (`requestContext`), after they read their local input.
+`upload` and `download` use `UploadFile` and `DownloadFile` of `pkg/client` without that
+deadline, so a large file is not stopped. `download` writes to a temporary file and renames it
+after a full download.
 
 The MCP file tools are `upload_file`, `get_file`, `update_file` and `delete_file`.
 `upload_file` reads only regular files under `--upload-root` (`PADMARK_MCP_UPLOAD_ROOT`); an
 empty root refuses all uploads. A lexical root check runs before each file system call, and each
-path outside the root gets the one error `ErrPathOutsideRoot`. Names that start with a dot and an
-agent `slug` are refused unless `--upload-allow-hidden` or `--upload-allow-slug` permits them.
+path outside the root gets the one error `ErrPathOutsideRoot`. Names that start with a dot are
+always refused, before and after link resolution. `upload_file` sends the agent `slug` as
+`create_note` and `create_link` do. Only the server flag `--custom-slugs` can refuse it.
 With a token, the default privacy of an upload is `owner`. The session vault keeps file edit
-codes as for notes and links. `mcp.NewManager` takes two generated clients: `PadmarkClient` with
-the total `--timeout`, and `FileClient`, where `--timeout` limits only the response headers.
+codes as for notes and links. `mcp.NewManager` takes one generated client through the
+`PadmarkClient` seam. Its HTTP client uses `--timeout` only for the response headers. Each tool
+other than `upload_file` gets a context deadline of `--timeout` for the full call (`limitCall`).
 
 ## 7. CLI and Configuration
 
@@ -434,13 +439,13 @@ The file flags are in `fileStorageFlags()`:
 | `--max-file-size` | `PADMARK_MAX_FILE_SIZE` | `104857600` (100 MiB); maximum 48 GiB |
 | `--files-sweep-interval` | `PADMARK_FILES_SWEEP_INTERVAL` | `1h`; `0` turns the sweep loop off |
 | `--file-idle-timeout` | `PADMARK_FILE_IDLE_TIMEOUT` | `1m`; `0` selects the default |
-| `--max-uploads` | `PADMARK_MAX_UPLOADS` | `32`; `0` selects the default |
+| `--max-uploads` | `PADMARK_MAX_UPLOADS` | `8`; `0` selects the default |
 | `--max-uploads-per-client` | `PADMARK_MAX_UPLOADS_PER_CLIENT` | `4`; `0` selects the default |
 
 The S3 keys come only from `PADMARK_S3_ACCESS_KEY` and `PADMARK_S3_SECRET_KEY`. There are no
 flags for them, because `ps` shows flags. The MCP proxy reads `--upload-root` /
-`PADMARK_MCP_UPLOAD_ROOT`, `--upload-allow-hidden` / `PADMARK_MCP_UPLOAD_ALLOW_HIDDEN` and
-`--upload-allow-slug` / `PADMARK_MCP_UPLOAD_ALLOW_SLUG`.
+`PADMARK_MCP_UPLOAD_ROOT`. The server flag `--custom-slugs` controls file slugs, as for notes
+and links.
 
 ## 8. Dependency Injection
 

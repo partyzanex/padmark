@@ -7,6 +7,7 @@
 //     server with object storage (--s3-endpoint); otherwise the server answers 503.
 //   - Server and accounts: ping, setup, create-token, create-invite and trust.
 //
-// upload and download stream the file body. --timeout limits only the wait for the response
-// headers of these two commands, so a large file is not stopped during the transfer.
+// All commands use one API client. --timeout limits the full API calls of a command. upload and
+// download stream the file body, so --timeout limits only the wait for the response headers of
+// these two commands. A large file is thus not stopped during the transfer.
 package cli

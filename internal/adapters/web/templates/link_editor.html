@@ -19,20 +19,42 @@
             <div class="link-fields">
                 <div class="field-group">
                     <label class="field-label" for="targetInput">Destination URL</label>
-                    <input type="url" class="field-input field-input--dest" id="targetInput" inputmode="url" placeholder="https://example.com/some/long/path" value="{{.TargetURL}}" required>
+                    <textarea class="field-input field-input--dest" id="targetInput" rows="3" inputmode="url" autocapitalize="none" spellcheck="false" placeholder="https://example.com/some/long/path" required>{{.TargetURL}}</textarea>
                 </div>
                 <div class="field-group">
-                    <label class="field-label" for="slugInput">Slug <span class="optional">· {{if .EditMode}}fixed{{else}}optional{{end}}</span></label>
+                    {{- if .EditMode}}
+                    <span class="field-label" id="slugLabel">Slug</span>
+                    <span class="fixed-value" id="slugFixed" aria-labelledby="slugLabel" title="The slug is fixed when the link is created">{{template "lock-icon"}}/{{.ID}}</span>
+                    {{- else}}
+                    <label class="field-label" for="slugInput">Slug <span class="optional">· optional</span></label>
                     <div class="slug-box">
                         <span aria-hidden="true">/</span>
-                        <input type="text" id="slugInput" name="link_slug" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="{{if .EditMode}}{{.ID}}{{else}}auto-generated{{end}}" value="{{.ID}}" pattern="[a-zA-Z0-9_\-]+" title="Letters, numbers, hyphens and underscores only"{{if .EditMode}} readonly{{end}}>
+                        <input type="text" id="slugInput" name="link_slug" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="auto-generated" pattern="[a-zA-Z0-9_\-]+" title="Letters, numbers, hyphens and underscores only">
                     </div>
+                    {{- end}}
                 </div>
             </div>
-            <div class="link-strip" aria-live="polite">
-                <span class="link-strip-caption">Your short link</span>
-                <span class="link-strip-short"><span id="previewHost"></span><strong id="previewSlug"></strong></span>
-                <span class="link-strip-hint" id="previewSlugHint"></span>
+            <div class="link-preview" aria-live="polite">
+                <span class="lbl">Preview</span>
+                <div class="preview-item">
+                    <span class="preview-caption">Short link</span>
+                    <span class="preview-short"><span id="previewHost"></span><strong id="previewSlug"></strong></span>
+                    <span class="preview-caption" id="previewSlugHint"></span>
+                </div>
+                <div class="preview-mode">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M6 13l6 6 6-6"/></svg>
+                    <span id="previewMode"></span>
+                </div>
+                <div class="preview-item">
+                    <span class="preview-caption">Destination</span>
+                    <span class="preview-host" id="previewDestHost"></span>
+                    <span class="preview-url" id="previewDestURL"></span>
+                </div>
+                <div class="preview-chips">
+                    <span class="preview-chip" id="chipAccess"></span>
+                    <span class="preview-chip" id="chipExpiry"></span>
+                    <span class="preview-chip preview-chip--warn" id="chipBurn" hidden>Burns after the first click</span>
+                </div>
             </div>
         </section>
 
@@ -42,7 +64,7 @@
 
                 <fieldset class="privacy-options" id="privacySelect">
                     <legend class="lbl">Who can follow</legend>
-                    {{template "privacy-options" .PrivacyOptions}}
+                    {{template "privacy-options" .Access}}
                 </fieldset>
 
                 <div class="field-group">
@@ -54,27 +76,31 @@
                         <option value="86400">In 1 day</option>
                         <option value="604800">In 7 days</option>
                         <option value="2592000">In 30 days</option>
-                        <option value="seconds">Custom, in seconds</option>
+                        <option value="custom">Custom…</option>
                     </select>
-                    <span class="field-hint" id="expiryHint">{{if .EditMode}}{{.ExpiresLabel}}{{else}}Counted from creation, independently of burn after click.{{end}}</span>
+                    <span class="field-hint" id="expiryHint">{{if .EditMode}}{{.ExpiresLabel}}{{else}}Counted from creation, separately from burn.{{end}}</span>
                 </div>
 
-                <div class="field-group" id="ttlGroup" hidden>
-                    <label class="field-label" for="ttlInput">Lifetime in seconds</label>
-                    <input type="number" class="field-input field-input--mono" id="ttlInput" min="1" max="9223372036" step="1" placeholder="86400" disabled>
-                </div>
+                {{template "expiry-custom"}}
 
                 <div class="setting-list">
-                    <label class="setting-row" id="burnLabel">
-                        <span class="setting-icon setting-icon--warn" aria-hidden="true">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 22c4 0 7-2.7 7-7 0-4-3-6.5-4.5-9.5C13 7 12.5 9 11 10 10.5 8 9.5 6.5 8 5c0 3-3 5.5-3 10 0 4.3 3 7 7 7z"/></svg>
-                        </span>
+                    {{- if .EditMode}}
+                    <div class="setting-row setting-row--fixed" id="burnFixed">
                         <span class="setting-text">
                             <span class="setting-title">Burn after first click</span>
-                            <span class="setting-desc">{{if .EditMode}}Fixed when the link is created{{else}}Stops working once followed{{end}}</span>
+                            <span class="setting-desc">Fixed when the link is created</span>
                         </span>
-                        <input type="checkbox" class="switch" role="switch" id="burnCheck"{{if .BurnAfterClick}} checked{{end}}{{if .EditMode}} disabled{{end}}>
+                        <span class="fixed-value">{{template "lock-icon"}}{{if .BurnAfterClick}}On{{else}}Off{{end}}</span>
+                    </div>
+                    {{- else}}
+                    <label class="setting-row" id="burnLabel">
+                        <span class="setting-text">
+                            <span class="setting-title">Burn after first click</span>
+                            <span class="setting-desc">Stops working once followed</span>
+                        </span>
+                        <input type="checkbox" class="switch" role="switch" id="burnCheck">
                     </label>
+                    {{- end}}
                 </div>
 
                 <div class="field-group">
@@ -114,8 +140,12 @@
                 <div class="publish-block">
                     <button type="submit" class="btn-publish" id="submitBtn" data-kbd="Ctrl ↵">{{if .EditMode}}Save{{else}}Create link{{end}}</button>
                     <p class="publish-note">{{if .EditMode}}Saving replaces the destination and the settings of this link.{{else}}You'll get the short link and an edit code.{{end}}</p>
-                    {{if .EditMode}}<button type="button" class="btn-danger" id="deleteBtn">Delete link</button>{{end}}
                 </div>
+                {{- if .EditMode}}
+                <div class="danger-block">
+                    <button type="button" class="btn-danger" id="deleteBtn">Delete link</button>
+                </div>
+                {{- end}}
             </div>
         </aside>
         <div class="sheet-backdrop" id="sheetBackdrop" hidden></div>
@@ -128,10 +158,13 @@
 <script nonce="{{.Nonce}}">
     {{template "theme-js"}}
     {{template "sheet-js"}}
+    {{template "expiry-js"}}
 
     const editMode = {{.EditMode}};
     const linkID = {{.ID}};
     const isOwner = {{.IsOwner}};
+    const directAllowed = {{.DirectAllowed}};
+    const burnAfterClick = {{.BurnAfterClick}};
     const submitLabel = editMode ? 'Save' : 'Create link';
     const form = document.getElementById('linkForm');
     const submitButton = document.getElementById('submitBtn');
@@ -141,44 +174,77 @@
         return checked ? checked.value : 'public';
     };
     const redirectSelect = document.getElementById('redirectSelect');
-    const expirySelect = document.getElementById('expirySelect');
-    const ttlInput = document.getElementById('ttlInput');
+    const targetInput = document.getElementById('targetInput');
+    // The edit page shows the slug and burn after click as fixed text, without these fields.
+    const slugInput = document.getElementById('slugInput');
+    const burnCheck = document.getElementById('burnCheck');
     const initialPrivacy = privacyValue();
     const initialRedirect = redirectSelect.value;
 
-    // The strip under the fields shows the short link while the user types the slug.
-    const slugInput = document.getElementById('slugInput');
+    // targetValue is the destination without the line breaks that a paste can add to the textarea.
+    function targetValue() {
+        return targetInput.value.replace(/[\r\n]+/g, '').trim();
+    }
+
+    // destinationHost returns the host of an http or https URL, or an empty string.
+    function destinationHost(target) {
+        try {
+            const url = new URL(target);
+            return ['http:', 'https:'].includes(url.protocol) ? url.host : '';
+        } catch (_) {
+            return '';
+        }
+    }
+
+    // The preview shows the result of the form while the user types: the short link, the
+    // redirect mode, the destination and the chosen settings.
     function updatePreview() {
-        const slug = slugInput.value.trim();
+        const slug = slugInput ? slugInput.value.trim() : linkID;
         document.getElementById('previewHost').textContent = location.host + '/';
         document.getElementById('previewSlug').textContent = slug || 'x7k2p';
         document.getElementById('previewSlugHint').textContent = editMode
             ? 'The slug is fixed when the link is created'
             : (slug ? 'Ends with your custom slug' : 'Random ending unless you set a slug');
-    }
-    slugInput.addEventListener('input', updatePreview);
-    updatePreview();
 
-    // The presets hold a lifetime in seconds; "seconds" opens the field for another value.
-    function updateExpiry() {
-        const enabled = expirySelect.value === 'seconds';
-        document.getElementById('ttlGroup').hidden = !enabled;
-        ttlInput.disabled = !enabled;
-        ttlInput.required = enabled;
+        // The rule of domain.Link.EffectiveDirectRedirect: "Server default" redirects at once
+        // when the link may do so; "Show destination first" never does.
+        const direct = directAllowed && redirectSelect.value !== 'false';
+        document.getElementById('previewMode').textContent = direct
+            ? 'redirects to' : 'shows the destination first, then continues to';
+
+        const target = targetValue();
+        const host = destinationHost(target);
+        document.getElementById('previewDestHost').textContent =
+            host || (target ? 'Not an http:// or https:// URL' : 'No destination yet');
+        document.getElementById('previewDestURL').textContent = target || 'Paste a URL above';
+
+        document.getElementById('chipAccess').textContent = privacyText();
+        document.getElementById('chipExpiry').textContent = expiryText();
+        document.getElementById('chipBurn').hidden = !(burnCheck ? burnCheck.checked : burnAfterClick);
     }
-    expirySelect.addEventListener('change', updateExpiry);
-    updateExpiry();
 
     // The settings button of the phone bar shows the chosen level and the expiration.
     function updateSummary() {
-        const checked = document.querySelector('input[name="privacy"]:checked');
-        const level = checked ? checked.closest('.privacy-option').querySelector('.privacy-option-title').textContent : 'Public';
-        const expiry = expirySelect.value === 'never' ? 'never expires'
-            : expirySelect.options[expirySelect.selectedIndex].text.toLowerCase();
-        document.getElementById('settingsSummary').textContent = level + ' · ' + expiry;
+        document.getElementById('settingsSummary').textContent = privacyText() + ' · ' + expirySummary();
     }
-    updateSummary();
-    document.getElementById('settingsSheet').addEventListener('change', updateSummary);
+
+    function updateForm() {
+        updatePreview();
+        updateSummary();
+    }
+    updateForm();
+    targetInput.addEventListener('input', updatePreview);
+    if (slugInput) slugInput.addEventListener('input', updatePreview);
+    document.getElementById('settingsSheet').addEventListener('change', updateForm);
+    document.getElementById('settingsSheet').addEventListener('input', updateForm);
+
+    // The destination is one line: Enter sends the form, as in a text field.
+    targetInput.addEventListener('keydown', event => {
+        if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+            event.preventDefault();
+            if (!submitButton.disabled) form.requestSubmit();
+        }
+    });
 
     const generateButton = document.getElementById('editCodeGenerate');
     if (generateButton) generateButton.addEventListener('click', () => {
@@ -211,25 +277,25 @@
     form.addEventListener('submit', async event => {
         event.preventDefault();
         errorBox.hidden = true;
-        const target = document.getElementById('targetInput').value.trim();
+        const target = targetValue();
         const code = document.getElementById('editCodeInput').value;
-        const slug = document.getElementById('slugInput').value.trim();
         const payload = {target_url: target};
         try {
-            if (!['http:', 'https:'].includes(new URL(target).protocol)) throw new Error('Use an http:// or https:// destination URL.');
+            if (!destinationHost(target)) throw new Error('Use an http:// or https:// destination URL.');
             if (editMode && !isOwner && !code) throw new Error('Edit code required');
             if (code) payload.edit_code = code;
             if (!editMode) {
+                const slug = slugInput.value.trim();
                 if (slug) payload.slug = slug;
-                payload.burn_after_click = document.getElementById('burnCheck').checked;
+                payload.burn_after_click = burnCheck.checked;
             }
             if (!editMode || privacyValue() !== initialPrivacy) payload.privacy = privacyValue();
             if (!editMode || redirectSelect.value !== initialRedirect) {
                 payload.direct_redirect = redirectSelect.value === 'inherit' ? null : redirectSelect.value === 'true';
             }
-            if (expirySelect.value === 'seconds') payload.ttl = Number(ttlInput.value);
-            else if (/^\d+$/.test(expirySelect.value)) payload.ttl = Number(expirySelect.value);
-            else if (editMode && expirySelect.value === 'never') payload.ttl = null;
+            const ttl = expirySeconds();
+            if (typeof ttl === 'number') payload.ttl = ttl;
+            else if (editMode && ttl === null) payload.ttl = null;
 
             setBusy(true);
             const link = await apiRequest(editMode ? 'PUT' : 'POST', '/links' + (editMode ? '/' + encodeURIComponent(linkID) : ''), payload);

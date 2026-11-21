@@ -18,11 +18,17 @@
             <div class="editor-head">
                 <label for="titleInput" class="sr-only">Title</label>
                 <input type="text" class="head-input" placeholder="Untitled note" id="titleInput" value="{{.Title}}" maxlength="500">
+                {{- if .EditMode}}
+                <span class="slug-field slug-field--fixed" id="slugFixed" title="The slug is fixed when the note is created">
+                    <span class="slug-prefix">URL&#160;&#160;/</span><span class="slug-value">{{.ID}}</span>{{template "lock-icon"}}
+                </span>
+                {{- else}}
                 <div class="slug-field">
                     <label for="slugInput" class="slug-prefix">URL&#160;&#160;/</label>
-                    <input type="text" id="slugInput" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="{{if .EditMode}}{{.ID}}{{else}}auto-generated{{end}}" value="{{.ID}}"
-                           pattern="[a-zA-Z0-9_\-]+" title="Letters, numbers, hyphens and underscores only"{{if .EditMode}} readonly{{end}}>
+                    <input type="text" id="slugInput" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="auto-generated"
+                           pattern="[a-zA-Z0-9_\-]+" title="Letters, numbers, hyphens and underscores only">
                 </div>
+                {{- end}}
             </div>
 
             <div class="editor-toolbar">
@@ -92,15 +98,12 @@
 
                 <fieldset class="privacy-options" id="privacySelect">
                     <legend class="lbl">Who can read</legend>
-                    {{template "privacy-options" .PrivacyOptions}}
+                    {{template "privacy-options" .Access}}
                 </fieldset>
 
                 <div class="setting-list">
                     <div class="setting-group">
                         <label class="setting-row" id="burnLabel">
-                            <span class="setting-icon setting-icon--warn" aria-hidden="true">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 22c4 0 7-2.7 7-7 0-4-3-6.5-4.5-9.5C13 7 12.5 9 11 10 10.5 8 9.5 6.5 8 5c0 3-3 5.5-3 10 0 4.3 3 7 7 7z"/></svg>
-                            </span>
                             <span class="setting-text">
                                 <span class="setting-title">Burn after reading</span>
                                 <span class="setting-desc">Delete once it's opened</span>
@@ -118,9 +121,6 @@
                     </div>
 
                     <label class="setting-row" id="contentsLabel">
-                        <span class="setting-icon" aria-hidden="true">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 6h3M4 12h3M4 18h3M11 6h9M13 12h7M13 18h7"/></svg>
-                        </span>
                         <span class="setting-text">
                             <span class="setting-title">Contents sidebar</span>
                             <span class="setting-desc">“On this page” from headings</span>
@@ -157,6 +157,11 @@
                     <button type="button" class="btn-publish" id="submitBtn" data-kbd="Ctrl ↵">{{if .EditMode}}Save{{else}}Publish note{{end}}</button>
                     <p class="publish-note">{{if .EditMode}}Saving replaces the content of this note.{{else}}You'll get a share link and an edit code.{{end}}</p>
                 </div>
+                {{- if .EditMode}}
+                <div class="danger-block">
+                    <button type="button" class="btn-danger" id="deleteBtn">Delete note</button>
+                </div>
+                {{- end}}
             </div>
         </aside>
         <div class="sheet-backdrop" id="sheetBackdrop" hidden></div>
@@ -375,6 +380,37 @@
         }
     }
 
+    // deleteNote deletes the note after a confirmation and then opens a new note editor, as the
+    // link and file editors do. The edit code goes only in the X-Edit-Code header.
+    async function deleteNote() {
+        const btn = document.getElementById('deleteBtn');
+        const submit = document.getElementById('submitBtn');
+        const editCode = document.getElementById('editCodeInput').value.trim();
+
+        errorBox.hidden = true;
+        if (!editCode && !isOwner) { showError(submit, 'Edit code required'); return; }
+        if (!confirm('Permanently delete this note?')) return;
+
+        btn.disabled = true;
+        submit.disabled = true;
+        const headers = {};
+        if (editCode) headers['X-Edit-Code'] = editCode;
+
+        try {
+            const resp = await fetch('/notes/' + encodeURIComponent(noteID), { method: 'DELETE', headers });
+            if (!resp.ok) {
+                const msg = await errorMessage(resp, 'HTTP ' + resp.status);
+                if (resp.status === 403 && msg === 'invalid edit code') { throw new Error('Invalid edit code'); }
+                throw new Error(msg);
+            }
+            window.location.href = '/';
+        } catch (err) {
+            showError(submit, err.message || 'Error — try again');
+        } finally {
+            btn.disabled = false;
+        }
+    }
+
     // The settings button of the phone bar shows the chosen level and the main switch state.
     function updateSummary() {
         const checked = document.querySelector('input[name="privacy"]:checked');
@@ -395,6 +431,8 @@
     document.getElementById('editor').addEventListener('input', updateCount);
     document.getElementById('burnCheck').addEventListener('change', toggleBurn);
     document.getElementById('submitBtn').addEventListener('click', editMode ? save : publish);
+    const deleteButton = document.getElementById('deleteBtn');
+    if (deleteButton) deleteButton.addEventListener('click', deleteNote);
     document.getElementById('mdHeading').addEventListener('click', () => prefixLine('## '));
     document.getElementById('mdBold').addEventListener('click', () => insertMd('**', '**'));
     document.getElementById('mdItalic').addEventListener('click', () => insertMd('_', '_'));

@@ -91,25 +91,101 @@
 </footer>
 {{end}}
 
-{{/* privacy-options renders one radio card for each level in the []privacyOption argument.
-     The server lists only the levels it can enforce; Hint replaces the default description. */}}
+{{/* privacy-options renders the privacy list from a privacyChoice: one row with a radio for each
+     level. The server lists only the levels it can enforce; Hint replaces the default description.
+     A disabled row needs a signed-in user; SignInURL then links to the sign-in page. */}}
 {{define "privacy-options"}}
-{{- range .}}
-<label class="privacy-option">
-    <input type="radio" name="privacy" id="privacy-{{.Value}}" value="{{.Value}}"{{if .Selected}} checked{{end}}>
+<div class="privacy-list">
+{{- range .Options}}
+<label class="privacy-option{{if .Disabled}} privacy-option--disabled{{end}}">
+    <input type="radio" name="privacy" id="privacy-{{.Value}}" value="{{.Value}}"{{if .Selected}} checked{{end}}{{if .Disabled}} disabled{{end}}>
     <span class="privacy-option-text">
         <span class="privacy-option-title">{{.Label}}</span>
         <span class="privacy-option-desc">{{if .Hint}}{{.Hint}}{{else if eq .Value "owner"}}Only you, as the author{{else if eq .Value "authenticated"}}Only signed-in users{{else}}Anyone with the link{{end}}</span>
     </span>
-    {{- if eq .Value "owner"}}
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>
-    {{- else if eq .Value "authenticated"}}
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
-    {{- else}}
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>
-    {{- end}}
 </label>
 {{- end}}
+</div>
+{{- if .SignInURL}}
+<a class="privacy-signin" href="{{.SignInURL}}" id="privacySignIn">{{template "lock-icon"}}Sign in to restrict access</a>
+{{- end}}
+{{end}}
+
+{{/* lock-icon marks a value that the user cannot change. */}}
+{{define "lock-icon"}}<svg class="lock-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>{{end}}
+
+{{/* expiry-custom renders the custom lifetime of the "Expires" select: a number and a unit.
+     expiry-js shows it for the "custom" option and converts it to seconds. */}}
+{{define "expiry-custom"}}
+<div class="field-group" id="ttlGroup" hidden>
+    <label class="field-label" for="ttlAmount">Custom lifetime</label>
+    <div class="ttl-custom">
+        <input type="number" class="field-input field-input--mono" id="ttlAmount" min="1" step="1" placeholder="2" inputmode="numeric" disabled>
+        <select class="field-select" id="ttlUnit" aria-label="Lifetime unit" disabled>
+            <option value="60">minutes</option>
+            <option value="3600" selected>hours</option>
+            <option value="86400">days</option>
+        </select>
+    </div>
+</div>
+{{end}}
+
+{{/* expiry-js controls #expirySelect and the expiry-custom fields. The select values are a preset
+     lifetime in seconds, "never", "custom" and, on the edit pages, "keep". The API takes seconds,
+     so the page converts the custom number and unit. */}}
+{{define "expiry-js"}}
+    const expirySelect = document.getElementById('expirySelect');
+    const ttlAmount = document.getElementById('ttlAmount');
+    const ttlUnit = document.getElementById('ttlUnit');
+    // The largest lifetime in seconds that the server accepts.
+    const maxTTLSeconds = 9223372036;
+
+    function updateExpiry() {
+        const custom = expirySelect.value === 'custom';
+        document.getElementById('ttlGroup').hidden = !custom;
+        ttlAmount.disabled = !custom;
+        ttlUnit.disabled = !custom;
+        ttlAmount.required = custom;
+        ttlAmount.max = String(Math.floor(maxTTLSeconds / Number(ttlUnit.value)));
+    }
+    expirySelect.addEventListener('change', updateExpiry);
+    ttlUnit.addEventListener('change', updateExpiry);
+    updateExpiry();
+
+    // expirySeconds returns the lifetime in seconds, null for "never" and undefined for "keep".
+    function expirySeconds() {
+        const value = expirySelect.value;
+        if (value === 'custom') return Number(ttlAmount.value) * Number(ttlUnit.value);
+        if (/^\d+$/.test(value)) return Number(value);
+        if (value === 'never') return null;
+        return undefined;
+    }
+
+    // expiryText describes the chosen lifetime, for example "Expires in 2 hours".
+    function expiryText() {
+        const value = expirySelect.value;
+        if (value === 'keep') return document.getElementById('expiryHint').textContent.trim();
+        if (value === 'never') return 'Never expires';
+        if (value === 'custom') {
+            const amount = Number(ttlAmount.value);
+            if (!Number.isInteger(amount) || amount < 1) return 'Custom lifetime';
+            const unit = ttlUnit.options[ttlUnit.selectedIndex].text;
+            return 'Expires in ' + amount + ' ' + (amount === 1 ? unit.replace(/s$/, '') : unit);
+        }
+        return 'Expires ' + expirySelect.options[expirySelect.selectedIndex].text.toLowerCase();
+    }
+
+    // privacyText returns the title of the chosen privacy level.
+    function privacyText() {
+        const checked = document.querySelector('input[name="privacy"]:checked');
+        return checked ? checked.closest('.privacy-option').querySelector('.privacy-option-title').textContent : 'Public';
+    }
+
+    // expirySummary is the expiry part of the settings button of the phone bar.
+    function expirySummary() {
+        const text = expiryText();
+        return text.charAt(0).toLowerCase() + text.slice(1);
+    }
 {{end}}
 
 {{/* signout renders the POST /logout form for phone width, where the account block of the

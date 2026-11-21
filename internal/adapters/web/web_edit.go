@@ -67,7 +67,7 @@ func (h *NoteHandler) editNote(w http.ResponseWriter, r *http.Request, id string
 		EditMode:         true,
 		BurnAfterReading: note.BurnAfterReading || note.BurnTTL > 0,
 		Privacy:          string(note.EffectivePrivacy()),
-		PrivacyOptions:   privacyOptions(h.authMgr != nil, header.SignedIn(), note.EffectivePrivacy()),
+		Access:           h.privacyChoice(r, header, note.EffectivePrivacy()),
 		Nonce:            middleware.NonceFromContext(r.Context()),
 		IsOwner:          isOwner,
 		ShowContents:     note.ContentsSidebar(),

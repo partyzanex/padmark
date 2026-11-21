@@ -51,7 +51,8 @@ func NewApp() *urcli.Command {
 				flag.Name = FlagTimeout
 				flag.Sources = urcli.EnvVars(EnvTimeout)
 				flag.Value = DefaultTimeout
-				flag.Usage = "Per-request HTTP timeout; 0 disables it (env: PADMARK_TIMEOUT)"
+				flag.Usage = "Time limit of each tool call; upload_file uses it only for the wait for " +
+					"the response headers; 0 disables it (env: PADMARK_TIMEOUT)"
 			}),
 			clifactory.BoolFlag(func(flag *urcli.BoolFlag) {
 				flag.Name = FlagAllowInsecureHTTP
@@ -65,7 +66,7 @@ func NewApp() *urcli.Command {
 	})
 }
 
-// uploadFlags returns the flags that limit upload_file.
+// uploadFlags returns the flag that limits upload_file.
 func uploadFlags() []urcli.Flag {
 	return []urcli.Flag{
 		clifactory.StringFlag(func(flag *urcli.StringFlag) {
@@ -74,19 +75,6 @@ func uploadFlags() []urcli.Flag {
 			flag.Value = DefaultUploadRoot
 			flag.Usage = "Directory from which upload_file may read files; empty turns uploads off. " +
 				"Do not put secrets in it (env: PADMARK_MCP_UPLOAD_ROOT)"
-		}),
-		clifactory.BoolFlag(func(flag *urcli.BoolFlag) {
-			flag.Name = FlagUploadAllowHidden
-			flag.Sources = urcli.EnvVars(EnvUploadAllowHidden)
-			flag.Value = DefaultUploadAllowHidden
-			flag.Usage = "Let upload_file read paths with names that start with a dot, such as .env " +
-				"(env: PADMARK_MCP_UPLOAD_ALLOW_HIDDEN)"
-		}),
-		clifactory.BoolFlag(func(flag *urcli.BoolFlag) {
-			flag.Name = FlagUploadAllowSlug
-			flag.Sources = urcli.EnvVars(EnvUploadAllowSlug)
-			flag.Value = DefaultUploadAllowSlug
-			flag.Usage = "Let upload_file send the slug that the agent gives (env: PADMARK_MCP_UPLOAD_ALLOW_SLUG)"
 		}),
 	}
 }
@@ -119,31 +107,13 @@ func runAction(ctx context.Context, cmd *urcli.Command) error {
 		return fmt.Errorf("check --%s: %w", FlagUploadRoot, err)
 	}
 
-	clients, err := newPadmarkClients(cmd)
+	client, opts, err := newPadmarkClient(cmd)
 	if err != nil {
 		return fmt.Errorf("create API client: %w", err)
 	}
 
-	mgr := NewManager(clients.api, clients.files, log, managerOptions(cmd, uploadRoot, clients)...)
+	opts = append(opts, WithUploadRoot(uploadRoot), WithCallTimeout(cmd.Duration(FlagTimeout)))
+	mgr := NewManager(client, log, opts...)
 
 	return errorcontext.Wrap(mgr.Run(ctx), "run server")
-}
-
-// managerOptions converts the upload flags and the token state of clients into Manager options.
-func managerOptions(cmd *urcli.Command, uploadRoot string, clients *padmarkClients) []Option {
-	opts := []Option{WithUploadRoot(uploadRoot)}
-
-	if cmd.Bool(FlagUploadAllowHidden) {
-		opts = append(opts, WithUploadHidden())
-	}
-
-	if cmd.Bool(FlagUploadAllowSlug) {
-		opts = append(opts, WithUploadSlug())
-	}
-
-	if clients.hasToken {
-		opts = append(opts, WithAccountToken())
-	}
-
-	return opts
 }

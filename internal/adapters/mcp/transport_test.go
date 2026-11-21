@@ -1,7 +1,9 @@
 package mcp
 
 import (
+	"context"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -9,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -74,7 +77,7 @@ func TestBearerClient_SameOriginRedirect_KeepsToken(t *testing.T) {
 		ok(w, r)
 	})
 
-	client, err := newBearerClient(server.server.URL, testBearer, time.Minute)
+	client, err := newHTTPClient(server.server.URL, testBearer, time.Minute)
 	require.NoError(t, err)
 
 	resp, err := getWith(t, client, server.server.URL+"/start")
@@ -95,7 +98,7 @@ func TestBearerClient_CrossOriginRedirect_Refused(t *testing.T) {
 		http.Redirect(w, r, other.server.URL+"/steal", http.StatusFound)
 	})
 
-	client, err := newBearerClient(server.server.URL, testBearer, time.Minute)
+	client, err := newHTTPClient(server.server.URL, testBearer, time.Minute)
 	require.NoError(t, err)
 
 	resp, err := getWith(t, client, server.server.URL+"/start")
@@ -115,7 +118,7 @@ func TestBearerClient_OtherOrigin_NoToken(t *testing.T) {
 	server := newAuthRecorder(t, ok)
 	other := newAuthRecorder(t, ok)
 
-	client, err := newBearerClient(server.server.URL, testBearer, time.Minute)
+	client, err := newHTTPClient(server.server.URL, testBearer, time.Minute)
 	require.NoError(t, err)
 
 	resp, err := getWith(t, client, other.server.URL+"/x")
@@ -133,7 +136,7 @@ func TestBearerClient_TooManyRedirects(t *testing.T) {
 		http.Redirect(w, r, "/loop", http.StatusFound)
 	})
 
-	client, err := newBearerClient(server.server.URL, testBearer, time.Minute)
+	client, err := newHTTPClient(server.server.URL, testBearer, time.Minute)
 	require.NoError(t, err)
 
 	resp, err := getWith(t, client, server.server.URL+"/loop")
@@ -144,18 +147,19 @@ func TestBearerClient_TooManyRedirects(t *testing.T) {
 	require.ErrorIs(t, err, errTooManyRedirects)
 }
 
-// TestTransferClient_HasNoTotalTimeout: the upload client limits only the wait for the response
-// headers, so a large upload on a slow link is not stopped.
-func TestTransferClient_HasNoTotalTimeout(t *testing.T) {
+// TestHTTPClient_HasOnlyHeaderTimeout: the one client of the proxy limits only the wait for the
+// response headers, so a large upload on a slow link is not stopped. The other tools get their
+// limit from the call deadline (limitCall).
+func TestHTTPClient_HasOnlyHeaderTimeout(t *testing.T) {
 	t.Parallel()
 
-	client, err := newTransferClient("https://pad.example.com", testBearer, 7*time.Second)
+	client, err := newHTTPClient("https://pad.example.com", testBearer, 7*time.Second)
 	require.NoError(t, err)
 
-	assert.Zero(t, client.Timeout, "the transfer client has no total timeout")
+	assert.Zero(t, client.Timeout, "the client has no total timeout")
 
 	bearer, ok := client.Transport.(*bearerTransport)
-	require.True(t, ok, "the transfer client keeps the origin-bound bearer transport")
+	require.True(t, ok, "the client keeps the origin-bound bearer transport")
 
 	base, ok := bearer.base.(*http.Transport)
 	require.True(t, ok)
@@ -163,9 +167,10 @@ func TestTransferClient_HasNoTotalTimeout(t *testing.T) {
 	assert.NotSame(t, http.DefaultTransport, base, "the default transport is cloned, not changed")
 }
 
-// TestTransferClient_SlowUploadOutlivesTimeout: an upload that takes longer than --timeout
-// completes with the transfer client, and stops with the total timeout of the API client.
-func TestTransferClient_SlowUploadOutlivesTimeout(t *testing.T) {
+// TestHTTPClient_SlowUploadOutlivesTimeout: an upload that takes longer than --timeout
+// completes without a call deadline, as upload_file sends it. The same request in a tool with
+// the call deadline (limitCall) stops with a timeout.
+func TestHTTPClient_SlowUploadOutlivesTimeout(t *testing.T) {
 	t.Parallel()
 
 	const (
@@ -175,24 +180,30 @@ func TestTransferClient_SlowUploadOutlivesTimeout(t *testing.T) {
 
 	server := newAuthRecorder(t, uploadCreated(t))
 
-	transfer, err := newTransferClient(server.server.URL, testBearer, timeout)
+	httpClient, err := newHTTPClient(server.server.URL, testBearer, timeout)
 	require.NoError(t, err)
 
-	created, err := uploadThrough(t, transfer, server.server.URL, newSlowReader(chunks, 2*timeout))
-	require.NoError(t, err, "the transfer client must not stop a slow upload")
+	created, err := uploadThrough(t.Context(), t, httpClient, server.server.URL, newSlowReader(chunks, 2*timeout))
+	require.NoError(t, err, "the header timeout must not stop a slow upload")
 	assert.Equal(t, "file123abc", created.ID)
 
-	api, err := newBearerClient(server.server.URL, testBearer, timeout)
-	require.NoError(t, err)
+	mgr := NewManager(nil, slog.New(slog.DiscardHandler), WithCallTimeout(timeout))
+	limited := limitCall(mgr, func(
+		ctx context.Context, _ *mcpsdk.CallToolRequest, _ struct{},
+	) (*mcpsdk.CallToolResult, struct{}, error) {
+		_, uploadErr := uploadThrough(ctx, t, httpClient, server.server.URL, newSlowReader(chunks, 2*timeout))
 
-	_, err = uploadThrough(t, api, server.server.URL, newSlowReader(chunks, 2*timeout))
-	require.Error(t, err, "the total timeout of the API client stops the slow upload")
+		return nil, struct{}{}, uploadErr
+	})
+
+	_, _, err = limited(t.Context(), nil, struct{}{})
+	require.Error(t, err, "the call deadline stops the slow request")
 	assert.True(t, isTimeout(err), "the error is a timeout: %v", err)
 }
 
-// TestTransferClient_HeaderTimeoutGetsTimeoutText: a server that does not answer gets the
+// TestHTTPClient_HeaderTimeoutGetsTimeoutText: a server that does not answer gets the
 // timeout text, not the transport text that tells the agent to check that the server runs.
-func TestTransferClient_HeaderTimeoutGetsTimeoutText(t *testing.T) {
+func TestHTTPClient_HeaderTimeoutGetsTimeoutText(t *testing.T) {
 	t.Parallel()
 
 	server := newAuthRecorder(t, func(w http.ResponseWriter, r *http.Request) {
@@ -201,10 +212,10 @@ func TestTransferClient_HeaderTimeoutGetsTimeoutText(t *testing.T) {
 		<-r.Context().Done()
 	})
 
-	transfer, err := newTransferClient(server.server.URL, testBearer, 50*time.Millisecond)
+	httpClient, err := newHTTPClient(server.server.URL, testBearer, 50*time.Millisecond)
 	require.NoError(t, err)
 
-	_, err = uploadThrough(t, transfer, server.server.URL, strings.NewReader("x"))
+	_, err = uploadThrough(t.Context(), t, httpClient, server.server.URL, strings.NewReader("x"))
 	require.Error(t, err)
 
 	text := uploadError(err).Error()
@@ -214,16 +225,16 @@ func TestTransferClient_HeaderTimeoutGetsTimeoutText(t *testing.T) {
 
 // --- helpers ---
 
-// uploadThrough sends body through the streaming upload of pkg/client with httpClient.
+// uploadThrough sends body through the streaming upload of pkg/client with httpClient in ctx.
 func uploadThrough(
-	t *testing.T, httpClient *http.Client, serverURL string, body io.Reader,
+	ctx context.Context, t *testing.T, httpClient *http.Client, serverURL string, body io.Reader,
 ) (*padmark.CreateFileResponse, error) {
 	t.Helper()
 
 	client, err := padmark.NewClient(serverURL, padmark.WithClient(httpClient))
 	require.NoError(t, err)
 
-	return client.UploadFile(t.Context(), "a.bin", body, padmark.UploadFileOptions{
+	return client.UploadFile(ctx, "a.bin", body, padmark.UploadFileOptions{
 		TTL: 0, Privacy: "", Slug: "", EditCode: "", BurnAfterDownload: false,
 	})
 }

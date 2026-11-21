@@ -5,12 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"net/netip"
 	"net/url"
 	"os"
 	"strings"
-	"time"
 
 	urcli "github.com/urfave/cli/v3"
 
@@ -68,7 +66,8 @@ func globalFlags() []urcli.Flag {
 			flag.Name = FlagTimeout
 			flag.Sources = urcli.EnvVars(EnvTimeout)
 			flag.Value = DefaultTimeout
-			flag.Usage = "Per-request HTTP timeout; 0 disables it (env: PADMARK_TIMEOUT)"
+			flag.Usage = "Time limit of the API calls of a command; upload and download use it only for " +
+				"the wait for the response headers; 0 disables it (env: PADMARK_TIMEOUT)"
 		}),
 		clifactory.BoolFlag(func(flag *urcli.BoolFlag) {
 			flag.Name = FlagAllowInsecureHTTP
@@ -79,21 +78,11 @@ func globalFlags() []urcli.Flag {
 	}
 }
 
+// newPadmarkClient returns the one API client of the CLI. It resolves the server and the token
+// and checks the transport. Its HTTP client uses --timeout only for the response headers, so
+// `upload` and `download` can transfer a large file. The other commands call requestContext
+// to limit their API calls.
 func newPadmarkClient(cmd *urcli.Command) (*padmark.Client, error) {
-	return newClientWith(cmd, newBearerClient)
-}
-
-// newFileTransferClient returns the API client for `upload` and `download`. Its HTTP client
-// uses --timeout only for the response headers, so a large file body is not stopped.
-func newFileTransferClient(cmd *urcli.Command) (*padmark.Client, error) {
-	return newClientWith(cmd, newTransferClient)
-}
-
-// newClientWith resolves the server and the token, checks the transport and builds the API
-// client with the HTTP client that newHTTPClient returns.
-func newClientWith(
-	cmd *urcli.Command, newHTTPClient func(serverURL, token string, timeout time.Duration) (*http.Client, error),
-) (*padmark.Client, error) {
 	// An envelope token carries its own server URL; an explicit --url/PADMARK_URL still wins.
 	token, serverURL, trustErr := resolveTrustedServer(cmd)
 	if trustErr != nil {
@@ -110,12 +99,27 @@ func newClientWith(
 		return nil, fmt.Errorf("create http client: %w", err)
 	}
 
-	cl, err := padmark.NewClient(serverURL, padmark.WithClient(httpClient))
+	apiClient, err := padmark.NewClient(serverURL, padmark.WithClient(httpClient))
 	if err != nil {
 		return nil, fmt.Errorf("create client: %w", err)
 	}
 
-	return cl, nil
+	return apiClient, nil
+}
+
+// requestContext adds the --timeout deadline to ctx for the API calls of an ordinary command.
+// The deadline limits the full call: the request, the response body and its decode. Call it
+// after the command reads its local input, so a slow stdin does not use the time limit.
+// `upload` and `download` do not call it: a large file needs more time than --timeout, so only
+// the response header timeout of the HTTP client limits them. A zero --timeout adds no
+// deadline. The caller must call the returned cancel function.
+func requestContext(ctx context.Context, cmd *urcli.Command) (context.Context, context.CancelFunc) {
+	timeout := cmd.Duration(FlagTimeout)
+	if timeout <= 0 {
+		return context.WithCancel(ctx)
+	}
+
+	return context.WithTimeout(ctx, timeout)
 }
 
 // commandWriter resolves the command's standard output, falling back to os.Stdout when unset.
@@ -363,12 +367,15 @@ func runDeleteCommand(
 		return fmt.Errorf("read resource ID: %w", err)
 	}
 
-	cl, err := newPadmarkClient(cmd)
+	apiClient, err := newPadmarkClient(cmd)
 	if err != nil {
 		return fmt.Errorf("create API client: %w", err)
 	}
 
-	err = doDelete(ctx, cl, id, cmd.String(FlagEditCode))
+	callCtx, cancel := requestContext(ctx, cmd)
+	defer cancel()
+
+	err = doDelete(callCtx, apiClient, id, cmd.String(FlagEditCode))
 	if err != nil {
 		return fmt.Errorf("delete resource: %w", err)
 	}

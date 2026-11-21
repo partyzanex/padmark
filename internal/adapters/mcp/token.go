@@ -4,11 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"net/netip"
 	"net/url"
 	"strings"
-	"time"
 
 	urcli "github.com/urfave/cli/v3"
 
@@ -50,67 +48,42 @@ func pickServerURL(cmd *urcli.Command, embeddedURL string) string {
 	return cmd.String(FlagBaseURL)
 }
 
-// padmarkClients are the API clients of one proxy process. Both point at the same server with
-// the same token. They differ only in their HTTP timeouts.
-type padmarkClients struct {
-	// api serves all tools other than upload_file. --timeout limits each full request.
-	api *padmark.Client
-	// files serves the file tools. --timeout limits only the wait for the response headers,
-	// so a large upload is not stopped (newTransferClient).
-	files *padmark.Client
-	// hasToken is true when the clients send a bearer token.
-	hasToken bool
-}
-
-// newPadmarkClients builds the generated ogen clients pointed at the resolved server URL, with
-// the raw bearer key injected on every request (the client itself sends no Authorization —
-// the API spec carries no per-operation security). No connection is opened here.
-func newPadmarkClients(cmd *urcli.Command) (*padmarkClients, error) {
+// newPadmarkClient builds the one generated ogen client of the proxy, pointed at the resolved
+// server URL, with the raw bearer key injected on every request (the client itself sends no
+// Authorization — the API spec carries no per-operation security). No connection is opened
+// here. It also returns the Manager options that follow from the token: WithAccountToken when
+// the client sends a bearer token.
+func newPadmarkClient(cmd *urcli.Command) (*padmark.Client, []Option, error) {
 	token, embeddedURL := splitToken(resolveToken(cmd))
 
 	serverURL := pickServerURL(cmd, embeddedURL)
 
 	trustErr := ensureTrustedServer(cmd, embeddedURL, serverURL)
 	if trustErr != nil {
-		return nil, fmt.Errorf("validate trusted server: %w", trustErr)
+		return nil, nil, fmt.Errorf("validate trusted server: %w", trustErr)
 	}
 
 	insecureErr := checkInsecureToken(stderrWriter(cmd), serverURL, token, allowInsecureHTTP(cmd))
 	if insecureErr != nil {
-		return nil, fmt.Errorf("validate token transport: %w", insecureErr)
+		return nil, nil, fmt.Errorf("validate token transport: %w", insecureErr)
 	}
 
-	timeout := cmd.Duration(FlagTimeout)
-
-	api, err := newClientWith(serverURL, token, timeout, newBearerClient)
+	httpClient, err := newHTTPClient(serverURL, token, cmd.Duration(FlagTimeout))
 	if err != nil {
-		return nil, err
+		return nil, nil, fmt.Errorf("create http client: %w", err)
 	}
 
-	files, err := newClientWith(serverURL, token, timeout, newTransferClient)
+	apiClient, err := padmark.NewClient(serverURL, padmark.WithClient(httpClient))
 	if err != nil {
-		return nil, err
+		return nil, nil, fmt.Errorf("create client: %w", err)
 	}
 
-	return &padmarkClients{api: api, files: files, hasToken: token != ""}, nil
-}
-
-// newClientWith builds one API client with the HTTP client that newHTTPClient returns.
-func newClientWith(
-	serverURL, token string, timeout time.Duration,
-	newHTTPClient func(serverURL, token string, timeout time.Duration) (*http.Client, error),
-) (*padmark.Client, error) {
-	httpClient, err := newHTTPClient(serverURL, token, timeout)
-	if err != nil {
-		return nil, fmt.Errorf("create http client: %w", err)
+	var opts []Option
+	if token != "" {
+		opts = append(opts, WithAccountToken())
 	}
 
-	cl, err := padmark.NewClient(serverURL, padmark.WithClient(httpClient))
-	if err != nil {
-		return nil, fmt.Errorf("create client: %w", err)
-	}
-
-	return cl, nil
+	return apiClient, opts, nil
 }
 
 // errInsecureTransport is returned when a credential would travel in cleartext to a non-loopback
