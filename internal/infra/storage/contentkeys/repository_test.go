@@ -209,7 +209,8 @@ func TestMarkLegacyTagsOnlyTheInspectedUntaggedNote(t *testing.T) {
 }
 
 // TestFileMetadataIsARotationResource makes sure that key rotation reads and rewrites the
-// sealed metadata of files. Without it, a retired key would make the files unreadable.
+// sealed metadata of files. Without it, a retired key would make the files unreadable. Delete
+// never removes a file record (R-27).
 func TestFileMetadataIsARotationResource(t *testing.T) {
 	db, err := sqlite.Open(filepath.Join(t.TempDir(), "files.db"), slog.New(slog.DiscardHandler))
 	require.NoError(t, err)
@@ -228,11 +229,18 @@ func TestFileMetadataIsARotationResource(t *testing.T) {
 	require.Len(t, rows, 1)
 	require.Equal(t, "old", rows[0].Value)
 
+	deleted, err := repo.Delete(t.Context(), rows[0])
+	require.Error(t, err, "the object would stay in the bucket without its content key")
+	require.False(t, deleted)
+
 	changed, err := repo.Replace(t.Context(), rows[0], "new")
 	require.NoError(t, err)
 	require.True(t, changed)
 
 	row, err := repo.Get(t.Context(), "file", domain.HashSlug("file"))
 	require.NoError(t, err)
-	require.Equal(t, "new", row.Value)
+	require.Equal(t, keys.Row{
+		Resource: "file", ID: domain.HashSlug("file"), Value: "new",
+		Legacy: nil, StoredEditCode: "",
+	}, *row)
 }

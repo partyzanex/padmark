@@ -109,10 +109,11 @@ info:
     `--max-file-size`. A streaming handler serves the `/files` operations, not the generated
     JSON server.
 
-    A `burn_after_download` file is deleted after the first deliberate download. Only a browser
-    navigation or a request with an exact `Accept` (for example `application/octet-stream`)
-    consumes it. Other requests get `409` with code `burn_read_not_explicit`, and the file
-    stays.
+    A `burn_after_download` file is deleted after the first deliberate download. A client without
+    browser fetch metadata consumes it with an exact `Accept` (for example
+    `application/octet-stream`). A browser consumes it only through the download form of the file
+    page, which has a CSRF token. Other requests get `409` with code `burn_read_not_explicit`, and
+    the file stays; a browser goes to the file page (`303`).
   version: 0.4.0
 
 servers:
@@ -472,7 +473,9 @@ paths:
         Returns the link as JSON, including its decrypted `target_url`. This is a metadata-only
         read: it does not increment `views`, does not consume a `burn_after_click` link, and does
         not follow the redirect — visiting `GET /{id}` does all of that. See the "Short links"
-        section above.
+        section above. A client whose `Accept` header prefers `text/html` gets the browser page
+        of the link instead, with the same privacy and expiry rules; send `Accept:
+        application/json` to get this response.
       tags: [links]
       parameters:
         - $ref: "#/components/parameters/linkId"
@@ -618,11 +621,22 @@ paths:
         Uploads one file and returns its description with the one-time `edit_code`.
         Send `multipart/form-data`. Put the optional text fields `ttl`, `privacy`,
         `burn_after_download`, `slug` and `edit_code` first. Put the `file` part last.
-        The server reads only the fields before `file` and ignores fields after it.
+        A part after `file` gives `400`, and the server does not keep the file.
         The server streams the file to object storage and does not keep it in memory.
-        Each text field can have a maximum of 1024 bytes. If `slug` is omitted, the server
+        Each text field can have a maximum of 1024 bytes and can occur one time. An unknown
+        field name or a repeated field gives `400`. All data before the `file` part,
+        part headers included, can have a maximum of 64 KiB. If `slug` is omitted, the server
         generates a 10-character random slug. The file name comes from the `filename` of the
         `file` part.
+
+        A `Content-Length` above the limit gets `413` before the server reads the body. An
+        upload that sends no data for the idle timeout (60 seconds by default) gets `408`.
+        The server limits the number of uploads at the same time, in total and for each client
+        IP address. A full limit gives `503` (server) or `429` (client) with `Retry-After`.
+        An error response before the end of the body has `Connection: close`.
+
+        A bearer token that is not valid does not give `401`: the server ignores it and the
+        file has no owner, as for `POST /notes` and `POST /links`.
       tags: [files]
       requestBody:
         required: true
@@ -645,11 +659,16 @@ paths:
                 $ref: "#/components/schemas/CreateFileResponse"
         "400":
           description: |
-            The body is not `multipart/form-data`, it has no `file` part, or a text field is
-            not valid (for example, `ttl` is not a number of seconds)
+            The body is not `multipart/form-data`, it has no `file` part, a text field is
+            not valid (for example, `ttl` is not a number of seconds), a field name is unknown
+            or repeated, the data before the `file` part is larger than 64 KiB, a part follows
+            the `file` part, or the multipart body is malformed or ends before its closing
+            boundary
           $ref: "#/components/responses/Error"
         "401":
-          description: The bearer token is not valid
+          description: |
+            Not used. A bearer token that is not valid does not give `401`; the server ignores
+            it and makes a file without an owner.
           $ref: "#/components/responses/Error"
         "403":
           description: The `Origin` header names a different site
@@ -658,7 +677,9 @@ paths:
           description: A note, link or file with the requested slug already exists
           $ref: "#/components/responses/Error"
         "413":
-          description: The file is larger than the server limit (`--max-file-size`)
+          description: |
+            The file is larger than the server limit (`--max-file-size`), or the declared
+            `Content-Length` is larger than that limit plus 1 MiB for the form
           $ref: "#/components/responses/Error"
         "422":
           description: |
@@ -666,13 +687,16 @@ paths:
             a credential also gets `422`.
           $ref: "#/components/responses/Error"
         "429":
-          description: Rate limit exceeded
+          description: |
+            Rate limit exceeded, or this client has the maximum number of uploads in progress
+            (with `Retry-After`)
           $ref: "#/components/responses/Error"
         "500":
           $ref: "#/components/responses/Error"
         "503":
           description: |
-            Files are not enabled, the object storage is not available, or the API is disabled
+            Files are not enabled, the object storage is not available, the server has the
+            maximum number of uploads in progress (with `Retry-After`), or the API is disabled
             (`code: api_disabled`)
           $ref: "#/components/responses/Error"
 
@@ -831,10 +855,15 @@ paths:
         A `burn_after_download` file is deleted after this download. Send
         `Accept: application/octet-stream` to show that the download is deliberate. Without a
         deliberate `Accept`, the server answers `409` with code `burn_read_not_explicit` and
-        the file stays.
+        the file stays. A request with browser fetch metadata (`Sec-Fetch-Site`) or a prefetch
+        never consumes the file: a browser that asks for HTML goes to the file page (`303`),
+        whose download form (`POST` with a CSRF token) consumes it.
 
-        If the transfer stops after the server sends the headers, the client gets fewer bytes
-        than `Content-Length`. Discard such a file.
+        If object storage fails before the first byte, the server answers `503` without the
+        download headers. If the transfer stops after the first byte, the server closes the
+        connection, and the client gets fewer bytes than `Content-Length`. Discard such a
+        file. A download that makes no progress for the idle timeout (60 seconds by default)
+        stops in the same way.
       tags: [files]
       parameters:
         - $ref: "#/components/parameters/fileId"
@@ -1504,8 +1533,8 @@ components:
       type: object
       required: [file]
       description: |
-        The upload form. Send the text fields before the `file` part: the server ignores
-        fields after `file`.
+        The upload form. Send the text fields before the `file` part: a part after `file`
+        gives `400`. Each field can occur one time; other field names give `400`.
       properties:
         ttl:
           type: integer
@@ -1513,8 +1542,9 @@ components:
           minimum: 0
           maximum: 9223372036
           description: |
-            Lifetime of the file in seconds, counted from the upload. Omitted means the file
-            does not expire.
+            Lifetime of the file in seconds, counted from the start of the upload. Omitted means
+            the file does not expire. `0` makes a file that is already expired: the upload
+            succeeds, but each read answers `410` and deletes the file.
           example: 86400
         privacy:
           type: string

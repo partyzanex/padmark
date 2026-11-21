@@ -104,7 +104,11 @@ func (s *TimeoutSuite) TestHungServer() {
 	ctx := s.T().Context()
 
 	operations := map[string]func() error{
-		"ping":   func() error { return s.store.Ping(ctx) },
+		"bucket": func() error {
+			_, err := s.store.EnsureBucket(ctx)
+
+			return err
+		},
 		"stat":   func() error { return s.store.Stat(ctx, hangKey) },
 		"get":    func() error { return s.store.WriteTo(ctx, hangKey, new(bytes.Buffer)) },
 		"put":    func() error { return s.store.Put(ctx, hangKey, strings.NewReader("data")) },
@@ -119,7 +123,7 @@ func (s *TimeoutSuite) TestHungServer() {
 		s.Contains(err.Error(), "timeout awaiting response headers", name)
 
 		// minio-go puts the request URL into the error; the URL of an object request has the key.
-		if name != "ping" {
+		if name != "bucket" {
 			s.Contains(err.Error(), redactedKey, name)
 		}
 	}

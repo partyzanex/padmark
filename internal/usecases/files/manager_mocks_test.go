@@ -14,7 +14,6 @@ import (
 	reflect "reflect"
 	time "time"
 
-	uuid "github.com/google/uuid"
 	domain "github.com/partyzanex/padmark/internal/domain"
 	gomock "go.uber.org/mock/gomock"
 )
@@ -43,19 +42,18 @@ func (m *MockStorage) EXPECT() *MockStorageMockRecorder {
 	return m.recorder
 }
 
-// ConsumeVisible mocks base method.
-func (m *MockStorage) ConsumeVisible(ctx context.Context, id string, callerID uuid.UUID, authenticated, allowBurn bool) (*domain.File, error) {
+// ClaimBurn mocks base method.
+func (m *MockStorage) ClaimBurn(ctx context.Context, claim *BurnClaim) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ConsumeVisible", ctx, id, callerID, authenticated, allowBurn)
-	ret0, _ := ret[0].(*domain.File)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
+	ret := m.ctrl.Call(m, "ClaimBurn", ctx, claim)
+	ret0, _ := ret[0].(error)
+	return ret0
 }
 
-// ConsumeVisible indicates an expected call of ConsumeVisible.
-func (mr *MockStorageMockRecorder) ConsumeVisible(ctx, id, callerID, authenticated, allowBurn any) *gomock.Call {
+// ClaimBurn indicates an expected call of ClaimBurn.
+func (mr *MockStorageMockRecorder) ClaimBurn(ctx, claim any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ConsumeVisible", reflect.TypeOf((*MockStorage)(nil).ConsumeVisible), ctx, id, callerID, authenticated, allowBurn)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ClaimBurn", reflect.TypeOf((*MockStorage)(nil).ClaimBurn), ctx, claim)
 }
 
 // Create mocks base method.
@@ -73,33 +71,31 @@ func (mr *MockStorageMockRecorder) Create(ctx, file any) *gomock.Call {
 }
 
 // Delete mocks base method.
-func (m *MockStorage) Delete(ctx context.Context, id string) (*domain.File, error) {
+func (m *MockStorage) Delete(ctx context.Context, id, objectKey string) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Delete", ctx, id)
-	ret0, _ := ret[0].(*domain.File)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
+	ret := m.ctrl.Call(m, "Delete", ctx, id, objectKey)
+	ret0, _ := ret[0].(error)
+	return ret0
 }
 
 // Delete indicates an expected call of Delete.
-func (mr *MockStorageMockRecorder) Delete(ctx, id any) *gomock.Call {
+func (mr *MockStorageMockRecorder) Delete(ctx, id, objectKey any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Delete", reflect.TypeOf((*MockStorage)(nil).Delete), ctx, id)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Delete", reflect.TypeOf((*MockStorage)(nil).Delete), ctx, id, objectKey)
 }
 
 // DeleteExpired mocks base method.
-func (m *MockStorage) DeleteExpired(ctx context.Context, now time.Time) ([]string, error) {
+func (m *MockStorage) DeleteExpired(ctx context.Context, id, objectKey string, now time.Time) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "DeleteExpired", ctx, now)
-	ret0, _ := ret[0].([]string)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
+	ret := m.ctrl.Call(m, "DeleteExpired", ctx, id, objectKey, now)
+	ret0, _ := ret[0].(error)
+	return ret0
 }
 
 // DeleteExpired indicates an expected call of DeleteExpired.
-func (mr *MockStorageMockRecorder) DeleteExpired(ctx, now any) *gomock.Call {
+func (mr *MockStorageMockRecorder) DeleteExpired(ctx, id, objectKey, now any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteExpired", reflect.TypeOf((*MockStorage)(nil).DeleteExpired), ctx, now)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteExpired", reflect.TypeOf((*MockStorage)(nil).DeleteExpired), ctx, id, objectKey, now)
 }
 
 // Exists mocks base method.
@@ -133,31 +129,60 @@ func (mr *MockStorageMockRecorder) GetByID(ctx, id any) *gomock.Call {
 }
 
 // IncrementDownloadsVisible mocks base method.
-func (m *MockStorage) IncrementDownloadsVisible(ctx context.Context, id string, callerID uuid.UUID, authenticated bool) error {
+func (m *MockStorage) IncrementDownloadsVisible(ctx context.Context, id, objectKey string, reader AccessOptions) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "IncrementDownloadsVisible", ctx, id, callerID, authenticated)
+	ret := m.ctrl.Call(m, "IncrementDownloadsVisible", ctx, id, objectKey, reader)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // IncrementDownloadsVisible indicates an expected call of IncrementDownloadsVisible.
-func (mr *MockStorageMockRecorder) IncrementDownloadsVisible(ctx, id, callerID, authenticated any) *gomock.Call {
+func (mr *MockStorageMockRecorder) IncrementDownloadsVisible(ctx, id, objectKey, reader any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IncrementDownloadsVisible", reflect.TypeOf((*MockStorage)(nil).IncrementDownloadsVisible), ctx, id, callerID, authenticated)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IncrementDownloadsVisible", reflect.TypeOf((*MockStorage)(nil).IncrementDownloadsVisible), ctx, id, objectKey, reader)
+}
+
+// ListExpired mocks base method.
+func (m *MockStorage) ListExpired(ctx context.Context, now time.Time, limit int) ([]*domain.File, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListExpired", ctx, now, limit)
+	ret0, _ := ret[0].([]*domain.File)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListExpired indicates an expected call of ListExpired.
+func (mr *MockStorageMockRecorder) ListExpired(ctx, now, limit any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListExpired", reflect.TypeOf((*MockStorage)(nil).ListExpired), ctx, now, limit)
+}
+
+// ReleaseBurn mocks base method.
+func (m *MockStorage) ReleaseBurn(ctx context.Context, claim *BurnClaim) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ReleaseBurn", ctx, claim)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// ReleaseBurn indicates an expected call of ReleaseBurn.
+func (mr *MockStorageMockRecorder) ReleaseBurn(ctx, claim any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReleaseBurn", reflect.TypeOf((*MockStorage)(nil).ReleaseBurn), ctx, claim)
 }
 
 // Update mocks base method.
-func (m *MockStorage) Update(ctx context.Context, file *domain.File) error {
+func (m *MockStorage) Update(ctx context.Context, id, objectKey string, opts UpdateOptions, now time.Time) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Update", ctx, file)
+	ret := m.ctrl.Call(m, "Update", ctx, id, objectKey, opts, now)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // Update indicates an expected call of Update.
-func (mr *MockStorageMockRecorder) Update(ctx, file any) *gomock.Call {
+func (mr *MockStorageMockRecorder) Update(ctx, id, objectKey, opts, now any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Update", reflect.TypeOf((*MockStorage)(nil).Update), ctx, file)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Update", reflect.TypeOf((*MockStorage)(nil).Update), ctx, id, objectKey, opts, now)
 }
 
 // MockObjectStore is a mock of ObjectStore interface.

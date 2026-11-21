@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/partyzanex/padmark/internal/adapters/web/middleware"
@@ -78,7 +79,7 @@ func registerOgenRoutes(
 	mux.Handle("DELETE /notes/{id}", locked(middleware.WithLegacyNoteEditCode(ogenSrv)))
 	mux.Handle("POST /links", ogenSrv)
 	mux.Handle("POST /links/bulk", ogenSrv)
-	mux.Handle("GET /links/{id}", ogenSrv)
+	// GET /links/{id} also serves the link page to a browser; registerAllRoutes registers it.
 	mux.Handle("PUT /links/{id}", locked(ogenSrv))
 	mux.Handle("DELETE /links/{id}", locked(ogenSrv))
 	mux.Handle("GET /healthz", ogenSrv)
@@ -108,7 +109,37 @@ func registerAllRoutes(mux *http.ServeMux, handler *Handler, ogenSrv http.Handle
 		registrar.RegisterRoutes(mux)
 	}
 
+	// The link page shares its path with the JSON read, as GET /notes/{id} serves the note page
+	// and the note JSON: a client that prefers HTML gets the page, other clients get the API.
+	mux.Handle("GET /links/{id}", htmlOr(handler.LinkPage, ogenSrv))
+	mux.HandleFunc("GET /edit/{id...}", handler.EditPage)
 	mux.HandleFunc("GET /{id...}", handler.GetNoteOrLink)
+}
+
+// htmlOr sends a request that prefers HTML (see negotiate) to page and other requests to api.
+func htmlOr(page http.HandlerFunc, api http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if negotiate(r) == formatHTML {
+			page(w, r)
+
+			return
+		}
+
+		api.ServeHTTP(w, r)
+	})
+}
+
+// isLinkPageRequest reports whether r asks for the page of a short link: GET or HEAD
+// /links/{id} from a client that prefers HTML. It is the rule of htmlOr for that path. With
+// --disable-api the page stays available, as the note page /{id} does, and the JSON read stops.
+func isLinkPageRequest(r *http.Request) bool {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		return false
+	}
+
+	slug, found := strings.CutPrefix(r.URL.Path, "/links/")
+
+	return found && slug != "" && !strings.Contains(slug, "/") && negotiate(r) == formatHTML
 }
 
 // NewRouter registers all routes and wraps them with middleware.
@@ -171,7 +202,7 @@ func wrapMiddleware(
 	stack = middleware.WithRequestOrigin(opts.ForcedScheme, opts.TrustedProxies, stack)
 
 	if opts.DisableAPI {
-		stack = middleware.WithAPIDisabled(handler.log, stack)
+		stack = middleware.WithAPIDisabled(handler.log, isLinkPageRequest, stack)
 	}
 
 	stack = middleware.NewAuthMiddleware(buildNamedRoutes(), checker, stack)

@@ -95,7 +95,7 @@ func (s *LogSuite) TestMissingObject() {
 func (s *LogSuite) TestDeleteObjectFailure() {
 	file := secretFile()
 	s.storage.EXPECT().GetByID(gomock.Any(), domain.HashSlug("abc")).Return(file, nil)
-	s.storage.EXPECT().Delete(gomock.Any(), domain.HashSlug("abc")).Return(file, nil)
+	s.storage.EXPECT().Delete(gomock.Any(), domain.HashSlug("abc"), loggedObjectKey).Return(nil)
 	s.objects.EXPECT().Delete(gomock.Any(), loggedObjectKey).Return(errors.New("s3 down"))
 
 	s.Require().NoError(s.manager.Delete(s.T().Context(), "abc", "code", uuid.Nil))

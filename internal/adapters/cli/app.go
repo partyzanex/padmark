@@ -16,6 +16,7 @@ import (
 
 	"github.com/partyzanex/padmark/internal/clifactory"
 	"github.com/partyzanex/padmark/internal/errorcontext"
+	"github.com/partyzanex/padmark/internal/infra/tokenfile"
 	padmark "github.com/partyzanex/padmark/pkg/client"
 )
 
@@ -264,7 +265,8 @@ func linkIDArg(cmd *urcli.Command) (string, error) {
 
 // fileIDArg returns the file ID from the first positional argument. The argument can also be
 // the file URL that `upload` prints: /{id}, /files/{id} or /files/{id}/download. The CLI sends
-// the request to --url; the host of the URL argument is not used.
+// the request to --url, so a URL argument must have the same origin as --url. Otherwise
+// `delete-file https://other.example/x` would delete the file "x" on the configured server.
 func fileIDArg(cmd *urcli.Command) (string, error) {
 	arg := strings.TrimSpace(cmd.Args().Get(0))
 	if arg == "" {
@@ -272,10 +274,51 @@ func fileIDArg(cmd *urcli.Command) (string, error) {
 	}
 
 	if !strings.Contains(arg, "://") {
-		return arg, nil
+		return checkFileID(arg)
 	}
 
-	return fileIDFromURL(arg)
+	err := checkFileURLOrigin(arg, resolveServerURL(cmd))
+	if err != nil {
+		return "", err
+	}
+
+	id, err := fileIDFromURL(arg)
+	if err != nil {
+		return "", err
+	}
+
+	return checkFileID(id)
+}
+
+// checkFileID refuses "." and "..". The client puts the ID in a URL path, where these values
+// change the route.
+func checkFileID(id string) (string, error) {
+	if id == "." || id == ".." {
+		return "", fmt.Errorf("%w: %q", errInvalidFileID, id)
+	}
+
+	return id, nil
+}
+
+// checkFileURLOrigin compares the origin (scheme, host and port) of a file URL with the origin
+// of the server URL.
+func checkFileURLOrigin(fileURL, serverURL string) error {
+	fileOrigin, err := tokenfile.Origin(fileURL)
+	if err != nil {
+		return fmt.Errorf("%w: %w", errFileURL, err)
+	}
+
+	serverOrigin, err := tokenfile.Origin(serverURL)
+	if err != nil {
+		return fmt.Errorf("resolve server URL: %w", err)
+	}
+
+	if fileOrigin != serverOrigin {
+		return fmt.Errorf("%w: the URL is on %s, the server is %s; pass --url %s",
+			errFileURLOrigin, fileOrigin, serverOrigin, fileOrigin)
+	}
+
+	return nil
 }
 
 // fileIDFromURL reads the file ID from the path of a file URL.

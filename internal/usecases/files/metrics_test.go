@@ -27,9 +27,9 @@ func (s *ManagerSuite) TestMetrics_CreateCountsUploadAndSize() {
 	metrics := s.strictMetrics()
 
 	s.expectUpload("hello")
-	s.storage.EXPECT().DeleteExpired(gomock.Any(), gomock.Any()).Return(nil, nil)
 	s.expectFreeSlug()
 	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
+	s.expectUploadSweep()
 	metrics.EXPECT().IncUploads()
 	metrics.EXPECT().ObserveUploadBytes(int64(5))
 
@@ -90,7 +90,7 @@ func (s *ManagerSuite) TestMetrics_GetFailureIsStorageError() {
 
 	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(storedFile(false), nil)
 	s.objects.EXPECT().Stat(gomock.Any(), "obj").Return(nil)
-	s.storage.EXPECT().IncrementDownloadsVisible(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
+	s.storage.EXPECT().IncrementDownloadsVisible(gomock.Any(), gomock.Any(), "obj", gomock.Any()).Return(nil)
 	s.objects.EXPECT().WriteTo(gomock.Any(), "obj", gomock.Any()).Return(errors.New("reset by peer"))
 	metrics.EXPECT().IncDownloads()
 	metrics.EXPECT().IncStorageErrors(StorageOpGet)
@@ -106,7 +106,8 @@ func (s *ManagerSuite) TestMetrics_BurnCountsDownloadAndDeletion() {
 
 	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(storedFile(true), nil)
 	s.expectObject("hello")
-	s.storage.EXPECT().ConsumeVisible(gomock.Any(), gomock.Any(), uuid.Nil, false, true).Return(storedFile(true), nil)
+	s.storage.EXPECT().ClaimBurn(gomock.Any(), gomock.Any()).Return(nil)
+	s.storage.EXPECT().Delete(gomock.Any(), domain.HashSlug("abc"), "obj").Return(nil)
 	s.objects.EXPECT().Delete(gomock.Any(), "obj").Return(nil)
 	metrics.EXPECT().IncDownloads()
 	metrics.EXPECT().IncDeleted(DeleteReasonBurn)
@@ -124,7 +125,7 @@ func (s *ManagerSuite) TestMetrics_DeleteKeepsObjectAfterStorageError() {
 
 	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(storedFile(false), nil)
 	gomock.InOrder(
-		s.storage.EXPECT().Delete(gomock.Any(), domain.HashSlug("abc")).Return(storedFile(false), nil),
+		s.storage.EXPECT().Delete(gomock.Any(), domain.HashSlug("abc"), "obj").Return(nil),
 		s.objects.EXPECT().Delete(gomock.Any(), "obj").Return(errors.New("s3 down")),
 	)
 	metrics.EXPECT().IncDeleted(DeleteReasonUser)
@@ -137,7 +138,6 @@ func (s *ManagerSuite) TestMetrics_RecordFailureRemovesObject() {
 	metrics := s.strictMetrics()
 
 	s.expectUpload("x")
-	s.storage.EXPECT().DeleteExpired(gomock.Any(), gomock.Any()).Return(nil, nil)
 	s.expectFreeSlug()
 	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(errors.New("disk full"))
 	s.objects.EXPECT().Delete(gomock.Any(), gomock.Any()).Return(errors.New("s3 down"))
@@ -145,43 +145,4 @@ func (s *ManagerSuite) TestMetrics_RecordFailureRemovesObject() {
 
 	_, err := s.manager.Create(s.T().Context(), "a", strings.NewReader("x"), createOptions())
 	s.Require().Error(err)
-}
-
-func (s *ManagerSuite) TestSweepExpired() {
-	ctx := s.T().Context()
-
-	s.Run("removes records and objects", func() {
-		metrics := s.strictMetrics()
-
-		s.storage.EXPECT().DeleteExpired(gomock.Any(), gomock.Any()).Return([]string{"one", "two"}, nil)
-		s.objects.EXPECT().Delete(gomock.Any(), "one").Return(nil)
-		s.objects.EXPECT().Delete(gomock.Any(), "two").Return(errors.New("s3 down"))
-		metrics.EXPECT().IncDeleted(DeleteReasonExpired).Times(2)
-		metrics.EXPECT().IncStorageErrors(StorageOpDelete)
-
-		removed, err := s.manager.SweepExpired(ctx)
-		s.Require().NoError(err)
-		s.Equal(2, removed)
-	})
-
-	s.Run("nothing expired", func() {
-		s.strictMetrics()
-
-		s.storage.EXPECT().DeleteExpired(gomock.Any(), gomock.Any()).Return(nil, nil)
-
-		removed, err := s.manager.SweepExpired(ctx)
-		s.Require().NoError(err)
-		s.Zero(removed)
-	})
-
-	s.Run("record error", func() {
-		s.strictMetrics()
-
-		dbErr := errors.New("database is locked")
-		s.storage.EXPECT().DeleteExpired(gomock.Any(), gomock.Any()).Return(nil, dbErr)
-
-		removed, err := s.manager.SweepExpired(ctx)
-		s.Require().ErrorIs(err, dbErr)
-		s.Zero(removed)
-	})
 }

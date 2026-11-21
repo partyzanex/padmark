@@ -52,7 +52,7 @@ func (s *FileInfoSuite) TestText() {
 }
 
 func (s *FileInfoSuite) TestJSON() {
-	out, err := runCLIOutput(s.T().Context(), "--url", s.server.URL, cmdFileInfo, "https://pad.example/"+testFileID,
+	out, err := runCLIOutput(s.T().Context(), "--url", s.server.URL, cmdFileInfo, s.server.URL+"/"+testFileID,
 		"--json")
 	s.Require().NoError(err)
 	s.Equal([]string{"GET /files/f1le-id"}, s.methods)
@@ -107,4 +107,26 @@ func TestFileIDFromURL(t *testing.T) {
 		_, err := fileIDFromURL(raw)
 		require.ErrorIs(t, err, errFileURL, raw)
 	}
+}
+
+func TestCheckFileURLOrigin(t *testing.T) {
+	t.Parallel()
+
+	for _, pair := range [][2]string{
+		{"https://pad.example/abc", "https://pad.example"},
+		{"https://PAD.example:443/files/abc", "https://pad.example/"},
+		{"http://localhost:8080/abc", "http://localhost:8080"},
+	} {
+		require.NoError(t, checkFileURLOrigin(pair[0], pair[1]), pair[0])
+	}
+
+	for _, pair := range [][2]string{
+		{"https://other.example/abc", "https://pad.example"},
+		{"http://pad.example/abc", "https://pad.example"},
+		{"https://pad.example:8443/abc", "https://pad.example"},
+	} {
+		require.ErrorIs(t, checkFileURLOrigin(pair[0], pair[1]), errFileURLOrigin, pair[0])
+	}
+
+	require.ErrorIs(t, checkFileURLOrigin("https:///abc", "https://pad.example"), errFileURL)
 }

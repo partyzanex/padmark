@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Padmark — Edit file</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    {{template "theme-head" .Nonce}}
     <link rel="stylesheet" href="/static/style.css?p={{styleVersion}}">
 </head>
 <body>
@@ -32,9 +33,9 @@
             </div>
         </section>
 
-        <aside class="card settings-panel" aria-label="File settings">
+        <aside class="card settings-panel" aria-label="Publish settings">
             <section class="settings-card" id="settingsSheet" aria-labelledby="sheetTitle">
-                {{template "sheet-head" "File settings"}}
+                {{template "sheet-head" "Publish settings"}}
 
                 <fieldset class="privacy-options" id="privacySelect">
                     <legend class="lbl">Who can download</legend>
@@ -74,9 +75,9 @@
                 </div>
 
                 <div class="field-group">
-                    <label class="field-label" for="editCodeInput">Edit code <span class="optional">· {{if .IsOwner}}optional for you{{else}}required to save{{end}}</span></label>
+                    <label class="field-label" for="editCodeInput">Edit code <span class="optional">· {{if .IsOwner}}optional, you created this file{{else}}required{{end}}</span></label>
                     <div class="field-box">
-                        <input type="password" id="editCodeInput" name="file_edit_code" autocomplete="new-password" placeholder="Original edit code">
+                        <input type="text" id="editCodeInput" name="file_edit_code" placeholder="Paste your edit code" autocomplete="off" autocapitalize="none" spellcheck="false">
                     </div>
                 </div>
             </section>
@@ -87,8 +88,8 @@
                 <p id="fileError" class="form-error" role="alert" hidden></p>
                 {{template "settings-toggle"}}
                 <div class="publish-block">
-                    <button type="submit" class="btn-publish" id="saveBtn" data-kbd="Ctrl ↵">Save file</button>
-                    <p id="fileStatus" class="form-status" role="status"></p>
+                    <button type="submit" class="btn-publish" id="saveBtn" data-kbd="Ctrl ↵">Save</button>
+                    <p class="publish-note">Saving replaces the settings of this file.</p>
                     <button type="button" class="btn-danger" id="deleteBtn">Delete file</button>
                 </div>
             </div>
@@ -111,7 +112,6 @@
     const saveButton = document.getElementById('saveBtn');
     const deleteButton = document.getElementById('deleteBtn');
     const errorBox = document.getElementById('fileError');
-    const statusBox = document.getElementById('fileStatus');
     const expirySelect = document.getElementById('expirySelect');
     const ttlInput = document.getElementById('ttlInput');
     const burnCheck = document.getElementById('burnCheck');
@@ -119,8 +119,8 @@
         const checked = document.querySelector('input[name="privacy"]:checked');
         return checked ? checked.value : 'public';
     };
-    let initialPrivacy = privacyValue();
-    let initialBurn = burnCheck.checked;
+    const initialPrivacy = privacyValue();
+    const initialBurn = burnCheck.checked;
 
     function showError(message) {
         errorBox.textContent = message;
@@ -173,10 +173,15 @@
         return true;
     }
 
+    // setBusy shows the request in progress on the main button, as the note editor does.
+    function setBusy(busy) {
+        saveButton.disabled = busy;
+        saveButton.textContent = busy ? 'Saving…' : 'Save';
+    }
+
     form.addEventListener('submit', async event => {
         event.preventDefault();
         errorBox.hidden = true;
-        statusBox.textContent = '';
         if (needCode()) return;
         const payload = {};
         if (privacyValue() !== initialPrivacy) payload.privacy = privacyValue();
@@ -185,19 +190,15 @@
         else if (/^\d+$/.test(expirySelect.value)) payload.ttl = Number(expirySelect.value);
         else if (expirySelect.value === 'never') payload.ttl = null;
 
-        saveButton.disabled = true;
+        setBusy(true);
         try {
-            const file = await fileRequest('PUT', payload);
-            initialPrivacy = file.privacy || privacyValue();
-            initialBurn = Boolean(file.burn_after_download);
-            expirySelect.value = 'keep';
-            updateExpiry();
-            document.getElementById('expiryHint').textContent = file.expires_at
-                ? 'Expires ' + new Date(file.expires_at).toUTCString() : 'Never expires';
-            updateSummary();
-            statusBox.textContent = 'File saved';
-        } catch (error) { showError(error.message); }
-        finally { saveButton.disabled = false; }
+            await fileRequest('PUT', payload);
+            // After a save, the browser shows the file page, as the note editor shows the note.
+            location.href = '/' + fileID;
+        } catch (error) {
+            showError(error.message);
+            setBusy(false);
+        }
     });
 
     deleteButton.addEventListener('click', async () => {

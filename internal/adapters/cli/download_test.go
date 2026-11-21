@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -22,10 +23,13 @@ const cmdDownload = "download"
 type DownloadSuite struct {
 	suite.Suite
 
-	dir       string
-	name      string
-	content   string
-	truncate  bool
+	dir      string
+	name     string
+	content  string
+	truncate bool
+	// stalled is not nil when the download must stop after the first bytes. The handler closes
+	// it after it sent them, then waits until the client goes away.
+	stalled   chan struct{}
 	metaHits  atomic.Int32
 	downloads atomic.Int32
 	server    *httptest.Server
@@ -41,7 +45,7 @@ func (s *DownloadSuite) SetupTest() {
 	s.dir = s.T().TempDir()
 	s.T().Chdir(s.dir)
 
-	s.name, s.content, s.truncate = "report.txt", "file body", false
+	s.name, s.content, s.truncate, s.stalled = "report.txt", "file body", false, nil
 	s.metaHits.Store(0)
 	s.downloads.Store(0)
 
@@ -91,6 +95,16 @@ func (s *DownloadSuite) handleDownload(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.T().Errorf("write download: %v", err)
 	}
+
+	if s.stalled != nil {
+		err = http.NewResponseController(w).Flush()
+		if err != nil {
+			s.T().Errorf("flush download: %v", err)
+		}
+
+		close(s.stalled)
+		<-r.Context().Done()
+	}
 }
 
 func (s *DownloadSuite) download(args ...string) (string, error) {
@@ -111,9 +125,14 @@ func (s *DownloadSuite) dirEntries() []string {
 	return names
 }
 
-// readFile returns the content of a file in the test directory. os.Root keeps the read in it.
+// readFile returns the content of a file in the test directory.
 func (s *DownloadSuite) readFile(name string) string {
-	root, err := os.OpenRoot(s.dir)
+	return s.readFileIn(s.dir, name)
+}
+
+// readFileIn returns the content of a file in dir. os.Root keeps the read in dir.
+func (s *DownloadSuite) readFileIn(dir, name string) string {
+	root, err := os.OpenRoot(dir)
 	s.Require().NoError(err)
 
 	defer func() { s.NoError(root.Close()) }()
@@ -188,6 +207,94 @@ func (s *DownloadSuite) TestOutputFlag() {
 	s.Equal("file body", s.readFile(filepath.Base(target)))
 }
 
+// TestOutputDirectory writes the file into an existing directory with the name from the server,
+// as curl -O --output-dir does.
+func (s *DownloadSuite) TestOutputDirectory() {
+	for _, force := range []bool{false, true} {
+		s.Run(strconv.FormatBool(force), func() {
+			dir := s.T().TempDir()
+
+			args := []string{testFileID, "-o", dir}
+			if force {
+				args = append(args, "--force")
+			}
+
+			out, err := s.download(args...)
+			s.Require().NoError(err)
+
+			target := filepath.Join(dir, "report.txt")
+			s.Equal("saved "+target+" (9 bytes)\n", out)
+
+			s.Equal("file body", s.readFileIn(dir, "report.txt"))
+		})
+	}
+}
+
+// TestOutputDirectoryHasDirectory stops the command before the download when the server name is
+// a directory in the --output directory. A rename cannot replace a directory.
+func (s *DownloadSuite) TestOutputDirectoryHasDirectory() {
+	s.Require().NoError(os.Mkdir(filepath.Join(s.dir, "report.txt"), 0o700))
+
+	for _, args := range [][]string{{testFileID, "-o", "."}, {testFileID, "-o", ".", "--force"}} {
+		_, err := s.download(args...)
+		s.Require().ErrorIs(err, errOutputIsDirectory)
+	}
+
+	s.Equal(int32(0), s.downloads.Load(), "a directory must stop the command before the download")
+	s.Equal([]string{"report.txt"}, s.dirEntries())
+}
+
+// TestOutputDirectoryUnsafeName checks the server name also when --output is a directory.
+func (s *DownloadSuite) TestOutputDirectoryUnsafeName() {
+	s.name = ".zshenv"
+
+	_, err := s.download(testFileID, "-o", ".", "--force")
+	s.Require().ErrorIs(err, errUnsafeFileName)
+	s.Equal(int32(0), s.downloads.Load())
+	s.Empty(s.dirEntries())
+}
+
+// TestURLOnOtherServer refuses a URL whose origin is not --url, before any request.
+func (s *DownloadSuite) TestURLOnOtherServer() {
+	_, err := s.download("https://pad.example/files/" + testFileID + "/download")
+	s.Require().ErrorIs(err, errFileURLOrigin)
+	s.Equal(int32(0), s.metaHits.Load())
+	s.Equal(int32(0), s.downloads.Load())
+}
+
+// TestDotID refuses "." and "..": in a URL path they change the route of the request.
+func (s *DownloadSuite) TestDotID() {
+	for _, arg := range []string{".", "..", s.server.URL + "/files/..", s.server.URL + "/files/./download"} {
+		_, err := s.download(arg, "-o", "out.bin")
+		s.Require().ErrorIs(err, errInvalidFileID, arg)
+	}
+
+	s.Equal(int32(0), s.downloads.Load())
+	s.Empty(s.dirEntries())
+}
+
+// TestInterrupted cancels the context during the transfer, as SIGINT does in padmark-cli. The
+// reserved destination and the temporary file must not stay, so a new attempt can start.
+func (s *DownloadSuite) TestInterrupted() {
+	s.stalled = make(chan struct{})
+	s.truncate = true
+
+	ctx, cancel := context.WithCancel(s.T().Context())
+	defer cancel()
+
+	go func() {
+		select {
+		case <-s.stalled:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+
+	_, err := runCLIOutput(ctx, "--url", s.server.URL, cmdDownload, testFileID)
+	s.Require().ErrorIs(err, context.Canceled)
+	s.Empty(s.dirEntries(), "an interrupted download leaves no destination and no temporary file")
+}
+
 func (s *DownloadSuite) TestStdout() {
 	out, err := s.download(testFileID, "--output", "-")
 	s.Require().NoError(err)
@@ -212,13 +319,31 @@ func (s *DownloadSuite) TestNotFound() {
 func TestSafeFileName(t *testing.T) {
 	t.Parallel()
 
-	for _, name := range []string{"report.txt", ".hidden", "a..b", "имя файла.pdf"} {
+	for name, want := range map[string]string{
+		"report.txt":    "report.txt",
+		"a..b":          "a..b",
+		"имя файла.pdf": "имя файла.pdf",
+		"a-b~c.txt":     "a-b~c.txt",
+		"console.log":   "console.log",
+		"COM10.txt":     "COM10.txt",
+		"LPT0":          "LPT0",
+		// Format characters (Unicode category Cf) are removed: U+202E would show the name
+		// "invoice\u202Efdp.exe" as "invoiceexe.pdf".
+		"invoice\u202Efdp.exe":     "invoicefdp.exe",
+		"\ufeffa\u200bb\u2066.txt": "ab.txt",
+	} {
 		got, err := safeFileName(name)
-		require.NoError(t, err, name)
-		assert.Equal(t, name, got)
+		require.NoError(t, err, "%q", name)
+		assert.Equal(t, want, got, "%q", name)
 	}
 
-	for _, name := range []string{"", ".", "..", "a/b", `a\b`, "a\nb", "a\x7fb"} {
+	// A name that starts with "." is refused: the CLI must not write a hidden file such as
+	// .zshenv or .envrc into the current directory. The user can choose a name with --output.
+	for _, name := range []string{
+		"", ".", "..", ".hidden", ".zshenv", "\u200b.envrc", "-rf", "~", "~user", "a/b", `a\b`, "a\nb", "a\x7fb",
+		"a:b", "C:report.txt", "NUL", "nul.txt", "Con", "aux.tar.gz", "PRN ", "COM1", "com9.log", "LPT1.txt",
+		"\u200b\u202e",
+	} {
 		_, err := safeFileName(name)
 		require.ErrorIs(t, err, errUnsafeFileName, "%q", name)
 	}

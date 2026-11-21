@@ -19,6 +19,8 @@ v0.5.0 follows **v0.4.0**.
   files.
 - New settings: `--s3-endpoint`, `--s3-bucket`, `--s3-region`, `--s3-path-style`,
   `--max-file-size`, and the environment-only `PADMARK_S3_ACCESS_KEY` / `PADMARK_S3_SECRET_KEY`.
+- The server creates the `--s3-bucket` bucket at startup when it does not exist. The key then
+  needs `s3:CreateBucket`.
 - `PUT /files/{id}` changes the expiry, the privacy and the `burn_after_download` rule of a
   file. `ttl` counts from the change, `"ttl": null` removes the expiry, and an omitted field
   keeps its value. The content, the name and the owner do not change. The edit code comes only
@@ -27,7 +29,7 @@ v0.5.0 follows **v0.4.0**.
   button. The page does not count a download and does not delete a `burn_after_download` file.
   Other clients get the content, also `curl` with `Accept: */*`.
 - Web pages for files: the upload page `/files` (drop area, progress bar, **Cancel upload**),
-  the success page for a file and the edit page `/files/{id}/edit`. The header shows a **File**
+  the success page for a file and the edit page `/edit/{id}`. The header shows a **File**
   tab only when files are on. The pages show each file error, for example a file that is too
   large or a storage failure.
 - `openapi.yaml` describes the `/files` operations. `/llms.txt` and `/api/reference.md` have a
@@ -53,20 +55,49 @@ v0.5.0 follows **v0.4.0**.
 - A background sweep removes expired files and their objects every `--files-sweep-interval` /
   `PADMARK_FILES_SWEEP_INTERVAL` (default `1h`; `0` turns it off). Each upload also removes
   expired files. The shutdown manager stops the loop before the database closes.
+- File transfer limits: `--file-idle-timeout` / `PADMARK_FILE_IDLE_TIMEOUT` (default `1m`)
+  stops an upload or a download that moves no data for that time; a stalled upload gets `408`.
+  Each chunk of data moves the deadline forward, up to a total limit of one hour.
+  `--max-uploads` / `PADMARK_MAX_UPLOADS` (default `32`) limits the uploads at the same time
+  (`503`), and `--max-uploads-per-client` / `PADMARK_MAX_UPLOADS_PER_CLIENT` (default `4`)
+  limits them for one client IP address (`429`). Both answers have `Retry-After: 10`. `0`
+  selects the default; a negative value stops startup.
 - Documentation: "Files setup" in the README (bucket policy, lifecycle rule for incomplete
   multipart uploads, reverse proxy limits), commented `PADMARK_S3_*` lines in
   `docker-compose.yml`, and the first architecture decision records (ADRs) in `docs/adr/`.
 
 ### Changed
 
+- Short links and files follow the note flow. **Open** on the success page opens the page of the
+  record; its **Edit** action opens the editor; **Save** returns to the page of the record.
+  A short link gets a page at `/links/{id}` for a client that prefers `text/html`: the
+  destination, the settings and the **Copy**, **Link** and **Edit** actions, in the layout of the
+  note page. The page uses the privacy and expiry rules of `GET /links/{id}`, does not count a
+  view and does not burn the link. `/{id}` stays the redirect, and other clients of
+  `GET /links/{id}` still get JSON. The file page `/{id}` has the layout of the note page.
+- The editor of each record is at `/edit/{id}`. `/links/{id}/edit` and `/files/{id}/edit`
+  answer `301` to it. The success page of a link or a file no longer has an **Edit** button, as
+  for a note. On a reader page, **New** opens the create form of the same kind.
+- The link and file editors use the labels of the note editor: **Save**, "Paste your edit code",
+  "Publish settings", and a busy text on the main button.
+- `--disable-api` keeps the link pages `/links`, `/links/{id}` (HTML) and `/links/{id}/edit`
+  open, as for the note and file pages. Before, the link form answered `503` with JSON.
 - `files` is a reserved first slug segment. A note slug that starts with `files/` stops being
   reachable.
 - The schema migration `20261118000001_files` adds the `files` table and rebuilds the SQLite
   `slug_namespace` table and its triggers. Back up the database before the upgrade.
 - `--disable-api` also turns off the file API. The `GET`/`HEAD` pages `/files`,
-  `/files/{id}/edit` and `/files/{id}/download` and the file page at `/{id}` stay available;
-  upload, change and delete are off.
+  `/files/{id}/edit` (redirect) and `/files/{id}/download`, the download form
+  `POST /files/{id}/download` and the file page at `/{id}` stay available; upload, change and
+  delete are off.
 - The footer text is "Markdown notes, short links & files" when files are on.
+
+### Fixed
+
+- A short link keeps the `#fragment` of its target URL. Before, the server saved
+  `https://example.com/page#part` as `https://example.com/page%23part`, and the redirect went to
+  a page that does not exist. The cause was the `uri` decoder of ogen, which keeps the fragment in
+  the path. Links that you saved before this fix keep `%23`: edit their target URL again.
 
 ### Security
 
@@ -85,6 +116,15 @@ v0.5.0 follows **v0.4.0**.
   fails after the record is gone, the server logs a warning and increments
   `padmark_files_storage_errors_total{op="delete"}`.
 - A plain `http://` S3 endpoint other than a loopback address gives a warning at startup.
+- `POST /files` accepts only the five known text fields, each one time, and a maximum of
+  64 KiB before the `file` part; other forms get `400`. The transfer deadlines start only after
+  the fields are valid, so a client that sends no file part cannot hold memory.
+- A browser downloads a `burn_after_download` file only through the CSRF-protected form
+  `POST /files/{id}/download` of the file page. A `GET` with `Sec-Fetch-Site`, a prefetch or an
+  `Accept` that prefers HTML never deletes such a file; a browser goes to the file page.
+  Non-browser clients send `Accept: application/octet-stream`.
+- An intentional abort of a download after the first byte (`http.ErrAbortHandler`) passes
+  through `WithRecovery`; the server no longer logs it as an error "panic recovered".
 
 ### Tests
 

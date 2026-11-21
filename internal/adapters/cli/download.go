@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"unicode"
 
@@ -71,11 +72,9 @@ func downloadAction(ctx context.Context, cmd *urcli.Command) error {
 		return err
 	}
 
-	if output == "" {
-		output, err = serverFileName(ctx, apiClient, id)
-		if err != nil {
-			return fmt.Errorf("resolve destination: %w", err)
-		}
+	output, err = downloadDestination(ctx, apiClient, id, output)
+	if err != nil {
+		return fmt.Errorf("resolve destination: %w", err)
 	}
 
 	size, err := saveDownload(output, overwriteSetting(cmd.Bool(FlagForce)), download)
@@ -91,6 +90,60 @@ func downloadAction(ctx context.Context, cmd *urcli.Command) error {
 	}
 
 	return nil
+}
+
+// downloadDestination returns the local path of the download. An empty output or an existing
+// directory uses the safe file name from the server, as curl -O --output-dir does. All checks
+// occur before the download request: a burn-after-download file is deleted after that request,
+// so a later failure would lose the file.
+func downloadDestination(ctx context.Context, apiClient *padmark.Client, id, output string) (string, error) {
+	if output == "" {
+		return serverFileName(ctx, apiClient, id)
+	}
+
+	isDir, err := isDirectory(output)
+	if err != nil {
+		return "", err
+	}
+
+	if !isDir {
+		return output, nil
+	}
+
+	name, err := serverFileName(ctx, apiClient, id)
+	if err != nil {
+		return "", err
+	}
+
+	path := filepath.Join(output, name)
+
+	// The server name can be the name of a directory in output. A rename cannot replace a
+	// directory, so the command stops here, before the download.
+	isDir, err = isDirectory(path)
+	if err != nil {
+		return "", err
+	}
+
+	if isDir {
+		return "", fmt.Errorf("%w: %s", errOutputIsDirectory, path)
+	}
+
+	return path, nil
+}
+
+// isDirectory reports whether path is a directory. Lstat does not follow a symbolic link, so a
+// link is not a directory: the rename replaces the link and does not write through it.
+func isDirectory(path string) (bool, error) {
+	info, err := os.Lstat(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+
+	if err != nil {
+		return false, fmt.Errorf("check destination: %w", err)
+	}
+
+	return info.IsDir(), nil
 }
 
 // serverFileName reads the file name with GET /files/{id} before the download. That request
@@ -110,16 +163,54 @@ func serverFileName(ctx context.Context, cl *padmark.Client, id string) (string,
 	return safeFileName(info.Name)
 }
 
-// safeFileName accepts a server file name as a name in the current directory. The uploader
-// chooses the name, so a path separator, "." or ".." or a control character is refused.
+// safeFileName returns a server file name that is safe as a name in the current directory.
+// The uploader chooses the name, so the function refuses a name that can do harm on the local
+// system. Refused names start with ".", "-" or "~" (hidden files such as .zshenv, command
+// options, home paths), contain a path separator, ":" or a control character, or are Windows
+// device names. It removes format characters (Unicode category Cf) first, because bidirectional
+// controls can show a different extension than the real one. A refused name stops the
+// command: the user can choose a name with --output.
 func safeFileName(name string) (string, error) {
-	unsafe := name == "" || name == "." || name == ".." ||
-		strings.ContainsAny(name, `/\`) || strings.ContainsFunc(name, unicode.IsControl)
-	if unsafe {
+	clean := strings.Map(func(char rune) rune {
+		if unicode.Is(unicode.Cf, char) {
+			return -1
+		}
+
+		return char
+	}, name)
+
+	if unsafeFileName(clean) {
 		return "", fmt.Errorf("%w: %q", errUnsafeFileName, name)
 	}
 
-	return name, nil
+	return clean, nil
+}
+
+// unsafeFileName reports whether name is not safe as a local file name. A name that starts
+// with "." also covers "." and "..".
+func unsafeFileName(name string) bool {
+	return name == "" || strings.ContainsRune(".-~", rune(name[0])) ||
+		strings.ContainsAny(name, `/\:`) || strings.ContainsFunc(name, unicode.IsControl) ||
+		isWindowsDeviceName(name)
+}
+
+// isWindowsDeviceName reports whether Windows opens name as a device and not as a file. Windows
+// ignores the extension and the case, so "nul.txt" and "Com1.log" are devices too.
+func isWindowsDeviceName(name string) bool {
+	stem, _, _ := strings.Cut(name, ".")
+	stem = strings.ToUpper(strings.TrimRight(stem, " "))
+
+	if slices.Contains([]string{"CON", "PRN", "AUX", "NUL"}, stem) {
+		return true
+	}
+
+	if len(stem) != len("COM1") || (!strings.HasPrefix(stem, "COM") && !strings.HasPrefix(stem, "LPT")) {
+		return false
+	}
+
+	digit := stem[len("COM")]
+
+	return digit >= '1' && digit <= '9'
 }
 
 // overwriteSetting is the value of --force. The named type keeps the setting out of a bare bool

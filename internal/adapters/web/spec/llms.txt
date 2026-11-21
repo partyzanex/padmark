@@ -8,8 +8,10 @@ base explicitly. The linked reference and OpenAPI are embedded in the same serve
 use the target instance's documents together when checking API compatibility.
 
 Reading a note increments `views` and can start or complete burn-after-reading. Following
-`/{id}` can consume a burn-after-click link. Use documentation or `/healthz` for discovery;
-read content or follow redirects only when the user intends it.
+`/{id}` can consume a burn-after-click link. `GET /links/{id}` reads a link without a redirect;
+a client that prefers `text/html` there gets the browser page, so send
+`Accept: application/json`. Use documentation or `/healthz` for discovery; read content or
+follow redirects only when the user intends it.
 
 Downloading a file increments `downloads` and can delete a burn-after-download file. Use
 `GET /files/{id}` to read the file description without a download. Files are optional on each

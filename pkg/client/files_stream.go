@@ -41,7 +41,9 @@ var (
 	// ErrIncompleteDownload reports a download that stopped before Content-Length bytes.
 	// Discard the data written to dst.
 	ErrIncompleteDownload = errors.New("incomplete file download")
-	errEmptyFileID        = errors.New("file id is empty")
+	// ErrInvalidFileID reports a file ID that is empty, "." or "..". These values change the
+	// route of the request path, so the client does not send them.
+	ErrInvalidFileID = errors.New(`file id is empty, "." or ".."`)
 )
 
 // UploadFileOptions holds the optional fields of an upload. The zero value uploads a public
@@ -95,10 +97,14 @@ func (e *APIError) Error() string {
 // does not keep the file in memory. The text fields go before the "file" part, as the server
 // requires. name becomes the file name on the server.
 //
-// UploadFile reads body until io.EOF in a different goroutine. It returns only after that
-// goroutine stops, so the caller can close body after the return. The request uses the HTTP
-// client of the Client (WithClient), so it has the same authorization headers as the generated
-// operations. A per-request timeout of that HTTP client also limits the full upload.
+// UploadFile reads body until io.EOF in a different goroutine. UploadFile does not close body.
+// After a successful upload, that goroutine has stopped when UploadFile returns, so the caller
+// can close body. After an error, UploadFile does not wait for the goroutine: a body.Read call
+// that blocks (for example, on a terminal or a pipe) must not stop the return when ctx is done
+// or the server answered with an error. Thus body can get one more Read call after an error
+// return. When that call returns, the goroutine stops. The request uses the HTTP client of the
+// Client (WithClient), so it has the same authorization headers as the generated operations.
+// A per-request timeout of that HTTP client also limits the full upload.
 //
 // Errors are fail-hard. A response with an error status returns *APIError (413 when the file
 // is larger than the server limit). A transport or read error is returned with context.
@@ -120,28 +126,46 @@ func (c *Client) UploadFile(
 		writer.CloseWithError(writeUploadForm(form, fields, name, body))
 	}()
 
-	// stopForm closes the read end so that the form goroutine stops, also when the server
-	// answered before it read the full body. Then it waits, so body is not read after the return.
-	stopForm := func() {
-		_ = reader.Close()
+	// stopForm closes the read end of the pipe. A blocked pipe read and the next write of the
+	// form goroutine then return an error.
+	stopForm := func() { _ = reader.Close() }
 
-		<-done
-	}
+	// Closing the read end stops the form goroutine at its next write, also when the server
+	// answered before it read the full body.
+	defer stopForm()
+
+	// On cancellation, http.Transport returns from Do only after its body read stops. A blocked
+	// body.Read also blocks that pipe read, so the pipe closes when ctx is done.
+	stopOnCancel := context.AfterFunc(ctx, stopForm)
+	defer stopOnCancel()
 
 	resp, err := c.sendUpload(ctx, reader, form.FormDataContentType())
 	if err != nil {
-		stopForm()
+		// The closed pipe can stop the transport before it sees ctx. The context error then
+		// stays in the chain, so errors.Is(err, context.Canceled) is true for the caller.
+		ctxErr := ctx.Err()
+		if ctxErr != nil && !errors.Is(err, ctxErr) {
+			return nil, fmt.Errorf("upload stopped: %w: %w", ctxErr, err)
+		}
 
 		return nil, err
 	}
 
-	// Read the response before stopForm: a server that answers early (413) can close the
-	// connection when the body stops, and the response body must arrive first.
+	// Read the response before the deferred stopForm: a server that answers early (413) can
+	// close the connection when the body stops, and the response body must arrive first.
 	created, err := readUploadResponse(resp)
+	if err != nil {
+		return nil, err
+	}
 
-	stopForm()
+	// The server answered 201 after it read the full form, so the goroutine stops soon. The
+	// wait keeps the godoc promise that body is not read after a successful return.
+	select {
+	case <-done:
+	case <-ctx.Done():
+	}
 
-	return created, err
+	return created, nil
 }
 
 func readUploadResponse(resp *http.Response) (*CreateFileResponse, error) {
@@ -236,10 +260,11 @@ func (c *Client) sendUpload(ctx context.Context, body io.Reader, contentType str
 
 // fileURL returns the URL of /files, or of /files/{id}/{suffix...} when id is given. JoinPath
 // reads each element as an escaped path, so each element is escaped first: a "/" or "%" in id
-// stays in one path segment.
+// stays in one path segment. PathEscape keeps "." and "..", and JoinPath resolves them, so
+// fileURL refuses these IDs: DownloadFile with ".." would send GET /download.
 func (c *Client) fileURL(ctx context.Context, idAndSuffix ...string) (string, error) {
-	if len(idAndSuffix) > 0 && idAndSuffix[0] == "" {
-		return "", errEmptyFileID
+	if len(idAndSuffix) > 0 && (idAndSuffix[0] == "" || idAndSuffix[0] == "." || idAndSuffix[0] == "..") {
+		return "", ErrInvalidFileID
 	}
 
 	segments := make([]string, 0, len(idAndSuffix)+1)

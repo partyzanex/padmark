@@ -88,7 +88,9 @@ func (f *File) VisibleTo(callerID uuid.UUID, authenticated bool) bool {
 
 // CleanFileName returns the base name of an uploaded file name. It removes the directory part
 // that some clients send, and control characters, because the name goes into a
-// Content-Disposition header. It returns ErrInvalidFileName for an empty or too long result.
+// Content-Disposition header. It also removes format characters (Unicode category Cf), such as
+// bidirectional controls and zero-width characters: U+202E can show "invoice\u202Efdp.exe" as
+// "invoiceexe.pdf". It returns ErrInvalidFileName for an empty or too long result.
 func CleanFileName(name string) (string, error) {
 	if !utf8.ValidString(name) {
 		return "", ErrInvalidFileName
@@ -100,7 +102,7 @@ func CleanFileName(name string) (string, error) {
 	}
 
 	base = strings.Map(func(char rune) rune {
-		if unicode.IsControl(char) {
+		if unicode.IsControl(char) || unicode.Is(unicode.Cf, char) {
 			return -1
 		}
 

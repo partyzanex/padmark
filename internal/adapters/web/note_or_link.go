@@ -61,3 +61,21 @@ func (h *Handler) serveFileIfExists(w http.ResponseWriter, r *http.Request, id s
 
 	return true
 }
+
+// EditPage handles GET /edit/{id...}: the editor of the note, short link or file with this slug,
+// so that the three kinds of records have one editor URL. It reads the records in the order of
+// GetNoteOrLink: the note, then the short link, then the file. A short link or file slug never
+// contains "/", so a multi-segment slug is always a note. Each editor reads only the record: to
+// open an editor never counts a view and never consumes a burn record.
+func (h *Handler) EditPage(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	note, err := h.NoteHandler.manager.Peek(r.Context(), id)
+	if errors.Is(err, domain.ErrNotFound) && !strings.Contains(id, "/") {
+		if h.editLinkIfExists(w, r, id) || h.files.editFileIfExists(w, r, id) {
+			return
+		}
+	}
+
+	h.editNote(w, r, id, note, err)
+}

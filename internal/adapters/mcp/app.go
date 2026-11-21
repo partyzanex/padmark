@@ -59,16 +59,36 @@ func NewApp() *urcli.Command {
 				flag.Usage = "Allow sending the bearer token over plain HTTP to a non-loopback host " +
 					"(loopback hosts only warn); default refuses (env: PADMARK_ALLOW_INSECURE_HTTP)"
 			}),
-			clifactory.StringFlag(func(flag *urcli.StringFlag) {
-				flag.Name = FlagUploadRoot
-				flag.Sources = urcli.EnvVars(EnvUploadRoot)
-				flag.Value = DefaultUploadRoot
-				flag.Usage = "Directory from which upload_file may read files; empty turns uploads off " +
-					"(env: PADMARK_MCP_UPLOAD_ROOT)"
-			}),
 		}
+		command.Flags = append(command.Flags, uploadFlags()...)
 		command.Action = runAction
 	})
+}
+
+// uploadFlags returns the flags that limit upload_file.
+func uploadFlags() []urcli.Flag {
+	return []urcli.Flag{
+		clifactory.StringFlag(func(flag *urcli.StringFlag) {
+			flag.Name = FlagUploadRoot
+			flag.Sources = urcli.EnvVars(EnvUploadRoot)
+			flag.Value = DefaultUploadRoot
+			flag.Usage = "Directory from which upload_file may read files; empty turns uploads off. " +
+				"Do not put secrets in it (env: PADMARK_MCP_UPLOAD_ROOT)"
+		}),
+		clifactory.BoolFlag(func(flag *urcli.BoolFlag) {
+			flag.Name = FlagUploadAllowHidden
+			flag.Sources = urcli.EnvVars(EnvUploadAllowHidden)
+			flag.Value = DefaultUploadAllowHidden
+			flag.Usage = "Let upload_file read paths with names that start with a dot, such as .env " +
+				"(env: PADMARK_MCP_UPLOAD_ALLOW_HIDDEN)"
+		}),
+		clifactory.BoolFlag(func(flag *urcli.BoolFlag) {
+			flag.Name = FlagUploadAllowSlug
+			flag.Sources = urcli.EnvVars(EnvUploadAllowSlug)
+			flag.Value = DefaultUploadAllowSlug
+			flag.Usage = "Let upload_file send the slug that the agent gives (env: PADMARK_MCP_UPLOAD_ALLOW_SLUG)"
+		}),
+	}
 }
 
 // stderrWriter resolves the command's error output, falling back to os.Stderr when unset.
@@ -99,10 +119,31 @@ func runAction(ctx context.Context, cmd *urcli.Command) error {
 		return fmt.Errorf("check --%s: %w", FlagUploadRoot, err)
 	}
 
-	cl, err := newPadmarkClient(cmd)
+	clients, err := newPadmarkClients(cmd)
 	if err != nil {
 		return fmt.Errorf("create API client: %w", err)
 	}
 
-	return errorcontext.Wrap(NewManager(cl, cl, log, WithUploadRoot(uploadRoot)).Run(ctx), "run server")
+	mgr := NewManager(clients.api, clients.files, log, managerOptions(cmd, uploadRoot, clients)...)
+
+	return errorcontext.Wrap(mgr.Run(ctx), "run server")
+}
+
+// managerOptions converts the upload flags and the token state of clients into Manager options.
+func managerOptions(cmd *urcli.Command, uploadRoot string, clients *padmarkClients) []Option {
+	opts := []Option{WithUploadRoot(uploadRoot)}
+
+	if cmd.Bool(FlagUploadAllowHidden) {
+		opts = append(opts, WithUploadHidden())
+	}
+
+	if cmd.Bool(FlagUploadAllowSlug) {
+		opts = append(opts, WithUploadSlug())
+	}
+
+	if clients.hasToken {
+		opts = append(opts, WithAccountToken())
+	}
+
+	return opts
 }

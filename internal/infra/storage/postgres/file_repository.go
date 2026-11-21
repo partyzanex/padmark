@@ -12,6 +12,7 @@ import (
 	"github.com/uptrace/bun/driver/pgdriver"
 
 	"github.com/partyzanex/padmark/internal/domain"
+	"github.com/partyzanex/padmark/internal/usecases/files"
 )
 
 // file is the database model for a published file.
@@ -21,6 +22,8 @@ type file struct {
 	CreatedAt         time.Time  `bun:"created_at"`
 	ExpiresAt         *time.Time `bun:"expires_at"`
 	OwnerID           *uuid.UUID `bun:"owner_id"`
+	BurnClaim         *string    `bun:"burn_claim"`
+	BurnClaimUntil    *time.Time `bun:"burn_claim_until"`
 	ID                string     `bun:"id,pk"`
 	ObjectKey         string     `bun:"object_key"`
 	SealedMeta        string     `bun:"sealed_meta"`
@@ -59,14 +62,23 @@ func fileToDomain(row *file) *domain.File {
 	}
 }
 
-// visibleWhere is the SQL form of domain.File.VisibleTo. Storage checks it again in each
-// write, so a concurrent privacy change cannot let an old read change the record.
-const visibleWhere = "privacy = ? OR (privacy = ? AND ?) OR (privacy = ? AND owner_id = ? AND ?)"
+const (
+	// visibleWhere is the SQL form of domain.File.VisibleTo. Storage checks it again in each
+	// write, so a concurrent privacy change cannot let an old read change the record. The
+	// first parameter is AccessOptions.SkipPrivacy.
+	visibleWhere = "? OR privacy = ? OR (privacy = ? AND ?) OR (privacy = ? AND owner_id = ? AND ?)"
+	// liveWhere selects a record that is not expired at the time parameter.
+	liveWhere = "expires_at IS NULL OR expires_at >= ?"
+	// unclaimedWhere selects a record without a claim, or with a stale claim, at the time
+	// parameter.
+	unclaimedWhere = "burn_claim_until IS NULL OR burn_claim_until <= ?"
+)
 
-func visibleArgs(callerID uuid.UUID, authenticated bool) []any {
+func visibleArgs(reader files.AccessOptions) []any {
 	return []any{
-		domain.PrivacyPublic, domain.PrivacyAuthenticated, authenticated,
-		domain.PrivacyOwner, callerID, callerID != uuid.Nil,
+		reader.SkipPrivacy,
+		domain.PrivacyPublic, domain.PrivacyAuthenticated, reader.Authenticated,
+		domain.PrivacyOwner, reader.CallerID, reader.CallerID != uuid.Nil,
 	}
 }
 
@@ -78,6 +90,8 @@ func (r *FileRepository) Create(ctx context.Context, domFile *domain.File) error
 		CreatedAt:         domFile.CreatedAt,
 		ExpiresAt:         domFile.ExpiresAt,
 		OwnerID:           domFile.OwnerID,
+		BurnClaim:         nil,
+		BurnClaimUntil:    nil,
 		ID:                domFile.ID,
 		ObjectKey:         domFile.ObjectKey,
 		SealedMeta:        domFile.SealedMeta,
@@ -101,11 +115,12 @@ func (r *FileRepository) Create(ctx context.Context, domFile *domain.File) error
 	return nil
 }
 
-// GetByID returns the file record with the ID HashSlug(slug).
+// GetByID returns the file record with the ID HashSlug(slug). A record that a burn download
+// claims is not found until the claim ends or becomes stale.
 func (r *FileRepository) GetByID(ctx context.Context, id string) (*domain.File, error) {
 	var row file
 
-	err := r.db.NewSelect().Model(&row).Where("id = ?", id).Scan(ctx)
+	err := r.db.NewSelect().Model(&row).Where("id = ?", id).Where(unclaimedWhere, time.Now()).Scan(ctx)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, domain.ErrNotFound
@@ -117,7 +132,7 @@ func (r *FileRepository) GetByID(ctx context.Context, id string) (*domain.File, 
 	return fileToDomain(&row), nil
 }
 
-// Exists reports whether a file record has the ID.
+// Exists reports whether a file record has the ID. A claimed record also counts.
 func (r *FileRepository) Exists(ctx context.Context, id string) (bool, error) {
 	exists, err := r.db.NewSelect().Model((*file)(nil)).Where("id = ?", id).Exists(ctx)
 	if err != nil {
@@ -127,81 +142,147 @@ func (r *FileRepository) Exists(ctx context.Context, id string) (bool, error) {
 	return exists, nil
 }
 
-// Delete removes the file record and returns it.
-func (r *FileRepository) Delete(ctx context.Context, id string) (*domain.File, error) {
-	var row file
+// Delete removes the file record with id and objectKey.
+func (r *FileRepository) Delete(ctx context.Context, id, objectKey string) error {
+	result, err := r.db.NewDelete().Model((*file)(nil)).
+		Where("id = ?", id).Where("object_key = ?", objectKey).Exec(ctx)
 
-	err := r.db.NewDelete().Model(&row).Where("id = ?", id).Returning("*").Scan(ctx)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, domain.ErrNotFound
-		}
-
-		return nil, fmt.Errorf("postgres delete file: %w", err)
-	}
-
-	return fileToDomain(&row), nil
+	return oneFileRow("postgres delete file", result, err)
 }
 
-// Update writes the editable fields of the record: expiry, privacy and burn after download.
-// It does not change the content, the sealed metadata, the object key or the download counter.
-func (r *FileRepository) Update(ctx context.Context, domFile *domain.File) error {
-	result, err := r.db.NewUpdate().TableExpr("files").
-		Set("expires_at = ?", domFile.ExpiresAt).
-		Set("privacy = ?", privacyVal(domFile.Privacy)).
-		Set("burn_after_download = ?", domFile.BurnAfterDownload).
-		Where("id = ?", domFile.ID).Exec(ctx)
-	if err != nil {
-		return fmt.Errorf("postgres update file: %w", err)
-	}
-
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("postgres file rowsaffected: %w", err)
-	}
-
-	if affected == 0 {
-		return domain.ErrNotFound
-	}
-
-	return nil
-}
-
-// ConsumeVisible deletes and returns the record when it is visible to the reader and it is
-// expired, or it is a burn file and allowBurn is true.
-func (r *FileRepository) ConsumeVisible(
-	ctx context.Context, id string, callerID uuid.UUID, authenticated, allowBurn bool,
-) (*domain.File, error) {
-	var row file
-
-	err := r.db.NewDelete().Model(&row).Where("id = ?", id).
-		Where("(expires_at IS NOT NULL AND expires_at <= ?) OR (burn_after_download AND ?)", time.Now(), allowBurn).
-		Where(visibleWhere, visibleArgs(callerID, authenticated)...).
-		Returning("*").Scan(ctx)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, domain.ErrNotFound
-		}
-
-		return nil, fmt.Errorf("postgres consume file: %w", err)
-	}
-
-	return fileToDomain(&row), nil
-}
-
-// IncrementDownloadsVisible counts a download while the record is visible to the reader.
-func (r *FileRepository) IncrementDownloadsVisible(
-	ctx context.Context, id string, callerID uuid.UUID, authenticated bool,
+// Update writes the fields that opts sets on the record with id and objectKey, while the
+// record is not expired at now. It does not change the content, the sealed metadata or the
+// download counter.
+func (r *FileRepository) Update(
+	ctx context.Context, id, objectKey string, opts files.UpdateOptions, now time.Time,
 ) error {
-	result, err := r.db.NewUpdate().TableExpr("files").Set("downloads = downloads + 1").Where("id = ?", id).
-		Where(visibleWhere, visibleArgs(callerID, authenticated)...).Exec(ctx)
-	if err != nil {
-		return fmt.Errorf("postgres count file download: %w", err)
+	query := r.db.NewUpdate().TableExpr("files").
+		Where("id = ?", id).Where("object_key = ?", objectKey).Where(liveWhere, now)
+
+	changes := fileChanges(&opts)
+	for i := range changes {
+		query = query.Set(changes[i].expr, changes[i].args...)
 	}
 
-	affected, err := result.RowsAffected()
+	result, err := query.Exec(ctx)
+
+	return oneFileRow("postgres update file", result, err)
+}
+
+// ClaimBurn marks a visible, live burn record without a live claim as claimed by claim.Token.
+// The UPDATE locks the row and checks the conditions again after the lock, so of parallel
+// claims only one changes the row.
+func (r *FileRepository) ClaimBurn(ctx context.Context, claim *files.BurnClaim) error {
+	result, err := r.db.NewUpdate().TableExpr("files").
+		Set("burn_claim = ?", claim.Token).
+		Set("burn_claim_until = ?", claim.Until).
+		Where("id = ?", claim.ID).Where("object_key = ?", claim.ObjectKey).
+		Where("burn_after_download").
+		Where(liveWhere, claim.Now).
+		Where(unclaimedWhere, claim.Now).
+		Where(visibleWhere, visibleArgs(claim.Reader)...).
+		Exec(ctx)
+
+	return oneFileRow("postgres claim burn file", result, err)
+}
+
+// ReleaseBurn removes the claim from the record.
+func (r *FileRepository) ReleaseBurn(ctx context.Context, claim *files.BurnClaim) error {
+	result, err := r.db.NewUpdate().TableExpr("files").
+		Set("burn_claim = NULL").Set("burn_claim_until = NULL").
+		Where("id = ?", claim.ID).Where("object_key = ?", claim.ObjectKey).
+		Where("burn_claim = ?", claim.Token).Exec(ctx)
+
+	return oneFileRow("postgres release burn file", result, err)
+}
+
+// IncrementDownloadsVisible counts a download while the record is visible to the reader, is
+// not a burn file and is not expired.
+func (r *FileRepository) IncrementDownloadsVisible(
+	ctx context.Context, id, objectKey string, reader files.AccessOptions,
+) error {
+	result, err := r.db.NewUpdate().TableExpr("files").Set("downloads = downloads + 1").
+		Where("id = ?", id).Where("object_key = ?", objectKey).
+		Where("NOT burn_after_download").
+		Where(liveWhere, time.Now()).
+		Where(visibleWhere, visibleArgs(reader)...).Exec(ctx)
+
+	return oneFileRow("postgres count file download", result, err)
+}
+
+// ListExpired returns at most limit records that expired before now and have no live claim,
+// the oldest expiry first. Only ID and ObjectKey are set.
+func (r *FileRepository) ListExpired(ctx context.Context, now time.Time, limit int) ([]*domain.File, error) {
+	var rows []file
+
+	err := r.db.NewSelect().Model(&rows).Column("id", "object_key").
+		Where("expires_at IS NOT NULL AND expires_at < ?", now).
+		Where(unclaimedWhere, now).
+		OrderExpr("expires_at").Limit(int64(limit)).Scan(ctx)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("postgres list expired files: %w", err)
+	}
+
+	expired := make([]*domain.File, 0, len(rows))
+	for i := range rows {
+		expired = append(expired, fileToDomain(&rows[i]))
+	}
+
+	return expired, nil
+}
+
+// DeleteExpired removes the record with id and objectKey while it is expired at now and has
+// no live claim.
+func (r *FileRepository) DeleteExpired(ctx context.Context, id, objectKey string, now time.Time) error {
+	result, err := r.db.NewDelete().Model((*file)(nil)).
+		Where("id = ?", id).Where("object_key = ?", objectKey).
+		Where("expires_at IS NOT NULL AND expires_at < ?", now).
+		Where(unclaimedWhere, now).Exec(ctx)
+
+	return oneFileRow("postgres delete expired file", result, err)
+}
+
+// columnChange is one SET clause of an UPDATE.
+type columnChange struct {
+	expr string
+	args []any
+}
+
+// fileChanges returns a SET clause for each field that opts sets.
+func fileChanges(opts *files.UpdateOptions) []columnChange {
+	var changes []columnChange
+
+	if opts.ClearExpiry {
+		changes = append(changes, columnChange{expr: "expires_at = NULL", args: nil})
+	} else if opts.ExpiresAt != nil {
+		changes = append(changes, columnChange{expr: "expires_at = ?", args: []any{*opts.ExpiresAt}})
+	}
+
+	if opts.Privacy != nil {
+		changes = append(changes, columnChange{expr: "privacy = ?", args: []any{privacyVal(opts.Privacy)}})
+	}
+
+	if opts.BurnAfterDownload != nil {
+		changes = append(changes, columnChange{expr: "burn_after_download = ?", args: []any{*opts.BurnAfterDownload}})
+	}
+
+	if len(changes) == 0 {
+		// An UPDATE needs a SET clause. This one changes nothing and still finds the row.
+		changes = append(changes, columnChange{expr: "downloads = downloads", args: nil})
+	}
+
+	return changes
+}
+
+// oneFileRow returns domain.ErrNotFound when the statement changed no row.
+func oneFileRow(operation string, result sql.Result, err error) error {
 	if err != nil {
-		return fmt.Errorf("postgres file rowsaffected: %w", err)
+		return fmt.Errorf("%s: %w", operation, err)
+	}
+
+	affected, rowsErr := result.RowsAffected()
+	if rowsErr != nil {
+		return fmt.Errorf("%s: rows affected: %w", operation, rowsErr)
 	}
 
 	if affected == 0 {
@@ -209,18 +290,4 @@ func (r *FileRepository) IncrementDownloadsVisible(
 	}
 
 	return nil
-}
-
-// DeleteExpired removes the records that expired before now and returns their object keys.
-func (r *FileRepository) DeleteExpired(ctx context.Context, now time.Time) ([]string, error) {
-	var keys []string
-
-	err := r.db.NewDelete().Model((*file)(nil)).
-		Where("expires_at IS NOT NULL AND expires_at < ?", now).
-		Returning("object_key").Scan(ctx, &keys)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return nil, fmt.Errorf("postgres delete expired files: %w", err)
-	}
-
-	return keys, nil
 }

@@ -15,6 +15,10 @@ const (
 	FlagLogLevel = "log-level"
 	// FlagUploadRoot is the only local directory from which upload_file reads files.
 	FlagUploadRoot = "upload-root"
+	// FlagUploadAllowHidden lets upload_file read a path with a name that starts with a dot.
+	FlagUploadAllowHidden = "upload-allow-hidden"
+	// FlagUploadAllowSlug lets upload_file send the slug that the agent gives.
+	FlagUploadAllowSlug = "upload-allow-slug"
 )
 
 // Environment variable names, shared with padmark-cli: one .env (PADMARK_TOKEN, PADMARK_URL,
@@ -29,12 +33,24 @@ const (
 	EnvLogLevel = "PADMARK_LOG_LEVEL"
 	// EnvUploadRoot is the environment source of --upload-root. Only padmark-mcp reads it.
 	EnvUploadRoot = "PADMARK_MCP_UPLOAD_ROOT"
+	// EnvUploadAllowHidden is the environment source of --upload-allow-hidden.
+	EnvUploadAllowHidden = "PADMARK_MCP_UPLOAD_ALLOW_HIDDEN"
+	// EnvUploadAllowSlug is the environment source of --upload-allow-slug.
+	EnvUploadAllowSlug = "PADMARK_MCP_UPLOAD_ALLOW_SLUG"
 )
 
 // DefaultUploadRoot is empty: upload_file refuses all paths until the operator sets a root.
 // The agent host selects the working directory of a stdio server, often the home directory.
 // A working-directory default could then send ~/.ssh or ~/.aws to a public URL.
 const DefaultUploadRoot = ""
+
+// DefaultUploadAllowHidden refuses names that start with a dot, such as .env, .git or .ssh.
+// These names often hold secrets, and an agent that follows injected text can ask for them.
+const DefaultUploadAllowHidden = false
+
+// DefaultUploadAllowSlug refuses an agent slug. With a known slug, injected text could make the
+// agent publish a file at an address that the attacker knows before the upload.
+const DefaultUploadAllowSlug = false
 
 // DefaultLogLevel keeps per-call debug records out of stderr unless asked for.
 const DefaultLogLevel = "info"

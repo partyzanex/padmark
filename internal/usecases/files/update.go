@@ -60,15 +60,24 @@ func (m *Manager) Update(
 		return nil, fmt.Errorf("validate file: %w", err)
 	}
 
-	err = m.deps.Storage.Update(ctx, updated)
-	if err != nil {
-		return nil, fmt.Errorf("update file: %w", err)
-	}
-
-	// The response shows the file name, which is only in the sealed metadata.
+	// The response shows the file name, which is only in the sealed metadata. A record that
+	// cannot be opened is not found, so Update must not change it.
 	err = m.openMeta(ctx, slug, updated)
 	if err != nil {
 		return nil, err
+	}
+
+	// The update response does not need the content key.
+	dropKey(updated)
+
+	if opts.changes() {
+		// Only the fields in opts are written: a parallel update of a different field on a
+		// different server process stays. The object key stops a write to a new file that took
+		// the slug after the read.
+		err = m.deps.Storage.Update(ctx, dbID, existing.ObjectKey, opts, time.Now())
+		if err != nil {
+			return nil, fmt.Errorf("update file: %w", err)
+		}
 	}
 
 	// The edit code is a secret of the create response. An update response does not show it.
@@ -77,6 +86,11 @@ func (m *Manager) Update(
 	m.deps.Log.DebugContext(ctx, "file updated", "id", dbID)
 
 	return updated, nil
+}
+
+// changes reports whether o changes a field.
+func (o *UpdateOptions) changes() bool {
+	return o.ClearExpiry || o.ExpiresAt != nil || o.Privacy != nil || o.BurnAfterDownload != nil
 }
 
 func applyUpdateOptions(existing *domain.File, opts UpdateOptions) *domain.File {

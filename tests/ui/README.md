@@ -12,8 +12,9 @@ They cover field entry, editor formatting, the Write/Split/Preview views and pre
 sanitization, validation,
 publish/save, clipboard actions, raw view, burn confirmation, theme persistence,
 setup/login, password changes, admin invites, keys and user revocation. Link scenarios cover
-creation, validation, failure/retry, editing/deletion, expiry preservation/reset, redirect
-settings, burn after click and owner-only access to the editor. File scenarios cover upload,
+creation, the link page, validation, failure/retry, editing/deletion, expiry
+preservation/reset, redirect settings, burn after click and owner-only access to the link page
+and the editor. File scenarios cover upload,
 the result page, the file page, download with a byte comparison, burn after download, changes
 to the lifetime, the privacy and burn after download, deletion with the edit code and by the
 owner, private files without a session and a canceled upload.
@@ -85,6 +86,11 @@ both screen sizes with a fresh server, context, diagnostics and failure artifact
 logo, the left and right content edges and the top edge of the editor and article cards.
 Add each new page to its scenarios, so a page that moves the frame fails the test. The `Files`
 scenario compares the file pages with the note editor of a server with files.
+
+`TestThemeFirstPaint` in `theme_paint_test.go` saves the light theme and opens the pages, also
+through the "New" and "Edit" actions. It records `data-theme` when the parser makes `<body>`,
+before the body scripts run, and requires the saved theme: a page must not paint the default
+theme first.
 
 `TestErrors` in `errors_test.go` opens each error of the web interface: the note and short-link
 and file forms, simulated server replies, the setup, sign-in, invite and change-password forms,

@@ -47,12 +47,21 @@ func (s *DeleteFileSuite) TearDownTest() {
 
 func (s *DeleteFileSuite) TestSuccess() {
 	out, err := runCLIOutput(s.T().Context(), "--url", s.server.URL, cmdDeleteFile,
-		"https://pad.example/files/"+testFileID, "--edit-code", "secret-code")
+		s.server.URL+"/files/"+testFileID, "--edit-code", "secret-code")
 	s.Require().NoError(err)
 
 	s.Equal("DELETE /files/f1le-id", s.method)
 	s.Equal("secret-code", s.editCode)
 	s.Equal("deleted f1le-id\n", out)
+}
+
+// TestURLOnOtherServer refuses a URL whose origin is not --url. The CLI would otherwise delete
+// the file with the same ID on the configured server.
+func (s *DeleteFileSuite) TestURLOnOtherServer() {
+	_, err := runCLIOutput(s.T().Context(), "--url", s.server.URL, cmdDeleteFile,
+		"https://pad.example/files/"+testFileID, "--edit-code", "secret-code")
+	s.Require().ErrorIs(err, errFileURLOrigin)
+	s.Empty(s.method)
 }
 
 func (s *DeleteFileSuite) TestOwnerWithoutEditCode() {

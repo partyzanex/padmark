@@ -235,12 +235,13 @@ func (s *FileSecuritySuite) TestFilePages_NotCached() {
 	router := s.newRouter(routerOptions{rateLimit: 0, accounts: false})
 	file := fileRecord("a.txt", 3, 0, false)
 
-	s.manager.EXPECT().Peek(gomock.Any(), "abc").Return(nil, domain.ErrNotFound)
+	s.manager.EXPECT().Peek(gomock.Any(), "abc").Return(nil, domain.ErrNotFound).Times(2)
 	s.linkManager.EXPECT().Redirect(gomock.Any(), "abc").Return(nil, domain.ErrNotFound)
+	s.linkManager.EXPECT().Peek(gomock.Any(), "abc").Return(nil, domain.ErrNotFound)
 	s.files.EXPECT().Peek(gomock.Any(), "abc").Return(file, nil).Times(2)
 	s.files.EXPECT().Info(gomock.Any(), "abc", access(false)).Return(file, nil)
 
-	for _, path := range []string{"/abc", "/files/abc/edit"} {
+	for _, path := range []string{"/abc", "/edit/abc"} {
 		rec := serveOnce(router, browserGet(path))
 
 		s.Require().Equal(http.StatusOK, rec.Code, path)
@@ -306,6 +307,7 @@ func (s *FileSecuritySuite) TestLogs_NoFileSecrets() {
 	s.files.EXPECT().Delete(gomock.Any(), slug, editCode, uuid.Nil).Return(errors.New("database is locked"))
 	s.files.EXPECT().Update(gomock.Any(), slug, editCode, uuid.Nil, gomock.Any()).
 		Return(nil, errors.New("database is locked"))
+	s.files.EXPECT().Info(gomock.Any(), slug, gomock.Any()).Return(nil, errors.New("metadata is locked"))
 
 	download := httptest.NewRequest(http.MethodGet, "/files/"+slug+"/download", nil)
 	download.Header.Set("Accept", "application/octet-stream")
@@ -320,10 +322,59 @@ func (s *FileSecuritySuite) TestLogs_NoFileSecrets() {
 	update.Header.Set("X-Edit-Code", editCode)
 	s.Equal(http.StatusInternalServerError, serveOnce(router, update).Code)
 
+	s.Equal(http.StatusInternalServerError,
+		serveOnce(router, httptest.NewRequest(http.MethodGet, "/files/"+slug, nil)).Code)
+
 	logs := s.logs.String()
 	s.Require().Contains(logs, "send file")
 	s.Require().Contains(logs, "update file failed")
+	// R-47: Metadata and Delete log the unknown errors behind a 500.
+	s.Require().Contains(logs, "metadata is locked")
+	s.Require().Contains(logs, "database is locked")
+	s.Require().Contains(logs, "file request failed")
 	s.NotContains(logs, slug)
 	s.NotContains(logs, fileName)
 	s.NotContains(logs, editCode)
+}
+
+// TestLogs_MalformedUploadIsQuiet (R-08): a damaged multipart body gets 400 and writes no error
+// record. No record contains the field values from the body, such as an edit code.
+func (s *FileSecuritySuite) TestLogs_MalformedUploadIsQuiet() {
+	const (
+		boundary = "XBOUNDARY"
+		editCode = "edit-secret-code"
+	)
+
+	router := s.newRouter(routerOptions{rateLimit: 0, accounts: false})
+	body := "--" + boundary + "\r\nContent-Disposition: form-data; name=\"edit_code\"\r\n\r\n" + editCode +
+		"\r\n--" + boundary + "\r\nbroken header " + editCode + "\r\n\r\nx\r\n"
+
+	req := httptest.NewRequest(http.MethodPost, "/files", strings.NewReader(body))
+	req.Header.Set("Content-Type", "multipart/form-data; boundary="+boundary)
+
+	rec := serveOnce(router, req)
+
+	s.Equal(http.StatusBadRequest, rec.Code)
+	s.NotContains(rec.Body.String(), editCode)
+	s.NotContains(s.logs.String(), editCode)
+	s.NotContains(s.logs.String(), "level=ERROR")
+}
+
+// TestLogs_CanceledUploadIsDebug (R-08): a canceled upload writes only a debug record.
+func (s *FileSecuritySuite) TestLogs_CanceledUploadIsDebug() {
+	router := s.newRouter(routerOptions{rateLimit: 0, accounts: false})
+	ctx, cancel := context.WithCancel(s.T().Context())
+
+	s.files.EXPECT().Create(gomock.Any(), "a.txt", gomock.Any(), gomock.Any()).
+		DoAndReturn(func(context.Context, string, io.Reader, files.CreateOptions) (*domain.File, error) {
+			cancel()
+
+			return nil, fmt.Errorf("upload file: %w", context.Canceled)
+		})
+
+	serveOnce(router, uploadRequest(nil, "a.txt", []byte("x")).WithContext(ctx))
+
+	s.Contains(s.logs.String(), "file upload canceled")
+	s.NotContains(s.logs.String(), "level=ERROR")
+	s.NotContains(s.logs.String(), "level=WARN")
 }

@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Padmark — Upload file</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    {{template "theme-head" .Nonce}}
     <link rel="stylesheet" href="/static/style.css?p={{styleVersion}}">
 </head>
 <body>
@@ -45,9 +46,9 @@
             </div>
         </section>
 
-        <aside class="card settings-panel" aria-label="File settings">
+        <aside class="card settings-panel" aria-label="Publish settings">
             <section class="settings-card" id="settingsSheet" aria-labelledby="sheetTitle">
-                {{template "sheet-head" "File settings"}}
+                {{template "sheet-head" "Publish settings"}}
 
                 <fieldset class="privacy-options" id="privacySelect">
                     <legend class="lbl">Who can download</legend>
@@ -93,6 +94,7 @@
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.6-4.5L4 8M4 4v4h4M4 13a8 8 0 0 0 14.6 4.5L20 16M20 20v-4h-4"/></svg>
                         </button>
                     </div>
+                    <span class="field-hint">Lets you edit or delete the file later.</span>
                 </div>
             </section>
 
@@ -249,7 +251,13 @@
 
     function finish(file) {
         if (file.edit_code) sessionStorage.setItem('padmark_file_edit_' + file.id, file.edit_code);
-        location.href = '/success?' + new URLSearchParams({kind: 'file', id: file.id});
+        // The success page reads the file record. If that read fails, it shows these values from
+        // the upload response, as the note and link pages do.
+        const params = new URLSearchParams({kind: 'file', id: file.id});
+        if (file.burn_after_download) params.set('burn', '1');
+        if (file.expires_at) params.set('expires', file.expires_at);
+        if (file.privacy) params.set('privacy', file.privacy);
+        location.href = '/success?' + params;
     }
 
     // XMLHttpRequest reports the upload progress; fetch does not.

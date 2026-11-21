@@ -4,6 +4,7 @@ import (
 	"io/fs"
 	"os"
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -81,4 +82,44 @@ func TestFileTemplatesUseErrorScript(t *testing.T) {
 		assert.Contains(t, string(src), `id="fileError"`, file)
 		assert.Contains(t, string(src), "fileErrorMessage(", file)
 	}
+}
+
+// TestThemedTemplatesApplyThemeInHead: each page with a theme applies the saved theme in <head>,
+// before the stylesheet. The theme-js script at the end of <body> runs after the browser can
+// paint, thus without theme-head a light page flashes in the default dark "dim" theme.
+func TestThemedTemplatesApplyThemeInHead(t *testing.T) {
+	const (
+		themeHead  = `{{template "theme-head" .Nonce}}`
+		stylesheet = `<link rel="stylesheet"`
+	)
+
+	pkgDir := os.DirFS(".")
+
+	files, err := fs.Glob(pkgDir, "templates/*.html")
+	require.NoError(t, err)
+
+	themed := 0
+
+	for _, file := range files {
+		src, err := fs.ReadFile(pkgDir, file)
+		require.NoError(t, err)
+
+		page := string(src)
+		if !strings.Contains(page, `{{template "theme-js"}}`) {
+			continue
+		}
+
+		themed++
+		head, _, found := strings.Cut(page, "</head>")
+		require.True(t, found, "%s has no </head>", file)
+
+		headAt := strings.Index(head, themeHead)
+		styleAt := strings.Index(head, stylesheet)
+
+		require.GreaterOrEqual(t, headAt, 0, "%s: <head> must include %s", file, themeHead)
+		require.GreaterOrEqual(t, styleAt, 0, "%s: <head> must include the stylesheet", file)
+		assert.Less(t, headAt, styleAt, "%s: theme-head must come before the stylesheet", file)
+	}
+
+	require.NotZero(t, themed, "expected templates that use theme-js")
 }

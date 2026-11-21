@@ -3,10 +3,15 @@ package mcp
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"maps"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
+	"testing/iotest"
 	"time"
 
 	"go.uber.org/mock/gomock"
@@ -44,7 +49,7 @@ func (s *ToolsSuite) TestUploadFile_SendsContentAndHidesEditCode() {
 
 func (s *ToolsSuite) TestUploadFile_PassesOptionsAndRevealsEditCode() {
 	ctx := s.T().Context()
-	root := s.useUploadRoot()
+	root := s.useUploadRoot(WithUploadSlug())
 	s.Require().NoError(os.Mkdir(filepath.Join(root, "sub"), 0o700))
 	s.writeFile(filepath.Join(root, "sub", "a.bin"), "x")
 
@@ -246,6 +251,8 @@ func (s *ToolsSuite) TestUpdateFile_RefusesBadInput() {
 	}{
 		"nothing to change":    {args: map[string]any{"id": "f"}, want: "nothing to change"},
 		"ttl and clear_expiry": {args: map[string]any{"id": "f", "ttl": 1, "clear_expiry": true}, want: "not both"},
+		"negative ttl":         {args: map[string]any{"id": "f", "ttl": -1}, want: errUpdateTTLRange.Error()},
+		"ttl above maximum":    {args: map[string]any{"id": "f", "ttl": maxTTLSeconds + 1}, want: errUpdateTTLRange.Error()},
 	}
 
 	for name, testCase := range cases {
@@ -300,17 +307,242 @@ func (s *ToolsSuite) TestDeleteFile_MapsErrors() {
 	}
 }
 
+// TestUploadFile_OutsidePathsShareOneError checks that each path outside the root gets the same
+// error text, without the path. A different text for a missing path would tell the agent which
+// files exist outside the root. No case reaches the server.
+func (s *ToolsSuite) TestUploadFile_OutsidePathsShareOneError() {
+	root := s.useUploadRoot()
+	outside := s.T().TempDir()
+	s.writeFile(filepath.Join(outside, "secret.txt"), "secret")
+	s.Require().NoError(os.Symlink(filepath.Join(outside, "secret.txt"), filepath.Join(root, "link.txt")))
+	s.Require().NoError(os.Symlink(outside, filepath.Join(root, "outdir")))
+	s.Require().NoError(os.Symlink(filepath.Join(outside, "missing.txt"), filepath.Join(root, "broken.txt")))
+
+	want := "open upload file: " + ErrPathOutsideRoot.Error()
+
+	cases := map[string]string{
+		"absolute existing file":        filepath.Join(outside, "secret.txt"),
+		"absolute missing file":         filepath.Join(outside, "missing.txt"),
+		"absolute missing directory":    filepath.Join(outside, "no-dir", "missing.txt"),
+		"relative missing file":         filepath.Join("..", filepath.Base(outside), "missing.txt"),
+		"relative missing far away":     filepath.Join("..", "..", "..", "..", "no-such-dir", "a.txt"),
+		"link to an existing file":      "link.txt",
+		"broken link to outside":        "broken.txt",
+		"linked directory, existing":    filepath.Join("outdir", "secret.txt"),
+		"linked directory, missing":     filepath.Join("outdir", "missing.txt"),
+		"linked directory, missing dir": filepath.Join("outdir", "no-dir", "missing.txt"),
+	}
+
+	for name, path := range cases {
+		s.Run(name, func() {
+			res := s.callTool(s.T().Context(), "upload_file", map[string]any{"path": path})
+
+			text := s.errorTextOf(res)
+			s.Equal(want, text)
+			s.NotContains(text, outside, "the error must not show a path outside the root")
+		})
+	}
+}
+
+// TestUploadFile_MissingFileInRootKeepsItsText checks that a missing path under the root still
+// gets its own text: it tells the agent nothing about the files outside the root.
+func (s *ToolsSuite) TestUploadFile_MissingFileInRootKeepsItsText() {
+	s.useUploadRoot()
+
+	res := s.callTool(s.T().Context(), "upload_file", map[string]any{"path": filepath.Join("sub", "a.txt")})
+
+	s.Equal(`open upload file: "`+filepath.Join("sub", "a.txt")+`": `+errNoSuchFile.Error(), s.errorTextOf(res))
+}
+
+// TestUploadFile_RefusesHiddenPaths covers the default refusal of names that start with a dot.
+// No case reaches the server.
+func (s *ToolsSuite) TestUploadFile_RefusesHiddenPaths() {
+	root := s.useUploadRoot()
+	s.writeFile(filepath.Join(root, ".env"), "TOKEN=x")
+	s.Require().NoError(os.MkdirAll(filepath.Join(root, ".git"), 0o700))
+	s.writeFile(filepath.Join(root, ".git", "config"), "x")
+	s.Require().NoError(os.Symlink(filepath.Join(root, ".env"), filepath.Join(root, "plain.txt")))
+
+	cases := map[string]string{
+		"hidden file":                   ".env",
+		"file in a hidden directory":    filepath.Join(".git", "config"),
+		"absolute hidden file":          filepath.Join(root, ".env"),
+		"plain link to a hidden file":   "plain.txt",
+		"missing file in hidden folder": filepath.Join(".ssh", "id_rsa"),
+	}
+
+	for name, path := range cases {
+		s.Run(name, func() {
+			res := s.callTool(s.T().Context(), "upload_file", map[string]any{"path": path})
+
+			s.Equal("open upload file: "+ErrHiddenPath.Error(), s.errorTextOf(res))
+		})
+	}
+}
+
+func (s *ToolsSuite) TestUploadFile_AllowsHiddenPathsWithOption() {
+	root := s.useUploadRoot(WithUploadHidden())
+	s.writeFile(filepath.Join(root, ".env"), "TOKEN=x")
+
+	s.files.EXPECT().UploadFile(gomock.Any(), ".env", gomock.Any(), gomock.Any()).
+		Return(testCreateFileResponse(s, "file123abc", "code-12345678"), nil)
+
+	res := s.callTool(s.T().Context(), "upload_file", map[string]any{"path": ".env"})
+
+	s.False(res.IsError, "the operator permitted hidden names")
+}
+
+// TestUploadFile_DefaultPrivacy checks the privacy that the proxy sends without a privacy field.
+func (s *ToolsSuite) TestUploadFile_DefaultPrivacy() {
+	cases := map[string]struct {
+		opts []Option
+		args map[string]any
+		want string
+	}{
+		"no token keeps the server default public": {opts: nil, args: map[string]any{}, want: ""},
+		"token makes owner the default": {
+			opts: []Option{WithAccountToken()}, args: map[string]any{}, want: "owner",
+		},
+		"explicit privacy wins over the default": {
+			opts: []Option{WithAccountToken()}, args: map[string]any{"privacy": "public"}, want: "public",
+		},
+	}
+
+	for name, testCase := range cases {
+		s.Run(name, func() {
+			root := s.useUploadRoot(testCase.opts...)
+			s.writeFile(filepath.Join(root, "a.txt"), "x")
+
+			s.files.EXPECT().UploadFile(gomock.Any(), "a.txt", gomock.Any(), gomock.Any()).
+				DoAndReturn(func(_ context.Context, _ string, _ io.Reader, opts padmark.UploadFileOptions) (
+					*padmark.CreateFileResponse, error,
+				) {
+					s.Equal(testCase.want, opts.Privacy)
+
+					return testCreateFileResponse(s, "file123abc", "code-12345678"), nil
+				})
+
+			args := map[string]any{"path": "a.txt"}
+			maps.Copy(args, testCase.args)
+
+			s.False(s.callTool(s.T().Context(), "upload_file", args).IsError)
+		})
+	}
+}
+
+func (s *ToolsSuite) TestUploadFile_RefusesSlugByDefault() {
+	root := s.useUploadRoot()
+	s.writeFile(filepath.Join(root, "a.txt"), "x")
+
+	res := s.callTool(s.T().Context(), "upload_file", map[string]any{"path": "a.txt", "slug": "known-id"})
+
+	s.Equal(ErrSlugOff.Error(), s.errorTextOf(res))
+}
+
+// TestUploadFile_RefusesTTLOutOfRange checks the TTL range before the conversion to
+// time.Duration. 18446744075 seconds would overflow to a TTL of about one second.
+func (s *ToolsSuite) TestUploadFile_RefusesTTLOutOfRange() {
+	root := s.useUploadRoot()
+	s.writeFile(filepath.Join(root, "a.txt"), "x")
+
+	for _, ttl := range []int64{0, -1, maxTTLSeconds + 1, 18446744075} {
+		s.Run(strconv.FormatInt(ttl, 10), func() {
+			res := s.callTool(s.T().Context(), "upload_file", map[string]any{"path": "a.txt", "ttl": ttl})
+
+			s.Equal(errUploadTTLRange.Error(), s.errorTextOf(res))
+		})
+	}
+}
+
+func (s *ToolsSuite) TestUploadFile_AcceptsMaximumTTL() {
+	root := s.useUploadRoot()
+	s.writeFile(filepath.Join(root, "a.txt"), "x")
+
+	s.files.EXPECT().UploadFile(gomock.Any(), "a.txt", gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, _ string, _ io.Reader, opts padmark.UploadFileOptions) (
+			*padmark.CreateFileResponse, error,
+		) {
+			s.Equal(time.Duration(maxTTLSeconds)*time.Second, opts.TTL)
+			s.Positive(opts.TTL, "the largest TTL does not overflow")
+
+			return testCreateFileResponse(s, "file123abc", "code-12345678"), nil
+		})
+
+	res := s.callTool(s.T().Context(), "upload_file", map[string]any{"path": "a.txt", "ttl": maxTTLSeconds})
+
+	s.False(res.IsError)
+}
+
+// TestUploadFile_MapsTimeoutAndReadErrors checks that a timeout and a local read error do not get
+// the transport text, which tells the agent to check that the server runs.
+func (s *ToolsSuite) TestUploadFile_MapsTimeoutAndReadErrors() {
+	root := s.useUploadRoot()
+	s.writeFile(filepath.Join(root, "a.txt"), "x")
+
+	s.Run("header timeout", func() {
+		s.files.EXPECT().UploadFile(gomock.Any(), "a.txt", gomock.Any(), gomock.Any()).
+			Return(nil, &url.Error{Op: "Post", URL: "http://pad.example.com/files", Err: timeoutError{}})
+
+		text := s.errorTextOf(s.callTool(s.T().Context(), "upload_file", map[string]any{"path": "a.txt"}))
+
+		s.Contains(text, ErrUploadTimeout.Error())
+		s.NotContains(text, "is padmark-server running")
+	})
+
+	s.Run("context deadline", func() {
+		s.files.EXPECT().UploadFile(gomock.Any(), "a.txt", gomock.Any(), gomock.Any()).
+			Return(nil, fmt.Errorf("send upload request: %w", context.DeadlineExceeded))
+
+		text := s.errorTextOf(s.callTool(s.T().Context(), "upload_file", map[string]any{"path": "a.txt"}))
+
+		s.Contains(text, ErrUploadTimeout.Error())
+	})
+
+	s.Run("local read error", func() {
+		diskErr := errors.New("input/output error")
+
+		s.files.EXPECT().UploadFile(gomock.Any(), "a.txt", gomock.Any(), gomock.Any()).
+			DoAndReturn(func(_ context.Context, _ string, body io.Reader, _ padmark.UploadFileOptions) (
+				*padmark.CreateFileResponse, error,
+			) {
+				// Replace the file source to make the read fail as a bad disk does.
+				recorder, ok := body.(*readErrRecorder)
+				s.Require().True(ok, "the tool wraps the file to record read errors")
+
+				recorder.reader = iotest.ErrReader(diskErr)
+
+				_, err := io.ReadAll(body)
+
+				return nil, fmt.Errorf("send upload request: %w", err)
+			})
+
+		text := s.errorTextOf(s.callTool(s.T().Context(), "upload_file", map[string]any{"path": "a.txt"}))
+
+		s.Contains(text, errReadLocalFile.Error())
+		s.Contains(text, diskErr.Error())
+		s.NotContains(text, "is padmark-server running")
+	})
+}
+
 // --- helpers ---
+
+// timeoutError is a network error with Timeout() true, as net/http returns for a header timeout.
+type timeoutError struct{}
+
+func (timeoutError) Error() string   { return "net/http: timeout awaiting response headers" }
+func (timeoutError) Timeout() bool   { return true }
+func (timeoutError) Temporary() bool { return true }
 
 // noCode returns an absent machine-readable error code.
 func noCode() padmark.OptString {
 	return padmark.OptString{Value: "", Set: false}
 }
 
-// useUploadRoot rebuilds the manager with a new temporary upload root and returns the root.
-func (s *ToolsSuite) useUploadRoot() string {
+// useUploadRoot rebuilds the manager with a new temporary upload root and the given options,
+// and returns the root.
+func (s *ToolsSuite) useUploadRoot(opts ...Option) string {
 	root := s.T().TempDir()
-	s.mgr = NewManager(s.cl, s.files, s.log, WithUploadRoot(root))
+	s.mgr = NewManager(s.cl, s.files, s.log, append([]Option{WithUploadRoot(root)}, opts...)...)
 
 	return root
 }

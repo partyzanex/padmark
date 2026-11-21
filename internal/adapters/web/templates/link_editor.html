@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Padmark — {{if .EditMode}}Edit link{{else}}Create link{{end}}</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    {{template "theme-head" .Nonce}}
     <link rel="stylesheet" href="/static/style.css?p={{styleVersion}}">
 </head>
 <body>
@@ -35,9 +36,9 @@
             </div>
         </section>
 
-        <aside class="card settings-panel" aria-label="Link settings">
+        <aside class="card settings-panel" aria-label="Publish settings">
             <section class="settings-card" id="settingsSheet" aria-labelledby="sheetTitle">
-                {{template "sheet-head" "Link settings"}}
+                {{template "sheet-head" "Publish settings"}}
 
                 <fieldset class="privacy-options" id="privacySelect">
                     <legend class="lbl">Who can follow</legend>
@@ -88,9 +89,9 @@
 
                 <div class="field-group">
                     {{if .EditMode}}
-                    <label class="field-label" for="editCodeInput">Edit code <span class="optional">· {{if .IsOwner}}optional for you{{else}}required to save{{end}}</span></label>
+                    <label class="field-label" for="editCodeInput">Edit code <span class="optional">· {{if .IsOwner}}optional, you created this link{{else}}required{{end}}</span></label>
                     <div class="field-box">
-                        <input type="password" id="editCodeInput" name="link_edit_code" autocomplete="new-password" placeholder="Original edit code">
+                        <input type="text" id="editCodeInput" name="link_edit_code" placeholder="Paste your edit code" autocomplete="off" autocapitalize="none" spellcheck="false">
                     </div>
                     {{else}}
                     <label class="field-label" for="editCodeInput">Edit code</label>
@@ -100,6 +101,7 @@
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.6-4.5L4 8M4 4v4h4M4 13a8 8 0 0 0 14.6 4.5L20 16M20 20v-4h-4"/></svg>
                         </button>
                     </div>
+                    <span class="field-hint">Lets you edit or delete the link later.</span>
                     {{end}}
                 </div>
             </section>
@@ -110,9 +112,9 @@
                 <p id="linkError" class="form-error" role="alert" hidden></p>
                 {{template "settings-toggle"}}
                 <div class="publish-block">
-                    <button type="submit" class="btn-publish" id="submitBtn" data-kbd="Ctrl ↵">{{if .EditMode}}Save link{{else}}Create link{{end}}</button>
-                    <p id="linkStatus" class="form-status" role="status"></p>
-                    {{if .EditMode}}<button type="button" class="btn-danger" id="deleteBtn">Delete link</button>{{else}}<p class="publish-note">You'll get the short link and an edit code.</p>{{end}}
+                    <button type="submit" class="btn-publish" id="submitBtn" data-kbd="Ctrl ↵">{{if .EditMode}}Save{{else}}Create link{{end}}</button>
+                    <p class="publish-note">{{if .EditMode}}Saving replaces the destination and the settings of this link.{{else}}You'll get the short link and an edit code.{{end}}</p>
+                    {{if .EditMode}}<button type="button" class="btn-danger" id="deleteBtn">Delete link</button>{{end}}
                 </div>
             </div>
         </aside>
@@ -130,10 +132,10 @@
     const editMode = {{.EditMode}};
     const linkID = {{.ID}};
     const isOwner = {{.IsOwner}};
+    const submitLabel = editMode ? 'Save' : 'Create link';
     const form = document.getElementById('linkForm');
     const submitButton = document.getElementById('submitBtn');
     const errorBox = document.getElementById('linkError');
-    const statusBox = document.getElementById('linkStatus');
     const privacyValue = () => {
         const checked = document.querySelector('input[name="privacy"]:checked');
         return checked ? checked.value : 'public';
@@ -141,8 +143,8 @@
     const redirectSelect = document.getElementById('redirectSelect');
     const expirySelect = document.getElementById('expirySelect');
     const ttlInput = document.getElementById('ttlInput');
-    let initialPrivacy = privacyValue();
-    let initialRedirect = redirectSelect.value;
+    const initialPrivacy = privacyValue();
+    const initialRedirect = redirectSelect.value;
 
     // The strip under the fields shows the short link while the user types the slug.
     const slugInput = document.getElementById('slugInput');
@@ -200,10 +202,15 @@
         errorBox.hidden = false;
     }
 
+    // setBusy shows the request in progress on the main button, as the note editor does.
+    function setBusy(busy) {
+        submitButton.disabled = busy;
+        submitButton.textContent = busy ? (editMode ? 'Saving…' : 'Creating…') : submitLabel;
+    }
+
     form.addEventListener('submit', async event => {
         event.preventDefault();
         errorBox.hidden = true;
-        statusBox.textContent = '';
         const target = document.getElementById('targetInput').value.trim();
         const code = document.getElementById('editCodeInput').value;
         const slug = document.getElementById('slugInput').value.trim();
@@ -224,26 +231,25 @@
             else if (/^\d+$/.test(expirySelect.value)) payload.ttl = Number(expirySelect.value);
             else if (editMode && expirySelect.value === 'never') payload.ttl = null;
 
-            submitButton.disabled = true;
+            setBusy(true);
             const link = await apiRequest(editMode ? 'PUT' : 'POST', '/links' + (editMode ? '/' + encodeURIComponent(linkID) : ''), payload);
+            // After a save the browser shows the page of the link, as the note editor shows the
+            // note. The page is /links/{id}: /{id} sends the browser to the destination.
             if (editMode) {
-                initialPrivacy = privacyValue();
-                initialRedirect = redirectSelect.value;
-                expirySelect.value = 'keep';
-                updateExpiry();
-                document.getElementById('expiryHint').textContent = link.expires_at ? 'Expires ' + link.expires_at : 'Never expires';
-                statusBox.textContent = 'Link saved';
-            } else {
-                if (link.edit_code) sessionStorage.setItem('padmark_link_edit_' + link.id, link.edit_code);
-                const params = new URLSearchParams({kind: 'link', id: link.id});
-                if (link.burn_after_click) params.set('burn', '1');
-                if (link.expires_at) params.set('expires', link.expires_at);
-                else if (link.burn_after_click) params.set('expires', 'immediately');
-                if (link.privacy) params.set('privacy', link.privacy);
-                location.href = '/success?' + params;
+                location.href = '/links/' + encodeURIComponent(linkID);
+                return;
             }
-        } catch (error) { showError(error); }
-        finally { submitButton.disabled = false; }
+            if (link.edit_code) sessionStorage.setItem('padmark_link_edit_' + link.id, link.edit_code);
+            const params = new URLSearchParams({kind: 'link', id: link.id});
+            if (link.burn_after_click) params.set('burn', '1');
+            if (link.expires_at) params.set('expires', link.expires_at);
+            else if (link.burn_after_click) params.set('expires', 'immediately');
+            if (link.privacy) params.set('privacy', link.privacy);
+            location.href = '/success?' + params;
+        } catch (error) {
+            showError(error);
+            setBusy(false);
+        }
     });
 
     const deleteButton = document.getElementById('deleteBtn');

@@ -66,7 +66,9 @@ or control characters (`400` if too short/long, `422` otherwise).
 - `GET /links/{id}` — link metadata; no `views` increment, no burn-after-click consumption.
   `401` when the link's `privacy` requires a credential, `404` unknown, `410` expired.
   Metadata and privacy are read from storage on every request across replicas. Only decrypted
-  public targets may be reused from cache, after matching the current ciphertext.
+  public targets may be reused from cache, after matching the current ciphertext. A client
+  whose `Accept` prefers `text/html` gets the browser page of the link with the same rules;
+  send `Accept: application/json` for the JSON body.
 - `PUT /links/{id}` — replace `target_url` (required, http/https only); pass `edit_code` in
   the body or omit it as the exact authenticated owner. Optional `ttl`, `privacy`, and
   `direct_redirect` preserve current values when omitted. TTL counts from this update;
@@ -89,14 +91,20 @@ Files are optional. Without object storage on the server, each `/files` operatio
 shares the slug namespace with notes and links. The server keeps each file encrypted.
 
 - `POST /files` — upload one file as `multipart/form-data`, not JSON. Optional text fields:
-  `ttl` (lifetime in seconds from the upload; omitted means no expiry), `privacy`,
-  `burn_after_download` (`true` or `false`), `slug` (one path segment) and `edit_code`.
-  Send these fields before the `file` part: the server ignores fields after `file`. The
-  `filename` of the part becomes the file name (1–255 bytes). The server streams the file to
-  storage, and `--max-file-size` limits its size. Responds `201` with the file description,
-  the one-time `edit_code` and `Location: /{id}`. Errors: `400` for a form without a `file`
-  part or a field that is not valid, `409` when the slug is taken, `413` above the size limit,
-  `422` for an invalid slug, name or privacy level.
+  `ttl` (lifetime in seconds from the upload; omitted means no expiry; `0` makes a file that
+  is already expired), `privacy`, `burn_after_download` (`true` or `false`), `slug` (one path
+  segment) and `edit_code`. Send these fields before the `file` part: a part after `file`
+  gives `400`, and the server does not keep the file. Each field can occur one time, and all
+  data before `file` can have a maximum of 64 KiB. The `filename` of the part becomes the file
+  name (1–255 bytes). The server streams the file to storage, and `--max-file-size` limits its
+  size. Responds `201` with the file description, the one-time `edit_code` and
+  `Location: /{id}`. Errors: `400` for a form without a `file` part, a field that is not
+  valid, an unknown or repeated field, a part after `file` or a malformed or cut body; `408`
+  when the upload sends no data for the idle timeout; `409` when the slug is taken; `413`
+  above the size limit, also for a `Content-Length` above it before the server reads the
+  body; `422` for an invalid slug, name or privacy level; `429` (per client) or `503` (per
+  server) with `Retry-After` when too many uploads are in progress. An invalid bearer token
+  does not give `401`: the file then has no owner, as for notes and links.
 - `GET /files/{id}` — the file description as JSON: `id`, `url`, `name`, `size`, `privacy`,
   `downloads`, `burn_after_download`, `created_at` and `expires_at` (absent without expiry).
   It does not download the content and does not count a download. `401` when the file's
@@ -105,9 +113,11 @@ shares the slug namespace with notes and links. The server keeps each file encry
   `Content-Disposition: attachment` and `Content-Length`. Each download increments
   `downloads`. A `burn_after_download` file is deleted by its first deliberate download: send
   `Accept: application/octet-stream`. Without it, the server answers `409`
-  (`code: burn_read_not_explicit`) and the file stays. `GET /{id}` also downloads the file.
-  When the transfer stops early, the client gets fewer bytes than `Content-Length`; discard
-  that data.
+  (`code: burn_read_not_explicit`) and the file stays. A browser request (`Sec-Fetch-Site`)
+  or a prefetch never consumes the file; a browser uses the download form of the file page.
+  `GET /{id}` also downloads the file. A storage failure before the first byte gives `503`.
+  After the first byte the server closes the connection, so the client gets fewer bytes than
+  `Content-Length`; discard that data.
 - `PUT /files/{id}` — change the access rules. JSON body with optional `ttl` (seconds from
   this change; `null` removes the expiry, `0` expires now), `privacy` and
   `burn_after_download`. An omitted field keeps its value. The content, name and owner do not

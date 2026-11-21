@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/partyzanex/padmark/internal/adapters/web/middleware"
@@ -226,7 +227,7 @@ func (h *OgenHandler) CreateLink(
 		return mapCreateLinkError(err, h.log), nil
 	}
 
-	link, err := h.linkManager.Create(ctx, req.TargetURL.String(), buildCreateLinkOptions(ctx, req))
+	link, err := h.linkManager.Create(ctx, requestTargetURL(&req.TargetURL), buildCreateLinkOptions(ctx, req))
 	if err != nil {
 		return mapCreateLinkError(err, h.log), nil
 	}
@@ -334,7 +335,7 @@ func createOneBulkLink(
 
 	err := requirePrivacySupport(accounts, optCreateLinkPrivacyPtr(item.Privacy))
 	if err == nil {
-		link, err = manager.Create(ctx, item.TargetURL.String(), buildCreateLinkOptions(ctx, item))
+		link, err = manager.Create(ctx, requestTargetURL(&item.TargetURL), buildCreateLinkOptions(ctx, item))
 	}
 
 	if err != nil {
@@ -736,4 +737,26 @@ func (h *OgenHandler) linkMutationAllowed(ctx context.Context, id string) bool {
 	}
 
 	return link.VisibleTo(middleware.CallerIDFromCtx(ctx), middleware.AuthenticatedFromCtx(ctx))
+}
+
+// requestTargetURL returns the target URL in the form that the client sent. ogen decodes a
+// "uri" field with url.ParseRequestURI, which does not split off "#fragment": the fragment
+// stays in the path, and url.URL.String then encodes "#" as "%23", so the redirect goes to a
+// different page. A literal "#" in the path always sets RawPath, because the escaped form is
+// different; an encoded "%23" does not, so that value stays encoded. links.Manager parses the
+// result again with url.Parse.
+func requestTargetURL(target *url.URL) string {
+	if !strings.Contains(target.RawPath, "#") {
+		return target.String()
+	}
+
+	origin := *target
+	origin.Path, origin.RawPath, origin.RawQuery, origin.ForceQuery = "", "", "", false
+
+	raw := origin.String() + target.RawPath
+	if target.ForceQuery || target.RawQuery != "" {
+		raw += "?" + target.RawQuery
+	}
+
+	return raw
 }

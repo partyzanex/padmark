@@ -193,6 +193,29 @@ func (s *UploadSuite) TestNonPositiveTTL() {
 	s.Empty(s.requests)
 }
 
+// TestTTLTooLarge uses a TTL that overflows time.Duration: 18446744075 seconds would become a
+// TTL of one second.
+func (s *UploadSuite) TestTTLTooLarge() {
+	path := s.tempFile("notes.txt")
+
+	_, err := runCLIOutput(s.T().Context(), "--url", s.server.URL, cmdUpload, path, "--ttl", "18446744075")
+	s.Require().ErrorIs(err, errTTLTooLarge)
+	s.Empty(s.requests)
+
+	_, err = runCLIOutput(s.T().Context(), "--url", s.server.URL, cmdUpload, path, "--ttl", "9223372037")
+	s.Require().ErrorIs(err, errTTLTooLarge)
+	s.Empty(s.requests)
+}
+
+func (s *UploadSuite) TestMaxTTL() {
+	path := s.tempFile("notes.txt")
+
+	_, err := runCLIOutput(s.T().Context(), "--url", s.server.URL, cmdUpload, path, "--ttl", "9223372036")
+	s.Require().NoError(err)
+	s.Require().Len(s.requests, 1)
+	s.Equal("9223372036", s.requests[0].fields["ttl"])
+}
+
 func (s *UploadSuite) TestTooLarge() {
 	s.status, s.body = http.StatusRequestEntityTooLarge, `{"message":"file exceeds maximum size (limit 4 bytes)"}`
 	path := s.tempFile("notes.txt")

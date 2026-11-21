@@ -80,8 +80,8 @@ Dependencies point inward: adapters and infrastructure depend on usecases and do
 - Keep installation keys and real credentials out of the repository. Test credentials must
   belong only to isolated fixtures. Back up database and keyring separately.
 - SQL migrations live in `migrations/sqlite/` and `migrations/postgres/` and are embedded per dialect.
-- `--s3-endpoint` turns files on; `attachFiles` (`infra/server/files.go`) stops startup on a bad
-  bucket or key. S3 keys come only from `PADMARK_S3_ACCESS_KEY` / `PADMARK_S3_SECRET_KEY`.
+- `--s3-endpoint` turns files on; `attachFiles` (`infra/server/files.go`) creates a missing
+  bucket and stops startup when the key has no access or cannot create it. S3 keys come only from `PADMARK_S3_ACCESS_KEY` / `PADMARK_S3_SECRET_KEY`.
   Other flags: `--s3-bucket`, `--s3-region`, `--s3-path-style`, `--max-file-size`,
   `--files-sweep-interval` (`0` = no background sweep).
 
@@ -97,7 +97,7 @@ Dependencies point inward: adapters and infrastructure depend on usecases and do
 - Delete credentials use `X-Edit-Code`. Notes retain the deprecated query-string fallback
   for v0.1.6 clients; links ignore query-string edit codes.
 - `FileHandler` serves `/files*` by hand, not ogen (`docs/adr/0002-files-outside-ogen.md`).
-  Pages: `/files` (upload), `/files/{id}/edit`, file page at `/{id}` for `Accept: text/html`;
+  Pages: `/files` (upload), `/edit/{id}` (editor), file page at `/{id}` for `Accept: text/html`;
   other clients get the content. `--disable-api` keeps only the GET/HEAD file pages.
 - CLI file commands: `upload`, `download`, `file-info`, `update-file`, `delete-file`. MCP file
   tools: `upload_file` (needs `--upload-root` / `PADMARK_MCP_UPLOAD_ROOT`), `get_file`,

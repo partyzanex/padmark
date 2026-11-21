@@ -65,12 +65,19 @@ type fileViewData struct {
 	URL          string
 	DownloadURL  string
 	SizeLabel    string
+	CreatedAt    string
+	CreatedISO   string
 	ExpiresLabel string
+	ExpiresISO   string
 	Privacy      string
 	Nonce        string
-	Header       headerView
-	Burn         bool
-	IsOwner      bool
+	// CSRFToken is the token of the download form of a burn-after-download file.
+	CSRFToken string
+	Header    headerView
+	Downloads int
+	Burn      bool
+	// CanEdit shows the Edit action, with the rule of the note page (renderNoteHTML).
+	CanEdit bool
 }
 
 // fileEditViewData is the data of the page that changes the settings of a file.
@@ -112,7 +119,7 @@ func (h *FileHandler) CreateFilePage(w http.ResponseWriter, r *http.Request) {
 // FilePage renders the page of the file slug. It reads only the metadata, so it never
 // consumes a burn-after-download file; the download button does that.
 func (h *FileHandler) FilePage(w http.ResponseWriter, r *http.Request, slug string) {
-	file, err := h.manager.Info(r.Context(), slug, pageAccess(r))
+	file, err := h.manager.Info(r.Context(), slug, h.pageAccess(r))
 	if err != nil {
 		h.writeFilePageError(w, r, err)
 
@@ -121,24 +128,36 @@ func (h *FileHandler) FilePage(w http.ResponseWriter, r *http.Request, slug stri
 
 	pageURL := h.scheme(r) + "://" + r.Host + "/" + slug
 	data := fileViewData{
-		Header:       h.header(r, headerKindView),
+		Header:       h.header(r, headerKindView).forRecord(recordFile),
 		ID:           slug,
 		Name:         file.Name,
 		URL:          pageURL,
 		DownloadURL:  "/files/" + slug + "/download",
 		SizeLabel:    formatSize(file.Size),
-		ExpiresLabel: fileExpiresLabel(file.ExpiresAt),
+		CreatedAt:    file.CreatedAt.Format(readerDateLayout),
+		CreatedISO:   file.CreatedAt.UTC().Format(time.RFC3339),
+		ExpiresLabel: neverExpiresLabel,
+		ExpiresISO:   "",
 		Privacy:      string(file.EffectivePrivacy()),
 		Nonce:        middleware.NonceFromContext(r.Context()),
+		CSRFToken:    middleware.CSRFFromContext(r.Context()),
+		Downloads:    file.Downloads,
 		Burn:         file.BurnAfterDownload,
-		IsOwner:      file.OwnedBy(middleware.CallerIDFromCtx(r.Context())),
+		// Info already applied the privacy check, so each reader of the page can open the editor;
+		// the save needs the edit code or the owner, as for a note.
+		CanEdit: true,
+	}
+
+	if file.ExpiresAt != nil {
+		data.ExpiresLabel = "Expires " + file.ExpiresAt.Format(readerExpiryLayout)
+		data.ExpiresISO = file.ExpiresAt.UTC().Format(time.RFC3339)
 	}
 
 	h.render(w, r, h.pages.view, &data)
 }
 
-// EditFilePage handles GET /files/{id}/edit. Like EditLinkPage it reads metadata only:
-// opening the page must never consume a burn-after-download file.
+// EditFilePage handles the old editor URL GET /files/{id}/edit. The editor is at /edit/{id}, as
+// for notes and short links. Without object storage the page tells the user that files are off.
 func (h *FileHandler) EditFilePage(w http.ResponseWriter, r *http.Request) {
 	if h.manager == nil {
 		h.writeFileErrorPage(w, r, domain.ErrFeatureNotSupported)
@@ -146,15 +165,37 @@ func (h *FileHandler) EditFilePage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	slug := r.PathValue("id")
+	redirectToEditor(w, r)
+}
+
+// editFileIfExists renders the editor of the file slug and returns true. It returns false when
+// files are off or no file has the slug, so that Handler.EditPage shows the note error.
+func (h *FileHandler) editFileIfExists(w http.ResponseWriter, r *http.Request, slug string) bool {
+	if h.manager == nil {
+		return false
+	}
 
 	file, err := h.manager.Peek(r.Context(), slug)
-	if err != nil {
-		h.writeFileErrorPage(w, r, err)
+	if errors.Is(err, domain.ErrNotFound) {
+		return false
+	}
+
+	h.editFile(w, r, slug, file, err)
+
+	return true
+}
+
+// editFile renders the page that changes the settings of a file. Like the short-link editor it
+// reads metadata only: opening the page must never consume a burn-after-download file. peekErr
+// is the error of the Peek that loaded file.
+func (h *FileHandler) editFile(w http.ResponseWriter, r *http.Request, slug string, file *domain.File, peekErr error) {
+	if peekErr != nil {
+		h.writeFileErrorPage(w, r, peekErr)
 
 		return
 	}
 
+	// Without accounts there is no privacy check, as for notes and links (pageAccess).
 	callerID := middleware.CallerIDFromCtx(r.Context())
 	if h.authMgr != nil && !file.VisibleTo(callerID, middleware.AuthenticatedFromCtx(r.Context())) {
 		h.denyPrivate(w, r)
@@ -225,13 +266,14 @@ func (h *FileHandler) render(w http.ResponseWriter, r *http.Request, tmpl *templ
 }
 
 // fileSuccess adds the file details to the success page after an upload. A failed lookup only
-// removes the details (fail-soft): the link and the edit code are still on the page.
+// removes the details (fail-soft): the link and the edit code are still on the page, and the
+// settings stay as the query gives them (see successViewData.SettingsKnown).
 func (c *common) fileSuccess(r *http.Request, slug string, data *successViewData) {
 	if c.fileMgr == nil {
 		return
 	}
 
-	file, err := c.fileMgr.Info(r.Context(), slug, pageAccess(r))
+	file, err := c.fileMgr.Info(r.Context(), slug, c.pageAccess(r))
 	if err != nil {
 		c.log.DebugContext(r.Context(), "read file for success page", "err", err)
 
@@ -242,6 +284,7 @@ func (c *common) fileSuccess(r *http.Request, slug string, data *successViewData
 	data.SizeLabel = formatSize(file.Size)
 	data.Privacy = string(file.EffectivePrivacy())
 	data.BurnAfterReading = file.BurnAfterDownload
+	data.SettingsKnown = true
 
 	data.ExpiresLabel = "never expires"
 	if file.ExpiresAt != nil {
@@ -250,12 +293,14 @@ func (c *common) fileSuccess(r *http.Request, slug string, data *successViewData
 }
 
 // pageAccess identifies the reader of a page. AllowBurn is always false: a page shows only the
-// metadata, so it must not count as a download.
-func pageAccess(r *http.Request) files.AccessOptions {
+// metadata, so it must not count as a download. With accounts off, notes, links and files have
+// no privacy check (the owner decision of R-23), so SkipPrivacy is on.
+func (c *common) pageAccess(r *http.Request) files.AccessOptions {
 	return files.AccessOptions{
 		CallerID:      middleware.CallerIDFromCtx(r.Context()),
 		Authenticated: middleware.AuthenticatedFromCtx(r.Context()),
 		AllowBurn:     false,
+		SkipPrivacy:   c.authMgr == nil,
 	}
 }
 

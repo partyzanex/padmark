@@ -56,8 +56,9 @@ func (c *FileCipher) NewKey() ([]byte, error) {
 	return key, nil
 }
 
-// Encrypt writes the encrypted form of src to dst. An error from src stops the stream and is
-// returned in the chain, so that a caller can see its own size-limit error.
+// Encrypt writes the encrypted form of src to dst. Only io.EOF from src ends the stream. Each
+// other error from src stops the stream and is returned in the chain, so that a caller can see
+// its own size-limit error or a cut request body.
 func (*FileCipher) Encrypt(key []byte, dst io.Writer, src io.Reader) error {
 	if len(key) != fileKeySize {
 		return errFileKeySize
@@ -72,7 +73,10 @@ func (*FileCipher) Encrypt(key []byte, dst io.Writer, src io.Reader) error {
 		src:     src,
 		gcm:     gcm,
 		buf:     make([]byte, 0, fileChunkSize+1),
-		out:     []byte(fileStreamMagic),
+		out:     append(make([]byte, 0, fileChunkSize+fileTagSize), fileStreamMagic...),
+		pos:     0,
+		nonce:   make([]byte, fileNonceSize),
+		aad:     []byte(fileAAD),
 		counter: 0,
 		done:    false,
 	}
@@ -103,7 +107,10 @@ func (*FileCipher) Decrypt(key []byte, dst io.Writer, src io.Reader) error {
 		src:     src,
 		gcm:     gcm,
 		buf:     make([]byte, 0, fileChunkSize+fileTagSize+1),
-		out:     nil,
+		out:     make([]byte, 0, fileChunkSize),
+		pos:     0,
+		nonce:   make([]byte, fileNonceSize),
+		aad:     []byte(fileAAD),
 		counter: 0,
 		header:  false,
 		done:    false,
@@ -117,56 +124,78 @@ func (*FileCipher) Decrypt(key []byte, dst io.Writer, src io.Reader) error {
 	return nil
 }
 
-// fileNonce returns the nonce of chunk counter. lastFlag is 1 for the last chunk, else 0.
-func fileNonce(counter uint64, lastFlag byte) []byte {
-	nonce := make([]byte, fileNonceSize)
+// fileNonce writes the nonce of chunk counter into nonce and returns it. lastFlag is 1 for the
+// last chunk, else 0. The caller gives the same buffer for each chunk, so that a chunk does not
+// allocate.
+func fileNonce(nonce []byte, counter uint64, lastFlag byte) []byte {
 	binary.BigEndian.PutUint64(nonce, counter)
 	nonce[fileNonceLastIdx] = lastFlag
 
 	return nonce
 }
 
-// lastChunkFlag returns the nonce flag byte for a chunk read with readErr: 1 when the stream
-// ended (io.EOF from fillChunk), else 0.
-func lastChunkFlag(readErr error) byte {
-	if errors.Is(readErr, io.EOF) {
+// streamChunk is the result of fillChunk.
+type streamChunk struct {
+	// data is the chunk with the one extra byte that starts the next chunk, if it exists.
+	data []byte
+	// last is true only when the source returned io.EOF itself before data was full.
+	last bool
+}
+
+// nonceFlag returns the nonce flag byte of the chunk: 1 for the last chunk, else 0.
+func (c streamChunk) nonceFlag() byte {
+	if c.last {
 		return 1
 	}
 
 	return 0
 }
 
-// fillChunk reads into buf until it holds limit bytes or src ends. It returns io.EOF only
-// when src ended before buf was full.
-func fillChunk(src io.Reader, buf []byte, limit int) ([]byte, error) {
-	start := len(buf)
+// fillChunk reads into buf until it holds limit bytes or src ends. Only io.EOF from src ends
+// the stream. Each other src error is a broken stream, also io.ErrUnexpectedEOF from a
+// multipart part without its closing boundary. fillChunk returns it wrapped, so that a cut
+// stream is never sealed as a complete file. io.ReadFull cannot do this: it returns the same
+// io.ErrUnexpectedEOF for a short last read and for a broken source.
+func fillChunk(src io.Reader, buf []byte, limit int) (streamChunk, error) {
 	chunk := buf[:limit]
+	filled := len(buf)
 
-	n, err := io.ReadFull(src, chunk[start:])
-	chunk = chunk[:start+n]
+	for filled < limit {
+		n, err := src.Read(chunk[filled:])
+		filled += n
 
-	if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF) {
-		return chunk, io.EOF
+		// Identity, not errors.Is: a wrapped io.EOF is an error of a wrapper, not the end.
+		if err == io.EOF {
+			// A full buffer is not the last chunk yet: the extra byte starts the next chunk,
+			// and the next Read returns io.EOF again.
+			return streamChunk{data: chunk[:filled], last: filled < limit}, nil
+		}
+
+		if err != nil {
+			return streamChunk{data: chunk[:filled], last: false}, fmt.Errorf("read file stream: %w", err)
+		}
 	}
 
-	if err != nil {
-		return chunk, fmt.Errorf("read file stream: %w", err)
-	}
-
-	return chunk, nil
+	return streamChunk{data: chunk, last: false}, nil
 }
 
+// encryptingReader seals one chunk at a time into out. out keeps its capacity for all chunks,
+// and pos is the start of the bytes that Read did not return yet. Thus a stream of any size
+// uses two buffers of one chunk each.
 type encryptingReader struct {
 	src     io.Reader
 	gcm     cipher.AEAD
 	buf     []byte
 	out     []byte
+	nonce   []byte
+	aad     []byte
+	pos     int
 	counter uint64
 	done    bool
 }
 
 func (r *encryptingReader) Read(dst []byte) (int, error) {
-	for len(r.out) == 0 {
+	for r.pos == len(r.out) {
 		if r.done {
 			return 0, io.EOF
 		}
@@ -177,8 +206,8 @@ func (r *encryptingReader) Read(dst []byte) (int, error) {
 		}
 	}
 
-	n := copy(dst, r.out)
-	r.out = r.out[n:]
+	n := copy(dst, r.out[r.pos:])
+	r.pos += n
 
 	return n, nil
 }
@@ -186,33 +215,39 @@ func (r *encryptingReader) Read(dst []byte) (int, error) {
 // sealNext reads one byte more than a chunk. That byte tells if the current chunk is the last;
 // it stays in buf as the start of the next chunk.
 func (r *encryptingReader) sealNext() error {
-	buf, err := fillChunk(r.src, r.buf, fileChunkSize+1)
-	if err != nil && !errors.Is(err, io.EOF) {
+	chunk, err := fillChunk(r.src, r.buf, fileChunkSize+1)
+	if err != nil {
 		return err
 	}
 
-	last := errors.Is(err, io.EOF)
+	buf := chunk.data
 	size := min(len(buf), fileChunkSize)
 
 	if r.counter == ^uint64(0) {
 		return errFileStreamTooLong
 	}
 
-	r.out = r.gcm.Seal(r.out[:0], fileNonce(r.counter, lastChunkFlag(err)), buf[:size], []byte(fileAAD))
+	r.out = r.gcm.Seal(r.out[:0], fileNonce(r.nonce, r.counter, chunk.nonceFlag()), buf[:size], r.aad)
+	r.pos = 0
 	r.counter++
 
 	rest := copy(buf, buf[size:])
 	r.buf = buf[:rest]
-	r.done = last
+	r.done = chunk.last
 
 	return nil
 }
 
+// decryptingReader opens one chunk at a time into out. As in encryptingReader, out keeps its
+// capacity and pos is the read offset.
 type decryptingReader struct {
 	src     io.Reader
 	gcm     cipher.AEAD
 	buf     []byte
 	out     []byte
+	nonce   []byte
+	aad     []byte
+	pos     int
 	counter uint64
 	header  bool
 	done    bool
@@ -226,7 +261,7 @@ func (r *decryptingReader) Read(dst []byte) (int, error) {
 		}
 	}
 
-	for len(r.out) == 0 {
+	for r.pos == len(r.out) {
 		if r.done {
 			return 0, io.EOF
 		}
@@ -237,8 +272,8 @@ func (r *decryptingReader) Read(dst []byte) (int, error) {
 		}
 	}
 
-	n := copy(dst, r.out)
-	r.out = r.out[n:]
+	n := copy(dst, r.out[r.pos:])
+	r.pos += n
 
 	return n, nil
 }
@@ -257,29 +292,30 @@ func (r *decryptingReader) readHeader() error {
 }
 
 func (r *decryptingReader) openNext() error {
-	buf, err := fillChunk(r.src, r.buf, fileChunkSize+fileTagSize+1)
-	if err != nil && !errors.Is(err, io.EOF) {
+	chunk, err := fillChunk(r.src, r.buf, fileChunkSize+fileTagSize+1)
+	if err != nil {
 		return err
 	}
 
-	last := errors.Is(err, io.EOF)
+	buf := chunk.data
 	size := min(len(buf), fileChunkSize+fileTagSize)
 
 	if size < fileTagSize {
 		return fmt.Errorf("file stream chunk: %w", domain.ErrMalformedCiphertext)
 	}
 
-	plain, openErr := r.gcm.Open(r.out[:0], fileNonce(r.counter, lastChunkFlag(err)), buf[:size], []byte(fileAAD))
+	plain, openErr := r.gcm.Open(r.out[:0], fileNonce(r.nonce, r.counter, chunk.nonceFlag()), buf[:size], r.aad)
 	if openErr != nil {
 		return fmt.Errorf("file stream chunk %d: %w", r.counter, domain.ErrDecryptionFailed)
 	}
 
 	r.out = plain
+	r.pos = 0
 	r.counter++
 
 	rest := copy(buf, buf[size:])
 	r.buf = buf[:rest]
-	r.done = last
+	r.done = chunk.last
 
 	return nil
 }

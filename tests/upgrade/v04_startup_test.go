@@ -3,14 +3,17 @@
 package upgrade_test
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/json"
 	"io"
 	"io/fs"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -18,18 +21,30 @@ import (
 	"github.com/stretchr/testify/suite"
 	"github.com/testcontainers/testcontainers-go"
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
+	"github.com/testcontainers/testcontainers-go/wait"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
 	"github.com/uptrace/bun/driver/pgdriver"
 
 	"github.com/partyzanex/padmark/internal/infra/crypto"
+	"github.com/partyzanex/padmark/internal/infra/server"
 	sqliterepo "github.com/partyzanex/padmark/internal/infra/storage/sqlite"
 	"github.com/partyzanex/padmark/internal/testutil"
+	"github.com/partyzanex/padmark/pkg/client"
 	"github.com/partyzanex/padmark/tests/internal/servertest"
 )
 
 // versionFiles is the goose version of 20261118000001_files.sql, the first v0.5.0 migration.
 const versionFiles = 20261118000001
+
+// Test values for the throwaway S3 container only; s3mock accepts any credentials.
+const (
+	s3AccessKey = "padmark-test"
+	s3SecretKey = "padmark-test-secret"
+	s3Bucket    = "padmark-files"
+	// v05FileSlug is a custom file slug that no v0.4.0 record has.
+	v05FileSlug = "v050-file"
+)
 
 // v04Record is one note or link of tests/fixtures/v0.4.0. Value is the note content or the
 // link target URL.
@@ -105,7 +120,11 @@ type v04Snapshot struct {
 type V04UpgradeSuite struct {
 	suite.Suite
 
-	binary string
+	objects testcontainers.Container
+	binary  string
+	// s3Args are the serve flags and s3Env the environment that turn file publishing on.
+	s3Args []string
+	s3Env  []string
 }
 
 func TestV04Upgrade(t *testing.T) {
@@ -113,7 +132,40 @@ func TestV04Upgrade(t *testing.T) {
 }
 
 func (s *V04UpgradeSuite) SetupSuite() {
+	ctx := s.T().Context()
+
+	// adobe/s3mock makes the bucket at startup and does not check signatures.
+	container, err := testcontainers.Run(ctx, "adobe/s3mock:3.12.0",
+		testcontainers.WithEnv(map[string]string{"initialBuckets": s3Bucket}),
+		testcontainers.WithExposedPorts("9090/tcp"),
+		testcontainers.WithWaitStrategy(wait.ForListeningPort("9090/tcp").WithStartupTimeout(time.Minute)),
+	)
+	s.Require().NoError(err)
+
+	s.objects = container
+
+	hostPort, err := container.PortEndpoint(ctx, "9090/tcp", "")
+	s.Require().NoError(err)
+
+	host, _, err := net.SplitHostPort(hostPort)
+	s.Require().NoError(err)
+
+	s.s3Args = []string{"--s3-endpoint", "http://" + hostPort, "--s3-bucket", s3Bucket, "--s3-path-style"}
+	s.s3Env = []string{server.EnvS3AccessKey + "=" + s3AccessKey, server.EnvS3SecretKey + "=" + s3SecretKey}
+
+	// The server refuses plain http:// to a host that is not loopback. A remote Docker host
+	// gives such a host; the container is a throwaway test store.
+	if ip := net.ParseIP(host); host != "localhost" && (ip == nil || !ip.IsLoopback()) {
+		s.s3Env = append(s.s3Env, server.EnvS3AllowInsecure+"=true")
+	}
+
 	s.binary = servertest.Build(s.T())
+}
+
+func (s *V04UpgradeSuite) TearDownSuite() {
+	if s.objects != nil {
+		s.NoError(testcontainers.TerminateContainer(s.objects))
+	}
 }
 
 func (s *V04UpgradeSuite) TestSQLite() {
@@ -178,8 +230,10 @@ func (s *V04UpgradeSuite) runUpgrade(directory, storage, dsn string, db *bun.DB)
 	keyring := filepath.Join(directory, "padmark-keys.json")
 	s.Require().NoError(crypto.WriteContentKeyring(keyring, testutil.ContentKeyring()))
 
-	baseURL, stop := servertest.Start(s.T(), s.binary, directory, "serve", "--storage", storage, "--dsn", dsn,
-		"--content-keyring-file", keyring, "--rate-limit", "0")
+	args := slices.Concat([]string{"serve", "--storage", storage, "--dsn", dsn,
+		"--content-keyring-file", keyring, "--rate-limit", "0"}, s.s3Args)
+
+	baseURL, stop := servertest.StartWithEnv(s.T(), s.binary, directory, s.s3Env, args...)
 	defer stop()
 
 	s.True(s.migrationApplied(db), "serve must apply the files migration")
@@ -192,6 +246,7 @@ func (s *V04UpgradeSuite) runUpgrade(directory, storage, dsn string, db *bun.DB)
 
 	s.assertNotes(baseURL, fixture.Notes)
 	s.assertLinks(baseURL, fixture.Links)
+	s.assertFiles(baseURL, fixture, db)
 }
 
 func (s *V04UpgradeSuite) migrationApplied(db *bun.DB) bool {
@@ -310,4 +365,42 @@ func (s *V04UpgradeSuite) request(method, target, editCode, body string) (int, [
 	s.Require().NoError(err)
 
 	return response.StatusCode, raw
+}
+
+// assertFiles uploads files to the upgraded server. A free custom slug works. The slug of a
+// v0.4.0 note or link gives 409, and that record stays readable.
+func (s *V04UpgradeSuite) assertFiles(baseURL string, fixture v04Fixture, db *bun.DB) {
+	api, err := client.NewClient(baseURL, client.WithClient(&http.Client{
+		Timeout: 30 * time.Second, Transport: nil, CheckRedirect: nil, Jar: nil,
+	}))
+	s.Require().NoError(err)
+
+	upload := func(slug string) (*client.CreateFileResponse, error) {
+		return api.UploadFile(s.T().Context(), "upgrade.bin", bytes.NewReader([]byte("file after the upgrade")),
+			client.UploadFileOptions{TTL: 0, Privacy: "", Slug: slug, EditCode: "", BurnAfterDownload: false})
+	}
+
+	created, err := upload(v05FileSlug)
+	s.Require().NoError(err)
+	s.Equal(v05FileSlug, created.ID)
+
+	note, link := fixture.Notes[v04NoteUnicode], fixture.Links[v04LinkRandom]
+	for _, slug := range []string{note.Slug, link.Slug} {
+		_, err = upload(slug)
+
+		var apiErr *client.APIError
+
+		s.Require().ErrorAs(err, &apiErr, slug)
+		s.Equal(http.StatusConflict, apiErr.StatusCode, "a file must not take the slug %s of a v0.4.0 record", slug)
+	}
+
+	var files int
+
+	s.Require().NoError(db.NewRaw("SELECT COUNT(*) FROM files").Scan(s.T().Context(), &files))
+	s.Equal(1, files, "only the upload with the free slug is stored")
+
+	status, _ := s.request(http.MethodGet, baseURL+"/notes/"+note.Slug, "", "")
+	s.Equal(http.StatusOK, status, "the refused upload must not change the note")
+	status, _ = s.request(http.MethodGet, baseURL+"/links/"+link.Slug, "", "")
+	s.Equal(http.StatusOK, status, "the refused upload must not change the link")
 }

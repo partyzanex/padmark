@@ -3,6 +3,7 @@ package mcp
 import (
 	"bytes"
 	"context"
+	"log/slog"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -136,10 +137,55 @@ func TestCheckInsecureToken(t *testing.T) {
 func TestNewPadmarkClient_RefusesInsecureRemote(t *testing.T) {
 	isolateEnv(t)
 
-	_, err := newPadmarkClient(newTestCmd(t, "--base-url", "http://example.com", "--token", "secret"))
+	_, err := newPadmarkClients(newTestCmd(t, "--base-url", "http://example.com", "--token", "secret"))
 	require.ErrorIs(t, err, errInsecureTransport)
 
-	_, err = newPadmarkClient(newTestCmd(t,
+	_, err = newPadmarkClients(newTestCmd(t,
 		"--base-url", "http://example.com", "--token", "secret", "--allow-insecure-http"))
 	require.NoError(t, err)
+}
+
+// TestNewPadmarkClients_ReportsToken checks the token state that selects the default privacy of
+// upload_file, and that the API and file clients are different clients.
+func TestNewPadmarkClients_ReportsToken(t *testing.T) {
+	isolateEnv(t)
+
+	clients, err := newPadmarkClients(newTestCmd(t, "--base-url", "https://example.com", "--token", "secret"))
+	require.NoError(t, err)
+	assert.True(t, clients.hasToken)
+	assert.NotSame(t, clients.api, clients.files, "the file client has its own HTTP timeouts")
+
+	clients, err = newPadmarkClients(newTestCmd(t, "--base-url", "https://example.com"))
+	require.NoError(t, err)
+	assert.False(t, clients.hasToken)
+}
+
+// TestManagerOptions_ReadsUploadFlags checks the wiring of the upload flags and their
+// environment sources into the manager.
+func TestManagerOptions_ReadsUploadFlags(t *testing.T) {
+	isolateEnv(t)
+
+	log := slog.New(slog.DiscardHandler)
+
+	anonymous := &padmarkClients{api: nil, files: nil, hasToken: false}
+	withToken := &padmarkClients{api: nil, files: nil, hasToken: true}
+
+	defaults := NewManager(nil, nil, log, managerOptions(newTestCmd(t), "/share", anonymous)...)
+	assert.Equal(t, "/share", defaults.uploadRoot)
+	assert.Equal(t, hiddenPathsDenied, defaults.uploadHidden)
+	assert.False(t, defaults.uploadSlug)
+	assert.False(t, defaults.hasToken)
+
+	flags := newTestCmd(t, "--"+FlagUploadAllowHidden, "--"+FlagUploadAllowSlug)
+	permitted := NewManager(nil, nil, log, managerOptions(flags, "/share", withToken)...)
+	assert.Equal(t, hiddenPathsAllowed, permitted.uploadHidden)
+	assert.True(t, permitted.uploadSlug)
+	assert.True(t, permitted.hasToken)
+
+	t.Setenv(EnvUploadAllowHidden, "true")
+	t.Setenv(EnvUploadAllowSlug, "true")
+
+	fromEnv := NewManager(nil, nil, log, managerOptions(newTestCmd(t), "/share", anonymous)...)
+	assert.Equal(t, hiddenPathsAllowed, fromEnv.uploadHidden)
+	assert.True(t, fromEnv.uploadSlug)
 }

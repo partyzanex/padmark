@@ -3,8 +3,12 @@ package crypto
 import (
 	"bytes"
 	"crypto/rand"
+	"errors"
+	"fmt"
 	"io"
+	"mime/multipart"
 	"testing"
+	"testing/iotest"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -112,4 +116,144 @@ func TestFileCipher_RejectsBadKey(t *testing.T) {
 
 	require.ErrorIs(t, fileCipher.Encrypt([]byte("short"), io.Discard, bytes.NewReader(nil)), errFileKeySize)
 	require.ErrorIs(t, fileCipher.Decrypt([]byte("short"), io.Discard, bytes.NewReader(nil)), errFileKeySize)
+}
+
+func TestFileCipher_EncryptStopsOnBrokenSource(t *testing.T) {
+	t.Parallel()
+
+	fileCipher := NewFileCipher()
+	key, err := fileCipher.NewKey()
+	require.NoError(t, err)
+
+	errReset := errors.New("connection reset")
+	data := bytes.Repeat([]byte("x"), 5000)
+
+	cases := map[string]struct {
+		src  io.Reader
+		want error
+	}{
+		"unexpected EOF after data": {
+			src:  io.MultiReader(bytes.NewReader(data), iotest.ErrReader(io.ErrUnexpectedEOF)),
+			want: io.ErrUnexpectedEOF,
+		},
+		"unexpected EOF after a full chunk": {
+			src: io.MultiReader(
+				bytes.NewReader(bytes.Repeat([]byte("y"), 2*fileChunkSize)),
+				iotest.ErrReader(io.ErrUnexpectedEOF),
+			),
+			want: io.ErrUnexpectedEOF,
+		},
+		"custom error mid-stream": {
+			src:  io.MultiReader(bytes.NewReader(data), iotest.ErrReader(errReset)),
+			want: errReset,
+		},
+		"wrapped EOF": {
+			src:  io.MultiReader(bytes.NewReader(data), iotest.ErrReader(fmt.Errorf("proxy: %w", io.EOF))),
+			want: io.EOF,
+		},
+	}
+
+	for name, testCase := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var out bytes.Buffer
+
+			err := fileCipher.Encrypt(key, &out, testCase.src)
+			require.ErrorIs(t, err, testCase.want)
+			require.ErrorContains(t, err, "read file stream")
+		})
+	}
+}
+
+func TestFileCipher_EncryptStopsOnMultipartWithoutClosingBoundary(t *testing.T) {
+	t.Parallel()
+
+	var body bytes.Buffer
+
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", "a.bin")
+	require.NoError(t, err)
+
+	_, err = part.Write(bytes.Repeat([]byte("z"), 5000))
+	require.NoError(t, err)
+	// No writer.Close(): the body has no closing boundary, as a cut upload.
+
+	reader := multipart.NewReader(bytes.NewReader(body.Bytes()), writer.Boundary())
+	filePart, err := reader.NextPart()
+	require.NoError(t, err)
+
+	fileCipher := NewFileCipher()
+	key, err := fileCipher.NewKey()
+	require.NoError(t, err)
+
+	err = fileCipher.Encrypt(key, io.Discard, filePart)
+	require.ErrorIs(t, err, io.ErrUnexpectedEOF)
+}
+
+func TestFileCipher_EncryptAcceptsDataWithEOF(t *testing.T) {
+	t.Parallel()
+
+	fileCipher := NewFileCipher()
+
+	sizes := []int{0, 1, fileChunkSize, fileChunkSize + 1, 2 * fileChunkSize, 2*fileChunkSize + 3}
+	readers := map[string]func([]byte) io.Reader{
+		"data with EOF in one call": func(plain []byte) io.Reader { return &dataEOFReader{data: plain} },
+		"data error reader":         func(plain []byte) io.Reader { return iotest.DataErrReader(bytes.NewReader(plain)) },
+		"one byte reader":           func(plain []byte) io.Reader { return iotest.OneByteReader(bytes.NewReader(plain)) },
+	}
+
+	for name, newReader := range readers {
+		for _, size := range sizes {
+			key, err := fileCipher.NewKey()
+			require.NoError(t, err)
+
+			plain := make([]byte, size)
+			_, err = rand.Read(plain)
+			require.NoError(t, err)
+
+			var out bytes.Buffer
+
+			require.NoError(t, fileCipher.Encrypt(key, &out, newReader(plain)), "%s, size %d", name, size)
+
+			chunks := max(1, (size+fileChunkSize-1)/fileChunkSize)
+			assert.Len(t, out.Bytes(), len(fileStreamMagic)+size+chunks*fileTagSize, "%s, size %d", name, size)
+
+			got, err := decryptAll(fileCipher, key, out.Bytes())
+			require.NoError(t, err, "%s, size %d", name, size)
+			assert.Equal(t, plain, got, "%s, size %d", name, size)
+		}
+	}
+}
+
+func TestFileCipher_DecryptStopsOnBrokenSource(t *testing.T) {
+	t.Parallel()
+
+	fileCipher := NewFileCipher()
+	key, err := fileCipher.NewKey()
+	require.NoError(t, err)
+
+	ciphertext := encryptAll(t, fileCipher, key, bytes.Repeat([]byte("x"), fileChunkSize+10))
+	src := io.MultiReader(bytes.NewReader(ciphertext[:len(ciphertext)/2]), iotest.ErrReader(io.ErrUnexpectedEOF))
+
+	err = fileCipher.Decrypt(key, io.Discard, src)
+	require.ErrorIs(t, err, io.ErrUnexpectedEOF)
+}
+
+// --- helpers ---
+
+// dataEOFReader returns io.EOF together with the last bytes, as the io.Reader contract permits.
+type dataEOFReader struct {
+	data []byte
+}
+
+func (r *dataEOFReader) Read(dst []byte) (int, error) {
+	n := copy(dst, r.data)
+	r.data = r.data[n:]
+
+	if len(r.data) == 0 {
+		return n, io.EOF
+	}
+
+	return n, nil
 }

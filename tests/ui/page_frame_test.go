@@ -17,7 +17,7 @@ const noCard = -1
 
 // The number of pages that each scenario measures.
 const (
-	notesFramePages    = 10
+	notesFramePages    = 11
 	accountsFramePages = 4
 	filesFramePages    = 6
 )
@@ -85,7 +85,11 @@ func testPageFrameNotes(sess *uiSession) {
 	linkID, _ := sess.createdLink()
 	pages = append(pages, sess.frame("published link"))
 
-	sess.gotoPage("/links/" + linkID + "/edit")
+	sess.gotoPage("/links/" + linkID)
+	sess.visible("#linkTitle")
+	pages = append(pages, sess.frame("link"))
+
+	sess.gotoPage("/edit/" + linkID)
 	pages = append(pages, sess.frame("link edit"))
 
 	sess.gotoPage("/missing-ui-note")
@@ -134,7 +138,7 @@ func testPageFrameFiles(sess *uiSession) {
 	sess.visible("#downloadBtn")
 	pages = append(pages, sess.frame("file"))
 
-	sess.gotoPage("/files/" + id + "/edit")
+	sess.gotoPage("/edit/" + id)
 	sess.visible("#saveBtn")
 	pages = append(pages, sess.frame("file edit"))
 

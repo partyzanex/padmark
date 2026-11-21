@@ -132,7 +132,8 @@ type NoteManager interface {
 
 // LinkManager is the interface the HTTP adapter requires from the short-link business logic
 // layer — the links analogue of NoteManager. Shared by OgenHandler (JSON API: POST /links,
-// GET/PUT/DELETE /links/{id}) and LinkHandler (browser-facing GET /{id} and GET /r/{id}).
+// GET/PUT/DELETE /links/{id}) and LinkHandler (browser-facing GET /{id}, GET /r/{id}, the link
+// page GET /links/{id} and the editor).
 type LinkManager interface {
 	Create(ctx context.Context, targetURL string, opts links.CreateOptions) (*domain.Link, error)
 	Update(
@@ -328,6 +329,7 @@ func NewHandler(manager NoteManager, linkManager LinkManager, log *slog.Logger) 
 	errorTmpl := parseTmpl("error", errorTmplSrc)
 	redirectTmpl := parseTmpl("redirect", redirectTmplSrc)
 	linkEditor := parseTmpl("link_editor", linkEditorTmplSrc)
+	linkView := parseTmpl("link", linkTmplSrc)
 
 	cmn := &common{
 		log:       log,
@@ -353,7 +355,7 @@ func NewHandler(manager NoteManager, linkManager LinkManager, log *slog.Logger) 
 	return &Handler{
 		common:       cmn,
 		NoteHandler:  noteHandler,
-		LinkHandler:  newLinkHandler(cmn, linkManager, redirectTmpl, linkEditor),
+		LinkHandler:  newLinkHandler(cmn, linkManager, redirectTmpl, linkEditor, linkView),
 		AuthHandler:  newAuthHandler(cmn, loginTmpl, setupTmpl, changePwTmpl),
 		AdminHandler: newAdminHandler(cmn, adminTmpl),
 		PageHandler:  newPageHandler(cmn, indexTmpl, successTmpl, apidocsTmpl),

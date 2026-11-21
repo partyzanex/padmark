@@ -22,44 +22,58 @@ import (
 // maxSlugRetries limits the retries after a random slug collision. A custom slug never retries.
 const maxSlugRetries = 5
 
-// errStreamStopped closes a pipe when its reader or writer side is done. The goroutine on the
-// other side then ends with this error, which is not a failure.
-var errStreamStopped = errors.New("upload stopped")
-
-// Storage keeps file records. Create must atomically claim the ID across notes, links and
-// files, and return domain.ErrSlugConflict if another resource has it. Errors are fail-hard.
+// Storage keeps file records. Errors are fail-hard: Manager returns them to the caller.
+//
+// Each write names the record by ID and by the object key from the read. The object key is the
+// identity of one upload: when a new file has the same slug, a write from an old read finds no
+// row and returns domain.ErrNotFound, so it cannot change or delete the new file.
 type Storage interface {
+	// Create inserts the record. It must atomically claim the ID across notes, links and
+	// files, and return domain.ErrSlugConflict if another resource has it.
 	Create(ctx context.Context, file *domain.File) error
+	// GetByID returns the record. While a burn claim that is not stale holds the record, it
+	// returns domain.ErrNotFound: other readers must not see a file that a download consumes.
 	GetByID(ctx context.Context, id string) (*domain.File, error)
+	// Exists reports whether a record has the ID. A claimed record also holds its ID.
 	Exists(ctx context.Context, id string) (bool, error)
-	// Delete removes the record and returns it, so that the caller can remove its object.
-	Delete(ctx context.Context, id string) (*domain.File, error)
-	// Update writes the expiry, privacy and burn rule of the record with ID file.ID.
-	// It returns domain.ErrNotFound when the record does not exist.
-	Update(ctx context.Context, file *domain.File) error
-	// ConsumeVisible atomically checks visibility and expiry or burn eligibility, then deletes
-	// and returns the record. With allowBurn=false only an expired record qualifies.
-	ConsumeVisible(
-		ctx context.Context, id string, callerID uuid.UUID, authenticated, allowBurn bool,
-	) (*domain.File, error)
-	// IncrementDownloadsVisible refuses a record that is no longer visible to this reader.
-	IncrementDownloadsVisible(ctx context.Context, id string, callerID uuid.UUID, authenticated bool) error
-	// DeleteExpired removes the records that expired before now and returns their object keys.
-	DeleteExpired(ctx context.Context, now time.Time) ([]string, error)
+	// Delete removes the record with id and objectKey.
+	Delete(ctx context.Context, id, objectKey string) error
+	// Update writes only the fields that opts sets, while the record is not expired at now.
+	Update(ctx context.Context, id, objectKey string, opts UpdateOptions, now time.Time) error
+	// ClaimBurn atomically marks a burn record as claimed by claim.Token until claim.Until.
+	// The record must be visible to claim.Reader, not expired at claim.Now and without a claim
+	// that is not stale. Of parallel calls, only one succeeds; the others get domain.ErrNotFound.
+	ClaimBurn(ctx context.Context, claim *BurnClaim) error
+	// ReleaseBurn removes the claim, so that the next reader can download the file. After a
+	// complete transfer, Manager uses Delete: Send ends before the claim becomes stale, so no
+	// other reader can hold the record at that time.
+	ReleaseBurn(ctx context.Context, claim *BurnClaim) error
+	// IncrementDownloadsVisible counts a download of a record that is visible to reader, is not
+	// a burn file and is not expired. Otherwise it returns domain.ErrNotFound.
+	IncrementDownloadsVisible(ctx context.Context, id, objectKey string, reader AccessOptions) error
+	// ListExpired returns at most limit records that expired before now and have no claim that
+	// is not stale. Only ID and ObjectKey must be set.
+	ListExpired(ctx context.Context, now time.Time, limit int) ([]*domain.File, error)
+	// DeleteExpired removes the record with id and objectKey while it is expired at now and
+	// has no claim that is not stale.
+	DeleteExpired(ctx context.Context, id, objectKey string, now time.Time) error
 }
 
 // ObjectStore keeps file content. Put, Stat and WriteTo are fail-hard. Delete is fail-soft:
-// the record is already gone when Manager calls it, so a failure only leaves an object that
-// nobody can read.
+// Manager logs and counts a failure. After a user delete or a burn download the record is
+// already gone, so a failure leaves an object that nobody can read. An expired file keeps its
+// record when Delete fails, so the next sweep tries again.
 type ObjectStore interface {
 	Put(ctx context.Context, key string, body io.Reader) error
 	// Stat and WriteTo return domain.ErrNotFound when the object does not exist.
 	Stat(ctx context.Context, key string) error
 	WriteTo(ctx context.Context, key string, dst io.Writer) error
+	// Delete removes the object. It does not return an error for a key that does not exist.
 	Delete(ctx context.Context, key string) error
 }
 
-// StreamCipher encrypts file content with a key for each file.
+// StreamCipher encrypts file content with a key for each file. Errors are fail-hard: an upload
+// or a download with a cipher error stops and returns the error.
 type StreamCipher interface {
 	NewKey() ([]byte, error)
 	Encrypt(key []byte, dst io.Writer, src io.Reader) error
@@ -68,13 +82,16 @@ type StreamCipher interface {
 
 // Encryptor seals the file metadata with the installation keyring. The record ID is
 // authenticated context. Files have no legacy records, so Manager gives an empty legacySlug.
+// Encrypt errors are fail-hard: the upload stops. A Decrypt error makes the file not found,
+// so that key errors do not show which slugs exist.
 type Encryptor interface {
 	Encrypt(plaintext, recordID string) (string, error)
 	Decrypt(ciphertext, recordID, legacySlug string) (string, error)
 }
 
 // EditCodeHasher hashes and verifies edit codes. HashUserProvided is memory-hard, because the
-// entropy of a code that the caller selects is not known.
+// entropy of a code that the caller selects is not known. Hash errors are fail-hard: the
+// upload stops. Verify has no error: a code that it cannot verify is a wrong code.
 type EditCodeHasher interface {
 	Hash(code string) (string, error)
 	HashUserProvided(code string) (string, error)
@@ -82,12 +99,14 @@ type EditCodeHasher interface {
 }
 
 // SlugLock serializes local slug checks. Share the instance with notes.Manager and
-// links.Manager; storage enforces uniqueness between server processes.
+// links.Manager; storage enforces uniqueness between server processes. Errors are fail-hard:
+// the operation stops, because it cannot check the slug safely.
 type SlugLock interface {
 	Lock(ctx context.Context, key string) (unlock func(), err error)
 }
 
-// SlugChecker reports whether another resource (notes or links) has an ID.
+// SlugChecker reports whether another resource (notes or links) has an ID. Errors are
+// fail-hard: an upload stops, because it cannot check the slug.
 type SlugChecker interface {
 	Exists(ctx context.Context, id string) (bool, error)
 }
@@ -157,11 +176,30 @@ type CreateOptions struct {
 }
 
 // AccessOptions identifies the reader. AllowBurn tells if the access is deliberate, so that it
-// can consume a burn-after-download file.
+// can consume a burn-after-download file. SkipPrivacy turns off the privacy check of reads, as
+// notes and links do when accounts are off. It does not change the owner and edit code checks
+// of Update and Delete.
 type AccessOptions struct {
 	CallerID      uuid.UUID
 	Authenticated bool
 	AllowBurn     bool
+	SkipPrivacy   bool
+}
+
+// visible reports whether the reader can see file.
+func (o AccessOptions) visible(file *domain.File) bool {
+	return o.SkipPrivacy || file.VisibleTo(o.CallerID, o.Authenticated)
+}
+
+// BurnClaim identifies one download of a burn-after-download file. Token is random for each
+// download, so that only this download can finish or release its claim.
+type BurnClaim struct {
+	Now       time.Time
+	Until     time.Time
+	ID        string
+	ObjectKey string
+	Token     string
+	Reader    AccessOptions
 }
 
 // sealedMeta is the plaintext of File.SealedMeta. One envelope for the name and the key stops
@@ -169,33 +207,6 @@ type AccessOptions struct {
 type sealedMeta struct {
 	Name string `json:"name"`
 	Key  []byte `json:"key"`
-}
-
-// Download is a file download that is ready to send. Call Send once, then Close.
-type Download struct {
-	File *domain.File
-
-	send    func(ctx context.Context, dst io.Writer) error
-	cleanup func(ctx context.Context)
-}
-
-// NewDownload returns a Download of file whose Send calls send. Manager uses it; adapter tests
-// use it for a download without object storage.
-func NewDownload(file *domain.File, send func(ctx context.Context, dst io.Writer) error) *Download {
-	return &Download{File: file, send: send, cleanup: nil}
-}
-
-// Send writes the plaintext of the file to dst.
-func (d *Download) Send(ctx context.Context, dst io.Writer) error {
-	return d.send(ctx, dst)
-}
-
-// Close deletes the object of a burn-after-download file. Give a context that is not canceled
-// when the client disconnects.
-func (d *Download) Close(ctx context.Context) {
-	if d.cleanup != nil {
-		d.cleanup(ctx)
-	}
 }
 
 // Manager implements the file life cycle: upload, metadata, download and delete.
@@ -243,11 +254,15 @@ func (m *Manager) Create(ctx context.Context, name string, body io.Reader, opts 
 		return nil, err
 	}
 
-	m.sweepOnUpload(ctx)
-
 	err = m.insert(ctx, file, opts.CustomSlug)
+
+	// The key is in the sealed metadata now. The caller does not need it.
+	dropKey(file)
+
 	if err != nil {
-		m.deleteObject(ctx, file.ObjectKey)
+		// The object is complete and has no record. The request can be canceled, but the
+		// cleanup must still run.
+		m.deleteObject(context.WithoutCancel(ctx), file.ObjectKey)
 
 		return nil, err
 	}
@@ -258,12 +273,108 @@ func (m *Manager) Create(ctx context.Context, name string, body io.Reader, opts 
 	m.metrics.ObserveUploadBytes(file.Size)
 	m.deps.Log.DebugContext(ctx, "file created", "id", domain.HashSlug(file.ID), "size", file.Size)
 
+	m.sweepOnUpload(ctx)
+
 	return file, nil
 }
 
 // Peek returns the file with decrypted metadata. It does not apply privacy, expiry or burn
 // rules; callers that show a file to a reader use Info or Download.
 func (m *Manager) Peek(ctx context.Context, slug string) (*domain.File, error) {
+	file, err := m.readFile(ctx, slug)
+	if err != nil {
+		return nil, err
+	}
+
+	dropKey(file)
+
+	return file, nil
+}
+
+// Info returns the file for a reader after the privacy and expiry checks. An expired file is
+// deleted and Info returns domain.ErrExpired.
+func (m *Manager) Info(ctx context.Context, slug string, opts AccessOptions) (*domain.File, error) {
+	file, err := m.readVisible(ctx, slug, opts)
+	if err != nil {
+		return nil, err
+	}
+
+	dropKey(file)
+
+	return file, nil
+}
+
+// Download prepares the file for a reader. It applies privacy and expiry, counts the download,
+// and claims a burn-after-download file when opts.AllowBurn is true. Without AllowBurn such a
+// file stays and Download returns domain.ErrBurnIntentRequired. The object is checked before
+// the record changes, so a missing object does not consume the file. A burn file is deleted
+// only when Send completes; see Download.Close.
+func (m *Manager) Download(ctx context.Context, slug string, opts AccessOptions) (*Download, error) {
+	file, err := m.readVisible(ctx, slug, opts)
+	if err != nil {
+		return nil, err
+	}
+
+	if file.BurnAfterDownload && !opts.AllowBurn {
+		dropKey(file)
+
+		return nil, domain.ErrBurnIntentRequired
+	}
+
+	err = m.statObject(ctx, file)
+	if err != nil {
+		dropKey(file)
+
+		return nil, err
+	}
+
+	objectKey, contentKey := file.ObjectKey, file.ContentKey
+	download := NewDownload(file, func(ctx context.Context, dst io.Writer) error {
+		return m.sendObject(ctx, objectKey, contentKey, dst)
+	})
+
+	err = m.record(ctx, file, opts, download)
+	if err != nil {
+		dropKey(file)
+
+		return nil, err
+	}
+
+	// The counter has the same moment as the download counter in the record.
+	m.metrics.IncDownloads()
+
+	return download, nil
+}
+
+// Delete removes a file after a check of the edit code, or of the caller as the owner. The
+// record goes first, so that no reader gets the file after Delete returns. Then the object goes;
+// a failure there is fail-soft and leaves an object that nobody can read.
+func (m *Manager) Delete(ctx context.Context, slug, editCode string, callerID uuid.UUID) error {
+	recordID := domain.HashSlug(slug)
+
+	existing, err := m.deps.Storage.GetByID(ctx, recordID)
+	if err != nil {
+		return fmt.Errorf("delete file: %w", err)
+	}
+
+	if !existing.OwnedBy(callerID) && !m.deps.Hasher.Verify(existing.EditCode, editCode) {
+		return domain.ErrInvalidEditCode
+	}
+
+	err = m.deps.Storage.Delete(ctx, recordID, existing.ObjectKey)
+	if err != nil {
+		return fmt.Errorf("delete file: %w", err)
+	}
+
+	m.metrics.IncDeleted(DeleteReasonUser)
+	// The record is gone. A client that disconnects now must not stop the object delete.
+	m.deleteObject(context.WithoutCancel(ctx), existing.ObjectKey)
+
+	return nil
+}
+
+// readFile reads the record and decrypts its metadata. The result has the content key.
+func (m *Manager) readFile(ctx context.Context, slug string) (*domain.File, error) {
 	file, err := m.deps.Storage.GetByID(ctx, domain.HashSlug(slug))
 	if err != nil {
 		return nil, fmt.Errorf("get file: %w", err)
@@ -277,99 +388,26 @@ func (m *Manager) Peek(ctx context.Context, slug string) (*domain.File, error) {
 	return file, nil
 }
 
-// Info returns the file for a reader after the privacy and expiry checks. An expired file is
-// deleted and Info returns domain.ErrExpired.
-func (m *Manager) Info(ctx context.Context, slug string, opts AccessOptions) (*domain.File, error) {
-	file, err := m.Peek(ctx, slug)
+// readVisible is Info that keeps the content key in the result, for Download.
+func (m *Manager) readVisible(ctx context.Context, slug string, opts AccessOptions) (*domain.File, error) {
+	file, err := m.readFile(ctx, slug)
 	if err != nil {
 		return nil, err
 	}
 
-	if !file.VisibleTo(opts.CallerID, opts.Authenticated) {
+	if !opts.visible(file) {
+		dropKey(file)
+
 		return nil, domain.ErrForbidden
 	}
 
 	if file.Expired(time.Now()) {
-		return nil, m.expire(ctx, slug, opts)
+		dropKey(file)
+
+		return nil, m.expire(ctx, file)
 	}
 
 	return file, nil
-}
-
-// Download prepares the file for a reader. It applies privacy and expiry, counts the download,
-// and consumes a burn-after-download file when opts.AllowBurn is true. Without AllowBurn such a
-// file stays and Download returns domain.ErrBurnIntentRequired. The object is checked before
-// the record changes, so a missing object does not consume the file.
-func (m *Manager) Download(ctx context.Context, slug string, opts AccessOptions) (*Download, error) {
-	file, err := m.Info(ctx, slug, opts)
-	if err != nil {
-		return nil, err
-	}
-
-	if file.BurnAfterDownload && !opts.AllowBurn {
-		return nil, domain.ErrBurnIntentRequired
-	}
-
-	err = m.statObject(ctx, file)
-	if err != nil {
-		return nil, err
-	}
-
-	objectKey, contentKey := file.ObjectKey, file.ContentKey
-	download := NewDownload(file, func(ctx context.Context, dst io.Writer) error {
-		return m.sendObject(ctx, objectKey, contentKey, dst)
-	})
-
-	err = m.record(ctx, slug, file, opts, download)
-	if err != nil {
-		return nil, err
-	}
-
-	// The counter has the same moment as the download counter in the record.
-	m.metrics.IncDownloads()
-
-	return download, nil
-}
-
-// Delete removes a file after a check of the edit code, or of the caller as the owner.
-func (m *Manager) Delete(ctx context.Context, slug, editCode string, callerID uuid.UUID) error {
-	recordID := domain.HashSlug(slug)
-
-	existing, err := m.deps.Storage.GetByID(ctx, recordID)
-	if err != nil {
-		return fmt.Errorf("delete file: %w", err)
-	}
-
-	if !existing.OwnedBy(callerID) && !m.deps.Hasher.Verify(existing.EditCode, editCode) {
-		return domain.ErrInvalidEditCode
-	}
-
-	deleted, err := m.deps.Storage.Delete(ctx, recordID)
-	if err != nil {
-		return fmt.Errorf("delete file: %w", err)
-	}
-
-	m.metrics.IncDeleted(DeleteReasonUser)
-	m.deleteObject(ctx, deleted.ObjectKey)
-
-	return nil
-}
-
-// SweepExpired removes the expired records and their objects. It returns the number of removed
-// records. A record error stops the sweep and is returned. An object error is fail-soft: the
-// record is already gone, so deleteObject only logs and counts it.
-func (m *Manager) SweepExpired(ctx context.Context) (int, error) {
-	keys, err := m.deps.Storage.DeleteExpired(ctx, time.Now())
-	if err != nil {
-		return 0, fmt.Errorf("sweep expired files: %w", err)
-	}
-
-	for _, key := range keys {
-		m.metrics.IncDeleted(DeleteReasonExpired)
-		m.deleteObject(ctx, key)
-	}
-
-	return len(keys), nil
 }
 
 func (m *Manager) newFile(name string, opts *CreateOptions) (*domain.File, string, error) {
@@ -378,9 +416,9 @@ func (m *Manager) newFile(name string, opts *CreateOptions) (*domain.File, strin
 		return nil, "", fmt.Errorf("clean file name: %w", err)
 	}
 
-	// Files are served at single-segment routes (/{id} and /files/{id}).
-	if strings.Contains(opts.CustomSlug, "/") {
-		return nil, "", fmt.Errorf("custom file slug must be one path segment: %w", domain.ErrInvalidSlug)
+	err = m.checkCustomSlug(opts.CustomSlug)
+	if err != nil {
+		return nil, "", err
 	}
 
 	file := &domain.File{
@@ -414,6 +452,27 @@ func (m *Manager) newFile(name string, opts *CreateOptions) (*domain.File, strin
 	}
 
 	return file, plainCode, nil
+}
+
+// checkCustomSlug does the static slug checks before the upload: the --custom-slugs setting,
+// the slug format and the reserved route names. Thus a bad slug does not cost a full upload.
+// Only the uniqueness check waits for the record insert.
+func (m *Manager) checkCustomSlug(customSlug string) error {
+	if customSlug == "" {
+		return nil
+	}
+
+	// Files are served at single-segment routes (/{id} and /files/{id}).
+	if strings.Contains(customSlug, "/") {
+		return fmt.Errorf("custom file slug must be one path segment: %w", domain.ErrInvalidSlug)
+	}
+
+	_, err := domain.ResolveSlug(customSlug, m.allowCustomSlugs)
+	if err != nil {
+		return fmt.Errorf("resolve slug: %w", err)
+	}
+
+	return nil
 }
 
 // hashEditCode replaces file.EditCode with its hash and returns the plaintext. It generates a
@@ -451,63 +510,6 @@ func (m *Manager) hashEditCode(file *domain.File) (string, error) {
 	return plain, nil
 }
 
-// upload encrypts body into the object storage through a pipe. The encryption goroutine ends
-// before upload returns, so the size counter is safe to read.
-func (m *Manager) upload(ctx context.Context, file *domain.File, body io.Reader) error {
-	key, err := m.deps.Cipher.NewKey()
-	if err != nil {
-		return fmt.Errorf("new file key: %w", err)
-	}
-
-	counter := &sizeLimitReader{src: body, limit: m.maxSize, total: 0}
-	pipeReader, pipeWriter := io.Pipe()
-	encrypted := make(chan error, 1)
-
-	go func() {
-		encErr := m.deps.Cipher.Encrypt(key, pipeWriter, counter)
-		encrypted <- errors.Join(encErr, pipeWriter.CloseWithError(encErr))
-	}()
-
-	putErr := m.deps.Objects.Put(ctx, file.ObjectKey, pipeReader)
-	putErr = errors.Join(putErr, pipeReader.CloseWithError(errStreamStopped))
-
-	encErr := <-encrypted
-
-	err = m.uploadError(ctx, counter, putErr, encErr)
-	if err != nil {
-		// An interrupted multipart upload can leave a part; Delete is safe for a missing key.
-		m.deleteObject(ctx, file.ObjectKey)
-
-		return err
-	}
-
-	file.ContentKey = key
-	file.Size = counter.total
-
-	return nil
-}
-
-// uploadError selects the error of an upload. The size limit and a canceled request are the
-// caller's errors; any other error is a storage failure.
-func (m *Manager) uploadError(ctx context.Context, counter *sizeLimitReader, putErr, encErr error) error {
-	switch {
-	case counter.total > m.maxSize:
-		return domain.ErrFileTooLarge
-	case putErr == nil && encErr == nil:
-		return nil
-	case ctx.Err() != nil:
-		return fmt.Errorf("upload file: %w", ctx.Err())
-	case encErr != nil && !errors.Is(encErr, errStreamStopped):
-		// The client stopped sending, or the body was not readable.
-		return fmt.Errorf("read upload: %w", encErr)
-	default:
-		m.metrics.IncStorageErrors(StorageOpPut)
-		m.deps.Log.ErrorContext(ctx, "upload file", "err", putErr)
-
-		return fmt.Errorf("upload file: %w", errors.Join(domain.ErrStorageUnavailable, putErr))
-	}
-}
-
 // insert resolves the slug, seals the metadata for that record ID and writes the record.
 func (m *Manager) insert(ctx context.Context, file *domain.File, customSlug string) error {
 	slug, unlock, err := m.resolveUniqueSlug(ctx, customSlug)
@@ -522,6 +524,9 @@ func (m *Manager) insert(ctx context.Context, file *domain.File, customSlug stri
 	if err != nil {
 		return fmt.Errorf("marshal file meta: %w", err)
 	}
+
+	// The JSON holds the content key in base64.
+	defer clear(meta)
 
 	sealed, err := m.deps.Encryptor.Encrypt(string(meta), recordID)
 	if err != nil {
@@ -582,9 +587,10 @@ func (m *Manager) resolveUniqueSlug(
 	return "", nil, domain.ErrHashCollision
 }
 
+// slugTaken reports whether a note, a link or a file has id. An expired file that the sweep did
+// not remove yet does not hold the slug: slugTaken removes it.
 func (m *Manager) slugTaken(ctx context.Context, id string) (bool, error) {
-	checkers := []SlugChecker{m.deps.Notes, m.deps.Links, m.deps.Storage}
-	for _, checker := range checkers {
+	for _, checker := range []SlugChecker{m.deps.Notes, m.deps.Links} {
 		taken, err := checker.Exists(ctx, id)
 		if err != nil {
 			return false, fmt.Errorf("check slug: %w", err)
@@ -595,28 +601,23 @@ func (m *Manager) slugTaken(ctx context.Context, id string) (bool, error) {
 		}
 	}
 
-	return false, nil
-}
-
-// sweepOnUpload does SweepExpired on each upload. The background sweep can be off, so this
-// cleanup stays. A failure only delays the cleanup to the next sweep.
-func (m *Manager) sweepOnUpload(ctx context.Context) {
-	_, err := m.SweepExpired(ctx)
+	taken, err := m.deps.Storage.Exists(ctx, id)
 	if err != nil {
-		m.deps.Log.WarnContext(ctx, "file sweep failed", "err", err)
+		return false, fmt.Errorf("check slug: %w", err)
 	}
-}
 
-// deleteObject removes an object after its record is gone. A failure leaves an object that
-// nobody can read, because its key was in the record. The warning and the "delete" storage
-// error counter are the signal for the operator. The log line does not contain the object key:
-// with the key and the bucket, a reader of the logs can find the content of one file.
-func (m *Manager) deleteObject(ctx context.Context, key string) {
-	err := m.deps.Objects.Delete(context.WithoutCancel(ctx), key)
-	if err != nil {
-		m.metrics.IncStorageErrors(StorageOpDelete)
-		m.deps.Log.WarnContext(ctx, "delete file object", "err", err)
+	if !taken {
+		return false, nil
 	}
+
+	released, err := m.ReleaseExpiredSlug(ctx, id)
+	if err != nil {
+		m.deps.Log.WarnContext(ctx, "release expired file slug", "id", id, "err", err)
+
+		return true, nil
+	}
+
+	return !released, nil
 }
 
 // openMeta decrypts SealedMeta into Name and ContentKey. A failure is ErrNotFound, as for notes
@@ -645,25 +646,6 @@ func (m *Manager) openMeta(ctx context.Context, slug string, file *domain.File) 
 	file.ContentKey = meta.Key
 
 	return nil
-}
-
-func (m *Manager) expire(ctx context.Context, slug string, opts AccessOptions) error {
-	consumed, err := m.deps.Storage.ConsumeVisible(
-		ctx, domain.HashSlug(slug), opts.CallerID, opts.Authenticated, false)
-	if errors.Is(err, domain.ErrNotFound) {
-		return domain.ErrNotFound
-	}
-
-	if err != nil {
-		m.deps.Log.ErrorContext(ctx, "delete expired file", "id", domain.HashSlug(slug), "err", err)
-
-		return domain.ErrExpired
-	}
-
-	m.metrics.IncDeleted(DeleteReasonExpired)
-	m.deleteObject(ctx, consumed.ObjectKey)
-
-	return domain.ErrExpired
 }
 
 // statObject makes sure that the object of file exists. The log lines identify the file by its
@@ -720,71 +702,9 @@ func (m *Manager) sendObject(ctx context.Context, objectKey string, contentKey [
 	return nil
 }
 
-// record consumes a burn file or counts the download of another file.
-func (m *Manager) record(
-	ctx context.Context, slug string, file *domain.File, opts AccessOptions, download *Download,
-) error {
-	recordID := domain.HashSlug(slug)
-
-	if file.BurnAfterDownload {
-		consumed, err := m.deps.Storage.ConsumeVisible(ctx, recordID, opts.CallerID, opts.Authenticated, true)
-		if err != nil {
-			return fmt.Errorf("consume file: %w", err)
-		}
-
-		m.metrics.IncDeleted(DeleteReasonBurn)
-
-		objectKey := consumed.ObjectKey
-		download.cleanup = func(ctx context.Context) { m.deleteObject(ctx, objectKey) }
-
-		return nil
-	}
-
-	err := m.deps.Storage.IncrementDownloadsVisible(ctx, recordID, opts.CallerID, opts.Authenticated)
-	if errors.Is(err, domain.ErrNotFound) {
-		return fmt.Errorf("count download: %w", err)
-	}
-
-	// The counter is statistics only: a failure does not stop the download.
-	if err != nil {
-		m.deps.Log.ErrorContext(ctx, "count file download", "id", recordID, "err", err)
-	} else {
-		file.Downloads++
-	}
-
-	return nil
-}
-
-// sizeLimitReader counts bytes and fails with domain.ErrFileTooLarge after limit bytes.
-type sizeLimitReader struct {
-	src   io.Reader
-	limit int64
-	total int64
-}
-
-func (r *sizeLimitReader) Read(dst []byte) (int, error) {
-	if r.total > r.limit {
-		return 0, domain.ErrFileTooLarge
-	}
-
-	// One byte more than the limit is enough to know that the file is too large.
-	chunk := dst
-	if remaining := r.limit - r.total + 1; int64(len(chunk)) > remaining {
-		chunk = chunk[:remaining]
-	}
-
-	n, err := r.src.Read(chunk)
-	r.total += int64(n)
-
-	switch {
-	case r.total > r.limit:
-		return n, domain.ErrFileTooLarge
-	case errors.Is(err, io.EOF):
-		// The io.Reader contract needs io.EOF itself, not a wrapped error.
-		return n, io.EOF
-	case err != nil:
-		return n, fmt.Errorf("read upload: %w", err)
-	default:
-		return n, nil
-	}
+// dropKey removes the content key from file and clears its bytes, as the note content cipher
+// does with its keys. A key in memory longer than necessary can go to a core dump.
+func dropKey(file *domain.File) {
+	clear(file.ContentKey)
+	file.ContentKey = nil
 }

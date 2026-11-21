@@ -97,9 +97,9 @@ func buildUpdateFileReq(cmd *urcli.Command) (*padmark.UpdateFileRequest, error) 
 
 	if cmd.IsSet(FlagTTL) {
 		// The API reads 0 as "expire now"; the CLI refuses it as for the other commands.
-		ttl := cmd.Int64(FlagTTL)
-		if ttl <= 0 {
-			return nil, errNonPositiveTTL
+		ttl, err := fileTTLSeconds(cmd)
+		if err != nil {
+			return nil, err
 		}
 
 		req.TTL = padmark.NewOptNilInt64(ttl)

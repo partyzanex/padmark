@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"slices"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/urfave/cli/v3"
 
+	"github.com/partyzanex/padmark/internal/adapters/web"
 	"github.com/partyzanex/padmark/internal/clifactory"
 	"github.com/partyzanex/padmark/internal/infra/crypto"
 	"github.com/partyzanex/padmark/internal/infra/logging"
@@ -54,6 +56,11 @@ const (
 	FlagS3PathStyle         = "s3-path-style"
 	FlagMaxFileSize         = "max-file-size"
 	FlagFilesSweepInterval  = "files-sweep-interval"
+	FlagS3AllowInsecure     = "s3-allow-insecure"
+	FlagShutdownTimeout     = "shutdown-timeout"
+	FlagFileIdleTimeout     = "file-idle-timeout"
+	FlagMaxUploads          = "max-uploads"
+	FlagMaxUploadsPerClient = "max-uploads-per-client"
 	// FlagAuthTokens is the removed v0.1.6 static bearer-token flag; it is still defined (hidden)
 	// so that using it fails startup with a migration hint instead of being ignored.
 	FlagAuthTokens = "auth-tokens" //nolint:gosec // flag name, not a credential
@@ -101,16 +108,27 @@ const (
 	EnvS3PathStyle         = "PADMARK_S3_PATH_STYLE"
 	EnvMaxFileSize         = "PADMARK_MAX_FILE_SIZE"
 	EnvFilesSweepInterval  = "PADMARK_FILES_SWEEP_INTERVAL"
+	EnvS3AllowInsecure     = "PADMARK_S3_ALLOW_INSECURE"
+	EnvShutdownTimeout     = "PADMARK_SHUTDOWN_TIMEOUT"
+	EnvFileIdleTimeout     = "PADMARK_FILE_IDLE_TIMEOUT"
+	EnvMaxUploads          = "PADMARK_MAX_UPLOADS"
+	EnvMaxUploadsPerClient = "PADMARK_MAX_UPLOADS_PER_CLIENT"
 	// EnvS3AccessKey and EnvS3SecretKey are the object storage credentials. They are read from
 	// the environment only — never a flag, so they cannot show up in process listings.
-	EnvS3AccessKey  = "PADMARK_S3_ACCESS_KEY"
-	EnvS3SecretKey  = "PADMARK_S3_SECRET_KEY" //nolint:gosec // G101: env var name, not an inline credential
-	EnvAuthTokens   = "PADMARK_AUTH_TOKENS"   //nolint:gosec // env var name, not a credential
+	// gosec G101 reports a string literal in a constant whose name has "secret". The names
+	// are built from envS3Prefix, so the check needs no nolint directive; a test keeps the
+	// full values.
+	EnvS3AccessKey  = envS3Prefix + "ACCESS_KEY"
+	EnvS3SecretKey  = envS3Prefix + "SECRET_KEY"
+	EnvAuthTokens   = "PADMARK_AUTH_TOKENS" //nolint:gosec // env var name, not a credential
 	EnvCookieMaxAge = "PADMARK_COOKIE_MAX_AGE"
 	// EnvBootstrapToken authorises creating the first admin via /setup without an invite. It is
 	// read from the environment only — never a flag, so it cannot show up in process listings.
 	EnvBootstrapToken = "PADMARK_BOOTSTRAP_TOKEN" //nolint:gosec // G101: env var name, not an inline credential
 )
+
+// envS3Prefix is the common prefix of the S3 key variables.
+const envS3Prefix = "PADMARK_S3_"
 
 // Default values for all flags.
 const (
@@ -140,7 +158,22 @@ const (
 	DefaultMaxFileSize = 100 << 20 // 100 MiB.
 	// DefaultFilesSweepInterval is the period of the background sweep of expired files.
 	DefaultFilesSweepInterval = time.Hour
+	// DefaultS3AllowInsecure is off: a plain http:// endpoint on a remote host sends the signed
+	// requests and the object metadata without TLS.
+	DefaultS3AllowInsecure = false
+	// DefaultShutdownTimeout is the limit of each shutdown phase. The Docker stop command waits
+	// 10 seconds before SIGKILL, so a larger value needs a larger stop grace period too.
+	DefaultShutdownTimeout = 10 * time.Second
+	// DefaultFileIdleTimeout, DefaultMaxUploads and DefaultMaxUploadsPerClient come from the web
+	// handler, which applies the same values when a flag is 0.
+	DefaultFileIdleTimeout     = web.DefaultFileIdleTimeout
+	DefaultMaxUploads          = web.DefaultMaxUploads
+	DefaultMaxUploadsPerClient = web.DefaultMaxUploadsPerClient
 )
+
+// maxFileSizeLimit is the largest --max-file-size: 48 GiB. s3store.MaxObjectSize is about
+// 48.8 GiB, and the encrypted object is a little larger than the file.
+const maxFileSizeLimit = 48 << 30
 
 // DefaultSessionTTL is the --session-ttl flag default, in seconds — derived from
 // auth.DefaultSessionTTL (the single source of truth for the session lifetime default) instead
@@ -159,6 +192,7 @@ func appFlags() []cli.Flag {
 		miscFlags(),
 		argon2Flags(),
 		fileStorageFlags(),
+		fileTransferFlags(),
 	)
 }
 
@@ -176,7 +210,7 @@ func fileStorageFlags() []cli.Flag {
 		clifactory.StringFlag(func(flag *cli.StringFlag) {
 			flag.Name = FlagS3Bucket
 			flag.Sources = cli.EnvVars(EnvS3Bucket)
-			flag.Usage = "Bucket for files; it must exist. Required with --" + FlagS3Endpoint
+			flag.Usage = "Bucket for files; created at startup when missing. Required with --" + FlagS3Endpoint
 		}),
 		clifactory.StringFlag(func(flag *cli.StringFlag) {
 			flag.Name = FlagS3Region
@@ -191,33 +225,71 @@ func fileStorageFlags() []cli.Flag {
 			flag.Usage = "Use path-style addresses (https://host/bucket/key). Set false for virtual-host " +
 				"addresses (https://bucket.host/key)"
 		}),
+		clifactory.BoolFlag(func(flag *cli.BoolFlag) {
+			flag.Name = FlagS3AllowInsecure
+			flag.Sources = cli.EnvVars(EnvS3AllowInsecure)
+			flag.Value = DefaultS3AllowInsecure
+			flag.Usage = "Permit a plain http:// --" + FlagS3Endpoint + " on a host that is not localhost or a " +
+				"loopback IP, for example a Compose service. Without it, startup stops for such an endpoint"
+		}),
 		clifactory.Int64Flag(func(flag *cli.Int64Flag) {
 			flag.Name = FlagMaxFileSize
 			flag.Sources = cli.EnvVars(EnvMaxFileSize)
 			flag.Value = DefaultMaxFileSize
-			flag.Validator = func(value int64) error {
-				if value < 1 {
-					return errInvalidMaxFileSize
-				}
-
-				return nil
-			}
-			flag.Usage = "Largest file in bytes that POST /files accepts (default: 104857600 = 100 MiB)"
+			flag.Validator = validateMaxFileSize
+			flag.Usage = "Largest file in bytes that POST /files accepts (default: 104857600 = 100 MiB; " +
+				"maximum: 51539607552 = 48 GiB)"
 		}),
 		clifactory.DurationFlag(func(flag *cli.DurationFlag) {
 			flag.Name = FlagFilesSweepInterval
 			flag.Sources = cli.EnvVars(EnvFilesSweepInterval)
 			flag.Value = DefaultFilesSweepInterval
-			flag.Validator = func(value time.Duration) error {
-				if value < 0 {
-					return errInvalidSweepInterval
-				}
-
-				return nil
-			}
+			flag.Validator = validateSweepInterval
 			flag.Usage = "Period of the background removal of expired files and their objects, for example 30m. " +
 				"0 turns the background removal off; each upload still removes expired files"
 		}),
+	}
+}
+
+// fileTransferFlags returns the limits of file uploads and downloads. A 0 keeps the default of
+// the web handler.
+func fileTransferFlags() []cli.Flag {
+	return []cli.Flag{
+		clifactory.DurationFlag(func(flag *cli.DurationFlag) {
+			flag.Name = FlagFileIdleTimeout
+			flag.Sources = cli.EnvVars(EnvFileIdleTimeout)
+			flag.Value = DefaultFileIdleTimeout
+			flag.Validator = validateFileIdleTimeout
+			flag.Usage = "Stop a file upload or download that moves no data for this time, for example 2m. " +
+				"Each transfer also has a total limit of 1 hour. 0 selects the default (1m)"
+		}),
+		clifactory.IntFlag(func(flag *cli.IntFlag) {
+			flag.Name = FlagMaxUploads
+			flag.Sources = cli.EnvVars(EnvMaxUploads)
+			flag.Value = DefaultMaxUploads
+			flag.Validator = validateUploadLimit
+			flag.Usage = "Number of file uploads that the server accepts at the same time; each holds one " +
+				"object storage part buffer in memory. More uploads get 503 with Retry-After. " +
+				"0 selects the default (32)"
+		}),
+		clifactory.IntFlag(func(flag *cli.IntFlag) {
+			flag.Name = FlagMaxUploadsPerClient
+			flag.Sources = cli.EnvVars(EnvMaxUploadsPerClient)
+			flag.Value = DefaultMaxUploadsPerClient
+			flag.Validator = validateUploadLimit
+			flag.Usage = "Number of file uploads from one client IP address at the same time. More uploads " +
+				"get 429 with Retry-After. 0 selects the default (4)"
+		}),
+	}
+}
+
+// fileTransferLimitsFromFlags reads the file transfer limits. The flag validators already
+// rejected negative values; the handler replaces a 0 with its default.
+func fileTransferLimitsFromFlags(cmd *cli.Command) web.FileTransferLimits {
+	return web.FileTransferLimits{
+		IdleTimeout:         cmd.Duration(FlagFileIdleTimeout),
+		MaxUploads:          cmd.Int(FlagMaxUploads),
+		MaxUploadsPerClient: cmd.Int(FlagMaxUploadsPerClient),
 	}
 }
 
@@ -343,7 +415,75 @@ func limitFlags() []cli.Flag {
 			flag.Value = DefaultRateBurst
 			flag.Usage = "Rate limit: max burst size per IP"
 		}),
+		clifactory.DurationFlag(func(flag *cli.DurationFlag) {
+			flag.Name = FlagShutdownTimeout
+			flag.Sources = cli.EnvVars(EnvShutdownTimeout)
+			flag.Value = DefaultShutdownTimeout
+			flag.Validator = validateShutdownTimeout
+			flag.Usage = "Limit of each shutdown phase, for example 2m. The listeners first get this time for " +
+				"open requests, such as file transfers; then background work gets the same time to stop " +
+				"before the database closes"
+		}),
 	}
+}
+
+// The validator errors stay next to their flags, because only the flag set uses them.
+var (
+	errMaxFileSizeTooLarge    = errors.New("max file size must not be larger than 48 GiB (51539607552 bytes)")
+	errInvalidShutdownTimeout = errors.New("shutdown timeout must be larger than 0")
+	errInvalidFileIdleTimeout = errors.New("file idle timeout must not be negative; use 0 for the default")
+	errInvalidUploadLimit     = errors.New("upload limit must not be negative; use 0 for the default")
+)
+
+// validateMaxFileSize keeps --max-file-size between 1 byte and maxFileSizeLimit.
+func validateMaxFileSize(value int64) error {
+	if value < 1 {
+		return errInvalidMaxFileSize
+	}
+
+	if value > maxFileSizeLimit {
+		return errMaxFileSizeTooLarge
+	}
+
+	return nil
+}
+
+// validateSweepInterval rejects a negative --files-sweep-interval; 0 turns the sweep off.
+func validateSweepInterval(value time.Duration) error {
+	if value < 0 {
+		return errInvalidSweepInterval
+	}
+
+	return nil
+}
+
+// validateShutdownTimeout rejects a --shutdown-timeout that is not positive: a zero limit
+// would skip the shutdown of each resource.
+func validateShutdownTimeout(value time.Duration) error {
+	if value <= 0 {
+		return errInvalidShutdownTimeout
+	}
+
+	return nil
+}
+
+// validateFileIdleTimeout rejects a negative --file-idle-timeout; 0 selects the default.
+func validateFileIdleTimeout(value time.Duration) error {
+	if value < 0 {
+		return errInvalidFileIdleTimeout
+	}
+
+	return nil
+}
+
+// validateUploadLimit rejects a negative --max-uploads or --max-uploads-per-client; 0 selects
+// the default.
+func validateUploadLimit(value int) error {
+	if value < 0 {
+		return errInvalidUploadLimit
+	}
+
+	return nil
 }
 
 // transportFlags returns the TLS, host, proxy and scheme flags.

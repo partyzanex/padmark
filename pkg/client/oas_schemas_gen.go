@@ -327,12 +327,13 @@ type CreateFileRequestEntityTooLarge ErrorResponse
 
 func (*CreateFileRequestEntityTooLarge) createFileRes() {}
 
-// The upload form. Send the text fields before the `file` part: the server ignores
-// fields after `file`.
+// The upload form. Send the text fields before the `file` part: a part after `file`
+// gives `400`. Each field can occur one time; other field names give `400`.
 // Ref: #/components/schemas/CreateFileRequest
 type CreateFileRequestMultipart struct {
-	// Lifetime of the file in seconds, counted from the upload. Omitted means the file
-	// does not expire.
+	// Lifetime of the file in seconds, counted from the start of the upload. Omitted means
+	// the file does not expire. `0` makes a file that is already expired: the upload
+	// succeeds, but each read answers `410` and deletes the file.
 	TTL OptInt64 `json:"ttl"`
 	// Who may read and download the file. Omitted means `public`. See
 	// `CreateNoteRequest.privacy` for each value.

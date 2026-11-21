@@ -159,7 +159,11 @@ Every file has:
   `burn_after_download` file.
 - Other clients get the content. This includes `curl` without options, which sends
   `Accept: */*`, and a request without `Accept`.
-- `GET /files/{id}/download` always sends the content. The **Download** button uses it.
+- `GET /files/{id}/download` always sends the content. For a usual file, the **Download**
+  button of the file page uses it.
+- A browser downloads a `burn_after_download` file only through the **Download** form of the
+  file page (`POST /files/{id}/download`, with a CSRF token). A browser `GET` never deletes such a
+  file: the server sends the browser to the file page.
 
 ```bash
 # Upload: the form fields must come before the file part; the response has the link and edit_code
@@ -168,8 +172,8 @@ curl -F ttl=86400 -F file=@report.pdf https://padmark.example.com/files
 # Burn after the first download, custom slug
 curl -F burn_after_download=true -F slug=q3-report -F file=@report.pdf https://padmark.example.com/files
 
-# Download. A burn_after_download file needs an explicit Accept; else the server keeps the file
-# and answers 409
+# Download. A burn_after_download file needs an exact Accept: application/octet-stream; else
+# the server keeps the file and answers 409
 curl -OJ -H 'Accept: application/octet-stream' https://padmark.example.com/q3-report
 curl -OJ -H 'Accept: application/octet-stream' https://padmark.example.com/files/q3-report/download
 
@@ -190,12 +194,15 @@ omit it. `PUT` also accepts `privacy`. The edit-code lockout applies to `PUT` an
 for notes and links. Anonymous uploads follow the same rule as anonymous notes and links.
 
 The file goes through the server to the bucket as it arrives; the server keeps at most one
-16 MiB upload part in memory. The server encrypts the content with a random key for each file
+5 MiB upload part in memory for each upload. The server encrypts the content with a random key for each file
 (AES-256-GCM in 64 KiB chunks; see [ADR-0001](docs/adr/0001-file-encryption-format.md)). The
 database keeps that key and the file name, encrypted with the installation keyring like notes
 and links. Thus the bucket alone does not give the content, and the database alone does not give
-the slugs or the names. Key rotation (`encryption rewrap`) includes files. Object names in the
-bucket are random and do not show the slugs.
+the slugs or the names. Key rotation (`encryption rewrap`) includes files, but it changes only the
+wrapping of each content key, not the key itself (see
+[key management](#content-key-management-migration-and-rotation)). Object names in the bucket are
+random and do not show the slugs. The database and the bucket keep the size, the times, the owner
+and the privacy in clear; see [ADR-0001](docs/adr/0001-file-encryption-format.md) for the full list.
 
 A download is always an attachment (`Content-Type: application/octet-stream`), so a browser
 never shows an uploaded HTML or SVG file as a page. The download also has
@@ -203,9 +210,21 @@ never shows an uploaded HTML or SVG file as a page. The download also has
 has an ASCII name for old clients and the full UTF-8 name in `filename*`.
 
 As with `burn_after_click` links, a link preview, a scanner or a `HEAD` request does not consume a
-`burn_after_download` file (`409`). An expired file answers `410 Gone`. The server removes expired
-files and their objects at each upload and every `--files-sweep-interval` (1 hour by default).
-Back up the bucket together with the database and the keyring.
+`burn_after_download` file (`409`). A `GET` with a `Sec-Fetch-Site` header (each modern browser
+sends it), a prefetch or an `Accept` that prefers HTML also keeps the file. Thus only the
+download form or a non-browser client, such as `curl`, the CLI or MCP, with
+`Accept: application/octet-stream`, deletes it.
+
+The server deletes a `burn_after_download` file only after a complete transfer. During the
+transfer, other readers get `404`. When the transfer fails or the client disconnects, the file
+stays, and the next reader can download it. When the server stops during a transfer, the file
+stays locked for up to 70 minutes; then the next reader can download it.
+
+An expired file answers `410 Gone`. The server removes expired files and their objects at
+startup, at each upload and every `--files-sweep-interval` (1 hour by default). One sweep
+removes at most 1000 files in batches of 100; the next sweep continues. An expired file that
+the sweep did not remove yet does not block a new note, link or file with its slug.
+Back up the database and the keyring separately, and back up the bucket too. A file needs all three.
 
 ---
 
@@ -345,8 +364,10 @@ services:
       PADMARK_ADDR: ":8080"
       PADMARK_LOG_FORMAT: json
       # File publishing through the s3 service below; see "Files setup" in README.md.
-      # The endpoint is plain HTTP inside the Compose network, so padmark logs a WARN at startup.
+      # The endpoint is plain HTTP inside the Compose network. padmark refuses plain HTTP to a
+      # host that is not loopback unless PADMARK_S3_ALLOW_INSECURE is true; it then logs a WARN.
       PADMARK_S3_ENDPOINT: "http://s3:9000"
+      PADMARK_S3_ALLOW_INSECURE: "true"
       PADMARK_S3_BUCKET: "padmark-files"
       PADMARK_S3_ACCESS_KEY: "${PADMARK_S3_ACCESS_KEY:?Set PADMARK_S3_ACCESS_KEY in .env}"
       PADMARK_S3_SECRET_KEY: "${PADMARK_S3_SECRET_KEY:?Set PADMARK_S3_SECRET_KEY in .env}"
@@ -356,22 +377,30 @@ services:
       db:
         condition: service_healthy
       s3:
-        condition: service_started
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - padmark
 
   s3:
     # S3-compatible storage for files. RustFS replaces MinIO here: the MinIO images need a
-    # registry login. Each top-level directory is a bucket, so the start command makes the bucket.
+    # registry login. padmark creates its bucket at the first start.
     image: rustfs/rustfs:1.0.6
     restart: unless-stopped
-    entrypoint: ["sh", "-c", "mkdir -p /data/padmark-files && exec /etc/rustfs/entrypoint.sh rustfs"]
     environment:
+      # These are the root keys of RustFS, and padmark uses the same keys. For production, give
+      # padmark a key that has access only to its bucket; see "Files setup" in README.md.
       RUSTFS_ACCESS_KEY: "${PADMARK_S3_ACCESS_KEY:?Set PADMARK_S3_ACCESS_KEY in .env}"
       RUSTFS_SECRET_KEY: "${PADMARK_S3_SECRET_KEY:?Set PADMARK_S3_SECRET_KEY in .env}"
     volumes:
       - s3_data:/data
+    # padmark checks the bucket at startup and stops when the S3 API does not respond, so it
+    # waits for this check. The image contains curl.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:9000/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
     # Loopback-only: the S3 API (9000) and the web console (9001) for local checks from the host.
     ports:
       - "127.0.0.1:9000:9000"
@@ -400,7 +429,9 @@ File publishing is optional. It needs a bucket in S3-compatible object storage. 
 uses the generic S3 client `minio-go`, so it operates with Amazon S3, MinIO and other servers
 that implement the S3 API. The project tests use `adobe/s3mock`.
 
-1. Create a bucket for padmark. The server does not create it.
+1. Select a bucket name for padmark. When the bucket does not exist, the server creates it at
+   startup in `--s3-region`; the key then also needs `s3:CreateBucket`. You can also create the
+   bucket yourself.
 2. Create an access key only for padmark. Give it these permissions:
 
    | Action | Resource | Use |
@@ -410,6 +441,7 @@ that implement the S3 API. The project tests use `adobe/s3mock`.
    | `s3:GetObject` | objects in the bucket | Download and object check (`GetObject`, `HeadObject`) |
    | `s3:DeleteObject` | objects in the bucket | Delete, burn after download and expiry |
    | `s3:AbortMultipartUpload` | objects in the bucket | Removal of the parts of a failed upload |
+   | `s3:CreateBucket` | the bucket | Only when the bucket does not exist at startup |
 
    Amazon S3 has no separate `HeadObject` permission: `s3:GetObject` gives it. An example
    policy for the bucket `padmark-files`:
@@ -448,39 +480,56 @@ that implement the S3 API. The project tests use `adobe/s3mock`.
    ```
 
    The bundled `docker-compose.yml` starts the `s3` service (RustFS, an S3-compatible server)
-   with the bucket `padmark-files`. Put the two keys in `.env`; the same values configure RustFS.
-   For a different server, change `PADMARK_S3_ENDPOINT` in `docker-compose.yml`.
-5. Start the server. When the bucket does not exist or the key has no access, startup stops
-   with an error. When the check is successful, the log has the line `file publishing is on`.
+   and sets the bucket `padmark-files`; padmark creates it at the first start. Put the two keys in `.env`; generate each value with
+   `openssl rand -hex 32`. The same values are the root keys of RustFS, so padmark gets full
+   access to that server. This is acceptable for a local or test installation only. For
+   production, create a key with only the permissions above, and give padmark that key. For a
+   different server, change `PADMARK_S3_ENDPOINT` in `docker-compose.yml`.
+5. Start the server. When the key has no access, or the bucket does not exist and the key
+   cannot create it, startup stops with an error. A new bucket gives the line `s3 bucket created`. When the check is successful, the log has the line `file publishing is on`.
 
 Use an `https://` endpoint. Do not use `http://` for a storage server on a different host.
 The file content stays encrypted, but the object names, the sizes and the signed requests then
-cross the network without TLS (Transport Layer Security). For a plain `http://` endpoint other
-than a loopback address, the server logs a warning at startup.
+cross the network without TLS (Transport Layer Security). Startup stops for a plain `http://`
+endpoint on a host other than `localhost` or a loopback IP address. To permit such an endpoint,
+for example the Compose service `s3`, set `--s3-allow-insecure` / `PADMARK_S3_ALLOW_INSECURE`;
+the server then logs a warning at startup. The endpoint must be `scheme://host[:port]`: startup
+also stops for user info, a path, a query or a fragment in it.
 
-**Reverse proxy.** A proxy in front of padmark must accept the upload body and must wait for
-long transfers. Padmark itself gives each upload and download one hour, in place of
-`--read-timeout` and `--write-timeout`. An nginx example for the default limit:
+**Transfer limits.** Uploads and downloads do not use `--read-timeout` and `--write-timeout`.
+A transfer that moves no data for `--file-idle-timeout` (60 seconds by default) stops; a stalled
+upload gets `408`. Each chunk of data moves this deadline forward, up to a total limit of one
+hour for each transfer. The server accepts at most `--max-uploads` uploads (32 by default) at the
+same time and answers `503` to more. One client IP address gets at most
+`--max-uploads-per-client` uploads (4 by default) and `429` for more. Both answers have
+`Retry-After: 10`. Behind a reverse proxy, set `--trusted-proxies`; otherwise all clients share
+the IP address of the proxy and its limit.
+
+**Reverse proxy.** A proxy in front of padmark must accept the upload body and must permit
+transfers of up to one hour. An nginx example for the default limit:
 
 ```nginx
 # In the server block of padmark
 client_max_body_size 101m;    # --max-file-size (100 MiB) plus 1 MiB for the form fields
 proxy_request_buffering off;  # send each upload to padmark as it arrives
 proxy_buffering off;          # send each download to the client as it arrives
-proxy_read_timeout 1h;
+proxy_read_timeout 1h;        # padmark itself stops a transfer without progress
 proxy_send_timeout 1h;
 ```
 
 Without `client_max_body_size`, nginx refuses a body larger than 1 MiB with `413`. Change the
 value together with `--max-file-size`.
 
-**Objects without a record.** The server deletes the database record first and the object
-second. When the object delete fails, the object stays in the bucket. Nobody can read it,
-because its content key was in the record. The server logs the warning `delete file object` and
-increments `padmark_files_storage_errors_total{op="delete"}`. To find such objects, compare the
-bucket list with the `object_key` column of the `files` table.
+**Objects without a record.** A user delete and a burn delete remove the database record first
+and the object second. When the object delete fails, the object stays in the bucket. Nobody can
+read it, because its content key was in the record. The server logs the warning
+`delete file object` and increments `padmark_files_storage_errors_total{op="delete"}`. To find
+such objects, compare the bucket list with the `object_key` column of the `files` table. The
+sweep of expired files uses the opposite order: the object first, then the record. When the
+object delete fails, the record stays, and the next sweep tries again.
 
-Back up the bucket together with the database and the keyring. A file needs all three.
+Back up the database and the keyring separately, and back up the bucket too. A file needs all three.
+A copy that holds the database and the keyring together gives all file names and content keys.
 
 ---
 
@@ -497,15 +546,21 @@ Go to `/`, write your note and select **Publish note**. You get a URL and your `
   the "On this page" contents sidebar and the edit code. You can type an edit code of 8 to 128
   characters or generate one; a blank field gets a random code.
 - **Result.** The success page shows the share link and hides the edit code until you select
-  **Show**. Save the edit code: the server cannot show it again.
+  **Show**. Save the edit code: the server cannot show it again. **Open note** opens the note
+  page; its **Edit** action opens `/edit/{id}`, and **Save** returns to the note page.
+- **Same flow for each record.** Notes, short links and files use the same steps: the create
+  form, the success page, the page of the record with **Link** and **Edit**, the editor at
+  `/edit/{id}` with **Save**, and the page of the record after the save. On a reader page,
+  **New** opens the create form of the same kind.
 - **Errors.** When a note or a link is refused, the form shows the reason in a block above the
   main button and keeps your text.
 - **Files.** When the server has a bucket, the header shows a **File** tab (`/files`). Select a
   file or drop it on the form, then set the expiry, privacy, burn after download, slug and edit
   code. The form shows the upload progress and has a **Cancel upload** button. The success page
-  shows the link, the name, the size and the edit code. The file page has a **Download** button;
-  **Edit** opens `/files/{id}/edit`, where you can change the expiry, privacy and burn rule, or
-  delete the file.
+  shows the link, the name, the size and the edit code. The file page (`/{id}`) has the layout
+  of the note page and a **Download** button; **Edit** opens `/edit/{id}`, where you can change
+  the expiry, privacy and burn rule, or delete the file. The old URL `/files/{id}/edit`
+  redirects there.
 - **Phone.** The settings open in a sheet from the bottom bar; the header has a menu and one
   theme button.
 - **Themes.** Light, dim (default) and dark.
@@ -610,9 +665,12 @@ tar -cz ./logs | padmark-cli upload - --name logs.tar.gz
 # Metadata by ID or URL (this does not count a download)
 padmark-cli file-info q3-report
 
-# Download. The default name comes from the server; an existing file stops the command
+# Download. The default name comes from the server; an existing file stops the command.
+# -o with a directory writes the file into it with the name from the server.
+# A file URL must be on the --url server; a URL on a different server is refused.
 padmark-cli download q3-report
-padmark-cli download https://padmark.example.com/q3-report -o report.pdf --force
+padmark-cli download q3-report -o ~/Downloads
+padmark-cli --url https://padmark.example.com download https://padmark.example.com/q3-report -o report.pdf --force
 padmark-cli download q3-report -o - > report.pdf
 
 # Change the expiry, privacy or burn rule; an omitted flag keeps its value
@@ -721,9 +779,13 @@ Open **Short link** in the header (`/links`) to create a short URL. The form inc
 optional slug/edit code, privacy, redirect mode, expiration and burn after click. The expiration
 is a preset (1 hour, 1, 7 or 30 days) or a lifetime in seconds.
 TTL counts from creation; burn after click is independent. After creation, copy the short URL
-and the one-time edit code. **Edit link** opens `/links/{id}/edit`, where you can update or delete
-the link without following it. Saving preserves the existing expiration unless explicitly changed;
-burn after click is fixed at creation. The authenticated owner may save/delete without an edit code.
+and the one-time edit code. **Open link** opens the link page `/links/{id}`: it shows the
+destination, the settings and the **Copy**, **Link** and **Edit** actions, like the note page. The
+link page does not follow the link, does not count a view and does not burn the link; `/{id}`
+stays the redirect. **Edit** opens `/edit/{id}`, where you can update or delete the link; **Save**
+returns to the link page. The old URL `/links/{id}/edit` redirects to `/edit/{id}`. Saving
+preserves the existing expiration unless explicitly changed; burn after click is fixed at
+creation. The authenticated owner may save/delete without an edit code.
 
 ```bash
 # Create a short link
@@ -737,7 +799,8 @@ curl -X POST http://localhost:4000/links/bulk \
   -H "Content-Type: application/json" \
   -d '{"links": [{"target_url": "https://example.com/a"}, {"target_url": "https://example.com/b"}]}'
 
-# Get a link's metadata (JSON, does not follow it)
+# Get a link's metadata (JSON, does not follow it). A client that prefers text/html gets the
+# link page instead.
 curl http://localhost:4000/links/{id}
 
 # Update its destination without changing the slug, views, or edit code
@@ -798,13 +861,27 @@ Configure with the same credential and defaults as the CLI: `--token` / `PADMARK
 
 `upload_file` reads only local files under one directory. Set that directory with
 `--upload-root` / `PADMARK_MCP_UPLOAD_ROOT`. When the value is empty (the default), the proxy
-refuses all uploads. When the value is not a directory, the proxy does not start. The tool
+refuses all uploads. When the value is not a directory, the proxy does not start. Do not put
+secrets in the root: an agent that follows injected text can upload each file in it. The tool
 accepts only regular files. A symbolic link must stay under the root after the proxy resolves
-it. A relative `path` is relative to the root.
+it. A relative `path` is relative to the root. Each path outside the root gets the same error,
+also when the path does not exist.
+
+The proxy limits `upload_file` further:
+
+- A path with a name that starts with a dot (`.env`, `.git/config`) is refused. Set
+  `--upload-allow-hidden` / `PADMARK_MCP_UPLOAD_ALLOW_HIDDEN` to permit it.
+- A `slug` from the agent is refused, so injected text cannot select the file address. Set
+  `--upload-allow-slug` / `PADMARK_MCP_UPLOAD_ALLOW_SLUG` to permit it.
+- Without `privacy`, an upload with a token is `owner`; without a token it is `public`. The
+  tool description tells the agent which default applies.
+- `ttl` must be 1 to 9223372036 seconds. Omit it for no expiry.
+- `--timeout` limits only the wait for the response headers of an upload, so a large file on a
+  slow link is not stopped. A timeout gets its own error text.
 
 MCP logging uses `--log-level` / `PADMARK_LOG_LEVEL` (`debug`, `info`, `warn`, `error`);
 logs go to stderr so stdout stays reserved for the protocol. Unknown levels fail startup.
-Tool descriptions label note text, titles and destination URLs as untrusted data. That
+Tool descriptions label note text, titles, file names and destination URLs as untrusted data. That
 framing is guidance to the consuming agent, not a sandbox: retrieved content never grants
 permission to expose credentials, switch servers or perform unrelated operations.
 
@@ -833,7 +910,8 @@ Notes for agents:
   not delete a `burn_after_download` file. The tools do not download file content.
 - `update_file` and `delete_file` take the `edit_code` from the input, else from the session,
   else they use the bearer token as the owner. `update_file` changes `ttl`, `privacy` and
-  `burn_after_download`; `clear_expiry: true` removes the expiry.
+  `burn_after_download`; `clear_expiry: true` removes the expiry. `ttl: 0` deletes the file now,
+  so `update_file` has `destructiveHint: true`.
 - Machine-readable docs: `/llms.txt` (index), `/api/reference.md` (guide) and
   `/api/openapi.yaml` (schemas); all are served even without a token and go away with the REST surface under
   `--disable-api`.
@@ -1169,9 +1247,9 @@ code is hashed with argon2id, since old records do not identify whether the code
 or caller-chosen. Their public URL and usable edit code stay the same, as do counters, TTL/burn settings,
 privacy and timestamps. Deleted rows are never recreated. Any error exits nonzero; incomplete
 migrations block `serve` until a successful rerun.
-JSON reports contain `plaintext`, `raw`, `wrapped`, `native`, `failed`, `corrupt_raw`, `untagged_legacy`, `pruned`, `changed`,
-`conflicts`, `missing` and counts by key ID, without plaintext content. Only `prune --corrupt --dry-run` adds
-`candidates` with record IDs (for an untagged v0.1.6 note, the ID is its slug). Raw validation checks structure only; the
+JSON reports contain `plaintext`, `raw`, `wrapped`, `native`, `failed`, `corrupt_raw`, `untagged_legacy`, `corrupt_file`,
+`pruned`, `changed`, `conflicts`, `missing` and counts by key ID, without plaintext content. Only
+`prune --corrupt --dry-run` adds `candidates` with record IDs (for an untagged v0.1.6 note, the ID is its slug). Raw validation checks structure only; the
 old encryption tag cannot be authenticated without the original slug.
 
 `plaintext` counts tagged, unconverted v0.1.6 notes; successful migration brings it to zero.
@@ -1217,6 +1295,14 @@ migration; rerun `migrate` before serving. Partial cleanup is resumable; `pruned
 deletions. Versioned envelopes — including unknown future versions and malformed `pmc2$…` values —
 are never selected by this command; they keep blocking startup until diagnosed separately.
 
+`prune --corrupt` never deletes a file record: the object in the bucket would stay without its
+content key. A file record whose `sealed_meta` has no version tag is damage, not legacy data.
+`status` and `migrate` count it in `failed` and `corrupt_file`, `migrate` never wraps it, and
+`prune --corrupt` refuses to run while it remains. The dry run lists the ID of each such record
+with the reason `corrupt_file`; `SELECT object_key FROM files WHERE id = '<id>'` gives its object.
+Restore the database from a backup, or stop all writers and delete the `files` row and its object
+by hand. Then rerun `encryption migrate`.
+
 When original slugs are available, feed one per line from a protected file or pipe:
 
 ```bash
@@ -1250,7 +1336,13 @@ export PADMARK_CONTENT_KEYRING_FILE="$HOME/.config/padmark/content-keys.current.
 ```
 
 `rewrap` preserves encrypted payload bytes and their nonces for both native and wrapped legacy
-records; only the DEK wrapper changes. An interrupted rewrap is readable with both keys and can
+records; only the DEK wrapper changes. For a file, `rewrap` changes only the wrapping of
+`sealed_meta`; the content key of the file and its object in the bucket stay the same. Thus an old
+keyring together with an old database copy still decrypts each object that is still in the bucket.
+After a keyring leak, upload each affected file again and delete the old file (the new upload gets a
+new content key and object), then rotate the key. Remove old database backups, or keep them away from
+the leaked keyring. padmark has no command that encrypts stored objects again.
+An interrupted rewrap is readable with both keys and can
 be rerun. `key-remove` refuses the active key or a key referenced by live rows. Registry checks
 for retired IDs remain, preventing silent reuse of an old ID with different key material.
 Every key-file command creates a complete **0600** file without overwriting an existing path.
@@ -1281,7 +1373,7 @@ There is no destructive encryption down-migration, and older binaries cannot rea
 | `--allow-shared-keyring` | `PADMARK_ALLOW_SHARED_KEYRING` | `false` | Accept a keyring file readable by group or other users (logged at WARN) instead of refusing startup. Only for secret managers that cannot provide an owner-only file; keyrings under `/run/secrets/` are already exempt. Prefer mode `0600`/`0400` |
 | `--enable-accounts` | `PADMARK_ENABLE_ACCOUNTS` | `false` | Enable the TOTP account system (`/setup`, `/login`, `/admin`, privacy-level gating); off = fully public |
 | — | `PADMARK_BOOTSTRAP_TOKEN` | — | Environment only (never a flag). Required to create the first admin via `/setup` without an invite; at least 32 characters (shorter fails startup). Unset = first-admin setup disabled. Never logged; unset it once the admin exists |
-| `--disable-api` | `PADMARK_DISABLE_API` | `false` | Disable the REST/JSON API (`/notes*`, `/links*`, `/files*`, `/api`, `/api/openapi.yaml`, `/api/reference.md`, `/llms.txt`, `/api/tokens`, `/api/invites`): the middleware returns `503` with `{"message":"API is disabled","code":"api_disabled"}`. Match `code` to identify the cause; outer middleware may reject a request first. The editor becomes **read-only**: viewing `/{id}` (including JSON/raw reads and short links), account/admin forms and health checks keep working, but publishing or saving from the editor fails with the API-disabled error, because the editor calls `POST /notes` and `PUT /notes/{id}`. For files, only the `GET`/`HEAD` pages `/files`, `/files/{id}/edit` and `/files/{id}/download` and the file page at `/{id}` stay open; upload, change and delete are off |
+| `--disable-api` | `PADMARK_DISABLE_API` | `false` | Disable the REST/JSON API (`/notes*`, `/links*`, `/files*`, `/api`, `/api/openapi.yaml`, `/api/reference.md`, `/llms.txt`, `/api/tokens`, `/api/invites`): the middleware returns `503` with `{"message":"API is disabled","code":"api_disabled"}`. Match `code` to identify the cause; outer middleware may reject a request first. The editor becomes **read-only**: viewing `/{id}` (including JSON/raw reads and short links), account/admin forms and health checks keep working, but publishing or saving from the editor fails with the API-disabled error, because the editor calls `POST /notes` and `PUT /notes/{id}`. For short links, the `GET`/`HEAD` pages `/links`, `/links/{id}/edit` (redirect) and the HTML link page `/links/{id}` stay open; the JSON read of `/links/{id}` and create, change and delete are off. For files, only the `GET`/`HEAD` pages `/files`, `/files/{id}/edit` (redirect) and `/files/{id}/download`, the download form `POST /files/{id}/download` and the file page at `/{id}` stay open; upload, change and delete are off. The editor `/edit/{id}` of each record stays open |
 | `--totp-issuer` | `PADMARK_TOTP_ISSUER` | `padmark` | TOTP issuer shown in the authenticator app |
 | `--session-ttl` | `PADMARK_SESSION_TTL` | `2592000` | Session lifetime in seconds (default 30 days) |
 | `--csrf-secret` | `PADMARK_CSRF_SECRET` | — | HMAC key signing CSRF form tokens; raw bytes, **at least 32 characters** (a shorter value is rejected at startup). Empty (default) mints a fresh random secret per process — fine for a single instance, but restarts then invalidate open forms and multiple replicas `403` each other's form submits. Generate with `openssl rand -base64 32` and share the same value across replicas |
@@ -1305,13 +1397,18 @@ There is no destructive encryption down-migration, and older binaries cannot rea
 | `--public-scheme` | `PADMARK_PUBLIC_SCHEME` | — | Force `http` or `https` for absolute links back to this server, bypassing TLS/`X-Forwarded-Proto` detection; `https` also marks session/CSRF cookies `Secure` and enables HSTS. Use this instead of `--trusted-proxies` when the proxy's IP isn't stable (cloud load balancers, k8s ingress) |
 | `--custom-slugs` | `PADMARK_CUSTOM_SLUGS` | `true` | Allow user-supplied human-readable slugs/link aliases (e.g. `project/GUIDE.md`) at creation. On by default, as in v0.1.6; set `false` to issue only random slugs, because public human-readable URLs are easy to guess. New content keys are independent of the slug; existing legacy ciphertext keeps its old protection until migrated. A slug's first path segment must not be a reserved route name: `login`, `setup`, `logout`, `totp-login`, `admin`, `api`, `success`, `healthz`, `readyz`, `notes`, `edit`, `change-password`, `static`, `links`, `r`, `files`, and the exact segments `llms.txt` and `favicon.ico` |
 | `--direct-redirect` | `PADMARK_DIRECT_REDIRECT` | `false` | `GET /{id}` behavior for short links. **Default changed from `true` to `false`:** links created anonymously now render an interstitial page (meta-refresh + `<noscript>` fallback) showing the destination, so the instance is not an open redirector; links created by a signed-in owner still get an immediate `301`. Set `true` to restore the `301` for every link |
-| `--s3-endpoint` | `PADMARK_S3_ENDPOINT` | — | S3-compatible storage URL for files, for example `https://s3.example.com:9000`. Empty (default) turns file publishing off. Startup fails when the bucket is missing or the credentials are wrong. A plain `http://` endpoint other than localhost is logged at WARN |
-| `--s3-bucket` | `PADMARK_S3_BUCKET` | — | Bucket for files; it must exist. Required with `--s3-endpoint` |
+| `--s3-endpoint` | `PADMARK_S3_ENDPOINT` | — | S3-compatible storage URL for files, for example `https://s3.example.com:9000`. Empty (default) turns file publishing off. Startup creates a missing bucket; it fails when the credentials are wrong or the bucket cannot be created. A plain `http://` endpoint on a host other than `localhost` or a loopback IP stops startup, unless `--s3-allow-insecure` is set. The URL must not contain user info, a path, a query or a fragment |
+| `--s3-allow-insecure` | `PADMARK_S3_ALLOW_INSECURE` | `false` | Permit a plain `http://` `--s3-endpoint` on a host that is not loopback, for example a Compose service. The server logs a warning at startup |
+| `--s3-bucket` | `PADMARK_S3_BUCKET` | — | Bucket for files; the server creates it when it does not exist. Required with `--s3-endpoint` |
 | — | `PADMARK_S3_ACCESS_KEY`, `PADMARK_S3_SECRET_KEY` | — | Environment only (never flags). S3 credentials; required with `--s3-endpoint` |
 | `--s3-region` | `PADMARK_S3_REGION` | `us-east-1` | Region for the request signature |
-| `--s3-path-style` | `PADMARK_S3_PATH_STYLE` | `true` | Path-style addresses (`https://host/bucket/key`), which most self-hosted servers need. Set `false` for virtual-host addresses |
-| `--max-file-size` | `PADMARK_MAX_FILE_SIZE` | `104857600` | Largest file in bytes that `POST /files` accepts (100 MiB). `--max-body-bytes` does not apply to the upload; uploads and downloads also get one hour in place of the read and write timeouts |
-| `--files-sweep-interval` | `PADMARK_FILES_SWEEP_INTERVAL` | `1h` | Period of the background removal of expired files and their objects, for example `30m`. `0` turns the background removal off; each upload still removes expired files. A negative value stops startup |
+| `--s3-path-style` | `PADMARK_S3_PATH_STYLE` | `true` | Path-style addresses (`https://host/bucket/key`), which most self-hosted servers need. Set `false` for virtual-host addresses (`https://bucket.host/key`) on each host |
+| `--max-file-size` | `PADMARK_MAX_FILE_SIZE` | `104857600` | Largest file in bytes that `POST /files` accepts (100 MiB). The maximum value is `51539607552` (48 GiB), because of the 5 MiB upload parts and the S3 limit of 10 000 parts. `--max-body-bytes` does not apply to the upload; uploads and downloads use `--file-idle-timeout` and a total limit of one hour in place of the read and write timeouts |
+| `--files-sweep-interval` | `PADMARK_FILES_SWEEP_INTERVAL` | `1h` | Period of the background removal of expired files and their objects, for example `30m`. `0` turns the background removal off; each upload still removes expired files. A negative value stops startup. The server also removes expired files once at startup, without a wait for the first interval |
+| `--file-idle-timeout` | `PADMARK_FILE_IDLE_TIMEOUT` | `1m` | Stop a file upload or download that moves no data for this time. Each chunk of data moves the deadline forward, up to a total limit of one hour for each transfer. A stalled upload gets `408`. `0` selects the default; a negative value stops startup |
+| `--max-uploads` | `PADMARK_MAX_UPLOADS` | `32` | Uploads that the server accepts at the same time. Each upload holds one 5 MiB part buffer in memory. More uploads get `503` with `Retry-After: 10`. `0` selects the default; a negative value stops startup |
+| `--max-uploads-per-client` | `PADMARK_MAX_UPLOADS_PER_CLIENT` | `4` | Uploads from one client IP address at the same time (the address obeys `--trusted-proxies`). More uploads get `429` with `Retry-After: 10`. `0` selects the default; a negative value stops startup |
+| `--shutdown-timeout` | `PADMARK_SHUTDOWN_TIMEOUT` | `10s` | Limit of each shutdown phase. The listeners first get this time for open requests, such as file transfers; then background work, such as the file sweep, gets the same time to stop before the database closes. For a larger value, also increase the stop grace period of the container (`docker stop` waits 10 seconds before `SIGKILL`) |
 | `--metrics-addr` | `PADMARK_METRICS_ADDR` | — | Address for a separate internal Prometheus `/metrics` listener (e.g. `:9090`); empty (default) disables it entirely. Exposes `padmark_links_created_total`, `padmark_links_redirects_total`, `padmark_links_collisions_total`, the file metrics `padmark_files_uploads_total`, `padmark_files_downloads_total`, `padmark_files_deleted_total{reason}`, `padmark_files_upload_bytes` and `padmark_files_storage_errors_total{op}`, plus standard Go/process collectors. Bind this to a private interface only — metrics are never served on the main, public-facing listener |
 
 #### Memory sizing (argon2id)

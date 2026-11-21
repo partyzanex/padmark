@@ -226,8 +226,16 @@ func (s *DisableAPISuite) TestFilePages_VisibleWhileAPIDisabled() {
 	router, err := web.NewRouter(handler, ogen, &opts)
 	s.Require().NoError(err)
 
-	pages := []string{"/files", "/files/" + testID + "/edit"}
-	for _, path := range pages {
+	// The editor of a file is at /edit/{id}: the note and the short link are not found first.
+	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(nil, domain.ErrNotFound)
+	s.linkManager.EXPECT().Peek(gomock.Any(), testID).Return(nil, domain.ErrNotFound)
+
+	pages := map[string]int{
+		"/files":                     http.StatusOK,
+		"/edit/" + testID:            http.StatusOK,
+		"/files/" + testID + "/edit": http.StatusMovedPermanently,
+	}
+	for path, status := range pages {
 		s.Run("page "+path, func() {
 			req := httptest.NewRequest(http.MethodGet, path, nil)
 			req.Header.Set("Accept", "text/html")
@@ -235,7 +243,7 @@ func (s *DisableAPISuite) TestFilePages_VisibleWhileAPIDisabled() {
 			rec := httptest.NewRecorder()
 			router.ServeHTTP(rec, req)
 
-			s.Equal(http.StatusOK, rec.Code)
+			s.Equal(status, rec.Code)
 		})
 	}
 
@@ -257,4 +265,38 @@ func (s *DisableAPISuite) TestFilePages_VisibleWhileAPIDisabled() {
 			s.JSONEq(`{"message":"API is disabled","code":"api_disabled"}`, rec.Body.String())
 		})
 	}
+}
+
+// TestLinkPages_VisibleWhileAPIDisabled: with --disable-api the short-link pages render, as the
+// note pages do, but the JSON read of the same path answers 503 without a call to the usecase.
+func (s *DisableAPISuite) TestLinkPages_VisibleWhileAPIDisabled() {
+	router := s.newRouter(true)
+
+	s.linkManager.EXPECT().Peek(gomock.Any(), testID).Return(newTestLink(), nil)
+
+	pages := map[string]int{
+		"/links":                     http.StatusOK,
+		"/links/" + testID:           http.StatusOK,
+		"/links/" + testID + "/edit": http.StatusMovedPermanently,
+	}
+	for path, status := range pages {
+		s.Run("page "+path, func() {
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			req.Header.Set("Accept", "text/html")
+
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+
+			s.Equal(status, rec.Code)
+		})
+	}
+
+	read := httptest.NewRequest(http.MethodGet, "/links/"+testID, nil)
+	read.Header.Set("Accept", "application/json")
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, read)
+
+	s.Equal(http.StatusServiceUnavailable, rec.Code)
+	s.JSONEq(`{"message":"API is disabled","code":"api_disabled"}`, rec.Body.String())
 }

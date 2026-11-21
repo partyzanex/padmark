@@ -23,13 +23,23 @@ var (
 var (
 	ErrUploadsOff = errors.New("upload_file is off: the operator must start padmark-mcp with " +
 		"--upload-root (env " + EnvUploadRoot + ") set to the directory to share")
-	ErrPathOutsideRoot    = errors.New("the path is outside the upload root; use a file in the upload root")
-	ErrNotRegularFile     = errors.New("the path is not a regular file")
+	ErrPathOutsideRoot = errors.New("the path is outside the upload root; use a file in the upload root")
+	ErrNotRegularFile  = errors.New("the path is not a regular file")
+	ErrHiddenPath      = errors.New("the path has a name that starts with a dot; the operator must start " +
+		"padmark-mcp with --" + FlagUploadAllowHidden + " (env " + EnvUploadAllowHidden + ") to share it")
+	ErrSlugOff = errors.New("slug is off for upload_file: omit it to get a random ID, or the operator " +
+		"must start padmark-mcp with --" + FlagUploadAllowSlug + " (env " + EnvUploadAllowSlug + ")")
+	ErrUploadTimeout = errors.New("the upload timed out: the server did not answer in time; try again, " +
+		"or the operator can raise --" + FlagTimeout)
 	errEmptyPath          = errors.New("path must not be empty")
+	errNoSuchFile         = errors.New("no such file in the upload root")
 	errFileReplaced       = errors.New("the file changed while it was opened; try again")
 	errUploadRootNotDir   = errors.New("is not a directory")
 	errNoFileChange       = errors.New("nothing to change: set ttl, clear_expiry, privacy or burn_after_download")
 	errTTLWithClearExpiry = errors.New("set ttl or clear_expiry, not both")
+	errUploadTTLRange     = errors.New("ttl must be 1 to 9223372036 seconds; omit it for no expiry")
+	errUpdateTTLRange     = errors.New("ttl must be 0 to 9223372036 seconds; 0 expires the file now")
+	errReadLocalFile      = errors.New("read the local file")
 )
 
 // Errors that the MCP tools map from the server response variants.

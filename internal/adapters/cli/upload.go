@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"time"
@@ -103,15 +104,34 @@ func uploadOptions(cmd *urcli.Command) (padmark.UploadFileOptions, error) {
 	}
 
 	if cmd.IsSet(FlagTTL) {
-		ttl := cmd.Int64(FlagTTL)
-		if ttl <= 0 {
-			return opts, errNonPositiveTTL
+		ttl, err := fileTTLSeconds(cmd)
+		if err != nil {
+			return opts, err
 		}
 
 		opts.TTL = time.Duration(ttl) * time.Second
 	}
 
 	return opts, nil
+}
+
+// maxTTLSeconds is the largest --ttl of a file, as on the server. A larger value overflows
+// time.Duration: 18446744075 seconds would become a TTL of one second.
+const maxTTLSeconds = math.MaxInt64 / int64(time.Second)
+
+// fileTTLSeconds reads --ttl of the file commands. It refuses a value that is not positive or
+// that is larger than maxTTLSeconds, before a conversion to time.Duration.
+func fileTTLSeconds(cmd *urcli.Command) (int64, error) {
+	ttl := cmd.Int64(FlagTTL)
+
+	switch {
+	case ttl <= 0:
+		return 0, errNonPositiveTTL
+	case ttl > maxTTLSeconds:
+		return 0, errTTLTooLarge
+	default:
+		return ttl, nil
+	}
 }
 
 // uploadSource is the content of an upload and its file name for the server.

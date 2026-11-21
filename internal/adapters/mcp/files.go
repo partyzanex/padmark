@@ -2,8 +2,10 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"math"
 	"time"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -32,23 +34,41 @@ type FileClient interface {
 
 var _ FileClient = (*padmark.Client)(nil)
 
+// maxTTLSeconds is the largest TTL in seconds that time.Duration can hold. The server uses the
+// same limit (9223372036). A larger value would overflow in the conversion to time.Duration.
+const maxTTLSeconds = math.MaxInt64 / int64(time.Second)
+
 // registerFileTools adds the file tools to the server. There is no download tool: the tools
 // return the page and download URLs, and an agent or a person opens them directly. The tool
 // result would otherwise carry a file of any size and type through the model context.
 func registerFileTools(srv *mcpsdk.Server, m *Manager) {
-	mcpsdk.AddTool[uploadFileInput, fileOutput](srv, uploadFileTool(), m.uploadFile)
+	mcpsdk.AddTool[uploadFileInput, fileOutput](srv, uploadFileTool(m.uploadDefaultPrivacy()), m.uploadFile)
 	mcpsdk.AddTool[getFileInput, fileOutput](srv, getFileTool(), m.getFile)
 	mcpsdk.AddTool[updateFileInput, fileOutput](srv, updateFileTool(), m.updateFile)
 	mcpsdk.AddTool[deleteFileInput, deleteNoteOutput](srv, deleteFileTool(), m.deleteFile)
 }
 
-func uploadFileTool() *mcpsdk.Tool {
+// uploadFileTool tells the agent the default privacy, because a public file is readable by
+// everyone who has its URL.
+func uploadFileTool(defaultPrivacy string) *mcpsdk.Tool {
 	return newTool("upload_file",
 		"Upload a local file and get its page URL and download URL. The path must be a regular file "+
 			"under the upload root that the operator set with --upload-root; a relative path is relative "+
-			"to that root. The edit_code is returned once and the proxy keeps it for this session. The "+
+			"to that root. Names that start with a dot are refused unless the operator permits them. "+
+			defaultPrivacyText(defaultPrivacy)+" "+
+			"Without ttl, the file does not expire. A slug is refused unless the operator permits it. "+
+			"The edit_code is returned once and the proxy keeps it for this session. The "+
 			"result shows it only when reveal_edit_code is set.",
 		hints(false, false, false))
+}
+
+// defaultPrivacyText tells the agent who can read an upload without a privacy field.
+func defaultPrivacyText(defaultPrivacy string) string {
+	if defaultPrivacy == string(padmark.FileInfoPrivacyOwner) {
+		return "Without privacy, the privacy is owner: only the account of the proxy token can read the file."
+	}
+
+	return "Without privacy, the privacy is public: each person with the URL can read the file."
 }
 
 func getFileTool() *mcpsdk.Tool {
@@ -64,8 +84,9 @@ func updateFileTool() *mcpsdk.Tool {
 			"change. ttl counts from now and 0 expires the file now; clear_expiry removes the expiry. "+
 			"The edit_code comes from the input, else from the proxy's session vault, else from the "+
 			"bearer token.",
-		// Not idempotent: a repeated ttl moves the expiry, because ttl counts from the call.
-		hints(false, false, false))
+		// Destructive: ttl 0 deletes the file now. Not idempotent: a repeated ttl moves the
+		// expiry, because ttl counts from the call.
+		hints(false, true, false))
 }
 
 func deleteFileTool() *mcpsdk.Tool {
@@ -78,7 +99,12 @@ func deleteFileTool() *mcpsdk.Tool {
 func (m *Manager) uploadFile(
 	ctx context.Context, _ *mcpsdk.CallToolRequest, input uploadFileInput,
 ) (*mcpsdk.CallToolResult, fileOutput, error) {
-	file, name, err := openUploadFile(m.uploadRoot, input.Path)
+	opts, err := m.uploadOptions(input)
+	if err != nil {
+		return nil, fileOutput{}, err
+	}
+
+	file, name, err := openUploadFile(m.uploadRoot, input.Path, m.uploadHidden)
 	if err != nil {
 		return nil, fileOutput{}, fmt.Errorf("open upload file: %w", err)
 	}
@@ -95,8 +121,15 @@ func (m *Manager) uploadFile(
 		name = *input.Name
 	}
 
-	resp, err := m.files.UploadFile(ctx, name, file, uploadOptions(input))
+	body := &readErrRecorder{reader: file, err: nil}
+
+	resp, err := m.files.UploadFile(ctx, name, body, opts)
 	if err != nil {
+		// UploadFile returns after it stops to read body, so body.err is safe to read here.
+		if body.err != nil {
+			return nil, fileOutput{}, fmt.Errorf("upload file: %w %q: %w", errReadLocalFile, input.Path, body.err)
+		}
+
 		return nil, fileOutput{}, uploadError(err)
 	}
 
@@ -108,21 +141,71 @@ func (m *Manager) uploadFile(
 	return nil, out, nil
 }
 
-// uploadOptions converts the tool input into client options. Unset fields stay at their zero
-// values, so the server applies its defaults.
-func uploadOptions(input uploadFileInput) padmark.UploadFileOptions {
+// readErrRecorder keeps the first read error of the local file. The upload client reports a
+// read error as a transport error, and the tool must not tell the agent to check the server.
+type readErrRecorder struct {
+	reader io.Reader
+	err    error
+}
+
+func (r *readErrRecorder) Read(buf []byte) (int, error) {
+	count, err := r.reader.Read(buf)
+	if err == nil {
+		return count, nil
+	}
+
+	// The io.Reader contract needs io.EOF itself, not a wrapped copy.
+	if errors.Is(err, io.EOF) {
+		return count, io.EOF
+	}
+
+	if r.err == nil {
+		r.err = err
+	}
+
+	return count, fmt.Errorf("read upload file: %w", err)
+}
+
+// uploadDefaultPrivacy is the privacy of an upload without a privacy field. With a token, the
+// account owns the file, so "owner" is valid and keeps the file private. Without a token, the
+// file has no owner and the server refuses "owner", so the server default "public" stays.
+func (m *Manager) uploadDefaultPrivacy() string {
+	if m.hasToken {
+		return string(padmark.FileInfoPrivacyOwner)
+	}
+
+	return string(padmark.FileInfoPrivacyPublic)
+}
+
+// uploadOptions converts the tool input into client options. It refuses input that the agent
+// can correct before the proxy reads the file.
+func (m *Manager) uploadOptions(input uploadFileInput) (padmark.UploadFileOptions, error) {
 	opts := padmark.UploadFileOptions{
 		TTL: 0, Privacy: "", Slug: "", EditCode: "", BurnAfterDownload: false,
 	}
+
 	if input.TTL != nil {
+		// Check the range before the conversion: a larger value overflows time.Duration.
+		if *input.TTL <= 0 || *input.TTL > maxTTLSeconds {
+			return opts, errUploadTTLRange
+		}
+
 		opts.TTL = time.Duration(*input.TTL) * time.Second
+	}
+
+	if m.hasToken {
+		opts.Privacy = m.uploadDefaultPrivacy()
 	}
 
 	if input.Privacy != nil {
 		opts.Privacy = *input.Privacy
 	}
 
-	if input.Slug != nil {
+	if input.Slug != nil && *input.Slug != "" {
+		if !m.uploadSlug {
+			return opts, ErrSlugOff
+		}
+
 		opts.Slug = *input.Slug
 	}
 
@@ -134,7 +217,7 @@ func uploadOptions(input uploadFileInput) padmark.UploadFileOptions {
 		opts.BurnAfterDownload = *input.BurnAfterDownload
 	}
 
-	return opts
+	return opts, nil
 }
 
 func (m *Manager) getFile(
@@ -187,17 +270,12 @@ func newUpdateFileRequest(input updateFileInput) (*padmark.UpdateFileRequest, er
 		BurnAfterDownload: padmark.OptBool{Value: false, Set: false},
 	}
 
-	if input.ClearExpiry && input.TTL != nil {
-		return nil, errTTLWithClearExpiry
+	ttl, err := updateTTL(input)
+	if err != nil {
+		return nil, err
 	}
 
-	if input.ClearExpiry {
-		req.TTL = padmark.OptNilInt64{Value: 0, Set: true, Null: true}
-	}
-
-	if input.TTL != nil {
-		req.TTL = padmark.NewOptNilInt64(*input.TTL)
-	}
+	req.TTL = ttl
 
 	if input.Privacy != nil {
 		req.Privacy = padmark.NewOptUpdateFileRequestPrivacy(padmark.UpdateFileRequestPrivacy(*input.Privacy))
@@ -212,6 +290,28 @@ func newUpdateFileRequest(input updateFileInput) (*padmark.UpdateFileRequest, er
 	}
 
 	return req, nil
+}
+
+// updateTTL returns the ttl field of the PUT body: unset, null (clear_expiry) or a value. 0 is
+// valid and expires the file now.
+func updateTTL(input updateFileInput) (padmark.OptNilInt64, error) {
+	if input.ClearExpiry && input.TTL != nil {
+		return padmark.OptNilInt64{Value: 0, Set: false, Null: false}, errTTLWithClearExpiry
+	}
+
+	if input.ClearExpiry {
+		return padmark.OptNilInt64{Value: 0, Set: true, Null: true}, nil
+	}
+
+	if input.TTL == nil {
+		return padmark.OptNilInt64{Value: 0, Set: false, Null: false}, nil
+	}
+
+	if *input.TTL < 0 || *input.TTL > maxTTLSeconds {
+		return padmark.OptNilInt64{Value: 0, Set: false, Null: false}, errUpdateTTLRange
+	}
+
+	return padmark.NewOptNilInt64(*input.TTL), nil
 }
 
 func (m *Manager) deleteFile(

@@ -78,11 +78,11 @@ func errorStatusMessage(err error) (status int, message string) {
 	return status, message
 }
 
-// writeDecodeError answers a request whose JSON body could not be decoded: 413 when the body
-// exceeded the configured limit (http.MaxBytesReader), otherwise 400. Keeps the native
-// multi-segment note handlers consistent with the ogen error surface (JSON ErrorResponse body).
-// Stays a single small method rather than shared middleware since it has one caller today
-// (UpdateNoteByPath); future native handlers with a JSON body should call this method directly.
+// writeDecodeError answers a request whose JSON body the handler cannot decode: 413 when the
+// body is larger than the configured limit (http.MaxBytesReader), otherwise 400 with a
+// constant message. The native handlers with a JSON body (UpdateNoteByPath and
+// FileHandler.UpdateFile) call it, so their errors have the ErrorResponse body of the ogen
+// handlers. It is a method and not middleware, because only these handlers decode JSON.
 func (c *common) writeDecodeError(w http.ResponseWriter, r *http.Request, err error) {
 	status, msg := http.StatusBadRequest, decodeErrorMessage
 

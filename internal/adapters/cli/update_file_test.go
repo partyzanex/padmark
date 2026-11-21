@@ -92,6 +92,12 @@ func (s *UpdateFileSuite) TestNonPositiveTTL() {
 	s.Empty(s.method)
 }
 
+func (s *UpdateFileSuite) TestTTLTooLarge() {
+	_, err := s.update(testFileID, "--ttl", "18446744075")
+	s.Require().ErrorIs(err, errTTLTooLarge)
+	s.Empty(s.method)
+}
+
 func (s *UpdateFileSuite) TestForbidden() {
 	s.status, s.body = http.StatusForbidden, `{"message":"invalid edit code"}`
 

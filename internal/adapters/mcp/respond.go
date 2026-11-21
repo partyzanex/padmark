@@ -2,8 +2,10 @@ package mcp
 
 import (
 	"cmp"
+	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 
 	"github.com/partyzanex/padmark/internal/errorcontext"
@@ -243,7 +245,28 @@ func uploadError(err error) error {
 		return fmt.Errorf("upload file: %w", err)
 	}
 
+	// The server answered too late, so the server is running: the transport text would be wrong.
+	if isTimeout(err) {
+		return fmt.Errorf("upload file: %w: %w", ErrUploadTimeout, err)
+	}
+
+	if errors.Is(err, context.Canceled) {
+		return fmt.Errorf("upload file: the upload was cancelled: %w", err)
+	}
+
 	return errorcontext.Wrap(transportError("upload file", err), "handle upload file")
+}
+
+// isTimeout reports whether err is a deadline of the context or a network timeout, such as the
+// response header timeout of the transfer client.
+func isTimeout(err error) bool {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+
+	netErr, ok := errors.AsType[net.Error](err)
+
+	return ok && netErr.Timeout()
 }
 
 // fileStatusError turns the status of an upload response into the error text for the model.

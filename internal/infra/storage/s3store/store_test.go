@@ -80,11 +80,27 @@ func (s *StoreSuite) newStore(bucket string) *s3store.Store {
 	return store
 }
 
-func (s *StoreSuite) TestPing() {
+// TestEnsureBucket: an existing bucket stays as it is, and a missing bucket is created once
+// and then accepts objects.
+func (s *StoreSuite) TestEnsureBucket() {
 	ctx := s.T().Context()
 
-	s.Require().NoError(s.store.Ping(ctx))
-	s.Require().Error(s.newStore("missing-bucket").Ping(ctx))
+	created, err := s.store.EnsureBucket(ctx)
+	s.Require().NoError(err)
+	s.False(created, "the bucket exists")
+
+	store := s.newStore("created-bucket")
+
+	created, err = store.EnsureBucket(ctx)
+	s.Require().NoError(err)
+	s.True(created, "a missing bucket must be created")
+
+	created, err = store.EnsureBucket(ctx)
+	s.Require().NoError(err)
+	s.False(created, "the second call finds the bucket")
+
+	s.Require().NoError(store.Put(ctx, "a", bytes.NewReader([]byte("hello"))))
+	s.Require().NoError(store.Stat(ctx, "a"))
 }
 
 func (s *StoreSuite) TestObjectLifecycle() {
@@ -122,7 +138,7 @@ func (s *StoreSuite) TestManagerEndToEnd() {
 	s.Require().NoError(err)
 	s.Equal(int64(len(content)), file.Size)
 
-	reader := files.AccessOptions{CallerID: [16]byte{}, Authenticated: false, AllowBurn: true}
+	reader := files.AccessOptions{CallerID: [16]byte{}, Authenticated: false, AllowBurn: true, SkipPrivacy: false}
 
 	download, err := manager.Download(ctx, file.ID, reader)
 	s.Require().NoError(err)

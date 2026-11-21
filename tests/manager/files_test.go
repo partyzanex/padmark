@@ -115,7 +115,7 @@ func (s *ManagerSuite) TestFile_Lifecycle() {
 	s.updateFile(created.ID)
 
 	_, err = s.FileManager.Download(ctx, created.ID, files.AccessOptions{
-		CallerID: uuid.Nil, Authenticated: false, AllowBurn: false,
+		CallerID: uuid.Nil, Authenticated: false, AllowBurn: false, SkipPrivacy: false,
 	})
 	s.Require().ErrorIs(err, domain.ErrBurnIntentRequired, "a preview must not consume a burn file")
 
@@ -197,7 +197,7 @@ func (s *ManagerSuite) TestFile_Expiry() {
 	}
 
 	_, err = s.FileManager.Info(ctx, read.ID, files.AccessOptions{
-		CallerID: uuid.Nil, Authenticated: false, AllowBurn: false,
+		CallerID: uuid.Nil, Authenticated: false, AllowBurn: false, SkipPrivacy: false,
 	})
 	s.Require().ErrorIs(err, domain.ErrExpired)
 
@@ -239,7 +239,7 @@ func (s *ManagerSuite) downloadFile(slug string, allowBurn bool) []byte {
 	ctx := s.T().Context()
 
 	download, err := s.FileManager.Download(ctx, slug, files.AccessOptions{
-		CallerID: uuid.Nil, Authenticated: false, AllowBurn: allowBurn,
+		CallerID: uuid.Nil, Authenticated: false, AllowBurn: allowBurn, SkipPrivacy: false,
 	})
 	s.Require().NoError(err)
 

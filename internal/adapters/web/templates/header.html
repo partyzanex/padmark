@@ -1,8 +1,9 @@
 {{/* header renders the site header from a headerView (see web_header.go). Kind selects the
-     controls: the create tabs, the "New" button of reader pages or the admin links. The "File"
-     tab is shown only when FilesEnabled is set. The account
-     block replaces "Sign in" for a signed-in user. On phone width the links and the account
-     block move into the menu under #menuBtn, and one button cycles the theme. */}}
+     controls: the create tabs, the "New" button of reader pages or the admin links. The "New"
+     button opens the create page of the record kind (Record). The "File" tab is shown only
+     when FilesEnabled is set. The account block replaces "Sign in" for a signed-in user. On
+     phone width the links and the account block move into the menu under #menuBtn, and one
+     button cycles the theme. */}}
 {{define "header"}}
 <header class="header">
     <a href="/" class="logo" aria-label="Padmark — home">Padmark<span class="logo-dot">.</span></a>
@@ -65,7 +66,7 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 3.5a8.5 8.5 0 0 1 0 17z" fill="currentColor"/></svg>
     </button>
     {{- if eq .Kind "view"}}
-    <a href="/" class="btn-primary header-new" aria-label="New note">
+    <a href="{{.NewURL}}" class="btn-primary header-new" aria-label="{{.NewLabel}}">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
         <span>New</span>
     </a>
@@ -181,6 +182,23 @@
         return [chars.slice(0, 4), chars.slice(4, 8), chars.slice(8, 12)].map(group => group.join('')).join('-');
     }
 {{end}}
+
+{{/* theme-head applies the saved theme before the browser paints the page. Put it in <head>
+     before the stylesheet; the argument is the CSP nonce. The server cannot read localStorage,
+     thus <html> has the default "dim". theme-js at the end of <body> runs too late: the browser
+     can paint the body before it, and a light page then flashes dark. */}}
+{{define "theme-head"}}
+    <script nonce="{{.}}">
+        try {
+            const saved = localStorage.getItem('theme');
+            if (saved === 'light' || saved === 'dim' || saved === 'dark') {
+                document.documentElement.setAttribute('data-theme', saved);
+            }
+        } catch (err) {
+            // Blocked storage keeps the default theme.
+        }
+    </script>
+{{- end}}
 
 {{define "theme-js"}}
     const themes = ['light', 'dim', 'dark'];

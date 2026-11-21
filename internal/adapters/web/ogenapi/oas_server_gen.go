@@ -31,11 +31,20 @@ type Handler interface {
 	// Uploads one file and returns its description with the one-time `edit_code`.
 	// Send `multipart/form-data`. Put the optional text fields `ttl`, `privacy`,
 	// `burn_after_download`, `slug` and `edit_code` first. Put the `file` part last.
-	// The server reads only the fields before `file` and ignores fields after it.
+	// A part after `file` gives `400`, and the server does not keep the file.
 	// The server streams the file to object storage and does not keep it in memory.
-	// Each text field can have a maximum of 1024 bytes. If `slug` is omitted, the server
+	// Each text field can have a maximum of 1024 bytes and can occur one time. An unknown
+	// field name or a repeated field gives `400`. All data before the `file` part,
+	// part headers included, can have a maximum of 64 KiB. If `slug` is omitted, the server
 	// generates a 10-character random slug. The file name comes from the `filename` of the
 	// `file` part.
+	// A `Content-Length` above the limit gets `413` before the server reads the body. An
+	// upload that sends no data for the idle timeout (60 seconds by default) gets `408`.
+	// The server limits the number of uploads at the same time, in total and for each client
+	// IP address. A full limit gives `503` (server) or `429` (client) with `Retry-After`.
+	// An error response before the end of the body has `Connection: close`.
+	// A bearer token that is not valid does not give `401`: the server ignores it and the
+	// file has no owner, as for `POST /notes` and `POST /links`.
 	//
 	// POST /files
 	CreateFile(ctx context.Context, req *CreateFileRequestMultipart) (CreateFileRes, error)
@@ -126,9 +135,14 @@ type Handler interface {
 	// A `burn_after_download` file is deleted after this download. Send
 	// `Accept: application/octet-stream` to show that the download is deliberate. Without a
 	// deliberate `Accept`, the server answers `409` with code `burn_read_not_explicit` and
-	// the file stays.
-	// If the transfer stops after the server sends the headers, the client gets fewer bytes
-	// than `Content-Length`. Discard such a file.
+	// the file stays. A request with browser fetch metadata (`Sec-Fetch-Site`) or a prefetch
+	// never consumes the file: a browser that asks for HTML goes to the file page (`303`),
+	// whose download form (`POST` with a CSRF token) consumes it.
+	// If object storage fails before the first byte, the server answers `503` without the
+	// download headers. If the transfer stops after the first byte, the server closes the
+	// connection, and the client gets fewer bytes than `Content-Length`. Discard such a
+	// file. A download that makes no progress for the idle timeout (60 seconds by default)
+	// stops in the same way.
 	//
 	// GET /files/{id}/download
 	GetFileContent(ctx context.Context, params GetFileContentParams) (GetFileContentRes, error)
@@ -137,7 +151,9 @@ type Handler interface {
 	// Returns the link as JSON, including its decrypted `target_url`. This is a metadata-only
 	// read: it does not increment `views`, does not consume a `burn_after_click` link, and does
 	// not follow the redirect — visiting `GET /{id}` does all of that. See the "Short links"
-	// section above.
+	// section above. A client whose `Accept` header prefers `text/html` gets the browser page
+	// of the link instead, with the same privacy and expiry rules; send `Accept:
+	// application/json` to get this response.
 	//
 	// GET /links/{id}
 	GetLink(ctx context.Context, params GetLinkParams) (GetLinkRes, error)

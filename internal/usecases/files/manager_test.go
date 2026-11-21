@@ -4,13 +4,16 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"strings"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/mock/gomock"
 
@@ -111,7 +114,7 @@ func createOptions() CreateOptions {
 }
 
 func anonymous(allowBurn bool) AccessOptions {
-	return AccessOptions{CallerID: uuid.Nil, Authenticated: false, AllowBurn: allowBurn}
+	return AccessOptions{CallerID: uuid.Nil, Authenticated: false, AllowBurn: allowBurn, SkipPrivacy: false}
 }
 
 func (s *ManagerSuite) expectFreeSlug() {
@@ -131,12 +134,16 @@ func (s *ManagerSuite) expectUpload(want string) {
 		})
 }
 
+// expectUploadSweep expects the small sweep after an upload. It finds no expired file.
+func (s *ManagerSuite) expectUploadSweep() {
+	s.storage.EXPECT().ListExpired(gomock.Any(), gomock.Any(), uploadSweepBatchSize).Return(nil, nil)
+}
+
 func (s *ManagerSuite) TestCreate_StoresFileAndReturnsSlug() {
 	ctx := s.T().Context()
+	old := fileRef("old-id", "old")
 
 	s.expectUpload("hello")
-	s.storage.EXPECT().DeleteExpired(gomock.Any(), gomock.Any()).Return([]string{"old"}, nil)
-	s.objects.EXPECT().Delete(gomock.Any(), "old").Return(nil)
 	s.expectFreeSlug()
 	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).
 		DoAndReturn(func(_ context.Context, file *domain.File) error {
@@ -146,6 +153,12 @@ func (s *ManagerSuite) TestCreate_StoresFileAndReturnsSlug() {
 
 			return nil
 		})
+	gomock.InOrder(
+		s.storage.EXPECT().ListExpired(gomock.Any(), gomock.Any(), uploadSweepBatchSize).
+			Return([]*domain.File{old}, nil),
+		s.objects.EXPECT().Delete(gomock.Any(), "old").Return(nil),
+		s.storage.EXPECT().DeleteExpired(gomock.Any(), "old-id", "old", gomock.Any()).Return(nil),
+	)
 
 	file, err := s.manager.Create(ctx, "dir/a.txt", strings.NewReader("hello"), createOptions())
 	s.Require().NoError(err)
@@ -154,11 +167,12 @@ func (s *ManagerSuite) TestCreate_StoresFileAndReturnsSlug() {
 	s.Equal("a.txt", file.Name)
 	s.NotEmpty(file.EditCode)
 	s.Equal(int64(5), file.Size)
+	s.Nil(file.ContentKey, "the caller does not get the content key")
 }
 
 func (s *ManagerSuite) TestCreate_UserEditCodeUsesMemoryHardHash() {
 	s.expectUpload("x")
-	s.storage.EXPECT().DeleteExpired(gomock.Any(), gomock.Any()).Return(nil, nil)
+	s.expectUploadSweep()
 	s.expectFreeSlug()
 	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).
 		DoAndReturn(func(_ context.Context, file *domain.File) error {
@@ -190,7 +204,7 @@ func (s *ManagerSuite) TestCreate_RejectsTooLargeFile() {
 
 func (s *ManagerSuite) TestCreate_AcceptsFileAtLimit() {
 	s.expectUpload("0123456789")
-	s.storage.EXPECT().DeleteExpired(gomock.Any(), gomock.Any()).Return(nil, nil)
+	s.expectUploadSweep()
 	s.expectFreeSlug()
 	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
 
@@ -223,9 +237,27 @@ func (s *ManagerSuite) TestCreate_BrokenUploadIsNotAStorageFailure() {
 	s.NotErrorIs(err, domain.ErrStorageUnavailable)
 }
 
+func (s *ManagerSuite) TestCreate_CutBodyIsNotStored() {
+	// A multipart part without its closing boundary ends with io.ErrUnexpectedEOF.
+	cut := io.MultiReader(strings.NewReader("ab"), iotest.ErrReader(io.ErrUnexpectedEOF))
+
+	s.objects.EXPECT().Put(gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, _ string, body io.Reader) error {
+			_, err := io.ReadAll(body)
+
+			return err
+		})
+	s.objects.EXPECT().Delete(gomock.Any(), gomock.Any()).Return(nil)
+	// No Storage.Create expectation: the strict mock fails the test if a record is written.
+
+	file, err := s.manager.Create(s.T().Context(), "a", cut, createOptions())
+	s.Require().ErrorIs(err, io.ErrUnexpectedEOF)
+	s.Require().NotErrorIs(err, domain.ErrStorageUnavailable)
+	s.Nil(file)
+}
+
 func (s *ManagerSuite) TestCreate_RemovesObjectWhenRecordFails() {
 	s.expectUpload("x")
-	s.storage.EXPECT().DeleteExpired(gomock.Any(), gomock.Any()).Return(nil, nil)
 	s.expectFreeSlug()
 	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(domain.ErrSlugConflict)
 	s.objects.EXPECT().Delete(gomock.Any(), gomock.Any()).Return(nil)
@@ -236,7 +268,6 @@ func (s *ManagerSuite) TestCreate_RemovesObjectWhenRecordFails() {
 
 func (s *ManagerSuite) TestCreate_CustomSlugTakenByNote() {
 	s.expectUpload("x")
-	s.storage.EXPECT().DeleteExpired(gomock.Any(), gomock.Any()).Return(nil, nil)
 	s.notes.EXPECT().Exists(gomock.Any(), domain.HashSlug("report")).Return(true, nil)
 	s.objects.EXPECT().Delete(gomock.Any(), gomock.Any()).Return(nil)
 
@@ -288,6 +319,15 @@ func storedFile(burn bool) *domain.File {
 	}
 }
 
+// fileRef returns a stored file with the record ID id and the object key key.
+func fileRef(id, key string) *domain.File {
+	file := storedFile(false)
+	file.ID = id
+	file.ObjectKey = key
+
+	return file
+}
+
 func (s *ManagerSuite) expectObject(content string) {
 	s.objects.EXPECT().Stat(gomock.Any(), "obj").Return(nil)
 	s.objects.EXPECT().WriteTo(gomock.Any(), "obj", gomock.Any()).
@@ -303,7 +343,8 @@ func (s *ManagerSuite) TestDownload_CountsAndDecrypts() {
 
 	s.storage.EXPECT().GetByID(gomock.Any(), domain.HashSlug("abc")).Return(storedFile(false), nil)
 	s.expectObject("hello")
-	s.storage.EXPECT().IncrementDownloadsVisible(gomock.Any(), domain.HashSlug("abc"), uuid.Nil, false).Return(nil)
+	s.storage.EXPECT().IncrementDownloadsVisible(gomock.Any(), domain.HashSlug("abc"), "obj", anonymous(false)).
+		Return(nil)
 
 	download, err := s.manager.Download(ctx, "abc", anonymous(false))
 	s.Require().NoError(err)
@@ -330,22 +371,23 @@ func (s *ManagerSuite) TestDownload_BurnConsumesAndDeletesObjectOnClose() {
 
 	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(storedFile(true), nil)
 	s.expectObject("hello")
-	s.storage.EXPECT().ConsumeVisible(gomock.Any(), domain.HashSlug("abc"), uuid.Nil, false, true).
-		Return(storedFile(true), nil)
+	s.storage.EXPECT().ClaimBurn(gomock.Any(), gomock.Any()).Return(nil)
 
 	download, err := s.manager.Download(ctx, "abc", anonymous(true))
 	s.Require().NoError(err)
 	s.Require().NoError(download.Send(ctx, io.Discard))
 
-	s.objects.EXPECT().Delete(gomock.Any(), "obj").Return(nil)
+	gomock.InOrder(
+		s.storage.EXPECT().Delete(gomock.Any(), domain.HashSlug("abc"), "obj").Return(nil),
+		s.objects.EXPECT().Delete(gomock.Any(), "obj").Return(nil),
+	)
 	download.Close(ctx)
 }
 
 func (s *ManagerSuite) TestDownload_LostBurnRace() {
 	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(storedFile(true), nil)
 	s.objects.EXPECT().Stat(gomock.Any(), "obj").Return(nil)
-	s.storage.EXPECT().ConsumeVisible(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), true).
-		Return(nil, domain.ErrNotFound)
+	s.storage.EXPECT().ClaimBurn(gomock.Any(), gomock.Any()).Return(domain.ErrNotFound)
 
 	_, err := s.manager.Download(s.T().Context(), "abc", anonymous(true))
 	s.Require().ErrorIs(err, domain.ErrNotFound)
@@ -368,8 +410,10 @@ func (s *ManagerSuite) TestDownload_ExpiredFileIsRemoved() {
 	file.ExpiresAt = &past
 
 	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(file, nil)
-	s.storage.EXPECT().ConsumeVisible(gomock.Any(), domain.HashSlug("abc"), uuid.Nil, false, false).Return(file, nil)
-	s.objects.EXPECT().Delete(gomock.Any(), "obj").Return(nil)
+	gomock.InOrder(
+		s.objects.EXPECT().Delete(gomock.Any(), "obj").Return(nil),
+		s.storage.EXPECT().DeleteExpired(gomock.Any(), domain.HashSlug("abc"), "obj", gomock.Any()).Return(nil),
+	)
 
 	_, err := s.manager.Download(s.T().Context(), "abc", anonymous(false))
 	s.Require().ErrorIs(err, domain.ErrExpired)
@@ -388,7 +432,7 @@ func (s *ManagerSuite) TestDownload_StorageReadFailure() {
 
 	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(storedFile(false), nil)
 	s.objects.EXPECT().Stat(gomock.Any(), "obj").Return(nil)
-	s.storage.EXPECT().IncrementDownloadsVisible(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
+	s.storage.EXPECT().IncrementDownloadsVisible(gomock.Any(), gomock.Any(), "obj", gomock.Any()).Return(nil)
 	s.objects.EXPECT().WriteTo(gomock.Any(), "obj", gomock.Any()).Return(errors.New("reset by peer"))
 
 	download, err := s.manager.Download(ctx, "abc", anonymous(false))
@@ -409,7 +453,7 @@ func (s *ManagerSuite) TestDelete() {
 
 	s.Run("with edit code", func() {
 		s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(storedFile(false), nil)
-		s.storage.EXPECT().Delete(gomock.Any(), domain.HashSlug("abc")).Return(storedFile(false), nil)
+		s.storage.EXPECT().Delete(gomock.Any(), domain.HashSlug("abc"), "obj").Return(nil)
 		s.objects.EXPECT().Delete(gomock.Any(), "obj").Return(nil)
 
 		s.Require().NoError(s.manager.Delete(ctx, "abc", "code", uuid.Nil))
@@ -420,7 +464,7 @@ func (s *ManagerSuite) TestDelete() {
 		file.OwnerID = &owner
 
 		s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(file, nil)
-		s.storage.EXPECT().Delete(gomock.Any(), gomock.Any()).Return(file, nil)
+		s.storage.EXPECT().Delete(gomock.Any(), gomock.Any(), "obj").Return(nil)
 		s.objects.EXPECT().Delete(gomock.Any(), "obj").Return(errors.New("s3 down"))
 
 		s.Require().NoError(s.manager.Delete(ctx, "abc", "", owner))
@@ -430,6 +474,39 @@ func (s *ManagerSuite) TestDelete() {
 		s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(storedFile(false), nil)
 
 		s.Require().ErrorIs(s.manager.Delete(ctx, "abc", "wrong", uuid.Nil), domain.ErrInvalidEditCode)
+	})
+}
+
+func TestSizeLimitReader_EndOfStream(t *testing.T) {
+	t.Parallel()
+
+	read := func(src io.Reader) error {
+		_, err := (&sizeLimitReader{src: src, limit: 10, total: 0}).Read(make([]byte, 4))
+
+		return err
+	}
+
+	// require.Same compares the error values by identity: a wrapped error is a different value.
+	t.Run("clean EOF passes unchanged", func(t *testing.T) {
+		t.Parallel()
+
+		require.Same(t, io.EOF, read(strings.NewReader("")))
+	})
+
+	t.Run("unexpected EOF is a wrapped error", func(t *testing.T) {
+		t.Parallel()
+
+		err := read(iotest.ErrReader(io.ErrUnexpectedEOF))
+		require.ErrorIs(t, err, io.ErrUnexpectedEOF)
+		require.NotSame(t, io.ErrUnexpectedEOF, err)
+	})
+
+	t.Run("wrapped EOF is not a clean end", func(t *testing.T) {
+		t.Parallel()
+
+		err := read(iotest.ErrReader(fmt.Errorf("proxy: %w", io.EOF)))
+		require.Error(t, err)
+		require.NotSame(t, io.EOF, err)
 	})
 }
 

@@ -163,6 +163,68 @@ func (s *FilesStreamSuite) TestUploadFile_BrokenConnection() {
 	s.NoError(ctx.Err(), "UploadFile must return when the connection drops, not at the timeout")
 }
 
+// TestUploadFile_ServerErrorWithBlockedBody uses a body whose Read blocks, as a terminal or a
+// pipe does. The server answers 400 at once, so UploadFile must return the error before the test
+// timeout releases the body.
+func (s *FilesStreamSuite) TestUploadFile_ServerErrorWithBlockedBody() {
+	ctx, cancel := context.WithTimeout(s.T().Context(), testTimeout)
+	defer cancel()
+
+	cl := s.newClient(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		// Without "Connection: close", net/http reads up to 256 KiB of the unread body before it
+		// sends the response. The blocked body never sends them, so no response would come.
+		w.Header().Set("Connection", "close")
+		writeJSON(w, http.StatusBadRequest, `{"message":"bad upload","code":"bad_upload"}`)
+	}))
+
+	source := &patternReader{size: bigFileSize, gateAt: 0, gate: make(chan struct{}), abort: ctx.Done()}
+
+	created, err := cl.UploadFile(ctx, "blocked.bin", source, client.UploadFileOptions{})
+	s.Require().Error(err)
+	s.Nil(created)
+
+	var apiErr *client.APIError
+
+	s.Require().ErrorAs(err, &apiErr)
+	s.Equal(http.StatusBadRequest, apiErr.StatusCode)
+	s.Equal("bad_upload", apiErr.Code)
+	s.NoError(ctx.Err(), "UploadFile must return after the server error, not at the timeout")
+}
+
+// TestUploadFile_CanceledWithBlockedBody cancels the upload while the body Read blocks.
+// UploadFile must return context.Canceled before the test timeout releases the body.
+func (s *FilesStreamSuite) TestUploadFile_CanceledWithBlockedBody() {
+	ctx, cancel := context.WithTimeout(s.T().Context(), testTimeout)
+	defer cancel()
+
+	uploadCtx, cancelUpload := context.WithCancel(ctx)
+	defer cancelUpload()
+
+	arrived := make(chan struct{})
+
+	cl := s.newClient(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		close(arrived)
+
+		// The body never ends: the read stops when the client closes the connection.
+		_, _ = io.Copy(io.Discard, r.Body)
+	}))
+
+	go func() {
+		select {
+		case <-arrived:
+			cancelUpload()
+		case <-ctx.Done():
+		}
+	}()
+
+	source := &patternReader{size: bigFileSize, gateAt: 0, gate: make(chan struct{}), abort: ctx.Done()}
+
+	created, err := cl.UploadFile(uploadCtx, "blocked.bin", source, client.UploadFileOptions{})
+	s.Require().ErrorIs(err, context.Canceled)
+	s.Nil(created)
+	s.NoError(ctx.Err(), "UploadFile must return after the cancellation, not at the timeout")
+}
+
 func (s *FilesStreamSuite) TestUploadFile_InvalidTTL() {
 	cl := s.newClient(http.NotFoundHandler())
 
@@ -273,11 +335,16 @@ func (s *FilesStreamSuite) TestDownloadFile_ErrorStatus() {
 	}
 }
 
-func (s *FilesStreamSuite) TestDownloadFile_EmptyID() {
-	cl := s.newClient(http.NotFoundHandler())
+func (s *FilesStreamSuite) TestDownloadFile_InvalidID() {
+	cl := s.newClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.Failf("unexpected request", "%s %s", r.Method, r.URL.Path)
+		w.WriteHeader(http.StatusTeapot)
+	}))
 
-	_, err := cl.DownloadFile(s.T().Context(), "", io.Discard)
-	s.Require().Error(err)
+	for _, id := range []string{"", ".", ".."} {
+		_, err := cl.DownloadFile(s.T().Context(), id, io.Discard)
+		s.Require().ErrorIs(err, client.ErrInvalidFileID, "%q", id)
+	}
 }
 
 // --- helpers ---

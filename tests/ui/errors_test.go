@@ -356,10 +356,11 @@ func testLinkEditErrors(sess *uiSession) {
 	sess.fill("#targetInput", "https://example.com/edit-errors")
 	sess.button("Create link")
 	sess.createdLink()
-	sess.link("Edit link")
+	sess.link("Open link")
+	sess.openEditor()
 	sess.page.OnDialog(func(dialog playwright.Dialog) { sess.must(dialog.Accept()) })
 
-	sess.button("Save link")
+	sess.button("Save")
 	sess.expectError("#linkError", "Edit code required")
 
 	sess.button("Delete link")
@@ -368,7 +369,7 @@ func testLinkEditErrors(sess *uiSession) {
 	sess.openSettings()
 	sess.fill("#editCodeInput", wrongEditCode)
 	sess.closeSettings()
-	sess.button("Save link")
+	sess.button("Save")
 	sess.expectError("#linkError", "invalid edit code")
 
 	sess.button("Delete link")
@@ -413,7 +414,7 @@ const (
 
 // testErrorPages: the error pages of the note and short-link routes without accounts.
 func testErrorPages(sess *uiSession) {
-	for _, path := range []string{"/missing-ui-note", "/edit/missing-ui-note", "/links/missing-ui-link/edit"} {
+	for _, path := range []string{"/missing-ui-note", "/edit/missing-ui-note", "/links/missing-ui-link"} {
 		sess.gotoPage(path)
 		sess.expectErrorPage("404", notFoundTitle, notFoundDesc)
 	}
@@ -431,7 +432,7 @@ func testErrorPages(sess *uiSession) {
 	sess.post("/links", map[string]any{"target_url": "https://example.com/short", "slug": "short-link", "ttl": 1})
 	sess.post("/links", map[string]any{"target_url": "https://example.com/short", "slug": "short-edit", "ttl": 1})
 
-	for _, path := range []string{"/short-note", "/short-link", "/links/short-edit/edit"} {
+	for _, path := range []string{"/short-note", "/short-link", "/links/short-edit", "/edit/short-edit"} {
 		sess.awaitErrorCode(path, "410")
 		sess.expectErrorPage("410", expiredTitle, expiredDesc)
 	}
@@ -765,10 +766,10 @@ func testFileEditorErrors(sess *uiSession) {
 // testFileEditErrors: the errors of the edit page of a file.
 func testFileEditErrors(sess *uiSession) {
 	id, _ := sess.uploadTestFile()
-	sess.link("Edit file")
+	sess.openFileEditor()
 	sess.page.OnDialog(func(dialog playwright.Dialog) { sess.must(dialog.Accept()) })
 
-	sess.button("Save file")
+	sess.button("Save")
 	sess.expectError("#fileError", "Edit code required")
 
 	sess.button("Delete file")
@@ -777,7 +778,7 @@ func testFileEditErrors(sess *uiSession) {
 	sess.openSettings()
 	sess.fill("#editCodeInput", wrongEditCode)
 	sess.closeSettings()
-	sess.button("Save file")
+	sess.button("Save")
 	sess.expectError("#fileError", fileWrongEditCode)
 
 	sess.button("Delete file")
@@ -791,7 +792,7 @@ func testFileEditErrors(sess *uiSession) {
 	)
 	for _, reply := range replies {
 		sess.simulate("**/files/"+id, reply)
-		sess.button("Save file")
+		sess.button("Save")
 		sess.expectReply("#fileError", reply)
 		sess.must(sess.expect.Locator(sess.page.Locator("#saveBtn")).ToBeEnabled())
 	}
@@ -800,14 +801,19 @@ func testFileEditErrors(sess *uiSession) {
 	sess.button("Delete file")
 	sess.expectError("#fileError", fileGoneDesc)
 	sess.must(sess.expect.Locator(sess.page.Locator("#deleteBtn")).ToBeEnabled())
-	sess.must(sess.expect.Page(sess.page).ToHaveURL(sess.baseURL + "/files/" + id + "/edit"))
+	sess.must(sess.expect.Page(sess.page).ToHaveURL(sess.baseURL + "/edit/" + id))
 }
 
 // testFileErrorPages: the error pages of a missing file and of an expired file.
 func testFileErrorPages(sess *uiSession) {
-	for _, path := range []string{"/files/missing-ui-file/edit", "/files/missing-ui-file/download"} {
+	sess.gotoPage("/files/missing-ui-file/download")
+	sess.expectErrorPage("404", fileGoneTitle, fileGoneDesc)
+
+	// The editor of each record is at /edit/{id}; without a record it is a missing note, as for a
+	// short link. The old editor URL goes there.
+	for _, path := range []string{"/edit/missing-ui-file", "/files/missing-ui-file/edit"} {
 		sess.gotoPage(path)
-		sess.expectErrorPage("404", fileGoneTitle, fileGoneDesc)
+		sess.expectErrorPage("404", notFoundTitle, notFoundDesc)
 	}
 
 	// The script uploads the file without the success page: that page reads the file, and a
@@ -822,17 +828,17 @@ func testFileErrorPages(sess *uiSession) {
 	require.True(sess.t, isText, "the upload returns the file ID")
 
 	// The edit page reads only the record, so it shows the expiry without a change to the file.
-	sess.awaitErrorCode("/files/"+id+"/edit", "410")
+	sess.awaitErrorCode("/edit/"+id, "410")
 	sess.expectErrorPage("410", fileGoneTitle, fileGoneDesc)
 
 	// The first reader of the file page deletes the expired file; then the file is not found.
 	sess.gotoPage("/" + id)
 	sess.expectErrorPage("410", fileGoneTitle, fileGoneDesc)
 
-	for _, path := range []string{"/files/" + id + "/download", "/files/" + id + "/edit"} {
-		sess.gotoPage(path)
-		sess.expectErrorPage("404", fileGoneTitle, fileGoneDesc)
-	}
+	sess.gotoPage("/files/" + id + "/download")
+	sess.expectErrorPage("404", fileGoneTitle, fileGoneDesc)
+	sess.gotoPage("/edit/" + id)
+	sess.expectErrorPage("404", notFoundTitle, notFoundDesc)
 
 	// Without the file record, the short address is a missing note.
 	sess.gotoPage("/" + id)

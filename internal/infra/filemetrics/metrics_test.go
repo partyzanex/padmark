@@ -52,9 +52,12 @@ func (s *MetricsSuite) TestStorageErrorsByOp() {
 }
 
 func (s *MetricsSuite) TestUploadBytesBuckets() {
-	s.Equal([]float64{1 << 20, 4 << 20, 16 << 20, 64 << 20, 256 << 20, 1 << 30}, uploadBuckets())
+	s.Equal([]float64{
+		16 << 10, 64 << 10, 256 << 10, 1 << 20, 4 << 20, 16 << 20, 64 << 20, 256 << 20, 1 << 30,
+	}, uploadBuckets())
 
 	s.metrics.ObserveUploadBytes(3 << 20)
+	s.metrics.ObserveUploadBytes(10 << 10)
 
 	reg := prometheus.NewRegistry()
 	s.Require().NoError(reg.Register(s.metrics.uploadBytes))
@@ -64,12 +67,13 @@ func (s *MetricsSuite) TestUploadBytesBuckets() {
 	s.Require().Len(families, 1)
 
 	histogram := families[0].GetMetric()[0].GetHistogram()
-	s.Equal(uint64(1), histogram.GetSampleCount())
+	s.Equal(uint64(2), histogram.GetSampleCount())
 
 	buckets := histogram.GetBucket()
 	s.Require().Len(buckets, len(uploadBuckets()))
-	s.Equal(uint64(0), buckets[0].GetCumulativeCount(), "3 MiB is above the 1 MiB bucket")
-	s.Equal(uint64(1), buckets[1].GetCumulativeCount(), "3 MiB is in the 4 MiB bucket")
+	s.Equal(uint64(1), buckets[0].GetCumulativeCount(), "10 KiB is in the 16 KiB bucket")
+	s.Equal(uint64(1), buckets[3].GetCumulativeCount(), "3 MiB is above the 1 MiB bucket")
+	s.Equal(uint64(2), buckets[4].GetCumulativeCount(), "3 MiB is in the 4 MiB bucket")
 }
 
 func (s *MetricsSuite) TestNewRegisteredShowsAllNames() {

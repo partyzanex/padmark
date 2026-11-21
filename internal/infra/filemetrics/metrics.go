@@ -14,16 +14,19 @@ import (
 const (
 	namespace = "padmark"
 	subsystem = "files"
-	mib       = 1 << 20
-	// bucketFactor and bucketCount give six upload buckets from 1 MiB, each four times larger.
+	kib       = 1 << 10
+	// bucketStart, bucketFactor and bucketCount give nine upload buckets from 16 KiB to 1 GiB,
+	// each four times larger. Most uploaded files are smaller than 1 MiB, so the buckets start
+	// low; a first bucket of 1 MiB would hold almost all files.
+	bucketStart  = 16 * kib
 	bucketFactor = 4
-	bucketCount  = 6
+	bucketCount  = 9
 )
 
-// uploadBuckets returns the upload size limits in bytes: 1, 4, 16, 64 and 256 MiB, and 1 GiB.
-// The default buckets are for durations, so they do not fit sizes.
+// uploadBuckets returns the upload size limits in bytes: 16, 64 and 256 KiB, 1, 4, 16, 64 and
+// 256 MiB, and 1 GiB. The default buckets are for durations, so they do not fit sizes.
 func uploadBuckets() []float64 {
-	return prometheus.ExponentialBuckets(mib, bucketFactor, bucketCount)
+	return prometheus.ExponentialBuckets(bucketStart, bucketFactor, bucketCount)
 }
 
 // deleteReasons and storageOps return all label values. New creates their series at zero, so a

@@ -202,6 +202,9 @@ func (sess *uiSession) expectFilePage(id string, content []byte) {
 	sess.text("#fileTitle", testFileName)
 	sess.text("#fileSize", "293 B")
 	sess.must(sess.expect.Locator(sess.page.Locator("#burnWarning")).ToHaveCount(0))
+	// The file page has the frame and the actions of the note page; "New" opens the upload page.
+	sess.visible(".article-card")
+	sess.must(sess.expect.Locator(sess.page.Locator(".header-new")).ToHaveAttribute("href", "/files"))
 	sess.expectLayout("#downloadBtn", "#copyLinkBtn", "#editFileLink")
 	sess.screenshot("file.png")
 
@@ -217,7 +220,7 @@ func (sess *uiSession) expectFilePage(id string, content []byte) {
 // expectFileEditPage checks the edit page of a file that never expires.
 func (sess *uiSession) expectFileEditPage(id string) {
 	sess.t.Helper()
-	sess.must(sess.expect.Page(sess.page).ToHaveURL(sess.baseURL + "/files/" + id + "/edit"))
+	sess.must(sess.expect.Page(sess.page).ToHaveURL(sess.baseURL + "/edit/" + id))
 	sess.text("#fileName", testFileName)
 	sess.value("#expirySelect", "keep")
 	sess.text("#expiryHint", "Never expires")
@@ -255,16 +258,17 @@ func testFileEditSettings(sess *uiSession) {
 	sess.admin()
 
 	id := sess.uploadOwnerFile()
-	sess.link("Edit file")
+	sess.openFileEditor()
 	sess.must(sess.expect.Locator(sess.page.Locator("#privacy-owner")).ToBeChecked())
 	sess.value("#expirySelect", "keep")
 	sess.must(sess.expect.Locator(sess.page.Locator("#expiryHint")).ToContainText("Expires "))
 
 	// The owner saves without the edit code.
-	sess.saveFileSettings(func() {
+	sess.saveFileSettings(id, func() {
 		sess.choosePrivacy("authenticated")
 		sess.selectOption("#expirySelect", "3600")
 	})
+	sess.click("#editFileLink")
 	sess.value("#expirySelect", "keep")
 
 	saved := sess.readFile(id)
@@ -273,11 +277,10 @@ func testFileEditSettings(sess *uiSession) {
 	require.WithinDuration(sess.t, time.Now().Add(time.Hour), *saved.ExpiresAt, fileHourTolerance)
 	require.False(sess.t, saved.BurnAfterDownload)
 
-	sess.saveFileSettings(func() {
+	sess.saveFileSettings(id, func() {
 		sess.selectOption("#expirySelect", "never")
 		sess.click("#burnLabel")
 	})
-	sess.text("#expiryHint", "Never expires")
 
 	saved = sess.readFile(id)
 	require.Equal(sess.t, "authenticated", saved.Privacy)
@@ -285,7 +288,6 @@ func testFileEditSettings(sess *uiSession) {
 	require.True(sess.t, saved.BurnAfterDownload)
 
 	// The file page shows the saved settings and does not use the single download.
-	sess.gotoPage("/" + id)
 	sess.visible("#burnWarning")
 	require.True(sess.t, sess.readFile(id).BurnAfterDownload)
 }
@@ -313,20 +315,30 @@ func (sess *uiSession) uploadOwnerFile() string {
 	return id
 }
 
-// saveFileSettings changes the settings of the edit page and saves them.
-func (sess *uiSession) saveFileSettings(change func()) {
+// saveFileSettings changes the settings of the edit page and saves them. After the save, the
+// browser shows the file page, as after the save of a note.
+func (sess *uiSession) saveFileSettings(id string, change func()) {
 	sess.t.Helper()
 	sess.openSettings()
 	change()
 	sess.closeSettings()
-	sess.button("Save file")
-	sess.text("#fileStatus", "File saved")
+	sess.button("Save")
+	sess.must(sess.expect.Page(sess.page).ToHaveURL(sess.baseURL + "/" + id))
+}
+
+// openFileEditor goes from the result page to the editor, as for a note: "Open file", then the
+// Edit action of the file page.
+func (sess *uiSession) openFileEditor() {
+	sess.t.Helper()
+	sess.link("Open file")
+	sess.click("#editFileLink")
+	sess.must(sess.expect.Page(sess.page).ToHaveURL(regexpURL("/edit/")))
 }
 
 // testFileDeleteWithCode: a user without an account deletes the file with the edit code.
 func testFileDeleteWithCode(sess *uiSession) {
 	id, code := sess.uploadTestFile()
-	sess.link("Edit file")
+	sess.openFileEditor()
 	sess.page.OnDialog(func(dialog playwright.Dialog) { sess.must(dialog.Accept()) })
 
 	sess.button("Delete file")
@@ -346,8 +358,9 @@ func testFileDeleteAsOwner(sess *uiSession) {
 	sess.admin()
 
 	id, _ := sess.uploadTestFile()
-	sess.link("Edit file")
-	sess.must(sess.expect.Locator(sess.page.Locator(`label[for="editCodeInput"]`)).ToContainText("optional for you"))
+	sess.openFileEditor()
+	sess.must(sess.expect.Locator(sess.page.Locator(`label[for="editCodeInput"]`)).
+		ToContainText("optional, you created this file"))
 	sess.page.OnDialog(func(dialog playwright.Dialog) { sess.must(dialog.Accept()) })
 	sess.button("Delete file")
 	sess.must(sess.expect.Page(sess.page).ToHaveURL(sess.baseURL + "/files"))
@@ -393,7 +406,7 @@ func testPrivateFile(sess *uiSession) {
 		return response
 	}
 
-	for _, path := range []string{"/" + id, "/files/" + id + "/edit", "/files/" + id + "/download"} {
+	for _, path := range []string{"/" + id, "/edit/" + id, "/files/" + id + "/download"} {
 		response := get(path, "text/html")
 		require.Equal(sess.t, http.StatusSeeOther, response.Status(), path)
 		require.Contains(sess.t, response.Headers()["location"], "/login?next=", path)

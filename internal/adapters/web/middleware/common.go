@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -135,6 +136,23 @@ func (sr *statusRecorder) SetWriteDeadline(deadline time.Time) error {
 	err := http.NewResponseController(sr.ResponseWriter).SetWriteDeadline(deadline)
 	if err != nil {
 		return fmt.Errorf("set write deadline: %w", err)
+	}
+
+	return nil
+}
+
+// FlushError lets http.ResponseController flush through this wrapper. A handler that aborts a
+// started download flushes first, so the client gets the status and a short body, not an empty
+// reply. A flush sends the header, so it records the status as Write does.
+func (sr *statusRecorder) FlushError() error {
+	if !sr.written {
+		sr.status = http.StatusOK
+		sr.written = true
+	}
+
+	err := http.NewResponseController(sr.ResponseWriter).Flush()
+	if err != nil {
+		return fmt.Errorf("flush response: %w", err)
 	}
 
 	return nil
@@ -299,16 +317,28 @@ func WithSecurityHeaders(forcedScheme string, trustedProxies []*net.IPNet, next 
 }
 
 // WithRecovery converts a handler panic into a 500 response and an error log record, so one
-// request cannot stop the server.
+// request cannot stop the server. It panics again with http.ErrAbortHandler: a handler uses that
+// value on purpose to stop a response that already started (for example a broken download), and
+// net/http then closes the connection without a log record.
 func WithRecovery(log *slog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 
 		defer func() {
-			if p := recover(); p != nil {
-				log.ErrorContext(ctx, "panic recovered", "panic", p)
-				http.Error(w, "internal server error", http.StatusInternalServerError)
+			recovered := recover()
+			if recovered == nil {
+				return
 			}
+
+			// The abort goes on to net/http, which closes the connection. net/http logs no
+			// record only for the exact value; a wrapped value gets its log record there.
+			abortErr, isError := recovered.(error)
+			if isError && errors.Is(abortErr, http.ErrAbortHandler) {
+				panic(recovered)
+			}
+
+			log.ErrorContext(ctx, "panic recovered", "panic", recovered)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
 		}()
 
 		next.ServeHTTP(w, r)

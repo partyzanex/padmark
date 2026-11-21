@@ -101,6 +101,20 @@ type Metrics interface {
 	IncCollisions()
 }
 
+// ExpiredFileReleaser removes an expired file that still holds a slug, because the file sweep
+// did not run yet. files.Manager implements it; the default releases nothing. Errors are
+// fail-soft: Create keeps its slug conflict and logs the error.
+type ExpiredFileReleaser interface {
+	// ReleaseExpiredSlug removes the expired file with the record ID id. It returns true when
+	// it removed the file.
+	ReleaseExpiredSlug(ctx context.Context, id string) (bool, error)
+}
+
+// noExpiredFiles is the default ExpiredFileReleaser, for a server without file publishing.
+type noExpiredFiles struct{}
+
+func (noExpiredFiles) ReleaseExpiredSlug(context.Context, string) (bool, error) { return false, nil }
+
 // Manager implements short-link business logic: URL validation, slug resolution, and encryption
 // coordination — the links analogue of notes.Manager.
 type Manager struct {
@@ -112,6 +126,7 @@ type Manager struct {
 	cache            Cache
 	metrics          Metrics
 	log              *slog.Logger
+	expiredFiles     ExpiredFileReleaser
 	allowCustomSlugs domain.CustomSlugSetting
 }
 
@@ -138,8 +153,17 @@ func NewManager(
 		cache:            nil,
 		metrics:          nil,
 		log:              log,
+		expiredFiles:     noExpiredFiles{},
 		allowCustomSlugs: domain.CustomSlugSetting(allowCustomSlugs),
 	}
+}
+
+// WithExpiredFiles attaches the file manager, so that an expired file that the sweep did not
+// remove yet does not block a link with the same slug. Call it at composition time.
+func (m *Manager) WithExpiredFiles(releaser ExpiredFileReleaser) *Manager {
+	m.expiredFiles = releaser
+
+	return m
 }
 
 // WithCache attaches an optional Cache for frequently-followed links. Nil (the default — Manager
@@ -392,7 +416,7 @@ func (m *Manager) persistLink(
 	link.TargetURL = encrypted
 	link.ID = domain.HashSlug(slug)
 
-	err := m.storage.Create(ctx, link)
+	err := m.createReleasingExpiredFile(ctx, link)
 	if err != nil {
 		return fmt.Errorf("create link: %w", err)
 	}
@@ -675,4 +699,32 @@ func (m *Manager) consumeLink(
 	}
 
 	return consumed, nil
+}
+
+// createReleasingExpiredFile calls storage.Create. On a slug conflict, it asks the file manager
+// to remove an expired file with the same ID and tries once more. The storage triggers check
+// the slug again, so the retry is safe across server processes.
+func (m *Manager) createReleasingExpiredFile(ctx context.Context, link *domain.Link) error {
+	err := m.storage.Create(ctx, link)
+	if errors.Is(err, domain.ErrSlugConflict) && m.releaseExpiredFile(ctx, link.ID) {
+		err = m.storage.Create(ctx, link)
+	}
+
+	if err != nil {
+		return fmt.Errorf("store link: %w", err)
+	}
+
+	return nil
+}
+
+// releaseExpiredFile reports whether the file manager removed an expired file with id.
+func (m *Manager) releaseExpiredFile(ctx context.Context, id string) bool {
+	released, err := m.expiredFiles.ReleaseExpiredSlug(ctx, id)
+	if err != nil {
+		m.log.WarnContext(ctx, "release expired file slug", "id", id, "err", err)
+
+		return false
+	}
+
+	return released
 }

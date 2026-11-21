@@ -8,8 +8,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -23,14 +25,18 @@ import (
 )
 
 const (
-	// fileTransferTimeout replaces the server read and write timeouts for one upload or
-	// download. The server timeouts (30 and 60 seconds by default) are for pages and JSON; a
-	// large file on a slow connection needs more time.
+	// fileTransferTimeout is the total limit of one upload or download. The idle timeout
+	// (FileTransferLimits.IdleTimeout) stops a stalled transfer before it.
 	fileTransferTimeout = time.Hour
 	// multipartOverhead is the space for the form fields and part headers above the file limit.
 	multipartOverhead = 1 << 20
 	// maxFormFieldSize limits each text field of the upload form.
 	maxFormFieldSize = 1 << 10
+	// maxFormFieldsSize limits all bytes before the file data: the preamble, the text fields,
+	// the part headers and the read-ahead of the multipart reader (4 KiB). The five fields and a
+	// file name of 255 bytes need less than 8 KiB; without this limit, part headers could hold
+	// the full upload limit in memory.
+	maxFormFieldsSize = 64 << 10
 	// maxTTLSeconds keeps now+ttl inside time.Duration, as in openapi.yaml.
 	maxTTLSeconds = 9223372036
 	fileFormField = "file"
@@ -39,10 +45,22 @@ const (
 	int64Bits     = 64
 )
 
+// The text fields of the upload form, as in openapi.yaml. Other names give 400.
+const (
+	uploadFieldTTL      = "ttl"
+	uploadFieldPrivacy  = "privacy"
+	uploadFieldBurn     = "burn_after_download"
+	uploadFieldSlug     = "slug"
+	uploadFieldEditCode = "edit_code"
+	uploadFieldCount    = 5
+)
+
 var (
 	errUploadNotMultipart = errors.New("upload must be multipart/form-data with a \"file\" part")
 	errUploadField        = errors.New("invalid upload form field")
+	errUploadFieldsSize   = errors.New("the form data before the file part is too large")
 	errFileUpdateField    = errors.New("invalid file update field")
+	errFileUpdateTrailing = errors.New("data after the JSON value")
 )
 
 // FileManager is the file usecase as the HTTP layer uses it.
@@ -67,10 +85,18 @@ type FileHandler struct {
 	lockout *middleware.FailLockoutCache
 	// pages holds the templates of the browser pages (web_file.go).
 	pages *filePages
+	// uploads limits the uploads in progress (file_transfer.go).
+	uploads *uploadLimiter
+	// idleTimeout stops a transfer without progress (FileTransferLimits.IdleTimeout).
+	idleTimeout time.Duration
 }
 
 func newFileHandler(c *common, lockout *middleware.FailLockoutCache) *FileHandler {
-	return &FileHandler{common: c, manager: nil, lockout: lockout, pages: newFilePages()}
+	return &FileHandler{
+		common: c, manager: nil, lockout: lockout, pages: newFilePages(),
+		uploads:     newUploadLimiter(DefaultMaxUploads, DefaultMaxUploadsPerClient),
+		idleTimeout: DefaultFileIdleTimeout,
+	}
 }
 
 // WithFileManager turns on the file routes. Called by the composition root before the server
@@ -85,13 +111,16 @@ func (h *Handler) WithFileManager(manager FileManager) *Handler {
 
 // RegisterRoutes registers the file routes. PUT and DELETE have the same edit-code lockout and
 // same-origin check as the note and link mutations. POST is multipart, which a cross-site form
-// can send without a CORS preflight, so it also has the same-origin check.
+// can send without a CORS preflight, so it also has the same-origin check. POST
+// /files/{id}/download is the download form of the file page; like the reveal form of a burn
+// note, it has the CSRF guard.
 func (h *FileHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /files", h.CreateFilePage)
 	mux.HandleFunc("GET /files/{id}/edit", h.EditFilePage)
 	mux.Handle("POST /files", middleware.RequireSameOrigin(h.log, http.HandlerFunc(h.Upload)))
 	mux.HandleFunc("GET /files/{id}", h.Metadata)
 	mux.HandleFunc("GET /files/{id}/download", h.DownloadFile)
+	mux.Handle("POST /files/{id}/download", middleware.RequireSameOrigin(h.log, h.guard(h.DownloadFileForm)))
 	mux.Handle("PUT /files/{id}", middleware.RequireSameOrigin(h.log,
 		middleware.WithFailLockout(h.lockout, h.trustedProxies, h.log, http.HandlerFunc(h.UpdateFile))))
 	mux.Handle("DELETE /files/{id}", middleware.RequireSameOrigin(h.log,
@@ -101,6 +130,7 @@ func (h *FileHandler) RegisterRoutes(mux *http.ServeMux) {
 // Upload handles POST /files. The body is multipart/form-data: optional text fields ttl
 // (seconds), privacy, burn_after_download, slug and edit_code, then the "file" part. The file
 // goes to object storage as it arrives, so the handler reads only the fields before the file.
+// A part after the file part fails the upload (uploadBody.finish).
 func (h *FileHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	if h.manager == nil {
 		h.writeError(w, r, domain.ErrFeatureNotSupported)
@@ -108,17 +138,37 @@ func (h *FileHandler) Upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.extendDeadlines(w, r)
-	r.Body = http.MaxBytesReader(w, r.Body, h.manager.MaxSize()+multipartOverhead)
+	limit := h.manager.MaxSize() + multipartOverhead
+	// A declared body above the limit cannot succeed, so the handler refuses it before it
+	// takes an upload slot or reads the body.
+	if r.ContentLength > limit {
+		h.writeUploadError(w, r, domain.ErrFileTooLarge)
 
-	part, opts, err := h.readUploadForm(r)
+		return
+	}
+
+	client := middleware.ClientIP(r, h.trustedProxies)
+
+	err := h.uploads.acquire(client)
+	if err != nil {
+		closeAfterResponse(w)
+		status := uploadBusyStatus(w, err)
+		response.WriteJSONErrorStatus(w, r, h.log, status, err.Error())
+
+		return
+	}
+	defer h.uploads.release(client)
+
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
+
+	form, err := h.readUploadForm(r)
 	if err != nil {
 		h.writeUploadError(w, r, err)
 
 		return
 	}
 
-	file, err := h.manager.Create(r.Context(), part.FileName(), part, opts)
+	file, err := h.createFile(w, r, form)
 	if err != nil {
 		h.writeUploadError(w, r, err)
 
@@ -132,7 +182,8 @@ func (h *FileHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	h.writeJSON(w, r, http.StatusCreated, body)
 }
 
-// Metadata handles GET /files/{id}: the file description in JSON, without a download count.
+// Metadata handles GET /files/{id}: the file description in JSON with the download count. It
+// does not count as a download and does not consume a burn-after-download file.
 func (h *FileHandler) Metadata(w http.ResponseWriter, r *http.Request) {
 	if h.manager == nil {
 		h.writeError(w, r, domain.ErrFeatureNotSupported)
@@ -140,7 +191,7 @@ func (h *FileHandler) Metadata(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	file, err := h.manager.Info(r.Context(), r.PathValue("id"), accessOptions(r))
+	file, err := h.manager.Info(r.Context(), r.PathValue("id"), h.pageAccess(r))
 	if err != nil {
 		if errors.Is(err, domain.ErrForbidden) {
 			middleware.WriteUnauthorized(w)
@@ -148,7 +199,7 @@ func (h *FileHandler) Metadata(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		h.writeError(w, r, err)
+		h.writeAPIError(w, r, err)
 
 		return
 	}
@@ -165,6 +216,23 @@ func (h *FileHandler) DownloadFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.serveFile(w, r, r.PathValue("id"))
+}
+
+// DownloadFileForm handles POST /files/{id}/download, the download button of the file page for
+// a burn-after-download file. The CSRF guard and the same-origin check prove that the user
+// clicked the button on a padmark page, so the request may consume the file. A GET from a
+// browser never does (explicitDownload), as a GET of a burn note shows the reveal form.
+func (h *FileHandler) DownloadFileForm(w http.ResponseWriter, r *http.Request) {
+	if h.manager == nil {
+		h.writeFileErrorPage(w, r, domain.ErrFeatureNotSupported)
+
+		return
+	}
+
+	opts := h.pageAccess(r)
+	opts.AllowBurn = true
+
+	h.sendFile(w, r, r.PathValue("id"), opts)
 }
 
 // Delete handles DELETE /files/{id} with the X-Edit-Code header, or by the owner.
@@ -184,7 +252,7 @@ func (h *FileHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 	err := h.manager.Delete(r.Context(), slug, editCodeHeader(r), middleware.CallerIDFromCtx(r.Context()))
 	if err != nil {
-		h.writeError(w, r, err)
+		h.writeAPIError(w, r, err)
 
 		return
 	}
@@ -210,6 +278,10 @@ func (h *FileHandler) UpdateFile(w http.ResponseWriter, r *http.Request) {
 	decoder.DisallowUnknownFields()
 
 	err := decoder.Decode(&body)
+	if err == nil {
+		err = requireJSONEnd(decoder)
+	}
+
 	if err != nil {
 		h.writeDecodeError(w, r, err)
 
@@ -240,6 +312,36 @@ func (h *FileHandler) UpdateFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.writeJSON(w, r, http.StatusOK, h.toJSON(r, file))
+}
+
+// createFile streams the file part to the usecase. Only the file data has the transfer
+// deadlines. Until the fields are valid, the server read timeout applies, so a client that
+// never sends the file part cannot hold the request.
+func (h *FileHandler) createFile(w http.ResponseWriter, r *http.Request, form *uploadForm) (*domain.File, error) {
+	deadline := newTransferDeadline(w, h.idleTimeout)
+	h.logDeadlineError(r, deadline.uploadStarted())
+
+	body := &uploadBody{
+		part: form.part, reader: form.reader, deadline: deadline, err: nil,
+		onDeadlineError: func(err error) { h.logDeadlineError(r, err) },
+	}
+
+	file, err := h.manager.Create(r.Context(), form.part.FileName(), body, form.opts)
+	if err != nil {
+		return nil, body.cause(err)
+	}
+
+	h.logDeadlineError(r, deadline.responseStarted())
+
+	return file, nil
+}
+
+// logDeadlineError logs a failure to move a transfer deadline. Only the server timeouts then
+// apply, so the record has debug level.
+func (h *FileHandler) logDeadlineError(r *http.Request, err error) {
+	if err != nil {
+		h.log.DebugContext(r.Context(), "set file transfer deadline", "err", err)
+	}
 }
 
 // mutationAllowed reports whether the caller of r can try to change the file slug. With
@@ -299,6 +401,18 @@ func (h *FileHandler) updateOptions(body fileUpdateJSON) (files.UpdateOptions, e
 	return opts, nil
 }
 
+// requireJSONEnd makes sure that only white space follows the JSON value. Without this check
+// the decoder ignores the data after the value, and the client does not know that the server
+// did not use it.
+func requireJSONEnd(decoder *json.Decoder) error {
+	_, err := decoder.Token()
+	if errors.Is(err, io.EOF) {
+		return nil
+	}
+
+	return errFileUpdateTrailing
+}
+
 func (h *FileHandler) writeUpdateError(w http.ResponseWriter, r *http.Request, err error) {
 	if errors.Is(err, errFileUpdateField) {
 		response.WriteJSONErrorStatus(w, r, h.log, http.StatusUnprocessableEntity, err.Error())
@@ -308,6 +422,16 @@ func (h *FileHandler) writeUpdateError(w http.ResponseWriter, r *http.Request, e
 
 	if status, _ := domainErrStatus(err); status == http.StatusInternalServerError {
 		h.log.ErrorContext(r.Context(), "update file failed", "err", err)
+	}
+
+	h.writeError(w, r, err)
+}
+
+// writeAPIError writes err as JSON. Unknown errors are logged, because the client sees only a
+// 500, as in respondError.
+func (h *FileHandler) writeAPIError(w http.ResponseWriter, r *http.Request, err error) {
+	if status, _ := domainErrStatus(err); status == http.StatusInternalServerError {
+		h.log.ErrorContext(r.Context(), "file request failed", "err", err)
 	}
 
 	h.writeError(w, r, err)
@@ -345,18 +469,6 @@ func (h *FileHandler) writeJSON(w http.ResponseWriter, r *http.Request, status i
 	}
 }
 
-// extendDeadlines gives a file transfer more time than the server timeouts. A failure only
-// keeps the server timeouts, so it is logged at debug level.
-func (h *FileHandler) extendDeadlines(w http.ResponseWriter, r *http.Request) {
-	ctrl := http.NewResponseController(w)
-	deadline := time.Now().Add(fileTransferTimeout)
-
-	err := errors.Join(ctrl.SetReadDeadline(deadline), ctrl.SetWriteDeadline(deadline))
-	if err != nil {
-		h.log.DebugContext(r.Context(), "extend file transfer deadline", "err", err)
-	}
-}
-
 // respondError writes err in the format of the request. A browser gets an error page, other
 // clients get JSON. Unknown errors are logged, because the client sees only a 500.
 func (h *FileHandler) respondError(w http.ResponseWriter, r *http.Request, err error) {
@@ -376,57 +488,154 @@ func (h *FileHandler) respondError(w http.ResponseWriter, r *http.Request, err e
 	}
 }
 
+// writeUploadError answers a failed upload. A client error gets a constant text: the error
+// chain can hold a parser error that quotes form values, so it is not sent and not logged.
 func (h *FileHandler) writeUploadError(w http.ResponseWriter, r *http.Request, err error) {
-	var maxBytes *http.MaxBytesError
+	closeAfterResponse(w)
 
 	switch {
-	case errors.As(err, &maxBytes), errors.Is(err, domain.ErrFileTooLarge):
+	// The server cancels the request context after a read timeout too, so this case is first.
+	case errors.Is(err, errUploadIdle):
+		response.WriteJSONErrorStatus(w, r, h.log, http.StatusRequestTimeout, errUploadIdle.Error())
+	case r.Context().Err() != nil, errors.Is(err, context.Canceled):
+		// The client went away; nobody reads a response.
+		h.log.DebugContext(r.Context(), "file upload canceled")
+	case isMaxBytes(err), errors.Is(err, domain.ErrFileTooLarge):
 		response.WriteJSONErrorStatus(w, r, h.log, http.StatusRequestEntityTooLarge,
 			fmt.Sprintf("%s (limit %d bytes)", domain.ErrFileTooLarge, h.manager.MaxSize()))
-	case errors.Is(err, errUploadNotMultipart), errors.Is(err, errUploadField):
+	case errors.Is(err, errUploadMalformed):
+		response.WriteJSONErrorStatus(w, r, h.log, http.StatusBadRequest, errUploadMalformed.Error())
+	case errors.Is(err, errUploadNotMultipart), errors.Is(err, errUploadField),
+		errors.Is(err, errUploadFieldsSize), errors.Is(err, errUploadFieldAfterFile):
 		response.WriteJSONErrorStatus(w, r, h.log, http.StatusBadRequest, err.Error())
 	default:
 		h.respondError(w, r, err)
 	}
 }
 
+// closeAfterResponse tells the server to close the connection after the response. An upload
+// error can leave the rest of a large body unread. Without this header, the server reads up to
+// 256 KiB of that body before it sends the response, so a client whose upload stalls does not
+// get the error.
+func closeAfterResponse(w http.ResponseWriter) {
+	w.Header().Set("Connection", "close")
+}
+
+// isMaxBytes reports whether err comes from http.MaxBytesReader.
+func isMaxBytes(err error) bool {
+	_, ok := errors.AsType[*http.MaxBytesError](err)
+
+	return ok
+}
+
+// uploadForm is the upload form up to the file part. The caller reads the file part and then
+// the rest of the form from reader.
+type uploadForm struct {
+	reader *multipart.Reader
+	part   *multipart.Part
+	opts   files.CreateOptions
+}
+
 // readUploadForm reads the text fields and stops at the file part, which the caller streams.
-func (h *FileHandler) readUploadForm(r *http.Request) (*multipart.Part, files.CreateOptions, error) {
-	var opts files.CreateOptions
+// Before the file part, the body has the small maxFormFieldsSize limit. When the file part
+// starts, only the file limit of Upload applies.
+func (h *FileHandler) readUploadForm(r *http.Request) (*uploadForm, error) {
+	fieldsLimit := &io.LimitedReader{R: r.Body, N: maxFormFieldsSize}
+	r.Body = limitedBody{Reader: fieldsLimit, Closer: r.Body}
 
 	reader, err := r.MultipartReader()
 	if err != nil {
-		return nil, opts, errUploadNotMultipart
+		return nil, errUploadNotMultipart
 	}
 
-	fields := map[string]string{}
+	fields, part, err := readUploadFields(reader)
+
+	// The multipart reader keeps the first read error for all later reads. A limit that is not
+	// used up thus never gave an error, and the file data can follow. A used-up limit also
+	// refuses a form that is just under it, but real clients send much less.
+	if fieldsLimit.N <= 0 {
+		return nil, errUploadFieldsSize
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	fieldsLimit.N = math.MaxInt64
+
+	opts, err := h.uploadOptions(r, fields)
+	if err != nil {
+		return nil, err
+	}
+
+	return &uploadForm{reader: reader, part: part, opts: opts}, nil
+}
+
+// limitedBody puts the limit of the upload fields on the request body and keeps its Close.
+type limitedBody struct {
+	io.Reader
+	io.Closer
+}
+
+// readUploadFields reads the text parts up to the file part. Each known field can occur once,
+// so a form has a maximum of uploadFieldCount parts before the file part.
+func readUploadFields(reader *multipart.Reader) (map[string]string, *multipart.Part, error) {
+	fields := make(map[string]string, uploadFieldCount)
 
 	for {
 		part, err := reader.NextPart()
 		if errors.Is(err, io.EOF) {
-			return nil, opts, errUploadNotMultipart
+			return nil, nil, errUploadNotMultipart
 		}
 
 		if err != nil {
-			return nil, opts, fmt.Errorf("read upload form: %w", err)
+			return nil, nil, classifyBodyError(err)
 		}
 
-		if part.FormName() == fileFormField {
-			opts, err = h.uploadOptions(r, fields)
-
-			return part, opts, err
+		name := part.FormName()
+		if name == fileFormField {
+			return fields, part, nil
 		}
 
-		value, err := io.ReadAll(io.LimitReader(part, maxFormFieldSize+1))
+		value, err := readUploadField(part, name, fields)
 		if err != nil {
-			return nil, opts, fmt.Errorf("read upload field: %w", err)
+			return nil, nil, err
 		}
 
-		if len(value) > maxFormFieldSize {
-			return nil, opts, fmt.Errorf("%w: %s is too long", errUploadField, part.FormName())
-		}
+		fields[name] = value
+	}
+}
 
-		fields[part.FormName()] = string(value)
+// readUploadField reads the value of the text part name. The error text names only known
+// fields: an unknown name is client input and does not go back to the client.
+func readUploadField(part *multipart.Part, name string, fields map[string]string) (string, error) {
+	if !isUploadField(name) {
+		return "", fmt.Errorf("%w: unknown field", errUploadField)
+	}
+
+	if _, seen := fields[name]; seen {
+		return "", fmt.Errorf("%w: %s is repeated", errUploadField, name)
+	}
+
+	value, err := io.ReadAll(io.LimitReader(part, maxFormFieldSize+1))
+	if err != nil {
+		return "", classifyBodyError(err)
+	}
+
+	if len(value) > maxFormFieldSize {
+		return "", fmt.Errorf("%w: %s is too long", errUploadField, name)
+	}
+
+	return string(value), nil
+}
+
+// isUploadField reports whether name is a text field of the upload form.
+func isUploadField(name string) bool {
+	switch name {
+	case uploadFieldTTL, uploadFieldPrivacy, uploadFieldBurn, uploadFieldSlug, uploadFieldEditCode:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -435,12 +644,12 @@ func (h *FileHandler) uploadOptions(r *http.Request, fields map[string]string) (
 		ExpiresAt:         nil,
 		Privacy:           nil,
 		OwnerID:           middleware.OwnerIDFromCtx(r.Context()),
-		CustomSlug:        fields["slug"],
-		EditCode:          fields["edit_code"],
+		CustomSlug:        fields[uploadFieldSlug],
+		EditCode:          fields[uploadFieldEditCode],
 		BurnAfterDownload: false,
 	}
 
-	if raw := fields["ttl"]; raw != "" {
+	if raw := fields[uploadFieldTTL]; raw != "" {
 		ttl, err := strconv.ParseInt(raw, decimalBase, int64Bits)
 		if err != nil || ttl < 0 || ttl > maxTTLSeconds {
 			return opts, fmt.Errorf("%w: ttl must be 0..%d seconds", errUploadField, maxTTLSeconds)
@@ -450,12 +659,12 @@ func (h *FileHandler) uploadOptions(r *http.Request, fields map[string]string) (
 		opts.ExpiresAt = &expiresAt
 	}
 
-	if raw := fields["privacy"]; raw != "" {
+	if raw := fields[uploadFieldPrivacy]; raw != "" {
 		privacy := domain.Privacy(raw)
 		opts.Privacy = &privacy
 	}
 
-	if raw := fields["burn_after_download"]; raw != "" {
+	if raw := fields[uploadFieldBurn]; raw != "" {
 		burn, err := strconv.ParseBool(raw)
 		if err != nil {
 			return opts, fmt.Errorf("%w: burn_after_download must be true or false", errUploadField)
@@ -472,10 +681,13 @@ func (h *FileHandler) uploadOptions(r *http.Request, fields map[string]string) (
 	return opts, nil
 }
 
-// serveFile sends the content of the file slug, or the error in the format of the request.
+// serveFile sends the content of the file slug to a GET or HEAD request.
 func (h *FileHandler) serveFile(w http.ResponseWriter, r *http.Request, slug string) {
-	opts := accessOptions(r)
+	h.sendFile(w, r, slug, h.accessOptions(r))
+}
 
+// sendFile sends the content of the file slug, or the error in the format of the request.
+func (h *FileHandler) sendFile(w http.ResponseWriter, r *http.Request, slug string, opts files.AccessOptions) {
 	if r.Method == http.MethodHead {
 		file, err := h.manager.Info(r.Context(), slug, opts)
 		if err != nil {
@@ -489,11 +701,12 @@ func (h *FileHandler) serveFile(w http.ResponseWriter, r *http.Request, slug str
 		return
 	}
 
-	h.extendDeadlines(w, r)
+	deadline := newTransferDeadline(w, h.idleTimeout)
+	h.logDeadlineError(r, deadline.downloadStarted())
 
 	download, err := h.manager.Download(r.Context(), slug, opts)
 	if err != nil {
-		h.respondError(w, r, err)
+		h.writeDownloadError(w, r, slug, err)
 
 		return
 	}
@@ -503,12 +716,58 @@ func (h *FileHandler) serveFile(w http.ResponseWriter, r *http.Request, slug str
 
 	writeDownloadHeaders(w, download.File)
 
-	// The status is already sent, so a failure can only stop the stream. The client sees fewer
-	// bytes than Content-Length and discards the file.
-	err = download.Send(r.Context(), w)
-	if err != nil {
-		h.log.WarnContext(r.Context(), "send file", "id", domain.HashSlug(slug), "err", err)
+	writer := &downloadWriter{
+		ResponseWriter: w, deadline: deadline, started: false,
+		onDeadlineError: func(err error) { h.logDeadlineError(r, err) },
 	}
+
+	err = download.Send(r.Context(), writer)
+	if err != nil {
+		h.sendFailed(w, r, slug, writer, err)
+	}
+}
+
+// writeDownloadError answers a download that the usecase refused. A browser that asks for a
+// burn-after-download file without the download form goes to the file page, which has the
+// burn warning and the form. Other clients get the 409 JSON answer.
+func (h *FileHandler) writeDownloadError(w http.ResponseWriter, r *http.Request, slug string, err error) {
+	if errors.Is(err, domain.ErrBurnIntentRequired) && negotiate(r) == formatHTML {
+		http.Redirect(w, r, "/"+url.PathEscape(slug), http.StatusSeeOther)
+
+		return
+	}
+
+	h.respondError(w, r, err)
+}
+
+// sendFailed handles a failed Send. Before the first byte, nothing is sent yet: the download
+// headers go away and the client gets a normal 503 error. After the first byte, the status is
+// sent, so the handler aborts the connection; the client then sees a broken transfer and not a
+// short 200 response.
+func (h *FileHandler) sendFailed(
+	w http.ResponseWriter, r *http.Request, slug string, writer *downloadWriter, err error,
+) {
+	if r.Context().Err() != nil {
+		h.log.DebugContext(r.Context(), "file download canceled", "id", domain.HashSlug(slug))
+
+		return
+	}
+
+	h.log.WarnContext(r.Context(), "send file", "id", domain.HashSlug(slug), "started", writer.started, "err", err)
+
+	if writer.started {
+		// The abort closes the connection without a flush of the response buffer. Without this
+		// flush, a client that got less than one buffer sees an empty reply and no status.
+		flushErr := http.NewResponseController(w).Flush()
+		if flushErr != nil {
+			h.log.DebugContext(r.Context(), "flush aborted download", "err", flushErr)
+		}
+
+		panic(http.ErrAbortHandler)
+	}
+
+	clearDownloadHeaders(w)
+	h.respondError(w, r, fmt.Errorf("send file: %w", errors.Join(domain.ErrStorageUnavailable, err)))
 }
 
 // isFileUpload reports whether r is the file upload. The general body limit does not apply to
@@ -539,14 +798,18 @@ type fileUpdateJSON struct {
 	TTL               json.RawMessage `json:"ttl"`
 }
 
-// explicitDownload reports whether r deliberately downloads the file, so it may consume a
-// burn-after-download file. It is explicitRead, or a client that asks for binary content.
+// explicitDownload reports whether a GET deliberately downloads the file, so it may consume a
+// burn-after-download file. Only a client without browser signals counts: the CLI, MCP and
+// curl with an exact Accept: application/octet-stream, or an Accept that explicitRead accepts
+// and that does not prefer HTML.
+//
+// A browser never consumes a file with a GET. A prefetch, a link in another site, a link in a
+// note or a typed URL all send a GET, and Sec-Fetch-Site alone does not show a user action on
+// the file page. A browser uses the download form instead (DownloadFileForm), which has the
+// CSRF guard, as the reveal form of a burn note has. A browser without fetch metadata (plain
+// HTTP) asks for HTML, so the HTML rule excludes it too.
 func explicitDownload(r *http.Request) bool {
-	if explicitRead(r) {
-		return true
-	}
-
-	if r.Method != http.MethodGet {
+	if r.Method != http.MethodGet || isPrefetch(r) || r.Header.Get("Sec-Fetch-Site") != "" {
 		return false
 	}
 
@@ -558,7 +821,7 @@ func explicitDownload(r *http.Request) bool {
 		}
 	}
 
-	return false
+	return negotiate(r) != formatHTML && explicitRead(r)
 }
 
 // writeDownloadHeaders sends the file as an attachment of an opaque type. The browser saves the
@@ -629,11 +892,11 @@ func isAttrChar(char byte) bool {
 	}
 }
 
-// accessOptions identifies the reader of r.
-func accessOptions(r *http.Request) files.AccessOptions {
-	return files.AccessOptions{
-		CallerID:      middleware.CallerIDFromCtx(r.Context()),
-		Authenticated: middleware.AuthenticatedFromCtx(r.Context()),
-		AllowBurn:     explicitDownload(r),
-	}
+// accessOptions identifies the reader of a download. With accounts off, the privacy check
+// does not apply, as for notes and links.
+func (h *FileHandler) accessOptions(r *http.Request) files.AccessOptions {
+	opts := h.pageAccess(r)
+	opts.AllowBurn = explicitDownload(r)
+
+	return opts
 }

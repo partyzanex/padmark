@@ -99,7 +99,9 @@ func testURL(t *testing.T, raw string) url.URL {
 func isolateEnv(t *testing.T) {
 	t.Helper()
 
-	for _, key := range []string{EnvToken, EnvBaseURL, EnvTimeout, EnvLogLevel, EnvUploadRoot} {
+	for _, key := range []string{
+		EnvToken, EnvBaseURL, EnvTimeout, EnvLogLevel, EnvUploadRoot, EnvUploadAllowHidden, EnvUploadAllowSlug,
+	} {
 		t.Setenv(key, "") // registers the restore of the original value.
 		require.NoError(t, os.Unsetenv(key))
 	}

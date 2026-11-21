@@ -25,7 +25,8 @@ const (
 	resourceLink = "link"
 	// resourceFile is the sealed metadata of a file: its name and its content key. The file
 	// content in object storage uses that content key, so a rewrap of the metadata is enough
-	// for a key rotation.
+	// to retire an installation key. A rewrap does not change the content key itself: an old
+	// keyring with an old database copy still opens the objects (see ADR-0001).
 	resourceFile = "file"
 )
 
@@ -58,7 +59,8 @@ type Registry struct {
 }
 
 // Storage uses compare-and-swap for ciphertext updates and explicit corrupt-raw
-// deletion. It must never upsert a record.
+// deletion. It must never upsert a record. Delete must refuse a file row: the object of the
+// file in the bucket would stay without its content key. Errors are fail-hard for each operation.
 type Storage interface {
 	Registry(ctx context.Context) (*Registry, error)
 	Initialize(ctx context.Context, registry *Registry) error
@@ -121,7 +123,8 @@ type Manager struct {
 	ciphers map[string]Cipher
 }
 
-// New returns a Manager with one cipher for notes and one for links.
+// New returns a Manager with one cipher for each resource: notes, links and the sealed
+// metadata of files.
 func New(store Storage, keys Keyring, notes, links, files Cipher, hasher EditCodeHasher) *Manager {
 	return &Manager{
 		store: store, keys: keys, hasher: hasher,
@@ -336,9 +339,10 @@ func (m *Manager) verifyKeyChecks(reg *Registry) error {
 // inspect classifies a row: notes tagged as v0.1.6 plaintext are Plaintext whatever their
 // content looks like (it may resemble an envelope or base64 ciphertext); an untagged note with
 // an unversioned value and an edit code that is not hash-shaped is an untagged v0.1.6 note
-// (UntaggedLegacy, also Failed, never pruned); other unversioned values are raw legacy
-// ciphertext (Raw) or malformed raw data (CorruptRaw, also Failed); versioned values that do
-// not authenticate are Failed only and are never eligible for pruning.
+// (UntaggedLegacy, also Failed, never pruned); an unversioned file value is CorruptFile (also
+// Failed, never pruned or wrapped); other unversioned values are raw legacy ciphertext (Raw) or
+// malformed raw data (CorruptRaw, also Failed); versioned values that do not authenticate are
+// Failed only and are never eligible for pruning.
 func (m *Manager) inspect(row Row, reg *Registry, report *Report) {
 	if row.Legacy != nil {
 		report.Plaintext++
@@ -348,21 +352,7 @@ func (m *Manager) inspect(row Row, reg *Registry, report *Report) {
 
 	cipher := m.ciphers[row.Resource]
 	if !cipher.Versioned(row.Value) {
-		if m.untaggedLegacy(&row) {
-			report.Failed++
-			report.UntaggedLegacy++
-
-			return
-		}
-
-		if cipher.ValidateLegacy(row.Value) != nil {
-			report.Failed++
-			report.CorruptRaw++
-
-			return
-		}
-
-		report.Raw++
+		countUnversioned(report, m.unversionedReason(&row, cipher))
 
 		return
 	}
@@ -388,6 +378,40 @@ func (m *Manager) inspect(row Row, reg *Registry, report *Report) {
 		report.Wrapped++
 	} else {
 		report.Native++
+	}
+}
+
+// unversionedReason classifies an untagged row whose value has no version tag:
+// reasonCorruptFile, reasonUntaggedLegacy, reasonCorruptRaw, or "" for raw legacy ciphertext.
+// Every release with files writes sealed_meta as a versioned envelope, so an unversioned file
+// value is damage. It is never legacy ciphertext, and a wrap would make Status accept it.
+func (m *Manager) unversionedReason(row *Row, cipher Cipher) string {
+	switch {
+	case row.Resource == resourceFile:
+		return reasonCorruptFile
+	case m.untaggedLegacy(row):
+		return reasonUntaggedLegacy
+	case cipher.ValidateLegacy(row.Value) != nil:
+		return reasonCorruptRaw
+	default:
+		return ""
+	}
+}
+
+// countUnversioned adds one unversioned row with the given reason to the report.
+func countUnversioned(report *Report, reason string) {
+	switch reason {
+	case reasonCorruptFile:
+		report.Failed++
+		report.CorruptFile++
+	case reasonUntaggedLegacy:
+		report.Failed++
+		report.UntaggedLegacy++
+	case reasonCorruptRaw:
+		report.Failed++
+		report.CorruptRaw++
+	default:
+		report.Raw++
 	}
 }
 

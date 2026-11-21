@@ -182,6 +182,24 @@ func TestMCPFlow_FileLifecycle(t *testing.T) {
 	require.True(t, refused.IsError, "a path outside the upload root is refused")
 	require.Contains(t, toolText(refused), "outside the upload root")
 
+	// A missing path outside the root gets the same text, so the error does not show which
+	// files exist outside the root.
+	missing := callOutput(ctx, t, sess, "upload_file", map[string]any{
+		"path": filepath.Join(filepath.Dir(outside), "missing.txt"),
+	})
+	require.True(t, missing.IsError)
+	require.Equal(t, toolText(refused), toolText(missing))
+	require.NotContains(t, toolText(missing), filepath.Dir(outside))
+
+	require.NoError(t, os.WriteFile(filepath.Join(root, ".env"), []byte("TOKEN=x"), 0o600))
+	hidden := callOutput(ctx, t, sess, "upload_file", map[string]any{"path": ".env"})
+	require.True(t, hidden.IsError, "a name that starts with a dot is refused by default")
+	require.Contains(t, toolText(hidden), "starts with a dot")
+
+	slug := callOutput(ctx, t, sess, "upload_file", map[string]any{"path": "report.txt", "slug": "known-id"})
+	require.True(t, slug.IsError, "a slug from the agent is refused by default")
+	require.Contains(t, toolText(slug), "slug is off")
+
 	uploaded := callOutput(ctx, t, sess, "upload_file", map[string]any{"path": "report.txt", "ttl": 3600})
 	require.False(t, uploaded.IsError, toolText(uploaded))
 	require.NotContains(t, toolText(uploaded), `"edit_code":`, "the one-time edit code is not printed by default")
@@ -211,6 +229,31 @@ func TestMCPFlow_FileLifecycle(t *testing.T) {
 	after := callOutput(ctx, t, sess, "get_file", map[string]any{"id": fileID})
 	require.True(t, after.IsError, "the file is deleted")
 	require.Contains(t, toolText(after), "not found")
+}
+
+// TestMCPFlow_FileUploadWithTokenDefaultsToOwner checks that an upload with a token and without
+// a privacy field is private to the account of the token: an anonymous reader cannot see it.
+func TestMCPFlow_FileUploadWithTokenDefaultsToOwner(t *testing.T) {
+	ctx := context.Background()
+
+	stack := startTestPadmarkWithFiles(t, startS3Mock(ctx, t))
+	envelope := issueEnvelopeToken(ctx, t, stack.auth, stack.users, stack.srv.URL)
+
+	root := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(root, "plan.txt"), []byte("plan\n"), 0o600))
+
+	sess := connectMCP(ctx, t, stack.srv.URL, envelope, mcpx.WithUploadRoot(root), mcpx.WithAccountToken())
+	defer sess.Close()
+
+	uploaded := callOutput(ctx, t, sess, "upload_file", map[string]any{"path": "plan.txt"})
+	require.False(t, uploaded.IsError, toolText(uploaded))
+	require.Equal(t, "owner", stringField(uploaded, "privacy"))
+
+	anonymous := connectMCP(ctx, t, stack.srv.URL, "")
+	defer anonymous.Close()
+
+	denied := callOutput(ctx, t, anonymous, "get_file", map[string]any{"id": resultID(uploaded)})
+	require.True(t, denied.IsError, "an anonymous reader cannot read an owner file: %s", toolText(denied))
 }
 
 // startS3Mock starts an S3-compatible container with the test bucket and returns its endpoint.
@@ -369,7 +412,8 @@ func newTestFileManager(t *testing.T, db *bun.DB, slugLock *lock.Locker, endpoin
 		AccessKey: flowS3AccessKey, SecretKey: flowS3SecretKey, PathStyle: true,
 	}, discardTestLogger())
 	require.NoError(t, err)
-	require.NoError(t, objects.Ping(context.Background()))
+	_, err = objects.EnsureBucket(context.Background())
+	require.NoError(t, err)
 
 	return files.NewManager(&files.Deps{
 		Storage:   sqliterepo.NewFileRepository(db),
