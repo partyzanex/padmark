@@ -860,7 +860,7 @@ func testFileErrorPages(sess *uiSession) {
 func testFilesOff(sess *uiSession) {
 	sess.gotoPage("/")
 	sess.must(sess.expect.Locator(sess.page.Locator(`a.nav-tab[href="/files"]`)).ToHaveCount(0))
-	sess.text(".site-footer > span:first-child", "Padmark — Markdown notes & short links")
+	sess.text(".site-footer > span:first-child", "Padmark — notes, links & files")
 
 	for _, path := range []string{"/files", "/files/any-file/edit"} {
 		sess.gotoPage(path)

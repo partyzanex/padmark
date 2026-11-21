@@ -20,9 +20,7 @@ const (
 	headerKindLogin = "login"
 	// headerKindView marks reader pages (note view, success): a "New" button replaces the tabs.
 	headerKindView = "view"
-	// headerKindAdmin marks the admin panel: "New note" and "API" links replace the tabs.
-	headerKindAdmin = "admin"
-	// headerKindPlain marks other pages: the create tabs with no current tab.
+	// headerKindPlain marks other pages, the admin panel too: the create tabs with no current tab.
 	headerKindPlain = ""
 )
 
@@ -38,7 +36,8 @@ type headerView struct {
 	// Accounts is true when the account system is attached; the "Sign in" button needs it.
 	Accounts bool
 	IsAdmin  bool
-	// FilesEnabled is true when object storage is configured; the "File" tab needs it.
+	// FilesEnabled is true when object storage is configured. The "File" tab needs it: without
+	// object storage there is no upload page to open.
 	FilesEnabled bool
 	// Record is the kind of record that a reader page shows. The "New" button of a reader page
 	// opens the create page of the same kind, as for notes.
@@ -86,9 +85,9 @@ func (v headerView) SignedIn() bool {
 }
 
 // Tabs reports whether the header shows the create tabs: "Note", "Short link" and, when files
-// are on, "File".
+// are on, "File". All pages other than the reader pages show them.
 func (v headerView) Tabs() bool {
-	return v.Kind != headerKindView && v.Kind != headerKindAdmin
+	return v.Kind != headerKindView
 }
 
 // Initial returns the first letter of the username for the avatar tile.
@@ -132,7 +131,7 @@ func (c *common) header(r *http.Request, kind string) headerView {
 		Accounts:  c.authMgr != nil,
 		IsAdmin:   false,
 		Record:    recordNote,
-		// The file tab and the footer text follow the configuration, not the user.
+		// The file tab follows the configuration, not the user.
 		FilesEnabled: c.fileMgr != nil,
 	}
 

@@ -126,9 +126,36 @@ func testOptions(sess *uiSession) {
 }
 
 // testPhoneMenu checks the header menu of phone width: it holds the links that wide screens show
-// in the header, and Escape closes it.
+// in the header, and Escape closes it. Reader pages have the same menu; their "+" button goes
+// before the theme and menu buttons, so these two stay at the right edge.
 func testPhoneMenu(sess *uiSession) {
 	sess.gotoPage("/")
+	sess.expectPhoneMenu()
+
+	_, noteURL := sess.publishNote()
+	parsed, err := url.Parse(noteURL)
+	sess.must(err)
+	sess.gotoPage(parsed.Path)
+	sess.visible(".header-new")
+	sess.expectPhoneMenu()
+
+	if !sess.mobile() {
+		return
+	}
+
+	newBox, err := sess.page.Locator(".header-new").BoundingBox()
+	sess.must(err)
+	themeBox, err := sess.page.Locator("#themeCycle").BoundingBox()
+	sess.must(err)
+	menuBox, err := sess.page.Locator("#menuBtn").BoundingBox()
+	sess.must(err)
+	require.Less(sess.t, newBox.X, themeBox.X, "the \"+\" button is left of the theme button")
+	require.Less(sess.t, themeBox.X, menuBox.X, "the theme button is left of the menu button")
+}
+
+// expectPhoneMenu checks the header menu of the open page.
+func (sess *uiSession) expectPhoneMenu() {
+	sess.t.Helper()
 
 	api := sess.page.Locator(".header-links").GetByRole(*playwright.AriaRoleLink, playwright.LocatorGetByRoleOptions{
 		Name: "API", Exact: new(true),

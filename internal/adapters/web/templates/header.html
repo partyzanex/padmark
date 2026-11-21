@@ -1,7 +1,8 @@
-{{/* header renders the site header from a headerView (see web_header.go). Kind selects the
-     controls: the create tabs, the "New" button of reader pages or the admin links. The "New"
-     button opens the create page of the record kind (Record). The "File" tab is shown only
-     when FilesEnabled is set. The account block replaces "Sign in" for a signed-in user. On
+{{/* header renders the site header from a headerView (see web_header.go). All pages have the
+     same header. Kind selects only the current item: the create tabs, or the "New" button of
+     reader pages in place of the tabs. The "New" button opens the create page of the record
+     kind (Record). The "File" tab is shown when FilesEnabled is set: without object storage
+     there is no upload page. The account block replaces "Sign in" for a signed-in user. On
      phone width the links and the account block move into the menu under #menuBtn, and one
      button cycles the theme. */}}
 {{define "header"}}
@@ -28,13 +29,8 @@
     <div class="header-spacer"></div>
     <div class="header-menu" id="headerMenu">
         <nav class="header-links" aria-label="Resources">
-            {{- if eq .Kind "admin"}}
-            <a href="/" class="header-link">New note</a>
-            {{- end}}
             <a href="/api" class="header-link">API</a>
-            {{- if ne .Kind "admin"}}
             <a href="https://github.com/partyzanex/padmark" class="header-link" target="_blank" rel="noopener noreferrer">GitHub</a>
-            {{- end}}
         </nav>
         {{- if .SignedIn}}
         <div class="account">
@@ -47,7 +43,7 @@
                 </button>
             </form>
         </div>
-        {{- else if and .Accounts .Tabs}}
+        {{- else if .Accounts}}
         <a href="/login" class="btn-ghost header-signin"{{if eq .Kind "login"}} aria-current="page"{{end}}>Sign in</a>
         {{- end}}
     </div>
@@ -71,7 +67,6 @@
         <span>New</span>
     </a>
     {{- end}}
-    {{- if or .SignedIn (ne .Kind "view")}}
     <button type="button" class="header-icon header-menu-btn" id="menuBtn" aria-label="{{if .SignedIn}}Account: {{.Username}}{{else}}Menu{{end}}" aria-expanded="false" aria-controls="headerMenu">
         {{- if .SignedIn}}
         <span class="account-avatar" aria-hidden="true">{{.Initial}}</span>
@@ -79,14 +74,14 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
         {{- end}}
     </button>
-    {{- end}}
 </header>
 {{end}}
 
-{{/* footer takes the headerView of the page: FilesEnabled selects the text. */}}
+{{/* footer renders the site footer of the create, result and error pages. The caption is the
+     same on all pages; the reader pages use the same caption with their own links. */}}
 {{define "footer"}}
 <footer class="site-footer">
-    <span>Padmark — Markdown notes{{if .FilesEnabled}}, short links &amp; files{{else}} &amp; short links{{end}}</span>
+    <span>Padmark — notes, links &amp; files</span>
     <span class="site-footer-links"><a href="/api">API</a><a href="https://github.com/partyzanex/padmark" target="_blank" rel="noopener noreferrer">Source on GitHub</a></span>
 </footer>
 {{end}}

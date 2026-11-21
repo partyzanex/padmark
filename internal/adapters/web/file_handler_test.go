@@ -723,7 +723,7 @@ func (s *FileHandlerSuite) TestCreateFilePage() {
 	s.Contains(body, `<span id="fileLimit">Up to 1 MiB</span>`)
 	s.Contains(body, `data-max-size="1048576"`)
 	s.Contains(body, `<a href="/files" class="nav-tab" aria-current="page">`)
-	s.Contains(body, "Markdown notes, short links &amp; files")
+	s.Contains(body, "<span>Padmark — notes, links &amp; files</span>")
 	// The fields go before the file part; the server reads them first.
 	s.Less(strings.Index(body, "data.append('ttl'"), strings.Index(body, "data.append('file'"))
 }

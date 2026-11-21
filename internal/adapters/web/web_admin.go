@@ -235,7 +235,7 @@ func (h *AdminHandler) AdminRevokeKeyHandler(w http.ResponseWriter, r *http.Requ
 // and API-token lists. Both lists require admin rights, already verified by the caller.
 func (h *AdminHandler) adminData(r *http.Request, adminID uuid.UUID) (adminViewData, error) {
 	data := adminViewData{
-		Header:    h.header(r, headerKindAdmin),
+		Header:    h.header(r, headerKindPlain),
 		Nonce:     middleware.NonceFromContext(r.Context()),
 		CSRFToken: middleware.CSRFFromContext(r.Context()),
 		// Status/action fields zeroed: populated by the per-action POST handler before re-render on failure

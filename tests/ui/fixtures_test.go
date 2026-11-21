@@ -317,8 +317,10 @@ func startServer(t *testing.T, test scenario) (string, *safeLog) {
 		endpoint, storageErr := runner.storage.start()
 		require.NoError(t, storageErr, "start the S3 mock storage; the file scenarios need Docker")
 
+		// The mock speaks plain HTTP. In CI the job runs in a container, so the mock host is the
+		// Docker host address, not loopback, and the server refuses it without this flag.
 		args = append(args, "--s3-endpoint", endpoint, "--s3-bucket", s3Bucket, "--s3-path-style",
-			"--max-file-size", strconv.Itoa(maxFileSize))
+			"--s3-allow-insecure", "--max-file-size", strconv.Itoa(maxFileSize))
 		env = append(env, "PADMARK_S3_ACCESS_KEY="+s3AccessKey, "PADMARK_S3_SECRET_KEY="+s3SigningKey)
 	}
 	// The free port is released before the server binds it, so a parallel server can take it first.

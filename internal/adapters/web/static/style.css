@@ -321,7 +321,8 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .theme-btn svg { width: 16px; height: 16px; }
 
-/* "New" on reader pages and "Sign in" on the create pages: the last header control. */
+/* "New" on reader pages goes after the theme switcher; "Sign in" or the account block is the
+   last header control on all pages. */
 .header-new {
     order: 3;
     height: 38px;
@@ -2042,7 +2043,8 @@ a.copy-value:hover { color: var(--accent-text); }
 
     .logo { display: flex; align-items: center; height: 52px; font-size: 20px; }
     .theme-switcher { display: none; }
-    .header-icon { display: grid; }
+    /* The theme and menu buttons stay at the right edge on all pages; "+" (order 3) goes before them. */
+    .header-icon { display: grid; order: 4; }
 
     .nav-create {
         order: 10;
@@ -2053,7 +2055,7 @@ a.copy-value:hover { color: var(--accent-text); }
 
     .nav-tab { flex: 1; justify-content: center; height: 40px; border-radius: 9px; }
 
-    .header-new { width: 44px; height: 44px; margin-left: 4px; padding: 0; border-radius: 10px; }
+    .header-new { width: 44px; height: 44px; margin-right: 4px; padding: 0; border-radius: 10px; }
     .header-new span { display: none; }
     .header-new svg { width: 20px; height: 20px; }
 
