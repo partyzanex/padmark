@@ -195,12 +195,15 @@ func TestMathBlockParser_Flags(t *testing.T) {
 	blockParser.Close(ast.NewParagraph(), text.NewReader(nil), parser.NewContext())
 }
 
-func TestMathExtension_KindsDiffer(t *testing.T) {
+// TestMathExtension_KindsShared checks that every renderer uses the same two node kinds:
+// goldmark registers a kind once per process, and a registration per renderer was a data race.
+func TestMathExtension_KindsShared(t *testing.T) {
 	t.Parallel()
 
 	first, second := newMathExtension(), newMathExtension()
 	assert.NotEqual(t, first.inlineKind, first.blockKind)
-	assert.NotEqual(t, first.inlineKind, second.inlineKind, "each renderer registers its own kinds")
+	assert.Equal(t, first.inlineKind, second.inlineKind, "all renderers share the inline kind")
+	assert.Equal(t, first.blockKind, second.blockKind, "all renderers share the block kind")
 	assert.Equal(t, "MathInline", first.inlineKind.String())
 	assert.Equal(t, "MathBlock", first.blockKind.String())
 }

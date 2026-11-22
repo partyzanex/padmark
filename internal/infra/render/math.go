@@ -51,15 +51,23 @@ const (
 	closeBracket = `\]`
 )
 
-// mathExtension adds the math parsers and renderer to goldmark. The node kinds are fields, not
-// package variables: each NewRenderer registers its own kinds.
+// mathExtension adds the math parsers and renderer to goldmark.
 type mathExtension struct {
 	inlineKind ast.NodeKind
 	blockKind  ast.NodeKind
 }
 
+// mathKinds holds the node kinds of the formulas. goldmark keeps node kinds in a package registry
+// without a lock, so a kind must be registered once per process, as goldmark's own extensions do.
+// A registration in each NewRenderer was a data race when two renderers were made at once.
+var mathKinds = mathExtension{ //nolint:gochecknoglobals // goldmark registers node kinds once per process.
+	inlineKind: ast.NewNodeKind("MathInline"),
+	blockKind:  ast.NewNodeKind("MathBlock"),
+}
+
+// newMathExtension returns the extension with the shared node kinds.
 func newMathExtension() mathExtension {
-	return mathExtension{inlineKind: ast.NewNodeKind("MathInline"), blockKind: ast.NewNodeKind("MathBlock")}
+	return mathKinds
 }
 
 // Extend registers the math parsers and the math renderer.

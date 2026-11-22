@@ -35,9 +35,6 @@ const superLinearBudget = time.Second
 // Measured ~15 s; the budget is ~5× that so only a real complexity regression trips it.
 const linearWorstCaseBudget = 75 * time.Second
 
-// raceSlowdown scales budgets when the binary is built with -race (roughly 5–10× slower).
-const raceSlowdown = 10
-
 // coverSlowdown scales budgets when coverage instrumentation is on: counters in the parser's hot
 // loops make each render several times slower, and the budget only has to catch a change in
 // complexity, not in constant. With -race as well (make test) the counters are atomic and
@@ -309,15 +306,14 @@ func renderWithin(rnd *render.Renderer, input string, budget time.Duration) (tim
 func TestRenderSuperLinearInputsWithinBudget(t *testing.T) {
 	t.Parallel()
 
-	if testing.CoverMode() != "" && raceEnabled() {
-		t.Skip("atomic coverage counters under -race make render timing meaningless")
+	// The race detector slows the math scanners about 35 times (0.3 s → 10 s for 512 KiB), so a
+	// timing budget under -race fails at random. CI runs this test in its own step without -race
+	// and without coverage, as TestRenderLinearWorstCaseAtMaxSize.
+	if raceEnabled() {
+		t.Skip("the race detector makes render timing meaningless; CI times renders without -race")
 	}
 
 	budget := superLinearBudget
-	if raceEnabled() {
-		budget *= raceSlowdown
-	}
-
 	if testing.CoverMode() != "" {
 		budget *= coverSlowdown
 	}
