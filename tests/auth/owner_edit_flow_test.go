@@ -91,8 +91,8 @@ func newOwnerFlowEnv(t *testing.T, dbName string) ownerFlowEnv {
 	authMgr, err := auth.NewManager(
 		auth.Stores{
 			Users:     users,
-			Invites:   sqliterepo.NewInviteRepository(db, slog.Default()),
-			Sessions:  sqliterepo.NewSessionRepository(db, slog.Default()),
+			Invites:   sqliterepo.NewInviteRepository(db),
+			Sessions:  sqliterepo.NewSessionRepository(db),
 			APITokens: sqliterepo.NewAPITokenRepository(db),
 		},
 		crypto.NewPasswordHasher(testArgon2Params),

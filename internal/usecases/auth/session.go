@@ -1,9 +1,9 @@
+//go:generate go run go.uber.org/mock/mockgen@latest -source=session.go -destination=session_mocks_test.go -package=auth -write_package_comment=false
+
 package auth
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -14,8 +14,6 @@ import (
 	"github.com/partyzanex/padmark/internal/domain"
 )
 
-const sessionIDBytes = 32
-
 // DefaultSessionTTL is how long a session stays valid when NewSessionManager is given no
 // override (sessionTTL <= 0). It is the single source of truth for the session lifetime default:
 // internal/infra/server's --session-ttl flag default and internal/adapters/web's session cookie
@@ -23,13 +21,53 @@ const sessionIDBytes = 32
 // their own copy, which would otherwise drift out of sync with the actual server-side TTL.
 const DefaultSessionTTL = 30 * 24 * time.Hour
 
+// SessionUserStore is the part of the user store that SessionManager uses.
+// Errors are fail-hard unless the SessionManager method says otherwise.
+type SessionUserStore interface {
+	GetByUsername(ctx context.Context, username string) (*domain.User, error)
+	GetByID(ctx context.Context, id uuid.UUID) (*domain.User, error)
+	// UpdateLastLogin records the time of the last login. Fail-soft: Login logs the error.
+	UpdateLastLogin(ctx context.Context, id uuid.UUID, t time.Time) error
+	// ChangePassword replaces the password hash, KDF salt and sealed TOTP secret of sess.UserID,
+	// makes sess the only session of that user and deletes all API tokens of that user, in one
+	// transaction. Fail-hard: on an error nothing changed, so the old password, sessions and API
+	// tokens stay valid and sess does not exist. Returns domain.ErrNotFound when the user is gone.
+	ChangePassword(
+		ctx context.Context, sess *domain.Session, passwordHash string, kdfSalt []byte, totpSecret string,
+	) error
+	// UpdateTOTPSecret replaces only the sealed TOTP secret, leaving the password hash and KDF
+	// salt untouched. It exists for the re-seal-on-login migration (see
+	// SessionManager.resealTOTPSecret), where the secret is rewritten under the current argon2
+	// cost but the credentials themselves do not change. It writes only while the stored seal
+	// equals expected and reports false otherwise, so a reseal started before a concurrent
+	// password change never overwrites the seal of the new password.
+	UpdateTOTPSecret(ctx context.Context, id uuid.UUID, expected, totpSecret string) (bool, error)
+	// UpdateTOTPCounter atomically advances the user's last accepted TOTP counter,
+	// returning false when counter is not strictly greater (replay). The conditional
+	// update is the cross-instance, restart-safe guard against TOTP code reuse.
+	UpdateTOTPCounter(ctx context.Context, id uuid.UUID, counter int64) (bool, error)
+}
+
+// SessionStore persists authenticated browser sessions.
+//
+// All key parameters carry the at-rest value domain.Session.SessionHash — the SHA-256 digest
+// of the raw session id (see hashToken) — never the raw cookie value.
+type SessionStore interface {
+	Create(ctx context.Context, s *domain.Session) error
+	Get(ctx context.Context, sessionID string) (*domain.Session, error)
+	Delete(ctx context.Context, sessionID string) error
+	// DeleteExpired removes the sessions that expired before now. Fail-soft: Login calls it
+	// after it stores a new session and only logs an error.
+	DeleteExpired(ctx context.Context, now time.Time) error
+}
+
 // SessionManager authenticates a user and manages their login session lifecycle.
 type SessionManager struct {
 	totp        TOTPManager
 	sessions    SessionStore
 	sealer      SecretSealer
 	pw          PasswordHasher
-	users       UserStore
+	users       SessionUserStore
 	log         *slog.Logger
 	dummyPwHash string
 	ttl         time.Duration
@@ -42,7 +80,7 @@ type SessionManager struct {
 // NewSessionManager runs only at the composition root, so the caller is expected to treat this
 // as a fatal startup error rather than retry.
 func NewSessionManager(
-	users UserStore, sessions SessionStore, passwordHasher PasswordHasher,
+	users SessionUserStore, sessions SessionStore, passwordHasher PasswordHasher,
 	sealer SecretSealer, totp TOTPManager, log *slog.Logger, sessionTTL time.Duration,
 ) (*SessionManager, error) {
 	ttl := sessionTTL
@@ -129,6 +167,7 @@ func (m *SessionManager) Login(
 	}
 
 	m.revokePreviousSession(ctx, usr.ID, previousSessionID)
+	m.deleteExpiredSessions(ctx, now)
 
 	updateErr := m.users.UpdateLastLogin(ctx, usr.ID, now)
 	if updateErr != nil {
@@ -165,7 +204,7 @@ func (m *SessionManager) GetSession(ctx context.Context, sessionID string) (*dom
 }
 
 // ChangePassword verifies the current password and TOTP code, then re-encrypts the
-// TOTP secret under a new derived key. UserStore.ChangePassword writes the new credentials, the
+// TOTP secret under a new derived key. SessionUserStore.ChangePassword writes the new credentials, the
 // replacement session and the revocation of all other sessions and API tokens in one transaction.
 // Thus a database failure or a process stop cannot keep the old access valid next to the new
 // password: on an error the account is as it was, and the caller can retry with a new TOTP code.
@@ -432,14 +471,16 @@ func (m *SessionManager) validateAndRecordTOTP(
 }
 
 func newSessionID() (string, error) {
-	buf := make([]byte, sessionIDBytes)
+	return newRandomToken()
+}
 
-	_, err := rand.Read(buf)
+// deleteExpiredSessions removes expired sessions after a login. No background worker removes
+// them, so each login does it. Fail-soft: the new session is valid, so an error is only logged.
+func (m *SessionManager) deleteExpiredSessions(ctx context.Context, now time.Time) {
+	err := m.sessions.DeleteExpired(ctx, now)
 	if err != nil {
-		return "", fmt.Errorf("read rand: %w", err)
+		m.log.WarnContext(ctx, "delete expired sessions failed", "err", err)
 	}
-
-	return base64.RawURLEncoding.EncodeToString(buf), nil
 }
 
 // revokePreviousSession deletes the session a client held before signing in again; no-op when it

@@ -1,8 +1,9 @@
+//go:generate go run go.uber.org/mock/mockgen@latest -source=api_token.go -destination=api_token_mocks_test.go -package=auth -write_package_comment=false
+
 package auth
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
@@ -15,8 +16,6 @@ import (
 )
 
 const (
-	// apiTokenBytes is the entropy of a freshly generated API key (256 bits).
-	apiTokenBytes = 32
 	// maxAPITokensPerUser caps how many live API keys a single user may hold, so an admin
 	// (or a compromised admin session) cannot mint an unbounded number of bearer credentials.
 	maxAPITokensPerUser = 20
@@ -38,13 +37,38 @@ type APITokenInfo struct {
 	UserID   uuid.UUID
 }
 
+// APITokenUserStore is the part of the user store that APITokenManager uses. Fail-hard.
+type APITokenUserStore interface {
+	GetByID(ctx context.Context, id uuid.UUID) (*domain.User, error)
+	List(ctx context.Context) ([]*domain.User, error)
+}
+
+// APITokenStore persists CLI API tokens keyed by their SHA-256 hash. The plain key is never stored.
+type APITokenStore interface {
+	// CreateIfUnderLimit atomically counts t.UserID's live (unexpired) tokens and inserts t only
+	// if that count is below limit, reporting false (no error) when the limit is already reached. The
+	// count-then-insert must be a single atomic operation — two concurrent issuance requests each
+	// doing a separate count check followed by an unconditional insert could both pass the check
+	// before either insert lands, letting the user exceed the limit.
+	CreateIfUnderLimit(ctx context.Context, t *domain.APIToken, limit int) (bool, error)
+	// GetByHash resolves a token by its SHA-256 hash. Returns domain.ErrNotFound when absent.
+	GetByHash(ctx context.Context, tokenHash string) (*domain.APIToken, error)
+	// List returns all tokens for the admin panel.
+	List(ctx context.Context) ([]*domain.APIToken, error)
+	// RevokeByHash deletes a token by its SHA-256 hash (the public identifier). Returns
+	// domain.ErrNotFound when absent.
+	RevokeByHash(ctx context.Context, tokenHash string) error
+	// UpdateLastUsed records the time of the most recent successful token check, keyed by hash.
+	UpdateLastUsed(ctx context.Context, tokenHash string, t time.Time) error
+}
+
 // APITokenManager issues, resolves, lists, and revokes long-lived API tokens.
 //
 // apiTokens may be nil to disable the flow entirely: every method then returns
 // domain.ErrFeatureNotSupported instead of touching a store.
 type APITokenManager struct {
 	apiTokens APITokenStore
-	users     UserStore
+	users     APITokenUserStore
 	stepUp    StepUpVerifier
 	log       *slog.Logger
 }
@@ -53,7 +77,7 @@ type APITokenManager struct {
 // API-token flow (all methods then return domain.ErrFeatureNotSupported). stepUp re-authenticates
 // a bearer-token caller before it may issue another token.
 func NewAPITokenManager(
-	apiTokens APITokenStore, users UserStore, stepUp StepUpVerifier, log *slog.Logger,
+	apiTokens APITokenStore, users APITokenUserStore, stepUp StepUpVerifier, log *slog.Logger,
 ) *APITokenManager {
 	return &APITokenManager{apiTokens: apiTokens, users: users, stepUp: stepUp, log: log}
 }
@@ -246,14 +270,7 @@ func apiTokenIssuedBy(issuer Issuer) *string {
 }
 
 func newAPIToken() (string, error) {
-	buf := make([]byte, apiTokenBytes)
-
-	_, err := rand.Read(buf)
-	if err != nil {
-		return "", fmt.Errorf("read rand: %w", err)
-	}
-
-	return base64.RawURLEncoding.EncodeToString(buf), nil
+	return newRandomToken()
 }
 
 // hashToken derives the at-rest primary key for a plaintext bearer credential: the SHA-256

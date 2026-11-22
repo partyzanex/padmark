@@ -9,7 +9,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/driver/pgdriver"
 
 	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/usecases/files"
@@ -104,8 +103,7 @@ func (r *FileRepository) Create(ctx context.Context, domFile *domain.File) error
 
 	_, err := r.db.NewInsert().Model(row).Exec(ctx)
 	if err != nil {
-		var pgErr pgdriver.Error
-		if errors.As(err, &pgErr) && pgErr.Field('C') == "23505" {
+		if isSlugConflict(err) {
 			return domain.ErrSlugConflict
 		}
 

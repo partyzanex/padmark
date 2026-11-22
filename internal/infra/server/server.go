@@ -493,23 +493,24 @@ func attachAccountSystem(
 	return handler.WithAuthManager(authMgr), nil
 }
 
-//nolint:ireturn // factory: returns different concrete impls (postgres vs sqlite) behind common interfaces
-func buildAuthRepos(storage string, db *bun.DB) (auth.Stores, web.RevealTokenStore) {
+// buildAuthRepos builds the account repositories and the reveal-token manager for the chosen
+// backend. log is the configured logger, so --log-level and --log-format apply to them.
+func buildAuthRepos(storage string, db *bun.DB, log *slog.Logger) (auth.Stores, *auth.RevealManager) {
 	switch storage {
 	case storagePostgres:
 		return auth.Stores{
 			Users:     postgres.NewUserRepository(db),
-			Invites:   postgres.NewInviteRepository(db, slog.Default()),
-			Sessions:  postgres.NewSessionRepository(db, slog.Default()),
+			Invites:   postgres.NewInviteRepository(db),
+			Sessions:  postgres.NewSessionRepository(db),
 			APITokens: postgres.NewAPITokenRepository(db),
-		}, postgres.NewRevealRepository(db, slog.Default())
+		}, auth.NewRevealManager(postgres.NewRevealRepository(db), log)
 	default:
 		return auth.Stores{
 			Users:     sqlite.NewUserRepository(db),
-			Invites:   sqlite.NewInviteRepository(db, slog.Default()),
-			Sessions:  sqlite.NewSessionRepository(db, slog.Default()),
+			Invites:   sqlite.NewInviteRepository(db),
+			Sessions:  sqlite.NewSessionRepository(db),
 			APITokens: sqlite.NewAPITokenRepository(db),
-		}, sqlite.NewRevealRepository(db, slog.Default())
+		}, auth.NewRevealManager(sqlite.NewRevealRepository(db), log)
 	}
 }
 
@@ -618,7 +619,7 @@ func buildHandlers(
 		WithCache(linkcache.NewDefault(log)).
 		WithMetrics(metrics.links)
 
-	authStores, revealStore := buildAuthRepos(store.name, store.db)
+	authStores, revealStore := buildAuthRepos(store.name, store.db, log)
 
 	handler := web.NewHandler(manager, linkManager, log).
 		WithRevealStore(revealStore).
@@ -657,14 +658,14 @@ func initRepos(
 			return store, fmt.Errorf("init postgres storage: %w", err)
 		}
 
-		store.notes, store.links, store.files = repo, newPostgresLinkRepository(db), postgres.NewFileRepository(db)
+		store.notes, store.links, store.files = repo, newPostgresLinkRepository(db, log), postgres.NewFileRepository(db)
 	default:
 		repo, err := initSQLiteStorage(ctx, db, log, opts)
 		if err != nil {
 			return store, fmt.Errorf("init sqlite storage: %w", err)
 		}
 
-		store.notes, store.links, store.files = repo, newSQLiteLinkRepository(db), sqlite.NewFileRepository(db)
+		store.notes, store.links, store.files = repo, newSQLiteLinkRepository(db, log), sqlite.NewFileRepository(db)
 	}
 
 	return store, nil

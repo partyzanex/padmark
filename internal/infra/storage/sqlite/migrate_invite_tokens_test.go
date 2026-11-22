@@ -25,7 +25,7 @@ func TestMigrateInviteTokens_InvalidatesOldInvitesAndDowngradeHashes(t *testing.
 	_, err = provider.UpTo(t.Context(), before)
 	require.NoError(t, err)
 
-	issuer := inviteTestUser("issuer")
+	issuer := migrationTestUser("issuer")
 	require.NoError(t, NewUserRepository(db).Create(t.Context(), issuer))
 	_, err = db.NewRaw("INSERT INTO invites (token, created_by, expires_at) VALUES (?, ?, ?)",
 		"legacy-bearer", issuer.ID, time.Now().Add(time.Hour)).Exec(t.Context())
@@ -36,15 +36,20 @@ func TestMigrateInviteTokens_InvalidatesOldInvitesAndDowngradeHashes(t *testing.
 	require.NoError(t, err)
 	require.Zero(t, count, "plaintext-era invites must be invalidated")
 
-	repo := NewInviteRepository(db, nil)
-	_, err = repo.Consume(t.Context(), "legacy-bearer", "member")
+	repo := NewInviteRepository(db)
+	err = repo.RedeemInvite(t.Context(), domain.HashInviteToken("legacy-bearer"), "member",
+		migrationTestUser("member"))
 	require.ErrorIs(t, err, domain.ErrNotFound)
-	plain, err := repo.Issue(t.Context(), issuer.ID)
-	require.NoError(t, err)
+
+	issued := domain.HashInviteToken("new-bearer")
+	require.NoError(t, repo.Create(t.Context(), &domain.Invite{
+		TokenHash: issued, CreatedBy: issuer.ID, ExpiresAt: time.Now().Add(time.Hour), UsedAt: nil, UsedBy: "",
+	}))
 	_, err = provider.Up(t.Context())
 	require.NoError(t, err)
-	_, err = repo.Consume(t.Context(), plain, "member")
-	require.NoError(t, err, "reapplying migrations must preserve newly issued invites")
+	kept, err := db.NewSelect().Table("invites").Where("token_hash = ? AND used_at IS NULL", issued).Count(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, int64(1), kept, "reapplying migrations must preserve newly issued invites")
 	_, err = provider.DownTo(t.Context(), before)
 	require.NoError(t, err)
 	count, err = db.NewSelect().Table("invites").Column("token").Count(t.Context())

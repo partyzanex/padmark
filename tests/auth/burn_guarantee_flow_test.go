@@ -54,8 +54,8 @@ func newBurnGuaranteeEnv(t *testing.T, dbName string) ownerFlowEnv {
 	authMgr, err := auth.NewManager(
 		auth.Stores{
 			Users:     users,
-			Invites:   sqliterepo.NewInviteRepository(db, log),
-			Sessions:  sqliterepo.NewSessionRepository(db, log),
+			Invites:   sqliterepo.NewInviteRepository(db),
+			Sessions:  sqliterepo.NewSessionRepository(db),
 			APITokens: sqliterepo.NewAPITokenRepository(db),
 		},
 		crypto.NewPasswordHasher(testArgon2Params),
@@ -70,7 +70,7 @@ func newBurnGuaranteeEnv(t *testing.T, dbName string) ownerFlowEnv {
 	notesMgr, linksMgr := newOwnerFlowManagers(t, db, log)
 
 	handler := web.NewHandler(notesMgr, linksMgr, log).
-		WithRevealStore(sqliterepo.NewRevealRepository(db, log)).
+		WithRevealStore(auth.NewRevealManager(sqliterepo.NewRevealRepository(db), log)).
 		WithAuthManager(authMgr)
 	ogen := web.NewOgenHandler(notesMgr, linksMgr, web.NoPinger{}, log)
 	router, err := web.NewRouter(handler, ogen, &web.RouterOptions{

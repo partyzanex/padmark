@@ -81,7 +81,7 @@ func (r *LinkRepository) Create(ctx context.Context, domLink *domain.Link) error
 
 	_, err := r.db.NewInsert().Model(dbLink).Exec(ctx)
 	if err != nil {
-		if isUniqueViolation(err) {
+		if isSlugConflict(err) {
 			return domain.ErrSlugConflict
 		}
 

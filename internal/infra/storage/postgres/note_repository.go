@@ -9,7 +9,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/driver/pgdriver"
 
 	"github.com/partyzanex/padmark/internal/domain"
 )
@@ -114,8 +113,7 @@ func (r *NoteRepository) Create(ctx context.Context, domNote *domain.Note) error
 
 	_, err := r.db.NewInsert().Model(dbNote).Exec(ctx)
 	if err != nil {
-		var pgErr pgdriver.Error
-		if errors.As(err, &pgErr) && pgErr.Field('C') == "23505" {
+		if isSlugConflict(err) {
 			return domain.ErrSlugConflict
 		}
 

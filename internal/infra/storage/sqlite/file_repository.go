@@ -103,7 +103,7 @@ func (r *FileRepository) Create(ctx context.Context, domFile *domain.File) error
 
 	_, err := r.db.NewInsert().Model(row).Exec(ctx)
 	if err != nil {
-		if isUniqueViolation(err) {
+		if isSlugConflict(err) {
 			return domain.ErrSlugConflict
 		}
 

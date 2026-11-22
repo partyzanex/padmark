@@ -152,13 +152,13 @@ func initSQLiteStorage(
 // newPostgresLinkRepository returns a ready-to-use links repository for the postgres backend.
 // Migrations for the links table already ran as part of the storage init (same db handle, same
 // migration set), so this only needs to construct the repository, not migrate again.
-func newPostgresLinkRepository(db *bun.DB) *postgres.LinkRepository {
-	return postgres.NewLinkRepository(db, slog.Default())
+func newPostgresLinkRepository(db *bun.DB, log *slog.Logger) *postgres.LinkRepository {
+	return postgres.NewLinkRepository(db, log)
 }
 
 // newSQLiteLinkRepository returns a ready-to-use links repository for the sqlite backend.
-func newSQLiteLinkRepository(db *bun.DB) *sqlite.LinkRepository {
-	return sqlite.NewLinkRepository(db, slog.Default())
+func newSQLiteLinkRepository(db *bun.DB, log *slog.Logger) *sqlite.LinkRepository {
+	return sqlite.NewLinkRepository(db, log)
 }
 
 // newPostgresNotesChecker returns a links.NotesChecker for the postgres backend — the same note

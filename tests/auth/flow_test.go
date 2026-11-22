@@ -160,6 +160,13 @@ func (s *AuthFlowSuite) TestFlow_AcceptInvite_Login_GetSession() {
 	s.Require().NoError(err)
 	s.NotEmpty(tok)
 
+	// The database keeps only the hash of the invite token, never the bearer value.
+	var stored string
+
+	s.Require().NoError(s.db.NewSelect().Table("invites").Column("token_hash").Scan(ctx, &stored))
+	s.Equal(domain.HashInviteToken(tok), stored)
+	s.NotEqual(tok, stored)
+
 	inviteEnr, err := s.mgr.AcceptInvite(ctx, tok, "newuser", flowPassword)
 	s.Require().NoError(err)
 	s.Contains(inviteEnr.QRCode, "data:image/png;base64,")

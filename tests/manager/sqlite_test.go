@@ -13,6 +13,7 @@ import (
 
 	"github.com/partyzanex/padmark/internal/infra/lock"
 	sqliterepo "github.com/partyzanex/padmark/internal/infra/storage/sqlite"
+	"github.com/partyzanex/padmark/internal/usecases/auth"
 )
 
 type SQLiteManagerSuite struct {
@@ -53,7 +54,7 @@ func (s *SQLiteManagerSuite) SetupTest() {
 	s.FileManager = newFileManager(&s.Suite, sqliterepo.NewFileRepository(s.db), sqliterepo.NewNoteRepository(s.db),
 		sqliterepo.NewLinkRepository(s.db, slog.Default()), slugLock, s.objects.store)
 	s.Objects = s.objects.store
-	s.RevealStore = sqliterepo.NewRevealRepository(s.db, slog.Default())
+	s.RevealStore = auth.NewRevealManager(sqliterepo.NewRevealRepository(s.db), slog.Default())
 	s.DB = s.db
 }
 

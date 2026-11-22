@@ -366,8 +366,8 @@ func TestAccountsFlow(t *testing.T) {
 func sqliteAuthStores(db *bun.DB, users auth.UserStore) auth.Stores {
 	return auth.Stores{
 		Users:     users,
-		Invites:   sqliterepo.NewInviteRepository(db, slog.Default()),
-		Sessions:  sqliterepo.NewSessionRepository(db, slog.Default()),
+		Invites:   sqliterepo.NewInviteRepository(db),
+		Sessions:  sqliterepo.NewSessionRepository(db),
 		APITokens: sqliterepo.NewAPITokenRepository(db),
 	}
 }

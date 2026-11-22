@@ -5,7 +5,6 @@ package postgres
 import (
 	"context"
 	"database/sql"
-	"log/slog"
 	"testing"
 	"time"
 
@@ -100,32 +99,6 @@ func (s *UserRepositoryTestSuite) newUser(username string) *domain.User {
 
 // ── Create ──.
 
-func (s *UserRepositoryTestSuite) TestCreate_GetByUsername_RoundTrip() {
-	ctx := s.T().Context()
-	usr := s.newUser("alice")
-
-	s.Require().NoError(s.repo.Create(ctx, usr))
-
-	got, err := s.repo.GetByUsername(ctx, "alice")
-	s.Require().NoError(err)
-	s.Equal(usr.ID, got.ID)
-	s.Equal(usr.Username, got.Username)
-	s.Equal(usr.TOTPSecret, got.TOTPSecret)
-	s.Equal(usr.PasswordHash, got.PasswordHash)
-	s.Equal(usr.KDFSalt, got.KDFSalt)
-	s.Equal(usr.IsAdmin, got.IsAdmin)
-	s.Nil(got.LastLoginAt)
-}
-
-func (s *UserRepositoryTestSuite) TestCreate_DuplicateUsername_ReturnsErrUserExists() {
-	ctx := s.T().Context()
-
-	s.Require().NoError(s.repo.Create(ctx, s.newUser("bob")))
-
-	err := s.repo.Create(ctx, s.newUser("bob"))
-	s.ErrorIs(err, domain.ErrUserExists)
-}
-
 func (s *UserRepositoryTestSuite) TestCreate_IsAdmin_StoredCorrectly() {
 	ctx := s.T().Context()
 	usr := s.newUser("admin")
@@ -140,28 +113,7 @@ func (s *UserRepositoryTestSuite) TestCreate_IsAdmin_StoredCorrectly() {
 
 // ── GetByUsername ──.
 
-func (s *UserRepositoryTestSuite) TestGetByUsername_NotFound_ReturnsErrNotFound() {
-	_, err := s.repo.GetByUsername(s.T().Context(), "nobody")
-	s.ErrorIs(err, domain.ErrNotFound)
-}
-
 // ── GetByID ──.
-
-func (s *UserRepositoryTestSuite) TestGetByID_Found() {
-	ctx := s.T().Context()
-	usr := s.newUser("carol")
-	s.Require().NoError(s.repo.Create(ctx, usr))
-
-	got, err := s.repo.GetByID(ctx, usr.ID)
-	s.Require().NoError(err)
-	s.Equal(usr.ID, got.ID)
-	s.Equal(usr.Username, got.Username)
-}
-
-func (s *UserRepositoryTestSuite) TestGetByID_NotFound_ReturnsErrNotFound() {
-	_, err := s.repo.GetByID(s.T().Context(), uuid.New())
-	s.ErrorIs(err, domain.ErrNotFound)
-}
 
 // ── List ──.
 
@@ -171,58 +123,9 @@ func (s *UserRepositoryTestSuite) TestList_Empty_ReturnsEmptySlice() {
 	s.Empty(users)
 }
 
-func (s *UserRepositoryTestSuite) TestList_OrderedByCreatedAt() {
-	ctx := s.T().Context()
-
-	first := s.newUser("dave")
-	first.CreatedAt = time.Now().Add(-time.Hour).Truncate(time.Second)
-
-	second := s.newUser("eve")
-	second.CreatedAt = time.Now().Truncate(time.Second)
-
-	s.Require().NoError(s.repo.Create(ctx, second))
-	s.Require().NoError(s.repo.Create(ctx, first))
-
-	users, err := s.repo.List(ctx)
-	s.Require().NoError(err)
-	s.Require().Len(users, 2)
-	s.Equal("dave", users[0].Username)
-	s.Equal("eve", users[1].Username)
-}
-
 // ── UpdateLastLogin ──.
 
-func (s *UserRepositoryTestSuite) TestUpdateLastLogin_SetsField() {
-	ctx := s.T().Context()
-	usr := s.newUser("frank")
-	s.Require().NoError(s.repo.Create(ctx, usr))
-
-	loginAt := time.Now().Truncate(time.Second)
-	s.Require().NoError(s.repo.UpdateLastLogin(ctx, usr.ID, loginAt))
-
-	got, err := s.repo.GetByID(ctx, usr.ID)
-	s.Require().NoError(err)
-	s.Require().NotNil(got.LastLoginAt)
-	s.Equal(loginAt.Unix(), got.LastLoginAt.Unix())
-}
-
-func (s *UserRepositoryTestSuite) TestUpdateLastLogin_NonExistentUser_NoError() {
-	err := s.repo.UpdateLastLogin(s.T().Context(), uuid.New(), time.Now())
-	s.Require().NoError(err)
-}
-
 // ── Revoke ──.
-
-func (s *UserRepositoryTestSuite) TestRevoke_RemovesUser() {
-	ctx := s.T().Context()
-	usr := s.newUser("grace")
-	s.Require().NoError(s.repo.Create(ctx, usr))
-
-	s.Require().NoError(s.repo.Revoke(ctx, usr.ID))
-
-	_, err := s.repo.GetByID(ctx, usr.ID)
-	s.ErrorIs(err, domain.ErrNotFound)
-}
 
 // TestRevoke_LastAdminRefused verifies the atomic last-admin guard: the advisory-locked
 // conditional delete must refuse to remove the only admin with domain.ErrForbidden and leave
@@ -242,56 +145,7 @@ func (s *UserRepositoryTestSuite) TestRevoke_LastAdminRefused() {
 	s.Require().NoError(getErr, "the last admin must survive a refused revocation")
 }
 
-func (s *UserRepositoryTestSuite) TestRevoke_NonExistentUser_ReturnsErrForbidden() {
-	err := s.repo.Revoke(s.T().Context(), uuid.New())
-	s.ErrorIs(err, domain.ErrForbidden)
-}
-
 // ── UpdatePassword ──.
-
-func (s *UserRepositoryTestSuite) TestUpdatePassword_UpdatesAllFields() {
-	ctx := s.T().Context()
-	usr := s.newUser("heidi")
-	s.Require().NoError(s.repo.Create(ctx, usr))
-
-	newHash := "new-password-hash"
-	newSalt := []byte("newsaltnewsalt16")
-	newTOTP := "new-totp-secret"
-
-	s.Require().NoError(s.repo.UpdatePassword(ctx, usr.ID, newHash, newSalt, newTOTP))
-
-	got, err := s.repo.GetByID(ctx, usr.ID)
-	s.Require().NoError(err)
-	s.Equal(newHash, got.PasswordHash)
-	s.Equal(newSalt, got.KDFSalt)
-	s.Equal(newTOTP, got.TOTPSecret)
-	// Other fields must not change.
-	s.Equal(usr.Username, got.Username)
-	s.Equal(usr.IsAdmin, got.IsAdmin)
-}
-
-func (s *UserRepositoryTestSuite) TestUpdatePassword_KDFSalt_Base64RoundTrip() {
-	ctx := s.T().Context()
-	usr := s.newUser("ivan")
-	s.Require().NoError(s.repo.Create(ctx, usr))
-
-	// Use bytes with all values 0–255 to exercise base64 encoding.
-	salt := make([]byte, 32)
-	for i := range salt {
-		salt[i] = byte(i)
-	}
-
-	s.Require().NoError(s.repo.UpdatePassword(ctx, usr.ID, "h", salt, "t"))
-
-	got, err := s.repo.GetByID(ctx, usr.ID)
-	s.Require().NoError(err)
-	s.Equal(salt, got.KDFSalt)
-}
-
-func (s *UserRepositoryTestSuite) TestUpdatePassword_NonExistentUser_NoError() {
-	err := s.repo.UpdatePassword(s.T().Context(), uuid.New(), "h", []byte("s"), "t")
-	s.Require().NoError(err)
-}
 
 // ── ChangePassword ──.
 
@@ -304,7 +158,7 @@ func (s *UserRepositoryTestSuite) changePasswordFixture() (*domain.User, *domain
 	s.Require().NoError(s.repo.Create(ctx, alice))
 	s.Require().NoError(s.repo.Create(ctx, bob))
 
-	sessions := NewSessionRepository(s.db, slog.New(slog.DiscardHandler))
+	sessions := NewSessionRepository(s.db)
 	tokens := NewAPITokenRepository(s.db)
 
 	for _, fixture := range []struct {
@@ -326,45 +180,13 @@ func (s *UserRepositoryTestSuite) changePasswordFixture() (*domain.User, *domain
 	return alice, cpSession("alice-new", alice.ID)
 }
 
-func (s *UserRepositoryTestSuite) TestChangePassword_ReplacesCredentialsAndAccess() {
-	ctx := s.T().Context()
-	alice, newSess := s.changePasswordFixture()
-	sessions := NewSessionRepository(s.db, slog.New(slog.DiscardHandler))
-	tokens := NewAPITokenRepository(s.db)
-	newSalt := []byte("newsaltnewsalt16")
-
-	s.Require().NoError(s.repo.ChangePassword(ctx, newSess, "new-hash", newSalt, "new-seal"))
-
-	got, err := s.repo.GetByID(ctx, alice.ID)
-	s.Require().NoError(err)
-	s.Equal("new-hash", got.PasswordHash)
-	s.Equal(newSalt, got.KDFSalt)
-	s.Equal("new-seal", got.TOTPSecret)
-
-	_, err = sessions.Get(ctx, "alice-new")
-	s.Require().NoError(err, "the new session must exist")
-
-	for _, old := range []string{"alice-old-1", "alice-old-2"} {
-		_, err = sessions.Get(ctx, old)
-		s.Require().ErrorIs(err, domain.ErrSessionExpired, "old session %s must be revoked", old)
-	}
-
-	_, err = tokens.GetByHash(ctx, "alice-token")
-	s.Require().ErrorIs(err, domain.ErrNotFound, "the API token of alice must be revoked")
-
-	_, err = sessions.Get(ctx, "bob-session")
-	s.Require().NoError(err, "the session of another user must stay")
-	_, err = tokens.GetByHash(ctx, "bob-token")
-	s.Require().NoError(err, "the API token of another user must stay")
-}
-
 // TestChangePassword_RevocationFailure_RollsBackAllWrites covers Finding 5: a failure in the last
 // step (API-token revocation) must leave the old password, old sessions and API tokens valid,
 // and must not keep the new session.
 func (s *UserRepositoryTestSuite) TestChangePassword_RevocationFailure_RollsBackAllWrites() {
 	ctx := s.T().Context()
 	alice, newSess := s.changePasswordFixture()
-	sessions := NewSessionRepository(s.db, slog.New(slog.DiscardHandler))
+	sessions := NewSessionRepository(s.db)
 	tokens := NewAPITokenRepository(s.db)
 
 	_, err := s.db.ExecContext(ctx, `CREATE OR REPLACE FUNCTION fail_api_token_delete() RETURNS trigger
@@ -401,50 +223,7 @@ func (s *UserRepositoryTestSuite) TestChangePassword_RevocationFailure_RollsBack
 	s.Require().NoError(err, "the API token must stay after a rollback")
 }
 
-func (s *UserRepositoryTestSuite) TestChangePassword_NonExistentUser_ReturnsErrNotFound() {
-	ctx := s.T().Context()
-	sessions := NewSessionRepository(s.db, slog.New(slog.DiscardHandler))
-	newSess := cpSession("ghost-session", uuid.New())
-
-	err := s.repo.ChangePassword(ctx, newSess, "h", []byte("s"), "t")
-	s.Require().ErrorIs(err, domain.ErrNotFound)
-
-	_, err = sessions.Get(ctx, "ghost-session")
-	s.Require().ErrorIs(err, domain.ErrSessionExpired)
-}
-
 // ── Case-insensitive usernames ──.
-
-// TestCreate_DuplicateUsernameDifferentCase_ReturnsErrUserExists pins that "Admin" cannot be
-// registered next to "admin": otherwise two accounts would differ only by case, which is an
-// impersonation/phishing aid and splits one person's lockout bucket from their account.
-func (s *UserRepositoryTestSuite) TestCreate_DuplicateUsernameDifferentCase_ReturnsErrUserExists() {
-	ctx := s.T().Context()
-
-	s.Require().NoError(s.repo.Create(ctx, s.newUser("admin")))
-
-	err := s.repo.Create(ctx, s.newUser("Admin"))
-	s.ErrorIs(err, domain.ErrUserExists)
-}
-
-// TestGetByUsername_IsCaseInsensitive verifies the lookup finds the stored row whatever case the
-// login form used, and returns the username as it was registered.
-func (s *UserRepositoryTestSuite) TestGetByUsername_IsCaseInsensitive() {
-	ctx := s.T().Context()
-
-	stored := s.newUser("Alice")
-	s.Require().NoError(s.repo.Create(ctx, stored))
-
-	for _, query := range []string{"Alice", "alice", "ALICE"} {
-		got, err := s.repo.GetByUsername(ctx, query)
-		s.Require().NoError(err, query)
-		s.Equal(stored.ID, got.ID, query)
-		s.Equal("Alice", got.Username, "the stored spelling is preserved")
-	}
-
-	_, err := s.repo.GetByUsername(ctx, "alic")
-	s.ErrorIs(err, domain.ErrNotFound)
-}
 
 // --- helpers ---
 

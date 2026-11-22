@@ -69,30 +69,6 @@ func verifyLogged(log *slog.Logger, what, storedHash, secret string, ceiling Arg
 	return matched
 }
 
-// HashPassword hashes a password with the default argon2 cost. Convenience helper for
-// callers that don't tune cost (e.g. tests); production wiring injects a PasswordHasher.
-func HashPassword(password string) (string, error) {
-	operationResult, operationErr := hashArgon2(password, DefaultArgon2Params())
-	if operationErr != nil {
-		return operationResult, fmt.Errorf("hash argon2: %w", operationErr)
-	}
-
-	return operationResult, nil
-}
-
-// VerifyPassword reports whether password matches storedHash (reads embedded params).
-func VerifyPassword(storedHash, password string) bool {
-	ceiling := DefaultArgon2Params().acceptedCeiling()
-
-	matched, err := verifyArgon2(storedHash, password, ceiling)
-	if err != nil {
-		// A cost above the ceiling is just a non-match for this config-less helper.
-		return false
-	}
-
-	return matched
-}
-
 // GenerateKDFSalt returns 16 random bytes to use as the argon2 salt for user key derivation.
 func GenerateKDFSalt() ([]byte, error) {
 	salt := make([]byte, pwKDFLen)

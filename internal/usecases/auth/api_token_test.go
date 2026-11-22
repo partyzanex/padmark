@@ -185,7 +185,7 @@ func (suite *APITokenSuite) TestCreateAPIToken_Success_ReturnsPlainKeyAndPersist
 	// The plain key is 32 random bytes, base64url-encoded.
 	raw, decErr := base64.RawURLEncoding.DecodeString(plain)
 	suite.Require().NoError(decErr)
-	suite.Len(raw, apiTokenBytes)
+	suite.Len(raw, bearerTokenBytes)
 }
 
 // ── ResolveAPIToken ──.

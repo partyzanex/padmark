@@ -137,19 +137,6 @@ func (s *ParitySuite) TestLink_ConcurrentConsumeSingleWinner() {
 		"a burn-after-click link must redirect exactly once")
 }
 
-func (s *ParitySuite) TestReveal_ConcurrentConsumeSingleWinner() {
-	ctx := s.T().Context()
-	repo := NewRevealRepository(s.db, s.discard)
-
-	tok, err := repo.Issue(ctx, "note-id")
-	s.Require().NoError(err)
-
-	results := race(func(int) bool { return repo.Consume(ctx, tok, "note-id") })
-
-	s.Equal(1, singleWinner(results, func(ok bool) bool { return ok }),
-		"a reveal token must be consumable exactly once")
-}
-
 // TestExpiry_ComparesInstantsNotWallClocks: TIMESTAMPTZ columns compare instants, so a timestamp
 // written in a far-east or far-west zone must expire at the same moment as its UTC equivalent.
 // SQLite gets the same result because bun normalises every time.Time to UTC text.
@@ -179,7 +166,7 @@ func (s *ParitySuite) TestExpiry_ComparesInstantsNotWallClocks() {
 	s.Require().NoError(err)
 	s.True(future.Truncate(time.Microsecond).Equal(*got.ExpiresAt), "the instant must round-trip")
 
-	sessions := NewSessionRepository(s.db, s.discard)
+	sessions := NewSessionRepository(s.db)
 	usr := s.createParityUser("zones", false)
 	s.Require().NoError(sessions.Create(ctx, &domain.Session{
 		SessionHash: "east", UserID: usr.ID, CreatedAt: time.Now(), ExpiresAt: time.Now().Add(-time.Second).In(east),

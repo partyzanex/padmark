@@ -25,7 +25,7 @@ func TestMigrateSessionIDs_InvalidatesOldSessionsAndDowngradeHashes(t *testing.T
 	_, err = provider.UpTo(t.Context(), before)
 	require.NoError(t, err)
 
-	owner := inviteTestUser("owner")
+	owner := migrationTestUser("owner")
 	require.NoError(t, NewUserRepository(db).Create(t.Context(), owner))
 	_, err = db.NewRaw("INSERT INTO sessions (session_id, user_id, expires_at) VALUES (?, ?, ?)",
 		"legacy-bearer", owner.ID, time.Now().Add(time.Hour)).Exec(t.Context())
@@ -36,7 +36,7 @@ func TestMigrateSessionIDs_InvalidatesOldSessionsAndDowngradeHashes(t *testing.T
 	require.NoError(t, err)
 	require.Zero(t, count, "plaintext-era sessions must be invalidated")
 
-	repo := NewSessionRepository(db, slog.New(slog.DiscardHandler))
+	repo := NewSessionRepository(db)
 	_, err = repo.Get(t.Context(), "legacy-bearer")
 	require.ErrorIs(t, err, domain.ErrSessionExpired)
 

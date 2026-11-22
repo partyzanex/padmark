@@ -362,8 +362,8 @@ func newTestAuthManager(t *testing.T, db *bun.DB, users *sqliterepo.UserReposito
 	authMgr, err := auth.NewManager(
 		auth.Stores{
 			Users:     users,
-			Invites:   sqliterepo.NewInviteRepository(db, discardTestLogger()),
-			Sessions:  sqliterepo.NewSessionRepository(db, discardTestLogger()),
+			Invites:   sqliterepo.NewInviteRepository(db),
+			Sessions:  sqliterepo.NewSessionRepository(db),
 			APITokens: sqliterepo.NewAPITokenRepository(db),
 		},
 		crypto.NewPasswordHasher(flowArgon2),

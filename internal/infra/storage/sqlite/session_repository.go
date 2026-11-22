@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -50,29 +49,19 @@ func (r *sessionRow) toDomain() *domain.Session {
 
 // SessionRepository is a SQLite-backed store for authenticated browser sessions.
 type SessionRepository struct {
-	db  *bun.DB
-	log *slog.Logger
+	db *bun.DB
 }
 
-// NewSessionRepository returns a new SQLite-backed SessionRepository. log is used to surface
-// lazy-sweep failures.
-func NewSessionRepository(db *bun.DB, log *slog.Logger) *SessionRepository {
-	return &SessionRepository{db: db, log: log}
+// NewSessionRepository returns a new SQLite-backed SessionRepository.
+func NewSessionRepository(db *bun.DB) *SessionRepository {
+	return &SessionRepository{db: db}
 }
 
-// Create inserts a new session record. Expired sessions are lazily swept on each call
-// (mirroring the invite/reveal-token pattern) since there is no background sweep worker.
+// Create inserts a new session record. It deletes no other rows: the caller calls DeleteExpired.
 func (r *SessionRepository) Create(ctx context.Context, s *domain.Session) error {
 	_, err := r.db.NewInsert().Model(toSessionRow(s)).Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("insert session: %w", err)
-	}
-
-	// Best-effort sweep of expired sessions; a failure here does not block session creation —
-	// stale rows simply persist until the next Create call.
-	sweepErr := r.DeleteExpired(ctx)
-	if sweepErr != nil {
-		r.log.WarnContext(ctx, "session sweep failed", "err", sweepErr)
 	}
 
 	return nil
@@ -140,11 +129,11 @@ func (r *SessionRepository) DeleteByUserID(ctx context.Context, userID uuid.UUID
 	return nil
 }
 
-// DeleteExpired removes all sessions whose expiry time is in the past.
-func (r *SessionRepository) DeleteExpired(ctx context.Context) error {
+// DeleteExpired removes all sessions that expired before now.
+func (r *SessionRepository) DeleteExpired(ctx context.Context, now time.Time) error {
 	_, err := r.db.NewDelete().
 		TableExpr("sessions").
-		Where("expires_at < ?", time.Now()).
+		Where("expires_at < ?", now).
 		Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("delete expired sessions: %w", err)

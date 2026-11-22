@@ -113,7 +113,7 @@ func (r *NoteRepository) Create(ctx context.Context, domNote *domain.Note) error
 
 	_, err := r.db.NewInsert().Model(dbNote).Exec(ctx)
 	if err != nil {
-		if isUniqueViolation(err) {
+		if isSlugConflict(err) {
 			return domain.ErrSlugConflict
 		}
 

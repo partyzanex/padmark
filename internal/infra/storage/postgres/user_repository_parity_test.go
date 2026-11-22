@@ -52,26 +52,6 @@ func (s *ParitySuite) TestUser_ConcurrentAdminCreateHasSingleWinner() {
 	s.Equal(1, created, "the first-admin bootstrap race must have exactly one winner")
 }
 
-func (s *ParitySuite) TestUser_RedeemInviteUsernameCollisionRollsBackInvite() {
-	ctx := s.T().Context()
-	users := NewUserRepository(s.db)
-	invites := NewInviteRepository(s.db, s.discard)
-	creator := s.createParityUser("creator", false)
-	s.createParityUser("taken", false)
-
-	tok, err := invites.Issue(ctx, creator.ID)
-	s.Require().NoError(err)
-
-	s.Require().ErrorIs(invites.RedeemInvite(ctx, tok, "taken", s.parityUser("taken")), domain.ErrUserExists)
-
-	fresh := s.parityUser("fresh")
-	s.Require().NoError(invites.RedeemInvite(ctx, tok, "fresh", fresh), "the invite must not have been burned")
-
-	got, err := users.GetByID(ctx, fresh.ID)
-	s.Require().NoError(err)
-	s.Equal("fresh", got.Username)
-}
-
 func (s *ParitySuite) TestUser_UpdateTOTPCounterPersistsAndBlocksReplay() {
 	ctx := s.T().Context()
 	repo := NewUserRepository(s.db)
@@ -158,7 +138,9 @@ func (s *ParitySuite) TestUser_UpdateTOTPSecret_StaleExpectedWritesNothing() {
 	repo := NewUserRepository(s.db)
 	usr := s.createParityUser("reseal-stale", false)
 
-	s.Require().NoError(repo.UpdatePassword(ctx, usr.ID, "new-hash", []byte("new-salt"), "new-seal"))
+	newSeal, err := repo.UpdateTOTPSecret(ctx, usr.ID, usr.TOTPSecret, "new-seal")
+	s.Require().NoError(err)
+	s.Require().True(newSeal, "a concurrent password change wrote a new seal")
 
 	updated, err := repo.UpdateTOTPSecret(ctx, usr.ID, usr.TOTPSecret, "stale-reseal")
 	s.Require().NoError(err)
@@ -192,7 +174,7 @@ func (s *ParitySuite) TestUser_RevokeClearsCredentialsAndOwnership() {
 	usr := s.createParityUser("leaver", false)
 	now := time.Now()
 
-	s.Require().NoError(NewSessionRepository(s.db, s.discard).Create(ctx, &domain.Session{
+	s.Require().NoError(NewSessionRepository(s.db).Create(ctx, &domain.Session{
 		SessionHash: "session-hash", UserID: usr.ID, CreatedAt: now, ExpiresAt: now.Add(time.Hour),
 
 		UserAgent: "", IP: "",
@@ -203,8 +185,9 @@ func (s *ParitySuite) TestUser_RevokeClearsCredentialsAndOwnership() {
 			ExpiresAt: nil, LastUsedAt: nil, IssuedBy: nil,
 		}, 10)
 	s.Require().NoError(err)
-	_, err = NewInviteRepository(s.db, s.discard).Issue(ctx, usr.ID)
-	s.Require().NoError(err)
+	s.Require().NoError(NewInviteRepository(s.db).Create(ctx, &domain.Invite{
+		TokenHash: "invite-hash", CreatedBy: usr.ID, ExpiresAt: now.Add(time.Hour), UsedAt: nil, UsedBy: "",
+	}))
 
 	owned := newNote("owned-note", "t", "c")
 	owned.OwnerID = &usr.ID

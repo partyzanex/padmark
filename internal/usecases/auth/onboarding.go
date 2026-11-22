@@ -1,9 +1,12 @@
+//go:generate go run go.uber.org/mock/mockgen@latest -source=onboarding.go -destination=onboarding_mocks_test.go -package=auth -write_package_comment=false
+
 package auth
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -11,14 +14,40 @@ import (
 	"github.com/partyzanex/padmark/internal/domain"
 )
 
+// inviteTTL is how long an invite link stays valid after GenerateInvite.
+const inviteTTL = 24 * time.Hour
+
+// OnboardingUserStore is the part of the user store that OnboardingManager uses. Fail-hard.
+type OnboardingUserStore interface {
+	// Create inserts u. Returns domain.ErrUserExists when the username or the single admin slot
+	// is taken.
+	Create(ctx context.Context, u *domain.User) error
+	GetByUsername(ctx context.Context, username string) (*domain.User, error)
+	GetByID(ctx context.Context, id uuid.UUID) (*domain.User, error)
+	List(ctx context.Context) ([]*domain.User, error)
+}
+
+// InviteStore persists single-use invite links by token hash. The raw token never reaches it.
+type InviteStore interface {
+	// Create stores inv. Fail-hard.
+	Create(ctx context.Context, inv *domain.Invite) error
+	// DeleteStale removes the invites that expired before now and the used invites. Fail-soft:
+	// GenerateInvite calls it after it stores a new invite and only logs an error.
+	DeleteStale(ctx context.Context, now time.Time) error
+	// RedeemInvite atomically consumes the invite and inserts usr in one transaction,
+	// so a failed user creation (e.g. a username race) never burns the token. Fail-hard.
+	RedeemInvite(ctx context.Context, tokenHash, username string, usr *domain.User) error
+}
+
 // OnboardingManager creates the first admin account and enrolls new users via invite tokens.
 type OnboardingManager struct {
 	totp    TOTPManager
 	invites InviteStore
 	sealer  SecretSealer
 	pw      PasswordHasher
-	users   UserStore
+	users   OnboardingUserStore
 	stepUp  StepUpVerifier
+	log     *slog.Logger
 	issuer  string
 }
 
@@ -26,8 +55,8 @@ type OnboardingManager struct {
 // in the authenticator app when a new user enrolls; stepUp re-authenticates a bearer-token
 // caller before it may issue an invite.
 func NewOnboardingManager(
-	users UserStore, invites InviteStore, passwordHasher PasswordHasher,
-	sealer SecretSealer, totp TOTPManager, stepUp StepUpVerifier, issuer string,
+	users OnboardingUserStore, invites InviteStore, passwordHasher PasswordHasher,
+	sealer SecretSealer, totp TOTPManager, stepUp StepUpVerifier, log *slog.Logger, issuer string,
 ) *OnboardingManager {
 	return &OnboardingManager{
 		users:   users,
@@ -36,6 +65,7 @@ func NewOnboardingManager(
 		sealer:  sealer,
 		totp:    totp,
 		stepUp:  stepUp,
+		log:     log,
 		issuer:  issuer,
 	}
 }
@@ -69,7 +99,7 @@ func (m *OnboardingManager) GenerateInvite(ctx context.Context, adminUserID uuid
 		return "", fmt.Errorf("authorize issuer: %w", err)
 	}
 
-	tok, err := m.invites.Issue(ctx, adminUserID)
+	tok, err := m.issueInvite(ctx, adminUserID)
 	if err != nil {
 		return "", fmt.Errorf("issue invite: %w", err)
 	}
@@ -120,7 +150,7 @@ func (m *OnboardingManager) AcceptInvite(ctx context.Context, token, username, p
 		return nil, fmt.Errorf("build user: %w", err)
 	}
 
-	err = m.invites.RedeemInvite(ctx, token, username, usr)
+	err = m.invites.RedeemInvite(ctx, domain.HashInviteToken(token), username, usr)
 	if err != nil {
 		return nil, fmt.Errorf("redeem invite: %w", err)
 	}
@@ -165,6 +195,36 @@ func (m *OnboardingManager) AcceptFirstAdmin(ctx context.Context, username, pass
 	}
 
 	return enr, nil
+}
+
+// issueInvite stores a new invite for adminUserID and returns its token. The store keeps only
+// the token hash. Then it deletes stale invites; no background worker does that.
+func (m *OnboardingManager) issueInvite(ctx context.Context, adminUserID uuid.UUID) (string, error) {
+	tok, err := newRandomToken()
+	if err != nil {
+		return "", fmt.Errorf("new invite token: %w", err)
+	}
+
+	now := time.Now()
+
+	err = m.invites.Create(ctx, &domain.Invite{
+		TokenHash: domain.HashInviteToken(tok),
+		CreatedBy: adminUserID,
+		ExpiresAt: now.Add(inviteTTL),
+		// UsedAt and UsedBy stay empty until RedeemInvite records the new user.
+		UsedAt: nil,
+		UsedBy: "",
+	})
+	if err != nil {
+		return "", fmt.Errorf("create invite: %w", err)
+	}
+
+	sweepErr := m.invites.DeleteStale(ctx, now)
+	if sweepErr != nil {
+		m.log.WarnContext(ctx, "delete stale invites failed", "err", sweepErr)
+	}
+
+	return tok, nil
 }
 
 // buildUser generates a fresh TOTP secret, seals it under a password-derived key, and

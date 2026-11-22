@@ -10,7 +10,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/driver/pgdriver"
 
 	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/errorcontext"
@@ -87,8 +86,7 @@ func (r *UserRepository) Create(ctx context.Context, u *domain.User) error {
 func insertUser(ctx context.Context, conn bun.IDB, u *domain.User) error {
 	_, err := conn.NewInsert().Model(toUserRow(u)).Exec(ctx)
 	if err != nil {
-		var pgErr pgdriver.Error
-		if errors.As(err, &pgErr) && pgErr.Field('C') == "23505" {
+		if isUniqueViolation(err) {
 			return domain.ErrUserExists
 		}
 
@@ -131,8 +129,9 @@ func (r *UserRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.Use
 }
 
 // UpdateLastLogin sets last_login_at for the given user ID.
+// Returns domain.ErrNotFound when the user does not exist.
 func (r *UserRepository) UpdateLastLogin(ctx context.Context, id uuid.UUID, t time.Time) error {
-	_, err := r.db.NewUpdate().
+	res, err := r.db.NewUpdate().
 		TableExpr("users").
 		Set("last_login_at = ?", t).
 		Where("id = ?", id).
@@ -141,7 +140,7 @@ func (r *UserRepository) UpdateLastLogin(ctx context.Context, id uuid.UUID, t ti
 		return fmt.Errorf("update last login: %w", err)
 	}
 
-	return nil
+	return errorcontext.Wrap(requireAffected(res), "update last login")
 }
 
 // List returns all registered users ordered by created_at ascending.
@@ -161,47 +160,27 @@ func (r *UserRepository) List(ctx context.Context) ([]*domain.User, error) {
 	return users, nil
 }
 
-// revokeAdminLockKey keys the transaction-scoped advisory lock guarding the last-admin
-// invariant in Revoke.
-const revokeAdminLockKey = "padmark:user-revoke"
-
-// Revoke deletes the user record by ID. The delete refuses to remove the last remaining admin.
-// The EXISTS guard lives in the DELETE, but under PostgreSQL's READ COMMITTED a conditional
-// statement alone is not race-free: two concurrent transactions each evaluate the subquery
-// before the other commits its delete (the statement re-check only covers the deleted row, not
-// the subquery). The same advisory-lock pattern as APITokenRepository.CreateIfUnderLimit
-// (auto-released at commit/rollback) serializes revocations cross-instance, so the guard always
-// sees the state after the previously committed one. Zero affected rows means the target does
-// not exist or is the last admin — both map to domain.ErrForbidden; callers pre-check GetByID
-// for a friendlier ErrNotFound.
+// Revoke deletes the user record by ID. It never deletes an admin: idx_users_single_admin
+// allows only one admin, so an admin is always the last admin, and its removal would leave the
+// server without one. No operation sets is_admin on an existing user, so the condition in the
+// DELETE is enough and no lock is necessary. Zero affected rows means the target does not exist
+// or is the admin; both give domain.ErrForbidden. Callers check GetByID first to give ErrNotFound.
 func (r *UserRepository) Revoke(ctx context.Context, id uuid.UUID) error {
-	err := r.db.RunInTx(ctx, nil, func(ctx context.Context, btx bun.Tx) error {
-		_, lockErr := btx.NewRaw("SELECT pg_advisory_xact_lock(hashtext(?))", revokeAdminLockKey).Exec(ctx)
-		if lockErr != nil {
-			return fmt.Errorf("acquire advisory lock: %w", lockErr)
-		}
-
-		res, execErr := btx.NewDelete().TableExpr("users").
-			Where("id = ?", id).
-			Where("is_admin = FALSE OR EXISTS (SELECT 1 FROM users AS u WHERE u.is_admin AND u.id != ?)", id).
-			Exec(ctx)
-		if execErr != nil {
-			return fmt.Errorf("revoke user: %w", execErr)
-		}
-
-		affected, affectedErr := res.RowsAffected()
-		if affectedErr != nil {
-			return fmt.Errorf("revoke user rows affected: %w", affectedErr)
-		}
-
-		if affected == 0 {
-			return domain.ErrForbidden
-		}
-
-		return nil
-	})
+	res, err := r.db.NewDelete().TableExpr("users").
+		Where("id = ?", id).
+		Where("is_admin = ?", false).
+		Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("revoke user: %w", err)
+	}
+
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("revoke user rows affected: %w", err)
+	}
+
+	if affected == 0 {
+		return fmt.Errorf("revoke user: %w", domain.ErrForbidden)
 	}
 
 	return nil
@@ -227,25 +206,6 @@ func (r *UserRepository) UpdateTOTPCounter(ctx context.Context, id uuid.UUID, co
 	}
 
 	return affected > 0, nil
-}
-
-// UpdatePassword atomically replaces password_hash, kdf_salt, and totp_secret.
-// kdfSalt is raw bytes; the repository encodes it as base64url before storage.
-func (r *UserRepository) UpdatePassword(
-	ctx context.Context, id uuid.UUID, passwordHash string, kdfSalt []byte, totpSecret string,
-) error {
-	_, err := r.db.NewUpdate().
-		TableExpr("users").
-		Set("password_hash = ?", passwordHash).
-		Set("kdf_salt = ?", base64.RawURLEncoding.EncodeToString(kdfSalt)).
-		Set("totp_secret = ?", totpSecret).
-		Where("id = ?", id).
-		Exec(ctx)
-	if err != nil {
-		return fmt.Errorf("update password: %w", err)
-	}
-
-	return nil
 }
 
 // ChangePassword replaces the credentials of sess.UserID, makes sess the only session of that user
@@ -342,4 +302,18 @@ func (r *UserRepository) UpdateTOTPSecret(
 	}
 
 	return affected > 0, nil
+}
+
+// requireAffected returns domain.ErrNotFound when res changed no row.
+func requireAffected(res sql.Result) error {
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("rows affected: %w", err)
+	}
+
+	if affected == 0 {
+		return domain.ErrNotFound
+	}
+
+	return nil
 }

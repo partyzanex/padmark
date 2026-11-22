@@ -147,8 +147,9 @@ func (r *UserRepository) List(ctx context.Context) ([]*domain.User, error) {
 }
 
 // UpdateLastLogin sets last_login_at for the given user ID.
+// Returns domain.ErrNotFound when the user does not exist.
 func (r *UserRepository) UpdateLastLogin(ctx context.Context, id uuid.UUID, t time.Time) error {
-	_, err := r.db.NewUpdate().
+	res, err := r.db.NewUpdate().
 		TableExpr("users").
 		Set("last_login_at = ?", t).
 		Where("id = ?", id).
@@ -157,19 +158,18 @@ func (r *UserRepository) UpdateLastLogin(ctx context.Context, id uuid.UUID, t ti
 		return fmt.Errorf("update last login: %w", err)
 	}
 
-	return nil
+	return errorcontext.Wrap(requireAffected(res), "update last login")
 }
 
-// Revoke deletes the user record by ID. The delete refuses to remove the last remaining admin:
-// the EXISTS guard lives in the DELETE itself, so the check and the delete are one atomic
-// statement — two concurrent revocations of the only two admins cannot both succeed, which
-// would otherwise leave the server permanently admin-less (the bootstrap hole accept-first-admin
-// is meant to close). Zero affected rows means the target does not exist or is the last admin —
-// both map to domain.ErrForbidden; callers pre-check GetByID for a friendlier ErrNotFound.
+// Revoke deletes the user record by ID. It never deletes an admin: idx_users_single_admin
+// allows only one admin, so an admin is always the last admin, and its removal would leave the
+// server without one. No operation sets is_admin on an existing user, so the condition in the
+// DELETE is enough and no lock is necessary. Zero affected rows means the target does not exist
+// or is the admin; both give domain.ErrForbidden. Callers check GetByID first to give ErrNotFound.
 func (r *UserRepository) Revoke(ctx context.Context, id uuid.UUID) error {
 	res, err := r.db.NewDelete().TableExpr("users").
 		Where("id = ?", id).
-		Where("is_admin = 0 OR EXISTS (SELECT 1 FROM users AS u WHERE u.is_admin = 1 AND u.id != ?)", id).
+		Where("is_admin = ?", false).
 		Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("revoke user: %w", err)
@@ -207,25 +207,6 @@ func (r *UserRepository) UpdateTOTPCounter(ctx context.Context, id uuid.UUID, co
 	}
 
 	return affected > 0, nil
-}
-
-// UpdatePassword atomically replaces password_hash, kdf_salt, and totp_secret.
-// kdfSalt is raw bytes; the repository encodes it as base64url before storage.
-func (r *UserRepository) UpdatePassword(
-	ctx context.Context, id uuid.UUID, passwordHash string, kdfSalt []byte, totpSecret string,
-) error {
-	_, err := r.db.NewUpdate().
-		TableExpr("users").
-		Set("password_hash = ?", passwordHash).
-		Set("kdf_salt = ?", base64.RawURLEncoding.EncodeToString(kdfSalt)).
-		Set("totp_secret = ?", totpSecret).
-		Where("id = ?", id).
-		Exec(ctx)
-	if err != nil {
-		return fmt.Errorf("update password: %w", err)
-	}
-
-	return nil
 }
 
 // ChangePassword replaces the credentials of sess.UserID, makes sess the only session of that user
@@ -312,4 +293,18 @@ func (r *UserRepository) UpdateTOTPSecret(
 	}
 
 	return affected > 0, nil
+}
+
+// requireAffected returns domain.ErrNotFound when res changed no row.
+func requireAffected(res sql.Result) error {
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("rows affected: %w", err)
+	}
+
+	if affected == 0 {
+		return domain.ErrNotFound
+	}
+
+	return nil
 }

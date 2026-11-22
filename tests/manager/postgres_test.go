@@ -16,6 +16,7 @@ import (
 
 	"github.com/partyzanex/padmark/internal/infra/lock"
 	pgrepo "github.com/partyzanex/padmark/internal/infra/storage/postgres"
+	"github.com/partyzanex/padmark/internal/usecases/auth"
 )
 
 type PostgresManagerSuite struct {
@@ -80,7 +81,7 @@ func (s *PostgresManagerSuite) SetupTest() {
 	s.FileManager = newFileManager(&s.Suite, pgrepo.NewFileRepository(s.db), pgrepo.NewNoteRepository(s.db),
 		pgrepo.NewLinkRepository(s.db, slog.Default()), slugLock, s.objects.store)
 	s.Objects = s.objects.store
-	s.RevealStore = pgrepo.NewRevealRepository(s.db, slog.Default())
+	s.RevealStore = auth.NewRevealManager(pgrepo.NewRevealRepository(s.db), slog.Default())
 	s.DB = s.db
 }
 
