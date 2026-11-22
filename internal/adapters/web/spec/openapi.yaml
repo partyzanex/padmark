@@ -278,6 +278,11 @@ paths:
         "404":
           description: Note not found
           $ref: "#/components/responses/Error"
+        "410":
+          description: |
+            The note has expired. An expired note cannot be changed: an update does not extend
+            its life. A caller that cannot see the note gets `401`, also when it has expired.
+          $ref: "#/components/responses/Error"
         "413":
           description: Request body exceeds the server limit (configurable, default 4 MB)
           $ref: "#/components/responses/Error"
@@ -541,6 +546,11 @@ paths:
         "404":
           description: Link not found
           $ref: "#/components/responses/Error"
+        "410":
+          description: |
+            The link has expired. An expired link cannot be changed: an update does not extend
+            its life. A caller that cannot see the link gets `401`, also when it has expired.
+          $ref: "#/components/responses/Error"
         "413":
           description: Request body exceeds the server limit (configurable, default 4 MB)
           $ref: "#/components/responses/Error"
@@ -778,7 +788,12 @@ paths:
           description: Wrong edit code, or a cross-site `Origin`
           $ref: "#/components/responses/Error"
         "404":
-          description: File not found or expired
+          description: File not found
+          $ref: "#/components/responses/Error"
+        "410":
+          description: |
+            The file has expired. An expired file cannot be changed: an update does not extend
+            its life. A caller that cannot see the file gets `401`, also when it has expired.
           $ref: "#/components/responses/Error"
         "413":
           description: Request body exceeds the server limit (configurable, default 4 MB)

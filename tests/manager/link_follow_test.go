@@ -14,6 +14,7 @@ import (
 	"github.com/partyzanex/padmark/internal/infra/lock"
 	pgrepo "github.com/partyzanex/padmark/internal/infra/storage/postgres"
 	sqliterepo "github.com/partyzanex/padmark/internal/infra/storage/sqlite"
+	"github.com/partyzanex/padmark/internal/testutil"
 	"github.com/partyzanex/padmark/internal/usecases/links"
 )
 
@@ -111,7 +112,9 @@ func (s *ManagerSuite) insertLinkOwner() uuid.UUID {
 }
 
 // privatizeAfterRead wraps storage so that the first successful read makes the link owner-only
-// with privateURL. The update commits between the reader's SELECT and its mutation.
+// with privateURL and a new expiry. The change commits between the reader's SELECT and its
+// mutation. It writes the row with SQL, as a second server process can: links.Manager.Update and
+// the storage Update refuse an expired link, and the expired scenario needs a change of that link.
 func (s *ManagerSuite) privatizeAfterRead(
 	storage links.Storage, linkID string, ownerID uuid.UUID, privateURL string,
 ) *changedLinkRead {
@@ -121,12 +124,21 @@ func (s *ManagerSuite) privatizeAfterRead(
 		Storage: storage,
 		once:    sync.Once{},
 		afterRead: func() {
-			_, updateErr := s.LinkManager.Update(s.T().Context(), linkID, "",
-				domain.Reader{CallerID: ownerID, Authenticated: true, AllowBurn: false, SkipPrivacy: false}, privateURL,
-				links.UpdateOptions{
-					Privacy: new(domain.PrivacyOwner), ExpiresAt: new(time.Now().Add(time.Hour)),
-					DirectRedirect: nil, ClearExpiry: false, ResetDirectRedirect: false,
-				})
+			ctx := s.T().Context()
+			id := domain.HashSlug(linkID)
+
+			stored, getErr := storage.GetByID(ctx, id)
+			s.Require().NoError(getErr)
+			s.Require().Equal(&ownerID, stored.OwnerID)
+
+			ciphertext, encryptErr := testutil.ContentEncryptor(s.T(), "link").Encrypt(privateURL, id)
+			s.Require().NoError(encryptErr)
+
+			_, updateErr := s.DB.NewUpdate().Table("links").
+				Set("target_url = ?", ciphertext).
+				Set("privacy = ?", string(domain.PrivacyOwner)).
+				Set("expires_at = ?", time.Now().Add(time.Hour)).
+				Where("id = ?", id).Exec(ctx)
 			s.Require().NoError(updateErr)
 		},
 	}

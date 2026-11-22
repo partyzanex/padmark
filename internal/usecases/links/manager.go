@@ -34,7 +34,9 @@ const maxHashRetries = 5
 // stored hash of the link that the caller checked. Each link gets a hash with a new random salt
 // and no write changes it, so the hash identifies one link version. If the link was deleted and
 // a new link took the same ID after the check, they return domain.ErrNotFound and do not touch
-// the new link.
+// the new link. Update also changes the row only while it is not expired, as
+// files.Storage.Update does: a link that expired after the check of Manager.Update gets
+// domain.ErrNotFound, and its expiry stays.
 type Storage interface {
 	Create(ctx context.Context, link *domain.Link) error
 	Update(ctx context.Context, id, storedEditCode string, patch *domain.LinkPatch) (*domain.Link, error)

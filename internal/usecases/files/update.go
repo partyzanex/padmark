@@ -20,9 +20,10 @@ type UpdateOptions struct {
 // Update changes the expiry, privacy and burn-after-download rule of a file. It does not change
 // the content, name, content key, object key, owner or download counter. The rules are in
 // checkMutation: the reader must see the file, and must be its owner or give the original
-// code. Errors are fail-hard: Update returns domain.ErrNotFound for a missing or expired file,
-// domain.ErrForbidden for a hidden file, domain.ErrInvalidEditCode for a wrong code, a
-// validation error for invalid options, and wraps storage errors.
+// code. Errors are fail-hard: Update returns domain.ErrNotFound for a missing file,
+// domain.ErrForbidden for a hidden file, domain.ErrExpired for an expired file,
+// domain.ErrInvalidEditCode for a wrong code, a validation error for invalid options, and wraps
+// storage errors. Notes and links use the same sequence of checks.
 func (m *Manager) Update(
 	ctx context.Context, slug, editCode string, reader domain.Reader, opts UpdateOptions,
 ) (*domain.File, error) {
@@ -44,9 +45,10 @@ func (m *Manager) Update(
 		return nil, domain.ErrForbidden
 	}
 
-	// An expired file is already gone for readers, so an update must not extend its life.
+	// An expired file is already gone for readers, so an update must not extend its life. The
+	// error is the error of a read (410), so that the editor and the clients give the same answer.
 	if existing.Expired(time.Now()) {
-		return nil, domain.ErrNotFound
+		return nil, domain.ErrExpired
 	}
 
 	err = m.checkMutation(existing, editCode, reader)

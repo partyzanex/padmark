@@ -219,6 +219,7 @@ func (r *NoteRepository) SetBurnExpiry(
 
 // Update modifies an existing note. A nil content type, privacy or ShowContents keeps the stored value.
 // domNote.EditCode must be the stored hash: it selects the note version and is never written.
+// An expired note is not changed (liveWhere): the write gets domain.ErrNotFound, as for files.
 func (r *NoteRepository) Update(ctx context.Context, id string, domNote *domain.Note) error {
 	dbNote := &note{
 		BaseModel:        bun.BaseModel{},
@@ -260,6 +261,7 @@ func (r *NoteRepository) Update(ctx context.Context, id string, domNote *domain.
 		Set("show_contents = COALESCE(?, show_contents)", domNote.ShowContents).
 		Where("id = ?", id).
 		Where("edit_code = ?", domNote.EditCode).
+		Where(liveWhere, time.Now()).
 		Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("sqlite update: %w", err)

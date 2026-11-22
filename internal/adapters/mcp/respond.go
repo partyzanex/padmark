@@ -37,14 +37,14 @@ type recordKind struct {
 
 func noteRecord() recordKind {
 	return recordKind{
-		gone: destroyedAfterRead("note"), tooLarge: contentTooLarge, unavailable: serviceUnavailableError,
+		gone: expiredRecord("note"), tooLarge: contentTooLarge, unavailable: serviceUnavailableError,
 		name: "note",
 	}
 }
 
 func linkRecord() recordKind {
 	return recordKind{
-		gone: destroyedAfterRead("link"), tooLarge: contentTooLarge, unavailable: serviceUnavailableError,
+		gone: expiredRecord("link"), tooLarge: contentTooLarge, unavailable: serviceUnavailableError,
 		name: "link",
 	}
 }
@@ -161,10 +161,11 @@ func contentTooLarge(apiErr *padmark.APIError) error {
 	return fmt.Errorf("%w: %s", errContentTooLarge, apiErr.Message)
 }
 
-// destroyedAfterRead maps 410 of a note or a link.
-func destroyedAfterRead(kind string) statusRule {
-	return fixed(fmt.Errorf("%w: the %s was destroyed after its first read (burn-after-reading with a TTL)",
-		errGone, kind))
+// expiredRecord maps 410 of a note or a link, for a read and for an update. The server gives 410
+// when the expiry ended; for a note also when the burn timer of its first read ended. An expired
+// record cannot be changed, so the text tells the model to create a new one.
+func expiredRecord(kind string) statusRule {
+	return fixed(fmt.Errorf("%w: the %s has expired and cannot be changed; create a new %s", errGone, kind, kind))
 }
 
 // apiDisabledCode is the code of each 503 answer of a server started with --disable-api.

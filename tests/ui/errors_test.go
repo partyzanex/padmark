@@ -44,6 +44,10 @@ func TestErrors(t *testing.T) {
 		{name: "LinkEditor", run: testLinkEditorErrors, accounts: false, files: false, allowedStatuses: rejections},
 		{name: "LinkEdit", run: testLinkEditErrors, accounts: false, files: false, allowedStatuses: rejections},
 		{name: "LinkServerReplies", run: testLinkServerReplies, accounts: false, files: false, allowedStatuses: rejections},
+		{
+			name: "ExpiredEdit", run: testExpiredEditErrors, accounts: false, files: false,
+			allowedStatuses: []int{http.StatusGone},
+		},
 		{name: "ErrorPages", run: testErrorPages, accounts: false, files: false, allowedStatuses: pageStatuses()},
 		{name: "Setup", run: testSetupErrors, accounts: true, files: false, allowedStatuses: pageStatuses()},
 		{name: "Login", run: testLoginErrors, accounts: true, files: false, allowedStatuses: nil},

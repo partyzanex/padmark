@@ -25,7 +25,9 @@ import (
 // the stored hash of the note that the caller checked: note.EditCode for Update, storedEditCode
 // for the others. Each note gets a hash with a new random salt and no write changes it, so the
 // hash identifies one note version. If the note was deleted and a new note took the same ID after
-// the check, these methods return domain.ErrNotFound and do not touch the new note.
+// the check, these methods return domain.ErrNotFound and do not touch the new note. Update also
+// changes the row only while it is not expired, as files.Storage.Update does: a note that expired
+// after the check of Manager.Update gets domain.ErrNotFound, and its expiry stays.
 type Storage interface {
 	Create(ctx context.Context, note *domain.Note) error
 	Get(ctx context.Context, id string) (*domain.Note, error)
@@ -450,10 +452,10 @@ func resolveExpiryTime(note, existing *domain.Note) {
 }
 
 // Update replaces a note's editable fields and keeps its immutable metadata. The rules are in
-// checkMutation: the reader must see the note, and must give the note's edit code or be its
-// owner, so that an authenticated creator (session or API token) edits without the code. The
-// check uses the same stored note that the write changes: the write names that note version by
-// its stored edit-code hash.
+// checkUpdate: the reader must see the note, the note must not be expired, and the reader must
+// give the note's edit code or be its owner, so that an authenticated creator (session or API
+// token) edits without the code. The check uses the same stored note that the write changes: the
+// write names that note version by its stored edit-code hash.
 func (m *Manager) Update(
 	ctx context.Context, id, editCode string, reader domain.Reader, note *domain.Note,
 ) (*domain.Note, error) {
@@ -469,7 +471,7 @@ func (m *Manager) Update(
 		return nil, fmt.Errorf("update note: %w", err)
 	}
 
-	err = m.checkMutation(existing, editCode, reader)
+	err = m.checkUpdate(existing, editCode, reader)
 	if err != nil {
 		return nil, err
 	}
@@ -566,6 +568,22 @@ func (m *Manager) ReadRendered(ctx context.Context, id string, reader domain.Rea
 	}
 
 	return note, rendered, nil
+}
+
+// checkUpdate applies the rules of an update to the stored note existing, in the sequence of
+// files.Manager.Update: privacy (domain.ErrForbidden), then expiry (domain.ErrExpired), then the
+// rules of checkMutation. Privacy comes first, so that a hidden note gives the same answer in each
+// state. An expired note is already gone for readers, so an update must not extend its life.
+func (m *Manager) checkUpdate(existing *domain.Note, editCode string, reader domain.Reader) error {
+	if !existing.VisibleTo(reader) {
+		return domain.ErrForbidden
+	}
+
+	if existing.Expired(time.Now()) {
+		return domain.ErrExpired
+	}
+
+	return m.checkMutation(existing, editCode, reader)
 }
 
 // checkMutation applies the rules of a change to the stored note existing: the reader must see

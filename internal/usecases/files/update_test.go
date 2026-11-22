@@ -75,15 +75,37 @@ func (s *ManagerSuite) TestUpdate_WrongEditCode() {
 	s.Require().ErrorIs(err, domain.ErrInvalidEditCode)
 }
 
-func (s *ManagerSuite) TestUpdate_ExpiredFileIsNotFound() {
-	stored := storedFile(false)
+// TestUpdate_ExpiredFileIsGone: an expired file gets the error of a read (410), before the edit
+// code check, and storage gets no write. The strict mock fails the test on a Storage.Update call.
+func (s *ManagerSuite) TestUpdate_ExpiredFileIsGone() {
+	for _, code := range []string{"code", "wrong"} {
+		s.Run(code, func() {
+			stored := storedFile(false)
+			past := time.Now().Add(-time.Minute)
+			stored.ExpiresAt = &past
+
+			s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(stored, nil)
+
+			opts := noUpdate()
+			opts.ClearExpiry = true
+
+			_, err := s.manager.Update(s.T().Context(), "abc", code, skipPrivacy(), opts)
+			s.Require().ErrorIs(err, domain.ErrExpired)
+		})
+	}
+}
+
+// TestUpdate_HiddenExpiredFileIsForbidden: privacy comes before expiry, so a reader that cannot
+// see the file does not learn that it expired.
+func (s *ManagerSuite) TestUpdate_HiddenExpiredFileIsForbidden() {
+	stored := privateFile(false)
 	past := time.Now().Add(-time.Minute)
 	stored.ExpiresAt = &past
 
 	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(stored, nil)
 
-	_, err := s.manager.Update(s.T().Context(), "abc", "code", skipPrivacy(), noUpdate())
-	s.Require().ErrorIs(err, domain.ErrNotFound)
+	_, err := s.manager.Update(s.T().Context(), "abc", "code", account(uuid.New()), noUpdate())
+	s.Require().ErrorIs(err, domain.ErrForbidden)
 }
 
 func (s *ManagerSuite) TestUpdate_ClearExpiry() {

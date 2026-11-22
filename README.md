@@ -220,8 +220,9 @@ transfer, other readers get `404`. When the transfer fails or the client disconn
 stays, and the next reader can download it. When the server stops during a transfer, the file
 stays locked for up to 70 minutes; then the next reader can download it.
 
-An expired file answers `410 Gone`. The server removes expired files and their objects at
-startup, at each upload and every `--files-sweep-interval` (1 hour by default). One sweep
+An expired file answers `410 Gone`, also to `PUT`: an update does not extend its life. The
+server removes expired files and their objects at startup, at each upload and every
+`--files-sweep-interval` (1 hour by default). One sweep
 removes at most 1000 files in batches of 100; the next sweep continues. An expired file that
 the sweep did not remove yet does not block a new note, link or file with its slug.
 Back up the database and the keyring separately, and back up the bucket too. A file needs all three.
@@ -770,7 +771,8 @@ curl -X DELETE http://localhost:4000/notes/{id} \
 
 For `PUT /notes/{id}` without `burn_after_reading`, `ttl: N` sets a hard expiry N seconds
 from the update, `ttl: null` removes expiry, and an omitted TTL preserves it. Disabling an
-existing burn timer clears that timer's expiry. With `burn_after_reading: true`, TTL remains
+existing burn timer clears that timer's expiry. An expired note cannot be changed: `PUT`
+answers `410 Gone`, as for links and files. With `burn_after_reading: true`, TTL remains
 a post-read grace period; omitted, null or 0 means immediate burn. All API TTLs are bounded
 to 0–9223372036 seconds.
 
@@ -850,7 +852,7 @@ same reason the note view at `GET /{id}` isn't documented in `/api/openapi.yaml`
 Omitted `ttl`, `privacy`, and `direct_redirect` keep their current values. TTL is counted from
 the update (`0` expires immediately, `null` removes expiry); `direct_redirect: null` restores
 the server default. The slug, views, original edit code, owner, creation time, and
-`burn_after_click` are preserved.
+`burn_after_click` are preserved. An expired link cannot be changed: `PUT` answers `410 Gone`.
 
 **Files**
 

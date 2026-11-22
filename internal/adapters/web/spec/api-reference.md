@@ -37,7 +37,8 @@ the original API base explicitly. A decoded token envelope can also supply its `
   current value), `edit_code`; the slug cannot be
   changed. Pass the `edit_code` in the body, or omit it when authenticated as the note's
   owner. `401` for an anonymous caller on a note whose `privacy` requires a credential, `403`
-  on a wrong edit code (or a non-owner without one). As in `POST`, a non-burn `ttl` is
+  on a wrong edit code (or a non-owner without one), `410` for an expired note: an update does
+  not extend the life of an expired note. As in `POST`, a non-burn `ttl` is
   a hard expiry, here counted from the update: `ttl: N` sets it, `ttl: 0` expires
   immediately, omitted preserves the current expiry (except that disabling an existing burn
   timer clears its expiry), and `ttl: null` removes it. With burn, `ttl` is the post-read
@@ -74,6 +75,7 @@ or control characters (`400` if too short/long, `422` otherwise).
   `direct_redirect` preserve current values when omitted. TTL counts from this update;
   `ttl: null` removes expiry, `ttl: 0` expires immediately. `direct_redirect: null` restores
   the server default. Preserves slug, views, edit code, owner, creation time and burn setting.
+  `410` for an expired link: an update does not extend the life of an expired link.
 - `DELETE /links/{id}` — send `X-Edit-Code`, or omit it as the authenticated owner.
   Unlike notes' legacy fallback, an `edit_code` query parameter is ignored.
 - `GET /{id}` follows a link when no note has this `id` (the older `GET /r/{id}` also works):
@@ -122,11 +124,12 @@ shares the slug namespace with notes and links. The server keeps each file encry
   this change; `null` removes the expiry, `0` expires now), `privacy` and
   `burn_after_download`. An omitted field keeps its value. The content, name and owner do not
   change. Send the edit code only in the `X-Edit-Code` header, or omit it as the owner; an
-  `edit_code` field in the body gets `400`. Responds `200` with the file description.
+  `edit_code` field in the body gets `400`. Responds `200` with the file description, `410`
+  for an expired file: an update does not extend the life of an expired file.
 - `DELETE /files/{id}` — delete the file and its content. Send `X-Edit-Code`, or omit it as
   the owner. The server ignores an `edit_code` query parameter. Responds `204`.
 
-`PUT` and `DELETE` use the same `401`/`403`/`429` rules as links. Upload a file with curl.
+`PUT` and `DELETE` use the same `401`/`403`/`410`/`429` rules as links. Upload a file with curl.
 curl sends the parts in the order of the `-F` options, so put `-F file=@…` last:
 
 ```sh

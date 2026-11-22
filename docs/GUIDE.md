@@ -169,13 +169,20 @@ The adapter only selects the format and translates the errors:
 | Privacy and expiry, no side effect on a live record | `Inspect` | `Inspect` | `Inspect` |
 | Editor read, no side effect at all | `Inspect` (deletes an expired note) | `Inspect` | `Settings` |
 | Full read: privacy, expiry, burn intent, burn, counter | `Read`, `ReadRendered` | `Follow` | `Download` |
-| Change: privacy, then owner or edit code | `Update`, `Delete` | `Update`, `Delete` | `Update`, `Delete` |
+| Change: privacy, then expiry (`Update` only), then owner or edit code | `Update`, `Delete` | `Update`, `Delete` | `Update`, `Delete` |
 
 A reader that cannot see the record gets `ErrForbidden`; the HTTP adapter answers 401 for a
 mutation (a 403 would count as a wrong edit code) and the privacy answer of `denyPrivate` for a
 read. A burn record without `AllowBurn` gets `ErrBurnIntentRequired` (409) and stays. An expired
 record gives `ErrExpired`; the note reads and the file page delete it, the link metadata read
 and the file editor (`Settings`) do not, so the next reader of the page still gets 410.
+`Update` of an expired record also gives `ErrExpired` (410) and writes nothing: an update must
+not extend the life of a record that readers see as gone. Privacy comes first, so a reader that
+cannot see the record gets `ErrForbidden` (401) and does not learn that it expired. Then comes
+the expiry, then the owner or edit code: a wrong code on an expired record also gets 410.
+The storage `UPDATE` of each kind repeats the expiry check, so a record that expires between the
+check and the write is not changed either (`ErrNotFound`).
+`Delete` has no expiry check: it removes an expired record as it removes a live one.
 The check and the change use the same stored record: the write names
 that version by its stored edit-code hash (notes, links) or object key (files).
 

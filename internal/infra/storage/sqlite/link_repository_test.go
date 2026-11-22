@@ -426,6 +426,12 @@ func (s *LinkRepositoryTestSuite) TestDeleteExpired_KeepsExtendedLink() {
 	extend := targetPatch("ciphertext")
 	extend.ExpiresAt = &future
 	_, err = s.repo.Update(ctx, original.ID, original.EditCode, extend)
+	s.Require().ErrorIs(err, domain.ErrNotFound, "Update does not change an expired link")
+
+	// Another writer extends the link after the reader's snapshot. Update refuses an expired
+	// link, so the test writes the row with SQL.
+	_, err = s.db.NewUpdate().Table("links").Set("expires_at = ?", future).
+		Where("id = ?", original.ID).Exec(ctx)
 	s.Require().NoError(err)
 
 	s.Require().ErrorIs(s.repo.DeleteExpired(ctx, original.ID), domain.ErrNotFound)

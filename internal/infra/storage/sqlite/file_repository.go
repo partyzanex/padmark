@@ -66,7 +66,8 @@ const (
 	// write, so a concurrent privacy change cannot let an old read change the record. The
 	// first parameter is Reader.SkipPrivacy.
 	visibleWhere = "? OR privacy = ? OR (privacy = ? AND ?) OR (privacy = ? AND owner_id = ? AND ?)"
-	// liveWhere selects a record that is not expired at the time parameter.
+	// liveWhere selects a record that is not expired at the time parameter. The note and link
+	// updates use it too.
 	liveWhere = "expires_at IS NULL OR expires_at >= ?"
 	// unclaimedWhere selects a record without a claim, or with a stale claim, at the time
 	// parameter.

@@ -3714,6 +3714,10 @@ type UpdateFileForbidden ErrorResponse
 
 func (*UpdateFileForbidden) updateFileRes() {}
 
+type UpdateFileGone ErrorResponse
+
+func (*UpdateFileGone) updateFileRes() {}
+
 type UpdateFileInternalServerError ErrorResponse
 
 func (*UpdateFileInternalServerError) updateFileRes() {}
@@ -3842,6 +3846,10 @@ func (*UpdateLinkBadRequest) updateLinkRes() {}
 type UpdateLinkForbidden ErrorResponse
 
 func (*UpdateLinkForbidden) updateLinkRes() {}
+
+type UpdateLinkGone ErrorResponse
+
+func (*UpdateLinkGone) updateLinkRes() {}
 
 type UpdateLinkInternalServerError ErrorResponse
 
@@ -4000,6 +4008,10 @@ func (*UpdateNoteBadRequest) updateNoteRes() {}
 type UpdateNoteForbidden ErrorResponse
 
 func (*UpdateNoteForbidden) updateNoteRes() {}
+
+type UpdateNoteGone ErrorResponse
+
+func (*UpdateNoteGone) updateNoteRes() {}
 
 type UpdateNoteInternalServerError ErrorResponse
 

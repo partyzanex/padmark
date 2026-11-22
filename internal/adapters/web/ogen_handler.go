@@ -123,6 +123,14 @@ func (h *OgenHandler) UpdateNote(
 		return &ogenapi.UpdateNoteUnauthorized{}, nil
 	}
 
+	if errors.Is(err, domain.ErrExpired) {
+		// An expired note cannot be changed. The answer is the 410 of a read. The check is here
+		// and not in mapUpdateError, as for ErrForbidden above, so that the mappers keep one form.
+		v := ogenapi.UpdateNoteGone(errResp(err))
+
+		return &v, nil
+	}
+
 	if err != nil {
 		return mapUpdateError(err, h.log), nil
 	}

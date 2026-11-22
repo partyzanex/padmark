@@ -107,6 +107,7 @@ func (r *LinkRepository) Create(ctx context.Context, domLink *domain.Link) error
 // Update writes the target URL and only the optional fields that patch sets (see
 // links.Storage). RETURNING reports the persisted counters and immutable fields without
 // overwriting clicks recorded since the caller's read. storedEditCode selects the link version.
+// An expired link is not changed (liveWhere): the write gets domain.ErrNotFound, as for files.
 func (r *LinkRepository) Update(
 	ctx context.Context, id, storedEditCode string, patch *domain.LinkPatch,
 ) (*domain.Link, error) {
@@ -117,6 +118,7 @@ func (r *LinkRepository) Update(
 	err := setLinkPatch(query, patch).
 		Where("id = ?", id).
 		Where("edit_code = ?", storedEditCode).
+		Where(liveWhere, time.Now()).
 		Returning("*").
 		Scan(ctx)
 	if err != nil {

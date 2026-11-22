@@ -19,8 +19,10 @@ type UpdateOptions struct {
 }
 
 // Update replaces the destination without changing the slug, edit code, owner,
-// creation time, burn-after-click setting, or click counter. The rules are in checkMutation:
-// the reader must see the link, and must be its owner or give the original edit code.
+// creation time, burn-after-click setting, or click counter. The checks have the sequence of
+// files.Manager.Update: the reader must see the link (domain.ErrForbidden), the link must not be
+// expired (domain.ErrExpired), and the rules of checkMutation apply: the reader must be its owner
+// or give the original edit code.
 func (m *Manager) Update(
 	ctx context.Context, slug, editCode string, reader domain.Reader, targetURL string, opts UpdateOptions,
 ) (*domain.Link, error) {
@@ -42,6 +44,16 @@ func (m *Manager) Update(
 	existing, err := m.storage.GetByID(ctx, dbID)
 	if err != nil {
 		return nil, fmt.Errorf("update link: %w", err)
+	}
+
+	// Privacy comes before expiry, so that a hidden link gives the same answer in each state.
+	if !existing.VisibleTo(reader) {
+		return nil, domain.ErrForbidden
+	}
+
+	// An expired link is already gone for readers, so an update must not extend its life.
+	if existing.Expired(time.Now()) {
+		return nil, domain.ErrExpired
 	}
 
 	err = m.checkMutation(existing, editCode, reader)

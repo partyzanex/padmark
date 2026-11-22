@@ -52,6 +52,13 @@ func (h *OgenHandler) UpdateLink(
 		return &ogenapi.UpdateLinkUnauthorized{}, nil
 	}
 
+	if errors.Is(err, domain.ErrExpired) {
+		// An expired link cannot be changed. The answer is the 410 of a read, as in UpdateNote.
+		v := ogenapi.UpdateLinkGone(errResp(err))
+
+		return &v, nil
+	}
+
 	if err != nil {
 		return mapUpdateLinkError(err, h.log), nil
 	}
