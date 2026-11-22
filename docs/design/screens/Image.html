@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Padmark — Image</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;0,8..60,700;1,8..60,400&amp;display=swap">
+<style>
+body{margin:0}
+.pm{--bg:#F3F4F6;--surface:#FFFFFF;--sunken:#F7F8FA;--ink:#14151A;--ink-2:#3B3E48;--muted:#5D6170;--line:#E2E4EA;--line-2:#CDD0D8;--accent:#4A3AE0;--on-accent:#FFFFFF;--accent-soft:#ECEAFF;--accent-text:#3A2BC4;--warn:#9A4A06;--warn-soft:#FFF1E0;--code-bg:#F0F1F4;--shadow:0 1px 2px rgba(20,21,26,.05),0 10px 30px -14px rgba(20,21,26,.14);font-family:'Onest',system-ui,-apple-system,'Segoe UI',sans-serif;color:var(--ink);background:var(--bg);-webkit-font-smoothing:antialiased}
+.pm.dim{--bg:#26272F;--surface:#2F3039;--sunken:#2A2B33;--ink:#ECEDF2;--ink-2:#CDCFD8;--muted:#A9ACB8;--line:#3D3F4A;--line-2:#4F525E;--accent:#9C92FF;--on-accent:#14151A;--accent-soft:#37335C;--accent-text:#BDB6FF;--warn:#F2A766;--warn-soft:#43321F;--code-bg:#353640;--shadow:0 1px 2px rgba(0,0,0,.3),0 14px 34px -16px rgba(0,0,0,.6)}
+.pm.dark{--bg:#0A0B0E;--surface:#121318;--sunken:#0E0F13;--ink:#EDEEF2;--ink-2:#C4C6CF;--muted:#9295A2;--line:#22242C;--line-2:#30323C;--accent:#8E83FF;--on-accent:#0A0B0E;--accent-soft:#1E1B3A;--accent-text:#ADA5FF;--warn:#F2A766;--warn-soft:#2D2116;--code-bg:#1A1B22;--shadow:0 1px 2px rgba(0,0,0,.4),0 14px 34px -16px rgba(0,0,0,.8)}
+.pm *{box-sizing:border-box}
+.pm input,.pm textarea,.pm select,.pm button{font:inherit;color:inherit}
+.pm button{cursor:pointer}
+.pm a{color:var(--accent-text);text-decoration:none}
+.pm a:hover{color:var(--ink)}
+.pm ::placeholder{color:var(--muted)}
+.pm .nav:hover{color:var(--ink);background:var(--sunken)}
+.pm .ghost:hover{background:var(--sunken);color:var(--ink)}
+.pm .primary:hover{filter:brightness(1.08)}
+.pm .field{transition:border-color .15s,box-shadow .15s}
+.pm .field:focus,.pm .field:focus-within{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.pm button:focus-visible,.pm a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.pm .lbl{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.pm .kbd{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px;padding:2px 6px;border-radius:5px;border:1px solid currentColor;opacity:.85}
+.pm .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.pm .row:hover{background:var(--sunken)}
+.pm .chip{display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 9px;border-radius:999px;border:1px solid var(--line-2);font-size:12px;color:var(--ink-2);background:var(--surface)}
+.pm .row:hover{background:var(--sunken)}
+.pm .chip{display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 9px;border-radius:999px;border:1px solid var(--line-2);font-size:12px;color:var(--ink-2);background:var(--surface)}
+.pm .row:hover{background:var(--sunken)}
+.pm .chip{display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 9px;border-radius:999px;border:1px solid var(--line-2);font-size:12px;color:var(--ink-2);background:var(--surface)}
+.pm .row:hover{background:var(--sunken)}
+.pm .chip{display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 9px;border-radius:999px;border:1px solid var(--line-2);font-size:12px;color:var(--ink-2);background:var(--surface)}
+</style>
+</helmet>
+<div class="pm {{theme}}" style="min-height: 100vh; display: flex; flex-direction: column">
+<div style="width: 100%; max-width: 1200px; margin: 0 auto; padding: 0 clamp(16px, 4vw, 40px)">
+<header style="display: flex; align-items: center; gap: 20px; flex-wrap: wrap; padding: 16px 0">
+<a href="Main.dc.html" aria-label="Padmark — home" style="font-family: 'Source Serif 4', Georgia, serif; font-weight: 700; font-size: 24px; letter-spacing: -0.02em; color: var(--ink); line-height: 1">Padmark<span style="color: var(--accent)">.</span></a>
+<div style="flex: 1"></div>
+<nav aria-label="Resources" style="display: flex; gap: 2px; align-items: center">
+<a class="nav" href="#api" style="height: 36px; display: flex; align-items: center; padding: 0 12px; border-radius: 8px; font-size: 13px; color: var(--muted)">API</a>
+<a class="nav" href="https://github.com" style="height: 36px; display: flex; align-items: center; padding: 0 12px; border-radius: 8px; font-size: 13px; color: var(--muted)">GitHub</a>
+</nav>
+<div role="group" aria-label="Theme" style="display: flex; gap: 2px; padding: 3px; border: 1px solid var(--line); border-radius: 999px; background: var(--sunken)"><button type="button" aria-label="Light theme" aria-pressed="{{pL}}" onClick="{{setL}}" style="width: 32px; height: 32px; border: 0; border-radius: 999px; display: grid; place-items: center; {{tL}}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"></path></svg></button><button type="button" aria-label="Dim theme" aria-pressed="{{pD}}" onClick="{{setD}}" style="width: 32px; height: 32px; border: 0; border-radius: 999px; display: grid; place-items: center; {{tD}}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"></circle><path d="M12 3.5a8.5 8.5 0 0 1 0 17z" fill="currentColor"></path></svg></button><button type="button" aria-label="Dark theme" aria-pressed="{{pK}}" onClick="{{setK}}" style="width: 32px; height: 32px; border: 0; border-radius: 999px; display: grid; place-items: center; {{tK}}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"></path></svg></button></div>
+<a class="primary" href="ImageUp.dc.html" style="height: 38px; display: flex; align-items: center; gap: 6px; padding: 0 14px; border-radius: 9px; background: var(--accent); color: var(--on-accent); font-size: 13px; font-weight: 600"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>New</a>
+</header>
+<div style="display: flex; align-items: center; gap: 12px 24px; flex-wrap: wrap; padding: 2px 0 14px">
+<div style="flex: 1 1 320px; min-width: 0; display: flex; flex-direction: column; gap: 4px">
+<h1 style="margin: 0; font-family: 'Source Serif 4', Georgia, serif; font-size: 20px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.25; word-break: break-all">{{name}}</h1>
+<p style="margin: 0; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: var(--muted)">{{meta}} · Nov 22, 2026 · 3 views · never expires · Public</p>
+</div>
+<div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap">
+<button class="ghost" type="button" onClick="{{copyLink}}" style="height: 36px; display: flex; align-items: center; gap: 6px; padding: 0 12px; border: 1px solid var(--line-2); border-radius: 9px; background: transparent; font-size: 13px; font-weight: 500; color: var(--ink)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"></rect><path d="M5 15V5a2 2 0 0 1 2-2h10"></path></svg>{{copyLabel}}</button>
+<div style="position: relative">
+<button class="ghost" type="button" aria-haspopup="dialog" aria-expanded="{{shareStr}}" onClick="{{toggleShare}}" style="height: 36px; display: flex; align-items: center; gap: 6px; padding: 0 12px; border: 1px solid var(--line-2); border-radius: 9px; background: transparent; font-size: 13px; font-weight: 500; color: var(--ink)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 8-4 4 4 4M16 8l4 4-4 4"></path></svg>Embed<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="opacity: .7"><path d="m6 9 6 6 6-6"></path></svg></button>
+<sc-if value="{{share}}" hint-placeholder-val="{{ false }}">
+<div role="dialog" aria-label="Embed" style="position: absolute; top: 44px; right: 0; z-index: 20; width: 380px; display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid var(--line-2); border-radius: 12px; background: var(--surface); box-shadow: 0 16px 40px -12px rgba(0,0,0,.5)">
+<span class="lbl">Use it elsewhere</span>
+<div role="tablist" aria-label="Format" style="display: flex; gap: 2px; padding: 2px; background: var(--bg); border: 1px solid var(--line); border-radius: 9px"><button type="button" role="tab" aria-selected="{{selL}}" onClick="{{fmtL}}" style="flex: 1; height: 30px; border: 0; border-radius: 7px; font-size: 12px; font-weight: 500; {{stL}}">Link</button><button type="button" role="tab" aria-selected="{{selM}}" onClick="{{fmtM}}" style="flex: 1; height: 30px; border: 0; border-radius: 7px; font-size: 12px; font-weight: 500; {{stM}}">Markdown</button><button type="button" role="tab" aria-selected="{{selH}}" onClick="{{fmtH}}" style="flex: 1; height: 30px; border: 0; border-radius: 7px; font-size: 12px; font-weight: 500; {{stH}}">HTML</button></div>
+<div style="display: flex; gap: 6px">
+<label for="pm-embed" class="sr">Code to copy</label>
+<input id="pm-embed" readonly value="{{embed}}" style="flex: 1; min-width: 0; height: 36px; padding: 0 10px; border: 1px solid var(--line-2); border-radius: 9px; background: var(--sunken); font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; outline: none">
+<button class="ghost" type="button" aria-label="Copy" style="flex: none; width: 36px; height: 36px; border: 1px solid var(--line-2); border-radius: 9px; background: var(--surface); display: grid; place-items: center"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"></rect><path d="M5 15V5a2 2 0 0 1 2-2h10"></path></svg></button>
+</div>
+<span style="font-size: 12px; color: var(--muted)">{{embedHint}}</span>
+</div>
+</sc-if>
+</div>
+<a class="ghost" href="ImageUp.dc.html" style="height: 36px; display: flex; align-items: center; gap: 6px; padding: 0 12px; border: 1px solid var(--line-2); border-radius: 9px; background: transparent; font-size: 13px; font-weight: 500; color: var(--ink)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"></path><path d="m13.5 6.5 4 4"></path></svg>Edit</a>
+<a class="primary" href="#download" style="height: 36px; display: flex; align-items: center; gap: 6px; padding: 0 14px; border-radius: 9px; background: var(--accent); color: var(--on-accent); font-size: 13px; font-weight: 600"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v12M7 11l5 5 5-5"></path><path d="M5 20h14"></path></svg>Download</a>
+</div>
+</div>
+</div>
+<main style="flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 0 clamp(8px, 1.5vw, 20px)">
+<div style="position: relative; flex: 1; min-height: 420px; display: flex; align-items: safe center; justify-content: safe center; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--sunken); overflow: {{stageOverflow}}">
+<a href="{{src}}" target="_blank" rel="noopener" aria-label="Open the original image" style="flex: none; display: block; line-height: 0; cursor: zoom-in">
+<img src="{{src}}" alt="Sunset over the ridge, seen from the trailhead" width="{{w}}" height="{{h}}" onLoad="{{measure}}" style="display: block; {{imgSize}}; border-radius: 4px; box-shadow: 0 10px 30px -14px rgba(0,0,0,.45)">
+</a>
+<div style="position: absolute; right: 12px; bottom: 12px; display: flex; gap: 6px; z-index: 2">
+<span aria-live="polite" style="height: 32px; display: flex; align-items: center; gap: 6px; padding: 0 10px; border: 0; border-radius: 8px; background: rgba(10,11,14,.66); color: #FFFFFF; font-size: 12px; font-weight: 600; font-family: 'JetBrains Mono', ui-monospace, monospace; font-weight: 500">{{scaleLabel}}</span>
+<sc-if value="{{canZoom}}" hint-placeholder-val="{{ true }}">
+<button type="button" aria-pressed="{{zoomStr}}" onClick="{{toggleZoom}}" style="height: 32px; display: flex; align-items: center; gap: 6px; padding: 0 10px; border: 0; border-radius: 8px; background: rgba(10,11,14,.66); color: #FFFFFF; font-size: 12px; font-weight: 600"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"></path></svg>{{zoomLabel}}</button>
+</sc-if>
+<a href="{{src}}" target="_blank" rel="noopener" style="height: 32px; display: flex; align-items: center; gap: 6px; padding: 0 10px; border: 0; border-radius: 8px; background: rgba(10,11,14,.66); color: #FFFFFF; font-size: 12px; font-weight: 600"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"></path></svg>Original</a>
+</div>
+</div>
+<p style="margin: 10px 0 0; text-align: center; font-size: 13px; color: var(--ink-2)">Sunset over the ridge, seen from the trailhead</p>
+</main>
+<div style="width: 100%; max-width: 1200px; margin: 0 auto; padding: 0 clamp(16px, 4vw, 40px)">
+<footer style="margin-top: 20px; display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 16px 0 24px; border-top: 1px solid var(--line); font-size: 12px; color: var(--muted)">
+<span>Published with Padmark</span>
+<span style="display: flex; gap: 16px"><a href="ImageUp.dc.html" style="color: var(--muted)">Edit</a><a href="ImageUp.dc.html" style="color: var(--muted)">New image</a></span>
+</footer>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["light","dim","dark"],"default":"light"},"sample":{"editor":"enum","options":["large","small"],"default":"large"},"$preview":{"width":1440,"height":1040}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const s = this.state || {};
+    const theme = s.theme || this.props.theme || 'light';
+    const sample = this.props.sample || 'large';
+    const big = sample === 'large';
+    const fmt = s.fmt || 'link';
+    const zoom = !!s.zoom;
+    const share = !!s.share;
+    const seg = (on) => on ? 'background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,.14)' : 'background: transparent; color: var(--muted)';
+    const page = '[your-host]/mountain-trip';
+    const raw = page + '/raw';
+    const alt = 'Sunset over the ridge, seen from the trailhead';
+    const w = big ? 3200 : 640, h = big ? 2000 : 400;
+    const scale = zoom ? 100 : (s.scale || (big ? 40 : 100));
+    return {
+      theme,
+      tL: seg(theme === 'light'), tD: seg(theme === 'dim'), tK: seg(theme === 'dark'),
+      pL: String(theme === 'light'), pD: String(theme === 'dim'), pK: String(theme === 'dark'),
+      setL: () => this.setState({ theme: 'light' }), setD: () => this.setState({ theme: 'dim' }), setK: () => this.setState({ theme: 'dark' }),
+      themeLabel: 'Theme: ' + theme + '. Tap to change',
+      cycleTheme: () => this.setState({ theme: ({ light: 'dim', dim: 'dark', dark: 'light' })[theme] }),
+      src: big ? '../assets/mountain-trip-large.jpg' : '../assets/mountain-trip-small.png', w, h,
+      name: big ? 'mountain-trip.jpg' : 'mountain-trip-small.png',
+      meta: big ? '3200 × 2000 · 146 KB · JPEG' : '640 × 400 · 4 KB · PNG',
+      measure: (e) => { const im = e.target; if (!zoom && im.naturalWidth) { const v = Math.min(100, Math.round(im.clientWidth / im.naturalWidth * 100)); if (v !== s.scale) this.setState({ scale: v }); } },
+      scaleLabel: scale >= 100 ? '100%' : 'Fit · ' + scale + '%',
+      canZoom: zoom || scale < 100,
+      zoomStr: String(zoom), zoomLabel: zoom ? 'Fit to screen' : '100%',
+      toggleZoom: () => this.setState({ zoom: !zoom }),
+      imgSize: zoom ? 'max-width: none; max-height: none; width: ' + w + 'px; height: auto' : 'max-width: 100%; max-height: calc(100vh - 290px); width: auto; height: auto',
+      stageOverflow: zoom ? 'auto' : 'hidden',
+      copyLabel: s.copied ? 'Copied' : 'Copy link', copyLink: () => this.setState({ copied: true }),
+      share, shareStr: String(share), toggleShare: () => this.setState({ share: !share }),
+      selL: String(fmt === 'link'), selM: String(fmt === 'md'), selH: String(fmt === 'html'),
+      stL: seg(fmt === 'link'), stM: seg(fmt === 'md'), stH: seg(fmt === 'html'),
+      fmtL: () => this.setState({ fmt: 'link' }), fmtM: () => this.setState({ fmt: 'md' }), fmtH: () => this.setState({ fmt: 'html' }),
+      embed: fmt === 'link' ? page : (fmt === 'md' ? '![' + alt + '](' + raw + ')' : '<img src="' + raw + '" alt="' + alt + '">'),
+      embedHint: fmt === 'link' ? 'Opens this page.' : (fmt === 'md' ? 'Paste into a Padmark note or any Markdown.' : 'Paste into a web page.')
+    };
+  }
+}
+</script>
+</body>
+</html>

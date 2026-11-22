@@ -32,6 +32,11 @@ body{margin:0}
 .pm .prose a{text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:3px}
 .pm .toc:hover{color:var(--ink);background:var(--sunken)}
 .pm .prose header li{margin:0}
+.pm .prose h3{font-family:'Source Serif 4',Georgia,serif;font-size:20px;font-weight:600;line-height:1.3;margin:26px 0 8px}
+.pm .prose h4{font-family:'Onest',system-ui,sans-serif;font-size:15px;font-weight:600;line-height:1.4;margin:20px 0 6px}
+.pm .toc-scroll{scrollbar-width:none;-webkit-mask-image:linear-gradient(to bottom,#000 calc(100% - 28px),transparent);mask-image:linear-gradient(to bottom,#000 calc(100% - 28px),transparent)}
+.pm .toc-scroll::-webkit-scrollbar{display:none}
+.pm .clamp2{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 </style>
 </helmet>
 <div class="pm {{theme}}" style="min-height: 100vh; display: flex; flex-direction: column">
@@ -55,25 +60,36 @@ body{margin:0}
 <div style="display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start; justify-content: center; padding: 12px 0 40px">
 
 <sc-if value="{{toc}}" hint-placeholder-val="{{ true }}">
-<nav aria-label="On this page" style="flex: 1 1 190px; min-width: 0; display: flex; flex-direction: column; gap: 2px; padding-top: 6px">
-<span class="lbl" lang="en" style="padding: 0 10px 8px">On this page</span>
-<a class="toc" href="#before" style="padding: 7px 10px; border-radius: 8px; font-size: 13px; color: var(--accent-text); background: var(--accent-soft); font-weight: 500">Перед деплоем</a>
-<a class="toc" href="#deploy" style="padding: 7px 10px; border-radius: 8px; font-size: 13px; color: var(--muted)">Деплой</a>
-<a class="toc" href="#rollback" style="padding: 7px 10px; border-radius: 8px; font-size: 13px; color: var(--muted)">Откат</a>
+<nav aria-label="On this page" lang="ru" style="flex: 0 1 260px; min-width: 220px; position: sticky; top: 24px; align-self: flex-start; display: flex; flex-direction: column; gap: 6px; padding-top: 4px">
+<div lang="en" style="display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 4px 4px 10px">
+<span class="lbl">On this page</span>
+<button class="toc" type="button" onClick="{{toggleAll}}" style="height: 28px; padding: 0 8px; border: 0; border-radius: 7px; background: transparent; font-size: 12px; color: var(--muted)">{{allLabel}}</button>
+</div>
+<div class="toc-scroll" style="max-height: calc(100vh - 140px); overflow-y: auto; display: flex; flex-direction: column; gap: 1px; padding-bottom: 20px">
+<sc-for list="{{tocRows}}" as="r" hint-placeholder-count="8">
+<div style="display: flex; align-items: flex-start; gap: 2px; {{r.wrap}}">
+<a class="toc" href="{{r.href}}" title="{{r.full}}" aria-current="{{r.cur}}" style="flex: 1; min-width: 0; display: flex; gap: 8px; align-items: baseline; padding: 6px 8px; border-radius: 7px; line-height: 1.35; {{r.style}}"><span class="mono" style="flex: none; min-width: 22px; font-size: 11px; color: var(--muted); {{r.numStyle}}">{{r.num}}</span><span class="clamp2" style="flex: 1; min-width: 0">{{r.label}}</span></a>
+<sc-if value="{{r.hasKids}}" hint-placeholder-val="{{ false }}">
+<button class="toc" type="button" aria-label="{{r.toggleLabel}}" aria-expanded="{{r.openStr}}" onClick="{{r.toggle}}" style="flex: none; display: flex; align-items: center; gap: 2px; height: 30px; padding: 0 6px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px">{{r.count}}<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="transition: transform .15s; {{r.chevStyle}}"><path d="m9 6 6 6-6 6"></path></svg></button>
+</sc-if>
+</div>
+</sc-for>
+</div>
+<a class="toc" href="#top" lang="en" style="align-self: flex-start; display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 7px; font-size: 12px; color: var(--muted)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"></path></svg>Back to top</a>
 </nav>
 </sc-if>
 
-<article class="prose" style="flex: 999 1 620px; min-width: 0; max-width: {{articleMax}}; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); padding: clamp(18px, 3vw, 28px) clamp(18px, 5vw, 56px) clamp(22px, 4vw, 44px); font-family: 'Source Serif 4', Georgia, serif; font-size: 17px; line-height: 1.7; color: var(--ink); text-wrap: pretty">
+<article id="top" class="prose" style="flex: 999 1 620px; min-width: 0; max-width: {{articleMax}}; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); padding: clamp(18px, 3vw, 28px) clamp(18px, 5vw, 56px) clamp(22px, 4vw, 44px); font-family: 'Source Serif 4', Georgia, serif; font-size: 17px; line-height: 1.7; color: var(--ink); text-wrap: pretty">
 <header style="display: flex; flex-direction: column; gap: 8px; padding-bottom: 16px; margin-bottom: 26px; border-bottom: 1px solid var(--line); font-family: 'Onest', system-ui, sans-serif; line-height: 1.4">
 <div style="display: flex; align-items: flex-start; gap: 16px">
-<h1 style="flex: 1 1 auto; min-width: 0; margin: 0; font-family: 'Source Serif 4', Georgia, serif; font-size: clamp(24px, 2.47vw, 28px); font-weight: 600; letter-spacing: -0.015em; line-height: 1.25; text-wrap: balance">Чек-лист перед релизом</h1>
+<h1 style="flex: 1 1 auto; min-width: 0; margin: 0; font-family: 'Source Serif 4', Georgia, serif; font-size: clamp(24px, 2.47vw, 28px); font-weight: 600; letter-spacing: -0.015em; line-height: 1.25; text-wrap: balance">Регламент релиза мобильного приложения</h1>
 <span lang="en" style="flex: none; margin-top: 5px; display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 9px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-text); font-size: 11px; font-weight: 600"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg>Login required</span>
 </div>
 <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap">
 <ul aria-label="Note details" lang="en" style="list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 18px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: var(--muted)">
 <li style="display: flex; align-items: center; gap: 6px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"></rect><path d="M3 10h18M8 3v4M16 3v4"></path></svg>Nov 10, 2026 · 08:56</li>
 <li style="display: flex; align-items: center; gap: 6px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"></path><circle cx="12" cy="12" r="3"></circle></svg>3 views</li>
-<li style="display: flex; align-items: center; gap: 6px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"></path><path d="M14 3v5h5"></path></svg>2.1 KB</li>
+<li style="display: flex; align-items: center; gap: 6px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"></path><path d="M14 3v5h5"></path></svg>9.8 KB</li>
 <li style="display: flex; align-items: center; gap: 6px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>Expires Feb 8, 2027</li>
 </ul>
 <div role="group" aria-label="Note actions" lang="en" style="display: flex; gap: 2px; padding: 3px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface)">
@@ -85,40 +101,49 @@ body{margin:0}
 </div>
 </div>
 </header>
-<p style="font-size: 20px; line-height: 1.6; color: var(--ink-2)">Короткая памятка для дежурного. <strong>Никогда не вставляйте токены</strong> в публичные заметки — для этого есть режим <em>Login required</em>.</p>
+<p style="font-size: 20px; line-height: 1.6; color: var(--ink-2)">Порядок выкладки iOS- и Android-сборок для дежурной команды. <strong>Никогда не вставляйте токены</strong> в публичные заметки — для этого есть доступ <em>Owner only</em>.</p>
 
-<h2 id="before" style="margin-top: 28px">Перед деплоем</h2>
-<ul style="list-style: none; padding-left: 0; font-family: 'Onest', system-ui, sans-serif; font-size: 15px">
-<li style="display: flex; gap: 12px; align-items: center"><input type="checkbox" checked disabled aria-label="Done" style="accent-color: var(--accent); width: 17px; height: 17px; margin: 0"><span style="color: var(--muted); text-decoration: line-through">Прогнать миграции на стейдже</span></li>
-<li style="display: flex; gap: 12px; align-items: center"><input type="checkbox" checked disabled aria-label="Done" style="accent-color: var(--accent); width: 17px; height: 17px; margin: 0"><span style="color: var(--muted); text-decoration: line-through">Сверить переменные окружения</span></li>
-<li style="display: flex; gap: 12px; align-items: center"><input type="checkbox" disabled aria-label="Not done" style="accent-color: var(--accent); width: 17px; height: 17px; margin: 0"><span>Обновить changelog</span></li>
-</ul>
+<h2 id="s1" style="margin-top: 28px">Подготовка релиза и проверка окружений перед выкладкой</h2>
+<p>Начинаем за день до окна. Цель — убедиться, что сборка, база и секреты на стейдже совпадают с тем, что поедет в production.</p>
+<h3 id="s1-1">Миграции базы данных на стейдже</h3>
+<p>Прогоняем все новые миграции и смотрим, сколько они идут. Если дольше пяти минут — переносим в отдельное окно.</p>
+<h3 id="s1-2">Сверка переменных окружения и секретов в хранилище</h3>
+<p>Сравниваем список переменных стейджа и production скриптом <code>make env-diff</code>. Расхождения разбираем до выкладки.</p>
+<h4 id="s1-2-1">Что делать, если секрет отсутствует или просрочен</h4>
+<p>Не создаём его вручную: заводим задачу на владельца сервиса и переносим релиз.</p>
+<h3 id="s1-3">Changelog и заметки для команды поддержки</h3>
+<p>Пишем изменения человеческим языком: что увидит пользователь и что может сломаться.</p>
 
-<h2 id="deploy">Деплой</h2>
-<p>Запускаем из корня репозитория. Переменная <code>ENV</code> обязательна — без неё скрипт остановится.</p>
-<figure style="margin: 0 0 20px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--code-bg)">
-<figcaption lang="en" style="display: flex; align-items: center; justify-content: space-between; padding: 6px 6px 6px 14px; border-bottom: 1px solid var(--line); font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: var(--muted)">bash<button class="ghost" type="button" aria-label="Copy code" style="width: 32px; height: 32px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); display: grid; place-items: center"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"></rect><path d="M5 15V5a2 2 0 0 1 2-2h10"></path></svg></button></figcaption>
-<pre style="margin: 0; padding: 16px 18px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; line-height: 1.7; overflow-x: auto; color: var(--ink)"><span style="color: var(--muted)">$</span> make deploy ENV=staging
+<h2 id="s2">Выкладка на стейдж и прогон smoke-тестов</h2>
+<h3 id="s2-1">Команды деплоя</h3>
+<pre style="margin: 0 0 18px; padding: 14px 16px; border-radius: 10px; background: var(--code-bg); border: 1px solid var(--line); font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; line-height: 1.65; overflow-x: auto; color: var(--ink)"><span style="color: var(--muted)">$</span> make deploy ENV=staging
 <span style="color: var(--muted)">$</span> make smoke ENV=staging</pre>
-</figure>
+<h3 id="s2-2">Какие smoke-тесты обязательны и где смотреть результаты</h3>
+<ul>
+<li>Вход по паролю и по коду из приложения</li>
+<li>Создание заметки, ссылки и загрузка файла</li>
+<li>Оплата тестовой картой в песочнице</li>
+</ul>
+<p>Результаты — в канале сборок. Красный тест останавливает релиз, даже если он «всегда флакает».</p>
+<h3 id="s2-3">Окна выкладки по средам</h3>
+<p><code>staging</code> — в любое время, подтверждает дежурный. <code>production</code> — по будням до 16:00, подтверждает тимлид.</p>
 
-<div style="overflow-x: auto; margin: 0 0 20px; border: 1px solid var(--line); border-radius: 10px">
-<table style="width: 100%; border-collapse: collapse; font-family: 'Onest', system-ui, sans-serif; font-size: 14px; line-height: 1.5">
-<thead><tr style="background: var(--sunken)"><th scope="col" style="text-align: left; padding: 10px 16px; font-weight: 600; border-bottom: 1px solid var(--line)">Среда</th><th scope="col" style="text-align: left; padding: 10px 16px; font-weight: 600; border-bottom: 1px solid var(--line)">Кто подтверждает</th><th scope="col" style="text-align: left; padding: 10px 16px; font-weight: 600; border-bottom: 1px solid var(--line)">Окно</th></tr></thead>
-<tbody>
-<tr><td style="padding: 10px 16px; border-bottom: 1px solid var(--line)"><code>staging</code></td><td style="padding: 10px 16px; border-bottom: 1px solid var(--line)">Дежурный</td><td style="padding: 10px 16px; border-bottom: 1px solid var(--line)">Любое время</td></tr>
-<tr><td style="padding: 10px 16px"><code>production</code></td><td style="padding: 10px 16px">Тимлид</td><td style="padding: 10px 16px">Будни, до 16:00</td></tr>
-</tbody>
-</table>
-</div>
+<h2 id="s3">Выкладка в production с поэтапным открытием трафика</h2>
+<h3 id="s3-1">Канареечный релиз на 5% пользователей</h3>
+<p>Открываем новую версию на 5% и ждём полчаса. Если метрики в норме — 25%, затем 100%.</p>
+<h3 id="s3-2">Мониторинг метрик в первые 30 минут</h3>
+<p>Смотрим долю ошибок, время ответа API и число падений приложения. Пороги — на дашборде релиза.</p>
 
-<h2 id="rollback">Откат</h2>
-<blockquote style="margin: 0 0 18px; padding: 4px 0 4px 20px; border-left: 3px solid var(--accent); color: var(--ink-2); font-style: italic">Если что-то пошло не так — откатываемся и пишем в канал релизов. Разбираемся после.</blockquote>
-<ol>
-<li>Вернуть предыдущий тег: <code>make rollback</code></li>
-<li>Проверить, что алерты погасли</li>
-<li>Записать, что случилось, в <a href="#changelog">changelog</a></li>
-</ol>
+<h2 id="s4">Откат, коммуникация и разбор инцидента после релиза</h2>
+<h3 id="s4-1">Когда принимать решение об откате</h3>
+<p>Если любой порог превышен дольше пяти минут — откатываемся, не дожидаясь причины.</p>
+<h3 id="s4-2">Шаблон сообщения в канал релизов</h3>
+<blockquote style="margin: 0 0 18px; padding: 4px 0 4px 20px; border-left: 3px solid var(--line-2); color: var(--ink-2); font-style: italic">Откатили версию X.Y.Z в production. Причина выясняется, пользователи на прошлой версии. Следующее обновление — через 30 минут.</blockquote>
+<h3 id="s4-3">Постмортем</h3>
+<p>В течение двух рабочих дней: что случилось, почему не поймали на стейдже и что меняем в регламенте.</p>
+
+<h2 id="s5">Приложение: контакты дежурных и полезные ссылки</h2>
+<p>Актуальный график дежурств и ссылки на дашборды — в закреплённом сообщении канала релизов.</p>
 </article>
 </div>
 
@@ -130,7 +155,7 @@ body{margin:0}
 </div>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["light","dim","dark"],"default":"light"},"toc":{"editor":"boolean","default":true},"$preview":{"width":1440,"height":1560}}'>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["light","dim","dark"],"default":"light"},"toc":{"editor":"boolean","default":true},"tocExpanded":{"editor":"boolean","default":false},"$preview":{"width":1440,"height":2700}}'>
 class Component extends DCLogic {
   renderVals() {
     const s = this.state || {};
@@ -138,6 +163,56 @@ class Component extends DCLogic {
     const seg = (on) => on
       ? 'background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,.14)'
       : 'background: transparent; color: var(--muted)';
+    const all = s.all != null ? s.all : !!(this.props.tocExpanded ?? false);
+    const openSec = s.open != null ? s.open : 's1';
+    const current = 's1-2';
+    const T = [
+      ['s1', 'Подготовка релиза и проверка окружений перед выкладкой', [
+        ['s1-1', 'Миграции базы данных на стейдже', []],
+        ['s1-2', 'Сверка переменных окружения и секретов в хранилище', [['s1-2-1', 'Что делать, если секрет отсутствует или просрочен']]],
+        ['s1-3', 'Changelog и заметки для команды поддержки', []]]],
+      ['s2', 'Выкладка на стейдж и прогон smoke-тестов', [
+        ['s2-1', 'Команды деплоя', []],
+        ['s2-2', 'Какие smoke-тесты обязательны и где смотреть результаты', []],
+        ['s2-3', 'Окна выкладки по средам', []]]],
+      ['s3', 'Выкладка в production с поэтапным открытием трафика', [
+        ['s3-1', 'Канареечный релиз на 5% пользователей', []],
+        ['s3-2', 'Мониторинг метрик в первые 30 минут', []]]],
+      ['s4', 'Откат, коммуникация и разбор инцидента после релиза', [
+        ['s4-1', 'Когда принимать решение об откате', []],
+        ['s4-2', 'Шаблон сообщения в канал релизов', []],
+        ['s4-3', 'Постмортем', []]]],
+      ['s5', 'Приложение: контакты дежурных и полезные ссылки', []]
+    ];
+    const on = (id) => id === current;
+    const inSec = (sec) => current.indexOf(sec + '-') === 0;
+    const rowStyle = (id, lvl, parentOfCurrent) => {
+      const size = lvl === 4 ? 'font-size: 12px' : 'font-size: 13px';
+      if (on(id)) return size + '; background: var(--accent-soft); color: var(--accent-text); font-weight: 500';
+      if (lvl === 2) return size + '; color: ' + (parentOfCurrent ? 'var(--ink)' : 'var(--ink-2)') + '; font-weight: ' + (parentOfCurrent ? '600' : '500');
+      return size + '; color: var(--muted)';
+    };
+    const rail = 'margin-left: 18px; padding-left: 6px; border-left: 1px solid var(--line)';
+    const tocRows = [];
+    T.forEach((h2, i) => {
+      const open = all || openSec === h2[0];
+      tocRows.push({ href: '#' + h2[0], full: h2[1], label: h2[1], num: String(i + 1), cur: on(h2[0]) ? 'location' : 'false',
+        style: rowStyle(h2[0], 2, inSec(h2[0])), numStyle: inSec(h2[0]) ? 'color: var(--accent-text)' : '', wrap: '',
+        hasKids: h2[2].length > 0, count: open ? '' : String(h2[2].length), openStr: String(open),
+        toggleLabel: (open ? 'Collapse ' : 'Expand ') + h2[1], chevStyle: open ? 'transform: rotate(90deg)' : 'transform: rotate(0deg)',
+        toggle: () => this.setState({ open: openSec === h2[0] && !all ? '' : h2[0], all: false }) });
+      if (!open) return;
+      h2[2].forEach((h3, j) => {
+        tocRows.push({ href: '#' + h3[0], full: h3[1], label: h3[1], num: (i + 1) + '.' + (j + 1), cur: on(h3[0]) ? 'location' : 'false',
+          style: rowStyle(h3[0], 3, false), numStyle: on(h3[0]) ? 'color: var(--accent-text)' : '', wrap: rail,
+          hasKids: false, count: '', openStr: 'false', toggleLabel: '', chevStyle: '', toggle: () => {} });
+        h3[2].forEach((h4) => {
+          tocRows.push({ href: '#' + h4[0], full: h4[1], label: h4[1], num: '', cur: on(h4[0]) ? 'location' : 'false',
+            style: rowStyle(h4[0], 4, false) + '; padding-left: 20px', numStyle: 'display: none', wrap: rail,
+            hasKids: false, count: '', openStr: 'false', toggleLabel: '', chevStyle: '', toggle: () => {} });
+        });
+      });
+    });
     return {
       theme,
       tL: seg(theme === 'light'), tD: seg(theme === 'dim'), tK: seg(theme === 'dark'),
@@ -148,6 +223,9 @@ class Component extends DCLogic {
       copyLabel: s.copied ? 'Copied' : 'Copy',
       copy: () => this.setState({ copied: true }),
       toc: this.props.toc ?? true,
+      allLabel: all ? 'Collapse' : 'Expand all',
+      toggleAll: () => this.setState({ all: !all }),
+      tocRows,
       articleMax: 'none'
     };
   }
