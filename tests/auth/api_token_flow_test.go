@@ -72,7 +72,7 @@ func TestAPITokenFlow_AdminIssuesKey_CLICreatesNote(t *testing.T) {
 		slugLock,
 		render.NewRenderer(),
 		testutil.ContentEncryptor(t, "note"),
-		crypto.NewEditCodeHasher(crypto.DefaultArgon2Params()),
+		crypto.NewEditCodeHasher(testutil.Argon2Params()),
 		log,
 		false,
 	)
@@ -81,7 +81,7 @@ func TestAPITokenFlow_AdminIssuesKey_CLICreatesNote(t *testing.T) {
 		sqliterepo.NewNoteRepository(db),
 		slugLock,
 		testutil.ContentEncryptor(t, "link"),
-		crypto.NewEditCodeHasher(crypto.DefaultArgon2Params()),
+		crypto.NewEditCodeHasher(testutil.Argon2Params()),
 		log,
 		false,
 	)

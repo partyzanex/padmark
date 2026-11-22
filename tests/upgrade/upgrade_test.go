@@ -48,7 +48,7 @@ func runUpgrade(t *testing.T, db *bun.DB, repos repositories, fixture []legacyNo
 	assertStoredRowsConverted(t, db, fixture)
 
 	manager := notes.NewManager(repos.notes, repos.links, lock.NewLocker(), render.NewRenderer(),
-		testutil.ContentEncryptor(t, "note"), crypto.NewEditCodeHasher(crypto.DefaultArgon2Params()),
+		testutil.ContentEncryptor(t, "note"), crypto.NewEditCodeHasher(testutil.Argon2Params()),
 		slog.New(slog.DiscardHandler), true)
 
 	assertNotesReadable(t, manager, fixture)
@@ -73,7 +73,7 @@ func newKeyManager(t *testing.T, db *bun.DB) *contentkeys.Manager {
 	require.NoError(t, err)
 
 	return contentkeys.New(keyrepo.New(db), ring, noteCipher, linkCipher, fileCipher,
-		crypto.NewEditCodeHasher(crypto.DefaultArgon2Params()))
+		crypto.NewEditCodeHasher(testutil.Argon2Params()))
 }
 
 // assertSchemaKeepsLegacyRows: schema migrations must neither expire nor rewrite v0.1.6 rows;

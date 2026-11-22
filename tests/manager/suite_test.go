@@ -59,7 +59,7 @@ func newManager(
 
 	return notes.NewManager(
 		storage, linkChecker, slugLock, render.NewRenderer(), testutil.ContentEncryptor(t, "note"),
-		crypto.NewEditCodeHasher(crypto.DefaultArgon2Params()), discardLog(), true,
+		crypto.NewEditCodeHasher(testutil.Argon2Params()), discardLog(), true,
 	)
 }
 
@@ -70,7 +70,7 @@ func newLinkManager(
 
 	return links.NewManager(
 		storage, notesChecker, slugLock, testutil.ContentEncryptor(t, "link"),
-		crypto.NewEditCodeHasher(crypto.DefaultArgon2Params()), discardLog(), true,
+		crypto.NewEditCodeHasher(testutil.Argon2Params()), discardLog(), true,
 	)
 }
 

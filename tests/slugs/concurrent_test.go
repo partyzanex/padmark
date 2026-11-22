@@ -113,7 +113,7 @@ func replica(t *testing.T, db *bun.DB, gate *createGate) *httptest.Server {
 	noteRepo, linkRepo := repositories(db)
 	log := slog.New(slog.DiscardHandler)
 	localLock := lock.NewLocker()
-	hasher := crypto.NewEditCodeHasher(crypto.DefaultArgon2Params())
+	hasher := crypto.NewEditCodeHasher(testutil.Argon2Params())
 	noteManager := notes.NewManager(&pausedNotes{Storage: noteRepo, gate: gate}, linkRepo, localLock,
 		render.NewRenderer(), testutil.ContentEncryptor(t, "note"), hasher, log, true)
 	linkManager := links.NewManager(&pausedLinks{Storage: linkRepo, gate: gate}, noteRepo, localLock,

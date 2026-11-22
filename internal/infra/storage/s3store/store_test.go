@@ -20,6 +20,7 @@ import (
 	"github.com/partyzanex/padmark/internal/infra/lock"
 	"github.com/partyzanex/padmark/internal/infra/storage/s3store"
 	"github.com/partyzanex/padmark/internal/infra/storage/sqlite"
+	"github.com/partyzanex/padmark/internal/testutil"
 	"github.com/partyzanex/padmark/internal/usecases/files"
 )
 
@@ -171,7 +172,7 @@ func (s *StoreSuite) newManager() *files.Manager {
 		Objects:   s.store,
 		Cipher:    crypto.NewFileCipher(),
 		Encryptor: encryptor,
-		Hasher:    crypto.NewEditCodeHasher(crypto.DefaultArgon2Params()),
+		Hasher:    crypto.NewEditCodeHasher(testutil.Argon2Params()),
 		SlugLock:  lock.NewLocker(),
 		Notes:     sqlite.NewNoteRepository(db),
 		Links:     sqlite.NewLinkRepository(db, slog.New(slog.DiscardHandler)),

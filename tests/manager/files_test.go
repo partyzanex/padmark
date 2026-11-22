@@ -79,7 +79,7 @@ func newFileManager(
 		Objects:   objects,
 		Cipher:    crypto.NewFileCipher(),
 		Encryptor: testutil.ContentEncryptor(testSuite.T(), "file"),
-		Hasher:    crypto.NewEditCodeHasher(crypto.DefaultArgon2Params()),
+		Hasher:    crypto.NewEditCodeHasher(testutil.Argon2Params()),
 		SlugLock:  slugLock,
 		Notes:     notes,
 		Links:     links,

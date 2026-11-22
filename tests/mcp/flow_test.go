@@ -48,7 +48,7 @@ const (
 	flowS3Bucket    = "padmark-files"
 )
 
-var flowArgon2 = crypto.Argon2Params{Memory: 8 * 1024, Time: 1, Threads: 1} //nolint:gochecknoglobals // test fixture
+var flowArgon2 = testutil.Argon2Params() //nolint:gochecknoglobals // test fixture
 
 // testStack bundles the pieces the tests reach into directly.
 type testStack struct {
@@ -387,7 +387,7 @@ func newTestManagers(t *testing.T, db *bun.DB, slugLock *lock.Locker) (*notes.Ma
 		slugLock,
 		render.NewRenderer(),
 		testutil.ContentEncryptor(t, "note"),
-		crypto.NewEditCodeHasher(crypto.DefaultArgon2Params()),
+		crypto.NewEditCodeHasher(testutil.Argon2Params()),
 		discardTestLogger(),
 		false,
 	)
@@ -396,7 +396,7 @@ func newTestManagers(t *testing.T, db *bun.DB, slugLock *lock.Locker) (*notes.Ma
 		sqliterepo.NewNoteRepository(db),
 		slugLock,
 		testutil.ContentEncryptor(t, "link"),
-		crypto.NewEditCodeHasher(crypto.DefaultArgon2Params()),
+		crypto.NewEditCodeHasher(testutil.Argon2Params()),
 		discardTestLogger(),
 		false,
 	)
@@ -422,7 +422,7 @@ func newTestFileManager(t *testing.T, db *bun.DB, slugLock *lock.Locker, endpoin
 		Objects:   objects,
 		Cipher:    crypto.NewFileCipher(),
 		Encryptor: testutil.ContentEncryptor(t, "file"),
-		Hasher:    crypto.NewEditCodeHasher(crypto.DefaultArgon2Params()),
+		Hasher:    crypto.NewEditCodeHasher(testutil.Argon2Params()),
 		SlugLock:  slugLock,
 		Notes:     sqliterepo.NewNoteRepository(db),
 		Links:     sqliterepo.NewLinkRepository(db, discardTestLogger()),

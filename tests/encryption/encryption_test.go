@@ -27,6 +27,7 @@ import (
 	keyrepo "github.com/partyzanex/padmark/internal/infra/storage/contentkeys"
 	pgrepo "github.com/partyzanex/padmark/internal/infra/storage/postgres"
 	sqliterepo "github.com/partyzanex/padmark/internal/infra/storage/sqlite"
+	"github.com/partyzanex/padmark/internal/testutil"
 	keys "github.com/partyzanex/padmark/internal/usecases/contentkeys"
 )
 
@@ -103,9 +104,7 @@ func manager(t *testing.T, store keys.Storage, ring *crypto.ContentKeyring) *key
 	files, err := ring.ForResource("file")
 	require.NoError(t, err)
 
-	return keys.New(store, ring, notes, links, files, crypto.NewEditCodeHasher(crypto.Argon2Params{
-		Memory: 0, Time: 0, Threads: 0,
-	}))
+	return keys.New(store, ring, notes, links, files, crypto.NewEditCodeHasher(testutil.Argon2Params()))
 }
 
 func reset(t *testing.T, db *bun.DB) {

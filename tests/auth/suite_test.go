@@ -10,17 +10,15 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/partyzanex/padmark/internal/domain"
-	"github.com/partyzanex/padmark/internal/infra/crypto"
+	"github.com/partyzanex/padmark/internal/testutil"
 )
 
-// testArgon2Params uses minimal argon2id cost so these end-to-end flow tests exercise real
-// hash/verify logic without paying crypto.DefaultArgon2Params' production-strength (64 MiB)
-// cost on every test; that cost is deliberate for brute-force resistance in production, not
-// something these flow tests need to pay, and is covered on its own in internal/infra/crypto's
-// tests.
+// testArgon2Params is the minimal argon2id cost (testutil.Argon2Params): these end-to-end flow
+// tests exercise real hash/verify logic, and the production cost is covered on its own in
+// internal/infra/crypto's tests.
 //
 //nolint:gochecknoglobals // test helper
-var testArgon2Params = crypto.Argon2Params{Memory: 8 * 1024, Time: 1, Threads: 1}
+var testArgon2Params = testutil.Argon2Params()
 
 type userRepo interface {
 	Create(ctx context.Context, u *domain.User) error
