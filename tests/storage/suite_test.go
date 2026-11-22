@@ -48,7 +48,7 @@ type userRepo interface {
 
 type sessionRepo interface {
 	Create(ctx context.Context, s *domain.Session) error
-	Get(ctx context.Context, sessionID string) (*domain.Session, error)
+	Get(ctx context.Context, sessionID string, now time.Time) (*domain.Session, error)
 	Delete(ctx context.Context, sessionID string) error
 	DeleteByUserID(ctx context.Context, userID uuid.UUID) error
 	DeleteByUserIDExcept(ctx context.Context, userID uuid.UUID, exceptSessionID string) error
@@ -67,7 +67,7 @@ type apiTokenRepo interface {
 type inviteRepo interface {
 	Create(ctx context.Context, inv *domain.Invite) error
 	DeleteStale(ctx context.Context, now time.Time) error
-	RedeemInvite(ctx context.Context, tokenHash, username string, usr *domain.User) error
+	RedeemInvite(ctx context.Context, tokenHash, username string, usr *domain.User, now time.Time) error
 }
 
 type revealRepo interface {
@@ -76,32 +76,37 @@ type revealRepo interface {
 	DeleteStale(ctx context.Context, now time.Time) error
 }
 
-// noteRepo lists only the note methods whose signatures stay fixed during the current
-// refactoring of the note read paths: Create, Get, Update, Delete and DeleteExpired.
+// noteRepo lists the note methods of the contract. Each method that compares times gets now.
 type noteRepo interface {
 	Create(ctx context.Context, note *domain.Note) error
 	Get(ctx context.Context, id string) (*domain.Note, error)
-	Update(ctx context.Context, id string, note *domain.Note) error
+	Consume(
+		ctx context.Context, id string, expected domain.Privacy, storedEditCode string, now time.Time,
+	) (*domain.Note, error)
+	Update(ctx context.Context, id string, note *domain.Note, now time.Time) error
 	Delete(ctx context.Context, id, storedEditCode string) error
-	DeleteExpired(ctx context.Context, id string) error
+	DeleteExpired(ctx context.Context, id string, now time.Time) error
 }
 
-// linkRepo lists only the link methods whose signatures stay fixed during the current
-// refactoring of the link read paths. Consume, ConsumeVisible, IncrementViews and
+// linkRepo lists the link methods of the contract. ConsumeVisible, IncrementViews and
 // IncrementViewsVisible are not in the contract yet.
 type linkRepo interface {
 	Create(ctx context.Context, link *domain.Link) error
 	GetByID(ctx context.Context, id string) (*domain.Link, error)
-	Update(ctx context.Context, id, storedEditCode string, patch *domain.LinkPatch) (*domain.Link, error)
+	Consume(ctx context.Context, id string, now time.Time) (*domain.Link, error)
+	Update(
+		ctx context.Context, id, storedEditCode string, patch *domain.LinkPatch, now time.Time,
+	) (*domain.Link, error)
 	Delete(ctx context.Context, id, storedEditCode string) error
-	DeleteExpired(ctx context.Context, id string) error
+	DeleteExpired(ctx context.Context, id string, now time.Time) error
 }
 
-// fileRepo lists the file methods that do not depend on the read model that is changing now.
-// ClaimBurn, ReleaseBurn, IncrementDownloadsVisible and Update are not in the contract yet.
+// fileRepo lists the file methods of the contract. ClaimBurn, ReleaseBurn and
+// IncrementDownloadsVisible are not in the contract yet.
 type fileRepo interface {
 	Create(ctx context.Context, file *domain.File) error
-	GetByID(ctx context.Context, id string) (*domain.File, error)
+	GetByID(ctx context.Context, id string, now time.Time) (*domain.File, error)
+	Update(ctx context.Context, id, objectKey string, opts files.UpdateOptions, now time.Time) error
 	Delete(ctx context.Context, id, objectKey string) error
 	ListExpired(ctx context.Context, now time.Time, after files.ExpiredCursor, limit int) ([]*domain.File, error)
 	DeleteExpired(ctx context.Context, id, objectKey string, now time.Time) error
@@ -179,10 +184,12 @@ func runContract(t *testing.T, open opener) {
 
 // --- helpers ---
 
-// now returns the current time in UTC, truncated to microseconds: PostgreSQL keeps
-// microseconds, so a round trip then gives an equal value on both dialects.
+// now is the clock of the contract: it always returns the same time. The repositories never
+// read the clock: each method that compares times gets now as a parameter, so the expiry cases
+// do not depend on the real clock. The time has whole seconds, because PostgreSQL keeps only
+// microseconds.
 func now() time.Time {
-	return time.Now().UTC().Truncate(time.Microsecond)
+	return time.Date(2026, time.November, 20, 12, 0, 0, 0, time.UTC)
 }
 
 func newUser(username string, isAdmin bool) *domain.User {

@@ -25,7 +25,7 @@ func customSlugNote() *domain.Note {
 func (s *ManagerTestSuite) TestCreate_CustomSlugReleasesExpiredHolder() {
 	gomock.InOrder(
 		s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(domain.ErrSlugConflict),
-		s.expired.EXPECT().ReleaseExpiredSlug(gomock.Any(), domain.HashSlug("report")).Return(true, nil),
+		s.expired.EXPECT().ReleaseExpiredSlug(gomock.Any(), domain.HashSlug("report"), testNow()).Return(true, nil),
 		s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil),
 	)
 
@@ -38,7 +38,7 @@ func (s *ManagerTestSuite) TestCreate_CustomSlugReleasesExpiredHolder() {
 func (s *ManagerTestSuite) TestCreate_CustomSlugConflict() {
 	s.Run("live holder", func() {
 		s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(domain.ErrSlugConflict)
-		s.expired.EXPECT().ReleaseExpiredSlug(gomock.Any(), gomock.Any()).Return(false, nil)
+		s.expired.EXPECT().ReleaseExpiredSlug(gomock.Any(), gomock.Any(), testNow()).Return(false, nil)
 
 		_, err := s.manager.Create(s.T().Context(), customSlugNote())
 		s.Require().ErrorIs(err, domain.ErrSlugConflict)
@@ -46,7 +46,7 @@ func (s *ManagerTestSuite) TestCreate_CustomSlugConflict() {
 
 	s.Run("release error is fail-soft", func() {
 		s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(domain.ErrSlugConflict)
-		s.expired.EXPECT().ReleaseExpiredSlug(gomock.Any(), gomock.Any()).Return(false, errors.New("db down"))
+		s.expired.EXPECT().ReleaseExpiredSlug(gomock.Any(), gomock.Any(), testNow()).Return(false, errors.New("db down"))
 
 		_, err := s.manager.Create(s.T().Context(), customSlugNote())
 		s.Require().ErrorIs(err, domain.ErrSlugConflict)
@@ -54,7 +54,7 @@ func (s *ManagerTestSuite) TestCreate_CustomSlugConflict() {
 
 	s.Run("another record takes the slug before the second attempt", func() {
 		s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(domain.ErrSlugConflict)
-		s.expired.EXPECT().ReleaseExpiredSlug(gomock.Any(), gomock.Any()).Return(true, nil)
+		s.expired.EXPECT().ReleaseExpiredSlug(gomock.Any(), gomock.Any(), testNow()).Return(true, nil)
 		s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(domain.ErrSlugConflict)
 
 		_, err := s.manager.Create(s.T().Context(), customSlugNote())

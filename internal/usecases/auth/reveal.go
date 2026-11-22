@@ -22,7 +22,7 @@ type RevealTokenStore interface {
 	// at now, in one atomic statement. It returns false and no error when a condition is not
 	// met, and an error only when the store fails.
 	Consume(ctx context.Context, tokenHash, noteID string, now time.Time) (bool, error)
-	// DeleteStale removes the tokens that expired before now and the used tokens. Fail-soft:
+	// DeleteStale removes the tokens that are expired at now and the used tokens. Fail-soft:
 	// Issue calls it after it stores a new token and only logs an error.
 	DeleteStale(ctx context.Context, now time.Time) error
 }
@@ -32,11 +32,12 @@ type RevealTokenStore interface {
 type RevealManager struct {
 	store RevealTokenStore
 	log   *slog.Logger
+	now   func() time.Time
 }
 
-// NewRevealManager returns a new RevealManager.
-func NewRevealManager(store RevealTokenStore, log *slog.Logger) *RevealManager {
-	return &RevealManager{store: store, log: log}
+// NewRevealManager returns a new RevealManager. now is the time source of token expiry.
+func NewRevealManager(store RevealTokenStore, log *slog.Logger, now func() time.Time) *RevealManager {
+	return &RevealManager{store: store, log: log, now: now}
 }
 
 // Issue returns a new one-time token bound to noteID that is valid for ten minutes. The store
@@ -44,10 +45,10 @@ func NewRevealManager(store RevealTokenStore, log *slog.Logger) *RevealManager {
 func (m *RevealManager) Issue(ctx context.Context, noteID string) (string, error) {
 	tok, err := newRandomToken()
 	if err != nil {
-		return "", fmt.Errorf("new reveal token: %w", err)
+		return "", err
 	}
 
-	now := time.Now()
+	now := m.now()
 
 	err = m.store.Create(ctx, domain.HashRevealToken(tok), noteID, now.Add(revealTokenTTL))
 	if err != nil {
@@ -69,7 +70,7 @@ func (m *RevealManager) Issue(ctx context.Context, noteID string) (string, error
 // and must not show the failure as a wrong token. Consume does not log the error: the caller
 // that answers the request logs it once.
 func (m *RevealManager) Consume(ctx context.Context, tok, noteID string) (bool, error) {
-	consumed, err := m.store.Consume(ctx, domain.HashRevealToken(tok), noteID, time.Now())
+	consumed, err := m.store.Consume(ctx, domain.HashRevealToken(tok), noteID, m.now())
 	if err != nil {
 		return false, fmt.Errorf("consume reveal token: %w", err)
 	}

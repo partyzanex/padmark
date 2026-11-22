@@ -64,10 +64,10 @@ func (s *LinkSuite) TestUpdate_WritesOnlyThePatch() {
 		ClearExpiry: false, ResetDirectRedirect: false,
 	}
 
-	_, err := s.be.links.Update(ctx, "link-1", "wrong-hash", patch)
+	_, err := s.be.links.Update(ctx, "link-1", "wrong-hash", patch, now())
 	s.Require().ErrorIs(err, domain.ErrNotFound, "a different version is not changed")
 
-	got, err := s.be.links.Update(ctx, "link-1", "edit-hash", patch)
+	got, err := s.be.links.Update(ctx, "link-1", "edit-hash", patch, now())
 	s.Require().NoError(err)
 	s.Equal("new-ciphertext", got.TargetURL)
 	s.Require().NotNil(got.ExpiresAt, "an omitted expiry stays")
@@ -79,7 +79,7 @@ func (s *LinkSuite) TestUpdate_WritesOnlyThePatch() {
 	patch.ClearExpiry = true
 	patch.ResetDirectRedirect = true
 
-	got, err = s.be.links.Update(ctx, "link-1", "edit-hash", patch)
+	got, err = s.be.links.Update(ctx, "link-1", "edit-hash", patch, now())
 	s.Require().NoError(err)
 	s.Nil(got.ExpiresAt)
 	s.Nil(got.DirectRedirect)
@@ -104,7 +104,7 @@ func (s *LinkSuite) TestDeleteExpired_RemovesOnlyExpired() {
 	past := now().Add(-time.Minute)
 	s.Require().NoError(s.be.links.Create(ctx, newLink("expired", &past)))
 
-	s.Require().NoError(s.be.links.DeleteExpired(ctx, "expired"))
-	s.Require().ErrorIs(s.be.links.DeleteExpired(ctx, "live"), domain.ErrNotFound)
-	s.Require().ErrorIs(s.be.links.DeleteExpired(ctx, "forever"), domain.ErrNotFound)
+	s.Require().NoError(s.be.links.DeleteExpired(ctx, "expired", now()))
+	s.Require().ErrorIs(s.be.links.DeleteExpired(ctx, "live", now()), domain.ErrNotFound)
+	s.Require().ErrorIs(s.be.links.DeleteExpired(ctx, "forever", now()), domain.ErrNotFound)
 }

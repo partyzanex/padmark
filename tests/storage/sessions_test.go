@@ -22,7 +22,7 @@ func (s *SessionSuite) TestCreate_Get_RoundTrip() {
 
 	s.Require().NoError(s.be.sessions.Create(ctx, sess))
 
-	got, err := s.be.sessions.Get(ctx, "hash-1")
+	got, err := s.be.sessions.Get(ctx, "hash-1", now())
 	s.Require().NoError(err)
 	s.Equal(usr.ID, got.UserID)
 	s.Equal(sess.UserAgent, got.UserAgent)
@@ -37,10 +37,10 @@ func (s *SessionSuite) TestGet_ExpiredAndUnknown_LookTheSame() {
 	usr := s.createUser("bob", false)
 	s.Require().NoError(s.be.sessions.Create(ctx, newSession("expired", usr.ID, now().Add(-time.Minute))))
 
-	_, err := s.be.sessions.Get(ctx, "expired")
+	_, err := s.be.sessions.Get(ctx, "expired", now())
 	s.Require().ErrorIs(err, domain.ErrSessionExpired)
 
-	_, err = s.be.sessions.Get(ctx, "unknown")
+	_, err = s.be.sessions.Get(ctx, "unknown", now())
 	s.Require().ErrorIs(err, domain.ErrSessionExpired)
 }
 
@@ -52,7 +52,7 @@ func (s *SessionSuite) TestDelete() {
 	s.Require().NoError(s.be.sessions.Delete(ctx, "doomed"))
 	s.Require().NoError(s.be.sessions.Delete(ctx, "doomed"), "a second delete is not an error")
 
-	_, err := s.be.sessions.Get(ctx, "doomed")
+	_, err := s.be.sessions.Get(ctx, "doomed", now())
 	s.Require().ErrorIs(err, domain.ErrSessionExpired)
 }
 
@@ -69,11 +69,11 @@ func (s *SessionSuite) TestDeleteByUserID_KeepsOtherUsers() {
 	s.Require().NoError(s.be.sessions.DeleteByUserID(ctx, owner.ID))
 	s.Require().NoError(s.be.sessions.DeleteByUserID(ctx, uuid.New()), "a user without sessions is not an error")
 
-	_, err := s.be.sessions.Get(ctx, "owner-1")
+	_, err := s.be.sessions.Get(ctx, "owner-1", now())
 	s.Require().ErrorIs(err, domain.ErrSessionExpired)
-	_, err = s.be.sessions.Get(ctx, "owner-2")
+	_, err = s.be.sessions.Get(ctx, "owner-2", now())
 	s.Require().ErrorIs(err, domain.ErrSessionExpired)
-	_, err = s.be.sessions.Get(ctx, "other")
+	_, err = s.be.sessions.Get(ctx, "other", now())
 	s.NoError(err)
 }
 
@@ -87,9 +87,9 @@ func (s *SessionSuite) TestDeleteByUserIDExcept_KeepsTheException() {
 
 	s.Require().NoError(s.be.sessions.DeleteByUserIDExcept(ctx, owner.ID, "keep"))
 
-	_, err := s.be.sessions.Get(ctx, "keep")
+	_, err := s.be.sessions.Get(ctx, "keep", now())
 	s.Require().NoError(err)
-	_, err = s.be.sessions.Get(ctx, "drop")
+	_, err = s.be.sessions.Get(ctx, "drop", now())
 	s.Require().ErrorIs(err, domain.ErrSessionExpired)
 }
 
@@ -104,7 +104,7 @@ func (s *SessionSuite) TestDeleteExpired_RemovesOnlyExpired() {
 	s.Require().NoError(s.be.sessions.DeleteExpired(ctx, instant))
 
 	s.Equal(int64(1), s.sessionRows())
-	_, err := s.be.sessions.Get(ctx, "live")
+	_, err := s.be.sessions.Get(ctx, "live", now())
 	s.NoError(err)
 }
 

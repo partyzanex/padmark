@@ -50,7 +50,7 @@ func (s *RepositoryTestSuite) TestStaleVersion_UpdateKeepsNewNote() {
 	stale := *checked
 	stale.Title, stale.Content, stale.UpdatedAt = "overwritten", "overwritten", time.Now().UTC()
 
-	s.Require().ErrorIs(s.repo.Update(ctx, reusedID, &stale), domain.ErrNotFound)
+	s.Require().ErrorIs(s.repo.Update(ctx, reusedID, &stale, time.Now()), domain.ErrNotFound)
 
 	got, err := s.repo.Get(ctx, reusedID)
 	s.Require().NoError(err)
@@ -77,7 +77,7 @@ func (s *RepositoryTestSuite) TestStaleVersion_BurnKeepsNewNote() {
 	// Version 2 is a burn note with the same privacy, so only the version check refuses it.
 	checked := s.replaceNote(noteVersion("second", "s1$second-salt$second-key", true))
 
-	_, err := s.repo.Consume(ctx, reusedID, domain.PrivacyPublic, checked.EditCode)
+	_, err := s.repo.Consume(ctx, reusedID, domain.PrivacyPublic, checked.EditCode, time.Now())
 	s.Require().ErrorIs(err, domain.ErrNotFound)
 
 	_, err = s.repo.SetBurnExpiry(ctx, reusedID, time.Now().Add(time.Hour), domain.PrivacyPublic, checked.EditCode)
@@ -116,7 +116,7 @@ func (s *LinkRepositoryTestSuite) TestStaleVersion_UpdateKeepsNewLink() {
 	ctx := s.T().Context()
 	checked := s.replaceLink(linkVersion("second target", "s1$second-salt$second-key"))
 
-	_, err := s.repo.Update(ctx, reusedID, checked.EditCode, targetPatch("overwritten"))
+	_, err := s.repo.Update(ctx, reusedID, checked.EditCode, targetPatch("overwritten"), time.Now())
 	s.Require().ErrorIs(err, domain.ErrNotFound)
 
 	got, err := s.repo.GetByID(ctx, reusedID)

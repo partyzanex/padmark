@@ -167,11 +167,11 @@ func validateEncryptionFlags(cmd *cli.Command) error {
 func encryptionAction(ctx context.Context, cmd *cli.Command) error {
 	flagErr := validateEncryptionFlags(cmd)
 	if flagErr != nil {
-		return fmt.Errorf("validate encryption flags: %w", flagErr)
+		return flagErr
 	}
 
 	if cmd.Name == "keygen" {
-		return errorcontext.Wrap(generateKeyring(cmd), "generate keyring")
+		return generateKeyring(cmd)
 	}
 
 	log := newLogger(DefaultLogLevel, DefaultLogFormat)
@@ -188,18 +188,18 @@ func encryptionAction(ctx context.Context, cmd *cli.Command) error {
 			return contentkeys.Wrap(err)
 		}
 
-		return errorcontext.Wrap(writeKeyring(cmd, keyring), "write keyring")
+		return writeKeyring(cmd, keyring)
 	}
 
 	argonErr := validateArgon2Config(cmd)
 	if argonErr != nil {
-		return fmt.Errorf("validate argon2 config: %w", argonErr)
+		return argonErr
 	}
 
 	// Bound argon2id workspace before converted legacy edit codes are hashed.
 	hasher, err := prepareArgon2(cmd)
 	if err != nil {
-		return fmt.Errorf("prepare argon2: %w", err)
+		return err
 	}
 
 	db, err := openDB(ctx, cmd.String(FlagStorage), cmd.String(FlagDSN), log)
@@ -248,7 +248,7 @@ func runEncryptionOperation(ctx context.Context, cmd *cli.Command, db *bun.DB,
 			return contentkeys.Wrap(err)
 		}
 
-		return errorcontext.Wrap(writeKeyring(cmd, keyring), "write keyring")
+		return writeKeyring(cmd, keyring)
 	case "key-remove":
 		id := cmd.String(flagKeyID)
 		if _, exists := keyring.Keys[id]; !exists {
@@ -262,9 +262,9 @@ func runEncryptionOperation(ctx context.Context, cmd *cli.Command, db *bun.DB,
 
 		delete(keyring.Keys, id)
 
-		return errorcontext.Wrap(writeKeyring(cmd, keyring), "write keyring")
+		return writeKeyring(cmd, keyring)
 	default:
-		return errorcontext.Wrap(runEncryptionData(ctx, cmd, manager), "run encryption data")
+		return runEncryptionData(ctx, cmd, manager)
 	}
 }
 
@@ -331,7 +331,7 @@ func generateKeyring(cmd *cli.Command) error {
 		return contentkeys.Wrap(err)
 	}
 
-	return errorcontext.Wrap(writeKeyring(cmd, keyring), "write keyring")
+	return writeKeyring(cmd, keyring)
 }
 
 func writeKeyring(cmd *cli.Command, keyring *crypto.ContentKeyring) error {
@@ -388,7 +388,7 @@ func validateContentEncryption(
 ) error {
 	manager, err := newEncryptionManager(db, keyring, hasher)
 	if err != nil {
-		return fmt.Errorf("new encryption manager: %w", err)
+		return err
 	}
 
 	log.InfoContext(ctx, "preparing stored content; pending migrations run automatically")

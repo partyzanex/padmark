@@ -211,11 +211,11 @@ func (s *UserRepositoryTestSuite) TestChangePassword_RevocationFailure_RollsBack
 	s.Equal(alice.KDFSalt, got.KDFSalt)
 	s.Equal(alice.TOTPSecret, got.TOTPSecret)
 
-	_, err = sessions.Get(ctx, "alice-new")
+	_, err = sessions.Get(ctx, "alice-new", time.Now())
 	s.Require().ErrorIs(err, domain.ErrSessionExpired, "the new session must not exist")
 
 	for _, old := range []string{"alice-old-1", "alice-old-2"} {
-		_, err = sessions.Get(ctx, old)
+		_, err = sessions.Get(ctx, old, time.Now())
 		s.Require().NoError(err, "old session %s must stay after a rollback", old)
 	}
 

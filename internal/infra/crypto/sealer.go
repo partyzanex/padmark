@@ -62,12 +62,7 @@ func NewSealer(params Argon2Params) *Sealer {
 
 // GenerateSalt returns a fresh random per-user KDF salt (16 bytes).
 func (*Sealer) GenerateSalt() ([]byte, error) {
-	operationResult, operationErr := GenerateKDFSalt()
-	if operationErr != nil {
-		return operationResult, fmt.Errorf("generate kdfsalt: %w", operationErr)
-	}
-
-	return operationResult, nil
+	return GenerateKDFSalt()
 }
 
 // Seal encrypts secret under a key derived from password and salt, returning a versioned
@@ -75,7 +70,7 @@ func (*Sealer) GenerateSalt() ([]byte, error) {
 func (s *Sealer) Seal(secret string, password, salt []byte) (string, error) {
 	key, err := DeriveUserKey(password, salt, s.params)
 	if err != nil {
-		return "", fmt.Errorf("derive user key: %w", err)
+		return "", err
 	}
 
 	ciphertext, err := s.enc.Encrypt(secret, key)
@@ -102,12 +97,7 @@ func (s *Sealer) Open(sealed string, password, salt []byte) (secret string, stal
 			return "", false, errInvalidSealedSecret
 		}
 
-		operationResult1, operationResult2, operationErr := s.openLegacy(sealed, password, salt)
-		if operationErr != nil {
-			return operationResult1, operationResult2, fmt.Errorf("open legacy: %w", operationErr)
-		}
-
-		return operationResult1, operationResult2, nil
+		return s.openLegacy(sealed, password, salt)
 	}
 
 	if params.exceeds(s.ceiling) {
@@ -116,7 +106,7 @@ func (s *Sealer) Open(sealed string, password, salt []byte) (secret string, stal
 
 	key, err := DeriveUserKey(password, salt, params)
 	if err != nil {
-		return "", false, fmt.Errorf("derive user key: %w", err)
+		return "", false, err
 	}
 
 	plaintext, err := s.enc.Decrypt(ciphertext, key)
@@ -134,7 +124,7 @@ func (s *Sealer) Open(sealed string, password, salt []byte) (secret string, stal
 func (s *Sealer) openLegacy(sealed string, password, salt []byte) (secret string, stale bool, err error) {
 	argonKey, err := DeriveUserKey(password, salt, s.params)
 	if err != nil {
-		return "", false, fmt.Errorf("derive user key: %w", err)
+		return "", false, err
 	}
 
 	plaintext, argonErr := s.enc.Decrypt(sealed, argonKey)
@@ -144,7 +134,7 @@ func (s *Sealer) openLegacy(sealed string, password, salt []byte) (secret string
 
 	hkdfKey, err := deriveUserKeyHKDF(password, salt)
 	if err != nil {
-		return "", false, fmt.Errorf("derive user key hkdf: %w", err)
+		return "", false, err
 	}
 
 	plaintext, hkdfErr := s.enc.Decrypt(sealed, hkdfKey)

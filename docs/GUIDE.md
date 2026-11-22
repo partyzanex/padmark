@@ -156,9 +156,22 @@ type Storage interface {
 ```
 
 [notes.NewManager](../internal/usecases/notes/manager.go) receives a `notes.Deps` (storage, a
-renderer, an encryptor, an edit-code hasher, the shared expired-slug releaser and the logger) and
-the custom-slug setting. Its optional render cache defaults to a no-op implementation.
-`links.NewManager` takes a `links.Deps` with the same pattern, as `files.NewManager` does.
+renderer, an encryptor, an edit-code hasher, the shared expired-slug releaser, the logger and the
+clock `Now`) and the custom-slug setting. Its optional render cache defaults to a no-op
+implementation. `links.NewManager` takes a `links.Deps` with the same pattern, as
+`files.NewManager` does. `auth.NewManager` takes an `auth.Deps` with the clock of the four
+account managers.
+
+Each manager reads the time only through its `Now` field: the composition root gives
+`time.Now`, unit tests give a fixed clock. A storage method that compares times gets that time
+as its `now` parameter, and no repository reads the clock. A `Create` method uses the
+`CreatedAt` of the new record instead (the link sweep and the API token limit).
+One expiry rule applies to notes, links, files, sessions, invites, reveal tokens and API tokens:
+a record is expired from its `expires_at` moment on (`now >= expires_at`), so a TTL of N
+seconds gives exactly N seconds of life. `domain.Note.Expired`, `Link.Expired`, `File.Expired`
+and `APIToken.Expired` implement it; the SQL forms are `expiredWhere`
+(`expires_at <= now`) and `liveWhere` (`expires_at > now`) in each storage package, and
+`tests/storage` pins the boundary on both dialects.
 
 The three managers apply the access rules themselves, with the `domain.Reader` of the request.
 The adapter only selects the format and translates the errors:
@@ -516,6 +529,14 @@ Wrap errors with the operation while preserving the chain:
 ```go
 return fmt.Errorf("create note: %w", err)
 ```
+
+Wrap an error once in each package: where it enters the package from another package (a
+storage, cipher or client call). An error from a function of the same package goes up as it is,
+so a chain does not repeat function names. A label names the operation and, where useful, the
+hashed record ID (`domain.HashSlug`); it never contains a raw slug or user content. Repository
+labels start with the dialect (`sqlite get session`), so the usecase label above them is not
+the same text. The CLI and MCP adapters keep their labels, because their error text is output
+for the user.
 
 Repositories translate SQL errors into domain sentinels. HTTP's `domainErrStatus` maps
 sentinels to status/message pairs; JSON, HTML and ogen responses derive from that mapping.

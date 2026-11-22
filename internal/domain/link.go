@@ -86,8 +86,8 @@ func (l *Link) EffectiveDirectRedirect(serverDefault bool) bool {
 	return allowed
 }
 
-// Expired reports whether l's TTL has elapsed as of now. A nil ExpiresAt means the link never
-// expires. links.Manager applies it; notes and files use the same comparison.
+// Expired reports whether l is expired at now: its expiry is now or earlier. A nil ExpiresAt
+// means the link never expires. Notes, files and API tokens use the same comparison.
 func (l *Link) Expired(now time.Time) bool {
 	return expired(l.ExpiresAt, now)
 }

@@ -3,7 +3,6 @@ package contentkeys
 import (
 	"context"
 	"errors"
-	"fmt"
 
 	"github.com/partyzanex/padmark/internal/errorcontext"
 )
@@ -36,12 +35,7 @@ func (m *Manager) PruneCorrupt(ctx context.Context) (Report, error) {
 
 	err = m.deleteCorruptRows(ctx, &report)
 	if err != nil {
-		operationResult, operationErr := m.failureReport(ctx, &report, err)
-		if operationErr != nil {
-			return operationResult, fmt.Errorf("failure report: %w", operationErr)
-		}
-
-		return operationResult, nil
+		return m.failureReport(ctx, &report, err)
 	}
 
 	final, err := m.Status(ctx)

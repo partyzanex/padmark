@@ -48,7 +48,7 @@ func (s *ManagerTestSuite) TestUpdate_HiddenExpiredLinkIsForbidden() {
 
 // expiredLink is a stored link of owner that expired one minute ago.
 func expiredLink(owner uuid.UUID, privacy *domain.Privacy) *domain.Link {
-	past := time.Now().Add(-time.Minute)
+	past := testNow().Add(-time.Minute)
 
 	return &domain.Link{
 		OwnerID: &owner, EditCode: "original", ExpiresAt: &past, Privacy: privacy,

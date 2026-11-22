@@ -28,7 +28,7 @@ func (m *Manager) Update(
 ) (*domain.Link, error) {
 	validURL, err := validateTargetURL(targetURL)
 	if err != nil {
-		return nil, fmt.Errorf("validate target url: %w", err)
+		return nil, err
 	}
 
 	// No lock: omitted fields stay because the storage patch does not write them, and a stale
@@ -46,7 +46,8 @@ func (m *Manager) Update(
 	}
 
 	// An expired link is already gone for readers, so an update must not extend its life.
-	if existing.Expired(time.Now()) {
+	now := m.now()
+	if existing.Expired(now) {
 		return nil, domain.ErrExpired
 	}
 
@@ -59,7 +60,7 @@ func (m *Manager) Update(
 	// stays correct when another replica changes the other fields after GetByID.
 	err = validateLink(applyUpdateOptions(existing, opts))
 	if err != nil {
-		return nil, fmt.Errorf("validate link: %w", err)
+		return nil, err
 	}
 
 	ciphertext, err := m.encryptor.Encrypt(validURL, dbID)
@@ -69,7 +70,7 @@ func (m *Manager) Update(
 
 	// The patch carries only the fields that the caller sent. existing.EditCode is the stored
 	// hash, so the UPDATE changes only the link checked above, not a new link with this ID.
-	persisted, err := m.storage.Update(ctx, dbID, existing.EditCode, newLinkPatch(ciphertext, opts))
+	persisted, err := m.storage.Update(ctx, dbID, existing.EditCode, newLinkPatch(ciphertext, opts), now)
 	if err != nil {
 		return nil, fmt.Errorf("update link: %w", err)
 	}

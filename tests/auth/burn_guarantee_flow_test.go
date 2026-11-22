@@ -59,12 +59,14 @@ func newBurnGuaranteeEnv(t *testing.T, dbName string) ownerFlowEnv {
 			Sessions:  sqliterepo.NewSessionRepository(db),
 			APITokens: sqliterepo.NewAPITokenRepository(db),
 		},
-		crypto.NewPasswordHasher(testArgon2Params),
-		crypto.NewSealer(testArgon2Params),
-		crypto.NewTOTP(),
-		log,
-		"padmark-test",
-		time.Hour,
+		&auth.Deps{
+			PasswordHasher: crypto.NewPasswordHasher(testArgon2Params),
+			Sealer:         crypto.NewSealer(testArgon2Params),
+			TOTP:           crypto.NewTOTP(),
+			Log:            log,
+			Now:            time.Now,
+		},
+		"padmark-test", time.Hour,
 	)
 	require.NoError(t, err)
 
@@ -72,7 +74,7 @@ func newBurnGuaranteeEnv(t *testing.T, dbName string) ownerFlowEnv {
 
 	resolver := slugs.NewResolver(sqliterepo.NewSlugRepository(db))
 	handler := web.NewHandler(notesMgr, linksMgr, resolver, log).
-		WithRevealStore(auth.NewRevealManager(sqliterepo.NewRevealRepository(db), log)).
+		WithRevealStore(auth.NewRevealManager(sqliterepo.NewRevealRepository(db), log, time.Now)).
 		WithAuthManager(authMgr)
 	ogen := web.NewOgenHandler(notesMgr, linksMgr, web.NoPinger{}, log)
 	router, err := web.NewRouter(handler, ogen, &web.RouterOptions{

@@ -73,6 +73,7 @@ func attachFiles(
 		Hasher:       deps.hasher,
 		ExpiredSlugs: deps.expired,
 		Log:          log,
+		Now:          time.Now,
 	}, cmd.Int64(FlagMaxFileSize), cmd.Bool(FlagCustomSlugs)).
 		WithMetrics(deps.metrics)
 

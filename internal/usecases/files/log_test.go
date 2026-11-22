@@ -53,6 +53,7 @@ func (s *LogSuite) SetupTest() {
 		Hasher:       identityHasher(s.ctrl),
 		ExpiredSlugs: NewMockExpiredSlugReleaser(s.ctrl),
 		Log:          log,
+		Now:          testNow,
 	}, 10, true)
 }
 
@@ -74,7 +75,7 @@ func secretFile() *domain.File {
 }
 
 func (s *LogSuite) TestStatFailure() {
-	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(secretFile(), nil)
+	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any(), testNow()).Return(secretFile(), nil)
 	s.objects.EXPECT().Stat(gomock.Any(), loggedObjectKey).Return(errors.New("timeout"))
 
 	_, err := s.manager.Download(s.T().Context(), "abc", anonymous(false))
@@ -83,7 +84,7 @@ func (s *LogSuite) TestStatFailure() {
 }
 
 func (s *LogSuite) TestMissingObject() {
-	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(secretFile(), nil)
+	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any(), testNow()).Return(secretFile(), nil)
 	s.objects.EXPECT().Stat(gomock.Any(), loggedObjectKey).Return(domain.ErrNotFound)
 
 	_, err := s.manager.Download(s.T().Context(), "abc", anonymous(false))
@@ -93,7 +94,7 @@ func (s *LogSuite) TestMissingObject() {
 
 func (s *LogSuite) TestDeleteObjectFailure() {
 	file := secretFile()
-	s.storage.EXPECT().GetByID(gomock.Any(), domain.HashSlug("abc")).Return(file, nil)
+	s.storage.EXPECT().GetByID(gomock.Any(), domain.HashSlug("abc"), testNow()).Return(file, nil)
 	s.storage.EXPECT().Delete(gomock.Any(), domain.HashSlug("abc"), loggedObjectKey).Return(nil)
 	s.objects.EXPECT().Delete(gomock.Any(), loggedObjectKey).Return(errors.New("s3 down"))
 
@@ -118,7 +119,7 @@ func (s *LogSuite) TestSweepStopsAfterFailStreak() {
 	for i := range sweepMaxFailStreak {
 		file := secretFile()
 		file.ID = fmt.Sprintf("id-%d", i)
-		expires := time.Now().Add(-time.Hour)
+		expires := testNow().Add(-time.Hour)
 		file.ExpiresAt = &expires
 
 		batch = append(batch, file)

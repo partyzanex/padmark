@@ -26,7 +26,7 @@ type expiredTable struct {
 // Each record expires one second after the previous one.
 func newExpiredTable(poison, good int) *expiredTable {
 	table := &expiredTable{records: nil, poison: make(map[string]bool), deleteCalls: 0}
-	base := time.Now().Add(-time.Hour)
+	base := testNow().Add(-time.Hour)
 
 	for i := range poison + good {
 		kind := "good"

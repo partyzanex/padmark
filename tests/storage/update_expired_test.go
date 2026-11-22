@@ -19,7 +19,7 @@ func (s *NoteSuite) TestUpdate_ExpiredNoteIsNotChanged() {
 	update := newNote("expired", "edit-hash", nil)
 	update.Title = "changed"
 
-	s.Require().ErrorIs(s.be.notes.Update(ctx, "expired", update), domain.ErrNotFound)
+	s.Require().ErrorIs(s.be.notes.Update(ctx, "expired", update, now()), domain.ErrNotFound)
 
 	got, err := s.be.notes.Get(ctx, "expired")
 	s.Require().NoError(err)
@@ -38,7 +38,7 @@ func (s *LinkSuite) TestUpdate_ExpiredLinkIsNotChanged() {
 	_, err := s.be.links.Update(ctx, "expired", "edit-hash", &domain.LinkPatch{
 		TargetURL: "new-ciphertext", ExpiresAt: nil, Privacy: nil, DirectRedirect: nil,
 		ClearExpiry: true, ResetDirectRedirect: false,
-	})
+	}, now())
 	s.Require().ErrorIs(err, domain.ErrNotFound)
 
 	got, err := s.be.links.GetByID(ctx, "expired")

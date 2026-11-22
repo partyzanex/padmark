@@ -18,27 +18,30 @@ import (
 // Consume and SetBurnExpiry change the row only while its privacy still equals expected, the
 // level the reader was checked against; otherwise they return domain.ErrNotFound, so a burn
 // read can never return or delete a version whose access level changed after the check.
-// DeleteExpired removes a row only while it is still expired, and returns domain.ErrNotFound
-// otherwise: an expiry decision from an old snapshot never deletes a note that was extended.
-// A read of an expired note and a Create with a slug conflict both use it.
+// DeleteExpired removes a row only while it is still expired at now, and returns
+// domain.ErrNotFound otherwise: an expiry decision from an old snapshot never deletes a note that
+// was extended. A read of an expired note and a Create with a slug conflict both use it.
+// Each method that compares times gets now from Manager and does not read the clock itself.
 //
 // Update, Delete, Consume and SetBurnExpiry change the row only while its edit_code still equals
 // the stored hash of the note that the caller checked: note.EditCode for Update, storedEditCode
 // for the others. Each note gets a hash with a new random salt and no write changes it, so the
 // hash identifies one note version. If the note was deleted and a new note took the same ID after
 // the check, these methods return domain.ErrNotFound and do not touch the new note. Update also
-// changes the row only while it is not expired, as files.Storage.Update does: a note that expired
-// after the check of Manager.Update gets domain.ErrNotFound, and its expiry stays.
+// changes the row only while it is not expired at now, as files.Storage.Update does: a note that
+// expired after the check of Manager.Update gets domain.ErrNotFound, and its expiry stays.
 type Storage interface {
 	Create(ctx context.Context, note *domain.Note) error
 	Get(ctx context.Context, id string) (*domain.Note, error)
-	Consume(ctx context.Context, id string, expected domain.Privacy, storedEditCode string) (*domain.Note, error)
+	Consume(
+		ctx context.Context, id string, expected domain.Privacy, storedEditCode string, now time.Time,
+	) (*domain.Note, error)
 	SetBurnExpiry(
 		ctx context.Context, id string, expiresAt time.Time, expected domain.Privacy, storedEditCode string,
 	) (*domain.Note, error)
-	Update(ctx context.Context, id string, note *domain.Note) error
+	Update(ctx context.Context, id string, note *domain.Note, now time.Time) error
 	Delete(ctx context.Context, id, storedEditCode string) error
-	DeleteExpired(ctx context.Context, id string) error
+	DeleteExpired(ctx context.Context, id string, now time.Time) error
 	IncrementViews(ctx context.Context, id string) error
 }
 
@@ -94,10 +97,10 @@ type EditCodeHasher interface {
 
 // ExpiredSlugReleaser removes an expired note, link or file that still holds the record ID id,
 // because no read and no sweep removed it yet. It returns true when it removed a record. It must
-// remove a record only while it is still expired, so a record that its owner extended stays.
-// Errors are fail-soft: Create keeps its slug conflict and logs the error.
+// remove a record only while it is still expired at now, so a record that its owner extended
+// stays. Errors are fail-soft: Create keeps its slug conflict and logs the error.
 type ExpiredSlugReleaser interface {
-	ReleaseExpiredSlug(ctx context.Context, id string) (bool, error)
+	ReleaseExpiredSlug(ctx context.Context, id string, now time.Time) (bool, error)
 }
 
 // Deps holds the dependencies of Manager. All fields are mandatory.
@@ -108,6 +111,9 @@ type Deps struct {
 	Hasher       EditCodeHasher
 	ExpiredSlugs ExpiredSlugReleaser
 	Log          *slog.Logger
+	// Now is the time source of each expiry decision and timestamp. The composition root gives
+	// time.Now; tests give a fixed clock.
+	Now func() time.Time
 }
 
 // maxSlugRetries limits the attempts with a new random slug after a slug conflict. A custom slug
@@ -124,6 +130,7 @@ type Manager struct {
 	hasher       EditCodeHasher
 	expiredSlugs ExpiredSlugReleaser
 	log          *slog.Logger
+	now          func() time.Time
 	burn         *burner
 	// renderCache defaults to noRenderCache; attach a real one with WithRenderCache.
 	renderCache RenderCache
@@ -145,7 +152,8 @@ func NewManager(deps *Deps, allowCustomSlugs bool) *Manager {
 		hasher:           deps.Hasher,
 		expiredSlugs:     deps.ExpiredSlugs,
 		log:              deps.Log,
-		burn:             newBurner(deps.Storage, deps.Encryptor, deps.Log),
+		now:              deps.Now,
+		burn:             newBurner(deps),
 		renderCache:      noRenderCache{},
 		allowCustomSlugs: domain.CustomSlugSetting(allowCustomSlugs),
 		maxContentLength: domain.DefaultMaxContentLength,
@@ -225,7 +233,7 @@ func (m *Manager) Create(ctx context.Context, note *domain.Note) (*domain.Note, 
 
 	err := validateForCreate(note, m.maxContentLength)
 	if err != nil {
-		return nil, fmt.Errorf("validate for create: %w", err)
+		return nil, err
 	}
 
 	// The slug check goes before the memory-hard edit-code hash, so an invalid slug costs little.
@@ -236,14 +244,14 @@ func (m *Manager) Create(ctx context.Context, note *domain.Note) (*domain.Note, 
 
 	plainCode, hashedCode, err := m.resolveEditCodeHash(note.EditCode)
 	if err != nil {
-		return nil, fmt.Errorf("resolve edit code hash: %w", err)
+		return nil, err
 	}
 
-	now := time.Now().UTC()
+	now := m.now().UTC()
 
 	slug, err = m.store(ctx, note, slug, storedCode{hash: hashedCode, at: now})
 	if err != nil {
-		return nil, fmt.Errorf("create note: %w", err)
+		return nil, err
 	}
 
 	note.ID = slug
@@ -269,7 +277,7 @@ func (m *Manager) Peek(ctx context.Context, id string) (*domain.Note, error) {
 
 	err = decryptContent(ctx, m.encryptor, m.log, note)
 	if err != nil {
-		return nil, fmt.Errorf("peek note: %w", err)
+		return nil, err
 	}
 
 	return note, nil
@@ -293,12 +301,12 @@ func (m *Manager) Inspect(ctx context.Context, id string, reader domain.Reader) 
 
 	err = m.burn.enforceExpiry(ctx, id, note)
 	if err != nil {
-		return nil, fmt.Errorf("inspect note: %w", err)
+		return nil, err
 	}
 
 	err = decryptContent(ctx, m.encryptor, m.log, note)
 	if err != nil {
-		return nil, fmt.Errorf("inspect note: %w", err)
+		return nil, err
 	}
 
 	return note, nil
@@ -318,7 +326,7 @@ func (m *Manager) Inspect(ctx context.Context, id string, reader domain.Reader) 
 func (m *Manager) Read(ctx context.Context, id string, reader domain.Reader) (*domain.Note, error) {
 	note, err := m.Inspect(ctx, id, reader)
 	if err != nil {
-		return nil, fmt.Errorf("read note: %w", err)
+		return nil, err
 	}
 
 	if note.BurnAfterReading && !reader.AllowBurn {
@@ -328,7 +336,7 @@ func (m *Manager) Read(ctx context.Context, id string, reader domain.Reader) (*d
 	if note.BurnAfterReading {
 		note, err = m.burn.burnNote(ctx, id, note)
 		if err != nil {
-			return nil, fmt.Errorf("read note: %w", err)
+			return nil, err
 		}
 	}
 
@@ -376,9 +384,13 @@ func withRequested(note *domain.Note, requested requestedFields) *domain.Note {
 	return &write
 }
 
-// backfillPersistedState copies the storage-persisted privacy, contents-sidebar option and view
-// count into the working note before the update is written.
+// backfillPersistedState copies the storage-persisted content type, privacy, contents-sidebar
+// option and view count into the working note before the update is written.
 func backfillPersistedState(note, existing *domain.Note) {
+	if note.ContentType == nil {
+		note.ContentType = existing.ContentType
+	}
+
 	if note.Privacy == nil {
 		note.Privacy = existing.Privacy
 	}
@@ -433,7 +445,9 @@ func (m *Manager) Update(
 		return nil, fmt.Errorf("update note: %w", err)
 	}
 
-	err = m.checkUpdate(existing, editCode, reader)
+	now := m.now()
+
+	err = m.checkUpdate(existing, editCode, reader, now)
 	if err != nil {
 		return nil, err
 	}
@@ -445,25 +459,19 @@ func (m *Manager) Update(
 
 	note.ID = id
 	note.CreatedAt = existing.CreatedAt
-	note.UpdatedAt = time.Now().UTC()
+	note.UpdatedAt = now.UTC()
 
 	resolveExpiryTime(note, existing)
 
-	if note.ContentType == nil {
-		note.ContentType = existing.ContentType
-	}
-
-	// Privacy is intentionally absent from the UPDATE column list (COALESCE keeps the stored
-	// value when the caller omitted it) and views are never writable — so the response must
-	// backfill both from the existing note to report the persisted state, not the caller's
-	// defaults. Without this, a PUT on a privacy=owner note would answer "public" with
-	// "views": 0. Doing it here (before pinImmutableFields) also lets ValidateOwnership judge
-	// the note's real inherited privacy.
+	// Privacy is absent from the UPDATE column list (COALESCE keeps the stored value when the
+	// caller omitted it) and views are never writable, so the response backfills both from the
+	// existing note: a PUT on a privacy=owner note must not answer "public" with "views": 0.
+	// Doing it here (before pinOwner) also lets ValidateOwnership judge the real privacy.
 	backfillPersistedState(note, existing)
 
 	err = pinOwner(note, existing)
 	if err != nil {
-		return nil, fmt.Errorf("pin owner: %w", err)
+		return nil, err
 	}
 
 	encrypted, err := m.encryptor.Encrypt(note.Content, dbID)
@@ -478,7 +486,7 @@ func (m *Manager) Update(
 	write.Content = encrypted
 	write.EditCode = existing.EditCode
 
-	err = m.storage.Update(ctx, dbID, write)
+	err = m.storage.Update(ctx, dbID, write, now)
 	if err != nil {
 		return nil, fmt.Errorf("update note: %w", err)
 	}
@@ -526,7 +534,7 @@ func (m *Manager) ReadRendered(ctx context.Context, id string, reader domain.Rea
 
 	rendered, err := m.renderNote(ctx, id, note)
 	if err != nil {
-		return nil, "", fmt.Errorf("render note: %w", err)
+		return nil, "", err
 	}
 
 	return note, rendered, nil
@@ -536,12 +544,12 @@ func (m *Manager) ReadRendered(ctx context.Context, id string, reader domain.Rea
 // files.Manager.Update: privacy (domain.ErrForbidden), then expiry (domain.ErrExpired), then the
 // rules of checkMutation. Privacy comes first, so that a hidden note gives the same answer in each
 // state. An expired note is already gone for readers, so an update must not extend its life.
-func (m *Manager) checkUpdate(existing *domain.Note, editCode string, reader domain.Reader) error {
+func (m *Manager) checkUpdate(existing *domain.Note, editCode string, reader domain.Reader, now time.Time) error {
 	if !existing.VisibleTo(reader) {
 		return domain.ErrForbidden
 	}
 
-	if existing.Expired(time.Now()) {
+	if existing.Expired(now) {
 		return domain.ErrExpired
 	}
 
@@ -610,7 +618,7 @@ func (m *Manager) renderNote(ctx context.Context, id string, note *domain.Note) 
 
 	rendered, err := m.renderContent(ctx, dbID, note)
 	if err != nil {
-		return "", fmt.Errorf("render content: %w", err)
+		return "", err
 	}
 
 	if cacheable && len(rendered) <= maxCachedRenderBytes {
@@ -714,7 +722,7 @@ func (m *Manager) store(ctx context.Context, note *domain.Note, first string, co
 		stored.UpdatedAt = code.at
 
 		err = m.storage.Create(ctx, &stored)
-		if custom && errors.Is(err, domain.ErrSlugConflict) && m.releaseExpiredHolder(ctx, recordID) {
+		if custom && errors.Is(err, domain.ErrSlugConflict) && m.releaseExpiredHolder(ctx, recordID, code.at) {
 			err = m.storage.Create(ctx, &stored)
 		}
 
@@ -737,8 +745,8 @@ func (m *Manager) store(ctx context.Context, note *domain.Note, first string, co
 
 // releaseExpiredHolder reports whether an expired note, link or file with id was removed. Errors
 // are fail-soft: Create keeps its slug conflict.
-func (m *Manager) releaseExpiredHolder(ctx context.Context, id string) bool {
-	released, err := m.expiredSlugs.ReleaseExpiredSlug(ctx, id)
+func (m *Manager) releaseExpiredHolder(ctx context.Context, id string, now time.Time) bool {
+	released, err := m.expiredSlugs.ReleaseExpiredSlug(ctx, id, now)
 	if err != nil {
 		m.log.WarnContext(ctx, "release expired slug", "id", id, "err", err)
 

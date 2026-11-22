@@ -51,6 +51,7 @@ func runUpgrade(t *testing.T, db *bun.DB, repos repositories, fixture []legacyNo
 		Storage: repos.notes, Renderer: render.NewRenderer(), Encryptor: testutil.ContentEncryptor(t, "note"),
 		Hasher:       crypto.NewEditCodeHasher(testutil.Argon2Params()),
 		ExpiredSlugs: expiredslugs.New(repos.notes, repos.links), Log: slog.New(slog.DiscardHandler),
+		Now: time.Now,
 	}, true)
 
 	assertNotesReadable(t, manager, fixture)

@@ -66,7 +66,8 @@ func (f *File) EffectivePrivacy() Privacy {
 	return *f.Privacy
 }
 
-// Expired reports whether the TTL of f has elapsed at now. A nil ExpiresAt never expires.
+// Expired reports whether f is expired at now: its expiry is now or earlier. A nil ExpiresAt
+// never expires.
 func (f *File) Expired(now time.Time) bool {
 	return expired(f.ExpiresAt, now)
 }

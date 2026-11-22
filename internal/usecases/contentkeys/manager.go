@@ -6,8 +6,6 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
-
-	"github.com/partyzanex/padmark/internal/errorcontext"
 )
 
 // The package godoc lives here, so the generated mocks must not add a second one.
@@ -134,12 +132,7 @@ func New(store Storage, keys Keyring, notes, links, files Cipher, hasher EditCod
 
 // Status authenticates envelopes and reports the remaining legacy layers without writing.
 func (m *Manager) Status(ctx context.Context) (Report, error) {
-	operationResult, operationErr := m.statusWithFailures(ctx, nil)
-	if operationErr != nil {
-		return operationResult, fmt.Errorf("status: %w", operationErr)
-	}
-
-	return operationResult, nil
+	return m.statusWithFailures(ctx, nil)
 }
 
 // PrepareServe validates readiness before listeners, lifecycle work or key activation.
@@ -446,7 +439,7 @@ func (m *Manager) initialize(ctx context.Context) error {
 		}
 	}
 
-	return errorcontext.Wrap(m.validateActiveKeys(reg), "validate active keys")
+	return m.validateActiveKeys(reg)
 }
 
 func (m *Manager) initializeRegistry(ctx context.Context) error {

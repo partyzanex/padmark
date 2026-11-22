@@ -74,7 +74,7 @@ func (m *Manager) record(ctx context.Context, file *domain.File, reader domain.R
 
 	recordID := domain.HashSlug(file.ID)
 
-	err := m.deps.Storage.IncrementDownloadsVisible(ctx, recordID, file.ObjectKey, reader)
+	err := m.deps.Storage.IncrementDownloadsVisible(ctx, recordID, file.ObjectKey, reader, m.deps.Now())
 
 	switch {
 	case errors.Is(err, domain.ErrNotFound):
@@ -95,9 +95,12 @@ func (m *Manager) record(ctx context.Context, file *domain.File, reader domain.R
 func (m *Manager) recordChanged(
 	ctx context.Context, file *domain.File, reader domain.Reader, download *Download,
 ) error {
-	fresh, err := m.deps.Storage.GetByID(ctx, domain.HashSlug(file.ID))
+	recordID := domain.HashSlug(file.ID)
+	now := m.deps.Now()
+
+	fresh, err := m.deps.Storage.GetByID(ctx, recordID, now)
 	if err != nil {
-		return fmt.Errorf("count download: %w", err)
+		return fmt.Errorf("count download %s: %w", recordID, err)
 	}
 
 	switch {
@@ -105,8 +108,8 @@ func (m *Manager) recordChanged(
 		return fmt.Errorf("count download: slug has a new file: %w", domain.ErrNotFound)
 	case !fresh.VisibleTo(reader):
 		return domain.ErrForbidden
-	case fresh.Expired(time.Now()):
-		return m.expire(ctx, file)
+	case fresh.Expired(now):
+		return m.expire(ctx, file, now)
 	case !fresh.BurnAfterDownload:
 		return fmt.Errorf("count download: %w", domain.ErrNotFound)
 	case !reader.AllowBurn:
@@ -121,7 +124,7 @@ func (m *Manager) recordChanged(
 // claimBurn claims a burn file for this download. The record stays, but other readers do not
 // see it. Download.Close deletes it after a complete Send, or releases the claim.
 func (m *Manager) claimBurn(ctx context.Context, file *domain.File, reader domain.Reader, download *Download) error {
-	now := time.Now()
+	now := m.deps.Now()
 	claim := &BurnClaim{
 		Now:       now,
 		Until:     now.Add(burnClaimTTL),
@@ -133,7 +136,7 @@ func (m *Manager) claimBurn(ctx context.Context, file *domain.File, reader domai
 
 	err := m.deps.Storage.ClaimBurn(ctx, claim)
 	if err != nil {
-		return fmt.Errorf("claim burn file: %w", err)
+		return fmt.Errorf("claim burn file %s: %w", claim.ID, err)
 	}
 
 	send := download.send

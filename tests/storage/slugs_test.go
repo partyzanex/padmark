@@ -58,8 +58,8 @@ func (s *SlugSuite) TestKind_DeletedRecordReleasesRow() {
 	s.Require().NoError(s.be.links.Create(ctx, newLink("link-1", &past)))
 	s.Require().NoError(s.be.files.Create(ctx, newFile("file-1", "object-1", nil)))
 
-	s.Require().NoError(s.be.notes.DeleteExpired(ctx, "note-1"))
-	s.Require().NoError(s.be.links.DeleteExpired(ctx, "link-1"))
+	s.Require().NoError(s.be.notes.DeleteExpired(ctx, "note-1", now()))
+	s.Require().NoError(s.be.links.DeleteExpired(ctx, "link-1", now()))
 	s.Require().NoError(s.be.files.Delete(ctx, "file-1", "object-1"))
 
 	for _, id := range []string{"note-1", "link-1", "file-1"} {

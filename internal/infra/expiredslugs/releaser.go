@@ -9,26 +9,29 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/partyzanex/padmark/internal/domain"
 )
 
-// RecordExpirer removes the note or link with id while it is expired. It returns
+// RecordExpirer removes the note or link with id while it is expired at now. It returns
 // domain.ErrNotFound when no expired record has id. The note and link repositories implement it.
 type RecordExpirer interface {
-	DeleteExpired(ctx context.Context, id string) error
+	DeleteExpired(ctx context.Context, id string, now time.Time) error
 }
 
-// FileReleaser removes the file with id while it is expired, with its object. files.Manager
-// implements it.
+// FileReleaser removes the file with id while it is expired at now, with its object.
+// files.Manager implements it.
 type FileReleaser interface {
-	ReleaseExpiredSlug(ctx context.Context, id string) (bool, error)
+	ReleaseExpiredSlug(ctx context.Context, id string, now time.Time) (bool, error)
 }
 
 // noFiles is the FileReleaser of a server without file publishing: no file holds a slug.
 type noFiles struct{}
 
-func (noFiles) ReleaseExpiredSlug(context.Context, string) (bool, error) { return false, nil }
+func (noFiles) ReleaseExpiredSlug(context.Context, string, time.Time) (bool, error) {
+	return false, nil
+}
 
 // Releaser is the one ExpiredSlugReleaser of notes.Manager, links.Manager and files.Manager.
 // After a slug conflict a Manager asks it to remove an expired holder of any kind. One record at
@@ -55,10 +58,11 @@ func (r *Releaser) WithFiles(files FileReleaser) *Releaser {
 	return r
 }
 
-// ReleaseExpiredSlug reports whether it removed an expired note, link or file with id.
-func (r *Releaser) ReleaseExpiredSlug(ctx context.Context, id string) (bool, error) {
+// ReleaseExpiredSlug reports whether it removed a note, link or file with id that is expired at
+// now. now comes from the clock of the Manager that asks.
+func (r *Releaser) ReleaseExpiredSlug(ctx context.Context, id string, now time.Time) (bool, error) {
 	for _, records := range []RecordExpirer{r.notes, r.links} {
-		err := records.DeleteExpired(ctx, id)
+		err := records.DeleteExpired(ctx, id, now)
 		if err == nil {
 			return true, nil
 		}
@@ -68,7 +72,7 @@ func (r *Releaser) ReleaseExpiredSlug(ctx context.Context, id string) (bool, err
 		}
 	}
 
-	released, err := r.files.ReleaseExpiredSlug(ctx, id)
+	released, err := r.files.ReleaseExpiredSlug(ctx, id, now)
 	if err != nil {
 		return false, fmt.Errorf("release expired slug: %w", err)
 	}

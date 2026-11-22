@@ -21,7 +21,6 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"github.com/partyzanex/padmark/internal/adapters/web"
-	"github.com/partyzanex/padmark/internal/errorcontext"
 	"github.com/partyzanex/padmark/internal/infra/crypto"
 	"github.com/partyzanex/padmark/internal/infra/expiredslugs"
 	"github.com/partyzanex/padmark/internal/infra/filemetrics"
@@ -148,7 +147,7 @@ func buildRouter(
 ) (http.Handler, error) {
 	trustedProxies, err := parseTrustedProxies(cmd.String(FlagTrustedProxies))
 	if err != nil {
-		return nil, fmt.Errorf("parse trusted proxies: %w", err)
+		return nil, err
 	}
 
 	// A warning rather than a startup error: the flag is still parseable and the operator may
@@ -166,12 +165,12 @@ func buildRouter(
 
 	publicScheme, err := parsePublicScheme(cmd.String(FlagPublicScheme))
 	if err != nil {
-		return nil, fmt.Errorf("parse public scheme: %w", err)
+		return nil, err
 	}
 
 	csrfSecret, err := parseCSRFSecret(cmd.String(FlagCSRFSecret))
 	if err != nil {
-		return nil, fmt.Errorf("parse CSRF secret: %w", err)
+		return nil, err
 	}
 
 	// The per-process fallback is a deliberate, documented default rather than a startup failure:
@@ -395,7 +394,7 @@ func runServer(
 		}
 	}
 
-	return errorcontext.Wrap(waitAndShutdown(serverCtx, limits, log), "wait and shutdown")
+	return waitAndShutdown(serverCtx, limits, log)
 }
 
 // waitAndShutdown blocks until SIGINT/SIGTERM arrives or serverCtx is cancelled (the main
@@ -468,9 +467,14 @@ func attachAccountSystem(
 
 	authMgr, err := auth.NewManager(
 		stores,
-		crypto.NewPasswordHasher(argonParams).WithLogger(log),
-		crypto.NewSealer(argonParams), crypto.NewTOTP(),
-		log, cmd.String(FlagTOTPIssuer), ttl,
+		&auth.Deps{
+			PasswordHasher: crypto.NewPasswordHasher(argonParams).WithLogger(log),
+			Sealer:         crypto.NewSealer(argonParams),
+			TOTP:           crypto.NewTOTP(),
+			Log:            log,
+			Now:            time.Now,
+		},
+		cmd.String(FlagTOTPIssuer), ttl,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("new auth manager: %w", err)
@@ -503,14 +507,14 @@ func buildAuthRepos(storage string, db *bun.DB, log *slog.Logger) (auth.Stores, 
 			Invites:   postgres.NewInviteRepository(db),
 			Sessions:  postgres.NewSessionRepository(db),
 			APITokens: postgres.NewAPITokenRepository(db),
-		}, auth.NewRevealManager(postgres.NewRevealRepository(db), log)
+		}, auth.NewRevealManager(postgres.NewRevealRepository(db), log, time.Now)
 	default:
 		return auth.Stores{
 			Users:     sqlite.NewUserRepository(db),
 			Invites:   sqlite.NewInviteRepository(db),
 			Sessions:  sqlite.NewSessionRepository(db),
 			APITokens: sqlite.NewAPITokenRepository(db),
-		}, auth.NewRevealManager(sqlite.NewRevealRepository(db), log)
+		}, auth.NewRevealManager(sqlite.NewRevealRepository(db), log, time.Now)
 	}
 }
 
@@ -604,11 +608,13 @@ func buildHandlers(
 	manager := notes.NewManager(&notes.Deps{
 		Storage: store.notes, Renderer: render.NewRenderer(), Encryptor: noteCipher,
 		Hasher: crypto.NewEditCodeHasher(argonParams).WithLogger(log), ExpiredSlugs: expired, Log: log,
+		Now: time.Now,
 	}, cmd.Bool(FlagCustomSlugs)).
 		WithRenderCache(rendercache.NewDefault(log)).WithMaxContentLength(maxContentLength(cmd))
 	linkManager := links.NewManager(&links.Deps{
 		Storage: store.links, Encryptor: linkCipher,
 		Hasher: crypto.NewEditCodeHasher(argonParams).WithLogger(log), ExpiredSlugs: expired, Log: log,
+		Now: time.Now,
 	}, cmd.Bool(FlagCustomSlugs)).
 		WithCache(linkcache.NewDefault(log)).
 		WithMetrics(metrics.links)
@@ -621,7 +627,7 @@ func buildHandlers(
 
 	handler, err = attachAccountSystem(ctx, cmd, handler, authStores, log)
 	if err != nil {
-		return nil, nil, fmt.Errorf("attach account system: %w", err)
+		return nil, nil, err
 	}
 
 	err = attachFiles(ctx, cmd, handler, store, keyring, &fileDeps{
@@ -629,7 +635,7 @@ func buildHandlers(
 		hasher:  crypto.NewEditCodeHasher(argonParams).WithLogger(log), metrics: metrics.files,
 	}, background, log)
 	if err != nil {
-		return nil, nil, fmt.Errorf("attach files: %w", err)
+		return nil, nil, err
 	}
 
 	ogenHandler := web.NewOgenHandler(manager, linkManager, store.db.DB, log)
@@ -648,14 +654,14 @@ func initRepos(
 	case storagePostgres:
 		repo, err := initPostgresStorage(ctx, db, log)
 		if err != nil {
-			return store, fmt.Errorf("init postgres storage: %w", err)
+			return store, err
 		}
 
 		store.notes, store.links, store.files = repo, newPostgresLinkRepository(db, log), postgres.NewFileRepository(db)
 	default:
 		repo, err := initSQLiteStorage(ctx, db, log, opts)
 		if err != nil {
-			return store, fmt.Errorf("init sqlite storage: %w", err)
+			return store, err
 		}
 
 		store.notes, store.links, store.files = repo, newSQLiteLinkRepository(db, log), sqlite.NewFileRepository(db)
@@ -667,13 +673,13 @@ func initRepos(
 func serverAction(ctx context.Context, cmd *cli.Command) error {
 	bootstrapToken, err := validateStartupSecrets(cmd)
 	if err != nil {
-		return fmt.Errorf("validate startup secrets: %w", err)
+		return err
 	}
 
 	// Bound concurrent argon2id workspace before any hasher can run (validated above).
 	hasher, err := prepareArgon2(cmd)
 	if err != nil {
-		return fmt.Errorf("prepare argon2: %w", err)
+		return err
 	}
 
 	log := newLogger(cmd.String(FlagLogLevel), cmd.String(FlagLogFormat))
@@ -688,7 +694,7 @@ func serverAction(ctx context.Context, cmd *cli.Command) error {
 
 	db, err := openDB(ctx, storage, dsn, log)
 	if err != nil {
-		return fmt.Errorf("open db: %w", err)
+		return err
 	}
 
 	defer closeDatabase(ctx, db, log)
@@ -709,12 +715,12 @@ func serverAction(ctx context.Context, cmd *cli.Command) error {
 	store, err := initRepos(ctx, storage, db, log,
 		migrationOptions{dsn: dsn, skipBackup: cmd.Bool(FlagSkipMigrationBackup)})
 	if err != nil {
-		return fmt.Errorf("init repos: %w", err)
+		return err
 	}
 
 	err = validateContentEncryption(ctx, db, keyring, hasher, log)
 	if err != nil {
-		return fmt.Errorf("validate content encryption: %w", err)
+		return err
 	}
 
 	router, metrics, err := buildServerRouter(ctx, cmd, store, keyring, background, bootstrapToken, log)
@@ -728,7 +734,7 @@ func serverAction(ctx context.Context, cmd *cli.Command) error {
 
 	logServerStarted(ctx, cmd, log, storage, dsn)
 
-	return errorcontext.Wrap(runServer(ctx, cmd, router, limits, log), "run server")
+	return runServer(ctx, cmd, router, limits, log)
 }
 
 // buildServerRouter makes the metrics registry, the request handlers and the router.
@@ -748,7 +754,7 @@ func buildServerRouter(
 
 	router, err := buildRouter(ctx, cmd, handler, ogenHandler, log, bootstrapToken)
 	if err != nil {
-		return nil, metrics, fmt.Errorf("build router: %w", err)
+		return nil, metrics, err
 	}
 
 	return router, metrics, nil
@@ -820,7 +826,7 @@ func validateStartupSecrets(cmd *cli.Command) (string, error) {
 
 	argonErr := validateArgon2Config(cmd)
 	if argonErr != nil {
-		return "", fmt.Errorf("validate argon2 config: %w", argonErr)
+		return "", argonErr
 	}
 
 	bootstrapToken, tokenErr := parseBootstrapToken(os.Getenv(EnvBootstrapToken))

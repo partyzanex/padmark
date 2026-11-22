@@ -27,7 +27,7 @@ func TestRevealSuite(t *testing.T) {
 func (s *RevealSuite) SetupTest() {
 	s.ctrl = gomock.NewController(s.T())
 	s.store = NewMockRevealTokenStore(s.ctrl)
-	s.mgr = NewRevealManager(s.store, discardLog())
+	s.mgr = NewRevealManager(s.store, discardLog(), testNow)
 }
 
 func (s *RevealSuite) TearDownTest() {
@@ -39,7 +39,7 @@ func (s *RevealSuite) TearDownTest() {
 // the insert.
 func (s *RevealSuite) TestIssue_StoresHashAndTTL() {
 	ctx := s.T().Context()
-	before := time.Now()
+	before := testNow()
 
 	var (
 		storedHash string

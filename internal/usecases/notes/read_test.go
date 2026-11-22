@@ -27,7 +27,7 @@ func strangerReader() domain.Reader {
 // TestRead_PrivacyIsCheckedFirst checks that a reader who cannot see the note gets ErrForbidden,
 // and that the note is not deleted, burned or counted, also when it is expired.
 func (s *ManagerTestSuite) TestRead_PrivacyIsCheckedFirst() {
-	past := time.Now().Add(-time.Minute)
+	past := testNow().Add(-time.Minute)
 	owner := testUserID1
 	s.expectGet("priv", readerNote(domain.PrivacyOwner, &owner, &past, true))
 
@@ -67,9 +67,9 @@ func (s *ManagerTestSuite) TestRead_AccountsOffSkipsPrivacy() {
 // TestRead_ExpiredIsDeleted checks that a visible expired note is deleted and gives ErrExpired,
 // before the burn intent check.
 func (s *ManagerTestSuite) TestRead_ExpiredIsDeleted() {
-	past := time.Now().Add(-time.Minute)
+	past := testNow().Add(-time.Minute)
 	s.expectGet("old", readerNote(domain.PrivacyPublic, nil, &past, true))
-	s.storage.EXPECT().DeleteExpired(gomock.Any(), domain.HashSlug("old")).Return(nil)
+	s.storage.EXPECT().DeleteExpired(gomock.Any(), domain.HashSlug("old"), testNow()).Return(nil)
 
 	reader := openReader()
 	reader.AllowBurn = false

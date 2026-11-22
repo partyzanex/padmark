@@ -99,32 +99,32 @@ func (mr *MockStorageMockRecorder) DeleteExpired(ctx, id, objectKey, now any) *g
 }
 
 // GetByID mocks base method.
-func (m *MockStorage) GetByID(ctx context.Context, id string) (*domain.File, error) {
+func (m *MockStorage) GetByID(ctx context.Context, id string, now time.Time) (*domain.File, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetByID", ctx, id)
+	ret := m.ctrl.Call(m, "GetByID", ctx, id, now)
 	ret0, _ := ret[0].(*domain.File)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // GetByID indicates an expected call of GetByID.
-func (mr *MockStorageMockRecorder) GetByID(ctx, id any) *gomock.Call {
+func (mr *MockStorageMockRecorder) GetByID(ctx, id, now any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetByID", reflect.TypeOf((*MockStorage)(nil).GetByID), ctx, id)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetByID", reflect.TypeOf((*MockStorage)(nil).GetByID), ctx, id, now)
 }
 
 // IncrementDownloadsVisible mocks base method.
-func (m *MockStorage) IncrementDownloadsVisible(ctx context.Context, id, objectKey string, reader domain.Reader) error {
+func (m *MockStorage) IncrementDownloadsVisible(ctx context.Context, id, objectKey string, reader domain.Reader, now time.Time) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "IncrementDownloadsVisible", ctx, id, objectKey, reader)
+	ret := m.ctrl.Call(m, "IncrementDownloadsVisible", ctx, id, objectKey, reader, now)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // IncrementDownloadsVisible indicates an expected call of IncrementDownloadsVisible.
-func (mr *MockStorageMockRecorder) IncrementDownloadsVisible(ctx, id, objectKey, reader any) *gomock.Call {
+func (mr *MockStorageMockRecorder) IncrementDownloadsVisible(ctx, id, objectKey, reader, now any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IncrementDownloadsVisible", reflect.TypeOf((*MockStorage)(nil).IncrementDownloadsVisible), ctx, id, objectKey, reader)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IncrementDownloadsVisible", reflect.TypeOf((*MockStorage)(nil).IncrementDownloadsVisible), ctx, id, objectKey, reader, now)
 }
 
 // ListExpired mocks base method.
@@ -464,18 +464,18 @@ func (m *MockExpiredSlugReleaser) EXPECT() *MockExpiredSlugReleaserMockRecorder 
 }
 
 // ReleaseExpiredSlug mocks base method.
-func (m *MockExpiredSlugReleaser) ReleaseExpiredSlug(ctx context.Context, id string) (bool, error) {
+func (m *MockExpiredSlugReleaser) ReleaseExpiredSlug(ctx context.Context, id string, now time.Time) (bool, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ReleaseExpiredSlug", ctx, id)
+	ret := m.ctrl.Call(m, "ReleaseExpiredSlug", ctx, id, now)
 	ret0, _ := ret[0].(bool)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // ReleaseExpiredSlug indicates an expected call of ReleaseExpiredSlug.
-func (mr *MockExpiredSlugReleaserMockRecorder) ReleaseExpiredSlug(ctx, id any) *gomock.Call {
+func (mr *MockExpiredSlugReleaserMockRecorder) ReleaseExpiredSlug(ctx, id, now any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReleaseExpiredSlug", reflect.TypeOf((*MockExpiredSlugReleaser)(nil).ReleaseExpiredSlug), ctx, id)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReleaseExpiredSlug", reflect.TypeOf((*MockExpiredSlugReleaser)(nil).ReleaseExpiredSlug), ctx, id, now)
 }
 
 // MockMetrics is a mock of Metrics interface.

@@ -112,10 +112,12 @@ func replica(t *testing.T, db *bun.DB, gate *createGate) *httptest.Server {
 	noteManager := notes.NewManager(&notes.Deps{
 		Storage: &pausedNotes{Storage: noteRepo, gate: gate}, Renderer: render.NewRenderer(),
 		Encryptor: testutil.ContentEncryptor(t, "note"), Hasher: hasher, ExpiredSlugs: expired, Log: log,
+		Now: time.Now,
 	}, true)
 	linkManager := links.NewManager(&links.Deps{
 		Storage: &pausedLinks{Storage: linkRepo, gate: gate}, Encryptor: testutil.ContentEncryptor(t, "link"),
 		Hasher: hasher, ExpiredSlugs: expired, Log: log,
+		Now: time.Now,
 	}, true)
 	handler := web.NewHandler(noteManager, linkManager, slugResolver(db), log)
 	ogen := web.NewOgenHandler(noteManager, linkManager, web.NoPinger{}, log)

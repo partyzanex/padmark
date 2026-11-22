@@ -21,7 +21,7 @@ func (s *ManagerSuite) TestDownload_BurnClaimDeletesAfterCompleteSend() {
 
 	var claimed *BurnClaim
 
-	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(storedFile(true), nil)
+	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any(), testNow()).Return(storedFile(true), nil)
 	s.expectObject("burn content")
 	s.storage.EXPECT().ClaimBurn(gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, claim *BurnClaim) error {
 		claimed = claim
@@ -29,7 +29,7 @@ func (s *ManagerSuite) TestDownload_BurnClaimDeletesAfterCompleteSend() {
 		return nil
 	})
 
-	before := time.Now()
+	before := testNow()
 	download, err := s.manager.Download(ctx, "abc", anonymous(true))
 	s.Require().NoError(err)
 	s.Require().NotNil(claimed)
@@ -60,7 +60,7 @@ func (s *ManagerSuite) TestDownload_BurnFailedSendKeepsFile() {
 
 	var claimed *BurnClaim
 
-	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(storedFile(true), nil)
+	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any(), testNow()).Return(storedFile(true), nil)
 	s.objects.EXPECT().Stat(gomock.Any(), "obj").Return(nil)
 	s.storage.EXPECT().ClaimBurn(gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, claim *BurnClaim) error {
 		claimed = claim
@@ -81,7 +81,7 @@ func (s *ManagerSuite) TestDownload_BurnFailedSendKeepsFile() {
 func (s *ManagerSuite) TestDownload_BurnCloseWithoutSendReleasesClaim() {
 	ctx := s.T().Context()
 
-	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(storedFile(true), nil)
+	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any(), testNow()).Return(storedFile(true), nil)
 	s.objects.EXPECT().Stat(gomock.Any(), "obj").Return(nil)
 	s.storage.EXPECT().ClaimBurn(gomock.Any(), gomock.Any()).Return(nil)
 	s.storage.EXPECT().ReleaseBurn(gomock.Any(), gomock.Any()).Return(errors.New("db down"))
@@ -97,7 +97,7 @@ func (s *ManagerSuite) TestDownload_BurnFinishFailureStillDeletesObject() {
 	ctx := s.T().Context()
 	metrics := s.strictMetrics()
 
-	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(storedFile(true), nil)
+	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any(), testNow()).Return(storedFile(true), nil)
 	s.expectObject("hello")
 	s.storage.EXPECT().ClaimBurn(gomock.Any(), gomock.Any()).Return(nil)
 	s.storage.EXPECT().Delete(gomock.Any(), domain.HashSlug("abc"), "obj").Return(errors.New("db down"))
@@ -117,7 +117,7 @@ func (s *ManagerSuite) TestDownload_BurnSendStopsBeforeClaimIsStale() {
 
 	var claimed *BurnClaim
 
-	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(storedFile(true), nil)
+	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any(), testNow()).Return(storedFile(true), nil)
 	s.objects.EXPECT().Stat(gomock.Any(), "obj").Return(nil)
 	s.storage.EXPECT().ClaimBurn(gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, claim *BurnClaim) error {
 		claimed = claim
@@ -147,22 +147,22 @@ func (s *ManagerSuite) TestDownload_CounterFindsBurnFile() {
 	ctx := s.T().Context()
 	changed := storedFile(true)
 
-	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(storedFile(false), nil)
+	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any(), testNow()).Return(storedFile(false), nil)
 	s.objects.EXPECT().Stat(gomock.Any(), "obj").Return(nil)
-	s.storage.EXPECT().IncrementDownloadsVisible(gomock.Any(), gomock.Any(), "obj", gomock.Any()).
+	s.storage.EXPECT().IncrementDownloadsVisible(gomock.Any(), gomock.Any(), "obj", gomock.Any(), testNow()).
 		Return(domain.ErrNotFound)
-	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(changed, nil)
+	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any(), testNow()).Return(changed, nil)
 
 	s.Run("without burn intent", func() {
 		_, err := s.manager.Download(ctx, "abc", anonymous(false))
 		s.Require().ErrorIs(err, domain.ErrBurnIntentRequired)
 	})
 
-	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(storedFile(false), nil)
+	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any(), testNow()).Return(storedFile(false), nil)
 	s.objects.EXPECT().Stat(gomock.Any(), "obj").Return(nil)
-	s.storage.EXPECT().IncrementDownloadsVisible(gomock.Any(), gomock.Any(), "obj", gomock.Any()).
+	s.storage.EXPECT().IncrementDownloadsVisible(gomock.Any(), gomock.Any(), "obj", gomock.Any(), testNow()).
 		Return(domain.ErrNotFound)
-	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(changed, nil)
+	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any(), testNow()).Return(changed, nil)
 	s.storage.EXPECT().ClaimBurn(gomock.Any(), gomock.Any()).Return(nil)
 
 	s.Run("with burn intent", func() {
@@ -179,11 +179,11 @@ func (s *ManagerSuite) TestDownload_SlugTakenByNewFile() {
 	replaced := storedFile(false)
 	replaced.ObjectKey = "new-obj"
 
-	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(storedFile(false), nil)
+	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any(), testNow()).Return(storedFile(false), nil)
 	s.objects.EXPECT().Stat(gomock.Any(), "obj").Return(nil)
-	s.storage.EXPECT().IncrementDownloadsVisible(gomock.Any(), gomock.Any(), "obj", gomock.Any()).
+	s.storage.EXPECT().IncrementDownloadsVisible(gomock.Any(), gomock.Any(), "obj", gomock.Any(), testNow()).
 		Return(domain.ErrNotFound)
-	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(replaced, nil)
+	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any(), testNow()).Return(replaced, nil)
 
 	_, err := s.manager.Download(s.T().Context(), "abc", anonymous(false))
 	s.Require().ErrorIs(err, domain.ErrNotFound)
@@ -194,20 +194,20 @@ func (s *ManagerSuite) TestDownload_CounterFindsPrivateFile() {
 	authenticated := domain.PrivacyAuthenticated
 	private.Privacy = &authenticated
 
-	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(storedFile(false), nil)
+	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any(), testNow()).Return(storedFile(false), nil)
 	s.objects.EXPECT().Stat(gomock.Any(), "obj").Return(nil)
-	s.storage.EXPECT().IncrementDownloadsVisible(gomock.Any(), gomock.Any(), "obj", gomock.Any()).
+	s.storage.EXPECT().IncrementDownloadsVisible(gomock.Any(), gomock.Any(), "obj", gomock.Any(), testNow()).
 		Return(domain.ErrNotFound)
-	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(private, nil)
+	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any(), testNow()).Return(private, nil)
 
 	_, err := s.manager.Download(s.T().Context(), "abc", anonymous(false))
 	s.Require().ErrorIs(err, domain.ErrForbidden)
 }
 
 func (s *ManagerSuite) TestDownload_CounterErrorDoesNotStopDownload() {
-	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(storedFile(false), nil)
+	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any(), testNow()).Return(storedFile(false), nil)
 	s.objects.EXPECT().Stat(gomock.Any(), "obj").Return(nil)
-	s.storage.EXPECT().IncrementDownloadsVisible(gomock.Any(), gomock.Any(), "obj", gomock.Any()).
+	s.storage.EXPECT().IncrementDownloadsVisible(gomock.Any(), gomock.Any(), "obj", gomock.Any(), testNow()).
 		Return(errors.New("database is locked"))
 
 	download, err := s.manager.Download(s.T().Context(), "abc", anonymous(false))
@@ -216,7 +216,7 @@ func (s *ManagerSuite) TestDownload_CounterErrorDoesNotStopDownload() {
 }
 
 func (s *ManagerSuite) TestDelete_SlugTakenByNewFile() {
-	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(storedFile(false), nil)
+	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any(), testNow()).Return(storedFile(false), nil)
 	s.storage.EXPECT().Delete(gomock.Any(), domain.HashSlug("abc"), "obj").Return(domain.ErrNotFound)
 	// No object delete: the object of the new file must stay.
 
@@ -246,7 +246,7 @@ func (s *ManagerSuite) TestSkipPrivacy_Info() {
 	skip := skipPrivacy()
 
 	s.Run("info", func() {
-		s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(privateFile(false), nil)
+		s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any(), testNow()).Return(privateFile(false), nil)
 
 		file, err := s.manager.Inspect(ctx, "abc", skip)
 		s.Require().NoError(err)
@@ -255,7 +255,7 @@ func (s *ManagerSuite) TestSkipPrivacy_Info() {
 	})
 
 	s.Run("info without skip", func() {
-		s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(privateFile(false), nil)
+		s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any(), testNow()).Return(privateFile(false), nil)
 
 		_, err := s.manager.Inspect(ctx, "abc", anonymous(true))
 		s.Require().ErrorIs(err, domain.ErrForbidden)
@@ -267,16 +267,16 @@ func (s *ManagerSuite) TestSkipPrivacy_Download() {
 	skip := skipPrivacy()
 
 	s.Run("download counter", func() {
-		s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(privateFile(false), nil)
+		s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any(), testNow()).Return(privateFile(false), nil)
 		s.objects.EXPECT().Stat(gomock.Any(), "obj").Return(nil)
-		s.storage.EXPECT().IncrementDownloadsVisible(gomock.Any(), gomock.Any(), "obj", skip).Return(nil)
+		s.storage.EXPECT().IncrementDownloadsVisible(gomock.Any(), gomock.Any(), "obj", skip, testNow()).Return(nil)
 
 		_, err := s.manager.Download(ctx, "abc", skip)
 		s.Require().NoError(err)
 	})
 
 	s.Run("burn claim", func() {
-		s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(privateFile(true), nil)
+		s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any(), testNow()).Return(privateFile(true), nil)
 		s.objects.EXPECT().Stat(gomock.Any(), "obj").Return(nil)
 		s.storage.EXPECT().ClaimBurn(gomock.Any(), gomock.Any()).
 			DoAndReturn(func(_ context.Context, claim *BurnClaim) error {
@@ -298,10 +298,10 @@ func (s *ManagerSuite) TestSkipPrivacy_ExpiryAndDelete() {
 
 	s.Run("expired file", func() {
 		file := privateFile(false)
-		past := time.Now().Add(-time.Minute)
+		past := testNow().Add(-time.Minute)
 		file.ExpiresAt = &past
 
-		s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(file, nil)
+		s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any(), testNow()).Return(file, nil)
 		s.objects.EXPECT().Delete(gomock.Any(), "obj").Return(nil)
 		s.storage.EXPECT().DeleteExpired(gomock.Any(), gomock.Any(), "obj", gomock.Any()).Return(nil)
 
@@ -310,7 +310,7 @@ func (s *ManagerSuite) TestSkipPrivacy_ExpiryAndDelete() {
 	})
 
 	s.Run("delete still needs the edit code", func() {
-		s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(privateFile(false), nil)
+		s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any(), testNow()).Return(privateFile(false), nil)
 
 		s.Require().ErrorIs(s.manager.Delete(ctx, "abc", "wrong", skipPrivacy()), domain.ErrInvalidEditCode)
 	})
@@ -321,7 +321,7 @@ func (s *ManagerSuite) TestSkipPrivacy_ExpiryAndDelete() {
 // expiredBatch returns count expired records in the order of ListExpired: each expires one
 // second after the previous one.
 func expiredBatch(count int, prefix string) []*domain.File {
-	base := time.Now().Add(-time.Hour)
+	base := testNow().Add(-time.Hour)
 	batch := make([]*domain.File, 0, count)
 
 	for i := range count {
@@ -452,46 +452,46 @@ func (s *ManagerSuite) TestReleaseExpiredSlug() {
 	id := domain.HashSlug("abc")
 
 	s.Run("missing", func() {
-		s.storage.EXPECT().GetByID(gomock.Any(), id).Return(nil, domain.ErrNotFound)
+		s.storage.EXPECT().GetByID(gomock.Any(), id, testNow()).Return(nil, domain.ErrNotFound)
 
-		released, err := s.manager.ReleaseExpiredSlug(ctx, id)
+		released, err := s.manager.ReleaseExpiredSlug(ctx, id, testNow())
 		s.Require().NoError(err)
 		s.False(released)
 	})
 
 	s.Run("live file", func() {
-		s.storage.EXPECT().GetByID(gomock.Any(), id).Return(storedFile(false), nil)
+		s.storage.EXPECT().GetByID(gomock.Any(), id, testNow()).Return(storedFile(false), nil)
 
-		released, err := s.manager.ReleaseExpiredSlug(ctx, id)
+		released, err := s.manager.ReleaseExpiredSlug(ctx, id, testNow())
 		s.Require().NoError(err)
 		s.False(released)
 	})
 
 	s.Run("expired file", func() {
 		file := storedFile(false)
-		past := time.Now().Add(-time.Minute)
+		past := testNow().Add(-time.Minute)
 		file.ExpiresAt = &past
 
-		s.storage.EXPECT().GetByID(gomock.Any(), id).Return(file, nil)
+		s.storage.EXPECT().GetByID(gomock.Any(), id, testNow()).Return(file, nil)
 		gomock.InOrder(
 			s.objects.EXPECT().Delete(gomock.Any(), "obj").Return(nil),
 			s.storage.EXPECT().DeleteExpired(gomock.Any(), id, "obj", gomock.Any()).Return(nil),
 		)
 
-		released, err := s.manager.ReleaseExpiredSlug(ctx, id)
+		released, err := s.manager.ReleaseExpiredSlug(ctx, id, testNow())
 		s.Require().NoError(err)
 		s.True(released)
 	})
 
 	s.Run("object storage failure", func() {
 		file := storedFile(false)
-		past := time.Now().Add(-time.Minute)
+		past := testNow().Add(-time.Minute)
 		file.ExpiresAt = &past
 
-		s.storage.EXPECT().GetByID(gomock.Any(), id).Return(file, nil)
+		s.storage.EXPECT().GetByID(gomock.Any(), id, testNow()).Return(file, nil)
 		s.objects.EXPECT().Delete(gomock.Any(), "obj").Return(errors.New("s3 down"))
 
-		released, err := s.manager.ReleaseExpiredSlug(ctx, id)
+		released, err := s.manager.ReleaseExpiredSlug(ctx, id, testNow())
 		s.Require().Error(err)
 		s.False(released)
 	})
@@ -503,7 +503,7 @@ func (s *ManagerSuite) TestCreate_ExpiredRecordDoesNotHoldCustomSlug() {
 	s.expectUpload("x")
 	gomock.InOrder(
 		s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(domain.ErrSlugConflict),
-		s.expired.EXPECT().ReleaseExpiredSlug(gomock.Any(), domain.HashSlug("report")).Return(true, nil),
+		s.expired.EXPECT().ReleaseExpiredSlug(gomock.Any(), domain.HashSlug("report"), testNow()).Return(true, nil),
 		s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil),
 	)
 	s.expectUploadSweep()
@@ -598,7 +598,7 @@ func (s *ManagerSuite) TestDownload_CorruptMetaIsNotFound() {
 	file := storedFile(false)
 	file.SealedMeta = "{"
 
-	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(file, nil)
+	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any(), testNow()).Return(file, nil)
 
 	_, err := s.manager.Download(s.T().Context(), "abc", anonymous(false))
 	s.Require().ErrorIs(err, domain.ErrNotFound)
@@ -608,13 +608,13 @@ func (s *ManagerSuite) TestDelete_StorageErrors() {
 	dbErr := errors.New("db down")
 
 	s.Run("read", func() {
-		s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(nil, dbErr)
+		s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any(), testNow()).Return(nil, dbErr)
 
 		s.Require().ErrorIs(s.manager.Delete(s.T().Context(), "abc", "code", skipPrivacy()), dbErr)
 	})
 
 	s.Run("write", func() {
-		s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(storedFile(false), nil)
+		s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any(), testNow()).Return(storedFile(false), nil)
 		s.storage.EXPECT().Delete(gomock.Any(), gomock.Any(), "obj").Return(dbErr)
 
 		s.Require().ErrorIs(s.manager.Delete(s.T().Context(), "abc", "code", skipPrivacy()), dbErr)

@@ -54,10 +54,12 @@ func newOwnerFlowManagers(t *testing.T, db *bun.DB, log *slog.Logger) (*notes.Ma
 	notesMgr := notes.NewManager(&notes.Deps{
 		Storage: noteRepo, Renderer: render.NewRenderer(), Encryptor: testutil.ContentEncryptor(t, "note"),
 		Hasher: crypto.NewEditCodeHasher(testutil.Argon2Params()), ExpiredSlugs: expired, Log: log,
+		Now: time.Now,
 	}, false)
 	linksMgr := links.NewManager(&links.Deps{
 		Storage: linkRepo, Encryptor: testutil.ContentEncryptor(t, "link"),
 		Hasher: crypto.NewEditCodeHasher(testutil.Argon2Params()), ExpiredSlugs: expired, Log: log,
+		Now: time.Now,
 	}, false).WithCache(linkcache.NewDefault(log))
 
 	return notesMgr, linksMgr
@@ -85,12 +87,14 @@ func newOwnerFlowEnv(t *testing.T, dbName string) ownerFlowEnv {
 			Sessions:  sqliterepo.NewSessionRepository(db),
 			APITokens: sqliterepo.NewAPITokenRepository(db),
 		},
-		crypto.NewPasswordHasher(testArgon2Params),
-		crypto.NewSealer(testArgon2Params),
-		crypto.NewTOTP(),
-		log,
-		"padmark-test",
-		time.Hour,
+		&auth.Deps{
+			PasswordHasher: crypto.NewPasswordHasher(testArgon2Params),
+			Sealer:         crypto.NewSealer(testArgon2Params),
+			TOTP:           crypto.NewTOTP(),
+			Log:            log,
+			Now:            time.Now,
+		},
+		"padmark-test", time.Hour,
 	)
 	require.NoError(t, err)
 

@@ -203,11 +203,11 @@ func (s *UserSuite) TestChangePassword_ReplacesCredentialsAndAccess() {
 	s.Equal([]byte("new-salt-16bytes"), got.KDFSalt)
 	s.Equal("new-seal", got.TOTPSecret)
 
-	_, err = s.be.sessions.Get(ctx, "old-session")
+	_, err = s.be.sessions.Get(ctx, "old-session", now())
 	s.Require().ErrorIs(err, domain.ErrSessionExpired, "the old session is gone")
-	_, err = s.be.sessions.Get(ctx, "new-session")
+	_, err = s.be.sessions.Get(ctx, "new-session", now())
 	s.Require().NoError(err, "the replacement session exists")
-	_, err = s.be.sessions.Get(ctx, "other-session")
+	_, err = s.be.sessions.Get(ctx, "other-session", now())
 	s.Require().NoError(err, "sessions of other users stay")
 	_, err = s.be.tokens.GetByHash(ctx, "old-token")
 	s.Require().ErrorIs(err, domain.ErrNotFound, "the API tokens of the user are gone")
@@ -221,7 +221,7 @@ func (s *UserSuite) TestChangePassword_UnknownUser_ChangesNothing() {
 		"new-hash", []byte("new-salt-16bytes"), "new-seal")
 	s.Require().ErrorIs(err, domain.ErrNotFound)
 
-	_, err = s.be.sessions.Get(ctx, "ghost-session")
+	_, err = s.be.sessions.Get(ctx, "ghost-session", now())
 	s.Require().ErrorIs(err, domain.ErrSessionExpired, "the transaction stored no session")
 }
 
@@ -234,7 +234,7 @@ func (s *UserSuite) TestRevoke_NonAdmin_RemovesUserAndSessions() {
 
 	_, err := s.be.users.GetByID(ctx, usr.ID)
 	s.Require().ErrorIs(err, domain.ErrNotFound)
-	_, err = s.be.sessions.Get(ctx, "mallory-session")
+	_, err = s.be.sessions.Get(ctx, "mallory-session", now())
 	s.Require().ErrorIs(err, domain.ErrSessionExpired)
 }
 

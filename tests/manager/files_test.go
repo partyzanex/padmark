@@ -81,6 +81,7 @@ func newFileManager(
 		Hasher:       crypto.NewEditCodeHasher(testutil.Argon2Params()),
 		ExpiredSlugs: expired,
 		Log:          discardLog(),
+		Now:          time.Now,
 	}, maxFileSize, true)
 	expired.WithFiles(manager)
 

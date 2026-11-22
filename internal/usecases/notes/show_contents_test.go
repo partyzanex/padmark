@@ -59,8 +59,8 @@ func (s *ManagerTestSuite) TestUpdate_OmittedShowContentsKeepsStoredValue() {
 	existing.EditCode = "secret123456"
 
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(existing, nil)
-	s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("abc-123"), gomock.Any()).DoAndReturn(
-		func(_ context.Context, _ string, written *domain.Note) error {
+	s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("abc-123"), gomock.Any(), testNow()).DoAndReturn(
+		func(_ context.Context, _ string, written *domain.Note, _ time.Time) error {
 			s.Nil(written.ShowContents, "an omitted option must not overwrite a concurrent change")
 
 			return nil
@@ -79,8 +79,8 @@ func (s *ManagerTestSuite) TestUpdate_ExplicitShowContentsIsWritten() {
 		existing.EditCode = "secret123456"
 
 		s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(existing, nil)
-		s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("abc-123"), gomock.Any()).DoAndReturn(
-			func(_ context.Context, _ string, written *domain.Note) error {
+		s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("abc-123"), gomock.Any(), testNow()).DoAndReturn(
+			func(_ context.Context, _ string, written *domain.Note, _ time.Time) error {
 				s.Require().NotNil(written.ShowContents)
 				s.Equal(value, *written.ShowContents)
 

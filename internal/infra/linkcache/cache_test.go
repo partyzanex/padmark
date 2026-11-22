@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bluele/gcache"
 	"github.com/stretchr/testify/require"
 )
 
@@ -74,13 +75,20 @@ func TestCache_RejectsDifferentCiphertext(t *testing.T) {
 func TestCache_TTLExpiry(t *testing.T) {
 	t.Parallel()
 
-	cache := New(10, 10*time.Millisecond, discardLogger())
-	cache.Set(context.Background(), "abc", "ciphertext", "https://example.com")
+	// A fake clock replaces the wait for real time: the result does not depend on the load of
+	// the machine.
+	const ttl = 10 * time.Millisecond
+
+	clock := gcache.NewFakeClock()
+	cache := newWithClock(10, ttl, clock, discardLogger())
+	cache.Set(t.Context(), "abc", "ciphertext", "https://example.com")
+
+	clock.Advance(ttl / 2)
 
 	_, found := cache.Get("abc", "ciphertext")
-	require.True(t, found, "entry must be present immediately after Set")
+	require.True(t, found, "entry must be present before its TTL has elapsed")
 
-	time.Sleep(30 * time.Millisecond)
+	clock.Advance(ttl)
 
 	_, found = cache.Get("abc", "ciphertext")
 	require.False(t, found, "entry must be gone once its TTL has elapsed")

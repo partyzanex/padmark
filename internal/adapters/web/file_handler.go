@@ -759,7 +759,7 @@ func (h *FileHandler) sendFailed(
 	}
 
 	clearDownloadHeaders(w)
-	h.respondError(w, r, fmt.Errorf("send file: %w", errors.Join(domain.ErrStorageUnavailable, err)))
+	h.respondError(w, r, fmt.Errorf("download file: %w", errors.Join(domain.ErrStorageUnavailable, err)))
 }
 
 // isFileUpload reports whether r is the file upload. The general body limit does not apply to

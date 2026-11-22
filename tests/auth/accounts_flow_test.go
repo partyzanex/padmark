@@ -139,12 +139,14 @@ func TestAccountsFlow(t *testing.T) {
 
 	authMgr, err := auth.NewManager(
 		sqliteAuthStores(db, users),
-		crypto.NewPasswordHasher(testArgon2Params),
-		crypto.NewSealer(testArgon2Params),
-		crypto.NewTOTP(),
-		log,
-		"padmark-test",
-		time.Hour,
+		&auth.Deps{
+			PasswordHasher: crypto.NewPasswordHasher(testArgon2Params),
+			Sealer:         crypto.NewSealer(testArgon2Params),
+			TOTP:           crypto.NewTOTP(),
+			Log:            log,
+			Now:            time.Now,
+		},
+		"padmark-test", time.Hour,
 	)
 	require.NoError(t, err)
 
@@ -154,10 +156,12 @@ func TestAccountsFlow(t *testing.T) {
 	notesMgr := notes.NewManager(&notes.Deps{
 		Storage: noteRepo, Renderer: render.NewRenderer(), Encryptor: testutil.ContentEncryptor(t, "note"),
 		Hasher: crypto.NewEditCodeHasher(testutil.Argon2Params()), ExpiredSlugs: expired, Log: log,
+		Now: time.Now,
 	}, false)
 	linksMgr := links.NewManager(&links.Deps{
 		Storage: linkRepo, Encryptor: testutil.ContentEncryptor(t, "link"),
 		Hasher: crypto.NewEditCodeHasher(testutil.Argon2Params()), ExpiredSlugs: expired, Log: log,
+		Now: time.Now,
 	}, false)
 
 	resolver := slugs.NewResolver(sqliterepo.NewSlugRepository(db))

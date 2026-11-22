@@ -37,7 +37,7 @@ var errInvalidPostgresDSN = errors.New("invalid postgres dsn")
 func openPostgresDB(dsn string, _ *slog.Logger) (db *bun.DB, err error) {
 	err = validatePostgresDSN(dsn)
 	if err != nil {
-		return nil, fmt.Errorf("validate postgres dsn: %w", err)
+		return nil, err
 	}
 
 	defer func() {

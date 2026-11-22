@@ -37,7 +37,7 @@ func TestMigrateSessionIDs_InvalidatesOldSessionsAndDowngradeHashes(t *testing.T
 	require.Zero(t, count, "plaintext-era sessions must be invalidated")
 
 	repo := NewSessionRepository(db)
-	_, err = repo.Get(t.Context(), "legacy-bearer")
+	_, err = repo.Get(t.Context(), "legacy-bearer", time.Now())
 	require.ErrorIs(t, err, domain.ErrSessionExpired)
 
 	now := time.Now().Truncate(time.Second)
@@ -48,7 +48,7 @@ func TestMigrateSessionIDs_InvalidatesOldSessionsAndDowngradeHashes(t *testing.T
 	}))
 	_, err = provider.Up(t.Context())
 	require.NoError(t, err)
-	_, err = repo.Get(t.Context(), "hashed-era-digest")
+	_, err = repo.Get(t.Context(), "hashed-era-digest", time.Now())
 	require.NoError(t, err, "reapplying migrations must preserve newly created sessions")
 	_, err = provider.DownTo(t.Context(), before)
 	require.NoError(t, err)

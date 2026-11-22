@@ -119,7 +119,11 @@ Dependencies point inward: adapters and infrastructure depend on usecases and do
 ## Coding rules
 
 - Never store `context.Context` in struct fields; pass it as the first argument.
-- Wrap errors with operation context and translate DB errors to domain errors.
+- Wrap errors with operation context and translate DB errors to domain errors. Wrap once where
+  the error enters a package; return errors of same-package functions as they are.
+- Read the time only through the `Now` dependency of a manager (`time.Now` at the composition
+  root, a fixed clock in tests). Pass it to storage as `now`; a record is expired when
+  `now >= expires_at` (`domain.*.Expired`, `expiredWhere`/`liveWhere` in SQL).
 - Required dependencies need no repeated nil checks. Use mocks or no-op implementations in tests.
 - Add interfaces for testing, multiple implementations or cross-package decoupling.
 - Do not hold a mutex across network I/O.

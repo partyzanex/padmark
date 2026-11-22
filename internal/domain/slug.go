@@ -56,22 +56,12 @@ const (
 )
 
 func newSlug() (string, error) {
-	operationResult, operationErr := randomString(slugChars, slugLength)
-	if operationErr != nil {
-		return operationResult, fmt.Errorf("random string: %w", operationErr)
-	}
-
-	return operationResult, nil
+	return randomString(slugChars, slugLength)
 }
 
 // NewEditCode generates a random edit code for a newly created note or link.
 func NewEditCode() (string, error) {
-	operationResult, operationErr := randomString(editCodeChars, editCodeLength)
-	if operationErr != nil {
-		return operationResult, fmt.Errorf("random string: %w", operationErr)
-	}
-
-	return operationResult, nil
+	return randomString(editCodeChars, editCodeLength)
 }
 
 // CustomSlugSetting is the value of the custom slug setting. Its underlying type is bool, so

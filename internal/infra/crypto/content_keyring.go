@@ -47,7 +47,7 @@ func LoadContentKeyring(path string, log *slog.Logger, opts KeyringLoadOptions) 
 
 	err := requireRegularKeyring(path)
 	if err != nil {
-		return nil, fmt.Errorf("require regular keyring: %w", err)
+		return nil, err
 	}
 
 	data, err := readKeyringFile(path, log, opts)
@@ -62,7 +62,7 @@ func LoadContentKeyring(path string, log *slog.Logger, opts KeyringLoadOptions) 
 
 	_, err = NewContentCipher(keyring.Active, keyring.Keys, "note")
 	if err != nil {
-		return nil, fmt.Errorf("new content cipher: %w", err)
+		return nil, err
 	}
 
 	return keyring, nil
@@ -173,7 +173,7 @@ func checkKeyringPermissions(path string, file *os.File, log *slog.Logger, opts 
 func (k *ContentKeyring) ForResource(resource string) (*ContentEncryptor, error) {
 	content, err := NewContentCipher(k.Active, k.Keys, resource)
 	if err != nil {
-		return nil, fmt.Errorf("new content cipher: %w", err)
+		return nil, err
 	}
 
 	return &ContentEncryptor{ContentCipher: content}, nil

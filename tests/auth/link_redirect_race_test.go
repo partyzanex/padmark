@@ -112,6 +112,7 @@ func TestLinkRedirectPrivacyRace(t *testing.T) {
 					Storage: paused, Encryptor: testutil.ContentEncryptor(t, "link"),
 					Hasher:       crypto.NewEditCodeHasher(testArgon2Params),
 					ExpiredSlugs: expiredslugs.New(sqliterepo.NewNoteRepository(env.db), repo), Log: log,
+					Now: time.Now,
 				}, false)
 				if cached {
 					cache := linkcache.NewDefault(log)

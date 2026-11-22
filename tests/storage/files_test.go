@@ -21,7 +21,7 @@ func (s *FileSuite) TestCreate_GetByID_RoundTrip() {
 	expires := now().Add(time.Hour)
 	s.Require().NoError(s.be.files.Create(ctx, newFile("file-1", "object-1", &expires)))
 
-	got, err := s.be.files.GetByID(ctx, "file-1")
+	got, err := s.be.files.GetByID(ctx, "file-1", now())
 	s.Require().NoError(err)
 	s.Equal("object-1", got.ObjectKey)
 	s.Equal("sealed-meta", got.SealedMeta)
@@ -30,7 +30,7 @@ func (s *FileSuite) TestCreate_GetByID_RoundTrip() {
 	s.Require().NotNil(got.ExpiresAt)
 	s.True(expires.Equal(*got.ExpiresAt))
 
-	_, err = s.be.files.GetByID(ctx, "unknown")
+	_, err = s.be.files.GetByID(ctx, "unknown", now())
 	s.Require().ErrorIs(err, domain.ErrNotFound)
 }
 
@@ -68,12 +68,12 @@ func (s *FileSuite) TestDelete() {
 
 	s.Require().ErrorIs(s.be.files.Delete(ctx, "file-1", "other-object"), domain.ErrNotFound)
 
-	_, err := s.be.files.GetByID(ctx, "file-1")
+	_, err := s.be.files.GetByID(ctx, "file-1", now())
 	s.Require().NoError(err, "a delete with another object key keeps the record")
 
 	s.Require().NoError(s.be.files.Delete(ctx, "file-1", "object-1"))
 
-	_, err = s.be.files.GetByID(ctx, "file-1")
+	_, err = s.be.files.GetByID(ctx, "file-1", now())
 	s.Require().ErrorIs(err, domain.ErrNotFound)
 }
 

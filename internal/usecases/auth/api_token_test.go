@@ -53,12 +53,14 @@ func newAuthManagerWithTokens(
 			Sessions:  NewMockSessionStore(suite.ctrl),
 			APITokens: apiTokens,
 		},
-		crypto.NewPasswordHasher(testArgon2Params),
-		crypto.NewSealer(testArgon2Params),
-		crypto.NewTOTP(),
-		discardLog(),
-		"padmark",
-		0,
+		&Deps{
+			PasswordHasher: crypto.NewPasswordHasher(testArgon2Params),
+			Sealer:         crypto.NewSealer(testArgon2Params),
+			TOTP:           crypto.NewTOTP(),
+			Log:            discardLog(),
+			Now:            testNow,
+		},
+		"padmark", 0,
 	)
 	suite.Require().NoError(err)
 
@@ -77,12 +79,14 @@ func (suite *APITokenSuite) disabledMgr() *Manager {
 			Sessions:  NewMockSessionStore(suite.ctrl),
 			APITokens: nil, // API-token flow disabled → methods return domain.ErrFeatureNotSupported.
 		},
-		crypto.NewPasswordHasher(testArgon2Params),
-		crypto.NewSealer(testArgon2Params),
-		crypto.NewTOTP(),
-		discardLog(),
-		"padmark",
-		0,
+		&Deps{
+			PasswordHasher: crypto.NewPasswordHasher(testArgon2Params),
+			Sealer:         crypto.NewSealer(testArgon2Params),
+			TOTP:           crypto.NewTOTP(),
+			Log:            discardLog(),
+			Now:            testNow,
+		},
+		"padmark", 0,
 	)
 	suite.Require().NoError(err)
 
@@ -203,11 +207,11 @@ func (suite *APITokenSuite) TestResolveAPIToken_UnknownHash_ReturnsErrNotFound()
 }
 
 func (suite *APITokenSuite) TestResolveAPIToken_ExpiredToken_ReturnsErrNotFound() {
-	exp := time.Now().Add(-time.Minute)
+	exp := testNow().Add(-time.Minute)
 	tok := &domain.APIToken{
 		UserID:    uuid.New(),
 		TokenHash: hashToken("plain"),
-		CreatedAt: time.Now(),
+		CreatedAt: testNow(),
 		ExpiresAt: &exp,
 
 		LastUsedAt: nil, IssuedBy: nil,
@@ -222,7 +226,7 @@ func (suite *APITokenSuite) TestResolveAPIToken_UpdateLastUsedFails_StillReturns
 	ctx := suite.T().Context()
 	usr := suite.regularUser()
 	tok := &domain.APIToken{
-		UserID: usr.ID, TokenHash: hashToken("plain"), CreatedAt: time.Now(),
+		UserID: usr.ID, TokenHash: hashToken("plain"), CreatedAt: testNow(),
 		ExpiresAt: nil, LastUsedAt: nil, IssuedBy: nil,
 	}
 
@@ -241,7 +245,7 @@ func (suite *APITokenSuite) TestResolveAPIToken_Success_ReturnsUserAndRecordsLas
 	ctx := suite.T().Context()
 	usr := suite.regularUser()
 	tok := &domain.APIToken{
-		UserID: usr.ID, TokenHash: hashToken("plain"), CreatedAt: time.Now(),
+		UserID: usr.ID, TokenHash: hashToken("plain"), CreatedAt: testNow(),
 		ExpiresAt: nil, LastUsedAt: nil, IssuedBy: nil,
 	}
 
@@ -263,7 +267,7 @@ func (suite *APITokenSuite) TestResolveAPIToken_UserLookupFails_WrapsError() {
 	ctx := suite.T().Context()
 	userID := uuid.New()
 	tok := &domain.APIToken{
-		UserID: userID, TokenHash: hashToken("plain"), CreatedAt: time.Now(),
+		UserID: userID, TokenHash: hashToken("plain"), CreatedAt: testNow(),
 		ExpiresAt: nil, LastUsedAt: nil, IssuedBy: nil,
 	}
 
@@ -297,11 +301,11 @@ func (suite *APITokenSuite) TestListAPITokens_Admin_ReturnsTokensWithUsernames()
 	aliceID := uuid.New()
 	tokens := []*domain.APIToken{
 		{
-			TokenHash: "tok-1", UserID: aliceID, CreatedAt: time.Now(),
+			TokenHash: "tok-1", UserID: aliceID, CreatedAt: testNow(),
 			ExpiresAt: nil, LastUsedAt: nil, IssuedBy: nil,
 		},
 		{
-			TokenHash: "tok-2", UserID: uuid.New(), CreatedAt: time.Now(),
+			TokenHash: "tok-2", UserID: uuid.New(), CreatedAt: testNow(),
 			ExpiresAt: nil, LastUsedAt: nil, IssuedBy: nil,
 		},
 	}
@@ -415,7 +419,7 @@ func (suite *APITokenSuite) TestRevokeAPIToken_AdminLookupFails_WrapsError() {
 func (suite *APITokenSuite) stepUpMgr() (*APITokenManager, *MockStepUpVerifier) {
 	verifier := NewMockStepUpVerifier(suite.ctrl)
 
-	return NewAPITokenManager(suite.apiTokens, suite.users, verifier, discardLog()), verifier
+	return NewAPITokenManager(suite.apiTokens, suite.users, verifier, discardLog(), testNow), verifier
 }
 
 func (suite *APITokenSuite) TestCreateAPIToken_Bearer_WithoutStepUp_ReturnsErrStepUpRequired() {

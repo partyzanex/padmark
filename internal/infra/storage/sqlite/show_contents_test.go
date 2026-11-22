@@ -1,6 +1,10 @@
 package sqlite
 
-import "github.com/partyzanex/padmark/internal/domain"
+import (
+	"time"
+
+	"github.com/partyzanex/padmark/internal/domain"
+)
 
 // showContentsCases are the create-time values: nil is an old client that does not send the option.
 func showContentsCases() []struct {
@@ -45,7 +49,7 @@ func (s *RepositoryTestSuite) TestShowContents_UpdateNilKeepsStoredValue() {
 	}{{nil, true}, {new(false), false}, {nil, false}, {new(true), true}} {
 		update := plainNote("sc-update")
 		update.ShowContents = step.value
-		s.Require().NoError(s.repo.Update(ctx, "sc-update", update))
+		s.Require().NoError(s.repo.Update(ctx, "sc-update", update, time.Now()))
 
 		got, err := s.repo.Get(ctx, "sc-update")
 		s.Require().NoError(err)
@@ -61,7 +65,7 @@ func (s *RepositoryTestSuite) TestShowContents_ConsumeReturnsValue() {
 	note.ShowContents = new(true)
 	s.Require().NoError(s.repo.Create(ctx, note))
 
-	got, err := s.repo.Consume(ctx, "sc-burn", domain.PrivacyPublic, "")
+	got, err := s.repo.Consume(ctx, "sc-burn", domain.PrivacyPublic, "", time.Now())
 	s.Require().NoError(err)
 	s.True(got.ContentsSidebar())
 }

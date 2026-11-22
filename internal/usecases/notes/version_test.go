@@ -62,8 +62,8 @@ func (s *ManagerTestSuite) TestDelete_NewVersionIsNotFound() {
 func (s *ManagerTestSuite) TestUpdate_UsesCheckedVersion() {
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).
 		Return(storedNote("secret123456", new(testUserID1)), nil)
-	s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("abc-123"), gomock.Any()).DoAndReturn(
-		func(_ any, _ string, written *domain.Note) error {
+	s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("abc-123"), gomock.Any(), testNow()).DoAndReturn(
+		func(_ any, _ string, written *domain.Note, _ time.Time) error {
 			s.Equal("secret123456", written.EditCode, "the stored hash selects the checked note")
 
 			return domain.ErrNotFound
@@ -80,7 +80,7 @@ func (s *ManagerTestSuite) TestUpdate_UsesCheckedVersion() {
 func (s *ManagerTestSuite) TestGet_BurnUsesCheckedVersion() {
 	note := checkedBurnNote("hash:checked")
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("burn-x")).Return(note, nil)
-	s.storage.EXPECT().Consume(gomock.Any(), domain.HashSlug("burn-x"), domain.PrivacyPublic, "hash:checked").
+	s.storage.EXPECT().Consume(gomock.Any(), domain.HashSlug("burn-x"), domain.PrivacyPublic, "hash:checked", testNow()).
 		Return(nil, domain.ErrNotFound)
 
 	_, err := s.manager.Read(s.T().Context(), "burn-x", openReader())

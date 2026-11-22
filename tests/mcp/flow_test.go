@@ -376,12 +376,14 @@ func newTestAuthManager(t *testing.T, db *bun.DB, users *sqliterepo.UserReposito
 			Sessions:  sqliterepo.NewSessionRepository(db),
 			APITokens: sqliterepo.NewAPITokenRepository(db),
 		},
-		crypto.NewPasswordHasher(flowArgon2),
-		crypto.NewSealer(flowArgon2),
-		crypto.NewTOTP(),
-		discardTestLogger(),
-		"padmark-test",
-		time.Hour,
+		&auth.Deps{
+			PasswordHasher: crypto.NewPasswordHasher(flowArgon2),
+			Sealer:         crypto.NewSealer(flowArgon2),
+			TOTP:           crypto.NewTOTP(),
+			Log:            discardTestLogger(),
+			Now:            time.Now,
+		},
+		"padmark-test", time.Hour,
 	)
 	require.NoError(t, err)
 
@@ -395,10 +397,12 @@ func newTestManagers(t *testing.T, db *bun.DB, expired *expiredslugs.Releaser) (
 		Storage: sqliterepo.NewNoteRepository(db), Renderer: render.NewRenderer(),
 		Encryptor: testutil.ContentEncryptor(t, "note"), Hasher: crypto.NewEditCodeHasher(testutil.Argon2Params()),
 		ExpiredSlugs: expired, Log: discardTestLogger(),
+		Now: time.Now,
 	}, false)
 	linksMgr := links.NewManager(&links.Deps{
 		Storage: sqliterepo.NewLinkRepository(db, discardTestLogger()), Encryptor: testutil.ContentEncryptor(t, "link"),
 		Hasher: crypto.NewEditCodeHasher(testutil.Argon2Params()), ExpiredSlugs: expired, Log: discardTestLogger(),
+		Now: time.Now,
 	}, false)
 
 	return notesMgr, linksMgr
@@ -425,6 +429,7 @@ func newTestFileManager(t *testing.T, db *bun.DB, expired *expiredslugs.Releaser
 		Hasher:       crypto.NewEditCodeHasher(testutil.Argon2Params()),
 		ExpiredSlugs: expired,
 		Log:          discardTestLogger(),
+		Now:          time.Now,
 	}, 1<<20, false)
 	expired.WithFiles(manager)
 

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/suite"
 	"github.com/uptrace/bun"
@@ -50,7 +51,7 @@ func (s *SQLiteManagerSuite) SetupTest() {
 	s.LinkManager = newLinkManager(s.T(), linkRepo, expired)
 	s.FileManager = newFileManager(&s.Suite, sqliterepo.NewFileRepository(s.db), expired, s.objects.store)
 	s.Objects = s.objects.store
-	s.RevealStore = auth.NewRevealManager(sqliterepo.NewRevealRepository(s.db), slog.Default())
+	s.RevealStore = auth.NewRevealManager(sqliterepo.NewRevealRepository(s.db), slog.Default(), time.Now)
 	s.DB = s.db
 }
 

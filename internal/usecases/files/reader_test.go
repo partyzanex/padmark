@@ -26,7 +26,7 @@ func (s *ManagerSuite) TestReader_HiddenFileIsForbidden() {
 	ctx := s.T().Context()
 	stranger := account(uuid.New())
 
-	s.storage.EXPECT().GetByID(gomock.Any(), domain.HashSlug("abc")).Return(hiddenFile(), nil).Times(4)
+	s.storage.EXPECT().GetByID(gomock.Any(), domain.HashSlug("abc"), testNow()).Return(hiddenFile(), nil).Times(4)
 
 	_, err := s.manager.Inspect(ctx, "abc", stranger)
 	s.Require().ErrorIs(err, domain.ErrForbidden)
@@ -43,10 +43,10 @@ func (s *ManagerSuite) TestReader_HiddenFileIsForbidden() {
 // TestReader_HiddenExpiredFileIsForbidden checks that privacy comes before expiry in Update.
 func (s *ManagerSuite) TestReader_HiddenExpiredFileIsForbidden() {
 	file := hiddenFile()
-	past := time.Now().Add(-time.Minute)
+	past := testNow().Add(-time.Minute)
 	file.ExpiresAt = &past
 
-	s.storage.EXPECT().GetByID(gomock.Any(), domain.HashSlug("abc")).Return(file, nil)
+	s.storage.EXPECT().GetByID(gomock.Any(), domain.HashSlug("abc"), testNow()).Return(file, nil)
 
 	_, err := s.manager.Update(s.T().Context(), "abc", "code", account(uuid.New()), noUpdate())
 	s.Require().ErrorIs(err, domain.ErrForbidden)
@@ -57,7 +57,7 @@ func (s *ManagerSuite) TestReader_HiddenExpiredFileIsForbidden() {
 func (s *ManagerSuite) TestReader_AccountsOffSkipsPrivacy() {
 	ctx := s.T().Context()
 
-	s.storage.EXPECT().GetByID(gomock.Any(), domain.HashSlug("abc")).Return(hiddenFile(), nil).Times(2)
+	s.storage.EXPECT().GetByID(gomock.Any(), domain.HashSlug("abc"), testNow()).Return(hiddenFile(), nil).Times(2)
 
 	file, err := s.manager.Inspect(ctx, "abc", skipPrivacy())
 	s.Require().NoError(err)
@@ -70,10 +70,10 @@ func (s *ManagerSuite) TestReader_AccountsOffSkipsPrivacy() {
 // delete: the strict mock fails on DeleteExpired, so the file page can still answer 410.
 func (s *ManagerSuite) TestSettings_ExpiredFileStays() {
 	file := storedFile(false)
-	past := time.Now().Add(-time.Minute)
+	past := testNow().Add(-time.Minute)
 	file.ExpiresAt = &past
 
-	s.storage.EXPECT().GetByID(gomock.Any(), domain.HashSlug("abc")).Return(file, nil)
+	s.storage.EXPECT().GetByID(gomock.Any(), domain.HashSlug("abc"), testNow()).Return(file, nil)
 
 	_, err := s.manager.Settings(s.T().Context(), "abc", skipPrivacy())
 	s.Require().ErrorIs(err, domain.ErrExpired)
@@ -81,7 +81,7 @@ func (s *ManagerSuite) TestSettings_ExpiredFileStays() {
 
 // TestSettings_HiddenFileIsForbidden checks the privacy rule of the editor read.
 func (s *ManagerSuite) TestSettings_HiddenFileIsForbidden() {
-	s.storage.EXPECT().GetByID(gomock.Any(), domain.HashSlug("abc")).Return(hiddenFile(), nil)
+	s.storage.EXPECT().GetByID(gomock.Any(), domain.HashSlug("abc"), testNow()).Return(hiddenFile(), nil)
 
 	_, err := s.manager.Settings(s.T().Context(), "abc", account(uuid.New()))
 	s.Require().ErrorIs(err, domain.ErrForbidden)

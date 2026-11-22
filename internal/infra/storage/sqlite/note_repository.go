@@ -140,20 +140,20 @@ func (r *NoteRepository) Get(ctx context.Context, id string) (*domain.Note, erro
 }
 
 // Consume atomically deletes a note and returns it, but only if the note is eligible for deletion:
-// burn_after_reading is set (with no grace period), or expires_at has passed.
+// burn_after_reading is set (with no grace period), or the note is expired at now.
 // It deletes only the note version with storedEditCode (see notes.Storage).
 // Returns domain.ErrNotFound otherwise. RETURNING lists the model columns (?Columns), not *:
 // notes also has legacy_slug (migrations/sqlite/20261023000001_legacy_notes.sql), which the
 // model does not map and bun refuses to scan.
 func (r *NoteRepository) Consume(
-	ctx context.Context, id string, expected domain.Privacy, storedEditCode string,
+	ctx context.Context, id string, expected domain.Privacy, storedEditCode string, now time.Time,
 ) (*domain.Note, error) {
 	var dbNote note
 
 	err := r.db.NewDelete().
 		Model(&dbNote).
 		Where("id = ?", id).
-		Where("burn_after_reading OR (expires_at IS NOT NULL AND expires_at <= ?)", time.Now()).
+		Where("burn_after_reading OR ("+expiredWhere+")", now).
 		Where("privacy = ?", expected).
 		Where("edit_code = ?", storedEditCode).
 		Returning("?Columns").
@@ -201,8 +201,9 @@ func (r *NoteRepository) SetBurnExpiry(
 
 // Update modifies an existing note. A nil content type, privacy or ShowContents keeps the stored value.
 // domNote.EditCode must be the stored hash: it selects the note version and is never written.
-// An expired note is not changed (liveWhere): the write gets domain.ErrNotFound, as for files.
-func (r *NoteRepository) Update(ctx context.Context, id string, domNote *domain.Note) error {
+// A note that is expired at now is not changed (liveWhere): the write gets domain.ErrNotFound, as
+// for files.
+func (r *NoteRepository) Update(ctx context.Context, id string, domNote *domain.Note, now time.Time) error {
 	dbNote := &note{
 		BaseModel:        bun.BaseModel{},
 		ID:               id,
@@ -243,7 +244,7 @@ func (r *NoteRepository) Update(ctx context.Context, id string, domNote *domain.
 		Set("show_contents = COALESCE(?, show_contents)", domNote.ShowContents).
 		Where("id = ?", id).
 		Where("edit_code = ?", domNote.EditCode).
-		Where(liveWhere, time.Now()).
+		Where(liveWhere, now).
 		Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("sqlite update: %w", err)
@@ -284,12 +285,12 @@ func (r *NoteRepository) IncrementViews(ctx context.Context, id string) error {
 	return nil
 }
 
-// DeleteExpired removes a note only while it is still expired at the moment of the DELETE.
+// DeleteExpired removes a note only while it is still expired at now.
 // It returns domain.ErrNotFound when no such row exists, for example after its owner extended it.
-func (r *NoteRepository) DeleteExpired(ctx context.Context, id string) error {
+func (r *NoteRepository) DeleteExpired(ctx context.Context, id string, now time.Time) error {
 	result, err := r.db.NewDelete().Model((*note)(nil)).
 		Where("id = ?", id).
-		Where("expires_at IS NOT NULL AND expires_at <= ?", time.Now()).
+		Where(expiredWhere, now).
 		Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("sqlite delete expired: %w", err)

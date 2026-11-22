@@ -18,21 +18,27 @@ import (
 
 // TestRequestTimeout_SlowServer_FailsFast verifies the --timeout flag is wired into the
 // command: against a server that never responds in time, the command aborts after the timeout
-// instead of hanging. The slow server sleeps far longer than the timeout, so a fast failure
-// (well under the sleep) proves the bound is enforced rather than ignored.
+// instead of hanging. The server holds the reply far longer than the timeout, so a failure
+// before the reply proves the bound is enforced rather than ignored. The bound is the server
+// delay, not a short fixed time, so a slow machine cannot make the test fail.
 func TestRequestTimeout_SlowServer_FailsFast(t *testing.T) {
 	isolateEnv(t)
 
-	// serverDelay >> timeout so the client's deadline fires first. elapsed is measured before
-	// srv.Close() (which blocks until the in-flight handler's sleep ends), so the assertion sees
-	// only the client-side fail-fast time, not the cleanup wait.
+	// serverDelay >> timeout so the client's deadline fires first. The handler returns when the
+	// client goes away, so srv.Close() does not wait for the full delay.
 	const (
-		serverDelay = 800 * time.Millisecond
+		serverDelay = 30 * time.Second
 		timeout     = "50ms"
 	)
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		time.Sleep(serverDelay)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The delay is the test input (a slow server), not a wait for other goroutines.
+		select {
+		case <-r.Context().Done():
+			return
+		case <-time.After(serverDelay):
+		}
+
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer srv.Close()
@@ -42,7 +48,7 @@ func TestRequestTimeout_SlowServer_FailsFast(t *testing.T) {
 	elapsed := time.Since(start)
 
 	require.Error(t, err, "request must fail when the server is slower than the timeout")
-	assert.Less(t, elapsed, 400*time.Millisecond,
+	assert.Less(t, elapsed, serverDelay/2,
 		"command must fail fast on timeout, not wait for the slow server (got %s)", elapsed)
 }
 
@@ -53,7 +59,7 @@ func TestRequestTimeout_SlowBody_FailsFast(t *testing.T) {
 	isolateEnv(t)
 
 	const (
-		serverDelay = 800 * time.Millisecond
+		serverDelay = 30 * time.Second
 		timeout     = "50ms"
 	)
 
@@ -80,7 +86,7 @@ func TestRequestTimeout_SlowBody_FailsFast(t *testing.T) {
 
 	require.Error(t, err, "a body slower than the timeout must stop the command")
 	require.ErrorIs(t, err, context.DeadlineExceeded)
-	assert.Less(t, elapsed, 400*time.Millisecond,
+	assert.Less(t, elapsed, serverDelay/2,
 		"command must fail fast on timeout, not wait for the slow body (got %s)", elapsed)
 }
 

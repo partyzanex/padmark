@@ -27,17 +27,17 @@ func (s *InviteSuite) TestRedeem_CreatesUserAndUsesInvite() {
 	ctx := s.T().Context()
 	s.createInvite("hash-1", now().Add(time.Hour))
 
-	s.Require().NoError(s.be.invites.RedeemInvite(ctx, "hash-1", "member", newUser("member", false)))
+	s.Require().NoError(s.be.invites.RedeemInvite(ctx, "hash-1", "member", newUser("member", false), now()))
 
 	_, err := s.be.users.GetByUsername(ctx, "member")
 	s.Require().NoError(err)
 
-	err = s.be.invites.RedeemInvite(ctx, "hash-1", "replay", newUser("replay", false))
+	err = s.be.invites.RedeemInvite(ctx, "hash-1", "replay", newUser("replay", false), now())
 	s.Require().ErrorIs(err, domain.ErrInviteUsed)
 }
 
 func (s *InviteSuite) TestRedeem_Unknown_ReturnsErrNotFound() {
-	err := s.be.invites.RedeemInvite(s.T().Context(), "unknown", "member", newUser("member", false))
+	err := s.be.invites.RedeemInvite(s.T().Context(), "unknown", "member", newUser("member", false), now())
 	s.Require().ErrorIs(err, domain.ErrNotFound)
 }
 
@@ -45,7 +45,7 @@ func (s *InviteSuite) TestRedeem_Expired_ReturnsErrInviteExpired() {
 	ctx := s.T().Context()
 	s.createInvite("old", now().Add(-time.Minute))
 
-	err := s.be.invites.RedeemInvite(ctx, "old", "member", newUser("member", false))
+	err := s.be.invites.RedeemInvite(ctx, "old", "member", newUser("member", false), now())
 	s.Require().ErrorIs(err, domain.ErrInviteExpired)
 
 	_, err = s.be.users.GetByUsername(ctx, "member")
@@ -59,10 +59,10 @@ func (s *InviteSuite) TestRedeem_UsernameTaken_KeepsInvite() {
 	s.createInvite("hash-1", now().Add(time.Hour))
 	s.createUser("taken", false)
 
-	err := s.be.invites.RedeemInvite(ctx, "hash-1", "taken", newUser("taken", false))
+	err := s.be.invites.RedeemInvite(ctx, "hash-1", "taken", newUser("taken", false), now())
 	s.Require().ErrorIs(err, domain.ErrUserExists)
 
-	s.Require().NoError(s.be.invites.RedeemInvite(ctx, "hash-1", "free", newUser("free", false)))
+	s.Require().NoError(s.be.invites.RedeemInvite(ctx, "hash-1", "free", newUser("free", false), now()))
 }
 
 func (s *InviteSuite) TestRedeem_Concurrent_SingleUse() {
@@ -72,7 +72,7 @@ func (s *InviteSuite) TestRedeem_Concurrent_SingleUse() {
 	results := race(func(attempt int) error {
 		name := fmt.Sprintf("racer%d", attempt)
 
-		return s.be.invites.RedeemInvite(context.WithoutCancel(ctx), "hash-1", name, newUser(name, false))
+		return s.be.invites.RedeemInvite(context.WithoutCancel(ctx), "hash-1", name, newUser(name, false), now())
 	})
 
 	won := 0
@@ -96,7 +96,7 @@ func (s *InviteSuite) TestDeleteStale_RemovesUsedAndExpired() {
 	s.createInvite("live", instant.Add(time.Hour))
 	s.createInvite("expired", instant.Add(-time.Minute))
 	s.createInvite("used", instant.Add(time.Hour))
-	s.Require().NoError(s.be.invites.RedeemInvite(ctx, "used", "member", newUser("member", false)))
+	s.Require().NoError(s.be.invites.RedeemInvite(ctx, "used", "member", newUser("member", false), now()))
 
 	s.Require().NoError(s.be.invites.DeleteStale(ctx, instant))
 

@@ -3,7 +3,6 @@
 package auth
 
 import (
-	"fmt"
 	"log/slog"
 	"time"
 )
@@ -76,38 +75,36 @@ type Stores struct {
 	APITokens APITokenStore
 }
 
-// NewManager returns a new auth Manager.
-// passwordHasher carries the (configurable) argon2 cost used for password hashing/verification.
-// sealer and totp provide the secret-sealing and TOTP primitives (injected so the usecase owns
-// its contracts instead of importing infra/crypto). issuer is the TOTP issuer name shown in the
+// Deps holds the primitives that the auth managers share. All fields are mandatory.
+// PasswordHasher carries the configurable argon2 cost of password hashing and verification.
+// Sealer and TOTP give the secret-sealing and TOTP primitives: the usecase owns their contracts
+// and does not import infra/crypto. Now is the time source of sessions, invites and API tokens:
+// the composition root gives time.Now, tests give a fixed clock.
+type Deps struct {
+	PasswordHasher PasswordHasher
+	Sealer         SecretSealer
+	TOTP           TOTPManager
+	Log            *slog.Logger
+	Now            func() time.Time
+}
+
+// NewManager returns a new auth Manager. issuer is the TOTP issuer name shown in the
 // authenticator app. sessionTTL controls how long a session remains valid; pass 0 for the
 // default (30 days).
 //
 // Returns an error when NewSessionManager's bootstrap-time crypto precompute fails (see its
 // doc); NewManager runs only at the composition root, so the caller should treat this as fatal.
-func NewManager(
-	stores Stores,
-	passwordHasher PasswordHasher,
-	sealer SecretSealer,
-	totp TOTPManager,
-	log *slog.Logger,
-	issuer string,
-	sessionTTL time.Duration,
-) (*Manager, error) {
-	sessionMgr, err := NewSessionManager(
-		stores.Users, stores.Sessions, passwordHasher, sealer, totp, log, sessionTTL,
-	)
+func NewManager(stores Stores, deps *Deps, issuer string, sessionTTL time.Duration) (*Manager, error) {
+	sessionMgr, err := NewSessionManager(stores.Users, stores.Sessions, deps, sessionTTL)
 	if err != nil {
-		return nil, fmt.Errorf("new session manager: %w", err)
+		return nil, err
 	}
 
 	// SessionManager owns the login factors, so it is the step-up verifier for both issuers.
 	return &Manager{
-		SessionManager: sessionMgr,
-		OnboardingManager: NewOnboardingManager(
-			stores.Users, stores.Invites, passwordHasher, sealer, totp, sessionMgr, log, issuer,
-		),
-		UserAdminManager: NewUserAdminManager(stores.Users),
-		APITokenManager:  NewAPITokenManager(stores.APITokens, stores.Users, sessionMgr, log),
+		SessionManager:    sessionMgr,
+		OnboardingManager: NewOnboardingManager(stores.Users, stores.Invites, sessionMgr, deps, issuer),
+		UserAdminManager:  NewUserAdminManager(stores.Users),
+		APITokenManager:   NewAPITokenManager(stores.APITokens, stores.Users, sessionMgr, deps.Log, deps.Now),
 	}, nil
 }

@@ -25,7 +25,7 @@ func (h *OgenHandler) withAccounts(tokens APITokenManager, onboarding Onboarding
 func (*OgenHandler) apiTokenEnvelope(ctx context.Context, plain string) (string, error) {
 	base, err := requestBaseURL(ctx)
 	if err != nil {
-		return "", fmt.Errorf("request base url: %w", err)
+		return "", err
 	}
 
 	envelope, encErr := domain.EncodeAPITokenEnvelope(base, plain)

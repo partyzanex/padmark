@@ -111,15 +111,18 @@ func newSlugEnv(t *testing.T, db *bun.DB, objects *s3store.Store, gate *createGa
 		Hasher:       hasher,
 		ExpiredSlugs: expired,
 		Log:          log,
+		Now:          time.Now,
 	}, maxFileSize, true)
 	expired.WithFiles(fileManager)
 	noteManager := notes.NewManager(&notes.Deps{
 		Storage: &pausedNotes{Storage: noteRepo, gate: gate}, Renderer: render.NewRenderer(),
 		Encryptor: testutil.ContentEncryptor(t, "note"), Hasher: hasher, ExpiredSlugs: expired, Log: log,
+		Now: time.Now,
 	}, true)
 	linkManager := links.NewManager(&links.Deps{
 		Storage: &pausedLinks{Storage: linkRepo, gate: gate}, Encryptor: testutil.ContentEncryptor(t, "link"),
 		Hasher: hasher, ExpiredSlugs: expired, Log: log,
+		Now: time.Now,
 	}, true)
 
 	return &slugEnv{db: db, notes: noteManager, links: linkManager, files: fileManager}

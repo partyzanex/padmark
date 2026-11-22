@@ -25,7 +25,7 @@ func strangerReader() domain.Reader {
 // TestFollow_PrivacyIsCheckedFirst checks that a hidden link gives ErrForbidden and that storage
 // does not delete, consume or count it, also when it is expired or a burn link.
 func (s *ManagerTestSuite) TestFollow_PrivacyIsCheckedFirst() {
-	past := time.Now().Add(-time.Minute)
+	past := testNow().Add(-time.Minute)
 	owner := uuid.New()
 	s.storage.EXPECT().GetByID(gomock.Any(), domain.HashSlug("priv")).
 		Return(readerLink(domain.PrivacyOwner, &owner, &past, true), nil)
@@ -80,7 +80,7 @@ func (s *ManagerTestSuite) TestFollow_BurnNeedsIntent() {
 
 	s.storage.EXPECT().GetByID(gomock.Any(), domain.HashSlug("burn")).
 		Return(readerLink(domain.PrivacyPublic, nil, nil, true), nil)
-	s.storage.EXPECT().ConsumeVisible(gomock.Any(), domain.HashSlug("burn"), reader.CallerID, true, true).
+	s.storage.EXPECT().ConsumeVisible(gomock.Any(), domain.HashSlug("burn"), reader.CallerID, true, true, testNow()).
 		Return(readerLink(domain.PrivacyPublic, nil, nil, true), nil)
 
 	link, err := s.manager.Follow(s.T().Context(), "burn", reader)
@@ -91,7 +91,7 @@ func (s *ManagerTestSuite) TestFollow_BurnNeedsIntent() {
 // TestInspect_ExpiredIsKept checks that Inspect reports a visible expired link without a delete
 // (the metadata read has no side effect), and never consumes a live burn link.
 func (s *ManagerTestSuite) TestInspect_ExpiredIsKept() {
-	past := time.Now().Add(-time.Minute)
+	past := testNow().Add(-time.Minute)
 	s.storage.EXPECT().GetByID(gomock.Any(), domain.HashSlug("old")).
 		Return(readerLink(domain.PrivacyPublic, nil, &past, false), nil)
 
@@ -108,10 +108,10 @@ func (s *ManagerTestSuite) TestInspect_ExpiredIsKept() {
 
 // TestFollow_ExpiredIsDeleted checks that Follow deletes a visible expired link.
 func (s *ManagerTestSuite) TestFollow_ExpiredIsDeleted() {
-	past := time.Now().Add(-time.Minute)
+	past := testNow().Add(-time.Minute)
 	s.storage.EXPECT().GetByID(gomock.Any(), domain.HashSlug("old")).
 		Return(readerLink(domain.PrivacyPublic, nil, &past, false), nil)
-	s.storage.EXPECT().DeleteExpired(gomock.Any(), domain.HashSlug("old")).Return(nil)
+	s.storage.EXPECT().DeleteExpired(gomock.Any(), domain.HashSlug("old"), testNow()).Return(nil)
 
 	_, err := s.manager.Follow(s.T().Context(), "old", openReader())
 	s.Require().ErrorIs(err, domain.ErrExpired)

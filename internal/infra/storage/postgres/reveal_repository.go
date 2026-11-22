@@ -43,7 +43,7 @@ func (s *RevealRepository) Create(ctx context.Context, tokenHash, noteID string,
 
 	_, err := s.db.NewInsert().Model(row).Exec(ctx)
 	if err != nil {
-		return fmt.Errorf("insert reveal token: %w", err)
+		return fmt.Errorf("postgres insert reveal token: %w", err)
 	}
 
 	return nil
@@ -63,12 +63,12 @@ func (s *RevealRepository) Consume(ctx context.Context, tokenHash, noteID string
 		Where("expires_at > ?", now).
 		Exec(ctx)
 	if err != nil {
-		return false, fmt.Errorf("consume reveal token: %w", err)
+		return false, fmt.Errorf("postgres consume reveal token: %w", err)
 	}
 
 	affected, err := res.RowsAffected()
 	if err != nil {
-		return false, fmt.Errorf("consume reveal token rows affected: %w", err)
+		return false, fmt.Errorf("postgres consume reveal token rows affected: %w", err)
 	}
 
 	return affected > 0, nil
@@ -78,11 +78,11 @@ func (s *RevealRepository) Consume(ctx context.Context, tokenHash, noteID string
 func (s *RevealRepository) DeleteStale(ctx context.Context, now time.Time) error {
 	_, err := s.db.NewDelete().
 		TableExpr("reveal_tokens").
-		Where("expires_at < ?", now).
+		Where("expires_at <= ?", now).
 		WhereOr("used_at IS NOT NULL").
 		Exec(ctx)
 	if err != nil {
-		return fmt.Errorf("delete stale reveal tokens: %w", err)
+		return fmt.Errorf("postgres delete stale reveal tokens: %w", err)
 	}
 
 	return nil

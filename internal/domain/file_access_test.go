@@ -54,7 +54,7 @@ func TestFile_Expired(t *testing.T) {
 	assert.True(t, file.Expired(now))
 
 	file.ExpiresAt = &now
-	assert.False(t, file.Expired(now), "the expiry moment itself is not expired yet")
+	assert.True(t, file.Expired(now), "the record is expired from the expiry moment on")
 
 	future := now.Add(time.Second)
 	file.ExpiresAt = &future

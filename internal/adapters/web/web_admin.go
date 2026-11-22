@@ -259,12 +259,12 @@ func (h *AdminHandler) adminData(r *http.Request, adminID uuid.UUID) (adminViewD
 
 	users, err := h.users.ListUsers(r.Context(), adminID)
 	if err != nil {
-		return data, fmt.Errorf("list users: %w", err)
+		return data, fmt.Errorf("admin page: %w", err)
 	}
 
 	tokens, err := h.tokens.ListAPITokens(r.Context(), adminID)
 	if err != nil {
-		return data, fmt.Errorf("list api tokens: %w", err)
+		return data, fmt.Errorf("admin page: %w", err)
 	}
 
 	data.Users = users

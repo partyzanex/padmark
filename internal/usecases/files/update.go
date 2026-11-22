@@ -31,9 +31,11 @@ func (m *Manager) Update(
 	// only the fields that opts sets.
 	dbID := domain.HashSlug(slug)
 
-	existing, err := m.deps.Storage.GetByID(ctx, dbID)
+	now := m.deps.Now()
+
+	existing, err := m.deps.Storage.GetByID(ctx, dbID, now)
 	if err != nil {
-		return nil, fmt.Errorf("update file: %w", err)
+		return nil, fmt.Errorf("update file %s: %w", dbID, err)
 	}
 
 	// Privacy comes before expiry, so that a hidden file gives the same answer in each state.
@@ -43,7 +45,7 @@ func (m *Manager) Update(
 
 	// An expired file is already gone for readers, so an update must not extend its life. The
 	// error is the error of a read (410), so that the editor and the clients give the same answer.
-	if existing.Expired(time.Now()) {
+	if existing.Expired(now) {
 		return nil, domain.ErrExpired
 	}
 
@@ -77,9 +79,9 @@ func (m *Manager) Update(
 		// Only the fields in opts are written: a parallel update of a different field on a
 		// different server process stays. The object key stops a write to a new file that took
 		// the slug after the read.
-		err = m.deps.Storage.Update(ctx, dbID, existing.ObjectKey, opts, time.Now())
+		err = m.deps.Storage.Update(ctx, dbID, existing.ObjectKey, opts, now)
 		if err != nil {
-			return nil, fmt.Errorf("update file: %w", err)
+			return nil, fmt.Errorf("update file %s: %w", dbID, err)
 		}
 	}
 

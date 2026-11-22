@@ -43,9 +43,9 @@ type Storage interface {
 	// not prove that the record is absent: the database can write the record and lose the
 	// reply. Manager then reads the record with GetByID.
 	Create(ctx context.Context, file *domain.File) error
-	// GetByID returns the record. While a burn claim that is not stale holds the record, it
-	// returns domain.ErrNotFound: other readers must not see a file that a download consumes.
-	GetByID(ctx context.Context, id string) (*domain.File, error)
+	// GetByID returns the record. While a burn claim that is not stale at now holds the record,
+	// it returns domain.ErrNotFound: other readers must not see a file that a download consumes.
+	GetByID(ctx context.Context, id string, now time.Time) (*domain.File, error)
 	// Delete removes the record with id and objectKey.
 	Delete(ctx context.Context, id, objectKey string) error
 	// Update writes only the fields that opts sets, while the record is not expired at now.
@@ -59,8 +59,8 @@ type Storage interface {
 	// other reader can hold the record at that time.
 	ReleaseBurn(ctx context.Context, claim *BurnClaim) error
 	// IncrementDownloadsVisible counts a download of a record that is visible to reader, is not
-	// a burn file and is not expired. Otherwise it returns domain.ErrNotFound.
-	IncrementDownloadsVisible(ctx context.Context, id, objectKey string, reader domain.Reader) error
+	// a burn file and is not expired at now. Otherwise it returns domain.ErrNotFound.
+	IncrementDownloadsVisible(ctx context.Context, id, objectKey string, reader domain.Reader, now time.Time) error
 	// ListExpired returns at most limit records that expired before now and have no claim that
 	// is not stale. It orders them by expiry, then by ID, and returns only the records after
 	// the cursor. Only ID, ObjectKey and ExpiresAt must be set.
@@ -111,10 +111,10 @@ type EditCodeHasher interface {
 
 // ExpiredSlugReleaser removes an expired note, link or file that still holds the record ID id,
 // because no read and no sweep removed it yet. It returns true when it removed a record. It must
-// remove a record only while it is still expired, so a record that its owner extended stays.
-// Errors are fail-soft: Create keeps its slug conflict and logs the error.
+// remove a record only while it is still expired at now, so a record that its owner extended
+// stays. Errors are fail-soft: Create keeps its slug conflict and logs the error.
 type ExpiredSlugReleaser interface {
-	ReleaseExpiredSlug(ctx context.Context, id string) (bool, error)
+	ReleaseExpiredSlug(ctx context.Context, id string, now time.Time) (bool, error)
 }
 
 // DeleteReason tells why a file was deleted. It is the "reason" label of the deleted counter.
@@ -169,6 +169,9 @@ type Deps struct {
 	// ReleaseExpiredSlug: the composition root connects it before the first request.
 	ExpiredSlugs ExpiredSlugReleaser
 	Log          *slog.Logger
+	// Now is the time source of each expiry decision, burn claim and timestamp. The composition
+	// root gives time.Now; tests give a fixed clock.
+	Now func() time.Time
 }
 
 // CreateOptions holds the Create parameters other than the content.
@@ -321,7 +324,7 @@ func (m *Manager) Settings(ctx context.Context, slug string, reader domain.Reade
 		return nil, domain.ErrForbidden
 	}
 
-	if file.Expired(time.Now()) {
+	if file.Expired(m.deps.Now()) {
 		return nil, domain.ErrExpired
 	}
 
@@ -377,9 +380,9 @@ func (m *Manager) Download(ctx context.Context, slug string, reader domain.Reade
 func (m *Manager) Delete(ctx context.Context, slug, editCode string, reader domain.Reader) error {
 	recordID := domain.HashSlug(slug)
 
-	existing, err := m.deps.Storage.GetByID(ctx, recordID)
+	existing, err := m.deps.Storage.GetByID(ctx, recordID, m.deps.Now())
 	if err != nil {
-		return fmt.Errorf("delete file: %w", err)
+		return fmt.Errorf("delete file %s: %w", recordID, err)
 	}
 
 	err = m.checkMutation(existing, editCode, reader)
@@ -389,7 +392,7 @@ func (m *Manager) Delete(ctx context.Context, slug, editCode string, reader doma
 
 	err = m.deps.Storage.Delete(ctx, recordID, existing.ObjectKey)
 	if err != nil {
-		return fmt.Errorf("delete file: %w", err)
+		return fmt.Errorf("delete file %s: %w", recordID, err)
 	}
 
 	m.metrics.IncDeleted(DeleteReasonUser)
@@ -416,9 +419,11 @@ func (m *Manager) checkMutation(existing *domain.File, editCode string, reader d
 
 // readFile reads the record and decrypts its metadata. The result has the content key.
 func (m *Manager) readFile(ctx context.Context, slug string) (*domain.File, error) {
-	file, err := m.deps.Storage.GetByID(ctx, domain.HashSlug(slug))
+	recordID := domain.HashSlug(slug)
+
+	file, err := m.deps.Storage.GetByID(ctx, recordID, m.deps.Now())
 	if err != nil {
-		return nil, fmt.Errorf("get file: %w", err)
+		return nil, fmt.Errorf("get file %s: %w", recordID, err)
 	}
 
 	err = m.openMeta(ctx, slug, file)
@@ -442,10 +447,11 @@ func (m *Manager) readVisible(ctx context.Context, slug string, reader domain.Re
 		return nil, domain.ErrForbidden
 	}
 
-	if file.Expired(time.Now()) {
+	now := m.deps.Now()
+	if file.Expired(now) {
 		dropKey(file)
 
-		return nil, m.expire(ctx, file)
+		return nil, m.expire(ctx, file, now)
 	}
 
 	return file, nil
@@ -463,7 +469,7 @@ func (m *Manager) newFile(name string, opts *CreateOptions) (*domain.File, strin
 	}
 
 	file := &domain.File{
-		CreatedAt:         time.Now().UTC(),
+		CreatedAt:         m.deps.Now().UTC(),
 		ExpiresAt:         opts.ExpiresAt,
 		Privacy:           opts.Privacy,
 		OwnerID:           opts.OwnerID,
@@ -565,7 +571,7 @@ func (m *Manager) insert(ctx context.Context, file *domain.File, customSlug stri
 		// A custom slug that an expired record holds gets one more attempt after the removal, as
 		// for notes. The storage triggers check the slug again, so this is safe across processes.
 		if customSlug != "" && errors.Is(err, domain.ErrSlugConflict) &&
-			m.releaseExpiredHolder(ctx, domain.HashSlug(slug)) {
+			m.releaseExpiredHolder(ctx, domain.HashSlug(slug), file.CreatedAt) {
 			err = m.insertAs(ctx, file, slug)
 		}
 
@@ -614,7 +620,7 @@ func (m *Manager) insertAs(ctx context.Context, file *domain.File, slug string) 
 	file.SealedMeta = sealed
 
 	if err != nil {
-		return fmt.Errorf("create file: %w", err)
+		return fmt.Errorf("create file %s: %w", recordID, err)
 	}
 
 	return nil
@@ -629,7 +635,7 @@ func (m *Manager) confirmCreate(ctx context.Context, recordID, objectKey string,
 	checkCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), recordCheckTimeout)
 	defer cancel()
 
-	existing, err := m.deps.Storage.GetByID(checkCtx, recordID)
+	existing, err := m.deps.Storage.GetByID(checkCtx, recordID, m.deps.Now())
 
 	switch {
 	case err == nil && existing.ObjectKey == objectKey:
@@ -648,8 +654,8 @@ func (m *Manager) confirmCreate(ctx context.Context, recordID, objectKey string,
 
 // releaseExpiredHolder reports whether an expired note, link or file with id was removed. Errors
 // are fail-soft: Create keeps its slug conflict.
-func (m *Manager) releaseExpiredHolder(ctx context.Context, id string) bool {
-	released, err := m.deps.ExpiredSlugs.ReleaseExpiredSlug(ctx, id)
+func (m *Manager) releaseExpiredHolder(ctx context.Context, id string, now time.Time) bool {
+	released, err := m.deps.ExpiredSlugs.ReleaseExpiredSlug(ctx, id, now)
 	if err != nil {
 		m.deps.Log.WarnContext(ctx, "release expired slug", "id", id, "err", err)
 

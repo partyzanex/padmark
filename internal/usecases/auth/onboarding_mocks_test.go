@@ -154,15 +154,15 @@ func (mr *MockInviteStoreMockRecorder) DeleteStale(ctx, now any) *gomock.Call {
 }
 
 // RedeemInvite mocks base method.
-func (m *MockInviteStore) RedeemInvite(ctx context.Context, tokenHash, username string, usr *domain.User) error {
+func (m *MockInviteStore) RedeemInvite(ctx context.Context, tokenHash, username string, usr *domain.User, now time.Time) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "RedeemInvite", ctx, tokenHash, username, usr)
+	ret := m.ctrl.Call(m, "RedeemInvite", ctx, tokenHash, username, usr, now)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // RedeemInvite indicates an expected call of RedeemInvite.
-func (mr *MockInviteStoreMockRecorder) RedeemInvite(ctx, tokenHash, username, usr any) *gomock.Call {
+func (mr *MockInviteStoreMockRecorder) RedeemInvite(ctx, tokenHash, username, usr, now any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RedeemInvite", reflect.TypeOf((*MockInviteStore)(nil).RedeemInvite), ctx, tokenHash, username, usr)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RedeemInvite", reflect.TypeOf((*MockInviteStore)(nil).RedeemInvite), ctx, tokenHash, username, usr, now)
 }

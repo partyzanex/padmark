@@ -38,39 +38,39 @@ func (s *ReleaserSuite) TearDownTest() {
 
 // TestFirstRemovalEnds: one record at most holds a slug, so a removed note ends the search.
 func (s *ReleaserSuite) TestFirstRemovalEnds() {
-	s.notes.EXPECT().DeleteExpired(gomock.Any(), "id").Return(nil)
+	s.notes.EXPECT().DeleteExpired(gomock.Any(), "id", testNow()).Return(nil)
 
-	released, err := s.releaser.ReleaseExpiredSlug(s.T().Context(), "id")
+	released, err := s.releaser.ReleaseExpiredSlug(s.T().Context(), "id", testNow())
 	s.Require().NoError(err)
 	s.True(released)
 }
 
 func (s *ReleaserSuite) TestLinkThenFile() {
 	s.Run("link", func() {
-		s.notes.EXPECT().DeleteExpired(gomock.Any(), "id").Return(domain.ErrNotFound)
-		s.links.EXPECT().DeleteExpired(gomock.Any(), "id").Return(nil)
+		s.notes.EXPECT().DeleteExpired(gomock.Any(), "id", testNow()).Return(domain.ErrNotFound)
+		s.links.EXPECT().DeleteExpired(gomock.Any(), "id", testNow()).Return(nil)
 
-		released, err := s.releaser.ReleaseExpiredSlug(s.T().Context(), "id")
+		released, err := s.releaser.ReleaseExpiredSlug(s.T().Context(), "id", testNow())
 		s.Require().NoError(err)
 		s.True(released)
 	})
 
 	s.Run("file", func() {
-		s.notes.EXPECT().DeleteExpired(gomock.Any(), "id").Return(domain.ErrNotFound)
-		s.links.EXPECT().DeleteExpired(gomock.Any(), "id").Return(domain.ErrNotFound)
-		s.files.EXPECT().ReleaseExpiredSlug(gomock.Any(), "id").Return(true, nil)
+		s.notes.EXPECT().DeleteExpired(gomock.Any(), "id", testNow()).Return(domain.ErrNotFound)
+		s.links.EXPECT().DeleteExpired(gomock.Any(), "id", testNow()).Return(domain.ErrNotFound)
+		s.files.EXPECT().ReleaseExpiredSlug(gomock.Any(), "id", testNow()).Return(true, nil)
 
-		released, err := s.releaser.ReleaseExpiredSlug(s.T().Context(), "id")
+		released, err := s.releaser.ReleaseExpiredSlug(s.T().Context(), "id", testNow())
 		s.Require().NoError(err)
 		s.True(released)
 	})
 
 	s.Run("no expired holder", func() {
-		s.notes.EXPECT().DeleteExpired(gomock.Any(), "id").Return(domain.ErrNotFound)
-		s.links.EXPECT().DeleteExpired(gomock.Any(), "id").Return(domain.ErrNotFound)
-		s.files.EXPECT().ReleaseExpiredSlug(gomock.Any(), "id").Return(false, nil)
+		s.notes.EXPECT().DeleteExpired(gomock.Any(), "id", testNow()).Return(domain.ErrNotFound)
+		s.links.EXPECT().DeleteExpired(gomock.Any(), "id", testNow()).Return(domain.ErrNotFound)
+		s.files.EXPECT().ReleaseExpiredSlug(gomock.Any(), "id", testNow()).Return(false, nil)
 
-		released, err := s.releaser.ReleaseExpiredSlug(s.T().Context(), "id")
+		released, err := s.releaser.ReleaseExpiredSlug(s.T().Context(), "id", testNow())
 		s.Require().NoError(err)
 		s.False(released)
 	})
@@ -80,19 +80,19 @@ func (s *ReleaserSuite) TestErrorsStopTheSearch() {
 	dbErr := errors.New("db down")
 
 	s.Run("storage", func() {
-		s.notes.EXPECT().DeleteExpired(gomock.Any(), "id").Return(dbErr)
+		s.notes.EXPECT().DeleteExpired(gomock.Any(), "id", testNow()).Return(dbErr)
 
-		released, err := s.releaser.ReleaseExpiredSlug(s.T().Context(), "id")
+		released, err := s.releaser.ReleaseExpiredSlug(s.T().Context(), "id", testNow())
 		s.Require().ErrorIs(err, dbErr)
 		s.False(released)
 	})
 
 	s.Run("files", func() {
-		s.notes.EXPECT().DeleteExpired(gomock.Any(), "id").Return(domain.ErrNotFound)
-		s.links.EXPECT().DeleteExpired(gomock.Any(), "id").Return(domain.ErrNotFound)
-		s.files.EXPECT().ReleaseExpiredSlug(gomock.Any(), "id").Return(false, dbErr)
+		s.notes.EXPECT().DeleteExpired(gomock.Any(), "id", testNow()).Return(domain.ErrNotFound)
+		s.links.EXPECT().DeleteExpired(gomock.Any(), "id", testNow()).Return(domain.ErrNotFound)
+		s.files.EXPECT().ReleaseExpiredSlug(gomock.Any(), "id", testNow()).Return(false, dbErr)
 
-		released, err := s.releaser.ReleaseExpiredSlug(s.T().Context(), "id")
+		released, err := s.releaser.ReleaseExpiredSlug(s.T().Context(), "id", testNow())
 		s.Require().ErrorIs(err, dbErr)
 		s.False(released)
 	})
@@ -101,10 +101,10 @@ func (s *ReleaserSuite) TestErrorsStopTheSearch() {
 // TestWithoutFiles: without WithFiles (no --s3-endpoint), no file holds a slug.
 func (s *ReleaserSuite) TestWithoutFiles() {
 	releaser := New(s.notes, s.links)
-	s.notes.EXPECT().DeleteExpired(gomock.Any(), "id").Return(domain.ErrNotFound)
-	s.links.EXPECT().DeleteExpired(gomock.Any(), "id").Return(domain.ErrNotFound)
+	s.notes.EXPECT().DeleteExpired(gomock.Any(), "id", testNow()).Return(domain.ErrNotFound)
+	s.links.EXPECT().DeleteExpired(gomock.Any(), "id", testNow()).Return(domain.ErrNotFound)
 
-	released, err := releaser.ReleaseExpiredSlug(s.T().Context(), "id")
+	released, err := releaser.ReleaseExpiredSlug(s.T().Context(), "id", testNow())
 	s.Require().NoError(err)
 	s.False(released)
 }

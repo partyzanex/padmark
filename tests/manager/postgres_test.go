@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"log/slog"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/suite"
 	"github.com/testcontainers/testcontainers-go"
@@ -79,7 +80,7 @@ func (s *PostgresManagerSuite) SetupTest() {
 	s.LinkManager = newLinkManager(s.T(), linkRepo, expired)
 	s.FileManager = newFileManager(&s.Suite, pgrepo.NewFileRepository(s.db), expired, s.objects.store)
 	s.Objects = s.objects.store
-	s.RevealStore = auth.NewRevealManager(pgrepo.NewRevealRepository(s.db), slog.Default())
+	s.RevealStore = auth.NewRevealManager(pgrepo.NewRevealRepository(s.db), slog.Default(), time.Now)
 	s.DB = s.db
 }
 

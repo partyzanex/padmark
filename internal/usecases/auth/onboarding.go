@@ -31,12 +31,13 @@ type OnboardingUserStore interface {
 type InviteStore interface {
 	// Create stores inv. Fail-hard.
 	Create(ctx context.Context, inv *domain.Invite) error
-	// DeleteStale removes the invites that expired before now and the used invites. Fail-soft:
+	// DeleteStale removes the invites that are expired at now and the used invites. Fail-soft:
 	// GenerateInvite calls it after it stores a new invite and only logs an error.
 	DeleteStale(ctx context.Context, now time.Time) error
-	// RedeemInvite atomically consumes the invite and inserts usr in one transaction,
-	// so a failed user creation (e.g. a username race) never burns the token. Fail-hard.
-	RedeemInvite(ctx context.Context, tokenHash, username string, usr *domain.User) error
+	// RedeemInvite atomically consumes the invite that is not expired at now and inserts usr in
+	// one transaction, so a failed user creation (e.g. a username race) never burns the token.
+	// Fail-hard.
+	RedeemInvite(ctx context.Context, tokenHash, username string, usr *domain.User, now time.Time) error
 }
 
 // OnboardingManager creates the first admin account and enrolls new users via invite tokens.
@@ -48,24 +49,26 @@ type OnboardingManager struct {
 	users   OnboardingUserStore
 	stepUp  StepUpVerifier
 	log     *slog.Logger
+	now     func() time.Time
 	issuer  string
 }
 
 // NewOnboardingManager returns a new OnboardingManager. issuer is the TOTP issuer name shown
 // in the authenticator app when a new user enrolls; stepUp re-authenticates a bearer-token
-// caller before it may issue an invite.
+// caller before it may issue an invite. deps.Now is the time source of invite expiry and
+// timestamps.
 func NewOnboardingManager(
-	users OnboardingUserStore, invites InviteStore, passwordHasher PasswordHasher,
-	sealer SecretSealer, totp TOTPManager, stepUp StepUpVerifier, log *slog.Logger, issuer string,
+	users OnboardingUserStore, invites InviteStore, stepUp StepUpVerifier, deps *Deps, issuer string,
 ) *OnboardingManager {
 	return &OnboardingManager{
 		users:   users,
 		invites: invites,
-		pw:      passwordHasher,
-		sealer:  sealer,
-		totp:    totp,
+		pw:      deps.PasswordHasher,
+		sealer:  deps.Sealer,
+		totp:    deps.TOTP,
 		stepUp:  stepUp,
-		log:     log,
+		log:     deps.Log,
+		now:     deps.Now,
 		issuer:  issuer,
 	}
 }
@@ -96,15 +99,10 @@ func (m *OnboardingManager) GenerateInvite(ctx context.Context, adminUserID uuid
 
 	err = authorizeIssuer(ctx, m.stepUp, admin.ID, issuer)
 	if err != nil {
-		return "", fmt.Errorf("authorize issuer: %w", err)
+		return "", err
 	}
 
-	tok, err := m.issueInvite(ctx, adminUserID)
-	if err != nil {
-		return "", fmt.Errorf("issue invite: %w", err)
-	}
-
-	return tok, nil
+	return m.issueInvite(ctx, adminUserID)
 }
 
 // Enrollment is what a newly created account must show its owner exactly once: the
@@ -147,10 +145,10 @@ func (m *OnboardingManager) AcceptInvite(ctx context.Context, token, username, p
 
 	usr, enr, err := m.buildUser(username, password, false)
 	if err != nil {
-		return nil, fmt.Errorf("build user: %w", err)
+		return nil, err
 	}
 
-	err = m.invites.RedeemInvite(ctx, domain.HashInviteToken(token), username, usr)
+	err = m.invites.RedeemInvite(ctx, domain.HashInviteToken(token), username, usr, usr.CreatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("redeem invite: %w", err)
 	}
@@ -186,7 +184,7 @@ func (m *OnboardingManager) AcceptFirstAdmin(ctx context.Context, username, pass
 
 	usr, enr, err := m.buildUser(username, password, true)
 	if err != nil {
-		return nil, fmt.Errorf("build user: %w", err)
+		return nil, err
 	}
 
 	err = m.users.Create(ctx, usr)
@@ -202,10 +200,10 @@ func (m *OnboardingManager) AcceptFirstAdmin(ctx context.Context, username, pass
 func (m *OnboardingManager) issueInvite(ctx context.Context, adminUserID uuid.UUID) (string, error) {
 	tok, err := newRandomToken()
 	if err != nil {
-		return "", fmt.Errorf("new invite token: %w", err)
+		return "", err
 	}
 
-	now := time.Now()
+	now := m.now()
 
 	err = m.invites.Create(ctx, &domain.Invite{
 		TokenHash: domain.HashInviteToken(tok),
@@ -260,7 +258,7 @@ func (m *OnboardingManager) buildUser(username, password string, isAdmin bool) (
 		PasswordHash: pwHash,
 		KDFSalt:      kdfSalt,
 		IsAdmin:      isAdmin,
-		CreatedAt:    time.Now(),
+		CreatedAt:    m.now(),
 		// LastLoginAt:    — no previous login on a freshly created account; nil pointer signals "never".
 		// LastTOTPCounter: counter starts at 0; first TOTP code validates against this baseline.
 		LastLoginAt:     nil,

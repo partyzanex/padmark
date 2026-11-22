@@ -25,12 +25,7 @@ const (
 
 // TokenPath resolves ~/.config/padmark/token, honouring XDG_CONFIG_HOME when set.
 func TokenPath() (string, error) {
-	operationResult, operationErr := configPath("token")
-	if operationErr != nil {
-		return operationResult, fmt.Errorf("config path: %w", operationErr)
-	}
-
-	return operationResult, nil
+	return configPath("token")
 }
 
 // configPath resolves a file inside ~/.config/padmark (XDG_CONFIG_HOME-aware) — the shared

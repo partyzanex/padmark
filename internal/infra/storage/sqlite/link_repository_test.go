@@ -217,7 +217,7 @@ func (s *LinkRepositoryTestSuite) TestConsume_BurnAfterClick() {
 	}
 	s.Require().NoError(s.repo.Create(ctx, l))
 
-	got, err := s.repo.Consume(ctx, "consume-bac")
+	got, err := s.repo.Consume(ctx, "consume-bac", time.Now())
 	s.Require().NoError(err)
 	s.Equal("consume-bac", got.ID)
 
@@ -236,7 +236,7 @@ func (s *LinkRepositoryTestSuite) TestConsume_Expired() {
 	}
 	s.Require().NoError(s.repo.Create(ctx, l))
 
-	got, err := s.repo.Consume(ctx, "consume-exp")
+	got, err := s.repo.Consume(ctx, "consume-exp", time.Now())
 	s.Require().NoError(err)
 	s.Equal("consume-exp", got.ID)
 
@@ -254,7 +254,7 @@ func (s *LinkRepositoryTestSuite) TestConsume_NotEligible() {
 	}
 	s.Require().NoError(s.repo.Create(ctx, l))
 
-	_, err := s.repo.Consume(ctx, "consume-no")
+	_, err := s.repo.Consume(ctx, "consume-no", time.Now())
 	s.Require().ErrorIs(err, domain.ErrNotFound)
 
 	got, err := s.repo.GetByID(ctx, "consume-no")
@@ -263,7 +263,7 @@ func (s *LinkRepositoryTestSuite) TestConsume_NotEligible() {
 }
 
 func (s *LinkRepositoryTestSuite) TestConsume_NotFound() {
-	_, err := s.repo.Consume(s.T().Context(), "consume-missing")
+	_, err := s.repo.Consume(s.T().Context(), "consume-missing", time.Now())
 
 	s.ErrorIs(err, domain.ErrNotFound)
 }
@@ -304,7 +304,7 @@ func (s *LinkRepositoryTestSuite) TestUpdate_NilPrivacy_KeepsStoredLevel() {
 	}
 	s.Require().NoError(s.repo.Create(ctx, original))
 
-	updated, err := s.repo.Update(ctx, original.ID, original.EditCode, targetPatch("new ciphertext"))
+	updated, err := s.repo.Update(ctx, original.ID, original.EditCode, targetPatch("new ciphertext"), time.Now())
 	s.Require().NoError(err)
 	s.Equal(authenticated, updated.EffectivePrivacy())
 
@@ -329,7 +329,7 @@ func (s *LinkRepositoryTestSuite) TestUpdate_EditableColumnsOnly() {
 	privacy := domain.PrivacyAuthenticated
 	patch := targetPatch("new ciphertext")
 	patch.Privacy, patch.ClearExpiry, patch.ResetDirectRedirect = &privacy, true, true
-	updated, err := s.repo.Update(ctx, original.ID, original.EditCode, patch)
+	updated, err := s.repo.Update(ctx, original.ID, original.EditCode, patch, time.Now())
 	s.Require().NoError(err)
 	s.Equal("new ciphertext", updated.TargetURL)
 	s.Equal(6, updated.Views)
@@ -343,7 +343,7 @@ func (s *LinkRepositoryTestSuite) TestUpdate_EditableColumnsOnly() {
 	stored, err := s.repo.GetByID(ctx, original.ID)
 	s.Require().NoError(err)
 	s.Equal(updated, stored)
-	_, err = s.repo.Update(ctx, "missing-link", "", targetPatch("unused"))
+	_, err = s.repo.Update(ctx, "missing-link", "", targetPatch("unused"), time.Now())
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
@@ -366,12 +366,12 @@ func (s *LinkRepositoryTestSuite) TestUpdate_ConcurrentPatchesKeepBothChanges() 
 
 	first := targetPatch("old ciphertext")
 	first.ExpiresAt = &shorter
-	_, err := s.repo.Update(ctx, original.ID, original.EditCode, first)
+	_, err := s.repo.Update(ctx, original.ID, original.EditCode, first, time.Now())
 	s.Require().NoError(err)
 
 	second := targetPatch("new ciphertext")
 	second.DirectRedirect = &direct
-	_, err = s.repo.Update(ctx, original.ID, original.EditCode, second)
+	_, err = s.repo.Update(ctx, original.ID, original.EditCode, second, time.Now())
 	s.Require().NoError(err)
 
 	stored, err := s.repo.GetByID(ctx, original.ID)
@@ -403,7 +403,7 @@ func (s *LinkRepositoryTestSuite) TestDeleteExpired_KeepsExtendedLink() {
 	future := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
 	extend := targetPatch("ciphertext")
 	extend.ExpiresAt = &future
-	_, err = s.repo.Update(ctx, original.ID, original.EditCode, extend)
+	_, err = s.repo.Update(ctx, original.ID, original.EditCode, extend, time.Now())
 	s.Require().ErrorIs(err, domain.ErrNotFound, "Update does not change an expired link")
 
 	// Another writer extends the link after the reader's snapshot. Update refuses an expired
@@ -412,7 +412,7 @@ func (s *LinkRepositoryTestSuite) TestDeleteExpired_KeepsExtendedLink() {
 		Where("id = ?", original.ID).Exec(ctx)
 	s.Require().NoError(err)
 
-	s.Require().ErrorIs(s.repo.DeleteExpired(ctx, original.ID), domain.ErrNotFound)
+	s.Require().ErrorIs(s.repo.DeleteExpired(ctx, original.ID, time.Now()), domain.ErrNotFound)
 
 	stored, err := s.repo.GetByID(ctx, original.ID)
 	s.Require().NoError(err, "the extended link must stay")
@@ -431,9 +431,9 @@ func (s *LinkRepositoryTestSuite) TestDeleteExpired_RemovesOnlyExpiredLinks() {
 	s.Require().NoError(s.repo.Create(ctx, expiringLink("unread-burn", nil, true)))
 	s.Require().NoError(s.repo.Create(ctx, expiringLink("expired", &past, false)))
 
-	s.Require().NoError(s.repo.DeleteExpired(ctx, "expired"))
-	s.Require().ErrorIs(s.repo.DeleteExpired(ctx, "live"), domain.ErrNotFound)
-	s.Require().ErrorIs(s.repo.DeleteExpired(ctx, "unread-burn"), domain.ErrNotFound)
+	s.Require().NoError(s.repo.DeleteExpired(ctx, "expired", time.Now()))
+	s.Require().ErrorIs(s.repo.DeleteExpired(ctx, "live", time.Now()), domain.ErrNotFound)
+	s.Require().ErrorIs(s.repo.DeleteExpired(ctx, "unread-burn", time.Now()), domain.ErrNotFound)
 
 	_, err := s.repo.GetByID(ctx, "expired")
 	s.Require().ErrorIs(err, domain.ErrNotFound)

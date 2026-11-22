@@ -66,9 +66,6 @@ const (
 	// write, so a concurrent privacy change cannot let an old read change the record. The
 	// first parameter is Reader.SkipPrivacy.
 	visibleWhere = "? OR privacy = ? OR (privacy = ? AND ?) OR (privacy = ? AND owner_id = ? AND ?)"
-	// liveWhere selects a record that is not expired at the time parameter. The note and link
-	// updates use it too.
-	liveWhere = "expires_at IS NULL OR expires_at >= ?"
 	// unclaimedWhere selects a record without a claim, or with a stale claim, at the time
 	// parameter.
 	unclaimedWhere = "burn_claim_until IS NULL OR burn_claim_until <= ?"
@@ -115,11 +112,11 @@ func (r *FileRepository) Create(ctx context.Context, domFile *domain.File) error
 }
 
 // GetByID returns the file record with the ID HashSlug(slug). A record that a burn download
-// claims is not found until the claim ends or becomes stale.
-func (r *FileRepository) GetByID(ctx context.Context, id string) (*domain.File, error) {
+// claims is not found until the claim ends or becomes stale at now.
+func (r *FileRepository) GetByID(ctx context.Context, id string, now time.Time) (*domain.File, error) {
 	var row file
 
-	err := r.db.NewSelect().Model(&row).Where("id = ?", id).Where(unclaimedWhere, time.Now()).Scan(ctx)
+	err := r.db.NewSelect().Model(&row).Where("id = ?", id).Where(unclaimedWhere, now).Scan(ctx)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, domain.ErrNotFound
@@ -185,20 +182,20 @@ func (r *FileRepository) ReleaseBurn(ctx context.Context, claim *files.BurnClaim
 }
 
 // IncrementDownloadsVisible counts a download while the record is visible to the reader, is
-// not a burn file and is not expired.
+// not a burn file and is not expired at now.
 func (r *FileRepository) IncrementDownloadsVisible(
-	ctx context.Context, id, objectKey string, reader domain.Reader,
+	ctx context.Context, id, objectKey string, reader domain.Reader, now time.Time,
 ) error {
 	result, err := r.db.NewUpdate().TableExpr("files").Set("downloads = downloads + 1").
 		Where("id = ?", id).Where("object_key = ?", objectKey).
 		Where("NOT burn_after_download").
-		Where(liveWhere, time.Now()).
+		Where(liveWhere, now).
 		Where(visibleWhere, visibleArgs(reader)...).Exec(ctx)
 
 	return oneFileRow("sqlite count file download", result, err)
 }
 
-// ListExpired returns at most limit records that expired before now and have no live claim,
+// ListExpired returns at most limit records that are expired at now and have no live claim,
 // the oldest expiry first, then by ID. It returns only the records after the cursor: the
 // bound on expires_at lets the database use the index, and the second condition breaks ties
 // of equal expiry by ID. ID, ObjectKey and ExpiresAt are set.
@@ -208,7 +205,7 @@ func (r *FileRepository) ListExpired(
 	var rows []file
 
 	query := r.db.NewSelect().Model(&rows).Column("id", "object_key", "expires_at").
-		Where("expires_at IS NOT NULL AND expires_at < ?", now).
+		Where(expiredWhere, now).
 		Where(unclaimedWhere, now)
 
 	if !after.IsZero() {
@@ -234,7 +231,7 @@ func (r *FileRepository) ListExpired(
 func (r *FileRepository) DeleteExpired(ctx context.Context, id, objectKey string, now time.Time) error {
 	result, err := r.db.NewDelete().Model((*file)(nil)).
 		Where("id = ?", id).Where("object_key = ?", objectKey).
-		Where("expires_at IS NOT NULL AND expires_at < ?", now).
+		Where(expiredWhere, now).
 		Where(unclaimedWhere, now).Exec(ctx)
 
 	return oneFileRow("sqlite delete expired file", result, err)

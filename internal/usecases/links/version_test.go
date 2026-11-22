@@ -42,10 +42,10 @@ func (s *ManagerTestSuite) TestDelete_NewVersionIsNotFound() {
 // DeleteExpired, never the unconditional Delete: storage checks the expiry again, so a new live
 // link with the same ID stays.
 func (s *ManagerTestSuite) TestRedirect_ExpiredUsesConditionalDelete() {
-	past := time.Now().Add(-time.Hour)
+	past := testNow().Add(-time.Hour)
 	s.storage.EXPECT().GetByID(gomock.Any(), domain.HashSlug("expired-slug")).
 		Return(storedLink("hash:expired", &past), nil)
-	s.storage.EXPECT().DeleteExpired(gomock.Any(), domain.HashSlug("expired-slug")).Return(nil)
+	s.storage.EXPECT().DeleteExpired(gomock.Any(), domain.HashSlug("expired-slug"), testNow()).Return(nil)
 
 	_, err := s.manager.Follow(s.T().Context(), "expired-slug", openReader())
 
@@ -56,11 +56,11 @@ func (s *ManagerTestSuite) TestRedirect_ExpiredUsesConditionalDelete() {
 // the expiry decision and the DELETE. Storage refuses the DELETE because the row is not expired
 // now. The manager must not fall back to an unconditional Delete: the strict mock fails on it.
 func (s *ManagerTestSuite) TestRedirect_ExtendedAfterExpiryCheckStays() {
-	past := time.Now().Add(-time.Hour)
+	past := testNow().Add(-time.Hour)
 	for _, reader := range []domain.Reader{openReader(), heldReader()} {
 		s.storage.EXPECT().GetByID(gomock.Any(), domain.HashSlug("extended")).
 			Return(storedLink("hash:extended", &past), nil)
-		s.storage.EXPECT().DeleteExpired(gomock.Any(), domain.HashSlug("extended")).Return(domain.ErrNotFound)
+		s.storage.EXPECT().DeleteExpired(gomock.Any(), domain.HashSlug("extended"), testNow()).Return(domain.ErrNotFound)
 
 		_, err := s.manager.Follow(s.T().Context(), "extended", reader)
 		s.Require().ErrorIs(err, domain.ErrExpired, "this request still saw the old expiry")

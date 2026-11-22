@@ -46,7 +46,7 @@ func (s *ParitySuite) TestNote_ConcurrentConsumeSingleWinner() {
 	s.Require().NoError(repo.Create(ctx, burn))
 
 	results := race(func(int) consumeOutcome {
-		got, err := repo.Consume(ctx, "burn-race", domain.PrivacyPublic, "")
+		got, err := repo.Consume(ctx, "burn-race", domain.PrivacyPublic, "", time.Now())
 
 		return consumeOutcome{err: err, ok: err == nil && got.Content == "secret"}
 	})
@@ -76,7 +76,7 @@ func (s *ParitySuite) TestNote_SetBurnExpiryStartsTimerOnce() {
 	_, err = repo.SetBurnExpiry(ctx, "burn-ttl", expiresAt.Add(time.Hour), domain.PrivacyPublic, "")
 	s.Require().ErrorIs(err, domain.ErrNotFound, "the grace timer must not be restartable")
 
-	_, err = repo.Consume(ctx, "burn-ttl", domain.PrivacyPublic, "")
+	_, err = repo.Consume(ctx, "burn-ttl", domain.PrivacyPublic, "", time.Now())
 	s.Require().ErrorIs(err, domain.ErrNotFound, "a note inside its grace period is not consumable")
 }
 
@@ -127,7 +127,7 @@ func (s *ParitySuite) TestLink_ConcurrentConsumeSingleWinner() {
 	}))
 
 	results := race(func(int) consumeOutcome {
-		got, err := repo.Consume(ctx, "click-race")
+		got, err := repo.Consume(ctx, "click-race", time.Now())
 
 		return consumeOutcome{err: err, ok: err == nil && got.TargetURL == "ciphertext"}
 	})
@@ -156,10 +156,10 @@ func (s *ParitySuite) TestExpiry_ComparesInstantsNotWallClocks() {
 	live.ExpiresAt = &future
 	s.Require().NoError(notes.Create(ctx, live))
 
-	_, err := notes.Consume(ctx, "expired-east", domain.PrivacyPublic, "")
+	_, err := notes.Consume(ctx, "expired-east", domain.PrivacyPublic, "", time.Now())
 	s.Require().NoError(err, "a past instant in UTC+14 is expired")
 
-	_, err = notes.Consume(ctx, "live-west", domain.PrivacyPublic, "")
+	_, err = notes.Consume(ctx, "live-west", domain.PrivacyPublic, "", time.Now())
 	s.Require().ErrorIs(err, domain.ErrNotFound, "a future instant in UTC-12 is not expired")
 
 	got, err := notes.Get(ctx, "live-west")
@@ -179,9 +179,9 @@ func (s *ParitySuite) TestExpiry_ComparesInstantsNotWallClocks() {
 		UserAgent: "", IP: "",
 	}))
 
-	_, err = sessions.Get(ctx, "east")
+	_, err = sessions.Get(ctx, "east", time.Now())
 	s.Require().ErrorIs(err, domain.ErrSessionExpired)
 
-	_, err = sessions.Get(ctx, "west")
+	_, err = sessions.Get(ctx, "west", time.Now())
 	s.Require().NoError(err)
 }

@@ -30,7 +30,7 @@ func ParseLevel(value string) (slog.Level, error) {
 func ValidateLevel(value string) error {
 	_, err := ParseLevel(value)
 	if err != nil {
-		return fmt.Errorf("parse level: %w", err)
+		return err
 	}
 
 	return nil

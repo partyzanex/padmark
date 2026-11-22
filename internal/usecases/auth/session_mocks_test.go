@@ -197,16 +197,16 @@ func (mr *MockSessionStoreMockRecorder) DeleteExpired(ctx, now any) *gomock.Call
 }
 
 // Get mocks base method.
-func (m *MockSessionStore) Get(ctx context.Context, sessionID string) (*domain.Session, error) {
+func (m *MockSessionStore) Get(ctx context.Context, sessionID string, now time.Time) (*domain.Session, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Get", ctx, sessionID)
+	ret := m.ctrl.Call(m, "Get", ctx, sessionID, now)
 	ret0, _ := ret[0].(*domain.Session)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // Get indicates an expected call of Get.
-func (mr *MockSessionStoreMockRecorder) Get(ctx, sessionID any) *gomock.Call {
+func (mr *MockSessionStoreMockRecorder) Get(ctx, sessionID, now any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Get", reflect.TypeOf((*MockSessionStore)(nil).Get), ctx, sessionID)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Get", reflect.TypeOf((*MockSessionStore)(nil).Get), ctx, sessionID, now)
 }

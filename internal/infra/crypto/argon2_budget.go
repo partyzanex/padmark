@@ -103,7 +103,7 @@ func currentArgon2Budget() *argon2Budget {
 func deriveArgon2Key(secret, salt []byte, params Argon2Params, keyLen uint32) ([]byte, error) {
 	release, err := currentArgon2Budget().acquire(params.Memory)
 	if err != nil {
-		return nil, fmt.Errorf("acquire: %w", err)
+		return nil, err
 	}
 
 	defer release()

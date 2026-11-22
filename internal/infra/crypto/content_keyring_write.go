@@ -40,7 +40,7 @@ func (k *ContentKeyring) AddKey(id string) error {
 func WriteContentKeyring(path string, keyring *ContentKeyring) (err error) {
 	_, validateErr := NewContentCipher(keyring.Active, keyring.Keys, "note")
 	if validateErr != nil {
-		return fmt.Errorf("new content cipher: %w", validateErr)
+		return validateErr
 	}
 
 	data, err := json.Marshal(keyring)

@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 
 	"github.com/urfave/cli/v3"
@@ -45,7 +44,7 @@ func migrateAction(ctx context.Context, cmd *cli.Command) error {
 
 	db, err := openDB(ctx, storage, dsn, log)
 	if err != nil {
-		return fmt.Errorf("open db: %w", err)
+		return err
 	}
 
 	defer func() {
@@ -65,7 +64,7 @@ func migrateAction(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	if err != nil {
-		return fmt.Errorf("init sqlite storage: %w", err)
+		return err
 	}
 
 	log.InfoContext(ctx, "migrations applied successfully")

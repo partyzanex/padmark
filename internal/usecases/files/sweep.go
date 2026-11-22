@@ -98,26 +98,26 @@ func (m *Manager) SweepExpired(ctx context.Context) (int, error) {
 	return m.sweep(ctx, m.backgroundPos, sweepBatchSize, sweepMaxBatches)
 }
 
-// ReleaseExpiredSlug removes the file with the record ID id when it is expired, so that a note,
-// a link or a new file can take the slug before the sweep removes it. It returns true when it
-// removed the file. Errors are fail-soft for the caller: it keeps its slug conflict.
-func (m *Manager) ReleaseExpiredSlug(ctx context.Context, id string) (bool, error) {
-	file, err := m.deps.Storage.GetByID(ctx, id)
+// ReleaseExpiredSlug removes the file with the record ID id when it is expired at now, so that a
+// note, a link or a new file can take the slug before the sweep removes it. It returns true when
+// it removed the file. Errors are fail-soft for the caller: it keeps its slug conflict.
+func (m *Manager) ReleaseExpiredSlug(ctx context.Context, id string, now time.Time) (bool, error) {
+	file, err := m.deps.Storage.GetByID(ctx, id, now)
 	if errors.Is(err, domain.ErrNotFound) {
 		return false, nil
 	}
 
 	if err != nil {
-		return false, fmt.Errorf("release expired slug: %w", err)
+		return false, fmt.Errorf("get file %s: %w", id, err)
 	}
 
-	if !file.Expired(time.Now()) {
+	if !file.Expired(now) {
 		return false, nil
 	}
 
-	err = m.removeExpired(ctx, id, file.ObjectKey)
+	err = m.removeExpired(ctx, id, file.ObjectKey, now)
 	if err != nil {
-		return false, fmt.Errorf("release expired slug: %w", err)
+		return false, err
 	}
 
 	return true, nil
@@ -139,12 +139,14 @@ func (m *Manager) sweep(ctx context.Context, cursor *sweepCursor, batchSize, max
 
 func (m *Manager) sweepPages(ctx context.Context, run *sweepRun, batchSize, maxBatches int) error {
 	for range maxBatches {
-		batch, err := m.deps.Storage.ListExpired(ctx, time.Now(), run.pos, batchSize)
+		now := m.deps.Now()
+
+		batch, err := m.deps.Storage.ListExpired(ctx, now, run.pos, batchSize)
 		if err != nil {
 			return fmt.Errorf("sweep expired files: %w", err)
 		}
 
-		err = m.sweepBatch(ctx, run, batch)
+		err = m.sweepBatch(ctx, run, batch, now)
 		if err != nil {
 			return err
 		}
@@ -167,14 +169,14 @@ func (m *Manager) sweepPages(ctx context.Context, run *sweepRun, batchSize, maxB
 
 // sweepBatch removes the files of a batch. A file that it cannot remove does not stop it; run
 // keeps the count of the failures in a row.
-func (m *Manager) sweepBatch(ctx context.Context, run *sweepRun, batch []*domain.File) error {
+func (m *Manager) sweepBatch(ctx context.Context, run *sweepRun, batch []*domain.File, now time.Time) error {
 	for _, file := range batch {
 		ctxErr := ctx.Err()
 		if ctxErr != nil {
 			return fmt.Errorf("sweep expired files: %w", ctxErr)
 		}
 
-		err := m.removeExpired(ctx, file.ID, file.ObjectKey)
+		err := m.removeExpired(ctx, file.ID, file.ObjectKey, now)
 
 		switch {
 		case err == nil:
@@ -188,7 +190,7 @@ func (m *Manager) sweepBatch(ctx context.Context, run *sweepRun, batch []*domain
 			run.failStreak++
 		default:
 			// The position stays before this record, so that the next sweep tries it again.
-			return fmt.Errorf("sweep expired files: %w", err)
+			return err
 		}
 
 		run.pos = cursorAfter(file)
@@ -211,15 +213,16 @@ func cursorAfter(file *domain.File) ExpiredCursor {
 	return cursor
 }
 
-// removeExpired deletes the object of an expired file, then its record.
-func (m *Manager) removeExpired(ctx context.Context, recordID, objectKey string) error {
+// removeExpired deletes the object of an expired file, then its record while it is expired at
+// now.
+func (m *Manager) removeExpired(ctx context.Context, recordID, objectKey string, now time.Time) error {
 	if !m.deleteObject(ctx, objectKey) {
 		return errObjectKept
 	}
 
-	err := m.deps.Storage.DeleteExpired(ctx, recordID, objectKey, time.Now())
+	err := m.deps.Storage.DeleteExpired(ctx, recordID, objectKey, now)
 	if err != nil {
-		return fmt.Errorf("delete expired file: %w", err)
+		return fmt.Errorf("delete expired file %s: %w", recordID, err)
 	}
 
 	m.metrics.IncDeleted(DeleteReasonExpired)
@@ -229,10 +232,10 @@ func (m *Manager) removeExpired(ctx context.Context, recordID, objectKey string)
 
 // expire removes the expired file that a reader asked for. It returns domain.ErrExpired, or
 // domain.ErrNotFound when another process removed the file first. file.ID is the slug.
-func (m *Manager) expire(ctx context.Context, file *domain.File) error {
+func (m *Manager) expire(ctx context.Context, file *domain.File, now time.Time) error {
 	recordID := domain.HashSlug(file.ID)
 
-	err := m.removeExpired(ctx, recordID, file.ObjectKey)
+	err := m.removeExpired(ctx, recordID, file.ObjectKey, now)
 
 	switch {
 	case errors.Is(err, domain.ErrNotFound):

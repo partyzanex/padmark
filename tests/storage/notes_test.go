@@ -63,10 +63,11 @@ func (s *NoteSuite) TestUpdate_ChecksEditCodeAndKeepsUnsetFields() {
 	update.Title = "changed"
 	update.ContentType = nil
 	update.Privacy = nil
-	s.Require().ErrorIs(s.be.notes.Update(ctx, "note-1", update), domain.ErrNotFound, "a different version is not changed")
+	s.Require().ErrorIs(s.be.notes.Update(ctx, "note-1", update, now()), domain.ErrNotFound,
+		"a different version is not changed")
 
 	update.EditCode = "edit-hash"
-	s.Require().NoError(s.be.notes.Update(ctx, "note-1", update))
+	s.Require().NoError(s.be.notes.Update(ctx, "note-1", update, now()))
 
 	got, err := s.be.notes.Get(ctx, "note-1")
 	s.Require().NoError(err)
@@ -97,8 +98,8 @@ func (s *NoteSuite) TestDeleteExpired_RemovesOnlyExpired() {
 	s.Require().NoError(s.be.notes.Create(ctx, newNote("live", "edit-hash", &future)))
 	s.Require().NoError(s.be.notes.Create(ctx, newNote("forever", "edit-hash", nil)))
 
-	s.Require().NoError(s.be.notes.DeleteExpired(ctx, "expired"))
-	s.Require().ErrorIs(s.be.notes.DeleteExpired(ctx, "live"), domain.ErrNotFound)
-	s.Require().ErrorIs(s.be.notes.DeleteExpired(ctx, "forever"), domain.ErrNotFound)
-	s.Require().ErrorIs(s.be.notes.DeleteExpired(ctx, "unknown"), domain.ErrNotFound)
+	s.Require().NoError(s.be.notes.DeleteExpired(ctx, "expired", now()))
+	s.Require().ErrorIs(s.be.notes.DeleteExpired(ctx, "live", now()), domain.ErrNotFound)
+	s.Require().ErrorIs(s.be.notes.DeleteExpired(ctx, "forever", now()), domain.ErrNotFound)
+	s.Require().ErrorIs(s.be.notes.DeleteExpired(ctx, "unknown", now()), domain.ErrNotFound)
 }

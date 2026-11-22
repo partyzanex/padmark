@@ -156,8 +156,8 @@ func (n *Note) OwnedBy(userID uuid.UUID) bool {
 	return ownedBy(n.OwnerID, userID)
 }
 
-// Expired reports whether the expiry of n (a hard TTL or a started burn timer) is before now. A
-// nil ExpiresAt never expires.
+// Expired reports whether n is expired at now: its expiry (a hard TTL or a started burn timer)
+// is now or earlier. A nil ExpiresAt never expires.
 func (n *Note) Expired(now time.Time) bool {
 	return expired(n.ExpiresAt, now)
 }

@@ -16,16 +16,16 @@ func (s *ManagerTestSuite) TestUpdate_PreservesStateAndEvictsCache() {
 	ctx := s.T().Context()
 	owner := uuid.New()
 	privacy := domain.PrivacyOwner
-	expiry := time.Now().Add(time.Hour)
+	expiry := testNow().Add(time.Hour)
 	direct := false
 	existing := &domain.Link{
 		ID: domain.HashSlug("stable"), TargetURL: "old ciphertext", EditCode: "original",
-		OwnerID: &owner, CreatedAt: time.Now().Add(-time.Hour), Views: 7,
+		OwnerID: &owner, CreatedAt: testNow().Add(-time.Hour), Views: 7,
 		Privacy: &privacy, ExpiresAt: &expiry, DirectRedirect: &direct, BurnAfterClick: true,
 	}
 	s.storage.EXPECT().GetByID(ctx, existing.ID).Return(existing, nil)
-	s.storage.EXPECT().Update(ctx, existing.ID, "original", gomock.Any()).DoAndReturn(
-		func(_ context.Context, _, _ string, patch *domain.LinkPatch) (*domain.Link, error) {
+	s.storage.EXPECT().Update(ctx, existing.ID, "original", gomock.Any(), testNow()).DoAndReturn(
+		func(_ context.Context, _, _ string, patch *domain.LinkPatch, _ time.Time) (*domain.Link, error) {
 			s.Equal("https://example.com/new", patch.TargetURL)
 			s.Equal(&domain.LinkPatch{
 				TargetURL: "https://example.com/new",
@@ -60,8 +60,8 @@ func (s *ManagerTestSuite) TestUpdate_PreservesStateAndEvictsCache() {
 // TestUpdate_PatchCarriesOnlySentFields covers finding 9 in the usecase: each sent field and each
 // explicit reset reaches storage, and no value comes from the snapshot that GetByID returned.
 func (s *ManagerTestSuite) TestUpdate_PatchCarriesOnlySentFields() {
-	expiry := time.Now().Add(time.Hour)
-	later := time.Now().Add(2 * time.Hour)
+	expiry := testNow().Add(time.Hour)
+	later := testNow().Add(2 * time.Hour)
 	direct, other := true, false
 	privacy := domain.PrivacyAuthenticated
 
@@ -100,7 +100,7 @@ func (s *ManagerTestSuite) TestUpdate_PatchCarriesOnlySentFields() {
 				Views: 0, BurnAfterClick: false,
 			}, nil)
 
-			s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("stable"), "code", &want).
+			s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("stable"), "code", &want, testNow()).
 				Return(storedLink("code", nil), nil)
 
 			_, err := s.manager.Update(s.T().Context(), "stable", "code", openReader(),
@@ -134,7 +134,8 @@ func (s *ManagerTestSuite) TestUpdate_EditCodeAndOwnerChecks() {
 			s.storage.EXPECT().GetByID(gomock.Any(), domain.HashSlug("stable")).Return(existing, nil)
 
 			if testCase.ok {
-				s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("stable"), "original", gomock.Any()).Return(&domain.Link{
+				s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("stable"), "original", gomock.Any(),
+					testNow()).Return(&domain.Link{
 					CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
 					DirectRedirect: nil, ID: "", TargetURL: "", EditCode: "",
 					Views: 0, BurnAfterClick: false,

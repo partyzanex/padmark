@@ -26,12 +26,7 @@ const knownHostsFile = "known_hosts"
 // HostsPath resolves ~/.config/padmark/known_hosts, honouring XDG_CONFIG_HOME when set —
 // the same directory TokenPath resolves the token file in.
 func HostsPath() (string, error) {
-	operationResult, operationErr := configPath(knownHostsFile)
-	if operationErr != nil {
-		return operationResult, fmt.Errorf("config path: %w", operationErr)
-	}
-
-	return operationResult, nil
+	return configPath(knownHostsFile)
 }
 
 // permGroupOtherWrite masks the group- and other-write bits. A trust store anyone else can
@@ -177,7 +172,7 @@ func AddKnownOrigin(raw string) error {
 
 	path, err := HostsPath()
 	if err != nil {
-		return fmt.Errorf("hosts path: %w", err)
+		return err
 	}
 
 	mkdirErr := os.MkdirAll(filepath.Dir(path), configDirMode)

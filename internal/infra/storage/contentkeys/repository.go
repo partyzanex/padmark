@@ -178,7 +178,7 @@ func selectRows(db *bun.DB, table, column string) *bun.SelectQuery {
 func (r *Repository) Batch(ctx context.Context, resource, after string, limit int) ([]keys.Row, error) {
 	table, column, err := resourceColumns(resource)
 	if err != nil {
-		return nil, fmt.Errorf("resource columns: %w", err)
+		return nil, err
 	}
 
 	var stored []storedRow
@@ -201,7 +201,7 @@ func (r *Repository) Batch(ctx context.Context, resource, after string, limit in
 func (r *Repository) Get(ctx context.Context, resource, id string) (*keys.Row, error) {
 	table, column, err := resourceColumns(resource)
 	if err != nil {
-		return nil, fmt.Errorf("resource columns: %w", err)
+		return nil, err
 	}
 
 	var stored storedRow
@@ -225,7 +225,7 @@ func (r *Repository) Get(ctx context.Context, resource, id string) (*keys.Row, e
 func (r *Repository) Replace(ctx context.Context, row keys.Row, value string) (bool, error) {
 	table, column, err := resourceColumns(row.Resource)
 	if err != nil {
-		return false, fmt.Errorf("resource columns: %w", err)
+		return false, err
 	}
 
 	result, err := r.db.NewUpdate().Table(table).Set("? = ?", bun.Ident(column), value).
@@ -315,7 +315,7 @@ func (r *Repository) Delete(ctx context.Context, row keys.Row) (bool, error) {
 
 	table, column, err := resourceColumns(row.Resource)
 	if err != nil {
-		return false, fmt.Errorf("resource columns: %w", err)
+		return false, err
 	}
 
 	result, err := r.db.NewDelete().Table(table).

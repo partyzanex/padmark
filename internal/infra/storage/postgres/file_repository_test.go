@@ -107,7 +107,7 @@ func (s *FileRepositorySuite) TestCreate_SlugSharedWithLinks() {
 
 	record := s.createFile("own", nil)
 
-	got, err := s.repo.GetByID(ctx, record.ID)
+	got, err := s.repo.GetByID(ctx, record.ID, time.Now())
 	s.Require().NoError(err)
 	s.Equal(int64(42), got.Size)
 	s.Require().ErrorIs(s.links.Create(ctx, newLinkRecord(record.ID)), domain.ErrSlugConflict)
@@ -180,13 +180,14 @@ func (s *FileRepositorySuite) TestStaleWrites_ReusedSlug() {
 	now := time.Now()
 
 	s.Require().ErrorIs(s.repo.Update(ctx, old.ID, old.ObjectKey, opts, now), domain.ErrNotFound)
-	s.Require().ErrorIs(s.repo.IncrementDownloadsVisible(ctx, old.ID, old.ObjectKey, fileReader(uuid.Nil, false)),
+	s.Require().ErrorIs(s.repo.IncrementDownloadsVisible(ctx, old.ID, old.ObjectKey, fileReader(uuid.Nil, false),
+		time.Now()),
 		domain.ErrNotFound)
 	s.Require().ErrorIs(s.repo.ClaimBurn(ctx, newClaim(old, "t1", fileReader(uuid.Nil, false), now)),
 		domain.ErrNotFound)
 	s.Require().ErrorIs(s.repo.Delete(ctx, old.ID, old.ObjectKey), domain.ErrNotFound)
 
-	got, err := s.repo.GetByID(ctx, current.ID)
+	got, err := s.repo.GetByID(ctx, current.ID, time.Now())
 	s.Require().NoError(err)
 	s.Equal("object-new", got.ObjectKey)
 	s.True(got.BurnAfterDownload)
@@ -212,7 +213,7 @@ func (s *FileRepositorySuite) TestClaimBurn_Lifecycle() {
 	first := newClaim(burn, "t1", fileReader(owner, true), now)
 	s.Require().NoError(s.repo.ClaimBurn(ctx, first))
 
-	_, err := s.repo.GetByID(ctx, burn.ID)
+	_, err := s.repo.GetByID(ctx, burn.ID, time.Now())
 	s.Require().ErrorIs(err, domain.ErrNotFound, "other readers do not see a claimed file")
 
 	exists, err := s.db.NewSelect().Table("files").Where("id = ?", burn.ID).Exists(ctx)
@@ -226,7 +227,7 @@ func (s *FileRepositorySuite) TestClaimBurn_Lifecycle() {
 	// A failed transfer releases the claim: the file stays for the next reader.
 	s.Require().NoError(s.repo.ReleaseBurn(ctx, first))
 
-	got, err := s.repo.GetByID(ctx, burn.ID)
+	got, err := s.repo.GetByID(ctx, burn.ID, time.Now())
 	s.Require().NoError(err)
 	s.Equal(burn.ObjectKey, got.ObjectKey)
 
@@ -267,14 +268,14 @@ func (s *FileRepositorySuite) TestClaimBurn_StaleClaim() {
 	stale := newClaim(burn, "t1", reader, time.Now().Add(-2*time.Hour))
 	s.Require().NoError(s.repo.ClaimBurn(ctx, stale))
 
-	_, err := s.repo.GetByID(ctx, burn.ID)
+	_, err := s.repo.GetByID(ctx, burn.ID, time.Now())
 	s.Require().NoError(err, "a stale claim does not hide the file")
 
 	fresh := newClaim(burn, "t2", reader, time.Now())
 	s.Require().NoError(s.repo.ClaimBurn(ctx, fresh))
 	s.Require().ErrorIs(s.repo.ReleaseBurn(ctx, stale), domain.ErrNotFound)
 
-	_, err = s.repo.GetByID(ctx, burn.ID)
+	_, err = s.repo.GetByID(ctx, burn.ID, time.Now())
 	s.Require().ErrorIs(err, domain.ErrNotFound, "the new claim hides the file")
 	s.Require().NoError(s.repo.ReleaseBurn(ctx, fresh))
 }
@@ -332,27 +333,29 @@ func (s *FileRepositorySuite) TestIncrementDownloadsVisible() {
 	record := s.createFile("a", func(record *domain.File) { record.Privacy = &authenticated })
 
 	anonymous := fileReader(uuid.Nil, false)
-	s.Require().ErrorIs(s.repo.IncrementDownloadsVisible(ctx, record.ID, record.ObjectKey, anonymous), domain.ErrNotFound)
+	s.Require().ErrorIs(s.repo.IncrementDownloadsVisible(ctx, record.ID, record.ObjectKey, anonymous, time.Now()),
+		domain.ErrNotFound)
 
 	user := fileReader(uuid.New(), true)
-	s.Require().NoError(s.repo.IncrementDownloadsVisible(ctx, record.ID, record.ObjectKey, user))
+	s.Require().NoError(s.repo.IncrementDownloadsVisible(ctx, record.ID, record.ObjectKey, user, time.Now()))
 
 	skip := fileReader(uuid.Nil, false)
 	skip.SkipPrivacy = true
-	s.Require().NoError(s.repo.IncrementDownloadsVisible(ctx, record.ID, record.ObjectKey, skip))
+	s.Require().NoError(s.repo.IncrementDownloadsVisible(ctx, record.ID, record.ObjectKey, skip, time.Now()))
 
-	got, err := s.repo.GetByID(ctx, record.ID)
+	got, err := s.repo.GetByID(ctx, record.ID, time.Now())
 	s.Require().NoError(err)
 	s.Equal(2, got.Downloads)
 
 	burn := s.createFile("burn", func(record *domain.File) { record.BurnAfterDownload = true })
-	s.Require().ErrorIs(s.repo.IncrementDownloadsVisible(ctx, burn.ID, burn.ObjectKey, fileReader(uuid.Nil, false)),
+	s.Require().ErrorIs(s.repo.IncrementDownloadsVisible(ctx, burn.ID, burn.ObjectKey, fileReader(uuid.Nil, false),
+		time.Now()),
 		domain.ErrNotFound, "a burn file is claimed, not counted")
 
 	past := time.Now().Add(-time.Minute)
 	expired := s.createFile("old", func(record *domain.File) { record.ExpiresAt = &past })
 	s.Require().ErrorIs(
-		s.repo.IncrementDownloadsVisible(ctx, expired.ID, expired.ObjectKey, fileReader(uuid.Nil, false)),
+		s.repo.IncrementDownloadsVisible(ctx, expired.ID, expired.ObjectKey, fileReader(uuid.Nil, false), time.Now()),
 		domain.ErrNotFound, "an expired file is not counted")
 }
 
@@ -494,7 +497,7 @@ func (s *FileRepositorySuite) TestUpdate_WritesOnlyChangedColumns() {
 		record.ExpiresAt = &expires
 	})
 	user := fileReader(uuid.New(), true)
-	s.Require().NoError(s.repo.IncrementDownloadsVisible(ctx, record.ID, record.ObjectKey, user))
+	s.Require().NoError(s.repo.IncrementDownloadsVisible(ctx, record.ID, record.ObjectKey, user, time.Now()))
 
 	privacyOnly := files.UpdateOptions{ExpiresAt: nil, Privacy: &public, BurnAfterDownload: nil, ClearExpiry: false}
 	s.Require().NoError(s.repo.Update(ctx, record.ID, record.ObjectKey, privacyOnly, time.Now()))
@@ -503,7 +506,7 @@ func (s *FileRepositorySuite) TestUpdate_WritesOnlyChangedColumns() {
 	burnOnly := files.UpdateOptions{ExpiresAt: nil, Privacy: nil, BurnAfterDownload: &burn, ClearExpiry: false}
 	s.Require().NoError(s.repo.Update(ctx, record.ID, record.ObjectKey, burnOnly, time.Now()))
 
-	got, err := s.repo.GetByID(ctx, record.ID)
+	got, err := s.repo.GetByID(ctx, record.ID, time.Now())
 	s.Require().NoError(err)
 	s.Equal(domain.PrivacyPublic, got.EffectivePrivacy(), "the second update keeps the first change")
 	s.True(got.BurnAfterDownload)
@@ -518,7 +521,7 @@ func (s *FileRepositorySuite) TestUpdate_WritesOnlyChangedColumns() {
 	newExpiry := files.UpdateOptions{ExpiresAt: &later, Privacy: nil, BurnAfterDownload: nil, ClearExpiry: false}
 	s.Require().NoError(s.repo.Update(ctx, record.ID, record.ObjectKey, newExpiry, time.Now()))
 
-	got, err = s.repo.GetByID(ctx, record.ID)
+	got, err = s.repo.GetByID(ctx, record.ID, time.Now())
 	s.Require().NoError(err)
 	s.Require().NotNil(got.ExpiresAt)
 	s.True(later.Equal(*got.ExpiresAt))
@@ -526,7 +529,7 @@ func (s *FileRepositorySuite) TestUpdate_WritesOnlyChangedColumns() {
 	clearExpiry := files.UpdateOptions{ExpiresAt: &later, Privacy: nil, BurnAfterDownload: nil, ClearExpiry: true}
 	s.Require().NoError(s.repo.Update(ctx, record.ID, record.ObjectKey, clearExpiry, time.Now()))
 
-	got, err = s.repo.GetByID(ctx, record.ID)
+	got, err = s.repo.GetByID(ctx, record.ID, time.Now())
 	s.Require().NoError(err)
 	s.Nil(got.ExpiresAt, "ClearExpiry has priority over ExpiresAt")
 

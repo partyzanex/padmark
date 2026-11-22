@@ -40,12 +40,14 @@ func (s *AuthFlowSuite) SetupTest() {
 			Sessions:  s.Sessions,
 			APITokens: nil, // this suite exercises TOTP/session flows, not API tokens.
 		},
-		crypto.NewPasswordHasher(testArgon2Params),
-		crypto.NewSealer(testArgon2Params),
-		crypto.NewTOTP(),
-		slog.New(slog.DiscardHandler),
-		"padmark-test",
-		time.Hour,
+		&auth.Deps{
+			PasswordHasher: crypto.NewPasswordHasher(testArgon2Params),
+			Sealer:         crypto.NewSealer(testArgon2Params),
+			TOTP:           crypto.NewTOTP(),
+			Log:            slog.New(slog.DiscardHandler),
+			Now:            time.Now,
+		},
+		"padmark-test", time.Hour,
 	)
 	s.Require().NoError(err)
 	s.mgr = mgr
@@ -291,7 +293,7 @@ func (s *AuthFlowSuite) TestFlow_ChangePassword_InvalidatesOldSessions() {
 	// Both sessions must be valid before the password change.
 	_, err = s.mgr.GetSession(ctx, sess1)
 	s.Require().NoError(err, "sess1 must be valid before password change")
-	_, err = s.Sessions.Get(ctx, stolenSess.SessionHash)
+	_, err = s.Sessions.Get(ctx, stolenSess.SessionHash, time.Now())
 	s.Require().NoError(err, "stolen session must exist before password change")
 
 	const newPassword = "N3wP@ssw0rd!"
@@ -312,7 +314,7 @@ func (s *AuthFlowSuite) TestFlow_ChangePassword_InvalidatesOldSessions() {
 	s.Require().ErrorIs(err, domain.ErrSessionExpired, "original session must be invalidated after password change")
 
 	// The stolen session must also be rejected.
-	_, err = s.Sessions.Get(ctx, stolenSess.SessionHash)
+	_, err = s.Sessions.Get(ctx, stolenSess.SessionHash, time.Now())
 	s.Require().ErrorIs(err, domain.ErrSessionExpired, "stolen session must be invalidated after password change")
 
 	// The newly issued session must be valid and resolve to the correct user.

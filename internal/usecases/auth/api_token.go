@@ -45,7 +45,7 @@ type APITokenUserStore interface {
 
 // APITokenStore persists CLI API tokens keyed by their SHA-256 hash. The plain key is never stored.
 type APITokenStore interface {
-	// CreateIfUnderLimit atomically counts t.UserID's live (unexpired) tokens and inserts t only
+	// CreateIfUnderLimit atomically counts t.UserID's tokens that are live at t.CreatedAt and inserts t only
 	// if that count is below limit, reporting false (no error) when the limit is already reached. The
 	// count-then-insert must be a single atomic operation — two concurrent issuance requests each
 	// doing a separate count check followed by an unconditional insert could both pass the check
@@ -71,15 +71,18 @@ type APITokenManager struct {
 	users     APITokenUserStore
 	stepUp    StepUpVerifier
 	log       *slog.Logger
+	now       func() time.Time
 }
 
 // NewAPITokenManager returns a new APITokenManager. Pass a nil apiTokens to disable the
 // API-token flow (all methods then return domain.ErrFeatureNotSupported). stepUp re-authenticates
-// a bearer-token caller before it may issue another token.
+// a bearer-token caller before it may issue another token. now is the time source of token
+// expiry and timestamps.
 func NewAPITokenManager(
 	apiTokens APITokenStore, users APITokenUserStore, stepUp StepUpVerifier, log *slog.Logger,
+	now func() time.Time,
 ) *APITokenManager {
-	return &APITokenManager{apiTokens: apiTokens, users: users, stepUp: stepUp, log: log}
+	return &APITokenManager{apiTokens: apiTokens, users: users, stepUp: stepUp, log: log, now: now}
 }
 
 // CreateAPIToken issues an API key for the user identified by userID that expires after ttlDays
@@ -109,15 +112,15 @@ func (m *APITokenManager) CreateAPIToken(
 
 	err = authorizeIssuer(ctx, m.stepUp, usr.ID, issuer)
 	if err != nil {
-		return "", fmt.Errorf("authorize issuer: %w", err)
+		return "", err
 	}
 
 	plain, err := newAPIToken()
 	if err != nil {
-		return "", fmt.Errorf("new apitoken: %w", err)
+		return "", err
 	}
 
-	now := time.Now()
+	now := m.now()
 
 	token := &domain.APIToken{
 		UserID:    usr.ID,
@@ -156,7 +159,8 @@ func (m *APITokenManager) ResolveAPIToken(ctx context.Context, plainToken string
 		return nil, "", fmt.Errorf("get api token by hash: %w", err)
 	}
 
-	if token.ExpiresAt != nil && time.Now().After(*token.ExpiresAt) {
+	now := m.now()
+	if token.Expired(now) {
 		return nil, "", domain.ErrNotFound
 	}
 
@@ -165,7 +169,7 @@ func (m *APITokenManager) ResolveAPIToken(ctx context.Context, plainToken string
 		return nil, "", fmt.Errorf("get token user: %w", err)
 	}
 
-	updateErr := m.apiTokens.UpdateLastUsed(ctx, token.TokenHash, time.Now())
+	updateErr := m.apiTokens.UpdateLastUsed(ctx, token.TokenHash, now)
 	if updateErr != nil {
 		// Last-used tracking is advisory; a failed update must not reject a valid key.
 		m.log.WarnContext(ctx, "update api token last used failed", "token_hash", token.TokenHash, "err", updateErr)

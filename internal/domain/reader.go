@@ -48,8 +48,11 @@ func ownedBy(ownerID *uuid.UUID, userID uuid.UUID) bool {
 	return userID != uuid.Nil && ownerID != nil && *ownerID == userID
 }
 
-// expired reports whether expiresAt is before now. A nil expiresAt never expires. Notes, links
-// and files use this one comparison.
+// expired reports whether a record with expiresAt is expired at now. A nil expiresAt never
+// expires. This is the one boundary rule of notes, links, files and API tokens: the record is
+// expired from the expiresAt moment on (now >= expiresAt), so a TTL of N seconds gives exactly
+// N seconds of life. The SQL conditions use the same rule: expires_at <= now selects an expired
+// row, expires_at > now a live one.
 func expired(expiresAt *time.Time, now time.Time) bool {
-	return expiresAt != nil && now.After(*expiresAt)
+	return expiresAt != nil && !now.Before(*expiresAt)
 }

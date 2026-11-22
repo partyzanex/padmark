@@ -38,7 +38,7 @@ func TestMigrateInviteTokens_InvalidatesOldInvitesAndDowngradeHashes(t *testing.
 
 	repo := NewInviteRepository(db)
 	err = repo.RedeemInvite(t.Context(), domain.HashInviteToken("legacy-bearer"), "member",
-		migrationTestUser("member"))
+		migrationTestUser("member"), time.Now())
 	require.ErrorIs(t, err, domain.ErrNotFound)
 
 	issued := domain.HashInviteToken("new-bearer")

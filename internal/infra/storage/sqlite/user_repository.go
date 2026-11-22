@@ -77,7 +77,7 @@ func NewUserRepository(db *bun.DB) *UserRepository {
 
 // Create inserts a new user. Returns domain.ErrUserExists on duplicate username.
 func (r *UserRepository) Create(ctx context.Context, u *domain.User) error {
-	return errorcontext.Wrap(insertUser(ctx, r.db, u), "insert user")
+	return insertUser(ctx, r.db, u)
 }
 
 // insertUser inserts a user via conn (a *bun.DB or bun.Tx), mapping a unique-constraint
@@ -91,7 +91,7 @@ func insertUser(ctx context.Context, conn bun.IDB, u *domain.User) error {
 			return domain.ErrUserExists
 		}
 
-		return fmt.Errorf("insert user: %w", err)
+		return fmt.Errorf("sqlite insert user: %w", err)
 	}
 
 	return nil
@@ -107,7 +107,7 @@ func (r *UserRepository) GetByUsername(ctx context.Context, username string) (*d
 			return nil, domain.ErrNotFound
 		}
 
-		return nil, fmt.Errorf("get user by username: %w", err)
+		return nil, fmt.Errorf("sqlite get user by username: %w", err)
 	}
 
 	return row.toDomain(), nil
@@ -123,7 +123,7 @@ func (r *UserRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.Use
 			return nil, domain.ErrNotFound
 		}
 
-		return nil, fmt.Errorf("get user by id: %w", err)
+		return nil, fmt.Errorf("sqlite get user by id: %w", err)
 	}
 
 	return row.toDomain(), nil
@@ -135,7 +135,7 @@ func (r *UserRepository) List(ctx context.Context) ([]*domain.User, error) {
 
 	err := r.db.NewSelect().Model(&rows).OrderExpr("created_at ASC").Scan(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("list users: %w", err)
+		return nil, fmt.Errorf("sqlite list users: %w", err)
 	}
 
 	users := make([]*domain.User, len(rows))
@@ -155,7 +155,7 @@ func (r *UserRepository) UpdateLastLogin(ctx context.Context, id uuid.UUID, t ti
 		Where("id = ?", id).
 		Exec(ctx)
 	if err != nil {
-		return fmt.Errorf("update last login: %w", err)
+		return fmt.Errorf("sqlite update last login: %w", err)
 	}
 
 	return errorcontext.Wrap(requireAffected(res), "update last login")
@@ -172,16 +172,16 @@ func (r *UserRepository) Revoke(ctx context.Context, id uuid.UUID) error {
 		Where("is_admin = ?", false).
 		Exec(ctx)
 	if err != nil {
-		return fmt.Errorf("revoke user: %w", err)
+		return fmt.Errorf("sqlite revoke user: %w", err)
 	}
 
 	affected, err := res.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("revoke user rows affected: %w", err)
+		return fmt.Errorf("sqlite revoke user rows affected: %w", err)
 	}
 
 	if affected == 0 {
-		return fmt.Errorf("revoke user: %w", domain.ErrForbidden)
+		return fmt.Errorf("sqlite revoke user: %w", domain.ErrForbidden)
 	}
 
 	return nil
@@ -198,12 +198,12 @@ func (r *UserRepository) UpdateTOTPCounter(ctx context.Context, id uuid.UUID, co
 		Where("last_totp_counter < ?", counter).
 		Exec(ctx)
 	if err != nil {
-		return false, fmt.Errorf("update totp counter: %w", err)
+		return false, fmt.Errorf("sqlite update totp counter: %w", err)
 	}
 
 	affected, err := res.RowsAffected()
 	if err != nil {
-		return false, fmt.Errorf("rows affected: %w", err)
+		return false, fmt.Errorf("sqlite rows affected: %w", err)
 	}
 
 	return affected > 0, nil
@@ -228,12 +228,12 @@ func (r *UserRepository) ChangePassword(
 			Where("id = ?", sess.UserID).
 			Exec(ctx)
 		if updErr != nil {
-			return fmt.Errorf("update password: %w", updErr)
+			return fmt.Errorf("sqlite update password: %w", updErr)
 		}
 
 		affected, affErr := res.RowsAffected()
 		if affErr != nil {
-			return fmt.Errorf("update password rows affected: %w", affErr)
+			return fmt.Errorf("sqlite update password rows affected: %w", affErr)
 		}
 
 		if affected == 0 {
@@ -243,7 +243,7 @@ func (r *UserRepository) ChangePassword(
 		return replaceUserAccess(ctx, btx, sess)
 	})
 	if err != nil {
-		return fmt.Errorf("change password: %w", err)
+		return fmt.Errorf("sqlite change password: %w", err)
 	}
 
 	return nil
@@ -254,17 +254,17 @@ func (r *UserRepository) ChangePassword(
 func replaceUserAccess(ctx context.Context, btx bun.Tx, sess *domain.Session) error {
 	_, err := btx.NewDelete().TableExpr("sessions").Where("user_id = ?", sess.UserID).Exec(ctx)
 	if err != nil {
-		return fmt.Errorf("delete sessions of user: %w", err)
+		return fmt.Errorf("sqlite delete sessions of user: %w", err)
 	}
 
 	_, err = btx.NewInsert().Model(toSessionRow(sess)).Exec(ctx)
 	if err != nil {
-		return fmt.Errorf("insert session: %w", err)
+		return fmt.Errorf("sqlite insert session: %w", err)
 	}
 
 	_, err = btx.NewDelete().TableExpr("api_tokens").Where("user_id = ?", sess.UserID).Exec(ctx)
 	if err != nil {
-		return fmt.Errorf("delete api tokens of user: %w", err)
+		return fmt.Errorf("sqlite delete api tokens of user: %w", err)
 	}
 
 	return nil
@@ -284,12 +284,12 @@ func (r *UserRepository) UpdateTOTPSecret(
 		Where("totp_secret = ?", expected).
 		Exec(ctx)
 	if err != nil {
-		return false, fmt.Errorf("update totp secret: %w", err)
+		return false, fmt.Errorf("sqlite update totp secret: %w", err)
 	}
 
 	affected, err := res.RowsAffected()
 	if err != nil {
-		return false, fmt.Errorf("rows affected: %w", err)
+		return false, fmt.Errorf("sqlite rows affected: %w", err)
 	}
 
 	return affected > 0, nil
@@ -299,7 +299,7 @@ func (r *UserRepository) UpdateTOTPSecret(
 func requireAffected(res sql.Result) error {
 	affected, err := res.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("rows affected: %w", err)
+		return fmt.Errorf("sqlite rows affected: %w", err)
 	}
 
 	if affected == 0 {

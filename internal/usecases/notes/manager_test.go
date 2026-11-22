@@ -44,6 +44,7 @@ func (s *ManagerTestSuite) SetupTest() {
 	s.manager = NewManager(&Deps{
 		Storage: s.storage, Renderer: s.renderer, Encryptor: passthroughEncryptor(s.ctrl),
 		Hasher: identityHasher(s.ctrl), ExpiredSlugs: s.expired, Log: slog.New(slog.DiscardHandler),
+		Now: testNow,
 	}, true)
 }
 
@@ -189,7 +190,7 @@ func (s *ManagerTestSuite) TestCreate_CustomEditCodeUsedForUpdate() {
 
 	// Update with the custom code must succeed.
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug(created.ID)).Return(created, nil)
-	s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug(created.ID), gomock.Any()).Return(nil)
+	s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug(created.ID), gomock.Any(), testNow()).Return(nil)
 
 	updated, err := s.manager.Update(s.T().Context(), created.ID, customCode, openReader(), &domain.Note{
 		Title:   "updated",
@@ -373,6 +374,7 @@ func (s *ManagerTestSuite) TestCreate_CustomSlugDisabled() {
 	mgr := NewManager(&Deps{
 		Storage: s.storage, Renderer: s.renderer, Encryptor: passthroughEncryptor(s.ctrl), Hasher: identityHasher(s.ctrl),
 		ExpiredSlugs: s.expired, Log: slog.New(slog.DiscardHandler),
+		Now: testNow,
 	}, false)
 
 	_, err := mgr.Create(s.T().Context(), &domain.Note{
@@ -390,6 +392,7 @@ func (s *ManagerTestSuite) TestCreate_CustomSlugDisabled_AutoSlugStillWorks() {
 	mgr := NewManager(&Deps{
 		Storage: s.storage, Renderer: s.renderer, Encryptor: passthroughEncryptor(s.ctrl), Hasher: identityHasher(s.ctrl),
 		ExpiredSlugs: s.expired, Log: slog.New(slog.DiscardHandler),
+		Now: testNow,
 	}, false)
 	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
 
@@ -432,6 +435,7 @@ func (s *ManagerTestSuite) TestCreate_EncryptError_RestoresPlaintext() {
 	mgr := NewManager(&Deps{
 		Storage: s.storage, Renderer: s.renderer, Encryptor: errEncryptor(s.ctrl), Hasher: prefixHasher(s.ctrl),
 		ExpiredSlugs: s.expired, Log: slog.New(slog.DiscardHandler),
+		Now: testNow,
 	}, true)
 	note := &domain.Note{
 		Title: "t", Content: "secret body", EditCode: "mycode123456",
@@ -455,6 +459,7 @@ func (s *ManagerTestSuite) TestCreate_StorageError_RestoresPlaintextAndPersistsE
 	mgr := NewManager(&Deps{
 		Storage: s.storage, Renderer: s.renderer, Encryptor: prefixEncryptor(s.ctrl), Hasher: prefixHasher(s.ctrl),
 		ExpiredSlugs: s.expired, Log: slog.New(slog.DiscardHandler),
+		Now: testNow,
 	}, true)
 	note := &domain.Note{
 		Title: "t", Content: "body", EditCode: "code12345678", ID: "myslug",
@@ -496,6 +501,7 @@ func (s *ManagerTestSuite) TestUpdate_PersistsHashedEditCode_NotPlaintext() {
 	mgr := NewManager(&Deps{
 		Storage: s.storage, Renderer: s.renderer, Encryptor: prefixEncryptor(s.ctrl), Hasher: prefixHasher(s.ctrl),
 		ExpiredSlugs: s.expired, Log: slog.New(slog.DiscardHandler),
+		Now: testNow,
 	}, true)
 
 	existing := &domain.Note{
@@ -508,8 +514,8 @@ func (s *ManagerTestSuite) TestUpdate_PersistsHashedEditCode_NotPlaintext() {
 
 	var atStore domain.Note
 
-	s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("myslug"), gomock.Any()).DoAndReturn(
-		func(_ context.Context, _ string, n *domain.Note) error {
+	s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("myslug"), gomock.Any(), testNow()).DoAndReturn(
+		func(_ context.Context, _ string, n *domain.Note, _ time.Time) error {
 			atStore = *n // snapshot the row as it is persisted.
 
 			return nil
@@ -543,6 +549,7 @@ func (s *ManagerTestSuite) TestHandleSetBurnExpiryErr_RefetchDecryptFails() {
 	mgr := NewManager(&Deps{
 		Storage: s.storage, Renderer: s.renderer, Encryptor: failingEncryptor(s.ctrl), Hasher: identityHasher(s.ctrl),
 		ExpiredSlugs: s.expired, Log: slog.New(slog.DiscardHandler),
+		Now: testNow,
 	}, true)
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("burn-x")).Return(&domain.Note{
 		ID: "x", Content: "ct",
@@ -569,7 +576,8 @@ func (s *ManagerTestSuite) TestRead_BurnUsesCheckedPrivacy() {
 		ClearExpiry: false, ShowContents: nil,
 	}
 
-	s.storage.EXPECT().Consume(gomock.Any(), domain.HashSlug("burn-x"), domain.PrivacyAuthenticated, "hash:checked").
+	s.storage.EXPECT().Consume(gomock.Any(), domain.HashSlug("burn-x"), domain.PrivacyAuthenticated, "hash:checked",
+		testNow()).
 		Return(nil, domain.ErrNotFound)
 
 	s.expectGet("burn-x", checked)
@@ -627,7 +635,8 @@ func (s *ManagerTestSuite) TestRead_GetBurnAfterReading() {
 		ClearExpiry: false, ShowContents: nil,
 	}
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(note, nil)
-	s.storage.EXPECT().Consume(gomock.Any(), domain.HashSlug("abc-123"), gomock.Any(), gomock.Any()).Return(note, nil)
+	s.storage.EXPECT().Consume(gomock.Any(), domain.HashSlug("abc-123"), gomock.Any(), gomock.Any(),
+		testNow()).Return(note, nil)
 
 	result, err := s.manager.Read(s.T().Context(), "abc-123", openReader())
 
@@ -653,7 +662,7 @@ func (s *ManagerTestSuite) TestRead_GetBurnAfterReading_WithTTL() {
 }
 
 func (s *ManagerTestSuite) TestRead_GetExpired() {
-	past := time.Now().Add(-time.Minute)
+	past := testNow().Add(-time.Minute)
 	note := &domain.Note{
 		ID: "abc-123", Title: "a", ExpiresAt: &past,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, Privacy: nil,
@@ -661,7 +670,7 @@ func (s *ManagerTestSuite) TestRead_GetExpired() {
 		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(note, nil)
-	s.storage.EXPECT().DeleteExpired(gomock.Any(), domain.HashSlug("abc-123")).Return(nil)
+	s.storage.EXPECT().DeleteExpired(gomock.Any(), domain.HashSlug("abc-123"), testNow()).Return(nil)
 
 	_, err := s.manager.Read(s.T().Context(), "abc-123", openReader())
 
@@ -703,7 +712,8 @@ func (s *ManagerTestSuite) TestView_BurnAfterReading() {
 		ClearExpiry: false, ShowContents: nil,
 	}
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(want, nil)
-	s.storage.EXPECT().Consume(gomock.Any(), domain.HashSlug("abc-123"), gomock.Any(), gomock.Any()).Return(want, nil)
+	s.storage.EXPECT().Consume(gomock.Any(), domain.HashSlug("abc-123"), gomock.Any(), gomock.Any(),
+		testNow()).Return(want, nil)
 
 	note, err := s.manager.Read(s.T().Context(), "abc-123", openReader())
 
@@ -713,7 +723,7 @@ func (s *ManagerTestSuite) TestView_BurnAfterReading() {
 }
 
 func (s *ManagerTestSuite) TestView_BurnAfterReading_WithTTL() {
-	future := time.Now().Add(30 * time.Minute)
+	future := testNow().Add(30 * time.Minute)
 	stored := &domain.Note{
 		ID: "abc-123", Title: "a", BurnAfterReading: true, BurnTTL: 1800,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
@@ -756,7 +766,7 @@ func (s *ManagerTestSuite) TestUpdate_OK() {
 		Title:       "old",
 		ContentType: new(domain.ContentTypeMarkdown),
 		EditCode:    "secret123456",
-		CreatedAt:   time.Now().Add(-time.Hour),
+		CreatedAt:   testNow().Add(-time.Hour),
 
 		UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
 		Content: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
@@ -771,7 +781,7 @@ func (s *ManagerTestSuite) TestUpdate_OK() {
 	}
 
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(existing, nil)
-	s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("abc-123"), gomock.Any()).Return(nil)
+	s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("abc-123"), gomock.Any(), testNow()).Return(nil)
 
 	result, err := s.manager.Update(s.T().Context(), "abc-123", "secret123456", openReader(), note)
 
@@ -813,8 +823,8 @@ func (s *ManagerTestSuite) TestUpdate_ResponseReportsPersistedPrivacyAndViews() 
 	}
 
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(existing, nil)
-	s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("abc-123"), gomock.Any()).DoAndReturn(
-		func(_ context.Context, _ string, written *domain.Note) error {
+	s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("abc-123"), gomock.Any(), testNow()).DoAndReturn(
+		func(_ context.Context, _ string, written *domain.Note, _ time.Time) error {
 			// The omitted privacy reaches storage as nil, so COALESCE keeps a concurrent change (R3).
 			s.Nil(written.Privacy)
 
@@ -838,7 +848,7 @@ func (s *ManagerTestSuite) TestUpdate_ResponseReportsPersistedPrivacyAndViews() 
 	}
 
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(existing, nil)
-	s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("abc-123"), gomock.Any()).Return(nil)
+	s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("abc-123"), gomock.Any(), testNow()).Return(nil)
 
 	result, err = s.manager.Update(s.T().Context(), "abc-123", "secret123456", openReader(), explicit)
 
@@ -859,7 +869,7 @@ func (s *ManagerTestSuite) TestUpdate_EmptyTitle() {
 	}
 
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(existing, nil)
-	s.storage.EXPECT().Update(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
+	s.storage.EXPECT().Update(gomock.Any(), gomock.Any(), gomock.Any(), testNow()).Return(nil)
 
 	result, err := s.manager.Update(s.T().Context(), "abc-123", "code", openReader(), &domain.Note{
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
@@ -935,7 +945,7 @@ func (s *ManagerTestSuite) TestUpdate_OwnerBypassesEditCode() {
 	}
 
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(existing, nil)
-	s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("abc-123"), gomock.Any()).Return(nil)
+	s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("abc-123"), gomock.Any(), testNow()).Return(nil)
 
 	result, err := s.manager.Update(s.T().Context(), "abc-123", "", accountReader(testUserID1), note)
 
@@ -1100,6 +1110,7 @@ func (s *ManagerTestSuite) TestGetRendered_DroppedImagesAreLogged() {
 	manager := NewManager(&Deps{
 		Storage: s.storage, Renderer: s.renderer, Encryptor: passthroughEncryptor(s.ctrl), Hasher: identityHasher(s.ctrl),
 		ExpiredSlugs: s.expired, Log: slog.New(slog.NewJSONHandler(&logs, nil)),
+		Now: testNow,
 	}, true)
 	note := &domain.Note{
 		ID: "abc-123", Content: "![a](data:image/svg+xml;base64,PHN2Zz4=)",
@@ -1138,6 +1149,7 @@ func (s *ManagerTestSuite) TestGetRendered_NoDroppedImagesNoLog() {
 	manager := NewManager(&Deps{
 		Storage: s.storage, Renderer: s.renderer, Encryptor: passthroughEncryptor(s.ctrl), Hasher: identityHasher(s.ctrl),
 		ExpiredSlugs: s.expired, Log: slog.New(slog.NewJSONHandler(&logs, nil)),
+		Now: testNow,
 	}, true)
 	note := &domain.Note{
 		ID: "abc-123", Content: "# Hello",
@@ -1281,7 +1293,7 @@ func (s *ManagerTestSuite) statefulRenderCache() *MockRenderCache {
 func (s *ManagerTestSuite) TestGetRendered_UnchangedNoteIsRenderedOnce() {
 	s.manager.WithRenderCache(s.statefulRenderCache())
 
-	stamp := time.Now().Add(-time.Hour)
+	stamp := testNow().Add(-time.Hour)
 
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).
 		DoAndReturn(func(context.Context, string) (*domain.Note, error) {
@@ -1307,7 +1319,7 @@ func (s *ManagerTestSuite) TestGetRendered_UnchangedNoteIsRenderedOnce() {
 func (s *ManagerTestSuite) TestGetRendered_ReRendersAfterUpdate() {
 	s.manager.WithRenderCache(s.statefulRenderCache())
 
-	stamp := time.Now().Add(-time.Hour)
+	stamp := testNow().Add(-time.Hour)
 	current := &domain.Note{
 		ID: "abc-123", Content: "old", UpdatedAt: stamp, EditCode: "secret123456",
 		CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
@@ -1322,8 +1334,8 @@ func (s *ManagerTestSuite) TestGetRendered_ReRendersAfterUpdate() {
 			return &clone, nil
 		}).AnyTimes()
 	s.storage.EXPECT().IncrementViews(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
-	s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("abc-123"), gomock.Any()).
-		DoAndReturn(func(_ context.Context, _ string, _ *domain.Note) error {
+	s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("abc-123"), gomock.Any(), testNow()).
+		DoAndReturn(func(_ context.Context, _ string, _ *domain.Note, _ time.Time) error {
 			// Stored state after the update; keep the old UpdatedAt to prove the explicit
 			// invalidation (not just the changed key) drops the entry.
 			current = &domain.Note{
@@ -1362,13 +1374,13 @@ func (s *ManagerTestSuite) TestGetRendered_ReRendersWhenUpdatedAtChanges() {
 	s.manager.WithRenderCache(s.statefulRenderCache())
 
 	first := &domain.Note{
-		ID: "abc-123", Content: "v1", UpdatedAt: time.Now().Add(-time.Hour),
+		ID: "abc-123", Content: "v1", UpdatedAt: testNow().Add(-time.Hour),
 		CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
 		Title: "", ContentType: nil, EditCode: "", Views: 0,
 		BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 	second := &domain.Note{
-		ID: "abc-123", Content: "v2", UpdatedAt: time.Now(),
+		ID: "abc-123", Content: "v2", UpdatedAt: testNow(),
 		CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
 		Title: "", ContentType: nil, EditCode: "", Views: 0,
 		BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
@@ -1406,7 +1418,8 @@ func (s *ManagerTestSuite) TestGetRendered_BurnNotesAreNeverCached() {
 		ClearExpiry: false, ShowContents: nil,
 	}
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(note, nil)
-	s.storage.EXPECT().Consume(gomock.Any(), domain.HashSlug("abc-123"), gomock.Any(), gomock.Any()).Return(note, nil)
+	s.storage.EXPECT().Consume(gomock.Any(), domain.HashSlug("abc-123"), gomock.Any(), gomock.Any(),
+		testNow()).Return(note, nil)
 	s.renderer.EXPECT().Render("# Hello").Return("<h1>Hello</h1>", nil, nil)
 
 	_, _, err := s.manager.ReadRendered(s.T().Context(), "abc-123", openReader())
@@ -1441,7 +1454,8 @@ func (s *ManagerTestSuite) TestGetRendered_BurnAfterReading() {
 		ClearExpiry: false, ShowContents: nil,
 	}
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(note, nil)
-	s.storage.EXPECT().Consume(gomock.Any(), domain.HashSlug("abc-123"), gomock.Any(), gomock.Any()).Return(note, nil)
+	s.storage.EXPECT().Consume(gomock.Any(), domain.HashSlug("abc-123"), gomock.Any(), gomock.Any(),
+		testNow()).Return(note, nil)
 	s.renderer.EXPECT().Render("# Hello").Return("<h1>Hello</h1>", nil, nil)
 
 	result, rendered, err := s.manager.ReadRendered(s.T().Context(), "abc-123", openReader())
@@ -1452,7 +1466,7 @@ func (s *ManagerTestSuite) TestGetRendered_BurnAfterReading() {
 }
 
 func (s *ManagerTestSuite) TestGetRendered_Expired() {
-	past := time.Now().Add(-time.Minute)
+	past := testNow().Add(-time.Minute)
 	note := &domain.Note{
 		ID: "abc-123", Content: "# Hello", ExpiresAt: &past,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, Privacy: nil,
@@ -1460,7 +1474,7 @@ func (s *ManagerTestSuite) TestGetRendered_Expired() {
 		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(note, nil)
-	s.storage.EXPECT().DeleteExpired(gomock.Any(), domain.HashSlug("abc-123")).Return(nil)
+	s.storage.EXPECT().DeleteExpired(gomock.Any(), domain.HashSlug("abc-123"), testNow()).Return(nil)
 
 	_, _, err := s.manager.ReadRendered(s.T().Context(), "abc-123", openReader())
 
@@ -1567,7 +1581,7 @@ func (s *ManagerTestSuite) TestPeek_NotFound() {
 // incorrectly calling IncrementViews for burn-after-reading notes that also had ExpiresAt set.
 // For a plain TTL note (BurnAfterReading=false), multiple views must succeed.
 func (s *ManagerTestSuite) TestView_WithTTL_SecondViewSucceeds() {
-	future := time.Now().Add(time.Hour)
+	future := testNow().Add(time.Hour)
 	note := &domain.Note{
 		ID: "ttl-note", Title: "t", Views: 0, ExpiresAt: &future,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, Privacy: nil,
@@ -1608,7 +1622,8 @@ func (s *ManagerTestSuite) TestView_BurnAfterReading_NoIncrementViews() {
 		ClearExpiry: false, ShowContents: nil,
 	}
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("burn-note")).Return(note, nil)
-	s.storage.EXPECT().Consume(gomock.Any(), domain.HashSlug("burn-note"), gomock.Any(), gomock.Any()).Return(note, nil)
+	s.storage.EXPECT().Consume(gomock.Any(), domain.HashSlug("burn-note"), gomock.Any(), gomock.Any(),
+		testNow()).Return(note, nil)
 	// IncrementViews must NOT be called.
 
 	result, err := s.manager.Read(s.T().Context(), "burn-note", openReader())
@@ -1622,7 +1637,7 @@ func (s *ManagerTestSuite) TestView_BurnAfterReading_NoIncrementViews() {
 // SetBurnExpiry returns the note with BurnAfterReading=false (as the real storage does after
 // flipping the column), so the test exercises the actual production code path.
 func (s *ManagerTestSuite) TestView_BurnAfterReading_WithBurnTTL_CountsViews() {
-	future := time.Now().Add(time.Hour)
+	future := testNow().Add(time.Hour)
 	// Real storage flips burn_after_reading=false and sets expires_at.
 	noteAfterBurn := &domain.Note{
 		ID: "burn-ttl", Title: "t", BurnAfterReading: false, BurnTTL: 3600, ExpiresAt: &future,
@@ -1677,7 +1692,7 @@ func (s *ManagerTestSuite) TestRead_GetBurnTTL_Race_SetBurnExpiryNotFound() {
 		Return(nil, domain.ErrNotFound)
 
 	// The fix must re-fetch the note to return its current state (BurnAfterReading=false, ExpiresAt set).
-	future := time.Now().Add(time.Hour)
+	future := testNow().Add(time.Hour)
 	noteAfterBurn := &domain.Note{
 		ID:               "burn-ttl-race",
 		Title:            "t",
@@ -1726,7 +1741,8 @@ func (s *ManagerTestSuite) TestRead_BurnAfterReading() {
 		OwnerID: nil, Title: "", Content: "", ContentType: nil, EditCode: "",
 		Views: 0, BurnTTL: 0, ClearExpiry: false, ShowContents: nil,
 	}
-	s.storage.EXPECT().Consume(gomock.Any(), domain.HashSlug("pre-2"), gomock.Any(), gomock.Any()).Return(note, nil)
+	s.storage.EXPECT().Consume(gomock.Any(), domain.HashSlug("pre-2"), gomock.Any(), gomock.Any(),
+		testNow()).Return(note, nil)
 
 	s.expectGet("pre-2", note)
 	result, err := s.manager.Read(s.T().Context(), "pre-2", openReader())
@@ -1737,7 +1753,7 @@ func (s *ManagerTestSuite) TestRead_BurnAfterReading() {
 }
 
 func (s *ManagerTestSuite) TestRead_Expired() {
-	past := time.Now().Add(-time.Minute)
+	past := testNow().Add(-time.Minute)
 	note := &domain.Note{
 		ID: "pre-3", ExpiresAt: &past,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, Privacy: nil,
@@ -1746,7 +1762,7 @@ func (s *ManagerTestSuite) TestRead_Expired() {
 		ClearExpiry: false, ShowContents: nil,
 	}
 
-	s.storage.EXPECT().DeleteExpired(gomock.Any(), domain.HashSlug("pre-3")).Return(nil)
+	s.storage.EXPECT().DeleteExpired(gomock.Any(), domain.HashSlug("pre-3"), testNow()).Return(nil)
 
 	s.expectGet("pre-3", note)
 	_, err := s.manager.Read(s.T().Context(), "pre-3", openReader())
@@ -1757,7 +1773,7 @@ func (s *ManagerTestSuite) TestRead_Expired() {
 // EnforceExpiry — expiry only, never burn.
 
 func (s *ManagerTestSuite) TestInspect_ExpiredNoteIsDeleted() {
-	past := time.Now().Add(-time.Minute)
+	past := testNow().Add(-time.Minute)
 	note := &domain.Note{
 		ID: "ee-1", ExpiresAt: &past, BurnAfterReading: true,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, Privacy: nil, OwnerID: nil,
@@ -1765,7 +1781,7 @@ func (s *ManagerTestSuite) TestInspect_ExpiredNoteIsDeleted() {
 		ClearExpiry: false, ShowContents: nil,
 	}
 
-	s.storage.EXPECT().DeleteExpired(gomock.Any(), domain.HashSlug("ee-1")).Return(nil)
+	s.storage.EXPECT().DeleteExpired(gomock.Any(), domain.HashSlug("ee-1"), testNow()).Return(nil)
 
 	s.expectGet("ee-1", note)
 	_, err := s.manager.Inspect(s.T().Context(), "ee-1", openReader())
@@ -1777,7 +1793,7 @@ func (s *ManagerTestSuite) TestInspect_ExpiredNoteIsDeleted() {
 // owner has extended the row since, so DeleteExpired finds nothing. The request still reports
 // ErrExpired from its snapshot, and the usecase never deletes the row by ID.
 func (s *ManagerTestSuite) TestInspect_ExtendedNoteIsKept() {
-	past := time.Now().Add(-time.Minute)
+	past := testNow().Add(-time.Minute)
 	stale := &domain.Note{
 		ID: "ee-ext", ExpiresAt: &past, BurnAfterReading: false,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, Privacy: nil, OwnerID: nil,
@@ -1785,7 +1801,7 @@ func (s *ManagerTestSuite) TestInspect_ExtendedNoteIsKept() {
 		ClearExpiry: false, ShowContents: nil,
 	}
 
-	s.storage.EXPECT().DeleteExpired(gomock.Any(), domain.HashSlug("ee-ext")).Return(domain.ErrNotFound)
+	s.storage.EXPECT().DeleteExpired(gomock.Any(), domain.HashSlug("ee-ext"), testNow()).Return(domain.ErrNotFound)
 
 	s.expectGet("ee-ext", stale)
 	_, err := s.manager.Inspect(s.T().Context(), "ee-ext", openReader())
@@ -1794,7 +1810,7 @@ func (s *ManagerTestSuite) TestInspect_ExtendedNoteIsKept() {
 }
 
 func (s *ManagerTestSuite) TestInspect_LiveBurnNoteIsNotConsumed() {
-	future := time.Now().Add(time.Hour)
+	future := testNow().Add(time.Hour)
 
 	for _, note := range []*domain.Note{
 		{
@@ -1848,7 +1864,7 @@ func (s *ManagerTestSuite) TestReadRendered_OK() {
 }
 
 func (s *ManagerTestSuite) TestReadRendered_Expired() {
-	past := time.Now().Add(-time.Minute)
+	past := testNow().Add(-time.Minute)
 	note := &domain.Note{
 		ID: "rp-2", ExpiresAt: &past, Content: "x",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, Privacy: nil,
@@ -1856,7 +1872,7 @@ func (s *ManagerTestSuite) TestReadRendered_Expired() {
 		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 
-	s.storage.EXPECT().DeleteExpired(gomock.Any(), domain.HashSlug("rp-2")).Return(nil)
+	s.storage.EXPECT().DeleteExpired(gomock.Any(), domain.HashSlug("rp-2"), testNow()).Return(nil)
 
 	s.expectGet("rp-2", note)
 	_, _, err := s.manager.ReadRendered(s.T().Context(), "rp-2", openReader())
@@ -1870,7 +1886,7 @@ func (s *ManagerTestSuite) TestReadRendered_Expired() {
 // Callers (e.g. auth middleware) use Peek to inspect note metadata without side effects;
 // they must not trigger deletion or policy enforcement.
 func (s *ManagerTestSuite) TestPeek_ReturnsExpiredNote() {
-	past := time.Now().Add(-time.Minute)
+	past := testNow().Add(-time.Minute)
 	note := &domain.Note{
 		ID: "expired-peek", Title: "t", ExpiresAt: &past,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, Privacy: nil,
@@ -1910,7 +1926,7 @@ func (s *ManagerTestSuite) TestUpdate_PrivateNote_CorrectCode() {
 	}
 
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("priv-1")).Return(existing, nil)
-	s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("priv-1"), gomock.Any()).Return(nil)
+	s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("priv-1"), gomock.Any(), testNow()).Return(nil)
 
 	result, err := s.manager.Update(s.T().Context(), "priv-1", "rightcode1234", openReader(), note)
 
@@ -1970,7 +1986,7 @@ func (s *ManagerTestSuite) TestUpdate_OwnerPrivacy_AlreadyOwnedNote_OK() {
 	}
 
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("owned-1")).Return(existing, nil)
-	s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("owned-1"), gomock.Any()).Return(nil)
+	s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("owned-1"), gomock.Any(), testNow()).Return(nil)
 
 	result, err := s.manager.Update(s.T().Context(), "owned-1", "rightcode1234", openReader(), note)
 
@@ -2017,7 +2033,7 @@ func (s *ManagerTestSuite) TestRead_GetBurnAfterReading_ConsumeError() {
 	}
 
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("burn-err")).Return(note, nil)
-	s.storage.EXPECT().Consume(gomock.Any(), domain.HashSlug("burn-err"), gomock.Any(), gomock.Any()).
+	s.storage.EXPECT().Consume(gomock.Any(), domain.HashSlug("burn-err"), gomock.Any(), gomock.Any(), testNow()).
 		Return(nil, consumeErr)
 
 	_, err := s.manager.Read(s.T().Context(), "burn-err", openReader())
@@ -2035,7 +2051,7 @@ func (s *ManagerTestSuite) TestView_BurnAfterReading_ConsumeError() {
 	}
 
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("burn-err-view")).Return(note, nil)
-	s.storage.EXPECT().Consume(gomock.Any(), domain.HashSlug("burn-err-view"), gomock.Any(), gomock.Any()).
+	s.storage.EXPECT().Consume(gomock.Any(), domain.HashSlug("burn-err-view"), gomock.Any(), gomock.Any(), testNow()).
 		Return(nil, consumeErr)
 
 	_, err := s.manager.Read(s.T().Context(), "burn-err-view", openReader())
@@ -2053,6 +2069,7 @@ func TestGet_DecryptionFailure(t *testing.T) {
 	mgr := NewManager(&Deps{
 		Storage: storage, Renderer: renderer, Encryptor: failingEncryptor(ctrl), Hasher: identityHasher(ctrl),
 		ExpiredSlugs: expired, Log: slog.New(slog.DiscardHandler),
+		Now: testNow,
 	}, true)
 
 	note := &domain.Note{
@@ -2076,6 +2093,7 @@ func TestPeek_DecryptionFailure(t *testing.T) {
 	mgr := NewManager(&Deps{
 		Storage: storage, Renderer: renderer, Encryptor: failingEncryptor(ctrl), Hasher: identityHasher(ctrl),
 		ExpiredSlugs: expired, Log: slog.New(slog.DiscardHandler),
+		Now: testNow,
 	}, true)
 
 	note := &domain.Note{
@@ -2101,6 +2119,7 @@ func TestGet_BurnAfterReading_DecryptionFailure(t *testing.T) {
 	mgr := NewManager(&Deps{
 		Storage: storage, Renderer: renderer, Encryptor: failingEncryptor(ctrl), Hasher: identityHasher(ctrl),
 		ExpiredSlugs: expired, Log: slog.New(slog.DiscardHandler),
+		Now: testNow,
 	}, true)
 
 	// decryptContent runs before burn.applyPolicy, so Consume is never reached.
@@ -2127,6 +2146,7 @@ func TestGet_BurnTTL_DecryptionFailure(t *testing.T) {
 	mgr := NewManager(&Deps{
 		Storage: storage, Renderer: renderer, Encryptor: failingEncryptor(ctrl), Hasher: identityHasher(ctrl),
 		ExpiredSlugs: expired, Log: slog.New(slog.DiscardHandler),
+		Now: testNow,
 	}, true)
 
 	// decryptContent runs before burn.applyPolicy, so SetBurnExpiry is never reached.
@@ -2143,7 +2163,7 @@ func TestGet_BurnTTL_DecryptionFailure(t *testing.T) {
 }
 
 func (s *ManagerTestSuite) TestUpdateExplicitExpiry() {
-	future := time.Now().Add(time.Hour)
+	future := testNow().Add(time.Hour)
 	for _, testCase := range []struct {
 		name   string
 		update *domain.Note
@@ -2179,8 +2199,8 @@ func (s *ManagerTestSuite) TestUpdateExplicitExpiry() {
 				Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 			}
 			s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("slug")).Return(existing, nil)
-			s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("slug"), gomock.Any()).
-				DoAndReturn(func(_ context.Context, _ string, note *domain.Note) error {
+			s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("slug"), gomock.Any(), testNow()).
+				DoAndReturn(func(_ context.Context, _ string, note *domain.Note, _ time.Time) error {
 					s.Equal(testCase.want, note.ExpiresAt)
 
 					return nil
@@ -2197,7 +2217,7 @@ func (s *ManagerTestSuite) TestUpdateExplicitExpiry() {
 // to BurnTTL=0, no ExpiresAt, no ClearExpiry): an existing hard expiry is kept, while a stale
 // burn-timer expiry from a previous burn TTL is dropped.
 func (s *ManagerTestSuite) TestUpdateBurnImmediateExpiry() {
-	future := time.Now().Add(time.Hour)
+	future := testNow().Add(time.Hour)
 	for _, testCase := range []struct {
 		name     string
 		existing *domain.Note
@@ -2230,8 +2250,8 @@ func (s *ManagerTestSuite) TestUpdateBurnImmediateExpiry() {
 	} {
 		s.Run(testCase.name, func() {
 			s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("slug")).Return(testCase.existing, nil)
-			s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("slug"), gomock.Any()).
-				DoAndReturn(func(_ context.Context, _ string, note *domain.Note) error {
+			s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("slug"), gomock.Any(), testNow()).
+				DoAndReturn(func(_ context.Context, _ string, note *domain.Note, _ time.Time) error {
 					s.Equal(testCase.want, note.ExpiresAt)
 
 					return nil

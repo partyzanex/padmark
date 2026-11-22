@@ -176,6 +176,7 @@ func (s *StoreSuite) newManager() *files.Manager {
 		Hasher:       crypto.NewEditCodeHasher(testutil.Argon2Params()),
 		ExpiredSlugs: expired,
 		Log:          slog.New(slog.DiscardHandler),
+		Now:          time.Now,
 	}, 64<<20, true)
 	expired.WithFiles(manager)
 

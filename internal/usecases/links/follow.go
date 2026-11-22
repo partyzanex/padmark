@@ -20,7 +20,7 @@ func (m *Manager) Inspect(ctx context.Context, slug string, reader domain.Reader
 		return nil, err
 	}
 
-	if link.Expired(time.Now()) {
+	if link.Expired(m.now()) {
 		return nil, domain.ErrExpired
 	}
 
@@ -31,7 +31,7 @@ func (m *Manager) Inspect(ctx context.Context, slug string, reader domain.Reader
 func (m *Manager) visibleLink(ctx context.Context, slug string, reader domain.Reader) (*domain.Link, error) {
 	link, err := m.resolveLink(ctx, slug)
 	if err != nil {
-		return nil, fmt.Errorf("inspect link: %w", err)
+		return nil, err
 	}
 
 	if !link.VisibleTo(reader) {
@@ -51,31 +51,27 @@ func (m *Manager) visibleLink(ctx context.Context, slug string, reader domain.Re
 func (m *Manager) Follow(ctx context.Context, slug string, reader domain.Reader) (*domain.Link, error) {
 	link, err := m.visibleLink(ctx, slug, reader)
 	if err != nil {
-		return nil, fmt.Errorf("follow link: %w", err)
+		return nil, err
 	}
 
-	if link.Expired(time.Now()) {
-		return nil, fmt.Errorf("follow link: %w", m.expireLink(ctx, slug, reader))
+	now := m.now()
+	if link.Expired(now) {
+		return nil, m.expireLink(ctx, slug, reader, now)
 	}
 
 	dbID := domain.HashSlug(slug)
 
 	if link.BurnAfterClick {
 		if !reader.AllowBurn {
-			return nil, fmt.Errorf("follow link: %w", domain.ErrBurnIntentRequired)
+			return nil, domain.ErrBurnIntentRequired
 		}
 
-		consumed, consumeErr := m.consumeLink(ctx, slug, dbID, reader)
-		if consumeErr != nil {
-			return nil, fmt.Errorf("follow link: %w", consumeErr)
-		}
-
-		return consumed, nil
+		return m.consumeLink(ctx, slug, dbID, reader)
 	}
 
 	err = m.incrementRedirectViews(ctx, dbID, link, reader)
 	if err != nil {
-		return nil, fmt.Errorf("follow link: %w", err)
+		return nil, err
 	}
 
 	m.metrics.IncRedirects()
@@ -88,20 +84,20 @@ func (m *Manager) Follow(ctx context.Context, slug string, reader domain.Reader)
 // live link took the ID, the row stays and only this request sees the link as expired. With
 // privacy on, the DELETE also checks that the current row is visible to reader; a row that is not
 // gives domain.ErrNotFound.
-func (m *Manager) expireLink(ctx context.Context, slug string, reader domain.Reader) error {
+func (m *Manager) expireLink(ctx context.Context, slug string, reader domain.Reader, now time.Time) error {
 	dbID := domain.HashSlug(slug)
 
 	var err error
 
 	if reader.SkipPrivacy {
-		err = m.storage.DeleteExpired(ctx, dbID)
+		err = m.storage.DeleteExpired(ctx, dbID, now)
 		if errors.Is(err, domain.ErrNotFound) {
 			m.log.DebugContext(ctx, "expired link already deleted or extended", "id", dbID)
 
 			err = nil
 		}
 	} else {
-		_, err = m.storage.ConsumeVisible(ctx, dbID, reader.CallerID, reader.Authenticated, false)
+		_, err = m.storage.ConsumeVisible(ctx, dbID, reader.CallerID, reader.Authenticated, false, now)
 		if errors.Is(err, domain.ErrNotFound) {
 			return fmt.Errorf("expire link: %w", err)
 		}

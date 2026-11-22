@@ -26,29 +26,33 @@ const maxHashRetries = 5
 // it is the only slug uniqueness check (docs/adr/0003-storage-slug-uniqueness.md).
 // Update writes only the fields that patch sets and returns the row as stored, so a concurrent
 // change of a field that this update omits stays.
-// DeleteExpired removes a row only while it is still expired, and returns domain.ErrNotFound
-// otherwise: an expiry decision from an old snapshot never deletes a link that its owner
-// extended, or a live link that took the ID after the decision.
+// DeleteExpired removes a row only while it is still expired at now, and returns
+// domain.ErrNotFound otherwise: an expiry decision from an old snapshot never deletes a link that
+// its owner extended, or a live link that took the ID after the decision. Each method that
+// compares times gets now from Manager and does not read the clock itself; Create removes other
+// links that expired at link.CreatedAt.
 //
 // Update and Delete change the row only while its edit_code still equals storedEditCode, the
 // stored hash of the link that the caller checked. Each link gets a hash with a new random salt
 // and no write changes it, so the hash identifies one link version. If the link was deleted and
 // a new link took the same ID after the check, they return domain.ErrNotFound and do not touch
-// the new link. Update also changes the row only while it is not expired, as
+// the new link. Update also changes the row only while it is not expired at now, as
 // files.Storage.Update does: a link that expired after the check of Manager.Update gets
 // domain.ErrNotFound, and its expiry stays.
 type Storage interface {
 	Create(ctx context.Context, link *domain.Link) error
-	Update(ctx context.Context, id, storedEditCode string, patch *domain.LinkPatch) (*domain.Link, error)
+	Update(
+		ctx context.Context, id, storedEditCode string, patch *domain.LinkPatch, now time.Time,
+	) (*domain.Link, error)
 	GetByID(ctx context.Context, id string) (*domain.Link, error)
 	IncrementViews(ctx context.Context, id string) error
 	Delete(ctx context.Context, id, storedEditCode string) error
-	DeleteExpired(ctx context.Context, id string) error
-	Consume(ctx context.Context, id string) (*domain.Link, error)
-	// ConsumeVisible atomically checks current visibility and expiry/burn eligibility before
-	// deleting and returning a row. allowBurn=false permits only expired rows.
+	DeleteExpired(ctx context.Context, id string, now time.Time) error
+	Consume(ctx context.Context, id string, now time.Time) (*domain.Link, error)
+	// ConsumeVisible atomically checks current visibility and expiry/burn eligibility at now
+	// before deleting and returning a row. allowBurn=false permits only expired rows.
 	ConsumeVisible(
-		ctx context.Context, id string, callerID uuid.UUID, authenticated, allowBurn bool,
+		ctx context.Context, id string, callerID uuid.UUID, authenticated, allowBurn bool, now time.Time,
 	) (*domain.Link, error)
 	// IncrementViewsVisible refuses a row that is no longer visible to this reader.
 	IncrementViewsVisible(ctx context.Context, id string, callerID uuid.UUID, authenticated bool) error
@@ -106,10 +110,10 @@ func (noopMetrics) IncCollisions()   {}
 
 // ExpiredSlugReleaser removes an expired note, link or file that still holds the record ID id,
 // because no read and no sweep removed it yet. It returns true when it removed a record. It must
-// remove a record only while it is still expired, so a record that its owner extended stays.
-// Errors are fail-soft: Create keeps its slug conflict and logs the error.
+// remove a record only while it is still expired at now, so a record that its owner extended
+// stays. Errors are fail-soft: Create keeps its slug conflict and logs the error.
 type ExpiredSlugReleaser interface {
-	ReleaseExpiredSlug(ctx context.Context, id string) (bool, error)
+	ReleaseExpiredSlug(ctx context.Context, id string, now time.Time) (bool, error)
 }
 
 // Deps holds the dependencies of Manager. All fields are mandatory.
@@ -119,6 +123,9 @@ type Deps struct {
 	Hasher       EditCodeHasher
 	ExpiredSlugs ExpiredSlugReleaser
 	Log          *slog.Logger
+	// Now is the time source of each expiry decision and timestamp. The composition root gives
+	// time.Now; tests give a fixed clock.
+	Now func() time.Time
 }
 
 // Manager implements short-link business logic: URL validation, slug resolution, and encryption
@@ -131,6 +138,7 @@ type Manager struct {
 	cache            Cache
 	metrics          Metrics
 	log              *slog.Logger
+	now              func() time.Time
 	allowCustomSlugs domain.CustomSlugSetting
 }
 
@@ -148,6 +156,7 @@ func NewManager(deps *Deps, allowCustomSlugs bool) *Manager {
 		cache:            nil,
 		metrics:          noopMetrics{},
 		log:              deps.Log,
+		now:              deps.Now,
 		allowCustomSlugs: domain.CustomSlugSetting(allowCustomSlugs),
 	}
 }
@@ -228,7 +237,7 @@ func validateLink(link *domain.Link) error {
 func (m *Manager) Create(ctx context.Context, targetURL string, opts CreateOptions) (*domain.Link, error) {
 	validURL, err := validateTargetURL(targetURL)
 	if err != nil {
-		return nil, fmt.Errorf("validate target url: %w", err)
+		return nil, err
 	}
 
 	link := &domain.Link{
@@ -246,7 +255,7 @@ func (m *Manager) Create(ctx context.Context, targetURL string, opts CreateOptio
 
 	err = validateLink(link)
 	if err != nil {
-		return nil, fmt.Errorf("validate link: %w", err)
+		return nil, err
 	}
 
 	// A caller-chosen code must meet the edit-code policy before it is hashed; an empty one is
@@ -261,19 +270,19 @@ func (m *Manager) Create(ctx context.Context, targetURL string, opts CreateOptio
 	// The slug check goes before the memory-hard edit-code hash, so an invalid slug costs little.
 	slug, err := m.resolveSlug(opts.CustomHash)
 	if err != nil {
-		return nil, fmt.Errorf("resolve slug: %w", err)
+		return nil, err
 	}
 
 	plaintextCode, err := m.resolveAndHashEditCode(link)
 	if err != nil {
-		return nil, fmt.Errorf("resolve and hash edit code: %w", err)
+		return nil, err
 	}
 
-	link.CreatedAt = time.Now().UTC()
+	link.CreatedAt = m.now().UTC()
 
 	slug, err = m.store(ctx, link, validURL, opts.CustomHash, slug)
 	if err != nil {
-		return nil, fmt.Errorf("persist link: %w", err)
+		return nil, err
 	}
 
 	// link gets the slug, the plaintext target URL and the plaintext edit code only after the
@@ -315,12 +324,7 @@ func decryptTargetURL(ctx context.Context, enc Encryptor, log *slog.Logger, link
 // decryption may use the optional Cache; cached entries never supply privacy, ownership or
 // lifecycle state.
 func (m *Manager) Peek(ctx context.Context, slug string) (*domain.Link, error) {
-	link, err := m.resolveLink(ctx, slug)
-	if err != nil {
-		return nil, fmt.Errorf("peek link: %w", err)
-	}
-
-	return link, nil
+	return m.resolveLink(ctx, slug)
 }
 
 // Delete removes a link by slug with the rules of checkMutation, as notes.Manager.Delete does.
@@ -386,7 +390,7 @@ func (m *Manager) store(ctx context.Context, link *domain.Link, validURL, custom
 		stored.TargetURL = encrypted
 
 		err = m.storage.Create(ctx, &stored)
-		if custom && errors.Is(err, domain.ErrSlugConflict) && m.releaseExpiredHolder(ctx, recordID) {
+		if custom && errors.Is(err, domain.ErrSlugConflict) && m.releaseExpiredHolder(ctx, recordID, link.CreatedAt) {
 			err = m.storage.Create(ctx, &stored)
 		}
 
@@ -431,7 +435,7 @@ func (m *Manager) resolveLink(ctx context.Context, slug string) (*domain.Link, e
 	ciphertext := link.TargetURL
 
 	cacheable := m.cache != nil && link.EffectivePrivacy() == domain.PrivacyPublic &&
-		!link.BurnAfterClick && !link.Expired(time.Now())
+		!link.BurnAfterClick && !link.Expired(m.now())
 	if cacheable {
 		if target, ok := m.cache.Get(dbID, ciphertext); ok {
 			link.TargetURL = target
@@ -442,7 +446,7 @@ func (m *Manager) resolveLink(ctx context.Context, slug string) (*domain.Link, e
 
 	err = decryptTargetURL(ctx, m.encryptor, m.log, link)
 	if err != nil {
-		return nil, fmt.Errorf("decrypt target url: %w", err)
+		return nil, err
 	}
 
 	if cacheable {
@@ -526,14 +530,14 @@ func (m *Manager) resolveSlug(customHash string) (string, error) {
 func (m *Manager) consumeLink(ctx context.Context, slug, dbID string, reader domain.Reader) (*domain.Link, error) {
 	consumed, err := m.consume(ctx, dbID, reader)
 	if err != nil {
-		return nil, fmt.Errorf("burn after click: %w", err)
+		return nil, err
 	}
 
 	consumed.ID = slug
 
 	err = decryptTargetURL(ctx, m.encryptor, m.log, consumed)
 	if err != nil {
-		return nil, fmt.Errorf("burn after click: %w", err)
+		return nil, err
 	}
 
 	m.log.DebugContext(ctx, "link burned", "id", domain.HashSlug(slug))
@@ -547,17 +551,17 @@ func (m *Manager) consumeLink(ctx context.Context, slug, dbID string, reader dom
 // checks only the burn and expiry rule.
 func (m *Manager) consume(ctx context.Context, dbID string, reader domain.Reader) (*domain.Link, error) {
 	if reader.SkipPrivacy {
-		consumed, err := m.storage.Consume(ctx, dbID)
+		consumed, err := m.storage.Consume(ctx, dbID, m.now())
 		if err != nil {
-			return nil, fmt.Errorf("consume link: %w", err)
+			return nil, fmt.Errorf("burn link: %w", err)
 		}
 
 		return consumed, nil
 	}
 
-	consumed, err := m.storage.ConsumeVisible(ctx, dbID, reader.CallerID, reader.Authenticated, true)
+	consumed, err := m.storage.ConsumeVisible(ctx, dbID, reader.CallerID, reader.Authenticated, true, m.now())
 	if err != nil {
-		return nil, fmt.Errorf("consume link: %w", err)
+		return nil, fmt.Errorf("burn link: %w", err)
 	}
 
 	return consumed, nil
@@ -565,8 +569,8 @@ func (m *Manager) consume(ctx context.Context, dbID string, reader domain.Reader
 
 // releaseExpiredHolder reports whether an expired note, link or file with id was removed. Errors
 // are fail-soft: Create keeps its slug conflict.
-func (m *Manager) releaseExpiredHolder(ctx context.Context, id string) bool {
-	released, err := m.expiredSlugs.ReleaseExpiredSlug(ctx, id)
+func (m *Manager) releaseExpiredHolder(ctx context.Context, id string, now time.Time) bool {
+	released, err := m.expiredSlugs.ReleaseExpiredSlug(ctx, id, now)
 	if err != nil {
 		m.log.WarnContext(ctx, "release expired slug", "id", id, "err", err)
 

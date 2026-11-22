@@ -54,9 +54,11 @@ type SessionUserStore interface {
 // of the raw session id (see hashToken) — never the raw cookie value.
 type SessionStore interface {
 	Create(ctx context.Context, s *domain.Session) error
-	Get(ctx context.Context, sessionID string) (*domain.Session, error)
+	// Get returns the session that is not expired at now. An unknown or expired session gives
+	// domain.ErrSessionExpired.
+	Get(ctx context.Context, sessionID string, now time.Time) (*domain.Session, error)
 	Delete(ctx context.Context, sessionID string) error
-	// DeleteExpired removes the sessions that expired before now. Fail-soft: Login calls it
+	// DeleteExpired removes the sessions that are expired at now. Fail-soft: Login calls it
 	// after it stores a new session and only logs an error.
 	DeleteExpired(ctx context.Context, now time.Time) error
 }
@@ -69,19 +71,19 @@ type SessionManager struct {
 	pw          PasswordHasher
 	users       SessionUserStore
 	log         *slog.Logger
+	now         func() time.Time
 	dummyPwHash string
 	ttl         time.Duration
 }
 
 // NewSessionManager returns a new SessionManager. sessionTTL controls how long a session
-// remains valid; pass 0 for the default (30 days).
+// remains valid; pass 0 for the default (30 days). deps.Now is the time source of session expiry.
 //
 // Returns an error when crypto/rand is unavailable (see the dummy-hash precompute below) —
 // NewSessionManager runs only at the composition root, so the caller is expected to treat this
 // as a fatal startup error rather than retry.
 func NewSessionManager(
-	users SessionUserStore, sessions SessionStore, passwordHasher PasswordHasher,
-	sealer SecretSealer, totp TOTPManager, log *slog.Logger, sessionTTL time.Duration,
+	users SessionUserStore, sessions SessionStore, deps *Deps, sessionTTL time.Duration,
 ) (*SessionManager, error) {
 	ttl := sessionTTL
 	if ttl <= 0 {
@@ -92,7 +94,7 @@ func NewSessionManager(
 	// crypto/rand is unavailable at boot — a fallback hash would ship with frozen argon2 params
 	// that diverge from the configured cost, reintroducing a login timing asymmetry, so this
 	// fails hard (returns an error) rather than silently degrading.
-	dummyHash, err := passwordHasher.Hash("padmark-dummy-auth-sentinel")
+	dummyHash, err := deps.PasswordHasher.Hash("padmark-dummy-auth-sentinel")
 	if err != nil {
 		return nil, fmt.Errorf("precompute dummy password hash: %w", err)
 	}
@@ -100,10 +102,11 @@ func NewSessionManager(
 	return &SessionManager{
 		users:       users,
 		sessions:    sessions,
-		pw:          passwordHasher,
-		sealer:      sealer,
-		totp:        totp,
-		log:         log,
+		pw:          deps.PasswordHasher,
+		sealer:      deps.Sealer,
+		totp:        deps.TOTP,
+		log:         deps.Log,
+		now:         deps.Now,
 		ttl:         ttl,
 		dummyPwHash: dummyHash,
 	}, nil
@@ -147,15 +150,15 @@ func (m *SessionManager) Login(ctx context.Context, req *LoginRequest) (string, 
 
 	factorErr := m.verifyLoginFactors(ctx, usr, req.Password, req.TOTPCode)
 	if factorErr != nil {
-		return "", fmt.Errorf("verify login factors: %w", factorErr)
+		return "", factorErr
 	}
 
 	sessionID, err := newSessionID()
 	if err != nil {
-		return "", fmt.Errorf("new session id: %w", err)
+		return "", err
 	}
 
-	now := time.Now()
+	now := m.now()
 	// The returned id goes into the client cookie; only its SHA-256 digest is persisted
 	// (SessionHash, see hashToken) so a leaked database carries no replayable sessions.
 	sess := &domain.Session{
@@ -174,7 +177,7 @@ func (m *SessionManager) Login(ctx context.Context, req *LoginRequest) (string, 
 
 	confirmErr := m.confirmCredentials(ctx, usr, sess.SessionHash)
 	if confirmErr != nil {
-		return "", fmt.Errorf("confirm credentials: %w", confirmErr)
+		return "", confirmErr
 	}
 
 	m.revokePreviousSession(ctx, usr.ID, req.PreviousSessionID)
@@ -201,7 +204,7 @@ func (m *SessionManager) Logout(ctx context.Context, sessionID string) error {
 // GetSession resolves sessionID to the owning User.
 // Returns domain.ErrSessionExpired when the session is absent or expired.
 func (m *SessionManager) GetSession(ctx context.Context, sessionID string) (*domain.User, error) {
-	sess, err := m.sessions.Get(ctx, hashToken(sessionID))
+	sess, err := m.sessions.Get(ctx, hashToken(sessionID), m.now())
 	if err != nil {
 		return nil, fmt.Errorf("get session: %w", err)
 	}
@@ -223,7 +226,7 @@ func (m *SessionManager) GetSession(ctx context.Context, sessionID string) (*dom
 func (m *SessionManager) ChangePassword(
 	ctx context.Context, sessionID, oldPassword, newPassword, totpCode string,
 ) (string, error) {
-	sess, err := m.sessions.Get(ctx, hashToken(sessionID))
+	sess, err := m.sessions.Get(ctx, hashToken(sessionID), m.now())
 	if err != nil {
 		return "", fmt.Errorf("get session: %w", err)
 	}
@@ -242,17 +245,17 @@ func (m *SessionManager) ChangePassword(
 	// The decrypted secret is reused below, so it is decrypted only once.
 	rawSecret, err := m.verifyTOTPStepUp(ctx, oldPassword, usr, totpCode)
 	if err != nil {
-		return "", fmt.Errorf("verify totpstep up: %w", err)
+		return "", err
 	}
 
 	creds, err := m.buildNewCredentials(newPassword, rawSecret)
 	if err != nil {
-		return "", fmt.Errorf("build new credentials: %w", err)
+		return "", err
 	}
 
 	newID, newSess, err := m.newReplacementSession(sess)
 	if err != nil {
-		return "", fmt.Errorf("new replacement session: %w", err)
+		return "", err
 	}
 
 	err = m.users.ChangePassword(ctx, newSess, creds.hash, creds.salt, creds.encSecret)
@@ -281,7 +284,7 @@ func (m *SessionManager) VerifyStepUp(ctx context.Context, userID uuid.UUID, ste
 	}
 
 	if err != nil {
-		return fmt.Errorf("verify login factors: %w", err)
+		return err
 	}
 
 	return nil
@@ -315,10 +318,10 @@ func (m *SessionManager) confirmCredentials(ctx context.Context, usr *domain.Use
 func (m *SessionManager) newReplacementSession(sess *domain.Session) (string, *domain.Session, error) {
 	newID, err := newSessionID()
 	if err != nil {
-		return "", nil, fmt.Errorf("new session id: %w", err)
+		return "", nil, err
 	}
 
-	now := time.Now()
+	now := m.now()
 	newSess := &domain.Session{
 		SessionHash: hashToken(newID),
 		UserID:      sess.UserID,
@@ -386,7 +389,7 @@ func (m *SessionManager) verifyLoginFactors(ctx context.Context, usr *domain.Use
 
 	ok, err := m.validateAndRecordTOTP(ctx, usr.ID, secret, totpCode)
 	if err != nil {
-		return fmt.Errorf("validate and record totp: %w", err)
+		return err
 	}
 
 	if !ok {
@@ -451,7 +454,7 @@ func (m *SessionManager) verifyTOTPStepUp(
 
 	ok, err := m.validateAndRecordTOTP(ctx, usr.ID, rawSecret, totpCode)
 	if err != nil {
-		return "", fmt.Errorf("validate and record totp: %w", err)
+		return "", err
 	}
 
 	if !ok {

@@ -31,7 +31,7 @@ func Open(dsn string, log *slog.Logger) (*bun.DB, error) {
 	if path != "" && create {
 		err := createDBFile(path)
 		if err != nil {
-			return nil, fmt.Errorf("create db file: %w", err)
+			return nil, err
 		}
 	}
 

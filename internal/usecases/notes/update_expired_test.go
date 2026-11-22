@@ -19,7 +19,7 @@ func (s *ManagerTestSuite) TestUpdate_ExpiredNoteIsGone() {
 		"owner":        {code: "", reader: accountReader(testUserID1)},
 	} {
 		s.Run(name, func() {
-			past := time.Now().Add(-time.Minute)
+			past := testNow().Add(-time.Minute)
 			s.expectGet("old-note", &domain.Note{
 				ID: domain.HashSlug("old-note"), Content: "c", EditCode: "code", ExpiresAt: &past,
 				OwnerID: &testUserID1, Title: "", CreatedAt: time.Time{}, UpdatedAt: time.Time{},
@@ -36,7 +36,7 @@ func (s *ManagerTestSuite) TestUpdate_ExpiredNoteIsGone() {
 // TestUpdate_HiddenExpiredNoteIsForbidden: privacy comes before expiry, so a reader that cannot
 // see the note does not learn that it expired.
 func (s *ManagerTestSuite) TestUpdate_HiddenExpiredNoteIsForbidden() {
-	past := time.Now().Add(-time.Minute)
+	past := testNow().Add(-time.Minute)
 	privacy := domain.PrivacyOwner
 	s.expectGet("old-note", &domain.Note{
 		ID: domain.HashSlug("old-note"), Content: "c", EditCode: "code", ExpiresAt: &past,

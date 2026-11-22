@@ -3,7 +3,6 @@ package web
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -143,7 +142,7 @@ func (h *OgenHandler) UpdateNote(
 func noteUpdatePayload(req *ogenapi.UpdateNoteRequest) (*domain.Note, error) {
 	privacy, err := resolvePrivacy(req.GetPrivate(), optUpdatePrivacyPtr(req.Privacy))
 	if err != nil {
-		return nil, fmt.Errorf("resolve privacy: %w", err)
+		return nil, err
 	}
 
 	burnAfterReading := req.BurnAfterReading.Or(false)

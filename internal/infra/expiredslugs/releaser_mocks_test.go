@@ -11,6 +11,7 @@ package expiredslugs
 import (
 	context "context"
 	reflect "reflect"
+	time "time"
 
 	gomock "go.uber.org/mock/gomock"
 )
@@ -40,17 +41,17 @@ func (m *MockRecordExpirer) EXPECT() *MockRecordExpirerMockRecorder {
 }
 
 // DeleteExpired mocks base method.
-func (m *MockRecordExpirer) DeleteExpired(ctx context.Context, id string) error {
+func (m *MockRecordExpirer) DeleteExpired(ctx context.Context, id string, now time.Time) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "DeleteExpired", ctx, id)
+	ret := m.ctrl.Call(m, "DeleteExpired", ctx, id, now)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // DeleteExpired indicates an expected call of DeleteExpired.
-func (mr *MockRecordExpirerMockRecorder) DeleteExpired(ctx, id any) *gomock.Call {
+func (mr *MockRecordExpirerMockRecorder) DeleteExpired(ctx, id, now any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteExpired", reflect.TypeOf((*MockRecordExpirer)(nil).DeleteExpired), ctx, id)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteExpired", reflect.TypeOf((*MockRecordExpirer)(nil).DeleteExpired), ctx, id, now)
 }
 
 // MockFileReleaser is a mock of FileReleaser interface.
@@ -78,16 +79,16 @@ func (m *MockFileReleaser) EXPECT() *MockFileReleaserMockRecorder {
 }
 
 // ReleaseExpiredSlug mocks base method.
-func (m *MockFileReleaser) ReleaseExpiredSlug(ctx context.Context, id string) (bool, error) {
+func (m *MockFileReleaser) ReleaseExpiredSlug(ctx context.Context, id string, now time.Time) (bool, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ReleaseExpiredSlug", ctx, id)
+	ret := m.ctrl.Call(m, "ReleaseExpiredSlug", ctx, id, now)
 	ret0, _ := ret[0].(bool)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // ReleaseExpiredSlug indicates an expected call of ReleaseExpiredSlug.
-func (mr *MockFileReleaserMockRecorder) ReleaseExpiredSlug(ctx, id any) *gomock.Call {
+func (mr *MockFileReleaserMockRecorder) ReleaseExpiredSlug(ctx, id, now any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReleaseExpiredSlug", reflect.TypeOf((*MockFileReleaser)(nil).ReleaseExpiredSlug), ctx, id)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReleaseExpiredSlug", reflect.TypeOf((*MockFileReleaser)(nil).ReleaseExpiredSlug), ctx, id, now)
 }

@@ -70,7 +70,7 @@ func (r *APITokenRepository) CreateIfUnderLimit(ctx context.Context, token *doma
 	err := r.db.RunInTx(ctx, nil, func(ctx context.Context, btx bun.Tx) error {
 		_, lockErr := btx.NewRaw("SELECT pg_advisory_xact_lock(hashtext(?))", token.UserID.String()).Exec(ctx)
 		if lockErr != nil {
-			return fmt.Errorf("acquire advisory lock: %w", lockErr)
+			return fmt.Errorf("postgres acquire advisory lock: %w", lockErr)
 		}
 
 		// Only live tokens count: an expired key no longer authenticates, so it must not hold a
@@ -78,10 +78,10 @@ func (r *APITokenRepository) CreateIfUnderLimit(ctx context.Context, token *doma
 		count, countErr := btx.NewSelect().
 			Model((*apiTokenRow)(nil)).
 			Where("user_id = ?", token.UserID).
-			Where("expires_at IS NULL OR expires_at > ?", time.Now()).
+			Where(liveWhere, token.CreatedAt).
 			Count(ctx)
 		if countErr != nil {
-			return fmt.Errorf("count api tokens: %w", countErr)
+			return fmt.Errorf("postgres count api tokens: %w", countErr)
 		}
 
 		if count >= int64(limit) {
@@ -90,7 +90,7 @@ func (r *APITokenRepository) CreateIfUnderLimit(ctx context.Context, token *doma
 
 		_, insErr := btx.NewInsert().Model(toAPITokenRow(token)).Exec(ctx)
 		if insErr != nil {
-			return fmt.Errorf("insert api token: %w", insErr)
+			return fmt.Errorf("postgres insert api token: %w", insErr)
 		}
 
 		created = true
@@ -98,7 +98,7 @@ func (r *APITokenRepository) CreateIfUnderLimit(ctx context.Context, token *doma
 		return nil
 	})
 	if err != nil {
-		return false, fmt.Errorf("create api token if under limit: %w", err)
+		return false, fmt.Errorf("postgres create api token if under limit: %w", err)
 	}
 
 	return created, nil
@@ -117,7 +117,7 @@ func (r *APITokenRepository) GetByHash(ctx context.Context, tokenHash string) (*
 			return nil, domain.ErrNotFound
 		}
 
-		return nil, fmt.Errorf("get api token: %w", err)
+		return nil, fmt.Errorf("postgres get api token: %w", err)
 	}
 
 	return row.toDomain(), nil
@@ -132,7 +132,7 @@ func (r *APITokenRepository) List(ctx context.Context) ([]*domain.APIToken, erro
 		Order("created_at DESC").
 		Scan(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("list api tokens: %w", err)
+		return nil, fmt.Errorf("postgres list api tokens: %w", err)
 	}
 
 	tokens := make([]*domain.APIToken, 0, len(rows))
@@ -150,12 +150,12 @@ func (r *APITokenRepository) RevokeByHash(ctx context.Context, tokenHash string)
 		Where("token_hash = ?", tokenHash).
 		Exec(ctx)
 	if err != nil {
-		return fmt.Errorf("revoke api token: %w", err)
+		return fmt.Errorf("postgres revoke api token: %w", err)
 	}
 
 	affected, err := res.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("revoke api token: rows affected: %w", err)
+		return fmt.Errorf("postgres revoke api token: rows affected: %w", err)
 	}
 
 	if affected == 0 {
@@ -173,7 +173,7 @@ func (r *APITokenRepository) DeleteByUserID(ctx context.Context, userID uuid.UUI
 		Where("user_id = ?", userID).
 		Exec(ctx)
 	if err != nil {
-		return fmt.Errorf("delete api tokens of user: %w", err)
+		return fmt.Errorf("postgres delete api tokens of user: %w", err)
 	}
 
 	return nil
@@ -189,7 +189,7 @@ func (r *APITokenRepository) UpdateLastUsed(ctx context.Context, tokenHash strin
 		Where("token_hash = ?", tokenHash).
 		Exec(ctx)
 	if err != nil {
-		return fmt.Errorf("update api token last used: %w", err)
+		return fmt.Errorf("postgres update api token last used: %w", err)
 	}
 
 	return nil

@@ -100,7 +100,7 @@ func OTPAuthURI(issuer, username, secret string) (string, error) {
 func GenerateQRCodeDataURL(issuer, username, secret string) (string, error) {
 	uri, err := OTPAuthURI(issuer, username, secret)
 	if err != nil {
-		return "", fmt.Errorf("otpauth uri: %w", err)
+		return "", err
 	}
 
 	key, keyErr := otp.NewKeyFromURL(uri)

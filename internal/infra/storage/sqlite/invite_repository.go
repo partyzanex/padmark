@@ -11,7 +11,6 @@ import (
 	"github.com/uptrace/bun"
 
 	"github.com/partyzanex/padmark/internal/domain"
-	"github.com/partyzanex/padmark/internal/errorcontext"
 )
 
 type inviteRow struct {
@@ -48,7 +47,7 @@ func (r *InviteRepository) Create(ctx context.Context, inv *domain.Invite) error
 
 	_, err := r.db.NewInsert().Model(row).Exec(ctx)
 	if err != nil {
-		return fmt.Errorf("insert invite: %w", err)
+		return fmt.Errorf("sqlite insert invite: %w", err)
 	}
 
 	return nil
@@ -58,11 +57,11 @@ func (r *InviteRepository) Create(ctx context.Context, inv *domain.Invite) error
 func (r *InviteRepository) DeleteStale(ctx context.Context, now time.Time) error {
 	_, err := r.db.NewDelete().
 		TableExpr("invites").
-		Where("expires_at < ?", now).
+		Where("expires_at <= ?", now).
 		WhereOr("used_at IS NOT NULL").
 		Exec(ctx)
 	if err != nil {
-		return fmt.Errorf("delete stale invites: %w", err)
+		return fmt.Errorf("sqlite delete stale invites: %w", err)
 	}
 
 	return nil
@@ -79,7 +78,7 @@ func classifyInviteMiss(ctx context.Context, conn bun.IDB, tokenHash string) err
 			return domain.ErrNotFound
 		}
 
-		return fmt.Errorf("fetch invite after miss: %w", err)
+		return fmt.Errorf("sqlite fetch invite after miss: %w", err)
 	}
 
 	if existing.UsedAt != nil {
@@ -94,10 +93,10 @@ func classifyInviteMiss(ctx context.Context, conn bun.IDB, tokenHash string) err
 // insert fails (for example ErrUserExists after a username race), the transaction rolls back and
 // the invite stays unused, so a failed registration never uses up the token.
 // Returns the invite sentinels (ErrNotFound, ErrInviteUsed, ErrInviteExpired) or ErrUserExists.
-func (r *InviteRepository) RedeemInvite(ctx context.Context, tokenHash, username string, usr *domain.User) error {
+func (r *InviteRepository) RedeemInvite(
+	ctx context.Context, tokenHash, username string, usr *domain.User, now time.Time,
+) error {
 	err := r.db.RunInTx(ctx, nil, func(ctx context.Context, btx bun.Tx) error {
-		now := time.Now()
-
 		res, updErr := btx.NewUpdate().
 			TableExpr("invites").
 			Set("used_at = ?", now).
@@ -107,22 +106,22 @@ func (r *InviteRepository) RedeemInvite(ctx context.Context, tokenHash, username
 			Where("expires_at > ?", now).
 			Exec(ctx)
 		if updErr != nil {
-			return fmt.Errorf("consume invite: %w", updErr)
+			return fmt.Errorf("sqlite consume invite: %w", updErr)
 		}
 
 		affected, affErr := res.RowsAffected()
 		if affErr != nil {
-			return fmt.Errorf("rows affected: %w", affErr)
+			return fmt.Errorf("sqlite rows affected: %w", affErr)
 		}
 
 		if affected == 0 {
-			return errorcontext.Wrap(classifyInviteMiss(ctx, btx, tokenHash), "classify invite miss")
+			return classifyInviteMiss(ctx, btx, tokenHash)
 		}
 
-		return errorcontext.Wrap(insertUser(ctx, btx, usr), "insert user")
+		return insertUser(ctx, btx, usr)
 	})
 	if err != nil {
-		return fmt.Errorf("redeem invite: %w", err)
+		return fmt.Errorf("sqlite redeem invite: %w", err)
 	}
 
 	return nil
