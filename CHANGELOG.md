@@ -9,6 +9,9 @@ v0.5.0 follows **v0.4.0**.
 
 ### Added
 
+- A wide table in a note scrolls horizontally in its own box on every screen width; the page
+  never scrolls sideways. Cells are at least 9em wide and do not break words; a narrow table
+  fills the text column. The editor preview shows the same box.
 - `padmark-cli update-link` and the MCP tool `update_link` change the destination, expiry,
   privacy and redirect setting of a short link; an omitted option keeps its value.
 - `tests/storage` runs one contract suite per repository role on SQLite and PostgreSQL, and
@@ -77,6 +80,16 @@ v0.5.0 follows **v0.4.0**.
 
 ### Changed
 
+- Notes, links, files, sessions, invites, reveal tokens and API tokens share one expiry rule: a
+  record is expired from its `expires_at` moment on, in the domain and in SQL on both databases.
+- Slugs stay unique only through the `slug_namespace` table: `Create` no longer checks other
+  tables first and retries a random slug up to five times (notes did not retry before); a custom
+  slug first releases an expired holder of any kind. The in-process slug lock is removed
+  (ADR-0003).
+- `GET /{id}` and `/edit/{id}` read the record kind from `slug_namespace` once and call only that
+  kind; a file page needs 2 reads instead of 4.
+- Error messages name each operation once; account repository errors start with the database
+  dialect, and file errors name the hashed record ID.
 - The "On this page" sidebar follows the new design: numbered H2 and H3 rows, H4 rows without a
   number, only the current section expanded ("Expand all" expands all), two-line names, a list
   that follows scrolling, and "Back to top". On a phone the block stays at the top of the screen
@@ -136,6 +149,14 @@ v0.5.0 follows **v0.4.0**.
 
 ### Fixed
 
+- An update of an expired note, short link or file answers `410 Gone` and changes nothing. Before,
+  notes and links accepted it and made the record live again, and files answered `404`. The
+  storage `UPDATE` repeats the expiry check, and `openapi.yaml` declares `410` for the three
+  `PUT` routes.
+- A database failure while a reveal token is used shows the 500 page instead of "Forbidden"; the
+  note is not read or burned, and the token stays valid.
+- The math renderer registers its goldmark node kinds once per process; two renderers made at
+  the same time were a data race.
 - A note larger than 64 MiB in bytes gets `422` before encryption; the server refuses a
   `--max-content-length` above 67108864 at startup. Before, such a note got `500`.
 - Only slug collisions give "slug is already taken"; a duplicate file object key is an internal
