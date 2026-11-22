@@ -27,6 +27,7 @@ func TestEditorPreview(t *testing.T) {
 		{name: "MathLoadsOnce", run: testMathLoadsOnce, accounts: false, files: false, allowedStatuses: nil},
 		{name: "NoMathNoKaTeX", run: testNoMathNoKaTeX, accounts: false, files: false, allowedStatuses: nil},
 		{name: "MathContents", run: testMathContents, accounts: false, files: false, allowedStatuses: nil},
+		{name: "Tables", run: testTables, accounts: false, files: false, allowedStatuses: nil},
 		// The <img src=x> request gets the note route's 404; the image error must not run a script.
 		{
 			name: "Sanitize", run: testPreviewSanitize, accounts: false, files: false,
@@ -181,6 +182,103 @@ func testPreviewServerParity(sess *uiSession) {
 	sess.must(sess.expect.Locator(preview.Locator("li").Nth(1)).ToHaveText("[x] done"))
 	sess.must(sess.expect.Locator(preview.Locator("input")).ToHaveCount(0))
 	// No syntax highlighting in the preview: that is a known difference from the note page.
+}
+
+// tableNote has a wide table with long words, a narrow table and a user element that tries to be a
+// scroll box. Only the two tables get a box (internal/infra/render/table_scroll.go).
+func tableNote() string {
+	header := "| Service | Environment | Responsible team | Deployment window | Rollback procedure " +
+		"| Monitoring dashboard | Escalation contact | Owner | Region | Notes |\n"
+	rule := "|---|---|---|---|---|---|---|---|---|---|\n"
+	row := "| authentication | production | platform engineering | weekdays before 16:00 " +
+		"| revert the release tag | latency and error rate | on-call engineer | identity | europe-west " +
+		"| the longest cell text of this table wraps in its column |\n"
+
+	return "Text before the tables.\n\n" + header + rule + row + row + "\n" +
+		"| Key | Value |\n|---|---|\n| a | 1 |\n\n" +
+		`<div class="table-scroll">not a box</div>` + "\n\nText after the tables.\n"
+}
+
+// tableMetrics measures each scroll box in a root: its overflow, the space between the box and
+// its table, the smallest difference between a cell width and the minimum cell width, and the
+// number of words that the browser breaks across two lines.
+const tableMetrics = `(root) => Array.from(document.querySelectorAll(root + " .table-scroll")).map((box) => {
+	const table = box.firstElementChild;
+	const cells = Array.from(table.querySelectorAll("th, td"));
+	const minWidth = parseFloat(getComputedStyle(cells[0]).minWidth);
+	const brokenWords = (cell) => {
+		const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT);
+		let broken = 0;
+		for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+			for (const word of node.data.matchAll(/\S+/g)) {
+				const range = document.createRange();
+				range.setStart(node, word.index);
+				range.setEnd(node, word.index + word[0].length);
+				broken += range.getClientRects().length > 1 ? 1 : 0;
+			}
+		}
+		return broken;
+	};
+	return {
+		tag: table.tagName,
+		overflowX: getComputedStyle(box).overflowX,
+		overflow: box.scrollWidth - box.clientWidth,
+		gap: box.clientWidth - table.getBoundingClientRect().width,
+		minWidth: minWidth,
+		slack: Math.min(...cells.map((cell) => cell.getBoundingClientRect().width - minWidth)),
+		brokenWords: cells.reduce((sum, cell) => sum + brokenWords(cell), 0),
+	};
+})`
+
+// expectTables checks the tables of tableNote in root: the wide table scrolls in its box, the
+// narrow table fills its box without a scroll, no cell is narrower than the minimum and the page
+// does not scroll horizontally.
+func (sess *uiSession) expectTables(root string) {
+	sess.t.Helper()
+
+	sess.must(sess.expect.Locator(sess.page.Locator(root + " .table-scroll")).ToHaveCount(2))
+	sess.must(sess.expect.Locator(sess.page.Locator(root + " .table-scroll > table")).ToHaveCount(2))
+	sess.must(sess.expect.Locator(sess.page.Locator(root+" div").Filter(playwright.LocatorFilterOptions{
+		HasText: "not a box", Has: nil, HasNot: nil, HasNotText: nil, Visible: nil,
+	})).Not().ToHaveAttribute("class", "table-scroll"))
+	sess.expectLayout(root+" .table-scroll >> nth=0", root+" .table-scroll >> nth=1")
+
+	boxes, ok := sess.evalWith(tableMetrics, root).([]any)
+	require.True(sess.t, ok, "the table metrics are a list")
+	require.Len(sess.t, boxes, 2)
+
+	for idx, value := range boxes {
+		box, isMap := value.(map[string]any)
+		require.True(sess.t, isMap, "the metrics of box %d are an object", idx)
+		require.Equal(sess.t, "TABLE", box["tag"], "box %d holds the table", idx)
+		require.Equal(sess.t, "auto", box["overflowX"], "box %d scrolls horizontally", idx)
+		require.GreaterOrEqual(sess.t, sess.number(box["minWidth"]), float64(100), "cells have a minimum width")
+		require.GreaterOrEqual(sess.t, sess.number(box["slack"]), -0.5, "no cell of box %d is narrower", idx)
+		require.Zero(sess.t, sess.number(box["brokenWords"]), "box %d breaks no word across two lines", idx)
+
+		if idx == 0 {
+			require.Greater(sess.t, sess.number(box["overflow"]), float64(0), "the wide table scrolls in its box")
+
+			continue
+		}
+
+		require.LessOrEqual(sess.t, sess.number(box["overflow"]), float64(0), "the narrow table does not scroll")
+		require.InDelta(sess.t, 0, sess.number(box["gap"]), 1, "the narrow table fills its box")
+	}
+}
+
+// testTables checks the scroll boxes of tables in the preview and on the note page.
+func testTables(sess *uiSession) {
+	sess.gotoPage("/")
+	sess.fill("#titleInput", "Tables")
+	sess.writeText(tableNote())
+	sess.showPreview()
+	sess.expectTables("#preview")
+
+	sess.button("Publish note")
+	sess.must(sess.expect.Page(sess.page).ToHaveURL(regexpURL("/success?")))
+	sess.link("Open note")
+	sess.expectTables(".prose.markdown-body")
 }
 
 // mathNote has the formula forms of LLM output and text that must stay text.

@@ -3414,16 +3414,29 @@ a.copy-value:hover { color: var(--accent-text); }
     font-style: italic;
 }
 
-.prose.markdown-body table {
-    display: block;
-    width: max-content;
-    max-width: 100%;
-    overflow-x: auto;
+/* Each outermost table is in a scroll box (internal/infra/render/table_scroll.go and
+   static/editor-preview.js make it). A table wider than the text column scrolls in its box, and
+   the page keeps its width. The box has the frame, as in docs/design/screens/NoteLong.html. */
+.prose.markdown-body .table-scroll {
     margin: 0 0 20px;
-    border-collapse: separate;
-    border-spacing: 0;
+    overflow-x: auto;
     border: 1px solid var(--line);
     border-radius: 10px;
+}
+
+/* A narrow table fills the text column, as in the design. A cell is at least 9em wide (126px with
+   its padding at 14px): about 13 characters of text, so the words of a wide table do not stand one
+   on each line. The text column of a phone holds two such columns, the note column of a wide
+   screen seven. The prose breaks words anywhere; a cell does not, because that break lets a column
+   shrink to one letter. A long word makes its column wider, and the box scrolls. */
+.prose.markdown-body table {
+    display: table;
+    width: 100%;
+    max-width: none;
+    overflow: visible;
+    margin: 0;
+    border-collapse: separate;
+    border-spacing: 0;
     font-family: var(--font-ui);
     font-size: 14px;
     line-height: 1.5;
@@ -3431,7 +3444,9 @@ a.copy-value:hover { color: var(--accent-text); }
 
 .prose.markdown-body table th,
 .prose.markdown-body table td {
+    min-width: 9em;
     padding: 10px 16px;
+    overflow-wrap: break-word;
     border: 0;
     border-bottom: 1px solid var(--line);
     text-align: left;

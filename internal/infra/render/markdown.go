@@ -136,7 +136,8 @@ func (r *Renderer) Render(content string) (rendered string, droppedImages []stri
 
 	converted := buf.String()
 
-	return r.policy.Sanitize(converted), r.droppedDataImages(converted), nil
+	// The scroll boxes come after the sanitizer, so user HTML cannot make one (table_scroll.go).
+	return wrapTables(r.policy.Sanitize(converted)), r.droppedDataImages(converted), nil
 }
 
 // droppedDataImages returns the reasons why the page does not show the data: images of the

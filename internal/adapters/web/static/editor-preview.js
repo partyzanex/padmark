@@ -256,8 +256,36 @@
       dropped.node.replaceWith(imageNotice(dropped.node, dropped.problem));
     });
     droppedImages = [];
+    wrapTables(fragment);
 
     return fragment;
+  }
+
+  // TABLE_SCROLL_CLASS is the class of the box that scrolls a wide table (style.css).
+  var TABLE_SCROLL_CLASS = "table-scroll";
+
+  // wrapTables puts each outermost table in a scroll box, as the server does after its sanitizer
+  // (wrapTables in internal/infra/render/table_scroll.go). A table in a table cell stays in the box
+  // of the outer table. The server sanitizer removes the class from user HTML, so the preview
+  // removes it from the user elements first.
+  function wrapTables(fragment) {
+    fragment.querySelectorAll("." + TABLE_SCROLL_CLASS).forEach(function (node) {
+      node.classList.remove(TABLE_SCROLL_CLASS);
+      if (!node.classList.length) {
+        node.removeAttribute("class");
+      }
+    });
+
+    fragment.querySelectorAll("table").forEach(function (table) {
+      if (table.parentElement && table.parentElement.closest("table")) {
+        return;
+      }
+
+      var box = document.createElement("div");
+      box.className = TABLE_SCROLL_CLASS;
+      table.replaceWith(box);
+      box.append(table);
+    });
   }
 
   function escapeText(text) {

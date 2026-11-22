@@ -79,6 +79,69 @@ func (s *RendererSuite) TestTable() {
 	s.Contains(out, "<td>1</td>")
 }
 
+// tableBox is the scroll box that Render puts around each outermost table (table_scroll.go).
+const tableBox = `<div class="table-scroll">`
+
+func (s *RendererSuite) TestTableScrollBox() {
+	out, _, err := s.r.Render("Text\n\n| A | B |\n|---|---|\n| 1 | 2 |\n\nAfter")
+	s.Require().NoError(err)
+	s.Contains(out, "<p>Text</p>\n"+tableBox+"<table>\n<thead>")
+	s.Contains(out, "</table></div>\n<p>After</p>")
+	s.Less(strings.Index(out, "Text"), strings.Index(out, tableBox))
+	s.Greater(strings.Index(out, "After"), strings.Index(out, "</div>"))
+}
+
+// TestTableScrollBoxRawHTML checks that a table written as HTML in the note gets the box too.
+func (s *RendererSuite) TestTableScrollBoxRawHTML() {
+	out, _, err := s.r.Render("<table><tr><td>raw</td></tr></table>\n\nText <table><tr><td>inline</td></tr></table>")
+	s.Require().NoError(err)
+	s.Equal(2, strings.Count(out, tableBox))
+	s.Contains(out, tableBox+"<table><tr><td>raw</td></tr></table></div>")
+	s.Contains(out, tableBox+"<table><tr><td>inline</td></tr></table></div>")
+}
+
+// TestTableScrollBoxNotFromUser checks that user HTML cannot make a scroll box: the sanitizer
+// removes the class, and only the real table gets one.
+func (s *RendererSuite) TestTableScrollBoxNotFromUser() {
+	out, _, err := s.r.Render(`<div class="table-scroll">spoof</div>` + "\n\n| A |\n|---|\n| 1 |")
+	s.Require().NoError(err)
+	s.Contains(out, "<div>spoof</div>")
+	s.Equal(1, strings.Count(out, tableBox))
+}
+
+// TestTableScrollBoxNestedAndMultiple checks that each outermost table gets one box and that a
+// table in a cell stays in the box of its outer table.
+func (s *RendererSuite) TestTableScrollBoxNestedAndMultiple() {
+	md := "| A |\n|---|\n| 1 |\n\n" +
+		"<table><tr><td><table><tr><td>in</td></tr></table></td></tr></table>\n\n" +
+		"> | Q |\n> |---|\n> | 2 |\n\n" +
+		"- item\n\n  | L |\n  |---|\n  | 3 |\n"
+	out, _, err := s.r.Render(md)
+	s.Require().NoError(err)
+	s.Equal(4, strings.Count(out, tableBox))
+	s.Equal(5, strings.Count(out, "<table>"))
+	s.Contains(out, tableBox+"<table><tr><td><table><tr><td>in</td></tr></table></td></tr></table></div>")
+}
+
+// TestTableScrollBoxNotInCode checks that table text in code gets no box.
+func (s *RendererSuite) TestTableScrollBoxNotInCode() {
+	md := "```html\n<table><tr><td>x</td></tr></table>\n```\n\n" +
+		"```\n| A |\n|---|\n| 1 |\n```\n\n" +
+		"Inline `<table>` code.\n\n    <table></table>\n"
+	out, _, err := s.r.Render(md)
+	s.Require().NoError(err)
+	s.NotContains(out, tableBox)
+	s.NotContains(out, "<table")
+}
+
+// TestTableScrollBoxKeepsFormulas checks that a formula in a cell keeps its marker class.
+func (s *RendererSuite) TestTableScrollBoxKeepsFormulas() {
+	out, _, err := s.r.Render("| f |\n|---|\n| $x_1$ |")
+	s.Require().NoError(err)
+	s.Contains(out, tableBox)
+	s.Contains(out, `<span class="math-inline">x_1</span>`)
+}
+
 func (s *RendererSuite) TestStrikethrough() {
 	out, _, err := s.r.Render("~~gone~~")
 	s.Require().NoError(err)
