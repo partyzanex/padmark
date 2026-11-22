@@ -322,13 +322,16 @@ func testMathContents(sess *uiSession) {
 	sess.must(sess.expect.Page(sess.page).ToHaveURL(regexpURL("/success?")))
 	sess.link("Open note")
 
-	links := sess.page.Locator("#noteTocList .note-toc-link")
-	sess.must(sess.expect.Locator(links).ToHaveCount(3))
-	sess.must(sess.expect.Locator(links.Nth(0).Locator(".katex")).ToHaveCount(1))
-	sess.must(sess.expect.Locator(links.Nth(1).Locator(".katex")).ToHaveCount(2))
-	sess.must(sess.expect.Locator(links.Nth(2)).ToHaveText("Plain heading"))
-	// One label element: as loose flex items, the text pieces would lose their spaces on a phone.
-	sess.must(sess.expect.Locator(sess.page.Locator("#noteTocList .note-toc-link > span")).ToHaveCount(3))
+	labels := sess.page.Locator("#noteTocList .note-toc-label")
+	sess.must(sess.expect.Locator(labels).ToHaveCount(3))
+	sess.must(sess.expect.Locator(labels.Nth(0).Locator(".katex")).ToHaveCount(1))
+	sess.must(sess.expect.Locator(labels.Nth(1).Locator(".katex")).ToHaveCount(2))
+	sess.must(sess.expect.Locator(labels.Nth(2)).ToHaveText("Plain heading"))
+	// One label element in each link: as loose flex items, the text pieces would lose their spaces.
+	sess.must(sess.expect.Locator(sess.page.Locator("#noteTocList .note-toc-link > .note-toc-label")).ToHaveCount(3))
+	// The title of a link gives the TeX source of a formula once, not the text that KaTeX draws.
+	sess.must(sess.expect.Locator(sess.page.Locator("#noteTocList .note-toc-link").First()).
+		ToHaveAttribute("title", `Mean \bar x`))
 	sess.must(sess.expect.Locator(sess.page.Locator("#noteToc .math-inline:not(:has(.katex))")).ToHaveCount(0))
 	sess.must(sess.expect.Locator(sess.page.Locator("#noteToc .math-error")).ToHaveCount(0))
 	// The heading keeps its own formula: the list gets copies.

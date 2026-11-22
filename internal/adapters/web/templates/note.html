@@ -46,7 +46,10 @@
     {{else}}
     {{if .ShowContents}}
     <nav class="note-toc" id="noteToc" aria-label="On this page" hidden>
-        <span class="lbl note-toc-title">On this page</span>
+        <div class="note-toc-head">
+            <span class="lbl">On this page</span>
+            <button type="button" class="note-toc-all" id="noteTocAll" aria-controls="noteTocList" aria-expanded="false">Expand all</button>
+        </div>
         <button type="button" class="note-toc-toggle" id="noteTocToggle" aria-expanded="false" aria-controls="noteTocList">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 6h3M4 12h3M4 18h3M11 6h9M13 12h7M13 18h7"/></svg>
             <span class="lbl">On this page</span>
@@ -54,9 +57,13 @@
             <svg class="note-toc-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
         </button>
         <ol class="note-toc-list" id="noteTocList"></ol>
+        <a class="note-toc-top" id="noteTocTop" href="#top">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"/></svg>
+            Back to top
+        </a>
     </nav>
     {{end}}
-    <article class="card article-card">
+    <article class="card article-card note-article">
         <header class="article-header">
             <div class="article-title-row">
                 <h1 class="article-title">{{.Title}}</h1>
@@ -262,110 +269,8 @@
     }
 
     {{if .ShowContents}}
-    // The "On this page" sidebar lists the h2 and h3 headings of the rendered note. The column
-    // stays hidden when the note has no such headings, so the article keeps its full width.
-    (function () {
-        const nav = document.getElementById('noteToc');
-        const list = document.getElementById('noteTocList');
-        const toggle = document.getElementById('noteTocToggle');
-        const currentLabel = document.getElementById('noteTocCurrent');
-        const selector = '.prose.markdown-body h2[id^="' + userContentPrefix + '"], ' +
-            '.prose.markdown-body h3[id^="' + userContentPrefix + '"]';
-        const headings = Array.prototype.filter.call(document.querySelectorAll(selector), function (h) {
-            return !h.hidden && h.textContent.trim() !== '';
-        });
-        if (!nav || !list || headings.length === 0) return;
-
-        const links = new Map();
-        let active = null;
-
-        function setActive(link) {
-            if (active === link) return;
-            if (active) {
-                active.classList.remove('active');
-                active.removeAttribute('aria-current');
-            }
-            active = link;
-            if (link) {
-                link.classList.add('active');
-                link.setAttribute('aria-current', 'location');
-                currentLabel.replaceChildren(headingLabel(link.heading));
-                // math.js is deferred: before it runs, it draws the whole <main>, this label too.
-                if (window.padmarkMath) window.padmarkMath.render(currentLabel);
-            }
-        }
-
-        // headingLabel copies the text of a heading for the list. A formula keeps its TeX source
-        // in a .math-inline element, so math.js draws it here too; textContent would show the
-        // TeX source, or, once KaTeX has drawn the heading, its text twice.
-        function headingLabel(node) {
-            const label = document.createDocumentFragment();
-            node.childNodes.forEach(function (child) {
-                if (child.nodeType === Node.TEXT_NODE) {
-                    label.appendChild(document.createTextNode(child.textContent));
-                } else if (child.nodeType !== Node.ELEMENT_NODE) {
-                    return;
-                } else if (child.classList.contains('math-inline') || child.classList.contains('math-display')) {
-                    const formula = document.createElement('span');
-                    formula.className = 'math-inline';
-                    formula.textContent = child.dataset.tex !== undefined ? child.dataset.tex : child.textContent;
-                    label.appendChild(formula);
-                } else {
-                    label.appendChild(headingLabel(child));
-                }
-            });
-            return label;
-        }
-
-        // Narrow screens show the list as a drop-down under the toggle.
-        function setOpen(open) {
-            nav.classList.toggle('open', open);
-            toggle.setAttribute('aria-expanded', String(open));
-        }
-        toggle.addEventListener('click', function () { setOpen(!nav.classList.contains('open')); });
-
-        headings.forEach(function (heading) {
-            const item = document.createElement('li');
-            item.className = heading.tagName === 'H3' ? 'note-toc-item note-toc-item--sub' : 'note-toc-item';
-            const link = document.createElement('a');
-            const name = heading.id.slice(userContentPrefix.length);
-            link.className = 'note-toc-link';
-            link.href = '#' + name;
-            link.heading = heading;
-            // One element for the label: the phone list makes the link a flex box, and there
-            // each loose text piece would lose its spaces at the formula.
-            const label = document.createElement('span');
-            label.appendChild(headingLabel(heading));
-            link.appendChild(label);
-            link.addEventListener('click', function (ev) {
-                if (jump(name, true)) {
-                    ev.preventDefault();
-                    setActive(link);
-                }
-                setOpen(false);
-            });
-            item.appendChild(link);
-            list.appendChild(item);
-            links.set(heading, link);
-        });
-        nav.hidden = false;
-
-        // The current section is the last heading above the top 40% of the viewport.
-        function update() {
-            const line = window.innerHeight * 0.4;
-            let current = headings[0];
-            headings.forEach(function (heading) {
-                if (heading.getBoundingClientRect().top <= line) current = heading;
-            });
-            setActive(links.get(current));
-        }
-
-        update();
-        if ('IntersectionObserver' in window) {
-            const observer = new IntersectionObserver(update, { rootMargin: '0px 0px -60% 0px', threshold: [0, 1] });
-            headings.forEach(function (heading) { observer.observe(heading); });
-        }
-    })();
+    // static/note-contents.js builds the "On this page" sidebar; it uses the same id prefix and jump().
+    window.padmarkNote = { prefix: userContentPrefix, jump: jump };
     {{end}}
 
     document.querySelectorAll('.markdown-body a[href^="#"]').forEach(function (link) {
@@ -376,6 +281,9 @@
     if (location.hash.length > 1) jump(location.hash.slice(1), false);
     {{end}}
 </script>
+{{if and .ShowContents (not .NeedsConfirmation)}}
+<script src="/static/note-contents.js?p={{assetVersion "note-contents.js"}}" nonce="{{.Nonce}}" defer></script>
+{{end}}
 {{if .HasMath}}
 <script src="/static/katex/katex.min.js?p={{assetVersion "katex/katex.min.js"}}" nonce="{{.Nonce}}" defer></script>
 <script src="/static/math.js?p={{assetVersion "math.js"}}" nonce="{{.Nonce}}" defer

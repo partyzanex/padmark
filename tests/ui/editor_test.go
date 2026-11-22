@@ -49,6 +49,8 @@ func TestEditor(t *testing.T) {
 		scenario{name: "EmptyContent", run: testEmptyContent, accounts: false, files: false, allowedStatuses: nil},
 		scenario{name: "PublishAndView", run: testPublishAndView, accounts: false, files: false, allowedStatuses: nil},
 		scenario{name: "ContentsSidebar", run: testContentsSidebar, accounts: false, files: false, allowedStatuses: nil},
+		scenario{name: "ContentsSections", run: testContentsSections, accounts: false, files: false, allowedStatuses: nil},
+		scenario{name: "ContentsScroll", run: testContentsScroll, accounts: false, files: false, allowedStatuses: nil},
 		scenario{name: "NoContentsSidebar", run: testNoContentsSidebar, accounts: false, files: false, allowedStatuses: nil},
 		scenario{name: "EditAndSave", run: testEditAndSave, accounts: false, files: false, allowedStatuses: nil},
 		scenario{name: "DeleteNote", run: testDeleteNote, accounts: false, files: false, allowedStatuses: nil},
@@ -479,12 +481,28 @@ func testNotFound(sess *uiSession) {
 	sess.visible("#editor")
 }
 
-// contentsNote has h2 and h3 headings and enough text to scroll, so a sidebar jump moves the page.
+// contentsLongHeading is longer than two lines of the contents list at both screen sizes.
+const contentsLongHeading = "A second detail with a long heading that does not fit on two lines " +
+	"of the narrow contents column"
+
+// contentsLabels returns the rows of the contents list: the h2, h3 and h4 headings of contentsNote.
+// The h5 heading "Too deep" is not in the list.
+func contentsLabels() []string {
+	return []string{
+		"First part", "Detail", "Fine point", contentsLongHeading, "Second part", "Second part detail", "Third part",
+	}
+}
+
+// contentsNote has h2, h3, h4 and h5 headings and enough text to scroll, so a sidebar jump moves
+// the page.
 func contentsNote() string {
 	filler := strings.Repeat("A paragraph that makes the section long enough to scroll.\n\n", 12)
 
 	return "# Guide\n\nIntro.\n\n## First part\n\n" + filler + "### Detail\n\n" + filler +
-		"## Second part\n\n" + filler
+		"#### Fine point\n\n" + filler + "##### Too deep\n\n" + filler +
+		"### " + contentsLongHeading + "\n\n" + filler +
+		"## Second part\n\n" + filler + "### Second part detail\n\n" + filler +
+		"## Third part\n\n" + filler
 }
 
 // publishContentsNote publishes contentsNote with the sidebar switch set as requested. It returns
@@ -531,30 +549,147 @@ func (sess *uiSession) putBodies() *safeLog {
 	return &bodies
 }
 
+// expectContentsPlacement checks the sidebar position: beside the article on desktop and above
+// it on a phone.
+func (sess *uiSession) expectContentsPlacement() {
+	sess.t.Helper()
+
+	navBox, err := sess.page.Locator(".note-toc").BoundingBox()
+	sess.must(err)
+	articleBox, err := sess.page.Locator(".article-card").BoundingBox()
+	sess.must(err)
+
+	if sess.screen.name == "mobile" {
+		require.LessOrEqual(sess.t, navBox.Y+navBox.Height, articleBox.Y, "the sidebar is above the article")
+
+		return
+	}
+
+	require.LessOrEqual(sess.t, navBox.X+navBox.Width, articleBox.X, "the sidebar is beside the article")
+}
+
+// openContents opens the "On this page" drop-down of narrow screens. Wide screens always show the
+// list beside the article.
+func (sess *uiSession) openContents() {
+	sess.t.Helper()
+
+	if !sess.mobile() {
+		return
+	}
+
+	sess.click("#noteTocToggle")
+	sess.must(sess.expect.Locator(sess.page.Locator("#noteTocToggle")).ToHaveAttribute("aria-expanded", "true"))
+	sess.visible("#noteTocList")
+}
+
+// visibleContents returns the labels of the rows that the list shows: collapsed sections hide
+// their subsections.
+//
+//nolint:ireturn // playwright-go returns an interface
+func (sess *uiSession) visibleContents() playwright.Locator {
+	return sess.page.Locator(".note-toc-label:visible")
+}
+
 func testContentsSidebar(sess *uiSession) {
 	code := sess.publishContentsNote(true)
 
 	nav := sess.role(playwright.AriaRoleNavigation, "On this page")
 	sess.must(sess.expect.Locator(nav).ToBeVisible())
-	links := sess.page.Locator(".note-toc-link")
-	sess.must(sess.expect.Locator(links).ToHaveText([]string{"First part", "Detail", "Second part"}))
-	sess.must(sess.expect.Locator(sess.page.Locator(".note-toc-item--sub")).ToHaveText("Detail"))
-	sess.must(sess.expect.Locator(links.First()).ToHaveAttribute("aria-current", "location"))
 	sess.expectLayout(".header", ".note-toc", ".article-card", ".site-footer")
 	sess.expectContentsPlacement()
+	sess.expectNoteCard()
 	sess.screenshot("note-toc.png")
+	sess.expectMenuOverContents()
+	sess.openContents()
 
-	if sess.mobile() {
-		// Phone width shows the list as a drop-down under the "On this page" button.
-		sess.click("#noteTocToggle")
-	}
+	// H2 rows are numbered "1", "2", H3 rows "1.1"; H4 rows have no number; H5 is not in the list.
+	sess.must(sess.expect.Locator(sess.page.Locator(".note-toc-label")).ToHaveText(contentsLabels()))
+	sess.must(sess.expect.Locator(sess.page.Locator(".note-toc-num")).ToHaveText(
+		[]string{"1", "1.1", "", "1.2", "2", "2.1", "3"}))
+	sess.must(sess.expect.Locator(sess.page.Locator(".note-toc-item--h4 .note-toc-label")).ToHaveText("Fine point"))
+	sess.must(sess.expect.Locator(sess.page.Locator(".note-toc-item--h4 .note-toc-num")).ToBeHidden())
+	// Only the section that the reader is in is expanded.
+	sess.must(sess.expect.Locator(sess.visibleContents()).ToHaveText(
+		[]string{"First part", "Detail", "Fine point", contentsLongHeading, "Second part", "Third part"}))
+	sess.must(sess.expect.Locator(sess.role(playwright.AriaRoleLink, "First part")).
+		ToHaveAttribute("aria-current", "location"))
+	sess.expectClampedContents()
 
 	sess.link("Second part")
 	sess.must(sess.expect.Page(sess.page).ToHaveURL(regexp.MustCompile(`#second-part$`)))
 	sess.must(sess.expect.Locator(sess.role(playwright.AriaRoleHeading, "Second part")).ToBeInViewport())
-	sess.must(sess.expect.Locator(links.Last()).ToHaveAttribute("aria-current", "location"))
+	sess.must(sess.expect.Locator(sess.page.Locator(".note-toc-link.active .note-toc-label")).ToHaveText("Second part"))
+	sess.expectHeadingBelowContents("Second part")
 
-	// Edit mode pre-sets the stored value and sends it only after a change.
+	sess.expectContentsSaved(code, nav)
+}
+
+// expectMenuOverContents checks that the header menu of a phone covers the sticky contents block.
+func (sess *uiSession) expectMenuOverContents() {
+	sess.t.Helper()
+
+	if !sess.mobile() {
+		return
+	}
+
+	sess.click("#menuBtn")
+	sess.visible("#headerMenu")
+	onTop := sess.eval(`() => {
+		const menu = document.getElementById("headerMenu");
+		const nav = document.getElementById("noteToc").getBoundingClientRect();
+		const box = menu.getBoundingClientRect();
+		const y = Math.max(box.top, nav.top) + 4;
+		const hit = document.elementFromPoint(box.left + box.width / 2, Math.min(y, box.bottom - 4));
+		return box.bottom > nav.top && menu.contains(hit);
+	}`)
+	require.Equal(sess.t, true, onTop, "the open menu is above the contents block")
+	sess.must(sess.page.Keyboard().Press("Escape"))
+	sess.must(sess.expect.Locator(sess.page.Locator("#headerMenu")).ToBeHidden())
+}
+
+// expectClampedContents checks that a long heading takes two lines of the list at most, with the
+// full text in the title of the link.
+func (sess *uiSession) expectClampedContents() {
+	sess.t.Helper()
+
+	link := sess.page.Locator(".note-toc-link").Filter(playwright.LocatorFilterOptions{
+		HasText: contentsLongHeading,
+
+		Has: nil, HasNot: nil, HasNotText: nil, Visible: nil,
+	})
+	sess.must(sess.expect.Locator(link).ToHaveAttribute("title", contentsLongHeading))
+
+	clamp := sess.evalWith(`(text) => {
+		const label = [...document.querySelectorAll(".note-toc-label")].find((node) => node.textContent === text);
+		const style = getComputedStyle(label);
+		const lines = Math.round(label.clientHeight / parseFloat(style.lineHeight));
+		return [style.webkitLineClamp, lines, label.scrollHeight > label.clientHeight + 1].join(" ");
+	}`, contentsLongHeading)
+	require.Equal(sess.t, "2 2 true", clamp, "the long label shows two lines and cuts the rest")
+}
+
+// expectHeadingBelowContents checks that a jump on a phone stops the heading below the sticky
+// "On this page" block, and that the jump closes the drop-down.
+func (sess *uiSession) expectHeadingBelowContents(heading string) {
+	sess.t.Helper()
+
+	if !sess.mobile() {
+		return
+	}
+
+	sess.must(sess.expect.Locator(sess.page.Locator("#noteTocToggle")).ToHaveAttribute("aria-expanded", "false"))
+	navBox, err := sess.page.Locator(".note-toc").BoundingBox()
+	sess.must(err)
+	headingBox, err := sess.role(playwright.AriaRoleHeading, heading).BoundingBox()
+	sess.must(err)
+	require.GreaterOrEqual(sess.t, headingBox.Y, navBox.Y+navBox.Height, "the heading is not under the block")
+}
+
+// expectContentsSaved checks the sidebar switch of the editor: edit mode pre-sets the stored value
+// and sends it only after a change.
+func (sess *uiSession) expectContentsSaved(code string, nav playwright.Locator) {
+	sess.t.Helper()
+
 	bodies := sess.putBodies()
 	sess.openEditor()
 	sess.must(sess.expect.Locator(sess.page.Locator("#contentsCheck")).ToBeChecked())
@@ -579,23 +714,164 @@ func testContentsSidebar(sess *uiSession) {
 	require.Contains(sess.t, bodies.String(), `"show_contents":false`)
 }
 
-// expectContentsPlacement checks the sidebar position: beside the article on desktop and above
-// it on a phone.
-func (sess *uiSession) expectContentsPlacement() {
-	sess.t.Helper()
+// testContentsSections checks the chevrons of the sections and the "Expand all" button.
+func testContentsSections(sess *uiSession) {
+	sess.publishContentsNote(true)
+	sess.openContents()
+	visible := sess.visibleContents()
 
-	navBox, err := sess.page.Locator(".note-toc").BoundingBox()
-	sess.must(err)
-	articleBox, err := sess.page.Locator(".article-card").BoundingBox()
-	sess.must(err)
+	expand := sess.role(playwright.AriaRoleButton, "Expand Second part")
+	sess.must(sess.expect.Locator(expand).ToHaveText("1"))
+	sess.must(sess.expect.Locator(expand).ToHaveAttribute("aria-expanded", "false"))
+	sess.must(expand.Click())
 
-	if sess.screen.name == "mobile" {
-		require.LessOrEqual(sess.t, navBox.Y+navBox.Height, articleBox.Y, "the sidebar is above the article")
+	// A chevron expands its section and collapses the others; a second click collapses it.
+	collapse := sess.role(playwright.AriaRoleButton, "Collapse Second part")
+	sess.must(sess.expect.Locator(collapse).ToHaveAttribute("aria-expanded", "true"))
+	sess.must(sess.expect.Locator(visible).ToHaveText(
+		[]string{"First part", "Second part", "Second part detail", "Third part"}))
+	sess.must(collapse.Click())
+	sess.must(sess.expect.Locator(visible).ToHaveText([]string{"First part", "Second part", "Third part"}))
+
+	all := sess.page.Locator("#noteTocAll")
+	if sess.mobile() {
+		// The phone drop-down has the chevrons only, as in the mobile design.
+		sess.must(sess.expect.Locator(all).ToBeHidden())
 
 		return
 	}
 
-	require.LessOrEqual(sess.t, navBox.X+navBox.Width, articleBox.X, "the sidebar is beside the article")
+	sess.must(sess.expect.Locator(all).ToHaveText("Expand all"))
+	sess.click("#noteTocAll")
+	sess.must(sess.expect.Locator(all).ToHaveText("Collapse"))
+	sess.must(sess.expect.Locator(all).ToHaveAttribute("aria-expanded", "true"))
+	sess.must(sess.expect.Locator(visible).ToHaveText(contentsLabels()))
+
+	// "Collapse" goes back to the section that the reader is in.
+	sess.click("#noteTocAll")
+	sess.must(sess.expect.Locator(all).ToHaveText("Expand all"))
+	sess.must(sess.expect.Locator(visible).ToHaveText(
+		[]string{"First part", "Detail", "Fine point", contentsLongHeading, "Second part", "Third part"}))
+}
+
+// testContentsScroll checks that the current row follows the scroll position, that the list
+// scrolls to it without a page scroll, the sticky block and "Back to top".
+func testContentsScroll(sess *uiSession) {
+	sess.publishContentsNote(true)
+	// A low window makes the list longer than its box, so the list must scroll to the current row.
+	sess.must(sess.page.SetViewportSize(sess.screen.width, contentsWindowHeight))
+	sess.openContents()
+
+	if !sess.mobile() {
+		sess.click("#noteTocAll")
+	}
+
+	current := sess.page.Locator(".note-toc-link.active .note-toc-label")
+	scrollY := sess.scrollToHeading("Second part detail")
+	sess.must(sess.expect.Locator(current).ToHaveText("Second part detail"))
+	sess.must(sess.expect.Locator(sess.page.Locator(".note-toc-item--section > .note-toc-row .note-toc-label")).
+		ToHaveText("Second part"))
+	sess.expectCurrentInList(scrollY)
+	sess.expectStickyContents()
+
+	if !sess.mobile() {
+		sess.click("#noteTocAll")
+	}
+
+	// Only the section that the reader is in is expanded, also after the reader goes to another one.
+	sess.must(sess.expect.Locator(sess.visibleContents()).ToHaveText(
+		[]string{"First part", "Second part", "Second part detail", "Third part"}))
+	sess.scrollToHeading("Detail")
+	sess.must(sess.expect.Locator(current).ToHaveText("Detail"))
+	sess.must(sess.expect.Locator(sess.visibleContents()).ToHaveText(
+		[]string{"First part", "Detail", "Fine point", contentsLongHeading, "Second part", "Third part"}))
+
+	top := sess.role(playwright.AriaRoleLink, "Back to top")
+	if sess.mobile() {
+		sess.must(sess.expect.Locator(top).ToBeHidden())
+
+		return
+	}
+
+	sess.must(top.Click())
+	_, err := sess.page.WaitForFunction("() => window.scrollY === 0", nil)
+	sess.must(err)
+	sess.must(sess.expect.Locator(current).ToHaveText("First part"))
+}
+
+// contentsWindowHeight is the window height of testContentsScroll: the list box is then lower
+// than the rows of an expanded section.
+const contentsWindowHeight = 280
+
+// scrollToHeading scrolls the page so that the heading is near the top of the window, and returns
+// the new scroll position.
+func (sess *uiSession) scrollToHeading(name string) float64 {
+	sess.t.Helper()
+
+	return sess.number(sess.evalWith(`(name) => {
+		const headings = document.querySelectorAll(".prose.markdown-body :is(h2, h3, h4)");
+		const heading = [...headings].find((node) => node.textContent.trim() === name);
+		window.scrollTo(0, Math.round(heading.getBoundingClientRect().top + window.scrollY - 60));
+		return window.scrollY;
+	}`, name))
+}
+
+// expectCurrentInList checks that the current row is inside the visible part of the list and that
+// the page stayed at scrollY: only the list scrolls.
+func (sess *uiSession) expectCurrentInList(scrollY float64) {
+	sess.t.Helper()
+
+	inside := sess.eval(`() => {
+		const list = document.getElementById("noteTocList");
+		const box = list.getBoundingClientRect();
+		const row = list.querySelector(".note-toc-link.active").getBoundingClientRect();
+		return {scrolled: list.scrollTop > 0, below: row.top >= box.top - 1, above: row.bottom <= box.bottom + 1};
+	}`)
+	require.Equal(sess.t, map[string]any{"scrolled": true, "below": true, "above": true}, inside,
+		"the list scrolls to the current row")
+	require.InDelta(sess.t, scrollY, sess.number(sess.eval("() => window.scrollY")), 1, "the page does not scroll")
+}
+
+// expectStickyContents checks that the contents stay at the top of the window after a scroll.
+func (sess *uiSession) expectStickyContents() {
+	sess.t.Helper()
+
+	box, err := sess.page.Locator(".note-toc").BoundingBox()
+	sess.must(err)
+
+	top := 24.0
+	if sess.mobile() {
+		top = 8
+	}
+
+	require.InDelta(sess.t, top, box.Y, 1, "the contents are sticky")
+}
+
+// number converts a JavaScript number from Evaluate to float64.
+func (sess *uiSession) number(value any) float64 {
+	sess.t.Helper()
+
+	switch typed := value.(type) {
+	case int:
+		return float64(typed)
+	case float64:
+		return typed
+	default:
+		require.Failf(sess.t, "not a number", "%T %v", value, value)
+
+		return 0
+	}
+}
+
+// evalWith runs a JavaScript function with one argument and returns its result.
+//
+//nolint:ireturn // playwright-go returns any
+func (sess *uiSession) evalWith(expression string, arg any) any {
+	sess.t.Helper()
+	value, err := sess.page.Evaluate(expression, arg)
+	sess.must(err)
+
+	return value
 }
 
 func testNoContentsSidebar(sess *uiSession) {
@@ -603,12 +879,35 @@ func testNoContentsSidebar(sess *uiSession) {
 	sess.must(sess.expect.Locator(sess.role(playwright.AriaRoleHeading, "First part")).ToBeVisible())
 	sess.must(sess.expect.Locator(sess.page.Locator(".note-toc")).ToHaveCount(0))
 	sess.must(sess.expect.Locator(sess.page.Locator(".note-layout--toc")).ToHaveCount(0))
+	sess.must(sess.expect.Locator(sess.page.Locator(`script[src*="note-contents.js"]`)).ToHaveCount(0))
 
 	articleBox, err := sess.page.Locator(".article-card").BoundingBox()
 	sess.must(err)
 	layoutBox, err := sess.page.Locator(".note-layout").BoundingBox()
 	sess.must(err)
 	require.InDelta(sess.t, layoutBox.Width, articleBox.Width, 1, "the article takes the full width")
+	sess.expectNoteCard()
+}
+
+// expectNoteCard checks the frame of the note: a card on wide screens; on a phone the text is on the
+// page background, 16px from the screen edges.
+func (sess *uiSession) expectNoteCard() {
+	sess.t.Helper()
+
+	frame := sess.eval(`() => {
+		const article = document.querySelector(".note-article");
+		const style = getComputedStyle(article);
+		const box = article.getBoundingClientRect();
+		return [style.borderTopWidth, style.backgroundColor, style.boxShadow,
+			Math.round(box.left), Math.round(window.innerWidth - box.right)].join(" | ");
+	}`)
+	if !sess.mobile() {
+		require.Contains(sess.t, frame, "1px | ", "a wide screen shows the note in a card")
+
+		return
+	}
+
+	require.Equal(sess.t, "0px | rgba(0, 0, 0, 0) | none | 16 | 16", frame, "a phone shows the note without a card")
 }
 
 func testEditorFillsHeight(sess *uiSession) {

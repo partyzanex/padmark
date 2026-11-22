@@ -177,13 +177,15 @@ func (s *HandlerSuite) TestGetNote_HTML_ContentsSidebar() {
 		if stored != nil && *stored {
 			s.Contains(body, `<nav class="note-toc" id="noteToc" aria-label="On this page" hidden>`)
 			s.Contains(body, `class="note-layout note-layout--toc"`)
-			s.Contains(body, "IntersectionObserver")
+			// static/note-contents.js builds the list; it loads only with the sidebar.
+			s.Contains(body, `<script src="/static/note-contents.js?p=`)
 
 			continue
 		}
 
 		s.NotContains(body, "note-toc")
 		s.NotContains(body, "noteToc")
+		s.NotContains(body, "note-contents.js")
 		s.Contains(body, `<main class="note-layout">`)
 	}
 }
