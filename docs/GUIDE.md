@@ -177,7 +177,10 @@ An upload has this sequence:
    A size counter stops the stream at `--max-file-size` with `ErrFileTooLarge`.
 3. `sweepOnUpload` removes expired files. A failure is fail-soft: it is only logged.
 4. `insert` takes the slug lock only for the record insert, because the upload can be long.
-   When the insert fails, the manager deletes the new object.
+   When the insert fails with a definite error, such as a slug conflict, the manager deletes the
+   new object. After an unclear error (a lost connection, a timeout or a canceled request), it
+   first reads the record by object key (`confirmCreate`). A committed record keeps its object and
+   the upload succeeds; when the read also fails, the object stays in the bucket.
 
 `Peek` reads a record without access rules. `Info` applies privacy and expiry. `Download`
 checks that the object exists before it changes the record, so a missing object does not
@@ -195,9 +198,11 @@ never get one burn file.
 `Delete` (by the user) deletes the record first and the object second; an object delete error
 is fail-soft: the manager logs it and increments the `delete` storage error counter.
 `SweepExpired` and `ReleaseExpiredSlug` use the opposite order: the object first, then the
-record with the same object key. Thus an object delete error keeps the record, and the next
-sweep tries again. One sweep removes at most 10 batches of 100 files; the sweep at each upload
-removes at most 8. The note and link managers call `ReleaseExpiredSlug`
+record with the same object key. Thus an object delete error keeps the record, and a later
+sweep tries again. `ListExpired` pages by `(expires_at, id)`; a sweep passes failed records,
+continues from the position of the last sweep and stops after ten failures in a row. One sweep
+removes at most 10 batches of 100 files; the sweep at each upload removes at most 8 and has one
+total limit of 3 seconds. The note and link managers call `ReleaseExpiredSlug`
 (`WithExpiredFiles`), so an expired file that the sweep did not remove yet does not block a
 new note or link with its slug.
 

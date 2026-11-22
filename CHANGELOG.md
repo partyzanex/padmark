@@ -73,6 +73,16 @@ v0.5.0 follows **v0.4.0**.
 
 ### Changed
 
+- `--shutdown-timeout` is now the limit of the full shutdown sequence, not of each phase. Open
+  requests get this time less one fifth (at most 2 seconds); then the server closes their
+  connections, stops background work and closes the database. A forced close gives a warning in
+  the log and exit code 0. The log records the signal and the duration of each phase.
+  `docker-compose.yml` sets `stop_grace_period: 15s`.
+- The image and CI build with Go 1.27.4, which fixes GO-2026-6859 (an HTTP/1 server crash in
+  `net/http`). Rebuild the image.
+- A short-link update (`PUT /links/{id}`) writes only the fields that the client sent: an omitted
+  `ttl` or `direct_redirect` keeps the stored value, and `null` resets it. Two concurrent updates
+  thus keep both changes.
 - The note content limit is a setting: `--max-content-length` / `PADMARK_MAX_CONTENT_LENGTH`
   (characters). The default `0` uses the `--max-body-bytes` value (4 MiB), so
   `PADMARK_MAX_BODY_BYTES` alone raises both limits. Before, the limit was a fixed 1,048,576
@@ -105,6 +115,39 @@ v0.5.0 follows **v0.4.0**.
 
 ### Fixed
 
+- `docker-compose.yml` passes `PADMARK_ENABLE_ACCOUNTS` (default `false`) and, when set,
+  `PADMARK_BOOTSTRAP_TOKEN` to the server. Before, the values in `.env` did not reach the
+  container, so accounts stayed off and note privacy was not checked.
+- An edit, delete, burn read or link expiry delete that passed its access check no longer changes
+  a new note or link that took the same address after the check: the write also matches the
+  stored edit-code hash and answers `404` when the record changed.
+- An expired note or short link no longer keeps its address. A new note, link or file with the
+  same custom slug is created at once; a record that its owner extended is never removed.
+- Following an expired short link no longer deletes it when its owner extended it at the same
+  time.
+- Password change: the new password, the new session and the revocation of all other sessions
+  and API keys are stored in one database transaction. A failure no longer leaves old sessions or
+  API keys valid; the "contact an administrator" warning is removed.
+- Files: after an unclear metadata write error, the server reads the record before it deletes the
+  uploaded object. An expired file whose object delete fails no longer blocks later expired files,
+  and the cleanup after an upload has one total limit of 3 seconds.
+- A stalled request, a long file transfer or a connection without a request no longer holds the
+  server stop after the deadline. The redirect and metrics listeners stop with the main listener.
+- The note editor sends the text unchanged on publish and save: leading spaces, a leading newline
+  and the final newline stay.
+- When the browser blocks session storage, the result page of a new note, short link or file still
+  shows the link and the edit code, and the form shows no false error.
+- For a note that burns some time after the first read, the result page shows that delay. Before,
+  it said "burns immediately".
+- The editor preview of a `text/plain` note shows plain text, as the note page does.
+- Cyrillic text uses the project fonts in all roles: Source Serif 4 and JetBrains Mono get
+  self-hosted Cyrillic subsets, so Cyrillic words no longer show in Georgia or Times. A page
+  downloads a Cyrillic font file only when it shows Cyrillic text in that font.
+- The CLI (`expand`, `shorten`) and the MCP proxy (`get_link`, `create_link`,
+  `create_links_bulk`) keep the `#fragment` of a short link target instead of `%23`.
+  `POST /links/bulk` echoes each target in the form that the client sent. `pkg/client` has a new
+  function, `SplitFragment`, that repairs a decoded `url.URL`.
+- The MCP proxy `upload_file` no longer has a data race on the read error of the local file.
 - The note page shows images that the Markdown embeds as base64 `data:` URIs (PNG, JPEG, GIF
   and WebP). Before, the server removed their source, and only the editor preview showed them.
   SVG and other types stay removed, and links cannot use `data:` URIs. In place of an image
@@ -117,6 +160,9 @@ v0.5.0 follows **v0.4.0**.
 
 ### Security
 
+- With accounts on, a note, link or file change (`PUT` or `DELETE`) stops when the privacy check
+  cannot read the record: a storage failure gives `500` and a missing record gives `404`. Before,
+  the change continued without the privacy check.
 - `POST /files`, `PUT /files/{id}` and `DELETE /files/{id}` reject a request with a foreign
   `Origin`, because a cross-site form can send a multipart body without a CORS (cross-origin
   resource sharing) preflight.

@@ -541,7 +541,8 @@ read it, because its content key was in the record. The server logs the warning
 `delete file object` and increments `padmark_files_storage_errors_total{op="delete"}`. To find
 such objects, compare the bucket list with the `object_key` column of the `files` table. The
 sweep of expired files uses the opposite order: the object first, then the record. When the
-object delete fails, the record stays, and the next sweep tries again.
+object delete fails, the record stays, and a later sweep tries again. A sweep passes such
+records and goes on to the next expired files, so one failing object does not stop the cleanup.
 
 Back up the database and the keyring separately, and back up the bucket too. A file needs all three.
 A copy that holds the database and the keyring together gives all file names and content keys.
