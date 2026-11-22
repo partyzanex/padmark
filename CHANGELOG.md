@@ -9,6 +9,10 @@ v0.5.0 follows **v0.4.0**.
 
 ### Added
 
+- `padmark-cli update-link` and the MCP tool `update_link` change the destination, expiry,
+  privacy and redirect setting of a short link; an omitted option keeps its value.
+- `tests/storage` runs one contract suite per repository role on SQLite and PostgreSQL, and
+  `tests/arch` checks the layer imports with `go list`.
 - File publishing in S3-compatible storage (S3: Simple Storage Service): `POST /files`
   (multipart upload), `GET /{id}` and `GET /files/{id}/download` (attachment),
   `GET /files/{id}` (metadata) and `DELETE /files/{id}` (`X-Edit-Code` or the owner). Files
@@ -73,6 +77,23 @@ v0.5.0 follows **v0.4.0**.
 
 ### Changed
 
+- The "On this page" sidebar follows the new design: numbered H2 and H3 rows, H4 rows without a
+  number, only the current section expanded ("Expand all" expands all), two-line names, a list
+  that follows scrolling, and "Back to top". On a phone the block stays at the top of the screen
+  and the note has no card frame. Note text: h3 is 20px, h4 uses the interface font at 15px.
+- Notes, short links and files check privacy, expiry and burn intent inside their usecase with
+  one reader value. PUT and DELETE check privacy on the same stored record that they change; a
+  hidden record gives `401`. Without accounts, the Edit link of an owner-only note shows and
+  `GET /links/{id}` serves an owner-only link, as the other pages do. The `PUT /notes/{id}`
+  response always has `expires_at` (`null` without expiry).
+- padmark-cli and padmark-mcp share one package (`internal/clientauth`) for the token file,
+  server trust, the plain-HTTP rule and the HTTP client. MCP tools report status 422 as
+  `validation error`, as padmark-cli does. padmark-cli refuses the IDs `.` and `..` and a `--ttl`
+  above 9223372036 before it sends a request. The unused `edit_code` field of the
+  `create_links_bulk` output is removed.
+- Invite and reveal token lifetimes and the cleanup of stale invites, reveal tokens and sessions
+  moved from the repositories to the auth managers. The schema allows one admin, so the admin
+  cannot be revoked.
 - `--shutdown-timeout` is now the limit of the full shutdown sequence, not of each phase. Open
   requests get this time less one fifth (at most 2 seconds); then the server closes their
   connections, stops background work and closes the database. A forced close gives a warning in
@@ -115,6 +136,16 @@ v0.5.0 follows **v0.4.0**.
 
 ### Fixed
 
+- A note larger than 64 MiB in bytes gets `422` before encryption; the server refuses a
+  `--max-content-length` above 67108864 at startup. Before, such a note got `500`.
+- Only slug collisions give "slug is already taken"; a duplicate file object key is an internal
+  error. SQLite consumes reveal tokens with one conditional `UPDATE`, as PostgreSQL does, and a
+  database failure is logged instead of looking like a wrong token.
+- Account and link repositories use the configured logger, so `--log-level` and `--log-format`
+  apply to their records.
+- `padmark-cli` and `padmark-mcp` stop when they cannot write the cleartext-token warning,
+  instead of sending the credential without the warning.
+- The CSRF signature and the `Content-Disposition` encoding no longer ignore write errors.
 - `docker-compose.yml` passes `PADMARK_ENABLE_ACCOUNTS` (default `false`) and, when set,
   `PADMARK_BOOTSTRAP_TOKEN` to the server. Before, the values in `.env` did not reach the
   container, so accounts stayed off and note privacy was not checked.
@@ -160,6 +191,8 @@ v0.5.0 follows **v0.4.0**.
 
 ### Security
 
+- `padmark-cli setup` does not follow a redirect to a different server. Before, a `307` or `308`
+  answer sent the password and the bootstrap token to the new address.
 - With accounts on, a note, link or file change (`PUT` or `DELETE`) stops when the privacy check
   cannot read the record: a storage failure gives `500` and a missing record gives `404`. Before,
   the change continued without the privacy check.
