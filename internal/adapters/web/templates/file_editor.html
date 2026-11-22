@@ -254,8 +254,20 @@
         return data;
     }
 
+    // keepEditCode gives the edit code to the success page. The record exists after 201, so blocked
+    // browser storage must not stop the success page: window.name then holds the code for this
+    // one navigation in the same tab, and the success page reads and clears it.
+    function keepEditCode(key, code) {
+        if (!code) return;
+        try {
+            sessionStorage.setItem(key, code);
+        } catch (_) {
+            window.name = 'padmark-edit-code:' + JSON.stringify([key, code]);
+        }
+    }
+
     function finish(file) {
-        if (file.edit_code) sessionStorage.setItem('padmark_file_edit_' + file.id, file.edit_code);
+        keepEditCode('padmark_file_edit_' + file.id, file.edit_code);
         // The success page reads the file record. If that read fails, it shows these values from
         // the upload response, as the note and link pages do.
         const params = new URLSearchParams({kind: 'file', id: file.id});

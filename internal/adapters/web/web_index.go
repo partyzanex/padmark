@@ -46,12 +46,15 @@ func (h *PageHandler) RegisterRoutes(mux *http.ServeMux) {
 
 // editorViewData is shared by IndexPage (create) and EditPage (edit).
 type editorViewData struct {
-	Header           headerView
-	ID               string
-	Title            string
-	Content          string
-	Nonce            string
-	Privacy          string
+	Header  headerView
+	ID      string
+	Title   string
+	Content string
+	Nonce   string
+	Privacy string
+	// ContentType is the stored format of the edited note. The preview shows a text/plain note
+	// as plain text, as its page does. Empty for a new note, which the server makes Markdown.
+	ContentType      string
 	Access           privacyChoice
 	TTLOptions       []ttlOption
 	EditMode         bool
@@ -162,6 +165,7 @@ func (h *PageHandler) IndexPage(w http.ResponseWriter, r *http.Request) {
 		IsOwner:          false,
 		ShowContents:     false,
 		ContentWithheld:  false,
+		ContentType:      "",
 	})
 	if err != nil {
 		h.log.ErrorContext(r.Context(), "render index template", "err", err)

@@ -138,6 +138,27 @@
         }
     }
 
+    // takeEditCode reads the edit code that the editor kept for this page, once. The editors use
+    // sessionStorage; when the browser blocks it, they put the code in window.name. The page
+    // removes both copies, so a reload does not show the code again.
+    function takeEditCode(key) {
+        let code = null;
+        try {
+            code = sessionStorage.getItem(key);
+            sessionStorage.removeItem(key);
+        } catch (_) { /* blocked storage: the code can be in window.name */ }
+
+        const prefix = 'padmark-edit-code:';
+        if (window.name.startsWith(prefix)) {
+            try {
+                const kept = JSON.parse(window.name.slice(prefix.length));
+                if (!code && kept[0] === key) code = kept[1];
+            } catch (_) { /* not a value that an editor wrote */ }
+            window.name = '';
+        }
+        return code;
+    }
+
     (function () {
         const copyLinkBtn = document.getElementById('copyLinkBtn');
         copyLinkBtn.addEventListener('click', function () {
@@ -155,9 +176,8 @@
 
         const id = new URLSearchParams(location.search).get('id');
         const key = ({{.IsLink}} ? 'padmark_link_edit_' : {{.IsFile}} ? 'padmark_file_edit_' : 'padmark_edit_') + id;
-        const code = sessionStorage.getItem(key);
+        const code = takeEditCode(key);
         if (code) {
-            sessionStorage.removeItem(key);
             // The code starts masked, so it is not readable over the shoulder; "Show" reveals it.
             const value = document.getElementById('editCodeValue');
             const reveal = document.getElementById('editCodeRevealBtn');

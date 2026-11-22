@@ -71,6 +71,7 @@ func (h *NoteHandler) editNote(w http.ResponseWriter, r *http.Request, id string
 		Nonce:            middleware.NonceFromContext(r.Context()),
 		IsOwner:          isOwner,
 		ShowContents:     note.ContentsSidebar(),
+		ContentType:      string(derefContentType(note.ContentType)),
 	})
 	if err != nil {
 		h.log.ErrorContext(r.Context(), "render edit template", "id", domain.HashSlug(id), "err", err)

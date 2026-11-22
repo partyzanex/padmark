@@ -34,6 +34,7 @@ func TestEditorPreview(t *testing.T) {
 		},
 		{name: "RememberChoice", run: testPreviewRememberChoice, accounts: false, files: false, allowedStatuses: nil},
 		{name: "PublishFromPreview", run: testPublishFromPreview, accounts: false, files: false, allowedStatuses: nil},
+		{name: "PlainText", run: testPreviewPlainText, accounts: false, files: false, allowedStatuses: nil},
 	})
 }
 
@@ -413,4 +414,40 @@ func (sess *uiSession) reload() {
 	sess.t.Helper()
 	_, err := sess.page.Reload()
 	sess.must(err)
+}
+
+// testPreviewPlainText: the preview of a text/plain note is the same text as its page: escaped
+// text in <pre>, without Markdown, HTML or formulas. The HTML parser removes one newline after
+// <pre> on the page, so the preview removes it too.
+func testPreviewPlainText(sess *uiSession) {
+	const content = "\n# Plain heading\n<b>bold?</b> $x^2$\n    indented\n"
+
+	created, err := sess.browserContext.Request().Post("/notes", playwright.APIRequestContextPostOptions{
+		Headers: map[string]string{"Accept": "application/json"},
+		Data:    map[string]any{"slug": "ui-plain", "content": content, "content_type": "text/plain"},
+
+		FailOnStatusCode: nil, Form: nil, IgnoreHttpsErrors: nil, MaxRedirects: nil,
+		MaxRetries: nil, Multipart: nil, Params: nil, Timeout: nil,
+	})
+	sess.must(err)
+	require.Equal(sess.t, http.StatusCreated, created.Status())
+
+	sess.gotoPage("/edit/ui-plain")
+	sess.showPreview()
+
+	preview := sess.page.Locator("#preview")
+	sess.must(sess.expect.Locator(preview.Locator("pre")).ToHaveCount(1))
+	sess.must(sess.expect.Locator(preview.Locator("h1, b, .katex")).ToHaveCount(0))
+	shown := sess.eval("() => document.querySelector('#preview pre').textContent")
+	require.Equal(sess.t, content[1:], shown)
+
+	// The preview follows the text as the author types.
+	sess.writeText("# Changed")
+	sess.showPreview()
+	sess.text("#preview pre", "# Changed")
+	sess.must(sess.expect.Locator(preview.Locator("h1")).ToHaveCount(0))
+
+	sess.gotoPage("/ui-plain")
+	sess.must(sess.expect.Locator(sess.page.Locator(".markdown-body pre")).ToHaveCount(1))
+	require.Equal(sess.t, shown, sess.eval("() => document.querySelector('.markdown-body pre').textContent"))
 }

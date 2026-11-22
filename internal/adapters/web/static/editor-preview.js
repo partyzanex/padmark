@@ -311,6 +311,13 @@
       empty.className = "editor-preview-empty";
       empty.textContent = PLACEHOLDER;
       preview.replaceChildren(empty);
+    } else if (body.dataset.contentType === "text/plain") {
+      // The server shows a text/plain note as escaped text in <pre> (render.RenderPlain), without
+      // Markdown and formulas. The HTML parser of the page removes one newline after <pre>;
+      // textContent does not parse, so the preview removes that newline itself.
+      var pre = document.createElement("pre");
+      pre.textContent = text.charAt(0) === "\n" ? text.slice(1) : text;
+      preview.replaceChildren(pre);
     } else {
       preview.replaceChildren(sanitize(marked.parse(text, { async: false })));
       // KaTeX draws after DOMPurify: its own output is trusted, the Markdown is not.

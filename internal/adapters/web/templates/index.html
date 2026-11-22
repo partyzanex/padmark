@@ -69,9 +69,13 @@
                 </div>
             </div>
 
-            <div class="editor-body" id="editorBody" data-view="write">
+            {{/* data-content-type selects the preview renderer: a text/plain note shows as plain
+                 text, as on its page. The HTML parser removes one newline that follows <textarea>,
+                 so the newline below keeps a leading newline of the content. */}}
+            <div class="editor-body" id="editorBody" data-view="write" data-content-type="{{.ContentType}}">
                 <label for="editor" class="sr-only">Markdown</label>
-                <textarea class="editor-textarea" id="editor" placeholder="{{if .ContentWithheld}}Burn-after-reading content is not shown here — write the replacement content{{else}}Paste or write your Markdown…{{end}}" spellcheck="false">{{.Content}}</textarea>
+                <textarea class="editor-textarea" id="editor" placeholder="{{if .ContentWithheld}}Burn-after-reading content is not shown here — write the replacement content{{else}}Paste or write your Markdown…{{end}}" spellcheck="false">
+{{.Content}}</textarea>
                 <div class="editor-preview prose markdown-body" id="preview" role="region" aria-label="Preview" hidden></div>
             </div>
 
@@ -287,9 +291,23 @@
         return parseInt(document.getElementById('burnTime').value);
     }
 
+    // keepEditCode gives the edit code to the success page. The note exists after 201, so blocked
+    // browser storage must not stop the success page: window.name then holds the code for this
+    // one navigation in the same tab, and the success page reads and clears it.
+    function keepEditCode(key, code) {
+        if (!code) return;
+        try {
+            sessionStorage.setItem(key, code);
+        } catch (_) {
+            window.name = 'padmark-edit-code:' + JSON.stringify([key, code]);
+        }
+    }
+
+    // publish and save send the text as the author wrote it: leading spaces make a code block and
+    // a final newline is part of the content. trim() only tells if the text is empty.
     async function publish() {
         const btn = document.getElementById('submitBtn');
-        const content = document.getElementById('editor').value.trim();
+        const content = document.getElementById('editor').value;
         const titleInput = document.getElementById('titleInput').value.trim();
         const slug = document.getElementById('slugInput').value.trim();
         const burnAfterReading = document.getElementById('burnCheck').checked;
@@ -297,7 +315,7 @@
         const ttl = getTTL();
 
         errorBox.hidden = true;
-        if (!content) { showError(btn, 'Enter some text first'); return; }
+        if (!content.trim()) { showError(btn, 'Enter some text first'); return; }
         // The server accepts a chosen edit code of 8 to 128 characters; a blank field gets a random code.
         if (editCode && editCode.length < 8) { showError(btn, 'Edit code: 8 characters or more'); return; }
 
@@ -314,6 +332,7 @@
         if (editCode) payload.edit_code = editCode;
         if (burnAfterReading) payload.ttl = ttl;
 
+        let note;
         try {
             const resp = await fetch('/notes', {
                 method: 'POST',
@@ -323,33 +342,37 @@
 
             if (!resp.ok) { throw new Error(await errorMessage(resp, 'Error — try again')); }
 
-            const note = await resp.json();
-            if (note.edit_code) {
-                sessionStorage.setItem('padmark_edit_' + note.id, note.edit_code);
-            }
-            const params = new URLSearchParams({ id: note.id });
-            if (note.burn_after_reading) params.set('burn', '1');
-            if (note.expires_at) {
-                params.set('expires', note.expires_at);
-            } else if (burnAfterReading) {
-                params.set('expires', 'immediately');
-            }
-            if (note.privacy) params.set('privacy', note.privacy);
-            window.location.href = '/success?' + params.toString();
+            note = await resp.json();
         } catch (err) {
             showError(btn, err.message || 'Error — try again');
+            return;
         }
+
+        // The note exists now. The button stays off, so a second click cannot make a copy.
+        keepEditCode('padmark_edit_' + note.id, note.edit_code);
+        const params = new URLSearchParams({ id: note.id });
+        if (note.burn_after_reading) params.set('burn', '1');
+        if (note.expires_at) {
+            params.set('expires', note.expires_at);
+        } else if (burnAfterReading && ttl > 0) {
+            // A delayed burn has no date before the first read: the page shows the delay.
+            params.set('burn_ttl', String(ttl));
+        } else if (burnAfterReading) {
+            params.set('expires', 'immediately');
+        }
+        if (note.privacy) params.set('privacy', note.privacy);
+        window.location.href = '/success?' + params.toString();
     }
 
     async function save() {
         const btn = document.getElementById('submitBtn');
-        const content = document.getElementById('editor').value.trim();
+        const content = document.getElementById('editor').value;
         const title = document.getElementById('titleInput').value.trim();
         const editCode = document.getElementById('editCodeInput').value.trim();
         const ttl = getTTL();
 
         errorBox.hidden = true;
-        if (!content) { showError(btn, 'Enter some text first'); return; }
+        if (!content.trim()) { showError(btn, 'Enter some text first'); return; }
         if (!editCode && !isOwner) { showError(btn, 'Edit code required'); return; }
 
         btn.textContent = 'Saving…';

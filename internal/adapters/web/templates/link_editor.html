@@ -274,6 +274,18 @@
         submitButton.textContent = busy ? (editMode ? 'Saving…' : 'Creating…') : submitLabel;
     }
 
+    // keepEditCode gives the edit code to the success page. The record exists after 201, so blocked
+    // browser storage must not stop the success page: window.name then holds the code for this
+    // one navigation in the same tab, and the success page reads and clears it.
+    function keepEditCode(key, code) {
+        if (!code) return;
+        try {
+            sessionStorage.setItem(key, code);
+        } catch (_) {
+            window.name = 'padmark-edit-code:' + JSON.stringify([key, code]);
+        }
+    }
+
     form.addEventListener('submit', async event => {
         event.preventDefault();
         errorBox.hidden = true;
@@ -305,7 +317,7 @@
                 location.href = '/links/' + encodeURIComponent(linkID);
                 return;
             }
-            if (link.edit_code) sessionStorage.setItem('padmark_link_edit_' + link.id, link.edit_code);
+            keepEditCode('padmark_link_edit_' + link.id, link.edit_code);
             const params = new URLSearchParams({kind: 'link', id: link.id});
             if (link.burn_after_click) params.set('burn', '1');
             if (link.expires_at) params.set('expires', link.expires_at);

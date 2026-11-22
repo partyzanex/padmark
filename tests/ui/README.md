@@ -9,15 +9,18 @@ after the run.
 
 Every scenario runs on desktop (1280 × 900) and mobile (390 × 844).
 They cover field entry, editor formatting, the Write/Split/Preview views and preview
-sanitization, validation,
-publish/save, clipboard actions, raw view, burn confirmation, theme persistence,
+sanitization, the plain-text preview, validation,
+publish/save without changes to the whitespace, the burn delay on the result page, clipboard
+actions, raw view, burn confirmation, theme persistence,
 setup/login, password changes, admin invites, keys and user revocation. Link scenarios cover
 creation, the link page, validation, failure/retry, editing/deletion, expiry
 preservation/reset, redirect settings, burn after click and owner-only access to the link page
 and the editor. File scenarios cover upload,
 the result page, the file page, download with a byte comparison, burn after download, changes
 to the lifetime, the privacy and burn after download, deletion with the edit code and by the
-owner, private files without a session and a canceled upload.
+owner, private files without a session and a canceled upload. For notes, links and files, a
+scenario blocks `sessionStorage` writes and checks that the result page still shows the link and
+the edit code.
 
 Each scenario starts a real Padmark server with its own temporary SQLite database,
 keyring and browser context. Inherited `PADMARK_*` settings are removed from the

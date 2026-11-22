@@ -27,6 +27,7 @@ func TestLinks(t *testing.T) {
 		{name: "FailureRetry", allowedStatuses: []int{503}, run: testLinkFailureRetry, accounts: false, files: false},
 		{name: "BurnAfterClick", allowedStatuses: []int{404}, run: testLinkBurnAfterClick, accounts: false, files: false},
 		{name: "PrivacyAndOwnership", accounts: true, files: false, run: testLinkPrivacyAndOwnership, allowedStatuses: nil},
+		{name: "BlockedStorage", run: testLinkBlockedStorage, accounts: false, files: false, allowedStatuses: nil},
 	})
 }
 
@@ -309,4 +310,22 @@ func testLinkPrivacyAndOwnership(sess *uiSession) {
 		sess.must(err)
 		require.NotContains(sess.t, string(body), "private-updated", path)
 	}
+}
+
+// testLinkBlockedStorage: a failed sessionStorage write does not hide a new short link and its
+// edit code, as for a note.
+func testLinkBlockedStorage(sess *uiSession) {
+	sess.blockSessionStorage()
+	sess.gotoPage("/links")
+	sess.fill("#targetInput", "https://example.com/blocked")
+	sess.fill("#slugInput", "ui-blocked")
+	sess.openSettings()
+	sess.fill("#editCodeInput", "Link-Blocked-Code42!")
+	sess.closeSettings()
+	sess.button("Create link")
+
+	id, code := sess.createdLink()
+	require.Equal(sess.t, "ui-blocked", id)
+	require.Equal(sess.t, "Link-Blocked-Code42!", code)
+	require.Empty(sess.t, sess.eval("() => window.name"))
 }

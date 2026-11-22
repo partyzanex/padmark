@@ -66,6 +66,9 @@ func TestEditor(t *testing.T) {
 			name: "InvalidEditCode", allowedStatuses: []int{403}, run: testInvalidEditCode, accounts: false, files: false,
 		},
 		scenario{name: "NotFound", allowedStatuses: []int{404}, run: testNotFound, accounts: false, files: false},
+		scenario{name: "KeepsWhitespace", run: testKeepsWhitespace, accounts: false, files: false, allowedStatuses: nil},
+		scenario{name: "BlockedStorage", run: testBlockedStorage, accounts: false, files: false, allowedStatuses: nil},
+		scenario{name: "BurnDelay", run: testBurnDelay, accounts: false, files: false, allowedStatuses: nil},
 	)
 	runScenarios(t, cases)
 }
@@ -666,4 +669,109 @@ func (sess *uiSession) expectFullHeight() {
 	}`).(int)
 	require.True(sess.t, ok, "the layout bottom must be an int")
 	require.InDelta(sess.t, float64(pageBottom), cardBox.Y+cardBox.Height, 1, "the editor card fills the free height")
+}
+
+// noteContent reads the stored content of a note through the JSON API.
+func (sess *uiSession) noteContent(id string) string {
+	sess.t.Helper()
+	response, err := sess.browserContext.Request().Get("/notes/"+id, playwright.APIRequestContextGetOptions{
+		Headers: map[string]string{"Accept": "application/json"},
+
+		Data: nil, FailOnStatusCode: nil, Form: nil, IgnoreHttpsErrors: nil, MaxRedirects: nil,
+		MaxRetries: nil, Multipart: nil, Params: nil, Timeout: nil,
+	})
+	sess.must(err)
+	require.Equal(sess.t, http.StatusOK, response.Status())
+
+	var note struct {
+		Content string `json:"content"`
+	}
+
+	sess.must(response.JSON(&note))
+
+	return note.Content
+}
+
+// testKeepsWhitespace: the editor sends the text as the author wrote it. Four leading spaces make
+// a code block in the preview and on the page, and the final newline stays. The edit page keeps
+// a leading newline, which the HTML parser removes after <textarea> without the template newline.
+func testKeepsWhitespace(sess *uiSession) {
+	const (
+		content = "    print(42)\n"
+		edited  = "\n    edited()\n"
+		code    = "Whitespace-Code-42"
+	)
+
+	sess.gotoPage("/")
+	sess.fill("#slugInput", "ui-code")
+	sess.writeText(content)
+	sess.showPreview()
+	sess.text("#preview pre code", "print(42)")
+	sess.openSettings()
+	sess.fill("#editCodeInput", code)
+	sess.closeSettings()
+	sess.button("Publish note")
+	sess.must(sess.expect.Page(sess.page).ToHaveURL(regexpURL("/success?")))
+	require.Equal(sess.t, content, sess.noteContent("ui-code"))
+
+	sess.gotoPage("/edit/ui-code")
+	sess.value("#editor", content)
+	sess.writeText(edited)
+	sess.openSettings()
+	sess.fill("#editCodeInput", code)
+	sess.closeSettings()
+	sess.button("Save")
+	// The exact URL: a pattern "/ui-code$" also matches the editor at /edit/ui-code.
+	sess.must(sess.expect.Page(sess.page).ToHaveURL(sess.baseURL + "/ui-code"))
+	require.Equal(sess.t, edited, sess.noteContent("ui-code"))
+
+	sess.gotoPage("/edit/ui-code")
+	sess.value("#editor", edited)
+}
+
+// blockSessionStorage makes each sessionStorage write of the context fail, as in a browser that
+// blocks site data or has no free storage space.
+func (sess *uiSession) blockSessionStorage() {
+	sess.t.Helper()
+	sess.must(sess.browserContext.AddInitScript(playwright.Script{
+		Content: new(`Storage.prototype.setItem = function () {
+			throw new DOMException('The quota has been exceeded.', 'QuotaExceededError');
+		};`),
+
+		Path: nil,
+	}))
+}
+
+// testBlockedStorage: the note exists after 201, so a failed sessionStorage write must not keep
+// the author in the editor. The success page shows the link and the generated edit code once.
+func testBlockedStorage(sess *uiSession) {
+	sess.blockSessionStorage()
+	sess.gotoPage("/")
+	sess.fill("#editor", "# Stored nowhere")
+	sess.button("Publish note")
+	sess.must(sess.expect.Page(sess.page).ToHaveURL(regexpURL("/success?")))
+	sess.text(".success-title", "Your note is live")
+	sess.must(sess.expect.Locator(sess.page.Locator(".copy-value")).ToHaveText(regexpURL(sess.baseURL + "/")))
+	require.NotEmpty(sess.t, sess.shownEditCode())
+
+	// The page removes the code from window.name: other pages of the tab cannot read it, and a
+	// reload does not show it again.
+	require.Empty(sess.t, sess.eval("() => window.name"))
+	sess.reload()
+	sess.must(sess.expect.Locator(sess.page.Locator("#editCodeBlock")).ToBeHidden())
+}
+
+// testBurnDelay: a note that burns 5 minutes after its first read has no expiry date before that
+// read. The success page shows the delay and does not say that the note burns immediately.
+func testBurnDelay(sess *uiSession) {
+	sess.gotoPage("/")
+	sess.fill("#editor", "Burns later")
+	sess.openSettings()
+	sess.click("#burnLabel")
+	sess.selectOption("#burnTime", "300")
+	sess.closeSettings()
+	sess.button("Publish note")
+	sess.must(sess.expect.Page(sess.page).ToHaveURL(regexpURL("/success?")))
+	sess.text(".chip-text", "burns 5 minutes after the first read")
+	sess.text(".chip--warn", "Burns after reading")
 }

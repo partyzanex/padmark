@@ -2,7 +2,9 @@ package web
 
 import (
 	_ "embed"
+	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/partyzanex/padmark/internal/adapters/web/middleware"
@@ -82,7 +84,7 @@ func (h *PageHandler) SuccessPage(w http.ResponseWriter, r *http.Request) {
 		ID:               id,
 		URL:              noteURL,
 		OpenURL:          openURL,
-		ExpiresLabel:     successExpiresLabel(query.Get("expires"), burnLabel),
+		ExpiresLabel:     successExpiresLabel(query.Get("expires"), query.Get("burn_ttl"), burnLabel),
 		Privacy:          string(privacy),
 		BurnAfterReading: burn,
 		Nonce:            middleware.NonceFromContext(r.Context()),
@@ -121,8 +123,9 @@ func successRecord(isLink, isFile bool, id, recordURL string) (string, recordKin
 }
 
 // successExpiresLabel is the expiry text of the success page for the "expires" query value.
-// burnLabel is the text for "immediately".
-func successExpiresLabel(raw, burnLabel string) string {
+// burnLabel is the text for "immediately". burnTTL is the "burn_ttl" query value: the delay of a
+// note that burns after its first read. That note has no expiry date before the first read.
+func successExpiresLabel(raw, burnTTL, burnLabel string) string {
 	switch {
 	case raw == "immediately":
 		return burnLabel
@@ -131,9 +134,28 @@ func successExpiresLabel(raw, burnLabel string) string {
 		if err == nil {
 			return "expires " + parsed.Format("Jan 2, 2006")
 		}
+	case burnTTL != "":
+		seconds, err := strconv.Atoi(burnTTL)
+		if err == nil && seconds > 0 {
+			return "burns " + burnDelayLabel(int64(seconds)) + " after the first read"
+		}
 	default:
 		// No expiry keeps the "never expires" label.
 	}
 
 	return "never expires"
+}
+
+// burnDelayLabel names a burn delay with the words of the "Delete" list of the editor, for
+// example "5 minutes". burnTTLOptions selects the matching option and adds one in seconds for a
+// delay that is not in the list, so the success page and the editor show the same words.
+func burnDelayLabel(seconds int64) string {
+	options := burnTTLOptions(seconds)
+	for index := range options {
+		if options[index].Selected {
+			return options[index].Label
+		}
+	}
+
+	return fmt.Sprintf("%d seconds", seconds)
 }

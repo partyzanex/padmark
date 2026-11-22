@@ -55,6 +55,7 @@ func TestFiles(t *testing.T) {
 		{name: "DeleteAsOwner", run: testFileDeleteAsOwner, files: true, accounts: true, allowedStatuses: nil},
 		{name: "PrivateFile", run: testPrivateFile, files: true, accounts: true, allowedStatuses: nil},
 		{name: "CancelUpload", run: testFileCancelUpload, files: true, accounts: false, allowedStatuses: nil},
+		{name: "BlockedStorage", run: testFileBlockedStorage, files: true, accounts: false, allowedStatuses: nil},
 	})
 }
 
@@ -449,4 +450,14 @@ func testFileCancelUpload(sess *uiSession) {
 	sess.must(sess.page.Unroute("**/files"))
 	sess.button("Upload file")
 	sess.uploadedFile()
+}
+
+// testFileBlockedStorage: a failed sessionStorage write does not hide a new file and its edit
+// code, as for a note.
+func testFileBlockedStorage(sess *uiSession) {
+	sess.blockSessionStorage()
+
+	_, code := sess.uploadTestFile()
+	require.NotEmpty(sess.t, code)
+	require.Empty(sess.t, sess.eval("() => window.name"))
 }
