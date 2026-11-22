@@ -883,22 +883,20 @@ func encodeExtValue(value string) string {
 		nibbleMask = 0x0f
 	)
 
-	var out strings.Builder
+	out := make([]byte, 0, len(value))
 
 	for idx := range len(value) {
 		char := value[idx]
 		if isAttrChar(char) {
-			out.WriteByte(char)
+			out = append(out, char)
 
 			continue
 		}
 
-		out.WriteByte('%')
-		out.WriteByte(hexDigits[char>>nibbleBits])
-		out.WriteByte(hexDigits[char&nibbleMask])
+		out = append(out, '%', hexDigits[char>>nibbleBits], hexDigits[char&nibbleMask])
 	}
 
-	return out.String()
+	return string(out)
 }
 
 // isAttrChar reports whether char is an attr-char of RFC 8187: a letter, a digit or one of

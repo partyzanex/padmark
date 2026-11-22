@@ -54,18 +54,26 @@ func GenerateCSRFToken(secret []byte, sessionID string) (string, error) {
 	}
 
 	nonceB64 := base64.RawURLEncoding.EncodeToString(nonce)
-	mac := csrfHMAC(nonceB64, csrfSessionBinding(sessionID), secret)
+
+	mac, err := csrfHMAC(nonceB64, csrfSessionBinding(sessionID), secret)
+	if err != nil {
+		return "", err
+	}
 
 	return nonceB64 + "." + base64.RawURLEncoding.EncodeToString(mac), nil
 }
 
 // csrfHMAC signs nonceB64 under secret, scoped to binding. The NUL separators keep the three
 // fields unambiguous.
-func csrfHMAC(nonceB64, binding string, secret []byte) []byte {
-	hm := hmac.New(sha256.New, secret)
-	hm.Write([]byte("padmark-csrf-v2\x00" + binding + "\x00" + nonceB64))
+func csrfHMAC(nonceB64, binding string, secret []byte) ([]byte, error) {
+	signer := hmac.New(sha256.New, secret)
 
-	return hm.Sum(nil)
+	_, err := signer.Write([]byte("padmark-csrf-v2\x00" + binding + "\x00" + nonceB64))
+	if err != nil {
+		return nil, fmt.Errorf("sign csrf token: %w", err)
+	}
+
+	return signer.Sum(nil), nil
 }
 
 // VerifyCSRFToken checks the HMAC signature for the state implied by sessionID (empty =
@@ -85,7 +93,11 @@ func VerifyCSRFToken(token string, secret []byte, sessionID string) bool {
 		return false
 	}
 
-	expected := csrfHMAC(nonceB64, csrfSessionBinding(sessionID), secret)
+	// A signing failure rejects the token: the check fails closed.
+	expected, err := csrfHMAC(nonceB64, csrfSessionBinding(sessionID), secret)
+	if err != nil {
+		return false
+	}
 
 	return hmac.Equal(gotMAC, expected)
 }

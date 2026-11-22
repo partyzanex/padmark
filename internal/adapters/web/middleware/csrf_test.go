@@ -17,7 +17,7 @@ func TestVerifyCSRFToken_RejectsEmptySecret(t *testing.T) {
 	// This signature is known to anyone without a server secret. It matched the
 	// verifier's deterministic empty-key HMAC before the fail-closed check.
 	nonce := "chosen-nonce"
-	forged := nonce + "." + base64.RawURLEncoding.EncodeToString(csrfHMAC(nonce, csrfAnonymousBinding, nil))
+	forged := nonce + "." + base64.RawURLEncoding.EncodeToString(signCSRF(t, nonce, nil))
 	require.False(t, VerifyCSRFToken(forged, nil, ""))
 	require.False(t, VerifyCSRFToken(forged, []byte{}, ""))
 
@@ -33,7 +33,7 @@ func TestVerifyCSRFToken_RejectsEmptySecret(t *testing.T) {
 func TestCSRFGuard_EmptySecretCannotAuthorizePOST(t *testing.T) {
 	for _, secret := range [][]byte{nil, {}} {
 		nonce := "attacker-nonce"
-		forged := nonce + "." + base64.RawURLEncoding.EncodeToString(csrfHMAC(nonce, csrfAnonymousBinding, secret))
+		forged := nonce + "." + base64.RawURLEncoding.EncodeToString(signCSRF(t, nonce, secret))
 		form := url.Values{csrfFieldName: {forged}}
 		req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form.Encode()))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -50,4 +50,14 @@ func TestCSRFGuard_EmptySecretCannotAuthorizePOST(t *testing.T) {
 		require.Equal(t, http.StatusForbidden, rec.Code)
 		require.False(t, called, "an unconfigured handler must reject even a matching forged cookie and form")
 	}
+}
+
+// signCSRF signs nonce for an anonymous caller, as an attacker who knows secret could.
+func signCSRF(t *testing.T, nonce string, secret []byte) []byte {
+	t.Helper()
+
+	mac, err := csrfHMAC(nonce, csrfAnonymousBinding, secret)
+	require.NoError(t, err)
+
+	return mac
 }
