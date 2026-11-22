@@ -33,8 +33,9 @@ const (
 	contentTagSize    = 16
 	wrappedKeySize    = contentNonceSize + aesKeySize + contentTagSize
 	maxKeyIDSize      = 64
-	// MaxContentSize bounds allocations when opening untrusted stored envelopes.
-	MaxContentSize = 64 << 20
+	// MaxContentSize bounds allocations when opening untrusted stored envelopes. It equals
+	// domain.MaxContentBytes, so note validation rejects content that Encrypt cannot store.
+	MaxContentSize = domain.MaxContentBytes
 	// Padded base64 encodes every started block of 3 bytes as 4 characters.
 	base64BlockBytes = 3
 	base64BlockChars = 4

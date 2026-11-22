@@ -2,12 +2,14 @@ package server
 
 import (
 	"context"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
 
 	"github.com/partyzanex/padmark/internal/clifactory"
+	"github.com/partyzanex/padmark/internal/domain"
 )
 
 // parseMaxContentLength runs the real flag set, with the environment of the test, and returns
@@ -47,6 +49,18 @@ func TestMaxContentLength_FromEnvironment(t *testing.T) {
 
 func TestMaxContentLength_Flag(t *testing.T) {
 	require.Equal(t, 100, parseMaxContentLength(t, "--max-content-length", "100"))
+}
+
+func TestMaxContentLength_StorageLimit(t *testing.T) {
+	require.Equal(t, domain.MaxContentBytes,
+		parseMaxContentLength(t, "--max-content-length", strconv.Itoa(domain.MaxContentBytes)))
+
+	err := NewApp().Run(t.Context(), []string{
+		"padmark", "serve", "--max-content-length", strconv.Itoa(domain.MaxContentBytes + 1),
+	})
+	// urfave/cli formats a validator error with %v, so only the text reaches the caller.
+	require.ErrorContains(t, err, errMaxContentLengthTooLarge.Error())
+	require.ErrorContains(t, err, strconv.Itoa(domain.MaxContentBytes), "the message gives the limit")
 }
 
 func TestMaxContentLength_RejectsNegative(t *testing.T) {

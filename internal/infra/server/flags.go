@@ -11,6 +11,7 @@ import (
 
 	"github.com/partyzanex/padmark/internal/adapters/web"
 	"github.com/partyzanex/padmark/internal/clifactory"
+	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/infra/crypto"
 	"github.com/partyzanex/padmark/internal/infra/logging"
 	"github.com/partyzanex/padmark/internal/usecases/auth"
@@ -415,7 +416,8 @@ func limitFlags() []cli.Flag {
 			flag.Value = DefaultMaxContentLength
 			flag.Validator = validateMaxContentLength
 			flag.Usage = "Maximum note content length in characters (0 = the --max-body-bytes value). " +
-				"Raise --max-body-bytes too: the request body holds the content"
+				"Raise --max-body-bytes too: the request body holds the content. " +
+				"A note holds at most 64 MiB in any case"
 		}),
 		clifactory.IntFlag(func(flag *cli.IntFlag) {
 			flag.Name = FlagRateLimit
@@ -448,6 +450,8 @@ var (
 	errInvalidShutdownTimeout  = errors.New("shutdown timeout must be larger than 0")
 	errInvalidMaxContentLength = errors.New("max content length must not be negative; " +
 		"use 0 for the --max-body-bytes value")
+	errMaxContentLengthTooLarge = errors.New("max content length must not be larger than 67108864 " +
+		"characters: a note holds at most 64 MiB")
 	errInvalidFileIdleTimeout = errors.New("file idle timeout must not be negative; use 0 for the default")
 	errInvalidUploadLimit     = errors.New("upload limit must not be negative; use 0 for the default")
 )
@@ -494,10 +498,15 @@ func validateFileIdleTimeout(value time.Duration) error {
 }
 
 // validateMaxContentLength rejects a negative --max-content-length; 0 selects the
-// --max-body-bytes value.
+// --max-body-bytes value. It also rejects a value above domain.MaxContentBytes: each character
+// has at least one byte, so the server can never accept such a note.
 func validateMaxContentLength(value int) error {
 	if value < 0 {
 		return errInvalidMaxContentLength
+	}
+
+	if value > domain.MaxContentBytes {
+		return errMaxContentLengthTooLarge
 	}
 
 	return nil

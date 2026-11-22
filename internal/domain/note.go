@@ -37,6 +37,11 @@ const MaxTitleLength = 500
 // the operator and not a constant.
 const DefaultMaxContentLength = 4 << 20
 
+// MaxContentBytes is the largest note content in bytes. Content encryption cannot store more
+// (crypto.MaxContentSize uses this value), so ValidateContentLength applies it for each
+// configured character limit.
+const MaxContentBytes = 64 << 20
+
 // Privacy controls who may read a note. The zero value is never used directly — nil on Note
 // means "not set" (defaults to PrivacyPublic on create, keeps the existing value on update),
 // mirroring the ContentType convention below.
@@ -86,9 +91,9 @@ type Note struct {
 }
 
 // ValidateContentLength returns ErrContentTooLarge when the content has more than limit
-// characters (runes).
+// characters (runes) or more than MaxContentBytes bytes.
 func (n *Note) ValidateContentLength(limit int) error {
-	if utf8.RuneCountInString(n.Content) > limit {
+	if len(n.Content) > MaxContentBytes || utf8.RuneCountInString(n.Content) > limit {
 		return ErrContentTooLarge
 	}
 

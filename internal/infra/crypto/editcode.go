@@ -135,9 +135,10 @@ func (*EditCodeHasher) IsStoredHash(value string) bool {
 
 // editCodeDigest computes SHA-256(salt || code).
 func editCodeDigest(salt []byte, code string) []byte {
-	sum := sha256.New()
-	sum.Write(salt)
-	sum.Write([]byte(code))
+	input := make([]byte, 0, len(salt)+len(code))
+	input = append(input, salt...)
+	input = append(input, code...)
+	sum := sha256.Sum256(input)
 
-	return sum.Sum(nil)
+	return sum[:]
 }

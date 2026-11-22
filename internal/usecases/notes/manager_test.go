@@ -1285,6 +1285,26 @@ func (s *ManagerTestSuite) TestMaxContentLength_Configured() {
 	s.Require().NoError(err, "a raised limit admits content above the default")
 }
 
+// TestMaxContentLength_ByteLimit checks that content above domain.MaxContentBytes gets
+// domain.ErrContentTooLarge before the encryptor, also when the character limit is higher.
+func (s *ManagerTestSuite) TestMaxContentLength_ByteLimit() {
+	s.manager.WithMaxContentLength(domain.MaxContentBytes * 2)
+
+	note := &domain.Note{
+		Content:   strings.Repeat("a", domain.MaxContentBytes+1),
+		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
+		Privacy: nil, OwnerID: nil, ID: "", Title: "",
+		ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
+		BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
+	}
+
+	_, err := s.manager.Create(s.T().Context(), note)
+	s.Require().ErrorIs(err, domain.ErrContentTooLarge)
+
+	_, err = s.manager.Update(s.T().Context(), "abc-123", "secret123456", uuid.Nil, note)
+	s.Require().ErrorIs(err, domain.ErrContentTooLarge)
+}
+
 // ── render cache ──.
 
 // statefulRenderCache backs the generated MockRenderCache with a map so the tests observe real

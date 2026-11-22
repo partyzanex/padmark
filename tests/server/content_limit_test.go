@@ -59,4 +59,12 @@ func TestNoteContentLimit(t *testing.T) {
 		require.Equal(t, http.StatusCreated, postNoteStatus(t, baseURL, 100))
 		require.Equal(t, http.StatusUnprocessableEntity, postNoteStatus(t, baseURL, 101))
 	})
+
+	// The encryption layer holds at most 64 MiB of content. A body limit above that must not let
+	// a longer note reach the encryption step, where it was an internal error (500).
+	t.Run("content over the storage byte limit", func(t *testing.T) {
+		baseURL, _ := servertest.Start(t, binary, t.TempDir(), "serve", "--max-body-bytes", "83886080")
+
+		require.Equal(t, http.StatusUnprocessableEntity, postNoteStatus(t, baseURL, 64<<20+1))
+	})
 }

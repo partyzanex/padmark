@@ -1035,7 +1035,9 @@ Rolling back this migration also revokes invites, since raw tokens cannot be rec
 Note content is limited by `--max-content-length` (characters); the default `0` uses the
 `--max-body-bytes` value, so `PADMARK_MAX_BODY_BYTES` alone sets both limits. A longer note is
 rejected with `422`. The request-body limit (`--max-body-bytes`, 4 MB) also applies: to store a
-larger note, raise it. Rendered HTML of repeatedly viewed
+larger note, raise it. Content encryption holds at most 64 MiB, so a note larger than 64 MiB in
+bytes also gets `422`, and the server refuses a `--max-content-length` above 67108864 at startup.
+Rendered HTML of repeatedly viewed
 notes is cached in memory for up to two minutes (128 entries, never for burn-after-reading notes)
 and dropped on update and delete.
 
@@ -1410,7 +1412,7 @@ There is no destructive encryption down-migration, and older binaries cannot rea
 | `--write-timeout` | `PADMARK_WRITE_TIMEOUT` | `60` | HTTP write timeout in seconds |
 | `--max-header-bytes` | `PADMARK_MAX_HEADER_BYTES` | `65536` | Max request header size in bytes (64 KB) |
 | `--max-body-bytes` | `PADMARK_MAX_BODY_BYTES` | `4194304` | Max request body size in bytes (4 MB) |
-| `--max-content-length` | `PADMARK_MAX_CONTENT_LENGTH` | `0` | Max note content length in characters; `0` = the `--max-body-bytes` value. Raise `--max-body-bytes` too: the request body holds the content |
+| `--max-content-length` | `PADMARK_MAX_CONTENT_LENGTH` | `0` | Max note content length in characters; `0` = the `--max-body-bytes` value. Raise `--max-body-bytes` too: the request body holds the content. A note holds at most 64 MiB; values above 67108864 stop startup |
 | `--tls-cert` | `PADMARK_TLS_CERT` | — | TLS certificate path |
 | `--tls-key` | `PADMARK_TLS_KEY` | — | TLS private key path |
 | `--http-redirect-addr` | `PADMARK_HTTP_REDIRECT_ADDR` | — | HTTP → HTTPS redirect listener (TLS only) |

@@ -307,6 +307,22 @@ func TestNote_ValidateContentLength(t *testing.T) {
 	require.NoError(t, contentNote(strings.Repeat("é", limit)).ValidateContentLength(limit))
 }
 
+// TestNote_ValidateContentLength_ByteLimit: a character limit above the content that encryption
+// can store does not let a longer note through.
+func TestNote_ValidateContentLength_ByteLimit(t *testing.T) {
+	t.Parallel()
+
+	const limit = MaxContentBytes * 2
+
+	require.NoError(t, contentNote(strings.Repeat("a", MaxContentBytes)).ValidateContentLength(limit))
+	require.ErrorIs(t, contentNote(strings.Repeat("a", MaxContentBytes+1)).ValidateContentLength(limit),
+		ErrContentTooLarge)
+
+	// Four-byte runes: fewer characters than the limit, but more bytes than MaxContentBytes.
+	emoji := strings.Repeat("😀", MaxContentBytes/4+1)
+	require.ErrorIs(t, contentNote(emoji).ValidateContentLength(MaxContentBytes), ErrContentTooLarge)
+}
+
 // TestNote_Validate_IgnoresContentLength: the limit is a server setting, so Validate does not
 // check it.
 func TestNote_Validate_IgnoresContentLength(t *testing.T) {
