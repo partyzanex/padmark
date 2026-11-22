@@ -14,9 +14,30 @@ import (
 )
 
 // editorPreviewScripts are the same-origin scripts that render the editor preview in the browser.
-// The order is significant: editor-preview.js uses the globals of the two vendored libraries.
+// The order is significant: editor-preview.js uses the globals of the other scripts.
 func editorPreviewScripts() []string {
-	return []string{"/static/marked.umd.js", "/static/purify.min.js", "/static/editor-preview.js"}
+	return []string{"/static/marked.umd.js", "/static/purify.min.js", "/static/math.js", "/static/editor-preview.js"}
+}
+
+// katexAssets are the files that math.js loads on the first formula of the preview.
+func katexAssets() map[string]string {
+	return map[string]string{
+		"data-katex-js":  "/static/katex/katex.min.js",
+		"data-katex-css": "/static/katex/katex.min.css",
+	}
+}
+
+// assetVersion requests a static file and returns its content-hash version.
+func assetVersion(t *testing.T, router http.Handler, path string) string {
+	t.Helper()
+
+	asset := httptest.NewRecorder()
+	router.ServeHTTP(asset, httptest.NewRequest(http.MethodGet, path, nil))
+	require.Equal(t, http.StatusOK, asset.Code, "%s must be embedded", path)
+
+	sum := sha256.Sum256(asset.Body.Bytes())
+
+	return hex.EncodeToString(sum[:])[:12]
 }
 
 // requireEditorPreviewScripts makes sure that the editor page loads each preview script from
@@ -39,19 +60,19 @@ func requireEditorPreviewScripts(t *testing.T, router http.Handler, path string)
 	last := -1
 
 	for _, script := range editorPreviewScripts() {
-		asset := httptest.NewRecorder()
-		router.ServeHTTP(asset, httptest.NewRequest(http.MethodGet, script, nil))
-		require.Equal(t, http.StatusOK, asset.Code, "%s must be embedded", script)
-		assert.Contains(t, asset.Header().Get("Content-Type"), "javascript", script)
-
-		sum := sha256.Sum256(asset.Body.Bytes())
-		tag := `<script src="` + script + `?p=` + hex.EncodeToString(sum[:])[:12] + `" nonce="` + nonce + `">`
+		// math.js has more attributes after the nonce, so the tag is matched without its end.
+		tag := `<script src="` + script + `?p=` + assetVersion(t, router, script) + `" nonce="` + nonce + `"`
 
 		index := strings.Index(body, tag)
 		require.GreaterOrEqual(t, index, 0, "the editor must load %s with a version and the nonce", script)
 		assert.Greater(t, index, last, "%s must load after the scripts it uses", script)
 
 		last = index
+	}
+
+	for attribute, path := range katexAssets() {
+		value := attribute + `="` + path + `?p=` + assetVersion(t, router, path) + `"`
+		assert.Contains(t, body, value, "math.js must get the KaTeX file %s with its version", path)
 	}
 
 	assert.Contains(t, body, `id="preview"`, "the editor must have the preview pane")

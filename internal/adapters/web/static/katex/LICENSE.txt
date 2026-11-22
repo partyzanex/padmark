@@ -1,0 +1,45 @@
+Vendored third-party asset: katex/ (katex.min.js, katex.min.css, fonts/*.woff2)
+
+Package:  katex (https://github.com/KaTeX/KaTeX)
+Version:  0.19.1 (released 2026-10-23; pinned, never "latest")
+Source:   https://registry.npmjs.org/katex/-/katex-0.19.1.tgz -> package/dist/katex.min.js,
+          package/dist/katex.min.css and package/dist/fonts/*.woff2
+Tarball:  sha1 ba2685811cdbffc54dfb7d55bd440c6cc6bb8795 (npm dist.shasum)
+          sha512-jG8uKntjSEcm2EpQOh0XturpPuuC9r3Sq5HLHdsFdWZT27E672SF19QEi+of0/YeOy15lDgRhKvr5614uRrEfA== (npm dist.integrity)
+Files:    katex.min.js  sha256 fa140498b8cfc8302cbe5e7cb1bdbc1f952bc38b3fa258ede09e73edbf9a74bc, 273081 bytes
+          katex.min.css sha256 00e0b094171b07f58422075f469b4feac2b2f7bce1aeec943c08da4d697f4dcf, 24793 bytes
+License:  MIT (reproduced below)
+
+Use: static/math.js draws the TeX formulas of a note page and of the editor preview with
+katex.render. The files are embedded in the binary and served from /static/katex/ under the
+global CSP (script-src 'self', style-src 'self', font-src 'self'), with no third-party origin.
+Only the woff2 fonts are vendored: katex.min.css lists woff2 first, and every supported browser
+loads woff2, so it never requests the woff and ttf fallbacks.
+
+Re-fetch (then verify the tarball against `npm view katex@<ver> dist.integrity` and update the
+hashes above):
+  curl -fsSL https://registry.npmjs.org/katex/-/katex-0.19.1.tgz -o katex.tgz && tar -xzf katex.tgz
+  cp package/dist/katex.min.js package/dist/katex.min.css internal/adapters/web/static/katex/
+  cp package/dist/fonts/*.woff2 internal/adapters/web/static/katex/fonts/
+
+The MIT License (MIT)
+
+Copyright (c) 2013-2020 Khan Academy and other contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

@@ -2910,6 +2910,12 @@ a.copy-value:hover { color: var(--accent-text); }
 .markdown-body blockquote > :first-child { margin-top: 0; }
 .markdown-body blockquote > :last-child { margin-bottom: 0; }
 
+/* TeX formulas (static/math.js draws them with KaTeX). A wide display formula scrolls in its own
+   box, so the page keeps its width on a phone. A formula that KaTeX refuses shows its source. */
+.markdown-body div.math-display { margin: 0 0 var(--base-size-16); overflow-x: auto; overflow-y: hidden; }
+.markdown-body div.math-display > .katex-display { margin: 0; padding: 4px 0; }
+.markdown-body .math-error { font-family: var(--font-mono); font-size: 0.9em; color: var(--warn); }
+
 .markdown-body h1 tt, .markdown-body h1 code,
 .markdown-body h2 tt, .markdown-body h2 code,
 .markdown-body h3 tt, .markdown-body h3 code,

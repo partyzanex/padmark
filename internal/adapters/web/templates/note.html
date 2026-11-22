@@ -7,6 +7,7 @@
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     {{template "theme-head" .Nonce}}
     <link rel="stylesheet" href="/static/style.css?p={{styleVersion}}">
+    {{if .HasMath}}<link rel="stylesheet" href="/static/katex/katex.min.css?p={{assetVersion "katex/katex.min.css"}}">{{end}}
 </head>
 <body>
 <div class="wrapper wrapper--note">
@@ -346,5 +347,12 @@
     if (location.hash.length > 1) jump(location.hash.slice(1), false);
     {{end}}
 </script>
+{{if .HasMath}}
+<script src="/static/katex/katex.min.js?p={{assetVersion "katex/katex.min.js"}}" nonce="{{.Nonce}}" defer></script>
+<script src="/static/math.js?p={{assetVersion "math.js"}}" nonce="{{.Nonce}}" defer
+        data-math-root=".prose.markdown-body"
+        data-katex-js="/static/katex/katex.min.js?p={{assetVersion "katex/katex.min.js"}}"
+        data-katex-css="/static/katex/katex.min.css?p={{assetVersion "katex/katex.min.css"}}"></script>
+{{end}}
 </body>
 </html>

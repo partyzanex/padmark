@@ -65,6 +65,11 @@ v0.5.0 follows **v0.4.0**.
 - Documentation: "Files setup" in the README (bucket policy, lifecycle rule for incomplete
   multipart uploads, reverse proxy limits), commented `PADMARK_S3_*` lines in
   `docker-compose.yml`, and the first architecture decision records (ADRs) in `docs/adr/`.
+- TeX formulas in notes, as LLM (large language model) output writes them: `$…$` and `\(…\)` in
+  a line of text, `$$…$$` in a line, and a block that starts a line with `$$` or `\[`. The note
+  page and the editor preview draw them with KaTeX 0.19.1. KaTeX, its CSS and fonts are embedded
+  in the binary and served from `/static/katex/`; a note without a formula does not load them.
+  "$5 and $10" stays text. A formula that KaTeX cannot parse shows its TeX source.
 
 ### Changed
 

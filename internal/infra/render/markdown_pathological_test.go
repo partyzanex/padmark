@@ -216,6 +216,13 @@ func pathoCases() []pathoCase {
 		{name: "backtick_unmatched", gen: func(n int) string { return fill("`a``a", n) }, probe: 512 << 10},
 		// One line of N '>' re-scans the line prefix per level (text.reader.LineOffset).
 		{name: "blockquote_nested_1line", gen: func(n int) string { return fill(">", n) }, probe: 128 << 10},
+		// Formula openers without a closer on one long line (math.go). A scan to the end of the
+		// line for each opener would be quadratic; the scans stop at the next opener instead.
+		{name: "math_dollar_unclosed", gen: func(n int) string { return fill("$a", n) }, probe: 512 << 10},
+		{name: "math_dollar_spaced", gen: func(n int) string { return fill("$a $", n) }, probe: 512 << 10},
+		{name: "math_dollars_unclosed", gen: func(n int) string { return fill("$$a", n) }, probe: 512 << 10},
+		{name: "math_paren_unclosed", gen: func(n int) string { return fill(`\(a`, n) }, probe: 512 << 10},
+		{name: "math_paren_mixed", gen: func(n int) string { return fill(`\(a$b\[`, n) }, probe: 512 << 10},
 		// Mildly super-linear on stock goldmark (exponent 1.4–1.8): measured, not budget-tested.
 		linearPathoCase("list_nested_indent", func(n int) string {
 			return staircase(n, 1000, func(d int) string { return strings.Repeat("  ", d) + "- x\n" })
@@ -246,6 +253,9 @@ func pathoCases() []pathoCase {
 		linearPathoCase("linkify_urls", func(n int) string { return fill("www.example.com ", n) }),
 		linearPathoCase("linkify_partial", func(n int) string { return fill("http://", n) }),
 		linearPathoCase("hard_wraps", func(n int) string { return fill("a\n", n) }),
+		linearPathoCase("math_inline_pairs", func(n int) string { return fill(`$x_i$ \(y_i\) `, n) }),
+		linearPathoCase("math_blocks", func(n int) string { return fill("$$\n\\sum_{i=1}^{n}x_i\n$$\n", n) }),
+		linearPathoCase("math_block_unclosed", func(n int) string { return "$$\n" + fill("x_i\n", n-3) }),
 		linearPathoCase("headings_unique", func(n int) string {
 			return staircase(n, 1<<30, func(d int) string { return fmt.Sprintf("# h%d\n", d) })
 		}),

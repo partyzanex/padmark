@@ -1048,6 +1048,31 @@ func (s *HandlerSuite) TestGetNote_HTML() {
 	s.Contains(body, "HTML note")
 	s.Contains(body, "<h1>Heading</h1>")
 	s.Contains(body, "<strong>bold</strong>")
+	s.NotContains(body, "/static/katex/", "a note without formulas must not load KaTeX")
+	s.NotContains(body, "/static/math.js")
+}
+
+// TestGetNote_HTML_LoadsKaTeXForFormulas checks that a note with a formula loads KaTeX from this
+// server: the stylesheet in the head and the scripts with the page nonce.
+func (s *HandlerSuite) TestGetNote_HTML_LoadsKaTeXForFormulas() {
+	note := newTestNote("Mean", "$$\\bar x$$")
+	s.manager.EXPECT().GetRendered(gomock.Any(), testID).
+		Return(note, `<div class="math-display">\bar x</div>`, nil)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
+	r.Header.Set("Accept", "text/html")
+
+	s.router.ServeHTTP(w, r)
+
+	s.Require().Equal(http.StatusOK, w.Code)
+
+	body := w.Body.String()
+	s.Contains(body, `<div class="math-display">\bar x</div>`)
+	s.Regexp(`<link rel="stylesheet" href="/static/katex/katex\.min\.css\?p=[0-9a-f]+">`, body)
+	s.Regexp(`<script src="/static/katex/katex\.min\.js\?p=[0-9a-f]+" nonce="[^"]+" defer>`, body)
+	s.Regexp(`<script src="/static/math\.js\?p=[0-9a-f]+" nonce="[^"]+" defer`, body)
+	s.Contains(body, `data-math-root=".prose.markdown-body"`)
 }
 
 func (s *HandlerSuite) TestGetNote_HTML_WithExpiry() {

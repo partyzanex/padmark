@@ -8,6 +8,7 @@ import (
 	"html/template"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/partyzanex/padmark/internal/adapters/web/middleware"
@@ -85,7 +86,13 @@ type noteViewData struct {
 	CanEdit           bool
 	NeedsConfirmation bool
 	ShowContents      bool
+	// HasMath loads KaTeX on the page; only notes with a formula pay for it.
+	HasMath bool
 }
+
+// mathClassMarker is in the rendered HTML of a note that has a TeX formula: the renderer
+// (internal/infra/render/math.go) writes each formula into a math-inline or math-display element.
+const mathClassMarker = `class="math-`
 
 // Layouts of the dates on the reader pages of notes, short links and files. The page script
 // replaces each date with the local time of the reader.
@@ -126,6 +133,7 @@ func toNoteViewData(note *domain.Note, rendered string) noteViewData {
 		CanEdit:           false,
 		NeedsConfirmation: false,
 		ShowContents:      note.ContentsSidebar(),
+		HasMath:           strings.Contains(rendered, mathClassMarker),
 	}
 }
 
@@ -182,8 +190,9 @@ func toBurnInterstitialViewData(note *domain.Note, tok string) noteViewData {
 		RawContent: "",
 		ExpiresISO: "",
 		CanEdit:    false,
-		// The interstitial does not show the note, so it has no headings to list.
+		// The interstitial does not show the note, so it has no headings to list and no formulas.
 		ShowContents: false,
+		HasMath:      false,
 	}
 }
 

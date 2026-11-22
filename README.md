@@ -542,6 +542,10 @@ Go to `/`, write your note and select **Publish note**. You get a URL and your `
 - **Editor.** The Write, Split and Preview views show the Markdown source, the result, or both.
   A title and a slug are optional. A note without a title takes the first text line as its
   title, at most 80 characters.
+- **Formulas.** TeX formulas show on the note page and in the preview: `$e_i$` or `\(e_i\)` in
+  a line, and a block between `$$` lines or `\[` and `\]` lines. KaTeX draws them in the
+  browser; it is embedded in the binary, so the page loads nothing from other sites. A `$` that
+  has a space after it, or a closing `$` before a digit, is text: "$5 and $10" stays as written.
 - **Settings.** The panel beside the editor sets who can read the note, burn after reading,
   the "On this page" contents sidebar and the edit code. You can type an edit code of 8 to 128
   characters or generate one; a blank field gets a random code.

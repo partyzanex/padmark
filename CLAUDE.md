@@ -170,6 +170,9 @@ Dependencies point inward: adapters and infrastructure depend on usecases and do
   variables, spacing, classes and existing colors instead of introducing another style system.
 - Fonts are self-hosted Onest (interface), Source Serif 4 (display/prose) and JetBrains Mono
   (code, slugs, labels).
+- TeX formulas: `infra/render/math.go` marks them, `static/math.js` draws them with the vendored
+  `static/katex/` (provenance in its `LICENSE.txt`). The preview has the same rules in
+  `static/editor-preview.js`; change both together. Load nothing from other origins.
   Themes are `light`, `dim` (default) and `dark`, selected through `[data-theme]`.
 - Use `html/template`, keep CSP-compatible script/style loading, and check affected forms and
   desktop/mobile screenshots with `make test-ui` after a frontend change.

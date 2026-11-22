@@ -25,12 +25,123 @@
   marked.use({
     gfm: true,
     breaks: true,
+    extensions: [mathBlockExtension(), mathInlineExtension()],
     renderer: {
       checkbox: function (token) {
         return escapeText(token.raw);
       },
     },
   });
+
+  // The math extensions follow the rules of the server (internal/infra/render/math.go), so the
+  // preview finds the same formulas: $…$, $$…$$ and \(…\) in a line of text, and a block that
+  // starts a line with $$ or \[. A formula does not cross a backtick. static/math.js draws them.
+  function mathBlockExtension() {
+    var OPEN = /^ {0,3}(\$\$|\\\[)([^\n]*)(?:\n|$)/;
+
+    return {
+      name: "mathBlock",
+      level: "block",
+      start: function (src) {
+        var match = /(?:^|\n) {0,3}(?:\$\$|\\\[)/.exec(src);
+        if (!match) {
+          return undefined;
+        }
+
+        return match[0].charAt(0) === "\n" ? match.index + 1 : match.index;
+      },
+      tokenizer: function (src) {
+        var open = OPEN.exec(src);
+        if (!open) {
+          return undefined;
+        }
+
+        var closer = open[1] === "$$" ? "$$" : "\\]";
+        var rest = open[2].replace(/\s+$/, "");
+
+        if (rest.trim()) {
+          // One line: the line ends with the closing delimiter, with TeX source before it.
+          var inner = rest.slice(0, rest.length - closer.length);
+          if (rest.length < closer.length || rest.slice(-closer.length) !== closer || !inner.trim()) {
+            return undefined;
+          }
+
+          return { type: "mathBlock", raw: open[0], text: inner };
+        }
+
+        // Several lines, to the line that ends with the closing delimiter or to the end.
+        var raw = open[0];
+        var lines = [];
+        var body = src.slice(raw.length);
+        while (body) {
+          var end = body.indexOf("\n");
+          var line = end < 0 ? body : body.slice(0, end);
+          var taken = end < 0 ? body : body.slice(0, end + 1);
+          raw += taken;
+          body = body.slice(taken.length);
+
+          var trimmed = line.replace(/\s+$/, "");
+          if (trimmed.slice(-closer.length) === closer) {
+            var last = trimmed.slice(0, trimmed.length - closer.length);
+            if (last.trim()) {
+              lines.push(last);
+            }
+            break;
+          }
+
+          lines.push(line);
+        }
+
+        return { type: "mathBlock", raw: raw, text: lines.join("\n") };
+      },
+      renderer: function (token) {
+        return '<div class="math-display">' + escapeText(token.text) + "</div>\n";
+      },
+    };
+  }
+
+  function mathInlineExtension() {
+    // A backslash escapes the next character; an unescaped backtick ends the search.
+    var DISPLAY = /^\$\$((?:\\[^\n]|[^\\$\n`])+)\$\$/;
+    var DOLLAR = /^\$((?:\\[^\n]|[^\\$\n`])+)\$(?!\d)/;
+    var PARENS = /^\\\(((?:\\[^()\n]|[^\\\n`])+)\\\)/;
+
+    function token(raw, text, display) {
+      return { type: "mathInline", raw: raw, text: text, display: display };
+    }
+
+    return {
+      name: "mathInline",
+      level: "inline",
+      start: function (src) {
+        var index = src.search(/\$|\\\(/);
+        return index < 0 ? undefined : index;
+      },
+      tokenizer: function (src) {
+        var match;
+        if (src.slice(0, 2) === "$$") {
+          match = DISPLAY.exec(src);
+          return match && match[1].trim() ? token(match[0], match[1], true) : undefined;
+        }
+
+        if (src.charAt(0) === "$") {
+          match = DOLLAR.exec(src);
+          if (!match || /^\s|\s$/.test(match[1])) {
+            return undefined;
+          }
+
+          return token(match[0], match[1], false);
+        }
+
+        match = PARENS.exec(src);
+        return match && match[1].trim() ? token(match[0], match[1], false) : undefined;
+      },
+      renderer: function (token) {
+        var name = token.display ? "math-display" : "math-inline";
+        return '<span class="' + name + '">' + escapeText(token.text) + "</span>";
+      },
+    };
+  }
 
   // SANITIZE_NAMED_PROPS puts user id/name attributes in the user-content- namespace, as the
   // server does, so the preview cannot shadow #editor, #charCount and the other page elements.
@@ -100,6 +211,8 @@
       preview.replaceChildren(empty);
     } else {
       preview.replaceChildren(DOMPurify.sanitize(marked.parse(text, { async: false }), PURIFY_CONFIG));
+      // KaTeX draws after DOMPurify: its own output is trusted, the Markdown is not.
+      window.padmarkMath.render(preview);
     }
 
     lastCost = performance.now() - started;

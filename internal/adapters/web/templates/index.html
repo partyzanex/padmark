@@ -173,6 +173,9 @@
 
 <script src="/static/marked.umd.js?p={{assetVersion "marked.umd.js"}}" nonce="{{.Nonce}}"></script>
 <script src="/static/purify.min.js?p={{assetVersion "purify.min.js"}}" nonce="{{.Nonce}}"></script>
+<script src="/static/math.js?p={{assetVersion "math.js"}}" nonce="{{.Nonce}}"
+        data-katex-js="/static/katex/katex.min.js?p={{assetVersion "katex/katex.min.js"}}"
+        data-katex-css="/static/katex/katex.min.css?p={{assetVersion "katex/katex.min.css"}}"></script>
 <script src="/static/editor-preview.js?p={{assetVersion "editor-preview.js"}}" nonce="{{.Nonce}}"></script>
 <script nonce="{{.Nonce}}">
     const editMode = {{.EditMode}};

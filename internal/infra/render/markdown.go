@@ -20,10 +20,12 @@ import (
 // produced with the same prefix and must stay in sync (regenerate via chromahtml.WriteCSS).
 const chromaClassPrefix = "chroma-"
 
-// reChromaClass matches a class attribute consisting solely of space-separated chroma-* tokens
-// (e.g. "chroma-chroma chroma-dark", "chroma-kd"). This blocks user Markdown from injecting
-// arbitrary application classes (cosmetic UI spoofing) while preserving syntax highlighting.
-var reChromaClass = regexp.MustCompile(`^chroma-[a-z0-9]+( chroma-[a-z0-9]+)*$`)
+// reContentClass matches a class attribute consisting solely of space-separated chroma-* tokens
+// (e.g. "chroma-chroma chroma-dark", "chroma-kd"), or one formula class (math.go). This blocks
+// user Markdown from injecting arbitrary application classes (cosmetic UI spoofing) while
+// preserving syntax highlighting and formulas.
+var reContentClass = regexp.MustCompile(`^(chroma-[a-z0-9]+( chroma-[a-z0-9]+)*|` +
+	mathInlineClass + `|` + mathDisplayClass + `)$`)
 
 // userContentIDPrefix is the namespace for every element ID that originates from user content
 // (auto-generated heading IDs and raw-HTML id attributes). Application elements never use it, so
@@ -57,7 +59,8 @@ type Renderer struct {
 	policy *bluemonday.Policy
 }
 
-// NewRenderer returns a Renderer with tables, strikethrough, autolinks and syntax highlighting enabled.
+// NewRenderer returns a Renderer with tables, strikethrough, autolinks, TeX formulas and syntax
+// highlighting enabled.
 func NewRenderer() *Renderer {
 	gmd := goldmark.New(
 		// Guarded default parsers: render time stays linear in note size (see parse_guards.go).
@@ -66,6 +69,7 @@ func NewRenderer() *Renderer {
 			extension.Table,
 			strikethroughExtension{},
 			linkifyExtension{},
+			newMathExtension(),
 			highlighting.NewHighlighting(
 				highlighting.WithStyle("github-dark"),
 				highlighting.WithFormatOptions(
@@ -89,7 +93,7 @@ func NewRenderer() *Renderer {
 	policy := newUGCPolicy()
 	policy.RequireNoFollowOnLinks(true)
 	policy.AddTargetBlankToFullyQualifiedLinks(true)
-	policy.AllowAttrs("class").Matching(reChromaClass).OnElements("span", "code", "pre", "div")
+	policy.AllowAttrs("class").Matching(reContentClass).OnElements("span", "code", "pre", "div")
 
 	return &Renderer{
 		md:     gmd,
