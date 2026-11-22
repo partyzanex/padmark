@@ -309,8 +309,8 @@ checks still read current database state, including changes made by another repl
 ### HTTP
 
 The HTTP adapter defines its own `NoteManager`, `LinkManager` and auth interfaces.
-`NewHandler(manager, linkManager, log)` receives those interfaces rather than concrete
-usecase managers. `NewRouter(handler, ogenHandler, *RouterOptions)` returns `(http.Handler, error)`.
+`NewHandler(manager, linkManager, resolver, log)` receives those interfaces rather than concrete
+usecase managers. `resolver` is a `SlugResolver`: production passes `slugs.Resolver`. `NewRouter(handler, ogenHandler, *RouterOptions)` returns `(http.Handler, error)`.
 Tests without a database pinger use `NoPinger{}`.
 
 `http/middleware/` owns authentication, CSRF/cookies, request context, proxy detection,
@@ -319,9 +319,12 @@ middleware never imports the parent adapter. `http/response/` supplies the share
 format without introducing a dependency cycle. Resource privacy remains in the handlers/usecases.
 
 `LinkHandler` serves the creation form at `/links`, the link page at `GET /links/{id}` and
-redirects at `/r/{id}`. `Handler.GetNoteOrLink` serves the bare `/{id}`:
-it reads the note first and calls the link redirect only when no note has the slug. Editor reads
-and saves do not consume burn links.
+redirects at `/r/{id}`. `Handler.GetNoteOrLink` serves the bare `/{id}`. It asks
+`slugs.Resolver.KindOf` for the kind of the slug: one primary-key read of `slug_namespace`, or no
+read for a slug with `/`, which only a note can have. Then it calls only the Manager of that kind.
+A slug without a row gets the negotiated not-found answer of a note read. An expired record keeps
+its row until a read, a sweep or a new record deletes it, so its Manager still answers `410`.
+Editor reads and saves do not consume burn links.
 
 Notes, short links and files have one user flow. The create form goes to `/success`; **Open**
 goes to the page of the record; **Edit** on that page goes to `/edit/{id}`; **Save** goes back to
@@ -329,8 +332,8 @@ the page of the record. The page of a note or a file is `/{id}`. The page of a s
 `/links/{id}`, because `/{id}` of a link is the redirect: `htmlOr` sends a client that prefers
 `text/html` to `LinkHandler.LinkPage` and other clients to the ogen JSON read. The link page uses
 `Inspect`, so it does not count a view or burn the link, and it applies the privacy and expiry
-checks of the JSON read. `Handler.EditPage` serves `/edit/{id...}` for the three kinds: it reads the note,
-then the short link, then the file, like `GetNoteOrLink`. The old URLs `/links/{id}/edit` and
+checks of the JSON read. `Handler.EditPage` serves `/edit/{id...}` for the three kinds: it asks the resolver for
+the kind, like `GetNoteOrLink`, and opens only the editor of that kind. The old URLs `/links/{id}/edit` and
 `/files/{id}/edit` answer `301` to `/edit/{id}`. `headerView.Record` sets the target of the
 **New** button of a reader page to the create form of the same kind. With `--disable-api`,
 `isLinkPage` and the `isLinkPageRequest` matcher keep the link pages open, as `isFilePage` keeps
@@ -378,7 +381,7 @@ limit also limits memory. When `Send` fails after the first byte, the handler pa
 `http.ErrAbortHandler`. `WithRecovery` panics again with that value, so `net/http` closes the
 connection without an error log record and the client sees a broken transfer.
 
-`GetNoteOrLink` calls `serveFileIfExists` for a single-segment slug. `wantsFilePage` sends a
+`GetNoteOrLink` calls `serveFileOrPage` for a file slug. `wantsFilePage` sends a
 browser to the file page (`file.html`), which has the article layout of the note page. Other
 clients, `*/*` included, get the content. The success page has the kind `file`, and the header
 shows the **File** tab only when files are on.

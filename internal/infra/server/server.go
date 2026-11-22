@@ -621,7 +621,7 @@ func buildHandlers(
 
 	authStores, revealStore := buildAuthRepos(store.name, store.db, log)
 
-	handler := web.NewHandler(manager, linkManager, log).
+	handler := web.NewHandler(manager, linkManager, newSlugResolver(store), log).
 		WithRevealStore(revealStore).
 		WithFileTransferLimits(fileTransferLimitsFromFlags(cmd))
 

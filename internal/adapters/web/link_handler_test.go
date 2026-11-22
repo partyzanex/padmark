@@ -47,7 +47,7 @@ type testLinkResponse struct {
 func (s *HandlerSuite) newLinkRouter(directRedirect bool) http.Handler {
 	s.T().Helper()
 
-	handler := web.NewHandler(s.manager, s.linkManager, discardLog())
+	handler := web.NewHandler(s.manager, s.linkManager, s.slugs, discardLog())
 	ogen := web.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
 
 	opts := web.RouterOptions{
@@ -70,7 +70,7 @@ func (s *HandlerSuite) newLinkRouter(directRedirect bool) http.Handler {
 func (s *HandlerSuite) newLinkRouterWithTOTPAuth() http.Handler {
 	s.T().Helper()
 
-	handler := web.NewHandler(s.manager, s.linkManager, discardLog()).
+	handler := web.NewHandler(s.manager, s.linkManager, s.slugs, discardLog()).
 		WithAuthManager(s.authMgr)
 	ogen := web.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
 

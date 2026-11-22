@@ -16,7 +16,9 @@ import (
 	"github.com/partyzanex/padmark/internal/adapters/web"
 	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/infra/linkcache"
+	sqliterepo "github.com/partyzanex/padmark/internal/infra/storage/sqlite"
 	"github.com/partyzanex/padmark/internal/usecases/auth"
+	"github.com/partyzanex/padmark/internal/usecases/slugs"
 )
 
 func TestLinkCacheReplicas(t *testing.T) {
@@ -34,7 +36,9 @@ func TestLinkCacheReplicas(t *testing.T) {
 	notes, links := newOwnerFlowManagers(t, env.db, log)
 	cache := linkcache.NewDefault(log)
 	links.WithCache(cache)
-	handler := web.NewHandler(notes, links, log).WithAuthManager(env.authMgr)
+
+	resolver := slugs.NewResolver(sqliterepo.NewSlugRepository(env.db))
+	handler := web.NewHandler(notes, links, resolver, log).WithAuthManager(env.authMgr)
 	ogen := web.NewOgenHandler(notes, links, web.NoPinger{}, log)
 	router, err := web.NewRouter(handler, ogen, &web.RouterOptions{
 		MaxBodyBytes: 256 * 1024,

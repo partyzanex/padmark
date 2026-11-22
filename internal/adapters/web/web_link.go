@@ -123,7 +123,7 @@ func (h *LinkHandler) LinkPage(w http.ResponseWriter, r *http.Request) {
 }
 
 // editLinkIfExists renders the editor of the short link id and returns true. It returns false
-// when no short link has the slug, so that Handler.EditPage can try a file.
+// when no short link has the slug, so that Handler.EditPage shows the note editor error.
 func (h *LinkHandler) editLinkIfExists(w http.ResponseWriter, r *http.Request, id string) bool {
 	link, err := h.manager.Inspect(r.Context(), id, h.reader(r))
 	if errors.Is(err, domain.ErrNotFound) {

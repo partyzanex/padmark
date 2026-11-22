@@ -389,10 +389,13 @@ type Handler struct {
 	// files is not embedded: its RegisterRoutes and Delete would be ambiguous with the methods
 	// of the other concern handlers.
 	files *FileHandler
+
+	// slugs tells GET /{id} and GET /edit/{id} which Manager has the slug (note_or_link.go).
+	slugs SlugResolver
 }
 
 // NewHandler creates a Handler with required dependencies.
-func NewHandler(manager NoteManager, linkManager LinkManager, log *slog.Logger) *Handler {
+func NewHandler(manager NoteManager, linkManager LinkManager, resolver SlugResolver, log *slog.Logger) *Handler {
 	noteTmpl := parseTmpl("note", noteTmplSrc)
 	indexTmpl := parseTmpl("index", indexTmplSrc)
 	loginTmpl := parseTmpl("login", loginTmplSrc)
@@ -438,6 +441,7 @@ func NewHandler(manager NoteManager, linkManager LinkManager, log *slog.Logger) 
 		PageHandler:  newPageHandler(cmn, indexTmpl, successTmpl, apidocsTmpl),
 		// Files share the edit-code lockout with notes and links: one slug namespace.
 		files: newFileHandler(cmn, noteHandler.lockout),
+		slugs: resolver,
 	}
 }
 

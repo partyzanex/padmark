@@ -116,21 +116,6 @@ func (mr *MockFileManagerMockRecorder) MaxSize() *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MaxSize", reflect.TypeOf((*MockFileManager)(nil).MaxSize))
 }
 
-// Peek mocks base method.
-func (m *MockFileManager) Peek(ctx context.Context, slug string) (*domain.File, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Peek", ctx, slug)
-	ret0, _ := ret[0].(*domain.File)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// Peek indicates an expected call of Peek.
-func (mr *MockFileManagerMockRecorder) Peek(ctx, slug any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Peek", reflect.TypeOf((*MockFileManager)(nil).Peek), ctx, slug)
-}
-
 // Settings mocks base method.
 func (m *MockFileManager) Settings(ctx context.Context, slug string, reader domain.Reader) (*domain.File, error) {
 	m.ctrl.T.Helper()

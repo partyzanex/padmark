@@ -65,9 +65,6 @@ var (
 // FileManager is the file usecase as the HTTP layer uses it.
 type FileManager interface {
 	Create(ctx context.Context, name string, body io.Reader, opts files.CreateOptions) (*domain.File, error)
-	// Peek reads the record without access rules; GetNoteOrLink uses it only to find whether a
-	// file has the slug.
-	Peek(ctx context.Context, slug string) (*domain.File, error)
 	// Inspect applies privacy and expiry without a download: pages and GET /files/{id} use it.
 	Inspect(ctx context.Context, slug string, reader domain.Reader) (*domain.File, error)
 	// Settings applies privacy and expiry without any side effect: the settings editor uses it,

@@ -118,7 +118,7 @@ func replica(t *testing.T, db *bun.DB, gate *createGate) *httptest.Server {
 		render.NewRenderer(), testutil.ContentEncryptor(t, "note"), hasher, log, true)
 	linkManager := links.NewManager(&pausedLinks{Storage: linkRepo, gate: gate}, noteRepo, localLock,
 		testutil.ContentEncryptor(t, "link"), hasher, log, true)
-	handler := web.NewHandler(noteManager, linkManager, log)
+	handler := web.NewHandler(noteManager, linkManager, slugResolver(db), log)
 	ogen := web.NewOgenHandler(noteManager, linkManager, web.NoPinger{}, log)
 	router, err := web.NewRouter(handler, ogen, &web.RouterOptions{
 		MaxBodyBytes: 256 * 1024,

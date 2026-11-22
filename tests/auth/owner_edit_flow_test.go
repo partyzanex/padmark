@@ -26,6 +26,7 @@ import (
 	"github.com/partyzanex/padmark/internal/usecases/auth"
 	"github.com/partyzanex/padmark/internal/usecases/links"
 	"github.com/partyzanex/padmark/internal/usecases/notes"
+	"github.com/partyzanex/padmark/internal/usecases/slugs"
 )
 
 const ownerFlowPassword = "OwnerP@ss123!"
@@ -106,7 +107,8 @@ func newOwnerFlowEnv(t *testing.T, dbName string) ownerFlowEnv {
 
 	notesMgr, linksMgr := newOwnerFlowManagers(t, db, log)
 
-	handler := web.NewHandler(notesMgr, linksMgr, log).WithAuthManager(authMgr)
+	resolver := slugs.NewResolver(sqliterepo.NewSlugRepository(db))
+	handler := web.NewHandler(notesMgr, linksMgr, resolver, log).WithAuthManager(authMgr)
 	ogen := web.NewOgenHandler(notesMgr, linksMgr, web.NoPinger{}, log)
 	router, err := web.NewRouter(handler, ogen, &web.RouterOptions{
 		MaxBodyBytes: 256 * 1024,

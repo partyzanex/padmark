@@ -51,7 +51,7 @@ func (s *LoginLockoutSuite) SetupTest() {
 
 	manager := NewMockNoteManager(s.ctrl)
 	linkManager := NewMockLinkManager(s.ctrl)
-	handler := web.NewHandler(manager, linkManager, discardLog()).WithAuthManager(s.auth)
+	handler := web.NewHandler(manager, linkManager, NewMockSlugResolver(s.ctrl), discardLog()).WithAuthManager(s.auth)
 	ogen := web.NewOgenHandler(manager, linkManager, NewMockPinger(s.ctrl), discardLog())
 
 	router, err := web.NewRouter(handler, ogen, &web.RouterOptions{

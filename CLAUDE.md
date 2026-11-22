@@ -62,7 +62,7 @@ Dependencies point inward: adapters and infrastructure depend on usecases and do
   Keep it independent of the parent `web` package; shared JSON errors live in `web/response/`.
 - Notes, links and files share the same slug-lock instance for local preflight/cache coordination.
   Storage triggers enforce cross-process uniqueness through the `slug_namespace` primary key.
-- `NewHandler(manager, linkManager, log)` requires both managers.
+- `NewHandler(manager, linkManager, resolver, log)` requires both managers.
   `NewRouter(handler, ogenHandler, opts)` receives `*RouterOptions` and returns `(http.Handler, error)`.
   Use `NoPinger{}` for test setups without a DB pinger.
 

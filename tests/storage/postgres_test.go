@@ -66,6 +66,7 @@ func postgresOpener(db *bun.DB) opener {
 			notes:    pgrepo.NewNoteRepository(db),
 			links:    pgrepo.NewLinkRepository(db, slog.New(slog.DiscardHandler)),
 			files:    pgrepo.NewFileRepository(db),
+			slugs:    pgrepo.NewSlugRepository(db),
 			dialect:  dialectPostgres,
 		}
 	}

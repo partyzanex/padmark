@@ -36,6 +36,7 @@ func openSQLite(t *testing.T) *backend {
 		notes:    sqliterepo.NewNoteRepository(db),
 		links:    sqliterepo.NewLinkRepository(db, log),
 		files:    sqliterepo.NewFileRepository(db),
+		slugs:    sqliterepo.NewSlugRepository(db),
 		dialect:  dialectSQLite,
 	}
 }

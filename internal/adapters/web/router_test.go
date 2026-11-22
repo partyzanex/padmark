@@ -106,7 +106,7 @@ func (o *ogenSpy) ServeHTTP(w net_http.ResponseWriter, _ *net_http.Request) {
 // never to the ogen server. The generated server buffers multipart bodies, so a /files route on
 // it would break the streaming upload.
 func TestFileRoutes_ServedByFileHandler(t *testing.T) {
-	handler := NewHandler(nil, nil, slog.New(slog.DiscardHandler))
+	handler := NewHandler(nil, nil, nil, slog.New(slog.DiscardHandler))
 	spy := &ogenSpy{calls: 0}
 	mux := net_http.NewServeMux()
 

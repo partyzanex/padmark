@@ -167,7 +167,7 @@ func toBurnInterstitialViewData(note *domain.Note, tok string) noteViewData {
 
 // GetNote handles GET /notes/{id} with content negotiation via Accept header.
 func (h *NoteHandler) GetNote(w http.ResponseWriter, r *http.Request) {
-	h.serveNote(w, r, r.PathValue("id"), nil)
+	h.serveNote(w, r, r.PathValue("id"))
 }
 
 // UpdateNoteByPath handles PUT /notes/{id...} for notes whose slug spans multiple path segments
@@ -277,7 +277,7 @@ func (h *NoteHandler) HandleReveal(w http.ResponseWriter, r *http.Request) {
 	// the privacy answer, and a token of the note stays valid for its reader.
 	_, err := h.manager.Inspect(r.Context(), id, reader)
 	if err != nil {
-		h.writeReadError(w, r, err, nil)
+		h.writeReadError(w, r, err)
 
 		return
 	}
@@ -317,10 +317,8 @@ func (h *NoteHandler) HandleReveal(w http.ResponseWriter, r *http.Request) {
 
 // serveNote answers a note read in the format of the request. The usecase applies privacy,
 // expiry, the burn intent and the burn itself (see notes.Manager.Read); this handler only
-// selects the format and translates the errors. missing runs when no note has the slug and
-// returns true when it answered the request instead (GetNoteOrLink tries a short link and a
-// file); nil writes the note error.
-func (h *NoteHandler) serveNote(w http.ResponseWriter, r *http.Request, id string, missing func() bool) {
+// selects the format and translates the errors.
+func (h *NoteHandler) serveNote(w http.ResponseWriter, r *http.Request, id string) {
 	reader := h.reader(r)
 	// A browser navigation or a client that names the format is a deliberate read; v0.1.6 API
 	// reads keep their old behavior (see legacyAPIRead).
@@ -328,15 +326,15 @@ func (h *NoteHandler) serveNote(w http.ResponseWriter, r *http.Request, id strin
 
 	switch negotiate(r) {
 	case formatHTML:
-		h.serveNoteHTML(w, r, id, reader, missing)
+		h.serveNoteHTML(w, r, id, reader)
 
 	case formatPlain:
-		h.writePlainNote(w, r, id, reader, missing)
+		h.writePlainNote(w, r, id, reader)
 
 	case formatJSON:
 		note, err := h.readNote(r, id, reader)
 		if err != nil {
-			h.writeReadError(w, r, err, missing)
+			h.writeReadError(w, r, err)
 
 			return
 		}
@@ -356,11 +354,9 @@ func (h *NoteHandler) serveNote(w http.ResponseWriter, r *http.Request, id strin
 // burn on the GET: the first read asks the usecase without the burn intent, and a burn note then
 // gets the confirmation form (handleBurnInterstitial). A note with a burn TTL is served directly;
 // its timer starts on this read.
-func (h *NoteHandler) serveNoteHTML(
-	w http.ResponseWriter, r *http.Request, id string, reader domain.Reader, missing func() bool,
-) {
+func (h *NoteHandler) serveNoteHTML(w http.ResponseWriter, r *http.Request, id string, reader domain.Reader) {
 	if h.revealStore == nil || !reader.AllowBurn {
-		h.renderNoteHTMLOr(w, r, id, reader, missing)
+		h.renderNoteHTML(w, r, id, reader)
 
 		return
 	}
@@ -376,7 +372,7 @@ func (h *NoteHandler) serveNoteHTML(
 	}
 
 	if err != nil {
-		h.writeReadError(w, r, err, missing)
+		h.writeReadError(w, r, err)
 
 		return
 	}
@@ -385,12 +381,10 @@ func (h *NoteHandler) serveNoteHTML(
 }
 
 // writePlainNote reads the note and writes the raw content as text/plain or text/markdown.
-func (h *NoteHandler) writePlainNote(
-	w http.ResponseWriter, r *http.Request, id string, reader domain.Reader, missing func() bool,
-) {
+func (h *NoteHandler) writePlainNote(w http.ResponseWriter, r *http.Request, id string, reader domain.Reader) {
 	note, err := h.readNote(r, id, reader)
 	if err != nil {
-		h.writeReadError(w, r, err, missing)
+		h.writeReadError(w, r, err)
 
 		return
 	}
@@ -422,14 +416,12 @@ func (h *NoteHandler) readNote(r *http.Request, id string, reader domain.Reader)
 	return note, nil
 }
 
-// writeReadError answers a failed note read. A missing note first goes to missing, when it is
-// set. A caller that cannot see the note gets the privacy answer of common.denyPrivate, shared
-// with the link and file pages. A burn note without a deliberate access gets the 409 of
-// writeBurnReadNotExplicit and stays. Other errors get the error in the format of the request.
-func (h *NoteHandler) writeReadError(w http.ResponseWriter, r *http.Request, err error, missing func() bool) {
+// writeReadError answers a failed note read. A caller that cannot see the note gets the privacy
+// answer of common.denyPrivate, shared with the link and file pages. A burn note without a
+// deliberate access gets the 409 of writeBurnReadNotExplicit and stays. Other errors get the error
+// in the format of the request.
+func (h *NoteHandler) writeReadError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
-	case errors.Is(err, domain.ErrNotFound) && missing != nil && missing():
-		return
 	case errors.Is(err, domain.ErrForbidden):
 		h.denyPrivate(w, r)
 	case errors.Is(err, domain.ErrBurnIntentRequired):
@@ -441,16 +433,9 @@ func (h *NoteHandler) writeReadError(w http.ResponseWriter, r *http.Request, err
 
 // renderNoteHTML reads the note for reader and renders the note page.
 func (h *NoteHandler) renderNoteHTML(w http.ResponseWriter, r *http.Request, id string, reader domain.Reader) {
-	h.renderNoteHTMLOr(w, r, id, reader, nil)
-}
-
-// renderNoteHTMLOr is renderNoteHTML with the missing fallback of serveNote.
-func (h *NoteHandler) renderNoteHTMLOr(
-	w http.ResponseWriter, r *http.Request, id string, reader domain.Reader, missing func() bool,
-) {
 	note, rendered, err := h.manager.ReadRendered(r.Context(), id, reader)
 	if err != nil {
-		h.writeReadError(w, r, err, missing)
+		h.writeReadError(w, r, err)
 
 		return
 	}
@@ -500,7 +485,7 @@ func writeBurnReadNotExplicit(w http.ResponseWriter, r *http.Request, log *slog.
 func (h *NoteHandler) handleBurnInterstitial(w http.ResponseWriter, r *http.Request, id string, reader domain.Reader) {
 	note, err := h.manager.Inspect(r.Context(), id, reader)
 	if err != nil {
-		h.writeReadError(w, r, err, nil)
+		h.writeReadError(w, r, err)
 
 		return
 	}

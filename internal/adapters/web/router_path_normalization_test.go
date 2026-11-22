@@ -15,6 +15,7 @@ import (
 
 	"github.com/partyzanex/padmark/internal/adapters/web"
 	"github.com/partyzanex/padmark/internal/domain"
+	"github.com/partyzanex/padmark/internal/usecases/slugs"
 )
 
 // PathNormalizationSuite drives the real router (auth configured, mocked managers) with request
@@ -34,6 +35,7 @@ type PathNormalizationSuite struct {
 	ctrl        *gomock.Controller
 	manager     *MockNoteManager
 	linkManager *MockLinkManager
+	slugs       *MockSlugResolver
 	revealStore *MockRevealTokenStore
 	auth        *MockAuthManager
 	router      http.Handler
@@ -47,10 +49,11 @@ func (s *PathNormalizationSuite) SetupTest() {
 	s.ctrl = gomock.NewController(s.T())
 	s.manager = NewMockNoteManager(s.ctrl)
 	s.linkManager = NewMockLinkManager(s.ctrl)
+	s.slugs = NewMockSlugResolver(s.ctrl)
 	s.revealStore = NewMockRevealTokenStore(s.ctrl)
 	s.auth = NewMockAuthManager(s.ctrl)
 
-	handler := web.NewHandler(s.manager, s.linkManager, discardLog()).
+	handler := web.NewHandler(s.manager, s.linkManager, s.slugs, discardLog()).
 		WithAuthManager(s.auth).
 		WithRevealStore(s.revealStore)
 	ogen := web.NewOgenHandler(s.manager, s.linkManager, NewMockPinger(s.ctrl), discardLog())
@@ -99,9 +102,9 @@ func (s *PathNormalizationSuite) recordPeeks() *[]string {
 			return nil, domain.ErrNotFound
 		}).AnyTimes()
 
-	// With no note, the GET /{id...} catch-all looks for a short link; none exists here either.
-	s.linkManager.EXPECT().Follow(gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(nil, domain.ErrNotFound).AnyTimes()
+	// The resolver gives a note for each slug, so the GET /{id...} catch-all and the editor read
+	// the note, and the note reads above record the slug that the router dispatched.
+	s.slugs.EXPECT().KindOf(gomock.Any(), gomock.Any()).Return(slugs.KindNote, nil).AnyTimes()
 
 	return &peeked
 }
@@ -284,6 +287,10 @@ func (s *PathNormalizationSuite) TestPercentEncodedPrivateSlug_StillGated() {
 			wantID := strings.TrimPrefix(strings.TrimPrefix(strings.TrimPrefix(target, "/notes"), "/edit"), "/")
 			wantID, err := url.PathUnescape(wantID)
 			s.Require().NoError(err)
+
+			if !strings.HasPrefix(target, "/notes/") {
+				s.slugs.EXPECT().KindOf(gomock.Any(), wantID).Return(slugs.KindNote, nil)
+			}
 
 			if strings.HasPrefix(target, "/edit/") {
 				s.manager.EXPECT().Inspect(gomock.Any(), wantID, anonymousReader()).Return(nil, domain.ErrForbidden)

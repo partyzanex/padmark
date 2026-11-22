@@ -22,6 +22,7 @@ import (
 	"github.com/partyzanex/padmark/internal/infra/crypto"
 	sqliterepo "github.com/partyzanex/padmark/internal/infra/storage/sqlite"
 	"github.com/partyzanex/padmark/internal/usecases/auth"
+	"github.com/partyzanex/padmark/internal/usecases/slugs"
 )
 
 // Finding H-1: the burn-after-reading guarantee is enforced only when content negotiation picks
@@ -69,7 +70,8 @@ func newBurnGuaranteeEnv(t *testing.T, dbName string) ownerFlowEnv {
 
 	notesMgr, linksMgr := newOwnerFlowManagers(t, db, log)
 
-	handler := web.NewHandler(notesMgr, linksMgr, log).
+	resolver := slugs.NewResolver(sqliterepo.NewSlugRepository(db))
+	handler := web.NewHandler(notesMgr, linksMgr, resolver, log).
 		WithRevealStore(auth.NewRevealManager(sqliterepo.NewRevealRepository(db), log)).
 		WithAuthManager(authMgr)
 	ogen := web.NewOgenHandler(notesMgr, linksMgr, web.NoPinger{}, log)

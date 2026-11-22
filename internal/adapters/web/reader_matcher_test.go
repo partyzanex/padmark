@@ -86,13 +86,6 @@ func boolText(value bool) string {
 	return "false"
 }
 
-// expectNoNote makes the note read of GET /{id} find no note, so that the handler tries the
-// short link and the file. The handler uses Read or ReadRendered by the format of the request,
-// so the test permits each of them once.
-func expectNoNote(manager *MockNoteManager, id string) {
-	expectNoteReadError(manager, id, gomock.Any(), domain.ErrNotFound)
-}
-
 // expectNoteReadError makes the note read of reader for id fail with err. The handler uses Read
 // or ReadRendered by the format of the request, so the test permits each of them once.
 func expectNoteReadError(manager *MockNoteManager, id string, reader gomock.Matcher, err error) {

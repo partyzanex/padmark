@@ -19,6 +19,7 @@ import (
 	"github.com/partyzanex/padmark/internal/adapters/web"
 	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/usecases/files"
+	"github.com/partyzanex/padmark/internal/usecases/slugs"
 )
 
 // FileSecuritySuite holds the checks of section 9 of the file plan: rate limit, download
@@ -29,6 +30,7 @@ type FileSecuritySuite struct {
 	ctrl        *gomock.Controller
 	manager     *MockNoteManager
 	linkManager *MockLinkManager
+	slugs       *MockSlugResolver
 	files       *MockFileManager
 	auth        *MockAuthManager
 	logs        *bytes.Buffer
@@ -42,6 +44,7 @@ func (s *FileSecuritySuite) SetupTest() {
 	s.ctrl = gomock.NewController(s.T())
 	s.manager = NewMockNoteManager(s.ctrl)
 	s.linkManager = NewMockLinkManager(s.ctrl)
+	s.slugs = NewMockSlugResolver(s.ctrl)
 	s.files = NewMockFileManager(s.ctrl)
 	s.auth = NewMockAuthManager(s.ctrl)
 	s.logs = new(bytes.Buffer)
@@ -65,7 +68,7 @@ func (s *FileSecuritySuite) newRouter(opts routerOptions) http.Handler {
 		AddSource: false, Level: slog.LevelDebug, ReplaceAttr: nil,
 	}))
 
-	handler := web.NewHandler(s.manager, s.linkManager, log)
+	handler := web.NewHandler(s.manager, s.linkManager, s.slugs, log)
 	if opts.accounts {
 		handler.WithAuthManager(s.auth)
 	}
@@ -234,13 +237,9 @@ func (s *FileSecuritySuite) TestFilePages_NotCached() {
 	router := s.newRouter(routerOptions{rateLimit: 0, accounts: false})
 	file := fileRecord("a.txt", 3, 0, false)
 
-	// GET /abc: no note, no short link, then the file page. GET /edit/abc: the editors of the
-	// note and the short link find nothing, then the file editor reads the file.
-	expectNoNote(s.manager, "abc")
-	s.linkManager.EXPECT().Follow(gomock.Any(), "abc", withBurn(true)).Return(nil, domain.ErrNotFound)
-	s.files.EXPECT().Peek(gomock.Any(), "abc").Return(file, nil)
-	s.manager.EXPECT().Inspect(gomock.Any(), "abc", gomock.Any()).Return(nil, domain.ErrNotFound)
-	s.linkManager.EXPECT().Inspect(gomock.Any(), "abc", gomock.Any()).Return(nil, domain.ErrNotFound)
+	// The resolver gives a file for both requests: GET /abc shows the file page, and GET
+	// /edit/abc opens the file editor.
+	s.slugs.EXPECT().KindOf(gomock.Any(), "abc").Return(slugs.KindFile, nil).Times(2)
 	s.files.EXPECT().Inspect(gomock.Any(), "abc", access(false)).Return(file, nil)
 	s.files.EXPECT().Settings(gomock.Any(), "abc", access(false)).Return(file, nil)
 

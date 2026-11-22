@@ -10,16 +10,16 @@ import (
 )
 
 // editNote renders the note editor pre-filled with existing content; Handler.EditPage calls it
-// for GET /edit/{id...}. missing runs when no note has the slug (see serveNote).
+// for GET /edit/{id...} when the slug names a note.
 // The editor reads the note with Inspect: the privacy check of a read applies — without it, an
 // authenticated caller who is not the note's owner could read a privacy=owner note's plaintext
 // content here. The editor never burns, so it must not become a side door around the read
 // policy either: an expired note is deleted and answered 410, and a burn-after-reading note's
 // content is withheld (saving replaces it).
-func (h *NoteHandler) editNote(w http.ResponseWriter, r *http.Request, id string, missing func() bool) {
+func (h *NoteHandler) editNote(w http.ResponseWriter, r *http.Request, id string) {
 	note, err := h.manager.Inspect(r.Context(), id, h.reader(r))
 	if err != nil {
-		h.writeEditorError(w, r, err, missing)
+		h.writeEditorError(w, r, err)
 
 		return
 	}
@@ -58,13 +58,10 @@ func (h *NoteHandler) editNote(w http.ResponseWriter, r *http.Request, id string
 	}
 }
 
-// writeEditorError answers an editor that cannot open the note. A missing note first goes to
-// missing, when it is set; a caller that cannot see the note gets the privacy answer; other
-// errors get the error page, because the editor is a page.
-func (h *NoteHandler) writeEditorError(w http.ResponseWriter, r *http.Request, err error, missing func() bool) {
+// writeEditorError answers an editor that cannot open the note. A caller that cannot see the
+// note gets the privacy answer; other errors get the error page, because the editor is a page.
+func (h *NoteHandler) writeEditorError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
-	case errors.Is(err, domain.ErrNotFound) && missing != nil && missing():
-		return
 	case errors.Is(err, domain.ErrForbidden):
 		h.denyPrivate(w, r)
 	default:

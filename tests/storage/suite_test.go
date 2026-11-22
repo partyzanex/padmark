@@ -17,6 +17,7 @@ import (
 
 	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/usecases/files"
+	"github.com/partyzanex/padmark/internal/usecases/slugs"
 )
 
 // raceAttempts is how many goroutines race one single-use operation.
@@ -109,6 +110,11 @@ type fileRepo interface {
 	DeleteExpired(ctx context.Context, id, objectKey string, now time.Time) error
 }
 
+// slugRepo is the read of the slug namespace (slugs.Storage).
+type slugRepo interface {
+	Kind(ctx context.Context, id string) (slugs.Kind, error)
+}
+
 // backend is one empty, migrated database and the repositories of one dialect.
 type backend struct {
 	db       *bun.DB
@@ -120,6 +126,7 @@ type backend struct {
 	notes    noteRepo
 	links    linkRepo
 	files    fileRepo
+	slugs    slugRepo
 	dialect  string
 }
 
@@ -164,6 +171,7 @@ func runContract(t *testing.T, open opener) {
 		{name: "notes", suite: new(NoteSuite)},
 		{name: "links", suite: new(LinkSuite)},
 		{name: "files", suite: new(FileSuite)},
+		{name: "slugs", suite: new(SlugSuite)},
 	}
 
 	for _, entry := range suites {

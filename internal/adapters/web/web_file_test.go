@@ -275,7 +275,8 @@ func (s *FileHandlerSuite) TestDownloadForm_Refused() {
 func (s *FileHandlerSuite) TestFilePage_DownloadButton() {
 	s.Run("burn file", func() {
 		file := fileRecord("a.txt", 3, 0, true)
-		s.expectRootFile(file, true)
+
+		s.expectFileKind()
 		s.files.EXPECT().Inspect(gomock.Any(), "abc", access(false)).Return(file, nil)
 
 		body := s.serve(browserGet("/abc")).Body.String()
@@ -287,7 +288,8 @@ func (s *FileHandlerSuite) TestFilePage_DownloadButton() {
 
 	s.Run("other file", func() {
 		file := fileRecord("a.txt", 3, 0, false)
-		s.expectRootFile(file, true)
+
+		s.expectFileKind()
 		s.files.EXPECT().Inspect(gomock.Any(), "abc", access(false)).Return(file, nil)
 
 		body := s.serve(browserGet("/abc")).Body.String()
