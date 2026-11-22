@@ -29,6 +29,7 @@ const (
 	FlagWriteTimeout        = "write-timeout"
 	FlagMaxHeaderBytes      = "max-header-bytes"
 	FlagMaxBodyBytes        = "max-body-bytes"
+	FlagMaxContentLength    = "max-content-length"
 	FlagRateLimit           = "rate-limit"
 	FlagRateBurst           = "rate-burst"
 	FlagTLSCert             = "tls-cert"
@@ -81,6 +82,7 @@ const (
 	EnvWriteTimeout        = "PADMARK_WRITE_TIMEOUT"
 	EnvMaxHeaderBytes      = "PADMARK_MAX_HEADER_BYTES"
 	EnvMaxBodyBytes        = "PADMARK_MAX_BODY_BYTES"
+	EnvMaxContentLength    = "PADMARK_MAX_CONTENT_LENGTH"
 	EnvRateLimit           = "PADMARK_RATE_LIMIT"
 	EnvRateBurst           = "PADMARK_RATE_BURST"
 	EnvTLSCert             = "PADMARK_TLS_CERT"
@@ -141,6 +143,7 @@ const (
 	DefaultWriteTimeout       = 60              // seconds.
 	DefaultMaxHeaderBytes     = 64 * 1024       // 64 KB.
 	DefaultMaxBodyBytes       = 4 * 1024 * 1024 // 4 MB.
+	DefaultMaxContentLength   = 0               // characters; 0 = the --max-body-bytes value.
 	DefaultRateLimit          = 10              // requests per second per IP.
 	DefaultRateBurst          = 20              // max burst size per IP.
 	DefaultTOTPIssuer         = "padmark"
@@ -405,6 +408,14 @@ func limitFlags() []cli.Flag {
 			flag.Usage = "Maximum size of request body in bytes"
 		}),
 		clifactory.IntFlag(func(flag *cli.IntFlag) {
+			flag.Name = FlagMaxContentLength
+			flag.Sources = cli.EnvVars(EnvMaxContentLength)
+			flag.Value = DefaultMaxContentLength
+			flag.Validator = validateMaxContentLength
+			flag.Usage = "Maximum note content length in characters (0 = the --max-body-bytes value). " +
+				"Raise --max-body-bytes too: the request body holds the content"
+		}),
+		clifactory.IntFlag(func(flag *cli.IntFlag) {
 			flag.Name = FlagRateLimit
 			flag.Sources = cli.EnvVars(EnvRateLimit)
 			flag.Value = DefaultRateLimit
@@ -430,8 +441,10 @@ func limitFlags() []cli.Flag {
 
 // The validator errors stay next to their flags, because only the flag set uses them.
 var (
-	errMaxFileSizeTooLarge    = errors.New("max file size must not be larger than 48 GiB (51539607552 bytes)")
-	errInvalidShutdownTimeout = errors.New("shutdown timeout must be larger than 0")
+	errMaxFileSizeTooLarge     = errors.New("max file size must not be larger than 48 GiB (51539607552 bytes)")
+	errInvalidShutdownTimeout  = errors.New("shutdown timeout must be larger than 0")
+	errInvalidMaxContentLength = errors.New("max content length must not be negative; " +
+		"use 0 for the --max-body-bytes value")
 	errInvalidFileIdleTimeout = errors.New("file idle timeout must not be negative; use 0 for the default")
 	errInvalidUploadLimit     = errors.New("upload limit must not be negative; use 0 for the default")
 )
@@ -475,6 +488,27 @@ func validateFileIdleTimeout(value time.Duration) error {
 	}
 
 	return nil
+}
+
+// validateMaxContentLength rejects a negative --max-content-length; 0 selects the
+// --max-body-bytes value.
+func validateMaxContentLength(value int) error {
+	if value < 0 {
+		return errInvalidMaxContentLength
+	}
+
+	return nil
+}
+
+// maxContentLength gives the note content limit: --max-content-length, or --max-body-bytes when
+// the flag is 0. A note cannot be larger than the body that holds it, so one setting is enough.
+func maxContentLength(cmd *cli.Command) int {
+	limit := cmd.Int(FlagMaxContentLength)
+	if limit == 0 {
+		return cmd.Int(FlagMaxBodyBytes)
+	}
+
+	return limit
 }
 
 // validateUploadLimit rejects a negative --max-uploads or --max-uploads-per-client; 0 selects

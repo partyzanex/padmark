@@ -38,6 +38,7 @@ func TestErrors(t *testing.T) {
 
 	runScenarios(t, []scenario{
 		{name: "NoteEditor", run: testNoteEditorErrors, accounts: false, files: false, allowedStatuses: rejections},
+		{name: "PreviewImages", run: testPreviewImageErrors, accounts: false, files: false, allowedStatuses: nil},
 		{name: "NoteEdit", run: testNoteEditErrors, accounts: false, files: false, allowedStatuses: rejections},
 		{name: "NoteServerReplies", run: testNoteServerReplies, accounts: false, files: false, allowedStatuses: rejections},
 		{name: "LinkEditor", run: testLinkEditorErrors, accounts: false, files: false, allowedStatuses: rejections},
@@ -123,6 +124,58 @@ func (sess *uiSession) post(path string, data map[string]any) {
 }
 
 // testNoteEditorErrors: the errors of a new note, from the browser checks and from the server.
+// previewImageCase is a data: image that the note page does not show, with the reason key of
+// the server (dataImageProblem in internal/infra/render/policy.go) and the preview text.
+type previewImageCase struct {
+	name, markdown, problem, message string
+}
+
+func previewImageCases() []previewImageCase {
+	return []previewImageCase{
+		{
+			"svg", "![svg](data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=)", "svg",
+			`Image "svg" not shown: SVG images are not supported. Use PNG, JPEG, GIF or WebP.`,
+		},
+		{
+			"type", "![html](data:text/html;base64,PGI+eDwvYj4=)", "type",
+			`Image "html" not shown: only PNG, JPEG, GIF and WebP images are supported.`,
+		},
+		{
+			"encoding", "![raw](data:image/png,abc)", "encoding",
+			`Image "raw" not shown: the image data must be base64, with ;base64, right after the image type.`,
+		},
+		{
+			"base64", "![cut](data:image/png;base64,YQ)", "base64",
+			`Image "cut" not shown: the base64 image data is damaged.`,
+		},
+		{
+			"query", "![part](data:image/png;base64," + pixelPNG + "?x)", "address",
+			`Image "part" not shown: a data: image address cannot have a ? or # part.`,
+		},
+		{
+			"fragment", "![part](data:image/png;base64," + pixelPNG + "#x)", "address",
+			`Image "part" not shown: a data: image address cannot have a ? or # part.`,
+		},
+		{
+			"invalid", "<img src=\"data:image/png;base64,YQ==\x01\">", "invalid",
+			"Image not shown: the image address cannot be read.",
+		},
+	}
+}
+
+// testPreviewImageErrors checks that the preview puts a readable reason in place of each data:
+// image that the note page will not show.
+func testPreviewImageErrors(sess *uiSession) {
+	sess.gotoPage("/")
+
+	for _, tc := range previewImageCases() {
+		sess.writeText(tc.markdown)
+		sess.showPreview()
+		sess.expectError(`#preview .preview-image-notice[data-problem="`+tc.problem+`"]`, tc.message)
+		sess.must(sess.expect.Locator(sess.page.Locator("#preview img")).ToHaveCount(0))
+	}
+}
+
 func testNoteEditorErrors(sess *uiSession) {
 	sess.createNote("taken-note")
 	sess.gotoPage("/")

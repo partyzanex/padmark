@@ -3,6 +3,7 @@ package notes
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"strings"
@@ -1140,7 +1141,7 @@ func (s *ManagerTestSuite) TestGetRendered_OK() {
 	}
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(note, nil)
 	s.storage.EXPECT().IncrementViews(gomock.Any(), domain.HashSlug("abc-123")).Return(nil)
-	s.renderer.EXPECT().Render("# Hello").Return("<h1>Hello</h1>", nil)
+	s.renderer.EXPECT().Render("# Hello").Return("<h1>Hello</h1>", nil, nil)
 
 	result, html, err := s.manager.GetRendered(s.T().Context(), "abc-123")
 
@@ -1149,11 +1150,70 @@ func (s *ManagerTestSuite) TestGetRendered_OK() {
 	s.Equal("<h1>Hello</h1>", html)
 }
 
+// TestGetRendered_DroppedImagesAreLogged checks that an image the page does not show leaves one
+// warning with the note hash and a count per reason, and that the note is still shown.
+func (s *ManagerTestSuite) TestGetRendered_DroppedImagesAreLogged() {
+	var logs bytes.Buffer
+
+	manager := NewManager(s.storage, s.links, noopSlugLock{}, s.renderer, passthroughEncryptor{}, identityHasher{},
+		slog.New(slog.NewJSONHandler(&logs, nil)), true)
+	note := &domain.Note{
+		ID: "abc-123", Content: "![a](data:image/svg+xml;base64,PHN2Zz4=)",
+		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
+		Privacy: nil, OwnerID: nil, Title: "", ContentType: nil,
+		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
+		ClearExpiry: false, ShowContents: nil,
+	}
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(note, nil)
+	s.storage.EXPECT().IncrementViews(gomock.Any(), domain.HashSlug("abc-123")).Return(nil)
+	s.renderer.EXPECT().Render(note.Content).Return(`<p><img alt="a"/></p>`, []string{"svg", "type", "svg"}, nil)
+
+	_, html, err := manager.GetRendered(s.T().Context(), "abc-123")
+	s.Require().NoError(err)
+	s.Equal(`<p><img alt="a"/></p>`, html)
+
+	var record struct {
+		Level   string         `json:"level"`
+		Msg     string         `json:"msg"`
+		Op      string         `json:"op"`
+		Note    string         `json:"note"`
+		Reasons map[string]int `json:"reasons"`
+	}
+	s.Require().NoError(json.Unmarshal(logs.Bytes(), &record), logs.String())
+	s.Equal("WARN", record.Level)
+	s.Equal("notes.render", record.Op)
+	s.Equal(domain.HashSlug("abc-123"), record.Note)
+	s.Equal(map[string]int{"svg": 2, "type": 1}, record.Reasons)
+	s.NotContains(logs.String(), "abc-123", "the log names the note by its hash only")
+	s.NotContains(logs.String(), "base64", "the log holds no note content")
+}
+
+func (s *ManagerTestSuite) TestGetRendered_NoDroppedImagesNoLog() {
+	var logs bytes.Buffer
+
+	manager := NewManager(s.storage, s.links, noopSlugLock{}, s.renderer, passthroughEncryptor{}, identityHasher{},
+		slog.New(slog.NewJSONHandler(&logs, nil)), true)
+	note := &domain.Note{
+		ID: "abc-123", Content: "# Hello",
+		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
+		Privacy: nil, OwnerID: nil, Title: "", ContentType: nil,
+		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
+		ClearExpiry: false, ShowContents: nil,
+	}
+	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(note, nil)
+	s.storage.EXPECT().IncrementViews(gomock.Any(), domain.HashSlug("abc-123")).Return(nil)
+	s.renderer.EXPECT().Render("# Hello").Return("<h1>Hello</h1>", nil, nil)
+
+	_, _, err := manager.GetRendered(s.T().Context(), "abc-123")
+	s.Require().NoError(err)
+	s.Empty(logs.String())
+}
+
 // ── content size cap ──.
 
 func (s *ManagerTestSuite) TestCreate_ContentOverCap_Rejected() {
 	note := &domain.Note{
-		Content:   strings.Repeat("a", domain.MaxContentLength+1),
+		Content:   strings.Repeat("a", domain.DefaultMaxContentLength+1),
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", Title: "",
 		ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
@@ -1170,7 +1230,7 @@ func (s *ManagerTestSuite) TestCreate_ContentAtCap_Accepted() {
 	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
 
 	note := &domain.Note{
-		Content:   strings.Repeat("a", domain.MaxContentLength),
+		Content:   strings.Repeat("a", domain.DefaultMaxContentLength),
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", Title: "",
 		ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
@@ -1184,7 +1244,7 @@ func (s *ManagerTestSuite) TestCreate_ContentAtCap_Accepted() {
 
 func (s *ManagerTestSuite) TestUpdate_ContentOverCap_Rejected() {
 	note := &domain.Note{
-		Content:   strings.Repeat("é", domain.MaxContentLength+1),
+		Content:   strings.Repeat("é", domain.DefaultMaxContentLength+1),
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", Title: "",
 		ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
@@ -1194,6 +1254,34 @@ func (s *ManagerTestSuite) TestUpdate_ContentOverCap_Rejected() {
 	_, err := s.manager.Update(s.T().Context(), "abc-123", "secret123456", uuid.Nil, note)
 
 	s.ErrorIs(err, domain.ErrContentTooLarge)
+}
+
+// TestMaxContentLength_Configured checks that WithMaxContentLength replaces the default limit
+// for create and update.
+func (s *ManagerTestSuite) TestMaxContentLength_Configured() {
+	s.manager.WithMaxContentLength(10)
+
+	note := &domain.Note{
+		Content:   strings.Repeat("a", 11),
+		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
+		Privacy: nil, OwnerID: nil, ID: "", Title: "",
+		ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
+		BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
+	}
+
+	_, err := s.manager.Create(s.T().Context(), note)
+	s.Require().ErrorIs(err, domain.ErrContentTooLarge)
+
+	_, err = s.manager.Update(s.T().Context(), "abc-123", "secret123456", uuid.Nil, note)
+	s.Require().ErrorIs(err, domain.ErrContentTooLarge)
+
+	s.manager.WithMaxContentLength(domain.DefaultMaxContentLength + 1)
+	s.expectSlugFree()
+	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
+
+	note.Content = strings.Repeat("a", domain.DefaultMaxContentLength+1)
+	_, err = s.manager.Create(s.T().Context(), note)
+	s.Require().NoError(err, "a raised limit admits content above the default")
 }
 
 // ── render cache ──.
@@ -1241,7 +1329,7 @@ func (s *ManagerTestSuite) TestGetRendered_UnchangedNoteIsRenderedOnce() {
 			}, nil
 		}).Times(2)
 	s.storage.EXPECT().IncrementViews(gomock.Any(), domain.HashSlug("abc-123")).Return(nil).Times(2)
-	s.renderer.EXPECT().Render("# Hello").Return("<h1>Hello</h1>", nil).Times(1)
+	s.renderer.EXPECT().Render("# Hello").Return("<h1>Hello</h1>", nil, nil).Times(1)
 
 	for range 2 {
 		_, html, err := s.manager.GetRendered(s.T().Context(), "abc-123")
@@ -1283,8 +1371,8 @@ func (s *ManagerTestSuite) TestGetRendered_ReRendersAfterUpdate() {
 
 			return nil
 		})
-	s.renderer.EXPECT().Render("old").Return("<p>old</p>", nil).Times(1)
-	s.renderer.EXPECT().Render("new").Return("<p>new</p>", nil).Times(1)
+	s.renderer.EXPECT().Render("old").Return("<p>old</p>", nil, nil).Times(1)
+	s.renderer.EXPECT().Render("new").Return("<p>new</p>", nil, nil).Times(1)
 
 	_, html, err := s.manager.GetRendered(s.T().Context(), "abc-123")
 	s.Require().NoError(err)
@@ -1327,8 +1415,8 @@ func (s *ManagerTestSuite) TestGetRendered_ReRendersWhenUpdatedAtChanges() {
 		s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(second, nil),
 	)
 	s.storage.EXPECT().IncrementViews(gomock.Any(), gomock.Any()).Return(nil).Times(2)
-	s.renderer.EXPECT().Render("v1").Return("<p>v1</p>", nil)
-	s.renderer.EXPECT().Render("v2").Return("<p>v2</p>", nil)
+	s.renderer.EXPECT().Render("v1").Return("<p>v1</p>", nil, nil)
+	s.renderer.EXPECT().Render("v2").Return("<p>v2</p>", nil, nil)
 
 	_, html, err := s.manager.GetRendered(s.T().Context(), "abc-123")
 	s.Require().NoError(err)
@@ -1355,7 +1443,7 @@ func (s *ManagerTestSuite) TestGetRendered_BurnNotesAreNeverCached() {
 	}
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(note, nil)
 	s.storage.EXPECT().Consume(gomock.Any(), domain.HashSlug("abc-123"), gomock.Any()).Return(note, nil)
-	s.renderer.EXPECT().Render("# Hello").Return("<h1>Hello</h1>", nil)
+	s.renderer.EXPECT().Render("# Hello").Return("<h1>Hello</h1>", nil, nil)
 
 	_, _, err := s.manager.GetRendered(s.T().Context(), "abc-123")
 
@@ -1390,7 +1478,7 @@ func (s *ManagerTestSuite) TestGetRendered_BurnAfterReading() {
 	}
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(note, nil)
 	s.storage.EXPECT().Consume(gomock.Any(), domain.HashSlug("abc-123"), gomock.Any()).Return(note, nil)
-	s.renderer.EXPECT().Render("# Hello").Return("<h1>Hello</h1>", nil)
+	s.renderer.EXPECT().Render("# Hello").Return("<h1>Hello</h1>", nil, nil)
 
 	result, rendered, err := s.manager.GetRendered(s.T().Context(), "abc-123")
 
@@ -1434,7 +1522,7 @@ func (s *ManagerTestSuite) TestGetRendered_RenderError() {
 	}
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(note, nil)
 	s.storage.EXPECT().IncrementViews(gomock.Any(), domain.HashSlug("abc-123")).Return(nil)
-	s.renderer.EXPECT().Render("bad").Return("", renderErr)
+	s.renderer.EXPECT().Render("bad").Return("", nil, renderErr)
 
 	_, _, err := s.manager.GetRendered(s.T().Context(), "abc-123")
 
@@ -1776,7 +1864,7 @@ func (s *ManagerTestSuite) TestGetRenderedPreloaded_OK() {
 	}
 
 	s.storage.EXPECT().IncrementViews(gomock.Any(), domain.HashSlug("rp-1")).Return(nil)
-	s.renderer.EXPECT().Render("# Hello").Return("<h1>Hello</h1>", nil)
+	s.renderer.EXPECT().Render("# Hello").Return("<h1>Hello</h1>", nil, nil)
 
 	result, rendered, err := s.manager.GetRenderedPreloaded(s.T().Context(), "rp-1", note)
 

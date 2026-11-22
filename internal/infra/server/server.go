@@ -587,7 +587,7 @@ func buildHandlers(
 
 	manager := notes.NewManager(store.notes, store.links, slugLock, render.NewRenderer(), noteCipher,
 		crypto.NewEditCodeHasher(argonParams).WithLogger(log), log, cmd.Bool(FlagCustomSlugs)).
-		WithRenderCache(rendercache.NewDefault(log))
+		WithRenderCache(rendercache.NewDefault(log)).WithMaxContentLength(maxContentLength(cmd))
 	linkManager := links.NewManager(store.links, checker, slugLock, linkCipher,
 		crypto.NewEditCodeHasher(argonParams).WithLogger(log), log, cmd.Bool(FlagCustomSlugs)).
 		WithCache(linkcache.NewDefault(log)).

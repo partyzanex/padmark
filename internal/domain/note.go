@@ -31,12 +31,11 @@ func (ct ContentType) Valid() bool {
 // MaxTitleLength caps a note title in characters (runes), checked by Note.Validate.
 const MaxTitleLength = 500
 
-// MaxContentLength caps a note's content in characters (runes), checked by Note.Validate and
-// published as maxLength in the OpenAPI spec. It is deliberately well below the 4 MiB default
-// request-body limit, which stays sized for JSON overhead and bulk requests: markdown rendering
-// and sanitizing cost grows with content size, so an unbounded note is a CPU/memory lever for
-// anyone allowed to create or view one.
-const MaxContentLength = 1 << 20
+// DefaultMaxContentLength is the note content limit in characters (runes) when the server
+// configuration gives none. The server sets the limit with --max-content-length; by default it
+// equals --max-body-bytes. Rendering cost grows with content size, so the limit is a setting of
+// the operator and not a constant.
+const DefaultMaxContentLength = 4 << 20
 
 // Privacy controls who may read a note. The zero value is never used directly — nil on Note
 // means "not set" (defaults to PrivacyPublic on create, keeps the existing value on update),
@@ -86,6 +85,16 @@ type Note struct {
 	ClearExpiry bool
 }
 
+// ValidateContentLength returns ErrContentTooLarge when the content has more than limit
+// characters (runes).
+func (n *Note) ValidateContentLength(limit int) error {
+	if utf8.RuneCountInString(n.Content) > limit {
+		return ErrContentTooLarge
+	}
+
+	return nil
+}
+
 // HashSlug returns the SHA-256 hex digest of slug, used as the database primary key (for notes)
 // and as the reveal-token note identifier (for burn-after-reading confirmation) — anywhere the
 // plaintext URL identifier must not be persisted. New content envelopes authenticate this
@@ -103,14 +112,11 @@ func HashSlug(slug string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// Validate checks that the note fields satisfy business rules.
+// Validate checks that the note fields satisfy business rules. The content length depends on
+// the server configuration, so ValidateContentLength checks it.
 func (n *Note) Validate() error {
 	if len([]rune(n.Title)) > MaxTitleLength {
 		return ErrTitleTooLong
-	}
-
-	if utf8.RuneCountInString(n.Content) > MaxContentLength {
-		return ErrContentTooLarge
 	}
 
 	if n.ContentType != nil && !n.ContentType.Valid() {

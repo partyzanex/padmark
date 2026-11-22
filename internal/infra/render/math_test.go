@@ -25,7 +25,7 @@ func TestMath(t *testing.T) {
 func (s *MathSuite) render(markdown string) string {
 	s.T().Helper()
 
-	out, err := s.r.Render(markdown)
+	out, _, err := s.r.Render(markdown)
 	s.Require().NoError(err)
 
 	return out

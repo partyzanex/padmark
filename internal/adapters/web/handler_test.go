@@ -609,7 +609,11 @@ func (s *HandlerSuite) TestCreateNote_OK() {
 // TestCreateNote_ContentOverCap_RejectedBeforeStorage: the OpenAPI maxLength on content is
 // enforced by the generated request validation, so an oversized body (well inside the 4 MiB
 // request limit) never reaches the manager.
-func (s *HandlerSuite) TestCreateNote_ContentOverCap_RejectedBeforeStorage() {
+// TestCreateNote_LongContentReachesManager checks that the API has no fixed content limit: the
+// notes manager applies the configured one (--max-content-length).
+func (s *HandlerSuite) TestCreateNote_LongContentReachesManager() {
+	s.manager.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil, domain.ErrContentTooLarge)
+
 	handler := web.NewHandler(s.manager, s.linkManager, discardLog())
 	ogen := web.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
 
@@ -622,14 +626,15 @@ func (s *HandlerSuite) TestCreateNote_ContentOverCap_RejectedBeforeStorage() {
 	})
 	s.Require().NoError(err)
 
-	body := `{"content":"` + strings.Repeat("a", domain.MaxContentLength+1) + `"}`
+	// One character more than the limit that the API spec had before.
+	body := `{"content":"` + strings.Repeat("a", 1<<20+1) + `"}`
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPost, "/notes", strings.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")
 
 	router.ServeHTTP(w, r)
 
-	s.Equal(http.StatusBadRequest, w.Code)
+	s.Equal(http.StatusUnprocessableEntity, w.Code)
 	s.Contains(w.Body.String(), "content")
 }
 

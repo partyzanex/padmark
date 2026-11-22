@@ -51,8 +51,11 @@ type SlugLock interface {
 // domain.ContentTypePlain notes (escape + wrap, no markdown parsing). Both live behind this one
 // port so the HTML-specific mechanics (escaping, sanitizing, wrapping) stay in the adapter that
 // implements it (internal/infra/render) — Manager only decides which content type calls for which.
+// Strategy: fail-hard; an error means the note cannot be shown. An image that the sanitizer
+// removes is not an error: Render reports a reason for it in droppedImages, and the page shows
+// the note without that image.
 type Renderer interface {
-	Render(content string) (string, error)
+	Render(content string) (rendered string, droppedImages []string, err error)
 	RenderPlain(content string) (string, error)
 }
 
@@ -127,6 +130,8 @@ type Manager struct {
 	// allowCustomSlugs gates user-supplied (human-readable) slugs. When false, custom slugs are
 	// rejected and only server-generated random slugs are issued.
 	allowCustomSlugs domain.CustomSlugSetting
+	// maxContentLength is the content limit in characters (WithMaxContentLength).
+	maxContentLength int
 }
 
 // NewManager creates a new Manager with required dependencies. allowCustomSlugs enables
@@ -150,7 +155,16 @@ func NewManager(
 		renderCache:      noRenderCache{},
 		expiredFiles:     noExpiredFiles{},
 		allowCustomSlugs: domain.CustomSlugSetting(allowCustomSlugs),
+		maxContentLength: domain.DefaultMaxContentLength,
 	}
+}
+
+// WithMaxContentLength sets the note content limit in characters (--max-content-length). Call it
+// at composition time.
+func (m *Manager) WithMaxContentLength(limit int) *Manager {
+	m.maxContentLength = limit
+
+	return m
 }
 
 // WithExpiredFiles attaches the file manager, so that an expired file that the sweep did not
@@ -170,6 +184,20 @@ func (m *Manager) WithRenderCache(cache RenderCache) *Manager {
 	return m
 }
 
+// validateNote runs Note.Validate and checks the content length against the configured limit.
+func validateNote(note *domain.Note, maxContentLength int) error {
+	err := note.Validate()
+	if err == nil {
+		err = note.ValidateContentLength(maxContentLength)
+	}
+
+	if err != nil {
+		return fmt.Errorf("validate: %w", err)
+	}
+
+	return nil
+}
+
 // validateForCreate runs Note.Validate, the ownership invariant (Note.ValidateOwnership) and,
 // when the caller chose one, the edit-code policy (domain.ValidateEditCode) — before anything is
 // resolved, hashed or persisted. An empty EditCode is not validated: Create generates it.
@@ -177,10 +205,10 @@ func (m *Manager) WithRenderCache(cache RenderCache) *Manager {
 // Update, where the same ownership check must wait until after OwnerID is pinned from the
 // existing note — see the call site in Update for why it cannot share this helper. Update never
 // accepts a replacement code, so the edit-code policy only ever applies here.
-func validateForCreate(note *domain.Note) error {
-	err := note.Validate()
+func validateForCreate(note *domain.Note, maxContentLength int) error {
+	err := validateNote(note, maxContentLength)
 	if err != nil {
-		return fmt.Errorf("validate: %w", err)
+		return err
 	}
 
 	err = note.ValidateOwnership()
@@ -210,7 +238,7 @@ func (m *Manager) Create(ctx context.Context, note *domain.Note) (*domain.Note, 
 		note.ShowContents = new(false)
 	}
 
-	err := validateForCreate(note)
+	err := validateForCreate(note, m.maxContentLength)
 	if err != nil {
 		return nil, fmt.Errorf("validate for create: %w", err)
 	}
@@ -428,9 +456,9 @@ func resolveExpiryTime(note, existing *domain.Note) {
 func (m *Manager) Update(
 	ctx context.Context, id, editCode string, callerID uuid.UUID, note *domain.Note,
 ) (*domain.Note, error) {
-	err := note.Validate()
+	err := validateNote(note, m.maxContentLength)
 	if err != nil {
-		return nil, fmt.Errorf("validate: %w", err)
+		return nil, err
 	}
 
 	dbID := domain.HashSlug(id)
@@ -530,7 +558,7 @@ func (m *Manager) GetRendered(ctx context.Context, id string) (*domain.Note, str
 		return nil, "", fmt.Errorf("get note for render: %w", err)
 	}
 
-	rendered, err := m.renderNote(id, note)
+	rendered, err := m.renderNote(ctx, id, note)
 	if err != nil {
 		return nil, "", fmt.Errorf("render note: %w", err)
 	}
@@ -548,7 +576,7 @@ func (m *Manager) GetRenderedPreloaded(
 		return nil, "", fmt.Errorf("get note for render: %w", err)
 	}
 
-	rendered, err := m.renderNote(id, note)
+	rendered, err := m.renderNote(ctx, id, note)
 	if err != nil {
 		return nil, "", fmt.Errorf("render note: %w", err)
 	}
@@ -593,7 +621,7 @@ const maxCachedRenderBytes = 256 * 1024
 // copy would only keep its plaintext alive in memory after the burn.
 // The error names the note by domain.HashSlug(id), never the plaintext slug: the slug is the
 // note's capability URL and this error ends up in server logs.
-func (m *Manager) renderNote(id string, note *domain.Note) (string, error) {
+func (m *Manager) renderNote(ctx context.Context, id string, note *domain.Note) (string, error) {
 	dbID := domain.HashSlug(id)
 	cacheable := !note.BurnAfterReading && note.BurnTTL == 0
 
@@ -604,7 +632,7 @@ func (m *Manager) renderNote(id string, note *domain.Note) (string, error) {
 		}
 	}
 
-	rendered, err := m.renderContent(dbID, note)
+	rendered, err := m.renderContent(ctx, dbID, note)
 	if err != nil {
 		return "", fmt.Errorf("render content: %w", err)
 	}
@@ -619,18 +647,37 @@ func (m *Manager) renderNote(id string, note *domain.Note) (string, error) {
 // renderContent picks the strategy the content type calls for: plain-text notes are escaped and
 // wrapped in <pre> (Renderer.RenderPlain), markdown notes are parsed and sanitized (Renderer.Render).
 // Errors name the note by dbID (its hash), never the plaintext slug.
-func (m *Manager) renderContent(dbID string, note *domain.Note) (string, error) {
-	render := m.renderer.Render
+func (m *Manager) renderContent(ctx context.Context, dbID string, note *domain.Note) (string, error) {
 	if note.ContentType != nil && *note.ContentType == domain.ContentTypePlain {
-		render = m.renderer.RenderPlain
+		rendered, err := m.renderer.RenderPlain(note.Content)
+		if err != nil {
+			return "", fmt.Errorf("render note %s: %w", dbID, err)
+		}
+
+		return rendered, nil
 	}
 
-	rendered, err := render(note.Content)
+	rendered, droppedImages, err := m.renderer.Render(note.Content)
 	if err != nil {
 		return "", fmt.Errorf("render note %s: %w", dbID, err)
 	}
 
+	if len(droppedImages) > 0 {
+		m.log.WarnContext(ctx, "note images not shown",
+			"op", "notes.render", "note", dbID, "reasons", countReasons(droppedImages))
+	}
+
 	return rendered, nil
+}
+
+// countReasons counts each reason, so one log record stays short for a note with many images.
+func countReasons(reasons []string) map[string]int {
+	counts := make(map[string]int, len(reasons))
+	for _, reason := range reasons {
+		counts[reason]++
+	}
+
+	return counts
 }
 
 // resolveUniqueSlug resolves note.ID into a concrete slug and confirms no link already claims it.

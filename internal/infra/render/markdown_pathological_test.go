@@ -285,7 +285,7 @@ func renderWithin(rnd *render.Renderer, input string, budget time.Duration) (tim
 
 	go func() {
 		start := time.Now()
-		_, _ = rnd.Render(input)
+		_, _, _ = rnd.Render(input)
 
 		done <- time.Since(start)
 	}()
@@ -392,7 +392,7 @@ func BenchmarkRenderPathological(b *testing.B) {
 				b.SetBytes(int64(len(input)))
 
 				for b.Loop() {
-					_, err := rnd.Render(input)
+					_, _, err := rnd.Render(input)
 					if err != nil {
 						b.Fatal(err)
 					}
@@ -467,7 +467,11 @@ func TestRenderPathologicalMeasure(t *testing.T) {
 	for _, testCase := range pathoCases() {
 		t.Run(testCase.name, func(t *testing.T) {
 			logScaling(t, testCase.name, func(size int) measurement {
-				return measureRender(t, testCase.gen(size), rnd.Render)
+				return measureRender(t, testCase.gen(size), func(input string) (string, error) {
+					out, _, err := rnd.Render(input)
+
+					return out, err
+				})
 			})
 		})
 	}

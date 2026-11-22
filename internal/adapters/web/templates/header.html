@@ -283,12 +283,16 @@
         document.getElementById('themeCycle').setAttribute('aria-label', 'Theme: ' + theme + '. Switch theme');
     }
 
+    // setTheme changes the theme at once. Transitions are off while the browser applies the new
+    // colours (reading offsetHeight makes it do so now); then they come back for hover and focus.
     function setTheme(theme) {
-        document.documentElement.classList.add('theme-transitioning');
-        document.documentElement.setAttribute('data-theme', theme);
+        const root = document.documentElement;
+        root.classList.add('theme-switching');
+        root.setAttribute('data-theme', theme);
         markTheme(theme);
         localStorage.setItem('theme', theme);
-        setTimeout(() => document.documentElement.classList.remove('theme-transitioning'), 450);
+        void root.offsetHeight;
+        root.classList.remove('theme-switching');
     }
 
     (function () {

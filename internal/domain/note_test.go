@@ -285,36 +285,34 @@ func TestNote_OwnedBy_AnonymousNote(t *testing.T) {
 	assert.False(t, note.OwnedBy(uuid.Nil))
 }
 
-func TestNote_Validate_ContentLength(t *testing.T) {
+func contentNote(content string) *Note {
+	return &Note{
+		Content:   content,
+		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
+		Privacy: nil, OwnerID: nil, ID: "", Title: "",
+		ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
+		BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
+	}
+}
+
+func TestNote_ValidateContentLength(t *testing.T) {
 	t.Parallel()
 
-	atCap := &Note{
-		Content:   strings.Repeat("a", MaxContentLength),
-		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
-		Privacy: nil, OwnerID: nil, ID: "", Title: "",
-		ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
-		BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
-	}
-	require.NoError(t, atCap.Validate())
+	const limit = 8
 
-	over := &Note{
-		Content:   strings.Repeat("a", MaxContentLength+1),
-		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
-		Privacy: nil, OwnerID: nil, ID: "", Title: "",
-		ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
-		BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
-	}
-	require.ErrorIs(t, over.Validate(), ErrContentTooLarge)
+	require.NoError(t, contentNote(strings.Repeat("a", limit)).ValidateContentLength(limit))
+	require.ErrorIs(t, contentNote(strings.Repeat("a", limit+1)).ValidateContentLength(limit), ErrContentTooLarge)
 
-	// The cap counts characters, not bytes: a body of two-byte runes at the cap is valid.
-	multibyte := &Note{
-		Content:   strings.Repeat("é", MaxContentLength),
-		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
-		Privacy: nil, OwnerID: nil, ID: "", Title: "",
-		ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
-		BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
-	}
-	require.NoError(t, multibyte.Validate())
+	// The limit counts characters, not bytes: two-byte runes at the limit are valid.
+	require.NoError(t, contentNote(strings.Repeat("é", limit)).ValidateContentLength(limit))
+}
+
+// TestNote_Validate_IgnoresContentLength: the limit is a server setting, so Validate does not
+// check it.
+func TestNote_Validate_IgnoresContentLength(t *testing.T) {
+	t.Parallel()
+
+	require.NoError(t, contentNote(strings.Repeat("a", DefaultMaxContentLength+1)).Validate())
 }
 
 func TestNote_ContentsSidebar(t *testing.T) {

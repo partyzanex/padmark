@@ -73,6 +73,12 @@ v0.5.0 follows **v0.4.0**.
 
 ### Changed
 
+- The note content limit is a setting: `--max-content-length` / `PADMARK_MAX_CONTENT_LENGTH`
+  (characters). The default `0` uses the `--max-body-bytes` value (4 MiB), so
+  `PADMARK_MAX_BODY_BYTES` alone raises both limits. Before, the limit was a fixed 1,048,576
+  characters in the code and in the API spec, and no setting changed it. A longer note now gets
+  `422` instead of `400`. The API spec has no `maxLength` for `content` any more, so
+  `padmark-cli` and `padmark-mcp` do not refuse a long note before they send it.
 - Short links and files follow the note flow. **Open** on the success page opens the page of the
   record; its **Edit** action opens the editor; **Save** returns to the page of the record.
   A short link gets a page at `/links/{id}` for a client that prefers `text/html`: the
@@ -99,6 +105,11 @@ v0.5.0 follows **v0.4.0**.
 
 ### Fixed
 
+- The note page shows images that the Markdown embeds as base64 `data:` URIs (PNG, JPEG, GIF
+  and WebP). Before, the server removed their source, and only the editor preview showed them.
+  SVG and other types stay removed, and links cannot use `data:` URIs. In place of an image
+  that the page will not show, the preview gives the reason. The server writes a `warn` log
+  record with the note hash and the count of each reason.
 - A short link keeps the `#fragment` of its target URL. Before, the server saved
   `https://example.com/page#part` as `https://example.com/page%23part`, and the redirect went to
   a page that does not exist. The cause was the `uri` decoder of ogen, which keeps the fragment in

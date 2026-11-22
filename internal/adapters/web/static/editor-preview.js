@@ -156,13 +156,109 @@
     RETURN_DOM_FRAGMENT: true,
   };
 
-  // A click on a preview link must not replace the editor page with unsaved text.
+  // The data: image rule of the server (dataImageProblem in infra/render/policy.go): the note
+  // page shows only a base64 GIF, JPEG, PNG or WebP image with no query or fragment. DOMPurify
+  // alone also admits SVG and other types, which the note page would not show.
+  var RASTER_TYPE = /^image\/(?:gif|jpeg|png|webp)[;,]/i;
+  var RASTER_PREFIX = /^image\/(?:gif|jpeg|png|webp);base64,/i;
+  var SVG_TYPE = /^image\/svg\+xml[;,]/i;
+  // Padded base64, as Go base64.StdEncoding decodes it.
+  var BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+  var CONTROL = /[\u0000-\u001f\u007f]/;
+
+  // IMAGE_PROBLEMS gives the text for each reason key of the server.
+  var IMAGE_PROBLEMS = {
+    invalid: "the image address cannot be read.",
+    address: "a data: image address cannot have a ? or # part.",
+    svg: "SVG images are not supported. Use PNG, JPEG, GIF or WebP.",
+    type: "only PNG, JPEG, GIF and WebP images are supported.",
+    encoding: "the image data must be base64, with ;base64, right after the image type.",
+    base64: "the base64 image data is damaged.",
+  };
+
+  // dataImageProblem gives the reason key why the note page does not show a data: image, or "".
+  // The URL parser of the server removes the spaces around the address and its line breaks, and
+  // refuses other control characters.
+  function dataImageProblem(src) {
+    var value = src.trim().replace(/[\r\n]/g, "");
+    if (CONTROL.test(value)) {
+      return "invalid";
+    }
+
+    var opaque = value.slice(5);
+    var hash = opaque.indexOf("#");
+    if (hash >= 0) {
+      // The server removes an empty fragment and refuses a fragment with text.
+      if (hash < opaque.length - 1) {
+        return "address";
+      }
+      opaque = opaque.slice(0, hash);
+    }
+    if (opaque.indexOf("?") >= 0) {
+      return "address";
+    }
+    if (SVG_TYPE.test(opaque)) {
+      return "svg";
+    }
+    if (!RASTER_TYPE.test(opaque)) {
+      return "type";
+    }
+
+    var prefix = RASTER_PREFIX.exec(opaque);
+    if (!prefix) {
+      return "encoding";
+    }
+
+    return BASE64.test(opaque.slice(prefix[0].length)) ? "" : "base64";
+  }
+
+  // droppedImages collects the images that the hook removes during one sanitize call; render
+  // then puts a notice in place of each one, so the author sees why the note page will not
+  // show it.
+  var droppedImages = [];
+
   DOMPurify.addHook("afterSanitizeAttributes", function (node) {
+    // A click on a preview link must not replace the editor page with unsaved text.
     if (node.tagName === "A" && node.hasAttribute("href")) {
       node.setAttribute("target", "_blank");
       node.setAttribute("rel", "noopener noreferrer nofollow");
     }
+    if (node.tagName === "IMG" && node.hasAttribute("src")) {
+      var src = node.getAttribute("src");
+      var problem = /^\s*data:/i.test(src) ? dataImageProblem(src) : "";
+      if (problem) {
+        node.removeAttribute("src");
+        droppedImages.push({ node: node, problem: problem });
+      }
+    }
   });
+
+  // imageNotice makes the notice for an image that the note page will not show.
+  function imageNotice(image, problem) {
+    var notice = document.createElement("span");
+    notice.className = "preview-image-notice";
+    notice.setAttribute("role", "note");
+    notice.dataset.problem = problem;
+
+    var alt = image.getAttribute("alt");
+    var title = document.createElement("strong");
+    title.textContent = alt ? 'Image "' + alt + '" not shown: ' : "Image not shown: ";
+    notice.append(title, IMAGE_PROBLEMS[problem]);
+
+    return notice;
+  }
+
+  // sanitize cleans the HTML of marked and replaces each dropped image with its notice.
+  function sanitize(html) {
+    droppedImages = [];
+    var fragment = DOMPurify.sanitize(html, PURIFY_CONFIG);
+    droppedImages.forEach(function (dropped) {
+      dropped.node.replaceWith(imageNotice(dropped.node, dropped.problem));
+    });
+    droppedImages = [];
+
+    return fragment;
+  }
 
   function escapeText(text) {
     return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -200,6 +296,12 @@
   }
 
   function render() {
+    // A render from apply() makes a scheduled one unnecessary. Without the cancel, the preview
+    // renders twice and replaces its nodes again while the author reads them.
+    window.clearTimeout(timer);
+    window.cancelAnimationFrame(frame);
+    timer = 0;
+    frame = 0;
     stale = false;
     var started = performance.now();
     var text = editor.value;
@@ -210,7 +312,7 @@
       empty.textContent = PLACEHOLDER;
       preview.replaceChildren(empty);
     } else {
-      preview.replaceChildren(DOMPurify.sanitize(marked.parse(text, { async: false }), PURIFY_CONFIG));
+      preview.replaceChildren(sanitize(marked.parse(text, { async: false })));
       // KaTeX draws after DOMPurify: its own output is trusted, the Markdown is not.
       window.padmarkMath.render(preview);
     }

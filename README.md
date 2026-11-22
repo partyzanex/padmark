@@ -1016,10 +1016,10 @@ hash of each invite token is stored in the database. Migration `20261014000002` 
 previously issued invites on both SQLite and PostgreSQL; admins must issue new links.
 Rolling back this migration also revokes invites, since raw tokens cannot be recovered.
 
-Note content is capped at 1,048,576 characters (`MaxContentLength`, published as `maxLength` in
-the OpenAPI spec); a longer body is rejected with `400` by the generated request validation, or
-`422` on the routes that decode the body by hand. The request-body limit (`--max-body-bytes`, 4 MB)
-is unchanged and still bounds JSON overhead and bulk requests. Rendered HTML of repeatedly viewed
+Note content is limited by `--max-content-length` (characters); the default `0` uses the
+`--max-body-bytes` value, so `PADMARK_MAX_BODY_BYTES` alone sets both limits. A longer note is
+rejected with `422`. The request-body limit (`--max-body-bytes`, 4 MB) also applies: to store a
+larger note, raise it. Rendered HTML of repeatedly viewed
 notes is cached in memory for up to two minutes (128 entries, never for burn-after-reading notes)
 and dropped on update and delete.
 
@@ -1394,6 +1394,7 @@ There is no destructive encryption down-migration, and older binaries cannot rea
 | `--write-timeout` | `PADMARK_WRITE_TIMEOUT` | `60` | HTTP write timeout in seconds |
 | `--max-header-bytes` | `PADMARK_MAX_HEADER_BYTES` | `65536` | Max request header size in bytes (64 KB) |
 | `--max-body-bytes` | `PADMARK_MAX_BODY_BYTES` | `4194304` | Max request body size in bytes (4 MB) |
+| `--max-content-length` | `PADMARK_MAX_CONTENT_LENGTH` | `0` | Max note content length in characters; `0` = the `--max-body-bytes` value. Raise `--max-body-bytes` too: the request body holds the content |
 | `--tls-cert` | `PADMARK_TLS_CERT` | — | TLS certificate path |
 | `--tls-key` | `PADMARK_TLS_KEY` | — | TLS private key path |
 | `--http-redirect-addr` | `PADMARK_HTTP_REDIRECT_ADDR` | — | HTTP → HTTPS redirect listener (TLS only) |
