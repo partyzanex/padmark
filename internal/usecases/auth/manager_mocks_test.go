@@ -42,6 +42,20 @@ func (m *MockUserStore) EXPECT() *MockUserStoreMockRecorder {
 	return m.recorder
 }
 
+// ChangePassword mocks base method.
+func (m *MockUserStore) ChangePassword(ctx context.Context, sess *domain.Session, passwordHash string, kdfSalt []byte, totpSecret string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ChangePassword", ctx, sess, passwordHash, kdfSalt, totpSecret)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// ChangePassword indicates an expected call of ChangePassword.
+func (mr *MockUserStoreMockRecorder) ChangePassword(ctx, sess, passwordHash, kdfSalt, totpSecret any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ChangePassword", reflect.TypeOf((*MockUserStore)(nil).ChangePassword), ctx, sess, passwordHash, kdfSalt, totpSecret)
+}
+
 // Create mocks base method.
 func (m *MockUserStore) Create(ctx context.Context, u *domain.User) error {
 	m.ctrl.T.Helper()
@@ -127,20 +141,6 @@ func (m *MockUserStore) UpdateLastLogin(ctx context.Context, id uuid.UUID, t tim
 func (mr *MockUserStoreMockRecorder) UpdateLastLogin(ctx, id, t any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateLastLogin", reflect.TypeOf((*MockUserStore)(nil).UpdateLastLogin), ctx, id, t)
-}
-
-// UpdatePassword mocks base method.
-func (m *MockUserStore) UpdatePassword(ctx context.Context, id uuid.UUID, passwordHash string, kdfSalt []byte, totpSecret string) error {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "UpdatePassword", ctx, id, passwordHash, kdfSalt, totpSecret)
-	ret0, _ := ret[0].(error)
-	return ret0
-}
-
-// UpdatePassword indicates an expected call of UpdatePassword.
-func (mr *MockUserStoreMockRecorder) UpdatePassword(ctx, id, passwordHash, kdfSalt, totpSecret any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdatePassword", reflect.TypeOf((*MockUserStore)(nil).UpdatePassword), ctx, id, passwordHash, kdfSalt, totpSecret)
 }
 
 // UpdateTOTPCounter mocks base method.
@@ -290,20 +290,6 @@ func (m *MockSessionStore) DeleteByUserID(ctx context.Context, userID uuid.UUID)
 func (mr *MockSessionStoreMockRecorder) DeleteByUserID(ctx, userID any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteByUserID", reflect.TypeOf((*MockSessionStore)(nil).DeleteByUserID), ctx, userID)
-}
-
-// DeleteByUserIDExcept mocks base method.
-func (m *MockSessionStore) DeleteByUserIDExcept(ctx context.Context, userID uuid.UUID, exceptSessionID string) error {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "DeleteByUserIDExcept", ctx, userID, exceptSessionID)
-	ret0, _ := ret[0].(error)
-	return ret0
-}
-
-// DeleteByUserIDExcept indicates an expected call of DeleteByUserIDExcept.
-func (mr *MockSessionStoreMockRecorder) DeleteByUserIDExcept(ctx, userID, exceptSessionID any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteByUserIDExcept", reflect.TypeOf((*MockSessionStore)(nil).DeleteByUserIDExcept), ctx, userID, exceptSessionID)
 }
 
 // Get mocks base method.
@@ -565,20 +551,6 @@ func (m *MockAPITokenStore) CreateIfUnderLimit(ctx context.Context, t *domain.AP
 func (mr *MockAPITokenStoreMockRecorder) CreateIfUnderLimit(ctx, t, limit any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateIfUnderLimit", reflect.TypeOf((*MockAPITokenStore)(nil).CreateIfUnderLimit), ctx, t, limit)
-}
-
-// DeleteByUserID mocks base method.
-func (m *MockAPITokenStore) DeleteByUserID(ctx context.Context, userID uuid.UUID) error {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "DeleteByUserID", ctx, userID)
-	ret0, _ := ret[0].(error)
-	return ret0
-}
-
-// DeleteByUserID indicates an expected call of DeleteByUserID.
-func (mr *MockAPITokenStoreMockRecorder) DeleteByUserID(ctx, userID any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteByUserID", reflect.TypeOf((*MockAPITokenStore)(nil).DeleteByUserID), ctx, userID)
 }
 
 // GetByHash mocks base method.

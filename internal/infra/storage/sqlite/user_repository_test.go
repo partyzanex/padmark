@@ -399,6 +399,117 @@ func (s *UserRepositoryTestSuite) TestUpdatePassword_NonExistentUser_NoError() {
 	s.Require().NoError(err)
 }
 
+// ── ChangePassword ──.
+
+// changePasswordFixture stores alice with two sessions and one API token, and bob with one
+// session and one API token. It returns alice and the new session that ChangePassword stores for her.
+func (s *UserRepositoryTestSuite) changePasswordFixture() (*domain.User, *domain.Session) {
+	ctx := s.T().Context()
+	alice := s.newUser("alice")
+	bob := s.newUser("bob")
+	s.Require().NoError(s.repo.Create(ctx, alice))
+	s.Require().NoError(s.repo.Create(ctx, bob))
+
+	sessions := NewSessionRepository(s.db, slog.New(slog.DiscardHandler))
+	tokens := NewAPITokenRepository(s.db)
+
+	for _, fixture := range []struct {
+		hash  string
+		owner uuid.UUID
+	}{{"alice-old-1", alice.ID}, {"alice-old-2", alice.ID}, {"bob-session", bob.ID}} {
+		s.Require().NoError(sessions.Create(ctx, cpSession(fixture.hash, fixture.owner)))
+	}
+
+	for _, fixture := range []struct {
+		hash  string
+		owner uuid.UUID
+	}{{"alice-token", alice.ID}, {"bob-token", bob.ID}} {
+		created, err := tokens.CreateIfUnderLimit(ctx, cpToken(fixture.hash, fixture.owner), 10)
+		s.Require().NoError(err)
+		s.Require().True(created)
+	}
+
+	return alice, cpSession("alice-new", alice.ID)
+}
+
+func (s *UserRepositoryTestSuite) TestChangePassword_ReplacesCredentialsAndAccess() {
+	ctx := s.T().Context()
+	alice, newSess := s.changePasswordFixture()
+	sessions := NewSessionRepository(s.db, slog.New(slog.DiscardHandler))
+	tokens := NewAPITokenRepository(s.db)
+	newSalt := []byte("newsaltnewsalt16")
+
+	s.Require().NoError(s.repo.ChangePassword(ctx, newSess, "new-hash", newSalt, "new-seal"))
+
+	got, err := s.repo.GetByID(ctx, alice.ID)
+	s.Require().NoError(err)
+	s.Equal("new-hash", got.PasswordHash)
+	s.Equal(newSalt, got.KDFSalt)
+	s.Equal("new-seal", got.TOTPSecret)
+
+	_, err = sessions.Get(ctx, "alice-new")
+	s.Require().NoError(err, "the new session must exist")
+
+	for _, old := range []string{"alice-old-1", "alice-old-2"} {
+		_, err = sessions.Get(ctx, old)
+		s.Require().ErrorIs(err, domain.ErrSessionExpired, "old session %s must be revoked", old)
+	}
+
+	_, err = tokens.GetByHash(ctx, "alice-token")
+	s.Require().ErrorIs(err, domain.ErrNotFound, "the API token of alice must be revoked")
+
+	_, err = sessions.Get(ctx, "bob-session")
+	s.Require().NoError(err, "the session of another user must stay")
+	_, err = tokens.GetByHash(ctx, "bob-token")
+	s.Require().NoError(err, "the API token of another user must stay")
+}
+
+// TestChangePassword_RevocationFailure_RollsBackAllWrites covers Finding 5: a failure in the last
+// step (API-token revocation) must leave the old password, old sessions and API tokens valid,
+// and must not keep the new session.
+func (s *UserRepositoryTestSuite) TestChangePassword_RevocationFailure_RollsBackAllWrites() {
+	ctx := s.T().Context()
+	alice, newSess := s.changePasswordFixture()
+	sessions := NewSessionRepository(s.db, slog.New(slog.DiscardHandler))
+	tokens := NewAPITokenRepository(s.db)
+
+	_, err := s.db.ExecContext(ctx, `CREATE TRIGGER fail_api_token_delete BEFORE DELETE ON api_tokens
+		BEGIN SELECT RAISE(ABORT, 'injected revocation failure'); END`)
+	s.Require().NoError(err)
+
+	err = s.repo.ChangePassword(ctx, newSess, "new-hash", []byte("newsaltnewsalt16"), "new-seal")
+	s.Require().ErrorContains(err, "injected revocation failure")
+
+	got, err := s.repo.GetByID(ctx, alice.ID)
+	s.Require().NoError(err)
+	s.Equal(alice.PasswordHash, got.PasswordHash, "the old password must stay valid")
+	s.Equal(alice.KDFSalt, got.KDFSalt)
+	s.Equal(alice.TOTPSecret, got.TOTPSecret)
+
+	_, err = sessions.Get(ctx, "alice-new")
+	s.Require().ErrorIs(err, domain.ErrSessionExpired, "the new session must not exist")
+
+	for _, old := range []string{"alice-old-1", "alice-old-2"} {
+		_, err = sessions.Get(ctx, old)
+		s.Require().NoError(err, "old session %s must stay after a rollback", old)
+	}
+
+	_, err = tokens.GetByHash(ctx, "alice-token")
+	s.Require().NoError(err, "the API token must stay after a rollback")
+}
+
+func (s *UserRepositoryTestSuite) TestChangePassword_NonExistentUser_ReturnsErrNotFound() {
+	ctx := s.T().Context()
+	sessions := NewSessionRepository(s.db, slog.New(slog.DiscardHandler))
+	newSess := cpSession("ghost-session", uuid.New())
+
+	err := s.repo.ChangePassword(ctx, newSess, "h", []byte("s"), "t")
+	s.Require().ErrorIs(err, domain.ErrNotFound)
+
+	_, err = sessions.Get(ctx, "ghost-session")
+	s.Require().ErrorIs(err, domain.ErrSessionExpired)
+}
+
 // ── Case-insensitive usernames ──.
 
 // TestCreate_DuplicateUsernameDifferentCase_ReturnsErrUserExists pins that "Admin" cannot be
@@ -430,4 +541,24 @@ func (s *UserRepositoryTestSuite) TestGetByUsername_IsCaseInsensitive() {
 
 	_, err := s.repo.GetByUsername(ctx, "alic")
 	s.ErrorIs(err, domain.ErrNotFound)
+}
+
+// --- helpers ---
+
+// cpSession returns a live session with the given at-rest hash for owner.
+func cpSession(hash string, owner uuid.UUID) *domain.Session {
+	now := time.Now()
+
+	return &domain.Session{
+		SessionHash: hash, UserID: owner, CreatedAt: now, ExpiresAt: now.Add(time.Hour),
+		UserAgent: "ua", IP: "127.0.0.1",
+	}
+}
+
+// cpToken returns an API token without expiry with the given hash for owner.
+func cpToken(hash string, owner uuid.UUID) *domain.APIToken {
+	return &domain.APIToken{
+		UserID: owner, TokenHash: hash, CreatedAt: time.Now(),
+		ExpiresAt: nil, LastUsedAt: nil, IssuedBy: nil,
+	}
 }

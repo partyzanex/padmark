@@ -27,7 +27,6 @@ const DefaultSessionTTL = 30 * 24 * time.Hour
 type SessionManager struct {
 	totp        TOTPManager
 	sessions    SessionStore
-	apiTokens   APITokenStore
 	sealer      SecretSealer
 	pw          PasswordHasher
 	users       UserStore
@@ -37,14 +36,13 @@ type SessionManager struct {
 }
 
 // NewSessionManager returns a new SessionManager. sessionTTL controls how long a session
-// remains valid; pass 0 for the default (30 days). apiTokens (nil when the API-token flow is
-// disabled) lets a password change revoke the account's API tokens.
+// remains valid; pass 0 for the default (30 days).
 //
 // Returns an error when crypto/rand is unavailable (see the dummy-hash precompute below) —
 // NewSessionManager runs only at the composition root, so the caller is expected to treat this
 // as a fatal startup error rather than retry.
 func NewSessionManager(
-	users UserStore, sessions SessionStore, apiTokens APITokenStore, passwordHasher PasswordHasher,
+	users UserStore, sessions SessionStore, passwordHasher PasswordHasher,
 	sealer SecretSealer, totp TOTPManager, log *slog.Logger, sessionTTL time.Duration,
 ) (*SessionManager, error) {
 	ttl := sessionTTL
@@ -64,7 +62,6 @@ func NewSessionManager(
 	return &SessionManager{
 		users:       users,
 		sessions:    sessions,
-		apiTokens:   apiTokens,
 		pw:          passwordHasher,
 		sealer:      sealer,
 		totp:        totp,
@@ -168,13 +165,11 @@ func (m *SessionManager) GetSession(ctx context.Context, sessionID string) (*dom
 }
 
 // ChangePassword verifies the current password and TOTP code, then re-encrypts the
-// TOTP secret under a new derived key. The replacement session is persisted first, then the new
-// credentials, then all other sessions and API tokens are revoked. A failure before the
-// credentials are written leaves the account as it was, so the caller can retry; the new password
-// is never stored without a session for the caller.
-// Returns the new session ID on success. ErrSessionRevocation is partial success:
-// the password and replacement session are persisted, but older sessions may remain.
-// Callers must keep that replacement session and show the revocation warning.
+// TOTP secret under a new derived key. UserStore.ChangePassword writes the new credentials, the
+// replacement session and the revocation of all other sessions and API tokens in one transaction.
+// Thus a database failure or a process stop cannot keep the old access valid next to the new
+// password: on an error the account is as it was, and the caller can retry with a new TOTP code.
+// Returns the new session ID on success.
 func (m *SessionManager) ChangePassword(
 	ctx context.Context, sessionID, oldPassword, newPassword, totpCode string,
 ) (string, error) {
@@ -205,30 +200,16 @@ func (m *SessionManager) ChangePassword(
 		return "", fmt.Errorf("build new credentials: %w", err)
 	}
 
-	// Create the replacement session BEFORE the credentials change: if Create fails, nothing has
-	// changed and the user can retry. A revocation failure must be surfaced alongside the
-	// replacement session.
-	newID, err := m.createReplacementSession(ctx, sess)
+	newID, newSess, err := m.newReplacementSession(sess)
 	if err != nil {
-		return "", fmt.Errorf("create replacement session: %w", err)
+		return "", fmt.Errorf("new replacement session: %w", err)
 	}
 
-	err = m.users.UpdatePassword(ctx, usr.ID, creds.hash, creds.salt, creds.encSecret)
+	err = m.users.ChangePassword(ctx, newSess, creds.hash, creds.salt, creds.encSecret)
 	if err != nil {
-		// The old password is still in force, so the replacement session must not outlive this
-		// failure. Its ID never reaches the caller, so a failed delete leaves an unusable row.
-		delErr := m.sessions.Delete(ctx, hashToken(newID))
-		if delErr != nil {
-			m.log.WarnContext(ctx, "delete replacement session after failed password update",
-				"user_id", usr.ID, "err", delErr)
-		}
+		m.log.ErrorContext(ctx, "change password", "user_id", usr.ID, "err", err)
 
-		return "", fmt.Errorf("update password: %w", err)
-	}
-
-	err = m.revokeOldCredentials(ctx, usr.ID, newID)
-	if err != nil {
-		return newID, fmt.Errorf("revoke old credentials: %w", err)
+		return "", fmt.Errorf("change password: %w", err)
 	}
 
 	return newID, nil
@@ -257,8 +238,8 @@ func (m *SessionManager) VerifyStepUp(ctx context.Context, userID uuid.UUID, ste
 }
 
 // confirmCredentials makes sure that the password this login verified is still the account's
-// password now that the new session exists. A concurrent ChangePassword revokes sessions only after
-// it writes the new hash, so a session created after that revocation would otherwise survive.
+// password now that the new session exists. A session created after the revocation of a
+// concurrent ChangePassword would otherwise survive with the old password.
 // When the hash changed, or the account is gone, the new session is deleted and the login fails
 // as a wrong factor (ErrInvalidTOTP).
 func (m *SessionManager) confirmCredentials(ctx context.Context, usr *domain.User, sessionHash string) error {
@@ -279,12 +260,12 @@ func (m *SessionManager) confirmCredentials(ctx context.Context, usr *domain.Use
 	return domain.ErrInvalidTOTP
 }
 
-// createReplacementSession stores a new session for the user of sess, with the same client
-// details, and returns its raw ID.
-func (m *SessionManager) createReplacementSession(ctx context.Context, sess *domain.Session) (string, error) {
+// newReplacementSession returns a new raw session ID and its session record for the user of sess,
+// with the same client details. It does not store the record.
+func (m *SessionManager) newReplacementSession(sess *domain.Session) (string, *domain.Session, error) {
 	newID, err := newSessionID()
 	if err != nil {
-		return "", fmt.Errorf("new session id: %w", err)
+		return "", nil, fmt.Errorf("new session id: %w", err)
 	}
 
 	now := time.Now()
@@ -297,45 +278,7 @@ func (m *SessionManager) createReplacementSession(ctx context.Context, sess *dom
 		IP:          sess.IP,
 	}
 
-	err = m.sessions.Create(ctx, newSess)
-	if err != nil {
-		return "", fmt.Errorf("create session: %w", err)
-	}
-
-	return newID, nil
-}
-
-// revokeOldCredentials invalidates everything the old password vouched for: every session but
-// keepSessionID (the replacement — it must survive so the caller stays logged in), and every API
-// token of the account — a leaked key, and whatever it minted, must not outlive the change. Both
-// are attempted even when one fails; a failure is ErrSessionRevocation (partial success).
-func (m *SessionManager) revokeOldCredentials(ctx context.Context, userID uuid.UUID, keepSessionID string) error {
-	err := errors.Join(
-		m.sessions.DeleteByUserIDExcept(ctx, userID, hashToken(keepSessionID)),
-		m.revokeAPITokens(ctx, userID),
-	)
-	if err != nil {
-		m.log.ErrorContext(ctx, "invalidate old sessions and api tokens after password change",
-			"user_id", userID, "err", err)
-
-		return fmt.Errorf("%w: %w", domain.ErrSessionRevocation, err)
-	}
-
-	return nil
-}
-
-// revokeAPITokens deletes every API token of userID; a no-op when the API-token flow is disabled.
-func (m *SessionManager) revokeAPITokens(ctx context.Context, userID uuid.UUID) error {
-	if m.apiTokens == nil {
-		return nil
-	}
-
-	err := m.apiTokens.DeleteByUserID(ctx, userID)
-	if err != nil {
-		return fmt.Errorf("revoke api tokens: %w", err)
-	}
-
-	return nil
+	return newID, newSess, nil
 }
 
 // buildNewCredentials validates newPassword complexity, derives a fresh KDF key, and

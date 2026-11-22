@@ -20,7 +20,13 @@ type UserStore interface {
 	GetByID(ctx context.Context, id uuid.UUID) (*domain.User, error)
 	List(ctx context.Context) ([]*domain.User, error)
 	UpdateLastLogin(ctx context.Context, id uuid.UUID, t time.Time) error
-	UpdatePassword(ctx context.Context, id uuid.UUID, passwordHash string, kdfSalt []byte, totpSecret string) error
+	// ChangePassword replaces the password hash, KDF salt and sealed TOTP secret of sess.UserID,
+	// makes sess the only session of that user and deletes all API tokens of that user, in one
+	// transaction. Fail-hard: on an error nothing changed, so the old password, sessions and API
+	// tokens stay valid and sess does not exist. Returns domain.ErrNotFound when the user is gone.
+	ChangePassword(
+		ctx context.Context, sess *domain.Session, passwordHash string, kdfSalt []byte, totpSecret string,
+	) error
 	// UpdateTOTPSecret replaces only the sealed TOTP secret, leaving the password hash and KDF
 	// salt untouched. It exists for the re-seal-on-login migration (see
 	// SessionManager.resealTOTPSecret), where the secret is rewritten under the current argon2
@@ -56,10 +62,8 @@ type SessionStore interface {
 	Create(ctx context.Context, s *domain.Session) error
 	Get(ctx context.Context, sessionID string) (*domain.Session, error)
 	Delete(ctx context.Context, sessionID string) error
-	// DeleteByUserID removes all sessions for a given user (e.g. after password change).
+	// DeleteByUserID removes all sessions for a given user.
 	DeleteByUserID(ctx context.Context, userID uuid.UUID) error
-	// DeleteByUserIDExcept removes all sessions for the user except the one with the given session ID.
-	DeleteByUserIDExcept(ctx context.Context, userID uuid.UUID, exceptSessionID string) error
 }
 
 // PasswordHasher hashes and verifies user passwords (argon2id with configurable cost).
@@ -113,8 +117,6 @@ type APITokenStore interface {
 	RevokeByHash(ctx context.Context, tokenHash string) error
 	// UpdateLastUsed records the time of the most recent successful token check, keyed by hash.
 	UpdateLastUsed(ctx context.Context, tokenHash string, t time.Time) error
-	// DeleteByUserID revokes every token of the user (e.g. after a password change).
-	DeleteByUserID(ctx context.Context, userID uuid.UUID) error
 }
 
 // Manager composes the four narrower auth managers — SessionManager (session.go),
@@ -159,7 +161,7 @@ func NewManager(
 	sessionTTL time.Duration,
 ) (*Manager, error) {
 	sessionMgr, err := NewSessionManager(
-		stores.Users, stores.Sessions, stores.APITokens, passwordHasher, sealer, totp, log, sessionTTL,
+		stores.Users, stores.Sessions, passwordHasher, sealer, totp, log, sessionTTL,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("new session manager: %w", err)

@@ -248,6 +248,77 @@ func (r *UserRepository) UpdatePassword(
 	return nil
 }
 
+// ChangePassword replaces the credentials of sess.UserID, makes sess the only session of that user
+// and deletes all API tokens of that user, in one transaction. A failure in any step rolls back
+// all of them, so the old password and the old access stay valid and sess does not exist.
+//
+// The transaction first locks the user row with FOR UPDATE. The foreign key check of a session
+// insert takes FOR KEY SHARE on the same row, and these two locks conflict. Thus a concurrent
+// login stores its session before the lock, and the delete removes it, or after the commit, and
+// its confirmCredentials check then sees the new hash. Without the lock, a session inserted
+// after the delete and checked before the commit would keep the old password valid.
+// Returns domain.ErrNotFound when the user does not exist.
+func (r *UserRepository) ChangePassword(
+	ctx context.Context, sess *domain.Session, passwordHash string, kdfSalt []byte, totpSecret string,
+) error {
+	err := r.db.RunInTx(ctx, nil, func(ctx context.Context, btx bun.Tx) error {
+		var locked uuid.UUID
+
+		lockErr := btx.NewSelect().
+			TableExpr("users").
+			Column("id").
+			Where("id = ?", sess.UserID).
+			For("UPDATE").
+			Scan(ctx, &locked)
+		if lockErr != nil {
+			if errors.Is(lockErr, sql.ErrNoRows) {
+				return domain.ErrNotFound
+			}
+
+			return fmt.Errorf("lock user: %w", lockErr)
+		}
+
+		_, updErr := btx.NewUpdate().
+			TableExpr("users").
+			Set("password_hash = ?", passwordHash).
+			Set("kdf_salt = ?", base64.RawURLEncoding.EncodeToString(kdfSalt)).
+			Set("totp_secret = ?", totpSecret).
+			Where("id = ?", sess.UserID).
+			Exec(ctx)
+		if updErr != nil {
+			return fmt.Errorf("update password: %w", updErr)
+		}
+
+		return replaceUserAccess(ctx, btx, sess)
+	})
+	if err != nil {
+		return fmt.Errorf("change password: %w", err)
+	}
+
+	return nil
+}
+
+// replaceUserAccess deletes all sessions and API tokens of sess.UserID and stores sess, inside the
+// transaction of ChangePassword.
+func replaceUserAccess(ctx context.Context, btx bun.Tx, sess *domain.Session) error {
+	_, err := btx.NewDelete().TableExpr("sessions").Where("user_id = ?", sess.UserID).Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("delete sessions of user: %w", err)
+	}
+
+	_, err = btx.NewInsert().Model(toSessionRow(sess)).Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("insert session: %w", err)
+	}
+
+	_, err = btx.NewDelete().TableExpr("api_tokens").Where("user_id = ?", sess.UserID).Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("delete api tokens of user: %w", err)
+	}
+
+	return nil
+}
+
 // UpdateTOTPSecret replaces only the sealed TOTP secret for the given user ID, and only while the
 // stored seal still equals expected. The password hash and KDF salt are deliberately left alone:
 // this is the re-seal-on-login migration path. The condition makes it a compare-and-set: after a

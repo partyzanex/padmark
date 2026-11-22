@@ -419,7 +419,7 @@ func (h *AuthHandler) ChangePasswordHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// A password change (full or partial) rotates the CSRF cookie; the re-rendered form must
+	// A password change rotates the CSRF cookie; the re-rendered form must
 	// carry the new token or resubmitting from this page fails the double-submit check (403).
 	if rotatedCSRF != "" {
 		data.CSRFToken = rotatedCSRF
@@ -606,7 +606,7 @@ func (h *AuthHandler) doChangePassword(
 	sessID := middleware.ExtractSessionID(r)
 
 	newSessID, changeErr := h.authMgr.ChangePassword(r.Context(), sessID, oldPassword, newPassword, totpCode)
-	if changeErr == nil || errors.Is(changeErr, domain.ErrSessionRevocation) {
+	if changeErr == nil {
 		// Replace the session cookie: all old sessions were invalidated; use the fresh one.
 		http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: HttpOnly/SameSite set; Secure follows IsHTTPS
 			Name:     middleware.SessionCookieName,
@@ -628,12 +628,6 @@ func (h *AuthHandler) doChangePassword(
 
 		rotatedCSRF = middleware.RotateCSRFToken(w, r, h.csrfSecret, newSessID, h.forcedScheme, h.trustedProxies)
 
-		if errors.Is(changeErr, domain.ErrSessionRevocation) {
-			return "Password changed, but older sessions or API tokens could not be revoked. " +
-				"You are signed in with a new session. Contact an administrator to revoke older sessions " +
-				"and API tokens.", rotatedCSRF
-		}
-
 		return "", rotatedCSRF
 	}
 
@@ -646,7 +640,8 @@ func (h *AuthHandler) doChangePassword(
 	return changePasswordErrMsg(changeErr), ""
 }
 
-// changePasswordErrMsg maps a failed (non-rotating) password change onto the form's message.
+// changePasswordErrMsg maps a failed (non-rotating) password change onto the form's message. A
+// failed change keeps the old password and access, so the default message asks for a retry.
 func changePasswordErrMsg(err error) string {
 	switch {
 	case errors.Is(err, domain.ErrInvalidPassword):

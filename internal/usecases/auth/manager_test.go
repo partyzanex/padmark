@@ -594,26 +594,38 @@ func (s *ManagerSuite) TestChangePassword_Success_UpdatesPasswordAndRotatesSessi
 	code, err := totp.GenerateCode(rawSecret, time.Now())
 	s.Require().NoError(err)
 
+	var stored *domain.Session
+
 	s.sessions.EXPECT().Get(gomock.Any(), hashToken("sess")).Return(sess, nil)
 	s.users.EXPECT().GetByID(gomock.Any(), s.userID).Return(usr, nil)
 	s.users.EXPECT().UpdateTOTPCounter(gomock.Any(), s.userID, gomock.Any()).Return(true, nil)
-	// The replacement session comes first, then the credentials, then the revocation (R7):
-	// a failure before UpdatePassword changes nothing. DeleteByUserIDExcept preserves the new
-	// session while wiping old ones.
-	gomock.InOrder(
-		s.sessions.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil),
-		s.users.EXPECT().UpdatePassword(gomock.Any(), s.userID, gomock.Any(), gomock.Any(), gomock.Any()).
-			Return(nil),
-		s.sessions.EXPECT().DeleteByUserIDExcept(gomock.Any(), s.userID, gomock.Any()).Return(nil),
-	)
+	// One store call does all writes (Finding 5): no separate session create or revocation.
+	s.users.EXPECT().ChangePassword(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, newSess *domain.Session, hash string, salt []byte, sealed string) error {
+			stored = newSess
+
+			s.NotEqual(usr.PasswordHash, hash)
+			s.NotEqual(usr.KDFSalt, salt)
+			s.NotEqual(usr.TOTPSecret, sealed)
+
+			return nil
+		})
 
 	newSessID, err := s.mgr.ChangePassword(s.T().Context(), "sess", testPassword, "NewP@ssw0rd!", code)
 	s.Require().NoError(err)
 	s.NotEmpty(newSessID)
 	s.NotEqual("sess", newSessID)
+	s.Require().NotNil(stored)
+	s.Equal(hashToken(newSessID), stored.SessionHash, "only the hash of the new session ID is stored")
+	s.Equal(s.userID, stored.UserID)
+	s.Equal("ua", stored.UserAgent)
+	s.Equal("1.2.3.4", stored.IP)
+	s.True(stored.ExpiresAt.After(stored.CreatedAt))
 }
 
-func (s *ManagerSuite) TestChangePassword_RevocationFailureReturnsSessionAndWarning() {
+// TestChangePassword_StoreFailure_ReturnsNoSession covers Finding 5: when the one atomic store
+// call fails, nothing changed, so ChangePassword returns no session ID and makes no other write.
+func (s *ManagerSuite) TestChangePassword_StoreFailure_ReturnsNoSession() {
 	usr, rawSecret := s.testUser()
 	sess := &domain.Session{
 		SessionHash: "sess", UserID: s.userID, UserAgent: "ua", IP: "1.2.3.4",
@@ -623,79 +635,16 @@ func (s *ManagerSuite) TestChangePassword_RevocationFailureReturnsSessionAndWarn
 	code, err := totp.GenerateCode(rawSecret, time.Now())
 	s.Require().NoError(err)
 
-	s.sessions.EXPECT().Get(gomock.Any(), hashToken("sess")).Return(sess, nil)
-	s.users.EXPECT().GetByID(gomock.Any(), s.userID).Return(usr, nil)
-	s.users.EXPECT().UpdateTOTPCounter(gomock.Any(), s.userID, gomock.Any()).Return(true, nil)
-	s.users.EXPECT().UpdatePassword(gomock.Any(), s.userID, gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(nil)
-	s.sessions.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
-	s.sessions.EXPECT().DeleteByUserIDExcept(gomock.Any(), s.userID, gomock.Any()).Return(errors.New("db timeout"))
-
-	// A partial result must retain the replacement session and explicitly report revocation failure.
-	newSessID, err := s.mgr.ChangePassword(s.T().Context(), "sess", testPassword, "NewP@ssw0rd!", code)
-	s.Require().ErrorIs(err, domain.ErrSessionRevocation)
-	s.NotEmpty(newSessID)
-}
-
-// TestChangePassword_SessionCreateFailure_KeepsOldPassword covers audit finding R7: when the
-// replacement session cannot be stored, the password is not changed at all, so the old password,
-// sessions and API tokens stay consistent and the user can retry.
-func (s *ManagerSuite) TestChangePassword_SessionCreateFailure_KeepsOldPassword() {
-	usr, rawSecret := s.testUser()
-	sess := &domain.Session{
-		SessionHash: "sess", UserID: s.userID, UserAgent: "ua", IP: "1.2.3.4",
-		CreatedAt: time.Time{}, ExpiresAt: time.Time{},
-	}
-
-	code, err := totp.GenerateCode(rawSecret, time.Now())
-	s.Require().NoError(err)
+	storeErr := errors.New("db down")
 
 	s.sessions.EXPECT().Get(gomock.Any(), hashToken("sess")).Return(sess, nil)
 	s.users.EXPECT().GetByID(gomock.Any(), s.userID).Return(usr, nil)
 	s.users.EXPECT().UpdateTOTPCounter(gomock.Any(), s.userID, gomock.Any()).Return(true, nil)
-	s.sessions.EXPECT().Create(gomock.Any(), gomock.Any()).Return(errors.New("db down"))
+	s.users.EXPECT().ChangePassword(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(storeErr)
 
 	newSessID, err := s.mgr.ChangePassword(s.T().Context(), "sess", testPassword, "NewP@ssw0rd!", code)
-	s.Require().Error(err)
-	s.Require().NotErrorIs(err, domain.ErrSessionRevocation)
-	s.Empty(newSessID)
-}
-
-// TestChangePassword_UpdateFailure_DeletesReplacementSession covers the other R7 path: when the
-// credentials cannot be written, the replacement session is deleted, because the old password is
-// still in force.
-func (s *ManagerSuite) TestChangePassword_UpdateFailure_DeletesReplacementSession() {
-	usr, rawSecret := s.testUser()
-	sess := &domain.Session{
-		SessionHash: "sess", UserID: s.userID, UserAgent: "ua", IP: "1.2.3.4",
-		CreatedAt: time.Time{}, ExpiresAt: time.Time{},
-	}
-
-	code, err := totp.GenerateCode(rawSecret, time.Now())
-	s.Require().NoError(err)
-
-	var created string
-
-	s.sessions.EXPECT().Get(gomock.Any(), hashToken("sess")).Return(sess, nil)
-	s.users.EXPECT().GetByID(gomock.Any(), s.userID).Return(usr, nil)
-	s.users.EXPECT().UpdateTOTPCounter(gomock.Any(), s.userID, gomock.Any()).Return(true, nil)
-	s.sessions.EXPECT().Create(gomock.Any(), gomock.Any()).DoAndReturn(
-		func(_ context.Context, newSess *domain.Session) error {
-			created = newSess.SessionHash
-
-			return nil
-		})
-	s.users.EXPECT().UpdatePassword(gomock.Any(), s.userID, gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(errors.New("db down"))
-	s.sessions.EXPECT().Delete(gomock.Any(), gomock.Any()).DoAndReturn(
-		func(_ context.Context, sessionHash string) error {
-			s.Equal(created, sessionHash, "the replacement session must be deleted")
-
-			return nil
-		})
-
-	newSessID, err := s.mgr.ChangePassword(s.T().Context(), "sess", testPassword, "NewP@ssw0rd!", code)
-	s.Require().Error(err)
+	s.Require().ErrorIs(err, storeErr)
 	s.Empty(newSessID)
 }
 
@@ -750,45 +699,6 @@ func (s *ManagerSuite) TestLogin_StaleReseal_SkipsWrite() {
 	sessID, err := s.mgr.Login(s.T().Context(), "alice", testPassword, totpCode, "UA", "127.0.0.1", "")
 	s.Require().NoError(err)
 	s.NotEmpty(sessID)
-}
-
-// TestChangePassword_RevokesAPITokens: a password change also revokes every API token of the
-// account (M-6), and a failure there is reported like a session-revocation failure.
-func (s *ManagerSuite) TestChangePassword_RevokesAPITokens() {
-	for _, revokeErr := range []error{nil, errors.New("db timeout")} {
-		apiTokens := NewMockAPITokenStore(s.ctrl)
-		mgr, err := NewManager(
-			Stores{Users: s.users, Invites: s.invites, Sessions: s.sessions, APITokens: apiTokens},
-			crypto.NewPasswordHasher(testArgon2Params),
-			crypto.NewSealer(testArgon2Params), crypto.NewTOTP(), discardLog(), "padmark", 0)
-		s.Require().NoError(err)
-
-		usr, rawSecret := s.testUser()
-		sess := &domain.Session{
-			SessionHash: "sess", UserID: s.userID,
-			CreatedAt: time.Time{}, ExpiresAt: time.Time{}, UserAgent: "", IP: "",
-		}
-
-		code, err := totp.GenerateCode(rawSecret, time.Now())
-		s.Require().NoError(err)
-
-		s.sessions.EXPECT().Get(gomock.Any(), hashToken("sess")).Return(sess, nil)
-		s.users.EXPECT().GetByID(gomock.Any(), s.userID).Return(usr, nil)
-		s.users.EXPECT().UpdateTOTPCounter(gomock.Any(), s.userID, gomock.Any()).Return(true, nil)
-		s.users.EXPECT().UpdatePassword(gomock.Any(), s.userID, gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
-		s.sessions.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
-		s.sessions.EXPECT().DeleteByUserIDExcept(gomock.Any(), s.userID, gomock.Any()).Return(nil)
-		apiTokens.EXPECT().DeleteByUserID(gomock.Any(), s.userID).Return(revokeErr)
-
-		newSessID, err := mgr.ChangePassword(s.T().Context(), "sess", testPassword, "NewP@ssw0rd!", code)
-		s.NotEmpty(newSessID)
-
-		if revokeErr == nil {
-			s.Require().NoError(err)
-		} else {
-			s.Require().ErrorIs(err, domain.ErrSessionRevocation)
-		}
-	}
 }
 
 // ── VerifyStepUp / GenerateInvite step-up (M-6) ──.

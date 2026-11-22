@@ -1963,7 +1963,10 @@ func (s *AuthHandlerSuite) TestUpdateNoteByPath_SessionOwner_BypassesEditCode() 
 	s.Equal(http.StatusOK, rec.Code)
 }
 
-func (s *AuthHandlerSuite) TestChangePasswordRevocationWarningKeepsReplacementSession() {
+// TestChangePasswordHandler_StoreFailure_AsksRetry: a failed change writes nothing (Finding 5),
+// so the page asks for a retry, keeps the current session cookie and tells nobody to call an
+// administrator.
+func (s *AuthHandlerSuite) TestChangePasswordHandler_StoreFailure_AsksRetry() {
 	usr := &domain.User{
 		ID: testUserID1, Username: "alice",
 		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
@@ -1971,7 +1974,7 @@ func (s *AuthHandlerSuite) TestChangePasswordRevocationWarningKeepsReplacementSe
 	}
 	s.auth.EXPECT().GetSession(gomock.Any(), "sess1").Return(usr, nil)
 	s.auth.EXPECT().ChangePassword(gomock.Any(), "sess1", "OldP@ss12!", "NewP@ss12!", "123456").
-		Return("replacement-session", domain.ErrSessionRevocation)
+		Return("", errors.New("change password: database is locked"))
 
 	form := withCSRFFor(url.Values{
 		"old_password": {"OldP@ss12!"}, "new_password": {"NewP@ss12!"},
@@ -1985,20 +1988,16 @@ func (s *AuthHandlerSuite) TestChangePasswordRevocationWarningKeepsReplacementSe
 	rec := httptest.NewRecorder()
 	s.router.ServeHTTP(rec, req)
 	s.Equal(http.StatusOK, rec.Code)
-	s.Contains(rec.Body.String(), "Password changed, but older sessions or API tokens could not be revoked")
-	s.NotContains(rec.Body.String(), "Password changed successfully")
 
-	found := false
+	body := rec.Body.String()
+	s.Contains(body, "Something went wrong. Please try again.")
+	s.NotContains(body, "Password changed")
+	s.NotContains(body, "administrator")
+	s.NotContains(body, "database is locked", "internal errors must not reach the page")
 
 	for _, cookie := range rec.Result().Cookies() {
-		if cookie.Name == "padmark_session" {
-			found = true
-
-			s.Equal("replacement-session", cookie.Value)
-		}
+		s.NotEqual("padmark_session", cookie.Name, "a failed change must keep the current session cookie")
 	}
-
-	s.True(found)
 }
 
 // renderedCSRFField extracts the hidden csrf_token value from a rendered HTML form.
@@ -2012,51 +2011,47 @@ func (s *AuthHandlerSuite) renderedCSRFField(body string) string {
 }
 
 // TestChangePasswordHandler_RerenderCarriesRotatedCSRFToken is the regression for the page
-// re-rendering the form with the pre-rotation CSRF token: a full or partial (revocation
-// warning) password change rotates the CSRF cookie, so the re-rendered form must embed that
-// new, verifiable token — otherwise resubmitting from the page fails the double-submit check.
+// re-rendering the form with the pre-rotation CSRF token: a password change rotates the CSRF
+// cookie, so the re-rendered form must embed that new, verifiable token — otherwise
+// resubmitting from the page fails the double-submit check.
 func (s *AuthHandlerSuite) TestChangePasswordHandler_RerenderCarriesRotatedCSRFToken() {
-	for _, changeErr := range []error{nil, domain.ErrSessionRevocation} {
-		s.Run(fmt.Sprintf("err=%v", changeErr), func() {
-			usr := &domain.User{
-				ID: testUserID1, Username: "alice",
-				CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
-				KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
-			}
-			s.auth.EXPECT().GetSession(gomock.Any(), "sess1").Return(usr, nil)
-			s.auth.EXPECT().ChangePassword(gomock.Any(), "sess1", "OldP@ss12!", "NewP@ss12!", "123456").
-				Return("new-sess-id", changeErr)
-
-			form := withCSRFFor(url.Values{
-				"old_password": {"OldP@ss12!"}, "new_password": {"NewP@ss12!"},
-				"new_password_confirm": {"NewP@ss12!"}, "totp_code": {"123456"},
-			}, "sess1")
-			req := httptest.NewRequest(http.MethodPost, "/change-password", strings.NewReader(form.Encode()))
-			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-			req.AddCookie(s.sessionCookie("sess1"))
-			req.AddCookie(s.csrfCookieFor("sess1"))
-
-			rec := httptest.NewRecorder()
-			s.router.ServeHTTP(rec, req)
-			s.Require().Equal(http.StatusOK, rec.Code)
-
-			var csrfCookie *http.Cookie
-
-			for _, cookie := range rec.Result().Cookies() {
-				if cookie.Name == "padmark_csrf" {
-					csrfCookie = cookie
-				}
-			}
-
-			s.Require().NotNil(csrfCookie, "password change must rotate the CSRF cookie")
-			s.NotEqual(csrfTokenFor("sess1"), csrfCookie.Value)
-
-			field := s.renderedCSRFField(rec.Body.String())
-			s.Equal(csrfCookie.Value, field, "re-rendered form must carry the rotated token")
-			s.True(web.VerifyCSRFTokenForTest(field, authTestCSRFSecret, "new-sess-id"),
-				"the rotated token must be bound to the new session")
-		})
+	usr := &domain.User{
+		ID: testUserID1, Username: "alice",
+		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
+		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
 	}
+	s.auth.EXPECT().GetSession(gomock.Any(), "sess1").Return(usr, nil)
+	s.auth.EXPECT().ChangePassword(gomock.Any(), "sess1", "OldP@ss12!", "NewP@ss12!", "123456").
+		Return("new-sess-id", nil)
+
+	form := withCSRFFor(url.Values{
+		"old_password": {"OldP@ss12!"}, "new_password": {"NewP@ss12!"},
+		"new_password_confirm": {"NewP@ss12!"}, "totp_code": {"123456"},
+	}, "sess1")
+	req := httptest.NewRequest(http.MethodPost, "/change-password", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(s.sessionCookie("sess1"))
+	req.AddCookie(s.csrfCookieFor("sess1"))
+
+	rec := httptest.NewRecorder()
+	s.router.ServeHTTP(rec, req)
+	s.Require().Equal(http.StatusOK, rec.Code)
+
+	var csrfCookie *http.Cookie
+
+	for _, cookie := range rec.Result().Cookies() {
+		if cookie.Name == "padmark_csrf" {
+			csrfCookie = cookie
+		}
+	}
+
+	s.Require().NotNil(csrfCookie, "password change must rotate the CSRF cookie")
+	s.NotEqual(csrfTokenFor("sess1"), csrfCookie.Value)
+
+	field := s.renderedCSRFField(rec.Body.String())
+	s.Equal(csrfCookie.Value, field, "re-rendered form must carry the rotated token")
+	s.True(web.VerifyCSRFTokenForTest(field, authTestCSRFSecret, "new-sess-id"),
+		"the rotated token must be bound to the new session")
 }
 
 // TestChangePasswordHandler_FailureKeepsRequestCSRFToken — a rejected change does not rotate,
