@@ -344,12 +344,6 @@ func (enc *ContentCipher) unwrap(value, recordID string) (*unwrappedEnvelope, er
 	}, nil
 }
 
-// contentAAD has fixed-size fields: a purpose/version prefix, kind, resource byte, and
-// the 32-byte database ID. Neither the human-readable slug nor a key derivation is involved.
-func (enc *ContentCipher) contentAAD(recordID string) ([]byte, error) {
-	return enc.contentAADForKind(recordID, contentKind)
-}
-
 // AAD prevents swaps between IDs/resources/kinds, but has no monotonic revision.
 // A database writer can replay an older valid envelope for the same record; at-rest
 // encryption does not provide freshness without a trusted version store outside the DB.

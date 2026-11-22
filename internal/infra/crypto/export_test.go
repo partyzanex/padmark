@@ -48,3 +48,26 @@ func ValidateTOTP(secret, code string) bool {
 
 	return valid && err == nil
 }
+
+// Argon2MemoryBudget returns the current process-wide argon2id workspace budget in KiB.
+func Argon2MemoryBudget() uint32 {
+	return currentArgon2Budget().kib
+}
+
+// tryAcquire is the non-blocking form of acquire; ok is false when kib KiB are not free now
+// or earlier waiters are queued.
+func (b *argon2Budget) tryAcquire(kib uint32) (func(), bool) {
+	weight := b.weight(kib)
+
+	if !b.sem.TryAcquire(weight) {
+		return nil, false
+	}
+
+	return func() { b.sem.Release(weight) }, true
+}
+
+// contentAAD is the note AAD (additional authenticated data): a purpose/version prefix, kind,
+// resource byte and the 32-byte database ID.
+func (enc *ContentCipher) contentAAD(recordID string) ([]byte, error) {
+	return enc.contentAADForKind(recordID, contentKind)
+}

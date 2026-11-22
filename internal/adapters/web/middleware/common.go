@@ -237,13 +237,9 @@ func logRoute(path string) string {
 	return "note"
 }
 
-// WithBodyLimit limits a request body to maxBytes; a larger body fails when the handler reads it.
-func WithBodyLimit(maxBytes int64, next http.Handler) http.Handler {
-	return WithBodyLimitExcept(maxBytes, nil, next)
-}
-
-// WithBodyLimitExcept is WithBodyLimit for all requests except those for which exempt returns
-// true. An exempt handler must apply its own limit; the file upload uses --max-file-size.
+// WithBodyLimitExcept limits a request body to maxBytes for all requests except those for which
+// exempt returns true; a larger body fails when the handler reads it. An exempt handler must apply
+// its own limit; the file upload uses --max-file-size.
 func WithBodyLimitExcept(maxBytes int64, exempt func(*http.Request) bool, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if exempt != nil && exempt(r) {
