@@ -29,7 +29,29 @@ func (s *ManagerTestSuite) TestCreate_ExpiredFileReleasesSlug() {
 	s.expectAliasFree()
 	gomock.InOrder(
 		s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(domain.ErrSlugConflict),
+		s.storage.EXPECT().DeleteExpired(gomock.Any(), domain.HashSlug("report")).Return(domain.ErrNotFound),
 		releaser.EXPECT().ReleaseExpiredSlug(gomock.Any(), domain.HashSlug("report")).Return(true, nil),
+		s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil),
+	)
+
+	link, err := s.manager.Create(s.T().Context(), "https://example.com", aliasOptions())
+	s.Require().NoError(err)
+	s.Equal("report", link.ID)
+}
+
+// TestCreate_ExpiredLinkReleasesSlug covers an expired link that took the slug after the preflight
+// check: Create removes it through the conditional DeleteExpired, evicts its cached target and
+// tries once more. The file manager is not asked, because one record at most holds a slug.
+func (s *ManagerTestSuite) TestCreate_ExpiredLinkReleasesSlug() {
+	releaser := NewMockExpiredFileReleaser(s.ctrl)
+	cache := NewMockCache(s.ctrl)
+	s.manager.WithExpiredFiles(releaser).WithCache(cache)
+
+	s.expectAliasFree()
+	gomock.InOrder(
+		s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(domain.ErrSlugConflict),
+		s.storage.EXPECT().DeleteExpired(gomock.Any(), domain.HashSlug("report")).Return(nil),
+		cache.EXPECT().Delete(domain.HashSlug("report")),
 		s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil),
 	)
 
@@ -45,6 +67,7 @@ func (s *ManagerTestSuite) TestCreate_SlugConflictWithoutExpiredFile() {
 	s.Run("live resource", func() {
 		s.expectAliasFree()
 		s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(domain.ErrSlugConflict)
+		s.storage.EXPECT().DeleteExpired(gomock.Any(), gomock.Any()).Return(domain.ErrNotFound)
 		releaser.EXPECT().ReleaseExpiredSlug(gomock.Any(), gomock.Any()).Return(false, nil)
 
 		_, err := s.manager.Create(s.T().Context(), "https://example.com", aliasOptions())
@@ -54,6 +77,7 @@ func (s *ManagerTestSuite) TestCreate_SlugConflictWithoutExpiredFile() {
 	s.Run("release error is fail-soft", func() {
 		s.expectAliasFree()
 		s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(domain.ErrSlugConflict)
+		s.storage.EXPECT().DeleteExpired(gomock.Any(), gomock.Any()).Return(errors.New("db down"))
 		releaser.EXPECT().ReleaseExpiredSlug(gomock.Any(), gomock.Any()).Return(false, errors.New("s3 down"))
 
 		_, err := s.manager.Create(s.T().Context(), "https://example.com", aliasOptions())

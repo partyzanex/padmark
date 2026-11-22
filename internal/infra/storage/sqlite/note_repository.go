@@ -139,9 +139,16 @@ func (r *NoteRepository) Get(ctx context.Context, id string) (*domain.Note, erro
 	return toDomain(&dbNote), nil
 }
 
-// Exists reports whether a note with the given ID exists — used for the cross-table slug
-// uniqueness check shared with links (see notes.Manager.Create / links.Manager.Create).
+// Exists reports whether a note holds the slug id. links.Manager and files.Manager use it for the
+// cross-resource slug check. An expired note does not hold its slug: Exists first deletes it
+// through DeleteExpired, which checks the expiry in the DELETE, so a note that its owner extended
+// stays. Thus the address of an expired note does not depend on a read after the expiry.
 func (r *NoteRepository) Exists(ctx context.Context, id string) (bool, error) {
+	err := r.DeleteExpired(ctx, id)
+	if err != nil && !errors.Is(err, domain.ErrNotFound) {
+		return false, fmt.Errorf("sqlite note exists: %w", err)
+	}
+
 	exists, err := r.db.NewSelect().Model((*note)(nil)).Where("id = ?", id).Exists(ctx)
 	if err != nil {
 		return false, fmt.Errorf("sqlite note exists: %w", err)
@@ -152,10 +159,13 @@ func (r *NoteRepository) Exists(ctx context.Context, id string) (bool, error) {
 
 // Consume atomically deletes a note and returns it, but only if the note is eligible for deletion:
 // burn_after_reading is set (with no grace period), or expires_at has passed.
+// It deletes only the note version with storedEditCode (see notes.Storage).
 // Returns domain.ErrNotFound otherwise. RETURNING lists the model columns (?Columns), not *:
 // notes also has legacy_slug (migrations/sqlite/20261023000001_legacy_notes.sql), which the
 // model does not map and bun refuses to scan.
-func (r *NoteRepository) Consume(ctx context.Context, id string, expected domain.Privacy) (*domain.Note, error) {
+func (r *NoteRepository) Consume(
+	ctx context.Context, id string, expected domain.Privacy, storedEditCode string,
+) (*domain.Note, error) {
 	var dbNote note
 
 	err := r.db.NewDelete().
@@ -163,6 +173,7 @@ func (r *NoteRepository) Consume(ctx context.Context, id string, expected domain
 		Where("id = ?", id).
 		Where("burn_after_reading OR (expires_at IS NOT NULL AND expires_at <= ?)", time.Now()).
 		Where("privacy = ?", expected).
+		Where("edit_code = ?", storedEditCode).
 		Returning("?Columns").
 		Scan(ctx)
 	if err != nil {
@@ -177,10 +188,11 @@ func (r *NoteRepository) Consume(ctx context.Context, id string, expected domain
 }
 
 // SetBurnExpiry atomically sets expires_at and clears burn_after_reading on first read
-// for notes with a burn grace period. Returns domain.ErrNotFound if no eligible row is found.
+// for notes with a burn grace period, only for the note version with storedEditCode.
+// Returns domain.ErrNotFound if no eligible row is found.
 // RETURNING lists the model columns only; see Consume.
 func (r *NoteRepository) SetBurnExpiry(
-	ctx context.Context, id string, expiresAt time.Time, expected domain.Privacy,
+	ctx context.Context, id string, expiresAt time.Time, expected domain.Privacy, storedEditCode string,
 ) (*domain.Note, error) {
 	var dbNote note
 
@@ -191,6 +203,7 @@ func (r *NoteRepository) SetBurnExpiry(
 		Where("id = ?", id).
 		Where("burn_after_reading").
 		Where("privacy = ?", expected).
+		Where("edit_code = ?", storedEditCode).
 		Returning("?Columns").
 		Scan(ctx)
 	if err != nil {
@@ -205,6 +218,7 @@ func (r *NoteRepository) SetBurnExpiry(
 }
 
 // Update modifies an existing note. A nil content type, privacy or ShowContents keeps the stored value.
+// domNote.EditCode must be the stored hash: it selects the note version and is never written.
 func (r *NoteRepository) Update(ctx context.Context, id string, domNote *domain.Note) error {
 	dbNote := &note{
 		BaseModel:        bun.BaseModel{},
@@ -245,6 +259,7 @@ func (r *NoteRepository) Update(ctx context.Context, id string, domNote *domain.
 		Set("privacy = COALESCE(?, privacy)", pVal).
 		Set("show_contents = COALESCE(?, show_contents)", domNote.ShowContents).
 		Where("id = ?", id).
+		Where("edit_code = ?", domNote.EditCode).
 		Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("sqlite update: %w", err)
@@ -308,9 +323,10 @@ func (r *NoteRepository) DeleteExpired(ctx context.Context, id string) error {
 	return nil
 }
 
-// Delete removes a note by ID.
-func (r *NoteRepository) Delete(ctx context.Context, id string) error {
-	result, err := r.db.NewDelete().Model((*note)(nil)).Where("id = ?", id).Exec(ctx)
+// Delete removes the note version with id and storedEditCode (see notes.Storage).
+func (r *NoteRepository) Delete(ctx context.Context, id, storedEditCode string) error {
+	result, err := r.db.NewDelete().Model((*note)(nil)).
+		Where("id = ?", id).Where("edit_code = ?", storedEditCode).Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("sqlite delete: %w", err)
 	}

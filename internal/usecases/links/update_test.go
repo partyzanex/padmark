@@ -25,19 +25,20 @@ func (s *ManagerTestSuite) TestUpdate_PreservesStateAndEvictsCache() {
 		Privacy: &privacy, ExpiresAt: &expiry, DirectRedirect: &direct, BurnAfterClick: true,
 	}
 	s.storage.EXPECT().GetByID(ctx, existing.ID).Return(existing, nil)
-	s.storage.EXPECT().Update(ctx, existing.ID, gomock.Any()).DoAndReturn(
-		func(_ context.Context, _ string, link *domain.Link) (*domain.Link, error) {
-			s.Equal("https://example.com/new", link.TargetURL)
-			s.Equal("original", link.EditCode)
-			s.Equal(existing.OwnerID, link.OwnerID)
-			s.Nil(link.Privacy, "an omitted privacy must reach storage as nil, so COALESCE keeps it")
-			s.Equal(existing.ExpiresAt, link.ExpiresAt)
-			s.Equal(existing.DirectRedirect, link.DirectRedirect)
-			s.Equal(existing.CreatedAt, link.CreatedAt)
-			s.True(link.BurnAfterClick)
-			link.Views = 8 // storage reports a click recorded after GetByID.
+	s.storage.EXPECT().Update(ctx, existing.ID, "original", gomock.Any()).DoAndReturn(
+		func(_ context.Context, _, _ string, patch *domain.LinkPatch) (*domain.Link, error) {
+			s.Equal("https://example.com/new", patch.TargetURL)
+			s.Equal(&domain.LinkPatch{
+				TargetURL: "https://example.com/new",
+				ExpiresAt: nil, Privacy: nil, DirectRedirect: nil, ClearExpiry: false, ResetDirectRedirect: false,
+			}, patch, "omitted fields must not reach storage, so the stored values stay")
 
-			return link, nil
+			// Storage reports the row as stored, including a click recorded after GetByID.
+			stored := *existing
+			stored.TargetURL = patch.TargetURL
+			stored.Views = 8
+
+			return &stored, nil
 		})
 	cache := NewMockCache(s.ctrl)
 	cache.EXPECT().Delete(existing.ID)
@@ -50,8 +51,64 @@ func (s *ManagerTestSuite) TestUpdate_PreservesStateAndEvictsCache() {
 	s.Require().NoError(err)
 	s.Equal("stable", updated.ID)
 	s.Equal(8, updated.Views)
+	s.Equal(existing.ExpiresAt, updated.ExpiresAt)
+	s.Equal(existing.DirectRedirect, updated.DirectRedirect)
+	s.True(updated.BurnAfterClick)
 	s.Empty(updated.EditCode)
 	s.Equal("original", existing.EditCode)
+}
+
+// TestUpdate_PatchCarriesOnlySentFields covers finding 9 in the usecase: each sent field and each
+// explicit reset reaches storage, and no value comes from the snapshot that GetByID returned.
+func (s *ManagerTestSuite) TestUpdate_PatchCarriesOnlySentFields() {
+	expiry := time.Now().Add(time.Hour)
+	later := time.Now().Add(2 * time.Hour)
+	direct, other := true, false
+	privacy := domain.PrivacyAuthenticated
+
+	// Each case sets one field in the request and the same field in the expected patch.
+	for name, send := range map[string]func(opts *UpdateOptions, want *domain.LinkPatch){
+		"expiry only": func(opts *UpdateOptions, want *domain.LinkPatch) {
+			opts.ExpiresAt, want.ExpiresAt = &later, &later
+		},
+		"clear expiry": func(opts *UpdateOptions, want *domain.LinkPatch) {
+			opts.ClearExpiry, want.ClearExpiry = true, true
+		},
+		"privacy only": func(opts *UpdateOptions, want *domain.LinkPatch) {
+			opts.Privacy, want.Privacy = &privacy, &privacy
+		},
+		"direct redirect only": func(opts *UpdateOptions, want *domain.LinkPatch) {
+			opts.DirectRedirect, want.DirectRedirect = &other, &other
+		},
+		"reset direct redirect": func(opts *UpdateOptions, want *domain.LinkPatch) {
+			opts.ResetDirectRedirect, want.ResetDirectRedirect = true, true
+		},
+	} {
+		s.Run(name, func() {
+			opts := UpdateOptions{
+				ExpiresAt: nil, Privacy: nil, DirectRedirect: nil, ClearExpiry: false, ResetDirectRedirect: false,
+			}
+			want := domain.LinkPatch{
+				TargetURL: "https://example.com/new",
+				ExpiresAt: nil, Privacy: nil, DirectRedirect: nil, ClearExpiry: false, ResetDirectRedirect: false,
+			}
+			send(&opts, &want)
+
+			s.storage.EXPECT().GetByID(gomock.Any(), domain.HashSlug("stable")).Return(&domain.Link{
+				EditCode: "code", ExpiresAt: &expiry, DirectRedirect: &direct,
+
+				CreatedAt: time.Time{}, Privacy: nil, OwnerID: nil, ID: "", TargetURL: "old",
+				Views: 0, BurnAfterClick: false,
+			}, nil)
+
+			s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("stable"), "code", &want).
+				Return(storedLink("code", nil), nil)
+
+			_, err := s.manager.Update(s.T().Context(), "stable", "code", uuid.Nil,
+				"https://example.com/new", opts)
+			s.Require().NoError(err)
+		})
+	}
 }
 
 func (s *ManagerTestSuite) TestUpdate_EditCodeAndOwnerChecks() {
@@ -78,7 +135,7 @@ func (s *ManagerTestSuite) TestUpdate_EditCodeAndOwnerChecks() {
 			s.storage.EXPECT().GetByID(gomock.Any(), domain.HashSlug("stable")).Return(existing, nil)
 
 			if testCase.ok {
-				s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("stable"), gomock.Any()).Return(&domain.Link{
+				s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("stable"), "original", gomock.Any()).Return(&domain.Link{
 					CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
 					DirectRedirect: nil, ID: "", TargetURL: "", EditCode: "",
 					Views: 0, BurnAfterClick: false,
@@ -170,8 +227,13 @@ func (s *ManagerTestSuite) TestUpdate_ConcurrentCacheFill() {
 			return &clone, nil
 		}),
 		s.storage.EXPECT().GetByID(ctx, dbID).Return(old, nil),
-		s.storage.EXPECT().Update(ctx, dbID, gomock.Any()).DoAndReturn(
-			func(_ context.Context, _ string, updated *domain.Link) (*domain.Link, error) { return updated, nil }),
+		s.storage.EXPECT().Update(ctx, dbID, "code", gomock.Any()).DoAndReturn(
+			func(_ context.Context, _, _ string, patch *domain.LinkPatch) (*domain.Link, error) {
+				updated := *old
+				updated.TargetURL = patch.TargetURL
+
+				return &updated, nil
+			}),
 	)
 	s.manager.slugLock = observedLock
 	s.manager.WithCache(linkcache.NewDefault(slog.New(slog.DiscardHandler)))

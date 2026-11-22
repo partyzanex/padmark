@@ -33,8 +33,8 @@ func (m *Manager) Update(
 
 	dbID := domain.HashSlug(slug)
 	// Serialize updates and cache fills for this slug so an in-flight read cannot
-	// cache the old destination after this write evicts it. Updates
-	// also preserve each other's omitted fields within this process.
+	// cache the old destination after this write evicts it. The lock is local to this process:
+	// omitted fields stay because the storage patch does not write them.
 	unlock, err := m.slugLock.Lock(ctx, dbID)
 	if err != nil {
 		return nil, fmt.Errorf("lock link: %w", err)
@@ -50,25 +50,21 @@ func (m *Manager) Update(
 		return nil, domain.ErrInvalidEditCode
 	}
 
-	updated := applyUpdateOptions(existing, opts)
-
-	err = validateLink(updated)
+	// The merged snapshot is only for validation. OwnerID cannot change, so the ownership check
+	// stays correct when another replica changes the other fields after GetByID.
+	err = validateLink(applyUpdateOptions(existing, opts))
 	if err != nil {
 		return nil, fmt.Errorf("validate link: %w", err)
 	}
 
-	updated.TargetURL, err = m.encryptor.Encrypt(validURL, dbID)
+	ciphertext, err := m.encryptor.Encrypt(validURL, dbID)
 	if err != nil {
 		return nil, fmt.Errorf("encrypt target url: %w", err)
 	}
 
-	// An omitted privacy goes to storage as nil, so COALESCE keeps the stored level: another
-	// replica may have changed it after GetByID, and slugLock serializes only this process.
-	if opts.Privacy == nil {
-		updated.Privacy = nil
-	}
-
-	persisted, err := m.storage.Update(ctx, dbID, updated)
+	// The patch carries only the fields that the caller sent. existing.EditCode is the stored
+	// hash, so the UPDATE changes only the link checked above, not a new link with this ID.
+	persisted, err := m.storage.Update(ctx, dbID, existing.EditCode, newLinkPatch(ciphertext, opts))
 	if err != nil {
 		return nil, fmt.Errorf("update link: %w", err)
 	}
@@ -86,6 +82,19 @@ func (m *Manager) Update(
 	return persisted, nil
 }
 
+// newLinkPatch converts the caller's options to a storage patch with the encrypted destination.
+func newLinkPatch(ciphertext string, opts UpdateOptions) *domain.LinkPatch {
+	return &domain.LinkPatch{
+		ExpiresAt:           opts.ExpiresAt,
+		Privacy:             opts.Privacy,
+		DirectRedirect:      opts.DirectRedirect,
+		TargetURL:           ciphertext,
+		ClearExpiry:         opts.ClearExpiry,
+		ResetDirectRedirect: opts.ResetDirectRedirect,
+	}
+}
+
+// applyUpdateOptions returns existing with the caller's options applied, for validation.
 func applyUpdateOptions(existing *domain.Link, opts UpdateOptions) *domain.Link {
 	updated := *existing
 	if opts.Privacy != nil {

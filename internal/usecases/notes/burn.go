@@ -93,7 +93,7 @@ func (b *burner) burnNote(ctx context.Context, id string, note *domain.Note) (*d
 		return operationResult, nil
 	}
 
-	consumed, consumeErr := b.storage.Consume(ctx, domain.HashSlug(id), note.EffectivePrivacy())
+	consumed, consumeErr := b.storage.Consume(ctx, domain.HashSlug(id), note.EffectivePrivacy(), note.EditCode)
 	if consumeErr != nil {
 		return nil, fmt.Errorf("burn after reading: %w", consumeErr)
 	}
@@ -115,9 +115,9 @@ func (b *burner) startTimer(ctx context.Context, id string, note *domain.Note) (
 
 	expected := note.EffectivePrivacy()
 
-	updated, burnErr := b.storage.SetBurnExpiry(ctx, domain.HashSlug(id), expiresAt, expected)
+	updated, burnErr := b.storage.SetBurnExpiry(ctx, domain.HashSlug(id), expiresAt, expected, note.EditCode)
 	if burnErr != nil {
-		operationResult, operationErr := b.handleSetExpiryErr(ctx, id, expected, burnErr)
+		operationResult, operationErr := b.handleSetExpiryErr(ctx, id, note, burnErr)
 		if operationErr != nil {
 			return operationResult, fmt.Errorf("handle set expiry err: %w", operationErr)
 		}
@@ -138,10 +138,11 @@ func (b *burner) startTimer(ctx context.Context, id string, note *domain.Note) (
 }
 
 // handleSetExpiryErr serves a note whose timer a concurrent reader already started. It returns
-// the current row only while its privacy is still expected: a changed access level means the
-// reader's check no longer applies, so the read fails as not found.
+// the current row only while it is still the checked note (same stored edit-code hash) with the
+// same privacy: a changed access level or a new note with this ID means the reader's check no
+// longer applies, so the read fails as not found.
 func (b *burner) handleSetExpiryErr(
-	ctx context.Context, id string, expected domain.Privacy, burnErr error,
+	ctx context.Context, id string, checked *domain.Note, burnErr error,
 ) (*domain.Note, error) {
 	if !errors.Is(burnErr, domain.ErrNotFound) {
 		return nil, fmt.Errorf("burn after reading: %w", burnErr)
@@ -152,7 +153,7 @@ func (b *burner) handleSetExpiryErr(
 		return nil, fmt.Errorf("burn after reading (re-fetch): %w", getErr)
 	}
 
-	if current.EffectivePrivacy() != expected {
+	if current.EditCode != checked.EditCode || current.EffectivePrivacy() != checked.EffectivePrivacy() {
 		return nil, fmt.Errorf("burn after reading (re-fetch): %w", domain.ErrNotFound)
 	}
 

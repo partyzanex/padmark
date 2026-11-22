@@ -24,14 +24,26 @@ const maxHashRetries = 5
 
 // Storage defines persistence operations for links. Create must atomically claim the ID
 // across notes and links, returning domain.ErrSlugConflict if another resource owns it.
-// Update keeps the stored privacy when link.Privacy is nil and returns the row as stored.
+// Update writes only the fields that patch sets and returns the row as stored, so a concurrent
+// change of a field that this update omits stays.
+// DeleteExpired removes a row only while it is still expired, and returns domain.ErrNotFound
+// otherwise: an expiry decision from an old snapshot never deletes a link that its owner
+// extended, or a live link that took the ID after the decision. Exists first removes an expired
+// link in the same way, so an expired link does not hold its slug.
+//
+// Update and Delete change the row only while its edit_code still equals storedEditCode, the
+// stored hash of the link that the caller checked. Each link gets a hash with a new random salt
+// and no write changes it, so the hash identifies one link version. If the link was deleted and
+// a new link took the same ID after the check, they return domain.ErrNotFound and do not touch
+// the new link.
 type Storage interface {
 	Create(ctx context.Context, link *domain.Link) error
-	Update(ctx context.Context, id string, link *domain.Link) (*domain.Link, error)
+	Update(ctx context.Context, id, storedEditCode string, patch *domain.LinkPatch) (*domain.Link, error)
 	GetByID(ctx context.Context, id string) (*domain.Link, error)
 	Exists(ctx context.Context, id string) (bool, error)
 	IncrementViews(ctx context.Context, id string) error
-	Delete(ctx context.Context, id string) error
+	Delete(ctx context.Context, id, storedEditCode string) error
+	DeleteExpired(ctx context.Context, id string) error
 	Consume(ctx context.Context, id string) (*domain.Link, error)
 	// ConsumeVisible atomically checks current visibility and expiry/burn eligibility before
 	// deleting and returning a row. allowBurn=false permits only expired rows.
@@ -385,7 +397,8 @@ func (m *Manager) Delete(ctx context.Context, slug, editCode string, callerID uu
 		return domain.ErrInvalidEditCode
 	}
 
-	err = m.storage.Delete(ctx, dbID)
+	// The stored hash limits the DELETE to the link checked above, not a new link with this ID.
+	err = m.storage.Delete(ctx, dbID, existing.EditCode)
 	if err != nil {
 		return fmt.Errorf("delete link: %w", err)
 	}
@@ -416,7 +429,7 @@ func (m *Manager) persistLink(
 	link.TargetURL = encrypted
 	link.ID = domain.HashSlug(slug)
 
-	err := m.createReleasingExpiredFile(ctx, link)
+	err := m.createReleasingExpired(ctx, link)
 	if err != nil {
 		return fmt.Errorf("create link: %w", err)
 	}
@@ -454,7 +467,7 @@ func (m *Manager) redirectLink(
 	reader := access.reader
 
 	if link.Expired(time.Now()) {
-		return nil, errorcontext.Wrap(m.expireLink(ctx, slug, dbID, reader), "handle redirect link")
+		return nil, errorcontext.Wrap(m.expireLink(ctx, slug, reader), "handle redirect link")
 	}
 
 	if link.BurnAfterClick {
@@ -701,12 +714,13 @@ func (m *Manager) consumeLink(
 	return consumed, nil
 }
 
-// createReleasingExpiredFile calls storage.Create. On a slug conflict, it asks the file manager
-// to remove an expired file with the same ID and tries once more. The storage triggers check
+// createReleasingExpired calls storage.Create. On a slug conflict, it removes an expired link or
+// an expired file with the same ID and tries once more, as notes.Manager does. Thus the address
+// of an expired record does not depend on a read after the expiry. The storage triggers check
 // the slug again, so the retry is safe across server processes.
-func (m *Manager) createReleasingExpiredFile(ctx context.Context, link *domain.Link) error {
+func (m *Manager) createReleasingExpired(ctx context.Context, link *domain.Link) error {
 	err := m.storage.Create(ctx, link)
-	if errors.Is(err, domain.ErrSlugConflict) && m.releaseExpiredFile(ctx, link.ID) {
+	if errors.Is(err, domain.ErrSlugConflict) && m.releaseExpiredSlug(ctx, link.ID) {
 		err = m.storage.Create(ctx, link)
 	}
 
@@ -715,6 +729,31 @@ func (m *Manager) createReleasingExpiredFile(ctx context.Context, link *domain.L
 	}
 
 	return nil
+}
+
+// releaseExpiredSlug reports whether it removed an expired link or an expired file with id. One
+// record at most holds a slug, so the file manager is asked only when no link was removed.
+func (m *Manager) releaseExpiredSlug(ctx context.Context, id string) bool {
+	return m.releaseExpiredLink(ctx, id) || m.releaseExpiredFile(ctx, id)
+}
+
+// releaseExpiredLink reports whether it removed the expired link with id. DeleteExpired checks
+// the expiry in the DELETE, so a link that its owner extended after it expired stays. Errors are
+// fail-soft: Create keeps its slug conflict.
+func (m *Manager) releaseExpiredLink(ctx context.Context, id string) bool {
+	err := m.storage.DeleteExpired(ctx, id)
+	if err == nil {
+		m.log.DebugContext(ctx, "expired link released its slug", "id", id)
+		m.evictCache(id)
+
+		return true
+	}
+
+	if !errors.Is(err, domain.ErrNotFound) {
+		m.log.WarnContext(ctx, "release expired link slug", "id", id, "err", err)
+	}
+
+	return false
 }
 
 // releaseExpiredFile reports whether the file manager removed an expired file with id.

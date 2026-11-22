@@ -106,18 +106,19 @@ func (r *LinkRepository) Create(ctx context.Context, domLink *domain.Link) error
 	return nil
 }
 
-// Update changes only editable fields. RETURNING reports the persisted counters and
-// immutable fields without overwriting clicks recorded since the caller's read.
-func (r *LinkRepository) Update(ctx context.Context, id string, domLink *domain.Link) (*domain.Link, error) {
+// Update writes the target URL and only the optional fields that patch sets (see
+// links.Storage). RETURNING reports the persisted counters and immutable fields without
+// overwriting clicks recorded since the caller's read. storedEditCode selects the link version.
+func (r *LinkRepository) Update(
+	ctx context.Context, id, storedEditCode string, patch *domain.LinkPatch,
+) (*domain.Link, error) {
 	var dbLink link
 
-	err := r.db.NewUpdate().
-		Model(&dbLink).
-		Set("target_url = ?", domLink.TargetURL).
-		Set("expires_at = ?", domLink.ExpiresAt).
-		Set("privacy = COALESCE(?, privacy)", optionalPrivacy(domLink.Privacy)).
-		Set("direct_redirect = ?", domLink.DirectRedirect).
+	query := r.db.NewUpdate().Model(&dbLink).Set("target_url = ?", patch.TargetURL)
+
+	err := setLinkPatch(query, patch).
 		Where("id = ?", id).
+		Where("edit_code = ?", storedEditCode).
 		Returning("*").
 		Scan(ctx)
 	if err != nil {
@@ -131,15 +132,32 @@ func (r *LinkRepository) Update(ctx context.Context, id string, domLink *domain.
 	return linkToDomain(&dbLink), nil
 }
 
-// optionalPrivacy is the privacy value for a COALESCE update: nil keeps the stored level.
-func optionalPrivacy(p *domain.Privacy) *string {
-	if p == nil {
-		return nil
+// setLinkPatch adds a SET clause for each optional field that patch sets. An omitted field gets
+// no clause, so the UPDATE keeps the value that is stored at the time of the write.
+func setLinkPatch(query *bun.UpdateQuery, patch *domain.LinkPatch) *bun.UpdateQuery {
+	patched := query
+
+	switch {
+	case patch.ClearExpiry:
+		patched = patched.Set("expires_at = NULL")
+	case patch.ExpiresAt != nil:
+		patched = patched.Set("expires_at = ?", patch.ExpiresAt)
+	default: // The caller omitted the expiry.
 	}
 
-	value := string(*p)
+	if patch.Privacy != nil {
+		patched = patched.Set("privacy = ?", string(*patch.Privacy))
+	}
 
-	return &value
+	switch {
+	case patch.ResetDirectRedirect:
+		patched = patched.Set("direct_redirect = NULL")
+	case patch.DirectRedirect != nil:
+		patched = patched.Set("direct_redirect = ?", *patch.DirectRedirect)
+	default: // The caller omitted the redirect mode.
+	}
+
+	return patched
 }
 
 // GetByID retrieves a link by ID (HashSlug(slug)).
@@ -158,9 +176,17 @@ func (r *LinkRepository) GetByID(ctx context.Context, id string) (*domain.Link, 
 	return linkToDomain(&dbLink), nil
 }
 
-// Exists reports whether a link with the given ID exists — used for the cross-table slug
-// uniqueness check shared with notes (see links.Manager.Create / notes.Manager.Create).
+// Exists reports whether a link holds the slug id. notes.Manager, links.Manager and files.Manager
+// use it for the cross-resource slug check. An expired link does not hold its slug: Exists first
+// deletes it through DeleteExpired, which checks the expiry in the DELETE, so a link that its
+// owner extended stays. Thus the address of an expired link does not depend on a read after the
+// expiry.
 func (r *LinkRepository) Exists(ctx context.Context, id string) (bool, error) {
+	err := r.DeleteExpired(ctx, id)
+	if err != nil && !errors.Is(err, domain.ErrNotFound) {
+		return false, fmt.Errorf("postgres link exists: %w", err)
+	}
+
 	exists, err := r.db.NewSelect().Model((*link)(nil)).Where("id = ?", id).Exists(ctx)
 	if err != nil {
 		return false, fmt.Errorf("postgres link exists: %w", err)
@@ -264,13 +290,34 @@ func (r *LinkRepository) IncrementViews(ctx context.Context, id string) error {
 	return nil
 }
 
-// Delete removes a link by ID.
-func (r *LinkRepository) Delete(ctx context.Context, id string) error {
-	result, err := r.db.NewDelete().Model((*link)(nil)).Where("id = ?", id).Exec(ctx)
+// Delete removes the link version with id and storedEditCode (see links.Storage).
+func (r *LinkRepository) Delete(ctx context.Context, id, storedEditCode string) error {
+	result, err := r.db.NewDelete().Model((*link)(nil)).
+		Where("id = ?", id).Where("edit_code = ?", storedEditCode).Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("postgres delete link: %w", err)
 	}
 
+	return linkRowRemoved(result)
+}
+
+// DeleteExpired removes the link with id only while it is still expired at the moment of the
+// DELETE. It returns domain.ErrNotFound when no such row exists, for example after its owner
+// extended it. An unread burn-after-click link without an expiry stays.
+func (r *LinkRepository) DeleteExpired(ctx context.Context, id string) error {
+	result, err := r.db.NewDelete().Model((*link)(nil)).
+		Where("id = ?", id).
+		Where("expires_at IS NOT NULL AND expires_at <= ?", time.Now()).
+		Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("postgres delete expired link: %w", err)
+	}
+
+	return linkRowRemoved(result)
+}
+
+// linkRowRemoved returns domain.ErrNotFound when a DELETE removed no link.
+func linkRowRemoved(result sql.Result) error {
 	affected, err := result.RowsAffected()
 	if err != nil {
 		return fmt.Errorf("postgres rowsaffected: %w", err)

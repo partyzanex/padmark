@@ -86,17 +86,31 @@ func (mr *MockStorageMockRecorder) Create(ctx, link any) *gomock.Call {
 }
 
 // Delete mocks base method.
-func (m *MockStorage) Delete(ctx context.Context, id string) error {
+func (m *MockStorage) Delete(ctx context.Context, id, storedEditCode string) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Delete", ctx, id)
+	ret := m.ctrl.Call(m, "Delete", ctx, id, storedEditCode)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // Delete indicates an expected call of Delete.
-func (mr *MockStorageMockRecorder) Delete(ctx, id any) *gomock.Call {
+func (mr *MockStorageMockRecorder) Delete(ctx, id, storedEditCode any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Delete", reflect.TypeOf((*MockStorage)(nil).Delete), ctx, id)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Delete", reflect.TypeOf((*MockStorage)(nil).Delete), ctx, id, storedEditCode)
+}
+
+// DeleteExpired mocks base method.
+func (m *MockStorage) DeleteExpired(ctx context.Context, id string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteExpired", ctx, id)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// DeleteExpired indicates an expected call of DeleteExpired.
+func (mr *MockStorageMockRecorder) DeleteExpired(ctx, id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteExpired", reflect.TypeOf((*MockStorage)(nil).DeleteExpired), ctx, id)
 }
 
 // Exists mocks base method.
@@ -158,18 +172,18 @@ func (mr *MockStorageMockRecorder) IncrementViewsVisible(ctx, id, callerID, auth
 }
 
 // Update mocks base method.
-func (m *MockStorage) Update(ctx context.Context, id string, link *domain.Link) (*domain.Link, error) {
+func (m *MockStorage) Update(ctx context.Context, id, storedEditCode string, patch *domain.LinkPatch) (*domain.Link, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Update", ctx, id, link)
+	ret := m.ctrl.Call(m, "Update", ctx, id, storedEditCode, patch)
 	ret0, _ := ret[0].(*domain.Link)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // Update indicates an expected call of Update.
-func (mr *MockStorageMockRecorder) Update(ctx, id, link any) *gomock.Call {
+func (mr *MockStorageMockRecorder) Update(ctx, id, storedEditCode, patch any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Update", reflect.TypeOf((*MockStorage)(nil).Update), ctx, id, link)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Update", reflect.TypeOf((*MockStorage)(nil).Update), ctx, id, storedEditCode, patch)
 }
 
 // MockNotesChecker is a mock of NotesChecker interface.

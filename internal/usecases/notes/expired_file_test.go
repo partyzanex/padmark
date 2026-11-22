@@ -20,7 +20,8 @@ func expiredFileNote() *domain.Note {
 }
 
 // TestCreate_ExpiredFileReleasesSlug covers R-26: an expired file that the sweep did not remove
-// yet holds the slug in storage. Create asks the file manager to remove it and tries once more.
+// yet holds the slug in storage. No note has the slug, so Create asks the file manager to remove
+// the file and tries once more.
 func (s *ManagerTestSuite) TestCreate_ExpiredFileReleasesSlug() {
 	releaser := NewMockExpiredFileReleaser(s.ctrl)
 	s.manager.WithExpiredFiles(releaser)
@@ -28,6 +29,7 @@ func (s *ManagerTestSuite) TestCreate_ExpiredFileReleasesSlug() {
 	s.expectSlugFree()
 	gomock.InOrder(
 		s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(domain.ErrSlugConflict),
+		s.storage.EXPECT().DeleteExpired(gomock.Any(), domain.HashSlug("report")).Return(domain.ErrNotFound),
 		releaser.EXPECT().ReleaseExpiredSlug(gomock.Any(), domain.HashSlug("report")).Return(true, nil),
 		s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil),
 	)
@@ -44,6 +46,7 @@ func (s *ManagerTestSuite) TestCreate_SlugConflictWithoutExpiredFile() {
 	s.Run("live resource", func() {
 		s.expectSlugFree()
 		s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(domain.ErrSlugConflict)
+		s.storage.EXPECT().DeleteExpired(gomock.Any(), gomock.Any()).Return(domain.ErrNotFound)
 		releaser.EXPECT().ReleaseExpiredSlug(gomock.Any(), gomock.Any()).Return(false, nil)
 
 		_, err := s.manager.Create(s.T().Context(), expiredFileNote())
@@ -53,6 +56,7 @@ func (s *ManagerTestSuite) TestCreate_SlugConflictWithoutExpiredFile() {
 	s.Run("release error is fail-soft", func() {
 		s.expectSlugFree()
 		s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(domain.ErrSlugConflict)
+		s.storage.EXPECT().DeleteExpired(gomock.Any(), gomock.Any()).Return(domain.ErrNotFound)
 		releaser.EXPECT().ReleaseExpiredSlug(gomock.Any(), gomock.Any()).Return(false, errors.New("s3 down"))
 
 		_, err := s.manager.Create(s.T().Context(), expiredFileNote())
@@ -63,6 +67,7 @@ func (s *ManagerTestSuite) TestCreate_SlugConflictWithoutExpiredFile() {
 		s.manager.WithExpiredFiles(noExpiredFiles{})
 		s.expectSlugFree()
 		s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(domain.ErrSlugConflict)
+		s.storage.EXPECT().DeleteExpired(gomock.Any(), gomock.Any()).Return(domain.ErrNotFound)
 
 		_, err := s.manager.Create(s.T().Context(), expiredFileNote())
 		s.Require().ErrorIs(err, domain.ErrSlugConflict)

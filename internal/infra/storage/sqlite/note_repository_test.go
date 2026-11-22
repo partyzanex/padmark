@@ -356,7 +356,7 @@ func (s *RepositoryTestSuite) TestDelete_OK() {
 	}
 	s.Require().NoError(s.repo.Create(s.T().Context(), domNote))
 
-	err := s.repo.Delete(s.T().Context(), domNote.ID)
+	err := s.repo.Delete(s.T().Context(), domNote.ID, "")
 
 	s.Require().NoError(err)
 
@@ -366,7 +366,7 @@ func (s *RepositoryTestSuite) TestDelete_OK() {
 }
 
 func (s *RepositoryTestSuite) TestDelete_NotFound() {
-	err := s.repo.Delete(s.T().Context(), "nonexistent")
+	err := s.repo.Delete(s.T().Context(), "nonexistent", "")
 
 	s.ErrorIs(err, domain.ErrNotFound)
 }
@@ -519,7 +519,7 @@ func (s *RepositoryTestSuite) TestConsume_BurnAfterReading() {
 	}
 	s.Require().NoError(s.repo.Create(ctx, n))
 
-	got, err := s.repo.Consume(ctx, "consume-bar", domain.PrivacyPublic)
+	got, err := s.repo.Consume(ctx, "consume-bar", domain.PrivacyPublic, "")
 	s.Require().NoError(err)
 	s.Equal("consume-bar", got.ID)
 
@@ -540,7 +540,7 @@ func (s *RepositoryTestSuite) TestConsume_Expired() {
 	}
 	s.Require().NoError(s.repo.Create(ctx, n))
 
-	got, err := s.repo.Consume(ctx, "consume-exp", domain.PrivacyPublic)
+	got, err := s.repo.Consume(ctx, "consume-exp", domain.PrivacyPublic, "")
 	s.Require().NoError(err)
 	s.Equal("consume-exp", got.ID)
 
@@ -559,7 +559,7 @@ func (s *RepositoryTestSuite) TestConsume_NotEligible() {
 	}
 	s.Require().NoError(s.repo.Create(ctx, n))
 
-	_, err := s.repo.Consume(ctx, "consume-no", domain.PrivacyPublic)
+	_, err := s.repo.Consume(ctx, "consume-no", domain.PrivacyPublic, "")
 	s.Require().ErrorIs(err, domain.ErrNotFound)
 
 	// note must still exist.
@@ -584,10 +584,10 @@ func (s *RepositoryTestSuite) TestBurn_PrivacyChanged_RowUntouched() {
 	n.BurnTTL = 60
 	s.Require().NoError(s.repo.Create(ctx, n))
 
-	_, err := s.repo.SetBurnExpiry(ctx, "burn-priv", time.Now().Add(time.Minute), domain.PrivacyPublic)
+	_, err := s.repo.SetBurnExpiry(ctx, "burn-priv", time.Now().Add(time.Minute), domain.PrivacyPublic, "")
 	s.Require().ErrorIs(err, domain.ErrNotFound)
 
-	_, err = s.repo.Consume(ctx, "burn-priv", domain.PrivacyPublic)
+	_, err = s.repo.Consume(ctx, "burn-priv", domain.PrivacyPublic, "")
 	s.Require().ErrorIs(err, domain.ErrNotFound)
 
 	stored, err := s.repo.Get(ctx, "burn-priv")
@@ -595,7 +595,7 @@ func (s *RepositoryTestSuite) TestBurn_PrivacyChanged_RowUntouched() {
 	s.True(stored.BurnAfterReading, "the timer must not start for a changed access level")
 	s.Nil(stored.ExpiresAt)
 
-	got, err := s.repo.Consume(ctx, "burn-priv", domain.PrivacyAuthenticated)
+	got, err := s.repo.Consume(ctx, "burn-priv", domain.PrivacyAuthenticated, "")
 	s.Require().NoError(err)
 	s.Equal("burn-priv", got.ID)
 }
@@ -626,6 +626,36 @@ func (s *RepositoryTestSuite) TestDeleteExpired_KeepsExtendedNote() {
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
+// TestExists_ReleasesExpiredNote covers audit finding 5: an expired note does not hold its slug
+// for the slug check of links and files, and Exists removes it. A note that is not expired stays.
+func (s *RepositoryTestSuite) TestExists_ReleasesExpiredNote() {
+	ctx := s.T().Context()
+	future := time.Now().Add(time.Hour)
+	past := time.Now().Add(-time.Hour)
+
+	live := plainNote("exists-live")
+	live.ExpiresAt = &future
+	s.Require().NoError(s.repo.Create(ctx, live))
+
+	expired := plainNote("exists-old")
+	expired.ExpiresAt = &past
+	s.Require().NoError(s.repo.Create(ctx, expired))
+
+	exists, err := s.repo.Exists(ctx, "exists-live")
+	s.Require().NoError(err)
+	s.True(exists, "a note that is not expired holds its slug")
+
+	exists, err = s.repo.Exists(ctx, "exists-old")
+	s.Require().NoError(err)
+	s.False(exists, "an expired note does not hold its slug")
+
+	_, err = s.repo.Get(ctx, "exists-old")
+	s.Require().ErrorIs(err, domain.ErrNotFound, "Exists removes the expired note")
+
+	_, err = s.repo.Get(ctx, "exists-live")
+	s.Require().NoError(err)
+}
+
 // plainNote returns a public note without expiry or burn settings.
 func plainNote(id string) *domain.Note {
 	return &domain.Note{
@@ -636,7 +666,7 @@ func plainNote(id string) *domain.Note {
 }
 
 func (s *RepositoryTestSuite) TestConsume_NotFound() {
-	_, err := s.repo.Consume(s.T().Context(), "consume-missing", domain.PrivacyPublic)
+	_, err := s.repo.Consume(s.T().Context(), "consume-missing", domain.PrivacyPublic, "")
 
 	s.ErrorIs(err, domain.ErrNotFound)
 }

@@ -42,18 +42,18 @@ func (m *MockStorage) EXPECT() *MockStorageMockRecorder {
 }
 
 // Consume mocks base method.
-func (m *MockStorage) Consume(ctx context.Context, id string, expected domain.Privacy) (*domain.Note, error) {
+func (m *MockStorage) Consume(ctx context.Context, id string, expected domain.Privacy, storedEditCode string) (*domain.Note, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Consume", ctx, id, expected)
+	ret := m.ctrl.Call(m, "Consume", ctx, id, expected, storedEditCode)
 	ret0, _ := ret[0].(*domain.Note)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // Consume indicates an expected call of Consume.
-func (mr *MockStorageMockRecorder) Consume(ctx, id, expected any) *gomock.Call {
+func (mr *MockStorageMockRecorder) Consume(ctx, id, expected, storedEditCode any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Consume", reflect.TypeOf((*MockStorage)(nil).Consume), ctx, id, expected)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Consume", reflect.TypeOf((*MockStorage)(nil).Consume), ctx, id, expected, storedEditCode)
 }
 
 // Create mocks base method.
@@ -71,17 +71,17 @@ func (mr *MockStorageMockRecorder) Create(ctx, note any) *gomock.Call {
 }
 
 // Delete mocks base method.
-func (m *MockStorage) Delete(ctx context.Context, id string) error {
+func (m *MockStorage) Delete(ctx context.Context, id, storedEditCode string) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Delete", ctx, id)
+	ret := m.ctrl.Call(m, "Delete", ctx, id, storedEditCode)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // Delete indicates an expected call of Delete.
-func (mr *MockStorageMockRecorder) Delete(ctx, id any) *gomock.Call {
+func (mr *MockStorageMockRecorder) Delete(ctx, id, storedEditCode any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Delete", reflect.TypeOf((*MockStorage)(nil).Delete), ctx, id)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Delete", reflect.TypeOf((*MockStorage)(nil).Delete), ctx, id, storedEditCode)
 }
 
 // DeleteExpired mocks base method.
@@ -128,18 +128,18 @@ func (mr *MockStorageMockRecorder) IncrementViews(ctx, id any) *gomock.Call {
 }
 
 // SetBurnExpiry mocks base method.
-func (m *MockStorage) SetBurnExpiry(ctx context.Context, id string, expiresAt time.Time, expected domain.Privacy) (*domain.Note, error) {
+func (m *MockStorage) SetBurnExpiry(ctx context.Context, id string, expiresAt time.Time, expected domain.Privacy, storedEditCode string) (*domain.Note, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "SetBurnExpiry", ctx, id, expiresAt, expected)
+	ret := m.ctrl.Call(m, "SetBurnExpiry", ctx, id, expiresAt, expected, storedEditCode)
 	ret0, _ := ret[0].(*domain.Note)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // SetBurnExpiry indicates an expected call of SetBurnExpiry.
-func (mr *MockStorageMockRecorder) SetBurnExpiry(ctx, id, expiresAt, expected any) *gomock.Call {
+func (mr *MockStorageMockRecorder) SetBurnExpiry(ctx, id, expiresAt, expected, storedEditCode any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetBurnExpiry", reflect.TypeOf((*MockStorage)(nil).SetBurnExpiry), ctx, id, expiresAt, expected)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetBurnExpiry", reflect.TypeOf((*MockStorage)(nil).SetBurnExpiry), ctx, id, expiresAt, expected, storedEditCode)
 }
 
 // Update mocks base method.

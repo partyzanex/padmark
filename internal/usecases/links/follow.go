@@ -39,11 +39,21 @@ func (m *Manager) Follow(ctx context.Context, slug string, options FollowOptions
 	return operationResult, nil
 }
 
-func (m *Manager) expireLink(ctx context.Context, slug, dbID string, reader *FollowOptions) error {
+// expireLink deletes the expired link that the caller read. The snapshot can be old, so storage
+// checks the expiry again in the DELETE: if the owner extended the link after the read, or a new
+// live link took the ID, the row stays and only this request sees the link as expired.
+func (m *Manager) expireLink(ctx context.Context, slug string, reader *FollowOptions) error {
+	dbID := domain.HashSlug(slug)
+
 	var err error
 
 	if reader == nil {
-		err = m.storage.Delete(ctx, dbID)
+		err = m.storage.DeleteExpired(ctx, dbID)
+		if errors.Is(err, domain.ErrNotFound) {
+			m.log.DebugContext(ctx, "expired link already deleted or extended", "id", dbID)
+
+			err = nil
+		}
 	} else {
 		_, err = m.storage.ConsumeVisible(ctx, dbID, reader.CallerID, reader.Authenticated, false)
 		if errors.Is(err, domain.ErrNotFound) {

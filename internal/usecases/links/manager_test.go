@@ -368,7 +368,7 @@ func (s *ManagerTestSuite) TestRedirect_Expired() {
 		ID: "", EditCode: "", Views: 0, BurnAfterClick: false,
 	}
 	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(link, nil)
-	s.storage.EXPECT().Delete(gomock.Any(), gomock.Any()).Return(nil)
+	s.storage.EXPECT().DeleteExpired(gomock.Any(), gomock.Any()).Return(nil)
 
 	_, err := s.manager.Redirect(s.T().Context(), "expired-slug")
 
@@ -435,7 +435,7 @@ func (s *ManagerTestSuite) TestRedirectWithoutBurn_ExpiredLinkStillExpires() {
 		ID: "", EditCode: "", Views: 0,
 	}
 	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(link, nil)
-	s.storage.EXPECT().Delete(gomock.Any(), gomock.Any()).Return(nil)
+	s.storage.EXPECT().DeleteExpired(gomock.Any(), gomock.Any()).Return(nil)
 
 	_, err := s.manager.RedirectWithoutBurn(s.T().Context(), "old-slug")
 
@@ -563,7 +563,7 @@ func (s *ManagerTestSuite) TestRedirect_Expired_EvictsCache() {
 	}
 
 	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(link, nil)
-	s.storage.EXPECT().Delete(gomock.Any(), gomock.Any()).Return(nil)
+	s.storage.EXPECT().DeleteExpired(gomock.Any(), gomock.Any()).Return(nil)
 	cache.EXPECT().Delete(gomock.Any())
 
 	_, err := s.manager.Redirect(s.T().Context(), "expired-slug")
@@ -761,7 +761,7 @@ func (s *ManagerTestSuite) TestDelete_OwnerBypassesEditCode() {
 		ID: "", TargetURL: "", Views: 0, BurnAfterClick: false,
 	}
 	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(existing, nil)
-	s.storage.EXPECT().Delete(gomock.Any(), gomock.Any()).Return(nil)
+	s.storage.EXPECT().Delete(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
 
 	err := s.manager.Delete(s.T().Context(), "the-slug", "", owner)
 
@@ -780,7 +780,7 @@ func (s *ManagerTestSuite) TestDelete_EvictsCache() {
 		ID: "", TargetURL: "", Views: 0, BurnAfterClick: false,
 	}
 	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(existing, nil)
-	s.storage.EXPECT().Delete(gomock.Any(), gomock.Any()).Return(nil)
+	s.storage.EXPECT().Delete(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
 	cache.EXPECT().Delete(gomock.Any())
 
 	err := s.manager.Delete(s.T().Context(), "the-slug", "", owner)
@@ -811,7 +811,7 @@ func (s *ManagerTestSuite) TestDelete_CorrectEditCode() {
 		BurnAfterClick: false,
 	}
 	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(existing, nil)
-	s.storage.EXPECT().Delete(gomock.Any(), gomock.Any()).Return(nil)
+	s.storage.EXPECT().Delete(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
 
 	err := s.manager.Delete(s.T().Context(), "the-slug", "secret123456", uuid.Nil)
 

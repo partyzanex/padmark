@@ -81,6 +81,7 @@ func runSlugNamespace(t *testing.T, db *bun.DB, open func(*testing.T) *bun.DB) {
 	t.Run("release", func(t *testing.T) { testRelease(t, db) })
 	t.Run("release_files", func(t *testing.T) { testFileRelease(t, db, objects) })
 	t.Run("expired_file_slug", func(t *testing.T) { testExpiredFileSlug(t, db, objects) })
+	t.Run("expired_note_slug", func(t *testing.T) { testExpiredNoteSlug(t, db, objects) })
 	t.Run("rollback", func(t *testing.T) { testRollback(t, db) })
 	t.Run("id_change", func(t *testing.T) { testIDChange(t, db) })
 	t.Run("legacy_conversion", func(t *testing.T) { testLegacyConversion(t, db) })

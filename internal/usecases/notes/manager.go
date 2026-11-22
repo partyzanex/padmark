@@ -22,13 +22,22 @@ import (
 // read can never return or delete a version whose access level changed after the check.
 // DeleteExpired removes a row only while it is still expired, and returns domain.ErrNotFound
 // otherwise: an expiry decision from an old snapshot never deletes a note that was extended.
+// A read of an expired note and a Create with a slug conflict both use it.
+//
+// Update, Delete, Consume and SetBurnExpiry change the row only while its edit_code still equals
+// the stored hash of the note that the caller checked: note.EditCode for Update, storedEditCode
+// for the others. Each note gets a hash with a new random salt and no write changes it, so the
+// hash identifies one note version. If the note was deleted and a new note took the same ID after
+// the check, these methods return domain.ErrNotFound and do not touch the new note.
 type Storage interface {
 	Create(ctx context.Context, note *domain.Note) error
 	Get(ctx context.Context, id string) (*domain.Note, error)
-	Consume(ctx context.Context, id string, expected domain.Privacy) (*domain.Note, error)
-	SetBurnExpiry(ctx context.Context, id string, expiresAt time.Time, expected domain.Privacy) (*domain.Note, error)
+	Consume(ctx context.Context, id string, expected domain.Privacy, storedEditCode string) (*domain.Note, error)
+	SetBurnExpiry(
+		ctx context.Context, id string, expiresAt time.Time, expected domain.Privacy, storedEditCode string,
+	) (*domain.Note, error)
 	Update(ctx context.Context, id string, note *domain.Note) error
-	Delete(ctx context.Context, id string) error
+	Delete(ctx context.Context, id, storedEditCode string) error
 	DeleteExpired(ctx context.Context, id string) error
 	IncrementViews(ctx context.Context, id string) error
 }
@@ -280,7 +289,7 @@ func (m *Manager) Create(ctx context.Context, note *domain.Note) (*domain.Note, 
 	note.Content = encrypted
 	note.ID = domain.HashSlug(slug) // store hash, not slug.
 
-	err = m.createReleasingExpiredFile(ctx, note)
+	err = m.createReleasingExpired(ctx, note)
 	if err != nil {
 		return nil, fmt.Errorf("create note: %w", err)
 	}
@@ -515,6 +524,8 @@ func (m *Manager) Update(
 		return nil, fmt.Errorf("encrypt content: %w", err)
 	}
 
+	// note.EditCode is the stored hash (pinImmutableFields), so the UPDATE changes only the note
+	// checked above, not a new note that took this ID after the check.
 	err = m.storage.Update(ctx, dbID, withRequested(note, requested))
 	if err != nil {
 		return nil, fmt.Errorf("update note: %w", err)
@@ -541,7 +552,8 @@ func (m *Manager) Delete(ctx context.Context, id, editCode string, callerID uuid
 		return domain.ErrInvalidEditCode
 	}
 
-	err = m.storage.Delete(ctx, dbID)
+	// The stored hash limits the DELETE to the note checked above, not a new note with this ID.
+	err = m.storage.Delete(ctx, dbID, existing.EditCode)
 	if err != nil {
 		return fmt.Errorf("delete note: %w", err)
 	}
@@ -739,12 +751,13 @@ func decryptContent(ctx context.Context, enc Encryptor, log *slog.Logger, note *
 	return nil
 }
 
-// createReleasingExpiredFile calls storage.Create. On a slug conflict, it asks the file manager
-// to remove an expired file with the same ID and tries once more. The storage triggers check
-// the slug again, so the retry is safe across server processes.
-func (m *Manager) createReleasingExpiredFile(ctx context.Context, note *domain.Note) error {
+// createReleasingExpired calls storage.Create. On a slug conflict, it removes an expired note or
+// an expired file with the same ID and tries once more. Thus the address of an expired record
+// does not depend on a read after the expiry. The storage triggers check the slug again, so the
+// retry is safe across server processes.
+func (m *Manager) createReleasingExpired(ctx context.Context, note *domain.Note) error {
 	err := m.storage.Create(ctx, note)
-	if errors.Is(err, domain.ErrSlugConflict) && m.releaseExpiredFile(ctx, note.ID) {
+	if errors.Is(err, domain.ErrSlugConflict) && m.releaseExpiredSlug(ctx, note.ID) {
 		err = m.storage.Create(ctx, note)
 	}
 
@@ -753,6 +766,30 @@ func (m *Manager) createReleasingExpiredFile(ctx context.Context, note *domain.N
 	}
 
 	return nil
+}
+
+// releaseExpiredSlug reports whether it removed an expired note or an expired file with id. One
+// record at most holds a slug, so the file manager is asked only when no note was removed.
+func (m *Manager) releaseExpiredSlug(ctx context.Context, id string) bool {
+	return m.releaseExpiredNote(ctx, id) || m.releaseExpiredFile(ctx, id)
+}
+
+// releaseExpiredNote reports whether it removed the expired note with id. DeleteExpired checks
+// the expiry in the DELETE, so a note that its owner extended after it expired stays. Errors are
+// fail-soft: Create keeps its slug conflict.
+func (m *Manager) releaseExpiredNote(ctx context.Context, id string) bool {
+	err := m.storage.DeleteExpired(ctx, id)
+	if err == nil {
+		m.log.DebugContext(ctx, "expired note released its slug", "id", id)
+
+		return true
+	}
+
+	if !errors.Is(err, domain.ErrNotFound) {
+		m.log.WarnContext(ctx, "release expired note slug", "id", id, "err", err)
+	}
+
+	return false
 }
 
 // releaseExpiredFile reports whether the file manager removed an expired file with id.

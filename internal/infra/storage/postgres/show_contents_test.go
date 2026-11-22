@@ -74,7 +74,7 @@ func (s *RepositoryTestSuite) TestShowContents_ConsumeReturnsValue() {
 	note.ShowContents = new(true)
 	s.Require().NoError(s.repo.Create(ctx, note))
 
-	got, err := s.repo.Consume(ctx, "sc-burn", domain.PrivacyPublic)
+	got, err := s.repo.Consume(ctx, "sc-burn", domain.PrivacyPublic, "")
 	s.Require().NoError(err)
 	s.True(got.ContentsSidebar())
 }

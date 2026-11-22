@@ -449,14 +449,14 @@ func (s *RepositoryTestSuite) TestDelete_OK() {
 	ctx := s.T().Context()
 	s.Require().NoError(s.repo.Create(ctx, newNote("d1", "del", "me")))
 
-	s.Require().NoError(s.repo.Delete(ctx, "d1"))
+	s.Require().NoError(s.repo.Delete(ctx, "d1", ""))
 
 	_, err := s.repo.Get(ctx, "d1")
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
 func (s *RepositoryTestSuite) TestDelete_NotFound() {
-	err := s.repo.Delete(s.T().Context(), "nonexistent")
+	err := s.repo.Delete(s.T().Context(), "nonexistent", "")
 
 	s.ErrorIs(err, domain.ErrNotFound)
 }
@@ -470,7 +470,7 @@ func (s *RepositoryTestSuite) TestConsume_BurnAfterReading() {
 	n.BurnAfterReading = true
 	s.Require().NoError(s.repo.Create(ctx, n))
 
-	got, err := s.repo.Consume(ctx, "con-bar", domain.PrivacyPublic)
+	got, err := s.repo.Consume(ctx, "con-bar", domain.PrivacyPublic, "")
 	s.Require().NoError(err)
 	s.Equal("con-bar", got.ID)
 
@@ -486,7 +486,7 @@ func (s *RepositoryTestSuite) TestConsume_Expired() {
 	n.ExpiresAt = &past
 	s.Require().NoError(s.repo.Create(ctx, n))
 
-	got, err := s.repo.Consume(ctx, "con-exp", domain.PrivacyPublic)
+	got, err := s.repo.Consume(ctx, "con-exp", domain.PrivacyPublic, "")
 	s.Require().NoError(err)
 	s.Equal("con-exp", got.ID)
 
@@ -499,7 +499,7 @@ func (s *RepositoryTestSuite) TestConsume_NotEligible() {
 
 	s.Require().NoError(s.repo.Create(ctx, newNote("con-no", "plain", "me")))
 
-	_, err := s.repo.Consume(ctx, "con-no", domain.PrivacyPublic)
+	_, err := s.repo.Consume(ctx, "con-no", domain.PrivacyPublic, "")
 	s.Require().ErrorIs(err, domain.ErrNotFound)
 
 	// note must still exist.
@@ -520,10 +520,10 @@ func (s *RepositoryTestSuite) TestBurn_PrivacyChanged_RowUntouched() {
 	n.BurnTTL = 60
 	s.Require().NoError(s.repo.Create(ctx, n))
 
-	_, err := s.repo.SetBurnExpiry(ctx, "burn-priv", time.Now().Add(time.Minute), domain.PrivacyPublic)
+	_, err := s.repo.SetBurnExpiry(ctx, "burn-priv", time.Now().Add(time.Minute), domain.PrivacyPublic, "")
 	s.Require().ErrorIs(err, domain.ErrNotFound)
 
-	_, err = s.repo.Consume(ctx, "burn-priv", domain.PrivacyPublic)
+	_, err = s.repo.Consume(ctx, "burn-priv", domain.PrivacyPublic, "")
 	s.Require().ErrorIs(err, domain.ErrNotFound)
 
 	stored, err := s.repo.Get(ctx, "burn-priv")
@@ -531,7 +531,7 @@ func (s *RepositoryTestSuite) TestBurn_PrivacyChanged_RowUntouched() {
 	s.True(stored.BurnAfterReading, "the timer must not start for a changed access level")
 	s.Nil(stored.ExpiresAt)
 
-	got, err := s.repo.Consume(ctx, "burn-priv", domain.PrivacyAuthenticated)
+	got, err := s.repo.Consume(ctx, "burn-priv", domain.PrivacyAuthenticated, "")
 	s.Require().NoError(err)
 	s.Equal("burn-priv", got.ID)
 }
@@ -562,8 +562,38 @@ func (s *RepositoryTestSuite) TestDeleteExpired_KeepsExtendedNote() {
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
+// TestExists_ReleasesExpiredNote covers audit finding 5: an expired note does not hold its slug
+// for the slug check of links and files, and Exists removes it. A note that is not expired stays.
+func (s *RepositoryTestSuite) TestExists_ReleasesExpiredNote() {
+	ctx := s.T().Context()
+	future := time.Now().Add(time.Hour)
+	past := time.Now().Add(-time.Hour)
+
+	live := newNote("exists-live", "live", "body")
+	live.ExpiresAt = &future
+	s.Require().NoError(s.repo.Create(ctx, live))
+
+	expired := newNote("exists-old", "old", "body")
+	expired.ExpiresAt = &past
+	s.Require().NoError(s.repo.Create(ctx, expired))
+
+	exists, err := s.repo.Exists(ctx, "exists-live")
+	s.Require().NoError(err)
+	s.True(exists, "a note that is not expired holds its slug")
+
+	exists, err = s.repo.Exists(ctx, "exists-old")
+	s.Require().NoError(err)
+	s.False(exists, "an expired note does not hold its slug")
+
+	_, err = s.repo.Get(ctx, "exists-old")
+	s.Require().ErrorIs(err, domain.ErrNotFound, "Exists removes the expired note")
+
+	_, err = s.repo.Get(ctx, "exists-live")
+	s.Require().NoError(err)
+}
+
 func (s *RepositoryTestSuite) TestConsume_NotFound() {
-	_, err := s.repo.Consume(s.T().Context(), "con-missing", domain.PrivacyPublic)
+	_, err := s.repo.Consume(s.T().Context(), "con-missing", domain.PrivacyPublic, "")
 
 	s.ErrorIs(err, domain.ErrNotFound)
 }
@@ -603,7 +633,7 @@ func (s *RepositoryTestSuite) TestRoundtrip_CRUD() {
 		UpdatedAt:   time.Now(),
 
 		ExpiresAt: nil, Privacy: nil, OwnerID: nil, ID: "",
-		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
+		EditCode: got.EditCode, Views: 0, BurnTTL: 0, BurnAfterReading: false,
 		ClearExpiry: false, ShowContents: nil,
 	}
 	s.Require().NoError(s.repo.Update(ctx, "rt1", updated))
@@ -621,7 +651,7 @@ func (s *RepositoryTestSuite) TestRoundtrip_CRUD() {
 	s.Equal(1, got.Views)
 
 	// Delete.
-	s.Require().NoError(s.repo.Delete(ctx, "rt1"))
+	s.Require().NoError(s.repo.Delete(ctx, "rt1", "edit123"))
 
 	_, err = s.repo.Get(ctx, "rt1")
 	s.ErrorIs(err, domain.ErrNotFound)
