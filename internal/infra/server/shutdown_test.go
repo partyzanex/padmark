@@ -52,7 +52,7 @@ func TestWaitAndShutdown_ListenerFailureClosesRegisteredResources(t *testing.T) 
 			serverCtx, cancel := context.WithCancelCause(t.Context())
 			cancel(errBind)
 
-			err := waitAndShutdown(serverCtx, DefaultShutdownTimeout)
+			err := waitAndShutdown(serverCtx, newStopLimits(DefaultShutdownTimeout), slog.New(slog.DiscardHandler))
 
 			require.True(t, closed, "listener failure must still close every registered resource")
 			require.ErrorIs(t, err, errBind)
@@ -87,7 +87,7 @@ func TestWaitAndShutdown_UsesTheTimeoutArgument(t *testing.T) {
 	serverCtx, cancel := context.WithCancelCause(t.Context())
 	cancel(nil)
 
-	_ = waitAndShutdown(serverCtx, timeout)
+	_ = waitAndShutdown(serverCtx, newStopLimits(timeout), slog.New(slog.DiscardHandler))
 
 	require.Greater(t, remaining, timeout-time.Minute)
 	require.LessOrEqual(t, remaining, timeout)
@@ -118,7 +118,7 @@ func TestShutdown_BackgroundStopsAfterListenerUsesFullTimeout(t *testing.T) {
 	serverCtx, cancel := context.WithCancelCause(t.Context())
 	cancel(nil)
 
-	err := waitAndShutdown(serverCtx, 50*time.Millisecond)
+	err := waitAndShutdown(serverCtx, newStopLimits(50*time.Millisecond), slog.New(slog.DiscardHandler))
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 
 	select {

@@ -54,17 +54,11 @@ func Start(t *testing.T, binary, directory string, args ...string) (baseURL stri
 func StartWithEnv(t *testing.T, binary, directory string, env []string, args ...string) (baseURL string, stop func()) {
 	t.Helper()
 
-	listener, err := new(net.ListenConfig).Listen(t.Context(), "tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-
-	address := listener.Addr().String()
-	require.NoError(t, listener.Close())
-
-	commandArgs := slices.Concat(args, []string{"--addr", address, "--metrics-addr", ""})
+	address, commandArgs := listenArgs(t, args)
 
 	var output bytes.Buffer
 
-	stop, done := startProcess(t, binary, directory, commandArgs, env, &output)
+	_, stop, done := startProcess(t, binary, directory, commandArgs, env, &output)
 	baseURL = "http://" + address
 
 	waitReady(t, baseURL, done, &output, stop)
@@ -72,11 +66,74 @@ func StartWithEnv(t *testing.T, binary, directory string, env []string, args ...
 	return baseURL, stop
 }
 
-// startProcess starts the server binary and writes its output to output. It returns a stop
-// function, which is also the test cleanup, and a channel that closes when the process exits.
+// listenArgs selects a free loopback port. It returns the address and args together with the
+// flags that put the main listener there and turn the metrics listener off.
+func listenArgs(t *testing.T, args []string) (address string, commandArgs []string) {
+	t.Helper()
+
+	listener, err := new(net.ListenConfig).Listen(t.Context(), "tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+
+	address = listener.Addr().String()
+	require.NoError(t, listener.Close())
+
+	return address, slices.Concat(args, []string{"--addr", address, "--metrics-addr", ""})
+}
+
+// Process is a server process for a test of the stop sequence: the test sends the signal and
+// examines the exit code and the output.
+type Process struct {
+	command *exec.Cmd
+	exited  <-chan struct{}
+	output  *bytes.Buffer
+	// BaseURL is the address of the main listener.
+	BaseURL string
+}
+
+// Launch is Start for a test that stops the server itself. The test cleanup also stops and
+// reaps the process.
+func Launch(t *testing.T, binary, directory string, args ...string) *Process {
+	t.Helper()
+
+	address, commandArgs := listenArgs(t, args)
+	output := new(bytes.Buffer)
+
+	command, stop, done := startProcess(t, binary, directory, commandArgs, nil, output)
+	process := &Process{command: command, exited: done, output: output, BaseURL: "http://" + address}
+
+	waitReady(t, process.BaseURL, done, output, stop)
+
+	return process
+}
+
+// Terminate sends SIGTERM to the server and does not wait for the exit.
+func (p *Process) Terminate(t *testing.T) {
+	t.Helper()
+
+	require.NoError(t, p.command.Process.Signal(syscall.SIGTERM))
+}
+
+// WaitExit waits for the exit of the server for at most limit and fails the test after that
+// time. It returns the exit code and all output of the server.
+func (p *Process) WaitExit(t *testing.T, limit time.Duration) (exitCode int, output string) {
+	t.Helper()
+
+	select {
+	case <-p.exited:
+	case <-time.After(limit):
+		t.Fatalf("the server did not exit in %s", limit)
+	}
+
+	// The process exited, so nothing writes to the output buffer now.
+	return p.command.ProcessState.ExitCode(), p.output.String()
+}
+
+// startProcess starts the server binary and writes its output to output. It returns the
+// command, a stop function, which is also the test cleanup, and a channel that closes when the
+// process exits.
 func startProcess(
 	t *testing.T, binary, directory string, commandArgs, env []string, output *bytes.Buffer,
-) (stop func(), done <-chan struct{}) {
+) (process *exec.Cmd, stop func(), done <-chan struct{}) {
 	t.Helper()
 
 	//nolint:gosec // controlled test binary/arguments
@@ -115,7 +172,7 @@ func startProcess(
 	})
 	t.Cleanup(stop)
 
-	return stop, exited
+	return command, stop, exited
 }
 
 // waitReady polls the readiness endpoint of baseURL until it returns 200 OK. It fails the test

@@ -385,6 +385,9 @@ services:
       s3:
         condition: service_healthy
     restart: unless-stopped
+    # padmark stops in at most PADMARK_SHUTDOWN_TIMEOUT (10 seconds by default). Keep this value
+    # larger, or Docker stops the process with SIGKILL before the database closes.
+    stop_grace_period: 15s
     networks:
       - padmark
 
@@ -1428,7 +1431,7 @@ There is no destructive encryption down-migration, and older binaries cannot rea
 | `--file-idle-timeout` | `PADMARK_FILE_IDLE_TIMEOUT` | `1m` | Stop a file upload or download that moves no data for this time. Each chunk of data moves the deadline forward, up to a total limit of one hour for each transfer. A stalled upload gets `408`. `0` selects the default; a negative value stops startup |
 | `--max-uploads` | `PADMARK_MAX_UPLOADS` | `8` | Uploads that the server accepts at the same time. Each upload holds one 5 MiB part buffer in memory. More uploads get `503` with `Retry-After: 10`. `0` selects the default; a negative value stops startup |
 | `--max-uploads-per-client` | `PADMARK_MAX_UPLOADS_PER_CLIENT` | `4` | Uploads from one client IP address at the same time (the address obeys `--trusted-proxies`). More uploads get `429` with `Retry-After: 10`. `0` selects the default; a negative value stops startup |
-| `--shutdown-timeout` | `PADMARK_SHUTDOWN_TIMEOUT` | `10s` | Limit of each shutdown phase. The listeners first get this time for open requests, such as file transfers; then background work, such as the file sweep, gets the same time to stop before the database closes. For a larger value, also increase the stop grace period of the container (`docker stop` waits 10 seconds before `SIGKILL`) |
+| `--shutdown-timeout` | `PADMARK_SHUTDOWN_TIMEOUT` | `10s` | Limit of the full shutdown sequence after `SIGTERM` or `SIGINT`. Open requests, such as file transfers, get this time less one fifth (at most 2 seconds): 8 seconds by default. Then the server closes their connections, stops background work, such as the file sweep, and closes the database. The log shows the signal, each phase with its duration and the number of requests that were open. Set the stop grace period of the container to a larger value: `docker stop` waits 10 seconds before `SIGKILL`, and the bundled Compose file sets `stop_grace_period: 15s` |
 | `--metrics-addr` | `PADMARK_METRICS_ADDR` | — | Address for a separate internal Prometheus `/metrics` listener (e.g. `:9090`); empty (default) disables it entirely. Exposes `padmark_links_created_total`, `padmark_links_redirects_total`, `padmark_links_collisions_total`, the file metrics `padmark_files_uploads_total`, `padmark_files_downloads_total`, `padmark_files_deleted_total{reason}`, `padmark_files_upload_bytes` and `padmark_files_storage_errors_total{op}`, plus standard Go/process collectors. Bind this to a private interface only — metrics are never served on the main, public-facing listener |
 
 #### Memory sizing (argon2id)

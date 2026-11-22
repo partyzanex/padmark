@@ -282,10 +282,12 @@ func newHTTPServer(addr string, handler http.Handler) *http.Server {
 	return server
 }
 
-func startRedirectServer(ctx context.Context, addr string, allowedHosts map[string]struct{}, log *slog.Logger) {
+func startRedirectServer(
+	ctx context.Context, addr string, allowedHosts map[string]struct{}, limits stopLimits, log *slog.Logger,
+) {
 	srv := newRedirectServer(addr, allowedHosts)
 
-	compat.Append(shutdown.ContextFn(srv.Shutdown))
+	registerListener(ctx, "redirect", srv, limits, log)
 
 	go func() {
 		err := srv.ListenAndServe()
@@ -314,10 +316,12 @@ func newMetricsServer(addr string, reg *prometheus.Registry) *http.Server {
 	return newHTTPServer(addr, mux)
 }
 
-func startMetricsServer(ctx context.Context, addr string, reg *prometheus.Registry, log *slog.Logger) {
+func startMetricsServer(
+	ctx context.Context, addr string, reg *prometheus.Registry, limits stopLimits, log *slog.Logger,
+) {
 	srv := newMetricsServer(addr, reg)
 
-	compat.Append(shutdown.ContextFn(srv.Shutdown))
+	registerListener(ctx, "metrics", srv, limits, log)
 
 	go func() {
 		err := srv.ListenAndServe()
@@ -355,7 +359,15 @@ func newMainServer(addr string, router http.Handler, readTimeout, writeTimeout, 
 	return server
 }
 
-func runServer(ctx context.Context, cmd *cli.Command, router http.Handler, log *slog.Logger) error {
+// registerListener adds the stop of srv to the shared shutdown manager. Call it before srv
+// starts.
+func registerListener(ctx context.Context, name string, srv *http.Server, limits stopLimits, log *slog.Logger) {
+	compat.Append(shutdown.ContextFn(newListener(ctx, name, srv, limits, log).stop))
+}
+
+func runServer(
+	ctx context.Context, cmd *cli.Command, router http.Handler, limits stopLimits, log *slog.Logger,
+) error {
 	tlsCert := cmd.String(FlagTLSCert)
 	tlsKey := cmd.String(FlagTLSKey)
 
@@ -368,7 +380,7 @@ func runServer(ctx context.Context, cmd *cli.Command, router http.Handler, log *
 		cmd.Int(FlagReadTimeout), cmd.Int(FlagWriteTimeout), cmd.Int(FlagMaxHeaderBytes),
 	)
 
-	compat.Append(shutdown.ContextFn(srv.Shutdown))
+	registerListener(ctx, "main", srv, limits, log)
 
 	// serverCtx is cancelled with the server error if ListenAndServe fails unexpectedly,
 	// allowing WaitForSignal to unblock and propagate the cause.
@@ -379,27 +391,38 @@ func runServer(ctx context.Context, cmd *cli.Command, router http.Handler, log *
 
 	if tlsCert != "" {
 		if redirectAddr := cmd.String(FlagHTTPRedirectAddr); redirectAddr != "" {
-			startRedirectServer(ctx, redirectAddr, allowedHostSet(cmd.String(FlagAllowedHosts)), log)
+			startRedirectServer(ctx, redirectAddr, allowedHostSet(cmd.String(FlagAllowedHosts)), limits, log)
 		}
 	}
 
-	return errorcontext.Wrap(waitAndShutdown(serverCtx, cmd.Duration(FlagShutdownTimeout)), "wait and shutdown")
+	return errorcontext.Wrap(waitAndShutdown(serverCtx, limits, log), "wait and shutdown")
 }
 
 // waitAndShutdown blocks until SIGINT/SIGTERM arrives or serverCtx is cancelled (the main
 // listener failed, or the parent context ended), then closes everything registered with the
-// shared shutdown manager — the main, redirect and metrics listeners alike — under a bounded
-// deadline of timeout. On the failure path the listener cause is joined with any shutdown error,
-// so both stay reachable through errors.Is. The shared manager skips the closers that remain
-// after the deadline, so work that must stop before the database closes does not use it; see
-// stopBackground.
-func waitAndShutdown(serverCtx context.Context, timeout time.Duration) error {
-	_, waitErr := compat.WaitForSignal(serverCtx, syscall.SIGINT, syscall.SIGTERM)
+// shared shutdown manager — the main, redirect and metrics listeners alike — under the limit of
+// the listener phase. Each listener closes its open connections when its drain limit ends; see
+// listener.stop. On the failure path the listener cause is joined with any shutdown error, so
+// both stay reachable through errors.Is. Work that must stop before the database closes does
+// not use the shared manager; see stopBackground.
+func waitAndShutdown(serverCtx context.Context, limits stopLimits, log *slog.Logger) error {
+	sig, waitErr := compat.WaitForSignal(serverCtx, syscall.SIGINT, syscall.SIGTERM)
 
 	// Start the deadline only after the wake-up, not at server startup. WithoutCancel
 	// retains context values while letting shutdown outlive server cancellation.
-	shutCtx, cancel := context.WithTimeout(context.WithoutCancel(serverCtx), timeout)
+	shutCtx, cancel := context.WithTimeout(context.WithoutCancel(serverCtx), limits.listeners())
 	defer cancel()
+
+	started := time.Now()
+
+	if waitErr != nil {
+		log.InfoContext(shutCtx, "shutdown started: the server context ended", "cause", context.Cause(serverCtx))
+	} else {
+		log.InfoContext(shutCtx, "shutdown started: signal received", "signal", sig.String())
+	}
+
+	log.InfoContext(shutCtx, "shutdown: listeners stop started",
+		"drain", limits.drain, "limit", limits.listeners())
 
 	var shutdownErr error
 
@@ -407,6 +430,8 @@ func waitAndShutdown(serverCtx context.Context, timeout time.Duration) error {
 	if closeErr != nil {
 		shutdownErr = fmt.Errorf("graceful shutdown: %w", closeErr)
 	}
+
+	log.InfoContext(shutCtx, "shutdown: listeners stopped", "duration", time.Since(started))
 
 	if waitErr != nil {
 		return errors.Join(fmt.Errorf("server: %w", context.Cause(serverCtx)), shutdownErr)
@@ -672,13 +697,20 @@ func serverAction(ctx context.Context, cmd *cli.Command) error {
 		return fmt.Errorf("open db: %w", err)
 	}
 
-	defer closeServerDB(ctx, db, log)
+	defer closeDatabase(ctx, db, log)
+
+	// The three phases of the shutdown sequence share one --shutdown-timeout.
+	limits := newStopLimits(cmd.Duration(FlagShutdownTimeout))
 
 	// Background work, such as the file sweep, uses the database. The deferred calls run in
-	// reverse order, so stopBackground runs before closeServerDB. It has its own deadline, so
-	// the stop also occurs when the listener shutdown used all of its time.
+	// reverse order, so stopBackground runs before closeDatabase. It has its own part of the
+	// shutdown time, so the stop also occurs when the listener phase used all of its part.
 	background := shutdown.NewLIFO()
-	defer stopBackground(ctx, background, cmd.Duration(FlagShutdownTimeout), log)
+	defer stopBackground(ctx, background, limits.background, log)
+
+	// The listeners do not depend on each other, so the shared manager stops them at the same
+	// time. A sequential manager skips the listeners that remain after the deadline.
+	compat.Set(shutdown.NewGroup())
 
 	store, err := initRepos(ctx, storage, db, log,
 		migrationOptions{dsn: dsn, skipBackup: cmd.Bool(FlagSkipMigrationBackup)})
@@ -697,12 +729,12 @@ func serverAction(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	if metricsAddr := cmd.String(FlagMetricsAddr); metricsAddr != "" {
-		startMetricsServer(ctx, metricsAddr, metrics.registry, log)
+		startMetricsServer(ctx, metricsAddr, metrics.registry, limits, log)
 	}
 
 	logServerStarted(ctx, cmd, log, storage, dsn)
 
-	return errorcontext.Wrap(runServer(ctx, cmd, router, log), "run server")
+	return errorcontext.Wrap(runServer(ctx, cmd, router, limits, log), "run server")
 }
 
 // buildServerRouter makes the metrics registry, the request handlers and the router.
@@ -734,10 +766,26 @@ func stopBackground(ctx context.Context, background *shutdown.Lifo, timeout time
 	stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
 	defer cancel()
 
+	started := time.Now()
+
+	log.InfoContext(stopCtx, "shutdown: background work stop started", "limit", timeout)
+
 	err := background.CloseContext(stopCtx)
 	if err != nil {
 		log.ErrorContext(ctx, "stop background work", "err", err)
 	}
+
+	log.InfoContext(stopCtx, "shutdown: background work stopped", "duration", time.Since(started))
+}
+
+// closeDatabase closes the database of the server and logs the duration, because the close has
+// no limit of its own: an operator must see when it holds the stop.
+func closeDatabase(ctx context.Context, db *bun.DB, log *slog.Logger) {
+	started := time.Now()
+
+	log.InfoContext(ctx, "shutdown: database close started")
+	closeServerDB(ctx, db, log)
+	log.InfoContext(ctx, "shutdown: database closed", "duration", time.Since(started))
 }
 
 // logServerStarted records the listener, the storage backend and the redacted DSN at startup.

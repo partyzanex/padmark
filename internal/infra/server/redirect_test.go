@@ -112,7 +112,7 @@ func TestStartRedirectServer_BindFailureIsNonFatal(t *testing.T) {
 	}))
 
 	// Must not panic and must return immediately (failure handled in its own goroutine).
-	startRedirectServer(context.Background(), addr, nil, log)
+	startRedirectServer(context.Background(), addr, nil, newStopLimits(DefaultShutdownTimeout), log)
 
 	require.Eventually(t, func() bool {
 		return strings.Contains(sink.String(), "http redirect listener stopped")

@@ -511,12 +511,38 @@ The server registers listener shutdown with `github.com/partyzanex/shutdown` and
 its infrastructure resources. Keep shutdown bounded and handle `http.ErrServerClosed` as
 the normal outcome of closing an HTTP server.
 
-`--shutdown-timeout` (10 seconds by default) limits each shutdown phase. The shared manager
-skips the closers that remain after its deadline, so work that must stop before the database
-closes does not use it. `serverAction` makes a second LIFO manager for background work and
-closes it through a deferred `stopBackground` call, before the deferred `closeServerDB` call.
-`stopBackground` has its own deadline, so it runs also when a long file transfer kept
-`srv.Shutdown` busy for the full time.
+`--shutdown-timeout` (10 seconds by default) limits the full shutdown sequence. `newStopLimits`
+(`internal/infra/server/shutdown.go`) divides it between three phases:
+
+| Phase | Limit | Default | Work |
+|---|---|---|---|
+| Drain | The timeout less one fifth (at most 2 seconds) | 8 s | Open requests complete (`srv.Shutdown`) |
+| Handlers | One half of the remaining time | 1 s | Only after a forced close: the request handlers return |
+| Background | The other half | 1 s | The background work stops |
+
+The database closes after these phases. Its close has no limit; the log shows its duration.
+
+Each HTTP server (main, redirect, metrics) has a `listener` value, and `listener.stop` is its
+close function in the shared manager. The shared manager is a `shutdown.Group`, so the
+listeners stop at the same time and no listener stays open after the deadline of a different
+one. `listener.stop` does these steps:
+
+1. It calls `srv.Shutdown` with the drain limit. At that time, it also closes the connections
+   that sent no complete request header. `net/http` waits up to 5 seconds for such a
+   connection and gives it no response during shutdown.
+2. If requests are open after the drain limit, it calls `srv.Close`, cancels the context of
+   each request and logs a warning with the number of open requests.
+3. It waits for the request handlers, because they use the database. A handler that does not
+   return in its limit is an error. A forced close is not an error: the exit code stays 0.
+
+Work that must stop before the database closes does not use the shared manager. `serverAction`
+makes a second LIFO manager for background work and closes it through a deferred
+`stopBackground` call, before the deferred `closeDatabase` call. `stopBackground` has its own
+part of the timeout, so it runs also when a long file transfer used the full listener phase.
+
+The log has one record for the signal (`shutdown started: signal received`) and records for
+the start and the duration of each phase. Set the stop grace period of the container to a
+value larger than `--shutdown-timeout`; `docker-compose.yml` sets `stop_grace_period: 15s`.
 
 The file sweep loop (`startFileSweep`) adds a close function to that background manager. The
 close function cancels the loop and waits for the current sweep until its deadline. The loop

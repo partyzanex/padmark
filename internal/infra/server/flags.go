@@ -164,8 +164,10 @@ const (
 	// DefaultS3AllowInsecure is off: a plain http:// endpoint on a remote host sends the signed
 	// requests and the object metadata without TLS.
 	DefaultS3AllowInsecure = false
-	// DefaultShutdownTimeout is the limit of each shutdown phase. The Docker stop command waits
-	// 10 seconds before SIGKILL, so a larger value needs a larger stop grace period too.
+	// DefaultShutdownTimeout is the limit of the full shutdown sequence; see newStopLimits. The
+	// Docker stop command waits 10 seconds before SIGKILL. With this default, the server closes
+	// the open connections after 8 seconds, so a usual stop ends before that signal. A larger
+	// value needs a larger stop grace period too.
 	DefaultShutdownTimeout = 10 * time.Second
 	// DefaultFileIdleTimeout, DefaultMaxUploads and DefaultMaxUploadsPerClient come from the web
 	// handler, which applies the same values when a flag is 0.
@@ -432,9 +434,10 @@ func limitFlags() []cli.Flag {
 			flag.Sources = cli.EnvVars(EnvShutdownTimeout)
 			flag.Value = DefaultShutdownTimeout
 			flag.Validator = validateShutdownTimeout
-			flag.Usage = "Limit of each shutdown phase, for example 2m. The listeners first get this time for " +
-				"open requests, such as file transfers; then background work gets the same time to stop " +
-				"before the database closes"
+			flag.Usage = "Limit of the full shutdown sequence, for example 2m. Open requests, such as file " +
+				"transfers, get this time less one fifth (at most 2s). Then the server closes their " +
+				"connections and stops background work before the database closes. Set the stop grace " +
+				"period of the container to a larger value"
 		}),
 	}
 }
