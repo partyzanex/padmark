@@ -121,11 +121,11 @@ func newNoteRecord(id string) *domain.Note {
 	}
 }
 
-func fileReader(callerID uuid.UUID, authenticated bool) files.AccessOptions {
-	return files.AccessOptions{CallerID: callerID, Authenticated: authenticated, AllowBurn: true, SkipPrivacy: false}
+func fileReader(callerID uuid.UUID, authenticated bool) domain.Reader {
+	return domain.Reader{CallerID: callerID, Authenticated: authenticated, AllowBurn: true, SkipPrivacy: false}
 }
 
-func newClaim(record *domain.File, token string, reader files.AccessOptions, now time.Time) *files.BurnClaim {
+func newClaim(record *domain.File, token string, reader domain.Reader, now time.Time) *files.BurnClaim {
 	return &files.BurnClaim{
 		Now: now, Until: now.Add(time.Hour), ID: record.ID, ObjectKey: record.ObjectKey, Token: token, Reader: reader,
 	}

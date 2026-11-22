@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"embed"
 	"encoding/hex"
+	"errors"
 	"html/template"
 	"log/slog"
 	"net"
@@ -63,12 +64,11 @@ type APITokenManager interface {
 	RevokeAPIToken(ctx context.Context, adminUserID uuid.UUID, tokenID string) error
 }
 
-// AuthManager performs TOTP-based authentication, user management, and API-token issuance.
-//
-// It is the single seam from the HTTP layer onto the auth Manager — session, onboarding,
-// user-admin and API-token operations the handlers consume through one field. It is composed
-// of four narrower interfaces (SessionManager, OnboardingManager, UserAdminManager,
-// APITokenManager) so each concern is independently readable and mockable per ISP.
+// AuthManager is the account system as the composition root gives it to Handler.WithAuthManager.
+// No handler keeps it: each handler keeps only the narrow interfaces it calls (ISP) —
+// AuthHandler the SessionManager and the OnboardingManager, AdminHandler the UserAdminManager,
+// the APITokenManager and the OnboardingManager, common the middleware.SessionChecker. Without
+// the account system each field holds disabledAccounts, so no handler needs a nil check.
 type AuthManager interface {
 	SessionManager
 	OnboardingManager
@@ -113,39 +113,94 @@ type RevealTokenStore interface {
 	Consume(ctx context.Context, tok, noteID string) bool
 }
 
-// NoteManager is the interface the HTTP adapter requires from the business logic layer.
+// NoteManager is the interface the HTTP adapter requires from the business logic layer. The
+// usecase applies the access rules with the domain.Reader of the request; the handlers only
+// translate the errors (see notes.Manager.Read for the order of the rules).
 type NoteManager interface {
 	Create(ctx context.Context, note *domain.Note) (*domain.Note, error)
-	Peek(ctx context.Context, id string) (*domain.Note, error)
-	View(ctx context.Context, id string) (*domain.Note, error)
-	ViewPreloaded(ctx context.Context, id string, preloaded *domain.Note) (*domain.Note, error)
-	GetRendered(ctx context.Context, id string) (*domain.Note, string, error)
-	GetRenderedPreloaded(ctx context.Context, id string, preloaded *domain.Note) (*domain.Note, string, error)
-	// EnforceExpiry deletes an expired, already-fetched note and returns ErrExpired, without
-	// consuming a burn note or starting its timer. See notes.Manager.EnforceExpiry.
-	EnforceExpiry(ctx context.Context, id string, note *domain.Note) error
-	// Update and Delete accept callerID — the authenticated caller's user ID ("" if anonymous) —
-	// so the note's owner can bypass editCode. See notes.Manager.Update/Delete.
-	Update(ctx context.Context, id, editCode string, callerID uuid.UUID, note *domain.Note) (*domain.Note, error)
-	Delete(ctx context.Context, id, editCode string, callerID uuid.UUID) error
+	// Inspect applies privacy and expiry without a burn or a view count: the editor and the
+	// burn confirmation page use it.
+	Inspect(ctx context.Context, id string, reader domain.Reader) (*domain.Note, error)
+	Read(ctx context.Context, id string, reader domain.Reader) (*domain.Note, error)
+	ReadRendered(ctx context.Context, id string, reader domain.Reader) (*domain.Note, string, error)
+	Update(ctx context.Context, id, editCode string, reader domain.Reader, note *domain.Note) (*domain.Note, error)
+	Delete(ctx context.Context, id, editCode string, reader domain.Reader) error
 }
 
 // LinkManager is the interface the HTTP adapter requires from the short-link business logic
 // layer — the links analogue of NoteManager. Shared by OgenHandler (JSON API: POST /links,
 // GET/PUT/DELETE /links/{id}) and LinkHandler (browser-facing GET /{id}, GET /r/{id}, the link
-// page GET /links/{id} and the editor).
+// page GET /links/{id} and the editor). The usecase applies the access rules with the
+// domain.Reader of the request (see links.Manager.Follow).
 type LinkManager interface {
 	Create(ctx context.Context, targetURL string, opts links.CreateOptions) (*domain.Link, error)
 	Update(
-		ctx context.Context, slug, editCode string, callerID uuid.UUID, targetURL string, opts links.UpdateOptions,
+		ctx context.Context, slug, editCode string, reader domain.Reader, targetURL string, opts links.UpdateOptions,
 	) (*domain.Link, error)
-	Peek(ctx context.Context, slug string) (*domain.Link, error)
-	Follow(ctx context.Context, slug string, options links.FollowOptions) (*domain.Link, error)
-	Redirect(ctx context.Context, slug string) (*domain.Link, error)
-	// RedirectWithoutBurn follows a link like Redirect but never consumes a burn_after_click
-	// link (domain.ErrBurnIntentRequired). See links.Manager.RedirectWithoutBurn.
-	RedirectWithoutBurn(ctx context.Context, slug string) (*domain.Link, error)
-	Delete(ctx context.Context, slug, editCode string, callerID uuid.UUID) error
+	// Inspect applies privacy and expiry without a burn or a view count: the link page, the
+	// metadata read and the editor use it.
+	Inspect(ctx context.Context, slug string, reader domain.Reader) (*domain.Link, error)
+	Follow(ctx context.Context, slug string, reader domain.Reader) (*domain.Link, error)
+	Delete(ctx context.Context, slug, editCode string, reader domain.Reader) error
+}
+
+// disabledAccounts is the account system of a server without accounts (--enable-accounts off).
+// Each method returns domain.ErrFeatureNotSupported, so a handler that calls it without a check
+// of common.accounts gets the "not enabled" answer and never a nil dereference.
+type disabledAccounts struct{}
+
+func (disabledAccounts) Login(context.Context, string, string, string, string, string, string) (string, error) {
+	return "", domain.ErrFeatureNotSupported
+}
+
+func (disabledAccounts) Logout(context.Context, string) error { return domain.ErrFeatureNotSupported }
+
+func (disabledAccounts) GetSession(context.Context, string) (*domain.User, error) {
+	return nil, domain.ErrFeatureNotSupported
+}
+
+func (disabledAccounts) ChangePassword(context.Context, string, string, string, string) (string, error) {
+	return "", domain.ErrFeatureNotSupported
+}
+
+func (disabledAccounts) IsEmpty(context.Context) (bool, error) {
+	return false, domain.ErrFeatureNotSupported
+}
+
+func (disabledAccounts) GenerateInvite(context.Context, uuid.UUID, auth.Issuer) (string, error) {
+	return "", domain.ErrFeatureNotSupported
+}
+
+func (disabledAccounts) AcceptInvite(context.Context, string, string, string) (*auth.Enrollment, error) {
+	return nil, domain.ErrFeatureNotSupported
+}
+
+func (disabledAccounts) AcceptFirstAdmin(context.Context, string, string) (*auth.Enrollment, error) {
+	return nil, domain.ErrFeatureNotSupported
+}
+
+func (disabledAccounts) ListUsers(context.Context, uuid.UUID) ([]*domain.User, error) {
+	return nil, domain.ErrFeatureNotSupported
+}
+
+func (disabledAccounts) RevokeUser(context.Context, uuid.UUID, uuid.UUID) error {
+	return domain.ErrFeatureNotSupported
+}
+
+func (disabledAccounts) ResolveAPIToken(context.Context, string) (*domain.User, string, error) {
+	return nil, "", domain.ErrFeatureNotSupported
+}
+
+func (disabledAccounts) CreateAPIToken(context.Context, uuid.UUID, auth.Issuer, int) (string, error) {
+	return "", domain.ErrFeatureNotSupported
+}
+
+func (disabledAccounts) ListAPITokens(context.Context, uuid.UUID) ([]*auth.APITokenInfo, error) {
+	return nil, domain.ErrFeatureNotSupported
+}
+
+func (disabledAccounts) RevokeAPIToken(context.Context, uuid.UUID, string) error {
+	return domain.ErrFeatureNotSupported
 }
 
 // Pinger checks database connectivity.
@@ -167,7 +222,8 @@ func (NoPinger) PingContext(_ context.Context) error { return nil }
 type common struct {
 	log       *slog.Logger
 	errorTmpl *template.Template
-	authMgr   AuthManager
+	// sessionChecker resolves a session for the page header and the auth middleware.
+	sessionChecker middleware.SessionChecker
 	// fileMgr is the file usecase, or nil when files are off. The header shows the file tab
 	// and the success page reads the file name only when it is set (see WithFileManager).
 	fileMgr        FileManager
@@ -178,6 +234,9 @@ type common struct {
 	// setup closed (see RouterOptions.BootstrapToken and bootstrapTokenValid).
 	bootstrapDigest []byte
 	sessionTTL      time.Duration
+	// accounts tells whether the account system is on (WithAuthManager). Without it no privacy
+	// level applies: reader sets domain.Reader.SkipPrivacy.
+	accounts accountMode
 }
 
 // sessionMaxAge returns the TOTP session cookie's Max-Age: the configured SessionTTL (see
@@ -211,8 +270,8 @@ func (c *common) isHTTPS(r *http.Request) bool {
 	return middleware.IsHTTPS(r, c.forcedScheme, c.trustedProxies)
 }
 
-// denyPrivate answers a caller that failed a resource's privacy check. Shared by
-// NoteHandler.handlePrivateAuth and LinkHandler.Redirect so their denial responses cannot drift.
+// denyPrivate answers a caller that failed a resource's privacy check (domain.ErrForbidden from a
+// usecase read). Shared by the note, link and file pages so their denial responses cannot drift.
 //
 // An anonymous browser is sent to the login page carrying its original target: signing in is
 // exactly what would grant access. A browser that is already signed in gets 403 instead — it is
@@ -229,7 +288,15 @@ func (c *common) denyPrivate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if c.isAuthenticated(r) {
+	// Without accounts no login page exists, so a browser gets the plain 403 page. The usecases
+	// do not refuse a read then (domain.Reader.SkipPrivacy), so only a usecase fault comes here.
+	if c.accounts == accountsOff {
+		c.writeErrorPage(w, r, domain.ErrForbidden)
+
+		return
+	}
+
+	if middleware.AuthenticatedFromCtx(r.Context()) {
 		data := privateToOtherPageData()
 		c.writeErrorPageData(w, r, &data)
 
@@ -240,28 +307,35 @@ func (c *common) denyPrivate(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, loginURL, http.StatusSeeOther)
 }
 
-// isAuthenticated reports whether the request carries a valid auth credential.
-// Accepts a TOTP session cookie, or no auth when the account system is unconfigured.
-func (c *common) isAuthenticated(r *http.Request) bool {
-	if c.authMgr == nil {
-		return true
+// reader identifies the caller of r for the usecases. The auth middleware resolves the session
+// or the API token of each record route and puts the user in the request context, so the
+// context is the one source of the caller. AllowBurn is false: a handler sets it only for a
+// deliberate access.
+func (c *common) reader(r *http.Request) domain.Reader {
+	return readerFromCtx(r.Context(), c.accounts)
+}
+
+// readerFromCtx is common.reader for the ogen handlers, which get only a context.
+func readerFromCtx(ctx context.Context, accounts accountMode) domain.Reader {
+	return domain.Reader{
+		CallerID:      middleware.CallerIDFromCtx(ctx),
+		Authenticated: middleware.AuthenticatedFromCtx(ctx),
+		AllowBurn:     false,
+		SkipPrivacy:   accounts == accountsOff,
+	}
+}
+
+// writeMutationError answers a failed PUT or DELETE of a note, a short link or a file. A caller
+// that cannot see the record gets 401, as for a read: a 403 would count as a wrong edit code for
+// the fail lockout, and the edit-code check must not tell a stranger that the record exists.
+func (c *common) writeMutationError(w http.ResponseWriter, r *http.Request, err error) {
+	if errors.Is(err, domain.ErrForbidden) {
+		middleware.WriteUnauthorized(w)
+
+		return
 	}
 
-	// The auth middleware already resolved the session and stored the user in context.
-	// Reading from context avoids a redundant DB round-trip for auth-protected routes.
-	if middleware.UserFromContext(r) != nil {
-		return true
-	}
-
-	// For public routes the middleware does not run, so fall back to a direct session check.
-	if sessID := middleware.ExtractSessionID(r); sessID != "" {
-		_, err := c.authMgr.GetSession(r.Context(), sessID)
-		if err == nil {
-			return true
-		}
-	}
-
-	return false
+	c.writeError(w, r, err)
 }
 
 // parseTmpl parses a page template together with the shared header partial.
@@ -334,12 +408,14 @@ func NewHandler(manager NoteManager, linkManager LinkManager, log *slog.Logger) 
 	cmn := &common{
 		log:       log,
 		errorTmpl: errorTmpl,
-		// authMgr, forcedScheme, csrfSecret, trustedProxies, sessionTTL are zero-valued here
-		// and attached later via WithAuthManager / WithForcedScheme / WithCSRFSecret /
+		// sessions holds disabledAccounts and accounts is off until WithAuthManager; forcedScheme,
+		// csrfSecret, trustedProxies, sessionTTL are zero-valued here and attached later via
+		// WithForcedScheme / WithCSRFSecret /
 		// WithTrustedProxies / WithSessionTTL from the composition root. NewRouter calls all
 		// of them before the server starts serving requests — missing one is a startup bug,
 		// caught on guarded POSTs (csrfSecret=nil → CSRFGuard rejects with 403).
-		authMgr:        nil,
+		sessionChecker: disabledAccounts{},
+		accounts:       accountsOff,
 		forcedScheme:   "",
 		csrfSecret:     nil,
 		trustedProxies: nil,
@@ -375,7 +451,13 @@ func (h *Handler) WithRevealStore(store RevealTokenStore) *Handler {
 
 // WithAuthManager attaches a TOTP AuthManager enabling session-based authentication.
 func (h *Handler) WithAuthManager(mgr AuthManager) *Handler {
-	h.authMgr = mgr
+	h.sessionChecker = mgr
+	h.accounts = accountsOn
+	h.sessions = mgr
+	h.AuthHandler.onboarding = mgr
+	h.users = mgr
+	h.tokens = mgr
+	h.AdminHandler.onboarding = mgr
 
 	return h
 }

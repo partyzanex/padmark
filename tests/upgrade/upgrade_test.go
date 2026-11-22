@@ -306,7 +306,7 @@ func assertEditCodes(t *testing.T, manager *notes.Manager, fixture []legacyNote)
 	} {
 		note := &fixture[index]
 		update := func(code string) error {
-			_, err := manager.Update(t.Context(), note.slug, code, uuid.Nil, &domain.Note{
+			_, err := manager.Update(t.Context(), note.slug, code, openReader(), &domain.Note{
 				Title: note.title + " (edited)", Content: "edited after the upgrade",
 
 				CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
@@ -328,6 +328,12 @@ func assertEditCodes(t *testing.T, manager *notes.Manager, fixture []legacyNote)
 	}
 }
 
+// openReader is the reader of a v0.1.6 server: no account system, so no privacy check, and a
+// deliberate access that may burn a note.
+func openReader() domain.Reader {
+	return domain.Reader{CallerID: uuid.Nil, Authenticated: false, AllowBurn: true, SkipPrivacy: true}
+}
+
 // assertLifecycle checks burn, expiry and view semantics survive the conversion.
 func assertLifecycle(t *testing.T, manager *notes.Manager, fixture []legacyNote) {
 	t.Helper()
@@ -335,28 +341,28 @@ func assertLifecycle(t *testing.T, manager *notes.Manager, fixture []legacyNote)
 	ctx := t.Context()
 
 	burn := &fixture[noteBurn]
-	read, err := manager.Get(ctx, burn.slug)
+	read, err := manager.Read(ctx, burn.slug, openReader())
 	require.NoError(t, err)
 	require.Equal(t, burn.content, read.Content)
-	_, err = manager.Get(ctx, burn.slug)
+	_, err = manager.Read(ctx, burn.slug, openReader())
 	require.ErrorIs(t, err, domain.ErrNotFound, "a burn-after-reading note burns on its first read")
 
 	farFuture := &fixture[noteFarFuture]
-	read, err = manager.Get(ctx, farFuture.slug)
+	read, err = manager.Read(ctx, farFuture.slug, openReader())
 	require.NoError(t, err)
 	require.Equal(t, farFuture.content, read.Content)
 	require.NotNil(t, read.ExpiresAt)
 	require.True(t, parseTime(t, farFuture.expiresAt).Equal(*read.ExpiresAt))
 
 	expired := &fixture[noteExpired]
-	_, err = manager.Get(ctx, expired.slug)
+	_, err = manager.Read(ctx, expired.slug, openReader())
 	require.True(t, errors.Is(err, domain.ErrExpired) || errors.Is(err, domain.ErrNotFound),
 		"an expired v0.1.6 note must not be revived, got %v", err)
 	_, err = manager.Peek(ctx, expired.slug)
 	require.ErrorIs(t, err, domain.ErrNotFound)
 
 	viewed := &fixture[noteViewed]
-	read, err = manager.View(ctx, viewed.slug)
+	read, err = manager.Read(ctx, viewed.slug, openReader())
 	require.NoError(t, err)
 	require.Equal(t, viewed.views+1, read.Views)
 }

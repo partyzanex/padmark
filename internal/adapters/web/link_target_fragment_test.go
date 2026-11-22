@@ -5,7 +5,6 @@ import (
 	"net/http/httptest"
 	"strings"
 
-	"github.com/google/uuid"
 	"go.uber.org/mock/gomock"
 
 	"github.com/partyzanex/padmark/internal/domain"
@@ -75,9 +74,8 @@ func (s *HandlerSuite) TestCreateLinksBulk_KeepsFragment() {
 func (s *HandlerSuite) TestUpdateLink_KeepsFragment() {
 	target := fragmentTarget
 
-	s.linkManager.EXPECT().Peek(gomock.Any(), testLinkID).Return(newTestLink(), nil).AnyTimes()
 	s.linkManager.EXPECT().
-		Update(gomock.Any(), testLinkID, "original", uuid.Nil, target, gomock.Any()).
+		Update(gomock.Any(), testLinkID, "original", openReader(), target, gomock.Any()).
 		Return(newTestLink(), nil)
 
 	w := httptest.NewRecorder()

@@ -53,13 +53,20 @@ var setupTmplSrc string
 type AuthHandler struct {
 	*common
 
+	// sessions and onboarding hold disabledAccounts until Handler.WithAuthManager.
+	sessions   SessionManager
+	onboarding OnboardingManager
+
 	loginTmpl    *template.Template
 	setupTmpl    *template.Template
 	changePwTmpl *template.Template
 }
 
 func newAuthHandler(c *common, loginTmpl, setupTmpl, changePwTmpl *template.Template) *AuthHandler {
-	return &AuthHandler{common: c, loginTmpl: loginTmpl, setupTmpl: setupTmpl, changePwTmpl: changePwTmpl}
+	return &AuthHandler{
+		common: c, sessions: disabledAccounts{}, onboarding: disabledAccounts{},
+		loginTmpl: loginTmpl, setupTmpl: setupTmpl, changePwTmpl: changePwTmpl,
+	}
 }
 
 // RegisterRoutes registers login, logout, account setup, and password-change routes.
@@ -119,7 +126,7 @@ func (h *AuthHandler) LoginPage(w http.ResponseWriter, r *http.Request) {
 
 // TOTPLoginHandler handles POST /totp-login — username + password + TOTP code → session cookie.
 func (h *AuthHandler) TOTPLoginHandler(w http.ResponseWriter, r *http.Request) {
-	if h.authMgr == nil {
+	if h.accounts == accountsOff {
 		http.Error(w, "not found", http.StatusNotFound)
 
 		return
@@ -135,7 +142,7 @@ func (h *AuthHandler) TOTPLoginHandler(w http.ResponseWriter, r *http.Request) {
 	next := middleware.SafeNextURL(r.FormValue("next"))
 
 	// The session cookie the browser presented, if any, is revoked by the usecase on success.
-	sessID, err := h.authMgr.Login(
+	sessID, err := h.sessions.Login(
 		r.Context(), username, password, code, truncateUA(r.UserAgent()), remoteIP(r), middleware.ExtractSessionID(r),
 	)
 	if err != nil {
@@ -185,8 +192,8 @@ func (h *AuthHandler) TOTPLoginHandler(w http.ResponseWriter, r *http.Request) {
 // cleared while the session remains valid on the server.
 func (h *AuthHandler) LogoutHandler(w http.ResponseWriter, r *http.Request) {
 	sessID := middleware.ExtractSessionID(r)
-	if sessID != "" && h.authMgr != nil {
-		logoutErr := h.authMgr.Logout(r.Context(), sessID)
+	if sessID != "" && h.accounts == accountsOn {
+		logoutErr := h.sessions.Logout(r.Context(), sessID)
 		if logoutErr != nil {
 			h.log.ErrorContext(r.Context(), "logout session", "err", logoutErr)
 			http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -232,7 +239,7 @@ type setupViewData struct {
 
 // SetupPage handles GET /setup — renders the account creation form.
 func (h *AuthHandler) SetupPage(w http.ResponseWriter, r *http.Request) {
-	if h.authMgr == nil {
+	if h.accounts == accountsOff {
 		http.Error(w, "not found", http.StatusNotFound)
 
 		return
@@ -289,7 +296,7 @@ func setupErrMsg(err error) string {
 // SetupHandler handles POST /setup — creates user and returns QR code (HTML) or the otpauth
 // enrollment URI (JSON, headless provisioning).
 func (h *AuthHandler) SetupHandler(w http.ResponseWriter, r *http.Request) {
-	if h.authMgr == nil {
+	if h.accounts == accountsOff {
 		http.Error(w, "not found", http.StatusNotFound)
 
 		return
@@ -341,9 +348,9 @@ func (h *AuthHandler) SetupHandler(w http.ResponseWriter, r *http.Request) {
 	)
 
 	if token != "" {
-		enrollment, setupErr = h.authMgr.AcceptInvite(r.Context(), token, username, password)
+		enrollment, setupErr = h.onboarding.AcceptInvite(r.Context(), token, username, password)
 	} else {
-		enrollment, setupErr = h.authMgr.AcceptFirstAdmin(r.Context(), username, password)
+		enrollment, setupErr = h.onboarding.AcceptFirstAdmin(r.Context(), username, password)
 	}
 
 	if setupErr != nil {
@@ -367,7 +374,7 @@ type changePwViewData struct {
 
 // ChangePasswordPage handles GET /change-password.
 func (h *AuthHandler) ChangePasswordPage(w http.ResponseWriter, r *http.Request) {
-	if h.authMgr == nil {
+	if h.accounts == accountsOff {
 		http.Error(w, "not found", http.StatusNotFound)
 
 		return
@@ -390,7 +397,7 @@ func (h *AuthHandler) ChangePasswordPage(w http.ResponseWriter, r *http.Request)
 
 // ChangePasswordHandler handles POST /change-password.
 func (h *AuthHandler) ChangePasswordHandler(w http.ResponseWriter, r *http.Request) {
-	if h.authMgr == nil {
+	if h.accounts == accountsOff {
 		http.Error(w, "not found", http.StatusNotFound)
 
 		return
@@ -501,16 +508,12 @@ func isJSONContentType(header string) bool {
 // Used to skip auth pages (login/setup) for already-signed-in users. /login is a public
 // path, so the auth middleware does not populate the context — resolve the session here.
 func (h *AuthHandler) hasValidSession(r *http.Request) bool {
-	if h.authMgr == nil {
-		return false
-	}
-
 	sessID := middleware.ExtractSessionID(r)
 	if sessID == "" {
 		return false
 	}
 
-	_, err := h.authMgr.GetSession(r.Context(), sessID)
+	_, err := h.sessions.GetSession(r.Context(), sessID)
 
 	return err == nil
 }
@@ -519,7 +522,7 @@ func (h *AuthHandler) hasValidSession(r *http.Request) bool {
 // When closed (an admin already exists) it writes the 403 "setup closed" page and returns
 // false; on a lookup error it writes 500 and returns false.
 func (h *AuthHandler) bootstrapOpen(w http.ResponseWriter, r *http.Request) bool {
-	empty, err := h.authMgr.IsEmpty(r.Context())
+	empty, err := h.onboarding.IsEmpty(r.Context())
 	if err != nil {
 		h.log.ErrorContext(r.Context(), "check empty", "err", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -605,7 +608,7 @@ func (h *AuthHandler) doChangePassword(
 
 	sessID := middleware.ExtractSessionID(r)
 
-	newSessID, changeErr := h.authMgr.ChangePassword(r.Context(), sessID, oldPassword, newPassword, totpCode)
+	newSessID, changeErr := h.sessions.ChangePassword(r.Context(), sessID, oldPassword, newPassword, totpCode)
 	if changeErr == nil {
 		// Replace the session cookie: all old sessions were invalidated; use the fresh one.
 		http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: HttpOnly/SameSite set; Secure follows IsHTTPS

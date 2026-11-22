@@ -64,7 +64,7 @@ func fileToDomain(row *file) *domain.File {
 const (
 	// visibleWhere is the SQL form of domain.File.VisibleTo. Storage checks it again in each
 	// write, so a concurrent privacy change cannot let an old read change the record. The
-	// first parameter is AccessOptions.SkipPrivacy.
+	// first parameter is Reader.SkipPrivacy.
 	visibleWhere = "? OR privacy = ? OR (privacy = ? AND ?) OR (privacy = ? AND owner_id = ? AND ?)"
 	// liveWhere selects a record that is not expired at the time parameter.
 	liveWhere = "expires_at IS NULL OR expires_at >= ?"
@@ -73,7 +73,7 @@ const (
 	unclaimedWhere = "burn_claim_until IS NULL OR burn_claim_until <= ?"
 )
 
-func visibleArgs(reader files.AccessOptions) []any {
+func visibleArgs(reader domain.Reader) []any {
 	return []any{
 		reader.SkipPrivacy,
 		domain.PrivacyPublic, domain.PrivacyAuthenticated, reader.Authenticated,
@@ -196,7 +196,7 @@ func (r *FileRepository) ReleaseBurn(ctx context.Context, claim *files.BurnClaim
 // IncrementDownloadsVisible counts a download while the record is visible to the reader, is
 // not a burn file and is not expired.
 func (r *FileRepository) IncrementDownloadsVisible(
-	ctx context.Context, id, objectKey string, reader files.AccessOptions,
+	ctx context.Context, id, objectKey string, reader domain.Reader,
 ) error {
 	result, err := r.db.NewUpdate().TableExpr("files").Set("downloads = downloads + 1").
 		Where("id = ?", id).Where("object_key = ?", objectKey).

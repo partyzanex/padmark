@@ -140,7 +140,7 @@ func newPrivacyChoice(accounts accountMode, signedIn bool, current domain.Privac
 
 // privacyChoice returns the privacy list of the form that r opens, for the user of header.
 func (c *common) privacyChoice(r *http.Request, header headerView, current domain.Privacy) privacyChoice {
-	return newPrivacyChoice(c.authMgr != nil, header.SignedIn(), current, r.URL.RequestURI())
+	return newPrivacyChoice(c.accounts, header.SignedIn(), current, r.URL.RequestURI())
 }
 
 // IndexPage handles GET / — serves the note editor.

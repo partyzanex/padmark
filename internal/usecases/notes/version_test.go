@@ -35,7 +35,7 @@ func (s *ManagerTestSuite) TestDelete_UsesCheckedVersion() {
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(storedNote("secret123456", nil), nil)
 	s.storage.EXPECT().Delete(gomock.Any(), domain.HashSlug("abc-123"), "secret123456").Return(nil)
 
-	s.Require().NoError(s.manager.Delete(s.T().Context(), "abc-123", "secret123456", uuid.Nil))
+	s.Require().NoError(s.manager.Delete(s.T().Context(), "abc-123", "secret123456", openReader()))
 }
 
 // TestDelete_OwnerUsesCheckedVersion verifies that the owner, who sends no edit code, still
@@ -45,7 +45,7 @@ func (s *ManagerTestSuite) TestDelete_OwnerUsesCheckedVersion() {
 		Return(storedNote("secret123456", new(testUserID1)), nil)
 	s.storage.EXPECT().Delete(gomock.Any(), domain.HashSlug("abc-123"), "secret123456").Return(nil)
 
-	s.Require().NoError(s.manager.Delete(s.T().Context(), "abc-123", "", testUserID1))
+	s.Require().NoError(s.manager.Delete(s.T().Context(), "abc-123", "", accountReader(testUserID1)))
 }
 
 // TestDelete_NewVersionIsNotFound verifies that a refused stale delete reaches the caller as
@@ -54,7 +54,7 @@ func (s *ManagerTestSuite) TestDelete_NewVersionIsNotFound() {
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(storedNote("secret123456", nil), nil)
 	s.storage.EXPECT().Delete(gomock.Any(), domain.HashSlug("abc-123"), "secret123456").Return(domain.ErrNotFound)
 
-	err := s.manager.Delete(s.T().Context(), "abc-123", "secret123456", uuid.Nil)
+	err := s.manager.Delete(s.T().Context(), "abc-123", "secret123456", openReader())
 
 	s.Require().ErrorIs(err, domain.ErrNotFound)
 }
@@ -72,7 +72,7 @@ func (s *ManagerTestSuite) TestUpdate_UsesCheckedVersion() {
 	update := storedNote("", nil)
 	update.Title, update.Content = "new", "body"
 
-	_, err := s.manager.Update(s.T().Context(), "abc-123", "", testUserID1, update)
+	_, err := s.manager.Update(s.T().Context(), "abc-123", "", accountReader(testUserID1), update)
 
 	s.Require().ErrorIs(err, domain.ErrNotFound)
 }
@@ -83,7 +83,7 @@ func (s *ManagerTestSuite) TestGet_BurnUsesCheckedVersion() {
 	s.storage.EXPECT().Consume(gomock.Any(), domain.HashSlug("burn-x"), domain.PrivacyPublic, "hash:checked").
 		Return(nil, domain.ErrNotFound)
 
-	_, err := s.manager.Get(s.T().Context(), "burn-x")
+	_, err := s.manager.Read(s.T().Context(), "burn-x", openReader())
 
 	s.Require().ErrorIs(err, domain.ErrNotFound)
 }
@@ -110,7 +110,7 @@ func (s *ManagerTestSuite) TestGet_BurnTimerUsesCheckedVersion() {
 	s.storage.EXPECT().SetBurnExpiry(gomock.Any(), domain.HashSlug("burn-x"), gomock.Any(), domain.PrivacyPublic,
 		"hash:checked").Return(note, nil)
 
-	_, err := s.manager.Get(s.T().Context(), "burn-x")
+	_, err := s.manager.Read(s.T().Context(), "burn-x", openReader())
 
 	s.Require().NoError(err)
 }

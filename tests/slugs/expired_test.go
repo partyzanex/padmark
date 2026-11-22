@@ -70,7 +70,7 @@ func testExpiredNoteRead(t *testing.T, env *slugEnv, db *bun.DB) {
 	_, err = env.create(t.Context(), "notes", slug, false)
 	require.NoError(t, err, "a create before a read of the expired note")
 
-	note, err := env.notes.Get(t.Context(), slug)
+	note, err := env.notes.Read(t.Context(), slug, openReader())
 	require.NoError(t, err, "the read returns the new note")
 	require.Nil(t, note.ExpiresAt)
 }
@@ -91,7 +91,7 @@ func testExpiredBurnTimer(t *testing.T, env *slugEnv, db *bun.DB) {
 	_, err = env.create(t.Context(), "notes", slug, false)
 	require.ErrorIs(t, err, domain.ErrSlugConflict, "an unread burn-after-reading note holds its slug")
 
-	read, err := env.notes.Get(t.Context(), slug)
+	read, err := env.notes.Read(t.Context(), slug, openReader())
 	require.NoError(t, err)
 	require.NotNil(t, read.ExpiresAt, "the first read starts the burn timer")
 
@@ -103,4 +103,10 @@ func testExpiredBurnTimer(t *testing.T, env *slugEnv, db *bun.DB) {
 	_, err = env.create(t.Context(), "links", slug, false)
 	require.NoError(t, err, "an ended burn timer must not block the slug")
 	assertReservation(t, db, id, "links")
+}
+
+// openReader is the reader of a server without accounts: no privacy check, and a deliberate
+// access that may burn a note.
+func openReader() domain.Reader {
+	return domain.Reader{CallerID: uuid.Nil, Authenticated: false, AllowBurn: true, SkipPrivacy: true}
 }

@@ -67,18 +67,18 @@ func (d *Download) Close(ctx context.Context) {
 }
 
 // record claims a burn file or counts the download of another file.
-func (m *Manager) record(ctx context.Context, file *domain.File, opts AccessOptions, download *Download) error {
+func (m *Manager) record(ctx context.Context, file *domain.File, reader domain.Reader, download *Download) error {
 	if file.BurnAfterDownload {
-		return m.claimBurn(ctx, file, opts, download)
+		return m.claimBurn(ctx, file, reader, download)
 	}
 
 	recordID := domain.HashSlug(file.ID)
 
-	err := m.deps.Storage.IncrementDownloadsVisible(ctx, recordID, file.ObjectKey, opts)
+	err := m.deps.Storage.IncrementDownloadsVisible(ctx, recordID, file.ObjectKey, reader)
 
 	switch {
 	case errors.Is(err, domain.ErrNotFound):
-		return m.recordChanged(ctx, file, opts, download)
+		return m.recordChanged(ctx, file, reader, download)
 	case err != nil:
 		// The counter is statistics only: a failure does not stop the download.
 		m.deps.Log.ErrorContext(ctx, "count file download", "id", recordID, "err", err)
@@ -93,7 +93,7 @@ func (m *Manager) record(ctx context.Context, file *domain.File, opts AccessOpti
 // it was deleted, replaced by a new file with the same slug, made private, expired, or made a
 // burn file. A second read selects the correct result.
 func (m *Manager) recordChanged(
-	ctx context.Context, file *domain.File, opts AccessOptions, download *Download,
+	ctx context.Context, file *domain.File, reader domain.Reader, download *Download,
 ) error {
 	fresh, err := m.deps.Storage.GetByID(ctx, domain.HashSlug(file.ID))
 	if err != nil {
@@ -103,24 +103,24 @@ func (m *Manager) recordChanged(
 	switch {
 	case fresh.ObjectKey != file.ObjectKey:
 		return fmt.Errorf("count download: slug has a new file: %w", domain.ErrNotFound)
-	case !opts.visible(fresh):
+	case !fresh.VisibleTo(reader):
 		return domain.ErrForbidden
 	case fresh.Expired(time.Now()):
 		return m.expire(ctx, file)
 	case !fresh.BurnAfterDownload:
 		return fmt.Errorf("count download: %w", domain.ErrNotFound)
-	case !opts.AllowBurn:
+	case !reader.AllowBurn:
 		return domain.ErrBurnIntentRequired
 	default:
 		file.BurnAfterDownload = true
 
-		return m.claimBurn(ctx, file, opts, download)
+		return m.claimBurn(ctx, file, reader, download)
 	}
 }
 
 // claimBurn claims a burn file for this download. The record stays, but other readers do not
 // see it. Download.Close deletes it after a complete Send, or releases the claim.
-func (m *Manager) claimBurn(ctx context.Context, file *domain.File, opts AccessOptions, download *Download) error {
+func (m *Manager) claimBurn(ctx context.Context, file *domain.File, reader domain.Reader, download *Download) error {
 	now := time.Now()
 	claim := &BurnClaim{
 		Now:       now,
@@ -128,7 +128,7 @@ func (m *Manager) claimBurn(ctx context.Context, file *domain.File, opts AccessO
 		ID:        domain.HashSlug(file.ID),
 		ObjectKey: file.ObjectKey,
 		Token:     uuid.NewString(),
-		Reader:    opts,
+		Reader:    reader,
 	}
 
 	err := m.deps.Storage.ClaimBurn(ctx, claim)

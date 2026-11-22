@@ -14,7 +14,6 @@ import (
 	io "io"
 	reflect "reflect"
 
-	uuid "github.com/google/uuid"
 	domain "github.com/partyzanex/padmark/internal/domain"
 	files "github.com/partyzanex/padmark/internal/usecases/files"
 	gomock "go.uber.org/mock/gomock"
@@ -60,47 +59,47 @@ func (mr *MockFileManagerMockRecorder) Create(ctx, name, body, opts any) *gomock
 }
 
 // Delete mocks base method.
-func (m *MockFileManager) Delete(ctx context.Context, slug, editCode string, callerID uuid.UUID) error {
+func (m *MockFileManager) Delete(ctx context.Context, slug, editCode string, reader domain.Reader) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Delete", ctx, slug, editCode, callerID)
+	ret := m.ctrl.Call(m, "Delete", ctx, slug, editCode, reader)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // Delete indicates an expected call of Delete.
-func (mr *MockFileManagerMockRecorder) Delete(ctx, slug, editCode, callerID any) *gomock.Call {
+func (mr *MockFileManagerMockRecorder) Delete(ctx, slug, editCode, reader any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Delete", reflect.TypeOf((*MockFileManager)(nil).Delete), ctx, slug, editCode, callerID)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Delete", reflect.TypeOf((*MockFileManager)(nil).Delete), ctx, slug, editCode, reader)
 }
 
 // Download mocks base method.
-func (m *MockFileManager) Download(ctx context.Context, slug string, opts files.AccessOptions) (*files.Download, error) {
+func (m *MockFileManager) Download(ctx context.Context, slug string, reader domain.Reader) (*files.Download, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Download", ctx, slug, opts)
+	ret := m.ctrl.Call(m, "Download", ctx, slug, reader)
 	ret0, _ := ret[0].(*files.Download)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // Download indicates an expected call of Download.
-func (mr *MockFileManagerMockRecorder) Download(ctx, slug, opts any) *gomock.Call {
+func (mr *MockFileManagerMockRecorder) Download(ctx, slug, reader any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Download", reflect.TypeOf((*MockFileManager)(nil).Download), ctx, slug, opts)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Download", reflect.TypeOf((*MockFileManager)(nil).Download), ctx, slug, reader)
 }
 
-// Info mocks base method.
-func (m *MockFileManager) Info(ctx context.Context, slug string, opts files.AccessOptions) (*domain.File, error) {
+// Inspect mocks base method.
+func (m *MockFileManager) Inspect(ctx context.Context, slug string, reader domain.Reader) (*domain.File, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Info", ctx, slug, opts)
+	ret := m.ctrl.Call(m, "Inspect", ctx, slug, reader)
 	ret0, _ := ret[0].(*domain.File)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
-// Info indicates an expected call of Info.
-func (mr *MockFileManagerMockRecorder) Info(ctx, slug, opts any) *gomock.Call {
+// Inspect indicates an expected call of Inspect.
+func (mr *MockFileManagerMockRecorder) Inspect(ctx, slug, reader any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Info", reflect.TypeOf((*MockFileManager)(nil).Info), ctx, slug, opts)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Inspect", reflect.TypeOf((*MockFileManager)(nil).Inspect), ctx, slug, reader)
 }
 
 // MaxSize mocks base method.
@@ -132,17 +131,32 @@ func (mr *MockFileManagerMockRecorder) Peek(ctx, slug any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Peek", reflect.TypeOf((*MockFileManager)(nil).Peek), ctx, slug)
 }
 
-// Update mocks base method.
-func (m *MockFileManager) Update(ctx context.Context, slug, editCode string, callerID uuid.UUID, opts files.UpdateOptions) (*domain.File, error) {
+// Settings mocks base method.
+func (m *MockFileManager) Settings(ctx context.Context, slug string, reader domain.Reader) (*domain.File, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Update", ctx, slug, editCode, callerID, opts)
+	ret := m.ctrl.Call(m, "Settings", ctx, slug, reader)
+	ret0, _ := ret[0].(*domain.File)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Settings indicates an expected call of Settings.
+func (mr *MockFileManagerMockRecorder) Settings(ctx, slug, reader any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Settings", reflect.TypeOf((*MockFileManager)(nil).Settings), ctx, slug, reader)
+}
+
+// Update mocks base method.
+func (m *MockFileManager) Update(ctx context.Context, slug, editCode string, reader domain.Reader, opts files.UpdateOptions) (*domain.File, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Update", ctx, slug, editCode, reader, opts)
 	ret0, _ := ret[0].(*domain.File)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // Update indicates an expected call of Update.
-func (mr *MockFileManagerMockRecorder) Update(ctx, slug, editCode, callerID, opts any) *gomock.Call {
+func (mr *MockFileManagerMockRecorder) Update(ctx, slug, editCode, reader, opts any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Update", reflect.TypeOf((*MockFileManager)(nil).Update), ctx, slug, editCode, callerID, opts)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Update", reflect.TypeOf((*MockFileManager)(nil).Update), ctx, slug, editCode, reader, opts)
 }

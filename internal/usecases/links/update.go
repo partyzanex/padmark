@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/google/uuid"
-
 	"github.com/partyzanex/padmark/internal/domain"
 )
 
@@ -21,10 +19,10 @@ type UpdateOptions struct {
 }
 
 // Update replaces the destination without changing the slug, edit code, owner,
-// creation time, burn-after-click setting, or click counter. The exact owner may
-// omit the edit code; other callers must prove knowledge of the original code.
+// creation time, burn-after-click setting, or click counter. The rules are in checkMutation:
+// the reader must see the link, and must be its owner or give the original edit code.
 func (m *Manager) Update(
-	ctx context.Context, slug, editCode string, callerID uuid.UUID, targetURL string, opts UpdateOptions,
+	ctx context.Context, slug, editCode string, reader domain.Reader, targetURL string, opts UpdateOptions,
 ) (*domain.Link, error) {
 	validURL, err := validateTargetURL(targetURL)
 	if err != nil {
@@ -46,8 +44,9 @@ func (m *Manager) Update(
 		return nil, fmt.Errorf("update link: %w", err)
 	}
 
-	if !existing.OwnedBy(callerID) && !m.hasher.Verify(existing.EditCode, editCode) {
-		return nil, domain.ErrInvalidEditCode
+	err = m.checkMutation(existing, editCode, reader)
+	if err != nil {
+		return nil, err
 	}
 
 	// The merged snapshot is only for validation. OwnerID cannot change, so the ownership check

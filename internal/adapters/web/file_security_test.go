@@ -13,7 +13,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/mock/gomock"
 
@@ -213,7 +212,7 @@ func (s *FileSecuritySuite) TestDownload_HeadersStopSniffAndCache() {
 
 	s.files.EXPECT().Download(gomock.Any(), "abc", access(true)).
 		Return(downloadOf("page.html", "<script>", false), nil)
-	s.files.EXPECT().Info(gomock.Any(), "abc", gomock.Any()).
+	s.files.EXPECT().Inspect(gomock.Any(), "abc", gomock.Any()).
 		Return(fileRecord("page.html", 8, 0, false), nil)
 
 	get := httptest.NewRequest(http.MethodGet, "/files/abc/download", nil)
@@ -235,11 +234,15 @@ func (s *FileSecuritySuite) TestFilePages_NotCached() {
 	router := s.newRouter(routerOptions{rateLimit: 0, accounts: false})
 	file := fileRecord("a.txt", 3, 0, false)
 
-	s.manager.EXPECT().Peek(gomock.Any(), "abc").Return(nil, domain.ErrNotFound).Times(2)
-	s.linkManager.EXPECT().Redirect(gomock.Any(), "abc").Return(nil, domain.ErrNotFound)
-	s.linkManager.EXPECT().Peek(gomock.Any(), "abc").Return(nil, domain.ErrNotFound)
-	s.files.EXPECT().Peek(gomock.Any(), "abc").Return(file, nil).Times(2)
-	s.files.EXPECT().Info(gomock.Any(), "abc", access(false)).Return(file, nil)
+	// GET /abc: no note, no short link, then the file page. GET /edit/abc: the editors of the
+	// note and the short link find nothing, then the file editor reads the file.
+	expectNoNote(s.manager, "abc")
+	s.linkManager.EXPECT().Follow(gomock.Any(), "abc", withBurn(true)).Return(nil, domain.ErrNotFound)
+	s.files.EXPECT().Peek(gomock.Any(), "abc").Return(file, nil)
+	s.manager.EXPECT().Inspect(gomock.Any(), "abc", gomock.Any()).Return(nil, domain.ErrNotFound)
+	s.linkManager.EXPECT().Inspect(gomock.Any(), "abc", gomock.Any()).Return(nil, domain.ErrNotFound)
+	s.files.EXPECT().Inspect(gomock.Any(), "abc", access(false)).Return(file, nil)
+	s.files.EXPECT().Settings(gomock.Any(), "abc", access(false)).Return(file, nil)
 
 	for _, path := range []string{"/abc", "/edit/abc"} {
 		rec := serveOnce(router, browserGet(path))
@@ -259,9 +262,9 @@ func (s *FileSecuritySuite) TestStorageUnavailable_Is503() {
 
 	s.files.EXPECT().Create(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil, storageErr)
 	s.files.EXPECT().Download(gomock.Any(), "abc", gomock.Any()).Return(nil, storageErr).Times(2)
-	s.files.EXPECT().Info(gomock.Any(), "abc", gomock.Any()).Return(nil, storageErr).Times(2)
-	s.files.EXPECT().Delete(gomock.Any(), "abc", "code-1234", uuid.Nil).Return(storageErr)
-	s.files.EXPECT().Update(gomock.Any(), "abc", "code-1234", uuid.Nil, gomock.Any()).Return(nil, storageErr)
+	s.files.EXPECT().Inspect(gomock.Any(), "abc", gomock.Any()).Return(nil, storageErr).Times(2)
+	s.files.EXPECT().Delete(gomock.Any(), "abc", "code-1234", access(false)).Return(storageErr)
+	s.files.EXPECT().Update(gomock.Any(), "abc", "code-1234", access(false), gomock.Any()).Return(nil, storageErr)
 
 	download := httptest.NewRequest(http.MethodGet, "/files/abc/download", nil)
 	download.Header.Set("Accept", "application/octet-stream")
@@ -304,10 +307,10 @@ func (s *FileSecuritySuite) TestLogs_NoFileSecrets() {
 		func(context.Context, io.Writer) error { return errors.New("stream stopped") })
 
 	s.files.EXPECT().Download(gomock.Any(), slug, access(true)).Return(failing, nil)
-	s.files.EXPECT().Delete(gomock.Any(), slug, editCode, uuid.Nil).Return(errors.New("database is locked"))
-	s.files.EXPECT().Update(gomock.Any(), slug, editCode, uuid.Nil, gomock.Any()).
+	s.files.EXPECT().Delete(gomock.Any(), slug, editCode, access(false)).Return(errors.New("database is locked"))
+	s.files.EXPECT().Update(gomock.Any(), slug, editCode, access(false), gomock.Any()).
 		Return(nil, errors.New("database is locked"))
-	s.files.EXPECT().Info(gomock.Any(), slug, gomock.Any()).Return(nil, errors.New("metadata is locked"))
+	s.files.EXPECT().Inspect(gomock.Any(), slug, gomock.Any()).Return(nil, errors.New("metadata is locked"))
 
 	download := httptest.NewRequest(http.MethodGet, "/files/"+slug+"/download", nil)
 	download.Header.Set("Accept", "application/octet-stream")

@@ -32,7 +32,7 @@ func (s *ManagerSuite) TestUpdate_OwnerChangesExpiryWithoutEditCode() {
 	// different server process stays.
 	s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("abc"), "obj", opts, gomock.Any()).Return(nil)
 
-	updated, err := s.manager.Update(ctx, "abc", "", owner, opts)
+	updated, err := s.manager.Update(ctx, "abc", "", account(owner), opts)
 	s.Require().NoError(err)
 	s.Equal("abc", updated.ID)
 	s.Equal("report.pdf", updated.Name)
@@ -54,7 +54,7 @@ func (s *ManagerSuite) TestUpdate_OtherUserWithEditCodeChangesPrivacy() {
 	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(storedFile(false), nil)
 	s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("abc"), "obj", opts, gomock.Any()).Return(nil)
 
-	updated, err := s.manager.Update(ctx, "abc", "code", uuid.New(), opts)
+	updated, err := s.manager.Update(ctx, "abc", "code", account(uuid.New()), opts)
 	s.Require().NoError(err)
 	s.Equal(domain.PrivacyAuthenticated, updated.EffectivePrivacy())
 }
@@ -63,7 +63,7 @@ func (s *ManagerSuite) TestUpdate_WithoutChangesWritesNothing() {
 	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(storedFile(false), nil)
 	// No Storage.Update expectation: the strict mock fails the test on a write.
 
-	updated, err := s.manager.Update(s.T().Context(), "abc", "code", uuid.Nil, noUpdate())
+	updated, err := s.manager.Update(s.T().Context(), "abc", "code", skipPrivacy(), noUpdate())
 	s.Require().NoError(err)
 	s.Equal("report.pdf", updated.Name)
 }
@@ -71,7 +71,7 @@ func (s *ManagerSuite) TestUpdate_WithoutChangesWritesNothing() {
 func (s *ManagerSuite) TestUpdate_WrongEditCode() {
 	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(storedFile(false), nil)
 
-	_, err := s.manager.Update(s.T().Context(), "abc", "wrong", uuid.New(), noUpdate())
+	_, err := s.manager.Update(s.T().Context(), "abc", "wrong", account(uuid.New()), noUpdate())
 	s.Require().ErrorIs(err, domain.ErrInvalidEditCode)
 }
 
@@ -82,7 +82,7 @@ func (s *ManagerSuite) TestUpdate_ExpiredFileIsNotFound() {
 
 	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(stored, nil)
 
-	_, err := s.manager.Update(s.T().Context(), "abc", "code", uuid.Nil, noUpdate())
+	_, err := s.manager.Update(s.T().Context(), "abc", "code", skipPrivacy(), noUpdate())
 	s.Require().ErrorIs(err, domain.ErrNotFound)
 }
 
@@ -98,7 +98,7 @@ func (s *ManagerSuite) TestUpdate_ClearExpiry() {
 	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(stored, nil)
 	s.storage.EXPECT().Update(gomock.Any(), gomock.Any(), "obj", opts, gomock.Any()).Return(nil)
 
-	updated, err := s.manager.Update(s.T().Context(), "abc", "code", uuid.Nil, opts)
+	updated, err := s.manager.Update(s.T().Context(), "abc", "code", skipPrivacy(), opts)
 	s.Require().NoError(err)
 	s.Nil(updated.ExpiresAt)
 }
@@ -117,7 +117,7 @@ func (s *ManagerSuite) TestUpdate_InvalidPrivacy() {
 			opts := noUpdate()
 			opts.Privacy = &testCase.privacy
 
-			_, err := s.manager.Update(s.T().Context(), "abc", "code", uuid.Nil, opts)
+			_, err := s.manager.Update(s.T().Context(), "abc", "code", skipPrivacy(), opts)
 			s.Require().ErrorIs(err, testCase.err)
 		})
 	}
@@ -135,7 +135,7 @@ func (s *ManagerSuite) TestUpdate_CorruptMetaWritesNothing() {
 
 	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(stored, nil)
 
-	_, err := s.manager.Update(s.T().Context(), "abc", "code", uuid.Nil, opts)
+	_, err := s.manager.Update(s.T().Context(), "abc", "code", skipPrivacy(), opts)
 	s.Require().ErrorIs(err, domain.ErrNotFound)
 }
 
@@ -150,7 +150,7 @@ func (s *ManagerSuite) TestUpdate_SlugTakenByNewFile() {
 	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(storedFile(false), nil)
 	s.storage.EXPECT().Update(gomock.Any(), gomock.Any(), "obj", opts, gomock.Any()).Return(domain.ErrNotFound)
 
-	_, err := s.manager.Update(s.T().Context(), "abc", "code", uuid.Nil, opts)
+	_, err := s.manager.Update(s.T().Context(), "abc", "code", skipPrivacy(), opts)
 	s.Require().ErrorIs(err, domain.ErrNotFound)
 }
 
@@ -164,7 +164,7 @@ func (s *ManagerSuite) TestUpdate_StorageErrors() {
 	s.Run("read", func() {
 		s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(nil, errDB)
 
-		_, err := s.manager.Update(s.T().Context(), "abc", "code", uuid.Nil, opts)
+		_, err := s.manager.Update(s.T().Context(), "abc", "code", skipPrivacy(), opts)
 		s.Require().ErrorIs(err, errDB)
 		s.Contains(err.Error(), "update file")
 	})
@@ -173,7 +173,7 @@ func (s *ManagerSuite) TestUpdate_StorageErrors() {
 		s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(storedFile(false), nil)
 		s.storage.EXPECT().Update(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(errDB)
 
-		_, err := s.manager.Update(s.T().Context(), "abc", "code", uuid.Nil, opts)
+		_, err := s.manager.Update(s.T().Context(), "abc", "code", skipPrivacy(), opts)
 		s.Require().ErrorIs(err, errDB)
 		s.Contains(err.Error(), "update file")
 	})
@@ -181,7 +181,7 @@ func (s *ManagerSuite) TestUpdate_StorageErrors() {
 	s.Run("missing record", func() {
 		s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(nil, domain.ErrNotFound)
 
-		_, err := s.manager.Update(s.T().Context(), "abc", "code", uuid.Nil, opts)
+		_, err := s.manager.Update(s.T().Context(), "abc", "code", skipPrivacy(), opts)
 		s.Require().ErrorIs(err, domain.ErrNotFound)
 	})
 }

@@ -44,7 +44,7 @@ func (s *ManagerTestSuite) TestUpdate_PreservesStateAndEvictsCache() {
 	cache.EXPECT().Delete(existing.ID)
 	s.manager.WithCache(cache)
 
-	updated, err := s.manager.Update(ctx, "stable", "", owner, "https://example.com/new", UpdateOptions{
+	updated, err := s.manager.Update(ctx, "stable", "", accountReader(owner), "https://example.com/new", UpdateOptions{
 		ExpiresAt: nil, Privacy: nil, DirectRedirect: nil,
 		ClearExpiry: false, ResetDirectRedirect: false,
 	})
@@ -104,7 +104,7 @@ func (s *ManagerTestSuite) TestUpdate_PatchCarriesOnlySentFields() {
 			s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("stable"), "code", &want).
 				Return(storedLink("code", nil), nil)
 
-			_, err := s.manager.Update(s.T().Context(), "stable", "code", uuid.Nil,
+			_, err := s.manager.Update(s.T().Context(), "stable", "code", openReader(),
 				"https://example.com/new", opts)
 			s.Require().NoError(err)
 		})
@@ -142,7 +142,7 @@ func (s *ManagerTestSuite) TestUpdate_EditCodeAndOwnerChecks() {
 				}, nil)
 			}
 
-			_, err := s.manager.Update(s.T().Context(), "stable", testCase.code, testCase.caller,
+			_, err := s.manager.Update(s.T().Context(), "stable", testCase.code, accountReader(testCase.caller),
 				"https://example.com", UpdateOptions{
 					ExpiresAt: nil, Privacy: nil, DirectRedirect: nil,
 					ClearExpiry: false, ResetDirectRedirect: false,
@@ -157,7 +157,7 @@ func (s *ManagerTestSuite) TestUpdate_EditCodeAndOwnerChecks() {
 }
 
 func (s *ManagerTestSuite) TestUpdate_Validation() {
-	_, err := s.manager.Update(s.T().Context(), "stable", "code", uuid.Nil, "javascript:alert(1)", UpdateOptions{
+	_, err := s.manager.Update(s.T().Context(), "stable", "code", openReader(), "javascript:alert(1)", UpdateOptions{
 		ExpiresAt: nil, Privacy: nil, DirectRedirect: nil,
 		ClearExpiry: false, ResetDirectRedirect: false,
 	})
@@ -176,7 +176,7 @@ func (s *ManagerTestSuite) TestUpdate_Validation() {
 			DirectRedirect: nil, ID: "", TargetURL: "", Views: 0,
 			BurnAfterClick: false,
 		}, nil)
-		_, err = s.manager.Update(s.T().Context(), "stable", "code", uuid.Nil, "https://example.com",
+		_, err = s.manager.Update(s.T().Context(), "stable", "code", openReader(), "https://example.com",
 			UpdateOptions{
 				Privacy:   &testCase.privacy,
 				ExpiresAt: nil, DirectRedirect: nil, ClearExpiry: false,
@@ -255,7 +255,7 @@ func (s *ManagerTestSuite) TestUpdate_ConcurrentCacheFill() {
 
 	privacy := domain.PrivacyAuthenticated
 	go func() {
-		_, err := s.manager.Update(ctx, "stable", "code", uuid.Nil, "https://example.com/new",
+		_, err := s.manager.Update(ctx, "stable", "code", openReader(), "https://example.com/new",
 			UpdateOptions{
 				Privacy:   &privacy,
 				ExpiresAt: nil, DirectRedirect: nil, ClearExpiry: false,

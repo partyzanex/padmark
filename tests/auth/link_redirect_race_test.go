@@ -160,7 +160,8 @@ func TestLinkRedirectPrivacyRace(t *testing.T) {
 					t.Fatal("redirect did not reach the initial row read")
 				}
 
-				_, err = writer.Update(t.Context(), link.ID, "", owner.ID, privateURL,
+				ownerReader := domain.Reader{CallerID: owner.ID, Authenticated: true, AllowBurn: false, SkipPrivacy: false}
+				_, err = writer.Update(t.Context(), link.ID, "", ownerReader, privateURL,
 					links.UpdateOptions{
 						Privacy:   new(domain.PrivacyOwner),
 						ExpiresAt: nil, DirectRedirect: nil, ClearExpiry: false,

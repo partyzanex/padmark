@@ -54,7 +54,7 @@ func (f *File) ValidateOwnership() error {
 
 // OwnedBy reports whether userID is the authenticated user who uploaded f.
 func (f *File) OwnedBy(userID uuid.UUID) bool {
-	return userID != uuid.Nil && f.OwnerID != nil && *f.OwnerID == userID
+	return ownedBy(f.OwnerID, userID)
 }
 
 // EffectivePrivacy returns f.Privacy, or PrivacyPublic when it is not set.
@@ -68,22 +68,12 @@ func (f *File) EffectivePrivacy() Privacy {
 
 // Expired reports whether the TTL of f has elapsed at now. A nil ExpiresAt never expires.
 func (f *File) Expired(now time.Time) bool {
-	return f.ExpiresAt != nil && now.After(*f.ExpiresAt)
+	return expired(f.ExpiresAt, now)
 }
 
-// VisibleTo reports whether a caller may download f. It has the same semantics as
-// Note.VisibleTo, including the fail-closed default for an unknown stored value.
-func (f *File) VisibleTo(callerID uuid.UUID, authenticated bool) bool {
-	switch f.EffectivePrivacy() {
-	case PrivacyPublic:
-		return true
-	case PrivacyAuthenticated:
-		return authenticated
-	case PrivacyOwner:
-		return f.OwnedBy(callerID)
-	default:
-		return false
-	}
+// VisibleTo reports whether reader can see f, with the rules of Reader.Sees.
+func (f *File) VisibleTo(reader Reader) bool {
+	return reader.Sees(f.EffectivePrivacy(), f.OwnerID)
 }
 
 // CleanFileName returns the base name of an uploaded file name. It removes the directory part

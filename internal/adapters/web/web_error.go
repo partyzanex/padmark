@@ -114,7 +114,7 @@ func (c *common) writeErrorPage(w http.ResponseWriter, r *http.Request, err erro
 
 // writeNoteError renders an error respecting content negotiation: browsers get the HTML error
 // page, while API/CLI clients (JSON or plain) get a machine-readable status via writeError. Used
-// on the note-view path, where handlePrivateAuth runs before the format switch and so must not
+// on the note-view path, which serves HTML, JSON and plain text and so must not
 // assume HTML — otherwise a CLI reading e.g. an already-burned note receives an undecodable
 // text/html body instead of a clean 404.
 func (c *common) writeNoteError(w http.ResponseWriter, r *http.Request, err error) {

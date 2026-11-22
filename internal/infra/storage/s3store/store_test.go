@@ -139,7 +139,7 @@ func (s *StoreSuite) TestManagerEndToEnd() {
 	s.Require().NoError(err)
 	s.Equal(int64(len(content)), file.Size)
 
-	reader := files.AccessOptions{CallerID: [16]byte{}, Authenticated: false, AllowBurn: true, SkipPrivacy: false}
+	reader := domain.Reader{CallerID: [16]byte{}, Authenticated: false, AllowBurn: true, SkipPrivacy: false}
 
 	download, err := manager.Download(ctx, file.ID, reader)
 	s.Require().NoError(err)

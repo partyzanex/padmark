@@ -16,8 +16,7 @@ func (s *HandlerSuite) TestEditPage_ContentType() {
 		note := newTestNote("edit me", "# Plain heading")
 		note.ContentType = new(contentType)
 
-		s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
-		s.manager.EXPECT().EnforceExpiry(gomock.Any(), testID, note).Return(nil)
+		s.manager.EXPECT().Inspect(gomock.Any(), testID, gomock.Any()).Return(note, nil)
 
 		w := httptest.NewRecorder()
 		s.router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/edit/"+testID, nil))
@@ -32,8 +31,7 @@ func (s *HandlerSuite) TestEditPage_ContentType() {
 func (s *HandlerSuite) TestEditPage_LeadingNewline() {
 	note := newTestNote("edit me", "\n    code\n")
 
-	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
-	s.manager.EXPECT().EnforceExpiry(gomock.Any(), testID, note).Return(nil)
+	s.manager.EXPECT().Inspect(gomock.Any(), testID, gomock.Any()).Return(note, nil)
 
 	w := httptest.NewRecorder()
 	s.router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/edit/"+testID, nil))

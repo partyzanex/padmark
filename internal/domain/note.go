@@ -153,7 +153,13 @@ func (n *Note) ValidateOwnership() error {
 // OwnedBy reports whether userID is the authenticated user who created n — see OwnerID. A nil
 // userID (anonymous caller, uuid.Nil) or an unowned note (created anonymously) never match.
 func (n *Note) OwnedBy(userID uuid.UUID) bool {
-	return userID != uuid.Nil && n.OwnerID != nil && *n.OwnerID == userID
+	return ownedBy(n.OwnerID, userID)
+}
+
+// Expired reports whether the expiry of n (a hard TTL or a started burn timer) is before now. A
+// nil ExpiresAt never expires.
+func (n *Note) Expired(now time.Time) bool {
+	return expired(n.ExpiresAt, now)
 }
 
 // EffectivePrivacy returns n.Privacy, defaulting to PrivacyPublic when unset.
@@ -170,21 +176,8 @@ func (n *Note) ContentsSidebar() bool {
 	return n.ShowContents != nil && *n.ShowContents
 }
 
-// VisibleTo reports whether a caller may read n given its privacy level: PrivacyOwner requires
-// callerID to match OwnerID (see OwnedBy), PrivacyAuthenticated requires any authenticated
-// caller, and PrivacyPublic (the default) always allows it. A stored value outside these three —
-// unreachable through Validate()+ValidateOwnership(), only possible via direct DB tampering —
-// fails closed (denies) rather than open: safer to wrongly deny than to wrongly grant access to a
-// note whose intended privacy level can't be determined.
-func (n *Note) VisibleTo(callerID uuid.UUID, authenticated bool) bool {
-	switch n.EffectivePrivacy() {
-	case PrivacyPublic:
-		return true
-	case PrivacyAuthenticated:
-		return authenticated
-	case PrivacyOwner:
-		return n.OwnedBy(callerID)
-	default:
-		return false
-	}
+// VisibleTo reports whether reader can see n. Reader.Sees has the rules, which are the same for
+// notes, links and files.
+func (n *Note) VisibleTo(reader Reader) bool {
+	return reader.Sees(n.EffectivePrivacy(), n.OwnerID)
 }

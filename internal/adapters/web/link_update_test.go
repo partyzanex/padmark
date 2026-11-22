@@ -6,7 +6,6 @@ import (
 	"net/http/httptest"
 	"strings"
 
-	"github.com/google/uuid"
 	"go.uber.org/mock/gomock"
 
 	"github.com/partyzanex/padmark/internal/domain"
@@ -14,7 +13,7 @@ import (
 )
 
 func (s *HandlerSuite) TestUpdateLink_OptionalFields() {
-	// The anonymous mutation gate applies only with the account system.
+	// With the account system the usecase gets the reader of an anonymous caller.
 	s.router = s.newRouterWithTOTPAuth()
 	for _, testCase := range []struct {
 		name, fields string
@@ -24,11 +23,10 @@ func (s *HandlerSuite) TestUpdateLink_OptionalFields() {
 		{"reset", `,"ttl":null,"direct_redirect":null`, true},
 	} {
 		s.Run(testCase.name, func() {
-			s.linkManager.EXPECT().Peek(gomock.Any(), testLinkID).Return(newTestLink(), nil)
 			s.linkManager.EXPECT().
-				Update(gomock.Any(), testLinkID, "original", uuid.Nil, "https://example.com/new", gomock.Any()).
+				Update(gomock.Any(), testLinkID, "original", anonymousReader(), "https://example.com/new", gomock.Any()).
 				DoAndReturn(func(
-					_ context.Context, _, _ string, _ uuid.UUID, _ string, opts links.UpdateOptions,
+					_ context.Context, _, _ string, _ domain.Reader, _ string, opts links.UpdateOptions,
 				) (*domain.Link, error) {
 					s.Equal(testCase.clear, opts.ClearExpiry)
 					s.Equal(testCase.clear, opts.ResetDirectRedirect)
@@ -67,13 +65,11 @@ func (s *HandlerSuite) TestUpdateLink_InvalidBody() {
 }
 
 func (s *HandlerSuite) TestUpdateLink_AnonymousPrivateLinkDenied() {
-	// The anonymous mutation gate applies only with the account system.
+	// With the account system the usecase finds that the anonymous caller cannot see the link.
 	s.router = s.newRouterWithTOTPAuth()
-	link := newTestLink()
-	privacy := domain.PrivacyAuthenticated
-
-	link.Privacy = &privacy
-	s.linkManager.EXPECT().Peek(gomock.Any(), testLinkID).Return(link, nil)
+	s.linkManager.EXPECT().
+		Update(gomock.Any(), testLinkID, "correct", anonymousReader(), gomock.Any(), gomock.Any()).
+		Return(nil, domain.ErrForbidden)
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPut, "/links/"+testLinkID,
@@ -84,10 +80,8 @@ func (s *HandlerSuite) TestUpdateLink_AnonymousPrivateLinkDenied() {
 }
 
 func (s *HandlerSuite) TestUpdateLink_FailedCodesLockOut() {
-	// The anonymous mutation gate applies only with the account system.
 	s.router = s.newRouterWithTOTPAuth()
-	s.linkManager.EXPECT().Peek(gomock.Any(), testLinkID).Return(newTestLink(), nil).Times(10)
-	s.linkManager.EXPECT().Update(gomock.Any(), testLinkID, "wrong", uuid.Nil, gomock.Any(), gomock.Any()).
+	s.linkManager.EXPECT().Update(gomock.Any(), testLinkID, "wrong", anonymousReader(), gomock.Any(), gomock.Any()).
 		Return(nil, domain.ErrInvalidEditCode).Times(10)
 
 	for i := range 11 {

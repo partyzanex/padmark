@@ -5,8 +5,6 @@ package integration
 import (
 	"time"
 
-	"github.com/google/uuid"
-
 	"github.com/partyzanex/padmark/internal/domain"
 )
 
@@ -36,7 +34,7 @@ func (s *ManagerSuite) TestShowContentsBackwardCompatibility() {
 	created, err := s.Manager.Create(ctx, contentsNote("## Part", new(true)))
 	s.Require().NoError(err)
 
-	updated, err := s.Manager.Update(ctx, created.ID, created.EditCode, uuid.Nil, contentsNote("## Changed", nil))
+	updated, err := s.Manager.Update(ctx, created.ID, created.EditCode, openReader(), contentsNote("## Changed", nil))
 	s.Require().NoError(err)
 	s.True(updated.ContentsSidebar(), "the response reports the kept value")
 
@@ -44,7 +42,7 @@ func (s *ManagerSuite) TestShowContentsBackwardCompatibility() {
 	s.Require().NoError(err)
 	s.True(stored.ContentsSidebar(), "an update without show_contents keeps true")
 
-	_, err = s.Manager.Update(ctx, created.ID, created.EditCode, uuid.Nil, contentsNote("## Off", new(false)))
+	_, err = s.Manager.Update(ctx, created.ID, created.EditCode, openReader(), contentsNote("## Off", new(false)))
 	s.Require().NoError(err)
 
 	stored, err = s.Manager.Peek(ctx, created.ID)

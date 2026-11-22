@@ -103,6 +103,10 @@ The full models are in [note.go](../internal/domain/note.go),
 include:
 
 - `PrivacyPublic`, `PrivacyAuthenticated`, `PrivacyOwner` determine visibility.
+- `domain.Reader` identifies the caller of a read, an update or a delete: `CallerID`,
+  `Authenticated`, `AllowBurn` (a deliberate access) and `SkipPrivacy` (the account system is
+  off). `Reader.Sees` is the one visibility rule; `Note`, `Link` and `File` call it in
+  `VisibleTo`. The HTTP adapter fills the reader from the request context (`common.reader`).
 - `OwnedBy` compares account IDs. Any valid session or API token for the creating account
   has the same owner identity; an administrator is not automatically another user's owner.
 - `ValidateOwnership` rejects owner-only privacy without an owner.
@@ -156,6 +160,25 @@ checker, the shared slug lock, a renderer, an encryptor, an edit-code hasher, lo
 custom-slug setting. Its optional render cache defaults to a no-op implementation.
 The link manager follows the same namespace/ownership model.
 
+The three managers apply the access rules themselves, with the `domain.Reader` of the request.
+The adapter only selects the format and translates the errors:
+
+| Method | Notes | Links | Files |
+|---|---|---|---|
+| No rules (kind lookup, tools) | `Peek` | `Peek` | `Peek` |
+| Privacy and expiry, no side effect on a live record | `Inspect` | `Inspect` | `Inspect` |
+| Editor read, no side effect at all | `Inspect` (deletes an expired note) | `Inspect` | `Settings` |
+| Full read: privacy, expiry, burn intent, burn, counter | `Read`, `ReadRendered` | `Follow` | `Download` |
+| Change: privacy, then owner or edit code | `Update`, `Delete` | `Update`, `Delete` | `Update`, `Delete` |
+
+A reader that cannot see the record gets `ErrForbidden`; the HTTP adapter answers 401 for a
+mutation (a 403 would count as a wrong edit code) and the privacy answer of `denyPrivate` for a
+read. A burn record without `AllowBurn` gets `ErrBurnIntentRequired` (409) and stays. An expired
+record gives `ErrExpired`; the note reads and the file page delete it, the link metadata read
+and the file editor (`Settings`) do not, so the next reader of the page still gets 410.
+The check and the change use the same stored record: the write names
+that version by its stored edit-code hash (notes, links) or object key (files).
+
 Notes, links and files share the **same slug-lock instance** to serialize local preflight checks
 and coordinate link-cache eviction. Cross-process uniqueness is enforced by the database:
 resource triggers atomically reserve the hashed ID in `slug_namespace`, whose primary key
@@ -182,7 +205,7 @@ An upload has this sequence:
    first reads the record by object key (`confirmCreate`). A committed record keeps its object and
    the upload succeeds; when the read also fails, the object stays in the bucket.
 
-`Peek` reads a record without access rules. `Info` applies privacy and expiry. `Download`
+`Peek` reads a record without access rules. `Inspect` applies privacy and expiry. `Download`
 checks that the object exists before it changes the record, so a missing object does not
 consume a `burn_after_download` file. Without `AllowBurn` such a file stays, and `Download`
 returns `ErrBurnIntentRequired`. `Update` changes only the expiry, privacy and burn rule.
@@ -305,8 +328,8 @@ goes to the page of the record; **Edit** on that page goes to `/edit/{id}`; **Sa
 the page of the record. The page of a note or a file is `/{id}`. The page of a short link is
 `/links/{id}`, because `/{id}` of a link is the redirect: `htmlOr` sends a client that prefers
 `text/html` to `LinkHandler.LinkPage` and other clients to the ogen JSON read. The link page uses
-`Peek`, so it does not count a view or burn the link, and it applies the privacy and expiry checks
-of the JSON read. `Handler.EditPage` serves `/edit/{id...}` for the three kinds: it reads the note,
+`Inspect`, so it does not count a view or burn the link, and it applies the privacy and expiry
+checks of the JSON read. `Handler.EditPage` serves `/edit/{id...}` for the three kinds: it reads the note,
 then the short link, then the file, like `GetNoteOrLink`. The old URLs `/links/{id}/edit` and
 `/files/{id}/edit` answer `301` to `/edit/{id}`. `headerView.Record` sets the target of the
 **New** button of a reader page to the create form of the same kind. With `--disable-api`,

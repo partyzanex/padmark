@@ -158,7 +158,7 @@ func truncateForMessage(s string) string {
 	return string(runes[:maxEchoedContentType]) + "…"
 }
 
-// mapCreateError, mapGetError, mapUpdateError, and mapDeleteError each switch on the status from
+// mapCreateError, mapUpdateError, and mapDeleteError each switch on the status from
 // the shared domainErrStatus table (errors.go) rather than repeating their own errors.Is chain.
 // The switch itself can't be unified further: ogen generates a distinct response-union type per
 // operation (CreateNoteRes, GetNoteRes, ...), so each function still has to name its own
@@ -181,28 +181,6 @@ func mapCreateError(err error, log *slog.Logger) ogenapi.CreateNoteRes {
 		log.Error("create note failed", slog.String("error", err.Error()))
 
 		v := ogenapi.CreateNoteInternalServerError(errorResponse(internalErrorMessage))
-
-		return &v
-	}
-}
-
-//nolint:ireturn // ogen response union types are interfaces by design
-func mapGetError(err error, log *slog.Logger) ogenapi.GetNoteRes {
-	r := errResp(err)
-
-	switch status, _ := domainErrStatus(err); status {
-	case http.StatusNotFound:
-		v := ogenapi.GetNoteNotFound(r)
-
-		return &v
-	case http.StatusGone:
-		v := ogenapi.GetNoteGone(r)
-
-		return &v
-	default:
-		log.Error("get note failed", slog.String("error", err.Error()))
-
-		v := ogenapi.GetNoteInternalServerError(errorResponse(internalErrorMessage))
 
 		return &v
 	}
@@ -261,7 +239,7 @@ func mapDeleteError(err error, log *slog.Logger) ogenapi.DeleteNoteRes {
 	}
 }
 
-// mapCreateLinkError, mapGetLinkError, and mapDeleteLinkError mirror mapCreateError/mapGetError/
+// mapCreateLinkError, mapGetLinkError, and mapDeleteLinkError mirror mapCreateError/
 // mapDeleteError, for the links operations' own distinct ogen response-union types. See
 // mapUpdateError's comment for why mapCreateLinkError's structural similarity to it isn't
 // unified further.

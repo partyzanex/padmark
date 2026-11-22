@@ -252,7 +252,9 @@ func TestNote_VisibleTo(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, tt.note.VisibleTo(tt.callerID, tt.authenticated))
+			assert.Equal(t, tt.want, tt.note.VisibleTo(Reader{
+				CallerID: tt.callerID, Authenticated: tt.authenticated, AllowBurn: false, SkipPrivacy: false,
+			}))
 		})
 	}
 }

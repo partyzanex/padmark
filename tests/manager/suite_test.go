@@ -173,7 +173,7 @@ func (s *ManagerSuite) TestContentEnvelope_LegacyReadAndNoteUpdate() {
 	var stored string
 	s.Require().NoError(s.DB.NewSelect().Table("notes").Column("content").Where("id = ?", id).Scan(ctx, &stored))
 	s.Equal(legacy, stored, "Peek must not perform a hidden migration")
-	_, err = s.Manager.Update(ctx, note.ID, note.EditCode, uuid.Nil, &domain.Note{
+	_, err = s.Manager.Update(ctx, note.ID, note.EditCode, openReader(), &domain.Note{
 		Content:   "updated",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", Title: "",
@@ -198,7 +198,7 @@ func (s *ManagerSuite) TestContentEnvelope_LegacyReadAndNoteUpdate() {
 	_, err = s.DB.NewUpdate().Table("links").Set("target_url = ?", legacyURL).
 		Where("id = ?", domain.HashSlug(link.ID)).Exec(ctx)
 	s.Require().NoError(err)
-	redirect, err := s.LinkManager.Redirect(ctx, link.ID)
+	redirect, err := s.LinkManager.Follow(ctx, link.ID, openReader())
 	s.Require().NoError(err)
 	s.Equal("https://example.com/legacy", redirect.TargetURL)
 }
@@ -266,14 +266,14 @@ func (s *ManagerSuite) TestGet_OK() {
 	})
 	s.Require().NoError(err)
 
-	got, err := s.Manager.Get(ctx, created.ID)
+	got, err := s.Manager.Read(ctx, created.ID, openReader())
 
 	s.Require().NoError(err)
 	s.Equal("t", got.Title)
 }
 
 func (s *ManagerSuite) TestGet_NotFound() {
-	_, err := s.Manager.Get(s.T().Context(), "nonexistent")
+	_, err := s.Manager.Read(s.T().Context(), "nonexistent", openReader())
 
 	s.ErrorIs(err, domain.ErrNotFound)
 }
@@ -289,7 +289,7 @@ func (s *ManagerSuite) TestGet_Expired_DeletesNote() {
 	})
 	s.Require().NoError(err)
 
-	_, err = s.Manager.Get(ctx, created.ID)
+	_, err = s.Manager.Read(ctx, created.ID, openReader())
 	s.Require().ErrorIs(err, domain.ErrExpired)
 
 	// note must be removed from storage.
@@ -308,11 +308,11 @@ func (s *ManagerSuite) TestGet_BurnAfterReading_ConsumedOnFirstRead() {
 	})
 	s.Require().NoError(err)
 
-	got, err := s.Manager.Get(ctx, created.ID)
+	got, err := s.Manager.Read(ctx, created.ID, openReader())
 	s.Require().NoError(err)
 	s.Equal(created.ID, got.ID)
 
-	_, err = s.Manager.Get(ctx, created.ID)
+	_, err = s.Manager.Read(ctx, created.ID, openReader())
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
@@ -328,14 +328,14 @@ func (s *ManagerSuite) TestGet_BurnAfterReading_WithTTL_StartsTimer() {
 	s.Require().NoError(err)
 
 	// First read: timer starts, note is still readable.
-	got, err := s.Manager.Get(ctx, created.ID)
+	got, err := s.Manager.Read(ctx, created.ID, openReader())
 	s.Require().NoError(err)
 	s.False(got.BurnAfterReading, "burn_after_reading must be cleared after timer starts")
 	s.Require().NotNil(got.ExpiresAt)
 	s.True(got.ExpiresAt.After(time.Now()))
 
 	// Second read: still accessible within the TTL window.
-	_, err = s.Manager.Get(ctx, created.ID)
+	_, err = s.Manager.Read(ctx, created.ID, openReader())
 	s.Require().NoError(err)
 }
 
@@ -375,10 +375,10 @@ func (s *ManagerSuite) TestView_IncrementsViews() {
 	})
 	s.Require().NoError(err)
 
-	_, err = s.Manager.View(ctx, created.ID)
+	_, err = s.Manager.Read(ctx, created.ID, openReader())
 	s.Require().NoError(err)
 
-	_, err = s.Manager.View(ctx, created.ID)
+	_, err = s.Manager.Read(ctx, created.ID, openReader())
 	s.Require().NoError(err)
 
 	got, err := s.Manager.Peek(ctx, created.ID)
@@ -397,7 +397,7 @@ func (s *ManagerSuite) TestView_BurnAfterReading_NoViewsIncrement() {
 	})
 	s.Require().NoError(err)
 
-	got, err := s.Manager.View(ctx, created.ID)
+	got, err := s.Manager.Read(ctx, created.ID, openReader())
 	s.Require().NoError(err)
 	s.Equal(0, got.Views)
 }
@@ -415,7 +415,7 @@ func (s *ManagerSuite) TestUpdate_PreservesMetadata() {
 	})
 	s.Require().NoError(err)
 
-	updated, err := s.Manager.Update(ctx, created.ID, created.EditCode, uuid.Nil, &domain.Note{
+	updated, err := s.Manager.Update(ctx, created.ID, created.EditCode, openReader(), &domain.Note{
 		Title: "new", Content: "new content",
 
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
@@ -441,7 +441,7 @@ func (s *ManagerSuite) TestUpdate_Forbidden() {
 	})
 	s.Require().NoError(err)
 
-	_, err = s.Manager.Update(ctx, created.ID, "wrong-code", uuid.Nil, &domain.Note{
+	_, err = s.Manager.Update(ctx, created.ID, "wrong-code", openReader(), &domain.Note{
 		Title: "hijack", Content: "x",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
@@ -453,7 +453,7 @@ func (s *ManagerSuite) TestUpdate_Forbidden() {
 }
 
 func (s *ManagerSuite) TestUpdate_NotFound() {
-	_, err := s.Manager.Update(s.T().Context(), "nonexistent", "code", uuid.Nil,
+	_, err := s.Manager.Update(s.T().Context(), "nonexistent", "code", openReader(),
 		&domain.Note{
 			Title: "t", Content: "c",
 			CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
@@ -478,7 +478,7 @@ func (s *ManagerSuite) TestDelete_OK() {
 	})
 	s.Require().NoError(err)
 
-	err = s.Manager.Delete(ctx, created.ID, created.EditCode, uuid.Nil)
+	err = s.Manager.Delete(ctx, created.ID, created.EditCode, openReader())
 	s.Require().NoError(err)
 
 	_, err = s.Manager.Peek(ctx, created.ID)
@@ -496,7 +496,7 @@ func (s *ManagerSuite) TestDelete_Forbidden() {
 	})
 	s.Require().NoError(err)
 
-	err = s.Manager.Delete(ctx, created.ID, "wrong-code", uuid.Nil)
+	err = s.Manager.Delete(ctx, created.ID, "wrong-code", openReader())
 
 	s.ErrorIs(err, domain.ErrInvalidEditCode)
 }
@@ -514,7 +514,7 @@ func (s *ManagerSuite) TestGetRendered_Markdown() {
 	})
 	s.Require().NoError(err)
 
-	_, rendered, err := s.Manager.GetRendered(ctx, created.ID)
+	_, rendered, err := s.Manager.ReadRendered(ctx, created.ID, openReader())
 
 	s.Require().NoError(err)
 	s.Contains(rendered, "Hello")
@@ -539,12 +539,12 @@ func (s *ManagerSuite) TestUpdate_ClearsBurnExpiryWhenBurnDisabled() {
 	s.Require().NoError(err)
 
 	// First read starts the burn timer — expires_at is now set.
-	got, err := s.Manager.Get(ctx, created.ID)
+	got, err := s.Manager.Read(ctx, created.ID, openReader())
 	s.Require().NoError(err)
 	s.Require().NotNil(got.ExpiresAt, "precondition: burn timer must have set expires_at")
 
 	// User unchecks burn_after_reading in the editor.
-	_, err = s.Manager.Update(ctx, created.ID, created.EditCode, uuid.Nil, &domain.Note{
+	_, err = s.Manager.Update(ctx, created.ID, created.EditCode, openReader(), &domain.Note{
 		Title:            "burn-edit",
 		Content:          "c",
 		BurnAfterReading: false, BurnTTL: 0,
@@ -578,7 +578,7 @@ func (s *ManagerSuite) TestUpdate_PreservesEditCode() {
 
 	code := created.EditCode
 
-	_, err = s.Manager.Update(ctx, created.ID, code, uuid.Nil, &domain.Note{
+	_, err = s.Manager.Update(ctx, created.ID, code, openReader(), &domain.Note{
 		Title: "v2", Content: "c2",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
@@ -588,7 +588,7 @@ func (s *ManagerSuite) TestUpdate_PreservesEditCode() {
 	s.Require().NoError(err)
 
 	// The edit code's stored hash must be unchanged, so it still verifies on a second update.
-	_, err = s.Manager.Update(ctx, created.ID, code, uuid.Nil, &domain.Note{
+	_, err = s.Manager.Update(ctx, created.ID, code, openReader(), &domain.Note{
 		Title: "v3", Content: "c3",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
@@ -610,7 +610,7 @@ func (s *ManagerSuite) TestGetRendered_PlainText_HTMLEscaped() {
 	})
 	s.Require().NoError(err)
 
-	_, rendered, err := s.Manager.GetRendered(ctx, created.ID)
+	_, rendered, err := s.Manager.ReadRendered(ctx, created.ID, openReader())
 
 	s.Require().NoError(err)
 	s.Contains(rendered, "<pre>")
@@ -674,11 +674,11 @@ func (s *ManagerSuite) TestReveal_EndToEnd_BurnAfterReading() {
 	s.Require().True(ok)
 
 	// Token unlocked access — note is readable and then burns.
-	got, err := s.Manager.Get(ctx, created.ID)
+	got, err := s.Manager.Read(ctx, created.ID, openReader())
 	s.Require().NoError(err)
 	s.Equal(created.ID, got.ID)
 
-	_, err = s.Manager.Get(ctx, created.ID)
+	_, err = s.Manager.Read(ctx, created.ID, openReader())
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
@@ -729,7 +729,7 @@ func (s *ManagerSuite) TestReveal_Consume_TokenNotReusableAfterNoteBurned() {
 	s.Require().True(consumed)
 
 	// Burn the note.
-	_, err = s.Manager.Get(ctx, created.ID)
+	_, err = s.Manager.Read(ctx, created.ID, openReader())
 	s.Require().NoError(err)
 
 	// Token already used — second Consume must fail.
@@ -913,7 +913,7 @@ func (s *ManagerSuite) TestLink_CreateThenRedirect_RealCrypto_RoundTrips() {
 	s.Require().NoError(err)
 	s.Equal(plaintext, peeked.TargetURL)
 
-	redirected, err := s.LinkManager.Redirect(ctx, created.ID)
+	redirected, err := s.LinkManager.Follow(ctx, created.ID, openReader())
 	s.Require().NoError(err)
 	s.Equal(plaintext, redirected.TargetURL)
 	s.Equal(1, redirected.Views)
@@ -928,7 +928,7 @@ func (s *ManagerSuite) TestLink_Update_RealCrypto() {
 		CustomHash: "", EditCode: "", BurnAfterClick: false,
 	})
 	s.Require().NoError(err)
-	_, err = s.LinkManager.Redirect(ctx, link.ID)
+	_, err = s.LinkManager.Follow(ctx, link.ID, openReader())
 	s.Require().NoError(err)
 
 	var originalHash string
@@ -936,7 +936,7 @@ func (s *ManagerSuite) TestLink_Update_RealCrypto() {
 	err = s.DB.NewSelect().TableExpr("links").Column("edit_code").
 		Where("id = ?", domain.HashSlug(link.ID)).Scan(ctx, &originalHash)
 	s.Require().NoError(err)
-	updated, err := s.LinkManager.Update(ctx, link.ID, link.EditCode, uuid.Nil,
+	updated, err := s.LinkManager.Update(ctx, link.ID, link.EditCode, openReader(),
 		"https://example.com/new", links.UpdateOptions{
 			ExpiresAt: nil, Privacy: nil, DirectRedirect: nil,
 			ClearExpiry: false, ResetDirectRedirect: false,
@@ -958,11 +958,11 @@ func (s *ManagerSuite) TestLink_Update_RealCrypto() {
 	s.True(strings.HasPrefix(stored.TargetURL, "pmc2$p$"))
 	s.NotContains(stored.TargetURL, "https://example.com/new")
 	s.Equal(originalHash, stored.EditCode)
-	redirected, err := s.LinkManager.Redirect(ctx, link.ID)
+	redirected, err := s.LinkManager.Follow(ctx, link.ID, openReader())
 	s.Require().NoError(err)
 	s.Equal("https://example.com/new", redirected.TargetURL)
 	// The original edit code still authorizes a subsequent mutation.
-	s.NoError(s.LinkManager.Delete(ctx, link.ID, link.EditCode, uuid.Nil))
+	s.NoError(s.LinkManager.Delete(ctx, link.ID, link.EditCode, openReader()))
 }
 
 func (s *ManagerSuite) TestUpdatePlainExpiryPersists() {
@@ -976,7 +976,7 @@ func (s *ManagerSuite) TestUpdatePlainExpiryPersists() {
 	})
 	s.Require().NoError(err)
 
-	_, err = s.Manager.Update(s.T().Context(), created.ID, created.EditCode, uuid.Nil, &domain.Note{
+	_, err = s.Manager.Update(s.T().Context(), created.ID, created.EditCode, openReader(), &domain.Note{
 		Content:   "preserved",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", Title: "",
@@ -990,7 +990,7 @@ func (s *ManagerSuite) TestUpdatePlainExpiryPersists() {
 	s.WithinDuration(future, *stored.ExpiresAt, time.Second)
 
 	later := future.Add(time.Hour)
-	_, err = s.Manager.Update(s.T().Context(), created.ID, created.EditCode, uuid.Nil,
+	_, err = s.Manager.Update(s.T().Context(), created.ID, created.EditCode, openReader(),
 		&domain.Note{
 			Content: "replaced", ExpiresAt: &later,
 			CreatedAt: time.Time{}, UpdatedAt: time.Time{}, Privacy: nil,
@@ -1004,7 +1004,7 @@ func (s *ManagerSuite) TestUpdatePlainExpiryPersists() {
 	s.Require().NotNil(stored.ExpiresAt)
 	s.WithinDuration(later, *stored.ExpiresAt, time.Second)
 
-	_, err = s.Manager.Update(s.T().Context(), created.ID, created.EditCode, uuid.Nil,
+	_, err = s.Manager.Update(s.T().Context(), created.ID, created.EditCode, openReader(),
 		&domain.Note{
 			Content: "no expiry", ClearExpiry: true,
 			CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
@@ -1016,4 +1016,10 @@ func (s *ManagerSuite) TestUpdatePlainExpiryPersists() {
 	stored, err = s.Manager.Peek(s.T().Context(), created.ID)
 	s.Require().NoError(err)
 	s.Nil(stored.ExpiresAt)
+}
+
+// openReader is the reader of a server without accounts: no privacy check, and a deliberate
+// access that may burn a note or a link.
+func openReader() domain.Reader {
+	return domain.Reader{CallerID: uuid.Nil, Authenticated: false, AllowBurn: true, SkipPrivacy: true}
 }

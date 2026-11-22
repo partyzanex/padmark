@@ -405,14 +405,14 @@ func downloadOf(name, content string, burn bool) *files.Download {
 
 // access returns the access options of an anonymous reader on a router without accounts: the
 // privacy check is off, as for notes and links.
-func access(allowBurn bool) files.AccessOptions {
-	return files.AccessOptions{CallerID: uuid.Nil, Authenticated: false, AllowBurn: allowBurn, SkipPrivacy: true}
+func access(allowBurn bool) domain.Reader {
+	return domain.Reader{CallerID: uuid.Nil, Authenticated: false, AllowBurn: allowBurn, SkipPrivacy: true}
 }
 
 // accountAccess returns the access options of an anonymous reader on a router with accounts:
 // the privacy check applies.
-func accountAccess(allowBurn bool) files.AccessOptions {
-	return files.AccessOptions{CallerID: uuid.Nil, Authenticated: false, AllowBurn: allowBurn, SkipPrivacy: false}
+func accountAccess(allowBurn bool) domain.Reader {
+	return domain.Reader{CallerID: uuid.Nil, Authenticated: false, AllowBurn: allowBurn, SkipPrivacy: false}
 }
 
 func (s *FileHandlerSuite) TestDownload_SendsAttachment() {
@@ -442,7 +442,7 @@ func (s *FileHandlerSuite) TestDownload_PreviewDoesNotBurn() {
 }
 
 func (s *FileHandlerSuite) TestDownload_HeadDoesNotCount() {
-	s.files.EXPECT().Info(gomock.Any(), "abc", gomock.Any()).
+	s.files.EXPECT().Inspect(gomock.Any(), "abc", gomock.Any()).
 		Return(fileRecord("a.txt", 3, 0, false), nil)
 
 	rec := s.serve(httptest.NewRequest(http.MethodHead, "/files/abc/download", nil))
@@ -455,8 +455,8 @@ func (s *FileHandlerSuite) TestDownload_HeadDoesNotCount() {
 // TestRootSlugServesFile: a client that asks for binary content gets the file on /{id}. A
 // browser gets the file page instead (TestFilePage_BrowserGetsPage).
 func (s *FileHandlerSuite) TestRootSlugServesFile() {
-	s.manager.EXPECT().Peek(gomock.Any(), "abc").Return(nil, domain.ErrNotFound)
-	s.linkManager.EXPECT().RedirectWithoutBurn(gomock.Any(), "abc").Return(nil, domain.ErrNotFound)
+	expectNoNote(s.manager, "abc")
+	s.linkManager.EXPECT().Follow(gomock.Any(), "abc", withBurn(false)).Return(nil, domain.ErrNotFound)
 	s.files.EXPECT().Peek(gomock.Any(), "abc").Return(fileRecord("a.txt", 5, 0, true), nil)
 	s.files.EXPECT().Download(gomock.Any(), "abc", access(true)).
 		Return(downloadOf("a.txt", "hello", true), nil)
@@ -470,8 +470,8 @@ func (s *FileHandlerSuite) TestRootSlugServesFile() {
 }
 
 func (s *FileHandlerSuite) TestRootSlugWithoutAnyResource() {
-	s.manager.EXPECT().Peek(gomock.Any(), "abc").Return(nil, domain.ErrNotFound)
-	s.linkManager.EXPECT().RedirectWithoutBurn(gomock.Any(), "abc").Return(nil, domain.ErrNotFound)
+	expectNoNote(s.manager, "abc")
+	s.linkManager.EXPECT().Follow(gomock.Any(), "abc", withBurn(false)).Return(nil, domain.ErrNotFound)
 	s.files.EXPECT().Peek(gomock.Any(), "abc").Return(nil, domain.ErrNotFound)
 
 	req := httptest.NewRequest(http.MethodGet, "/abc", nil)
@@ -479,7 +479,7 @@ func (s *FileHandlerSuite) TestRootSlugWithoutAnyResource() {
 }
 
 func (s *FileHandlerSuite) TestMetadata() {
-	s.files.EXPECT().Info(gomock.Any(), "abc", gomock.Any()).
+	s.files.EXPECT().Inspect(gomock.Any(), "abc", gomock.Any()).
 		Return(fileRecord("a.txt", 3, 2, false), nil)
 
 	rec := s.serve(httptest.NewRequest(http.MethodGet, "/files/abc", nil))
@@ -491,18 +491,18 @@ func (s *FileHandlerSuite) TestMetadata() {
 	s.InDelta(2, body["downloads"], 0)
 	s.NotContains(body, "edit_code")
 
-	s.files.EXPECT().Info(gomock.Any(), "gone", gomock.Any()).Return(nil, domain.ErrExpired)
+	s.files.EXPECT().Inspect(gomock.Any(), "gone", gomock.Any()).Return(nil, domain.ErrExpired)
 	s.Equal(http.StatusGone, s.serve(httptest.NewRequest(http.MethodGet, "/files/gone", nil)).Code)
 }
 
 func (s *FileHandlerSuite) TestDelete() {
-	s.files.EXPECT().Delete(gomock.Any(), "abc", "code-1234", uuid.Nil).Return(nil)
+	s.files.EXPECT().Delete(gomock.Any(), "abc", "code-1234", access(false)).Return(nil)
 
 	req := httptest.NewRequest(http.MethodDelete, "/files/abc", nil)
 	req.Header.Set("X-Edit-Code", "code-1234")
 	s.Equal(http.StatusNoContent, s.serve(req).Code)
 
-	s.files.EXPECT().Delete(gomock.Any(), "abc", "wrong", uuid.Nil).Return(domain.ErrInvalidEditCode)
+	s.files.EXPECT().Delete(gomock.Any(), "abc", "wrong", access(false)).Return(domain.ErrInvalidEditCode)
 
 	req = httptest.NewRequest(http.MethodDelete, "/files/abc", nil)
 	req.Header.Set("X-Edit-Code", "wrong")
@@ -546,8 +546,8 @@ func (s *FileHandlerSuite) TestUpdate_WithEditCode() {
 	authenticated := domain.PrivacyAuthenticated
 	updated.Privacy = &authenticated
 
-	s.files.EXPECT().Update(gomock.Any(), "abc", "code-1234", uuid.Nil, gomock.Any()).
-		DoAndReturn(func(_ context.Context, _, _ string, _ uuid.UUID, opts files.UpdateOptions) (*domain.File, error) {
+	s.files.EXPECT().Update(gomock.Any(), "abc", "code-1234", access(false), gomock.Any()).
+		DoAndReturn(func(_ context.Context, _, _ string, _ domain.Reader, opts files.UpdateOptions) (*domain.File, error) {
 			s.Require().NotNil(opts.ExpiresAt)
 			s.WithinDuration(time.Now().Add(time.Hour), *opts.ExpiresAt, time.Minute)
 			s.False(opts.ClearExpiry)
@@ -570,7 +570,7 @@ func (s *FileHandlerSuite) TestUpdate_WithEditCode() {
 }
 
 func (s *FileHandlerSuite) TestUpdate_NullTTLClearsExpiry() {
-	s.files.EXPECT().Update(gomock.Any(), "abc", "code-1234", uuid.Nil, files.UpdateOptions{
+	s.files.EXPECT().Update(gomock.Any(), "abc", "code-1234", access(false), files.UpdateOptions{
 		ExpiresAt: nil, Privacy: nil, BurnAfterDownload: nil, ClearExpiry: true,
 	}).Return(fileRecord("a.txt", 3, 0, false), nil)
 
@@ -589,9 +589,8 @@ func (s *FileHandlerSuite) TestUpdate_OwnerWithoutEditCode() {
 
 	auth := NewMockAuthManager(s.ctrl)
 	auth.EXPECT().ResolveAPIToken(gomock.Any(), "owner-key").Return(owner, "token-hash", nil)
-	s.files.EXPECT().Peek(gomock.Any(), "abc").Return(stored, nil)
-	s.files.EXPECT().Update(gomock.Any(), "abc", "", owner.ID, gomock.Any()).
-		DoAndReturn(func(_ context.Context, _, _ string, _ uuid.UUID, opts files.UpdateOptions) (*domain.File, error) {
+	s.files.EXPECT().Update(gomock.Any(), "abc", "", signedInReader(owner.ID), gomock.Any()).
+		DoAndReturn(func(_ context.Context, _, _ string, _ domain.Reader, opts files.UpdateOptions) (*domain.File, error) {
 			s.Require().NotNil(opts.Privacy)
 			s.Equal(domain.PrivacyOwner, *opts.Privacy)
 
@@ -612,7 +611,9 @@ func (s *FileHandlerSuite) TestUpdate_InvisibleFileIsUnauthorized() {
 	stored := fileRecord("a.txt", 3, 0, false)
 	stored.OwnerID, stored.Privacy = &ownerID, &ownerPrivacy
 
-	s.files.EXPECT().Peek(gomock.Any(), "abc").Return(stored, nil)
+	// The usecase finds that the caller cannot see the file; the handler answers 401.
+	s.files.EXPECT().Update(gomock.Any(), "abc", "code-1234", anonymousReader(), gomock.Any()).
+		Return(nil, domain.ErrForbidden)
 
 	rec := httptest.NewRecorder()
 	s.newAuthRouter(NewMockAuthManager(s.ctrl)).ServeHTTP(rec, updateRequest(`{"ttl":60}`, "code-1234"))
@@ -650,7 +651,7 @@ func (s *FileHandlerSuite) TestUpdate_UsecaseErrors() {
 		{domain.ErrOwnerPrivacyRequiresOwner, http.StatusUnprocessableEntity},
 	} {
 		s.Run(testCase.err.Error(), func() {
-			s.files.EXPECT().Update(gomock.Any(), "abc", "code-1234", uuid.Nil, gomock.Any()).
+			s.files.EXPECT().Update(gomock.Any(), "abc", "code-1234", access(false), gomock.Any()).
 				Return(nil, testCase.err)
 
 			s.Equal(testCase.status, s.serve(updateRequest(`{}`, "code-1234")).Code)
@@ -666,7 +667,7 @@ func (s *FileHandlerSuite) TestUpdate_CrossOrigin() {
 }
 
 func (s *FileHandlerSuite) TestUpdate_FailedCodesLockOut() {
-	s.files.EXPECT().Update(gomock.Any(), "abc", "wrong", uuid.Nil, gomock.Any()).
+	s.files.EXPECT().Update(gomock.Any(), "abc", "wrong", access(false), gomock.Any()).
 		Return(nil, domain.ErrInvalidEditCode).Times(10)
 
 	for range 10 {
@@ -688,13 +689,8 @@ func (s *FileHandlerSuite) TestUpdate_FilesOff() {
 // expectRootFile sets the lookups of GET /{id} for a slug that names only a file. explicit is
 // true when the request states the intent to read, so the link lookup may burn.
 func (s *FileHandlerSuite) expectRootFile(file *domain.File, explicit bool) {
-	s.manager.EXPECT().Peek(gomock.Any(), "abc").Return(nil, domain.ErrNotFound)
-
-	if explicit {
-		s.linkManager.EXPECT().Redirect(gomock.Any(), "abc").Return(nil, domain.ErrNotFound)
-	} else {
-		s.linkManager.EXPECT().RedirectWithoutBurn(gomock.Any(), "abc").Return(nil, domain.ErrNotFound)
-	}
+	expectNoNote(s.manager, "abc")
+	s.linkManager.EXPECT().Follow(gomock.Any(), "abc", withBurn(explicit)).Return(nil, domain.ErrNotFound)
 
 	s.files.EXPECT().Peek(gomock.Any(), "abc").Return(file, nil)
 }
@@ -748,7 +744,7 @@ func (s *FileHandlerSuite) TestFilePages_FilesOff() {
 func (s *FileHandlerSuite) TestFilePage_BrowserGetsPage() {
 	file := fileRecord("отчёт <1>.pdf", 3*1024*1024/2, 0, true)
 	s.expectRootFile(file, true)
-	s.files.EXPECT().Info(gomock.Any(), "abc", access(false)).Return(file, nil)
+	s.files.EXPECT().Inspect(gomock.Any(), "abc", access(false)).Return(file, nil)
 
 	rec := s.serve(browserGet("/abc"))
 	body := rec.Body.String()
@@ -773,7 +769,7 @@ func (s *FileHandlerSuite) TestFilePage_NoBurnWarning() {
 	expires := time.Date(2030, time.March, 4, 5, 6, 0, 0, time.UTC)
 	file.ExpiresAt = &expires
 	s.expectRootFile(file, true)
-	s.files.EXPECT().Info(gomock.Any(), "abc", access(false)).Return(file, nil)
+	s.files.EXPECT().Inspect(gomock.Any(), "abc", access(false)).Return(file, nil)
 
 	rec := s.serve(browserGet("/abc"))
 
@@ -796,7 +792,7 @@ func (s *FileHandlerSuite) TestFilePage_Errors() {
 	for _, test := range cases {
 		s.Run(test.err.Error(), func() {
 			s.expectRootFile(fileRecord("a.txt", 3, 0, false), true)
-			s.files.EXPECT().Info(gomock.Any(), "abc", access(false)).Return(nil, test.err)
+			s.files.EXPECT().Inspect(gomock.Any(), "abc", access(false)).Return(nil, test.err)
 
 			rec := s.serve(browserGet("/abc"))
 
@@ -832,11 +828,12 @@ func (s *FileHandlerSuite) TestDownload_BrowserErrorPage() {
 }
 
 // expectEditFile sets the reads of GET /edit/abc for a file: the note and the short link are
-// not found, then the file editor reads the file.
+// not found, then the file editor reads the file with Settings, which applies privacy and expiry
+// and never deletes an expired file.
 func (s *FileHandlerSuite) expectEditFile(file *domain.File, err error) {
-	s.manager.EXPECT().Peek(gomock.Any(), "abc").Return(nil, domain.ErrNotFound)
-	s.linkManager.EXPECT().Peek(gomock.Any(), "abc").Return(nil, domain.ErrNotFound)
-	s.files.EXPECT().Peek(gomock.Any(), "abc").Return(file, err)
+	s.manager.EXPECT().Inspect(gomock.Any(), "abc", gomock.Any()).Return(nil, domain.ErrNotFound)
+	s.linkManager.EXPECT().Inspect(gomock.Any(), "abc", gomock.Any()).Return(nil, domain.ErrNotFound)
+	s.files.EXPECT().Settings(gomock.Any(), "abc", gomock.Any()).Return(file, err)
 }
 
 func (s *FileHandlerSuite) TestEditFilePage() {
@@ -867,9 +864,7 @@ func (s *FileHandlerSuite) TestEditFilePage_OldURL() {
 
 func (s *FileHandlerSuite) TestEditFilePage_Errors() {
 	s.Run("not found", func() {
-		s.manager.EXPECT().Peek(gomock.Any(), "abc").Return(nil, domain.ErrNotFound).Times(1)
-		s.linkManager.EXPECT().Peek(gomock.Any(), "abc").Return(nil, domain.ErrNotFound)
-		s.files.EXPECT().Peek(gomock.Any(), "abc").Return(nil, domain.ErrNotFound)
+		s.expectEditFile(nil, domain.ErrNotFound)
 
 		rec := s.serve(browserGet("/edit/abc"))
 
@@ -877,10 +872,8 @@ func (s *FileHandlerSuite) TestEditFilePage_Errors() {
 	})
 
 	s.Run("expired", func() {
-		file := fileRecord("a.txt", 3, 0, false)
-		past := time.Now().Add(-time.Hour)
-		file.ExpiresAt = &past
-		s.expectEditFile(file, nil)
+		// The usecase applies the expiry rule; the editor shows its error.
+		s.expectEditFile(nil, domain.ErrExpired)
 
 		rec := s.serve(browserGet("/edit/abc"))
 
@@ -899,7 +892,7 @@ func (s *FileHandlerSuite) TestEditFilePage_Errors() {
 }
 
 func (s *FileHandlerSuite) TestSuccessPage_File() {
-	s.files.EXPECT().Info(gomock.Any(), "abc", access(false)).Return(fileRecord("a.txt", 2048, 0, true), nil)
+	s.files.EXPECT().Inspect(gomock.Any(), "abc", access(false)).Return(fileRecord("a.txt", 2048, 0, true), nil)
 
 	rec := s.serve(browserGet("/success?kind=file&id=abc"))
 	body := rec.Body.String()
@@ -918,7 +911,7 @@ func (s *FileHandlerSuite) TestSuccessPage_File() {
 
 // TestSuccessPage_FileLookupFails: without the record the page still shows the link (fail-soft).
 func (s *FileHandlerSuite) TestSuccessPage_FileLookupFails() {
-	s.files.EXPECT().Info(gomock.Any(), "abc", access(false)).Return(nil, domain.ErrStorageUnavailable)
+	s.files.EXPECT().Inspect(gomock.Any(), "abc", access(false)).Return(nil, domain.ErrStorageUnavailable)
 
 	rec := s.serve(browserGet("/success?kind=file&id=abc"))
 
@@ -1274,7 +1267,7 @@ func (s *FileHandlerSuite) TestUpdate_TrailingData() {
 	}
 
 	s.Run("white space", func() {
-		s.files.EXPECT().Update(gomock.Any(), "abc", "code-1234", uuid.Nil, gomock.Any()).
+		s.files.EXPECT().Update(gomock.Any(), "abc", "code-1234", access(false), gomock.Any()).
 			Return(fileRecord("a.txt", 3, 0, false), nil)
 
 		s.Equal(http.StatusOK, s.serve(updateRequest("{\"ttl\":60}\n \t", "code-1234")).Code)
@@ -1304,7 +1297,7 @@ func testUser(userID uuid.UUID) *domain.User {
 // expectAccountRootFile sets the lookups of GET /{id} on a router with accounts for a slug that
 // names only a file.
 func (s *FileHandlerSuite) expectAccountRootFile(file *domain.File) {
-	s.manager.EXPECT().Peek(gomock.Any(), "abc").Return(nil, domain.ErrNotFound)
+	expectNoNote(s.manager, "abc")
 	s.linkManager.EXPECT().Follow(gomock.Any(), "abc", gomock.Any()).Return(nil, domain.ErrNotFound)
 	s.files.EXPECT().Peek(gomock.Any(), "abc").Return(file, nil)
 }
@@ -1317,7 +1310,7 @@ func (s *FileHandlerSuite) TestPrivateFile_ReadDenials() {
 
 	s.Run("file page, anonymous browser", func() {
 		s.expectAccountRootFile(privateFile(domain.PrivacyOwner))
-		s.files.EXPECT().Info(gomock.Any(), "abc", accountAccess(false)).Return(nil, domain.ErrForbidden)
+		s.files.EXPECT().Inspect(gomock.Any(), "abc", accountAccess(false)).Return(nil, domain.ErrForbidden)
 
 		rec := s.serveWith(router, browserGet("/abc"))
 
@@ -1329,7 +1322,7 @@ func (s *FileHandlerSuite) TestPrivateFile_ReadDenials() {
 		other := testUser(uuid.New())
 		auth.EXPECT().GetSession(gomock.Any(), "other-session").Return(other, nil)
 		s.expectAccountRootFile(privateFile(domain.PrivacyOwner))
-		s.files.EXPECT().Info(gomock.Any(), "abc", files.AccessOptions{
+		s.files.EXPECT().Inspect(gomock.Any(), "abc", domain.Reader{
 			CallerID: other.ID, Authenticated: true, AllowBurn: false, SkipPrivacy: false,
 		}).Return(nil, domain.ErrForbidden)
 
@@ -1342,7 +1335,7 @@ func (s *FileHandlerSuite) TestPrivateFile_ReadDenials() {
 	})
 
 	s.Run("metadata", func() {
-		s.files.EXPECT().Info(gomock.Any(), "abc", accountAccess(false)).Return(nil, domain.ErrForbidden)
+		s.files.EXPECT().Inspect(gomock.Any(), "abc", accountAccess(false)).Return(nil, domain.ErrForbidden)
 
 		s.Equal(http.StatusUnauthorized, s.serveWith(router, httptest.NewRequest(http.MethodGet, "/files/abc", nil)).Code)
 	})
@@ -1358,9 +1351,9 @@ func (s *FileHandlerSuite) TestPrivateFile_ReadDenials() {
 }
 
 // TestDelete_InvisibleFileIsUnauthorized: with accounts on, a caller that cannot see a private
-// file gets 401 before the edit code check (strict mock: no Delete call).
+// file gets 401: the usecase checks privacy before the edit code and returns ErrForbidden.
 func (s *FileHandlerSuite) TestDelete_InvisibleFileIsUnauthorized() {
-	s.files.EXPECT().Peek(gomock.Any(), "abc").Return(privateFile(domain.PrivacyAuthenticated), nil)
+	s.files.EXPECT().Delete(gomock.Any(), "abc", "code-1234", anonymousReader()).Return(domain.ErrForbidden)
 
 	req := httptest.NewRequest(http.MethodDelete, "/files/abc", nil)
 	req.Header.Set("X-Edit-Code", "code-1234")
@@ -1370,7 +1363,7 @@ func (s *FileHandlerSuite) TestDelete_InvisibleFileIsUnauthorized() {
 
 // TestDelete_FailedCodesLockOut: wrong edit codes lock the slug, as for PUT.
 func (s *FileHandlerSuite) TestDelete_FailedCodesLockOut() {
-	s.files.EXPECT().Delete(gomock.Any(), "abc", "wrong", uuid.Nil).Return(domain.ErrInvalidEditCode).Times(10)
+	s.files.EXPECT().Delete(gomock.Any(), "abc", "wrong", access(false)).Return(domain.ErrInvalidEditCode).Times(10)
 
 	deleteRequest := func() *http.Request {
 		req := httptest.NewRequest(http.MethodDelete, "/files/abc", nil)
@@ -1427,10 +1420,10 @@ func (s *FileHandlerSuite) TestUpload_OwnerFromCredentials() {
 // TestRootSlug_HeadFile: HEAD /{id} of a file sends the download headers without a body and
 // without a download (no Download call).
 func (s *FileHandlerSuite) TestRootSlug_HeadFile() {
-	s.manager.EXPECT().Peek(gomock.Any(), "abc").Return(nil, domain.ErrNotFound)
-	s.linkManager.EXPECT().RedirectWithoutBurn(gomock.Any(), "abc").Return(nil, domain.ErrNotFound)
+	expectNoNote(s.manager, "abc")
+	s.linkManager.EXPECT().Follow(gomock.Any(), "abc", withBurn(false)).Return(nil, domain.ErrNotFound)
 	s.files.EXPECT().Peek(gomock.Any(), "abc").Return(fileRecord("a.txt", 5, 0, true), nil)
-	s.files.EXPECT().Info(gomock.Any(), "abc", access(false)).Return(fileRecord("a.txt", 5, 0, true), nil)
+	s.files.EXPECT().Inspect(gomock.Any(), "abc", access(false)).Return(fileRecord("a.txt", 5, 0, true), nil)
 
 	req := httptest.NewRequest(http.MethodHead, "/abc", nil)
 	req.Header.Set("Accept", "application/octet-stream")

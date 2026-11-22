@@ -12,32 +12,35 @@ import (
 	"github.com/partyzanex/padmark/internal/domain"
 )
 
-// errGateStorage is a storage failure of the privacy-check read. Its text must never reach the
-// client: the central error mapping answers 500 with a constant message.
+// errGateStorage is a storage failure of the read inside the usecase mutation. Its text must
+// never reach the client: the central error mapping answers 500 with a constant message.
 var errGateStorage = errors.New("pq: connection refused by 10.0.0.5:5432")
 
-// gateCase is one mutation route that has a privacy check before the change.
+// gateCase is one mutation route. The usecase reads the record and checks privacy before the
+// change; the handler only translates the error.
 type gateCase struct {
 	name   string
 	method string
 	path   string
 	body   string
-	// peek sets the Peek expectation of the record kind of the route.
-	peek func(err error)
+	// mutate sets the Update or Delete expectation of the route, which returns err.
+	mutate func(err error)
 }
 
-// gatePeekError is one Peek error of the privacy check and the status that it must give.
+// gatePeekError is one error of the usecase mutation and the status that it must give.
 type gatePeekError struct {
 	name   string
 	err    error
 	status int
 }
 
-// gatePeekErrors returns the Peek errors that each mutation route must stop on.
+// gatePeekErrors returns the usecase errors that each mutation route must translate. A hidden
+// record gives 401, as for a read, so that it does not count as a wrong edit code.
 func gatePeekErrors() []gatePeekError {
 	return []gatePeekError{
 		{"storage failure", errGateStorage, http.StatusInternalServerError},
 		{"missing record", domain.ErrNotFound, http.StatusNotFound},
+		{"hidden record", domain.ErrForbidden, http.StatusUnauthorized},
 	}
 }
 
@@ -55,9 +58,8 @@ func gateRequest(route gateCase) *http.Request {
 	return r
 }
 
-// assertGateError checks that the privacy check stopped the change with the expected status and
-// without the internal error text. The strict gomock controller fails the test if the handler
-// calls Update or Delete, because no test sets an expectation for them.
+// assertGateError checks that the handler answered the usecase error with the expected status and
+// without the internal error text.
 func assertGateError(check *assert.Assertions, w *httptest.ResponseRecorder, status int) {
 	check.Equal(status, w.Code, w.Body.String())
 	check.NotContains(w.Body.String(), "10.0.0.5")
@@ -66,26 +68,39 @@ func assertGateError(check *assert.Assertions, w *httptest.ResponseRecorder, sta
 }
 
 // TestMutationGate_PeekError_StopsMutation covers audit finding 7 for notes and links: with
-// accounts on, a failed Peek of the privacy check stops each PUT and DELETE route. A storage
-// failure gives 500 and a missing record gives 404; the usecase mutation is never called.
+// accounts on, the usecase reads the record and checks privacy inside Update and Delete. A
+// storage failure gives 500, a missing record 404 and a hidden record 401, on each PUT and
+// DELETE route, without the internal error text.
 func (s *HandlerSuite) TestMutationGate_PeekError_StopsMutation() {
-	notePeek := func(id string) func(error) {
-		return func(err error) { s.manager.EXPECT().Peek(gomock.Any(), id).Return(nil, err) }
+	noteUpdate := func(id string) func(error) {
+		return func(err error) {
+			s.manager.EXPECT().Update(gomock.Any(), id, "right-code", anonymousReader(), gomock.Any()).Return(nil, err)
+		}
 	}
-	linkPeek := func(err error) {
-		s.linkManager.EXPECT().Peek(gomock.Any(), testLinkID).Return(nil, err)
+	noteDelete := func(id string) func(error) {
+		return func(err error) {
+			s.manager.EXPECT().Delete(gomock.Any(), id, "right-code", anonymousReader()).Return(err)
+		}
+	}
+	linkUpdate := func(err error) {
+		s.linkManager.EXPECT().
+			Update(gomock.Any(), testLinkID, "right-code", anonymousReader(), gomock.Any(), gomock.Any()).
+			Return(nil, err)
+	}
+	linkDelete := func(err error) {
+		s.linkManager.EXPECT().Delete(gomock.Any(), testLinkID, "right-code", anonymousReader()).Return(err)
 	}
 
 	cases := []gateCase{
 		{"ogen note PUT", http.MethodPut, "/notes/" + testID, `{"title":"t","content":"c","edit_code":"right-code"}`,
-			notePeek(testID)},
-		{"ogen note DELETE", http.MethodDelete, "/notes/" + testID, "", notePeek(testID)},
+			noteUpdate(testID)},
+		{"ogen note DELETE", http.MethodDelete, "/notes/" + testID, "", noteDelete(testID)},
 		{"native note PUT", http.MethodPut, "/notes/project/GUIDE.md",
-			`{"title":"t","content":"c","edit_code":"right-code"}`, notePeek("project/GUIDE.md")},
-		{"native note DELETE", http.MethodDelete, "/notes/project/GUIDE.md", "", notePeek("project/GUIDE.md")},
+			`{"title":"t","content":"c","edit_code":"right-code"}`, noteUpdate("project/GUIDE.md")},
+		{"native note DELETE", http.MethodDelete, "/notes/project/GUIDE.md", "", noteDelete("project/GUIDE.md")},
 		{"ogen link PUT", http.MethodPut, "/links/" + testLinkID,
-			`{"target_url":"https://example.com/new","edit_code":"right-code"}`, linkPeek},
-		{"ogen link DELETE", http.MethodDelete, "/links/" + testLinkID, "", linkPeek},
+			`{"target_url":"https://example.com/new","edit_code":"right-code"}`, linkUpdate},
+		{"ogen link DELETE", http.MethodDelete, "/links/" + testLinkID, "", linkDelete},
 	}
 
 	for _, route := range cases {
@@ -93,7 +108,7 @@ func (s *HandlerSuite) TestMutationGate_PeekError_StopsMutation() {
 			s.Run(route.name+"/"+peekErr.name, func() {
 				router := s.newRouterWithTOTPAuth()
 
-				route.peek(peekErr.err)
+				route.mutate(peekErr.err)
 
 				w := httptest.NewRecorder()
 				router.ServeHTTP(w, gateRequest(route))
@@ -105,18 +120,23 @@ func (s *HandlerSuite) TestMutationGate_PeekError_StopsMutation() {
 }
 
 // TestMutationGate_PeekError_StopsMutation is the files counterpart of the notes and links test:
-// PUT and DELETE /files/{id} stop on a failed Peek, with the same statuses.
+// PUT and DELETE /files/{id} translate the usecase errors with the same statuses.
 func (s *FileHandlerSuite) TestMutationGate_PeekError_StopsMutation() {
 	cases := []gateCase{
-		{"file PUT", http.MethodPut, "/files/abc", `{"ttl":60}`, nil},
-		{"file DELETE", http.MethodDelete, "/files/abc", "", nil},
+		{"file PUT", http.MethodPut, "/files/abc", `{"ttl":60}`, func(err error) {
+			s.files.EXPECT().Update(gomock.Any(), "abc", "right-code", anonymousReader(), gomock.Any()).Return(nil, err)
+		}},
+		{"file DELETE", http.MethodDelete, "/files/abc", "", func(err error) {
+			s.files.EXPECT().Delete(gomock.Any(), "abc", "right-code", anonymousReader()).Return(err)
+		}},
 	}
 
 	for _, route := range cases {
 		for _, peekErr := range gatePeekErrors() {
 			s.Run(route.name+"/"+peekErr.name, func() {
 				router := s.newAuthRouter(NewMockAuthManager(s.ctrl))
-				s.files.EXPECT().Peek(gomock.Any(), "abc").Return(nil, peekErr.err)
+
+				route.mutate(peekErr.err)
 
 				w := httptest.NewRecorder()
 				router.ServeHTTP(w, gateRequest(route))

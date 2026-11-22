@@ -114,13 +114,13 @@ func (s *ManagerSuite) TestFile_Lifecycle() {
 
 	s.updateFile(created.ID)
 
-	_, err = s.FileManager.Download(ctx, created.ID, files.AccessOptions{
+	_, err = s.FileManager.Download(ctx, created.ID, domain.Reader{
 		CallerID: uuid.Nil, Authenticated: false, AllowBurn: false, SkipPrivacy: false,
 	})
 	s.Require().ErrorIs(err, domain.ErrBurnIntentRequired, "a preview must not consume a burn file")
 
-	s.Require().ErrorIs(s.FileManager.Delete(ctx, created.ID, "wrong-code-123", uuid.Nil), domain.ErrInvalidEditCode)
-	s.Require().NoError(s.FileManager.Delete(ctx, created.ID, fileEditCode, uuid.Nil))
+	s.Require().ErrorIs(s.FileManager.Delete(ctx, created.ID, "wrong-code-123", openReader()), domain.ErrInvalidEditCode)
+	s.Require().NoError(s.FileManager.Delete(ctx, created.ID, fileEditCode, openReader()))
 
 	_, err = s.FileManager.Peek(ctx, created.ID)
 	s.Require().ErrorIs(err, domain.ErrNotFound)
@@ -196,7 +196,7 @@ func (s *ManagerSuite) TestFile_Expiry() {
 		s.Require().NoError(updateErr)
 	}
 
-	_, err = s.FileManager.Info(ctx, read.ID, files.AccessOptions{
+	_, err = s.FileManager.Inspect(ctx, read.ID, domain.Reader{
 		CallerID: uuid.Nil, Authenticated: false, AllowBurn: false, SkipPrivacy: false,
 	})
 	s.Require().ErrorIs(err, domain.ErrExpired)
@@ -219,10 +219,10 @@ func (s *ManagerSuite) updateFile(slug string) {
 	burn := true
 	opts := files.UpdateOptions{ExpiresAt: &expiresAt, Privacy: nil, BurnAfterDownload: &burn, ClearExpiry: false}
 
-	_, err := s.FileManager.Update(ctx, slug, "wrong-code-123", uuid.Nil, opts)
+	_, err := s.FileManager.Update(ctx, slug, "wrong-code-123", openReader(), opts)
 	s.Require().ErrorIs(err, domain.ErrInvalidEditCode)
 
-	updated, err := s.FileManager.Update(ctx, slug, fileEditCode, uuid.Nil, opts)
+	updated, err := s.FileManager.Update(ctx, slug, fileEditCode, openReader(), opts)
 	s.Require().NoError(err)
 	s.True(updated.BurnAfterDownload)
 	s.Empty(updated.EditCode)
@@ -238,7 +238,7 @@ func (s *ManagerSuite) updateFile(slug string) {
 func (s *ManagerSuite) downloadFile(slug string, allowBurn bool) []byte {
 	ctx := s.T().Context()
 
-	download, err := s.FileManager.Download(ctx, slug, files.AccessOptions{
+	download, err := s.FileManager.Download(ctx, slug, domain.Reader{
 		CallerID: uuid.Nil, Authenticated: false, AllowBurn: allowBurn, SkipPrivacy: false,
 	})
 	s.Require().NoError(err)

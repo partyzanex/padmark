@@ -9,10 +9,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/google/uuid"
-
 	"github.com/partyzanex/padmark/internal/domain"
-	"github.com/partyzanex/padmark/internal/errorcontext"
 )
 
 // Storage defines persistence operations for notes. Create must atomically claim the ID
@@ -258,50 +255,46 @@ func (m *Manager) Create(ctx context.Context, note *domain.Note) (*domain.Note, 
 	}
 	defer unlock()
 
-	hashedCode, hashErr := m.resolveEditCodeHash(note)
-	if hashErr != nil {
-		return nil, fmt.Errorf("resolve edit code hash: %w", hashErr)
+	plainCode, hashedCode, err := m.resolveEditCodeHash(note.EditCode)
+	if err != nil {
+		return nil, fmt.Errorf("resolve edit code hash: %w", err)
 	}
 
-	// Create mutates note in place for persistence (hash the edit code, encrypt the content,
-	// store the hashed slug as the PK). The defer restores the caller-facing plaintext fields
-	// and the slug ID on every return path, so no branch can leave note in an encrypted state.
-	plaintextContent := note.Content
-	plaintextCode := note.EditCode
-
-	defer func() {
-		note.Content = plaintextContent
-		note.EditCode = plaintextCode
-		note.ID = slug
-	}()
-
-	note.EditCode = hashedCode
-
+	recordID := domain.HashSlug(slug)
 	now := time.Now().UTC()
-	note.CreatedAt = now
-	note.UpdatedAt = now
 
-	encrypted, encErr := m.encryptor.Encrypt(note.Content, domain.HashSlug(slug))
-	if encErr != nil {
-		return nil, fmt.Errorf("encrypt content: %w", encErr)
+	encrypted, err := m.encryptor.Encrypt(note.Content, recordID)
+	if err != nil {
+		return nil, fmt.Errorf("encrypt content: %w", err)
 	}
 
-	note.Content = encrypted
-	note.ID = domain.HashSlug(slug) // store hash, not slug.
+	// stored is a separate value with the storage form of the note: the hashed slug, the
+	// ciphertext and the edit-code hash. The caller's note never holds these values.
+	stored := *note
+	stored.ID = recordID
+	stored.Content = encrypted
+	stored.EditCode = hashedCode
+	stored.CreatedAt = now
+	stored.UpdatedAt = now
 
-	err = m.createReleasingExpired(ctx, note)
+	err = m.createReleasingExpired(ctx, &stored)
 	if err != nil {
 		return nil, fmt.Errorf("create note: %w", err)
 	}
 
-	m.log.DebugContext(ctx, "note created", "id", domain.HashSlug(slug))
+	note.ID = slug
+	note.EditCode = plainCode
+	note.CreatedAt = now
+	note.UpdatedAt = now
+
+	m.log.DebugContext(ctx, "note created", "id", recordID)
 
 	return note, nil
 }
 
-// Peek fetches a note by ID without incrementing views, triggering burn-after-reading,
-// or applying expiry policy. Intentionally returns expired notes as-is — callers that
-// need expiry enforcement should use Get or View instead.
+// Peek fetches a note by ID without any access rule: no privacy check, no expiry, no burn and
+// no view count. It returns expired notes as they are. A caller that shows a note to a reader
+// uses Read, ReadRendered or Inspect, which apply the rules.
 func (m *Manager) Peek(ctx context.Context, id string) (*domain.Note, error) {
 	note, err := m.storage.Get(ctx, domain.HashSlug(id))
 	if err != nil {
@@ -318,35 +311,61 @@ func (m *Manager) Peek(ctx context.Context, id string) (*domain.Note, error) {
 	return note, nil
 }
 
-// Get returns a note by ID. If the note has expired it is deleted and ErrExpired is returned.
-// Burn-after-reading notes are atomically consumed (deleted and returned) to prevent races.
-func (m *Manager) Get(ctx context.Context, id string) (*domain.Note, error) {
+// Inspect returns the note for reader without a side effect on a live note. It applies the
+// first two read rules of Read: privacy (domain.ErrForbidden) and expiry (an expired note is
+// deleted and Inspect returns domain.ErrExpired). It never consumes a burn-after-reading note,
+// never starts its timer and never counts a view. The editor and the burn confirmation page use it.
+func (m *Manager) Inspect(ctx context.Context, id string, reader domain.Reader) (*domain.Note, error) {
 	note, err := m.storage.Get(ctx, domain.HashSlug(id))
 	if err != nil {
-		return nil, fmt.Errorf("get note: %w", err)
+		return nil, fmt.Errorf("inspect note: %w", err)
 	}
 
 	note.ID = id
 
+	if !note.VisibleTo(reader) {
+		return nil, domain.ErrForbidden
+	}
+
+	err = m.burn.enforceExpiry(ctx, id, note)
+	if err != nil {
+		return nil, fmt.Errorf("inspect note: %w", err)
+	}
+
 	err = decryptContent(ctx, m.encryptor, m.log, note)
 	if err != nil {
-		return nil, fmt.Errorf("get note: %w", err)
+		return nil, fmt.Errorf("inspect note: %w", err)
 	}
 
-	operationResult, operationErr := m.burn.applyPolicy(ctx, id, note)
-	if operationErr != nil {
-		return operationResult, fmt.Errorf("apply policy: %w", operationErr)
-	}
-
-	return operationResult, nil
+	return note, nil
 }
 
-// View returns a note by ID and increments its view counter.
-// Burn-after-reading notes are not incremented because they are deleted on read.
-func (m *Manager) View(ctx context.Context, id string) (*domain.Note, error) {
-	note, err := m.Get(ctx, id)
+// Read returns the note for reader and applies all read rules in this order:
+//
+//  1. Privacy: a reader that cannot see the note gets domain.ErrForbidden.
+//  2. Expiry: an expired note is deleted, and Read returns domain.ErrExpired.
+//  3. Burn intent: a burn-after-reading note needs reader.AllowBurn; otherwise Read returns
+//     domain.ErrBurnIntentRequired and the note stays.
+//  4. Burn: an immediate burn note is consumed; a note with a burn TTL starts its timer.
+//  5. Views: the view counter goes up, except for a note that this read consumed.
+//
+// Storage checks the privacy level and the edit-code hash again when it consumes the note or
+// starts the timer, so a change after the checks above cannot burn a different note version.
+func (m *Manager) Read(ctx context.Context, id string, reader domain.Reader) (*domain.Note, error) {
+	note, err := m.Inspect(ctx, id, reader)
 	if err != nil {
-		return nil, fmt.Errorf("get: %w", err)
+		return nil, fmt.Errorf("read note: %w", err)
+	}
+
+	if note.BurnAfterReading && !reader.AllowBurn {
+		return nil, domain.ErrBurnIntentRequired
+	}
+
+	if note.BurnAfterReading {
+		note, err = m.burn.burnNote(ctx, id, note)
+		if err != nil {
+			return nil, fmt.Errorf("read note: %w", err)
+		}
 	}
 
 	m.burn.applyViewIncrement(ctx, id, note)
@@ -354,37 +373,12 @@ func (m *Manager) View(ctx context.Context, id string) (*domain.Note, error) {
 	return note, nil
 }
 
-// ViewPreloaded is like View but skips the initial storage.Get by reusing an already-fetched note.
-// Use this when the caller has already loaded the note (e.g. during auth checks) to avoid a second SELECT.
-func (m *Manager) ViewPreloaded(ctx context.Context, id string, preloaded *domain.Note) (*domain.Note, error) {
-	note, err := m.burn.applyPolicy(ctx, id, preloaded)
-	if err != nil {
-		return nil, fmt.Errorf("apply policy: %w", err)
-	}
-
-	m.burn.applyViewIncrement(ctx, id, note)
-
-	return note, nil
-}
-
-// EnforceExpiry applies only the expiry half of the read policy to an already-fetched note (from
-// Peek): an expired note — plain TTL or a started burn timer — is deleted and ErrExpired is
-// returned. It never consumes a burn-after-reading note, starts its timer or counts a view, so a
-// caller that must not trigger burn (the editor) still cannot serve an expired note.
-func (m *Manager) EnforceExpiry(ctx context.Context, id string, note *domain.Note) error {
-	return errorcontext.Wrap(m.burn.enforceExpiry(ctx, id, note), "enforce expiry")
-}
-
-// pinImmutableFields carries forward two fields Update must never let the caller change: the
-// stored edit-code hash (never the plaintext the caller supplied — the repository's Update
-// column list excludes edit_code today, but if that ever changes this avoids leaking it) and
-// OwnerID (fixed at creation — excluded from the same column list today, kept here so it isn't
-// silently nilled out if that changes). Only once OwnerID is pinned to its real value does
-// ValidateOwnership's check become meaningful: the upfront Validate() call in Update runs before
-// this pin, when the caller-supplied OwnerID is always nil regardless of actual ownership, so it
-// cannot reject privacy=owner on a note that never had one — this can.
-func pinImmutableFields(note, existing *domain.Note) error {
-	note.EditCode = existing.EditCode
+// pinOwner carries forward OwnerID, which Update must never let the caller change (it is fixed at
+// creation). Only once OwnerID is pinned to its real value does ValidateOwnership's check become
+// meaningful: the upfront Validate() call in Update runs before this pin, when the caller-supplied
+// OwnerID is always nil regardless of actual ownership, so it cannot reject privacy=owner on a
+// note that never had one — this can. The stored edit-code hash goes only to the storage copy.
+func pinOwner(note, existing *domain.Note) error {
 	note.OwnerID = existing.OwnerID
 
 	err := note.ValidateOwnership()
@@ -455,15 +449,13 @@ func resolveExpiryTime(note, existing *domain.Note) {
 	note.ExpiresAt = existing.ExpiresAt
 }
 
-// Update validates and updates an existing note, preserving immutable metadata.
-// The caller must supply the correct edit code.
-// Update replaces a note's editable fields. The caller must either supply the note's edit_code,
-// or be the note's owner (callerID matches existing.OwnerID) — the latter lets an authenticated
-// creator (session or API token) edit without the edit_code. callerID is uuid.Nil for an
-// anonymous caller, which never matches an owner and falls back to the edit_code check
-// unconditionally.
+// Update replaces a note's editable fields and keeps its immutable metadata. The rules are in
+// checkMutation: the reader must see the note, and must give the note's edit code or be its
+// owner, so that an authenticated creator (session or API token) edits without the code. The
+// check uses the same stored note that the write changes: the write names that note version by
+// its stored edit-code hash.
 func (m *Manager) Update(
-	ctx context.Context, id, editCode string, callerID uuid.UUID, note *domain.Note,
+	ctx context.Context, id, editCode string, reader domain.Reader, note *domain.Note,
 ) (*domain.Note, error) {
 	err := validateNote(note, m.maxContentLength)
 	if err != nil {
@@ -477,8 +469,9 @@ func (m *Manager) Update(
 		return nil, fmt.Errorf("update note: %w", err)
 	}
 
-	if !existing.OwnedBy(callerID) && !m.hasher.Verify(existing.EditCode, editCode) {
-		return nil, domain.ErrInvalidEditCode
+	err = m.checkMutation(existing, editCode, reader)
+	if err != nil {
+		return nil, err
 	}
 
 	// Omitted privacy, content type and contents-sidebar option go to storage as nil, so COALESCE
@@ -504,43 +497,39 @@ func (m *Manager) Update(
 	// the note's real inherited privacy.
 	backfillPersistedState(note, existing)
 
-	// Update mutates note in place for persistence (encrypt content, carry the stored edit-code
-	// hash). The defer restores the caller-facing plaintext fields on every return path, so the
-	// returned note never exposes ciphertext and the caller still sees the plaintext edit code.
-	plaintextContent := note.Content
-
-	defer func() {
-		note.Content = plaintextContent
-		note.EditCode = editCode
-	}()
-
-	err = pinImmutableFields(note, existing)
+	err = pinOwner(note, existing)
 	if err != nil {
-		return nil, fmt.Errorf("pin immutable fields: %w", err)
+		return nil, fmt.Errorf("pin owner: %w", err)
 	}
 
-	note.Content, err = m.encryptor.Encrypt(note.Content, dbID)
+	encrypted, err := m.encryptor.Encrypt(note.Content, dbID)
 	if err != nil {
 		return nil, fmt.Errorf("encrypt content: %w", err)
 	}
 
-	// note.EditCode is the stored hash (pinImmutableFields), so the UPDATE changes only the note
-	// checked above, not a new note that took this ID after the check.
-	err = m.storage.Update(ctx, dbID, withRequested(note, requested))
+	// write is a separate value with the storage form: the ciphertext and the stored edit-code
+	// hash. The hash makes the UPDATE change only the note checked above, not a new note that
+	// took this ID after the check. The caller's note keeps the plaintext.
+	write := withRequested(note, requested)
+	write.Content = encrypted
+	write.EditCode = existing.EditCode
+
+	err = m.storage.Update(ctx, dbID, write)
 	if err != nil {
 		return nil, fmt.Errorf("update note: %w", err)
 	}
 
 	m.renderCache.Delete(dbID)
 
-	m.log.DebugContext(ctx, "note updated", "id", domain.HashSlug(id))
+	m.log.DebugContext(ctx, "note updated", "id", dbID)
+
+	note.EditCode = editCode
 
 	return note, nil
 }
 
-// Delete removes a note by ID after verifying the edit code, or that the caller is the note's
-// owner — see Update for the exact bypass semantics.
-func (m *Manager) Delete(ctx context.Context, id, editCode string, callerID uuid.UUID) error {
+// Delete removes a note by ID with the rules of Update (see checkMutation).
+func (m *Manager) Delete(ctx context.Context, id, editCode string, reader domain.Reader) error {
 	dbID := domain.HashSlug(id)
 
 	existing, err := m.storage.Get(ctx, dbID)
@@ -548,8 +537,9 @@ func (m *Manager) Delete(ctx context.Context, id, editCode string, callerID uuid
 		return fmt.Errorf("delete note: %w", err)
 	}
 
-	if !existing.OwnedBy(callerID) && !m.hasher.Verify(existing.EditCode, editCode) {
-		return domain.ErrInvalidEditCode
+	err = m.checkMutation(existing, editCode, reader)
+	if err != nil {
+		return err
 	}
 
 	// The stored hash limits the DELETE to the note checked above, not a new note with this ID.
@@ -563,11 +553,11 @@ func (m *Manager) Delete(ctx context.Context, id, editCode string, callerID uuid
 	return nil
 }
 
-// GetRendered fetches a note, increments its view counter, and returns it with content as safe HTML.
-func (m *Manager) GetRendered(ctx context.Context, id string) (*domain.Note, string, error) {
-	note, err := m.View(ctx, id)
+// ReadRendered is Read that also returns the content as safe HTML.
+func (m *Manager) ReadRendered(ctx context.Context, id string, reader domain.Reader) (*domain.Note, string, error) {
+	note, err := m.Read(ctx, id, reader)
 	if err != nil {
-		return nil, "", fmt.Errorf("get note for render: %w", err)
+		return nil, "", err
 	}
 
 	rendered, err := m.renderNote(ctx, id, note)
@@ -578,51 +568,45 @@ func (m *Manager) GetRendered(ctx context.Context, id string) (*domain.Note, str
 	return note, rendered, nil
 }
 
-// GetRenderedPreloaded is like GetRendered but skips the initial storage.Get by reusing an already-fetched note.
-// Use this when the caller has already loaded the note (e.g. during auth checks) to avoid a second SELECT.
-func (m *Manager) GetRenderedPreloaded(
-	ctx context.Context, id string, preloaded *domain.Note,
-) (*domain.Note, string, error) {
-	note, err := m.ViewPreloaded(ctx, id, preloaded)
-	if err != nil {
-		return nil, "", fmt.Errorf("get note for render: %w", err)
+// checkMutation applies the rules of a change to the stored note existing: the reader must see
+// the note (domain.ErrForbidden), and must be its owner or give its edit code
+// (domain.ErrInvalidEditCode). An edit code never opens a note that privacy hides from the reader.
+func (m *Manager) checkMutation(existing *domain.Note, editCode string, reader domain.Reader) error {
+	if !existing.VisibleTo(reader) {
+		return domain.ErrForbidden
 	}
 
-	rendered, err := m.renderNote(ctx, id, note)
-	if err != nil {
-		return nil, "", fmt.Errorf("render note: %w", err)
+	if !existing.OwnedBy(reader.CallerID) && !m.hasher.Verify(existing.EditCode, editCode) {
+		return domain.ErrInvalidEditCode
 	}
 
-	return note, rendered, nil
+	return nil
 }
 
-// resolveEditCodeHash fills an empty edit code with a server-generated one and returns its
-// stored-hash form. Generated codes are high-entropy, so they take the fast hash; a
+// resolveEditCodeHash returns the plaintext edit code and its stored hash. It generates a code
+// when the caller gave none. Generated codes are high-entropy, so they take the fast hash; a
 // caller-supplied code takes the memory-hard variant because its entropy is not guaranteed.
-// On success note.EditCode holds the plaintext code (generated or supplied).
-func (m *Manager) resolveEditCodeHash(note *domain.Note) (string, error) {
-	if note.EditCode == "" {
-		editCode, err := domain.NewEditCode()
+func (m *Manager) resolveEditCodeHash(code string) (plain, hashed string, err error) {
+	if code != "" {
+		hashed, err = m.hasher.HashUserProvided(code)
 		if err != nil {
-			return "", fmt.Errorf("generate edit code: %w", err)
+			return "", "", fmt.Errorf("hash edit code: %w", err)
 		}
 
-		note.EditCode = editCode
-
-		hashed, hashErr := m.hasher.Hash(note.EditCode)
-		if hashErr != nil {
-			return "", fmt.Errorf("hash edit code: %w", hashErr)
-		}
-
-		return hashed, nil
+		return code, hashed, nil
 	}
 
-	hashed, err := m.hasher.HashUserProvided(note.EditCode)
+	plain, err = domain.NewEditCode()
 	if err != nil {
-		return "", fmt.Errorf("hash edit code: %w", err)
+		return "", "", fmt.Errorf("generate edit code: %w", err)
 	}
 
-	return hashed, nil
+	hashed, err = m.hasher.Hash(plain)
+	if err != nil {
+		return "", "", fmt.Errorf("hash edit code: %w", err)
+	}
+
+	return plain, hashed, nil
 }
 
 // maxCachedRenderBytes keeps one huge note from pinning megabytes of HTML in the cache.

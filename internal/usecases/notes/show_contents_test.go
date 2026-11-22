@@ -4,7 +4,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/google/uuid"
 	"go.uber.org/mock/gomock"
 
 	"github.com/partyzanex/padmark/internal/domain"
@@ -69,7 +68,7 @@ func (s *ManagerTestSuite) TestUpdate_OmittedShowContentsKeepsStoredValue() {
 			return nil
 		})
 
-	result, err := s.manager.Update(s.T().Context(), "abc-123", "secret123456", uuid.Nil, contentsNote(nil))
+	result, err := s.manager.Update(s.T().Context(), "abc-123", "secret123456", openReader(), contentsNote(nil))
 
 	s.Require().NoError(err)
 	s.True(result.ContentsSidebar(), "the omitted option must not reset to false")
@@ -90,7 +89,7 @@ func (s *ManagerTestSuite) TestUpdate_ExplicitShowContentsIsWritten() {
 				return nil
 			})
 
-		result, err := s.manager.Update(s.T().Context(), "abc-123", "secret123456", uuid.Nil, contentsNote(new(value)))
+		result, err := s.manager.Update(s.T().Context(), "abc-123", "secret123456", openReader(), contentsNote(new(value)))
 
 		s.Require().NoError(err)
 		s.Equal(value, result.ContentsSidebar())

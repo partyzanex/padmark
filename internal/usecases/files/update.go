@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/google/uuid"
-
 	"github.com/partyzanex/padmark/internal/domain"
 )
 
@@ -20,12 +18,13 @@ type UpdateOptions struct {
 }
 
 // Update changes the expiry, privacy and burn-after-download rule of a file. It does not change
-// the content, name, content key, object key, owner or download counter. The owner can omit
-// the edit code; other callers must give the original code. Errors are fail-hard: Update
-// returns domain.ErrNotFound for a missing or expired file, domain.ErrInvalidEditCode for a
-// wrong code, a validation error for invalid options, and wraps storage errors.
+// the content, name, content key, object key, owner or download counter. The rules are in
+// checkMutation: the reader must see the file, and must be its owner or give the original
+// code. Errors are fail-hard: Update returns domain.ErrNotFound for a missing or expired file,
+// domain.ErrForbidden for a hidden file, domain.ErrInvalidEditCode for a wrong code, a
+// validation error for invalid options, and wraps storage errors.
 func (m *Manager) Update(
-	ctx context.Context, slug, editCode string, callerID uuid.UUID, opts UpdateOptions,
+	ctx context.Context, slug, editCode string, reader domain.Reader, opts UpdateOptions,
 ) (*domain.File, error) {
 	dbID := domain.HashSlug(slug)
 	// The lock keeps two updates in this process from losing each other's omitted fields.
@@ -40,13 +39,19 @@ func (m *Manager) Update(
 		return nil, fmt.Errorf("update file: %w", err)
 	}
 
+	// Privacy comes before expiry, so that a hidden file gives the same answer in each state.
+	if !existing.VisibleTo(reader) {
+		return nil, domain.ErrForbidden
+	}
+
 	// An expired file is already gone for readers, so an update must not extend its life.
 	if existing.Expired(time.Now()) {
 		return nil, domain.ErrNotFound
 	}
 
-	if !existing.OwnedBy(callerID) && !m.deps.Hasher.Verify(existing.EditCode, editCode) {
-		return nil, domain.ErrInvalidEditCode
+	err = m.checkMutation(existing, editCode, reader)
+	if err != nil {
+		return nil, err
 	}
 
 	updated := applyUpdateOptions(existing, opts)

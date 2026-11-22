@@ -16,9 +16,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
-
 	"github.com/partyzanex/padmark/internal/adapters/web/middleware"
+	"github.com/partyzanex/padmark/internal/adapters/web/ogenapi"
 	"github.com/partyzanex/padmark/internal/adapters/web/response"
 	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/usecases/files"
@@ -66,12 +65,18 @@ var (
 // FileManager is the file usecase as the HTTP layer uses it.
 type FileManager interface {
 	Create(ctx context.Context, name string, body io.Reader, opts files.CreateOptions) (*domain.File, error)
+	// Peek reads the record without access rules; GetNoteOrLink uses it only to find whether a
+	// file has the slug.
 	Peek(ctx context.Context, slug string) (*domain.File, error)
-	Info(ctx context.Context, slug string, opts files.AccessOptions) (*domain.File, error)
-	Download(ctx context.Context, slug string, opts files.AccessOptions) (*files.Download, error)
-	Delete(ctx context.Context, slug, editCode string, callerID uuid.UUID) error
+	// Inspect applies privacy and expiry without a download: pages and GET /files/{id} use it.
+	Inspect(ctx context.Context, slug string, reader domain.Reader) (*domain.File, error)
+	// Settings applies privacy and expiry without any side effect: the settings editor uses it,
+	// so that it does not delete an expired file before the file page reports it.
+	Settings(ctx context.Context, slug string, reader domain.Reader) (*domain.File, error)
+	Download(ctx context.Context, slug string, reader domain.Reader) (*files.Download, error)
+	Delete(ctx context.Context, slug, editCode string, reader domain.Reader) error
 	Update(
-		ctx context.Context, slug, editCode string, callerID uuid.UUID, opts files.UpdateOptions,
+		ctx context.Context, slug, editCode string, reader domain.Reader, opts files.UpdateOptions,
 	) (*domain.File, error)
 	MaxSize() int64
 }
@@ -175,8 +180,15 @@ func (h *FileHandler) Upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	body := h.toJSON(r, file)
-	body.EditCode = file.EditCode
+	info := h.toJSON(r, file)
+	body := &ogenapi.CreateFileResponse{
+		ID: info.ID, URL: info.URL, Name: info.Name, Size: info.Size,
+		Privacy:   ogenapi.CreateFileResponsePrivacy(info.Privacy),
+		Downloads: info.Downloads, BurnAfterDownload: info.BurnAfterDownload,
+		ExpiresAt: info.ExpiresAt, CreatedAt: info.CreatedAt,
+		// The edit code is in the upload response only.
+		EditCode: file.EditCode,
+	}
 
 	w.Header().Set("Location", "/"+file.ID)
 	h.writeJSON(w, r, http.StatusCreated, body)
@@ -191,7 +203,7 @@ func (h *FileHandler) Metadata(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	file, err := h.manager.Info(r.Context(), r.PathValue("id"), h.pageAccess(r))
+	file, err := h.manager.Inspect(r.Context(), r.PathValue("id"), h.reader(r))
 	if err != nil {
 		if errors.Is(err, domain.ErrForbidden) {
 			middleware.WriteUnauthorized(w)
@@ -229,10 +241,10 @@ func (h *FileHandler) DownloadFileForm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	opts := h.pageAccess(r)
-	opts.AllowBurn = true
+	reader := h.reader(r)
+	reader.AllowBurn = true
 
-	h.sendFile(w, r, r.PathValue("id"), opts)
+	h.sendFile(w, r, r.PathValue("id"), reader)
 }
 
 // Delete handles DELETE /files/{id} with the X-Edit-Code header, or by the owner.
@@ -243,22 +255,7 @@ func (h *FileHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	slug := r.PathValue("id")
-
-	allowed, err := h.mutationAllowed(r, slug)
-	if err != nil {
-		h.writeAPIError(w, r, err)
-
-		return
-	}
-
-	if !allowed {
-		middleware.WriteUnauthorized(w)
-
-		return
-	}
-
-	err = h.manager.Delete(r.Context(), slug, editCodeHeader(r), middleware.CallerIDFromCtx(r.Context()))
+	err := h.manager.Delete(r.Context(), r.PathValue("id"), editCodeHeader(r), h.reader(r))
 	if err != nil {
 		h.writeAPIError(w, r, err)
 
@@ -303,24 +300,7 @@ func (h *FileHandler) UpdateFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	slug := r.PathValue("id")
-
-	allowed, err := h.mutationAllowed(r, slug)
-	if err != nil {
-		h.writeUpdateError(w, r, err)
-
-		return
-	}
-
-	if !allowed {
-		middleware.WriteUnauthorized(w)
-
-		return
-	}
-
-	callerID := middleware.CallerIDFromCtx(r.Context())
-
-	file, err := h.manager.Update(r.Context(), slug, editCodeHeader(r), callerID, opts)
+	file, err := h.manager.Update(r.Context(), r.PathValue("id"), editCodeHeader(r), h.reader(r), opts)
 	if err != nil {
 		h.writeUpdateError(w, r, err)
 
@@ -360,26 +340,6 @@ func (h *FileHandler) logDeadlineError(r *http.Request, err error) {
 	}
 }
 
-// mutationAllowed reports whether the caller of r can try to change the file slug. With
-// accounts on, a caller that cannot see a private file gets 401, as for links. The edit-code
-// check then does not tell a stranger that the file exists. A failed Peek stops the mutation
-// (fail-closed), as for notes and links: the caller gets the error, 404 for a missing file and
-// 500 for a storage failure.
-func (h *FileHandler) mutationAllowed(r *http.Request, slug string) (bool, error) {
-	if h.authMgr == nil {
-		return true, nil
-	}
-
-	file, err := h.manager.Peek(r.Context(), slug)
-	if err != nil {
-		return false, fmt.Errorf("check file access: %w", err)
-	}
-
-	visible := file.VisibleTo(middleware.CallerIDFromCtx(r.Context()), middleware.AuthenticatedFromCtx(r.Context()))
-
-	return visible, nil
-}
-
 // updateOptions converts the PUT body into files.UpdateOptions. It checks the values before
 // the usecase call, so that an invalid request does not read the record.
 func (h *FileHandler) updateOptions(body fileUpdateJSON) (files.UpdateOptions, error) {
@@ -413,7 +373,7 @@ func (h *FileHandler) updateOptions(body fileUpdateJSON) (files.UpdateOptions, e
 		opts.Privacy = &privacy
 	}
 
-	err := requirePrivacySupport(accountMode(h.authMgr != nil), opts.Privacy)
+	err := requirePrivacySupport(h.accounts, opts.Privacy)
 	if err != nil {
 		return opts, err
 	}
@@ -444,17 +404,17 @@ func (h *FileHandler) writeUpdateError(w http.ResponseWriter, r *http.Request, e
 		h.log.ErrorContext(r.Context(), "update file failed", "err", err)
 	}
 
-	h.writeError(w, r, err)
+	h.writeMutationError(w, r, err)
 }
 
 // writeAPIError writes err as JSON. Unknown errors are logged, because the client sees only a
-// 500, as in respondError.
+// 500, as in respondError. A caller that cannot see the file gets 401 (writeMutationError).
 func (h *FileHandler) writeAPIError(w http.ResponseWriter, r *http.Request, err error) {
 	if status, _ := domainErrStatus(err); status == http.StatusInternalServerError {
 		h.log.ErrorContext(r.Context(), "file request failed", "err", err)
 	}
 
-	h.writeError(w, r, err)
+	h.writeMutationError(w, r, err)
 }
 
 // editCodeHeader returns the edit code of a file mutation. Files take it only from the header;
@@ -463,19 +423,31 @@ func editCodeHeader(r *http.Request) string {
 	return strings.TrimSpace(r.Header.Get("X-Edit-Code"))
 }
 
-func (h *FileHandler) toJSON(r *http.Request, file *domain.File) fileJSON {
-	return fileJSON{
-		CreatedAt:         file.CreatedAt,
-		ExpiresAt:         file.ExpiresAt,
-		ID:                file.ID,
-		URL:               h.scheme(r) + "://" + r.Host + "/" + file.ID,
+// toJSON returns the generated FileInfo model of file (openapi.yaml), as the JSON responses of
+// GET and PUT /files/{id} use it. ADR-0002 keeps the generated types for /files; only the
+// server routing is by hand. A file without expiry has no expires_at field, as before.
+func (h *FileHandler) toJSON(r *http.Request, file *domain.File) *ogenapi.FileInfo {
+	info := &ogenapi.FileInfo{
+		ID: file.ID,
+		URL: url.URL{
+			Scheme: h.scheme(r), Host: r.Host, Path: "/" + file.ID,
+			Opaque: "", User: nil, RawPath: "", OmitHost: false, ForceQuery: false,
+			RawQuery: "", Fragment: "", RawFragment: "",
+		},
 		Name:              file.Name,
-		Privacy:           string(file.EffectivePrivacy()),
-		EditCode:          "",
 		Size:              file.Size,
+		Privacy:           ogenapi.FileInfoPrivacy(file.EffectivePrivacy()),
 		Downloads:         file.Downloads,
 		BurnAfterDownload: file.BurnAfterDownload,
+		ExpiresAt:         ogenapi.OptNilDateTime{Value: time.Time{}, Set: false, Null: false},
+		CreatedAt:         file.CreatedAt,
 	}
+
+	if file.ExpiresAt != nil {
+		info.ExpiresAt = ogenapi.NewOptNilDateTime(*file.ExpiresAt)
+	}
+
+	return info
 }
 
 func (h *FileHandler) writeJSON(w http.ResponseWriter, r *http.Request, status int, body any) {
@@ -693,7 +665,7 @@ func (h *FileHandler) uploadOptions(r *http.Request, fields map[string]string) (
 		opts.BurnAfterDownload = burn
 	}
 
-	err := requirePrivacySupport(accountMode(h.authMgr != nil), opts.Privacy)
+	err := requirePrivacySupport(h.accounts, opts.Privacy)
 	if err != nil {
 		return opts, err
 	}
@@ -703,13 +675,16 @@ func (h *FileHandler) uploadOptions(r *http.Request, fields map[string]string) (
 
 // serveFile sends the content of the file slug to a GET or HEAD request.
 func (h *FileHandler) serveFile(w http.ResponseWriter, r *http.Request, slug string) {
-	h.sendFile(w, r, slug, h.accessOptions(r))
+	reader := h.reader(r)
+	reader.AllowBurn = explicitDownload(r)
+
+	h.sendFile(w, r, slug, reader)
 }
 
 // sendFile sends the content of the file slug, or the error in the format of the request.
-func (h *FileHandler) sendFile(w http.ResponseWriter, r *http.Request, slug string, opts files.AccessOptions) {
+func (h *FileHandler) sendFile(w http.ResponseWriter, r *http.Request, slug string, reader domain.Reader) {
 	if r.Method == http.MethodHead {
-		file, err := h.manager.Info(r.Context(), slug, opts)
+		file, err := h.manager.Inspect(r.Context(), slug, reader)
 		if err != nil {
 			h.respondError(w, r, err)
 
@@ -724,7 +699,7 @@ func (h *FileHandler) sendFile(w http.ResponseWriter, r *http.Request, slug stri
 	deadline := newTransferDeadline(w, h.idleTimeout)
 	h.logDeadlineError(r, deadline.downloadStarted())
 
-	download, err := h.manager.Download(r.Context(), slug, opts)
+	download, err := h.manager.Download(r.Context(), slug, reader)
 	if err != nil {
 		h.writeDownloadError(w, r, slug, err)
 
@@ -796,22 +771,10 @@ func isFileUpload(r *http.Request) bool {
 	return r.Method == http.MethodPost && r.URL.Path == "/files"
 }
 
-// fileJSON is the JSON form of a file. EditCode is set only in the upload response.
-type fileJSON struct {
-	CreatedAt         time.Time  `json:"created_at"`
-	ExpiresAt         *time.Time `json:"expires_at,omitempty"`
-	ID                string     `json:"id"`
-	URL               string     `json:"url"`
-	Name              string     `json:"name"`
-	Privacy           string     `json:"privacy"`
-	EditCode          string     `json:"edit_code,omitempty"`
-	Size              int64      `json:"size"`
-	Downloads         int        `json:"downloads"`
-	BurnAfterDownload bool       `json:"burn_after_download"`
-}
-
 // fileUpdateJSON is the body of PUT /files/{id}. A nil field keeps the current value. TTL stays
-// raw, because an omitted ttl and a null ttl have different meanings.
+// raw, because an omitted ttl and a null ttl have different meanings. The decoder stays by hand:
+// it refuses unknown fields (a client that sends edit_code in the body must know that the server
+// does not use it), and the generated ogenapi.UpdateFileRequest decoder skips them.
 type fileUpdateJSON struct {
 	Privacy           *string         `json:"privacy"`
 	BurnAfterDownload *bool           `json:"burn_after_download"`
@@ -908,13 +871,4 @@ func isAttrChar(char byte) bool {
 	default:
 		return strings.IndexByte("!#$&+-.^_`|~", char) >= 0
 	}
-}
-
-// accessOptions identifies the reader of a download. With accounts off, the privacy check
-// does not apply, as for notes and links.
-func (h *FileHandler) accessOptions(r *http.Request) files.AccessOptions {
-	opts := h.pageAccess(r)
-	opts.AllowBurn = explicitDownload(r)
-
-	return opts
 }

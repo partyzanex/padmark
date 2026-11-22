@@ -1,6 +1,7 @@
 package web
 
 import (
+	"errors"
 	"net/http"
 	"time"
 
@@ -9,36 +10,16 @@ import (
 )
 
 // editNote renders the note editor pre-filled with existing content; Handler.EditPage calls it
-// for GET /edit/{id...} when the slug names a note. peeked and peekErr are the result of the
-// Peek that Handler.EditPage did, so the note is not read a second time.
-// Gated by the same privacy check as GetNote (handlePrivateAuth) — without it, an authenticated
-// caller who is not the note's owner could read a privacy=owner note's plaintext content here,
-// bypassing the read restriction that GET /notes/{id} enforces. The editor never burns, so it
-// must not become a side door around the read policy either: an expired note is deleted and
-// answered 410, and a burn-after-reading note's content is withheld (saving replaces it).
-func (h *NoteHandler) editNote(w http.ResponseWriter, r *http.Request, id string, peeked *domain.Note, peekErr error) {
-	if peekErr != nil {
-		// The same answers as before the dispatch: with accounts, handlePrivateAuth negotiated
-		// the format of the error; without accounts the editor showed the error page.
-		if h.authMgr != nil {
-			h.writeNoteError(w, r, peekErr)
-
-			return
-		}
-
-		h.writeErrorPage(w, r, peekErr)
-
-		return
-	}
-
-	note, handled := h.handlePrivateAuth(w, r, id, peeked)
-	if handled {
-		return
-	}
-
-	err := h.manager.EnforceExpiry(r.Context(), id, note)
+// for GET /edit/{id...}. missing runs when no note has the slug (see serveNote).
+// The editor reads the note with Inspect: the privacy check of a read applies — without it, an
+// authenticated caller who is not the note's owner could read a privacy=owner note's plaintext
+// content here. The editor never burns, so it must not become a side door around the read
+// policy either: an expired note is deleted and answered 410, and a burn-after-reading note's
+// content is withheld (saving replaces it).
+func (h *NoteHandler) editNote(w http.ResponseWriter, r *http.Request, id string, missing func() bool) {
+	note, err := h.manager.Inspect(r.Context(), id, h.reader(r))
 	if err != nil {
-		h.writeErrorPage(w, r, err)
+		h.writeEditorError(w, r, err, missing)
 
 		return
 	}
@@ -52,8 +33,7 @@ func (h *NoteHandler) editNote(w http.ResponseWriter, r *http.Request, id string
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
-	usr := middleware.UserFromContext(r)
-	isOwner := usr != nil && note.OwnedBy(usr.ID)
+	isOwner := note.OwnedBy(middleware.CallerIDFromCtx(r.Context()))
 
 	header := h.header(r, headerKindPlain)
 
@@ -75,6 +55,20 @@ func (h *NoteHandler) editNote(w http.ResponseWriter, r *http.Request, id string
 	})
 	if err != nil {
 		h.log.ErrorContext(r.Context(), "render edit template", "id", domain.HashSlug(id), "err", err)
+	}
+}
+
+// writeEditorError answers an editor that cannot open the note. A missing note first goes to
+// missing, when it is set; a caller that cannot see the note gets the privacy answer; other
+// errors get the error page, because the editor is a page.
+func (h *NoteHandler) writeEditorError(w http.ResponseWriter, r *http.Request, err error, missing func() bool) {
+	switch {
+	case errors.Is(err, domain.ErrNotFound) && missing != nil && missing():
+		return
+	case errors.Is(err, domain.ErrForbidden):
+		h.denyPrivate(w, r)
+	default:
+		h.writeErrorPage(w, r, err)
 	}
 }
 

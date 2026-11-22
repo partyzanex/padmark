@@ -31,7 +31,7 @@ func (s *FileHandlerSuite) TestSuccessPage_AnonymousWithAccounts() {
 	router := s.newAuthRouter(NewMockAuthManager(s.ctrl))
 
 	s.Run("file", func() {
-		s.files.EXPECT().Info(gomock.Any(), "abc", accountAccess(false)).
+		s.files.EXPECT().Inspect(gomock.Any(), "abc", accountAccess(false)).
 			Return(fileRecord("a.txt", 3, 0, false), nil)
 
 		rec := httptest.NewRecorder()
@@ -55,7 +55,7 @@ func (s *FileHandlerSuite) TestSuccessPage_AnonymousWithAccounts() {
 	})
 
 	s.Run("private file of another user", func() {
-		s.files.EXPECT().Info(gomock.Any(), "abc", accountAccess(false)).Return(nil, domain.ErrForbidden)
+		s.files.EXPECT().Inspect(gomock.Any(), "abc", accountAccess(false)).Return(nil, domain.ErrForbidden)
 
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, browserGet("/success?kind=file&id=abc"))
@@ -70,7 +70,7 @@ func (s *FileHandlerSuite) TestSuccessPage_AnonymousWithAccounts() {
 // TestSuccessPage_FileLookupFailsHidesSettings (R-48): without the record and without the values
 // from the upload response, the page does not show "Public" and "never expires" as facts.
 func (s *FileHandlerSuite) TestSuccessPage_FileLookupFailsHidesSettings() {
-	s.files.EXPECT().Info(gomock.Any(), "abc", access(false)).Return(nil, domain.ErrStorageUnavailable)
+	s.files.EXPECT().Inspect(gomock.Any(), "abc", access(false)).Return(nil, domain.ErrStorageUnavailable)
 
 	rec := s.serve(browserGet("/success?kind=file&id=abc"))
 	body := rec.Body.String()
@@ -85,7 +85,7 @@ func (s *FileHandlerSuite) TestSuccessPage_FileLookupFailsHidesSettings() {
 // TestSuccessPage_FileLookupFailsUsesQuery (R-48): the upload page puts the settings of the upload
 // response into the query, and the page shows them when it cannot read the record.
 func (s *FileHandlerSuite) TestSuccessPage_FileLookupFailsUsesQuery() {
-	s.files.EXPECT().Info(gomock.Any(), "abc", access(false)).Return(nil, domain.ErrStorageUnavailable)
+	s.files.EXPECT().Inspect(gomock.Any(), "abc", access(false)).Return(nil, domain.ErrStorageUnavailable)
 
 	rec := s.serve(browserGet("/success?kind=file&id=abc&privacy=owner&burn=1&expires=2030-01-02T03:04:05Z"))
 	body := rec.Body.String()
@@ -100,7 +100,7 @@ func (s *FileHandlerSuite) TestSuccessPage_FileLookupFailsUsesQuery() {
 
 // TestSuccessPage_FileRecordWins: the record replaces the query values when the read succeeds.
 func (s *FileHandlerSuite) TestSuccessPage_FileRecordWins() {
-	s.files.EXPECT().Info(gomock.Any(), "abc", access(false)).Return(fileRecord("a.txt", 3, 0, false), nil)
+	s.files.EXPECT().Inspect(gomock.Any(), "abc", access(false)).Return(fileRecord("a.txt", 3, 0, false), nil)
 
 	rec := s.serve(browserGet("/success?kind=file&id=abc&privacy=owner&burn=1"))
 	body := rec.Body.String()
@@ -129,13 +129,11 @@ func (s *FileHandlerSuite) TestEditFilePage_PrivateWithoutAccounts() {
 	}
 }
 
-// TestEditFilePage_PrivateWithAccounts: with accounts on, the edit page of a private file sends
-// an anonymous browser to the sign-in page and does not show the file name.
+// TestEditFilePage_PrivateWithAccounts: with accounts on, the usecase refuses the anonymous
+// reader of a private file (ErrForbidden); the edit page sends the browser to the sign-in page
+// and does not show the file name.
 func (s *FileHandlerSuite) TestEditFilePage_PrivateWithAccounts() {
-	ownerID := uuid.New()
-	stored := fileRecord("secret-name.txt", 3, 0, false)
-	stored.OwnerID, stored.Privacy = &ownerID, new(domain.PrivacyOwner)
-	s.expectEditFile(stored, nil)
+	s.expectEditFile(nil, domain.ErrForbidden)
 
 	rec := httptest.NewRecorder()
 	s.newAuthRouter(NewMockAuthManager(s.ctrl)).ServeHTTP(rec, browserGet("/edit/abc"))
@@ -278,7 +276,7 @@ func (s *FileHandlerSuite) TestFilePage_DownloadButton() {
 	s.Run("burn file", func() {
 		file := fileRecord("a.txt", 3, 0, true)
 		s.expectRootFile(file, true)
-		s.files.EXPECT().Info(gomock.Any(), "abc", access(false)).Return(file, nil)
+		s.files.EXPECT().Inspect(gomock.Any(), "abc", access(false)).Return(file, nil)
 
 		body := s.serve(browserGet("/abc")).Body.String()
 
@@ -290,7 +288,7 @@ func (s *FileHandlerSuite) TestFilePage_DownloadButton() {
 	s.Run("other file", func() {
 		file := fileRecord("a.txt", 3, 0, false)
 		s.expectRootFile(file, true)
-		s.files.EXPECT().Info(gomock.Any(), "abc", access(false)).Return(file, nil)
+		s.files.EXPECT().Inspect(gomock.Any(), "abc", access(false)).Return(file, nil)
 
 		body := s.serve(browserGet("/abc")).Body.String()
 

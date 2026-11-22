@@ -25,33 +25,12 @@ func newBurner(storage Storage, encryptor Encryptor, log *slog.Logger) *burner {
 	return &burner{storage: storage, encryptor: encryptor, log: log}
 }
 
-// applyPolicy applies expiry and burn-after-reading logic to an already-fetched note. Plain
-// TTL expiry and burn-timer expiry share the same ExpiresAt field, so both are enforced here
-// in one pass rather than split across two call sites.
-func (b *burner) applyPolicy(ctx context.Context, id string, note *domain.Note) (*domain.Note, error) {
-	err := b.enforceExpiry(ctx, id, note)
-	if err != nil {
-		return nil, fmt.Errorf("enforce expiry: %w", err)
-	}
-
-	if note.BurnAfterReading {
-		operationResult, operationErr := b.burnNote(ctx, id, note)
-		if operationErr != nil {
-			return operationResult, fmt.Errorf("burn note: %w", operationErr)
-		}
-
-		return operationResult, nil
-	}
-
-	return note, nil
-}
-
-// enforceExpiry is the expiry half of applyPolicy: an expired note (plain TTL or a started burn
-// timer) is deleted and ErrExpired returned. It never consumes a note or starts a burn timer.
+// enforceExpiry is the expiry rule of a read: an expired note (plain TTL or a started burn timer)
+// is deleted and ErrExpired returned. It never consumes a note or starts a burn timer.
 // The delete checks the expiry again in storage, because the snapshot can be old: if the owner
 // has extended the note since, the row stays and only this request sees the note as expired.
 func (b *burner) enforceExpiry(ctx context.Context, id string, note *domain.Note) error {
-	if note.ExpiresAt == nil || !time.Now().After(*note.ExpiresAt) {
+	if !note.Expired(time.Now()) {
 		return nil
 	}
 
@@ -83,6 +62,8 @@ func (b *burner) applyViewIncrement(ctx context.Context, id string, note *domain
 	}
 }
 
+// burnNote applies burn-after-reading to a note that the reader may burn: a note with a burn TTL
+// starts its timer, any other burn note is consumed.
 func (b *burner) burnNote(ctx context.Context, id string, note *domain.Note) (*domain.Note, error) {
 	if note.BurnTTL > 0 {
 		operationResult, operationErr := b.startTimer(ctx, id, note)

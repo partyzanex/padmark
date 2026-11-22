@@ -91,7 +91,9 @@ func TestFile_VisibleTo(t *testing.T) {
 			t.Parallel()
 
 			file := accessFile(testCase.privacy, testCase.owner)
-			assert.Equal(t, testCase.want, file.VisibleTo(testCase.caller, testCase.authenticated))
+			assert.Equal(t, testCase.want, file.VisibleTo(Reader{
+				CallerID: testCase.caller, Authenticated: testCase.authenticated, AllowBurn: false, SkipPrivacy: false,
+			}))
 		})
 	}
 }

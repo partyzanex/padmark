@@ -69,30 +69,16 @@ func (h *LinkHandler) CreateLinkPage(w http.ResponseWriter, r *http.Request) {
 
 // LinkPage handles GET /links/{id} for a client that prefers HTML: the page of a short link, as
 // the note page is the page of a note. GET /{id} stays the redirect, because to follow the short
-// link is its function. The page reads the link with Peek: it does not count a view and does not
-// burn a burn_after_click link. It applies the privacy check and the expiry check of the JSON
-// read GET /links/{id}, in the same order.
+// link is its function. The page reads the link with Inspect: it does not count a view and does
+// not burn a burn_after_click link. It has the privacy and expiry rules of the JSON read
+// GET /links/{id}.
 func (h *LinkHandler) LinkPage(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	reader := h.reader(r)
 
-	link, err := h.manager.Peek(r.Context(), id)
+	link, err := h.manager.Inspect(r.Context(), id, reader)
 	if err != nil {
-		h.writeErrorPage(w, r, err)
-
-		return
-	}
-
-	callerID := middleware.CallerIDFromCtx(r.Context())
-	authenticated := h.isAuthenticated(r)
-
-	if h.authMgr != nil && !link.VisibleTo(callerID, authenticated) {
-		h.denyPrivate(w, r)
-
-		return
-	}
-
-	if link.Expired(time.Now()) {
-		h.writeErrorPage(w, r, domain.ErrExpired)
+		h.writeLinkPageError(w, r, err)
 
 		return
 	}
@@ -113,8 +99,8 @@ func (h *LinkHandler) LinkPage(w http.ResponseWriter, r *http.Request) {
 		Nonce:          middleware.NonceFromContext(r.Context()),
 		Views:          link.Views,
 		BurnAfterClick: link.BurnAfterClick,
-		// The same rule as the Edit action of the note page (renderNoteHTML).
-		CanEdit: link.VisibleTo(callerID, authenticated),
+		// The same rule as the Edit action of the note page (writeNotePage).
+		CanEdit: link.VisibleTo(reader),
 	}
 
 	if link.EffectiveDirectRedirect(h.directRedirect) {
@@ -139,37 +125,37 @@ func (h *LinkHandler) LinkPage(w http.ResponseWriter, r *http.Request) {
 // editLinkIfExists renders the editor of the short link id and returns true. It returns false
 // when no short link has the slug, so that Handler.EditPage can try a file.
 func (h *LinkHandler) editLinkIfExists(w http.ResponseWriter, r *http.Request, id string) bool {
-	link, err := h.manager.Peek(r.Context(), id)
+	link, err := h.manager.Inspect(r.Context(), id, h.reader(r))
 	if errors.Is(err, domain.ErrNotFound) {
 		return false
 	}
 
-	h.editLink(w, r, id, link, err)
+	if err != nil {
+		h.writeLinkPageError(w, r, err)
+
+		return true
+	}
+
+	h.editLink(w, r, id, link)
 
 	return true
 }
 
-// editLink renders the short-link editor. It reads metadata only: opening an editor must never
-// consume a burn link. peekErr is the error of the Peek that loaded link.
-func (h *LinkHandler) editLink(w http.ResponseWriter, r *http.Request, id string, link *domain.Link, peekErr error) {
-	if peekErr != nil {
-		h.writeErrorPage(w, r, peekErr)
-
-		return
-	}
-
-	if h.authMgr != nil && !link.VisibleTo(middleware.CallerIDFromCtx(r.Context()), h.isAuthenticated(r)) {
+// writeLinkPageError answers a link page or a link editor that cannot show the link: the privacy
+// answer of common.denyPrivate for a hidden link, the error page for other errors.
+func (h *LinkHandler) writeLinkPageError(w http.ResponseWriter, r *http.Request, err error) {
+	if errors.Is(err, domain.ErrForbidden) {
 		h.denyPrivate(w, r)
 
 		return
 	}
 
-	if link.Expired(time.Now()) {
-		h.writeErrorPage(w, r, domain.ErrExpired)
+	h.writeErrorPage(w, r, err)
+}
 
-		return
-	}
-
+// editLink renders the short-link editor of link, which Inspect returned. To open an editor
+// never consumes a burn link and never counts a view.
+func (h *LinkHandler) editLink(w http.ResponseWriter, r *http.Request, id string, link *domain.Link) {
 	header := h.header(r, headerKindPlain)
 
 	data := linkEditorViewData{

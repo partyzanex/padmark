@@ -220,14 +220,14 @@ func (s *ManagerSuite) TestDelete_SlugTakenByNewFile() {
 	s.storage.EXPECT().Delete(gomock.Any(), domain.HashSlug("abc"), "obj").Return(domain.ErrNotFound)
 	// No object delete: the object of the new file must stay.
 
-	err := s.manager.Delete(s.T().Context(), "abc", "code", uuid.Nil)
+	err := s.manager.Delete(s.T().Context(), "abc", "code", skipPrivacy())
 	s.Require().ErrorIs(err, domain.ErrNotFound)
 }
 
 // --- SkipPrivacy (R-23) ---
 
-func skipPrivacy() AccessOptions {
-	return AccessOptions{CallerID: uuid.Nil, Authenticated: false, AllowBurn: true, SkipPrivacy: true}
+func skipPrivacy() domain.Reader {
+	return domain.Reader{CallerID: uuid.Nil, Authenticated: false, AllowBurn: true, SkipPrivacy: true}
 }
 
 // privateFile returns a file that only its owner can see.
@@ -248,7 +248,7 @@ func (s *ManagerSuite) TestSkipPrivacy_Info() {
 	s.Run("info", func() {
 		s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(privateFile(false), nil)
 
-		file, err := s.manager.Info(ctx, "abc", skip)
+		file, err := s.manager.Inspect(ctx, "abc", skip)
 		s.Require().NoError(err)
 		s.Equal("report.pdf", file.Name)
 		s.Nil(file.ContentKey, "Info does not return the content key")
@@ -257,7 +257,7 @@ func (s *ManagerSuite) TestSkipPrivacy_Info() {
 	s.Run("info without skip", func() {
 		s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(privateFile(false), nil)
 
-		_, err := s.manager.Info(ctx, "abc", anonymous(true))
+		_, err := s.manager.Inspect(ctx, "abc", anonymous(true))
 		s.Require().ErrorIs(err, domain.ErrForbidden)
 	})
 }
@@ -305,14 +305,14 @@ func (s *ManagerSuite) TestSkipPrivacy_ExpiryAndDelete() {
 		s.objects.EXPECT().Delete(gomock.Any(), "obj").Return(nil)
 		s.storage.EXPECT().DeleteExpired(gomock.Any(), gomock.Any(), "obj", gomock.Any()).Return(nil)
 
-		_, err := s.manager.Info(ctx, "abc", skip)
+		_, err := s.manager.Inspect(ctx, "abc", skip)
 		s.Require().ErrorIs(err, domain.ErrExpired)
 	})
 
 	s.Run("delete still needs the edit code", func() {
 		s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(privateFile(false), nil)
 
-		s.Require().ErrorIs(s.manager.Delete(ctx, "abc", "wrong", uuid.Nil), domain.ErrInvalidEditCode)
+		s.Require().ErrorIs(s.manager.Delete(ctx, "abc", "wrong", skipPrivacy()), domain.ErrInvalidEditCode)
 	})
 }
 
@@ -615,13 +615,13 @@ func (s *ManagerSuite) TestDelete_StorageErrors() {
 	s.Run("read", func() {
 		s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(nil, dbErr)
 
-		s.Require().ErrorIs(s.manager.Delete(s.T().Context(), "abc", "code", uuid.Nil), dbErr)
+		s.Require().ErrorIs(s.manager.Delete(s.T().Context(), "abc", "code", skipPrivacy()), dbErr)
 	})
 
 	s.Run("write", func() {
 		s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(storedFile(false), nil)
 		s.storage.EXPECT().Delete(gomock.Any(), gomock.Any(), "obj").Return(dbErr)
 
-		s.Require().ErrorIs(s.manager.Delete(s.T().Context(), "abc", "code", uuid.Nil), dbErr)
+		s.Require().ErrorIs(s.manager.Delete(s.T().Context(), "abc", "code", skipPrivacy()), dbErr)
 	})
 }

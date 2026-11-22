@@ -6,7 +6,6 @@ import (
 	"io"
 	"strings"
 
-	"github.com/google/uuid"
 	"go.uber.org/mock/gomock"
 
 	"github.com/partyzanex/padmark/internal/domain"
@@ -131,7 +130,7 @@ func (s *ManagerSuite) TestMetrics_DeleteKeepsObjectAfterStorageError() {
 	metrics.EXPECT().IncDeleted(DeleteReasonUser)
 	metrics.EXPECT().IncStorageErrors(StorageOpDelete).Times(1)
 
-	s.Require().NoError(s.manager.Delete(s.T().Context(), "abc", "code", uuid.Nil))
+	s.Require().NoError(s.manager.Delete(s.T().Context(), "abc", "code", skipPrivacy()))
 }
 
 func (s *ManagerSuite) TestMetrics_RecordFailureRemovesObject() {

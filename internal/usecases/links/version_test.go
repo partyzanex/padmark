@@ -1,10 +1,8 @@
 package links
 
 import (
-	"context"
 	"time"
 
-	"github.com/google/uuid"
 	"go.uber.org/mock/gomock"
 
 	"github.com/partyzanex/padmark/internal/domain"
@@ -26,7 +24,7 @@ func (s *ManagerTestSuite) TestDelete_UsesCheckedVersion() {
 	s.storage.EXPECT().GetByID(gomock.Any(), domain.HashSlug("the-slug")).Return(storedLink("secret123456", nil), nil)
 	s.storage.EXPECT().Delete(gomock.Any(), domain.HashSlug("the-slug"), "secret123456").Return(nil)
 
-	s.Require().NoError(s.manager.Delete(s.T().Context(), "the-slug", "secret123456", uuid.Nil))
+	s.Require().NoError(s.manager.Delete(s.T().Context(), "the-slug", "secret123456", openReader()))
 }
 
 // TestDelete_NewVersionIsNotFound verifies that a refused stale delete reaches the caller as
@@ -35,7 +33,7 @@ func (s *ManagerTestSuite) TestDelete_NewVersionIsNotFound() {
 	s.storage.EXPECT().GetByID(gomock.Any(), domain.HashSlug("the-slug")).Return(storedLink("secret123456", nil), nil)
 	s.storage.EXPECT().Delete(gomock.Any(), domain.HashSlug("the-slug"), "secret123456").Return(domain.ErrNotFound)
 
-	err := s.manager.Delete(s.T().Context(), "the-slug", "secret123456", uuid.Nil)
+	err := s.manager.Delete(s.T().Context(), "the-slug", "secret123456", openReader())
 
 	s.Require().ErrorIs(err, domain.ErrNotFound)
 }
@@ -49,7 +47,7 @@ func (s *ManagerTestSuite) TestRedirect_ExpiredUsesConditionalDelete() {
 		Return(storedLink("hash:expired", &past), nil)
 	s.storage.EXPECT().DeleteExpired(gomock.Any(), domain.HashSlug("expired-slug")).Return(nil)
 
-	_, err := s.manager.Redirect(s.T().Context(), "expired-slug")
+	_, err := s.manager.Follow(s.T().Context(), "expired-slug", openReader())
 
 	s.Require().ErrorIs(err, domain.ErrExpired)
 }
@@ -59,14 +57,12 @@ func (s *ManagerTestSuite) TestRedirect_ExpiredUsesConditionalDelete() {
 // now. The manager must not fall back to an unconditional Delete: the strict mock fails on it.
 func (s *ManagerTestSuite) TestRedirect_ExtendedAfterExpiryCheckStays() {
 	past := time.Now().Add(-time.Hour)
-	for _, redirect := range []func(ctx context.Context, slug string) (*domain.Link, error){
-		s.manager.Redirect, s.manager.RedirectWithoutBurn,
-	} {
+	for _, reader := range []domain.Reader{openReader(), heldReader()} {
 		s.storage.EXPECT().GetByID(gomock.Any(), domain.HashSlug("extended")).
 			Return(storedLink("hash:extended", &past), nil)
 		s.storage.EXPECT().DeleteExpired(gomock.Any(), domain.HashSlug("extended")).Return(domain.ErrNotFound)
 
-		_, err := redirect(s.T().Context(), "extended")
+		_, err := s.manager.Follow(s.T().Context(), "extended", reader)
 		s.Require().ErrorIs(err, domain.ErrExpired, "this request still saw the old expiry")
 	}
 }

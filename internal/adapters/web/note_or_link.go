@@ -15,27 +15,26 @@ import (
 func (h *Handler) GetNoteOrLink(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	note, err := h.NoteHandler.manager.Peek(r.Context(), id)
-	if errors.Is(err, domain.ErrNotFound) && !strings.Contains(id, "/") {
+	h.serveNote(w, r, id, h.otherRecord(id, func() bool {
 		link, linkErr := h.followLink(r, id)
-		if !errors.Is(linkErr, domain.ErrNotFound) {
-			h.respondLink(w, r, id, link, linkErr)
-
-			return
+		if errors.Is(linkErr, domain.ErrNotFound) {
+			return h.serveFileIfExists(w, r, id)
 		}
 
-		if h.serveFileIfExists(w, r, id) {
-			return
-		}
+		h.respondLink(w, r, id, link, linkErr)
+
+		return true
+	}))
+}
+
+// otherRecord returns answer as the missing fallback of a note read, or nil for a multi-segment
+// slug, which only a note can have.
+func (*Handler) otherRecord(id string, answer func() bool) func() bool {
+	if strings.Contains(id, "/") {
+		return nil
 	}
 
-	if err != nil {
-		h.writeNoteError(w, r, err)
-
-		return
-	}
-
-	h.serveNote(w, r, id, note)
+	return answer
 }
 
 // serveFileIfExists answers for the file id and returns true, or returns false when files are
@@ -70,12 +69,7 @@ func (h *Handler) serveFileIfExists(w http.ResponseWriter, r *http.Request, id s
 func (h *Handler) EditPage(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	note, err := h.NoteHandler.manager.Peek(r.Context(), id)
-	if errors.Is(err, domain.ErrNotFound) && !strings.Contains(id, "/") {
-		if h.editLinkIfExists(w, r, id) || h.files.editFileIfExists(w, r, id) {
-			return
-		}
-	}
-
-	h.editNote(w, r, id, note, err)
+	h.editNote(w, r, id, h.otherRecord(id, func() bool {
+		return h.editLinkIfExists(w, r, id) || h.files.editFileIfExists(w, r, id)
+	}))
 }

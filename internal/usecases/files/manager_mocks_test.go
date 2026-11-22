@@ -129,7 +129,7 @@ func (mr *MockStorageMockRecorder) GetByID(ctx, id any) *gomock.Call {
 }
 
 // IncrementDownloadsVisible mocks base method.
-func (m *MockStorage) IncrementDownloadsVisible(ctx context.Context, id, objectKey string, reader AccessOptions) error {
+func (m *MockStorage) IncrementDownloadsVisible(ctx context.Context, id, objectKey string, reader domain.Reader) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "IncrementDownloadsVisible", ctx, id, objectKey, reader)
 	ret0, _ := ret[0].(error)

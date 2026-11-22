@@ -20,41 +20,6 @@ import (
 	"github.com/partyzanex/padmark/internal/domain"
 )
 
-// passthroughEncryptor returns the metadata unchanged.
-type passthroughEncryptor struct{}
-
-func (passthroughEncryptor) Encrypt(pt, _ string) (string, error)    { return pt, nil }
-func (passthroughEncryptor) Decrypt(ct, _, _ string) (string, error) { return ct, nil }
-
-// identityHasher keeps edit codes as plaintext; a user code gets the "user:" prefix, so tests
-// can see which hash the manager selected.
-type identityHasher struct{}
-
-func (identityHasher) Hash(code string) (string, error)             { return code, nil }
-func (identityHasher) HashUserProvided(code string) (string, error) { return "user:" + code, nil }
-func (identityHasher) Verify(hash, code string) bool                { return hash == code || hash == "user:"+code }
-
-// passthroughCipher copies the content without a change and uses a fixed key.
-type passthroughCipher struct{}
-
-func (passthroughCipher) NewKey() ([]byte, error) { return []byte("key"), nil }
-
-func (passthroughCipher) Encrypt(_ []byte, dst io.Writer, src io.Reader) error {
-	_, err := io.Copy(dst, src)
-
-	return err
-}
-
-func (passthroughCipher) Decrypt(_ []byte, dst io.Writer, src io.Reader) error {
-	_, err := io.Copy(dst, src)
-
-	return err
-}
-
-type noopSlugLock struct{}
-
-func (noopSlugLock) Lock(context.Context, string) (func(), error) { return func() {}, nil }
-
 const testMeta = `{"name":"report.pdf","key":"a2V5"}`
 
 type ManagerSuite struct {
@@ -84,10 +49,10 @@ func (s *ManagerSuite) SetupTest() {
 	s.manager = NewManager(&Deps{
 		Storage:   s.storage,
 		Objects:   s.objects,
-		Cipher:    passthroughCipher{},
-		Encryptor: passthroughEncryptor{},
-		Hasher:    identityHasher{},
-		SlugLock:  noopSlugLock{},
+		Cipher:    passthroughCipher(s.ctrl),
+		Encryptor: passthroughEncryptor(s.ctrl),
+		Hasher:    identityHasher(s.ctrl),
+		SlugLock:  noopSlugLock(s.ctrl),
 		Notes:     s.notes,
 		Links:     s.links,
 		Log:       slog.New(slog.DiscardHandler),
@@ -113,8 +78,8 @@ func createOptions() CreateOptions {
 	}
 }
 
-func anonymous(allowBurn bool) AccessOptions {
-	return AccessOptions{CallerID: uuid.Nil, Authenticated: false, AllowBurn: allowBurn, SkipPrivacy: false}
+func anonymous(allowBurn bool) domain.Reader {
+	return domain.Reader{CallerID: uuid.Nil, Authenticated: false, AllowBurn: allowBurn, SkipPrivacy: false}
 }
 
 func (s *ManagerSuite) expectFreeSlug() {
@@ -557,7 +522,7 @@ func (s *ManagerSuite) TestDelete() {
 		s.storage.EXPECT().Delete(gomock.Any(), domain.HashSlug("abc"), "obj").Return(nil)
 		s.objects.EXPECT().Delete(gomock.Any(), "obj").Return(nil)
 
-		s.Require().NoError(s.manager.Delete(ctx, "abc", "code", uuid.Nil))
+		s.Require().NoError(s.manager.Delete(ctx, "abc", "code", skipPrivacy()))
 	})
 
 	s.Run("owner without edit code", func() {
@@ -568,13 +533,13 @@ func (s *ManagerSuite) TestDelete() {
 		s.storage.EXPECT().Delete(gomock.Any(), gomock.Any(), "obj").Return(nil)
 		s.objects.EXPECT().Delete(gomock.Any(), "obj").Return(errors.New("s3 down"))
 
-		s.Require().NoError(s.manager.Delete(ctx, "abc", "", owner))
+		s.Require().NoError(s.manager.Delete(ctx, "abc", "", account(owner)))
 	})
 
 	s.Run("wrong edit code", func() {
 		s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(storedFile(false), nil)
 
-		s.Require().ErrorIs(s.manager.Delete(ctx, "abc", "wrong", uuid.Nil), domain.ErrInvalidEditCode)
+		s.Require().ErrorIs(s.manager.Delete(ctx, "abc", "wrong", skipPrivacy()), domain.ErrInvalidEditCode)
 	})
 }
 
@@ -617,3 +582,60 @@ func TestSizeLimitReader_EndOfStream(t *testing.T) {
 type iotestErrReader struct{}
 
 func (iotestErrReader) Read([]byte) (int, error) { return 0, errors.New("connection reset") }
+
+// account is a signed-in reader with the account ID id and a deliberate access.
+func account(id uuid.UUID) domain.Reader {
+	return domain.Reader{CallerID: id, Authenticated: true, AllowBurn: true, SkipPrivacy: false}
+}
+
+// --- test doubles: mockgen mocks with fixed behavior ---
+
+// passthroughEncryptor returns an Encryptor mock that returns content unchanged.
+func passthroughEncryptor(ctrl *gomock.Controller) *MockEncryptor {
+	enc := NewMockEncryptor(ctrl)
+	enc.EXPECT().Encrypt(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(plaintext, _ string) (string, error) { return plaintext, nil }).AnyTimes()
+	enc.EXPECT().Decrypt(gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(ciphertext, _, _ string) (string, error) { return ciphertext, nil }).AnyTimes()
+
+	return enc
+}
+
+// identityHasher returns an EditCodeHasher mock that keeps edit codes as plaintext. A
+// caller-supplied code gets the "user:" prefix, so tests can see which hash the usecase selected.
+func identityHasher(ctrl *gomock.Controller) *MockEditCodeHasher {
+	hasher := NewMockEditCodeHasher(ctrl)
+	hasher.EXPECT().Hash(gomock.Any()).DoAndReturn(func(code string) (string, error) { return code, nil }).AnyTimes()
+	hasher.EXPECT().HashUserProvided(gomock.Any()).
+		DoAndReturn(func(code string) (string, error) { return "user:" + code, nil }).AnyTimes()
+	hasher.EXPECT().Verify(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(hash, code string) bool { return hash == code || hash == "user:"+code }).AnyTimes()
+
+	return hasher
+}
+
+// passthroughCipher returns a StreamCipher mock that copies the content without a change and
+// uses a fixed key.
+func passthroughCipher(ctrl *gomock.Controller) *MockStreamCipher {
+	copyStream := func(_ []byte, dst io.Writer, src io.Reader) error {
+		_, err := io.Copy(dst, src)
+
+		return err
+	}
+
+	cipher := NewMockStreamCipher(ctrl)
+	cipher.EXPECT().NewKey().DoAndReturn(func() ([]byte, error) { return []byte("key"), nil }).AnyTimes()
+	cipher.EXPECT().Encrypt(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(copyStream).AnyTimes()
+	cipher.EXPECT().Decrypt(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(copyStream).AnyTimes()
+
+	return cipher
+}
+
+// noopSlugLock returns a SlugLock mock that grants every lock at once. These tests exercise
+// business logic in isolation, never two concurrent Create calls.
+func noopSlugLock(ctrl *gomock.Controller) *MockSlugLock {
+	slugLock := NewMockSlugLock(ctrl)
+	slugLock.EXPECT().Lock(gomock.Any(), gomock.Any()).Return(func() {}, nil).AnyTimes()
+
+	return slugLock
+}

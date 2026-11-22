@@ -15,40 +15,6 @@ import (
 	"github.com/partyzanex/padmark/internal/domain"
 )
 
-// passthroughEncryptor is a test double that returns content unchanged — mirrors
-// notes.passthroughEncryptor.
-type passthroughEncryptor struct{}
-
-func (passthroughEncryptor) Encrypt(pt, _ string) (string, error)    { return pt, nil }
-func (passthroughEncryptor) Decrypt(ct, _, _ string) (string, error) { return ct, nil }
-
-// identityHasher is a test double that stores and compares edit codes as plaintext.
-type identityHasher struct{}
-
-func (identityHasher) Hash(code string) (string, error) { return code, nil }
-
-// HashUserProvided prefixes the code so tests can assert which hashing variant the usecase
-// picked for caller-supplied codes (see TestCreate_UserSuppliedCodeUsesMemoryHardHash).
-func (identityHasher) HashUserProvided(code string) (string, error) { return "user:" + code, nil }
-
-func (identityHasher) Verify(hash, code string) bool { return hash == code || hash == "user:"+code }
-
-// failingEncryptor is a test double whose Decrypt always returns an error.
-type failingEncryptor struct{}
-
-func (failingEncryptor) Encrypt(pt, _ string) (string, error) { return pt, nil }
-func (failingEncryptor) Decrypt(_, _, _ string) (string, error) {
-	return "", errors.New("decryption failed")
-}
-
-// noopSlugLock is a test double that grants every lock immediately — mirrors
-// notes.noopSlugLock. These tests exercise business logic in isolation, never two concurrent
-// Create calls, so nothing here needs the real cross-manager serialization
-// internal/infra/lock.Locker provides in production.
-type noopSlugLock struct{}
-
-func (noopSlugLock) Lock(context.Context, string) (func(), error) { return func() {}, nil }
-
 type ManagerTestSuite struct {
 	suite.Suite
 
@@ -62,7 +28,7 @@ func (s *ManagerTestSuite) SetupTest() {
 	s.ctrl = gomock.NewController(s.T())
 	s.storage = NewMockStorage(s.ctrl)
 	s.notes = NewMockNotesChecker(s.ctrl)
-	s.manager = NewManager(s.storage, s.notes, noopSlugLock{}, passthroughEncryptor{}, identityHasher{},
+	s.manager = NewManager(s.storage, s.notes, noopSlugLock(s.ctrl), passthroughEncryptor(s.ctrl), identityHasher(s.ctrl),
 		slog.New(slog.DiscardHandler), true)
 }
 
@@ -237,7 +203,7 @@ func (s *ManagerTestSuite) TestCreate_CustomSlugRejectsMultiSegment() {
 }
 
 func (s *ManagerTestSuite) TestCreate_CustomSlugDisabled() {
-	s.manager = NewManager(s.storage, s.notes, noopSlugLock{}, passthroughEncryptor{}, identityHasher{},
+	s.manager = NewManager(s.storage, s.notes, noopSlugLock(s.ctrl), passthroughEncryptor(s.ctrl), identityHasher(s.ctrl),
 		slog.New(slog.DiscardHandler), false)
 
 	_, err := s.manager.Create(s.T().Context(), "https://example.com", CreateOptions{
@@ -345,7 +311,7 @@ func (s *ManagerTestSuite) TestRedirect_OK() {
 	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(link, nil)
 	s.storage.EXPECT().IncrementViews(gomock.Any(), gomock.Any()).Return(nil)
 
-	got, err := s.manager.Redirect(s.T().Context(), "the-slug")
+	got, err := s.manager.Follow(s.T().Context(), "the-slug", openReader())
 
 	s.Require().NoError(err)
 	s.Equal("https://example.com", got.TargetURL)
@@ -355,7 +321,7 @@ func (s *ManagerTestSuite) TestRedirect_OK() {
 func (s *ManagerTestSuite) TestRedirect_NotFound() {
 	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(nil, domain.ErrNotFound)
 
-	_, err := s.manager.Redirect(s.T().Context(), "missing")
+	_, err := s.manager.Follow(s.T().Context(), "missing", openReader())
 
 	s.ErrorIs(err, domain.ErrNotFound)
 }
@@ -370,7 +336,7 @@ func (s *ManagerTestSuite) TestRedirect_Expired() {
 	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(link, nil)
 	s.storage.EXPECT().DeleteExpired(gomock.Any(), gomock.Any()).Return(nil)
 
-	_, err := s.manager.Redirect(s.T().Context(), "expired-slug")
+	_, err := s.manager.Follow(s.T().Context(), "expired-slug", openReader())
 
 	s.ErrorIs(err, domain.ErrExpired)
 }
@@ -384,7 +350,7 @@ func (s *ManagerTestSuite) TestRedirect_BurnAfterClick_ConsumedOnce() {
 	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(link, nil)
 	s.storage.EXPECT().Consume(gomock.Any(), gomock.Any()).Return(link, nil)
 
-	got, err := s.manager.Redirect(s.T().Context(), "burn-slug")
+	got, err := s.manager.Follow(s.T().Context(), "burn-slug", openReader())
 
 	s.Require().NoError(err)
 	s.Equal("https://example.com", got.TargetURL)
@@ -401,7 +367,7 @@ func (s *ManagerTestSuite) TestRedirectWithoutBurn_BurnLinkLeftIntact() {
 	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(link, nil)
 	// No Consume, no IncrementViews.
 
-	got, err := s.manager.RedirectWithoutBurn(s.T().Context(), "burn-slug")
+	got, err := s.manager.Follow(s.T().Context(), "burn-slug", heldReader())
 
 	s.Require().ErrorIs(err, domain.ErrBurnIntentRequired)
 	s.Nil(got)
@@ -418,7 +384,7 @@ func (s *ManagerTestSuite) TestRedirectWithoutBurn_OrdinaryLinkFollowed() {
 	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(link, nil)
 	s.storage.EXPECT().IncrementViews(gomock.Any(), gomock.Any()).Return(nil)
 
-	got, err := s.manager.RedirectWithoutBurn(s.T().Context(), "plain-slug")
+	got, err := s.manager.Follow(s.T().Context(), "plain-slug", heldReader())
 
 	s.Require().NoError(err)
 	s.Equal("https://example.com", got.TargetURL)
@@ -437,7 +403,7 @@ func (s *ManagerTestSuite) TestRedirectWithoutBurn_ExpiredLinkStillExpires() {
 	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(link, nil)
 	s.storage.EXPECT().DeleteExpired(gomock.Any(), gomock.Any()).Return(nil)
 
-	_, err := s.manager.RedirectWithoutBurn(s.T().Context(), "old-slug")
+	_, err := s.manager.Follow(s.T().Context(), "old-slug", heldReader())
 
 	s.ErrorIs(err, domain.ErrExpired)
 }
@@ -453,17 +419,17 @@ func (s *ManagerTestSuite) TestRedirect_BurnAfterClick_SecondCallNotFound() {
 	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(link, nil)
 	s.storage.EXPECT().Consume(gomock.Any(), gomock.Any()).Return(link, nil)
 
-	_, err := s.manager.Redirect(s.T().Context(), "burn-slug")
+	_, err := s.manager.Follow(s.T().Context(), "burn-slug", openReader())
 	s.Require().NoError(err)
 
 	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(nil, domain.ErrNotFound)
 
-	_, err = s.manager.Redirect(s.T().Context(), "burn-slug")
+	_, err = s.manager.Follow(s.T().Context(), "burn-slug", openReader())
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
 func (s *ManagerTestSuite) TestRedirect_DecryptFailure() {
-	s.manager = NewManager(s.storage, s.notes, noopSlugLock{}, failingEncryptor{}, identityHasher{},
+	s.manager = NewManager(s.storage, s.notes, noopSlugLock(s.ctrl), failingEncryptor(s.ctrl), identityHasher(s.ctrl),
 		slog.New(slog.DiscardHandler), true)
 
 	link := &domain.Link{
@@ -474,7 +440,7 @@ func (s *ManagerTestSuite) TestRedirect_DecryptFailure() {
 	}
 	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(link, nil)
 
-	_, err := s.manager.Redirect(s.T().Context(), "the-slug")
+	_, err := s.manager.Follow(s.T().Context(), "the-slug", openReader())
 
 	s.ErrorIs(err, domain.ErrNotFound,
 		"decryption failure collapses to ErrNotFound, not a distinguishable error")
@@ -485,7 +451,7 @@ func (s *ManagerTestSuite) TestRedirect_DecryptFailure() {
 
 func (s *ManagerTestSuite) TestRedirect_CacheHit_ReadsCurrentMetadata() {
 	cache := NewMockCache(s.ctrl)
-	s.manager = NewManager(s.storage, s.notes, noopSlugLock{}, failingEncryptor{}, identityHasher{},
+	s.manager = NewManager(s.storage, s.notes, noopSlugLock(s.ctrl), failingEncryptor(s.ctrl), identityHasher(s.ctrl),
 		slog.New(slog.DiscardHandler), true).WithCache(cache)
 
 	stored := &domain.Link{
@@ -497,7 +463,7 @@ func (s *ManagerTestSuite) TestRedirect_CacheHit_ReadsCurrentMetadata() {
 	cache.EXPECT().Get(domain.HashSlug("the-slug"), "ciphertext").Return("https://example.com", true)
 	s.storage.EXPECT().IncrementViews(gomock.Any(), gomock.Any()).Return(nil)
 
-	got, err := s.manager.Redirect(s.T().Context(), "the-slug")
+	got, err := s.manager.Follow(s.T().Context(), "the-slug", openReader())
 
 	s.Require().NoError(err)
 	s.Equal("https://example.com", got.TargetURL)
@@ -507,7 +473,7 @@ func (s *ManagerTestSuite) TestRedirect_CacheHit_ReadsCurrentMetadata() {
 
 func (s *ManagerTestSuite) TestRedirect_CacheMiss_PopulatesCacheForNonBurnLink() {
 	cache := NewMockCache(s.ctrl)
-	s.manager = NewManager(s.storage, s.notes, noopSlugLock{}, passthroughEncryptor{}, identityHasher{},
+	s.manager = NewManager(s.storage, s.notes, noopSlugLock(s.ctrl), passthroughEncryptor(s.ctrl), identityHasher(s.ctrl),
 		slog.New(slog.DiscardHandler), true).WithCache(cache)
 
 	link := &domain.Link{
@@ -522,7 +488,7 @@ func (s *ManagerTestSuite) TestRedirect_CacheMiss_PopulatesCacheForNonBurnLink()
 	cache.EXPECT().Set(gomock.Any(), gomock.Any(), "https://example.com", "https://example.com")
 	s.storage.EXPECT().IncrementViews(gomock.Any(), gomock.Any()).Return(nil)
 
-	_, err := s.manager.Redirect(s.T().Context(), "the-slug")
+	_, err := s.manager.Follow(s.T().Context(), "the-slug", openReader())
 
 	s.Require().NoError(err)
 }
@@ -532,7 +498,7 @@ func (s *ManagerTestSuite) TestRedirect_CacheMiss_PopulatesCacheForNonBurnLink()
 // "not yet consumed" copy instead of relying on storage.Consume's atomic exactly-once guarantee.
 func (s *ManagerTestSuite) TestRedirect_BurnAfterClick_NeverCached() {
 	cache := NewMockCache(s.ctrl)
-	s.manager = NewManager(s.storage, s.notes, noopSlugLock{}, passthroughEncryptor{}, identityHasher{},
+	s.manager = NewManager(s.storage, s.notes, noopSlugLock(s.ctrl), passthroughEncryptor(s.ctrl), identityHasher(s.ctrl),
 		slog.New(slog.DiscardHandler), true).WithCache(cache)
 
 	link := &domain.Link{
@@ -545,14 +511,14 @@ func (s *ManagerTestSuite) TestRedirect_BurnAfterClick_NeverCached() {
 	// cache.Set deliberately has no EXPECT() — a burn-after-click link must never be cached.
 	s.storage.EXPECT().Consume(gomock.Any(), gomock.Any()).Return(link, nil)
 
-	_, err := s.manager.Redirect(s.T().Context(), "burn-slug")
+	_, err := s.manager.Follow(s.T().Context(), "burn-slug", openReader())
 
 	s.Require().NoError(err)
 }
 
 func (s *ManagerTestSuite) TestRedirect_Expired_EvictsCache() {
 	cache := NewMockCache(s.ctrl)
-	s.manager = NewManager(s.storage, s.notes, noopSlugLock{}, passthroughEncryptor{}, identityHasher{},
+	s.manager = NewManager(s.storage, s.notes, noopSlugLock(s.ctrl), passthroughEncryptor(s.ctrl), identityHasher(s.ctrl),
 		slog.New(slog.DiscardHandler), true).WithCache(cache)
 
 	past := time.Now().Add(-time.Hour)
@@ -566,14 +532,14 @@ func (s *ManagerTestSuite) TestRedirect_Expired_EvictsCache() {
 	s.storage.EXPECT().DeleteExpired(gomock.Any(), gomock.Any()).Return(nil)
 	cache.EXPECT().Delete(gomock.Any())
 
-	_, err := s.manager.Redirect(s.T().Context(), "expired-slug")
+	_, err := s.manager.Follow(s.T().Context(), "expired-slug", openReader())
 
 	s.ErrorIs(err, domain.ErrExpired)
 }
 
 func (s *ManagerTestSuite) TestPeek_CacheHit_ReadsCurrentMetadata() {
 	cache := NewMockCache(s.ctrl)
-	s.manager = NewManager(s.storage, s.notes, noopSlugLock{}, failingEncryptor{}, identityHasher{},
+	s.manager = NewManager(s.storage, s.notes, noopSlugLock(s.ctrl), failingEncryptor(s.ctrl), identityHasher(s.ctrl),
 		slog.New(slog.DiscardHandler), true).WithCache(cache)
 
 	stored := &domain.Link{
@@ -608,7 +574,7 @@ func (s *ManagerTestSuite) TestPeek_PrivateRowNeverUsesCache() {
 	got, err := s.manager.Peek(s.T().Context(), "the-slug")
 	s.Require().NoError(err)
 	s.Equal(domain.PrivacyOwner, got.EffectivePrivacy())
-	s.False(got.VisibleTo(uuid.Nil, false))
+	s.False(got.VisibleTo(domain.Reader{CallerID: uuid.Nil, Authenticated: false, AllowBurn: false, SkipPrivacy: false}))
 }
 
 func (s *ManagerTestSuite) TestPeek_DatabaseFailureNeverFallsBackToCache() {
@@ -626,7 +592,7 @@ func (s *ManagerTestSuite) TestPeek_DatabaseFailureNeverFallsBackToCache() {
 
 func (s *ManagerTestSuite) TestCreate_RecordsLinksCreated() {
 	metrics := NewMockMetrics(s.ctrl)
-	s.manager = NewManager(s.storage, s.notes, noopSlugLock{}, passthroughEncryptor{}, identityHasher{},
+	s.manager = NewManager(s.storage, s.notes, noopSlugLock(s.ctrl), passthroughEncryptor(s.ctrl), identityHasher(s.ctrl),
 		slog.New(slog.DiscardHandler), true).WithMetrics(metrics)
 
 	s.notes.EXPECT().Exists(gomock.Any(), gomock.Any()).Return(false, nil)
@@ -644,7 +610,7 @@ func (s *ManagerTestSuite) TestCreate_RecordsLinksCreated() {
 
 func (s *ManagerTestSuite) TestCreate_InvalidURL_DoesNotRecordLinksCreated() {
 	metrics := NewMockMetrics(s.ctrl)
-	s.manager = NewManager(s.storage, s.notes, noopSlugLock{}, passthroughEncryptor{}, identityHasher{},
+	s.manager = NewManager(s.storage, s.notes, noopSlugLock(s.ctrl), passthroughEncryptor(s.ctrl), identityHasher(s.ctrl),
 		slog.New(slog.DiscardHandler), true).WithMetrics(metrics)
 	// metrics.EXPECT().IncLinksCreated() deliberately absent — a rejected create must not count.
 
@@ -658,7 +624,7 @@ func (s *ManagerTestSuite) TestCreate_InvalidURL_DoesNotRecordLinksCreated() {
 
 func (s *ManagerTestSuite) TestRedirect_RecordsRedirect() {
 	metrics := NewMockMetrics(s.ctrl)
-	s.manager = NewManager(s.storage, s.notes, noopSlugLock{}, passthroughEncryptor{}, identityHasher{},
+	s.manager = NewManager(s.storage, s.notes, noopSlugLock(s.ctrl), passthroughEncryptor(s.ctrl), identityHasher(s.ctrl),
 		slog.New(slog.DiscardHandler), true).WithMetrics(metrics)
 
 	link := &domain.Link{
@@ -671,14 +637,14 @@ func (s *ManagerTestSuite) TestRedirect_RecordsRedirect() {
 	s.storage.EXPECT().IncrementViews(gomock.Any(), gomock.Any()).Return(nil)
 	metrics.EXPECT().IncRedirects()
 
-	_, err := s.manager.Redirect(s.T().Context(), "the-slug")
+	_, err := s.manager.Follow(s.T().Context(), "the-slug", openReader())
 
 	s.Require().NoError(err)
 }
 
 func (s *ManagerTestSuite) TestRedirect_BurnAfterClick_RecordsRedirect() {
 	metrics := NewMockMetrics(s.ctrl)
-	s.manager = NewManager(s.storage, s.notes, noopSlugLock{}, passthroughEncryptor{}, identityHasher{},
+	s.manager = NewManager(s.storage, s.notes, noopSlugLock(s.ctrl), passthroughEncryptor(s.ctrl), identityHasher(s.ctrl),
 		slog.New(slog.DiscardHandler), true).WithMetrics(metrics)
 
 	link := &domain.Link{
@@ -690,26 +656,26 @@ func (s *ManagerTestSuite) TestRedirect_BurnAfterClick_RecordsRedirect() {
 	s.storage.EXPECT().Consume(gomock.Any(), gomock.Any()).Return(link, nil)
 	metrics.EXPECT().IncRedirects()
 
-	_, err := s.manager.Redirect(s.T().Context(), "burn-slug")
+	_, err := s.manager.Follow(s.T().Context(), "burn-slug", openReader())
 
 	s.Require().NoError(err)
 }
 
 func (s *ManagerTestSuite) TestRedirect_NotFound_DoesNotRecordRedirect() {
 	metrics := NewMockMetrics(s.ctrl)
-	s.manager = NewManager(s.storage, s.notes, noopSlugLock{}, passthroughEncryptor{}, identityHasher{},
+	s.manager = NewManager(s.storage, s.notes, noopSlugLock(s.ctrl), passthroughEncryptor(s.ctrl), identityHasher(s.ctrl),
 		slog.New(slog.DiscardHandler), true).WithMetrics(metrics)
 	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(nil, domain.ErrNotFound)
 	// metrics.EXPECT().IncRedirects() deliberately absent — only a served redirect counts.
 
-	_, err := s.manager.Redirect(s.T().Context(), "missing")
+	_, err := s.manager.Follow(s.T().Context(), "missing", openReader())
 
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
 func (s *ManagerTestSuite) TestCreate_RandomSlugCollision_RecordsCollision() {
 	metrics := NewMockMetrics(s.ctrl)
-	s.manager = NewManager(s.storage, s.notes, noopSlugLock{}, passthroughEncryptor{}, identityHasher{},
+	s.manager = NewManager(s.storage, s.notes, noopSlugLock(s.ctrl), passthroughEncryptor(s.ctrl), identityHasher(s.ctrl),
 		slog.New(slog.DiscardHandler), true).WithMetrics(metrics)
 
 	gomock.InOrder(
@@ -735,7 +701,7 @@ func (s *ManagerTestSuite) TestCreate_RandomSlugCollision_RecordsCollision() {
 // signal, so it must not increment IncCollisions the way a random-slug retry does.
 func (s *ManagerTestSuite) TestCreate_CustomAliasConflict_DoesNotRecordCollision() {
 	metrics := NewMockMetrics(s.ctrl)
-	s.manager = NewManager(s.storage, s.notes, noopSlugLock{}, passthroughEncryptor{}, identityHasher{},
+	s.manager = NewManager(s.storage, s.notes, noopSlugLock(s.ctrl), passthroughEncryptor(s.ctrl), identityHasher(s.ctrl),
 		slog.New(slog.DiscardHandler), true).WithMetrics(metrics)
 
 	s.notes.EXPECT().Exists(gomock.Any(), gomock.Any()).Return(false, nil)
@@ -763,14 +729,14 @@ func (s *ManagerTestSuite) TestDelete_OwnerBypassesEditCode() {
 	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(existing, nil)
 	s.storage.EXPECT().Delete(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
 
-	err := s.manager.Delete(s.T().Context(), "the-slug", "", owner)
+	err := s.manager.Delete(s.T().Context(), "the-slug", "", accountReader(owner))
 
 	s.Require().NoError(err)
 }
 
 func (s *ManagerTestSuite) TestDelete_EvictsCache() {
 	cache := NewMockCache(s.ctrl)
-	s.manager = NewManager(s.storage, s.notes, noopSlugLock{}, passthroughEncryptor{}, identityHasher{},
+	s.manager = NewManager(s.storage, s.notes, noopSlugLock(s.ctrl), passthroughEncryptor(s.ctrl), identityHasher(s.ctrl),
 		slog.New(slog.DiscardHandler), true).WithCache(cache)
 
 	owner := uuid.New()
@@ -783,7 +749,7 @@ func (s *ManagerTestSuite) TestDelete_EvictsCache() {
 	s.storage.EXPECT().Delete(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
 	cache.EXPECT().Delete(gomock.Any())
 
-	err := s.manager.Delete(s.T().Context(), "the-slug", "", owner)
+	err := s.manager.Delete(s.T().Context(), "the-slug", "", accountReader(owner))
 
 	s.Require().NoError(err)
 }
@@ -798,7 +764,7 @@ func (s *ManagerTestSuite) TestDelete_NonOwnerNeedsEditCode() {
 	}
 	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(existing, nil)
 
-	err := s.manager.Delete(s.T().Context(), "the-slug", "wrong-code", other)
+	err := s.manager.Delete(s.T().Context(), "the-slug", "wrong-code", accountReader(other))
 
 	s.ErrorIs(err, domain.ErrInvalidEditCode)
 }
@@ -813,7 +779,7 @@ func (s *ManagerTestSuite) TestDelete_CorrectEditCode() {
 	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(existing, nil)
 	s.storage.EXPECT().Delete(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
 
-	err := s.manager.Delete(s.T().Context(), "the-slug", "secret123456", uuid.Nil)
+	err := s.manager.Delete(s.T().Context(), "the-slug", "secret123456", openReader())
 
 	s.Require().NoError(err)
 }
@@ -827,7 +793,7 @@ func (s *ManagerTestSuite) TestDelete_AnonymousLinkAlwaysNeedsEditCode() {
 	}
 	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(existing, nil)
 
-	err := s.manager.Delete(s.T().Context(), "the-slug", "wrong", uuid.Nil)
+	err := s.manager.Delete(s.T().Context(), "the-slug", "wrong", openReader())
 
 	s.ErrorIs(err, domain.ErrInvalidEditCode)
 }
@@ -835,7 +801,7 @@ func (s *ManagerTestSuite) TestDelete_AnonymousLinkAlwaysNeedsEditCode() {
 func (s *ManagerTestSuite) TestDelete_NotFound() {
 	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(nil, domain.ErrNotFound)
 
-	err := s.manager.Delete(s.T().Context(), "missing", "code", uuid.Nil)
+	err := s.manager.Delete(s.T().Context(), "missing", "code", openReader())
 
 	s.ErrorIs(err, domain.ErrNotFound)
 }
@@ -852,8 +818,70 @@ func (s *ManagerTestSuite) TestDecryptionFailureLogsOnlyHashedSlug() {
 		CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
 		DirectRedirect: nil, EditCode: "", Views: 0, BurnAfterClick: false,
 	}
-	err := decryptTargetURL(s.T().Context(), failingEncryptor{}, log, note)
+	err := decryptTargetURL(s.T().Context(), failingEncryptor(s.ctrl), log, note)
 	s.Require().ErrorIs(err, domain.ErrNotFound)
 	s.Contains(buf.String(), domain.HashSlug(note.ID))
 	s.NotContains(buf.String(), note.ID)
+}
+
+// openReader is the reader of a server without accounts: no privacy check, and a deliberate
+// access that may consume a burn link.
+func openReader() domain.Reader {
+	return domain.Reader{CallerID: uuid.Nil, Authenticated: false, AllowBurn: true, SkipPrivacy: true}
+}
+
+// heldReader is openReader without the burn intent: a preview fetch or a scanner.
+func heldReader() domain.Reader {
+	return domain.Reader{CallerID: uuid.Nil, Authenticated: false, AllowBurn: false, SkipPrivacy: true}
+}
+
+// accountReader is a signed-in reader with the account ID id and a deliberate access.
+func accountReader(id uuid.UUID) domain.Reader {
+	return domain.Reader{CallerID: id, Authenticated: true, AllowBurn: true, SkipPrivacy: false}
+}
+
+// --- test doubles: mockgen mocks with fixed behavior ---
+
+// passthroughEncryptor returns an Encryptor mock that returns content unchanged.
+func passthroughEncryptor(ctrl *gomock.Controller) *MockEncryptor {
+	enc := NewMockEncryptor(ctrl)
+	enc.EXPECT().Encrypt(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(plaintext, _ string) (string, error) { return plaintext, nil }).AnyTimes()
+	enc.EXPECT().Decrypt(gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(ciphertext, _, _ string) (string, error) { return ciphertext, nil }).AnyTimes()
+
+	return enc
+}
+
+// identityHasher returns an EditCodeHasher mock that keeps edit codes as plaintext. A
+// caller-supplied code gets the "user:" prefix, so tests can see which hash the usecase selected.
+func identityHasher(ctrl *gomock.Controller) *MockEditCodeHasher {
+	hasher := NewMockEditCodeHasher(ctrl)
+	hasher.EXPECT().Hash(gomock.Any()).DoAndReturn(func(code string) (string, error) { return code, nil }).AnyTimes()
+	hasher.EXPECT().HashUserProvided(gomock.Any()).
+		DoAndReturn(func(code string) (string, error) { return "user:" + code, nil }).AnyTimes()
+	hasher.EXPECT().Verify(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(hash, code string) bool { return hash == code || hash == "user:"+code }).AnyTimes()
+
+	return hasher
+}
+
+// failingEncryptor returns an Encryptor mock whose Decrypt always fails.
+func failingEncryptor(ctrl *gomock.Controller) *MockEncryptor {
+	enc := NewMockEncryptor(ctrl)
+	enc.EXPECT().Encrypt(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(plaintext, _ string) (string, error) { return plaintext, nil }).AnyTimes()
+	enc.EXPECT().Decrypt(gomock.Any(), gomock.Any(), gomock.Any()).
+		Return("", errors.New("decryption failed")).AnyTimes()
+
+	return enc
+}
+
+// noopSlugLock returns a SlugLock mock that grants every lock at once. These tests exercise
+// business logic in isolation, never two concurrent Create calls.
+func noopSlugLock(ctrl *gomock.Controller) *MockSlugLock {
+	slugLock := NewMockSlugLock(ctrl)
+	slugLock.EXPECT().Lock(gomock.Any(), gomock.Any()).Return(func() {}, nil).AnyTimes()
+
+	return slugLock
 }

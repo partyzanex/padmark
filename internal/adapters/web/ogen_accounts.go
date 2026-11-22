@@ -8,12 +8,14 @@ import (
 	"github.com/partyzanex/padmark/internal/domain"
 )
 
-// WithAuthManager attaches the auth seam, enabling ogenapi's POST /api/tokens and
+// withAccounts attaches the account system, enabling ogenapi's POST /api/tokens and
 // POST /api/invites (implemented in ogen_handler.go, next to the other ogen operations).
-// Unset, both operations answer 503 (feature not enabled) — mirrors Handler.WithAuthManager
-// and keeps the existing NewOgenHandler call sites intact.
-func (h *OgenHandler) WithAuthManager(mgr AuthManager) *OgenHandler {
-	h.authMgr = mgr
+// NewRouter calls it with the interfaces of Handler.WithAuthManager. Without it, both
+// operations answer 503 (feature not enabled).
+func (h *OgenHandler) withAccounts(tokens APITokenManager, onboarding OnboardingManager) *OgenHandler {
+	h.tokens = tokens
+	h.onboarding = onboarding
+	h.accounts = accountsOn
 
 	return h
 }

@@ -2,18 +2,18 @@ package web
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"time"
 
-	"github.com/partyzanex/padmark/internal/adapters/web/middleware"
 	"github.com/partyzanex/padmark/internal/adapters/web/ogenapi"
 	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/usecases/links"
 )
 
-// UpdateLink implements ogenapi.Handler with the same privacy and edit-code gates
-// as UpdateNote. Fetching metadata here never consumes a burn link or adds views.
+// UpdateLink implements ogenapi.Handler with the privacy and edit-code rules of UpdateNote, which
+// links.Manager.Update applies. It never consumes a burn link or adds views.
 //
 //nolint:ireturn // ogen response unions are interfaces by design
 func (h *OgenHandler) UpdateLink(
@@ -31,15 +31,6 @@ func (h *OgenHandler) UpdateLink(
 		return mapUpdateLinkError(err, h.log), nil
 	}
 
-	allowed, err := h.linkMutationAllowed(ctx, params.ID)
-	if err != nil {
-		return mapUpdateLinkError(err, h.log), nil
-	}
-
-	if !allowed {
-		return &ogenapi.UpdateLinkUnauthorized{}, nil
-	}
-
 	opts := links.UpdateOptions{
 		ExpiresAt:           nil,
 		Privacy:             nil,
@@ -54,8 +45,13 @@ func (h *OgenHandler) UpdateLink(
 
 	opts.Privacy = requested
 
-	link, err := h.linkManager.Update(ctx, params.ID, req.EditCode.Or(""), middleware.CallerIDFromCtx(ctx),
+	link, err := h.linkManager.Update(ctx, params.ID, req.EditCode.Or(""), h.reader(ctx),
 		requestTargetURL(&req.TargetURL), opts)
+	if errors.Is(err, domain.ErrForbidden) {
+		// A caller that cannot see the link gets 401, as for a read; see common.writeMutationError.
+		return &ogenapi.UpdateLinkUnauthorized{}, nil
+	}
+
 	if err != nil {
 		return mapUpdateLinkError(err, h.log), nil
 	}

@@ -1372,8 +1372,8 @@ func (s *AuthHandlerSuite) TestAPITokenAuth_PrivateNote_ValidBearer_Served() {
 	note.Privacy = &priv
 
 	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "good-api-key").Return(usr, "token-hash", nil)
-	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
-	s.manager.EXPECT().ViewPreloaded(gomock.Any(), testID, gomock.Any()).Return(note, nil)
+	// The usecase gets the account of the API token as the reader.
+	s.manager.EXPECT().Read(gomock.Any(), testID, signedInReader(usr.ID)).Return(note, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
 	req.Header.Set("Authorization", "Bearer good-api-key")
@@ -1387,14 +1387,10 @@ func (s *AuthHandlerSuite) TestAPITokenAuth_PrivateNote_ValidBearer_Served() {
 }
 
 // TestAPITokenAuth_PrivateNote_UnknownBearer_Returns401 is the negative counterpart: an unknown
-// API key must not reach a private note.
+// API key must not reach a private note. The usecase gets an anonymous reader and refuses it.
 func (s *AuthHandlerSuite) TestAPITokenAuth_PrivateNote_UnknownBearer_Returns401() {
-	priv := domain.PrivacyAuthenticated
-	note := newTestNote("secret", "# private")
-	note.Privacy = &priv
-
 	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "bad-key").Return(nil, "", domain.ErrNotFound)
-	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
+	s.manager.EXPECT().Read(gomock.Any(), testID, anonymousReader()).Return(nil, domain.ErrForbidden)
 
 	req := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
 	req.Header.Set("Authorization", "Bearer bad-key")
@@ -1418,7 +1414,7 @@ func (s *AuthHandlerSuite) TestGetNote_NotFound_JSONClient_GetsJSONError() {
 		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
 	}
 	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "good-api-key").Return(usr, "token-hash", nil)
-	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(nil, domain.ErrNotFound)
+	s.manager.EXPECT().Read(gomock.Any(), testID, gomock.Any()).Return(nil, domain.ErrNotFound)
 
 	req := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
 	req.Header.Set("Authorization", "Bearer good-api-key")
@@ -1442,7 +1438,7 @@ func (s *AuthHandlerSuite) TestGetNote_NotFound_JSONClient_GetsJSONError() {
 // TestGetNote_NotFound_BrowserClient_GetsHTMLPage locks in the other half of the negotiation:
 // a browser still gets the styled HTML error page.
 func (s *AuthHandlerSuite) TestGetNote_NotFound_BrowserClient_GetsHTMLPage() {
-	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(nil, domain.ErrNotFound)
+	s.manager.EXPECT().ReadRendered(gomock.Any(), testID, gomock.Any()).Return(nil, "", domain.ErrNotFound)
 
 	req := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
 	req.Header.Set("Accept", "text/html")
@@ -1846,14 +1842,12 @@ func (s *AuthHandlerSuite) TestTOTPLogin_SessionCookieMaxAge_TracksConfiguredSes
 // single-segment PUT /notes/{id} route) resolves the caller and lets the note's owner update it
 // with no edit_code.
 func (s *AuthHandlerSuite) TestUpdateNote_SessionOwner_BypassesEditCode() {
-	s.expectPublicMutationGate()
-
 	s.auth.EXPECT().GetSession(gomock.Any(), "sess-owner").Return(&domain.User{
 		ID:        testUserID1,
 		CreatedAt: time.Time{}, LastLoginAt: nil, Username: "", TOTPSecret: "",
 		PasswordHash: "", KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
 	}, nil)
-	s.manager.EXPECT().Update(gomock.Any(), testID, "", testUserID1, gomock.Any()).
+	s.manager.EXPECT().Update(gomock.Any(), testID, "", caller(testUserID1), gomock.Any()).
 		Return(newTestNote("t", "c"), nil)
 
 	body := `{"title":"t","content":"c"}`
@@ -1870,14 +1864,12 @@ func (s *AuthHandlerSuite) TestUpdateNote_SessionOwner_BypassesEditCode() {
 // TestUpdateNote_APITokenOwner_BypassesEditCode is the CLI/API-client counterpart: a Bearer API
 // token resolves to its owning user the same way a session does.
 func (s *AuthHandlerSuite) TestUpdateNote_APITokenOwner_BypassesEditCode() {
-	s.expectPublicMutationGate()
-
 	s.auth.EXPECT().ResolveAPIToken(gomock.Any(), "valid-key").Return(&domain.User{
 		ID:        testUserID1,
 		CreatedAt: time.Time{}, LastLoginAt: nil, Username: "", TOTPSecret: "",
 		PasswordHash: "", KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
 	}, "token-hash", nil)
-	s.manager.EXPECT().Update(gomock.Any(), testID, "", testUserID1, gomock.Any()).
+	s.manager.EXPECT().Update(gomock.Any(), testID, "", caller(testUserID1), gomock.Any()).
 		Return(newTestNote("t", "c"), nil)
 
 	body := `{"title":"t","content":"c"}`
@@ -1894,14 +1886,12 @@ func (s *AuthHandlerSuite) TestUpdateNote_APITokenOwner_BypassesEditCode() {
 // TestDeleteNote_SessionOwner_BypassesEditCode mirrors TestUpdateNote_SessionOwner_BypassesEditCode
 // for DELETE.
 func (s *AuthHandlerSuite) TestDeleteNote_SessionOwner_BypassesEditCode() {
-	s.expectPublicMutationGate()
-
 	s.auth.EXPECT().GetSession(gomock.Any(), "sess-owner").Return(&domain.User{
 		ID:        testUserID1,
 		CreatedAt: time.Time{}, LastLoginAt: nil, Username: "", TOTPSecret: "",
 		PasswordHash: "", KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
 	}, nil)
-	s.manager.EXPECT().Delete(gomock.Any(), testID, "", testUserID1).Return(nil)
+	s.manager.EXPECT().Delete(gomock.Any(), testID, "", caller(testUserID1)).Return(nil)
 
 	req := httptest.NewRequest(http.MethodDelete, "/notes/"+testID, nil)
 	req.AddCookie(s.sessionCookie("sess-owner"))
@@ -1916,14 +1906,12 @@ func (s *AuthHandlerSuite) TestDeleteNote_SessionOwner_BypassesEditCode() {
 // another signed-in user: without the correct edit_code, a non-owner session gets the same
 // domain.ErrInvalidEditCode → 403 as an anonymous caller.
 func (s *AuthHandlerSuite) TestUpdateNote_SessionNonOwner_StillNeedsEditCode() {
-	s.expectPublicMutationGate()
-
 	s.auth.EXPECT().GetSession(gomock.Any(), "sess-other").Return(&domain.User{
 		ID:        testUserID2,
 		CreatedAt: time.Time{}, LastLoginAt: nil, Username: "", TOTPSecret: "",
 		PasswordHash: "", KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
 	}, nil)
-	s.manager.EXPECT().Update(gomock.Any(), testID, "", testUserID2, gomock.Any()).
+	s.manager.EXPECT().Update(gomock.Any(), testID, "", caller(testUserID2), gomock.Any()).
 		Return(nil, domain.ErrInvalidEditCode)
 
 	body := `{"title":"t","content":"c"}`
@@ -1940,8 +1928,6 @@ func (s *AuthHandlerSuite) TestUpdateNote_SessionNonOwner_StillNeedsEditCode() {
 // TestUpdateNoteByPath_SessionOwner_BypassesEditCode is the native multi-segment-slug
 // counterpart of TestUpdateNote_SessionOwner_BypassesEditCode (PUT /notes/{id...}).
 func (s *AuthHandlerSuite) TestUpdateNoteByPath_SessionOwner_BypassesEditCode() {
-	s.expectPublicMutationGate()
-
 	const mid = "project/GUIDE.md"
 
 	s.auth.EXPECT().GetSession(gomock.Any(), "sess-owner").Return(&domain.User{
@@ -1949,7 +1935,7 @@ func (s *AuthHandlerSuite) TestUpdateNoteByPath_SessionOwner_BypassesEditCode() 
 		CreatedAt: time.Time{}, LastLoginAt: nil, Username: "", TOTPSecret: "",
 		PasswordHash: "", KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
 	}, nil)
-	s.manager.EXPECT().Update(gomock.Any(), mid, "", testUserID1, gomock.Any()).
+	s.manager.EXPECT().Update(gomock.Any(), mid, "", caller(testUserID1), gomock.Any()).
 		Return(newTestNote("Guide", "new body"), nil)
 
 	body := `{"title":"Guide","content":"new body"}`
@@ -2111,10 +2097,4 @@ func (s *AuthHandlerSuite) TestSetupHandler_InvalidUsername_ShowsValidationMessa
 	s.Equal(http.StatusOK, rec.Code)
 	s.Contains(rec.Body.String(), "username must be 1–64 characters")
 	s.NotContains(rec.Body.String(), "Scan QR code")
-}
-
-// expectPublicMutationGate installs the Peek of the mutation gate: it returns a public note, so
-// the gate lets the request reach the mocked usecase, which decides ownership.
-func (s *AuthHandlerSuite) expectPublicMutationGate() {
-	s.manager.EXPECT().Peek(gomock.Any(), gomock.Any()).Return(newTestNote("gate", "c"), nil)
 }

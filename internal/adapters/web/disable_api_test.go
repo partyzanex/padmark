@@ -122,12 +122,12 @@ func (s *DisableAPISuite) TestAPIPaths_Return503WithCode() {
 func (s *DisableAPISuite) TestWebUI_Unaffected() {
 	router := s.newRouter(true)
 
-	// The note view (no explicit Accept) and the editor each load the note via Peek; the view
-	// then applies the read policy to that snapshot, the editor only enforces expiry.
-	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(newTestNote("t", "c"), nil).Times(2)
-	s.manager.EXPECT().ViewPreloaded(gomock.Any(), testID, gomock.Any()).Return(newTestNote("t", "c"), nil)
-	s.manager.EXPECT().EnforceExpiry(gomock.Any(), testID, gomock.Any()).Return(nil)
-	s.linkManager.EXPECT().RedirectWithoutBurn(gomock.Any(), testID).Return(newTestLink(), nil)
+	// The note view (no explicit Accept) reads the note with all read rules; the editor reads it
+	// with Inspect, which applies only privacy and expiry. A request without an Accept that
+	// names a format is not deliberate, so the short link redirect cannot burn the link.
+	s.manager.EXPECT().Read(gomock.Any(), testID, gomock.Any()).Return(newTestNote("t", "c"), nil)
+	s.manager.EXPECT().Inspect(gomock.Any(), testID, gomock.Any()).Return(newTestNote("t", "c"), nil)
+	s.linkManager.EXPECT().Follow(gomock.Any(), testID, withBurn(false)).Return(newTestLink(), nil)
 	s.pinger.EXPECT().PingContext(gomock.Any()).Return(nil)
 
 	cases := []struct {
@@ -206,7 +206,7 @@ func (s *DisableAPISuite) TestGeneratedClient_DistinguishesDisabledAPIFromReadin
 func (s *DisableAPISuite) TestFilePages_VisibleWhileAPIDisabled() {
 	fileMgr := NewMockFileManager(s.ctrl)
 	fileMgr.EXPECT().MaxSize().Return(int64(1 << 20)).AnyTimes()
-	fileMgr.EXPECT().Peek(gomock.Any(), testID).Return(&domain.File{
+	fileMgr.EXPECT().Settings(gomock.Any(), testID, gomock.Any()).Return(&domain.File{
 		CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil, ID: testID, ObjectKey: "",
 		SealedMeta: "", Name: "a.txt", ContentKey: nil, EditCode: "hash", Size: 3, Downloads: 0,
 		BurnAfterDownload: false,
@@ -227,8 +227,8 @@ func (s *DisableAPISuite) TestFilePages_VisibleWhileAPIDisabled() {
 	s.Require().NoError(err)
 
 	// The editor of a file is at /edit/{id}: the note and the short link are not found first.
-	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(nil, domain.ErrNotFound)
-	s.linkManager.EXPECT().Peek(gomock.Any(), testID).Return(nil, domain.ErrNotFound)
+	s.manager.EXPECT().Inspect(gomock.Any(), testID, gomock.Any()).Return(nil, domain.ErrNotFound)
+	s.linkManager.EXPECT().Inspect(gomock.Any(), testID, gomock.Any()).Return(nil, domain.ErrNotFound)
 
 	pages := map[string]int{
 		"/files":                     http.StatusOK,
@@ -272,7 +272,7 @@ func (s *DisableAPISuite) TestFilePages_VisibleWhileAPIDisabled() {
 func (s *DisableAPISuite) TestLinkPages_VisibleWhileAPIDisabled() {
 	router := s.newRouter(true)
 
-	s.linkManager.EXPECT().Peek(gomock.Any(), testID).Return(newTestLink(), nil)
+	s.linkManager.EXPECT().Inspect(gomock.Any(), testID, gomock.Any()).Return(newTestLink(), nil)
 
 	pages := map[string]int{
 		"/links":                     http.StatusOK,

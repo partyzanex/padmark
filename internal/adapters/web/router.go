@@ -153,8 +153,8 @@ func NewRouter(
 	// The auth seam is optional on OgenHandler; attach it where it exists so the account
 	// endpoints (POST /api/tokens, /api/invites) serve instead of 503-ing.
 	apiHandler := ogenHandler
-	if handler.authMgr != nil {
-		apiHandler = ogenHandler.WithAuthManager(handler.authMgr)
+	if handler.accounts == accountsOn {
+		apiHandler = ogenHandler.withAccounts(handler.tokens, handler.AdminHandler.onboarding)
 	}
 
 	ogenSrv, err := ogenapi.NewServer(apiHandler, ogenapi.WithErrorHandler(newOgenErrorHandler(handler.log)))
@@ -194,8 +194,8 @@ func wrapMiddleware(
 	mux http.Handler, handler *Handler, opts *RouterOptions, csrfSecret []byte,
 ) http.Handler {
 	var checker middleware.SessionChecker
-	if handler.authMgr != nil {
-		checker = handler.authMgr
+	if handler.accounts == accountsOn {
+		checker = handler.sessionChecker
 	}
 
 	stack := middleware.WithRecovery(handler.log, mux)

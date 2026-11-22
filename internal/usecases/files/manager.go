@@ -61,7 +61,7 @@ type Storage interface {
 	ReleaseBurn(ctx context.Context, claim *BurnClaim) error
 	// IncrementDownloadsVisible counts a download of a record that is visible to reader, is not
 	// a burn file and is not expired. Otherwise it returns domain.ErrNotFound.
-	IncrementDownloadsVisible(ctx context.Context, id, objectKey string, reader AccessOptions) error
+	IncrementDownloadsVisible(ctx context.Context, id, objectKey string, reader domain.Reader) error
 	// ListExpired returns at most limit records that expired before now and have no claim that
 	// is not stale. It orders them by expiry, then by ID, and returns only the records after
 	// the cursor. Only ID, ObjectKey and ExpiresAt must be set.
@@ -187,22 +187,6 @@ type CreateOptions struct {
 	BurnAfterDownload bool
 }
 
-// AccessOptions identifies the reader. AllowBurn tells if the access is deliberate, so that it
-// can consume a burn-after-download file. SkipPrivacy turns off the privacy check of reads, as
-// notes and links do when accounts are off. It does not change the owner and edit code checks
-// of Update and Delete.
-type AccessOptions struct {
-	CallerID      uuid.UUID
-	Authenticated bool
-	AllowBurn     bool
-	SkipPrivacy   bool
-}
-
-// visible reports whether the reader can see file.
-func (o AccessOptions) visible(file *domain.File) bool {
-	return o.SkipPrivacy || file.VisibleTo(o.CallerID, o.Authenticated)
-}
-
 // BurnClaim identifies one download of a burn-after-download file. Token is random for each
 // download, so that only this download can finish or release its claim.
 type BurnClaim struct {
@@ -211,7 +195,7 @@ type BurnClaim struct {
 	ID        string
 	ObjectKey string
 	Token     string
-	Reader    AccessOptions
+	Reader    domain.Reader
 }
 
 // sealedMeta is the plaintext of File.SealedMeta. One envelope for the name and the key stops
@@ -302,7 +286,7 @@ func (m *Manager) Create(ctx context.Context, name string, body io.Reader, opts 
 }
 
 // Peek returns the file with decrypted metadata. It does not apply privacy, expiry or burn
-// rules; callers that show a file to a reader use Info or Download.
+// rules; callers that show a file to a reader use Inspect or Download.
 func (m *Manager) Peek(ctx context.Context, slug string) (*domain.File, error) {
 	file, err := m.readFile(ctx, slug)
 	if err != nil {
@@ -314,10 +298,11 @@ func (m *Manager) Peek(ctx context.Context, slug string) (*domain.File, error) {
 	return file, nil
 }
 
-// Info returns the file for a reader after the privacy and expiry checks. An expired file is
-// deleted and Info returns domain.ErrExpired.
-func (m *Manager) Info(ctx context.Context, slug string, opts AccessOptions) (*domain.File, error) {
-	file, err := m.readVisible(ctx, slug, opts)
+// Inspect returns the file for reader without a side effect on a live file, as
+// notes.Manager.Inspect does: privacy (domain.ErrForbidden) and expiry (an expired file is
+// deleted, and Inspect returns domain.ErrExpired). It never counts or consumes a download.
+func (m *Manager) Inspect(ctx context.Context, slug string, reader domain.Reader) (*domain.File, error) {
+	file, err := m.readVisible(ctx, slug, reader)
 	if err != nil {
 		return nil, err
 	}
@@ -327,18 +312,41 @@ func (m *Manager) Info(ctx context.Context, slug string, opts AccessOptions) (*d
 	return file, nil
 }
 
-// Download prepares the file for a reader. It applies privacy and expiry, counts the download,
-// and claims a burn-after-download file when opts.AllowBurn is true. Without AllowBurn such a
-// file stays and Download returns domain.ErrBurnIntentRequired. The object is checked before
-// the record changes, so a missing object does not consume the file. A burn file is deleted
-// only when Send completes; see Download.Close.
-func (m *Manager) Download(ctx context.Context, slug string, opts AccessOptions) (*Download, error) {
-	file, err := m.readVisible(ctx, slug, opts)
+// Settings returns the file for the settings editor without any side effect: privacy
+// (domain.ErrForbidden), then expiry (domain.ErrExpired). Unlike Inspect it never deletes an
+// expired file: the first reader of the file page gets 410 and deletes it, as before.
+func (m *Manager) Settings(ctx context.Context, slug string, reader domain.Reader) (*domain.File, error) {
+	file, err := m.readFile(ctx, slug)
 	if err != nil {
 		return nil, err
 	}
 
-	if file.BurnAfterDownload && !opts.AllowBurn {
+	dropKey(file)
+
+	if !file.VisibleTo(reader) {
+		return nil, domain.ErrForbidden
+	}
+
+	if file.Expired(time.Now()) {
+		return nil, domain.ErrExpired
+	}
+
+	return file, nil
+}
+
+// Download prepares the file for reader, the file counterpart of notes.Manager.Read. It applies
+// privacy and expiry, counts the download, and claims a burn-after-download file when
+// reader.AllowBurn is true. Without AllowBurn such a file stays and Download returns
+// domain.ErrBurnIntentRequired. The object is checked before the record changes, so a missing
+// object does not consume the file. A burn file is deleted only when Send completes; see
+// Download.Close.
+func (m *Manager) Download(ctx context.Context, slug string, reader domain.Reader) (*Download, error) {
+	file, err := m.readVisible(ctx, slug, reader)
+	if err != nil {
+		return nil, err
+	}
+
+	if file.BurnAfterDownload && !reader.AllowBurn {
 		dropKey(file)
 
 		return nil, domain.ErrBurnIntentRequired
@@ -356,7 +364,7 @@ func (m *Manager) Download(ctx context.Context, slug string, opts AccessOptions)
 		return m.sendObject(ctx, objectKey, contentKey, dst)
 	})
 
-	err = m.record(ctx, file, opts, download)
+	err = m.record(ctx, file, reader, download)
 	if err != nil {
 		dropKey(file)
 
@@ -369,10 +377,10 @@ func (m *Manager) Download(ctx context.Context, slug string, opts AccessOptions)
 	return download, nil
 }
 
-// Delete removes a file after a check of the edit code, or of the caller as the owner. The
-// record goes first, so that no reader gets the file after Delete returns. Then the object goes;
-// a failure there is fail-soft and leaves an object that nobody can read.
-func (m *Manager) Delete(ctx context.Context, slug, editCode string, callerID uuid.UUID) error {
+// Delete removes a file with the rules of checkMutation. The record goes first, so that no
+// reader gets the file after Delete returns. Then the object goes; a failure there is fail-soft
+// and leaves an object that nobody can read.
+func (m *Manager) Delete(ctx context.Context, slug, editCode string, reader domain.Reader) error {
 	recordID := domain.HashSlug(slug)
 
 	existing, err := m.deps.Storage.GetByID(ctx, recordID)
@@ -380,8 +388,9 @@ func (m *Manager) Delete(ctx context.Context, slug, editCode string, callerID uu
 		return fmt.Errorf("delete file: %w", err)
 	}
 
-	if !existing.OwnedBy(callerID) && !m.deps.Hasher.Verify(existing.EditCode, editCode) {
-		return domain.ErrInvalidEditCode
+	err = m.checkMutation(existing, editCode, reader)
+	if err != nil {
+		return err
 	}
 
 	err = m.deps.Storage.Delete(ctx, recordID, existing.ObjectKey)
@@ -392,6 +401,21 @@ func (m *Manager) Delete(ctx context.Context, slug, editCode string, callerID uu
 	m.metrics.IncDeleted(DeleteReasonUser)
 	// The record is gone. A client that disconnects now must not stop the object delete.
 	m.deleteObject(context.WithoutCancel(ctx), existing.ObjectKey)
+
+	return nil
+}
+
+// checkMutation applies the rules of a change to the stored file existing, as notes.Manager
+// does: the reader must see the file (domain.ErrForbidden), and must be its owner or give its
+// edit code (domain.ErrInvalidEditCode).
+func (m *Manager) checkMutation(existing *domain.File, editCode string, reader domain.Reader) error {
+	if !existing.VisibleTo(reader) {
+		return domain.ErrForbidden
+	}
+
+	if !existing.OwnedBy(reader.CallerID) && !m.deps.Hasher.Verify(existing.EditCode, editCode) {
+		return domain.ErrInvalidEditCode
+	}
 
 	return nil
 }
@@ -411,14 +435,14 @@ func (m *Manager) readFile(ctx context.Context, slug string) (*domain.File, erro
 	return file, nil
 }
 
-// readVisible is Info that keeps the content key in the result, for Download.
-func (m *Manager) readVisible(ctx context.Context, slug string, opts AccessOptions) (*domain.File, error) {
+// readVisible is Inspect that keeps the content key in the result, for Download.
+func (m *Manager) readVisible(ctx context.Context, slug string, reader domain.Reader) (*domain.File, error) {
 	file, err := m.readFile(ctx, slug)
 	if err != nil {
 		return nil, err
 	}
 
-	if !opts.visible(file) {
+	if !file.VisibleTo(reader) {
 		dropKey(file)
 
 		return nil, domain.ErrForbidden
@@ -556,15 +580,19 @@ func (m *Manager) insert(ctx context.Context, file *domain.File, customSlug stri
 		return fmt.Errorf("seal file meta: %w", err)
 	}
 
-	file.ID = recordID
-	file.SealedMeta = sealed
+	// stored is a separate value with the storage form: the record ID is the hashed slug. The
+	// caller's file never holds the hash in ID.
+	stored := *file
+	stored.ID = recordID
+	stored.SealedMeta = sealed
 
-	err = m.deps.Storage.Create(ctx, file)
+	err = m.deps.Storage.Create(ctx, &stored)
 	if err != nil && !errors.Is(err, domain.ErrSlugConflict) {
 		err = m.confirmCreate(ctx, recordID, file.ObjectKey, err)
 	}
 
 	file.ID = slug
+	file.SealedMeta = sealed
 
 	if err != nil {
 		return fmt.Errorf("create file: %w", err)

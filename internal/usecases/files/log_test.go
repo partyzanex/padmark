@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/mock/gomock"
 
@@ -49,10 +48,10 @@ func (s *LogSuite) SetupTest() {
 	s.manager = NewManager(&Deps{
 		Storage:   s.storage,
 		Objects:   s.objects,
-		Cipher:    passthroughCipher{},
-		Encryptor: passthroughEncryptor{},
-		Hasher:    identityHasher{},
-		SlugLock:  noopSlugLock{},
+		Cipher:    passthroughCipher(s.ctrl),
+		Encryptor: passthroughEncryptor(s.ctrl),
+		Hasher:    identityHasher(s.ctrl),
+		SlugLock:  noopSlugLock(s.ctrl),
 		Notes:     NewMockSlugChecker(s.ctrl),
 		Links:     NewMockSlugChecker(s.ctrl),
 		Log:       log,
@@ -100,7 +99,7 @@ func (s *LogSuite) TestDeleteObjectFailure() {
 	s.storage.EXPECT().Delete(gomock.Any(), domain.HashSlug("abc"), loggedObjectKey).Return(nil)
 	s.objects.EXPECT().Delete(gomock.Any(), loggedObjectKey).Return(errors.New("s3 down"))
 
-	s.Require().NoError(s.manager.Delete(s.T().Context(), "abc", "code", uuid.Nil))
+	s.Require().NoError(s.manager.Delete(s.T().Context(), "abc", "code", skipPrivacy()))
 	s.Contains(s.logs.String(), "delete file object")
 }
 

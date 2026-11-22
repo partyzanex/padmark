@@ -11,7 +11,6 @@ import (
 
 	"github.com/partyzanex/padmark/internal/adapters/web/middleware"
 	"github.com/partyzanex/padmark/internal/domain"
-	"github.com/partyzanex/padmark/internal/usecases/files"
 )
 
 //go:embed templates/file_editor.html
@@ -119,7 +118,7 @@ func (h *FileHandler) CreateFilePage(w http.ResponseWriter, r *http.Request) {
 // FilePage renders the page of the file slug. It reads only the metadata, so it never
 // consumes a burn-after-download file; the download button does that.
 func (h *FileHandler) FilePage(w http.ResponseWriter, r *http.Request, slug string) {
-	file, err := h.manager.Info(r.Context(), slug, h.pageAccess(r))
+	file, err := h.manager.Inspect(r.Context(), slug, h.reader(r))
 	if err != nil {
 		h.writeFilePageError(w, r, err)
 
@@ -143,7 +142,7 @@ func (h *FileHandler) FilePage(w http.ResponseWriter, r *http.Request, slug stri
 		CSRFToken:    middleware.CSRFFromContext(r.Context()),
 		Downloads:    file.Downloads,
 		Burn:         file.BurnAfterDownload,
-		// Info already applied the privacy check, so each reader of the page can open the editor;
+		// Inspect already applied the privacy check, so each reader of the page can open the editor;
 		// the save needs the edit code or the owner, as for a note.
 		CanEdit: true,
 	}
@@ -175,39 +174,27 @@ func (h *FileHandler) editFileIfExists(w http.ResponseWriter, r *http.Request, s
 		return false
 	}
 
-	file, err := h.manager.Peek(r.Context(), slug)
+	file, err := h.manager.Settings(r.Context(), slug, h.reader(r))
 	if errors.Is(err, domain.ErrNotFound) {
 		return false
 	}
 
-	h.editFile(w, r, slug, file, err)
+	if err != nil {
+		h.writeFilePageError(w, r, err)
+
+		return true
+	}
+
+	h.editFile(w, r, slug, file)
 
 	return true
 }
 
-// editFile renders the page that changes the settings of a file. Like the short-link editor it
-// reads metadata only: opening the page must never consume a burn-after-download file. peekErr
-// is the error of the Peek that loaded file.
-func (h *FileHandler) editFile(w http.ResponseWriter, r *http.Request, slug string, file *domain.File, peekErr error) {
-	if peekErr != nil {
-		h.writeFileErrorPage(w, r, peekErr)
-
-		return
-	}
-
-	// Without accounts there is no privacy check, as for notes and links (pageAccess).
+// editFile renders the page that changes the settings of file, which Settings returned. Like the
+// short-link editor it reads metadata only: opening the page must never consume a
+// burn-after-download file.
+func (h *FileHandler) editFile(w http.ResponseWriter, r *http.Request, slug string, file *domain.File) {
 	callerID := middleware.CallerIDFromCtx(r.Context())
-	if h.authMgr != nil && !file.VisibleTo(callerID, middleware.AuthenticatedFromCtx(r.Context())) {
-		h.denyPrivate(w, r)
-
-		return
-	}
-
-	if file.Expired(time.Now()) {
-		h.writeFileErrorPage(w, r, domain.ErrExpired)
-
-		return
-	}
 
 	header := h.header(r, headerKindPlain)
 	data := fileEditViewData{
@@ -273,7 +260,7 @@ func (c *common) fileSuccess(r *http.Request, slug string, data *successViewData
 		return
 	}
 
-	file, err := c.fileMgr.Info(r.Context(), slug, c.pageAccess(r))
+	file, err := c.fileMgr.Inspect(r.Context(), slug, c.reader(r))
 	if err != nil {
 		c.log.DebugContext(r.Context(), "read file for success page", "err", err)
 
@@ -289,18 +276,6 @@ func (c *common) fileSuccess(r *http.Request, slug string, data *successViewData
 	data.ExpiresLabel = "never expires"
 	if file.ExpiresAt != nil {
 		data.ExpiresLabel = "expires " + file.ExpiresAt.UTC().Format(fileDateLayout)
-	}
-}
-
-// pageAccess identifies the reader of a page. AllowBurn is always false: a page shows only the
-// metadata, so it must not count as a download. With accounts off, notes, links and files have
-// no privacy check (the owner decision of R-23), so SkipPrivacy is on.
-func (c *common) pageAccess(r *http.Request) files.AccessOptions {
-	return files.AccessOptions{
-		CallerID:      middleware.CallerIDFromCtx(r.Context()),
-		Authenticated: middleware.AuthenticatedFromCtx(r.Context()),
-		AllowBurn:     false,
-		SkipPrivacy:   c.authMgr == nil,
 	}
 }
 

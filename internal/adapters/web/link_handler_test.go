@@ -13,7 +13,6 @@ import (
 
 	"github.com/partyzanex/padmark/internal/adapters/web"
 	"github.com/partyzanex/padmark/internal/domain"
-	"github.com/partyzanex/padmark/internal/usecases/links"
 	"github.com/partyzanex/padmark/tests/httptestutil"
 )
 
@@ -201,7 +200,7 @@ func (s *HandlerSuite) TestCreateLinksBulk_TooManyItems_Returns400() {
 
 func (s *HandlerSuite) TestGetLink_OK() {
 	link := newTestLink()
-	s.linkManager.EXPECT().Peek(gomock.Any(), testLinkID).Return(link, nil)
+	s.linkManager.EXPECT().Inspect(gomock.Any(), testLinkID, openReader()).Return(link, nil)
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/links/"+testLinkID, nil)
@@ -218,7 +217,7 @@ func (s *HandlerSuite) TestGetLink_OK() {
 }
 
 func (s *HandlerSuite) TestGetLink_NotFound() {
-	s.linkManager.EXPECT().Peek(gomock.Any(), "missing").Return(nil, domain.ErrNotFound)
+	s.linkManager.EXPECT().Inspect(gomock.Any(), "missing", gomock.Any()).Return(nil, domain.ErrNotFound)
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/links/missing", nil)
@@ -228,20 +227,11 @@ func (s *HandlerSuite) TestGetLink_NotFound() {
 	s.Equal(http.StatusNotFound, w.Code)
 }
 
-// TestGetLink_Expired exercises the real expiry path. links.Manager.Peek deliberately returns
-// an expired link as-is — it is the pre-auth metadata read and applies no policy — so the
-// handler is the only place that can turn it into the 410 the OpenAPI spec documents.
-//
-// The previous version of this test mocked Peek returning domain.ErrExpired, an outcome Peek's
-// contract rules out. It passed while GET /links/{id} actually answered 200 for expired links,
-// out of step with GET /r/{id}: coverage of a branch nothing reaches reads exactly like coverage
-// of the real one.
+// TestGetLink_Expired checks the translation of the expiry rule: links.Manager.Inspect applies
+// expiry and returns domain.ErrExpired, which GET /links/{id} answers with the 410 that the
+// OpenAPI spec documents. The usecase tests cover the expiry rule itself.
 func (s *HandlerSuite) TestGetLink_Expired() {
-	link := newTestLink()
-	expired := time.Now().Add(-time.Hour)
-	link.ExpiresAt = &expired
-
-	s.linkManager.EXPECT().Peek(gomock.Any(), testLinkID).Return(link, nil)
+	s.linkManager.EXPECT().Inspect(gomock.Any(), testLinkID, gomock.Any()).Return(nil, domain.ErrExpired)
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/links/"+testLinkID, nil)
@@ -265,7 +255,7 @@ func (s *HandlerSuite) TestGetLink_NotYetExpired_OK() {
 	future := time.Now().Add(time.Hour)
 	link.ExpiresAt = &future
 
-	s.linkManager.EXPECT().Peek(gomock.Any(), testLinkID).Return(link, nil)
+	s.linkManager.EXPECT().Inspect(gomock.Any(), testLinkID, gomock.Any()).Return(link, nil)
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/links/"+testLinkID, nil)
@@ -275,45 +265,29 @@ func (s *HandlerSuite) TestGetLink_NotYetExpired_OK() {
 	s.Equal(http.StatusOK, w.Code)
 }
 
-// TestGetLink_ExpiredAndPrivate_Anonymous_Unauthorized pins the order of the two gates: privacy
-// is decided before expiry, mirroring LinkHandler.Redirect. A stranger asking about an expired
-// owner-only link gets 401, not 410 — a 410 would confirm the link had existed.
+// TestGetLink_ExpiredAndPrivate_Anonymous_Unauthorized: the usecase decides privacy before
+// expiry, so a stranger asking about an expired owner-only link gets ErrForbidden and the handler
+// answers 401, not 410 — a 410 would confirm the link had existed. links.Manager tests cover the
+// order; this test covers the translation with the account system on.
 func (s *HandlerSuite) TestGetLink_ExpiredAndPrivate_Anonymous_Unauthorized() {
-	owner := uuid.New()
-
-	link := newTestLink()
-	link.Privacy = new(domain.PrivacyOwner)
-	link.OwnerID = &owner
-	expired := time.Now().Add(-time.Hour)
-	link.ExpiresAt = &expired
-
-	s.linkManager.EXPECT().Peek(gomock.Any(), testLinkID).Return(link, nil)
+	s.linkManager.EXPECT().Inspect(gomock.Any(), testLinkID, anonymousReader()).Return(nil, domain.ErrForbidden)
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/links/"+testLinkID, nil)
 
-	s.router.ServeHTTP(w, r)
+	s.newLinkRouterWithTOTPAuth().ServeHTTP(w, r)
 
 	s.Equal(http.StatusUnauthorized, w.Code)
 }
 
 func (s *HandlerSuite) TestGetLink_OwnerOnly_NonOwner_Unauthorized() {
-	owner := &domain.User{
-		ID: uuid.New(), Username: "alice",
-		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
-		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
-	}
 	other := &domain.User{
 		ID: uuid.New(), Username: "bob",
 		CreatedAt: time.Time{}, LastLoginAt: nil, TOTPSecret: "", PasswordHash: "",
 		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
 	}
 
-	link := newTestLink()
-	link.Privacy = new(domain.PrivacyOwner)
-	link.OwnerID = &owner.ID
-
-	s.linkManager.EXPECT().Peek(gomock.Any(), testLinkID).Return(link, nil)
+	s.linkManager.EXPECT().Inspect(gomock.Any(), testLinkID, signedInReader(other.ID)).Return(nil, domain.ErrForbidden)
 	s.authMgr.EXPECT().GetSession(gomock.Any(), "valid-sess").Return(other, nil).Times(1)
 
 	router := s.newLinkRouterWithTOTPAuth()
@@ -330,8 +304,7 @@ func (s *HandlerSuite) TestGetLink_OwnerOnly_NonOwner_Unauthorized() {
 // ── DELETE /links/{id} ──.
 
 func (s *HandlerSuite) TestDeleteLink_OK() {
-	s.expectLinkMutationGate()
-	s.linkManager.EXPECT().Delete(gomock.Any(), testLinkID, "editcode1234", uuid.Nil).Return(nil)
+	s.linkManager.EXPECT().Delete(gomock.Any(), testLinkID, "editcode1234", noCaller()).Return(nil)
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodDelete, "/links/"+testLinkID, nil)
@@ -345,8 +318,7 @@ func (s *HandlerSuite) TestDeleteLink_OK() {
 // TestDeleteLink_QueryParamIgnored pins that the edit code is read from the X-Edit-Code header
 // only: a ?edit_code= query string (which leaks into proxy logs and Referer) counts as no code.
 func (s *HandlerSuite) TestDeleteLink_QueryParamIgnored() {
-	s.expectLinkMutationGate()
-	s.linkManager.EXPECT().Delete(gomock.Any(), testLinkID, "", uuid.Nil).Return(domain.ErrInvalidEditCode)
+	s.linkManager.EXPECT().Delete(gomock.Any(), testLinkID, "", noCaller()).Return(domain.ErrInvalidEditCode)
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodDelete, "/links/"+testLinkID+"?edit_code=fromquery", nil)
@@ -357,8 +329,7 @@ func (s *HandlerSuite) TestDeleteLink_QueryParamIgnored() {
 }
 
 func (s *HandlerSuite) TestDeleteLink_Forbidden() {
-	s.expectLinkMutationGate()
-	s.linkManager.EXPECT().Delete(gomock.Any(), testLinkID, "wrong", uuid.Nil).
+	s.linkManager.EXPECT().Delete(gomock.Any(), testLinkID, "wrong", noCaller()).
 		Return(domain.ErrInvalidEditCode)
 
 	w := httptest.NewRecorder()
@@ -370,15 +341,14 @@ func (s *HandlerSuite) TestDeleteLink_Forbidden() {
 	s.Equal(http.StatusForbidden, w.Code)
 }
 
-// TestDeleteLink_Gated_PrivateLink verifies the anonymous link-mutation gate: with auth
-// configured, an anonymous DELETE of a privacy=authenticated link is refused with 401 before
-// the usecase runs (Delete having no EXPECT guarantees that) — an anonymous caller could not
-// read the link, so they may not mutate it via an edit code either.
+// TestDeleteLink_Gated_PrivateLink verifies the link-mutation privacy rule: with auth
+// configured, the usecase refuses an anonymous DELETE of a privacy=authenticated link
+// (ErrForbidden), and the handler answers 401 — an anonymous caller could not read the link, so
+// they may not mutate it via an edit code either.
 func (s *HandlerSuite) TestDeleteLink_Gated_PrivateLink() {
 	router := s.newLinkRouterWithTOTPAuth()
-	link := newTestLink()
-	link.Privacy = new(domain.PrivacyAuthenticated)
-	s.linkManager.EXPECT().Peek(gomock.Any(), testLinkID).Return(link, nil)
+	s.linkManager.EXPECT().Delete(gomock.Any(), testLinkID, "editcode1234", anonymousReader()).
+		Return(domain.ErrForbidden)
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodDelete, "/links/"+testLinkID, nil)
@@ -392,13 +362,11 @@ func (s *HandlerSuite) TestDeleteLink_Gated_PrivateLink() {
 	s.Empty(w.Body.String())
 }
 
-// TestDeleteLink_Gated_PublicLink_WrongEditCode verifies the gate passes for a link an
-// anonymous caller could read: the wrong edit code then surfaces as the usecase's 403 —
-// never the middleware-level 401.
+// TestDeleteLink_Gated_PublicLink_WrongEditCode verifies that for a link an anonymous caller
+// could read, the wrong edit code surfaces as the usecase's 403 — never the 401 of privacy.
 func (s *HandlerSuite) TestDeleteLink_Gated_PublicLink_WrongEditCode() {
 	router := s.newLinkRouterWithTOTPAuth()
-	s.expectLinkMutationGate()
-	s.linkManager.EXPECT().Delete(gomock.Any(), testLinkID, "wrong", uuid.Nil).
+	s.linkManager.EXPECT().Delete(gomock.Any(), testLinkID, "wrong", noCaller()).
 		Return(domain.ErrInvalidEditCode)
 
 	w := httptest.NewRecorder()
@@ -413,18 +381,22 @@ func (s *HandlerSuite) TestDeleteLink_Gated_PublicLink_WrongEditCode() {
 
 // TestLinkMutationGate_SignedInNonOwner_OwnerLink covers audit finding R4 for links: a signed-in
 // caller who cannot read another account's privacy=owner link may not update or delete it with
-// the edit code. The gate answers 401 and the usecase is never called.
+// the edit code. The usecase refuses the reader (ErrForbidden), and the handler answers 401.
 func (s *HandlerSuite) TestLinkMutationGate_SignedInNonOwner_OwnerLink() {
 	usr := newTestUser("bob")
-
-	link := newTestLink()
-	link.Privacy = new(domain.PrivacyOwner)
-	link.OwnerID = new(uuid.New())
 
 	for _, method := range []string{http.MethodPut, http.MethodDelete} {
 		s.Run(method, func() {
 			router := s.newRouterWithTOTPAuth()
-			s.linkManager.EXPECT().Peek(gomock.Any(), testLinkID).Return(link, nil)
+			if method == http.MethodPut {
+				s.linkManager.EXPECT().
+					Update(gomock.Any(), testLinkID, "right-code", signedInReader(usr.ID), gomock.Any(), gomock.Any()).
+					Return(nil, domain.ErrForbidden)
+			} else {
+				s.linkManager.EXPECT().Delete(gomock.Any(), testLinkID, "right-code", signedInReader(usr.ID)).
+					Return(domain.ErrForbidden)
+			}
+
 			s.authMgr.EXPECT().GetSession(gomock.Any(), "valid-sess").Return(usr, nil)
 
 			body := `{"target_url":"https://example.com/new","privacy":"public","edit_code":"right-code"}`
@@ -448,8 +420,7 @@ func (s *HandlerSuite) TestDeleteLink_OwnerBypass_NoEditCode() {
 		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
 	}
 
-	s.expectLinkMutationGate()
-	s.linkManager.EXPECT().Delete(gomock.Any(), testLinkID, "", owner.ID).Return(nil)
+	s.linkManager.EXPECT().Delete(gomock.Any(), testLinkID, "", caller(owner.ID)).Return(nil)
 	s.authMgr.EXPECT().GetSession(gomock.Any(), "valid-sess").Return(owner, nil).Times(1)
 
 	router := s.newLinkRouterWithTOTPAuth()
@@ -496,7 +467,7 @@ func (s *HandlerSuite) TestRedirectLink_ImplicitAccess_BurnLinkRefused() {
 
 	for _, testCase := range cases {
 		s.Run(testCase.name, func() {
-			s.linkManager.EXPECT().RedirectWithoutBurn(gomock.Any(), testLinkID).
+			s.linkManager.EXPECT().Follow(gomock.Any(), testLinkID, withBurn(false)).
 				Return(nil, fmt.Errorf("redirect: %w", domain.ErrBurnIntentRequired))
 
 			w := httptest.NewRecorder()
@@ -522,7 +493,7 @@ func (s *HandlerSuite) TestRedirectLink_ImplicitAccess_BurnLinkRefused() {
 // TestRedirectLink_ImplicitAccess_OrdinaryLinkFollowed: an ordinary link keeps redirecting any
 // client, curl included — only burn links need deliberate intent.
 func (s *HandlerSuite) TestRedirectLink_ImplicitAccess_OrdinaryLinkFollowed() {
-	s.linkManager.EXPECT().RedirectWithoutBurn(gomock.Any(), testLinkID).Return(newTestLink(), nil)
+	s.linkManager.EXPECT().Follow(gomock.Any(), testLinkID, withBurn(false)).Return(newTestLink(), nil)
 
 	router := s.newLinkRouter(true)
 
@@ -538,7 +509,7 @@ func (s *HandlerSuite) TestRedirectLink_ImplicitAccess_OrdinaryLinkFollowed() {
 
 func (s *HandlerSuite) TestRedirectLink_DirectMode_301() {
 	link := newTestLink()
-	s.linkManager.EXPECT().Redirect(gomock.Any(), testLinkID).Return(link, nil)
+	s.linkManager.EXPECT().Follow(gomock.Any(), testLinkID, withBurn(true)).Return(link, nil)
 
 	router := s.newLinkRouter(true)
 
@@ -553,7 +524,7 @@ func (s *HandlerSuite) TestRedirectLink_DirectMode_301() {
 
 func (s *HandlerSuite) TestRedirectLink_InterstitialMode_200() {
 	link := newTestLink()
-	s.linkManager.EXPECT().Redirect(gomock.Any(), testLinkID).Return(link, nil)
+	s.linkManager.EXPECT().Follow(gomock.Any(), testLinkID, withBurn(true)).Return(link, nil)
 
 	router := s.newLinkRouter(false)
 
@@ -577,7 +548,7 @@ func (s *HandlerSuite) TestRedirectLink_AnonymousLink_DefaultConfig_Interstitial
 	forceDirect := true
 	link := newTestLink()
 	link.DirectRedirect = &forceDirect
-	s.linkManager.EXPECT().Redirect(gomock.Any(), testLinkID).Return(link, nil)
+	s.linkManager.EXPECT().Follow(gomock.Any(), testLinkID, withBurn(true)).Return(link, nil)
 
 	router := s.newLinkRouter(false)
 
@@ -595,7 +566,7 @@ func (s *HandlerSuite) TestRedirectLink_OwnedLink_DefaultConfig_Direct() {
 	ownerID := uuid.New()
 	link := newTestLink()
 	link.OwnerID = &ownerID
-	s.linkManager.EXPECT().Redirect(gomock.Any(), testLinkID).Return(link, nil)
+	s.linkManager.EXPECT().Follow(gomock.Any(), testLinkID, withBurn(true)).Return(link, nil)
 
 	router := s.newLinkRouter(false)
 
@@ -609,7 +580,7 @@ func (s *HandlerSuite) TestRedirectLink_OwnedLink_DefaultConfig_Direct() {
 // TestRedirectLink_AnonymousLink_FlagOn_Direct: an operator who sets --direct-redirect explicitly
 // gets the old behaviour back for every link, anonymous ones included.
 func (s *HandlerSuite) TestRedirectLink_AnonymousLink_FlagOn_Direct() {
-	s.linkManager.EXPECT().Redirect(gomock.Any(), testLinkID).Return(newTestLink(), nil)
+	s.linkManager.EXPECT().Follow(gomock.Any(), testLinkID, withBurn(true)).Return(newTestLink(), nil)
 
 	router := s.newLinkRouter(true)
 
@@ -626,7 +597,7 @@ func (s *HandlerSuite) TestRedirectLink_PerLinkOverride_ForcesInterstitialDespit
 	forceInterstitial := false
 	link := newTestLink()
 	link.DirectRedirect = &forceInterstitial
-	s.linkManager.EXPECT().Redirect(gomock.Any(), testLinkID).Return(link, nil)
+	s.linkManager.EXPECT().Follow(gomock.Any(), testLinkID, withBurn(true)).Return(link, nil)
 
 	router := s.newLinkRouter(true)
 
@@ -640,7 +611,7 @@ func (s *HandlerSuite) TestRedirectLink_PerLinkOverride_ForcesInterstitialDespit
 }
 
 func (s *HandlerSuite) TestRedirectLink_Expired() {
-	s.linkManager.EXPECT().Redirect(gomock.Any(), testLinkID).Return(nil, domain.ErrExpired)
+	s.linkManager.EXPECT().Follow(gomock.Any(), testLinkID, withBurn(true)).Return(nil, domain.ErrExpired)
 
 	router := s.newLinkRouter(true)
 
@@ -653,7 +624,7 @@ func (s *HandlerSuite) TestRedirectLink_Expired() {
 }
 
 func (s *HandlerSuite) TestRedirectLink_NotFound() {
-	s.linkManager.EXPECT().Redirect(gomock.Any(), "missing").Return(nil, domain.ErrNotFound)
+	s.linkManager.EXPECT().Follow(gomock.Any(), "missing", withBurn(true)).Return(nil, domain.ErrNotFound)
 
 	router := s.newLinkRouter(true)
 
@@ -666,7 +637,7 @@ func (s *HandlerSuite) TestRedirectLink_NotFound() {
 }
 
 // TestRedirectLink_BurnAfterClick_ConsumedOnce verifies that a burn-after-click link redirects
-// exactly once, then a second GET gets 404 — links.Manager.Redirect's atomic consumeLink is what
+// exactly once, then a second GET gets 404 — links.Manager.Follow's atomic consumeLink is what
 // actually enforces "exactly once"; this test only verifies the handler surfaces that correctly
 // on both calls (the mock stands in for the atomicity, already covered at the manager-test level).
 func (s *HandlerSuite) TestRedirectLink_BurnAfterClick_ConsumedOnce() {
@@ -674,8 +645,8 @@ func (s *HandlerSuite) TestRedirectLink_BurnAfterClick_ConsumedOnce() {
 	link.BurnAfterClick = true
 
 	gomock.InOrder(
-		s.linkManager.EXPECT().Redirect(gomock.Any(), testLinkID).Return(link, nil),
-		s.linkManager.EXPECT().Redirect(gomock.Any(), testLinkID).Return(nil, domain.ErrNotFound),
+		s.linkManager.EXPECT().Follow(gomock.Any(), testLinkID, withBurn(true)).Return(link, nil),
+		s.linkManager.EXPECT().Follow(gomock.Any(), testLinkID, withBurn(true)).Return(nil, domain.ErrNotFound),
 	)
 
 	router := s.newLinkRouter(true)
@@ -701,8 +672,8 @@ func (s *HandlerSuite) TestRedirectLink_OwnerOnly_NonOwner_HTML_Forbidden() {
 		KDFSalt: nil, LastTOTPCounter: 0, IsAdmin: false,
 	}
 
-	s.linkManager.EXPECT().Follow(gomock.Any(), testLinkID, links.FollowOptions{
-		CallerID: other.ID, Authenticated: true, AllowBurn: true,
+	s.linkManager.EXPECT().Follow(gomock.Any(), testLinkID, domain.Reader{
+		CallerID: other.ID, Authenticated: true, AllowBurn: true, SkipPrivacy: false,
 	}).Return(nil, domain.ErrForbidden)
 	s.authMgr.EXPECT().GetSession(gomock.Any(), "valid-sess").Return(other, nil).Times(1)
 
@@ -734,8 +705,8 @@ func (s *HandlerSuite) TestRedirectLink_OwnerOnly_Owner_Authorized() {
 	link.Privacy = new(domain.PrivacyOwner)
 	link.OwnerID = &owner.ID
 
-	s.linkManager.EXPECT().Follow(gomock.Any(), testLinkID, links.FollowOptions{
-		CallerID: owner.ID, Authenticated: true, AllowBurn: true,
+	s.linkManager.EXPECT().Follow(gomock.Any(), testLinkID, domain.Reader{
+		CallerID: owner.ID, Authenticated: true, AllowBurn: true, SkipPrivacy: false,
 	}).Return(link, nil)
 	s.authMgr.EXPECT().GetSession(gomock.Any(), "valid-sess").Return(owner, nil).Times(1)
 
@@ -755,8 +726,8 @@ func (s *HandlerSuite) TestRedirectLink_OwnerOnly_Owner_Authorized() {
 // from denying a different authenticated caller — completes the privacy × caller matrix alongside
 // TestRedirectLink_OwnerOnly_NonOwner_HTML_Forbidden and _Owner_Authorized above.
 func (s *HandlerSuite) TestRedirectLink_OwnerOnly_Anonymous_Unauthorized() {
-	s.linkManager.EXPECT().Follow(gomock.Any(), testLinkID, links.FollowOptions{
-		CallerID: uuid.Nil, Authenticated: false, AllowBurn: true,
+	s.linkManager.EXPECT().Follow(gomock.Any(), testLinkID, domain.Reader{
+		CallerID: uuid.Nil, Authenticated: false, AllowBurn: true, SkipPrivacy: false,
 	}).Return(nil, domain.ErrForbidden)
 
 	router := s.newLinkRouterWithTOTPAuth()
@@ -773,8 +744,8 @@ func (s *HandlerSuite) TestRedirectLink_OwnerOnly_Anonymous_Unauthorized() {
 // TestRedirectLink_OwnerOnly_Anonymous_HTML_RedirectToLogin is the HTML-negotiated counterpart to
 // the anonymous case above — mirrors TestOwnerOnlyNote_Anonymous_HTML_RedirectToLogin.
 func (s *HandlerSuite) TestRedirectLink_OwnerOnly_Anonymous_HTML_RedirectToLogin() {
-	s.linkManager.EXPECT().Follow(gomock.Any(), testLinkID, links.FollowOptions{
-		CallerID: uuid.Nil, Authenticated: false, AllowBurn: true,
+	s.linkManager.EXPECT().Follow(gomock.Any(), testLinkID, domain.Reader{
+		CallerID: uuid.Nil, Authenticated: false, AllowBurn: true, SkipPrivacy: false,
 	}).Return(nil, domain.ErrForbidden)
 
 	router := s.newLinkRouterWithTOTPAuth()
@@ -794,8 +765,8 @@ func (s *HandlerSuite) TestRedirectLink_OwnerOnly_Anonymous_HTML_RedirectToLogin
 // unlike privacy: owner, any logged-in caller (not just the creator) is enough, but anonymous
 // never is.
 func (s *HandlerSuite) TestRedirectLink_PrivacyAuthenticated_Unauthenticated() {
-	s.linkManager.EXPECT().Follow(gomock.Any(), testLinkID, links.FollowOptions{
-		CallerID: uuid.Nil, Authenticated: false, AllowBurn: true,
+	s.linkManager.EXPECT().Follow(gomock.Any(), testLinkID, domain.Reader{
+		CallerID: uuid.Nil, Authenticated: false, AllowBurn: true, SkipPrivacy: false,
 	}).Return(nil, domain.ErrForbidden)
 
 	router := s.newLinkRouterWithTOTPAuth()
@@ -823,8 +794,8 @@ func (s *HandlerSuite) TestRedirectLink_PrivacyAuthenticated_Authenticated() {
 	link := newTestLink()
 	link.Privacy = new(domain.PrivacyAuthenticated)
 
-	s.linkManager.EXPECT().Follow(gomock.Any(), testLinkID, links.FollowOptions{
-		CallerID: usr.ID, Authenticated: true, AllowBurn: true,
+	s.linkManager.EXPECT().Follow(gomock.Any(), testLinkID, domain.Reader{
+		CallerID: usr.ID, Authenticated: true, AllowBurn: true, SkipPrivacy: false,
 	}).Return(link, nil)
 	s.authMgr.EXPECT().GetSession(gomock.Any(), "valid-sess").Return(usr, nil).Times(1)
 
@@ -839,9 +810,9 @@ func (s *HandlerSuite) TestRedirectLink_PrivacyAuthenticated_Authenticated() {
 	s.Equal(http.StatusMovedPermanently, w.Code)
 }
 
-// TestGetLink_PrivacyAuthenticated_Authenticated confirms OgenHandler.GetLink's own privacy gate
-// (added as a bug fix in the HTTP handlers section) also grants access to any authenticated
-// caller for privacy: authenticated, not just the link's owner.
+// TestGetLink_PrivacyAuthenticated_Authenticated confirms that OgenHandler.GetLink gives the
+// usecase the reader of the session, so any authenticated caller can read a privacy:
+// authenticated link, not just the link's owner.
 func (s *HandlerSuite) TestGetLink_PrivacyAuthenticated_Authenticated() {
 	usr := &domain.User{
 		ID: uuid.New(), Username: "alice",
@@ -852,7 +823,7 @@ func (s *HandlerSuite) TestGetLink_PrivacyAuthenticated_Authenticated() {
 	link := newTestLink()
 	link.Privacy = new(domain.PrivacyAuthenticated)
 
-	s.linkManager.EXPECT().Peek(gomock.Any(), testLinkID).Return(link, nil)
+	s.linkManager.EXPECT().Inspect(gomock.Any(), testLinkID, signedInReader(usr.ID)).Return(link, nil)
 	s.authMgr.EXPECT().GetSession(gomock.Any(), "valid-sess").Return(usr, nil).Times(1)
 
 	router := s.newLinkRouterWithTOTPAuth()
@@ -869,10 +840,7 @@ func (s *HandlerSuite) TestGetLink_PrivacyAuthenticated_Authenticated() {
 // TestGetLink_PrivacyAuthenticated_Anonymous_Unauthorized is the negative counterpart: no
 // credential at all must not satisfy privacy: authenticated.
 func (s *HandlerSuite) TestGetLink_PrivacyAuthenticated_Anonymous_Unauthorized() {
-	link := newTestLink()
-	link.Privacy = new(domain.PrivacyAuthenticated)
-
-	s.linkManager.EXPECT().Peek(gomock.Any(), testLinkID).Return(link, nil)
+	s.linkManager.EXPECT().Inspect(gomock.Any(), testLinkID, anonymousReader()).Return(nil, domain.ErrForbidden)
 
 	router := s.newLinkRouterWithTOTPAuth()
 

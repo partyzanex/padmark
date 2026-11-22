@@ -32,21 +32,23 @@ func (s *HandlerSuite) TestFailLockout_AnonymousAttackDoesNotBlockOwner() {
 			if testCase.resource == "notes" {
 				note := newTestNote("title", "content")
 				note.ID, note.OwnerID = testCase.id, &owner.ID
-				// Ten gated attacker attempts plus the owner's update and delete.
-				s.manager.EXPECT().Peek(gomock.Any(), testCase.id).Return(note, nil).Times(12)
-				s.manager.EXPECT().Update(gomock.Any(), testCase.id, "wrong", uuid.Nil, gomock.Any()).
+				// Ten attacker attempts plus the owner's update and delete.
+				s.manager.EXPECT().Update(gomock.Any(), testCase.id, "wrong", anonymousReader(), gomock.Any()).
 					Return(nil, domain.ErrInvalidEditCode).Times(10)
-				s.manager.EXPECT().Update(gomock.Any(), testCase.id, "", owner.ID, gomock.Any()).Return(note, nil)
-				s.manager.EXPECT().Delete(gomock.Any(), testCase.id, "", owner.ID).Return(nil)
+				s.manager.EXPECT().Update(gomock.Any(), testCase.id, "", signedInReader(owner.ID), gomock.Any()).
+					Return(note, nil)
+				s.manager.EXPECT().Delete(gomock.Any(), testCase.id, "", signedInReader(owner.ID)).Return(nil)
 			} else {
 				link := newTestLink()
 				link.OwnerID = &owner.ID
-				s.linkManager.EXPECT().Peek(gomock.Any(), testCase.id).Return(link, nil).Times(12)
-				s.linkManager.EXPECT().Update(gomock.Any(), testCase.id, "wrong", uuid.Nil, gomock.Any(), gomock.Any()).
+
+				s.linkManager.EXPECT().
+					Update(gomock.Any(), testCase.id, "wrong", anonymousReader(), gomock.Any(), gomock.Any()).
 					Return(nil, domain.ErrInvalidEditCode).Times(10)
-				s.linkManager.EXPECT().Update(gomock.Any(), testCase.id, "", owner.ID, gomock.Any(), gomock.Any()).
+				s.linkManager.EXPECT().
+					Update(gomock.Any(), testCase.id, "", signedInReader(owner.ID), gomock.Any(), gomock.Any()).
 					Return(link, nil)
-				s.linkManager.EXPECT().Delete(gomock.Any(), testCase.id, "", owner.ID).Return(nil)
+				s.linkManager.EXPECT().Delete(gomock.Any(), testCase.id, "", signedInReader(owner.ID)).Return(nil)
 			}
 
 			s.authMgr.EXPECT().GetSession(gomock.Any(), "owner-session").Return(owner, nil)

@@ -54,7 +54,7 @@ func (l *Link) ValidateOwnership() error {
 // OwnedBy reports whether userID is the authenticated user who created l — see OwnerID. A nil
 // userID (anonymous caller, uuid.Nil) or an unowned link (created anonymously) never match.
 func (l *Link) OwnedBy(userID uuid.UUID) bool {
-	return userID != uuid.Nil && l.OwnerID != nil && *l.OwnerID == userID
+	return ownedBy(l.OwnerID, userID)
 }
 
 // EffectivePrivacy returns l.Privacy, defaulting to PrivacyPublic when unset.
@@ -87,27 +87,12 @@ func (l *Link) EffectiveDirectRedirect(serverDefault bool) bool {
 }
 
 // Expired reports whether l's TTL has elapsed as of now. A nil ExpiresAt means the link never
-// expires.
-//
-// Every path that surfaces a link to a caller must consult this, because links.Manager.Peek
-// deliberately returns expired links as-is (it is the pre-auth metadata read, and must not apply
-// policy). Keeping the comparison here rather than repeating it per call site is what stops the
-// redirect path and the API path from drifting apart on when a link counts as gone.
+// expires. links.Manager applies it; notes and files use the same comparison.
 func (l *Link) Expired(now time.Time) bool {
-	return l.ExpiresAt != nil && now.After(*l.ExpiresAt)
+	return expired(l.ExpiresAt, now)
 }
 
-// VisibleTo reports whether a caller may resolve l given its privacy level — identical semantics
-// to Note.VisibleTo, including the fail-closed default for an unrecognized stored value.
-func (l *Link) VisibleTo(callerID uuid.UUID, authenticated bool) bool {
-	switch l.EffectivePrivacy() {
-	case PrivacyPublic:
-		return true
-	case PrivacyAuthenticated:
-		return authenticated
-	case PrivacyOwner:
-		return l.OwnedBy(callerID)
-	default:
-		return false
-	}
+// VisibleTo reports whether reader can see l, with the rules of Reader.Sees.
+func (l *Link) VisibleTo(reader Reader) bool {
+	return reader.Sees(l.EffectivePrivacy(), l.OwnerID)
 }

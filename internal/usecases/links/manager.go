@@ -14,7 +14,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/partyzanex/padmark/internal/domain"
-	"github.com/partyzanex/padmark/internal/errorcontext"
 )
 
 // maxHashRetries bounds random-slug collision retries in Create — a bounded loop, never an
@@ -97,10 +96,10 @@ type Cache interface {
 	Delete(id string)
 }
 
-// Metrics records business events for operational visibility — see WithMetrics. Each method
-// corresponds to one counter documented in TODO.md's Phase 3 section:
+// Metrics records business events for operational visibility — see WithMetrics. Metrics are
+// fail-soft: the methods return no errors. Each method corresponds to one counter:
 //   - IncLinksCreated: one successful Manager.Create.
-//   - IncRedirects: one successful Manager.Redirect (normal or burn-after-click; error paths —
+//   - IncRedirects: one successful Manager.Follow (normal or burn-after-click; error paths —
 //     not found, expired, denied — do not count, matching "requests actually served").
 //   - IncCollisions: one random-slug retry inside resolveUniqueSlug hitting an already-taken
 //     slug. Deliberately scoped to the random-generation retry case only, not a rejected
@@ -112,6 +111,13 @@ type Metrics interface {
 	IncRedirects()
 	IncCollisions()
 }
+
+// noopMetrics is the default Metrics. It records nothing, so Manager needs no nil checks.
+type noopMetrics struct{}
+
+func (noopMetrics) IncLinksCreated() {}
+func (noopMetrics) IncRedirects()    {}
+func (noopMetrics) IncCollisions()   {}
 
 // ExpiredFileReleaser removes an expired file that still holds a slug, because the file sweep
 // did not run yet. files.Manager implements it; the default releases nothing. Errors are
@@ -146,9 +152,9 @@ type Manager struct {
 // user-supplied slugs (aliases); when false, a create request carrying one is rejected with
 // domain.ErrCustomSlugDisabled — mirrors notes.NewManager, and both share the same server-wide
 // --custom-slugs flag. slugLock must be the same instance passed to the paired notes.Manager —
-// see SlugLock's doc comment for why. cache and metrics are optional collaborators that default
-// to nil and must be attached via WithCache/WithMetrics at composition time; every code path
-// nil-checks them, so a missed attachment leaves caching/metrics disabled (never a nil deref).
+// see SlugLock's doc comment for why. cache and metrics are optional collaborators attached via
+// WithCache/WithMetrics at composition time: cache defaults to nil (no cache, and no slug lock on
+// reads — see resolveLink), metrics to noopMetrics.
 // All fields of Manager are explicitly initialised here so a future field added to the struct
 // cannot silently land in an undefined state — the compiler forces every caller through this
 // constructor.
@@ -163,7 +169,7 @@ func NewManager(
 		encryptor:        encryptor,
 		hasher:           hasher,
 		cache:            nil,
-		metrics:          nil,
+		metrics:          noopMetrics{},
 		log:              log,
 		expiredFiles:     noExpiredFiles{},
 		allowCustomSlugs: domain.CustomSlugSetting(allowCustomSlugs),
@@ -189,10 +195,8 @@ func (m *Manager) WithCache(cache Cache) *Manager {
 	return m
 }
 
-// WithMetrics attaches optional Metrics recording. Nil (the default) disables recording
-// entirely: every code path already nil-checks it via the unexported record* helpers below, so
-// behavior is identical with or without one — same optional-collaborator shape as WithCache.
-// Called by the composition root; do not call after the server starts serving requests.
+// WithMetrics attaches Metrics recording; the default records nothing. Give a value that is not
+// nil. Called by the composition root; do not call after the server starts serving requests.
 func (m *Manager) WithMetrics(metrics Metrics) *Manager {
 	m.metrics = metrics
 
@@ -307,9 +311,7 @@ func (m *Manager) Create(ctx context.Context, targetURL string, opts CreateOptio
 
 	m.log.DebugContext(ctx, "link created", "id", domain.HashSlug(slug))
 
-	if m.metrics != nil {
-		m.metrics.IncLinksCreated()
-	}
+	m.metrics.IncLinksCreated()
 
 	return link, nil
 }
@@ -334,12 +336,11 @@ func decryptTargetURL(ctx context.Context, enc Encryptor, log *slog.Logger, link
 	return nil
 }
 
-// Peek fetches a link by slug without incrementing views, consuming burn-after-click, or
-// applying expiry policy. Used by the HTTP layer's privacy gate before Redirect's side effects,
-// and directly by OgenHandler.GetLink (GET /links/{id}'s metadata read) — mirrors
-// notes.Manager.Peek exactly, including intentionally returning expired/burn-pending links as-is.
-// Every call reads current metadata from storage. Only target decryption may use
-// the optional Cache; cached entries never supply privacy, ownership or lifecycle state.
+// Peek fetches a link by slug without any access rule: no privacy check, no expiry, no burn and
+// no view count. It returns expired and burn links as they are. A caller that shows a link to a
+// reader uses Inspect or Follow. Every call reads current metadata from storage. Only target
+// decryption may use the optional Cache; cached entries never supply privacy, ownership or
+// lifecycle state.
 func (m *Manager) Peek(ctx context.Context, slug string) (*domain.Link, error) {
 	link, err := m.resolveLink(ctx, slug)
 	if err != nil {
@@ -349,43 +350,8 @@ func (m *Manager) Peek(ctx context.Context, slug string) (*domain.Link, error) {
 	return link, nil
 }
 
-// Redirect resolves slug to its target URL, applying expiry and burn-after-click policy exactly
-// once. Burn-after-click links are atomically consumed (deleted and returned) to prevent races
-// — a second concurrent Redirect for the same link sees no row left to consume and gets
-// ErrNotFound, giving true "exactly once" semantics. Expired links are deleted and ErrExpired is
-// returned. On an ordinary successful redirect the view counter is incremented (skipped for a
-// just-consumed burn link, which no longer exists to count) — mirrors notes.Manager.Get/View,
-// simplified for links' single burn mode (no TTL grace period, unlike notes' burn-after-reading).
-//
-// The initial fetch always reads current storage metadata. For public links the
-// optional Cache can skip decryption after verifying the current ciphertext.
-// This operation does not authorize a reader; adapters with accounts enabled use Follow.
-func (m *Manager) Redirect(ctx context.Context, slug string) (*domain.Link, error) {
-	operationResult, operationErr := m.resolveAndRedirect(ctx, slug, true)
-	if operationErr != nil {
-		return operationResult, fmt.Errorf("redirect: %w", operationErr)
-	}
-
-	return operationResult, nil
-}
-
-// RedirectWithoutBurn is Redirect for an access that did not deliberately follow the link (a
-// link-preview fetch, a mail scanner, a HEAD probe, an embedded resource): a burn_after_click
-// link is left intact and domain.ErrBurnIntentRequired is returned, decided on the same row
-// snapshot the rest of the policy uses, so a concurrent switch to burn cannot slip through. Any
-// other link is followed exactly as by Redirect.
-func (m *Manager) RedirectWithoutBurn(ctx context.Context, slug string) (*domain.Link, error) {
-	operationResult, operationErr := m.resolveAndRedirect(ctx, slug, false)
-	if operationErr != nil {
-		return operationResult, fmt.Errorf("redirect: %w", operationErr)
-	}
-
-	return operationResult, nil
-}
-
-// Delete removes a link by slug after verifying the edit code, or that the caller is the link's
-// owner — mirrors notes.Manager.Delete exactly.
-func (m *Manager) Delete(ctx context.Context, slug, editCode string, callerID uuid.UUID) error {
+// Delete removes a link by slug with the rules of checkMutation, as notes.Manager.Delete does.
+func (m *Manager) Delete(ctx context.Context, slug, editCode string, reader domain.Reader) error {
 	dbID := domain.HashSlug(slug)
 
 	existing, err := m.storage.GetByID(ctx, dbID)
@@ -393,8 +359,9 @@ func (m *Manager) Delete(ctx context.Context, slug, editCode string, callerID uu
 		return fmt.Errorf("delete link: %w", err)
 	}
 
-	if !existing.OwnedBy(callerID) && !m.hasher.Verify(existing.EditCode, editCode) {
-		return domain.ErrInvalidEditCode
+	err = m.checkMutation(existing, editCode, reader)
+	if err != nil {
+		return err
 	}
 
 	// The stored hash limits the DELETE to the link checked above, not a new link with this ID.
@@ -408,91 +375,48 @@ func (m *Manager) Delete(ctx context.Context, slug, editCode string, callerID uu
 	return nil
 }
 
-// persistLink mutates link in place for persistence (encrypt the target URL, store the hashed
-// slug as the PK) and writes it to storage. The defer restores the caller-facing plaintext
-// fields and the slug ID on every return path, so no branch — including a failed storage.Create
-// — can leave the link in an encrypted state.
-func (m *Manager) persistLink(
-	ctx context.Context, link *domain.Link, slug, validURL, plaintextCode string,
-) error {
-	defer func() {
-		link.ID = slug
-		link.TargetURL = validURL
-		link.EditCode = plaintextCode
-	}()
-
-	encrypted, encErr := m.encryptor.Encrypt(validURL, domain.HashSlug(slug))
-	if encErr != nil {
-		return fmt.Errorf("encrypt target url: %w", encErr)
+// checkMutation applies the rules of a change to the stored link existing, as
+// notes.Manager does: the reader must see the link (domain.ErrForbidden), and must be its owner
+// or give its edit code (domain.ErrInvalidEditCode).
+func (m *Manager) checkMutation(existing *domain.Link, editCode string, reader domain.Reader) error {
+	if !existing.VisibleTo(reader) {
+		return domain.ErrForbidden
 	}
 
-	link.TargetURL = encrypted
-	link.ID = domain.HashSlug(slug)
-
-	err := m.createReleasingExpired(ctx, link)
-	if err != nil {
-		return fmt.Errorf("create link: %w", err)
+	if !existing.OwnedBy(reader.CallerID) && !m.hasher.Verify(existing.EditCode, editCode) {
+		return domain.ErrInvalidEditCode
 	}
 
 	return nil
 }
 
-// resolveAndRedirect is Redirect/RedirectWithoutBurn's shared body; allowBurn says whether this
-// access may consume a burn_after_click link.
-func (m *Manager) resolveAndRedirect(ctx context.Context, slug string, allowBurn bool) (*domain.Link, error) {
-	link, err := m.resolveLink(ctx, slug)
+// persistLink writes link to storage under slug. The storage form is a separate value with the
+// hashed slug, the encrypted target URL and the edit-code hash; link itself gets the slug, the
+// plaintext target URL and the plaintext edit code only after the write.
+func (m *Manager) persistLink(
+	ctx context.Context, link *domain.Link, slug, validURL, plaintextCode string,
+) error {
+	recordID := domain.HashSlug(slug)
+
+	encrypted, err := m.encryptor.Encrypt(validURL, recordID)
 	if err != nil {
-		return nil, fmt.Errorf("redirect: %w", err)
+		return fmt.Errorf("encrypt target url: %w", err)
 	}
 
-	operationResult, operationErr := m.redirectLink(ctx, slug, link, redirectAccess{reader: nil, allowBurn: allowBurn})
-	if operationErr != nil {
-		return operationResult, fmt.Errorf("redirect link: %w", operationErr)
+	stored := *link
+	stored.ID = recordID
+	stored.TargetURL = encrypted
+
+	err = m.createReleasingExpired(ctx, &stored)
+	if err != nil {
+		return fmt.Errorf("create link: %w", err)
 	}
 
-	return operationResult, nil
-}
+	link.ID = slug
+	link.TargetURL = validURL
+	link.EditCode = plaintextCode
 
-// redirectAccess describes one redirect. reader is the Follow caller whose visibility storage
-// enforces, or nil for Redirect; allowBurn says whether the access may consume a burn link.
-type redirectAccess struct {
-	reader    *FollowOptions
-	allowBurn bool
-}
-
-func (m *Manager) redirectLink(
-	ctx context.Context, slug string, link *domain.Link, access redirectAccess,
-) (*domain.Link, error) {
-	dbID := domain.HashSlug(slug)
-	reader := access.reader
-
-	if link.Expired(time.Now()) {
-		return nil, errorcontext.Wrap(m.expireLink(ctx, slug, reader), "handle redirect link")
-	}
-
-	if link.BurnAfterClick {
-		if !access.allowBurn {
-			return nil, fmt.Errorf("redirect: %w", domain.ErrBurnIntentRequired)
-		}
-
-		operationResult, operationErr := m.consumeLink(ctx, slug, dbID, reader)
-		if operationErr != nil {
-			return operationResult, fmt.Errorf("consume link: %w", operationErr)
-		}
-
-		return operationResult, nil
-	}
-
-	incErr := m.incrementRedirectViews(ctx, dbID, link, reader)
-	if incErr != nil {
-		return nil, fmt.Errorf("increment redirect views: %w", incErr)
-	}
-
-	if m.metrics != nil {
-		m.metrics.IncRedirects()
-	}
-
-	return link, nil
+	return nil
 }
 
 // resolveLink reads the current row before consulting the decrypted-target cache.
@@ -654,9 +578,7 @@ func (m *Manager) resolveUniqueSlug(
 
 		// Reached only for a random-slug retry collision, never a rejected custom alias (that
 		// returns above) — see the Metrics interface's doc comment for why the distinction matters.
-		if m.metrics != nil {
-			m.metrics.IncCollisions()
-		}
+		m.metrics.IncCollisions()
 	}
 
 	return "", nil, domain.ErrHashCollision
@@ -681,34 +603,42 @@ func (m *Manager) slugTaken(ctx context.Context, dbID string) (bool, error) {
 	return linksExist, nil
 }
 
-func (m *Manager) consumeLink(
-	ctx context.Context, slug, dbID string, reader *FollowOptions,
-) (*domain.Link, error) {
-	var consumed *domain.Link
-
-	var err error
-
-	if reader == nil {
-		consumed, err = m.storage.Consume(ctx, dbID)
-	} else {
-		consumed, err = m.storage.ConsumeVisible(ctx, dbID, reader.CallerID, reader.Authenticated, true)
-	}
-
+// consumeLink deletes the burn link that reader follows and returns it with the plaintext target.
+func (m *Manager) consumeLink(ctx context.Context, slug, dbID string, reader domain.Reader) (*domain.Link, error) {
+	consumed, err := m.consume(ctx, dbID, reader)
 	if err != nil {
-		return nil, fmt.Errorf("redirect: burn after click: %w", err)
+		return nil, fmt.Errorf("burn after click: %w", err)
 	}
 
 	consumed.ID = slug
 
 	err = decryptTargetURL(ctx, m.encryptor, m.log, consumed)
 	if err != nil {
-		return nil, fmt.Errorf("redirect: burn after click: %w", err)
+		return nil, fmt.Errorf("burn after click: %w", err)
 	}
 
 	m.log.DebugContext(ctx, "link burned", "id", domain.HashSlug(slug))
+	m.metrics.IncRedirects()
 
-	if m.metrics != nil {
-		m.metrics.IncRedirects()
+	return consumed, nil
+}
+
+// consume atomically deletes a burn link. Storage checks the privacy of the current row for
+// reader in the DELETE; with SkipPrivacy (accounts off) no privacy level applies, so storage
+// checks only the burn and expiry rule.
+func (m *Manager) consume(ctx context.Context, dbID string, reader domain.Reader) (*domain.Link, error) {
+	if reader.SkipPrivacy {
+		consumed, err := m.storage.Consume(ctx, dbID)
+		if err != nil {
+			return nil, fmt.Errorf("consume link: %w", err)
+		}
+
+		return consumed, nil
+	}
+
+	consumed, err := m.storage.ConsumeVisible(ctx, dbID, reader.CallerID, reader.Authenticated, true)
+	if err != nil {
+		return nil, fmt.Errorf("consume link: %w", err)
 	}
 
 	return consumed, nil

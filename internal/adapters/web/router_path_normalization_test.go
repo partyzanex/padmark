@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	time "time"
 
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/mock/gomock"
@@ -77,9 +76,25 @@ func (s *PathNormalizationSuite) TearDownTest() {
 func (s *PathNormalizationSuite) recordPeeks() *[]string {
 	peeked := []string{}
 
-	s.manager.EXPECT().Peek(gomock.Any(), gomock.Any()).
-		DoAndReturn(func(_ context.Context, id string) (*domain.Note, error) {
-			peeked = append(peeked, id)
+	record := func(id string) {
+		peeked = append(peeked, id)
+	}
+
+	s.manager.EXPECT().Read(gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, id string, _ domain.Reader) (*domain.Note, error) {
+			record(id)
+
+			return nil, domain.ErrNotFound
+		}).AnyTimes()
+	s.manager.EXPECT().ReadRendered(gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, id string, _ domain.Reader) (*domain.Note, string, error) {
+			record(id)
+
+			return nil, "", domain.ErrNotFound
+		}).AnyTimes()
+	s.manager.EXPECT().Inspect(gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, id string, _ domain.Reader) (*domain.Note, error) {
+			record(id)
 
 			return nil, domain.ErrNotFound
 		}).AnyTimes()
@@ -261,24 +276,20 @@ func (s *PathNormalizationSuite) TestPercentEncodedLoginPath_IsTheLoginPage() {
 
 // TestPercentEncodedPrivateSlug_StillGated covers the inverse direction: a private note fetched
 // through a percent-encoded spelling of its slug reaches the note handler under its real slug,
-// and the per-note privacy gate (handlePrivateAuth) still refuses the anonymous caller — no
-// View/GetRendered call, no content.
+// and the usecase privacy rule still refuses the anonymous caller (ErrForbidden) — no content.
+// The editor reads with Inspect, the other routes with Read.
 func (s *PathNormalizationSuite) TestPercentEncodedPrivateSlug_StillGated() {
-	privacy := domain.PrivacyAuthenticated
-	private := &domain.Note{
-		ID: "secret", Content: "top secret", Privacy: &privacy,
-		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
-		OwnerID: nil, Title: "", ContentType: nil, EditCode: "",
-		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
-	}
-
 	for _, target := range []string{"/%73ecret", "/notes/%73ecret", "/edit/%73ecret", "/%73ecret%2Fsub"} {
 		s.Run(target, func() {
 			wantID := strings.TrimPrefix(strings.TrimPrefix(strings.TrimPrefix(target, "/notes"), "/edit"), "/")
 			wantID, err := url.PathUnescape(wantID)
 			s.Require().NoError(err)
 
-			s.manager.EXPECT().Peek(gomock.Any(), wantID).Return(private, nil).Times(1)
+			if strings.HasPrefix(target, "/edit/") {
+				s.manager.EXPECT().Inspect(gomock.Any(), wantID, anonymousReader()).Return(nil, domain.ErrForbidden)
+			} else {
+				s.manager.EXPECT().Read(gomock.Any(), wantID, anonymousReader()).Return(nil, domain.ErrForbidden)
+			}
 
 			rec := s.serve(s.rawRequest(http.MethodGet, target))
 

@@ -128,7 +128,7 @@ func (c *common) header(r *http.Request, kind string) headerView {
 		Kind:      kind,
 		Username:  "",
 		CSRFToken: middleware.CSRFFromContext(r.Context()),
-		Accounts:  c.authMgr != nil,
+		Accounts:  bool(c.accounts),
 		IsAdmin:   false,
 		Record:    recordNote,
 		// The file tab follows the configuration, not the user.
@@ -148,10 +148,6 @@ func (c *common) header(r *http.Request, kind string) headerView {
 // or when accounts are off. A failed session lookup counts as signed out (fail-soft): the header
 // then offers "Sign in" and the page still renders.
 func (c *common) currentUser(r *http.Request) *domain.User {
-	if c.authMgr == nil {
-		return nil
-	}
-
 	// The auth middleware stores the user for protected routes; public routes need the lookup.
 	usr := middleware.UserFromContext(r)
 	if usr != nil {
@@ -163,7 +159,8 @@ func (c *common) currentUser(r *http.Request) *domain.User {
 		return nil
 	}
 
-	usr, err := c.authMgr.GetSession(r.Context(), sessID)
+	// Without accounts, sessionChecker is disabledAccounts: the lookup fails and nobody is signed in.
+	usr, err := c.sessionChecker.GetSession(r.Context(), sessID)
 	if err != nil {
 		return nil
 	}

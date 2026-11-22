@@ -6,11 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 
-	"github.com/google/uuid"
 	"go.uber.org/mock/gomock"
 
-	"github.com/partyzanex/padmark/internal/adapters/web"
-	"github.com/partyzanex/padmark/internal/adapters/web/ogenapi"
 	"github.com/partyzanex/padmark/internal/domain"
 )
 
@@ -98,11 +95,9 @@ func (s *HandlerSuite) TestUpdateNote_ShowContents() {
 
 	for _, id := range []string{testID, "project/GUIDE.md"} {
 		for _, tcase := range cases {
-			s.expectMutationGate()
-
 			stored := newTestNote("t", "c")
 			stored.ShowContents = new(true)
-			s.manager.EXPECT().Update(gomock.Any(), id, "editcode1234", uuid.Nil, showContentsMatcher(tcase.want)).
+			s.manager.EXPECT().Update(gomock.Any(), id, "editcode1234", noCaller(), showContentsMatcher(tcase.want)).
 				Return(stored, nil)
 
 			w := s.sendJSON(http.MethodPut, "/notes/"+id, tcase.body)
@@ -120,15 +115,15 @@ func (s *HandlerSuite) TestUpdateNote_ShowContents() {
 	}
 }
 
-// TestGetNote_ShowContentsField checks the JSON reads: the native content-negotiated route and
-// the ogen handler report show_contents, false for a note without the value.
+// TestGetNote_ShowContentsField checks the JSON read of the native content-negotiated route: it
+// reports show_contents, false for a note without the value.
 func (s *HandlerSuite) TestGetNote_ShowContentsField() {
 	for _, stored := range []*bool{nil, new(false), new(true)} {
 		note := newTestNote("t", "c")
 		note.ShowContents = stored
 		want := stored != nil && *stored
 
-		s.manager.EXPECT().View(gomock.Any(), testID).Return(note, nil)
+		s.manager.EXPECT().Read(gomock.Any(), testID, gomock.Any()).Return(note, nil)
 
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
@@ -144,17 +139,6 @@ func (s *HandlerSuite) TestGetNote_ShowContentsField() {
 		for _, field := range legacyNoteFields() {
 			s.Contains(read, field, "field %s", field)
 		}
-
-		s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
-		s.manager.EXPECT().ViewPreloaded(gomock.Any(), testID, note).Return(note, nil)
-
-		handler := web.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
-		result, err := handler.GetNote(s.T().Context(), ogenapi.GetNoteParams{ID: testID})
-		s.Require().NoError(err)
-
-		resp, ok := result.(*ogenapi.NoteResponse)
-		s.Require().True(ok)
-		s.Equal(ogenapi.NewOptBool(want), resp.ShowContents)
 	}
 }
 
@@ -164,7 +148,7 @@ func (s *HandlerSuite) TestGetNote_HTML_ContentsSidebar() {
 	for _, stored := range []*bool{nil, new(false), new(true)} {
 		note := newTestNote("toc", "## Part")
 		note.ShowContents = stored
-		s.manager.EXPECT().GetRendered(gomock.Any(), testID).
+		s.manager.EXPECT().ReadRendered(gomock.Any(), testID, gomock.Any()).
 			Return(note, `<h2 id="user-content-part">Part</h2>`, nil)
 
 		w := httptest.NewRecorder()
@@ -197,7 +181,10 @@ func (s *HandlerSuite) TestGetNote_BurnInterstitial_NoContentsSidebar() {
 	note.BurnAfterReading = true
 	note.ShowContents = new(true)
 
-	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
+	// The first read does not burn; the burn note then gets the confirmation page.
+	s.manager.EXPECT().ReadRendered(gomock.Any(), testID, withBurn(false)).
+		Return(nil, "", domain.ErrBurnIntentRequired)
+	s.manager.EXPECT().Inspect(gomock.Any(), testID, gomock.Any()).Return(note, nil)
 	s.revealStore.EXPECT().Issue(gomock.Any(), domain.HashSlug(testID)).Return("tok-abc", nil)
 
 	w := httptest.NewRecorder()
@@ -217,8 +204,7 @@ func (s *HandlerSuite) TestEditPage_ContentsSwitch() {
 	for _, stored := range []*bool{nil, new(true)} {
 		note := newTestNote("edit me", "# hello")
 		note.ShowContents = stored
-		s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
-		s.manager.EXPECT().EnforceExpiry(gomock.Any(), testID, note).Return(nil)
+		s.manager.EXPECT().Inspect(gomock.Any(), testID, gomock.Any()).Return(note, nil)
 
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest(http.MethodGet, "/edit/"+testID, nil)

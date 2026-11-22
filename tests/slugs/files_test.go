@@ -178,8 +178,8 @@ func expireFile(t *testing.T, db bun.IDB, id string) {
 	require.NoError(t, err)
 }
 
-func reader(allowBurn bool) files.AccessOptions {
-	return files.AccessOptions{CallerID: uuid.Nil, Authenticated: false, AllowBurn: allowBurn, SkipPrivacy: false}
+func reader(allowBurn bool) domain.Reader {
+	return domain.Reader{CallerID: uuid.Nil, Authenticated: false, AllowBurn: allowBurn, SkipPrivacy: false}
 }
 
 // testFileRelease checks that each way a file goes away releases its slug, and that a note, a
@@ -214,12 +214,12 @@ func removeFile(t *testing.T, env *slugEnv, slug, editCode, operation string) {
 
 	switch operation {
 	case "delete":
-		require.NoError(t, env.files.Delete(ctx, slug, editCode, uuid.Nil))
+		require.NoError(t, env.files.Delete(ctx, slug, editCode, reader(false)))
 	case "burn":
 		burnFile(t, env, slug)
 	case "expiry":
 		expireFile(t, env.db, domain.HashSlug(slug))
-		_, err := env.files.Info(ctx, slug, reader(false))
+		_, err := env.files.Inspect(ctx, slug, reader(false))
 		require.ErrorIs(t, err, domain.ErrExpired)
 	default:
 		expireFile(t, env.db, domain.HashSlug(slug))

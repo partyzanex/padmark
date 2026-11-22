@@ -9,7 +9,6 @@ import (
 
 	"github.com/partyzanex/padmark/internal/adapters/web/middleware"
 	"github.com/partyzanex/padmark/internal/domain"
-	"github.com/partyzanex/padmark/internal/usecases/links"
 )
 
 //go:embed templates/redirect.html
@@ -61,8 +60,8 @@ type redirectViewData struct {
 }
 
 // Redirect handles GET /r/{id}, the older short-link URL (Handler.GetNoteOrLink serves GET /{id}
-// through respondLink): resolves the link, applies its privacy gate (mirrors
-// NoteHandler.handlePrivateAuth), then either issues a 301 to the target URL or renders the
+// through respondLink): follows the link with links.Manager.Follow, which applies the privacy,
+// expiry and burn rules, then either issues a 301 to the target URL or renders the
 // transparency interstitial. The mode is link.EffectiveDirectRedirect(h.directRedirect): anonymous
 // links get the interstitial unless the operator enabled --direct-redirect; links created by an
 // authenticated owner redirect directly; a per-link override applies within those limits.
@@ -123,29 +122,10 @@ func (h *LinkHandler) respondLink(w http.ResponseWriter, r *http.Request, id str
 // (explicitRead — a browser navigation or a client naming the format) may consume a
 // burn_after_click link; anything else (preview fetch, scanner, HEAD, <img src="/…">) may not.
 func (h *LinkHandler) followLink(r *http.Request, id string) (*domain.Link, error) {
-	if h.authMgr != nil {
-		link, err := h.manager.Follow(r.Context(), id, links.FollowOptions{
-			CallerID:      middleware.CallerIDFromCtx(r.Context()),
-			Authenticated: h.isAuthenticated(r),
-			AllowBurn:     explicitRead(r),
-		})
-		if err != nil {
-			return nil, fmt.Errorf("follow link: %w", err)
-		}
+	reader := h.reader(r)
+	reader.AllowBurn = explicitRead(r)
 
-		return link, nil
-	}
-
-	if explicitRead(r) {
-		link, err := h.manager.Redirect(r.Context(), id)
-		if err != nil {
-			return nil, fmt.Errorf("follow link: %w", err)
-		}
-
-		return link, nil
-	}
-
-	link, err := h.manager.RedirectWithoutBurn(r.Context(), id)
+	link, err := h.manager.Follow(r.Context(), id, reader)
 	if err != nil {
 		return nil, fmt.Errorf("follow link: %w", err)
 	}

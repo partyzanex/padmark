@@ -31,15 +31,15 @@ func linkPageUser(name string) *domain.User {
 }
 
 // TestLinkPage_Browser: a browser on /links/{id} gets the page of the link, with the frame and
-// the actions of the note page. Only Peek is expected: the page does not count a view and does
-// not burn the link (gomock fails on a Follow or Redirect call).
+// the actions of the note page. Only Inspect is expected: the page does not count a view and
+// does not burn the link (gomock fails on a Follow call).
 func (s *HandlerSuite) TestLinkPage_Browser() {
 	link := newTestLink()
 	link.BurnAfterClick = true
 	link.Views = 3
 	expires := time.Date(2030, time.March, 4, 5, 6, 0, 0, time.UTC)
 	link.ExpiresAt = &expires
-	s.linkManager.EXPECT().Peek(gomock.Any(), testLinkID).Return(link, nil)
+	s.linkManager.EXPECT().Inspect(gomock.Any(), testLinkID, openReader()).Return(link, nil)
 
 	rec := httptest.NewRecorder()
 	s.router.ServeHTTP(rec, linkPageRequest("/links/"+testLinkID))
@@ -63,7 +63,7 @@ func (s *HandlerSuite) TestLinkPage_Browser() {
 
 // TestLinkPage_DirectRedirectLabel: the page names the redirect mode that /{id} applies.
 func (s *HandlerSuite) TestLinkPage_DirectRedirectLabel() {
-	s.linkManager.EXPECT().Peek(gomock.Any(), testLinkID).Return(newTestLink(), nil)
+	s.linkManager.EXPECT().Inspect(gomock.Any(), testLinkID, gomock.Any()).Return(newTestLink(), nil)
 
 	rec := httptest.NewRecorder()
 	s.newLinkRouter(true).ServeHTTP(rec, linkPageRequest("/links/"+testLinkID))
@@ -74,7 +74,7 @@ func (s *HandlerSuite) TestLinkPage_DirectRedirectLabel() {
 
 // TestLinkPage_APIStaysJSON: a client that does not prefer HTML keeps the JSON read.
 func (s *HandlerSuite) TestLinkPage_APIStaysJSON() {
-	s.linkManager.EXPECT().Peek(gomock.Any(), testLinkID).Return(newTestLink(), nil)
+	s.linkManager.EXPECT().Inspect(gomock.Any(), testLinkID, gomock.Any()).Return(newTestLink(), nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/links/"+testLinkID, nil)
 	req.Header.Set("Accept", "*/*")
@@ -89,7 +89,7 @@ func (s *HandlerSuite) TestLinkPage_APIStaysJSON() {
 
 func (s *HandlerSuite) TestLinkPage_Errors() {
 	s.Run("not found", func() {
-		s.linkManager.EXPECT().Peek(gomock.Any(), "missing").Return(nil, domain.ErrNotFound)
+		s.linkManager.EXPECT().Inspect(gomock.Any(), "missing", gomock.Any()).Return(nil, domain.ErrNotFound)
 
 		rec := httptest.NewRecorder()
 		s.router.ServeHTTP(rec, linkPageRequest("/links/missing"))
@@ -99,10 +99,8 @@ func (s *HandlerSuite) TestLinkPage_Errors() {
 	})
 
 	s.Run("expired", func() {
-		link := newTestLink()
-		past := time.Now().Add(-time.Hour)
-		link.ExpiresAt = &past
-		s.linkManager.EXPECT().Peek(gomock.Any(), testLinkID).Return(link, nil)
+		// The usecase applies the expiry rule; the page shows its error.
+		s.linkManager.EXPECT().Inspect(gomock.Any(), testLinkID, gomock.Any()).Return(nil, domain.ErrExpired)
 
 		rec := httptest.NewRecorder()
 		s.router.ServeHTTP(rec, linkPageRequest("/links/"+testLinkID))
@@ -112,9 +110,10 @@ func (s *HandlerSuite) TestLinkPage_Errors() {
 	})
 }
 
-// TestLinkPage_Privacy: the page applies the privacy rules of the note page. An anonymous
-// browser goes to the sign-in page, a signed-in user who is not the owner gets 403, and the
-// owner gets the page. The destination never reaches a caller who failed the check.
+// TestLinkPage_Privacy: the page gives the privacy answers of the note page. The usecase decides
+// (ErrForbidden); an anonymous browser goes to the sign-in page, a signed-in user who is not the
+// owner gets 403, and the owner gets the page. The destination never reaches a caller who failed
+// the check.
 func (s *HandlerSuite) TestLinkPage_Privacy() {
 	owner := linkPageUser("alice")
 	link := newTestLink()
@@ -122,7 +121,7 @@ func (s *HandlerSuite) TestLinkPage_Privacy() {
 	link.OwnerID = &owner.ID
 
 	s.Run("anonymous", func() {
-		s.linkManager.EXPECT().Peek(gomock.Any(), testLinkID).Return(link, nil)
+		s.linkManager.EXPECT().Inspect(gomock.Any(), testLinkID, anonymousReader()).Return(nil, domain.ErrForbidden)
 
 		rec := httptest.NewRecorder()
 		s.newLinkRouterWithTOTPAuth().ServeHTTP(rec, linkPageRequest("/links/"+testLinkID))
@@ -135,7 +134,8 @@ func (s *HandlerSuite) TestLinkPage_Privacy() {
 	s.Run("other user", func() {
 		other := linkPageUser("bob")
 
-		s.linkManager.EXPECT().Peek(gomock.Any(), testLinkID).Return(link, nil)
+		s.linkManager.EXPECT().Inspect(gomock.Any(), testLinkID, signedInReader(other.ID)).
+			Return(nil, domain.ErrForbidden)
 		s.authMgr.EXPECT().GetSession(gomock.Any(), "other-sess").Return(other, nil)
 
 		req := linkPageRequest("/links/" + testLinkID)
@@ -149,7 +149,7 @@ func (s *HandlerSuite) TestLinkPage_Privacy() {
 	})
 
 	s.Run("owner", func() {
-		s.linkManager.EXPECT().Peek(gomock.Any(), testLinkID).Return(link, nil)
+		s.linkManager.EXPECT().Inspect(gomock.Any(), testLinkID, signedInReader(owner.ID)).Return(link, nil)
 		s.authMgr.EXPECT().GetSession(gomock.Any(), "owner-sess").Return(owner, nil)
 
 		req := linkPageRequest("/links/" + testLinkID)
@@ -166,10 +166,10 @@ func (s *HandlerSuite) TestLinkPage_Privacy() {
 }
 
 // TestEditPage_Link: /edit/{id} opens the short-link editor when the slug names a link, with
-// the labels of the note editor. It reads the link with Peek only.
+// the labels of the note editor. It reads the link with Inspect only.
 func (s *HandlerSuite) TestEditPage_Link() {
-	s.manager.EXPECT().Peek(gomock.Any(), testLinkID).Return(nil, domain.ErrNotFound)
-	s.linkManager.EXPECT().Peek(gomock.Any(), testLinkID).Return(newTestLink(), nil)
+	s.manager.EXPECT().Inspect(gomock.Any(), testLinkID, gomock.Any()).Return(nil, domain.ErrNotFound)
+	s.linkManager.EXPECT().Inspect(gomock.Any(), testLinkID, gomock.Any()).Return(newTestLink(), nil)
 
 	rec := httptest.NewRecorder()
 	s.router.ServeHTTP(rec, linkPageRequest("/edit/"+testLinkID))
@@ -190,11 +190,8 @@ func (s *HandlerSuite) TestEditPage_Link() {
 
 // TestEditPage_LinkPrivate: the link editor at /edit/{id} keeps the privacy check of the link.
 func (s *HandlerSuite) TestEditPage_LinkPrivate() {
-	link := newTestLink()
-	link.Privacy = new(domain.PrivacyAuthenticated)
-
-	s.manager.EXPECT().Peek(gomock.Any(), testLinkID).Return(nil, domain.ErrNotFound)
-	s.linkManager.EXPECT().Peek(gomock.Any(), testLinkID).Return(link, nil)
+	s.manager.EXPECT().Inspect(gomock.Any(), testLinkID, anonymousReader()).Return(nil, domain.ErrNotFound)
+	s.linkManager.EXPECT().Inspect(gomock.Any(), testLinkID, anonymousReader()).Return(nil, domain.ErrForbidden)
 
 	rec := httptest.NewRecorder()
 	s.newLinkRouterWithTOTPAuth().ServeHTTP(rec, linkPageRequest("/edit/"+testLinkID))

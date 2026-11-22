@@ -73,9 +73,9 @@ func (s *ManagerSuite) TestFollowConcurrentPrivacyChange() {
 			privateURL := "https://example.com/private?secret=hidden"
 			changing := s.privatizeAfterRead(storage, link.ID, ownerID, privateURL)
 			reader := newLinkManager(s.T(), changing, checker, lock.NewLocker())
-			result, followErr := reader.Follow(s.T().Context(), link.ID, links.FollowOptions{
-				AllowBurn: true,
-				CallerID:  uuid.UUID{}, Authenticated: false,
+			result, followErr := reader.Follow(s.T().Context(), link.ID, domain.Reader{
+				AllowBurn: true, SkipPrivacy: false,
+				CallerID: uuid.UUID{}, Authenticated: false,
 			})
 			s.Require().ErrorIs(followErr, domain.ErrNotFound)
 			s.Nil(result, "a raced privacy change must not expose the new destination")
@@ -83,15 +83,15 @@ func (s *ManagerSuite) TestFollowConcurrentPrivacyChange() {
 			s.Require().NoError(getErr, "the private replacement must survive both burn and expiry cleanup")
 			s.Zero(stored.Views)
 
-			followed, ownerErr := reader.Follow(s.T().Context(), link.ID, links.FollowOptions{
-				CallerID: ownerID, Authenticated: true, AllowBurn: true,
+			followed, ownerErr := reader.Follow(s.T().Context(), link.ID, domain.Reader{
+				CallerID: ownerID, Authenticated: true, AllowBurn: true, SkipPrivacy: false,
 			})
 			s.Require().NoError(ownerErr)
 			s.Equal(privateURL, followed.TargetURL)
 
 			if scenario.burn {
-				_, followErr = reader.Follow(s.T().Context(), link.ID, links.FollowOptions{
-					CallerID: ownerID, Authenticated: true, AllowBurn: true,
+				_, followErr = reader.Follow(s.T().Context(), link.ID, domain.Reader{
+					CallerID: ownerID, Authenticated: true, AllowBurn: true, SkipPrivacy: false,
 				})
 				s.Require().ErrorIs(followErr, domain.ErrNotFound, "only one owner read may consume the link")
 			}
@@ -121,7 +121,8 @@ func (s *ManagerSuite) privatizeAfterRead(
 		Storage: storage,
 		once:    sync.Once{},
 		afterRead: func() {
-			_, updateErr := s.LinkManager.Update(s.T().Context(), linkID, "", ownerID, privateURL,
+			_, updateErr := s.LinkManager.Update(s.T().Context(), linkID, "",
+				domain.Reader{CallerID: ownerID, Authenticated: true, AllowBurn: false, SkipPrivacy: false}, privateURL,
 				links.UpdateOptions{
 					Privacy: new(domain.PrivacyOwner), ExpiresAt: new(time.Now().Add(time.Hour)),
 					DirectRedirect: nil, ClearExpiry: false, ResetDirectRedirect: false,
