@@ -190,10 +190,18 @@ func (s *HandlerSuite) newRouterWithTOTPAuth() http.Handler {
 func (s *HandlerSuite) newRouterWithReveal() http.Handler {
 	s.T().Helper()
 
-	handler := web.NewHandler(s.manager, s.linkManager, discardLog()).
+	return s.newRouterWithRevealLog(discardLog())
+}
+
+// newRouterWithRevealLog is newRouterWithReveal with the given logger, for tests that examine
+// the log records.
+func (s *HandlerSuite) newRouterWithRevealLog(log *slog.Logger) http.Handler {
+	s.T().Helper()
+
+	handler := web.NewHandler(s.manager, s.linkManager, log).
 		WithAuthManager(s.authMgr).
 		WithRevealStore(s.revealStore)
-	ogen := web.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
+	ogen := web.NewOgenHandler(s.manager, s.linkManager, s.pinger, log)
 
 	opts := web.RouterOptions{
 		MaxBodyBytes: 256 * 1024,
@@ -2784,7 +2792,7 @@ func (s *HandlerSuite) TestHandleReveal_OK() {
 
 	// Inspect applies privacy before the token; the confirmed read has the burn intent.
 	s.manager.EXPECT().Inspect(gomock.Any(), testID, gomock.Any()).Return(note, nil)
-	s.revealStore.EXPECT().Consume(gomock.Any(), "tok-abc", domain.HashSlug(testID)).Return(true)
+	s.revealStore.EXPECT().Consume(gomock.Any(), "tok-abc", domain.HashSlug(testID)).Return(true, nil)
 	s.manager.EXPECT().ReadRendered(gomock.Any(), testID, withBurn(true)).
 		Return(note, "<p>burn me</p>", nil)
 
@@ -2828,7 +2836,7 @@ func (s *HandlerSuite) TestHandleReveal_NoCSRF_Forbidden() {
 func (s *HandlerSuite) TestHandleReveal_InvalidToken_Forbidden() {
 	note := newTestNote("secret", "burn me")
 	s.manager.EXPECT().Inspect(gomock.Any(), testID, gomock.Any()).Return(note, nil)
-	s.revealStore.EXPECT().Consume(gomock.Any(), "bad-tok", domain.HashSlug(testID)).Return(false)
+	s.revealStore.EXPECT().Consume(gomock.Any(), "bad-tok", domain.HashSlug(testID)).Return(false, nil)
 
 	router := s.newRouterWithReveal()
 
@@ -2837,7 +2845,10 @@ func (s *HandlerSuite) TestHandleReveal_InvalidToken_Forbidden() {
 
 	router.ServeHTTP(w, r)
 
+	// A wrong or used token keeps the Forbidden page; only a store failure gives the 500 page.
 	s.Equal(http.StatusForbidden, w.Code)
+	s.Contains(w.Body.String(), "permission to perform this action")
+	s.NotContains(w.Body.String(), "burn me")
 }
 
 // TestHandleReveal_TokenForWrongNote_Forbidden verifies that posting a token issued
@@ -2848,7 +2859,7 @@ func (s *HandlerSuite) TestHandleReveal_TokenForWrongNote_Forbidden() {
 	s.manager.EXPECT().Inspect(gomock.Any(), testID, gomock.Any()).Return(note, nil)
 	// Consume is called with testID (URL note); token was issued for another note →
 	// DB WHERE note_id = testID finds no row → returns false, token untouched.
-	s.revealStore.EXPECT().Consume(gomock.Any(), "tok-other", domain.HashSlug(testID)).Return(false)
+	s.revealStore.EXPECT().Consume(gomock.Any(), "tok-other", domain.HashSlug(testID)).Return(false, nil)
 
 	router := s.newRouterWithReveal()
 
@@ -2863,7 +2874,7 @@ func (s *HandlerSuite) TestHandleReveal_TokenForWrongNote_Forbidden() {
 func (s *HandlerSuite) TestHandleReveal_MissingToken_Forbidden() {
 	note := newTestNote("secret", "burn me")
 	s.manager.EXPECT().Inspect(gomock.Any(), testID, gomock.Any()).Return(note, nil)
-	s.revealStore.EXPECT().Consume(gomock.Any(), "", domain.HashSlug(testID)).Return(false)
+	s.revealStore.EXPECT().Consume(gomock.Any(), "", domain.HashSlug(testID)).Return(false, nil)
 
 	router := s.newRouterWithReveal()
 
@@ -2894,7 +2905,7 @@ func (s *HandlerSuite) TestHandleReveal_CrossNoteToken_TokenNotBurned() {
 
 	s.manager.EXPECT().Inspect(gomock.Any(), "wrong-note", gomock.Any()).Return(wrongNote, nil)
 	// Consume called with "wrong-note" as noteID — DB rejects mismatch, token preserved.
-	s.revealStore.EXPECT().Consume(gomock.Any(), "tok-for-abc123", domain.HashSlug("wrong-note")).Return(false)
+	s.revealStore.EXPECT().Consume(gomock.Any(), "tok-for-abc123", domain.HashSlug("wrong-note")).Return(false, nil)
 
 	router := s.newRouterWithReveal()
 
@@ -2906,6 +2917,37 @@ func (s *HandlerSuite) TestHandleReveal_CrossNoteToken_TokenNotBurned() {
 	s.Equal(http.StatusForbidden, w.Code)
 	// gomock TearDown verifies Consume(_, "tok-for-abc123", "wrong-note") was called —
 	// confirming the handler passed the URL noteID to Consume, not a blind token burn.
+}
+
+// TestHandleReveal_StoreFails_InternalError pins C4 on the web side: a store failure while the
+// token is used gives the server error page, not the wrong-token page. The strict mock has no
+// ReadRendered expectation, so a read or a burn of the note fails the test. The handler writes
+// one error record, and the record does not contain the token.
+func (s *HandlerSuite) TestHandleReveal_StoreFails_InternalError() {
+	note := newTestNote("secret", "burn me")
+	note.BurnAfterReading = true
+
+	s.manager.EXPECT().Inspect(gomock.Any(), testID, gomock.Any()).Return(note, nil)
+	s.revealStore.EXPECT().Consume(gomock.Any(), "tok-abc", domain.HashSlug(testID)).
+		Return(false, errors.New("consume reveal token: database is locked"))
+
+	logs := new(strings.Builder)
+	router := s.newRouterWithRevealLog(slog.New(slog.NewJSONHandler(logs, &slog.HandlerOptions{
+		AddSource: false, Level: slog.LevelDebug, ReplaceAttr: nil,
+	})))
+
+	w := httptest.NewRecorder()
+	r := s.revealPOST("/notes/"+testID, "token=tok-abc")
+
+	router.ServeHTTP(w, r)
+
+	s.Equal(http.StatusInternalServerError, w.Code)
+	s.Contains(w.Body.String(), "Internal server error")
+	s.NotContains(w.Body.String(), "burn me")
+	s.NotContains(w.Body.String(), "database is locked", "the page must not show the internal error")
+	s.Equal(1, strings.Count(logs.String(), `"level":"ERROR"`), "the failure is logged once at error level")
+	s.Contains(logs.String(), "database is locked")
+	s.NotContains(logs.String(), "tok-abc", "the log must not contain the token")
 }
 
 // ── TOTP-mode private note and CanEdit fixes ──

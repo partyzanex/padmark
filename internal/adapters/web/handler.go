@@ -107,10 +107,11 @@ func staticAssetVersion(path string) string {
 // RevealTokenStore issues and consumes one-time reveal tokens for burn-after-reading notes.
 type RevealTokenStore interface {
 	Issue(ctx context.Context, noteID string) (string, error)
-	// Consume atomically marks tok as used only when it is bound to noteID,
-	// is unused, and has not expired. Returns false if any condition is unmet,
-	// leaving the token intact so the legitimate owner can still use it.
-	Consume(ctx context.Context, tok, noteID string) bool
+	// Consume atomically marks tok as used only when it is bound to noteID, is unused, and has
+	// not expired. It returns false and no error when a condition is not met; the token then
+	// stays intact for its owner. It returns an error only when the store fails (fail-hard):
+	// the caller then must not reveal the note.
+	Consume(ctx context.Context, tok, noteID string) (bool, error)
 }
 
 // NoteManager is the interface the HTTP adapter requires from the business logic layer. The

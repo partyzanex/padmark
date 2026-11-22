@@ -581,11 +581,12 @@ func (m *MockRevealTokenStore) EXPECT() *MockRevealTokenStoreMockRecorder {
 }
 
 // Consume mocks base method.
-func (m *MockRevealTokenStore) Consume(ctx context.Context, tok, noteID string) bool {
+func (m *MockRevealTokenStore) Consume(ctx context.Context, tok, noteID string) (bool, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "Consume", ctx, tok, noteID)
 	ret0, _ := ret[0].(bool)
-	return ret0
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
 }
 
 // Consume indicates an expected call of Consume.

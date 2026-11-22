@@ -87,22 +87,30 @@ func (s *RevealSuite) TestConsume_PassesHash() {
 	ctx := s.T().Context()
 	s.store.EXPECT().Consume(ctx, domain.HashRevealToken("tok"), "note-hash", gomock.Any()).Return(true, nil)
 
-	s.True(s.mgr.Consume(ctx, "tok", "note-hash"))
+	consumed, err := s.mgr.Consume(ctx, "tok", "note-hash")
+	s.Require().NoError(err)
+	s.True(consumed)
 }
 
 func (s *RevealSuite) TestConsume_ConditionNotMet_ReturnsFalse() {
 	ctx := s.T().Context()
 	s.store.EXPECT().Consume(ctx, domain.HashRevealToken("tok"), "note-hash", gomock.Any()).Return(false, nil)
 
-	s.False(s.mgr.Consume(ctx, "tok", "note-hash"))
+	consumed, err := s.mgr.Consume(ctx, "tok", "note-hash")
+	s.Require().NoError(err, "a wrong or used token is not a store failure")
+	s.False(consumed)
 }
 
-// TestConsume_StoreFails_ReturnsFalse pins C4 on the manager side: a store failure never
-// reveals the note.
-func (s *RevealSuite) TestConsume_StoreFails_ReturnsFalse() {
+// TestConsume_StoreFails_ReturnsError pins C4 on the manager side: a store failure returns the
+// error, so the caller does not show it as a wrong token, and returns false, so the caller does
+// not reveal the note.
+func (s *RevealSuite) TestConsume_StoreFails_ReturnsError() {
 	ctx := s.T().Context()
+	boom := errors.New("db down")
 	s.store.EXPECT().Consume(ctx, domain.HashRevealToken("tok"), "note-hash", gomock.Any()).
-		Return(false, errors.New("db down"))
+		Return(true, boom)
 
-	s.False(s.mgr.Consume(ctx, "tok", "note-hash"))
+	consumed, err := s.mgr.Consume(ctx, "tok", "note-hash")
+	s.Require().ErrorIs(err, boom)
+	s.False(consumed, "a store failure never reveals the note, also when the store result is true")
 }

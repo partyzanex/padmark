@@ -30,7 +30,7 @@ func discardLog() *slog.Logger { return slog.New(slog.DiscardHandler) }
 
 type revealStore interface {
 	Issue(ctx context.Context, noteID string) (string, error)
-	Consume(ctx context.Context, tok, noteID string) bool
+	Consume(ctx context.Context, tok, noteID string) (bool, error)
 }
 
 // ManagerSuite is the storage-agnostic business-logic integration suite.
@@ -651,9 +651,10 @@ func (s *ManagerSuite) TestReveal_Consume_ReturnsNoteID() {
 	tok, err := s.RevealStore.Issue(ctx, created.ID)
 	s.Require().NoError(err)
 
-	ok := s.RevealStore.Consume(ctx, tok, created.ID)
+	consumed, err := s.RevealStore.Consume(ctx, tok, created.ID)
+	s.Require().NoError(err)
 
-	s.True(ok)
+	s.True(consumed)
 }
 
 func (s *ManagerSuite) TestReveal_EndToEnd_BurnAfterReading() {
@@ -670,8 +671,9 @@ func (s *ManagerSuite) TestReveal_EndToEnd_BurnAfterReading() {
 	tok, err := s.RevealStore.Issue(ctx, created.ID)
 	s.Require().NoError(err)
 
-	ok := s.RevealStore.Consume(ctx, tok, created.ID)
-	s.Require().True(ok)
+	consumed, err := s.RevealStore.Consume(ctx, tok, created.ID)
+	s.Require().NoError(err)
+	s.Require().True(consumed)
 
 	// Token unlocked access — note is readable and then burns.
 	got, err := s.Manager.Read(ctx, created.ID, openReader())
@@ -685,9 +687,10 @@ func (s *ManagerSuite) TestReveal_EndToEnd_BurnAfterReading() {
 // ── RevealStore edge cases ──.
 
 func (s *ManagerSuite) TestReveal_Consume_UnknownToken() {
-	ok := s.RevealStore.Consume(s.T().Context(), "no-such-token", "any-note")
+	consumed, err := s.RevealStore.Consume(s.T().Context(), "no-such-token", "any-note")
+	s.Require().NoError(err)
 
-	s.False(ok)
+	s.False(consumed)
 }
 
 func (s *ManagerSuite) TestReveal_Consume_AlreadyUsed() {
@@ -704,11 +707,13 @@ func (s *ManagerSuite) TestReveal_Consume_AlreadyUsed() {
 	tok, err := s.RevealStore.Issue(ctx, created.ID)
 	s.Require().NoError(err)
 
-	ok := s.RevealStore.Consume(ctx, tok, created.ID)
-	s.Require().True(ok)
+	consumed, err := s.RevealStore.Consume(ctx, tok, created.ID)
+	s.Require().NoError(err)
+	s.Require().True(consumed)
 
-	ok = s.RevealStore.Consume(ctx, tok, created.ID)
-	s.False(ok, "second Consume must fail")
+	consumed, err = s.RevealStore.Consume(ctx, tok, created.ID)
+	s.Require().NoError(err)
+	s.False(consumed, "second Consume must fail")
 }
 
 func (s *ManagerSuite) TestReveal_Consume_TokenNotReusableAfterNoteBurned() {
@@ -725,7 +730,8 @@ func (s *ManagerSuite) TestReveal_Consume_TokenNotReusableAfterNoteBurned() {
 	tok, err := s.RevealStore.Issue(ctx, created.ID)
 	s.Require().NoError(err)
 
-	consumed := s.RevealStore.Consume(ctx, tok, created.ID)
+	consumed, err := s.RevealStore.Consume(ctx, tok, created.ID)
+	s.Require().NoError(err)
 	s.Require().True(consumed)
 
 	// Burn the note.
@@ -733,7 +739,8 @@ func (s *ManagerSuite) TestReveal_Consume_TokenNotReusableAfterNoteBurned() {
 	s.Require().NoError(err)
 
 	// Token already used — second Consume must fail.
-	consumed = s.RevealStore.Consume(ctx, tok, created.ID)
+	consumed, err = s.RevealStore.Consume(ctx, tok, created.ID)
+	s.Require().NoError(err)
 	s.False(consumed)
 }
 
@@ -756,11 +763,42 @@ func (s *ManagerSuite) TestReveal_IssueMultiple_EachConsumedOnce() {
 
 	s.NotEqual(tok1, tok2, "each Issue must produce a unique token")
 
-	ok := s.RevealStore.Consume(ctx, tok1, created.ID)
-	s.True(ok)
+	consumed, err := s.RevealStore.Consume(ctx, tok1, created.ID)
+	s.Require().NoError(err)
+	s.True(consumed)
 
-	ok = s.RevealStore.Consume(ctx, tok2, created.ID)
-	s.True(ok, "second independent token must still be consumable")
+	consumed, err = s.RevealStore.Consume(ctx, tok2, created.ID)
+	s.Require().NoError(err)
+	s.True(consumed, "second independent token must still be consumable")
+}
+
+// TestReveal_Consume_StoreFailure_ReturnsErrorAndKeepsToken pins C4 against the real database:
+// a cancelled context makes the store fail before the UPDATE. Consume returns the error and
+// false, not a plain false, and the token stays valid for the next request.
+func (s *ManagerSuite) TestReveal_Consume_StoreFailure_ReturnsErrorAndKeepsToken() {
+	ctx := s.T().Context()
+
+	created, err := s.Manager.Create(ctx, &domain.Note{
+		Title: "t", Content: "c", BurnAfterReading: true,
+		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
+		OwnerID: nil, ID: "", ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
+		ClearExpiry: false, ShowContents: nil,
+	})
+	s.Require().NoError(err)
+
+	tok, err := s.RevealStore.Issue(ctx, created.ID)
+	s.Require().NoError(err)
+
+	failing, cancel := context.WithCancel(ctx)
+	cancel()
+
+	consumed, err := s.RevealStore.Consume(failing, tok, created.ID)
+	s.Require().ErrorIs(err, context.Canceled, "a store failure is an error, not a wrong token")
+	s.False(consumed)
+
+	consumed, err = s.RevealStore.Consume(ctx, tok, created.ID)
+	s.Require().NoError(err)
+	s.True(consumed, "the failed attempt must not use the token")
 }
 
 // ── Cross-table slug uniqueness (notes vs links) ──

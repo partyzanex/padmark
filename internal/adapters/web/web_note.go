@@ -293,7 +293,17 @@ func (h *NoteHandler) HandleReveal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !h.revealStore.Consume(r.Context(), r.FormValue("token"), domain.HashSlug(id)) {
+	consumed, err := h.revealStore.Consume(r.Context(), r.FormValue("token"), domain.HashSlug(id))
+	if err != nil {
+		// A store failure is not a wrong token: the reader gets the server error page and can
+		// send the same token again. The log has the note hash and the error, never the token.
+		h.log.ErrorContext(r.Context(), "consume reveal token", "id", domain.HashSlug(id), "err", err)
+		h.writeErrorPage(w, r, err)
+
+		return
+	}
+
+	if !consumed {
 		h.writeErrorPage(w, r, domain.ErrForbidden)
 
 		return

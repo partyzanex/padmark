@@ -63,17 +63,16 @@ func (m *RevealManager) Issue(ctx context.Context, noteID string) (string, error
 }
 
 // Consume marks tok as used when it is bound to noteID, unused, and not expired. It returns
-// false when a condition is not met; the token then stays intact for its owner.
+// false and no error when a condition is not met; the token then stays intact for its owner.
 //
-// A store failure also returns false, so the note is not read. The web adapter interface
-// returns a bool only, so Consume logs the store error at the error level to keep it visible.
-func (m *RevealManager) Consume(ctx context.Context, tok, noteID string) bool {
+// A store failure returns false and the error (fail-hard). The caller must not reveal the note
+// and must not show the failure as a wrong token. Consume does not log the error: the caller
+// that answers the request logs it once.
+func (m *RevealManager) Consume(ctx context.Context, tok, noteID string) (bool, error) {
 	consumed, err := m.store.Consume(ctx, domain.HashRevealToken(tok), noteID, time.Now())
 	if err != nil {
-		m.log.ErrorContext(ctx, "consume reveal token failed", "err", err)
-
-		return false
+		return false, fmt.Errorf("consume reveal token: %w", err)
 	}
 
-	return consumed
+	return consumed, nil
 }
