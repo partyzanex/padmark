@@ -30,6 +30,12 @@ services:
       PADMARK_DSN: "postgres://padmark:${POSTGRES_PASSWORD}@db:5432/padmark?sslmode=disable"
       PADMARK_ADDR: ":8080"
       PADMARK_LOG_FORMAT: json
+      # Compose gives the container only the variables in this list, not all of .env.
+      # Without accounts, padmark does not check note privacy. On a database that has private
+      # notes, keep this true. See "User accounts with TOTP 2FA" in README.md.
+      PADMARK_ENABLE_ACCOUNTS: "${PADMARK_ENABLE_ACCOUNTS:-false}"
+      # No value here: Compose passes the token only when .env or the environment sets it.
+      PADMARK_BOOTSTRAP_TOKEN:
       # File publishing through the s3 service below; see "Files setup" in README.md.
       # The endpoint is plain HTTP inside the Compose network. padmark refuses plain HTTP to a
       # host that is not loopback unless PADMARK_S3_ALLOW_INSECURE is true; it then logs a WARN.

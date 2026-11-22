@@ -5,8 +5,9 @@ Project guidance for development and maintenance of this repository.
 ## Project
 
 **padmark** is a Go service for Markdown notes, short links, optional S3 files and
-account-based access, with HTML/JSON/raw content negotiation and encrypted storage. Use Go
-1.27.3 as specified in [go.mod](go.mod). Read [README.md](README.md) for operation,
+account-based access, with HTML/JSON/raw content negotiation and encrypted storage. Build with Go
+1.27.4 or later (GO-2026-6859); [go.mod](go.mod) gives the minimum.
+Read [README.md](README.md) for operation,
 [docs/GUIDE.md](docs/GUIDE.md) for architecture and [docs/adr/](docs/adr/README.md) for decisions.
 
 ## Commands
@@ -148,7 +149,7 @@ Dependencies point inward: adapters and infrastructure depend on usecases and do
   owner's explicit request. Fix code under the existing checks instead of weakening them.
 - `.golangci.yml` defines enabled linters, exclusions and thresholds (121-column lines,
   complexity 12, JSON `snake_case`, YAML `camelCase`). `_test.go` has specific exclusions.
-- CI pins golangci-lint v2.15.0 and Go 1.27.3. The lint config currently sets analysis
+- CI pins golangci-lint v2.15.0 and Go 1.27.4. The lint config currently sets analysis
   language `go: '1.25'`; that is separate from the build-toolchain requirement.
 - `*.mk` files are fetched from `github.com/partyzanex/go-makefile`; do not edit them manually.
   Add project targets to `Makefile` and browser-specific targets to `tests/ui/Makefile`.

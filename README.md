@@ -363,6 +363,12 @@ services:
       PADMARK_DSN: "postgres://padmark:${POSTGRES_PASSWORD}@db:5432/padmark?sslmode=disable"
       PADMARK_ADDR: ":8080"
       PADMARK_LOG_FORMAT: json
+      # Compose gives the container only the variables in this list, not all of .env.
+      # Without accounts, padmark does not check note privacy. On a database that has private
+      # notes, keep this true. See "User accounts with TOTP 2FA" in README.md.
+      PADMARK_ENABLE_ACCOUNTS: "${PADMARK_ENABLE_ACCOUNTS:-false}"
+      # No value here: Compose passes the token only when .env or the environment sets it.
+      PADMARK_BOOTSTRAP_TOKEN:
       # File publishing through the s3 service below; see "Files setup" in README.md.
       # The endpoint is plain HTTP inside the Compose network. padmark refuses plain HTTP to a
       # host that is not loopback unless PADMARK_S3_ALLOW_INSECURE is true; it then logs a WARN.
@@ -420,6 +426,12 @@ volumes:
 This file is also included in the repo as [`docker-compose.yml`](docker-compose.yml).
 
 Compose requires `POSTGRES_PASSWORD`; that value is used for both PostgreSQL and the app DSN.
+Compose uses `.env` only to fill the values in the file. The container gets only the variables
+in the `environment` list of the `padmark` service. To use a different setting from
+`.env.example`, add it to that list. Accounts are off by default. To turn them on, set
+`PADMARK_ENABLE_ACCOUNTS=true` in `.env`. For the first admin, also set
+`PADMARK_BOOTSTRAP_TOKEN` there, and remove it after `/setup`. Without accounts, padmark does
+not check note privacy, so keep accounts on for a database that has private notes.
 The named `db_data` and `content_keys` volumes preserve the database and its keys when
 containers are recreated. Retain and back up both.
 
@@ -1519,8 +1531,9 @@ cost until the password is changed. The change costs RAM and CPU per login, not 
 [CHANGELOG.md](CHANGELOG.md) lists the changes of each release. References to `v0.1.6`
 describe historical migration fixtures rather than the current release number.
 
-Use Go 1.27.3 (see [`go.mod`](go.mod)). The application module and browser-test module have
-separate dependencies and test commands:
+Build with Go 1.27.4 or later: it fixes GO-2026-6859 in `net/http`. CI and the Dockerfile use
+Go 1.27.4; [`go.mod`](go.mod) gives the minimum version. The application module and
+browser-test module have separate dependencies and test commands:
 
 ```bash
 make build          # compile binaries from cmd/

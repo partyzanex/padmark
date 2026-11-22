@@ -2,8 +2,8 @@
 
 Architecture and development conventions for the current Padmark repository. Operational
 configuration and upgrades are documented in [README.md](../README.md); browser-test setup
-is in [tests/ui/README.md](../tests/ui/README.md). The application and browser-test modules
-both require Go 1.27.3.
+is in [tests/ui/README.md](../tests/ui/README.md). Build both the application and browser-test
+modules with Go 1.27.4 or later: it fixes GO-2026-6859 in `net/http`.
 
 ## Contents
 
@@ -650,7 +650,7 @@ IPv6), while authenticated attempts are per record and account ID.
 
 ## 14. Modern Go
 
-The build toolchain is Go 1.27.3. Use `for range N`, `t.Context()` / `s.T().Context()` and
+The build toolchain is Go 1.27.4. Use `for range N`, `t.Context()` / `s.T().Context()` and
 `sync.WaitGroup.Go` where they fit; use `log/slog` for structured logging. Run and review
 `go fix ./...` when upgrading the toolchain rather than rewriting code mechanically by hand.
 
@@ -674,13 +674,16 @@ separate from the build toolchain in `go.mod`.
 
 Use the checked-in [Dockerfile](../Dockerfile) and [Compose file](../docker-compose.yml),
 not a second build recipe in this guide. The Dockerfile builds the server with
-`golang:1.27.3-alpine` and `CGO_ENABLED=0`, then runs it as UID/GID 65534 in scratch.
+`golang:1.27.4-alpine` and `CGO_ENABLED=0`, then runs it as UID/GID 65534 in scratch.
 It contains no shell, CLI/MCP executable or browser-test environment.
 
 The container works in `/data`; persist that volume for its generated keyring and SQLite data.
 An explicitly configured keyring must already exist and be readable by the service UID.
 Compose uses PostgreSQL with `db_data` and `content_keys` named volumes and requires
-`POSTGRES_PASSWORD`. Startup migrates schema/content without commands inside the container.
+`POSTGRES_PASSWORD`. The container gets only the variables in the `environment` list of the
+`padmark` service; the list passes `PADMARK_ENABLE_ACCOUNTS` (default `false`) and, when set,
+`PADMARK_BOOTSTRAP_TOKEN` from `.env`. Startup migrates schema/content without commands inside
+the container.
 Retain the same keys on every restart/replica; stop old-version writers during the upgrade.
 
 File publishing needs an S3 bucket and a key with `s3:ListBucket` on the bucket and
