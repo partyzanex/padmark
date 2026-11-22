@@ -97,9 +97,12 @@ func (m *Manager) linkOutputFromCreate(headers *padmark.CreateLinkResponseHeader
 }
 
 func linkOutputFromLink(resp *padmark.LinkResponse) createLinkOutput {
+	// The generated decoder leaves a "#fragment" in the path, and String would write "%23".
+	target := padmark.SplitFragment(resp.TargetURL)
+
 	out := createLinkOutput{
 		ID:             resp.ID,
-		TargetURL:      resp.TargetURL.String(),
+		TargetURL:      target.String(),
 		Views:          resp.Views,
 		BurnAfterClick: resp.BurnAfterClick,
 		CreatedAt:      timeText(resp.CreatedAt),
@@ -129,8 +132,10 @@ func (m *Manager) bulkLinkOutput(resp *padmark.BulkCreateLinksResponse) createBu
 
 	for idx := range resp.Results {
 		item := resp.Results[idx]
+		// The generated decoder leaves a "#fragment" in the path, and String would write "%23".
+		target := padmark.SplitFragment(item.TargetURL)
 		row := bulkLinkResultOutput{
-			TargetURL: item.TargetURL.String(),
+			TargetURL: target.String(),
 			ID:        "",
 			EditCode:  "",
 			Error:     "",

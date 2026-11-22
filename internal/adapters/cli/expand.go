@@ -3,7 +3,6 @@ package cli
 import (
 	"context"
 	"fmt"
-	"os"
 
 	urcli "github.com/urfave/cli/v3"
 
@@ -51,16 +50,21 @@ func expandAction(ctx context.Context, cmd *urcli.Command) error {
 		return fmt.Errorf("decode get link response: %w", apiErr)
 	}
 
+	out := commandWriter(cmd)
+
 	if cmd.Bool(FlagJSON) {
-		return errorcontext.Wrap(printLinkJSON(os.Stdout, link), "print link json")
+		return errorcontext.Wrap(printLinkJSON(out, link), "print link json")
 	}
 
-	return errorcontext.Wrap(printLink(os.Stdout, link), "print link")
+	return errorcontext.Wrap(printLink(out, link), "print link")
 }
 
 func handleGetLinkRes(res padmark.GetLinkRes) (*padmark.LinkResponse, error) {
 	switch typed := res.(type) {
 	case *padmark.LinkResponse:
+		// The generated decoder leaves a "#fragment" in the path, and the output would show "%23".
+		typed.TargetURL = padmark.SplitFragment(typed.TargetURL)
+
 		return typed, nil
 	case *padmark.GetLinkUnauthorized:
 		return nil, fmt.Errorf("%w: %s", ErrUnauthorized, typed.Message)

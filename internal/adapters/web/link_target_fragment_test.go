@@ -7,6 +7,8 @@ import (
 
 	"github.com/google/uuid"
 	"go.uber.org/mock/gomock"
+
+	"github.com/partyzanex/padmark/internal/domain"
 )
 
 // fragmentTarget is the target URL from the bug report: "#" must not become "%23".
@@ -43,18 +45,31 @@ func (s *HandlerSuite) TestCreateLink_KeepsFragment() {
 	}
 }
 
+// TestCreateLinksBulk_KeepsFragment checks that the bulk handler gives each target to
+// links.Manager in the form that the client sent, and echoes that form in the result, also for
+// an item that fails.
 func (s *HandlerSuite) TestCreateLinksBulk_KeepsFragment() {
-	target := fragmentTarget
-	s.linkManager.EXPECT().Create(gomock.Any(), target, gomock.Any()).Return(newTestLink(), nil)
+	for _, target := range fragmentTargets() {
+		for name, createErr := range map[string]error{"created": nil, "failed": domain.ErrSlugConflict} {
+			s.Run(name+" "+target, func() {
+				if createErr == nil {
+					s.linkManager.EXPECT().Create(gomock.Any(), target, gomock.Any()).Return(newTestLink(), nil)
+				} else {
+					s.linkManager.EXPECT().Create(gomock.Any(), target, gomock.Any()).Return(nil, createErr)
+				}
 
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodPost, "/links/bulk",
-		strings.NewReader(`{"links":[{"target_url":"`+target+`"}]}`))
-	r.Header.Set("Content-Type", "application/json")
+				w := httptest.NewRecorder()
+				r := httptest.NewRequest(http.MethodPost, "/links/bulk",
+					strings.NewReader(`{"links":[{"target_url":"`+target+`"}]}`))
+				r.Header.Set("Content-Type", "application/json")
 
-	s.router.ServeHTTP(w, r)
+				s.router.ServeHTTP(w, r)
 
-	s.Equal(http.StatusOK, w.Code)
+				s.Equal(http.StatusOK, w.Code)
+				s.Contains(w.Body.String(), `"target_url":"`+target+`"`, "the echo keeps the client form")
+			})
+		}
+	}
 }
 
 func (s *HandlerSuite) TestUpdateLink_KeepsFragment() {

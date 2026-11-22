@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/url"
-	"os"
 
 	urcli "github.com/urfave/cli/v3"
 
@@ -83,7 +82,8 @@ func shortenAction(ctx context.Context, cmd *urcli.Command) error {
 		return fmt.Errorf("decode create link response: %w", apiErr)
 	}
 
-	return errorcontext.Wrap(printCreateLinkResult(os.Stdout, resolveServerURL(cmd), link), "print create link result")
+	return errorcontext.Wrap(
+		printCreateLinkResult(commandWriter(cmd), resolveServerURL(cmd), link), "print create link result")
 }
 
 func buildShortenReq(cmd *urcli.Command) (*padmark.CreateLinkRequest, error) {
@@ -140,6 +140,8 @@ func buildShortenReq(cmd *urcli.Command) (*padmark.CreateLinkRequest, error) {
 func handleCreateLinkRes(res padmark.CreateLinkRes) (*padmark.CreateLinkResponse, error) {
 	if typed, ok := res.(*padmark.CreateLinkResponseHeaders); ok {
 		resp := typed.Response
+		// The generated decoder leaves a "#fragment" in the path, and the output would show "%23".
+		resp.TargetURL = padmark.SplitFragment(resp.TargetURL)
 
 		return &resp, nil
 	}

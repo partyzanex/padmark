@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"sync"
 	"time"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -105,13 +106,16 @@ func (m *Manager) uploadFile(
 		name = *input.Name
 	}
 
-	body := &readErrRecorder{reader: file, err: nil}
+	body := &readErrRecorder{reader: file, err: nil, mu: sync.Mutex{}}
 
 	resp, err := m.client.UploadFile(ctx, name, body, opts)
 	if err != nil {
-		// UploadFile returns after it stops to read body, so body.err is safe to read here.
-		if body.err != nil {
-			return nil, fileOutput{}, fmt.Errorf("upload file: %w %q: %w", errReadLocalFile, input.Path, body.err)
+		// After an error, UploadFile does not wait for the goroutine that reads body (see its
+		// godoc). That goroutine can record a read error at this time, so firstErr takes the lock.
+		// A read error that comes later does not change the result: the error of UploadFile was first.
+		readErr := body.firstErr()
+		if readErr != nil {
+			return nil, fileOutput{}, fmt.Errorf("upload file: %w %q: %w", errReadLocalFile, input.Path, readErr)
 		}
 
 		return nil, fileOutput{}, uploadError(err)
@@ -127,9 +131,13 @@ func (m *Manager) uploadFile(
 
 // readErrRecorder keeps the first read error of the local file. The upload client reports a
 // read error as a transport error, and the tool must not tell the agent to check the server.
+// The upload client reads the file in its own goroutine, and after an error it does not wait for
+// that goroutine. The tool handler can thus read the error while the goroutine writes it, so mu
+// guards err.
 type readErrRecorder struct {
 	reader io.Reader
 	err    error
+	mu     sync.Mutex
 }
 
 func (r *readErrRecorder) Read(buf []byte) (int, error) {
@@ -143,11 +151,27 @@ func (r *readErrRecorder) Read(buf []byte) (int, error) {
 		return count, io.EOF
 	}
 
+	r.record(err)
+
+	return count, fmt.Errorf("read upload file: %w", err)
+}
+
+// record keeps err when it is the first read error.
+func (r *readErrRecorder) record(err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	if r.err == nil {
 		r.err = err
 	}
+}
 
-	return count, fmt.Errorf("read upload file: %w", err)
+// firstErr returns the first read error, or nil when no read failed yet.
+func (r *readErrRecorder) firstErr() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	return r.err
 }
 
 // uploadDefaultPrivacy is the privacy of an upload without a privacy field. With a token, the

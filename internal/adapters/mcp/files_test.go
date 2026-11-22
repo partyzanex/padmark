@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing/iotest"
 	"time"
 
@@ -545,6 +546,48 @@ func (s *ToolsSuite) TestUploadFile_MapsTimeoutAndReadErrors() {
 		s.Contains(text, diskErr.Error())
 		s.NotContains(text, "is padmark-server running")
 	})
+}
+
+// TestUploadFile_EarlyReturnDoesNotRaceWithReader follows the contract of UploadFile in
+// pkg/client: after an error, UploadFile returns and does not wait for the goroutine that reads
+// the body. That goroutine can fail a read at any time, also while the tool handler decides
+// which cause to report. The stub does the same: it starts a goroutine that fails a read, and
+// it returns a server error at once. Only -race shows a failure of this test, because the test
+// needs the access to the recorded error to be synchronized.
+func (s *ToolsSuite) TestUploadFile_EarlyReturnDoesNotRaceWithReader() {
+	root := s.useUploadRoot()
+	s.writeFile(filepath.Join(root, "a.txt"), "x")
+
+	diskErr := errors.New("input/output error")
+	readerStopped := make(chan struct{})
+
+	s.cl.EXPECT().UploadFile(gomock.Any(), "a.txt", gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, _ string, body io.Reader, _ padmark.UploadFileOptions) (
+			*padmark.CreateFileResponse, error,
+		) {
+			recorder, ok := body.(*readErrRecorder)
+			s.Require().True(ok, "the tool wraps the file to record read errors")
+
+			recorder.reader = iotest.ErrReader(diskErr)
+
+			// This goroutine is the one that UploadFile does not wait for. Nothing here orders
+			// its read before or after the return of the stub.
+			go func() {
+				defer close(readerStopped)
+
+				_, _ = io.ReadAll(body)
+			}()
+
+			return nil, &padmark.APIError{Message: "too large", Code: "", StatusCode: http.StatusRequestEntityTooLarge}
+		})
+
+	res := s.callTool(s.T().Context(), "upload_file", map[string]any{"path": "a.txt"})
+
+	<-readerStopped
+
+	// Either cause is valid here: it depends on which side was first. The tool must report one.
+	text := s.errorTextOf(res)
+	s.True(strings.Contains(text, "content too large") || strings.Contains(text, errReadLocalFile.Error()), text)
 }
 
 // --- helpers ---

@@ -348,9 +348,14 @@ func createOneBulkLink(
 ) ogenapi.BulkLinkResult {
 	var link *domain.Link
 
+	// target is the address in the form that the client sent. The echo uses it too: ogen decodes
+	// a "#fragment" into the path, and item.TargetURL would give "%23" back to the client.
+	target := requestTargetURL(&item.TargetURL)
+	echo := linkTargetURL(target, log)
+
 	err := requirePrivacySupport(accounts, optCreateLinkPrivacyPtr(item.Privacy))
 	if err == nil {
-		link, err = manager.Create(ctx, requestTargetURL(&item.TargetURL), buildCreateLinkOptions(ctx, item))
+		link, err = manager.Create(ctx, target, buildCreateLinkOptions(ctx, item))
 	}
 
 	if err != nil {
@@ -360,7 +365,7 @@ func createOneBulkLink(
 		}
 
 		return ogenapi.BulkLinkResult{
-			TargetURL: item.TargetURL,
+			TargetURL: echo,
 			Error:     ogenapi.NewOptString(message),
 			// Successful fields stay zero — invariant: never both link fields and Error in the same item.
 			ID:             ogenapi.OptString{Value: "", Set: false},
@@ -375,7 +380,7 @@ func createOneBulkLink(
 	}
 
 	result := ogenapi.BulkLinkResult{
-		TargetURL:      item.TargetURL,
+		TargetURL:      echo,
 		ID:             ogenapi.NewOptString(link.ID),
 		EditCode:       ogenapi.NewOptString(link.EditCode),
 		Views:          ogenapi.NewOptInt(link.Views),
