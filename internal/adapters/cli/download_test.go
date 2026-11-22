@@ -266,7 +266,7 @@ func (s *DownloadSuite) TestURLOnOtherServer() {
 func (s *DownloadSuite) TestDotID() {
 	for _, arg := range []string{".", "..", s.server.URL + "/files/..", s.server.URL + "/files/./download"} {
 		_, err := s.download(arg, "-o", "out.bin")
-		s.Require().ErrorIs(err, errInvalidFileID, arg)
+		s.Require().ErrorIs(err, errInvalidID, arg)
 	}
 
 	s.Equal(int32(0), s.downloads.Load())

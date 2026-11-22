@@ -666,6 +666,10 @@ padmark-cli shorten --target-url https://example.com --direct-redirect=false
 # Get a link's metadata (does not follow it or consume burn-after-click)
 padmark-cli expand my-link
 
+# Change a link's destination; --ttl, --privacy and --direct-redirect are optional,
+# and an omitted flag keeps its value (--edit-code is optional for the link's owner)
+padmark-cli update-link my-link --target-url https://example.com/new --edit-code MySecretCode1
+
 # Delete a link
 padmark-cli delete-link my-link --edit-code MySecretCode1
 ```
@@ -871,8 +875,8 @@ go install github.com/partyzanex/padmark/cmd/padmark-mcp@latest
 ```
 
 Tools: `create_note`, `get_note`, `update_note`, `delete_note`, `create_link`,
-`create_links_bulk`, `get_link`, `delete_link`, `upload_file`, `get_file`, `update_file`,
-`delete_file`, `check_server`.
+`create_links_bulk`, `get_link`, `update_link`, `delete_link`, `upload_file`, `get_file`,
+`update_file`, `delete_file`, `check_server`.
 
 Configure with the same credential and defaults as the CLI: `--token` / `PADMARK_TOKEN`
 (a `pmk_…` envelope works — it carries the server URL too), `--base-url` / `PADMARK_URL`
@@ -928,6 +932,9 @@ Notes for agents:
 - `get_note` is not read-only: reads bump `views`, and the first read of a burn-after-reading
   note destroys it. `get_link` is read-only — burn-after-click fires on the browser redirect
   path, not on metadata.
+- `update_link` replaces the destination of a link. It takes the `edit_code` as `update_note`
+  does. An omitted `ttl`, `privacy` or `direct_redirect` keeps its value; `ttl: 0` expires the
+  link now, so `update_link` has `destructiveHint: true`.
 - `upload_file` returns the page URL and the download URL. The proxy keeps the `edit_code` as
   for notes and links. `get_file` reads only the metadata: it does not count a download and does
   not delete a `burn_after_download` file. The tools do not download file content.

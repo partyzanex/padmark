@@ -46,14 +46,14 @@ func resolveUploadRoot(raw string) (string, error) {
 // agent host selects the working directory. The caller closes the file.
 //
 // The function does a lexical root check before it reads the file system. Each path outside
-// the root gets the same error, ErrPathOutsideRoot, without the path, so the error does not
+// the root gets the same error, errPathOutsideRoot, without the path, so the error does not
 // tell if a path outside the root exists. Then the checks resolve symbolic links, so a link
 // under root to a file outside root gets the same error. After the open, the function compares
 // the opened file with the checked file. This prevents a time-of-check to time-of-use (TOCTOU)
 // swap of the path between the two steps.
 func openUploadFile(root, path string) (*os.File, string, error) {
 	if root == "" {
-		return nil, "", ErrUploadsOff
+		return nil, "", errUploadsOff
 	}
 
 	if strings.TrimSpace(path) == "" {
@@ -68,7 +68,7 @@ func openUploadFile(root, path string) (*os.File, string, error) {
 
 	lexicalRel, inside := lexicalInsideRoot(root, rootReal, path)
 	if !inside {
-		return nil, "", ErrPathOutsideRoot
+		return nil, "", errPathOutsideRoot
 	}
 
 	err = refuseHidden(lexicalRel)
@@ -85,7 +85,7 @@ func openUploadFile(root, path string) (*os.File, string, error) {
 
 	rel, inside := relInsideRoot(rootReal, resolved)
 	if !inside {
-		return nil, "", ErrPathOutsideRoot
+		return nil, "", errPathOutsideRoot
 	}
 
 	// A link with a plain name can point to a hidden file, so the resolved path gets the check too.
@@ -103,12 +103,12 @@ func openUploadFile(root, path string) (*os.File, string, error) {
 	return file, filepath.Base(target), nil
 }
 
-// refuseHidden returns ErrHiddenPath when an element of rel starts with a dot. Such names, for
+// refuseHidden returns errHiddenPath when an element of rel starts with a dot. Such names, for
 // example .env, .git or .ssh, often hold secrets, and an agent that follows injected text can
 // ask for them. No setting turns this check off.
 func refuseHidden(rel string) error {
 	if hasHiddenElement(rel) {
-		return ErrHiddenPath
+		return errHiddenPath
 	}
 
 	return nil
@@ -156,7 +156,7 @@ func hasHiddenElement(rel string) bool {
 // resolution fails, the error must not tell if a path outside the root exists. A link under the
 // root can lead out of it, and EvalSymlinks errors can hold the link target. Thus the function
 // finds the deepest entry of the path that exists. If that entry resolves outside the root, or
-// it is a link that does not resolve, the error is ErrPathOutsideRoot: a broken link can point
+// it is a link that does not resolve, the error is errPathOutsideRoot: a broken link can point
 // out of the root. Otherwise the error holds only the agent's path and the cause.
 func resolveUnderRoot(rootReal, target, shown string) (string, error) {
 	resolved, err := realPath(target)
@@ -172,11 +172,11 @@ func resolveUnderRoot(rootReal, target, shown string) (string, error) {
 
 		entryReal, realErr := realPath(entry)
 		if realErr != nil {
-			return "", ErrPathOutsideRoot
+			return "", errPathOutsideRoot
 		}
 
 		if _, ok := relInsideRoot(rootReal, entryReal); !ok {
-			return "", ErrPathOutsideRoot
+			return "", errPathOutsideRoot
 		}
 
 		break
@@ -235,7 +235,7 @@ func openRegularFile(root *os.Root, rel, shown string) (*os.File, error) {
 	}
 
 	if !checked.Mode().IsRegular() {
-		return nil, fmt.Errorf("%q: %w", shown, ErrNotRegularFile)
+		return nil, fmt.Errorf("%q: %w", shown, errNotRegularFile)
 	}
 
 	file, err := root.Open(rel)

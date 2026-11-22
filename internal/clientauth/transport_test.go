@@ -1,4 +1,4 @@
-package cli
+package clientauth
 
 import (
 	"net/http"
@@ -70,7 +70,7 @@ func TestHTTPClient_SameOriginRedirect_KeepsToken(t *testing.T) {
 		ok(w, r)
 	})
 
-	client, err := newHTTPClient(server.server.URL, testBearer, time.Minute)
+	client, err := NewHTTPClient(server.server.URL, testBearer, time.Minute)
 	require.NoError(t, err)
 
 	resp, err := getWith(t, client, server.server.URL+"/start")
@@ -91,7 +91,7 @@ func TestHTTPClient_CrossOriginRedirect_Refused(t *testing.T) {
 		http.Redirect(w, r, other.server.URL+"/steal", http.StatusFound)
 	})
 
-	client, err := newHTTPClient(server.server.URL, testBearer, time.Minute)
+	client, err := NewHTTPClient(server.server.URL, testBearer, time.Minute)
 	require.NoError(t, err)
 
 	resp, err := getWith(t, client, server.server.URL+"/start")
@@ -99,7 +99,7 @@ func TestHTTPClient_CrossOriginRedirect_Refused(t *testing.T) {
 		require.NoError(t, resp.Body.Close())
 	}
 
-	require.ErrorIs(t, err, errCrossOriginRedirect)
+	require.ErrorIs(t, err, ErrCrossOriginRedirect)
 	assert.Empty(t, other.headers(), "the other origin must not receive any request")
 }
 
@@ -111,7 +111,7 @@ func TestHTTPClient_OtherOrigin_NoToken(t *testing.T) {
 	server := newAuthRecorder(t, ok)
 	other := newAuthRecorder(t, ok)
 
-	client, err := newHTTPClient(server.server.URL, testBearer, time.Minute)
+	client, err := NewHTTPClient(server.server.URL, testBearer, time.Minute)
 	require.NoError(t, err)
 
 	resp, err := getWith(t, client, other.server.URL+"/x")
@@ -129,7 +129,7 @@ func TestHTTPClient_TooManyRedirects(t *testing.T) {
 		http.Redirect(w, r, "/loop", http.StatusFound)
 	})
 
-	client, err := newHTTPClient(server.server.URL, testBearer, time.Minute)
+	client, err := NewHTTPClient(server.server.URL, testBearer, time.Minute)
 	require.NoError(t, err)
 
 	resp, err := getWith(t, client, server.server.URL+"/loop")
@@ -137,7 +137,7 @@ func TestHTTPClient_TooManyRedirects(t *testing.T) {
 		require.NoError(t, resp.Body.Close())
 	}
 
-	require.ErrorIs(t, err, errTooManyRedirects)
+	require.ErrorIs(t, err, ErrTooManyRedirects)
 }
 
 // TestHTTPClient_HeaderTimeoutOnly: the one client of the CLI has no total timeout, because
@@ -149,7 +149,7 @@ func TestHTTPClient_HeaderTimeoutOnly(t *testing.T) {
 
 	server := newAuthRecorder(t, ok)
 
-	client, err := newHTTPClient(server.server.URL, testBearer, time.Minute)
+	client, err := NewHTTPClient(server.server.URL, testBearer, time.Minute)
 	require.NoError(t, err)
 
 	assert.Zero(t, client.Timeout, "a total timeout would stop a large file transfer")

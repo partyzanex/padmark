@@ -13,6 +13,7 @@ import (
 
 	urcli "github.com/urfave/cli/v3"
 
+	"github.com/partyzanex/padmark/internal/clientauth"
 	"github.com/partyzanex/padmark/internal/clifactory"
 	"github.com/partyzanex/padmark/internal/errorcontext"
 )
@@ -58,7 +59,9 @@ func setupAction(ctx context.Context, cmd *urcli.Command) error {
 	// The trust gate runs before stdin is consumed, before the insecure warning and before any
 	// network I/O: a pmk_ envelope URL must not receive the bootstrap credentials unconfirmed.
 	// Setup is unauthenticated, so the bearer key itself is deliberately not sent.
-	_, serverURL, trustErr := resolveTrustedServer(cmd)
+	settings := clientSettings(cmd)
+
+	server, trustErr := clientauth.TrustedServer(settings)
 	if trustErr != nil {
 		return fmt.Errorf("resolve trusted server: %w", trustErr)
 	}
@@ -68,41 +71,30 @@ func setupAction(ctx context.Context, cmd *urcli.Command) error {
 		return fmt.Errorf("setup password: %w", err)
 	}
 
-	invite := cmd.String(FlagInvite)
-
-	// The bootstrap token only matters for the first admin; an invite is its own credential.
-	var bootstrapToken string
-	if invite == "" {
-		bootstrapToken = os.Getenv(EnvBootstrapToken)
-	}
-
-	body := struct {
-		Username       string `json:"username"`
-		Password       string `json:"password"`
-		Invite         string `json:"invite,omitempty"`
-		BootstrapToken string `json:"bootstrap_token,omitempty"`
-	}{username, password, invite, bootstrapToken}
-
-	//nolint:gosec // G117: the password must reach the server; transport secrecy is HTTPS job
-	payload, err := json.Marshal(body)
+	payload, err := setupPayload(cmd, username, password)
 	if err != nil {
-		return fmt.Errorf("encode setup request: %w", err)
+		return err
 	}
 
-	endpoint := serverURL + "/setup"
+	endpoint := server.URL + "/setup"
 
 	// Same policy as the token flow: secrets must not travel in cleartext silently.
-	insecureErr := checkInsecureSetup(commandErrWriter(cmd), endpoint, allowInsecureHTTP(cmd))
+	insecureErr := clientauth.CheckInsecure(settings.ErrOut, endpoint, setupCredential, settings.InsecureHTTP)
 	if insecureErr != nil {
-		return fmt.Errorf("check insecure setup: %w", insecureErr)
+		return fmt.Errorf("check insecure setup: validate setup transport: %w", insecureErr)
 	}
 
-	httpClient := &http.Client{
-		Timeout:   cmd.Duration(FlagTimeout),
-		Transport: nil, CheckRedirect: nil, Jar: nil,
+	// The setup request uses the HTTP client of the other commands, without a bearer token. Its
+	// redirect guard stops a 307 or 308 answer from sending the password to a different origin.
+	httpClient, err := clientauth.NewHTTPClient(server.URL, "", settings.HeaderTimeout)
+	if err != nil {
+		return fmt.Errorf("create http client: %w", err)
 	}
 
-	req, reqErr := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(string(payload)))
+	callCtx, cancel := requestContext(ctx, cmd)
+	defer cancel()
+
+	req, reqErr := http.NewRequestWithContext(callCtx, http.MethodPost, endpoint, strings.NewReader(string(payload)))
 	if reqErr != nil {
 		return fmt.Errorf("build setup request: %w", reqErr)
 	}
@@ -120,14 +112,35 @@ func setupAction(ctx context.Context, cmd *urcli.Command) error {
 	return errorcontext.Wrap(handleSetupRes(commandErrWriter(cmd), resp), "decode setup response")
 }
 
-// checkInsecureSetup guards the initial admin's password (and the returned TOTP secret, an
-// equivalent credential) against cleartext transport with the same policy as checkInsecureToken.
-func checkInsecureSetup(errOut io.Writer, serverURL string, allowInsecure insecureHTTPSetting) error {
-	return errorcontext.Wrap(
-		checkInsecureTransport(errOut, serverURL, "the initial admin password and TOTP secret", allowInsecure),
-		"validate setup transport",
-	)
+// setupPayload encodes the JSON body of /setup. The bootstrap token only matters for the first
+// admin; an invite is its own credential.
+func setupPayload(cmd *urcli.Command, username, password string) ([]byte, error) {
+	invite := cmd.String(FlagInvite)
+
+	var bootstrapToken string
+	if invite == "" {
+		bootstrapToken = os.Getenv(EnvBootstrapToken)
+	}
+
+	body := struct {
+		Username       string `json:"username"`
+		Password       string `json:"password"`
+		Invite         string `json:"invite,omitempty"`
+		BootstrapToken string `json:"bootstrap_token,omitempty"`
+	}{username, password, invite, bootstrapToken}
+
+	//nolint:gosec // G117: the password must reach the server; transport secrecy is HTTPS job
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("encode setup request: %w", err)
+	}
+
+	return payload, nil
 }
+
+// setupCredential names the secrets of /setup in the plain-HTTP messages: the initial admin's
+// password, and the returned TOTP secret, an equivalent credential.
+const setupCredential = "the initial admin password and TOTP secret"
 
 // setupJSONHeaders marks the request as the machine-readable setup variant: application/json
 // body and an explicit Accept that pins the server's negotiate() gate to the JSON branch even

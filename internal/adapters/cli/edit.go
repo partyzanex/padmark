@@ -3,11 +3,13 @@ package cli
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 
 	urcli "github.com/urfave/cli/v3"
 
+	"github.com/partyzanex/padmark/internal/clientauth"
 	"github.com/partyzanex/padmark/internal/clifactory"
 	"github.com/partyzanex/padmark/internal/errorcontext"
 	padmark "github.com/partyzanex/padmark/pkg/client"
@@ -47,7 +49,7 @@ func editCommand() *urcli.Command {
 			}),
 			clifactory.StringFlag(func(flag *urcli.StringFlag) {
 				flag.Name = FlagPrivacy
-				flag.Usage = "Privacy level: public, authenticated, or owner"
+				flag.Usage = usagePrivacy
 			}),
 			clifactory.BoolFlag(func(flag *urcli.BoolFlag) {
 				flag.Name = FlagPrivate
@@ -97,7 +99,7 @@ func editAction(ctx context.Context, cmd *urcli.Command) error {
 
 	req := buildUpdateReq(cmd, content, editCode)
 
-	apiClient, err := newPadmarkClient(cmd)
+	apiClient, _, err := clientauth.NewClient(clientSettings(cmd))
 	if err != nil {
 		return fmt.Errorf("create API client: %w", err)
 	}
@@ -123,7 +125,7 @@ func editAction(ctx context.Context, cmd *urcli.Command) error {
 // otherwise rejects it with a clear "invalid edit code" API error — the CLI does not pre-validate
 // which credential the caller intends to rely on.
 func editActionArgs(cmd *urcli.Command) (id, editCode string, err error) {
-	id, err = noteIDArg(cmd)
+	id, err = recordIDArg(cmd, noteRecord())
 	if err != nil {
 		return "", "", fmt.Errorf("read note ID: %w", err)
 	}
@@ -174,49 +176,14 @@ func buildUpdateReq(cmd *urcli.Command, content, editCode string) *padmark.Updat
 	return req
 }
 
-// handleUpdateNoteRes maps every UpdateNote response variant; exhaustive keeps the list complete.
+// handleUpdateNoteRes returns the updated note or the CLI error of the response.
 func handleUpdateNoteRes(res padmark.UpdateNoteRes) (*padmark.NoteResponse, error) {
 	if typed, ok := res.(*padmark.NoteResponse); ok {
 		return typed, nil
 	}
 
-	err := updateNoteClientError(res)
-	if err != nil {
-		return nil, err
-	}
+	rules := mutationRules()
+	rules[http.StatusForbidden] = fixed(errWrongEditCode)
 
-	switch typed := res.(type) {
-	case *padmark.UpdateNoteServiceUnavailable:
-		return nil, errorcontext.Wrap(
-			serviceUnavailableError(padmark.ErrorResponse(*typed)), "decode update note response")
-	case *padmark.UpdateNoteInternalServerError:
-		return nil, fmt.Errorf("%w: %s", ErrServer, typed.Message)
-	default:
-		return nil, fmt.Errorf("%w: %T", ErrUnexpectedResponse, res)
-	}
-}
-
-// updateNoteClientError maps the client-error variants of an UpdateNote response. It returns nil
-// for every other variant, so the caller handles those.
-func updateNoteClientError(res padmark.UpdateNoteRes) error {
-	switch typed := res.(type) {
-	case *padmark.UpdateNoteBadRequest:
-		return fmt.Errorf("%w: %s", ErrBadRequest, typed.Message)
-	case *padmark.UpdateNoteUnauthorized:
-		return ErrUnauthorized
-	case *padmark.UpdateNoteForbidden:
-		return errWrongEditCode
-	case *padmark.UpdateNoteNotFound:
-		return ErrNoteNotFound
-	case *padmark.UpdateNoteUnprocessableEntity:
-		return fmt.Errorf("%w: %s", ErrValidation, typed.Message)
-	case *padmark.UpdateNoteRequestEntityTooLarge:
-		return fmt.Errorf("%w: %s", ErrContentTooLarge, typed.Message)
-	case *padmark.UpdateNoteUnsupportedMediaType:
-		return fmt.Errorf("%w: %s", ErrBadRequest, typed.Message)
-	case *padmark.UpdateNoteTooManyRequests:
-		return ErrRateLimited
-	default:
-		return nil
-	}
+	return nil, responseError(res, noteRecord(), rules)
 }

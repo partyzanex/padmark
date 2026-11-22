@@ -1,6 +1,10 @@
 package cli
 
-import "time"
+import (
+	"time"
+
+	"github.com/partyzanex/padmark/internal/clientauth"
+)
 
 // CLI flag names.
 const (
@@ -8,7 +12,7 @@ const (
 	FlagToken   = "token"
 	FlagTimeout = "timeout"
 	// FlagAllowInsecureHTTP permits sending credentials over plain HTTP to a non-loopback host.
-	FlagAllowInsecureHTTP = "allow-insecure-http"
+	FlagAllowInsecureHTTP = clientauth.FlagAllowInsecureHTTP
 	FlagTitle             = "title"
 	FlagContent           = "content"
 	FlagFile              = "file"
@@ -28,7 +32,7 @@ const (
 	FlagJSON     = "json"
 	// FlagTargetURL is the short link's destination. Named "target-url", not "url" — the global
 	// --url flag already means the padmark server address; reusing it for the link destination
-	// would collide (see the CLI section in TODO.md for this deviation from the original draft).
+	// would collide.
 	FlagTargetURL = "target-url"
 	// FlagDirectRedirect is a per-link override of the server's --direct-redirect default. A
 	// plain BoolFlag: cmd.IsSet distinguishes "not passed" (inherit the server default, omit the
@@ -63,7 +67,7 @@ const (
 	EnvToken   = "PADMARK_TOKEN"
 	EnvTimeout = "PADMARK_TIMEOUT"
 	// EnvAllowInsecureHTTP is the environment source of --allow-insecure-http.
-	EnvAllowInsecureHTTP = "PADMARK_ALLOW_INSECURE_HTTP"
+	EnvAllowInsecureHTTP = clientauth.EnvAllowInsecureHTTP
 	EnvEditCode          = "PADMARK_EDIT_CODE"
 	// EnvBootstrapToken carries the server's first-admin bootstrap token to `setup` (no invite).
 	// Environment only: a flag value would show up in process listings.
@@ -73,6 +77,9 @@ const (
 // psWarnEditCode is appended to every --edit-code usage text: an edit code is a credential for
 // the note or link, and flag values are visible to other local users in process listings.
 const psWarnEditCode = "Flag values are visible in process listings (ps); prefer the " + EnvEditCode + " env var"
+
+// usagePrivacy is the --privacy usage text of the commands that change a resource.
+const usagePrivacy = "Privacy level: public, authenticated, or owner"
 
 // usagePrivacyDefaultPublic is the --privacy usage text of the commands that create a resource.
 const usagePrivacyDefaultPublic = "Privacy level: public (default), authenticated, or owner"

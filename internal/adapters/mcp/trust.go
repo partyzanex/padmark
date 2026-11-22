@@ -6,8 +6,8 @@ import (
 
 	urcli "github.com/urfave/cli/v3"
 
+	"github.com/partyzanex/padmark/internal/clientauth"
 	"github.com/partyzanex/padmark/internal/clifactory"
-	"github.com/partyzanex/padmark/internal/infra/tokenfile"
 )
 
 // trustedOriginMsg is the success message of `trust`: what was recorded, and where.
@@ -30,31 +30,10 @@ func trustCommand() *urcli.Command {
 // --base-url/PADMARK_URL wins, otherwise the URL embedded in the token. With neither there is
 // nothing to pin — trusting the built-in default would record a decision the user never made.
 func trustAction(_ context.Context, cmd *urcli.Command) error {
-	_, embeddedURL := splitToken(resolveToken(cmd))
-
-	serverURL := cmd.String(FlagBaseURL)
-
-	if !cmd.IsSet(FlagBaseURL) {
-		if embeddedURL == "" {
-			return errNoTrustTarget
-		}
-
-		serverURL = embeddedURL
-	}
-
-	origin, err := tokenfile.Origin(serverURL)
+	origin, path, err := clientauth.Trust(clientSettings(cmd))
 	if err != nil {
-		return fmt.Errorf("resolve server URL: %w", err)
-	}
-
-	addErr := tokenfile.AddKnownOrigin(origin)
-	if addErr != nil {
-		return fmt.Errorf("record trusted server: %w", addErr)
-	}
-
-	path, pathErr := tokenfile.HostsPath()
-	if pathErr != nil {
-		path = "<config dir unavailable>"
+		// The error of Trust is the complete message for the user, so no context is added.
+		return fmt.Errorf("%w", err)
 	}
 
 	// The confirmation is the command's only output (stderr, because stdout belongs to the MCP
@@ -66,30 +45,4 @@ func trustAction(_ context.Context, cmd *urcli.Command) error {
 	}
 
 	return nil
-}
-
-// ensureTrustedServer enforces trust-on-first-use for the server URL a pmk_ envelope token
-// pins: the embedded URL is attacker-controllable when the token comes from a third party,
-// and requests would carry the note content, the Authorization header and edit codes to
-// wherever it points. Only the case where the envelope actually decides needs confirmation —
-// an explicit --base-url/PADMARK_URL always wins over the embedded URL and is its own
-// confirmation, and a bare legacy token pins nothing.
-func ensureTrustedServer(cmd *urcli.Command, embeddedURL, serverURL string) error {
-	if embeddedURL == "" || cmd.IsSet(FlagBaseURL) {
-		return nil
-	}
-
-	origin, err := tokenfile.Origin(serverURL)
-	if err != nil {
-		return fmt.Errorf("token pins an invalid server URL %q: %w", serverURL, err)
-	}
-
-	if tokenfile.IsKnownOrigin(origin) {
-		return nil
-	}
-
-	return fmt.Errorf("%w %s, which is not trusted yet; run "+
-		"`padmark-mcp trust` to record it, or choose "+
-		"the server explicitly with "+
-		"--base-url/PADMARK_URL", ErrUntrustedServer, origin)
 }

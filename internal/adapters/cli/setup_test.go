@@ -12,6 +12,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/partyzanex/padmark/internal/clientauth"
 )
 
 // setupArgs returns the credential flags of a setup run that would otherwise succeed: only
@@ -220,6 +222,36 @@ func TestSetup_SendsBootstrapTokenFromEnv(t *testing.T) {
 				require.NotNil(t, got.BootstrapToken)
 				assert.Equal(t, testCase.want, *got.BootstrapToken)
 			}
+		})
+	}
+}
+
+// TestSetup_CrossOriginRedirectKeepsSecrets proves that a 307 or 308 answer of /setup does not
+// carry the password and the bootstrap token to a different origin. net/http sends the request
+// body again on these redirects, so only the redirect guard of the shared client stops it.
+func TestSetup_CrossOriginRedirectKeepsSecrets(t *testing.T) {
+	for _, status := range []int{http.StatusTemporaryRedirect, http.StatusPermanentRedirect} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			isolateEnv(t)
+			t.Setenv(EnvBootstrapToken, "bootstrap-secret")
+
+			var otherHits atomic.Int32
+
+			other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				otherHits.Add(1)
+				w.WriteHeader(http.StatusCreated)
+				_, _ = w.Write([]byte(`{"otp_auth_uri":"otpauth://totp/padmark:root"}`))
+			}))
+			defer other.Close()
+
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				http.Redirect(w, r, other.URL+"/setup", status)
+			}))
+			defer srv.Close()
+
+			err := runCLI(t.Context(), append([]string{"--url", srv.URL}, setupArgs()...)...)
+			require.ErrorIs(t, err, clientauth.ErrCrossOriginRedirect, "a refused redirect must fail the command")
+			assert.Zero(t, otherHits.Load(), "the other origin must not receive the setup request")
 		})
 	}
 }

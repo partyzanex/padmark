@@ -1,4 +1,4 @@
-package tokenfile_test
+package clientauth_test
 
 import (
 	"os"
@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/partyzanex/padmark/internal/infra/tokenfile"
+	"github.com/partyzanex/padmark/internal/clientauth"
 )
 
 // isolateConfig points the config dir at a fresh temp dir so tests never touch the real
@@ -58,7 +58,7 @@ func TestOrigin(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			t.Parallel()
 
-			origin, err := tokenfile.Origin(testCase.serverURL)
+			origin, err := clientauth.Origin(testCase.serverURL)
 
 			if testCase.wantErr {
 				require.Error(t, err)
@@ -78,16 +78,16 @@ func TestOrigin(t *testing.T) {
 func TestKnownOriginRoundtrip(t *testing.T) {
 	isolateConfig(t)
 
-	assert.False(t, tokenfile.IsKnownOrigin("https://example.com"), "empty hosts file must trust nothing")
+	assert.False(t, clientauth.IsKnownOrigin("https://example.com"), "empty hosts file must trust nothing")
 
-	require.NoError(t, tokenfile.AddKnownOrigin("https://example.com"))
+	require.NoError(t, clientauth.AddKnownOrigin("https://example.com"))
 
-	assert.True(t, tokenfile.IsKnownOrigin("https://example.com"))
-	assert.False(t, tokenfile.IsKnownOrigin("http://example.com"), "a different scheme is a different origin")
+	assert.True(t, clientauth.IsKnownOrigin("https://example.com"))
+	assert.False(t, clientauth.IsKnownOrigin("http://example.com"), "a different scheme is a different origin")
 
-	require.NoError(t, tokenfile.AddKnownOrigin("https://example.com"), "re-adding a known origin is not an error")
+	require.NoError(t, clientauth.AddKnownOrigin("https://example.com"), "re-adding a known origin is not an error")
 
-	path, err := tokenfile.HostsPath()
+	path, err := clientauth.HostsPath()
 	require.NoError(t, err)
 
 	data, err := os.ReadFile(path) //nolint:gosec // path from the isolated test config dir
@@ -103,7 +103,7 @@ func TestKnownOriginRoundtrip(t *testing.T) {
 func TestAddKnownOrigin_MissingConfigDir(t *testing.T) {
 	dir := isolateConfig(t)
 
-	require.NoError(t, tokenfile.AddKnownOrigin("https://first.example"))
+	require.NoError(t, clientauth.AddKnownOrigin("https://first.example"))
 
 	_, err := os.Stat(filepath.Join(dir, "padmark", "known_hosts"))
 	assert.NoError(t, err)
@@ -113,7 +113,7 @@ func TestAddKnownOrigin_MissingConfigDir(t *testing.T) {
 func TestAddKnownOrigin_RejectsEmpty(t *testing.T) {
 	isolateConfig(t)
 
-	require.Error(t, tokenfile.AddKnownOrigin(""))
+	require.Error(t, clientauth.AddKnownOrigin(""))
 }
 
 // TestIsKnownOrigin_UnsetConfigDir verifies a user without a resolvable home gets
@@ -123,7 +123,7 @@ func TestIsKnownOrigin_UnsetConfigDir(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "")
 	t.Setenv("HOME", "")
 
-	assert.False(t, tokenfile.IsKnownOrigin("https://example.com"))
+	assert.False(t, clientauth.IsKnownOrigin("https://example.com"))
 }
 
 // TestIsKnownOrigin_Normalised verifies trust survives cosmetic differences in how an origin is
@@ -149,7 +149,7 @@ func TestIsKnownOrigin_Normalised(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			writeHostsFile(t, testCase.stored+"\n", 0o600)
 
-			assert.Equal(t, testCase.want, tokenfile.IsKnownOrigin(testCase.query))
+			assert.Equal(t, testCase.want, clientauth.IsKnownOrigin(testCase.query))
 		})
 	}
 }
@@ -178,7 +178,7 @@ func TestIsKnownOrigin_FailsClosedOnUnsafeFile(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			writeHostsFile(t, "https://example.com\n", testCase.mode)
 
-			assert.Equal(t, testCase.want, tokenfile.IsKnownOrigin("https://example.com"))
+			assert.Equal(t, testCase.want, clientauth.IsKnownOrigin("https://example.com"))
 		})
 	}
 }
@@ -189,7 +189,7 @@ func TestIsKnownOrigin_FailsClosedOnDirectory(t *testing.T) {
 	dir := isolateConfig(t)
 	require.NoError(t, os.MkdirAll(filepath.Join(dir, "padmark", "known_hosts"), 0o700))
 
-	assert.False(t, tokenfile.IsKnownOrigin("https://example.com"))
+	assert.False(t, clientauth.IsKnownOrigin("https://example.com"))
 }
 
 // TestAddKnownOrigin_HealsWritableFile verifies running trust over a group/other-writable
@@ -200,14 +200,14 @@ func TestAddKnownOrigin_HealsWritableFile(t *testing.T) {
 	}
 
 	path := writeHostsFile(t, "https://example.com\n", 0o666)
-	require.False(t, tokenfile.IsKnownOrigin("https://example.com"), "precondition: unsafe file trusts nothing")
+	require.False(t, clientauth.IsKnownOrigin("https://example.com"), "precondition: unsafe file trusts nothing")
 
-	require.NoError(t, tokenfile.AddKnownOrigin("https://example.com"))
+	require.NoError(t, clientauth.AddKnownOrigin("https://example.com"))
 
 	info, err := os.Stat(path)
 	require.NoError(t, err)
 	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm(), "trust must re-tighten the hosts file")
-	assert.True(t, tokenfile.IsKnownOrigin("https://example.com"))
+	assert.True(t, clientauth.IsKnownOrigin("https://example.com"))
 }
 
 // TestAddKnownOrigin_StoresCanonicalOrigin verifies the record is written in canonical form,
@@ -215,10 +215,10 @@ func TestAddKnownOrigin_HealsWritableFile(t *testing.T) {
 func TestAddKnownOrigin_StoresCanonicalOrigin(t *testing.T) {
 	isolateConfig(t)
 
-	require.NoError(t, tokenfile.AddKnownOrigin("https://Example.COM:443"))
-	require.NoError(t, tokenfile.AddKnownOrigin("https://example.com"))
+	require.NoError(t, clientauth.AddKnownOrigin("https://Example.COM:443"))
+	require.NoError(t, clientauth.AddKnownOrigin("https://example.com"))
 
-	path, err := tokenfile.HostsPath()
+	path, err := clientauth.HostsPath()
 	require.NoError(t, err)
 
 	data, err := os.ReadFile(path) //nolint:gosec // path from the isolated test config dir

@@ -7,6 +7,7 @@ import (
 
 	urcli "github.com/urfave/cli/v3"
 
+	"github.com/partyzanex/padmark/internal/clientauth"
 	"github.com/partyzanex/padmark/internal/clifactory"
 	"github.com/partyzanex/padmark/internal/errorcontext"
 	padmark "github.com/partyzanex/padmark/pkg/client"
@@ -64,7 +65,7 @@ func shortenAction(ctx context.Context, cmd *urcli.Command) error {
 		return fmt.Errorf("build shorten req: %w", err)
 	}
 
-	apiClient, err := newPadmarkClient(cmd)
+	apiClient, server, err := clientauth.NewClient(clientSettings(cmd))
 	if err != nil {
 		return fmt.Errorf("create API client: %w", err)
 	}
@@ -83,7 +84,7 @@ func shortenAction(ctx context.Context, cmd *urcli.Command) error {
 	}
 
 	return errorcontext.Wrap(
-		printCreateLinkResult(commandWriter(cmd), resolveServerURL(cmd), link), "print create link result")
+		printCreateLinkResult(commandWriter(cmd), server.URL, link), "print create link result")
 }
 
 func buildShortenReq(cmd *urcli.Command) (*padmark.CreateLinkRequest, error) {
@@ -92,10 +93,9 @@ func buildShortenReq(cmd *urcli.Command) (*padmark.CreateLinkRequest, error) {
 		return nil, fmt.Errorf("invalid --%s: %w", FlagTargetURL, err)
 	}
 
-	// Only an explicitly set non-positive TTL is a user error — an unset TTL legitimately means
-	// "no expiry", and flag zero values must never fail.
-	if ttl := cmd.Int64(FlagTTL); cmd.IsSet(FlagTTL) && ttl <= 0 {
-		return nil, fmt.Errorf("invalid --%s: %w", FlagTTL, errLinkTTL)
+	ttl, ttlSet, err := ttlFlag(cmd)
+	if err != nil {
+		return nil, fmt.Errorf("validate TTL: %w", err)
 	}
 
 	req := &padmark.CreateLinkRequest{
@@ -126,7 +126,7 @@ func buildShortenReq(cmd *urcli.Command) (*padmark.CreateLinkRequest, error) {
 		req.BurnAfterClick = padmark.NewOptBool(true)
 	}
 
-	if ttl := cmd.Int64(FlagTTL); ttl > 0 {
+	if ttlSet {
 		req.TTL = padmark.NewOptInt64(ttl)
 	}
 
@@ -138,49 +138,14 @@ func buildShortenReq(cmd *urcli.Command) (*padmark.CreateLinkRequest, error) {
 }
 
 func handleCreateLinkRes(res padmark.CreateLinkRes) (*padmark.CreateLinkResponse, error) {
-	if typed, ok := res.(*padmark.CreateLinkResponseHeaders); ok {
-		resp := typed.Response
-		// The generated decoder leaves a "#fragment" in the path, and the output would show "%23".
-		resp.TargetURL = padmark.SplitFragment(resp.TargetURL)
-
-		return &resp, nil
+	typed, ok := res.(*padmark.CreateLinkResponseHeaders)
+	if !ok {
+		return nil, responseError(res, linkRecord(), nil)
 	}
 
-	err := createLinkClientError(res)
-	if err != nil {
-		return nil, err
-	}
+	resp := typed.Response
+	// The generated decoder leaves a "#fragment" in the path, and the output would show "%23".
+	resp.TargetURL = padmark.SplitFragment(resp.TargetURL)
 
-	switch typed := res.(type) {
-	case *padmark.CreateLinkServiceUnavailable:
-		return nil, errorcontext.Wrap(
-			serviceUnavailableError(padmark.ErrorResponse(*typed)), "decode create link response")
-	case *padmark.CreateLinkInternalServerError:
-		return nil, fmt.Errorf("%w: %s", ErrServer, typed.Message)
-	default:
-		return nil, fmt.Errorf("%w: %T", ErrUnexpectedResponse, res)
-	}
-}
-
-// createLinkClientError maps the client-error variants of a CreateLink response. It returns nil
-// for every other variant, so the caller handles those.
-func createLinkClientError(res padmark.CreateLinkRes) error {
-	switch typed := res.(type) {
-	case *padmark.CreateLinkBadRequest:
-		return fmt.Errorf("%w: %s", ErrBadRequest, typed.Message)
-	case *padmark.CreateLinkUnauthorized:
-		return fmt.Errorf("%w: %s", ErrUnauthorized, typed.Message)
-	case *padmark.CreateLinkConflict:
-		return fmt.Errorf("%w: %s", ErrSlugConflict, typed.Message)
-	case *padmark.CreateLinkRequestEntityTooLarge:
-		return fmt.Errorf("%w: %s", ErrRequestTooLarge, typed.Message)
-	case *padmark.CreateLinkUnprocessableEntity:
-		return fmt.Errorf("%w: %s", ErrValidation, typed.Message)
-	case *padmark.CreateLinkUnsupportedMediaType:
-		return fmt.Errorf("%w: %s", ErrBadRequest, typed.Message)
-	case *padmark.CreateLinkTooManyRequests:
-		return ErrRateLimited
-	default:
-		return nil
-	}
+	return &resp, nil
 }

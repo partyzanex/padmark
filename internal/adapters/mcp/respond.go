@@ -12,233 +12,196 @@ import (
 	padmark "github.com/partyzanex/padmark/pkg/client"
 )
 
-// Response-union mapping. Every padmark operation returns a success variant plus
-// ErrorResponse-coded failure variants; these mappers turn each failure into a text error the
-// model can act on. HTTP transport errors are wrapped by transportError in the handlers.
+// The tools map each error response to one error text in this file. pkg/client gives an
+// *padmark.APIError for each error variant of a generated operation (ResponseError) and for an
+// error status of UploadFile. Thus one table per kind of record covers all tools, and a tool
+// names only the statuses where its text differs. Each text carries the remediation that the
+// model needs. transportError wraps the HTTP transport errors in the handlers.
 
-func mapCreateNoteRes(res padmark.CreateNoteRes) (*padmark.CreateNoteResponse, error) {
-	switch typed := res.(type) {
-	case *padmark.CreateNoteResponseHeaders:
-		return &typed.Response, nil
-	case *padmark.CreateNoteBadRequest:
-		return nil, errorcontext.Wrap(apiStatus(ErrBadRequest, typed.Message), "decode create note response")
-	case *padmark.CreateNoteUnauthorized:
-		return nil, errorcontext.Wrap(unauthorizedErr(), "decode create note response")
-	case *padmark.CreateNoteConflict:
-		return nil, errorcontext.Wrap(conflictErr(), "decode create note response")
-	case *padmark.CreateNoteRequestEntityTooLarge:
-		return nil, fmt.Errorf("%w: %s", ErrContentTooLarge, typed.Message)
-	case *padmark.CreateNoteUnsupportedMediaType:
-		return nil, errorcontext.Wrap(unsupportedErr(), "decode create note response")
-	case *padmark.CreateNoteUnprocessableEntity:
-		return nil, errorcontext.Wrap(apiStatus(ErrRejected, typed.Message), "decode create note response")
-	case *padmark.CreateNoteServiceUnavailable:
-		return nil, errorcontext.Wrap(
-			serviceUnavailableError(padmark.ErrorResponse(*typed)), "decode create note response")
-	case *padmark.CreateNoteInternalServerError:
-		return nil, errorcontext.Wrap(serverErr(), "decode create note response")
-	default:
-		return nil, errorcontext.Wrap(unexpectedRes(res), "decode create note response")
+// statusRule returns the tool error for an error response.
+type statusRule func(apiErr *padmark.APIError) error
+
+// statusRules maps an HTTP status to its rule.
+type statusRules map[int]statusRule
+
+// recordKind holds the tool errors that depend on the kind of record.
+type recordKind struct {
+	// gone and tooLarge map 410 and 413.
+	gone     statusRule
+	tooLarge statusRule
+	// unavailable maps 503: an operator-disabled API, or the file storage, or a failure.
+	unavailable statusRule
+	// name is the record in the error texts: note, link or file.
+	name string
+}
+
+func noteRecord() recordKind {
+	return recordKind{
+		gone: destroyedAfterRead("note"), tooLarge: contentTooLarge, unavailable: serviceUnavailableError,
+		name: "note",
 	}
 }
 
-func mapGetNoteRes(res padmark.GetNoteRes) (*padmark.NoteResponse, error) {
-	switch typed := res.(type) {
-	case *padmark.NoteResponse:
+func linkRecord() recordKind {
+	return recordKind{
+		gone: destroyedAfterRead("link"), tooLarge: contentTooLarge, unavailable: serviceUnavailableError,
+		name: "link",
+	}
+}
+
+func fileRecord() recordKind {
+	return recordKind{
+		gone: withDetails(errGone), tooLarge: withDetails(errContentTooLarge), unavailable: fileUnavailableError,
+		name: "file",
+	}
+}
+
+// operation is one server call of a tool.
+type operation struct {
+	// context wraps each error of the call, for example "decode create note response".
+	context string
+	// rateScope names the limited calls in the text of 429, for example "note updates".
+	rateScope string
+	kind      recordKind
+}
+
+// rules returns the rule of each status that has the same text in all tools of the kind.
+func (op operation) rules() statusRules {
+	kind := op.kind
+
+	return statusRules{
+		http.StatusBadRequest:            withDetails(errBadRequest),
+		http.StatusUnauthorized:          fixed(unauthorizedErr()),
+		http.StatusForbidden:             fixed(forbiddenErr(kind.name)),
+		http.StatusNotFound:              fixed(notFoundErr(kind.name)),
+		http.StatusConflict:              fixed(errSlugConflict),
+		http.StatusGone:                  kind.gone,
+		http.StatusRequestEntityTooLarge: kind.tooLarge,
+		http.StatusUnsupportedMediaType:  fixed(errUnsupportedContentType),
+		http.StatusUnprocessableEntity:   withDetails(errValidation),
+		http.StatusTooManyRequests:       fixed(rateLimitedErr(op.rateScope)),
+		http.StatusInternalServerError:   fixed(errServer),
+		http.StatusServiceUnavailable:    kind.unavailable,
+	}
+}
+
+// responseError returns the tool error for the error variant res of a generated operation. A
+// tool calls it after it took the success variant. overrides holds the statuses where the text
+// of this tool differs from the kind rules.
+func (op operation) responseError(res any, overrides statusRules) error {
+	apiErr, ok := padmark.ResponseError(res)
+	if !ok {
+		return errorcontext.Wrap(unexpectedRes(res), op.context)
+	}
+
+	return errorcontext.Wrap(op.statusError(apiErr, overrides), op.context)
+}
+
+// fetch maps the result of one server call of a tool. A transport error gets the remediation
+// text; an error variant gets the tool error of spec. call names the server call in the error
+// contexts, for example "get link".
+func fetch[Want any](res any, callErr error, call string, spec operation) (Want, error) {
+	if callErr != nil {
+		var zero Want
+
+		return zero, errorcontext.Wrap(transportError(call, callErr), "handle "+call)
+	}
+
+	return successOf[Want](res, "map "+call+" res", spec, nil)
+}
+
+// successOf returns the success variant Want of res. For an error variant it returns the tool
+// error of spec, wrapped with label, the context of the tool handler (for example "map get link
+// res"). overrides holds the statuses where the text of this tool differs from the kind rules.
+func successOf[Want any](res any, label string, spec operation, overrides statusRules) (Want, error) {
+	if typed, ok := res.(Want); ok {
 		return typed, nil
-	case *padmark.GetNoteUnauthorized:
-		return nil, errorcontext.Wrap(unauthorizedErr(), "decode get note response")
-	case *padmark.GetNoteNotFound:
-		return nil, errorcontext.Wrap(notFoundErr("note"), "decode get note response")
-	case *padmark.GetNoteGone:
-		return nil, errorcontext.Wrap(goneErr("note"), "decode get note response")
-	case *padmark.GetNoteConflict:
-		return nil, errorcontext.Wrap(burnReadRefusedErr(typed.Message), "decode get note response")
-	case *padmark.GetNoteServiceUnavailable:
-		return nil, errorcontext.Wrap(
-			serviceUnavailableError(padmark.ErrorResponse(*typed)), "decode get note response")
-	case *padmark.GetNoteInternalServerError:
-		return nil, errorcontext.Wrap(serverErr(), "decode get note response")
-	default:
-		return nil, errorcontext.Wrap(unexpectedRes(res), "decode get note response")
+	}
+
+	var zero Want
+
+	return zero, fmt.Errorf("%s: %w", label, spec.responseError(res, overrides))
+}
+
+// statusError returns the tool error for apiErr: the rule of overrides, else the rule of the
+// kind, else an unexpected response.
+func (op operation) statusError(apiErr *padmark.APIError, overrides statusRules) error {
+	if rule, ok := overrides[apiErr.StatusCode]; ok {
+		return rule(apiErr)
+	}
+
+	if rule, ok := op.rules()[apiErr.StatusCode]; ok {
+		return rule(apiErr)
+	}
+
+	return unexpectedStatus(apiErr)
+}
+
+// unexpectedStatus maps a status that the tool does not expect.
+func unexpectedStatus(apiErr *padmark.APIError) error {
+	return fmt.Errorf("%w: status %d: %s", errUnexpectedResponse, apiErr.StatusCode, apiErr.Message)
+}
+
+// withDetails returns a rule that adds the server message to cause.
+func withDetails(cause error) statusRule {
+	return func(apiErr *padmark.APIError) error {
+		return apiStatus(cause, apiErr.Message)
 	}
 }
 
-func mapUpdateNoteRes(res padmark.UpdateNoteRes) (*padmark.NoteResponse, error) {
-	if typed, ok := res.(*padmark.NoteResponse); ok {
-		return typed, nil
-	}
-
-	err := mapUpdateNoteClientErr(res)
-	if err != nil {
-		return nil, err
-	}
-
-	switch typed := res.(type) {
-	case *padmark.UpdateNoteServiceUnavailable:
-		return nil, errorcontext.Wrap(
-			serviceUnavailableError(padmark.ErrorResponse(*typed)), "decode update note response")
-	case *padmark.UpdateNoteInternalServerError:
-		return nil, errorcontext.Wrap(serverErr(), "decode update note response")
-	default:
-		return nil, errorcontext.Wrap(unexpectedRes(res), "decode update note response")
+// fixed returns a rule that ignores the server message.
+func fixed(err error) statusRule {
+	return func(*padmark.APIError) error {
+		return err
 	}
 }
 
-// mapUpdateNoteClientErr maps the client-error variants of an UpdateNote response. It returns nil
-// for every other variant, so the caller handles those.
-func mapUpdateNoteClientErr(res padmark.UpdateNoteRes) error {
-	switch typed := res.(type) {
-	case *padmark.UpdateNoteBadRequest:
-		return errorcontext.Wrap(apiStatus(ErrBadRequest, typed.Message), "decode update note response")
-	case *padmark.UpdateNoteUnauthorized:
-		return errorcontext.Wrap(unauthorizedErr(), "decode update note response")
-	case *padmark.UpdateNoteForbidden:
-		return errorcontext.Wrap(forbiddenErr("note"), "decode update note response")
-	case *padmark.UpdateNoteNotFound:
-		return errorcontext.Wrap(notFoundErr("note"), "decode update note response")
-	case *padmark.UpdateNoteRequestEntityTooLarge:
-		return fmt.Errorf("%w: %s", ErrContentTooLarge, typed.Message)
-	case *padmark.UpdateNoteUnsupportedMediaType:
-		return errorcontext.Wrap(unsupportedErr(), "decode update note response")
-	case *padmark.UpdateNoteUnprocessableEntity:
-		return errorcontext.Wrap(apiStatus(ErrRejected, typed.Message), "decode update note response")
-	case *padmark.UpdateNoteTooManyRequests:
-		return errorcontext.Wrap(rateLimitedErr("note updates"), "decode update note response")
-	default:
-		return nil
-	}
+// contentTooLarge maps 413 of a note or a link. The server message gives the limit.
+func contentTooLarge(apiErr *padmark.APIError) error {
+	return fmt.Errorf("%w: %s", errContentTooLarge, apiErr.Message)
 }
 
-func mapDeleteNoteRes(res padmark.DeleteNoteRes) error {
-	return errorcontext.Wrap(mapDeleteRes(res, "note"), "delete note response")
+// destroyedAfterRead maps 410 of a note or a link.
+func destroyedAfterRead(kind string) statusRule {
+	return fixed(fmt.Errorf("%w: the %s was destroyed after its first read (burn-after-reading with a TTL)",
+		errGone, kind))
 }
 
-func mapCreateLinkRes(res padmark.CreateLinkRes) (*padmark.CreateLinkResponseHeaders, error) {
-	if typed, ok := res.(*padmark.CreateLinkResponseHeaders); ok {
-		return typed, nil
+// apiDisabledCode is the code of each 503 answer of a server started with --disable-api.
+const apiDisabledCode = "api_disabled"
+
+// serviceUnavailableError distinguishes an operator-disabled API from other 503 responses.
+func serviceUnavailableError(apiErr *padmark.APIError) error {
+	if apiErr.Code == apiDisabledCode {
+		return errAPIDisabled
 	}
 
-	err := mapCreateLinkClientErr(res)
-	if err != nil {
-		return nil, err
-	}
-
-	switch typed := res.(type) {
-	case *padmark.CreateLinkServiceUnavailable:
-		return nil, errorcontext.Wrap(
-			serviceUnavailableError(padmark.ErrorResponse(*typed)), "decode create link response")
-	case *padmark.CreateLinkInternalServerError:
-		return nil, errorcontext.Wrap(serverErr(), "decode create link response")
-	default:
-		return nil, errorcontext.Wrap(unexpectedRes(res), "decode create link response")
-	}
+	return fmt.Errorf("%w: %s", errServiceUnavailable, apiErr.Message)
 }
 
-// mapCreateLinkClientErr maps the client-error variants of a CreateLink response. It returns nil
-// for every other variant, so the caller handles those.
-func mapCreateLinkClientErr(res padmark.CreateLinkRes) error {
-	switch typed := res.(type) {
-	case *padmark.CreateLinkBadRequest:
-		return errorcontext.Wrap(apiStatus(ErrBadRequest, typed.Message), "decode create link response")
-	case *padmark.CreateLinkUnauthorized:
-		return errorcontext.Wrap(unauthorizedErr(), "decode create link response")
-	case *padmark.CreateLinkConflict:
-		return errorcontext.Wrap(conflictErr(), "decode create link response")
-	case *padmark.CreateLinkRequestEntityTooLarge:
-		return fmt.Errorf("%w: %s", ErrContentTooLarge, typed.Message)
-	case *padmark.CreateLinkUnsupportedMediaType:
-		return errorcontext.Wrap(unsupportedErr(), "decode create link response")
-	case *padmark.CreateLinkUnprocessableEntity:
-		return errorcontext.Wrap(apiStatus(ErrRejected, typed.Message), "decode create link response")
-	case *padmark.CreateLinkTooManyRequests:
-		return errorcontext.Wrap(rateLimitedErr("link creations"), "decode create link response")
-	default:
-		return nil
+// fileUnavailableError reports a 503 of a file operation. Other than an operator-disabled API,
+// it means that the server has no object storage, or that the storage does not respond.
+func fileUnavailableError(apiErr *padmark.APIError) error {
+	if apiErr.Code == apiDisabledCode {
+		return errAPIDisabled
 	}
-}
 
-func mapCreateLinksBulkRes(res padmark.CreateLinksBulkRes) (*padmark.BulkCreateLinksResponse, error) {
-	switch typed := res.(type) {
-	case *padmark.BulkCreateLinksResponse:
-		return typed, nil
-	case *padmark.CreateLinksBulkBadRequest:
-		return nil, errorcontext.Wrap(apiStatus(ErrBadRequest, typed.Message), "decode create links bulk response")
-	case *padmark.CreateLinksBulkUnauthorized:
-		return nil, errorcontext.Wrap(unauthorizedErr(), "decode create links bulk response")
-	case *padmark.CreateLinksBulkRequestEntityTooLarge:
-		return nil, fmt.Errorf("%w: %s", ErrContentTooLarge, typed.Message)
-	case *padmark.CreateLinksBulkUnsupportedMediaType:
-		return nil, errorcontext.Wrap(unsupportedErr(), "decode create links bulk response")
-	case *padmark.CreateLinksBulkTooManyRequests:
-		return nil, errorcontext.Wrap(rateLimitedErr("bulk link creations"), "decode create links bulk response")
-	case *padmark.CreateLinksBulkServiceUnavailable:
-		return nil, errorcontext.Wrap(
-			serviceUnavailableError(padmark.ErrorResponse(*typed)), "decode bulk link creation response",
-		)
-	case *padmark.CreateLinksBulkInternalServerError:
-		return nil, errorcontext.Wrap(serverErr(), "decode create links bulk response")
-	default:
-		return nil, errorcontext.Wrap(unexpectedRes(res), "decode create links bulk response")
-	}
-}
-
-func mapGetLinkRes(res padmark.GetLinkRes) (*padmark.LinkResponse, error) {
-	switch typed := res.(type) {
-	case *padmark.LinkResponse:
-		return typed, nil
-	case *padmark.GetLinkUnauthorized:
-		return nil, errorcontext.Wrap(unauthorizedErr(), "decode get link response")
-	case *padmark.GetLinkNotFound:
-		return nil, errorcontext.Wrap(notFoundErr("link"), "decode get link response")
-	case *padmark.GetLinkGone:
-		return nil, errorcontext.Wrap(goneErr("link"), "decode get link response")
-	case *padmark.GetLinkServiceUnavailable:
-		return nil, errorcontext.Wrap(
-			serviceUnavailableError(padmark.ErrorResponse(*typed)), "decode get link response")
-	case *padmark.GetLinkInternalServerError:
-		return nil, errorcontext.Wrap(serverErr(), "decode get link response")
-	default:
-		return nil, errorcontext.Wrap(unexpectedRes(res), "decode get link response")
-	}
-}
-
-func mapDeleteLinkRes(res padmark.DeleteLinkRes) error {
-	return errorcontext.Wrap(mapDeleteRes(res, "link"), "delete link response")
-}
-
-func mapDeleteRes(res any, resource string) error {
-	switch typed := res.(type) {
-	case *padmark.DeleteNoteNoContent, *padmark.DeleteLinkNoContent:
-		return nil
-	case *padmark.DeleteNoteUnauthorized, *padmark.DeleteLinkUnauthorized:
-		return errorcontext.Wrap(unauthorizedErr(), "authorize deletion")
-	case *padmark.DeleteNoteForbidden, *padmark.DeleteLinkForbidden:
-		return errorcontext.Wrap(forbiddenErr(resource), "authorize deletion")
-	case *padmark.DeleteNoteNotFound, *padmark.DeleteLinkNotFound:
-		return errorcontext.Wrap(notFoundErr(resource), "resolve deleted resource")
-	case *padmark.DeleteNoteTooManyRequests, *padmark.DeleteLinkTooManyRequests:
-		return errorcontext.Wrap(rateLimitedErr(resource+" deletes"), "limit deletion requests")
-	case *padmark.DeleteNoteServiceUnavailable:
-		return errorcontext.Wrap(
-			serviceUnavailableError(padmark.ErrorResponse(*typed)), "decode service unavailable response",
-		)
-	case *padmark.DeleteLinkServiceUnavailable:
-		return errorcontext.Wrap(
-			serviceUnavailableError(padmark.ErrorResponse(*typed)), "decode service unavailable response",
-		)
-	case *padmark.DeleteNoteInternalServerError, *padmark.DeleteLinkInternalServerError:
-		return ErrServer
-	default:
-		return errorcontext.Wrap(unexpectedRes(res), "decode deletion response")
-	}
+	return fmt.Errorf("%w: %s — file storage is off or not available on this server; "+
+		"ask the operator to check the S3 settings", errServiceUnavailable,
+		cmp.Or(apiErr.Message, "no details provided"))
 }
 
 // uploadError maps an UploadFile error. The streaming client returns *padmark.APIError for a
 // status error, ErrInvalidUploadOptions for a bad option, and a plain error for the transport.
 func uploadError(err error) error {
 	if apiErr, ok := errors.AsType[*padmark.APIError](err); ok {
-		return errorcontext.Wrap(fileStatusError(apiErr), "decode upload file response")
+		upload := operation{context: "decode upload file response", rateScope: "file uploads", kind: fileRecord()}
+
+		return errorcontext.Wrap(upload.statusError(apiErr, statusRules{
+			http.StatusForbidden: withDetails(errForbidden),
+			// The JSON remediation of the kind rule is wrong for a multipart upload.
+			http.StatusUnsupportedMediaType: unexpectedStatus,
+		}), upload.context)
 	}
 
 	if errors.Is(err, padmark.ErrInvalidUploadOptions) {
@@ -247,7 +210,7 @@ func uploadError(err error) error {
 
 	// The server answered too late, so the server is running: the transport text would be wrong.
 	if isTimeout(err) {
-		return fmt.Errorf("upload file: %w: %w", ErrUploadTimeout, err)
+		return fmt.Errorf("upload file: %w: %w", errUploadTimeout, err)
 	}
 
 	if errors.Is(err, context.Canceled) {
@@ -269,133 +232,6 @@ func isTimeout(err error) bool {
 	return ok && netErr.Timeout()
 }
 
-// fileStatusError turns the status of an upload response into the error text for the model.
-func fileStatusError(apiErr *padmark.APIError) error {
-	switch apiErr.StatusCode {
-	case http.StatusBadRequest:
-		return apiStatus(ErrBadRequest, apiErr.Message)
-	case http.StatusUnauthorized:
-		return unauthorizedErr()
-	case http.StatusForbidden:
-		return apiStatus(ErrForbidden, apiErr.Message)
-	case http.StatusConflict:
-		return conflictErr()
-	case http.StatusRequestEntityTooLarge:
-		// The server message gives the limit in bytes.
-		return apiStatus(ErrContentTooLarge, apiErr.Message)
-	case http.StatusUnprocessableEntity:
-		return apiStatus(ErrRejected, apiErr.Message)
-	case http.StatusTooManyRequests:
-		return rateLimitedErr("file uploads")
-	case http.StatusServiceUnavailable:
-		return fileUnavailableError(padmark.ErrorResponse{
-			Message: apiErr.Message, Code: padmark.NewOptString(apiErr.Code),
-		})
-	case http.StatusInternalServerError:
-		return serverErr()
-	default:
-		return fmt.Errorf("%w: status %d: %s", ErrUnexpectedResponse, apiErr.StatusCode, apiErr.Message)
-	}
-}
-
-// fileUnavailableError reports a 503 of a file operation. Other than an operator-disabled API,
-// it means that the server has no object storage, or that the storage does not respond.
-func fileUnavailableError(response padmark.ErrorResponse) error {
-	if response.Code.Or("") == "api_disabled" {
-		return ErrAPIDisabled
-	}
-
-	return fmt.Errorf("%w: %s — file storage is off or not available on this server; "+
-		"ask the operator to check the S3 settings", ErrServiceUnavailable,
-		cmp.Or(response.Message, "no details provided"))
-}
-
-func mapGetFileRes(res padmark.GetFileRes) (*padmark.FileInfo, error) {
-	switch typed := res.(type) {
-	case *padmark.FileInfo:
-		return typed, nil
-	case *padmark.GetFileUnauthorized:
-		return nil, errorcontext.Wrap(unauthorizedErr(), "decode get file response")
-	case *padmark.GetFileNotFound:
-		return nil, errorcontext.Wrap(notFoundErr("file"), "decode get file response")
-	case *padmark.GetFileGone:
-		return nil, errorcontext.Wrap(apiStatus(ErrGone, typed.Message), "decode get file response")
-	case *padmark.GetFileServiceUnavailable:
-		return nil, errorcontext.Wrap(
-			fileUnavailableError(padmark.ErrorResponse(*typed)), "decode get file response")
-	case *padmark.GetFileInternalServerError:
-		return nil, errorcontext.Wrap(serverErr(), "decode get file response")
-	default:
-		return nil, errorcontext.Wrap(unexpectedRes(res), "decode get file response")
-	}
-}
-
-func mapUpdateFileRes(res padmark.UpdateFileRes) (*padmark.FileInfo, error) {
-	if typed, ok := res.(*padmark.FileInfo); ok {
-		return typed, nil
-	}
-
-	err := mapUpdateFileClientErr(res)
-	if err != nil {
-		return nil, err
-	}
-
-	switch typed := res.(type) {
-	case *padmark.UpdateFileServiceUnavailable:
-		return nil, errorcontext.Wrap(
-			fileUnavailableError(padmark.ErrorResponse(*typed)), "decode update file response")
-	case *padmark.UpdateFileInternalServerError:
-		return nil, errorcontext.Wrap(serverErr(), "decode update file response")
-	default:
-		return nil, errorcontext.Wrap(unexpectedRes(res), "decode update file response")
-	}
-}
-
-// mapUpdateFileClientErr maps the client-error variants of an UpdateFile response. It returns nil
-// for every other variant, so the caller handles those.
-func mapUpdateFileClientErr(res padmark.UpdateFileRes) error {
-	switch typed := res.(type) {
-	case *padmark.UpdateFileBadRequest:
-		return errorcontext.Wrap(apiStatus(ErrBadRequest, typed.Message), "decode update file response")
-	case *padmark.UpdateFileUnauthorized:
-		return errorcontext.Wrap(unauthorizedErr(), "decode update file response")
-	case *padmark.UpdateFileForbidden:
-		return errorcontext.Wrap(forbiddenErr("file"), "decode update file response")
-	case *padmark.UpdateFileNotFound:
-		return errorcontext.Wrap(notFoundErr("file"), "decode update file response")
-	case *padmark.UpdateFileRequestEntityTooLarge:
-		return errorcontext.Wrap(apiStatus(ErrContentTooLarge, typed.Message), "decode update file response")
-	case *padmark.UpdateFileUnprocessableEntity:
-		return errorcontext.Wrap(apiStatus(ErrRejected, typed.Message), "decode update file response")
-	case *padmark.UpdateFileTooManyRequests:
-		return errorcontext.Wrap(rateLimitedErr("file updates"), "decode update file response")
-	default:
-		return nil
-	}
-}
-
-func mapDeleteFileRes(res padmark.DeleteFileRes) error {
-	switch typed := res.(type) {
-	case *padmark.DeleteFileNoContent:
-		return nil
-	case *padmark.DeleteFileUnauthorized:
-		return errorcontext.Wrap(unauthorizedErr(), "decode delete file response")
-	case *padmark.DeleteFileForbidden:
-		return errorcontext.Wrap(forbiddenErr("file"), "decode delete file response")
-	case *padmark.DeleteFileNotFound:
-		return errorcontext.Wrap(notFoundErr("file"), "decode delete file response")
-	case *padmark.DeleteFileTooManyRequests:
-		return errorcontext.Wrap(rateLimitedErr("file deletes"), "decode delete file response")
-	case *padmark.DeleteFileServiceUnavailable:
-		return errorcontext.Wrap(
-			fileUnavailableError(padmark.ErrorResponse(*typed)), "decode delete file response")
-	case *padmark.DeleteFileInternalServerError:
-		return ErrServer
-	default:
-		return errorcontext.Wrap(unexpectedRes(res), "decode delete file response")
-	}
-}
-
 // transportError wraps a network-level failure with the remediation the model needs. The
 // padmark server may be started later than the agent (docker compose up, dev cycle), so a
 // tool call failing with connection refused is the expected shape, not a fatal proxy error.
@@ -410,45 +246,29 @@ func apiStatus(cause error, message string) error {
 }
 
 func unauthorizedErr() error {
-	return fmt.Errorf("%w: the server needs a bearer token (--token / %s) or edit_code", ErrUnauthorized, EnvToken)
+	return fmt.Errorf("%w: the server needs a bearer token (--token / %s) or edit_code", errUnauthorized, EnvToken)
 }
 
 func forbiddenErr(kind string) error {
 	return fmt.Errorf("%w: wrong edit_code for the %s (an edit_code "+
-		"is shown exactly once, at creation)", ErrForbidden, kind)
+		"is shown exactly once, at creation)", errForbidden, kind)
 }
 
 func notFoundErr(kind string) error {
-	return fmt.Errorf("%s %w — wrong ID, already deleted/expired, or a different server", kind, ErrNotFound)
-}
-
-func goneErr(kind string) error {
-	return fmt.Errorf("%w: the %s was destroyed after its first read (burn-after-reading with a TTL)", ErrGone, kind)
-}
-
-func conflictErr() error {
-	return ErrSlugConflict
+	return fmt.Errorf("%s %w — wrong ID, already deleted/expired, or a different server", kind, errNotFound)
 }
 
 func rateLimitedErr(op string) error {
-	return fmt.Errorf("%w: rate limit or failure lockout is active on %s — wait and retry", ErrRateLimited, op)
+	return fmt.Errorf("%w: rate limit or failure lockout is active on %s — wait and retry", errRateLimited, op)
 }
 
-func unsupportedErr() error {
-	return ErrUnsupportedContentType
-}
-
-// burnReadRefusedErr reports a burn-after-reading read the server refused as not explicit
-// (409). The client always sends Accept: application/json, so this means a misbehaving proxy
+// burnReadRefused maps 409 of get_note: the server refused a burn-after-reading read as not
+// explicit. The client always sends Accept: application/json, so this means a misbehaving proxy
 // stripped the header; the note is still intact.
-func burnReadRefusedErr(message string) error {
-	return fmt.Errorf("%w: %s — the note is still intact", ErrBurnReadRefused, message)
-}
-
-func serverErr() error {
-	return ErrServer
+func burnReadRefused(apiErr *padmark.APIError) error {
+	return fmt.Errorf("%w: %s — the note is still intact", errBurnReadRefused, apiErr.Message)
 }
 
 func unexpectedRes(res any) error {
-	return fmt.Errorf("%w %T", ErrUnexpectedResponse, res)
+	return fmt.Errorf("%w %T", errUnexpectedResponse, res)
 }

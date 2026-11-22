@@ -2,14 +2,15 @@ package mcp
 
 import (
 	"context"
+	"log/slog"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	urcli "github.com/urfave/cli/v3"
 
+	"github.com/partyzanex/padmark/internal/clientauth"
 	"github.com/partyzanex/padmark/internal/domain"
-	"github.com/partyzanex/padmark/internal/infra/tokenfile"
 )
 
 // envelopeToken builds a pmk_ envelope token pinning baseURL.
@@ -22,14 +23,14 @@ func envelopeToken(t *testing.T, baseURL string) string {
 	return token
 }
 
-// runClientOnly replaces the root action with its guarded first step (newPadmarkClient) so
+// runClientOnly replaces the root action with its guarded first step (newServerFromFlags) so
 // tests exercise the trust gate without entering the stdio protocol loop: the loop reads the
-// real process stdin and is not hermetic. newPadmarkClient performs no network I/O, so a nil
+// real process stdin and is not hermetic. newServerFromFlags performs no network I/O, so a nil
 // error here means the gate let the pinned (or explicit) URL through.
 func runClientOnly(ctx context.Context, args ...string) error {
 	app := NewApp()
 	app.Action = func(_ context.Context, cmd *urcli.Command) error {
-		_, _, err := newPadmarkClient(cmd)
+		_, err := newServerFromFlags(cmd, slog.New(slog.DiscardHandler))
 
 		return err
 	}
@@ -46,7 +47,7 @@ func TestTrustCommand_RecordsEnvelopeOrigin(t *testing.T) {
 
 	require.NoError(t, NewApp().Run(t.Context(), []string{"padmark-mcp", "trust", "--token", token}))
 
-	assert.True(t, tokenfile.IsKnownOrigin("https://example.com"))
+	assert.True(t, clientauth.IsKnownOrigin("https://example.com"))
 }
 
 // TestTrustCommand_RequiresSomethingToTrust verifies a bare legacy token with no --base-url
@@ -70,8 +71,8 @@ func TestTrustCommand_ExplicitBaseURLWins(t *testing.T) {
 	require.NoError(t, NewApp().Run(t.Context(),
 		[]string{"padmark-mcp", "trust", "--token", token, "--base-url", "https://good.example"}))
 
-	assert.True(t, tokenfile.IsKnownOrigin("https://good.example"))
-	assert.False(t, tokenfile.IsKnownOrigin("https://evil.example"))
+	assert.True(t, clientauth.IsKnownOrigin("https://good.example"))
+	assert.False(t, clientauth.IsKnownOrigin("https://evil.example"))
 }
 
 // TestTrustedServerGate_BlocksUnknownPinnedOrigin is the core R-08 guard for the MCP surface:
@@ -98,7 +99,7 @@ func TestTrustedServerGate_ExplicitBaseURLOverridesEnvelope(t *testing.T) {
 	token := envelopeToken(t, "https://untrusted.example")
 
 	require.NoError(t, runClientOnly(t.Context(), "--token", token, "--base-url", "https://explicit.example"))
-	assert.False(t, tokenfile.IsKnownOrigin("https://untrusted.example"))
+	assert.False(t, clientauth.IsKnownOrigin("https://untrusted.example"))
 }
 
 // TestTrustedServerGate_TrustedOriginProceeds verifies the full trust-on-first-use cycle:

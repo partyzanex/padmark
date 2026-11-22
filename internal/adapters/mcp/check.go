@@ -14,12 +14,12 @@ func checkServerTool() *mcpsdk.Tool {
 	return newTool("check_server",
 		"Check the configured padmark server's liveness and readiness. Returns live/ready flags and the error "+
 			"text when a probe fails.",
-		hints(true, false, false))
+		readOnlyTool)
 }
 
 // checkServer runs both health probes. Both results are reported even when only one fails —
 // masking one probe behind the other's error is what the padmark-cli ping path avoids.
-func (m *Manager) checkServer(
+func (s *Server) checkServer(
 	ctx context.Context, _ *mcpsdk.CallToolRequest, _ checkServerInput,
 ) (*mcpsdk.CallToolResult, checkServerOutput, error) {
 	out := checkServerOutput{
@@ -28,12 +28,12 @@ func (m *Manager) checkServer(
 		Error: "",
 	}
 
-	liveErr := m.client.Healthz(ctx)
+	liveErr := s.client.Healthz(ctx)
 	if liveErr != nil {
-		m.log.DebugContext(ctx, "check_server: healthz failed", "err", liveErr)
+		s.log.DebugContext(ctx, "check_server: healthz failed", "err", liveErr)
 	}
 
-	readyErr := m.checkReadiness(ctx)
+	readyErr := s.checkReadiness(ctx)
 
 	out.Live, out.Ready = liveErr == nil, readyErr == nil
 	out.Error = joinProbeErrors(liveErr, readyErr)
@@ -43,20 +43,22 @@ func (m *Manager) checkServer(
 
 // checkReadiness mirrors padmark-cli's contract: a readyz 503 (ErrorResponse) is a readiness
 // failure, not an unexpected response.
-func (m *Manager) checkReadiness(ctx context.Context) error {
-	res, err := m.client.Readyz(ctx)
+func (s *Server) checkReadiness(ctx context.Context) error {
+	res, err := s.client.Readyz(ctx)
 	if err != nil {
 		return fmt.Errorf("readyz: %w", err)
 	}
 
-	switch typed := res.(type) {
-	case *padmark.ReadyzOK:
+	if _, ok := res.(*padmark.ReadyzOK); ok {
 		return nil
-	case *padmark.ErrorResponse:
-		return fmt.Errorf("%w: %s", ErrServiceUnavailable, typed.Message)
-	default:
-		return fmt.Errorf("%w: %T", ErrUnexpectedResponse, res)
 	}
+
+	// Readyz has one error response: 503 with the error body.
+	if apiErr, ok := padmark.ResponseError(res); ok {
+		return fmt.Errorf("%w: %s", errServiceUnavailable, apiErr.Message)
+	}
+
+	return fmt.Errorf("%w: %T", errUnexpectedResponse, res)
 }
 
 // joinProbeErrors combines the two probe failures into one text; nil when the server is fine.

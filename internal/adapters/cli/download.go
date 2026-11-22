@@ -14,6 +14,7 @@ import (
 
 	urcli "github.com/urfave/cli/v3"
 
+	"github.com/partyzanex/padmark/internal/clientauth"
 	"github.com/partyzanex/padmark/internal/clifactory"
 	padmark "github.com/partyzanex/padmark/pkg/client"
 )
@@ -46,12 +47,12 @@ func downloadCommand() *urcli.Command {
 }
 
 func downloadAction(ctx context.Context, cmd *urcli.Command) error {
-	id, err := fileIDArg(cmd)
+	id, err := recordIDArg(cmd, fileRecord())
 	if err != nil {
 		return fmt.Errorf("read file ID: %w", err)
 	}
 
-	apiClient, err := newPadmarkClient(cmd)
+	apiClient, _, err := clientauth.NewClient(clientSettings(cmd))
 	if err != nil {
 		return fmt.Errorf("create API client: %w", err)
 	}

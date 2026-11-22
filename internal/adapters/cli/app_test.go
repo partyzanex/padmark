@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	urcli "github.com/urfave/cli/v3"
 
+	"github.com/partyzanex/padmark/internal/clientauth"
 	padmark "github.com/partyzanex/padmark/pkg/client"
 )
 
@@ -131,7 +132,7 @@ func TestUpload_SlowBodyOutlivesTimeout(t *testing.T) {
 
 	cmd := parsedCommand(t, "--url", srv.URL, "--timeout", timeout.String())
 
-	client, err := newPadmarkClient(cmd)
+	client, _, err := clientauth.NewClient(clientSettings(cmd))
 	require.NoError(t, err)
 
 	created, err := client.UploadFile(t.Context(), "a.bin", newSlowReader(chunks, 2*timeout), noUploadOptions())

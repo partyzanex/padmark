@@ -8,8 +8,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/partyzanex/padmark/internal/clientauth"
 	"github.com/partyzanex/padmark/internal/domain"
-	"github.com/partyzanex/padmark/internal/infra/tokenfile"
 )
 
 // envelopeToken builds a pmk_ envelope token pinning baseURL.
@@ -40,7 +40,7 @@ func TestTrustCommand_RecordsEnvelopeOrigin(t *testing.T) {
 
 	require.NoError(t, runCLI(t.Context(), "--token", token, cmdTrust))
 
-	assert.True(t, tokenfile.IsKnownOrigin("https://example.com"))
+	assert.True(t, clientauth.IsKnownOrigin("https://example.com"))
 }
 
 // TestTrustCommand_RequiresSomethingToTrust verifies a bare legacy token with no --url is
@@ -63,8 +63,8 @@ func TestTrustCommand_ExplicitURLWins(t *testing.T) {
 
 	require.NoError(t, runCLI(t.Context(), "--token", token, "--url", "https://good.example", cmdTrust))
 
-	assert.True(t, tokenfile.IsKnownOrigin("https://good.example"))
-	assert.False(t, tokenfile.IsKnownOrigin("https://evil.example"))
+	assert.True(t, clientauth.IsKnownOrigin("https://good.example"))
+	assert.False(t, clientauth.IsKnownOrigin("https://evil.example"))
 }
 
 // TestTrustedServerGate_BlocksUnknownPinnedOrigin is the core R-08 guard: a command run with
@@ -97,7 +97,7 @@ func TestTrustedServerGate_ExplicitURLOverridesEnvelope(t *testing.T) {
 	token := envelopeToken(t, "https://evil.example")
 
 	require.NoError(t, runCLI(t.Context(), "--token", token, "--url", srv.URL, cmdPing))
-	assert.False(t, tokenfile.IsKnownOrigin("https://evil.example"))
+	assert.False(t, clientauth.IsKnownOrigin("https://evil.example"))
 }
 
 // TestTrustedServerGate_TrustedOriginProceeds verifies the full trust-on-first-use cycle:

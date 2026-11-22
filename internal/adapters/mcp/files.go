@@ -5,19 +5,24 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"sync"
 	"time"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/partyzanex/padmark/internal/errorcontext"
 	padmark "github.com/partyzanex/padmark/pkg/client"
 )
 
-// maxTTLSeconds is the largest TTL in seconds that time.Duration can hold. The server uses the
-// same limit (9223372036). A larger value would overflow in the conversion to time.Duration.
-const maxTTLSeconds = math.MaxInt64 / int64(time.Second)
+// checkTTL is the one ttl check of the tools that check ttl before a server call. A nil ttl is
+// not set. minimum is 1 for a new record and 0 for an update, where 0 expires the record now.
+// The largest value is padmark.MaxTTLSeconds: a larger one overflows time.Duration.
+func checkTTL(ttl *int64, minimum int64, rangeErr error) error {
+	if ttl != nil && (*ttl < minimum || *ttl > padmark.MaxTTLSeconds) {
+		return rangeErr
+	}
+
+	return nil
+}
 
 // registerFileTools adds the file tools to the server. There is no download tool: the tools
 // return the page and download URLs, and an agent or a person opens them directly. The tool
@@ -26,11 +31,11 @@ const maxTTLSeconds = math.MaxInt64 / int64(time.Second)
 // upload_file is the only tool without the call deadline (limitCall): it sends a file body of
 // any size, so only the response header timeout of the HTTP client limits it. The other file
 // tools send and receive small JSON bodies.
-func registerFileTools(srv *mcpsdk.Server, m *Manager) {
-	mcpsdk.AddTool[uploadFileInput, fileOutput](srv, uploadFileTool(m.uploadDefaultPrivacy()), m.uploadFile)
-	mcpsdk.AddTool[getFileInput, fileOutput](srv, getFileTool(), limitCall(m, m.getFile))
-	mcpsdk.AddTool[updateFileInput, fileOutput](srv, updateFileTool(), limitCall(m, m.updateFile))
-	mcpsdk.AddTool[deleteFileInput, deleteNoteOutput](srv, deleteFileTool(), limitCall(m, m.deleteFile))
+func registerFileTools(srv *mcpsdk.Server, proxy *Server) {
+	mcpsdk.AddTool[uploadFileInput, fileOutput](srv, uploadFileTool(proxy.uploadDefaultPrivacy()), proxy.uploadFile)
+	mcpsdk.AddTool[getFileInput, fileOutput](srv, getFileTool(), limitCall(proxy, proxy.getFile))
+	mcpsdk.AddTool[updateFileInput, fileOutput](srv, updateFileTool(), limitCall(proxy, proxy.updateFile))
+	mcpsdk.AddTool[deleteFileInput, deletedOutput](srv, deleteFileTool(), limitCall(proxy, proxy.deleteFile))
 }
 
 // uploadFileTool tells the agent the default privacy, because a public file is readable by
@@ -44,7 +49,7 @@ func uploadFileTool(defaultPrivacy string) *mcpsdk.Tool {
 			"Without ttl, the file does not expire. "+
 			"The edit_code is returned once and the proxy keeps it for this session. The "+
 			"result shows it only when reveal_edit_code is set.",
-		hints(false, false, false))
+		additiveTool)
 }
 
 // defaultPrivacyText tells the agent who can read an upload without a privacy field.
@@ -60,7 +65,7 @@ func getFileTool() *mcpsdk.Tool {
 	return newTool("get_file",
 		"Read file metadata: name, size, privacy, expiry and URLs. Read-only: this does not download "+
 			"the file, does not count a download, and does not delete a burn-after-download file.",
-		hints(true, false, false))
+		readOnlyTool)
 }
 
 func updateFileTool() *mcpsdk.Tool {
@@ -71,25 +76,25 @@ func updateFileTool() *mcpsdk.Tool {
 			"bearer token.",
 		// Destructive: ttl 0 deletes the file now. Not idempotent: a repeated ttl moves the
 		// expiry, because ttl counts from the call.
-		hints(false, true, false))
+		destructiveTool)
 }
 
 func deleteFileTool() *mcpsdk.Tool {
 	return newTool("delete_file",
 		"Delete a file permanently. The edit_code comes from the input, else from the proxy's session "+
 			"vault, else from the bearer token.",
-		hints(false, true, false))
+		destructiveTool)
 }
 
-func (m *Manager) uploadFile(
+func (s *Server) uploadFile(
 	ctx context.Context, _ *mcpsdk.CallToolRequest, input uploadFileInput,
 ) (*mcpsdk.CallToolResult, fileOutput, error) {
-	opts, err := m.uploadOptions(input)
+	opts, err := s.uploadOptions(input)
 	if err != nil {
 		return nil, fileOutput{}, err
 	}
 
-	file, name, err := openUploadFile(m.uploadRoot, input.Path)
+	file, name, err := openUploadFile(s.uploadRoot, input.Path)
 	if err != nil {
 		return nil, fileOutput{}, fmt.Errorf("open upload file: %w", err)
 	}
@@ -98,7 +103,7 @@ func (m *Manager) uploadFile(
 		// The file is read-only, so a close error loses no data and does not change the result.
 		closeErr := file.Close()
 		if closeErr != nil {
-			m.log.WarnContext(ctx, "close upload file", "err", closeErr)
+			s.log.WarnContext(ctx, "close upload file", "err", closeErr)
 		}
 	}()
 
@@ -108,7 +113,7 @@ func (m *Manager) uploadFile(
 
 	body := &readErrRecorder{reader: file, err: nil, mu: sync.Mutex{}}
 
-	resp, err := m.client.UploadFile(ctx, name, body, opts)
+	resp, err := s.client.UploadFile(ctx, name, body, opts)
 	if err != nil {
 		// After an error, UploadFile does not wait for the goroutine that reads body (see its
 		// godoc). That goroutine can record a read error at this time, so firstErr takes the lock.
@@ -121,7 +126,7 @@ func (m *Manager) uploadFile(
 		return nil, fileOutput{}, uploadError(err)
 	}
 
-	out := m.fileOutputFromCreate(resp)
+	out := s.fileOutputFromCreate(resp)
 	if input.RevealEditCode && resp.EditCode != "" {
 		out.revealEditCode(resp.EditCode)
 	}
@@ -177,8 +182,8 @@ func (r *readErrRecorder) firstErr() error {
 // uploadDefaultPrivacy is the privacy of an upload without a privacy field. With a token, the
 // account owns the file, so "owner" is valid and keeps the file private. Without a token, the
 // file has no owner and the server refuses "owner", so the server default "public" stays.
-func (m *Manager) uploadDefaultPrivacy() string {
-	if m.hasToken {
+func (s *Server) uploadDefaultPrivacy() string {
+	if s.hasToken {
 		return string(padmark.FileInfoPrivacyOwner)
 	}
 
@@ -187,22 +192,23 @@ func (m *Manager) uploadDefaultPrivacy() string {
 
 // uploadOptions converts the tool input into client options. It refuses input that the agent
 // can correct before the proxy reads the file.
-func (m *Manager) uploadOptions(input uploadFileInput) (padmark.UploadFileOptions, error) {
+func (s *Server) uploadOptions(input uploadFileInput) (padmark.UploadFileOptions, error) {
 	opts := padmark.UploadFileOptions{
 		TTL: 0, Privacy: "", Slug: "", EditCode: "", BurnAfterDownload: false,
 	}
 
-	if input.TTL != nil {
-		// Check the range before the conversion: a larger value overflows time.Duration.
-		if *input.TTL <= 0 || *input.TTL > maxTTLSeconds {
-			return opts, errUploadTTLRange
-		}
+	// Check the range before the conversion: a larger value overflows time.Duration.
+	err := checkTTL(input.TTL, 1, errUploadTTLRange)
+	if err != nil {
+		return opts, err
+	}
 
+	if input.TTL != nil {
 		opts.TTL = time.Duration(*input.TTL) * time.Second
 	}
 
-	if m.hasToken {
-		opts.Privacy = m.uploadDefaultPrivacy()
+	if s.hasToken {
+		opts.Privacy = s.uploadDefaultPrivacy()
 	}
 
 	if input.Privacy != nil {
@@ -224,23 +230,22 @@ func (m *Manager) uploadOptions(input uploadFileInput) (padmark.UploadFileOption
 	return opts, nil
 }
 
-func (m *Manager) getFile(
+func (s *Server) getFile(
 	ctx context.Context, _ *mcpsdk.CallToolRequest, input getFileInput,
 ) (*mcpsdk.CallToolResult, fileOutput, error) {
-	res, err := m.client.GetFile(ctx, padmark.GetFileParams{ID: input.ID})
-	if err != nil {
-		return nil, fileOutput{}, errorcontext.Wrap(transportError("get file", err), "handle get file")
-	}
+	res, err := s.client.GetFile(ctx, padmark.GetFileParams{ID: input.ID})
 
-	info, apiErr := mapGetFileRes(res)
-	if apiErr != nil {
-		return nil, fileOutput{}, fmt.Errorf("map get file res: %w", apiErr)
+	info, err := fetch[*padmark.FileInfo](res, err, "get file", operation{
+		context: "decode get file response", rateScope: "file reads", kind: fileRecord(),
+	})
+	if err != nil {
+		return nil, fileOutput{}, err
 	}
 
 	return nil, fileOutputFromInfo(info), nil
 }
 
-func (m *Manager) updateFile(
+func (s *Server) updateFile(
 	ctx context.Context, _ *mcpsdk.CallToolRequest, input updateFileInput,
 ) (*mcpsdk.CallToolResult, fileOutput, error) {
 	req, err := newUpdateFileRequest(input)
@@ -248,17 +253,16 @@ func (m *Manager) updateFile(
 		return nil, fileOutput{}, err
 	}
 
-	res, err := m.client.UpdateFile(ctx, req, padmark.UpdateFileParams{
+	res, err := s.client.UpdateFile(ctx, req, padmark.UpdateFileParams{
 		ID:        input.ID,
-		XEditCode: editCodeParam(m.vault, input.ID, input.EditCode),
+		XEditCode: editCodeParam(s.vault, input.ID, input.EditCode),
+	})
+
+	info, err := fetch[*padmark.FileInfo](res, err, "update file", operation{
+		context: "decode update file response", rateScope: "file updates", kind: fileRecord(),
 	})
 	if err != nil {
-		return nil, fileOutput{}, errorcontext.Wrap(transportError("update file", err), "handle update file")
-	}
-
-	info, apiErr := mapUpdateFileRes(res)
-	if apiErr != nil {
-		return nil, fileOutput{}, fmt.Errorf("map update file res: %w", apiErr)
+		return nil, fileOutput{}, err
 	}
 
 	return nil, fileOutputFromInfo(info), nil
@@ -307,39 +311,35 @@ func updateTTL(input updateFileInput) (padmark.OptNilInt64, error) {
 		return padmark.OptNilInt64{Value: 0, Set: true, Null: true}, nil
 	}
 
-	if input.TTL == nil {
-		return padmark.OptNilInt64{Value: 0, Set: false, Null: false}, nil
-	}
-
-	if *input.TTL < 0 || *input.TTL > maxTTLSeconds {
-		return padmark.OptNilInt64{Value: 0, Set: false, Null: false}, errUpdateTTLRange
+	err := checkTTL(input.TTL, 0, errUpdateTTLRange)
+	if err != nil || input.TTL == nil {
+		return padmark.OptNilInt64{Value: 0, Set: false, Null: false}, err
 	}
 
 	return padmark.NewOptNilInt64(*input.TTL), nil
 }
 
-func (m *Manager) deleteFile(
+func (s *Server) deleteFile(
 	ctx context.Context, _ *mcpsdk.CallToolRequest, input deleteFileInput,
-) (*mcpsdk.CallToolResult, deleteNoteOutput, error) {
-	res, err := m.client.DeleteFile(ctx, padmark.DeleteFileParams{
+) (*mcpsdk.CallToolResult, deletedOutput, error) {
+	res, err := s.client.DeleteFile(ctx, padmark.DeleteFileParams{
 		ID:        input.ID,
-		XEditCode: editCodeParam(m.vault, input.ID, input.EditCode),
+		XEditCode: editCodeParam(s.vault, input.ID, input.EditCode),
+	})
+
+	_, err = fetch[*padmark.DeleteFileNoContent](res, err, "delete file", operation{
+		context: "decode delete file response", rateScope: "file deletes", kind: fileRecord(),
 	})
 	if err != nil {
-		return nil, deleteNoteOutput{}, errorcontext.Wrap(transportError("delete file", err), "handle delete file")
+		return nil, deletedOutput{}, err
 	}
 
-	apiErr := mapDeleteFileRes(res)
-	if apiErr != nil {
-		return nil, deleteNoteOutput{}, fmt.Errorf("map delete file res: %w", apiErr)
-	}
-
-	return nil, deleteNoteOutput{ID: input.ID, Deleted: true}, nil
+	return nil, deletedOutput{ID: input.ID, Deleted: true}, nil
 }
 
-// editCodeParam returns the X-Edit-Code header value for a file mutation. Files take the edit
-// code only from the header. Without a code, the header is not sent, so the server can use the
-// bearer token of the owner.
+// editCodeParam returns the edit code of a mutation: the X-Edit-Code header of a file or a
+// delete, or the edit_code field of update_link. Without a code, the value is not sent, so the
+// server can use the bearer token of the owner.
 func editCodeParam(vault *editCodeVault, id string, explicit *string) padmark.OptString {
 	if code := editCodeFor(vault, id, explicit); code != "" {
 		return padmark.NewOptString(code)

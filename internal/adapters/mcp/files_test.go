@@ -253,7 +253,9 @@ func (s *ToolsSuite) TestUpdateFile_RefusesBadInput() {
 		"nothing to change":    {args: map[string]any{"id": "f"}, want: "nothing to change"},
 		"ttl and clear_expiry": {args: map[string]any{"id": "f", "ttl": 1, "clear_expiry": true}, want: "not both"},
 		"negative ttl":         {args: map[string]any{"id": "f", "ttl": -1}, want: errUpdateTTLRange.Error()},
-		"ttl above maximum":    {args: map[string]any{"id": "f", "ttl": maxTTLSeconds + 1}, want: errUpdateTTLRange.Error()},
+		"ttl above maximum": {
+			args: map[string]any{"id": "f", "ttl": padmark.MaxTTLSeconds + 1}, want: errUpdateTTLRange.Error(),
+		},
 	}
 
 	for name, testCase := range cases {
@@ -319,7 +321,7 @@ func (s *ToolsSuite) TestUploadFile_OutsidePathsShareOneError() {
 	s.Require().NoError(os.Symlink(outside, filepath.Join(root, "outdir")))
 	s.Require().NoError(os.Symlink(filepath.Join(outside, "missing.txt"), filepath.Join(root, "broken.txt")))
 
-	want := "open upload file: " + ErrPathOutsideRoot.Error()
+	want := "open upload file: " + errPathOutsideRoot.Error()
 
 	cases := map[string]string{
 		"absolute existing file":        filepath.Join(outside, "secret.txt"),
@@ -376,7 +378,7 @@ func (s *ToolsSuite) TestUploadFile_RefusesHiddenPaths() {
 		s.Run(name, func() {
 			res := s.callTool(s.T().Context(), "upload_file", map[string]any{"path": path})
 
-			s.Equal("open upload file: "+ErrHiddenPath.Error(), s.errorTextOf(res))
+			s.Equal("open upload file: "+errHiddenPath.Error(), s.errorTextOf(res))
 		})
 	}
 }
@@ -460,7 +462,7 @@ func (s *ToolsSuite) TestUploadFile_ReturnsCustomSlugsOffError() {
 
 	res := s.callTool(s.T().Context(), "upload_file", map[string]any{"path": "a.txt", "slug": "known-id"})
 
-	s.Contains(s.errorTextOf(res), "rejected: custom slugs are disabled on this server")
+	s.Contains(s.errorTextOf(res), "validation error: custom slugs are disabled on this server")
 }
 
 // TestUploadFile_RefusesTTLOutOfRange checks the TTL range before the conversion to
@@ -469,7 +471,7 @@ func (s *ToolsSuite) TestUploadFile_RefusesTTLOutOfRange() {
 	root := s.useUploadRoot()
 	s.writeFile(filepath.Join(root, "a.txt"), "x")
 
-	for _, ttl := range []int64{0, -1, maxTTLSeconds + 1, 18446744075} {
+	for _, ttl := range []int64{0, -1, padmark.MaxTTLSeconds + 1, 18446744075} {
 		s.Run(strconv.FormatInt(ttl, 10), func() {
 			res := s.callTool(s.T().Context(), "upload_file", map[string]any{"path": "a.txt", "ttl": ttl})
 
@@ -486,13 +488,13 @@ func (s *ToolsSuite) TestUploadFile_AcceptsMaximumTTL() {
 		DoAndReturn(func(_ context.Context, _ string, _ io.Reader, opts padmark.UploadFileOptions) (
 			*padmark.CreateFileResponse, error,
 		) {
-			s.Equal(time.Duration(maxTTLSeconds)*time.Second, opts.TTL)
+			s.Equal(time.Duration(padmark.MaxTTLSeconds)*time.Second, opts.TTL)
 			s.Positive(opts.TTL, "the largest TTL does not overflow")
 
 			return testCreateFileResponse(s, "file123abc", "code-12345678"), nil
 		})
 
-	res := s.callTool(s.T().Context(), "upload_file", map[string]any{"path": "a.txt", "ttl": maxTTLSeconds})
+	res := s.callTool(s.T().Context(), "upload_file", map[string]any{"path": "a.txt", "ttl": padmark.MaxTTLSeconds})
 
 	s.False(res.IsError)
 }
@@ -509,7 +511,7 @@ func (s *ToolsSuite) TestUploadFile_MapsTimeoutAndReadErrors() {
 
 		text := s.errorTextOf(s.callTool(s.T().Context(), "upload_file", map[string]any{"path": "a.txt"}))
 
-		s.Contains(text, ErrUploadTimeout.Error())
+		s.Contains(text, errUploadTimeout.Error())
 		s.NotContains(text, "is padmark-server running")
 	})
 
@@ -519,7 +521,7 @@ func (s *ToolsSuite) TestUploadFile_MapsTimeoutAndReadErrors() {
 
 		text := s.errorTextOf(s.callTool(s.T().Context(), "upload_file", map[string]any{"path": "a.txt"}))
 
-		s.Contains(text, ErrUploadTimeout.Error())
+		s.Contains(text, errUploadTimeout.Error())
 	})
 
 	s.Run("local read error", func() {
@@ -608,7 +610,7 @@ func noCode() padmark.OptString {
 // and returns the root.
 func (s *ToolsSuite) useUploadRoot(opts ...Option) string {
 	root := s.T().TempDir()
-	s.mgr = NewManager(s.cl, s.log, append([]Option{WithUploadRoot(root)}, opts...)...)
+	s.mgr = NewServer(s.cl, s.log, append([]Option{WithUploadRoot(root)}, opts...)...)
 
 	return root
 }

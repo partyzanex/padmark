@@ -103,10 +103,14 @@ Dependencies point inward: adapters and infrastructure depend on usecases and do
 - CLI file commands: `upload`, `download`, `file-info`, `update-file`, `delete-file`. MCP file
   tools: `upload_file` (needs `--upload-root` / `PADMARK_MCP_UPLOAD_ROOT`), `get_file`,
   `update_file`, `delete_file`. Use `pkg/client` `UploadFile`/`DownloadFile`, not the
-  generated `CreateFile`/`GetFileContent`.
-- The CLI and the MCP proxy each have one `*padmark.Client` for their one server. Its HTTP
-  client uses `--timeout` only for the response headers. Ordinary calls add a context deadline
-  (`requestContext` in the CLI, `limitCall` in MCP); file uploads and downloads do not.
+  generated `CreateFile`/`GetFileContent`. Links: CLI `update-link`, MCP `update_link`.
+- The CLI and the MCP proxy each have one `*padmark.Client` for their one server, built by
+  `clientauth.NewClient` (`internal/clientauth`: token file, trust-on-first-use, plain-HTTP
+  policy, redirect guard). Its HTTP client uses `--timeout` only for the response headers.
+  Ordinary calls add a context deadline (`requestContext` in the CLI, `limitCall` in MCP);
+  file uploads and downloads do not. Map error responses through `padmark.ResponseError`
+  (`*APIError`) and the status table of each adapter (`responses.go`, `respond.go`).
+- `tests/arch` checks the layer imports with `go list`; give each new package a layer there.
 - Translate domain errors centrally through `errors.go`/`ogen_errors.go`; JSON responses use
   `{"message": ..., "code"?: ...}`. Do not expose wrapped internal errors to clients.
 

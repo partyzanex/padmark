@@ -15,8 +15,8 @@ import (
 // noteOutputFromCreate builds the create output with the edit code hidden. The caller calls
 // revealEditCode when the input opted into revealing this one-time secret. The vault copy is
 // stored either way.
-func (m *Manager) noteOutputFromCreate(resp *padmark.CreateNoteResponse) createNoteOutput {
-	out := createNoteOutput{
+func (s *Server) noteOutputFromCreate(resp *padmark.CreateNoteResponse) noteOutput {
+	out := noteOutput{
 		ID:               resp.ID,
 		Title:            resp.Title,
 		Content:          resp.Content,
@@ -40,13 +40,13 @@ func (m *Manager) noteOutputFromCreate(resp *padmark.CreateNoteResponse) createN
 		out.hideEditCode()
 	}
 
-	m.vault.Put(resp.ID, code)
+	s.vault.Put(resp.ID, code)
 
 	return out
 }
 
-func noteOutputFromNote(resp *padmark.NoteResponse) createNoteOutput {
-	out := createNoteOutput{
+func noteOutputFromNote(resp *padmark.NoteResponse) noteOutput {
+	out := noteOutput{
 		ID:               resp.ID,
 		Title:            resp.Title,
 		Content:          resp.Content,
@@ -70,7 +70,7 @@ func noteOutputFromNote(resp *padmark.NoteResponse) createNoteOutput {
 
 // linkOutputFromCreate builds the create output with the edit code hidden, the same contract as
 // noteOutputFromCreate. The caller calls revealEditCode to reveal the code.
-func (m *Manager) linkOutputFromCreate(headers *padmark.CreateLinkResponseHeaders) createLinkOutput {
+func (s *Server) linkOutputFromCreate(headers *padmark.CreateLinkResponseHeaders) linkOutput {
 	resp := headers.Response
 
 	out := linkOutputFromLink(&padmark.LinkResponse{
@@ -91,16 +91,16 @@ func (m *Manager) linkOutputFromCreate(headers *padmark.CreateLinkResponseHeader
 		out.hideEditCode()
 	}
 
-	m.vault.Put(resp.ID, code)
+	s.vault.Put(resp.ID, code)
 
 	return out
 }
 
-func linkOutputFromLink(resp *padmark.LinkResponse) createLinkOutput {
+func linkOutputFromLink(resp *padmark.LinkResponse) linkOutput {
 	// The generated decoder leaves a "#fragment" in the path, and String would write "%23".
 	target := padmark.SplitFragment(resp.TargetURL)
 
-	out := createLinkOutput{
+	out := linkOutput{
 		ID:             resp.ID,
 		TargetURL:      target.String(),
 		Views:          resp.Views,
@@ -127,7 +127,7 @@ func linkOutputFromLink(resp *padmark.LinkResponse) createLinkOutput {
 
 // bulkLinkOutput maps best-effort bulk results item by item; successful items have their one-time
 // edit codes stored in the vault (never printed) so delete_link can act on them later.
-func (m *Manager) bulkLinkOutput(resp *padmark.BulkCreateLinksResponse) createBulkLinksOutput {
+func (s *Server) bulkLinkOutput(resp *padmark.BulkCreateLinksResponse) createBulkLinksOutput {
 	out := createBulkLinksOutput{Results: make([]bulkLinkResultOutput, 0, len(resp.Results))}
 
 	for idx := range resp.Results {
@@ -137,7 +137,6 @@ func (m *Manager) bulkLinkOutput(resp *padmark.BulkCreateLinksResponse) createBu
 		row := bulkLinkResultOutput{
 			TargetURL: target.String(),
 			ID:        "",
-			EditCode:  "",
 			Error:     "",
 		}
 
@@ -145,7 +144,7 @@ func (m *Manager) bulkLinkOutput(resp *padmark.BulkCreateLinksResponse) createBu
 			row.Error = item.Error.Value
 		} else {
 			row.ID = item.ID.Value
-			m.vault.Put(row.ID, item.EditCode.Value)
+			s.vault.Put(row.ID, item.EditCode.Value)
 		}
 
 		out.Results = append(out.Results, row)
@@ -173,7 +172,7 @@ type fileOutput struct {
 
 // fileOutputFromCreate builds the upload output with the edit code hidden, the same contract as
 // noteOutputFromCreate. The caller calls revealEditCode to reveal the code.
-func (m *Manager) fileOutputFromCreate(resp *padmark.CreateFileResponse) fileOutput {
+func (s *Server) fileOutputFromCreate(resp *padmark.CreateFileResponse) fileOutput {
 	out := fileOutputFromInfo(&padmark.FileInfo{
 		ID:                resp.ID,
 		URL:               resp.URL,
@@ -192,7 +191,7 @@ func (m *Manager) fileOutputFromCreate(resp *padmark.CreateFileResponse) fileOut
 			"need no edit_code now"
 	}
 
-	m.vault.Put(resp.ID, code)
+	s.vault.Put(resp.ID, code)
 
 	return out
 }
@@ -235,26 +234,27 @@ const revealedEditCodeNote = "edit_code shown by opt-in request — it cannot be
 
 // hideEditCode clears the edit code of a note create output. The hint says that the proxy holds
 // the code.
-func (out *createNoteOutput) hideEditCode() {
+func (out *noteOutput) hideEditCode() {
 	out.EditCode = ""
 	out.EditCodeNote = "edit_code stored by the proxy for this session; update/delete need no edit_code now"
 }
 
 // revealEditCode shows the one-time edit code of a note create output.
-func (out *createNoteOutput) revealEditCode(code string) {
+func (out *noteOutput) revealEditCode(code string) {
 	out.EditCode = code
 	out.EditCodeNote = revealedEditCodeNote
 }
 
 // hideEditCode clears the edit code of a link create output. The hint says that the proxy holds
 // the code.
-func (out *createLinkOutput) hideEditCode() {
+func (out *linkOutput) hideEditCode() {
 	out.EditCode = ""
-	out.EditCodeNote = "edit_code stored by the proxy for this session; delete_link needs no edit_code now"
+	out.EditCodeNote = "edit_code stored by the proxy for this session; update_link and delete_link need no " +
+		"edit_code now"
 }
 
 // revealEditCode shows the one-time edit code of a link create output.
-func (out *createLinkOutput) revealEditCode(code string) {
+func (out *linkOutput) revealEditCode(code string) {
 	out.EditCode = code
 	out.EditCodeNote = revealedEditCodeNote
 }

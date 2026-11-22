@@ -7,24 +7,25 @@ import (
 	padmark "github.com/partyzanex/padmark/pkg/client"
 )
 
-//go:generate go run go.uber.org/mock/mockgen@latest -source=seam.go -destination=mcp_mocks_test.go -package=mcp -write_package_comment=false
+// The mocks cover only PadmarkClient: the tests replace the whole client, never one group.
+//go:generate go run go.uber.org/mock/mockgen@latest -source=padmark_client.go -destination=padmark_client_mocks_test.go -package=mcp -write_package_comment=false -exclude_interfaces=noteAPI,linkAPI,fileAPI,probeAPI
 
 // PadmarkClient is the subset of the generated ogen client (*padmark.Client) the tools need.
 // A seam by the project's DIP convention: declared next to the consumer (this package),
 // implemented by the concrete generated client, replaced by a generated mock in unit tests.
-// One server has one client, so the Manager takes this one seam for all tools.
-// The seam is a union of the tool groups below. Each group stays under the interfacebloat
-// limit of 10 methods; the Manager still gets one client, not one client for each group.
+// One server has one client, so the Server takes this one seam for all tools.
+// The seam is a union of the unexported tool groups below only because each group stays under
+// the interfacebloat limit of 10 methods. The groups are not separate dependencies.
 // Errors are fail-hard for each call: the tool returns the error to the agent as its result.
 type PadmarkClient interface {
-	NoteAPI
-	LinkAPI
-	FileAPI
-	ProbeAPI
+	noteAPI
+	linkAPI
+	fileAPI
+	probeAPI
 }
 
-// NoteAPI is the part of PadmarkClient that the note tools use.
-type NoteAPI interface {
+// noteAPI is the part of PadmarkClient that the note tools use.
+type noteAPI interface {
 	CreateNote(ctx context.Context, request *padmark.CreateNoteRequest) (padmark.CreateNoteRes, error)
 	GetNote(ctx context.Context, params padmark.GetNoteParams) (padmark.GetNoteRes, error)
 	UpdateNote(
@@ -33,16 +34,19 @@ type NoteAPI interface {
 	DeleteNote(ctx context.Context, params padmark.DeleteNoteParams) (padmark.DeleteNoteRes, error)
 }
 
-// LinkAPI is the part of PadmarkClient that the link tools use.
-type LinkAPI interface {
+// linkAPI is the part of PadmarkClient that the link tools use.
+type linkAPI interface {
 	CreateLink(ctx context.Context, request *padmark.CreateLinkRequest) (padmark.CreateLinkRes, error)
 	CreateLinksBulk(ctx context.Context, request *padmark.BulkCreateLinksRequest) (padmark.CreateLinksBulkRes, error)
 	GetLink(ctx context.Context, params padmark.GetLinkParams) (padmark.GetLinkRes, error)
+	UpdateLink(
+		ctx context.Context, request *padmark.UpdateLinkRequest, params padmark.UpdateLinkParams,
+	) (padmark.UpdateLinkRes, error)
 	DeleteLink(ctx context.Context, params padmark.DeleteLinkParams) (padmark.DeleteLinkRes, error)
 }
 
-// FileAPI is the part of PadmarkClient that the file tools use.
-type FileAPI interface {
+// fileAPI is the part of PadmarkClient that the file tools use.
+type fileAPI interface {
 	// UploadFile is the hand-written streaming upload of pkg/client. The generated CreateFile
 	// sends the file part before the option fields, so the server would ignore the options.
 	UploadFile(
@@ -55,8 +59,8 @@ type FileAPI interface {
 	DeleteFile(ctx context.Context, params padmark.DeleteFileParams) (padmark.DeleteFileRes, error)
 }
 
-// ProbeAPI is the part of PadmarkClient that check_server uses.
-type ProbeAPI interface {
+// probeAPI is the part of PadmarkClient that check_server uses.
+type probeAPI interface {
 	Healthz(ctx context.Context) error
 	Readyz(ctx context.Context) (padmark.ReadyzRes, error)
 }

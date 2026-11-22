@@ -6,6 +6,7 @@ import (
 
 	urcli "github.com/urfave/cli/v3"
 
+	"github.com/partyzanex/padmark/internal/clientauth"
 	"github.com/partyzanex/padmark/internal/clifactory"
 	"github.com/partyzanex/padmark/internal/errorcontext"
 	padmark "github.com/partyzanex/padmark/pkg/client"
@@ -29,12 +30,12 @@ func fileInfoCommand() *urcli.Command {
 // fileInfoAction sends only GET /files/{id}. That request does not consume a
 // burn-after-download file.
 func fileInfoAction(ctx context.Context, cmd *urcli.Command) error {
-	id, err := fileIDArg(cmd)
+	id, err := recordIDArg(cmd, fileRecord())
 	if err != nil {
 		return fmt.Errorf("read file ID: %w", err)
 	}
 
-	apiClient, err := newPadmarkClient(cmd)
+	apiClient, server, err := clientauth.NewClient(clientSettings(cmd))
 	if err != nil {
 		return fmt.Errorf("create API client: %w", err)
 	}
@@ -52,35 +53,24 @@ func fileInfoAction(ctx context.Context, cmd *urcli.Command) error {
 		return fmt.Errorf("decode get file response: %w", err)
 	}
 
-	return printFileResult(cmd, info)
+	return printFileResult(cmd, server.URL, info)
 }
 
 // printFileResult prints file metadata as text, or as JSON with --json.
-func printFileResult(cmd *urcli.Command, info *padmark.FileInfo) error {
+func printFileResult(cmd *urcli.Command, serverURL string, info *padmark.FileInfo) error {
 	out := commandWriter(cmd)
 
 	if cmd.Bool(FlagJSON) {
-		return errorcontext.Wrap(printFileJSON(out, info), "print file json")
+		return errorcontext.Wrap(printJSON(out, info), "print file json")
 	}
 
-	return errorcontext.Wrap(printFile(out, resolveServerURL(cmd), info), "print file")
+	return errorcontext.Wrap(printFile(out, serverURL, info), "print file")
 }
 
 func handleGetFileRes(res padmark.GetFileRes) (*padmark.FileInfo, error) {
-	switch typed := res.(type) {
-	case *padmark.FileInfo:
+	if typed, ok := res.(*padmark.FileInfo); ok {
 		return typed, nil
-	case *padmark.GetFileUnauthorized:
-		return nil, fmt.Errorf("%w: %s", ErrUnauthorized, typed.Message)
-	case *padmark.GetFileNotFound:
-		return nil, ErrFileNotFound
-	case *padmark.GetFileGone:
-		return nil, ErrFileGone
-	case *padmark.GetFileServiceUnavailable:
-		return nil, fileServiceUnavailableError(typed.Code.Or(""), typed.Message)
-	case *padmark.GetFileInternalServerError:
-		return nil, fmt.Errorf("%w: %s", ErrServer, typed.Message)
-	default:
-		return nil, fmt.Errorf("%w: %T", ErrUnexpectedResponse, res)
 	}
+
+	return nil, responseError(res, fileRecord(), nil)
 }

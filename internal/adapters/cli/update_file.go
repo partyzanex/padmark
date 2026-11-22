@@ -6,6 +6,7 @@ import (
 
 	urcli "github.com/urfave/cli/v3"
 
+	"github.com/partyzanex/padmark/internal/clientauth"
 	"github.com/partyzanex/padmark/internal/clifactory"
 	padmark "github.com/partyzanex/padmark/pkg/client"
 )
@@ -33,7 +34,7 @@ func updateFileCommand() *urcli.Command {
 			}),
 			clifactory.StringFlag(func(flag *urcli.StringFlag) {
 				flag.Name = FlagPrivacy
-				flag.Usage = "Privacy level: public, authenticated, or owner"
+				flag.Usage = usagePrivacy
 			}),
 			clifactory.BoolFlag(func(flag *urcli.BoolFlag) {
 				flag.Name = FlagBurn
@@ -49,7 +50,7 @@ func updateFileCommand() *urcli.Command {
 }
 
 func updateFileAction(ctx context.Context, cmd *urcli.Command) error {
-	id, err := fileIDArg(cmd)
+	id, err := recordIDArg(cmd, fileRecord())
 	if err != nil {
 		return fmt.Errorf("read file ID: %w", err)
 	}
@@ -59,7 +60,7 @@ func updateFileAction(ctx context.Context, cmd *urcli.Command) error {
 		return fmt.Errorf("build update file request: %w", err)
 	}
 
-	apiClient, err := newPadmarkClient(cmd)
+	apiClient, server, err := clientauth.NewClient(clientSettings(cmd))
 	if err != nil {
 		return fmt.Errorf("create API client: %w", err)
 	}
@@ -79,7 +80,7 @@ func updateFileAction(ctx context.Context, cmd *urcli.Command) error {
 		return fmt.Errorf("decode update file response: %w", err)
 	}
 
-	return printFileResult(cmd, info)
+	return printFileResult(cmd, server.URL, info)
 }
 
 // buildUpdateFileReq sends only the fields of the flags that the user set. The server keeps
@@ -98,13 +99,13 @@ func buildUpdateFileReq(cmd *urcli.Command) (*padmark.UpdateFileRequest, error) 
 		BurnAfterDownload: padmark.OptBool{Value: false, Set: false},
 	}
 
-	if cmd.IsSet(FlagTTL) {
-		// The API reads 0 as "expire now"; the CLI refuses it as for the other commands.
-		ttl, err := fileTTLSeconds(cmd)
-		if err != nil {
-			return nil, err
-		}
+	// The API reads 0 as "expire now"; the CLI refuses it as for the other commands.
+	ttl, ttlSet, err := ttlFlag(cmd)
+	if err != nil {
+		return nil, err
+	}
 
+	if ttlSet {
 		req.TTL = padmark.NewOptNilInt64(ttl)
 	}
 
@@ -132,40 +133,5 @@ func handleUpdateFileRes(res padmark.UpdateFileRes) (*padmark.FileInfo, error) {
 		return typed, nil
 	}
 
-	err := updateFileClientError(res)
-	if err != nil {
-		return nil, err
-	}
-
-	switch typed := res.(type) {
-	case *padmark.UpdateFileServiceUnavailable:
-		return nil, fileServiceUnavailableError(typed.Code.Or(""), typed.Message)
-	case *padmark.UpdateFileInternalServerError:
-		return nil, fmt.Errorf("%w: %s", ErrServer, typed.Message)
-	default:
-		return nil, fmt.Errorf("%w: %T", ErrUnexpectedResponse, res)
-	}
-}
-
-// updateFileClientError maps the client-error variants of an UpdateFile response. It returns nil
-// for every other variant, so the caller handles those.
-func updateFileClientError(res padmark.UpdateFileRes) error {
-	switch typed := res.(type) {
-	case *padmark.UpdateFileBadRequest:
-		return fmt.Errorf("%w: %s", ErrBadRequest, typed.Message)
-	case *padmark.UpdateFileUnauthorized:
-		return ErrUnauthorized
-	case *padmark.UpdateFileForbidden:
-		return errFileOwnershipRequired
-	case *padmark.UpdateFileNotFound:
-		return ErrFileNotFound
-	case *padmark.UpdateFileUnprocessableEntity:
-		return fmt.Errorf("%w: %s", ErrValidation, typed.Message)
-	case *padmark.UpdateFileRequestEntityTooLarge:
-		return fmt.Errorf("%w: %s", ErrRequestTooLarge, typed.Message)
-	case *padmark.UpdateFileTooManyRequests:
-		return ErrRateLimited
-	default:
-		return nil
-	}
+	return nil, responseError(res, fileRecord(), mutationRules())
 }

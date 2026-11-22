@@ -6,6 +6,7 @@ import (
 
 	urcli "github.com/urfave/cli/v3"
 
+	"github.com/partyzanex/padmark/internal/clientauth"
 	"github.com/partyzanex/padmark/internal/clifactory"
 	"github.com/partyzanex/padmark/internal/errorcontext"
 	padmark "github.com/partyzanex/padmark/pkg/client"
@@ -27,12 +28,12 @@ func expandCommand() *urcli.Command {
 }
 
 func expandAction(ctx context.Context, cmd *urcli.Command) error {
-	id, err := linkIDArg(cmd)
+	id, err := recordIDArg(cmd, linkRecord())
 	if err != nil {
 		return fmt.Errorf("read link ID: %w", err)
 	}
 
-	apiClient, err := newPadmarkClient(cmd)
+	apiClient, _, err := clientauth.NewClient(clientSettings(cmd))
 	if err != nil {
 		return fmt.Errorf("create API client: %w", err)
 	}
@@ -53,31 +54,20 @@ func expandAction(ctx context.Context, cmd *urcli.Command) error {
 	out := commandWriter(cmd)
 
 	if cmd.Bool(FlagJSON) {
-		return errorcontext.Wrap(printLinkJSON(out, link), "print link json")
+		return errorcontext.Wrap(printJSON(out, link), "print link json")
 	}
 
 	return errorcontext.Wrap(printLink(out, link), "print link")
 }
 
 func handleGetLinkRes(res padmark.GetLinkRes) (*padmark.LinkResponse, error) {
-	switch typed := res.(type) {
-	case *padmark.LinkResponse:
-		// The generated decoder leaves a "#fragment" in the path, and the output would show "%23".
-		typed.TargetURL = padmark.SplitFragment(typed.TargetURL)
-
-		return typed, nil
-	case *padmark.GetLinkUnauthorized:
-		return nil, fmt.Errorf("%w: %s", ErrUnauthorized, typed.Message)
-	case *padmark.GetLinkNotFound:
-		return nil, ErrLinkNotFound
-	case *padmark.GetLinkGone:
-		return nil, ErrLinkGone
-	case *padmark.GetLinkServiceUnavailable:
-		return nil, errorcontext.Wrap(
-			serviceUnavailableError(padmark.ErrorResponse(*typed)), "decode get link response")
-	case *padmark.GetLinkInternalServerError:
-		return nil, fmt.Errorf("%w: %s", ErrServer, typed.Message)
-	default:
-		return nil, fmt.Errorf("%w: %T", ErrUnexpectedResponse, res)
+	link, ok := res.(*padmark.LinkResponse)
+	if !ok {
+		return nil, responseError(res, linkRecord(), nil)
 	}
+
+	// The generated decoder leaves a "#fragment" in the path, and the output would show "%23".
+	link.TargetURL = padmark.SplitFragment(link.TargetURL)
+
+	return link, nil
 }

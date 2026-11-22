@@ -2,19 +2,15 @@ package cli
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
-	"net/netip"
-	"net/url"
 	"os"
 	"strings"
 
 	urcli "github.com/urfave/cli/v3"
 
+	"github.com/partyzanex/padmark/internal/clientauth"
 	"github.com/partyzanex/padmark/internal/clifactory"
-	"github.com/partyzanex/padmark/internal/errorcontext"
-	"github.com/partyzanex/padmark/internal/infra/tokenfile"
 	padmark "github.com/partyzanex/padmark/pkg/client"
 )
 
@@ -32,6 +28,7 @@ func NewApp() *urcli.Command {
 			deleteCommand(),
 			shortenCommand(),
 			expandCommand(),
+			updateLinkCommand(),
 			deleteLinkCommand(),
 			uploadCommand(),
 			downloadCommand(),
@@ -78,33 +75,36 @@ func globalFlags() []urcli.Flag {
 	}
 }
 
-// newPadmarkClient returns the one API client of the CLI. It resolves the server and the token
-// and checks the transport. Its HTTP client uses --timeout only for the response headers, so
-// `upload` and `download` can transfer a large file. The other commands call requestContext
+// programName is the binary name in the messages of the client rules.
+const programName = "padmark-cli"
+
+// clientSettings reads the settings of the one API client of the CLI from the global flags.
+// Each command passes them to clientauth.NewClient, which resolves the server and the token and
+// checks trust and the transport. Its HTTP client uses --timeout only for the response headers,
+// so `upload` and `download` can transfer a large file. The other commands call requestContext
 // to limit their API calls.
-func newPadmarkClient(cmd *urcli.Command) (*padmark.Client, error) {
-	// An envelope token carries its own server URL; an explicit --url/PADMARK_URL still wins.
-	token, serverURL, trustErr := resolveTrustedServer(cmd)
-	if trustErr != nil {
-		return nil, fmt.Errorf("resolve trusted server: %w", trustErr)
+func clientSettings(cmd *urcli.Command) *clientauth.Settings {
+	return &clientauth.Settings{
+		ErrOut:        commandErrWriter(cmd),
+		Token:         cmd.String(FlagToken),
+		ServerURL:     cmd.String(FlagURL),
+		Program:       programName,
+		ServerFlag:    FlagURL,
+		HeaderTimeout: cmd.Duration(FlagTimeout),
+		ServerURLSet:  cmd.IsSet(FlagURL),
+		InsecureHTTP:  clientauth.InsecureHTTP(cmd.Bool(FlagAllowInsecureHTTP)),
 	}
+}
 
-	insecureErr := checkInsecureToken(commandErrWriter(cmd), serverURL, token, allowInsecureHTTP(cmd))
-	if insecureErr != nil {
-		return nil, fmt.Errorf("validate token transport: %w", insecureErr)
-	}
-
-	httpClient, err := newHTTPClient(serverURL, token, cmd.Duration(FlagTimeout))
+// resolveServerURL returns the base server URL that the requests use, without the trust check.
+// A command uses it before it builds the client, to compare a URL argument with the server.
+func resolveServerURL(cmd *urcli.Command) (string, error) {
+	server, err := clientauth.ResolveServer(clientSettings(cmd))
 	if err != nil {
-		return nil, fmt.Errorf("create http client: %w", err)
+		return "", fmt.Errorf("resolve server: %w", err)
 	}
 
-	apiClient, err := padmark.NewClient(serverURL, padmark.WithClient(httpClient))
-	if err != nil {
-		return nil, fmt.Errorf("create client: %w", err)
-	}
-
-	return apiClient, nil
+	return server.URL, nil
 }
 
 // requestContext adds the --timeout deadline to ctx for the API calls of an ordinary command.
@@ -138,77 +138,6 @@ func commandErrWriter(cmd *urcli.Command) io.Writer {
 	}
 
 	return os.Stderr
-}
-
-// errInsecureTransport is returned when a credential would travel in cleartext to a non-loopback
-// host and the operator did not opt in with --allow-insecure-http.
-var errInsecureTransport = errors.New("refusing to send credentials over non-HTTPS to a non-loopback host")
-
-// isLoopbackHost reports whether the URL's host is localhost or a loopback IP (127.0.0.0/8, ::1).
-// An unparsable URL or empty host is not loopback, so the check fails closed.
-func isLoopbackHost(serverURL string) bool {
-	parsed, err := url.Parse(serverURL)
-	if err != nil {
-		return false
-	}
-
-	host := parsed.Hostname()
-	if strings.EqualFold(host, "localhost") {
-		return true
-	}
-
-	addr, err := netip.ParseAddr(host)
-
-	return err == nil && addr.IsLoopback()
-}
-
-// insecureHTTPSetting is the value of --allow-insecure-http. Its underlying type is bool, and the
-// named type keeps the setting out of bare bool parameters.
-type insecureHTTPSetting bool
-
-// insecureHTTPDenied refuses cleartext transport to a non-loopback host.
-const insecureHTTPDenied insecureHTTPSetting = false
-
-// allowInsecureHTTP reads the --allow-insecure-http setting of the command.
-func allowInsecureHTTP(cmd *urcli.Command) insecureHTTPSetting {
-	return insecureHTTPSetting(cmd.Bool(FlagAllowInsecureHTTP))
-}
-
-// checkInsecureToken guards a bearer token against cleartext transport. HTTPS or no token → nil.
-// Plain HTTP to a loopback host only warns on stderr, keeping local development working. Plain
-// HTTP to any other host is an error unless allowInsecure (--allow-insecure-http) is set, in
-// which case it warns and proceeds.
-func checkInsecureToken(errOut io.Writer, serverURL, token string, allowInsecure insecureHTTPSetting) error {
-	if token == "" {
-		return nil
-	}
-
-	return errorcontext.Wrap(
-		checkInsecureTransport(errOut, serverURL, "bearer token", allowInsecure), "validate token transport",
-	)
-}
-
-// checkInsecureTransport implements the shared policy for checkInsecureToken and
-// checkInsecureSetup; what names the credential in the message.
-func checkInsecureTransport(errOut io.Writer, serverURL, what string, allowInsecure insecureHTTPSetting) error {
-	parsed, err := url.Parse(serverURL)
-	if err == nil && parsed.Scheme == "https" {
-		return nil
-	}
-
-	if allowInsecure == insecureHTTPDenied && !isLoopbackHost(serverURL) {
-		return fmt.Errorf("%w: %s to %s; use an https:// URL or pass --%s",
-			errInsecureTransport, what, serverURL, FlagAllowInsecureHTTP)
-	}
-
-	// Best-effort advisory write (errWriter swallows the error); a failed warning must not
-	// abort the command.
-	ew := &errWriter{w: errOut, err: nil}
-	ew.printf(
-		"warning: %s will be sent in cleartext over a non-HTTPS URL (%s); use an https:// server URL\n",
-		what, serverURL)
-
-	return nil
 }
 
 // readContent reads note content from --content flag, --file flag, or stdin (in that order).
@@ -247,103 +176,6 @@ func isCharDevice(mode os.FileMode) bool {
 	return mode&os.ModeCharDevice != 0
 }
 
-// noteIDArg returns the note ID from the first positional argument or an error.
-func noteIDArg(cmd *urcli.Command) (string, error) {
-	id := cmd.Args().Get(0)
-	if id == "" {
-		return "", errNoteIDRequired
-	}
-
-	return id, nil
-}
-
-// linkIDArg returns the link ID from the first positional argument or an error.
-func linkIDArg(cmd *urcli.Command) (string, error) {
-	id := cmd.Args().Get(0)
-	if id == "" {
-		return "", errLinkIDRequired
-	}
-
-	return id, nil
-}
-
-// fileIDArg returns the file ID from the first positional argument. The argument can also be
-// the file URL that `upload` prints: /{id}, /files/{id} or /files/{id}/download. The CLI sends
-// the request to --url, so a URL argument must have the same origin as --url. Otherwise
-// `delete-file https://other.example/x` would delete the file "x" on the configured server.
-func fileIDArg(cmd *urcli.Command) (string, error) {
-	arg := strings.TrimSpace(cmd.Args().Get(0))
-	if arg == "" {
-		return "", errFileIDRequired
-	}
-
-	if !strings.Contains(arg, "://") {
-		return checkFileID(arg)
-	}
-
-	err := checkFileURLOrigin(arg, resolveServerURL(cmd))
-	if err != nil {
-		return "", err
-	}
-
-	id, err := fileIDFromURL(arg)
-	if err != nil {
-		return "", err
-	}
-
-	return checkFileID(id)
-}
-
-// checkFileID refuses "." and "..". The client puts the ID in a URL path, where these values
-// change the route.
-func checkFileID(id string) (string, error) {
-	if id == "." || id == ".." {
-		return "", fmt.Errorf("%w: %q", errInvalidFileID, id)
-	}
-
-	return id, nil
-}
-
-// checkFileURLOrigin compares the origin (scheme, host and port) of a file URL with the origin
-// of the server URL.
-func checkFileURLOrigin(fileURL, serverURL string) error {
-	fileOrigin, err := tokenfile.Origin(fileURL)
-	if err != nil {
-		return fmt.Errorf("%w: %w", errFileURL, err)
-	}
-
-	serverOrigin, err := tokenfile.Origin(serverURL)
-	if err != nil {
-		return fmt.Errorf("resolve server URL: %w", err)
-	}
-
-	if fileOrigin != serverOrigin {
-		return fmt.Errorf("%w: the URL is on %s, the server is %s; pass --url %s",
-			errFileURLOrigin, fileOrigin, serverOrigin, fileOrigin)
-	}
-
-	return nil
-}
-
-// fileIDFromURL reads the file ID from the path of a file URL.
-func fileIDFromURL(raw string) (string, error) {
-	parsed, err := url.Parse(raw)
-	if err != nil {
-		return "", fmt.Errorf("%w: %w", errFileURL, err)
-	}
-
-	id := strings.Trim(parsed.Path, "/")
-	if rest, ok := strings.CutPrefix(id, filesPathSegment+"/"); ok {
-		id = strings.TrimSuffix(rest, "/download")
-	}
-
-	if id == "" || id == filesPathSegment || strings.Contains(id, "/") {
-		return "", fmt.Errorf("%w: %s", errFileURL, raw)
-	}
-
-	return id, nil
-}
-
 // optEditCode returns the X-Edit-Code header value. An empty code omits the header, so the
 // server can identify the owner by --token.
 func optEditCode(editCode string) padmark.OptString {
@@ -359,15 +191,15 @@ func optEditCode(editCode string) padmark.OptString {
 // distinct params/response-union/client-method types per operation, so the resource-specific
 // request-building and response-mapping stay in doDelete, supplied by each command's own action.
 func runDeleteCommand(
-	ctx context.Context, cmd *urcli.Command, idArg func(*urcli.Command) (string, error),
+	ctx context.Context, cmd *urcli.Command, kind *recordKind,
 	doDelete func(ctx context.Context, cl *padmark.Client, id, editCode string) error,
 ) error {
-	id, err := idArg(cmd)
+	id, err := recordIDArg(cmd, kind)
 	if err != nil {
 		return fmt.Errorf("read resource ID: %w", err)
 	}
 
-	apiClient, err := newPadmarkClient(cmd)
+	apiClient, _, err := clientauth.NewClient(clientSettings(cmd))
 	if err != nil {
 		return fmt.Errorf("create API client: %w", err)
 	}

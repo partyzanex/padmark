@@ -26,26 +26,13 @@ func deleteFileAction(ctx context.Context, cmd *urcli.Command) error {
 		return errorcontext.Wrap(handleDeleteFileRes(res), "decode delete file response")
 	}
 
-	return errorcontext.Wrap(runDeleteCommand(ctx, cmd, fileIDArg, deleteFile), "delete resource")
+	return errorcontext.Wrap(runDeleteCommand(ctx, cmd, fileRecord(), deleteFile), "delete resource")
 }
 
 func handleDeleteFileRes(res padmark.DeleteFileRes) error {
-	switch typed := res.(type) {
-	case *padmark.DeleteFileNoContent:
+	if _, ok := res.(*padmark.DeleteFileNoContent); ok {
 		return nil
-	case *padmark.DeleteFileUnauthorized:
-		return ErrUnauthorized
-	case *padmark.DeleteFileForbidden:
-		return errFileOwnershipRequired
-	case *padmark.DeleteFileNotFound:
-		return ErrFileNotFound
-	case *padmark.DeleteFileTooManyRequests:
-		return ErrRateLimited
-	case *padmark.DeleteFileServiceUnavailable:
-		return fileServiceUnavailableError(typed.Code.Or(""), typed.Message)
-	case *padmark.DeleteFileInternalServerError:
-		return fmt.Errorf("%w: %s", ErrServer, typed.Message)
-	default:
-		return fmt.Errorf("%w: %T", ErrUnexpectedResponse, res)
 	}
+
+	return responseError(res, fileRecord(), mutationRules())
 }

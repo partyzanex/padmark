@@ -72,27 +72,6 @@ type DownloadedFile struct {
 	Size int64
 }
 
-// APIError is a response with an error status from a file operation of UploadFile or
-// DownloadFile. Use errors.As to read the status and the machine-readable code.
-type APIError struct {
-	// Message is the server message, or the HTTP status text when the body has no message.
-	Message string
-	// Code is the optional machine-readable code, for example "burn_read_not_explicit" or
-	// "api_disabled". Compare Code, not Message.
-	Code string
-	// StatusCode is the HTTP status code of the response.
-	StatusCode int
-}
-
-// Error returns the status code and the server message.
-func (e *APIError) Error() string {
-	if e.Code != "" {
-		return fmt.Sprintf("padmark: status %d: %s (code %s)", e.StatusCode, e.Message, e.Code)
-	}
-
-	return fmt.Sprintf("padmark: status %d: %s", e.StatusCode, e.Message)
-}
-
 // UploadFile sends POST /files. It streams body to the server through a pipe, so the client
 // does not keep the file in memory. The text fields go before the "file" part, as the server
 // requires. name becomes the file name on the server.

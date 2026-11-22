@@ -1,4 +1,4 @@
-package tokenfile
+package clientauth
 
 import (
 	"errors"
@@ -24,7 +24,7 @@ const configDirMode os.FileMode = 0o700
 const knownHostsFile = "known_hosts"
 
 // HostsPath resolves ~/.config/padmark/known_hosts, honouring XDG_CONFIG_HOME when set —
-// the same directory tokenfile.Path resolves the token file in.
+// the same directory TokenPath resolves the token file in.
 func HostsPath() (string, error) {
 	operationResult, operationErr := configPath(knownHostsFile)
 	if operationErr != nil {
@@ -205,7 +205,10 @@ func AddKnownOrigin(raw string) error {
 
 	// OpenFile's perm only applies to creation; a pre-existing file keeps its old mode, so
 	// re-tighten exactly like token reads do.
-	Secure(path, nil)
+	secureErr := SecureTokenFile(path, nil)
+	if secureErr != nil {
+		return fmt.Errorf("secure known hosts: %w", secureErr)
+	}
 
 	return nil
 }

@@ -3,10 +3,12 @@ package cli
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 
 	urcli "github.com/urfave/cli/v3"
 
+	"github.com/partyzanex/padmark/internal/clientauth"
 	"github.com/partyzanex/padmark/internal/clifactory"
 	"github.com/partyzanex/padmark/internal/errorcontext"
 	padmark "github.com/partyzanex/padmark/pkg/client"
@@ -32,12 +34,12 @@ func getCommand() *urcli.Command {
 }
 
 func getAction(ctx context.Context, cmd *urcli.Command) error {
-	id, err := noteIDArg(cmd)
+	id, err := recordIDArg(cmd, noteRecord())
 	if err != nil {
 		return fmt.Errorf("read note ID: %w", err)
 	}
 
-	apiClient, err := newPadmarkClient(cmd)
+	apiClient, _, err := clientauth.NewClient(clientSettings(cmd))
 	if err != nil {
 		return fmt.Errorf("create API client: %w", err)
 	}
@@ -64,7 +66,7 @@ func getAction(ctx context.Context, cmd *urcli.Command) error {
 			return fmt.Errorf("write: %w", ew.err)
 		}
 	case cmd.Bool(FlagJSON):
-		return errorcontext.Wrap(printNoteJSON(os.Stdout, note), "print note json")
+		return errorcontext.Wrap(printJSON(os.Stdout, note), "print note json")
 	default:
 		return errorcontext.Wrap(printNote(os.Stdout, note), "print note")
 	}
@@ -73,25 +75,16 @@ func getAction(ctx context.Context, cmd *urcli.Command) error {
 }
 
 func handleGetNoteRes(res padmark.GetNoteRes) (*padmark.NoteResponse, error) {
-	switch typed := res.(type) {
-	case *padmark.NoteResponse:
+	if typed, ok := res.(*padmark.NoteResponse); ok {
 		return typed, nil
-	case *padmark.GetNoteUnauthorized:
-		return nil, errNoteReadCredentialRequired
-	case *padmark.GetNoteNotFound:
-		return nil, ErrNoteNotFound
-	case *padmark.GetNoteGone:
-		return nil, ErrNoteGone
-	case *padmark.GetNoteConflict:
+	}
+
+	return nil, responseError(res, noteRecord(), statusRules{
+		http.StatusUnauthorized: fixed(errNoteReadCredentialRequired),
 		// The client always sends Accept: application/json; a 409 means something on the way
 		// stripped it. The burn-after-reading note was not consumed.
-		return nil, fmt.Errorf("%w: %s — the note is still intact", ErrBurnReadRefused, typed.Message)
-	case *padmark.GetNoteServiceUnavailable:
-		return nil, errorcontext.Wrap(
-			serviceUnavailableError(padmark.ErrorResponse(*typed)), "decode get note response")
-	case *padmark.GetNoteInternalServerError:
-		return nil, fmt.Errorf("%w: %s", ErrServer, typed.Message)
-	default:
-		return nil, fmt.Errorf("%w: %T", ErrUnexpectedResponse, res)
-	}
+		http.StatusConflict: func(apiErr *padmark.APIError) error {
+			return fmt.Errorf("%w: %s — the note is still intact", ErrBurnReadRefused, apiErr.Message)
+		},
+	})
 }

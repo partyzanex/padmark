@@ -9,6 +9,7 @@ import (
 
 	urcli "github.com/urfave/cli/v3"
 
+	"github.com/partyzanex/padmark/internal/clientauth"
 	"github.com/partyzanex/padmark/internal/clifactory"
 	"github.com/partyzanex/padmark/internal/errorcontext"
 	"github.com/partyzanex/padmark/internal/infra/logging"
@@ -89,8 +90,8 @@ func stderrWriter(cmd *urcli.Command) io.Writer {
 	return os.Stderr
 }
 
-// runAction builds the padmark client from the resolved token/url and serves MCP over stdio
-// until the client disconnects.
+// runAction builds the one padmark client from the resolved token and server URL and serves
+// MCP over stdio until the client disconnects. It is the composition root of the binary.
 func runAction(ctx context.Context, cmd *urcli.Command) error {
 	level, err := logging.ParseLevel(cmd.String(FlagLogLevel))
 	if err != nil {
@@ -102,18 +103,51 @@ func runAction(ctx context.Context, cmd *urcli.Command) error {
 		AddSource: false, ReplaceAttr: nil,
 	}))
 
+	proxy, err := newServerFromFlags(cmd, log)
+	if err != nil {
+		return err
+	}
+
+	return errorcontext.Wrap(proxy.Run(ctx), "run server")
+}
+
+// newServerFromFlags builds the Server with the one padmark client of the proxy. The token
+// state selects the upload default: with a token, upload_file uses "owner".
+func newServerFromFlags(cmd *urcli.Command, log *slog.Logger) (*Server, error) {
 	uploadRoot, err := resolveUploadRoot(cmd.String(FlagUploadRoot))
 	if err != nil {
-		return fmt.Errorf("check --%s: %w", FlagUploadRoot, err)
+		return nil, fmt.Errorf("check --%s: %w", FlagUploadRoot, err)
 	}
 
-	client, opts, err := newPadmarkClient(cmd)
+	client, server, err := clientauth.NewClient(clientSettings(cmd))
 	if err != nil {
-		return fmt.Errorf("create API client: %w", err)
+		return nil, fmt.Errorf("create API client: %w", err)
 	}
 
-	opts = append(opts, WithUploadRoot(uploadRoot), WithCallTimeout(cmd.Duration(FlagTimeout)))
-	mgr := NewManager(client, log, opts...)
+	opts := []Option{WithUploadRoot(uploadRoot), WithCallTimeout(cmd.Duration(FlagTimeout))}
+	if server.HasToken() {
+		opts = append(opts, WithAccountToken())
+	}
 
-	return errorcontext.Wrap(mgr.Run(ctx), "run server")
+	return NewServer(client, log, opts...), nil
+}
+
+// programName is the binary name in the messages of the client rules.
+const programName = "padmark-mcp"
+
+// clientSettings reads the settings of the one API client of the proxy from the flags. The
+// shared client rules (clientauth.NewClient) resolve the server and the token and check trust
+// and the transport. The HTTP client uses --timeout only for the response headers; limitCall
+// adds the deadline of each tool call other than upload_file. No connection is opened here.
+func clientSettings(cmd *urcli.Command) *clientauth.Settings {
+	return &clientauth.Settings{
+		ErrOut:        stderrWriter(cmd),
+		Token:         cmd.String(FlagToken),
+		ServerURL:     cmd.String(FlagBaseURL),
+		Program:       programName,
+		ServerFlag:    FlagBaseURL,
+		HeaderTimeout: cmd.Duration(FlagTimeout),
+		ServerURLSet:  cmd.IsSet(FlagBaseURL),
+		InsecureHTTP:  clientauth.InsecureHTTP(cmd.Bool(FlagAllowInsecureHTTP)),
+	}
 }

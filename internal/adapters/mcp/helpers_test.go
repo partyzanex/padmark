@@ -15,7 +15,7 @@ import (
 
 // connectTestClient attaches an in-memory MCP client to the manager's server, so tests drive
 // tools exactly the way a real agent does (schema-validated arguments, packed results).
-func connectTestClient(ctx context.Context, mgr *Manager) (*mcpsdk.ClientSession, error) {
+func connectTestClient(ctx context.Context, mgr *Server) (*mcpsdk.ClientSession, error) {
 	clientTransport, serverTransport := mcpsdk.NewInMemoryTransports()
 
 	srvSession, err := mgr.srv.Connect(ctx, serverTransport, nil)

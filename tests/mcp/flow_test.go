@@ -109,6 +109,13 @@ func TestMCPFlow_AuthenticatedOwnerLifecycle(t *testing.T) {
 	require.False(t, linkMeta.IsError, toolText(linkMeta))
 	require.Contains(t, toolText(linkMeta), "https://example.com/long/path")
 
+	// ── update_link: no edit_code passed — the proxy's vault supplies it ──.
+	linkUpdated := callOutput(ctx, t, sess, "update_link", map[string]any{
+		"id": resultID(link), "target_url": "https://example.com/new#part",
+	})
+	require.False(t, linkUpdated.IsError, "update_link must succeed via the vault edit code: %s", toolText(linkUpdated))
+	require.Contains(t, toolText(linkUpdated), `"target_url":"https://example.com/new#part"`)
+
 	linkDeleted := callOutput(ctx, t, sess, "delete_link", map[string]any{"id": resultID(link)})
 	require.False(t, linkDeleted.IsError, "delete_link must succeed via the vault edit code: %s", toolText(linkDeleted))
 
@@ -455,7 +462,7 @@ func issueEnvelopeToken(
 	return envelope
 }
 
-// connectMCP wires the padmark-mcp Manager to the test server through the real generated
+// connectMCP wires the padmark-mcp Server to the test server through the real generated
 // client (a bearer token when passed) and attaches an in-memory MCP client session.
 func connectMCP(
 	ctx context.Context, t *testing.T, serverURL, token string, opts ...mcpx.Option,
@@ -463,7 +470,7 @@ func connectMCP(
 	t.Helper()
 
 	padmarkClient := newTestPadmarkClient(t, serverURL, token)
-	mgr := mcpx.NewManager(padmarkClient, slog.New(slog.DiscardHandler), opts...)
+	mgr := mcpx.NewServer(padmarkClient, slog.New(slog.DiscardHandler), opts...)
 
 	clientTransport, serverTransport := mcpsdk.NewInMemoryTransports()
 

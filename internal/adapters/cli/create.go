@@ -8,6 +8,7 @@ import (
 
 	urcli "github.com/urfave/cli/v3"
 
+	"github.com/partyzanex/padmark/internal/clientauth"
 	"github.com/partyzanex/padmark/internal/clifactory"
 	"github.com/partyzanex/padmark/internal/errorcontext"
 	padmark "github.com/partyzanex/padmark/pkg/client"
@@ -119,17 +120,35 @@ func validatePrivacyFlags(cmd *urcli.Command) error {
 	return nil
 }
 
-// validateTTL rejects an explicit non-positive --ttl. With --burn it is the grace period after
-// the first read; without --burn it is a lifetime (from creation for `create`, from the update
-// for `edit`), as in the API.
+// validateTTL rejects an explicit --ttl that ttlFlag refuses. With --burn it is the grace period
+// after the first read; without --burn it is a lifetime (from creation for `create`, from the
+// update for `edit`), as in the API.
 func validateTTL(cmd *urcli.Command) error {
-	// Explicitly negative or zero TTL is a user error (an unset one legitimately means "no
-	// expiry"); silently dropping it would create a note without the requested expiry.
-	if ttl := cmd.Int64(FlagTTL); cmd.IsSet(FlagTTL) && ttl <= 0 {
-		return errNonPositiveTTL
+	_, _, err := ttlFlag(cmd)
+
+	return err
+}
+
+// ttlFlag is the one --ttl check of all commands. set is false when the flag is not given: an
+// unset --ttl means "no expiry" for a new record and "keep the expiry" for an update. An
+// explicit value must be positive: silently dropping a zero or negative value would create a
+// record without the requested expiry. A value above padmark.MaxTTLSeconds would overflow
+// time.Duration: 18446744075 seconds would become a TTL of one second.
+func ttlFlag(cmd *urcli.Command) (ttl int64, set bool, err error) {
+	if !cmd.IsSet(FlagTTL) {
+		return 0, false, nil
 	}
 
-	return nil
+	ttl = cmd.Int64(FlagTTL)
+
+	switch {
+	case ttl <= 0:
+		return 0, false, errNonPositiveTTL
+	case ttl > padmark.MaxTTLSeconds:
+		return 0, false, errTTLTooLarge
+	default:
+		return ttl, true, nil
+	}
 }
 
 func createAction(ctx context.Context, cmd *urcli.Command) error {
@@ -154,7 +173,7 @@ func createAction(ctx context.Context, cmd *urcli.Command) error {
 
 	req := buildCreateReq(cmd, content)
 
-	apiClient, err := newPadmarkClient(cmd)
+	apiClient, server, err := clientauth.NewClient(clientSettings(cmd))
 	if err != nil {
 		return fmt.Errorf("create API client: %w", err)
 	}
@@ -172,7 +191,7 @@ func createAction(ctx context.Context, cmd *urcli.Command) error {
 		return fmt.Errorf("decode create note response: %w", apiErr)
 	}
 
-	return errorcontext.Wrap(printCreateResult(os.Stdout, resolveServerURL(cmd), note), "print create result")
+	return errorcontext.Wrap(printCreateResult(os.Stdout, server.URL, note), "print create result")
 }
 
 func buildCreateReq(cmd *urcli.Command, content string) *padmark.CreateNoteRequest {
@@ -223,31 +242,13 @@ func buildCreateReq(cmd *urcli.Command, content string) *padmark.CreateNoteReque
 }
 
 func handleCreateNoteRes(res padmark.CreateNoteRes) (*padmark.CreateNoteResponse, error) {
-	switch typed := res.(type) {
-	case *padmark.CreateNoteResponseHeaders:
+	if typed, ok := res.(*padmark.CreateNoteResponseHeaders); ok {
 		resp := typed.Response
 
 		return &resp, nil
-	case *padmark.CreateNoteBadRequest:
-		return nil, fmt.Errorf("%w: %s", ErrBadRequest, typed.Message)
-	case *padmark.CreateNoteUnauthorized:
-		return nil, fmt.Errorf("%w: %s", ErrUnauthorized, typed.Message)
-	case *padmark.CreateNoteConflict:
-		return nil, fmt.Errorf("%w: %s", ErrSlugConflict, typed.Message)
-	case *padmark.CreateNoteRequestEntityTooLarge:
-		return nil, fmt.Errorf("%w: %s", ErrContentTooLarge, typed.Message)
-	case *padmark.CreateNoteUnprocessableEntity:
-		return nil, fmt.Errorf("%w: %s", ErrValidation, typed.Message)
-	case *padmark.CreateNoteUnsupportedMediaType:
-		return nil, fmt.Errorf("%w: %s", ErrBadRequest, typed.Message)
-	case *padmark.CreateNoteServiceUnavailable:
-		return nil, errorcontext.Wrap(
-			serviceUnavailableError(padmark.ErrorResponse(*typed)), "decode create note response")
-	case *padmark.CreateNoteInternalServerError:
-		return nil, fmt.Errorf("%w: %s", ErrServer, typed.Message)
-	default:
-		return nil, fmt.Errorf("%w: %T", ErrUnexpectedResponse, res)
 	}
+
+	return nil, responseError(res, noteRecord(), nil)
 }
 
 // firstLine returns the first non-empty, non-heading line of content as a title fallback.

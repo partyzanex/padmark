@@ -19,7 +19,7 @@ type ToolsSuite struct {
 
 	ctrl *gomock.Controller
 	cl   *MockPadmarkClient
-	mgr  *Manager
+	mgr  *Server
 	log  *slog.Logger
 }
 
@@ -31,7 +31,7 @@ func (s *ToolsSuite) SetupTest() {
 	s.ctrl = gomock.NewController(s.T())
 	s.cl = NewMockPadmarkClient(s.ctrl)
 	s.log = slog.New(slog.DiscardHandler)
-	s.mgr = NewManager(s.cl, s.log)
+	s.mgr = NewServer(s.cl, s.log)
 }
 
 func (s *ToolsSuite) TearDownTest() {
@@ -307,6 +307,7 @@ func (s *ToolsSuite) TestCreateLinksBulk_PassesItemsThrough() {
 	s.Contains(out, `"id":"link-ok"`)
 	s.Contains(out, `"error":"invalid slug"`)
 	s.NotContains(out, "bulk-code-1", "bulk edit codes stay in the vault, not the transcript")
+	s.NotContains(out, `"edit_code"`, "a bulk item has no edit code field")
 	s.Equal("bulk-code-1", s.mgr.vault.Get("link-ok"))
 }
 
@@ -334,7 +335,7 @@ func (s *toolRegistrationSuite) TearDownTest() {
 func (s *toolRegistrationSuite) TestAllToolsRegistered() {
 	ctx := s.T().Context()
 
-	mgr := NewManager(NewMockPadmarkClient(s.ctrl), slog.New(slog.DiscardHandler))
+	mgr := NewServer(NewMockPadmarkClient(s.ctrl), slog.New(slog.DiscardHandler))
 
 	sess, err := connectTestClient(ctx, mgr)
 	s.Require().NoError(err)
@@ -359,7 +360,7 @@ func (s *toolRegistrationSuite) TestAllToolsRegistered() {
 
 	for _, want := range []string{
 		"create_note", "get_note", "update_note", "delete_note",
-		"create_link", "create_links_bulk", "get_link", "delete_link", "check_server",
+		"create_link", "create_links_bulk", "get_link", "update_link", "delete_link", "check_server",
 		"upload_file", "get_file", "update_file", "delete_file",
 	} {
 		s.Truef(names[want], "tool %q is registered", want)
@@ -378,6 +379,10 @@ func (s *toolRegistrationSuite) TestAllToolsRegistered() {
 	s.Truef(*annotations["delete_file"].DestructiveHint, "delete_file removes a file")
 	s.Truef(*annotations["update_file"].DestructiveHint, "update_file with ttl 0 deletes the file now")
 	s.Falsef(annotations["update_file"].IdempotentHint, "a repeated ttl moves the expiry")
+	s.Falsef(annotations["update_link"].ReadOnlyHint, "update_link mutates")
+	s.Truef(*annotations["update_link"].DestructiveHint, "update_link replaces the destination")
+	s.Falsef(annotations["update_link"].IdempotentHint, "a repeated ttl moves the expiry")
+	s.Truef(annotations["update_note"].IdempotentHint, "update_note replaces the note wholesale")
 }
 
 // TestUploadFileDescriptionNamesDefaultPrivacy checks that the agent sees the privacy of an
@@ -394,7 +399,7 @@ func (s *toolRegistrationSuite) TestUploadFileDescriptionNamesDefaultPrivacy() {
 	for name, testCase := range cases {
 		s.Run(name, func() {
 			ctx := s.T().Context()
-			mgr := NewManager(NewMockPadmarkClient(s.ctrl), slog.New(slog.DiscardHandler), testCase.opts...)
+			mgr := NewServer(NewMockPadmarkClient(s.ctrl), slog.New(slog.DiscardHandler), testCase.opts...)
 
 			sess, err := connectTestClient(ctx, mgr)
 			s.Require().NoError(err)

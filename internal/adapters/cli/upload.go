@@ -4,13 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"os"
 	"path/filepath"
 	"time"
 
 	urcli "github.com/urfave/cli/v3"
 
+	"github.com/partyzanex/padmark/internal/clientauth"
 	"github.com/partyzanex/padmark/internal/clifactory"
 	"github.com/partyzanex/padmark/internal/errorcontext"
 	padmark "github.com/partyzanex/padmark/pkg/client"
@@ -73,7 +73,7 @@ func uploadAction(ctx context.Context, cmd *urcli.Command) (err error) {
 
 	defer func() { err = errors.Join(err, source.close()) }()
 
-	apiClient, err := newPadmarkClient(cmd)
+	apiClient, server, err := clientauth.NewClient(clientSettings(cmd))
 	if err != nil {
 		return fmt.Errorf("create API client: %w", err)
 	}
@@ -86,10 +86,10 @@ func uploadAction(ctx context.Context, cmd *urcli.Command) (err error) {
 	out := commandWriter(cmd)
 
 	if cmd.Bool(FlagJSON) {
-		return errorcontext.Wrap(printFileJSON(out, created), "print upload result json")
+		return errorcontext.Wrap(printJSON(out, created), "print upload result json")
 	}
 
-	return errorcontext.Wrap(printCreateFileResult(out, resolveServerURL(cmd), created), "print upload result")
+	return errorcontext.Wrap(printCreateFileResult(out, server.URL, created), "print upload result")
 }
 
 // uploadOptions reads the upload flags. An explicit non-positive --ttl is an error; an unset
@@ -103,35 +103,16 @@ func uploadOptions(cmd *urcli.Command) (padmark.UploadFileOptions, error) {
 		BurnAfterDownload: cmd.Bool(FlagBurn),
 	}
 
-	if cmd.IsSet(FlagTTL) {
-		ttl, err := fileTTLSeconds(cmd)
-		if err != nil {
-			return opts, err
-		}
+	ttl, ttlSet, err := ttlFlag(cmd)
+	if err != nil {
+		return opts, err
+	}
 
+	if ttlSet {
 		opts.TTL = time.Duration(ttl) * time.Second
 	}
 
 	return opts, nil
-}
-
-// maxTTLSeconds is the largest --ttl of a file, as on the server. A larger value overflows
-// time.Duration: 18446744075 seconds would become a TTL of one second.
-const maxTTLSeconds = math.MaxInt64 / int64(time.Second)
-
-// fileTTLSeconds reads --ttl of the file commands. It refuses a value that is not positive or
-// that is larger than maxTTLSeconds, before a conversion to time.Duration.
-func fileTTLSeconds(cmd *urcli.Command) (int64, error) {
-	ttl := cmd.Int64(FlagTTL)
-
-	switch {
-	case ttl <= 0:
-		return 0, errNonPositiveTTL
-	case ttl > maxTTLSeconds:
-		return 0, errTTLTooLarge
-	default:
-		return ttl, nil
-	}
 }
 
 // uploadSource is the content of an upload and its file name for the server.
