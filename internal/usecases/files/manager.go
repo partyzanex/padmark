@@ -19,8 +19,17 @@ import (
 	"github.com/partyzanex/padmark/internal/domain"
 )
 
-// maxSlugRetries limits the retries after a random slug collision. A custom slug never retries.
-const maxSlugRetries = 5
+const (
+	// maxSlugRetries limits the retries after a random slug collision. A custom slug never retries.
+	maxSlugRetries = 5
+	// recordCheckTimeout limits the read of a record after a Create error. The read does not
+	// stop with the request, so this limit stops it when the database does not respond.
+	recordCheckTimeout = 10 * time.Second
+)
+
+// errRecordUnknown tells that Create failed and that the read after it also failed. Thus the
+// record can exist, and Manager must not delete its object.
+var errRecordUnknown = errors.New("file record state is unknown")
 
 // Storage keeps file records. Errors are fail-hard: Manager returns them to the caller.
 //
@@ -29,7 +38,9 @@ const maxSlugRetries = 5
 // row and returns domain.ErrNotFound, so it cannot change or delete the new file.
 type Storage interface {
 	// Create inserts the record. It must atomically claim the ID across notes, links and
-	// files, and return domain.ErrSlugConflict if another resource has it.
+	// files, and return domain.ErrSlugConflict if another resource has it. Another error does
+	// not prove that the record is absent: the database can write the record and lose the
+	// reply. Manager then reads the record with GetByID.
 	Create(ctx context.Context, file *domain.File) error
 	// GetByID returns the record. While a burn claim that is not stale holds the record, it
 	// returns domain.ErrNotFound: other readers must not see a file that a download consumes.
@@ -52,8 +63,9 @@ type Storage interface {
 	// a burn file and is not expired. Otherwise it returns domain.ErrNotFound.
 	IncrementDownloadsVisible(ctx context.Context, id, objectKey string, reader AccessOptions) error
 	// ListExpired returns at most limit records that expired before now and have no claim that
-	// is not stale. Only ID and ObjectKey must be set.
-	ListExpired(ctx context.Context, now time.Time, limit int) ([]*domain.File, error)
+	// is not stale. It orders them by expiry, then by ID, and returns only the records after
+	// the cursor. Only ID, ObjectKey and ExpiresAt must be set.
+	ListExpired(ctx context.Context, now time.Time, after ExpiredCursor, limit int) ([]*domain.File, error)
 	// DeleteExpired removes the record with id and objectKey while it is expired at now and
 	// has no claim that is not stale.
 	DeleteExpired(ctx context.Context, id, objectKey string, now time.Time) error
@@ -62,7 +74,7 @@ type Storage interface {
 // ObjectStore keeps file content. Put, Stat and WriteTo are fail-hard. Delete is fail-soft:
 // Manager logs and counts a failure. After a user delete or a burn download the record is
 // already gone, so a failure leaves an object that nobody can read. An expired file keeps its
-// record when Delete fails, so the next sweep tries again.
+// record when Delete fails, so a later sweep tries again.
 type ObjectStore interface {
 	Put(ctx context.Context, key string, body io.Reader) error
 	// Stat and WriteTo return domain.ErrNotFound when the object does not exist.
@@ -211,10 +223,14 @@ type sealedMeta struct {
 
 // Manager implements the file life cycle: upload, metadata, download and delete.
 type Manager struct {
-	metrics          Metrics
-	deps             *Deps
-	maxSize          int64
-	allowCustomSlugs domain.CustomSlugSetting
+	metrics Metrics
+	deps    *Deps
+	// backgroundPos and uploadPos keep the position of the last sweep of each kind; see sweepCursor.
+	backgroundPos      *sweepCursor
+	uploadPos          *sweepCursor
+	maxSize            int64
+	uploadSweepTimeout time.Duration
+	allowCustomSlugs   domain.CustomSlugSetting
 }
 
 // NewManager returns a Manager. maxSize is the largest permitted file in bytes.
@@ -222,10 +238,13 @@ type Manager struct {
 // The Manager records no metrics until WithMetrics attaches them.
 func NewManager(deps *Deps, maxSize int64, allowCustomSlugs bool) *Manager {
 	return &Manager{
-		metrics:          noopMetrics{},
-		deps:             deps,
-		maxSize:          maxSize,
-		allowCustomSlugs: domain.CustomSlugSetting(allowCustomSlugs),
+		metrics:            noopMetrics{},
+		deps:               deps,
+		backgroundPos:      newSweepCursor(),
+		uploadPos:          newSweepCursor(),
+		maxSize:            maxSize,
+		uploadSweepTimeout: uploadSweepTimeout,
+		allowCustomSlugs:   domain.CustomSlugSetting(allowCustomSlugs),
 	}
 }
 
@@ -242,7 +261,8 @@ func (m *Manager) MaxSize() int64 { return m.maxSize }
 
 // Create encrypts body to object storage and records the file. It returns the file with the
 // slug as ID and the plaintext edit code. The upload goes first, because it can take a long
-// time; the slug lock is held only for the record insert.
+// time; the slug lock is held only for the record insert. When the insert fails, Create deletes
+// the object only if the record is surely absent; see confirmCreate.
 func (m *Manager) Create(ctx context.Context, name string, body io.Reader, opts CreateOptions) (*domain.File, error) {
 	file, plainCode, err := m.newFile(name, &opts)
 	if err != nil {
@@ -260,9 +280,12 @@ func (m *Manager) Create(ctx context.Context, name string, body io.Reader, opts 
 	dropKey(file)
 
 	if err != nil {
-		// The object is complete and has no record. The request can be canceled, but the
-		// cleanup must still run.
-		m.deleteObject(context.WithoutCancel(ctx), file.ObjectKey)
+		// When the record state is unknown, the object stays: a record without its object is
+		// worse than an object without a record. Otherwise the object has no record. The
+		// request can be canceled, but the cleanup must still run.
+		if !errors.Is(err, errRecordUnknown) {
+			m.deleteObject(context.WithoutCancel(ctx), file.ObjectKey)
+		}
 
 		return nil, err
 	}
@@ -537,6 +560,9 @@ func (m *Manager) insert(ctx context.Context, file *domain.File, customSlug stri
 	file.SealedMeta = sealed
 
 	err = m.deps.Storage.Create(ctx, file)
+	if err != nil && !errors.Is(err, domain.ErrSlugConflict) {
+		err = m.confirmCreate(ctx, recordID, file.ObjectKey, err)
+	}
 
 	file.ID = slug
 
@@ -545,6 +571,32 @@ func (m *Manager) insert(ctx context.Context, file *domain.File, customSlug stri
 	}
 
 	return nil
+}
+
+// confirmCreate reads the record after a Create error. The database can write the record and
+// lose the reply, for example when the connection breaks or the request is canceled. It returns
+// nil when the record with objectKey exists, createErr when it does not, and an error with
+// errRecordUnknown when the read fails. A slug conflict needs no read: the database refused the
+// row. The object key is new for each upload, so a record with another key is not this upload.
+func (m *Manager) confirmCreate(ctx context.Context, recordID, objectKey string, createErr error) error {
+	checkCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), recordCheckTimeout)
+	defer cancel()
+
+	existing, err := m.deps.Storage.GetByID(checkCtx, recordID)
+
+	switch {
+	case err == nil && existing.ObjectKey == objectKey:
+		m.deps.Log.WarnContext(ctx, "file record exists after a create error", "id", recordID, "err", createErr)
+
+		return nil
+	case err == nil, errors.Is(err, domain.ErrNotFound):
+		return createErr
+	default:
+		m.deps.Log.ErrorContext(ctx, "check file record after a create error",
+			"id", recordID, "create_err", createErr, "err", err)
+
+		return errors.Join(errRecordUnknown, createErr, err)
+	}
 }
 
 func (m *Manager) resolveUniqueSlug(

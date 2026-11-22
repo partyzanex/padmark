@@ -3,9 +3,11 @@ package files
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/suite"
@@ -109,4 +111,27 @@ func (s *LogSuite) TestUploadFailure() {
 	_, err := s.manager.Create(s.T().Context(), "report.pdf", strings.NewReader("x"), createOptions())
 	s.Require().ErrorIs(err, domain.ErrStorageUnavailable)
 	s.Contains(s.logs.String(), "upload file")
+}
+
+// TestSweepStopsAfterFailStreak makes sure that the warning about a stopped sweep does not
+// contain the object key.
+func (s *LogSuite) TestSweepStopsAfterFailStreak() {
+	batch := make([]*domain.File, 0, sweepMaxFailStreak)
+
+	for i := range sweepMaxFailStreak {
+		file := secretFile()
+		file.ID = fmt.Sprintf("id-%d", i)
+		expires := time.Now().Add(-time.Hour)
+		file.ExpiresAt = &expires
+
+		batch = append(batch, file)
+	}
+
+	s.storage.EXPECT().ListExpired(gomock.Any(), gomock.Any(), gomock.Any(), sweepBatchSize).Return(batch, nil)
+	s.objects.EXPECT().Delete(gomock.Any(), loggedObjectKey).Return(errors.New("s3 down")).Times(sweepMaxFailStreak)
+
+	removed, err := s.manager.SweepExpired(s.T().Context())
+	s.Require().NoError(err)
+	s.Zero(removed)
+	s.Contains(s.logs.String(), "file sweep stopped")
 }

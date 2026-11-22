@@ -143,18 +143,18 @@ func (mr *MockStorageMockRecorder) IncrementDownloadsVisible(ctx, id, objectKey,
 }
 
 // ListExpired mocks base method.
-func (m *MockStorage) ListExpired(ctx context.Context, now time.Time, limit int) ([]*domain.File, error) {
+func (m *MockStorage) ListExpired(ctx context.Context, now time.Time, after ExpiredCursor, limit int) ([]*domain.File, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ListExpired", ctx, now, limit)
+	ret := m.ctrl.Call(m, "ListExpired", ctx, now, after, limit)
 	ret0, _ := ret[0].([]*domain.File)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // ListExpired indicates an expected call of ListExpired.
-func (mr *MockStorageMockRecorder) ListExpired(ctx, now, limit any) *gomock.Call {
+func (mr *MockStorageMockRecorder) ListExpired(ctx, now, after, limit any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListExpired", reflect.TypeOf((*MockStorage)(nil).ListExpired), ctx, now, limit)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListExpired", reflect.TypeOf((*MockStorage)(nil).ListExpired), ctx, now, after, limit)
 }
 
 // ReleaseBurn mocks base method.

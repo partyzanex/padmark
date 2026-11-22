@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/partyzanex/padmark/internal/domain"
@@ -14,9 +15,17 @@ const (
 	// sweep continues; thus one call cannot hold the database or the object storage for long.
 	sweepBatchSize  = 100
 	sweepMaxBatches = 10
+	// sweepMaxFailStreak is the number of object delete failures in a row that ends a sweep.
+	// A run of failures means that the object storage is down. Without this limit, a sweep
+	// would wait for one timeout for each file of its batch.
+	sweepMaxFailStreak = 10
 	// uploadSweepBatchSize limits the sweep on the upload path. The background sweep can be off,
 	// so uploads remove a few expired files; a small batch keeps the upload response fast.
 	uploadSweepBatchSize = 8
+	// uploadSweepTimeout limits the whole sweep on the upload path, not each delete. The upload
+	// is already complete, so a slow object storage must not hold the response: a client with a
+	// short timeout could send the same upload again.
+	uploadSweepTimeout = 3 * time.Second
 	// objectDeleteTimeout limits one object delete, so that a stopped object storage cannot
 	// hold a sweep, a burn cleanup or a shutdown without end.
 	objectDeleteTimeout = 30 * time.Second
@@ -25,13 +34,68 @@ const (
 // errObjectKept tells that an expired file keeps its record because its object delete failed.
 var errObjectKept = errors.New("file object is not deleted")
 
+// ExpiredCursor is a position in the list that Storage.ListExpired returns. The list is in the
+// order of ExpiresAt, then ID. The cursor names the last record that a sweep passed, so that
+// the next page starts after it. The zero value is the start of the list.
+type ExpiredCursor struct {
+	ExpiresAt time.Time
+	ID        string
+}
+
+// IsZero reports whether the cursor is the start of the list.
+func (c ExpiredCursor) IsZero() bool {
+	return c.ExpiresAt.IsZero() && c.ID == ""
+}
+
+// sweepCursor keeps the position where the last sweep of one kind ended. A record whose object
+// delete fails stays in storage, and it would stay at the head of the list. With the position,
+// the next sweep goes on after it, so that the later expired files get their turn. At the end of
+// the list the position goes back to the start, and the kept records get another try.
+//
+// The position lives in the memory of one process and is not a safety control: DeleteExpired
+// checks each record again. A lost position only makes the sweep start at the oldest record.
+// The mutex guards only the position; no I/O runs under it.
+type sweepCursor struct {
+	pos ExpiredCursor
+	mu  sync.Mutex
+}
+
+func newSweepCursor() *sweepCursor {
+	return &sweepCursor{pos: ExpiredCursor{ExpiresAt: time.Time{}, ID: ""}, mu: sync.Mutex{}}
+}
+
+func (c *sweepCursor) load() ExpiredCursor {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	return c.pos
+}
+
+func (c *sweepCursor) store(pos ExpiredCursor) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.pos = pos
+}
+
+// sweepRun is the state of one sweep.
+type sweepRun struct {
+	// pos is the last record that the sweep passed.
+	pos        ExpiredCursor
+	removed    int
+	failStreak int
+}
+
 // SweepExpired removes expired files in batches. It returns the number of removed files.
 // The object goes first, then the record with the same object key. Thus an object delete
-// failure keeps the record, and the next sweep tries again; no object stays without a record.
+// failure keeps the record, and a later sweep tries again; no object stays without a record.
+// A failed record does not stop the sweep: it goes on to the next records, and the next call
+// starts after the last record that this call passed. Only a run of failures, which means that
+// the object storage is down, ends the sweep early.
 // Give the context of the caller: its cancellation stops the sweep. A record error stops the
 // sweep and is returned.
 func (m *Manager) SweepExpired(ctx context.Context) (int, error) {
-	return m.sweep(ctx, sweepBatchSize, sweepMaxBatches)
+	return m.sweep(ctx, m.backgroundPos, sweepBatchSize, sweepMaxBatches)
 }
 
 // ReleaseExpiredSlug removes the file with the record ID id when it is expired, so that a note,
@@ -59,54 +123,92 @@ func (m *Manager) ReleaseExpiredSlug(ctx context.Context, id string) (bool, erro
 	return true, nil
 }
 
-func (m *Manager) sweep(ctx context.Context, batchSize, maxBatches int) (int, error) {
-	removed := 0
+// sweep runs one sweep from the position in cursor and stores the position where it ended.
+func (m *Manager) sweep(ctx context.Context, cursor *sweepCursor, batchSize, maxBatches int) (int, error) {
+	run := sweepRun{pos: cursor.load(), removed: 0, failStreak: 0}
 
+	err := m.sweepPages(ctx, &run, batchSize, maxBatches)
+	cursor.store(run.pos)
+
+	if run.failStreak >= sweepMaxFailStreak {
+		m.deps.Log.WarnContext(ctx, "file sweep stopped: object deletes fail", "failures", run.failStreak)
+	}
+
+	return run.removed, err
+}
+
+func (m *Manager) sweepPages(ctx context.Context, run *sweepRun, batchSize, maxBatches int) error {
 	for range maxBatches {
-		batch, err := m.deps.Storage.ListExpired(ctx, time.Now(), batchSize)
+		batch, err := m.deps.Storage.ListExpired(ctx, time.Now(), run.pos, batchSize)
 		if err != nil {
-			return removed, fmt.Errorf("sweep expired files: %w", err)
+			return fmt.Errorf("sweep expired files: %w", err)
 		}
 
-		count, err := m.sweepBatch(ctx, batch)
-		removed += count
-
+		err = m.sweepBatch(ctx, run, batch)
 		if err != nil {
-			return removed, err
+			return err
 		}
 
-		// A short batch is the last one. A batch without progress means that object storage
-		// fails; the same records would come again, so the next sweep tries again.
-		if len(batch) < batchSize || count == 0 {
-			break
+		if run.failStreak >= sweepMaxFailStreak {
+			return nil
+		}
+
+		// A short batch is the end of the list. The next sweep starts at the oldest record
+		// again, so that it tries the records that this sweep kept.
+		if len(batch) < batchSize {
+			run.pos = ExpiredCursor{ExpiresAt: time.Time{}, ID: ""}
+
+			return nil
 		}
 	}
 
-	return removed, nil
+	return nil
 }
 
-func (m *Manager) sweepBatch(ctx context.Context, batch []*domain.File) (int, error) {
-	removed := 0
-
+// sweepBatch removes the files of a batch. A file that it cannot remove does not stop it; run
+// keeps the count of the failures in a row.
+func (m *Manager) sweepBatch(ctx context.Context, run *sweepRun, batch []*domain.File) error {
 	for _, file := range batch {
 		ctxErr := ctx.Err()
 		if ctxErr != nil {
-			return removed, fmt.Errorf("sweep expired files: %w", ctxErr)
+			return fmt.Errorf("sweep expired files: %w", ctxErr)
 		}
 
 		err := m.removeExpired(ctx, file.ID, file.ObjectKey)
 
 		switch {
 		case err == nil:
-			removed++
-		case errors.Is(err, errObjectKept), errors.Is(err, domain.ErrNotFound):
-			// The object delete is logged; a missing record was removed by another process.
+			run.removed++
+			run.failStreak = 0
+		case errors.Is(err, domain.ErrNotFound):
+			// Another process removed the record.
+			run.failStreak = 0
+		case errors.Is(err, errObjectKept):
+			// deleteObject logged and counted the failure. The record stays for a later sweep.
+			run.failStreak++
 		default:
-			return removed, fmt.Errorf("sweep expired files: %w", err)
+			// The position stays before this record, so that the next sweep tries it again.
+			return fmt.Errorf("sweep expired files: %w", err)
+		}
+
+		run.pos = cursorAfter(file)
+
+		if run.failStreak >= sweepMaxFailStreak {
+			return nil
 		}
 	}
 
-	return removed, nil
+	return nil
+}
+
+// cursorAfter returns the cursor that makes ListExpired start after file.
+func cursorAfter(file *domain.File) ExpiredCursor {
+	cursor := ExpiredCursor{ExpiresAt: time.Time{}, ID: file.ID}
+	if file.ExpiresAt != nil {
+		cursor.ExpiresAt = *file.ExpiresAt
+	}
+
+	return cursor
 }
 
 // removeExpired deletes the object of an expired file, then its record.
@@ -147,9 +249,15 @@ func (m *Manager) expire(ctx context.Context, file *domain.File) error {
 }
 
 // sweepOnUpload removes a small batch of expired files on each upload. The background sweep
-// can be off, so this cleanup stays. A failure only delays the cleanup to the next sweep.
+// can be off, so this cleanup stays. The whole sweep has the limit uploadSweepTimeout, so a slow
+// object storage cannot hold the response of the upload. A failure or the limit only delays the
+// cleanup to the next sweep. The request context stays the parent: when the client leaves, the
+// sweep stops.
 func (m *Manager) sweepOnUpload(ctx context.Context) {
-	_, err := m.sweep(ctx, uploadSweepBatchSize, 1)
+	sweepCtx, cancel := context.WithTimeout(ctx, m.uploadSweepTimeout)
+	defer cancel()
+
+	_, err := m.sweep(sweepCtx, m.uploadPos, uploadSweepBatchSize, 1)
 	if err != nil {
 		m.deps.Log.WarnContext(ctx, "file sweep failed", "err", err)
 	}

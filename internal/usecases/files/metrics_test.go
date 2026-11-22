@@ -140,6 +140,7 @@ func (s *ManagerSuite) TestMetrics_RecordFailureRemovesObject() {
 	s.expectUpload("x")
 	s.expectFreeSlug()
 	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(errors.New("disk full"))
+	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(nil, domain.ErrNotFound)
 	s.objects.EXPECT().Delete(gomock.Any(), gomock.Any()).Return(errors.New("s3 down"))
 	metrics.EXPECT().IncStorageErrors(StorageOpDelete)
 

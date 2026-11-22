@@ -136,7 +136,7 @@ func (s *ManagerSuite) expectUpload(want string) {
 
 // expectUploadSweep expects the small sweep after an upload. It finds no expired file.
 func (s *ManagerSuite) expectUploadSweep() {
-	s.storage.EXPECT().ListExpired(gomock.Any(), gomock.Any(), uploadSweepBatchSize).Return(nil, nil)
+	s.storage.EXPECT().ListExpired(gomock.Any(), gomock.Any(), gomock.Any(), uploadSweepBatchSize).Return(nil, nil)
 }
 
 func (s *ManagerSuite) TestCreate_StoresFileAndReturnsSlug() {
@@ -154,7 +154,7 @@ func (s *ManagerSuite) TestCreate_StoresFileAndReturnsSlug() {
 			return nil
 		})
 	gomock.InOrder(
-		s.storage.EXPECT().ListExpired(gomock.Any(), gomock.Any(), uploadSweepBatchSize).
+		s.storage.EXPECT().ListExpired(gomock.Any(), gomock.Any(), gomock.Any(), uploadSweepBatchSize).
 			Return([]*domain.File{old}, nil),
 		s.objects.EXPECT().Delete(gomock.Any(), "old").Return(nil),
 		s.storage.EXPECT().DeleteExpired(gomock.Any(), "old-id", "old", gomock.Any()).Return(nil),
@@ -264,6 +264,107 @@ func (s *ManagerSuite) TestCreate_RemovesObjectWhenRecordFails() {
 
 	_, err := s.manager.Create(s.T().Context(), "a", strings.NewReader("x"), createOptions())
 	s.Require().ErrorIs(err, domain.ErrSlugConflict)
+}
+
+// expectLostCreate makes Create fail after the record write, as when the reply is lost. It
+// returns the record that the database keeps, for the GetByID that follows.
+func (s *ManagerSuite) expectLostCreate(createErr error) *domain.File {
+	stored := new(domain.File)
+
+	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, file *domain.File) error {
+			*stored = *file
+
+			return createErr
+		})
+
+	return stored
+}
+
+func (s *ManagerSuite) TestCreate_LostReplyKeepsCommittedRecord() {
+	ctx, cancel := context.WithCancel(s.T().Context())
+	defer cancel()
+
+	s.expectUpload("x")
+	s.expectFreeSlug()
+
+	stored := new(domain.File)
+
+	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, file *domain.File) error {
+			*stored = *file
+			// The client disconnects while the database commits the row.
+			cancel()
+
+			return context.Canceled
+		})
+	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(checkCtx context.Context, id string) (*domain.File, error) {
+			s.Require().NoError(checkCtx.Err(), "the check must not stop with the request")
+			s.Equal(stored.ID, id)
+
+			return fileRef(stored.ID, stored.ObjectKey), nil
+		})
+	s.expectUploadSweep()
+
+	file, err := s.manager.Create(ctx, "a", strings.NewReader("x"), createOptions())
+	s.Require().NoError(err)
+	s.Equal(stored.ID, domain.HashSlug(file.ID))
+	s.NotEmpty(file.EditCode)
+	s.Nil(file.ContentKey)
+}
+
+func (s *ManagerSuite) TestCreate_UnclearErrorWithoutRecordRemovesObject() {
+	createErr := errors.New("connection reset by peer")
+
+	s.expectUpload("x")
+	s.expectFreeSlug()
+	s.expectLostCreate(createErr)
+	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(nil, domain.ErrNotFound)
+	s.objects.EXPECT().Delete(gomock.Any(), gomock.Any()).Return(nil)
+
+	file, err := s.manager.Create(s.T().Context(), "a", strings.NewReader("x"), createOptions())
+	s.Require().ErrorIs(err, createErr)
+	s.Require().NotErrorIs(err, errRecordUnknown)
+	s.Nil(file)
+}
+
+func (s *ManagerSuite) TestCreate_SlugOfOtherObjectRemovesObject() {
+	createErr := errors.New("connection reset by peer")
+
+	s.expectUpload("x")
+	s.expectFreeSlug()
+	stored := s.expectLostCreate(createErr)
+	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, id string) (*domain.File, error) {
+			return fileRef(id, "other-upload"), nil
+		})
+	s.objects.EXPECT().Delete(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, key string) error {
+			s.Equal(stored.ObjectKey, key)
+
+			return nil
+		})
+
+	_, err := s.manager.Create(s.T().Context(), "a", strings.NewReader("x"), createOptions())
+	s.Require().ErrorIs(err, createErr)
+}
+
+func (s *ManagerSuite) TestCreate_FailedCheckKeepsObject() {
+	createErr := errors.New("connection reset by peer")
+	checkErr := errors.New("connection refused")
+
+	s.expectUpload("x")
+	s.expectFreeSlug()
+	s.expectLostCreate(createErr)
+	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(nil, checkErr)
+	// No objects.Delete: the record can exist, and its object must stay.
+
+	file, err := s.manager.Create(s.T().Context(), "a", strings.NewReader("x"), createOptions())
+	s.Require().ErrorIs(err, errRecordUnknown)
+	s.Require().ErrorIs(err, createErr)
+	s.Require().ErrorIs(err, checkErr)
+	s.Nil(file)
 }
 
 func (s *ManagerSuite) TestCreate_CustomSlugTakenByNote() {

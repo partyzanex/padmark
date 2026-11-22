@@ -208,14 +208,24 @@ func (r *FileRepository) IncrementDownloadsVisible(
 }
 
 // ListExpired returns at most limit records that expired before now and have no live claim,
-// the oldest expiry first. Only ID and ObjectKey are set.
-func (r *FileRepository) ListExpired(ctx context.Context, now time.Time, limit int) ([]*domain.File, error) {
+// the oldest expiry first, then by ID. It returns only the records after the cursor: the
+// bound on expires_at lets the database use the index, and the second condition breaks ties
+// of equal expiry by ID. ID, ObjectKey and ExpiresAt are set.
+func (r *FileRepository) ListExpired(
+	ctx context.Context, now time.Time, after files.ExpiredCursor, limit int,
+) ([]*domain.File, error) {
 	var rows []file
 
-	err := r.db.NewSelect().Model(&rows).Column("id", "object_key").
+	query := r.db.NewSelect().Model(&rows).Column("id", "object_key", "expires_at").
 		Where("expires_at IS NOT NULL AND expires_at < ?", now).
-		Where(unclaimedWhere, now).
-		OrderExpr("expires_at").Limit(int64(limit)).Scan(ctx)
+		Where(unclaimedWhere, now)
+
+	if !after.IsZero() {
+		query = query.Where("expires_at >= ?", after.ExpiresAt).
+			Where("expires_at > ? OR id > ?", after.ExpiresAt, after.ID)
+	}
+
+	err := query.OrderExpr("expires_at, id").Limit(int64(limit)).Scan(ctx)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("sqlite list expired files: %w", err)
 	}

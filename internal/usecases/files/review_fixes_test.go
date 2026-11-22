@@ -318,10 +318,18 @@ func (s *ManagerSuite) TestSkipPrivacy_ExpiryAndDelete() {
 
 // --- expired files: object first, bounded batches (R-07) ---
 
+// expiredBatch returns count expired records in the order of ListExpired: each expires one
+// second after the previous one.
 func expiredBatch(count int, prefix string) []*domain.File {
+	base := time.Now().Add(-time.Hour)
 	batch := make([]*domain.File, 0, count)
+
 	for i := range count {
-		batch = append(batch, fileRef(fmt.Sprintf("%s-id-%d", prefix, i), fmt.Sprintf("%s-%d", prefix, i)))
+		file := fileRef(fmt.Sprintf("%s-id-%d", prefix, i), fmt.Sprintf("%s-%d", prefix, i))
+		expires := base.Add(time.Duration(i) * time.Second)
+		file.ExpiresAt = &expires
+
+		batch = append(batch, file)
 	}
 
 	return batch
@@ -331,7 +339,7 @@ func (s *ManagerSuite) TestSweepExpired_ObjectFirstThenRecord() {
 	metrics := s.strictMetrics()
 	batch := expiredBatch(2, "obj")
 
-	s.storage.EXPECT().ListExpired(gomock.Any(), gomock.Any(), sweepBatchSize).Return(batch, nil)
+	s.storage.EXPECT().ListExpired(gomock.Any(), gomock.Any(), gomock.Any(), sweepBatchSize).Return(batch, nil)
 	gomock.InOrder(
 		s.objects.EXPECT().Delete(gomock.Any(), "obj-0").Return(nil),
 		s.storage.EXPECT().DeleteExpired(gomock.Any(), "obj-id-0", "obj-0", gomock.Any()).Return(nil),
@@ -351,8 +359,8 @@ func (s *ManagerSuite) TestSweepExpired_ContinuesWithFullBatches() {
 	second := expiredBatch(3, "b")
 
 	gomock.InOrder(
-		s.storage.EXPECT().ListExpired(gomock.Any(), gomock.Any(), sweepBatchSize).Return(first, nil),
-		s.storage.EXPECT().ListExpired(gomock.Any(), gomock.Any(), sweepBatchSize).Return(second, nil),
+		s.storage.EXPECT().ListExpired(gomock.Any(), gomock.Any(), gomock.Any(), sweepBatchSize).Return(first, nil),
+		s.storage.EXPECT().ListExpired(gomock.Any(), gomock.Any(), gomock.Any(), sweepBatchSize).Return(second, nil),
 	)
 	s.objects.EXPECT().Delete(gomock.Any(), gomock.Any()).Return(nil).Times(sweepBatchSize + 3)
 	s.storage.EXPECT().DeleteExpired(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
@@ -364,7 +372,7 @@ func (s *ManagerSuite) TestSweepExpired_ContinuesWithFullBatches() {
 }
 
 func (s *ManagerSuite) TestSweepExpired_StopsAfterMaxBatches() {
-	s.storage.EXPECT().ListExpired(gomock.Any(), gomock.Any(), sweepBatchSize).
+	s.storage.EXPECT().ListExpired(gomock.Any(), gomock.Any(), gomock.Any(), sweepBatchSize).
 		Return(expiredBatch(sweepBatchSize, "x"), nil).Times(sweepMaxBatches)
 	s.objects.EXPECT().Delete(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 	s.storage.EXPECT().DeleteExpired(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
@@ -375,28 +383,20 @@ func (s *ManagerSuite) TestSweepExpired_StopsAfterMaxBatches() {
 	s.Equal(sweepBatchSize*sweepMaxBatches, removed)
 }
 
-func (s *ManagerSuite) TestSweepExpired_BatchWithoutProgressStops() {
-	s.storage.EXPECT().ListExpired(gomock.Any(), gomock.Any(), sweepBatchSize).
-		Return(expiredBatch(sweepBatchSize, "x"), nil).Times(1)
-	s.objects.EXPECT().Delete(gomock.Any(), gomock.Any()).Return(errors.New("s3 down")).Times(sweepBatchSize)
-
-	removed, err := s.manager.SweepExpired(s.T().Context())
-	s.Require().NoError(err)
-	s.Zero(removed)
-}
-
 func (s *ManagerSuite) TestSweepExpired_Errors() {
 	dbErr := errors.New("database is locked")
 
 	s.Run("list", func() {
-		s.storage.EXPECT().ListExpired(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil, dbErr)
+		s.storage.EXPECT().ListExpired(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+			Return(nil, dbErr)
 
 		_, err := s.manager.SweepExpired(s.T().Context())
 		s.Require().ErrorIs(err, dbErr)
 	})
 
 	s.Run("record", func() {
-		s.storage.EXPECT().ListExpired(gomock.Any(), gomock.Any(), gomock.Any()).Return(expiredBatch(2, "r"), nil)
+		s.storage.EXPECT().ListExpired(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+			Return(expiredBatch(2, "r"), nil)
 		s.objects.EXPECT().Delete(gomock.Any(), "r-0").Return(nil)
 		s.storage.EXPECT().DeleteExpired(gomock.Any(), "r-id-0", "r-0", gomock.Any()).Return(dbErr)
 
@@ -406,7 +406,8 @@ func (s *ManagerSuite) TestSweepExpired_Errors() {
 	})
 
 	s.Run("record removed by another process", func() {
-		s.storage.EXPECT().ListExpired(gomock.Any(), gomock.Any(), gomock.Any()).Return(expiredBatch(1, "g"), nil)
+		s.storage.EXPECT().ListExpired(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+			Return(expiredBatch(1, "g"), nil)
 		s.objects.EXPECT().Delete(gomock.Any(), "g-0").Return(nil)
 		s.storage.EXPECT().DeleteExpired(gomock.Any(), "g-id-0", "g-0", gomock.Any()).Return(domain.ErrNotFound)
 
@@ -419,7 +420,8 @@ func (s *ManagerSuite) TestSweepExpired_Errors() {
 		ctx, cancel := context.WithCancel(s.T().Context())
 		cancel()
 
-		s.storage.EXPECT().ListExpired(gomock.Any(), gomock.Any(), gomock.Any()).Return(expiredBatch(1, "c"), nil)
+		s.storage.EXPECT().ListExpired(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+			Return(expiredBatch(1, "c"), nil)
 
 		_, err := s.manager.SweepExpired(ctx)
 		s.Require().ErrorIs(err, context.Canceled)
@@ -429,7 +431,8 @@ func (s *ManagerSuite) TestSweepExpired_Errors() {
 // TestSweepExpired_ObjectDeleteHasTimeout makes sure that each object delete has a deadline, so
 // that a stopped object storage cannot hold the sweep or the shutdown without end.
 func (s *ManagerSuite) TestSweepExpired_ObjectDeleteHasTimeout() {
-	s.storage.EXPECT().ListExpired(gomock.Any(), gomock.Any(), gomock.Any()).Return(expiredBatch(1, "t"), nil)
+	s.storage.EXPECT().ListExpired(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(expiredBatch(1, "t"), nil)
 	s.objects.EXPECT().Delete(gomock.Any(), "t-0").DoAndReturn(func(ctx context.Context, _ string) error {
 		_, ok := ctx.Deadline()
 		s.True(ok, "an object delete must have a deadline")

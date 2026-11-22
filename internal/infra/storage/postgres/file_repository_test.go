@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -356,6 +357,8 @@ func (s *FileRepositorySuite) TestIncrementDownloadsVisible() {
 }
 
 func (s *FileRepositorySuite) TestListExpired() {
+	var none files.ExpiredCursor
+
 	ctx := s.T().Context()
 	now := time.Now()
 
@@ -379,20 +382,72 @@ func (s *FileRepositorySuite) TestListExpired() {
 	claim := newClaim(claimed, "t1", fileReader(uuid.Nil, false), now.Add(-30*time.Minute))
 	s.Require().NoError(s.repo.ClaimBurn(ctx, claim))
 
-	batch, err := s.repo.ListExpired(ctx, now, 2)
+	batch, err := s.repo.ListExpired(ctx, now, none, 2)
 	s.Require().NoError(err)
 	s.Require().Len(batch, 2)
 	s.Equal("object-old-0", batch[0].ObjectKey, "the oldest expiry comes first")
 	s.Equal(domain.HashSlug("old-0"), batch[0].ID)
+	s.Require().NotNil(batch[0].ExpiresAt, "ListExpired sets ExpiresAt for the cursor")
 	s.Equal("object-old-2", batch[1].ObjectKey)
 
-	batch, err = s.repo.ListExpired(ctx, now, 10)
+	batch, err = s.repo.ListExpired(ctx, now, none, 10)
 	s.Require().NoError(err)
 	s.Len(batch, 3)
 
-	batch, err = s.repo.ListExpired(ctx, now.Add(-4*time.Hour), 10)
+	batch, err = s.repo.ListExpired(ctx, now.Add(-4*time.Hour), none, 10)
 	s.Require().NoError(err)
 	s.Empty(batch)
+}
+
+// TestListExpired_CursorPagesThroughTies pages through five records, three of them with the
+// same expiry, and makes sure that each record comes once, in the order of expiry, then ID. A
+// page ends inside the tied records, so the cursor must break the tie by ID.
+func (s *FileRepositorySuite) TestListExpired_CursorPagesThroughTies() {
+	ctx := s.T().Context()
+	now := time.Now()
+	oldest := now.Add(-3 * time.Hour)
+	tied := now.Add(-2 * time.Hour)
+	newest := now.Add(-time.Hour)
+
+	for name, expires := range map[string]*time.Time{"a": &tied, "b": &tied, "c": &tied, "d": &oldest, "e": &newest} {
+		s.createFile(name, func(record *domain.File) { record.ExpiresAt = expires })
+	}
+
+	tiedIDs := []string{domain.HashSlug("a"), domain.HashSlug("b"), domain.HashSlug("c")}
+	slices.Sort(tiedIDs)
+
+	want := append([]string{domain.HashSlug("d")}, tiedIDs...)
+	want = append(want, domain.HashSlug("e"))
+
+	var (
+		got    []string
+		cursor files.ExpiredCursor
+	)
+
+	for range want {
+		page, err := s.repo.ListExpired(ctx, now, cursor, 2)
+		s.Require().NoError(err)
+
+		if len(page) == 0 {
+			break
+		}
+
+		for _, record := range page {
+			s.Require().NotNil(record.ExpiresAt, "ListExpired sets ExpiresAt")
+			s.NotEmpty(record.ObjectKey)
+
+			got = append(got, record.ID)
+		}
+
+		last := page[len(page)-1]
+		cursor = files.ExpiredCursor{ExpiresAt: *last.ExpiresAt, ID: last.ID}
+	}
+
+	s.Equal(want, got)
+
+	page, err := s.repo.ListExpired(ctx, now, cursor, 2)
+	s.Require().NoError(err)
+	s.Empty(page, "nothing is after the last record")
 }
 
 func (s *FileRepositorySuite) TestDeleteExpired() {
