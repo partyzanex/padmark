@@ -9,7 +9,7 @@ import (
 	"github.com/partyzanex/padmark/internal/usecases/files"
 )
 
-// FileSuite is the contract of the file repository for Create, GetByID, Exists, Delete,
+// FileSuite is the contract of the file repository for Create, GetByID, Delete,
 // ListExpired and DeleteExpired. ClaimBurn, ReleaseBurn, IncrementDownloadsVisible and Update
 // are not in it yet: another change refactors the file read paths now.
 type FileSuite struct {
@@ -62,20 +62,19 @@ func (s *FileSuite) TestCreate_DuplicateObjectKey_IsNotASlugConflict() {
 	s.NotErrorIs(err, domain.ErrSlugConflict)
 }
 
-func (s *FileSuite) TestExists_Delete() {
+func (s *FileSuite) TestDelete() {
 	ctx := s.T().Context()
 	s.Require().NoError(s.be.files.Create(ctx, newFile("file-1", "object-1", nil)))
 
-	exists, err := s.be.files.Exists(ctx, "file-1")
-	s.Require().NoError(err)
-	s.True(exists)
-
 	s.Require().ErrorIs(s.be.files.Delete(ctx, "file-1", "other-object"), domain.ErrNotFound)
+
+	_, err := s.be.files.GetByID(ctx, "file-1")
+	s.Require().NoError(err, "a delete with another object key keeps the record")
+
 	s.Require().NoError(s.be.files.Delete(ctx, "file-1", "object-1"))
 
-	exists, err = s.be.files.Exists(ctx, "file-1")
-	s.Require().NoError(err)
-	s.False(exists)
+	_, err = s.be.files.GetByID(ctx, "file-1")
+	s.Require().ErrorIs(err, domain.ErrNotFound)
 }
 
 // TestListExpired_PagesByCursor pins the order (expiry, then ID) and the cursor of aba5c3a on

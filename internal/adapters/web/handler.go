@@ -26,9 +26,7 @@ import (
 
 // SessionManager authenticates a user and manages their login session lifecycle.
 type SessionManager interface {
-	Login(
-		ctx context.Context, username, password, totpCode, userAgent, clientIP, previousSessionID string,
-	) (string, error)
+	Login(ctx context.Context, req *auth.LoginRequest) (string, error)
 	Logout(ctx context.Context, sessionID string) error
 	GetSession(ctx context.Context, sessionID string) (*domain.User, error)
 	ChangePassword(ctx context.Context, sessionID, oldPassword, newPassword, totpCode string) (string, error)
@@ -150,7 +148,7 @@ type LinkManager interface {
 // of common.accounts gets the "not enabled" answer and never a nil dereference.
 type disabledAccounts struct{}
 
-func (disabledAccounts) Login(context.Context, string, string, string, string, string, string) (string, error) {
+func (disabledAccounts) Login(context.Context, *auth.LoginRequest) (string, error) {
 	return "", domain.ErrFeatureNotSupported
 }
 

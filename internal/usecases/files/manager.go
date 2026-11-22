@@ -38,15 +38,14 @@ var errRecordUnknown = errors.New("file record state is unknown")
 // row and returns domain.ErrNotFound, so it cannot change or delete the new file.
 type Storage interface {
 	// Create inserts the record. It must atomically claim the ID across notes, links and
-	// files, and return domain.ErrSlugConflict if another resource has it. Another error does
+	// files, and return domain.ErrSlugConflict if another resource has it: it is the only slug
+	// uniqueness check (docs/adr/0003-storage-slug-uniqueness.md). Another error does
 	// not prove that the record is absent: the database can write the record and lose the
 	// reply. Manager then reads the record with GetByID.
 	Create(ctx context.Context, file *domain.File) error
 	// GetByID returns the record. While a burn claim that is not stale holds the record, it
 	// returns domain.ErrNotFound: other readers must not see a file that a download consumes.
 	GetByID(ctx context.Context, id string) (*domain.File, error)
-	// Exists reports whether a record has the ID. A claimed record also holds its ID.
-	Exists(ctx context.Context, id string) (bool, error)
 	// Delete removes the record with id and objectKey.
 	Delete(ctx context.Context, id, objectKey string) error
 	// Update writes only the fields that opts sets, while the record is not expired at now.
@@ -110,17 +109,12 @@ type EditCodeHasher interface {
 	Verify(storedHash, code string) bool
 }
 
-// SlugLock serializes local slug checks. Share the instance with notes.Manager and
-// links.Manager; storage enforces uniqueness between server processes. Errors are fail-hard:
-// the operation stops, because it cannot check the slug safely.
-type SlugLock interface {
-	Lock(ctx context.Context, key string) (unlock func(), err error)
-}
-
-// SlugChecker reports whether another resource (notes or links) has an ID. Errors are
-// fail-hard: an upload stops, because it cannot check the slug.
-type SlugChecker interface {
-	Exists(ctx context.Context, id string) (bool, error)
+// ExpiredSlugReleaser removes an expired note, link or file that still holds the record ID id,
+// because no read and no sweep removed it yet. It returns true when it removed a record. It must
+// remove a record only while it is still expired, so a record that its owner extended stays.
+// Errors are fail-soft: Create keeps its slug conflict and logs the error.
+type ExpiredSlugReleaser interface {
+	ReleaseExpiredSlug(ctx context.Context, id string) (bool, error)
 }
 
 // DeleteReason tells why a file was deleted. It is the "reason" label of the deleted counter.
@@ -171,10 +165,10 @@ type Deps struct {
 	Cipher    StreamCipher
 	Encryptor Encryptor
 	Hasher    EditCodeHasher
-	SlugLock  SlugLock
-	Notes     SlugChecker
-	Links     SlugChecker
-	Log       *slog.Logger
+	// ExpiredSlugs can be the composite that also removes files through this Manager's
+	// ReleaseExpiredSlug: the composition root connects it before the first request.
+	ExpiredSlugs ExpiredSlugReleaser
+	Log          *slog.Logger
 }
 
 // CreateOptions holds the Create parameters other than the content.
@@ -245,7 +239,7 @@ func (m *Manager) MaxSize() int64 { return m.maxSize }
 
 // Create encrypts body to object storage and records the file. It returns the file with the
 // slug as ID and the plaintext edit code. The upload goes first, because it can take a long
-// time; the slug lock is held only for the record insert. When the insert fails, Create deletes
+// time; the record insert follows (see insert). When the insert fails, Create deletes
 // the object only if the record is surely absent; see confirmCreate.
 func (m *Manager) Create(ctx context.Context, name string, body io.Reader, opts CreateOptions) (*domain.File, error) {
 	file, plainCode, err := m.newFile(name, &opts)
@@ -557,14 +551,39 @@ func (m *Manager) hashEditCode(file *domain.File) (string, error) {
 	return plain, nil
 }
 
-// insert resolves the slug, seals the metadata for that record ID and writes the record.
+// insert resolves the slug and writes the record. Storage.Create is the only uniqueness check. A
+// random slug that is taken gets a new random slug, at most maxSlugRetries times. A custom slug
+// that is taken stays taken, except when an expired record holds it.
 func (m *Manager) insert(ctx context.Context, file *domain.File, customSlug string) error {
-	slug, unlock, err := m.resolveUniqueSlug(ctx, customSlug)
+	slug, err := domain.ResolveSlug(customSlug, m.allowCustomSlugs)
 	if err != nil {
-		return err
+		return fmt.Errorf("resolve slug: %w", err)
 	}
-	defer unlock()
 
+	for range maxSlugRetries {
+		err = m.insertAs(ctx, file, slug)
+		// A custom slug that an expired record holds gets one more attempt after the removal, as
+		// for notes. The storage triggers check the slug again, so this is safe across processes.
+		if customSlug != "" && errors.Is(err, domain.ErrSlugConflict) &&
+			m.releaseExpiredHolder(ctx, domain.HashSlug(slug)) {
+			err = m.insertAs(ctx, file, slug)
+		}
+
+		if customSlug != "" || !errors.Is(err, domain.ErrSlugConflict) {
+			return err
+		}
+
+		slug, err = domain.ResolveSlug("", m.allowCustomSlugs)
+		if err != nil {
+			return fmt.Errorf("resolve slug: %w", err)
+		}
+	}
+
+	return domain.ErrHashCollision
+}
+
+// insertAs seals the metadata for the record ID of slug and writes the record.
+func (m *Manager) insertAs(ctx context.Context, file *domain.File, slug string) error {
 	recordID := domain.HashSlug(slug)
 
 	meta, err := json.Marshal(sealedMeta{Name: file.Name, Key: file.ContentKey})
@@ -627,77 +646,21 @@ func (m *Manager) confirmCreate(ctx context.Context, recordID, objectKey string,
 	}
 }
 
-func (m *Manager) resolveUniqueSlug(
-	ctx context.Context, customSlug string,
-) (slug string, unlock func(), err error) {
-	for range maxSlugRetries {
-		ctxErr := ctx.Err()
-		if ctxErr != nil {
-			return "", nil, fmt.Errorf("resolve unique slug: %w", ctxErr)
-		}
-
-		slug, err = domain.ResolveSlug(customSlug, m.allowCustomSlugs)
-		if err != nil {
-			return "", nil, fmt.Errorf("resolve slug: %w", err)
-		}
-
-		unlock, err = m.deps.SlugLock.Lock(ctx, domain.HashSlug(slug))
-		if err != nil {
-			return "", nil, fmt.Errorf("lock slug: %w", err)
-		}
-
-		taken, err := m.slugTaken(ctx, domain.HashSlug(slug))
-		if err != nil {
-			unlock()
-
-			return "", nil, err
-		}
-
-		if !taken {
-			return slug, unlock, nil
-		}
-
-		unlock()
-
-		if customSlug != "" {
-			return "", nil, domain.ErrSlugConflict
-		}
-	}
-
-	return "", nil, domain.ErrHashCollision
-}
-
-// slugTaken reports whether a note, a link or a file has id. An expired file that the sweep did
-// not remove yet does not hold the slug: slugTaken removes it.
-func (m *Manager) slugTaken(ctx context.Context, id string) (bool, error) {
-	for _, checker := range []SlugChecker{m.deps.Notes, m.deps.Links} {
-		taken, err := checker.Exists(ctx, id)
-		if err != nil {
-			return false, fmt.Errorf("check slug: %w", err)
-		}
-
-		if taken {
-			return true, nil
-		}
-	}
-
-	taken, err := m.deps.Storage.Exists(ctx, id)
+// releaseExpiredHolder reports whether an expired note, link or file with id was removed. Errors
+// are fail-soft: Create keeps its slug conflict.
+func (m *Manager) releaseExpiredHolder(ctx context.Context, id string) bool {
+	released, err := m.deps.ExpiredSlugs.ReleaseExpiredSlug(ctx, id)
 	if err != nil {
-		return false, fmt.Errorf("check slug: %w", err)
+		m.deps.Log.WarnContext(ctx, "release expired slug", "id", id, "err", err)
+
+		return false
 	}
 
-	if !taken {
-		return false, nil
+	if released {
+		m.deps.Log.DebugContext(ctx, "expired record released its slug", "id", id)
 	}
 
-	released, err := m.ReleaseExpiredSlug(ctx, id)
-	if err != nil {
-		m.deps.Log.WarnContext(ctx, "release expired file slug", "id", id, "err", err)
-
-		return true, nil
-	}
-
-	return !released, nil
+	return released
 }
 
 // openMeta decrypts SealedMeta into Name and ContentKey. A failure is ErrNotFound, as for notes

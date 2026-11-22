@@ -155,10 +155,10 @@ type Storage interface {
 }
 ```
 
-[notes.NewManager](../internal/usecases/notes/manager.go) receives storage, a link-namespace
-checker, the shared slug lock, a renderer, an encryptor, an edit-code hasher, logger and the
-custom-slug setting. Its optional render cache defaults to a no-op implementation.
-The link manager follows the same namespace/ownership model.
+[notes.NewManager](../internal/usecases/notes/manager.go) receives a `notes.Deps` (storage, a
+renderer, an encryptor, an edit-code hasher, the shared expired-slug releaser and the logger) and
+the custom-slug setting. Its optional render cache defaults to a no-op implementation.
+`links.NewManager` takes a `links.Deps` with the same pattern, as `files.NewManager` does.
 
 The three managers apply the access rules themselves, with the `domain.Reader` of the request.
 The adapter only selects the format and translates the errors:
@@ -186,14 +186,19 @@ check and the write is not changed either (`ErrNotFound`).
 The check and the change use the same stored record: the write names
 that version by its stored edit-code hash (notes, links) or object key (files).
 
-Notes, links and files share the **same slug-lock instance** to serialize local preflight checks
-and coordinate link-cache eviction. Cross-process uniqueness is enforced by the database:
-resource triggers atomically reserve the hashed ID in `slug_namespace`, whose primary key
-is shared by all three resource types. A losing create returns `ErrSlugConflict` (HTTP 409).
+Only the database keeps slugs unique ([ADR-0003](adr/0003-storage-slug-uniqueness.md)). Resource
+triggers atomically reserve the hashed ID in `slug_namespace`, whose primary key is shared by
+all three resource types, also between server processes. The managers make no check before
+`Storage.Create` and hold no lock. When `Create` returns `ErrSlugConflict`:
+
+- A random slug gets a new random slug, at most five attempts, then `ErrHashCollision`.
+- A custom slug asks the shared `expiredslugs.Releaser` to remove an expired note, link or file
+  that holds it, then tries once more. Otherwise the conflict stays (HTTP 409).
+
 Deleting or consuming a resource releases its reservation in the same transaction.
 
-[files.Manager](../internal/usecases/files/manager.go) uses the same slug lock, the note and
-link slug checkers and the edit-code hasher. Its other ports are `Storage` (records),
+[files.Manager](../internal/usecases/files/manager.go) uses the same expired-slug releaser and
+the edit-code hasher. Its other ports are `Storage` (records),
 `ObjectStore` (the bucket), `StreamCipher` (`crypto.FileCipher`), `Encryptor` (the keyring for
 `sealed_meta`) and `Metrics`. The default `Metrics` records nothing; `WithMetrics` attaches the
 Prometheus implementation.
@@ -206,8 +211,8 @@ An upload has this sequence:
    the server keeps no full file in memory.
    A size counter stops the stream at `--max-file-size` with `ErrFileTooLarge`.
 3. `sweepOnUpload` removes expired files. A failure is fail-soft: it is only logged.
-4. `insert` takes the slug lock only for the record insert, because the upload can be long.
-   When the insert fails with a definite error, such as a slug conflict, the manager deletes the
+4. `insert` writes the record after the upload, with the slug rules above. The metadata is
+   sealed again for each new record ID. When the insert fails with a definite error, such as a slug conflict, the manager deletes the
    new object. After an unclear error (a lost connection, a timeout or a canceled request), it
    first reads the record by object key (`confirmCreate`). A committed record keeps its object and
    the upload succeeds; when the read also fails, the object stays in the bucket.
@@ -492,7 +497,7 @@ Manual wiring lives in [server.go](../internal/infra/server/server.go), chiefly
 
 1. Validate startup configuration/secrets and initialize logging.
 2. Load the keyring, open storage, apply schema migrations and validate content encryption.
-3. Construct repositories, ciphers, renderer, shared slug lock, caches and metrics.
+3. Construct repositories, ciphers, renderer, the shared expired-slug releaser, caches and metrics.
 4. Build note/link/auth managers and inject them into the HTTP handlers/router.
    `attachFiles` in [files.go](../internal/infra/server/files.go) builds `files.Manager` only
    when `--s3-endpoint` is set. A set but wrong S3 configuration stops startup (fail-hard).

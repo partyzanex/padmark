@@ -18,8 +18,8 @@ import (
 
 	"github.com/partyzanex/padmark/internal/adapters/web"
 	"github.com/partyzanex/padmark/internal/infra/crypto"
+	"github.com/partyzanex/padmark/internal/infra/expiredslugs"
 	"github.com/partyzanex/padmark/internal/infra/linkcache"
-	"github.com/partyzanex/padmark/internal/infra/lock"
 	"github.com/partyzanex/padmark/internal/infra/render"
 	sqliterepo "github.com/partyzanex/padmark/internal/infra/storage/sqlite"
 	"github.com/partyzanex/padmark/internal/testutil"
@@ -43,33 +43,22 @@ type ownerFlowEnv struct {
 // newOwnerFlowEnv builds that stack. Shared by the API-token owner-bypass test and the edit-page
 // privacy test so both exercise the same wiring the server actually assembles, rather than each
 // standing up its own approximation of it.
-// newOwnerFlowManagers builds the note and link managers over db, sharing one slug Locker
-// between them exactly as the composition root does — a separate Locker per manager would leave
-// the cross-table slug race open.
+// newOwnerFlowManagers builds the note and link managers over db with one shared
+// expiredslugs.Releaser, as the composition root does.
 func newOwnerFlowManagers(t *testing.T, db *bun.DB, log *slog.Logger) (*notes.Manager, *links.Manager) {
 	t.Helper()
 
-	slugLock := lock.NewLocker()
+	noteRepo, linkRepo := sqliterepo.NewNoteRepository(db), sqliterepo.NewLinkRepository(db, log)
+	expired := expiredslugs.New(noteRepo, linkRepo)
 
-	notesMgr := notes.NewManager(
-		sqliterepo.NewNoteRepository(db),
-		sqliterepo.NewLinkRepository(db, slog.Default()),
-		slugLock,
-		render.NewRenderer(),
-		testutil.ContentEncryptor(t, "note"),
-		crypto.NewEditCodeHasher(testutil.Argon2Params()),
-		log,
-		false,
-	)
-	linksMgr := links.NewManager(
-		sqliterepo.NewLinkRepository(db, slog.Default()),
-		sqliterepo.NewNoteRepository(db),
-		slugLock,
-		testutil.ContentEncryptor(t, "link"),
-		crypto.NewEditCodeHasher(testutil.Argon2Params()),
-		log,
-		false,
-	).WithCache(linkcache.NewDefault(log))
+	notesMgr := notes.NewManager(&notes.Deps{
+		Storage: noteRepo, Renderer: render.NewRenderer(), Encryptor: testutil.ContentEncryptor(t, "note"),
+		Hasher: crypto.NewEditCodeHasher(testutil.Argon2Params()), ExpiredSlugs: expired, Log: log,
+	}, false)
+	linksMgr := links.NewManager(&links.Deps{
+		Storage: linkRepo, Encryptor: testutil.ContentEncryptor(t, "link"),
+		Hasher: crypto.NewEditCodeHasher(testutil.Argon2Params()), ExpiredSlugs: expired, Log: log,
+	}, false).WithCache(linkcache.NewDefault(log))
 
 	return notesMgr, linksMgr
 }

@@ -14,10 +14,9 @@ import (
 
 	"github.com/partyzanex/padmark/internal/adapters/web"
 	"github.com/partyzanex/padmark/internal/infra/crypto"
+	"github.com/partyzanex/padmark/internal/infra/expiredslugs"
 	"github.com/partyzanex/padmark/internal/infra/storage/s3store"
 	"github.com/partyzanex/padmark/internal/usecases/files"
-	"github.com/partyzanex/padmark/internal/usecases/links"
-	"github.com/partyzanex/padmark/internal/usecases/notes"
 )
 
 // s3PingTimeout limits the bucket check and the bucket creation at startup.
@@ -28,16 +27,12 @@ const s3PingTimeout = 10 * time.Second
 var errInvalidSweepInterval = errors.New("files sweep interval must not be negative; use 0 to turn it off")
 
 // fileDeps holds the collaborators that the file manager shares with the note and link managers,
-// and the file metrics. noteManager and linkManager get the file manager, so that an expired
-// file that the sweep did not remove yet does not block a new note or link with its slug.
+// and the file metrics. expired gets the file manager, so that an expired file that the sweep
+// did not remove yet does not block a new note, link or file with its slug.
 type fileDeps struct {
-	slugLock    files.SlugLock
-	notes       files.SlugChecker
-	links       files.SlugChecker
-	hasher      files.EditCodeHasher
-	metrics     files.Metrics
-	noteManager *notes.Manager
-	linkManager *links.Manager
+	expired *expiredslugs.Releaser
+	hasher  files.EditCodeHasher
+	metrics files.Metrics
 }
 
 // attachFiles turns on file publishing when --s3-endpoint is set. A set but unusable
@@ -71,20 +66,18 @@ func attachFiles(
 	}
 
 	manager := files.NewManager(&files.Deps{
-		Storage:   store.files,
-		Objects:   objects,
-		Cipher:    crypto.NewFileCipher(),
-		Encryptor: encryptor,
-		Hasher:    deps.hasher,
-		SlugLock:  deps.slugLock,
-		Notes:     deps.notes,
-		Links:     deps.links,
-		Log:       log,
+		Storage:      store.files,
+		Objects:      objects,
+		Cipher:       crypto.NewFileCipher(),
+		Encryptor:    encryptor,
+		Hasher:       deps.hasher,
+		ExpiredSlugs: deps.expired,
+		Log:          log,
 	}, cmd.Int64(FlagMaxFileSize), cmd.Bool(FlagCustomSlugs)).
 		WithMetrics(deps.metrics)
 
-	deps.noteManager.WithExpiredFiles(manager)
-	deps.linkManager.WithExpiredFiles(manager)
+	// Composition time, before the first request: the shared releaser now also removes files.
+	deps.expired.WithFiles(manager)
 	handler.WithFileManager(manager)
 	log.InfoContext(ctx, "file publishing is on", "bucket", cfg.Bucket, "max_file_size", manager.MaxSize())
 

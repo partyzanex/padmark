@@ -281,7 +281,6 @@ func (s *ManagerSuite) TestCreate_SweepHasTotalTimeout() {
 	s.manager.uploadSweepTimeout = limit
 
 	s.expectUpload("hello")
-	s.expectFreeSlug()
 	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
 	s.storage.EXPECT().ListExpired(gomock.Any(), gomock.Any(), gomock.Any(), uploadSweepBatchSize).
 		Return(expiredBatch(uploadSweepBatchSize, "slow"), nil)
@@ -311,7 +310,6 @@ func (s *ManagerSuite) TestCreate_SweepStopsWhenTheClientLeaves() {
 	defer cancel()
 
 	s.expectUpload("hello")
-	s.expectFreeSlug()
 	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
 	s.storage.EXPECT().ListExpired(gomock.Any(), gomock.Any(), gomock.Any(), uploadSweepBatchSize).
 		DoAndReturn(func(context.Context, time.Time, ExpiredCursor, int) ([]*domain.File, error) {

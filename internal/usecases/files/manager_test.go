@@ -28,8 +28,7 @@ type ManagerSuite struct {
 	ctrl    *gomock.Controller
 	storage *MockStorage
 	objects *MockObjectStore
-	notes   *MockSlugChecker
-	links   *MockSlugChecker
+	expired *MockExpiredSlugReleaser
 	metrics *MockMetrics
 	manager *Manager
 }
@@ -42,20 +41,17 @@ func (s *ManagerSuite) SetupTest() {
 	s.ctrl = gomock.NewController(s.T())
 	s.storage = NewMockStorage(s.ctrl)
 	s.objects = NewMockObjectStore(s.ctrl)
-	s.notes = NewMockSlugChecker(s.ctrl)
-	s.links = NewMockSlugChecker(s.ctrl)
+	s.expired = NewMockExpiredSlugReleaser(s.ctrl)
 	s.metrics = NewMockMetrics(s.ctrl)
 	s.allowMetrics()
 	s.manager = NewManager(&Deps{
-		Storage:   s.storage,
-		Objects:   s.objects,
-		Cipher:    passthroughCipher(s.ctrl),
-		Encryptor: passthroughEncryptor(s.ctrl),
-		Hasher:    identityHasher(s.ctrl),
-		SlugLock:  noopSlugLock(s.ctrl),
-		Notes:     s.notes,
-		Links:     s.links,
-		Log:       slog.New(slog.DiscardHandler),
+		Storage:      s.storage,
+		Objects:      s.objects,
+		Cipher:       passthroughCipher(s.ctrl),
+		Encryptor:    passthroughEncryptor(s.ctrl),
+		Hasher:       identityHasher(s.ctrl),
+		ExpiredSlugs: s.expired,
+		Log:          slog.New(slog.DiscardHandler),
 	}, 10, true).WithMetrics(s.metrics)
 }
 
@@ -82,12 +78,6 @@ func anonymous(allowBurn bool) domain.Reader {
 	return domain.Reader{CallerID: uuid.Nil, Authenticated: false, AllowBurn: allowBurn, SkipPrivacy: false}
 }
 
-func (s *ManagerSuite) expectFreeSlug() {
-	s.notes.EXPECT().Exists(gomock.Any(), gomock.Any()).Return(false, nil)
-	s.links.EXPECT().Exists(gomock.Any(), gomock.Any()).Return(false, nil)
-	s.storage.EXPECT().Exists(gomock.Any(), gomock.Any()).Return(false, nil)
-}
-
 func (s *ManagerSuite) expectUpload(want string) {
 	s.objects.EXPECT().Put(gomock.Any(), gomock.Any(), gomock.Any()).
 		DoAndReturn(func(_ context.Context, _ string, body io.Reader) error {
@@ -109,7 +99,6 @@ func (s *ManagerSuite) TestCreate_StoresFileAndReturnsSlug() {
 	old := fileRef("old-id", "old")
 
 	s.expectUpload("hello")
-	s.expectFreeSlug()
 	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).
 		DoAndReturn(func(_ context.Context, file *domain.File) error {
 			s.Len(file.ID, 64, "storage gets the hashed slug")
@@ -138,7 +127,6 @@ func (s *ManagerSuite) TestCreate_StoresFileAndReturnsSlug() {
 func (s *ManagerSuite) TestCreate_UserEditCodeUsesMemoryHardHash() {
 	s.expectUpload("x")
 	s.expectUploadSweep()
-	s.expectFreeSlug()
 	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).
 		DoAndReturn(func(_ context.Context, file *domain.File) error {
 			s.Equal("user:my-secret-code", file.EditCode)
@@ -170,7 +158,6 @@ func (s *ManagerSuite) TestCreate_RejectsTooLargeFile() {
 func (s *ManagerSuite) TestCreate_AcceptsFileAtLimit() {
 	s.expectUpload("0123456789")
 	s.expectUploadSweep()
-	s.expectFreeSlug()
 	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
 
 	file, err := s.manager.Create(s.T().Context(), "a", strings.NewReader("0123456789"), createOptions())
@@ -221,14 +208,40 @@ func (s *ManagerSuite) TestCreate_CutBodyIsNotStored() {
 	s.Nil(file)
 }
 
+// TestCreate_RemovesObjectWhenRecordFails uses a custom slug: a random slug would get a new slug
+// after the conflict.
 func (s *ManagerSuite) TestCreate_RemovesObjectWhenRecordFails() {
 	s.expectUpload("x")
-	s.expectFreeSlug()
 	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(domain.ErrSlugConflict)
+	s.expired.EXPECT().ReleaseExpiredSlug(gomock.Any(), gomock.Any()).Return(false, nil)
 	s.objects.EXPECT().Delete(gomock.Any(), gomock.Any()).Return(nil)
 
-	_, err := s.manager.Create(s.T().Context(), "a", strings.NewReader("x"), createOptions())
+	opts := createOptions()
+	opts.CustomSlug = "report"
+
+	_, err := s.manager.Create(s.T().Context(), "a", strings.NewReader("x"), opts)
 	s.Require().ErrorIs(err, domain.ErrSlugConflict)
+}
+
+// TestCreate_RandomSlugRetry: a random slug that storage refuses gets a new random slug, and the
+// metadata is sealed again for the new record ID.
+func (s *ManagerSuite) TestCreate_RandomSlugRetry() {
+	var ids []string
+
+	record := func(_ any, file *domain.File) { ids = append(ids, file.ID) }
+
+	s.expectUpload("x")
+	gomock.InOrder(
+		s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Do(record).Return(domain.ErrSlugConflict),
+		s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Do(record).Return(nil),
+	)
+	s.expectUploadSweep()
+
+	file, err := s.manager.Create(s.T().Context(), "a", strings.NewReader("x"), createOptions())
+	s.Require().NoError(err)
+	s.Require().Len(ids, 2)
+	s.NotEqual(ids[0], ids[1])
+	s.Equal(domain.HashSlug(file.ID), ids[1])
 }
 
 // expectLostCreate makes Create fail after the record write, as when the reply is lost. It
@@ -251,7 +264,6 @@ func (s *ManagerSuite) TestCreate_LostReplyKeepsCommittedRecord() {
 	defer cancel()
 
 	s.expectUpload("x")
-	s.expectFreeSlug()
 
 	stored := new(domain.File)
 
@@ -283,7 +295,6 @@ func (s *ManagerSuite) TestCreate_UnclearErrorWithoutRecordRemovesObject() {
 	createErr := errors.New("connection reset by peer")
 
 	s.expectUpload("x")
-	s.expectFreeSlug()
 	s.expectLostCreate(createErr)
 	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(nil, domain.ErrNotFound)
 	s.objects.EXPECT().Delete(gomock.Any(), gomock.Any()).Return(nil)
@@ -298,7 +309,6 @@ func (s *ManagerSuite) TestCreate_SlugOfOtherObjectRemovesObject() {
 	createErr := errors.New("connection reset by peer")
 
 	s.expectUpload("x")
-	s.expectFreeSlug()
 	stored := s.expectLostCreate(createErr)
 	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).
 		DoAndReturn(func(_ context.Context, id string) (*domain.File, error) {
@@ -320,7 +330,6 @@ func (s *ManagerSuite) TestCreate_FailedCheckKeepsObject() {
 	checkErr := errors.New("connection refused")
 
 	s.expectUpload("x")
-	s.expectFreeSlug()
 	s.expectLostCreate(createErr)
 	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(nil, checkErr)
 	// No objects.Delete: the record can exist, and its object must stay.
@@ -332,9 +341,12 @@ func (s *ManagerSuite) TestCreate_FailedCheckKeepsObject() {
 	s.Nil(file)
 }
 
-func (s *ManagerSuite) TestCreate_CustomSlugTakenByNote() {
+// TestCreate_CustomSlugTaken: storage refuses the custom slug and no expired record holds it,
+// so Create reports the conflict and deletes the uploaded object.
+func (s *ManagerSuite) TestCreate_CustomSlugTaken() {
 	s.expectUpload("x")
-	s.notes.EXPECT().Exists(gomock.Any(), domain.HashSlug("report")).Return(true, nil)
+	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(domain.ErrSlugConflict)
+	s.expired.EXPECT().ReleaseExpiredSlug(gomock.Any(), domain.HashSlug("report")).Return(false, nil)
 	s.objects.EXPECT().Delete(gomock.Any(), gomock.Any()).Return(nil)
 
 	opts := createOptions()
@@ -629,13 +641,4 @@ func passthroughCipher(ctrl *gomock.Controller) *MockStreamCipher {
 	cipher.EXPECT().Decrypt(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(copyStream).AnyTimes()
 
 	return cipher
-}
-
-// noopSlugLock returns a SlugLock mock that grants every lock at once. These tests exercise
-// business logic in isolation, never two concurrent Create calls.
-func noopSlugLock(ctrl *gomock.Controller) *MockSlugLock {
-	slugLock := NewMockSlugLock(ctrl)
-	slugLock.EXPECT().Lock(gomock.Any(), gomock.Any()).Return(func() {}, nil).AnyTimes()
-
-	return slugLock
 }

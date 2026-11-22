@@ -35,8 +35,6 @@ func (s *ManagerTestSuite) TestCreate_RejectsMalformedCustomEditCode() {
 // TestCreate_AcceptsMinLengthCustomEditCode is the boundary control: exactly
 // domain.MinEditCodeLength characters is accepted.
 func (s *ManagerTestSuite) TestCreate_AcceptsMinLengthCustomEditCode() {
-	s.notes.EXPECT().Exists(gomock.Any(), gomock.Any()).Return(false, nil)
-	s.storage.EXPECT().Exists(gomock.Any(), gomock.Any()).Return(false, nil)
 	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
 
 	link, err := s.manager.Create(s.T().Context(), "https://example.com", CreateOptions{

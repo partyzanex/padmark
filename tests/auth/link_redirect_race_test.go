@@ -19,8 +19,8 @@ import (
 	"github.com/partyzanex/padmark/internal/adapters/web"
 	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/infra/crypto"
+	"github.com/partyzanex/padmark/internal/infra/expiredslugs"
 	"github.com/partyzanex/padmark/internal/infra/linkcache"
-	"github.com/partyzanex/padmark/internal/infra/lock"
 	sqliterepo "github.com/partyzanex/padmark/internal/infra/storage/sqlite"
 	"github.com/partyzanex/padmark/internal/testutil"
 	"github.com/partyzanex/padmark/internal/usecases/auth"
@@ -108,8 +108,11 @@ func TestLinkRedirectPrivacyRace(t *testing.T) {
 					once: sync.Once{},
 				}
 
-				reader := links.NewManager(paused, sqliterepo.NewNoteRepository(env.db), lock.NewLocker(),
-					testutil.ContentEncryptor(t, "link"), crypto.NewEditCodeHasher(testArgon2Params), log, false)
+				reader := links.NewManager(&links.Deps{
+					Storage: paused, Encryptor: testutil.ContentEncryptor(t, "link"),
+					Hasher:       crypto.NewEditCodeHasher(testArgon2Params),
+					ExpiredSlugs: expiredslugs.New(sqliterepo.NewNoteRepository(env.db), repo), Log: log,
+				}, false)
 				if cached {
 					cache := linkcache.NewDefault(log)
 					stored, getErr := repo.GetByID(t.Context(), domain.HashSlug(link.ID))

@@ -22,7 +22,7 @@ import (
 	"github.com/partyzanex/padmark/internal/adapters/web"
 	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/infra/crypto"
-	"github.com/partyzanex/padmark/internal/infra/lock"
+	"github.com/partyzanex/padmark/internal/infra/expiredslugs"
 	"github.com/partyzanex/padmark/internal/infra/render"
 	pgrepo "github.com/partyzanex/padmark/internal/infra/storage/postgres"
 	sqliterepo "github.com/partyzanex/padmark/internal/infra/storage/sqlite"
@@ -35,7 +35,7 @@ type createGate struct {
 	ready   chan struct{}
 	proceed chan struct{}
 	// once closes ready on the first wait. A manager can call Create again on the same gate: a
-	// note or link create tries once more after it removes an expired file.
+	// create with a custom slug tries once more after it removes an expired record.
 	once sync.Once
 }
 
@@ -92,13 +92,8 @@ func (r *pausedLinks) Create(ctx context.Context, link *domain.Link) error {
 	return r.Storage.Create(ctx, link)
 }
 
-type noteRepository interface {
-	notes.Storage
-	links.NotesChecker
-}
-
 //nolint:ireturn // selects the actual backend repositories behind their consumer ports
-func repositories(db *bun.DB) (noteRepository, links.Storage) {
+func repositories(db *bun.DB) (notes.Storage, links.Storage) {
 	log := slog.New(slog.DiscardHandler)
 	if db.Dialect().Name() == dialect.PG {
 		return pgrepo.NewNoteRepository(db), pgrepo.NewLinkRepository(db, log)
@@ -112,12 +107,16 @@ func replica(t *testing.T, db *bun.DB, gate *createGate) *httptest.Server {
 
 	noteRepo, linkRepo := repositories(db)
 	log := slog.New(slog.DiscardHandler)
-	localLock := lock.NewLocker()
+	expired := expiredslugs.New(noteRepo, linkRepo)
 	hasher := crypto.NewEditCodeHasher(testutil.Argon2Params())
-	noteManager := notes.NewManager(&pausedNotes{Storage: noteRepo, gate: gate}, linkRepo, localLock,
-		render.NewRenderer(), testutil.ContentEncryptor(t, "note"), hasher, log, true)
-	linkManager := links.NewManager(&pausedLinks{Storage: linkRepo, gate: gate}, noteRepo, localLock,
-		testutil.ContentEncryptor(t, "link"), hasher, log, true)
+	noteManager := notes.NewManager(&notes.Deps{
+		Storage: &pausedNotes{Storage: noteRepo, gate: gate}, Renderer: render.NewRenderer(),
+		Encryptor: testutil.ContentEncryptor(t, "note"), Hasher: hasher, ExpiredSlugs: expired, Log: log,
+	}, true)
+	linkManager := links.NewManager(&links.Deps{
+		Storage: &pausedLinks{Storage: linkRepo, gate: gate}, Encryptor: testutil.ContentEncryptor(t, "link"),
+		Hasher: hasher, ExpiredSlugs: expired, Log: log,
+	}, true)
 	handler := web.NewHandler(noteManager, linkManager, slugResolver(db), log)
 	ogen := web.NewOgenHandler(noteManager, linkManager, web.NoPinger{}, log)
 	router, err := web.NewRouter(handler, ogen, &web.RouterOptions{
@@ -169,8 +168,8 @@ func postAsync(ctx context.Context, t *testing.T, url, body string) <-chan creat
 func testConcurrentCreate(t *testing.T, db *bun.DB, open func(*testing.T) *bun.DB, winner string) {
 	t.Helper()
 
-	// Separate pools, locks, handlers and listeners model independent replicas. The gate is
-	// after both managers' preflight checks and before their actual repository INSERT.
+	// Separate pools, handlers and listeners model independent replicas. The gate is before each
+	// repository INSERT; the managers make no slug check before it.
 	noteGate, linkGate := newGate(), newGate()
 	noteServer := replica(t, open(t), noteGate)
 	linkServer := replica(t, open(t), linkGate)
@@ -187,7 +186,7 @@ func testConcurrentCreate(t *testing.T, db *bun.DB, open func(*testing.T) *bun.D
 		select {
 		case <-gate.ready:
 		case <-ctx.Done():
-			t.Fatal("both creates must reach INSERT after observing the slug as free")
+			t.Fatal("both creates must reach INSERT")
 		}
 	}
 

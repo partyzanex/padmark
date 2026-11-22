@@ -31,7 +31,7 @@ type ManagerTestSuite struct {
 
 	ctrl     *gomock.Controller
 	storage  *MockStorage
-	links    *MockLinksChecker
+	expired  *MockExpiredSlugReleaser
 	renderer *MockRenderer
 	manager  *Manager
 }
@@ -39,22 +39,17 @@ type ManagerTestSuite struct {
 func (s *ManagerTestSuite) SetupTest() {
 	s.ctrl = gomock.NewController(s.T())
 	s.storage = NewMockStorage(s.ctrl)
-	s.links = NewMockLinksChecker(s.ctrl)
+	s.expired = NewMockExpiredSlugReleaser(s.ctrl)
 	s.renderer = NewMockRenderer(s.ctrl)
-	s.manager = NewManager(s.storage, s.links, noopSlugLock(s.ctrl), s.renderer,
-		passthroughEncryptor(s.ctrl), identityHasher(s.ctrl),
-		slog.New(slog.DiscardHandler), true)
+	s.manager = NewManager(&Deps{
+		Storage: s.storage, Renderer: s.renderer, Encryptor: passthroughEncryptor(s.ctrl),
+		Hasher: identityHasher(s.ctrl), ExpiredSlugs: s.expired, Log: slog.New(slog.DiscardHandler),
+	}, true)
 }
 
 // expectGet makes storage return note for the slug id.
 func (s *ManagerTestSuite) expectGet(id string, note *domain.Note) {
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug(id)).Return(note, nil)
-}
-
-// expectSlugFree sets up s.links to report the candidate slug as not already taken by a link —
-// the default, common case for Create tests that are expected to reach storage.Create.
-func (s *ManagerTestSuite) expectSlugFree() {
-	s.links.EXPECT().Exists(gomock.Any(), gomock.Any()).Return(false, nil)
 }
 
 func (s *ManagerTestSuite) TearDownTest() {
@@ -76,7 +71,6 @@ func (s *ManagerTestSuite) TestCreate_OK() {
 		ClearExpiry: false, ShowContents: nil,
 	}
 
-	s.expectSlugFree()
 	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
 
 	result, err := s.manager.Create(s.T().Context(), note)
@@ -99,7 +93,6 @@ func (s *ManagerTestSuite) TestCreate_WithCustomEditCode() {
 		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 
-	s.expectSlugFree()
 	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
 
 	result, err := s.manager.Create(s.T().Context(), note)
@@ -121,7 +114,6 @@ func (s *ManagerTestSuite) TestCreate_UserSuppliedCodeUsesMemoryHardHash() {
 
 	var storedHash string
 
-	s.expectSlugFree()
 	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).
 		DoAndReturn(func(_ context.Context, stored *domain.Note) error {
 			storedHash = stored.EditCode
@@ -148,7 +140,6 @@ func (s *ManagerTestSuite) TestCreate_GeneratedCodeUsesFastHash() {
 
 	var storedHash string
 
-	s.expectSlugFree()
 	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).
 		DoAndReturn(func(_ context.Context, stored *domain.Note) error {
 			storedHash = stored.EditCode
@@ -171,7 +162,6 @@ func (s *ManagerTestSuite) TestCreate_EmptyEditCodeIsGenerated() {
 		BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 
-	s.expectSlugFree()
 	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
 
 	result, err := s.manager.Create(s.T().Context(), note)
@@ -191,7 +181,6 @@ func (s *ManagerTestSuite) TestCreate_CustomEditCodeUsedForUpdate() {
 		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 
-	s.expectSlugFree()
 	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
 
 	created, err := s.manager.Create(s.T().Context(), note)
@@ -227,7 +216,6 @@ func (s *ManagerTestSuite) TestCreate_CustomEditCodeWrongCodeForbidden() {
 		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 
-	s.expectSlugFree()
 	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
 
 	created, err := s.manager.Create(s.T().Context(), note)
@@ -258,7 +246,6 @@ func (s *ManagerTestSuite) TestCreate_EmptyTitle() {
 		BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 
-	s.expectSlugFree()
 	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
 
 	result, err := s.manager.Create(s.T().Context(), note)
@@ -324,7 +311,6 @@ func (s *ManagerTestSuite) TestCreate_OwnerPrivacy_WithOwnerID_OK() {
 		BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 
-	s.expectSlugFree()
 	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
 
 	result, err := s.manager.Create(s.T().Context(), note)
@@ -341,7 +327,6 @@ func (s *ManagerTestSuite) TestCreate_WithBurnTTL() {
 		ClearExpiry: false, ShowContents: nil,
 	}
 
-	s.expectSlugFree()
 	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
 
 	result, err := s.manager.Create(s.T().Context(), note)
@@ -360,7 +345,6 @@ func (s *ManagerTestSuite) TestCreate_WithSlug() {
 		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 
-	s.expectSlugFree()
 	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
 
 	result, err := s.manager.Create(s.T().Context(), note)
@@ -386,9 +370,10 @@ func (s *ManagerTestSuite) TestCreate_InvalidSlug() {
 func (s *ManagerTestSuite) TestCreate_CustomSlugDisabled() {
 	// With custom slugs off (allowCustomSlugs=false, the default), a create request that supplies
 	// a slug is rejected — the server issues only random slugs.
-	mgr := NewManager(s.storage, s.links,
-		noopSlugLock(s.ctrl), s.renderer, passthroughEncryptor(s.ctrl), identityHasher(s.ctrl),
-		slog.New(slog.DiscardHandler), false)
+	mgr := NewManager(&Deps{
+		Storage: s.storage, Renderer: s.renderer, Encryptor: passthroughEncryptor(s.ctrl), Hasher: identityHasher(s.ctrl),
+		ExpiredSlugs: s.expired, Log: slog.New(slog.DiscardHandler),
+	}, false)
 
 	_, err := mgr.Create(s.T().Context(), &domain.Note{
 		ID: "my-slug", Title: "hello", Content: "world",
@@ -402,10 +387,10 @@ func (s *ManagerTestSuite) TestCreate_CustomSlugDisabled() {
 
 func (s *ManagerTestSuite) TestCreate_CustomSlugDisabled_AutoSlugStillWorks() {
 	// With custom slugs off, a create request without a slug still succeeds with a generated one.
-	mgr := NewManager(s.storage, s.links,
-		noopSlugLock(s.ctrl), s.renderer, passthroughEncryptor(s.ctrl), identityHasher(s.ctrl),
-		slog.New(slog.DiscardHandler), false)
-	s.expectSlugFree()
+	mgr := NewManager(&Deps{
+		Storage: s.storage, Renderer: s.renderer, Encryptor: passthroughEncryptor(s.ctrl), Hasher: identityHasher(s.ctrl),
+		ExpiredSlugs: s.expired, Log: slog.New(slog.DiscardHandler),
+	}, false)
 	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
 
 	result, err := mgr.Create(s.T().Context(), &domain.Note{
@@ -432,7 +417,6 @@ func (s *ManagerTestSuite) TestCreate_StorageError() {
 		BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 
-	s.expectSlugFree()
 	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(storageErr)
 
 	_, err := s.manager.Create(s.T().Context(), note)
@@ -445,16 +429,16 @@ func (s *ManagerTestSuite) TestCreate_StorageError() {
 // Create returns the error AND leaves the caller's note in plaintext (defer restore),
 // not in the half-hashed state it mutates into. storage.Create must not be reached.
 func (s *ManagerTestSuite) TestCreate_EncryptError_RestoresPlaintext() {
-	mgr := NewManager(s.storage, s.links, noopSlugLock(s.ctrl), s.renderer, errEncryptor(s.ctrl), prefixHasher(s.ctrl),
-		slog.New(slog.DiscardHandler), true)
+	mgr := NewManager(&Deps{
+		Storage: s.storage, Renderer: s.renderer, Encryptor: errEncryptor(s.ctrl), Hasher: prefixHasher(s.ctrl),
+		ExpiredSlugs: s.expired, Log: slog.New(slog.DiscardHandler),
+	}, true)
 	note := &domain.Note{
 		Title: "t", Content: "secret body", EditCode: "mycode123456",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
 		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
-
-	s.expectSlugFree()
 
 	_, err := mgr.Create(s.T().Context(), note)
 
@@ -468,16 +452,16 @@ func (s *ManagerTestSuite) TestCreate_EncryptError_RestoresPlaintext() {
 // the encrypted content / hashed edit code / hashed-slug PK, and that on a storage failure the
 // caller's note is restored to plaintext and the slug ID (defer restore).
 func (s *ManagerTestSuite) TestCreate_StorageError_RestoresPlaintextAndPersistsEncrypted() {
-	mgr := NewManager(s.storage, s.links, noopSlugLock(s.ctrl), s.renderer, prefixEncryptor(s.ctrl), prefixHasher(s.ctrl),
-		slog.New(slog.DiscardHandler), true)
+	mgr := NewManager(&Deps{
+		Storage: s.storage, Renderer: s.renderer, Encryptor: prefixEncryptor(s.ctrl), Hasher: prefixHasher(s.ctrl),
+		ExpiredSlugs: s.expired, Log: slog.New(slog.DiscardHandler),
+	}, true)
 	note := &domain.Note{
 		Title: "t", Content: "body", EditCode: "code12345678", ID: "myslug",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		Privacy: nil, OwnerID: nil, ContentType: nil, Views: 0,
 		BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
-
-	s.expectSlugFree()
 
 	var atStore domain.Note
 
@@ -509,8 +493,10 @@ func (s *ManagerTestSuite) TestCreate_StorageError_RestoresPlaintextAndPersistsE
 // ("hash:"+code) is distinguishable from plaintext. This locks in the defense-in-depth fix so a
 // future change to the repository column allow-list cannot silently start persisting plaintext.
 func (s *ManagerTestSuite) TestUpdate_PersistsHashedEditCode_NotPlaintext() {
-	mgr := NewManager(s.storage, s.links, noopSlugLock(s.ctrl), s.renderer, prefixEncryptor(s.ctrl), prefixHasher(s.ctrl),
-		slog.New(slog.DiscardHandler), true)
+	mgr := NewManager(&Deps{
+		Storage: s.storage, Renderer: s.renderer, Encryptor: prefixEncryptor(s.ctrl), Hasher: prefixHasher(s.ctrl),
+		ExpiredSlugs: s.expired, Log: slog.New(slog.DiscardHandler),
+	}, true)
 
 	existing := &domain.Note{
 		ID: "myslug", EditCode: "hash:code12345678", Content: "enc:old",
@@ -554,9 +540,10 @@ func (s *ManagerTestSuite) TestUpdate_PersistsHashedEditCode_NotPlaintext() {
 // race (SetBurnExpiry → ErrNotFound), the re-fetch succeeds but decryption of the re-fetched
 // note fails — the error must propagate.
 func (s *ManagerTestSuite) TestHandleSetBurnExpiryErr_RefetchDecryptFails() {
-	mgr := NewManager(s.storage, s.links,
-		noopSlugLock(s.ctrl), s.renderer, failingEncryptor(s.ctrl), identityHasher(s.ctrl),
-		slog.New(slog.DiscardHandler), true)
+	mgr := NewManager(&Deps{
+		Storage: s.storage, Renderer: s.renderer, Encryptor: failingEncryptor(s.ctrl), Hasher: identityHasher(s.ctrl),
+		ExpiredSlugs: s.expired, Log: slog.New(slog.DiscardHandler),
+	}, true)
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("burn-x")).Return(&domain.Note{
 		ID: "x", Content: "ct",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
@@ -1110,9 +1097,10 @@ func (s *ManagerTestSuite) TestGetRendered_OK() {
 func (s *ManagerTestSuite) TestGetRendered_DroppedImagesAreLogged() {
 	var logs bytes.Buffer
 
-	manager := NewManager(s.storage, s.links,
-		noopSlugLock(s.ctrl), s.renderer, passthroughEncryptor(s.ctrl), identityHasher(s.ctrl),
-		slog.New(slog.NewJSONHandler(&logs, nil)), true)
+	manager := NewManager(&Deps{
+		Storage: s.storage, Renderer: s.renderer, Encryptor: passthroughEncryptor(s.ctrl), Hasher: identityHasher(s.ctrl),
+		ExpiredSlugs: s.expired, Log: slog.New(slog.NewJSONHandler(&logs, nil)),
+	}, true)
 	note := &domain.Note{
 		ID: "abc-123", Content: "![a](data:image/svg+xml;base64,PHN2Zz4=)",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
@@ -1147,9 +1135,10 @@ func (s *ManagerTestSuite) TestGetRendered_DroppedImagesAreLogged() {
 func (s *ManagerTestSuite) TestGetRendered_NoDroppedImagesNoLog() {
 	var logs bytes.Buffer
 
-	manager := NewManager(s.storage, s.links,
-		noopSlugLock(s.ctrl), s.renderer, passthroughEncryptor(s.ctrl), identityHasher(s.ctrl),
-		slog.New(slog.NewJSONHandler(&logs, nil)), true)
+	manager := NewManager(&Deps{
+		Storage: s.storage, Renderer: s.renderer, Encryptor: passthroughEncryptor(s.ctrl), Hasher: identityHasher(s.ctrl),
+		ExpiredSlugs: s.expired, Log: slog.New(slog.NewJSONHandler(&logs, nil)),
+	}, true)
 	note := &domain.Note{
 		ID: "abc-123", Content: "# Hello",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
@@ -1183,7 +1172,6 @@ func (s *ManagerTestSuite) TestCreate_ContentOverCap_Rejected() {
 }
 
 func (s *ManagerTestSuite) TestCreate_ContentAtCap_Accepted() {
-	s.expectSlugFree()
 	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
 
 	note := &domain.Note{
@@ -1233,7 +1221,6 @@ func (s *ManagerTestSuite) TestMaxContentLength_Configured() {
 	s.Require().ErrorIs(err, domain.ErrContentTooLarge)
 
 	s.manager.WithMaxContentLength(domain.DefaultMaxContentLength + 1)
-	s.expectSlugFree()
 	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
 
 	note.Content = strings.Repeat("a", domain.DefaultMaxContentLength+1)
@@ -2061,10 +2048,12 @@ func (s *ManagerTestSuite) TestView_BurnAfterReading_ConsumeError() {
 func TestGet_DecryptionFailure(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	storage := NewMockStorage(ctrl)
-	links := NewMockLinksChecker(ctrl)
+	expired := NewMockExpiredSlugReleaser(ctrl)
 	renderer := NewMockRenderer(ctrl)
-	mgr := NewManager(storage, links, noopSlugLock(ctrl), renderer, failingEncryptor(ctrl), identityHasher(ctrl),
-		slog.New(slog.DiscardHandler), true)
+	mgr := NewManager(&Deps{
+		Storage: storage, Renderer: renderer, Encryptor: failingEncryptor(ctrl), Hasher: identityHasher(ctrl),
+		ExpiredSlugs: expired, Log: slog.New(slog.DiscardHandler),
+	}, true)
 
 	note := &domain.Note{
 		ID: "enc-fail", Title: "t", Content: "ciphertext",
@@ -2082,10 +2071,12 @@ func TestGet_DecryptionFailure(t *testing.T) {
 func TestPeek_DecryptionFailure(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	storage := NewMockStorage(ctrl)
-	links := NewMockLinksChecker(ctrl)
+	expired := NewMockExpiredSlugReleaser(ctrl)
 	renderer := NewMockRenderer(ctrl)
-	mgr := NewManager(storage, links, noopSlugLock(ctrl), renderer, failingEncryptor(ctrl), identityHasher(ctrl),
-		slog.New(slog.DiscardHandler), true)
+	mgr := NewManager(&Deps{
+		Storage: storage, Renderer: renderer, Encryptor: failingEncryptor(ctrl), Hasher: identityHasher(ctrl),
+		ExpiredSlugs: expired, Log: slog.New(slog.DiscardHandler),
+	}, true)
 
 	note := &domain.Note{
 		ID: "enc-fail-peek", Title: "t", Content: "ciphertext",
@@ -2105,10 +2096,12 @@ func TestPeek_DecryptionFailure(t *testing.T) {
 func TestGet_BurnAfterReading_DecryptionFailure(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	storage := NewMockStorage(ctrl)
-	links := NewMockLinksChecker(ctrl)
+	expired := NewMockExpiredSlugReleaser(ctrl)
 	renderer := NewMockRenderer(ctrl)
-	mgr := NewManager(storage, links, noopSlugLock(ctrl), renderer, failingEncryptor(ctrl), identityHasher(ctrl),
-		slog.New(slog.DiscardHandler), true)
+	mgr := NewManager(&Deps{
+		Storage: storage, Renderer: renderer, Encryptor: failingEncryptor(ctrl), Hasher: identityHasher(ctrl),
+		ExpiredSlugs: expired, Log: slog.New(slog.DiscardHandler),
+	}, true)
 
 	// decryptContent runs before burn.applyPolicy, so Consume is never reached.
 	raw := &domain.Note{
@@ -2129,10 +2122,12 @@ func TestGet_BurnAfterReading_DecryptionFailure(t *testing.T) {
 func TestGet_BurnTTL_DecryptionFailure(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	storage := NewMockStorage(ctrl)
-	links := NewMockLinksChecker(ctrl)
+	expired := NewMockExpiredSlugReleaser(ctrl)
 	renderer := NewMockRenderer(ctrl)
-	mgr := NewManager(storage, links, noopSlugLock(ctrl), renderer, failingEncryptor(ctrl), identityHasher(ctrl),
-		slog.New(slog.DiscardHandler), true)
+	mgr := NewManager(&Deps{
+		Storage: storage, Renderer: renderer, Encryptor: failingEncryptor(ctrl), Hasher: identityHasher(ctrl),
+		ExpiredSlugs: expired, Log: slog.New(slog.DiscardHandler),
+	}, true)
 
 	// decryptContent runs before burn.applyPolicy, so SetBurnExpiry is never reached.
 	raw := &domain.Note{
@@ -2358,13 +2353,4 @@ func errEncryptor(ctrl *gomock.Controller) *MockEncryptor {
 		DoAndReturn(func(ciphertext, _, _ string) (string, error) { return ciphertext, nil }).AnyTimes()
 
 	return enc
-}
-
-// noopSlugLock returns a SlugLock mock that grants every lock at once. These tests exercise
-// business logic in isolation, never two concurrent Create calls.
-func noopSlugLock(ctrl *gomock.Controller) *MockSlugLock {
-	slugLock := NewMockSlugLock(ctrl)
-	slugLock.EXPECT().Lock(gomock.Any(), gomock.Any()).Return(func() {}, nil).AnyTimes()
-
-	return slugLock
 }

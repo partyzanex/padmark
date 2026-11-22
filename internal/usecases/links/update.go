@@ -31,15 +31,9 @@ func (m *Manager) Update(
 		return nil, fmt.Errorf("validate target url: %w", err)
 	}
 
+	// No lock: omitted fields stay because the storage patch does not write them, and a stale
+	// cache fill is never served (see resolveLink).
 	dbID := domain.HashSlug(slug)
-	// Serialize updates and cache fills for this slug so an in-flight read cannot
-	// cache the old destination after this write evicts it. The lock is local to this process:
-	// omitted fields stay because the storage patch does not write them.
-	unlock, err := m.slugLock.Lock(ctx, dbID)
-	if err != nil {
-		return nil, fmt.Errorf("lock link: %w", err)
-	}
-	defer unlock()
 
 	existing, err := m.storage.GetByID(ctx, dbID)
 	if err != nil {

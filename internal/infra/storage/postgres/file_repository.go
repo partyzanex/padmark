@@ -131,16 +131,6 @@ func (r *FileRepository) GetByID(ctx context.Context, id string) (*domain.File, 
 	return fileToDomain(&row), nil
 }
 
-// Exists reports whether a file record has the ID. A claimed record also counts.
-func (r *FileRepository) Exists(ctx context.Context, id string) (bool, error) {
-	exists, err := r.db.NewSelect().Model((*file)(nil)).Where("id = ?", id).Exists(ctx)
-	if err != nil {
-		return false, fmt.Errorf("postgres file exists: %w", err)
-	}
-
-	return exists, nil
-}
-
 // Delete removes the file record with id and objectKey.
 func (r *FileRepository) Delete(ctx context.Context, id, objectKey string) error {
 	result, err := r.db.NewDelete().Model((*file)(nil)).

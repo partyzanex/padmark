@@ -203,23 +203,6 @@ func (s *RepositoryTestSuite) TestGet_NotFound() {
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
-func (s *RepositoryTestSuite) TestExists_True() {
-	ctx := s.T().Context()
-
-	s.Require().NoError(s.repo.Create(ctx, newNote("exists-1", "t", "c")))
-
-	exists, err := s.repo.Exists(ctx, "exists-1")
-	s.Require().NoError(err)
-	s.True(exists)
-}
-
-func (s *RepositoryTestSuite) TestExists_False() {
-	exists, err := s.repo.Exists(s.T().Context(), "missing")
-
-	s.Require().NoError(err)
-	s.False(exists)
-}
-
 // ── Update ──.
 
 func (s *RepositoryTestSuite) TestUpdate_OK() {
@@ -560,36 +543,6 @@ func (s *RepositoryTestSuite) TestDeleteExpired_KeepsExtendedNote() {
 
 	_, err = s.repo.Get(ctx, "del-exp-old")
 	s.ErrorIs(err, domain.ErrNotFound)
-}
-
-// TestExists_ReleasesExpiredNote covers audit finding 5: an expired note does not hold its slug
-// for the slug check of links and files, and Exists removes it. A note that is not expired stays.
-func (s *RepositoryTestSuite) TestExists_ReleasesExpiredNote() {
-	ctx := s.T().Context()
-	future := time.Now().Add(time.Hour)
-	past := time.Now().Add(-time.Hour)
-
-	live := newNote("exists-live", "live", "body")
-	live.ExpiresAt = &future
-	s.Require().NoError(s.repo.Create(ctx, live))
-
-	expired := newNote("exists-old", "old", "body")
-	expired.ExpiresAt = &past
-	s.Require().NoError(s.repo.Create(ctx, expired))
-
-	exists, err := s.repo.Exists(ctx, "exists-live")
-	s.Require().NoError(err)
-	s.True(exists, "a note that is not expired holds its slug")
-
-	exists, err = s.repo.Exists(ctx, "exists-old")
-	s.Require().NoError(err)
-	s.False(exists, "an expired note does not hold its slug")
-
-	_, err = s.repo.Get(ctx, "exists-old")
-	s.Require().ErrorIs(err, domain.ErrNotFound, "Exists removes the expired note")
-
-	_, err = s.repo.Get(ctx, "exists-live")
-	s.Require().NoError(err)
 }
 
 func (s *RepositoryTestSuite) TestConsume_NotFound() {

@@ -109,24 +109,35 @@ func NewSessionManager(
 	}, nil
 }
 
-// Login authenticates username+password+totpCode and creates a new session.
+// LoginRequest holds the values of one sign-in. Named fields replace six string parameters of
+// one type, which a caller could give in the wrong sequence without a compile error.
+type LoginRequest struct {
+	Username string
+	Password string
+	TOTPCode string
+	// UserAgent and ClientIP are stored with the session for the session list.
+	UserAgent string
+	ClientIP  string
+	// PreviousSessionID is the session that the client presented when it signed in (empty if none).
+	PreviousSessionID string
+}
+
+// Login authenticates the username, password and TOTP code of req and creates a new session.
 // Returns the opaque session ID on success.
 // All authentication failures return ErrInvalidTOTP to avoid leaking which factor failed.
 //
-// previousSessionID is the session the client presented when it signed in (empty if none). It is
-// revoked once the new session exists, so re-authenticating never leaves the old cookie valid
-// (session-fixation hygiene, and a forgotten or stolen cookie cannot outlive a re-login).
+// req.PreviousSessionID is revoked once the new session exists, so re-authenticating never
+// leaves the old cookie valid (session-fixation hygiene, and a forgotten or stolen cookie cannot
+// outlive a re-login).
 // Revocation is fail-soft: the new session is already valid, so a store error is logged, not
 // returned.
-func (m *SessionManager) Login(
-	ctx context.Context, username, password, totpCode, userAgent, clientIP, previousSessionID string,
-) (string, error) {
-	usr, err := m.users.GetByUsername(ctx, username)
+func (m *SessionManager) Login(ctx context.Context, req *LoginRequest) (string, error) {
+	usr, err := m.users.GetByUsername(ctx, req.Username)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			// Run the same argon2id work as a real attempt to prevent timing-based
 			// username enumeration. The result is always discarded.
-			m.pw.Verify(m.dummyPwHash, password)
+			m.pw.Verify(m.dummyPwHash, req.Password)
 
 			return "", domain.ErrInvalidTOTP
 		}
@@ -134,7 +145,7 @@ func (m *SessionManager) Login(
 		return "", fmt.Errorf("get user: %w", err)
 	}
 
-	factorErr := m.verifyLoginFactors(ctx, usr, password, totpCode)
+	factorErr := m.verifyLoginFactors(ctx, usr, req.Password, req.TOTPCode)
 	if factorErr != nil {
 		return "", fmt.Errorf("verify login factors: %w", factorErr)
 	}
@@ -152,8 +163,8 @@ func (m *SessionManager) Login(
 		UserID:      usr.ID,
 		CreatedAt:   now,
 		ExpiresAt:   now.Add(m.ttl),
-		UserAgent:   userAgent,
-		IP:          clientIP,
+		UserAgent:   req.UserAgent,
+		IP:          req.ClientIP,
 	}
 
 	createErr := m.sessions.Create(ctx, sess)
@@ -166,7 +177,7 @@ func (m *SessionManager) Login(
 		return "", fmt.Errorf("confirm credentials: %w", confirmErr)
 	}
 
-	m.revokePreviousSession(ctx, usr.ID, previousSessionID)
+	m.revokePreviousSession(ctx, usr.ID, req.PreviousSessionID)
 	m.deleteExpiredSessions(ctx, now)
 
 	updateErr := m.users.UpdateLastLogin(ctx, usr.ID, now)

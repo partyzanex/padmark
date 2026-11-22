@@ -7,6 +7,7 @@ Each record has these sections: Context, Decision, Alternatives and Consequences
 |---|---|---|---|
 | [0001](0001-file-encryption-format.md) | File encryption format `pmf1` | Accepted | 2026-11-20 |
 | [0002](0002-files-outside-ogen.md) | A manual HTTP handler for files, not ogen | Accepted | 2026-11-20 |
+| [0003](0003-storage-slug-uniqueness.md) | No slug pre-checks; storage uniqueness and retry | Accepted | 2026-11-22 |
 
 ## Rules
 

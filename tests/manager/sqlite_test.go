@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	"github.com/uptrace/bun"
 
-	"github.com/partyzanex/padmark/internal/infra/lock"
+	"github.com/partyzanex/padmark/internal/infra/expiredslugs"
 	sqliterepo "github.com/partyzanex/padmark/internal/infra/storage/sqlite"
 	"github.com/partyzanex/padmark/internal/usecases/auth"
 )
@@ -43,16 +43,12 @@ func (s *SQLiteManagerSuite) SetupTest() {
 	_, migrateErr := sqliterepo.Migrate(s.T().Context(), s.db)
 	s.Require().NoError(migrateErr)
 
-	slugLock := lock.NewLocker()
+	noteRepo, linkRepo := sqliterepo.NewNoteRepository(s.db), sqliterepo.NewLinkRepository(s.db, slog.Default())
+	expired := expiredslugs.New(noteRepo, linkRepo)
 
-	s.Manager = newManager(s.T(),
-		sqliterepo.NewNoteRepository(s.db), sqliterepo.NewLinkRepository(s.db, slog.Default()), slugLock,
-	)
-	s.LinkManager = newLinkManager(s.T(),
-		sqliterepo.NewLinkRepository(s.db, slog.Default()), sqliterepo.NewNoteRepository(s.db), slugLock,
-	)
-	s.FileManager = newFileManager(&s.Suite, sqliterepo.NewFileRepository(s.db), sqliterepo.NewNoteRepository(s.db),
-		sqliterepo.NewLinkRepository(s.db, slog.Default()), slugLock, s.objects.store)
+	s.Manager = newManager(s.T(), noteRepo, expired)
+	s.LinkManager = newLinkManager(s.T(), linkRepo, expired)
+	s.FileManager = newFileManager(&s.Suite, sqliterepo.NewFileRepository(s.db), expired, s.objects.store)
 	s.Objects = s.objects.store
 	s.RevealStore = auth.NewRevealManager(sqliterepo.NewRevealRepository(s.db), slog.Default())
 	s.DB = s.db

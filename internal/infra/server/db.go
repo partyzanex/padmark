@@ -161,21 +161,6 @@ func newSQLiteLinkRepository(db *bun.DB, log *slog.Logger) *sqlite.LinkRepositor
 	return sqlite.NewLinkRepository(db, log)
 }
 
-// newPostgresNotesChecker returns a links.NotesChecker for the postgres backend — the same note
-// repository the storage init built, reconstructed here typed to expose Exists. notes.Storage
-// deliberately doesn't declare Exists — it's not something notes.Manager itself needs — so
-// links.Manager's cross-table check needs its own, separately typed handle onto the same underlying
-// table rather than widening notes.Storage for a consumer it doesn't otherwise serve. Repositories
-// are stateless wrappers over *bun.DB, so constructing a second one is free.
-func newPostgresNotesChecker(db *bun.DB) *postgres.NoteRepository {
-	return postgres.NewNoteRepository(db)
-}
-
-// newSQLiteNotesChecker returns a links.NotesChecker for the sqlite backend — see newPostgresNotesChecker.
-func newSQLiteNotesChecker(db *bun.DB) *sqlite.NoteRepository {
-	return sqlite.NewNoteRepository(db)
-}
-
 // parseTrustedProxies parses a comma-separated list of CIDRs or bare IP addresses.
 // Bare IPs are converted to /32 (IPv4) or /128 (IPv6) host CIDRs.
 func parseTrustedProxies(raw string) ([]*net.IPNet, error) {

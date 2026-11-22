@@ -20,6 +20,7 @@ import (
 
 	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/infra/crypto"
+	"github.com/partyzanex/padmark/internal/usecases/auth"
 )
 
 // Finding M-6: a bearer API token can mint more API tokens (and invites, and use the HTML admin
@@ -69,8 +70,10 @@ func newHardeningOwner(t *testing.T, env ownerFlowEnv) *hardeningOwner {
 		session: "", bearer: "",
 	}
 
-	owner.session, err = env.authMgr.Login(ctx, "owner", ownerFlowPassword, owner.totpCodeAt(t, 0),
-		"Mozilla/5.0", "127.0.0.1", "")
+	owner.session, err = env.authMgr.Login(ctx, &auth.LoginRequest{
+		Username: "owner", Password: ownerFlowPassword, TOTPCode: owner.totpCodeAt(t, 0),
+		UserAgent: "Mozilla/5.0", ClientIP: "127.0.0.1", PreviousSessionID: "",
+	})
 	require.NoError(t, err)
 
 	status, body := hardeningDo(t, env.baseURL, http.MethodPost, "/api/tokens", "", owner.session, `{}`)

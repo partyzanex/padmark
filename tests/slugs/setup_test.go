@@ -70,6 +70,9 @@ func runSlugNamespace(t *testing.T, db *bun.DB, open func(*testing.T) *bun.DB) {
 		})
 	}
 
+	t.Run("storage_conflicts", func(t *testing.T) { testStorageConflicts(t, db) })
+	t.Run("concurrent_storage", func(t *testing.T) { testConcurrentStorageCreates(t, db, open) })
+
 	objects := startObjects(t)
 
 	for _, winner := range []string{"notes", "links", "files", "simultaneous"} {

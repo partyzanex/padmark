@@ -10,7 +10,6 @@ import (
 
 	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/infra/linkcache"
-	"github.com/partyzanex/padmark/internal/infra/lock"
 )
 
 func (s *ManagerTestSuite) TestUpdate_PreservesStateAndEvictsCache() {
@@ -186,93 +185,32 @@ func (s *ManagerTestSuite) TestUpdate_Validation() {
 	}
 }
 
-// A cache fill paused on an old snapshot must finish before the update evicts
-// that snapshot. Metadata is always read from storage, even after a cache fill.
-//
-//nolint:funlen // Keep the blocked cache fill and concurrent PUT together to show their ordering.
-func (s *ManagerTestSuite) TestUpdate_ConcurrentCacheFill() {
-	ctx, cancel := context.WithTimeout(s.T().Context(), 5*time.Second)
-	defer cancel()
-
+// TestRead_StaleCacheFillIsNotServed: no lock orders reads, updates and cache fills, so a read
+// that started before an Update can store the old target after the Update evicts it. The next
+// read gets the new ciphertext from storage, so the fingerprint misses, the old target is not
+// served and the new target replaces the entry.
+func (s *ManagerTestSuite) TestRead_StaleCacheFillIsNotServed() {
+	ctx := s.T().Context()
 	dbID := domain.HashSlug("stable")
-	old := &domain.Link{
-		ID: dbID, TargetURL: "https://example.com/old", EditCode: "code",
+	cache := linkcache.NewDefault(slog.New(slog.DiscardHandler))
+	s.manager.WithCache(cache)
+
+	// The passthrough encryptor makes the ciphertext equal to the target URL.
+	cache.Set(ctx, dbID, "https://example.com/old", "https://example.com/old")
+	s.storage.EXPECT().GetByID(ctx, dbID).Return(&domain.Link{
+		ID: dbID, TargetURL: "https://example.com/new", EditCode: "code",
 		CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
 		DirectRedirect: nil, Views: 0, BurnAfterClick: false,
-	}
-	readStarted, releaseRead, updateLockAttempt := make(chan struct{}), make(chan struct{}), make(chan struct{})
-	locker := lock.NewLocker()
-	observedLock := NewMockSlugLock(s.ctrl)
+	}, nil)
 
-	gomock.InOrder(
-		observedLock.EXPECT().Lock(ctx, dbID).DoAndReturn(locker.Lock),
-		observedLock.EXPECT().Lock(ctx, dbID).DoAndReturn(func(ctx context.Context, id string) (func(), error) {
-			close(updateLockAttempt)
+	link, err := s.manager.Peek(ctx, "stable")
+	s.Require().NoError(err)
+	s.Equal("https://example.com/new", link.TargetURL)
 
-			return locker.Lock(ctx, id)
-		}),
-	)
-	gomock.InOrder(
-		s.storage.EXPECT().GetByID(ctx, dbID).DoAndReturn(func(context.Context, string) (*domain.Link, error) {
-			close(readStarted)
+	_, stale := cache.Get(dbID, "https://example.com/old")
+	s.False(stale, "the read replaces the stale entry")
 
-			select {
-			case <-releaseRead:
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			}
-
-			clone := *old
-
-			return &clone, nil
-		}),
-		s.storage.EXPECT().GetByID(ctx, dbID).Return(old, nil),
-		s.storage.EXPECT().Update(ctx, dbID, "code", gomock.Any()).DoAndReturn(
-			func(_ context.Context, _, _ string, patch *domain.LinkPatch) (*domain.Link, error) {
-				updated := *old
-				updated.TargetURL = patch.TargetURL
-
-				return &updated, nil
-			}),
-	)
-	s.manager.slugLock = observedLock
-	s.manager.WithCache(linkcache.NewDefault(slog.New(slog.DiscardHandler)))
-
-	readDone := make(chan error, 1)
-
-	go func() {
-		_, err := s.manager.Peek(ctx, "stable")
-		readDone <- err
-	}()
-
-	select {
-	case <-readStarted:
-	case <-ctx.Done():
-		s.T().Fatal(ctx.Err())
-	}
-
-	updateDone := make(chan error, 1)
-
-	privacy := domain.PrivacyAuthenticated
-	go func() {
-		_, err := s.manager.Update(ctx, "stable", "code", openReader(), "https://example.com/new",
-			UpdateOptions{
-				Privacy:   &privacy,
-				ExpiresAt: nil, DirectRedirect: nil, ClearExpiry: false,
-				ResetDirectRedirect: false,
-			})
-		updateDone <- err
-	}()
-
-	select {
-	case <-updateLockAttempt:
-	case <-ctx.Done():
-		s.T().Fatal(ctx.Err())
-	}
-
-	close(releaseRead)
-	s.Require().NoError(<-readDone)
-	s.Require().NoError(<-updateDone)
-	_, cached := s.manager.cache.Get(dbID, old.TargetURL)
-	s.False(cached, "the old target must not survive local eviction after PUT")
+	target, fresh := cache.Get(dbID, "https://example.com/new")
+	s.True(fresh)
+	s.Equal("https://example.com/new", target)
 }

@@ -18,7 +18,7 @@ import (
 
 	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/infra/crypto"
-	"github.com/partyzanex/padmark/internal/infra/lock"
+	"github.com/partyzanex/padmark/internal/infra/expiredslugs"
 	"github.com/partyzanex/padmark/internal/infra/render"
 	pgrepo "github.com/partyzanex/padmark/internal/infra/storage/postgres"
 	"github.com/partyzanex/padmark/internal/infra/storage/s3store"
@@ -81,8 +81,8 @@ func (r *pausedFiles) Create(ctx context.Context, file *domain.File) error {
 	return r.Storage.Create(ctx, file)
 }
 
-// slugEnv is one server replica: a database pool, a slug lock and the three managers, wired as
-// in infra/server. Each repository Create waits for gate.
+// slugEnv is one server replica: a database pool and the three managers with one shared
+// expiredslugs.Releaser, wired as in infra/server. Each repository Create waits for gate.
 type slugEnv struct {
 	db    *bun.DB
 	notes *notes.Manager
@@ -101,23 +101,26 @@ func newSlugEnv(t *testing.T, db *bun.DB, objects *s3store.Store, gate *createGa
 	}
 
 	log := slog.New(slog.DiscardHandler)
-	slugLock := lock.NewLocker()
+	expired := expiredslugs.New(noteRepo, linkRepo)
 	hasher := crypto.NewEditCodeHasher(testutil.Argon2Params())
 	fileManager := files.NewManager(&files.Deps{
-		Storage:   &pausedFiles{Storage: fileRepo, gate: gate},
-		Objects:   objects,
-		Cipher:    crypto.NewFileCipher(),
-		Encryptor: testutil.ContentEncryptor(t, "file"),
-		Hasher:    hasher,
-		SlugLock:  slugLock,
-		Notes:     noteRepo,
-		Links:     linkRepo,
-		Log:       log,
+		Storage:      &pausedFiles{Storage: fileRepo, gate: gate},
+		Objects:      objects,
+		Cipher:       crypto.NewFileCipher(),
+		Encryptor:    testutil.ContentEncryptor(t, "file"),
+		Hasher:       hasher,
+		ExpiredSlugs: expired,
+		Log:          log,
 	}, maxFileSize, true)
-	noteManager := notes.NewManager(&pausedNotes{Storage: noteRepo, gate: gate}, linkRepo, slugLock,
-		render.NewRenderer(), testutil.ContentEncryptor(t, "note"), hasher, log, true).WithExpiredFiles(fileManager)
-	linkManager := links.NewManager(&pausedLinks{Storage: linkRepo, gate: gate}, noteRepo, slugLock,
-		testutil.ContentEncryptor(t, "link"), hasher, log, true).WithExpiredFiles(fileManager)
+	expired.WithFiles(fileManager)
+	noteManager := notes.NewManager(&notes.Deps{
+		Storage: &pausedNotes{Storage: noteRepo, gate: gate}, Renderer: render.NewRenderer(),
+		Encryptor: testutil.ContentEncryptor(t, "note"), Hasher: hasher, ExpiredSlugs: expired, Log: log,
+	}, true)
+	linkManager := links.NewManager(&links.Deps{
+		Storage: &pausedLinks{Storage: linkRepo, gate: gate}, Encryptor: testutil.ContentEncryptor(t, "link"),
+		Hasher: hasher, ExpiredSlugs: expired, Log: log,
+	}, true)
 
 	return &slugEnv{db: db, notes: noteManager, links: linkManager, files: fileManager}
 }
@@ -318,8 +321,8 @@ func testExpiredFileSlug(t *testing.T, db *bun.DB, objects *s3store.Store) {
 }
 
 // testConcurrentFileCreate runs a note, a link and a file create with one slug on three
-// replicas. Each replica has its own pool, lock and managers. All three pass the manager checks
-// before any INSERT, so only the storage triggers can select one winner.
+// replicas. Each replica has its own pool and managers. The managers make no slug check, and all
+// three wait before their INSERT, so only the storage triggers can select one winner.
 func testConcurrentFileCreate(
 	t *testing.T, db *bun.DB, open func(*testing.T) *bun.DB, objects *s3store.Store, winner string,
 ) {
@@ -341,7 +344,7 @@ func testConcurrentFileCreate(
 		select {
 		case <-gates[resource].ready:
 		case <-ctx.Done():
-			t.Fatalf("the %s create must reach INSERT after it saw the slug as free", resource)
+			t.Fatalf("the %s create must reach INSERT", resource)
 		}
 	}
 

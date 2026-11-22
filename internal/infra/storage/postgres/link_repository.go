@@ -176,25 +176,6 @@ func (r *LinkRepository) GetByID(ctx context.Context, id string) (*domain.Link, 
 	return linkToDomain(&dbLink), nil
 }
 
-// Exists reports whether a link holds the slug id. notes.Manager, links.Manager and files.Manager
-// use it for the cross-resource slug check. An expired link does not hold its slug: Exists first
-// deletes it through DeleteExpired, which checks the expiry in the DELETE, so a link that its
-// owner extended stays. Thus the address of an expired link does not depend on a read after the
-// expiry.
-func (r *LinkRepository) Exists(ctx context.Context, id string) (bool, error) {
-	err := r.DeleteExpired(ctx, id)
-	if err != nil && !errors.Is(err, domain.ErrNotFound) {
-		return false, fmt.Errorf("postgres link exists: %w", err)
-	}
-
-	exists, err := r.db.NewSelect().Model((*link)(nil)).Where("id = ?", id).Exists(ctx)
-	if err != nil {
-		return false, fmt.Errorf("postgres link exists: %w", err)
-	}
-
-	return exists, nil
-}
-
 // Consume atomically deletes a link and returns it, but only if the link is eligible for
 // deletion: burn_after_click is set, or expires_at has passed. Returns domain.ErrNotFound
 // otherwise. Mirrors note_repository.go:Consume. Unlike notes, links has no deprecated column

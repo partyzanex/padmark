@@ -23,7 +23,6 @@ func contentsNote(showContents *bool) *domain.Note {
 // TestCreate_ShowContentsDefaultsToFalse pins the old-client contract: a create request without
 // the option stores false, so the note view keeps the full-width article.
 func (s *ManagerTestSuite) TestCreate_ShowContentsDefaultsToFalse() {
-	s.expectSlugFree()
 	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).DoAndReturn(
 		func(_ context.Context, written *domain.Note) error {
 			s.Require().NotNil(written.ShowContents)
@@ -39,7 +38,6 @@ func (s *ManagerTestSuite) TestCreate_ShowContentsDefaultsToFalse() {
 }
 
 func (s *ManagerTestSuite) TestCreate_ShowContentsTrueIsStored() {
-	s.expectSlugFree()
 	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).DoAndReturn(
 		func(_ context.Context, written *domain.Note) error {
 			s.True(written.ContentsSidebar())

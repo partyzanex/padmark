@@ -80,7 +80,7 @@ func (s *FileRepositorySuite) TestCreateAndGet() {
 	s.Equal(int64(42), got.Size)
 	s.Equal(domain.PrivacyPublic, got.EffectivePrivacy())
 
-	exists, err := s.repo.Exists(ctx, record.ID)
+	exists, err := s.db.NewSelect().Table("files").Where("id = ?", record.ID).Exists(ctx)
 	s.Require().NoError(err)
 	s.True(exists)
 
@@ -200,7 +200,7 @@ func (s *FileRepositorySuite) TestClaimBurn_Lifecycle() {
 	_, err := s.repo.GetByID(ctx, burn.ID)
 	s.Require().ErrorIs(err, domain.ErrNotFound, "other readers do not see a claimed file")
 
-	exists, err := s.repo.Exists(ctx, burn.ID)
+	exists, err := s.db.NewSelect().Table("files").Where("id = ?", burn.ID).Exists(ctx)
 	s.Require().NoError(err)
 	s.True(exists, "a claimed file still holds its slug")
 
@@ -220,7 +220,7 @@ func (s *FileRepositorySuite) TestClaimBurn_Lifecycle() {
 	s.Require().NoError(s.repo.Delete(ctx, burn.ID, burn.ObjectKey))
 	s.Require().ErrorIs(s.repo.ReleaseBurn(ctx, second), domain.ErrNotFound)
 
-	exists, err = s.repo.Exists(ctx, burn.ID)
+	exists, err = s.db.NewSelect().Table("files").Where("id = ?", burn.ID).Exists(ctx)
 	s.Require().NoError(err)
 	s.False(exists)
 }
@@ -450,7 +450,7 @@ func (s *FileRepositorySuite) TestDeleteExpired() {
 	s.Require().NoError(s.repo.DeleteExpired(ctx, expired.ID, expired.ObjectKey, now))
 	s.Require().ErrorIs(s.repo.DeleteExpired(ctx, expired.ID, expired.ObjectKey, now), domain.ErrNotFound)
 
-	exists, err := s.repo.Exists(ctx, live.ID)
+	exists, err := s.db.NewSelect().Table("files").Where("id = ?", live.ID).Exists(ctx)
 	s.Require().NoError(err)
 	s.True(exists)
 }

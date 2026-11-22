@@ -15,7 +15,7 @@ import (
 
 	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/infra/crypto"
-	"github.com/partyzanex/padmark/internal/infra/lock"
+	"github.com/partyzanex/padmark/internal/infra/expiredslugs"
 	"github.com/partyzanex/padmark/internal/infra/storage/s3store"
 	"github.com/partyzanex/padmark/internal/testutil"
 	"github.com/partyzanex/padmark/internal/usecases/files"
@@ -68,23 +68,23 @@ func (o *objectStore) stop(s *suite.Suite) {
 	}
 }
 
-// newFileManager wires files.Manager like the server: the slug lock is the one of the note and
-// link managers, and the note and link repositories are the slug checkers.
+// newFileManager wires files.Manager like the server: it shares expired with the note and link
+// managers, and expired then also removes expired files.
 func newFileManager(
-	testSuite *suite.Suite, storage files.Storage, notes, links files.SlugChecker, slugLock *lock.Locker,
-	objects *s3store.Store,
+	testSuite *suite.Suite, storage files.Storage, expired *expiredslugs.Releaser, objects *s3store.Store,
 ) *files.Manager {
-	return files.NewManager(&files.Deps{
-		Storage:   storage,
-		Objects:   objects,
-		Cipher:    crypto.NewFileCipher(),
-		Encryptor: testutil.ContentEncryptor(testSuite.T(), "file"),
-		Hasher:    crypto.NewEditCodeHasher(testutil.Argon2Params()),
-		SlugLock:  slugLock,
-		Notes:     notes,
-		Links:     links,
-		Log:       discardLog(),
+	manager := files.NewManager(&files.Deps{
+		Storage:      storage,
+		Objects:      objects,
+		Cipher:       crypto.NewFileCipher(),
+		Encryptor:    testutil.ContentEncryptor(testSuite.T(), "file"),
+		Hasher:       crypto.NewEditCodeHasher(testutil.Argon2Params()),
+		ExpiredSlugs: expired,
+		Log:          discardLog(),
 	}, maxFileSize, true)
+	expired.WithFiles(manager)
+
+	return manager
 }
 
 // ── Files ──.

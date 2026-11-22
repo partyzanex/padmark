@@ -303,7 +303,7 @@ func (s *AuthHandlerSuite) TestSignOutForm_NotRenderedForAnonymousPages() {
 // TestTOTPLogin_ForwardsPresentedSessionForRevocation — signing in again hands the session the
 // browser presented to the usecase, which revokes it; the response carries the replacement.
 func (s *AuthHandlerSuite) TestTOTPLogin_ForwardsPresentedSessionForRevocation() {
-	s.auth.EXPECT().Login(gomock.Any(), "alice", gomock.Any(), "123456", gomock.Any(), gomock.Any(), "sess-old").
+	s.auth.EXPECT().Login(gomock.Any(), loginWith("alice", "", "123456", "sess-old")).
 		Return("sess-new", nil)
 
 	form := withCSRFFor(url.Values{"username": {"alice"}, "password": {"ValidP@ss12!"}, "code": {"123456"}}, "sess-old")
@@ -337,7 +337,7 @@ func (s *AuthHandlerSuite) TestTOTPLogin_ForwardsPresentedSessionForRevocation()
 // ── TOTP login ──.
 
 func (s *AuthHandlerSuite) TestTOTPLogin_Success_SetsCookieAndRedirects() {
-	s.auth.EXPECT().Login(gomock.Any(), "alice", gomock.Any(), "123456", gomock.Any(), gomock.Any(), gomock.Any()).
+	s.auth.EXPECT().Login(gomock.Any(), loginWith("alice", "", "123456", "")).
 		Return("sess-id-abc", nil)
 
 	form := withCSRF(url.Values{"username": {"alice"}, "password": {"ValidP@ss12!"}, "code": {"123456"}})
@@ -365,7 +365,7 @@ func (s *AuthHandlerSuite) TestTOTPLogin_Success_SetsCookieAndRedirects() {
 }
 
 func (s *AuthHandlerSuite) TestTOTPLogin_Invalid_RedirectsWithError() {
-	s.auth.EXPECT().Login(gomock.Any(), "alice", gomock.Any(), "000000", gomock.Any(), gomock.Any(), gomock.Any()).
+	s.auth.EXPECT().Login(gomock.Any(), loginWith("alice", "", "000000", "")).
 		Return("", domain.ErrInvalidTOTP)
 
 	form := withCSRF(url.Values{"username": {"alice"}, "password": {"ValidP@ss12!"}, "code": {"000000"}})
@@ -383,7 +383,7 @@ func (s *AuthHandlerSuite) TestTOTPLogin_Invalid_RedirectsWithError() {
 }
 
 func (s *AuthHandlerSuite) TestTOTPLogin_WithNext_RedirectsToNext() {
-	s.auth.EXPECT().Login(gomock.Any(), "alice", gomock.Any(), "123456", gomock.Any(), gomock.Any(), gomock.Any()).
+	s.auth.EXPECT().Login(gomock.Any(), loginWith("alice", "", "123456", "")).
 		Return("sess-id", nil)
 
 	next := url.QueryEscape("/admin")
@@ -1745,7 +1745,7 @@ func (s *AuthHandlerSuite) postTOTPLoginWithCSRF(router http.Handler, cookie *ht
 // that rendered the form.
 func (s *AuthHandlerSuite) TestCSRF_SharedSecret_TokenSurvivesInstanceChange() {
 	s.auth.EXPECT().
-		Login(gomock.Any(), "alice", gomock.Any(), "123456", gomock.Any(), gomock.Any(), gomock.Any()).
+		Login(gomock.Any(), loginWith("alice", "", "123456", "")).
 		Return("sess-id", nil)
 
 	before := s.newRouterWithCSRFSecret(authTestCSRFSecret)
@@ -1763,7 +1763,7 @@ func (s *AuthHandlerSuite) TestCSRF_SharedSecret_TokenSurvivesInstanceChange() {
 // it is why leaving the flag empty logs a warning at startup.
 func (s *AuthHandlerSuite) TestCSRF_NoSecret_TokenRejectedByOtherInstance() {
 	s.auth.EXPECT().
-		Login(gomock.Any(), "alice", gomock.Any(), "123456", gomock.Any(), gomock.Any(), gomock.Any()).
+		Login(gomock.Any(), loginWith("alice", "", "123456", "")).
 		Return("sess-id", nil)
 
 	before := s.newRouterWithCSRFSecret(nil)
@@ -1780,7 +1780,7 @@ func (s *AuthHandlerSuite) TestCSRF_NoSecret_TokenRejectedByOtherInstance() {
 // ── Session expiry ──.
 
 func (s *AuthHandlerSuite) TestTOTPLogin_SessionCookieMaxAge_Is30Days() {
-	s.auth.EXPECT().Login(gomock.Any(), "alice", gomock.Any(), "123456", gomock.Any(), gomock.Any(), gomock.Any()).
+	s.auth.EXPECT().Login(gomock.Any(), loginWith("alice", "", "123456", "")).
 		Return("sess-id", nil)
 
 	form := withCSRF(url.Values{"username": {"alice"}, "password": {testPw}, "code": {"123456"}})
@@ -1811,7 +1811,7 @@ func (s *AuthHandlerSuite) TestTOTPLogin_SessionCookieMaxAge_TracksConfiguredSes
 
 	s.router = s.newRouterWithAuthAndSessionTTL(configuredTTL)
 
-	s.auth.EXPECT().Login(gomock.Any(), "alice", gomock.Any(), "123456", gomock.Any(), gomock.Any(), gomock.Any()).
+	s.auth.EXPECT().Login(gomock.Any(), loginWith("alice", "", "123456", "")).
 		Return("sess-id", nil)
 
 	form := withCSRF(url.Values{"username": {"alice"}, "password": {testPw}, "code": {"123456"}})
@@ -2099,4 +2099,26 @@ func (s *AuthHandlerSuite) TestSetupHandler_InvalidUsername_ShowsValidationMessa
 	s.Equal(http.StatusOK, rec.Code)
 	s.Contains(rec.Body.String(), "username must be 1–64 characters")
 	s.NotContains(rec.Body.String(), "Scan QR code")
+}
+
+// loginRequestMatcher matches an auth.LoginRequest with username and code. An empty password or
+// previous session ID matches each value, as gomock.Any() did for the positional parameters.
+type loginRequestMatcher struct {
+	username, password, code, previous string
+}
+
+func loginWith(username, password, code, previous string) loginRequestMatcher {
+	return loginRequestMatcher{username: username, password: password, code: code, previous: previous}
+}
+
+func (m loginRequestMatcher) Matches(x any) bool {
+	req, ok := x.(*auth.LoginRequest)
+
+	return ok && req.Username == m.username && req.TOTPCode == m.code &&
+		(m.password == "" || req.Password == m.password) &&
+		(m.previous == "" || req.PreviousSessionID == m.previous)
+}
+
+func (m loginRequestMatcher) String() string {
+	return "login request of " + m.username + " with code " + m.code
 }

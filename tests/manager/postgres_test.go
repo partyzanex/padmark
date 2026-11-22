@@ -14,7 +14,7 @@ import (
 	"github.com/uptrace/bun/dialect/pgdialect"
 	"github.com/uptrace/bun/driver/pgdriver"
 
-	"github.com/partyzanex/padmark/internal/infra/lock"
+	"github.com/partyzanex/padmark/internal/infra/expiredslugs"
 	pgrepo "github.com/partyzanex/padmark/internal/infra/storage/postgres"
 	"github.com/partyzanex/padmark/internal/usecases/auth"
 )
@@ -72,14 +72,12 @@ func (s *PostgresManagerSuite) SetupTest() {
 		s.Require().NoError(err)
 	}
 
-	slugLock := lock.NewLocker()
+	noteRepo, linkRepo := pgrepo.NewNoteRepository(s.db), pgrepo.NewLinkRepository(s.db, slog.Default())
+	expired := expiredslugs.New(noteRepo, linkRepo)
 
-	s.Manager = newManager(s.T(), pgrepo.NewNoteRepository(s.db), pgrepo.NewLinkRepository(s.db, slog.Default()), slugLock)
-	s.LinkManager = newLinkManager(s.T(),
-		pgrepo.NewLinkRepository(s.db, slog.Default()), pgrepo.NewNoteRepository(s.db), slugLock,
-	)
-	s.FileManager = newFileManager(&s.Suite, pgrepo.NewFileRepository(s.db), pgrepo.NewNoteRepository(s.db),
-		pgrepo.NewLinkRepository(s.db, slog.Default()), slugLock, s.objects.store)
+	s.Manager = newManager(s.T(), noteRepo, expired)
+	s.LinkManager = newLinkManager(s.T(), linkRepo, expired)
+	s.FileManager = newFileManager(&s.Suite, pgrepo.NewFileRepository(s.db), expired, s.objects.store)
 	s.Objects = s.objects.store
 	s.RevealStore = auth.NewRevealManager(pgrepo.NewRevealRepository(s.db), slog.Default())
 	s.DB = s.db

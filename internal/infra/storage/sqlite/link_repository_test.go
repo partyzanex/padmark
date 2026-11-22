@@ -183,28 +183,6 @@ func (s *LinkRepositoryTestSuite) TestGetByID_NotFound() {
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
-func (s *LinkRepositoryTestSuite) TestExists_True() {
-	ctx := s.T().Context()
-
-	l := &domain.Link{
-		ID: "exists-1", TargetURL: "a", CreatedAt: time.Now(),
-		ExpiresAt: nil, Privacy: nil, OwnerID: nil, DirectRedirect: nil,
-		EditCode: "", Views: 0, BurnAfterClick: false,
-	}
-	s.Require().NoError(s.repo.Create(ctx, l))
-
-	exists, err := s.repo.Exists(ctx, "exists-1")
-	s.Require().NoError(err)
-	s.True(exists)
-}
-
-func (s *LinkRepositoryTestSuite) TestExists_False() {
-	exists, err := s.repo.Exists(s.T().Context(), "missing")
-
-	s.Require().NoError(err)
-	s.False(exists)
-}
-
 func (s *LinkRepositoryTestSuite) TestIncrementViews_OK() {
 	ctx := s.T().Context()
 
@@ -436,10 +414,6 @@ func (s *LinkRepositoryTestSuite) TestDeleteExpired_KeepsExtendedLink() {
 
 	s.Require().ErrorIs(s.repo.DeleteExpired(ctx, original.ID), domain.ErrNotFound)
 
-	exists, err := s.repo.Exists(ctx, original.ID)
-	s.Require().NoError(err)
-	s.True(exists, "the extended link holds its slug")
-
 	stored, err := s.repo.GetByID(ctx, original.ID)
 	s.Require().NoError(err, "the extended link must stay")
 	s.Require().NotNil(stored.ExpiresAt)
@@ -468,27 +442,6 @@ func (s *LinkRepositoryTestSuite) TestDeleteExpired_RemovesOnlyExpiredLinks() {
 		_, err = s.repo.GetByID(ctx, id)
 		s.Require().NoError(err, id)
 	}
-}
-
-// TestExists_ReleasesExpiredLink verifies that an expired, unread link does not hold its slug:
-// Exists removes it and reports false. A live link and an unread burn link still hold theirs.
-func (s *LinkRepositoryTestSuite) TestExists_ReleasesExpiredLink() {
-	ctx := s.T().Context()
-	past := time.Now().Add(-time.Minute).UTC().Truncate(time.Second)
-	future := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
-	// Create sweeps expired links with other IDs, so the expired link comes last.
-	s.Require().NoError(s.repo.Create(ctx, expiringLink("live", &future, false)))
-	s.Require().NoError(s.repo.Create(ctx, expiringLink("unread-burn", nil, true)))
-	s.Require().NoError(s.repo.Create(ctx, expiringLink("expired", &past, false)))
-
-	for id, want := range map[string]bool{"expired": false, "live": true, "unread-burn": true, "missing": false} {
-		exists, err := s.repo.Exists(ctx, id)
-		s.Require().NoError(err, id)
-		s.Equal(want, exists, id)
-	}
-
-	_, err := s.repo.GetByID(ctx, "expired")
-	s.ErrorIs(err, domain.ErrNotFound, "Exists removed the expired row")
 }
 
 // --- helpers ---

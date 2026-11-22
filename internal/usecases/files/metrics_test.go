@@ -26,7 +26,6 @@ func (s *ManagerSuite) TestMetrics_CreateCountsUploadAndSize() {
 	metrics := s.strictMetrics()
 
 	s.expectUpload("hello")
-	s.expectFreeSlug()
 	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
 	s.expectUploadSweep()
 	metrics.EXPECT().IncUploads()
@@ -137,7 +136,6 @@ func (s *ManagerSuite) TestMetrics_RecordFailureRemovesObject() {
 	metrics := s.strictMetrics()
 
 	s.expectUpload("x")
-	s.expectFreeSlug()
 	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(errors.New("disk full"))
 	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(nil, domain.ErrNotFound)
 	s.objects.EXPECT().Delete(gomock.Any(), gomock.Any()).Return(errors.New("s3 down"))

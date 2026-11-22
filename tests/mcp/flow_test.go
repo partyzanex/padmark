@@ -27,7 +27,7 @@ import (
 	"github.com/partyzanex/padmark/internal/adapters/web"
 	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/infra/crypto"
-	"github.com/partyzanex/padmark/internal/infra/lock"
+	"github.com/partyzanex/padmark/internal/infra/expiredslugs"
 	"github.com/partyzanex/padmark/internal/infra/render"
 	"github.com/partyzanex/padmark/internal/infra/storage/s3store"
 	sqliterepo "github.com/partyzanex/padmark/internal/infra/storage/sqlite"
@@ -337,15 +337,15 @@ func startStack(t *testing.T, s3Endpoint string) *testStack {
 
 	authMgr := newTestAuthManager(t, db, users)
 
-	slugLock := lock.NewLocker()
+	expired := expiredslugs.New(sqliterepo.NewNoteRepository(db), sqliterepo.NewLinkRepository(db, discardTestLogger()))
 
-	notesMgr, linksMgr := newTestManagers(t, db, slugLock)
+	notesMgr, linksMgr := newTestManagers(t, db, expired)
 
 	resolver := slugs.NewResolver(sqliterepo.NewSlugRepository(db))
 	handler := web.NewHandler(notesMgr, linksMgr, resolver, discardTestLogger()).WithAuthManager(authMgr)
 
 	if s3Endpoint != "" {
-		handler.WithFileManager(newTestFileManager(t, db, slugLock, s3Endpoint))
+		handler.WithFileManager(newTestFileManager(t, db, expired, s3Endpoint))
 	}
 
 	ogen := web.NewOgenHandler(notesMgr, linksMgr, web.NoPinger{}, discardTestLogger())
@@ -388,35 +388,25 @@ func newTestAuthManager(t *testing.T, db *bun.DB, users *sqliterepo.UserReposito
 	return authMgr
 }
 
-func newTestManagers(t *testing.T, db *bun.DB, slugLock *lock.Locker) (*notes.Manager, *links.Manager) {
+func newTestManagers(t *testing.T, db *bun.DB, expired *expiredslugs.Releaser) (*notes.Manager, *links.Manager) {
 	t.Helper()
 
-	notesMgr := notes.NewManager(
-		sqliterepo.NewNoteRepository(db),
-		sqliterepo.NewLinkRepository(db, discardTestLogger()),
-		slugLock,
-		render.NewRenderer(),
-		testutil.ContentEncryptor(t, "note"),
-		crypto.NewEditCodeHasher(testutil.Argon2Params()),
-		discardTestLogger(),
-		false,
-	)
-	linksMgr := links.NewManager(
-		sqliterepo.NewLinkRepository(db, discardTestLogger()),
-		sqliterepo.NewNoteRepository(db),
-		slugLock,
-		testutil.ContentEncryptor(t, "link"),
-		crypto.NewEditCodeHasher(testutil.Argon2Params()),
-		discardTestLogger(),
-		false,
-	)
+	notesMgr := notes.NewManager(&notes.Deps{
+		Storage: sqliterepo.NewNoteRepository(db), Renderer: render.NewRenderer(),
+		Encryptor: testutil.ContentEncryptor(t, "note"), Hasher: crypto.NewEditCodeHasher(testutil.Argon2Params()),
+		ExpiredSlugs: expired, Log: discardTestLogger(),
+	}, false)
+	linksMgr := links.NewManager(&links.Deps{
+		Storage: sqliterepo.NewLinkRepository(db, discardTestLogger()), Encryptor: testutil.ContentEncryptor(t, "link"),
+		Hasher: crypto.NewEditCodeHasher(testutil.Argon2Params()), ExpiredSlugs: expired, Log: discardTestLogger(),
+	}, false)
 
 	return notesMgr, linksMgr
 }
 
 // newTestFileManager mirrors attachFiles in internal/infra/server with the test fixtures.
 // Custom slugs are off, as for the notes and links of this stack.
-func newTestFileManager(t *testing.T, db *bun.DB, slugLock *lock.Locker, endpoint string) *files.Manager {
+func newTestFileManager(t *testing.T, db *bun.DB, expired *expiredslugs.Releaser, endpoint string) *files.Manager {
 	t.Helper()
 
 	objects, err := s3store.New(&s3store.Config{
@@ -427,17 +417,18 @@ func newTestFileManager(t *testing.T, db *bun.DB, slugLock *lock.Locker, endpoin
 	_, err = objects.EnsureBucket(context.Background())
 	require.NoError(t, err)
 
-	return files.NewManager(&files.Deps{
-		Storage:   sqliterepo.NewFileRepository(db),
-		Objects:   objects,
-		Cipher:    crypto.NewFileCipher(),
-		Encryptor: testutil.ContentEncryptor(t, "file"),
-		Hasher:    crypto.NewEditCodeHasher(testutil.Argon2Params()),
-		SlugLock:  slugLock,
-		Notes:     sqliterepo.NewNoteRepository(db),
-		Links:     sqliterepo.NewLinkRepository(db, discardTestLogger()),
-		Log:       discardTestLogger(),
+	manager := files.NewManager(&files.Deps{
+		Storage:      sqliterepo.NewFileRepository(db),
+		Objects:      objects,
+		Cipher:       crypto.NewFileCipher(),
+		Encryptor:    testutil.ContentEncryptor(t, "file"),
+		Hasher:       crypto.NewEditCodeHasher(testutil.Argon2Params()),
+		ExpiredSlugs: expired,
+		Log:          discardTestLogger(),
 	}, 1<<20, false)
+	expired.WithFiles(manager)
+
+	return manager
 }
 
 // issueEnvelopeToken creates the first admin + an API key, returning the envelope the admin

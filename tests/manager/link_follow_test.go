@@ -11,7 +11,7 @@ import (
 	"github.com/uptrace/bun/dialect"
 
 	"github.com/partyzanex/padmark/internal/domain"
-	"github.com/partyzanex/padmark/internal/infra/lock"
+	"github.com/partyzanex/padmark/internal/infra/expiredslugs"
 	pgrepo "github.com/partyzanex/padmark/internal/infra/storage/postgres"
 	sqliterepo "github.com/partyzanex/padmark/internal/infra/storage/sqlite"
 	"github.com/partyzanex/padmark/internal/testutil"
@@ -35,18 +35,22 @@ func (r *changedLinkRead) GetByID(ctx context.Context, id string) (*domain.Link,
 }
 
 //nolint:ireturn // test factory selects backend implementations of the same usecase ports
-func (s *ManagerSuite) linkStorage() (links.Storage, links.NotesChecker) {
+func (s *ManagerSuite) linkStorage() (links.Storage, *expiredslugs.Releaser) {
 	if s.DB.Dialect().Name() == dialect.PG {
-		return pgrepo.NewLinkRepository(s.DB, discardLog()), pgrepo.NewNoteRepository(s.DB)
+		repo := pgrepo.NewLinkRepository(s.DB, discardLog())
+
+		return repo, expiredslugs.New(pgrepo.NewNoteRepository(s.DB), repo)
 	}
 
-	return sqliterepo.NewLinkRepository(s.DB, discardLog()), sqliterepo.NewNoteRepository(s.DB)
+	repo := sqliterepo.NewLinkRepository(s.DB, discardLog())
+
+	return repo, expiredslugs.New(sqliterepo.NewNoteRepository(s.DB), repo)
 }
 
 // This suite runs against SQLite and PostgreSQL. A second manager commits between SELECT
 // and the read's mutation, exercising each backend's actual visibility predicates.
 func (s *ManagerSuite) TestFollowConcurrentPrivacyChange() {
-	storage, checker := s.linkStorage()
+	storage, expired := s.linkStorage()
 	ownerID := s.insertLinkOwner()
 
 	for _, scenario := range []struct {
@@ -73,7 +77,7 @@ func (s *ManagerSuite) TestFollowConcurrentPrivacyChange() {
 
 			privateURL := "https://example.com/private?secret=hidden"
 			changing := s.privatizeAfterRead(storage, link.ID, ownerID, privateURL)
-			reader := newLinkManager(s.T(), changing, checker, lock.NewLocker())
+			reader := newLinkManager(s.T(), changing, expired)
 			result, followErr := reader.Follow(s.T().Context(), link.ID, domain.Reader{
 				AllowBurn: true, SkipPrivacy: false,
 				CallerID: uuid.UUID{}, Authenticated: false,

@@ -22,13 +22,13 @@ import (
 const maxHashRetries = 5
 
 // Storage defines persistence operations for links. Create must atomically claim the ID
-// across notes and links, returning domain.ErrSlugConflict if another resource owns it.
+// across notes, links and files, returning domain.ErrSlugConflict if another resource owns it:
+// it is the only slug uniqueness check (docs/adr/0003-storage-slug-uniqueness.md).
 // Update writes only the fields that patch sets and returns the row as stored, so a concurrent
 // change of a field that this update omits stays.
 // DeleteExpired removes a row only while it is still expired, and returns domain.ErrNotFound
 // otherwise: an expiry decision from an old snapshot never deletes a link that its owner
-// extended, or a live link that took the ID after the decision. Exists first removes an expired
-// link in the same way, so an expired link does not hold its slug.
+// extended, or a live link that took the ID after the decision.
 //
 // Update and Delete change the row only while its edit_code still equals storedEditCode, the
 // stored hash of the link that the caller checked. Each link gets a hash with a new random salt
@@ -41,7 +41,6 @@ type Storage interface {
 	Create(ctx context.Context, link *domain.Link) error
 	Update(ctx context.Context, id, storedEditCode string, patch *domain.LinkPatch) (*domain.Link, error)
 	GetByID(ctx context.Context, id string) (*domain.Link, error)
-	Exists(ctx context.Context, id string) (bool, error)
 	IncrementViews(ctx context.Context, id string) error
 	Delete(ctx context.Context, id, storedEditCode string) error
 	DeleteExpired(ctx context.Context, id string) error
@@ -53,22 +52,6 @@ type Storage interface {
 	) (*domain.Link, error)
 	// IncrementViewsVisible refuses a row that is no longer visible to this reader.
 	IncrementViewsVisible(ctx context.Context, id string, callerID uuid.UUID, authenticated bool) error
-}
-
-// NotesChecker lets links.Manager verify a candidate slug isn't already taken by a note — slugs
-// are globally unique across notes and links. See notes.Manager's mirrored LinksChecker, which
-// enforces the same rule in the other direction.
-type NotesChecker interface {
-	Exists(ctx context.Context, id string) (bool, error)
-}
-
-// SlugLock serializes local preflight checks in resolveUniqueSlug. Share the same instance
-// with notes.Manager. Storage independently enforces cross-resource uniqueness between
-// server processes. Declared here rather than imported from notes: usecases depend only on
-// domain and stdlib.
-// Updates and target-cache fills also share this lock to coordinate local eviction.
-type SlugLock interface {
-	Lock(ctx context.Context, key string) (unlock func(), err error)
 }
 
 // Encryptor writes content using installation keys and the stored record ID as authenticated
@@ -103,8 +86,8 @@ type Cache interface {
 //   - IncLinksCreated: one successful Manager.Create.
 //   - IncRedirects: one successful Manager.Follow (normal or burn-after-click; error paths —
 //     not found, expired, denied — do not count, matching "requests actually served").
-//   - IncCollisions: one random-slug retry inside resolveUniqueSlug hitting an already-taken
-//     slug. Deliberately scoped to the random-generation retry case only, not a rejected
+//   - IncCollisions: one random slug that Storage.Create refused because it is already taken.
+//     Deliberately scoped to the random-generation retry case only, not a rejected
 //     custom-alias request — a collision here is a signal about slug-space health (retries
 //     climbing over time would mean the keyspace is filling up), whereas a user picking an
 //     already-taken alias is normal, expected behavior with nothing operational to signal.
@@ -121,69 +104,52 @@ func (noopMetrics) IncLinksCreated() {}
 func (noopMetrics) IncRedirects()    {}
 func (noopMetrics) IncCollisions()   {}
 
-// ExpiredFileReleaser removes an expired file that still holds a slug, because the file sweep
-// did not run yet. files.Manager implements it; the default releases nothing. Errors are
-// fail-soft: Create keeps its slug conflict and logs the error.
-type ExpiredFileReleaser interface {
-	// ReleaseExpiredSlug removes the expired file with the record ID id. It returns true when
-	// it removed the file.
+// ExpiredSlugReleaser removes an expired note, link or file that still holds the record ID id,
+// because no read and no sweep removed it yet. It returns true when it removed a record. It must
+// remove a record only while it is still expired, so a record that its owner extended stays.
+// Errors are fail-soft: Create keeps its slug conflict and logs the error.
+type ExpiredSlugReleaser interface {
 	ReleaseExpiredSlug(ctx context.Context, id string) (bool, error)
 }
 
-// noExpiredFiles is the default ExpiredFileReleaser, for a server without file publishing.
-type noExpiredFiles struct{}
-
-func (noExpiredFiles) ReleaseExpiredSlug(context.Context, string) (bool, error) { return false, nil }
+// Deps holds the dependencies of Manager. All fields are mandatory.
+type Deps struct {
+	Storage      Storage
+	Encryptor    Encryptor
+	Hasher       EditCodeHasher
+	ExpiredSlugs ExpiredSlugReleaser
+	Log          *slog.Logger
+}
 
 // Manager implements short-link business logic: URL validation, slug resolution, and encryption
 // coordination — the links analogue of notes.Manager.
 type Manager struct {
 	storage          Storage
-	notes            NotesChecker
-	slugLock         SlugLock
 	encryptor        Encryptor
 	hasher           EditCodeHasher
+	expiredSlugs     ExpiredSlugReleaser
 	cache            Cache
 	metrics          Metrics
 	log              *slog.Logger
-	expiredFiles     ExpiredFileReleaser
 	allowCustomSlugs domain.CustomSlugSetting
 }
 
-// NewManager creates a new Manager with required dependencies. allowCustomSlugs enables
-// user-supplied slugs (aliases); when false, a create request carrying one is rejected with
-// domain.ErrCustomSlugDisabled — mirrors notes.NewManager, and both share the same server-wide
-// --custom-slugs flag. slugLock must be the same instance passed to the paired notes.Manager —
-// see SlugLock's doc comment for why. cache and metrics are optional collaborators attached via
-// WithCache/WithMetrics at composition time: cache defaults to nil (no cache, and no slug lock on
-// reads — see resolveLink), metrics to noopMetrics.
-// All fields of Manager are explicitly initialised here so a future field added to the struct
-// cannot silently land in an undefined state — the compiler forces every caller through this
-// constructor.
-func NewManager(
-	storage Storage, notes NotesChecker, slugLock SlugLock, encryptor Encryptor, hasher EditCodeHasher,
-	log *slog.Logger, allowCustomSlugs bool,
-) *Manager {
+// NewManager creates a new Manager. allowCustomSlugs enables user-supplied slugs (aliases); when
+// false, a create request carrying one is rejected with domain.ErrCustomSlugDisabled, as for
+// notes (both use the server-wide --custom-slugs flag). cache and metrics are optional
+// collaborators attached via WithCache/WithMetrics at composition time: cache defaults to nil
+// (no cache), metrics to noopMetrics.
+func NewManager(deps *Deps, allowCustomSlugs bool) *Manager {
 	return &Manager{
-		storage:          storage,
-		notes:            notes,
-		slugLock:         slugLock,
-		encryptor:        encryptor,
-		hasher:           hasher,
+		storage:          deps.Storage,
+		encryptor:        deps.Encryptor,
+		hasher:           deps.Hasher,
+		expiredSlugs:     deps.ExpiredSlugs,
 		cache:            nil,
 		metrics:          noopMetrics{},
-		log:              log,
-		expiredFiles:     noExpiredFiles{},
+		log:              deps.Log,
 		allowCustomSlugs: domain.CustomSlugSetting(allowCustomSlugs),
 	}
-}
-
-// WithExpiredFiles attaches the file manager, so that an expired file that the sweep did not
-// remove yet does not block a link with the same slug. Call it at composition time.
-func (m *Manager) WithExpiredFiles(releaser ExpiredFileReleaser) *Manager {
-	m.expiredFiles = releaser
-
-	return m
 }
 
 // WithCache attaches an optional Cache for frequently-followed links. Nil (the default — Manager
@@ -258,8 +224,7 @@ func validateLink(link *domain.Link) error {
 
 // Create validates a target URL and persists a new short link, returning it with the plaintext
 // target URL and plaintext edit code populated — both are stored encrypted/hashed. Mirrors
-// notes.Manager.Create closely. Link slug resolution retries randomly generated candidates
-// rejected by preflight; a collision during the final atomic insert returns ErrSlugConflict.
+// notes.Manager.Create closely; see store for the slug conflict rules.
 func (m *Manager) Create(ctx context.Context, targetURL string, opts CreateOptions) (*domain.Link, error) {
 	validURL, err := validateTargetURL(targetURL)
 	if err != nil {
@@ -293,6 +258,12 @@ func (m *Manager) Create(ctx context.Context, targetURL string, opts CreateOptio
 		}
 	}
 
+	// The slug check goes before the memory-hard edit-code hash, so an invalid slug costs little.
+	slug, err := m.resolveSlug(opts.CustomHash)
+	if err != nil {
+		return nil, fmt.Errorf("resolve slug: %w", err)
+	}
+
 	plaintextCode, err := m.resolveAndHashEditCode(link)
 	if err != nil {
 		return nil, fmt.Errorf("resolve and hash edit code: %w", err)
@@ -300,16 +271,16 @@ func (m *Manager) Create(ctx context.Context, targetURL string, opts CreateOptio
 
 	link.CreatedAt = time.Now().UTC()
 
-	slug, unlock, err := m.resolveUniqueSlug(ctx, opts.CustomHash)
-	if err != nil {
-		return nil, fmt.Errorf("resolve unique slug: %w", err)
-	}
-	defer unlock()
-
-	err = m.persistLink(ctx, link, slug, validURL, plaintextCode)
+	slug, err = m.store(ctx, link, validURL, opts.CustomHash, slug)
 	if err != nil {
 		return nil, fmt.Errorf("persist link: %w", err)
 	}
+
+	// link gets the slug, the plaintext target URL and the plaintext edit code only after the
+	// write; the storage form was a separate value.
+	link.ID = slug
+	link.TargetURL = validURL
+	link.EditCode = plaintextCode
 
 	m.log.DebugContext(ctx, "link created", "id", domain.HashSlug(slug))
 
@@ -392,56 +363,64 @@ func (m *Manager) checkMutation(existing *domain.Link, editCode string, reader d
 	return nil
 }
 
-// persistLink writes link to storage under slug. The storage form is a separate value with the
-// hashed slug, the encrypted target URL and the edit-code hash; link itself gets the slug, the
-// plaintext target URL and the plaintext edit code only after the write.
-func (m *Manager) persistLink(
-	ctx context.Context, link *domain.Link, slug, validURL, plaintextCode string,
-) error {
-	recordID := domain.HashSlug(slug)
+// store writes link under the slug first and returns the slug that storage accepted. The storage form is a
+// separate value with the hashed slug and the encrypted target URL; link already holds the
+// edit-code hash. Storage.Create is the only uniqueness check. A random slug that is taken gets a
+// new random slug, at most maxHashRetries times. A custom slug that is taken stays taken, except
+// when an expired record holds it: then store removes that record and tries once more, as
+// notes.Manager does. The storage triggers check the slug again, so the second attempt is safe
+// across server processes.
+func (m *Manager) store(ctx context.Context, link *domain.Link, validURL, customHash, first string) (string, error) {
+	custom, slug := customHash != "", first
 
-	encrypted, err := m.encryptor.Encrypt(validURL, recordID)
-	if err != nil {
-		return fmt.Errorf("encrypt target url: %w", err)
+	for range maxHashRetries {
+		recordID := domain.HashSlug(slug)
+
+		encrypted, err := m.encryptor.Encrypt(validURL, recordID)
+		if err != nil {
+			return "", fmt.Errorf("encrypt target url: %w", err)
+		}
+
+		stored := *link
+		stored.ID = recordID
+		stored.TargetURL = encrypted
+
+		err = m.storage.Create(ctx, &stored)
+		if custom && errors.Is(err, domain.ErrSlugConflict) && m.releaseExpiredHolder(ctx, recordID) {
+			err = m.storage.Create(ctx, &stored)
+		}
+
+		if err == nil {
+			return slug, nil
+		}
+
+		if custom || !errors.Is(err, domain.ErrSlugConflict) {
+			return "", fmt.Errorf("store link: %w", err)
+		}
+
+		// Only a random slug comes here, never a custom one: see the Metrics doc comment.
+		m.metrics.IncCollisions()
+
+		slug, err = domain.ResolveSlug("", m.allowCustomSlugs)
+		if err != nil {
+			return "", fmt.Errorf("resolve slug: %w", err)
+		}
 	}
 
-	stored := *link
-	stored.ID = recordID
-	stored.TargetURL = encrypted
-
-	err = m.createReleasingExpired(ctx, &stored)
-	if err != nil {
-		return fmt.Errorf("create link: %w", err)
-	}
-
-	link.ID = slug
-	link.TargetURL = validURL
-	link.EditCode = plaintextCode
-
-	return nil
+	return "", domain.ErrHashCollision
 }
 
 // resolveLink reads the current row before consulting the decrypted-target cache.
 // Privacy, ownership, deletion, TTL and burn state must be visible across replicas
 // without waiting for local cache expiry. The cache can only reuse a public URL
 // when its ciphertext matches this read's snapshot.
+//
+// Freshness, including across replicas, comes from the ciphertext fingerprint: a stale entry
+// never matches the row read below. No lock serializes reads, updates and cache fills: a read
+// that races an Update or a Delete can store the old target after the eviction. That entry is
+// never served, and the next read of the link or the cache TTL replaces it.
 func (m *Manager) resolveLink(ctx context.Context, slug string) (*domain.Link, error) {
 	dbID := domain.HashSlug(slug)
-
-	if m.cache != nil {
-		// Freshness, including across replicas, comes from the ciphertext fingerprint:
-		// a stale entry never matches the row read below. This in-process lock is memory
-		// hygiene only — Update holds it through persistence and eviction, so a concurrent
-		// cache miss cannot re-fill the cache with the plaintext target of a link that was
-		// just updated. The cost is serialising reads of one link. (Delete does not take
-		// it: a racing read may re-cache a deleted link's target until TTL eviction, but
-		// that entry is never served because the row lookup below fails first.)
-		unlock, err := m.slugLock.Lock(ctx, dbID)
-		if err != nil {
-			return nil, fmt.Errorf("lock link: %w", err)
-		}
-		defer unlock()
-	}
 
 	link, err := m.storage.GetByID(ctx, dbID)
 	if err != nil {
@@ -521,88 +500,26 @@ func (m *Manager) resolveAndHashEditCode(link *domain.Link) (string, error) {
 	return plaintext, nil
 }
 
-// resolveUniqueSlug resolves customHash into a slug via domain.ResolveSlug, then confirms it
-// isn't already taken by a note or another link (slugs are globally unique across both). A
-// custom-alias collision is an immediate ErrSlugConflict — the caller chose that exact value,
-// there is nothing to retry. A random-slug collision retries up to maxHashRetries before giving
-// up with ErrHashCollision.
-//
-// On success the returned unlock holds m.slugLock for the winning candidate — the caller must
-// call it exactly once, after persistLink (see SlugLock's doc comment for why the lock has to
-// stay held past the check). Every candidate rejected during a retry releases its own lock
-// before the next attempt, so at most one lock is ever held at a time.
-func (m *Manager) resolveUniqueSlug(
-	ctx context.Context, customHash string,
-) (slug string, unlock func(), err error) {
+// resolveSlug resolves customHash into a slug via domain.ResolveSlug. It does not check that the
+// slug is free: Storage.Create does that (see store).
+func (m *Manager) resolveSlug(customHash string) (string, error) {
 	// Unlike notes, links are only served at single-segment routes (GET /{id} and GET /r/{id} plus the ogen
 	// GET /links/{id} / DELETE /links/{id}), so a multi-segment custom alias would be created
 	// successfully yet unroutable and unreachable through the API. Reject it here, at the
 	// resource that owns the routing constraint, rather than narrowing the shared
 	// domain.ValidCustomSlug that multi-segment notes legitimately rely on.
 	if strings.Contains(customHash, "/") {
-		return "", nil, fmt.Errorf(
+		return "", fmt.Errorf(
 			"custom link slug %q must be a single path segment (links are served at /{id}): %w",
 			customHash, domain.ErrInvalidSlug)
 	}
 
-	for range maxHashRetries {
-		ctxErr := ctx.Err()
-		if ctxErr != nil {
-			return "", nil, fmt.Errorf("resolve unique slug: %w", ctxErr)
-		}
-
-		slug, err := domain.ResolveSlug(customHash, m.allowCustomSlugs)
-		if err != nil {
-			return "", nil, fmt.Errorf("resolve slug: %w", err)
-		}
-
-		unlock, lockErr := m.slugLock.Lock(ctx, domain.HashSlug(slug))
-		if lockErr != nil {
-			return "", nil, fmt.Errorf("lock slug: %w", lockErr)
-		}
-
-		taken, err := m.slugTaken(ctx, domain.HashSlug(slug))
-		if err != nil {
-			unlock()
-
-			return "", nil, fmt.Errorf("slug taken: %w", err)
-		}
-
-		if !taken {
-			return slug, unlock, nil
-		}
-
-		unlock()
-
-		if customHash != "" {
-			return "", nil, domain.ErrSlugConflict
-		}
-
-		// Reached only for a random-slug retry collision, never a rejected custom alias (that
-		// returns above) — see the Metrics interface's doc comment for why the distinction matters.
-		m.metrics.IncCollisions()
-	}
-
-	return "", nil, domain.ErrHashCollision
-}
-
-// slugTaken reports whether dbID (HashSlug(slug)) already names a note or a link.
-func (m *Manager) slugTaken(ctx context.Context, dbID string) (bool, error) {
-	notesExist, err := m.notes.Exists(ctx, dbID)
+	slug, err := domain.ResolveSlug(customHash, m.allowCustomSlugs)
 	if err != nil {
-		return false, fmt.Errorf("check note slug: %w", err)
+		return "", fmt.Errorf("resolve slug: %w", err)
 	}
 
-	if notesExist {
-		return true, nil
-	}
-
-	linksExist, err := m.storage.Exists(ctx, dbID)
-	if err != nil {
-		return false, fmt.Errorf("check link slug: %w", err)
-	}
-
-	return linksExist, nil
+	return slug, nil
 }
 
 // consumeLink deletes the burn link that reader follows and returns it with the plaintext target.
@@ -646,55 +563,20 @@ func (m *Manager) consume(ctx context.Context, dbID string, reader domain.Reader
 	return consumed, nil
 }
 
-// createReleasingExpired calls storage.Create. On a slug conflict, it removes an expired link or
-// an expired file with the same ID and tries once more, as notes.Manager does. Thus the address
-// of an expired record does not depend on a read after the expiry. The storage triggers check
-// the slug again, so the retry is safe across server processes.
-func (m *Manager) createReleasingExpired(ctx context.Context, link *domain.Link) error {
-	err := m.storage.Create(ctx, link)
-	if errors.Is(err, domain.ErrSlugConflict) && m.releaseExpiredSlug(ctx, link.ID) {
-		err = m.storage.Create(ctx, link)
-	}
-
+// releaseExpiredHolder reports whether an expired note, link or file with id was removed. Errors
+// are fail-soft: Create keeps its slug conflict.
+func (m *Manager) releaseExpiredHolder(ctx context.Context, id string) bool {
+	released, err := m.expiredSlugs.ReleaseExpiredSlug(ctx, id)
 	if err != nil {
-		return fmt.Errorf("store link: %w", err)
-	}
-
-	return nil
-}
-
-// releaseExpiredSlug reports whether it removed an expired link or an expired file with id. One
-// record at most holds a slug, so the file manager is asked only when no link was removed.
-func (m *Manager) releaseExpiredSlug(ctx context.Context, id string) bool {
-	return m.releaseExpiredLink(ctx, id) || m.releaseExpiredFile(ctx, id)
-}
-
-// releaseExpiredLink reports whether it removed the expired link with id. DeleteExpired checks
-// the expiry in the DELETE, so a link that its owner extended after it expired stays. Errors are
-// fail-soft: Create keeps its slug conflict.
-func (m *Manager) releaseExpiredLink(ctx context.Context, id string) bool {
-	err := m.storage.DeleteExpired(ctx, id)
-	if err == nil {
-		m.log.DebugContext(ctx, "expired link released its slug", "id", id)
-		m.evictCache(id)
-
-		return true
-	}
-
-	if !errors.Is(err, domain.ErrNotFound) {
-		m.log.WarnContext(ctx, "release expired link slug", "id", id, "err", err)
-	}
-
-	return false
-}
-
-// releaseExpiredFile reports whether the file manager removed an expired file with id.
-func (m *Manager) releaseExpiredFile(ctx context.Context, id string) bool {
-	released, err := m.expiredFiles.ReleaseExpiredSlug(ctx, id)
-	if err != nil {
-		m.log.WarnContext(ctx, "release expired file slug", "id", id, "err", err)
+		m.log.WarnContext(ctx, "release expired slug", "id", id, "err", err)
 
 		return false
+	}
+
+	if released {
+		// A link that had this ID can have a cached target; the new record must not keep it alive.
+		m.evictCache(id)
+		m.log.DebugContext(ctx, "expired record released its slug", "id", id)
 	}
 
 	return released

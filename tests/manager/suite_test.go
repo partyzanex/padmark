@@ -17,7 +17,7 @@ import (
 
 	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/infra/crypto"
-	"github.com/partyzanex/padmark/internal/infra/lock"
+	"github.com/partyzanex/padmark/internal/infra/expiredslugs"
 	"github.com/partyzanex/padmark/internal/infra/render"
 	"github.com/partyzanex/padmark/internal/infra/storage/s3store"
 	"github.com/partyzanex/padmark/internal/testutil"
@@ -49,29 +49,25 @@ type ManagerSuite struct {
 	DB          *bun.DB
 }
 
-// newManager and newLinkManager share a local slugLock for each Manager/LinkManager pair.
-// Storage independently enforces global uniqueness across replicas; see tests/slugs for
-// races between servers with separate locks and connection pools.
-func newManager(
-	t *testing.T, storage notes.Storage, linkChecker notes.LinksChecker, slugLock *lock.Locker,
-) *notes.Manager {
+// newManager and newLinkManager share one expiredslugs.Releaser for each Manager/LinkManager
+// pair, as the server does. Storage is the only slug uniqueness check; see tests/slugs for races
+// between servers with separate connection pools.
+func newManager(t *testing.T, storage notes.Storage, expired *expiredslugs.Releaser) *notes.Manager {
 	t.Helper()
 
-	return notes.NewManager(
-		storage, linkChecker, slugLock, render.NewRenderer(), testutil.ContentEncryptor(t, "note"),
-		crypto.NewEditCodeHasher(testutil.Argon2Params()), discardLog(), true,
-	)
+	return notes.NewManager(&notes.Deps{
+		Storage: storage, Renderer: render.NewRenderer(), Encryptor: testutil.ContentEncryptor(t, "note"),
+		Hasher: crypto.NewEditCodeHasher(testutil.Argon2Params()), ExpiredSlugs: expired, Log: discardLog(),
+	}, true)
 }
 
-func newLinkManager(
-	t *testing.T, storage links.Storage, notesChecker links.NotesChecker, slugLock *lock.Locker,
-) *links.Manager {
+func newLinkManager(t *testing.T, storage links.Storage, expired *expiredslugs.Releaser) *links.Manager {
 	t.Helper()
 
-	return links.NewManager(
-		storage, notesChecker, slugLock, testutil.ContentEncryptor(t, "link"),
-		crypto.NewEditCodeHasher(testutil.Argon2Params()), discardLog(), true,
-	)
+	return links.NewManager(&links.Deps{
+		Storage: storage, Encryptor: testutil.ContentEncryptor(t, "link"),
+		Hasher: crypto.NewEditCodeHasher(testutil.Argon2Params()), ExpiredSlugs: expired, Log: discardLog(),
+	}, true)
 }
 
 // ── Create ──.

@@ -60,8 +60,10 @@ Dependencies point inward: adapters and infrastructure depend on usecases and do
   `buildHandlers` and `buildRouter`; do not introduce a DI framework.
 - HTTP middleware and its request context live in `internal/adapters/web/middleware/`.
   Keep it independent of the parent `web` package; shared JSON errors live in `web/response/`.
-- Notes, links and files share the same slug-lock instance for local preflight/cache coordination.
-  Storage triggers enforce cross-process uniqueness through the `slug_namespace` primary key.
+- Only storage keeps slugs unique: triggers and the `slug_namespace` primary key, also across
+  processes (`docs/adr/0003-storage-slug-uniqueness.md`). Create makes no pre-check and holds no lock.
+  On `ErrSlugConflict` a random slug retries (5 attempts); a custom slug asks the shared
+  `expiredslugs.Releaser` to remove an expired holder of any kind, then tries once more.
 - `NewHandler(manager, linkManager, resolver, log)` requires both managers.
   `NewRouter(handler, ogenHandler, opts)` receives `*RouterOptions` and returns `(http.Handler, error)`.
   Use `NoPinger{}` for test setups without a DB pinger.

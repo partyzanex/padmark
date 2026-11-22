@@ -77,14 +77,13 @@ type revealRepo interface {
 }
 
 // noteRepo lists only the note methods whose signatures stay fixed during the current
-// refactoring of the note read paths: Create, Get, Update, Delete, DeleteExpired and Exists.
+// refactoring of the note read paths: Create, Get, Update, Delete and DeleteExpired.
 type noteRepo interface {
 	Create(ctx context.Context, note *domain.Note) error
 	Get(ctx context.Context, id string) (*domain.Note, error)
 	Update(ctx context.Context, id string, note *domain.Note) error
 	Delete(ctx context.Context, id, storedEditCode string) error
 	DeleteExpired(ctx context.Context, id string) error
-	Exists(ctx context.Context, id string) (bool, error)
 }
 
 // linkRepo lists only the link methods whose signatures stay fixed during the current
@@ -96,7 +95,6 @@ type linkRepo interface {
 	Update(ctx context.Context, id, storedEditCode string, patch *domain.LinkPatch) (*domain.Link, error)
 	Delete(ctx context.Context, id, storedEditCode string) error
 	DeleteExpired(ctx context.Context, id string) error
-	Exists(ctx context.Context, id string) (bool, error)
 }
 
 // fileRepo lists the file methods that do not depend on the read model that is changing now.
@@ -104,7 +102,6 @@ type linkRepo interface {
 type fileRepo interface {
 	Create(ctx context.Context, file *domain.File) error
 	GetByID(ctx context.Context, id string) (*domain.File, error)
-	Exists(ctx context.Context, id string) (bool, error)
 	Delete(ctx context.Context, id, objectKey string) error
 	ListExpired(ctx context.Context, now time.Time, after files.ExpiredCursor, limit int) ([]*domain.File, error)
 	DeleteExpired(ctx context.Context, id, objectKey string, now time.Time) error

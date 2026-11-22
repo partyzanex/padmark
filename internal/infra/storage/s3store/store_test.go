@@ -17,7 +17,7 @@ import (
 
 	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/infra/crypto"
-	"github.com/partyzanex/padmark/internal/infra/lock"
+	"github.com/partyzanex/padmark/internal/infra/expiredslugs"
 	"github.com/partyzanex/padmark/internal/infra/storage/s3store"
 	"github.com/partyzanex/padmark/internal/infra/storage/sqlite"
 	"github.com/partyzanex/padmark/internal/testutil"
@@ -167,15 +167,17 @@ func (s *StoreSuite) newManager() *files.Manager {
 	encryptor, err := ring.ForResource("file")
 	s.Require().NoError(err)
 
-	return files.NewManager(&files.Deps{
-		Storage:   sqlite.NewFileRepository(db),
-		Objects:   s.store,
-		Cipher:    crypto.NewFileCipher(),
-		Encryptor: encryptor,
-		Hasher:    crypto.NewEditCodeHasher(testutil.Argon2Params()),
-		SlugLock:  lock.NewLocker(),
-		Notes:     sqlite.NewNoteRepository(db),
-		Links:     sqlite.NewLinkRepository(db, slog.New(slog.DiscardHandler)),
-		Log:       slog.New(slog.DiscardHandler),
+	expired := expiredslugs.New(sqlite.NewNoteRepository(db), sqlite.NewLinkRepository(db, slog.New(slog.DiscardHandler)))
+	manager := files.NewManager(&files.Deps{
+		Storage:      sqlite.NewFileRepository(db),
+		Objects:      s.store,
+		Cipher:       crypto.NewFileCipher(),
+		Encryptor:    encryptor,
+		Hasher:       crypto.NewEditCodeHasher(testutil.Argon2Params()),
+		ExpiredSlugs: expired,
+		Log:          slog.New(slog.DiscardHandler),
 	}, 64<<20, true)
+	expired.WithFiles(manager)
+
+	return manager
 }

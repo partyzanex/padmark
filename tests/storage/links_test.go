@@ -8,8 +8,8 @@ import (
 	"github.com/partyzanex/padmark/internal/domain"
 )
 
-// LinkSuite is the contract of the link repository for Create, GetByID, Update, Delete,
-// DeleteExpired and Exists. Consume, ConsumeVisible, IncrementViews and IncrementViewsVisible
+// LinkSuite is the contract of the link repository for Create, GetByID, Update, Delete and
+// DeleteExpired. Consume, ConsumeVisible, IncrementViews and IncrementViewsVisible
 // are not in it yet: another change refactors the link read paths now.
 type LinkSuite struct {
 	repoSuite
@@ -107,22 +107,4 @@ func (s *LinkSuite) TestDeleteExpired_RemovesOnlyExpired() {
 	s.Require().NoError(s.be.links.DeleteExpired(ctx, "expired"))
 	s.Require().ErrorIs(s.be.links.DeleteExpired(ctx, "live"), domain.ErrNotFound)
 	s.Require().ErrorIs(s.be.links.DeleteExpired(ctx, "forever"), domain.ErrNotFound)
-}
-
-func (s *LinkSuite) TestExists_ReleasesExpiredSlug() {
-	ctx := s.T().Context()
-	s.Require().NoError(s.be.links.Create(ctx, newLink("live", nil)))
-
-	past := now().Add(-time.Minute)
-	s.Require().NoError(s.be.links.Create(ctx, newLink("expired", &past)))
-
-	exists, err := s.be.links.Exists(ctx, "live")
-	s.Require().NoError(err)
-	s.True(exists)
-
-	exists, err = s.be.links.Exists(ctx, "expired")
-	s.Require().NoError(err)
-	s.False(exists)
-
-	s.Require().NoError(s.be.notes.Create(ctx, newNote("expired", "edit-hash", nil)), "the slug is free")
 }

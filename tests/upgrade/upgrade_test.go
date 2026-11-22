@@ -21,7 +21,7 @@ import (
 
 	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/infra/crypto"
-	"github.com/partyzanex/padmark/internal/infra/lock"
+	"github.com/partyzanex/padmark/internal/infra/expiredslugs"
 	"github.com/partyzanex/padmark/internal/infra/render"
 	keyrepo "github.com/partyzanex/padmark/internal/infra/storage/contentkeys"
 	"github.com/partyzanex/padmark/internal/testutil"
@@ -31,10 +31,10 @@ import (
 
 var hashedID = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
-// repositories are the dialect's notes storage and link checker, as wired by serve.
+// repositories are the dialect's note and link storage, as wired by serve.
 type repositories struct {
 	notes notes.Storage
-	links notes.LinksChecker
+	links expiredslugs.RecordExpirer
 }
 
 // runUpgrade runs on a database loaded from the fixture dump and already brought to the
@@ -47,9 +47,11 @@ func runUpgrade(t *testing.T, db *bun.DB, repos repositories, fixture []legacyNo
 	convertContent(t, db, fixture)
 	assertStoredRowsConverted(t, db, fixture)
 
-	manager := notes.NewManager(repos.notes, repos.links, lock.NewLocker(), render.NewRenderer(),
-		testutil.ContentEncryptor(t, "note"), crypto.NewEditCodeHasher(testutil.Argon2Params()),
-		slog.New(slog.DiscardHandler), true)
+	manager := notes.NewManager(&notes.Deps{
+		Storage: repos.notes, Renderer: render.NewRenderer(), Encryptor: testutil.ContentEncryptor(t, "note"),
+		Hasher:       crypto.NewEditCodeHasher(testutil.Argon2Params()),
+		ExpiredSlugs: expiredslugs.New(repos.notes, repos.links), Log: slog.New(slog.DiscardHandler),
+	}, true)
 
 	assertNotesReadable(t, manager, fixture)
 	assertEditCodes(t, manager, fixture)

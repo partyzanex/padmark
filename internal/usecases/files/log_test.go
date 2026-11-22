@@ -46,15 +46,13 @@ func (s *LogSuite) SetupTest() {
 	}))
 
 	s.manager = NewManager(&Deps{
-		Storage:   s.storage,
-		Objects:   s.objects,
-		Cipher:    passthroughCipher(s.ctrl),
-		Encryptor: passthroughEncryptor(s.ctrl),
-		Hasher:    identityHasher(s.ctrl),
-		SlugLock:  noopSlugLock(s.ctrl),
-		Notes:     NewMockSlugChecker(s.ctrl),
-		Links:     NewMockSlugChecker(s.ctrl),
-		Log:       log,
+		Storage:      s.storage,
+		Objects:      s.objects,
+		Cipher:       passthroughCipher(s.ctrl),
+		Encryptor:    passthroughEncryptor(s.ctrl),
+		Hasher:       identityHasher(s.ctrl),
+		ExpiredSlugs: NewMockExpiredSlugReleaser(s.ctrl),
+		Log:          log,
 	}, 10, true)
 }
 

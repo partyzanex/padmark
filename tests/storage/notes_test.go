@@ -8,8 +8,8 @@ import (
 	"github.com/partyzanex/padmark/internal/domain"
 )
 
-// NoteSuite is the contract of the note repository for Create, Get, Update, Delete,
-// DeleteExpired and Exists. Consume, SetBurnExpiry and IncrementViews are not in it yet:
+// NoteSuite is the contract of the note repository for Create, Get, Update, Delete and
+// DeleteExpired. Consume, SetBurnExpiry and IncrementViews are not in it yet:
 // another change refactors the note read paths now.
 type NoteSuite struct {
 	repoSuite
@@ -101,24 +101,4 @@ func (s *NoteSuite) TestDeleteExpired_RemovesOnlyExpired() {
 	s.Require().ErrorIs(s.be.notes.DeleteExpired(ctx, "live"), domain.ErrNotFound)
 	s.Require().ErrorIs(s.be.notes.DeleteExpired(ctx, "forever"), domain.ErrNotFound)
 	s.Require().ErrorIs(s.be.notes.DeleteExpired(ctx, "unknown"), domain.ErrNotFound)
-}
-
-// TestExists_ReleasesExpiredSlug pins that an expired note does not hold its slug: Exists
-// deletes it, and the slug is free for a link.
-func (s *NoteSuite) TestExists_ReleasesExpiredSlug() {
-	ctx := s.T().Context()
-	past := now().Add(-time.Minute)
-
-	s.Require().NoError(s.be.notes.Create(ctx, newNote("live", "edit-hash", nil)))
-	s.Require().NoError(s.be.notes.Create(ctx, newNote("expired", "edit-hash", &past)))
-
-	exists, err := s.be.notes.Exists(ctx, "live")
-	s.Require().NoError(err)
-	s.True(exists)
-
-	exists, err = s.be.notes.Exists(ctx, "expired")
-	s.Require().NoError(err)
-	s.False(exists)
-
-	s.Require().NoError(s.be.links.Create(ctx, newLink("expired", nil)), "the slug is free")
 }

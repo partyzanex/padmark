@@ -27,13 +27,9 @@ type UpdateOptions struct {
 func (m *Manager) Update(
 	ctx context.Context, slug, editCode string, reader domain.Reader, opts UpdateOptions,
 ) (*domain.File, error) {
+	// No lock: two updates do not lose each other's omitted fields, because Storage.Update writes
+	// only the fields that opts sets.
 	dbID := domain.HashSlug(slug)
-	// The lock keeps two updates in this process from losing each other's omitted fields.
-	unlock, err := m.deps.SlugLock.Lock(ctx, dbID)
-	if err != nil {
-		return nil, fmt.Errorf("lock file: %w", err)
-	}
-	defer unlock()
 
 	existing, err := m.deps.Storage.GetByID(ctx, dbID)
 	if err != nil {

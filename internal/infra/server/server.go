@@ -23,10 +23,10 @@ import (
 	"github.com/partyzanex/padmark/internal/adapters/web"
 	"github.com/partyzanex/padmark/internal/errorcontext"
 	"github.com/partyzanex/padmark/internal/infra/crypto"
+	"github.com/partyzanex/padmark/internal/infra/expiredslugs"
 	"github.com/partyzanex/padmark/internal/infra/filemetrics"
 	"github.com/partyzanex/padmark/internal/infra/linkcache"
 	"github.com/partyzanex/padmark/internal/infra/linkmetrics"
-	"github.com/partyzanex/padmark/internal/infra/lock"
 	"github.com/partyzanex/padmark/internal/infra/render"
 	"github.com/partyzanex/padmark/internal/infra/rendercache"
 	"github.com/partyzanex/padmark/internal/infra/storage/postgres"
@@ -596,26 +596,20 @@ func buildHandlers(
 		return nil, nil, fmt.Errorf("argon2 params: %w", err)
 	}
 
-	var checker links.NotesChecker
+	// The storage triggers keep slugs unique across notes, links and files, also between server
+	// processes. The managers share one expiredslugs.Releaser, so an expired record of any kind
+	// does not block a new record with its slug.
+	expired := expiredslugs.New(store.notes, store.links)
 
-	switch store.name {
-	case storagePostgres:
-		checker = newPostgresNotesChecker(store.db)
-	default:
-		checker = newSQLiteNotesChecker(store.db)
-	}
-
-	// One Locker instance shared by both managers: it closes the cross-table TOCTOU race
-	// between notes.Manager.Create and links.Manager.Create (see notes.SlugLock's doc comment)
-	// — a Locker per manager would each serialize its own calls but never contend with the
-	// other's, protecting nothing.
-	slugLock := lock.NewLocker()
-
-	manager := notes.NewManager(store.notes, store.links, slugLock, render.NewRenderer(), noteCipher,
-		crypto.NewEditCodeHasher(argonParams).WithLogger(log), log, cmd.Bool(FlagCustomSlugs)).
+	manager := notes.NewManager(&notes.Deps{
+		Storage: store.notes, Renderer: render.NewRenderer(), Encryptor: noteCipher,
+		Hasher: crypto.NewEditCodeHasher(argonParams).WithLogger(log), ExpiredSlugs: expired, Log: log,
+	}, cmd.Bool(FlagCustomSlugs)).
 		WithRenderCache(rendercache.NewDefault(log)).WithMaxContentLength(maxContentLength(cmd))
-	linkManager := links.NewManager(store.links, checker, slugLock, linkCipher,
-		crypto.NewEditCodeHasher(argonParams).WithLogger(log), log, cmd.Bool(FlagCustomSlugs)).
+	linkManager := links.NewManager(&links.Deps{
+		Storage: store.links, Encryptor: linkCipher,
+		Hasher: crypto.NewEditCodeHasher(argonParams).WithLogger(log), ExpiredSlugs: expired, Log: log,
+	}, cmd.Bool(FlagCustomSlugs)).
 		WithCache(linkcache.NewDefault(log)).
 		WithMetrics(metrics.links)
 
@@ -631,9 +625,8 @@ func buildHandlers(
 	}
 
 	err = attachFiles(ctx, cmd, handler, store, keyring, &fileDeps{
-		slugLock: slugLock, notes: checker, links: store.links,
-		hasher: crypto.NewEditCodeHasher(argonParams).WithLogger(log), metrics: metrics.files,
-		noteManager: manager, linkManager: linkManager,
+		expired: expired,
+		hasher:  crypto.NewEditCodeHasher(argonParams).WithLogger(log), metrics: metrics.files,
 	}, background, log)
 	if err != nil {
 		return nil, nil, fmt.Errorf("attach files: %w", err)

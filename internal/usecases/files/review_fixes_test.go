@@ -497,20 +497,15 @@ func (s *ManagerSuite) TestReleaseExpiredSlug() {
 	})
 }
 
-func (s *ManagerSuite) TestCreate_ExpiredFileDoesNotHoldCustomSlug() {
-	expired := storedFile(false)
-	past := time.Now().Add(-time.Minute)
-	expired.ExpiresAt = &past
-	expired.ObjectKey = "old-obj"
-
+// TestCreate_ExpiredRecordDoesNotHoldCustomSlug: an expired note, link or file still holds the
+// custom slug in storage. Create asks the release port to remove it and tries once more.
+func (s *ManagerSuite) TestCreate_ExpiredRecordDoesNotHoldCustomSlug() {
 	s.expectUpload("x")
-	s.notes.EXPECT().Exists(gomock.Any(), domain.HashSlug("report")).Return(false, nil)
-	s.links.EXPECT().Exists(gomock.Any(), domain.HashSlug("report")).Return(false, nil)
-	s.storage.EXPECT().Exists(gomock.Any(), domain.HashSlug("report")).Return(true, nil)
-	s.storage.EXPECT().GetByID(gomock.Any(), domain.HashSlug("report")).Return(expired, nil)
-	s.objects.EXPECT().Delete(gomock.Any(), "old-obj").Return(nil)
-	s.storage.EXPECT().DeleteExpired(gomock.Any(), domain.HashSlug("report"), "old-obj", gomock.Any()).Return(nil)
-	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
+	gomock.InOrder(
+		s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(domain.ErrSlugConflict),
+		s.expired.EXPECT().ReleaseExpiredSlug(gomock.Any(), domain.HashSlug("report")).Return(true, nil),
+		s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil),
+	)
 	s.expectUploadSweep()
 
 	opts := createOptions()
@@ -592,7 +587,7 @@ func (s *ManagerSuite) TestCreate_CanceledRequest() {
 
 func (s *ManagerSuite) TestCreate_RandomSlugCollisions() {
 	s.expectUpload("x")
-	s.notes.EXPECT().Exists(gomock.Any(), gomock.Any()).Return(true, nil).Times(maxSlugRetries)
+	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(domain.ErrSlugConflict).Times(maxSlugRetries)
 	s.objects.EXPECT().Delete(gomock.Any(), gomock.Any()).Return(nil)
 
 	_, err := s.manager.Create(s.T().Context(), "a", strings.NewReader("x"), createOptions())
