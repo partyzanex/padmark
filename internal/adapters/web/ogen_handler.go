@@ -138,7 +138,12 @@ func (h *OgenHandler) UpdateNote(
 		return mapUpdateError(err, h.log), nil
 	}
 
-	if !h.noteMutationAllowed(ctx, params.ID) {
+	allowed, err := h.noteMutationAllowed(ctx, params.ID)
+	if err != nil {
+		return mapUpdateError(err, h.log), nil
+	}
+
+	if !allowed {
 		v := ogenapi.UpdateNoteUnauthorized{}
 
 		return &v, nil
@@ -202,7 +207,12 @@ func noteUpdatePayload(req *ogenapi.UpdateNoteRequest) (*domain.Note, error) {
 func (h *OgenHandler) DeleteNote(
 	ctx context.Context, params ogenapi.DeleteNoteParams,
 ) (ogenapi.DeleteNoteRes, error) {
-	if !h.noteMutationAllowed(ctx, params.ID) {
+	allowed, err := h.noteMutationAllowed(ctx, params.ID)
+	if err != nil {
+		return mapDeleteError(err, h.log), nil
+	}
+
+	if !allowed {
 		return &ogenapi.DeleteNoteUnauthorized{}, nil
 	}
 
@@ -210,7 +220,7 @@ func (h *OgenHandler) DeleteNote(
 		ctx, h.log, params.ID, params.XEditCode.Or(""), middleware.LegacyNoteEditCodeFromCtx(ctx),
 	)
 
-	err := h.manager.Delete(ctx, params.ID, editCode, middleware.CallerIDFromCtx(ctx))
+	err = h.manager.Delete(ctx, params.ID, editCode, middleware.CallerIDFromCtx(ctx))
 	if err != nil {
 		return mapDeleteError(err, h.log), nil
 	}
@@ -294,11 +304,16 @@ func (h *OgenHandler) GetLink(
 func (h *OgenHandler) DeleteLink(
 	ctx context.Context, params ogenapi.DeleteLinkParams,
 ) (ogenapi.DeleteLinkRes, error) {
-	if !h.linkMutationAllowed(ctx, params.ID) {
+	allowed, err := h.linkMutationAllowed(ctx, params.ID)
+	if err != nil {
+		return mapDeleteLinkError(err, h.log), nil
+	}
+
+	if !allowed {
 		return &ogenapi.DeleteLinkUnauthorized{}, nil
 	}
 
-	err := h.linkManager.Delete(ctx, params.ID, params.XEditCode.Or(""), middleware.CallerIDFromCtx(ctx))
+	err = h.linkManager.Delete(ctx, params.ID, params.XEditCode.Or(""), middleware.CallerIDFromCtx(ctx))
 	if err != nil {
 		return mapDeleteLinkError(err, h.log), nil
 	}
@@ -708,35 +723,37 @@ func (h *OgenHandler) accountsEnabled() accountMode {
 // note's read-level privacy must admit this caller, as on GetNote. An edit code proves the right
 // to change a note the caller can read; it never opens a note that privacy hides, such as another
 // account's owner-only note. The denial is 401, like the read, so it never counts as a wrong edit
-// code for the fail lockout. A failed Peek defers to the real mutation so the caller sees the
-// same error (404) a read would produce. Without the account system no privacy level is enforced
-// on reads, as in v0.1.6 without --auth-tokens, so the edit code alone decides.
-func (h *OgenHandler) noteMutationAllowed(ctx context.Context, id string) bool {
+// code for the fail lockout. A failed Peek stops the mutation and the error goes to the caller
+// (fail-closed): a missing note gives 404, and a storage failure gives 500 through the operation's
+// error mapper. The mutation must not continue without the privacy check. Without the account
+// system no privacy level is enforced on reads, as in v0.1.6 without --auth-tokens, so the edit
+// code alone decides.
+func (h *OgenHandler) noteMutationAllowed(ctx context.Context, id string) (bool, error) {
 	if !h.accountsEnabled() {
-		return true
+		return true, nil
 	}
 
 	note, err := h.manager.Peek(ctx, id)
 	if err != nil {
-		return true
+		return false, fmt.Errorf("check note access: %w", err)
 	}
 
-	return note.VisibleTo(middleware.CallerIDFromCtx(ctx), middleware.AuthenticatedFromCtx(ctx))
+	return note.VisibleTo(middleware.CallerIDFromCtx(ctx), middleware.AuthenticatedFromCtx(ctx)), nil
 }
 
 // linkMutationAllowed is the links counterpart of noteMutationAllowed
 // (see GetLink's VisibleTo check for the read-path symmetry).
-func (h *OgenHandler) linkMutationAllowed(ctx context.Context, id string) bool {
+func (h *OgenHandler) linkMutationAllowed(ctx context.Context, id string) (bool, error) {
 	if !h.accountsEnabled() {
-		return true
+		return true, nil
 	}
 
 	link, err := h.linkManager.Peek(ctx, id)
 	if err != nil {
-		return true
+		return false, fmt.Errorf("check link access: %w", err)
 	}
 
-	return link.VisibleTo(middleware.CallerIDFromCtx(ctx), middleware.AuthenticatedFromCtx(ctx))
+	return link.VisibleTo(middleware.CallerIDFromCtx(ctx), middleware.AuthenticatedFromCtx(ctx)), nil
 }
 
 // requestTargetURL returns the target URL in the form that the client sent. ogen decodes a

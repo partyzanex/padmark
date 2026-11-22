@@ -3082,26 +3082,6 @@ func (s *HandlerSuite) TestMutationGate_SignedInNonOwner_OwnerNote() {
 	}
 }
 
-// TestMutationGate_PeekError_DefersToMutation verifies the gate's fail-open behaviour on a
-// Peek error: the request proceeds to the real mutation, so the caller sees the same 404 a read
-// of a missing note would produce — never a spurious 401 (and never silent success).
-func (s *HandlerSuite) TestMutationGate_PeekError_DefersToMutation() {
-	router := s.newRouterWithTOTPAuth()
-	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(nil, domain.ErrNotFound)
-	s.manager.EXPECT().
-		Delete(gomock.Any(), testID, "whatever", uuid.Nil).
-		Return(domain.ErrNotFound)
-
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodDelete, "/notes/"+testID, nil)
-	r.Header.Set("X-Edit-Code", "whatever")
-	r.Header.Set("Accept", "application/json")
-
-	router.ServeHTTP(w, r)
-
-	s.Equal(http.StatusNotFound, w.Code)
-}
-
 // TestMutationGate_Note401DoesNotTriggerFailLockout verifies the gate/lockout interplay: the
 // fail-lockout counts consecutive 403s (wrong edit codes), while the mutation gate's 401 is a
 // pre-check that never reaches the counter — repeated gated attempts stay 401 and never

@@ -244,13 +244,21 @@ func (h *FileHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slug := r.PathValue("id")
-	if !h.mutationAllowed(r, slug) {
+
+	allowed, err := h.mutationAllowed(r, slug)
+	if err != nil {
+		h.writeAPIError(w, r, err)
+
+		return
+	}
+
+	if !allowed {
 		middleware.WriteUnauthorized(w)
 
 		return
 	}
 
-	err := h.manager.Delete(r.Context(), slug, editCodeHeader(r), middleware.CallerIDFromCtx(r.Context()))
+	err = h.manager.Delete(r.Context(), slug, editCodeHeader(r), middleware.CallerIDFromCtx(r.Context()))
 	if err != nil {
 		h.writeAPIError(w, r, err)
 
@@ -296,7 +304,15 @@ func (h *FileHandler) UpdateFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slug := r.PathValue("id")
-	if !h.mutationAllowed(r, slug) {
+
+	allowed, err := h.mutationAllowed(r, slug)
+	if err != nil {
+		h.writeUpdateError(w, r, err)
+
+		return
+	}
+
+	if !allowed {
 		middleware.WriteUnauthorized(w)
 
 		return
@@ -346,18 +362,22 @@ func (h *FileHandler) logDeadlineError(r *http.Request, err error) {
 
 // mutationAllowed reports whether the caller of r can try to change the file slug. With
 // accounts on, a caller that cannot see a private file gets 401, as for links. The edit-code
-// check then does not tell a stranger that the file exists.
-func (h *FileHandler) mutationAllowed(r *http.Request, slug string) bool {
+// check then does not tell a stranger that the file exists. A failed Peek stops the mutation
+// (fail-closed), as for notes and links: the caller gets the error, 404 for a missing file and
+// 500 for a storage failure.
+func (h *FileHandler) mutationAllowed(r *http.Request, slug string) (bool, error) {
 	if h.authMgr == nil {
-		return true
+		return true, nil
 	}
 
 	file, err := h.manager.Peek(r.Context(), slug)
 	if err != nil {
-		return true
+		return false, fmt.Errorf("check file access: %w", err)
 	}
 
-	return file.VisibleTo(middleware.CallerIDFromCtx(r.Context()), middleware.AuthenticatedFromCtx(r.Context()))
+	visible := file.VisibleTo(middleware.CallerIDFromCtx(r.Context()), middleware.AuthenticatedFromCtx(r.Context()))
+
+	return visible, nil
 }
 
 // updateOptions converts the PUT body into files.UpdateOptions. It checks the values before

@@ -406,9 +406,9 @@ func (h *NoteHandler) writePlainNote(w http.ResponseWriter, r *http.Request, id 
 // gateMutation enforces the note's read-level privacy for every write caller (PUT/DELETE):
 // someone who could not read the note may not mutate it via edit code either, signed in or not —
 // the mutation counterpart of handlePrivateAuth, applied by UpdateNoteByPath and
-// DeleteNoteByPath. A failed Peek defers to the real mutation so the caller sees the same error
-// (404) a read would produce. Reports whether the response has been written (gate refused the
-// request).
+// DeleteNoteByPath. A failed Peek stops the mutation (fail-closed), as on the ogen routes: a
+// missing note gives 404 and a storage failure gives 500 through errorStatusMessage, without the
+// internal error text. Reports whether the response has been written (gate refused the request).
 func (h *NoteHandler) gateMutation(w http.ResponseWriter, r *http.Request, id string) bool {
 	if h.authMgr == nil {
 		return false
@@ -416,7 +416,13 @@ func (h *NoteHandler) gateMutation(w http.ResponseWriter, r *http.Request, id st
 
 	note, err := h.manager.Peek(r.Context(), id)
 	if err != nil {
-		return false
+		if status, _ := domainErrStatus(err); status == http.StatusInternalServerError {
+			h.log.ErrorContext(r.Context(), "check note access", "id", domain.HashSlug(id), "err", err)
+		}
+
+		h.writeError(w, r, err)
+
+		return true
 	}
 
 	if note.VisibleTo(middleware.CallerIDFromCtx(r.Context()), h.isAuthenticated(r)) {
