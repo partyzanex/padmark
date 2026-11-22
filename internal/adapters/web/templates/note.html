@@ -289,8 +289,32 @@
             if (link) {
                 link.classList.add('active');
                 link.setAttribute('aria-current', 'location');
-                currentLabel.textContent = link.textContent;
+                currentLabel.replaceChildren(headingLabel(link.heading));
+                // math.js is deferred: before it runs, it draws the whole <main>, this label too.
+                if (window.padmarkMath) window.padmarkMath.render(currentLabel);
             }
+        }
+
+        // headingLabel copies the text of a heading for the list. A formula keeps its TeX source
+        // in a .math-inline element, so math.js draws it here too; textContent would show the
+        // TeX source, or, once KaTeX has drawn the heading, its text twice.
+        function headingLabel(node) {
+            const label = document.createDocumentFragment();
+            node.childNodes.forEach(function (child) {
+                if (child.nodeType === Node.TEXT_NODE) {
+                    label.appendChild(document.createTextNode(child.textContent));
+                } else if (child.nodeType !== Node.ELEMENT_NODE) {
+                    return;
+                } else if (child.classList.contains('math-inline') || child.classList.contains('math-display')) {
+                    const formula = document.createElement('span');
+                    formula.className = 'math-inline';
+                    formula.textContent = child.dataset.tex !== undefined ? child.dataset.tex : child.textContent;
+                    label.appendChild(formula);
+                } else {
+                    label.appendChild(headingLabel(child));
+                }
+            });
+            return label;
         }
 
         // Narrow screens show the list as a drop-down under the toggle.
@@ -307,7 +331,12 @@
             const name = heading.id.slice(userContentPrefix.length);
             link.className = 'note-toc-link';
             link.href = '#' + name;
-            link.textContent = heading.textContent.trim();
+            link.heading = heading;
+            // One element for the label: the phone list makes the link a flex box, and there
+            // each loose text piece would lose its spaces at the formula.
+            const label = document.createElement('span');
+            label.appendChild(headingLabel(heading));
+            link.appendChild(label);
             link.addEventListener('click', function (ev) {
                 if (jump(name, true)) {
                     ev.preventDefault();
@@ -350,7 +379,7 @@
 {{if .HasMath}}
 <script src="/static/katex/katex.min.js?p={{assetVersion "katex/katex.min.js"}}" nonce="{{.Nonce}}" defer></script>
 <script src="/static/math.js?p={{assetVersion "math.js"}}" nonce="{{.Nonce}}" defer
-        data-math-root=".prose.markdown-body"
+        data-math-root="main"
         data-katex-js="/static/katex/katex.min.js?p={{assetVersion "katex/katex.min.js"}}"
         data-katex-css="/static/katex/katex.min.css?p={{assetVersion "katex/katex.min.css"}}"></script>
 {{end}}

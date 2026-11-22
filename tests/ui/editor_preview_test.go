@@ -26,6 +26,7 @@ func TestEditorPreview(t *testing.T) {
 		{name: "MathParity", run: testMathParity, accounts: false, files: false, allowedStatuses: nil},
 		{name: "MathLoadsOnce", run: testMathLoadsOnce, accounts: false, files: false, allowedStatuses: nil},
 		{name: "NoMathNoKaTeX", run: testNoMathNoKaTeX, accounts: false, files: false, allowedStatuses: nil},
+		{name: "MathContents", run: testMathContents, accounts: false, files: false, allowedStatuses: nil},
 		// The <img src=x> request gets the note route's 404; the image error must not run a script.
 		{
 			name: "Sanitize", run: testPreviewSanitize, accounts: false, files: false,
@@ -304,6 +305,34 @@ func testMathLoadsOnce(sess *uiSession) {
 
 	sess.must(sess.expect.Locator(sess.page.Locator(`link[href*="katex.min.css"]`)).ToHaveCount(1))
 	sess.must(sess.expect.Locator(sess.page.Locator(`script[src*="katex.min.js"]`)).ToHaveCount(1))
+}
+
+// testMathContents checks that the "On this page" list and the current-section label draw the
+// formulas of the headings instead of showing their TeX source.
+func testMathContents(sess *uiSession) {
+	sess.gotoPage("/")
+	sess.fill("#titleInput", "Statistics")
+	sess.fill("#editor", "Intro.\n\n## Mean $\\bar x$\n\nText.\n\n## Error \\(e_i\\) and *$y_i$*\n\nText.\n\n"+
+		"## Plain heading\n\nText.\n")
+	sess.openSettings()
+	sess.click("#contentsLabel")
+	sess.closeSettings()
+	sess.button("Publish note")
+	sess.must(sess.expect.Page(sess.page).ToHaveURL(regexpURL("/success?")))
+	sess.link("Open note")
+
+	links := sess.page.Locator("#noteTocList .note-toc-link")
+	sess.must(sess.expect.Locator(links).ToHaveCount(3))
+	sess.must(sess.expect.Locator(links.Nth(0).Locator(".katex")).ToHaveCount(1))
+	sess.must(sess.expect.Locator(links.Nth(1).Locator(".katex")).ToHaveCount(2))
+	sess.must(sess.expect.Locator(links.Nth(2)).ToHaveText("Plain heading"))
+	// One label element: as loose flex items, the text pieces would lose their spaces on a phone.
+	sess.must(sess.expect.Locator(sess.page.Locator("#noteTocList .note-toc-link > span")).ToHaveCount(3))
+	sess.must(sess.expect.Locator(sess.page.Locator("#noteToc .math-inline:not(:has(.katex))")).ToHaveCount(0))
+	sess.must(sess.expect.Locator(sess.page.Locator("#noteToc .math-error")).ToHaveCount(0))
+	// The heading keeps its own formula: the list gets copies.
+	sess.must(sess.expect.Locator(sess.page.Locator(".prose.markdown-body h2 .katex")).ToHaveCount(3))
+	sess.must(sess.expect.Locator(sess.page.Locator("#noteTocCurrent .katex")).ToHaveCount(1))
 }
 
 // testNoMathNoKaTeX checks that a note page without a formula does not load KaTeX.

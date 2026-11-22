@@ -1942,6 +1942,8 @@ a.copy-value:hover { color: var(--accent-text); }
 
 .note-toc-link:hover { color: var(--ink); background: var(--sunken); }
 .note-toc-link.active { color: var(--accent-text); background: var(--accent-soft); font-weight: 500; }
+/* A formula in a heading (static/math.js) keeps the size of the link text in the list. */
+.note-toc .katex { font-size: 1em; }
 .note-toc-item--sub .note-toc-link { padding-left: 22px; }
 
 @media (min-width: 960px) {

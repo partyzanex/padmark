@@ -1072,7 +1072,7 @@ func (s *HandlerSuite) TestGetNote_HTML_LoadsKaTeXForFormulas() {
 	s.Regexp(`<link rel="stylesheet" href="/static/katex/katex\.min\.css\?p=[0-9a-f]+">`, body)
 	s.Regexp(`<script src="/static/katex/katex\.min\.js\?p=[0-9a-f]+" nonce="[^"]+" defer>`, body)
 	s.Regexp(`<script src="/static/math\.js\?p=[0-9a-f]+" nonce="[^"]+" defer`, body)
-	s.Contains(body, `data-math-root=".prose.markdown-body"`)
+	s.Contains(body, `data-math-root="main"`, "math.js draws the note and its contents sidebar")
 }
 
 func (s *HandlerSuite) TestGetNote_HTML_WithExpiry() {
