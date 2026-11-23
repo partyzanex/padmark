@@ -18,6 +18,10 @@ import (
 
 	"github.com/partyzanex/padmark/internal/infra/storage/postgres"
 	"github.com/partyzanex/padmark/internal/infra/storage/sqlite"
+	"github.com/partyzanex/padmark/internal/usecases/auth"
+	"github.com/partyzanex/padmark/internal/usecases/files"
+	"github.com/partyzanex/padmark/internal/usecases/links"
+	"github.com/partyzanex/padmark/internal/usecases/notes"
 )
 
 const storagePostgres = "postgres"
@@ -104,18 +108,6 @@ func openDB(ctx context.Context, storage, dsn string, log *slog.Logger) (*bun.DB
 	return db, nil
 }
 
-// initPostgresStorage runs postgres migrations and returns a ready-to-use note repository.
-func initPostgresStorage(ctx context.Context, db *bun.DB, log *slog.Logger) (*postgres.NoteRepository, error) {
-	results, err := postgres.MigrateWithWarning(ctx, db, log)
-	if err != nil {
-		return nil, fmt.Errorf("postgres migrate: %w", err)
-	}
-
-	logMigrations(ctx, log, results)
-
-	return postgres.NewNoteRepository(db), nil
-}
-
 // migrationOptions carries what the sqlite backup-before-migrate step needs.
 type migrationOptions struct {
 	// dsn is the database DSN, from which the file to back up is resolved.
@@ -124,11 +116,83 @@ type migrationOptions struct {
 	skipBackup bool
 }
 
-// initSQLiteStorage runs sqlite migrations, backing the database up first when any are pending
-// (unless opts.skipBackup), and returns a ready-to-use note repository.
-func initSQLiteStorage(
-	ctx context.Context, db *bun.DB, log *slog.Logger, opts migrationOptions,
-) (*sqlite.NoteRepository, error) {
+// serverStorage is the storage of one dialect: the connection, the repositories that the
+// managers use and the schema migration of the dialect.
+type serverStorage struct {
+	db     *bun.DB
+	notes  notes.Storage
+	links  links.Storage
+	files  files.Storage
+	reveal auth.RevealTokenStore
+	// migrate applies the pending schema migrations and logs them.
+	migrate func(ctx context.Context, opts migrationOptions) error
+	auth    auth.Stores
+	name    string
+}
+
+// newStorage builds the repositories and the migration of one dialect. It is the only dialect
+// switch of the composition root. openDB already refused an unknown dialect, so each other
+// value is SQLite. The constructors have no side effects; initRepos applies the migrations.
+func newStorage(dialect string, db *bun.DB, log *slog.Logger) serverStorage {
+	if dialect == storagePostgres {
+		return serverStorage{
+			db: db, notes: postgres.NewNoteRepository(db), links: postgres.NewLinkRepository(db, log),
+			files: postgres.NewFileRepository(db), reveal: postgres.NewRevealRepository(db),
+			migrate: func(ctx context.Context, _ migrationOptions) error {
+				return migratePostgres(ctx, db, log)
+			},
+			auth: auth.Stores{
+				Users:     postgres.NewUserRepository(db),
+				Invites:   postgres.NewInviteRepository(db),
+				Sessions:  postgres.NewSessionRepository(db),
+				APITokens: postgres.NewAPITokenRepository(db),
+			},
+			name: dialect,
+		}
+	}
+
+	return serverStorage{
+		db: db, notes: sqlite.NewNoteRepository(db), links: sqlite.NewLinkRepository(db, log),
+		files: sqlite.NewFileRepository(db), reveal: sqlite.NewRevealRepository(db),
+		migrate: func(ctx context.Context, opts migrationOptions) error {
+			return migrateSQLite(ctx, db, log, opts)
+		},
+		auth: auth.Stores{
+			Users:     sqlite.NewUserRepository(db),
+			Invites:   sqlite.NewInviteRepository(db),
+			Sessions:  sqlite.NewSessionRepository(db),
+			APITokens: sqlite.NewAPITokenRepository(db),
+		},
+		name: dialect,
+	}
+}
+
+// initRepos builds the storage of the dialect and applies its pending migrations. serve and
+// migrate both use it.
+func initRepos(
+	ctx context.Context, dialect string, db *bun.DB, log *slog.Logger, opts migrationOptions,
+) (serverStorage, error) {
+	store := newStorage(dialect, db, log)
+	err := store.migrate(ctx, opts)
+
+	return store, err
+}
+
+// migratePostgres runs the postgres migrations.
+func migratePostgres(ctx context.Context, db *bun.DB, log *slog.Logger) error {
+	results, err := postgres.MigrateWithWarning(ctx, db, log)
+	if err != nil {
+		return fmt.Errorf("postgres migrate: %w", err)
+	}
+
+	logMigrations(ctx, log, results)
+
+	return nil
+}
+
+// migrateSQLite runs the sqlite migrations. It backs the database up first when any are
+// pending, unless opts.skipBackup is set.
+func migrateSQLite(ctx context.Context, db *bun.DB, log *slog.Logger, opts migrationOptions) error {
 	var (
 		results []*goose.MigrationResult
 		err     error
@@ -141,24 +205,12 @@ func initSQLiteStorage(
 	}
 
 	if err != nil {
-		return nil, fmt.Errorf("sqlite migrate: %w", err)
+		return fmt.Errorf("sqlite migrate: %w", err)
 	}
 
 	logMigrations(ctx, log, results)
 
-	return sqlite.NewNoteRepository(db), nil
-}
-
-// newPostgresLinkRepository returns a ready-to-use links repository for the postgres backend.
-// Migrations for the links table already ran as part of the storage init (same db handle, same
-// migration set), so this only needs to construct the repository, not migrate again.
-func newPostgresLinkRepository(db *bun.DB, log *slog.Logger) *postgres.LinkRepository {
-	return postgres.NewLinkRepository(db, log)
-}
-
-// newSQLiteLinkRepository returns a ready-to-use links repository for the sqlite backend.
-func newSQLiteLinkRepository(db *bun.DB, log *slog.Logger) *sqlite.LinkRepository {
-	return sqlite.NewLinkRepository(db, log)
+	return nil
 }
 
 // parseTrustedProxies parses a comma-separated list of CIDRs or bare IP addresses.

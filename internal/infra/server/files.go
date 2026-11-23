@@ -5,12 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
 	"runtime/debug"
 	"time"
 
 	"github.com/partyzanex/shutdown"
-	"github.com/urfave/cli/v3"
 
 	"github.com/partyzanex/padmark/internal/adapters/web"
 	"github.com/partyzanex/padmark/internal/infra/crypto"
@@ -31,73 +29,65 @@ var errInvalidSweepInterval = errors.New("files sweep interval must not be negat
 // did not remove yet does not block a new note, link or file with its slug.
 type fileDeps struct {
 	expired *expiredslugs.Releaser
-	hasher  files.EditCodeHasher
 	metrics files.Metrics
 }
 
-// attachFiles turns on file publishing when --s3-endpoint is set. A set but unusable
-// configuration stops startup (fail-hard): an operator who configures files expects them to
-// work, and a wrong bucket or key is a configuration error, not a temporary failure. The file
-// sweep registers its close function in background; the caller closes background before the
-// database closes.
+// attachFiles turns on file publishing when --s3-endpoint is set. configFromCommand already
+// checked that the bucket and the keys are set. An unusable configuration stops startup
+// (fail-hard): an operator who configures files expects them to work, and a wrong bucket or key
+// is a configuration error, not a temporary failure. The file sweep registers its close function
+// in shared.background, which stops before the database closes.
 func attachFiles(
-	ctx context.Context, cmd *cli.Command, handler *web.Handler, store serverStorage,
-	keyring *crypto.ContentKeyring, deps *fileDeps, background *shutdown.Lifo, log *slog.Logger,
+	ctx context.Context, cfg *Config, handler *web.Handler, storage files.Storage,
+	shared contentServices, deps *fileDeps, log *slog.Logger,
 ) error {
-	if cmd.String(FlagS3Endpoint) == "" {
-		logFilesOff(ctx, cmd, log)
+	if cfg.files.s3.Endpoint == "" {
+		logFilesOff(ctx, cfg.files.orphans, log)
 
 		return nil
 	}
 
-	cfg, err := s3ConfigFromFlags(cmd)
+	objects, err := openObjectStore(ctx, &cfg.files, log)
 	if err != nil {
 		return err
 	}
 
-	objects, err := openObjectStore(ctx, cmd, &cfg, log)
-	if err != nil {
-		return err
-	}
-
-	encryptor, err := keyring.ForResource("file")
+	encryptor, err := shared.keyring.ForResource("file")
 	if err != nil {
 		return fmt.Errorf("file content cipher: %w", err)
 	}
 
 	manager := files.NewManager(&files.Deps{
-		Storage:      store.files,
+		Storage:      storage,
 		Objects:      objects,
 		Cipher:       crypto.NewFileCipher(),
 		Encryptor:    encryptor,
-		Hasher:       deps.hasher,
+		Hasher:       shared.hasher,
 		ExpiredSlugs: deps.expired,
 		Log:          log,
 		Now:          time.Now,
-	}, cmd.Int64(FlagMaxFileSize), cmd.Bool(FlagCustomSlugs)).
+	}, cfg.files.maxFileSize, cfg.customSlugs).
 		WithMetrics(deps.metrics)
 
 	// Composition time, before the first request: the shared releaser now also removes files.
 	deps.expired.WithFiles(manager)
 	handler.WithFileManager(manager)
-	log.InfoContext(ctx, "file publishing is on", "bucket", cfg.Bucket, "max_file_size", manager.MaxSize())
+	log.InfoContext(ctx, "file publishing is on", "bucket", cfg.files.s3.Bucket, "max_file_size", manager.MaxSize())
 
-	startFileSweep(ctx, cmd.Duration(FlagFilesSweepInterval), manager.SweepExpired, background, log)
+	startFileSweep(ctx, cfg.files.sweepInterval, manager.SweepExpired, shared.background, log)
 
 	return nil
 }
 
 // openObjectStore connects to the storage and makes sure that the bucket exists. It creates a
 // missing bucket, so that the operator does not have to make it by hand before the first start.
-func openObjectStore(
-	ctx context.Context, cmd *cli.Command, cfg *s3store.Config, log *slog.Logger,
-) (*s3store.Store, error) {
+func openObjectStore(ctx context.Context, cfg *filesConfig, log *slog.Logger) (*s3store.Store, error) {
 	var storeOpts []s3store.Option
-	if cmd.Bool(FlagS3AllowInsecure) {
+	if cfg.allowInsecure {
 		storeOpts = append(storeOpts, s3store.AllowInsecureHTTP())
 	}
 
-	objects, err := s3store.New(cfg, log, storeOpts...)
+	objects, err := s3store.New(&cfg.s3, log, storeOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("s3 store: %w", err)
 	}
@@ -111,50 +101,16 @@ func openObjectStore(
 	}
 
 	if created {
-		log.InfoContext(ctx, "s3 bucket created", "bucket", cfg.Bucket)
+		log.InfoContext(ctx, "s3 bucket created", "bucket", cfg.s3.Bucket)
 	}
 
 	return objects, nil
 }
 
-// s3ConfigFromFlags reads the object storage settings. The keys come only from the
-// environment, so that ps does not show them.
-func s3ConfigFromFlags(cmd *cli.Command) (s3store.Config, error) {
-	cfg := s3store.Config{
-		Endpoint:  cmd.String(FlagS3Endpoint),
-		Bucket:    cmd.String(FlagS3Bucket),
-		Region:    cmd.String(FlagS3Region),
-		AccessKey: os.Getenv(EnvS3AccessKey),
-		SecretKey: os.Getenv(EnvS3SecretKey),
-		PathStyle: cmd.Bool(FlagS3PathStyle),
-	}
-
-	if cfg.Bucket == "" || cfg.AccessKey == "" || cfg.SecretKey == "" {
-		return cfg, fmt.Errorf("%w: --%s, %s and %s are required with --%s",
-			errS3Config, FlagS3Bucket, EnvS3AccessKey, EnvS3SecretKey, FlagS3Endpoint)
-	}
-
-	return cfg, nil
-}
-
 // logFilesOff records that file publishing is off. Other S3 settings without --s3-endpoint
 // usually mean a misspelled endpoint variable, so the server then logs a warning with the
-// names of those settings. The values stay out of the log.
-func logFilesOff(ctx context.Context, cmd *cli.Command, log *slog.Logger) {
-	var orphans []string
-
-	for _, name := range []string{FlagS3Bucket, FlagS3Region, FlagS3PathStyle, FlagS3AllowInsecure} {
-		if cmd.IsSet(name) {
-			orphans = append(orphans, "--"+name)
-		}
-	}
-
-	for _, name := range []string{EnvS3AccessKey, EnvS3SecretKey} {
-		if os.Getenv(name) != "" {
-			orphans = append(orphans, name)
-		}
-	}
-
+// names of those settings (orphans). The values stay out of the log.
+func logFilesOff(ctx context.Context, orphans []string, log *slog.Logger) {
 	if len(orphans) > 0 {
 		log.WarnContext(ctx, "file publishing is off: other s3 settings are set without --"+FlagS3Endpoint,
 			"settings", orphans)

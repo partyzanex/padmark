@@ -512,12 +512,12 @@ func validateMaxContentLength(value int) error {
 	return nil
 }
 
-// maxContentLength gives the note content limit: --max-content-length, or --max-body-bytes when
-// the flag is 0. A note cannot be larger than the body that holds it, so one setting is enough.
-func maxContentLength(cmd *cli.Command) int {
-	limit := cmd.Int(FlagMaxContentLength)
+// maxContentLength gives the note content limit: --max-content-length (limit), or
+// --max-body-bytes when limit is 0. A note cannot be larger than the body that holds it, so one
+// setting is enough.
+func maxContentLength(limit, maxBodyBytes int) int {
 	if limit == 0 {
-		return cmd.Int(FlagMaxBodyBytes)
+		return maxBodyBytes
 	}
 
 	return limit

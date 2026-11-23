@@ -145,7 +145,8 @@ func (s *AttachFilesSuite) setKeys() {
 	s.T().Setenv(EnvS3SecretKey, testS3KeyValue)
 }
 
-// attach parses args with the serve flags and calls attachFiles.
+// attach parses args with the serve flags and calls attachFiles. configFromCommand checks the
+// S3 settings, so its error counts as the error of the file wiring.
 func (s *AttachFilesSuite) attach(args ...string) error {
 	var attachErr error
 
@@ -154,8 +155,13 @@ func (s *AttachFilesSuite) attach(args ...string) error {
 		command.Name = "padmark"
 		command.Flags = appFlags()
 		command.Action = func(ctx context.Context, cmd *cli.Command) error {
-			store := serverStorage{db: nil, notes: nil, links: nil, files: nil, name: ""}
-			attachErr = attachFiles(ctx, cmd, nil, store, nil, new(fileDeps), s.background, log)
+			var cfg Config
+
+			cfg, attachErr = configFromCommand(cmd)
+			if attachErr == nil {
+				shared := contentServices{keyring: nil, hasher: nil, background: s.background}
+				attachErr = attachFiles(ctx, &cfg, nil, nil, shared, new(fileDeps), log)
+			}
 
 			return nil
 		}

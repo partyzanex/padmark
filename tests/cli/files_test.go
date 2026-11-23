@@ -15,8 +15,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/partyzanex/shutdown"
-	"github.com/partyzanex/shutdown/compat"
 	"github.com/stretchr/testify/suite"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
@@ -193,10 +191,6 @@ func (s *FilesSuite) startServer() string {
 
 	s.T().Setenv("PADMARK_S3_ACCESS_KEY", filesAccessKey)
 	s.T().Setenv("PADMARK_S3_SECRET_KEY", filesSecretKey)
-
-	// The server registers its resources in the global compat manager. A new manager for each
-	// run lets the suite run again in the same process (go test -count=2).
-	compat.Set(shutdown.NewLIFO())
 
 	args := []string{
 		"padmark", "--addr", address, "--metrics-addr", "", "--rate-limit", "0", "--log-level", "error",

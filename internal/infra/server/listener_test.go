@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/partyzanex/shutdown"
-	"github.com/partyzanex/shutdown/compat"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 )
@@ -188,13 +187,13 @@ func (s *ListenerSuite) TestStop_WaitsForOpenRequestToComplete() {
 	s.NotContains(s.logs.String(), "level=WARN")
 }
 
-// TestWaitAndShutdown_ForcedStopClosesEachListener makes sure that the shared manager stops
+// TestWaitAndShutdown_ForcedStopClosesEachListener makes sure that the listener phase stops
 // each listener when one of them uses all of its drain limit, and that this is not an error.
 func (s *ListenerSuite) TestWaitAndShutdown_ForcedStopClosesEachListener() {
-	compat.Set(shutdown.NewGroup())
-	s.T().Cleanup(func() { compat.Set(shutdown.NewLIFO()) })
-
 	limits := stopLimits{drain: 100 * time.Millisecond, handlers: longDrain, background: 0}
+	stop := newServerStop(limits, s.log)
+	stop.addListenerPhase()
+
 	entered := make(chan struct{})
 
 	busy, busyAddress := s.start(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
@@ -203,8 +202,8 @@ func (s *ListenerSuite) TestWaitAndShutdown_ForcedStopClosesEachListener() {
 	}), limits)
 	idle, idleAddress := s.start(http.NotFoundHandler(), limits)
 
-	compat.Append(shutdown.ContextFn(idle.stop))
-	compat.Append(shutdown.ContextFn(busy.stop))
+	stop.listeners.Append(shutdown.ContextFn(idle.stop))
+	stop.listeners.Append(shutdown.ContextFn(busy.stop))
 
 	conn := s.dial(busyAddress)
 	s.write(conn, "GET / HTTP/1.1\r\nHost: test\r\n\r\n")
@@ -214,7 +213,7 @@ func (s *ListenerSuite) TestWaitAndShutdown_ForcedStopClosesEachListener() {
 	cancel(nil)
 
 	started := time.Now()
-	err := waitAndShutdown(serverCtx, limits, s.log)
+	err := waitAndShutdown(serverCtx, stop)
 
 	s.Require().ErrorIs(err, context.Canceled)
 	s.NotContains(err.Error(), "graceful shutdown", "the forced close is not a failure")

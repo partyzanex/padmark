@@ -23,9 +23,10 @@ func parseMaxContentLength(t *testing.T, args ...string) int {
 		command.Name = "padmark"
 		command.Flags = appFlags()
 		command.Action = func(_ context.Context, cmd *cli.Command) error {
-			got = maxContentLength(cmd)
+			cfg, err := configFromCommand(cmd)
+			got = cfg.maxContentLength
 
-			return nil
+			return err
 		}
 	})
 

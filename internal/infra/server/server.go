@@ -7,13 +7,10 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"os"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/partyzanex/shutdown"
-	"github.com/partyzanex/shutdown/compat"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -28,10 +25,7 @@ import (
 	"github.com/partyzanex/padmark/internal/infra/linkmetrics"
 	"github.com/partyzanex/padmark/internal/infra/render"
 	"github.com/partyzanex/padmark/internal/infra/rendercache"
-	"github.com/partyzanex/padmark/internal/infra/storage/postgres"
-	"github.com/partyzanex/padmark/internal/infra/storage/sqlite"
 	"github.com/partyzanex/padmark/internal/usecases/auth"
-	"github.com/partyzanex/padmark/internal/usecases/files"
 	"github.com/partyzanex/padmark/internal/usecases/links"
 	"github.com/partyzanex/padmark/internal/usecases/notes"
 )
@@ -45,45 +39,7 @@ const (
 	// all while the main server silently uses --read-timeout — two different policies by
 	// accident rather than by choice.
 	idleTimeout = 60 * time.Second
-	// minCSRFSecretLen is the minimum accepted length for --csrf-secret; it matches the
-	// 32-byte secret NewRouter generates when the flag is empty.
-	minCSRFSecretLen = 32
-	// minBootstrapTokenLen is the minimum accepted length for PADMARK_BOOTSTRAP_TOKEN: the token
-	// alone decides who becomes the single admin, so it must not be guessable.
-	minBootstrapTokenLen = 32
 )
-
-// parseBootstrapToken validates the PADMARK_BOOTSTRAP_TOKEN value. Empty is valid and keeps
-// first-admin setup closed (fail-closed: without proof of server ownership the first visitor of
-// /setup would become the permanent admin). A configured token shorter than the minimum fails
-// startup rather than leaving the bootstrap guessable. The value never appears in errors or logs.
-func parseBootstrapToken(raw string) (string, error) {
-	if raw != "" && len(raw) < minBootstrapTokenLen {
-		return "", fmt.Errorf("%w: %s must be at least %d characters, got %d",
-			errInvalidBootstrapToken, EnvBootstrapToken, minBootstrapTokenLen, len(raw))
-	}
-
-	return raw, nil
-}
-
-// parseCSRFSecret converts the --csrf-secret flag value into an HMAC key. An empty value is
-// valid and yields nil, meaning "generate a fresh random secret per process" (the legacy
-// behaviour): single-instance deployments rely on it to avoid secret management, and the
-// restart-invalidates-tokens tradeoff is acceptable there. A configured secret must be long
-// enough to serve as an HMAC-SHA256 key; a short one would make the CSRF token forgeable in
-// principle, so this fails at startup rather than weakening protection silently.
-func parseCSRFSecret(raw string) ([]byte, error) {
-	if raw == "" {
-		return nil, nil
-	}
-
-	if len(raw) < minCSRFSecretLen {
-		return nil, fmt.Errorf("%w: csrf secret must be at least %d "+
-			"characters, got %d", errInvalidCSRFSecret, minCSRFSecretLen, len(raw))
-	}
-
-	return []byte(raw), nil
-}
 
 func serveCommand() *cli.Command {
 	return newCommand("serve", "Start the HTTP server", appFlags(), serverAction)
@@ -101,31 +57,13 @@ func parseTokens(raw string) []string {
 	return result
 }
 
-// sessionTTL resolves the session lifetime from --session-ttl and the deprecated
-// --cookie-max-age (the v0.1.6 name for the same knob). An explicit --session-ttl always wins and
-// the deprecated value is ignored with a warning; otherwise a set --cookie-max-age is honoured
-// so an upgrade does not silently change the lifetime operators configured. No extra bounds are
-// applied: --session-ttl itself has none, and auth.NewManager rejects an unusable TTL.
-// sessionTTL resolves the session lifetime: --session-ttl, or the deprecated v0.1.6
-// --cookie-max-age when only that one is set. It is pure so that both consumers (router options
-// and the auth manager) agree; warnDeprecatedSessionFlags reports the fallback once at startup.
-func sessionTTL(cmd *cli.Command) time.Duration {
-	seconds := cmd.Int(FlagSessionTTL)
-
-	if cmd.IsSet(FlagCookieMaxAge) && !cmd.IsSet(FlagSessionTTL) {
-		seconds = cmd.Int(FlagCookieMaxAge)
-	}
-
-	return time.Duration(seconds) * time.Second
-}
-
 // warnDeprecatedSessionFlags logs, once, how the deprecated --cookie-max-age was treated.
-func warnDeprecatedSessionFlags(ctx context.Context, cmd *cli.Command, log *slog.Logger) {
-	if !cmd.IsSet(FlagCookieMaxAge) {
+func warnDeprecatedSessionFlags(ctx context.Context, accounts accountsConfig, log *slog.Logger) {
+	if !accounts.cookieMaxAgeSet {
 		return
 	}
 
-	if cmd.IsSet(FlagSessionTTL) {
+	if accounts.sessionTTLSet {
 		log.WarnContext(ctx, "deprecated --cookie-max-age is ignored because --session-ttl is set",
 			"flag", "--"+FlagCookieMaxAge, "env", EnvCookieMaxAge, "use", "--"+FlagSessionTTL)
 
@@ -137,24 +75,16 @@ func warnDeprecatedSessionFlags(ctx context.Context, cmd *cli.Command, log *slog
 		"flag", "--"+FlagCookieMaxAge, "env", EnvCookieMaxAge, "use", "--"+FlagSessionTTL)
 }
 
+// buildRouter makes the router from the checked configuration. It logs the warnings about the
+// router settings once at startup.
 func buildRouter(
-	ctx context.Context,
-	cmd *cli.Command,
-	handler *web.Handler,
-	ogenHandler *web.OgenHandler,
-	log *slog.Logger,
-	bootstrapToken string,
+	ctx context.Context, cfg *Config, handler *web.Handler, ogenHandler *web.OgenHandler, log *slog.Logger,
 ) (http.Handler, error) {
-	trustedProxies, err := parseTrustedProxies(cmd.String(FlagTrustedProxies))
-	if err != nil {
-		return nil, err
-	}
-
 	// A warning rather than a startup error: the flag is still parseable and the operator may
 	// have a reason we cannot see (a lab, a closed network). But an entry this wide trusts
 	// arbitrary clients to name their own address via X-Real-IP, which retires the per-IP rate
 	// limit — including the TOTP login cap — so it must never pass unremarked.
-	if broad := overlyBroadProxyCIDRs(trustedProxies); len(broad) > 0 {
+	if broad := overlyBroadProxyCIDRs(cfg.router.trustedProxies); len(broad) > 0 {
 		log.WarnContext(ctx,
 			"trusted proxy range covers arbitrary clients: any client can then set its own "+
 				"X-Real-IP and get a fresh rate-limit bucket per request, defeating the per-IP "+
@@ -163,21 +93,11 @@ func buildRouter(
 		)
 	}
 
-	publicScheme, err := parsePublicScheme(cmd.String(FlagPublicScheme))
-	if err != nil {
-		return nil, err
-	}
-
-	csrfSecret, err := parseCSRFSecret(cmd.String(FlagCSRFSecret))
-	if err != nil {
-		return nil, err
-	}
-
 	// The per-process fallback is a deliberate, documented default rather than a startup failure:
 	// a single instance works out of the box with no secret to manage, and its only cost is that
 	// forms opened before a restart must be reloaded. It is silently wrong for anything larger,
 	// though — every replica would reject the others' form tokens — so say so once at startup.
-	if len(csrfSecret) == 0 {
+	if len(cfg.router.csrfSecret) == 0 {
 		log.WarnContext(ctx,
 			"no csrf secret configured: using a random one for this process only; "+
 				"restarts invalidate open forms and multiple replicas reject each other's forms",
@@ -185,25 +105,26 @@ func buildRouter(
 		)
 	}
 
-	warnDeprecatedSessionFlags(ctx, cmd, log)
+	warnDeprecatedSessionFlags(ctx, cfg.accounts, log)
+
 	opts := web.RouterOptions{
-		MaxBodyBytes:   cmd.Int(FlagMaxBodyBytes),
-		RateLimit:      cmd.Int(FlagRateLimit),
-		RateBurst:      cmd.Int(FlagRateBurst),
-		TrustedProxies: trustedProxies,
-		ForcedScheme:   publicScheme,
-		// Same flag attachAccountSystem feeds into auth.NewManager's sessionTTL, so the TOTP
-		// session cookie's Max-Age always matches the actual server-side session lifetime.
-		SessionTTL:     sessionTTL(cmd),
-		DisableAPI:     cmd.Bool(FlagDisableAPI),
-		DirectRedirect: cmd.Bool(FlagDirectRedirect),
-		// The same allow-list guards the redirect listener and, here, the main one.
-		AllowedHosts: parseTokens(cmd.String(FlagAllowedHosts)),
+		ForcedScheme: cfg.router.publicScheme,
+		// Empty keeps first-admin setup closed.
+		BootstrapToken: cfg.accounts.bootstrapToken,
+		TrustedProxies: cfg.router.trustedProxies,
 		// Nil (flag empty) lets NewRouter generate a fresh CSRF secret instead of accepting
 		// an injected one — the legacy single-instance behaviour.
-		CSRFSecret: csrfSecret,
-		// Validated by serverAction before the DB opens; empty keeps first-admin setup closed.
-		BootstrapToken: bootstrapToken,
+		CSRFSecret: cfg.router.csrfSecret,
+		// The same allow-list guards the redirect listener and, here, the main one.
+		AllowedHosts: cfg.http.allowedHosts,
+		MaxBodyBytes: cfg.router.maxBodyBytes,
+		RateLimit:    cfg.router.rateLimit,
+		RateBurst:    cfg.router.rateBurst,
+		// The auth manager gets the same value, so the TOTP session cookie's Max-Age always
+		// matches the actual server-side session lifetime.
+		SessionTTL:     cfg.accounts.sessionTTL,
+		DisableAPI:     cfg.router.disableAPI,
+		DirectRedirect: cfg.router.directRedirect,
 	}
 
 	router, err := web.NewRouter(handler, ogenHandler, &opts)
@@ -258,10 +179,6 @@ func allowedHostSet(raw string) map[string]struct{} {
 	return set
 }
 
-// startRedirectServer launches the optional plain-HTTP→HTTPS redirect listener. Its failure is
-// non-fatal: the redirect listener is a convenience, so a bind error (e.g. :80 already in use)
-// is logged and swallowed rather than cancelling the main server's context — a healthy HTTPS
-// server must not be torn down because the auxiliary redirector could not start.
 // newRedirectServer builds the plain-HTTP→HTTPS redirect listener. Read and Write timeouts
 // stay unset: the handler writes one redirect line per request and never reads a body, while
 // the shared ReadHeaderTimeout/IdleTimeout constants still bound headers and keep-alive.
@@ -281,12 +198,16 @@ func newHTTPServer(addr string, handler http.Handler) *http.Server {
 	return server
 }
 
+// startRedirectServer launches the optional plain-HTTP→HTTPS redirect listener. Its failure is
+// non-fatal: the redirect listener is a convenience, so a bind error (e.g. :80 already in use)
+// is logged and swallowed rather than cancelling the main server's context — a healthy HTTPS
+// server must not be torn down because the auxiliary redirector could not start.
 func startRedirectServer(
-	ctx context.Context, addr string, allowedHosts map[string]struct{}, limits stopLimits, log *slog.Logger,
+	ctx context.Context, addr string, allowedHosts map[string]struct{}, stop *serverStop, log *slog.Logger,
 ) {
 	srv := newRedirectServer(addr, allowedHosts)
 
-	registerListener(ctx, "redirect", srv, limits, log)
+	stop.addListener(ctx, "redirect", srv)
 
 	go func() {
 		err := srv.ListenAndServe()
@@ -297,10 +218,6 @@ func startRedirectServer(
 	}()
 }
 
-// startMetricsServer launches the optional Prometheus /metrics listener on its own address,
-// separate from the main public-facing router — see ~/.claude/docs/observability.md's "separate
-// internal port" recommendation. Mirrors startRedirectServer's shape and non-fatal-failure
-// handling exactly: a bind error here must not tear down an otherwise healthy main server.
 // newMetricsServer builds the internal Prometheus /metrics listener — same timeout policy as
 // the redirect listener: the shared ReadHeaderTimeout/IdleTimeout constants and no Read/Write
 // timeouts (single small response, no request body).
@@ -315,12 +232,16 @@ func newMetricsServer(addr string, reg *prometheus.Registry) *http.Server {
 	return newHTTPServer(addr, mux)
 }
 
+// startMetricsServer launches the optional Prometheus /metrics listener on its own address,
+// separate from the main public-facing router (an internal port). Mirrors startRedirectServer's
+// shape and non-fatal-failure handling exactly: a bind error here must not tear down an
+// otherwise healthy main server.
 func startMetricsServer(
-	ctx context.Context, addr string, reg *prometheus.Registry, limits stopLimits, log *slog.Logger,
+	ctx context.Context, addr string, reg *prometheus.Registry, stop *serverStop, log *slog.Logger,
 ) {
 	srv := newMetricsServer(addr, reg)
 
-	registerListener(ctx, "metrics", srv, limits, log)
+	stop.addListener(ctx, "metrics", srv)
 
 	go func() {
 		err := srv.ListenAndServe()
@@ -358,89 +279,25 @@ func newMainServer(addr string, router http.Handler, readTimeout, writeTimeout, 
 	return server
 }
 
-// registerListener adds the stop of srv to the shared shutdown manager. Call it before srv
-// starts.
-func registerListener(ctx context.Context, name string, srv *http.Server, limits stopLimits, log *slog.Logger) {
-	compat.Append(shutdown.ContextFn(newListener(ctx, name, srv, limits, log).stop))
-}
+// runServer starts the main listener and the optional redirect listener, then waits for a
+// signal or a listener failure and runs the shutdown sequence.
+func runServer(ctx context.Context, cfg *Config, router http.Handler, stop *serverStop, log *slog.Logger) error {
+	srv := newMainServer(cfg.http.addr, router, cfg.http.readTimeout, cfg.http.writeTimeout, cfg.http.maxHeaderBytes)
 
-func runServer(
-	ctx context.Context, cmd *cli.Command, router http.Handler, limits stopLimits, log *slog.Logger,
-) error {
-	tlsCert := cmd.String(FlagTLSCert)
-	tlsKey := cmd.String(FlagTLSKey)
-
-	if (tlsCert == "") != (tlsKey == "") {
-		return errIncompleteTLSConfig
-	}
-
-	srv := newMainServer(
-		cmd.String(FlagAddr), router,
-		cmd.Int(FlagReadTimeout), cmd.Int(FlagWriteTimeout), cmd.Int(FlagMaxHeaderBytes),
-	)
-
-	registerListener(ctx, "main", srv, limits, log)
+	stop.addListener(ctx, "main", srv)
 
 	// serverCtx is cancelled with the server error if ListenAndServe fails unexpectedly,
 	// allowing WaitForSignal to unblock and propagate the cause.
 	serverCtx, cancelServer := context.WithCancelCause(ctx)
 	defer cancelServer(nil)
 
-	go listenAndServe(srv, tlsCert, tlsKey, cancelServer)
+	go listenAndServe(srv, cfg.http.tlsCert, cfg.http.tlsKey, cancelServer)
 
-	if tlsCert != "" {
-		if redirectAddr := cmd.String(FlagHTTPRedirectAddr); redirectAddr != "" {
-			startRedirectServer(ctx, redirectAddr, allowedHostSet(cmd.String(FlagAllowedHosts)), limits, log)
-		}
+	if cfg.http.tlsCert != "" && cfg.http.redirectAddr != "" {
+		startRedirectServer(ctx, cfg.http.redirectAddr, cfg.http.redirectHosts, stop, log)
 	}
 
-	return waitAndShutdown(serverCtx, limits, log)
-}
-
-// waitAndShutdown blocks until SIGINT/SIGTERM arrives or serverCtx is cancelled (the main
-// listener failed, or the parent context ended), then closes everything registered with the
-// shared shutdown manager — the main, redirect and metrics listeners alike — under the limit of
-// the listener phase. Each listener closes its open connections when its drain limit ends; see
-// listener.stop. On the failure path the listener cause is joined with any shutdown error, so
-// both stay reachable through errors.Is. Work that must stop before the database closes does
-// not use the shared manager; see stopBackground.
-func waitAndShutdown(serverCtx context.Context, limits stopLimits, log *slog.Logger) error {
-	sig, waitErr := compat.WaitForSignal(serverCtx, syscall.SIGINT, syscall.SIGTERM)
-
-	// Start the deadline only after the wake-up, not at server startup. WithoutCancel
-	// retains context values while letting shutdown outlive server cancellation.
-	shutCtx, cancel := context.WithTimeout(context.WithoutCancel(serverCtx), limits.listeners())
-	defer cancel()
-
-	started := time.Now()
-
-	if waitErr != nil {
-		log.InfoContext(shutCtx, "shutdown started: the server context ended", "cause", context.Cause(serverCtx))
-	} else {
-		log.InfoContext(shutCtx, "shutdown started: signal received", "signal", sig.String())
-	}
-
-	log.InfoContext(shutCtx, "shutdown: listeners stop started",
-		"drain", limits.drain, "limit", limits.listeners())
-
-	var shutdownErr error
-
-	closeErr := compat.CloseContext(shutCtx)
-	if closeErr != nil {
-		shutdownErr = fmt.Errorf("graceful shutdown: %w", closeErr)
-	}
-
-	log.InfoContext(shutCtx, "shutdown: listeners stopped", "duration", time.Since(started))
-
-	if waitErr != nil {
-		return errors.Join(fmt.Errorf("server: %w", context.Cause(serverCtx)), shutdownErr)
-	}
-
-	if shutdownErr != nil {
-		return fmt.Errorf("shutdown server: %w", shutdownErr)
-	}
-
-	return nil
+	return waitAndShutdown(serverCtx, stop)
 }
 
 // attachAccountSystem wires the opt-in TOTP account manager onto the handler when
@@ -450,31 +307,24 @@ func waitAndShutdown(serverCtx context.Context, limits stopLimits, log *slog.Log
 // Returns an error when auth.NewManager's bootstrap-time crypto precompute fails — this only
 // runs once at startup, so the caller should treat it as fatal.
 func attachAccountSystem(
-	ctx context.Context, cmd *cli.Command, handler *web.Handler, stores auth.Stores, log *slog.Logger,
+	ctx context.Context, cfg *Config, handler *web.Handler, stores auth.Stores, log *slog.Logger,
 ) (*web.Handler, error) {
-	if !cmd.Bool(FlagEnableAccounts) {
+	if !cfg.accounts.enabled {
 		log.InfoContext(ctx, "account system disabled (public mode); set --enable-accounts to enable login/admin")
 
 		return handler, nil
 	}
 
-	ttl := sessionTTL(cmd)
-
-	argonParams, err := argon2ParamsFromFlags(cmd)
-	if err != nil {
-		return nil, fmt.Errorf("argon2 params: %w", err)
-	}
-
 	authMgr, err := auth.NewManager(
 		stores,
 		&auth.Deps{
-			PasswordHasher: crypto.NewPasswordHasher(argonParams).WithLogger(log),
-			Sealer:         crypto.NewSealer(argonParams),
+			PasswordHasher: crypto.NewPasswordHasher(cfg.argon2.params).WithLogger(log),
+			Sealer:         crypto.NewSealer(cfg.argon2.params),
 			TOTP:           crypto.NewTOTP(),
 			Log:            log,
 			Now:            time.Now,
 		},
-		cmd.String(FlagTOTPIssuer), ttl,
+		cfg.accounts.totpIssuer, cfg.accounts.sessionTTL,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("new auth manager: %w", err)
@@ -485,7 +335,7 @@ func attachAccountSystem(
 		log.WarnContext(ctx, "check users empty", "err", emptyErr)
 	} else if empty {
 		// Presence only — the token itself is a secret and never logged.
-		if os.Getenv(EnvBootstrapToken) == "" {
+		if cfg.accounts.bootstrapToken == "" {
 			log.WarnContext(ctx, "No users found, but first-admin setup is disabled: set the bootstrap "+
 				"token env (at least 32 characters) and restart, then open /setup", "env", EnvBootstrapToken)
 		} else {
@@ -495,42 +345,6 @@ func attachAccountSystem(
 	}
 
 	return handler.WithAuthManager(authMgr), nil
-}
-
-// buildAuthRepos builds the account repositories and the reveal-token manager for the chosen
-// backend. log is the configured logger, so --log-level and --log-format apply to them.
-func buildAuthRepos(storage string, db *bun.DB, log *slog.Logger) (auth.Stores, *auth.RevealManager) {
-	switch storage {
-	case storagePostgres:
-		return auth.Stores{
-			Users:     postgres.NewUserRepository(db),
-			Invites:   postgres.NewInviteRepository(db),
-			Sessions:  postgres.NewSessionRepository(db),
-			APITokens: postgres.NewAPITokenRepository(db),
-		}, auth.NewRevealManager(postgres.NewRevealRepository(db), log, time.Now)
-	default:
-		return auth.Stores{
-			Users:     sqlite.NewUserRepository(db),
-			Invites:   sqlite.NewInviteRepository(db),
-			Sessions:  sqlite.NewSessionRepository(db),
-			APITokens: sqlite.NewAPITokenRepository(db),
-		}, auth.NewRevealManager(sqlite.NewRevealRepository(db), log, time.Now)
-	}
-}
-
-// argon2ParamsFromFlags reads the configurable argon2id cost from flags/env.
-// Zero values fall back to the built-in defaults inside the crypto constructors.
-func argon2ParamsFromFlags(cmd *cli.Command) (crypto.Argon2Params, error) {
-	memory, memoryErr := uint32Flag(cmd, FlagArgon2Memory)
-	timeCost, timeErr := uint32Flag(cmd, FlagArgon2Time)
-	threads, threadsErr := uint8Flag(cmd, FlagArgon2Threads)
-
-	flagErr := errors.Join(memoryErr, timeErr, threadsErr)
-	if flagErr != nil {
-		return crypto.Argon2Params{Memory: 0, Time: 0, Threads: 0}, fmt.Errorf("read argon2 flags: %w", flagErr)
-	}
-
-	return crypto.Argon2Params{Memory: memory, Time: timeCost, Threads: threads}, nil
 }
 
 // serverMetrics holds the Prometheus registry and the metrics of the managers in it.
@@ -568,36 +382,29 @@ func newMetricsRegistry() (serverMetrics, error) {
 	return serverMetrics{registry: reg, links: linkMetrics, files: fileMetrics}, nil
 }
 
-// serverStorage is the opened storage backend: its name, the connection and the content
-// repositories that initRepos built for it.
-type serverStorage struct {
-	db    *bun.DB
-	notes notes.Storage
-	links links.Storage
-	files files.Storage
-	name  string
+// contentServices are the objects that serve builds one time and gives to more than one
+// manager: the content keyring, the edit-code hasher and the stop of the background work.
+type contentServices struct {
+	keyring    *crypto.ContentKeyring
+	hasher     *crypto.EditCodeHasher
+	background *shutdown.Lifo
 }
 
 // buildHandlers assembles the notes/links business-logic managers and wires them into the
 // JSON/HTML handler and the ogen-generated handler, including the optional account system and
 // link cache/metrics collaborators.
 func buildHandlers(
-	ctx context.Context, cmd *cli.Command, store serverStorage, log *slog.Logger,
-	metrics serverMetrics, keyring *crypto.ContentKeyring, background *shutdown.Lifo,
+	ctx context.Context, cfg *Config, store *serverStorage, shared contentServices,
+	metrics serverMetrics, log *slog.Logger,
 ) (*web.Handler, *web.OgenHandler, error) {
-	noteCipher, err := keyring.ForResource("note")
+	noteCipher, err := shared.keyring.ForResource("note")
 	if err != nil {
 		return nil, nil, fmt.Errorf("note content cipher: %w", err)
 	}
 
-	linkCipher, err := keyring.ForResource("link")
+	linkCipher, err := shared.keyring.ForResource("link")
 	if err != nil {
 		return nil, nil, fmt.Errorf("link content cipher: %w", err)
-	}
-
-	argonParams, err := argon2ParamsFromFlags(cmd)
-	if err != nil {
-		return nil, nil, fmt.Errorf("argon2 params: %w", err)
 	}
 
 	// The storage triggers keep slugs unique across notes, links and files, also between server
@@ -607,33 +414,27 @@ func buildHandlers(
 
 	manager := notes.NewManager(&notes.Deps{
 		Storage: store.notes, Renderer: render.NewRenderer(), Encryptor: noteCipher,
-		Hasher: crypto.NewEditCodeHasher(argonParams).WithLogger(log), ExpiredSlugs: expired, Log: log,
-		Now: time.Now,
-	}, cmd.Bool(FlagCustomSlugs)).
-		WithRenderCache(rendercache.NewDefault(log)).WithMaxContentLength(maxContentLength(cmd))
+		Hasher: shared.hasher, ExpiredSlugs: expired, Log: log, Now: time.Now,
+	}, cfg.customSlugs).
+		WithRenderCache(rendercache.NewDefault(log)).WithMaxContentLength(cfg.maxContentLength)
 	linkManager := links.NewManager(&links.Deps{
 		Storage: store.links, Encryptor: linkCipher,
-		Hasher: crypto.NewEditCodeHasher(argonParams).WithLogger(log), ExpiredSlugs: expired, Log: log,
-		Now: time.Now,
-	}, cmd.Bool(FlagCustomSlugs)).
+		Hasher: shared.hasher, ExpiredSlugs: expired, Log: log, Now: time.Now,
+	}, cfg.customSlugs).
 		WithCache(linkcache.NewDefault(log)).
 		WithMetrics(metrics.links)
 
-	authStores, revealStore := buildAuthRepos(store.name, store.db, log)
-
 	handler := web.NewHandler(manager, linkManager, log).
-		WithRevealStore(revealStore).
-		WithFileTransferLimits(fileTransferLimitsFromFlags(cmd))
+		WithRevealStore(auth.NewRevealManager(store.reveal, log, time.Now)).
+		WithFileTransferLimits(cfg.files.transfer)
 
-	handler, err = attachAccountSystem(ctx, cmd, handler, authStores, log)
+	handler, err = attachAccountSystem(ctx, cfg, handler, store.auth, log)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	err = attachFiles(ctx, cmd, handler, store, keyring, &fileDeps{
-		expired: expired,
-		hasher:  crypto.NewEditCodeHasher(argonParams).WithLogger(log), metrics: metrics.files,
-	}, background, log)
+	err = attachFiles(ctx, cfg, handler, store.files, shared,
+		&fileDeps{expired: expired, metrics: metrics.files}, log)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -643,154 +444,96 @@ func buildHandlers(
 	return handler, ogenHandler, nil
 }
 
-// initRepos runs migrations and builds the note and link repositories for the chosen backend.
-// openDB already validated the backend name, so unknown values cannot reach the default branch.
-func initRepos(
-	ctx context.Context, storage string, db *bun.DB, log *slog.Logger, opts migrationOptions,
-) (serverStorage, error) {
-	store := serverStorage{db: db, notes: nil, links: nil, files: nil, name: storage}
-
-	switch storage {
-	case storagePostgres:
-		repo, err := initPostgresStorage(ctx, db, log)
-		if err != nil {
-			return store, err
-		}
-
-		store.notes, store.links, store.files = repo, newPostgresLinkRepository(db, log), postgres.NewFileRepository(db)
-	default:
-		repo, err := initSQLiteStorage(ctx, db, log, opts)
-		if err != nil {
-			return store, err
-		}
-
-		store.notes, store.links, store.files = repo, newSQLiteLinkRepository(db, log), sqlite.NewFileRepository(db)
+func serverAction(ctx context.Context, cmd *cli.Command) error {
+	cfg, err := configFromCommand(cmd)
+	if err != nil {
+		return err
 	}
 
-	return store, nil
+	return serve(ctx, &cfg)
 }
 
-func serverAction(ctx context.Context, cmd *cli.Command) error {
-	bootstrapToken, err := validateStartupSecrets(cmd)
-	if err != nil {
-		return err
-	}
-
-	// Bound concurrent argon2id workspace before any hasher can run (validated above).
-	hasher, err := prepareArgon2(cmd)
-	if err != nil {
-		return err
-	}
-
-	log := newLogger(cmd.String(FlagLogLevel), cmd.String(FlagLogFormat))
-	storage := cmd.String(FlagStorage)
-	dsn := cmd.String(FlagDSN)
+// serve builds the server from cfg, serves until a signal or a listener failure and then runs
+// the shutdown sequence. One manager, stop, closes the listeners, the background work and the
+// database in this order; serve registers them in the reverse order.
+func serve(ctx context.Context, cfg *Config) error {
+	// Bound concurrent argon2id workspace before any hasher can run.
+	hasher := prepareArgon2(cfg.argon2)
+	log := newLogger(cfg.log.level, cfg.log.format)
+	hasher.WithLogger(log)
 
 	keyring, err := loadServeKeyring(
-		cmd.String(FlagContentKeyring), storage, dsn, cmd.Bool(FlagAllowSharedKeyring), log)
+		cfg.keyring.path, cfg.storage.dialect, cfg.storage.dsn, cfg.keyring.allowShared, log)
 	if err != nil {
 		return fmt.Errorf("load content encryption keys: %w", err)
 	}
 
-	db, err := openDB(ctx, storage, dsn, log)
+	db, err := openDB(ctx, cfg.storage.dialect, cfg.storage.dsn, log)
 	if err != nil {
 		return err
 	}
 
-	defer closeDatabase(ctx, db, log)
+	stop := newServerStop(newStopLimits(cfg.shutdownTimeout), log)
+	stop.addDatabase(db)
+	stop.addBackgroundPhase()
 
-	// The three phases of the shutdown sequence share one --shutdown-timeout.
-	limits := newStopLimits(cmd.Duration(FlagShutdownTimeout))
+	shared := contentServices{keyring: keyring, hasher: hasher, background: stop.background}
 
-	// Background work, such as the file sweep, uses the database. The deferred calls run in
-	// reverse order, so stopBackground runs before closeDatabase. It has its own part of the
-	// shutdown time, so the stop also occurs when the listener phase used all of its part.
-	background := shutdown.NewLIFO()
-	defer stopBackground(ctx, background, limits.background, log)
-
-	// The listeners do not depend on each other, so the shared manager stops them at the same
-	// time. A sequential manager skips the listeners that remain after the deadline.
-	compat.Set(shutdown.NewGroup())
-
-	store, err := initRepos(ctx, storage, db, log,
-		migrationOptions{dsn: dsn, skipBackup: cmd.Bool(FlagSkipMigrationBackup)})
+	router, metrics, err := buildServerRouter(ctx, cfg, db, shared, log)
 	if err != nil {
-		return err
+		return stop.closeAfterFailedStart(ctx, err)
 	}
 
-	err = validateContentEncryption(ctx, db, keyring, hasher, log)
-	if err != nil {
-		return err
+	// The listener phase is registered last, so the listeners stop first.
+	stop.addListenerPhase()
+
+	if cfg.http.metricsAddr != "" {
+		startMetricsServer(ctx, cfg.http.metricsAddr, metrics.registry, stop, log)
 	}
 
-	router, metrics, err := buildServerRouter(ctx, cmd, store, keyring, background, bootstrapToken, log)
-	if err != nil {
-		return err
-	}
+	logServerStarted(ctx, cfg, log)
 
-	if metricsAddr := cmd.String(FlagMetricsAddr); metricsAddr != "" {
-		startMetricsServer(ctx, metricsAddr, metrics.registry, limits, log)
-	}
-
-	logServerStarted(ctx, cmd, log, storage, dsn)
-
-	return runServer(ctx, cmd, router, limits, log)
+	return runServer(ctx, cfg, router, stop, log)
 }
 
-// buildServerRouter makes the metrics registry, the request handlers and the router.
+// buildServerRouter applies the migrations, prepares the stored content and makes the metrics
+// registry, the request handlers and the router.
 func buildServerRouter(
-	ctx context.Context, cmd *cli.Command, store serverStorage, keyring *crypto.ContentKeyring,
-	background *shutdown.Lifo, bootstrapToken string, log *slog.Logger,
+	ctx context.Context, cfg *Config, db *bun.DB, shared contentServices, log *slog.Logger,
 ) (http.Handler, serverMetrics, error) {
+	var zero serverMetrics
+
+	store, err := initRepos(ctx, cfg.storage.dialect, db, log, cfg.storage.migration())
+	if err != nil {
+		return nil, zero, err
+	}
+
+	err = validateContentEncryption(ctx, db, shared.keyring, shared.hasher, log)
+	if err != nil {
+		return nil, zero, err
+	}
+
 	metrics, err := newMetricsRegistry()
 	if err != nil {
-		return nil, metrics, fmt.Errorf("create metrics registry: %w", err)
+		return nil, zero, fmt.Errorf("create metrics registry: %w", err)
 	}
 
-	handler, ogenHandler, err := buildHandlers(ctx, cmd, store, log, metrics, keyring, background)
+	handler, ogenHandler, err := buildHandlers(ctx, cfg, &store, shared, metrics, log)
 	if err != nil {
-		return nil, metrics, fmt.Errorf("build request handlers: %w", err)
+		return nil, zero, fmt.Errorf("build request handlers: %w", err)
 	}
 
-	router, err := buildRouter(ctx, cmd, handler, ogenHandler, log, bootstrapToken)
+	router, err := buildRouter(ctx, cfg, handler, ogenHandler, log)
 	if err != nil {
-		return nil, metrics, err
+		return nil, zero, err
 	}
 
 	return router, metrics, nil
 }
 
-// stopBackground closes the background work under a new deadline of timeout. A failure is
-// logged at the error level: the database closes next, so work that did not stop can fail.
-func stopBackground(ctx context.Context, background *shutdown.Lifo, timeout time.Duration, log *slog.Logger) {
-	stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
-	defer cancel()
-
-	started := time.Now()
-
-	log.InfoContext(stopCtx, "shutdown: background work stop started", "limit", timeout)
-
-	err := background.CloseContext(stopCtx)
-	if err != nil {
-		log.ErrorContext(ctx, "stop background work", "err", err)
-	}
-
-	log.InfoContext(stopCtx, "shutdown: background work stopped", "duration", time.Since(started))
-}
-
-// closeDatabase closes the database of the server and logs the duration, because the close has
-// no limit of its own: an operator must see when it holds the stop.
-func closeDatabase(ctx context.Context, db *bun.DB, log *slog.Logger) {
-	started := time.Now()
-
-	log.InfoContext(ctx, "shutdown: database close started")
-	closeServerDB(ctx, db, log)
-	log.InfoContext(ctx, "shutdown: database closed", "duration", time.Since(started))
-}
-
 // logServerStarted records the listener, the storage backend and the redacted DSN at startup.
-func logServerStarted(ctx context.Context, cmd *cli.Command, log *slog.Logger, storage, dsn string) {
-	tlsEnabled := cmd.String(FlagTLSCert) != ""
+func logServerStarted(ctx context.Context, cfg *Config, log *slog.Logger) {
+	tlsEnabled := cfg.http.tlsCert != ""
 
 	// The scheme reflects TLS on this listener, independently of a reverse proxy.
 	scheme := "http"
@@ -799,74 +542,10 @@ func logServerStarted(ctx context.Context, cmd *cli.Command, log *slog.Logger, s
 	}
 
 	log.InfoContext(ctx, "server started",
-		"addr", cmd.String(FlagAddr), "url", listenerURL(scheme, cmd.String(FlagAddr)),
-		"storage", storage, "dsn", redactDSN(dsn),
+		"addr", cfg.http.addr, "url", listenerURL(scheme, cfg.http.addr),
+		"storage", cfg.storage.dialect, "dsn", redactDSN(cfg.storage.dsn),
 		"tls", tlsEnabled,
 	)
-}
-
-// errRemovedAuthTokens is returned when the removed --auth-tokens / PADMARK_AUTH_TOKENS is set.
-var errRemovedAuthTokens = fmt.Errorf(
-	"--%s / %s was removed in this version: static bearer tokens are replaced by accounts; "+
-		"use --%s with %s and create the first admin via /setup or `padmark-cli setup` "+
-		"(API tokens are issued via /api/tokens); unset the old variable to start",
-	FlagAuthTokens, EnvAuthTokens, FlagEnableAccounts, EnvBootstrapToken,
-)
-
-// validateStartupSecrets checks the security configuration that must be sound before anything
-// is opened: the argon2 cost bounds, the argon2 memory budget and the bootstrap token. It returns
-// the validated token.
-func validateStartupSecrets(cmd *cli.Command) (string, error) {
-	// Fail closed: v0.1.6 gated writes behind these tokens, so ignoring them would bring the
-	// server up with anonymous writes. Only whether the value is set is checked; it is never
-	// echoed.
-	if cmd.String(FlagAuthTokens) != "" {
-		return "", errRemovedAuthTokens
-	}
-
-	argonErr := validateArgon2Config(cmd)
-	if argonErr != nil {
-		return "", argonErr
-	}
-
-	bootstrapToken, tokenErr := parseBootstrapToken(os.Getenv(EnvBootstrapToken))
-	if tokenErr != nil {
-		return "", fmt.Errorf("validate bootstrap token: %w", tokenErr)
-	}
-
-	return bootstrapToken, nil
-}
-
-// validateArgon2Config checks the argon2 cost bounds and the memory budget (fail-hard).
-func validateArgon2Config(cmd *cli.Command) error {
-	params, paramsErr := argon2ParamsFromFlags(cmd)
-	if paramsErr != nil {
-		return fmt.Errorf("argon2 params: %w", paramsErr)
-	}
-
-	costErr := params.Validate()
-	if costErr != nil {
-		return fmt.Errorf("validate argon2 configuration: %w", costErr)
-	}
-
-	budgetErr := validateArgon2MemoryBudget(cmd)
-	if budgetErr != nil {
-		return fmt.Errorf("validate argon2 configuration: %w", budgetErr)
-	}
-
-	return nil
-}
-
-// validateArgon2MemoryBudget checks that the concurrency budget can hold at least one
-// derivation at the configured password cost.
-func validateArgon2MemoryBudget(cmd *cli.Command) error {
-	budget, memory := cmd.Int(FlagArgon2MemoryBudget), cmd.Int(FlagArgon2Memory)
-	if budget < memory {
-		return fmt.Errorf("%w: --%s (%d KiB) must be at least --%s (%d "+
-			"KiB)", errInvalidArgon2Budget, FlagArgon2MemoryBudget, budget, FlagArgon2Memory, memory)
-	}
-
-	return nil
 }
 
 func closeServerDB(ctx context.Context, db *bun.DB, log *slog.Logger) {

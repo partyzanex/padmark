@@ -30,6 +30,18 @@ func TestServerRejectsInvalidSecurityConfigurationBeforeOpeningDB(t *testing.T) 
 			args:    []string{"--argon2-memory", "1", "--argon2-threads", "2"},
 			wantErr: argon2Err,
 		},
+		// configFromCommand checks these settings before the keyring and the database open.
+		{name: "trusted proxy", args: []string{"--trusted-proxies", "not-an-ip"}, wantErr: "invalid trusted proxy"},
+		{name: "public scheme", args: []string{"--public-scheme", "ftp"}, wantErr: "invalid public scheme"},
+		{name: "short csrf secret", args: []string{"--csrf-secret", "short"}, wantErr: "invalid csrf secret length"},
+		{
+			name: "tls certificate without key", args: []string{"--tls-cert", "cert.pem"},
+			wantErr: "--tls-cert and --tls-key must both be set",
+		},
+		{
+			name: "s3 endpoint without bucket", args: []string{"--s3-endpoint", "https://s3.example.com"},
+			wantErr: "invalid s3 configuration",
+		},
 	}
 
 	for _, testCase := range tests {

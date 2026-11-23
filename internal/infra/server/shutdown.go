@@ -11,7 +11,12 @@ import (
 	"slices"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
+
+	"github.com/partyzanex/shutdown"
+	"github.com/partyzanex/shutdown/compat"
+	"github.com/uptrace/bun"
 
 	"github.com/partyzanex/padmark/internal/errorcontext"
 )
@@ -58,6 +63,146 @@ func newStopLimits(timeout time.Duration) stopLimits {
 // listeners returns the limit of the listener phase: the drain and the wait for the handlers.
 func (l stopLimits) listeners() time.Duration {
 	return l.drain + l.handlers
+}
+
+// serverStop is the one shutdown manager of serve. It is a LIFO manager of three phases, so
+// serve registers the database first, then the background work and then the listeners: the
+// listeners stop first, the background work stops next and the database closes last. Each phase
+// sets its own deadline from stopLimits, so a phase that uses all of its time does not take the
+// time of the next phase. The manager context has no deadline: the LIFO manager skips the
+// remaining phases when its context ends, and the database must close also after a slow stop.
+type serverStop struct {
+	manager *shutdown.Lifo
+	// background holds the background work, such as the file sweep, in one LIFO phase.
+	background *shutdown.Lifo
+	// listeners holds the HTTP listeners. They do not depend on each other, so they stop at the
+	// same time: a sequential manager would skip the listeners that remain after the deadline.
+	listeners *shutdown.Group
+	log       *slog.Logger
+	limits    stopLimits
+}
+
+// newServerStop makes the shutdown manager. It registers no phase: serve registers them in
+// the order of the resources that they close.
+func newServerStop(limits stopLimits, log *slog.Logger) *serverStop {
+	return &serverStop{
+		manager: shutdown.NewLIFO(), background: shutdown.NewLIFO(), listeners: shutdown.NewGroup(),
+		log: log, limits: limits,
+	}
+}
+
+// addDatabase registers the database close. Call it first, so that the database closes last.
+// The close has no limit of its own, and its error is only logged, as before the manager.
+func (s *serverStop) addDatabase(db *bun.DB) {
+	s.manager.Append(shutdown.ContextFn(func(ctx context.Context) error {
+		closeDatabase(ctx, db, s.log)
+
+		return nil
+	}))
+}
+
+// addBackgroundPhase registers the stop of the background work. Call it after addDatabase. A
+// failure is logged at the error level and does not change the exit code.
+func (s *serverStop) addBackgroundPhase() {
+	s.manager.Append(shutdown.ContextFn(func(ctx context.Context) error {
+		stopBackground(ctx, s.background, s.limits.background, s.log)
+
+		return nil
+	}))
+}
+
+// addListenerPhase registers the stop of the listeners. Call it after addBackgroundPhase and
+// before the first listener starts. Only this phase returns its error to serve.
+func (s *serverStop) addListenerPhase() {
+	s.manager.Append(shutdown.ContextFn(s.stopListeners))
+}
+
+// addListener adds the stop of srv to the listener phase. Call it before srv starts.
+func (s *serverStop) addListener(ctx context.Context, name string, srv *http.Server) {
+	s.listeners.Append(shutdown.ContextFn(newListener(ctx, name, srv, s.limits, s.log).stop))
+}
+
+// closeAfterFailedStart runs the shutdown sequence after startErr stopped the startup. Then only
+// the database and the background work are registered. The sequence context has no cancel, so a
+// cancelled ctx does not skip the close. The result is startErr joined with a close error.
+func (s *serverStop) closeAfterFailedStart(ctx context.Context, startErr error) error {
+	return errors.Join(startErr, s.manager.CloseContext(context.WithoutCancel(ctx)))
+}
+
+// stopListeners stops each listener under the limit of the listener phase. The deadline
+// starts here, after the wake-up, not at server startup. Each listener closes its open
+// connections when its drain limit ends; see listener.stop.
+func (s *serverStop) stopListeners(ctx context.Context) error {
+	shutCtx, cancel := context.WithTimeout(ctx, s.limits.listeners())
+	defer cancel()
+
+	started := time.Now()
+
+	s.log.InfoContext(shutCtx, "shutdown: listeners stop started",
+		"drain", s.limits.drain, "limit", s.limits.listeners())
+
+	err := s.listeners.CloseContext(shutCtx)
+
+	s.log.InfoContext(shutCtx, "shutdown: listeners stopped", "duration", time.Since(started))
+
+	return errorcontext.Wrap(err, "graceful shutdown")
+}
+
+// waitAndShutdown blocks until SIGINT/SIGTERM arrives or serverCtx is cancelled (the main
+// listener failed, or the parent context ended), then runs the shutdown sequence of stop. The
+// manager runs the sequence one time. The context of the sequence keeps the values of serverCtx
+// and has no deadline or cancel; see serverStop. On the failure path the listener cause is
+// joined with any shutdown error, so both stay reachable through errors.Is.
+func waitAndShutdown(serverCtx context.Context, stop *serverStop) error {
+	sig, waitErr := compat.WaitForSignal(serverCtx, syscall.SIGINT, syscall.SIGTERM)
+
+	shutCtx := context.WithoutCancel(serverCtx)
+
+	if waitErr != nil {
+		stop.log.InfoContext(shutCtx, "shutdown started: the server context ended", "cause", context.Cause(serverCtx))
+	} else {
+		stop.log.InfoContext(shutCtx, "shutdown started: signal received", "signal", sig.String())
+	}
+
+	shutdownErr := stop.manager.CloseContext(shutCtx)
+
+	if waitErr != nil {
+		return errors.Join(fmt.Errorf("server: %w", context.Cause(serverCtx)), shutdownErr)
+	}
+
+	if shutdownErr != nil {
+		return fmt.Errorf("shutdown server: %w", shutdownErr)
+	}
+
+	return nil
+}
+
+// stopBackground closes the background work under a new deadline of timeout. A failure is
+// logged at the error level: the database closes next, so work that did not stop can fail.
+func stopBackground(ctx context.Context, background *shutdown.Lifo, timeout time.Duration, log *slog.Logger) {
+	stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
+	defer cancel()
+
+	started := time.Now()
+
+	log.InfoContext(stopCtx, "shutdown: background work stop started", "limit", timeout)
+
+	err := background.CloseContext(stopCtx)
+	if err != nil {
+		log.ErrorContext(ctx, "stop background work", "err", err)
+	}
+
+	log.InfoContext(stopCtx, "shutdown: background work stopped", "duration", time.Since(started))
+}
+
+// closeDatabase closes the database of the server and logs the duration, because the close has
+// no limit of its own: an operator must see when it holds the stop.
+func closeDatabase(ctx context.Context, db *bun.DB, log *slog.Logger) {
+	started := time.Now()
+
+	log.InfoContext(ctx, "shutdown: database close started")
+	closeServerDB(ctx, db, log)
+	log.InfoContext(ctx, "shutdown: database closed", "duration", time.Since(started))
 }
 
 // unusedConns holds the connections that sent no complete request header (http.StateNew). A

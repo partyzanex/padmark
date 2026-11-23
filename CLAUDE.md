@@ -56,8 +56,13 @@ Dependencies point inward: adapters and infrastructure depend on usecases and do
 - Constructors return concrete types. Use constructor arguments for required dependencies;
   optional caches/configuration may use explicit options.
 - Each adapter defines its own interfaces instead of importing another adapter's interfaces.
-- Manual wiring lives in `internal/infra/server/server.go`, through `serverAction`,
-  `buildHandlers` and `buildRouter`; do not introduce a DI framework.
+- Manual wiring lives in `internal/infra/server/server.go`: `serverAction` gets a checked
+  `Config` from `configFromCommand` (`config.go`), then `serve`, `buildHandlers` and `buildRouter`
+  read only that `Config`, never `*cli.Command`. `newStorage` (`db.go`) is the one dialect switch.
+  Do not introduce a DI framework.
+- One LIFO manager, `serverStop` (`shutdown.go`), closes the listeners, then the background work,
+  then the database; `serve` registers them in the reverse order. Do not register closers in the
+  global `compat` manager; only its stateless `compat.WaitForSignal` is in use.
 - HTTP middleware and its request context live in `internal/adapters/web/middleware/`.
   Keep it independent of the parent `web` package; shared JSON errors live in `web/response/`.
 - Only storage keeps slugs unique: triggers and the `slug_namespace` primary key, also across
@@ -74,6 +79,7 @@ Dependencies point inward: adapters and infrastructure depend on usecases and do
 
 - Flag names, environment variables and defaults are grouped in `internal/infra/server/flags.go`.
   Server variables use `PADMARK_*`; `PADMARK_BOOTSTRAP_TOKEN` is environment-only.
+  `configFromCommand` reads each flag once and does all startup checks before the keyring opens.
 - File-backed SQLite defaults to `padmark-keys.json` beside the DB; PostgreSQL uses the
   working directory. The container works in `/data`, persisted by a named volume in Compose.
   Only `serve` generates missing default keys. Explicit paths must already exist;
@@ -85,8 +91,9 @@ Dependencies point inward: adapters and infrastructure depend on usecases and do
 - Keep installation keys and real credentials out of the repository. Test credentials must
   belong only to isolated fixtures. Back up database and keyring separately.
 - SQL migrations live in `migrations/sqlite/` and `migrations/postgres/` and are embedded per dialect.
-- `--s3-endpoint` turns files on; `attachFiles` (`infra/server/files.go`) creates a missing
-  bucket and stops startup when the key has no access or cannot create it. S3 keys come only from `PADMARK_S3_ACCESS_KEY` / `PADMARK_S3_SECRET_KEY`.
+- `--s3-endpoint` turns files on; `configFromCommand` requires the bucket and both keys, and
+  `attachFiles` (`infra/server/files.go`) creates a missing bucket and stops startup when the key
+  has no access or cannot create it. S3 keys come only from `PADMARK_S3_ACCESS_KEY` / `PADMARK_S3_SECRET_KEY`.
   Other flags: `--s3-bucket`, `--s3-region`, `--s3-path-style`, `--max-file-size`,
   `--files-sweep-interval` (`0` = no background sweep).
 

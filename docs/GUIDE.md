@@ -484,6 +484,17 @@ Keep composition and operational logic in `internal/infra/server/`, not in `main
 environment source; the bootstrap token is environment-only. Consult
 [the configuration table](../README.md#configuration-reference) and [.env.example](../.env.example).
 
+`configFromCommand` in [config.go](../internal/infra/server/config.go) reads each `serve` flag
+and environment variable one time into one `Config` value. It also does all startup checks:
+the removed `--auth-tokens`, the argon2id cost and budget, the bootstrap token, the S3 bucket
+and keys, the trusted proxies, the public scheme, the CSRF secret and the TLS pair. An error
+stops startup before the keyring and the database open (fail-hard), so an invalid
+configuration creates no keyring and no database file. The flag validators of `urfave/cli`
+still check single values (ranges, negative numbers) while the flags are parsed. The build
+functions read only `Config`; they never get `*cli.Command`. `migrate` and the `encryption`
+commands use the same readers for the storage, keyring and argon2id settings.
+`Config` holds secrets: do not log it.
+
 For file-backed SQLite, an unset keyring path resolves to `padmark-keys.json` beside the DB.
 PostgreSQL defaults to the working directory. Only `serve` creates missing default files.
 Explicit paths must exist, and in-memory/temporary SQLite requires an explicit keyring;
@@ -517,17 +528,27 @@ and links.
 ## 8. Dependency Injection
 
 Manual wiring lives in [server.go](../internal/infra/server/server.go), chiefly
-`serverAction`, `buildHandlers` and `buildRouter`:
+`serverAction`, `serve`, `buildHandlers` and `buildRouter`:
 
-1. Validate startup configuration/secrets and initialize logging.
-2. Load the keyring, open storage, apply schema migrations and validate content encryption.
-3. Construct repositories, ciphers, renderer, the shared expired-slug releaser, caches and metrics.
-4. Build note/link/auth managers and inject them into the HTTP handlers/router.
+1. `serverAction` gets the checked `Config` from `configFromCommand` and calls `serve`.
+2. `serve` sets the argon2id budget, makes the one edit-code hasher and initializes logging.
+3. Load the keyring and open storage. Register the database close and the background phase in
+   the shutdown manager (see [Graceful Shutdown](#11-graceful-shutdown)).
+4. `initRepos` builds the repositories of the dialect with `newStorage`, the one dialect switch
+   in [db.go](../internal/infra/server/db.go), and applies the schema migrations. Then validate
+   content encryption.
+5. Construct ciphers, renderer, the shared expired-slug releaser, caches and metrics. Each
+   shared object is built one time: the keyring, the edit-code hasher and the releaser go to
+   the note, link and file managers.
+6. Build note/link/auth managers and inject them into the HTTP handlers/router.
    `attachFiles` in [files.go](../internal/infra/server/files.go) builds `files.Manager` only
-   when `--s3-endpoint` is set. A set but wrong S3 configuration stops startup (fail-hard).
-   Without the endpoint, the server logs `file publishing is off`; other S3 settings without
-   the endpoint give a warning with their names.
-5. Start configured listeners and register shutdown/cleanup work.
+   when `--s3-endpoint` is set. A wrong endpoint or a bucket that the key cannot use stops
+   startup (fail-hard). Without the endpoint, the server logs `file publishing is off`; other
+   S3 settings without the endpoint give a warning with their names.
+7. Register the listener phase, then start the configured listeners.
+
+If a step after the database opens fails, `serve` closes the background work and the database
+through the same manager and returns the startup error.
 
 Required dependencies use constructors; optional facilities can use explicit `With...`
 methods or options. Use mocks/no-op implementations in tests instead of adding nil checks
@@ -582,9 +603,21 @@ not the subject of a test.
 
 ## 11. Graceful Shutdown
 
-The server registers listener shutdown with `github.com/partyzanex/shutdown` and releases
-its infrastructure resources. Keep shutdown bounded and handle `http.ErrServerClosed` as
-the normal outcome of closing an HTTP server.
+The server stops through one manager of `github.com/partyzanex/shutdown`: `serverStop` in
+[shutdown.go](../internal/infra/server/shutdown.go), a LIFO (last in, first out) manager that
+`serve` owns. It uses the root API, not the global `compat` manager; only the stateless
+`compat.WaitForSignal` waits for `SIGINT` or `SIGTERM`. `serve` registers the phases in the
+order of the resources that they close:
+
+1. `addDatabase`: the database close, right after the database opens.
+2. `addBackgroundPhase`: a LIFO manager for background work, such as the file sweep.
+3. `addListenerPhase`: a `shutdown.Group` for the main, redirect and metrics listeners, right
+   before the first listener starts.
+
+The LIFO order closes them in reverse: the listeners stop first, the background work stops next
+and the database closes last. A startup failure after the database opens closes the
+background work and the database through the same manager. Keep shutdown bounded and handle
+`http.ErrServerClosed` as the normal outcome of closing an HTTP server.
 
 `--shutdown-timeout` (10 seconds by default) limits the full shutdown sequence. `newStopLimits`
 (`internal/infra/server/shutdown.go`) divides it between three phases:
@@ -597,8 +630,13 @@ the normal outcome of closing an HTTP server.
 
 The database closes after these phases. Its close has no limit; the log shows its duration.
 
+Each phase sets its own deadline from its limit. The context of the manager has no deadline:
+the LIFO manager skips the remaining phases when its context ends, and the database must close
+also after a slow stop. So a phase that uses all of its time does not take the time of the
+next phase, and the full sequence stays within `--shutdown-timeout` plus the database close.
+
 Each HTTP server (main, redirect, metrics) has a `listener` value, and `listener.stop` is its
-close function in the shared manager. The shared manager is a `shutdown.Group`, so the
+close function in the listener phase. The listener phase is a `shutdown.Group`, so the
 listeners stop at the same time and no listener stays open after the deadline of a different
 one. `listener.stop` does these steps:
 
@@ -610,16 +648,16 @@ one. `listener.stop` does these steps:
 3. It waits for the request handlers, because they use the database. A handler that does not
    return in its limit is an error. A forced close is not an error: the exit code stays 0.
 
-Work that must stop before the database closes does not use the shared manager. `serverAction`
-makes a second LIFO manager for background work and closes it through a deferred
-`stopBackground` call, before the deferred `closeDatabase` call. `stopBackground` has its own
-part of the timeout, so it runs also when a long file transfer used the full listener phase.
+Only the listener phase returns its error, as `graceful shutdown: ...`. The background phase
+(`stopBackground`) and the database phase (`closeDatabase`) log their errors at the error level
+and do not change the exit code. The background phase has its own part of the timeout, so it
+runs also when a long file transfer used the full listener phase.
 
 The log has one record for the signal (`shutdown started: signal received`) and records for
 the start and the duration of each phase. Set the stop grace period of the container to a
 value larger than `--shutdown-timeout`; `docker-compose.yml` sets `stop_grace_period: 15s`.
 
-The file sweep loop (`startFileSweep`) adds a close function to that background manager. The
+The file sweep loop (`startFileSweep`) adds a close function to the background phase. The
 close function cancels the loop and waits for the current sweep until its deadline. The loop
 sweeps once at startup and then at each tick. A sweep error is fail-soft: the loop logs it and
 tries again at the next tick. A panic in a sweep is logged at the error level, and the loop

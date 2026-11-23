@@ -11,8 +11,8 @@ import (
 	"github.com/urfave/cli/v3"
 )
 
-// runWithSessionTTL parses args against the real flag set and returns what sessionTTL resolves
-// together with the log output of warnDeprecatedSessionFlags.
+// runWithSessionTTL parses args against the real flag set and returns the session TTL of
+// accountsConfigFromCommand together with the log output of warnDeprecatedSessionFlags.
 func runWithSessionTTL(t *testing.T, args ...string) (time.Duration, string) {
 	t.Helper()
 
@@ -23,10 +23,11 @@ func runWithSessionTTL(t *testing.T, args ...string) (time.Duration, string) {
 
 	log := slog.New(slog.NewTextHandler(&out, nil))
 	cmd := newCommand("padmark", "test", appFlags(), func(ctx context.Context, cmd *cli.Command) error {
-		warnDeprecatedSessionFlags(ctx, cmd, log)
-		got = sessionTTL(cmd)
+		accounts, err := accountsConfigFromCommand(cmd)
+		warnDeprecatedSessionFlags(ctx, accounts, log)
+		got = accounts.sessionTTL
 
-		return nil
+		return err
 	})
 
 	require.NoError(t, cmd.Run(t.Context(), append([]string{"padmark"}, args...)))

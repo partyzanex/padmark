@@ -107,7 +107,7 @@ func (s *DSNErrorLeakSuite) rejectedDSNs() []rejectedDSN {
 	}
 }
 
-// openLikeServer mirrors server.openPostgresDB + openDB + initPostgresStorage: connector from
+// openLikeServer mirrors server.openPostgresDB + openDB + migratePostgres: connector from
 // the DSN, ping, then goose migrations.
 func openLikeServer(ctx context.Context, dsn string) error {
 	db := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn))), pgdialect.New())

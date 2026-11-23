@@ -80,6 +80,13 @@ v0.5.0 follows **v0.4.0**.
 
 ### Changed
 
+- `serve` reads all settings once into one `Config` and checks them before it opens the keyring
+  and the database. An invalid `--trusted-proxies`, `--public-scheme`, `--csrf-secret`, TLS pair
+  or S3 setting no longer creates a database file or a new keyring before the error, and the
+  incomplete-S3 error no longer starts with `build request handlers: `.
+- One shutdown manager closes the listeners, then the background work, then the database; a
+  startup failure closes them through the same manager. The timing and the log records do not
+  change.
 - Notes, links, files, sessions, invites, reveal tokens and API tokens share one expiry rule: a
   record is expired from its `expires_at` moment on, in the domain and in SQL on both databases.
 - Slugs stay unique only through the `slug_namespace` table: `Create` no longer checks other
