@@ -296,7 +296,7 @@ func (s *ManagerTestSuite) TestCreate_StorageError() {
 
 // Follow.
 
-func (s *ManagerTestSuite) TestRedirect_OK() {
+func (s *ManagerTestSuite) TestFollow_OK() {
 	link := &domain.Link{
 		TargetURL: "https://example.com",
 		CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
@@ -313,7 +313,7 @@ func (s *ManagerTestSuite) TestRedirect_OK() {
 	s.Equal(1, got.Views)
 }
 
-func (s *ManagerTestSuite) TestRedirect_NotFound() {
+func (s *ManagerTestSuite) TestFollow_NotFound() {
 	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(nil, domain.ErrNotFound)
 
 	_, err := s.manager.Follow(s.T().Context(), "missing", openReader())
@@ -321,7 +321,7 @@ func (s *ManagerTestSuite) TestRedirect_NotFound() {
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
-func (s *ManagerTestSuite) TestRedirect_Expired() {
+func (s *ManagerTestSuite) TestFollow_Expired() {
 	past := testNow().Add(-time.Hour)
 	link := &domain.Link{
 		TargetURL: "https://example.com", ExpiresAt: &past,
@@ -336,7 +336,7 @@ func (s *ManagerTestSuite) TestRedirect_Expired() {
 	s.ErrorIs(err, domain.ErrExpired)
 }
 
-func (s *ManagerTestSuite) TestRedirect_BurnAfterClick_ConsumedOnce() {
+func (s *ManagerTestSuite) TestFollow_BurnAfterClick_ConsumedOnce() {
 	link := &domain.Link{
 		TargetURL: "https://example.com", BurnAfterClick: true,
 		CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
@@ -351,9 +351,9 @@ func (s *ManagerTestSuite) TestRedirect_BurnAfterClick_ConsumedOnce() {
 	s.Equal("https://example.com", got.TargetURL)
 }
 
-// TestRedirectWithoutBurn_BurnLinkLeftIntact: an access without deliberate intent must neither
+// TestFollow_NoBurnIntent_BurnLinkLeftIntact: an access without deliberate intent must neither
 // consume a burn_after_click link nor count a view — it gets ErrBurnIntentRequired.
-func (s *ManagerTestSuite) TestRedirectWithoutBurn_BurnLinkLeftIntact() {
+func (s *ManagerTestSuite) TestFollow_NoBurnIntent_BurnLinkLeftIntact() {
 	link := &domain.Link{
 		TargetURL: "https://example.com", BurnAfterClick: true,
 		CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
@@ -368,9 +368,9 @@ func (s *ManagerTestSuite) TestRedirectWithoutBurn_BurnLinkLeftIntact() {
 	s.Nil(got)
 }
 
-// TestRedirectWithoutBurn_OrdinaryLinkFollowed: without AllowBurn, any other link is followed
+// TestFollow_NoBurnIntent_OrdinaryLinkFollowed: without AllowBurn, any other link is followed
 // exactly as with it.
-func (s *ManagerTestSuite) TestRedirectWithoutBurn_OrdinaryLinkFollowed() {
+func (s *ManagerTestSuite) TestFollow_NoBurnIntent_OrdinaryLinkFollowed() {
 	link := &domain.Link{
 		TargetURL: "https://example.com",
 		CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
@@ -387,9 +387,9 @@ func (s *ManagerTestSuite) TestRedirectWithoutBurn_OrdinaryLinkFollowed() {
 	s.Equal(1, got.Views)
 }
 
-// TestRedirectWithoutBurn_ExpiredLinkStillExpires: expiry is not a burn — an expired link is
+// TestFollow_NoBurnIntent_ExpiredLinkStillExpires: expiry is not a burn — an expired link is
 // deleted and ErrExpired returned on either path.
-func (s *ManagerTestSuite) TestRedirectWithoutBurn_ExpiredLinkStillExpires() {
+func (s *ManagerTestSuite) TestFollow_NoBurnIntent_ExpiredLinkStillExpires() {
 	past := testNow().Add(-time.Minute)
 	link := &domain.Link{
 		TargetURL: "https://example.com", BurnAfterClick: true, ExpiresAt: &past,
@@ -404,9 +404,9 @@ func (s *ManagerTestSuite) TestRedirectWithoutBurn_ExpiredLinkStillExpires() {
 	s.ErrorIs(err, domain.ErrExpired)
 }
 
-// TestRedirect_BurnAfterClick_SecondCallNotFound verifies burn-after-click is exactly-once: a
+// TestFollow_BurnAfterClick_SecondCallNotFound verifies burn-after-click is exactly-once: a
 // second Follow for the same slug, after the row was consumed, gets ErrNotFound.
-func (s *ManagerTestSuite) TestRedirect_BurnAfterClick_SecondCallNotFound() {
+func (s *ManagerTestSuite) TestFollow_BurnAfterClick_SecondCallNotFound() {
 	link := &domain.Link{
 		TargetURL: "https://example.com", BurnAfterClick: true,
 		CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
@@ -424,7 +424,7 @@ func (s *ManagerTestSuite) TestRedirect_BurnAfterClick_SecondCallNotFound() {
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
-func (s *ManagerTestSuite) TestRedirect_DecryptFailure() {
+func (s *ManagerTestSuite) TestFollow_DecryptFailure() {
 	s.manager = s.newManager(failingEncryptor(s.ctrl))
 
 	link := &domain.Link{
@@ -444,7 +444,7 @@ func (s *ManagerTestSuite) TestRedirect_DecryptFailure() {
 // Cache (WithCache) — the default Manager has no cache (see SetupTest); these tests attach s.cache
 // to exercise resolveLink/evictCache without changing every other test's expectations.
 
-func (s *ManagerTestSuite) TestRedirect_CacheHit_ReadsCurrentMetadata() {
+func (s *ManagerTestSuite) TestFollow_CacheHit_ReadsCurrentMetadata() {
 	s.manager = s.newManager(failingEncryptor(s.ctrl)).WithCache(s.cache)
 
 	stored := &domain.Link{
@@ -464,7 +464,7 @@ func (s *ManagerTestSuite) TestRedirect_CacheHit_ReadsCurrentMetadata() {
 	s.Equal("the-slug", got.ID)
 }
 
-func (s *ManagerTestSuite) TestRedirect_CacheMiss_PopulatesCacheForNonBurnLink() {
+func (s *ManagerTestSuite) TestFollow_CacheMiss_PopulatesCacheForNonBurnLink() {
 	s.manager.WithCache(s.cache)
 
 	link := &domain.Link{
@@ -484,10 +484,10 @@ func (s *ManagerTestSuite) TestRedirect_CacheMiss_PopulatesCacheForNonBurnLink()
 	s.Require().NoError(err)
 }
 
-// TestRedirect_BurnAfterClick_NeverCached verifies a burn-after-click link is never written to
+// TestFollow_BurnAfterClick_NeverCached verifies a burn-after-click link is never written to
 // the cache — caching one would risk a second, concurrent Follow being served a stale
 // "not yet consumed" copy instead of relying on storage.Consume's atomic exactly-once guarantee.
-func (s *ManagerTestSuite) TestRedirect_BurnAfterClick_NeverCached() {
+func (s *ManagerTestSuite) TestFollow_BurnAfterClick_NeverCached() {
 	s.manager.WithCache(s.cache)
 
 	link := &domain.Link{
@@ -505,7 +505,7 @@ func (s *ManagerTestSuite) TestRedirect_BurnAfterClick_NeverCached() {
 	s.Require().NoError(err)
 }
 
-func (s *ManagerTestSuite) TestRedirect_Expired_EvictsCache() {
+func (s *ManagerTestSuite) TestFollow_Expired_EvictsCache() {
 	s.manager.WithCache(s.cache)
 
 	past := testNow().Add(-time.Hour)
@@ -600,7 +600,7 @@ func (s *ManagerTestSuite) TestCreate_InvalidURL_DoesNotRecordLinksCreated() {
 	s.ErrorIs(err, domain.ErrInvalidURL)
 }
 
-func (s *ManagerTestSuite) TestRedirect_RecordsRedirect() {
+func (s *ManagerTestSuite) TestFollow_RecordsRedirect() {
 	s.manager.WithMetrics(s.metrics)
 
 	link := &domain.Link{
@@ -618,7 +618,7 @@ func (s *ManagerTestSuite) TestRedirect_RecordsRedirect() {
 	s.Require().NoError(err)
 }
 
-func (s *ManagerTestSuite) TestRedirect_BurnAfterClick_RecordsRedirect() {
+func (s *ManagerTestSuite) TestFollow_BurnAfterClick_RecordsRedirect() {
 	s.manager.WithMetrics(s.metrics)
 
 	link := &domain.Link{
@@ -635,7 +635,7 @@ func (s *ManagerTestSuite) TestRedirect_BurnAfterClick_RecordsRedirect() {
 	s.Require().NoError(err)
 }
 
-func (s *ManagerTestSuite) TestRedirect_NotFound_DoesNotRecordRedirect() {
+func (s *ManagerTestSuite) TestFollow_NotFound_DoesNotRecordRedirect() {
 	s.manager.WithMetrics(s.metrics)
 	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(nil, domain.ErrNotFound)
 	// s.metrics.EXPECT().IncRedirects() deliberately absent — only a served redirect counts.

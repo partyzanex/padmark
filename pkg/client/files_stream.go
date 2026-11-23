@@ -35,6 +35,15 @@ const (
 	decimalBase     = 10
 )
 
+// The names of the text fields of the upload form.
+const (
+	ttlField               = "ttl"
+	privacyField           = "privacy"
+	burnAfterDownloadField = "burn_after_download"
+	slugField              = "slug"
+	editCodeField          = "edit_code"
+)
+
 var (
 	// ErrInvalidUploadOptions reports an UploadFileOptions value that the client cannot send.
 	ErrInvalidUploadOptions = errors.New("invalid upload options")
@@ -49,16 +58,16 @@ var (
 // UploadFileOptions holds the optional fields of an upload. The zero value uploads a public
 // file without expiry, with a random slug and a random edit code.
 type UploadFileOptions struct {
-	// TTL is the lifetime of the file, counted from the upload. Zero means no expiry.
-	// The server counts whole seconds, so TTL must be zero or at least one second.
-	// The client drops the fraction of a second.
-	TTL time.Duration
 	// Privacy is "public", "authenticated" or "owner". Empty uses the server default (public).
 	Privacy string
 	// Slug is a custom file ID. Empty makes the server generate a random ID.
 	Slug string
 	// EditCode is a custom edit code (8 to 128 characters). Empty makes the server generate one.
 	EditCode string
+	// TTL is the lifetime of the file, counted from the upload. Zero means no expiry.
+	// The server counts whole seconds, so TTL must be zero or at least one second.
+	// The client drops the fraction of a second.
+	TTL time.Duration
 	// BurnAfterDownload makes the server delete the file after the first deliberate download.
 	BurnAfterDownload bool
 }
@@ -102,12 +111,14 @@ func (c *Client) UploadFile(
 	go func() {
 		defer close(done)
 
-		writer.CloseWithError(writeUploadForm(form, fields, name, body))
+		// CloseWithError always returns nil. The form error goes to the reader of the pipe.
+		_ = writer.CloseWithError(writeUploadForm(form, fields, name, body))
 	}()
 
 	// stopForm closes the read end of the pipe. A blocked pipe read and the next write of the
-	// form goroutine then return an error.
-	stopForm := func() { _ = reader.Close() }
+	// form goroutine then return an error. CloseWithError(nil) is the same as Close, and its
+	// documentation promises a nil result.
+	stopForm := func() { _ = reader.CloseWithError(nil) }
 
 	// Closing the read end stops the form goroutine at its next write, also when the server
 	// answered before it read the full body.
@@ -133,6 +144,8 @@ func (c *Client) UploadFile(
 	// Read the response before the deferred stopForm: a server that answers early (413) can
 	// close the connection when the body stops, and the response body must arrive first.
 	created, err := readUploadResponse(resp)
+
+	err = closeBody(resp, err)
 	if err != nil {
 		return nil, err
 	}
@@ -147,9 +160,8 @@ func (c *Client) UploadFile(
 	return created, nil
 }
 
+// readUploadResponse decodes the response of an upload. The caller closes the body.
 func readUploadResponse(resp *http.Response) (*CreateFileResponse, error) {
-	defer closeBody(resp)
-
 	if resp.StatusCode != http.StatusCreated {
 		return nil, decodeAPIError(resp)
 	}
@@ -197,8 +209,18 @@ func (c *Client) DownloadFile(ctx context.Context, id string, dst io.Writer) (*D
 		return nil, fmt.Errorf("send download request: %w", err)
 	}
 
-	defer closeBody(resp)
+	downloaded, err := readDownload(resp, dst)
 
+	err = closeBody(resp, err)
+	if err != nil {
+		return nil, err
+	}
+
+	return downloaded, nil
+}
+
+// readDownload copies the content of a download response to dst. The caller closes the body.
+func readDownload(resp *http.Response, dst io.Writer) (*DownloadedFile, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, decodeAPIError(resp)
 	}
@@ -265,23 +287,23 @@ func (o *UploadFileOptions) formFields() ([][2]string, error) {
 	}
 
 	if o.TTL > 0 {
-		fields = append(fields, [2]string{"ttl", strconv.FormatInt(int64(o.TTL/time.Second), decimalBase)})
+		fields = append(fields, [2]string{ttlField, strconv.FormatInt(int64(o.TTL/time.Second), decimalBase)})
 	}
 
 	if o.Privacy != "" {
-		fields = append(fields, [2]string{"privacy", o.Privacy})
+		fields = append(fields, [2]string{privacyField, o.Privacy})
 	}
 
 	if o.BurnAfterDownload {
-		fields = append(fields, [2]string{"burn_after_download", "true"})
+		fields = append(fields, [2]string{burnAfterDownloadField, "true"})
 	}
 
 	if o.Slug != "" {
-		fields = append(fields, [2]string{"slug", o.Slug})
+		fields = append(fields, [2]string{slugField, o.Slug})
 	}
 
 	if o.EditCode != "" {
-		fields = append(fields, [2]string{"edit_code", o.EditCode})
+		fields = append(fields, [2]string{editCodeField, o.EditCode})
 	}
 
 	return fields, nil
@@ -289,10 +311,12 @@ func (o *UploadFileOptions) formFields() ([][2]string, error) {
 
 // writeUploadForm writes the text fields, then the file part, then the closing boundary.
 func writeUploadForm(form *multipart.Writer, fields [][2]string, name string, body io.Reader) error {
-	for _, field := range fields {
-		err := form.WriteField(field[0], field[1])
+	for idx := range fields {
+		fieldName, fieldValue := fields[idx][0], fields[idx][1]
+
+		err := form.WriteField(fieldName, fieldValue)
 		if err != nil {
-			return fmt.Errorf("write field %s: %w", field[0], err)
+			return fmt.Errorf("write field %s: %w", fieldName, err)
 		}
 	}
 
@@ -344,8 +368,21 @@ func attachmentName(disposition string) string {
 	return strings.TrimSpace(params["filename"])
 }
 
-// closeBody drains a small rest of the body so that the connection can be used again.
-func closeBody(resp *http.Response) {
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxFileJSONSize))
-	_ = resp.Body.Close()
+// closeBody drains a small rest of the body, so that the connection can be used again, and
+// closes the body. It returns err when err is not nil: the first error tells the cause.
+// Otherwise it returns the drain or the close error with context.
+func closeBody(resp *http.Response, err error) error {
+	_, drainErr := io.Copy(io.Discard, io.LimitReader(resp.Body, maxFileJSONSize))
+	closeErr := resp.Body.Close()
+
+	switch {
+	case err != nil:
+		return err
+	case drainErr != nil:
+		return fmt.Errorf("drain response body: %w", drainErr)
+	case closeErr != nil:
+		return fmt.Errorf("close response body: %w", closeErr)
+	default:
+		return nil
+	}
 }

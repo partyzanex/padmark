@@ -338,9 +338,9 @@ func (s *HandlerSuite) TestGetNote_ExplicitBurnRead_Consumes() {
 	}
 }
 
-// TestGetNote_ImplicitRead_PeekNotFound: an implicit read of a missing note gets the not-found
+// TestGetNote_ImplicitRead_NotFound: an implicit read of a missing note gets the not-found
 // error of the usecase as is.
-func (s *HandlerSuite) TestGetNote_ImplicitRead_PeekNotFound() {
+func (s *HandlerSuite) TestGetNote_ImplicitRead_NotFound() {
 	s.manager.EXPECT().Read(gomock.Any(), "nonexistent", withBurn(false)).Return(nil, domain.ErrNotFound)
 
 	w := httptest.NewRecorder()

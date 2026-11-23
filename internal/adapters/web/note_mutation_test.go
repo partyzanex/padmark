@@ -282,9 +282,9 @@ func (s *HandlerSuite) TestDeleteNote_Forbidden() {
 // handlers answer 401. The tests below check the translation on each route, and that a 401 does
 // not count for the fail lockout.
 
-// TestMutationGate_AnonymousDelete_PrivateNote verifies the ogen DELETE route: with auth
+// TestNoteMutation_AnonymousDelete_PrivateNote verifies the ogen DELETE route: with auth
 // configured, an anonymous DELETE that the usecase refuses (ErrForbidden) gets a bodyless 401.
-func (s *HandlerSuite) TestMutationGate_AnonymousDelete_PrivateNote() {
+func (s *HandlerSuite) TestNoteMutation_AnonymousDelete_PrivateNote() {
 	router := s.newRouterWithTOTPAuth()
 	s.manager.EXPECT().Delete(gomock.Any(), testID, "whatever", anonymousReader()).Return(domain.ErrForbidden)
 
@@ -300,9 +300,9 @@ func (s *HandlerSuite) TestMutationGate_AnonymousDelete_PrivateNote() {
 	s.Empty(w.Body.String())
 }
 
-// TestMutationGate_AnonymousDelete_OwnerNote is the same branch for privacy=owner: the usecase
+// TestNoteMutation_AnonymousDelete_OwnerNote is the same branch for privacy=owner: the usecase
 // refuses the anonymous caller with ErrForbidden, which the handler answers with 401.
-func (s *HandlerSuite) TestMutationGate_AnonymousDelete_OwnerNote() {
+func (s *HandlerSuite) TestNoteMutation_AnonymousDelete_OwnerNote() {
 	router := s.newRouterWithTOTPAuth()
 	s.manager.EXPECT().Delete(gomock.Any(), testID, "whatever", anonymousReader()).Return(domain.ErrForbidden)
 
@@ -316,11 +316,11 @@ func (s *HandlerSuite) TestMutationGate_AnonymousDelete_OwnerNote() {
 	s.Equal(http.StatusUnauthorized, w.Code)
 }
 
-// TestMutationGate_SignedInNonOwner_OwnerNote covers audit finding R4: a signed-in caller who
+// TestNoteMutation_SignedInNonOwner_OwnerNote covers audit finding R4: a signed-in caller who
 // cannot read another account's privacy=owner note may not update or delete it, even with the
 // right edit code. The usecase gets the reader of the signed-in caller and refuses it; the
 // handler answers 401 like the read.
-func (s *HandlerSuite) TestMutationGate_SignedInNonOwner_OwnerNote() {
+func (s *HandlerSuite) TestNoteMutation_SignedInNonOwner_OwnerNote() {
 	usr := newTestUser("bob")
 
 	// The single-segment path is the ogen route; the multi-segment path is the native one.
@@ -353,10 +353,10 @@ func (s *HandlerSuite) TestMutationGate_SignedInNonOwner_OwnerNote() {
 	}
 }
 
-// TestMutationGate_Note401DoesNotTriggerFailLockout verifies the privacy/lockout interplay: the
+// TestNoteMutation_401DoesNotTriggerFailLockout verifies the privacy/lockout interplay: the
 // fail-lockout counts consecutive 403s (wrong edit codes), while the 401 of a hidden note never
 // reaches the counter — repeated refused attempts stay 401 and never escalate to 429.
-func (s *HandlerSuite) TestMutationGate_Note401DoesNotTriggerFailLockout() {
+func (s *HandlerSuite) TestNoteMutation_401DoesNotTriggerFailLockout() {
 	router := s.newRouterWithTOTPAuth()
 	s.manager.EXPECT().Update(gomock.Any(), testID, "", anonymousReader(), gomock.Any()).
 		Return(nil, domain.ErrForbidden).Times(12)
@@ -373,9 +373,9 @@ func (s *HandlerSuite) TestMutationGate_Note401DoesNotTriggerFailLockout() {
 	}
 }
 
-// TestMutationGate_MultiSegmentPaths verifies the native {id...} routes: an anonymous PUT and
+// TestNoteMutation_MultiSegmentPaths verifies the native {id...} routes: an anonymous PUT and
 // DELETE of a multi-segment-slug note whose privacy refuses anonymous callers get 401.
-func (s *HandlerSuite) TestMutationGate_MultiSegmentPaths() {
+func (s *HandlerSuite) TestNoteMutation_MultiSegmentPaths() {
 	router := s.newRouterWithTOTPAuth()
 	s.manager.EXPECT().Update(gomock.Any(), "project/GUIDE.md", "", anonymousReader(), gomock.Any()).
 		Return(nil, domain.ErrForbidden)

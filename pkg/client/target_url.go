@@ -22,11 +22,11 @@ import (
 // "#". A URL without a misplaced "#", for example a URL from url.Parse, is returned without
 // a change. If the restored address does not parse, SplitFragment returns u.
 func SplitFragment(u url.URL) url.URL {
-	if u.Fragment != "" || !hasMisplacedHash(u) {
+	if u.Fragment != "" || !hasMisplacedHash(&u) {
 		return u
 	}
 
-	parsed, err := url.Parse(restoreAddress(u))
+	parsed, err := url.Parse(restoreAddress(&u))
 	if err != nil {
 		return u
 	}
@@ -36,26 +36,26 @@ func SplitFragment(u url.URL) url.URL {
 
 // hasMisplacedHash reports whether a "#" is in a component that is not the fragment. A literal
 // "#" of the path is in RawPath, never only in Path (see SplitFragment).
-func hasMisplacedHash(u url.URL) bool {
-	return strings.Contains(u.RawPath, "#") ||
-		strings.Contains(u.RawQuery, "#") ||
-		strings.Contains(u.Opaque, "#")
+func hasMisplacedHash(target *url.URL) bool {
+	return strings.Contains(target.RawPath, "#") ||
+		strings.Contains(target.RawQuery, "#") ||
+		strings.Contains(target.Opaque, "#")
 }
 
 // restoreAddress writes the address that the server sent. String is correct, except when a
 // literal "#" is in the path: it writes that "#" as "%23". For that case, the path comes from
 // RawPath, which has the "#" as the server sent it.
-func restoreAddress(u url.URL) string {
-	if !strings.Contains(u.RawPath, "#") {
-		return u.String()
+func restoreAddress(target *url.URL) string {
+	if !strings.Contains(target.RawPath, "#") {
+		return target.String()
 	}
 
-	origin := u
+	origin := *target
 	origin.Path, origin.RawPath, origin.RawQuery, origin.ForceQuery = "", "", "", false
 
-	raw := origin.String() + u.RawPath
-	if u.ForceQuery || u.RawQuery != "" {
-		raw += "?" + u.RawQuery
+	raw := origin.String() + target.RawPath
+	if target.ForceQuery || target.RawQuery != "" {
+		raw += "?" + target.RawQuery
 	}
 
 	return raw

@@ -80,6 +80,9 @@ v0.5.0 follows **v0.4.0**.
 
 ### Changed
 
+- `pkg/client`: `UploadFile` and `DownloadFile` return a drain or close error of the response
+  body when no other error occurred. The fields of `UploadFileOptions` have a new order; keyed
+  literals do not change.
 - `notes.NewManager(deps, maxContentLength, allowCustomSlugs)` takes the content limit as an
   argument, as `files.NewManager` takes its size limit; `WithMaxContentLength` is removed.
 - Without object storage, `web.NewHandler` uses a disabled file manager, and each file route
@@ -268,6 +271,8 @@ v0.5.0 follows **v0.4.0**.
 
 ### Tests
 
+- Test names and comments name the current APIs: `Follow`, `Read`, `ReadRendered`, `Inspect`,
+  and the usecase privacy check of a mutation instead of a web mutation gate (70 tests).
 - `tests/internal/testenv` builds the in-process web stack and gives each test package one shared
   PostgreSQL and one S3 mock container, with a new database or bucket for each caller. A full
   integration run starts 15 containers instead of 24.

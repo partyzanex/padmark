@@ -77,7 +77,7 @@ func (s *ManagerTestSuite) TestUpdate_UsesCheckedVersion() {
 	s.Require().ErrorIs(err, domain.ErrNotFound)
 }
 
-func (s *ManagerTestSuite) TestGet_BurnUsesCheckedVersion() {
+func (s *ManagerTestSuite) TestRead_BurnUsesCheckedVersion() {
 	note := checkedBurnNote("hash:checked")
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("burn-x")).Return(note, nil)
 	s.storage.EXPECT().Consume(gomock.Any(), domain.HashSlug("burn-x"), domain.PrivacyPublic, "hash:checked", testNow()).
@@ -101,9 +101,9 @@ func (s *ManagerTestSuite) TestHandleSetBurnExpiryErr_NewVersion() {
 	s.Nil(got)
 }
 
-// TestGet_BurnTimerUsesCheckedVersion verifies that the timer start carries the stored edit-code
+// TestRead_BurnTimerUsesCheckedVersion verifies that the timer start carries the stored edit-code
 // hash of the checked note.
-func (s *ManagerTestSuite) TestGet_BurnTimerUsesCheckedVersion() {
+func (s *ManagerTestSuite) TestRead_BurnTimerUsesCheckedVersion() {
 	note := checkedBurnNote("hash:checked")
 	note.BurnTTL = 60
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("burn-x")).Return(note, nil)

@@ -253,9 +253,9 @@ func (s *ManagerSuite) TestCreate_EmptyTitleAllowed() {
 	s.Empty(result.Title)
 }
 
-// ── Get / expiry / burn ──.
+// ── Read / expiry / burn ──.
 
-func (s *ManagerSuite) TestGet_OK() {
+func (s *ManagerSuite) TestRead_OK() {
 	ctx := s.T().Context()
 	created, err := s.Manager.Create(ctx, &domain.Note{
 		Title: "t", Content: "c",
@@ -272,13 +272,13 @@ func (s *ManagerSuite) TestGet_OK() {
 	s.Equal("t", got.Title)
 }
 
-func (s *ManagerSuite) TestGet_NotFound() {
+func (s *ManagerSuite) TestRead_NotFound() {
 	_, err := s.Manager.Read(s.T().Context(), "nonexistent", openReader())
 
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
-func (s *ManagerSuite) TestGet_Expired_DeletesNote() {
+func (s *ManagerSuite) TestRead_Expired_DeletesNote() {
 	ctx := s.T().Context()
 	past := time.Now().Add(-time.Minute)
 	created, err := s.Manager.Create(ctx, &domain.Note{
@@ -297,7 +297,7 @@ func (s *ManagerSuite) TestGet_Expired_DeletesNote() {
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
-func (s *ManagerSuite) TestGet_BurnAfterReading_ConsumedOnFirstRead() {
+func (s *ManagerSuite) TestRead_BurnAfterReading_ConsumedOnFirstRead() {
 	ctx := s.T().Context()
 	created, err := s.Manager.Create(ctx, &domain.Note{
 		Title: "burn", Content: "c", BurnAfterReading: true,
@@ -316,7 +316,7 @@ func (s *ManagerSuite) TestGet_BurnAfterReading_ConsumedOnFirstRead() {
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
-func (s *ManagerSuite) TestGet_BurnAfterReading_WithTTL_StartsTimer() {
+func (s *ManagerSuite) TestRead_BurnAfterReading_WithTTL_StartsTimer() {
 	ctx := s.T().Context()
 	created, err := s.Manager.Create(ctx, &domain.Note{
 		Title: "burn-ttl", Content: "c", BurnAfterReading: true, BurnTTL: 3600,
@@ -362,9 +362,9 @@ func (s *ManagerSuite) TestPeek_ReturnsExpiredNoteWithoutDeleting() {
 	s.Require().NoError(err)
 }
 
-// ── View ──.
+// ── Read: views ──.
 
-func (s *ManagerSuite) TestView_IncrementsViews() {
+func (s *ManagerSuite) TestRead_IncrementsViews() {
 	ctx := s.T().Context()
 	created, err := s.Manager.Create(ctx, &domain.Note{
 		Title: "t", Content: "c",
@@ -386,7 +386,7 @@ func (s *ManagerSuite) TestView_IncrementsViews() {
 	s.Equal(2, got.Views)
 }
 
-func (s *ManagerSuite) TestView_BurnAfterReading_NoViewsIncrement() {
+func (s *ManagerSuite) TestRead_BurnAfterReading_NoViewsIncrement() {
 	ctx := s.T().Context()
 	created, err := s.Manager.Create(ctx, &domain.Note{
 		Title: "burn", Content: "c", BurnAfterReading: true,
@@ -503,7 +503,7 @@ func (s *ManagerSuite) TestDelete_Forbidden() {
 
 // ── ReadRendered ──.
 
-func (s *ManagerSuite) TestGetRendered_Markdown() {
+func (s *ManagerSuite) TestReadRendered_Markdown() {
 	ctx := s.T().Context()
 	created, err := s.Manager.Create(ctx, &domain.Note{
 		Title: "md", Content: "# Hello",
@@ -524,7 +524,7 @@ func (s *ManagerSuite) TestGetRendered_Markdown() {
 // TestUpdate_ClearsBurnExpiryWhenBurnDisabled reproduces the bug where unchecking
 // burn_after_reading in the editor left expires_at set from the burn timer.
 //
-// Flow: create with burn_ttl → first Get starts the timer (sets expires_at) →
+// Flow: create with burn_ttl → first Read starts the timer (sets expires_at) →
 // Update with burn_after_reading=false, burn_ttl=0 → expires_at must be cleared.
 func (s *ManagerSuite) TestUpdate_ClearsBurnExpiryWhenBurnDisabled() {
 	ctx := s.T().Context()
@@ -598,7 +598,7 @@ func (s *ManagerSuite) TestUpdate_PreservesEditCode() {
 	s.Require().NoError(err, "edit code must remain valid after an update (hash unchanged)")
 }
 
-func (s *ManagerSuite) TestGetRendered_PlainText_HTMLEscaped() {
+func (s *ManagerSuite) TestReadRendered_PlainText_HTMLEscaped() {
 	ctx := s.T().Context()
 	ct := domain.ContentTypePlain
 	created, err := s.Manager.Create(ctx, &domain.Note{
@@ -803,15 +803,12 @@ func (s *ManagerSuite) TestReveal_Consume_StoreFailure_ReturnsErrorAndKeepsToken
 
 // ── Cross-table slug uniqueness (notes vs links) ──
 //
-// Notes and links share one global slug namespace (see the project checklist's "Cross-table slug
-// uniqueness" entry): a note and a link can never have the same ID, in either creation order.
-// Enforced at the application level — links.Manager.Create checks notes.Exists, notes.Manager.
-// Create checks links.Exists — not via a unified `slugs` table, a deliberate trade-off already
-// written down elsewhere (keeps notes and links as independently owned tables/repositories per
-// this project's onion-architecture layering, at the cost of two application-level existence
-// checks instead of one DB-level unique constraint). These tests are the concrete verification
-// that both directions are actually wired, not just documented — exercised against a real
-// database (SQLite or Postgres, via ManagerSuite's two embedders), not mocks.
+// Notes and links share one global slug namespace: a note and a link can never have the same ID,
+// in either creation order. Storage.Create is the only check: the slug_namespace primary key
+// and the resource triggers refuse a slug of another kind with domain.ErrSlugConflict, and the
+// managers make no check before it (docs/adr/0003-storage-slug-uniqueness.md). These tests run
+// both directions against a real database (SQLite or Postgres, through the two embedders of
+// ManagerSuite), not mocks.
 
 func (s *ManagerSuite) TestCrossTableSlugUniqueness_NoteFirst_ThenLinkConflicts() {
 	ctx := s.T().Context()
@@ -852,8 +849,8 @@ func (s *ManagerSuite) TestCrossTableSlugUniqueness_LinkFirst_ThenNoteConflicts(
 }
 
 // TestCrossTableSlugUniqueness_ConcurrentCreate runs both managers of one server concurrently.
-// They share a local lock; tests/slugs also covers independent servers, forcing both past
-// their preflight checks to exercise the database's cross-resource uniqueness constraint.
+// They hold no lock and make no check before Storage.Create, so only the database constraint
+// across resources decides. tests/slugs also covers independent servers.
 func (s *ManagerSuite) TestCrossTableSlugUniqueness_ConcurrentCreate() {
 	ctx := s.T().Context()
 
@@ -934,9 +931,9 @@ func (s *ManagerSuite) TestLink_TargetURLIsEncryptedAtRest() {
 	s.NotContains(stored, "example.com", "ciphertext must not leak any substring of the plaintext URL")
 }
 
-// TestLink_CreateThenRedirect_RealCrypto_RoundTrips exercises the production cipher,
+// TestLink_CreateThenFollow_RealCrypto_RoundTrips exercises the production cipher,
 // including the ID/type binding that a passthrough test encryptor cannot validate.
-func (s *ManagerSuite) TestLink_CreateThenRedirect_RealCrypto_RoundTrips() {
+func (s *ManagerSuite) TestLink_CreateThenFollow_RealCrypto_RoundTrips() {
 	ctx := s.T().Context()
 
 	const plaintext = "https://example.com/round-trip"

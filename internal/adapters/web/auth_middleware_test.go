@@ -134,9 +134,9 @@ func (s *HandlerSuite) TestAuth_Create_AnonymousAllowed() {
 }
 
 // TestAuth_Update_Anonymous_PublicNote_WrongEditCode verifies the restored edit_code workflow:
-// with auth configured, an anonymous caller hitting PUT on a public note passes the middleware
-// and the mutation privacy gate (a public note admits anonymous callers), then the usecase's
-// edit-code verification decides the outcome — a wrong code yields 403, not the middleware's 401.
+// with auth configured, an anonymous caller hitting PUT on a public note passes the middleware.
+// The usecase admits an anonymous reader for a public note, and its edit-code verification
+// decides the outcome — a wrong code yields 403, not the middleware's 401.
 func (s *HandlerSuite) TestAuth_Update_Anonymous_PublicNote_WrongEditCode() {
 	router := s.newRouterWithTOTPAuth()
 	s.manager.EXPECT().

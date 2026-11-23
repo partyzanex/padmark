@@ -377,10 +377,10 @@ func (s *HandlerSuite) TestDeleteLink_Gated_PublicLink_WrongEditCode() {
 	s.Equal(http.StatusForbidden, w.Code)
 }
 
-// TestLinkMutationGate_SignedInNonOwner_OwnerLink covers audit finding R4 for links: a signed-in
+// TestLinkMutation_SignedInNonOwner_OwnerLink covers audit finding R4 for links: a signed-in
 // caller who cannot read another account's privacy=owner link may not update or delete it with
 // the edit code. The usecase refuses the reader (ErrForbidden), and the handler answers 401.
-func (s *HandlerSuite) TestLinkMutationGate_SignedInNonOwner_OwnerLink() {
+func (s *HandlerSuite) TestLinkMutation_SignedInNonOwner_OwnerLink() {
 	usr := newTestUser("bob")
 
 	for _, method := range []string{http.MethodPut, http.MethodDelete} {

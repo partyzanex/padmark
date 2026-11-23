@@ -29,7 +29,7 @@ import (
 )
 
 // pausedLinkRead lets a separate manager commit an update after the reader fetched its row.
-// Neither manager shares a process-local slug lock or target cache with the other.
+// Neither manager shares a process-local target cache with the other.
 type pausedLinkRead struct {
 	links.Storage
 

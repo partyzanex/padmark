@@ -67,11 +67,11 @@ func assertGateError(check *assert.Assertions, w *httptest.ResponseRecorder, sta
 	check.NotContains(w.Body.String(), "check ")
 }
 
-// TestMutationGate_PeekError_StopsMutation covers audit finding 7 for notes and links: with
-// accounts on, the usecase reads the record and checks privacy inside Update and Delete. A
-// storage failure gives 500, a missing record 404 and a hidden record 401, on each PUT and
-// DELETE route, without the internal error text.
-func (s *HandlerSuite) TestMutationGate_PeekError_StopsMutation() {
+// TestMutation_UsecaseErrorStatus covers audit finding 7 for notes and links: with accounts on,
+// the usecase reads the record and checks privacy inside Update and Delete. A storage failure
+// gives 500, a missing record 404 and a hidden record 401, on each PUT and DELETE route, without
+// the internal error text.
+func (s *HandlerSuite) TestMutation_UsecaseErrorStatus() {
 	noteUpdate := func(id string) func(error) {
 		return func(err error) {
 			s.manager.EXPECT().Update(gomock.Any(), id, "right-code", anonymousReader(), gomock.Any()).Return(nil, err)
@@ -119,9 +119,9 @@ func (s *HandlerSuite) TestMutationGate_PeekError_StopsMutation() {
 	}
 }
 
-// TestMutationGate_PeekError_StopsMutation is the files counterpart of the notes and links test:
+// TestFileMutation_UsecaseErrorStatus is the files counterpart of TestMutation_UsecaseErrorStatus:
 // PUT and DELETE /files/{id} translate the usecase errors with the same statuses.
-func (s *FileHandlerSuite) TestMutationGate_PeekError_StopsMutation() {
+func (s *FileHandlerSuite) TestFileMutation_UsecaseErrorStatus() {
 	cases := []gateCase{
 		{"file PUT", http.MethodPut, "/files/abc", `{"ttl":60}`, func(err error) {
 			s.files.EXPECT().Update(gomock.Any(), "abc", "right-code", anonymousReader(), gomock.Any()).Return(nil, err)

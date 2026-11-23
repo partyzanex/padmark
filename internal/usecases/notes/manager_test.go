@@ -615,9 +615,9 @@ func (s *ManagerTestSuite) TestHandleSetBurnExpiryErr_PrivacyChanged() {
 	s.Nil(got)
 }
 
-// Get.
+// Read: results and errors.
 
-func (s *ManagerTestSuite) TestRead_GetOK() {
+func (s *ManagerTestSuite) TestRead_ReturnsStoredNote() {
 	want := &domain.Note{
 		ID: "abc-123", Title: "a",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
@@ -635,7 +635,7 @@ func (s *ManagerTestSuite) TestRead_GetOK() {
 	s.Equal(want, note)
 }
 
-func (s *ManagerTestSuite) TestRead_GetBurnAfterReading() {
+func (s *ManagerTestSuite) TestRead_BurnAfterReading_Consumes() {
 	note := &domain.Note{
 		ID: "abc-123", Title: "a", BurnAfterReading: true,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
@@ -652,7 +652,7 @@ func (s *ManagerTestSuite) TestRead_GetBurnAfterReading() {
 	s.Equal(note, result)
 }
 
-func (s *ManagerTestSuite) TestRead_GetBurnAfterReading_WithTTL() {
+func (s *ManagerTestSuite) TestRead_BurnAfterReading_WithTTL_StartsTimer() {
 	note := &domain.Note{
 		ID: "abc-123", Title: "a", BurnAfterReading: true, BurnTTL: 3600,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
@@ -669,7 +669,7 @@ func (s *ManagerTestSuite) TestRead_GetBurnAfterReading_WithTTL() {
 	s.Equal(note, result)
 }
 
-func (s *ManagerTestSuite) TestRead_GetExpired() {
+func (s *ManagerTestSuite) TestRead_ExpiredGivesErrExpired() {
 	past := testNow().Add(-time.Minute)
 	note := &domain.Note{
 		ID: "abc-123", Title: "a", ExpiresAt: &past,
@@ -685,7 +685,7 @@ func (s *ManagerTestSuite) TestRead_GetExpired() {
 	s.ErrorIs(err, domain.ErrExpired)
 }
 
-func (s *ManagerTestSuite) TestRead_GetNotFound() {
+func (s *ManagerTestSuite) TestRead_NotFound() {
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("missing")).Return(nil, domain.ErrNotFound)
 
 	_, err := s.manager.Read(s.T().Context(), "missing", openReader())
@@ -695,7 +695,7 @@ func (s *ManagerTestSuite) TestRead_GetNotFound() {
 
 // Read: views and burn.
 
-func (s *ManagerTestSuite) TestView_OK() {
+func (s *ManagerTestSuite) TestRead_CountsView() {
 	want := &domain.Note{
 		ID: "abc-123", Title: "a", Views: 5,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
@@ -712,7 +712,7 @@ func (s *ManagerTestSuite) TestView_OK() {
 	s.Equal(6, note.Views)
 }
 
-func (s *ManagerTestSuite) TestView_BurnAfterReading() {
+func (s *ManagerTestSuite) TestRead_BurnAfterReading_ViewsStayZero() {
 	want := &domain.Note{
 		ID: "abc-123", Title: "a", BurnAfterReading: true,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
@@ -730,7 +730,7 @@ func (s *ManagerTestSuite) TestView_BurnAfterReading() {
 	s.Equal(0, note.Views) // no increment for burn-after-reading.
 }
 
-func (s *ManagerTestSuite) TestView_BurnAfterReading_WithTTL() {
+func (s *ManagerTestSuite) TestRead_BurnAfterReading_WithTTL_CountsView() {
 	future := testNow().Add(30 * time.Minute)
 	stored := &domain.Note{
 		ID: "abc-123", Title: "a", BurnAfterReading: true, BurnTTL: 1800,
@@ -758,7 +758,7 @@ func (s *ManagerTestSuite) TestView_BurnAfterReading_WithTTL() {
 	s.Equal(1, note.Views)
 }
 
-func (s *ManagerTestSuite) TestView_NotFound() {
+func (s *ManagerTestSuite) TestRead_MissingNoteIsNotCounted() {
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("missing")).Return(nil, domain.ErrNotFound)
 
 	_, err := s.manager.Read(s.T().Context(), "missing", openReader())
@@ -1091,7 +1091,7 @@ func (s *ManagerTestSuite) TestDelete_NonOwnerCallerStillNeedsEditCode() {
 
 // ReadRendered.
 
-func (s *ManagerTestSuite) TestGetRendered_OK() {
+func (s *ManagerTestSuite) TestReadRendered_RendersMarkdown() {
 	note := &domain.Note{
 		ID: "abc-123", Content: "# Hello",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
@@ -1110,9 +1110,9 @@ func (s *ManagerTestSuite) TestGetRendered_OK() {
 	s.Equal("<h1>Hello</h1>", html)
 }
 
-// TestGetRendered_DroppedImagesAreLogged checks that an image the page does not show leaves one
+// TestReadRendered_DroppedImagesAreLogged checks that an image the page does not show leaves one
 // warning with the note hash and a count per reason, and that the note is still shown.
-func (s *ManagerTestSuite) TestGetRendered_DroppedImagesAreLogged() {
+func (s *ManagerTestSuite) TestReadRendered_DroppedImagesAreLogged() {
 	var logs bytes.Buffer
 
 	manager := NewManager(&Deps{
@@ -1151,7 +1151,7 @@ func (s *ManagerTestSuite) TestGetRendered_DroppedImagesAreLogged() {
 	s.NotContains(logs.String(), "base64", "the log holds no note content")
 }
 
-func (s *ManagerTestSuite) TestGetRendered_NoDroppedImagesNoLog() {
+func (s *ManagerTestSuite) TestReadRendered_NoDroppedImagesNoLog() {
 	var logs bytes.Buffer
 
 	manager := NewManager(&Deps{
@@ -1297,8 +1297,8 @@ func (s *ManagerTestSuite) statefulRenderCache() *MockRenderCache {
 	return cache
 }
 
-// TestGetRendered_UnchangedNoteIsRenderedOnce: two views of an unchanged note cost one render.
-func (s *ManagerTestSuite) TestGetRendered_UnchangedNoteIsRenderedOnce() {
+// TestReadRendered_UnchangedNoteIsRenderedOnce: two views of an unchanged note cost one render.
+func (s *ManagerTestSuite) TestReadRendered_UnchangedNoteIsRenderedOnce() {
 	s.manager.WithRenderCache(s.statefulRenderCache())
 
 	stamp := testNow().Add(-time.Hour)
@@ -1322,9 +1322,9 @@ func (s *ManagerTestSuite) TestGetRendered_UnchangedNoteIsRenderedOnce() {
 	}
 }
 
-// TestGetRendered_ReRendersAfterUpdate: Update invalidates the entry, so the next view renders
+// TestReadRendered_ReRendersAfterUpdate: Update invalidates the entry, so the next view renders
 // the new content instead of serving stale HTML.
-func (s *ManagerTestSuite) TestGetRendered_ReRendersAfterUpdate() {
+func (s *ManagerTestSuite) TestReadRendered_ReRendersAfterUpdate() {
 	s.manager.WithRenderCache(s.statefulRenderCache())
 
 	stamp := testNow().Add(-time.Hour)
@@ -1376,9 +1376,9 @@ func (s *ManagerTestSuite) TestGetRendered_ReRendersAfterUpdate() {
 	s.Equal("<p>new</p>", html)
 }
 
-// TestGetRendered_ReRendersWhenUpdatedAtChanges covers an update made through another replica:
+// TestReadRendered_ReRendersWhenUpdatedAtChanges covers an update made through another replica:
 // no local invalidation happens, but the new updated_at misses the cached entry.
-func (s *ManagerTestSuite) TestGetRendered_ReRendersWhenUpdatedAtChanges() {
+func (s *ManagerTestSuite) TestReadRendered_ReRendersWhenUpdatedAtChanges() {
 	s.manager.WithRenderCache(s.statefulRenderCache())
 
 	first := &domain.Note{
@@ -1411,9 +1411,9 @@ func (s *ManagerTestSuite) TestGetRendered_ReRendersWhenUpdatedAtChanges() {
 	s.Equal("<p>v2</p>", html)
 }
 
-// TestGetRendered_BurnNotesAreNeverCached: reading a burn-after-reading note destroys it, and a
+// TestReadRendered_BurnNotesAreNeverCached: reading a burn-after-reading note destroys it, and a
 // cached copy would outlive the burn in memory.
-func (s *ManagerTestSuite) TestGetRendered_BurnNotesAreNeverCached() {
+func (s *ManagerTestSuite) TestReadRendered_BurnNotesAreNeverCached() {
 	s.renderCache.EXPECT().Get(gomock.Any(), gomock.Any()).Times(0)
 	s.renderCache.EXPECT().Set(gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
 	s.manager.WithRenderCache(s.renderCache)
@@ -1452,7 +1452,7 @@ func (s *ManagerTestSuite) TestDelete_DropsCachedRender() {
 	s.Require().NoError(s.manager.Delete(s.T().Context(), "abc-123", "secret123456", openReader()))
 }
 
-func (s *ManagerTestSuite) TestGetRendered_BurnAfterReading() {
+func (s *ManagerTestSuite) TestReadRendered_BurnAfterReading() {
 	note := &domain.Note{
 		ID: "abc-123", Content: "# Hello", BurnAfterReading: true,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
@@ -1471,7 +1471,7 @@ func (s *ManagerTestSuite) TestGetRendered_BurnAfterReading() {
 	s.Equal("<h1>Hello</h1>", rendered)
 }
 
-func (s *ManagerTestSuite) TestGetRendered_Expired() {
+func (s *ManagerTestSuite) TestReadRendered_ExpiredIsDeleted() {
 	past := testNow().Add(-time.Minute)
 	note := &domain.Note{
 		ID: "abc-123", Content: "# Hello", ExpiresAt: &past,
@@ -1487,7 +1487,7 @@ func (s *ManagerTestSuite) TestGetRendered_Expired() {
 	s.ErrorIs(err, domain.ErrExpired)
 }
 
-func (s *ManagerTestSuite) TestGetRendered_StorageError() {
+func (s *ManagerTestSuite) TestReadRendered_StorageError() {
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(nil, domain.ErrNotFound)
 
 	_, _, err := s.manager.ReadRendered(s.T().Context(), "abc-123", openReader())
@@ -1495,7 +1495,7 @@ func (s *ManagerTestSuite) TestGetRendered_StorageError() {
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
-func (s *ManagerTestSuite) TestGetRendered_RenderError() {
+func (s *ManagerTestSuite) TestReadRendered_RenderError() {
 	renderErr := errors.New("render failed")
 	note := &domain.Note{
 		ID: "abc-123", Content: "bad",
@@ -1516,7 +1516,7 @@ func (s *ManagerTestSuite) TestGetRendered_RenderError() {
 	s.Contains(err.Error(), domain.HashSlug("abc-123"))
 }
 
-func (s *ManagerTestSuite) TestGetRendered_PlainText_UsesRenderPlain() {
+func (s *ManagerTestSuite) TestReadRendered_PlainText_UsesRenderPlain() {
 	plain := domain.ContentTypePlain
 	note := &domain.Note{
 		ID: "abc-123", Content: "<script>", ContentType: &plain,
@@ -1535,7 +1535,7 @@ func (s *ManagerTestSuite) TestGetRendered_PlainText_UsesRenderPlain() {
 	s.Equal("<pre>&lt;script&gt;</pre>", rendered)
 }
 
-func (s *ManagerTestSuite) TestGetRendered_PlainText_RenderPlainError() {
+func (s *ManagerTestSuite) TestReadRendered_PlainText_RenderPlainError() {
 	renderErr := errors.New("render failed")
 	plain := domain.ContentTypePlain
 	note := &domain.Note{
@@ -1582,11 +1582,11 @@ func (s *ManagerTestSuite) TestPeek_NotFound() {
 
 // Read TTL regression tests.
 
-// TestView_WithTTL_SecondViewSucceeds reproduces an old bug: a note with ExpiresAt set (but
-// BurnAfterReading=false) returned 404 on the second view, because the read path called
+// TestRead_WithTTL_SecondReadSucceeds reproduces an old bug: a note with ExpiresAt set (but
+// BurnAfterReading=false) returned 404 on the second read, because the read path called
 // IncrementViews incorrectly for burn-after-reading notes that also had ExpiresAt set. For a
 // plain TTL note (BurnAfterReading=false), multiple reads must succeed.
-func (s *ManagerTestSuite) TestView_WithTTL_SecondViewSucceeds() {
+func (s *ManagerTestSuite) TestRead_WithTTL_SecondReadSucceeds() {
 	future := testNow().Add(time.Hour)
 	note := &domain.Note{
 		ID: "ttl-note", Title: "t", Views: 0, ExpiresAt: &future,
@@ -1618,9 +1618,9 @@ func (s *ManagerTestSuite) TestView_WithTTL_SecondViewSucceeds() {
 	s.Equal(2, result2.Views)
 }
 
-// TestView_BurnAfterReading_NoIncrementViews verifies that burn-after-reading notes
+// TestRead_BurnAfterReading_NoIncrementViews verifies that burn-after-reading notes
 // are consumed (deleted) and IncrementViews is NOT called on the already-deleted note.
-func (s *ManagerTestSuite) TestView_BurnAfterReading_NoIncrementViews() {
+func (s *ManagerTestSuite) TestRead_BurnAfterReading_NoIncrementViews() {
 	note := &domain.Note{
 		ID: "burn-note", Title: "t", BurnAfterReading: true,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
@@ -1637,12 +1637,12 @@ func (s *ManagerTestSuite) TestView_BurnAfterReading_NoIncrementViews() {
 	s.Equal(note, result)
 }
 
-// TestView_BurnAfterReading_WithBurnTTL_CountsViews verifies that a burn-after-reading note
+// TestRead_BurnAfterReading_WithBurnTTL_CountsViews verifies that a burn-after-reading note
 // with BurnTTL > 0 starts a timer on first view and, because it stays readable during the
 // grace period, each read DOES increment the view counter.
 // SetBurnExpiry returns the note with BurnAfterReading=false (as the real storage does after
 // flipping the column), so the test exercises the actual production code path.
-func (s *ManagerTestSuite) TestView_BurnAfterReading_WithBurnTTL_CountsViews() {
+func (s *ManagerTestSuite) TestRead_BurnAfterReading_WithBurnTTL_CountsViews() {
 	future := testNow().Add(time.Hour)
 	// Real storage flips burn_after_reading=false and sets expires_at.
 	noteAfterBurn := &domain.Note{
@@ -1670,7 +1670,7 @@ func (s *ManagerTestSuite) TestView_BurnAfterReading_WithBurnTTL_CountsViews() {
 	s.Equal(1, result.Views)
 }
 
-// TestRead_GetBurnTTL_Race_SetBurnExpiryNotFound reproduces the race condition where two concurrent
+// TestRead_BurnTTL_Race_SetBurnExpiryNotFound reproduces the race condition where two concurrent
 // requests both read the note (BurnAfterReading=true, BurnTTL>0) before either calls SetBurnExpiry.
 //
 // Timeline:
@@ -1682,7 +1682,7 @@ func (s *ManagerTestSuite) TestView_BurnAfterReading_WithBurnTTL_CountsViews() {
 //
 // Request B's note still exists — its burn timer was started by A. manager.Read must return
 // the note successfully; propagating ErrNotFound here is incorrect.
-func (s *ManagerTestSuite) TestRead_GetBurnTTL_Race_SetBurnExpiryNotFound() {
+func (s *ManagerTestSuite) TestRead_BurnTTL_Race_SetBurnExpiryNotFound() {
 	note := &domain.Note{
 		ID: "burn-ttl-race", Title: "t", BurnAfterReading: true, BurnTTL: 3600,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
@@ -1712,7 +1712,7 @@ func (s *ManagerTestSuite) TestRead_GetBurnTTL_Race_SetBurnExpiryNotFound() {
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("burn-ttl-race")).Return(noteAfterBurn, nil)
 	s.storage.EXPECT().IncrementViews(gomock.Any(), domain.HashSlug("burn-ttl-race")).Return(nil)
 
-	// The note exists and its burn timer is running — Get must succeed, not return ErrNotFound.
+	// The note exists and its burn timer is running — Read must succeed, not return ErrNotFound.
 	result, err := s.manager.Read(s.T().Context(), "burn-ttl-race", openReader())
 	s.Require().NoError(err)
 	s.NotNil(result)
@@ -1889,8 +1889,8 @@ func (s *ManagerTestSuite) TestReadRendered_Expired() {
 // Peek — expiry policy is intentionally NOT applied.
 
 // TestPeek_ReturnsExpiredNote documents that Peek bypasses expiry policy by design.
-// Callers (e.g. auth middleware) use Peek to inspect note metadata without side effects;
-// they must not trigger deletion or policy enforcement.
+// Peek reads the stored note without side effects: it must not delete the note or apply a
+// read rule. A caller that shows a note to a reader uses Read, ReadRendered or Inspect.
 func (s *ManagerTestSuite) TestPeek_ReturnsExpiredNote() {
 	past := testNow().Add(-time.Minute)
 	note := &domain.Note{
@@ -2029,7 +2029,7 @@ func (s *ManagerTestSuite) TestUpdate_PrivateNote_WrongCode() {
 
 // Consume error path.
 
-func (s *ManagerTestSuite) TestRead_GetBurnAfterReading_ConsumeError() {
+func (s *ManagerTestSuite) TestRead_BurnAfterReading_ConsumeError() {
 	consumeErr := errors.New("storage unavailable")
 	note := &domain.Note{
 		ID: "burn-err", Title: "t", BurnAfterReading: true,
@@ -2047,7 +2047,7 @@ func (s *ManagerTestSuite) TestRead_GetBurnAfterReading_ConsumeError() {
 	s.ErrorIs(err, consumeErr)
 }
 
-func (s *ManagerTestSuite) TestView_BurnAfterReading_ConsumeError() {
+func (s *ManagerTestSuite) TestRead_BurnAfterReading_ConsumeError_NoViewCounted() {
 	consumeErr := errors.New("storage unavailable")
 	note := &domain.Note{
 		ID: "burn-err-view", Title: "t", BurnAfterReading: true,
@@ -2096,7 +2096,7 @@ func (s *DecryptionFailureSuite) TearDownTest() {
 	s.ctrl.Finish()
 }
 
-func (s *DecryptionFailureSuite) TestGet_DecryptionFailure() {
+func (s *DecryptionFailureSuite) TestRead_DecryptionFailure() {
 	note := &domain.Note{
 		ID: "enc-fail", Title: "t", Content: "ciphertext",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
@@ -2124,10 +2124,10 @@ func (s *DecryptionFailureSuite) TestPeek_DecryptionFailure() {
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
-// TestGet_BurnAfterReading_DecryptionFailure verifies that decryption failure on the initial
-// storage.Get result propagates as ErrDecryptionFailed before Consume is ever called.
-func (s *DecryptionFailureSuite) TestGet_BurnAfterReading_DecryptionFailure() {
-	// decryptContent runs before burn.applyPolicy, so Consume is never reached.
+// TestRead_BurnAfterReading_DecryptionFailure verifies that a decryption failure of the initial
+// storage.Get result gives ErrNotFound before Consume is called.
+func (s *DecryptionFailureSuite) TestRead_BurnAfterReading_DecryptionFailure() {
+	// decryptContent runs before burn.burnNote, so Consume is never reached.
 	raw := &domain.Note{
 		ID: "burn-enc-fail", Title: "t", BurnAfterReading: true, Content: "ciphertext",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
@@ -2141,10 +2141,10 @@ func (s *DecryptionFailureSuite) TestGet_BurnAfterReading_DecryptionFailure() {
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
-// TestGet_BurnTTL_DecryptionFailure verifies that decryption failure on the initial
-// storage.Get result propagates as ErrDecryptionFailed before SetBurnExpiry is ever called.
-func (s *DecryptionFailureSuite) TestGet_BurnTTL_DecryptionFailure() {
-	// decryptContent runs before burn.applyPolicy, so SetBurnExpiry is never reached.
+// TestRead_BurnTTL_DecryptionFailure verifies that a decryption failure of the initial
+// storage.Get result gives ErrNotFound before SetBurnExpiry is called.
+func (s *DecryptionFailureSuite) TestRead_BurnTTL_DecryptionFailure() {
+	// decryptContent runs before burn.burnNote, so SetBurnExpiry is never reached.
 	raw := &domain.Note{
 		ID: "burn-ttl-enc-fail", Title: "t", BurnAfterReading: true, BurnTTL: 3600, Content: "ciphertext",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,

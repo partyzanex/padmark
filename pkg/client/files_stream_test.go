@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math"
 	"mime"
 	"net/http"
 	"net/http/httptest"
@@ -45,12 +46,14 @@ func (s *FilesStreamSuite) newClient(handler http.Handler) *client.Client {
 	server := httptest.NewServer(handler)
 	s.T().Cleanup(server.Close)
 
-	httpClient := &http.Client{Transport: bearerTransport{base: server.Client().Transport}}
+	httpClient := &http.Client{
+		Transport: bearerTransport{base: server.Client().Transport}, CheckRedirect: nil, Jar: nil, Timeout: 0,
+	}
 
-	cl, err := client.NewClient(server.URL, client.WithClient(httpClient))
+	api, err := client.NewClient(server.URL, client.WithClient(httpClient))
 	s.Require().NoError(err)
 
-	return cl
+	return api
 }
 
 func (s *FilesStreamSuite) TestUploadFile_StreamsFieldsBeforeFile() {
@@ -60,20 +63,20 @@ func (s *FilesStreamSuite) TestUploadFile_StreamsFieldsBeforeFile() {
 	gate := make(chan struct{})
 	received := make(chan uploadSeen, 1)
 
-	cl := s.newClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	api := s.newClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		seen := readUpload(r, gate)
 		received <- seen
 
 		writeCreated(w, seen.size)
 	}))
 
-	source := &patternReader{size: bigFileSize, gateAt: gateSize, gate: gate, abort: ctx.Done()}
+	source := &patternReader{size: bigFileSize, gateAt: gateSize, gate: gate, abort: ctx.Done(), read: 0}
 
-	created, err := cl.UploadFile(ctx, "отчёт \"2026\".bin", source, client.UploadFileOptions{
-		TTL:               90 * time.Second,
+	created, err := api.UploadFile(ctx, "отчёт \"2026\".bin", source, client.UploadFileOptions{
 		Privacy:           "authenticated",
 		Slug:              "report",
 		EditCode:          "MySecretCode1",
+		TTL:               90 * time.Second,
 		BurnAfterDownload: true,
 	})
 	s.Require().NoError(err)
@@ -98,16 +101,16 @@ func (s *FilesStreamSuite) TestUploadFile_StreamsFieldsBeforeFile() {
 func (s *FilesStreamSuite) TestUploadFile_ZeroOptionsSendNoFields() {
 	received := make(chan uploadSeen, 1)
 
-	cl := s.newClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	api := s.newClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		seen := readUpload(r, nil)
 		received <- seen
 
 		writeCreated(w, seen.size)
 	}))
 
-	source := &patternReader{size: 10, gateAt: 0, gate: nil, abort: nil}
+	source := &patternReader{size: 10, gateAt: 0, gate: nil, abort: nil, read: 0}
 
-	_, err := cl.UploadFile(s.T().Context(), "a.txt", source, client.UploadFileOptions{})
+	_, err := api.UploadFile(s.T().Context(), "a.txt", source, noUploadOptions())
 	s.Require().NoError(err)
 
 	seen := <-received
@@ -117,15 +120,15 @@ func (s *FilesStreamSuite) TestUploadFile_ZeroOptionsSendNoFields() {
 }
 
 func (s *FilesStreamSuite) TestUploadFile_TooLarge() {
-	cl := s.newClient(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	api := s.newClient(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		// The server answers before it reads the file, as the real server does with
 		// MaxBytesReader. net/http drains the small rest of the body after the handler.
 		writeJSON(w, http.StatusRequestEntityTooLarge, `{"message":"file exceeds maximum size (limit 1024 bytes)"}`)
 	}))
 
-	source := &patternReader{size: 128 << 10, gateAt: 0, gate: nil, abort: nil}
+	source := &patternReader{size: 128 << 10, gateAt: 0, gate: nil, abort: nil, read: 0}
 
-	created, err := cl.UploadFile(s.T().Context(), "big.bin", source, client.UploadFileOptions{})
+	created, err := api.UploadFile(s.T().Context(), "big.bin", source, noUploadOptions())
 	s.Require().Error(err)
 	s.Nil(created)
 
@@ -141,7 +144,7 @@ func (s *FilesStreamSuite) TestUploadFile_BrokenConnection() {
 	ctx, cancel := context.WithTimeout(s.T().Context(), testTimeout)
 	defer cancel()
 
-	cl := s.newClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	api := s.newClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Read a part of the body, then drop the connection without a response.
 		_, _ = io.CopyN(io.Discard, r.Body, gateSize)
 
@@ -151,15 +154,15 @@ func (s *FilesStreamSuite) TestUploadFile_BrokenConnection() {
 		}
 	}))
 
-	source := &patternReader{size: bigFileSize, gateAt: 0, gate: nil, abort: ctx.Done()}
+	source := &patternReader{size: bigFileSize, gateAt: 0, gate: nil, abort: ctx.Done(), read: 0}
 
-	created, err := cl.UploadFile(ctx, "big.bin", source, client.UploadFileOptions{})
+	created, err := api.UploadFile(ctx, "big.bin", source, noUploadOptions())
 	s.Require().Error(err)
 	s.Nil(created)
 
 	var apiErr *client.APIError
 
-	s.False(errors.As(err, &apiErr), "a dropped connection is a transport error, not a status: %v", err)
+	s.NotErrorAs(err, &apiErr, "a dropped connection is a transport error, not a status: %v", err)
 	s.NoError(ctx.Err(), "UploadFile must return when the connection drops, not at the timeout")
 }
 
@@ -170,16 +173,16 @@ func (s *FilesStreamSuite) TestUploadFile_ServerErrorWithBlockedBody() {
 	ctx, cancel := context.WithTimeout(s.T().Context(), testTimeout)
 	defer cancel()
 
-	cl := s.newClient(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	api := s.newClient(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		// Without "Connection: close", net/http reads up to 256 KiB of the unread body before it
 		// sends the response. The blocked body never sends them, so no response would come.
 		w.Header().Set("Connection", "close")
 		writeJSON(w, http.StatusBadRequest, `{"message":"bad upload","code":"bad_upload"}`)
 	}))
 
-	source := &patternReader{size: bigFileSize, gateAt: 0, gate: make(chan struct{}), abort: ctx.Done()}
+	source := &patternReader{size: bigFileSize, gateAt: 0, gate: make(chan struct{}), abort: ctx.Done(), read: 0}
 
-	created, err := cl.UploadFile(ctx, "blocked.bin", source, client.UploadFileOptions{})
+	created, err := api.UploadFile(ctx, "blocked.bin", source, noUploadOptions())
 	s.Require().Error(err)
 	s.Nil(created)
 
@@ -202,7 +205,7 @@ func (s *FilesStreamSuite) TestUploadFile_CanceledWithBlockedBody() {
 
 	arrived := make(chan struct{})
 
-	cl := s.newClient(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+	api := s.newClient(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		close(arrived)
 
 		// The body never ends: the read stops when the client closes the connection.
@@ -217,20 +220,21 @@ func (s *FilesStreamSuite) TestUploadFile_CanceledWithBlockedBody() {
 		}
 	}()
 
-	source := &patternReader{size: bigFileSize, gateAt: 0, gate: make(chan struct{}), abort: ctx.Done()}
+	source := &patternReader{size: bigFileSize, gateAt: 0, gate: make(chan struct{}), abort: ctx.Done(), read: 0}
 
-	created, err := cl.UploadFile(uploadCtx, "blocked.bin", source, client.UploadFileOptions{})
+	created, err := api.UploadFile(uploadCtx, "blocked.bin", source, noUploadOptions())
 	s.Require().ErrorIs(err, context.Canceled)
 	s.Nil(created)
 	s.NoError(ctx.Err(), "UploadFile must return after the cancellation, not at the timeout")
 }
 
 func (s *FilesStreamSuite) TestUploadFile_InvalidTTL() {
-	cl := s.newClient(http.NotFoundHandler())
+	api := s.newClient(http.NotFoundHandler())
 
 	for _, ttl := range []time.Duration{-time.Second, 500 * time.Millisecond} {
-		_, err := cl.UploadFile(s.T().Context(), "a.txt", &patternReader{size: 1, gateAt: 0, gate: nil, abort: nil},
-			client.UploadFileOptions{TTL: ttl})
+		source := &patternReader{size: 1, gateAt: 0, gate: nil, abort: nil, read: 0}
+		_, err := api.UploadFile(s.T().Context(), "a.txt", source,
+			client.UploadFileOptions{Privacy: "", Slug: "", EditCode: "", TTL: ttl, BurnAfterDownload: false})
 		s.Require().ErrorIs(err, client.ErrInvalidUploadOptions, ttl)
 	}
 }
@@ -243,7 +247,7 @@ func (s *FilesStreamSuite) TestDownloadFile_Streams() {
 
 	requests := make(chan *http.Request, 1)
 
-	cl := s.newClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	api := s.newClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests <- r.Clone(context.WithoutCancel(r.Context()))
 
 		w.Header().Set("Content-Type", "application/octet-stream")
@@ -253,13 +257,13 @@ func (s *FilesStreamSuite) TestDownloadFile_Streams() {
 
 		// Send the first part and wait until the client has it. A client that reads the full
 		// body before it writes to dst never sends the signal, and the test times out.
-		source := &patternReader{size: bigFileSize, gateAt: gateSize, gate: clientGot, abort: r.Context().Done()}
+		source := &patternReader{size: bigFileSize, gateAt: gateSize, gate: clientGot, abort: r.Context().Done(), read: 0}
 		_, _ = io.Copy(flushWriter{w: w}, source)
 	}))
 
-	dst := &patternWriter{signalAt: gateSize, signal: clientGot, once: sync.Once{}}
+	dst := &patternWriter{signalAt: gateSize, signal: clientGot, once: sync.Once{}, written: 0, mismatch: false}
 
-	downloaded, err := cl.DownloadFile(ctx, "my file", dst)
+	downloaded, err := api.DownloadFile(ctx, "my file", dst)
 	s.Require().NoError(err)
 
 	req := <-requests
@@ -273,11 +277,11 @@ func (s *FilesStreamSuite) TestDownloadFile_Streams() {
 }
 
 func (s *FilesStreamSuite) TestDownloadFile_BrokenConnection() {
-	cl := s.newClient(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	api := s.newClient(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.Header().Set("Content-Length", strconv.Itoa(bigFileSize))
 
-		_, _ = io.CopyN(w, &patternReader{size: gateSize, gateAt: 0, gate: nil, abort: nil}, gateSize)
+		_, _ = io.CopyN(w, &patternReader{size: gateSize, gateAt: 0, gate: nil, abort: nil, read: 0}, gateSize)
 
 		conn, _, err := http.NewResponseController(w).Hijack()
 		if err == nil {
@@ -285,16 +289,16 @@ func (s *FilesStreamSuite) TestDownloadFile_BrokenConnection() {
 		}
 	}))
 
-	dst := &patternWriter{signalAt: 0, signal: nil, once: sync.Once{}}
+	dst := &patternWriter{signalAt: 0, signal: nil, once: sync.Once{}, written: 0, mismatch: false}
 
-	downloaded, err := cl.DownloadFile(s.T().Context(), "abc", dst)
+	downloaded, err := api.DownloadFile(s.T().Context(), "abc", dst)
 	s.Require().Error(err)
 	s.Nil(downloaded)
 	s.Less(dst.written, int64(bigFileSize))
 
 	var apiErr *client.APIError
 
-	s.False(errors.As(err, &apiErr), "a dropped connection is a transport error, not a status: %v", err)
+	s.NotErrorAs(err, &apiErr, "a dropped connection is a transport error, not a status: %v", err)
 }
 
 func (s *FilesStreamSuite) TestDownloadFile_ErrorStatus() {
@@ -314,35 +318,35 @@ func (s *FilesStreamSuite) TestDownloadFile_ErrorStatus() {
 		{name: "body is not JSON", status: http.StatusBadGateway, body: "<html>", message: "Bad Gateway", code: ""},
 	}
 
-	for _, tc := range cases {
-		s.Run(tc.name, func() {
-			cl := s.newClient(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				writeJSON(w, tc.status, tc.body)
+	for _, testCase := range cases {
+		s.Run(testCase.name, func() {
+			api := s.newClient(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				writeJSON(w, testCase.status, testCase.body)
 			}))
 
-			dst := &patternWriter{signalAt: 0, signal: nil, once: sync.Once{}}
+			dst := &patternWriter{signalAt: 0, signal: nil, once: sync.Once{}, written: 0, mismatch: false}
 
-			_, err := cl.DownloadFile(s.T().Context(), "abc", dst)
+			_, err := api.DownloadFile(s.T().Context(), "abc", dst)
 
 			var apiErr *client.APIError
 
 			s.Require().ErrorAs(err, &apiErr)
-			s.Equal(tc.status, apiErr.StatusCode)
-			s.Equal(tc.message, apiErr.Message)
-			s.Equal(tc.code, apiErr.Code)
+			s.Equal(testCase.status, apiErr.StatusCode)
+			s.Equal(testCase.message, apiErr.Message)
+			s.Equal(testCase.code, apiErr.Code)
 			s.Zero(dst.written)
 		})
 	}
 }
 
 func (s *FilesStreamSuite) TestDownloadFile_InvalidID() {
-	cl := s.newClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	api := s.newClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.Failf("unexpected request", "%s %s", r.Method, r.URL.Path)
 		w.WriteHeader(http.StatusTeapot)
 	}))
 
 	for _, id := range []string{"", ".", ".."} {
-		_, err := cl.DownloadFile(s.T().Context(), id, io.Discard)
+		_, err := api.DownloadFile(s.T().Context(), id, io.Discard)
 		s.Require().ErrorIs(err, client.ErrInvalidFileID, "%q", id)
 	}
 }
@@ -361,9 +365,18 @@ func (b bearerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return b.base.RoundTrip(clone)
 }
 
-// patternByte is the byte at offset off of the test content.
+// patternPeriod is the length of the repeated test content. A prime length makes a shifted or
+// lost block visible.
+const patternPeriod = 251
+
+// patternByte is the byte at offset off of the test content. The offsets are not negative.
 func patternByte(off int64) byte {
-	return byte(off % 251)
+	rest := off % patternPeriod
+	if rest < 0 || rest > math.MaxUint8 {
+		return 0
+	}
+
+	return byte(rest)
 }
 
 // patternReader gives size bytes of the test content. When gate is not nil, it stops after
@@ -463,7 +476,10 @@ type uploadSeen struct {
 // readUpload reads the form as the real server does: fields first, then the file part. It
 // closes gate after gateSize bytes of the file.
 func readUpload(r *http.Request, gate chan struct{}) uploadSeen {
-	seen := uploadSeen{fields: map[string]string{}, auth: r.Header.Get("Authorization"), patternOK: true}
+	seen := uploadSeen{
+		err: nil, fields: map[string]string{}, fileName: "", auth: r.Header.Get("Authorization"),
+		order: nil, size: 0, patternOK: true,
+	}
 
 	reader, err := r.MultipartReader()
 	if err != nil {
@@ -494,7 +510,7 @@ func readUpload(r *http.Request, gate chan struct{}) uploadSeen {
 		}
 
 		seen.fileName = part.FileName()
-		dst := &patternWriter{signalAt: gateSize, signal: gate, once: sync.Once{}}
+		dst := &patternWriter{signalAt: gateSize, signal: gate, once: sync.Once{}, written: 0, mismatch: false}
 
 		_, err = io.Copy(dst, part)
 		if err != nil {
@@ -508,13 +524,24 @@ func readUpload(r *http.Request, gate chan struct{}) uploadSeen {
 }
 
 func writeCreated(w http.ResponseWriter, size int64) {
-	body, _ := json.Marshal(map[string]any{
+	body, err := json.Marshal(map[string]any{
 		"id": "abc", "url": "http://example.test/abc", "name": "a.bin", "size": size,
 		"privacy": "public", "downloads": 0, "burn_after_download": false,
 		"created_at": "2026-11-20T10:00:00Z", "edit_code": "secret-code",
 	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+
+		return
+	}
 
 	writeJSON(w, http.StatusCreated, string(body))
+}
+
+// noUploadOptions returns the zero upload options: a public file without expiry, with a random
+// slug and a random edit code.
+func noUploadOptions() client.UploadFileOptions {
+	return client.UploadFileOptions{Privacy: "", Slug: "", EditCode: "", TTL: 0, BurnAfterDownload: false}
 }
 
 func writeJSON(w http.ResponseWriter, status int, body string) {

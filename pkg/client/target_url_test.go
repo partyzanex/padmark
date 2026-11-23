@@ -95,7 +95,15 @@ func (s *TargetURLSuite) TestRoundTrip() {
 			s.Require().NoError(err)
 
 			// The request side: a URL that url.Parse made is encoded without a change.
-			encoded, err := (&client.CreateLinkRequest{TargetURL: *parsed}).MarshalJSON()
+			encoded, err := (&client.CreateLinkRequest{
+				TargetURL:      *parsed,
+				Slug:           client.OptString{Value: "", Set: false},
+				BurnAfterClick: client.OptBool{Value: false, Set: false},
+				TTL:            client.OptInt64{Value: 0, Set: false},
+				EditCode:       client.OptString{Value: "", Set: false},
+				Privacy:        client.OptCreateLinkRequestPrivacy{Value: "", Set: false},
+				DirectRedirect: client.OptNilBool{Value: false, Set: false, Null: false},
+			}).MarshalJSON()
 			s.Require().NoError(err)
 			s.Contains(string(encoded), `"target_url":"`+raw+`"`)
 

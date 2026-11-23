@@ -61,8 +61,10 @@ func isErrorVariant(spec *ast.TypeSpec) bool {
 func TestResponseStatusCoversVariants(t *testing.T) {
 	t.Parallel()
 
-	byName := make(map[string]int, len(responseStatus))
-	for typ, status := range responseStatus {
+	statuses := responseStatus()
+
+	byName := make(map[string]int, len(statuses))
+	for typ, status := range statuses {
 		byName[typ.Name()] = status
 	}
 
@@ -82,7 +84,7 @@ func TestResponseStatusCoversVariants(t *testing.T) {
 	}
 
 	// The table has one more entry: ErrorResponse itself, the error body of Readyz.
-	assert.Len(t, responseStatus, len(names)+1)
+	assert.Len(t, statuses, len(names)+1)
 }
 
 func TestResponseError_VariantWithBody(t *testing.T) {
@@ -123,7 +125,10 @@ func TestResponseError_ReadyzBody(t *testing.T) {
 func TestResponseError_NotAnError(t *testing.T) {
 	t.Parallel()
 
-	for _, res := range []any{nil, &NoteResponse{}, &DeleteNoteNoContent{}, CreateNoteConflict{}, (*NoteResponse)(nil), "x"} {
+	// A variant value, not a pointer to it, is not a response of the generated client.
+	var conflictValue CreateNoteConflict
+
+	for _, res := range []any{nil, new(NoteResponse), &DeleteNoteNoContent{}, conflictValue, (*NoteResponse)(nil), "x"} {
 		apiErr, ok := ResponseError(res)
 		assert.False(t, ok, "%T", res)
 		assert.Nil(t, apiErr)
