@@ -106,7 +106,9 @@ func (s *ManagerTestSuite) TestInspect_ExpiredIsKept() {
 	s.True(link.BurnAfterClick)
 }
 
-// TestFollow_ExpiredIsDeleted checks that Follow deletes a visible expired link.
+// TestFollow_ExpiredIsDeleted checks that Follow deletes a visible expired link with the
+// conditional DeleteExpired, never the unconditional Delete: storage checks the expiry again, so a
+// new live link with the same ID stays.
 func (s *ManagerTestSuite) TestFollow_ExpiredIsDeleted() {
 	past := testNow().Add(-time.Minute)
 	s.storage.EXPECT().GetByID(gomock.Any(), domain.HashSlug("old")).

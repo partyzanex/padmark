@@ -185,11 +185,11 @@ func (s *ManagerTestSuite) TestUpdate_Validation() {
 	}
 }
 
-// TestRead_StaleCacheFillIsNotServed: no lock orders reads, updates and cache fills, so a read
+// TestInspect_StaleCacheFillIsNotServed: no lock orders reads, updates and cache fills, so a read
 // that started before an Update can store the old target after the Update evicts it. The next
 // read gets the new ciphertext from storage, so the fingerprint misses, the old target is not
 // served and the new target replaces the entry.
-func (s *ManagerTestSuite) TestRead_StaleCacheFillIsNotServed() {
+func (s *ManagerTestSuite) TestInspect_StaleCacheFillIsNotServed() {
 	ctx := s.T().Context()
 	dbID := domain.HashSlug("stable")
 	cache := linkcache.NewDefault(slog.New(slog.DiscardHandler))
@@ -203,7 +203,7 @@ func (s *ManagerTestSuite) TestRead_StaleCacheFillIsNotServed() {
 		DirectRedirect: nil, Views: 0, BurnAfterClick: false,
 	}, nil)
 
-	link, err := s.manager.Peek(ctx, "stable")
+	link, err := s.manager.Inspect(ctx, "stable", openReader())
 	s.Require().NoError(err)
 	s.Equal("https://example.com/new", link.TargetURL)
 

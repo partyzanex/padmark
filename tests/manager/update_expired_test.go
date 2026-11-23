@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/partyzanex/padmark/internal/domain"
+	"github.com/partyzanex/padmark/internal/testutil"
 	"github.com/partyzanex/padmark/internal/usecases/files"
 	"github.com/partyzanex/padmark/internal/usecases/links"
 )
@@ -14,8 +15,9 @@ import (
 // The TestUpdate_Expired* tests check on each storage backend that an update of an expired note,
 // link or file returns domain.ErrExpired with the correct edit code, and that the stored record
 // keeps its expiry: the update must not extend the life of a record that readers see as gone.
-// The expiry comes from the stored row, so the tests also cover the time values that each
-// backend gives back.
+// The tests read the stored row through the repository of the Manager, because a Manager read
+// deletes an expired record or hides it. The expiry comes from the stored row, so the tests also
+// cover the time values that each backend gives back.
 
 func (s *ManagerSuite) TestUpdate_ExpiredNoteIsGone() {
 	ctx := s.T().Context()
@@ -37,9 +39,12 @@ func (s *ManagerSuite) TestUpdate_ExpiredNoteIsGone() {
 	})
 	s.Require().ErrorIs(err, domain.ErrExpired)
 
-	stored, err := s.Manager.Peek(ctx, created.ID)
+	id := domain.HashSlug(created.ID)
+	stored, err := s.NoteStorage.Get(ctx, id)
 	s.Require().NoError(err)
-	s.Equal("c", stored.Content)
+	content, err := testutil.ContentEncryptor(s.T(), "note").Decrypt(stored.Content, id, created.ID)
+	s.Require().NoError(err)
+	s.Equal("c", content)
 	s.Require().NotNil(stored.ExpiresAt)
 	s.WithinDuration(past, *stored.ExpiresAt, time.Second)
 }
@@ -61,9 +66,12 @@ func (s *ManagerSuite) TestUpdate_ExpiredLinkIsGone() {
 		})
 	s.Require().ErrorIs(err, domain.ErrExpired)
 
-	stored, err := s.LinkManager.Peek(ctx, created.ID)
+	id := domain.HashSlug(created.ID)
+	stored, err := s.LinkStorage.GetByID(ctx, id)
 	s.Require().NoError(err)
-	s.Equal("https://example.com/old", stored.TargetURL)
+	target, err := testutil.ContentEncryptor(s.T(), "link").Decrypt(stored.TargetURL, id, created.ID)
+	s.Require().NoError(err)
+	s.Equal("https://example.com/old", target)
 	s.Require().NotNil(stored.ExpiresAt)
 	s.WithinDuration(past, *stored.ExpiresAt, time.Second)
 }
@@ -84,7 +92,7 @@ func (s *ManagerSuite) TestUpdate_ExpiredFileIsGone() {
 	})
 	s.Require().ErrorIs(err, domain.ErrExpired)
 
-	stored, err := s.FileManager.Peek(ctx, created.ID)
+	stored, err := s.FileStorage.GetByID(ctx, domain.HashSlug(created.ID), time.Now())
 	s.Require().NoError(err)
 	s.Require().NotNil(stored.ExpiresAt)
 	s.WithinDuration(past, *stored.ExpiresAt, time.Second)

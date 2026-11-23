@@ -52,20 +52,6 @@ func (s *ManagerSuite) TestReader_HiddenExpiredFileIsForbidden() {
 	s.Require().ErrorIs(err, domain.ErrForbidden)
 }
 
-// TestReader_AccountsOffSkipsPrivacy checks that SkipPrivacy (accounts off) shows a hidden file,
-// and that Delete still needs the edit code.
-func (s *ManagerSuite) TestReader_AccountsOffSkipsPrivacy() {
-	ctx := s.T().Context()
-
-	s.storage.EXPECT().GetByID(gomock.Any(), domain.HashSlug("abc"), testNow()).Return(hiddenFile(), nil).Times(2)
-
-	file, err := s.manager.Inspect(ctx, "abc", skipPrivacy())
-	s.Require().NoError(err)
-	s.Equal("report.pdf", file.Name)
-
-	s.Require().ErrorIs(s.manager.Delete(ctx, "abc", "wrong", skipPrivacy()), domain.ErrInvalidEditCode)
-}
-
 // TestSettings_ExpiredFileStays checks that the editor read reports an expired file without a
 // delete: the strict mock fails on DeleteExpired, so the file page can still answer 410.
 func (s *ManagerSuite) TestSettings_ExpiredFileStays() {

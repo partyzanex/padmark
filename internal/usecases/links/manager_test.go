@@ -321,36 +321,6 @@ func (s *ManagerTestSuite) TestFollow_NotFound() {
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
-func (s *ManagerTestSuite) TestFollow_Expired() {
-	past := testNow().Add(-time.Hour)
-	link := &domain.Link{
-		TargetURL: "https://example.com", ExpiresAt: &past,
-		CreatedAt: time.Time{}, Privacy: nil, OwnerID: nil, DirectRedirect: nil,
-		ID: "", EditCode: "", Views: 0, BurnAfterClick: false,
-	}
-	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(link, nil)
-	s.storage.EXPECT().DeleteExpired(gomock.Any(), gomock.Any(), testNow()).Return(nil)
-
-	_, err := s.manager.Follow(s.T().Context(), "expired-slug", openReader())
-
-	s.ErrorIs(err, domain.ErrExpired)
-}
-
-func (s *ManagerTestSuite) TestFollow_BurnAfterClick_ConsumedOnce() {
-	link := &domain.Link{
-		TargetURL: "https://example.com", BurnAfterClick: true,
-		CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
-		DirectRedirect: nil, ID: "", EditCode: "", Views: 0,
-	}
-	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(link, nil)
-	s.storage.EXPECT().Consume(gomock.Any(), gomock.Any(), testNow()).Return(link, nil)
-
-	got, err := s.manager.Follow(s.T().Context(), "burn-slug", openReader())
-
-	s.Require().NoError(err)
-	s.Equal("https://example.com", got.TargetURL)
-}
-
 // TestFollow_NoBurnIntent_BurnLinkLeftIntact: an access without deliberate intent must neither
 // consume a burn_after_click link nor count a view — it gets ErrBurnIntentRequired.
 func (s *ManagerTestSuite) TestFollow_NoBurnIntent_BurnLinkLeftIntact() {
@@ -415,8 +385,9 @@ func (s *ManagerTestSuite) TestFollow_BurnAfterClick_SecondCallNotFound() {
 	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(link, nil)
 	s.storage.EXPECT().Consume(gomock.Any(), gomock.Any(), testNow()).Return(link, nil)
 
-	_, err := s.manager.Follow(s.T().Context(), "burn-slug", openReader())
+	got, err := s.manager.Follow(s.T().Context(), "burn-slug", openReader())
 	s.Require().NoError(err)
+	s.Equal("https://example.com", got.TargetURL)
 
 	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(nil, domain.ErrNotFound)
 
@@ -524,7 +495,7 @@ func (s *ManagerTestSuite) TestFollow_Expired_EvictsCache() {
 	s.ErrorIs(err, domain.ErrExpired)
 }
 
-func (s *ManagerTestSuite) TestPeek_CacheHit_ReadsCurrentMetadata() {
+func (s *ManagerTestSuite) TestInspect_CacheHit_ReadsCurrentMetadata() {
 	s.manager = s.newManager(failingEncryptor(s.ctrl)).WithCache(s.cache)
 
 	stored := &domain.Link{
@@ -535,7 +506,7 @@ func (s *ManagerTestSuite) TestPeek_CacheHit_ReadsCurrentMetadata() {
 	s.storage.EXPECT().GetByID(gomock.Any(), domain.HashSlug("the-slug")).Return(stored, nil)
 	s.cache.EXPECT().Get(domain.HashSlug("the-slug"), "ciphertext").Return("https://example.com", true)
 
-	got, err := s.manager.Peek(s.T().Context(), "the-slug")
+	got, err := s.manager.Inspect(s.T().Context(), "the-slug", openReader())
 
 	s.Require().NoError(err)
 	s.Equal("https://example.com", got.TargetURL)
@@ -543,7 +514,7 @@ func (s *ManagerTestSuite) TestPeek_CacheHit_ReadsCurrentMetadata() {
 	s.Equal("the-slug", got.ID)
 }
 
-func (s *ManagerTestSuite) TestPeek_PrivateRowNeverUsesCache() {
+func (s *ManagerTestSuite) TestInspect_PrivateRowNeverUsesCache() {
 	s.manager.WithCache(s.cache)
 
 	privacy, owner := domain.PrivacyOwner, uuid.New()
@@ -554,19 +525,19 @@ func (s *ManagerTestSuite) TestPeek_PrivateRowNeverUsesCache() {
 	}
 	s.storage.EXPECT().GetByID(gomock.Any(), domain.HashSlug("the-slug")).Return(stored, nil)
 	// No cache Get/Set is allowed for a private row, even if an older public target
-	// is still present in this replica's cache.
-	got, err := s.manager.Peek(s.T().Context(), "the-slug")
+	// is still present in this replica's cache. The open reader can see the row.
+	got, err := s.manager.Inspect(s.T().Context(), "the-slug", openReader())
 	s.Require().NoError(err)
 	s.Equal(domain.PrivacyOwner, got.EffectivePrivacy())
 	s.False(got.VisibleTo(domain.Reader{CallerID: uuid.Nil, Authenticated: false, AllowBurn: false, SkipPrivacy: false}))
 }
 
-func (s *ManagerTestSuite) TestPeek_DatabaseFailureNeverFallsBackToCache() {
+func (s *ManagerTestSuite) TestInspect_DatabaseFailureNeverFallsBackToCache() {
 	s.manager.WithCache(s.cache)
 
 	for _, cause := range []error{domain.ErrNotFound, errors.New("database unavailable")} {
 		s.storage.EXPECT().GetByID(gomock.Any(), domain.HashSlug("the-slug")).Return(nil, cause)
-		_, err := s.manager.Peek(s.T().Context(), "the-slug")
+		_, err := s.manager.Inspect(s.T().Context(), "the-slug", openReader())
 		s.ErrorIs(err, cause)
 	}
 }

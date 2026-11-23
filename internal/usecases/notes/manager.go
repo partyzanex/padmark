@@ -262,25 +262,6 @@ func (m *Manager) Create(ctx context.Context, note *domain.Note) (*domain.Note, 
 	return note, nil
 }
 
-// Peek fetches a note by ID without any access rule: no privacy check, no expiry, no burn and
-// no view count. It returns expired notes as they are. A caller that shows a note to a reader
-// uses Read, ReadRendered or Inspect, which apply the rules.
-func (m *Manager) Peek(ctx context.Context, id string) (*domain.Note, error) {
-	note, err := m.storage.Get(ctx, domain.HashSlug(id))
-	if err != nil {
-		return nil, fmt.Errorf("peek note: %w", err)
-	}
-
-	note.ID = id
-
-	err = decryptContent(ctx, m.encryptor, m.log, note)
-	if err != nil {
-		return nil, err
-	}
-
-	return note, nil
-}
-
 // Inspect returns the note for reader without a side effect on a live note. It applies the
 // first two read rules of Read: privacy (domain.ErrForbidden) and expiry (an expired note is
 // deleted and Inspect returns domain.ErrExpired). It never consumes a burn-after-reading note,

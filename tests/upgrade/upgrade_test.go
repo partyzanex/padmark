@@ -66,7 +66,7 @@ func runUpgrade(t *testing.T, db *bun.DB, repos repositories, fixture []legacyNo
 
 	assertNotesReadable(t, manager, fixture)
 	assertEditCodes(t, manager, fixture)
-	assertLifecycle(t, manager, fixture)
+	assertLifecycle(t, manager, repos.notes, fixture)
 }
 
 // newKeyManager wires contentkeys.Manager like `padmark-server encryption`, with the keyring
@@ -268,7 +268,8 @@ func assertStoredRowsConverted(t *testing.T, db *bun.DB, fixture []legacyNote) {
 	}
 }
 
-// assertNotesReadable compares every surviving note with the fixture without any read side effect.
+// assertNotesReadable compares every surviving note with the fixture without any read side effect:
+// Inspect does not burn a note and does not count a view.
 func assertNotesReadable(t *testing.T, manager *notes.Manager, fixture []legacyNote) {
 	t.Helper()
 
@@ -280,7 +281,7 @@ func assertNotesReadable(t *testing.T, manager *notes.Manager, fixture []legacyN
 		want := &fixture[i]
 
 		t.Run("read/"+want.title, func(t *testing.T) {
-			got, err := manager.Peek(t.Context(), want.slug)
+			got, err := manager.Inspect(t.Context(), want.slug, openReader())
 			require.NoError(t, err)
 
 			assert.Equal(t, want.title, got.Title)
@@ -335,7 +336,7 @@ func assertEditCodes(t *testing.T, manager *notes.Manager, fixture []legacyNote)
 		require.ErrorIs(t, update(""), domain.ErrInvalidEditCode, note.title)
 		require.NoError(t, update(note.editCode), "the v0.1.6 edit code of %q must still work", note.title)
 
-		edited, err := manager.Peek(t.Context(), note.slug)
+		edited, err := manager.Inspect(t.Context(), note.slug, openReader())
 		require.NoError(t, err)
 		require.Equal(t, "edited after the upgrade", edited.Content)
 	}
@@ -347,8 +348,9 @@ func openReader() domain.Reader {
 	return domain.Reader{CallerID: uuid.Nil, Authenticated: false, AllowBurn: true, SkipPrivacy: true}
 }
 
-// assertLifecycle checks burn, expiry and view semantics survive the conversion.
-func assertLifecycle(t *testing.T, manager *notes.Manager, fixture []legacyNote) {
+// assertLifecycle checks burn, expiry and view semantics survive the conversion. It reads storage
+// to check that the expired note is gone, because a Manager read applies the expiry rule.
+func assertLifecycle(t *testing.T, manager *notes.Manager, storage notes.Storage, fixture []legacyNote) {
 	t.Helper()
 
 	ctx := t.Context()
@@ -371,7 +373,7 @@ func assertLifecycle(t *testing.T, manager *notes.Manager, fixture []legacyNote)
 	_, err = manager.Read(ctx, expired.slug, openReader())
 	require.True(t, errors.Is(err, domain.ErrExpired) || errors.Is(err, domain.ErrNotFound),
 		"an expired v0.1.6 note must not be revived, got %v", err)
-	_, err = manager.Peek(ctx, expired.slug)
+	_, err = storage.Get(ctx, domain.HashSlug(expired.slug))
 	require.ErrorIs(t, err, domain.ErrNotFound)
 
 	viewed := &fixture[noteViewed]

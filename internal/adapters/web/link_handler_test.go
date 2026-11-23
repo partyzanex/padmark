@@ -739,29 +739,11 @@ func (s *HandlerSuite) TestRedirectLink_OwnerOnly_Anonymous_Unauthorized() {
 	s.Equal(http.StatusUnauthorized, w.Code)
 }
 
-// TestRedirectLink_OwnerOnly_Anonymous_HTML_RedirectToLogin is the HTML-negotiated counterpart to
-// the anonymous case above — mirrors TestOwnerOnlyNote_Anonymous_HTML_RedirectToLogin.
-func (s *HandlerSuite) TestRedirectLink_OwnerOnly_Anonymous_HTML_RedirectToLogin() {
-	s.linkManager.EXPECT().Follow(gomock.Any(), testLinkID, domain.Reader{
-		CallerID: uuid.Nil, Authenticated: false, AllowBurn: true, SkipPrivacy: false,
-	}).Return(nil, domain.ErrForbidden)
-
-	router := s.newLinkRouterWithTOTPAuth()
-
-	w := httptest.NewRecorder()
-	r := newLinkClickRequest("/r/" + testLinkID)
-	r.Header.Set("Accept", "text/html")
-
-	router.ServeHTTP(w, r)
-
-	s.Equal(http.StatusSeeOther, w.Code)
-	s.True(strings.HasPrefix(w.Header().Get("Location"), "/login?next="))
-}
-
 // TestRedirectLink_PrivacyAuthenticated_Unauthenticated mirrors TestPrivateNote_TOTPMode_
 // Unauthenticated: a privacy: authenticated link denies any caller with no credential at all —
 // unlike privacy: owner, any logged-in caller (not just the creator) is enough, but anonymous
-// never is.
+// never is. A browser goes to /login. The usecase refuses an anonymous reader for a privacy:
+// owner link too, so this case also covers that level.
 func (s *HandlerSuite) TestRedirectLink_PrivacyAuthenticated_Unauthenticated() {
 	s.linkManager.EXPECT().Follow(gomock.Any(), testLinkID, domain.Reader{
 		CallerID: uuid.Nil, Authenticated: false, AllowBurn: true, SkipPrivacy: false,

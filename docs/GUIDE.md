@@ -179,7 +179,6 @@ The adapter only selects the format and translates the errors:
 
 | Method | Notes | Links | Files |
 |---|---|---|---|
-| No rules (kind lookup, tools) | `Peek` | `Peek` | `Peek` |
 | Privacy and expiry, no side effect on a live record | `Inspect` | `Inspect` | `Inspect` |
 | Editor read, no side effect at all | `Inspect` (deletes an expired note) | `Inspect` | `Settings` |
 | Full read: privacy, expiry, burn intent, burn, counter | `Read`, `ReadRendered` | `Follow` | `Download` |
@@ -238,10 +237,10 @@ An upload has this sequence:
    first reads the record by object key (`confirmCreate`). A committed record keeps its object and
    the upload succeeds; when the read also fails, the object stays in the bucket.
 
-`Peek` reads a record without access rules. `Inspect` applies privacy and expiry. `Download`
-checks that the object exists before it changes the record, so a missing object does not
-consume a `burn_after_download` file. Without `AllowBurn` such a file stays, and `Download`
-returns `ErrBurnIntentRequired`. `Update` changes only the expiry, privacy and burn rule.
+`Inspect` applies privacy and expiry. `Download` checks that the object exists before it changes
+the record, so a missing object does not consume a `burn_after_download` file. Without
+`AllowBurn` such a file stays, and `Download` returns `ErrBurnIntentRequired`. `Update` changes
+only the expiry, privacy and burn rule.
 
 A burn download first claims the record (`ClaimBurn` sets `burn_claim` and `burn_claim_until`,
 70 minutes after the claim). Other readers do not see a claimed record and get 404.

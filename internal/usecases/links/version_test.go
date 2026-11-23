@@ -38,20 +38,6 @@ func (s *ManagerTestSuite) TestDelete_NewVersionIsNotFound() {
 	s.Require().ErrorIs(err, domain.ErrNotFound)
 }
 
-// TestFollow_ExpiredUsesConditionalDelete verifies that the expiry delete is the conditional
-// DeleteExpired, never the unconditional Delete: storage checks the expiry again, so a new live
-// link with the same ID stays.
-func (s *ManagerTestSuite) TestFollow_ExpiredUsesConditionalDelete() {
-	past := testNow().Add(-time.Hour)
-	s.storage.EXPECT().GetByID(gomock.Any(), domain.HashSlug("expired-slug")).
-		Return(storedLink("hash:expired", &past), nil)
-	s.storage.EXPECT().DeleteExpired(gomock.Any(), domain.HashSlug("expired-slug"), testNow()).Return(nil)
-
-	_, err := s.manager.Follow(s.T().Context(), "expired-slug", openReader())
-
-	s.Require().ErrorIs(err, domain.ErrExpired)
-}
-
 // TestFollow_ExtendedAfterExpiryCheckStays covers finding 8: the owner extends the link between
 // the expiry decision and the DELETE. Storage refuses the DELETE because the row is not expired
 // now. The manager must not fall back to an unconditional Delete: the strict mock fails on it.

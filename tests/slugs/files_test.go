@@ -127,11 +127,11 @@ func (e *slugEnv) create(ctx context.Context, resource, slug string, burn bool) 
 	}
 }
 
-// objectKey returns the object key of the file with slug.
+// objectKey returns the object key of the live file with slug. Inspect never consumes a burn file.
 func (e *slugEnv) objectKey(t *testing.T, slug string) string {
 	t.Helper()
 
-	file, err := e.files.Peek(t.Context(), slug)
+	file, err := e.files.Inspect(t.Context(), slug, openReader())
 	require.NoError(t, err)
 
 	return file.ObjectKey

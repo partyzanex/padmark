@@ -241,20 +241,20 @@ func privateFile(burn bool) *domain.File {
 	return file
 }
 
-func (s *ManagerSuite) TestSkipPrivacy_Info() {
+func (s *ManagerSuite) TestSkipPrivacy_Inspect() {
 	ctx := s.T().Context()
 	skip := skipPrivacy()
 
-	s.Run("info", func() {
+	s.Run("inspect", func() {
 		s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any(), testNow()).Return(privateFile(false), nil)
 
 		file, err := s.manager.Inspect(ctx, "abc", skip)
 		s.Require().NoError(err)
 		s.Equal("report.pdf", file.Name)
-		s.Nil(file.ContentKey, "Info does not return the content key")
+		s.Nil(file.ContentKey, "Inspect does not return the content key")
 	})
 
-	s.Run("info without skip", func() {
+	s.Run("inspect without skip", func() {
 		s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any(), testNow()).Return(privateFile(false), nil)
 
 		_, err := s.manager.Inspect(ctx, "abc", anonymous(true))

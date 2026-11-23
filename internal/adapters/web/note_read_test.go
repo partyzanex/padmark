@@ -395,37 +395,6 @@ func (s *HandlerSuite) TestGetNote_ShortURL() {
 	s.Equal("short", resp.Title)
 }
 
-func (s *HandlerSuite) TestGetNote_Private_HTML_Unauthorized() {
-	// The usecase refuses the anonymous reader; the handler sends the browser to the sign-in page.
-	s.manager.EXPECT().ReadRendered(gomock.Any(), testID, anonymousReader()).Return(nil, "", domain.ErrForbidden)
-
-	router := s.newRouterWithTOTPAuth()
-
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
-	r.Header.Set("Accept", "text/html")
-
-	router.ServeHTTP(w, r)
-
-	s.Equal(http.StatusSeeOther, w.Code)
-	s.True(strings.HasPrefix(w.Header().Get("Location"), "/login?next="),
-		"should redirect to /login with ?next= param")
-}
-
-func (s *HandlerSuite) TestGetNote_Private_JSON_Unauthorized() {
-	s.manager.EXPECT().Read(gomock.Any(), testID, anonymousReader()).Return(nil, domain.ErrForbidden)
-
-	router := s.newRouterWithTOTPAuth()
-
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
-	r.Header.Set("Accept", "application/json")
-
-	router.ServeHTTP(w, r)
-
-	s.Equal(http.StatusUnauthorized, w.Code)
-}
-
 // ── Multi-segment (path-like) slug support ──.
 
 func (s *HandlerSuite) TestGetNote_MultiSegmentSlug_PublicServed() {

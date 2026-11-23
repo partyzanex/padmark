@@ -1166,7 +1166,7 @@ after they stop, and existing sessions and API tokens keep working throughout.
 - `serve` automatically wraps existing unversioned ciphertext before opening its listeners.
   Migration protects it with an outer `pmc2$l$…` envelope. Its inner legacy layer still needs
   the original slug; `convert` replaces that layer with native `kind=p` when the slug is known.
-  Reads/Peek never migrate records. Updating a note writes native `kind=p`.
+  Reads never migrate records. Updating a note writes native `kind=p`.
 - The keyring JSON has an `active` key ID and a `keys` object mapping IDs to base64-encoded
   **32-byte random keys**. The DB holds an installation UUID and authenticated key checks,
   never raw keys. Before opening listeners, `serve` verifies the registry, active key and

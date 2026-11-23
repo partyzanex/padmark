@@ -44,9 +44,12 @@ func (s *PostgresManagerSuite) SetupTest() {
 	noteRepo, linkRepo := pgrepo.NewNoteRepository(s.db), pgrepo.NewLinkRepository(s.db, slog.Default())
 	expired := expiredslugs.New(noteRepo, linkRepo)
 
+	fileRepo := pgrepo.NewFileRepository(s.db)
+
 	s.Manager = newManager(s.T(), noteRepo, expired)
 	s.LinkManager = newLinkManager(s.T(), linkRepo, expired)
-	s.FileManager = newFileManager(&s.Suite, pgrepo.NewFileRepository(s.db), expired, s.objects)
+	s.FileManager = newFileManager(&s.Suite, fileRepo, expired, s.objects)
+	s.NoteStorage, s.LinkStorage, s.FileStorage = noteRepo, linkRepo, fileRepo
 	s.Objects = s.objects
 	s.RevealStore = auth.NewRevealManager(pgrepo.NewRevealRepository(s.db), slog.Default(), time.Now)
 	s.DB = s.db

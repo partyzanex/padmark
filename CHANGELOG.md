@@ -80,6 +80,8 @@ v0.5.0 follows **v0.4.0**.
 
 ### Changed
 
+- `notes.Manager`, `links.Manager` and `files.Manager` have no `Peek` method; only tests called
+  it. Tests read a record with `Inspect`, or through the storage when they need the stored row.
 - `pkg/client`: `UploadFile` and `DownloadFile` return a drain or close error of the response
   body when no other error occurred. The fields of `UploadFileOptions` have a new order; keyed
   literals do not change.
@@ -271,6 +273,9 @@ v0.5.0 follows **v0.4.0**.
 
 ### Tests
 
+- 21 duplicate tests are removed from the notes, links and files usecases and the web handlers;
+  each kept test has the assertions of the removed ones. Test helpers, variables and files that
+  named removed APIs have the current names (`mutation_gate_test.go` is `mutation_error_test.go`).
 - Test names and comments name the current APIs: `Follow`, `Read`, `ReadRendered`, `Inspect`,
   and the usecase privacy check of a mutation instead of a web mutation gate (70 tests).
 - `tests/internal/testenv` builds the in-process web stack and gives each test package one shared

@@ -93,7 +93,7 @@ func (s *APITokenFlowSuite) checkCLICreatesNote(envelope string) {
 	require.Equal(t, int64(1), count, "exactly one note created through the API-token-authenticated path")
 }
 
-// checkInvalidKeyRefused checks that an invalid API key cannot change a privacy-gated note.
+// checkInvalidKeyRefused checks that an invalid API key cannot change a private note.
 func (s *APITokenFlowSuite) checkInvalidKeyRefused() {
 	t := s.T()
 	ctx := t.Context()
@@ -101,12 +101,12 @@ func (s *APITokenFlowSuite) checkInvalidKeyRefused() {
 	// ── negative: a bogus key is rejected when the operation requires a credential ──
 	// POST /notes is anonymous-allowed by design (an invalid key does not block creating a
 	// public note), so the negative case targets a mutation on a privacy=authenticated note —
-	// the mutation privacy gate answers 401 before the note is touched.
-	gatedPrv := domain.PrivacyAuthenticated
-	gated, err := s.stack.Notes.Create(ctx, &domain.Note{
-		Title:   "gated",
+	// the privacy check of the usecase answers 401 before the note is touched.
+	privacy := domain.PrivacyAuthenticated
+	private, err := s.stack.Notes.Create(ctx, &domain.Note{
+		Title:   "private",
 		Content: "requires login",
-		Privacy: &gatedPrv,
+		Privacy: &privacy,
 
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		OwnerID: nil, ID: "", ContentType: nil, EditCode: "",
@@ -116,13 +116,13 @@ func (s *APITokenFlowSuite) checkInvalidKeyRefused() {
 
 	badErr := clicmd.NewApp().Run(ctx, []string{
 		"padmark-cli", "--url", s.stack.Server.URL, "--token", "not-a-real-key",
-		"delete", gated.ID,
+		"delete", private.ID,
 	})
 	require.Error(t, badErr, "CLI must fail when the API key is invalid")
 
 	count, err := s.stack.DB.NewSelect().TableExpr("notes").Count(ctx)
 	require.NoError(t, err)
-	require.Equal(t, int64(2), count, "an invalid API key must not mutate the privacy-gated note")
+	require.Equal(t, int64(2), count, "an invalid API key must not mutate the private note")
 }
 
 // checkPrivateRead checks the reads of the CLI with the envelope token: a private note and a

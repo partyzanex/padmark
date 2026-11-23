@@ -70,13 +70,13 @@ func (s *PathNormalizationSuite) TearDownTest() {
 	s.ctrl.Finish()
 }
 
-// recordPeeks makes every note lookup miss and returns the IDs the note handler looked up, so a
+// recordNoteLookups makes every note lookup miss and returns the IDs the note handler looked up, so a
 // case can assert whether (and as which slug) a request was dispatched to the note catch-all.
-func (s *PathNormalizationSuite) recordPeeks() *[]string {
-	peeked := []string{}
+func (s *PathNormalizationSuite) recordNoteLookups() *[]string {
+	lookups := []string{}
 
 	record := func(id string) {
-		peeked = append(peeked, id)
+		lookups = append(lookups, id)
 	}
 
 	s.manager.EXPECT().Read(gomock.Any(), gomock.Any(), gomock.Any()).
@@ -102,7 +102,7 @@ func (s *PathNormalizationSuite) recordPeeks() *[]string {
 	// record the slug that the router dispatched. No note has it, and the read tells no other
 	// kind, so no link or file Manager is called.
 
-	return &peeked
+	return &lookups
 }
 
 // rawRequest parses method + target exactly as net/http's server does for a raw request line,
@@ -221,11 +221,11 @@ func nonCanonicalCases() []nonCanonicalCase {
 //   - Encoded dot segments (/r/%2E%2E/admin): not cleaned by ServeMux (it cleans the escaped
 //     path), so they never match a literal admin pattern; they fall to the note catch-all or 404.
 func (s *PathNormalizationSuite) TestAnonymousNonCanonicalTargets_NeverReachProtectedHandlers() {
-	peeked := s.recordPeeks()
+	lookups := s.recordNoteLookups()
 
 	for _, tcase := range nonCanonicalCases() {
 		s.Run(tcase.method+" "+tcase.target, func() {
-			*peeked = (*peeked)[:0]
+			*lookups = (*lookups)[:0]
 
 			rec := s.serve(s.rawRequest(tcase.method, tcase.target))
 
@@ -233,9 +233,9 @@ func (s *PathNormalizationSuite) TestAnonymousNonCanonicalTargets_NeverReachProt
 			s.Equal(tcase.location, rec.Header().Get("Location"))
 
 			if tcase.noteID == "" {
-				s.Empty(*peeked, "must not be dispatched to the note catch-all")
+				s.Empty(*lookups, "must not be dispatched to the note catch-all")
 			} else {
-				s.Equal([]string{tcase.noteID}, *peeked, "dispatched to the note catch-all as this slug")
+				s.Equal([]string{tcase.noteID}, *lookups, "dispatched to the note catch-all as this slug")
 			}
 
 			if tcase.location != "" {

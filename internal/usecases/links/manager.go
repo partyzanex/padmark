@@ -318,15 +318,6 @@ func decryptTargetURL(ctx context.Context, enc Encryptor, log *slog.Logger, link
 	return nil
 }
 
-// Peek fetches a link by slug without any access rule: no privacy check, no expiry, no burn and
-// no view count. It returns expired and burn links as they are. A caller that shows a link to a
-// reader uses Inspect or Follow. Every call reads current metadata from storage. Only target
-// decryption may use the optional Cache; cached entries never supply privacy, ownership or
-// lifecycle state.
-func (m *Manager) Peek(ctx context.Context, slug string) (*domain.Link, error) {
-	return m.resolveLink(ctx, slug)
-}
-
 // Delete removes a link by slug with the rules of checkMutation, as notes.Manager.Delete does.
 func (m *Manager) Delete(ctx context.Context, slug, editCode string, reader domain.Reader) error {
 	dbID := domain.HashSlug(slug)

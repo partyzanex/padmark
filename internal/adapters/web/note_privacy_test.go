@@ -25,7 +25,8 @@ import (
 //   4. The page sets CanEdit with Note.VisibleTo(reader).
 
 // TestPrivateNote_TOTPMode_Unauthenticated verifies that an unauthenticated
-// request to a private note is redirected to /login in TOTP-only mode.
+// request to a private note is redirected to /login in TOTP-only mode. The usecase refuses an
+// anonymous reader for each private level (authenticated and owner), so one case covers both.
 func (s *HandlerSuite) TestPrivateNote_TOTPMode_Unauthenticated() {
 	// No session cookie: the reader is anonymous and the usecase refuses it.
 	s.manager.EXPECT().ReadRendered(gomock.Any(), testID, anonymousReader()).Return(nil, "", domain.ErrForbidden)
@@ -130,8 +131,9 @@ func (s *HandlerSuite) TestOwnerOnlyNote_OtherAuthenticatedUser_Forbidden() {
 		"the note's plaintext must never reach a non-owner's response body")
 }
 
-// TestOwnerOnlyNote_Anonymous_Unauthorized verifies that a note with privacy: owner is not
-// readable by an unauthenticated caller.
+// TestOwnerOnlyNote_Anonymous_Unauthorized verifies that a JSON client without credentials gets
+// 401 for a private note. The usecase refuses an anonymous reader for each private level
+// (authenticated and owner), so one case covers both.
 func (s *HandlerSuite) TestOwnerOnlyNote_Anonymous_Unauthorized() {
 	s.manager.EXPECT().Read(gomock.Any(), testID, anonymousReader()).Return(nil, domain.ErrForbidden)
 
@@ -143,23 +145,6 @@ func (s *HandlerSuite) TestOwnerOnlyNote_Anonymous_Unauthorized() {
 	router.ServeHTTP(w, r)
 
 	s.Equal(http.StatusUnauthorized, w.Code)
-}
-
-// TestOwnerOnlyNote_Anonymous_HTML_RedirectToLogin is the HTML-negotiated counterpart to
-// TestOwnerOnlyNote_Anonymous_Unauthorized: a browser request (Accept: text/html) to a
-// privacy: owner note from an anonymous caller must redirect to /login, not 401.
-func (s *HandlerSuite) TestOwnerOnlyNote_Anonymous_HTML_RedirectToLogin() {
-	s.manager.EXPECT().ReadRendered(gomock.Any(), testID, anonymousReader()).Return(nil, "", domain.ErrForbidden)
-
-	router := s.newRouterWithTOTPAuth()
-
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
-	r.Header.Set("Accept", "text/html")
-	router.ServeHTTP(w, r)
-
-	s.Equal(http.StatusSeeOther, w.Code)
-	s.True(strings.HasPrefix(w.Header().Get("Location"), "/login?next="))
 }
 
 // TestEditPage_OwnerOnly_NonOwner_Forbidden verifies that GET /edit/{id} for a privacy: owner

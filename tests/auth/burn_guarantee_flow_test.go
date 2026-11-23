@@ -315,8 +315,8 @@ func runImageAttack(t *testing.T, env ownerFlowEnv, testCase imageAttackCase) {
 		"viewing someone else's note must not burn (or start the burn timer of) the victim note")
 }
 
-// TestEditPageHonoursBurnAndExpiry — H-1 bypass 3. GET /edit/{id} loaded the note with
-// Manager.Peek (no burn, no expiry policy) and pre-filled the editor with the plaintext, so
+// TestEditPageHonoursBurnAndExpiry — H-1 bypass 3. GET /edit/{id} loaded the note with a raw
+// Manager read (no burn, no expiry policy) and pre-filled the editor with the plaintext, so
 // anyone holding a burn note's URL read it any number of times via /edit/<slug>, and an expired
 // note stayed readable there until something hit the view route (no sweeper). The editor now
 // uses Manager.Inspect; this test pins that fix.

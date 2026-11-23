@@ -61,16 +61,16 @@ func (s *ManagerSuite) TestFile_Lifecycle() {
 	s.Equal(fileEditCode, created.EditCode)
 	s.Equal(int64(len(content)), created.Size)
 
-	peeked, err := s.FileManager.Peek(ctx, created.ID)
+	file, err := s.FileManager.Inspect(ctx, created.ID, openReader())
 	s.Require().NoError(err)
-	s.Equal("report.pdf", peeked.Name)
-	s.Require().NoError(s.Objects.Stat(ctx, peeked.ObjectKey))
+	s.Equal("report.pdf", file.Name)
+	s.Require().NoError(s.Objects.Stat(ctx, file.ObjectKey))
 
 	s.Equal(content, s.downloadFile(created.ID, false))
 
-	peeked, err = s.FileManager.Peek(ctx, created.ID)
+	file, err = s.FileManager.Inspect(ctx, created.ID, openReader())
 	s.Require().NoError(err)
-	s.Equal(1, peeked.Downloads)
+	s.Equal(1, file.Downloads)
 
 	s.updateFile(created.ID)
 
@@ -82,9 +82,8 @@ func (s *ManagerSuite) TestFile_Lifecycle() {
 	s.Require().ErrorIs(s.FileManager.Delete(ctx, created.ID, "wrong-code-123", openReader()), domain.ErrInvalidEditCode)
 	s.Require().NoError(s.FileManager.Delete(ctx, created.ID, fileEditCode, openReader()))
 
-	_, err = s.FileManager.Peek(ctx, created.ID)
-	s.Require().ErrorIs(err, domain.ErrNotFound)
-	s.Require().ErrorIs(s.Objects.Stat(ctx, peeked.ObjectKey), domain.ErrNotFound)
+	s.requireFileGone(created.ID)
+	s.Require().ErrorIs(s.Objects.Stat(ctx, file.ObjectKey), domain.ErrNotFound)
 }
 
 // TestFile_BurnAfterDownload checks that one deliberate download consumes the file and its
@@ -98,14 +97,14 @@ func (s *ManagerSuite) TestFile_BurnAfterDownload() {
 	created, err := s.FileManager.Create(ctx, "once.bin", bytes.NewReader(content), opts)
 	s.Require().NoError(err)
 
-	peeked, err := s.FileManager.Peek(ctx, created.ID)
+	// Inspect never consumes a burn file.
+	file, err := s.FileManager.Inspect(ctx, created.ID, openReader())
 	s.Require().NoError(err)
 
 	s.Equal(content, s.downloadFile(created.ID, true))
 
-	_, err = s.FileManager.Peek(ctx, created.ID)
-	s.Require().ErrorIs(err, domain.ErrNotFound)
-	s.Require().ErrorIs(s.Objects.Stat(ctx, peeked.ObjectKey), domain.ErrNotFound)
+	s.requireFileGone(created.ID)
+	s.Require().ErrorIs(s.Objects.Stat(ctx, file.ObjectKey), domain.ErrNotFound)
 }
 
 // TestFile_SharedSlugNamespace checks that notes, links and files share one slug namespace in
@@ -146,10 +145,10 @@ func (s *ManagerSuite) TestFile_Expiry() {
 	keys := make(map[string]string, 2)
 
 	for _, slug := range []string{read.ID, swept.ID} {
-		peeked, peekErr := s.FileManager.Peek(ctx, slug)
-		s.Require().NoError(peekErr)
+		file, inspectErr := s.FileManager.Inspect(ctx, slug, openReader())
+		s.Require().NoError(inspectErr)
 
-		keys[slug] = peeked.ObjectKey
+		keys[slug] = file.ObjectKey
 
 		_, updateErr := s.DB.NewUpdate().Table("files").Set("expires_at = ?", time.Now().Add(-time.Hour)).
 			Where("id = ?", domain.HashSlug(slug)).Exec(ctx)
@@ -166,8 +165,7 @@ func (s *ManagerSuite) TestFile_Expiry() {
 	s.Equal(1, removed, "the read already removed the other file")
 
 	for slug, key := range keys {
-		_, err = s.FileManager.Peek(ctx, slug)
-		s.Require().ErrorIs(err, domain.ErrNotFound, slug)
+		s.requireFileGone(slug)
 		s.Require().ErrorIs(s.Objects.Stat(ctx, key), domain.ErrNotFound, slug)
 	}
 }
@@ -187,7 +185,7 @@ func (s *ManagerSuite) updateFile(slug string) {
 	s.True(updated.BurnAfterDownload)
 	s.Empty(updated.EditCode)
 
-	stored, err := s.FileManager.Peek(ctx, slug)
+	stored, err := s.FileManager.Inspect(ctx, slug, openReader())
 	s.Require().NoError(err)
 	s.True(stored.BurnAfterDownload)
 	s.Require().NotNil(stored.ExpiresAt)

@@ -321,7 +321,7 @@ func (s *FileHandlerSuite) TestCreateFilePage() {
 	s.Less(strings.Index(body, "data.append('ttl'"), strings.Index(body, "data.append('file'"))
 }
 
-// TestFilePage_BrowserGetsPage: a browser on /{id} gets the page. Info reads only the metadata,
+// TestFilePage_BrowserGetsPage: a browser on /{id} gets the page. Inspect reads only the metadata,
 // and no Download call is expected, so the page does not consume a burn file.
 func (s *FileHandlerSuite) TestFilePage_BrowserGetsPage() {
 	file := fileRecord("отчёт <1>.pdf", 3*1024*1024/2, 0, true)

@@ -282,19 +282,6 @@ func (m *Manager) Create(ctx context.Context, name string, body io.Reader, opts 
 	return file, nil
 }
 
-// Peek returns the file with decrypted metadata. It does not apply privacy, expiry or burn
-// rules; callers that show a file to a reader use Inspect or Download.
-func (m *Manager) Peek(ctx context.Context, slug string) (*domain.File, error) {
-	file, err := m.readFile(ctx, slug)
-	if err != nil {
-		return nil, err
-	}
-
-	dropKey(file)
-
-	return file, nil
-}
-
 // Inspect returns the file for reader without a side effect on a live file, as
 // notes.Manager.Inspect does: privacy (domain.ErrForbidden) and expiry (an expired file is
 // deleted, and Inspect returns domain.ErrExpired). It never counts or consumes a download.

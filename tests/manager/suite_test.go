@@ -34,19 +34,37 @@ type revealStore interface {
 }
 
 // ManagerSuite is the storage-agnostic business-logic integration suite.
-// Embed it in a storage-specific suite that sets Manager, LinkManager, FileManager, Objects,
+// Embed it in a storage-specific suite that sets the managers, their storages, Objects,
 // RevealStore, and DB in SetupTest. DB is the raw handle, exposed only for tests that need to bypass the repository's
 // decrypt path and inspect exactly what ended up on disk (e.g. the encryption-at-rest check
 // below) — everyday business-logic tests should go through Manager/LinkManager instead.
+// NoteStorage, LinkStorage and FileStorage are the repositories of the managers. A test reads
+// them when it needs the stored record without the read rules of a Manager, for example to
+// check that a record is gone or that an expired record did not change.
 type ManagerSuite struct {
 	suite.Suite
 
 	Manager     *notes.Manager
 	LinkManager *links.Manager
 	FileManager *files.Manager
+	NoteStorage notes.Storage
+	LinkStorage links.Storage
+	FileStorage files.Storage
 	Objects     *s3store.Store
 	RevealStore revealStore
 	DB          *bun.DB
+}
+
+// requireNoteGone checks that storage has no note with slug.
+func (s *ManagerSuite) requireNoteGone(slug string) {
+	_, err := s.NoteStorage.Get(s.T().Context(), domain.HashSlug(slug))
+	s.Require().ErrorIs(err, domain.ErrNotFound, slug)
+}
+
+// requireFileGone checks that storage has no file record with slug.
+func (s *ManagerSuite) requireFileGone(slug string) {
+	_, err := s.FileStorage.GetByID(s.T().Context(), domain.HashSlug(slug), time.Now())
+	s.Require().ErrorIs(err, domain.ErrNotFound, slug)
 }
 
 // newManager and newLinkManager share one expiredslugs.Releaser for each Manager/LinkManager
@@ -166,13 +184,13 @@ func (s *ManagerSuite) TestContentEnvelope_LegacyReadAndNoteUpdate() {
 	s.Require().NoError(err)
 	_, err = s.DB.NewUpdate().Table("notes").Set("content = ?", legacy).Where("id = ?", id).Exec(ctx)
 	s.Require().NoError(err)
-	peeked, err := s.Manager.Peek(ctx, note.ID)
+	inspected, err := s.Manager.Inspect(ctx, note.ID, openReader())
 	s.Require().NoError(err)
-	s.Equal("old content", peeked.Content)
+	s.Equal("old content", inspected.Content)
 
 	var stored string
 	s.Require().NoError(s.DB.NewSelect().Table("notes").Column("content").Where("id = ?", id).Scan(ctx, &stored))
-	s.Equal(legacy, stored, "Peek must not perform a hidden migration")
+	s.Equal(legacy, stored, "Inspect must not perform a hidden migration")
 	_, err = s.Manager.Update(ctx, note.ID, note.EditCode, openReader(), &domain.Note{
 		Content:   "updated",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
@@ -198,9 +216,9 @@ func (s *ManagerSuite) TestContentEnvelope_LegacyReadAndNoteUpdate() {
 	_, err = s.DB.NewUpdate().Table("links").Set("target_url = ?", legacyURL).
 		Where("id = ?", domain.HashSlug(link.ID)).Exec(ctx)
 	s.Require().NoError(err)
-	redirect, err := s.LinkManager.Follow(ctx, link.ID, openReader())
+	followed, err := s.LinkManager.Follow(ctx, link.ID, openReader())
 	s.Require().NoError(err)
-	s.Equal("https://example.com/legacy", redirect.TargetURL)
+	s.Equal("https://example.com/legacy", followed.TargetURL)
 }
 
 func (s *ManagerSuite) TestCreate_InvalidSlug() {
@@ -293,8 +311,7 @@ func (s *ManagerSuite) TestRead_Expired_DeletesNote() {
 	s.Require().ErrorIs(err, domain.ErrExpired)
 
 	// note must be removed from storage.
-	_, err = s.Manager.Peek(ctx, created.ID)
-	s.ErrorIs(err, domain.ErrNotFound)
+	s.requireNoteGone(created.ID)
 }
 
 func (s *ManagerSuite) TestRead_BurnAfterReading_ConsumedOnFirstRead() {
@@ -339,29 +356,6 @@ func (s *ManagerSuite) TestRead_BurnAfterReading_WithTTL_StartsTimer() {
 	s.Require().NoError(err)
 }
 
-// ── Peek ──.
-
-func (s *ManagerSuite) TestPeek_ReturnsExpiredNoteWithoutDeleting() {
-	ctx := s.T().Context()
-	past := time.Now().Add(-time.Minute)
-	created, err := s.Manager.Create(ctx, &domain.Note{
-		Title: "t", Content: "c", ExpiresAt: &past,
-		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, Privacy: nil,
-		OwnerID: nil, ID: "", ContentType: nil, EditCode: "",
-		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
-	})
-	s.Require().NoError(err)
-
-	// Peek must return the expired note without removing it.
-	got, err := s.Manager.Peek(ctx, created.ID)
-	s.Require().NoError(err)
-	s.Equal(created.ID, got.ID)
-
-	// Note still exists after Peek.
-	_, err = s.Manager.Peek(ctx, created.ID)
-	s.Require().NoError(err)
-}
-
 // ── Read: views ──.
 
 func (s *ManagerSuite) TestRead_IncrementsViews() {
@@ -381,7 +375,7 @@ func (s *ManagerSuite) TestRead_IncrementsViews() {
 	_, err = s.Manager.Read(ctx, created.ID, openReader())
 	s.Require().NoError(err)
 
-	got, err := s.Manager.Peek(ctx, created.ID)
+	got, err := s.Manager.Inspect(ctx, created.ID, openReader())
 	s.Require().NoError(err)
 	s.Equal(2, got.Views)
 }
@@ -481,8 +475,7 @@ func (s *ManagerSuite) TestDelete_OK() {
 	err = s.Manager.Delete(ctx, created.ID, created.EditCode, openReader())
 	s.Require().NoError(err)
 
-	_, err = s.Manager.Peek(ctx, created.ID)
-	s.ErrorIs(err, domain.ErrNotFound)
+	s.requireNoteGone(created.ID)
 }
 
 func (s *ManagerSuite) TestDelete_Forbidden() {
@@ -556,9 +549,9 @@ func (s *ManagerSuite) TestUpdate_ClearsBurnExpiryWhenBurnDisabled() {
 	})
 	s.Require().NoError(err)
 
-	peek, err := s.Manager.Peek(ctx, created.ID)
+	stored, err := s.Manager.Inspect(ctx, created.ID, openReader())
 	s.Require().NoError(err)
-	s.Nil(peek.ExpiresAt, "expires_at must be cleared when burn is disabled on update")
+	s.Nil(stored.ExpiresAt, "expires_at must be cleared when burn is disabled on update")
 }
 
 // TestUpdate_PreservesEditCode verifies the edit code (its argon2 hash) is left untouched by
@@ -902,7 +895,7 @@ func (s *ManagerSuite) TestCrossTableSlugUniqueness_ConcurrentCreate() {
 
 // TestLink_TargetURLIsEncryptedAtRest is the concrete verification behind the acceptance
 // criteria's "DB dump of the links table contains no plaintext target URLs" — it bypasses
-// LinkManager's own decrypt path (Peek/Follow always decrypt) and reads the raw stored column
+// LinkManager's own decrypt path (Inspect/Follow always decrypt) and reads the raw stored column
 // directly via DB, using the real content envelope encryptor (not a passthrough test double, unlike
 // links.Manager's own unit tests).
 func (s *ManagerSuite) TestLink_TargetURLIsEncryptedAtRest() {
@@ -944,14 +937,14 @@ func (s *ManagerSuite) TestLink_CreateThenFollow_RealCrypto_RoundTrips() {
 	})
 	s.Require().NoError(err)
 
-	peeked, err := s.LinkManager.Peek(ctx, created.ID)
+	inspected, err := s.LinkManager.Inspect(ctx, created.ID, openReader())
 	s.Require().NoError(err)
-	s.Equal(plaintext, peeked.TargetURL)
+	s.Equal(plaintext, inspected.TargetURL)
 
-	redirected, err := s.LinkManager.Follow(ctx, created.ID, openReader())
+	followed, err := s.LinkManager.Follow(ctx, created.ID, openReader())
 	s.Require().NoError(err)
-	s.Equal(plaintext, redirected.TargetURL)
-	s.Equal(1, redirected.Views)
+	s.Equal(plaintext, followed.TargetURL)
+	s.Equal(1, followed.Views)
 }
 
 // Updating a destination preserves the original encrypted edit-code hash and slug,
@@ -993,9 +986,9 @@ func (s *ManagerSuite) TestLink_Update_RealCrypto() {
 	s.True(strings.HasPrefix(stored.TargetURL, "pmc2$p$"))
 	s.NotContains(stored.TargetURL, "https://example.com/new")
 	s.Equal(originalHash, stored.EditCode)
-	redirected, err := s.LinkManager.Follow(ctx, link.ID, openReader())
+	followed, err := s.LinkManager.Follow(ctx, link.ID, openReader())
 	s.Require().NoError(err)
-	s.Equal("https://example.com/new", redirected.TargetURL)
+	s.Equal("https://example.com/new", followed.TargetURL)
 	// The original edit code still authorizes a subsequent mutation.
 	s.NoError(s.LinkManager.Delete(ctx, link.ID, link.EditCode, openReader()))
 }
@@ -1019,7 +1012,7 @@ func (s *ManagerSuite) TestUpdatePlainExpiryPersists() {
 		BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	})
 	s.Require().NoError(err)
-	stored, err := s.Manager.Peek(s.T().Context(), created.ID)
+	stored, err := s.Manager.Inspect(s.T().Context(), created.ID, openReader())
 	s.Require().NoError(err)
 	s.Require().NotNil(stored.ExpiresAt)
 	s.WithinDuration(future, *stored.ExpiresAt, time.Second)
@@ -1034,7 +1027,7 @@ func (s *ManagerSuite) TestUpdatePlainExpiryPersists() {
 			ClearExpiry: false, ShowContents: nil,
 		})
 	s.Require().NoError(err)
-	stored, err = s.Manager.Peek(s.T().Context(), created.ID)
+	stored, err = s.Manager.Inspect(s.T().Context(), created.ID, openReader())
 	s.Require().NoError(err)
 	s.Require().NotNil(stored.ExpiresAt)
 	s.WithinDuration(later, *stored.ExpiresAt, time.Second)
@@ -1048,7 +1041,7 @@ func (s *ManagerSuite) TestUpdatePlainExpiryPersists() {
 			BurnAfterReading: false, ShowContents: nil,
 		})
 	s.Require().NoError(err)
-	stored, err = s.Manager.Peek(s.T().Context(), created.ID)
+	stored, err = s.Manager.Inspect(s.T().Context(), created.ID, openReader())
 	s.Require().NoError(err)
 	s.Nil(stored.ExpiresAt)
 }
