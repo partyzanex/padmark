@@ -2,7 +2,6 @@ package server
 
 import (
 	"bytes"
-	"context"
 	"log/slog"
 	"net"
 	"net/http"
@@ -95,10 +94,10 @@ func TestHTTPRedirectHandler(t *testing.T) {
 // TestStartRedirectServer_BindFailureIsNonFatal verifies that a redirect-listener bind error
 // (port already in use) is logged and swallowed rather than crashing or propagating — a healthy
 // main server must not be affected by the auxiliary redirector failing to start.
-func TestStartRedirectServer_BindFailureIsNonFatal(t *testing.T) {
+func (s *ListenerSuite) TestStartRedirectServer_BindFailureIsNonFatal() {
 	// Occupy a port so the redirect listener cannot bind to it.
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
+	s.Require().NoError(err)
 
 	defer func() { _ = ln.Close() }()
 
@@ -112,9 +111,9 @@ func TestStartRedirectServer_BindFailureIsNonFatal(t *testing.T) {
 	}))
 
 	// Must not panic and must return immediately (failure handled in its own goroutine).
-	startRedirectServer(context.Background(), addr, nil, newServerStop(newStopLimits(DefaultShutdownTimeout), log), log)
+	startRedirectServer(s.T().Context(), addr, nil, newServerStop(newStopLimits(DefaultShutdownTimeout), log), log)
 
-	require.Eventually(t, func() bool {
+	s.Require().Eventually(func() bool {
 		return strings.Contains(sink.String(), "http redirect listener stopped")
 	}, time.Second, 10*time.Millisecond, "bind failure must be logged, not fatal")
 }

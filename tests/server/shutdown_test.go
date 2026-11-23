@@ -1,3 +1,5 @@
+//go:build integration
+
 package server_test
 
 import (
@@ -28,25 +30,26 @@ const (
 	clientWait      = 10 * time.Second
 )
 
-// ShutdownSuite sends SIGTERM to a server process and examines its exit.
-type ShutdownSuite struct {
+// ServerSuite starts the server binary of this repository and examines it from the outside.
+// The suite builds the binary once; each test starts its own server processes.
+type ServerSuite struct {
 	suite.Suite
 
 	binary string
 }
 
-func TestShutdownSuite(t *testing.T) {
-	suite.Run(t, new(ShutdownSuite))
+func TestServerSuite(t *testing.T) {
+	suite.Run(t, new(ServerSuite))
 }
 
-func (s *ShutdownSuite) SetupSuite() {
+func (s *ServerSuite) SetupSuite() {
 	s.binary = servertest.Build(s.T())
 }
 
 // TestSIGTERM_ClosesStalledRequestWithinTimeout reproduces the slow stop: a client sends a part
 // of a request body and waits. The read timeout of the server is 30 seconds, so only the
 // shutdown sequence can close this connection in time.
-func (s *ShutdownSuite) TestSIGTERM_ClosesStalledRequestWithinTimeout() {
+func (s *ServerSuite) TestSIGTERM_ClosesStalledRequestWithinTimeout() {
 	process := servertest.Launch(s.T(), s.binary, s.T().TempDir(),
 		"--shutdown-timeout", shutdownTimeout.String(), "--log-format", "text")
 
@@ -83,7 +86,7 @@ func (s *ShutdownSuite) TestSIGTERM_ClosesStalledRequestWithinTimeout() {
 
 // TestSIGTERM_DoesNotWaitForUnusedConnection makes sure that a connection without a request,
 // which a browser or a proxy opens in advance, does not hold the stop.
-func (s *ShutdownSuite) TestSIGTERM_DoesNotWaitForUnusedConnection() {
+func (s *ServerSuite) TestSIGTERM_DoesNotWaitForUnusedConnection() {
 	process := servertest.Launch(s.T(), s.binary, s.T().TempDir(), "--log-format", "text")
 
 	unused := s.dial(process.BaseURL)
@@ -119,7 +122,7 @@ func shutdownLog(output string) string {
 }
 
 // dial opens a client connection to the server. The test cleanup closes it.
-func (s *ShutdownSuite) dial(baseURL string) *net.TCPConn {
+func (s *ServerSuite) dial(baseURL string) *net.TCPConn {
 	conn, err := new(net.Dialer).DialContext(s.T().Context(), "tcp", strings.TrimPrefix(baseURL, "http://"))
 	s.Require().NoError(err)
 	s.T().Cleanup(func() { _ = conn.Close() })
@@ -130,13 +133,13 @@ func (s *ShutdownSuite) dial(baseURL string) *net.TCPConn {
 	return tcpConn
 }
 
-func (s *ShutdownSuite) write(conn io.Writer, data string) {
+func (s *ServerSuite) write(conn io.Writer, data string) {
 	_, err := io.WriteString(conn, data)
 	s.Require().NoError(err)
 }
 
 // get sends one request on a new connection and returns the status code.
-func (s *ShutdownSuite) get(url string) int {
+func (s *ServerSuite) get(url string) int {
 	client := &http.Client{Timeout: clientWait, Transport: nil, CheckRedirect: nil, Jar: nil}
 
 	request, err := http.NewRequestWithContext(s.T().Context(), http.MethodGet, url, http.NoBody)
@@ -154,7 +157,7 @@ func (s *ShutdownSuite) get(url string) int {
 
 // requireClosedByServer makes sure that the server side of conn is closed: the read ends before
 // its deadline, with the end of the stream or a connection reset.
-func (s *ShutdownSuite) requireClosedByServer(conn net.Conn, reader io.Reader) {
+func (s *ServerSuite) requireClosedByServer(conn net.Conn, reader io.Reader) {
 	s.Require().NoError(conn.SetReadDeadline(time.Now().Add(clientWait)))
 
 	_, err := io.Copy(io.Discard, reader)

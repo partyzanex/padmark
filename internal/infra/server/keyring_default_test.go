@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 )
 
 func TestDefaultKeyringPath(t *testing.T) {
@@ -47,8 +48,16 @@ func TestResolveKeyringPathErrors(t *testing.T) {
 	require.False(t, derived)
 }
 
-func TestLoadServeKeyringCreatesThenReuses(t *testing.T) {
-	dsn := filepath.Join(t.TempDir(), "padmark.db")
+type ServeKeyringSuite struct {
+	suite.Suite
+}
+
+func TestServeKeyringSuite(t *testing.T) {
+	suite.Run(t, new(ServeKeyringSuite))
+}
+
+func (s *ServeKeyringSuite) TestLoadServeKeyringCreatesThenReuses() {
+	dsn := filepath.Join(s.T().TempDir(), "padmark.db")
 	keyPath := filepath.Join(filepath.Dir(dsn), defaultKeyringName)
 
 	var logs bytes.Buffer
@@ -59,56 +68,56 @@ func TestLoadServeKeyringCreatesThenReuses(t *testing.T) {
 	}))
 
 	first, err := loadServeKeyring("", "sqlite", dsn, false, log)
-	require.NoError(t, err)
-	require.Equal(t, "k1", first.Active)
-	require.Contains(t, logs.String(), "level=WARN")
-	require.Contains(t, logs.String(), keyPath)
-	require.Contains(t, logs.String(), "back it up")
+	s.Require().NoError(err)
+	s.Require().Equal("k1", first.Active)
+	s.Require().Contains(logs.String(), "level=WARN")
+	s.Require().Contains(logs.String(), keyPath)
+	s.Require().Contains(logs.String(), "back it up")
 
 	info, err := os.Stat(keyPath)
-	require.NoError(t, err)
-	require.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+	s.Require().NoError(err)
+	s.Require().Equal(os.FileMode(0o600), info.Mode().Perm())
 
 	before, err := os.ReadFile(keyPath) //nolint:gosec // test-controlled temp path
-	require.NoError(t, err)
+	s.Require().NoError(err)
 
 	logs.Reset()
 
 	second, err := loadServeKeyring("", "sqlite", dsn, false, log)
-	require.NoError(t, err)
-	require.Equal(t, first.Active, second.Active)
-	require.Equal(t, first.Keys["k1"], second.Keys["k1"])
-	require.NotContains(t, logs.String(), "generated")
+	s.Require().NoError(err)
+	s.Require().Equal(first.Active, second.Active)
+	s.Require().Equal(first.Keys["k1"], second.Keys["k1"])
+	s.Require().NotContains(logs.String(), "generated")
 
 	after, err := os.ReadFile(keyPath) //nolint:gosec // test-controlled temp path
-	require.NoError(t, err)
-	require.Equal(t, before, after)
+	s.Require().NoError(err)
+	s.Require().Equal(before, after)
 }
 
-func TestLoadServeKeyringExplicitMissingFails(t *testing.T) {
-	dir := t.TempDir()
+func (s *ServeKeyringSuite) TestLoadServeKeyringExplicitMissingFails() {
+	dir := s.T().TempDir()
 	explicit := filepath.Join(dir, "missing.json")
 
 	_, err := loadServeKeyring(explicit, "sqlite", filepath.Join(dir, "padmark.db"), false, slog.New(slog.DiscardHandler))
-	require.Error(t, err)
-	require.NoFileExists(t, explicit)
-	require.NoFileExists(t, filepath.Join(dir, defaultKeyringName))
+	s.Require().Error(err)
+	s.Require().NoFileExists(explicit)
+	s.Require().NoFileExists(filepath.Join(dir, defaultKeyringName))
 }
 
-func TestLoadServeKeyringPostgresCreatesDefault(t *testing.T) {
-	t.Chdir(t.TempDir())
+func (s *ServeKeyringSuite) TestLoadServeKeyringPostgresCreatesDefault() {
+	s.T().Chdir(s.T().TempDir())
 
 	ring, err := loadServeKeyring("", "postgres", "postgres://h/db", false, slog.New(slog.DiscardHandler))
-	require.NoError(t, err)
-	require.Equal(t, "k1", ring.Active)
-	require.FileExists(t, defaultKeyringName)
+	s.Require().NoError(err)
+	s.Require().Equal("k1", ring.Active)
+	s.Require().FileExists(defaultKeyringName)
 }
 
-func TestLoadToolKeyringDoesNotCreate(t *testing.T) {
-	dir := t.TempDir()
+func (s *ServeKeyringSuite) TestLoadToolKeyringDoesNotCreate() {
+	dir := s.T().TempDir()
 	dsn := filepath.Join(dir, "padmark.db")
 
 	_, err := loadToolKeyring("", "sqlite", dsn, false, slog.New(slog.DiscardHandler))
-	require.Error(t, err)
-	require.NoFileExists(t, filepath.Join(dir, defaultKeyringName))
+	s.Require().Error(err)
+	s.Require().NoFileExists(filepath.Join(dir, defaultKeyringName))
 }

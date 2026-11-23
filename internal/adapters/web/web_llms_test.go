@@ -70,6 +70,7 @@ type LLMsRouterSuite struct {
 	manager     *MockNoteManager
 	linkManager *MockLinkManager
 	pinger      *MockPinger
+	auth        *MockAuthManager
 }
 
 func TestLLMsTxtRouter(t *testing.T) {
@@ -81,6 +82,7 @@ func (s *LLMsRouterSuite) SetupTest() {
 	s.manager = NewMockNoteManager(s.ctrl)
 	s.linkManager = NewMockLinkManager(s.ctrl)
 	s.pinger = NewMockPinger(s.ctrl)
+	s.auth = NewMockAuthManager(s.ctrl)
 }
 
 func (s *LLMsRouterSuite) TearDownTest() {
@@ -91,7 +93,7 @@ func (s *LLMsRouterSuite) newRouter() http.Handler {
 	s.T().Helper()
 
 	handlerCfg := testHandlerConfig(s.manager, s.linkManager, s.pinger)
-	handlerCfg.Accounts = NewMockAuthManager(s.ctrl)
+	handlerCfg.Accounts = s.auth
 	handlerCfg.CSRFSecret = testCSRFSecret
 	handler := newTestHandler(s.T(), handlerCfg)
 
@@ -154,7 +156,7 @@ func (s *LLMsRouterSuite) TestReferencedSpecIsAlive() {
 	}
 }
 
-// TestReferencedSpecIsAdvertised cross-checks the document against the router: llms.txt must
+// TestSpecURLAdvertised cross-checks the document against the router: llms.txt must
 // actually mention the spec URL it points to.
 func (s *LLMsRouterSuite) TestSpecURLAdvertised() {
 	router := s.newRouter()

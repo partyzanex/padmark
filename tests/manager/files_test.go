@@ -11,8 +11,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/suite"
-	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/wait"
 
 	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/infra/crypto"
@@ -23,51 +21,11 @@ import (
 	"github.com/partyzanex/padmark/internal/usecases/links"
 )
 
-// Test values for the throwaway S3 container only; s3mock accepts any credentials.
 const (
-	s3AccessKey  = "padmark-test"
-	s3SecretKey  = "padmark-test-secret"
-	s3Bucket     = "padmark-files"
 	maxFileSize  = 8 << 20
 	fileSize     = 256<<10 + 17
 	fileEditCode = "file-edit-code-1"
 )
-
-// objectStore is the S3-compatible container of one backend suite.
-type objectStore struct {
-	container testcontainers.Container
-	store     *s3store.Store
-}
-
-// startObjectStore starts adobe/s3mock with the test bucket. The suite that calls it
-// terminates the container in TearDownSuite through stop.
-func startObjectStore(testSuite *suite.Suite) *objectStore {
-	ctx := testSuite.T().Context()
-
-	container, err := testcontainers.Run(ctx, "adobe/s3mock:3.12.0",
-		testcontainers.WithEnv(map[string]string{"initialBuckets": s3Bucket}),
-		testcontainers.WithExposedPorts("9090/tcp"),
-		testcontainers.WithWaitStrategy(wait.ForListeningPort("9090/tcp").WithStartupTimeout(time.Minute)),
-	)
-	testSuite.Require().NoError(err)
-
-	hostPort, err := container.PortEndpoint(ctx, "9090/tcp", "")
-	testSuite.Require().NoError(err)
-
-	store, err := s3store.New(&s3store.Config{
-		Endpoint: "http://" + hostPort, Bucket: s3Bucket, Region: "us-east-1",
-		AccessKey: s3AccessKey, SecretKey: s3SecretKey, PathStyle: true,
-	}, discardLog())
-	testSuite.Require().NoError(err)
-
-	return &objectStore{container: container, store: store}
-}
-
-func (o *objectStore) stop(s *suite.Suite) {
-	if o != nil && o.container != nil {
-		s.NoError(testcontainers.TerminateContainer(o.container))
-	}
-}
 
 // newFileManager wires files.Manager like the server: it shares expired with the note and link
 // managers, and expired then also removes expired files.

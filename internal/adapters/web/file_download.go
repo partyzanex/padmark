@@ -13,12 +13,6 @@ import (
 
 // DownloadFile handles GET /files/{id}/download.
 func (h *FileHandler) DownloadFile(w http.ResponseWriter, r *http.Request) {
-	if h.manager == nil {
-		h.writeError(w, r, domain.ErrFeatureNotSupported)
-
-		return
-	}
-
 	h.serveFile(w, r, r.PathValue("id"))
 }
 
@@ -27,12 +21,6 @@ func (h *FileHandler) DownloadFile(w http.ResponseWriter, r *http.Request) {
 // clicked the button on a padmark page, so the request may consume the file. A GET from a
 // browser never does (explicitDownload), as a GET of a burn note shows the reveal form.
 func (h *FileHandler) DownloadFileForm(w http.ResponseWriter, r *http.Request) {
-	if h.manager == nil {
-		h.writeFileErrorPage(w, r, domain.ErrFeatureNotSupported)
-
-		return
-	}
-
 	reader := h.reader(r)
 	reader.AllowBurn = true
 

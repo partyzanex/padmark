@@ -10,19 +10,28 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 	urcli "github.com/urfave/cli/v3"
 
 	"github.com/partyzanex/padmark/internal/clientauth"
 	padmark "github.com/partyzanex/padmark/pkg/client"
 )
 
+type RequestTimeoutSuite struct {
+	suite.Suite
+}
+
+func TestRequestTimeoutSuite(t *testing.T) {
+	suite.Run(t, new(RequestTimeoutSuite))
+}
+
 // TestRequestTimeout_SlowServer_FailsFast verifies the --timeout flag is wired into the
 // command: against a server that never responds in time, the command aborts after the timeout
 // instead of hanging. The server holds the reply far longer than the timeout, so a failure
 // before the reply proves the bound is enforced rather than ignored. The bound is the server
 // delay, not a short fixed time, so a slow machine cannot make the test fail.
-func TestRequestTimeout_SlowServer_FailsFast(t *testing.T) {
-	isolateEnv(t)
+func (s *RequestTimeoutSuite) TestRequestTimeout_SlowServer_FailsFast() {
+	isolateEnv(s.T())
 
 	// serverDelay >> timeout so the client's deadline fires first. The handler returns when the
 	// client goes away, so srv.Close() does not wait for the full delay.
@@ -44,19 +53,19 @@ func TestRequestTimeout_SlowServer_FailsFast(t *testing.T) {
 	defer srv.Close()
 
 	start := time.Now()
-	err := runCLI(t.Context(), "--url", srv.URL, "--timeout", timeout, cmdGet, "some-id")
+	err := runCLI(s.T().Context(), "--url", srv.URL, "--timeout", timeout, cmdGet, "some-id")
 	elapsed := time.Since(start)
 
-	require.Error(t, err, "request must fail when the server is slower than the timeout")
-	assert.Less(t, elapsed, serverDelay/2,
+	s.Require().Error(err, "request must fail when the server is slower than the timeout")
+	s.Less(elapsed, serverDelay/2,
 		"command must fail fast on timeout, not wait for the slow server (got %s)", elapsed)
 }
 
 // TestRequestTimeout_SlowBody_FailsFast verifies that --timeout limits the full API call of an
 // ordinary command, not only the wait for the response headers: the server sends the headers at
 // once and then holds the body. Only the deadline of requestContext stops this call.
-func TestRequestTimeout_SlowBody_FailsFast(t *testing.T) {
-	isolateEnv(t)
+func (s *RequestTimeoutSuite) TestRequestTimeout_SlowBody_FailsFast() {
+	isolateEnv(s.T())
 
 	const (
 		serverDelay = 30 * time.Second
@@ -81,12 +90,12 @@ func TestRequestTimeout_SlowBody_FailsFast(t *testing.T) {
 	defer srv.Close()
 
 	start := time.Now()
-	err := runCLI(t.Context(), "--url", srv.URL, "--timeout", timeout, cmdGet, "some-id")
+	err := runCLI(s.T().Context(), "--url", srv.URL, "--timeout", timeout, cmdGet, "some-id")
 	elapsed := time.Since(start)
 
-	require.Error(t, err, "a body slower than the timeout must stop the command")
-	require.ErrorIs(t, err, context.DeadlineExceeded)
-	assert.Less(t, elapsed, serverDelay/2,
+	s.Require().Error(err, "a body slower than the timeout must stop the command")
+	s.Require().ErrorIs(err, context.DeadlineExceeded)
+	s.Less(elapsed, serverDelay/2,
 		"command must fail fast on timeout, not wait for the slow body (got %s)", elapsed)
 }
 
@@ -112,8 +121,8 @@ func TestRequestContext_Deadline(t *testing.T) {
 // TestUpload_SlowBodyOutlivesTimeout: upload sends a file body for longer than --timeout and
 // completes, because only the response header timeout limits it. The same upload in the
 // context of requestContext stops with the deadline.
-func TestUpload_SlowBodyOutlivesTimeout(t *testing.T) {
-	isolateEnv(t)
+func (s *RequestTimeoutSuite) TestUpload_SlowBodyOutlivesTimeout() {
+	isolateEnv(s.T())
 
 	const (
 		timeout = 50 * time.Millisecond
@@ -136,20 +145,20 @@ func TestUpload_SlowBodyOutlivesTimeout(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	cmd := parsedCommand(t, "--url", srv.URL, "--timeout", timeout.String())
+	cmd := parsedCommand(s.T(), "--url", srv.URL, "--timeout", timeout.String())
 
 	client, _, err := clientauth.NewClient(clientSettings(cmd))
-	require.NoError(t, err)
+	s.Require().NoError(err)
 
-	created, err := client.UploadFile(t.Context(), "a.bin", newSlowReader(chunks, 2*timeout), noUploadOptions())
-	require.NoError(t, err, "the header timeout must not stop a slow upload")
-	assert.Equal(t, "file123abc", created.ID)
+	created, err := client.UploadFile(s.T().Context(), "a.bin", newSlowReader(chunks, 2*timeout), noUploadOptions())
+	s.Require().NoError(err, "the header timeout must not stop a slow upload")
+	s.Equal("file123abc", created.ID)
 
-	ctx, cancel := requestContext(t.Context(), cmd)
+	ctx, cancel := requestContext(s.T().Context(), cmd)
 	defer cancel()
 
 	_, err = client.UploadFile(ctx, "a.bin", newSlowReader(chunks, 2*timeout), noUploadOptions())
-	require.ErrorIs(t, err, context.DeadlineExceeded, "the request deadline stops the slow upload")
+	s.Require().ErrorIs(err, context.DeadlineExceeded, "the request deadline stops the slow upload")
 }
 
 // --- helpers ---

@@ -157,9 +157,10 @@ type Storage interface {
 
 [notes.NewManager](../internal/usecases/notes/manager.go) receives a `notes.Deps` (storage, a
 renderer, an encryptor, an edit-code hasher, the shared expired-slug releaser, the logger and the
-clock `Now`) and the custom-slug setting. Its optional render cache defaults to a no-op
-implementation. `links.NewManager` takes a `links.Deps` with the same pattern, as
-`files.NewManager` does. `auth.NewManager` takes an `auth.Deps` with the clock of the four
+clock `Now`), the content limit in characters (`--max-content-length`) and the custom-slug
+setting. Its optional render cache defaults to a no-op implementation. `links.NewManager` takes a
+`links.Deps` with the same pattern. `files.NewManager` takes a `files.Deps`, the file size limit
+and the custom-slug setting. `auth.NewManager` takes an `auth.Deps` with the clock of the four
 account managers.
 
 Each manager reads the time only through its `Now` field: the composition root gives
@@ -257,9 +258,9 @@ record with the same object key. Thus an object delete error keeps the record, a
 sweep tries again. `ListExpired` pages by `(expires_at, id)`; a sweep passes failed records,
 continues from the position of the last sweep and stops after ten failures in a row. One sweep
 removes at most 10 batches of 100 files; the sweep at each upload removes at most 8 and has one
-total limit of 3 seconds. The note and link managers call `ReleaseExpiredSlug`
-(`WithExpiredFiles`), so an expired file that the sweep did not remove yet does not block a
-new note or link with its slug.
+total limit of 3 seconds. The note and link managers call `ReleaseExpiredSlug` of the shared
+`expiredslugs.Releaser`; `Releaser.WithFiles` adds the file manager when files are on. Thus an
+expired file that the sweep did not remove yet does not block a new note or link with its slug.
 
 The auth package separates sessions, onboarding, account administration and API-token
 operations. Content-key maintenance has its own manager and storage/cipher ports; it must
@@ -344,7 +345,9 @@ The HTTP adapter defines its own `NoteManager`, `LinkManager` and auth interface
 `NewHandler(*HandlerConfig)` receives those interfaces rather than concrete usecase managers,
 together with every setting of the handlers, and returns `(*Handler, error)`. It builds the
 browser handlers and the ogen API handler from the same values, and `Handler` has no setters.
-A nil `Accounts`, `Files` or `Reveal` turns that feature off. `NewRouter(handler, *RouterOptions)`
+A nil `Accounts`, `Files` or `Reveal` turns that feature off. `NewHandler` converts a nil
+`Accounts` or `Files` once into an implementation that answers `domain.ErrFeatureNotSupported`
+and a mode value, so no handler compares a manager with nil. `NewRouter(handler, *RouterOptions)`
 reads the handler without a change and returns `(http.Handler, error)`; `RouterOptions` holds only
 the middleware settings. Tests without a database pinger use `NoPinger{}`.
 
@@ -403,9 +406,11 @@ parameter is a fallback for v0.1.6 clients only (`deleteEditCode`).
 lockout. The upload has its own body limit (`--max-file-size` plus 1 MiB for the form). A download
 sends `application/octet-stream`, `Content-Disposition` with an ASCII name and
 `filename*=UTF-8''…`, `nosniff` and `Cache-Control: private, no-store`. Without a file manager,
-the API routes answer 503 and the pages show the "files are off" error. `--disable-api` keeps
-only the `GET`/`HEAD` pages `/files`, `/files/{id}/edit` and `/files/{id}/download`, and the
-download form `POST /files/{id}/download` (`isFilePage`).
+`FileHandler.RegisterRoutes` keeps the middleware of each route and puts the off answer in place
+of the handler: the API routes answer 503 in JSON and the pages show the "files are off" error.
+A file slug at `/{id}` and `/edit/{id}` then gets the answer of a slug without a record.
+`--disable-api` keeps only the `GET`/`HEAD` pages `/files`, `/files/{id}/edit` and
+`/files/{id}/download`, and the download form `POST /files/{id}/download` (`isFilePage`).
 
 `file_transfer.go` sets the limits of a transfer (`FileTransferLimits`, given in
 `HandlerConfig.FileTransfer`). `file_upload.go`, `file_update.go` and `file_download.go` hold the

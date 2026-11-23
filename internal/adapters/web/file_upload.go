@@ -53,12 +53,6 @@ var (
 // goes to object storage as it arrives, so the handler reads only the fields before the file.
 // A part after the file part fails the upload (uploadBody.finish).
 func (h *FileHandler) Upload(w http.ResponseWriter, r *http.Request) {
-	if h.manager == nil {
-		h.writeError(w, r, domain.ErrFeatureNotSupported)
-
-		return
-	}
-
 	limit := h.manager.MaxSize() + multipartOverhead
 	// A declared body above the limit cannot succeed, so the handler refuses it before it
 	// takes an upload slot or reads the body.

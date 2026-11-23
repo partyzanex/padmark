@@ -1,3 +1,5 @@
+//go:build integration
+
 package server_test
 
 import (
@@ -36,8 +38,8 @@ func postNoteStatus(t *testing.T, baseURL string, characters int) int {
 
 // TestNoteContentLimit starts the real server and checks that the note content limit comes from
 // its settings: --max-content-length, or --max-body-bytes when that flag is not set.
-func TestNoteContentLimit(t *testing.T) {
-	binary := servertest.Build(t)
+func (s *ServerSuite) TestNoteContentLimit() {
+	t, binary := s.T(), s.binary
 
 	t.Run("default follows the body limit", func(t *testing.T) {
 		baseURL, _ := servertest.Start(t, binary, t.TempDir())

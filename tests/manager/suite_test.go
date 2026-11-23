@@ -60,7 +60,7 @@ func newManager(t *testing.T, storage notes.Storage, expired *expiredslugs.Relea
 		Hasher: crypto.NewEditCodeHasher(testutil.Argon2Params(), discardLog()), ExpiredSlugs: expired,
 		Log: discardLog(),
 		Now: time.Now,
-	}, true)
+	}, domain.DefaultMaxContentLength, true)
 }
 
 func newLinkManager(t *testing.T, storage links.Storage, expired *expiredslugs.Releaser) *links.Manager {
@@ -501,7 +501,7 @@ func (s *ManagerSuite) TestDelete_Forbidden() {
 	s.ErrorIs(err, domain.ErrInvalidEditCode)
 }
 
-// ── GetRendered ──.
+// ── ReadRendered ──.
 
 func (s *ManagerSuite) TestGetRendered_Markdown() {
 	ctx := s.T().Context()
@@ -905,7 +905,7 @@ func (s *ManagerSuite) TestCrossTableSlugUniqueness_ConcurrentCreate() {
 
 // TestLink_TargetURLIsEncryptedAtRest is the concrete verification behind the acceptance
 // criteria's "DB dump of the links table contains no plaintext target URLs" — it bypasses
-// LinkManager's own decrypt path (Peek/Redirect always decrypt) and reads the raw stored column
+// LinkManager's own decrypt path (Peek/Follow always decrypt) and reads the raw stored column
 // directly via DB, using the real content envelope encryptor (not a passthrough test double, unlike
 // links.Manager's own unit tests).
 func (s *ManagerSuite) TestLink_TargetURLIsEncryptedAtRest() {

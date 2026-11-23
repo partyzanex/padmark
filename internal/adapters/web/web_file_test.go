@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"go.uber.org/mock/gomock"
@@ -28,7 +29,7 @@ func browserClick(path string) *http.Request {
 // TestSuccessPage_AnonymousWithAccounts (R-15): with accounts on, an anonymous author of a file
 // or a link gets the success page with the link and the edit code block, not the sign-in page.
 func (s *FileHandlerSuite) TestSuccessPage_AnonymousWithAccounts() {
-	router := s.newAuthRouter(NewMockAuthManager(s.ctrl))
+	router := s.newAuthRouter(s.auth)
 
 	s.Run("file", func() {
 		s.files.EXPECT().Inspect(gomock.Any(), "abc", accountAccess(false)).
@@ -136,7 +137,7 @@ func (s *FileHandlerSuite) TestEditFilePage_PrivateWithAccounts() {
 	s.expectEditFile(nil, domain.ErrForbidden)
 
 	rec := httptest.NewRecorder()
-	s.newAuthRouter(NewMockAuthManager(s.ctrl)).ServeHTTP(rec, browserGet("/edit/abc"))
+	s.newAuthRouter(s.auth).ServeHTTP(rec, browserGet("/edit/abc"))
 
 	s.Equal(http.StatusSeeOther, rec.Code)
 	s.Equal("/login?next=%2Fedit%2Fabc", rec.Header().Get("Location"))
@@ -297,4 +298,182 @@ func (s *FileHandlerSuite) TestFilePage_DownloadButton() {
 		s.Contains(body, `<a href="/files/abc/download" class="btn-primary file-download" id="downloadBtn">`)
 		s.NotContains(body, `id="downloadForm"`)
 	})
+}
+
+func (s *FileHandlerSuite) TestCreateFilePage() {
+	rec := s.serve(browserGet("/files"))
+	body := rec.Body.String()
+
+	s.Require().Equal(http.StatusOK, rec.Code)
+	s.Contains(body, `id="fileInput"`)
+	s.Contains(body, `id="dropZone"`)
+	s.Contains(body, `id="fileError"`)
+	s.Contains(body, `<progress class="upload-progress-bar" id="progressBar"`)
+	s.Contains(body, `id="cancelBtn"`)
+	s.Contains(body, `id="burnCheck"`)
+	s.Contains(body, `id="slugInput"`)
+	s.Contains(body, `id="editCodeInput"`)
+	s.Contains(body, `<span id="fileLimit">Up to 1 MiB</span>`)
+	s.Contains(body, `data-max-size="1048576"`)
+	s.Contains(body, `<a href="/files" class="nav-tab" aria-current="page">`)
+	s.Contains(body, "<span>Padmark — notes, links &amp; files</span>")
+	// The fields go before the file part; the server reads them first.
+	s.Less(strings.Index(body, "data.append('ttl'"), strings.Index(body, "data.append('file'"))
+}
+
+// TestFilePage_BrowserGetsPage: a browser on /{id} gets the page. Info reads only the metadata,
+// and no Download call is expected, so the page does not consume a burn file.
+func (s *FileHandlerSuite) TestFilePage_BrowserGetsPage() {
+	file := fileRecord("отчёт <1>.pdf", 3*1024*1024/2, 0, true)
+
+	s.expectFileKind()
+	s.files.EXPECT().Inspect(gomock.Any(), "abc", access(false)).Return(file, nil)
+
+	rec := s.serve(browserGet("/abc"))
+	body := rec.Body.String()
+
+	s.Require().Equal(http.StatusOK, rec.Code)
+	s.Equal("text/html; charset=utf-8", rec.Header().Get("Content-Type"))
+	s.Equal("private, no-store", rec.Header().Get("Cache-Control"))
+	s.Contains(body, "отчёт &lt;1&gt;.pdf")
+	s.Contains(body, "1.5 MiB")
+	s.Contains(body, `action="/files/abc/download"`)
+	s.Contains(body, `href="/edit/abc"`)
+	s.Contains(body, `id="burnWarning"`)
+	s.Contains(body, "Never expires")
+	s.Contains(body, "0 downloads")
+	// The file page has the frame of the note page, and "New" opens the upload page.
+	s.Contains(body, `class="card article-card"`)
+	s.Contains(body, `href="/files" class="btn-primary header-new" aria-label="New file"`)
+}
+
+func (s *FileHandlerSuite) TestFilePage_NoBurnWarning() {
+	file := fileRecord("a.txt", 3, 0, false)
+	expires := time.Date(2030, time.March, 4, 5, 6, 0, 0, time.UTC)
+	file.ExpiresAt = &expires
+
+	s.expectFileKind()
+	s.files.EXPECT().Inspect(gomock.Any(), "abc", access(false)).Return(file, nil)
+
+	rec := s.serve(browserGet("/abc"))
+
+	s.Require().Equal(http.StatusOK, rec.Code)
+	s.NotContains(rec.Body.String(), `id="burnWarning"`)
+	s.Contains(rec.Body.String(), "Expires Mar 4, 2030")
+	s.Contains(rec.Body.String(), `data-expires="2030-03-04T05:06:00Z"`)
+}
+
+func (s *FileHandlerSuite) TestFilePage_Errors() {
+	cases := []struct {
+		err    error
+		text   string
+		status int
+	}{
+		{domain.ErrExpired, "The file was deleted or its lifetime ended.", http.StatusGone},
+		{domain.ErrStorageUnavailable, "File storage is unavailable. Try again later.", http.StatusServiceUnavailable},
+	}
+
+	for _, test := range cases {
+		s.Run(test.err.Error(), func() {
+			s.expectFileKind()
+			s.files.EXPECT().Inspect(gomock.Any(), "abc", access(false)).Return(nil, test.err)
+
+			rec := s.serve(browserGet("/abc"))
+
+			s.Equal(test.status, rec.Code)
+			s.Contains(rec.Body.String(), test.text)
+		})
+	}
+}
+
+// expectEditFile sets the reads of GET /edit/abc for a file: the note read tells that a file has
+// the slug, then the file editor reads the file with Settings, which applies privacy and expiry
+// and never deletes an expired file.
+func (s *FileHandlerSuite) expectEditFile(file *domain.File, err error) {
+	expectOtherKindEditor(s.manager, "abc", domain.KindFile)
+	s.files.EXPECT().Settings(gomock.Any(), "abc", gomock.Any()).Return(file, err)
+}
+
+func (s *FileHandlerSuite) TestEditFilePage() {
+	s.expectEditFile(fileRecord("a.txt", 3, 0, true), nil)
+
+	rec := s.serve(browserGet("/edit/abc"))
+	body := rec.Body.String()
+
+	s.Require().Equal(http.StatusOK, rec.Code)
+	s.Contains(body, `id="fileName">a.txt<`)
+	s.Contains(body, `id="saveBtn"`)
+	s.Contains(body, `id="deleteBtn"`)
+	s.Contains(body, `id="fileError"`)
+	s.Contains(body, "Edit code <span class=\"optional\">· required</span>")
+	s.Contains(body, `placeholder="Paste your edit code"`)
+	s.Contains(body, `id="burnCheck" checked`)
+	s.Contains(body, `value="keep"`)
+	s.Contains(body, "headers['X-Edit-Code'] = code")
+}
+
+// TestEditFilePage_OldURL: the old editor URL sends the browser to /edit/{id}, as for notes.
+func (s *FileHandlerSuite) TestEditFilePage_OldURL() {
+	rec := s.serve(browserGet("/files/abc/edit"))
+
+	s.Equal(http.StatusMovedPermanently, rec.Code)
+	s.Equal("/edit/abc", rec.Header().Get("Location"))
+}
+
+func (s *FileHandlerSuite) TestEditFilePage_Errors() {
+	s.Run("not found", func() {
+		s.expectEditFile(nil, domain.ErrNotFound)
+
+		rec := s.serve(browserGet("/edit/abc"))
+
+		s.Equal(http.StatusNotFound, rec.Code)
+	})
+
+	s.Run("expired", func() {
+		// The usecase applies the expiry rule; the editor shows its error.
+		s.expectEditFile(nil, domain.ErrExpired)
+
+		rec := s.serve(browserGet("/edit/abc"))
+
+		s.Equal(http.StatusGone, rec.Code)
+		s.Contains(rec.Body.String(), "The file was deleted or its lifetime ended.")
+	})
+
+	s.Run("storage unavailable", func() {
+		s.expectEditFile(nil, domain.ErrStorageUnavailable)
+
+		rec := s.serve(browserGet("/edit/abc"))
+
+		s.Equal(http.StatusServiceUnavailable, rec.Code)
+		s.Contains(rec.Body.String(), "File storage is unavailable. Try again later.")
+	})
+}
+
+func (s *FileHandlerSuite) TestSuccessPage_File() {
+	s.files.EXPECT().Inspect(gomock.Any(), "abc", access(false)).Return(fileRecord("a.txt", 2048, 0, true), nil)
+
+	rec := s.serve(browserGet("/success?kind=file&id=abc"))
+	body := rec.Body.String()
+
+	s.Require().Equal(http.StatusOK, rec.Code)
+	s.Contains(body, "Your file is live")
+	s.Contains(body, "<strong>a.txt</strong><span>2 KiB</span>")
+	// As for a note, the page opens the record; Edit is on the file page.
+	s.Contains(body, `id="openRecordLink">`)
+	s.Contains(body, `href="http://example.com/abc" class="btn-ghost" id="openRecordLink"`)
+	s.NotContains(body, `/edit/abc`)
+	s.Contains(body, "Deleted after the first download")
+	s.Contains(body, "It is shown only once")
+	s.Contains(body, "'padmark_file_edit_'")
+}
+
+// TestSuccessPage_FileLookupFails: without the record the page still shows the link (fail-soft).
+func (s *FileHandlerSuite) TestSuccessPage_FileLookupFails() {
+	s.files.EXPECT().Inspect(gomock.Any(), "abc", access(false)).Return(nil, domain.ErrStorageUnavailable)
+
+	rec := s.serve(browserGet("/success?kind=file&id=abc"))
+
+	s.Require().Equal(http.StatusOK, rec.Code)
+	s.Contains(rec.Body.String(), "http://example.com/abc")
+	s.NotContains(rec.Body.String(), `id="successFile"`)
 }

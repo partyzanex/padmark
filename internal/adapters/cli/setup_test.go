@@ -12,6 +12,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 
 	"github.com/partyzanex/padmark/internal/clientauth"
 )
@@ -37,26 +38,34 @@ func newSetupSrv(hits *atomic.Int32, sawAuth *atomic.Bool) *httptest.Server {
 	}))
 }
 
+type SetupCommandSuite struct {
+	suite.Suite
+}
+
+func TestSetupCommandSuite(t *testing.T) {
+	suite.Run(t, new(SetupCommandSuite))
+}
+
 // TestSetup_PasswordPipedToStdin verifies the no-dependency password path: without --password,
 // the setup password comes from the first line of piped stdin — visible-echo TTY prompts are
 // deliberately rejected as a footgun instead of allowed.
-func TestSetup_PasswordPipedToStdin(t *testing.T) {
-	isolateEnv(t)
+func (s *SetupCommandSuite) TestSetup_PasswordPipedToStdin() {
+	isolateEnv(s.T())
 
 	// Replace stdin with a pipe carrying the password; no --password flag.
 	r, w, err := os.Pipe()
-	require.NoError(t, err)
+	s.Require().NoError(err)
 
 	_, writeErr := w.WriteString("P1pedP@ss12!\n")
 
-	require.NoError(t, writeErr)
+	s.Require().NoError(writeErr)
 
-	require.NoError(t, w.Close())
+	s.Require().NoError(w.Close())
 
 	saved := os.Stdin
 	os.Stdin = r
 
-	t.Cleanup(func() { os.Stdin = saved })
+	s.T().Cleanup(func() { os.Stdin = saved })
 
 	// The server answers 400 for whatever we send — the test only pins how the password was
 	// resolved, so the command must fail on the HTTP response, not on password resolution.
@@ -67,78 +76,77 @@ func TestSetup_PasswordPipedToStdin(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	err = runCLI(t.Context(), "--url", srv.URL, "setup", "--username", "admin")
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "The first admin already exists",
+	err = runCLI(s.T().Context(), "--url", srv.URL, "setup", "--username", "admin")
+	s.Require().Error(err)
+	s.Require().Contains(err.Error(), "The first admin already exists",
 		"piped password must be accepted and reach the server")
 }
 
 // TestSetup_TTYWithoutPassword_FailsFast — an interactive stdin with no --password is an
 // immediate error, not a visible-echo prompt.
-func TestSetup_TTYWithoutPassword_FailsFast(t *testing.T) {
-	isolateEnv(t)
+func (s *SetupCommandSuite) TestSetup_TTYWithoutPassword_FailsFast() {
+	isolateEnv(s.T())
 
 	// os.Stdin in `go test` is not a char device, but the error path is the same: nothing piped
 	// and no flag → the command must refuse rather than block or prompt.
 	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
-		t.Error("server must not be reached without a password")
+		s.T().Error("server must not be reached without a password")
 	}))
 	defer srv.Close()
 
-	err := runCLI(t.Context(), "--url", srv.URL, "setup", "--username", "admin")
-	require.Error(t, err)
-	require.ErrorIs(t, err, errSetupNoPassword)
+	err := runCLI(s.T().Context(), "--url", srv.URL, "setup", "--username", "admin")
+	s.Require().Error(err)
+	s.Require().ErrorIs(err, errSetupNoPassword)
 }
 
 // TestSetup_UntrustedEnvelope_BlocksBeforeAnyRequest is the R-08 regression for setup: a pmk_
 // envelope pinning an untrusted server, from any token source and with no --url, must fail
 // before the insecure warning and before a single byte reaches the pinned server — otherwise
 // the bootstrap password and the returned TOTP secret go wherever a third-party token points.
-func TestSetup_UntrustedEnvelope_BlocksBeforeAnyRequest(t *testing.T) {
+func (s *SetupCommandSuite) TestSetup_UntrustedEnvelope_BlocksBeforeAnyRequest() {
 	cases := []struct {
-		name    string
-		provide func(t *testing.T, configDir, token string) []string
+		name string
+		// provide runs in the subtest: s.T() and s.Require() belong to it.
+		provide func(configDir, token string) []string
 	}{
-		{"token flag", func(_ *testing.T, _, token string) []string {
+		{"token flag", func(_, token string) []string {
 			return []string{"--token", token}
 		}},
-		{"PADMARK_TOKEN env", func(t *testing.T, _, token string) []string {
-			t.Helper()
-			t.Setenv(EnvToken, token)
+		{"PADMARK_TOKEN env", func(_, token string) []string {
+			s.T().Setenv(EnvToken, token)
 
 			return nil
 		}},
-		{"token file", func(t *testing.T, configDir, token string) []string {
-			t.Helper()
-			require.NoError(t, os.MkdirAll(filepath.Join(configDir, "padmark"), 0o700))
-			require.NoError(t, os.WriteFile(filepath.Join(configDir, "padmark", "token"), []byte(token), 0o600))
+		{"token file", func(configDir, token string) []string {
+			s.Require().NoError(os.MkdirAll(filepath.Join(configDir, "padmark"), 0o700))
+			s.Require().NoError(os.WriteFile(filepath.Join(configDir, "padmark", "token"), []byte(token), 0o600))
 
 			return nil
 		}},
 	}
 
 	for _, testCase := range cases {
-		t.Run(testCase.name, func(t *testing.T) {
-			configDir := isolateEnv(t)
+		s.Run(testCase.name, func() {
+			configDir := isolateEnv(s.T())
 
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				t.Error("setup must not reach a server pinned by an untrusted envelope")
+				s.T().Error("setup must not reach a server pinned by an untrusted envelope")
 				w.WriteHeader(http.StatusCreated)
 			}))
 			defer srv.Close()
 
-			args := testCase.provide(t, configDir, envelopeToken(t, srv.URL))
+			args := testCase.provide(configDir, envelopeToken(s.T(), srv.URL))
 
 			var errBuf bytes.Buffer
 
 			app := NewApp()
 			app.ErrWriter = &errBuf
 
-			err := app.Run(t.Context(), append(append([]string{testBin}, args...), setupArgs()...))
+			err := app.Run(s.T().Context(), append(append([]string{testBin}, args...), setupArgs()...))
 
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), "not trusted yet")
-			assert.NotContains(t, errBuf.String(), "cleartext", "the gate must run before the insecure warning")
+			s.Require().Error(err)
+			s.Contains(err.Error(), "not trusted yet")
+			s.NotContains(errBuf.String(), "cleartext", "the gate must run before the insecure warning")
 		})
 	}
 }
@@ -186,7 +194,7 @@ func TestSetup_TrustedEnvelopeProceeds(t *testing.T) {
 
 // TestSetup_SendsBootstrapTokenFromEnv: bootstrapping the first admin forwards the server's
 // bootstrap token from the environment (never a flag); an invite enrollment does not send it.
-func TestSetup_SendsBootstrapTokenFromEnv(t *testing.T) {
+func (s *SetupCommandSuite) TestSetup_SendsBootstrapTokenFromEnv() {
 	const bootstrap = "operator-bootstrap-token-0123456789abcdef"
 
 	for _, testCase := range []struct {
@@ -197,16 +205,16 @@ func TestSetup_SendsBootstrapTokenFromEnv(t *testing.T) {
 		{"first admin", nil, bootstrap},
 		{"invite enrollment", []string{"--invite", "inv-123"}, ""},
 	} {
-		t.Run(testCase.name, func(t *testing.T) {
-			isolateEnv(t)
-			t.Setenv(EnvBootstrapToken, bootstrap)
+		s.Run(testCase.name, func() {
+			isolateEnv(s.T())
+			s.T().Setenv(EnvBootstrapToken, bootstrap)
 
 			var got struct {
 				BootstrapToken *string `json:"bootstrap_token"`
 			}
 
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				assert.NoError(t, json.NewDecoder(r.Body).Decode(&got))
+				s.NoError(json.NewDecoder(r.Body).Decode(&got))
 
 				w.WriteHeader(http.StatusCreated)
 				_, _ = w.Write([]byte(`{"otp_auth_uri":"otpauth://totp/padmark:root"}`))
@@ -214,13 +222,13 @@ func TestSetup_SendsBootstrapTokenFromEnv(t *testing.T) {
 			defer srv.Close()
 
 			args := append(append([]string{"--url", srv.URL}, setupArgs()...), testCase.extra...)
-			require.NoError(t, runCLI(t.Context(), args...))
+			s.Require().NoError(runCLI(s.T().Context(), args...))
 
 			if testCase.want == "" {
-				assert.Nil(t, got.BootstrapToken, "an invite enrollment must not send the bootstrap token")
+				s.Nil(got.BootstrapToken, "an invite enrollment must not send the bootstrap token")
 			} else {
-				require.NotNil(t, got.BootstrapToken)
-				assert.Equal(t, testCase.want, *got.BootstrapToken)
+				s.Require().NotNil(got.BootstrapToken)
+				s.Equal(testCase.want, *got.BootstrapToken)
 			}
 		})
 	}
@@ -229,11 +237,11 @@ func TestSetup_SendsBootstrapTokenFromEnv(t *testing.T) {
 // TestSetup_CrossOriginRedirectKeepsSecrets proves that a 307 or 308 answer of /setup does not
 // carry the password and the bootstrap token to a different origin. net/http sends the request
 // body again on these redirects, so only the redirect guard of the shared client stops it.
-func TestSetup_CrossOriginRedirectKeepsSecrets(t *testing.T) {
+func (s *SetupCommandSuite) TestSetup_CrossOriginRedirectKeepsSecrets() {
 	for _, status := range []int{http.StatusTemporaryRedirect, http.StatusPermanentRedirect} {
-		t.Run(http.StatusText(status), func(t *testing.T) {
-			isolateEnv(t)
-			t.Setenv(EnvBootstrapToken, "bootstrap-secret")
+		s.Run(http.StatusText(status), func() {
+			isolateEnv(s.T())
+			s.T().Setenv(EnvBootstrapToken, "bootstrap-secret")
 
 			var otherHits atomic.Int32
 
@@ -249,9 +257,9 @@ func TestSetup_CrossOriginRedirectKeepsSecrets(t *testing.T) {
 			}))
 			defer srv.Close()
 
-			err := runCLI(t.Context(), append([]string{"--url", srv.URL}, setupArgs()...)...)
-			require.ErrorIs(t, err, clientauth.ErrCrossOriginRedirect, "a refused redirect must fail the command")
-			assert.Zero(t, otherHits.Load(), "the other origin must not receive the setup request")
+			err := runCLI(s.T().Context(), append([]string{"--url", srv.URL}, setupArgs()...)...)
+			s.Require().ErrorIs(err, clientauth.ErrCrossOriginRedirect, "a refused redirect must fail the command")
+			s.Zero(otherHits.Load(), "the other origin must not receive the setup request")
 		})
 	}
 }

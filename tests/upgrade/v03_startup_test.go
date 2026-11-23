@@ -19,8 +19,7 @@ import (
 
 	"github.com/pquerna/otp/totp"
 	"github.com/stretchr/testify/require"
-	"github.com/testcontainers/testcontainers-go"
-	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
+	"github.com/stretchr/testify/suite"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
 	"github.com/uptrace/bun/driver/pgdriver"
@@ -29,6 +28,7 @@ import (
 	sqliterepo "github.com/partyzanex/padmark/internal/infra/storage/sqlite"
 	"github.com/partyzanex/padmark/tests/httptestutil"
 	"github.com/partyzanex/padmark/tests/internal/servertest"
+	"github.com/partyzanex/padmark/tests/internal/testenv"
 )
 
 type v03Fixture struct {
@@ -52,8 +52,25 @@ type v03Note struct {
 	Content  string
 }
 
-func TestSQLiteAutomaticUpgradeFromV03(t *testing.T) {
-	binary := servertest.Build(t)
+// V03UpgradeSuite starts the current server binary on the v0.3.2 and v0.3.3 dumps of each
+// backend. The suite builds the binary once.
+type V03UpgradeSuite struct {
+	suite.Suite
+
+	binary string
+}
+
+func TestV03Upgrade(t *testing.T) {
+	suite.Run(t, new(V03UpgradeSuite))
+}
+
+func (s *V03UpgradeSuite) SetupSuite() {
+	s.binary = servertest.Build(s.T())
+}
+
+func (s *V03UpgradeSuite) TestSQLiteAutomaticUpgrade() {
+	t := s.T()
+
 	for _, version := range []string{"v0.3.2", "v0.3.3"} {
 		t.Run(version, func(t *testing.T) {
 			directory := t.TempDir()
@@ -62,29 +79,18 @@ func TestSQLiteAutomaticUpgradeFromV03(t *testing.T) {
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, db.Close()) })
 			fixture := loadV03(t, db, version, "sqlite")
-			runV03Startup(t, binary, directory, "sqlite", dsn, db, fixture)
+			runV03Startup(t, s.binary, directory, "sqlite", dsn, db, fixture)
 		})
 	}
 }
 
-func TestPostgresAutomaticUpgradeFromV03(t *testing.T) {
-	binary := servertest.Build(t)
-	container, err := tcpostgres.Run(t.Context(), "postgres:17-alpine",
-		tcpostgres.WithDatabase("padmark"), tcpostgres.WithUsername("test"), tcpostgres.WithPassword("test"),
-		tcpostgres.BasicWaitStrategies())
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, testcontainers.TerminateContainer(container)) })
+// TestPostgresAutomaticUpgrade uses PostgreSQL 17, the version of the v0.3.x installations.
+func (s *V03UpgradeSuite) TestPostgresAutomaticUpgrade() {
+	t := s.T()
 
 	for _, version := range []string{"v0.3.2", "v0.3.3"} {
 		t.Run(version, func(t *testing.T) {
-			database := strings.ReplaceAll(version, ".", "_")
-			code, _, execErr := container.Exec(t.Context(), []string{"createdb", "-U", "test", database})
-			require.NoError(t, execErr)
-			require.Zero(t, code)
-			dsn, connErr := container.ConnectionString(t.Context(), "sslmode=disable")
-			require.NoError(t, connErr)
-
-			dsn = strings.Replace(dsn, "/padmark?", "/"+database+"?", 1)
+			dsn := testenv.PostgresWithImage(t, "postgres:17-alpine").DSN
 			loader := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn))), pgdialect.New())
 			fixture := loadV03(t, loader, version, "postgres")
 			require.NoError(t, loader.Close(), "pg_dump changes its session search_path")
@@ -92,7 +98,7 @@ func TestPostgresAutomaticUpgradeFromV03(t *testing.T) {
 			db := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn))), pgdialect.New())
 
 			t.Cleanup(func() { require.NoError(t, db.Close()) })
-			runV03Startup(t, binary, t.TempDir(), "postgres", dsn, db, fixture)
+			runV03Startup(t, s.binary, t.TempDir(), "postgres", dsn, db, fixture)
 		})
 	}
 }

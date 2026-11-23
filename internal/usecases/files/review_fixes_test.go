@@ -95,7 +95,7 @@ func (s *ManagerSuite) TestDownload_BurnCloseWithoutSendReleasesClaim() {
 // is the only one: the object goes also when the record delete fails.
 func (s *ManagerSuite) TestDownload_BurnFinishFailureStillDeletesObject() {
 	ctx := s.T().Context()
-	metrics := s.strictMetrics()
+	metrics := s.useStrictMetrics()
 
 	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any(), testNow()).Return(storedFile(true), nil)
 	s.expectObject("hello")
@@ -336,7 +336,7 @@ func expiredBatch(count int, prefix string) []*domain.File {
 }
 
 func (s *ManagerSuite) TestSweepExpired_ObjectFirstThenRecord() {
-	metrics := s.strictMetrics()
+	metrics := s.useStrictMetrics()
 	batch := expiredBatch(2, "obj")
 
 	s.storage.EXPECT().ListExpired(gomock.Any(), gomock.Any(), gomock.Any(), sweepBatchSize).Return(batch, nil)
@@ -542,7 +542,7 @@ func (s *ManagerSuite) TestCreate_RejectsBadCustomSlugBeforeUpload() {
 // TestCreate_PutFailureWithBrokenBodyIsStorageFailure covers R-39: Put fails for its own cause,
 // and the body read also fails after that. The upload is a storage failure.
 func (s *ManagerSuite) TestCreate_PutFailureWithBrokenBodyIsStorageFailure() {
-	metrics := s.strictMetrics()
+	metrics := s.useStrictMetrics()
 
 	s.objects.EXPECT().Put(gomock.Any(), gomock.Any(), gomock.Any()).Return(errors.New("connection refused"))
 	s.objects.EXPECT().Delete(gomock.Any(), gomock.Any()).Return(nil)
@@ -555,7 +555,7 @@ func (s *ManagerSuite) TestCreate_PutFailureWithBrokenBodyIsStorageFailure() {
 // TestMetrics_FailedPutCleanupIsNotDeleteError covers R-34: the cleanup after a failed Put
 // fails too during an object storage failure, but it is not a "delete" storage error.
 func (s *ManagerSuite) TestMetrics_FailedPutCleanupIsNotDeleteError() {
-	metrics := s.strictMetrics()
+	metrics := s.useStrictMetrics()
 
 	s.objects.EXPECT().Put(gomock.Any(), gomock.Any(), gomock.Any()).Return(errors.New("connection refused"))
 	s.objects.EXPECT().Delete(gomock.Any(), gomock.Any()).Return(errors.New("connection refused"))

@@ -1,3 +1,5 @@
+//go:build integration
+
 package cli_test
 
 import (
@@ -13,8 +15,8 @@ import (
 	adaptercli "github.com/partyzanex/padmark/internal/adapters/cli"
 )
 
-func TestCLITimestampsDoNotDependOnSystemTimezone(t *testing.T) {
-	isolateCLI(t)
+func (s *CLISuite) TestTimestampsDoNotDependOnSystemTimezone() {
+	t := s.T()
 	server := timestampServer(t)
 	t.Setenv(adaptercli.EnvURL, server.URL)
 	t.Setenv(adaptercli.EnvToken, "timestamp-test-token")

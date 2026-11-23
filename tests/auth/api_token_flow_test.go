@@ -3,107 +3,64 @@
 package integration
 
 import (
-	"context"
-	"log/slog"
-	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 
 	clicmd "github.com/partyzanex/padmark/internal/adapters/cli"
-	"github.com/partyzanex/padmark/internal/adapters/web"
 	"github.com/partyzanex/padmark/internal/domain"
-	"github.com/partyzanex/padmark/internal/infra/crypto"
-	"github.com/partyzanex/padmark/internal/infra/expiredslugs"
-	"github.com/partyzanex/padmark/internal/infra/render"
-	sqliterepo "github.com/partyzanex/padmark/internal/infra/storage/sqlite"
-	"github.com/partyzanex/padmark/internal/testutil"
 	"github.com/partyzanex/padmark/internal/usecases/auth"
-	"github.com/partyzanex/padmark/internal/usecases/links"
-	"github.com/partyzanex/padmark/internal/usecases/notes"
+	"github.com/partyzanex/padmark/tests/internal/testenv"
 )
 
 const apiFlowPassword = "FlowP@ss123!"
 
-// TestAPITokenFlow_AdminIssuesKey_CLICreatesNote is the end-to-end admin→CLI→note flow:
+// APITokenFlowSuite is the end-to-end admin→CLI→note flow:
 // an admin issues an API key, and the CLI — authenticating with nothing but that Bearer key —
 // creates a note through the real HTTP stack (auth middleware → ResolveAPIToken → ogen handler →
 // storage). It also guards the composition-root wiring: if the api-token store is not injected
-// into auth.Manager, CreateAPIToken returns ErrFeatureNotSupported and this test fails.
-func TestAPITokenFlow_AdminIssuesKey_CLICreatesNote(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+// into auth.Manager, CreateAPIToken returns ErrFeatureNotSupported and the suite fails.
+type APITokenFlowSuite struct {
+	suite.Suite
 
-	ctx := context.Background()
+	stack *testenv.Stack
+}
 
-	// ── storage: fresh shared-cache in-memory DB, pragmas (incl. FK enforcement) via Open ──.
-	db, err := sqliterepo.Open("file:apitokenflow?mode=memory&cache=shared", slog.New(slog.DiscardHandler))
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, db.Close()) })
+func TestAPITokenFlowSuite(t *testing.T) {
+	suite.Run(t, new(APITokenFlowSuite))
+}
 
-	_, err = sqliterepo.Migrate(ctx, db)
-	require.NoError(t, err)
+// SetupTest isolates the CLI configuration and builds the stack: a fresh shared-cache in-memory
+// DB (pragmas, incl. FK enforcement, via Open) and the stack of testenv, which mirrors
+// internal/infra/server assembly.
+func (s *APITokenFlowSuite) SetupTest() {
+	s.T().Setenv("XDG_CONFIG_HOME", s.T().TempDir())
+	s.stack = testenv.NewStack(s.T(), "apitokenflow", testenv.WithAccounts())
+}
 
-	// ── wiring (mirrors internal/infra/server assembly) ──.
-	log := slog.New(slog.DiscardHandler)
-	users := sqliterepo.NewUserRepository(db)
+func (s *APITokenFlowSuite) TestAdminIssuesKey_CLICreatesNote() {
+	envelope := s.issueEnvelope()
+	s.checkCLICreatesNote(envelope)
+	s.checkInvalidKeyRefused()
+	s.checkPrivateRead(envelope)
+}
 
-	authMgr, err := auth.NewManager(
-		auth.Stores{
-			Users:     users,
-			Invites:   sqliterepo.NewInviteRepository(db),
-			Sessions:  sqliterepo.NewSessionRepository(db),
-			APITokens: sqliterepo.NewAPITokenRepository(db),
-		},
-		&auth.Deps{
-			PasswordHasher: crypto.NewPasswordHasher(testArgon2Params, slog.New(slog.DiscardHandler)),
-			Sealer:         crypto.NewSealer(testArgon2Params),
-			TOTP:           crypto.NewTOTP(),
-			Log:            log,
-			Now:            time.Now,
-		},
-		"padmark-test", time.Hour,
-	)
-	require.NoError(t, err)
-
-	noteRepo, linkRepo := sqliterepo.NewNoteRepository(db), sqliterepo.NewLinkRepository(db, log)
-	expired := expiredslugs.New(noteRepo, linkRepo)
-
-	notesMgr := notes.NewManager(&notes.Deps{
-		Storage: noteRepo, Renderer: render.NewRenderer(), Encryptor: testutil.ContentEncryptor(t, "note"),
-		Hasher: crypto.NewEditCodeHasher(testutil.Argon2Params(), log), ExpiredSlugs: expired, Log: log,
-		Now: time.Now,
-	}, false)
-	linksMgr := links.NewManager(&links.Deps{
-		Storage: linkRepo, Encryptor: testutil.ContentEncryptor(t, "link"),
-		Hasher: crypto.NewEditCodeHasher(testutil.Argon2Params(), log), ExpiredSlugs: expired, Log: log,
-		Now: time.Now,
-	}, false)
-
-	handlerCfg := testHandlerConfig(notesMgr, linksMgr)
-	handlerCfg.Log = log
-	handlerCfg.Accounts = authMgr
-	handlerCfg.CSRFSecret = []byte("padmark-test-csrf-secret-32bytes")
-	handler := newTestHandler(t, handlerCfg)
-	router, err := web.NewRouter(handler, &web.RouterOptions{
-		MaxBodyBytes: 256 * 1024,
-
-		AllowedHosts: nil, RateLimit: 0, RateBurst: 0, DisableAPI: false,
-	})
-	require.NoError(t, err)
-
-	srv := httptest.NewServer(router)
-	t.Cleanup(srv.Close)
+// issueEnvelope makes the first admin issue an API key and returns the envelope token of it.
+func (s *APITokenFlowSuite) issueEnvelope() string {
+	t := s.T()
+	ctx := t.Context()
 
 	// ── admin issues an API key ──.
-	_, err = authMgr.AcceptFirstAdmin(ctx, "admin", apiFlowPassword)
+	_, err := s.stack.Auth.AcceptFirstAdmin(ctx, "admin", apiFlowPassword)
 	require.NoError(t, err)
 
-	admin, err := users.GetByUsername(ctx, "admin")
+	admin, err := s.stack.Users.GetByUsername(ctx, "admin")
 	require.NoError(t, err)
 	require.True(t, admin.IsAdmin)
 
-	apiKey, err := authMgr.CreateAPIToken(ctx, admin.ID, auth.Issuer{
+	apiKey, err := s.stack.Auth.CreateAPIToken(ctx, admin.ID, auth.Issuer{
 		APITokenHash: "", StepUp: auth.StepUp{Password: "", TOTPCode: ""},
 	}, 0)
 	require.NoError(t, err, "admin must be able to issue an API key — the store must be wired into auth.Manager")
@@ -111,10 +68,18 @@ func TestAPITokenFlow_AdminIssuesKey_CLICreatesNote(t *testing.T) {
 
 	// The admin panel hands the user an envelope token: the raw key packed together with the
 	// server URL. Exercising that exact string proves the whole feature end-to-end.
-	envelope, err := domain.EncodeAPITokenEnvelope(srv.URL, apiKey)
+	envelope, err := domain.EncodeAPITokenEnvelope(s.stack.Server.URL, apiKey)
 	require.NoError(t, err)
 
 	require.NoError(t, clicmd.NewApp().Run(ctx, []string{"padmark-cli", "--token", envelope, "trust"}))
+
+	return envelope
+}
+
+// checkCLICreatesNote makes the CLI create a note with only the envelope token.
+func (s *APITokenFlowSuite) checkCLICreatesNote(envelope string) {
+	t := s.T()
+	ctx := t.Context()
 
 	// ── CLI creates a note with only the envelope token — no --url, the URL comes from the token ──.
 	runErr := clicmd.NewApp().Run(ctx, []string{
@@ -123,16 +88,22 @@ func TestAPITokenFlow_AdminIssuesKey_CLICreatesNote(t *testing.T) {
 	})
 	require.NoError(t, runErr, "CLI must create a note using the URL and key packed into the envelope token")
 
-	count, err := db.NewSelect().TableExpr("notes").Count(ctx)
+	count, err := s.stack.DB.NewSelect().TableExpr("notes").Count(ctx)
 	require.NoError(t, err)
 	require.Equal(t, int64(1), count, "exactly one note created through the API-token-authenticated path")
+}
+
+// checkInvalidKeyRefused checks that an invalid API key cannot change a privacy-gated note.
+func (s *APITokenFlowSuite) checkInvalidKeyRefused() {
+	t := s.T()
+	ctx := t.Context()
 
 	// ── negative: a bogus key is rejected when the operation requires a credential ──
 	// POST /notes is anonymous-allowed by design (an invalid key does not block creating a
 	// public note), so the negative case targets a mutation on a privacy=authenticated note —
 	// the mutation privacy gate answers 401 before the note is touched.
 	gatedPrv := domain.PrivacyAuthenticated
-	gated, err := notesMgr.Create(ctx, &domain.Note{
+	gated, err := s.stack.Notes.Create(ctx, &domain.Note{
 		Title:   "gated",
 		Content: "requires login",
 		Privacy: &gatedPrv,
@@ -144,20 +115,27 @@ func TestAPITokenFlow_AdminIssuesKey_CLICreatesNote(t *testing.T) {
 	require.NoError(t, err)
 
 	badErr := clicmd.NewApp().Run(ctx, []string{
-		"padmark-cli", "--url", srv.URL, "--token", "not-a-real-key",
+		"padmark-cli", "--url", s.stack.Server.URL, "--token", "not-a-real-key",
 		"delete", gated.ID,
 	})
 	require.Error(t, badErr, "CLI must fail when the API key is invalid")
 
-	count, err = db.NewSelect().TableExpr("notes").Count(ctx)
+	count, err := s.stack.DB.NewSelect().TableExpr("notes").Count(ctx)
 	require.NoError(t, err)
 	require.Equal(t, int64(2), count, "an invalid API key must not mutate the privacy-gated note")
+}
+
+// checkPrivateRead checks the reads of the CLI with the envelope token: a private note and a
+// missing note.
+func (s *APITokenFlowSuite) checkPrivateRead(envelope string) {
+	t := s.T()
+	ctx := t.Context()
 
 	// ── regression: a PRIVATE (authenticated-level) note must be readable via the CLI's API
 	// token ── GET /notes/{id} is a "public" route (auth not required), so the auth middleware
 	// must still resolve the API-token Bearer key there — otherwise a private-note read returns 401.
 	priv := domain.PrivacyAuthenticated
-	created, err := notesMgr.Create(ctx, &domain.Note{
+	created, err := s.stack.Notes.Create(ctx, &domain.Note{
 		Title:   "secret",
 		Content: "private body",
 		Privacy: &priv,

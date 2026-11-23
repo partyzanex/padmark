@@ -3,7 +3,6 @@
 package postgres
 
 import (
-	"database/sql"
 	"log/slog"
 	"sync"
 	"testing"
@@ -11,11 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/suite"
-	"github.com/testcontainers/testcontainers-go"
-	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect/pgdialect"
-	"github.com/uptrace/bun/driver/pgdriver"
 
 	"github.com/partyzanex/padmark/internal/domain"
 )
@@ -31,33 +26,12 @@ const parityConcurrency = 16
 type ParitySuite struct {
 	suite.Suite
 
-	container *tcpostgres.PostgresContainer
-	db        *bun.DB
-	discard   *slog.Logger
+	db      *bun.DB
+	discard *slog.Logger
 }
 
 func (s *ParitySuite) SetupSuite() {
-	ctx := s.T().Context()
-
-	container, err := tcpostgres.Run(ctx, "postgres:18-alpine",
-		tcpostgres.WithDatabase("padmark_parity_test"),
-		tcpostgres.WithUsername("test"),
-		tcpostgres.WithPassword("test"),
-		tcpostgres.BasicWaitStrategies(),
-	)
-	s.Require().NoError(err)
-
-	s.container = container
-
-	dsn, err := container.ConnectionString(ctx, "sslmode=disable")
-	s.Require().NoError(err)
-
-	sqldb := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
-	s.db = bun.NewDB(sqldb, pgdialect.New())
-	s.Require().NoError(s.db.PingContext(ctx))
-
-	_, err = Migrate(ctx, s.db)
-	s.Require().NoError(err)
+	s.db = newTestDB(s.T())
 
 	s.discard = slog.New(slog.DiscardHandler)
 }
@@ -65,10 +39,6 @@ func (s *ParitySuite) SetupSuite() {
 func (s *ParitySuite) TearDownSuite() {
 	if s.db != nil {
 		s.NoError(s.db.Close())
-	}
-
-	if s.container != nil {
-		s.NoError(testcontainers.TerminateContainer(s.container))
 	}
 }
 

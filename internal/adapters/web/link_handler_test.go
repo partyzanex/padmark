@@ -445,8 +445,8 @@ func newLinkClickRequest(path string) *http.Request {
 }
 
 // TestRedirectLink_ImplicitAccess_BurnLinkRefused: a preview fetch, scanner, HEAD probe or
-// embedded <img> goes through RedirectWithoutBurn; for a burn link that is a 409 and the link
-// stays intact — no target leaks.
+// embedded <img> calls Follow without burn intent; for a burn link Follow returns
+// domain.ErrBurnIntentRequired, the answer is 409 and the link stays intact — no target leaks.
 func (s *HandlerSuite) TestRedirectLink_ImplicitAccess_BurnLinkRefused() {
 	cases := []struct {
 		name    string

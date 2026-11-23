@@ -314,7 +314,7 @@ func (s *ToolsSuite) TestCreateLinksBulk_PassesItemsThrough() {
 // TestToolRegistration asserts the whole surface is reachable by name through tools/list.
 func TestToolRegistration(t *testing.T) {
 	suite.Run(t, &toolRegistrationSuite{
-		Assertions: nil, ctrl: nil,
+		Assertions: nil, ctrl: nil, client: nil,
 	})
 }
 
@@ -322,10 +322,13 @@ type toolRegistrationSuite struct {
 	suite.Suite
 
 	ctrl *gomock.Controller
+	// client expects no call: the tests only list the tools.
+	client *MockPadmarkClient
 }
 
 func (s *toolRegistrationSuite) SetupTest() {
 	s.ctrl = gomock.NewController(s.T())
+	s.client = NewMockPadmarkClient(s.ctrl)
 }
 
 func (s *toolRegistrationSuite) TearDownTest() {
@@ -335,7 +338,7 @@ func (s *toolRegistrationSuite) TearDownTest() {
 func (s *toolRegistrationSuite) TestAllToolsRegistered() {
 	ctx := s.T().Context()
 
-	mgr := NewServer(NewMockPadmarkClient(s.ctrl), slog.New(slog.DiscardHandler))
+	mgr := NewServer(s.client, slog.New(slog.DiscardHandler))
 
 	sess, err := connectTestClient(ctx, mgr)
 	s.Require().NoError(err)
@@ -399,7 +402,7 @@ func (s *toolRegistrationSuite) TestUploadFileDescriptionNamesDefaultPrivacy() {
 	for name, testCase := range cases {
 		s.Run(name, func() {
 			ctx := s.T().Context()
-			mgr := NewServer(NewMockPadmarkClient(s.ctrl), slog.New(slog.DiscardHandler), testCase.opts...)
+			mgr := NewServer(s.client, slog.New(slog.DiscardHandler), testCase.opts...)
 
 			sess, err := connectTestClient(ctx, mgr)
 			s.Require().NoError(err)

@@ -80,6 +80,11 @@ v0.5.0 follows **v0.4.0**.
 
 ### Changed
 
+- `notes.NewManager(deps, maxContentLength, allowCustomSlugs)` takes the content limit as an
+  argument, as `files.NewManager` takes its size limit; `WithMaxContentLength` is removed.
+- Without object storage, `web.NewHandler` uses a disabled file manager, and each file route
+  gives the "files are off" answer behind its middleware; no handler compares the file manager
+  with nil. Status codes, headers and pages do not change.
 - `web.NewHandler` takes one `HandlerConfig` with every collaborator and setting and builds the
   complete handler, the JSON API handler included; the `With…` setters of `web.Handler` are
   removed, and `web.NewRouter(handler, opts)` no longer changes the handler. `RouterOptions`
@@ -263,6 +268,15 @@ v0.5.0 follows **v0.4.0**.
 
 ### Tests
 
+- `tests/internal/testenv` builds the in-process web stack and gives each test package one shared
+  PostgreSQL and one S3 mock container, with a new database or bucket for each caller. A full
+  integration run starts 15 containers instead of 24.
+- `tests/server` and `tests/cli/timestamps_test.go` have the `integration` tag, so `go test ./...`
+  runs only unit tests (29 s instead of 40 s).
+- Tests with servers, databases, files, processes or mocks are testify suites; `handler_test.go`,
+  `file_handler_test.go` and `web_auth_test.go` are split by handler and topic. Tests use
+  `t.Context()`, and suites create their mocks in `SetupTest`. Stale comments that named removed
+  APIs are corrected.
 - `tests/files` runs the file life cycle through HTTP with SQLite and an S3 container, with a
   server restart and a content key rotation. `tests/manager`, `tests/cli`, `tests/mcp` and the
   `s3store` adapter tests also use `adobe/s3mock:3.12.0` and need Docker.

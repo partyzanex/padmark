@@ -19,13 +19,12 @@ func aliasOptions() CreateOptions {
 // file that no read and no sweep removed still holds the alias in storage. Create asks the
 // release port to remove it, evicts a cached target of that ID and tries once more.
 func (s *ManagerTestSuite) TestCreate_AliasReleasesExpiredHolder() {
-	cache := NewMockCache(s.ctrl)
-	s.manager.WithCache(cache)
+	s.manager.WithCache(s.cache)
 
 	gomock.InOrder(
 		s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(domain.ErrSlugConflict),
 		s.expired.EXPECT().ReleaseExpiredSlug(gomock.Any(), domain.HashSlug("report"), testNow()).Return(true, nil),
-		cache.EXPECT().Delete(domain.HashSlug("report")),
+		s.cache.EXPECT().Delete(domain.HashSlug("report")),
 		s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil),
 	)
 

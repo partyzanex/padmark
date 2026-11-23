@@ -170,16 +170,16 @@ func captureServerOutput(t *testing.T, body func()) string {
 // TestServeAndMigrateCommands_PostgresDSNPasswordNeverEscapes runs the real CLI entry points
 // (padmark serve / padmark migrate) the way cmd/padmark-server does and checks the final error
 // (what main logs), any panic, and everything the commands wrote to stderr or slog.
-func TestServeAndMigrateCommands_PostgresDSNPasswordNeverEscapes(t *testing.T) {
+func (s *CommandSuite) TestServeAndMigrateCommands_PostgresDSNPasswordNeverEscapes() {
 	secret := leakTestPassword()
-	keyring := filepath.Join(t.TempDir(), "keyring.json")
-	require.NoError(t, crypto.WriteContentKeyring(keyring, &crypto.ContentKeyring{
+	keyring := filepath.Join(s.T().TempDir(), "keyring.json")
+	s.Require().NoError(crypto.WriteContentKeyring(keyring, &crypto.ContentKeyring{
 		Active: "leak-test", Keys: map[string][]byte{"leak-test": bytes.Repeat([]byte{7}, 32)},
 	}))
 
 	for _, testCase := range dsnLeakCases(secret) {
 		for _, command := range []string{"serve", "migrate"} {
-			t.Run(command+"/"+testCase.name, func(t *testing.T) {
+			s.Run(command+"/"+testCase.name, func() {
 				args := []string{"padmark", command, "--storage", storagePostgres, "--dsn", testCase.dsn}
 				if command == "serve" {
 					args = append(args, "--content-keyring-file", keyring, "--addr", "127.0.0.1:0")
@@ -190,17 +190,17 @@ func TestServeAndMigrateCommands_PostgresDSNPasswordNeverEscapes(t *testing.T) {
 					panicked bool
 				)
 
-				output := captureServerOutput(t, func() {
+				output := captureServerOutput(s.T(), func() {
 					text, panicked = callRecovering(func() error {
-						return NewApp().Run(context.WithoutCancel(t.Context()), args)
+						return NewApp().Run(context.WithoutCancel(s.T().Context()), args)
 					})
 				})
 
 				shown := strings.ReplaceAll(text, secret, leakMarker)
-				assert.False(t, panicked, "%s must fail with an error, not crash; panic value: %s", command, shown)
-				assert.NotEmpty(t, text, "an unreachable or invalid DSN must fail startup")
-				assert.NotContains(t, text, secret, "DSN password leaked in the returned error: %s", shown)
-				assert.NotContains(t, output, secret, "DSN password leaked in logs: %s",
+				s.False(panicked, "%s must fail with an error, not crash; panic value: %s", command, shown)
+				s.NotEmpty(text, "an unreachable or invalid DSN must fail startup")
+				s.NotContains(text, secret, "DSN password leaked in the returned error: %s", shown)
+				s.NotContains(output, secret, "DSN password leaked in logs: %s",
 					strings.ReplaceAll(output, secret, leakMarker))
 			})
 		}

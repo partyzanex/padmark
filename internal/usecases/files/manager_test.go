@@ -30,7 +30,9 @@ type ManagerSuite struct {
 	objects *MockObjectStore
 	expired *MockExpiredSlugReleaser
 	metrics *MockMetrics
-	manager *Manager
+	// strictMetrics permits no call; the tests in metrics_test.go attach it (strictMetrics).
+	strictMetrics *MockMetrics
+	manager       *Manager
 }
 
 func TestManagerSuite(t *testing.T) {
@@ -43,6 +45,7 @@ func (s *ManagerSuite) SetupTest() {
 	s.objects = NewMockObjectStore(s.ctrl)
 	s.expired = NewMockExpiredSlugReleaser(s.ctrl)
 	s.metrics = NewMockMetrics(s.ctrl)
+	s.strictMetrics = NewMockMetrics(s.ctrl)
 	s.allowMetrics()
 	s.manager = NewManager(&Deps{
 		Storage:      s.storage,

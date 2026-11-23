@@ -4,10 +4,8 @@ package integration
 
 import (
 	"io"
-	"log/slog"
 	"net/http"
 	"net/http/cookiejar"
-	"net/http/httptest"
 	"net/url"
 	"regexp"
 	"strings"
@@ -17,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/partyzanex/padmark/internal/adapters/web"
+	"github.com/partyzanex/padmark/tests/internal/testenv"
 )
 
 // Finding M-2: while no account exists, /setup without an invite creates the single, permanent
@@ -30,74 +29,86 @@ var setupCSRFPattern = regexp.MustCompile(`name="csrf_token" value="([^"]+)"`)
 
 // TestBootstrapSetup_AnonymousCannotClaimFirstAdmin is an internet scanner racing the operator to
 // a freshly started --enable-accounts instance on which no bootstrap token was configured.
-func TestBootstrapSetup_AnonymousCannotClaimFirstAdmin(t *testing.T) {
-	const scannerPassword = "Sc4nner!Passw0rd"
+func (s *StackFlowSuite) TestBootstrapSetup_AnonymousCannotClaimFirstAdmin() {
+	t := s.T()
 
-	t.Run("headless JSON setup", func(t *testing.T) {
-		env := newOwnerFlowEnv(t, "bootstrap-setup-json")
+	t.Run("headless JSON setup", anonymousJSONSetup)
+	t.Run("browser form setup", anonymousFormSetup)
+}
 
-		for _, body := range []string{
-			`{"username":"scanner","password":"` + scannerPassword + `"}`,
-			`{"username":"scanner","password":"` + scannerPassword + `","bootstrap_token":"guess"}`,
-		} {
-			resp := setupPost(t, env.baseURL, body)
-			raw, err := io.ReadAll(resp.Body)
-			require.NoError(t, err)
-			require.NoError(t, resp.Body.Close())
+// scannerPassword is the password of the scanner in the anonymous setup scenarios.
+const scannerPassword = "Sc4nner!Passw0rd"
 
-			assert.Equal(t, http.StatusForbidden, resp.StatusCode,
-				"an unproven first-admin setup must be refused: %s", raw)
+// anonymousJSONSetup sends the headless JSON setup without a proof of ownership.
+func anonymousJSONSetup(t *testing.T) {
+	t.Helper()
+
+	env := newOwnerFlowEnv(t, "bootstrap-setup-json")
+
+	for _, body := range []string{
+		`{"username":"scanner","password":"` + scannerPassword + `"}`,
+		`{"username":"scanner","password":"` + scannerPassword + `","bootstrap_token":"guess"}`,
+	} {
+		resp := setupPost(t, env.baseURL, body)
+		raw, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		require.NoError(t, resp.Body.Close())
+
+		assert.Equal(t, http.StatusForbidden, resp.StatusCode,
+			"an unproven first-admin setup must be refused: %s", raw)
+	}
+
+	empty, err := env.authMgr.IsEmpty(t.Context())
+	require.NoError(t, err)
+	assert.True(t, empty, "the scanner must not have become the first admin")
+}
+
+// anonymousFormSetup submits the browser setup form without a proof of ownership.
+func anonymousFormSetup(t *testing.T) {
+	t.Helper()
+
+	env := newOwnerFlowEnv(t, "bootstrap-setup-form")
+
+	jar, err := cookiejar.New(nil)
+	require.NoError(t, err)
+
+	client := &http.Client{
+		Jar:       jar,
+		Transport: nil, CheckRedirect: nil, Timeout: 0,
+	}
+
+	// A real browser flow: GET the form (CSRF cookie + token), then submit it.
+	page, err := client.Get(env.baseURL + "/setup")
+	require.NoError(t, err)
+
+	raw, err := io.ReadAll(page.Body)
+	require.NoError(t, err)
+	require.NoError(t, page.Body.Close())
+
+	if match := setupCSRFPattern.FindSubmatch(raw); match != nil {
+		form := url.Values{
+			"csrf_token":       {string(match[1])},
+			"username":         {"scanner"},
+			"password":         {scannerPassword},
+			"password_confirm": {scannerPassword},
+			"bootstrap_token":  {"guess"},
 		}
 
-		empty, err := env.authMgr.IsEmpty(t.Context())
-		require.NoError(t, err)
-		assert.True(t, empty, "the scanner must not have become the first admin")
-	})
+		req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodPost, env.baseURL+"/setup",
+			strings.NewReader(form.Encode()))
+		require.NoError(t, reqErr)
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("Accept", "text/html")
+		req.Header.Set("Origin", env.baseURL)
 
-	t.Run("browser form setup", func(t *testing.T) {
-		env := newOwnerFlowEnv(t, "bootstrap-setup-form")
+		resp, doErr := client.Do(req)
+		require.NoError(t, doErr)
+		require.NoError(t, resp.Body.Close())
+	}
 
-		jar, err := cookiejar.New(nil)
-		require.NoError(t, err)
-
-		client := &http.Client{
-			Jar:       jar,
-			Transport: nil, CheckRedirect: nil, Timeout: 0,
-		}
-
-		// A real browser flow: GET the form (CSRF cookie + token), then submit it.
-		page, err := client.Get(env.baseURL + "/setup")
-		require.NoError(t, err)
-
-		raw, err := io.ReadAll(page.Body)
-		require.NoError(t, err)
-		require.NoError(t, page.Body.Close())
-
-		if match := setupCSRFPattern.FindSubmatch(raw); match != nil {
-			form := url.Values{
-				"csrf_token":       {string(match[1])},
-				"username":         {"scanner"},
-				"password":         {scannerPassword},
-				"password_confirm": {scannerPassword},
-				"bootstrap_token":  {"guess"},
-			}
-
-			req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodPost, env.baseURL+"/setup",
-				strings.NewReader(form.Encode()))
-			require.NoError(t, reqErr)
-			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-			req.Header.Set("Accept", "text/html")
-			req.Header.Set("Origin", env.baseURL)
-
-			resp, doErr := client.Do(req)
-			require.NoError(t, doErr)
-			require.NoError(t, resp.Body.Close())
-		}
-
-		empty, err := env.authMgr.IsEmpty(t.Context())
-		require.NoError(t, err)
-		assert.True(t, empty, "the scanner must not have become the first admin via the HTML form")
-	})
+	empty, err := env.authMgr.IsEmpty(t.Context())
+	require.NoError(t, err)
+	assert.True(t, empty, "the scanner must not have become the first admin via the HTML form")
 }
 
 // bootstrapFlowToken is the operator's bootstrap token in the configured-token scenarios.
@@ -107,29 +118,9 @@ const bootstrapFlowToken = "operator-bootstrap-token-9f8e7d6c5b4a3210"
 func newBootstrapEnv(t *testing.T, dbName string) ownerFlowEnv {
 	t.Helper()
 
-	env := newOwnerFlowEnv(t, dbName)
-	log := slog.New(slog.DiscardHandler)
-	notesMgr, linksMgr := newOwnerFlowManagers(t, env.db, log)
-
-	handlerCfg := testHandlerConfig(notesMgr, linksMgr)
-	handlerCfg.Log = log
-	handlerCfg.Accounts = env.authMgr
-	handlerCfg.CSRFSecret = []byte("padmark-test-csrf-secret-32bytes")
-	handlerCfg.BootstrapToken = bootstrapFlowToken
-	handler := newTestHandler(t, handlerCfg)
-	router, err := web.NewRouter(handler, &web.RouterOptions{
-		MaxBodyBytes: 256 * 1024,
-
-		AllowedHosts: nil, RateLimit: 0, RateBurst: 0, DisableAPI: false,
-	})
-	require.NoError(t, err)
-
-	srv := httptest.NewServer(router)
-	t.Cleanup(srv.Close)
-
-	env.baseURL = srv.URL
-
-	return env
+	return newOwnerFlowEnv(t, dbName, testenv.WithConfig(func(cfg *web.HandlerConfig, _ *testenv.Stack) {
+		cfg.BootstrapToken = bootstrapFlowToken
+	}))
 }
 
 // postSetupForm submits the browser /setup form (CSRF cookie + token from a GET) and returns the
@@ -175,7 +166,9 @@ func postSetupForm(t *testing.T, baseURL string, fields url.Values) int {
 
 // TestBootstrapSetup_ConfiguredToken: with the operator's token configured, only a setup that
 // presents it creates the first admin — over JSON and over the browser form alike.
-func TestBootstrapSetup_ConfiguredToken(t *testing.T) {
+func (s *StackFlowSuite) TestBootstrapSetup_ConfiguredToken() {
+	t := s.T()
+
 	const password = "0perator!Passw0rd"
 
 	t.Run("JSON: wrong token refused, right token creates the admin", func(t *testing.T) {

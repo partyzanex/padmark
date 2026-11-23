@@ -3,46 +3,27 @@
 package storage
 
 import (
-	"database/sql"
 	"log/slog"
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"github.com/testcontainers/testcontainers-go"
-	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect/pgdialect"
-	"github.com/uptrace/bun/driver/pgdriver"
 
 	pgrepo "github.com/partyzanex/padmark/internal/infra/storage/postgres"
+	"github.com/partyzanex/padmark/tests/internal/testenv"
 )
 
 // contractTables are the tables that the contract suites write. TRUNCATE ... CASCADE also
 // empties the tables that refer to them, and the TRUNCATE triggers empty slug_namespace.
 const contractTables = "users, sessions, api_tokens, invites, reveal_tokens, notes, links, files, slug_namespace"
 
-// TestPostgresContract starts one container for all contract suites. Each test then starts
-// from empty tables (see postgresOpener).
+// TestPostgresContract runs all contract suites on one database of the shared container. Each
+// test then starts from empty tables (see postgresOpener).
 func TestPostgresContract(t *testing.T) {
 	ctx := t.Context()
+	db := testenv.Postgres(t).Open(t)
 
-	container, err := tcpostgres.Run(ctx, "postgres:18-alpine",
-		tcpostgres.WithDatabase("padmark_contract_test"),
-		tcpostgres.WithUsername("test"),
-		tcpostgres.WithPassword("test"),
-		tcpostgres.BasicWaitStrategies(),
-	)
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, testcontainers.TerminateContainer(container)) })
-
-	dsn, err := container.ConnectionString(ctx, "sslmode=disable")
-	require.NoError(t, err)
-
-	db := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn))), pgdialect.New())
-
-	t.Cleanup(func() { require.NoError(t, db.Close()) })
-
-	_, err = pgrepo.MigrateWithWarning(ctx, db, slog.New(slog.DiscardHandler))
+	_, err := pgrepo.MigrateWithWarning(ctx, db, slog.New(slog.DiscardHandler))
 	require.NoError(t, err)
 
 	runContract(t, postgresOpener(db))

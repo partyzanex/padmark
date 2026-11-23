@@ -3,12 +3,9 @@
 package integration
 
 import (
-	"context"
 	"encoding/json"
 	"io"
-	"log/slog"
 	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"os"
 	"strings"
@@ -17,19 +14,14 @@ import (
 
 	"github.com/pquerna/otp/totp"
 	"github.com/stretchr/testify/require"
-	"github.com/uptrace/bun"
+	"github.com/stretchr/testify/suite"
 
 	clicmd "github.com/partyzanex/padmark/internal/adapters/cli"
 	"github.com/partyzanex/padmark/internal/adapters/web"
 	"github.com/partyzanex/padmark/internal/domain"
-	"github.com/partyzanex/padmark/internal/infra/crypto"
-	"github.com/partyzanex/padmark/internal/infra/expiredslugs"
-	"github.com/partyzanex/padmark/internal/infra/render"
 	sqliterepo "github.com/partyzanex/padmark/internal/infra/storage/sqlite"
-	"github.com/partyzanex/padmark/internal/testutil"
 	"github.com/partyzanex/padmark/internal/usecases/auth"
-	"github.com/partyzanex/padmark/internal/usecases/links"
-	"github.com/partyzanex/padmark/internal/usecases/notes"
+	"github.com/partyzanex/padmark/tests/internal/testenv"
 )
 
 // captureStdout redirects os.Stdout for the duration of fn and returns what was printed —
@@ -112,77 +104,61 @@ func setupPost(t *testing.T, baseURL, body string) *http.Response {
 	return resp
 }
 
-// TestAccountsFlow is the headless-accounts end-to-end: CLI setup → create-token →
-// create-invite → member enrollment → the 403/409/410/429 edges.
-// accountsFlowBootstrapToken is the first-admin bootstrap token TestAccountsFlow's server runs with.
+// accountsFlowBootstrapToken is the first-admin bootstrap token of the server of
+// AccountsFlowSuite.
 const accountsFlowBootstrapToken = "accounts-flow-bootstrap-token-0123456789"
 
-func TestAccountsFlow(t *testing.T) {
+// AccountsFlowSuite is the headless-accounts end-to-end: CLI setup → create-token →
+// create-invite → member enrollment → the 403/409/410/429 edges. Each phase is one method; the
+// phases run in sequence in TestAccountsFlow, because each phase uses the result of the one
+// before it.
+type AccountsFlowSuite struct {
+	suite.Suite
+
+	authMgr *auth.Manager
+	users   *sqliterepo.UserRepository
+	srvURL  string
+}
+
+func TestAccountsFlowSuite(t *testing.T) {
+	suite.Run(t, new(AccountsFlowSuite))
+}
+
+func (s *AccountsFlowSuite) SetupTest() {
+	t := s.T()
+
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	// The operator's bootstrap token: the server is configured with it, and padmark-cli setup
 	// forwards it from the same environment variable.
 	t.Setenv("PADMARK_BOOTSTRAP_TOKEN", accountsFlowBootstrapToken)
 
-	ctx := context.Background()
+	// ── storage + wiring: the stack of testenv, as the server assembles it ──.
+	stack := testenv.NewStack(t, "accountsflow", testenv.WithAccounts(),
+		testenv.WithConfig(func(cfg *web.HandlerConfig, _ *testenv.Stack) {
+			cfg.BootstrapToken = accountsFlowBootstrapToken
+		}))
+	s.authMgr, s.users, s.srvURL = stack.Auth, stack.Users, stack.Server.URL
+}
 
-	// ── storage + wiring (see testAPITokenFlow for the same pattern) ──.
-	db, err := sqliterepo.Open("file:accountsflow?mode=memory&cache=shared", slog.New(slog.DiscardHandler))
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, db.Close()) })
+func (s *AccountsFlowSuite) TestAccountsFlow() {
+	totpURI := s.bootstrapFirstAdmin()
+	admin, bearer, totpCodeAt := s.selfIssueToken(totpURI)
+	inviteToken := s.issueInvite(bearer, totpCodeAt)
+	memberURI := s.enrollMember(inviteToken)
+	memberKey := s.checkMemberRights(memberURI)
+	s.checkOriginGate(memberKey)
+	s.checkTokenCap(admin)
+}
 
-	_, err = sqliterepo.Migrate(ctx, db)
-	require.NoError(t, err)
+// bootstrapFirstAdmin runs the headless bootstrap: CLI setup creates the first admin and prints
+// the URI once. It returns that otpauth URI.
+func (s *AccountsFlowSuite) bootstrapFirstAdmin() string {
+	t := s.T()
+	ctx := t.Context()
 
-	log := slog.New(slog.DiscardHandler)
-	users := sqliterepo.NewUserRepository(db)
-
-	authMgr, err := auth.NewManager(
-		sqliteAuthStores(db, users),
-		&auth.Deps{
-			PasswordHasher: crypto.NewPasswordHasher(testArgon2Params, slog.New(slog.DiscardHandler)),
-			Sealer:         crypto.NewSealer(testArgon2Params),
-			TOTP:           crypto.NewTOTP(),
-			Log:            log,
-			Now:            time.Now,
-		},
-		"padmark-test", time.Hour,
-	)
-	require.NoError(t, err)
-
-	noteRepo, linkRepo := sqliterepo.NewNoteRepository(db), sqliterepo.NewLinkRepository(db, log)
-	expired := expiredslugs.New(noteRepo, linkRepo)
-
-	notesMgr := notes.NewManager(&notes.Deps{
-		Storage: noteRepo, Renderer: render.NewRenderer(), Encryptor: testutil.ContentEncryptor(t, "note"),
-		Hasher: crypto.NewEditCodeHasher(testutil.Argon2Params(), log), ExpiredSlugs: expired, Log: log,
-		Now: time.Now,
-	}, false)
-	linksMgr := links.NewManager(&links.Deps{
-		Storage: linkRepo, Encryptor: testutil.ContentEncryptor(t, "link"),
-		Hasher: crypto.NewEditCodeHasher(testutil.Argon2Params(), log), ExpiredSlugs: expired, Log: log,
-		Now: time.Now,
-	}, false)
-
-	handlerCfg := testHandlerConfig(notesMgr, linksMgr)
-	handlerCfg.Log = log
-	handlerCfg.Accounts = authMgr
-	handlerCfg.CSRFSecret = []byte("padmark-test-csrf-secret-32bytes")
-	handlerCfg.BootstrapToken = accountsFlowBootstrapToken
-	handler := newTestHandler(t, handlerCfg)
-	router, err := web.NewRouter(handler, &web.RouterOptions{
-		MaxBodyBytes: 256 * 1024,
-
-		AllowedHosts: nil, RateLimit: 0, RateBurst: 0, DisableAPI: false,
-	})
-	require.NoError(t, err)
-
-	srv := httptest.NewServer(router)
-	t.Cleanup(srv.Close)
-
-	// ── headless bootstrap: CLI setup creates the first admin and prints the URI once ──.
 	out := captureStdout(t, func() error {
 		return clicmd.NewApp().Run(ctx, []string{
-			"padmark-cli", "--url", srv.URL,
+			"padmark-cli", "--url", s.srvURL,
 			"setup", "--username", "admin", "--password", apiFlowPassword,
 		})
 	})
@@ -192,22 +168,31 @@ func TestAccountsFlow(t *testing.T) {
 		"setup must print the otpauth URI on stdout, got: %q", totpURI)
 
 	// Setup is closed now: a second bootstrap attempt answers 403 with the invite hint.
-	resp := setupPost(t, srv.URL, `{"username":"admin2","password":"`+apiFlowPassword+`"}`)
+	resp := setupPost(t, s.srvURL, `{"username":"admin2","password":"`+apiFlowPassword+`"}`)
 	defer func() { _ = resp.Body.Close() }()
 
 	require.Equal(t, http.StatusForbidden, resp.StatusCode)
 
-	// ── admin gets a credential and self-serves a token over the generated route ──.
-	admin, err := users.GetByUsername(ctx, "admin")
+	return totpURI
+}
+
+// selfIssueToken makes the admin get a credential and self-serve a token over the generated
+// route. It returns the admin, the bearer key of the self-issued envelope and the TOTP code of
+// the admin for a 30-second window.
+func (s *AccountsFlowSuite) selfIssueToken(totpURI string) (*domain.User, string, func(step int) string) {
+	t := s.T()
+	ctx := t.Context()
+
+	admin, err := s.users.GetByUsername(ctx, "admin")
 	require.NoError(t, err)
 	require.True(t, admin.IsAdmin)
 
-	apiKey, err := authMgr.CreateAPIToken(ctx, admin.ID, auth.Issuer{
+	apiKey, err := s.authMgr.CreateAPIToken(ctx, admin.ID, auth.Issuer{
 		APITokenHash: "", StepUp: auth.StepUp{Password: "", TOTPCode: ""},
 	}, 0)
 	require.NoError(t, err)
 
-	adminEnvelope, err := domain.EncodeAPITokenEnvelope(srv.URL, apiKey)
+	adminEnvelope, err := domain.EncodeAPITokenEnvelope(s.srvURL, apiKey)
 	require.NoError(t, err)
 
 	require.NoError(t, clicmd.NewApp().Run(ctx, []string{"padmark-cli", "--token", adminEnvelope, "trust"}))
@@ -226,7 +211,7 @@ func TestAccountsFlow(t *testing.T) {
 		return code
 	}
 
-	out = captureStdout(t, func() error {
+	out := captureStdout(t, func() error {
 		return clicmd.NewApp().Run(ctx, []string{
 			"padmark-cli", "--token", adminEnvelope, "create-token",
 			"--password", apiFlowPassword, "--totp-code", totpCodeAt(0), "--ttl-days", "30",
@@ -236,15 +221,22 @@ func TestAccountsFlow(t *testing.T) {
 	selfIssued := strings.TrimSpace(out)
 	base, bearer, first := domain.DecodeAPITokenEnvelope(selfIssued)
 	require.True(t, first, "create-token must print a pmk_ envelope, got: %q", selfIssued)
-	require.Equal(t, srv.URL, base)
+	require.Equal(t, s.srvURL, base)
 
 	// The issued envelope is immediately usable, but a key alone cannot multiply itself.
-	status, body := hardeningDo(t, srv.URL, http.MethodPost, "/api/tokens", bearer, "", "")
+	status, body := hardeningDo(t, s.srvURL, http.MethodPost, "/api/tokens", bearer, "", "")
 	require.Equal(t, http.StatusForbidden, status, body)
 	require.Contains(t, body, `"code":"step_up_required"`)
 
+	return admin, bearer, totpCodeAt
+}
+
+// issueInvite makes the admin issue an invite with a step-up and returns the invite token.
+func (s *AccountsFlowSuite) issueInvite(bearer string, totpCodeAt func(step int) string) string {
+	t := s.T()
+
 	// ── invites: admin issues (with step-up), member enrolls via CLI setup, replay is 410 ──.
-	status, body = hardeningDo(t, srv.URL, http.MethodPost, "/api/invites", bearer, "",
+	status, body := hardeningDo(t, s.srvURL, http.MethodPost, "/api/invites", bearer, "",
 		`{"password":"`+apiFlowPassword+`","totp_code":"`+totpCodeAt(1)+`"}`)
 	require.Equal(t, http.StatusCreated, status, body)
 
@@ -252,7 +244,7 @@ func TestAccountsFlow(t *testing.T) {
 		InviteURL string `json:"invite_url"`
 	}
 
-	err = json.Unmarshal([]byte(body), &inviteOut)
+	err := json.Unmarshal([]byte(body), &inviteOut)
 	require.NoError(t, err)
 
 	inviteURL, parseErr := url.Parse(inviteOut.InviteURL)
@@ -261,10 +253,18 @@ func TestAccountsFlow(t *testing.T) {
 	inviteToken := inviteURL.Query().Get("invite")
 	require.NotEmpty(t, inviteToken)
 
-	// Member enrolls through the CLI (headless path) with a valid invite.
-	out = captureStdout(t, func() error {
+	return inviteToken
+}
+
+// enrollMember enrolls the member through the CLI (headless path) with a valid invite and
+// returns the otpauth URI of the member. A replay of the spent invite is 410.
+func (s *AccountsFlowSuite) enrollMember(inviteToken string) *url.URL {
+	t := s.T()
+	ctx := t.Context()
+
+	out := captureStdout(t, func() error {
 		return clicmd.NewApp().Run(ctx, []string{
-			"padmark-cli", "--url", srv.URL,
+			"padmark-cli", "--url", s.srvURL,
 			"setup", "--invite", inviteToken,
 			"--username", "member", "--password", apiFlowPassword,
 		})
@@ -275,22 +275,31 @@ func TestAccountsFlow(t *testing.T) {
 	require.NoError(t, err)
 
 	// Replay of the spent invite is 410 — the token is single-use.
-	resp = setupPost(t, srv.URL,
+	resp := setupPost(t, s.srvURL,
 		`{"username":"other","password":"`+apiFlowPassword+`","invite":"`+inviteToken+`"}`)
 	require.Equal(t, http.StatusGone, resp.StatusCode)
 	_ = resp.Body.Close()
 
+	return memberURI
+}
+
+// checkMemberRights checks that a non-admin cannot mint invites and can issue a token for
+// itself with a step-up. It returns the API key of the member.
+func (s *AccountsFlowSuite) checkMemberRights(memberURI *url.URL) string {
+	t := s.T()
+	ctx := t.Context()
+
 	// ── non-admin cannot mint invites ──.
-	member, err := users.GetByUsername(ctx, "member")
+	member, err := s.users.GetByUsername(ctx, "member")
 	require.NoError(t, err)
 	require.False(t, member.IsAdmin)
 
-	memberKey, err := authMgr.CreateAPIToken(ctx, member.ID, auth.Issuer{
+	memberKey, err := s.authMgr.CreateAPIToken(ctx, member.ID, auth.Issuer{
 		APITokenHash: "", StepUp: auth.StepUp{Password: "", TOTPCode: ""},
 	}, 0)
 	require.NoError(t, err)
 
-	resp = bearerPost(t, srv.URL, "/api/invites", memberKey)
+	resp := bearerPost(t, s.srvURL, "/api/invites", memberKey)
 	require.Equal(t, http.StatusForbidden, resp.StatusCode)
 	_ = resp.Body.Close()
 
@@ -299,24 +308,31 @@ func TestAccountsFlow(t *testing.T) {
 	memberCode, err := totp.GenerateCode(memberURI.Query().Get("secret"), time.Now())
 	require.NoError(t, err)
 
-	status, body = hardeningDo(t, srv.URL, http.MethodPost, "/api/tokens", memberKey, "",
+	status, body := hardeningDo(t, s.srvURL, http.MethodPost, "/api/tokens", memberKey, "",
 		`{"password":"`+apiFlowPassword+`","totp_code":"`+memberCode+`"}`)
 	require.Equal(t, http.StatusCreated, status, body)
 
-	// ── the origin gate: cross-site mints are refused, same-origin passes (P1/P2 fixes) ──
+	return memberKey
+}
+
+// checkOriginGate checks that cross-site mints are refused, same-origin passes (P1/P2 fixes),
+// and that a text/plain JSON setup is refused.
+func (s *AccountsFlowSuite) checkOriginGate(memberKey string) {
+	t := s.T()
+
 	// A page on a sibling subdomain rides the session cookie (SameSite alone admits it);
 	// the Origin header it must declare cannot match, so the mint is refused before it runs.
-	resp = bearerPostOrigin(t, srv.URL, "/api/tokens", memberKey, "https://evil.sibling.example")
+	resp := bearerPostOrigin(t, s.srvURL, "/api/tokens", memberKey, "https://evil.sibling.example")
 	require.Equal(t, http.StatusForbidden, resp.StatusCode)
 	_ = resp.Body.Close()
 
-	resp = bearerPostOrigin(t, srv.URL, "/api/invites", memberKey, "https://evil.sibling.example")
+	resp = bearerPostOrigin(t, s.srvURL, "/api/invites", memberKey, "https://evil.sibling.example")
 	require.Equal(t, http.StatusForbidden, resp.StatusCode)
 	_ = resp.Body.Close()
 
 	// The same-origin call passes the origin gate (the browser sends its own origin) and reaches
 	// the issuing rule, which wants the bearer's step-up — not the cross-origin refusal.
-	resp = bearerPostOrigin(t, srv.URL, "/api/tokens", memberKey, srv.URL)
+	resp = bearerPostOrigin(t, s.srvURL, "/api/tokens", memberKey, s.srvURL)
 
 	sameOrigin, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
@@ -328,7 +344,7 @@ func TestAccountsFlow(t *testing.T) {
 
 	// JSON setup: a CORS-safelisted text/plain Content-Type (a preflight-free cross-site fetch,
 	// no Fetch Metadata required) is refused — the headless branch exists only for JSON bodies.
-	plainReq, plainNewErr := http.NewRequest(http.MethodPost, srv.URL+"/setup",
+	plainReq, plainNewErr := http.NewRequestWithContext(t.Context(), http.MethodPost, s.srvURL+"/setup",
 		strings.NewReader(`{"username":"admin3","password":"`+apiFlowPassword+`"}`))
 	require.NoError(t, plainNewErr)
 	plainReq.Header.Set("Accept", "application/json")
@@ -339,30 +355,25 @@ func TestAccountsFlow(t *testing.T) {
 	require.Equal(t, http.StatusUnsupportedMediaType, plainResp.StatusCode,
 		"a text/plain JSON smuggle must not reach the setup usecase")
 	_ = plainResp.Body.Close()
+}
 
-	// ── the per-user cap: 20 live tokens max, the 21st is refused ──
-	// admin holds 2 issued above (manager, create-token); fill to 20. Over HTTP the refusal is
-	// 429 (unit-tested); here it is checked at the usecase, since every further bearer issue
-	// would need another TOTP window.
+// checkTokenCap checks the per-user cap: 20 live tokens max, the 21st is refused. admin holds 2
+// issued above (manager, create-token); fill to 20. Over HTTP the refusal is 429 (unit-tested);
+// here it is checked at the usecase, since every further bearer issue would need another TOTP
+// window.
+func (s *AccountsFlowSuite) checkTokenCap(admin *domain.User) {
+	t := s.T()
+	ctx := t.Context()
+
 	for range 18 {
-		_, err = authMgr.CreateAPIToken(ctx, admin.ID, auth.Issuer{
+		_, err := s.authMgr.CreateAPIToken(ctx, admin.ID, auth.Issuer{
 			APITokenHash: "", StepUp: auth.StepUp{Password: "", TOTPCode: ""},
 		}, 0)
 		require.NoError(t, err)
 	}
 
-	_, err = authMgr.CreateAPIToken(ctx, admin.ID, auth.Issuer{
+	_, err := s.authMgr.CreateAPIToken(ctx, admin.ID, auth.Issuer{
 		APITokenHash: "", StepUp: auth.StepUp{Password: "", TOTPCode: ""},
 	}, 0)
 	require.ErrorIs(t, err, domain.ErrAPITokenLimit)
-}
-
-// sqliteAuthStores builds the account repositories of one SQLite test database around users.
-func sqliteAuthStores(db *bun.DB, users auth.UserStore) auth.Stores {
-	return auth.Stores{
-		Users:     users,
-		Invites:   sqliterepo.NewInviteRepository(db),
-		Sessions:  sqliterepo.NewSessionRepository(db),
-		APITokens: sqliterepo.NewAPITokenRepository(db),
-	}
 }

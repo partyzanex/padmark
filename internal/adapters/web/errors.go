@@ -47,9 +47,8 @@ func domainErrStatus(err error) (status int, message string) {
 		{domain.ErrInvalidAPITokenTTL, http.StatusUnprocessableEntity},
 		{domain.ErrInvalidEditCode, http.StatusForbidden},
 		{domain.ErrForbidden, http.StatusForbidden},
-		// javascript:/data:/file:/etc. target URLs are a malformed request, not an
-		// otherwise-valid-but-unprocessable one — matches the acceptance criteria's literal 400
-		// (see TODO.md's Bug-class checklist, old C4), unlike the 422s above.
+		// A javascript:, data: or file: target URL is a malformed request, not a valid but
+		// unprocessable one, so it gets 400 and not the 422 of the errors above.
 		{domain.ErrInvalidURL, http.StatusBadRequest},
 		{domain.ErrAPITokenLimit, http.StatusTooManyRequests},
 		{domain.ErrFeatureNotSupported, http.StatusServiceUnavailable},

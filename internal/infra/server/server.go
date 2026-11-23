@@ -404,8 +404,8 @@ func buildHandlers(
 	manager := notes.NewManager(&notes.Deps{
 		Storage: store.notes, Renderer: render.NewRenderer(), Encryptor: noteCipher,
 		Hasher: shared.hasher, ExpiredSlugs: expired, Log: log, Now: time.Now,
-	}, cfg.customSlugs).
-		WithRenderCache(rendercache.NewDefault(log)).WithMaxContentLength(cfg.maxContentLength)
+	}, cfg.maxContentLength, cfg.customSlugs).
+		WithRenderCache(rendercache.NewDefault(log))
 	linkManager := links.NewManager(&links.Deps{
 		Storage: store.links, Encryptor: linkCipher,
 		Hasher: shared.hasher, ExpiredSlugs: expired, Log: log, Now: time.Now,

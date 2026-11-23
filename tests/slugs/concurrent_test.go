@@ -19,16 +19,12 @@ import (
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect"
 
-	"github.com/partyzanex/padmark/internal/adapters/web"
 	"github.com/partyzanex/padmark/internal/domain"
-	"github.com/partyzanex/padmark/internal/infra/crypto"
-	"github.com/partyzanex/padmark/internal/infra/expiredslugs"
-	"github.com/partyzanex/padmark/internal/infra/render"
 	pgrepo "github.com/partyzanex/padmark/internal/infra/storage/postgres"
 	sqliterepo "github.com/partyzanex/padmark/internal/infra/storage/sqlite"
-	"github.com/partyzanex/padmark/internal/testutil"
 	"github.com/partyzanex/padmark/internal/usecases/links"
 	"github.com/partyzanex/padmark/internal/usecases/notes"
+	"github.com/partyzanex/padmark/tests/internal/testenv"
 )
 
 type createGate struct {
@@ -105,34 +101,15 @@ func repositories(db *bun.DB) (notes.Storage, links.Storage) {
 func replica(t *testing.T, db *bun.DB, gate *createGate) *httptest.Server {
 	t.Helper()
 
-	noteRepo, linkRepo := repositories(db)
-	log := slog.New(slog.DiscardHandler)
-	expired := expiredslugs.New(noteRepo, linkRepo)
-	hasher := crypto.NewEditCodeHasher(testutil.Argon2Params(), slog.New(slog.DiscardHandler))
-	noteManager := notes.NewManager(&notes.Deps{
-		Storage: &pausedNotes{Storage: noteRepo, gate: gate}, Renderer: render.NewRenderer(),
-		Encryptor: testutil.ContentEncryptor(t, "note"), Hasher: hasher, ExpiredSlugs: expired, Log: log,
-		Now: time.Now,
-	}, true)
-	linkManager := links.NewManager(&links.Deps{
-		Storage: &pausedLinks{Storage: linkRepo, gate: gate}, Encryptor: testutil.ContentEncryptor(t, "link"),
-		Hasher: hasher, ExpiredSlugs: expired, Log: log,
-		Now: time.Now,
-	}, true)
-	handlerCfg := testHandlerConfig(noteManager, linkManager)
-	handlerCfg.Log = log
-	handler := newTestHandler(t, handlerCfg)
-	router, err := web.NewRouter(handler, &web.RouterOptions{
-		MaxBodyBytes: 256 * 1024,
+	managers := testenv.NewManagers(t, db, testenv.WithCustomSlugs(),
+		testenv.WithNoteStorage(func(storage notes.Storage) notes.Storage {
+			return &pausedNotes{Storage: storage, gate: gate}
+		}),
+		testenv.WithLinkStorage(func(storage links.Storage) links.Storage {
+			return &pausedLinks{Storage: storage, gate: gate}
+		}))
 
-		AllowedHosts: nil, RateLimit: 0, RateBurst: 0, DisableAPI: false,
-	})
-	require.NoError(t, err)
-
-	server := httptest.NewServer(router)
-	t.Cleanup(server.Close)
-
-	return server
+	return testenv.Serve(t, testenv.HandlerConfig(managers.Notes, managers.Links))
 }
 
 type createResult struct {
@@ -228,27 +205,4 @@ func testConcurrentCreate(t *testing.T, db *bun.DB, open func(*testing.T) *bun.D
 	require.Equal(t, 1, count)
 	require.NoError(t, db.NewRaw("SELECT COUNT(*) FROM notes JOIN links ON notes.id = links.id").Scan(t.Context(), &count))
 	require.Zero(t, count)
-}
-
-// testHandlerConfig returns the web.HandlerConfig of the test stacks: the given managers, no
-// database pinger, a discarding logger, no account system, no files, no reveal store and the
-// default settings. A test sets the fields of its scenario on the returned value.
-func testHandlerConfig(notes web.NoteManager, links web.LinkManager) *web.HandlerConfig {
-	return &web.HandlerConfig{
-		Notes: notes, Links: links, Pinger: web.NoPinger{}, Log: slog.New(slog.DiscardHandler),
-		Accounts: nil, Files: nil, Reveal: nil,
-		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, CSRFSecret: nil, SessionTTL: 0,
-		FileTransfer:   web.FileTransferLimits{IdleTimeout: 0, MaxUploads: 0, MaxUploadsPerClient: 0},
-		DirectRedirect: false,
-	}
-}
-
-// newTestHandler builds the web.Handler of cfg and stops the test when web.NewHandler fails.
-func newTestHandler(t *testing.T, cfg *web.HandlerConfig) *web.Handler {
-	t.Helper()
-
-	handler, err := web.NewHandler(cfg)
-	require.NoError(t, err)
-
-	return handler
 }

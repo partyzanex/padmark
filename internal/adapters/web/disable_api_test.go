@@ -23,6 +23,7 @@ type DisableAPISuite struct {
 	manager     *MockNoteManager
 	linkManager *MockLinkManager
 	pinger      *MockPinger
+	files       *MockFileManager
 }
 
 func TestDisableAPI(t *testing.T) {
@@ -34,6 +35,7 @@ func (s *DisableAPISuite) SetupTest() {
 	s.manager = NewMockNoteManager(s.ctrl)
 	s.linkManager = NewMockLinkManager(s.ctrl)
 	s.pinger = NewMockPinger(s.ctrl)
+	s.files = NewMockFileManager(s.ctrl)
 }
 
 func (s *DisableAPISuite) TearDownTest() {
@@ -203,16 +205,15 @@ func (s *DisableAPISuite) TestGeneratedClient_DistinguishesDisabledAPIFromReadin
 // TestFilePages_VisibleWhileAPIDisabled: with --disable-api the file pages still render, but
 // upload, metadata, change and delete answer 503 without a call to the file usecase.
 func (s *DisableAPISuite) TestFilePages_VisibleWhileAPIDisabled() {
-	fileMgr := NewMockFileManager(s.ctrl)
-	fileMgr.EXPECT().MaxSize().Return(int64(1 << 20)).AnyTimes()
-	fileMgr.EXPECT().Settings(gomock.Any(), testID, gomock.Any()).Return(&domain.File{
+	s.files.EXPECT().MaxSize().Return(int64(1 << 20)).AnyTimes()
+	s.files.EXPECT().Settings(gomock.Any(), testID, gomock.Any()).Return(&domain.File{
 		CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil, ID: testID, ObjectKey: "",
 		SealedMeta: "", Name: "a.txt", ContentKey: nil, EditCode: "hash", Size: 3, Downloads: 0,
 		BurnAfterDownload: false,
 	}, nil)
 
 	handlerCfg := testHandlerConfig(s.manager, s.linkManager, s.pinger)
-	handlerCfg.Files = fileMgr
+	handlerCfg.Files = s.files
 	handlerCfg.CSRFSecret = testCSRFSecret
 	handler := newTestHandler(s.T(), handlerCfg)
 	opts := web.RouterOptions{

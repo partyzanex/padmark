@@ -11,16 +11,16 @@ import (
 	"github.com/partyzanex/padmark/internal/clifactory"
 )
 
-func TestServerRequiresContentKeyringBeforeOpeningDatabase(t *testing.T) {
-	t.Setenv(EnvContentKeyring, "")
+func (s *CommandSuite) TestServerRequiresContentKeyringBeforeOpeningDatabase() {
+	s.T().Setenv(EnvContentKeyring, "")
 
 	for _, args := range [][]string{
 		{"padmark", "--storage", "invalid"},
-		{"padmark", "serve", "--storage", "invalid", "--content-keyring-file", filepath.Join(t.TempDir(), "missing")},
+		{"padmark", "serve", "--storage", "invalid", "--content-keyring-file", filepath.Join(s.T().TempDir(), "missing")},
 	} {
-		err := NewApp().Run(context.Background(), args)
-		require.ErrorContains(t, err, "content")
-		require.NotContains(t, err.Error(), "unknown storage")
+		err := NewApp().Run(s.T().Context(), args)
+		s.Require().ErrorContains(err, "content")
+		s.Require().NotContains(err.Error(), "unknown storage")
 	}
 }
 
@@ -42,6 +42,6 @@ func TestContentKeyringFlagAndEnv(t *testing.T) {
 				return nil
 			}
 		})
-		require.NoError(t, app.Run(context.Background(), item.args))
+		require.NoError(t, app.Run(t.Context(), item.args))
 	}
 }

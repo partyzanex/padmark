@@ -22,12 +22,6 @@ var (
 // the expiry), privacy and burn_after_download; an omitted field keeps its value. The edit code
 // comes only from the X-Edit-Code header, as for Delete. The response is the GET /files/{id} body.
 func (h *FileHandler) UpdateFile(w http.ResponseWriter, r *http.Request) {
-	if h.manager == nil {
-		h.writeError(w, r, domain.ErrFeatureNotSupported)
-
-		return
-	}
-
 	var body fileUpdateJSON
 
 	decoder := json.NewDecoder(r.Body)

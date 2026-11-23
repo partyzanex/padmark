@@ -16,19 +16,14 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/suite"
-	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/wait"
 
 	adaptercli "github.com/partyzanex/padmark/internal/adapters/cli"
 	infraserver "github.com/partyzanex/padmark/internal/infra/server"
 	"github.com/partyzanex/padmark/tests/internal/servertest"
+	"github.com/partyzanex/padmark/tests/internal/testenv"
 )
 
-// Test values for the throwaway S3 container only; s3mock accepts any credentials.
 const (
-	filesAccessKey = "padmark-test"
-	filesSecretKey = "padmark-test-secret"
-	filesBucket    = "padmark-files"
 	// filesSize is larger than one S3 multipart part (16 MiB), so the scenario streams the file
 	// in more than one part in the two directions.
 	filesSize       = 17<<20 + 123
@@ -42,9 +37,9 @@ const (
 type FilesSuite struct {
 	suite.Suite
 
-	container testcontainers.Container
-	endpoint  string
-	binary    string
+	// bucket is the bucket of the shared S3-compatible container.
+	bucket testenv.S3
+	binary string
 }
 
 func TestFilesSuite(t *testing.T) {
@@ -52,30 +47,8 @@ func TestFilesSuite(t *testing.T) {
 }
 
 func (s *FilesSuite) SetupSuite() {
-	ctx := s.T().Context()
-
-	// adobe/s3mock creates the bucket at startup and does not check signatures, as in the
-	// s3store integration tests.
-	container, err := testcontainers.Run(ctx, "adobe/s3mock:3.12.0",
-		testcontainers.WithEnv(map[string]string{"initialBuckets": filesBucket}),
-		testcontainers.WithExposedPorts("9090/tcp"),
-		testcontainers.WithWaitStrategy(wait.ForListeningPort("9090/tcp").WithStartupTimeout(time.Minute)),
-	)
-	s.Require().NoError(err)
-
-	s.container = container
-
-	hostPort, err := container.PortEndpoint(ctx, "9090/tcp", "")
-	s.Require().NoError(err)
-
-	s.endpoint = "http://" + hostPort
+	s.bucket = testenv.S3Mock(s.T())
 	s.binary = servertest.Build(s.T())
-}
-
-func (s *FilesSuite) TearDownSuite() {
-	if s.container != nil {
-		s.NoError(testcontainers.TerminateContainer(s.container))
-	}
 }
 
 // SetupTest also moves HOME and XDG_CONFIG_HOME to a new directory. Without that, the CLI reads
@@ -189,13 +162,13 @@ func (s *FilesSuite) startServer() string {
 	address := listener.Addr().String()
 	s.Require().NoError(listener.Close())
 
-	s.T().Setenv("PADMARK_S3_ACCESS_KEY", filesAccessKey)
-	s.T().Setenv("PADMARK_S3_SECRET_KEY", filesSecretKey)
+	s.T().Setenv("PADMARK_S3_ACCESS_KEY", testenv.S3AccessKey)
+	s.T().Setenv("PADMARK_S3_SECRET_KEY", testenv.S3SecretKey)
 
 	args := []string{
 		"padmark", "--addr", address, "--metrics-addr", "", "--rate-limit", "0", "--log-level", "error",
 		"--dsn", filepath.Join(s.T().TempDir(), "padmark.db"),
-		"--s3-endpoint", s.endpoint, "--s3-bucket", filesBucket,
+		"--s3-endpoint", s.bucket.Endpoint, "--s3-bucket", s.bucket.Bucket,
 	}
 
 	done := make(chan error, 1)

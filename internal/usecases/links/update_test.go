@@ -39,9 +39,8 @@ func (s *ManagerTestSuite) TestUpdate_PreservesStateAndEvictsCache() {
 
 			return &stored, nil
 		})
-	cache := NewMockCache(s.ctrl)
-	cache.EXPECT().Delete(existing.ID)
-	s.manager.WithCache(cache)
+	s.cache.EXPECT().Delete(existing.ID)
+	s.manager.WithCache(s.cache)
 
 	updated, err := s.manager.Update(ctx, "stable", "", accountReader(owner), "https://example.com/new", UpdateOptions{
 		ExpiresAt: nil, Privacy: nil, DirectRedirect: nil,

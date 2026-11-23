@@ -4,18 +4,13 @@ package postgres
 
 import (
 	"context"
-	"database/sql"
 	"log/slog"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/suite"
-	"github.com/testcontainers/testcontainers-go"
-	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect/pgdialect"
-	"github.com/uptrace/bun/driver/pgdriver"
 
 	"github.com/partyzanex/padmark/internal/domain"
 )
@@ -23,33 +18,12 @@ import (
 type LinkRepositoryTestSuite struct {
 	suite.Suite
 
-	container *tcpostgres.PostgresContainer
-	db        *bun.DB
-	repo      *LinkRepository
+	db   *bun.DB
+	repo *LinkRepository
 }
 
 func (s *LinkRepositoryTestSuite) SetupSuite() {
-	ctx := s.T().Context()
-
-	container, err := tcpostgres.Run(ctx, "postgres:18-alpine",
-		tcpostgres.WithDatabase("padmark_test"),
-		tcpostgres.WithUsername("test"),
-		tcpostgres.WithPassword("test"),
-		tcpostgres.BasicWaitStrategies(),
-	)
-	s.Require().NoError(err)
-
-	s.container = container
-
-	dsn, err := container.ConnectionString(ctx, "sslmode=disable")
-	s.Require().NoError(err)
-
-	sqldb := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
-	s.db = bun.NewDB(sqldb, pgdialect.New())
-	s.Require().NoError(s.db.PingContext(ctx))
-
-	_, migrateErr := Migrate(ctx, s.db)
-	s.Require().NoError(migrateErr)
+	s.db = newTestDB(s.T())
 
 	s.repo = NewLinkRepository(s.db, slog.Default())
 }
@@ -57,10 +31,6 @@ func (s *LinkRepositoryTestSuite) SetupSuite() {
 func (s *LinkRepositoryTestSuite) TearDownSuite() {
 	if s.db != nil {
 		s.NoError(s.db.Close())
-	}
-
-	if s.container != nil {
-		s.NoError(testcontainers.TerminateContainer(s.container))
 	}
 }
 

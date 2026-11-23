@@ -13,23 +13,21 @@ import (
 	"github.com/uptrace/bun"
 
 	"github.com/partyzanex/padmark/internal/infra/expiredslugs"
+	"github.com/partyzanex/padmark/internal/infra/storage/s3store"
 	sqliterepo "github.com/partyzanex/padmark/internal/infra/storage/sqlite"
 	"github.com/partyzanex/padmark/internal/usecases/auth"
+	"github.com/partyzanex/padmark/tests/internal/testenv"
 )
 
 type SQLiteManagerSuite struct {
 	ManagerSuite
 
-	objects *objectStore
+	objects *s3store.Store
 	db      *bun.DB
 }
 
 func (s *SQLiteManagerSuite) SetupSuite() {
-	s.objects = startObjectStore(&s.Suite)
-}
-
-func (s *SQLiteManagerSuite) TearDownSuite() {
-	s.objects.stop(&s.Suite)
+	s.objects = testenv.S3Mock(s.T()).Store(s.T())
 }
 
 func (s *SQLiteManagerSuite) SetupTest() {
@@ -49,8 +47,8 @@ func (s *SQLiteManagerSuite) SetupTest() {
 
 	s.Manager = newManager(s.T(), noteRepo, expired)
 	s.LinkManager = newLinkManager(s.T(), linkRepo, expired)
-	s.FileManager = newFileManager(&s.Suite, sqliterepo.NewFileRepository(s.db), expired, s.objects.store)
-	s.Objects = s.objects.store
+	s.FileManager = newFileManager(&s.Suite, sqliterepo.NewFileRepository(s.db), expired, s.objects)
+	s.Objects = s.objects
 	s.RevealStore = auth.NewRevealManager(sqliterepo.NewRevealRepository(s.db), slog.Default(), time.Now)
 	s.DB = s.db
 }

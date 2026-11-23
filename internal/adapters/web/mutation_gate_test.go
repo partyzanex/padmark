@@ -134,7 +134,7 @@ func (s *FileHandlerSuite) TestMutationGate_PeekError_StopsMutation() {
 	for _, route := range cases {
 		for _, peekErr := range gatePeekErrors() {
 			s.Run(route.name+"/"+peekErr.name, func() {
-				router := s.newAuthRouter(NewMockAuthManager(s.ctrl))
+				router := s.newAuthRouter(s.auth)
 
 				route.mutate(peekErr.err)
 

@@ -43,12 +43,73 @@ type FileManager interface {
 	MaxSize() int64
 }
 
+// fileMode tells whether file publishing is on: HandlerConfig.Files is set.
+type fileMode bool
+
+// Values of fileMode.
+const (
+	filesOff fileMode = false
+	filesOn  fileMode = true
+)
+
+// fileSystem is the file publishing of a Handler: the configured FileManager, or disabledFiles
+// when files are off, and the mode that tells the two apart.
+type fileSystem struct {
+	manager FileManager
+	mode    fileMode
+}
+
+// newFileSystem converts the optional HandlerConfig.Files into a value once, so no handler needs
+// a nil check.
+func newFileSystem(manager FileManager) fileSystem {
+	if manager == nil {
+		return fileSystem{manager: disabledFiles{}, mode: filesOff}
+	}
+
+	return fileSystem{manager: manager, mode: filesOn}
+}
+
+// disabledFiles is the file usecase of a server without object storage (no --s3-endpoint). Each
+// method returns domain.ErrFeatureNotSupported, so a handler that calls it gets the "files are
+// off" answer and never a nil dereference. MaxSize returns 0: the error page then gives no limit.
+type disabledFiles struct{}
+
+func (disabledFiles) Create(context.Context, string, io.Reader, files.CreateOptions) (*domain.File, error) {
+	return nil, domain.ErrFeatureNotSupported
+}
+
+func (disabledFiles) Inspect(context.Context, string, domain.Reader) (*domain.File, error) {
+	return nil, domain.ErrFeatureNotSupported
+}
+
+func (disabledFiles) Settings(context.Context, string, domain.Reader) (*domain.File, error) {
+	return nil, domain.ErrFeatureNotSupported
+}
+
+func (disabledFiles) Download(context.Context, string, domain.Reader) (*files.Download, error) {
+	return nil, domain.ErrFeatureNotSupported
+}
+
+func (disabledFiles) Delete(context.Context, string, string, domain.Reader) error {
+	return domain.ErrFeatureNotSupported
+}
+
+func (disabledFiles) Update(
+	context.Context, string, string, domain.Reader, files.UpdateOptions,
+) (*domain.File, error) {
+	return nil, domain.ErrFeatureNotSupported
+}
+
+func (disabledFiles) MaxSize() int64 { return 0 }
+
 // FileHandler serves file upload, metadata, download and delete. Files are an optional
-// feature: without a FileManager (HandlerConfig.Files is nil because no object storage is
-// configured) the routes answer 503.
+// feature: without object storage (HandlerConfig.Files is nil) RegisterRoutes gives each file
+// route the "files are off" answer: 503 in JSON for the API routes and the error page for the
+// browser pages.
 type FileHandler struct {
 	*common
 
+	// manager is the file usecase, or disabledFiles when files are off (common.fileMode).
 	manager FileManager
 	lockout *middleware.FailLockoutCache
 	// pages holds the templates of the browser pages (web_file.go).
@@ -59,8 +120,8 @@ type FileHandler struct {
 	idleTimeout time.Duration
 }
 
-// newFileHandler builds the FileHandler. manager is nil when files are off. A zero field of
-// limits selects its default.
+// newFileHandler builds the FileHandler. manager is disabledFiles when files are off. A zero
+// field of limits selects its default.
 func newFileHandler(
 	c *common, manager FileManager, lockout *middleware.FailLockoutCache, limits FileTransferLimits,
 ) *FileHandler {
@@ -75,29 +136,26 @@ func newFileHandler(
 // same-origin check as the note and link mutations. POST is multipart, which a cross-site form
 // can send without a CORS preflight, so it also has the same-origin check. POST
 // /files/{id}/download is the download form of the file page; like the reveal form of a burn
-// note, it has the CSRF guard.
+// note, it has the CSRF guard. When files are off, each route keeps its middleware and gets the
+// "files are off" answer instead of the handler (apiRoute, pageRoute).
 func (h *FileHandler) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /files", h.CreateFilePage)
-	mux.HandleFunc("GET /files/{id}/edit", h.EditFilePage)
-	mux.Handle("POST /files", middleware.RequireSameOrigin(h.log, http.HandlerFunc(h.Upload)))
-	mux.HandleFunc("GET /files/{id}", h.Metadata)
-	mux.HandleFunc("GET /files/{id}/download", h.DownloadFile)
-	mux.Handle("POST /files/{id}/download", middleware.RequireSameOrigin(h.log, h.guard(h.DownloadFileForm)))
+	api, page := h.apiRoute, h.pageRoute
+
+	mux.HandleFunc("GET /files", page(h.CreateFilePage))
+	mux.HandleFunc("GET /files/{id}/edit", page(h.EditFilePage))
+	mux.Handle("POST /files", middleware.RequireSameOrigin(h.log, api(h.Upload)))
+	mux.HandleFunc("GET /files/{id}", api(h.Metadata))
+	mux.HandleFunc("GET /files/{id}/download", api(h.DownloadFile))
+	mux.Handle("POST /files/{id}/download", middleware.RequireSameOrigin(h.log, h.guard(page(h.DownloadFileForm))))
 	mux.Handle("PUT /files/{id}", middleware.RequireSameOrigin(h.log,
-		middleware.WithFailLockout(h.lockout, h.trustedProxies, h.log, http.HandlerFunc(h.UpdateFile))))
+		middleware.WithFailLockout(h.lockout, h.trustedProxies, h.log, api(h.UpdateFile))))
 	mux.Handle("DELETE /files/{id}", middleware.RequireSameOrigin(h.log,
-		middleware.WithFailLockout(h.lockout, h.trustedProxies, h.log, http.HandlerFunc(h.Delete))))
+		middleware.WithFailLockout(h.lockout, h.trustedProxies, h.log, api(h.Delete))))
 }
 
 // Metadata handles GET /files/{id}: the file description in JSON with the download count. It
 // does not count as a download and does not consume a burn-after-download file.
 func (h *FileHandler) Metadata(w http.ResponseWriter, r *http.Request) {
-	if h.manager == nil {
-		h.writeError(w, r, domain.ErrFeatureNotSupported)
-
-		return
-	}
-
 	file, err := h.manager.Inspect(r.Context(), r.PathValue("id"), h.reader(r))
 	if err != nil {
 		if errors.Is(err, domain.ErrForbidden) {
@@ -116,12 +174,6 @@ func (h *FileHandler) Metadata(w http.ResponseWriter, r *http.Request) {
 
 // Delete handles DELETE /files/{id} with the X-Edit-Code header, or by the owner.
 func (h *FileHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	if h.manager == nil {
-		h.writeError(w, r, domain.ErrFeatureNotSupported)
-
-		return
-	}
-
 	err := h.manager.Delete(r.Context(), r.PathValue("id"), editCodeHeader(r), h.reader(r))
 	if err != nil {
 		h.writeAPIError(w, r, err)
@@ -130,6 +182,30 @@ func (h *FileHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// apiRoute returns next when files are on. When files are off, it returns a handler that answers
+// each request with the JSON 503 of domain.ErrFeatureNotSupported before it reads the body.
+func (h *FileHandler) apiRoute(next http.HandlerFunc) http.HandlerFunc {
+	if h.fileMode == filesOn {
+		return next
+	}
+
+	return func(w http.ResponseWriter, r *http.Request) {
+		h.writeError(w, r, domain.ErrFeatureNotSupported)
+	}
+}
+
+// pageRoute is apiRoute for the browser pages: when files are off, the page tells the user that
+// files are off.
+func (h *FileHandler) pageRoute(next http.HandlerFunc) http.HandlerFunc {
+	if h.fileMode == filesOn {
+		return next
+	}
+
+	return func(w http.ResponseWriter, r *http.Request) {
+		h.writeFileErrorPage(w, r, domain.ErrFeatureNotSupported)
+	}
 }
 
 // logDeadlineError logs a failure to move a transfer deadline. Only the server timeouts then

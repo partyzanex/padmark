@@ -100,11 +100,9 @@ func CallerIDFromCtx(ctx context.Context) uuid.UUID {
 }
 
 // AuthenticatedFromCtx reports whether the request resolved to a TOTP session or API-token user
-// — the context-only counterpart of common.isAuthenticated's context check, for ogen handlers
-// (see UserFromCtx). Unlike common.isAuthenticated, it does NOT special-case "no auth configured
-// at all" (context has no way to know that). Callers that need that must use
-// common.isAuthenticated instead; this exists for handlers that only see a context.Context,
-// e.g. OgenHandler.GetLink.
+// (see UserFromCtx). The context is the one source of the caller for the browser handlers and for
+// the ogen handlers, which see only a context.Context. It does not tell whether the account
+// system is on; the handlers know that from their configuration.
 func AuthenticatedFromCtx(ctx context.Context) bool {
 	return UserFromCtx(ctx) != nil
 }

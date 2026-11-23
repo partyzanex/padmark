@@ -3,6 +3,8 @@
 package integration
 
 import (
+	"testing"
+
 	"github.com/stretchr/testify/suite"
 
 	"github.com/partyzanex/padmark/internal/testutil"
@@ -24,4 +26,14 @@ type AuthSuite struct {
 	Users    auth.UserStore
 	Invites  auth.InviteStore
 	Sessions auth.SessionStore
+}
+
+// StackFlowSuite runs the flows that build their own stacks, for example one stack for each
+// subtest.
+type StackFlowSuite struct {
+	suite.Suite
+}
+
+func TestStackFlowSuite(t *testing.T) {
+	suite.Run(t, new(StackFlowSuite))
 }

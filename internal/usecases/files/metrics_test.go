@@ -14,16 +14,15 @@ import (
 // The tests in this file replace the permissive metrics mock with a strict one. Thus an
 // unexpected or a missing metric call fails the test.
 
-// strictMetrics attaches a metrics mock without permitted calls and returns it.
-func (s *ManagerSuite) strictMetrics() *MockMetrics {
-	strict := NewMockMetrics(s.ctrl)
-	s.manager.WithMetrics(strict)
+// useStrictMetrics attaches the metrics mock without permitted calls and returns it.
+func (s *ManagerSuite) useStrictMetrics() *MockMetrics {
+	s.manager.WithMetrics(s.strictMetrics)
 
-	return strict
+	return s.strictMetrics
 }
 
 func (s *ManagerSuite) TestMetrics_CreateCountsUploadAndSize() {
-	metrics := s.strictMetrics()
+	metrics := s.useStrictMetrics()
 
 	s.expectUpload("hello")
 	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
@@ -36,7 +35,7 @@ func (s *ManagerSuite) TestMetrics_CreateCountsUploadAndSize() {
 }
 
 func (s *ManagerSuite) TestMetrics_PutFailureIsStorageError() {
-	metrics := s.strictMetrics()
+	metrics := s.useStrictMetrics()
 
 	s.objects.EXPECT().Put(gomock.Any(), gomock.Any(), gomock.Any()).Return(errors.New("connection refused"))
 	s.objects.EXPECT().Delete(gomock.Any(), gomock.Any()).Return(nil)
@@ -47,7 +46,7 @@ func (s *ManagerSuite) TestMetrics_PutFailureIsStorageError() {
 }
 
 func (s *ManagerSuite) TestMetrics_TooLargeFileIsNotStorageError() {
-	s.strictMetrics()
+	s.useStrictMetrics()
 
 	s.objects.EXPECT().Put(gomock.Any(), gomock.Any(), gomock.Any()).
 		DoAndReturn(func(_ context.Context, _ string, body io.Reader) error {
@@ -62,7 +61,7 @@ func (s *ManagerSuite) TestMetrics_TooLargeFileIsNotStorageError() {
 }
 
 func (s *ManagerSuite) TestMetrics_StatFailureIsStorageError() {
-	metrics := s.strictMetrics()
+	metrics := s.useStrictMetrics()
 
 	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any(), testNow()).Return(storedFile(false), nil)
 	s.objects.EXPECT().Stat(gomock.Any(), "obj").Return(errors.New("timeout"))
@@ -73,7 +72,7 @@ func (s *ManagerSuite) TestMetrics_StatFailureIsStorageError() {
 }
 
 func (s *ManagerSuite) TestMetrics_MissingObjectIsNotStorageError() {
-	s.strictMetrics()
+	s.useStrictMetrics()
 
 	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any(), testNow()).Return(storedFile(false), nil)
 	s.objects.EXPECT().Stat(gomock.Any(), "obj").Return(domain.ErrNotFound)
@@ -84,7 +83,7 @@ func (s *ManagerSuite) TestMetrics_MissingObjectIsNotStorageError() {
 
 func (s *ManagerSuite) TestMetrics_GetFailureIsStorageError() {
 	ctx := s.T().Context()
-	metrics := s.strictMetrics()
+	metrics := s.useStrictMetrics()
 
 	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any(), testNow()).Return(storedFile(false), nil)
 	s.objects.EXPECT().Stat(gomock.Any(), "obj").Return(nil)
@@ -100,7 +99,7 @@ func (s *ManagerSuite) TestMetrics_GetFailureIsStorageError() {
 
 func (s *ManagerSuite) TestMetrics_BurnCountsDownloadAndDeletion() {
 	ctx := s.T().Context()
-	metrics := s.strictMetrics()
+	metrics := s.useStrictMetrics()
 
 	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any(), testNow()).Return(storedFile(true), nil)
 	s.expectObject("hello")
@@ -119,7 +118,7 @@ func (s *ManagerSuite) TestMetrics_BurnCountsDownloadAndDeletion() {
 // TestMetrics_DeleteKeepsObjectAfterStorageError shows the order: the record goes first, so a
 // failed object delete leaves only an object that nobody can read. The counter is the signal.
 func (s *ManagerSuite) TestMetrics_DeleteKeepsObjectAfterStorageError() {
-	metrics := s.strictMetrics()
+	metrics := s.useStrictMetrics()
 
 	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any(), testNow()).Return(storedFile(false), nil)
 	gomock.InOrder(
@@ -133,7 +132,7 @@ func (s *ManagerSuite) TestMetrics_DeleteKeepsObjectAfterStorageError() {
 }
 
 func (s *ManagerSuite) TestMetrics_RecordFailureRemovesObject() {
-	metrics := s.strictMetrics()
+	metrics := s.useStrictMetrics()
 
 	s.expectUpload("x")
 	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(errors.New("disk full"))

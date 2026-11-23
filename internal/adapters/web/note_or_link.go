@@ -63,7 +63,7 @@ func (h *Handler) serveLink(w http.ResponseWriter, r *http.Request, id string) {
 // content (see wantsFilePage). FilePage and serveFile apply the access rules. When files are off,
 // a file slug gets the not-found answer of a slug without a record.
 func (h *Handler) serveFileOrPage(w http.ResponseWriter, r *http.Request, id string) {
-	if h.files.manager == nil {
+	if h.fileMode == filesOff {
 		h.writeNoteError(w, r, domain.ErrNotFound)
 
 		return

@@ -227,8 +227,8 @@ type common struct {
 	errorTmpl *template.Template
 	// sessionChecker resolves a session for the page header and the auth middleware.
 	sessionChecker middleware.SessionChecker
-	// fileMgr is the file usecase, or nil when files are off. The header shows the file tab
-	// and the success page reads the file name only when it is set (HandlerConfig.Files).
+	// fileMgr is the file usecase, or disabledFiles when files are off (HandlerConfig.Files).
+	// The success page reads the file name through it.
 	fileMgr        FileManager
 	forcedScheme   string
 	csrfSecret     []byte
@@ -240,6 +240,8 @@ type common struct {
 	// accounts tells whether the account system is on (HandlerConfig.Accounts). Without it no
 	// privacy level applies: reader sets domain.Reader.SkipPrivacy.
 	accounts accountMode
+	// fileMode tells whether file publishing is on: the header shows the file tab only then.
+	fileMode fileMode
 }
 
 // sessionMaxAge returns the TOTP session cookie's Max-Age: the configured SessionTTL (see
@@ -463,12 +465,14 @@ func NewHandler(cfg *HandlerConfig) (*Handler, error) {
 	}
 
 	accounts := newAccountSystem(cfg.Accounts)
+	files := newFileSystem(cfg.Files)
 
 	cmn := &common{
 		log:             cfg.Log,
 		errorTmpl:       parseTmpl("error", errorTmplSrc),
 		sessionChecker:  accounts.manager,
-		fileMgr:         cfg.Files,
+		fileMgr:         files.manager,
+		fileMode:        files.mode,
 		forcedScheme:    cfg.ForcedScheme,
 		csrfSecret:      csrfSecret,
 		trustedProxies:  cfg.TrustedProxies,
@@ -489,7 +493,7 @@ func NewHandler(cfg *HandlerConfig) (*Handler, error) {
 		AdminHandler: newAdminHandler(cmn, accounts.manager),
 		PageHandler:  newPageHandler(cmn, indexTmpl),
 		// Files share the edit-code lockout with notes and links: one slug namespace.
-		files: newFileHandler(cmn, cfg.Files, noteHandler.lockout, cfg.FileTransfer),
+		files: newFileHandler(cmn, files.manager, noteHandler.lockout, cfg.FileTransfer),
 		api:   newOgenHandler(cfg, accounts),
 	}, nil
 }

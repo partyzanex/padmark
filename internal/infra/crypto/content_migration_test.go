@@ -86,30 +86,30 @@ func TestKeyRegistryCheck_BindsInstallationAndKeyID(t *testing.T) {
 	require.Error(t, ring.VerifyKeyCheck("installation-a", "key", check))
 }
 
-func TestKeyringCreation_ExclusiveAndPrivate(t *testing.T) {
+func (s *ContentKeyringFileSuite) TestKeyringCreation_ExclusiveAndPrivate() {
 	ring := &ContentKeyring{
 		Active: "first",
 		Keys:   nil,
 	}
-	require.NoError(t, ring.AddKey("first"))
-	require.Len(t, ring.Keys["first"], 32)
-	require.NoError(t, ring.AddKey("second"))
-	require.NotEqual(t, ring.Keys["first"], ring.Keys["second"])
-	require.Error(t, ring.AddKey("first"))
-	require.Error(t, ring.AddKey("bad$key"))
-	path := filepath.Join(t.TempDir(), "content-keys.json")
-	require.NoError(t, WriteContentKeyring(path, ring))
+	s.Require().NoError(ring.AddKey("first"))
+	s.Require().Len(ring.Keys["first"], 32)
+	s.Require().NoError(ring.AddKey("second"))
+	s.Require().NotEqual(ring.Keys["first"], ring.Keys["second"])
+	s.Require().Error(ring.AddKey("first"))
+	s.Require().Error(ring.AddKey("bad$key"))
+	path := filepath.Join(s.T().TempDir(), "content-keys.json")
+	s.Require().NoError(WriteContentKeyring(path, ring))
 	info, err := os.Stat(path)
-	require.NoError(t, err)
-	require.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+	s.Require().NoError(err)
+	s.Require().Equal(os.FileMode(0o600), info.Mode().Perm())
 
 	loaded, err := loadStrictKeyring(path)
-	require.NoError(t, err)
-	require.Equal(t, ring, loaded)
-	require.Error(t, WriteContentKeyring(path, ring), "must not overwrite an existing keyring")
+	s.Require().NoError(err)
+	s.Require().Equal(ring, loaded)
+	s.Require().Error(WriteContentKeyring(path, ring), "must not overwrite an existing keyring")
 	files, err := filepath.Glob(filepath.Join(filepath.Dir(path), ".padmark-keyring-*"))
-	require.NoError(t, err)
-	require.Empty(t, files)
+	s.Require().NoError(err)
+	s.Require().Empty(files)
 }
 
 func TestIsVersionedContent(t *testing.T) {

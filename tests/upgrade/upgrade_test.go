@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 	"github.com/uptrace/bun"
 
 	"github.com/partyzanex/padmark/internal/domain"
@@ -30,6 +31,15 @@ import (
 )
 
 var hashedID = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
+// UpgradeSuite replays the upgrade from the v0.1.6 dumps on each backend.
+type UpgradeSuite struct {
+	suite.Suite
+}
+
+func TestUpgradeSuite(t *testing.T) {
+	suite.Run(t, new(UpgradeSuite))
+}
 
 // repositories are the dialect's note and link storage, as wired by serve.
 type repositories struct {
@@ -52,7 +62,7 @@ func runUpgrade(t *testing.T, db *bun.DB, repos repositories, fixture []legacyNo
 		Hasher:       crypto.NewEditCodeHasher(testutil.Argon2Params(), slog.New(slog.DiscardHandler)),
 		ExpiredSlugs: expiredslugs.New(repos.notes, repos.links), Log: slog.New(slog.DiscardHandler),
 		Now: time.Now,
-	}, true)
+	}, domain.DefaultMaxContentLength, true)
 
 	assertNotesReadable(t, manager, fixture)
 	assertEditCodes(t, manager, fixture)

@@ -288,7 +288,7 @@ func isLinkPath(trimmed string) bool {
 // names a built-in route (namedRoutes) is never a public note: those keep requiring auth, so
 // /edit/{id}, /admin/... and friends are not opened up by the multi-segment slug support.
 // Any other single-segment path is a candidate public note by design — slugs and route names
-// share one flat namespace, kept apart only by reservedSlugPrefixes (internal/usecases/notes) —
+// share one flat namespace, kept apart only by domain.ReservedSlugPrefixes —
 // and whether the matched note is actually served publicly is decided downstream, per-note, by
 // the notes usecase (notes.Manager.Read).
 func isNoteIDPath(trimmed string, namedRoutes map[string]struct{}) bool {

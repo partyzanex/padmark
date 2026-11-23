@@ -11,15 +11,11 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
-	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/wait"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect"
 
 	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/infra/crypto"
-	"github.com/partyzanex/padmark/internal/infra/expiredslugs"
-	"github.com/partyzanex/padmark/internal/infra/render"
 	pgrepo "github.com/partyzanex/padmark/internal/infra/storage/postgres"
 	"github.com/partyzanex/padmark/internal/infra/storage/s3store"
 	sqliterepo "github.com/partyzanex/padmark/internal/infra/storage/sqlite"
@@ -27,44 +23,16 @@ import (
 	"github.com/partyzanex/padmark/internal/usecases/files"
 	"github.com/partyzanex/padmark/internal/usecases/links"
 	"github.com/partyzanex/padmark/internal/usecases/notes"
+	"github.com/partyzanex/padmark/tests/internal/testenv"
 )
 
-// Test values for the throwaway S3 container only; s3mock accepts any credentials.
 const (
-	s3AccessKey   = "padmark-test"
-	s3SecretKey   = "padmark-test-secret"
-	s3Bucket      = "padmark-files"
 	maxFileSize   = 1 << 20
 	createTimeout = 30 * time.Second
 )
 
 // sharedResources returns the three tables that share slug_namespace.
 func sharedResources() []string { return []string{"notes", "links", "files"} }
-
-// startObjects starts adobe/s3mock with the test bucket. The test cleanup stops it.
-func startObjects(t *testing.T) *s3store.Store {
-	t.Helper()
-
-	container, err := testcontainers.Run(t.Context(), "adobe/s3mock:3.12.0",
-		testcontainers.WithEnv(map[string]string{"initialBuckets": s3Bucket}),
-		testcontainers.WithExposedPorts("9090/tcp"),
-		testcontainers.WithWaitStrategy(wait.ForListeningPort("9090/tcp").WithStartupTimeout(time.Minute)),
-	)
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, testcontainers.TerminateContainer(container)) })
-
-	hostPort, err := container.PortEndpoint(t.Context(), "9090/tcp", "")
-	require.NoError(t, err)
-
-	// A remote Docker host is not loopback; the container is a throwaway test store.
-	store, err := s3store.New(&s3store.Config{
-		Endpoint: "http://" + hostPort, Bucket: s3Bucket, Region: "us-east-1",
-		AccessKey: s3AccessKey, SecretKey: s3SecretKey, PathStyle: true,
-	}, slog.New(slog.DiscardHandler), s3store.AllowInsecureHTTP())
-	require.NoError(t, err)
-
-	return store
-}
 
 type pausedFiles struct {
 	files.Storage
@@ -93,37 +61,31 @@ type slugEnv struct {
 func newSlugEnv(t *testing.T, db *bun.DB, objects *s3store.Store, gate *createGate) *slugEnv {
 	t.Helper()
 
-	noteRepo, linkRepo := repositories(db)
+	managers := testenv.NewManagers(t, db, testenv.WithCustomSlugs(),
+		testenv.WithNoteStorage(func(storage notes.Storage) notes.Storage {
+			return &pausedNotes{Storage: storage, gate: gate}
+		}),
+		testenv.WithLinkStorage(func(storage links.Storage) links.Storage {
+			return &pausedLinks{Storage: storage, gate: gate}
+		}))
 
 	var fileRepo files.Storage = sqliterepo.NewFileRepository(db)
 	if db.Dialect().Name() == dialect.PG {
 		fileRepo = pgrepo.NewFileRepository(db)
 	}
 
-	log := slog.New(slog.DiscardHandler)
-	expired := expiredslugs.New(noteRepo, linkRepo)
-	hasher := crypto.NewEditCodeHasher(testutil.Argon2Params(), slog.New(slog.DiscardHandler))
 	fileManager := files.NewManager(&files.Deps{
 		Storage:      &pausedFiles{Storage: fileRepo, gate: gate},
 		Objects:      objects,
 		Cipher:       crypto.NewFileCipher(),
 		Encryptor:    testutil.ContentEncryptor(t, "file"),
-		Hasher:       hasher,
-		ExpiredSlugs: expired,
-		Log:          log,
+		Hasher:       crypto.NewEditCodeHasher(testutil.Argon2Params(), slog.New(slog.DiscardHandler)),
+		ExpiredSlugs: managers.Expired,
+		Log:          slog.New(slog.DiscardHandler),
 		Now:          time.Now,
 	}, maxFileSize, true)
-	expired.WithFiles(fileManager)
-	noteManager := notes.NewManager(&notes.Deps{
-		Storage: &pausedNotes{Storage: noteRepo, gate: gate}, Renderer: render.NewRenderer(),
-		Encryptor: testutil.ContentEncryptor(t, "note"), Hasher: hasher, ExpiredSlugs: expired, Log: log,
-		Now: time.Now,
-	}, true)
-	linkManager := links.NewManager(&links.Deps{
-		Storage: &pausedLinks{Storage: linkRepo, gate: gate}, Encryptor: testutil.ContentEncryptor(t, "link"),
-		Hasher: hasher, ExpiredSlugs: expired, Log: log,
-		Now: time.Now,
-	}, true)
+	managers.Expired.WithFiles(fileManager)
+	noteManager, linkManager := managers.Notes, managers.Links
 
 	return &slugEnv{db: db, notes: noteManager, links: linkManager, files: fileManager}
 }

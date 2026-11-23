@@ -2,7 +2,6 @@ package web
 
 import (
 	"bytes"
-	"context"
 	"log/slog"
 	net_http "net/http"
 	"net/http/httptest"
@@ -88,7 +87,7 @@ func TestAPISpec_OK_SetsContentType(t *testing.T) {
 func TestNoPinger(t *testing.T) {
 	var pinger Pinger = NoPinger{}
 
-	assert.NoError(t, pinger.PingContext(context.Background()))
+	assert.NoError(t, pinger.PingContext(t.Context()))
 }
 
 // ogenSpy stands in for the generated ogen server. It counts the requests that reach it.

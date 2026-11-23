@@ -456,9 +456,10 @@ func (m *Manager) resolveLink(ctx context.Context, slug string) (*domain.Link, e
 	return link, nil
 }
 
-// evictCache removes dbID from the optional Cache, if one is attached. Called after Update/Delete and
-// after Redirect deletes an expired link. Other replicas also check storage and
-// ciphertext before using their own cache, so correctness does not rely on eviction.
+// evictCache removes dbID from the optional Cache, if one is attached. Called after Update/Delete,
+// after Follow deletes an expired link and after an expired record releases its slug. Other
+// replicas also check storage and ciphertext before using their own cache, so correctness does
+// not rely on eviction.
 func (m *Manager) evictCache(dbID string) {
 	if m.cache != nil {
 		m.cache.Delete(dbID)

@@ -142,14 +142,15 @@ type Manager struct {
 	// allowCustomSlugs gates user-supplied (human-readable) slugs. When false, custom slugs are
 	// rejected and only server-generated random slugs are issued.
 	allowCustomSlugs domain.CustomSlugSetting
-	// maxContentLength is the content limit in characters (WithMaxContentLength).
+	// maxContentLength is the content limit in characters (--max-content-length).
 	maxContentLength int
 }
 
-// NewManager creates a new Manager. allowCustomSlugs enables user-supplied slugs; when false, a
-// create request carrying a slug is rejected with domain.ErrCustomSlugDisabled (custom public
-// URLs are easier to guess).
-func NewManager(deps *Deps, allowCustomSlugs bool) *Manager {
+// NewManager creates a new Manager. maxContentLength is the note content limit in characters
+// (--max-content-length). allowCustomSlugs enables user-supplied slugs; when false, a create
+// request carrying a slug is rejected with domain.ErrCustomSlugDisabled (custom public URLs are
+// easier to guess).
+func NewManager(deps *Deps, maxContentLength int, allowCustomSlugs bool) *Manager {
 	return &Manager{
 		storage:          deps.Storage,
 		renderer:         deps.Renderer,
@@ -161,16 +162,8 @@ func NewManager(deps *Deps, allowCustomSlugs bool) *Manager {
 		burn:             newBurner(deps),
 		renderCache:      noRenderCache{},
 		allowCustomSlugs: domain.CustomSlugSetting(allowCustomSlugs),
-		maxContentLength: domain.DefaultMaxContentLength,
+		maxContentLength: maxContentLength,
 	}
-}
-
-// WithMaxContentLength sets the note content limit in characters (--max-content-length). Call it
-// at composition time.
-func (m *Manager) WithMaxContentLength(limit int) *Manager {
-	m.maxContentLength = limit
-
-	return m
 }
 
 // WithRenderCache attaches a RenderCache for rendered note HTML. The default caches nothing, so

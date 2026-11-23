@@ -17,9 +17,44 @@ import (
 	padmark "github.com/partyzanex/padmark/pkg/client"
 )
 
-func TestLinkUpdateFlow(t *testing.T) {
+func (s *OwnerFlowSuite) TestLinkUpdateFlow() {
+	f := newLinkUpdateFlow(s.T(), s.env)
+	created := f.createAndUpdate()
+	f.clearWithClient(created)
+	f.restrictAndExpire(created)
+}
+
+// createdLink is the create answer of a short link.
+type createdLink struct {
+	ID        string    `json:"id"`
+	EditCode  string    `json:"edit_code"`
+	ExpiresAt time.Time `json:"expires_at"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// updatedLink is the read and update answer of a short link.
+type updatedLink struct {
+	ID             string     `json:"id"`
+	TargetURL      string     `json:"target_url"`
+	Views          int        `json:"views"`
+	ExpiresAt      *time.Time `json:"expires_at"`
+	CreatedAt      time.Time  `json:"created_at"`
+	DirectRedirect *bool      `json:"direct_redirect"`
+}
+
+// linkUpdateFlow holds the stack and the API keys of TestLinkUpdateFlow: the admin and the
+// invited owner of the link.
+type linkUpdateFlow struct {
+	t        *testing.T
+	baseURL  string
+	adminKey string
+	ownerKey string
+}
+
+func newLinkUpdateFlow(t *testing.T, env ownerFlowEnv) *linkUpdateFlow {
+	t.Helper()
+
 	ctx := t.Context()
-	env := newOwnerFlowEnv(t, "linkupdateflow")
 	_, err := env.authMgr.AcceptFirstAdmin(ctx, "admin", ownerFlowPassword)
 	require.NoError(t, err)
 	admin, err := env.users.GetByUsername(ctx, "admin")
@@ -41,63 +76,61 @@ func TestLinkUpdateFlow(t *testing.T) {
 	}, 0)
 	require.NoError(t, err)
 
-	request := func(method, path, key, body string, status int) []byte {
-		t.Helper()
+	return &linkUpdateFlow{t: t, baseURL: env.baseURL, adminKey: adminKey, ownerKey: ownerKey}
+}
 
-		req, reqErr := http.NewRequestWithContext(ctx, method, env.baseURL+path, strings.NewReader(body))
-		require.NoError(t, reqErr)
-		req.Header.Set("Content-Type", "application/json")
+// request sends one JSON request without following redirects, checks its status and returns the
+// body.
+func (f *linkUpdateFlow) request(method, path, key, body string, status int) []byte {
+	f.t.Helper()
 
-		req.Header.Set("Accept", "application/json")
+	req, reqErr := http.NewRequestWithContext(f.t.Context(), method, f.baseURL+path, strings.NewReader(body))
+	require.NoError(f.t, reqErr)
+	req.Header.Set("Content-Type", "application/json")
 
-		if key != "" {
-			req.Header.Set("Authorization", "Bearer "+key)
-		}
+	req.Header.Set("Accept", "application/json")
 
-		client := &http.Client{
-			CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse },
-
-			Transport: nil, Jar: nil, Timeout: 0,
-		}
-
-		resp, doErr := client.Do(req)
-		require.NoError(t, doErr)
-
-		defer resp.Body.Close()
-
-		raw, readErr := io.ReadAll(resp.Body)
-		require.NoError(t, readErr)
-		require.Equal(t, status, resp.StatusCode, string(raw))
-
-		return raw
+	if key != "" {
+		req.Header.Set("Authorization", "Bearer "+key)
 	}
 
-	var created struct {
-		ID        string    `json:"id"`
-		EditCode  string    `json:"edit_code"`
-		ExpiresAt time.Time `json:"expires_at"`
-		CreatedAt time.Time `json:"created_at"`
+	client := &http.Client{
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse },
+
+		Transport: nil, Jar: nil, Timeout: 0,
 	}
 
-	raw := request(http.MethodPost, "/links", ownerKey,
+	resp, doErr := client.Do(req)
+	require.NoError(f.t, doErr)
 
+	defer resp.Body.Close()
+
+	raw, readErr := io.ReadAll(resp.Body)
+	require.NoError(f.t, readErr)
+	require.Equal(f.t, status, resp.StatusCode, string(raw))
+
+	return raw
+}
+
+// createAndUpdate creates the link as the owner and checks the owner update without the edit
+// code and the refused updates. It returns the create answer.
+func (f *linkUpdateFlow) createAndUpdate() createdLink {
+	t := f.t
+
+	var created createdLink
+
+	raw := f.request(http.MethodPost, "/links", f.ownerKey,
 		`{"target_url":"https://example.com/old","ttl":3600,"direct_redirect":true}`, http.StatusCreated)
 	require.NoError(t, json.Unmarshal(raw, &created))
 	require.NotEmpty(t, created.EditCode)
 	path := "/links/" + created.ID
-	request(http.MethodGet, "/r/"+created.ID, "", "", http.StatusMovedPermanently)
+	f.request(http.MethodGet, "/r/"+created.ID, "", "", http.StatusMovedPermanently)
 
 	// The owner bypasses edit_code while optional fields, counters and creation time survive.
-	raw = request(http.MethodPut, path, ownerKey, `{"target_url":"https://example.com/new"}`, http.StatusOK)
+	raw = f.request(http.MethodPut, path, f.ownerKey, `{"target_url":"https://example.com/new"}`, http.StatusOK)
 
-	var updated struct {
-		ID             string     `json:"id"`
-		TargetURL      string     `json:"target_url"`
-		Views          int        `json:"views"`
-		ExpiresAt      *time.Time `json:"expires_at"`
-		CreatedAt      time.Time  `json:"created_at"`
-		DirectRedirect *bool      `json:"direct_redirect"`
-	}
+	var updated updatedLink
+
 	require.NoError(t, json.Unmarshal(raw, &updated))
 	require.Equal(t, created.ID, updated.ID)
 	require.Equal(t, 1, updated.Views)
@@ -107,14 +140,23 @@ func TestLinkUpdateFlow(t *testing.T) {
 	require.True(t, *updated.DirectRedirect)
 	require.NotContains(t, string(raw), "edit_code")
 
-	request(http.MethodPut, path, adminKey, `{"target_url":"https://example.com/admin"}`, http.StatusForbidden)
-	request(http.MethodPut, path, "", `{"target_url":"https://example.com/wrong","edit_code":"wrong"}`,
+	f.request(http.MethodPut, path, f.adminKey, `{"target_url":"https://example.com/admin"}`, http.StatusForbidden)
+	f.request(http.MethodPut, path, "", `{"target_url":"https://example.com/wrong","edit_code":"wrong"}`,
 		http.StatusForbidden)
 
-	request(http.MethodPut, path, ownerKey, `{"target_url":"javascript:alert(1)"}`, http.StatusBadRequest)
+	f.request(http.MethodPut, path, f.ownerKey, `{"target_url":"javascript:alert(1)"}`, http.StatusBadRequest)
+
+	return created
+}
+
+// clearWithClient clears the expiry and the redirect mode with the generated client and the
+// original edit code.
+func (f *linkUpdateFlow) clearWithClient(created createdLink) {
+	t := f.t
+	path := "/links/" + created.ID
 
 	// The generated client can use the original code and explicitly clear both nullable fields.
-	client, err := padmark.NewClient(env.baseURL)
+	client, err := padmark.NewClient(f.baseURL)
 	require.NoError(t, err)
 	target, err := url.Parse("https://example.com/client")
 
@@ -129,7 +171,7 @@ func TestLinkUpdateFlow(t *testing.T) {
 		Value: false, Set: false, Null: false,
 	}
 	direct.SetToNull()
-	res, err := client.UpdateLink(ctx, &padmark.UpdateLinkRequest{
+	res, err := client.UpdateLink(t.Context(), &padmark.UpdateLinkRequest{
 		TargetURL: *target, EditCode: padmark.NewOptString(created.EditCode), TTL: ttl, DirectRedirect: direct,
 
 		Privacy: padmark.OptUpdateLinkRequestPrivacy{Value: "", Set: false},
@@ -142,27 +184,37 @@ func TestLinkUpdateFlow(t *testing.T) {
 	require.Equal(t, 1, link.Views)
 
 	// The bare slug serves the same link: no note has this id in the shared namespace.
-	request(http.MethodGet, "/"+created.ID, "", "", http.StatusMovedPermanently)
+	f.request(http.MethodGet, "/"+created.ID, "", "", http.StatusMovedPermanently)
 
-	raw = request(http.MethodGet, path, "", "", http.StatusOK)
-	updated.ExpiresAt = nil
-	updated.DirectRedirect = nil
+	raw := f.request(http.MethodGet, path, "", "", http.StatusOK)
+
+	var updated updatedLink
+
 	require.NoError(t, json.Unmarshal(raw, &updated))
 	require.Nil(t, updated.ExpiresAt)
 	require.Nil(t, updated.DirectRedirect)
+}
 
-	request(http.MethodPut, path, ownerKey,
+// restrictAndExpire makes the link private to the owner, then expires it.
+func (f *linkUpdateFlow) restrictAndExpire(created createdLink) {
+	t := f.t
+	path := "/links/" + created.ID
+
+	f.request(http.MethodPut, path, f.ownerKey,
 		`{"target_url":"https://example.com/private","privacy":"owner","ttl":60,"direct_redirect":false}`, http.StatusOK)
-	request(http.MethodPut, path, "", `{"target_url":"https://example.com/blocked","edit_code":"`+created.EditCode+`"}`,
+	f.request(http.MethodPut, path, "", `{"target_url":"https://example.com/blocked","edit_code":"`+created.EditCode+`"}`,
 		http.StatusUnauthorized)
-	request(http.MethodGet, path, "", "", http.StatusUnauthorized)
-	raw = request(http.MethodGet, path, ownerKey, "", http.StatusOK)
+	f.request(http.MethodGet, path, "", "", http.StatusUnauthorized)
+	raw := f.request(http.MethodGet, path, f.ownerKey, "", http.StatusOK)
+
+	var updated updatedLink
+
 	require.NoError(t, json.Unmarshal(raw, &updated))
 	require.Equal(t, "https://example.com/private", updated.TargetURL)
 	require.NotNil(t, updated.ExpiresAt)
 	require.WithinDuration(t, time.Now().Add(time.Minute), *updated.ExpiresAt, 5*time.Second)
 	require.NotNil(t, updated.DirectRedirect)
 	require.False(t, *updated.DirectRedirect)
-	request(http.MethodPut, path, ownerKey, `{"target_url":"https://example.com/expired","ttl":0}`, http.StatusOK)
-	request(http.MethodGet, path, ownerKey, "", http.StatusGone)
+	f.request(http.MethodPut, path, f.ownerKey, `{"target_url":"https://example.com/expired","ttl":0}`, http.StatusOK)
+	f.request(http.MethodGet, path, f.ownerKey, "", http.StatusGone)
 }

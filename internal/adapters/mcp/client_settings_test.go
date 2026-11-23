@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 	urcli "github.com/urfave/cli/v3"
 
 	"github.com/partyzanex/padmark/internal/clientauth"
@@ -93,23 +94,31 @@ func TestNewServerFromFlags_RefusesInsecureRemote(t *testing.T) {
 	require.NoError(t, err)
 }
 
+type ClientSettingsSuite struct {
+	suite.Suite
+}
+
+func TestClientSettingsSuite(t *testing.T) {
+	suite.Run(t, new(ClientSettingsSuite))
+}
+
 // TestNewServerFromFlags_TokenSelectsOwnerPrivacy checks that the token state goes into the
 // server options: with a token, upload_file uses "owner" as its default privacy.
-func TestNewServerFromFlags_TokenSelectsOwnerPrivacy(t *testing.T) {
-	isolateEnv(t)
+func (s *ClientSettingsSuite) TestNewServerFromFlags_TokenSelectsOwnerPrivacy() {
+	isolateEnv(s.T())
 
 	log := slog.New(slog.DiscardHandler)
-	root := t.TempDir()
+	root := s.T().TempDir()
 
-	owner, err := newServerFromFlags(newTestCmd(t,
+	owner, err := newServerFromFlags(newTestCmd(s.T(),
 		"--base-url", "https://example.com", "--token", "secret", "--upload-root", root), log)
-	require.NoError(t, err)
-	assert.NotEmpty(t, owner.uploadRoot)
-	assert.True(t, owner.hasToken)
+	s.Require().NoError(err)
+	s.NotEmpty(owner.uploadRoot)
+	s.True(owner.hasToken)
 
-	anonymous, err := newServerFromFlags(newTestCmd(t, "--base-url", "https://example.com"), log)
-	require.NoError(t, err)
-	assert.False(t, anonymous.hasToken, "no token gives no account option")
+	anonymous, err := newServerFromFlags(newTestCmd(s.T(), "--base-url", "https://example.com"), log)
+	s.Require().NoError(err)
+	s.False(anonymous.hasToken, "no token gives no account option")
 }
 
 // TestWithCallTimeout_SetsLimit checks the default call limit and the option that changes it.

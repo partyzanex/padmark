@@ -55,8 +55,8 @@ func (s *LinkRepositoryTestSuite) TestCreate_OK() {
 // TestCreate_SweepsExpiredLinks verifies the lazy-sweep-on-Create pattern (mirroring
 // session/invite repositories): a Create call opportunistically deletes every already-expired
 // link in the table, not just the one being inserted — this is what keeps a link that expires
-// and is never followed again from lingering forever, since Redirect's own delete-on-read only
-// cleans up links that ARE read after expiry.
+// and is never followed again from lingering forever, since the delete-on-read of
+// links.Manager.Follow only cleans up links that ARE read after expiry.
 func (s *LinkRepositoryTestSuite) TestCreate_SweepsExpiredLinks() {
 	ctx := s.T().Context()
 	past := time.Now().Add(-time.Hour)

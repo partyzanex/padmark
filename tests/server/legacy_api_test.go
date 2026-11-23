@@ -1,3 +1,5 @@
+//go:build integration
+
 package server_test
 
 import (
@@ -13,8 +15,8 @@ import (
 	"github.com/partyzanex/padmark/tests/internal/servertest"
 )
 
-func TestLegacyNoteHTTPContract(t *testing.T) {
-	binary := servertest.Build(t)
+func (s *ServerSuite) TestLegacyNoteHTTPContract() {
+	t, binary := s.T(), s.binary
 	// The test sends 24 requests in about half a second. The default limit (burst 20, 10 per
 	// second) permits about 24 in that time, so a fast machine got 429 on the last request.
 	// The limit is off: the test is about the legacy contract, not about the rate limit.

@@ -97,7 +97,7 @@ type httpConfig struct {
 type routerConfig struct {
 	publicScheme   string
 	trustedProxies []*net.IPNet
-	// csrfSecret is nil when the flag is empty: NewRouter then makes a secret for this process.
+	// csrfSecret is nil when the flag is empty: NewHandler then makes a secret for this process.
 	csrfSecret     []byte
 	maxBodyBytes   int
 	rateLimit      int

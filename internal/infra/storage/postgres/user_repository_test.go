@@ -4,17 +4,12 @@ package postgres
 
 import (
 	"context"
-	"database/sql"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/suite"
-	"github.com/testcontainers/testcontainers-go"
-	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect/pgdialect"
-	"github.com/uptrace/bun/driver/pgdriver"
 
 	"github.com/partyzanex/padmark/internal/domain"
 )
@@ -22,33 +17,12 @@ import (
 type UserRepositoryTestSuite struct {
 	suite.Suite
 
-	container *tcpostgres.PostgresContainer
-	db        *bun.DB
-	repo      *UserRepository
+	db   *bun.DB
+	repo *UserRepository
 }
 
 func (s *UserRepositoryTestSuite) SetupSuite() {
-	ctx := s.T().Context()
-
-	container, err := tcpostgres.Run(ctx, "postgres:18-alpine",
-		tcpostgres.WithDatabase("padmark_user_test"),
-		tcpostgres.WithUsername("test"),
-		tcpostgres.WithPassword("test"),
-		tcpostgres.BasicWaitStrategies(),
-	)
-	s.Require().NoError(err)
-
-	s.container = container
-
-	dsn, err := container.ConnectionString(ctx, "sslmode=disable")
-	s.Require().NoError(err)
-
-	sqldb := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
-	s.db = bun.NewDB(sqldb, pgdialect.New())
-	s.Require().NoError(s.db.PingContext(ctx))
-
-	_, err = Migrate(ctx, s.db)
-	s.Require().NoError(err)
+	s.db = newTestDB(s.T())
 
 	s.repo = NewUserRepository(s.db)
 }
@@ -56,10 +30,6 @@ func (s *UserRepositoryTestSuite) SetupSuite() {
 func (s *UserRepositoryTestSuite) TearDownSuite() {
 	if s.db != nil {
 		s.NoError(s.db.Close())
-	}
-
-	if s.container != nil {
-		s.NoError(testcontainers.TerminateContainer(s.container))
 	}
 }
 
@@ -198,6 +168,7 @@ func (s *UserRepositoryTestSuite) TestChangePassword_RevocationFailure_RollsBack
 
 	// The suite shares one database: drop the trigger so other tests can delete API tokens.
 	s.T().Cleanup(func() {
+		// The test context is already cancelled when the cleanup runs.
 		_, dropErr := s.db.ExecContext(context.Background(), "DROP TRIGGER fail_api_token_delete ON api_tokens")
 		s.NoError(dropErr)
 	})

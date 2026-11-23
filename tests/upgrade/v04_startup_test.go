@@ -9,7 +9,6 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
-	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -19,32 +18,23 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/suite"
-	"github.com/testcontainers/testcontainers-go"
-	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
-	"github.com/testcontainers/testcontainers-go/wait"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
 	"github.com/uptrace/bun/driver/pgdriver"
 
 	"github.com/partyzanex/padmark/internal/infra/crypto"
-	"github.com/partyzanex/padmark/internal/infra/server"
 	sqliterepo "github.com/partyzanex/padmark/internal/infra/storage/sqlite"
 	"github.com/partyzanex/padmark/internal/testutil"
 	"github.com/partyzanex/padmark/pkg/client"
 	"github.com/partyzanex/padmark/tests/internal/servertest"
+	"github.com/partyzanex/padmark/tests/internal/testenv"
 )
 
 // versionFiles is the goose version of 20261118000001_files.sql, the first v0.5.0 migration.
 const versionFiles = 20261118000001
 
-// Test values for the throwaway S3 container only; s3mock accepts any credentials.
-const (
-	s3AccessKey = "padmark-test"
-	s3SecretKey = "padmark-test-secret"
-	s3Bucket    = "padmark-files"
-	// v05FileSlug is a custom file slug that no v0.4.0 record has.
-	v05FileSlug = "v050-file"
-)
+// v05FileSlug is a custom file slug that no v0.4.0 record has.
+const v05FileSlug = "v050-file"
 
 // v04Record is one note or link of tests/fixtures/v0.4.0. Value is the note content or the
 // link target URL.
@@ -120,8 +110,7 @@ type v04Snapshot struct {
 type V04UpgradeSuite struct {
 	suite.Suite
 
-	objects testcontainers.Container
-	binary  string
+	binary string
 	// s3Args are the serve flags and s3Env the environment that turn file publishing on.
 	s3Args []string
 	s3Env  []string
@@ -132,40 +121,11 @@ func TestV04Upgrade(t *testing.T) {
 }
 
 func (s *V04UpgradeSuite) SetupSuite() {
-	ctx := s.T().Context()
-
-	// adobe/s3mock makes the bucket at startup and does not check signatures.
-	container, err := testcontainers.Run(ctx, "adobe/s3mock:3.12.0",
-		testcontainers.WithEnv(map[string]string{"initialBuckets": s3Bucket}),
-		testcontainers.WithExposedPorts("9090/tcp"),
-		testcontainers.WithWaitStrategy(wait.ForListeningPort("9090/tcp").WithStartupTimeout(time.Minute)),
-	)
-	s.Require().NoError(err)
-
-	s.objects = container
-
-	hostPort, err := container.PortEndpoint(ctx, "9090/tcp", "")
-	s.Require().NoError(err)
-
-	host, _, err := net.SplitHostPort(hostPort)
-	s.Require().NoError(err)
-
-	s.s3Args = []string{"--s3-endpoint", "http://" + hostPort, "--s3-bucket", s3Bucket, "--s3-path-style"}
-	s.s3Env = []string{server.EnvS3AccessKey + "=" + s3AccessKey, server.EnvS3SecretKey + "=" + s3SecretKey}
-
-	// The server refuses plain http:// to a host that is not loopback. A remote Docker host
-	// gives such a host; the container is a throwaway test store.
-	if ip := net.ParseIP(host); host != "localhost" && (ip == nil || !ip.IsLoopback()) {
-		s.s3Env = append(s.s3Env, server.EnvS3AllowInsecure+"=true")
-	}
+	objects := testenv.S3Mock(s.T())
+	s.s3Args = objects.ServerArgs()
+	s.s3Env = objects.ServerEnv()
 
 	s.binary = servertest.Build(s.T())
-}
-
-func (s *V04UpgradeSuite) TearDownSuite() {
-	if s.objects != nil {
-		s.NoError(testcontainers.TerminateContainer(s.objects))
-	}
 }
 
 func (s *V04UpgradeSuite) TestSQLite() {
@@ -186,16 +146,7 @@ func (s *V04UpgradeSuite) TestSQLite() {
 }
 
 func (s *V04UpgradeSuite) TestPostgres() {
-	ctx := s.T().Context()
-
-	container, err := tcpostgres.Run(ctx, "postgres:18-alpine",
-		tcpostgres.WithDatabase("padmark"), tcpostgres.WithUsername("test"), tcpostgres.WithPassword("test"),
-		tcpostgres.BasicWaitStrategies())
-	s.Require().NoError(err)
-	s.T().Cleanup(func() { s.NoError(testcontainers.TerminateContainer(container)) })
-
-	dsn, err := container.ConnectionString(ctx, "sslmode=disable")
-	s.Require().NoError(err)
+	dsn := testenv.Postgres(s.T()).DSN
 
 	// pg_dump empties search_path for its session, so the dump runs on a throwaway pool.
 	loader := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn))), pgdialect.New())

@@ -7,7 +7,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"net/http/httptest"
 	"regexp"
 	"strings"
 	"testing"
@@ -16,12 +15,14 @@ import (
 	"github.com/pquerna/otp/totp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 
 	"github.com/partyzanex/padmark/internal/adapters/web"
 	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/infra/crypto"
 	sqliterepo "github.com/partyzanex/padmark/internal/infra/storage/sqlite"
 	"github.com/partyzanex/padmark/internal/usecases/auth"
+	"github.com/partyzanex/padmark/tests/internal/testenv"
 )
 
 // Finding H-1: the burn-after-reading guarantee is enforced only when content negotiation picks
@@ -35,63 +36,36 @@ const browserImageAccept = "image/avif,image/webp,image/apng,image/svg+xml,image
 
 var imgSrcPattern = regexp.MustCompile(`<img[^>]*\ssrc="([^"]*)"`)
 
+// BurnGuaranteeSuite runs the burn scenarios on the stack of newBurnGuaranteeEnv. SetupTest
+// builds a new stack for each test, with a database named after the test.
+type BurnGuaranteeSuite struct {
+	suite.Suite
+
+	env ownerFlowEnv
+}
+
+func TestBurnGuaranteeSuite(t *testing.T) {
+	suite.Run(t, new(BurnGuaranteeSuite))
+}
+
+func (s *BurnGuaranteeSuite) SetupTest() {
+	s.env = newBurnGuaranteeEnv(s.T(), testDBName(s.T()))
+}
+
 // newBurnGuaranteeEnv wires the stack the way serverAction does it with --enable-accounts:
 // the reveal-token store is attached (it always is in production), so the HTML interstitial is
 // active and any remaining bypass is a real one.
 func newBurnGuaranteeEnv(t *testing.T, dbName string) ownerFlowEnv {
 	t.Helper()
 
-	db, err := sqliterepo.Open("file:"+dbName+"?mode=memory&cache=shared", slog.New(slog.DiscardHandler))
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, db.Close()) })
-
-	_, err = sqliterepo.Migrate(t.Context(), db)
-	require.NoError(t, err)
-
-	log := slog.New(slog.DiscardHandler)
-	users := sqliterepo.NewUserRepository(db)
-
-	authMgr, err := auth.NewManager(
-		auth.Stores{
-			Users:     users,
-			Invites:   sqliterepo.NewInviteRepository(db),
-			Sessions:  sqliterepo.NewSessionRepository(db),
-			APITokens: sqliterepo.NewAPITokenRepository(db),
-		},
-		&auth.Deps{
-			PasswordHasher: crypto.NewPasswordHasher(testArgon2Params, slog.New(slog.DiscardHandler)),
-			Sealer:         crypto.NewSealer(testArgon2Params),
-			TOTP:           crypto.NewTOTP(),
-			Log:            log,
-			Now:            time.Now,
-		},
-		"padmark-test", time.Hour,
-	)
-	require.NoError(t, err)
-
-	notesMgr, linksMgr := newOwnerFlowManagers(t, db, log)
-
-	handlerCfg := testHandlerConfig(notesMgr, linksMgr)
-	handlerCfg.Log = log
-	handlerCfg.Reveal = auth.NewRevealManager(sqliterepo.NewRevealRepository(db), log, time.Now)
-	handlerCfg.Accounts = authMgr
-	handlerCfg.CSRFSecret = []byte("padmark-test-csrf-secret-32bytes")
-	// The burn-link flows create their links anonymously and follow them with a 301; anonymous
-	// links get the interstitial by default, so this models an operator running
-	// --direct-redirect=true.
-	handlerCfg.DirectRedirect = true
-	handler := newTestHandler(t, handlerCfg)
-	router, err := web.NewRouter(handler, &web.RouterOptions{
-		MaxBodyBytes: 256 * 1024,
-
-		AllowedHosts: nil, RateLimit: 0, RateBurst: 0, DisableAPI: false,
-	})
-	require.NoError(t, err)
-
-	srv := httptest.NewServer(router)
-	t.Cleanup(srv.Close)
-
-	return ownerFlowEnv{db: db, authMgr: authMgr, users: users, baseURL: srv.URL}
+	return newOwnerFlowEnv(t, dbName, testenv.WithConfig(func(cfg *web.HandlerConfig, stack *testenv.Stack) {
+		log := slog.New(slog.DiscardHandler)
+		cfg.Reveal = auth.NewRevealManager(sqliterepo.NewRevealRepository(stack.DB), log, time.Now)
+		// The burn-link flows create their links anonymously and follow them with a 301; anonymous
+		// links get the interstitial by default, so this models an operator running
+		// --direct-redirect=true.
+		cfg.DirectRedirect = true
+	}))
 }
 
 // burnCreateNote creates a note through the public JSON API and returns its slug.
@@ -206,13 +180,15 @@ func burnOwnerSession(t *testing.T, env ownerFlowEnv) (sessionID, apiToken strin
 	return sessionID, apiToken
 }
 
-// TestBurnGuarantee_NonExplicitReadDoesNotConsume — H-1 bypass 1. Link unfurlers, mail
+// TestNonExplicitReadDoesNotConsume — H-1 bypass 1. Link unfurlers, mail
 // security gateways and plain HTTP libraries send no Accept or Accept: */*. negotiate()
 // maps both to JSON, the interstitial is skipped, and GET returns the plaintext while
 // storage.Consume destroys the note: the recipient then sees 404. A read that does not
 // explicitly ask for the note must neither receive the content nor consume it.
-func TestBurnGuarantee_NonExplicitReadDoesNotConsume(t *testing.T) {
-	env := newBurnGuaranteeEnv(t, "burn-guarantee-non-explicit")
+func (s *BurnGuaranteeSuite) TestNonExplicitReadDoesNotConsume() {
+	t := s.T()
+
+	env := s.env
 
 	for _, testCase := range []struct {
 		name    string
@@ -242,25 +218,20 @@ func TestBurnGuarantee_NonExplicitReadDoesNotConsume(t *testing.T) {
 	}
 }
 
-// TestBurnGuarantee_ImageSubresourceDoesNotTriggerBurn — H-1 bypass 2 (read-CSRF). Raw HTML
+// TestImageSubresourceDoesNotTriggerBurn — H-1 bypass 2 (read-CSRF). Raw HTML
 // is allowed in markdown, bluemonday's UGC policy keeps a relative <img src> and the CSP allows
 // img-src 'self', so an attacker's note can embed <img src="/<victim-slug>">. Every viewer's
 // browser then fetches the victim note as a same-origin image (Accept ends in */*, so JSON is
 // negotiated) with its SameSite=Strict session cookie attached, and the burn fires — even on an
 // owner-only note the attacker can never read. Either the chain is broken (no same-origin
 // <img> survives rendering) or such a fetch must have no read side effect.
-func TestBurnGuarantee_ImageSubresourceDoesNotTriggerBurn(t *testing.T) {
-	env := newBurnGuaranteeEnv(t, "burn-guarantee-img-csrf")
+func (s *BurnGuaranteeSuite) TestImageSubresourceDoesNotTriggerBurn() {
+	t := s.T()
+
+	env := s.env
 	ownerSession, ownerToken := burnOwnerSession(t, env)
 
-	for _, testCase := range []struct {
-		name          string
-		bearer        string
-		fields        string
-		viewerSession string
-		// intact is the SQL condition the victim row must still satisfy after the attack.
-		intact string
-	}{
+	for _, testCase := range []imageAttackCase{
 		{
 			name:   "public immediate-burn note, anonymous viewer",
 			fields: `"burn_after_reading":true`,
@@ -283,57 +254,75 @@ func TestBurnGuarantee_ImageSubresourceDoesNotTriggerBurn(t *testing.T) {
 			bearer: "", viewerSession: "",
 		},
 	} {
-		t.Run(testCase.name, func(t *testing.T) {
-			victim := burnCreateNote(t, env, testCase.bearer,
-				`{"content":"`+burnGuaranteeContent+`",`+testCase.fields+`}`)
-
-			if testCase.viewerSession != "" {
-				// Precondition: the attacker cannot read the owner-only note itself.
-				status, body := burnHTTPGet(t, env.baseURL+"/"+victim,
-					map[string]string{"Accept": "application/json"}, "")
-				require.NotEqual(t, http.StatusOK, status)
-				require.NotContains(t, body, burnGuaranteeContent)
-			}
-
-			attacker := burnCreateNote(t, env, "", `{"title":"cute cat","content":"look ![cat](/`+victim+`)"}`)
-
-			// The viewer's browser navigates to the attacker's note ...
-			status, page := burnHTTPGet(t, env.baseURL+"/"+attacker, map[string]string{
-				"Accept":         "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-				"Sec-Fetch-Dest": "document",
-				"Sec-Fetch-Mode": "navigate",
-				"Sec-Fetch-Site": "none",
-			}, testCase.viewerSession)
-			require.Equal(t, http.StatusOK, status, page)
-
-			// ... and loads every same-origin image the rendered note embeds.
-			for _, match := range imgSrcPattern.FindAllStringSubmatch(page, -1) {
-				src := match[1]
-				if !strings.HasPrefix(src, "/") || strings.HasPrefix(src, "//") {
-					continue
-				}
-
-				burnHTTPGet(t, env.baseURL+src, map[string]string{
-					"Accept":         browserImageAccept,
-					"Sec-Fetch-Dest": "image",
-					"Sec-Fetch-Mode": "no-cors",
-					"Sec-Fetch-Site": "same-origin",
-					"Referer":        env.baseURL + "/" + attacker,
-				}, testCase.viewerSession)
-			}
-
-			assert.Equal(t, 1, burnNoteCount(t, env, victim, testCase.intact),
-				"viewing someone else's note must not burn (or start the burn timer of) the victim note")
-		})
+		t.Run(testCase.name, func(t *testing.T) { runImageAttack(t, env, testCase) })
 	}
 }
 
-// TestBurnGuarantee_EditPageHonoursBurnAndExpiry — H-1 bypass 3. GET /edit/{id} loads the note
+// imageAttackCase is one victim note of TestImageSubresourceDoesNotTriggerBurn and its viewer.
+type imageAttackCase struct {
+	name          string
+	bearer        string
+	fields        string
+	viewerSession string
+	// intact is the SQL condition the victim row must still satisfy after the attack.
+	intact string
+}
+
+// runImageAttack embeds the victim note of testCase as an image in an attacker note, loads the
+// attacker note in the browser of the viewer and checks that the victim note stays intact.
+func runImageAttack(t *testing.T, env ownerFlowEnv, testCase imageAttackCase) {
+	t.Helper()
+
+	victim := burnCreateNote(t, env, testCase.bearer,
+		`{"content":"`+burnGuaranteeContent+`",`+testCase.fields+`}`)
+
+	if testCase.viewerSession != "" {
+		// Precondition: the attacker cannot read the owner-only note itself.
+		status, body := burnHTTPGet(t, env.baseURL+"/"+victim,
+			map[string]string{"Accept": "application/json"}, "")
+		require.NotEqual(t, http.StatusOK, status)
+		require.NotContains(t, body, burnGuaranteeContent)
+	}
+
+	attacker := burnCreateNote(t, env, "", `{"title":"cute cat","content":"look ![cat](/`+victim+`)"}`)
+
+	// The viewer's browser navigates to the attacker's note ...
+	status, page := burnHTTPGet(t, env.baseURL+"/"+attacker, map[string]string{
+		"Accept":         "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+		"Sec-Fetch-Dest": "document",
+		"Sec-Fetch-Mode": "navigate",
+		"Sec-Fetch-Site": "none",
+	}, testCase.viewerSession)
+	require.Equal(t, http.StatusOK, status, page)
+
+	// ... and loads every same-origin image the rendered note embeds.
+	for _, match := range imgSrcPattern.FindAllStringSubmatch(page, -1) {
+		src := match[1]
+		if !strings.HasPrefix(src, "/") || strings.HasPrefix(src, "//") {
+			continue
+		}
+
+		burnHTTPGet(t, env.baseURL+src, map[string]string{
+			"Accept":         browserImageAccept,
+			"Sec-Fetch-Dest": "image",
+			"Sec-Fetch-Mode": "no-cors",
+			"Sec-Fetch-Site": "same-origin",
+			"Referer":        env.baseURL + "/" + attacker,
+		}, testCase.viewerSession)
+	}
+
+	assert.Equal(t, 1, burnNoteCount(t, env, victim, testCase.intact),
+		"viewing someone else's note must not burn (or start the burn timer of) the victim note")
+}
+
+// TestEditPageHonoursBurnAndExpiry — H-1 bypass 3. GET /edit/{id} loads the note
 // with Manager.Peek (no burn, no expiry policy) and pre-fills the editor with the plaintext, so
 // anyone holding a burn note's URL reads it any number of times via /edit/<slug>, and an expired
 // note stays readable there until something hits the view route (no sweeper).
-func TestBurnGuarantee_EditPageHonoursBurnAndExpiry(t *testing.T) {
-	env := newBurnGuaranteeEnv(t, "burn-guarantee-edit-page")
+func (s *BurnGuaranteeSuite) TestEditPageHonoursBurnAndExpiry() {
+	t := s.T()
+
+	env := s.env
 	browser := map[string]string{"Accept": "text/html,application/xhtml+xml,*/*;q=0.8"}
 
 	t.Run("immediate-burn note is not readable via the editor", func(t *testing.T) {
@@ -429,12 +418,14 @@ func burnHTTPDo(t *testing.T, method, url string, headers map[string]string) (in
 	return resp.StatusCode, resp.Header.Get("Location"), string(raw)
 }
 
-// TestBurnGuarantee_LinkRedirectRequiresExplicitIntent — the H-1 class on short links: GET
+// TestLinkRedirectRequiresExplicitIntent — the H-1 class on short links: GET
 // /r/{id} consumes a burn_after_click link on any request, so a chat unfurler, a mail scanner, a
 // HEAD probe or an <img src="/r/<slug>"> in someone else's note follows (and destroys) it before
 // the recipient does. Only a deliberate navigation may follow a burn link.
-func TestBurnGuarantee_LinkRedirectRequiresExplicitIntent(t *testing.T) {
-	env := newBurnGuaranteeEnv(t, "burn-guarantee-link-redirect")
+func (s *BurnGuaranteeSuite) TestLinkRedirectRequiresExplicitIntent() {
+	t := s.T()
+
+	env := s.env
 	target := "https://example.com/h1-burn-link-target"
 
 	for _, testCase := range []struct {

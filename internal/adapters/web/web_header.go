@@ -132,7 +132,7 @@ func (c *common) header(r *http.Request, kind string) headerView {
 		IsAdmin:   false,
 		Record:    recordNote,
 		// The file tab follows the configuration, not the user.
-		FilesEnabled: c.fileMgr != nil,
+		FilesEnabled: c.fileMode == filesOn,
 	}
 
 	usr := c.currentUser(r)

@@ -9,6 +9,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 
 	"github.com/partyzanex/padmark/internal/clientauth"
 )
@@ -72,31 +73,39 @@ func TestOrigin(t *testing.T) {
 	}
 }
 
+type KnownHostsSuite struct {
+	suite.Suite
+}
+
+func TestKnownHostsSuite(t *testing.T) {
+	suite.Run(t, new(KnownHostsSuite))
+}
+
 // TestKnownOriginRoundtrip covers the add/check cycle: nothing is trusted before the first
 // record, AddKnownOrigin makes exactly that origin trusted (scheme-sensitive), and a second
 // add of the same origin does not duplicate the line.
-func TestKnownOriginRoundtrip(t *testing.T) {
-	isolateConfig(t)
+func (s *KnownHostsSuite) TestKnownOriginRoundtrip() {
+	isolateConfig(s.T())
 
-	assert.False(t, clientauth.IsKnownOrigin("https://example.com"), "empty hosts file must trust nothing")
+	s.False(clientauth.IsKnownOrigin("https://example.com"), "empty hosts file must trust nothing")
 
-	require.NoError(t, clientauth.AddKnownOrigin("https://example.com"))
+	s.Require().NoError(clientauth.AddKnownOrigin("https://example.com"))
 
-	assert.True(t, clientauth.IsKnownOrigin("https://example.com"))
-	assert.False(t, clientauth.IsKnownOrigin("http://example.com"), "a different scheme is a different origin")
+	s.True(clientauth.IsKnownOrigin("https://example.com"))
+	s.False(clientauth.IsKnownOrigin("http://example.com"), "a different scheme is a different origin")
 
-	require.NoError(t, clientauth.AddKnownOrigin("https://example.com"), "re-adding a known origin is not an error")
+	s.Require().NoError(clientauth.AddKnownOrigin("https://example.com"), "re-adding a known origin is not an error")
 
 	path, err := clientauth.HostsPath()
-	require.NoError(t, err)
+	s.Require().NoError(err)
 
 	data, err := os.ReadFile(path) //nolint:gosec // path from the isolated test config dir
-	require.NoError(t, err)
-	assert.Equal(t, 1, strings.Count(string(data), "https://example.com\n"), "known origin must not be duplicated")
+	s.Require().NoError(err)
+	s.Equal(1, strings.Count(string(data), "https://example.com\n"), "known origin must not be duplicated")
 
 	info, err := os.Stat(path)
-	require.NoError(t, err)
-	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm(), "hosts file must be owner-only")
+	s.Require().NoError(err)
+	s.Equal(os.FileMode(0o600), info.Mode().Perm(), "hosts file must be owner-only")
 }
 
 // TestAddKnownOrigin_MissingConfigDir verifies the config dir is created on demand.
@@ -212,18 +221,18 @@ func TestAddKnownOrigin_HealsWritableFile(t *testing.T) {
 
 // TestAddKnownOrigin_StoresCanonicalOrigin verifies the record is written in canonical form,
 // so the file never accumulates spelling variants of one origin.
-func TestAddKnownOrigin_StoresCanonicalOrigin(t *testing.T) {
-	isolateConfig(t)
+func (s *KnownHostsSuite) TestAddKnownOrigin_StoresCanonicalOrigin() {
+	isolateConfig(s.T())
 
-	require.NoError(t, clientauth.AddKnownOrigin("https://Example.COM:443"))
-	require.NoError(t, clientauth.AddKnownOrigin("https://example.com"))
+	s.Require().NoError(clientauth.AddKnownOrigin("https://Example.COM:443"))
+	s.Require().NoError(clientauth.AddKnownOrigin("https://example.com"))
 
 	path, err := clientauth.HostsPath()
-	require.NoError(t, err)
+	s.Require().NoError(err)
 
 	data, err := os.ReadFile(path) //nolint:gosec // path from the isolated test config dir
-	require.NoError(t, err)
-	assert.Equal(t, "https://example.com\n", string(data))
+	s.Require().NoError(err)
+	s.Equal("https://example.com\n", string(data))
 }
 
 // writeHostsFile isolates the config dir and writes the hosts file with an exact mode,

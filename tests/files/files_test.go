@@ -16,22 +16,16 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/suite"
-	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/wait"
 
 	"github.com/partyzanex/padmark/internal/domain"
-	"github.com/partyzanex/padmark/internal/infra/server"
 	"github.com/partyzanex/padmark/internal/infra/storage/s3store"
 	sqliterepo "github.com/partyzanex/padmark/internal/infra/storage/sqlite"
 	"github.com/partyzanex/padmark/pkg/client"
 	"github.com/partyzanex/padmark/tests/internal/servertest"
+	"github.com/partyzanex/padmark/tests/internal/testenv"
 )
 
-// Test values for the throwaway container only; s3mock accepts any credentials.
 const (
-	testAccessKey = "padmark-test"
-	testSecretKey = "padmark-test-secret"
-	testBucket    = "padmark-files"
 	// bigFileSize is larger than one 16 MiB multipart part, so the upload and the download
 	// cross a part boundary.
 	bigFileSize   = 17<<20 + 123
@@ -45,10 +39,10 @@ const (
 type FilesSuite struct {
 	suite.Suite
 
-	container testcontainers.Container
-	objects   *s3store.Store
-	endpoint  string
-	binary    string
+	// bucket is the bucket of the shared S3-compatible container; objects reads it directly.
+	bucket  testenv.S3
+	objects *s3store.Store
+	binary  string
 }
 
 func TestFilesSuite(t *testing.T) {
@@ -56,43 +50,16 @@ func TestFilesSuite(t *testing.T) {
 }
 
 func (s *FilesSuite) SetupSuite() {
-	ctx := s.T().Context()
-
-	// adobe/s3mock makes the bucket at startup and does not check signatures.
-	container, err := testcontainers.Run(ctx, "adobe/s3mock:3.12.0",
-		testcontainers.WithEnv(map[string]string{"initialBuckets": testBucket}),
-		testcontainers.WithExposedPorts("9090/tcp"),
-		testcontainers.WithWaitStrategy(wait.ForListeningPort("9090/tcp").WithStartupTimeout(time.Minute)),
-	)
-	s.Require().NoError(err)
-
-	s.container = container
-
-	hostPort, err := container.PortEndpoint(ctx, "9090/tcp", "")
-	s.Require().NoError(err)
-
-	s.endpoint = "http://" + hostPort
-
-	s.objects, err = s3store.New(&s3store.Config{
-		Endpoint: s.endpoint, Bucket: testBucket, Region: server.DefaultS3Region,
-		AccessKey: testAccessKey, SecretKey: testSecretKey, PathStyle: true,
-	}, slog.New(slog.DiscardHandler))
-	s.Require().NoError(err)
-
+	s.bucket = testenv.S3Mock(s.T())
+	s.objects = s.bucket.Store(s.T())
 	s.binary = servertest.Build(s.T())
-}
-
-func (s *FilesSuite) TearDownSuite() {
-	if s.container != nil {
-		s.NoError(testcontainers.TerminateContainer(s.container))
-	}
 }
 
 // TestLifecycle uploads a file, reads it through /{id} and the download path, changes its
 // rules, deletes it and checks that the record and the object are gone.
 func (s *FilesSuite) TestLifecycle() {
 	inst := newInstallation(s.T())
-	baseURL, _ := startServer(s.T(), s.binary, s.endpoint, inst)
+	baseURL, _ := startServer(s.T(), s.binary, s.bucket, inst)
 	content := randomBytes(s.T(), bigFileSize)
 
 	created := s.upload(baseURL, content)
@@ -171,13 +138,13 @@ func (s *FilesSuite) assertDelete(baseURL, id, editCode string) {
 // TestRestart checks that a file stays available after the server stops and starts again.
 func (s *FilesSuite) TestRestart() {
 	inst := newInstallation(s.T())
-	baseURL, stop := startServer(s.T(), s.binary, s.endpoint, inst)
+	baseURL, stop := startServer(s.T(), s.binary, s.bucket, inst)
 	content := randomBytes(s.T(), smallFileSize)
 	created := s.upload(baseURL, content)
 
 	stop()
 
-	baseURL, _ = startServer(s.T(), s.binary, s.endpoint, inst)
+	baseURL, _ = startServer(s.T(), s.binary, s.bucket, inst)
 
 	s.Equal(fileName, s.metadata(baseURL, created.ID).Name)
 	s.True(bytes.Equal(content, s.download(baseURL, created.ID)), "the file changed after the restart")
@@ -187,7 +154,7 @@ func (s *FilesSuite) TestRestart() {
 // keyring has no k1, so the file is readable only when rewrap changed its sealed metadata.
 func (s *FilesSuite) TestKeyRotation() {
 	inst := newInstallation(s.T())
-	baseURL, stop := startServer(s.T(), s.binary, s.endpoint, inst)
+	baseURL, stop := startServer(s.T(), s.binary, s.bucket, inst)
 	content := randomBytes(s.T(), smallFileSize)
 	created := s.upload(baseURL, content)
 
@@ -212,7 +179,7 @@ func (s *FilesSuite) TestKeyRotation() {
 	s.Contains(s.sealedMeta(inst, created.ID), "$k2$", "the sealed metadata uses the new key")
 
 	inst.keyring = current
-	baseURL, _ = startServer(s.T(), s.binary, s.endpoint, inst)
+	baseURL, _ = startServer(s.T(), s.binary, s.bucket, inst)
 
 	s.Equal(fileName, s.metadata(baseURL, created.ID).Name)
 	s.True(bytes.Equal(content, s.download(baseURL, created.ID)), "the file changed after the rotation")

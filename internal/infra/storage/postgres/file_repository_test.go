@@ -3,7 +3,6 @@
 package postgres
 
 import (
-	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -15,11 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/pressly/goose/v3"
 	"github.com/stretchr/testify/suite"
-	"github.com/testcontainers/testcontainers-go"
-	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect/pgdialect"
-	"github.com/uptrace/bun/driver/pgdriver"
 
 	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/usecases/files"
@@ -31,11 +26,10 @@ import (
 type FileRepositorySuite struct {
 	suite.Suite
 
-	container *tcpostgres.PostgresContainer
-	db        *bun.DB
-	repo      *FileRepository
-	links     *LinkRepository
-	notes     *NoteRepository
+	db    *bun.DB
+	repo  *FileRepository
+	links *LinkRepository
+	notes *NoteRepository
 }
 
 func TestFileRepositorySuite(t *testing.T) {
@@ -43,26 +37,7 @@ func TestFileRepositorySuite(t *testing.T) {
 }
 
 func (s *FileRepositorySuite) SetupSuite() {
-	ctx := s.T().Context()
-
-	container, err := tcpostgres.Run(ctx, "postgres:18-alpine",
-		tcpostgres.WithDatabase("padmark_test"),
-		tcpostgres.WithUsername("test"),
-		tcpostgres.WithPassword("test"),
-		tcpostgres.BasicWaitStrategies(),
-	)
-	s.Require().NoError(err)
-
-	s.container = container
-
-	dsn, err := container.ConnectionString(ctx, "sslmode=disable")
-	s.Require().NoError(err)
-
-	s.db = bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn))), pgdialect.New())
-	s.Require().NoError(s.db.PingContext(ctx))
-
-	_, err = Migrate(ctx, s.db)
-	s.Require().NoError(err)
+	s.db = newTestDB(s.T())
 
 	s.repo = NewFileRepository(s.db)
 	s.links = NewLinkRepository(s.db, slog.New(slog.DiscardHandler))
@@ -72,10 +47,6 @@ func (s *FileRepositorySuite) SetupSuite() {
 func (s *FileRepositorySuite) TearDownSuite() {
 	if s.db != nil {
 		s.NoError(s.db.Close())
-	}
-
-	if s.container != nil {
-		s.NoError(testcontainers.TerminateContainer(s.container))
 	}
 }
 

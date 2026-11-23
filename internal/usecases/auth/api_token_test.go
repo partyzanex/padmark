@@ -22,7 +22,12 @@ type APITokenSuite struct {
 	ctrl      *gomock.Controller
 	users     *MockUserStore
 	apiTokens *MockAPITokenStore
-	mgr       *Manager
+	// invites and sessions expect no call: the API-token tests do not use them.
+	invites  *MockInviteStore
+	sessions *MockSessionStore
+	// stepUp is the step-up verifier of stepUpMgr.
+	stepUp *MockStepUpVerifier
+	mgr    *Manager
 }
 
 func TestAPITokenSuite(t *testing.T) {
@@ -33,6 +38,9 @@ func (suite *APITokenSuite) SetupTest() {
 	suite.ctrl = gomock.NewController(suite.T())
 	suite.users = NewMockUserStore(suite.ctrl)
 	suite.apiTokens = NewMockAPITokenStore(suite.ctrl)
+	suite.invites = NewMockInviteStore(suite.ctrl)
+	suite.sessions = NewMockSessionStore(suite.ctrl)
+	suite.stepUp = NewMockStepUpVerifier(suite.ctrl)
 	suite.mgr = newAuthManagerWithTokens(suite, suite.users, suite.apiTokens)
 }
 
@@ -50,8 +58,8 @@ func newAuthManagerWithTokens(
 	mgr, err := NewManager(
 		Stores{
 			Users:     users,
-			Invites:   NewMockInviteStore(suite.ctrl),
-			Sessions:  NewMockSessionStore(suite.ctrl),
+			Invites:   suite.invites,
+			Sessions:  suite.sessions,
 			APITokens: apiTokens,
 		},
 		&Deps{
@@ -76,8 +84,8 @@ func (suite *APITokenSuite) disabledMgr() *Manager {
 	mgr, err := NewManager(
 		Stores{
 			Users:     suite.users,
-			Invites:   NewMockInviteStore(suite.ctrl),
-			Sessions:  NewMockSessionStore(suite.ctrl),
+			Invites:   suite.invites,
+			Sessions:  suite.sessions,
 			APITokens: nil, // API-token flow disabled → methods return domain.ErrFeatureNotSupported.
 		},
 		&Deps{
@@ -418,9 +426,7 @@ func (suite *APITokenSuite) TestRevokeAPIToken_AdminLookupFails_WrapsError() {
 // stepUpMgr wires an APITokenManager whose step-up verifier is a mock, so the issuance rule is
 // tested on its own (SessionManager.VerifyStepUp has its own tests in ManagerSuite).
 func (suite *APITokenSuite) stepUpMgr() (*APITokenManager, *MockStepUpVerifier) {
-	verifier := NewMockStepUpVerifier(suite.ctrl)
-
-	return NewAPITokenManager(suite.apiTokens, suite.users, verifier, discardLog(), testNow), verifier
+	return NewAPITokenManager(suite.apiTokens, suite.users, suite.stepUp, discardLog(), testNow), suite.stepUp
 }
 
 func (suite *APITokenSuite) TestCreateAPIToken_Bearer_WithoutStepUp_ReturnsErrStepUpRequired() {

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 
 	"github.com/partyzanex/padmark/internal/infra/crypto"
 )
@@ -94,17 +95,25 @@ func TestLoadContentKeyring_AllowSharedPermissionsWarnsThroughInjectedLogger(t *
 	require.Equal(t, os.FileMode(0o444), info.Mode().Perm(), "the loader must never chmod the operator's file")
 }
 
-func TestLoadContentKeyring_WarnsOnSymlinkThroughInjectedLogger(t *testing.T) {
-	global := captureDefaultLogger(t)
+type KeyringLoadSuite struct {
+	suite.Suite
+}
+
+func TestKeyringLoadSuite(t *testing.T) {
+	suite.Run(t, new(KeyringLoadSuite))
+}
+
+func (s *KeyringLoadSuite) TestLoadContentKeyring_WarnsOnSymlinkThroughInjectedLogger() {
+	global := captureDefaultLogger(s.T())
 
 	var output bytes.Buffer
 
-	path := writeTestKeyring(t, 0o400)
-	link := filepath.Join(t.TempDir(), "managed-secret")
-	require.NoError(t, os.Symlink(path, link))
+	path := writeTestKeyring(s.T(), 0o400)
+	link := filepath.Join(s.T().TempDir(), "managed-secret")
+	s.Require().NoError(os.Symlink(path, link))
 	_, err := crypto.LoadContentKeyring(link, slog.New(slog.NewTextHandler(&output, nil)), strictLoad())
-	require.NoError(t, err)
-	require.Contains(t, output.String(), "symlink")
-	require.NotContains(t, output.String(), "BwcHBwcH", "no key material may be logged")
-	require.Empty(t, global.String(), "warnings must not bypass the injected logger")
+	s.Require().NoError(err)
+	s.Require().Contains(output.String(), "symlink")
+	s.Require().NotContains(output.String(), "BwcHBwcH", "no key material may be logged")
+	s.Require().Empty(global.String(), "warnings must not bypass the injected logger")
 }

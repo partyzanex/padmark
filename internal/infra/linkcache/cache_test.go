@@ -1,7 +1,6 @@
 package linkcache
 
 import (
-	"context"
 	"log/slog"
 	"testing"
 	"time"
@@ -18,7 +17,7 @@ func TestCache_SetGet_RoundTrip(t *testing.T) {
 	t.Parallel()
 
 	cache := New(10, time.Minute, discardLogger())
-	cache.Set(context.Background(), "abc", "ciphertext", "https://example.com")
+	cache.Set(t.Context(), "abc", "ciphertext", "https://example.com")
 
 	got, found := cache.Get("abc", "ciphertext")
 	require.True(t, found)
@@ -38,7 +37,7 @@ func TestCache_Delete(t *testing.T) {
 	t.Parallel()
 
 	cache := New(10, time.Minute, discardLogger())
-	cache.Set(context.Background(), "abc", "ciphertext", "https://example.com")
+	cache.Set(t.Context(), "abc", "ciphertext", "https://example.com")
 
 	cache.Delete("abc")
 
@@ -98,10 +97,10 @@ func TestCache_LRUEviction_WhenFull(t *testing.T) {
 	t.Parallel()
 
 	cache := New(2, time.Minute, discardLogger())
-	cache.Set(context.Background(), "a", "ciphertext", "a")
-	cache.Set(context.Background(), "b", "ciphertext", "b")
+	cache.Set(t.Context(), "a", "ciphertext", "a")
+	cache.Set(t.Context(), "b", "ciphertext", "b")
 	// Over capacity: this third insert must evict the least-recently-used entry ("a").
-	cache.Set(context.Background(), "c", "ciphertext", "c")
+	cache.Set(t.Context(), "c", "ciphertext", "c")
 
 	_, found := cache.Get("a", "ciphertext")
 	require.False(t, found, "least-recently-used entry must be evicted once the cache is full")
@@ -117,7 +116,7 @@ func TestNewDefault_UsableCache(t *testing.T) {
 	t.Parallel()
 
 	cache := NewDefault(discardLogger())
-	cache.Set(context.Background(), "abc", "ciphertext", "https://example.com")
+	cache.Set(t.Context(), "abc", "ciphertext", "https://example.com")
 
 	got, found := cache.Get("abc", "ciphertext")
 	require.True(t, found)

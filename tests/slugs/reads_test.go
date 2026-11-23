@@ -19,12 +19,12 @@ import (
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect"
 
-	"github.com/partyzanex/padmark/internal/adapters/web"
 	"github.com/partyzanex/padmark/internal/domain"
 	pgrepo "github.com/partyzanex/padmark/internal/infra/storage/postgres"
 	"github.com/partyzanex/padmark/internal/infra/storage/s3store"
 	sqliterepo "github.com/partyzanex/padmark/internal/infra/storage/sqlite"
 	"github.com/partyzanex/padmark/internal/usecases/auth"
+	"github.com/partyzanex/padmark/tests/internal/testenv"
 )
 
 // queryCounter counts the SQL statements of one database handle. A SELECT is a read; each other
@@ -83,18 +83,11 @@ func readServer(t *testing.T, env *slugEnv, served chan<- struct{}) *httptest.Se
 		reveals = pgrepo.NewRevealRepository(env.db)
 	}
 
-	handlerCfg := testHandlerConfig(env.notes, env.links)
-	handlerCfg.Log = log
+	handlerCfg := testenv.HandlerConfig(env.notes, env.links)
 	handlerCfg.Reveal = auth.NewRevealManager(reveals, log, time.Now)
 	handlerCfg.Files = env.files
 	handlerCfg.CSRFSecret = []byte("record-reads-csrf-secret-32bytes")
-	handler := newTestHandler(t, handlerCfg)
-	router, err := web.NewRouter(handler, &web.RouterOptions{
-		MaxBodyBytes: 256 * 1024,
-
-		AllowedHosts: nil, RateLimit: 0, RateBurst: 0, DisableAPI: false,
-	})
-	require.NoError(t, err)
+	router := testenv.Router(t, handlerCfg)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		router.ServeHTTP(w, r)

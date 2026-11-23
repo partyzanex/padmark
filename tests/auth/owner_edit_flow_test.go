@@ -3,29 +3,19 @@
 package integration
 
 import (
-	"context"
 	"encoding/json"
 	"io"
-	"log/slog"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 	"github.com/uptrace/bun"
 
-	"github.com/partyzanex/padmark/internal/adapters/web"
-	"github.com/partyzanex/padmark/internal/infra/crypto"
-	"github.com/partyzanex/padmark/internal/infra/expiredslugs"
-	"github.com/partyzanex/padmark/internal/infra/linkcache"
-	"github.com/partyzanex/padmark/internal/infra/render"
 	sqliterepo "github.com/partyzanex/padmark/internal/infra/storage/sqlite"
-	"github.com/partyzanex/padmark/internal/testutil"
 	"github.com/partyzanex/padmark/internal/usecases/auth"
-	"github.com/partyzanex/padmark/internal/usecases/links"
-	"github.com/partyzanex/padmark/internal/usecases/notes"
+	"github.com/partyzanex/padmark/tests/internal/testenv"
 )
 
 const ownerFlowPassword = "OwnerP@ss123!"
@@ -39,146 +29,55 @@ type ownerFlowEnv struct {
 	baseURL string
 }
 
-// newOwnerFlowEnv builds that stack. Shared by the API-token owner-bypass test and the edit-page
-// privacy test so both exercise the same wiring the server actually assembles, rather than each
-// standing up its own approximation of it.
-// newOwnerFlowManagers builds the note and link managers over db with one shared
-// expiredslugs.Releaser, as the composition root does.
-func newOwnerFlowManagers(t *testing.T, db *bun.DB, log *slog.Logger) (*notes.Manager, *links.Manager) {
+// OwnerFlowSuite runs the flows on the stack of newOwnerFlowEnv. SetupTest builds a new stack
+// for each test, with a database named after the test.
+type OwnerFlowSuite struct {
+	suite.Suite
+
+	env ownerFlowEnv
+}
+
+func TestOwnerFlowSuite(t *testing.T) {
+	suite.Run(t, new(OwnerFlowSuite))
+}
+
+func (s *OwnerFlowSuite) SetupTest() {
+	s.env = newOwnerFlowEnv(s.T(), testDBName(s.T()))
+}
+
+// testDBName returns the in-memory database name of the test t: each test gets its own database.
+func testDBName(t *testing.T) string {
 	t.Helper()
 
-	noteRepo, linkRepo := sqliterepo.NewNoteRepository(db), sqliterepo.NewLinkRepository(db, log)
-	expired := expiredslugs.New(noteRepo, linkRepo)
-
-	notesMgr := notes.NewManager(&notes.Deps{
-		Storage: noteRepo, Renderer: render.NewRenderer(), Encryptor: testutil.ContentEncryptor(t, "note"),
-		Hasher: crypto.NewEditCodeHasher(testutil.Argon2Params(), log), ExpiredSlugs: expired, Log: log,
-		Now: time.Now,
-	}, false)
-	linksMgr := links.NewManager(&links.Deps{
-		Storage: linkRepo, Encryptor: testutil.ContentEncryptor(t, "link"),
-		Hasher: crypto.NewEditCodeHasher(testutil.Argon2Params(), log), ExpiredSlugs: expired, Log: log,
-		Now: time.Now,
-	}, false).WithCache(linkcache.NewDefault(log))
-
-	return notesMgr, linksMgr
+	return strings.ReplaceAll(t.Name(), "/", "_")
 }
 
-// testHandlerConfig returns the web.HandlerConfig of the test stacks: the given managers, no
-// database pinger, a discarding logger, no account system, no files, no reveal store and the
-// default settings. A test sets the fields of its scenario on the returned value.
-func testHandlerConfig(notes web.NoteManager, links web.LinkManager) *web.HandlerConfig {
-	return &web.HandlerConfig{
-		Notes: notes, Links: links, Pinger: web.NoPinger{}, Log: slog.New(slog.DiscardHandler),
-		Accounts: nil, Files: nil, Reveal: nil,
-		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, CSRFSecret: nil, SessionTTL: 0,
-		FileTransfer:   web.FileTransferLimits{IdleTimeout: 0, MaxUploads: 0, MaxUploadsPerClient: 0},
-		DirectRedirect: false,
-	}
-}
-
-// newTestHandler builds the web.Handler of cfg and stops the test when web.NewHandler fails.
-func newTestHandler(t *testing.T, cfg *web.HandlerConfig) *web.Handler {
+// newOwnerFlowEnv builds that stack over the in-memory database dbName: testenv.NewStack with the
+// account system and the link cache, as the server assembles it. opts add the differences of a
+// scenario, for example its bootstrap token.
+func newOwnerFlowEnv(t *testing.T, dbName string, opts ...testenv.Option) ownerFlowEnv {
 	t.Helper()
 
-	handler, err := web.NewHandler(cfg)
-	require.NoError(t, err)
+	stack := testenv.NewStack(t, dbName,
+		append([]testenv.Option{testenv.WithAccounts(), testenv.WithLinkCache()}, opts...)...)
 
-	return handler
+	return ownerFlowEnv{db: stack.DB, authMgr: stack.Auth, users: stack.Users, baseURL: stack.Server.URL}
 }
 
-func newOwnerFlowEnv(t *testing.T, dbName string) ownerFlowEnv {
-	t.Helper()
-
-	ctx := context.Background()
-
-	db, err := sqliterepo.Open("file:"+dbName+"?mode=memory&cache=shared", slog.New(slog.DiscardHandler))
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, db.Close()) })
-
-	_, err = sqliterepo.Migrate(ctx, db)
-	require.NoError(t, err)
-
-	log := slog.New(slog.DiscardHandler)
-	users := sqliterepo.NewUserRepository(db)
-
-	authMgr, err := auth.NewManager(
-		auth.Stores{
-			Users:     users,
-			Invites:   sqliterepo.NewInviteRepository(db),
-			Sessions:  sqliterepo.NewSessionRepository(db),
-			APITokens: sqliterepo.NewAPITokenRepository(db),
-		},
-		&auth.Deps{
-			PasswordHasher: crypto.NewPasswordHasher(testArgon2Params, slog.New(slog.DiscardHandler)),
-			Sealer:         crypto.NewSealer(testArgon2Params),
-			TOTP:           crypto.NewTOTP(),
-			Log:            log,
-			Now:            time.Now,
-		},
-		"padmark-test", time.Hour,
-	)
-	require.NoError(t, err)
-
-	notesMgr, linksMgr := newOwnerFlowManagers(t, db, log)
-
-	handlerCfg := testHandlerConfig(notesMgr, linksMgr)
-	handlerCfg.Log = log
-	handlerCfg.Accounts = authMgr
-	handlerCfg.CSRFSecret = []byte("padmark-test-csrf-secret-32bytes")
-	handler := newTestHandler(t, handlerCfg)
-	router, err := web.NewRouter(handler, &web.RouterOptions{
-		MaxBodyBytes: 256 * 1024,
-
-		AllowedHosts: nil, RateLimit: 0, RateBurst: 0, DisableAPI: false,
-	})
-	require.NoError(t, err)
-
-	srv := httptest.NewServer(router)
-	t.Cleanup(srv.Close)
-
-	return ownerFlowEnv{db: db, authMgr: authMgr, users: users, baseURL: srv.URL}
-}
-
-// TestOwnerEditFlow_APITokenOwner_EditsAndDeletesWithoutEditCode is the end-to-end regression for
+// TestAPITokenOwner_EditsAndDeletesWithoutEditCode is the end-to-end regression for
 // the owner-bypass feature: a note created by an authenticated API-token caller records that
 // caller as owner_id (real SQLite migration + repository), and the exact same caller may then
 // PUT/DELETE it with no edit_code at all through the real HTTP stack. A second, different
 // authenticated caller must still be rejected without the edit_code — the bypass is strictly
 // owner-scoped, never "any authenticated caller".
-func TestOwnerEditFlow_APITokenOwner_EditsAndDeletesWithoutEditCode(t *testing.T) {
-	ctx := context.Background()
+func (s *OwnerFlowSuite) TestAPITokenOwner_EditsAndDeletesWithoutEditCode() {
+	t := s.T()
+	ctx := t.Context()
 
-	env := newOwnerFlowEnv(t, "ownereditflow")
-	authMgr, users, srvURL := env.authMgr, env.users, env.baseURL
+	srvURL := s.env.baseURL
 
 	// ── two accounts: the note's owner, and an unrelated second user ──.
-	_, err := authMgr.AcceptFirstAdmin(ctx, "owner", ownerFlowPassword)
-	require.NoError(t, err)
-
-	owner, err := users.GetByUsername(ctx, "owner")
-	require.NoError(t, err)
-
-	ownerKey, err := authMgr.CreateAPIToken(ctx, owner.ID, auth.Issuer{
-		APITokenHash: "", StepUp: auth.StepUp{Password: "", TOTPCode: ""},
-	}, 0)
-	require.NoError(t, err)
-
-	inviteTok, err := authMgr.GenerateInvite(ctx, owner.ID, auth.Issuer{
-		APITokenHash: "", StepUp: auth.StepUp{Password: "", TOTPCode: ""},
-	})
-	require.NoError(t, err)
-
-	_, err = authMgr.AcceptInvite(ctx, inviteTok, "other", ownerFlowPassword)
-	require.NoError(t, err)
-
-	other, err := users.GetByUsername(ctx, "other")
-	require.NoError(t, err)
-
-	otherKey, err := authMgr.CreateAPIToken(ctx, other.ID, auth.Issuer{
-		APITokenHash: "", StepUp: auth.StepUp{Password: "", TOTPCode: ""},
-	}, 0)
-	require.NoError(t, err)
+	ownerKey, otherKey := ownerAndOtherKeys(t, s.env)
 
 	// ── owner creates a note over the API-token-authenticated path ──.
 	created := postNote(t, srvURL, ownerKey, `{"title":"t","content":"c"}`)
@@ -227,6 +126,44 @@ func TestOwnerEditFlow_APITokenOwner_EditsAndDeletesWithoutEditCode(t *testing.T
 		"the note's own API-token owner must be able to delete it without edit_code")
 }
 
+// ownerAndOtherKeys makes two accounts on env, the first admin "owner" and the invited "other",
+// and returns an API key of each.
+func ownerAndOtherKeys(t *testing.T, env ownerFlowEnv) (ownerKey, otherKey string) {
+	t.Helper()
+
+	ctx := t.Context()
+	authMgr, users := env.authMgr, env.users
+
+	_, err := authMgr.AcceptFirstAdmin(ctx, "owner", ownerFlowPassword)
+	require.NoError(t, err)
+
+	owner, err := users.GetByUsername(ctx, "owner")
+	require.NoError(t, err)
+
+	ownerKey, err = authMgr.CreateAPIToken(ctx, owner.ID, auth.Issuer{
+		APITokenHash: "", StepUp: auth.StepUp{Password: "", TOTPCode: ""},
+	}, 0)
+	require.NoError(t, err)
+
+	inviteTok, err := authMgr.GenerateInvite(ctx, owner.ID, auth.Issuer{
+		APITokenHash: "", StepUp: auth.StepUp{Password: "", TOTPCode: ""},
+	})
+	require.NoError(t, err)
+
+	_, err = authMgr.AcceptInvite(ctx, inviteTok, "other", ownerFlowPassword)
+	require.NoError(t, err)
+
+	other, err := users.GetByUsername(ctx, "other")
+	require.NoError(t, err)
+
+	otherKey, err = authMgr.CreateAPIToken(ctx, other.ID, auth.Issuer{
+		APITokenHash: "", StepUp: auth.StepUp{Password: "", TOTPCode: ""},
+	}, 0)
+	require.NoError(t, err)
+
+	return ownerKey, otherKey
+}
+
 type createdNote struct {
 	ID string `json:"id"`
 }
@@ -235,7 +172,7 @@ type createdNote struct {
 func postNote(t *testing.T, baseURL, bearerKey, body string) createdNote {
 	t.Helper()
 
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost,
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost,
 		baseURL+"/notes", strings.NewReader(body))
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
@@ -272,7 +209,7 @@ type editPageCaller struct {
 func getEditPage(t *testing.T, baseURL, noteID string, caller editPageCaller) (int, http.Header, string) {
 	t.Helper()
 
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, baseURL+"/edit/"+noteID, nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, baseURL+"/edit/"+noteID, nil)
 	require.NoError(t, err)
 	req.Header.Set("Accept", caller.accept)
 
@@ -298,96 +235,24 @@ func getEditPage(t *testing.T, baseURL, noteID string, caller editPageCaller) (i
 	return resp.StatusCode, resp.Header, string(raw)
 }
 
-// TestOwnerEditFlow_EditPage_PrivacyGate exercises GET /edit/{id} through the real HTTP stack for
+// TestEditPage_PrivacyGate exercises GET /edit/{id} through the real HTTP stack for
 // every combination of note privacy and caller. The editor page renders a note's decrypted
 // plaintext into the form, so it is a read surface: whoever cannot read a note via GET
 // /notes/{id} must not reach its content here either.
 //
 // Reading the auth middleware alone does not answer this. GET /edit/{id} is deliberately let
-// through there (isPublicRoute), and the decision is made further in, by EditPage →
-// handlePrivateAuth → denyPrivate. What comes back depends on the caller: an anonymous browser
-// gets 303 to /login (signing in is what would grant access), a signed-in browser that still may
-// not read gets 403 (it holds the wrong credential, not none), and a non-HTML client gets 401.
+// through there (isPublicRoute), and the decision is made further in: EditPage → editNote →
+// notes.Manager.Inspect, and denyPrivate for its domain.ErrForbidden. What comes back depends on
+// the caller: an anonymous browser gets 303 to /login (signing in is what would grant access), a
+// signed-in browser that still may not read gets 403 (it holds the wrong credential, not none),
+// and a non-HTML client gets 401.
 // Only an end-to-end request shows which of the three applies.
-func TestOwnerEditFlow_EditPage_PrivacyGate(t *testing.T) {
-	ctx := context.Background()
+func (s *OwnerFlowSuite) TestEditPage_PrivacyGate() {
+	t := s.T()
+	env := s.env
+	ownerKey, otherKey := ownerAndOtherKeys(t, env)
 
-	env := newOwnerFlowEnv(t, "editpageprivacy")
-
-	_, err := env.authMgr.AcceptFirstAdmin(ctx, "owner", ownerFlowPassword)
-	require.NoError(t, err)
-
-	owner, err := env.users.GetByUsername(ctx, "owner")
-	require.NoError(t, err)
-
-	ownerKey, err := env.authMgr.CreateAPIToken(ctx, owner.ID, auth.Issuer{
-		APITokenHash: "", StepUp: auth.StepUp{Password: "", TOTPCode: ""},
-	}, 0)
-	require.NoError(t, err)
-
-	inviteTok, err := env.authMgr.GenerateInvite(ctx, owner.ID, auth.Issuer{
-		APITokenHash: "", StepUp: auth.StepUp{Password: "", TOTPCode: ""},
-	})
-	require.NoError(t, err)
-
-	_, err = env.authMgr.AcceptInvite(ctx, inviteTok, "other", ownerFlowPassword)
-	require.NoError(t, err)
-
-	other, err := env.users.GetByUsername(ctx, "other")
-	require.NoError(t, err)
-
-	otherKey, err := env.authMgr.CreateAPIToken(ctx, other.ID, auth.Issuer{
-		APITokenHash: "", StepUp: auth.StepUp{Password: "", TOTPCode: ""},
-	}, 0)
-	require.NoError(t, err)
-
-	anonBrowser := editPageCaller{name: "anonymous browser", accept: "text/html", bearer: ""}
-	anonAPI := editPageCaller{name: "anonymous api client", accept: "application/json", bearer: ""}
-	otherBrowser := editPageCaller{name: "non-owner browser", accept: "text/html", bearer: otherKey}
-	otherAPI := editPageCaller{name: "non-owner api client", accept: "application/json", bearer: otherKey}
-	ownerBrowser := editPageCaller{name: "owner browser", accept: "text/html", bearer: ownerKey}
-	// The header a real browser actually sends, rather than the bare "text/html" above: negotiate
-	// walks the list and must still pick HTML from it, or a denied navigation would get a bare
-	// 401 in place of the login redirect.
-	realBrowser := editPageCaller{
-		name:   "anonymous browser (full Accept)",
-		accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-
-		bearer: "",
-	}
-
-	// want is the expected status; a 303 additionally carries the login redirect. reachesContent
-	// says whether the caller is allowed to see the note's plaintext in the response.
-	cases := map[string][]struct {
-		caller         editPageCaller
-		want           int
-		reachesContent bool
-	}{
-		"owner": {
-			{anonBrowser, http.StatusSeeOther, false},
-			{realBrowser, http.StatusSeeOther, false},
-			{anonAPI, http.StatusUnauthorized, false},
-			// Signed in, but as the wrong account: a login page would only send them back here.
-			{otherBrowser, http.StatusForbidden, false},
-			{otherAPI, http.StatusUnauthorized, false},
-			{ownerBrowser, http.StatusOK, true},
-		},
-		"authenticated": {
-			{anonBrowser, http.StatusSeeOther, false},
-			{anonAPI, http.StatusUnauthorized, false},
-			// "authenticated" means any signed-in caller, owner or not — by definition, not an oversight.
-			{otherBrowser, http.StatusOK, true},
-			{otherAPI, http.StatusOK, true},
-			{ownerBrowser, http.StatusOK, true},
-		},
-		"public": {
-			{anonBrowser, http.StatusOK, true},
-			{anonAPI, http.StatusOK, true},
-			{otherBrowser, http.StatusOK, true},
-			{otherAPI, http.StatusOK, true},
-			{ownerBrowser, http.StatusOK, true},
-		},
-	}
+	cases := editPageCases(ownerKey, otherKey)
 
 	for privacy, callers := range cases {
 		t.Run(privacy, func(t *testing.T) {
@@ -417,5 +282,59 @@ func TestOwnerEditFlow_EditPage_PrivacyGate(t *testing.T) {
 					want.caller.name, map[bool]string{true: "", false: " not"}[want.reachesContent], privacy)
 			}
 		})
+	}
+}
+
+// editPageCase is one caller of the edit page and its expected answer. want is the expected
+// status; a 303 additionally carries the login redirect. reachesContent says whether the caller
+// is allowed to see the note's plaintext in the response.
+type editPageCase struct {
+	caller         editPageCaller
+	want           int
+	reachesContent bool
+}
+
+// editPageCases returns the callers of TestEditPage_PrivacyGate for each note privacy level.
+func editPageCases(ownerKey, otherKey string) map[string][]editPageCase {
+	anonBrowser := editPageCaller{name: "anonymous browser", accept: "text/html", bearer: ""}
+	anonAPI := editPageCaller{name: "anonymous api client", accept: "application/json", bearer: ""}
+	otherBrowser := editPageCaller{name: "non-owner browser", accept: "text/html", bearer: otherKey}
+	otherAPI := editPageCaller{name: "non-owner api client", accept: "application/json", bearer: otherKey}
+	ownerBrowser := editPageCaller{name: "owner browser", accept: "text/html", bearer: ownerKey}
+	// The header a real browser actually sends, rather than the bare "text/html" above: negotiate
+	// walks the list and must still pick HTML from it, or a denied navigation would get a bare
+	// 401 in place of the login redirect.
+	realBrowser := editPageCaller{
+		name:   "anonymous browser (full Accept)",
+		accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+
+		bearer: "",
+	}
+
+	return map[string][]editPageCase{
+		"owner": {
+			{anonBrowser, http.StatusSeeOther, false},
+			{realBrowser, http.StatusSeeOther, false},
+			{anonAPI, http.StatusUnauthorized, false},
+			// Signed in, but as the wrong account: a login page would only send them back here.
+			{otherBrowser, http.StatusForbidden, false},
+			{otherAPI, http.StatusUnauthorized, false},
+			{ownerBrowser, http.StatusOK, true},
+		},
+		"authenticated": {
+			{anonBrowser, http.StatusSeeOther, false},
+			{anonAPI, http.StatusUnauthorized, false},
+			// "authenticated" means any signed-in caller, owner or not — by definition, not an oversight.
+			{otherBrowser, http.StatusOK, true},
+			{otherAPI, http.StatusOK, true},
+			{ownerBrowser, http.StatusOK, true},
+		},
+		"public": {
+			{anonBrowser, http.StatusOK, true},
+			{anonAPI, http.StatusOK, true},
+			{otherBrowser, http.StatusOK, true},
+			{otherAPI, http.StatusOK, true},
+			{ownerBrowser, http.StatusOK, true},
+		},
 	}
 }

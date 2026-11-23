@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	"github.com/partyzanex/padmark/internal/domain"
 )
@@ -164,7 +163,7 @@ func TestWithRecovery_AbortHandlerPanicsAgain(t *testing.T) {
 // TestWithRecovery_AbortAfterFlushGivesShortBody runs an abort through the real server and the
 // logging wrapper. A handler that flushes before it aborts gives the client the status and a
 // short body; WithRecovery writes no record.
-func TestWithRecovery_AbortAfterFlushGivesShortBody(t *testing.T) {
+func (s *LiveServerSuite) TestWithRecovery_AbortAfterFlushGivesShortBody() {
 	var buf bytes.Buffer
 
 	log := slog.New(slog.NewJSONHandler(&buf, nil))
@@ -174,32 +173,31 @@ func TestWithRecovery_AbortAfterFlushGivesShortBody(t *testing.T) {
 
 		flushErr := net_http.NewResponseController(w).Flush()
 		if flushErr != nil {
-			t.Errorf("flush through the middleware: %v", flushErr)
+			s.T().Errorf("flush through the middleware: %v", flushErr)
 		}
 
 		panic(net_http.ErrAbortHandler)
 	})
 
-	server := httptest.NewServer(WithLogging(log, WithRecovery(log, aborting)))
-	defer server.Close()
+	server := s.startServer(WithLogging(log, WithRecovery(log, aborting)))
 
-	req, err := net_http.NewRequestWithContext(t.Context(), net_http.MethodGet, server.URL+"/files/abc/download", nil)
+	req, err := net_http.NewRequestWithContext(s.T().Context(), net_http.MethodGet, server.URL+"/files/abc/download", nil)
 	if err != nil {
-		t.Fatal(err)
+		s.T().Fatal(err)
 	}
 
 	resp, err := server.Client().Do(req)
 	if err != nil {
-		t.Fatal(err)
+		s.T().Fatal(err)
 	}
 
 	defer resp.Body.Close()
 
 	_, err = io.ReadAll(resp.Body)
 
-	require.ErrorIs(t, err, io.ErrUnexpectedEOF)
-	assert.Equal(t, net_http.StatusOK, resp.StatusCode)
-	assert.NotContains(t, buf.String(), "panic recovered")
+	s.Require().ErrorIs(err, io.ErrUnexpectedEOF)
+	s.Equal(net_http.StatusOK, resp.StatusCode)
+	s.NotContains(buf.String(), "panic recovered")
 }
 
 // TestWithRecovery_OutermostLayerCoversMiddlewarePanic guards the fix for a panic occurring

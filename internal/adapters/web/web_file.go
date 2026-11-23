@@ -93,15 +93,9 @@ type fileEditViewData struct {
 	IsOwner      bool
 }
 
-// CreateFilePage handles GET /files: the upload form. Without object storage the page tells
-// the user that files are off.
+// CreateFilePage handles GET /files: the upload form. Without object storage RegisterRoutes
+// shows the "files are off" page instead.
 func (h *FileHandler) CreateFilePage(w http.ResponseWriter, r *http.Request) {
-	if h.manager == nil {
-		h.writeFileErrorPage(w, r, domain.ErrFeatureNotSupported)
-
-		return
-	}
-
 	header := h.header(r, headerKindFile)
 	data := fileEditorViewData{
 		Header:       header,
@@ -156,21 +150,16 @@ func (h *FileHandler) FilePage(w http.ResponseWriter, r *http.Request, slug stri
 }
 
 // EditFilePage handles the old editor URL GET /files/{id}/edit. The editor is at /edit/{id}, as
-// for notes and short links. Without object storage the page tells the user that files are off.
-func (h *FileHandler) EditFilePage(w http.ResponseWriter, r *http.Request) {
-	if h.manager == nil {
-		h.writeFileErrorPage(w, r, domain.ErrFeatureNotSupported)
-
-		return
-	}
-
+// for notes and short links. Without object storage RegisterRoutes shows the "files are off"
+// page instead.
+func (*FileHandler) EditFilePage(w http.ResponseWriter, r *http.Request) {
 	redirectToEditor(w, r)
 }
 
 // editFileIfExists renders the editor of the file slug and returns true. It returns false when
 // files are off or no file has the slug, so that Handler.EditPage shows the note error.
 func (h *FileHandler) editFileIfExists(w http.ResponseWriter, r *http.Request, slug string) bool {
-	if h.manager == nil {
+	if h.fileMode == filesOff {
 		return false
 	}
 
@@ -228,12 +217,7 @@ func (h *FileHandler) writeFilePageError(w http.ResponseWriter, r *http.Request,
 // writeFileErrorPage renders the error page with the texts for files. Unknown errors are logged,
 // because the page shows only a general message.
 func (h *FileHandler) writeFileErrorPage(w http.ResponseWriter, r *http.Request, err error) {
-	var maxSize int64
-	if h.manager != nil {
-		maxSize = h.manager.MaxSize()
-	}
-
-	data := fileErrToPageData(err, maxSize)
+	data := fileErrToPageData(err, h.manager.MaxSize())
 	if data.Code == http.StatusInternalServerError {
 		h.log.ErrorContext(r.Context(), "file page failed", "err", err)
 	}
@@ -254,12 +238,9 @@ func (h *FileHandler) render(w http.ResponseWriter, r *http.Request, tmpl *templ
 
 // fileSuccess adds the file details to the success page after an upload. A failed lookup only
 // removes the details (fail-soft): the link and the edit code are still on the page, and the
-// settings stay as the query gives them (see successViewData.SettingsKnown).
+// settings stay as the query gives them (see successViewData.SettingsKnown). When files are off,
+// disabledFiles makes the lookup fail in the same way.
 func (c *common) fileSuccess(r *http.Request, slug string, data *successViewData) {
-	if c.fileMgr == nil {
-		return
-	}
-
 	file, err := c.fileMgr.Inspect(r.Context(), slug, c.reader(r))
 	if err != nil {
 		c.log.DebugContext(r.Context(), "read file for success page", "err", err)

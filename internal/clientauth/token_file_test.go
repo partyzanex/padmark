@@ -11,6 +11,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 )
 
 func TestTokenPath_XDGConfigHome(t *testing.T) {
@@ -30,19 +31,27 @@ func TestTokenPath_HomeFallback(t *testing.T) {
 	assert.Equal(t, filepath.Join("/home/tester", ".config", "padmark", "token"), path)
 }
 
-func TestReadToken_ReadsAndTrimsWhitespace(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", dir)
-	require.NoError(t, os.MkdirAll(filepath.Join(dir, "padmark"), 0o700))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "padmark", "token"), []byte("  secret-key\n\n"), 0o600))
-
-	assert.Equal(t, "secret-key", readTokenOrFail(t, nil))
+type TokenFileSuite struct {
+	suite.Suite
 }
 
-func TestReadToken_Missing_ReturnsEmpty(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+func TestTokenFileSuite(t *testing.T) {
+	suite.Run(t, new(TokenFileSuite))
+}
 
-	assert.Empty(t, readTokenOrFail(t, nil))
+func (s *TokenFileSuite) TestReadToken_ReadsAndTrimsWhitespace() {
+	dir := s.T().TempDir()
+	s.T().Setenv("XDG_CONFIG_HOME", dir)
+	s.Require().NoError(os.MkdirAll(filepath.Join(dir, "padmark"), 0o700))
+	s.Require().NoError(os.WriteFile(filepath.Join(dir, "padmark", "token"), []byte("  secret-key\n\n"), 0o600))
+
+	s.Equal("secret-key", readTokenOrFail(s.T(), nil))
+}
+
+func (s *TokenFileSuite) TestReadToken_Missing_ReturnsEmpty() {
+	s.T().Setenv("XDG_CONFIG_HOME", s.T().TempDir())
+
+	s.Empty(readTokenOrFail(s.T(), nil))
 }
 
 // writeMode writes the token file with an explicit permission mode and returns its path,

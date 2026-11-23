@@ -12,8 +12,8 @@ import (
 	"testing"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 )
 
 func TestMCPRejectsUnknownLogLevel(t *testing.T) {
@@ -68,34 +68,50 @@ func (b *lockedBuffer) String() string {
 	return b.buf.String()
 }
 
-// TestMCPDebugLogLevel_LogsToStderrOnly runs the real binary entry point (NewApp → stdio
-// server) with --log-level=debug and drives one check_server call over swapped stdin/stdout
-// pipes. The probe hits a closed server, which check_server logs at debug level: the record
-// must reach the command's stderr writer, and stdout must carry nothing but JSON-RPC frames.
-func TestMCPDebugLogLevel_LogsToStderrOnly(t *testing.T) {
-	isolateEnv(t)
+type DebugLogSuite struct {
+	suite.Suite
+}
 
-	// A closed server: the healthz probe fails fast with connection refused.
-	dead := httptest.NewServer(http.NotFoundHandler())
-	deadURL := dead.URL
-	dead.Close()
+func TestDebugLogSuite(t *testing.T) {
+	suite.Run(t, new(DebugLogSuite))
+}
 
+// swapStdio replaces os.Stdin and os.Stdout with pipes until the end of the test. It returns the
+// write end of the new stdin and the read end of the new stdout.
+func (s *DebugLogSuite) swapStdio() (stdinW, stdoutR *os.File) {
 	stdinR, stdinW, err := os.Pipe()
-	require.NoError(t, err)
+	s.Require().NoError(err)
 
 	stdoutR, stdoutW, err := os.Pipe()
-	require.NoError(t, err)
+	s.Require().NoError(err)
 
 	savedIn, savedOut := os.Stdin, os.Stdout
 	os.Stdin, os.Stdout = stdinR, stdoutW
 
-	t.Cleanup(func() {
+	s.T().Cleanup(func() {
 		os.Stdin, os.Stdout = savedIn, savedOut
 
 		_ = stdinR.Close()
 		_ = stdoutR.Close()
 		_ = stdoutW.Close()
 	})
+
+	return stdinW, stdoutR
+}
+
+// TestMCPDebugLogLevel_LogsToStderrOnly runs the real binary entry point (NewApp → stdio
+// server) with --log-level=debug and drives one check_server call over swapped stdin/stdout
+// pipes. The probe hits a closed server, which check_server logs at debug level: the record
+// must reach the command's stderr writer, and stdout must carry nothing but JSON-RPC frames.
+func (s *DebugLogSuite) TestMCPDebugLogLevel_LogsToStderrOnly() {
+	isolateEnv(s.T())
+
+	// A closed server: the healthz probe fails fast with connection refused.
+	dead := httptest.NewServer(http.NotFoundHandler())
+	deadURL := dead.URL
+	dead.Close()
+
+	stdinW, stdoutR := s.swapStdio()
 
 	var stderr, stdout lockedBuffer
 
@@ -105,7 +121,7 @@ func TestMCPDebugLogLevel_LogsToStderrOnly(t *testing.T) {
 	done := make(chan error, 1)
 
 	go func() {
-		done <- app.Run(t.Context(), []string{
+		done <- app.Run(s.T().Context(), []string{
 			"padmark-mcp", "--" + FlagLogLevel, "debug", "--" + FlagBaseURL, deadURL,
 		})
 	}()
@@ -115,32 +131,32 @@ func TestMCPDebugLogLevel_LogsToStderrOnly(t *testing.T) {
 		Title: "", Description: "", WebsiteURL: "", Icons: nil,
 	}, nil)
 
-	session, err := client.Connect(t.Context(), &mcpsdk.IOTransport{
+	session, err := client.Connect(s.T().Context(), &mcpsdk.IOTransport{
 		Reader: io.NopCloser(io.TeeReader(stdoutR, &stdout)),
 		Writer: stdinW, // closed by session.Close: the server sees EOF and Run returns.
 
 		MaxLineLength: 0,
 	}, nil)
-	require.NoError(t, err)
+	s.Require().NoError(err)
 
-	_, err = session.CallTool(t.Context(), &mcpsdk.CallToolParams{
+	_, err = session.CallTool(s.T().Context(), &mcpsdk.CallToolParams{
 		Name: "check_server",
 		Meta: nil, Arguments: nil, InputResponses: nil, RequestState: "",
 	})
-	require.NoError(t, err)
+	s.Require().NoError(err)
 
-	require.NoError(t, session.Close())
-	require.NoError(t, <-done)
+	s.Require().NoError(session.Close())
+	s.Require().NoError(<-done)
 
 	logs := stderr.String()
-	assert.Contains(t, logs, "level=DEBUG", "debug records must be emitted at --log-level=debug")
-	assert.Contains(t, logs, "check_server: healthz failed")
+	s.Contains(logs, "level=DEBUG", "debug records must be emitted at --log-level=debug")
+	s.Contains(logs, "check_server: healthz failed")
 
 	out := stdout.String()
-	assert.NotContains(t, out, "level=", "log records must never reach stdout")
+	s.NotContains(out, "level=", "log records must never reach stdout")
 
 	for line := range strings.SplitSeq(strings.TrimSpace(out), "\n") {
-		assert.True(t, json.Valid([]byte(line)), "stdout must carry only JSON-RPC frames, got %q", line)
-		assert.Contains(t, line, `"jsonrpc"`)
+		s.True(json.Valid([]byte(line)), "stdout must carry only JSON-RPC frames, got %q", line)
+		s.Contains(line, `"jsonrpc"`)
 	}
 }

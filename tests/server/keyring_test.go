@@ -1,3 +1,5 @@
+//go:build integration
+
 package server_test
 
 import (
@@ -17,19 +19,6 @@ import (
 	"github.com/partyzanex/padmark/internal/infra/crypto"
 	"github.com/partyzanex/padmark/internal/infra/server"
 )
-
-func buildServer(t *testing.T) string {
-	t.Helper()
-
-	binary := filepath.Join(t.TempDir(), "padmark-server")
-	//nolint:gosec // G204: repository source and output path in t.TempDir
-	command := exec.CommandContext(t.Context(), "go", "build", "-buildvcs=false", "-o", binary, "./cmd/padmark-server")
-	command.Dir = "../.."
-	output, err := command.CombinedOutput()
-	require.NoError(t, err, string(output))
-
-	return binary
-}
 
 func serverEnvironment(allowShared string) []string {
 	environment := make([]string, 0, len(os.Environ())+1)
@@ -104,8 +93,8 @@ func startServer(t *testing.T, binary string, args, environment []string) (bool,
 	}
 }
 
-func TestServerSharedKeyring(t *testing.T) {
-	binary := buildServer(t)
+func (s *ServerSuite) TestSharedKeyring() {
+	t, binary := s.T(), s.binary
 	for _, test := range []struct {
 		name, env       string
 		args            []string

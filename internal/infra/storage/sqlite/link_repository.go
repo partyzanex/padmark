@@ -59,11 +59,10 @@ func linkToDomain(dbLink *link) *domain.Link {
 	}
 }
 
-// Create inserts a new link. Expired links are lazily swept on each call (mirroring the
-// session/invite/reveal-token pattern — see session_repository.go) since there is no background
-// sweep worker in this codebase. This is the "nobody ever revisits it" gap Redirect's own
-// delete-on-read (links.Manager.Redirect) can't close on its own: a link that expires and is
-// never followed again would otherwise linger in the table forever.
+// Create inserts a new link. Links have no background sweep, so each call also deletes the
+// expired links of other IDs. links.Manager.Follow deletes an expired link only when a caller
+// follows it: a link that expires and that nobody follows again would otherwise stay in the
+// table.
 func (r *LinkRepository) Create(ctx context.Context, domLink *domain.Link) error {
 	dbLink := &link{
 		BaseModel:      bun.BaseModel{},

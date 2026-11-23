@@ -320,7 +320,7 @@ func (s *Store) Delete(ctx context.Context, key string) error {
 }
 
 // isLoopback reports whether host is "localhost" or a loopback IP address. A different host
-// name, also a Compose service name, needs Config.AllowInsecure for plain http.
+// name, also a Compose service name, needs the AllowInsecureHTTP option for plain http.
 func isLoopback(host string) bool {
 	if strings.EqualFold(host, "localhost") {
 		return true

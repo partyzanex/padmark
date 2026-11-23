@@ -15,10 +15,12 @@ import (
 
 // Pathological-input cost of Renderer.Render (audit L-11).
 //
-// maxContentBytes mirrors server.DefaultMaxBodyBytes (--max-body-bytes, 4 MiB), the only bound on
-// note content: the domain caps only the title, the OpenAPI schema puts no maxLength on content,
-// and notes.Manager renders on every HTML view (GetRendered → renderNote) with no cache. Render
-// takes no context, so a slow render keeps burning its goroutine after the client goes away.
+// maxContentBytes mirrors server.DefaultMaxBodyBytes (--max-body-bytes, 4 MiB), the default bound
+// on a request body; domain.DefaultMaxContentLength has the same value in characters.
+// notes.Manager renders a note on an HTML view (ReadRendered → renderNote). The render cache
+// keeps only the HTML of a note that is not burn-after-reading, so a first view or a burn note
+// pays the full cost. Render takes no context, so a slow render keeps burning its goroutine after
+// the client goes away.
 //
 // Measured (Apple Silicon, no -race): most inputs scale linearly (worst: many chroma-highlighted
 // fences, ~15 s per 4 MiB render), but stock goldmark v1.8.6 is quadratic on several inputs that

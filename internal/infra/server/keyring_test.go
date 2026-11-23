@@ -69,28 +69,28 @@ func TestLoadContentKeyringOverrideWarnsThroughServerLogger(t *testing.T) {
 	require.Contains(t, output.String(), "0640")
 }
 
-func TestServeRefusesSharedKeyringBeforeOpeningDatabase(t *testing.T) {
-	t.Setenv(EnvAllowSharedKeyring, "")
+func (s *CommandSuite) TestServeRefusesSharedKeyringBeforeOpeningDatabase() {
+	s.T().Setenv(EnvAllowSharedKeyring, "")
 
-	dsn := filepath.Join(t.TempDir(), "test.db")
-	path := writeSharedTestKeyring(t, 0o644)
-	err := NewApp().Run(t.Context(), []string{
+	dsn := filepath.Join(s.T().TempDir(), "test.db")
+	path := writeSharedTestKeyring(s.T(), 0o644)
+	err := NewApp().Run(s.T().Context(), []string{
 		"padmark", "serve", "--storage", "sqlite",
 		"--dsn", dsn, "--content-keyring-file", path, "--addr", "invalid-listen-address",
 	})
-	require.ErrorIs(t, err, crypto.ErrKeyringPermissions)
-	require.ErrorContains(t, err, "--"+FlagAllowSharedKeyring)
-	require.NoFileExists(t, dsn, "a refused keyring must stop startup before the database is opened")
+	s.Require().ErrorIs(err, crypto.ErrKeyringPermissions)
+	s.Require().ErrorContains(err, "--"+FlagAllowSharedKeyring)
+	s.Require().NoFileExists(dsn, "a refused keyring must stop startup before the database is opened")
 }
 
-func TestEncryptionCommandRefusesSharedKeyringWithoutOverride(t *testing.T) {
-	t.Setenv(EnvAllowSharedKeyring, "")
+func (s *CommandSuite) TestEncryptionCommandRefusesSharedKeyringWithoutOverride() {
+	s.T().Setenv(EnvAllowSharedKeyring, "")
 
-	dsn := filepath.Join(t.TempDir(), "test.db")
-	path := writeSharedTestKeyring(t, 0o644)
-	_, err := runEncryptionTestCommand(t, dsn, path, "status")
-	require.ErrorIs(t, err, crypto.ErrKeyringPermissions)
-	require.ErrorContains(t, err, "--"+FlagAllowSharedKeyring)
+	dsn := filepath.Join(s.T().TempDir(), "test.db")
+	path := writeSharedTestKeyring(s.T(), 0o644)
+	_, err := runEncryptionTestCommand(s.T(), dsn, path, "status")
+	s.Require().ErrorIs(err, crypto.ErrKeyringPermissions)
+	s.Require().ErrorContains(err, "--"+FlagAllowSharedKeyring)
 }
 
 func TestAllowSharedKeyringFlagAndEnv(t *testing.T) {

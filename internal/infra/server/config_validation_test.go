@@ -5,10 +5,18 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 )
 
-func TestServerRejectsInvalidSecurityConfigurationBeforeOpeningDB(t *testing.T) {
+type CommandSuite struct {
+	suite.Suite
+}
+
+func TestCommandSuite(t *testing.T) {
+	suite.Run(t, new(CommandSuite))
+}
+
+func (s *CommandSuite) TestServerRejectsInvalidSecurityConfigurationBeforeOpeningDB() {
 	const (
 		flagBoundsErr = "cost must be between 1 and "
 		argon2Err     = "validate argon2 configuration: argon2 cost outside supported bounds"
@@ -45,21 +53,21 @@ func TestServerRejectsInvalidSecurityConfigurationBeforeOpeningDB(t *testing.T) 
 	}
 
 	for _, testCase := range tests {
-		t.Run(testCase.name, func(t *testing.T) {
-			dir := t.TempDir()
+		s.Run(testCase.name, func() {
+			dir := s.T().TempDir()
 			dsn := filepath.Join(dir, "padmark.db")
 			args := append([]string{"padmark", "serve", "--dsn", dsn}, testCase.args...)
 
-			err := NewApp().Run(t.Context(), args)
+			err := NewApp().Run(s.T().Context(), args)
 
-			require.Error(t, err)
-			require.ErrorContains(t, err, testCase.wantErr)
-			require.NotContains(t, err.Error(), "keyring", "configuration error must precede keyring startup")
-			require.NoFileExists(t, dsn, "configuration error must precede opening the database")
+			s.Require().Error(err)
+			s.Require().ErrorContains(err, testCase.wantErr)
+			s.Require().NotContains(err.Error(), "keyring", "configuration error must precede keyring startup")
+			s.Require().NoFileExists(dsn, "configuration error must precede opening the database")
 
 			entries, readErr := os.ReadDir(dir)
-			require.NoError(t, readErr)
-			require.Empty(t, entries, "no database (or journal) file may be created")
+			s.Require().NoError(readErr)
+			s.Require().Empty(entries, "no database (or journal) file may be created")
 		})
 	}
 }

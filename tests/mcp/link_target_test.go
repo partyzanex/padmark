@@ -22,10 +22,11 @@ func linkTargets() []string {
 	}
 }
 
-// TestMCPFlow_LinkTargetKeepsItsAddress drives create_link and get_link against the real server
+// TestLinkTargetKeepsItsAddress drives create_link and get_link against the real server
 // stack. Both tools return the address that the agent sent.
-func TestMCPFlow_LinkTargetKeepsItsAddress(t *testing.T) {
-	ctx := context.Background()
+func (s *MCPFlowSuite) TestLinkTargetKeepsItsAddress() {
+	t := s.T()
+	ctx := t.Context()
 
 	stack := startTestPadmark(t)
 
@@ -43,10 +44,11 @@ func TestMCPFlow_LinkTargetKeepsItsAddress(t *testing.T) {
 	}
 }
 
-// TestMCPFlow_BulkLinkTargetIsSavedExactly checks the address that create_links_bulk saves: the
+// TestBulkLinkTargetIsSavedExactly checks the address that create_links_bulk saves: the
 // server stores the target of each item as the agent sent it. get_link reads the saved value.
-func TestMCPFlow_BulkLinkTargetIsSavedExactly(t *testing.T) {
-	ctx := context.Background()
+func (s *MCPFlowSuite) TestBulkLinkTargetIsSavedExactly() {
+	t := s.T()
+	ctx := t.Context()
 
 	stack := startTestPadmark(t)
 
@@ -65,10 +67,11 @@ func TestMCPFlow_BulkLinkTargetIsSavedExactly(t *testing.T) {
 	}
 }
 
-// TestMCPFlow_BulkLinkEchoKeepsItsAddress checks the target_url of each create_links_bulk result.
+// TestBulkLinkEchoKeepsItsAddress checks the target_url of each create_links_bulk result.
 // The contract of BulkLinkResult is that it echoes the target of the request item.
-func TestMCPFlow_BulkLinkEchoKeepsItsAddress(t *testing.T) {
-	ctx := context.Background()
+func (s *MCPFlowSuite) TestBulkLinkEchoKeepsItsAddress() {
+	t := s.T()
+	ctx := t.Context()
 
 	stack := startTestPadmark(t)
 

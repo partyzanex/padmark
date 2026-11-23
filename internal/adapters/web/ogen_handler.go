@@ -153,7 +153,7 @@ func noteUpdatePayload(req *ogenapi.UpdateNoteRequest) (*domain.Note, error) {
 	}
 
 	return &domain.Note{
-		// UpdatePath/Update semantics: CreatedAt/UpdatedAt/Views are not caller-set; OwnerID/ID are
+		// UpdateNote/UpdateNoteByPath semantics: CreatedAt/UpdatedAt/Views are not caller-set; OwnerID/ID are
 		// pinned from the existing note inside the usecase; EditCode is the caller-supplied credential.
 		CreatedAt:        time.Time{},
 		UpdatedAt:        time.Time{},
