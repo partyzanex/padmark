@@ -110,13 +110,13 @@ func TestHashers_LogAndRejectCostAboveCeiling(t *testing.T) {
 		AddSource: false, ReplaceAttr: nil,
 	}))
 
-	assert.False(t, NewPasswordHasher(low).WithLogger(log).Verify(hugeCostHash(), "password"))
+	assert.False(t, NewPasswordHasher(low, log).Verify(hugeCostHash(), "password"))
 	assert.Contains(t, buf.String(), "level=WARN")
 	assert.Contains(t, buf.String(), "password")
 
 	buf.Reset()
 
-	assert.False(t, NewEditCodeHasher(low).WithLogger(log).Verify(hugeCostHash(), "code"))
+	assert.False(t, NewEditCodeHasher(low, log).Verify(hugeCostHash(), "code"))
 	assert.Contains(t, buf.String(), "level=WARN")
 	assert.Contains(t, buf.String(), "edit code")
 	assert.NotContains(t, buf.String(), hugeCostHash(), "the stored hash must never be logged")

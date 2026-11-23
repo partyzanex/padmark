@@ -11,7 +11,7 @@ import (
 )
 
 func TestEditCodeHasher_Roundtrip(t *testing.T) {
-	hasher := crypto.NewEditCodeHasher(crypto.DefaultArgon2Params())
+	hasher := crypto.NewEditCodeHasher(crypto.DefaultArgon2Params(), discardLog())
 
 	hash, err := hasher.Hash("MySecretCode12")
 	require.NoError(t, err)
@@ -21,7 +21,7 @@ func TestEditCodeHasher_Roundtrip(t *testing.T) {
 // TestEditCodeHasher_UsesFastHashFormat locks in that new edit codes use the fast salted-SHA-256
 // scheme ("s1$…"), not memory-hard argon2 — the change that removed argon2's per-write memory cost.
 func TestEditCodeHasher_UsesFastHashFormat(t *testing.T) {
-	hasher := crypto.NewEditCodeHasher(crypto.DefaultArgon2Params())
+	hasher := crypto.NewEditCodeHasher(crypto.DefaultArgon2Params(), discardLog())
 
 	hash, err := hasher.Hash("code12345678")
 	require.NoError(t, err)
@@ -35,7 +35,7 @@ func TestEditCodeHasher_VerifiesLegacyArgon2Hash(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, strings.HasPrefix(legacy, "v1$"))
 
-	hasher := crypto.NewEditCodeHasher(crypto.DefaultArgon2Params())
+	hasher := crypto.NewEditCodeHasher(crypto.DefaultArgon2Params(), discardLog())
 
 	assert.True(t, hasher.Verify(legacy, "legacy-code-123"), "legacy argon2 edit code must still verify")
 	assert.False(t, hasher.Verify(legacy, "wrong-code"))
@@ -44,7 +44,7 @@ func TestEditCodeHasher_VerifiesLegacyArgon2Hash(t *testing.T) {
 // TestEditCodeHasher_UserProvidedRoundtrip pins that caller-supplied codes take the
 // memory-hard argon2id path and remain verifiable through the same Verify dispatcher.
 func TestEditCodeHasher_UserProvidedRoundtrip(t *testing.T) {
-	hasher := crypto.NewEditCodeHasher(crypto.DefaultArgon2Params())
+	hasher := crypto.NewEditCodeHasher(crypto.DefaultArgon2Params(), discardLog())
 
 	hash, err := hasher.HashUserProvided("MySecretCode12")
 	require.NoError(t, err)
@@ -56,7 +56,7 @@ func TestEditCodeHasher_UserProvidedRoundtrip(t *testing.T) {
 // TestEditCodeHasher_UserProvidedSaltsDiffer ensures two hashes of the same caller-supplied
 // code differ (random salt), so identical weak codes are not visible in a DB dump.
 func TestEditCodeHasher_UserProvidedSaltsDiffer(t *testing.T) {
-	hasher := crypto.NewEditCodeHasher(crypto.DefaultArgon2Params())
+	hasher := crypto.NewEditCodeHasher(crypto.DefaultArgon2Params(), discardLog())
 
 	hash1, err := hasher.HashUserProvided("password123")
 	require.NoError(t, err)
@@ -71,7 +71,7 @@ func TestEditCodeHasher_UserProvidedSaltsDiffer(t *testing.T) {
 
 // TestEditCodeHasher_WrongCodeFails verifies the negative branch of the fast path.
 func TestEditCodeHasher_WrongCodeFails(t *testing.T) {
-	hasher := crypto.NewEditCodeHasher(crypto.DefaultArgon2Params())
+	hasher := crypto.NewEditCodeHasher(crypto.DefaultArgon2Params(), discardLog())
 
 	hash, err := hasher.Hash("correct-code")
 	require.NoError(t, err)
@@ -79,7 +79,7 @@ func TestEditCodeHasher_WrongCodeFails(t *testing.T) {
 }
 
 func TestEditCodeHasher_DifferentSaltsPerHash(t *testing.T) {
-	hasher := crypto.NewEditCodeHasher(crypto.DefaultArgon2Params())
+	hasher := crypto.NewEditCodeHasher(crypto.DefaultArgon2Params(), discardLog())
 
 	hash1, err := hasher.Hash("same-code")
 	require.NoError(t, err)
@@ -94,7 +94,7 @@ func TestEditCodeHasher_DifferentSaltsPerHash(t *testing.T) {
 }
 
 func TestEditCodeHasher_InvalidFormatFails(t *testing.T) {
-	hasher := crypto.NewEditCodeHasher(crypto.DefaultArgon2Params())
+	hasher := crypto.NewEditCodeHasher(crypto.DefaultArgon2Params(), discardLog())
 
 	for _, bad := range []string{
 		"",
@@ -109,7 +109,7 @@ func TestEditCodeHasher_InvalidFormatFails(t *testing.T) {
 }
 
 func TestEditCodeHasher_TamperedHashFails(t *testing.T) {
-	hasher := crypto.NewEditCodeHasher(crypto.DefaultArgon2Params())
+	hasher := crypto.NewEditCodeHasher(crypto.DefaultArgon2Params(), discardLog())
 
 	hash, err := hasher.Hash("code")
 	require.NoError(t, err)
@@ -125,7 +125,7 @@ func TestEditCodeHasher_TamperedHashFails(t *testing.T) {
 // hashed with the operator's --argon2-* cost, not a hard-coded 64 MiB default.
 func TestEditCodeHasher_HashUserProvidedUsesConfiguredParams(t *testing.T) {
 	custom := crypto.Argon2Params{Memory: 8 * 1024, Time: 3, Threads: 2}
-	hasher := crypto.NewEditCodeHasher(custom)
+	hasher := crypto.NewEditCodeHasher(custom, discardLog())
 
 	hash, err := hasher.HashUserProvided("password123")
 	require.NoError(t, err)
@@ -137,8 +137,8 @@ func TestEditCodeHasher_HashUserProvidedUsesConfiguredParams(t *testing.T) {
 // TestEditCodeHasher_VerifiesCodesHashedWithOtherParams checks that changing the configured cost
 // does not invalidate stored codes: Verify reads the cost from the stored hash.
 func TestEditCodeHasher_VerifiesCodesHashedWithOtherParams(t *testing.T) {
-	old := crypto.NewEditCodeHasher(crypto.Argon2Params{Memory: 8 * 1024, Time: 2, Threads: 1})
-	current := crypto.NewEditCodeHasher(crypto.Argon2Params{Memory: 16 * 1024, Time: 3, Threads: 1})
+	old := crypto.NewEditCodeHasher(crypto.Argon2Params{Memory: 8 * 1024, Time: 2, Threads: 1}, discardLog())
+	current := crypto.NewEditCodeHasher(crypto.Argon2Params{Memory: 16 * 1024, Time: 3, Threads: 1}, discardLog())
 
 	hash, err := old.HashUserProvided("chosen-by-user")
 	require.NoError(t, err)
@@ -149,7 +149,7 @@ func TestEditCodeHasher_VerifiesCodesHashedWithOtherParams(t *testing.T) {
 // TestEditCodeHasher_IsStoredHash pins the exact stored-hash shape: real hashes of both formats
 // match, while v0.1.6 caller-chosen codes that only start like a hash do not (review R1).
 func TestEditCodeHasher_IsStoredHash(t *testing.T) {
-	hasher := crypto.NewEditCodeHasher(crypto.DefaultArgon2Params())
+	hasher := crypto.NewEditCodeHasher(crypto.DefaultArgon2Params(), discardLog())
 
 	fast, err := hasher.Hash("code12345678")
 	require.NoError(t, err)

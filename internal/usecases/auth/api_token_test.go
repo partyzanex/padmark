@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -54,7 +55,7 @@ func newAuthManagerWithTokens(
 			APITokens: apiTokens,
 		},
 		&Deps{
-			PasswordHasher: crypto.NewPasswordHasher(testArgon2Params),
+			PasswordHasher: crypto.NewPasswordHasher(testArgon2Params, slog.New(slog.DiscardHandler)),
 			Sealer:         crypto.NewSealer(testArgon2Params),
 			TOTP:           crypto.NewTOTP(),
 			Log:            discardLog(),
@@ -80,7 +81,7 @@ func (suite *APITokenSuite) disabledMgr() *Manager {
 			APITokens: nil, // API-token flow disabled → methods return domain.ErrFeatureNotSupported.
 		},
 		&Deps{
-			PasswordHasher: crypto.NewPasswordHasher(testArgon2Params),
+			PasswordHasher: crypto.NewPasswordHasher(testArgon2Params, slog.New(slog.DiscardHandler)),
 			Sealer:         crypto.NewSealer(testArgon2Params),
 			TOTP:           crypto.NewTOTP(),
 			Log:            discardLog(),

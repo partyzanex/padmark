@@ -23,21 +23,14 @@ type PasswordHasher struct {
 }
 
 // NewPasswordHasher returns a PasswordHasher using the given argon2 cost parameters.
-// Zero-valued fields fall back to DefaultArgon2Params.
-func NewPasswordHasher(params Argon2Params) *PasswordHasher {
+// Zero-valued fields fall back to DefaultArgon2Params. log records the stored hashes that Verify
+// refuses for an excessive cost (WARN).
+func NewPasswordHasher(params Argon2Params, log *slog.Logger) *PasswordHasher {
 	return &PasswordHasher{
-		log:     slog.New(slog.DiscardHandler),
+		log:     log,
 		params:  params.withDefaults(),
 		ceiling: params.acceptedCeiling(),
 	}
-}
-
-// WithLogger sets the logger that records stored hashes refused for an excessive cost (WARN).
-// The default discards them.
-func (h *PasswordHasher) WithLogger(log *slog.Logger) *PasswordHasher {
-	h.log = log
-
-	return h
 }
 
 // Hash derives an argon2id hash from password (cost parameters embedded in the result).

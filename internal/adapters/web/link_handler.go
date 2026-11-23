@@ -26,21 +26,18 @@ type LinkHandler struct {
 	view *template.Template
 
 	// directRedirect selects the short-link redirect's response mode: true issues an immediate 301 to the
-	// target URL, false renders the interstitial (redirect.html). Set via Handler.WithDirectRedirect
-	// (RouterOptions.DirectRedirect); the zero value (false) only matters for callers that build a
-	// Handler without going through NewRouter, e.g. tests that don't exercise this route.
+	// target URL, false renders the interstitial (redirect.html). See HandlerConfig.DirectRedirect.
 	directRedirect bool
 }
 
-func newLinkHandler(c *common, manager LinkManager, tmpl, editor, view *template.Template) *LinkHandler {
+func newLinkHandler(c *common, manager LinkManager, directRedirect bool) *LinkHandler {
 	return &LinkHandler{
-		common:  c,
-		manager: manager,
-		tmpl:    tmpl,
-		editor:  editor,
-		view:    view,
-		// directRedirect zero = false = interstitial mode; WithDirectRedirect overrides at router build.
-		directRedirect: false,
+		common:         c,
+		manager:        manager,
+		tmpl:           parseTmpl("redirect", redirectTmplSrc),
+		editor:         parseTmpl("link_editor", linkEditorTmplSrc),
+		view:           parseTmpl("link", linkTmplSrc),
+		directRedirect: directRedirect,
 	}
 }
 
@@ -131,12 +128,4 @@ func (h *LinkHandler) followLink(r *http.Request, id string) (*domain.Link, erro
 	}
 
 	return link, nil
-}
-
-// WithDirectRedirect sets the short-link redirect's response mode (see RouterOptions.DirectRedirect). Called
-// by NewRouter; do not call after the server starts.
-func (h *Handler) WithDirectRedirect(v bool) *Handler {
-	h.directRedirect = v
-
-	return h
 }

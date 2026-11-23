@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -78,7 +79,7 @@ func newFileManager(
 		Objects:      objects,
 		Cipher:       crypto.NewFileCipher(),
 		Encryptor:    testutil.ContentEncryptor(testSuite.T(), "file"),
-		Hasher:       crypto.NewEditCodeHasher(testutil.Argon2Params()),
+		Hasher:       crypto.NewEditCodeHasher(testutil.Argon2Params(), slog.New(slog.DiscardHandler)),
 		ExpiredSlugs: expired,
 		Log:          discardLog(),
 		Now:          time.Now,

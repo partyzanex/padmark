@@ -340,19 +340,22 @@ func startStack(t *testing.T, s3Endpoint string) *testStack {
 
 	notesMgr, linksMgr := newTestManagers(t, db, expired)
 
-	handler := web.NewHandler(notesMgr, linksMgr, discardTestLogger()).WithAuthManager(authMgr)
+	handlerCfg := testHandlerConfig(notesMgr, linksMgr)
+	handlerCfg.Accounts = authMgr
+	handlerCfg.CSRFSecret = []byte("padmark-test-csrf-secret-32bytes")
 
+	// The field stays a nil interface without files: a nil *files.Manager in it would turn the
+	// file routes on.
 	if s3Endpoint != "" {
-		handler.WithFileManager(newTestFileManager(t, db, expired, s3Endpoint))
+		handlerCfg.Files = newTestFileManager(t, db, expired, s3Endpoint)
 	}
 
-	ogen := web.NewOgenHandler(notesMgr, linksMgr, web.NoPinger{}, discardTestLogger())
-	router, err := web.NewRouter(handler, ogen, &web.RouterOptions{
-		MaxBodyBytes: 256 * 1024,
-		CSRFSecret:   []byte("padmark-test-csrf-secret-32bytes"),
+	handler := newTestHandler(t, handlerCfg)
 
-		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, AllowedHosts: nil, RateLimit: 0,
-		RateBurst: 0, SessionTTL: 0, DisableAPI: false, DirectRedirect: false,
+	router, err := web.NewRouter(handler, &web.RouterOptions{
+		MaxBodyBytes: 256 * 1024,
+
+		AllowedHosts: nil, RateLimit: 0, RateBurst: 0, DisableAPI: false,
 	})
 	require.NoError(t, err)
 
@@ -375,7 +378,7 @@ func newTestAuthManager(t *testing.T, db *bun.DB, users *sqliterepo.UserReposito
 			APITokens: sqliterepo.NewAPITokenRepository(db),
 		},
 		&auth.Deps{
-			PasswordHasher: crypto.NewPasswordHasher(flowArgon2),
+			PasswordHasher: crypto.NewPasswordHasher(flowArgon2, slog.New(slog.DiscardHandler)),
 			Sealer:         crypto.NewSealer(flowArgon2),
 			TOTP:           crypto.NewTOTP(),
 			Log:            discardTestLogger(),
@@ -388,18 +391,43 @@ func newTestAuthManager(t *testing.T, db *bun.DB, users *sqliterepo.UserReposito
 	return authMgr
 }
 
+// testHandlerConfig returns the web.HandlerConfig of the test stacks: the given managers, no
+// database pinger, a discarding logger, no account system, no files, no reveal store and the
+// default settings. A test sets the fields of its scenario on the returned value.
+func testHandlerConfig(notes web.NoteManager, links web.LinkManager) *web.HandlerConfig {
+	return &web.HandlerConfig{
+		Notes: notes, Links: links, Pinger: web.NoPinger{}, Log: slog.New(slog.DiscardHandler),
+		Accounts: nil, Files: nil, Reveal: nil,
+		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, CSRFSecret: nil, SessionTTL: 0,
+		FileTransfer:   web.FileTransferLimits{IdleTimeout: 0, MaxUploads: 0, MaxUploadsPerClient: 0},
+		DirectRedirect: false,
+	}
+}
+
+// newTestHandler builds the web.Handler of cfg and stops the test when web.NewHandler fails.
+func newTestHandler(t *testing.T, cfg *web.HandlerConfig) *web.Handler {
+	t.Helper()
+
+	handler, err := web.NewHandler(cfg)
+	require.NoError(t, err)
+
+	return handler
+}
+
 func newTestManagers(t *testing.T, db *bun.DB, expired *expiredslugs.Releaser) (*notes.Manager, *links.Manager) {
 	t.Helper()
 
 	notesMgr := notes.NewManager(&notes.Deps{
 		Storage: sqliterepo.NewNoteRepository(db), Renderer: render.NewRenderer(),
-		Encryptor: testutil.ContentEncryptor(t, "note"), Hasher: crypto.NewEditCodeHasher(testutil.Argon2Params()),
+		Encryptor:    testutil.ContentEncryptor(t, "note"),
+		Hasher:       crypto.NewEditCodeHasher(testutil.Argon2Params(), discardTestLogger()),
 		ExpiredSlugs: expired, Log: discardTestLogger(),
 		Now: time.Now,
 	}, false)
 	linksMgr := links.NewManager(&links.Deps{
 		Storage: sqliterepo.NewLinkRepository(db, discardTestLogger()), Encryptor: testutil.ContentEncryptor(t, "link"),
-		Hasher: crypto.NewEditCodeHasher(testutil.Argon2Params()), ExpiredSlugs: expired, Log: discardTestLogger(),
+		Hasher: crypto.NewEditCodeHasher(testutil.Argon2Params(), discardTestLogger()), ExpiredSlugs: expired,
+		Log: discardTestLogger(),
 		Now: time.Now,
 	}, false)
 
@@ -424,7 +452,7 @@ func newTestFileManager(t *testing.T, db *bun.DB, expired *expiredslugs.Releaser
 		Objects:      objects,
 		Cipher:       crypto.NewFileCipher(),
 		Encryptor:    testutil.ContentEncryptor(t, "file"),
-		Hasher:       crypto.NewEditCodeHasher(testutil.Argon2Params()),
+		Hasher:       crypto.NewEditCodeHasher(testutil.Argon2Params(), slog.New(slog.DiscardHandler)),
 		ExpiredSlugs: expired,
 		Log:          discardTestLogger(),
 		Now:          time.Now,

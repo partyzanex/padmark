@@ -32,13 +32,14 @@ type fileDeps struct {
 	metrics files.Metrics
 }
 
-// attachFiles turns on file publishing when --s3-endpoint is set. configFromCommand already
-// checked that the bucket and the keys are set. An unusable configuration stops startup
-// (fail-hard): an operator who configures files expects them to work, and a wrong bucket or key
-// is a configuration error, not a temporary failure. The file sweep registers its close function
-// in shared.background, which stops before the database closes.
+// attachFiles turns on file publishing when --s3-endpoint is set: it puts the file manager into
+// handlerCfg.Files. Without the endpoint the field stays nil. configFromCommand already checked
+// that the bucket and the keys are set. An unusable configuration stops startup (fail-hard): an
+// operator who configures files expects them to work, and a wrong bucket or key is a
+// configuration error, not a temporary failure. The file sweep registers its close function in
+// shared.background, which stops before the database closes.
 func attachFiles(
-	ctx context.Context, cfg *Config, handler *web.Handler, storage files.Storage,
+	ctx context.Context, cfg *Config, handlerCfg *web.HandlerConfig, storage files.Storage,
 	shared contentServices, deps *fileDeps, log *slog.Logger,
 ) error {
 	if cfg.files.s3.Endpoint == "" {
@@ -71,7 +72,7 @@ func attachFiles(
 
 	// Composition time, before the first request: the shared releaser now also removes files.
 	deps.expired.WithFiles(manager)
-	handler.WithFileManager(manager)
+	handlerCfg.Files = manager
 	log.InfoContext(ctx, "file publishing is on", "bucket", cfg.files.s3.Bucket, "max_file_size", manager.MaxSize())
 
 	startFileSweep(ctx, cfg.files.sweepInterval, manager.SweepExpired, shared.background, log)

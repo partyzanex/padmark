@@ -50,17 +50,16 @@ func (s *PathNormalizationSuite) SetupTest() {
 	s.revealStore = NewMockRevealTokenStore(s.ctrl)
 	s.auth = NewMockAuthManager(s.ctrl)
 
-	handler := web.NewHandler(s.manager, s.linkManager, discardLog()).
-		WithAuthManager(s.auth).
-		WithRevealStore(s.revealStore)
-	ogen := web.NewOgenHandler(s.manager, s.linkManager, NewMockPinger(s.ctrl), discardLog())
+	handlerCfg := testHandlerConfig(s.manager, s.linkManager, NewMockPinger(s.ctrl))
+	handlerCfg.Accounts = s.auth
+	handlerCfg.Reveal = s.revealStore
+	handlerCfg.CSRFSecret = authTestCSRFSecret
+	handler := newTestHandler(s.T(), handlerCfg)
 
-	router, err := web.NewRouter(handler, ogen, &web.RouterOptions{
+	router, err := web.NewRouter(handler, &web.RouterOptions{
 		MaxBodyBytes: 256 * 1024,
-		CSRFSecret:   authTestCSRFSecret,
 
-		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, AllowedHosts: nil, RateLimit: 0,
-		RateBurst: 0, SessionTTL: 0, DisableAPI: false, DirectRedirect: false,
+		AllowedHosts: nil, RateLimit: 0, RateBurst: 0, DisableAPI: false,
 	})
 	s.Require().NoError(err)
 

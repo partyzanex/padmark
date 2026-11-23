@@ -27,25 +27,26 @@ type OgenHandler struct {
 	manager     NoteManager
 	linkManager LinkManager
 	pinger      Pinger
-	// tokens and onboarding hold disabledAccounts until NewRouter attaches the account system
-	// (withAccounts); until then POST /api/tokens and POST /api/invites answer 503.
+	// tokens and onboarding hold disabledAccounts when the account system is off; then
+	// POST /api/tokens and POST /api/invites answer 503.
 	tokens     APITokenManager
 	onboarding OnboardingManager
 	log        *slog.Logger
 	accounts   accountMode
 }
 
-// NewOgenHandler creates an OgenHandler with required dependencies.
-func NewOgenHandler(manager NoteManager, linkManager LinkManager, pinger Pinger, log *slog.Logger) *OgenHandler {
+// newOgenHandler builds the OgenHandler of NewHandler from the same HandlerConfig and account
+// system as the browser handlers, so the JSON API and the pages cannot disagree about accounts.
+func newOgenHandler(cfg *HandlerConfig, accounts accountSystem) *OgenHandler {
 	return &OgenHandler{
 		UnimplementedHandler: ogenapi.UnimplementedHandler{},
-		manager:              manager,
-		linkManager:          linkManager,
-		pinger:               pinger,
-		tokens:               disabledAccounts{},
-		onboarding:           disabledAccounts{},
-		log:                  log,
-		accounts:             accountsOff,
+		manager:              cfg.Notes,
+		linkManager:          cfg.Links,
+		pinger:               cfg.Pinger,
+		tokens:               accounts.manager,
+		onboarding:           accounts.manager,
+		log:                  cfg.Log,
+		accounts:             accounts.mode,
 	}
 }
 

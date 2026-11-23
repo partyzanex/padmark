@@ -341,9 +341,12 @@ checks still read current database state, including changes made by another repl
 ### HTTP
 
 The HTTP adapter defines its own `NoteManager`, `LinkManager` and auth interfaces.
-`NewHandler(manager, linkManager, log)` receives those interfaces rather than concrete
-usecase managers. `NewRouter(handler, ogenHandler, *RouterOptions)` returns `(http.Handler, error)`.
-Tests without a database pinger use `NoPinger{}`.
+`NewHandler(*HandlerConfig)` receives those interfaces rather than concrete usecase managers,
+together with every setting of the handlers, and returns `(*Handler, error)`. It builds the
+browser handlers and the ogen API handler from the same values, and `Handler` has no setters.
+A nil `Accounts`, `Files` or `Reveal` turns that feature off. `NewRouter(handler, *RouterOptions)`
+reads the handler without a change and returns `(http.Handler, error)`; `RouterOptions` holds only
+the middleware settings. Tests without a database pinger use `NoPinger{}`.
 
 `http/middleware/` owns authentication, CSRF/cookies, request context, proxy detection,
 rate/guessing limits, security headers, logging and recovery. The router composes the chain;
@@ -404,9 +407,10 @@ the API routes answer 503 and the pages show the "files are off" error. `--disab
 only the `GET`/`HEAD` pages `/files`, `/files/{id}/edit` and `/files/{id}/download`, and the
 download form `POST /files/{id}/download` (`isFilePage`).
 
-`file_transfer.go` sets the limits of a transfer (`FileTransferLimits`, set by
-`WithFileTransferLimits`). Uploads and downloads do not use `--read-timeout` and
-`--write-timeout`. `transferDeadline` gives each transfer an idle deadline
+`file_transfer.go` sets the limits of a transfer (`FileTransferLimits`, given in
+`HandlerConfig.FileTransfer`). `file_upload.go`, `file_update.go` and `file_download.go` hold the
+three operations, and `content_disposition.go` encodes the download file name. Uploads and
+downloads do not use `--read-timeout` and `--write-timeout`. `transferDeadline` gives each transfer an idle deadline
 (`--file-idle-timeout`, 60 seconds by default). Each chunk of data moves the deadline forward,
 but never past a total limit of one hour from the start (`fileTransferTimeout`). An upload
 that stops for the idle time answers 408. `uploadLimiter` accepts at most `--max-uploads`
@@ -480,7 +484,8 @@ and `encryption` subcommands. Omitting the subcommand still runs `serve`.
 `cmd/padmark-server/main.go` calls `server.NewApp().Run(ctx, os.Args)` and reports an error.
 Keep composition and operational logic in `internal/infra/server/`, not in `main`.
 
-`flags.go` groups `Flag*`, `Env*` and `Default*` constants. Most flags have a `PADMARK_*`
+`flags.go` groups `Flag*`, `Env*` and `Default*` constants and the flag definitions;
+`flag_validation.go` holds the value checks of the flags. Most flags have a `PADMARK_*`
 environment source; the bootstrap token is environment-only. Consult
 [the configuration table](../README.md#configuration-reference) and [.env.example](../.env.example).
 
@@ -531,7 +536,7 @@ Manual wiring lives in [server.go](../internal/infra/server/server.go), chiefly
 `serverAction`, `serve`, `buildHandlers` and `buildRouter`:
 
 1. `serverAction` gets the checked `Config` from `configFromCommand` and calls `serve`.
-2. `serve` sets the argon2id budget, makes the one edit-code hasher and initializes logging.
+2. `serve` initializes logging, sets the argon2id budget and makes the one edit-code hasher.
 3. Load the keyring and open storage. Register the database close and the background phase in
    the shutdown manager (see [Graceful Shutdown](#11-graceful-shutdown)).
 4. `initRepos` builds the repositories of the dialect with `newStorage`, the one dialect switch
@@ -540,19 +545,24 @@ Manual wiring lives in [server.go](../internal/infra/server/server.go), chiefly
 5. Construct ciphers, renderer, the shared expired-slug releaser, caches and metrics. Each
    shared object is built one time: the keyring, the edit-code hasher and the releaser go to
    the note, link and file managers.
-6. Build note/link/auth managers and inject them into the HTTP handlers/router.
-   `attachFiles` in [files.go](../internal/infra/server/files.go) builds `files.Manager` only
-   when `--s3-endpoint` is set. A wrong endpoint or a bucket that the key cannot use stops
-   startup (fail-hard). Without the endpoint, the server logs `file publishing is off`; other
+6. Build the note and link managers and put them with the HTTP settings into one
+   `web.HandlerConfig`. `attachAccountSystem` adds the auth manager when `--enable-accounts` is
+   set. `attachFiles` in [files.go](../internal/infra/server/files.go) adds `files.Manager` only
+   when `--s3-endpoint` is set. One `web.NewHandler` call then builds the complete handler, and
+   `buildRouter` gives it to `web.NewRouter`. A wrong endpoint or a bucket that the key cannot
+   use stops startup (fail-hard). Without the endpoint, the server logs `file publishing is off`; other
    S3 settings without the endpoint give a warning with their names.
 7. Register the listener phase, then start the configured listeners.
 
 If a step after the database opens fails, `serve` closes the background work and the database
 through the same manager and returns the startup error.
 
-Required dependencies use constructors; optional facilities can use explicit `With...`
-methods or options. Use mocks/no-op implementations in tests instead of adding nil checks
-around ordinary production operations.
+Required dependencies and settings go to the constructor, often in one `Deps` or `Config`
+struct. Only an optional facility with a complete default can use an explicit `With...` method
+at composition time: a cache, a metrics recorder, a note content limit, or the file part of
+`expiredslugs.Releaser`, which closes a construction cycle with `files.Manager`. Use
+mocks/no-op implementations in tests instead of adding nil checks around ordinary production
+operations.
 
 ## 9. Error Handling
 

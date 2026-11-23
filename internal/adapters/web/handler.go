@@ -4,10 +4,12 @@ package web
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"embed"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"html/template"
 	"log/slog"
 	"net"
@@ -62,7 +64,7 @@ type APITokenManager interface {
 	RevokeAPIToken(ctx context.Context, adminUserID uuid.UUID, tokenID string) error
 }
 
-// AuthManager is the account system as the composition root gives it to Handler.WithAuthManager.
+// AuthManager is the account system as the composition root gives it in HandlerConfig.Accounts.
 // No handler keeps it: each handler keeps only the narrow interfaces it calls (ISP) —
 // AuthHandler the SessionManager and the OnboardingManager, AdminHandler the UserAdminManager,
 // the APITokenManager and the OnboardingManager, common the middleware.SessionChecker. Without
@@ -217,31 +219,31 @@ func (NoPinger) PingContext(_ context.Context) error { return nil }
 
 // common holds the collaborators and config shared by every concern-specific handler
 // (NoteHandler, AuthHandler, AdminHandler, PageHandler): logging, error-page rendering,
-// auth-manager access, and the request-scheme/proxy/CSRF config set once at startup via the
-// Handler facade's With* methods. A single *common instance is embedded (by pointer) in the
-// facade and in each concern handler, so a With* call is visible everywhere immediately.
+// auth-manager access, and the request-scheme/proxy/CSRF config. NewHandler fills it once from
+// HandlerConfig and embeds the same *common (by pointer) in the facade and in each concern
+// handler. Nothing changes it after NewHandler returns.
 type common struct {
 	log       *slog.Logger
 	errorTmpl *template.Template
 	// sessionChecker resolves a session for the page header and the auth middleware.
 	sessionChecker middleware.SessionChecker
 	// fileMgr is the file usecase, or nil when files are off. The header shows the file tab
-	// and the success page reads the file name only when it is set (see WithFileManager).
+	// and the success page reads the file name only when it is set (HandlerConfig.Files).
 	fileMgr        FileManager
 	forcedScheme   string
 	csrfSecret     []byte
 	trustedProxies []*net.IPNet
 	// bootstrapDigest is the SHA-256 of the configured bootstrap token; nil keeps first-admin
-	// setup closed (see RouterOptions.BootstrapToken and bootstrapTokenValid).
+	// setup closed (see HandlerConfig.BootstrapToken and bootstrapTokenValid).
 	bootstrapDigest []byte
 	sessionTTL      time.Duration
-	// accounts tells whether the account system is on (WithAuthManager). Without it no privacy
-	// level applies: reader sets domain.Reader.SkipPrivacy.
+	// accounts tells whether the account system is on (HandlerConfig.Accounts). Without it no
+	// privacy level applies: reader sets domain.Reader.SkipPrivacy.
 	accounts accountMode
 }
 
 // sessionMaxAge returns the TOTP session cookie's Max-Age: the configured SessionTTL (see
-// RouterOptions.SessionTTL), or auth.DefaultSessionTTL when unset — the same fallback
+// HandlerConfig.SessionTTL), or auth.DefaultSessionTTL when unset — the same fallback
 // auth.NewSessionManager applies to the actual server-side session lifetime, so an unconfigured
 // deployment still gets a cookie that matches how long its sessions really live.
 func (c *common) sessionMaxAge() time.Duration {
@@ -252,7 +254,7 @@ func (c *common) sessionMaxAge() time.Duration {
 	return auth.DefaultSessionTTL
 }
 
-// guard wraps next with CSRF verification using the secret set via Handler.WithCSRFSecret.
+// guard wraps next with CSRF verification using the secret of HandlerConfig.CSRFSecret.
 func (c *common) guard(next http.HandlerFunc) http.HandlerFunc {
 	return middleware.CSRFGuard(c.csrfSecret, next)
 }
@@ -373,11 +375,13 @@ func assetVersions() func(name string) string {
 }
 
 // Handler composes the five concern-specific handlers — NoteHandler (web_note.go, web_edit.go),
-// LinkHandler (link_handler.go), AuthHandler (web_auth.go), AdminHandler (web_admin.go), and
-// PageHandler (web_index.go, web_success.go, web_apidocs.go) — into the single value routing and
-// the composition root consume. Each concern owns only the collaborators and templates it needs;
-// common (this file) holds what is genuinely cross-cutting. Go embedding promotes each concern's
-// methods, so Handler needs no methods of its own beyond construction and the With* wiring below.
+// LinkHandler (link_handler.go), AuthHandler (web_auth.go, web_setup.go, web_password.go),
+// AdminHandler (web_admin.go), and PageHandler (web_index.go, web_success.go, web_apidocs.go) —
+// with FileHandler and the ogen API handler into the single value routing and the composition
+// root consume. Each concern owns only the collaborators and templates it needs; common (this
+// file) holds what is genuinely cross-cutting. Go embedding promotes each concern's methods, so
+// Handler needs no methods of its own beyond construction. NewHandler builds it complete from
+// HandlerConfig, and nothing changes it after that.
 type Handler struct {
 	*common
 	*NoteHandler
@@ -389,127 +393,149 @@ type Handler struct {
 	// files is not embedded: its RegisterRoutes and Delete would be ambiguous with the methods
 	// of the other concern handlers.
 	files *FileHandler
+	// api serves the generated REST API routes (registerOgenRoutes). It is not embedded either:
+	// its methods implement ogenapi.Handler, not browser routes.
+	api *OgenHandler
 }
 
-// NewHandler creates a Handler with required dependencies.
-func NewHandler(manager NoteManager, linkManager LinkManager, log *slog.Logger) *Handler {
-	noteTmpl := parseTmpl("note", noteTmplSrc)
-	indexTmpl := parseTmpl("index", indexTmplSrc)
-	loginTmpl := parseTmpl("login", loginTmplSrc)
-	setupTmpl := parseTmpl("setup", setupTmplSrc)
-	adminTmpl := parseTmpl("admin", adminTmplSrc)
-	changePwTmpl := parseTmpl("change_password", changePwTmplSrc)
-	apidocsTmpl := parseTmpl("apidocs", apidocsTmplSrc)
-	successTmpl := parseTmpl("success", successTmplSrc)
-	errorTmpl := parseTmpl("error", errorTmplSrc)
-	redirectTmpl := parseTmpl("redirect", redirectTmplSrc)
-	linkEditor := parseTmpl("link_editor", linkEditorTmplSrc)
-	linkView := parseTmpl("link", linkTmplSrc)
+// HandlerConfig holds every value of a Handler. NewHandler reads it once, and a Handler has no
+// setter, so each request sees the same complete configuration.
+//
+// Notes, Links, Pinger and Log are required. Accounts, Files and Reveal are optional
+// collaborators: nil turns the feature off. The zero value of each setting selects its default.
+// exhaustruct makes each literal of this struct name every field, so a new field cannot be
+// forgotten at the composition root or in a test.
+type HandlerConfig struct {
+	Notes NoteManager
+	Links LinkManager
+	// Pinger checks the database for GET /readyz. Tests without a database use NoPinger.
+	Pinger Pinger
+	Log    *slog.Logger
+	// Accounts is the account system (--enable-accounts). Nil keeps it off: the login, setup,
+	// admin and API-key routes refuse each request, and no privacy level applies.
+	Accounts AuthManager
+	// Files is the file usecase. Nil keeps the file routes off: the API routes answer 503 and the
+	// pages show the "files are off" error.
+	Files FileManager
+	// Reveal issues and consumes the one-time tokens of the burn confirmation page. Nil serves a
+	// burn-after-reading note at once, without the confirmation page.
+	Reveal RevealTokenStore
+	// ForcedScheme ("http" or "https") replaces the scheme detection from TLS and
+	// X-Forwarded-Proto (--public-scheme). "https" also marks every request as HTTPS for the
+	// Secure cookie attribute and HSTS, because behind a TLS-terminating proxy that is the only
+	// signal the server has. Empty keeps the detection.
+	ForcedScheme string
+	// BootstrapToken is the operator's proof of server ownership for creating the first admin
+	// via /setup without an invite (PADMARK_BOOTSTRAP_TOKEN). Empty keeps that setup closed:
+	// otherwise whoever reached /setup first would become the single, permanent admin. Only its
+	// SHA-256 digest stays in memory.
+	BootstrapToken string
+	// TrustedProxies are the CIDR blocks whose X-Forwarded-Proto and X-Real-IP headers are
+	// trusted. NewRouter gives the same value to the middleware.
+	TrustedProxies []*net.IPNet
+	// CSRFSecret is the HMAC key of the CSRF tokens. Empty makes NewHandler generate a random
+	// key for this process: restarts then invalidate open forms, and replicas reject the forms
+	// of each other. NewRouter gives the same key to the middleware.
+	CSRFSecret []byte
+	// SessionTTL sets the Max-Age of the TOTP session cookie. Give it the session lifetime of
+	// auth.NewManager (the same --session-ttl value), so the cookie never outlives the session or
+	// expires before it. Zero selects auth.DefaultSessionTTL, as auth.NewSessionManager does.
+	SessionTTL time.Duration
+	// FileTransfer holds the limits of file uploads and downloads. A zero field selects its
+	// default.
+	FileTransfer FileTransferLimits
+	// DirectRedirect selects the response mode of the short-link redirect: true sends an
+	// immediate 301 to the target URL, false shows the transparency interstitial. See
+	// LinkHandler.Redirect.
+	DirectRedirect bool
+}
 
-	cmn := &common{
-		log:       log,
-		errorTmpl: errorTmpl,
-		// sessions holds disabledAccounts and accounts is off until WithAuthManager; forcedScheme,
-		// csrfSecret, trustedProxies, sessionTTL are zero-valued here and attached later via
-		// WithForcedScheme / WithCSRFSecret /
-		// WithTrustedProxies / WithSessionTTL from the composition root. NewRouter calls all
-		// of them before the server starts serving requests — missing one is a startup bug,
-		// caught on guarded POSTs (csrfSecret=nil → CSRFGuard rejects with 403).
-		sessionChecker: disabledAccounts{},
-		accounts:       accountsOff,
-		forcedScheme:   "",
-		csrfSecret:     nil,
-		trustedProxies: nil,
-		sessionTTL:     0,
-		// Set by WithBootstrapToken; nil keeps first-admin setup closed.
-		bootstrapDigest: nil,
-		// Set by WithFileManager; nil keeps the file pages off.
-		fileMgr: nil,
+// csrfSecretSize is the size of the random CSRF secret for an empty HandlerConfig.CSRFSecret.
+const csrfSecretSize = 32
+
+// NewHandler builds a complete Handler from cfg. It returns an error only when crypto/rand
+// cannot generate the CSRF secret for an empty cfg.CSRFSecret; the caller treats it as a fatal
+// startup error.
+func NewHandler(cfg *HandlerConfig) (*Handler, error) {
+	csrfSecret, err := csrfSecretOrRandom(cfg.CSRFSecret)
+	if err != nil {
+		return nil, err
 	}
 
-	noteHandler := newNoteHandler(cmn, manager, noteTmpl, indexTmpl)
+	accounts := newAccountSystem(cfg.Accounts)
+
+	cmn := &common{
+		log:             cfg.Log,
+		errorTmpl:       parseTmpl("error", errorTmplSrc),
+		sessionChecker:  accounts.manager,
+		fileMgr:         cfg.Files,
+		forcedScheme:    cfg.ForcedScheme,
+		csrfSecret:      csrfSecret,
+		trustedProxies:  cfg.TrustedProxies,
+		bootstrapDigest: bootstrapDigest(cfg.BootstrapToken),
+		sessionTTL:      cfg.SessionTTL,
+		accounts:        accounts.mode,
+	}
+
+	// The note editor and the landing page share one parsed editor template.
+	indexTmpl := parseTmpl("index", indexTmplSrc)
+	noteHandler := newNoteHandler(cmn, cfg.Notes, cfg.Reveal, indexTmpl)
 
 	return &Handler{
 		common:       cmn,
 		NoteHandler:  noteHandler,
-		LinkHandler:  newLinkHandler(cmn, linkManager, redirectTmpl, linkEditor, linkView),
-		AuthHandler:  newAuthHandler(cmn, loginTmpl, setupTmpl, changePwTmpl),
-		AdminHandler: newAdminHandler(cmn, adminTmpl),
-		PageHandler:  newPageHandler(cmn, indexTmpl, successTmpl, apidocsTmpl),
+		LinkHandler:  newLinkHandler(cmn, cfg.Links, cfg.DirectRedirect),
+		AuthHandler:  newAuthHandler(cmn, accounts.manager),
+		AdminHandler: newAdminHandler(cmn, accounts.manager),
+		PageHandler:  newPageHandler(cmn, indexTmpl),
 		// Files share the edit-code lockout with notes and links: one slug namespace.
-		files: newFileHandler(cmn, noteHandler.lockout),
-	}
+		files: newFileHandler(cmn, cfg.Files, noteHandler.lockout, cfg.FileTransfer),
+		api:   newOgenHandler(cfg, accounts),
+	}, nil
 }
 
-// WithRevealStore attaches a RevealTokenStore so that burn-after-reading notes
-// show a confirmation interstitial before being consumed.
-// When not set, burn notes are served immediately (backward-compatible).
-func (h *Handler) WithRevealStore(store RevealTokenStore) *Handler {
-	h.revealStore = store
-
-	return h
+// accountSystem is the account system of a Handler: the configured AuthManager, or
+// disabledAccounts when accounts are off, and the mode that tells the two apart.
+type accountSystem struct {
+	manager AuthManager
+	mode    accountMode
 }
 
-// WithAuthManager attaches a TOTP AuthManager enabling session-based authentication.
-func (h *Handler) WithAuthManager(mgr AuthManager) *Handler {
-	h.sessionChecker = mgr
-	h.accounts = accountsOn
-	h.sessions = mgr
-	h.AuthHandler.onboarding = mgr
-	h.users = mgr
-	h.tokens = mgr
-	h.AdminHandler.onboarding = mgr
-
-	return h
-}
-
-// WithBootstrapToken sets the token that authorises creating the first admin via /setup without an
-// invite (RouterOptions.BootstrapToken). Only its digest is kept; empty leaves that setup closed.
-// Called by NewRouter before any request is served; do not call after the server starts.
-func (h *Handler) WithBootstrapToken(token string) *Handler {
-	h.bootstrapDigest = nil
-
-	if token != "" {
-		sum := sha256.Sum256([]byte(token))
-		h.bootstrapDigest = sum[:]
+// newAccountSystem converts the optional HandlerConfig.Accounts into a value once, so no
+// handler needs a nil check.
+func newAccountSystem(manager AuthManager) accountSystem {
+	if manager == nil {
+		return accountSystem{manager: disabledAccounts{}, mode: accountsOff}
 	}
 
-	return h
+	return accountSystem{manager: manager, mode: accountsOn}
 }
 
-// WithCSRFSecret sets the HMAC key used to sign and verify CSRF tokens.
-// Called by NewRouter before any request is served; do not call after the server starts.
-func (h *Handler) WithCSRFSecret(secret []byte) *Handler {
-	h.csrfSecret = secret
+// csrfSecretOrRandom returns secret, or a new random secret of csrfSecretSize bytes when secret
+// is empty.
+func csrfSecretOrRandom(secret []byte) ([]byte, error) {
+	if len(secret) > 0 {
+		return secret, nil
+	}
 
-	return h
+	random := make([]byte, csrfSecretSize)
+
+	_, err := rand.Read(random)
+	if err != nil {
+		return nil, fmt.Errorf("generate csrf secret: %w", err)
+	}
+
+	return random, nil
 }
 
-// WithTrustedProxies sets the CIDR blocks whose X-Forwarded-Proto header is trusted.
-// Called by NewRouter; do not call after the server starts.
-func (h *Handler) WithTrustedProxies(proxies []*net.IPNet) *Handler {
-	h.trustedProxies = proxies
+// bootstrapDigest returns the SHA-256 digest of token, or nil for an empty token: nil keeps
+// first-admin setup closed.
+func bootstrapDigest(token string) []byte {
+	if token == "" {
+		return nil
+	}
 
-	return h
-}
+	sum := sha256.Sum256([]byte(token))
 
-// WithForcedScheme overrides the scheme ("http" or "https") used when building absolute links
-// back to this server, bypassing TLS/X-Forwarded-Proto auto-detection entirely. "https" also
-// marks every request as HTTPS for the session/CSRF cookie Secure attribute and HSTS (see
-// IsHTTPS), since behind a TLS-terminating proxy that is the only signal the server has. Pass an
-// empty string to keep auto-detection. Called by NewRouter; do not call after the server starts.
-func (h *Handler) WithForcedScheme(scheme string) *Handler {
-	h.forcedScheme = scheme
-
-	return h
-}
-
-// WithSessionTTL sets the Max-Age used by the TOTP session cookie (see RouterOptions.SessionTTL
-// for why this must be kept in sync with auth.NewManager's sessionTTL). Zero or negative falls
-// back to auth.DefaultSessionTTL at read time (see common.sessionMaxAge), matching
-// auth.NewSessionManager's own fallback. Called by NewRouter; do not call after the server starts.
-func (h *Handler) WithSessionTTL(ttl time.Duration) *Handler {
-	h.sessionTTL = ttl
-
-	return h
+	return sum[:]
 }

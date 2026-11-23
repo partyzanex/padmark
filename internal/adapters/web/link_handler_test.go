@@ -47,19 +47,18 @@ type testLinkResponse struct {
 func (s *HandlerSuite) newLinkRouter(directRedirect bool) http.Handler {
 	s.T().Helper()
 
-	handler := web.NewHandler(s.manager, s.linkManager, discardLog())
-	ogen := web.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
+	handlerCfg := testHandlerConfig(s.manager, s.linkManager, s.pinger)
+	handlerCfg.CSRFSecret = testCSRFSecret
+	handlerCfg.DirectRedirect = directRedirect
+	handler := newTestHandler(s.T(), handlerCfg)
 
 	opts := web.RouterOptions{
-		MaxBodyBytes:   256 * 1024,
-		CSRFSecret:     testCSRFSecret,
-		DirectRedirect: directRedirect,
+		MaxBodyBytes: 256 * 1024,
 
-		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, AllowedHosts: nil, RateLimit: 0,
-		RateBurst: 0, SessionTTL: 0, DisableAPI: false,
+		AllowedHosts: nil, RateLimit: 0, RateBurst: 0, DisableAPI: false,
 	}
 
-	router, err := web.NewRouter(handler, ogen, &opts)
+	router, err := web.NewRouter(handler, &opts)
 	s.Require().NoError(err)
 
 	return router
@@ -70,20 +69,19 @@ func (s *HandlerSuite) newLinkRouter(directRedirect bool) http.Handler {
 func (s *HandlerSuite) newLinkRouterWithTOTPAuth() http.Handler {
 	s.T().Helper()
 
-	handler := web.NewHandler(s.manager, s.linkManager, discardLog()).
-		WithAuthManager(s.authMgr)
-	ogen := web.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
+	handlerCfg := testHandlerConfig(s.manager, s.linkManager, s.pinger)
+	handlerCfg.Accounts = s.authMgr
+	handlerCfg.CSRFSecret = testCSRFSecret
+	handlerCfg.DirectRedirect = true
+	handler := newTestHandler(s.T(), handlerCfg)
 
 	opts := web.RouterOptions{
-		MaxBodyBytes:   256 * 1024,
-		CSRFSecret:     testCSRFSecret,
-		DirectRedirect: true,
+		MaxBodyBytes: 256 * 1024,
 
-		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, AllowedHosts: nil, RateLimit: 0,
-		RateBurst: 0, SessionTTL: 0, DisableAPI: false,
+		AllowedHosts: nil, RateLimit: 0, RateBurst: 0, DisableAPI: false,
 	}
 
-	router, err := web.NewRouter(handler, ogen, &opts)
+	router, err := web.NewRouter(handler, &opts)
 	s.Require().NoError(err)
 
 	return router

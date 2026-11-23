@@ -111,15 +111,16 @@ func newBootstrapEnv(t *testing.T, dbName string) ownerFlowEnv {
 	log := slog.New(slog.DiscardHandler)
 	notesMgr, linksMgr := newOwnerFlowManagers(t, env.db, log)
 
-	handler := web.NewHandler(notesMgr, linksMgr, log).WithAuthManager(env.authMgr)
-	ogen := web.NewOgenHandler(notesMgr, linksMgr, web.NoPinger{}, log)
-	router, err := web.NewRouter(handler, ogen, &web.RouterOptions{
-		MaxBodyBytes:   256 * 1024,
-		CSRFSecret:     []byte("padmark-test-csrf-secret-32bytes"),
-		BootstrapToken: bootstrapFlowToken,
+	handlerCfg := testHandlerConfig(notesMgr, linksMgr)
+	handlerCfg.Log = log
+	handlerCfg.Accounts = env.authMgr
+	handlerCfg.CSRFSecret = []byte("padmark-test-csrf-secret-32bytes")
+	handlerCfg.BootstrapToken = bootstrapFlowToken
+	handler := newTestHandler(t, handlerCfg)
+	router, err := web.NewRouter(handler, &web.RouterOptions{
+		MaxBodyBytes: 256 * 1024,
 
-		ForcedScheme: "", TrustedProxies: nil, AllowedHosts: nil, RateLimit: 0, RateBurst: 0,
-		SessionTTL: 0, DisableAPI: false, DirectRedirect: false,
+		AllowedHosts: nil, RateLimit: 0, RateBurst: 0, DisableAPI: false,
 	})
 	require.NoError(t, err)
 

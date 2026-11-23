@@ -1,9 +1,6 @@
 package server
 
 import (
-	"errors"
-	"fmt"
-	"math"
 	"slices"
 	"time"
 
@@ -11,7 +8,6 @@ import (
 
 	"github.com/partyzanex/padmark/internal/adapters/web"
 	"github.com/partyzanex/padmark/internal/clifactory"
-	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/infra/crypto"
 	"github.com/partyzanex/padmark/internal/infra/logging"
 	"github.com/partyzanex/padmark/internal/usecases/auth"
@@ -289,16 +285,6 @@ func fileTransferFlags() []cli.Flag {
 	}
 }
 
-// fileTransferLimitsFromFlags reads the file transfer limits. The flag validators already
-// rejected negative values; the handler replaces a 0 with its default.
-func fileTransferLimitsFromFlags(cmd *cli.Command) web.FileTransferLimits {
-	return web.FileTransferLimits{
-		IdleTimeout:         cmd.Duration(FlagFileIdleTimeout),
-		MaxUploads:          cmd.Int(FlagMaxUploads),
-		MaxUploadsPerClient: cmd.Int(FlagMaxUploadsPerClient),
-	}
-}
-
 // storageAndLogFlags returns the content keyring, storage and logging flags.
 func storageAndLogFlags() []cli.Flag {
 	return []cli.Flag{
@@ -442,95 +428,6 @@ func limitFlags() []cli.Flag {
 				"period of the container to a larger value"
 		}),
 	}
-}
-
-// The validator errors stay next to their flags, because only the flag set uses them.
-var (
-	errMaxFileSizeTooLarge     = errors.New("max file size must not be larger than 48 GiB (51539607552 bytes)")
-	errInvalidShutdownTimeout  = errors.New("shutdown timeout must be larger than 0")
-	errInvalidMaxContentLength = errors.New("max content length must not be negative; " +
-		"use 0 for the --max-body-bytes value")
-	errMaxContentLengthTooLarge = errors.New("max content length must not be larger than 67108864 " +
-		"characters: a note holds at most 64 MiB")
-	errInvalidFileIdleTimeout = errors.New("file idle timeout must not be negative; use 0 for the default")
-	errInvalidUploadLimit     = errors.New("upload limit must not be negative; use 0 for the default")
-)
-
-// validateMaxFileSize keeps --max-file-size between 1 byte and maxFileSizeLimit.
-func validateMaxFileSize(value int64) error {
-	if value < 1 {
-		return errInvalidMaxFileSize
-	}
-
-	if value > maxFileSizeLimit {
-		return errMaxFileSizeTooLarge
-	}
-
-	return nil
-}
-
-// validateSweepInterval rejects a negative --files-sweep-interval; 0 turns the sweep off.
-func validateSweepInterval(value time.Duration) error {
-	if value < 0 {
-		return errInvalidSweepInterval
-	}
-
-	return nil
-}
-
-// validateShutdownTimeout rejects a --shutdown-timeout that is not positive: a zero limit
-// would skip the shutdown of each resource.
-func validateShutdownTimeout(value time.Duration) error {
-	if value <= 0 {
-		return errInvalidShutdownTimeout
-	}
-
-	return nil
-}
-
-// validateFileIdleTimeout rejects a negative --file-idle-timeout; 0 selects the default.
-func validateFileIdleTimeout(value time.Duration) error {
-	if value < 0 {
-		return errInvalidFileIdleTimeout
-	}
-
-	return nil
-}
-
-// validateMaxContentLength rejects a negative --max-content-length; 0 selects the
-// --max-body-bytes value. It also rejects a value above domain.MaxContentBytes: each character
-// has at least one byte, so the server can never accept such a note.
-func validateMaxContentLength(value int) error {
-	if value < 0 {
-		return errInvalidMaxContentLength
-	}
-
-	if value > domain.MaxContentBytes {
-		return errMaxContentLengthTooLarge
-	}
-
-	return nil
-}
-
-// maxContentLength gives the note content limit: --max-content-length (limit), or
-// --max-body-bytes when limit is 0. A note cannot be larger than the body that holds it, so one
-// setting is enough.
-func maxContentLength(limit, maxBodyBytes int) int {
-	if limit == 0 {
-		return maxBodyBytes
-	}
-
-	return limit
-}
-
-// validateUploadLimit rejects a negative --max-uploads or --max-uploads-per-client; 0 selects
-// the default.
-func validateUploadLimit(value int) error {
-	if value < 0 {
-		return errInvalidUploadLimit
-	}
-
-	return nil
 }
 
 // transportFlags returns the TLS, host, proxy and scheme flags.
@@ -705,40 +602,4 @@ func allowSharedKeyringFlag() *cli.BoolFlag {
 			"Only for secret managers that cannot provide an owner-only file; keyrings under /run/secrets/ " +
 			"(Docker/Compose secrets) are already exempt"
 	})
-}
-
-// maxArgon2MemoryBudget caps --argon2-memory-budget at 64 GiB (in KiB): it rejects typos and keeps
-// the value inside uint32 on every platform's int.
-const maxArgon2MemoryBudget = 64 * 1024 * 1024
-
-// boundedCost rejects negative and overflowing flag values before narrowing to uint32/uint8.
-func boundedCost(maximum int) func(int) error {
-	return func(value int) error {
-		if value < 1 || value > maximum {
-			return fmt.Errorf("%w 1 and %d", errInvalidArgon2Cost, maximum)
-		}
-
-		return nil
-	}
-}
-
-// uint32Flag narrows an integer flag to uint32. The flag Validator already bounds the value;
-// the repeated range check keeps the conversion provably safe where it happens.
-func uint32Flag(cmd *cli.Command, name string) (uint32, error) {
-	value := cmd.Int(name)
-	if value < 0 || value > math.MaxUint32 {
-		return 0, fmt.Errorf("--%s=%d: %w", name, value, errFlagOutOfRange)
-	}
-
-	return uint32(value), nil
-}
-
-// uint8Flag narrows an integer flag to uint8, with the same range check as uint32Flag.
-func uint8Flag(cmd *cli.Command, name string) (uint8, error) {
-	value := cmd.Int(name)
-	if value < 0 || value > math.MaxUint8 {
-		return 0, fmt.Errorf("--%s=%d: %w", name, value, errFlagOutOfRange)
-	}
-
-	return uint8(value), nil
 }

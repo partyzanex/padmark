@@ -52,16 +52,39 @@ func newOwnerFlowManagers(t *testing.T, db *bun.DB, log *slog.Logger) (*notes.Ma
 
 	notesMgr := notes.NewManager(&notes.Deps{
 		Storage: noteRepo, Renderer: render.NewRenderer(), Encryptor: testutil.ContentEncryptor(t, "note"),
-		Hasher: crypto.NewEditCodeHasher(testutil.Argon2Params()), ExpiredSlugs: expired, Log: log,
+		Hasher: crypto.NewEditCodeHasher(testutil.Argon2Params(), log), ExpiredSlugs: expired, Log: log,
 		Now: time.Now,
 	}, false)
 	linksMgr := links.NewManager(&links.Deps{
 		Storage: linkRepo, Encryptor: testutil.ContentEncryptor(t, "link"),
-		Hasher: crypto.NewEditCodeHasher(testutil.Argon2Params()), ExpiredSlugs: expired, Log: log,
+		Hasher: crypto.NewEditCodeHasher(testutil.Argon2Params(), log), ExpiredSlugs: expired, Log: log,
 		Now: time.Now,
 	}, false).WithCache(linkcache.NewDefault(log))
 
 	return notesMgr, linksMgr
+}
+
+// testHandlerConfig returns the web.HandlerConfig of the test stacks: the given managers, no
+// database pinger, a discarding logger, no account system, no files, no reveal store and the
+// default settings. A test sets the fields of its scenario on the returned value.
+func testHandlerConfig(notes web.NoteManager, links web.LinkManager) *web.HandlerConfig {
+	return &web.HandlerConfig{
+		Notes: notes, Links: links, Pinger: web.NoPinger{}, Log: slog.New(slog.DiscardHandler),
+		Accounts: nil, Files: nil, Reveal: nil,
+		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, CSRFSecret: nil, SessionTTL: 0,
+		FileTransfer:   web.FileTransferLimits{IdleTimeout: 0, MaxUploads: 0, MaxUploadsPerClient: 0},
+		DirectRedirect: false,
+	}
+}
+
+// newTestHandler builds the web.Handler of cfg and stops the test when web.NewHandler fails.
+func newTestHandler(t *testing.T, cfg *web.HandlerConfig) *web.Handler {
+	t.Helper()
+
+	handler, err := web.NewHandler(cfg)
+	require.NoError(t, err)
+
+	return handler
 }
 
 func newOwnerFlowEnv(t *testing.T, dbName string) ownerFlowEnv {
@@ -87,7 +110,7 @@ func newOwnerFlowEnv(t *testing.T, dbName string) ownerFlowEnv {
 			APITokens: sqliterepo.NewAPITokenRepository(db),
 		},
 		&auth.Deps{
-			PasswordHasher: crypto.NewPasswordHasher(testArgon2Params),
+			PasswordHasher: crypto.NewPasswordHasher(testArgon2Params, slog.New(slog.DiscardHandler)),
 			Sealer:         crypto.NewSealer(testArgon2Params),
 			TOTP:           crypto.NewTOTP(),
 			Log:            log,
@@ -99,14 +122,15 @@ func newOwnerFlowEnv(t *testing.T, dbName string) ownerFlowEnv {
 
 	notesMgr, linksMgr := newOwnerFlowManagers(t, db, log)
 
-	handler := web.NewHandler(notesMgr, linksMgr, log).WithAuthManager(authMgr)
-	ogen := web.NewOgenHandler(notesMgr, linksMgr, web.NoPinger{}, log)
-	router, err := web.NewRouter(handler, ogen, &web.RouterOptions{
+	handlerCfg := testHandlerConfig(notesMgr, linksMgr)
+	handlerCfg.Log = log
+	handlerCfg.Accounts = authMgr
+	handlerCfg.CSRFSecret = []byte("padmark-test-csrf-secret-32bytes")
+	handler := newTestHandler(t, handlerCfg)
+	router, err := web.NewRouter(handler, &web.RouterOptions{
 		MaxBodyBytes: 256 * 1024,
-		CSRFSecret:   []byte("padmark-test-csrf-secret-32bytes"),
 
-		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, AllowedHosts: nil, RateLimit: 0,
-		RateBurst: 0, SessionTTL: 0, DisableAPI: false, DirectRedirect: false,
+		AllowedHosts: nil, RateLimit: 0, RateBurst: 0, DisableAPI: false,
 	})
 	require.NoError(t, err)
 

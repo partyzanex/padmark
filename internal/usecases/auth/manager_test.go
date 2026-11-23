@@ -54,7 +54,7 @@ func (s *ManagerSuite) SetupTest() {
 	mgr, err := NewManager(
 		Stores{Users: s.users, Invites: s.invites, Sessions: s.sessions, APITokens: nil},
 		&Deps{
-			PasswordHasher: crypto.NewPasswordHasher(testArgon2Params),
+			PasswordHasher: crypto.NewPasswordHasher(testArgon2Params, slog.New(slog.DiscardHandler)),
 			Sealer:         crypto.NewSealer(testArgon2Params),
 			TOTP:           crypto.NewTOTP(),
 			Log:            discardLog(),
@@ -132,7 +132,7 @@ func (s *ManagerSuite) userWithSealedSecret(seal func(rawSecret string, kdfSalt 
 	// verifyArgon2 reads its cost parameters from the stored hash itself, so hashing the
 	// fixture with testArgon2Params (cheap) verifies identically to crypto.HashPassword's
 	// production cost — just without paying it on every test.
-	pwHash, err := crypto.NewPasswordHasher(testArgon2Params).Hash(testPassword)
+	pwHash, err := crypto.NewPasswordHasher(testArgon2Params, slog.New(slog.DiscardHandler)).Hash(testPassword)
 	s.Require().NoError(err)
 
 	usr := &domain.User{

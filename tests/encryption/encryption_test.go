@@ -104,7 +104,9 @@ func manager(t *testing.T, store keys.Storage, ring *crypto.ContentKeyring) *key
 	files, err := ring.ForResource("file")
 	require.NoError(t, err)
 
-	return keys.New(store, ring, notes, links, files, crypto.NewEditCodeHasher(testutil.Argon2Params()))
+	hasher := crypto.NewEditCodeHasher(testutil.Argon2Params(), slog.New(slog.DiscardHandler))
+
+	return keys.New(store, ring, notes, links, files, hasher)
 }
 
 func reset(t *testing.T, db *bun.DB) {

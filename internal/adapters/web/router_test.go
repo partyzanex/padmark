@@ -106,7 +106,16 @@ func (o *ogenSpy) ServeHTTP(w net_http.ResponseWriter, _ *net_http.Request) {
 // never to the ogen server. The generated server buffers multipart bodies, so a /files route on
 // it would break the streaming upload.
 func TestFileRoutes_ServedByFileHandler(t *testing.T) {
-	handler := NewHandler(nil, nil, slog.New(slog.DiscardHandler))
+	// The managers stay nil: the test only matches routes and never calls a handler.
+	handler, err := NewHandler(&HandlerConfig{
+		Notes: nil, Links: nil, Pinger: NoPinger{}, Log: slog.New(slog.DiscardHandler),
+		Accounts: nil, Files: nil, Reveal: nil,
+		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, CSRFSecret: nil, SessionTTL: 0,
+		FileTransfer:   FileTransferLimits{IdleTimeout: 0, MaxUploads: 0, MaxUploadsPerClient: 0},
+		DirectRedirect: false,
+	})
+	require.NoError(t, err)
+
 	spy := &ogenSpy{calls: 0}
 	mux := net_http.NewServeMux()
 

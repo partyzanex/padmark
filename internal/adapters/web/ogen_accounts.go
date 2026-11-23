@@ -8,18 +8,6 @@ import (
 	"github.com/partyzanex/padmark/internal/domain"
 )
 
-// withAccounts attaches the account system, enabling ogenapi's POST /api/tokens and
-// POST /api/invites (implemented in ogen_handler.go, next to the other ogen operations).
-// NewRouter calls it with the interfaces of Handler.WithAuthManager. Without it, both
-// operations answer 503 (feature not enabled).
-func (h *OgenHandler) withAccounts(tokens APITokenManager, onboarding OnboardingManager) *OgenHandler {
-	h.tokens = tokens
-	h.onboarding = onboarding
-	h.accounts = accountsOn
-
-	return h
-}
-
 // apiTokenEnvelope packs a plain bearer key into the pmk_ envelope carrying the server's own
 // base URL — the same shape the admin panel returns (web_admin.go AdminCreateKeyHandler).
 func (*OgenHandler) apiTokenEnvelope(ctx context.Context, plain string) (string, error) {

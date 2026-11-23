@@ -90,19 +90,18 @@ func (s *LLMsRouterSuite) TearDownTest() {
 func (s *LLMsRouterSuite) newRouter() http.Handler {
 	s.T().Helper()
 
-	handler := web.NewHandler(s.manager, s.linkManager, discardLog())
-	handler.WithAuthManager(NewMockAuthManager(s.ctrl))
-	ogen := web.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
+	handlerCfg := testHandlerConfig(s.manager, s.linkManager, s.pinger)
+	handlerCfg.Accounts = NewMockAuthManager(s.ctrl)
+	handlerCfg.CSRFSecret = testCSRFSecret
+	handler := newTestHandler(s.T(), handlerCfg)
 
 	opts := web.RouterOptions{
 		MaxBodyBytes: 256 * 1024,
-		CSRFSecret:   testCSRFSecret,
 
-		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, AllowedHosts: nil, RateLimit: 0,
-		RateBurst: 0, SessionTTL: 0, DisableAPI: false, DirectRedirect: false,
+		AllowedHosts: nil, RateLimit: 0, RateBurst: 0, DisableAPI: false,
 	}
 
-	router, err := web.NewRouter(handler, ogen, &opts)
+	router, err := web.NewRouter(handler, &opts)
 	s.Require().NoError(err)
 
 	return router

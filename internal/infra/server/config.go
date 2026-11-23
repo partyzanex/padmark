@@ -3,6 +3,7 @@ package server
 import (
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"os"
 	"time"
@@ -419,4 +420,46 @@ func httpConfigFromCommand(cmd *cli.Command) (httpConfig, error) {
 		writeTimeout:   cmd.Int(FlagWriteTimeout),
 		maxHeaderBytes: cmd.Int(FlagMaxHeaderBytes),
 	}, nil
+}
+
+// fileTransferLimitsFromFlags reads the file transfer limits. The flag validators already
+// rejected negative values; the handler replaces a 0 with its default.
+func fileTransferLimitsFromFlags(cmd *cli.Command) web.FileTransferLimits {
+	return web.FileTransferLimits{
+		IdleTimeout:         cmd.Duration(FlagFileIdleTimeout),
+		MaxUploads:          cmd.Int(FlagMaxUploads),
+		MaxUploadsPerClient: cmd.Int(FlagMaxUploadsPerClient),
+	}
+}
+
+// maxContentLength gives the note content limit: --max-content-length (limit), or
+// --max-body-bytes when limit is 0. A note cannot be larger than the body that holds it, so one
+// setting is enough.
+func maxContentLength(limit, maxBodyBytes int) int {
+	if limit == 0 {
+		return maxBodyBytes
+	}
+
+	return limit
+}
+
+// uint32Flag narrows an integer flag to uint32. The flag Validator already bounds the value;
+// the repeated range check keeps the conversion provably safe where it happens.
+func uint32Flag(cmd *cli.Command, name string) (uint32, error) {
+	value := cmd.Int(name)
+	if value < 0 || value > math.MaxUint32 {
+		return 0, fmt.Errorf("--%s=%d: %w", name, value, errFlagOutOfRange)
+	}
+
+	return uint32(value), nil
+}
+
+// uint8Flag narrows an integer flag to uint8, with the same range check as uint32Flag.
+func uint8Flag(cmd *cli.Command, name string) (uint8, error) {
+	value := cmd.Int(name)
+	if value < 0 || value > math.MaxUint8 {
+		return 0, fmt.Errorf("--%s=%d: %w", name, value, errFlagOutOfRange)
+	}
+
+	return uint8(value), nil
 }

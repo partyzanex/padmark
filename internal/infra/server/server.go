@@ -76,10 +76,8 @@ func warnDeprecatedSessionFlags(ctx context.Context, accounts accountsConfig, lo
 }
 
 // buildRouter makes the router from the checked configuration. It logs the warnings about the
-// router settings once at startup.
-func buildRouter(
-	ctx context.Context, cfg *Config, handler *web.Handler, ogenHandler *web.OgenHandler, log *slog.Logger,
-) (http.Handler, error) {
+// proxy, CSRF and session settings once at startup.
+func buildRouter(ctx context.Context, cfg *Config, handler *web.Handler, log *slog.Logger) (http.Handler, error) {
 	// A warning rather than a startup error: the flag is still parseable and the operator may
 	// have a reason we cannot see (a lab, a closed network). But an entry this wide trusts
 	// arbitrary clients to name their own address via X-Real-IP, which retires the per-IP rate
@@ -108,26 +106,15 @@ func buildRouter(
 	warnDeprecatedSessionFlags(ctx, cfg.accounts, log)
 
 	opts := web.RouterOptions{
-		ForcedScheme: cfg.router.publicScheme,
-		// Empty keeps first-admin setup closed.
-		BootstrapToken: cfg.accounts.bootstrapToken,
-		TrustedProxies: cfg.router.trustedProxies,
-		// Nil (flag empty) lets NewRouter generate a fresh CSRF secret instead of accepting
-		// an injected one — the legacy single-instance behaviour.
-		CSRFSecret: cfg.router.csrfSecret,
 		// The same allow-list guards the redirect listener and, here, the main one.
 		AllowedHosts: cfg.http.allowedHosts,
 		MaxBodyBytes: cfg.router.maxBodyBytes,
 		RateLimit:    cfg.router.rateLimit,
 		RateBurst:    cfg.router.rateBurst,
-		// The auth manager gets the same value, so the TOTP session cookie's Max-Age always
-		// matches the actual server-side session lifetime.
-		SessionTTL:     cfg.accounts.sessionTTL,
-		DisableAPI:     cfg.router.disableAPI,
-		DirectRedirect: cfg.router.directRedirect,
+		DisableAPI:   cfg.router.disableAPI,
 	}
 
-	router, err := web.NewRouter(handler, ogenHandler, &opts)
+	router, err := web.NewRouter(handler, &opts)
 	if err != nil {
 		return nil, fmt.Errorf("new router: %w", err)
 	}
@@ -300,25 +287,26 @@ func runServer(ctx context.Context, cfg *Config, router http.Handler, stop *serv
 	return waitAndShutdown(serverCtx, stop)
 }
 
-// attachAccountSystem wires the opt-in TOTP account manager onto the handler when
-// --enable-accounts is set; otherwise it leaves the handler public (no authMgr → the auth
-// middleware passes everything through).
+// attachAccountSystem puts the opt-in TOTP account manager into handlerCfg.Accounts when
+// --enable-accounts is set; otherwise it leaves the field nil, and the handler stays public (the
+// auth middleware passes everything through). It runs before web.NewHandler, so the handler is
+// built once with its final account system.
 //
 // Returns an error when auth.NewManager's bootstrap-time crypto precompute fails — this only
 // runs once at startup, so the caller should treat it as fatal.
 func attachAccountSystem(
-	ctx context.Context, cfg *Config, handler *web.Handler, stores auth.Stores, log *slog.Logger,
-) (*web.Handler, error) {
+	ctx context.Context, cfg *Config, handlerCfg *web.HandlerConfig, stores auth.Stores, log *slog.Logger,
+) error {
 	if !cfg.accounts.enabled {
 		log.InfoContext(ctx, "account system disabled (public mode); set --enable-accounts to enable login/admin")
 
-		return handler, nil
+		return nil
 	}
 
 	authMgr, err := auth.NewManager(
 		stores,
 		&auth.Deps{
-			PasswordHasher: crypto.NewPasswordHasher(cfg.argon2.params).WithLogger(log),
+			PasswordHasher: crypto.NewPasswordHasher(cfg.argon2.params, log),
 			Sealer:         crypto.NewSealer(cfg.argon2.params),
 			TOTP:           crypto.NewTOTP(),
 			Log:            log,
@@ -327,7 +315,7 @@ func attachAccountSystem(
 		cfg.accounts.totpIssuer, cfg.accounts.sessionTTL,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("new auth manager: %w", err)
+		return fmt.Errorf("new auth manager: %w", err)
 	}
 
 	empty, emptyErr := authMgr.IsEmpty(ctx)
@@ -344,7 +332,9 @@ func attachAccountSystem(
 		}
 	}
 
-	return handler.WithAuthManager(authMgr), nil
+	handlerCfg.Accounts = authMgr
+
+	return nil
 }
 
 // serverMetrics holds the Prometheus registry and the metrics of the managers in it.
@@ -390,21 +380,20 @@ type contentServices struct {
 	background *shutdown.Lifo
 }
 
-// buildHandlers assembles the notes/links business-logic managers and wires them into the
-// JSON/HTML handler and the ogen-generated handler, including the optional account system and
-// link cache/metrics collaborators.
+// buildHandlers assembles the notes/links business-logic managers and the optional account
+// system and file manager, and builds the HTTP handler from them in one web.NewHandler call.
 func buildHandlers(
 	ctx context.Context, cfg *Config, store *serverStorage, shared contentServices,
 	metrics serverMetrics, log *slog.Logger,
-) (*web.Handler, *web.OgenHandler, error) {
+) (*web.Handler, error) {
 	noteCipher, err := shared.keyring.ForResource("note")
 	if err != nil {
-		return nil, nil, fmt.Errorf("note content cipher: %w", err)
+		return nil, fmt.Errorf("note content cipher: %w", err)
 	}
 
 	linkCipher, err := shared.keyring.ForResource("link")
 	if err != nil {
-		return nil, nil, fmt.Errorf("link content cipher: %w", err)
+		return nil, fmt.Errorf("link content cipher: %w", err)
 	}
 
 	// The storage triggers keep slugs unique across notes, links and files, also between server
@@ -424,24 +413,42 @@ func buildHandlers(
 		WithCache(linkcache.NewDefault(log)).
 		WithMetrics(metrics.links)
 
-	handler := web.NewHandler(manager, linkManager, log).
-		WithRevealStore(auth.NewRevealManager(store.reveal, log, time.Now)).
-		WithFileTransferLimits(cfg.files.transfer)
-
-	handler, err = attachAccountSystem(ctx, cfg, handler, store.auth, log)
-	if err != nil {
-		return nil, nil, err
+	handlerCfg := web.HandlerConfig{
+		Notes: manager, Links: linkManager, Pinger: store.db.DB, Log: log,
+		// attachAccountSystem and attachFiles set these when their feature is on.
+		Accounts: nil, Files: nil,
+		Reveal:       auth.NewRevealManager(store.reveal, log, time.Now),
+		ForcedScheme: cfg.router.publicScheme,
+		// Empty keeps first-admin setup closed.
+		BootstrapToken: cfg.accounts.bootstrapToken,
+		TrustedProxies: cfg.router.trustedProxies,
+		// Nil (flag empty) lets NewHandler generate a fresh CSRF secret instead of accepting
+		// an injected one — the legacy single-instance behaviour.
+		CSRFSecret: cfg.router.csrfSecret,
+		// The auth manager gets the same value, so the TOTP session cookie's Max-Age always
+		// matches the actual server-side session lifetime.
+		SessionTTL:     cfg.accounts.sessionTTL,
+		FileTransfer:   cfg.files.transfer,
+		DirectRedirect: cfg.router.directRedirect,
 	}
 
-	err = attachFiles(ctx, cfg, handler, store.files, shared,
+	err = attachAccountSystem(ctx, cfg, &handlerCfg, store.auth, log)
+	if err != nil {
+		return nil, err
+	}
+
+	err = attachFiles(ctx, cfg, &handlerCfg, store.files, shared,
 		&fileDeps{expired: expired, metrics: metrics.files}, log)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
-	ogenHandler := web.NewOgenHandler(manager, linkManager, store.db.DB, log)
+	handler, err := web.NewHandler(&handlerCfg)
+	if err != nil {
+		return nil, fmt.Errorf("new handler: %w", err)
+	}
 
-	return handler, ogenHandler, nil
+	return handler, nil
 }
 
 func serverAction(ctx context.Context, cmd *cli.Command) error {
@@ -457,10 +464,9 @@ func serverAction(ctx context.Context, cmd *cli.Command) error {
 // the shutdown sequence. One manager, stop, closes the listeners, the background work and the
 // database in this order; serve registers them in the reverse order.
 func serve(ctx context.Context, cfg *Config) error {
-	// Bound concurrent argon2id workspace before any hasher can run.
-	hasher := prepareArgon2(cfg.argon2)
 	log := newLogger(cfg.log.level, cfg.log.format)
-	hasher.WithLogger(log)
+	// Bound concurrent argon2id workspace before any hasher can run.
+	hasher := prepareArgon2(cfg.argon2, log)
 
 	keyring, err := loadServeKeyring(
 		cfg.keyring.path, cfg.storage.dialect, cfg.storage.dsn, cfg.keyring.allowShared, log)
@@ -518,12 +524,12 @@ func buildServerRouter(
 		return nil, zero, fmt.Errorf("create metrics registry: %w", err)
 	}
 
-	handler, ogenHandler, err := buildHandlers(ctx, cfg, &store, shared, metrics, log)
+	handler, err := buildHandlers(ctx, cfg, &store, shared, metrics, log)
 	if err != nil {
 		return nil, zero, fmt.Errorf("build request handlers: %w", err)
 	}
 
-	router, err := buildRouter(ctx, cfg, handler, ogenHandler, log)
+	router, err := buildRouter(ctx, cfg, handler, log)
 	if err != nil {
 		return nil, zero, err
 	}

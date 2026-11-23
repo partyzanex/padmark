@@ -12,6 +12,10 @@ import (
 	"time"
 )
 
+// fileTransferTimeout is the total limit of one upload or download. The idle timeout
+// (FileTransferLimits.IdleTimeout) stops a stalled transfer before it.
+const fileTransferTimeout = time.Hour
+
 // Default limits of file transfers. FileTransferLimits replaces them.
 const (
 	// DefaultFileIdleTimeout stops an upload or a download that makes no progress for this time.
@@ -50,17 +54,14 @@ type FileTransferLimits struct {
 	MaxUploadsPerClient int
 }
 
-// WithFileTransferLimits sets the limits of file transfers. Called by the composition root
-// before the server starts; do not call after the server starts.
-func (h *Handler) WithFileTransferLimits(limits FileTransferLimits) *Handler {
-	h.files.idleTimeout = limits.IdleTimeout
-	if h.files.idleTimeout <= 0 {
-		h.files.idleTimeout = DefaultFileIdleTimeout
+// idleTimeoutOrDefault returns IdleTimeout, or DefaultFileIdleTimeout for a zero or negative
+// value.
+func (l FileTransferLimits) idleTimeoutOrDefault() time.Duration {
+	if l.IdleTimeout <= 0 {
+		return DefaultFileIdleTimeout
 	}
 
-	h.files.uploads = newUploadLimiter(limits.MaxUploads, limits.MaxUploadsPerClient)
-
-	return h
+	return l.IdleTimeout
 }
 
 // uploadLimiter counts the uploads in progress, in total and for each client IP address.

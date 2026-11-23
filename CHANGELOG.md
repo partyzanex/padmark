@@ -80,6 +80,14 @@ v0.5.0 follows **v0.4.0**.
 
 ### Changed
 
+- `web.NewHandler` takes one `HandlerConfig` with every collaborator and setting and builds the
+  complete handler, the JSON API handler included; the `With…` setters of `web.Handler` are
+  removed, and `web.NewRouter(handler, opts)` no longer changes the handler. `RouterOptions`
+  keeps only the middleware settings. Routes, status codes, headers and pages do not change.
+- The edit-code and password hashers get their logger in the constructor. The `encryption`
+  commands now log a stored hash that is above the argon2id cost limit, as `serve` does.
+- `file_handler.go`, `web_auth.go` and `flags.go` are split by topic (upload, update, download,
+  Content-Disposition; login, setup, password; flag checks) without a change in behavior.
 - `serve` reads all settings once into one `Config` and checks them before it opens the keyring
   and the database. An invalid `--trusted-proxies`, `--public-scheme`, `--csrf-secret`, TLS pair
   or S3 setting no longer creates a database file or a new keyring before the error, and the

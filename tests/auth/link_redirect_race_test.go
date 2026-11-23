@@ -109,7 +109,7 @@ func TestLinkRedirectPrivacyRace(t *testing.T) {
 
 				reader := links.NewManager(&links.Deps{
 					Storage: paused, Encryptor: testutil.ContentEncryptor(t, "link"),
-					Hasher:       crypto.NewEditCodeHasher(testArgon2Params),
+					Hasher:       crypto.NewEditCodeHasher(testArgon2Params, slog.New(slog.DiscardHandler)),
 					ExpiredSlugs: expiredslugs.New(sqliterepo.NewNoteRepository(env.db), repo), Log: log,
 					Now: time.Now,
 				}, false)
@@ -121,14 +121,15 @@ func TestLinkRedirectPrivacyRace(t *testing.T) {
 					reader.WithCache(cache)
 				}
 
-				handler := web.NewHandler(notes, reader, log).WithAuthManager(env.authMgr)
-				ogen := web.NewOgenHandler(notes, reader, web.NoPinger{}, log)
-				router, err := web.NewRouter(handler, ogen, &web.RouterOptions{
-					MaxBodyBytes: 256 * 1024, DirectRedirect: true,
+				handlerCfg := testHandlerConfig(notes, reader)
+				handlerCfg.Log = log
+				handlerCfg.Accounts = env.authMgr
+				handlerCfg.DirectRedirect = true
+				handler := newTestHandler(t, handlerCfg)
+				router, err := web.NewRouter(handler, &web.RouterOptions{
+					MaxBodyBytes: 256 * 1024,
 
-					ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, CSRFSecret: nil,
-					AllowedHosts: nil, RateLimit: 0, RateBurst: 0, SessionTTL: 0,
-					DisableAPI: false,
+					AllowedHosts: nil, RateLimit: 0, RateBurst: 0, DisableAPI: false,
 				})
 				require.NoError(t, err)
 

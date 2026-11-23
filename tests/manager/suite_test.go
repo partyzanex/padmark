@@ -57,7 +57,8 @@ func newManager(t *testing.T, storage notes.Storage, expired *expiredslugs.Relea
 
 	return notes.NewManager(&notes.Deps{
 		Storage: storage, Renderer: render.NewRenderer(), Encryptor: testutil.ContentEncryptor(t, "note"),
-		Hasher: crypto.NewEditCodeHasher(testutil.Argon2Params()), ExpiredSlugs: expired, Log: discardLog(),
+		Hasher: crypto.NewEditCodeHasher(testutil.Argon2Params(), discardLog()), ExpiredSlugs: expired,
+		Log: discardLog(),
 		Now: time.Now,
 	}, true)
 }
@@ -67,7 +68,8 @@ func newLinkManager(t *testing.T, storage links.Storage, expired *expiredslugs.R
 
 	return links.NewManager(&links.Deps{
 		Storage: storage, Encryptor: testutil.ContentEncryptor(t, "link"),
-		Hasher: crypto.NewEditCodeHasher(testutil.Argon2Params()), ExpiredSlugs: expired, Log: discardLog(),
+		Hasher: crypto.NewEditCodeHasher(testutil.Argon2Params(), discardLog()), ExpiredSlugs: expired,
+		Log: discardLog(),
 		Now: time.Now,
 	}, true)
 }

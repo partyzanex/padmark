@@ -197,7 +197,7 @@ func encryptionAction(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	// Bound argon2id workspace before converted legacy edit codes are hashed.
-	hasher := prepareArgon2(argon2)
+	hasher := prepareArgon2(argon2, log)
 
 	db, err := openDB(ctx, storage.dialect, storage.dsn, log)
 	if err != nil {
@@ -357,12 +357,12 @@ func writeKeyring(cmd *cli.Command, keyring *crypto.ContentKeyring) error {
 }
 
 // prepareArgon2 sets the process-wide argon2id memory budget and builds the edit-code hasher
-// with the operator's argon2 cost. Call it before any hasher runs. serve gives the one hasher to
-// each manager; the encryption commands hash converted legacy edit codes with it.
-func prepareArgon2(cfg argon2Config) *crypto.EditCodeHasher {
+// with the operator's argon2 cost and log. Call it before any hasher runs. serve gives the one
+// hasher to each manager; the encryption commands hash converted legacy edit codes with it.
+func prepareArgon2(cfg argon2Config, log *slog.Logger) *crypto.EditCodeHasher {
 	crypto.SetArgon2MemoryBudget(cfg.memoryBudget)
 
-	return crypto.NewEditCodeHasher(cfg.params)
+	return crypto.NewEditCodeHasher(cfg.params, log)
 }
 
 func validateContentEncryption(

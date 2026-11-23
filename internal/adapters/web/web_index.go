@@ -24,8 +24,12 @@ type PageHandler struct {
 	apidocsTmpl *template.Template
 }
 
-func newPageHandler(c *common, indexTmpl, successTmpl, apidocsTmpl *template.Template) *PageHandler {
-	return &PageHandler{common: c, indexTmpl: indexTmpl, successTmpl: successTmpl, apidocsTmpl: apidocsTmpl}
+func newPageHandler(c *common, indexTmpl *template.Template) *PageHandler {
+	return &PageHandler{
+		common: c, indexTmpl: indexTmpl,
+		successTmpl: parseTmpl("success", successTmplSrc),
+		apidocsTmpl: parseTmpl("apidocs", apidocsTmplSrc),
+	}
 }
 
 // RegisterRoutes registers the editor landing page, post-create confirmation page, API docs

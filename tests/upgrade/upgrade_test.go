@@ -49,7 +49,7 @@ func runUpgrade(t *testing.T, db *bun.DB, repos repositories, fixture []legacyNo
 
 	manager := notes.NewManager(&notes.Deps{
 		Storage: repos.notes, Renderer: render.NewRenderer(), Encryptor: testutil.ContentEncryptor(t, "note"),
-		Hasher:       crypto.NewEditCodeHasher(testutil.Argon2Params()),
+		Hasher:       crypto.NewEditCodeHasher(testutil.Argon2Params(), slog.New(slog.DiscardHandler)),
 		ExpiredSlugs: expiredslugs.New(repos.notes, repos.links), Log: slog.New(slog.DiscardHandler),
 		Now: time.Now,
 	}, true)
@@ -76,7 +76,7 @@ func newKeyManager(t *testing.T, db *bun.DB) *contentkeys.Manager {
 	require.NoError(t, err)
 
 	return contentkeys.New(keyrepo.New(db), ring, noteCipher, linkCipher, fileCipher,
-		crypto.NewEditCodeHasher(testutil.Argon2Params()))
+		crypto.NewEditCodeHasher(testutil.Argon2Params(), slog.New(slog.DiscardHandler)))
 }
 
 // assertSchemaKeepsLegacyRows: schema migrations must neither expire nor rewrite v0.1.6 rows;

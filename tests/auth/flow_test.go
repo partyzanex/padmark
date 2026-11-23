@@ -41,7 +41,7 @@ func (s *AuthFlowSuite) SetupTest() {
 			APITokens: nil, // this suite exercises TOTP/session flows, not API tokens.
 		},
 		&auth.Deps{
-			PasswordHasher: crypto.NewPasswordHasher(testArgon2Params),
+			PasswordHasher: crypto.NewPasswordHasher(testArgon2Params, slog.New(slog.DiscardHandler)),
 			Sealer:         crypto.NewSealer(testArgon2Params),
 			TOTP:           crypto.NewTOTP(),
 			Log:            slog.New(slog.DiscardHandler),

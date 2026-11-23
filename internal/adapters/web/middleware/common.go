@@ -72,7 +72,7 @@ type RequestOrigin struct {
 type originCtxKey struct{}
 
 // WithRequestOrigin stores the request's origin in the context. forcedScheme is the
-// operator-forced override (Handler.WithForcedScheme); an empty value defers to
+// operator-forced override (web.HandlerConfig.ForcedScheme); an empty value defers to
 // RequestScheme's TLS/X-Forwarded-Proto detection — same rules as common.scheme.
 func WithRequestOrigin(forcedScheme string, trustedProxies []*net.IPNet, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

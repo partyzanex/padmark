@@ -1,28 +1,21 @@
 package web
 
 import (
-	"crypto/rand"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/partyzanex/padmark/internal/adapters/web/middleware"
 	"github.com/partyzanex/padmark/internal/adapters/web/ogenapi"
 	"github.com/partyzanex/padmark/internal/domain"
 )
 
-// RouterOptions holds configurable parameters for the middleware stack.
+// RouterOptions holds the parameters that only the middleware stack uses. The scheme, proxy and
+// CSRF settings come from the HandlerConfig of the handler, so the handlers and the middleware
+// always use the same values.
 type RouterOptions struct {
-	ForcedScheme string
-	// BootstrapToken is the operator's proof of server ownership for creating the first admin
-	// via /setup without an invite (PADMARK_BOOTSTRAP_TOKEN). Empty keeps that bootstrap closed:
-	// otherwise whoever reached /setup first would become the single, permanent admin.
-	BootstrapToken string
-	TrustedProxies []*net.IPNet
-	CSRFSecret     []byte
 	// AllowedHosts is the Host header allow-list for the main listener (--allowed-hosts). When
 	// non-empty, any other Host is refused with 421 before a handler runs; empty disables the
 	// check. See WithAllowedHosts.
@@ -30,18 +23,10 @@ type RouterOptions struct {
 	MaxBodyBytes int
 	RateLimit    int
 	RateBurst    int
-	// SessionTTL sets the TOTP session cookie's Max-Age (see AuthHandler), matching the
-	// server-side session lifetime configured via auth.NewManager's sessionTTL — both should be
-	// fed the same --session-ttl value so the cookie never outlives (or expires before) the
-	// session it represents. Zero falls back to auth.DefaultSessionTTL.
-	SessionTTL time.Duration
 	// DisableAPI turns off the REST/JSON API surface (/notes*, /api, /api/openapi.yaml): every
 	// request reaching the disabling middleware gets 503 with code=api_disabled. The web UI and
 	// /healthz, /readyz keep working — see WithAPIDisabled.
 	DisableAPI bool
-	// DirectRedirect selects the short-link redirect's response mode: true issues an immediate 301 to the
-	// short link's target URL, false renders a transparency interstitial. See LinkHandler.Redirect.
-	DirectRedirect bool
 }
 
 // RouteRegistrar registers one concern's HTTP routes on mux. Each concern-specific handler
@@ -54,8 +39,8 @@ type RouteRegistrar interface {
 }
 
 // registerOgenRoutes registers the generated REST API routes (note and link CRUD, health checks)
-// served directly by ogenSrv. These aren't owned by any concern handler — ogenSrv wraps the
-// separate OgenHandler — so they're registered here rather than via a RouteRegistrar. lockout is
+// served directly by ogenSrv. These aren't owned by any concern handler — ogenSrv wraps
+// Handler.api, the OgenHandler — so they're registered here rather than via a RouteRegistrar. lockout is
 // shared with NoteHandler's native {id...} routes (see NoteHandler.RegisterRoutes) so fail-lockout
 // tracking is consistent for a note or link regardless of which route variant a client hits — a
 // single cache keyed by path ID plus caller works since notes and links share one global slug
@@ -142,80 +127,53 @@ func isLinkPageRequest(r *http.Request) bool {
 	return found && slug != "" && !strings.Contains(slug, "/") && negotiate(r) == formatHTML
 }
 
-// NewRouter registers all routes and wraps them with middleware.
+// NewRouter registers all routes of handler and wraps them with middleware. It reads handler
+// and does not change it.
 //
-// Returns an error when building the generated ogen server fails, or when crypto/rand is
-// unavailable to generate a CSRF secret (only when opts.CSRFSecret is empty). NewRouter runs
-// only at the composition root, so the caller should treat either as a fatal startup error.
-func NewRouter(
-	handler *Handler, ogenHandler *OgenHandler, opts *RouterOptions,
-) (http.Handler, error) {
-	// The auth seam is optional on OgenHandler; attach it where it exists so the account
-	// endpoints (POST /api/tokens, /api/invites) serve instead of 503-ing.
-	apiHandler := ogenHandler
-	if handler.accounts == accountsOn {
-		apiHandler = ogenHandler.withAccounts(handler.tokens, handler.AdminHandler.onboarding)
-	}
-
-	ogenSrv, err := ogenapi.NewServer(apiHandler, ogenapi.WithErrorHandler(newOgenErrorHandler(handler.log)))
+// Returns an error when building the generated ogen server fails. NewRouter runs only at the
+// composition root, so the caller should treat it as a fatal startup error.
+func NewRouter(handler *Handler, opts *RouterOptions) (http.Handler, error) {
+	ogenSrv, err := ogenapi.NewServer(handler.api, ogenapi.WithErrorHandler(newOgenErrorHandler(handler.log)))
 	if err != nil {
 		return nil, fmt.Errorf("new ogen server: %w", err)
 	}
-
-	const csrfSecretSize = 32
-
-	csrfSecret := opts.CSRFSecret
-	if len(csrfSecret) == 0 {
-		csrfSecret = make([]byte, csrfSecretSize)
-
-		_, randErr := rand.Read(csrfSecret)
-		if randErr != nil {
-			return nil, fmt.Errorf("generate csrf secret: %w", randErr)
-		}
-	}
-
-	handler.WithCSRFSecret(csrfSecret)
-	handler.WithTrustedProxies(opts.TrustedProxies)
-	handler.WithForcedScheme(opts.ForcedScheme)
-	handler.WithSessionTTL(opts.SessionTTL)
-	handler.WithDirectRedirect(opts.DirectRedirect)
-	handler.WithBootstrapToken(opts.BootstrapToken)
 
 	mux := http.NewServeMux()
 
 	registerAllRoutes(mux, handler, ogenSrv)
 
-	return wrapMiddleware(mux, handler, opts, csrfSecret), nil
+	return wrapMiddleware(mux, handler, opts), nil
 }
 
 // wrapMiddleware wraps the routed mux in the server's middleware chain. The listing order is
-// innermost-first: the last wrapper applied is the one that sees a request first.
-func wrapMiddleware(
-	mux http.Handler, handler *Handler, opts *RouterOptions, csrfSecret []byte,
-) http.Handler {
+// innermost-first: the last wrapper applied is the one that sees a request first. The scheme,
+// proxy and CSRF settings come from handler, so the middleware and the handlers agree.
+func wrapMiddleware(mux http.Handler, handler *Handler, opts *RouterOptions) http.Handler {
 	var checker middleware.SessionChecker
 	if handler.accounts == accountsOn {
 		checker = handler.sessionChecker
 	}
 
+	scheme, proxies := handler.forcedScheme, handler.trustedProxies
+
 	stack := middleware.WithRecovery(handler.log, mux)
-	stack = middleware.WithRequestOrigin(opts.ForcedScheme, opts.TrustedProxies, stack)
+	stack = middleware.WithRequestOrigin(scheme, proxies, stack)
 
 	if opts.DisableAPI {
 		stack = middleware.WithAPIDisabled(handler.log, isLinkPageRequest, stack)
 	}
 
 	stack = middleware.NewAuthMiddleware(buildNamedRoutes(), checker, stack)
-	stack = middleware.WithCSRFToken(csrfSecret, opts.ForcedScheme, opts.TrustedProxies, stack)
+	stack = middleware.WithCSRFToken(handler.csrfSecret, scheme, proxies, stack)
 
 	stack = middleware.WithBodyLimitExcept(int64(opts.MaxBodyBytes), isFileUpload, stack)
 
 	if opts.RateLimit > 0 {
-		stack = middleware.WithRateLimit(opts.RateLimit, opts.RateBurst, opts.TrustedProxies, handler.log, stack)
+		stack = middleware.WithRateLimit(opts.RateLimit, opts.RateBurst, proxies, handler.log, stack)
 	}
 
 	// Only meaningful when nothing is trusted — see WarnUnconfiguredProxy.
-	if len(opts.TrustedProxies) == 0 {
+	if len(proxies) == 0 {
 		stack = middleware.WarnUnconfiguredProxy(handler.log, stack)
 	}
 
@@ -224,7 +182,7 @@ func wrapMiddleware(
 	// is still logged and carries them.
 	stack = middleware.WithAllowedHosts(opts.AllowedHosts, stack)
 
-	stack = middleware.WithSecurityHeaders(opts.ForcedScheme, opts.TrustedProxies, stack)
+	stack = middleware.WithSecurityHeaders(scheme, proxies, stack)
 	stack = middleware.WithLogging(handler.log, stack)
 	stack = middleware.WithRequestID(stack)
 

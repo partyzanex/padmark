@@ -43,19 +43,18 @@ func (s *DisableAPISuite) TearDownTest() {
 func (s *DisableAPISuite) newRouter(disableAPI bool) http.Handler {
 	s.T().Helper()
 
-	handler := web.NewHandler(s.manager, s.linkManager, discardLog())
-	ogen := web.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
+	handlerCfg := testHandlerConfig(s.manager, s.linkManager, s.pinger)
+	handlerCfg.CSRFSecret = testCSRFSecret
+	handler := newTestHandler(s.T(), handlerCfg)
 
 	opts := web.RouterOptions{
 		MaxBodyBytes: 256 * 1024,
-		CSRFSecret:   testCSRFSecret,
 		DisableAPI:   disableAPI,
 
-		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, AllowedHosts: nil, RateLimit: 0,
-		RateBurst: 0, SessionTTL: 0, DirectRedirect: false,
+		AllowedHosts: nil, RateLimit: 0, RateBurst: 0,
 	}
 
-	router, err := web.NewRouter(handler, ogen, &opts)
+	router, err := web.NewRouter(handler, &opts)
 	s.Require().NoError(err)
 
 	return router
@@ -212,18 +211,18 @@ func (s *DisableAPISuite) TestFilePages_VisibleWhileAPIDisabled() {
 		BurnAfterDownload: false,
 	}, nil)
 
-	handler := web.NewHandler(s.manager, s.linkManager, discardLog()).WithFileManager(fileMgr)
-	ogen := web.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
+	handlerCfg := testHandlerConfig(s.manager, s.linkManager, s.pinger)
+	handlerCfg.Files = fileMgr
+	handlerCfg.CSRFSecret = testCSRFSecret
+	handler := newTestHandler(s.T(), handlerCfg)
 	opts := web.RouterOptions{
 		MaxBodyBytes: 256 * 1024,
-		CSRFSecret:   testCSRFSecret,
 		DisableAPI:   true,
 
-		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, AllowedHosts: nil, RateLimit: 0,
-		RateBurst: 0, SessionTTL: 0, DirectRedirect: false,
+		AllowedHosts: nil, RateLimit: 0, RateBurst: 0,
 	}
 
-	router, err := web.NewRouter(handler, ogen, &opts)
+	router, err := web.NewRouter(handler, &opts)
 	s.Require().NoError(err)
 
 	// The editor of a file is at /edit/{id}: the note read tells that a file has the slug, so

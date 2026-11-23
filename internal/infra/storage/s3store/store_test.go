@@ -173,7 +173,7 @@ func (s *StoreSuite) newManager() *files.Manager {
 		Objects:      s.store,
 		Cipher:       crypto.NewFileCipher(),
 		Encryptor:    encryptor,
-		Hasher:       crypto.NewEditCodeHasher(testutil.Argon2Params()),
+		Hasher:       crypto.NewEditCodeHasher(testutil.Argon2Params(), slog.New(slog.DiscardHandler)),
 		ExpiredSlugs: expired,
 		Log:          slog.New(slog.DiscardHandler),
 		Now:          time.Now,

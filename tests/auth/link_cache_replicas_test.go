@@ -34,14 +34,15 @@ func TestLinkCacheReplicas(t *testing.T) {
 	notes, links := newOwnerFlowManagers(t, env.db, log)
 	cache := linkcache.NewDefault(log)
 	links.WithCache(cache)
-	handler := web.NewHandler(notes, links, log).WithAuthManager(env.authMgr)
-	ogen := web.NewOgenHandler(notes, links, web.NoPinger{}, log)
-	router, err := web.NewRouter(handler, ogen, &web.RouterOptions{
+	handlerCfg := testHandlerConfig(notes, links)
+	handlerCfg.Log = log
+	handlerCfg.Accounts = env.authMgr
+	handlerCfg.CSRFSecret = []byte("padmark-test-csrf-secret-32bytes")
+	handler := newTestHandler(t, handlerCfg)
+	router, err := web.NewRouter(handler, &web.RouterOptions{
 		MaxBodyBytes: 256 * 1024,
-		CSRFSecret:   []byte("padmark-test-csrf-secret-32bytes"),
 
-		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, AllowedHosts: nil, RateLimit: 0,
-		RateBurst: 0, SessionTTL: 0, DisableAPI: false, DirectRedirect: false,
+		AllowedHosts: nil, RateLimit: 0, RateBurst: 0, DisableAPI: false,
 	})
 	require.NoError(t, err)
 

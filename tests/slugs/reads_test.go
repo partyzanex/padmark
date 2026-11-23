@@ -83,16 +83,16 @@ func readServer(t *testing.T, env *slugEnv, served chan<- struct{}) *httptest.Se
 		reveals = pgrepo.NewRevealRepository(env.db)
 	}
 
-	handler := web.NewHandler(env.notes, env.links, log).
-		WithRevealStore(auth.NewRevealManager(reveals, log, time.Now)).
-		WithFileManager(env.files)
-	ogen := web.NewOgenHandler(env.notes, env.links, web.NoPinger{}, log)
-	router, err := web.NewRouter(handler, ogen, &web.RouterOptions{
+	handlerCfg := testHandlerConfig(env.notes, env.links)
+	handlerCfg.Log = log
+	handlerCfg.Reveal = auth.NewRevealManager(reveals, log, time.Now)
+	handlerCfg.Files = env.files
+	handlerCfg.CSRFSecret = []byte("record-reads-csrf-secret-32bytes")
+	handler := newTestHandler(t, handlerCfg)
+	router, err := web.NewRouter(handler, &web.RouterOptions{
 		MaxBodyBytes: 256 * 1024,
-		CSRFSecret:   []byte("record-reads-csrf-secret-32bytes"),
-		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil,
-		AllowedHosts: nil, RateLimit: 0, RateBurst: 0, SessionTTL: 0, DisableAPI: false,
-		DirectRedirect: false,
+
+		AllowedHosts: nil, RateLimit: 0, RateBurst: 0, DisableAPI: false,
 	})
 	require.NoError(t, err)
 

@@ -1,6 +1,7 @@
 package crypto_test
 
 import (
+	"log/slog"
 	"strings"
 	"testing"
 
@@ -122,3 +123,6 @@ func TestEncryptor_TooShortCiphertextFails(t *testing.T) {
 	_, err := enc.Decrypt("aGVsbG8=", "slug") // base64("hello").
 	assert.Error(t, err)
 }
+
+// discardLog returns a logger that drops each record, for hashers whose log the test ignores.
+func discardLog() *slog.Logger { return slog.New(slog.DiscardHandler) }

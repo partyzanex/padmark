@@ -40,13 +40,15 @@ type NoteHandler struct {
 	lockout *middleware.FailLockoutCache
 }
 
-func newNoteHandler(c *common, manager NoteManager, noteTmpl, indexTmpl *template.Template) *NoteHandler {
+// newNoteHandler builds the NoteHandler. revealStore is optional (HandlerConfig.Reveal): with
+// nil, the burn routes serve a burn note at once, without the confirmation page.
+func newNoteHandler(
+	c *common, manager NoteManager, revealStore RevealTokenStore, indexTmpl *template.Template,
+) *NoteHandler {
 	return &NoteHandler{
-		common: c, manager: manager, noteTmpl: noteTmpl, indexTmpl: indexTmpl,
+		common: c, manager: manager, revealStore: revealStore,
+		noteTmpl: parseTmpl("note", noteTmplSrc), indexTmpl: indexTmpl,
 		lockout: middleware.NewFailLockoutCache(),
-		// revealStore zero = nil — Handler.WithRevealStore attaches one at router build; nil-checks
-		// in the burn routes short-circuit so tests/CLI builds that skip the option still work.
-		revealStore: nil,
 	}
 }
 

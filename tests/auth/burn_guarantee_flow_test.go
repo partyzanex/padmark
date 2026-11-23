@@ -59,7 +59,7 @@ func newBurnGuaranteeEnv(t *testing.T, dbName string) ownerFlowEnv {
 			APITokens: sqliterepo.NewAPITokenRepository(db),
 		},
 		&auth.Deps{
-			PasswordHasher: crypto.NewPasswordHasher(testArgon2Params),
+			PasswordHasher: crypto.NewPasswordHasher(testArgon2Params, slog.New(slog.DiscardHandler)),
 			Sealer:         crypto.NewSealer(testArgon2Params),
 			TOTP:           crypto.NewTOTP(),
 			Log:            log,
@@ -71,20 +71,20 @@ func newBurnGuaranteeEnv(t *testing.T, dbName string) ownerFlowEnv {
 
 	notesMgr, linksMgr := newOwnerFlowManagers(t, db, log)
 
-	handler := web.NewHandler(notesMgr, linksMgr, log).
-		WithRevealStore(auth.NewRevealManager(sqliterepo.NewRevealRepository(db), log, time.Now)).
-		WithAuthManager(authMgr)
-	ogen := web.NewOgenHandler(notesMgr, linksMgr, web.NoPinger{}, log)
-	router, err := web.NewRouter(handler, ogen, &web.RouterOptions{
+	handlerCfg := testHandlerConfig(notesMgr, linksMgr)
+	handlerCfg.Log = log
+	handlerCfg.Reveal = auth.NewRevealManager(sqliterepo.NewRevealRepository(db), log, time.Now)
+	handlerCfg.Accounts = authMgr
+	handlerCfg.CSRFSecret = []byte("padmark-test-csrf-secret-32bytes")
+	// The burn-link flows create their links anonymously and follow them with a 301; anonymous
+	// links get the interstitial by default, so this models an operator running
+	// --direct-redirect=true.
+	handlerCfg.DirectRedirect = true
+	handler := newTestHandler(t, handlerCfg)
+	router, err := web.NewRouter(handler, &web.RouterOptions{
 		MaxBodyBytes: 256 * 1024,
-		CSRFSecret:   []byte("padmark-test-csrf-secret-32bytes"),
-		// The burn-link flows create their links anonymously and follow them with a 301; anonymous
-		// links get the interstitial by default, so this models an operator running
-		// --direct-redirect=true.
-		DirectRedirect: true,
 
-		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, AllowedHosts: nil, RateLimit: 0,
-		RateBurst: 0, SessionTTL: 0, DisableAPI: false,
+		AllowedHosts: nil, RateLimit: 0, RateBurst: 0, DisableAPI: false,
 	})
 	require.NoError(t, err)
 

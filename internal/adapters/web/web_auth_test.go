@@ -70,20 +70,19 @@ func (s *AuthHandlerSuite) newRouterWithAuth() http.Handler {
 func (s *AuthHandlerSuite) newRouterWithBootstrapToken(token string) http.Handler {
 	s.T().Helper()
 
-	handler := web.NewHandler(s.manager, s.linkManager, discardLog()).
-		WithAuthManager(s.auth)
-	ogen := web.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
+	handlerCfg := testHandlerConfig(s.manager, s.linkManager, s.pinger)
+	handlerCfg.Accounts = s.auth
+	handlerCfg.CSRFSecret = authTestCSRFSecret
+	handlerCfg.BootstrapToken = token
+	handler := newTestHandler(s.T(), handlerCfg)
 
 	opts := web.RouterOptions{
-		MaxBodyBytes:   256 * 1024,
-		CSRFSecret:     authTestCSRFSecret,
-		BootstrapToken: token,
+		MaxBodyBytes: 256 * 1024,
 
-		ForcedScheme: "", TrustedProxies: nil, AllowedHosts: nil, RateLimit: 0, RateBurst: 0,
-		SessionTTL: 0, DisableAPI: false, DirectRedirect: false,
+		AllowedHosts: nil, RateLimit: 0, RateBurst: 0, DisableAPI: false,
 	}
 
-	router, err := web.NewRouter(handler, ogen, &opts)
+	router, err := web.NewRouter(handler, &opts)
 	s.Require().NoError(err)
 
 	return router
@@ -94,20 +93,19 @@ func (s *AuthHandlerSuite) newRouterWithBootstrapToken(token string) http.Handle
 func (s *AuthHandlerSuite) newRouterWithAuthAndScheme(forcedScheme string) http.Handler {
 	s.T().Helper()
 
-	handler := web.NewHandler(s.manager, s.linkManager, discardLog()).
-		WithAuthManager(s.auth)
-	ogen := web.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
+	handlerCfg := testHandlerConfig(s.manager, s.linkManager, s.pinger)
+	handlerCfg.Accounts = s.auth
+	handlerCfg.CSRFSecret = authTestCSRFSecret
+	handlerCfg.ForcedScheme = forcedScheme
+	handler := newTestHandler(s.T(), handlerCfg)
 
 	opts := web.RouterOptions{
 		MaxBodyBytes: 256 * 1024,
-		CSRFSecret:   authTestCSRFSecret,
-		ForcedScheme: forcedScheme,
 
-		BootstrapToken: "", TrustedProxies: nil, AllowedHosts: nil, RateLimit: 0, RateBurst: 0,
-		SessionTTL: 0, DisableAPI: false, DirectRedirect: false,
+		AllowedHosts: nil, RateLimit: 0, RateBurst: 0, DisableAPI: false,
 	}
 
-	router, err := web.NewRouter(handler, ogen, &opts)
+	router, err := web.NewRouter(handler, &opts)
 	s.Require().NoError(err)
 
 	return router
@@ -118,20 +116,19 @@ func (s *AuthHandlerSuite) newRouterWithAuthAndScheme(forcedScheme string) http.
 func (s *AuthHandlerSuite) newRouterWithAuthAndSessionTTL(ttl time.Duration) http.Handler {
 	s.T().Helper()
 
-	handler := web.NewHandler(s.manager, s.linkManager, discardLog()).
-		WithAuthManager(s.auth)
-	ogen := web.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
+	handlerCfg := testHandlerConfig(s.manager, s.linkManager, s.pinger)
+	handlerCfg.Accounts = s.auth
+	handlerCfg.CSRFSecret = authTestCSRFSecret
+	handlerCfg.SessionTTL = ttl
+	handler := newTestHandler(s.T(), handlerCfg)
 
 	opts := web.RouterOptions{
 		MaxBodyBytes: 256 * 1024,
-		CSRFSecret:   authTestCSRFSecret,
-		SessionTTL:   ttl,
 
-		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, AllowedHosts: nil, RateLimit: 0,
-		RateBurst: 0, DisableAPI: false, DirectRedirect: false,
+		AllowedHosts: nil, RateLimit: 0, RateBurst: 0, DisableAPI: false,
 	}
 
-	router, err := web.NewRouter(handler, ogen, &opts)
+	router, err := web.NewRouter(handler, &opts)
 	s.Require().NoError(err)
 
 	return router
@@ -1675,19 +1672,18 @@ func (s *AuthHandlerSuite) TestCSRFGuard_InvalidHMAC_Returns403() {
 func (s *AuthHandlerSuite) newRouterWithCSRFSecret(secret []byte) http.Handler {
 	s.T().Helper()
 
-	handler := web.NewHandler(s.manager, s.linkManager, discardLog()).
-		WithAuthManager(s.auth)
-	ogen := web.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
+	handlerCfg := testHandlerConfig(s.manager, s.linkManager, s.pinger)
+	handlerCfg.Accounts = s.auth
+	handlerCfg.CSRFSecret = secret
+	handler := newTestHandler(s.T(), handlerCfg)
 
 	opts := web.RouterOptions{
 		MaxBodyBytes: 256 * 1024,
-		CSRFSecret:   secret,
 
-		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, AllowedHosts: nil, RateLimit: 0,
-		RateBurst: 0, SessionTTL: 0, DisableAPI: false, DirectRedirect: false,
+		AllowedHosts: nil, RateLimit: 0, RateBurst: 0, DisableAPI: false,
 	}
 
-	router, err := web.NewRouter(handler, ogen, &opts)
+	router, err := web.NewRouter(handler, &opts)
 	s.Require().NoError(err)
 
 	return router

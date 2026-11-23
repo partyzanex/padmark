@@ -19,7 +19,7 @@ func TestArgon2Params_Default(t *testing.T) {
 }
 
 func TestPasswordHasher_EmbedsConfiguredParams(t *testing.T) {
-	hasher := crypto.NewPasswordHasher(crypto.Argon2Params{Memory: 8 * 1024, Time: 2, Threads: 1})
+	hasher := crypto.NewPasswordHasher(crypto.Argon2Params{Memory: 8 * 1024, Time: 2, Threads: 1}, discardLog())
 
 	hash, err := hasher.Hash("correct horse battery staple")
 	require.NoError(t, err)
@@ -31,7 +31,7 @@ func TestPasswordHasher_EmbedsConfiguredParams(t *testing.T) {
 func TestPasswordHasher_ZeroParamsFallBackToDefaults(t *testing.T) {
 	hasher := crypto.NewPasswordHasher(crypto.Argon2Params{
 		Memory: 0, Time: 0, Threads: 0,
-	}) // all-zero → defaults.
+	}, discardLog()) // all-zero → defaults.
 
 	hash, err := hasher.Hash("xyz")
 	require.NoError(t, err)
@@ -42,18 +42,19 @@ func TestPasswordHasher_ZeroParamsFallBackToDefaults(t *testing.T) {
 // hashes: a hash made with strong (default) cost still verifies via a weak-cost hasher,
 // because Verify reads the params embedded in the stored hash.
 func TestArgon2_VerifyAcrossParamChanges(t *testing.T) {
-	strong := crypto.NewPasswordHasher(crypto.DefaultArgon2Params())
+	strong := crypto.NewPasswordHasher(crypto.DefaultArgon2Params(), discardLog())
 
 	hash, err := strong.Hash("secret123")
 	require.NoError(t, err)
 
-	weak := crypto.NewPasswordHasher(crypto.Argon2Params{Memory: 8 * 1024, Time: 1, Threads: 1})
+	weak := crypto.NewPasswordHasher(crypto.Argon2Params{Memory: 8 * 1024, Time: 1, Threads: 1}, discardLog())
 	require.True(t, weak.Verify(hash, "secret123"))
 }
 
 func TestStoredArgon2CostsFailClosed(t *testing.T) {
 	// Salt and digest are correctly shaped, so rejection must happen on cost bounds.
 	salt := base64.RawURLEncoding.EncodeToString(make([]byte, 16))
+	hasher := crypto.NewEditCodeHasher(crypto.DefaultArgon2Params(), discardLog())
 
 	digest := base64.RawURLEncoding.EncodeToString(make([]byte, 32))
 	for _, cost := range []string{
@@ -62,7 +63,7 @@ func TestStoredArgon2CostsFailClosed(t *testing.T) {
 	} {
 		stored := "v1$" + cost + "$" + salt + "$" + digest
 		require.False(t, crypto.VerifyPassword(stored, "password"), cost)
-		require.False(t, crypto.NewEditCodeHasher(crypto.DefaultArgon2Params()).Verify(stored, "edit-code"), cost)
+		require.False(t, hasher.Verify(stored, "edit-code"), cost)
 		_, _, err := crypto.NewSealer(sealTestParams).Open("v1$"+cost+"$AAAA", []byte("password"), sealTestSalt)
 		require.Error(t, err, cost)
 	}
@@ -78,7 +79,7 @@ func TestInvalidConfiguredArgon2CostCannotWrite(t *testing.T) {
 		{Memory: 8192, Time: crypto.MaxArgon2Time + 1, Threads: 1},
 		{Memory: 8192, Time: 1, Threads: crypto.MaxArgon2Threads + 1},
 	} {
-		_, err := crypto.NewPasswordHasher(params).Hash("password")
+		_, err := crypto.NewPasswordHasher(params, discardLog()).Hash("password")
 		require.Error(t, err)
 		_, err = crypto.NewSealer(params).Seal("secret", []byte("password"), sealTestSalt)
 		require.Error(t, err)

@@ -164,8 +164,8 @@ func NewManager(deps *Deps, allowCustomSlugs bool) *Manager {
 // WithCache attaches an optional Cache for frequently-followed links. Nil (the default — Manager
 // never sets m.cache itself) disables caching entirely: every code path already nil-checks it, so
 // behavior is identical with or without one — this is a pure performance optimization, never a
-// correctness dependency. Mirrors Handler.WithRevealStore's optional-collaborator shape on the
-// HTTP side. Called by the composition root; do not call after the server starts serving requests.
+// correctness dependency. Called by the composition root; do not call after the server starts
+// serving requests.
 func (m *Manager) WithCache(cache Cache) *Manager {
 	m.cache = cache
 

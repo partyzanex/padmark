@@ -65,25 +65,26 @@ func (s *FileSecuritySuite) newRouter(opts routerOptions) http.Handler {
 		AddSource: false, Level: slog.LevelDebug, ReplaceAttr: nil,
 	}))
 
-	handler := web.NewHandler(s.manager, s.linkManager, log)
+	handlerCfg := testHandlerConfig(s.manager, s.linkManager, web.NoPinger{})
+	handlerCfg.Log = log
+	handlerCfg.CSRFSecret = testCSRFSecret
+	handlerCfg.Files = s.files
+
 	if opts.accounts {
-		handler.WithAuthManager(s.auth)
+		handlerCfg.Accounts = s.auth
 	}
 
-	handler.WithFileManager(s.files)
+	handler := newTestHandler(s.T(), handlerCfg)
 
-	ogen := web.NewOgenHandler(s.manager, s.linkManager, web.NoPinger{}, log)
 	routerOpts := web.RouterOptions{
 		MaxBodyBytes: 64 * 1024,
-		CSRFSecret:   testCSRFSecret,
 		RateLimit:    opts.rateLimit,
 		RateBurst:    opts.rateLimit,
 
-		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, AllowedHosts: nil,
-		SessionTTL: 0, DisableAPI: false, DirectRedirect: false,
+		AllowedHosts: nil, DisableAPI: false,
 	}
 
-	router, err := web.NewRouter(handler, ogen, &routerOpts)
+	router, err := web.NewRouter(handler, &routerOpts)
 	s.Require().NoError(err)
 
 	return router

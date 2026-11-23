@@ -139,7 +139,7 @@ func TestAccountsFlow(t *testing.T) {
 	authMgr, err := auth.NewManager(
 		sqliteAuthStores(db, users),
 		&auth.Deps{
-			PasswordHasher: crypto.NewPasswordHasher(testArgon2Params),
+			PasswordHasher: crypto.NewPasswordHasher(testArgon2Params, slog.New(slog.DiscardHandler)),
 			Sealer:         crypto.NewSealer(testArgon2Params),
 			TOTP:           crypto.NewTOTP(),
 			Log:            log,
@@ -154,24 +154,25 @@ func TestAccountsFlow(t *testing.T) {
 
 	notesMgr := notes.NewManager(&notes.Deps{
 		Storage: noteRepo, Renderer: render.NewRenderer(), Encryptor: testutil.ContentEncryptor(t, "note"),
-		Hasher: crypto.NewEditCodeHasher(testutil.Argon2Params()), ExpiredSlugs: expired, Log: log,
+		Hasher: crypto.NewEditCodeHasher(testutil.Argon2Params(), log), ExpiredSlugs: expired, Log: log,
 		Now: time.Now,
 	}, false)
 	linksMgr := links.NewManager(&links.Deps{
 		Storage: linkRepo, Encryptor: testutil.ContentEncryptor(t, "link"),
-		Hasher: crypto.NewEditCodeHasher(testutil.Argon2Params()), ExpiredSlugs: expired, Log: log,
+		Hasher: crypto.NewEditCodeHasher(testutil.Argon2Params(), log), ExpiredSlugs: expired, Log: log,
 		Now: time.Now,
 	}, false)
 
-	handler := web.NewHandler(notesMgr, linksMgr, log).WithAuthManager(authMgr)
-	ogen := web.NewOgenHandler(notesMgr, linksMgr, web.NoPinger{}, log)
-	router, err := web.NewRouter(handler, ogen, &web.RouterOptions{
-		MaxBodyBytes:   256 * 1024,
-		CSRFSecret:     []byte("padmark-test-csrf-secret-32bytes"),
-		BootstrapToken: accountsFlowBootstrapToken,
+	handlerCfg := testHandlerConfig(notesMgr, linksMgr)
+	handlerCfg.Log = log
+	handlerCfg.Accounts = authMgr
+	handlerCfg.CSRFSecret = []byte("padmark-test-csrf-secret-32bytes")
+	handlerCfg.BootstrapToken = accountsFlowBootstrapToken
+	handler := newTestHandler(t, handlerCfg)
+	router, err := web.NewRouter(handler, &web.RouterOptions{
+		MaxBodyBytes: 256 * 1024,
 
-		ForcedScheme: "", TrustedProxies: nil, AllowedHosts: nil, RateLimit: 0, RateBurst: 0,
-		SessionTTL: 0, DisableAPI: false, DirectRedirect: false,
+		AllowedHosts: nil, RateLimit: 0, RateBurst: 0, DisableAPI: false,
 	})
 	require.NoError(t, err)
 

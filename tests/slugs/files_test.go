@@ -102,7 +102,7 @@ func newSlugEnv(t *testing.T, db *bun.DB, objects *s3store.Store, gate *createGa
 
 	log := slog.New(slog.DiscardHandler)
 	expired := expiredslugs.New(noteRepo, linkRepo)
-	hasher := crypto.NewEditCodeHasher(testutil.Argon2Params())
+	hasher := crypto.NewEditCodeHasher(testutil.Argon2Params(), slog.New(slog.DiscardHandler))
 	fileManager := files.NewManager(&files.Deps{
 		Storage:      &pausedFiles{Storage: fileRepo, gate: gate},
 		Objects:      objects,

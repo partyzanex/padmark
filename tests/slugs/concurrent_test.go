@@ -108,7 +108,7 @@ func replica(t *testing.T, db *bun.DB, gate *createGate) *httptest.Server {
 	noteRepo, linkRepo := repositories(db)
 	log := slog.New(slog.DiscardHandler)
 	expired := expiredslugs.New(noteRepo, linkRepo)
-	hasher := crypto.NewEditCodeHasher(testutil.Argon2Params())
+	hasher := crypto.NewEditCodeHasher(testutil.Argon2Params(), slog.New(slog.DiscardHandler))
 	noteManager := notes.NewManager(&notes.Deps{
 		Storage: &pausedNotes{Storage: noteRepo, gate: gate}, Renderer: render.NewRenderer(),
 		Encryptor: testutil.ContentEncryptor(t, "note"), Hasher: hasher, ExpiredSlugs: expired, Log: log,
@@ -119,13 +119,13 @@ func replica(t *testing.T, db *bun.DB, gate *createGate) *httptest.Server {
 		Hasher: hasher, ExpiredSlugs: expired, Log: log,
 		Now: time.Now,
 	}, true)
-	handler := web.NewHandler(noteManager, linkManager, log)
-	ogen := web.NewOgenHandler(noteManager, linkManager, web.NoPinger{}, log)
-	router, err := web.NewRouter(handler, ogen, &web.RouterOptions{
+	handlerCfg := testHandlerConfig(noteManager, linkManager)
+	handlerCfg.Log = log
+	handler := newTestHandler(t, handlerCfg)
+	router, err := web.NewRouter(handler, &web.RouterOptions{
 		MaxBodyBytes: 256 * 1024,
-		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, CSRFSecret: nil,
-		AllowedHosts: nil, RateLimit: 0, RateBurst: 0, SessionTTL: 0, DisableAPI: false,
-		DirectRedirect: false,
+
+		AllowedHosts: nil, RateLimit: 0, RateBurst: 0, DisableAPI: false,
 	})
 	require.NoError(t, err)
 
@@ -228,4 +228,27 @@ func testConcurrentCreate(t *testing.T, db *bun.DB, open func(*testing.T) *bun.D
 	require.Equal(t, 1, count)
 	require.NoError(t, db.NewRaw("SELECT COUNT(*) FROM notes JOIN links ON notes.id = links.id").Scan(t.Context(), &count))
 	require.Zero(t, count)
+}
+
+// testHandlerConfig returns the web.HandlerConfig of the test stacks: the given managers, no
+// database pinger, a discarding logger, no account system, no files, no reveal store and the
+// default settings. A test sets the fields of its scenario on the returned value.
+func testHandlerConfig(notes web.NoteManager, links web.LinkManager) *web.HandlerConfig {
+	return &web.HandlerConfig{
+		Notes: notes, Links: links, Pinger: web.NoPinger{}, Log: slog.New(slog.DiscardHandler),
+		Accounts: nil, Files: nil, Reveal: nil,
+		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, CSRFSecret: nil, SessionTTL: 0,
+		FileTransfer:   web.FileTransferLimits{IdleTimeout: 0, MaxUploads: 0, MaxUploadsPerClient: 0},
+		DirectRedirect: false,
+	}
+}
+
+// newTestHandler builds the web.Handler of cfg and stops the test when web.NewHandler fails.
+func newTestHandler(t *testing.T, cfg *web.HandlerConfig) *web.Handler {
+	t.Helper()
+
+	handler, err := web.NewHandler(cfg)
+	require.NoError(t, err)
+
+	return handler
 }

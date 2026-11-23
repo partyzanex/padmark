@@ -58,21 +58,22 @@ func (s *FileHandlerSuite) TearDownTest() {
 }
 
 func (s *FileHandlerSuite) newRouter(withFiles bool) http.Handler {
-	handler := web.NewHandler(s.manager, s.linkManager, discardLog())
+	handlerCfg := testHandlerConfig(s.manager, s.linkManager, web.NoPinger{})
+	handlerCfg.CSRFSecret = testCSRFSecret
+
 	if withFiles {
-		handler.WithFileManager(s.files)
+		handlerCfg.Files = s.files
 	}
 
-	ogen := web.NewOgenHandler(s.manager, s.linkManager, web.NoPinger{}, discardLog())
+	handler := newTestHandler(s.T(), handlerCfg)
+
 	opts := web.RouterOptions{
 		MaxBodyBytes: 64 * 1024,
-		CSRFSecret:   testCSRFSecret,
 
-		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, AllowedHosts: nil, RateLimit: 0,
-		RateBurst: 0, SessionTTL: 0, DisableAPI: false, DirectRedirect: false,
+		AllowedHosts: nil, RateLimit: 0, RateBurst: 0, DisableAPI: false,
 	}
 
-	router, err := web.NewRouter(handler, ogen, &opts)
+	router, err := web.NewRouter(handler, &opts)
 	s.Require().NoError(err)
 
 	return router
@@ -522,19 +523,19 @@ func (s *FileHandlerSuite) TestDelete() {
 // newAuthRouter returns a router with files and accounts on. A request without credentials is
 // anonymous, so the tests set AuthManager expectations only for the credentials that they send.
 func (s *FileHandlerSuite) newAuthRouter(auth *MockAuthManager) http.Handler {
-	handler := web.NewHandler(s.manager, s.linkManager, discardLog()).WithAuthManager(auth)
-	handler.WithFileManager(s.files)
+	handlerCfg := testHandlerConfig(s.manager, s.linkManager, web.NoPinger{})
+	handlerCfg.Accounts = auth
+	handlerCfg.Files = s.files
+	handlerCfg.CSRFSecret = testCSRFSecret
+	handler := newTestHandler(s.T(), handlerCfg)
 
-	ogen := web.NewOgenHandler(s.manager, s.linkManager, web.NoPinger{}, discardLog())
 	opts := web.RouterOptions{
 		MaxBodyBytes: 64 * 1024,
-		CSRFSecret:   testCSRFSecret,
 
-		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, AllowedHosts: nil, RateLimit: 0,
-		RateBurst: 0, SessionTTL: 0, DisableAPI: false, DirectRedirect: false,
+		AllowedHosts: nil, RateLimit: 0, RateBurst: 0, DisableAPI: false,
 	}
 
-	router, err := web.NewRouter(handler, ogen, &opts)
+	router, err := web.NewRouter(handler, &opts)
 	s.Require().NoError(err)
 
 	return router
@@ -1069,17 +1070,19 @@ func (s *FileHandlerSuite) TestUpload_Canceled() {
 
 // newLimitedRouter returns a router with files on and the given transfer limits.
 func (s *FileHandlerSuite) newLimitedRouter(limits web.FileTransferLimits) http.Handler {
-	handler := web.NewHandler(s.manager, s.linkManager, discardLog()).WithFileManager(s.files)
-	handler.WithFileTransferLimits(limits)
+	handlerCfg := testHandlerConfig(s.manager, s.linkManager, web.NoPinger{})
+	handlerCfg.Files = s.files
+	handlerCfg.FileTransfer = limits
+	handlerCfg.CSRFSecret = testCSRFSecret
+	handler := newTestHandler(s.T(), handlerCfg)
 
-	ogen := web.NewOgenHandler(s.manager, s.linkManager, web.NoPinger{}, discardLog())
 	opts := web.RouterOptions{
-		MaxBodyBytes: 64 * 1024, CSRFSecret: testCSRFSecret,
-		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, AllowedHosts: nil, RateLimit: 0,
-		RateBurst: 0, SessionTTL: 0, DisableAPI: false, DirectRedirect: false,
+		MaxBodyBytes: 64 * 1024,
+
+		AllowedHosts: nil, RateLimit: 0, RateBurst: 0, DisableAPI: false,
 	}
 
-	router, err := web.NewRouter(handler, ogen, &opts)
+	router, err := web.NewRouter(handler, &opts)
 	s.Require().NoError(err)
 
 	return router

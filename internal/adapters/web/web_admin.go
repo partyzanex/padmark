@@ -24,7 +24,7 @@ var adminTmplSrc string
 type AdminHandler struct {
 	*common
 
-	// users, tokens and onboarding hold disabledAccounts until Handler.WithAuthManager.
+	// users, tokens and onboarding hold disabledAccounts when the account system is off.
 	users      UserAdminManager
 	tokens     APITokenManager
 	onboarding OnboardingManager
@@ -32,10 +32,10 @@ type AdminHandler struct {
 	adminTmpl *template.Template
 }
 
-func newAdminHandler(c *common, adminTmpl *template.Template) *AdminHandler {
+func newAdminHandler(c *common, accounts AuthManager) *AdminHandler {
 	return &AdminHandler{
-		common: c, users: disabledAccounts{}, tokens: disabledAccounts{}, onboarding: disabledAccounts{},
-		adminTmpl: adminTmpl,
+		common: c, users: accounts, tokens: accounts, onboarding: accounts,
+		adminTmpl: parseTmpl("admin", adminTmplSrc),
 	}
 }
 

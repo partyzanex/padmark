@@ -374,19 +374,18 @@ func (s *AuthHandlerSuite) TestAccountEndpoints_RequireCredentials() {
 // like the rest of the machine surface: the middleware runs outside auth, so a valid bearer
 // key must not leak provisioning calls on a disabled instance.
 func (s *AuthHandlerSuite) TestAccountEndpoints_DisabledAPI_503() {
-	handler := web.NewHandler(s.manager, s.linkManager, discardLog())
-	ogen := web.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
+	handlerCfg := testHandlerConfig(s.manager, s.linkManager, s.pinger)
+	handlerCfg.CSRFSecret = authTestCSRFSecret
+	handler := newTestHandler(s.T(), handlerCfg)
 
 	opts := web.RouterOptions{
 		MaxBodyBytes: 256 * 1024,
-		CSRFSecret:   authTestCSRFSecret,
 		DisableAPI:   true,
 
-		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, AllowedHosts: nil, RateLimit: 0,
-		RateBurst: 0, SessionTTL: 0, DirectRedirect: false,
+		AllowedHosts: nil, RateLimit: 0, RateBurst: 0,
 	}
 
-	router, err := web.NewRouter(handler, ogen, &opts)
+	router, err := web.NewRouter(handler, &opts)
 	s.Require().NoError(err)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/tokens", nil)
