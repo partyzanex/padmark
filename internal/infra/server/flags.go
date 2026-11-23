@@ -276,7 +276,7 @@ func fileTransferFlags() []cli.Flag {
 			flag.Validator = validateUploadLimit
 			flag.Usage = "Number of file uploads that the server accepts at the same time; each holds one " +
 				"object storage part buffer in memory. More uploads get 503 with Retry-After. " +
-				"0 selects the default (32)"
+				"0 selects the default (8)"
 		}),
 		clifactory.IntFlag(func(flag *cli.IntFlag) {
 			flag.Name = FlagMaxUploadsPerClient
