@@ -30,7 +30,6 @@ import (
 	"github.com/partyzanex/padmark/internal/usecases/auth"
 	"github.com/partyzanex/padmark/internal/usecases/links"
 	"github.com/partyzanex/padmark/internal/usecases/notes"
-	"github.com/partyzanex/padmark/internal/usecases/slugs"
 )
 
 // captureStdout redirects os.Stdout for the duration of fn and returns what was printed —
@@ -164,8 +163,7 @@ func TestAccountsFlow(t *testing.T) {
 		Now: time.Now,
 	}, false)
 
-	resolver := slugs.NewResolver(sqliterepo.NewSlugRepository(db))
-	handler := web.NewHandler(notesMgr, linksMgr, resolver, log).WithAuthManager(authMgr)
+	handler := web.NewHandler(notesMgr, linksMgr, log).WithAuthManager(authMgr)
 	ogen := web.NewOgenHandler(notesMgr, linksMgr, web.NoPinger{}, log)
 	router, err := web.NewRouter(handler, ogen, &web.RouterOptions{
 		MaxBodyBytes:   256 * 1024,

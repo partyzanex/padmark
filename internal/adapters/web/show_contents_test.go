@@ -9,7 +9,6 @@ import (
 	"go.uber.org/mock/gomock"
 
 	"github.com/partyzanex/padmark/internal/domain"
-	"github.com/partyzanex/padmark/internal/usecases/slugs"
 )
 
 // showContentsMatcher matches a *domain.Note whose ShowContents equals want (nil when want is nil).
@@ -206,7 +205,6 @@ func (s *HandlerSuite) TestEditPage_ContentsSwitch() {
 		note := newTestNote("edit me", "# hello")
 		note.ShowContents = stored
 
-		s.expectKind(testID, slugs.KindNote)
 		s.manager.EXPECT().Inspect(gomock.Any(), testID, gomock.Any()).Return(note, nil)
 
 		w := httptest.NewRecorder()

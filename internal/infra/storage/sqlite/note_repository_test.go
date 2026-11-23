@@ -29,6 +29,12 @@ func (s *RepositoryTestSuite) SetupTest() {
 	_, err = s.db.NewCreateTable().Model((*note)(nil)).IfNotExists().Exec(s.T().Context())
 	s.Require().NoError(err)
 
+	// Get also reads slug_namespace. This suite has no triggers, so the table stays empty;
+	// tests/storage covers the rows that the triggers write.
+	_, err = s.db.ExecContext(s.T().Context(),
+		"CREATE TABLE IF NOT EXISTS slug_namespace (id TEXT NOT NULL PRIMARY KEY, resource TEXT NOT NULL)")
+	s.Require().NoError(err)
+
 	s.repo = NewNoteRepository(s.db)
 }
 

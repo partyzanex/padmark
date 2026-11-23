@@ -36,7 +36,6 @@ import (
 	"github.com/partyzanex/padmark/internal/usecases/files"
 	"github.com/partyzanex/padmark/internal/usecases/links"
 	"github.com/partyzanex/padmark/internal/usecases/notes"
-	"github.com/partyzanex/padmark/internal/usecases/slugs"
 	padmark "github.com/partyzanex/padmark/pkg/client"
 )
 
@@ -341,8 +340,7 @@ func startStack(t *testing.T, s3Endpoint string) *testStack {
 
 	notesMgr, linksMgr := newTestManagers(t, db, expired)
 
-	resolver := slugs.NewResolver(sqliterepo.NewSlugRepository(db))
-	handler := web.NewHandler(notesMgr, linksMgr, resolver, discardTestLogger()).WithAuthManager(authMgr)
+	handler := web.NewHandler(notesMgr, linksMgr, discardTestLogger()).WithAuthManager(authMgr)
 
 	if s3Endpoint != "" {
 		handler.WithFileManager(newTestFileManager(t, db, expired, s3Endpoint))

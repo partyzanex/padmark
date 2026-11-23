@@ -25,7 +25,6 @@ import (
 	"github.com/partyzanex/padmark/internal/adapters/web"
 	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/usecases/files"
-	"github.com/partyzanex/padmark/internal/usecases/slugs"
 	"github.com/partyzanex/padmark/tests/httptestutil"
 )
 
@@ -37,7 +36,6 @@ type FileHandlerSuite struct {
 	ctrl        *gomock.Controller
 	manager     *MockNoteManager
 	linkManager *MockLinkManager
-	slugs       *MockSlugResolver
 	files       *MockFileManager
 	router      http.Handler
 }
@@ -50,7 +48,6 @@ func (s *FileHandlerSuite) SetupTest() {
 	s.ctrl = gomock.NewController(s.T())
 	s.manager = NewMockNoteManager(s.ctrl)
 	s.linkManager = NewMockLinkManager(s.ctrl)
-	s.slugs = NewMockSlugResolver(s.ctrl)
 	s.files = NewMockFileManager(s.ctrl)
 	s.files.EXPECT().MaxSize().Return(int64(fileTestMaxSize)).AnyTimes()
 	s.router = s.newRouter(true)
@@ -61,7 +58,7 @@ func (s *FileHandlerSuite) TearDownTest() {
 }
 
 func (s *FileHandlerSuite) newRouter(withFiles bool) http.Handler {
-	handler := web.NewHandler(s.manager, s.linkManager, s.slugs, discardLog())
+	handler := web.NewHandler(s.manager, s.linkManager, discardLog())
 	if withFiles {
 		handler.WithFileManager(s.files)
 	}
@@ -470,9 +467,10 @@ func (s *FileHandlerSuite) TestRootSlugServesFile() {
 	s.Equal("hello", rec.Body.String())
 }
 
-// TestRootSlugWithoutAnyResource: a slug that names no record gets 404 without a Manager call.
+// TestRootSlugWithoutAnyResource: a slug that names no record gets 404 after the note read,
+// without a link or file Manager call.
 func (s *FileHandlerSuite) TestRootSlugWithoutAnyResource() {
-	s.slugs.EXPECT().KindOf(gomock.Any(), "abc").Return(slugs.Kind(""), domain.ErrNotFound)
+	expectNoteReadError(s.manager, "abc", gomock.Any(), domain.ErrNotFound)
 
 	req := httptest.NewRequest(http.MethodGet, "/abc", nil)
 	s.Equal(http.StatusNotFound, s.serve(req).Code)
@@ -524,7 +522,7 @@ func (s *FileHandlerSuite) TestDelete() {
 // newAuthRouter returns a router with files and accounts on. A request without credentials is
 // anonymous, so the tests set AuthManager expectations only for the credentials that they send.
 func (s *FileHandlerSuite) newAuthRouter(auth *MockAuthManager) http.Handler {
-	handler := web.NewHandler(s.manager, s.linkManager, s.slugs, discardLog()).WithAuthManager(auth)
+	handler := web.NewHandler(s.manager, s.linkManager, discardLog()).WithAuthManager(auth)
 	handler.WithFileManager(s.files)
 
 	ogen := web.NewOgenHandler(s.manager, s.linkManager, web.NoPinger{}, discardLog())
@@ -698,10 +696,10 @@ func (s *FileHandlerSuite) TestUpdate_FilesOff() {
 
 // --- browser pages ---
 
-// expectFileKind makes the resolver give a file for the slug "abc": GET /{id} and GET /edit/{id}
-// then call only the file Manager, and the strict mocks fail on a note or link read.
+// expectFileKind makes the note read of GET /abc tell that a file has the slug: the handler then
+// calls only the file Manager, and the strict mocks fail on a link read.
 func (s *FileHandlerSuite) expectFileKind() {
-	s.slugs.EXPECT().KindOf(gomock.Any(), "abc").Return(slugs.KindFile, nil)
+	expectOtherKind(s.manager, "abc", domain.KindFile)
 }
 
 func browserGet(path string) *http.Request {
@@ -838,11 +836,11 @@ func (s *FileHandlerSuite) TestDownload_BrowserErrorPage() {
 	s.Contains(rec.Body.String(), "The file was deleted or its lifetime ended.")
 }
 
-// expectEditFile sets the reads of GET /edit/abc for a file: the resolver gives a file, then the
-// file editor reads the file with Settings, which applies privacy and expiry and never deletes an
-// expired file.
+// expectEditFile sets the reads of GET /edit/abc for a file: the note read tells that a file has
+// the slug, then the file editor reads the file with Settings, which applies privacy and expiry
+// and never deletes an expired file.
 func (s *FileHandlerSuite) expectEditFile(file *domain.File, err error) {
-	s.expectFileKind()
+	expectOtherKindEditor(s.manager, "abc", domain.KindFile)
 	s.files.EXPECT().Settings(gomock.Any(), "abc", gomock.Any()).Return(file, err)
 }
 
@@ -1071,7 +1069,7 @@ func (s *FileHandlerSuite) TestUpload_Canceled() {
 
 // newLimitedRouter returns a router with files on and the given transfer limits.
 func (s *FileHandlerSuite) newLimitedRouter(limits web.FileTransferLimits) http.Handler {
-	handler := web.NewHandler(s.manager, s.linkManager, s.slugs, discardLog()).WithFileManager(s.files)
+	handler := web.NewHandler(s.manager, s.linkManager, discardLog()).WithFileManager(s.files)
 	handler.WithFileTransferLimits(limits)
 
 	ogen := web.NewOgenHandler(s.manager, s.linkManager, web.NoPinger{}, discardLog())

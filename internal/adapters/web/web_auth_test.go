@@ -39,7 +39,6 @@ type AuthHandlerSuite struct {
 	ctrl        *gomock.Controller
 	manager     *MockNoteManager
 	linkManager *MockLinkManager
-	slugs       *MockSlugResolver
 	pinger      *MockPinger
 	auth        *MockAuthManager
 	router      http.Handler
@@ -53,7 +52,6 @@ func (s *AuthHandlerSuite) SetupTest() {
 	s.ctrl = gomock.NewController(s.T())
 	s.manager = NewMockNoteManager(s.ctrl)
 	s.linkManager = NewMockLinkManager(s.ctrl)
-	s.slugs = NewMockSlugResolver(s.ctrl)
 	s.pinger = NewMockPinger(s.ctrl)
 	s.auth = NewMockAuthManager(s.ctrl)
 	s.router = s.newRouterWithAuth()
@@ -72,7 +70,7 @@ func (s *AuthHandlerSuite) newRouterWithAuth() http.Handler {
 func (s *AuthHandlerSuite) newRouterWithBootstrapToken(token string) http.Handler {
 	s.T().Helper()
 
-	handler := web.NewHandler(s.manager, s.linkManager, s.slugs, discardLog()).
+	handler := web.NewHandler(s.manager, s.linkManager, discardLog()).
 		WithAuthManager(s.auth)
 	ogen := web.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
 
@@ -96,7 +94,7 @@ func (s *AuthHandlerSuite) newRouterWithBootstrapToken(token string) http.Handle
 func (s *AuthHandlerSuite) newRouterWithAuthAndScheme(forcedScheme string) http.Handler {
 	s.T().Helper()
 
-	handler := web.NewHandler(s.manager, s.linkManager, s.slugs, discardLog()).
+	handler := web.NewHandler(s.manager, s.linkManager, discardLog()).
 		WithAuthManager(s.auth)
 	ogen := web.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
 
@@ -120,7 +118,7 @@ func (s *AuthHandlerSuite) newRouterWithAuthAndScheme(forcedScheme string) http.
 func (s *AuthHandlerSuite) newRouterWithAuthAndSessionTTL(ttl time.Duration) http.Handler {
 	s.T().Helper()
 
-	handler := web.NewHandler(s.manager, s.linkManager, s.slugs, discardLog()).
+	handler := web.NewHandler(s.manager, s.linkManager, discardLog()).
 		WithAuthManager(s.auth)
 	ogen := web.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
 
@@ -1677,7 +1675,7 @@ func (s *AuthHandlerSuite) TestCSRFGuard_InvalidHMAC_Returns403() {
 func (s *AuthHandlerSuite) newRouterWithCSRFSecret(secret []byte) http.Handler {
 	s.T().Helper()
 
-	handler := web.NewHandler(s.manager, s.linkManager, s.slugs, discardLog()).
+	handler := web.NewHandler(s.manager, s.linkManager, discardLog()).
 		WithAuthManager(s.auth)
 	ogen := web.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
 

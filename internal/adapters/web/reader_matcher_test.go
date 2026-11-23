@@ -1,6 +1,8 @@
 package web_test
 
 import (
+	"fmt"
+
 	"github.com/google/uuid"
 	"go.uber.org/mock/gomock"
 
@@ -91,4 +93,21 @@ func boolText(value bool) string {
 func expectNoteReadError(manager *MockNoteManager, id string, reader gomock.Matcher, err error) {
 	manager.EXPECT().Read(gomock.Any(), id, reader).Return(nil, err).MaxTimes(1)
 	manager.EXPECT().ReadRendered(gomock.Any(), id, reader).Return(nil, "", err).MaxTimes(1)
+}
+
+// expectOtherKind makes the note read of GET /{id} tell that a record of kind has the slug, as
+// notes.Storage.Get does in the same query. The handler then calls only the Manager of that kind.
+func expectOtherKind(manager *MockNoteManager, id string, kind domain.RecordKind) {
+	expectNoteReadError(manager, id, gomock.Any(), otherKindError(kind))
+}
+
+// expectOtherKindEditor is expectOtherKind for the note read of GET /edit/{id}, which is Inspect.
+func expectOtherKindEditor(manager *MockNoteManager, id string, kind domain.RecordKind) {
+	manager.EXPECT().Inspect(gomock.Any(), id, gomock.Any()).Return(nil, otherKindError(kind))
+}
+
+// otherKindError is the error of a note read for a slug of a record of kind, as notes.Manager
+// wraps it.
+func otherKindError(kind domain.RecordKind) error {
+	return fmt.Errorf("inspect note: %w", &domain.OtherKindError{Kind: kind})
 }

@@ -165,9 +165,10 @@ func toBurnInterstitialViewData(note *domain.Note, tok string) noteViewData {
 	}
 }
 
-// GetNote handles GET /notes/{id} with content negotiation via Accept header.
+// GetNote handles GET /notes/{id} with content negotiation via Accept header. The path names
+// only notes: a slug of a short link or a file gets the not-found answer of a missing note.
 func (h *NoteHandler) GetNote(w http.ResponseWriter, r *http.Request) {
-	h.serveNote(w, r, r.PathValue("id"))
+	h.serveNote(w, r, r.PathValue("id"), h.noteOnly(w, r))
 }
 
 // UpdateNoteByPath handles PUT /notes/{id...} for notes whose slug spans multiple path segments
@@ -312,13 +313,22 @@ func (h *NoteHandler) HandleReveal(w http.ResponseWriter, r *http.Request) {
 	// The confirmed form is the deliberate access that may burn the note.
 	reader.AllowBurn = true
 
-	h.renderNoteHTML(w, r, id, reader)
+	h.renderNoteHTML(w, r, id, reader, h.noteOnly(w, r))
+}
+
+// noteOnly answers a slug of a short link or a file on a route that serves only notes, as for a
+// slug without a record: the client never learns that a record of another kind has the slug.
+func (h *NoteHandler) noteOnly(w http.ResponseWriter, r *http.Request) otherRecord {
+	return func(domain.RecordKind) {
+		h.writeNoteError(w, r, domain.ErrNotFound)
+	}
 }
 
 // serveNote answers a note read in the format of the request. The usecase applies privacy,
 // expiry, the burn intent and the burn itself (see notes.Manager.Read); this handler only
-// selects the format and translates the errors.
-func (h *NoteHandler) serveNote(w http.ResponseWriter, r *http.Request, id string) {
+// selects the format and translates the errors. When a short link or a file has the slug, other
+// answers the request (see GetNoteOrLink).
+func (h *NoteHandler) serveNote(w http.ResponseWriter, r *http.Request, id string, other otherRecord) {
 	reader := h.reader(r)
 	// A browser navigation or a client that names the format is a deliberate read; v0.1.6 API
 	// reads keep their old behavior (see legacyAPIRead).
@@ -326,15 +336,15 @@ func (h *NoteHandler) serveNote(w http.ResponseWriter, r *http.Request, id strin
 
 	switch negotiate(r) {
 	case formatHTML:
-		h.serveNoteHTML(w, r, id, reader)
+		h.serveNoteHTML(w, r, id, reader, other)
 
 	case formatPlain:
-		h.writePlainNote(w, r, id, reader)
+		h.writePlainNote(w, r, id, reader, other)
 
 	case formatJSON:
 		note, err := h.readNote(r, id, reader)
 		if err != nil {
-			h.writeReadError(w, r, err)
+			h.writeReadErrorOr(w, r, err, other)
 
 			return
 		}
@@ -354,9 +364,11 @@ func (h *NoteHandler) serveNote(w http.ResponseWriter, r *http.Request, id strin
 // burn on the GET: the first read asks the usecase without the burn intent, and a burn note then
 // gets the confirmation form (handleBurnInterstitial). A note with a burn TTL is served directly;
 // its timer starts on this read.
-func (h *NoteHandler) serveNoteHTML(w http.ResponseWriter, r *http.Request, id string, reader domain.Reader) {
+func (h *NoteHandler) serveNoteHTML(
+	w http.ResponseWriter, r *http.Request, id string, reader domain.Reader, other otherRecord,
+) {
 	if h.revealStore == nil || !reader.AllowBurn {
-		h.renderNoteHTML(w, r, id, reader)
+		h.renderNoteHTML(w, r, id, reader, other)
 
 		return
 	}
@@ -372,7 +384,7 @@ func (h *NoteHandler) serveNoteHTML(w http.ResponseWriter, r *http.Request, id s
 	}
 
 	if err != nil {
-		h.writeReadError(w, r, err)
+		h.writeReadErrorOr(w, r, err, other)
 
 		return
 	}
@@ -381,10 +393,12 @@ func (h *NoteHandler) serveNoteHTML(w http.ResponseWriter, r *http.Request, id s
 }
 
 // writePlainNote reads the note and writes the raw content as text/plain or text/markdown.
-func (h *NoteHandler) writePlainNote(w http.ResponseWriter, r *http.Request, id string, reader domain.Reader) {
+func (h *NoteHandler) writePlainNote(
+	w http.ResponseWriter, r *http.Request, id string, reader domain.Reader, other otherRecord,
+) {
 	note, err := h.readNote(r, id, reader)
 	if err != nil {
-		h.writeReadError(w, r, err)
+		h.writeReadErrorOr(w, r, err, other)
 
 		return
 	}
@@ -431,11 +445,24 @@ func (h *NoteHandler) writeReadError(w http.ResponseWriter, r *http.Request, err
 	}
 }
 
-// renderNoteHTML reads the note for reader and renders the note page.
-func (h *NoteHandler) renderNoteHTML(w http.ResponseWriter, r *http.Request, id string, reader domain.Reader) {
+// writeReadErrorOr is writeReadError for a read that can find a record of another kind: a slug of
+// a short link or a file goes to other.
+func (h *NoteHandler) writeReadErrorOr(w http.ResponseWriter, r *http.Request, err error, other otherRecord) {
+	if answerOther(err, other) {
+		return
+	}
+
+	h.writeReadError(w, r, err)
+}
+
+// renderNoteHTML reads the note for reader and renders the note page. When a short link or a
+// file has the slug, other answers the request.
+func (h *NoteHandler) renderNoteHTML(
+	w http.ResponseWriter, r *http.Request, id string, reader domain.Reader, other otherRecord,
+) {
 	note, rendered, err := h.manager.ReadRendered(r.Context(), id, reader)
 	if err != nil {
-		h.writeReadError(w, r, err)
+		h.writeReadErrorOr(w, r, err, other)
 
 		return
 	}
@@ -491,7 +518,7 @@ func (h *NoteHandler) handleBurnInterstitial(w http.ResponseWriter, r *http.Requ
 	}
 
 	if !note.BurnAfterReading || note.BurnTTL > 0 {
-		h.renderNoteHTML(w, r, id, reader)
+		h.renderNoteHTML(w, r, id, reader, h.noteOnly(w, r))
 
 		return
 	}

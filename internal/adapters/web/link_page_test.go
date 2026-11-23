@@ -9,7 +9,6 @@ import (
 	"go.uber.org/mock/gomock"
 
 	"github.com/partyzanex/padmark/internal/domain"
-	"github.com/partyzanex/padmark/internal/usecases/slugs"
 	"github.com/partyzanex/padmark/tests/httptestutil"
 )
 
@@ -169,7 +168,7 @@ func (s *HandlerSuite) TestLinkPage_Privacy() {
 // TestEditPage_Link: /edit/{id} opens the short-link editor when the slug names a link, with
 // the labels of the note editor. It reads the link with Inspect only.
 func (s *HandlerSuite) TestEditPage_Link() {
-	s.expectKind(testLinkID, slugs.KindLink)
+	expectOtherKindEditor(s.manager, testLinkID, domain.KindLink)
 	s.linkManager.EXPECT().Inspect(gomock.Any(), testLinkID, gomock.Any()).Return(newTestLink(), nil)
 
 	rec := httptest.NewRecorder()
@@ -191,7 +190,7 @@ func (s *HandlerSuite) TestEditPage_Link() {
 
 // TestEditPage_LinkPrivate: the link editor at /edit/{id} keeps the privacy check of the link.
 func (s *HandlerSuite) TestEditPage_LinkPrivate() {
-	s.expectKind(testLinkID, slugs.KindLink)
+	expectOtherKindEditor(s.manager, testLinkID, domain.KindLink)
 	s.linkManager.EXPECT().Inspect(gomock.Any(), testLinkID, anonymousReader()).Return(nil, domain.ErrForbidden)
 
 	rec := httptest.NewRecorder()

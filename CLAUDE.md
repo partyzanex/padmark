@@ -64,7 +64,9 @@ Dependencies point inward: adapters and infrastructure depend on usecases and do
   processes (`docs/adr/0003-storage-slug-uniqueness.md`). Create makes no pre-check and holds no lock.
   On `ErrSlugConflict` a random slug retries (5 attempts); a custom slug asks the shared
   `expiredslugs.Releaser` to remove an expired holder of any kind, then tries once more.
-- `NewHandler(manager, linkManager, resolver, log)` requires both managers.
+- `NewHandler(manager, linkManager, log)` requires both managers. `GET /{id}` and `/edit/{id}` read
+  the note first; the note `Get` returns `*domain.OtherKindError` for a link or file slug in the same
+  query, so a note view costs one database read (`tests/slugs` `record_reads` pins the counts).
   `NewRouter(handler, ogenHandler, opts)` receives `*RouterOptions` and returns `(http.Handler, error)`.
   Use `NoPinger{}` for test setups without a DB pinger.
 

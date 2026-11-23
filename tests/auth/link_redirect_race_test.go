@@ -25,7 +25,6 @@ import (
 	"github.com/partyzanex/padmark/internal/testutil"
 	"github.com/partyzanex/padmark/internal/usecases/auth"
 	"github.com/partyzanex/padmark/internal/usecases/links"
-	"github.com/partyzanex/padmark/internal/usecases/slugs"
 )
 
 // pausedLinkRead lets a separate manager commit an update after the reader fetched its row.
@@ -122,8 +121,7 @@ func TestLinkRedirectPrivacyRace(t *testing.T) {
 					reader.WithCache(cache)
 				}
 
-				resolver := slugs.NewResolver(sqliterepo.NewSlugRepository(env.db))
-				handler := web.NewHandler(notes, reader, resolver, log).WithAuthManager(env.authMgr)
+				handler := web.NewHandler(notes, reader, log).WithAuthManager(env.authMgr)
 				ogen := web.NewOgenHandler(notes, reader, web.NoPinger{}, log)
 				router, err := web.NewRouter(handler, ogen, &web.RouterOptions{
 					MaxBodyBytes: 256 * 1024, DirectRedirect: true,

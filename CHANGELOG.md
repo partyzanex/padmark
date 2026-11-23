@@ -86,8 +86,9 @@ v0.5.0 follows **v0.4.0**.
   tables first and retries a random slug up to five times (notes did not retry before); a custom
   slug first releases an expired holder of any kind. The in-process slug lock is removed
   (ADR-0003).
-- `GET /{id}` and `/edit/{id}` read the record kind from `slug_namespace` once and call only that
-  kind; a file page needs 2 reads instead of 4.
+- `GET /{id}` and `/edit/{id}` read the note first. When no note has the slug, the same query
+  gives the kind of the short link or file that has it (`slug_namespace`), and only that kind's
+  Manager is called. A note view needs one database read; a short link or a file page needs two.
 - Error messages name each operation once; account repository errors start with the database
   dialect, and file errors name the hashed record ID.
 - The "On this page" sidebar follows the new design: numbered H2 and H3 rows, H4 rows without a

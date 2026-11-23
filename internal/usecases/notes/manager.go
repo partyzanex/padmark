@@ -23,6 +23,11 @@ import (
 // was extended. A read of an expired note and a Create with a slug conflict both use it.
 // Each method that compares times gets now from Manager and does not read the clock itself.
 //
+// Get returns domain.ErrNotFound when no note has the ID. When a short link or a file has the ID,
+// the error is a *domain.OtherKindError with its kind, from the same query: GET /{id} then calls
+// the Manager of that kind without one more read. The error matches domain.ErrNotFound, so the
+// callers of Get need no special case.
+//
 // Update, Delete, Consume and SetBurnExpiry change the row only while its edit_code still equals
 // the stored hash of the note that the caller checked: note.EditCode for Update, storedEditCode
 // for the others. Each note gets a hash with a new random salt and no write changes it, so the
@@ -287,6 +292,7 @@ func (m *Manager) Peek(ctx context.Context, id string) (*domain.Note, error) {
 // first two read rules of Read: privacy (domain.ErrForbidden) and expiry (an expired note is
 // deleted and Inspect returns domain.ErrExpired). It never consumes a burn-after-reading note,
 // never starts its timer and never counts a view. The editor and the burn confirmation page use it.
+// A slug of a short link or a file gives the *domain.OtherKindError of Storage.Get.
 func (m *Manager) Inspect(ctx context.Context, id string, reader domain.Reader) (*domain.Note, error) {
 	note, err := m.storage.Get(ctx, domain.HashSlug(id))
 	if err != nil {
@@ -323,6 +329,7 @@ func (m *Manager) Inspect(ctx context.Context, id string, reader domain.Reader) 
 //
 // Storage checks the privacy level and the edit-code hash again when it consumes the note or
 // starts the timer, so a change after the checks above cannot burn a different note version.
+// A slug of a short link or a file gives the *domain.OtherKindError of Storage.Get.
 func (m *Manager) Read(ctx context.Context, id string, reader domain.Reader) (*domain.Note, error) {
 	note, err := m.Inspect(ctx, id, reader)
 	if err != nil {

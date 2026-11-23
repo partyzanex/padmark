@@ -13,7 +13,6 @@ import (
 
 	"github.com/partyzanex/padmark/internal/adapters/web"
 	"github.com/partyzanex/padmark/internal/domain"
-	"github.com/partyzanex/padmark/internal/usecases/slugs"
 	padmark "github.com/partyzanex/padmark/pkg/client"
 )
 
@@ -23,7 +22,6 @@ type DisableAPISuite struct {
 	ctrl        *gomock.Controller
 	manager     *MockNoteManager
 	linkManager *MockLinkManager
-	slugs       *MockSlugResolver
 	pinger      *MockPinger
 }
 
@@ -35,7 +33,6 @@ func (s *DisableAPISuite) SetupTest() {
 	s.ctrl = gomock.NewController(s.T())
 	s.manager = NewMockNoteManager(s.ctrl)
 	s.linkManager = NewMockLinkManager(s.ctrl)
-	s.slugs = NewMockSlugResolver(s.ctrl)
 	s.pinger = NewMockPinger(s.ctrl)
 }
 
@@ -46,7 +43,7 @@ func (s *DisableAPISuite) TearDownTest() {
 func (s *DisableAPISuite) newRouter(disableAPI bool) http.Handler {
 	s.T().Helper()
 
-	handler := web.NewHandler(s.manager, s.linkManager, s.slugs, discardLog())
+	handler := web.NewHandler(s.manager, s.linkManager, discardLog())
 	ogen := web.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
 
 	opts := web.RouterOptions{
@@ -128,7 +125,6 @@ func (s *DisableAPISuite) TestWebUI_Unaffected() {
 	// The note view (no explicit Accept) reads the note with all read rules; the editor reads it
 	// with Inspect, which applies only privacy and expiry. A request without an Accept that
 	// names a format is not deliberate, so the short link redirect cannot burn the link.
-	s.slugs.EXPECT().KindOf(gomock.Any(), testID).Return(slugs.KindNote, nil).Times(2)
 	s.manager.EXPECT().Read(gomock.Any(), testID, gomock.Any()).Return(newTestNote("t", "c"), nil)
 	s.manager.EXPECT().Inspect(gomock.Any(), testID, gomock.Any()).Return(newTestNote("t", "c"), nil)
 	s.linkManager.EXPECT().Follow(gomock.Any(), testID, withBurn(false)).Return(newTestLink(), nil)
@@ -216,7 +212,7 @@ func (s *DisableAPISuite) TestFilePages_VisibleWhileAPIDisabled() {
 		BurnAfterDownload: false,
 	}, nil)
 
-	handler := web.NewHandler(s.manager, s.linkManager, s.slugs, discardLog()).WithFileManager(fileMgr)
+	handler := web.NewHandler(s.manager, s.linkManager, discardLog()).WithFileManager(fileMgr)
 	ogen := web.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
 	opts := web.RouterOptions{
 		MaxBodyBytes: 256 * 1024,
@@ -230,9 +226,9 @@ func (s *DisableAPISuite) TestFilePages_VisibleWhileAPIDisabled() {
 	router, err := web.NewRouter(handler, ogen, &opts)
 	s.Require().NoError(err)
 
-	// The editor of a file is at /edit/{id}: the resolver gives a file, so only the file
-	// Manager is called.
-	s.slugs.EXPECT().KindOf(gomock.Any(), testID).Return(slugs.KindFile, nil)
+	// The editor of a file is at /edit/{id}: the note read tells that a file has the slug, so
+	// only the file Manager is called next.
+	expectOtherKindEditor(s.manager, testID, domain.KindFile)
 
 	pages := map[string]int{
 		"/files":                     http.StatusOK,

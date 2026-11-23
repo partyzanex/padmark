@@ -1,6 +1,7 @@
 package notes
 
 import (
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -136,4 +137,40 @@ func (s *ManagerTestSuite) TestDelete_AccountsOffUsesEditCode() {
 	err := s.manager.Delete(s.T().Context(), "off", "wrong-code00", openReader())
 
 	s.Require().ErrorIs(err, domain.ErrInvalidEditCode)
+}
+
+// TestRead_OtherKindKeepsTheKind checks that a slug of a short link or a file gives the
+// *domain.OtherKindError of the storage to the caller of Read, Inspect and ReadRendered, so that
+// GET /{id} can call the Manager of that kind. The error still matches ErrNotFound.
+func (s *ManagerTestSuite) TestRead_OtherKindKeepsTheKind() {
+	ctx := s.T().Context()
+	reads := map[string]func() error{
+		"Read": func() error {
+			_, err := s.manager.Read(ctx, "held", openReader())
+
+			return err
+		},
+		"Inspect": func() error {
+			_, err := s.manager.Inspect(ctx, "held", openReader())
+
+			return err
+		},
+		"ReadRendered": func() error {
+			_, _, err := s.manager.ReadRendered(ctx, "held", openReader())
+
+			return err
+		},
+	}
+
+	for name, read := range reads {
+		s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("held")).
+			Return(nil, &domain.OtherKindError{Kind: domain.KindFile})
+
+		err := read()
+
+		other, _ := errors.AsType[*domain.OtherKindError](err)
+		s.Require().NotNil(other, name)
+		s.Equal(domain.KindFile, other.Kind, name)
+		s.Require().ErrorIs(err, domain.ErrNotFound, name)
+	}
 }

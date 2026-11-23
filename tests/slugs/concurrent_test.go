@@ -119,7 +119,7 @@ func replica(t *testing.T, db *bun.DB, gate *createGate) *httptest.Server {
 		Hasher: hasher, ExpiredSlugs: expired, Log: log,
 		Now: time.Now,
 	}, true)
-	handler := web.NewHandler(noteManager, linkManager, slugResolver(db), log)
+	handler := web.NewHandler(noteManager, linkManager, log)
 	ogen := web.NewOgenHandler(noteManager, linkManager, web.NoPinger{}, log)
 	router, err := web.NewRouter(handler, ogen, &web.RouterOptions{
 		MaxBodyBytes: 256 * 1024,

@@ -69,7 +69,6 @@ type LLMsRouterSuite struct {
 	ctrl        *gomock.Controller
 	manager     *MockNoteManager
 	linkManager *MockLinkManager
-	slugs       *MockSlugResolver
 	pinger      *MockPinger
 }
 
@@ -81,7 +80,6 @@ func (s *LLMsRouterSuite) SetupTest() {
 	s.ctrl = gomock.NewController(s.T())
 	s.manager = NewMockNoteManager(s.ctrl)
 	s.linkManager = NewMockLinkManager(s.ctrl)
-	s.slugs = NewMockSlugResolver(s.ctrl)
 	s.pinger = NewMockPinger(s.ctrl)
 }
 
@@ -92,7 +90,7 @@ func (s *LLMsRouterSuite) TearDownTest() {
 func (s *LLMsRouterSuite) newRouter() http.Handler {
 	s.T().Helper()
 
-	handler := web.NewHandler(s.manager, s.linkManager, s.slugs, discardLog())
+	handler := web.NewHandler(s.manager, s.linkManager, discardLog())
 	handler.WithAuthManager(NewMockAuthManager(s.ctrl))
 	ogen := web.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
 

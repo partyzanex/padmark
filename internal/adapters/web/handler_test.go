@@ -19,7 +19,6 @@ import (
 
 	"github.com/partyzanex/padmark/internal/adapters/web"
 	"github.com/partyzanex/padmark/internal/domain"
-	"github.com/partyzanex/padmark/internal/usecases/slugs"
 	"github.com/partyzanex/padmark/tests/httptestutil"
 )
 
@@ -47,7 +46,6 @@ type HandlerSuite struct {
 	ctrl        *gomock.Controller
 	manager     *MockNoteManager
 	linkManager *MockLinkManager
-	slugs       *MockSlugResolver
 	pinger      *MockPinger
 	revealStore *MockRevealTokenStore
 	authMgr     *MockAuthManager
@@ -64,7 +62,6 @@ func (s *HandlerSuite) SetupTest() {
 	s.ctrl = gomock.NewController(s.T())
 	s.manager = NewMockNoteManager(s.ctrl)
 	s.linkManager = NewMockLinkManager(s.ctrl)
-	s.slugs = NewMockSlugResolver(s.ctrl)
 	s.pinger = NewMockPinger(s.ctrl)
 	s.revealStore = NewMockRevealTokenStore(s.ctrl)
 	s.authMgr = NewMockAuthManager(s.ctrl)
@@ -75,7 +72,7 @@ func (s *HandlerSuite) SetupTest() {
 func (s *HandlerSuite) newRouter() http.Handler {
 	s.T().Helper()
 
-	handler := web.NewHandler(s.manager, s.linkManager, s.slugs, discardLog())
+	handler := web.NewHandler(s.manager, s.linkManager, discardLog())
 	ogen := web.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
 
 	opts := web.RouterOptions{
@@ -97,7 +94,7 @@ func (s *HandlerSuite) newRouter() http.Handler {
 func (s *HandlerSuite) newRouterWithOptions(trustedProxies []*net.IPNet, forcedScheme string) http.Handler {
 	s.T().Helper()
 
-	handler := web.NewHandler(s.manager, s.linkManager, s.slugs, discardLog())
+	handler := web.NewHandler(s.manager, s.linkManager, discardLog())
 	ogen := web.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
 
 	opts := web.RouterOptions{
@@ -120,7 +117,7 @@ func (s *HandlerSuite) newRouterWithOptions(trustedProxies []*net.IPNet, forcedS
 func (s *HandlerSuite) newRouterWithAllowedHosts(hosts ...string) http.Handler {
 	s.T().Helper()
 
-	handler := web.NewHandler(s.manager, s.linkManager, s.slugs, discardLog())
+	handler := web.NewHandler(s.manager, s.linkManager, discardLog())
 	ogen := web.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
 
 	opts := web.RouterOptions{
@@ -170,7 +167,7 @@ func (s *HandlerSuite) TestAllowedHosts_EnforcedOnMainListener() {
 func (s *HandlerSuite) newRouterWithTOTPAuth() http.Handler {
 	s.T().Helper()
 
-	handler := web.NewHandler(s.manager, s.linkManager, s.slugs, discardLog()).
+	handler := web.NewHandler(s.manager, s.linkManager, discardLog()).
 		WithAuthManager(s.authMgr)
 	ogen := web.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
 
@@ -201,7 +198,7 @@ func (s *HandlerSuite) newRouterWithReveal() http.Handler {
 func (s *HandlerSuite) newRouterWithRevealLog(log *slog.Logger) http.Handler {
 	s.T().Helper()
 
-	handler := web.NewHandler(s.manager, s.linkManager, s.slugs, log).
+	handler := web.NewHandler(s.manager, s.linkManager, log).
 		WithAuthManager(s.authMgr).
 		WithRevealStore(s.revealStore)
 	ogen := web.NewOgenHandler(s.manager, s.linkManager, s.pinger, log)
@@ -335,7 +332,6 @@ func (s *HandlerSuite) TestEditPage_OK() {
 	future := time.Now().Add(time.Hour)
 	note.ExpiresAt = &future
 
-	s.expectKind(testID, slugs.KindNote)
 	s.manager.EXPECT().Inspect(gomock.Any(), testID, gomock.Any()).Return(note, nil)
 
 	w := httptest.NewRecorder()
@@ -360,7 +356,6 @@ func (s *HandlerSuite) TestEditPage_OK() {
 func (s *HandlerSuite) TestEditPage_FixedSlugAndDelete() {
 	note := newTestNote("edit me", "# hello")
 
-	s.expectKind(testID, slugs.KindNote)
 	s.manager.EXPECT().Inspect(gomock.Any(), testID, gomock.Any()).Return(note, nil)
 
 	w := httptest.NewRecorder()
@@ -380,7 +375,6 @@ func (s *HandlerSuite) TestEditPage_BurnNote_ContentWithheld() {
 	note := newTestNote("edit me", "# burn-only-once")
 	note.BurnAfterReading = true
 
-	s.expectKind(testID, slugs.KindNote)
 	s.manager.EXPECT().Inspect(gomock.Any(), testID, gomock.Any()).Return(note, nil)
 
 	w := httptest.NewRecorder()
@@ -400,7 +394,6 @@ func (s *HandlerSuite) TestEditPage_BurnNote_ContentWithheld() {
 // TestEditPage_Expired_Gone: the editor reads with Inspect, which applies expiry — an expired
 // note is deleted (by the usecase) and answered 410 instead of being served (H-1).
 func (s *HandlerSuite) TestEditPage_Expired_Gone() {
-	s.expectKind(testID, slugs.KindNote)
 	s.manager.EXPECT().Inspect(gomock.Any(), testID, gomock.Any()).Return(nil, domain.ErrExpired)
 
 	w := httptest.NewRecorder()
@@ -597,7 +590,7 @@ func (s *HandlerSuite) TestCreateNote_OK() {
 func (s *HandlerSuite) TestCreateNote_LongContentReachesManager() {
 	s.manager.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil, domain.ErrContentTooLarge)
 
-	handler := web.NewHandler(s.manager, s.linkManager, s.slugs, discardLog())
+	handler := web.NewHandler(s.manager, s.linkManager, discardLog())
 	ogen := web.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
 
 	router, err := web.NewRouter(handler, ogen, &web.RouterOptions{
@@ -817,7 +810,7 @@ func (s *HandlerSuite) TestCreateNote_BodyExceedsLimit_Returns413() {
 	// MaxBodyBytes, enforced at the transport layer (http.MaxBytesReader). A body over that limit
 	// must surface as a clean 413, not an opaque decode error — checked here with a tiny limit.
 	// Manager.Create is never reached (no EXPECT): the body is rejected during ogen decoding.
-	handler := web.NewHandler(s.manager, s.linkManager, s.slugs, discardLog())
+	handler := web.NewHandler(s.manager, s.linkManager, discardLog())
 	ogen := web.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
 	opts := web.RouterOptions{
 		MaxBodyBytes: 64,
@@ -941,7 +934,7 @@ func (s *HandlerSuite) TestOgenDecodeErrors_LongContentTypeIsTruncated() {
 // already wrote the right shape before the handler was replaced, so this pins it against a
 // regression while the surrounding code changes.
 func (s *HandlerSuite) TestCreateNote_BodyExceedsLimit_UsesErrorResponseShape() {
-	handler := web.NewHandler(s.manager, s.linkManager, s.slugs, discardLog())
+	handler := web.NewHandler(s.manager, s.linkManager, discardLog())
 	ogen := web.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
 	opts := web.RouterOptions{
 		MaxBodyBytes: 64,
@@ -1274,7 +1267,6 @@ func (s *HandlerSuite) TestGetNote_ImplicitBurnRead_Refused() {
 	for _, testCase := range cases {
 		s.Run(testCase.name, func() {
 			// The usecase refuses a burn note to a reader without the burn intent.
-			s.expectKind(testID, slugs.KindNote)
 			expectNoteReadError(s.manager, testID, withBurn(false), domain.ErrBurnIntentRequired)
 
 			w := httptest.NewRecorder()
@@ -1360,8 +1352,7 @@ func (s *HandlerSuite) TestGetNote_Expired() {
 
 func (s *HandlerSuite) TestGetNote_ShortURL() {
 	note := newTestNote("short", "body")
-	// GET /{id} asks the resolver for the kind, then reads the note once.
-	s.expectKind(testID, slugs.KindNote)
+	// GET /{id} reads the note once; the same read would tell the kind of a link or a file.
 	s.manager.EXPECT().Read(gomock.Any(), testID, gomock.Any()).Return(note, nil)
 
 	w := httptest.NewRecorder()
@@ -1418,7 +1409,6 @@ func (s *HandlerSuite) TestGetNote_MultiSegmentSlug_PublicServed() {
 
 	note := newTestNote("Guide", "# body")
 
-	s.expectKind(mid, slugs.KindNote)
 	s.manager.EXPECT().Read(gomock.Any(), mid, gomock.Any()).Return(note, nil)
 
 	router := s.newRouterWithTOTPAuth()
@@ -1437,7 +1427,6 @@ func (s *HandlerSuite) TestGetNote_MultiSegmentSlug_PrivateRequiresAuth() {
 	// served to an unauthenticated caller.
 	const mid = "project/secret.md"
 
-	s.expectKind(mid, slugs.KindNote)
 	s.manager.EXPECT().Read(gomock.Any(), mid, anonymousReader()).Return(nil, domain.ErrForbidden)
 
 	router := s.newRouterWithTOTPAuth()
@@ -1460,9 +1449,7 @@ func (s *HandlerSuite) TestEditPage_MultiSegmentPath_GatedByPrivacy() {
 
 	public := newTestNote("guide", "# guide")
 
-	s.expectKind("project/GUIDE.md", slugs.KindNote)
 	s.manager.EXPECT().Inspect(gomock.Any(), "project/GUIDE.md", anonymousReader()).Return(public, nil)
-	s.expectKind("project/secret.md", slugs.KindNote)
 	s.manager.EXPECT().Inspect(gomock.Any(), "project/secret.md", anonymousReader()).Return(nil, domain.ErrForbidden)
 
 	w := httptest.NewRecorder()
@@ -1784,7 +1771,7 @@ func (s *HandlerSuite) TestReadyz_OK() {
 }
 
 func (s *HandlerSuite) TestReadyz_NoPinger() {
-	handler := web.NewHandler(s.manager, s.linkManager, s.slugs, discardLog())
+	handler := web.NewHandler(s.manager, s.linkManager, discardLog())
 	ogen := web.NewOgenHandler(s.manager, s.linkManager, web.NoPinger{}, discardLog())
 	opts := web.RouterOptions{
 		MaxBodyBytes: 256 * 1024,
@@ -1866,7 +1853,7 @@ func (s *HandlerSuite) TestStaticAsset_AutofillOverride() {
 // TestTOTPLoginHandler_AccountsDisabled_Returns404 covers the nil-guard added so that the
 // account system is opt-in: with no auth manager configured, /totp-login must 404.
 func (s *HandlerSuite) TestTOTPLoginHandler_AccountsDisabled_Returns404() {
-	handler := web.NewHandler(s.manager, s.linkManager, s.slugs, discardLog()) // no WithAuthManager → accounts disabled.
+	handler := web.NewHandler(s.manager, s.linkManager, discardLog()) // no WithAuthManager → accounts disabled.
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPost, "/totp-login", nil)
 
@@ -1878,7 +1865,7 @@ func (s *HandlerSuite) TestTOTPLoginHandler_AccountsDisabled_Returns404() {
 // TestChangePasswordPage_AccountsDisabled_Returns404 mirrors the TOTPLoginHandler nil-guard
 // test above for the GET /change-password page.
 func (s *HandlerSuite) TestChangePasswordPage_AccountsDisabled_Returns404() {
-	handler := web.NewHandler(s.manager, s.linkManager, s.slugs, discardLog()) // no WithAuthManager → accounts disabled.
+	handler := web.NewHandler(s.manager, s.linkManager, discardLog()) // no WithAuthManager → accounts disabled.
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/change-password", nil)
 
@@ -1933,7 +1920,7 @@ func (fw *failWriter) WriteHeader(code int)      { fw.code = code }
 func (fw *failWriter) Write([]byte) (int, error) { return 0, errors.New("write failed") }
 
 func (s *HandlerSuite) TestIndexPage_WriteFail() {
-	handler := web.NewHandler(s.manager, s.linkManager, s.slugs, slog.New(slog.DiscardHandler))
+	handler := web.NewHandler(s.manager, s.linkManager, slog.New(slog.DiscardHandler))
 	fw := newFailWriter()
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
 
@@ -1945,10 +1932,9 @@ func (s *HandlerSuite) TestIndexPage_WriteFail() {
 func (s *HandlerSuite) TestEditPage_WriteFail() {
 	note := newTestNote("edit", "body")
 
-	s.expectKind(testID, slugs.KindNote)
 	s.manager.EXPECT().Inspect(gomock.Any(), testID, gomock.Any()).Return(note, nil)
 
-	handler := web.NewHandler(s.manager, s.linkManager, s.slugs, slog.New(slog.DiscardHandler))
+	handler := web.NewHandler(s.manager, s.linkManager, slog.New(slog.DiscardHandler))
 	fwr := newFailWriter()
 	r := httptest.NewRequest(http.MethodGet, "/edit/"+testID, nil)
 	r.SetPathValue("id", testID)
@@ -1959,7 +1945,7 @@ func (s *HandlerSuite) TestEditPage_WriteFail() {
 }
 
 func (s *HandlerSuite) TestSuccessPage_WriteFail() {
-	handler := web.NewHandler(s.manager, s.linkManager, s.slugs, slog.New(slog.DiscardHandler))
+	handler := web.NewHandler(s.manager, s.linkManager, slog.New(slog.DiscardHandler))
 	fwr := newFailWriter()
 	r := httptest.NewRequest(http.MethodGet, "/success?id=abc", nil)
 
@@ -1972,7 +1958,7 @@ func (s *HandlerSuite) TestGetNote_HTML_WriteFail() {
 	note := newTestNote("note", "body")
 	s.manager.EXPECT().ReadRendered(gomock.Any(), testID, gomock.Any()).Return(note, "<p>body</p>", nil)
 
-	handler := web.NewHandler(s.manager, s.linkManager, s.slugs, slog.New(slog.DiscardHandler))
+	handler := web.NewHandler(s.manager, s.linkManager, slog.New(slog.DiscardHandler))
 	fwr := newFailWriter()
 	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
 	r.SetPathValue("id", testID)
@@ -1987,7 +1973,7 @@ func (s *HandlerSuite) TestGetNote_Plain_WriteFail() {
 	note := newTestNote("note", "body")
 	s.manager.EXPECT().Read(gomock.Any(), testID, gomock.Any()).Return(note, nil)
 
-	handler := web.NewHandler(s.manager, s.linkManager, s.slugs, slog.New(slog.DiscardHandler))
+	handler := web.NewHandler(s.manager, s.linkManager, slog.New(slog.DiscardHandler))
 	fwr := newFailWriter()
 	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
 	r.SetPathValue("id", testID)
@@ -2002,7 +1988,7 @@ func (s *HandlerSuite) TestGetNote_JSON_WriteFail() {
 	note := newTestNote("note", "body")
 	s.manager.EXPECT().Read(gomock.Any(), testID, gomock.Any()).Return(note, nil)
 
-	handler := web.NewHandler(s.manager, s.linkManager, s.slugs, slog.New(slog.DiscardHandler))
+	handler := web.NewHandler(s.manager, s.linkManager, slog.New(slog.DiscardHandler))
 	fwr := newFailWriter()
 	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
 	r.SetPathValue("id", testID)
@@ -2016,7 +2002,7 @@ func (s *HandlerSuite) TestGetNote_JSON_WriteFail() {
 // ── Rate limit ──.
 
 func (s *HandlerSuite) TestRateLimit_Exceeded() {
-	handler := web.NewHandler(s.manager, s.linkManager, s.slugs, discardLog())
+	handler := web.NewHandler(s.manager, s.linkManager, discardLog())
 	ogen := web.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
 	opts := web.RouterOptions{
 		MaxBodyBytes: 256 * 1024,
@@ -2049,7 +2035,7 @@ func (s *HandlerSuite) TestRateLimit_Exceeded_POSTLinks() {
 	link := newTestLink()
 	s.linkManager.EXPECT().Create(gomock.Any(), gomock.Any(), gomock.Any()).Return(link, nil)
 
-	handler := web.NewHandler(s.manager, s.linkManager, s.slugs, discardLog())
+	handler := web.NewHandler(s.manager, s.linkManager, discardLog())
 	ogen := web.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
 	opts := web.RouterOptions{
 		MaxBodyBytes: 256 * 1024,
@@ -2078,7 +2064,7 @@ func (s *HandlerSuite) TestRateLimit_Exceeded_POSTLinks() {
 }
 
 func (s *HandlerSuite) TestRateLimit_DifferentIPs() {
-	handler := web.NewHandler(s.manager, s.linkManager, s.slugs, discardLog())
+	handler := web.NewHandler(s.manager, s.linkManager, discardLog())
 	ogen := web.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
 	opts := web.RouterOptions{
 		MaxBodyBytes: 256 * 1024,
@@ -2291,7 +2277,7 @@ func (s *HandlerSuite) TestGetNote_Plain_InternalError() {
 func (s *HandlerSuite) TestWriteErrorPage_WriteFail() {
 	s.manager.EXPECT().ReadRendered(gomock.Any(), testID, gomock.Any()).Return(nil, "", domain.ErrNotFound)
 
-	handler := web.NewHandler(s.manager, s.linkManager, s.slugs, slog.New(slog.DiscardHandler))
+	handler := web.NewHandler(s.manager, s.linkManager, slog.New(slog.DiscardHandler))
 	fwr := newFailWriter()
 	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
 	r.SetPathValue("id", testID)
@@ -2539,7 +2525,7 @@ func (s *HandlerSuite) TestLoginPage_Error() {
 }
 
 func (s *HandlerSuite) TestLoginPage_WriteFail() {
-	handler := web.NewHandler(s.manager, s.linkManager, s.slugs, slog.New(slog.DiscardHandler))
+	handler := web.NewHandler(s.manager, s.linkManager, slog.New(slog.DiscardHandler))
 	fw := newFailWriter()
 	r := httptest.NewRequest(http.MethodGet, "/login?error=1", nil)
 
@@ -2647,7 +2633,7 @@ func (s *HandlerSuite) TestAPISpec() {
 }
 
 func (s *HandlerSuite) TestAPIDocsPage_WriteFail() {
-	handler := web.NewHandler(s.manager, s.linkManager, s.slugs, slog.New(slog.DiscardHandler))
+	handler := web.NewHandler(s.manager, s.linkManager, slog.New(slog.DiscardHandler))
 	fw := newFailWriter()
 	r := httptest.NewRequest(http.MethodGet, "/api", nil)
 
@@ -2666,7 +2652,7 @@ func (s *HandlerSuite) TestAPISpec_WriteFail() {
 }
 
 func (s *HandlerSuite) TestAPIDocsPage_Public() {
-	handler := web.NewHandler(s.manager, s.linkManager, s.slugs, discardLog()).WithAuthManager(s.authMgr)
+	handler := web.NewHandler(s.manager, s.linkManager, discardLog()).WithAuthManager(s.authMgr)
 	ogen := web.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
 	opts := web.RouterOptions{
 		MaxBodyBytes: 256 * 1024,
@@ -3237,7 +3223,6 @@ func (s *HandlerSuite) TestEditPage_OwnerOnly_NonOwner_Forbidden() {
 	}
 
 	// The editor reads with Inspect; the usecase refuses the signed-in caller who is not the owner.
-	s.expectKind(testID, slugs.KindNote)
 	s.manager.EXPECT().Inspect(gomock.Any(), testID, signedInReader(other.ID)).Return(nil, domain.ErrForbidden)
 	s.authMgr.EXPECT().GetSession(gomock.Any(), "valid-sess").Return(other, nil).Times(1)
 
@@ -3269,7 +3254,6 @@ func (s *HandlerSuite) TestEditPage_OwnerOnly_Owner_OK() {
 	note.Privacy = new(domain.PrivacyOwner)
 	note.OwnerID = &owner.ID
 
-	s.expectKind(testID, slugs.KindNote)
 	s.manager.EXPECT().Inspect(gomock.Any(), testID, gomock.Any()).Return(note, nil)
 	s.authMgr.EXPECT().GetSession(gomock.Any(), "valid-sess").Return(owner, nil).Times(1)
 

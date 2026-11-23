@@ -114,7 +114,9 @@ type RevealTokenStore interface {
 
 // NoteManager is the interface the HTTP adapter requires from the business logic layer. The
 // usecase applies the access rules with the domain.Reader of the request; the handlers only
-// translate the errors (see notes.Manager.Read for the order of the rules).
+// translate the errors (see notes.Manager.Read for the order of the rules). A read of a slug that
+// a short link or a file has returns a *domain.OtherKindError, which matches domain.ErrNotFound:
+// GET /{id} and GET /edit/{id} use its kind (note_or_link.go).
 type NoteManager interface {
 	Create(ctx context.Context, note *domain.Note) (*domain.Note, error)
 	// Inspect applies privacy and expiry without a burn or a view count: the editor and the
@@ -387,13 +389,10 @@ type Handler struct {
 	// files is not embedded: its RegisterRoutes and Delete would be ambiguous with the methods
 	// of the other concern handlers.
 	files *FileHandler
-
-	// slugs tells GET /{id} and GET /edit/{id} which Manager has the slug (note_or_link.go).
-	slugs SlugResolver
 }
 
 // NewHandler creates a Handler with required dependencies.
-func NewHandler(manager NoteManager, linkManager LinkManager, resolver SlugResolver, log *slog.Logger) *Handler {
+func NewHandler(manager NoteManager, linkManager LinkManager, log *slog.Logger) *Handler {
 	noteTmpl := parseTmpl("note", noteTmplSrc)
 	indexTmpl := parseTmpl("index", indexTmplSrc)
 	loginTmpl := parseTmpl("login", loginTmplSrc)
@@ -439,7 +438,6 @@ func NewHandler(manager NoteManager, linkManager LinkManager, resolver SlugResol
 		PageHandler:  newPageHandler(cmn, indexTmpl, successTmpl, apidocsTmpl),
 		// Files share the edit-code lockout with notes and links: one slug namespace.
 		files: newFileHandler(cmn, noteHandler.lockout),
-		slugs: resolver,
 	}
 }
 

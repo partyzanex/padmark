@@ -123,20 +123,43 @@ func (r *NoteRepository) Create(ctx context.Context, domNote *domain.Note) error
 	return nil
 }
 
-// Get retrieves a note by ID.
+// noteOrHolder is the row of Get: the note with the ID, or only the slug_namespace resource of
+// the record of another kind that has the ID. Note keeps the columns of the note model without a
+// prefix, and the alias "note" names the join of the notes table in Get.
+type noteOrHolder struct {
+	bun.BaseModel `bun:"table:notes,alias:note"`
+
+	// Holder is the slug_namespace resource of the ID; NULL, when no record has the ID, scans as "".
+	Holder string `bun:"holder,scanonly"`
+	Note   note   `bun:"embed:"`
+}
+
+// Get retrieves a note by ID. When no note has the ID, the same query gives the slug_namespace
+// resource of the ID, and Get returns domain.NoteNotFound of it: a *domain.OtherKindError for a
+// short link or a file, otherwise domain.ErrNotFound. Thus GET /{id} needs no second query to
+// find the kind of the record. The one-row table k makes the query return a row also when no
+// record has the ID. The note join does not depend on the namespace row, so a legacy note, which
+// has no row (migrations/postgres/20261025000001_slug_namespace.sql), stays readable.
 func (r *NoteRepository) Get(ctx context.Context, id string) (*domain.Note, error) {
-	var dbNote note
+	var row noteOrHolder
 
-	err := r.db.NewSelect().Model(&dbNote).Where("id = ?", id).Scan(ctx)
+	err := r.db.NewSelect().
+		Model(&row).
+		ModelTableExpr("(SELECT CAST(? AS TEXT) AS id) AS k", id).
+		Join("LEFT JOIN notes AS note ON note.id = k.id").
+		Join("LEFT JOIN slug_namespace AS ns ON ns.id = k.id").
+		ColumnExpr("?TableColumns").
+		ColumnExpr("ns.resource AS holder").
+		Scan(ctx)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, domain.ErrNotFound
-		}
-
 		return nil, fmt.Errorf("postgres get: %w", err)
 	}
 
-	return toDomain(&dbNote), nil
+	if row.Note.ID == "" {
+		return nil, fmt.Errorf("postgres get: %w", domain.NoteNotFound(row.Holder))
+	}
+
+	return toDomain(&row.Note), nil
 }
 
 // Consume atomically deletes a note and returns it, but only if the note is eligible for deletion:

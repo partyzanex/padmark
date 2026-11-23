@@ -7,7 +7,6 @@ import (
 	"go.uber.org/mock/gomock"
 
 	"github.com/partyzanex/padmark/internal/domain"
-	"github.com/partyzanex/padmark/internal/usecases/slugs"
 )
 
 // TestEditPage_ContentType: the editor gives the stored format to the preview, so a text/plain
@@ -17,7 +16,6 @@ func (s *HandlerSuite) TestEditPage_ContentType() {
 		note := newTestNote("edit me", "# Plain heading")
 		note.ContentType = new(contentType)
 
-		s.expectKind(testID, slugs.KindNote)
 		s.manager.EXPECT().Inspect(gomock.Any(), testID, gomock.Any()).Return(note, nil)
 
 		w := httptest.NewRecorder()
@@ -33,7 +31,6 @@ func (s *HandlerSuite) TestEditPage_ContentType() {
 func (s *HandlerSuite) TestEditPage_LeadingNewline() {
 	note := newTestNote("edit me", "\n    code\n")
 
-	s.expectKind(testID, slugs.KindNote)
 	s.manager.EXPECT().Inspect(gomock.Any(), testID, gomock.Any()).Return(note, nil)
 
 	w := httptest.NewRecorder()

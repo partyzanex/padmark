@@ -17,8 +17,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/partyzanex/padmark/internal/adapters/web"
-	sqliterepo "github.com/partyzanex/padmark/internal/infra/storage/sqlite"
-	"github.com/partyzanex/padmark/internal/usecases/slugs"
 )
 
 // Finding M-2: while no account exists, /setup without an invite creates the single, permanent
@@ -113,8 +111,7 @@ func newBootstrapEnv(t *testing.T, dbName string) ownerFlowEnv {
 	log := slog.New(slog.DiscardHandler)
 	notesMgr, linksMgr := newOwnerFlowManagers(t, env.db, log)
 
-	resolver := slugs.NewResolver(sqliterepo.NewSlugRepository(env.db))
-	handler := web.NewHandler(notesMgr, linksMgr, resolver, log).WithAuthManager(env.authMgr)
+	handler := web.NewHandler(notesMgr, linksMgr, log).WithAuthManager(env.authMgr)
 	ogen := web.NewOgenHandler(notesMgr, linksMgr, web.NoPinger{}, log)
 	router, err := web.NewRouter(handler, ogen, &web.RouterOptions{
 		MaxBodyBytes:   256 * 1024,
