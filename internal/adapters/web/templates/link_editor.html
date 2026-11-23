@@ -256,6 +256,9 @@
         if (editCode) headers['X-Edit-Code'] = editCode;
         const response = await fetch(path, {method, headers, body: payload ? JSON.stringify(payload) : undefined});
         if (!response.ok) {
+            // 410 is an update of an expired link (domain.ErrExpired). The server word "expired"
+            // is not a sentence; the file editor shows the same text for a file.
+            if (response.status === 410) throw new Error('The link was deleted or its lifetime ended.');
             let message = 'Unable to save the link. Please try again.';
             try { message = (await response.json()).message || message; } catch (_) {}
             throw new Error(message);

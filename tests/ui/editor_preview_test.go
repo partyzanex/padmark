@@ -200,12 +200,15 @@ func tableNote() string {
 }
 
 // tableMetrics measures each scroll box in a root: its overflow, the space between the box and
-// its table, the smallest difference between a cell width and the minimum cell width, and the
-// number of words that the browser breaks across two lines.
+// its table, the widths of the box and of the text column, the smallest difference between a cell
+// width and the minimum cell width, and the number of words that the browser breaks across two
+// lines.
 const tableMetrics = `(root) => Array.from(document.querySelectorAll(root + " .table-scroll")).map((box) => {
 	const table = box.firstElementChild;
 	const cells = Array.from(table.querySelectorAll("th, td"));
 	const minWidth = parseFloat(getComputedStyle(cells[0]).minWidth);
+	const parent = getComputedStyle(box.parentElement);
+	const column = box.parentElement.clientWidth - parseFloat(parent.paddingLeft) - parseFloat(parent.paddingRight);
 	const brokenWords = (cell) => {
 		const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT);
 		let broken = 0;
@@ -224,15 +227,17 @@ const tableMetrics = `(root) => Array.from(document.querySelectorAll(root + " .t
 		overflowX: getComputedStyle(box).overflowX,
 		overflow: box.scrollWidth - box.clientWidth,
 		gap: box.clientWidth - table.getBoundingClientRect().width,
+		width: box.getBoundingClientRect().width,
+		column: column,
 		minWidth: minWidth,
 		slack: Math.min(...cells.map((cell) => cell.getBoundingClientRect().width - minWidth)),
 		brokenWords: cells.reduce((sum, cell) => sum + brokenWords(cell), 0),
 	};
 })`
 
-// expectTables checks the tables of tableNote in root: the wide table scrolls in its box, the
-// narrow table fills its box without a scroll, no cell is narrower than the minimum and the page
-// does not scroll horizontally.
+// expectTables checks the tables of tableNote in root: the wide table scrolls in a box as wide as
+// the text column, the narrow table takes the width of its content and its box wraps it without a
+// scroll, no cell is narrower than the minimum and the page does not scroll horizontally.
 func (sess *uiSession) expectTables(root string) {
 	sess.t.Helper()
 
@@ -258,12 +263,16 @@ func (sess *uiSession) expectTables(root string) {
 
 		if idx == 0 {
 			require.Greater(sess.t, sess.number(box["overflow"]), float64(0), "the wide table scrolls in its box")
+			require.InDelta(sess.t, sess.number(box["column"]), sess.number(box["width"]), 1,
+				"the box of the wide table is as wide as the text column")
 
 			continue
 		}
 
 		require.LessOrEqual(sess.t, sess.number(box["overflow"]), float64(0), "the narrow table does not scroll")
-		require.InDelta(sess.t, 0, sess.number(box["gap"]), 1, "the narrow table fills its box")
+		require.InDelta(sess.t, 0, sess.number(box["gap"]), 1, "the box of the narrow table wraps the table")
+		require.Less(sess.t, sess.number(box["width"]), sess.number(box["column"])-1,
+			"the narrow table takes the width of its content, not the text column")
 	}
 }
 

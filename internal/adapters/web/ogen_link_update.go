@@ -52,13 +52,6 @@ func (h *OgenHandler) UpdateLink(
 		return &ogenapi.UpdateLinkUnauthorized{}, nil
 	}
 
-	if errors.Is(err, domain.ErrExpired) {
-		// An expired link cannot be changed. The answer is the 410 of a read, as in UpdateNote.
-		v := ogenapi.UpdateLinkGone(errResp(err))
-
-		return &v, nil
-	}
-
 	if err != nil {
 		return mapUpdateLinkError(err, h.log), nil
 	}
@@ -66,9 +59,10 @@ func (h *OgenHandler) UpdateLink(
 	return domainLinkToResponse(link, h.log), nil
 }
 
-// Per-operation ogen union types make the status mappers textually near-identical (dupl).
+// mapUpdateLinkError translates an UpdateLink failure into the generated response union. 410 is
+// an expired link (domain.ErrExpired).
 //
-//nolint:ireturn,dupl // ogen response unions are interfaces by design
+//nolint:ireturn // ogen response unions are interfaces by design
 func mapUpdateLinkError(err error, log *slog.Logger) ogenapi.UpdateLinkRes {
 	r := errResp(err)
 	switch status, _ := domainErrStatus(err); status {
@@ -87,6 +81,11 @@ func mapUpdateLinkError(err error, log *slog.Logger) ogenapi.UpdateLinkRes {
 		return &v
 	case http.StatusUnprocessableEntity:
 		v := ogenapi.UpdateLinkUnprocessableEntity(r)
+
+		return &v
+	case http.StatusGone:
+		// An expired link cannot be changed. The answer is the 410 of a read.
+		v := ogenapi.UpdateLinkGone(r)
 
 		return &v
 	default:

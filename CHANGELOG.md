@@ -11,7 +11,7 @@ v0.5.0 follows **v0.4.0**.
 
 - A wide table in a note scrolls horizontally in its own box on every screen width; the page
   never scrolls sideways. Cells are at least 9em wide and do not break words; a narrow table
-  fills the text column. The editor preview shows the same box.
+  takes the width of its content, and its frame wraps it. The editor preview shows the same box.
 - `padmark-cli update-link` and the MCP tool `update_link` change the destination, expiry,
   privacy and redirect setting of a short link; an omitted option keeps its value.
 - `tests/storage` runs one contract suite per repository role on SQLite and PostgreSQL, and
@@ -153,6 +153,9 @@ v0.5.0 follows **v0.4.0**.
   notes and links accepted it and made the record live again, and files answered `404`. The
   storage `UPDATE` repeats the expiry check, and `openapi.yaml` declares `410` for the three
   `PUT` routes.
+- The note and link editors show "The note was deleted or its lifetime ended." and "The link was
+  deleted or its lifetime ended." when a save gets `410`, as the file editor does, instead of the
+  server word "expired".
 - A database failure while a reveal token is used shows the 500 page instead of "Forbidden"; the
   note is not read or burned, and the token stays valid.
 - The math renderer registers its goldmark node kinds once per process; two renderers made at

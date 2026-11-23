@@ -3415,23 +3415,28 @@ a.copy-value:hover { color: var(--accent-text); }
 }
 
 /* Each outermost table is in a scroll box (internal/infra/render/table_scroll.go and
-   static/editor-preview.js make it). A table wider than the text column scrolls in its box, and
-   the page keeps its width. The box has the frame, as in docs/design/screens/NoteLong.html. */
+   static/editor-preview.js make it). The box has the frame, as in
+   docs/design/screens/NoteLong.html, and takes the width of its table: a narrow table does not
+   stand in an empty full-width frame. The box is never wider than the text column, so a wider
+   table scrolls in its box, and the page keeps its width. */
 .prose.markdown-body .table-scroll {
+    width: fit-content;
+    max-width: 100%;
     margin: 0 0 20px;
     overflow-x: auto;
     border: 1px solid var(--line);
     border-radius: 10px;
 }
 
-/* A narrow table fills the text column, as in the design. A cell is at least 9em wide (126px with
-   its padding at 14px): about 13 characters of text, so the words of a wide table do not stand one
-   on each line. The text column of a phone holds two such columns, the note column of a wide
-   screen seven. The prose breaks words anywhere; a cell does not, because that break lets a column
-   shrink to one letter. A long word makes its column wider, and the box scrolls. */
+/* A table takes the width of its content. A table with more text than the column holds fills the
+   column and wraps the text in its cells. A cell is at least 9em wide (126px with its padding at
+   14px): about 13 characters of text, so the words of a wide table do not stand one on each line.
+   The text column of a phone holds two such columns, the note column of a wide screen seven. The
+   prose breaks words anywhere; a cell does not, because that break lets a column shrink to one
+   letter. A long word makes its column wider, and the box scrolls. */
 .prose.markdown-body table {
     display: table;
-    width: 100%;
+    width: auto;
     max-width: none;
     overflow: visible;
     margin: 0;

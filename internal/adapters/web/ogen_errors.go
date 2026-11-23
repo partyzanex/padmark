@@ -186,7 +186,7 @@ func mapCreateError(err error, log *slog.Logger) ogenapi.CreateNoteRes {
 	}
 }
 
-// mapUpdateError is structurally similar to mapCreateLinkError (both have 3 status cases +
+// mapUpdateError is structurally similar to mapCreateAPITokenError (both have 4 status cases +
 // default) but each names its own operation-specific variant constructor — ogen generates a
 // distinct type per operation, so this can't be unified further without generics obscuring more
 // than they'd save for 2 call sites.
@@ -206,6 +206,11 @@ func mapUpdateError(err error, log *slog.Logger) ogenapi.UpdateNoteRes {
 		return &v
 	case http.StatusUnprocessableEntity:
 		v := ogenapi.UpdateNoteUnprocessableEntity(r)
+
+		return &v
+	case http.StatusGone:
+		// An expired note cannot be changed. The answer is the 410 of a read.
+		v := ogenapi.UpdateNoteGone(r)
 
 		return &v
 	default:
@@ -240,11 +245,9 @@ func mapDeleteError(err error, log *slog.Logger) ogenapi.DeleteNoteRes {
 }
 
 // mapCreateLinkError, mapGetLinkError, and mapDeleteLinkError mirror mapCreateError/
-// mapDeleteError, for the links operations' own distinct ogen response-union types. See
-// mapUpdateError's comment for why mapCreateLinkError's structural similarity to it isn't
-// unified further.
+// mapDeleteError, for the links operations' own distinct ogen response-union types.
 //
-//nolint:ireturn,dupl // ogen response union types are interfaces by design; see comment above
+//nolint:ireturn // ogen response union types are interfaces by design
 func mapCreateLinkError(err error, log *slog.Logger) ogenapi.CreateLinkRes {
 	r := errResp(err)
 

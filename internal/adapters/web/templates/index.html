@@ -397,6 +397,9 @@
                 // Only the edit-code rejection (403 "invalid edit code", domain.ErrInvalidEditCode)
                 // means the code was wrong; other 403s (e.g. "cross-origin request rejected") are not.
                 if (resp.status === 403 && msg === 'invalid edit code') { throw new Error('Invalid edit code'); }
+                // 410 is an update of an expired note (domain.ErrExpired). The server word
+                // "expired" is not a sentence; the file editor shows the same text for a file.
+                if (resp.status === 410) { throw new Error('The note was deleted or its lifetime ended.'); }
                 throw new Error(msg);
             }
 
