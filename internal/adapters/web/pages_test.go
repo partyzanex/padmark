@@ -14,9 +14,10 @@ import (
 
 // ── IndexPage ──.
 
-// TestIndexPage_ShowsNewNoteEditor: GET / shows the editor of a new note. A new note has no
-// stored format, so the preview uses Markdown (an empty data-content-type).
-func (s *HandlerSuite) TestIndexPage_ShowsNewNoteEditor() {
+// TestIndexPage_ShowsNewNoteEditorWithContentsOff: GET / shows the editor of a new note. A new
+// note has no stored format, so the preview uses Markdown (an empty data-content-type). The
+// "On this page" switch starts off, and the form sends its state as show_contents.
+func (s *HandlerSuite) TestIndexPage_ShowsNewNoteEditorWithContentsOff() {
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
 
@@ -27,6 +28,8 @@ func (s *HandlerSuite) TestIndexPage_ShowsNewNoteEditor() {
 	s.Contains(w.Body.String(), "Padmark")
 	s.Contains(w.Body.String(), "Publish")
 	s.Contains(w.Body.String(), `data-content-type=""`)
+	s.Contains(w.Body.String(), `id="contentsCheck">`)
+	s.Contains(w.Body.String(), "show_contents: document.getElementById('contentsCheck').checked")
 }
 
 // TestCreateLinkPage_AnonymousWithAccounts: with accounts a signed-out user sees the protected

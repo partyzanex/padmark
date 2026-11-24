@@ -36,15 +36,19 @@ func getPage(router http.Handler, path, session string) *httptest.ResponseRecord
 	return rec
 }
 
-// TestHeader_AccountsOff_NoSignIn: without the account system nobody can sign in, so the header
-// has no "Sign in" button and no account block.
-func (s *HandlerSuite) TestHeader_AccountsOff_NoSignIn() {
+// TestHeader_AccountsAndFilesOff_NoSignInNoFileTab: without the account system nobody can sign
+// in, so the header has no "Sign in" button and no account block. Without object storage the
+// header has no "File" tab, because there is no upload page. The footer caption does not change.
+func (s *HandlerSuite) TestHeader_AccountsAndFilesOff_NoSignInNoFileTab() {
 	rec := getPage(s.router, "/", "")
+	body := rec.Body.String()
 
 	s.Require().Equal(http.StatusOK, rec.Code)
-	s.NotContains(rec.Body.String(), "header-signin")
-	s.NotContains(rec.Body.String(), "account-signout")
-	s.Contains(rec.Body.String(), `class="nav-tab" aria-current="page"`)
+	s.NotContains(body, "header-signin")
+	s.NotContains(body, "account-signout")
+	s.Contains(body, `class="nav-tab" aria-current="page"`)
+	s.NotContains(body, `href="/files"`)
+	s.Contains(body, "<span>Padmark — notes, links &amp; files</span>")
 }
 
 // TestHeader_SignedOut_ShowsSignIn: with accounts on, an anonymous visitor gets "Sign in" on a
@@ -157,17 +161,6 @@ func (s *AuthHandlerSuite) TestHeader_AccountPages_SameHeader() {
 			s.Contains(body, `id="menuBtn" aria-label="Account: admin"`)
 		})
 	}
-}
-
-// TestHeader_FilesOff_NoFileTab: without object storage the header has no "File" tab, because
-// there is no upload page. The footer caption does not change.
-func (s *HandlerSuite) TestHeader_FilesOff_NoFileTab() {
-	rec := getPage(s.router, "/", "")
-	body := rec.Body.String()
-
-	s.Require().Equal(http.StatusOK, rec.Code)
-	s.NotContains(body, `href="/files"`)
-	s.Contains(body, "<span>Padmark — notes, links &amp; files</span>")
 }
 
 // TestHeader_FilesOn_ShowsFileTab: with files on, every create page has the "File" tab; it is

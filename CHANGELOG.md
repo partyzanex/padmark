@@ -278,8 +278,8 @@ v0.5.0 follows **v0.4.0**.
 - 21 duplicate tests are removed from the notes, links and files usecases and the web handlers;
   each kept test has the assertions of the removed ones. Test helpers, variables and files that
   named removed APIs have the current names (`mutation_gate_test.go` is `mutation_error_test.go`).
-- 63 near-duplicate tests are merged into the test of the same scenario: 34 in the notes, links
-  and files usecases and 29 in the web handlers. A metric, cache, log or response check of the
+- 65 near-duplicate tests are merged into the test of the same scenario: 34 in the notes, links
+  and files usecases and 31 in the web handlers. A metric, cache, log or response check of the
   removed test moves into the kept test, and the name of the kept test tells all of its checks.
 - Test names and comments name the current APIs: `Follow`, `Read`, `ReadRendered`, `Inspect`,
   and the usecase privacy check of a mutation instead of a web mutation gate (70 tests).

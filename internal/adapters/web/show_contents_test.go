@@ -224,14 +224,3 @@ func (s *HandlerSuite) TestEditPage_ContentsSwitch() {
 		s.Contains(body, `id="contentsCheck">`)
 	}
 }
-
-// TestIndexPage_ContentsSwitchOff checks that a new note starts with the sidebar off.
-func (s *HandlerSuite) TestIndexPage_ContentsSwitchOff() {
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet, "/", nil)
-	s.router.ServeHTTP(w, r)
-
-	s.Require().Equal(http.StatusOK, w.Code)
-	s.Contains(w.Body.String(), `id="contentsCheck">`)
-	s.Contains(w.Body.String(), "show_contents: document.getElementById('contentsCheck').checked")
-}
