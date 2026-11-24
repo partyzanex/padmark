@@ -414,24 +414,6 @@ func (s *FileHandlerSuite) TestUpload_MalformedBody() {
 	})
 }
 
-// TestUpload_Canceled (R-08): when the client goes away, the handler writes no response.
-func (s *FileHandlerSuite) TestUpload_Canceled() {
-	ctx, cancel := context.WithCancel(s.T().Context())
-
-	s.files.EXPECT().Create(gomock.Any(), "a.txt", gomock.Any(), gomock.Any()).
-		DoAndReturn(func(context.Context, string, io.Reader, files.CreateOptions) (*domain.File, error) {
-			cancel()
-
-			return nil, fmt.Errorf("upload file: %w", context.Canceled)
-		})
-
-	rec := s.serve(uploadRequest(nil, "a.txt", []byte("x")).WithContext(ctx))
-
-	s.False(rec.Flushed)
-	s.Empty(rec.Body.String())
-	s.Empty(rec.Header().Get("Content-Type"))
-}
-
 // TestUpload_OwnerFromCredentials: an upload with a session or an API token records the
 // account as the owner.
 func (s *FileHandlerSuite) TestUpload_OwnerFromCredentials() {

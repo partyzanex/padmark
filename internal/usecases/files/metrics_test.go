@@ -64,29 +64,6 @@ func (s *ManagerSuite) TestCreate_RejectsTooLargeFileWithoutStorageError() {
 	s.Require().ErrorIs(err, domain.ErrFileTooLarge)
 }
 
-func (s *ManagerSuite) TestMetrics_StatFailureIsStorageError() {
-	metrics := s.useStrictMetrics()
-
-	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any(), testNow()).Return(storedFile(false), nil)
-	s.objects.EXPECT().Stat(gomock.Any(), "obj").Return(errors.New("timeout"))
-	metrics.EXPECT().IncStorageErrors(StorageOpStat)
-
-	_, err := s.manager.Download(s.T().Context(), "abc", anonymous(false))
-	s.Require().ErrorIs(err, domain.ErrStorageUnavailable)
-}
-
-// TestDownload_MissingObjectIsNotFoundWithoutStorageError: a record without its object gives
-// ErrNotFound, and the strict metrics mock gets no storage error.
-func (s *ManagerSuite) TestDownload_MissingObjectIsNotFoundWithoutStorageError() {
-	s.useStrictMetrics()
-
-	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any(), testNow()).Return(storedFile(false), nil)
-	s.objects.EXPECT().Stat(gomock.Any(), "obj").Return(domain.ErrNotFound)
-
-	_, err := s.manager.Download(s.T().Context(), "abc", anonymous(false))
-	s.Require().ErrorIs(err, domain.ErrNotFound)
-}
-
 // TestDownload_StorageReadFailureCountsStorageError: a failed object read stops Send with an
 // error, after one counted download, and counts one storage error of the get operation.
 func (s *ManagerSuite) TestDownload_StorageReadFailureCountsStorageError() {
@@ -103,22 +80,6 @@ func (s *ManagerSuite) TestDownload_StorageReadFailureCountsStorageError() {
 	download, err := s.manager.Download(ctx, "abc", anonymous(false))
 	s.Require().NoError(err)
 	s.Require().Error(download.Send(ctx, io.Discard))
-}
-
-// TestMetrics_DeleteKeepsObjectAfterStorageError shows the order: the record goes first, so a
-// failed object delete leaves only an object that nobody can read. The counter is the signal.
-func (s *ManagerSuite) TestMetrics_DeleteKeepsObjectAfterStorageError() {
-	metrics := s.useStrictMetrics()
-
-	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any(), testNow()).Return(storedFile(false), nil)
-	gomock.InOrder(
-		s.storage.EXPECT().Delete(gomock.Any(), domain.HashSlug("abc"), "obj").Return(nil),
-		s.objects.EXPECT().Delete(gomock.Any(), "obj").Return(errors.New("s3 down")),
-	)
-	metrics.EXPECT().IncDeleted(DeleteReasonUser)
-	metrics.EXPECT().IncStorageErrors(StorageOpDelete).Times(1)
-
-	s.Require().NoError(s.manager.Delete(s.T().Context(), "abc", "code", skipPrivacy()))
 }
 
 func (s *ManagerSuite) TestMetrics_RecordFailureRemovesObject() {

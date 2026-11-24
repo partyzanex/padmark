@@ -361,8 +361,9 @@ func (s *FileSecuritySuite) TestLogs_MalformedUploadIsQuiet() {
 	s.NotContains(s.logs.String(), "level=ERROR")
 }
 
-// TestLogs_CanceledUploadIsDebug (R-08): a canceled upload writes only a debug record.
-func (s *FileSecuritySuite) TestLogs_CanceledUploadIsDebug() {
+// TestUpload_CanceledWritesNoResponseAndLogsDebugOnly (R-08): a canceled upload writes no
+// response (no flush, no body, no content type) and only a debug log record.
+func (s *FileSecuritySuite) TestUpload_CanceledWritesNoResponseAndLogsDebugOnly() {
 	router := s.newRouter(routerOptions{rateLimit: 0, accounts: false})
 	ctx, cancel := context.WithCancel(s.T().Context())
 
@@ -373,8 +374,11 @@ func (s *FileSecuritySuite) TestLogs_CanceledUploadIsDebug() {
 			return nil, fmt.Errorf("upload file: %w", context.Canceled)
 		})
 
-	serveOnce(router, uploadRequest(nil, "a.txt", []byte("x")).WithContext(ctx))
+	rec := serveOnce(router, uploadRequest(nil, "a.txt", []byte("x")).WithContext(ctx))
 
+	s.False(rec.Flushed)
+	s.Empty(rec.Body.String())
+	s.Empty(rec.Header().Get("Content-Type"))
 	s.Contains(s.logs.String(), "file upload canceled")
 	s.NotContains(s.logs.String(), "level=ERROR")
 	s.NotContains(s.logs.String(), "level=WARN")

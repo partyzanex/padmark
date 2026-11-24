@@ -17,8 +17,10 @@ import (
 
 // ── CreateNote ──.
 
-// TestCreateNote_OK: the default router has no auth, so a POST without a token creates the note.
-func (s *HandlerSuite) TestCreateNote_OK() {
+// TestCreateNote_DefaultRouter_201WithNote: the default router has no auth and keeps the API on
+// (--disable-api is off, so its middleware is not in the chain). A POST without a token creates
+// the note: 201, a Location header and the note as JSON.
+func (s *HandlerSuite) TestCreateNote_DefaultRouter_201WithNote() {
 	note := newTestNote("hello", "# world")
 	note.EditCode = "editcode1234"
 	s.manager.EXPECT().Create(gomock.Any(), gomock.Any()).Return(note, nil)

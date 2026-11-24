@@ -318,7 +318,10 @@ func TestIsTrustedProxy_InvalidIP(t *testing.T) {
 
 // WithTOTPRateLimit.
 
-func TestWithTOTPRateLimit_AllowsUnderLimit(t *testing.T) {
+// TestWithTOTPRateLimit_AllowsLimitThenBlocksWithJSON: the requests up to the per-minute limit
+// from one IP reach the handler and get 200. The next request gets 429 with a JSON error body and
+// does not reach the handler.
+func TestWithTOTPRateLimit_AllowsLimitThenBlocksWithJSON(t *testing.T) {
 	calls := 0
 	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		calls++
@@ -329,28 +332,12 @@ func TestWithTOTPRateLimit_AllowsUnderLimit(t *testing.T) {
 
 	for range totpRatePerMin {
 		req := httptest.NewRequest(http.MethodPost, "/totp-login", nil)
-		req.RemoteAddr = "1.2.3.4:9000"
+		req.RemoteAddr = "5.5.5.5:9000"
 
 		rec := httptest.NewRecorder()
 		handler(rec, req)
 
 		assert.Equal(t, http.StatusOK, rec.Code)
-	}
-
-	assert.Equal(t, totpRatePerMin, calls)
-}
-
-func TestWithTOTPRateLimit_BlocksOverLimit(t *testing.T) {
-	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
-	handler := WithTOTPRateLimit(nil, testDiscardLog(), inner)
-
-	for range totpRatePerMin {
-		req := httptest.NewRequest(http.MethodPost, "/totp-login", nil)
-		req.RemoteAddr = "5.5.5.5:9000"
-
-		handler(httptest.NewRecorder(), req)
 	}
 
 	// one more must be rate-limited.
@@ -361,6 +348,7 @@ func TestWithTOTPRateLimit_BlocksOverLimit(t *testing.T) {
 	handler(rec, req)
 
 	assert.Equal(t, http.StatusTooManyRequests, rec.Code)
+	assert.Equal(t, totpRatePerMin, calls, "the blocked request must not reach the handler")
 
 	// The OpenAPI ErrorResponse schema promises JSON ({"message": ...}), not net/http's
 	// default text/plain (see errors.go's WriteJSONErrorStatus).

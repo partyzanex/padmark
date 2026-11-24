@@ -42,7 +42,9 @@ func (s *DisableAPISuite) TearDownTest() {
 	s.ctrl.Finish()
 }
 
-func (s *DisableAPISuite) newRouter(disableAPI bool) http.Handler {
+// newRouter returns a router with --disable-api on. HandlerSuite.newRouter is the router with the
+// flag off: TestCreateNote_DefaultRouter_201WithNote checks that the API works there.
+func (s *DisableAPISuite) newRouter() http.Handler {
 	s.T().Helper()
 
 	handlerCfg := testHandlerConfig(s.manager, s.linkManager, s.pinger)
@@ -51,7 +53,7 @@ func (s *DisableAPISuite) newRouter(disableAPI bool) http.Handler {
 
 	opts := web.RouterOptions{
 		MaxBodyBytes: 256 * 1024,
-		DisableAPI:   disableAPI,
+		DisableAPI:   true,
 
 		AllowedHosts: nil, RateLimit: 0, RateBurst: 0,
 	}
@@ -67,7 +69,7 @@ func (s *DisableAPISuite) newRouter(disableAPI bool) http.Handler {
 // of these — if the request reached a real handler, the mock would fail the test on the
 // unexpected call, which proves the middleware prevents business logic from running.
 func (s *DisableAPISuite) TestAPIPaths_Return503WithCode() {
-	router := s.newRouter(true)
+	router := s.newRouter()
 
 	cases := []struct {
 		name   string
@@ -121,7 +123,7 @@ func (s *DisableAPISuite) TestAPIPaths_Return503WithCode() {
 // TestWebUI_Unaffected verifies the web UI and operational endpoints keep working when the API
 // is disabled — only the REST/JSON API surface is short-circuited.
 func (s *DisableAPISuite) TestWebUI_Unaffected() {
-	router := s.newRouter(true)
+	router := s.newRouter()
 
 	// The note view (no explicit Accept) reads the note with all read rules; the editor reads it
 	// with Inspect, which applies only privacy and expiry. A request without an Accept that
@@ -157,27 +159,9 @@ func (s *DisableAPISuite) TestWebUI_Unaffected() {
 	}
 }
 
-// TestDisableAPI_Off_APIStillWorks is the regression guard: with the flag off (default), the
-// middleware must not be wired in at all, and normal API traffic keeps working.
-func (s *DisableAPISuite) TestDisableAPI_Off_APIStillWorks() {
-	router := s.newRouter(false)
-
-	note := newTestNote("t", "c")
-	s.manager.EXPECT().Create(gomock.Any(), gomock.Any()).Return(note, nil)
-
-	r := httptest.NewRequest(http.MethodPost, "/notes", strings.NewReader(`{"title":"t","content":"c"}`))
-	r.Header.Set("Content-Type", "application/json")
-
-	w := httptest.NewRecorder()
-
-	router.ServeHTTP(w, r)
-
-	s.Equal(http.StatusCreated, w.Code)
-}
-
 // Exercise the generated decoder against the real middleware, not a synthetic 503 body.
 func (s *DisableAPISuite) TestGeneratedClient_DistinguishesDisabledAPIFromReadinessFailure() {
-	server := httptest.NewServer(s.newRouter(true))
+	server := httptest.NewServer(s.newRouter())
 	defer server.Close()
 
 	client, err := padmark.NewClient(server.URL)
@@ -270,7 +254,7 @@ func (s *DisableAPISuite) TestFilePages_VisibleWhileAPIDisabled() {
 // TestLinkPages_VisibleWhileAPIDisabled: with --disable-api the short-link pages render, as the
 // note pages do, but the JSON read of the same path answers 503 without a call to the usecase.
 func (s *DisableAPISuite) TestLinkPages_VisibleWhileAPIDisabled() {
-	router := s.newRouter(true)
+	router := s.newRouter()
 
 	s.linkManager.EXPECT().Inspect(gomock.Any(), testID, gomock.Any()).Return(newTestLink(), nil)
 

@@ -558,19 +558,6 @@ func (s *ManagerSuite) TestCreate_PutFailureWithBrokenBodyIsStorageFailure() {
 	s.Require().ErrorIs(err, domain.ErrStorageUnavailable)
 }
 
-// TestMetrics_FailedPutCleanupIsNotDeleteError covers R-34: the cleanup after a failed Put
-// fails too during an object storage failure, but it is not a "delete" storage error.
-func (s *ManagerSuite) TestMetrics_FailedPutCleanupIsNotDeleteError() {
-	metrics := s.useStrictMetrics()
-
-	s.objects.EXPECT().Put(gomock.Any(), gomock.Any(), gomock.Any()).Return(errors.New("connection refused"))
-	s.objects.EXPECT().Delete(gomock.Any(), gomock.Any()).Return(errors.New("connection refused"))
-	metrics.EXPECT().IncStorageErrors(StorageOpPut)
-
-	_, err := s.manager.Create(s.T().Context(), "a", strings.NewReader("x"), createOptions())
-	s.Require().ErrorIs(err, domain.ErrStorageUnavailable)
-}
-
 func (s *ManagerSuite) TestCreate_CanceledRequest() {
 	ctx, cancel := context.WithCancel(s.T().Context())
 

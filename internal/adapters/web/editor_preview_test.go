@@ -88,5 +88,5 @@ func (s *HandlerSuite) TestIndexPage_PreviewScripts() {
 // TestWebUI_PreviewWithoutAPI covers --disable-api: the editor is read-only, but its preview
 // needs only static files, so it continues to operate.
 func (s *DisableAPISuite) TestWebUI_PreviewWithoutAPI() {
-	requireEditorPreviewScripts(s.T(), s.newRouter(true), "/")
+	requireEditorPreviewScripts(s.T(), s.newRouter(), "/")
 }
