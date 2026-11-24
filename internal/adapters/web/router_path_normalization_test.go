@@ -273,11 +273,11 @@ func (s *PathNormalizationSuite) TestPercentEncodedLoginPath_IsTheLoginPage() {
 	s.Contains(rec.Body.String(), "<form")
 }
 
-// TestPercentEncodedPrivateSlug_StillGated covers the inverse direction: a private note fetched
+// TestPercentEncodedPrivateSlug_StillPrivate covers the inverse direction: a private note fetched
 // through a percent-encoded spelling of its slug reaches the note handler under its real slug,
 // and the usecase privacy rule still refuses the anonymous caller (ErrForbidden) — no content.
 // The editor reads with Inspect, the other routes with Read.
-func (s *PathNormalizationSuite) TestPercentEncodedPrivateSlug_StillGated() {
+func (s *PathNormalizationSuite) TestPercentEncodedPrivateSlug_StillPrivate() {
 	for _, target := range []string{"/%73ecret", "/notes/%73ecret", "/edit/%73ecret", "/%73ecret%2Fsub"} {
 		s.Run(target, func() {
 			wantID := strings.TrimPrefix(strings.TrimPrefix(strings.TrimPrefix(target, "/notes"), "/edit"), "/")

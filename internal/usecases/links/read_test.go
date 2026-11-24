@@ -106,14 +106,17 @@ func (s *ManagerTestSuite) TestInspect_ExpiredIsKept() {
 	s.True(link.BurnAfterClick)
 }
 
-// TestFollow_ExpiredIsDeleted checks that Follow deletes a visible expired link with the
-// conditional DeleteExpired, never the unconditional Delete: storage checks the expiry again, so a
-// new live link with the same ID stays.
-func (s *ManagerTestSuite) TestFollow_ExpiredIsDeleted() {
+// TestFollow_ExpiredIsDeletedAndEvictedFromCache checks that Follow deletes a visible expired link
+// with the conditional DeleteExpired, never the unconditional Delete: storage checks the expiry
+// again, so a new live link with the same ID stays. Follow also removes the link from the cache.
+func (s *ManagerTestSuite) TestFollow_ExpiredIsDeletedAndEvictedFromCache() {
+	s.manager.WithCache(s.cache)
+
 	past := testNow().Add(-time.Minute)
 	s.storage.EXPECT().GetByID(gomock.Any(), domain.HashSlug("old")).
 		Return(readerLink(domain.PrivacyPublic, nil, &past, false), nil)
 	s.storage.EXPECT().DeleteExpired(gomock.Any(), domain.HashSlug("old"), testNow()).Return(nil)
+	s.cache.EXPECT().Delete(domain.HashSlug("old"))
 
 	_, err := s.manager.Follow(s.T().Context(), "old", openReader())
 	s.Require().ErrorIs(err, domain.ErrExpired)

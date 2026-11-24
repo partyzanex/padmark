@@ -71,7 +71,10 @@ func TestManagerTestSuite(t *testing.T) {
 
 // Create.
 
-func (s *ManagerTestSuite) TestCreate_OK() {
+// TestCreate_SetsDefaultsAndFastHashesGeneratedCode: an empty edit code gets a generated code of 12
+// characters, and the server-generated code stays on the fast-hash path (identityHasher.Hash → no
+// prefix). Create also sets the ID, the times and the default content type.
+func (s *ManagerTestSuite) TestCreate_SetsDefaultsAndFastHashesGeneratedCode() {
 	note := &domain.Note{
 		Title: "hello", Content: "world",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
@@ -80,7 +83,14 @@ func (s *ManagerTestSuite) TestCreate_OK() {
 		ClearExpiry: false, ShowContents: nil,
 	}
 
-	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
+	var storedHash string
+
+	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, stored *domain.Note) error {
+			storedHash = stored.EditCode
+
+			return nil
+		})
 
 	result, err := s.manager.Create(s.T().Context(), note)
 
@@ -89,12 +99,17 @@ func (s *ManagerTestSuite) TestCreate_OK() {
 	s.NotEmpty(result.ID)
 	s.NotEmpty(result.EditCode)
 	s.Len(result.EditCode, 12)
+	s.Len(storedHash, 12)
+	s.NotContains(storedHash, "user:")
 	s.False(result.CreatedAt.IsZero())
 	s.False(result.UpdatedAt.IsZero())
 	s.Equal(new(domain.ContentTypeMarkdown), result.ContentType)
 }
 
-func (s *ManagerTestSuite) TestCreate_WithCustomEditCode() {
+// TestCreate_UserSuppliedCodeIsReturnedAndUsesMemoryHardHash pins that a caller-chosen edit code
+// is hashed with the memory-hard variant (identityHasher.HashUserProvided → "user:" prefix)
+// because its entropy is not guaranteed. The caller gets the plaintext code back.
+func (s *ManagerTestSuite) TestCreate_UserSuppliedCodeIsReturnedAndUsesMemoryHardHash() {
 	note := &domain.Note{
 		Title: "hello", Content: "world", EditCode: "MyCustomCode1",
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
@@ -102,82 +117,20 @@ func (s *ManagerTestSuite) TestCreate_WithCustomEditCode() {
 		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 
-	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
+	var storedHash string
+
+	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, stored *domain.Note) error {
+			storedHash = stored.EditCode
+
+			return nil
+		})
 
 	result, err := s.manager.Create(s.T().Context(), note)
 
 	s.Require().NoError(err)
 	s.Equal("MyCustomCode1", result.EditCode)
-}
-
-// TestCreate_UserSuppliedCodeUsesMemoryHardHash pins that a caller-chosen edit code is
-// hashed with the memory-hard variant (identityHasher.HashUserProvided → "user:" prefix)
-// because its entropy is not guaranteed.
-func (s *ManagerTestSuite) TestCreate_UserSuppliedCodeUsesMemoryHardHash() {
-	note := &domain.Note{
-		Title: "hello", Content: "world", EditCode: "MyCustomCode1",
-		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
-		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
-		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
-	}
-
-	var storedHash string
-
-	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).
-		DoAndReturn(func(_ context.Context, stored *domain.Note) error {
-			storedHash = stored.EditCode
-
-			return nil
-		})
-
-	_, err := s.manager.Create(s.T().Context(), note)
-
-	s.Require().NoError(err)
 	s.Equal("user:MyCustomCode1", storedHash)
-}
-
-// TestCreate_GeneratedCodeUsesFastHash pins the mirror invariant: a server-generated code
-// stays on the fast-hash path (identityHasher.Hash → no prefix).
-func (s *ManagerTestSuite) TestCreate_GeneratedCodeUsesFastHash() {
-	note := &domain.Note{
-		Title: "hello", Content: "world",
-		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
-		Privacy: nil, OwnerID: nil, ID: "", ContentType: nil,
-		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false, ShowContents: nil,
-	}
-
-	var storedHash string
-
-	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).
-		DoAndReturn(func(_ context.Context, stored *domain.Note) error {
-			storedHash = stored.EditCode
-
-			return nil
-		})
-
-	_, err := s.manager.Create(s.T().Context(), note)
-
-	s.Require().NoError(err)
-	s.Len(storedHash, 12)
-	s.NotContains(storedHash, "user:")
-}
-
-func (s *ManagerTestSuite) TestCreate_EmptyEditCodeIsGenerated() {
-	note := &domain.Note{
-		Title: "hello", Content: "world", EditCode: "", CreatedAt: time.Time{},
-		UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
-		ID: "", ContentType: nil, Views: 0, BurnTTL: 0,
-		BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
-	}
-
-	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
-
-	result, err := s.manager.Create(s.T().Context(), note)
-
-	s.Require().NoError(err)
-	s.NotEmpty(result.EditCode)
-	s.Len(result.EditCode, 12)
 }
 
 func (s *ManagerTestSuite) TestCreate_CustomEditCodeUsedForUpdate() {
@@ -572,29 +525,6 @@ func (s *ManagerTestSuite) TestHandleSetBurnExpiryErr_RefetchDecryptFails() {
 	s.Require().Error(err)
 }
 
-// TestRead_BurnUsesCheckedPrivacy covers R2: the burn read binds the storage call to
-// the privacy of the snapshot the reader was checked against, so a changed row is not consumed.
-func (s *ManagerTestSuite) TestRead_BurnUsesCheckedPrivacy() {
-	authenticated := domain.PrivacyAuthenticated
-	checked := &domain.Note{
-		ID: "burn-x", Content: "enc:old",
-		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
-		Privacy: &authenticated, OwnerID: nil, Title: "", ContentType: nil,
-		EditCode: "hash:checked", Views: 0, BurnTTL: 0, BurnAfterReading: true,
-		ClearExpiry: false, ShowContents: nil,
-	}
-
-	s.storage.EXPECT().Consume(gomock.Any(), domain.HashSlug("burn-x"), domain.PrivacyAuthenticated, "hash:checked",
-		testNow()).
-		Return(nil, domain.ErrNotFound)
-
-	s.expectGet("burn-x", checked)
-	got, err := s.manager.Read(s.T().Context(), "burn-x", openReader())
-
-	s.Require().ErrorIs(err, domain.ErrNotFound)
-	s.Nil(got)
-}
-
 // TestHandleSetBurnExpiryErr_PrivacyChanged covers R2: when the timer start found no row with the
 // checked privacy and the re-fetched row now has another level, the reader gets ErrNotFound and
 // never the new version's content.
@@ -913,22 +843,6 @@ func (s *ManagerTestSuite) TestUpdate_AnonymousNoteAlwaysNeedsEditCode() {
 
 // Delete.
 
-func (s *ManagerTestSuite) TestDelete_OK() {
-	existing := &domain.Note{
-		ID: "abc-123", EditCode: "secret123456",
-		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
-		Privacy: nil, OwnerID: nil, Title: "", Content: "",
-		ContentType: nil, Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false, ShowContents: nil,
-	}
-	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(existing, nil)
-	s.storage.EXPECT().Delete(gomock.Any(), domain.HashSlug("abc-123"), gomock.Any()).Return(nil)
-
-	err := s.manager.Delete(s.T().Context(), "abc-123", "secret123456", openReader())
-
-	s.Require().NoError(err)
-}
-
 func (s *ManagerTestSuite) TestDelete_NotFound() {
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("missing")).Return(nil, domain.ErrNotFound)
 
@@ -952,22 +866,6 @@ func (s *ManagerTestSuite) TestDelete_Forbidden() {
 	s.ErrorIs(err, domain.ErrInvalidEditCode)
 }
 
-// TestDelete_OwnerBypassesEditCode mirrors TestUpdate_OwnerBypassesEditCode for Delete.
-func (s *ManagerTestSuite) TestDelete_OwnerBypassesEditCode() {
-	existing := &domain.Note{
-		ID: "abc-123", EditCode: "secret123456", OwnerID: new(testUserID1),
-		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
-		Privacy: nil, Title: "", Content: "", ContentType: nil,
-		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
-	}
-	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(existing, nil)
-	s.storage.EXPECT().Delete(gomock.Any(), domain.HashSlug("abc-123"), gomock.Any()).Return(nil)
-
-	err := s.manager.Delete(s.T().Context(), "abc-123", "", accountReader(testUserID1))
-
-	s.Require().NoError(err)
-}
-
 // TestDelete_NonOwnerCallerStillNeedsEditCode mirrors TestUpdate_NonOwnerCallerStillNeedsEditCode
 // for Delete.
 func (s *ManagerTestSuite) TestDelete_NonOwnerCallerStillNeedsEditCode() {
@@ -985,25 +883,6 @@ func (s *ManagerTestSuite) TestDelete_NonOwnerCallerStillNeedsEditCode() {
 }
 
 // ReadRendered.
-
-func (s *ManagerTestSuite) TestReadRendered_RendersMarkdown() {
-	note := &domain.Note{
-		ID: "abc-123", Content: "# Hello",
-		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
-		Privacy: nil, OwnerID: nil, Title: "", ContentType: nil,
-		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false, ShowContents: nil,
-	}
-	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(note, nil)
-	s.storage.EXPECT().IncrementViews(gomock.Any(), domain.HashSlug("abc-123")).Return(nil)
-	s.renderer.EXPECT().Render("# Hello").Return("<h1>Hello</h1>", nil, nil)
-
-	result, html, err := s.manager.ReadRendered(s.T().Context(), "abc-123", openReader())
-
-	s.Require().NoError(err)
-	s.Equal(note, result)
-	s.Equal("<h1>Hello</h1>", html)
-}
 
 // TestReadRendered_DroppedImagesAreLogged checks that an image the page does not show leaves one
 // warning with the note hash and a count per reason, and that the note is still shown.
@@ -1046,7 +925,9 @@ func (s *ManagerTestSuite) TestReadRendered_DroppedImagesAreLogged() {
 	s.NotContains(logs.String(), "base64", "the log holds no note content")
 }
 
-func (s *ManagerTestSuite) TestReadRendered_NoDroppedImagesNoLog() {
+// TestReadRendered_RendersMarkdownWithoutLog: a note without dropped images is rendered, and the
+// read writes no log record.
+func (s *ManagerTestSuite) TestReadRendered_RendersMarkdownWithoutLog() {
 	var logs bytes.Buffer
 
 	manager := NewManager(&Deps{
@@ -1065,8 +946,10 @@ func (s *ManagerTestSuite) TestReadRendered_NoDroppedImagesNoLog() {
 	s.storage.EXPECT().IncrementViews(gomock.Any(), domain.HashSlug("abc-123")).Return(nil)
 	s.renderer.EXPECT().Render("# Hello").Return("<h1>Hello</h1>", nil, nil)
 
-	_, _, err := manager.ReadRendered(s.T().Context(), "abc-123", openReader())
+	result, html, err := manager.ReadRendered(s.T().Context(), "abc-123", openReader())
 	s.Require().NoError(err)
+	s.Equal(note, result)
+	s.Equal("<h1>Hello</h1>", html)
 	s.Empty(logs.String())
 }
 
@@ -1306,48 +1189,13 @@ func (s *ManagerTestSuite) TestReadRendered_ReRendersWhenUpdatedAtChanges() {
 	s.Equal("<p>v2</p>", html)
 }
 
-// TestReadRendered_BurnNotesAreNeverCached: reading a burn-after-reading note destroys it, and a
-// cached copy would outlive the burn in memory.
-func (s *ManagerTestSuite) TestReadRendered_BurnNotesAreNeverCached() {
+// TestReadRendered_BurnNoteIsRenderedAndNeverCached: ReadRendered consumes a burn-after-reading
+// note and renders it. The render cache gets no call: a cached copy would outlive the burn in memory.
+func (s *ManagerTestSuite) TestReadRendered_BurnNoteIsRenderedAndNeverCached() {
 	s.renderCache.EXPECT().Get(gomock.Any(), gomock.Any()).Times(0)
 	s.renderCache.EXPECT().Set(gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
 	s.manager.WithRenderCache(s.renderCache)
 
-	note := &domain.Note{
-		ID: "abc-123", Content: "# Hello", BurnAfterReading: true,
-		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,
-		OwnerID: nil, Title: "", ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
-		ClearExpiry: false, ShowContents: nil,
-	}
-	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(note, nil)
-	s.storage.EXPECT().Consume(gomock.Any(), domain.HashSlug("abc-123"), gomock.Any(), gomock.Any(),
-		testNow()).Return(note, nil)
-	s.renderer.EXPECT().Render("# Hello").Return("<h1>Hello</h1>", nil, nil)
-
-	_, _, err := s.manager.ReadRendered(s.T().Context(), "abc-123", openReader())
-
-	s.Require().NoError(err)
-}
-
-// TestDelete_DropsCachedRender: a deleted note's rendered content must not linger in memory.
-func (s *ManagerTestSuite) TestDelete_DropsCachedRender() {
-	s.manager.WithRenderCache(s.renderCache)
-
-	existing := &domain.Note{
-		ID: "abc-123", EditCode: "secret123456",
-		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
-		Privacy: nil, OwnerID: nil, Title: "", Content: "",
-		ContentType: nil, Views: 0, BurnTTL: 0, BurnAfterReading: false,
-		ClearExpiry: false, ShowContents: nil,
-	}
-	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(existing, nil)
-	s.storage.EXPECT().Delete(gomock.Any(), domain.HashSlug("abc-123"), gomock.Any()).Return(nil)
-	s.renderCache.EXPECT().Delete(domain.HashSlug("abc-123"))
-
-	s.Require().NoError(s.manager.Delete(s.T().Context(), "abc-123", "secret123456", openReader()))
-}
-
-func (s *ManagerTestSuite) TestReadRendered_BurnAfterReading() {
 	note := &domain.Note{
 		ID: "abc-123", Content: "# Hello", BurnAfterReading: true,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil,

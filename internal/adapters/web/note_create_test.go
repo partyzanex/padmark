@@ -17,6 +17,7 @@ import (
 
 // ── CreateNote ──.
 
+// TestCreateNote_OK: the default router has no auth, so a POST without a token creates the note.
 func (s *HandlerSuite) TestCreateNote_OK() {
 	note := newTestNote("hello", "# world")
 	note.EditCode = "editcode1234"
@@ -263,32 +264,6 @@ func (s *HandlerSuite) TestCreateNote_InvalidContentType() {
 	s.Equal(http.StatusBadRequest, w.Code)
 }
 
-func (s *HandlerSuite) TestCreateNote_BodyExceedsLimit_Returns413() {
-	// The 1 MiB domain content cap is gone; the only size limit is now the configurable
-	// MaxBodyBytes, enforced at the transport layer (http.MaxBytesReader). A body over that limit
-	// must surface as a clean 413, not an opaque decode error — checked here with a tiny limit.
-	// Manager.Create is never reached (no EXPECT): the body is rejected during ogen decoding.
-	handlerCfg := testHandlerConfig(s.manager, s.linkManager, s.pinger)
-	handlerCfg.CSRFSecret = testCSRFSecret
-	handler := newTestHandler(s.T(), handlerCfg)
-	opts := web.RouterOptions{
-		MaxBodyBytes: 64,
-
-		AllowedHosts: nil, RateLimit: 0, RateBurst: 0, DisableAPI: false,
-	}
-	router, err := web.NewRouter(handler, &opts)
-	s.Require().NoError(err)
-
-	body := `{"title":"t","content":"` + strings.Repeat("x", 512) + `"}`
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodPost, "/notes", strings.NewReader(body))
-	r.Header.Set("Content-Type", "application/json")
-
-	router.ServeHTTP(w, r)
-
-	s.Equal(http.StatusRequestEntityTooLarge, w.Code)
-}
-
 // ── ogen decode errors (pre-handler failures) ──.
 
 // decodeErrorBody posts body to /notes with the given Content-Type and returns the status and
@@ -387,10 +362,11 @@ func (s *HandlerSuite) TestOgenDecodeErrors_LongContentTypeIsTruncated() {
 	s.Contains(message, "unsupported content type")
 }
 
-// TestCreateNote_BodyExceedsLimit_UsesErrorResponseShape is the 413 counterpart: that branch
-// already wrote the right shape before the handler was replaced, so this pins it against a
-// regression while the surrounding code changes.
-func (s *HandlerSuite) TestCreateNote_BodyExceedsLimit_UsesErrorResponseShape() {
+// TestCreateNote_BodyExceedsLimit_Returns413WithErrorShape: the only size limit is the
+// configurable MaxBodyBytes, enforced at the transport layer (http.MaxBytesReader). A body over
+// that limit gets a clean 413 with the {"message": ...} error shape, not an opaque decode error.
+// The test uses a small limit. Manager.Create has no expectation: ogen decoding refuses the body.
+func (s *HandlerSuite) TestCreateNote_BodyExceedsLimit_Returns413WithErrorShape() {
 	handlerCfg := testHandlerConfig(s.manager, s.linkManager, s.pinger)
 	handlerCfg.CSRFSecret = testCSRFSecret
 	handler := newTestHandler(s.T(), handlerCfg)

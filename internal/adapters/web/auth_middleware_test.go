@@ -38,19 +38,6 @@ func (s *HandlerSuite) TestChangePasswordPage_AccountsDisabled_Returns404() {
 
 // ── Auth middleware ──.
 
-func (s *HandlerSuite) TestAuth_NoTokensConfigured() {
-	note := newTestNote("t", "c")
-	s.manager.EXPECT().Create(gomock.Any(), gomock.Any()).Return(note, nil)
-
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodPost, "/notes", strings.NewReader(`{"title":"t","content":"c"}`))
-	r.Header.Set("Content-Type", "application/json")
-
-	s.router.ServeHTTP(w, r)
-
-	s.Equal(http.StatusCreated, w.Code)
-}
-
 func (s *HandlerSuite) TestAuth_MissingToken_Browser() {
 	router := s.newRouterWithTOTPAuth()
 
@@ -173,28 +160,6 @@ func (s *HandlerSuite) TestAuth_Delete_Anonymous_PublicNote_WrongEditCode() {
 	s.Equal(http.StatusForbidden, w.Code)
 }
 
-// TestAuth_MissingToken_API verifies the mutation privacy rule on the API path: with auth
-// configured, an anonymous PUT against a privacy=owner note is refused with 401 — someone who
-// could not read the note may not attempt to mutate it via an edit code either. The usecase
-// decides (ErrForbidden); the handler translates it.
-func (s *HandlerSuite) TestAuth_MissingToken_API() {
-	router := s.newRouterWithTOTPAuth()
-	s.manager.EXPECT().Update(gomock.Any(), testID, "", anonymousReader(), gomock.Any()).
-		Return(nil, domain.ErrForbidden)
-
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodPut, "/notes/"+testID, strings.NewReader(`{"title":"t","content":"c"}`))
-	r.Header.Set("Content-Type", "application/json")
-	r.Header.Set("Accept", "application/json")
-
-	router.ServeHTTP(w, r)
-
-	s.Equal(http.StatusUnauthorized, w.Code)
-	// The ogen spec declares PUT /notes/{id} 401 without a schema, so the handler returns
-	// the empty UpdateNoteUnauthorized — no JSON body to decode on the client side.
-	s.Empty(w.Body.String())
-}
-
 func (s *HandlerSuite) TestGetNote_OpenInstance_ShowsEditButtons() {
 	// No auth tokens configured → CanEdit is always true.
 	note := newTestNote("public note", "content")
@@ -230,7 +195,8 @@ func (s *HandlerSuite) TestGetNote_AuthInstance_Unauthenticated_ShowsEditButtons
 	s.Equal(http.StatusOK, w.Code)
 
 	body := w.Body.String()
-	s.Contains(body, `href="/edit/`)
+	s.Contains(body, `href="/edit/`+testID+`"`,
+		"an unauthenticated reader of a public note must see the edit button in TOTP mode")
 	s.Contains(body, ">New note<")
 }
 

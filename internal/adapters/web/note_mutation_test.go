@@ -127,20 +127,6 @@ func (s *HandlerSuite) TestUpdateNote_NotFound() {
 	s.Equal(http.StatusNotFound, w.Code)
 }
 
-func (s *HandlerSuite) TestUpdateNote_Forbidden() {
-	s.manager.EXPECT().Update(gomock.Any(), testID, "wrong", noCaller(), gomock.Any()).
-		Return(nil, domain.ErrInvalidEditCode)
-
-	body := `{"title":"title","content":"content","edit_code":"wrong"}`
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodPut, "/notes/"+testID, strings.NewReader(body))
-	r.Header.Set("Content-Type", "application/json")
-
-	s.router.ServeHTTP(w, r)
-
-	s.Equal(http.StatusForbidden, w.Code)
-}
-
 // ── ACCEPTANCE: edit/delete a path-like slug by its URL ──
 //
 // The web editor saves with PUT /notes/{id} and deletes with DELETE /notes/{id}. For a slug that
@@ -213,18 +199,6 @@ func (s *HandlerSuite) TestUpdateNote_InvalidBody() {
 
 // ── DeleteNote ──.
 
-func (s *HandlerSuite) TestDeleteNote_OK() {
-	s.manager.EXPECT().Delete(gomock.Any(), testID, "editcode1234", noCaller()).Return(nil)
-
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodDelete, "/notes/"+testID, nil)
-	r.Header.Set("X-Edit-Code", "editcode1234")
-
-	s.router.ServeHTTP(w, r)
-
-	s.Equal(http.StatusNoContent, w.Code)
-}
-
 // TestDeleteNote_QueryParamFallback pins the deprecated v0.1.6 form: without X-Edit-Code the
 // edit_code query value reaches the manager, and the header wins when both are sent, for
 // single-segment and path-like slugs alike.
@@ -263,18 +237,6 @@ func (s *HandlerSuite) TestDeleteNote_NotFound() {
 	s.Equal(http.StatusNotFound, w.Code)
 }
 
-func (s *HandlerSuite) TestDeleteNote_Forbidden() {
-	s.manager.EXPECT().Delete(gomock.Any(), testID, "wrong", noCaller()).Return(domain.ErrInvalidEditCode)
-
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodDelete, "/notes/"+testID, nil)
-	r.Header.Set("X-Edit-Code", "wrong")
-
-	s.router.ServeHTTP(w, r)
-
-	s.Equal(http.StatusForbidden, w.Code)
-}
-
 // ── Mutation privacy rule (PUT/DELETE) ──
 //
 // notes.Manager.Update and Delete implement the restored semantics: a caller may mutate a note
@@ -284,6 +246,7 @@ func (s *HandlerSuite) TestDeleteNote_Forbidden() {
 
 // TestNoteMutation_AnonymousDelete_PrivateNote verifies the ogen DELETE route: with auth
 // configured, an anonymous DELETE that the usecase refuses (ErrForbidden) gets a bodyless 401.
+// The usecase refuses it for privacy=authenticated and for privacy=owner.
 func (s *HandlerSuite) TestNoteMutation_AnonymousDelete_PrivateNote() {
 	router := s.newRouterWithTOTPAuth()
 	s.manager.EXPECT().Delete(gomock.Any(), testID, "whatever", anonymousReader()).Return(domain.ErrForbidden)
@@ -298,22 +261,6 @@ func (s *HandlerSuite) TestNoteMutation_AnonymousDelete_PrivateNote() {
 	s.Equal(http.StatusUnauthorized, w.Code)
 	// DELETE /notes/{id} 401 has no schema in the ogen spec → empty DeleteNoteUnauthorized.
 	s.Empty(w.Body.String())
-}
-
-// TestNoteMutation_AnonymousDelete_OwnerNote is the same branch for privacy=owner: the usecase
-// refuses the anonymous caller with ErrForbidden, which the handler answers with 401.
-func (s *HandlerSuite) TestNoteMutation_AnonymousDelete_OwnerNote() {
-	router := s.newRouterWithTOTPAuth()
-	s.manager.EXPECT().Delete(gomock.Any(), testID, "whatever", anonymousReader()).Return(domain.ErrForbidden)
-
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodDelete, "/notes/"+testID, nil)
-	r.Header.Set("X-Edit-Code", "whatever")
-	r.Header.Set("Accept", "application/json")
-
-	router.ServeHTTP(w, r)
-
-	s.Equal(http.StatusUnauthorized, w.Code)
 }
 
 // TestNoteMutation_SignedInNonOwner_OwnerNote covers audit finding R4: a signed-in caller who
@@ -353,10 +300,13 @@ func (s *HandlerSuite) TestNoteMutation_SignedInNonOwner_OwnerNote() {
 	}
 }
 
-// TestNoteMutation_401DoesNotTriggerFailLockout verifies the privacy/lockout interplay: the
-// fail-lockout counts consecutive 403s (wrong edit codes), while the 401 of a hidden note never
-// reaches the counter — repeated refused attempts stay 401 and never escalate to 429.
-func (s *HandlerSuite) TestNoteMutation_401DoesNotTriggerFailLockout() {
+// TestNoteMutation_Bodyless401DoesNotTriggerFailLockout verifies the privacy/lockout interplay:
+// with auth configured, an anonymous PUT of a note that the caller cannot read gets 401. Someone
+// who could not read the note may not mutate it with an edit code either. The ogen spec declares
+// PUT /notes/{id} 401 without a schema, so the body is empty. The fail-lockout counts consecutive
+// 403s (wrong edit codes), while the 401 never reaches the counter: repeated refused attempts stay
+// 401 and never escalate to 429.
+func (s *HandlerSuite) TestNoteMutation_Bodyless401DoesNotTriggerFailLockout() {
 	router := s.newRouterWithTOTPAuth()
 	s.manager.EXPECT().Update(gomock.Any(), testID, "", anonymousReader(), gomock.Any()).
 		Return(nil, domain.ErrForbidden).Times(12)
@@ -369,7 +319,8 @@ func (s *HandlerSuite) TestNoteMutation_401DoesNotTriggerFailLockout() {
 
 		router.ServeHTTP(w, r)
 
-		s.Equal(http.StatusUnauthorized, w.Code, "each gated attempt must be 401")
+		s.Equal(http.StatusUnauthorized, w.Code, "each attempt on the hidden note must be 401")
+		s.Empty(w.Body.String())
 	}
 }
 

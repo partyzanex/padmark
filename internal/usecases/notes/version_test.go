@@ -31,16 +31,22 @@ func storedNote(editCode string, ownerID *uuid.UUID) *domain.Note {
 	}
 }
 
-func (s *ManagerTestSuite) TestDelete_UsesCheckedVersion() {
+// TestDelete_CorrectEditCodeUsesCheckedVersionAndDropsRender verifies that the right edit code
+// deletes the note, that the DELETE carries the stored edit-code hash of the checked note, and
+// that the rendered content of the deleted note does not stay in memory.
+func (s *ManagerTestSuite) TestDelete_CorrectEditCodeUsesCheckedVersionAndDropsRender() {
+	s.manager.WithRenderCache(s.renderCache)
+
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(storedNote("secret123456", nil), nil)
 	s.storage.EXPECT().Delete(gomock.Any(), domain.HashSlug("abc-123"), "secret123456").Return(nil)
+	s.renderCache.EXPECT().Delete(domain.HashSlug("abc-123"))
 
 	s.Require().NoError(s.manager.Delete(s.T().Context(), "abc-123", "secret123456", openReader()))
 }
 
-// TestDelete_OwnerUsesCheckedVersion verifies that the owner, who sends no edit code, still
-// deletes only the checked note.
-func (s *ManagerTestSuite) TestDelete_OwnerUsesCheckedVersion() {
+// TestDelete_OwnerBypassesEditCodeAndUsesCheckedVersion verifies that the owner deletes the note
+// without an edit code, and still deletes only the checked note.
+func (s *ManagerTestSuite) TestDelete_OwnerBypassesEditCodeAndUsesCheckedVersion() {
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).
 		Return(storedNote("secret123456", new(testUserID1)), nil)
 	s.storage.EXPECT().Delete(gomock.Any(), domain.HashSlug("abc-123"), "secret123456").Return(nil)
@@ -77,15 +83,28 @@ func (s *ManagerTestSuite) TestUpdate_UsesCheckedVersion() {
 	s.Require().ErrorIs(err, domain.ErrNotFound)
 }
 
-func (s *ManagerTestSuite) TestRead_BurnUsesCheckedVersion() {
-	note := checkedBurnNote("hash:checked")
-	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("burn-x")).Return(note, nil)
-	s.storage.EXPECT().Consume(gomock.Any(), domain.HashSlug("burn-x"), domain.PrivacyPublic, "hash:checked", testNow()).
-		Return(nil, domain.ErrNotFound)
+// TestRead_BurnUsesCheckedPrivacyAndVersion covers R2: the burn read binds Consume to the privacy
+// and the stored edit-code hash of the checked note, so a changed row is not consumed. A note
+// without a privacy value is public.
+func (s *ManagerTestSuite) TestRead_BurnUsesCheckedPrivacyAndVersion() {
+	for _, testCase := range []struct {
+		stored *domain.Privacy
+		want   domain.Privacy
+	}{
+		{stored: nil, want: domain.PrivacyPublic},
+		{stored: new(domain.PrivacyAuthenticated), want: domain.PrivacyAuthenticated},
+	} {
+		note := checkedBurnNote("hash:checked")
+		note.Privacy = testCase.stored
+		s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("burn-x")).Return(note, nil)
+		s.storage.EXPECT().Consume(gomock.Any(), domain.HashSlug("burn-x"), testCase.want, "hash:checked", testNow()).
+			Return(nil, domain.ErrNotFound)
 
-	_, err := s.manager.Read(s.T().Context(), "burn-x", openReader())
+		got, err := s.manager.Read(s.T().Context(), "burn-x", openReader())
 
-	s.Require().ErrorIs(err, domain.ErrNotFound)
+		s.Require().ErrorIs(err, domain.ErrNotFound, testCase.want)
+		s.Nil(got, testCase.want)
+	}
 }
 
 // TestHandleSetBurnExpiryErr_NewVersion covers the check-then-write race: the checked note was

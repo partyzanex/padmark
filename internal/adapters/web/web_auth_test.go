@@ -205,7 +205,9 @@ func withCSRFFor(form url.Values, sessionID string) url.Values {
 
 // ── Login page ──.
 
-func (s *AuthHandlerSuite) TestLoginPage_TOTP_Mode() {
+// TestLoginPage_TOTPFormWithoutSignOut: the login page has the TOTP form, and no sign-out form
+// because it has no session to end.
+func (s *AuthHandlerSuite) TestLoginPage_TOTPFormWithoutSignOut() {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/login", nil)
 
@@ -213,6 +215,7 @@ func (s *AuthHandlerSuite) TestLoginPage_TOTP_Mode() {
 
 	s.Equal(http.StatusOK, rec.Code)
 	s.Contains(rec.Body.String(), "totp-login") // TOTP form action.
+	s.NotContains(rec.Body.String(), `action="/logout"`)
 }
 
 // TestLoginPage_AlreadyAuthenticated_RedirectsHome verifies a signed-in user is not asked
@@ -283,15 +286,6 @@ func (s *AuthHandlerSuite) TestSignOutForm_RenderedOnSignedInPages() {
 	}
 }
 
-// TestSignOutForm_NotRenderedForAnonymousPages — the login page has no session to end.
-func (s *AuthHandlerSuite) TestSignOutForm_NotRenderedForAnonymousPages() {
-	rec := httptest.NewRecorder()
-	s.router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/login", nil))
-
-	s.Require().Equal(http.StatusOK, rec.Code)
-	s.NotContains(rec.Body.String(), `action="/logout"`)
-}
-
 // TestTOTPLogin_ForwardsPresentedSessionForRevocation — signing in again hands the session the
 // browser presented to the usecase, which revokes it; the response carries the replacement.
 func (s *AuthHandlerSuite) TestTOTPLogin_ForwardsPresentedSessionForRevocation() {
@@ -328,7 +322,9 @@ func (s *AuthHandlerSuite) TestTOTPLogin_ForwardsPresentedSessionForRevocation()
 
 // ── TOTP login ──.
 
-func (s *AuthHandlerSuite) TestTOTPLogin_Success_SetsCookieAndRedirects() {
+// TestTOTPLogin_Success_Sets30DayCookieAndRedirects: a valid TOTP login redirects home and sets
+// the session cookie with a Max-Age of 30 days.
+func (s *AuthHandlerSuite) TestTOTPLogin_Success_Sets30DayCookieAndRedirects() {
 	s.auth.EXPECT().Login(gomock.Any(), loginWith("alice", "", "123456", "")).
 		Return("sess-id-abc", nil)
 
@@ -345,11 +341,15 @@ func (s *AuthHandlerSuite) TestTOTPLogin_Success_SetsCookieAndRedirects() {
 	s.Equal(http.StatusSeeOther, rec.Code)
 	s.Equal("/", rec.Header().Get("Location"))
 
+	const expectedMaxAge = int(30 * 24 * time.Hour / time.Second)
+
 	found := false
 
 	for _, ck := range rec.Result().Cookies() {
 		if ck.Name == "padmark_session" && ck.Value == "sess-id-abc" {
 			found = true
+
+			s.Equal(expectedMaxAge, ck.MaxAge)
 		}
 	}
 
@@ -461,29 +461,6 @@ func (s *AuthHandlerSuite) TestLogout_NoSession_StillRedirects() {
 }
 
 // ── Session expiry ──.
-
-func (s *AuthHandlerSuite) TestTOTPLogin_SessionCookieMaxAge_Is30Days() {
-	s.auth.EXPECT().Login(gomock.Any(), loginWith("alice", "", "123456", "")).
-		Return("sess-id", nil)
-
-	form := withCSRF(url.Values{"username": {"alice"}, "password": {testPw}, "code": {"123456"}})
-	req := httptest.NewRequest(http.MethodPost, "/totp-login", strings.NewReader(form.Encode()))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Accept", "text/html")
-	req.AddCookie(s.csrfCookie())
-
-	rec := httptest.NewRecorder()
-
-	s.router.ServeHTTP(rec, req)
-
-	const expectedMaxAge = int(30 * 24 * time.Hour / time.Second)
-
-	for _, ck := range rec.Result().Cookies() {
-		if ck.Name == "padmark_session" {
-			s.Equal(expectedMaxAge, ck.MaxAge)
-		}
-	}
-}
 
 // TestTOTPLogin_SessionCookieMaxAge_TracksConfiguredSessionTTL covers RouterOptions.SessionTTL:
 // the cookie's Max-Age must match whatever --session-ttl is configured to, not a value

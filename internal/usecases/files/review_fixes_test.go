@@ -16,8 +16,12 @@ import (
 
 // --- burn after download: two-phase claim (R-06) ---
 
-func (s *ManagerSuite) TestDownload_BurnClaimDeletesAfterCompleteSend() {
+// TestDownload_BurnClaimCountsAndDeletesAfterCompleteSend: a burn download claims the file, sends
+// the content, then deletes the record and the object on Close. It counts one download and one
+// burn deletion; the strict metrics mock fails the test on any other count.
+func (s *ManagerSuite) TestDownload_BurnClaimCountsAndDeletesAfterCompleteSend() {
 	ctx := s.T().Context()
+	metrics := s.useStrictMetrics()
 
 	var claimed *BurnClaim
 
@@ -28,6 +32,7 @@ func (s *ManagerSuite) TestDownload_BurnClaimDeletesAfterCompleteSend() {
 
 		return nil
 	})
+	metrics.EXPECT().IncDownloads()
 
 	before := testNow()
 	download, err := s.manager.Download(ctx, "abc", anonymous(true))
@@ -48,6 +53,7 @@ func (s *ManagerSuite) TestDownload_BurnClaimDeletesAfterCompleteSend() {
 		s.storage.EXPECT().Delete(gomock.Any(), domain.HashSlug("abc"), "obj").Return(nil),
 		s.objects.EXPECT().Delete(gomock.Any(), "obj").Return(nil),
 	)
+	metrics.EXPECT().IncDeleted(DeleteReasonBurn)
 	download.Close(ctx)
 	s.Nil(download.File.ContentKey, "Close clears the content key")
 

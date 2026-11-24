@@ -62,7 +62,9 @@ func (s *AuthHandlerSuite) TestTOTPLogin_ForcedHTTPS_SessionCookieIsSecure() {
 	s.True(csrf.Secure, "rotated CSRF cookie must be Secure under --public-scheme https")
 }
 
-func (s *AuthHandlerSuite) TestCSRFCookie_ForcedHTTPS_IsSecure() {
+// TestForcedHTTPS_SecureCSRFCookieAndHSTS: under --public-scheme https the first GET of the login
+// page issues a Secure CSRF cookie and sends HSTS.
+func (s *AuthHandlerSuite) TestForcedHTTPS_SecureCSRFCookieAndHSTS() {
 	router := s.newRouterWithAuthAndScheme("https")
 
 	req := httptest.NewRequest(http.MethodGet, "/login", nil)
@@ -74,16 +76,6 @@ func (s *AuthHandlerSuite) TestCSRFCookie_ForcedHTTPS_IsSecure() {
 	csrf := cookieByName(rec, "padmark_csrf")
 	s.Require().NotNil(csrf, "padmark_csrf cookie must be issued on first GET")
 	s.True(csrf.Secure, "CSRF cookie must be Secure under --public-scheme https")
-}
-
-func (s *AuthHandlerSuite) TestSecurityHeaders_ForcedHTTPS_SendsHSTS() {
-	router := s.newRouterWithAuthAndScheme("https")
-
-	req := httptest.NewRequest(http.MethodGet, "/login", nil)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-
-	s.Require().Equal(http.StatusOK, rec.Code)
 	s.NotEmpty(rec.Header().Get("Strict-Transport-Security"),
 		"HSTS must be sent under --public-scheme https")
 }

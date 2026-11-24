@@ -20,7 +20,9 @@ func storedLink(editCode string, expiresAt *time.Time) *domain.Link {
 	}
 }
 
-func (s *ManagerTestSuite) TestDelete_UsesCheckedVersion() {
+// TestDelete_CorrectEditCodeUsesCheckedVersion verifies that the right edit code deletes the link,
+// and that the DELETE carries the stored edit-code hash of the checked link.
+func (s *ManagerTestSuite) TestDelete_CorrectEditCodeUsesCheckedVersion() {
 	s.storage.EXPECT().GetByID(gomock.Any(), domain.HashSlug("the-slug")).Return(storedLink("secret123456", nil), nil)
 	s.storage.EXPECT().Delete(gomock.Any(), domain.HashSlug("the-slug"), "secret123456").Return(nil)
 

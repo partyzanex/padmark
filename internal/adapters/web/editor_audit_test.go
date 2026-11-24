@@ -40,15 +40,6 @@ func (s *HandlerSuite) TestEditPage_LeadingNewline() {
 	s.Contains(w.Body.String(), "spellcheck=\"false\">\n\n    code\n</textarea>")
 }
 
-// TestNewNotePage_ContentType: a new note has no stored format; the preview uses Markdown.
-func (s *HandlerSuite) TestNewNotePage_ContentType() {
-	w := httptest.NewRecorder()
-	s.router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/", nil))
-
-	s.Require().Equal(http.StatusOK, w.Code)
-	s.Contains(w.Body.String(), `data-content-type=""`)
-}
-
 // TestSuccessPage_BurnDelay: a note that burns some time after its first read has no expiry
 // date yet. The success page shows the delay, not an immediate burn.
 func (s *HandlerSuite) TestSuccessPage_BurnDelay() {

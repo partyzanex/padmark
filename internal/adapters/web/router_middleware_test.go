@@ -40,26 +40,6 @@ func (s *HandlerSuite) TestAllowedHosts_EnforcedOnMainListener() {
 
 // ── Health ──.
 
-func (s *HandlerSuite) TestHealthz() {
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet, "/healthz", nil)
-
-	s.router.ServeHTTP(w, r)
-
-	s.Equal(http.StatusOK, w.Code)
-}
-
-func (s *HandlerSuite) TestReadyz_OK() {
-	s.pinger.EXPECT().PingContext(gomock.Any()).Return(nil)
-
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet, "/readyz", nil)
-
-	s.router.ServeHTTP(w, r)
-
-	s.Equal(http.StatusOK, w.Code)
-}
-
 func (s *HandlerSuite) TestReadyz_NoPinger() {
 	handlerCfg := testHandlerConfig(s.manager, s.linkManager, web.NoPinger{})
 	handler := newTestHandler(s.T(), handlerCfg)
@@ -92,28 +72,6 @@ func (s *HandlerSuite) TestReadyz_Error() {
 
 // ── Middleware ──.
 
-func (s *HandlerSuite) TestRequestIDHeader() {
-	s.manager.EXPECT().Read(gomock.Any(), testID, gomock.Any()).Return(newTestNote("title", "content"), nil)
-
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet, "/notes/"+testID, nil)
-	r.Header.Set("Accept", "application/json")
-
-	s.router.ServeHTTP(w, r)
-
-	s.NotEmpty(w.Header().Get("X-Request-ID"))
-}
-
-func (s *HandlerSuite) TestStaticAssets() {
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet, "/static/style.css", nil)
-
-	s.router.ServeHTTP(w, r)
-
-	s.Equal(http.StatusOK, w.Code)
-	s.Contains(w.Header().Get("Content-Type"), "text/css")
-}
-
 // TestStaticAsset_PasswordToggle verifies the show/hide-password script is embedded and served.
 func (s *HandlerSuite) TestStaticAsset_PasswordToggle() {
 	w := httptest.NewRecorder()
@@ -125,15 +83,17 @@ func (s *HandlerSuite) TestStaticAsset_PasswordToggle() {
 	s.Contains(w.Body.String(), "pw-toggle", "toggle script must be served")
 }
 
-// TestStaticAsset_AutofillOverride guards the CSS that stops browser autofill from
-// overriding the dark-theme field background and text colour.
-func (s *HandlerSuite) TestStaticAsset_AutofillOverride() {
+// TestStaticAsset_StyleIsCSSWithAutofillOverride: the style sheet is served as text/css, and it
+// has the rule that stops browser autofill from overriding the dark-theme field background and
+// text colour.
+func (s *HandlerSuite) TestStaticAsset_StyleIsCSSWithAutofillOverride() {
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/static/style.css", nil)
 
 	s.router.ServeHTTP(w, r)
 
 	s.Equal(http.StatusOK, w.Code)
+	s.Contains(w.Header().Get("Content-Type"), "text/css")
 	body := w.Body.String()
 	s.Contains(body, ":-webkit-autofill", "autofill override rule must be present")
 	s.Contains(body, "-webkit-text-fill-color", "autofill text colour must be forced")
@@ -143,7 +103,7 @@ func (s *HandlerSuite) TestStaticAsset_AutofillOverride() {
 // section 1): with no tokens and no auth manager (s.router = newRouter(nil)), public pages
 // are reachable and account pages are not exposed. Nothing redirects to /login.
 func (s *HandlerSuite) TestPublicMode_AccessMatrix() {
-	s.pinger.EXPECT().PingContext(gomock.Any()).Return(nil).AnyTimes() // for /readyz.
+	s.pinger.EXPECT().PingContext(gomock.Any()).Return(nil) // /readyz pings the database once.
 
 	cases := []struct {
 		path string
@@ -259,29 +219,6 @@ func (s *HandlerSuite) TestRateLimit_DifferentIPs() {
 
 // ── Fail lockout ──.
 
-func (s *HandlerSuite) TestFailLockout_Lockout() {
-	s.manager.EXPECT().
-		Update(gomock.Any(), testID, "wrong", noCaller(), gomock.Any()).
-		Return(nil, domain.ErrInvalidEditCode).
-		Times(10)
-
-	body := `{"title":"t","content":"c","edit_code":"wrong"}`
-
-	for range 10 {
-		w := httptest.NewRecorder()
-		r := httptest.NewRequest(http.MethodPut, "/notes/"+testID, strings.NewReader(body))
-		r.Header.Set("Content-Type", "application/json")
-		s.router.ServeHTTP(w, r)
-		s.Equal(http.StatusForbidden, w.Code)
-	}
-
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodPut, "/notes/"+testID, strings.NewReader(body))
-	r.Header.Set("Content-Type", "application/json")
-	s.router.ServeHTTP(w, r)
-	s.Equal(http.StatusTooManyRequests, w.Code)
-}
-
 // TestFailLockout_ResetsOnSuccess verifies a successful request clears the accumulated failure
 // count: an owner who mistypes the edit code a few times before getting it right must not carry
 // a stale near-threshold counter into their next legitimate edit.
@@ -362,7 +299,9 @@ func (s *HandlerSuite) TestFailLockout_NoIncrementOnNonForbiddenError() {
 	}
 }
 
-func (s *HandlerSuite) TestFailLockout_DeleteAlsoLocked() {
+// TestFailLockout_DeleteForbiddenThenLocked: a DELETE with a wrong edit code gets 403, and after
+// 10 such failures the next DELETE gets 429.
+func (s *HandlerSuite) TestFailLockout_DeleteForbiddenThenLocked() {
 	s.manager.EXPECT().
 		Delete(gomock.Any(), testID, "wrong", noCaller()).
 		Return(domain.ErrInvalidEditCode).
@@ -383,7 +322,9 @@ func (s *HandlerSuite) TestFailLockout_DeleteAlsoLocked() {
 	s.Equal(http.StatusTooManyRequests, w.Code)
 }
 
-func (s *HandlerSuite) TestFailLockout_IndependentPerNoteID() {
+// TestFailLockout_UpdateForbiddenThenLockedPerNoteID: a PUT with a wrong edit code gets 403. After
+// 10 such failures the next PUT of that note gets 429, but a PUT of another note still gets 403.
+func (s *HandlerSuite) TestFailLockout_UpdateForbiddenThenLockedPerNoteID() {
 	body := `{"title":"t","content":"c","edit_code":"wrong"}`
 
 	s.manager.EXPECT().
@@ -396,6 +337,7 @@ func (s *HandlerSuite) TestFailLockout_IndependentPerNoteID() {
 		r := httptest.NewRequest(http.MethodPut, "/notes/"+testID, strings.NewReader(body))
 		r.Header.Set("Content-Type", "application/json")
 		s.router.ServeHTTP(w, r)
+		s.Equal(http.StatusForbidden, w.Code)
 	}
 
 	w := httptest.NewRecorder()

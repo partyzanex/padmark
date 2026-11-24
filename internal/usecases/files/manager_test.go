@@ -146,19 +146,6 @@ func (s *ManagerSuite) TestCreate_UserEditCodeUsesMemoryHardHash() {
 	s.Equal("my-secret-code", file.EditCode)
 }
 
-func (s *ManagerSuite) TestCreate_RejectsTooLargeFile() {
-	s.objects.EXPECT().Put(gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(_ context.Context, _ string, body io.Reader) error {
-			_, err := io.ReadAll(body)
-
-			return err
-		})
-	s.objects.EXPECT().Delete(gomock.Any(), gomock.Any()).Return(nil)
-
-	_, err := s.manager.Create(s.T().Context(), "a", strings.NewReader("01234567890"), createOptions())
-	s.Require().ErrorIs(err, domain.ErrFileTooLarge)
-}
-
 func (s *ManagerSuite) TestCreate_AcceptsFileAtLimit() {
 	s.expectUpload("0123456789")
 	s.expectUploadSweep()
@@ -167,14 +154,6 @@ func (s *ManagerSuite) TestCreate_AcceptsFileAtLimit() {
 	file, err := s.manager.Create(s.T().Context(), "a", strings.NewReader("0123456789"), createOptions())
 	s.Require().NoError(err)
 	s.Equal(int64(10), file.Size)
-}
-
-func (s *ManagerSuite) TestCreate_StorageFailureIsUnavailable() {
-	s.objects.EXPECT().Put(gomock.Any(), gomock.Any(), gomock.Any()).Return(errors.New("connection refused"))
-	s.objects.EXPECT().Delete(gomock.Any(), gomock.Any()).Return(nil)
-
-	_, err := s.manager.Create(s.T().Context(), "a", strings.NewReader("x"), createOptions())
-	s.Require().ErrorIs(err, domain.ErrStorageUnavailable)
 }
 
 func (s *ManagerSuite) TestCreate_BrokenUploadIsNotAStorageFailure() {
@@ -210,21 +189,6 @@ func (s *ManagerSuite) TestCreate_CutBodyIsNotStored() {
 	s.Require().ErrorIs(err, io.ErrUnexpectedEOF)
 	s.Require().NotErrorIs(err, domain.ErrStorageUnavailable)
 	s.Nil(file)
-}
-
-// TestCreate_RemovesObjectWhenRecordFails uses a custom slug: a random slug would get a new slug
-// after the conflict.
-func (s *ManagerSuite) TestCreate_RemovesObjectWhenRecordFails() {
-	s.expectUpload("x")
-	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(domain.ErrSlugConflict)
-	s.expired.EXPECT().ReleaseExpiredSlug(gomock.Any(), gomock.Any(), testNow()).Return(false, nil)
-	s.objects.EXPECT().Delete(gomock.Any(), gomock.Any()).Return(nil)
-
-	opts := createOptions()
-	opts.CustomSlug = "report"
-
-	_, err := s.manager.Create(s.T().Context(), "a", strings.NewReader("x"), opts)
-	s.Require().ErrorIs(err, domain.ErrSlugConflict)
 }
 
 // TestCreate_RandomSlugRetry: a random slug that storage refuses gets a new random slug, and the
@@ -345,9 +309,10 @@ func (s *ManagerSuite) TestCreate_FailedCheckKeepsObject() {
 	s.Nil(file)
 }
 
-// TestCreate_CustomSlugTaken: storage refuses the custom slug and no expired record holds it,
-// so Create reports the conflict and deletes the uploaded object.
-func (s *ManagerSuite) TestCreate_CustomSlugTaken() {
+// TestCreate_CustomSlugTakenRemovesObject: storage refuses the custom slug and no expired record
+// holds it, so Create reports the conflict and deletes the uploaded object. A random slug would get
+// a new slug after the conflict, so this test uses a custom slug.
+func (s *ManagerSuite) TestCreate_CustomSlugTakenRemovesObject() {
 	s.expectUpload("x")
 	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(domain.ErrSlugConflict)
 	s.expired.EXPECT().ReleaseExpiredSlug(gomock.Any(), domain.HashSlug("report"), testNow()).Return(false, nil)
@@ -448,24 +413,6 @@ func (s *ManagerSuite) TestDownload_BurnNeedsDeliberateAccess() {
 	s.Require().ErrorIs(err, domain.ErrBurnIntentRequired)
 }
 
-func (s *ManagerSuite) TestDownload_BurnConsumesAndDeletesObjectOnClose() {
-	ctx := s.T().Context()
-
-	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any(), testNow()).Return(storedFile(true), nil)
-	s.expectObject("hello")
-	s.storage.EXPECT().ClaimBurn(gomock.Any(), gomock.Any()).Return(nil)
-
-	download, err := s.manager.Download(ctx, "abc", anonymous(true))
-	s.Require().NoError(err)
-	s.Require().NoError(download.Send(ctx, io.Discard))
-
-	gomock.InOrder(
-		s.storage.EXPECT().Delete(gomock.Any(), domain.HashSlug("abc"), "obj").Return(nil),
-		s.objects.EXPECT().Delete(gomock.Any(), "obj").Return(nil),
-	)
-	download.Close(ctx)
-}
-
 func (s *ManagerSuite) TestDownload_LostBurnRace() {
 	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any(), testNow()).Return(storedFile(true), nil)
 	s.objects.EXPECT().Stat(gomock.Any(), "obj").Return(nil)
@@ -499,27 +446,6 @@ func (s *ManagerSuite) TestDownload_ExpiredFileIsRemoved() {
 
 	_, err := s.manager.Download(s.T().Context(), "abc", anonymous(false))
 	s.Require().ErrorIs(err, domain.ErrExpired)
-}
-
-func (s *ManagerSuite) TestDownload_MissingObjectIsNotFound() {
-	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any(), testNow()).Return(storedFile(false), nil)
-	s.objects.EXPECT().Stat(gomock.Any(), "obj").Return(domain.ErrNotFound)
-
-	_, err := s.manager.Download(s.T().Context(), "abc", anonymous(false))
-	s.Require().ErrorIs(err, domain.ErrNotFound)
-}
-
-func (s *ManagerSuite) TestDownload_StorageReadFailure() {
-	ctx := s.T().Context()
-
-	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any(), testNow()).Return(storedFile(false), nil)
-	s.objects.EXPECT().Stat(gomock.Any(), "obj").Return(nil)
-	s.storage.EXPECT().IncrementDownloadsVisible(gomock.Any(), gomock.Any(), "obj", gomock.Any(), testNow()).Return(nil)
-	s.objects.EXPECT().WriteTo(gomock.Any(), "obj", gomock.Any()).Return(errors.New("reset by peer"))
-
-	download, err := s.manager.Download(ctx, "abc", anonymous(false))
-	s.Require().NoError(err)
-	s.Require().Error(download.Send(ctx, io.Discard))
 }
 
 func (s *ManagerSuite) TestDownload_UnknownSlug() {

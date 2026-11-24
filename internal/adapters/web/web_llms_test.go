@@ -109,11 +109,11 @@ func (s *LLMsRouterSuite) newRouter() http.Handler {
 	return router
 }
 
-// TestServedAsRoute verifies that a bare GET /llms.txt through the full router returns the
-// document, not a fall-through into the /{id...} note catch-all (which would answer 404).
-// No mock expectation is set — reaching a note handler would fail the test on the unexpected
-// mock call.
-func (s *LLMsRouterSuite) TestServedAsRoute() {
+// TestServedAsRouteToAnonymous verifies that a bare anonymous GET /llms.txt through the full
+// router returns the document, not a fall-through into the /{id...} note catch-all (which would
+// answer 404) and not a redirect to /login: the document is for agents. No mock expectation is
+// set — reaching a note handler would fail the test on the unexpected mock call.
+func (s *LLMsRouterSuite) TestServedAsRouteToAnonymous() {
 	router := s.newRouter()
 
 	req := httptest.NewRequest(http.MethodGet, "/llms.txt", nil)
@@ -122,23 +122,9 @@ func (s *LLMsRouterSuite) TestServedAsRoute() {
 	router.ServeHTTP(rec, req)
 
 	s.Equal(http.StatusOK, rec.Code)
+	s.NotEqual(http.StatusSeeOther, rec.Code, "anonymous fetch must not redirect to /login")
 	s.Equal("text/markdown; charset=utf-8", rec.Header().Get("Content-Type"))
 	s.NotEmpty(rec.Body.String())
-}
-
-// TestAnonymousFetch is the auth-middleware regression guard: /llms.txt is agent-facing
-// documentation, so an anonymous request must not be redirected to /login or sent to note
-// resolution.
-func (s *LLMsRouterSuite) TestAnonymousFetch() {
-	router := s.newRouter()
-
-	req := httptest.NewRequest(http.MethodGet, "/llms.txt", nil)
-	rec := httptest.NewRecorder()
-
-	router.ServeHTTP(rec, req)
-
-	s.Require().Equal(http.StatusOK, rec.Code)
-	s.NotEqual(http.StatusSeeOther, rec.Code, "anonymous fetch must not redirect to /login")
 }
 
 // TestReferencedSpecIsAlive guards the document's pointer: the spec URL it advertises must
@@ -156,26 +142,15 @@ func (s *LLMsRouterSuite) TestReferencedSpecIsAlive() {
 	}
 }
 
-// TestSpecURLAdvertised cross-checks the document against the router: llms.txt must
-// actually mention the spec URL it points to.
-func (s *LLMsRouterSuite) TestSpecURLAdvertised() {
-	router := s.newRouter()
-
-	req := httptest.NewRequest(http.MethodGet, "/llms.txt", nil)
-	rec := httptest.NewRecorder()
-
-	router.ServeHTTP(rec, req)
-
-	s.Contains(rec.Body.String(), "/api/openapi.yaml")
-	s.Contains(rec.Body.String(), "/api/reference.md")
-}
-
-// TestFilesSectionAdvertised verifies that llms.txt has the Files section and that its links
-// point to the Files section of the reference.
-func (s *LLMsRouterSuite) TestFilesSectionAdvertised() {
+// TestSpecURLsAndFilesSectionAdvertised cross-checks the document against the router: llms.txt
+// mentions the spec URLs it points to, has the Files section, and its links point to the Files
+// section of the reference.
+func (s *LLMsRouterSuite) TestSpecURLsAndFilesSectionAdvertised() {
 	router := s.newRouter()
 
 	index := s.get(router, "/llms.txt")
+	s.Contains(index, "/api/openapi.yaml")
+	s.Contains(index, "/api/reference.md")
 	s.Contains(index, "\n## Files\n")
 
 	for _, text := range []string{

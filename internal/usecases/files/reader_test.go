@@ -40,18 +40,6 @@ func (s *ManagerSuite) TestReader_HiddenFileIsForbidden() {
 	s.Require().ErrorIs(s.manager.Delete(ctx, "abc", "code", stranger), domain.ErrForbidden)
 }
 
-// TestReader_HiddenExpiredFileIsForbidden checks that privacy comes before expiry in Update.
-func (s *ManagerSuite) TestReader_HiddenExpiredFileIsForbidden() {
-	file := hiddenFile()
-	past := testNow().Add(-time.Minute)
-	file.ExpiresAt = &past
-
-	s.storage.EXPECT().GetByID(gomock.Any(), domain.HashSlug("abc"), testNow()).Return(file, nil)
-
-	_, err := s.manager.Update(s.T().Context(), "abc", "code", account(uuid.New()), noUpdate())
-	s.Require().ErrorIs(err, domain.ErrForbidden)
-}
-
 // TestSettings_ExpiredFileStays checks that the editor read reports an expired file without a
 // delete: the strict mock fails on DeleteExpired, so the file page can still answer 410.
 func (s *ManagerSuite) TestSettings_ExpiredFileStays() {

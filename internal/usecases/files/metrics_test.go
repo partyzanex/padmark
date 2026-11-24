@@ -34,7 +34,9 @@ func (s *ManagerSuite) TestMetrics_CreateCountsUploadAndSize() {
 	s.Require().NoError(err)
 }
 
-func (s *ManagerSuite) TestMetrics_PutFailureIsStorageError() {
+// TestCreate_PutFailureIsUnavailableAndCountsStorageError: a failed Put gives
+// ErrStorageUnavailable and counts one storage error of the put operation.
+func (s *ManagerSuite) TestCreate_PutFailureIsUnavailableAndCountsStorageError() {
 	metrics := s.useStrictMetrics()
 
 	s.objects.EXPECT().Put(gomock.Any(), gomock.Any(), gomock.Any()).Return(errors.New("connection refused"))
@@ -45,7 +47,9 @@ func (s *ManagerSuite) TestMetrics_PutFailureIsStorageError() {
 	s.Require().ErrorIs(err, domain.ErrStorageUnavailable)
 }
 
-func (s *ManagerSuite) TestMetrics_TooLargeFileIsNotStorageError() {
+// TestCreate_RejectsTooLargeFileWithoutStorageError: a file above the limit gives ErrFileTooLarge,
+// and the strict metrics mock gets no storage error.
+func (s *ManagerSuite) TestCreate_RejectsTooLargeFileWithoutStorageError() {
 	s.useStrictMetrics()
 
 	s.objects.EXPECT().Put(gomock.Any(), gomock.Any(), gomock.Any()).
@@ -71,7 +75,9 @@ func (s *ManagerSuite) TestMetrics_StatFailureIsStorageError() {
 	s.Require().ErrorIs(err, domain.ErrStorageUnavailable)
 }
 
-func (s *ManagerSuite) TestMetrics_MissingObjectIsNotStorageError() {
+// TestDownload_MissingObjectIsNotFoundWithoutStorageError: a record without its object gives
+// ErrNotFound, and the strict metrics mock gets no storage error.
+func (s *ManagerSuite) TestDownload_MissingObjectIsNotFoundWithoutStorageError() {
 	s.useStrictMetrics()
 
 	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any(), testNow()).Return(storedFile(false), nil)
@@ -81,7 +87,9 @@ func (s *ManagerSuite) TestMetrics_MissingObjectIsNotStorageError() {
 	s.Require().ErrorIs(err, domain.ErrNotFound)
 }
 
-func (s *ManagerSuite) TestMetrics_GetFailureIsStorageError() {
+// TestDownload_StorageReadFailureCountsStorageError: a failed object read stops Send with an
+// error, after one counted download, and counts one storage error of the get operation.
+func (s *ManagerSuite) TestDownload_StorageReadFailureCountsStorageError() {
 	ctx := s.T().Context()
 	metrics := s.useStrictMetrics()
 
@@ -95,24 +103,6 @@ func (s *ManagerSuite) TestMetrics_GetFailureIsStorageError() {
 	download, err := s.manager.Download(ctx, "abc", anonymous(false))
 	s.Require().NoError(err)
 	s.Require().Error(download.Send(ctx, io.Discard))
-}
-
-func (s *ManagerSuite) TestMetrics_BurnCountsDownloadAndDeletion() {
-	ctx := s.T().Context()
-	metrics := s.useStrictMetrics()
-
-	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any(), testNow()).Return(storedFile(true), nil)
-	s.expectObject("hello")
-	s.storage.EXPECT().ClaimBurn(gomock.Any(), gomock.Any()).Return(nil)
-	s.storage.EXPECT().Delete(gomock.Any(), domain.HashSlug("abc"), "obj").Return(nil)
-	s.objects.EXPECT().Delete(gomock.Any(), "obj").Return(nil)
-	metrics.EXPECT().IncDownloads()
-	metrics.EXPECT().IncDeleted(DeleteReasonBurn)
-
-	download, err := s.manager.Download(ctx, "abc", anonymous(true))
-	s.Require().NoError(err)
-	s.Require().NoError(download.Send(ctx, io.Discard))
-	download.Close(ctx)
 }
 
 // TestMetrics_DeleteKeepsObjectAfterStorageError shows the order: the record goes first, so a

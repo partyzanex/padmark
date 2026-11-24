@@ -28,6 +28,7 @@ func (s *HandlerSuite) TestGetNoteOrLink_NoteSlug_ReadsOnlyNote() {
 	s.router.ServeHTTP(w, r)
 
 	s.Equal(http.StatusOK, w.Code)
+	s.Contains(w.Body.String(), `"title":"Title"`)
 	s.Contains(w.Body.String(), `"content":"body"`)
 }
 

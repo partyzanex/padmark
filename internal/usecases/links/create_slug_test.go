@@ -33,10 +33,15 @@ func (s *ManagerTestSuite) TestCreate_AliasReleasesExpiredHolder() {
 	s.Equal("report", link.ID)
 }
 
-func (s *ManagerTestSuite) TestCreate_AliasConflictWithoutExpiredHolder() {
+// TestCreate_AliasConflictWithoutExpiredHolder_RecordsNoCollision: a custom alias that no expired
+// record holds stays taken. A refused alias is normal user behavior, not a signal about the slug
+// space, so no subtest increments IncCollisions: the metrics mock has no expectation.
+func (s *ManagerTestSuite) TestCreate_AliasConflictWithoutExpiredHolder_RecordsNoCollision() {
+	s.manager.WithMetrics(s.metrics)
+
 	s.Run("live holder", func() {
 		s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(domain.ErrSlugConflict)
-		s.expired.EXPECT().ReleaseExpiredSlug(gomock.Any(), gomock.Any(), testNow()).Return(false, nil)
+		s.expired.EXPECT().ReleaseExpiredSlug(gomock.Any(), domain.HashSlug("report"), testNow()).Return(false, nil)
 
 		_, err := s.manager.Create(s.T().Context(), "https://example.com", aliasOptions())
 		s.Require().ErrorIs(err, domain.ErrSlugConflict)

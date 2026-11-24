@@ -105,7 +105,7 @@ func TestNegotiate_CaseAndSpacing(t *testing.T) {
 		negotiateFor(t, "application/json;q=0.9 , text/plain;q=0.8"))
 }
 
-// TestNegotiate_BrowsersAndMachines pins the two real-world caller shapes the privacy gate and
+// TestNegotiate_BrowsersAndMachines pins the two real-world caller shapes the privacy check and
 // the setup branch rely on: a full Chrome Accept keeps the HTML path, curl's default and an
 // explicit machine Accept keep the JSON path.
 func TestNegotiate_BrowsersAndMachines(t *testing.T) {

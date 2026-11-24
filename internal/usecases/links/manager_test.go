@@ -56,8 +56,11 @@ func TestManagerTestSuite(t *testing.T) {
 
 // Create.
 
-func (s *ManagerTestSuite) TestCreate_OK() {
+func (s *ManagerTestSuite) TestCreate_ReturnsLinkAndRecordsLinksCreated() {
+	s.manager.WithMetrics(s.metrics)
+
 	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
+	s.metrics.EXPECT().IncLinksCreated()
 
 	link, err := s.manager.Create(s.T().Context(), "https://example.com", CreateOptions{
 		ExpiresAt: nil, Privacy: nil, OwnerID: nil, DirectRedirect: nil,
@@ -93,10 +96,13 @@ func (s *ManagerTestSuite) TestCreate_UserSuppliedCodeUsesMemoryHardHash() {
 	s.Equal("user:MyCustomCode1", storedHash)
 }
 
-// TestCreate_URLSchemeWhitelist is the explicit whitelist test matrix: http/https allowed, every
-// other scheme (and schemeless/relative URLs) rejected with domain.ErrInvalidURL at Create time —
-// before storage.Create is ever called, so a malicious scheme never reaches persistence.
-func (s *ManagerTestSuite) TestCreate_URLSchemeWhitelist() {
+// TestCreate_URLSchemeWhitelist_RecordsOnlyAcceptedLinks is the explicit whitelist test matrix:
+// http/https allowed, every other scheme (and schemeless/relative URLs) rejected with
+// domain.ErrInvalidURL at Create time — before storage.Create is ever called, so a malicious
+// scheme never reaches persistence. Only an accepted link increments IncLinksCreated.
+func (s *ManagerTestSuite) TestCreate_URLSchemeWhitelist_RecordsOnlyAcceptedLinks() {
+	s.manager.WithMetrics(s.metrics)
+
 	tests := []struct {
 		name string
 		url  string
@@ -117,6 +123,7 @@ func (s *ManagerTestSuite) TestCreate_URLSchemeWhitelist() {
 		s.Run(test.name, func() {
 			if test.ok {
 				s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
+				s.metrics.EXPECT().IncLinksCreated()
 			}
 
 			_, err := s.manager.Create(s.T().Context(), test.url, CreateOptions{
@@ -133,22 +140,11 @@ func (s *ManagerTestSuite) TestCreate_URLSchemeWhitelist() {
 	}
 }
 
-// TestCreate_CustomAliasConflict: storage refuses the custom alias and no expired record holds
-// it, so Create reports the conflict without a new slug.
-func (s *ManagerTestSuite) TestCreate_CustomAliasConflict() {
-	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(domain.ErrSlugConflict)
-	s.expired.EXPECT().ReleaseExpiredSlug(gomock.Any(), domain.HashSlug("taken"), testNow()).Return(false, nil)
+// TestCreate_RandomSlugCollision_RetriesAndRecordsCollision: a refused random slug gets a new
+// random slug and increments IncCollisions once.
+func (s *ManagerTestSuite) TestCreate_RandomSlugCollision_RetriesAndRecordsCollision() {
+	s.manager.WithMetrics(s.metrics)
 
-	_, err := s.manager.Create(s.T().Context(), "https://example.com", CreateOptions{
-		CustomHash: "taken",
-		ExpiresAt:  nil, Privacy: nil, OwnerID: nil, DirectRedirect: nil,
-		EditCode: "", BurnAfterClick: false,
-	})
-
-	s.ErrorIs(err, domain.ErrSlugConflict)
-}
-
-func (s *ManagerTestSuite) TestCreate_RandomSlugCollision_Retries() {
 	var ids []string
 
 	record := func(_ any, link *domain.Link) { ids = append(ids, link.ID) }
@@ -157,6 +153,8 @@ func (s *ManagerTestSuite) TestCreate_RandomSlugCollision_Retries() {
 		s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Do(record).Return(domain.ErrSlugConflict),
 		s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Do(record).Return(nil),
 	)
+	s.metrics.EXPECT().IncCollisions()
+	s.metrics.EXPECT().IncLinksCreated()
 
 	_, err := s.manager.Create(s.T().Context(), "https://example.com", CreateOptions{
 		ExpiresAt: nil, Privacy: nil, OwnerID: nil, DirectRedirect: nil,
@@ -296,7 +294,11 @@ func (s *ManagerTestSuite) TestCreate_StorageError() {
 
 // Follow.
 
-func (s *ManagerTestSuite) TestFollow_OK() {
+// TestFollow_CountsViewRecordsRedirectAndFillsCache: on a cache miss, Follow decrypts the stored
+// target, fills the cache, counts the view and records one redirect.
+func (s *ManagerTestSuite) TestFollow_CountsViewRecordsRedirectAndFillsCache() {
+	s.manager.WithCache(s.cache).WithMetrics(s.metrics)
+
 	link := &domain.Link{
 		TargetURL: "https://example.com",
 		CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
@@ -304,7 +306,10 @@ func (s *ManagerTestSuite) TestFollow_OK() {
 		BurnAfterClick: false,
 	}
 	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(link, nil)
+	s.cache.EXPECT().Get(gomock.Any(), "https://example.com").Return("", false)
+	s.cache.EXPECT().Set(gomock.Any(), gomock.Any(), "https://example.com", "https://example.com")
 	s.storage.EXPECT().IncrementViews(gomock.Any(), gomock.Any()).Return(nil)
+	s.metrics.EXPECT().IncRedirects()
 
 	got, err := s.manager.Follow(s.T().Context(), "the-slug", openReader())
 
@@ -313,7 +318,10 @@ func (s *ManagerTestSuite) TestFollow_OK() {
 	s.Equal(1, got.Views)
 }
 
-func (s *ManagerTestSuite) TestFollow_NotFound() {
+// TestFollow_NotFound_DoesNotRecordRedirect: only a served redirect increments IncRedirects. The
+// metrics mock has no expectation, so a count fails the test.
+func (s *ManagerTestSuite) TestFollow_NotFound_DoesNotRecordRedirect() {
+	s.manager.WithMetrics(s.metrics)
 	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(nil, domain.ErrNotFound)
 
 	_, err := s.manager.Follow(s.T().Context(), "missing", openReader())
@@ -374,9 +382,13 @@ func (s *ManagerTestSuite) TestFollow_NoBurnIntent_ExpiredLinkStillExpires() {
 	s.ErrorIs(err, domain.ErrExpired)
 }
 
-// TestFollow_BurnAfterClick_SecondCallNotFound verifies burn-after-click is exactly-once: a
-// second Follow for the same slug, after the row was consumed, gets ErrNotFound.
-func (s *ManagerTestSuite) TestFollow_BurnAfterClick_SecondCallNotFound() {
+// TestFollow_BurnAfterClick_RedirectsOnceAndIsNeverCached verifies burn-after-click is
+// exactly-once: the first Follow consumes the row and records one redirect, and a second Follow
+// for the same slug gets ErrNotFound. The cache mock has no expectation: a cached burn link could
+// give a concurrent Follow a copy that storage.Consume already removed.
+func (s *ManagerTestSuite) TestFollow_BurnAfterClick_RedirectsOnceAndIsNeverCached() {
+	s.manager.WithCache(s.cache).WithMetrics(s.metrics)
+
 	link := &domain.Link{
 		TargetURL: "https://example.com", BurnAfterClick: true,
 		CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
@@ -384,6 +396,7 @@ func (s *ManagerTestSuite) TestFollow_BurnAfterClick_SecondCallNotFound() {
 	}
 	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(link, nil)
 	s.storage.EXPECT().Consume(gomock.Any(), gomock.Any(), testNow()).Return(link, nil)
+	s.metrics.EXPECT().IncRedirects()
 
 	got, err := s.manager.Follow(s.T().Context(), "burn-slug", openReader())
 	s.Require().NoError(err)
@@ -412,8 +425,8 @@ func (s *ManagerTestSuite) TestFollow_DecryptFailure() {
 		"decryption failure collapses to ErrNotFound, not a distinguishable error")
 }
 
-// Cache (WithCache) — the default Manager has no cache (see SetupTest); these tests attach s.cache
-// to exercise resolveLink/evictCache without changing every other test's expectations.
+// Cache (WithCache): the default Manager has no cache (see SetupTest). A test that checks the cache
+// attaches s.cache.
 
 func (s *ManagerTestSuite) TestFollow_CacheHit_ReadsCurrentMetadata() {
 	s.manager = s.newManager(failingEncryptor(s.ctrl)).WithCache(s.cache)
@@ -433,66 +446,6 @@ func (s *ManagerTestSuite) TestFollow_CacheHit_ReadsCurrentMetadata() {
 	s.Equal("https://example.com", got.TargetURL)
 	s.Equal(9, got.Views)
 	s.Equal("the-slug", got.ID)
-}
-
-func (s *ManagerTestSuite) TestFollow_CacheMiss_PopulatesCacheForNonBurnLink() {
-	s.manager.WithCache(s.cache)
-
-	link := &domain.Link{
-		TargetURL: "https://example.com",
-		CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
-		DirectRedirect: nil, ID: "", EditCode: "", Views: 0,
-		BurnAfterClick: false,
-	}
-
-	s.cache.EXPECT().Get(gomock.Any(), "https://example.com").Return("", false)
-	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(link, nil)
-	s.cache.EXPECT().Set(gomock.Any(), gomock.Any(), "https://example.com", "https://example.com")
-	s.storage.EXPECT().IncrementViews(gomock.Any(), gomock.Any()).Return(nil)
-
-	_, err := s.manager.Follow(s.T().Context(), "the-slug", openReader())
-
-	s.Require().NoError(err)
-}
-
-// TestFollow_BurnAfterClick_NeverCached verifies a burn-after-click link is never written to
-// the cache — caching one would risk a second, concurrent Follow being served a stale
-// "not yet consumed" copy instead of relying on storage.Consume's atomic exactly-once guarantee.
-func (s *ManagerTestSuite) TestFollow_BurnAfterClick_NeverCached() {
-	s.manager.WithCache(s.cache)
-
-	link := &domain.Link{
-		TargetURL: "https://example.com", BurnAfterClick: true,
-		CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
-		DirectRedirect: nil, ID: "", EditCode: "", Views: 0,
-	}
-
-	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(link, nil)
-	// cache.Set deliberately has no EXPECT() — a burn-after-click link must never be cached.
-	s.storage.EXPECT().Consume(gomock.Any(), gomock.Any(), testNow()).Return(link, nil)
-
-	_, err := s.manager.Follow(s.T().Context(), "burn-slug", openReader())
-
-	s.Require().NoError(err)
-}
-
-func (s *ManagerTestSuite) TestFollow_Expired_EvictsCache() {
-	s.manager.WithCache(s.cache)
-
-	past := testNow().Add(-time.Hour)
-	link := &domain.Link{
-		TargetURL: "https://example.com", ExpiresAt: &past,
-		CreatedAt: time.Time{}, Privacy: nil, OwnerID: nil, DirectRedirect: nil,
-		ID: "", EditCode: "", Views: 0, BurnAfterClick: false,
-	}
-
-	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(link, nil)
-	s.storage.EXPECT().DeleteExpired(gomock.Any(), gomock.Any(), testNow()).Return(nil)
-	s.cache.EXPECT().Delete(gomock.Any())
-
-	_, err := s.manager.Follow(s.T().Context(), "expired-slug", openReader())
-
-	s.ErrorIs(err, domain.ErrExpired)
 }
 
 func (s *ManagerTestSuite) TestInspect_CacheHit_ReadsCurrentMetadata() {
@@ -542,135 +495,9 @@ func (s *ManagerTestSuite) TestInspect_DatabaseFailureNeverFallsBackToCache() {
 	}
 }
 
-// Metrics (WithMetrics) — the default Manager records no metrics (see SetupTest); these tests
-// attach s.metrics, exactly like the Cache tests above.
-
-func (s *ManagerTestSuite) TestCreate_RecordsLinksCreated() {
-	s.manager.WithMetrics(s.metrics)
-
-	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
-	s.metrics.EXPECT().IncLinksCreated()
-
-	_, err := s.manager.Create(s.T().Context(), "https://example.com", CreateOptions{
-		ExpiresAt: nil, Privacy: nil, OwnerID: nil, DirectRedirect: nil,
-		CustomHash: "", EditCode: "", BurnAfterClick: false,
-	})
-
-	s.Require().NoError(err)
-}
-
-func (s *ManagerTestSuite) TestCreate_InvalidURL_DoesNotRecordLinksCreated() {
-	s.manager.WithMetrics(s.metrics)
-	// s.metrics.EXPECT().IncLinksCreated() deliberately absent — a rejected create must not count.
-
-	_, err := s.manager.Create(s.T().Context(), "javascript:alert(1)", CreateOptions{
-		ExpiresAt: nil, Privacy: nil, OwnerID: nil, DirectRedirect: nil,
-		CustomHash: "", EditCode: "", BurnAfterClick: false,
-	})
-
-	s.ErrorIs(err, domain.ErrInvalidURL)
-}
-
-func (s *ManagerTestSuite) TestFollow_RecordsRedirect() {
-	s.manager.WithMetrics(s.metrics)
-
-	link := &domain.Link{
-		TargetURL: "https://example.com",
-		CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
-		DirectRedirect: nil, ID: "", EditCode: "", Views: 0,
-		BurnAfterClick: false,
-	}
-	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(link, nil)
-	s.storage.EXPECT().IncrementViews(gomock.Any(), gomock.Any()).Return(nil)
-	s.metrics.EXPECT().IncRedirects()
-
-	_, err := s.manager.Follow(s.T().Context(), "the-slug", openReader())
-
-	s.Require().NoError(err)
-}
-
-func (s *ManagerTestSuite) TestFollow_BurnAfterClick_RecordsRedirect() {
-	s.manager.WithMetrics(s.metrics)
-
-	link := &domain.Link{
-		TargetURL: "https://example.com", BurnAfterClick: true,
-		CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
-		DirectRedirect: nil, ID: "", EditCode: "", Views: 0,
-	}
-	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(link, nil)
-	s.storage.EXPECT().Consume(gomock.Any(), gomock.Any(), testNow()).Return(link, nil)
-	s.metrics.EXPECT().IncRedirects()
-
-	_, err := s.manager.Follow(s.T().Context(), "burn-slug", openReader())
-
-	s.Require().NoError(err)
-}
-
-func (s *ManagerTestSuite) TestFollow_NotFound_DoesNotRecordRedirect() {
-	s.manager.WithMetrics(s.metrics)
-	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(nil, domain.ErrNotFound)
-	// s.metrics.EXPECT().IncRedirects() deliberately absent — only a served redirect counts.
-
-	_, err := s.manager.Follow(s.T().Context(), "missing", openReader())
-
-	s.ErrorIs(err, domain.ErrNotFound)
-}
-
-func (s *ManagerTestSuite) TestCreate_RandomSlugCollision_RecordsCollision() {
-	s.manager.WithMetrics(s.metrics)
-
-	gomock.InOrder(
-		s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(domain.ErrSlugConflict),
-		s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil),
-	)
-	s.metrics.EXPECT().IncCollisions()
-	s.metrics.EXPECT().IncLinksCreated()
-
-	_, err := s.manager.Create(s.T().Context(), "https://example.com", CreateOptions{
-		ExpiresAt: nil, Privacy: nil, OwnerID: nil, DirectRedirect: nil,
-		CustomHash: "", EditCode: "", BurnAfterClick: false,
-	})
-
-	s.Require().NoError(err)
-}
-
-// TestCreate_CustomAliasConflict_DoesNotRecordCollision proves the scoping decision documented on
-// the Metrics interface: a rejected custom alias is normal user behavior, not a slug-space health
-// signal, so it must not increment IncCollisions the way a random-slug retry does.
-func (s *ManagerTestSuite) TestCreate_CustomAliasConflict_DoesNotRecordCollision() {
-	s.manager.WithMetrics(s.metrics)
-
-	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(domain.ErrSlugConflict)
-	s.expired.EXPECT().ReleaseExpiredSlug(gomock.Any(), gomock.Any(), testNow()).Return(false, nil)
-	// s.metrics.EXPECT().IncCollisions() deliberately absent.
-
-	_, err := s.manager.Create(s.T().Context(), "https://example.com", CreateOptions{
-		CustomHash: "taken",
-		ExpiresAt:  nil, Privacy: nil, OwnerID: nil, DirectRedirect: nil,
-		EditCode: "", BurnAfterClick: false,
-	})
-
-	s.ErrorIs(err, domain.ErrSlugConflict)
-}
-
 // Delete.
 
-func (s *ManagerTestSuite) TestDelete_OwnerBypassesEditCode() {
-	owner := uuid.New()
-	existing := &domain.Link{
-		EditCode: "secret123456", OwnerID: &owner,
-		CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, DirectRedirect: nil,
-		ID: "", TargetURL: "", Views: 0, BurnAfterClick: false,
-	}
-	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(existing, nil)
-	s.storage.EXPECT().Delete(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
-
-	err := s.manager.Delete(s.T().Context(), "the-slug", "", accountReader(owner))
-
-	s.Require().NoError(err)
-}
-
-func (s *ManagerTestSuite) TestDelete_EvictsCache() {
+func (s *ManagerTestSuite) TestDelete_OwnerBypassesEditCodeAndEvictsCache() {
 	s.manager.WithCache(s.cache)
 
 	owner := uuid.New()
@@ -701,21 +528,6 @@ func (s *ManagerTestSuite) TestDelete_NonOwnerNeedsEditCode() {
 	err := s.manager.Delete(s.T().Context(), "the-slug", "wrong-code", accountReader(other))
 
 	s.ErrorIs(err, domain.ErrInvalidEditCode)
-}
-
-func (s *ManagerTestSuite) TestDelete_CorrectEditCode() {
-	existing := &domain.Link{
-		EditCode:  "secret123456",
-		CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
-		DirectRedirect: nil, ID: "", TargetURL: "", Views: 0,
-		BurnAfterClick: false,
-	}
-	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any()).Return(existing, nil)
-	s.storage.EXPECT().Delete(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
-
-	err := s.manager.Delete(s.T().Context(), "the-slug", "secret123456", openReader())
-
-	s.Require().NoError(err)
 }
 
 func (s *ManagerTestSuite) TestDelete_AnonymousLinkAlwaysNeedsEditCode() {

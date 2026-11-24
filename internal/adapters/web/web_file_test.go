@@ -68,9 +68,10 @@ func (s *FileHandlerSuite) TestSuccessPage_AnonymousWithAccounts() {
 	})
 }
 
-// TestSuccessPage_FileLookupFailsHidesSettings (R-48): without the record and without the values
-// from the upload response, the page does not show "Public" and "never expires" as facts.
-func (s *FileHandlerSuite) TestSuccessPage_FileLookupFailsHidesSettings() {
+// TestSuccessPage_FileLookupFailsShowsLinkHidesSettings (R-48): without the record the page still
+// shows the link (fail-soft). Without the values from the upload response, the page does not show
+// "Public" and "never expires" as facts, and it has no file settings block.
+func (s *FileHandlerSuite) TestSuccessPage_FileLookupFailsShowsLinkHidesSettings() {
 	s.files.EXPECT().Inspect(gomock.Any(), "abc", access(false)).Return(nil, domain.ErrStorageUnavailable)
 
 	rec := s.serve(browserGet("/success?kind=file&id=abc"))
@@ -78,6 +79,7 @@ func (s *FileHandlerSuite) TestSuccessPage_FileLookupFailsHidesSettings() {
 
 	s.Require().Equal(http.StatusOK, rec.Code)
 	s.Contains(body, "http://example.com/abc")
+	s.NotContains(body, `id="successFile"`)
 	s.NotContains(body, "Anyone with the link can open it.")
 	s.NotContains(body, "never expires")
 	s.NotContains(body, `class="chip-list"`)
@@ -465,15 +467,4 @@ func (s *FileHandlerSuite) TestSuccessPage_File() {
 	s.Contains(body, "Deleted after the first download")
 	s.Contains(body, "It is shown only once")
 	s.Contains(body, "'padmark_file_edit_'")
-}
-
-// TestSuccessPage_FileLookupFails: without the record the page still shows the link (fail-soft).
-func (s *FileHandlerSuite) TestSuccessPage_FileLookupFails() {
-	s.files.EXPECT().Inspect(gomock.Any(), "abc", access(false)).Return(nil, domain.ErrStorageUnavailable)
-
-	rec := s.serve(browserGet("/success?kind=file&id=abc"))
-
-	s.Require().Equal(http.StatusOK, rec.Code)
-	s.Contains(rec.Body.String(), "http://example.com/abc")
-	s.NotContains(rec.Body.String(), `id="successFile"`)
 }

@@ -263,11 +263,12 @@ func (s *HandlerSuite) TestGetLink_NotYetExpired_OK() {
 	s.Equal(http.StatusOK, w.Code)
 }
 
-// TestGetLink_ExpiredAndPrivate_Anonymous_Unauthorized: the usecase decides privacy before
-// expiry, so a stranger asking about an expired owner-only link gets ErrForbidden and the handler
-// answers 401, not 410 — a 410 would confirm the link had existed. links.Manager tests cover the
-// order; this test covers the translation with the account system on.
-func (s *HandlerSuite) TestGetLink_ExpiredAndPrivate_Anonymous_Unauthorized() {
+// TestGetLink_HiddenFromAnonymous_Unauthorized: the usecase refuses an anonymous reader with
+// ErrForbidden for a privacy=authenticated link, and also for an expired owner-only link because
+// it decides privacy before expiry. The handler answers 401, not 410: a 410 would confirm the link
+// had existed. links.Manager tests cover the order; this test covers the translation with the
+// account system on.
+func (s *HandlerSuite) TestGetLink_HiddenFromAnonymous_Unauthorized() {
 	s.linkManager.EXPECT().Inspect(gomock.Any(), testLinkID, anonymousReader()).Return(nil, domain.ErrForbidden)
 
 	w := httptest.NewRecorder()
@@ -339,11 +340,11 @@ func (s *HandlerSuite) TestDeleteLink_Forbidden() {
 	s.Equal(http.StatusForbidden, w.Code)
 }
 
-// TestDeleteLink_Gated_PrivateLink verifies the link-mutation privacy rule: with auth
+// TestDeleteLink_PrivateLink_Anonymous401 verifies the link-mutation privacy rule: with auth
 // configured, the usecase refuses an anonymous DELETE of a privacy=authenticated link
 // (ErrForbidden), and the handler answers 401 — an anonymous caller could not read the link, so
 // they may not mutate it via an edit code either.
-func (s *HandlerSuite) TestDeleteLink_Gated_PrivateLink() {
+func (s *HandlerSuite) TestDeleteLink_PrivateLink_Anonymous401() {
 	router := s.newLinkRouterWithTOTPAuth()
 	s.linkManager.EXPECT().Delete(gomock.Any(), testLinkID, "editcode1234", anonymousReader()).
 		Return(domain.ErrForbidden)
@@ -360,9 +361,9 @@ func (s *HandlerSuite) TestDeleteLink_Gated_PrivateLink() {
 	s.Empty(w.Body.String())
 }
 
-// TestDeleteLink_Gated_PublicLink_WrongEditCode verifies that for a link an anonymous caller
+// TestDeleteLink_PublicLink_WrongEditCode403 verifies that for a link an anonymous caller
 // could read, the wrong edit code surfaces as the usecase's 403 — never the 401 of privacy.
-func (s *HandlerSuite) TestDeleteLink_Gated_PublicLink_WrongEditCode() {
+func (s *HandlerSuite) TestDeleteLink_PublicLink_WrongEditCode403() {
 	router := s.newLinkRouterWithTOTPAuth()
 	s.linkManager.EXPECT().Delete(gomock.Any(), testLinkID, "wrong", noCaller()).
 		Return(domain.ErrInvalidEditCode)
@@ -503,21 +504,6 @@ func (s *HandlerSuite) TestRedirectLink_ImplicitAccess_OrdinaryLinkFollowed() {
 
 	s.Equal(http.StatusMovedPermanently, w.Code)
 	s.Equal(testLinkTargetURL, w.Header().Get("Location"))
-}
-
-func (s *HandlerSuite) TestRedirectLink_DirectMode_301() {
-	link := newTestLink()
-	s.linkManager.EXPECT().Follow(gomock.Any(), testLinkID, withBurn(true)).Return(link, nil)
-
-	router := s.newLinkRouter(true)
-
-	w := httptest.NewRecorder()
-	r := newLinkClickRequest("/r/" + testLinkID)
-
-	router.ServeHTTP(w, r)
-
-	s.Equal(http.StatusMovedPermanently, w.Code)
-	s.Equal("https://example.com/dest", w.Header().Get("Location"))
 }
 
 func (s *HandlerSuite) TestRedirectLink_InterstitialMode_200() {
@@ -815,19 +801,4 @@ func (s *HandlerSuite) TestGetLink_PrivacyAuthenticated_Authenticated() {
 	router.ServeHTTP(w, r)
 
 	s.Equal(http.StatusOK, w.Code)
-}
-
-// TestGetLink_PrivacyAuthenticated_Anonymous_Unauthorized is the negative counterpart: no
-// credential at all must not satisfy privacy: authenticated.
-func (s *HandlerSuite) TestGetLink_PrivacyAuthenticated_Anonymous_Unauthorized() {
-	s.linkManager.EXPECT().Inspect(gomock.Any(), testLinkID, anonymousReader()).Return(nil, domain.ErrForbidden)
-
-	router := s.newLinkRouterWithTOTPAuth()
-
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet, "/links/"+testLinkID, nil)
-
-	router.ServeHTTP(w, r)
-
-	s.Equal(http.StatusUnauthorized, w.Code)
 }

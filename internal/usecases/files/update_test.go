@@ -102,7 +102,7 @@ func (s *ManagerSuite) TestUpdate_HiddenExpiredFileIsForbidden() {
 	past := testNow().Add(-time.Minute)
 	stored.ExpiresAt = &past
 
-	s.storage.EXPECT().GetByID(gomock.Any(), gomock.Any(), testNow()).Return(stored, nil)
+	s.storage.EXPECT().GetByID(gomock.Any(), domain.HashSlug("abc"), testNow()).Return(stored, nil)
 
 	_, err := s.manager.Update(s.T().Context(), "abc", "code", account(uuid.New()), noUpdate())
 	s.Require().ErrorIs(err, domain.ErrForbidden)

@@ -15,7 +15,9 @@ import (
 
 // ── GetNote ──.
 
-func (s *HandlerSuite) TestGetNote_JSON() {
+// TestGetNote_JSONWithRequestID: a JSON read returns the note without its edit code, and the
+// response has an X-Request-ID header.
+func (s *HandlerSuite) TestGetNote_JSONWithRequestID() {
 	note := newTestNote("my title", "**bold**")
 	note.Views = 3
 	s.manager.EXPECT().Read(gomock.Any(), testID, gomock.Any()).Return(note, nil)
@@ -28,6 +30,7 @@ func (s *HandlerSuite) TestGetNote_JSON() {
 
 	s.Equal(http.StatusOK, w.Code)
 	s.Contains(w.Header().Get("Content-Type"), "application/json")
+	s.NotEmpty(w.Header().Get("X-Request-ID"))
 
 	var resp testNoteResponse
 	s.Require().NoError(json.NewDecoder(w.Body).Decode(&resp))
@@ -377,24 +380,6 @@ func (s *HandlerSuite) TestGetNote_Expired() {
 	s.Equal(http.StatusGone, w.Code)
 }
 
-func (s *HandlerSuite) TestGetNote_ShortURL() {
-	note := newTestNote("short", "body")
-	// GET /{id} reads the note once; the same read would tell the kind of a link or a file.
-	s.manager.EXPECT().Read(gomock.Any(), testID, gomock.Any()).Return(note, nil)
-
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet, "/"+testID, nil)
-	r.Header.Set("Accept", "application/json")
-
-	s.router.ServeHTTP(w, r)
-
-	s.Equal(http.StatusOK, w.Code)
-
-	var resp testNoteResponse
-	s.Require().NoError(json.NewDecoder(w.Body).Decode(&resp))
-	s.Equal("short", resp.Title)
-}
-
 // ── Multi-segment (path-like) slug support ──.
 
 func (s *HandlerSuite) TestGetNote_MultiSegmentSlug_PublicServed() {
@@ -436,11 +421,11 @@ func (s *HandlerSuite) TestGetNote_MultiSegmentSlug_PrivateRequiresAuth() {
 	s.Equal(http.StatusUnauthorized, w.Code)
 }
 
-// TestEditPage_MultiSegmentPath_GatedByPrivacy verifies the /edit/{id...} route's gating: GET
-// /edit/<multi-segment-slug> is admitted by isPublicRoute (the editor's save still requires the
+// TestEditPage_MultiSegmentPath_PrivateNoteNeedsLogin verifies the privacy rule of the
+// /edit/{id...} route: GET /edit/<multi-segment-slug> is admitted by isPublicRoute (the editor's save still requires the
 // edit code on the PUT), but per-note privacy is enforced by the usecase (Inspect) — a public
 // note renders the form, a privacy=owner note redirects an anonymous caller to /login.
-func (s *HandlerSuite) TestEditPage_MultiSegmentPath_GatedByPrivacy() {
+func (s *HandlerSuite) TestEditPage_MultiSegmentPath_PrivateNoteNeedsLogin() {
 	router := s.newRouterWithTOTPAuth()
 
 	public := newTestNote("guide", "# guide")

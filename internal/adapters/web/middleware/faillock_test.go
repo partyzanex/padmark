@@ -174,7 +174,7 @@ func TestWithFailLockout_ParallelBurst_StopsAtThreshold(t *testing.T) {
 }
 
 // TestWithFailLockout_NonFailureRefundsAttempt verifies that responses other than 403, such as
-// the 401 of the privacy gate or a 404, take the reserved attempt back and never lock the bucket.
+// the 401 of the privacy check or a 404, take the reserved attempt back and never lock the bucket.
 func TestWithFailLockout_NonFailureRefundsAttempt(t *testing.T) {
 	t.Parallel()
 

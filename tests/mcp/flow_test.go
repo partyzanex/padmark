@@ -144,7 +144,7 @@ func (s *MCPFlowSuite) checkLinkLifecycle(sess *mcpsdk.ClientSession) {
 }
 
 // TestAnonymous_PublicCreateAndPrivateAccessDenied exercises the unauthenticated path:
-// public create/read work; a privacy=owner note answers the remediation error text.
+// public create/read work; a privacy=authenticated note answers the remediation error text.
 func (s *MCPFlowSuite) TestAnonymous_PublicCreateAndPrivateAccessDenied() {
 	t := s.T()
 	ctx := t.Context()
@@ -162,17 +162,17 @@ func (s *MCPFlowSuite) TestAnonymous_PublicCreateAndPrivateAccessDenied() {
 	pub := callOutput(ctx, t, sess, "get_note", map[string]any{"id": resultID(created)})
 	require.False(t, pub.IsError, toolText(pub))
 
-	gated := domain.PrivacyAuthenticated
-	gatedNote, err := stack.notes.Create(ctx, &domain.Note{
-		Title: "gated", Content: "owner-only", Privacy: &gated,
+	private := domain.PrivacyAuthenticated
+	privateNote, err := stack.notes.Create(ctx, &domain.Note{
+		Title: "private", Content: "owner-only", Privacy: &private,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		OwnerID: nil, ID: "", ContentType: nil, EditCode: "",
 		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	})
 	require.NoError(t, err)
 
-	denied := callOutput(ctx, t, sess, "get_note", map[string]any{"id": gatedNote.ID})
-	require.True(t, denied.IsError, "a privacy=owner note is refused to an anonymous caller")
+	denied := callOutput(ctx, t, sess, "get_note", map[string]any{"id": privateNote.ID})
+	require.True(t, denied.IsError, "a privacy=authenticated note is refused to an anonymous caller")
 	require.Contains(t, toolText(denied), "unauthorized",
 		"the failure text carries the remediation (configure a token or use edit_code)")
 }

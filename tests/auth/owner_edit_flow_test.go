@@ -194,7 +194,7 @@ func postNote(t *testing.T, baseURL, bearerKey, body string) createdNote {
 	return note
 }
 
-// ── GET /edit/{id} privacy gate ──.
+// ── GET /edit/{id} privacy check ──.
 
 // editPageCaller is one way of asking for the edit page: which credential is presented, and
 // whether the client looks like a browser (Accept: text/html) or an API client.
@@ -204,8 +204,8 @@ type editPageCaller struct {
 	bearer string
 }
 
-// getEditPage requests the edit page without following redirects, so the gate's own response is
-// observed rather than whatever /login renders afterwards. Returns the response and its body.
+// getEditPage requests the edit page without following redirects, so the response of the privacy
+// check is observed rather than whatever /login renders afterwards. Returns the response and its body.
 func getEditPage(t *testing.T, baseURL, noteID string, caller editPageCaller) (int, http.Header, string) {
 	t.Helper()
 
@@ -235,7 +235,7 @@ func getEditPage(t *testing.T, baseURL, noteID string, caller editPageCaller) (i
 	return resp.StatusCode, resp.Header, string(raw)
 }
 
-// TestEditPage_PrivacyGate exercises GET /edit/{id} through the real HTTP stack for
+// TestEditPage_ContentOnlyForReaders exercises GET /edit/{id} through the real HTTP stack for
 // every combination of note privacy and caller. The editor page renders a note's decrypted
 // plaintext into the form, so it is a read surface: whoever cannot read a note via GET
 // /notes/{id} must not reach its content here either.
@@ -247,7 +247,7 @@ func getEditPage(t *testing.T, baseURL, noteID string, caller editPageCaller) (i
 // signed-in browser that still may not read gets 403 (it holds the wrong credential, not none),
 // and a non-HTML client gets 401.
 // Only an end-to-end request shows which of the three applies.
-func (s *OwnerFlowSuite) TestEditPage_PrivacyGate() {
+func (s *OwnerFlowSuite) TestEditPage_ContentOnlyForReaders() {
 	t := s.T()
 	env := s.env
 	ownerKey, otherKey := ownerAndOtherKeys(t, env)
@@ -294,7 +294,7 @@ type editPageCase struct {
 	reachesContent bool
 }
 
-// editPageCases returns the callers of TestEditPage_PrivacyGate for each note privacy level.
+// editPageCases returns the callers of TestEditPage_ContentOnlyForReaders for each note privacy level.
 func editPageCases(ownerKey, otherKey string) map[string][]editPageCase {
 	anonBrowser := editPageCaller{name: "anonymous browser", accept: "text/html", bearer: ""}
 	anonAPI := editPageCaller{name: "anonymous api client", accept: "application/json", bearer: ""}

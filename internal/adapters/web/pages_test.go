@@ -14,7 +14,9 @@ import (
 
 // ── IndexPage ──.
 
-func (s *HandlerSuite) TestIndexPage() {
+// TestIndexPage_ShowsNewNoteEditor: GET / shows the editor of a new note. A new note has no
+// stored format, so the preview uses Markdown (an empty data-content-type).
+func (s *HandlerSuite) TestIndexPage_ShowsNewNoteEditor() {
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
 
@@ -24,6 +26,7 @@ func (s *HandlerSuite) TestIndexPage() {
 	s.Contains(w.Header().Get("Content-Type"), "text/html")
 	s.Contains(w.Body.String(), "Padmark")
 	s.Contains(w.Body.String(), "Publish")
+	s.Contains(w.Body.String(), `data-content-type=""`)
 }
 
 // TestCreateLinkPage_AnonymousWithAccounts: with accounts a signed-out user sees the protected
@@ -327,15 +330,6 @@ func (s *HandlerSuite) TestAPIDocsPage_WriteFail() {
 	r := httptest.NewRequest(http.MethodGet, "/api", nil)
 
 	handler.APIDocsPage(fw, r)
-
-	s.NotNil(fw)
-}
-
-func (s *HandlerSuite) TestAPISpec_WriteFail() {
-	fw := newFailWriter()
-	r := httptest.NewRequest(http.MethodGet, "/api/openapi.yaml", nil)
-
-	web.APISpec(discardLog())(fw, r)
 
 	s.NotNil(fw)
 }
