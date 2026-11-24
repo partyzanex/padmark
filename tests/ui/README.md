@@ -76,6 +76,10 @@ The nested module is excluded from root `go test ./...`; run browser tests expli
 Headed and debug runs skip screenshot comparisons: the references come from headless
 Chromium, and the full headed browser renders fonts and scrollbars differently. `-update`
 with `-headed` is refused for the same reason.
+On macOS every page gets `scrollbar-width: none`. macOS selects overlay or classic scrollbars
+from the pointing device and the system setting, and only classic scrollbars reserve the
+`scrollbar-gutter` space, so without this rule the macOS references would depend on the machine.
+Linux headless Chromium always uses classic scrollbars, so the Linux references keep that space.
 
 ## Writing scenarios
 

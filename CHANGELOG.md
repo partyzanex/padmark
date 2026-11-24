@@ -273,6 +273,8 @@ v0.5.0 follows **v0.4.0**.
 
 ### Tests
 
+- The browser tests on macOS no longer depend on the scrollbar setting of the system: every
+  page gets `scrollbar-width: none`, and the macOS desktop references have no scrollbar space.
 - 21 duplicate tests are removed from the notes, links and files usecases and the web handlers;
   each kept test has the assertions of the removed ones. Test helpers, variables and files that
   named removed APIs have the current names (`mutation_gate_test.go` is `mutation_error_test.go`).

@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -23,6 +24,17 @@ import (
 	"github.com/pquerna/otp/totp"
 	"github.com/stretchr/testify/require"
 )
+
+// macScrollbarStyle removes the scrollbars and their reserved space on every page. macOS selects
+// overlay or classic scrollbars from the pointing device and the system setting, and only classic
+// ones reserve the scrollbar-gutter of the page, so the layout width would depend on the machine.
+// A constructed style sheet is not subject to the page CSP. Linux headless Chromium always uses
+// classic scrollbars, so Linux references keep the reserved space.
+const macScrollbarStyle = `(() => {
+	const sheet = new CSSStyleSheet();
+	sheet.replaceSync('* { scrollbar-width: none; }');
+	document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+})()`
 
 const (
 	bootstrapToken = "padmark-ui-only-bootstrap-token-1234567890"
@@ -149,6 +161,11 @@ func newUI(t *testing.T, screen viewport, test scenario) *uiSession {
 		StrictSelectors: nil,
 	})
 	require.NoError(t, err)
+
+	if runtime.GOOS == "darwin" {
+		require.NoError(t, context.AddInitScript(playwright.Script{Content: new(macScrollbarStyle), Path: nil}))
+	}
+
 	context.SetDefaultTimeout(5_000)
 
 	if os.Getenv("PWDEBUG") != "" {
