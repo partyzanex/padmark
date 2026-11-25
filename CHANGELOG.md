@@ -116,10 +116,11 @@ v0.5.0 follows **v0.4.0**.
   Manager is called. A note view needs one database read; a short link or a file page needs two.
 - Error messages name each operation once; account repository errors start with the database
   dialect, and file errors name the hashed record ID.
-- The "On this page" sidebar follows the new design: numbered H2 and H3 rows, H4 rows without a
-  number, only the current section expanded ("Expand all" expands all), two-line names, a list
-  that follows scrolling, and "Back to top". On a phone the block stays at the top of the screen
-  and the note has no card frame. Note text: h3 is 20px, h4 uses the interface font at 15px.
+- The "On this page" sidebar follows the new design: H2, H3 and H4 rows without numbers, so the
+  names get the full width of the row, only the current section expanded ("Expand all" expands
+  all), two-line names, a list that follows scrolling, and "Back to top". On a phone the block
+  stays at the top of the screen and the note has no card frame. Note text: h3 is 20px, h4 uses
+  the interface font at 15px.
 - Notes, short links and files check privacy, expiry and burn intent inside their usecase with
   one reader value. PUT and DELETE check privacy on the same stored record that they change; a
   hidden record gives `401`. Without accounts, the Edit link of an owner-only note shows and

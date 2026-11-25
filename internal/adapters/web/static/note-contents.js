@@ -93,22 +93,8 @@
     stack.push(entry);
   });
 
-  function number(entry) {
-    if (!entry.parent) {
-      return String(roots.indexOf(entry) + 1);
-    }
-
-    if (entry.parent === entry.root && entry.level === 3) {
-      var siblings = entry.parent.children.filter(function (child) { return child.level === 3; });
-
-      return number(entry.parent) + "." + (siblings.indexOf(entry) + 1);
-    }
-
-    // An h4 has no number in the list.
-    return "";
-  }
-
-  // kind gives the row style: a section row, a numbered subsection row or an h4 row.
+  // kind gives the row style: a section row, a subsection row or an h4 row. The rows have no
+  // numbers: a heading often has its own number, and the label gets the full width of the row.
   function kind(entry) {
     if (!entry.parent) {
       return "h2";
@@ -131,17 +117,12 @@
     link.href = "#" + name;
     link.title = text;
 
-    var num = document.createElement("span");
-    num.className = "note-toc-num";
-    num.textContent = number(entry);
-    num.setAttribute("aria-hidden", "true");
-
     // One element for the label: it clamps the text to two lines, and as loose flex items the
     // text pieces would lose their spaces at a formula.
     var label = document.createElement("span");
     label.className = "note-toc-label";
     label.appendChild(headingLabel(entry.heading));
-    link.append(num, label);
+    link.appendChild(label);
     link.addEventListener("click", function (event) {
       // Close the phone drop-down first: it is in the page flow, and its height moves the target.
       setDropDown(false);

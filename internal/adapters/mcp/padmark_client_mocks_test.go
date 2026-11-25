@@ -13,9 +13,8 @@ import (
 	io "io"
 	reflect "reflect"
 
-	gomock "go.uber.org/mock/gomock"
-
 	client "github.com/partyzanex/padmark/pkg/client"
+	gomock "go.uber.org/mock/gomock"
 )
 
 // MockPadmarkClient is a mock of PadmarkClient interface.

@@ -2012,20 +2012,10 @@ a.copy-value:hover { color: var(--accent-text); }
     flex: 1;
     min-width: 0;
     display: flex;
-    align-items: baseline;
-    gap: 8px;
     padding: 6px 8px;
     border-radius: 7px;
     font-size: 13px;
     line-height: 1.35;
-    color: var(--muted);
-}
-
-.note-toc-num {
-    flex: none;
-    min-width: 22px;
-    font-family: var(--font-mono);
-    font-size: 11px;
     color: var(--muted);
 }
 
@@ -2042,7 +2032,6 @@ a.copy-value:hover { color: var(--accent-text); }
 
 .note-toc-item--h2 > .note-toc-row > .note-toc-link { color: var(--ink-2); font-weight: 500; }
 .note-toc-item--h4 > .note-toc-row > .note-toc-link { padding-left: 20px; font-size: 12px; }
-.note-toc-item--h4 > .note-toc-row .note-toc-num { display: none; }
 
 .note-toc-expand {
     flex: none;
@@ -2082,11 +2071,9 @@ a.copy-value:hover { color: var(--accent-text); }
 .note-toc-all:hover,
 .note-toc-top:hover { color: var(--ink); background: var(--sunken); }
 
-/* The section of the current row: a bold H2 row with the number in the accent color. */
+/* The section of the current row: a bold H2 row. */
 .note-toc-item--section > .note-toc-row > .note-toc-link { color: var(--ink); font-weight: 600; }
-.note-toc-item--section > .note-toc-row .note-toc-num { color: var(--accent-text); }
 .note-toc .note-toc-link.active { color: var(--accent-text); background: var(--accent-soft); font-weight: 500; }
-.note-toc .note-toc-link.active .note-toc-num { color: var(--accent-text); }
 /* A formula in a heading (static/math.js) keeps the size of the link text in the list. */
 .note-toc .katex { font-size: 1em; }
 

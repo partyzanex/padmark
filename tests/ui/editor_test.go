@@ -602,12 +602,9 @@ func testContentsSidebar(sess *uiSession) {
 	sess.expectMenuOverContents()
 	sess.openContents()
 
-	// H2 rows are numbered "1", "2", H3 rows "1.1"; H4 rows have no number; H5 is not in the list.
-	sess.must(sess.expect.Locator(sess.page.Locator(".note-toc-label")).ToHaveText(contentsLabels()))
-	sess.must(sess.expect.Locator(sess.page.Locator(".note-toc-num")).ToHaveText(
-		[]string{"1", "1.1", "", "1.2", "2", "2.1", "3"}))
+	// The rows have no numbers: the label is the only text of a row. H5 is not in the list.
+	sess.must(sess.expect.Locator(sess.page.Locator(".note-toc-link")).ToHaveText(contentsLabels()))
 	sess.must(sess.expect.Locator(sess.page.Locator(".note-toc-item--h4 .note-toc-label")).ToHaveText("Fine point"))
-	sess.must(sess.expect.Locator(sess.page.Locator(".note-toc-item--h4 .note-toc-num")).ToBeHidden())
 	// Only the section that the reader is in is expanded.
 	sess.must(sess.expect.Locator(sess.visibleContents()).ToHaveText(
 		[]string{"First part", "Detail", "Fine point", contentsLongHeading, "Second part", "Third part"}))
