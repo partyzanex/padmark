@@ -31,6 +31,10 @@ func (sess *uiSession) screenshot(name string, masks ...string) {
 			const icon = tag.querySelector('svg');
 			tag.replaceChildren(...(icon ? [icon] : []), document.createTextNode(' Oct 24, 2026, 12:00 PM'));
 		}
+		// An expiry chip, for example "Expires Nov 20, 2026", shows the date of the run.
+		for (const chip of document.querySelectorAll('.chip-text')) {
+			chip.textContent = chip.textContent.replace(/\b[A-Z][a-z]{2} \d{1,2}, \d{4}\b/g, 'Oct 24, 2026');
+		}
 	}`)
 
 	options := playwright.PageScreenshotOptions{

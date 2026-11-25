@@ -7,32 +7,39 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 )
+
+type CreateTokenSuite struct {
+	suite.Suite
+}
+
+func TestCreateTokenSuite(t *testing.T) {
+	suite.Run(t, new(CreateTokenSuite))
+}
 
 // TestCreateToken_RequiresTOTPCodeBeforeAnyRequest: the CLI always authenticates with a bearer
 // key, which may issue only with a step-up, so a missing --totp-code fails locally.
-func TestCreateToken_RequiresTOTPCodeBeforeAnyRequest(t *testing.T) {
+func (s *CreateTokenSuite) TestCreateToken_RequiresTOTPCodeBeforeAnyRequest() {
 	for _, command := range []string{"create-token", "create-invite"} {
-		t.Run(command, func(t *testing.T) {
-			isolateEnv(t)
+		s.Run(command, func() {
+			isolateEnv(s.T())
 
 			var hits atomic.Int32
 
 			srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { hits.Add(1) }))
 			defer srv.Close()
 
-			err := runCLI(t.Context(), "--url", srv.URL, "--token", "bare-key", command, "--password", "pw")
-			require.ErrorIs(t, err, errStepUpNoTOTPCode)
-			assert.Zero(t, hits.Load(), "no request may be sent without a step-up")
+			err := runCLI(s.T().Context(), "--url", srv.URL, "--token", "bare-key", command, "--password", "pw")
+			s.Require().ErrorIs(err, errStepUpNoTOTPCode)
+			s.Zero(hits.Load(), "no request may be sent without a step-up")
 		})
 	}
 }
 
 // TestCreateToken_SendsStepUpAndLifetime: the step-up and the lifetime reach the server body.
-func TestCreateToken_SendsStepUpAndLifetime(t *testing.T) {
-	isolateEnv(t)
+func (s *CreateTokenSuite) TestCreateToken_SendsStepUpAndLifetime() {
+	isolateEnv(s.T())
 
 	var got struct {
 		TTLDays  int    `json:"ttl_days"`
@@ -41,7 +48,7 @@ func TestCreateToken_SendsStepUpAndLifetime(t *testing.T) {
 	}
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.NoError(t, json.NewDecoder(r.Body).Decode(&got))
+		s.NoError(json.NewDecoder(r.Body).Decode(&got))
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
@@ -49,17 +56,17 @@ func TestCreateToken_SendsStepUpAndLifetime(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	require.NoError(t, runCLI(t.Context(), "--url", srv.URL, "--token", "bare-key", "create-token",
+	s.Require().NoError(runCLI(s.T().Context(), "--url", srv.URL, "--token", "bare-key", "create-token",
 		"--password", "pw", "--totp-code", "123456", "--ttl-days", "90"))
 
-	assert.Equal(t, 90, got.TTLDays)
-	assert.Equal(t, "pw", got.Password)
-	assert.Equal(t, "123456", got.TOTPCode)
+	s.Equal(90, got.TTLDays)
+	s.Equal("pw", got.Password)
+	s.Equal("123456", got.TOTPCode)
 }
 
 // TestCreateToken_StepUpRefusalIsReported: a 403 from the step-up rule is surfaced, not swallowed.
-func TestCreateToken_StepUpRefusalIsReported(t *testing.T) {
-	isolateEnv(t)
+func (s *CreateTokenSuite) TestCreateToken_StepUpRefusalIsReported() {
+	isolateEnv(s.T())
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -68,7 +75,7 @@ func TestCreateToken_StepUpRefusalIsReported(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	err := runCLI(t.Context(), "--url", srv.URL, "--token", "bare-key", "create-token",
+	err := runCLI(s.T().Context(), "--url", srv.URL, "--token", "bare-key", "create-token",
 		"--password", "pw", "--totp-code", "000000")
-	require.ErrorContains(t, err, "step-up refused: re-authentication failed")
+	s.Require().ErrorContains(err, "step-up refused: re-authentication failed")
 }

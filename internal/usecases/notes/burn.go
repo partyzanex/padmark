@@ -19,43 +19,24 @@ type burner struct {
 	storage   Storage
 	encryptor Encryptor
 	log       *slog.Logger
+	now       func() time.Time
 }
 
-func newBurner(storage Storage, encryptor Encryptor, log *slog.Logger) *burner {
-	return &burner{storage: storage, encryptor: encryptor, log: log}
+func newBurner(deps *Deps) *burner {
+	return &burner{storage: deps.Storage, encryptor: deps.Encryptor, log: deps.Log, now: deps.Now}
 }
 
-// applyPolicy applies expiry and burn-after-reading logic to an already-fetched note. Plain
-// TTL expiry and burn-timer expiry share the same ExpiresAt field, so both are enforced here
-// in one pass rather than split across two call sites.
-func (b *burner) applyPolicy(ctx context.Context, id string, note *domain.Note) (*domain.Note, error) {
-	err := b.enforceExpiry(ctx, id, note)
-	if err != nil {
-		return nil, fmt.Errorf("enforce expiry: %w", err)
-	}
-
-	if note.BurnAfterReading {
-		operationResult, operationErr := b.burnNote(ctx, id, note)
-		if operationErr != nil {
-			return operationResult, fmt.Errorf("burn note: %w", operationErr)
-		}
-
-		return operationResult, nil
-	}
-
-	return note, nil
-}
-
-// enforceExpiry is the expiry half of applyPolicy: an expired note (plain TTL or a started burn
-// timer) is deleted and ErrExpired returned. It never consumes a note or starts a burn timer.
+// enforceExpiry is the expiry rule of a read: an expired note (plain TTL or a started burn timer)
+// is deleted and ErrExpired returned. It never consumes a note or starts a burn timer.
 // The delete checks the expiry again in storage, because the snapshot can be old: if the owner
 // has extended the note since, the row stays and only this request sees the note as expired.
 func (b *burner) enforceExpiry(ctx context.Context, id string, note *domain.Note) error {
-	if note.ExpiresAt == nil || !time.Now().After(*note.ExpiresAt) {
+	now := b.now()
+	if !note.Expired(now) {
 		return nil
 	}
 
-	delErr := b.storage.DeleteExpired(ctx, domain.HashSlug(id))
+	delErr := b.storage.DeleteExpired(ctx, domain.HashSlug(id), now)
 	if errors.Is(delErr, domain.ErrNotFound) {
 		b.log.DebugContext(ctx, "expired note already deleted or extended", "id", domain.HashSlug(id))
 	} else if delErr != nil {
@@ -83,17 +64,16 @@ func (b *burner) applyViewIncrement(ctx context.Context, id string, note *domain
 	}
 }
 
+// burnNote applies burn-after-reading to a note that the reader may burn: a note with a burn TTL
+// starts its timer, any other burn note is consumed.
 func (b *burner) burnNote(ctx context.Context, id string, note *domain.Note) (*domain.Note, error) {
 	if note.BurnTTL > 0 {
-		operationResult, operationErr := b.startTimer(ctx, id, note)
-		if operationErr != nil {
-			return operationResult, fmt.Errorf("start timer: %w", operationErr)
-		}
-
-		return operationResult, nil
+		return b.startTimer(ctx, id, note)
 	}
 
-	consumed, consumeErr := b.storage.Consume(ctx, domain.HashSlug(id), note.EffectivePrivacy())
+	consumed, consumeErr := b.storage.Consume(
+		ctx, domain.HashSlug(id), note.EffectivePrivacy(), note.EditCode, b.now(),
+	)
 	if consumeErr != nil {
 		return nil, fmt.Errorf("burn after reading: %w", consumeErr)
 	}
@@ -102,7 +82,7 @@ func (b *burner) burnNote(ctx context.Context, id string, note *domain.Note) (*d
 
 	decErr := decryptContent(ctx, b.encryptor, b.log, consumed)
 	if decErr != nil {
-		return nil, fmt.Errorf("burn after reading: %w", decErr)
+		return nil, decErr
 	}
 
 	b.log.DebugContext(ctx, "note burned", "id", domain.HashSlug(id))
@@ -111,25 +91,20 @@ func (b *burner) burnNote(ctx context.Context, id string, note *domain.Note) (*d
 }
 
 func (b *burner) startTimer(ctx context.Context, id string, note *domain.Note) (*domain.Note, error) {
-	expiresAt := time.Now().UTC().Add(time.Duration(note.BurnTTL) * time.Second)
+	expiresAt := b.now().UTC().Add(time.Duration(note.BurnTTL) * time.Second)
 
 	expected := note.EffectivePrivacy()
 
-	updated, burnErr := b.storage.SetBurnExpiry(ctx, domain.HashSlug(id), expiresAt, expected)
+	updated, burnErr := b.storage.SetBurnExpiry(ctx, domain.HashSlug(id), expiresAt, expected, note.EditCode)
 	if burnErr != nil {
-		operationResult, operationErr := b.handleSetExpiryErr(ctx, id, expected, burnErr)
-		if operationErr != nil {
-			return operationResult, fmt.Errorf("handle set expiry err: %w", operationErr)
-		}
-
-		return operationResult, nil
+		return b.handleSetExpiryErr(ctx, id, note, burnErr)
 	}
 
 	updated.ID = id
 
 	decErr := decryptContent(ctx, b.encryptor, b.log, updated)
 	if decErr != nil {
-		return nil, fmt.Errorf("burn after reading: %w", decErr)
+		return nil, decErr
 	}
 
 	b.log.DebugContext(ctx, "burn timer started", "id", domain.HashSlug(id), "expires_at", expiresAt)
@@ -138,10 +113,11 @@ func (b *burner) startTimer(ctx context.Context, id string, note *domain.Note) (
 }
 
 // handleSetExpiryErr serves a note whose timer a concurrent reader already started. It returns
-// the current row only while its privacy is still expected: a changed access level means the
-// reader's check no longer applies, so the read fails as not found.
+// the current row only while it is still the checked note (same stored edit-code hash) with the
+// same privacy: a changed access level or a new note with this ID means the reader's check no
+// longer applies, so the read fails as not found.
 func (b *burner) handleSetExpiryErr(
-	ctx context.Context, id string, expected domain.Privacy, burnErr error,
+	ctx context.Context, id string, checked *domain.Note, burnErr error,
 ) (*domain.Note, error) {
 	if !errors.Is(burnErr, domain.ErrNotFound) {
 		return nil, fmt.Errorf("burn after reading: %w", burnErr)
@@ -152,7 +128,7 @@ func (b *burner) handleSetExpiryErr(
 		return nil, fmt.Errorf("burn after reading (re-fetch): %w", getErr)
 	}
 
-	if current.EffectivePrivacy() != expected {
+	if current.EditCode != checked.EditCode || current.EffectivePrivacy() != checked.EffectivePrivacy() {
 		return nil, fmt.Errorf("burn after reading (re-fetch): %w", domain.ErrNotFound)
 	}
 
@@ -160,7 +136,7 @@ func (b *burner) handleSetExpiryErr(
 
 	decErr := decryptContent(ctx, b.encryptor, b.log, current)
 	if decErr != nil {
-		return nil, fmt.Errorf("burn after reading (re-fetch): %w", decErr)
+		return nil, decErr
 	}
 
 	return current, nil

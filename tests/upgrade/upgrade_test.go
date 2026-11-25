@@ -17,11 +17,12 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 	"github.com/uptrace/bun"
 
 	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/infra/crypto"
-	"github.com/partyzanex/padmark/internal/infra/lock"
+	"github.com/partyzanex/padmark/internal/infra/expiredslugs"
 	"github.com/partyzanex/padmark/internal/infra/render"
 	keyrepo "github.com/partyzanex/padmark/internal/infra/storage/contentkeys"
 	"github.com/partyzanex/padmark/internal/testutil"
@@ -31,10 +32,19 @@ import (
 
 var hashedID = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
-// repositories are the dialect's notes storage and link checker, as wired by serve.
+// UpgradeSuite replays the upgrade from the v0.1.6 dumps on each backend.
+type UpgradeSuite struct {
+	suite.Suite
+}
+
+func TestUpgradeSuite(t *testing.T) {
+	suite.Run(t, new(UpgradeSuite))
+}
+
+// repositories are the dialect's note and link storage, as wired by serve.
 type repositories struct {
 	notes notes.Storage
-	links notes.LinksChecker
+	links expiredslugs.RecordExpirer
 }
 
 // runUpgrade runs on a database loaded from the fixture dump and already brought to the
@@ -47,13 +57,16 @@ func runUpgrade(t *testing.T, db *bun.DB, repos repositories, fixture []legacyNo
 	convertContent(t, db, fixture)
 	assertStoredRowsConverted(t, db, fixture)
 
-	manager := notes.NewManager(repos.notes, repos.links, lock.NewLocker(), render.NewRenderer(),
-		testutil.ContentEncryptor(t, "note"), crypto.NewEditCodeHasher(crypto.DefaultArgon2Params()),
-		slog.New(slog.DiscardHandler), true)
+	manager := notes.NewManager(&notes.Deps{
+		Storage: repos.notes, Renderer: render.NewRenderer(), Encryptor: testutil.ContentEncryptor(t, "note"),
+		Hasher:       crypto.NewEditCodeHasher(testutil.Argon2Params(), slog.New(slog.DiscardHandler)),
+		ExpiredSlugs: expiredslugs.New(repos.notes, repos.links), Log: slog.New(slog.DiscardHandler),
+		Now: time.Now,
+	}, domain.DefaultMaxContentLength, true)
 
 	assertNotesReadable(t, manager, fixture)
 	assertEditCodes(t, manager, fixture)
-	assertLifecycle(t, manager, fixture)
+	assertLifecycle(t, manager, repos.notes, fixture)
 }
 
 // newKeyManager wires contentkeys.Manager like `padmark-server encryption`, with the keyring
@@ -69,8 +82,11 @@ func newKeyManager(t *testing.T, db *bun.DB) *contentkeys.Manager {
 	linkCipher, err := ring.ForResource("link")
 	require.NoError(t, err)
 
-	return contentkeys.New(keyrepo.New(db), ring, noteCipher, linkCipher,
-		crypto.NewEditCodeHasher(crypto.DefaultArgon2Params()))
+	fileCipher, err := ring.ForResource("file")
+	require.NoError(t, err)
+
+	return contentkeys.New(keyrepo.New(db), ring, noteCipher, linkCipher, fileCipher,
+		crypto.NewEditCodeHasher(testutil.Argon2Params(), slog.New(slog.DiscardHandler)))
 }
 
 // assertSchemaKeepsLegacyRows: schema migrations must neither expire nor rewrite v0.1.6 rows;
@@ -252,7 +268,8 @@ func assertStoredRowsConverted(t *testing.T, db *bun.DB, fixture []legacyNote) {
 	}
 }
 
-// assertNotesReadable compares every surviving note with the fixture without any read side effect.
+// assertNotesReadable compares every surviving note with the fixture without any read side effect:
+// Inspect does not burn a note and does not count a view.
 func assertNotesReadable(t *testing.T, manager *notes.Manager, fixture []legacyNote) {
 	t.Helper()
 
@@ -264,7 +281,7 @@ func assertNotesReadable(t *testing.T, manager *notes.Manager, fixture []legacyN
 		want := &fixture[i]
 
 		t.Run("read/"+want.title, func(t *testing.T) {
-			got, err := manager.Peek(t.Context(), want.slug)
+			got, err := manager.Inspect(t.Context(), want.slug, openReader())
 			require.NoError(t, err)
 
 			assert.Equal(t, want.title, got.Title)
@@ -303,7 +320,7 @@ func assertEditCodes(t *testing.T, manager *notes.Manager, fixture []legacyNote)
 	} {
 		note := &fixture[index]
 		update := func(code string) error {
-			_, err := manager.Update(t.Context(), note.slug, code, uuid.Nil, &domain.Note{
+			_, err := manager.Update(t.Context(), note.slug, code, openReader(), &domain.Note{
 				Title: note.title + " (edited)", Content: "edited after the upgrade",
 
 				CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
@@ -319,41 +336,48 @@ func assertEditCodes(t *testing.T, manager *notes.Manager, fixture []legacyNote)
 		require.ErrorIs(t, update(""), domain.ErrInvalidEditCode, note.title)
 		require.NoError(t, update(note.editCode), "the v0.1.6 edit code of %q must still work", note.title)
 
-		edited, err := manager.Peek(t.Context(), note.slug)
+		edited, err := manager.Inspect(t.Context(), note.slug, openReader())
 		require.NoError(t, err)
 		require.Equal(t, "edited after the upgrade", edited.Content)
 	}
 }
 
-// assertLifecycle checks burn, expiry and view semantics survive the conversion.
-func assertLifecycle(t *testing.T, manager *notes.Manager, fixture []legacyNote) {
+// openReader is the reader of a v0.1.6 server: no account system, so no privacy check, and a
+// deliberate access that may burn a note.
+func openReader() domain.Reader {
+	return domain.Reader{CallerID: uuid.Nil, Authenticated: false, AllowBurn: true, SkipPrivacy: true}
+}
+
+// assertLifecycle checks burn, expiry and view semantics survive the conversion. It reads storage
+// to check that the expired note is gone, because a Manager read applies the expiry rule.
+func assertLifecycle(t *testing.T, manager *notes.Manager, storage notes.Storage, fixture []legacyNote) {
 	t.Helper()
 
 	ctx := t.Context()
 
 	burn := &fixture[noteBurn]
-	read, err := manager.Get(ctx, burn.slug)
+	read, err := manager.Read(ctx, burn.slug, openReader())
 	require.NoError(t, err)
 	require.Equal(t, burn.content, read.Content)
-	_, err = manager.Get(ctx, burn.slug)
+	_, err = manager.Read(ctx, burn.slug, openReader())
 	require.ErrorIs(t, err, domain.ErrNotFound, "a burn-after-reading note burns on its first read")
 
 	farFuture := &fixture[noteFarFuture]
-	read, err = manager.Get(ctx, farFuture.slug)
+	read, err = manager.Read(ctx, farFuture.slug, openReader())
 	require.NoError(t, err)
 	require.Equal(t, farFuture.content, read.Content)
 	require.NotNil(t, read.ExpiresAt)
 	require.True(t, parseTime(t, farFuture.expiresAt).Equal(*read.ExpiresAt))
 
 	expired := &fixture[noteExpired]
-	_, err = manager.Get(ctx, expired.slug)
+	_, err = manager.Read(ctx, expired.slug, openReader())
 	require.True(t, errors.Is(err, domain.ErrExpired) || errors.Is(err, domain.ErrNotFound),
 		"an expired v0.1.6 note must not be revived, got %v", err)
-	_, err = manager.Peek(ctx, expired.slug)
+	_, err = storage.Get(ctx, domain.HashSlug(expired.slug))
 	require.ErrorIs(t, err, domain.ErrNotFound)
 
 	viewed := &fixture[noteViewed]
-	read, err = manager.View(ctx, viewed.slug)
+	read, err = manager.Read(ctx, viewed.slug, openReader())
 	require.NoError(t, err)
 	require.Equal(t, viewed.views+1, read.Views)
 }

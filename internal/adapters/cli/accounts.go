@@ -4,13 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 
 	urcli "github.com/urfave/cli/v3"
 
+	"github.com/partyzanex/padmark/internal/clientauth"
 	"github.com/partyzanex/padmark/internal/clifactory"
-	"github.com/partyzanex/padmark/internal/errorcontext"
 	padmark "github.com/partyzanex/padmark/pkg/client"
 )
 
@@ -72,7 +73,7 @@ func createTokenCommand() *urcli.Command {
 }
 
 func createTokenAction(ctx context.Context, cmd *urcli.Command) error {
-	apiClient, err := newPadmarkClient(cmd)
+	apiClient, _, err := clientauth.NewClient(clientSettings(cmd))
 	if err != nil {
 		return fmt.Errorf("create API client: %w", err)
 	}
@@ -82,11 +83,16 @@ func createTokenAction(ctx context.Context, cmd *urcli.Command) error {
 		return fmt.Errorf("read step up: %w", err)
 	}
 
-	res, clientErr := apiClient.CreateAPIToken(ctx, padmark.NewOptCreateAPITokenRequest(padmark.CreateAPITokenRequest{
+	callCtx, cancel := requestContext(ctx, cmd)
+	defer cancel()
+
+	req := padmark.NewOptCreateAPITokenRequest(padmark.CreateAPITokenRequest{
 		TTLDays:  padmark.NewOptInt(cmd.Int(FlagTTLDays)),
 		Password: padmark.NewOptString(password),
 		TotpCode: padmark.NewOptString(totpCode),
-	}))
+	})
+
+	res, clientErr := apiClient.CreateAPIToken(callCtx, req)
 	if clientErr != nil {
 		return fmt.Errorf("create token: %w", clientErr)
 	}
@@ -115,26 +121,15 @@ func createTokenAction(ctx context.Context, cmd *urcli.Command) error {
 }
 
 func handleCreateAPITokenRes(res padmark.CreateAPITokenRes) (string, error) {
-	switch typed := res.(type) {
-	case *padmark.CreateAPITokenResponse:
+	if typed, ok := res.(*padmark.CreateAPITokenResponse); ok {
 		return typed.Token, nil
-	case *padmark.CreateAPITokenUnauthorized:
-		return "", fmt.Errorf("%w: %s", ErrUnauthorized, typed.Message)
-	case *padmark.CreateAPITokenForbidden:
-		return "", fmt.Errorf("%w: %s", ErrStepUpRefused, typed.Message)
-	case *padmark.CreateAPITokenUnprocessableEntity:
-		return "", fmt.Errorf("%w: %s", ErrInvalidRequest, typed.Message)
-	case *padmark.CreateAPITokenTooManyRequests:
-		return "", fmt.Errorf("%w: %s", ErrTokenLimit, typed.Message)
-	case *padmark.CreateAPITokenServiceUnavailable:
-		return "", errorcontext.Wrap(
-			serviceUnavailableError(padmark.ErrorResponse(*typed)), "decode create API token response",
-		)
-	case *padmark.CreateAPITokenInternalServerError:
-		return "", fmt.Errorf("%w: %s", ErrServer, typed.Message)
-	default:
-		return "", fmt.Errorf("%w: %T", ErrUnexpectedResponse, res)
 	}
+
+	return "", responseError(res, accountRecord(), statusRules{
+		http.StatusForbidden:           withMessage(ErrStepUpRefused),
+		http.StatusUnprocessableEntity: withMessage(ErrInvalidRequest),
+		http.StatusTooManyRequests:     withMessage(ErrTokenLimit),
+	})
 }
 
 func createInviteCommand() *urcli.Command {
@@ -151,7 +146,7 @@ func createInviteCommand() *urcli.Command {
 }
 
 func createInviteAction(ctx context.Context, cmd *urcli.Command) error {
-	apiClient, err := newPadmarkClient(cmd)
+	apiClient, _, err := clientauth.NewClient(clientSettings(cmd))
 	if err != nil {
 		return fmt.Errorf("create API client: %w", err)
 	}
@@ -161,7 +156,10 @@ func createInviteAction(ctx context.Context, cmd *urcli.Command) error {
 		return fmt.Errorf("read step up: %w", err)
 	}
 
-	res, clientErr := apiClient.CreateInvite(ctx, padmark.NewOptStepUpRequest(padmark.StepUpRequest{
+	callCtx, cancel := requestContext(ctx, cmd)
+	defer cancel()
+
+	res, clientErr := apiClient.CreateInvite(callCtx, padmark.NewOptStepUpRequest(padmark.StepUpRequest{
 		Password: padmark.NewOptString(password),
 		TotpCode: padmark.NewOptString(totpCode),
 	}))
@@ -192,21 +190,11 @@ func createInviteAction(ctx context.Context, cmd *urcli.Command) error {
 }
 
 func handleCreateInviteRes(res padmark.CreateInviteRes) (string, error) {
-	switch typed := res.(type) {
-	case *padmark.CreateInviteResponse:
+	if typed, ok := res.(*padmark.CreateInviteResponse); ok {
 		return typed.InviteURL.String(), nil
-	case *padmark.CreateInviteUnauthorized:
-		return "", fmt.Errorf("%w: %s", ErrUnauthorized, typed.Message)
-	case *padmark.CreateInviteForbidden:
-		return "", fmt.Errorf("%w: %s", errAdminStepUpRequired, typed.Message)
-	case *padmark.CreateInviteTooManyRequests:
-		return "", ErrRateLimited
-	case *padmark.CreateInviteServiceUnavailable:
-		return "", errorcontext.Wrap(
-			serviceUnavailableError(padmark.ErrorResponse(*typed)), "decode create invite response")
-	case *padmark.CreateInviteInternalServerError:
-		return "", fmt.Errorf("%w: %s", ErrServer, typed.Message)
-	default:
-		return "", fmt.Errorf("%w: %T", ErrUnexpectedResponse, res)
 	}
+
+	return "", responseError(res, accountRecord(), statusRules{
+		http.StatusForbidden: withMessage(errAdminStepUpRequired),
+	})
 }

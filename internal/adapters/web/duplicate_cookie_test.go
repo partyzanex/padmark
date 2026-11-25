@@ -56,15 +56,15 @@ func (s *DuplicateCookieSuite) SetupTest() {
 	manager := NewMockNoteManager(s.ctrl)
 	linkManager := NewMockLinkManager(s.ctrl)
 
-	handler := web.NewHandler(manager, linkManager, discardLog()).WithAuthManager(s.auth)
-	ogen := web.NewOgenHandler(manager, linkManager, NewMockPinger(s.ctrl), discardLog())
+	handlerCfg := testHandlerConfig(manager, linkManager, NewMockPinger(s.ctrl))
+	handlerCfg.Accounts = s.auth
+	handlerCfg.CSRFSecret = authTestCSRFSecret
+	handler := newTestHandler(s.T(), handlerCfg)
 
-	router, err := web.NewRouter(handler, ogen, &web.RouterOptions{
+	router, err := web.NewRouter(handler, &web.RouterOptions{
 		MaxBodyBytes: 256 * 1024,
-		CSRFSecret:   authTestCSRFSecret,
 
-		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, AllowedHosts: nil, RateLimit: 0,
-		RateBurst: 0, SessionTTL: 0, DisableAPI: false, DirectRedirect: false,
+		AllowedHosts: nil, RateLimit: 0, RateBurst: 0, DisableAPI: false,
 	})
 	s.Require().NoError(err)
 

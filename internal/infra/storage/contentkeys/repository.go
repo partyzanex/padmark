@@ -122,8 +122,12 @@ func (r *Repository) SetPhase(ctx context.Context, phase string) error {
 	return nil
 }
 
-// resourceNote is the only resource with v0.1.6 legacy rows and edit codes to inspect.
-const resourceNote = "note"
+const (
+	// resourceNote is the only resource with v0.1.6 legacy rows and edit codes to inspect.
+	resourceNote = "note"
+	// resourceFile is the only resource with an object in the bucket.
+	resourceFile = "file"
+)
 
 func resourceColumns(resource string) (table, column string, err error) {
 	switch resource {
@@ -131,6 +135,8 @@ func resourceColumns(resource string) (table, column string, err error) {
 		return "notes", "content", nil
 	case "link":
 		return "links", "target_url", nil
+	case resourceFile:
+		return "files", "sealed_meta", nil
 	default:
 		return "", "", errInvalidResource
 	}
@@ -172,7 +178,7 @@ func selectRows(db *bun.DB, table, column string) *bun.SelectQuery {
 func (r *Repository) Batch(ctx context.Context, resource, after string, limit int) ([]keys.Row, error) {
 	table, column, err := resourceColumns(resource)
 	if err != nil {
-		return nil, fmt.Errorf("resource columns: %w", err)
+		return nil, err
 	}
 
 	var stored []storedRow
@@ -195,7 +201,7 @@ func (r *Repository) Batch(ctx context.Context, resource, after string, limit in
 func (r *Repository) Get(ctx context.Context, resource, id string) (*keys.Row, error) {
 	table, column, err := resourceColumns(resource)
 	if err != nil {
-		return nil, fmt.Errorf("resource columns: %w", err)
+		return nil, err
 	}
 
 	var stored storedRow
@@ -219,7 +225,7 @@ func (r *Repository) Get(ctx context.Context, resource, id string) (*keys.Row, e
 func (r *Repository) Replace(ctx context.Context, row keys.Row, value string) (bool, error) {
 	table, column, err := resourceColumns(row.Resource)
 	if err != nil {
-		return false, fmt.Errorf("resource columns: %w", err)
+		return false, err
 	}
 
 	result, err := r.db.NewUpdate().Table(table).Set("? = ?", bun.Ident(column), value).
@@ -300,10 +306,16 @@ func convertError(ctx context.Context, db *bun.DB, newID string) error {
 // Delete removes exactly the invalid raw value inspected by the caller. A
 // concurrent replacement or deletion counts as a conflict, never a reason to
 // remove the new record. Errors never expose raw content or SQL parameters.
+// It refuses a file row: the record holds the only copy of the content key, and the
+// object in the bucket would stay without it.
 func (r *Repository) Delete(ctx context.Context, row keys.Row) (bool, error) {
+	if row.Resource == resourceFile {
+		return false, errFileDeleteRefused
+	}
+
 	table, column, err := resourceColumns(row.Resource)
 	if err != nil {
-		return false, fmt.Errorf("resource columns: %w", err)
+		return false, err
 	}
 
 	result, err := r.db.NewDelete().Table(table).

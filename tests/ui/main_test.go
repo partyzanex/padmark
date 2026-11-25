@@ -27,6 +27,8 @@ type testRunner struct {
 	browser    playwright.Browser
 	binary     string
 	report     report
+	// storage is the S3 mock of the file scenarios; the first file scenario starts it.
+	storage objectStorage
 }
 
 func TestMain(m *testing.M) {
@@ -95,7 +97,17 @@ func runTests(m *testing.M) int {
 		return 1
 	}
 
-	code := m.Run()
+	return finishRun(m.Run())
+}
+
+// finishRun stops the S3 mock storage and writes the report. It returns the exit code of the run.
+func finishRun(code int) int {
+	err := runner.storage.stop()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+
+		code = 1
+	}
 
 	err = runner.report.write()
 	if err != nil {

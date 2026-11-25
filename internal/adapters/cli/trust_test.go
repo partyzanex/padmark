@@ -7,9 +7,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 
+	"github.com/partyzanex/padmark/internal/clientauth"
 	"github.com/partyzanex/padmark/internal/domain"
-	"github.com/partyzanex/padmark/internal/infra/tokenfile"
 )
 
 // envelopeToken builds a pmk_ envelope token pinning baseURL.
@@ -40,7 +41,7 @@ func TestTrustCommand_RecordsEnvelopeOrigin(t *testing.T) {
 
 	require.NoError(t, runCLI(t.Context(), "--token", token, cmdTrust))
 
-	assert.True(t, tokenfile.IsKnownOrigin("https://example.com"))
+	assert.True(t, clientauth.IsKnownOrigin("https://example.com"))
 }
 
 // TestTrustCommand_RequiresSomethingToTrust verifies a bare legacy token with no --url is
@@ -63,27 +64,35 @@ func TestTrustCommand_ExplicitURLWins(t *testing.T) {
 
 	require.NoError(t, runCLI(t.Context(), "--token", token, "--url", "https://good.example", cmdTrust))
 
-	assert.True(t, tokenfile.IsKnownOrigin("https://good.example"))
-	assert.False(t, tokenfile.IsKnownOrigin("https://evil.example"))
+	assert.True(t, clientauth.IsKnownOrigin("https://good.example"))
+	assert.False(t, clientauth.IsKnownOrigin("https://evil.example"))
+}
+
+type TrustGateSuite struct {
+	suite.Suite
+}
+
+func TestTrustGateSuite(t *testing.T) {
+	suite.Run(t, new(TrustGateSuite))
 }
 
 // TestTrustedServerGate_BlocksUnknownPinnedOrigin is the core R-08 guard: a command run with
 // an envelope token pinning an untrusted server must fail before any request is sent. The
 // target server deliberately answers everything, so reaching it would mean the gate leaked.
-func TestTrustedServerGate_BlocksUnknownPinnedOrigin(t *testing.T) {
-	isolateEnv(t)
+func (s *TrustGateSuite) TestTrustedServerGate_BlocksUnknownPinnedOrigin() {
+	isolateEnv(s.T())
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer srv.Close()
 
-	token := envelopeToken(t, srv.URL)
+	token := envelopeToken(s.T(), srv.URL)
 
-	err := runCLI(t.Context(), "--token", token, cmdPing)
+	err := runCLI(s.T().Context(), "--token", token, cmdPing)
 
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "not trusted yet")
+	s.Require().Error(err)
+	s.Contains(err.Error(), "not trusted yet")
 }
 
 // TestTrustedServerGate_ExplicitURLOverridesEnvelope verifies an explicit --url is its own
@@ -97,7 +106,7 @@ func TestTrustedServerGate_ExplicitURLOverridesEnvelope(t *testing.T) {
 	token := envelopeToken(t, "https://evil.example")
 
 	require.NoError(t, runCLI(t.Context(), "--token", token, "--url", srv.URL, cmdPing))
-	assert.False(t, tokenfile.IsKnownOrigin("https://evil.example"))
+	assert.False(t, clientauth.IsKnownOrigin("https://evil.example"))
 }
 
 // TestTrustedServerGate_TrustedOriginProceeds verifies the full trust-on-first-use cycle:

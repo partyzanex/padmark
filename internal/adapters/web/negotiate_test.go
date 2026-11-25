@@ -105,7 +105,7 @@ func TestNegotiate_CaseAndSpacing(t *testing.T) {
 		negotiateFor(t, "application/json;q=0.9 , text/plain;q=0.8"))
 }
 
-// TestNegotiate_BrowsersAndMachines pins the two real-world caller shapes the privacy gate and
+// TestNegotiate_BrowsersAndMachines pins the two real-world caller shapes the privacy check and
 // the setup branch rely on: a full Chrome Accept keeps the HTML path, curl's default and an
 // explicit machine Accept keep the JSON path.
 func TestNegotiate_BrowsersAndMachines(t *testing.T) {
@@ -164,5 +164,136 @@ func TestExplicitRead(t *testing.T) {
 
 			require.Equal(t, testCase.want, explicitRead(req))
 		})
+	}
+}
+
+// TestWantsFilePage pins which GET /{id} requests for a file get the file page and which get the
+// content. A browser gets the page; curl, a missing Accept and a binary request get the content.
+func TestWantsFilePage(t *testing.T) {
+	cases := []struct {
+		name   string
+		accept string
+		raw    bool
+		page   bool
+	}{
+		{"browser navigation", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", false, true},
+		{"plain html", "text/html", false, true},
+		{"binary", "application/octet-stream", false, false},
+		{"curl wildcard", "*/*", false, false},
+		{"no accept", "", false, false},
+		{"json", "application/json", false, false},
+		{"binary preferred by q", "text/html;q=0.5, application/octet-stream", false, false},
+		{"html preferred by q", "application/octet-stream;q=0.5, text/html", false, true},
+		{"binary first at equal q", "application/octet-stream, text/html", false, false},
+		{"html first at equal q", "text/html, application/octet-stream", false, true},
+		{"raw view", "text/html", true, false},
+	}
+
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			path := "/abc"
+			if test.raw {
+				path += "?raw=1"
+			}
+
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			if test.accept != "" {
+				req.Header.Set("Accept", test.accept)
+			}
+
+			require.Equal(t, test.page, wantsFilePage(req))
+		})
+	}
+}
+
+// TestExplicitRead_Prefetch (R-17): a browser prefetch or prerender is never a read with intent,
+// also for a note or a link with a served Accept type.
+func TestExplicitRead_Prefetch(t *testing.T) {
+	cases := []struct {
+		header string
+		value  string
+		want   bool
+	}{
+		{"Sec-Purpose", "prefetch", false},
+		{"Sec-Purpose", "prefetch;prerender", false},
+		{"Sec-Purpose", "Prefetch ; anonymous-client-ip", false},
+		{"Purpose", "prefetch", false},
+		{"X-Moz", "prefetch", false},
+		{"Sec-Purpose", "", true},
+		{"Sec-Purpose", "prerender-only", true},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.header+"="+testCase.value, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/r/abc", nil)
+			req.Header.Set("Accept", "text/html")
+			req.Header.Set("Sec-Fetch-Dest", "document")
+			req.Header.Set(testCase.header, testCase.value)
+
+			require.Equal(t, testCase.want, explicitRead(req))
+		})
+	}
+}
+
+// TestExplicitDownload (R-17): a GET consumes a burn-after-download file only for a client
+// without browser signals. A browser uses the download form (POST with the CSRF guard).
+func TestExplicitDownload(t *testing.T) {
+	const browserAccept = "text/html,application/xhtml+xml,*/*;q=0.8"
+
+	cases := []struct {
+		headers map[string]string
+		name    string
+		method  string
+		want    bool
+	}{
+		{name: "CLI", method: http.MethodGet, want: true,
+			headers: map[string]string{"Accept": "application/octet-stream"}},
+		{name: "JSON client", method: http.MethodGet, want: true,
+			headers: map[string]string{"Accept": "application/json"}},
+		{name: "curl without Accept", method: http.MethodGet, want: false, headers: map[string]string{}},
+		{name: "wildcard", method: http.MethodGet, want: false, headers: map[string]string{"Accept": "*/*"}},
+		{name: "HEAD", method: http.MethodHead, want: false,
+			headers: map[string]string{"Accept": "application/octet-stream"}},
+		{name: "browser over plain HTTP", method: http.MethodGet, want: false,
+			headers: map[string]string{"Accept": browserAccept}},
+		{name: "click on a same-origin link", method: http.MethodGet, want: false,
+			headers: map[string]string{
+				"Accept": browserAccept, "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "navigate",
+				"Sec-Fetch-User": "?1",
+			}},
+		{name: "cross-site fetch with a binary Accept", method: http.MethodGet, want: false,
+			headers: map[string]string{
+				"Accept": "application/octet-stream", "Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "cors",
+			}},
+		{name: "same-origin fetch with a binary Accept", method: http.MethodGet, want: false,
+			headers: map[string]string{"Accept": "application/octet-stream", "Sec-Fetch-Site": "same-origin"}},
+		{name: "prefetch with a binary Accept", method: http.MethodGet, want: false,
+			headers: map[string]string{"Accept": "application/octet-stream", "Sec-Purpose": "prefetch"}},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			req := httptest.NewRequest(testCase.method, "/files/abc/download", nil)
+			for name, value := range testCase.headers {
+				req.Header.Set(name, value)
+			}
+
+			require.Equal(t, testCase.want, explicitDownload(req))
+		})
+	}
+}
+
+// TestExplicitRead_CrossSite: notes and links keep cross-site navigations, so a burn link in an
+// email still works.
+func TestExplicitRead_CrossSite(t *testing.T) {
+	for _, path := range []string{"/r/abc", "/abc"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Header.Set("Accept", "text/html,application/xhtml+xml,*/*;q=0.8")
+		req.Header.Set("Sec-Fetch-Dest", "document")
+		req.Header.Set("Sec-Fetch-Site", "cross-site")
+		req.Header.Set("Sec-Fetch-Mode", "navigate")
+		req.Header.Set("Sec-Fetch-User", "?1")
+
+		require.True(t, explicitRead(req), path)
 	}
 }

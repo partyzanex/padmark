@@ -70,6 +70,7 @@ type LLMsRouterSuite struct {
 	manager     *MockNoteManager
 	linkManager *MockLinkManager
 	pinger      *MockPinger
+	auth        *MockAuthManager
 }
 
 func TestLLMsTxtRouter(t *testing.T) {
@@ -81,6 +82,7 @@ func (s *LLMsRouterSuite) SetupTest() {
 	s.manager = NewMockNoteManager(s.ctrl)
 	s.linkManager = NewMockLinkManager(s.ctrl)
 	s.pinger = NewMockPinger(s.ctrl)
+	s.auth = NewMockAuthManager(s.ctrl)
 }
 
 func (s *LLMsRouterSuite) TearDownTest() {
@@ -90,29 +92,28 @@ func (s *LLMsRouterSuite) TearDownTest() {
 func (s *LLMsRouterSuite) newRouter() http.Handler {
 	s.T().Helper()
 
-	handler := web.NewHandler(s.manager, s.linkManager, discardLog())
-	handler.WithAuthManager(NewMockAuthManager(s.ctrl))
-	ogen := web.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
+	handlerCfg := testHandlerConfig(s.manager, s.linkManager, s.pinger)
+	handlerCfg.Accounts = s.auth
+	handlerCfg.CSRFSecret = testCSRFSecret
+	handler := newTestHandler(s.T(), handlerCfg)
 
 	opts := web.RouterOptions{
 		MaxBodyBytes: 256 * 1024,
-		CSRFSecret:   testCSRFSecret,
 
-		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, AllowedHosts: nil, RateLimit: 0,
-		RateBurst: 0, SessionTTL: 0, DisableAPI: false, DirectRedirect: false,
+		AllowedHosts: nil, RateLimit: 0, RateBurst: 0, DisableAPI: false,
 	}
 
-	router, err := web.NewRouter(handler, ogen, &opts)
+	router, err := web.NewRouter(handler, &opts)
 	s.Require().NoError(err)
 
 	return router
 }
 
-// TestServedAsRoute verifies that a bare GET /llms.txt through the full router returns the
-// document, not a fall-through into the /{id...} note catch-all (which would answer 404).
-// No mock expectation is set — reaching a note handler would fail the test on the unexpected
-// mock call.
-func (s *LLMsRouterSuite) TestServedAsRoute() {
+// TestServedAsRouteToAnonymous verifies that a bare anonymous GET /llms.txt through the full
+// router returns the document, not a fall-through into the /{id...} note catch-all (which would
+// answer 404) and not a redirect to /login: the document is for agents. No mock expectation is
+// set — reaching a note handler would fail the test on the unexpected mock call.
+func (s *LLMsRouterSuite) TestServedAsRouteToAnonymous() {
 	router := s.newRouter()
 
 	req := httptest.NewRequest(http.MethodGet, "/llms.txt", nil)
@@ -121,23 +122,9 @@ func (s *LLMsRouterSuite) TestServedAsRoute() {
 	router.ServeHTTP(rec, req)
 
 	s.Equal(http.StatusOK, rec.Code)
+	s.NotEqual(http.StatusSeeOther, rec.Code, "anonymous fetch must not redirect to /login")
 	s.Equal("text/markdown; charset=utf-8", rec.Header().Get("Content-Type"))
 	s.NotEmpty(rec.Body.String())
-}
-
-// TestAnonymousFetch is the auth-middleware regression guard: /llms.txt is agent-facing
-// documentation, so an anonymous request must not be redirected to /login or sent to note
-// resolution.
-func (s *LLMsRouterSuite) TestAnonymousFetch() {
-	router := s.newRouter()
-
-	req := httptest.NewRequest(http.MethodGet, "/llms.txt", nil)
-	rec := httptest.NewRecorder()
-
-	router.ServeHTTP(rec, req)
-
-	s.Require().Equal(http.StatusOK, rec.Code)
-	s.NotEqual(http.StatusSeeOther, rec.Code, "anonymous fetch must not redirect to /login")
 }
 
 // TestReferencedSpecIsAlive guards the document's pointer: the spec URL it advertises must
@@ -155,16 +142,36 @@ func (s *LLMsRouterSuite) TestReferencedSpecIsAlive() {
 	}
 }
 
-// TestReferencedSpecIsAdvertised cross-checks the document against the router: llms.txt must
-// actually mention the spec URL it points to.
-func (s *LLMsRouterSuite) TestSpecURLAdvertised() {
+// TestSpecURLsAndFilesSectionAdvertised cross-checks the document against the router: llms.txt
+// mentions the spec URLs it points to, has the Files section, and its links point to the Files
+// section of the reference.
+func (s *LLMsRouterSuite) TestSpecURLsAndFilesSectionAdvertised() {
 	router := s.newRouter()
 
-	req := httptest.NewRequest(http.MethodGet, "/llms.txt", nil)
+	index := s.get(router, "/llms.txt")
+	s.Contains(index, "/api/openapi.yaml")
+	s.Contains(index, "/api/reference.md")
+	s.Contains(index, "\n## Files\n")
+
+	for _, text := range []string{
+		"(/api/reference.md#files)", "`POST /files`", "multipart/form-data",
+		"`GET /files/{id}/download`", "Accept: application/octet-stream",
+		"`PUT /files/{id}`", "`DELETE /files/{id}`", "X-Edit-Code", "`413`",
+	} {
+		s.Contains(index, text)
+	}
+
+	s.Contains(s.get(router, "/api/reference.md"), "\n## Files\n", "the #files anchor must exist")
+}
+
+func (s *LLMsRouterSuite) get(router http.Handler, path string) string {
+	s.T().Helper()
+
+	req := httptest.NewRequestWithContext(s.T().Context(), http.MethodGet, path, nil)
 	rec := httptest.NewRecorder()
 
 	router.ServeHTTP(rec, req)
+	s.Require().Equal(http.StatusOK, rec.Code, path)
 
-	s.Contains(rec.Body.String(), "/api/openapi.yaml")
-	s.Contains(rec.Body.String(), "/api/reference.md")
+	return rec.Body.String()
 }

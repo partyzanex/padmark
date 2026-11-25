@@ -133,7 +133,7 @@ func hashArgon2(secret string, requested Argon2Params) (string, error) {
 
 	err := params.Validate()
 	if err != nil {
-		return "", fmt.Errorf("validate: %w", err)
+		return "", err
 	}
 
 	salt := make([]byte, argon2SaltLen)
@@ -145,7 +145,7 @@ func hashArgon2(secret string, requested Argon2Params) (string, error) {
 
 	key, err := deriveArgon2Key([]byte(secret), salt, params, argon2KeyLen)
 	if err != nil {
-		return "", fmt.Errorf("derive argon2 key: %w", err)
+		return "", err
 	}
 
 	enc := base64.RawURLEncoding
@@ -197,7 +197,7 @@ func verifyArgon2(storedHash, secret string, ceiling Argon2Params) (bool, error)
 
 	actual, err := deriveArgon2Key([]byte(secret), salt, params, argon2KeyLen)
 	if err != nil {
-		return false, fmt.Errorf("derive argon2 key: %w", err)
+		return false, err
 	}
 
 	return subtle.ConstantTimeCompare(expected, actual) == 1, nil
@@ -218,12 +218,12 @@ func parseArgon2Cost(memoryText, timeText, threadsText string) (Argon2Params, er
 
 	memory, err := parseU32(memoryText)
 	if err != nil {
-		return none, fmt.Errorf("parse u32: %w", err)
+		return none, err
 	}
 
 	iterations, err := parseU32(timeText)
 	if err != nil {
-		return none, fmt.Errorf("parse u32: %w", err)
+		return none, err
 	}
 
 	threads, err := parseU32(threadsText)
@@ -235,7 +235,7 @@ func parseArgon2Cost(memoryText, timeText, threadsText string) (Argon2Params, er
 
 	err = params.Validate()
 	if err != nil {
-		return none, fmt.Errorf("validate: %w", err)
+		return none, err
 	}
 
 	return params, nil

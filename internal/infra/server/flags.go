@@ -1,13 +1,12 @@
 package server
 
 import (
-	"fmt"
-	"math"
 	"slices"
 	"time"
 
 	"github.com/urfave/cli/v3"
 
+	"github.com/partyzanex/padmark/internal/adapters/web"
 	"github.com/partyzanex/padmark/internal/clifactory"
 	"github.com/partyzanex/padmark/internal/infra/crypto"
 	"github.com/partyzanex/padmark/internal/infra/logging"
@@ -27,6 +26,7 @@ const (
 	FlagWriteTimeout        = "write-timeout"
 	FlagMaxHeaderBytes      = "max-header-bytes"
 	FlagMaxBodyBytes        = "max-body-bytes"
+	FlagMaxContentLength    = "max-content-length"
 	FlagRateLimit           = "rate-limit"
 	FlagRateBurst           = "rate-burst"
 	FlagTLSCert             = "tls-cert"
@@ -48,6 +48,17 @@ const (
 	FlagContentKeyring      = "content-keyring-file"
 	FlagAllowSharedKeyring  = "allow-shared-keyring"
 	FlagSkipMigrationBackup = "skip-migration-backup"
+	FlagS3Endpoint          = "s3-endpoint"
+	FlagS3Bucket            = "s3-bucket"
+	FlagS3Region            = "s3-region"
+	FlagS3PathStyle         = "s3-path-style"
+	FlagMaxFileSize         = "max-file-size"
+	FlagFilesSweepInterval  = "files-sweep-interval"
+	FlagS3AllowInsecure     = "s3-allow-insecure"
+	FlagShutdownTimeout     = "shutdown-timeout"
+	FlagFileIdleTimeout     = "file-idle-timeout"
+	FlagMaxUploads          = "max-uploads"
+	FlagMaxUploadsPerClient = "max-uploads-per-client"
 	// FlagAuthTokens is the removed v0.1.6 static bearer-token flag; it is still defined (hidden)
 	// so that using it fails startup with a migration hint instead of being ignored.
 	FlagAuthTokens = "auth-tokens" //nolint:gosec // flag name, not a credential
@@ -68,6 +79,7 @@ const (
 	EnvWriteTimeout        = "PADMARK_WRITE_TIMEOUT"
 	EnvMaxHeaderBytes      = "PADMARK_MAX_HEADER_BYTES"
 	EnvMaxBodyBytes        = "PADMARK_MAX_BODY_BYTES"
+	EnvMaxContentLength    = "PADMARK_MAX_CONTENT_LENGTH"
 	EnvRateLimit           = "PADMARK_RATE_LIMIT"
 	EnvRateBurst           = "PADMARK_RATE_BURST"
 	EnvTLSCert             = "PADMARK_TLS_CERT"
@@ -89,12 +101,33 @@ const (
 	EnvContentKeyring      = "PADMARK_CONTENT_KEYRING_FILE"
 	EnvAllowSharedKeyring  = "PADMARK_ALLOW_SHARED_KEYRING"
 	EnvSkipMigrationBackup = "PADMARK_SKIP_MIGRATION_BACKUP"
-	EnvAuthTokens          = "PADMARK_AUTH_TOKENS" //nolint:gosec // env var name, not a credential
-	EnvCookieMaxAge        = "PADMARK_COOKIE_MAX_AGE"
+	EnvS3Endpoint          = "PADMARK_S3_ENDPOINT"
+	EnvS3Bucket            = "PADMARK_S3_BUCKET"
+	EnvS3Region            = "PADMARK_S3_REGION"
+	EnvS3PathStyle         = "PADMARK_S3_PATH_STYLE"
+	EnvMaxFileSize         = "PADMARK_MAX_FILE_SIZE"
+	EnvFilesSweepInterval  = "PADMARK_FILES_SWEEP_INTERVAL"
+	EnvS3AllowInsecure     = "PADMARK_S3_ALLOW_INSECURE"
+	EnvShutdownTimeout     = "PADMARK_SHUTDOWN_TIMEOUT"
+	EnvFileIdleTimeout     = "PADMARK_FILE_IDLE_TIMEOUT"
+	EnvMaxUploads          = "PADMARK_MAX_UPLOADS"
+	EnvMaxUploadsPerClient = "PADMARK_MAX_UPLOADS_PER_CLIENT"
+	// EnvS3AccessKey and EnvS3SecretKey are the object storage credentials. They are read from
+	// the environment only — never a flag, so they cannot show up in process listings.
+	// gosec G101 reports a string literal in a constant whose name has "secret". The names
+	// are built from envS3Prefix, so the check needs no nolint directive; a test keeps the
+	// full values.
+	EnvS3AccessKey  = envS3Prefix + "ACCESS_KEY"
+	EnvS3SecretKey  = envS3Prefix + "SECRET_KEY"
+	EnvAuthTokens   = "PADMARK_AUTH_TOKENS" //nolint:gosec // env var name, not a credential
+	EnvCookieMaxAge = "PADMARK_COOKIE_MAX_AGE"
 	// EnvBootstrapToken authorises creating the first admin via /setup without an invite. It is
 	// read from the environment only — never a flag, so it cannot show up in process listings.
 	EnvBootstrapToken = "PADMARK_BOOTSTRAP_TOKEN" //nolint:gosec // G101: env var name, not an inline credential
 )
+
+// envS3Prefix is the common prefix of the S3 key variables.
+const envS3Prefix = "PADMARK_S3_"
 
 // Default values for all flags.
 const (
@@ -107,6 +140,7 @@ const (
 	DefaultWriteTimeout       = 60              // seconds.
 	DefaultMaxHeaderBytes     = 64 * 1024       // 64 KB.
 	DefaultMaxBodyBytes       = 4 * 1024 * 1024 // 4 MB.
+	DefaultMaxContentLength   = 0               // characters; 0 = the --max-body-bytes value.
 	DefaultRateLimit          = 10              // requests per second per IP.
 	DefaultRateBurst          = 20              // max burst size per IP.
 	DefaultTOTPIssuer         = "padmark"
@@ -117,7 +151,31 @@ const (
 	DefaultAllowSharedKeyring = false      // refuse group/other-readable keyrings outside /run/secrets/.
 	// DefaultDirectRedirect is off: an anonymous link must not be a free open redirector.
 	DefaultDirectRedirect = false
+	DefaultS3Region       = "us-east-1"
+	// DefaultS3PathStyle is on because most self-hosted S3 servers do not serve bucket
+	// subdomains.
+	DefaultS3PathStyle = true
+	DefaultMaxFileSize = 100 << 20 // 100 MiB.
+	// DefaultFilesSweepInterval is the period of the background sweep of expired files.
+	DefaultFilesSweepInterval = time.Hour
+	// DefaultS3AllowInsecure is off: a plain http:// endpoint on a remote host sends the signed
+	// requests and the object metadata without TLS.
+	DefaultS3AllowInsecure = false
+	// DefaultShutdownTimeout is the limit of the full shutdown sequence; see newStopLimits. The
+	// Docker stop command waits 10 seconds before SIGKILL. With this default, the server closes
+	// the open connections after 8 seconds, so a usual stop ends before that signal. A larger
+	// value needs a larger stop grace period too.
+	DefaultShutdownTimeout = 10 * time.Second
+	// DefaultFileIdleTimeout, DefaultMaxUploads and DefaultMaxUploadsPerClient come from the web
+	// handler, which applies the same values when a flag is 0.
+	DefaultFileIdleTimeout     = web.DefaultFileIdleTimeout
+	DefaultMaxUploads          = web.DefaultMaxUploads
+	DefaultMaxUploadsPerClient = web.DefaultMaxUploadsPerClient
 )
+
+// maxFileSizeLimit is the largest --max-file-size: 48 GiB. s3store.MaxObjectSize is about
+// 48.8 GiB, and the encrypted object is a little larger than the file.
+const maxFileSizeLimit = 48 << 30
 
 // DefaultSessionTTL is the --session-ttl flag default, in seconds — derived from
 // auth.DefaultSessionTTL (the single source of truth for the session lifetime default) instead
@@ -135,7 +193,96 @@ func appFlags() []cli.Flag {
 		sessionFlags(),
 		miscFlags(),
 		argon2Flags(),
+		fileStorageFlags(),
+		fileTransferFlags(),
 	)
+}
+
+// fileStorageFlags returns the object storage flags for files. The access key and the secret
+// key come only from EnvS3AccessKey and EnvS3SecretKey.
+func fileStorageFlags() []cli.Flag {
+	return []cli.Flag{
+		clifactory.StringFlag(func(flag *cli.StringFlag) {
+			flag.Name = FlagS3Endpoint
+			flag.Sources = cli.EnvVars(EnvS3Endpoint)
+			flag.Usage = "S3-compatible object storage URL for files, for example https://s3.example.com:9000. " +
+				"Empty (default) turns file publishing off. Set " + EnvS3AccessKey + " and " +
+				EnvS3SecretKey + " in the environment"
+		}),
+		clifactory.StringFlag(func(flag *cli.StringFlag) {
+			flag.Name = FlagS3Bucket
+			flag.Sources = cli.EnvVars(EnvS3Bucket)
+			flag.Usage = "Bucket for files; created at startup when missing. Required with --" + FlagS3Endpoint
+		}),
+		clifactory.StringFlag(func(flag *cli.StringFlag) {
+			flag.Name = FlagS3Region
+			flag.Sources = cli.EnvVars(EnvS3Region)
+			flag.Value = DefaultS3Region
+			flag.Usage = "Region of the bucket for the request signature"
+		}),
+		clifactory.BoolFlag(func(flag *cli.BoolFlag) {
+			flag.Name = FlagS3PathStyle
+			flag.Sources = cli.EnvVars(EnvS3PathStyle)
+			flag.Value = DefaultS3PathStyle
+			flag.Usage = "Use path-style addresses (https://host/bucket/key). Set false for virtual-host " +
+				"addresses (https://bucket.host/key)"
+		}),
+		clifactory.BoolFlag(func(flag *cli.BoolFlag) {
+			flag.Name = FlagS3AllowInsecure
+			flag.Sources = cli.EnvVars(EnvS3AllowInsecure)
+			flag.Value = DefaultS3AllowInsecure
+			flag.Usage = "Permit a plain http:// --" + FlagS3Endpoint + " on a host that is not localhost or a " +
+				"loopback IP, for example a Compose service. Without it, startup stops for such an endpoint"
+		}),
+		clifactory.Int64Flag(func(flag *cli.Int64Flag) {
+			flag.Name = FlagMaxFileSize
+			flag.Sources = cli.EnvVars(EnvMaxFileSize)
+			flag.Value = DefaultMaxFileSize
+			flag.Validator = validateMaxFileSize
+			flag.Usage = "Largest file in bytes that POST /files accepts (default: 104857600 = 100 MiB; " +
+				"maximum: 51539607552 = 48 GiB)"
+		}),
+		clifactory.DurationFlag(func(flag *cli.DurationFlag) {
+			flag.Name = FlagFilesSweepInterval
+			flag.Sources = cli.EnvVars(EnvFilesSweepInterval)
+			flag.Value = DefaultFilesSweepInterval
+			flag.Validator = validateSweepInterval
+			flag.Usage = "Period of the background removal of expired files and their objects, for example 30m. " +
+				"0 turns the background removal off; each upload still removes expired files"
+		}),
+	}
+}
+
+// fileTransferFlags returns the limits of file uploads and downloads. A 0 keeps the default of
+// the web handler.
+func fileTransferFlags() []cli.Flag {
+	return []cli.Flag{
+		clifactory.DurationFlag(func(flag *cli.DurationFlag) {
+			flag.Name = FlagFileIdleTimeout
+			flag.Sources = cli.EnvVars(EnvFileIdleTimeout)
+			flag.Value = DefaultFileIdleTimeout
+			flag.Validator = validateFileIdleTimeout
+			flag.Usage = "Stop a file upload or download that moves no data for this time, for example 2m. " +
+				"Each transfer also has a total limit of 1 hour. 0 selects the default (1m)"
+		}),
+		clifactory.IntFlag(func(flag *cli.IntFlag) {
+			flag.Name = FlagMaxUploads
+			flag.Sources = cli.EnvVars(EnvMaxUploads)
+			flag.Value = DefaultMaxUploads
+			flag.Validator = validateUploadLimit
+			flag.Usage = "Number of file uploads that the server accepts at the same time; each holds one " +
+				"object storage part buffer in memory. More uploads get 503 with Retry-After. " +
+				"0 selects the default (8)"
+		}),
+		clifactory.IntFlag(func(flag *cli.IntFlag) {
+			flag.Name = FlagMaxUploadsPerClient
+			flag.Sources = cli.EnvVars(EnvMaxUploadsPerClient)
+			flag.Value = DefaultMaxUploadsPerClient
+			flag.Validator = validateUploadLimit
+			flag.Usage = "Number of file uploads from one client IP address at the same time. More uploads " +
+				"get 429 with Retry-After. 0 selects the default (4)"
+		}),
+	}
 }
 
 // storageAndLogFlags returns the content keyring, storage and logging flags.
@@ -213,7 +360,8 @@ func accessFlags() []cli.Flag {
 			// random slugs, because human-readable public URLs are easier to guess.
 			flag.Value = true
 			flag.Usage = "Allow user-supplied human-readable slugs at note creation (e.g. project/GUIDE.md) " +
-				"and at short-link creation (e.g. launch-2026, single segment only). " +
+				"at short-link creation (e.g. launch-2026, single segment only) " +
+				"and at file upload (single segment only). " +
 				"On by default for v0.1.6 compatibility; set false to issue only random slugs, " +
 				"because human-readable public URLs are easier to guess. " +
 				"New content encryption keys are independent of the slug"
@@ -249,6 +397,15 @@ func limitFlags() []cli.Flag {
 			flag.Usage = "Maximum size of request body in bytes"
 		}),
 		clifactory.IntFlag(func(flag *cli.IntFlag) {
+			flag.Name = FlagMaxContentLength
+			flag.Sources = cli.EnvVars(EnvMaxContentLength)
+			flag.Value = DefaultMaxContentLength
+			flag.Validator = validateMaxContentLength
+			flag.Usage = "Maximum note content length in characters (0 = the --max-body-bytes value). " +
+				"Raise --max-body-bytes too: the request body holds the content. " +
+				"A note holds at most 64 MiB in any case"
+		}),
+		clifactory.IntFlag(func(flag *cli.IntFlag) {
 			flag.Name = FlagRateLimit
 			flag.Sources = cli.EnvVars(EnvRateLimit)
 			flag.Value = DefaultRateLimit
@@ -259,6 +416,16 @@ func limitFlags() []cli.Flag {
 			flag.Sources = cli.EnvVars(EnvRateBurst)
 			flag.Value = DefaultRateBurst
 			flag.Usage = "Rate limit: max burst size per IP"
+		}),
+		clifactory.DurationFlag(func(flag *cli.DurationFlag) {
+			flag.Name = FlagShutdownTimeout
+			flag.Sources = cli.EnvVars(EnvShutdownTimeout)
+			flag.Value = DefaultShutdownTimeout
+			flag.Validator = validateShutdownTimeout
+			flag.Usage = "Limit of the full shutdown sequence, for example 2m. Open requests, such as file " +
+				"transfers, get this time less one fifth (at most 2s). Then the server closes their " +
+				"connections and stops background work before the database closes. Set the stop grace " +
+				"period of the container to a larger value"
 		}),
 	}
 }
@@ -435,40 +602,4 @@ func allowSharedKeyringFlag() *cli.BoolFlag {
 			"Only for secret managers that cannot provide an owner-only file; keyrings under /run/secrets/ " +
 			"(Docker/Compose secrets) are already exempt"
 	})
-}
-
-// maxArgon2MemoryBudget caps --argon2-memory-budget at 64 GiB (in KiB): it rejects typos and keeps
-// the value inside uint32 on every platform's int.
-const maxArgon2MemoryBudget = 64 * 1024 * 1024
-
-// boundedCost rejects negative and overflowing flag values before narrowing to uint32/uint8.
-func boundedCost(maximum int) func(int) error {
-	return func(value int) error {
-		if value < 1 || value > maximum {
-			return fmt.Errorf("%w 1 and %d", errInvalidArgon2Cost, maximum)
-		}
-
-		return nil
-	}
-}
-
-// uint32Flag narrows an integer flag to uint32. The flag Validator already bounds the value;
-// the repeated range check keeps the conversion provably safe where it happens.
-func uint32Flag(cmd *cli.Command, name string) (uint32, error) {
-	value := cmd.Int(name)
-	if value < 0 || value > math.MaxUint32 {
-		return 0, fmt.Errorf("--%s=%d: %w", name, value, errFlagOutOfRange)
-	}
-
-	return uint32(value), nil
-}
-
-// uint8Flag narrows an integer flag to uint8, with the same range check as uint32Flag.
-func uint8Flag(cmd *cli.Command, name string) (uint8, error) {
-	value := cmd.Int(name)
-	if value < 0 || value > math.MaxUint8 {
-		return 0, fmt.Errorf("--%s=%d: %w", name, value, errFlagOutOfRange)
-	}
-
-	return uint8(value), nil
 }

@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 env:
-  GO_VERSION: "1.27.3"
+  GO_VERSION: "1.27.4"
   GOLANGCI_LINT_VERSION: "v2.15.0"
   DOCKER_IMAGE: ${{ vars.DOCKER_IMAGE || 'partyzanex/padmark' }}
 
@@ -67,6 +67,14 @@ jobs:
       - name: Unit tests
         run: go test -v -count=1 -race ./... -coverprofile=cover.out
 
+      # The render timing tests skip under -race with coverage, and the 4 MiB case skips under
+      # any -race. Run them here without both, so the render budget guards stay active in CI.
+      - name: Render timing tests
+        run: >-
+          go test -v -count=1
+          -run '^TestRender(SuperLinearInputsWithinBudget|LinearWorstCaseAtMaxSize)$'
+          ./internal/infra/render
+
       - name: Upload coverage
         if: always()
         uses: actions/upload-artifact@v4
@@ -85,11 +93,43 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
 
-      # The tests/ tree and PostgreSQL repository tests are gated by //go:build integration.
-      # Run both here so Docker-backed repositories stay covered outside the unit job.
-      # Docker is available on ubuntu-latest for the testcontainers suites.
+      # The tests/ tree, the PostgreSQL repository tests and the S3 adapter tests are gated by
+      # //go:build integration. Run them here so Docker-backed adapters stay covered outside the
+      # unit job. Docker is available on ubuntu-latest for the testcontainers suites.
       - name: Integration tests
-        run: go test -v -count=1 -race -tags=integration ./tests/... ./internal/infra/storage/postgres
+        run: >-
+          go test -v -count=1 -race -tags=integration
+          ./tests/...
+          ./internal/infra/storage/postgres
+          ./internal/infra/storage/s3store
+
+  compose:
+    name: Compose configuration
+    runs-on: ubuntu-latest
+    # Dummy values only: this job renders the file and starts no container.
+    env:
+      POSTGRES_PASSWORD: ci-dummy
+      PADMARK_S3_ACCESS_KEY: ci-dummy
+      PADMARK_S3_SECRET_KEY: ci-dummy
+    steps:
+      - uses: actions/checkout@v4
+
+      # Compose gives the container only its listed variables. Make sure that the account
+      # settings from .env reach the padmark service: without accounts, privacy is not checked.
+      - name: Check that account settings reach the container
+        run: |
+          docker compose --env-file /dev/null config --format json > compose-default.json
+          jq -e '.services.padmark.environment
+            | .PADMARK_ENABLE_ACCOUNTS == "false" and .PADMARK_BOOTSTRAP_TOKEN == null' \
+            compose-default.json
+
+          token="ci-dummy-bootstrap-0123456789abcdef"
+          printf 'PADMARK_ENABLE_ACCOUNTS=true\nPADMARK_BOOTSTRAP_TOKEN=%s\n' "$token" \
+            > "$RUNNER_TEMP/compose.env"
+          docker compose --env-file "$RUNNER_TEMP/compose.env" config --format json > compose-env.json
+          jq -e --arg token "$token" '.services.padmark.environment
+            | .PADMARK_ENABLE_ACCOUNTS == "true" and .PADMARK_BOOTSTRAP_TOKEN == $token' \
+            compose-env.json
 
   ui:
     name: Browser UI tests
@@ -129,7 +169,7 @@ jobs:
 
   docker:
     name: Docker build & push
-    needs: [lint, test, integration, ui]
+    needs: [lint, test, integration, compose, ui]
     runs-on: ubuntu-latest
     if: github.event_name == 'push'
     permissions:

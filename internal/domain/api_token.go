@@ -27,6 +27,12 @@ type APIToken struct {
 	UserID     uuid.UUID
 }
 
+// Expired reports whether t is expired at now, with the rule of notes, links and files. A nil
+// ExpiresAt never expires.
+func (t *APIToken) Expired(now time.Time) bool {
+	return expired(t.ExpiresAt, now)
+}
+
 // apiTokenEnvelopePrefix marks a value produced by EncodeAPITokenEnvelope so the CLI can tell a
 // self-contained envelope apart from a legacy bare bearer key.
 const apiTokenEnvelopePrefix = "pmk_"

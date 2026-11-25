@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 
 	"github.com/urfave/cli/v3"
@@ -38,14 +37,13 @@ func migrateFlags() []cli.Flag {
 }
 
 func migrateAction(ctx context.Context, cmd *cli.Command) error {
-	storage := cmd.String(FlagStorage)
-	dsn := cmd.String(FlagDSN)
+	storage := storageConfigFromCommand(cmd)
 
 	log := slog.Default()
 
-	db, err := openDB(ctx, storage, dsn, log)
+	db, err := openDB(ctx, storage.dialect, storage.dsn, log)
 	if err != nil {
-		return fmt.Errorf("open db: %w", err)
+		return err
 	}
 
 	defer func() {
@@ -55,17 +53,11 @@ func migrateAction(ctx context.Context, cmd *cli.Command) error {
 		}
 	}()
 
-	log.InfoContext(ctx, "running migrations", "storage", storage)
+	log.InfoContext(ctx, "running migrations", "storage", storage.dialect)
 
-	if storage == storagePostgres {
-		_, err = initPostgresStorage(ctx, db, log)
-	} else {
-		_, err = initSQLiteStorage(
-			ctx, db, log, migrationOptions{dsn: dsn, skipBackup: cmd.Bool(FlagSkipMigrationBackup)})
-	}
-
+	_, err = initRepos(ctx, storage.dialect, db, log, storage.migration())
 	if err != nil {
-		return fmt.Errorf("init sqlite storage: %w", err)
+		return err
 	}
 
 	log.InfoContext(ctx, "migrations applied successfully")

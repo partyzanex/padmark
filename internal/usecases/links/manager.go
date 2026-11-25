@@ -14,7 +14,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/partyzanex/padmark/internal/domain"
-	"github.com/partyzanex/padmark/internal/errorcontext"
 )
 
 // maxHashRetries bounds random-slug collision retries in Create — a bounded loop, never an
@@ -23,39 +22,40 @@ import (
 const maxHashRetries = 5
 
 // Storage defines persistence operations for links. Create must atomically claim the ID
-// across notes and links, returning domain.ErrSlugConflict if another resource owns it.
-// Update keeps the stored privacy when link.Privacy is nil and returns the row as stored.
+// across notes, links and files, returning domain.ErrSlugConflict if another resource owns it:
+// it is the only slug uniqueness check (docs/adr/0003-storage-slug-uniqueness.md).
+// Update writes only the fields that patch sets and returns the row as stored, so a concurrent
+// change of a field that this update omits stays.
+// DeleteExpired removes a row only while it is still expired at now, and returns
+// domain.ErrNotFound otherwise: an expiry decision from an old snapshot never deletes a link that
+// its owner extended, or a live link that took the ID after the decision. Each method that
+// compares times gets now from Manager and does not read the clock itself; Create removes other
+// links that expired at link.CreatedAt.
+//
+// Update and Delete change the row only while its edit_code still equals storedEditCode, the
+// stored hash of the link that the caller checked. Each link gets a hash with a new random salt
+// and no write changes it, so the hash identifies one link version. If the link was deleted and
+// a new link took the same ID after the check, they return domain.ErrNotFound and do not touch
+// the new link. Update also changes the row only while it is not expired at now, as
+// files.Storage.Update does: a link that expired after the check of Manager.Update gets
+// domain.ErrNotFound, and its expiry stays.
 type Storage interface {
 	Create(ctx context.Context, link *domain.Link) error
-	Update(ctx context.Context, id string, link *domain.Link) (*domain.Link, error)
+	Update(
+		ctx context.Context, id, storedEditCode string, patch *domain.LinkPatch, now time.Time,
+	) (*domain.Link, error)
 	GetByID(ctx context.Context, id string) (*domain.Link, error)
-	Exists(ctx context.Context, id string) (bool, error)
 	IncrementViews(ctx context.Context, id string) error
-	Delete(ctx context.Context, id string) error
-	Consume(ctx context.Context, id string) (*domain.Link, error)
-	// ConsumeVisible atomically checks current visibility and expiry/burn eligibility before
-	// deleting and returning a row. allowBurn=false permits only expired rows.
+	Delete(ctx context.Context, id, storedEditCode string) error
+	DeleteExpired(ctx context.Context, id string, now time.Time) error
+	Consume(ctx context.Context, id string, now time.Time) (*domain.Link, error)
+	// ConsumeVisible atomically checks current visibility and expiry/burn eligibility at now
+	// before deleting and returning a row. allowBurn=false permits only expired rows.
 	ConsumeVisible(
-		ctx context.Context, id string, callerID uuid.UUID, authenticated, allowBurn bool,
+		ctx context.Context, id string, callerID uuid.UUID, authenticated, allowBurn bool, now time.Time,
 	) (*domain.Link, error)
 	// IncrementViewsVisible refuses a row that is no longer visible to this reader.
 	IncrementViewsVisible(ctx context.Context, id string, callerID uuid.UUID, authenticated bool) error
-}
-
-// NotesChecker lets links.Manager verify a candidate slug isn't already taken by a note — slugs
-// are globally unique across notes and links. See notes.Manager's mirrored LinksChecker, which
-// enforces the same rule in the other direction.
-type NotesChecker interface {
-	Exists(ctx context.Context, id string) (bool, error)
-}
-
-// SlugLock serializes local preflight checks in resolveUniqueSlug. Share the same instance
-// with notes.Manager. Storage independently enforces cross-resource uniqueness between
-// server processes. Declared here rather than imported from notes: usecases depend only on
-// domain and stdlib.
-// Updates and target-cache fills also share this lock to coordinate local eviction.
-type SlugLock interface {
-	Lock(ctx context.Context, key string) (unlock func(), err error)
 }
 
 // Encryptor writes content using installation keys and the stored record ID as authenticated
@@ -85,13 +85,13 @@ type Cache interface {
 	Delete(id string)
 }
 
-// Metrics records business events for operational visibility — see WithMetrics. Each method
-// corresponds to one counter documented in TODO.md's Phase 3 section:
+// Metrics records business events for operational visibility — see WithMetrics. Metrics are
+// fail-soft: the methods return no errors. Each method corresponds to one counter:
 //   - IncLinksCreated: one successful Manager.Create.
-//   - IncRedirects: one successful Manager.Redirect (normal or burn-after-click; error paths —
+//   - IncRedirects: one successful Manager.Follow (normal or burn-after-click; error paths —
 //     not found, expired, denied — do not count, matching "requests actually served").
-//   - IncCollisions: one random-slug retry inside resolveUniqueSlug hitting an already-taken
-//     slug. Deliberately scoped to the random-generation retry case only, not a rejected
+//   - IncCollisions: one random slug that Storage.Create refused because it is already taken.
+//     Deliberately scoped to the random-generation retry case only, not a rejected
 //     custom-alias request — a collision here is a signal about slug-space health (retries
 //     climbing over time would mean the keyspace is filling up), whereas a user picking an
 //     already-taken alias is normal, expected behavior with nothing operational to signal.
@@ -101,43 +101,62 @@ type Metrics interface {
 	IncCollisions()
 }
 
+// noopMetrics is the default Metrics. It records nothing, so Manager needs no nil checks.
+type noopMetrics struct{}
+
+func (noopMetrics) IncLinksCreated() {}
+func (noopMetrics) IncRedirects()    {}
+func (noopMetrics) IncCollisions()   {}
+
+// ExpiredSlugReleaser removes an expired note, link or file that still holds the record ID id,
+// because no read and no sweep removed it yet. It returns true when it removed a record. It must
+// remove a record only while it is still expired at now, so a record that its owner extended
+// stays. Errors are fail-soft: Create keeps its slug conflict and logs the error.
+type ExpiredSlugReleaser interface {
+	ReleaseExpiredSlug(ctx context.Context, id string, now time.Time) (bool, error)
+}
+
+// Deps holds the dependencies of Manager. All fields are mandatory.
+type Deps struct {
+	Storage      Storage
+	Encryptor    Encryptor
+	Hasher       EditCodeHasher
+	ExpiredSlugs ExpiredSlugReleaser
+	Log          *slog.Logger
+	// Now is the time source of each expiry decision and timestamp. The composition root gives
+	// time.Now; tests give a fixed clock.
+	Now func() time.Time
+}
+
 // Manager implements short-link business logic: URL validation, slug resolution, and encryption
 // coordination — the links analogue of notes.Manager.
 type Manager struct {
 	storage          Storage
-	notes            NotesChecker
-	slugLock         SlugLock
 	encryptor        Encryptor
 	hasher           EditCodeHasher
+	expiredSlugs     ExpiredSlugReleaser
 	cache            Cache
 	metrics          Metrics
 	log              *slog.Logger
+	now              func() time.Time
 	allowCustomSlugs domain.CustomSlugSetting
 }
 
-// NewManager creates a new Manager with required dependencies. allowCustomSlugs enables
-// user-supplied slugs (aliases); when false, a create request carrying one is rejected with
-// domain.ErrCustomSlugDisabled — mirrors notes.NewManager, and both share the same server-wide
-// --custom-slugs flag. slugLock must be the same instance passed to the paired notes.Manager —
-// see SlugLock's doc comment for why. cache and metrics are optional collaborators that default
-// to nil and must be attached via WithCache/WithMetrics at composition time; every code path
-// nil-checks them, so a missed attachment leaves caching/metrics disabled (never a nil deref).
-// All fields of Manager are explicitly initialised here so a future field added to the struct
-// cannot silently land in an undefined state — the compiler forces every caller through this
-// constructor.
-func NewManager(
-	storage Storage, notes NotesChecker, slugLock SlugLock, encryptor Encryptor, hasher EditCodeHasher,
-	log *slog.Logger, allowCustomSlugs bool,
-) *Manager {
+// NewManager creates a new Manager. allowCustomSlugs enables user-supplied slugs (aliases); when
+// false, a create request carrying one is rejected with domain.ErrCustomSlugDisabled, as for
+// notes (both use the server-wide --custom-slugs flag). cache and metrics are optional
+// collaborators attached via WithCache/WithMetrics at composition time: cache defaults to nil
+// (no cache), metrics to noopMetrics.
+func NewManager(deps *Deps, allowCustomSlugs bool) *Manager {
 	return &Manager{
-		storage:          storage,
-		notes:            notes,
-		slugLock:         slugLock,
-		encryptor:        encryptor,
-		hasher:           hasher,
+		storage:          deps.Storage,
+		encryptor:        deps.Encryptor,
+		hasher:           deps.Hasher,
+		expiredSlugs:     deps.ExpiredSlugs,
 		cache:            nil,
-		metrics:          nil,
-		log:              log,
+		metrics:          noopMetrics{},
+		log:              deps.Log,
+		now:              deps.Now,
 		allowCustomSlugs: domain.CustomSlugSetting(allowCustomSlugs),
 	}
 }
@@ -145,18 +164,16 @@ func NewManager(
 // WithCache attaches an optional Cache for frequently-followed links. Nil (the default — Manager
 // never sets m.cache itself) disables caching entirely: every code path already nil-checks it, so
 // behavior is identical with or without one — this is a pure performance optimization, never a
-// correctness dependency. Mirrors Handler.WithRevealStore's optional-collaborator shape on the
-// HTTP side. Called by the composition root; do not call after the server starts serving requests.
+// correctness dependency. Called by the composition root; do not call after the server starts
+// serving requests.
 func (m *Manager) WithCache(cache Cache) *Manager {
 	m.cache = cache
 
 	return m
 }
 
-// WithMetrics attaches optional Metrics recording. Nil (the default) disables recording
-// entirely: every code path already nil-checks it via the unexported record* helpers below, so
-// behavior is identical with or without one — same optional-collaborator shape as WithCache.
-// Called by the composition root; do not call after the server starts serving requests.
+// WithMetrics attaches Metrics recording; the default records nothing. Give a value that is not
+// nil. Called by the composition root; do not call after the server starts serving requests.
 func (m *Manager) WithMetrics(metrics Metrics) *Manager {
 	m.metrics = metrics
 
@@ -216,12 +233,11 @@ func validateLink(link *domain.Link) error {
 
 // Create validates a target URL and persists a new short link, returning it with the plaintext
 // target URL and plaintext edit code populated — both are stored encrypted/hashed. Mirrors
-// notes.Manager.Create closely. Link slug resolution retries randomly generated candidates
-// rejected by preflight; a collision during the final atomic insert returns ErrSlugConflict.
+// notes.Manager.Create closely; see store for the slug conflict rules.
 func (m *Manager) Create(ctx context.Context, targetURL string, opts CreateOptions) (*domain.Link, error) {
 	validURL, err := validateTargetURL(targetURL)
 	if err != nil {
-		return nil, fmt.Errorf("validate target url: %w", err)
+		return nil, err
 	}
 
 	link := &domain.Link{
@@ -239,7 +255,7 @@ func (m *Manager) Create(ctx context.Context, targetURL string, opts CreateOptio
 
 	err = validateLink(link)
 	if err != nil {
-		return nil, fmt.Errorf("validate link: %w", err)
+		return nil, err
 	}
 
 	// A caller-chosen code must meet the edit-code policy before it is hashed; an empty one is
@@ -251,29 +267,33 @@ func (m *Manager) Create(ctx context.Context, targetURL string, opts CreateOptio
 		}
 	}
 
+	// The slug check goes before the memory-hard edit-code hash, so an invalid slug costs little.
+	slug, err := m.resolveSlug(opts.CustomHash)
+	if err != nil {
+		return nil, err
+	}
+
 	plaintextCode, err := m.resolveAndHashEditCode(link)
 	if err != nil {
-		return nil, fmt.Errorf("resolve and hash edit code: %w", err)
+		return nil, err
 	}
 
-	link.CreatedAt = time.Now().UTC()
+	link.CreatedAt = m.now().UTC()
 
-	slug, unlock, err := m.resolveUniqueSlug(ctx, opts.CustomHash)
+	slug, err = m.store(ctx, link, validURL, opts.CustomHash, slug)
 	if err != nil {
-		return nil, fmt.Errorf("resolve unique slug: %w", err)
+		return nil, err
 	}
-	defer unlock()
 
-	err = m.persistLink(ctx, link, slug, validURL, plaintextCode)
-	if err != nil {
-		return nil, fmt.Errorf("persist link: %w", err)
-	}
+	// link gets the slug, the plaintext target URL and the plaintext edit code only after the
+	// write; the storage form was a separate value.
+	link.ID = slug
+	link.TargetURL = validURL
+	link.EditCode = plaintextCode
 
 	m.log.DebugContext(ctx, "link created", "id", domain.HashSlug(slug))
 
-	if m.metrics != nil {
-		m.metrics.IncLinksCreated()
-	}
+	m.metrics.IncLinksCreated()
 
 	return link, nil
 }
@@ -298,58 +318,8 @@ func decryptTargetURL(ctx context.Context, enc Encryptor, log *slog.Logger, link
 	return nil
 }
 
-// Peek fetches a link by slug without incrementing views, consuming burn-after-click, or
-// applying expiry policy. Used by the HTTP layer's privacy gate before Redirect's side effects,
-// and directly by OgenHandler.GetLink (GET /links/{id}'s metadata read) — mirrors
-// notes.Manager.Peek exactly, including intentionally returning expired/burn-pending links as-is.
-// Every call reads current metadata from storage. Only target decryption may use
-// the optional Cache; cached entries never supply privacy, ownership or lifecycle state.
-func (m *Manager) Peek(ctx context.Context, slug string) (*domain.Link, error) {
-	link, err := m.resolveLink(ctx, slug)
-	if err != nil {
-		return nil, fmt.Errorf("peek link: %w", err)
-	}
-
-	return link, nil
-}
-
-// Redirect resolves slug to its target URL, applying expiry and burn-after-click policy exactly
-// once. Burn-after-click links are atomically consumed (deleted and returned) to prevent races
-// — a second concurrent Redirect for the same link sees no row left to consume and gets
-// ErrNotFound, giving true "exactly once" semantics. Expired links are deleted and ErrExpired is
-// returned. On an ordinary successful redirect the view counter is incremented (skipped for a
-// just-consumed burn link, which no longer exists to count) — mirrors notes.Manager.Get/View,
-// simplified for links' single burn mode (no TTL grace period, unlike notes' burn-after-reading).
-//
-// The initial fetch always reads current storage metadata. For public links the
-// optional Cache can skip decryption after verifying the current ciphertext.
-// This operation does not authorize a reader; adapters with accounts enabled use Follow.
-func (m *Manager) Redirect(ctx context.Context, slug string) (*domain.Link, error) {
-	operationResult, operationErr := m.resolveAndRedirect(ctx, slug, true)
-	if operationErr != nil {
-		return operationResult, fmt.Errorf("redirect: %w", operationErr)
-	}
-
-	return operationResult, nil
-}
-
-// RedirectWithoutBurn is Redirect for an access that did not deliberately follow the link (a
-// link-preview fetch, a mail scanner, a HEAD probe, an embedded resource): a burn_after_click
-// link is left intact and domain.ErrBurnIntentRequired is returned, decided on the same row
-// snapshot the rest of the policy uses, so a concurrent switch to burn cannot slip through. Any
-// other link is followed exactly as by Redirect.
-func (m *Manager) RedirectWithoutBurn(ctx context.Context, slug string) (*domain.Link, error) {
-	operationResult, operationErr := m.resolveAndRedirect(ctx, slug, false)
-	if operationErr != nil {
-		return operationResult, fmt.Errorf("redirect: %w", operationErr)
-	}
-
-	return operationResult, nil
-}
-
-// Delete removes a link by slug after verifying the edit code, or that the caller is the link's
-// owner — mirrors notes.Manager.Delete exactly.
-func (m *Manager) Delete(ctx context.Context, slug, editCode string, callerID uuid.UUID) error {
+// Delete removes a link by slug with the rules of checkMutation, as notes.Manager.Delete does.
+func (m *Manager) Delete(ctx context.Context, slug, editCode string, reader domain.Reader) error {
 	dbID := domain.HashSlug(slug)
 
 	existing, err := m.storage.GetByID(ctx, dbID)
@@ -357,11 +327,13 @@ func (m *Manager) Delete(ctx context.Context, slug, editCode string, callerID uu
 		return fmt.Errorf("delete link: %w", err)
 	}
 
-	if !existing.OwnedBy(callerID) && !m.hasher.Verify(existing.EditCode, editCode) {
-		return domain.ErrInvalidEditCode
+	err = m.checkMutation(existing, editCode, reader)
+	if err != nil {
+		return err
 	}
 
-	err = m.storage.Delete(ctx, dbID)
+	// The stored hash limits the DELETE to the link checked above, not a new link with this ID.
+	err = m.storage.Delete(ctx, dbID, existing.EditCode)
 	if err != nil {
 		return fmt.Errorf("delete link: %w", err)
 	}
@@ -371,114 +343,79 @@ func (m *Manager) Delete(ctx context.Context, slug, editCode string, callerID uu
 	return nil
 }
 
-// persistLink mutates link in place for persistence (encrypt the target URL, store the hashed
-// slug as the PK) and writes it to storage. The defer restores the caller-facing plaintext
-// fields and the slug ID on every return path, so no branch — including a failed storage.Create
-// — can leave the link in an encrypted state.
-func (m *Manager) persistLink(
-	ctx context.Context, link *domain.Link, slug, validURL, plaintextCode string,
-) error {
-	defer func() {
-		link.ID = slug
-		link.TargetURL = validURL
-		link.EditCode = plaintextCode
-	}()
-
-	encrypted, encErr := m.encryptor.Encrypt(validURL, domain.HashSlug(slug))
-	if encErr != nil {
-		return fmt.Errorf("encrypt target url: %w", encErr)
+// checkMutation applies the rules of a change to the stored link existing, as
+// notes.Manager does: the reader must see the link (domain.ErrForbidden), and must be its owner
+// or give its edit code (domain.ErrInvalidEditCode).
+func (m *Manager) checkMutation(existing *domain.Link, editCode string, reader domain.Reader) error {
+	if !existing.VisibleTo(reader) {
+		return domain.ErrForbidden
 	}
 
-	link.TargetURL = encrypted
-	link.ID = domain.HashSlug(slug)
-
-	err := m.storage.Create(ctx, link)
-	if err != nil {
-		return fmt.Errorf("create link: %w", err)
+	if !existing.OwnedBy(reader.CallerID) && !m.hasher.Verify(existing.EditCode, editCode) {
+		return domain.ErrInvalidEditCode
 	}
 
 	return nil
 }
 
-// resolveAndRedirect is Redirect/RedirectWithoutBurn's shared body; allowBurn says whether this
-// access may consume a burn_after_click link.
-func (m *Manager) resolveAndRedirect(ctx context.Context, slug string, allowBurn bool) (*domain.Link, error) {
-	link, err := m.resolveLink(ctx, slug)
-	if err != nil {
-		return nil, fmt.Errorf("redirect: %w", err)
-	}
+// store writes link under the slug first and returns the slug that storage accepted. The storage form is a
+// separate value with the hashed slug and the encrypted target URL; link already holds the
+// edit-code hash. Storage.Create is the only uniqueness check. A random slug that is taken gets a
+// new random slug, at most maxHashRetries times. A custom slug that is taken stays taken, except
+// when an expired record holds it: then store removes that record and tries once more, as
+// notes.Manager does. The storage triggers check the slug again, so the second attempt is safe
+// across server processes.
+func (m *Manager) store(ctx context.Context, link *domain.Link, validURL, customHash, first string) (string, error) {
+	custom, slug := customHash != "", first
 
-	operationResult, operationErr := m.redirectLink(ctx, slug, link, redirectAccess{reader: nil, allowBurn: allowBurn})
-	if operationErr != nil {
-		return operationResult, fmt.Errorf("redirect link: %w", operationErr)
-	}
+	for range maxHashRetries {
+		recordID := domain.HashSlug(slug)
 
-	return operationResult, nil
-}
-
-// redirectAccess describes one redirect. reader is the Follow caller whose visibility storage
-// enforces, or nil for Redirect; allowBurn says whether the access may consume a burn link.
-type redirectAccess struct {
-	reader    *FollowOptions
-	allowBurn bool
-}
-
-func (m *Manager) redirectLink(
-	ctx context.Context, slug string, link *domain.Link, access redirectAccess,
-) (*domain.Link, error) {
-	dbID := domain.HashSlug(slug)
-	reader := access.reader
-
-	if link.Expired(time.Now()) {
-		return nil, errorcontext.Wrap(m.expireLink(ctx, slug, dbID, reader), "handle redirect link")
-	}
-
-	if link.BurnAfterClick {
-		if !access.allowBurn {
-			return nil, fmt.Errorf("redirect: %w", domain.ErrBurnIntentRequired)
+		encrypted, err := m.encryptor.Encrypt(validURL, recordID)
+		if err != nil {
+			return "", fmt.Errorf("encrypt target url: %w", err)
 		}
 
-		operationResult, operationErr := m.consumeLink(ctx, slug, dbID, reader)
-		if operationErr != nil {
-			return operationResult, fmt.Errorf("consume link: %w", operationErr)
+		stored := *link
+		stored.ID = recordID
+		stored.TargetURL = encrypted
+
+		err = m.storage.Create(ctx, &stored)
+		if custom && errors.Is(err, domain.ErrSlugConflict) && m.releaseExpiredHolder(ctx, recordID, link.CreatedAt) {
+			err = m.storage.Create(ctx, &stored)
 		}
 
-		return operationResult, nil
+		if err == nil {
+			return slug, nil
+		}
+
+		if custom || !errors.Is(err, domain.ErrSlugConflict) {
+			return "", fmt.Errorf("store link: %w", err)
+		}
+
+		// Only a random slug comes here, never a custom one: see the Metrics doc comment.
+		m.metrics.IncCollisions()
+
+		slug, err = domain.ResolveSlug("", m.allowCustomSlugs)
+		if err != nil {
+			return "", fmt.Errorf("resolve slug: %w", err)
+		}
 	}
 
-	incErr := m.incrementRedirectViews(ctx, dbID, link, reader)
-	if incErr != nil {
-		return nil, fmt.Errorf("increment redirect views: %w", incErr)
-	}
-
-	if m.metrics != nil {
-		m.metrics.IncRedirects()
-	}
-
-	return link, nil
+	return "", domain.ErrHashCollision
 }
 
 // resolveLink reads the current row before consulting the decrypted-target cache.
 // Privacy, ownership, deletion, TTL and burn state must be visible across replicas
 // without waiting for local cache expiry. The cache can only reuse a public URL
 // when its ciphertext matches this read's snapshot.
+//
+// Freshness, including across replicas, comes from the ciphertext fingerprint: a stale entry
+// never matches the row read below. No lock serializes reads, updates and cache fills: a read
+// that races an Update or a Delete can store the old target after the eviction. That entry is
+// never served, and the next read of the link or the cache TTL replaces it.
 func (m *Manager) resolveLink(ctx context.Context, slug string) (*domain.Link, error) {
 	dbID := domain.HashSlug(slug)
-
-	if m.cache != nil {
-		// Freshness, including across replicas, comes from the ciphertext fingerprint:
-		// a stale entry never matches the row read below. This in-process lock is memory
-		// hygiene only — Update holds it through persistence and eviction, so a concurrent
-		// cache miss cannot re-fill the cache with the plaintext target of a link that was
-		// just updated. The cost is serialising reads of one link. (Delete does not take
-		// it: a racing read may re-cache a deleted link's target until TTL eviction, but
-		// that entry is never served because the row lookup below fails first.)
-		unlock, err := m.slugLock.Lock(ctx, dbID)
-		if err != nil {
-			return nil, fmt.Errorf("lock link: %w", err)
-		}
-		defer unlock()
-	}
 
 	link, err := m.storage.GetByID(ctx, dbID)
 	if err != nil {
@@ -489,7 +426,7 @@ func (m *Manager) resolveLink(ctx context.Context, slug string) (*domain.Link, e
 	ciphertext := link.TargetURL
 
 	cacheable := m.cache != nil && link.EffectivePrivacy() == domain.PrivacyPublic &&
-		!link.BurnAfterClick && !link.Expired(time.Now())
+		!link.BurnAfterClick && !link.Expired(m.now())
 	if cacheable {
 		if target, ok := m.cache.Get(dbID, ciphertext); ok {
 			link.TargetURL = target
@@ -500,7 +437,7 @@ func (m *Manager) resolveLink(ctx context.Context, slug string) (*domain.Link, e
 
 	err = decryptTargetURL(ctx, m.encryptor, m.log, link)
 	if err != nil {
-		return nil, fmt.Errorf("decrypt target url: %w", err)
+		return nil, err
 	}
 
 	if cacheable {
@@ -510,9 +447,10 @@ func (m *Manager) resolveLink(ctx context.Context, slug string) (*domain.Link, e
 	return link, nil
 }
 
-// evictCache removes dbID from the optional Cache, if one is attached. Called after Update/Delete and
-// after Redirect deletes an expired link. Other replicas also check storage and
-// ciphertext before using their own cache, so correctness does not rely on eviction.
+// evictCache removes dbID from the optional Cache, if one is attached. Called after Update/Delete,
+// after Follow deletes an expired link and after an expired record releases its slug. Other
+// replicas also check storage and ciphertext before using their own cache, so correctness does
+// not rely on eviction.
 func (m *Manager) evictCache(dbID string) {
 	if m.cache != nil {
 		m.cache.Delete(dbID)
@@ -558,121 +496,84 @@ func (m *Manager) resolveAndHashEditCode(link *domain.Link) (string, error) {
 	return plaintext, nil
 }
 
-// resolveUniqueSlug resolves customHash into a slug via domain.ResolveSlug, then confirms it
-// isn't already taken by a note or another link (slugs are globally unique across both). A
-// custom-alias collision is an immediate ErrSlugConflict — the caller chose that exact value,
-// there is nothing to retry. A random-slug collision retries up to maxHashRetries before giving
-// up with ErrHashCollision.
-//
-// On success the returned unlock holds m.slugLock for the winning candidate — the caller must
-// call it exactly once, after persistLink (see SlugLock's doc comment for why the lock has to
-// stay held past the check). Every candidate rejected during a retry releases its own lock
-// before the next attempt, so at most one lock is ever held at a time.
-func (m *Manager) resolveUniqueSlug(
-	ctx context.Context, customHash string,
-) (slug string, unlock func(), err error) {
+// resolveSlug resolves customHash into a slug via domain.ResolveSlug. It does not check that the
+// slug is free: Storage.Create does that (see store).
+func (m *Manager) resolveSlug(customHash string) (string, error) {
 	// Unlike notes, links are only served at single-segment routes (GET /{id} and GET /r/{id} plus the ogen
 	// GET /links/{id} / DELETE /links/{id}), so a multi-segment custom alias would be created
 	// successfully yet unroutable and unreachable through the API. Reject it here, at the
 	// resource that owns the routing constraint, rather than narrowing the shared
 	// domain.ValidCustomSlug that multi-segment notes legitimately rely on.
 	if strings.Contains(customHash, "/") {
-		return "", nil, fmt.Errorf(
+		return "", fmt.Errorf(
 			"custom link slug %q must be a single path segment (links are served at /{id}): %w",
 			customHash, domain.ErrInvalidSlug)
 	}
 
-	for range maxHashRetries {
-		ctxErr := ctx.Err()
-		if ctxErr != nil {
-			return "", nil, fmt.Errorf("resolve unique slug: %w", ctxErr)
-		}
-
-		slug, err := domain.ResolveSlug(customHash, m.allowCustomSlugs)
-		if err != nil {
-			return "", nil, fmt.Errorf("resolve slug: %w", err)
-		}
-
-		unlock, lockErr := m.slugLock.Lock(ctx, domain.HashSlug(slug))
-		if lockErr != nil {
-			return "", nil, fmt.Errorf("lock slug: %w", lockErr)
-		}
-
-		taken, err := m.slugTaken(ctx, domain.HashSlug(slug))
-		if err != nil {
-			unlock()
-
-			return "", nil, fmt.Errorf("slug taken: %w", err)
-		}
-
-		if !taken {
-			return slug, unlock, nil
-		}
-
-		unlock()
-
-		if customHash != "" {
-			return "", nil, domain.ErrSlugConflict
-		}
-
-		// Reached only for a random-slug retry collision, never a rejected custom alias (that
-		// returns above) — see the Metrics interface's doc comment for why the distinction matters.
-		if m.metrics != nil {
-			m.metrics.IncCollisions()
-		}
+	slug, err := domain.ResolveSlug(customHash, m.allowCustomSlugs)
+	if err != nil {
+		return "", fmt.Errorf("resolve slug: %w", err)
 	}
 
-	return "", nil, domain.ErrHashCollision
+	return slug, nil
 }
 
-// slugTaken reports whether dbID (HashSlug(slug)) already names a note or a link.
-func (m *Manager) slugTaken(ctx context.Context, dbID string) (bool, error) {
-	notesExist, err := m.notes.Exists(ctx, dbID)
+// consumeLink deletes the burn link that reader follows and returns it with the plaintext target.
+func (m *Manager) consumeLink(ctx context.Context, slug, dbID string, reader domain.Reader) (*domain.Link, error) {
+	consumed, err := m.consume(ctx, dbID, reader)
 	if err != nil {
-		return false, fmt.Errorf("check note slug: %w", err)
-	}
-
-	if notesExist {
-		return true, nil
-	}
-
-	linksExist, err := m.storage.Exists(ctx, dbID)
-	if err != nil {
-		return false, fmt.Errorf("check link slug: %w", err)
-	}
-
-	return linksExist, nil
-}
-
-func (m *Manager) consumeLink(
-	ctx context.Context, slug, dbID string, reader *FollowOptions,
-) (*domain.Link, error) {
-	var consumed *domain.Link
-
-	var err error
-
-	if reader == nil {
-		consumed, err = m.storage.Consume(ctx, dbID)
-	} else {
-		consumed, err = m.storage.ConsumeVisible(ctx, dbID, reader.CallerID, reader.Authenticated, true)
-	}
-
-	if err != nil {
-		return nil, fmt.Errorf("redirect: burn after click: %w", err)
+		return nil, err
 	}
 
 	consumed.ID = slug
 
 	err = decryptTargetURL(ctx, m.encryptor, m.log, consumed)
 	if err != nil {
-		return nil, fmt.Errorf("redirect: burn after click: %w", err)
+		return nil, err
 	}
 
 	m.log.DebugContext(ctx, "link burned", "id", domain.HashSlug(slug))
+	m.metrics.IncRedirects()
 
-	if m.metrics != nil {
-		m.metrics.IncRedirects()
+	return consumed, nil
+}
+
+// consume atomically deletes a burn link. Storage checks the privacy of the current row for
+// reader in the DELETE; with SkipPrivacy (accounts off) no privacy level applies, so storage
+// checks only the burn and expiry rule.
+func (m *Manager) consume(ctx context.Context, dbID string, reader domain.Reader) (*domain.Link, error) {
+	if reader.SkipPrivacy {
+		consumed, err := m.storage.Consume(ctx, dbID, m.now())
+		if err != nil {
+			return nil, fmt.Errorf("burn link: %w", err)
+		}
+
+		return consumed, nil
+	}
+
+	consumed, err := m.storage.ConsumeVisible(ctx, dbID, reader.CallerID, reader.Authenticated, true, m.now())
+	if err != nil {
+		return nil, fmt.Errorf("burn link: %w", err)
 	}
 
 	return consumed, nil
+}
+
+// releaseExpiredHolder reports whether an expired note, link or file with id was removed. Errors
+// are fail-soft: Create keeps its slug conflict.
+func (m *Manager) releaseExpiredHolder(ctx context.Context, id string, now time.Time) bool {
+	released, err := m.expiredSlugs.ReleaseExpiredSlug(ctx, id, now)
+	if err != nil {
+		m.log.WarnContext(ctx, "release expired slug", "id", id, "err", err)
+
+		return false
+	}
+
+	if released {
+		// A link that had this ID can have a cached target; the new record must not keep it alive.
+		m.evictCache(id)
+		m.log.DebugContext(ctx, "expired record released its slug", "id", id)
+	}
+
+	return released
 }

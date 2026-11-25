@@ -15,8 +15,7 @@ import (
 // and dotfiles (path-traversal-ish shapes). Overall length is bounded separately by SlugMaxLen.
 var slugRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*$`)
 
-// SlugMaxLen bounds the total slug length (a slug doubles as content/target-URL encryption key
-// material for both notes and links).
+// SlugMaxLen bounds the total slug length of a note, a short link or a file.
 const SlugMaxLen = 100
 
 // SlugMaxSegments bounds the number of "/"-separated path segments in a custom slug. Generous
@@ -35,7 +34,7 @@ func ReservedSlugPrefixes() map[string]struct{} {
 		"login": {}, "setup": {}, "logout": {}, "totp-login": {},
 		"admin": {}, "api": {}, "success": {}, "healthz": {}, "readyz": {},
 		"notes": {}, "edit": {}, "change-password": {}, "static": {},
-		"links": {}, "r": {},
+		"links": {}, "r": {}, "files": {},
 		// Served file, registered per exact segment ("llms.txt", not "llms") so agent docs
 		// stay reachable without blocking the "llms" segment for note slugs.
 		"llms.txt": {},
@@ -46,9 +45,10 @@ func ReservedSlugPrefixes() map[string]struct{} {
 
 const (
 	slugChars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-	// slugLength balances short, friendly URLs against the fact that the slug doubles
-	// as the content/target-URL encryption key. 10 chars over a 62-char alphabet ≈ 60 bits:
-	// safe against online URL-guessing and a meaningful offline brute-force cost (years).
+	// slugLength balances short, friendly URLs against URL guessing: the random slug is the only
+	// secret in the URL of a public record. 10 chars over a 62-char alphabet ≈ 60 bits: safe
+	// against online URL guessing, and offline guessing from the HashSlug values of a stolen
+	// database costs years. Only legacy content envelopes derive their key from the slug.
 	slugLength = 10
 
 	editCodeChars  = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
@@ -56,39 +56,12 @@ const (
 )
 
 func newSlug() (string, error) {
-	operationResult, operationErr := randomString(slugChars, slugLength)
-	if operationErr != nil {
-		return operationResult, fmt.Errorf("random string: %w", operationErr)
-	}
-
-	return operationResult, nil
+	return randomString(slugChars, slugLength)
 }
 
 // NewEditCode generates a random edit code for a newly created note or link.
 func NewEditCode() (string, error) {
-	operationResult, operationErr := randomString(editCodeChars, editCodeLength)
-	if operationErr != nil {
-		return operationResult, fmt.Errorf("random string: %w", operationErr)
-	}
-
-	return operationResult, nil
-}
-
-// HasGeneratedEditCodeShape reports whether code looks like a server-generated edit code (every
-// release, v0.1.6 included, generates 12 chars of [A-Za-z0-9]). A caller-chosen code may share
-// the shape; only shape-mismatching codes are known to be caller-chosen.
-func HasGeneratedEditCodeShape(code string) bool {
-	if len(code) != editCodeLength {
-		return false
-	}
-
-	for _, char := range code {
-		if !strings.ContainsRune(editCodeChars, char) {
-			return false
-		}
-	}
-
-	return true
+	return randomString(editCodeChars, editCodeLength)
 }
 
 // CustomSlugSetting is the value of the custom slug setting. Its underlying type is bool, so
@@ -102,11 +75,11 @@ const (
 	CustomSlugsEnabled CustomSlugSetting = true
 )
 
-// ResolveSlug validates or generates a slug, returning the plaintext value to use as both the
-// resource's encryption key and the input to HashSlug. A user-supplied candidate is only
-// accepted when custom is CustomSlugsEnabled; otherwise a non-empty candidate is rejected so
-// callers cannot pick low-entropy, guessable key material. An empty candidate always generates
-// a fresh random slug, regardless of custom (custom aliases are optional, not mandatory).
+// ResolveSlug validates or generates a slug, returning the plaintext value of the URL. HashSlug of
+// it is the record ID. A user-supplied candidate is only accepted when custom is
+// CustomSlugsEnabled; otherwise a non-empty candidate is rejected so callers cannot pick a short,
+// guessable URL. An empty candidate always generates a fresh random slug, regardless of custom
+// (custom aliases are optional, not mandatory).
 func ResolveSlug(candidate string, custom CustomSlugSetting) (string, error) {
 	if candidate == "" {
 		slug, err := newSlug()

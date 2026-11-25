@@ -10,10 +10,25 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 
 	adaptercli "github.com/partyzanex/padmark/internal/adapters/cli"
 	"github.com/partyzanex/padmark/internal/errorcontext"
 )
+
+// CLISuite runs padmark-cli in this process against httptest servers. SetupTest isolates the
+// CLI from the environment of the developer.
+type CLISuite struct {
+	suite.Suite
+}
+
+func TestCLISuite(t *testing.T) {
+	suite.Run(t, new(CLISuite))
+}
+
+func (s *CLISuite) SetupTest() {
+	isolateCLI(s.T())
+}
 
 func isolateCLI(t *testing.T) {
 	t.Helper()
@@ -37,15 +52,91 @@ func runCLI(t *testing.T, serverURL string, args ...string) error {
 	return errorcontext.Wrap(app.Run(t.Context(), append(command, args...)), "run CLI")
 }
 
-func TestCLIResponseErrorsPreserveIdentity(t *testing.T) {
-	isolateCLI(t)
+func (s *CLISuite) TestResponseErrorsPreserveIdentity() {
+	t := s.T()
 
-	for _, test := range []struct {
-		name, body, context string
-		status              int
-		args                []string
-		causes              []error
-	}{
+	for _, test := range responseErrorCases() {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(test.status)
+
+				_, err := io.WriteString(w, test.body)
+				if err != nil {
+					t.Errorf("write fixture response: %v", err)
+				}
+			}))
+			defer server.Close()
+
+			for range 2 {
+				err := runCLI(t, server.URL, test.args...)
+				require.ErrorContains(t, err, test.context)
+
+				for _, cause := range test.causes {
+					require.ErrorIs(t, err, cause)
+				}
+			}
+		})
+	}
+}
+
+func (s *CLISuite) TestTransportErrorPreservesType() {
+	t := s.T()
+
+	server := httptest.NewServer(http.NotFoundHandler())
+	server.Close()
+
+	err := runCLI(t, server.URL, "get", "example")
+	require.ErrorContains(t, err, "get note")
+	_, ok := errors.AsType[*net.OpError](err)
+	require.True(t, ok, "network errors must remain available through errors.As")
+}
+
+func (s *CLISuite) TestMissingIDIsStableAndHasContext() {
+	t := s.T()
+
+	first := runCLI(t, "http://127.0.0.1:1", "expand")
+	second := runCLI(t, "http://127.0.0.1:1", "expand")
+	require.ErrorContains(t, first, "read link ID")
+	require.ErrorContains(t, second, "read link ID")
+
+	cause := first
+	for unwrapped := errors.Unwrap(cause); unwrapped != nil; unwrapped = errors.Unwrap(cause) {
+		cause = unwrapped
+	}
+
+	require.ErrorIs(t, second, cause)
+}
+
+func (s *CLISuite) TestOutputSuccessRemainsNil() {
+	t := s.T()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		_, err := io.WriteString(w, `{"id":"fixture","title":"Fixture","content":"text",`+
+			`"content_type":"text/plain","views":0,"burn_after_reading":false,`+
+			`"created_at":"2026-10-25T12:00:00Z","updated_at":"2026-10-25T12:00:00Z"}`)
+		if err != nil {
+			t.Errorf("write fixture response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	require.NoError(t, runCLI(t, server.URL, "get", "example", "--json"))
+}
+
+// responseErrorCase is one error answer of the server and the CLI errors that it must give.
+type responseErrorCase struct {
+	name, body, context string
+	status              int
+	args                []string
+	causes              []error
+}
+
+// responseErrorCases returns the cases of TestResponseErrorsPreserveIdentity.
+func responseErrorCases() []responseErrorCase {
+	return []responseErrorCase{
 		{
 			name: "unauthorized", status: http.StatusUnauthorized, body: `{"message":"sign in"}`,
 			args: []string{"get", "example"}, context: "decode get note response",
@@ -87,73 +178,5 @@ func TestCLIResponseErrorsPreserveIdentity(t *testing.T) {
 			args:    []string{"edit", "example", "--content", "fixture", "--edit-code", "fixture-code"},
 			context: "invalid fixture title", causes: []error{adaptercli.ErrBadRequest},
 		},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(test.status)
-
-				_, err := io.WriteString(w, test.body)
-				if err != nil {
-					t.Errorf("write fixture response: %v", err)
-				}
-			}))
-			defer server.Close()
-
-			for range 2 {
-				err := runCLI(t, server.URL, test.args...)
-				require.ErrorContains(t, err, test.context)
-
-				for _, cause := range test.causes {
-					require.ErrorIs(t, err, cause)
-				}
-			}
-		})
 	}
-}
-
-func TestCLITransportErrorPreservesType(t *testing.T) {
-	isolateCLI(t)
-
-	server := httptest.NewServer(http.NotFoundHandler())
-	server.Close()
-
-	err := runCLI(t, server.URL, "get", "example")
-	require.ErrorContains(t, err, "get note")
-	_, ok := errors.AsType[*net.OpError](err)
-	require.True(t, ok, "network errors must remain available through errors.As")
-}
-
-func TestCLIMissingIDIsStableAndHasContext(t *testing.T) {
-	isolateCLI(t)
-
-	first := runCLI(t, "http://127.0.0.1:1", "expand")
-	second := runCLI(t, "http://127.0.0.1:1", "expand")
-	require.ErrorContains(t, first, "read link ID")
-	require.ErrorContains(t, second, "read link ID")
-
-	cause := first
-	for unwrapped := errors.Unwrap(cause); unwrapped != nil; unwrapped = errors.Unwrap(cause) {
-		cause = unwrapped
-	}
-
-	require.ErrorIs(t, second, cause)
-}
-
-func TestCLIOutputSuccessRemainsNil(t *testing.T) {
-	isolateCLI(t)
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-
-		_, err := io.WriteString(w, `{"id":"fixture","title":"Fixture","content":"text",`+
-			`"content_type":"text/plain","views":0,"burn_after_reading":false,`+
-			`"created_at":"2026-10-25T12:00:00Z","updated_at":"2026-10-25T12:00:00Z"}`)
-		if err != nil {
-			t.Errorf("write fixture response: %v", err)
-		}
-	}))
-	defer server.Close()
-
-	require.NoError(t, runCLI(t, server.URL, "get", "example", "--json"))
 }

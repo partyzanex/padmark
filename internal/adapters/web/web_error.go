@@ -114,7 +114,7 @@ func (c *common) writeErrorPage(w http.ResponseWriter, r *http.Request, err erro
 
 // writeNoteError renders an error respecting content negotiation: browsers get the HTML error
 // page, while API/CLI clients (JSON or plain) get a machine-readable status via writeError. Used
-// on the note-view path, where handlePrivateAuth runs before the format switch and so must not
+// on the note-view path, which serves HTML, JSON and plain text and so must not
 // assume HTML — otherwise a CLI reading e.g. an already-burned note receives an undecodable
 // text/html body instead of a clean 404.
 func (c *common) writeNoteError(w http.ResponseWriter, r *http.Request, err error) {
@@ -185,4 +185,42 @@ func setupDisabledPageData() errorViewData {
 		Detail: "",
 		Nonce:  "",
 	}
+}
+
+// File error texts. The upload and edit pages show the same texts in #fileError, see the
+// "file-errors-js" template.
+const (
+	fileGoneDesc        = "The file was deleted or its lifetime ended."
+	fileStorageDesc     = "File storage is unavailable. Try again later."
+	fileInvalidNameDesc = "The file name is not valid."
+	filesOffDesc        = "File publishing is turned off on this server."
+)
+
+// fileErrToPageData is domainErrToPageData with the texts for files. maxSize is the server
+// limit for the "too large" text; 0 omits the number.
+func fileErrToPageData(err error, maxSize int64) errorViewData {
+	status, _ := domainErrStatus(err)
+	data := errorViewData{
+		Header: noHeader(), Code: status, ErrorType: errorTypeClient, Title: "", Desc: "", Detail: "", Nonce: "",
+	}
+
+	switch {
+	case errors.Is(err, domain.ErrNotFound), errors.Is(err, domain.ErrExpired):
+		data.Title, data.Desc = "File not found", fileGoneDesc
+	case errors.Is(err, domain.ErrFileTooLarge):
+		data.Title, data.Desc = "File too large", "The file is larger than the server limit."
+		if maxSize > 0 {
+			data.Desc = "The file is larger than the server limit (" + formatSize(maxSize) + ")."
+		}
+	case errors.Is(err, domain.ErrStorageUnavailable):
+		data.ErrorType, data.Title, data.Desc = errorTypeServer, "File storage unavailable", fileStorageDesc
+	case errors.Is(err, domain.ErrInvalidFileName):
+		data.Title, data.Desc = "Invalid file name", fileInvalidNameDesc
+	case errors.Is(err, domain.ErrFeatureNotSupported):
+		data.ErrorType, data.Title, data.Desc = errorTypeServer, "Files are off", filesOffDesc
+	default:
+		return domainErrToPageData(err)
+	}
+
+	return data
 }

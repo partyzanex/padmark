@@ -11,6 +11,7 @@ package links
 import (
 	context "context"
 	reflect "reflect"
+	time "time"
 
 	uuid "github.com/google/uuid"
 	domain "github.com/partyzanex/padmark/internal/domain"
@@ -42,33 +43,33 @@ func (m *MockStorage) EXPECT() *MockStorageMockRecorder {
 }
 
 // Consume mocks base method.
-func (m *MockStorage) Consume(ctx context.Context, id string) (*domain.Link, error) {
+func (m *MockStorage) Consume(ctx context.Context, id string, now time.Time) (*domain.Link, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Consume", ctx, id)
+	ret := m.ctrl.Call(m, "Consume", ctx, id, now)
 	ret0, _ := ret[0].(*domain.Link)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // Consume indicates an expected call of Consume.
-func (mr *MockStorageMockRecorder) Consume(ctx, id any) *gomock.Call {
+func (mr *MockStorageMockRecorder) Consume(ctx, id, now any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Consume", reflect.TypeOf((*MockStorage)(nil).Consume), ctx, id)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Consume", reflect.TypeOf((*MockStorage)(nil).Consume), ctx, id, now)
 }
 
 // ConsumeVisible mocks base method.
-func (m *MockStorage) ConsumeVisible(ctx context.Context, id string, callerID uuid.UUID, authenticated, allowBurn bool) (*domain.Link, error) {
+func (m *MockStorage) ConsumeVisible(ctx context.Context, id string, callerID uuid.UUID, authenticated, allowBurn bool, now time.Time) (*domain.Link, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ConsumeVisible", ctx, id, callerID, authenticated, allowBurn)
+	ret := m.ctrl.Call(m, "ConsumeVisible", ctx, id, callerID, authenticated, allowBurn, now)
 	ret0, _ := ret[0].(*domain.Link)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // ConsumeVisible indicates an expected call of ConsumeVisible.
-func (mr *MockStorageMockRecorder) ConsumeVisible(ctx, id, callerID, authenticated, allowBurn any) *gomock.Call {
+func (mr *MockStorageMockRecorder) ConsumeVisible(ctx, id, callerID, authenticated, allowBurn, now any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ConsumeVisible", reflect.TypeOf((*MockStorage)(nil).ConsumeVisible), ctx, id, callerID, authenticated, allowBurn)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ConsumeVisible", reflect.TypeOf((*MockStorage)(nil).ConsumeVisible), ctx, id, callerID, authenticated, allowBurn, now)
 }
 
 // Create mocks base method.
@@ -86,32 +87,31 @@ func (mr *MockStorageMockRecorder) Create(ctx, link any) *gomock.Call {
 }
 
 // Delete mocks base method.
-func (m *MockStorage) Delete(ctx context.Context, id string) error {
+func (m *MockStorage) Delete(ctx context.Context, id, storedEditCode string) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Delete", ctx, id)
+	ret := m.ctrl.Call(m, "Delete", ctx, id, storedEditCode)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // Delete indicates an expected call of Delete.
-func (mr *MockStorageMockRecorder) Delete(ctx, id any) *gomock.Call {
+func (mr *MockStorageMockRecorder) Delete(ctx, id, storedEditCode any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Delete", reflect.TypeOf((*MockStorage)(nil).Delete), ctx, id)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Delete", reflect.TypeOf((*MockStorage)(nil).Delete), ctx, id, storedEditCode)
 }
 
-// Exists mocks base method.
-func (m *MockStorage) Exists(ctx context.Context, id string) (bool, error) {
+// DeleteExpired mocks base method.
+func (m *MockStorage) DeleteExpired(ctx context.Context, id string, now time.Time) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Exists", ctx, id)
-	ret0, _ := ret[0].(bool)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
+	ret := m.ctrl.Call(m, "DeleteExpired", ctx, id, now)
+	ret0, _ := ret[0].(error)
+	return ret0
 }
 
-// Exists indicates an expected call of Exists.
-func (mr *MockStorageMockRecorder) Exists(ctx, id any) *gomock.Call {
+// DeleteExpired indicates an expected call of DeleteExpired.
+func (mr *MockStorageMockRecorder) DeleteExpired(ctx, id, now any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Exists", reflect.TypeOf((*MockStorage)(nil).Exists), ctx, id)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteExpired", reflect.TypeOf((*MockStorage)(nil).DeleteExpired), ctx, id, now)
 }
 
 // GetByID mocks base method.
@@ -158,96 +158,18 @@ func (mr *MockStorageMockRecorder) IncrementViewsVisible(ctx, id, callerID, auth
 }
 
 // Update mocks base method.
-func (m *MockStorage) Update(ctx context.Context, id string, link *domain.Link) (*domain.Link, error) {
+func (m *MockStorage) Update(ctx context.Context, id, storedEditCode string, patch *domain.LinkPatch, now time.Time) (*domain.Link, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Update", ctx, id, link)
+	ret := m.ctrl.Call(m, "Update", ctx, id, storedEditCode, patch, now)
 	ret0, _ := ret[0].(*domain.Link)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // Update indicates an expected call of Update.
-func (mr *MockStorageMockRecorder) Update(ctx, id, link any) *gomock.Call {
+func (mr *MockStorageMockRecorder) Update(ctx, id, storedEditCode, patch, now any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Update", reflect.TypeOf((*MockStorage)(nil).Update), ctx, id, link)
-}
-
-// MockNotesChecker is a mock of NotesChecker interface.
-type MockNotesChecker struct {
-	ctrl     *gomock.Controller
-	recorder *MockNotesCheckerMockRecorder
-	isgomock struct{}
-}
-
-// MockNotesCheckerMockRecorder is the mock recorder for MockNotesChecker.
-type MockNotesCheckerMockRecorder struct {
-	mock *MockNotesChecker
-}
-
-// NewMockNotesChecker creates a new mock instance.
-func NewMockNotesChecker(ctrl *gomock.Controller) *MockNotesChecker {
-	mock := &MockNotesChecker{ctrl: ctrl}
-	mock.recorder = &MockNotesCheckerMockRecorder{mock}
-	return mock
-}
-
-// EXPECT returns an object that allows the caller to indicate expected use.
-func (m *MockNotesChecker) EXPECT() *MockNotesCheckerMockRecorder {
-	return m.recorder
-}
-
-// Exists mocks base method.
-func (m *MockNotesChecker) Exists(ctx context.Context, id string) (bool, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Exists", ctx, id)
-	ret0, _ := ret[0].(bool)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// Exists indicates an expected call of Exists.
-func (mr *MockNotesCheckerMockRecorder) Exists(ctx, id any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Exists", reflect.TypeOf((*MockNotesChecker)(nil).Exists), ctx, id)
-}
-
-// MockSlugLock is a mock of SlugLock interface.
-type MockSlugLock struct {
-	ctrl     *gomock.Controller
-	recorder *MockSlugLockMockRecorder
-	isgomock struct{}
-}
-
-// MockSlugLockMockRecorder is the mock recorder for MockSlugLock.
-type MockSlugLockMockRecorder struct {
-	mock *MockSlugLock
-}
-
-// NewMockSlugLock creates a new mock instance.
-func NewMockSlugLock(ctrl *gomock.Controller) *MockSlugLock {
-	mock := &MockSlugLock{ctrl: ctrl}
-	mock.recorder = &MockSlugLockMockRecorder{mock}
-	return mock
-}
-
-// EXPECT returns an object that allows the caller to indicate expected use.
-func (m *MockSlugLock) EXPECT() *MockSlugLockMockRecorder {
-	return m.recorder
-}
-
-// Lock mocks base method.
-func (m *MockSlugLock) Lock(ctx context.Context, key string) (func(), error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Lock", ctx, key)
-	ret0, _ := ret[0].(func())
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// Lock indicates an expected call of Lock.
-func (mr *MockSlugLockMockRecorder) Lock(ctx, key any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Lock", reflect.TypeOf((*MockSlugLock)(nil).Lock), ctx, key)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Update", reflect.TypeOf((*MockStorage)(nil).Update), ctx, id, storedEditCode, patch, now)
 }
 
 // MockEncryptor is a mock of Encryptor interface.
@@ -493,4 +415,43 @@ func (m *MockMetrics) IncRedirects() {
 func (mr *MockMetricsMockRecorder) IncRedirects() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IncRedirects", reflect.TypeOf((*MockMetrics)(nil).IncRedirects))
+}
+
+// MockExpiredSlugReleaser is a mock of ExpiredSlugReleaser interface.
+type MockExpiredSlugReleaser struct {
+	ctrl     *gomock.Controller
+	recorder *MockExpiredSlugReleaserMockRecorder
+	isgomock struct{}
+}
+
+// MockExpiredSlugReleaserMockRecorder is the mock recorder for MockExpiredSlugReleaser.
+type MockExpiredSlugReleaserMockRecorder struct {
+	mock *MockExpiredSlugReleaser
+}
+
+// NewMockExpiredSlugReleaser creates a new mock instance.
+func NewMockExpiredSlugReleaser(ctrl *gomock.Controller) *MockExpiredSlugReleaser {
+	mock := &MockExpiredSlugReleaser{ctrl: ctrl}
+	mock.recorder = &MockExpiredSlugReleaserMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockExpiredSlugReleaser) EXPECT() *MockExpiredSlugReleaserMockRecorder {
+	return m.recorder
+}
+
+// ReleaseExpiredSlug mocks base method.
+func (m *MockExpiredSlugReleaser) ReleaseExpiredSlug(ctx context.Context, id string, now time.Time) (bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ReleaseExpiredSlug", ctx, id, now)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ReleaseExpiredSlug indicates an expected call of ReleaseExpiredSlug.
+func (mr *MockExpiredSlugReleaserMockRecorder) ReleaseExpiredSlug(ctx, id, now any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReleaseExpiredSlug", reflect.TypeOf((*MockExpiredSlugReleaser)(nil).ReleaseExpiredSlug), ctx, id, now)
 }

@@ -6,9 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"testing"
 
-	"github.com/stretchr/testify/suite"
 	"github.com/uptrace/bun"
 
 	sqliterepo "github.com/partyzanex/padmark/internal/infra/storage/sqlite"
@@ -33,16 +31,12 @@ func (s *SQLiteAuthSuite) SetupTest() {
 	s.Require().NoError(migrateErr)
 
 	s.Users = sqliterepo.NewUserRepository(s.db)
-	s.Invites = sqliterepo.NewInviteRepository(s.db, slog.Default())
-	s.Sessions = sqliterepo.NewSessionRepository(s.db, slog.Default())
+	s.Invites = sqliterepo.NewInviteRepository(s.db)
+	s.Sessions = sqliterepo.NewSessionRepository(s.db)
 }
 
 func (s *SQLiteAuthSuite) TearDownTest() {
 	if s.db != nil {
 		s.Require().NoError(s.db.Close())
 	}
-}
-
-func TestSQLiteAuth(t *testing.T) {
-	suite.Run(t, new(SQLiteAuthSuite))
 }

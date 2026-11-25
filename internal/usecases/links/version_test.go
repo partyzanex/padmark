@@ -1,0 +1,56 @@
+package links
+
+import (
+	"time"
+
+	"go.uber.org/mock/gomock"
+
+	"github.com/partyzanex/padmark/internal/domain"
+)
+
+// These tests check that a delete after an access or expiry check carries the stored edit-code
+// hash of the checked link. Storage uses it to refuse a new link that took the ID after the check.
+
+func storedLink(editCode string, expiresAt *time.Time) *domain.Link {
+	return &domain.Link{
+		TargetURL: "https://example.com", EditCode: editCode, ExpiresAt: expiresAt,
+
+		CreatedAt: time.Time{}, Privacy: nil, OwnerID: nil, DirectRedirect: nil,
+		ID: "", Views: 0, BurnAfterClick: false,
+	}
+}
+
+// TestDelete_CorrectEditCodeUsesCheckedVersion verifies that the right edit code deletes the link,
+// and that the DELETE carries the stored edit-code hash of the checked link.
+func (s *ManagerTestSuite) TestDelete_CorrectEditCodeUsesCheckedVersion() {
+	s.storage.EXPECT().GetByID(gomock.Any(), domain.HashSlug("the-slug")).Return(storedLink("secret123456", nil), nil)
+	s.storage.EXPECT().Delete(gomock.Any(), domain.HashSlug("the-slug"), "secret123456").Return(nil)
+
+	s.Require().NoError(s.manager.Delete(s.T().Context(), "the-slug", "secret123456", openReader()))
+}
+
+// TestDelete_NewVersionIsNotFound verifies that a refused stale delete reaches the caller as
+// ErrNotFound, the answer for a deleted link.
+func (s *ManagerTestSuite) TestDelete_NewVersionIsNotFound() {
+	s.storage.EXPECT().GetByID(gomock.Any(), domain.HashSlug("the-slug")).Return(storedLink("secret123456", nil), nil)
+	s.storage.EXPECT().Delete(gomock.Any(), domain.HashSlug("the-slug"), "secret123456").Return(domain.ErrNotFound)
+
+	err := s.manager.Delete(s.T().Context(), "the-slug", "secret123456", openReader())
+
+	s.Require().ErrorIs(err, domain.ErrNotFound)
+}
+
+// TestFollow_ExtendedAfterExpiryCheckStays covers finding 8: the owner extends the link between
+// the expiry decision and the DELETE. Storage refuses the DELETE because the row is not expired
+// now. The manager must not fall back to an unconditional Delete: the strict mock fails on it.
+func (s *ManagerTestSuite) TestFollow_ExtendedAfterExpiryCheckStays() {
+	past := testNow().Add(-time.Hour)
+	for _, reader := range []domain.Reader{openReader(), heldReader()} {
+		s.storage.EXPECT().GetByID(gomock.Any(), domain.HashSlug("extended")).
+			Return(storedLink("hash:extended", &past), nil)
+		s.storage.EXPECT().DeleteExpired(gomock.Any(), domain.HashSlug("extended"), testNow()).Return(domain.ErrNotFound)
+
+		_, err := s.manager.Follow(s.T().Context(), "extended", reader)
+		s.Require().ErrorIs(err, domain.ErrExpired, "this request still saw the old expiry")
+	}
+}

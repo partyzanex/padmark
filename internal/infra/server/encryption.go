@@ -135,7 +135,12 @@ func newEncryptionManager(
 		return nil, contentkeys.Wrap(err)
 	}
 
-	return contentkeys.New(keyrepo.New(db), keyring, notes, links, hasher), nil
+	files, err := keyring.ForResource("file")
+	if err != nil {
+		return nil, contentkeys.Wrap(err)
+	}
+
+	return contentkeys.New(keyrepo.New(db), keyring, notes, links, files, hasher), nil
 }
 
 func validateEncryptionFlags(cmd *cli.Command) error {
@@ -162,17 +167,17 @@ func validateEncryptionFlags(cmd *cli.Command) error {
 func encryptionAction(ctx context.Context, cmd *cli.Command) error {
 	flagErr := validateEncryptionFlags(cmd)
 	if flagErr != nil {
-		return fmt.Errorf("validate encryption flags: %w", flagErr)
+		return flagErr
 	}
 
 	if cmd.Name == "keygen" {
-		return errorcontext.Wrap(generateKeyring(cmd), "generate keyring")
+		return generateKeyring(cmd)
 	}
 
 	log := newLogger(DefaultLogLevel, DefaultLogFormat)
+	storage, keyringCfg := storageConfigFromCommand(cmd), keyringConfigFromCommand(cmd)
 
-	keyring, err := loadToolKeyring(cmd.String(FlagContentKeyring), cmd.String(FlagStorage), cmd.String(FlagDSN),
-		cmd.Bool(FlagAllowSharedKeyring), log)
+	keyring, err := loadToolKeyring(keyringCfg.path, storage.dialect, storage.dsn, keyringCfg.allowShared, log)
 	if err != nil {
 		return contentkeys.Wrap(err)
 	}
@@ -183,21 +188,18 @@ func encryptionAction(ctx context.Context, cmd *cli.Command) error {
 			return contentkeys.Wrap(err)
 		}
 
-		return errorcontext.Wrap(writeKeyring(cmd, keyring), "write keyring")
+		return writeKeyring(cmd, keyring)
 	}
 
-	argonErr := validateArgon2Config(cmd)
-	if argonErr != nil {
-		return fmt.Errorf("validate argon2 config: %w", argonErr)
+	argon2, err := argon2ConfigFromCommand(cmd)
+	if err != nil {
+		return err
 	}
 
 	// Bound argon2id workspace before converted legacy edit codes are hashed.
-	hasher, err := prepareArgon2(cmd)
-	if err != nil {
-		return fmt.Errorf("prepare argon2: %w", err)
-	}
+	hasher := prepareArgon2(argon2, log)
 
-	db, err := openDB(ctx, cmd.String(FlagStorage), cmd.String(FlagDSN), log)
+	db, err := openDB(ctx, storage.dialect, storage.dsn, log)
 	if err != nil {
 		return contentkeys.Wrap(err)
 	}
@@ -243,7 +245,7 @@ func runEncryptionOperation(ctx context.Context, cmd *cli.Command, db *bun.DB,
 			return contentkeys.Wrap(err)
 		}
 
-		return errorcontext.Wrap(writeKeyring(cmd, keyring), "write keyring")
+		return writeKeyring(cmd, keyring)
 	case "key-remove":
 		id := cmd.String(flagKeyID)
 		if _, exists := keyring.Keys[id]; !exists {
@@ -257,9 +259,9 @@ func runEncryptionOperation(ctx context.Context, cmd *cli.Command, db *bun.DB,
 
 		delete(keyring.Keys, id)
 
-		return errorcontext.Wrap(writeKeyring(cmd, keyring), "write keyring")
+		return writeKeyring(cmd, keyring)
 	default:
-		return errorcontext.Wrap(runEncryptionData(ctx, cmd, manager), "run encryption data")
+		return runEncryptionData(ctx, cmd, manager)
 	}
 }
 
@@ -326,7 +328,7 @@ func generateKeyring(cmd *cli.Command) error {
 		return contentkeys.Wrap(err)
 	}
 
-	return errorcontext.Wrap(writeKeyring(cmd, keyring), "write keyring")
+	return writeKeyring(cmd, keyring)
 }
 
 func writeKeyring(cmd *cli.Command, keyring *crypto.ContentKeyring) error {
@@ -354,27 +356,13 @@ func writeKeyring(cmd *cli.Command, keyring *crypto.ContentKeyring) error {
 	return nil
 }
 
-// encryptionHasher hashes converted legacy edit codes with the operator's argon2 cost.
-func encryptionHasher(cmd *cli.Command) (*crypto.EditCodeHasher, error) {
-	params, err := argon2ParamsFromFlags(cmd)
-	if err != nil {
-		return nil, fmt.Errorf("argon2 params: %w", err)
-	}
+// prepareArgon2 sets the process-wide argon2id memory budget and builds the edit-code hasher
+// with the operator's argon2 cost and log. Call it before any hasher runs. serve gives the one
+// hasher to each manager; the encryption commands hash converted legacy edit codes with it.
+func prepareArgon2(cfg argon2Config, log *slog.Logger) *crypto.EditCodeHasher {
+	crypto.SetArgon2MemoryBudget(cfg.memoryBudget)
 
-	return crypto.NewEditCodeHasher(params), nil
-}
-
-// prepareArgon2 sets the process-wide argon2id memory budget from the validated flag and builds
-// the edit-code hasher. Call it before any hasher runs.
-func prepareArgon2(cmd *cli.Command) (*crypto.EditCodeHasher, error) {
-	budget, err := uint32Flag(cmd, FlagArgon2MemoryBudget)
-	if err != nil {
-		return nil, fmt.Errorf("argon2 memory budget: %w", err)
-	}
-
-	crypto.SetArgon2MemoryBudget(budget)
-
-	return encryptionHasher(cmd)
+	return crypto.NewEditCodeHasher(cfg.params, log)
 }
 
 func validateContentEncryption(
@@ -383,7 +371,7 @@ func validateContentEncryption(
 ) error {
 	manager, err := newEncryptionManager(db, keyring, hasher)
 	if err != nil {
-		return fmt.Errorf("new encryption manager: %w", err)
+		return err
 	}
 
 	log.InfoContext(ctx, "preparing stored content; pending migrations run automatically")

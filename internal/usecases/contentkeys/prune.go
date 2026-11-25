@@ -3,7 +3,6 @@ package contentkeys
 import (
 	"context"
 	"errors"
-	"fmt"
 
 	"github.com/partyzanex/padmark/internal/errorcontext"
 )
@@ -11,6 +10,9 @@ import (
 const (
 	reasonCorruptRaw     = "corrupt_raw"
 	reasonUntaggedLegacy = "untagged_legacy"
+	// reasonCorruptFile marks a file record with unversioned sealed metadata. Prune never
+	// deletes it: the object in the bucket would stay without its content key.
+	reasonCorruptFile = "corrupt_file"
 )
 
 // PruneCorrupt permanently deletes only malformed raw records: unversioned values
@@ -20,7 +22,9 @@ const (
 // or name an unknown version; any such failure blocks the whole run before deletion.
 // Valid legacy ciphertext, v0.1.6 plaintext notes tagged for conversion, and untagged v0.1.6
 // notes (see untaggedLegacy) are never candidates either; an untagged v0.1.6 note also blocks
-// the whole run until MarkLegacy tags it. PreviewPrune lists every candidate ID with its reason.
+// the whole run until MarkLegacy tags it. A file record is never deleted: an unversioned file
+// value (reasonCorruptFile) blocks the whole run until the operator restores or removes the
+// record and its object by hand. PreviewPrune lists every candidate ID with its reason.
 // Stop all writers and back up the DB before the call. It neither initializes the registry nor
 // marks a pending migration ready.
 func (m *Manager) PruneCorrupt(ctx context.Context) (Report, error) {
@@ -31,12 +35,7 @@ func (m *Manager) PruneCorrupt(ctx context.Context) (Report, error) {
 
 	err = m.deleteCorruptRows(ctx, &report)
 	if err != nil {
-		operationResult, operationErr := m.failureReport(ctx, &report, err)
-		if operationErr != nil {
-			return operationResult, fmt.Errorf("failure report: %w", operationErr)
-		}
-
-		return operationResult, nil
+		return m.failureReport(ctx, &report, err)
 	}
 
 	final, err := m.Status(ctx)
@@ -59,7 +58,8 @@ func (m *Manager) PreviewPrune(ctx context.Context) (Report, error) {
 	}
 
 	// Malformed raw data alone is what a prune run resolves, so the preview succeeds; untagged
-	// v0.1.6 notes or failing envelopes keep the error, with the candidates listed anyway.
+	// v0.1.6 notes, damaged file records or failing envelopes keep the error, with the
+	// candidates listed anyway.
 	if onlyCorruptRaw(&report, err) {
 		return report, nil
 	}
@@ -89,21 +89,16 @@ func (m *Manager) deleteCorruptRows(ctx context.Context, report *Report) error {
 }
 
 // pruneReason classifies a row for pruning: reasonCorruptRaw for malformed raw data that prune
-// deletes, reasonUntaggedLegacy for an untagged v0.1.6 note that it never deletes, or "" for
-// every other row (tagged, versioned, or structurally valid legacy ciphertext).
+// deletes, reasonUntaggedLegacy for an untagged v0.1.6 note and reasonCorruptFile for a damaged
+// file record that it never deletes, or "" for every other row (tagged, versioned, or
+// structurally valid legacy ciphertext).
 func (m *Manager) pruneReason(row *Row) string {
 	cipher := m.ciphers[row.Resource]
-
-	switch {
-	case row.Legacy != nil || cipher.Versioned(row.Value):
-		return ""
-	case m.untaggedLegacy(row):
-		return reasonUntaggedLegacy
-	case cipher.ValidateLegacy(row.Value) != nil:
-		return reasonCorruptRaw
-	default:
+	if row.Legacy != nil || cipher.Versioned(row.Value) {
 		return ""
 	}
+
+	return m.unversionedReason(row, cipher)
 }
 
 // listCandidates adds every record a prune run would delete or refuses to delete to the report.

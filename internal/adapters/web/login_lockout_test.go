@@ -51,15 +51,15 @@ func (s *LoginLockoutSuite) SetupTest() {
 
 	manager := NewMockNoteManager(s.ctrl)
 	linkManager := NewMockLinkManager(s.ctrl)
-	handler := web.NewHandler(manager, linkManager, discardLog()).WithAuthManager(s.auth)
-	ogen := web.NewOgenHandler(manager, linkManager, NewMockPinger(s.ctrl), discardLog())
+	handlerCfg := testHandlerConfig(manager, linkManager, NewMockPinger(s.ctrl))
+	handlerCfg.Accounts = s.auth
+	handlerCfg.CSRFSecret = authTestCSRFSecret
+	handler := newTestHandler(s.T(), handlerCfg)
 
-	router, err := web.NewRouter(handler, ogen, &web.RouterOptions{
+	router, err := web.NewRouter(handler, &web.RouterOptions{
 		MaxBodyBytes: 256 * 1024,
-		CSRFSecret:   authTestCSRFSecret,
 
-		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, AllowedHosts: nil, RateLimit: 0,
-		RateBurst: 0, SessionTTL: 0, DisableAPI: false, DirectRedirect: false,
+		AllowedHosts: nil, RateLimit: 0, RateBurst: 0, DisableAPI: false,
 	})
 	s.Require().NoError(err)
 
@@ -93,14 +93,14 @@ func (s *LoginLockoutSuite) login(remoteAddr, username, code string) *httptest.R
 // answers an unknown username with the very same ErrInvalidTOTP, so this also models "nobody".
 func (s *LoginLockoutSuite) expectFailures(username string, times int) {
 	s.auth.EXPECT().
-		Login(gomock.Any(), username, lockTestPassword, lockTestBadCode, gomock.Any(), gomock.Any(), gomock.Any()).
+		Login(gomock.Any(), loginWith(username, lockTestPassword, lockTestBadCode, "")).
 		Return("", domain.ErrInvalidTOTP).
 		Times(times)
 }
 
 func (s *LoginLockoutSuite) expectSuccess(username string) {
 	s.auth.EXPECT().
-		Login(gomock.Any(), username, lockTestPassword, lockTestGoodCode, gomock.Any(), gomock.Any(), gomock.Any()).
+		Login(gomock.Any(), loginWith(username, lockTestPassword, lockTestGoodCode, "")).
 		Return("sess-"+username, nil)
 }
 
@@ -121,7 +121,7 @@ func (s *LoginLockoutSuite) attemptWhileLocked(remoteAddr, username string) (*ht
 	leaks := new(int)
 
 	s.auth.EXPECT().
-		Login(gomock.Any(), username, lockTestPassword, lockTestGoodCode, gomock.Any(), gomock.Any(), gomock.Any()).
+		Login(gomock.Any(), loginWith(username, lockTestPassword, lockTestGoodCode, "")).
 		DoAndReturn(func(_, _, _, _, _, _ any) (string, error) {
 			*leaks++
 

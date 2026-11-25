@@ -33,7 +33,13 @@ type Cache struct {
 // New creates a Cache holding up to size entries (LRU-evicted) for ttl each. log is used to
 // surface unexpected gcache failures; pass slog.Default() if no project logger is at hand.
 func New(size int, ttl time.Duration, log *slog.Logger) *Cache {
-	return &Cache{gc: gcache.New(size).LRU().Expiration(ttl).Build(), log: log}
+	return newWithClock(size, ttl, gcache.NewRealClock(), log)
+}
+
+// newWithClock is New with the clock that measures the TTL. Tests give a fake clock, as the
+// login lockout of the web middleware does, so that a TTL test does not wait for real time.
+func newWithClock(size int, ttl time.Duration, clock gcache.Clock, log *slog.Logger) *Cache {
+	return &Cache{gc: gcache.New(size).LRU().Expiration(ttl).Clock(clock).Build(), log: log}
 }
 
 // NewDefault creates a Cache sized for a "hot links" workload (DefaultSize entries, DefaultTTL

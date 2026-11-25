@@ -2,7 +2,6 @@ package crypto
 
 import (
 	"encoding/base64"
-	"fmt"
 	"strings"
 
 	"github.com/partyzanex/padmark/internal/domain"
@@ -33,22 +32,17 @@ func (*ContentCipher) ValidateLegacy(value string) error {
 func (enc *ContentCipher) WrapLegacy(value, recordID string) (string, error) {
 	err := enc.ValidateLegacy(value)
 	if err != nil {
-		return "", fmt.Errorf("validate legacy: %w", err)
+		return "", err
 	}
 
-	operationResult, operationErr := enc.encryptKind(value, recordID, legacyKind)
-	if operationErr != nil {
-		return operationResult, fmt.Errorf("encrypt: %w", operationErr)
-	}
-
-	return operationResult, nil
+	return enc.encryptKind(value, recordID, legacyKind)
 }
 
 // Inspect authenticates the envelope, including its payload digest, without opening the payload.
 func (enc *ContentCipher) Inspect(value, recordID string) (kind, keyID string, err error) {
 	envelope, err := enc.unwrap(value, recordID)
 	if err != nil {
-		return "", "", fmt.Errorf("unwrap: %w", err)
+		return "", "", err
 	}
 
 	clear(envelope.dek)
@@ -60,7 +54,7 @@ func (enc *ContentCipher) Inspect(value, recordID string) (kind, keyID string, e
 func (enc *ContentCipher) Rewrap(value, recordID string) (string, error) {
 	envelope, err := enc.unwrap(value, recordID)
 	if err != nil {
-		return "", fmt.Errorf("unwrap: %w", err)
+		return "", err
 	}
 	defer clear(envelope.dek)
 
@@ -70,12 +64,12 @@ func (enc *ContentCipher) Rewrap(value, recordID string) (string, error) {
 
 	keyAAD, err := wrappedKeyAAD(envelope.aad, enc.activeID, envelope.payload)
 	if err != nil {
-		return "", fmt.Errorf("wrapped key aad: %w", err)
+		return "", err
 	}
 
 	wrapped, err := enc.seal(enc.keys[enc.activeID], envelope.dek, keyAAD)
 	if err != nil {
-		return "", fmt.Errorf("seal: %w", err)
+		return "", err
 	}
 
 	return strings.Join([]string{
@@ -92,17 +86,17 @@ func (k *ContentKeyring) KeyCheck(installationID, keyID string) (string, error) 
 
 	gcm, err := contentGCM(k.Keys[keyID])
 	if err != nil {
-		return "", fmt.Errorf("content gcm: %w", err)
+		return "", err
 	}
 
 	enc, err := NewContentCipher(k.Active, k.Keys, "note")
 	if err != nil {
-		return "", fmt.Errorf("new content cipher: %w", err)
+		return "", err
 	}
 
 	sealed, err := enc.seal(gcm, []byte("padmark-key-check"), keyCheckAAD(installationID, keyID))
 	if err != nil {
-		return "", fmt.Errorf("seal: %w", err)
+		return "", err
 	}
 
 	return base64.RawURLEncoding.EncodeToString(sealed), nil
@@ -121,7 +115,7 @@ func (k *ContentKeyring) VerifyKeyCheck(installationID, keyID, value string) err
 
 	gcm, err := contentGCM(k.Keys[keyID])
 	if err != nil {
-		return fmt.Errorf("content gcm: %w", err)
+		return err
 	}
 
 	plain, err := gcm.Open(nil, data[:contentNonceSize], data[contentNonceSize:], keyCheckAAD(installationID, keyID))

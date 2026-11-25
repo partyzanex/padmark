@@ -3,6 +3,8 @@
 package postgres
 
 import (
+	"time"
+
 	"github.com/pressly/goose/v3"
 
 	"github.com/partyzanex/padmark/internal/domain"
@@ -58,7 +60,7 @@ func (s *RepositoryTestSuite) TestShowContents_UpdateNilKeepsStoredValue() {
 	}{{nil, true}, {new(false), false}, {nil, false}, {new(true), true}} {
 		update := showContentsNote("sc-update")
 		update.ShowContents = step.value
-		s.Require().NoError(s.repo.Update(ctx, "sc-update", update))
+		s.Require().NoError(s.repo.Update(ctx, "sc-update", update, time.Now()))
 
 		got, err := s.repo.Get(ctx, "sc-update")
 		s.Require().NoError(err)
@@ -74,7 +76,7 @@ func (s *RepositoryTestSuite) TestShowContents_ConsumeReturnsValue() {
 	note.ShowContents = new(true)
 	s.Require().NoError(s.repo.Create(ctx, note))
 
-	got, err := s.repo.Consume(ctx, "sc-burn", domain.PrivacyPublic)
+	got, err := s.repo.Consume(ctx, "sc-burn", domain.PrivacyPublic, "", time.Now())
 	s.Require().NoError(err)
 	s.True(got.ContentsSidebar())
 }

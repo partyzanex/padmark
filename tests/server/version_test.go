@@ -1,3 +1,5 @@
+//go:build integration
+
 package server_test
 
 import (
@@ -15,7 +17,9 @@ import (
 	"github.com/partyzanex/padmark/tests/internal/servertest"
 )
 
-func TestAPIDocumentationReleaseVersion(t *testing.T) {
+func (s *ServerSuite) TestAPIDocumentationReleaseVersion() {
+	t := s.T()
+
 	for _, test := range []struct {
 		name, version string
 		flags         []string

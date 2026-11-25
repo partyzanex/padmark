@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 	"github.com/uptrace/bun"
 )
 
@@ -70,6 +71,14 @@ func runReadModifyWrite(t *testing.T, dsn string, writers, iters int) (failures 
 	return errs, final
 }
 
+type ConcurrentWritersSuite struct {
+	suite.Suite
+}
+
+func TestConcurrentWritersSuite(t *testing.T) {
+	suite.Run(t, new(ConcurrentWritersSuite))
+}
+
 // TestSQLiteConcurrentWriters_NoLockContention is the regression guard for the _txlock=immediate
 // setting in WithPragmas.
 //
@@ -81,17 +90,15 @@ func runReadModifyWrite(t *testing.T, dsn string, writers, iters int) (failures 
 //
 // Every transaction must therefore succeed, and the counter must equal the number of
 // transactions: a lost update would mean two writers overlapped rather than serialised.
-func TestSQLiteConcurrentWriters_NoLockContention(t *testing.T) {
-	t.Parallel()
-
+func (s *ConcurrentWritersSuite) TestSQLiteConcurrentWriters_NoLockContention() {
 	const writers, iters = 8, 40
 
-	dsn := WithPragmas(filepath.Join(t.TempDir(), "concurrency.db"))
+	dsn := WithPragmas(filepath.Join(s.T().TempDir(), "concurrency.db"))
 
-	failures, final := runReadModifyWrite(t, dsn, writers, iters)
+	failures, final := runReadModifyWrite(s.T(), dsn, writers, iters)
 
-	require.Empty(t, failures, "read-then-write transactions must not fail under concurrent writers")
-	require.Equal(t, writers*iters, final, "every transaction must be reflected in the counter")
+	s.Require().Empty(failures, "read-then-write transactions must not fail under concurrent writers")
+	s.Require().Equal(writers*iters, final, "every transaction must be reflected in the counter")
 }
 
 // TestSQLiteConcurrentWriters_DeferredIsTheProblem pins the cause rather than the symptom: the
@@ -99,16 +106,14 @@ func TestSQLiteConcurrentWriters_NoLockContention(t *testing.T) {
 // version made deferred transactions safe here, this test starts failing and the setting above
 // can be reconsidered — without it, the reason for _txlock=immediate would only live in a
 // comment.
-func TestSQLiteConcurrentWriters_DeferredIsTheProblem(t *testing.T) {
-	t.Parallel()
-
+func (s *ConcurrentWritersSuite) TestSQLiteConcurrentWriters_DeferredIsTheProblem() {
 	const writers, iters = 8, 40
 
-	dsn := WithPragmas(filepath.Join(t.TempDir(), "deferred.db") + "?_txlock=deferred")
+	dsn := WithPragmas(filepath.Join(s.T().TempDir(), "deferred.db") + "?_txlock=deferred")
 
-	failures, _ := runReadModifyWrite(t, dsn, writers, iters)
+	failures, _ := runReadModifyWrite(s.T(), dsn, writers, iters)
 
-	require.NotEmpty(t, failures,
+	s.Require().NotEmpty(failures,
 		"deferred BEGIN is expected to lose transactions to lock contention; if it no longer "+
 			"does, re-evaluate the _txlock=immediate default in WithPragmas")
 }

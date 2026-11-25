@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"log/slog"
+	"runtime"
 	"testing"
 	"time"
 
@@ -53,17 +54,27 @@ func TestAcceptedCeiling(t *testing.T) {
 	}
 }
 
+// TestVerifyArgon2_RejectsCostAboveCeilingWithoutDeriving proves that the derivation does not
+// run by the memory that the call allocates, not by its duration: a derivation of hugeCostHash
+// allocates MaxArgon2Memory KiB, and a time bound fails on a slow or busy machine. The test is
+// not parallel, because the parallel tests of the package allocate argon2 memory too and the
+// allocation counter is for the whole process.
 func TestVerifyArgon2_RejectsCostAboveCeilingWithoutDeriving(t *testing.T) {
-	t.Parallel()
-
 	ceiling := Argon2Params{Memory: 8 * 1024, Time: 1, Threads: 1}.acceptedCeiling()
 
-	start := time.Now()
+	var before, after runtime.MemStats
+
+	runtime.ReadMemStats(&before)
+
 	matched, err := verifyArgon2(hugeCostHash(), "password", ceiling)
+
+	runtime.ReadMemStats(&after)
 
 	require.ErrorIs(t, err, ErrArgon2CostTooHigh)
 	assert.False(t, matched)
-	assert.Less(t, time.Since(start), 250*time.Millisecond, "must reject before running the derivation")
+
+	derivation := uint64(MaxArgon2Memory) * 1024
+	assert.Less(t, after.TotalAlloc-before.TotalAlloc, derivation/4, "must reject before running the derivation")
 }
 
 func TestVerifyArgon2_AcceptsConfiguredAndLegacyDefaultCost(t *testing.T) {
@@ -99,13 +110,13 @@ func TestHashers_LogAndRejectCostAboveCeiling(t *testing.T) {
 		AddSource: false, ReplaceAttr: nil,
 	}))
 
-	assert.False(t, NewPasswordHasher(low).WithLogger(log).Verify(hugeCostHash(), "password"))
+	assert.False(t, NewPasswordHasher(low, log).Verify(hugeCostHash(), "password"))
 	assert.Contains(t, buf.String(), "level=WARN")
 	assert.Contains(t, buf.String(), "password")
 
 	buf.Reset()
 
-	assert.False(t, NewEditCodeHasher(low).WithLogger(log).Verify(hugeCostHash(), "code"))
+	assert.False(t, NewEditCodeHasher(low, log).Verify(hugeCostHash(), "code"))
 	assert.Contains(t, buf.String(), "level=WARN")
 	assert.Contains(t, buf.String(), "edit code")
 	assert.NotContains(t, buf.String(), hugeCostHash(), "the stored hash must never be logged")

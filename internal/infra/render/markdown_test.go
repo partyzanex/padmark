@@ -24,7 +24,7 @@ func TestRenderer(t *testing.T) {
 }
 
 func (s *RendererSuite) TestParagraph() {
-	out, err := s.r.Render("hello world")
+	out, _, err := s.r.Render("hello world")
 	s.Require().NoError(err)
 	s.Contains(out, "hello world")
 }
@@ -42,7 +42,7 @@ func (s *RendererSuite) TestRenderPlain_DoesNotParseMarkdown() {
 }
 
 func (s *RendererSuite) TestHeadings() {
-	out, err := s.r.Render("# Title\n## Sub")
+	out, _, err := s.r.Render("# Title\n## Sub")
 	s.Require().NoError(err)
 	s.Contains(out, "<h1")
 	s.Contains(out, "<h2")
@@ -51,7 +51,7 @@ func (s *RendererSuite) TestHeadings() {
 // TestHeadingIDsArePrefixed pins DOM-clobbering protection: auto heading IDs live in the
 // user-content- namespace, so a heading can never shadow an application element ID.
 func (s *RendererSuite) TestHeadingIDsArePrefixed() {
-	out, err := s.r.Render("# raw-content\n\n## createdTag\n\n## createdTag")
+	out, _, err := s.r.Render("# raw-content\n\n## createdTag\n\n## createdTag")
 	s.Require().NoError(err)
 	s.Contains(out, `id="user-content-raw-content"`)
 	s.Contains(out, `id="user-content-createdtag"`)
@@ -63,7 +63,7 @@ func (s *RendererSuite) TestHeadingIDsArePrefixed() {
 // TestRawHTMLIDsAreRestricted verifies a user-supplied id outside the user-content- namespace is
 // dropped, while one inside it survives, and that name attributes cannot clobber either.
 func (s *RendererSuite) TestRawHTMLIDsAreRestricted() {
-	out, err := s.r.Render(`<div id="raw-content">a</div><p id="user-content-ok">b</p>` +
+	out, _, err := s.r.Render(`<div id="raw-content">a</div><p id="user-content-ok">b</p>` +
 		`<a name="copyRawBtn" href="/x">c</a><img name="createdTag" src="/i.png">`)
 	s.Require().NoError(err)
 	s.NotContains(out, `id="raw-content"`, "application element IDs must not be user-controllable")
@@ -73,38 +73,101 @@ func (s *RendererSuite) TestRawHTMLIDsAreRestricted() {
 
 func (s *RendererSuite) TestTable() {
 	md := "| A | B |\n|---|---|\n| 1 | 2 |"
-	out, err := s.r.Render(md)
+	out, _, err := s.r.Render(md)
 	s.Require().NoError(err)
 	s.Contains(out, "<table>")
 	s.Contains(out, "<td>1</td>")
 }
 
+// tableBox is the scroll box that Render puts around each outermost table (table_scroll.go).
+const tableBox = `<div class="table-scroll">`
+
+func (s *RendererSuite) TestTableScrollBox() {
+	out, _, err := s.r.Render("Text\n\n| A | B |\n|---|---|\n| 1 | 2 |\n\nAfter")
+	s.Require().NoError(err)
+	s.Contains(out, "<p>Text</p>\n"+tableBox+"<table>\n<thead>")
+	s.Contains(out, "</table></div>\n<p>After</p>")
+	s.Less(strings.Index(out, "Text"), strings.Index(out, tableBox))
+	s.Greater(strings.Index(out, "After"), strings.Index(out, "</div>"))
+}
+
+// TestTableScrollBoxRawHTML checks that a table written as HTML in the note gets the box too.
+func (s *RendererSuite) TestTableScrollBoxRawHTML() {
+	out, _, err := s.r.Render("<table><tr><td>raw</td></tr></table>\n\nText <table><tr><td>inline</td></tr></table>")
+	s.Require().NoError(err)
+	s.Equal(2, strings.Count(out, tableBox))
+	s.Contains(out, tableBox+"<table><tr><td>raw</td></tr></table></div>")
+	s.Contains(out, tableBox+"<table><tr><td>inline</td></tr></table></div>")
+}
+
+// TestTableScrollBoxNotFromUser checks that user HTML cannot make a scroll box: the sanitizer
+// removes the class, and only the real table gets one.
+func (s *RendererSuite) TestTableScrollBoxNotFromUser() {
+	out, _, err := s.r.Render(`<div class="table-scroll">spoof</div>` + "\n\n| A |\n|---|\n| 1 |")
+	s.Require().NoError(err)
+	s.Contains(out, "<div>spoof</div>")
+	s.Equal(1, strings.Count(out, tableBox))
+}
+
+// TestTableScrollBoxNestedAndMultiple checks that each outermost table gets one box and that a
+// table in a cell stays in the box of its outer table.
+func (s *RendererSuite) TestTableScrollBoxNestedAndMultiple() {
+	md := "| A |\n|---|\n| 1 |\n\n" +
+		"<table><tr><td><table><tr><td>in</td></tr></table></td></tr></table>\n\n" +
+		"> | Q |\n> |---|\n> | 2 |\n\n" +
+		"- item\n\n  | L |\n  |---|\n  | 3 |\n"
+	out, _, err := s.r.Render(md)
+	s.Require().NoError(err)
+	s.Equal(4, strings.Count(out, tableBox))
+	s.Equal(5, strings.Count(out, "<table>"))
+	s.Contains(out, tableBox+"<table><tr><td><table><tr><td>in</td></tr></table></td></tr></table></div>")
+}
+
+// TestTableScrollBoxNotInCode checks that table text in code gets no box.
+func (s *RendererSuite) TestTableScrollBoxNotInCode() {
+	md := "```html\n<table><tr><td>x</td></tr></table>\n```\n\n" +
+		"```\n| A |\n|---|\n| 1 |\n```\n\n" +
+		"Inline `<table>` code.\n\n    <table></table>\n"
+	out, _, err := s.r.Render(md)
+	s.Require().NoError(err)
+	s.NotContains(out, tableBox)
+	s.NotContains(out, "<table")
+}
+
+// TestTableScrollBoxKeepsFormulas checks that a formula in a cell keeps its marker class.
+func (s *RendererSuite) TestTableScrollBoxKeepsFormulas() {
+	out, _, err := s.r.Render("| f |\n|---|\n| $x_1$ |")
+	s.Require().NoError(err)
+	s.Contains(out, tableBox)
+	s.Contains(out, `<span class="math-inline">x_1</span>`)
+}
+
 func (s *RendererSuite) TestStrikethrough() {
-	out, err := s.r.Render("~~gone~~")
+	out, _, err := s.r.Render("~~gone~~")
 	s.Require().NoError(err)
 	s.Contains(out, "<del>gone</del>")
 }
 
 func (s *RendererSuite) TestAutolink() {
-	out, err := s.r.Render("visit https://example.com today")
+	out, _, err := s.r.Render("visit https://example.com today")
 	s.Require().NoError(err)
 	s.Contains(out, `href="https://example.com"`)
 }
 
 func (s *RendererSuite) TestSanitizesScriptTags() {
-	out, err := s.r.Render("<script>alert('xss')</script>")
+	out, _, err := s.r.Render("<script>alert('xss')</script>")
 	s.Require().NoError(err)
 	s.NotContains(out, "<script>", "script tag must be stripped")
 }
 
 func (s *RendererSuite) TestSanitizesOnclickAttribute() {
-	out, err := s.r.Render(`<a href="/" onclick="evil()">click</a>`)
+	out, _, err := s.r.Render(`<a href="/" onclick="evil()">click</a>`)
 	s.Require().NoError(err)
 	s.NotContains(out, "onclick", "onclick must be stripped")
 }
 
 func (s *RendererSuite) TestEmptyInput() {
-	out, err := s.r.Render("")
+	out, _, err := s.r.Render("")
 	s.Require().NoError(err)
 	s.Empty(out)
 }
@@ -112,7 +175,7 @@ func (s *RendererSuite) TestEmptyInput() {
 // TestSyntaxHighlightingUsesPrefixedClasses verifies fenced code blocks are highlighted with
 // chroma-* prefixed classes, which the sanitizer allowlist and style.css both depend on.
 func (s *RendererSuite) TestSyntaxHighlightingUsesPrefixedClasses() {
-	out, err := s.r.Render("```go\nfunc main() {}\n```\n")
+	out, _, err := s.r.Render("```go\nfunc main() {}\n```\n")
 	s.Require().NoError(err)
 	s.Contains(out, `class="chroma-chroma chroma-dark"`, "wrapper must carry prefixed classes")
 	s.Contains(out, "chroma-kd", "keyword token must be highlighted with a prefixed class")
@@ -123,7 +186,7 @@ func (s *RendererSuite) TestSyntaxHighlightingUsesPrefixedClasses() {
 // vocabulary is removed (cosmetic UI-spoofing protection), since the sanitizer only allows
 // class values matching the chroma allowlist.
 func (s *RendererSuite) TestStripsArbitraryClassAttribute() {
-	out, err := s.r.Render(`<span class="admin-banner">x</span>`)
+	out, _, err := s.r.Render(`<span class="admin-banner">x</span>`)
 	s.Require().NoError(err)
 	s.NotContains(out, "admin-banner", "arbitrary class must be stripped")
 }
@@ -131,7 +194,7 @@ func (s *RendererSuite) TestStripsArbitraryClassAttribute() {
 // TestStripsChromaLookalikeClass verifies that a class merely starting like chroma but mixed
 // with a forbidden token is rejected as a whole (the regex anchors the full attribute value).
 func (s *RendererSuite) TestStripsChromaLookalikeClass() {
-	out, err := s.r.Render(`<span class="chroma-k evil-class">x</span>`)
+	out, _, err := s.r.Render(`<span class="chroma-k evil-class">x</span>`)
 	s.Require().NoError(err)
 	s.NotContains(out, "evil-class", "mixed class value must be rejected as a whole")
 	s.NotContains(out, "chroma-k", "the whole attribute is dropped when any token is invalid")
@@ -147,12 +210,12 @@ func (s *RendererSuite) TestRejectsExecutableURLs() {
 		`<a href="java&#x09;script:alert(1)">click</a>`,
 		`<a href="data:text/html,<script>alert(1)</script>">click</a>`,
 	} {
-		out, err := s.r.Render(input)
+		out, _, err := s.r.Render(input)
 		s.Require().NoError(err)
 		s.NotContains(out, "href=", input)
 	}
 
-	out, err := s.r.Render(`[safe](https://example.com) [relative](/guide) [email](mailto:help@example.com)`)
+	out, _, err := s.r.Render(`[safe](https://example.com) [relative](/guide) [email](mailto:help@example.com)`)
 	s.Require().NoError(err)
 	s.Contains(out, `href="https://example.com"`)
 	s.Contains(out, `href="/guide"`)
@@ -174,14 +237,14 @@ func (s *RendererSuite) TestRejectsExecutableImageURLs() {
 		`<img src="data:image/svg+xml,<svg onload=alert(1)>">`,
 		`<img src="data:text/html,<script>alert(1)</script>">`,
 	} {
-		out, err := s.r.Render(input)
+		out, _, err := s.r.Render(input)
 		s.Require().NoError(err)
 		s.NotContains(out, "src=", input)
 		s.NotContains(strings.ToLower(out), "javascript:", input)
 		s.NotContains(out, "data:", input)
 	}
 
-	out, err := s.r.Render(`![safe](https://example.com/a.png) ![relative](/static/favicon.svg)`)
+	out, _, err := s.r.Render(`![safe](https://example.com/a.png) ![relative](/static/favicon.svg)`)
 	s.Require().NoError(err)
 	s.Contains(out, `src="https://example.com/a.png"`)
 	s.Contains(out, `src="/static/favicon.svg"`)

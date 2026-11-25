@@ -14,33 +14,10 @@ import (
 	"github.com/partyzanex/padmark/internal/usecases/auth"
 )
 
-func TestFailLockoutPrincipals(t *testing.T) {
-	ctx := t.Context()
-	env := newOwnerFlowEnv(t, "faillock-principals")
-	_, err := env.authMgr.AcceptFirstAdmin(ctx, "owner", ownerFlowPassword)
-	require.NoError(t, err)
-	owner, err := env.users.GetByUsername(ctx, "owner")
-	require.NoError(t, err)
-	ownerKey, err := env.authMgr.CreateAPIToken(ctx, owner.ID, auth.Issuer{
-		APITokenHash: "", StepUp: auth.StepUp{Password: "", TOTPCode: ""},
-	}, 0)
-	require.NoError(t, err)
-	invite, err := env.authMgr.GenerateInvite(ctx, owner.ID, auth.Issuer{
-		APITokenHash: "", StepUp: auth.StepUp{Password: "", TOTPCode: ""},
-	})
-	require.NoError(t, err)
-	_, err = env.authMgr.AcceptInvite(ctx, invite, "attacker", ownerFlowPassword)
-	require.NoError(t, err)
-	attacker, err := env.users.GetByUsername(ctx, "attacker")
-	require.NoError(t, err)
-	attackerKey, err := env.authMgr.CreateAPIToken(ctx, attacker.ID, auth.Issuer{
-		APITokenHash: "", StepUp: auth.StepUp{Password: "", TOTPCode: ""},
-	}, 0)
-	require.NoError(t, err)
-	rotatedKey, err := env.authMgr.CreateAPIToken(ctx, attacker.ID, auth.Issuer{
-		APITokenHash: "", StepUp: auth.StepUp{Password: "", TOTPCode: ""},
-	}, 0)
-	require.NoError(t, err)
+func (s *OwnerFlowSuite) TestFailLockoutPrincipals() {
+	t := s.T()
+	env := s.env
+	ownerKey, attackerKey, rotatedKey := failLockKeys(t, env)
 
 	for _, testCase := range []struct{ resource, body string }{
 		{"notes", `{"content":"updated content"}`},
@@ -50,24 +27,7 @@ func TestFailLockoutPrincipals(t *testing.T) {
 			request := func(method, path, bearer, body string, status int) []byte {
 				t.Helper()
 
-				req, reqErr := http.NewRequestWithContext(ctx, method, env.baseURL+path, strings.NewReader(body))
-				require.NoError(t, reqErr)
-				req.Header.Set("Content-Type", "application/json")
-
-				if bearer != "" {
-					req.Header.Set("Authorization", "Bearer "+bearer)
-				}
-
-				resp, doErr := http.DefaultClient.Do(req)
-				require.NoError(t, doErr)
-
-				defer resp.Body.Close()
-
-				raw, readErr := io.ReadAll(resp.Body)
-				require.NoError(t, readErr)
-				require.Equal(t, status, resp.StatusCode, string(raw))
-
-				return raw
+				return lockoutRequest(t, env.baseURL, method, path, bearer, body, status)
 			}
 			raw := request(http.MethodPost, "/"+testCase.resource, ownerKey, testCase.body, http.StatusCreated)
 
@@ -101,4 +61,62 @@ func TestFailLockoutPrincipals(t *testing.T) {
 			request(http.MethodDelete, path, ownerKey, "", http.StatusNoContent)
 		})
 	}
+}
+
+// failLockKeys makes the owner and the attacker accounts on env. It returns the API key of the
+// owner and two API keys of the attacker.
+func failLockKeys(t *testing.T, env ownerFlowEnv) (ownerKey, attackerKey, rotatedKey string) {
+	t.Helper()
+
+	ctx := t.Context()
+	_, err := env.authMgr.AcceptFirstAdmin(ctx, "owner", ownerFlowPassword)
+	require.NoError(t, err)
+	owner, err := env.users.GetByUsername(ctx, "owner")
+	require.NoError(t, err)
+	ownerKey, err = env.authMgr.CreateAPIToken(ctx, owner.ID, auth.Issuer{
+		APITokenHash: "", StepUp: auth.StepUp{Password: "", TOTPCode: ""},
+	}, 0)
+	require.NoError(t, err)
+	invite, err := env.authMgr.GenerateInvite(ctx, owner.ID, auth.Issuer{
+		APITokenHash: "", StepUp: auth.StepUp{Password: "", TOTPCode: ""},
+	})
+	require.NoError(t, err)
+	_, err = env.authMgr.AcceptInvite(ctx, invite, "attacker", ownerFlowPassword)
+	require.NoError(t, err)
+	attacker, err := env.users.GetByUsername(ctx, "attacker")
+	require.NoError(t, err)
+	attackerKey, err = env.authMgr.CreateAPIToken(ctx, attacker.ID, auth.Issuer{
+		APITokenHash: "", StepUp: auth.StepUp{Password: "", TOTPCode: ""},
+	}, 0)
+	require.NoError(t, err)
+	rotatedKey, err = env.authMgr.CreateAPIToken(ctx, attacker.ID, auth.Issuer{
+		APITokenHash: "", StepUp: auth.StepUp{Password: "", TOTPCode: ""},
+	}, 0)
+	require.NoError(t, err)
+
+	return ownerKey, attackerKey, rotatedKey
+}
+
+// lockoutRequest sends one request to baseURL, checks its status and returns the body.
+func lockoutRequest(t *testing.T, baseURL, method, path, bearer, body string, status int) []byte {
+	t.Helper()
+
+	req, reqErr := http.NewRequestWithContext(t.Context(), method, baseURL+path, strings.NewReader(body))
+	require.NoError(t, reqErr)
+	req.Header.Set("Content-Type", "application/json")
+
+	if bearer != "" {
+		req.Header.Set("Authorization", "Bearer "+bearer)
+	}
+
+	resp, doErr := http.DefaultClient.Do(req)
+	require.NoError(t, doErr)
+
+	defer resp.Body.Close()
+
+	raw, readErr := io.ReadAll(resp.Body)
+	require.NoError(t, readErr)
+	require.Equal(t, status, resp.StatusCode, string(raw))
+
+	return raw
 }

@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	time "time"
 
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/mock/gomock"
@@ -51,17 +50,16 @@ func (s *PathNormalizationSuite) SetupTest() {
 	s.revealStore = NewMockRevealTokenStore(s.ctrl)
 	s.auth = NewMockAuthManager(s.ctrl)
 
-	handler := web.NewHandler(s.manager, s.linkManager, discardLog()).
-		WithAuthManager(s.auth).
-		WithRevealStore(s.revealStore)
-	ogen := web.NewOgenHandler(s.manager, s.linkManager, NewMockPinger(s.ctrl), discardLog())
+	handlerCfg := testHandlerConfig(s.manager, s.linkManager, NewMockPinger(s.ctrl))
+	handlerCfg.Accounts = s.auth
+	handlerCfg.Reveal = s.revealStore
+	handlerCfg.CSRFSecret = authTestCSRFSecret
+	handler := newTestHandler(s.T(), handlerCfg)
 
-	router, err := web.NewRouter(handler, ogen, &web.RouterOptions{
+	router, err := web.NewRouter(handler, &web.RouterOptions{
 		MaxBodyBytes: 256 * 1024,
-		CSRFSecret:   authTestCSRFSecret,
 
-		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, AllowedHosts: nil, RateLimit: 0,
-		RateBurst: 0, SessionTTL: 0, DisableAPI: false, DirectRedirect: false,
+		AllowedHosts: nil, RateLimit: 0, RateBurst: 0, DisableAPI: false,
 	})
 	s.Require().NoError(err)
 
@@ -72,23 +70,39 @@ func (s *PathNormalizationSuite) TearDownTest() {
 	s.ctrl.Finish()
 }
 
-// recordPeeks makes every note lookup miss and returns the IDs the note handler looked up, so a
+// recordNoteLookups makes every note lookup miss and returns the IDs the note handler looked up, so a
 // case can assert whether (and as which slug) a request was dispatched to the note catch-all.
-func (s *PathNormalizationSuite) recordPeeks() *[]string {
-	peeked := []string{}
+func (s *PathNormalizationSuite) recordNoteLookups() *[]string {
+	lookups := []string{}
 
-	s.manager.EXPECT().Peek(gomock.Any(), gomock.Any()).
-		DoAndReturn(func(_ context.Context, id string) (*domain.Note, error) {
-			peeked = append(peeked, id)
+	record := func(id string) {
+		lookups = append(lookups, id)
+	}
+
+	s.manager.EXPECT().Read(gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, id string, _ domain.Reader) (*domain.Note, error) {
+			record(id)
+
+			return nil, domain.ErrNotFound
+		}).AnyTimes()
+	s.manager.EXPECT().ReadRendered(gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, id string, _ domain.Reader) (*domain.Note, string, error) {
+			record(id)
+
+			return nil, "", domain.ErrNotFound
+		}).AnyTimes()
+	s.manager.EXPECT().Inspect(gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, id string, _ domain.Reader) (*domain.Note, error) {
+			record(id)
 
 			return nil, domain.ErrNotFound
 		}).AnyTimes()
 
-	// With no note, the GET /{id...} catch-all looks for a short link; none exists here either.
-	s.linkManager.EXPECT().Follow(gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(nil, domain.ErrNotFound).AnyTimes()
+	// The GET /{id...} catch-all and the editor read the note first, so the note reads above
+	// record the slug that the router dispatched. No note has it, and the read tells no other
+	// kind, so no link or file Manager is called.
 
-	return &peeked
+	return &lookups
 }
 
 // rawRequest parses method + target exactly as net/http's server does for a raw request line,
@@ -207,11 +221,11 @@ func nonCanonicalCases() []nonCanonicalCase {
 //   - Encoded dot segments (/r/%2E%2E/admin): not cleaned by ServeMux (it cleans the escaped
 //     path), so they never match a literal admin pattern; they fall to the note catch-all or 404.
 func (s *PathNormalizationSuite) TestAnonymousNonCanonicalTargets_NeverReachProtectedHandlers() {
-	peeked := s.recordPeeks()
+	lookups := s.recordNoteLookups()
 
 	for _, tcase := range nonCanonicalCases() {
 		s.Run(tcase.method+" "+tcase.target, func() {
-			*peeked = (*peeked)[:0]
+			*lookups = (*lookups)[:0]
 
 			rec := s.serve(s.rawRequest(tcase.method, tcase.target))
 
@@ -219,9 +233,9 @@ func (s *PathNormalizationSuite) TestAnonymousNonCanonicalTargets_NeverReachProt
 			s.Equal(tcase.location, rec.Header().Get("Location"))
 
 			if tcase.noteID == "" {
-				s.Empty(*peeked, "must not be dispatched to the note catch-all")
+				s.Empty(*lookups, "must not be dispatched to the note catch-all")
 			} else {
-				s.Equal([]string{tcase.noteID}, *peeked, "dispatched to the note catch-all as this slug")
+				s.Equal([]string{tcase.noteID}, *lookups, "dispatched to the note catch-all as this slug")
 			}
 
 			if tcase.location != "" {
@@ -259,26 +273,22 @@ func (s *PathNormalizationSuite) TestPercentEncodedLoginPath_IsTheLoginPage() {
 	s.Contains(rec.Body.String(), "<form")
 }
 
-// TestPercentEncodedPrivateSlug_StillGated covers the inverse direction: a private note fetched
+// TestPercentEncodedPrivateSlug_StillPrivate covers the inverse direction: a private note fetched
 // through a percent-encoded spelling of its slug reaches the note handler under its real slug,
-// and the per-note privacy gate (handlePrivateAuth) still refuses the anonymous caller — no
-// View/GetRendered call, no content.
-func (s *PathNormalizationSuite) TestPercentEncodedPrivateSlug_StillGated() {
-	privacy := domain.PrivacyAuthenticated
-	private := &domain.Note{
-		ID: "secret", Content: "top secret", Privacy: &privacy,
-		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
-		OwnerID: nil, Title: "", ContentType: nil, EditCode: "",
-		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
-	}
-
+// and the usecase privacy rule still refuses the anonymous caller (ErrForbidden) — no content.
+// The editor reads with Inspect, the other routes with Read.
+func (s *PathNormalizationSuite) TestPercentEncodedPrivateSlug_StillPrivate() {
 	for _, target := range []string{"/%73ecret", "/notes/%73ecret", "/edit/%73ecret", "/%73ecret%2Fsub"} {
 		s.Run(target, func() {
 			wantID := strings.TrimPrefix(strings.TrimPrefix(strings.TrimPrefix(target, "/notes"), "/edit"), "/")
 			wantID, err := url.PathUnescape(wantID)
 			s.Require().NoError(err)
 
-			s.manager.EXPECT().Peek(gomock.Any(), wantID).Return(private, nil).Times(1)
+			if strings.HasPrefix(target, "/edit/") {
+				s.manager.EXPECT().Inspect(gomock.Any(), wantID, anonymousReader()).Return(nil, domain.ErrForbidden)
+			} else {
+				s.manager.EXPECT().Read(gomock.Any(), wantID, anonymousReader()).Return(nil, domain.ErrForbidden)
+			}
 
 			rec := s.serve(s.rawRequest(http.MethodGet, target))
 

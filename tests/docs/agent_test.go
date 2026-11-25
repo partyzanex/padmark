@@ -80,3 +80,22 @@ func TestAgentDocumentsMatchOpenAPIRelease(t *testing.T) {
 		require.NotContains(t, document, "{{VERSION}}", path)
 	}
 }
+
+// TestAgentDocumentsListFilePaths verifies that the agent documents name each /files path of
+// the OpenAPI contract, so an agent that reads only the reference finds the file operations.
+func TestAgentDocumentsListFilePaths(t *testing.T) {
+	discardLog := slog.New(slog.DiscardHandler)
+
+	spec := readDocument(t, "/api/openapi.yaml", web.APISpec(discardLog))
+	reference := readDocument(t, "/api/reference.md", web.APIReference(discardLog))
+	index := readDocument(t, "/llms.txt", web.LLMsTxt(discardLog))
+
+	pathPattern := regexp.MustCompile(`(?m)^  (/files[^:]*):$`)
+	matches := pathPattern.FindAllStringSubmatch(spec, -1)
+	require.NotEmpty(t, matches, "openapi.yaml must describe the /files paths")
+
+	for _, match := range matches {
+		require.Contains(t, reference, " "+match[1]+"`", "reference must list %s", match[1])
+		require.Contains(t, index, " "+match[1]+"`", "llms.txt must list %s", match[1])
+	}
+}

@@ -8,22 +8,12 @@ import (
 	"github.com/partyzanex/padmark/internal/domain"
 )
 
-// WithAuthManager attaches the auth seam, enabling ogenapi's POST /api/tokens and
-// POST /api/invites (implemented in ogen_handler.go, next to the other ogen operations).
-// Unset, both operations answer 503 (feature not enabled) — mirrors Handler.WithAuthManager
-// and keeps the existing NewOgenHandler call sites intact.
-func (h *OgenHandler) WithAuthManager(mgr AuthManager) *OgenHandler {
-	h.authMgr = mgr
-
-	return h
-}
-
 // apiTokenEnvelope packs a plain bearer key into the pmk_ envelope carrying the server's own
 // base URL — the same shape the admin panel returns (web_admin.go AdminCreateKeyHandler).
 func (*OgenHandler) apiTokenEnvelope(ctx context.Context, plain string) (string, error) {
 	base, err := requestBaseURL(ctx)
 	if err != nil {
-		return "", fmt.Errorf("request base url: %w", err)
+		return "", err
 	}
 
 	envelope, encErr := domain.EncodeAPITokenEnvelope(base, plain)

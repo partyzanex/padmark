@@ -6,7 +6,6 @@ import (
 	"net/http/httptest"
 	"strings"
 
-	"github.com/google/uuid"
 	"go.uber.org/mock/gomock"
 
 	"github.com/partyzanex/padmark/internal/domain"
@@ -106,11 +105,8 @@ func (s *HandlerSuite) TestUpdateNote_PrivateAlias() {
 		{"true+owner", `"private":true,"privacy":"owner"`, new(domain.PrivacyOwner)},
 	}
 
-	// Anonymous mutation consults Peek first; a public note lets the request through.
-	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(newTestNote("t", "c"), nil).AnyTimes()
-
 	for _, tcase := range cases {
-		s.manager.EXPECT().Update(gomock.Any(), testID, "editcode1234", uuid.Nil, privacyMatcher(tcase.want)).
+		s.manager.EXPECT().Update(gomock.Any(), testID, "editcode1234", noCaller(), privacyMatcher(tcase.want)).
 			Return(newTestNote("t", "c"), nil)
 
 		w := s.sendJSON(http.MethodPut, "/notes/"+testID, `{"content":"c","edit_code":"editcode1234",`+tcase.body+`}`)
@@ -154,9 +150,8 @@ func (s *HandlerSuite) TestNoteResponses_PrivateField() {
 
 // TestUpdateNoteByPath_PrivateAlias covers the native multi-segment PUT, which shares the mapping.
 func (s *HandlerSuite) TestUpdateNoteByPath_PrivateAlias() {
-	s.manager.EXPECT().Peek(gomock.Any(), "dir/note").Return(newTestNote("t", "c"), nil).AnyTimes()
 	s.manager.EXPECT().
-		Update(gomock.Any(), "dir/note", "editcode1234", uuid.Nil, privacyMatcher(new(domain.PrivacyAuthenticated))).
+		Update(gomock.Any(), "dir/note", "editcode1234", noCaller(), privacyMatcher(new(domain.PrivacyAuthenticated))).
 		Return(newTestNote("t", "c"), nil)
 
 	w := s.sendJSON(http.MethodPut, "/notes/dir/note", `{"content":"c","edit_code":"editcode1234","private":true}`)

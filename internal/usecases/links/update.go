@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/google/uuid"
-
 	"github.com/partyzanex/padmark/internal/domain"
 )
 
@@ -21,54 +19,58 @@ type UpdateOptions struct {
 }
 
 // Update replaces the destination without changing the slug, edit code, owner,
-// creation time, burn-after-click setting, or click counter. The exact owner may
-// omit the edit code; other callers must prove knowledge of the original code.
+// creation time, burn-after-click setting, or click counter. The checks have the sequence of
+// files.Manager.Update: the reader must see the link (domain.ErrForbidden), the link must not be
+// expired (domain.ErrExpired), and the rules of checkMutation apply: the reader must be its owner
+// or give the original edit code.
 func (m *Manager) Update(
-	ctx context.Context, slug, editCode string, callerID uuid.UUID, targetURL string, opts UpdateOptions,
+	ctx context.Context, slug, editCode string, reader domain.Reader, targetURL string, opts UpdateOptions,
 ) (*domain.Link, error) {
 	validURL, err := validateTargetURL(targetURL)
 	if err != nil {
-		return nil, fmt.Errorf("validate target url: %w", err)
+		return nil, err
 	}
 
+	// No lock: omitted fields stay because the storage patch does not write them, and a stale
+	// cache fill is never served (see resolveLink).
 	dbID := domain.HashSlug(slug)
-	// Serialize updates and cache fills for this slug so an in-flight read cannot
-	// cache the old destination after this write evicts it. Updates
-	// also preserve each other's omitted fields within this process.
-	unlock, err := m.slugLock.Lock(ctx, dbID)
-	if err != nil {
-		return nil, fmt.Errorf("lock link: %w", err)
-	}
-	defer unlock()
 
 	existing, err := m.storage.GetByID(ctx, dbID)
 	if err != nil {
 		return nil, fmt.Errorf("update link: %w", err)
 	}
 
-	if !existing.OwnedBy(callerID) && !m.hasher.Verify(existing.EditCode, editCode) {
-		return nil, domain.ErrInvalidEditCode
+	// Privacy comes before expiry, so that a hidden link gives the same answer in each state.
+	if !existing.VisibleTo(reader) {
+		return nil, domain.ErrForbidden
 	}
 
-	updated := applyUpdateOptions(existing, opts)
+	// An expired link is already gone for readers, so an update must not extend its life.
+	now := m.now()
+	if existing.Expired(now) {
+		return nil, domain.ErrExpired
+	}
 
-	err = validateLink(updated)
+	err = m.checkMutation(existing, editCode, reader)
 	if err != nil {
-		return nil, fmt.Errorf("validate link: %w", err)
+		return nil, err
 	}
 
-	updated.TargetURL, err = m.encryptor.Encrypt(validURL, dbID)
+	// The merged snapshot is only for validation. OwnerID cannot change, so the ownership check
+	// stays correct when another replica changes the other fields after GetByID.
+	err = validateLink(applyUpdateOptions(existing, opts))
+	if err != nil {
+		return nil, err
+	}
+
+	ciphertext, err := m.encryptor.Encrypt(validURL, dbID)
 	if err != nil {
 		return nil, fmt.Errorf("encrypt target url: %w", err)
 	}
 
-	// An omitted privacy goes to storage as nil, so COALESCE keeps the stored level: another
-	// replica may have changed it after GetByID, and slugLock serializes only this process.
-	if opts.Privacy == nil {
-		updated.Privacy = nil
-	}
-
-	persisted, err := m.storage.Update(ctx, dbID, updated)
+	// The patch carries only the fields that the caller sent. existing.EditCode is the stored
+	// hash, so the UPDATE changes only the link checked above, not a new link with this ID.
+	persisted, err := m.storage.Update(ctx, dbID, existing.EditCode, newLinkPatch(ciphertext, opts), now)
 	if err != nil {
 		return nil, fmt.Errorf("update link: %w", err)
 	}
@@ -86,6 +88,19 @@ func (m *Manager) Update(
 	return persisted, nil
 }
 
+// newLinkPatch converts the caller's options to a storage patch with the encrypted destination.
+func newLinkPatch(ciphertext string, opts UpdateOptions) *domain.LinkPatch {
+	return &domain.LinkPatch{
+		ExpiresAt:           opts.ExpiresAt,
+		Privacy:             opts.Privacy,
+		DirectRedirect:      opts.DirectRedirect,
+		TargetURL:           ciphertext,
+		ClearExpiry:         opts.ClearExpiry,
+		ResetDirectRedirect: opts.ResetDirectRedirect,
+	}
+}
+
+// applyUpdateOptions returns existing with the caller's options applied, for validation.
 func applyUpdateOptions(existing *domain.Link, opts UpdateOptions) *domain.Link {
 	updated := *existing
 	if opts.Privacy != nil {

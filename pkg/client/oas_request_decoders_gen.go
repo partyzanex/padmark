@@ -7,10 +7,14 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"net/url"
 
 	"github.com/go-faster/errors"
 	"github.com/go-faster/jx"
+	"github.com/ogen-go/ogen/conv"
+	ht "github.com/ogen-go/ogen/http"
 	"github.com/ogen-go/ogen/ogenerrors"
+	"github.com/ogen-go/ogen/uri"
 	"github.com/ogen-go/ogen/validate"
 )
 
@@ -99,6 +103,308 @@ func (s *Server) decodeCreateAPITokenRequest(r *http.Request) (
 			return req, rawBody, close, errors.Wrap(err, "validate")
 		}
 		return request, rawBody, close, nil
+	default:
+		return req, rawBody, close, validate.InvalidContentType(ct)
+	}
+}
+
+func (s *Server) decodeCreateFileRequest(r *http.Request) (
+	req *CreateFileRequestMultipart,
+	rawBody []byte,
+	close func() error,
+	rerr error,
+) {
+	var closers []func() error
+	close = func() error {
+		var merr error
+		// Close in reverse order, to match defer behavior.
+		for i := len(closers) - 1; i >= 0; i-- {
+			c := closers[i]
+			merr = errors.Join(merr, c())
+		}
+		return merr
+	}
+	defer func() {
+		if rerr != nil {
+			rerr = errors.Join(rerr, close())
+		}
+	}()
+	ct, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil {
+		return req, rawBody, close, errors.Wrap(err, "parse media type")
+	}
+	switch {
+	case ct == "multipart/form-data":
+		if r.ContentLength == 0 {
+			return req, rawBody, close, validate.ErrBodyRequired
+		}
+		if err := r.ParseMultipartForm(s.cfg.MaxMultipartMemory); err != nil {
+			return req, rawBody, close, errors.Wrap(err, "parse multipart form")
+		}
+		// Remove all temporary files created by ParseMultipartForm when the request is done.
+		//
+		// Notice that the closers are called in reverse order, to match defer behavior, so
+		// any opened file will be closed before RemoveAll call.
+		closers = append(closers, r.MultipartForm.RemoveAll)
+		// Form values may be unused.
+		form := url.Values(r.MultipartForm.Value)
+		_ = form
+
+		var request CreateFileRequestMultipart
+		request.setDefaults()
+		q := uri.NewQueryDecoder(form)
+		{
+			cfg := uri.QueryParameterDecodingConfig{
+				Name:    "ttl",
+				Style:   uri.QueryStyleForm,
+				Explode: true,
+			}
+			if err := q.HasParam(cfg); err == nil {
+				if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+					var requestDotTTLVal int64
+					if err := func() error {
+						val, err := d.DecodeValue()
+						if err != nil {
+							return err
+						}
+
+						c, err := conv.ToInt64(val)
+						if err != nil {
+							return err
+						}
+
+						requestDotTTLVal = c
+						return nil
+					}(); err != nil {
+						return err
+					}
+					request.TTL.SetTo(requestDotTTLVal)
+					return nil
+				}); err != nil {
+					return req, rawBody, close, errors.Wrap(err, "decode \"ttl\"")
+				}
+				if err := func() error {
+					if value, ok := request.TTL.Get(); ok {
+						if err := func() error {
+							if err := (validate.Int{
+								MinSet:        true,
+								Min:           0,
+								MaxSet:        true,
+								Max:           9223372036,
+								MinExclusive:  false,
+								MaxExclusive:  false,
+								MultipleOfSet: false,
+								MultipleOf:    0,
+								Pattern:       nil,
+							}).Validate(int64(value)); err != nil {
+								return errors.Wrap(err, "int")
+							}
+							return nil
+						}(); err != nil {
+							return err
+						}
+					}
+					return nil
+				}(); err != nil {
+					return req, rawBody, close, errors.Wrap(err, "validate")
+				}
+			}
+		}
+		{
+			cfg := uri.QueryParameterDecodingConfig{
+				Name:    "privacy",
+				Style:   uri.QueryStyleForm,
+				Explode: true,
+			}
+			if err := q.HasParam(cfg); err == nil {
+				if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+					var requestDotPrivacyVal CreateFileRequestMultipartPrivacy
+					if err := func() error {
+						val, err := d.DecodeValue()
+						if err != nil {
+							return err
+						}
+
+						c, err := conv.ToString(val)
+						if err != nil {
+							return err
+						}
+
+						requestDotPrivacyVal = CreateFileRequestMultipartPrivacy(c)
+						return nil
+					}(); err != nil {
+						return err
+					}
+					request.Privacy.SetTo(requestDotPrivacyVal)
+					return nil
+				}); err != nil {
+					return req, rawBody, close, errors.Wrap(err, "decode \"privacy\"")
+				}
+				if err := func() error {
+					if value, ok := request.Privacy.Get(); ok {
+						if err := func() error {
+							if err := value.Validate(); err != nil {
+								return err
+							}
+							return nil
+						}(); err != nil {
+							return err
+						}
+					}
+					return nil
+				}(); err != nil {
+					return req, rawBody, close, errors.Wrap(err, "validate")
+				}
+			}
+		}
+		{
+			cfg := uri.QueryParameterDecodingConfig{
+				Name:    "burn_after_download",
+				Style:   uri.QueryStyleForm,
+				Explode: true,
+			}
+			if err := q.HasParam(cfg); err == nil {
+				if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+					var requestDotBurnAfterDownloadVal bool
+					if err := func() error {
+						val, err := d.DecodeValue()
+						if err != nil {
+							return err
+						}
+
+						c, err := conv.ToBool(val)
+						if err != nil {
+							return err
+						}
+
+						requestDotBurnAfterDownloadVal = c
+						return nil
+					}(); err != nil {
+						return err
+					}
+					request.BurnAfterDownload.SetTo(requestDotBurnAfterDownloadVal)
+					return nil
+				}); err != nil {
+					return req, rawBody, close, errors.Wrap(err, "decode \"burn_after_download\"")
+				}
+			}
+		}
+		{
+			cfg := uri.QueryParameterDecodingConfig{
+				Name:    "slug",
+				Style:   uri.QueryStyleForm,
+				Explode: true,
+			}
+			if err := q.HasParam(cfg); err == nil {
+				if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+					var requestDotSlugVal string
+					if err := func() error {
+						val, err := d.DecodeValue()
+						if err != nil {
+							return err
+						}
+
+						c, err := conv.ToString(val)
+						if err != nil {
+							return err
+						}
+
+						requestDotSlugVal = c
+						return nil
+					}(); err != nil {
+						return err
+					}
+					request.Slug.SetTo(requestDotSlugVal)
+					return nil
+				}); err != nil {
+					return req, rawBody, close, errors.Wrap(err, "decode \"slug\"")
+				}
+			}
+		}
+		{
+			cfg := uri.QueryParameterDecodingConfig{
+				Name:    "edit_code",
+				Style:   uri.QueryStyleForm,
+				Explode: true,
+			}
+			if err := q.HasParam(cfg); err == nil {
+				if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+					var requestDotEditCodeVal string
+					if err := func() error {
+						val, err := d.DecodeValue()
+						if err != nil {
+							return err
+						}
+
+						c, err := conv.ToString(val)
+						if err != nil {
+							return err
+						}
+
+						requestDotEditCodeVal = c
+						return nil
+					}(); err != nil {
+						return err
+					}
+					request.EditCode.SetTo(requestDotEditCodeVal)
+					return nil
+				}); err != nil {
+					return req, rawBody, close, errors.Wrap(err, "decode \"edit_code\"")
+				}
+				if err := func() error {
+					if value, ok := request.EditCode.Get(); ok {
+						if err := func() error {
+							if err := (validate.String{
+								MinLength:     8,
+								MinLengthSet:  true,
+								MaxLength:     128,
+								MaxLengthSet:  true,
+								Email:         false,
+								Hostname:      false,
+								Regex:         nil,
+								MinNumeric:    0,
+								MinNumericSet: false,
+								MaxNumeric:    0,
+								MaxNumericSet: false,
+							}).Validate(string(value)); err != nil {
+								return errors.Wrap(err, "string")
+							}
+							return nil
+						}(); err != nil {
+							return err
+						}
+					}
+					return nil
+				}(); err != nil {
+					return req, rawBody, close, errors.Wrap(err, "validate")
+				}
+			}
+		}
+		{
+			if err := func() error {
+				files, ok := r.MultipartForm.File["file"]
+				if !ok || len(files) < 1 {
+					return validate.ErrFieldRequired
+				}
+				fh := files[0]
+
+				f, err := fh.Open()
+				if err != nil {
+					return errors.Wrap(err, "open")
+				}
+				closers = append(closers, f.Close)
+				request.File = ht.MultipartFile{
+					Name:   fh.Filename,
+					File:   f,
+					Size:   fh.Size,
+					Header: fh.Header,
+				}
+				return nil
+			}(); err != nil {
+				return req, rawBody, close, errors.Wrap(err, "decode \"file\"")
+			}
+		}
+		return &request, rawBody, close, nil
 	default:
 		return req, rawBody, close, validate.InvalidContentType(ct)
 	}
@@ -386,6 +692,85 @@ func (s *Server) decodeCreateNoteRequest(r *http.Request) (
 		d := jx.DecodeBytes(buf)
 
 		var request CreateNoteRequest
+		if err := func() error {
+			if err := request.Decode(d); err != nil {
+				return err
+			}
+			if err := d.Skip(); err != io.EOF {
+				return errors.New("unexpected trailing data")
+			}
+			return nil
+		}(); err != nil {
+			err = &ogenerrors.DecodeBodyError{
+				ContentType: ct,
+				Body:        buf,
+				Err:         err,
+			}
+			return req, rawBody, close, err
+		}
+		if err := func() error {
+			if err := request.Validate(); err != nil {
+				return err
+			}
+			return nil
+		}(); err != nil {
+			return req, rawBody, close, errors.Wrap(err, "validate")
+		}
+		return &request, rawBody, close, nil
+	default:
+		return req, rawBody, close, validate.InvalidContentType(ct)
+	}
+}
+
+func (s *Server) decodeUpdateFileRequest(r *http.Request) (
+	req *UpdateFileRequest,
+	rawBody []byte,
+	close func() error,
+	rerr error,
+) {
+	var closers []func() error
+	close = func() error {
+		var merr error
+		// Close in reverse order, to match defer behavior.
+		for i := len(closers) - 1; i >= 0; i-- {
+			c := closers[i]
+			merr = errors.Join(merr, c())
+		}
+		return merr
+	}
+	defer func() {
+		if rerr != nil {
+			rerr = errors.Join(rerr, close())
+		}
+	}()
+	ct, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil {
+		return req, rawBody, close, errors.Wrap(err, "parse media type")
+	}
+	switch {
+	case ct == "application/json":
+		if r.ContentLength == 0 {
+			return req, rawBody, close, validate.ErrBodyRequired
+		}
+		buf, err := io.ReadAll(r.Body)
+		defer func() {
+			_ = r.Body.Close()
+		}()
+		if err != nil {
+			return req, rawBody, close, err
+		}
+
+		// Reset the body to allow for downstream reading.
+		r.Body = io.NopCloser(bytes.NewBuffer(buf))
+
+		if len(buf) == 0 {
+			return req, rawBody, close, validate.ErrBodyRequired
+		}
+
+		rawBody = append(rawBody, buf...)
+		d := jx.DecodeBytes(buf)
+
+		var request UpdateFileRequest
 		if err := func() error {
 			if err := request.Decode(d); err != nil {
 				return err

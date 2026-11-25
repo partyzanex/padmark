@@ -252,7 +252,9 @@ func TestNote_VisibleTo(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, tt.note.VisibleTo(tt.callerID, tt.authenticated))
+			assert.Equal(t, tt.want, tt.note.VisibleTo(Reader{
+				CallerID: tt.callerID, Authenticated: tt.authenticated, AllowBurn: false, SkipPrivacy: false,
+			}))
 		})
 	}
 }
@@ -285,36 +287,50 @@ func TestNote_OwnedBy_AnonymousNote(t *testing.T) {
 	assert.False(t, note.OwnedBy(uuid.Nil))
 }
 
-func TestNote_Validate_ContentLength(t *testing.T) {
+func contentNote(content string) *Note {
+	return &Note{
+		Content:   content,
+		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
+		Privacy: nil, OwnerID: nil, ID: "", Title: "",
+		ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
+		BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
+	}
+}
+
+func TestNote_ValidateContentLength(t *testing.T) {
 	t.Parallel()
 
-	atCap := &Note{
-		Content:   strings.Repeat("a", MaxContentLength),
-		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
-		Privacy: nil, OwnerID: nil, ID: "", Title: "",
-		ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
-		BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
-	}
-	require.NoError(t, atCap.Validate())
+	const limit = 8
 
-	over := &Note{
-		Content:   strings.Repeat("a", MaxContentLength+1),
-		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
-		Privacy: nil, OwnerID: nil, ID: "", Title: "",
-		ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
-		BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
-	}
-	require.ErrorIs(t, over.Validate(), ErrContentTooLarge)
+	require.NoError(t, contentNote(strings.Repeat("a", limit)).ValidateContentLength(limit))
+	require.ErrorIs(t, contentNote(strings.Repeat("a", limit+1)).ValidateContentLength(limit), ErrContentTooLarge)
 
-	// The cap counts characters, not bytes: a body of two-byte runes at the cap is valid.
-	multibyte := &Note{
-		Content:   strings.Repeat("é", MaxContentLength),
-		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
-		Privacy: nil, OwnerID: nil, ID: "", Title: "",
-		ContentType: nil, EditCode: "", Views: 0, BurnTTL: 0,
-		BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
-	}
-	require.NoError(t, multibyte.Validate())
+	// The limit counts characters, not bytes: two-byte runes at the limit are valid.
+	require.NoError(t, contentNote(strings.Repeat("é", limit)).ValidateContentLength(limit))
+}
+
+// TestNote_ValidateContentLength_ByteLimit: a character limit above the content that encryption
+// can store does not let a longer note through.
+func TestNote_ValidateContentLength_ByteLimit(t *testing.T) {
+	t.Parallel()
+
+	const limit = MaxContentBytes * 2
+
+	require.NoError(t, contentNote(strings.Repeat("a", MaxContentBytes)).ValidateContentLength(limit))
+	require.ErrorIs(t, contentNote(strings.Repeat("a", MaxContentBytes+1)).ValidateContentLength(limit),
+		ErrContentTooLarge)
+
+	// Four-byte runes: fewer characters than the limit, but more bytes than MaxContentBytes.
+	emoji := strings.Repeat("😀", MaxContentBytes/4+1)
+	require.ErrorIs(t, contentNote(emoji).ValidateContentLength(MaxContentBytes), ErrContentTooLarge)
+}
+
+// TestNote_Validate_IgnoresContentLength: the limit is a server setting, so Validate does not
+// check it.
+func TestNote_Validate_IgnoresContentLength(t *testing.T) {
+	t.Parallel()
+
+	require.NoError(t, contentNote(strings.Repeat("a", DefaultMaxContentLength+1)).Validate())
 }
 
 func TestNote_ContentsSidebar(t *testing.T) {

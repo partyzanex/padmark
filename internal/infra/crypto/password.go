@@ -23,31 +23,19 @@ type PasswordHasher struct {
 }
 
 // NewPasswordHasher returns a PasswordHasher using the given argon2 cost parameters.
-// Zero-valued fields fall back to DefaultArgon2Params.
-func NewPasswordHasher(params Argon2Params) *PasswordHasher {
+// Zero-valued fields fall back to DefaultArgon2Params. log records the stored hashes that Verify
+// refuses for an excessive cost (WARN).
+func NewPasswordHasher(params Argon2Params, log *slog.Logger) *PasswordHasher {
 	return &PasswordHasher{
-		log:     slog.New(slog.DiscardHandler),
+		log:     log,
 		params:  params.withDefaults(),
 		ceiling: params.acceptedCeiling(),
 	}
 }
 
-// WithLogger sets the logger that records stored hashes refused for an excessive cost (WARN).
-// The default discards them.
-func (h *PasswordHasher) WithLogger(log *slog.Logger) *PasswordHasher {
-	h.log = log
-
-	return h
-}
-
 // Hash derives an argon2id hash from password (cost parameters embedded in the result).
 func (h *PasswordHasher) Hash(password string) (string, error) {
-	operationResult, operationErr := hashArgon2(password, h.params)
-	if operationErr != nil {
-		return operationResult, fmt.Errorf("hash argon2: %w", operationErr)
-	}
-
-	return operationResult, nil
+	return hashArgon2(password, h.params)
 }
 
 // Verify reports whether password matches storedHash, reading params from the stored hash.
@@ -64,30 +52,6 @@ func verifyLogged(log *slog.Logger, what, storedHash, secret string, ceiling Arg
 		log.Warn("refusing stored argon2 hash above the accepted cost ceiling",
 			"kind", what, "ceiling_memory_kib", ceiling.Memory, "ceiling_time", ceiling.Time,
 			"ceiling_threads", ceiling.Threads)
-	}
-
-	return matched
-}
-
-// HashPassword hashes a password with the default argon2 cost. Convenience helper for
-// callers that don't tune cost (e.g. tests); production wiring injects a PasswordHasher.
-func HashPassword(password string) (string, error) {
-	operationResult, operationErr := hashArgon2(password, DefaultArgon2Params())
-	if operationErr != nil {
-		return operationResult, fmt.Errorf("hash argon2: %w", operationErr)
-	}
-
-	return operationResult, nil
-}
-
-// VerifyPassword reports whether password matches storedHash (reads embedded params).
-func VerifyPassword(storedHash, password string) bool {
-	ceiling := DefaultArgon2Params().acceptedCeiling()
-
-	matched, err := verifyArgon2(storedHash, password, ceiling)
-	if err != nil {
-		// A cost above the ceiling is just a non-match for this config-less helper.
-		return false
 	}
 
 	return matched
@@ -117,12 +81,12 @@ func DeriveUserKey(password, kdfSalt []byte, requested Argon2Params) (string, er
 
 	err := params.Validate()
 	if err != nil {
-		return "", fmt.Errorf("validate: %w", err)
+		return "", err
 	}
 
 	key, err := deriveArgon2Key(password, kdfSalt, params, pwKeyLen)
 	if err != nil {
-		return "", fmt.Errorf("derive argon2 key: %w", err)
+		return "", err
 	}
 
 	return base64.RawURLEncoding.EncodeToString(key), nil

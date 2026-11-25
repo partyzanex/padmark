@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Padmark mobile — Image</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;0,8..60,700;1,8..60,400&amp;display=swap">
+<style>
+body{margin:0}
+.pm{--bg:#F3F4F6;--surface:#FFFFFF;--sunken:#F7F8FA;--ink:#14151A;--ink-2:#3B3E48;--muted:#5D6170;--line:#E2E4EA;--line-2:#CDD0D8;--accent:#4A3AE0;--on-accent:#FFFFFF;--accent-soft:#ECEAFF;--accent-text:#3A2BC4;--warn:#9A4A06;--warn-soft:#FFF1E0;--code-bg:#F0F1F4;--shadow:0 1px 2px rgba(20,21,26,.05),0 10px 30px -14px rgba(20,21,26,.14);font-family:'Onest',system-ui,-apple-system,'Segoe UI',sans-serif;color:var(--ink);background:var(--bg);-webkit-font-smoothing:antialiased}
+.pm.dim{--bg:#26272F;--surface:#2F3039;--sunken:#2A2B33;--ink:#ECEDF2;--ink-2:#CDCFD8;--muted:#A9ACB8;--line:#3D3F4A;--line-2:#4F525E;--accent:#9C92FF;--on-accent:#14151A;--accent-soft:#37335C;--accent-text:#BDB6FF;--warn:#F2A766;--warn-soft:#43321F;--code-bg:#353640;--shadow:0 1px 2px rgba(0,0,0,.3),0 14px 34px -16px rgba(0,0,0,.6)}
+.pm.dark{--bg:#0A0B0E;--surface:#121318;--sunken:#0E0F13;--ink:#EDEEF2;--ink-2:#C4C6CF;--muted:#9295A2;--line:#22242C;--line-2:#30323C;--accent:#8E83FF;--on-accent:#0A0B0E;--accent-soft:#1E1B3A;--accent-text:#ADA5FF;--warn:#F2A766;--warn-soft:#2D2116;--code-bg:#1A1B22;--shadow:0 1px 2px rgba(0,0,0,.4),0 14px 34px -16px rgba(0,0,0,.8)}
+.pm *{box-sizing:border-box}
+.pm input,.pm textarea,.pm select,.pm button{font:inherit;color:inherit}
+.pm button{cursor:pointer}
+.pm a{color:var(--accent-text);text-decoration:none}
+.pm a:hover{color:var(--ink)}
+.pm ::placeholder{color:var(--muted)}
+.pm .nav:hover{color:var(--ink);background:var(--sunken)}
+.pm .ghost:hover{background:var(--sunken);color:var(--ink)}
+.pm .primary:hover{filter:brightness(1.08)}
+.pm .field{transition:border-color .15s,box-shadow .15s}
+.pm .field:focus,.pm .field:focus-within{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.pm button:focus-visible,.pm a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.pm .lbl{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.pm .kbd{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px;padding:2px 6px;border-radius:5px;border:1px solid currentColor;opacity:.85}
+.pm .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.pm .row:hover{background:var(--sunken)}
+.pm .chip{display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 9px;border-radius:999px;border:1px solid var(--line-2);font-size:12px;color:var(--ink-2);background:var(--surface)}
+.pm .row:hover{background:var(--sunken)}
+.pm .chip{display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 9px;border-radius:999px;border:1px solid var(--line-2);font-size:12px;color:var(--ink-2);background:var(--surface)}
+.pm .row:hover{background:var(--sunken)}
+.pm .chip{display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 9px;border-radius:999px;border:1px solid var(--line-2);font-size:12px;color:var(--ink-2);background:var(--surface)}
+.pm .row:hover{background:var(--sunken)}
+.pm .chip{display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 9px;border-radius:999px;border:1px solid var(--line-2);font-size:12px;color:var(--ink-2);background:var(--surface)}
+</style>
+</helmet>
+<div class="pm {{theme}}" style="width: 390px; min-height: 1000px; display: flex; flex-direction: column">
+<header style="flex: none; display: flex; align-items: center; height: 52px; padding: 0 6px 0 16px; border-bottom: 1px solid var(--line); background: var(--surface)"><a href="MobileEditor.dc.html" aria-label="Padmark — home" style="font-family: 'Source Serif 4', Georgia, serif; font-weight: 700; font-size: 21px; letter-spacing: -0.02em; color: var(--ink); line-height: 1">Padmark<span style="color: var(--accent)">.</span></a><div style="flex: 1"></div><button type="button" aria-label="{{themeLabel}}" onClick="{{cycleTheme}}" style="width: 44px; height: 44px; border: 0; border-radius: 10px; background: transparent; color: var(--ink-2); display: grid; place-items: center"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"></circle><path d="M12 3.5a8.5 8.5 0 0 1 0 17z" fill="currentColor"></path></svg></button><a href="MobileImageUp.dc.html" aria-label="New" style="width: 44px; height: 44px; margin-left: 4px; border-radius: 10px; background: var(--accent); color: var(--on-accent); display: grid; place-items: center"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg></a></header>
+<div style="position: relative; display: flex; align-items: center; justify-content: center; min-height: 260px; background: var(--sunken); border-bottom: 1px solid var(--line)">
+<a href="{{src}}" target="_blank" rel="noopener" aria-label="Open the original image" style="display: block; line-height: 0">
+<img src="{{src}}" alt="Sunset over the ridge, seen from the trailhead" width="{{w}}" height="{{h}}" onLoad="{{measure}}" style="display: block; max-width: 100%; max-height: 560px; width: auto; height: auto">
+</a>
+<div style="position: absolute; right: 10px; bottom: 10px; display: flex; gap: 6px">
+<span style="height: 32px; display: flex; align-items: center; padding: 0 10px; border-radius: 8px; background: rgba(10,11,14,.66); color: #FFFFFF; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px">{{scaleLabel}}</span>
+<a href="{{src}}" target="_blank" rel="noopener" style="height: 32px; display: flex; align-items: center; gap: 6px; padding: 0 10px; border-radius: 8px; background: rgba(10,11,14,.66); color: #FFFFFF; font-size: 12px; font-weight: 600"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"></path></svg>Original</a>
+</div>
+</div>
+<main style="flex: 1; display: flex; flex-direction: column; gap: 14px; padding: 16px">
+<div style="display: flex; flex-direction: column; gap: 6px">
+<h1 style="margin: 0; font-family: 'Source Serif 4', Georgia, serif; font-size: 22px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.25; word-break: break-all">{{name}}</h1>
+<p style="margin: 0; font-size: 14px; line-height: 1.5; color: var(--ink-2)">Sunset over the ridge, seen from the trailhead</p>
+<p style="margin: 0; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; line-height: 1.6; color: var(--muted)">{{meta}} · Nov 22, 2026 · 3 views · never expires</p>
+</div>
+<div style="display: flex; flex-direction: column; gap: 8px">
+<a href="#download" style="height: 48px; border-radius: 12px; background: var(--accent); color: var(--on-accent); display: flex; align-items: center; justify-content: center; gap: 8px; font-weight: 600; font-size: 15px"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v12M7 11l5 5 5-5"></path><path d="M5 20h14"></path></svg>Download</a>
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px">
+<button type="button" onClick="{{copyLink}}" style="height: 44px; display: flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid var(--line-2); border-radius: 10px; background: transparent; font-size: 14px; font-weight: 500; color: var(--ink)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"></rect><path d="M5 15V5a2 2 0 0 1 2-2h10"></path></svg>{{copyLabel}}</button>
+<button type="button" aria-expanded="{{shareStr}}" onClick="{{toggleShare}}" style="height: 44px; display: flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid var(--line-2); border-radius: 10px; background: transparent; font-size: 14px; font-weight: 500; color: var(--ink)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 8-4 4 4 4M16 8l4 4-4 4"></path></svg>Embed</button>
+<a href="MobileImageUp.dc.html" style="height: 44px; display: flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid var(--line-2); border-radius: 10px; background: transparent; font-size: 14px; font-weight: 500; color: var(--ink)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"></path><path d="m13.5 6.5 4 4"></path></svg>Edit</a>
+</div>
+<sc-if value="{{share}}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface)">
+<div role="tablist" aria-label="Format" style="display: flex; gap: 2px; padding: 2px; background: var(--bg); border: 1px solid var(--line); border-radius: 9px"><button type="button" role="tab" aria-selected="{{selL}}" onClick="{{fmtL}}" style="flex: 1; height: 40px; border: 0; border-radius: 7px; font-size: 12px; font-weight: 500; {{stL}}">Link</button><button type="button" role="tab" aria-selected="{{selM}}" onClick="{{fmtM}}" style="flex: 1; height: 40px; border: 0; border-radius: 7px; font-size: 12px; font-weight: 500; {{stM}}">Markdown</button><button type="button" role="tab" aria-selected="{{selH}}" onClick="{{fmtH}}" style="flex: 1; height: 40px; border: 0; border-radius: 7px; font-size: 12px; font-weight: 500; {{stH}}">HTML</button></div>
+<div style="display: flex; gap: 6px">
+<label for="pm-embed" class="sr">Code to copy</label>
+<input id="pm-embed" readonly value="{{embed}}" style="flex: 1; min-width: 0; height: 44px; padding: 0 10px; border: 1px solid var(--line-2); border-radius: 9px; background: var(--sunken); font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; outline: none">
+<button class="ghost" type="button" aria-label="Copy" style="flex: none; width: 44px; height: 44px; border: 1px solid var(--line-2); border-radius: 9px; background: var(--surface); display: grid; place-items: center"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"></rect><path d="M5 15V5a2 2 0 0 1 2-2h10"></path></svg></button>
+</div>
+<span style="font-size: 12px; color: var(--muted)">{{embedHint}}</span>
+</div>
+</sc-if>
+</div>
+</main>
+<footer style="display: flex; justify-content: space-between; padding: 20px 16px 28px; margin-top: 16px; border-top: 1px solid var(--line); font-size: 12px; color: var(--muted)"><span>Published with Padmark</span><a href="MobileImageUp.dc.html" style="color: var(--muted)">New image</a></footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["light","dim","dark"],"default":"light"},"sample":{"editor":"enum","options":["large","small"],"default":"large"},"$preview":{"width":390,"height":1000}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const s = this.state || {};
+    const theme = s.theme || this.props.theme || 'light';
+    const sample = this.props.sample || 'large';
+    const big = sample === 'large';
+    const fmt = s.fmt || 'link';
+    const zoom = !!s.zoom;
+    const share = !!s.share;
+    const seg = (on) => on ? 'background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,.14)' : 'background: transparent; color: var(--muted)';
+    const page = '[your-host]/mountain-trip';
+    const raw = page + '/raw';
+    const alt = 'Sunset over the ridge, seen from the trailhead';
+    const w = big ? 3200 : 640, h = big ? 2000 : 400;
+    const scale = zoom ? 100 : (s.scale || (big ? 40 : 100));
+    return {
+      theme,
+      tL: seg(theme === 'light'), tD: seg(theme === 'dim'), tK: seg(theme === 'dark'),
+      pL: String(theme === 'light'), pD: String(theme === 'dim'), pK: String(theme === 'dark'),
+      setL: () => this.setState({ theme: 'light' }), setD: () => this.setState({ theme: 'dim' }), setK: () => this.setState({ theme: 'dark' }),
+      themeLabel: 'Theme: ' + theme + '. Tap to change',
+      cycleTheme: () => this.setState({ theme: ({ light: 'dim', dim: 'dark', dark: 'light' })[theme] }),
+      src: big ? '../assets/mountain-trip-large.jpg' : '../assets/mountain-trip-small.png', w, h,
+      name: big ? 'mountain-trip.jpg' : 'mountain-trip-small.png',
+      meta: big ? '3200 × 2000 · 146 KB · JPEG' : '640 × 400 · 4 KB · PNG',
+      measure: (e) => { const im = e.target; if (!zoom && im.naturalWidth) { const v = Math.min(100, Math.round(im.clientWidth / im.naturalWidth * 100)); if (v !== s.scale) this.setState({ scale: v }); } },
+      scaleLabel: scale >= 100 ? '100%' : 'Fit · ' + scale + '%',
+      canZoom: zoom || scale < 100,
+      zoomStr: String(zoom), zoomLabel: zoom ? 'Fit to screen' : '100%',
+      toggleZoom: () => this.setState({ zoom: !zoom }),
+      imgSize: zoom ? 'max-width: none; max-height: none; width: ' + w + 'px; height: auto' : 'max-width: 100%; max-height: calc(100vh - 290px); width: auto; height: auto',
+      stageOverflow: zoom ? 'auto' : 'hidden',
+      copyLabel: s.copied ? 'Copied' : 'Copy link', copyLink: () => this.setState({ copied: true }),
+      share, shareStr: String(share), toggleShare: () => this.setState({ share: !share }),
+      selL: String(fmt === 'link'), selM: String(fmt === 'md'), selH: String(fmt === 'html'),
+      stL: seg(fmt === 'link'), stM: seg(fmt === 'md'), stH: seg(fmt === 'html'),
+      fmtL: () => this.setState({ fmt: 'link' }), fmtM: () => this.setState({ fmt: 'md' }), fmtH: () => this.setState({ fmt: 'html' }),
+      embed: fmt === 'link' ? page : (fmt === 'md' ? '![' + alt + '](' + raw + ')' : '<img src="' + raw + '" alt="' + alt + '">'),
+      embedHint: fmt === 'link' ? 'Opens this page.' : (fmt === 'md' ? 'Paste into a Padmark note or any Markdown.' : 'Paste into a web page.')
+    };
+  }
+}
+</script>
+</body>
+</html>

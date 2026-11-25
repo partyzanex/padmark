@@ -5,10 +5,18 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 )
 
-func TestGet_ServiceUnavailable(t *testing.T) {
+type ServiceUnavailableSuite struct {
+	suite.Suite
+}
+
+func TestServiceUnavailableSuite(t *testing.T) {
+	suite.Run(t, new(ServiceUnavailableSuite))
+}
+
+func (s *ServiceUnavailableSuite) TestGet_ServiceUnavailable() {
 	for _, testCase := range []struct {
 		name string
 		body string
@@ -17,20 +25,20 @@ func TestGet_ServiceUnavailable(t *testing.T) {
 		{"disabled", `{"message":"translated text","code":"api_disabled"}`, "API is disabled on this server (api_disabled)"},
 		{"other failure", `{"message":"maintenance"}`, "service unavailable: maintenance"},
 	} {
-		t.Run(testCase.name, func(t *testing.T) {
+		s.Run(testCase.name, func() {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusServiceUnavailable)
 
 				_, err := w.Write([]byte(testCase.body))
 				if err != nil {
-					t.Error(err)
+					s.T().Error(err)
 				}
 			}))
 			defer server.Close()
 
-			err := runCLI(t.Context(), "--url", server.URL, "get", "example")
-			require.ErrorContains(t, err, testCase.want)
+			err := runCLI(s.T().Context(), "--url", server.URL, "get", "example")
+			s.Require().ErrorContains(err, testCase.want)
 		})
 	}
 }

@@ -42,28 +42,13 @@ func deleteLinkAction(ctx context.Context, cmd *urcli.Command) error {
 		return errorcontext.Wrap(handleDeleteLinkRes(res), "decode delete link response")
 	}
 
-	return errorcontext.Wrap(runDeleteCommand(ctx, cmd, linkIDArg, deleteLink), "delete resource")
+	return errorcontext.Wrap(runDeleteCommand(ctx, cmd, linkRecord(), deleteLink), "delete resource")
 }
 
 func handleDeleteLinkRes(res padmark.DeleteLinkRes) error {
-	switch typed := res.(type) {
-	case *padmark.DeleteLinkNoContent:
+	if _, ok := res.(*padmark.DeleteLinkNoContent); ok {
 		return nil
-	case *padmark.DeleteLinkUnauthorized:
-		return ErrUnauthorized
-	case *padmark.DeleteLinkForbidden:
-		return errLinkOwnershipRequired
-	case *padmark.DeleteLinkNotFound:
-		return ErrLinkNotFound
-	case *padmark.DeleteLinkTooManyRequests:
-		return ErrRateLimited
-	case *padmark.DeleteLinkServiceUnavailable:
-		return errorcontext.Wrap(
-			serviceUnavailableError(padmark.ErrorResponse(*typed)), "decode service unavailable response",
-		)
-	case *padmark.DeleteLinkInternalServerError:
-		return fmt.Errorf("%w: %s", ErrServer, typed.Message)
-	default:
-		return fmt.Errorf("%w: %T", ErrUnexpectedResponse, res)
 	}
+
+	return responseError(res, linkRecord(), mutationRules())
 }

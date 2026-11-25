@@ -3,6 +3,306 @@
 All notable changes to this project. The format is inspired by
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## v0.5.0 — unreleased
+
+v0.5.0 follows **v0.4.0**.
+
+### Added
+
+- A wide table in a note scrolls horizontally in its own box on every screen width; the page
+  never scrolls sideways. Cells are at least 9em wide and do not break words; a narrow table
+  takes the width of its content, and its frame wraps it. The editor preview shows the same box.
+- `padmark-cli update-link` and the MCP tool `update_link` change the destination, expiry,
+  privacy and redirect setting of a short link; an omitted option keeps its value.
+- `tests/storage` runs one contract suite per repository role on SQLite and PostgreSQL, and
+  `tests/arch` checks the layer imports with `go list`.
+- File publishing in S3-compatible storage (S3: Simple Storage Service): `POST /files`
+  (multipart upload), `GET /{id}` and `GET /files/{id}/download` (attachment),
+  `GET /files/{id}` (metadata) and `DELETE /files/{id}` (`X-Edit-Code` or the owner). Files
+  have the same slug namespace, privacy levels, TTL, edit codes and burn rule
+  (`burn_after_download`) as notes and links.
+- The server encrypts each file with its own key (AES-256-GCM in 64 KiB chunks); the database
+  keeps the key and the file name sealed with the installation keyring. Key rotation includes
+  files.
+- New settings: `--s3-endpoint`, `--s3-bucket`, `--s3-region`, `--s3-path-style`,
+  `--max-file-size`, and the environment-only `PADMARK_S3_ACCESS_KEY` / `PADMARK_S3_SECRET_KEY`.
+- The server creates the `--s3-bucket` bucket at startup when it does not exist. The key then
+  needs `s3:CreateBucket`.
+- `PUT /files/{id}` changes the expiry, the privacy and the `burn_after_download` rule of a
+  file. `ttl` counts from the change, `"ttl": null` removes the expiry, and an omitted field
+  keeps its value. The content, the name and the owner do not change. The edit code comes only
+  from `X-Edit-Code`; a signed-in owner can omit it. The edit-code lockout applies.
+- `GET /{id}` of a file gives a browser (`Accept: text/html`) a file page with a **Download**
+  button. The page does not count a download and does not delete a `burn_after_download` file.
+  Other clients get the content, also `curl` with `Accept: */*`.
+- Web pages for files: the upload page `/files` (drop area, progress bar, **Cancel upload**),
+  the success page for a file and the edit page `/edit/{id}`. The header shows a **File**
+  tab only when files are on. The pages show each file error, for example a file that is too
+  large or a storage failure.
+- `openapi.yaml` describes the `/files` operations. `/llms.txt` and `/api/reference.md` have a
+  files part. A streaming handler serves `/files`, not the generated ogen server
+  ([ADR-0002](docs/adr/0002-files-outside-ogen.md)).
+- `pkg/client` adds `UploadFile` and `DownloadFile`. They stream the file and do not keep it in
+  memory. The generated `CreateFile` sends the form fields after the file, so the server does
+  not see them, and `GetFileContent` reads the full body into memory. Do not use these two.
+  The other client changes only add names.
+- CLI (command-line interface) commands `upload`, `download`, `file-info`, `update-file` and
+  `delete-file`. `upload -` reads stdin and needs `--name`. `download` accepts an ID or a URL,
+  writes to a temporary file, renames it after a full download, and replaces a file only with
+  `--force`. `-o -` writes to stdout. For `upload` and `download`, `--timeout` limits only the
+  wait for the response headers.
+- MCP (Model Context Protocol) tools `upload_file`, `get_file`, `update_file` and
+  `delete_file`. `upload_file` reads only regular files under `--upload-root` /
+  `PADMARK_MCP_UPLOAD_ROOT`; an empty value (the default) refuses all uploads. The session
+  vault keeps file edit codes as for notes and links.
+- File metrics on the `--metrics-addr` listener: `padmark_files_uploads_total`,
+  `padmark_files_downloads_total`, `padmark_files_deleted_total{reason}` (`user`, `burn`,
+  `expired`), the `padmark_files_upload_bytes` histogram and
+  `padmark_files_storage_errors_total{op}` (`put`, `stat`, `get`, `delete`).
+- A background sweep removes expired files and their objects every `--files-sweep-interval` /
+  `PADMARK_FILES_SWEEP_INTERVAL` (default `1h`; `0` turns it off). Each upload also removes
+  expired files. The shutdown manager stops the loop before the database closes.
+- File transfer limits: `--file-idle-timeout` / `PADMARK_FILE_IDLE_TIMEOUT` (default `1m`)
+  stops an upload or a download that moves no data for that time; a stalled upload gets `408`.
+  Each chunk of data moves the deadline forward, up to a total limit of one hour.
+  `--max-uploads` / `PADMARK_MAX_UPLOADS` (default `8`) limits the uploads at the same time
+  (`503`), and `--max-uploads-per-client` / `PADMARK_MAX_UPLOADS_PER_CLIENT` (default `4`)
+  limits them for one client IP address (`429`). Both answers have `Retry-After: 10`. `0`
+  selects the default; a negative value stops startup.
+- Documentation: "Files setup" in the README (bucket policy, lifecycle rule for incomplete
+  multipart uploads, reverse proxy limits), commented `PADMARK_S3_*` lines in
+  `docker-compose.yml`, and the first architecture decision records (ADRs) in `docs/adr/`.
+- TeX formulas in notes, as LLM (large language model) output writes them: `$…$` and `\(…\)` in
+  a line of text, `$$…$$` in a line, and a block that starts a line with `$$` or `\[`. The note
+  page and the editor preview draw them with KaTeX 0.19.1. KaTeX, its CSS and fonts are embedded
+  in the binary and served from `/static/katex/`; a note without a formula does not load them.
+  "$5 and $10" stays text. A formula that KaTeX cannot parse shows its TeX source.
+
+### Changed
+
+- `notes.Manager`, `links.Manager` and `files.Manager` have no `Peek` method; only tests called
+  it. Tests read a record with `Inspect`, or through the storage when they need the stored row.
+- `pkg/client`: `UploadFile` and `DownloadFile` return a drain or close error of the response
+  body when no other error occurred. The fields of `UploadFileOptions` have a new order; keyed
+  literals do not change.
+- `notes.NewManager(deps, maxContentLength, allowCustomSlugs)` takes the content limit as an
+  argument, as `files.NewManager` takes its size limit; `WithMaxContentLength` is removed.
+- Without object storage, `web.NewHandler` uses a disabled file manager, and each file route
+  gives the "files are off" answer behind its middleware; no handler compares the file manager
+  with nil. Status codes, headers and pages do not change.
+- `web.NewHandler` takes one `HandlerConfig` with every collaborator and setting and builds the
+  complete handler, the JSON API handler included; the `With…` setters of `web.Handler` are
+  removed, and `web.NewRouter(handler, opts)` no longer changes the handler. `RouterOptions`
+  keeps only the middleware settings. Routes, status codes, headers and pages do not change.
+- The edit-code and password hashers get their logger in the constructor. The `encryption`
+  commands now log a stored hash that is above the argon2id cost limit, as `serve` does.
+- `file_handler.go`, `web_auth.go` and `flags.go` are split by topic (upload, update, download,
+  Content-Disposition; login, setup, password; flag checks) without a change in behavior.
+- `serve` reads all settings once into one `Config` and checks them before it opens the keyring
+  and the database. An invalid `--trusted-proxies`, `--public-scheme`, `--csrf-secret`, TLS pair
+  or S3 setting no longer creates a database file or a new keyring before the error, and the
+  incomplete-S3 error no longer starts with `build request handlers: `.
+- One shutdown manager closes the listeners, then the background work, then the database; a
+  startup failure closes them through the same manager. The timing and the log records do not
+  change.
+- Notes, links, files, sessions, invites, reveal tokens and API tokens share one expiry rule: a
+  record is expired from its `expires_at` moment on, in the domain and in SQL on both databases.
+- Slugs stay unique only through the `slug_namespace` table: `Create` no longer checks other
+  tables first and retries a random slug up to five times (notes did not retry before); a custom
+  slug first releases an expired holder of any kind. The in-process slug lock is removed
+  (ADR-0003).
+- `GET /{id}` and `/edit/{id}` read the note first. When no note has the slug, the same query
+  gives the kind of the short link or file that has it (`slug_namespace`), and only that kind's
+  Manager is called. A note view needs one database read; a short link or a file page needs two.
+- Error messages name each operation once; account repository errors start with the database
+  dialect, and file errors name the hashed record ID.
+- The "On this page" sidebar follows the new design: H2, H3 and H4 rows without numbers, so the
+  names get the full width of the row, only the current section expanded ("Expand all" expands
+  all), two-line names, a list that follows scrolling, and "Back to top". On a phone the block
+  stays at the top of the screen and the note has no card frame. Note text: h3 is 20px, h4 uses
+  the interface font at 15px.
+- Notes, short links and files check privacy, expiry and burn intent inside their usecase with
+  one reader value. PUT and DELETE check privacy on the same stored record that they change; a
+  hidden record gives `401`. Without accounts, the Edit link of an owner-only note shows and
+  `GET /links/{id}` serves an owner-only link, as the other pages do. The `PUT /notes/{id}`
+  response always has `expires_at` (`null` without expiry).
+- padmark-cli and padmark-mcp share one package (`internal/clientauth`) for the token file,
+  server trust, the plain-HTTP rule and the HTTP client. MCP tools report status 422 as
+  `validation error`, as padmark-cli does. padmark-cli refuses the IDs `.` and `..` and a `--ttl`
+  above 9223372036 before it sends a request. The unused `edit_code` field of the
+  `create_links_bulk` output is removed.
+- Invite and reveal token lifetimes and the cleanup of stale invites, reveal tokens and sessions
+  moved from the repositories to the auth managers. The schema allows one admin, so the admin
+  cannot be revoked.
+- `--shutdown-timeout` is now the limit of the full shutdown sequence, not of each phase. Open
+  requests get this time less one fifth (at most 2 seconds); then the server closes their
+  connections, stops background work and closes the database. A forced close gives a warning in
+  the log and exit code 0. The log records the signal and the duration of each phase.
+  `docker-compose.yml` sets `stop_grace_period: 15s`.
+- The image and CI build with Go 1.27.4, which fixes GO-2026-6859 (an HTTP/1 server crash in
+  `net/http`). Rebuild the image.
+- A short-link update (`PUT /links/{id}`) writes only the fields that the client sent: an omitted
+  `ttl` or `direct_redirect` keeps the stored value, and `null` resets it. Two concurrent updates
+  thus keep both changes.
+- The note content limit is a setting: `--max-content-length` / `PADMARK_MAX_CONTENT_LENGTH`
+  (characters). The default `0` uses the `--max-body-bytes` value (4 MiB), so
+  `PADMARK_MAX_BODY_BYTES` alone raises both limits. Before, the limit was a fixed 1,048,576
+  characters in the code and in the API spec, and no setting changed it. A longer note now gets
+  `422` instead of `400`. The API spec has no `maxLength` for `content` any more, so
+  `padmark-cli` and `padmark-mcp` do not refuse a long note before they send it.
+- Short links and files follow the note flow. **Open** on the success page opens the page of the
+  record; its **Edit** action opens the editor; **Save** returns to the page of the record.
+  A short link gets a page at `/links/{id}` for a client that prefers `text/html`: the
+  destination, the settings and the **Copy**, **Link** and **Edit** actions, in the layout of the
+  note page. The page uses the privacy and expiry rules of `GET /links/{id}`, does not count a
+  view and does not burn the link. `/{id}` stays the redirect, and other clients of
+  `GET /links/{id}` still get JSON. The file page `/{id}` has the layout of the note page.
+- The editor of each record is at `/edit/{id}`. `/links/{id}/edit` and `/files/{id}/edit`
+  answer `301` to it. The success page of a link or a file no longer has an **Edit** button, as
+  for a note. On a reader page, **New** opens the create form of the same kind.
+- The link and file editors use the labels of the note editor: **Save**, "Paste your edit code",
+  "Publish settings", and a busy text on the main button.
+- `--disable-api` keeps the link pages `/links`, `/links/{id}` (HTML) and `/links/{id}/edit`
+  open, as for the note and file pages. Before, the link form answered `503` with JSON.
+- `files` is a reserved first slug segment. A note slug that starts with `files/` stops being
+  reachable.
+- The schema migration `20261118000001_files` adds the `files` table and rebuilds the SQLite
+  `slug_namespace` table and its triggers. Back up the database before the upgrade.
+- `--disable-api` also turns off the file API. The `GET`/`HEAD` pages `/files`,
+  `/files/{id}/edit` (redirect) and `/files/{id}/download`, the download form
+  `POST /files/{id}/download` and the file page at `/{id}` stay available; upload, change and
+  delete are off.
+- The footer text is "Markdown notes, short links & files" when files are on.
+
+### Fixed
+
+- An update of an expired note, short link or file answers `410 Gone` and changes nothing. Before,
+  notes and links accepted it and made the record live again, and files answered `404`. The
+  storage `UPDATE` repeats the expiry check, and `openapi.yaml` declares `410` for the three
+  `PUT` routes.
+- The note and link editors show "The note was deleted or its lifetime ended." and "The link was
+  deleted or its lifetime ended." when a save gets `410`, as the file editor does, instead of the
+  server word "expired".
+- A database failure while a reveal token is used shows the 500 page instead of "Forbidden"; the
+  note is not read or burned, and the token stays valid.
+- The math renderer registers its goldmark node kinds once per process; two renderers made at
+  the same time were a data race.
+- A note larger than 64 MiB in bytes gets `422` before encryption; the server refuses a
+  `--max-content-length` above 67108864 at startup. Before, such a note got `500`.
+- Only slug collisions give "slug is already taken"; a duplicate file object key is an internal
+  error. SQLite consumes reveal tokens with one conditional `UPDATE`, as PostgreSQL does, and a
+  database failure is logged instead of looking like a wrong token.
+- Account and link repositories use the configured logger, so `--log-level` and `--log-format`
+  apply to their records.
+- `padmark-cli` and `padmark-mcp` stop when they cannot write the cleartext-token warning,
+  instead of sending the credential without the warning.
+- The CSRF signature and the `Content-Disposition` encoding no longer ignore write errors.
+- `docker-compose.yml` passes `PADMARK_ENABLE_ACCOUNTS` (default `false`) and, when set,
+  `PADMARK_BOOTSTRAP_TOKEN` to the server. Before, the values in `.env` did not reach the
+  container, so accounts stayed off and note privacy was not checked.
+- An edit, delete, burn read or link expiry delete that passed its access check no longer changes
+  a new note or link that took the same address after the check: the write also matches the
+  stored edit-code hash and answers `404` when the record changed.
+- An expired note or short link no longer keeps its address. A new note, link or file with the
+  same custom slug is created at once; a record that its owner extended is never removed.
+- Following an expired short link no longer deletes it when its owner extended it at the same
+  time.
+- Password change: the new password, the new session and the revocation of all other sessions
+  and API keys are stored in one database transaction. A failure no longer leaves old sessions or
+  API keys valid; the "contact an administrator" warning is removed.
+- Files: after an unclear metadata write error, the server reads the record before it deletes the
+  uploaded object. An expired file whose object delete fails no longer blocks later expired files,
+  and the cleanup after an upload has one total limit of 3 seconds.
+- A stalled request, a long file transfer or a connection without a request no longer holds the
+  server stop after the deadline. The redirect and metrics listeners stop with the main listener.
+- The note editor sends the text unchanged on publish and save: leading spaces, a leading newline
+  and the final newline stay.
+- When the browser blocks session storage, the result page of a new note, short link or file still
+  shows the link and the edit code, and the form shows no false error.
+- For a note that burns some time after the first read, the result page shows that delay. Before,
+  it said "burns immediately".
+- The editor preview of a `text/plain` note shows plain text, as the note page does.
+- Cyrillic text uses the project fonts in all roles: Source Serif 4 and JetBrains Mono get
+  self-hosted Cyrillic subsets, so Cyrillic words no longer show in Georgia or Times. A page
+  downloads a Cyrillic font file only when it shows Cyrillic text in that font.
+- The CLI (`expand`, `shorten`) and the MCP proxy (`get_link`, `create_link`,
+  `create_links_bulk`) keep the `#fragment` of a short link target instead of `%23`.
+  `POST /links/bulk` echoes each target in the form that the client sent. `pkg/client` has a new
+  function, `SplitFragment`, that repairs a decoded `url.URL`.
+- The MCP proxy `upload_file` no longer has a data race on the read error of the local file.
+- The note page shows images that the Markdown embeds as base64 `data:` URIs (PNG, JPEG, GIF
+  and WebP). Before, the server removed their source, and only the editor preview showed them.
+  SVG and other types stay removed, and links cannot use `data:` URIs. In place of an image
+  that the page will not show, the preview gives the reason. The server writes a `warn` log
+  record with the note hash and the count of each reason.
+- A short link keeps the `#fragment` of its target URL. Before, the server saved
+  `https://example.com/page#part` as `https://example.com/page%23part`, and the redirect went to
+  a page that does not exist. The cause was the `uri` decoder of ogen, which keeps the fragment in
+  the path. Links that you saved before this fix keep `%23`: edit their target URL again.
+
+### Security
+
+- `padmark-cli setup` does not follow a redirect to a different server. Before, a `307` or `308`
+  answer sent the password and the bootstrap token to the new address.
+- With accounts on, a note, link or file change (`PUT` or `DELETE`) stops when the privacy check
+  cannot read the record: a storage failure gives `500` and a missing record gives `404`. Before,
+  the change continued without the privacy check.
+- `POST /files`, `PUT /files/{id}` and `DELETE /files/{id}` reject a request with a foreign
+  `Origin`, because a cross-site form can send a multipart body without a CORS (cross-origin
+  resource sharing) preflight.
+- The S3 client has a 10-second dial, a 10-second TLS (Transport Layer Security) handshake,
+  a 30-second wait for the response headers and 3 attempts. A storage server that does not
+  respond thus does not hold a request for about 10 minutes, as with the `minio-go` defaults.
+- Error texts of the S3 adapter replace the object key with `<object-key>`. Logs do not contain
+  file names, object keys or edit codes.
+- A download is an attachment of type `application/octet-stream` with
+  `X-Content-Type-Options: nosniff` and `Cache-Control: private, no-store`. The
+  `Content-Disposition` names cannot add a parameter or a header.
+- An S3 failure before the response starts gives `503`, not `500`. When an object delete
+  fails after the record is gone, the server logs a warning and increments
+  `padmark_files_storage_errors_total{op="delete"}`.
+- A plain `http://` S3 endpoint other than a loopback address gives a warning at startup.
+- `POST /files` accepts only the five known text fields, each one time, and a maximum of
+  64 KiB before the `file` part; other forms get `400`. The transfer deadlines start only after
+  the fields are valid, so a client that sends no file part cannot hold memory.
+- A browser downloads a `burn_after_download` file only through the CSRF-protected form
+  `POST /files/{id}/download` of the file page. A `GET` with `Sec-Fetch-Site`, a prefetch or an
+  `Accept` that prefers HTML never deletes such a file; a browser goes to the file page.
+  Non-browser clients send `Accept: application/octet-stream`.
+- An intentional abort of a download after the first byte (`http.ErrAbortHandler`) passes
+  through `WithRecovery`; the server no longer logs it as an error "panic recovered".
+
+### Tests
+
+- The browser tests on macOS no longer depend on the scrollbar setting of the system: every
+  page gets `scrollbar-width: none`, and the macOS desktop references have no scrollbar space.
+- 21 duplicate tests are removed from the notes, links and files usecases and the web handlers;
+  each kept test has the assertions of the removed ones. Test helpers, variables and files that
+  named removed APIs have the current names (`mutation_gate_test.go` is `mutation_error_test.go`).
+- 65 near-duplicate tests are merged into the test of the same scenario: 34 in the notes, links
+  and files usecases and 31 in the web handlers. A metric, cache, log or response check of the
+  removed test moves into the kept test, and the name of the kept test tells all of its checks.
+- Test names and comments name the current APIs: `Follow`, `Read`, `ReadRendered`, `Inspect`,
+  and the usecase privacy check of a mutation instead of a web mutation gate (70 tests).
+- Tests, variables and comments that used "gated" or "privacy gate" for privacy tell the behavior,
+  for example `TestDeleteLink_PrivateLink_Anonymous401` and `TestEditPage_ContentOnlyForReaders`
+  (5 tests, 2 variables, 7 comments and messages). A "gate" with another meaning, such as the slug
+  race gate, the trust gate or the upload stream gate, keeps its name.
+- `tests/internal/testenv` builds the in-process web stack and gives each test package one shared
+  PostgreSQL and one S3 mock container, with a new database or bucket for each caller. A full
+  integration run starts 15 containers instead of 24.
+- `tests/server` and `tests/cli/timestamps_test.go` have the `integration` tag, so `go test ./...`
+  runs only unit tests (29 s instead of 40 s).
+- Tests with servers, databases, files, processes or mocks are testify suites; `handler_test.go`,
+  `file_handler_test.go` and `web_auth_test.go` are split by handler and topic. Tests use
+  `t.Context()`, and suites create their mocks in `SetupTest`. Stale comments that named removed
+  APIs are corrected.
+- `tests/files` runs the file life cycle through HTTP with SQLite and an S3 container, with a
+  server restart and a content key rotation. `tests/manager`, `tests/cli`, `tests/mcp` and the
+  `s3store` adapter tests also use `adobe/s3mock:3.12.0` and need Docker.
+- `tests/upgrade` upgrades real v0.4.0 SQLite and PostgreSQL dumps to v0.5.0. The notes and
+  links stay readable, and the record counts do not change.
+
 ## v0.4.0 — unreleased
 
 v0.4.0 follows **v0.3.3** (`b32ab62`); summaries of the previously tagged v0.2.x/v0.3.x

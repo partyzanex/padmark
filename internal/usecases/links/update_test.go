@@ -10,48 +10,103 @@ import (
 
 	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/infra/linkcache"
-	"github.com/partyzanex/padmark/internal/infra/lock"
 )
 
 func (s *ManagerTestSuite) TestUpdate_PreservesStateAndEvictsCache() {
 	ctx := s.T().Context()
 	owner := uuid.New()
 	privacy := domain.PrivacyOwner
-	expiry := time.Now().Add(time.Hour)
+	expiry := testNow().Add(time.Hour)
 	direct := false
 	existing := &domain.Link{
 		ID: domain.HashSlug("stable"), TargetURL: "old ciphertext", EditCode: "original",
-		OwnerID: &owner, CreatedAt: time.Now().Add(-time.Hour), Views: 7,
+		OwnerID: &owner, CreatedAt: testNow().Add(-time.Hour), Views: 7,
 		Privacy: &privacy, ExpiresAt: &expiry, DirectRedirect: &direct, BurnAfterClick: true,
 	}
 	s.storage.EXPECT().GetByID(ctx, existing.ID).Return(existing, nil)
-	s.storage.EXPECT().Update(ctx, existing.ID, gomock.Any()).DoAndReturn(
-		func(_ context.Context, _ string, link *domain.Link) (*domain.Link, error) {
-			s.Equal("https://example.com/new", link.TargetURL)
-			s.Equal("original", link.EditCode)
-			s.Equal(existing.OwnerID, link.OwnerID)
-			s.Nil(link.Privacy, "an omitted privacy must reach storage as nil, so COALESCE keeps it")
-			s.Equal(existing.ExpiresAt, link.ExpiresAt)
-			s.Equal(existing.DirectRedirect, link.DirectRedirect)
-			s.Equal(existing.CreatedAt, link.CreatedAt)
-			s.True(link.BurnAfterClick)
-			link.Views = 8 // storage reports a click recorded after GetByID.
+	s.storage.EXPECT().Update(ctx, existing.ID, "original", gomock.Any(), testNow()).DoAndReturn(
+		func(_ context.Context, _, _ string, patch *domain.LinkPatch, _ time.Time) (*domain.Link, error) {
+			s.Equal("https://example.com/new", patch.TargetURL)
+			s.Equal(&domain.LinkPatch{
+				TargetURL: "https://example.com/new",
+				ExpiresAt: nil, Privacy: nil, DirectRedirect: nil, ClearExpiry: false, ResetDirectRedirect: false,
+			}, patch, "omitted fields must not reach storage, so the stored values stay")
 
-			return link, nil
+			// Storage reports the row as stored, including a click recorded after GetByID.
+			stored := *existing
+			stored.TargetURL = patch.TargetURL
+			stored.Views = 8
+
+			return &stored, nil
 		})
-	cache := NewMockCache(s.ctrl)
-	cache.EXPECT().Delete(existing.ID)
-	s.manager.WithCache(cache)
+	s.cache.EXPECT().Delete(existing.ID)
+	s.manager.WithCache(s.cache)
 
-	updated, err := s.manager.Update(ctx, "stable", "", owner, "https://example.com/new", UpdateOptions{
+	updated, err := s.manager.Update(ctx, "stable", "", accountReader(owner), "https://example.com/new", UpdateOptions{
 		ExpiresAt: nil, Privacy: nil, DirectRedirect: nil,
 		ClearExpiry: false, ResetDirectRedirect: false,
 	})
 	s.Require().NoError(err)
 	s.Equal("stable", updated.ID)
 	s.Equal(8, updated.Views)
+	s.Equal(existing.ExpiresAt, updated.ExpiresAt)
+	s.Equal(existing.DirectRedirect, updated.DirectRedirect)
+	s.True(updated.BurnAfterClick)
 	s.Empty(updated.EditCode)
 	s.Equal("original", existing.EditCode)
+}
+
+// TestUpdate_PatchCarriesOnlySentFields covers finding 9 in the usecase: each sent field and each
+// explicit reset reaches storage, and no value comes from the snapshot that GetByID returned.
+func (s *ManagerTestSuite) TestUpdate_PatchCarriesOnlySentFields() {
+	expiry := testNow().Add(time.Hour)
+	later := testNow().Add(2 * time.Hour)
+	direct, other := true, false
+	privacy := domain.PrivacyAuthenticated
+
+	// Each case sets one field in the request and the same field in the expected patch.
+	for name, send := range map[string]func(opts *UpdateOptions, want *domain.LinkPatch){
+		"expiry only": func(opts *UpdateOptions, want *domain.LinkPatch) {
+			opts.ExpiresAt, want.ExpiresAt = &later, &later
+		},
+		"clear expiry": func(opts *UpdateOptions, want *domain.LinkPatch) {
+			opts.ClearExpiry, want.ClearExpiry = true, true
+		},
+		"privacy only": func(opts *UpdateOptions, want *domain.LinkPatch) {
+			opts.Privacy, want.Privacy = &privacy, &privacy
+		},
+		"direct redirect only": func(opts *UpdateOptions, want *domain.LinkPatch) {
+			opts.DirectRedirect, want.DirectRedirect = &other, &other
+		},
+		"reset direct redirect": func(opts *UpdateOptions, want *domain.LinkPatch) {
+			opts.ResetDirectRedirect, want.ResetDirectRedirect = true, true
+		},
+	} {
+		s.Run(name, func() {
+			opts := UpdateOptions{
+				ExpiresAt: nil, Privacy: nil, DirectRedirect: nil, ClearExpiry: false, ResetDirectRedirect: false,
+			}
+			want := domain.LinkPatch{
+				TargetURL: "https://example.com/new",
+				ExpiresAt: nil, Privacy: nil, DirectRedirect: nil, ClearExpiry: false, ResetDirectRedirect: false,
+			}
+			send(&opts, &want)
+
+			s.storage.EXPECT().GetByID(gomock.Any(), domain.HashSlug("stable")).Return(&domain.Link{
+				EditCode: "code", ExpiresAt: &expiry, DirectRedirect: &direct,
+
+				CreatedAt: time.Time{}, Privacy: nil, OwnerID: nil, ID: "", TargetURL: "old",
+				Views: 0, BurnAfterClick: false,
+			}, nil)
+
+			s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("stable"), "code", &want, testNow()).
+				Return(storedLink("code", nil), nil)
+
+			_, err := s.manager.Update(s.T().Context(), "stable", "code", openReader(),
+				"https://example.com/new", opts)
+			s.Require().NoError(err)
+		})
+	}
 }
 
 func (s *ManagerTestSuite) TestUpdate_EditCodeAndOwnerChecks() {
@@ -78,14 +133,15 @@ func (s *ManagerTestSuite) TestUpdate_EditCodeAndOwnerChecks() {
 			s.storage.EXPECT().GetByID(gomock.Any(), domain.HashSlug("stable")).Return(existing, nil)
 
 			if testCase.ok {
-				s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("stable"), gomock.Any()).Return(&domain.Link{
+				s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("stable"), "original", gomock.Any(),
+					testNow()).Return(&domain.Link{
 					CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
 					DirectRedirect: nil, ID: "", TargetURL: "", EditCode: "",
 					Views: 0, BurnAfterClick: false,
 				}, nil)
 			}
 
-			_, err := s.manager.Update(s.T().Context(), "stable", testCase.code, testCase.caller,
+			_, err := s.manager.Update(s.T().Context(), "stable", testCase.code, accountReader(testCase.caller),
 				"https://example.com", UpdateOptions{
 					ExpiresAt: nil, Privacy: nil, DirectRedirect: nil,
 					ClearExpiry: false, ResetDirectRedirect: false,
@@ -100,7 +156,7 @@ func (s *ManagerTestSuite) TestUpdate_EditCodeAndOwnerChecks() {
 }
 
 func (s *ManagerTestSuite) TestUpdate_Validation() {
-	_, err := s.manager.Update(s.T().Context(), "stable", "code", uuid.Nil, "javascript:alert(1)", UpdateOptions{
+	_, err := s.manager.Update(s.T().Context(), "stable", "code", openReader(), "javascript:alert(1)", UpdateOptions{
 		ExpiresAt: nil, Privacy: nil, DirectRedirect: nil,
 		ClearExpiry: false, ResetDirectRedirect: false,
 	})
@@ -119,7 +175,7 @@ func (s *ManagerTestSuite) TestUpdate_Validation() {
 			DirectRedirect: nil, ID: "", TargetURL: "", Views: 0,
 			BurnAfterClick: false,
 		}, nil)
-		_, err = s.manager.Update(s.T().Context(), "stable", "code", uuid.Nil, "https://example.com",
+		_, err = s.manager.Update(s.T().Context(), "stable", "code", openReader(), "https://example.com",
 			UpdateOptions{
 				Privacy:   &testCase.privacy,
 				ExpiresAt: nil, DirectRedirect: nil, ClearExpiry: false,
@@ -129,88 +185,32 @@ func (s *ManagerTestSuite) TestUpdate_Validation() {
 	}
 }
 
-// A cache fill paused on an old snapshot must finish before the update evicts
-// that snapshot. Metadata is always read from storage, even after a cache fill.
-//
-//nolint:funlen // Keep the blocked cache fill and concurrent PUT together to show their ordering.
-func (s *ManagerTestSuite) TestUpdate_ConcurrentCacheFill() {
-	ctx, cancel := context.WithTimeout(s.T().Context(), 5*time.Second)
-	defer cancel()
-
+// TestInspect_StaleCacheFillIsNotServed: no lock orders reads, updates and cache fills, so a read
+// that started before an Update can store the old target after the Update evicts it. The next
+// read gets the new ciphertext from storage, so the fingerprint misses, the old target is not
+// served and the new target replaces the entry.
+func (s *ManagerTestSuite) TestInspect_StaleCacheFillIsNotServed() {
+	ctx := s.T().Context()
 	dbID := domain.HashSlug("stable")
-	old := &domain.Link{
-		ID: dbID, TargetURL: "https://example.com/old", EditCode: "code",
+	cache := linkcache.NewDefault(slog.New(slog.DiscardHandler))
+	s.manager.WithCache(cache)
+
+	// The passthrough encryptor makes the ciphertext equal to the target URL.
+	cache.Set(ctx, dbID, "https://example.com/old", "https://example.com/old")
+	s.storage.EXPECT().GetByID(ctx, dbID).Return(&domain.Link{
+		ID: dbID, TargetURL: "https://example.com/new", EditCode: "code",
 		CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
 		DirectRedirect: nil, Views: 0, BurnAfterClick: false,
-	}
-	readStarted, releaseRead, updateLockAttempt := make(chan struct{}), make(chan struct{}), make(chan struct{})
-	locker := lock.NewLocker()
-	observedLock := NewMockSlugLock(s.ctrl)
+	}, nil)
 
-	gomock.InOrder(
-		observedLock.EXPECT().Lock(ctx, dbID).DoAndReturn(locker.Lock),
-		observedLock.EXPECT().Lock(ctx, dbID).DoAndReturn(func(ctx context.Context, id string) (func(), error) {
-			close(updateLockAttempt)
+	link, err := s.manager.Inspect(ctx, "stable", openReader())
+	s.Require().NoError(err)
+	s.Equal("https://example.com/new", link.TargetURL)
 
-			return locker.Lock(ctx, id)
-		}),
-	)
-	gomock.InOrder(
-		s.storage.EXPECT().GetByID(ctx, dbID).DoAndReturn(func(context.Context, string) (*domain.Link, error) {
-			close(readStarted)
+	_, stale := cache.Get(dbID, "https://example.com/old")
+	s.False(stale, "the read replaces the stale entry")
 
-			select {
-			case <-releaseRead:
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			}
-
-			clone := *old
-
-			return &clone, nil
-		}),
-		s.storage.EXPECT().GetByID(ctx, dbID).Return(old, nil),
-		s.storage.EXPECT().Update(ctx, dbID, gomock.Any()).DoAndReturn(
-			func(_ context.Context, _ string, updated *domain.Link) (*domain.Link, error) { return updated, nil }),
-	)
-	s.manager.slugLock = observedLock
-	s.manager.WithCache(linkcache.NewDefault(slog.New(slog.DiscardHandler)))
-
-	readDone := make(chan error, 1)
-
-	go func() {
-		_, err := s.manager.Peek(ctx, "stable")
-		readDone <- err
-	}()
-
-	select {
-	case <-readStarted:
-	case <-ctx.Done():
-		s.T().Fatal(ctx.Err())
-	}
-
-	updateDone := make(chan error, 1)
-
-	privacy := domain.PrivacyAuthenticated
-	go func() {
-		_, err := s.manager.Update(ctx, "stable", "code", uuid.Nil, "https://example.com/new",
-			UpdateOptions{
-				Privacy:   &privacy,
-				ExpiresAt: nil, DirectRedirect: nil, ClearExpiry: false,
-				ResetDirectRedirect: false,
-			})
-		updateDone <- err
-	}()
-
-	select {
-	case <-updateLockAttempt:
-	case <-ctx.Done():
-		s.T().Fatal(ctx.Err())
-	}
-
-	close(releaseRead)
-	s.Require().NoError(<-readDone)
-	s.Require().NoError(<-updateDone)
-	_, cached := s.manager.cache.Get(dbID, old.TargetURL)
-	s.False(cached, "the old target must not survive local eviction after PUT")
+	target, fresh := cache.Get(dbID, "https://example.com/new")
+	s.True(fresh)
+	s.Equal("https://example.com/new", target)
 }

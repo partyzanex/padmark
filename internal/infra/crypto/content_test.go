@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 
 	"github.com/partyzanex/padmark/internal/domain"
 )
@@ -216,31 +217,39 @@ func loadStrictKeyring(path string) (*ContentKeyring, error) {
 	return LoadContentKeyring(path, slog.New(slog.DiscardHandler), KeyringLoadOptions{AllowSharedPermissions: false})
 }
 
-func TestLoadContentKeyring(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "keys.json")
+type ContentKeyringFileSuite struct {
+	suite.Suite
+}
+
+func TestContentKeyringFileSuite(t *testing.T) {
+	suite.Run(t, new(ContentKeyringFileSuite))
+}
+
+func (s *ContentKeyringFileSuite) TestLoadContentKeyring() {
+	path := filepath.Join(s.T().TempDir(), "keys.json")
 	data, err := json.Marshal(ContentKeyring{Active: "key1", Keys: map[string][]byte{"key1": bytes.Repeat([]byte{7}, 32)}})
-	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(path, data, 0o600))
+	s.Require().NoError(err)
+	s.Require().NoError(os.WriteFile(path, data, 0o600))
 	keyring, err := loadStrictKeyring(path)
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	_, err = keyring.ForResource("link")
-	require.NoError(t, err)
+	s.Require().NoError(err)
 
 	for _, bad := range []string{
 		"", "null", string(data) + " {}", string(data) + strings.Repeat(" ", maxKeyringSize),
 		`{"active":"key1","keys":{"key1":"secret-should-not-appear-in-errors"}}`,
 		`{"active":"missing","keys":{}}`, `{"active":"key1","keys":{},"typo":true}`,
 	} {
-		require.NoError(t, os.WriteFile(path, []byte(bad), 0o600))
+		s.Require().NoError(os.WriteFile(path, []byte(bad), 0o600))
 		_, err = loadStrictKeyring(path)
-		require.Error(t, err)
-		require.NotContains(t, err.Error(), "secret-should-not-appear-in-errors")
+		s.Require().Error(err)
+		s.Require().NotContains(err.Error(), "secret-should-not-appear-in-errors")
 	}
 
 	_, err = loadStrictKeyring("")
-	require.Error(t, err)
-	_, err = loadStrictKeyring(filepath.Join(t.TempDir(), "missing"))
-	require.Error(t, err)
+	s.Require().Error(err)
+	_, err = loadStrictKeyring(filepath.Join(s.T().TempDir(), "missing"))
+	s.Require().Error(err)
 }
 
 func FuzzContentCipherDecrypt(f *testing.F) {

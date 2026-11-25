@@ -6,14 +6,14 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	sqliterepo "github.com/partyzanex/padmark/internal/infra/storage/sqlite"
 )
 
-func TestSQLiteUpgradeFromV016(t *testing.T) {
+func (s *UpgradeSuite) TestSQLiteFromV016() {
+	t := s.T()
 	ctx := t.Context()
 	fixture := sqliteFixture()
 	path := filepath.Join(t.TempDir(), "v016.db")

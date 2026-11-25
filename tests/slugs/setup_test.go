@@ -3,23 +3,59 @@
 package slugs_test
 
 import (
-	"database/sql"
 	"log/slog"
 	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"github.com/testcontainers/testcontainers-go"
-	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
+	"github.com/stretchr/testify/suite"
 	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect/pgdialect"
-	"github.com/uptrace/bun/driver/pgdriver"
 
 	pgrepo "github.com/partyzanex/padmark/internal/infra/storage/postgres"
+	"github.com/partyzanex/padmark/internal/infra/storage/s3store"
 	sqliterepo "github.com/partyzanex/padmark/internal/infra/storage/sqlite"
+	"github.com/partyzanex/padmark/tests/internal/testenv"
 )
 
+// SlugNamespaceSuite runs the slug namespace scenarios on one backend. The scenarios share one
+// database and run in a fixed order (runSlugNamespace), so the suite has one test method.
+type SlugNamespaceSuite struct {
+	suite.Suite
+
+	// prepare returns the opener of the database of the backend. Each call of the opener gives
+	// a new connection pool; the first pool has applied the migrations.
+	prepare func(t *testing.T) func(*testing.T) *bun.DB
+	db      *bun.DB
+	open    func(*testing.T) *bun.DB
+	objects *s3store.Store
+}
+
 func TestSQLiteSlugNamespace(t *testing.T) {
+	namespace := new(SlugNamespaceSuite)
+	namespace.prepare = prepareSQLite
+	suite.Run(t, namespace)
+}
+
+func TestPostgresSlugNamespace(t *testing.T) {
+	namespace := new(SlugNamespaceSuite)
+	namespace.prepare = preparePostgres
+	suite.Run(t, namespace)
+}
+
+func (s *SlugNamespaceSuite) SetupSuite() {
+	s.open = s.prepare(s.T())
+	s.db = s.open(s.T())
+	s.objects = testenv.S3Mock(s.T()).Store(s.T())
+}
+
+func (s *SlugNamespaceSuite) TestNamespace() {
+	runSlugNamespace(s.T(), s.db, s.open, s.objects)
+}
+
+// prepareSQLite makes a migrated SQLite file database and returns its opener.
+func prepareSQLite(t *testing.T) func(*testing.T) *bun.DB {
+	t.Helper()
+
 	dsn := filepath.Join(t.TempDir(), "namespace.db")
 	open := func(t *testing.T) *bun.DB {
 		t.Helper()
@@ -30,38 +66,34 @@ func TestSQLiteSlugNamespace(t *testing.T) {
 
 		return db
 	}
+
 	db := open(t)
 	_, err := sqliterepo.Migrate(t.Context(), db)
 	require.NoError(t, err)
 
-	runSlugNamespace(t, db, open)
+	return open
 }
 
-func TestPostgresSlugNamespace(t *testing.T) {
-	container, err := tcpostgres.Run(t.Context(), "postgres:18-alpine",
-		tcpostgres.WithDatabase("padmark"), tcpostgres.WithUsername("test"), tcpostgres.WithPassword("test"),
-		tcpostgres.BasicWaitStrategies())
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, testcontainers.TerminateContainer(container)) })
-	dsn, err := container.ConnectionString(t.Context(), "sslmode=disable")
-	require.NoError(t, err)
+// preparePostgres makes a migrated database on the shared PostgreSQL container and returns its
+// opener.
+func preparePostgres(t *testing.T) func(*testing.T) *bun.DB {
+	t.Helper()
+
+	database := testenv.Postgres(t)
 	open := func(t *testing.T) *bun.DB {
 		t.Helper()
 
-		db := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn))), pgdialect.New())
-
-		t.Cleanup(func() { require.NoError(t, db.Close()) })
-
-		return db
+		return database.Open(t)
 	}
+
 	db := open(t)
-	_, err = pgrepo.Migrate(t.Context(), db)
+	_, err := pgrepo.Migrate(t.Context(), db)
 	require.NoError(t, err)
 
-	runSlugNamespace(t, db, open)
+	return open
 }
 
-func runSlugNamespace(t *testing.T, db *bun.DB, open func(*testing.T) *bun.DB) {
+func runSlugNamespace(t *testing.T, db *bun.DB, open func(*testing.T) *bun.DB, objects *s3store.Store) {
 	t.Helper()
 
 	for _, winner := range []string{"notes", "links", "simultaneous"} {
@@ -70,7 +102,20 @@ func runSlugNamespace(t *testing.T, db *bun.DB, open func(*testing.T) *bun.DB) {
 		})
 	}
 
+	t.Run("storage_conflicts", func(t *testing.T) { testStorageConflicts(t, db) })
+	t.Run("concurrent_storage", func(t *testing.T) { testConcurrentStorageCreates(t, db, open) })
+
+	for _, winner := range []string{"notes", "links", "files", "simultaneous"} {
+		t.Run("concurrent_files_"+winner, func(t *testing.T) {
+			testConcurrentFileCreate(t, db, open, objects, winner)
+		})
+	}
+
 	t.Run("release", func(t *testing.T) { testRelease(t, db) })
+	t.Run("release_files", func(t *testing.T) { testFileRelease(t, db, objects) })
+	t.Run("expired_file_slug", func(t *testing.T) { testExpiredFileSlug(t, db, objects) })
+	t.Run("expired_note_slug", func(t *testing.T) { testExpiredNoteSlug(t, db, objects) })
+	t.Run("record_reads", func(t *testing.T) { testRecordReads(t, db, objects) })
 	t.Run("rollback", func(t *testing.T) { testRollback(t, db) })
 	t.Run("id_change", func(t *testing.T) { testIDChange(t, db) })
 	t.Run("legacy_conversion", func(t *testing.T) { testLegacyConversion(t, db) })

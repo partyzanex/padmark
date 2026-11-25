@@ -24,6 +24,9 @@ func domainToResponse(note *domain.Note) *ogenapi.NoteResponse {
 	resp.SetPrivate(ogenapi.NewOptBool(privateFlag(note)))
 	resp.ShowContents = ogenapi.NewOptBool(note.ContentsSidebar())
 
+	// The spec gives null for a note without expiry, so the field is always present: the native
+	// GET and PUT handlers (web_note.go) encode the same model and have always sent null.
+	resp.ExpiresAt = ogenapi.OptNilDateTime{Value: time.Time{}, Set: true, Null: true}
 	if note.ExpiresAt != nil {
 		resp.ExpiresAt = ogenapi.NewOptNilDateTime(*note.ExpiresAt)
 	}
@@ -119,6 +122,9 @@ func domainToCreateResponse(note *domain.Note) ogenapi.CreateNoteResponse {
 	resp.SetPrivate(ogenapi.NewOptBool(privateFlag(note)))
 	resp.ShowContents = ogenapi.NewOptBool(note.ContentsSidebar())
 
+	// The spec gives null for a note without expiry, so the field is always present: the native
+	// GET and PUT handlers (web_note.go) encode the same model and have always sent null.
+	resp.ExpiresAt = ogenapi.OptNilDateTime{Value: time.Time{}, Set: true, Null: true}
 	if note.ExpiresAt != nil {
 		resp.ExpiresAt = ogenapi.NewOptNilDateTime(*note.ExpiresAt)
 	}

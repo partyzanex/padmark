@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 
-	"github.com/google/uuid"
 	"go.uber.org/mock/gomock"
 
 	"github.com/partyzanex/padmark/internal/domain"
@@ -70,13 +69,13 @@ func (s *HandlerSuite) TestUpdateNote_ProtectedPrivacyNeedsAccounts() {
 // editable and deletable with its edit code, as in v0.1.6 without --auth-tokens; omitting privacy
 // keeps the stored level.
 func (s *HandlerSuite) TestMutateV016PrivateNoteWithoutAccounts() {
-	s.manager.EXPECT().Update(gomock.Any(), testID, "editcode1234", uuid.Nil, privacyMatcher(nil)).
+	s.manager.EXPECT().Update(gomock.Any(), testID, "editcode1234", noCaller(), privacyMatcher(nil)).
 		Return(newTestNote("t", "edited"), nil)
 
 	w := s.sendJSON(http.MethodPut, "/notes/"+testID, `{"content":"edited","edit_code":"editcode1234"}`)
 	s.Equal(http.StatusOK, w.Code)
 
-	s.manager.EXPECT().Delete(gomock.Any(), testID, "editcode1234", uuid.Nil).Return(nil)
+	s.manager.EXPECT().Delete(gomock.Any(), testID, "editcode1234", noCaller()).Return(nil)
 
 	w = httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodDelete, "/notes/"+testID, nil)

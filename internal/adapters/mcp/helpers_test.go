@@ -15,7 +15,7 @@ import (
 
 // connectTestClient attaches an in-memory MCP client to the manager's server, so tests drive
 // tools exactly the way a real agent does (schema-validated arguments, packed results).
-func connectTestClient(ctx context.Context, mgr *Manager) (*mcpsdk.ClientSession, error) {
+func connectTestClient(ctx context.Context, mgr *Server) (*mcpsdk.ClientSession, error) {
 	clientTransport, serverTransport := mcpsdk.NewInMemoryTransports()
 
 	srvSession, err := mgr.srv.Connect(ctx, serverTransport, nil)
@@ -99,7 +99,9 @@ func testURL(t *testing.T, raw string) url.URL {
 func isolateEnv(t *testing.T) {
 	t.Helper()
 
-	for _, key := range []string{EnvToken, EnvBaseURL, EnvTimeout, EnvLogLevel} {
+	for _, key := range []string{
+		EnvToken, EnvBaseURL, EnvTimeout, EnvLogLevel, EnvUploadRoot,
+	} {
 		t.Setenv(key, "") // registers the restore of the original value.
 		require.NoError(t, os.Unsetenv(key))
 	}

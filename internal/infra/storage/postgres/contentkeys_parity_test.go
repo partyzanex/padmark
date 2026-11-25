@@ -178,3 +178,41 @@ func (s *ParitySuite) TestContentKeys_ConcurrentReplaceSingleWinner() {
 	s.Equal(1, singleWinner(results, func(r consumeOutcome) bool { return r.ok }),
 		"exactly one rewrap may replace a given ciphertext")
 }
+
+// TestContentKeys_FileMetadataIsARotationResource ports the SQLite test of the same name: key
+// rotation reads and rewrites files.sealed_meta, and Delete never removes a file record.
+func (s *ParitySuite) TestContentKeys_FileMetadataIsARotationResource() {
+	ctx := s.T().Context()
+	s.Require().NoError(NewFileRepository(s.db).Create(ctx, &domain.File{
+		CreatedAt: time.Now(), ExpiresAt: nil, Privacy: nil, OwnerID: nil, ID: domain.HashSlug("file"),
+		ObjectKey: "object", SealedMeta: "old", Name: "", ContentKey: nil, EditCode: "", Size: 0,
+		Downloads: 0, BurnAfterDownload: false,
+	}))
+
+	repo := contentkeys.New(s.db)
+
+	rows, err := repo.Batch(ctx, "file", "", 10)
+	s.Require().NoError(err)
+	s.Require().Len(rows, 1)
+	s.Equal("old", rows[0].Value)
+
+	deleted, err := repo.Delete(ctx, rows[0])
+	s.Require().Error(err, "the object would stay in the bucket without its content key")
+	s.False(deleted)
+
+	changed, err := repo.Replace(ctx, rows[0], "new")
+	s.Require().NoError(err)
+	s.True(changed)
+
+	changed, err = repo.Replace(ctx, rows[0], "stale-replacement")
+	s.Require().NoError(err)
+	s.False(changed)
+
+	row, err := repo.Get(ctx, "file", domain.HashSlug("file"))
+	s.Require().NoError(err)
+	s.Require().NotNil(row)
+	s.Equal(keys.Row{
+		Resource: "file", ID: domain.HashSlug("file"), Value: "new",
+		Legacy: nil, StoredEditCode: "",
+	}, *row)
+}

@@ -60,7 +60,6 @@ var (
 	ErrWeakPassword    = errors.New("password does not meet complexity requirements")
 	ErrInvalidUsername = errors.New("username must be 1–64 characters: letters, digits, dot, underscore, @ or " +
 		"hyphen; start with a letter or digit")
-	ErrSessionRevocation   = errors.New("password changed, but older sessions or API tokens could not be revoked")
 	ErrFeatureNotSupported = errors.New("feature is not enabled")
 	ErrAPITokenLimit       = errors.New("api token limit reached")
 	// ErrBurnIntentRequired reports an access without deliberate intent to a burn resource.
@@ -76,4 +75,10 @@ var (
 	// ErrInvalidAPITokenTTL reports an API token lifetime outside 0 (never expires) …
 	// MaxAPITokenTTLDays.
 	ErrInvalidAPITokenTTL = errors.New("api token lifetime out of range")
+	// ErrFileTooLarge reports an upload that is larger than the server limit (--max-file-size).
+	ErrFileTooLarge = errors.New("file exceeds maximum size")
+	// ErrInvalidFileName reports an empty file name, or one that is longer than MaxFileNameLength.
+	ErrInvalidFileName = errors.New("file name must be 1-255 bytes")
+	// ErrStorageUnavailable reports that the object storage for files did not complete an operation.
+	ErrStorageUnavailable = errors.New("file storage is unavailable")
 )

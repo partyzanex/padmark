@@ -3,6 +3,7 @@ package ui_test
 import (
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -21,11 +22,12 @@ type linkMetadata struct {
 
 func TestLinks(t *testing.T) {
 	runScenarios(t, []scenario{
-		{name: "CreateEditDelete", run: testLinkCreateEditDelete, accounts: false, allowedStatuses: nil},
-		{name: "Validation", run: testLinkValidation, accounts: false, allowedStatuses: nil},
-		{name: "FailureRetry", allowedStatuses: []int{503}, run: testLinkFailureRetry, accounts: false},
-		{name: "BurnAfterClick", allowedStatuses: []int{404}, run: testLinkBurnAfterClick, accounts: false},
-		{name: "PrivacyAndOwnership", accounts: true, run: testLinkPrivacyAndOwnership, allowedStatuses: nil},
+		{name: "CreateEditDelete", run: testLinkCreateEditDelete, accounts: false, files: false, allowedStatuses: nil},
+		{name: "Validation", run: testLinkValidation, accounts: false, files: false, allowedStatuses: nil},
+		{name: "FailureRetry", allowedStatuses: []int{503}, run: testLinkFailureRetry, accounts: false, files: false},
+		{name: "BurnAfterClick", allowedStatuses: []int{404}, run: testLinkBurnAfterClick, accounts: false, files: false},
+		{name: "PrivacyAndOwnership", accounts: true, files: false, run: testLinkPrivacyAndOwnership, allowedStatuses: nil},
+		{name: "BlockedStorage", run: testLinkBlockedStorage, accounts: false, files: false, allowedStatuses: nil},
 	})
 }
 
@@ -63,11 +65,15 @@ func (sess *uiSession) createTestLink() (string, string) {
 	sess.fill("#slugInput", "ui-link")
 	sess.openSettings()
 	sess.fill("#editCodeInput", "Link-Edit-Code42!")
-	sess.selectOption("#expirySelect", "seconds")
-	sess.fill("#ttlInput", "123")
+	// The custom lifetime is a number and a unit; the page sends 2 minutes as 120 seconds.
+	sess.selectOption("#expirySelect", "custom")
+	sess.fill("#ttlAmount", "2")
+	sess.selectOption("#ttlUnit", "60")
 	sess.selectOption("#redirectSelect", "false")
 	sess.click("#burnLabel")
-	sess.expectLayout("#editCodeInput", "#privacySelect", "#redirectSelect", "#ttlInput", "#burnLabel")
+	sess.expectLayout("#editCodeInput", "#privacySelect", "#redirectSelect", "#ttlAmount", "#ttlUnit", "#burnLabel")
+	sess.text("#chipExpiry", "Expires in 2 minutes")
+	sess.visible("#chipBurn")
 	sess.closeSettings()
 	sess.expectLayout(".header", "#targetInput", "#slugInput", "#submitBtn")
 	sess.screenshot("link-editor.png", "#previewHost")
@@ -95,21 +101,23 @@ func testLinkCreateEditDelete(sess *uiSession) {
 	original := sess.readLink(id)
 	require.True(sess.t, original.BurnAfterClick)
 	require.NotNil(sess.t, original.ExpiresAt)
-	require.WithinDuration(sess.t, time.Now().Add(123*time.Second), *original.ExpiresAt, 10*time.Second)
-	sess.link("Edit link")
-	sess.value("#targetInput", original.TargetURL)
-	sess.value("#redirectSelect", "false")
-	sess.value("#expirySelect", "keep")
-	sess.must(sess.expect.Locator(sess.page.Locator("#burnCheck")).ToBeDisabled())
-	sess.screenshot("link-edit.png", "#expiryHint", "#previewHost")
-	sess.button("Save link")
+	require.WithinDuration(sess.t, time.Now().Add(120*time.Second), *original.ExpiresAt, 10*time.Second)
+	// As for a note: the result page opens the page of the link, and Edit is there.
+	sess.link("Open link")
+	sess.expectLinkPage(id, original.TargetURL)
+	// The title has the port of the test server, and the expiry has the time of the run.
+	sess.screenshot("link.png", "#linkTitle", "#expiresTag")
+	sess.openEditor()
+	sess.expectLinkEditPage(id, original.TargetURL)
+	sess.button("Save")
 	sess.text("#linkError", "Edit code required")
 	sess.openSettings()
 	sess.fill("#editCodeInput", code)
 	sess.closeSettings()
 	sess.fill("#targetInput", "https://example.com/updated")
 	sess.must(sess.page.Locator("#targetInput").Press("Control+Enter"))
-	sess.text("#linkStatus", "Link saved")
+	// After a save the browser shows the page of the link, as after the save of a note.
+	sess.expectLinkPage(id, "https://example.com/updated")
 	saved := sess.readLink(id)
 	require.Equal(sess.t, "https://example.com/updated", saved.TargetURL)
 	require.Equal(sess.t, original.ExpiresAt, saved.ExpiresAt)
@@ -117,12 +125,65 @@ func testLinkCreateEditDelete(sess *uiSession) {
 	require.True(sess.t, saved.BurnAfterClick)
 	require.NotNil(sess.t, saved.DirectRedirect)
 	require.False(sess.t, *saved.DirectRedirect)
+	sess.editLinkWithCode(code)
 	sess.setLinkOptions("never", "inherit")
-	sess.button("Save link")
-	sess.text("#linkStatus", "Link saved")
+	sess.button("Save")
+	sess.expectLinkPage(id, "https://example.com/updated")
+	sess.text("#expiresTag", "Never expires")
 	saved = sess.readLink(id)
 	require.Nil(sess.t, saved.ExpiresAt)
 	require.Nil(sess.t, saved.DirectRedirect)
+	sess.editLinkWithCode(code)
+	sess.deleteLink(id)
+}
+
+// expectLinkEditPage checks the editor of the link that createTestLink made: the saved values
+// and the fixed values of a link after create.
+func (sess *uiSession) expectLinkEditPage(id, target string) {
+	sess.t.Helper()
+	sess.must(sess.expect.Page(sess.page).ToHaveURL(sess.baseURL + "/edit/" + id))
+	sess.value("#targetInput", target)
+	sess.value("#redirectSelect", "false")
+	sess.value("#expirySelect", "keep")
+	// After create, the slug and burn after click are fixed text, not fields.
+	sess.must(sess.expect.Locator(sess.page.Locator("#burnCheck")).ToHaveCount(0))
+	sess.must(sess.expect.Locator(sess.page.Locator("#burnFixed")).ToContainText("On"))
+	sess.text("#slugFixed", "/"+id)
+	// The expiry hint, its chip and the phone summary show the time of the run. A fixed time
+	// keeps the width of the chips the same in each run.
+	sess.eval(`() => {
+		for (const node of document.querySelectorAll('#expiryHint, #chipExpiry, #settingsSummary')) {
+			node.textContent = node.textContent.replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z/, '2026-10-24T12:00:00Z');
+		}
+	}`)
+	sess.screenshot("link-edit.png", "#previewHost")
+}
+
+// expectLinkPage checks the page of a short link: the address, the destination and the actions.
+// The page does not follow the link, so the views stay the same.
+func (sess *uiSession) expectLinkPage(id, target string) {
+	sess.t.Helper()
+	sess.must(sess.expect.Page(sess.page).ToHaveURL(sess.baseURL + "/links/" + id))
+	sess.text("#linkTitle", strings.TrimPrefix(sess.baseURL, "http://")+"/"+id)
+	sess.text("#targetLink", target)
+	sess.must(sess.expect.Locator(sess.page.Locator("#copyLinkBtn")).ToHaveAttribute("data-url", sess.baseURL+"/"+id))
+	sess.expectLayout(".header", "#linkTitle", "#targetLink", "#copyLinkBtn", "#editLinkBtn")
+	sess.must(sess.expect.Locator(sess.page.Locator(".header-new")).ToHaveAttribute("href", "/links"))
+}
+
+// editLinkWithCode opens the editor from the link page and enters the edit code. After a save,
+// the browser shows the link page, so each further change starts there.
+func (sess *uiSession) editLinkWithCode(code string) {
+	sess.t.Helper()
+	sess.openEditor()
+	sess.openSettings()
+	sess.fill("#editCodeInput", code)
+	sess.closeSettings()
+}
+
+// deleteLink deletes the link from its editor and makes sure that the API does not find it.
+func (sess *uiSession) deleteLink(id string) {
+	sess.t.Helper()
 	sess.page.OnDialog(func(dialog playwright.Dialog) { sess.must(dialog.Accept()) })
 	sess.button("Delete link")
 	sess.must(sess.expect.Page(sess.page).ToHaveURL(sess.baseURL + "/links"))
@@ -149,10 +210,10 @@ func testLinkValidation(sess *uiSession) {
 	sess.button("Create link")
 	sess.visible("#editCodeInput:invalid")
 	sess.fill("#editCodeInput", "")
-	sess.selectOption("#expirySelect", "seconds")
-	sess.fill("#ttlInput", "0")
+	sess.selectOption("#expirySelect", "custom")
+	sess.fill("#ttlAmount", "0")
 	sess.button("Create link")
-	sess.visible("#ttlInput:invalid")
+	sess.visible("#ttlAmount:invalid")
 	sess.selectOption("#expirySelect", "never")
 	sess.button("Create link")
 	sess.createdLink()
@@ -188,7 +249,12 @@ func testLinkBurnAfterClick(sess *uiSession) {
 	metadata := sess.readLink(id)
 	require.True(sess.t, metadata.BurnAfterClick)
 	require.Nil(sess.t, metadata.ExpiresAt)
+	// The page of the link does not burn it; only the short link /{id} does.
 	sess.link("Open link")
+	sess.visible("#burnBadge")
+	sess.gotoPage("/links/" + id)
+	require.True(sess.t, sess.readLink(id).BurnAfterClick)
+	sess.gotoPage("/" + id)
 	sess.visible("#continueLink")
 	deleted, err := sess.browserContext.Request().Get("/links/" + id)
 	sess.must(err)
@@ -209,10 +275,14 @@ func testLinkPrivacyAndOwnership(sess *uiSession) {
 	id, _ := sess.createdLink()
 	metadata := sess.readLink(id)
 	require.Equal(sess.t, "owner", metadata.Privacy)
-	sess.link("Edit link")
+	sess.link("Open link")
+	sess.text(".article-title-row .badge", "Owner only")
+	sess.openEditor()
+	sess.must(sess.expect.Locator(sess.page.Locator(`label[for="editCodeInput"]`)).
+		ToContainText("optional, you created this link"))
 	sess.fill("#targetInput", "https://example.com/private-updated")
-	sess.button("Save link")
-	sess.text("#linkStatus", "Link saved")
+	sess.button("Save")
+	sess.expectLinkPage(id, "https://example.com/private-updated")
 
 	anonymous, err := runner.playwright.Request.NewContext(playwright.APIRequestNewContextOptions{
 		BaseURL: new(sess.baseURL),
@@ -225,16 +295,37 @@ func testLinkPrivacyAndOwnership(sess *uiSession) {
 
 	defer anonymous.Dispose()
 
-	response, err := anonymous.Get("/links/"+id+"/edit", playwright.APIRequestContextGetOptions{
-		Headers: map[string]string{"Accept": "text/html"}, MaxRedirects: new(0),
+	// The page and the editor of a private link send a browser without a session to sign in.
+	for _, path := range []string{"/links/" + id, "/edit/" + id} {
+		response, err := anonymous.Get(path, playwright.APIRequestContextGetOptions{
+			Headers: map[string]string{"Accept": "text/html"}, MaxRedirects: new(0),
 
-		Data: nil, FailOnStatusCode: nil, Form: nil, IgnoreHttpsErrors: nil, MaxRetries: nil,
-		Multipart: nil, Params: nil, Timeout: nil,
-	})
-	sess.must(err)
-	require.Equal(sess.t, http.StatusSeeOther, response.Status())
-	require.Contains(sess.t, response.Headers()["location"], "/login?next=")
-	body, err := response.Body()
-	sess.must(err)
-	require.NotContains(sess.t, string(body), "private-updated")
+			Data: nil, FailOnStatusCode: nil, Form: nil, IgnoreHttpsErrors: nil, MaxRetries: nil,
+			Multipart: nil, Params: nil, Timeout: nil,
+		})
+		sess.must(err)
+		require.Equal(sess.t, http.StatusSeeOther, response.Status(), path)
+		require.Contains(sess.t, response.Headers()["location"], "/login?next=", path)
+		body, err := response.Body()
+		sess.must(err)
+		require.NotContains(sess.t, string(body), "private-updated", path)
+	}
+}
+
+// testLinkBlockedStorage: a failed sessionStorage write does not hide a new short link and its
+// edit code, as for a note.
+func testLinkBlockedStorage(sess *uiSession) {
+	sess.blockSessionStorage()
+	sess.gotoPage("/links")
+	sess.fill("#targetInput", "https://example.com/blocked")
+	sess.fill("#slugInput", "ui-blocked")
+	sess.openSettings()
+	sess.fill("#editCodeInput", "Link-Blocked-Code42!")
+	sess.closeSettings()
+	sess.button("Create link")
+
+	id, code := sess.createdLink()
+	require.Equal(sess.t, "ui-blocked", id)
+	require.Equal(sess.t, "Link-Blocked-Code42!", code)
+	require.Empty(sess.t, sess.eval("() => window.name"))
 }

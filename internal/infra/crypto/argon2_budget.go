@@ -55,18 +55,6 @@ func (b *argon2Budget) acquire(kib uint32) (func(), error) {
 	return func() { b.sem.Release(weight) }, nil
 }
 
-// tryAcquire is the non-blocking form of acquire; ok is false when kib KiB are not free now
-// or earlier waiters are queued.
-func (b *argon2Budget) tryAcquire(kib uint32) (func(), bool) {
-	weight := b.weight(kib)
-
-	if !b.sem.TryAcquire(weight) {
-		return nil, false
-	}
-
-	return func() { b.sem.Release(weight) }, true
-}
-
 // processArgon2Budget is the single budget shared by every argon2id derivation in the
 // process. It is package-level rather than injected because memory is a process-wide
 // resource and the hasher constructors and method signatures are consumed across the
@@ -80,11 +68,6 @@ var processArgon2Budget atomic.Pointer[argon2Budget] //nolint:gochecknoglobals /
 // budget they started on.
 func SetArgon2MemoryBudget(kib uint32) {
 	processArgon2Budget.Store(newArgon2Budget(kib))
-}
-
-// Argon2MemoryBudget returns the current process-wide argon2id workspace budget in KiB.
-func Argon2MemoryBudget() uint32 {
-	return currentArgon2Budget().kib
 }
 
 func currentArgon2Budget() *argon2Budget {
@@ -103,7 +86,7 @@ func currentArgon2Budget() *argon2Budget {
 func deriveArgon2Key(secret, salt []byte, params Argon2Params, keyLen uint32) ([]byte, error) {
 	release, err := currentArgon2Budget().acquire(params.Memory)
 	if err != nil {
-		return nil, fmt.Errorf("acquire: %w", err)
+		return nil, err
 	}
 
 	defer release()

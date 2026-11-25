@@ -9,6 +9,7 @@ import (
 
 	urcli "github.com/urfave/cli/v3"
 
+	"github.com/partyzanex/padmark/internal/clientauth"
 	"github.com/partyzanex/padmark/internal/clifactory"
 	"github.com/partyzanex/padmark/internal/errorcontext"
 	"github.com/partyzanex/padmark/internal/infra/logging"
@@ -51,7 +52,8 @@ func NewApp() *urcli.Command {
 				flag.Name = FlagTimeout
 				flag.Sources = urcli.EnvVars(EnvTimeout)
 				flag.Value = DefaultTimeout
-				flag.Usage = "Per-request HTTP timeout; 0 disables it (env: PADMARK_TIMEOUT)"
+				flag.Usage = "Time limit of each tool call; upload_file uses it only for the wait for " +
+					"the response headers; 0 disables it (env: PADMARK_TIMEOUT)"
 			}),
 			clifactory.BoolFlag(func(flag *urcli.BoolFlag) {
 				flag.Name = FlagAllowInsecureHTTP
@@ -60,8 +62,22 @@ func NewApp() *urcli.Command {
 					"(loopback hosts only warn); default refuses (env: PADMARK_ALLOW_INSECURE_HTTP)"
 			}),
 		}
+		command.Flags = append(command.Flags, uploadFlags()...)
 		command.Action = runAction
 	})
+}
+
+// uploadFlags returns the flag that limits upload_file.
+func uploadFlags() []urcli.Flag {
+	return []urcli.Flag{
+		clifactory.StringFlag(func(flag *urcli.StringFlag) {
+			flag.Name = FlagUploadRoot
+			flag.Sources = urcli.EnvVars(EnvUploadRoot)
+			flag.Value = DefaultUploadRoot
+			flag.Usage = "Directory from which upload_file may read files; empty turns uploads off. " +
+				"Do not put secrets in it (env: PADMARK_MCP_UPLOAD_ROOT)"
+		}),
+	}
 }
 
 // stderrWriter resolves the command's error output, falling back to os.Stderr when unset.
@@ -74,8 +90,8 @@ func stderrWriter(cmd *urcli.Command) io.Writer {
 	return os.Stderr
 }
 
-// runAction builds the padmark client from the resolved token/url and serves MCP over stdio
-// until the client disconnects.
+// runAction builds the one padmark client from the resolved token and server URL and serves
+// MCP over stdio until the client disconnects. It is the composition root of the binary.
 func runAction(ctx context.Context, cmd *urcli.Command) error {
 	level, err := logging.ParseLevel(cmd.String(FlagLogLevel))
 	if err != nil {
@@ -87,10 +103,51 @@ func runAction(ctx context.Context, cmd *urcli.Command) error {
 		AddSource: false, ReplaceAttr: nil,
 	}))
 
-	cl, err := newPadmarkClient(cmd)
+	proxy, err := newServerFromFlags(cmd, log)
 	if err != nil {
-		return fmt.Errorf("create API client: %w", err)
+		return err
 	}
 
-	return errorcontext.Wrap(NewManager(cl, log).Run(ctx), "run server")
+	return errorcontext.Wrap(proxy.Run(ctx), "run server")
+}
+
+// newServerFromFlags builds the Server with the one padmark client of the proxy. The token
+// state selects the upload default: with a token, upload_file uses "owner".
+func newServerFromFlags(cmd *urcli.Command, log *slog.Logger) (*Server, error) {
+	uploadRoot, err := resolveUploadRoot(cmd.String(FlagUploadRoot))
+	if err != nil {
+		return nil, fmt.Errorf("check --%s: %w", FlagUploadRoot, err)
+	}
+
+	client, server, err := clientauth.NewClient(clientSettings(cmd))
+	if err != nil {
+		return nil, fmt.Errorf("create API client: %w", err)
+	}
+
+	opts := []Option{WithUploadRoot(uploadRoot), WithCallTimeout(cmd.Duration(FlagTimeout))}
+	if server.HasToken() {
+		opts = append(opts, WithAccountToken())
+	}
+
+	return NewServer(client, log, opts...), nil
+}
+
+// programName is the binary name in the messages of the client rules.
+const programName = "padmark-mcp"
+
+// clientSettings reads the settings of the one API client of the proxy from the flags. The
+// shared client rules (clientauth.NewClient) resolve the server and the token and check trust
+// and the transport. The HTTP client uses --timeout only for the response headers; limitCall
+// adds the deadline of each tool call other than upload_file. No connection is opened here.
+func clientSettings(cmd *urcli.Command) *clientauth.Settings {
+	return &clientauth.Settings{
+		ErrOut:        stderrWriter(cmd),
+		Token:         cmd.String(FlagToken),
+		ServerURL:     cmd.String(FlagBaseURL),
+		Program:       programName,
+		ServerFlag:    FlagBaseURL,
+		HeaderTimeout: cmd.Duration(FlagTimeout),
+		ServerURLSet:  cmd.IsSet(FlagBaseURL),
+		InsecureHTTP:  clientauth.InsecureHTTP(cmd.Bool(FlagAllowInsecureHTTP)),
+	}
 }

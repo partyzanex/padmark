@@ -66,7 +66,7 @@ func (s *Argon2MemoryBoundSuite) TestConcurrentDerivationsStayWithinBudget() {
 
 	sampler.Go(func() { sampleHeapInuse(stop, &peak) })
 
-	hasher := crypto.NewPasswordHasher(crypto.Argon2Params{Memory: memPerHashKiB, Time: 1, Threads: 1})
+	hasher := crypto.NewPasswordHasher(crypto.Argon2Params{Memory: memPerHashKiB, Time: 1, Threads: 1}, discardLog())
 
 	var workers sync.WaitGroup
 

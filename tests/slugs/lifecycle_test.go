@@ -102,10 +102,11 @@ func removeResource(t *testing.T, db *bun.DB, table, id, operation string) {
 		link.ID, link.ExpiresAt = uuid.NewString(), nil
 		require.NoError(t, linkRepo.Create(t.Context(), link))
 	} else if table == "notes" {
-		_, err := noteRepo.Consume(t.Context(), id, domain.PrivacyPublic)
+		_, err := noteRepo.Consume(t.Context(), id, domain.PrivacyPublic, "",
+			time.Now()) // insertResource keeps the '' default
 		require.NoError(t, err)
 	} else {
-		_, err := linkRepo.Consume(t.Context(), id)
+		_, err := linkRepo.Consume(t.Context(), id, time.Now())
 		require.NoError(t, err)
 	}
 }

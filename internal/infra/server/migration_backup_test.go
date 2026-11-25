@@ -7,6 +7,7 @@ import (
 
 	"github.com/pressly/goose/v3"
 	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 	"github.com/urfave/cli/v3"
 
 	"github.com/partyzanex/padmark/internal/infra/storage/sqlite"
@@ -46,65 +47,73 @@ func backupsOf(t *testing.T, dbPath string) []string {
 	return matches
 }
 
-func TestMigrateCommand_BacksUpOnlyWhenPending(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "padmark.db")
-
-	require.NoError(t, runMigrate(t, dbPath))
-	require.Empty(t, backupsOf(t, dbPath), "fresh install has nothing worth backing up")
-
-	dbPath = filepath.Join(t.TempDir(), "older.db")
-	seedOlderDB(t, dbPath)
-
-	require.NoError(t, runMigrate(t, dbPath))
-	require.Len(t, backupsOf(t, dbPath), 1)
-
-	require.NoError(t, runMigrate(t, dbPath))
-	require.Len(t, backupsOf(t, dbPath), 1)
+type MigrationBackupSuite struct {
+	suite.Suite
 }
 
-func TestMigrateCommand_SkipFlag_NoBackup(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "padmark.db")
-	seedOlderDB(t, dbPath)
-
-	require.NoError(t, runMigrate(t, dbPath, "--skip-migration-backup"))
-	require.Empty(t, backupsOf(t, dbPath))
+func TestMigrationBackupSuite(t *testing.T) {
+	suite.Run(t, new(MigrationBackupSuite))
 }
 
-func TestMigrateCommand_SkipEnv_NoBackup(t *testing.T) {
-	t.Setenv(EnvSkipMigrationBackup, "true")
+func (s *MigrationBackupSuite) TestMigrateCommand_BacksUpOnlyWhenPending() {
+	dbPath := filepath.Join(s.T().TempDir(), "padmark.db")
 
-	dbPath := filepath.Join(t.TempDir(), "padmark.db")
-	seedOlderDB(t, dbPath)
+	s.Require().NoError(runMigrate(s.T(), dbPath))
+	s.Require().Empty(backupsOf(s.T(), dbPath), "fresh install has nothing worth backing up")
 
-	require.NoError(t, runMigrate(t, dbPath))
-	require.Empty(t, backupsOf(t, dbPath))
+	dbPath = filepath.Join(s.T().TempDir(), "older.db")
+	seedOlderDB(s.T(), dbPath)
+
+	s.Require().NoError(runMigrate(s.T(), dbPath))
+	s.Require().Len(backupsOf(s.T(), dbPath), 1)
+
+	s.Require().NoError(runMigrate(s.T(), dbPath))
+	s.Require().Len(backupsOf(s.T(), dbPath), 1)
 }
 
-func TestMigrateCommand_InMemory_NoBackup(t *testing.T) {
-	dir := t.TempDir()
-	t.Chdir(dir)
+func (s *MigrationBackupSuite) TestMigrateCommand_SkipFlag_NoBackup() {
+	dbPath := filepath.Join(s.T().TempDir(), "padmark.db")
+	seedOlderDB(s.T(), dbPath)
 
-	require.NoError(t, runMigrate(t, "file::memory:?cache=shared"))
-	require.Empty(t, backupsOf(t, filepath.Join(dir, "file::memory:")))
+	s.Require().NoError(runMigrate(s.T(), dbPath, "--skip-migration-backup"))
+	s.Require().Empty(backupsOf(s.T(), dbPath))
 }
 
-func TestInitRepos_SQLite_BackupHonoursSkip(t *testing.T) {
+func (s *MigrationBackupSuite) TestMigrateCommand_SkipEnv_NoBackup() {
+	s.T().Setenv(EnvSkipMigrationBackup, "true")
+
+	dbPath := filepath.Join(s.T().TempDir(), "padmark.db")
+	seedOlderDB(s.T(), dbPath)
+
+	s.Require().NoError(runMigrate(s.T(), dbPath))
+	s.Require().Empty(backupsOf(s.T(), dbPath))
+}
+
+func (s *MigrationBackupSuite) TestMigrateCommand_InMemory_NoBackup() {
+	dir := s.T().TempDir()
+	s.T().Chdir(dir)
+
+	s.Require().NoError(runMigrate(s.T(), "file::memory:?cache=shared"))
+	s.Require().Empty(backupsOf(s.T(), filepath.Join(dir, "file::memory:")))
+}
+
+func (s *MigrationBackupSuite) TestInitRepos_SQLite_BackupHonoursSkip() {
 	for _, skip := range []bool{false, true} {
-		dbPath := filepath.Join(t.TempDir(), "padmark.db")
-		seedOlderDB(t, dbPath)
+		dbPath := filepath.Join(s.T().TempDir(), "padmark.db")
+		seedOlderDB(s.T(), dbPath)
 
-		db, err := openDB(t.Context(), "sqlite", dbPath, slog.New(slog.DiscardHandler))
-		require.NoError(t, err)
+		db, err := openDB(s.T().Context(), "sqlite", dbPath, slog.New(slog.DiscardHandler))
+		s.Require().NoError(err)
 
-		_, err = initRepos(t.Context(), "sqlite", db, newLogger("error", "text"),
+		_, err = initRepos(s.T().Context(), "sqlite", db, newLogger("error", "text"),
 			migrationOptions{dsn: dbPath, skipBackup: skip})
-		require.NoError(t, err)
-		require.NoError(t, db.Close())
+		s.Require().NoError(err)
+		s.Require().NoError(db.Close())
 
 		if skip {
-			require.Empty(t, backupsOf(t, dbPath))
+			s.Require().Empty(backupsOf(s.T(), dbPath))
 		} else {
-			require.Len(t, backupsOf(t, dbPath), 1)
+			s.Require().Len(backupsOf(s.T(), dbPath), 1)
 		}
 	}
 }

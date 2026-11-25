@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Padmark{{if .EditMode}} — Edit{{end}}</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    {{template "theme-head" .Nonce}}
     <link rel="stylesheet" href="/static/style.css?p={{styleVersion}}">
 </head>
 <body>
@@ -17,11 +18,17 @@
             <div class="editor-head">
                 <label for="titleInput" class="sr-only">Title</label>
                 <input type="text" class="head-input" placeholder="Untitled note" id="titleInput" value="{{.Title}}" maxlength="500">
+                {{- if .EditMode}}
+                <span class="slug-field slug-field--fixed" id="slugFixed" title="The slug is fixed when the note is created">
+                    <span class="slug-prefix">URL&#160;&#160;/</span><span class="slug-value">{{.ID}}</span>{{template "lock-icon"}}
+                </span>
+                {{- else}}
                 <div class="slug-field">
                     <label for="slugInput" class="slug-prefix">URL&#160;&#160;/</label>
-                    <input type="text" id="slugInput" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="{{if .EditMode}}{{.ID}}{{else}}auto-generated{{end}}" value="{{.ID}}"
-                           pattern="[a-zA-Z0-9_\-]+" title="Letters, numbers, hyphens and underscores only"{{if .EditMode}} readonly{{end}}>
+                    <input type="text" id="slugInput" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="auto-generated"
+                           pattern="[a-zA-Z0-9_\-]+" title="Letters, numbers, hyphens and underscores only">
                 </div>
+                {{- end}}
             </div>
 
             <div class="editor-toolbar">
@@ -62,18 +69,30 @@
                 </div>
             </div>
 
-            <div class="editor-body" id="editorBody" data-view="write">
+            {{/* data-content-type selects the preview renderer: a text/plain note shows as plain
+                 text, as on its page. The HTML parser removes one newline that follows <textarea>,
+                 so the newline below keeps a leading newline of the content. */}}
+            <div class="editor-body" id="editorBody" data-view="write" data-content-type="{{.ContentType}}">
                 <label for="editor" class="sr-only">Markdown</label>
-                <textarea class="editor-textarea" id="editor" placeholder="{{if .ContentWithheld}}Burn-after-reading content is not shown here — write the replacement content{{else}}Paste or write your Markdown…{{end}}" spellcheck="false">{{.Content}}</textarea>
+                <textarea class="editor-textarea" id="editor" placeholder="{{if .ContentWithheld}}Burn-after-reading content is not shown here — write the replacement content{{else}}Paste or write your Markdown…{{end}}" spellcheck="false">
+{{.Content}}</textarea>
                 <div class="editor-preview prose markdown-body" id="preview" role="region" aria-label="Preview" hidden></div>
             </div>
 
             <div class="editor-footer">
                 <span><span id="charCount">0 characters</span> · <span id="wordCount">0 words</span></span>
-                <a class="format-hint" href="https://commonmark.org/help/" target="_blank" rel="noopener noreferrer">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M6 15V9l2.5 3L11 9v6M16 9v6M14 13l2 2 2-2"/></svg>
-                    Markdown guide
-                </a>
+                <span class="editor-footer-links">
+                    {{- if and .Header.FilesEnabled (not .EditMode)}}
+                    <a class="format-hint" href="/files" id="uploadFileLink">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M12 18v-6M9 15l3-3 3 3"/></svg>
+                        Upload a file
+                    </a>
+                    {{- end}}
+                    <a class="format-hint" href="https://commonmark.org/help/" target="_blank" rel="noopener noreferrer">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M6 15V9l2.5 3L11 9v6M16 9v6M14 13l2 2 2-2"/></svg>
+                        Markdown guide
+                    </a>
+                </span>
             </div>
         </section>
 
@@ -83,15 +102,12 @@
 
                 <fieldset class="privacy-options" id="privacySelect">
                     <legend class="lbl">Who can read</legend>
-                    {{template "privacy-options" .PrivacyOptions}}
+                    {{template "privacy-options" .Access}}
                 </fieldset>
 
                 <div class="setting-list">
                     <div class="setting-group">
                         <label class="setting-row" id="burnLabel">
-                            <span class="setting-icon setting-icon--warn" aria-hidden="true">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 22c4 0 7-2.7 7-7 0-4-3-6.5-4.5-9.5C13 7 12.5 9 11 10 10.5 8 9.5 6.5 8 5c0 3-3 5.5-3 10 0 4.3 3 7 7 7z"/></svg>
-                            </span>
                             <span class="setting-text">
                                 <span class="setting-title">Burn after reading</span>
                                 <span class="setting-desc">Delete once it's opened</span>
@@ -109,9 +125,6 @@
                     </div>
 
                     <label class="setting-row" id="contentsLabel">
-                        <span class="setting-icon" aria-hidden="true">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 6h3M4 12h3M4 18h3M11 6h9M13 12h7M13 18h7"/></svg>
-                        </span>
                         <span class="setting-text">
                             <span class="setting-title">Contents sidebar</span>
                             <span class="setting-desc">“On this page” from headings</span>
@@ -148,6 +161,11 @@
                     <button type="button" class="btn-publish" id="submitBtn" data-kbd="Ctrl ↵">{{if .EditMode}}Save{{else}}Publish note{{end}}</button>
                     <p class="publish-note">{{if .EditMode}}Saving replaces the content of this note.{{else}}You'll get a share link and an edit code.{{end}}</p>
                 </div>
+                {{- if .EditMode}}
+                <div class="danger-block">
+                    <button type="button" class="btn-danger" id="deleteBtn">Delete note</button>
+                </div>
+                {{- end}}
             </div>
         </aside>
         <div class="sheet-backdrop" id="sheetBackdrop" hidden></div>
@@ -159,6 +177,9 @@
 
 <script src="/static/marked.umd.js?p={{assetVersion "marked.umd.js"}}" nonce="{{.Nonce}}"></script>
 <script src="/static/purify.min.js?p={{assetVersion "purify.min.js"}}" nonce="{{.Nonce}}"></script>
+<script src="/static/math.js?p={{assetVersion "math.js"}}" nonce="{{.Nonce}}"
+        data-katex-js="/static/katex/katex.min.js?p={{assetVersion "katex/katex.min.js"}}"
+        data-katex-css="/static/katex/katex.min.css?p={{assetVersion "katex/katex.min.css"}}"></script>
 <script src="/static/editor-preview.js?p={{assetVersion "editor-preview.js"}}" nonce="{{.Nonce}}"></script>
 <script nonce="{{.Nonce}}">
     const editMode = {{.EditMode}};
@@ -270,9 +291,23 @@
         return parseInt(document.getElementById('burnTime').value);
     }
 
+    // keepEditCode gives the edit code to the success page. The note exists after 201, so blocked
+    // browser storage must not stop the success page: window.name then holds the code for this
+    // one navigation in the same tab, and the success page reads and clears it.
+    function keepEditCode(key, code) {
+        if (!code) return;
+        try {
+            sessionStorage.setItem(key, code);
+        } catch (_) {
+            window.name = 'padmark-edit-code:' + JSON.stringify([key, code]);
+        }
+    }
+
+    // publish and save send the text as the author wrote it: leading spaces make a code block and
+    // a final newline is part of the content. trim() only tells if the text is empty.
     async function publish() {
         const btn = document.getElementById('submitBtn');
-        const content = document.getElementById('editor').value.trim();
+        const content = document.getElementById('editor').value;
         const titleInput = document.getElementById('titleInput').value.trim();
         const slug = document.getElementById('slugInput').value.trim();
         const burnAfterReading = document.getElementById('burnCheck').checked;
@@ -280,7 +315,7 @@
         const ttl = getTTL();
 
         errorBox.hidden = true;
-        if (!content) { showError(btn, 'Enter some text first'); return; }
+        if (!content.trim()) { showError(btn, 'Enter some text first'); return; }
         // The server accepts a chosen edit code of 8 to 128 characters; a blank field gets a random code.
         if (editCode && editCode.length < 8) { showError(btn, 'Edit code: 8 characters or more'); return; }
 
@@ -297,6 +332,7 @@
         if (editCode) payload.edit_code = editCode;
         if (burnAfterReading) payload.ttl = ttl;
 
+        let note;
         try {
             const resp = await fetch('/notes', {
                 method: 'POST',
@@ -306,33 +342,37 @@
 
             if (!resp.ok) { throw new Error(await errorMessage(resp, 'Error — try again')); }
 
-            const note = await resp.json();
-            if (note.edit_code) {
-                sessionStorage.setItem('padmark_edit_' + note.id, note.edit_code);
-            }
-            const params = new URLSearchParams({ id: note.id });
-            if (note.burn_after_reading) params.set('burn', '1');
-            if (note.expires_at) {
-                params.set('expires', note.expires_at);
-            } else if (burnAfterReading) {
-                params.set('expires', 'immediately');
-            }
-            if (note.privacy) params.set('privacy', note.privacy);
-            window.location.href = '/success?' + params.toString();
+            note = await resp.json();
         } catch (err) {
             showError(btn, err.message || 'Error — try again');
+            return;
         }
+
+        // The note exists now. The button stays off, so a second click cannot make a copy.
+        keepEditCode('padmark_edit_' + note.id, note.edit_code);
+        const params = new URLSearchParams({ id: note.id });
+        if (note.burn_after_reading) params.set('burn', '1');
+        if (note.expires_at) {
+            params.set('expires', note.expires_at);
+        } else if (burnAfterReading && ttl > 0) {
+            // A delayed burn has no date before the first read: the page shows the delay.
+            params.set('burn_ttl', String(ttl));
+        } else if (burnAfterReading) {
+            params.set('expires', 'immediately');
+        }
+        if (note.privacy) params.set('privacy', note.privacy);
+        window.location.href = '/success?' + params.toString();
     }
 
     async function save() {
         const btn = document.getElementById('submitBtn');
-        const content = document.getElementById('editor').value.trim();
+        const content = document.getElementById('editor').value;
         const title = document.getElementById('titleInput').value.trim();
         const editCode = document.getElementById('editCodeInput').value.trim();
         const ttl = getTTL();
 
         errorBox.hidden = true;
-        if (!content) { showError(btn, 'Enter some text first'); return; }
+        if (!content.trim()) { showError(btn, 'Enter some text first'); return; }
         if (!editCode && !isOwner) { showError(btn, 'Edit code required'); return; }
 
         btn.textContent = 'Saving…';
@@ -357,12 +397,46 @@
                 // Only the edit-code rejection (403 "invalid edit code", domain.ErrInvalidEditCode)
                 // means the code was wrong; other 403s (e.g. "cross-origin request rejected") are not.
                 if (resp.status === 403 && msg === 'invalid edit code') { throw new Error('Invalid edit code'); }
+                // 410 is an update of an expired note (domain.ErrExpired). The server word
+                // "expired" is not a sentence; the file editor shows the same text for a file.
+                if (resp.status === 410) { throw new Error('The note was deleted or its lifetime ended.'); }
                 throw new Error(msg);
             }
 
             window.location.href = '/' + noteID;
         } catch (err) {
             showError(btn, err.message || 'Error — try again');
+        }
+    }
+
+    // deleteNote deletes the note after a confirmation and then opens a new note editor, as the
+    // link and file editors do. The edit code goes only in the X-Edit-Code header.
+    async function deleteNote() {
+        const btn = document.getElementById('deleteBtn');
+        const submit = document.getElementById('submitBtn');
+        const editCode = document.getElementById('editCodeInput').value.trim();
+
+        errorBox.hidden = true;
+        if (!editCode && !isOwner) { showError(submit, 'Edit code required'); return; }
+        if (!confirm('Permanently delete this note?')) return;
+
+        btn.disabled = true;
+        submit.disabled = true;
+        const headers = {};
+        if (editCode) headers['X-Edit-Code'] = editCode;
+
+        try {
+            const resp = await fetch('/notes/' + encodeURIComponent(noteID), { method: 'DELETE', headers });
+            if (!resp.ok) {
+                const msg = await errorMessage(resp, 'HTTP ' + resp.status);
+                if (resp.status === 403 && msg === 'invalid edit code') { throw new Error('Invalid edit code'); }
+                throw new Error(msg);
+            }
+            window.location.href = '/';
+        } catch (err) {
+            showError(submit, err.message || 'Error — try again');
+        } finally {
+            btn.disabled = false;
         }
     }
 
@@ -386,6 +460,8 @@
     document.getElementById('editor').addEventListener('input', updateCount);
     document.getElementById('burnCheck').addEventListener('change', toggleBurn);
     document.getElementById('submitBtn').addEventListener('click', editMode ? save : publish);
+    const deleteButton = document.getElementById('deleteBtn');
+    if (deleteButton) deleteButton.addEventListener('click', deleteNote);
     document.getElementById('mdHeading').addEventListener('click', () => prefixLine('## '));
     document.getElementById('mdBold').addEventListener('click', () => insertMd('**', '**'));
     document.getElementById('mdItalic').addEventListener('click', () => insertMd('_', '_'));

@@ -1,14 +1,11 @@
 package cli
 
 import (
-	"bytes"
 	"context"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -17,7 +14,6 @@ import (
 
 	"github.com/partyzanex/padmark/internal/clifactory"
 	"github.com/partyzanex/padmark/internal/domain"
-	"github.com/partyzanex/padmark/internal/infra/tokenfile"
 )
 
 // writeTokenFile points XDG_CONFIG_HOME at a temp dir and writes the given token file contents,
@@ -29,87 +25,6 @@ func writeTokenFile(t *testing.T, contents string) {
 	require.NoError(t, os.MkdirAll(filepath.Join(dir, "padmark"), 0o700))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "padmark", "token"), []byte(contents), 0o600))
 	t.Setenv("XDG_CONFIG_HOME", dir)
-}
-
-func TestReadTokenFile_ReadsAndTrimsWhitespace(t *testing.T) {
-	writeTokenFile(t, "  secret-key\n\n")
-
-	assert.Equal(t, "secret-key", readTokenFile(io.Discard))
-}
-
-func TestReadTokenFile_Missing_ReturnsEmpty(t *testing.T) {
-	// A config dir with no token file present.
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-
-	assert.Empty(t, readTokenFile(io.Discard))
-}
-
-// writeTokenFileMode writes the token file with an explicit permission mode and returns its path,
-// so tests can assert that readTokenFile tightens an over-permissive file to 0600.
-func writeTokenFileMode(t *testing.T, contents string, mode os.FileMode) string {
-	t.Helper()
-
-	dir := t.TempDir()
-	require.NoError(t, os.MkdirAll(filepath.Join(dir, "padmark"), 0o700))
-
-	path := filepath.Join(dir, "padmark", "token")
-	require.NoError(t, os.WriteFile(path, []byte(contents), mode))
-	// WriteFile respects the umask, so force the exact mode we want to test against.
-	require.NoError(t, os.Chmod(path, mode))
-	t.Setenv("XDG_CONFIG_HOME", dir)
-
-	return path
-}
-
-func TestReadTokenFile_TightensGroupOtherReadableFile(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("POSIX permission bits are not meaningful on Windows")
-	}
-
-	var errBuf bytes.Buffer
-
-	path := writeTokenFileMode(t, "secret-key\n", 0o644)
-
-	assert.Equal(t, "secret-key", readTokenFile(&errBuf), "token is still returned after tightening")
-
-	info, err := os.Stat(path)
-	require.NoError(t, err)
-	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm(), "over-permissive token file is tightened to 0600")
-	assert.Contains(t, errBuf.String(), "tightened to 600", "a warning is emitted when perms are fixed")
-}
-
-func TestReadTokenFile_LeavesOwnerOnlyFileUntouched(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("POSIX permission bits are not meaningful on Windows")
-	}
-
-	var errBuf bytes.Buffer
-
-	path := writeTokenFileMode(t, "secret-key\n", 0o600)
-
-	assert.Equal(t, "secret-key", readTokenFile(&errBuf))
-
-	info, err := os.Stat(path)
-	require.NoError(t, err)
-	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
-	assert.Empty(t, errBuf.String(), "no warning for an already-secure token file")
-}
-
-func TestTokenFilePath_XDGConfigHome(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", "/tmp/xdg-config")
-
-	path, err := tokenfile.Path()
-	require.NoError(t, err)
-	assert.Equal(t, filepath.Join("/tmp/xdg-config", "padmark", "token"), path)
-}
-
-func TestTokenFilePath_HomeFallback(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", "")
-	t.Setenv("HOME", "/home/tester")
-
-	path, err := tokenfile.Path()
-	require.NoError(t, err)
-	assert.Equal(t, filepath.Join("/home/tester", ".config", "padmark", "token"), path)
 }
 
 // captureAuthServer returns a test server that records the Authorization header of the last
@@ -173,9 +88,11 @@ func resolvedURLFor(t *testing.T, args ...string) string {
 	app := clifactory.Command(func(command *urcli.Command) {
 		command.Flags = globalFlags()
 		command.Action = func(_ context.Context, cmd *urcli.Command) error {
-			got = resolveServerURL(cmd)
+			var err error
 
-			return nil
+			got, err = resolveServerURL(cmd)
+
+			return err
 		}
 	})
 	require.NoError(t, app.Run(t.Context(), append([]string{"padmark-cli"}, args...)))
@@ -209,21 +126,6 @@ func TestResolveServerURL_DefaultWhenNoToken(t *testing.T) {
 
 	assert.Equal(t, DefaultURL, resolvedURLFor(t),
 		"with no token and no --url, the default server URL is used")
-}
-
-func TestSplitToken_Envelope(t *testing.T) {
-	envelope, err := domain.EncodeAPITokenEnvelope("https://notes.example.com", "the-key")
-	require.NoError(t, err)
-
-	bearer, baseURL := splitToken(envelope)
-	assert.Equal(t, "the-key", bearer)
-	assert.Equal(t, "https://notes.example.com", baseURL)
-}
-
-func TestSplitToken_LegacyBareKey(t *testing.T) {
-	bearer, baseURL := splitToken("legacy-plain-key")
-	assert.Equal(t, "legacy-plain-key", bearer, "a bare key is used verbatim as the bearer")
-	assert.Empty(t, baseURL, "a bare key carries no embedded URL")
 }
 
 func TestEnvelopeToken_EmbeddedURLUsed_KeySentAsBearer(t *testing.T) {

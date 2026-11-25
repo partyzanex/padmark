@@ -7,34 +7,47 @@ package mcpintegration
 
 import (
 	"context"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 	"github.com/uptrace/bun"
 
 	mcpx "github.com/partyzanex/padmark/internal/adapters/mcp"
 	"github.com/partyzanex/padmark/internal/adapters/web"
 	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/infra/crypto"
-	"github.com/partyzanex/padmark/internal/infra/lock"
-	"github.com/partyzanex/padmark/internal/infra/render"
+	"github.com/partyzanex/padmark/internal/infra/expiredslugs"
 	sqliterepo "github.com/partyzanex/padmark/internal/infra/storage/sqlite"
 	"github.com/partyzanex/padmark/internal/testutil"
 	"github.com/partyzanex/padmark/internal/usecases/auth"
+	"github.com/partyzanex/padmark/internal/usecases/files"
 	"github.com/partyzanex/padmark/internal/usecases/links"
 	"github.com/partyzanex/padmark/internal/usecases/notes"
 	padmark "github.com/partyzanex/padmark/pkg/client"
+	"github.com/partyzanex/padmark/tests/internal/testenv"
 )
 
 const flowPassword = "McpFlowP@ss123!"
 
-var flowArgon2 = crypto.Argon2Params{Memory: 8 * 1024, Time: 1, Threads: 1} //nolint:gochecknoglobals // test fixture
+// MCPFlowSuite drives the agent surface against the server stack. Each test starts its own stack
+// (startTestPadmark or startTestPadmarkWithFiles), because some tests need file publishing.
+type MCPFlowSuite struct {
+	suite.Suite
+}
+
+func TestMCPFlowSuite(t *testing.T) {
+	suite.Run(t, new(MCPFlowSuite))
+}
 
 // testStack bundles the pieces the tests reach into directly.
 type testStack struct {
@@ -45,11 +58,12 @@ type testStack struct {
 	srv   *httptest.Server
 }
 
-// TestMCPFlow_AuthenticatedOwnerLifecycle drives the full owner lifecycle through the agent
+// TestAuthenticatedOwnerLifecycle drives the full owner lifecycle through the agent
 // surface over the bearer-token path: create (the one-time edit code held in the proxy, not
 // printed) → update via the vault contract → get → short links → bulk → delete → gone.
-func TestMCPFlow_AuthenticatedOwnerLifecycle(t *testing.T) {
-	ctx := context.Background()
+func (s *MCPFlowSuite) TestAuthenticatedOwnerLifecycle() {
+	t := s.T()
+	ctx := t.Context()
 
 	stack := startTestPadmark(t)
 	envelope := issueEnvelopeToken(ctx, t, stack.auth, stack.users, stack.srv.URL)
@@ -85,18 +99,7 @@ func TestMCPFlow_AuthenticatedOwnerLifecycle(t *testing.T) {
 	require.False(t, got.IsError, toolText(got))
 	require.Contains(t, toolText(got), "secret runbook v2")
 
-	// ── short links: create → metadata (read-only) → delete via the vault ──.
-	link := callOutput(ctx, t, sess, "create_link", map[string]any{
-		"target_url": "https://example.com/long/path",
-	})
-	require.False(t, link.IsError, toolText(link))
-
-	linkMeta := callOutput(ctx, t, sess, "get_link", map[string]any{"id": resultID(link)})
-	require.False(t, linkMeta.IsError, toolText(linkMeta))
-	require.Contains(t, toolText(linkMeta), "https://example.com/long/path")
-
-	linkDeleted := callOutput(ctx, t, sess, "delete_link", map[string]any{"id": resultID(link)})
-	require.False(t, linkDeleted.IsError, "delete_link must succeed via the vault edit code: %s", toolText(linkDeleted))
+	s.checkLinkLifecycle(sess)
 
 	// ── bulk: two valid targets, results in request order (best-effort contract) ──.
 	bulk := callOutput(ctx, t, sess, "create_links_bulk", map[string]any{
@@ -113,10 +116,38 @@ func TestMCPFlow_AuthenticatedOwnerLifecycle(t *testing.T) {
 	require.Contains(t, toolText(after), "not found")
 }
 
-// TestMCPFlow_Anonymous_PublicCreateAndPrivateAccessDenied exercises the unauthenticated path:
-// public create/read work; a privacy=owner note answers the remediation error text.
-func TestMCPFlow_Anonymous_PublicCreateAndPrivateAccessDenied(t *testing.T) {
-	ctx := context.Background()
+// checkLinkLifecycle drives a short link through the agent surface: create → metadata
+// (read-only) → update → delete, each change with the edit code from the vault of the proxy.
+func (s *MCPFlowSuite) checkLinkLifecycle(sess *mcpsdk.ClientSession) {
+	t := s.T()
+	ctx := t.Context()
+
+	// ── short links: create → metadata (read-only) → delete via the vault ──.
+	link := callOutput(ctx, t, sess, "create_link", map[string]any{
+		"target_url": "https://example.com/long/path",
+	})
+	require.False(t, link.IsError, toolText(link))
+
+	linkMeta := callOutput(ctx, t, sess, "get_link", map[string]any{"id": resultID(link)})
+	require.False(t, linkMeta.IsError, toolText(linkMeta))
+	require.Contains(t, toolText(linkMeta), "https://example.com/long/path")
+
+	// ── update_link: no edit_code passed — the proxy's vault supplies it ──.
+	linkUpdated := callOutput(ctx, t, sess, "update_link", map[string]any{
+		"id": resultID(link), "target_url": "https://example.com/new#part",
+	})
+	require.False(t, linkUpdated.IsError, "update_link must succeed via the vault edit code: %s", toolText(linkUpdated))
+	require.Contains(t, toolText(linkUpdated), `"target_url":"https://example.com/new#part"`)
+
+	linkDeleted := callOutput(ctx, t, sess, "delete_link", map[string]any{"id": resultID(link)})
+	require.False(t, linkDeleted.IsError, "delete_link must succeed via the vault edit code: %s", toolText(linkDeleted))
+}
+
+// TestAnonymous_PublicCreateAndPrivateAccessDenied exercises the unauthenticated path:
+// public create/read work; a privacy=authenticated note answers the remediation error text.
+func (s *MCPFlowSuite) TestAnonymous_PublicCreateAndPrivateAccessDenied() {
+	t := s.T()
+	ctx := t.Context()
 
 	stack := startTestPadmark(t)
 
@@ -131,19 +162,148 @@ func TestMCPFlow_Anonymous_PublicCreateAndPrivateAccessDenied(t *testing.T) {
 	pub := callOutput(ctx, t, sess, "get_note", map[string]any{"id": resultID(created)})
 	require.False(t, pub.IsError, toolText(pub))
 
-	gated := domain.PrivacyAuthenticated
-	gatedNote, err := stack.notes.Create(ctx, &domain.Note{
-		Title: "gated", Content: "owner-only", Privacy: &gated,
+	private := domain.PrivacyAuthenticated
+	privateNote, err := stack.notes.Create(ctx, &domain.Note{
+		Title: "private", Content: "owner-only", Privacy: &private,
 		CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
 		OwnerID: nil, ID: "", ContentType: nil, EditCode: "",
 		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	})
 	require.NoError(t, err)
 
-	denied := callOutput(ctx, t, sess, "get_note", map[string]any{"id": gatedNote.ID})
-	require.True(t, denied.IsError, "a privacy=owner note is refused to an anonymous caller")
+	denied := callOutput(ctx, t, sess, "get_note", map[string]any{"id": privateNote.ID})
+	require.True(t, denied.IsError, "a privacy=authenticated note is refused to an anonymous caller")
 	require.Contains(t, toolText(denied), "unauthorized",
 		"the failure text carries the remediation (configure a token or use edit_code)")
+}
+
+// TestFileLifecycle drives the file tools against the server with an S3-compatible
+// container: upload from the upload root → metadata → change → download by URL → delete with
+// the vault edit code → not found. A path outside the upload root never reaches the server.
+func (s *MCPFlowSuite) TestFileLifecycle() {
+	t := s.T()
+	ctx := t.Context()
+
+	stack := startTestPadmarkWithFiles(t, testenv.S3Mock(t))
+
+	root := t.TempDir()
+	content := []byte("quarterly numbers\n")
+	require.NoError(t, os.WriteFile(filepath.Join(root, "report.txt"), content, 0o600))
+
+	outside := filepath.Join(t.TempDir(), "secret.txt")
+	require.NoError(t, os.WriteFile(outside, []byte("secret"), 0o600))
+
+	sess := connectMCP(ctx, t, stack.srv.URL, "", mcpx.WithUploadRoot(root))
+	defer sess.Close()
+
+	s.checkRefusedUploads(sess, root, outside)
+
+	uploaded := callOutput(ctx, t, sess, "upload_file", map[string]any{"path": "report.txt", "ttl": 3600})
+	require.False(t, uploaded.IsError, toolText(uploaded))
+	require.NotContains(t, toolText(uploaded), `"edit_code":`, "the one-time edit code is not printed by default")
+
+	fileID := resultID(uploaded)
+	require.NotEmpty(t, fileID)
+	require.Equal(t, stack.srv.URL+"/"+fileID, stringField(uploaded, "url"))
+	require.Equal(t, stack.srv.URL+"/files/"+fileID+"/download", stringField(uploaded, "download_url"))
+	require.NotEmpty(t, stringField(uploaded, "expires_at"))
+
+	info := callOutput(ctx, t, sess, "get_file", map[string]any{"id": fileID})
+	require.False(t, info.IsError, toolText(info))
+	require.Equal(t, "report.txt", stringField(info, "name"))
+	require.InDelta(t, float64(len(content)), numberField(info, "size"), 0)
+
+	updated := callOutput(ctx, t, sess, "update_file", map[string]any{
+		"id": fileID, "clear_expiry": true, "privacy": "public",
+	})
+	require.False(t, updated.IsError, "update_file must succeed via the vault edit code: %s", toolText(updated))
+	require.Empty(t, stringField(updated, "expires_at"), "clear_expiry removes the expiry")
+
+	require.Equal(t, content, downloadFile(ctx, t, stringField(uploaded, "download_url")))
+
+	deleted := callOutput(ctx, t, sess, "delete_file", map[string]any{"id": fileID})
+	require.False(t, deleted.IsError, "delete_file must succeed via the vault edit code: %s", toolText(deleted))
+
+	after := callOutput(ctx, t, sess, "get_file", map[string]any{"id": fileID})
+	require.True(t, after.IsError, "the file is deleted")
+	require.Contains(t, toolText(after), "not found")
+}
+
+// checkRefusedUploads checks the uploads that the proxy or the server refuse: a path outside the
+// upload root, a missing path outside it, a name that starts with a dot and a custom slug.
+func (s *MCPFlowSuite) checkRefusedUploads(sess *mcpsdk.ClientSession, root, outside string) {
+	t := s.T()
+	ctx := t.Context()
+
+	refused := callOutput(ctx, t, sess, "upload_file", map[string]any{"path": outside})
+	require.True(t, refused.IsError, "a path outside the upload root is refused")
+	require.Contains(t, toolText(refused), "outside the upload root")
+
+	// A missing path outside the root gets the same text, so the error does not show which
+	// files exist outside the root.
+	missing := callOutput(ctx, t, sess, "upload_file", map[string]any{
+		"path": filepath.Join(filepath.Dir(outside), "missing.txt"),
+	})
+	require.True(t, missing.IsError)
+	require.Equal(t, toolText(refused), toolText(missing))
+	require.NotContains(t, toolText(missing), filepath.Dir(outside))
+
+	require.NoError(t, os.WriteFile(filepath.Join(root, ".env"), []byte("TOKEN=x"), 0o600))
+	hidden := callOutput(ctx, t, sess, "upload_file", map[string]any{"path": ".env"})
+	require.True(t, hidden.IsError, "a name that starts with a dot is always refused")
+	require.Contains(t, toolText(hidden), "starts with a dot")
+
+	// The proxy sends the slug. The test server has custom slugs off, so the server refuses it.
+	slug := callOutput(ctx, t, sess, "upload_file", map[string]any{"path": "report.txt", "slug": "known-id"})
+	require.True(t, slug.IsError, "the server refuses a slug with custom slugs off")
+	require.Contains(t, toolText(slug), "custom slugs are disabled on this server")
+}
+
+// TestFileUploadWithTokenDefaultsToOwner checks that an upload with a token and without
+// a privacy field is private to the account of the token: an anonymous reader cannot see it.
+func (s *MCPFlowSuite) TestFileUploadWithTokenDefaultsToOwner() {
+	t := s.T()
+	ctx := t.Context()
+
+	stack := startTestPadmarkWithFiles(t, testenv.S3Mock(t))
+	envelope := issueEnvelopeToken(ctx, t, stack.auth, stack.users, stack.srv.URL)
+
+	root := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(root, "plan.txt"), []byte("plan\n"), 0o600))
+
+	sess := connectMCP(ctx, t, stack.srv.URL, envelope, mcpx.WithUploadRoot(root), mcpx.WithAccountToken())
+	defer sess.Close()
+
+	uploaded := callOutput(ctx, t, sess, "upload_file", map[string]any{"path": "plan.txt"})
+	require.False(t, uploaded.IsError, toolText(uploaded))
+	require.Equal(t, "owner", stringField(uploaded, "privacy"))
+
+	anonymous := connectMCP(ctx, t, stack.srv.URL, "")
+	defer anonymous.Close()
+
+	denied := callOutput(ctx, t, anonymous, "get_file", map[string]any{"id": resultID(uploaded)})
+	require.True(t, denied.IsError, "an anonymous reader cannot read an owner file: %s", toolText(denied))
+}
+
+// downloadFile reads the file content through the download URL, as an agent HTTP tool does.
+func downloadFile(ctx context.Context, t *testing.T, target string) []byte {
+	t.Helper()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, http.NoBody)
+	require.NoError(t, err)
+	req.Header.Set("Accept", "application/octet-stream")
+
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+
+	defer func() { require.NoError(t, resp.Body.Close()) }()
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	data, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+
+	return data
 }
 
 // ── wiring (mirrors internal/infra/server's assembly and the tests/auth integration setup) ──.
@@ -151,88 +311,54 @@ func TestMCPFlow_Anonymous_PublicCreateAndPrivateAccessDenied(t *testing.T) {
 func startTestPadmark(t *testing.T) *testStack {
 	t.Helper()
 
-	ctx := context.Background()
-
-	db, err := sqliterepo.Open("file:mcpflow?mode=memory&cache=shared", slog.New(slog.DiscardHandler))
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, db.Close()) })
-
-	_, err = sqliterepo.Migrate(ctx, db)
-	require.NoError(t, err)
-
-	users := sqliterepo.NewUserRepository(db)
-
-	authMgr := newTestAuthManager(t, db, users)
-
-	slugLock := lock.NewLocker()
-
-	notesMgr, linksMgr := newTestManagers(t, db, slugLock)
-
-	handler := web.NewHandler(notesMgr, linksMgr, discardTestLogger()).WithAuthManager(authMgr)
-	ogen := web.NewOgenHandler(notesMgr, linksMgr, web.NoPinger{}, discardTestLogger())
-	router, err := web.NewRouter(handler, ogen, &web.RouterOptions{
-		MaxBodyBytes: 256 * 1024,
-		CSRFSecret:   []byte("padmark-test-csrf-secret-32bytes"),
-
-		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, AllowedHosts: nil, RateLimit: 0,
-		RateBurst: 0, SessionTTL: 0, DisableAPI: false, DirectRedirect: false,
-	})
-	require.NoError(t, err)
-
-	srv := httptest.NewServer(router)
-	t.Cleanup(srv.Close)
-
-	return &testStack{users: users, notes: notesMgr, links: linksMgr, auth: authMgr, srv: srv}
+	return startStack(t, nil)
 }
 
-func discardTestLogger() *slog.Logger { return slog.New(slog.DiscardHandler) }
-
-func newTestAuthManager(t *testing.T, db *bun.DB, users *sqliterepo.UserRepository) *auth.Manager {
+// startTestPadmarkWithFiles starts the stack with file publishing on the bucket objects.
+func startTestPadmarkWithFiles(t *testing.T, objects testenv.S3) *testStack {
 	t.Helper()
 
-	authMgr, err := auth.NewManager(
-		auth.Stores{
-			Users:     users,
-			Invites:   sqliterepo.NewInviteRepository(db, discardTestLogger()),
-			Sessions:  sqliterepo.NewSessionRepository(db, discardTestLogger()),
-			APITokens: sqliterepo.NewAPITokenRepository(db),
-		},
-		crypto.NewPasswordHasher(flowArgon2),
-		crypto.NewSealer(flowArgon2),
-		crypto.NewTOTP(),
-		discardTestLogger(),
-		"padmark-test",
-		time.Hour,
-	)
-	require.NoError(t, err)
-
-	return authMgr
+	return startStack(t, &objects)
 }
 
-func newTestManagers(t *testing.T, db *bun.DB, slugLock *lock.Locker) (*notes.Manager, *links.Manager) {
+// startStack starts the server stack. A nil objects keeps files off, as in production.
+func startStack(t *testing.T, objects *testenv.S3) *testStack {
 	t.Helper()
 
-	notesMgr := notes.NewManager(
-		sqliterepo.NewNoteRepository(db),
-		sqliterepo.NewLinkRepository(db, discardTestLogger()),
-		slugLock,
-		render.NewRenderer(),
-		testutil.ContentEncryptor(t, "note"),
-		crypto.NewEditCodeHasher(crypto.DefaultArgon2Params()),
-		discardTestLogger(),
-		false,
-	)
-	linksMgr := links.NewManager(
-		sqliterepo.NewLinkRepository(db, discardTestLogger()),
-		sqliterepo.NewNoteRepository(db),
-		slugLock,
-		testutil.ContentEncryptor(t, "link"),
-		crypto.NewEditCodeHasher(crypto.DefaultArgon2Params()),
-		discardTestLogger(),
-		false,
-	)
+	stack := testenv.NewStack(t, "mcpflow", testenv.WithAccounts(),
+		testenv.WithConfig(func(cfg *web.HandlerConfig, stack *testenv.Stack) {
+			// The field stays a nil interface without files: a nil *files.Manager in it would turn
+			// the file routes on.
+			if objects != nil {
+				cfg.Files = newTestFileManager(t, stack.DB, stack.Expired, *objects)
+			}
+		}))
 
-	return notesMgr, linksMgr
+	return &testStack{users: stack.Users, notes: stack.Notes, links: stack.Links, auth: stack.Auth, srv: stack.Server}
+}
+
+// newTestFileManager mirrors attachFiles in internal/infra/server with the test fixtures.
+// Custom slugs are off, as for the notes and links of this stack.
+func newTestFileManager(t *testing.T, db *bun.DB, expired *expiredslugs.Releaser, objects testenv.S3) *files.Manager {
+	t.Helper()
+
+	store := objects.Store(t)
+	_, err := store.EnsureBucket(t.Context())
+	require.NoError(t, err)
+
+	manager := files.NewManager(&files.Deps{
+		Storage:      sqliterepo.NewFileRepository(db),
+		Objects:      store,
+		Cipher:       crypto.NewFileCipher(),
+		Encryptor:    testutil.ContentEncryptor(t, "file"),
+		Hasher:       crypto.NewEditCodeHasher(testutil.Argon2Params(), slog.New(slog.DiscardHandler)),
+		ExpiredSlugs: expired,
+		Log:          slog.New(slog.DiscardHandler),
+		Now:          time.Now,
+	}, 1<<20, false)
+	expired.WithFiles(manager)
+
+	return manager
 }
 
 // issueEnvelopeToken creates the first admin + an API key, returning the envelope the admin
@@ -260,13 +386,15 @@ func issueEnvelopeToken(
 	return envelope
 }
 
-// connectMCP wires the padmark-mcp Manager to the test server through the real generated
+// connectMCP wires the padmark-mcp Server to the test server through the real generated
 // client (a bearer token when passed) and attaches an in-memory MCP client session.
-func connectMCP(ctx context.Context, t *testing.T, serverURL, token string) *mcpsdk.ClientSession {
+func connectMCP(
+	ctx context.Context, t *testing.T, serverURL, token string, opts ...mcpx.Option,
+) *mcpsdk.ClientSession {
 	t.Helper()
 
 	padmarkClient := newTestPadmarkClient(t, serverURL, token)
-	mgr := mcpx.NewManager(padmarkClient, slog.New(slog.DiscardHandler))
+	mgr := mcpx.NewServer(padmarkClient, slog.New(slog.DiscardHandler), opts...)
 
 	clientTransport, serverTransport := mcpsdk.NewInMemoryTransports()
 
@@ -366,6 +494,26 @@ func resultID(res *mcpsdk.CallToolResult) string {
 	}
 
 	return ""
+}
+
+func stringField(res *mcpsdk.CallToolResult, key string) string {
+	if m, ok := res.StructuredContent.(map[string]any); ok {
+		if v, ok := m[key].(string); ok {
+			return v
+		}
+	}
+
+	return ""
+}
+
+func numberField(res *mcpsdk.CallToolResult, key string) float64 {
+	if m, ok := res.StructuredContent.(map[string]any); ok {
+		if v, ok := m[key].(float64); ok {
+			return v
+		}
+	}
+
+	return 0
 }
 
 func boolField(res *mcpsdk.CallToolResult, key string) bool {

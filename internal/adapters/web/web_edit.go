@@ -1,6 +1,7 @@
 package web
 
 import (
+	"errors"
 	"net/http"
 	"time"
 
@@ -8,35 +9,17 @@ import (
 	"github.com/partyzanex/padmark/internal/domain"
 )
 
-// EditPage handles GET /edit/{id} and renders the note editor pre-filled with existing content.
-// Gated by the same privacy check as GetNote (handlePrivateAuth) — without it, an authenticated
-// caller who is not the note's owner could read a privacy=owner note's plaintext content here,
-// bypassing the read restriction that GET /notes/{id} enforces. The editor never burns, so it
-// must not become a side door around the read policy either: an expired note is deleted and
-// answered 410, and a burn-after-reading note's content is withheld (saving replaces it).
-func (h *NoteHandler) EditPage(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-
-	preloaded, handled := h.handlePrivateAuth(w, r, id, nil)
-	if handled {
-		return
-	}
-
-	note := preloaded
-	if note == nil {
-		var err error
-
-		note, err = h.manager.Peek(r.Context(), id)
-		if err != nil {
-			h.writeErrorPage(w, r, err)
-
-			return
-		}
-	}
-
-	err := h.manager.EnforceExpiry(r.Context(), id, note)
+// editNote renders the note editor pre-filled with existing content; Handler.EditPage calls it
+// for GET /edit/{id...}. When a short link or a file has the slug, other opens its editor.
+// The editor reads the note with Inspect: the privacy check of a read applies — without it, an
+// authenticated caller who is not the note's owner could read a privacy=owner note's plaintext
+// content here. The editor never burns, so it must not become a side door around the read
+// policy either: an expired note is deleted and answered 410, and a burn-after-reading note's
+// content is withheld (saving replaces it).
+func (h *NoteHandler) editNote(w http.ResponseWriter, r *http.Request, id string, other otherRecord) {
+	note, err := h.manager.Inspect(r.Context(), id, h.reader(r))
 	if err != nil {
-		h.writeErrorPage(w, r, err)
+		h.writeEditorError(w, r, err, other)
 
 		return
 	}
@@ -50,8 +33,7 @@ func (h *NoteHandler) EditPage(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
-	usr := middleware.UserFromContext(r)
-	isOwner := usr != nil && note.OwnedBy(usr.ID)
+	isOwner := note.OwnedBy(middleware.CallerIDFromCtx(r.Context()))
 
 	header := h.header(r, headerKindPlain)
 
@@ -65,13 +47,30 @@ func (h *NoteHandler) EditPage(w http.ResponseWriter, r *http.Request) {
 		EditMode:         true,
 		BurnAfterReading: note.BurnAfterReading || note.BurnTTL > 0,
 		Privacy:          string(note.EffectivePrivacy()),
-		PrivacyOptions:   privacyOptions(h.authMgr != nil, header.SignedIn(), note.EffectivePrivacy()),
+		Access:           h.privacyChoice(r, header, note.EffectivePrivacy()),
 		Nonce:            middleware.NonceFromContext(r.Context()),
 		IsOwner:          isOwner,
 		ShowContents:     note.ContentsSidebar(),
+		ContentType:      string(derefContentType(note.ContentType)),
 	})
 	if err != nil {
 		h.log.ErrorContext(r.Context(), "render edit template", "id", domain.HashSlug(id), "err", err)
+	}
+}
+
+// writeEditorError answers an editor that cannot open the note. A slug of a short link or a file
+// goes to other. A caller that cannot see the note gets the privacy answer; other errors get the
+// error page, because the editor is a page.
+func (h *NoteHandler) writeEditorError(w http.ResponseWriter, r *http.Request, err error, other otherRecord) {
+	if answerOther(err, other) {
+		return
+	}
+
+	switch {
+	case errors.Is(err, domain.ErrForbidden):
+		h.denyPrivate(w, r)
+	default:
+		h.writeErrorPage(w, r, err)
 	}
 }
 

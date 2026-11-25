@@ -4,10 +4,15 @@ package ogenapi
 
 import (
 	"bytes"
+	"mime"
+	"mime/multipart"
 	"net/http"
 
+	"github.com/go-faster/errors"
 	"github.com/go-faster/jx"
+	"github.com/ogen-go/ogen/conv"
 	ht "github.com/ogen-go/ogen/http"
+	"github.com/ogen-go/ogen/uri"
 )
 
 func encodeCreateAPITokenRequest(
@@ -27,6 +32,107 @@ func encodeCreateAPITokenRequest(
 	}
 	encoded := e.Bytes()
 	ht.SetBody(r, bytes.NewReader(encoded), contentType)
+	return nil
+}
+
+func encodeCreateFileRequest(
+	req *CreateFileRequestMultipart,
+	r *http.Request,
+) error {
+	const contentType = "multipart/form-data"
+	request := req
+
+	q := uri.NewFormEncoder(map[string]string{})
+	{
+		// Encode "ttl" form field.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "ttl",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := request.TTL.Get(); ok {
+				return e.EncodeValue(conv.Int64ToString(val))
+			}
+			return nil
+		}); err != nil {
+			return errors.Wrap(err, "encode query")
+		}
+	}
+	{
+		// Encode "privacy" form field.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "privacy",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := request.Privacy.Get(); ok {
+				return e.EncodeValue(conv.StringToString(string(val)))
+			}
+			return nil
+		}); err != nil {
+			return errors.Wrap(err, "encode query")
+		}
+	}
+	{
+		// Encode "burn_after_download" form field.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "burn_after_download",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := request.BurnAfterDownload.Get(); ok {
+				return e.EncodeValue(conv.BoolToString(val))
+			}
+			return nil
+		}); err != nil {
+			return errors.Wrap(err, "encode query")
+		}
+	}
+	{
+		// Encode "slug" form field.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "slug",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := request.Slug.Get(); ok {
+				return e.EncodeValue(conv.StringToString(val))
+			}
+			return nil
+		}); err != nil {
+			return errors.Wrap(err, "encode query")
+		}
+	}
+	{
+		// Encode "edit_code" form field.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "edit_code",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := request.EditCode.Get(); ok {
+				return e.EncodeValue(conv.StringToString(val))
+			}
+			return nil
+		}); err != nil {
+			return errors.Wrap(err, "encode query")
+		}
+	}
+	body, boundary := ht.CreateMultipartBody(func(w *multipart.Writer) error {
+		if err := request.File.WriteMultipart("file", w); err != nil {
+			return errors.Wrap(err, "write \"file\"")
+		}
+		if err := q.WriteMultipart(w); err != nil {
+			return errors.Wrap(err, "write multipart")
+		}
+		return nil
+	})
+	ht.SetCloserBody(r, body, mime.FormatMediaType(contentType, map[string]string{"boundary": boundary}))
 	return nil
 }
 
@@ -80,6 +186,20 @@ func encodeCreateLinksBulkRequest(
 
 func encodeCreateNoteRequest(
 	req *CreateNoteRequest,
+	r *http.Request,
+) error {
+	const contentType = "application/json"
+	e := new(jx.Encoder)
+	{
+		req.Encode(e)
+	}
+	encoded := e.Bytes()
+	ht.SetBody(r, bytes.NewReader(encoded), contentType)
+	return nil
+}
+
+func encodeUpdateFileRequest(
+	req *UpdateFileRequest,
 	r *http.Request,
 ) error {
 	const contentType = "application/json"

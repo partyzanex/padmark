@@ -20,6 +20,7 @@ import (
 
 	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/infra/crypto"
+	"github.com/partyzanex/padmark/internal/usecases/auth"
 )
 
 // Finding M-6: a bearer API token can mint more API tokens (and invites, and use the HTML admin
@@ -69,8 +70,10 @@ func newHardeningOwner(t *testing.T, env ownerFlowEnv) *hardeningOwner {
 		session: "", bearer: "",
 	}
 
-	owner.session, err = env.authMgr.Login(ctx, "owner", ownerFlowPassword, owner.totpCodeAt(t, 0),
-		"Mozilla/5.0", "127.0.0.1", "")
+	owner.session, err = env.authMgr.Login(ctx, &auth.LoginRequest{
+		Username: "owner", Password: ownerFlowPassword, TOTPCode: owner.totpCodeAt(t, 0),
+		UserAgent: "Mozilla/5.0", ClientIP: "127.0.0.1", PreviousSessionID: "",
+	})
 	require.NoError(t, err)
 
 	status, body := hardeningDo(t, env.baseURL, http.MethodPost, "/api/tokens", "", owner.session, `{}`)
@@ -179,8 +182,10 @@ func hardeningOwnerNote(t *testing.T, env ownerFlowEnv, raw string) string {
 
 // TestAPITokenHardening_BearerIssuanceRequiresStepUp: a leaked key alone mints neither API tokens
 // nor invites — the bearer must re-authenticate with the account password and a fresh TOTP code.
-func TestAPITokenHardening_BearerIssuanceRequiresStepUp(t *testing.T) {
-	env := newOwnerFlowEnv(t, "m6-step-up")
+func (s *OwnerFlowSuite) TestAPITokenHardening_BearerIssuanceRequiresStepUp() {
+	t := s.T()
+
+	env := s.env
 	owner := newHardeningOwner(t, env)
 
 	for _, body := range []string{
@@ -206,8 +211,10 @@ func TestAPITokenHardening_BearerIssuanceRequiresStepUp(t *testing.T) {
 
 // TestAPITokenHardening_AdminPanelNeedsSession: the HTML admin panel (and its key-minting form)
 // is a browser UI — a bearer key must not reach it.
-func TestAPITokenHardening_AdminPanelNeedsSession(t *testing.T) {
-	env := newOwnerFlowEnv(t, "m6-admin-panel")
+func (s *OwnerFlowSuite) TestAPITokenHardening_AdminPanelNeedsSession() {
+	t := s.T()
+
+	env := s.env
 	owner := newHardeningOwner(t, env)
 
 	status, _ := hardeningDo(t, env.baseURL, http.MethodGet, "/admin", owner.bearer, "", "")
@@ -248,8 +255,10 @@ func TestAPITokenHardening_AdminPanelNeedsSession(t *testing.T) {
 
 // TestAPITokenHardening_PasswordChangeRevokesTokens: "change the password" is the remedy a victim
 // reaches for — it must also kill every API token of the account.
-func TestAPITokenHardening_PasswordChangeRevokesTokens(t *testing.T) {
-	env := newOwnerFlowEnv(t, "m6-password-change")
+func (s *OwnerFlowSuite) TestAPITokenHardening_PasswordChangeRevokesTokens() {
+	t := s.T()
+
+	env := s.env
 	owner := newHardeningOwner(t, env)
 	noteID := hardeningOwnerNote(t, env, owner.bearer)
 
@@ -265,8 +274,10 @@ func TestAPITokenHardening_PasswordChangeRevokesTokens(t *testing.T) {
 
 // TestAPITokenHardening_LifetimeAndCascade: the issuer chooses a lifetime in days (0 = never), and
 // revoking a token also revokes every token issued with it.
-func TestAPITokenHardening_LifetimeAndCascade(t *testing.T) {
-	env := newOwnerFlowEnv(t, "m6-ttl-cascade")
+func (s *OwnerFlowSuite) TestAPITokenHardening_LifetimeAndCascade() {
+	t := s.T()
+
+	env := s.env
 	owner := newHardeningOwner(t, env)
 	noteID := hardeningOwnerNote(t, env, owner.bearer)
 

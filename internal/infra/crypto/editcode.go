@@ -47,21 +47,14 @@ type EditCodeHasher struct {
 
 // NewEditCodeHasher returns an EditCodeHasher whose HashUserProvided uses the given argon2id
 // cost. The fast generated-code hash has no cost parameters. Zero-valued fields fall back to
-// DefaultArgon2Params, like NewPasswordHasher.
-func NewEditCodeHasher(params Argon2Params) *EditCodeHasher {
+// DefaultArgon2Params, like NewPasswordHasher. log records the stored hashes that Verify refuses
+// for an excessive cost (WARN).
+func NewEditCodeHasher(params Argon2Params, log *slog.Logger) *EditCodeHasher {
 	return &EditCodeHasher{
-		log:     slog.New(slog.DiscardHandler),
+		log:     log,
 		params:  params.withDefaults(),
 		ceiling: params.acceptedCeiling(),
 	}
-}
-
-// WithLogger sets the logger that records stored hashes refused for an excessive cost (WARN).
-// The default discards them.
-func (h *EditCodeHasher) WithLogger(log *slog.Logger) *EditCodeHasher {
-	h.log = log
-
-	return h
 }
 
 // Hash returns a salted SHA-256 of code in the format "s1$<base64url_salt>$<base64url_digest>".
@@ -135,9 +128,10 @@ func (*EditCodeHasher) IsStoredHash(value string) bool {
 
 // editCodeDigest computes SHA-256(salt || code).
 func editCodeDigest(salt []byte, code string) []byte {
-	sum := sha256.New()
-	sum.Write(salt)
-	sum.Write([]byte(code))
+	input := make([]byte, 0, len(salt)+len(code))
+	input = append(input, salt...)
+	input = append(input, code...)
+	sum := sha256.Sum256(input)
 
-	return sum.Sum(nil)
+	return sum[:]
 }

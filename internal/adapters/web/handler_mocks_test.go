@@ -75,18 +75,18 @@ func (mr *MockSessionManagerMockRecorder) GetSession(ctx, sessionID any) *gomock
 }
 
 // Login mocks base method.
-func (m *MockSessionManager) Login(ctx context.Context, username, password, totpCode, userAgent, clientIP, previousSessionID string) (string, error) {
+func (m *MockSessionManager) Login(ctx context.Context, req *auth.LoginRequest) (string, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Login", ctx, username, password, totpCode, userAgent, clientIP, previousSessionID)
+	ret := m.ctrl.Call(m, "Login", ctx, req)
 	ret0, _ := ret[0].(string)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // Login indicates an expected call of Login.
-func (mr *MockSessionManagerMockRecorder) Login(ctx, username, password, totpCode, userAgent, clientIP, previousSessionID any) *gomock.Call {
+func (mr *MockSessionManagerMockRecorder) Login(ctx, req any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Login", reflect.TypeOf((*MockSessionManager)(nil).Login), ctx, username, password, totpCode, userAgent, clientIP, previousSessionID)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Login", reflect.TypeOf((*MockSessionManager)(nil).Login), ctx, req)
 }
 
 // Logout mocks base method.
@@ -484,18 +484,18 @@ func (mr *MockAuthManagerMockRecorder) ListUsers(ctx, adminUserID any) *gomock.C
 }
 
 // Login mocks base method.
-func (m *MockAuthManager) Login(ctx context.Context, username, password, totpCode, userAgent, clientIP, previousSessionID string) (string, error) {
+func (m *MockAuthManager) Login(ctx context.Context, req *auth.LoginRequest) (string, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Login", ctx, username, password, totpCode, userAgent, clientIP, previousSessionID)
+	ret := m.ctrl.Call(m, "Login", ctx, req)
 	ret0, _ := ret[0].(string)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // Login indicates an expected call of Login.
-func (mr *MockAuthManagerMockRecorder) Login(ctx, username, password, totpCode, userAgent, clientIP, previousSessionID any) *gomock.Call {
+func (mr *MockAuthManagerMockRecorder) Login(ctx, req any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Login", reflect.TypeOf((*MockAuthManager)(nil).Login), ctx, username, password, totpCode, userAgent, clientIP, previousSessionID)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Login", reflect.TypeOf((*MockAuthManager)(nil).Login), ctx, req)
 }
 
 // Logout mocks base method.
@@ -581,11 +581,12 @@ func (m *MockRevealTokenStore) EXPECT() *MockRevealTokenStoreMockRecorder {
 }
 
 // Consume mocks base method.
-func (m *MockRevealTokenStore) Consume(ctx context.Context, tok, noteID string) bool {
+func (m *MockRevealTokenStore) Consume(ctx context.Context, tok, noteID string) (bool, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "Consume", ctx, tok, noteID)
 	ret0, _ := ret[0].(bool)
-	return ret0
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
 }
 
 // Consume indicates an expected call of Consume.
@@ -649,123 +650,78 @@ func (mr *MockNoteManagerMockRecorder) Create(ctx, note any) *gomock.Call {
 }
 
 // Delete mocks base method.
-func (m *MockNoteManager) Delete(ctx context.Context, id, editCode string, callerID uuid.UUID) error {
+func (m *MockNoteManager) Delete(ctx context.Context, id, editCode string, reader domain.Reader) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Delete", ctx, id, editCode, callerID)
+	ret := m.ctrl.Call(m, "Delete", ctx, id, editCode, reader)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // Delete indicates an expected call of Delete.
-func (mr *MockNoteManagerMockRecorder) Delete(ctx, id, editCode, callerID any) *gomock.Call {
+func (mr *MockNoteManagerMockRecorder) Delete(ctx, id, editCode, reader any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Delete", reflect.TypeOf((*MockNoteManager)(nil).Delete), ctx, id, editCode, callerID)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Delete", reflect.TypeOf((*MockNoteManager)(nil).Delete), ctx, id, editCode, reader)
 }
 
-// EnforceExpiry mocks base method.
-func (m *MockNoteManager) EnforceExpiry(ctx context.Context, id string, note *domain.Note) error {
+// Inspect mocks base method.
+func (m *MockNoteManager) Inspect(ctx context.Context, id string, reader domain.Reader) (*domain.Note, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "EnforceExpiry", ctx, id, note)
-	ret0, _ := ret[0].(error)
-	return ret0
-}
-
-// EnforceExpiry indicates an expected call of EnforceExpiry.
-func (mr *MockNoteManagerMockRecorder) EnforceExpiry(ctx, id, note any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "EnforceExpiry", reflect.TypeOf((*MockNoteManager)(nil).EnforceExpiry), ctx, id, note)
-}
-
-// GetRendered mocks base method.
-func (m *MockNoteManager) GetRendered(ctx context.Context, id string) (*domain.Note, string, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetRendered", ctx, id)
-	ret0, _ := ret[0].(*domain.Note)
-	ret1, _ := ret[1].(string)
-	ret2, _ := ret[2].(error)
-	return ret0, ret1, ret2
-}
-
-// GetRendered indicates an expected call of GetRendered.
-func (mr *MockNoteManagerMockRecorder) GetRendered(ctx, id any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetRendered", reflect.TypeOf((*MockNoteManager)(nil).GetRendered), ctx, id)
-}
-
-// GetRenderedPreloaded mocks base method.
-func (m *MockNoteManager) GetRenderedPreloaded(ctx context.Context, id string, preloaded *domain.Note) (*domain.Note, string, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetRenderedPreloaded", ctx, id, preloaded)
-	ret0, _ := ret[0].(*domain.Note)
-	ret1, _ := ret[1].(string)
-	ret2, _ := ret[2].(error)
-	return ret0, ret1, ret2
-}
-
-// GetRenderedPreloaded indicates an expected call of GetRenderedPreloaded.
-func (mr *MockNoteManagerMockRecorder) GetRenderedPreloaded(ctx, id, preloaded any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetRenderedPreloaded", reflect.TypeOf((*MockNoteManager)(nil).GetRenderedPreloaded), ctx, id, preloaded)
-}
-
-// Peek mocks base method.
-func (m *MockNoteManager) Peek(ctx context.Context, id string) (*domain.Note, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Peek", ctx, id)
+	ret := m.ctrl.Call(m, "Inspect", ctx, id, reader)
 	ret0, _ := ret[0].(*domain.Note)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
-// Peek indicates an expected call of Peek.
-func (mr *MockNoteManagerMockRecorder) Peek(ctx, id any) *gomock.Call {
+// Inspect indicates an expected call of Inspect.
+func (mr *MockNoteManagerMockRecorder) Inspect(ctx, id, reader any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Peek", reflect.TypeOf((*MockNoteManager)(nil).Peek), ctx, id)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Inspect", reflect.TypeOf((*MockNoteManager)(nil).Inspect), ctx, id, reader)
+}
+
+// Read mocks base method.
+func (m *MockNoteManager) Read(ctx context.Context, id string, reader domain.Reader) (*domain.Note, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Read", ctx, id, reader)
+	ret0, _ := ret[0].(*domain.Note)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Read indicates an expected call of Read.
+func (mr *MockNoteManagerMockRecorder) Read(ctx, id, reader any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Read", reflect.TypeOf((*MockNoteManager)(nil).Read), ctx, id, reader)
+}
+
+// ReadRendered mocks base method.
+func (m *MockNoteManager) ReadRendered(ctx context.Context, id string, reader domain.Reader) (*domain.Note, string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ReadRendered", ctx, id, reader)
+	ret0, _ := ret[0].(*domain.Note)
+	ret1, _ := ret[1].(string)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
+}
+
+// ReadRendered indicates an expected call of ReadRendered.
+func (mr *MockNoteManagerMockRecorder) ReadRendered(ctx, id, reader any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReadRendered", reflect.TypeOf((*MockNoteManager)(nil).ReadRendered), ctx, id, reader)
 }
 
 // Update mocks base method.
-func (m *MockNoteManager) Update(ctx context.Context, id, editCode string, callerID uuid.UUID, note *domain.Note) (*domain.Note, error) {
+func (m *MockNoteManager) Update(ctx context.Context, id, editCode string, reader domain.Reader, note *domain.Note) (*domain.Note, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Update", ctx, id, editCode, callerID, note)
+	ret := m.ctrl.Call(m, "Update", ctx, id, editCode, reader, note)
 	ret0, _ := ret[0].(*domain.Note)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // Update indicates an expected call of Update.
-func (mr *MockNoteManagerMockRecorder) Update(ctx, id, editCode, callerID, note any) *gomock.Call {
+func (mr *MockNoteManagerMockRecorder) Update(ctx, id, editCode, reader, note any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Update", reflect.TypeOf((*MockNoteManager)(nil).Update), ctx, id, editCode, callerID, note)
-}
-
-// View mocks base method.
-func (m *MockNoteManager) View(ctx context.Context, id string) (*domain.Note, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "View", ctx, id)
-	ret0, _ := ret[0].(*domain.Note)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// View indicates an expected call of View.
-func (mr *MockNoteManagerMockRecorder) View(ctx, id any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "View", reflect.TypeOf((*MockNoteManager)(nil).View), ctx, id)
-}
-
-// ViewPreloaded mocks base method.
-func (m *MockNoteManager) ViewPreloaded(ctx context.Context, id string, preloaded *domain.Note) (*domain.Note, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ViewPreloaded", ctx, id, preloaded)
-	ret0, _ := ret[0].(*domain.Note)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// ViewPreloaded indicates an expected call of ViewPreloaded.
-func (mr *MockNoteManagerMockRecorder) ViewPreloaded(ctx, id, preloaded any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ViewPreloaded", reflect.TypeOf((*MockNoteManager)(nil).ViewPreloaded), ctx, id, preloaded)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Update", reflect.TypeOf((*MockNoteManager)(nil).Update), ctx, id, editCode, reader, note)
 }
 
 // MockLinkManager is a mock of LinkManager interface.
@@ -808,92 +764,62 @@ func (mr *MockLinkManagerMockRecorder) Create(ctx, targetURL, opts any) *gomock.
 }
 
 // Delete mocks base method.
-func (m *MockLinkManager) Delete(ctx context.Context, slug, editCode string, callerID uuid.UUID) error {
+func (m *MockLinkManager) Delete(ctx context.Context, slug, editCode string, reader domain.Reader) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Delete", ctx, slug, editCode, callerID)
+	ret := m.ctrl.Call(m, "Delete", ctx, slug, editCode, reader)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // Delete indicates an expected call of Delete.
-func (mr *MockLinkManagerMockRecorder) Delete(ctx, slug, editCode, callerID any) *gomock.Call {
+func (mr *MockLinkManagerMockRecorder) Delete(ctx, slug, editCode, reader any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Delete", reflect.TypeOf((*MockLinkManager)(nil).Delete), ctx, slug, editCode, callerID)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Delete", reflect.TypeOf((*MockLinkManager)(nil).Delete), ctx, slug, editCode, reader)
 }
 
 // Follow mocks base method.
-func (m *MockLinkManager) Follow(ctx context.Context, slug string, options links.FollowOptions) (*domain.Link, error) {
+func (m *MockLinkManager) Follow(ctx context.Context, slug string, reader domain.Reader) (*domain.Link, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Follow", ctx, slug, options)
+	ret := m.ctrl.Call(m, "Follow", ctx, slug, reader)
 	ret0, _ := ret[0].(*domain.Link)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // Follow indicates an expected call of Follow.
-func (mr *MockLinkManagerMockRecorder) Follow(ctx, slug, options any) *gomock.Call {
+func (mr *MockLinkManagerMockRecorder) Follow(ctx, slug, reader any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Follow", reflect.TypeOf((*MockLinkManager)(nil).Follow), ctx, slug, options)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Follow", reflect.TypeOf((*MockLinkManager)(nil).Follow), ctx, slug, reader)
 }
 
-// Peek mocks base method.
-func (m *MockLinkManager) Peek(ctx context.Context, slug string) (*domain.Link, error) {
+// Inspect mocks base method.
+func (m *MockLinkManager) Inspect(ctx context.Context, slug string, reader domain.Reader) (*domain.Link, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Peek", ctx, slug)
+	ret := m.ctrl.Call(m, "Inspect", ctx, slug, reader)
 	ret0, _ := ret[0].(*domain.Link)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
-// Peek indicates an expected call of Peek.
-func (mr *MockLinkManagerMockRecorder) Peek(ctx, slug any) *gomock.Call {
+// Inspect indicates an expected call of Inspect.
+func (mr *MockLinkManagerMockRecorder) Inspect(ctx, slug, reader any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Peek", reflect.TypeOf((*MockLinkManager)(nil).Peek), ctx, slug)
-}
-
-// Redirect mocks base method.
-func (m *MockLinkManager) Redirect(ctx context.Context, slug string) (*domain.Link, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Redirect", ctx, slug)
-	ret0, _ := ret[0].(*domain.Link)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// Redirect indicates an expected call of Redirect.
-func (mr *MockLinkManagerMockRecorder) Redirect(ctx, slug any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Redirect", reflect.TypeOf((*MockLinkManager)(nil).Redirect), ctx, slug)
-}
-
-// RedirectWithoutBurn mocks base method.
-func (m *MockLinkManager) RedirectWithoutBurn(ctx context.Context, slug string) (*domain.Link, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "RedirectWithoutBurn", ctx, slug)
-	ret0, _ := ret[0].(*domain.Link)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// RedirectWithoutBurn indicates an expected call of RedirectWithoutBurn.
-func (mr *MockLinkManagerMockRecorder) RedirectWithoutBurn(ctx, slug any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RedirectWithoutBurn", reflect.TypeOf((*MockLinkManager)(nil).RedirectWithoutBurn), ctx, slug)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Inspect", reflect.TypeOf((*MockLinkManager)(nil).Inspect), ctx, slug, reader)
 }
 
 // Update mocks base method.
-func (m *MockLinkManager) Update(ctx context.Context, slug, editCode string, callerID uuid.UUID, targetURL string, opts links.UpdateOptions) (*domain.Link, error) {
+func (m *MockLinkManager) Update(ctx context.Context, slug, editCode string, reader domain.Reader, targetURL string, opts links.UpdateOptions) (*domain.Link, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Update", ctx, slug, editCode, callerID, targetURL, opts)
+	ret := m.ctrl.Call(m, "Update", ctx, slug, editCode, reader, targetURL, opts)
 	ret0, _ := ret[0].(*domain.Link)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // Update indicates an expected call of Update.
-func (mr *MockLinkManagerMockRecorder) Update(ctx, slug, editCode, callerID, targetURL, opts any) *gomock.Call {
+func (mr *MockLinkManagerMockRecorder) Update(ctx, slug, editCode, reader, targetURL, opts any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Update", reflect.TypeOf((*MockLinkManager)(nil).Update), ctx, slug, editCode, callerID, targetURL, opts)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Update", reflect.TypeOf((*MockLinkManager)(nil).Update), ctx, slug, editCode, reader, targetURL, opts)
 }
 
 // MockPinger is a mock of Pinger interface.

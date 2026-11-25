@@ -2,18 +2,18 @@ package web
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"time"
 
-	"github.com/partyzanex/padmark/internal/adapters/web/middleware"
 	"github.com/partyzanex/padmark/internal/adapters/web/ogenapi"
 	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/usecases/links"
 )
 
-// UpdateLink implements ogenapi.Handler with the same privacy and edit-code gates
-// as UpdateNote. Fetching metadata here never consumes a burn link or adds views.
+// UpdateLink implements ogenapi.Handler with the privacy and edit-code rules of UpdateNote, which
+// links.Manager.Update applies. It never consumes a burn link or adds views.
 //
 //nolint:ireturn // ogen response unions are interfaces by design
 func (h *OgenHandler) UpdateLink(
@@ -31,10 +31,6 @@ func (h *OgenHandler) UpdateLink(
 		return mapUpdateLinkError(err, h.log), nil
 	}
 
-	if !h.linkMutationAllowed(ctx, params.ID) {
-		return &ogenapi.UpdateLinkUnauthorized{}, nil
-	}
-
 	opts := links.UpdateOptions{
 		ExpiresAt:           nil,
 		Privacy:             nil,
@@ -49,8 +45,13 @@ func (h *OgenHandler) UpdateLink(
 
 	opts.Privacy = requested
 
-	link, err := h.linkManager.Update(ctx, params.ID, req.EditCode.Or(""), middleware.CallerIDFromCtx(ctx),
-		req.TargetURL.String(), opts)
+	link, err := h.linkManager.Update(ctx, params.ID, req.EditCode.Or(""), h.reader(ctx),
+		requestTargetURL(&req.TargetURL), opts)
+	if errors.Is(err, domain.ErrForbidden) {
+		// A caller that cannot see the link gets 401, as for a read; see common.writeMutationError.
+		return &ogenapi.UpdateLinkUnauthorized{}, nil
+	}
+
 	if err != nil {
 		return mapUpdateLinkError(err, h.log), nil
 	}
@@ -58,9 +59,10 @@ func (h *OgenHandler) UpdateLink(
 	return domainLinkToResponse(link, h.log), nil
 }
 
-// Per-operation ogen union types make the status mappers textually near-identical (dupl).
+// mapUpdateLinkError translates an UpdateLink failure into the generated response union. 410 is
+// an expired link (domain.ErrExpired).
 //
-//nolint:ireturn,dupl // ogen response unions are interfaces by design
+//nolint:ireturn // ogen response unions are interfaces by design
 func mapUpdateLinkError(err error, log *slog.Logger) ogenapi.UpdateLinkRes {
 	r := errResp(err)
 	switch status, _ := domainErrStatus(err); status {
@@ -79,6 +81,11 @@ func mapUpdateLinkError(err error, log *slog.Logger) ogenapi.UpdateLinkRes {
 		return &v
 	case http.StatusUnprocessableEntity:
 		v := ogenapi.UpdateLinkUnprocessableEntity(r)
+
+		return &v
+	case http.StatusGone:
+		// An expired link cannot be changed. The answer is the 410 of a read.
+		v := ogenapi.UpdateLinkGone(r)
 
 		return &v
 	default:

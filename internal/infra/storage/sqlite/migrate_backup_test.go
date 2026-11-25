@@ -8,6 +8,7 @@ import (
 
 	"github.com/pressly/goose/v3"
 	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 	"github.com/uptrace/bun"
 
 	sqlitemigrations "github.com/partyzanex/padmark/migrations/sqlite"
@@ -57,113 +58,121 @@ func versionRows(t *testing.T, path string) int {
 	return count
 }
 
-func TestMigrateWithBackup_FreshDB_NoBackup(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "padmark.db")
-	db := openFileDB(t, dbPath)
-
-	results, err := MigrateWithBackup(t.Context(), db, dbPath, slog.New(slog.DiscardHandler))
-	require.NoError(t, err)
-	require.NotEmpty(t, results)
-	require.Empty(t, listBackups(t, dbPath))
+type MigrateBackupSuite struct {
+	suite.Suite
 }
 
-func TestMigrateWithBackup_BackupIsOwnerOnly(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "padmark.db")
-	db := openFileDB(t, dbPath)
+func TestMigrateBackupSuite(t *testing.T) {
+	suite.Run(t, new(MigrateBackupSuite))
+}
+
+func (s *MigrateBackupSuite) TestMigrateWithBackup_FreshDB_NoBackup() {
+	dbPath := filepath.Join(s.T().TempDir(), "padmark.db")
+	db := openFileDB(s.T(), dbPath)
+
+	results, err := MigrateWithBackup(s.T().Context(), db, dbPath, slog.New(slog.DiscardHandler))
+	s.Require().NoError(err)
+	s.Require().NotEmpty(results)
+	s.Require().Empty(listBackups(s.T(), dbPath))
+}
+
+func (s *MigrateBackupSuite) TestMigrateWithBackup_BackupIsOwnerOnly() {
+	dbPath := filepath.Join(s.T().TempDir(), "padmark.db")
+	db := openFileDB(s.T(), dbPath)
 
 	provider, err := goose.NewProvider(goose.DialectSQLite3, db.DB, sqlitemigrations.FS)
-	require.NoError(t, err)
+	s.Require().NoError(err)
 
-	_, err = provider.UpByOne(t.Context())
-	require.NoError(t, err)
+	_, err = provider.UpByOne(s.T().Context())
+	s.Require().NoError(err)
 
-	_, err = MigrateWithBackup(t.Context(), db, dbPath, slog.New(slog.DiscardHandler))
-	require.NoError(t, err)
+	_, err = MigrateWithBackup(s.T().Context(), db, dbPath, slog.New(slog.DiscardHandler))
+	s.Require().NoError(err)
 
-	backups := listBackups(t, dbPath)
-	require.Len(t, backups, 1)
+	backups := listBackups(s.T(), dbPath)
+	s.Require().Len(backups, 1)
 
 	info, err := os.Stat(backups[0])
-	require.NoError(t, err)
-	require.Equal(t, os.FileMode(0o600), info.Mode().Perm())
-	require.Less(t, versionRows(t, backups[0]), versionRows(t, dbPath))
+	s.Require().NoError(err)
+	s.Require().Equal(os.FileMode(0o600), info.Mode().Perm())
+	s.Require().Less(versionRows(s.T(), backups[0]), versionRows(s.T(), dbPath))
 }
 
-func TestMigrateWithBackup_SecondRun_NoNewBackup(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "padmark.db")
-	db := openFileDB(t, dbPath)
+func (s *MigrateBackupSuite) TestMigrateWithBackup_SecondRun_NoNewBackup() {
+	dbPath := filepath.Join(s.T().TempDir(), "padmark.db")
+	db := openFileDB(s.T(), dbPath)
 	log := slog.New(slog.DiscardHandler)
 
 	provider, err := goose.NewProvider(goose.DialectSQLite3, db.DB, sqlitemigrations.FS)
-	require.NoError(t, err)
+	s.Require().NoError(err)
 
-	_, err = provider.UpByOne(t.Context())
-	require.NoError(t, err)
+	_, err = provider.UpByOne(s.T().Context())
+	s.Require().NoError(err)
 
-	_, err = MigrateWithBackup(t.Context(), db, dbPath, log)
-	require.NoError(t, err)
+	_, err = MigrateWithBackup(s.T().Context(), db, dbPath, log)
+	s.Require().NoError(err)
 
-	_, err = MigrateWithBackup(t.Context(), db, dbPath, log)
-	require.NoError(t, err)
+	_, err = MigrateWithBackup(s.T().Context(), db, dbPath, log)
+	s.Require().NoError(err)
 
-	require.Len(t, listBackups(t, dbPath), 1)
+	s.Require().Len(listBackups(s.T(), dbPath), 1)
 }
 
-func TestMigrateWithBackup_InMemory_NoBackup(t *testing.T) {
-	dir := t.TempDir()
-	t.Chdir(dir)
+func (s *MigrateBackupSuite) TestMigrateWithBackup_InMemory_NoBackup() {
+	dir := s.T().TempDir()
+	s.T().Chdir(dir)
 
 	for _, dsn := range []string{":memory:", "file::memory:?cache=shared", "file:mem1?mode=memory&cache=shared"} {
-		db := openFileDB(t, dsn)
+		db := openFileDB(s.T(), dsn)
 
-		results, err := MigrateWithBackup(t.Context(), db, dsn, slog.New(slog.DiscardHandler))
-		require.NoError(t, err, dsn)
-		require.NotEmpty(t, results, dsn)
+		results, err := MigrateWithBackup(s.T().Context(), db, dsn, slog.New(slog.DiscardHandler))
+		s.Require().NoError(err, dsn)
+		s.Require().NotEmpty(results, dsn)
 	}
 
 	entries, err := os.ReadDir(dir)
-	require.NoError(t, err)
-	require.Empty(t, entries)
+	s.Require().NoError(err)
+	s.Require().Empty(entries)
 }
 
-func TestMigrateWithBackup_OlderVersion_TakesBackup(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "padmark.db")
-	db := openFileDB(t, dbPath)
+func (s *MigrateBackupSuite) TestMigrateWithBackup_OlderVersion_TakesBackup() {
+	dbPath := filepath.Join(s.T().TempDir(), "padmark.db")
+	db := openFileDB(s.T(), dbPath)
 
 	provider, err := goose.NewProvider(goose.DialectSQLite3, db.DB, sqlitemigrations.FS)
-	require.NoError(t, err)
+	s.Require().NoError(err)
 
-	_, err = provider.UpByOne(t.Context())
-	require.NoError(t, err)
+	_, err = provider.UpByOne(s.T().Context())
+	s.Require().NoError(err)
 
-	_, err = provider.UpByOne(t.Context())
-	require.NoError(t, err)
+	_, err = provider.UpByOne(s.T().Context())
+	s.Require().NoError(err)
 
-	require.Empty(t, listBackups(t, dbPath))
+	s.Require().Empty(listBackups(s.T(), dbPath))
 
-	before := versionRows(t, dbPath)
+	before := versionRows(s.T(), dbPath)
 
-	_, err = MigrateWithBackup(t.Context(), db, dbPath, slog.New(slog.DiscardHandler))
-	require.NoError(t, err)
+	_, err = MigrateWithBackup(s.T().Context(), db, dbPath, slog.New(slog.DiscardHandler))
+	s.Require().NoError(err)
 
-	backups := listBackups(t, dbPath)
-	require.Len(t, backups, 1)
-	require.Equal(t, before, versionRows(t, backups[0]))
-	require.Less(t, before, versionRows(t, dbPath))
+	backups := listBackups(s.T(), dbPath)
+	s.Require().Len(backups, 1)
+	s.Require().Equal(before, versionRows(s.T(), backups[0]))
+	s.Require().Less(before, versionRows(s.T(), dbPath))
 }
 
-func TestMigrateWithBackup_DSNWithQuery(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "padmark.db")
+func (s *MigrateBackupSuite) TestMigrateWithBackup_DSNWithQuery() {
+	dbPath := filepath.Join(s.T().TempDir(), "padmark.db")
 	dsn := "file:" + dbPath + "?_pragma=busy_timeout(5000)"
-	db := openFileDB(t, dsn)
+	db := openFileDB(s.T(), dsn)
 
 	provider, err := goose.NewProvider(goose.DialectSQLite3, db.DB, sqlitemigrations.FS)
-	require.NoError(t, err)
+	s.Require().NoError(err)
 
-	_, err = provider.UpByOne(t.Context())
-	require.NoError(t, err)
+	_, err = provider.UpByOne(s.T().Context())
+	s.Require().NoError(err)
 
-	_, err = MigrateWithBackup(t.Context(), db, dsn, slog.New(slog.DiscardHandler))
-	require.NoError(t, err)
-	require.Len(t, listBackups(t, dbPath), 1)
+	_, err = MigrateWithBackup(s.T().Context(), db, dsn, slog.New(slog.DiscardHandler))
+	s.Require().NoError(err)
+	s.Require().Len(listBackups(s.T(), dbPath), 1)
 }

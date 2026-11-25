@@ -1,0 +1,375 @@
+//go:build integration
+
+package slugs_test
+
+import (
+	"bytes"
+	"context"
+	"log/slog"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/stretchr/testify/require"
+	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/dialect"
+
+	"github.com/partyzanex/padmark/internal/domain"
+	"github.com/partyzanex/padmark/internal/infra/crypto"
+	pgrepo "github.com/partyzanex/padmark/internal/infra/storage/postgres"
+	"github.com/partyzanex/padmark/internal/infra/storage/s3store"
+	sqliterepo "github.com/partyzanex/padmark/internal/infra/storage/sqlite"
+	"github.com/partyzanex/padmark/internal/testutil"
+	"github.com/partyzanex/padmark/internal/usecases/files"
+	"github.com/partyzanex/padmark/internal/usecases/links"
+	"github.com/partyzanex/padmark/internal/usecases/notes"
+	"github.com/partyzanex/padmark/tests/internal/testenv"
+)
+
+const (
+	maxFileSize   = 1 << 20
+	createTimeout = 30 * time.Second
+)
+
+// sharedResources returns the three tables that share slug_namespace.
+func sharedResources() []string { return []string{"notes", "links", "files"} }
+
+type pausedFiles struct {
+	files.Storage
+
+	gate *createGate
+}
+
+func (r *pausedFiles) Create(ctx context.Context, file *domain.File) error {
+	err := r.gate.wait(ctx)
+	if err != nil {
+		return err
+	}
+
+	return r.Storage.Create(ctx, file)
+}
+
+// slugEnv is one server replica: a database pool and the three managers with one shared
+// expiredslugs.Releaser, wired as in infra/server. Each repository Create waits for gate.
+type slugEnv struct {
+	db    *bun.DB
+	notes *notes.Manager
+	links *links.Manager
+	files *files.Manager
+}
+
+func newSlugEnv(t *testing.T, db *bun.DB, objects *s3store.Store, gate *createGate) *slugEnv {
+	t.Helper()
+
+	managers := testenv.NewManagers(t, db, testenv.WithCustomSlugs(),
+		testenv.WithNoteStorage(func(storage notes.Storage) notes.Storage {
+			return &pausedNotes{Storage: storage, gate: gate}
+		}),
+		testenv.WithLinkStorage(func(storage links.Storage) links.Storage {
+			return &pausedLinks{Storage: storage, gate: gate}
+		}))
+
+	var fileRepo files.Storage = sqliterepo.NewFileRepository(db)
+	if db.Dialect().Name() == dialect.PG {
+		fileRepo = pgrepo.NewFileRepository(db)
+	}
+
+	fileManager := files.NewManager(&files.Deps{
+		Storage:      &pausedFiles{Storage: fileRepo, gate: gate},
+		Objects:      objects,
+		Cipher:       crypto.NewFileCipher(),
+		Encryptor:    testutil.ContentEncryptor(t, "file"),
+		Hasher:       crypto.NewEditCodeHasher(testutil.Argon2Params(), slog.New(slog.DiscardHandler)),
+		ExpiredSlugs: managers.Expired,
+		Log:          slog.New(slog.DiscardHandler),
+		Now:          time.Now,
+	}, maxFileSize, true)
+	managers.Expired.WithFiles(fileManager)
+	noteManager, linkManager := managers.Notes, managers.Links
+
+	return &slugEnv{db: db, notes: noteManager, links: linkManager, files: fileManager}
+}
+
+// create makes resource take slug through its manager and returns the edit code.
+func (e *slugEnv) create(ctx context.Context, resource, slug string, burn bool) (string, error) {
+	switch resource {
+	case "notes":
+		note, err := e.notes.Create(ctx, &domain.Note{
+			ID: slug, Title: "", Content: "note",
+			CreatedAt: time.Time{}, UpdatedAt: time.Time{}, ExpiresAt: nil,
+			Privacy: nil, OwnerID: nil, ContentType: nil, EditCode: "",
+			Views: 0, BurnTTL: 0, BurnAfterReading: burn, ClearExpiry: false, ShowContents: nil,
+		})
+		if err != nil {
+			return "", err
+		}
+
+		return note.EditCode, nil
+	case "links":
+		link, err := e.links.Create(ctx, "https://example.com/target", links.CreateOptions{
+			CustomHash: slug,
+			ExpiresAt:  nil, Privacy: nil, OwnerID: nil, DirectRedirect: nil, EditCode: "", BurnAfterClick: burn,
+		})
+		if err != nil {
+			return "", err
+		}
+
+		return link.EditCode, nil
+	default:
+		file, err := e.files.Create(ctx, "slug.bin", bytes.NewReader([]byte("file payload")), files.CreateOptions{
+			ExpiresAt: nil, Privacy: nil, OwnerID: nil, CustomSlug: slug, EditCode: "", BurnAfterDownload: burn,
+		})
+		if err != nil {
+			return "", err
+		}
+
+		return file.EditCode, nil
+	}
+}
+
+// objectKey returns the object key of the live file with slug. Inspect never consumes a burn file.
+func (e *slugEnv) objectKey(t *testing.T, slug string) string {
+	t.Helper()
+
+	file, err := e.files.Inspect(t.Context(), slug, openReader())
+	require.NoError(t, err)
+
+	return file.ObjectKey
+}
+
+// expireFile moves the expiry of the file record id into the past without a read.
+func expireFile(t *testing.T, db bun.IDB, id string) {
+	t.Helper()
+
+	_, err := db.NewUpdate().Table("files").Set("expires_at = ?", time.Now().Add(-time.Hour)).
+		Where("id = ?", id).Exec(t.Context())
+	require.NoError(t, err)
+}
+
+func reader(allowBurn bool) domain.Reader {
+	return domain.Reader{CallerID: uuid.Nil, Authenticated: false, AllowBurn: allowBurn, SkipPrivacy: false}
+}
+
+// testFileRelease checks that each way a file goes away releases its slug, and that a note, a
+// link and a new file can then take it.
+func testFileRelease(t *testing.T, db *bun.DB, objects *s3store.Store) {
+	t.Helper()
+
+	env := newSlugEnv(t, db, objects, openGate())
+
+	for _, operation := range []string{"delete", "burn", "expiry", "sweep"} {
+		t.Run(operation, func(t *testing.T) {
+			slug := uuid.NewString()
+			id := domain.HashSlug(slug)
+			editCode, err := env.create(t.Context(), "files", slug, operation == "burn")
+			require.NoError(t, err)
+			assertReservation(t, db, id, "files")
+
+			key := env.objectKey(t, slug)
+			removeFile(t, env, slug, editCode, operation)
+			assertReservation(t, db, id, "")
+			require.ErrorIs(t, objects.Stat(t.Context(), key), domain.ErrNotFound)
+
+			claimInTurn(t, env, slug)
+		})
+	}
+}
+
+func removeFile(t *testing.T, env *slugEnv, slug, editCode, operation string) {
+	t.Helper()
+
+	ctx := t.Context()
+
+	switch operation {
+	case "delete":
+		require.NoError(t, env.files.Delete(ctx, slug, editCode, reader(false)))
+	case "burn":
+		burnFile(t, env, slug)
+	case "expiry":
+		expireFile(t, env.db, domain.HashSlug(slug))
+		_, err := env.files.Inspect(ctx, slug, reader(false))
+		require.ErrorIs(t, err, domain.ErrExpired)
+	default:
+		expireFile(t, env.db, domain.HashSlug(slug))
+		removed, err := env.files.SweepExpired(ctx)
+		require.NoError(t, err)
+		require.NotZero(t, removed)
+	}
+}
+
+// burnFile downloads a burn file twice. The first transfer fails: its claim keeps the record and
+// the slug, and the release lets the next reader download. The second transfer is complete, and
+// only its Close deletes the record.
+func burnFile(t *testing.T, env *slugEnv, slug string) {
+	t.Helper()
+
+	ctx := t.Context()
+	id := domain.HashSlug(slug)
+
+	failed, err := env.files.Download(ctx, slug, reader(true))
+	require.NoError(t, err)
+	assertReservation(t, env.db, id, "files")
+
+	_, err = env.files.Download(ctx, slug, reader(true))
+	require.ErrorIs(t, err, domain.ErrNotFound, "a claimed file is not visible to a second reader")
+
+	_, err = env.create(ctx, "notes", slug, false)
+	require.ErrorIs(t, err, domain.ErrSlugConflict, "a claimed file keeps its slug")
+
+	failed.Close(context.WithoutCancel(ctx))
+	assertReservation(t, env.db, id, "files")
+
+	download, err := env.files.Download(ctx, slug, reader(true))
+	require.NoError(t, err, "a released claim lets the next reader download the file")
+
+	var content bytes.Buffer
+
+	require.NoError(t, download.Send(ctx, &content))
+	require.Equal(t, "file payload", content.String())
+	assertReservation(t, env.db, id, "files")
+	download.Close(context.WithoutCancel(ctx))
+}
+
+// claimInTurn makes a note, then a link, then a file take the free slug. A raw delete removes
+// each note and link before the next resource takes the slug.
+func claimInTurn(t *testing.T, env *slugEnv, slug string) {
+	t.Helper()
+
+	id := domain.HashSlug(slug)
+
+	for _, resource := range sharedResources() {
+		_, err := env.create(t.Context(), resource, slug, false)
+		require.NoError(t, err, resource)
+		assertReservation(t, env.db, id, resource)
+
+		if resource != "files" {
+			_, err = env.db.NewDelete().Table(resource).Where("id = ?", id).Exec(t.Context())
+			require.NoError(t, err)
+			assertReservation(t, env.db, id, "")
+		}
+	}
+}
+
+// testExpiredFileSlug checks R-26: an expired file that the sweep did not remove yet does not
+// block a note, a link or a new file with its slug. A file that is not expired still blocks.
+func testExpiredFileSlug(t *testing.T, db *bun.DB, objects *s3store.Store) {
+	t.Helper()
+
+	env := newSlugEnv(t, db, objects, openGate())
+
+	for _, claimant := range sharedResources() {
+		t.Run(claimant, func(t *testing.T) {
+			slug := uuid.NewString()
+			id := domain.HashSlug(slug)
+			_, err := env.create(t.Context(), "files", slug, false)
+			require.NoError(t, err)
+
+			key := env.objectKey(t, slug)
+			_, err = env.create(t.Context(), claimant, slug, false)
+			require.ErrorIs(t, err, domain.ErrSlugConflict, "a live file holds its slug")
+
+			expireFile(t, db, id)
+			assertReservation(t, db, id, "files")
+
+			_, err = env.create(t.Context(), claimant, slug, false)
+			require.NoError(t, err, "an expired file must not block the slug")
+			assertReservation(t, db, id, claimant)
+			require.ErrorIs(t, objects.Stat(t.Context(), key), domain.ErrNotFound, "the expired object goes too")
+
+			if claimant != "files" {
+				exists, existsErr := db.NewSelect().Table("files").Where("id = ?", id).Exists(t.Context())
+				require.NoError(t, existsErr)
+				require.False(t, exists)
+			}
+		})
+	}
+}
+
+// testConcurrentFileCreate runs a note, a link and a file create with one slug on three
+// replicas. Each replica has its own pool and managers. The managers make no slug check, and all
+// three wait before their INSERT, so only the storage triggers can select one winner.
+func testConcurrentFileCreate(
+	t *testing.T, db *bun.DB, open func(*testing.T) *bun.DB, objects *s3store.Store, winner string,
+) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(t.Context(), createTimeout)
+	defer cancel()
+
+	slug := uuid.NewString()
+	gates := make(map[string]*createGate, len(sharedResources()))
+	results := make(map[string]<-chan error, len(sharedResources()))
+
+	for _, resource := range sharedResources() {
+		gates[resource] = newGate()
+		results[resource] = createAsync(ctx, newSlugEnv(t, open(t), objects, gates[resource]), resource, slug)
+	}
+
+	for _, resource := range sharedResources() {
+		select {
+		case <-gates[resource].ready:
+		case <-ctx.Done():
+			t.Fatalf("the %s create must reach INSERT", resource)
+		}
+	}
+
+	if winner == "simultaneous" {
+		winner = raceAll(t, gates, results)
+	} else {
+		close(gates[winner].proceed)
+		require.NoError(t, <-results[winner])
+
+		for _, resource := range sharedResources() {
+			if resource != winner {
+				close(gates[resource].proceed)
+				require.ErrorIs(t, <-results[resource], domain.ErrSlugConflict, resource)
+			}
+		}
+	}
+
+	id := domain.HashSlug(slug)
+	assertReservation(t, db, id, winner)
+
+	var count int
+
+	require.NoError(t, db.NewRaw(`SELECT COUNT(*) FROM (
+		SELECT id FROM notes WHERE id = ? UNION ALL SELECT id FROM links WHERE id = ?
+		UNION ALL SELECT id FROM files WHERE id = ?
+	) AS occupied`, id, id, id).Scan(t.Context(), &count))
+	require.Equal(t, 1, count)
+}
+
+// raceAll lets all creates insert at the same time and returns the resource that won.
+func raceAll(t *testing.T, gates map[string]*createGate, results map[string]<-chan error) string {
+	t.Helper()
+
+	for _, resource := range sharedResources() {
+		close(gates[resource].proceed)
+	}
+
+	var winners []string
+
+	for _, resource := range sharedResources() {
+		err := <-results[resource]
+		if err == nil {
+			winners = append(winners, resource)
+		} else {
+			require.ErrorIs(t, err, domain.ErrSlugConflict, resource)
+		}
+	}
+
+	require.Len(t, winners, 1)
+
+	return winners[0]
+}
+
+func createAsync(ctx context.Context, env *slugEnv, resource, slug string) <-chan error {
+	result := make(chan error, 1)
+
+	go func() {
+		_, err := env.create(ctx, resource, slug, false)
+		result <- err
+	}()
+
+	return result
+}

@@ -5,7 +5,6 @@ package encryption_test
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -16,29 +15,89 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"github.com/testcontainers/testcontainers-go"
-	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
+	"github.com/stretchr/testify/suite"
 	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect/pgdialect"
-	"github.com/uptrace/bun/driver/pgdriver"
 
 	"github.com/partyzanex/padmark/internal/domain"
 	"github.com/partyzanex/padmark/internal/infra/crypto"
 	keyrepo "github.com/partyzanex/padmark/internal/infra/storage/contentkeys"
 	pgrepo "github.com/partyzanex/padmark/internal/infra/storage/postgres"
 	sqliterepo "github.com/partyzanex/padmark/internal/infra/storage/sqlite"
+	"github.com/partyzanex/padmark/internal/testutil"
 	keys "github.com/partyzanex/padmark/internal/usecases/contentkeys"
+	"github.com/partyzanex/padmark/tests/internal/testenv"
 )
 
 type snapshot func(*testing.T) *bun.DB
 
+// EncryptionSuite runs the content-key scenarios on one backend. Each scenario empties the
+// tables first (reset), so the scenarios share one database.
+type EncryptionSuite struct {
+	suite.Suite
+
+	// prepare returns the migrated database of the backend and the backup of that database.
+	prepare func(t *testing.T) (*bun.DB, snapshot)
+	db      *bun.DB
+	backup  snapshot
+}
+
 func TestSQLiteEncryption(t *testing.T) {
+	encryption := new(EncryptionSuite)
+	encryption.prepare = prepareSQLite
+	suite.Run(t, encryption)
+}
+
+func TestPostgresEncryption(t *testing.T) {
+	encryption := new(EncryptionSuite)
+	encryption.prepare = preparePostgres
+	suite.Run(t, encryption)
+}
+
+func (s *EncryptionSuite) SetupSuite() {
+	s.db, s.backup = s.prepare(s.T())
+}
+
+func (s *EncryptionSuite) TestAutomaticStartupResumeAndNoop() { testAutomaticStartup(s.T(), s.db) }
+
+func (s *EncryptionSuite) TestConcurrentInitializePreservesWinner() {
+	testConcurrentInitialize(s.T(), s.db)
+}
+
+func (s *EncryptionSuite) TestMigrationRotationRestore() {
+	testMigrationRotationRestore(s.T(), s.db, s.backup)
+}
+
+func (s *EncryptionSuite) TestRestartAfterFailureAndPagination() {
+	testRestartAfterFailure(s.T(), s.db)
+}
+
+func (s *EncryptionSuite) TestInvalidInitialRecordCounts() { testInvalidInitialRecord(s.T(), s.db) }
+
+func (s *EncryptionSuite) TestConcurrentUpdateAndDeleteUseCAS() { testConcurrentCAS(s.T(), s.db) }
+
+func (s *EncryptionSuite) TestMissingSubstitutedKeysAndCorruption() {
+	testKeysAndCorruption(s.T(), s.db)
+}
+
+func (s *EncryptionSuite) TestPruneCorruptRawPaginationAndPreservation() {
+	testPruneCorruptRaw(s.T(), s.db)
+}
+
+func (s *EncryptionSuite) TestPruneConcurrentUpdateAndDelete() { testPruneConcurrentCAS(s.T(), s.db) }
+
+func (s *EncryptionSuite) TestPrunePartialFailureResumes() { testPrunePartialFailure(s.T(), s.db) }
+
+// prepareSQLite makes a migrated SQLite database. Its backup is a VACUUM INTO copy.
+func prepareSQLite(t *testing.T) (*bun.DB, snapshot) {
+	t.Helper()
+
 	db, err := sqliterepo.Open(filepath.Join(t.TempDir(), "source.db"), slog.New(slog.DiscardHandler))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, db.Close()) })
 	_, err = sqliterepo.Migrate(t.Context(), db)
 	require.NoError(t, err)
-	runEncryptionSuite(t, db, func(t *testing.T) *bun.DB {
+
+	return db, func(t *testing.T) *bun.DB {
 		t.Helper()
 		path := filepath.Join(t.TempDir(), "restore.db")
 		_, err := db.NewRaw("VACUUM INTO ?", path).Exec(t.Context())
@@ -48,45 +107,30 @@ func TestSQLiteEncryption(t *testing.T) {
 		t.Cleanup(func() { require.NoError(t, restored.Close()) })
 
 		return restored
-	})
+	}
 }
 
-func TestPostgresEncryption(t *testing.T) {
-	ctx := t.Context()
-	container, err := tcpostgres.Run(ctx, "postgres:18-alpine", tcpostgres.WithDatabase("padmark_test"),
-		tcpostgres.WithUsername("test"), tcpostgres.WithPassword("test"), tcpostgres.BasicWaitStrategies())
+// preparePostgres makes a migrated database on the shared PostgreSQL container. Its backup is a
+// pg_dump that pg_restore writes into a new database.
+func preparePostgres(t *testing.T) (*bun.DB, snapshot) {
+	t.Helper()
+
+	database := testenv.Postgres(t)
+	db := database.Open(t)
+
+	_, err := pgrepo.Migrate(t.Context(), db)
 	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, testcontainers.TerminateContainer(container)) })
 
-	dsn, err := container.ConnectionString(ctx, "sslmode=disable")
-	require.NoError(t, err)
-
-	db := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn))), pgdialect.New())
-
-	t.Cleanup(func() { require.NoError(t, db.Close()) })
-
-	_, err = pgrepo.Migrate(ctx, db)
-	require.NoError(t, err)
-	runEncryptionSuite(t, db, func(t *testing.T) *bun.DB {
+	return db, func(t *testing.T) *bun.DB {
 		t.Helper()
 
-		for _, command := range [][]string{
-			{"pg_dump", "-U", "test", "-d", "padmark_test", "-Fc", "-f", "/tmp/content-backup.dump"},
-			{"createdb", "-U", "test", "restored"},
-			{"pg_restore", "-U", "test", "-d", "restored", "/tmp/content-backup.dump"},
-		} {
-			code, _, err := container.Exec(t.Context(), command)
-			require.NoError(t, err)
-			require.Zero(t, code)
-		}
+		dump := "/tmp/" + database.Name + "-content-backup.dump"
+		restored := testenv.Postgres(t)
+		database.Exec(t, "pg_dump", "-U", testenv.PostgresUser, "-d", database.Name, "-Fc", "-f", dump)
+		database.Exec(t, "pg_restore", "-U", testenv.PostgresUser, "-d", restored.Name, dump)
 
-		restoreDSN := strings.Replace(dsn, "/padmark_test", "/restored", 1)
-		restored := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(restoreDSN))), pgdialect.New())
-
-		t.Cleanup(func() { require.NoError(t, restored.Close()) })
-
-		return restored
-	})
+		return restored.Open(t)
+	}
 }
 
 func testKeyring() *crypto.ContentKeyring {
@@ -100,10 +144,12 @@ func manager(t *testing.T, store keys.Storage, ring *crypto.ContentKeyring) *key
 	require.NoError(t, err)
 	links, err := ring.ForResource("link")
 	require.NoError(t, err)
+	files, err := ring.ForResource("file")
+	require.NoError(t, err)
 
-	return keys.New(store, ring, notes, links, crypto.NewEditCodeHasher(crypto.Argon2Params{
-		Memory: 0, Time: 0, Threads: 0,
-	}))
+	hasher := crypto.NewEditCodeHasher(testutil.Argon2Params(), slog.New(slog.DiscardHandler))
+
+	return keys.New(store, ring, notes, links, files, hasher)
 }
 
 func reset(t *testing.T, db *bun.DB) {
@@ -163,38 +209,6 @@ func metadata(t *testing.T, db *bun.DB, table, id string) map[string]any {
 	delete(record, "target_url")
 
 	return record
-}
-
-func runEncryptionSuite(t *testing.T, db *bun.DB, backup snapshot) {
-	t.Helper()
-	t.Run("automatic_startup_resume_and_noop", func(t *testing.T) { testAutomaticStartup(t, db) })
-	t.Run("concurrent_initialize_preserves_winner", func(t *testing.T) {
-		testConcurrentInitialize(t, db)
-	})
-	t.Run("migration_rotation_restore", func(t *testing.T) {
-		testMigrationRotationRestore(t, db, backup)
-	})
-	t.Run("restart_after_failure_and_pagination", func(t *testing.T) {
-		testRestartAfterFailure(t, db)
-	})
-	t.Run("invalid_initial_record_counts", func(t *testing.T) {
-		testInvalidInitialRecord(t, db)
-	})
-	t.Run("concurrent_update_and_delete_use_CAS", func(t *testing.T) {
-		testConcurrentCAS(t, db)
-	})
-	t.Run("missing_substituted_keys_and_corruption", func(t *testing.T) {
-		testKeysAndCorruption(t, db)
-	})
-	t.Run("prune_corrupt_raw_pagination_and_preservation", func(t *testing.T) {
-		testPruneCorruptRaw(t, db)
-	})
-	t.Run("prune_concurrent_update_and_delete", func(t *testing.T) {
-		testPruneConcurrentCAS(t, db)
-	})
-	t.Run("prune_partial_failure_resumes", func(t *testing.T) {
-		testPrunePartialFailure(t, db)
-	})
 }
 
 type interceptStorage struct {

@@ -6,18 +6,15 @@ import (
 	"log/slog"
 	"path/filepath"
 	"syscall"
-	"testing"
 	"time"
-
-	"github.com/stretchr/testify/require"
 
 	"github.com/partyzanex/padmark/internal/infra/crypto"
 )
 
 // Opening a FIFO blocks until a writer appears, so the type check must precede the open.
-func TestLoadContentKeyring_RejectsFIFOWithoutBlocking(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "keys.fifo")
-	require.NoError(t, syscall.Mkfifo(path, 0o600))
+func (s *KeyringLoadSuite) TestLoadContentKeyring_RejectsFIFOWithoutBlocking() {
+	path := filepath.Join(s.T().TempDir(), "keys.fifo")
+	s.Require().NoError(syscall.Mkfifo(path, 0o600))
 
 	done := make(chan error, 1)
 
@@ -28,13 +25,13 @@ func TestLoadContentKeyring_RejectsFIFOWithoutBlocking(t *testing.T) {
 
 	select {
 	case err := <-done:
-		require.ErrorContains(t, err, "regular file")
+		s.Require().ErrorContains(err, "regular file")
 	case <-time.After(5 * time.Second):
-		t.Fatal("LoadContentKeyring blocked on a FIFO")
+		s.T().Fatal("LoadContentKeyring blocked on a FIFO")
 	}
 }
 
-func TestLoadContentKeyring_RejectsDirectory(t *testing.T) {
-	_, err := crypto.LoadContentKeyring(t.TempDir(), slog.New(slog.DiscardHandler), strictLoad())
-	require.ErrorContains(t, err, "regular file")
+func (s *KeyringLoadSuite) TestLoadContentKeyring_RejectsDirectory() {
+	_, err := crypto.LoadContentKeyring(s.T().TempDir(), slog.New(slog.DiscardHandler), strictLoad())
+	s.Require().ErrorContains(err, "regular file")
 }

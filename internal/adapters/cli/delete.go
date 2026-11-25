@@ -57,28 +57,13 @@ func deleteAction(ctx context.Context, cmd *urcli.Command) error {
 		return errorcontext.Wrap(handleDeleteNoteRes(res), "decode delete note response")
 	}
 
-	return errorcontext.Wrap(runDeleteCommand(ctx, cmd, noteIDArg, deleteNote), "delete resource")
+	return errorcontext.Wrap(runDeleteCommand(ctx, cmd, noteRecord(), deleteNote), "delete resource")
 }
 
 func handleDeleteNoteRes(res padmark.DeleteNoteRes) error {
-	switch typed := res.(type) {
-	case *padmark.DeleteNoteNoContent:
+	if _, ok := res.(*padmark.DeleteNoteNoContent); ok {
 		return nil
-	case *padmark.DeleteNoteUnauthorized:
-		return ErrUnauthorized
-	case *padmark.DeleteNoteForbidden:
-		return errNoteOwnershipRequired
-	case *padmark.DeleteNoteNotFound:
-		return ErrNoteNotFound
-	case *padmark.DeleteNoteTooManyRequests:
-		return ErrRateLimited
-	case *padmark.DeleteNoteServiceUnavailable:
-		return errorcontext.Wrap(
-			serviceUnavailableError(padmark.ErrorResponse(*typed)), "decode service unavailable response",
-		)
-	case *padmark.DeleteNoteInternalServerError:
-		return fmt.Errorf("%w: %s", ErrServer, typed.Message)
-	default:
-		return fmt.Errorf("%w: %T", ErrUnexpectedResponse, res)
 	}
+
+	return responseError(res, noteRecord(), mutationRules())
 }

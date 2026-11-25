@@ -25,6 +25,8 @@ var (
 	errInvalidArgon2Cost     = errors.New("cost must be between")
 	errInvalidBootstrapToken = errors.New("invalid bootstrap token length")
 	errInvalidCSRFSecret     = errors.New("invalid csrf secret length")
+	errInvalidMaxFileSize    = errors.New("max file size must be at least 1 byte")
+	errS3Config              = errors.New("invalid s3 configuration")
 	errInvalidPublicScheme   = errors.New("invalid public scheme")
 	errInvalidTrustedProxy   = errors.New("invalid trusted proxy address")
 	errUnknownStorage        = errors.New("unknown storage backend")

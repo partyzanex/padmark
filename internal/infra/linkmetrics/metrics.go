@@ -1,8 +1,7 @@
-// Package linkmetrics provides a Prometheus-backed implementation of links.Metrics — the
-// counters documented in TODO.md's Phase 3 section: padmark_links_created_total,
-// padmark_links_redirects_total, padmark_links_collisions_total. Naming follows this project's
-// {namespace}_{subsystem}_{metric_name}_{unit} convention (see ~/.claude/docs/observability.md):
-// namespace "padmark", subsystem "links".
+// Package linkmetrics provides a Prometheus-backed implementation of links.Metrics with the
+// counters padmark_links_created_total, padmark_links_redirects_total and
+// padmark_links_collisions_total. The names use the {namespace}_{subsystem}_{metric_name}_{unit}
+// form: namespace "padmark", subsystem "links".
 package linkmetrics
 
 import (

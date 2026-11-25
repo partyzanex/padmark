@@ -26,6 +26,28 @@ type Handler interface {
 	//
 	// POST /api/tokens
 	CreateAPIToken(ctx context.Context, req OptCreateAPITokenRequest) (CreateAPITokenRes, error)
+	// CreateFile implements createFile operation.
+	//
+	// Uploads one file and returns its description with the one-time `edit_code`.
+	// Send `multipart/form-data`. Put the optional text fields `ttl`, `privacy`,
+	// `burn_after_download`, `slug` and `edit_code` first. Put the `file` part last.
+	// A part after `file` gives `400`, and the server does not keep the file.
+	// The server streams the file to object storage and does not keep it in memory.
+	// Each text field can have a maximum of 1024 bytes and can occur one time. An unknown
+	// field name or a repeated field gives `400`. All data before the `file` part,
+	// part headers included, can have a maximum of 64 KiB. If `slug` is omitted, the server
+	// generates a 10-character random slug. The file name comes from the `filename` of the
+	// `file` part.
+	// A `Content-Length` above the limit gets `413` before the server reads the body. An
+	// upload that sends no data for the idle timeout (60 seconds by default) gets `408`.
+	// The server limits the number of uploads at the same time, in total and for each client
+	// IP address. A full limit gives `503` (server) or `429` (client) with `Retry-After`.
+	// An error response before the end of the body has `Connection: close`.
+	// A bearer token that is not valid does not give `401`: the server ignores it and the
+	// file has no owner, as for `POST /notes` and `POST /links`.
+	//
+	// POST /files
+	CreateFile(ctx context.Context, req *CreateFileRequestMultipart) (CreateFileRes, error)
 	// CreateInvite implements createInvite operation.
 	//
 	// The JSON counterpart of the admin panel's `POST /admin/invite`. Requires an **admin**
@@ -65,6 +87,14 @@ type Handler interface {
 	//
 	// POST /notes
 	CreateNote(ctx context.Context, req *CreateNoteRequest) (CreateNoteRes, error)
+	// DeleteFile implements deleteFile operation.
+	//
+	// Deletes the file record and its stored content. Send the edit code in the
+	// `X-Edit-Code` header. The account that uploaded the file can omit the edit code.
+	// The server ignores an `edit_code` query parameter.
+	//
+	// DELETE /files/{id}
+	DeleteFile(ctx context.Context, params DeleteFileParams) (DeleteFileRes, error)
 	// DeleteLink implements deleteLink operation.
 	//
 	// Permanently deletes the link. The edit code must be supplied as the `X-Edit-Code`
@@ -90,12 +120,40 @@ type Handler interface {
 	//
 	// DELETE /notes/{id}
 	DeleteNote(ctx context.Context, params DeleteNoteParams) (DeleteNoteRes, error)
+	// GetFile implements getFile operation.
+	//
+	// Returns the file description as JSON. This read does not download the content, does not
+	// increment `downloads` and does not consume a `burn_after_download` file.
+	//
+	// GET /files/{id}
+	GetFile(ctx context.Context, params GetFileParams) (GetFileRes, error)
+	// GetFileContent implements getFileContent operation.
+	//
+	// Sends the file content as `application/octet-stream` with
+	// `Content-Disposition: attachment`. Each download increments `downloads`. `HEAD` sends
+	// only the headers and does not count a download.
+	// A `burn_after_download` file is deleted after this download. Send
+	// `Accept: application/octet-stream` to show that the download is deliberate. Without a
+	// deliberate `Accept`, the server answers `409` with code `burn_read_not_explicit` and
+	// the file stays. A request with browser fetch metadata (`Sec-Fetch-Site`) or a prefetch
+	// never consumes the file: a browser that asks for HTML goes to the file page (`303`),
+	// whose download form (`POST` with a CSRF token) consumes it.
+	// If object storage fails before the first byte, the server answers `503` without the
+	// download headers. If the transfer stops after the first byte, the server closes the
+	// connection, and the client gets fewer bytes than `Content-Length`. Discard such a
+	// file. A download that makes no progress for the idle timeout (60 seconds by default)
+	// stops in the same way.
+	//
+	// GET /files/{id}/download
+	GetFileContent(ctx context.Context, params GetFileContentParams) (GetFileContentRes, error)
 	// GetLink implements getLink operation.
 	//
 	// Returns the link as JSON, including its decrypted `target_url`. This is a metadata-only
 	// read: it does not increment `views`, does not consume a `burn_after_click` link, and does
 	// not follow the redirect — visiting `GET /{id}` does all of that. See the "Short links"
-	// section above.
+	// section above. A client whose `Accept` header prefers `text/html` gets the browser page
+	// of the link instead, with the same privacy and expiry rules; send `Accept:
+	// application/json` to get this response.
 	//
 	// GET /links/{id}
 	GetLink(ctx context.Context, params GetLinkParams) (GetLinkRes, error)
@@ -129,6 +187,16 @@ type Handler interface {
 	//
 	// GET /readyz
 	Readyz(ctx context.Context) (ReadyzRes, error)
+	// UpdateFile implements updateFile operation.
+	//
+	// Changes the expiry, the privacy level and the burn-after-download rule of a file.
+	// It does not change the content, the name, the slug, the owner or `downloads`.
+	// An omitted field keeps its current value. Send the edit code in the `X-Edit-Code`
+	// header. The account that uploaded the file can omit the edit code. Returns the changed
+	// file description. The edit code is not returned again.
+	//
+	// PUT /files/{id}
+	UpdateFile(ctx context.Context, req *UpdateFileRequest, params UpdateFileParams) (UpdateFileRes, error)
 	// UpdateLink implements updateLink operation.
 	//
 	// Replaces the destination URL, preserving the slug, edit code, click count, owner,

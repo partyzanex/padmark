@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 
 	urcli "github.com/urfave/cli/v3"
 
+	"github.com/partyzanex/padmark/internal/clientauth"
 	"github.com/partyzanex/padmark/internal/clifactory"
 	padmark "github.com/partyzanex/padmark/pkg/client"
 )
@@ -21,22 +23,25 @@ func pingCommand() *urcli.Command {
 }
 
 func pingAction(ctx context.Context, cmd *urcli.Command) error {
-	padmarkClient, err := newPadmarkClient(cmd)
+	padmarkClient, server, err := clientauth.NewClient(clientSettings(cmd))
 	if err != nil {
 		return fmt.Errorf("create API client: %w", err)
 	}
 
-	erw := &errWriter{w: os.Stdout, err: nil}
-	erw.printf("server: %s\n", resolveServerURL(cmd))
+	callCtx, cancel := requestContext(ctx, cmd)
+	defer cancel()
 
-	liveErr := checkLiveness(ctx, padmarkClient)
+	erw := &errWriter{w: os.Stdout, err: nil}
+	erw.printf("server: %s\n", server.URL)
+
+	liveErr := checkLiveness(callCtx, padmarkClient)
 	if liveErr != nil {
 		erw.printf("healthz: FAIL (%s)\n", liveErr)
 	} else {
 		erw.printf("healthz: OK\n")
 	}
 
-	readyErr := checkReadiness(ctx, padmarkClient)
+	readyErr := checkReadiness(callCtx, padmarkClient)
 	if readyErr != nil {
 		erw.printf("readyz:  FAIL (%s)\n", readyErr)
 	} else {
@@ -67,12 +72,11 @@ func checkReadiness(ctx context.Context, cl *padmark.Client) error {
 		return fmt.Errorf("readyz: %w", err)
 	}
 
-	switch typed := res.(type) {
-	case *padmark.ReadyzOK:
+	if _, ok := res.(*padmark.ReadyzOK); ok {
 		return nil
-	case *padmark.ErrorResponse:
-		return fmt.Errorf("%w: %s", ErrServiceUnavailable, typed.Message)
-	default:
-		return fmt.Errorf("%w: %T", ErrUnexpectedResponse, res)
 	}
+
+	return responseError(res, accountRecord(), statusRules{
+		http.StatusServiceUnavailable: withMessage(ErrServiceUnavailable),
+	})
 }

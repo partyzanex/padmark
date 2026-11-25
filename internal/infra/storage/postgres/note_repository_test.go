@@ -4,17 +4,12 @@ package postgres
 
 import (
 	"context"
-	"database/sql"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/suite"
-	"github.com/testcontainers/testcontainers-go"
-	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect/pgdialect"
-	"github.com/uptrace/bun/driver/pgdriver"
 
 	"github.com/partyzanex/padmark/internal/domain"
 )
@@ -22,33 +17,12 @@ import (
 type RepositoryTestSuite struct {
 	suite.Suite
 
-	container *tcpostgres.PostgresContainer
-	db        *bun.DB
-	repo      *NoteRepository
+	db   *bun.DB
+	repo *NoteRepository
 }
 
 func (s *RepositoryTestSuite) SetupSuite() {
-	ctx := s.T().Context()
-
-	container, err := tcpostgres.Run(ctx, "postgres:18-alpine",
-		tcpostgres.WithDatabase("padmark_test"),
-		tcpostgres.WithUsername("test"),
-		tcpostgres.WithPassword("test"),
-		tcpostgres.BasicWaitStrategies(),
-	)
-	s.Require().NoError(err)
-
-	s.container = container
-
-	dsn, err := container.ConnectionString(ctx, "sslmode=disable")
-	s.Require().NoError(err)
-
-	sqldb := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
-	s.db = bun.NewDB(sqldb, pgdialect.New())
-	s.Require().NoError(s.db.PingContext(ctx))
-
-	_, migrateErr := Migrate(ctx, s.db)
-	s.Require().NoError(migrateErr)
+	s.db = newTestDB(s.T())
 
 	s.repo = NewNoteRepository(s.db)
 }
@@ -56,10 +30,6 @@ func (s *RepositoryTestSuite) SetupSuite() {
 func (s *RepositoryTestSuite) TearDownSuite() {
 	if s.db != nil {
 		s.NoError(s.db.Close())
-	}
-
-	if s.container != nil {
-		s.NoError(testcontainers.TerminateContainer(s.container))
 	}
 }
 
@@ -173,7 +143,7 @@ func (s *RepositoryTestSuite) TestUpdate_PreservesOwnerID() {
 
 	updated := newNote("owned-update", "new title", "new content")
 	updated.OwnerID = &attackerID
-	s.Require().NoError(s.repo.Update(ctx, "owned-update", updated))
+	s.Require().NoError(s.repo.Update(ctx, "owned-update", updated, time.Now()))
 
 	got, err := s.repo.Get(ctx, "owned-update")
 	s.Require().NoError(err)
@@ -203,23 +173,6 @@ func (s *RepositoryTestSuite) TestGet_NotFound() {
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
-func (s *RepositoryTestSuite) TestExists_True() {
-	ctx := s.T().Context()
-
-	s.Require().NoError(s.repo.Create(ctx, newNote("exists-1", "t", "c")))
-
-	exists, err := s.repo.Exists(ctx, "exists-1")
-	s.Require().NoError(err)
-	s.True(exists)
-}
-
-func (s *RepositoryTestSuite) TestExists_False() {
-	exists, err := s.repo.Exists(s.T().Context(), "missing")
-
-	s.Require().NoError(err)
-	s.False(exists)
-}
-
 // ── Update ──.
 
 func (s *RepositoryTestSuite) TestUpdate_OK() {
@@ -237,7 +190,7 @@ func (s *RepositoryTestSuite) TestUpdate_OK() {
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
 		ClearExpiry: false, ShowContents: nil,
 	}
-	err := s.repo.Update(ctx, "u1", updated)
+	err := s.repo.Update(ctx, "u1", updated, time.Now())
 	s.Require().NoError(err)
 
 	got, err := s.repo.Get(ctx, "u1")
@@ -265,7 +218,7 @@ func (s *RepositoryTestSuite) TestUpdate_ExpiresAt() {
 		ClearExpiry: false, ShowContents: nil,
 	}
 
-	s.Require().NoError(s.repo.Update(ctx, "u2", updated))
+	s.Require().NoError(s.repo.Update(ctx, "u2", updated, time.Now()))
 
 	got, err := s.repo.Get(ctx, "u2")
 	s.Require().NoError(err)
@@ -288,7 +241,7 @@ func (s *RepositoryTestSuite) TestUpdate_BurnAfterReading() {
 		EditCode: "", Views: 0, BurnTTL: 0, ClearExpiry: false, ShowContents: nil,
 	}
 
-	s.Require().NoError(s.repo.Update(ctx, "u3", updated))
+	s.Require().NoError(s.repo.Update(ctx, "u3", updated, time.Now()))
 
 	got, err := s.repo.Get(ctx, "u3")
 	s.Require().NoError(err)
@@ -307,7 +260,7 @@ func (s *RepositoryTestSuite) TestUpdate_NotFound() {
 		BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 
-	err := s.repo.Update(s.T().Context(), "nonexistent", note)
+	err := s.repo.Update(s.T().Context(), "nonexistent", note, time.Now())
 
 	s.ErrorIs(err, domain.ErrNotFound)
 }
@@ -333,7 +286,7 @@ func (s *RepositoryTestSuite) TestUpdate_Privacy_Nil_PreservesExistingValue() {
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
 		ClearExpiry: false, ShowContents: nil,
 	}
-	s.Require().NoError(s.repo.Update(ctx, "priv-nil-1", updated))
+	s.Require().NoError(s.repo.Update(ctx, "priv-nil-1", updated, time.Now()))
 
 	got, err := s.repo.Get(ctx, "priv-nil-1")
 	s.Require().NoError(err)
@@ -361,7 +314,7 @@ func (s *RepositoryTestSuite) TestUpdate_Privacy_ExplicitPublic_ClearsPrivacy() 
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
 		ClearExpiry: false, ShowContents: nil,
 	}
-	s.Require().NoError(s.repo.Update(ctx, "priv-false-1", updated))
+	s.Require().NoError(s.repo.Update(ctx, "priv-false-1", updated, time.Now()))
 
 	got, err := s.repo.Get(ctx, "priv-false-1")
 	s.Require().NoError(err)
@@ -388,7 +341,7 @@ func (s *RepositoryTestSuite) TestUpdate_ContentType_Nil_PreservesExistingValue(
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
 		ClearExpiry: false, ShowContents: nil,
 	}
-	s.Require().NoError(s.repo.Update(ctx, "ct-nil-pg", updated))
+	s.Require().NoError(s.repo.Update(ctx, "ct-nil-pg", updated, time.Now()))
 
 	got, err := s.repo.Get(ctx, "ct-nil-pg")
 	s.Require().NoError(err)
@@ -415,7 +368,7 @@ func (s *RepositoryTestSuite) TestUpdate_ContentType_ExplicitChange() {
 		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
 		ClearExpiry: false, ShowContents: nil,
 	}
-	s.Require().NoError(s.repo.Update(ctx, "ct-change-pg", updated))
+	s.Require().NoError(s.repo.Update(ctx, "ct-change-pg", updated, time.Now()))
 
 	got, err := s.repo.Get(ctx, "ct-change-pg")
 	s.Require().NoError(err)
@@ -449,14 +402,14 @@ func (s *RepositoryTestSuite) TestDelete_OK() {
 	ctx := s.T().Context()
 	s.Require().NoError(s.repo.Create(ctx, newNote("d1", "del", "me")))
 
-	s.Require().NoError(s.repo.Delete(ctx, "d1"))
+	s.Require().NoError(s.repo.Delete(ctx, "d1", ""))
 
 	_, err := s.repo.Get(ctx, "d1")
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
 func (s *RepositoryTestSuite) TestDelete_NotFound() {
-	err := s.repo.Delete(s.T().Context(), "nonexistent")
+	err := s.repo.Delete(s.T().Context(), "nonexistent", "")
 
 	s.ErrorIs(err, domain.ErrNotFound)
 }
@@ -470,7 +423,7 @@ func (s *RepositoryTestSuite) TestConsume_BurnAfterReading() {
 	n.BurnAfterReading = true
 	s.Require().NoError(s.repo.Create(ctx, n))
 
-	got, err := s.repo.Consume(ctx, "con-bar", domain.PrivacyPublic)
+	got, err := s.repo.Consume(ctx, "con-bar", domain.PrivacyPublic, "", time.Now())
 	s.Require().NoError(err)
 	s.Equal("con-bar", got.ID)
 
@@ -486,7 +439,7 @@ func (s *RepositoryTestSuite) TestConsume_Expired() {
 	n.ExpiresAt = &past
 	s.Require().NoError(s.repo.Create(ctx, n))
 
-	got, err := s.repo.Consume(ctx, "con-exp", domain.PrivacyPublic)
+	got, err := s.repo.Consume(ctx, "con-exp", domain.PrivacyPublic, "", time.Now())
 	s.Require().NoError(err)
 	s.Equal("con-exp", got.ID)
 
@@ -499,7 +452,7 @@ func (s *RepositoryTestSuite) TestConsume_NotEligible() {
 
 	s.Require().NoError(s.repo.Create(ctx, newNote("con-no", "plain", "me")))
 
-	_, err := s.repo.Consume(ctx, "con-no", domain.PrivacyPublic)
+	_, err := s.repo.Consume(ctx, "con-no", domain.PrivacyPublic, "", time.Now())
 	s.Require().ErrorIs(err, domain.ErrNotFound)
 
 	// note must still exist.
@@ -520,10 +473,10 @@ func (s *RepositoryTestSuite) TestBurn_PrivacyChanged_RowUntouched() {
 	n.BurnTTL = 60
 	s.Require().NoError(s.repo.Create(ctx, n))
 
-	_, err := s.repo.SetBurnExpiry(ctx, "burn-priv", time.Now().Add(time.Minute), domain.PrivacyPublic)
+	_, err := s.repo.SetBurnExpiry(ctx, "burn-priv", time.Now().Add(time.Minute), domain.PrivacyPublic, "")
 	s.Require().ErrorIs(err, domain.ErrNotFound)
 
-	_, err = s.repo.Consume(ctx, "burn-priv", domain.PrivacyPublic)
+	_, err = s.repo.Consume(ctx, "burn-priv", domain.PrivacyPublic, "", time.Now())
 	s.Require().ErrorIs(err, domain.ErrNotFound)
 
 	stored, err := s.repo.Get(ctx, "burn-priv")
@@ -531,7 +484,7 @@ func (s *RepositoryTestSuite) TestBurn_PrivacyChanged_RowUntouched() {
 	s.True(stored.BurnAfterReading, "the timer must not start for a changed access level")
 	s.Nil(stored.ExpiresAt)
 
-	got, err := s.repo.Consume(ctx, "burn-priv", domain.PrivacyAuthenticated)
+	got, err := s.repo.Consume(ctx, "burn-priv", domain.PrivacyAuthenticated, "", time.Now())
 	s.Require().NoError(err)
 	s.Equal("burn-priv", got.ID)
 }
@@ -551,19 +504,19 @@ func (s *RepositoryTestSuite) TestDeleteExpired_KeepsExtendedNote() {
 	expired.ExpiresAt = &past
 	s.Require().NoError(s.repo.Create(ctx, expired))
 
-	s.Require().ErrorIs(s.repo.DeleteExpired(ctx, "del-exp-live"), domain.ErrNotFound)
+	s.Require().ErrorIs(s.repo.DeleteExpired(ctx, "del-exp-live", time.Now()), domain.ErrNotFound)
 
 	_, err := s.repo.Get(ctx, "del-exp-live")
 	s.Require().NoError(err, "an extended note must stay")
 
-	s.Require().NoError(s.repo.DeleteExpired(ctx, "del-exp-old"))
+	s.Require().NoError(s.repo.DeleteExpired(ctx, "del-exp-old", time.Now()))
 
 	_, err = s.repo.Get(ctx, "del-exp-old")
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
 func (s *RepositoryTestSuite) TestConsume_NotFound() {
-	_, err := s.repo.Consume(s.T().Context(), "con-missing", domain.PrivacyPublic)
+	_, err := s.repo.Consume(s.T().Context(), "con-missing", domain.PrivacyPublic, "", time.Now())
 
 	s.ErrorIs(err, domain.ErrNotFound)
 }
@@ -603,10 +556,10 @@ func (s *RepositoryTestSuite) TestRoundtrip_CRUD() {
 		UpdatedAt:   time.Now(),
 
 		ExpiresAt: nil, Privacy: nil, OwnerID: nil, ID: "",
-		EditCode: "", Views: 0, BurnTTL: 0, BurnAfterReading: false,
+		EditCode: got.EditCode, Views: 0, BurnTTL: 0, BurnAfterReading: false,
 		ClearExpiry: false, ShowContents: nil,
 	}
-	s.Require().NoError(s.repo.Update(ctx, "rt1", updated))
+	s.Require().NoError(s.repo.Update(ctx, "rt1", updated, time.Now()))
 
 	got, err = s.repo.Get(ctx, "rt1")
 	s.Require().NoError(err)
@@ -621,7 +574,7 @@ func (s *RepositoryTestSuite) TestRoundtrip_CRUD() {
 	s.Equal(1, got.Views)
 
 	// Delete.
-	s.Require().NoError(s.repo.Delete(ctx, "rt1"))
+	s.Require().NoError(s.repo.Delete(ctx, "rt1", "edit123"))
 
 	_, err = s.repo.Get(ctx, "rt1")
 	s.ErrorIs(err, domain.ErrNotFound)

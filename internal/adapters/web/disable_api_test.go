@@ -6,11 +6,13 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/mock/gomock"
 
 	"github.com/partyzanex/padmark/internal/adapters/web"
+	"github.com/partyzanex/padmark/internal/domain"
 	padmark "github.com/partyzanex/padmark/pkg/client"
 )
 
@@ -21,6 +23,7 @@ type DisableAPISuite struct {
 	manager     *MockNoteManager
 	linkManager *MockLinkManager
 	pinger      *MockPinger
+	files       *MockFileManager
 }
 
 func TestDisableAPI(t *testing.T) {
@@ -32,28 +35,30 @@ func (s *DisableAPISuite) SetupTest() {
 	s.manager = NewMockNoteManager(s.ctrl)
 	s.linkManager = NewMockLinkManager(s.ctrl)
 	s.pinger = NewMockPinger(s.ctrl)
+	s.files = NewMockFileManager(s.ctrl)
 }
 
 func (s *DisableAPISuite) TearDownTest() {
 	s.ctrl.Finish()
 }
 
-func (s *DisableAPISuite) newRouter(disableAPI bool) http.Handler {
+// newRouter returns a router with --disable-api on. HandlerSuite.newRouter is the router with the
+// flag off: TestCreateNote_DefaultRouter_201WithNote checks that the API works there.
+func (s *DisableAPISuite) newRouter() http.Handler {
 	s.T().Helper()
 
-	handler := web.NewHandler(s.manager, s.linkManager, discardLog())
-	ogen := web.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
+	handlerCfg := testHandlerConfig(s.manager, s.linkManager, s.pinger)
+	handlerCfg.CSRFSecret = testCSRFSecret
+	handler := newTestHandler(s.T(), handlerCfg)
 
 	opts := web.RouterOptions{
 		MaxBodyBytes: 256 * 1024,
-		CSRFSecret:   testCSRFSecret,
-		DisableAPI:   disableAPI,
+		DisableAPI:   true,
 
-		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, AllowedHosts: nil, RateLimit: 0,
-		RateBurst: 0, SessionTTL: 0, DirectRedirect: false,
+		AllowedHosts: nil, RateLimit: 0, RateBurst: 0,
 	}
 
-	router, err := web.NewRouter(handler, ogen, &opts)
+	router, err := web.NewRouter(handler, &opts)
 	s.Require().NoError(err)
 
 	return router
@@ -64,7 +69,7 @@ func (s *DisableAPISuite) newRouter(disableAPI bool) http.Handler {
 // of these — if the request reached a real handler, the mock would fail the test on the
 // unexpected call, which proves the middleware prevents business logic from running.
 func (s *DisableAPISuite) TestAPIPaths_Return503WithCode() {
-	router := s.newRouter(true)
+	router := s.newRouter()
 
 	cases := []struct {
 		name   string
@@ -83,6 +88,7 @@ func (s *DisableAPISuite) TestAPIPaths_Return503WithCode() {
 		{"link read single-segment", http.MethodGet, "/links/" + testID, ""},
 		{"link update single-segment", http.MethodPut, "/links/" + testID, `{"target_url":"https://example.com"}`},
 		{"link delete single-segment", http.MethodDelete, "/links/" + testID, ""},
+		{"file update", http.MethodPut, "/files/" + testID, `{"ttl":null}`},
 		{"token create", http.MethodPost, "/api/tokens", ""},
 		{"invite create", http.MethodPost, "/api/invites", ""},
 		{"api docs", http.MethodGet, "/api", ""},
@@ -117,14 +123,14 @@ func (s *DisableAPISuite) TestAPIPaths_Return503WithCode() {
 // TestWebUI_Unaffected verifies the web UI and operational endpoints keep working when the API
 // is disabled — only the REST/JSON API surface is short-circuited.
 func (s *DisableAPISuite) TestWebUI_Unaffected() {
-	router := s.newRouter(true)
+	router := s.newRouter()
 
-	// The note view (no explicit Accept) and the editor each load the note via Peek; the view
-	// then applies the read policy to that snapshot, the editor only enforces expiry.
-	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(newTestNote("t", "c"), nil).Times(2)
-	s.manager.EXPECT().ViewPreloaded(gomock.Any(), testID, gomock.Any()).Return(newTestNote("t", "c"), nil)
-	s.manager.EXPECT().EnforceExpiry(gomock.Any(), testID, gomock.Any()).Return(nil)
-	s.linkManager.EXPECT().RedirectWithoutBurn(gomock.Any(), testID).Return(newTestLink(), nil)
+	// The note view (no explicit Accept) reads the note with all read rules; the editor reads it
+	// with Inspect, which applies only privacy and expiry. A request without an Accept that
+	// names a format is not deliberate, so the short link redirect cannot burn the link.
+	s.manager.EXPECT().Read(gomock.Any(), testID, gomock.Any()).Return(newTestNote("t", "c"), nil)
+	s.manager.EXPECT().Inspect(gomock.Any(), testID, gomock.Any()).Return(newTestNote("t", "c"), nil)
+	s.linkManager.EXPECT().Follow(gomock.Any(), testID, withBurn(false)).Return(newTestLink(), nil)
 	s.pinger.EXPECT().PingContext(gomock.Any()).Return(nil)
 
 	cases := []struct {
@@ -153,27 +159,9 @@ func (s *DisableAPISuite) TestWebUI_Unaffected() {
 	}
 }
 
-// TestDisableAPI_Off_APIStillWorks is the regression guard: with the flag off (default), the
-// middleware must not be wired in at all, and normal API traffic keeps working.
-func (s *DisableAPISuite) TestDisableAPI_Off_APIStillWorks() {
-	router := s.newRouter(false)
-
-	note := newTestNote("t", "c")
-	s.manager.EXPECT().Create(gomock.Any(), gomock.Any()).Return(note, nil)
-
-	r := httptest.NewRequest(http.MethodPost, "/notes", strings.NewReader(`{"title":"t","content":"c"}`))
-	r.Header.Set("Content-Type", "application/json")
-
-	w := httptest.NewRecorder()
-
-	router.ServeHTTP(w, r)
-
-	s.Equal(http.StatusCreated, w.Code)
-}
-
 // Exercise the generated decoder against the real middleware, not a synthetic 503 body.
 func (s *DisableAPISuite) TestGeneratedClient_DistinguishesDisabledAPIFromReadinessFailure() {
-	server := httptest.NewServer(s.newRouter(true))
+	server := httptest.NewServer(s.newRouter())
 	defer server.Close()
 
 	client, err := padmark.NewClient(server.URL)
@@ -196,4 +184,103 @@ func (s *DisableAPISuite) TestGeneratedClient_DistinguishesDisabledAPIFromReadin
 	s.Require().True(isUnavailable, "expected readiness error, got %T", readiness)
 	s.False(unavailable.Code.IsSet(), "a database failure must not look like a disabled API")
 	s.Equal("db unavailable", unavailable.Message)
+}
+
+// TestFilePages_VisibleWhileAPIDisabled: with --disable-api the file pages still render, but
+// upload, metadata, change and delete answer 503 without a call to the file usecase.
+func (s *DisableAPISuite) TestFilePages_VisibleWhileAPIDisabled() {
+	s.files.EXPECT().MaxSize().Return(int64(1 << 20)).AnyTimes()
+	s.files.EXPECT().Settings(gomock.Any(), testID, gomock.Any()).Return(&domain.File{
+		CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil, ID: testID, ObjectKey: "",
+		SealedMeta: "", Name: "a.txt", ContentKey: nil, EditCode: "hash", Size: 3, Downloads: 0,
+		BurnAfterDownload: false,
+	}, nil)
+
+	handlerCfg := testHandlerConfig(s.manager, s.linkManager, s.pinger)
+	handlerCfg.Files = s.files
+	handlerCfg.CSRFSecret = testCSRFSecret
+	handler := newTestHandler(s.T(), handlerCfg)
+	opts := web.RouterOptions{
+		MaxBodyBytes: 256 * 1024,
+		DisableAPI:   true,
+
+		AllowedHosts: nil, RateLimit: 0, RateBurst: 0,
+	}
+
+	router, err := web.NewRouter(handler, &opts)
+	s.Require().NoError(err)
+
+	// The editor of a file is at /edit/{id}: the note read tells that a file has the slug, so
+	// only the file Manager is called next.
+	expectOtherKindEditor(s.manager, testID, domain.KindFile)
+
+	pages := map[string]int{
+		"/files":                     http.StatusOK,
+		"/edit/" + testID:            http.StatusOK,
+		"/files/" + testID + "/edit": http.StatusMovedPermanently,
+	}
+	for path, status := range pages {
+		s.Run("page "+path, func() {
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			req.Header.Set("Accept", "text/html")
+
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+
+			s.Equal(status, rec.Code)
+		})
+	}
+
+	closed := []struct {
+		method string
+		path   string
+	}{
+		{http.MethodPost, "/files"},
+		{http.MethodGet, "/files/" + testID},
+		{http.MethodPut, "/files/" + testID},
+		{http.MethodDelete, "/files/" + testID},
+	}
+	for _, test := range closed {
+		s.Run(test.method+" "+test.path, func() {
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, httptest.NewRequest(test.method, test.path, strings.NewReader("")))
+
+			s.Equal(http.StatusServiceUnavailable, rec.Code)
+			s.JSONEq(`{"message":"API is disabled","code":"api_disabled"}`, rec.Body.String())
+		})
+	}
+}
+
+// TestLinkPages_VisibleWhileAPIDisabled: with --disable-api the short-link pages render, as the
+// note pages do, but the JSON read of the same path answers 503 without a call to the usecase.
+func (s *DisableAPISuite) TestLinkPages_VisibleWhileAPIDisabled() {
+	router := s.newRouter()
+
+	s.linkManager.EXPECT().Inspect(gomock.Any(), testID, gomock.Any()).Return(newTestLink(), nil)
+
+	pages := map[string]int{
+		"/links":                     http.StatusOK,
+		"/links/" + testID:           http.StatusOK,
+		"/links/" + testID + "/edit": http.StatusMovedPermanently,
+	}
+	for path, status := range pages {
+		s.Run("page "+path, func() {
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			req.Header.Set("Accept", "text/html")
+
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+
+			s.Equal(status, rec.Code)
+		})
+	}
+
+	read := httptest.NewRequest(http.MethodGet, "/links/"+testID, nil)
+	read.Header.Set("Accept", "application/json")
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, read)
+
+	s.Equal(http.StatusServiceUnavailable, rec.Code)
+	s.JSONEq(`{"message":"API is disabled","code":"api_disabled"}`, rec.Body.String())
 }

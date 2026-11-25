@@ -42,21 +42,6 @@ func GenerateTOTPSecret() (string, error) {
 	return key.Secret(), nil
 }
 
-// ValidateTOTP checks code against secret (base32) using RFC 6238, ±1 period window.
-// An invalid secret or malformed code returns false.
-func ValidateTOTP(secret, code string) bool {
-	valid, err := totp.ValidateCustom(code, secret, time.Now(), totp.ValidateOpts{
-		Period:    totpPeriod,
-		Skew:      totpWindow,
-		Digits:    otp.DigitsSix,
-		Algorithm: otp.AlgorithmSHA1,
-		// Encoder zero = default base32 encoding (otp.EncoderDefault), matches GenerateTOTPSecret's output.
-		Encoder: otp.EncoderDefault,
-	})
-
-	return valid && err == nil
-}
-
 // ValidateTOTPWithCounter validates code and returns the TOTP counter index that matched.
 // counter is the raw time-step value floor(unix/period); it is zero when the code is invalid.
 // Callers must reject codes whose counter ≤ the last accepted counter to prevent replay attacks.
@@ -115,7 +100,7 @@ func OTPAuthURI(issuer, username, secret string) (string, error) {
 func GenerateQRCodeDataURL(issuer, username, secret string) (string, error) {
 	uri, err := OTPAuthURI(issuer, username, secret)
 	if err != nil {
-		return "", fmt.Errorf("otpauth uri: %w", err)
+		return "", err
 	}
 
 	key, keyErr := otp.NewKeyFromURL(uri)

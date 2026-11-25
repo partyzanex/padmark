@@ -7,40 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"go.uber.org/mock/gomock"
 
-	"github.com/partyzanex/padmark/internal/adapters/web"
-	"github.com/partyzanex/padmark/internal/adapters/web/ogenapi"
 	"github.com/partyzanex/padmark/internal/domain"
 )
-
-func (s *HandlerSuite) TestOgenGetNotePrivacyBeforeView() {
-	for _, privacy := range []domain.Privacy{domain.PrivacyOwner, domain.PrivacyAuthenticated} {
-		note := newTestNote("private", "secret")
-		note.Privacy = &privacy
-		note.BurnAfterReading = true
-		s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
-
-		handler := web.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
-		result, err := handler.GetNote(s.T().Context(), ogenapi.GetNoteParams{ID: testID})
-		s.Require().NoError(err)
-		s.IsType(&ogenapi.GetNoteUnauthorized{
-			Message: "", Code: ogenapi.OptString{Value: "", Set: false},
-		}, result)
-		// No View/ViewPreloaded expectation: denied reads must not burn or increment views.
-	}
-}
-
-func (s *HandlerSuite) TestOgenGetNotePublicAppliesView() {
-	note := newTestNote("public", "body")
-	s.manager.EXPECT().Peek(gomock.Any(), testID).Return(note, nil)
-	s.manager.EXPECT().ViewPreloaded(gomock.Any(), testID, note).Return(note, nil)
-	handler := web.NewOgenHandler(s.manager, s.linkManager, s.pinger, discardLog())
-	result, err := handler.GetNote(s.T().Context(), ogenapi.GetNoteParams{ID: testID})
-	s.Require().NoError(err)
-	s.IsType(new(ogenapi.NoteResponse), result)
-}
 
 func (s *HandlerSuite) TestNoteTTLBoundaryValidation() {
 	paths := []string{"/notes", "/notes/" + testID, "/notes/project/GUIDE.md", "/links", "/links/" + testLinkID}
@@ -53,10 +23,6 @@ func (s *HandlerSuite) TestNoteTTLBoundaryValidation() {
 
 			if strings.HasPrefix(path, "/links") {
 				content = `"target_url":"https://example.com"`
-			}
-
-			if path == "/notes/project/GUIDE.md" {
-				s.expectMutationGate()
 			}
 
 			r := httptest.NewRequest(method, path, strings.NewReader(`{`+content+`,"ttl":`+ttl+`}`))
@@ -84,9 +50,8 @@ func (s *HandlerSuite) TestNativePutRequiresJSONContentType() {
 func (s *HandlerSuite) TestUpdateNotePlainTTL() {
 	for _, id := range []string{testID, "project/GUIDE.md"} {
 		for _, ttl := range []string{"", `,"ttl":null`, `,"ttl":3600`, `,"ttl":0`, `,"ttl":9223372036`} {
-			s.expectMutationGate()
-			s.manager.EXPECT().Update(gomock.Any(), id, "code", uuid.Nil, gomock.Any()).
-				DoAndReturn(func(_ context.Context, _, _ string, _ uuid.UUID, note *domain.Note) (*domain.Note, error) {
+			s.manager.EXPECT().Update(gomock.Any(), id, "code", noCaller(), gomock.Any()).
+				DoAndReturn(func(_ context.Context, _, _ string, _ domain.Reader, note *domain.Note) (*domain.Note, error) {
 					s.Zero(note.BurnTTL)
 					s.Equal(ttl == `,"ttl":null`, note.ClearExpiry)
 
@@ -125,9 +90,8 @@ func (s *HandlerSuite) TestUpdateNotePlainTTL() {
 func (s *HandlerSuite) TestUpdateNoteBurnTTLNullEqualsOmittedAndZero() {
 	for _, id := range []string{testID, "project/GUIDE.md"} {
 		for _, ttl := range []string{"", `,"ttl":null`, `,"ttl":0`} {
-			s.expectMutationGate()
-			s.manager.EXPECT().Update(gomock.Any(), id, "code", uuid.Nil, gomock.Any()).
-				DoAndReturn(func(_ context.Context, _, _ string, _ uuid.UUID, note *domain.Note) (*domain.Note, error) {
+			s.manager.EXPECT().Update(gomock.Any(), id, "code", noCaller(), gomock.Any()).
+				DoAndReturn(func(_ context.Context, _, _ string, _ domain.Reader, note *domain.Note) (*domain.Note, error) {
 					s.True(note.BurnAfterReading, "ttl=%q", ttl)
 					s.Zero(note.BurnTTL, "ttl=%q", ttl)
 					s.False(note.ClearExpiry, "ttl=%q", ttl)

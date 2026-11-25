@@ -53,7 +53,7 @@ const SchemeHTTP = "http"
 
 // RequestScheme returns the URL scheme ("http" or "https") to use when building absolute links
 // back to this server: the operator-forced override when set (--public-scheme, see
-// Handler.WithForcedScheme), otherwise the auto-detected value from IsHTTPS.
+// web.HandlerConfig.ForcedScheme), otherwise the auto-detected value from IsHTTPS.
 func RequestScheme(r *http.Request, forcedScheme string, trustedProxies []*net.IPNet) string {
 	if forcedScheme != "" {
 		return forcedScheme

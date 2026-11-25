@@ -9,6 +9,7 @@ import (
 	"go.uber.org/mock/gomock"
 
 	"github.com/partyzanex/padmark/internal/domain"
+	"github.com/partyzanex/padmark/internal/usecases/auth"
 )
 
 // headerUser returns a signed-in user for the header tests.
@@ -35,15 +36,19 @@ func getPage(router http.Handler, path, session string) *httptest.ResponseRecord
 	return rec
 }
 
-// TestHeader_AccountsOff_NoSignIn: without the account system nobody can sign in, so the header
-// has no "Sign in" button and no account block.
-func (s *HandlerSuite) TestHeader_AccountsOff_NoSignIn() {
+// TestHeader_AccountsAndFilesOff_NoSignInNoFileTab: without the account system nobody can sign
+// in, so the header has no "Sign in" button and no account block. Without object storage the
+// header has no "File" tab, because there is no upload page. The footer caption does not change.
+func (s *HandlerSuite) TestHeader_AccountsAndFilesOff_NoSignInNoFileTab() {
 	rec := getPage(s.router, "/", "")
+	body := rec.Body.String()
 
 	s.Require().Equal(http.StatusOK, rec.Code)
-	s.NotContains(rec.Body.String(), "header-signin")
-	s.NotContains(rec.Body.String(), "account-signout")
-	s.Contains(rec.Body.String(), `class="nav-tab" aria-current="page"`)
+	s.NotContains(body, "header-signin")
+	s.NotContains(body, "account-signout")
+	s.Contains(body, `class="nav-tab" aria-current="page"`)
+	s.NotContains(body, `href="/files"`)
+	s.Contains(body, "<span>Padmark — notes, links &amp; files</span>")
 }
 
 // TestHeader_SignedOut_ShowsSignIn: with accounts on, an anonymous visitor gets "Sign in" on a
@@ -111,11 +116,65 @@ func (s *AuthHandlerSuite) TestHeader_SessionLookupFails_ShowsSignIn() {
 	s.NotContains(rec.Body.String(), "account-signout")
 }
 
-// TestHeader_ReaderPage_HasNewButton: reader pages replace the create tabs with "New".
+// TestHeader_ReaderPage_HasNewButton: reader pages replace the create tabs with "New". The phone
+// menu is on reader pages too, also for a visitor who is not signed in.
 func (s *HandlerSuite) TestHeader_ReaderPage_HasNewButton() {
 	rec := getPage(s.router, "/success?id=abc", "")
 
 	s.Require().Equal(http.StatusOK, rec.Code)
 	s.Contains(rec.Body.String(), `class="btn-primary header-new"`)
 	s.NotContains(rec.Body.String(), `class="nav-create`)
+	s.Contains(rec.Body.String(), `id="menuBtn" aria-label="Menu"`)
+}
+
+// TestHeader_ReaderPage_SignedOut_ShowsSignIn: with accounts on, a reader page offers "Sign in"
+// as the create pages do.
+func (s *AuthHandlerSuite) TestHeader_ReaderPage_SignedOut_ShowsSignIn() {
+	rec := getPage(s.router, "/success?id=abc", "")
+
+	s.Require().Equal(http.StatusOK, rec.Code)
+	s.Contains(rec.Body.String(), `class="btn-primary header-new"`)
+	s.Contains(rec.Body.String(), `<a href="/login" class="btn-ghost header-signin">Sign in</a>`)
+}
+
+// TestHeader_AccountPages_SameHeader: the admin panel and the change-password page have the
+// header of the other pages: the create tabs with no current tab, "API" and "GitHub".
+func (s *AuthHandlerSuite) TestHeader_AccountPages_SameHeader() {
+	usr := s.adminUser()
+	s.auth.EXPECT().GetSession(gomock.Any(), "admin-sess").Return(usr, nil).AnyTimes()
+	s.auth.EXPECT().ListUsers(gomock.Any(), testAdminID).Return([]*domain.User{usr}, nil).AnyTimes()
+	s.auth.EXPECT().ListAPITokens(gomock.Any(), testAdminID).Return([]*auth.APITokenInfo{}, nil).AnyTimes()
+
+	for _, path := range []string{"/admin", "/change-password"} {
+		s.Run(path, func() {
+			rec := getPage(s.router, path, "admin-sess")
+			body := rec.Body.String()
+
+			s.Require().Equal(http.StatusOK, rec.Code)
+			s.Contains(body, `<nav class="nav-create" aria-label="Create">`)
+			s.Contains(body, `<a href="/" class="nav-tab">`)
+			s.Contains(body, `<a href="/links" class="nav-tab">`)
+			s.NotContains(body, `aria-current="page"`)
+			s.Contains(body, `<a href="/api" class="header-link">API</a>`)
+			s.Contains(body, `class="header-link" target="_blank" rel="noopener noreferrer">GitHub</a>`)
+			s.NotContains(body, `class="header-link">New note</a>`)
+			s.Contains(body, `id="menuBtn" aria-label="Account: admin"`)
+		})
+	}
+}
+
+// TestHeader_FilesOn_ShowsFileTab: with files on, every create page has the "File" tab; it is
+// current only on the upload page. The note editor links to the upload page.
+func (s *FileHandlerSuite) TestHeader_FilesOn_ShowsFileTab() {
+	rec := getPage(s.router, "/", "")
+	body := rec.Body.String()
+
+	s.Require().Equal(http.StatusOK, rec.Code)
+	s.Contains(body, `<a href="/files" class="nav-tab">`)
+	s.Contains(body, `id="uploadFileLink"`)
+	s.Contains(body, "<span>Padmark — notes, links &amp; files</span>")
+
+	rec = getPage(s.router, "/links", "")
+	s.Require().Equal(http.StatusOK, rec.Code)
+	s.Contains(rec.Body.String(), `<a href="/files" class="nav-tab">`)
 }

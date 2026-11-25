@@ -55,8 +55,8 @@ func (s *LinkRepositoryTestSuite) TestCreate_OK() {
 // TestCreate_SweepsExpiredLinks verifies the lazy-sweep-on-Create pattern (mirroring
 // session/invite repositories): a Create call opportunistically deletes every already-expired
 // link in the table, not just the one being inserted — this is what keeps a link that expires
-// and is never followed again from lingering forever, since Redirect's own delete-on-read only
-// cleans up links that ARE read after expiry.
+// and is never followed again from lingering forever, since the delete-on-read of
+// links.Manager.Follow only cleans up links that ARE read after expiry.
 func (s *LinkRepositoryTestSuite) TestCreate_SweepsExpiredLinks() {
 	ctx := s.T().Context()
 	past := time.Now().Add(-time.Hour)
@@ -183,28 +183,6 @@ func (s *LinkRepositoryTestSuite) TestGetByID_NotFound() {
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
-func (s *LinkRepositoryTestSuite) TestExists_True() {
-	ctx := s.T().Context()
-
-	l := &domain.Link{
-		ID: "exists-1", TargetURL: "a", CreatedAt: time.Now(),
-		ExpiresAt: nil, Privacy: nil, OwnerID: nil, DirectRedirect: nil,
-		EditCode: "", Views: 0, BurnAfterClick: false,
-	}
-	s.Require().NoError(s.repo.Create(ctx, l))
-
-	exists, err := s.repo.Exists(ctx, "exists-1")
-	s.Require().NoError(err)
-	s.True(exists)
-}
-
-func (s *LinkRepositoryTestSuite) TestExists_False() {
-	exists, err := s.repo.Exists(s.T().Context(), "missing")
-
-	s.Require().NoError(err)
-	s.False(exists)
-}
-
 func (s *LinkRepositoryTestSuite) TestIncrementViews_OK() {
 	ctx := s.T().Context()
 
@@ -239,7 +217,7 @@ func (s *LinkRepositoryTestSuite) TestConsume_BurnAfterClick() {
 	}
 	s.Require().NoError(s.repo.Create(ctx, l))
 
-	got, err := s.repo.Consume(ctx, "consume-bac")
+	got, err := s.repo.Consume(ctx, "consume-bac", time.Now())
 	s.Require().NoError(err)
 	s.Equal("consume-bac", got.ID)
 
@@ -258,7 +236,7 @@ func (s *LinkRepositoryTestSuite) TestConsume_Expired() {
 	}
 	s.Require().NoError(s.repo.Create(ctx, l))
 
-	got, err := s.repo.Consume(ctx, "consume-exp")
+	got, err := s.repo.Consume(ctx, "consume-exp", time.Now())
 	s.Require().NoError(err)
 	s.Equal("consume-exp", got.ID)
 
@@ -276,7 +254,7 @@ func (s *LinkRepositoryTestSuite) TestConsume_NotEligible() {
 	}
 	s.Require().NoError(s.repo.Create(ctx, l))
 
-	_, err := s.repo.Consume(ctx, "consume-no")
+	_, err := s.repo.Consume(ctx, "consume-no", time.Now())
 	s.Require().ErrorIs(err, domain.ErrNotFound)
 
 	got, err := s.repo.GetByID(ctx, "consume-no")
@@ -285,7 +263,7 @@ func (s *LinkRepositoryTestSuite) TestConsume_NotEligible() {
 }
 
 func (s *LinkRepositoryTestSuite) TestConsume_NotFound() {
-	_, err := s.repo.Consume(s.T().Context(), "consume-missing")
+	_, err := s.repo.Consume(s.T().Context(), "consume-missing", time.Now())
 
 	s.ErrorIs(err, domain.ErrNotFound)
 }
@@ -300,14 +278,14 @@ func (s *LinkRepositoryTestSuite) TestDelete_OK() {
 	}
 	s.Require().NoError(s.repo.Create(ctx, l))
 
-	s.Require().NoError(s.repo.Delete(ctx, "del-1"))
+	s.Require().NoError(s.repo.Delete(ctx, "del-1", ""))
 
 	_, err := s.repo.GetByID(ctx, "del-1")
 	s.ErrorIs(err, domain.ErrNotFound)
 }
 
 func (s *LinkRepositoryTestSuite) TestDelete_NotFound() {
-	err := s.repo.Delete(s.T().Context(), "del-missing")
+	err := s.repo.Delete(s.T().Context(), "del-missing", "")
 
 	s.ErrorIs(err, domain.ErrNotFound)
 }
@@ -326,11 +304,7 @@ func (s *LinkRepositoryTestSuite) TestUpdate_NilPrivacy_KeepsStoredLevel() {
 	}
 	s.Require().NoError(s.repo.Create(ctx, original))
 
-	updated, err := s.repo.Update(ctx, original.ID, &domain.Link{
-		TargetURL: "new ciphertext", Privacy: nil,
-		CreatedAt: time.Time{}, ExpiresAt: nil, OwnerID: nil, DirectRedirect: nil,
-		ID: "", EditCode: "", Views: 0, BurnAfterClick: false,
-	})
+	updated, err := s.repo.Update(ctx, original.ID, original.EditCode, targetPatch("new ciphertext"), time.Now())
 	s.Require().NoError(err)
 	s.Equal(authenticated, updated.EffectivePrivacy())
 
@@ -353,13 +327,9 @@ func (s *LinkRepositoryTestSuite) TestUpdate_EditableColumnsOnly() {
 	s.Require().NoError(s.repo.IncrementViews(ctx, original.ID))
 
 	privacy := domain.PrivacyAuthenticated
-	updated, err := s.repo.Update(ctx, original.ID, &domain.Link{
-		TargetURL: "new ciphertext", Privacy: &privacy,
-		// Everything else is intentionally zero, including immutable fields and counters.
-
-		CreatedAt: time.Time{}, ExpiresAt: nil, OwnerID: nil, DirectRedirect: nil,
-		ID: "", EditCode: "", Views: 0, BurnAfterClick: false,
-	})
+	patch := targetPatch("new ciphertext")
+	patch.Privacy, patch.ClearExpiry, patch.ResetDirectRedirect = &privacy, true, true
+	updated, err := s.repo.Update(ctx, original.ID, original.EditCode, patch, time.Now())
 	s.Require().NoError(err)
 	s.Equal("new ciphertext", updated.TargetURL)
 	s.Equal(6, updated.Views)
@@ -373,11 +343,123 @@ func (s *LinkRepositoryTestSuite) TestUpdate_EditableColumnsOnly() {
 	stored, err := s.repo.GetByID(ctx, original.ID)
 	s.Require().NoError(err)
 	s.Equal(updated, stored)
-	_, err = s.repo.Update(ctx, "missing-link", &domain.Link{
-		TargetURL: "unused",
-		CreatedAt: time.Time{}, ExpiresAt: nil, Privacy: nil, OwnerID: nil,
-		DirectRedirect: nil, ID: "", EditCode: "", Views: 0,
-		BurnAfterClick: false,
-	})
+	_, err = s.repo.Update(ctx, "missing-link", "", targetPatch("unused"), time.Now())
 	s.ErrorIs(err, domain.ErrNotFound)
+}
+
+// TestUpdate_ConcurrentPatchesKeepBothChanges covers finding 9. Two server processes read the
+// same link. One shortens the expiry and omits the redirect mode; the other sets the redirect
+// mode and omits the expiry. Each UPDATE writes only its own fields, so both changes persist.
+func (s *LinkRepositoryTestSuite) TestUpdate_ConcurrentPatchesKeepBothChanges() {
+	ctx := s.T().Context()
+	expiry := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
+	original := &domain.Link{
+		ID: "two-patches", TargetURL: "old ciphertext", CreatedAt: time.Now().UTC().Truncate(time.Second),
+		EditCode: "hash", ExpiresAt: &expiry,
+
+		Views: 0, BurnAfterClick: false, DirectRedirect: nil, Privacy: nil, OwnerID: nil,
+	}
+	s.Require().NoError(s.repo.Create(ctx, original))
+
+	shorter := time.Now().Add(time.Minute).UTC().Truncate(time.Second)
+	direct := true
+
+	first := targetPatch("old ciphertext")
+	first.ExpiresAt = &shorter
+	_, err := s.repo.Update(ctx, original.ID, original.EditCode, first, time.Now())
+	s.Require().NoError(err)
+
+	second := targetPatch("new ciphertext")
+	second.DirectRedirect = &direct
+	_, err = s.repo.Update(ctx, original.ID, original.EditCode, second, time.Now())
+	s.Require().NoError(err)
+
+	stored, err := s.repo.GetByID(ctx, original.ID)
+	s.Require().NoError(err)
+	s.Equal("new ciphertext", stored.TargetURL)
+	s.Require().NotNil(stored.ExpiresAt, "the second update must not restore or clear the expiry")
+	s.WithinDuration(shorter, *stored.ExpiresAt, time.Second)
+	s.Require().NotNil(stored.DirectRedirect)
+	s.True(*stored.DirectRedirect)
+}
+
+// TestDeleteExpired_KeepsExtendedLink covers finding 8. The reader decides from its snapshot that
+// the link expired. The owner then extends it. The DELETE checks the expiry again and keeps it.
+func (s *LinkRepositoryTestSuite) TestDeleteExpired_KeepsExtendedLink() {
+	ctx := s.T().Context()
+	past := time.Now().Add(-time.Minute).UTC().Truncate(time.Second)
+	original := &domain.Link{
+		ID: "extended", TargetURL: "ciphertext", CreatedAt: time.Now().UTC().Truncate(time.Second),
+		EditCode: "hash", ExpiresAt: &past,
+
+		Views: 0, BurnAfterClick: false, DirectRedirect: nil, Privacy: nil, OwnerID: nil,
+	}
+	s.Require().NoError(s.repo.Create(ctx, original))
+
+	snapshot, err := s.repo.GetByID(ctx, original.ID)
+	s.Require().NoError(err)
+	s.Require().True(snapshot.Expired(time.Now()), "the reader decides that the link expired")
+
+	future := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
+	extend := targetPatch("ciphertext")
+	extend.ExpiresAt = &future
+	_, err = s.repo.Update(ctx, original.ID, original.EditCode, extend, time.Now())
+	s.Require().ErrorIs(err, domain.ErrNotFound, "Update does not change an expired link")
+
+	// Another writer extends the link after the reader's snapshot. Update refuses an expired
+	// link, so the test writes the row with SQL.
+	_, err = s.db.NewUpdate().Table("links").Set("expires_at = ?", future).
+		Where("id = ?", original.ID).Exec(ctx)
+	s.Require().NoError(err)
+
+	s.Require().ErrorIs(s.repo.DeleteExpired(ctx, original.ID, time.Now()), domain.ErrNotFound)
+
+	stored, err := s.repo.GetByID(ctx, original.ID)
+	s.Require().NoError(err, "the extended link must stay")
+	s.Require().NotNil(stored.ExpiresAt)
+	s.WithinDuration(future, *stored.ExpiresAt, time.Second)
+}
+
+// TestDeleteExpired_RemovesOnlyExpiredLinks verifies that DeleteExpired removes an expired link.
+// A live link and an unread burn-after-click link without an expiry stay.
+func (s *LinkRepositoryTestSuite) TestDeleteExpired_RemovesOnlyExpiredLinks() {
+	ctx := s.T().Context()
+	past := time.Now().Add(-time.Minute).UTC().Truncate(time.Second)
+	future := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
+	// Create sweeps expired links with other IDs, so the expired link comes last.
+	s.Require().NoError(s.repo.Create(ctx, expiringLink("live", &future, false)))
+	s.Require().NoError(s.repo.Create(ctx, expiringLink("unread-burn", nil, true)))
+	s.Require().NoError(s.repo.Create(ctx, expiringLink("expired", &past, false)))
+
+	s.Require().NoError(s.repo.DeleteExpired(ctx, "expired", time.Now()))
+	s.Require().ErrorIs(s.repo.DeleteExpired(ctx, "live", time.Now()), domain.ErrNotFound)
+	s.Require().ErrorIs(s.repo.DeleteExpired(ctx, "unread-burn", time.Now()), domain.ErrNotFound)
+
+	_, err := s.repo.GetByID(ctx, "expired")
+	s.Require().ErrorIs(err, domain.ErrNotFound)
+
+	for _, id := range []string{"live", "unread-burn"} {
+		_, err = s.repo.GetByID(ctx, id)
+		s.Require().NoError(err, id)
+	}
+}
+
+// --- helpers ---
+
+// expiringLink is a link with id, the given expiry and the given burn-after-click setting.
+func expiringLink(id string, expiresAt *time.Time, burn bool) *domain.Link {
+	return &domain.Link{
+		ID: id, TargetURL: "ciphertext", CreatedAt: time.Now().UTC().Truncate(time.Second),
+		EditCode: "hash " + id, ExpiresAt: expiresAt, BurnAfterClick: burn,
+
+		Views: 0, DirectRedirect: nil, Privacy: nil, OwnerID: nil,
+	}
+}
+
+// targetPatch is a patch that writes only the target URL. Tests set other fields on it.
+func targetPatch(target string) *domain.LinkPatch {
+	return &domain.LinkPatch{
+		TargetURL: target,
+		ExpiresAt: nil, Privacy: nil, DirectRedirect: nil, ClearExpiry: false, ResetDirectRedirect: false,
+	}
 }

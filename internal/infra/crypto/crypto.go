@@ -30,7 +30,7 @@ func New() *Encryptor { return &Encryptor{} }
 func (*Encryptor) Encrypt(plaintext, slug string) (string, error) {
 	gcm, err := newGCM(slug)
 	if err != nil {
-		return "", fmt.Errorf("new gcm: %w", err)
+		return "", err
 	}
 
 	nonce := make([]byte, gcm.NonceSize())
@@ -54,7 +54,7 @@ func (*Encryptor) Decrypt(ciphertext, slug string) (string, error) {
 
 	gcm, err := newGCM(slug)
 	if err != nil {
-		return "", fmt.Errorf("new gcm: %w", err)
+		return "", err
 	}
 
 	if len(data) < gcm.NonceSize() {
@@ -75,7 +75,7 @@ func (*Encryptor) Decrypt(ciphertext, slug string) (string, error) {
 func newGCM(slug string) (cipher.AEAD, error) {
 	key, err := deriveKey(slug)
 	if err != nil {
-		return nil, fmt.Errorf("derive key: %w", err)
+		return nil, err
 	}
 
 	block, err := aes.NewCipher(key)

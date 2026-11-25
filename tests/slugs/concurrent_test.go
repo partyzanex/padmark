@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -18,25 +19,36 @@ import (
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect"
 
-	"github.com/partyzanex/padmark/internal/adapters/web"
 	"github.com/partyzanex/padmark/internal/domain"
-	"github.com/partyzanex/padmark/internal/infra/crypto"
-	"github.com/partyzanex/padmark/internal/infra/lock"
-	"github.com/partyzanex/padmark/internal/infra/render"
 	pgrepo "github.com/partyzanex/padmark/internal/infra/storage/postgres"
 	sqliterepo "github.com/partyzanex/padmark/internal/infra/storage/sqlite"
-	"github.com/partyzanex/padmark/internal/testutil"
 	"github.com/partyzanex/padmark/internal/usecases/links"
 	"github.com/partyzanex/padmark/internal/usecases/notes"
+	"github.com/partyzanex/padmark/tests/internal/testenv"
 )
 
 type createGate struct {
 	ready   chan struct{}
 	proceed chan struct{}
+	// once closes ready on the first wait. A manager can call Create again on the same gate: a
+	// create with a custom slug tries once more after it removes an expired record.
+	once sync.Once
+}
+
+func newGate() *createGate {
+	return &createGate{ready: make(chan struct{}), proceed: make(chan struct{}), once: sync.Once{}}
+}
+
+// openGate returns a gate that does not pause the create.
+func openGate() *createGate {
+	gate := newGate()
+	close(gate.proceed)
+
+	return gate
 }
 
 func (g *createGate) wait(ctx context.Context) error {
-	close(g.ready)
+	g.once.Do(func() { close(g.ready) })
 
 	select {
 	case <-g.proceed:
@@ -76,13 +88,8 @@ func (r *pausedLinks) Create(ctx context.Context, link *domain.Link) error {
 	return r.Storage.Create(ctx, link)
 }
 
-type noteRepository interface {
-	notes.Storage
-	links.NotesChecker
-}
-
 //nolint:ireturn // selects the actual backend repositories behind their consumer ports
-func repositories(db *bun.DB) (noteRepository, links.Storage) {
+func repositories(db *bun.DB) (notes.Storage, links.Storage) {
 	log := slog.New(slog.DiscardHandler)
 	if db.Dialect().Name() == dialect.PG {
 		return pgrepo.NewNoteRepository(db), pgrepo.NewLinkRepository(db, log)
@@ -94,28 +101,15 @@ func repositories(db *bun.DB) (noteRepository, links.Storage) {
 func replica(t *testing.T, db *bun.DB, gate *createGate) *httptest.Server {
 	t.Helper()
 
-	noteRepo, linkRepo := repositories(db)
-	log := slog.New(slog.DiscardHandler)
-	localLock := lock.NewLocker()
-	hasher := crypto.NewEditCodeHasher(crypto.DefaultArgon2Params())
-	noteManager := notes.NewManager(&pausedNotes{Storage: noteRepo, gate: gate}, linkRepo, localLock,
-		render.NewRenderer(), testutil.ContentEncryptor(t, "note"), hasher, log, true)
-	linkManager := links.NewManager(&pausedLinks{Storage: linkRepo, gate: gate}, noteRepo, localLock,
-		testutil.ContentEncryptor(t, "link"), hasher, log, true)
-	handler := web.NewHandler(noteManager, linkManager, log)
-	ogen := web.NewOgenHandler(noteManager, linkManager, web.NoPinger{}, log)
-	router, err := web.NewRouter(handler, ogen, &web.RouterOptions{
-		MaxBodyBytes: 256 * 1024,
-		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, CSRFSecret: nil,
-		AllowedHosts: nil, RateLimit: 0, RateBurst: 0, SessionTTL: 0, DisableAPI: false,
-		DirectRedirect: false,
-	})
-	require.NoError(t, err)
+	managers := testenv.NewManagers(t, db, testenv.WithCustomSlugs(),
+		testenv.WithNoteStorage(func(storage notes.Storage) notes.Storage {
+			return &pausedNotes{Storage: storage, gate: gate}
+		}),
+		testenv.WithLinkStorage(func(storage links.Storage) links.Storage {
+			return &pausedLinks{Storage: storage, gate: gate}
+		}))
 
-	server := httptest.NewServer(router)
-	t.Cleanup(server.Close)
-
-	return server
+	return testenv.Serve(t, testenv.HandlerConfig(managers.Notes, managers.Links))
 }
 
 type createResult struct {
@@ -153,10 +147,9 @@ func postAsync(ctx context.Context, t *testing.T, url, body string) <-chan creat
 func testConcurrentCreate(t *testing.T, db *bun.DB, open func(*testing.T) *bun.DB, winner string) {
 	t.Helper()
 
-	// Separate pools, locks, handlers and listeners model independent replicas. The gate is
-	// after both managers' preflight checks and before their actual repository INSERT.
-	noteGate := &createGate{ready: make(chan struct{}), proceed: make(chan struct{})}
-	linkGate := &createGate{ready: make(chan struct{}), proceed: make(chan struct{})}
+	// Separate pools, handlers and listeners model independent replicas. The gate is before each
+	// repository INSERT; the managers make no slug check before it.
+	noteGate, linkGate := newGate(), newGate()
 	noteServer := replica(t, open(t), noteGate)
 	linkServer := replica(t, open(t), linkGate)
 
@@ -172,7 +165,7 @@ func testConcurrentCreate(t *testing.T, db *bun.DB, open func(*testing.T) *bun.D
 		select {
 		case <-gate.ready:
 		case <-ctx.Done():
-			t.Fatal("both creates must reach INSERT after observing the slug as free")
+			t.Fatal("both creates must reach INSERT")
 		}
 	}
 

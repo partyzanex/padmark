@@ -214,10 +214,10 @@ func (s *ParseGuardsSuite) TestDelimiterRunsUpToCapMatchStock() {
 }
 
 func (s *ParseGuardsSuite) TestHeadingIDsAreUniquePerRender() {
-	first, err := s.guarded.Render("# Same\n# Same\n")
+	first, _, err := s.guarded.Render("# Same\n# Same\n")
 	s.Require().NoError(err)
 
-	second, err := s.guarded.Render("# Same\n")
+	second, _, err := s.guarded.Render("# Same\n")
 	s.Require().NoError(err)
 
 	s.Contains(first, `id="user-content-same-1"`)

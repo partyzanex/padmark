@@ -77,7 +77,7 @@ func NewUserRepository(db *bun.DB) *UserRepository {
 
 // Create inserts a new user. Returns domain.ErrUserExists on duplicate username.
 func (r *UserRepository) Create(ctx context.Context, u *domain.User) error {
-	return errorcontext.Wrap(insertUser(ctx, r.db, u), "insert user")
+	return insertUser(ctx, r.db, u)
 }
 
 // insertUser inserts a user via conn (a *bun.DB or bun.Tx), mapping a unique-constraint
@@ -91,7 +91,7 @@ func insertUser(ctx context.Context, conn bun.IDB, u *domain.User) error {
 			return domain.ErrUserExists
 		}
 
-		return fmt.Errorf("insert user: %w", err)
+		return fmt.Errorf("sqlite insert user: %w", err)
 	}
 
 	return nil
@@ -107,7 +107,7 @@ func (r *UserRepository) GetByUsername(ctx context.Context, username string) (*d
 			return nil, domain.ErrNotFound
 		}
 
-		return nil, fmt.Errorf("get user by username: %w", err)
+		return nil, fmt.Errorf("sqlite get user by username: %w", err)
 	}
 
 	return row.toDomain(), nil
@@ -123,7 +123,7 @@ func (r *UserRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.Use
 			return nil, domain.ErrNotFound
 		}
 
-		return nil, fmt.Errorf("get user by id: %w", err)
+		return nil, fmt.Errorf("sqlite get user by id: %w", err)
 	}
 
 	return row.toDomain(), nil
@@ -135,7 +135,7 @@ func (r *UserRepository) List(ctx context.Context) ([]*domain.User, error) {
 
 	err := r.db.NewSelect().Model(&rows).OrderExpr("created_at ASC").Scan(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("list users: %w", err)
+		return nil, fmt.Errorf("sqlite list users: %w", err)
 	}
 
 	users := make([]*domain.User, len(rows))
@@ -147,41 +147,41 @@ func (r *UserRepository) List(ctx context.Context) ([]*domain.User, error) {
 }
 
 // UpdateLastLogin sets last_login_at for the given user ID.
+// Returns domain.ErrNotFound when the user does not exist.
 func (r *UserRepository) UpdateLastLogin(ctx context.Context, id uuid.UUID, t time.Time) error {
-	_, err := r.db.NewUpdate().
+	res, err := r.db.NewUpdate().
 		TableExpr("users").
 		Set("last_login_at = ?", t).
 		Where("id = ?", id).
 		Exec(ctx)
 	if err != nil {
-		return fmt.Errorf("update last login: %w", err)
+		return fmt.Errorf("sqlite update last login: %w", err)
 	}
 
-	return nil
+	return errorcontext.Wrap(requireAffected(res), "update last login")
 }
 
-// Revoke deletes the user record by ID. The delete refuses to remove the last remaining admin:
-// the EXISTS guard lives in the DELETE itself, so the check and the delete are one atomic
-// statement — two concurrent revocations of the only two admins cannot both succeed, which
-// would otherwise leave the server permanently admin-less (the bootstrap hole accept-first-admin
-// is meant to close). Zero affected rows means the target does not exist or is the last admin —
-// both map to domain.ErrForbidden; callers pre-check GetByID for a friendlier ErrNotFound.
+// Revoke deletes the user record by ID. It never deletes an admin: idx_users_single_admin
+// allows only one admin, so an admin is always the last admin, and its removal would leave the
+// server without one. No operation sets is_admin on an existing user, so the condition in the
+// DELETE is enough and no lock is necessary. Zero affected rows means the target does not exist
+// or is the admin; both give domain.ErrForbidden. Callers check GetByID first to give ErrNotFound.
 func (r *UserRepository) Revoke(ctx context.Context, id uuid.UUID) error {
 	res, err := r.db.NewDelete().TableExpr("users").
 		Where("id = ?", id).
-		Where("is_admin = 0 OR EXISTS (SELECT 1 FROM users AS u WHERE u.is_admin = 1 AND u.id != ?)", id).
+		Where("is_admin = ?", false).
 		Exec(ctx)
 	if err != nil {
-		return fmt.Errorf("revoke user: %w", err)
+		return fmt.Errorf("sqlite revoke user: %w", err)
 	}
 
 	affected, err := res.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("revoke user rows affected: %w", err)
+		return fmt.Errorf("sqlite revoke user rows affected: %w", err)
 	}
 
 	if affected == 0 {
-		return fmt.Errorf("revoke user: %w", domain.ErrForbidden)
+		return fmt.Errorf("sqlite revoke user: %w", domain.ErrForbidden)
 	}
 
 	return nil
@@ -198,31 +198,73 @@ func (r *UserRepository) UpdateTOTPCounter(ctx context.Context, id uuid.UUID, co
 		Where("last_totp_counter < ?", counter).
 		Exec(ctx)
 	if err != nil {
-		return false, fmt.Errorf("update totp counter: %w", err)
+		return false, fmt.Errorf("sqlite update totp counter: %w", err)
 	}
 
 	affected, err := res.RowsAffected()
 	if err != nil {
-		return false, fmt.Errorf("rows affected: %w", err)
+		return false, fmt.Errorf("sqlite rows affected: %w", err)
 	}
 
 	return affected > 0, nil
 }
 
-// UpdatePassword atomically replaces password_hash, kdf_salt, and totp_secret.
-// kdfSalt is raw bytes; the repository encodes it as base64url before storage.
-func (r *UserRepository) UpdatePassword(
-	ctx context.Context, id uuid.UUID, passwordHash string, kdfSalt []byte, totpSecret string,
+// ChangePassword replaces the credentials of sess.UserID, makes sess the only session of that user
+// and deletes all API tokens of that user, in one transaction. A failure in any step rolls back
+// all of them, so the old password and the old access stay valid and sess does not exist.
+// SQLite has one writer, and _txlock=immediate (see WithPragmas) takes the write lock at BEGIN.
+// Thus a concurrent login stores its session before this transaction, and the delete removes it,
+// or after the commit, and its confirmCredentials check then sees the new hash.
+// Returns domain.ErrNotFound when the user does not exist.
+func (r *UserRepository) ChangePassword(
+	ctx context.Context, sess *domain.Session, passwordHash string, kdfSalt []byte, totpSecret string,
 ) error {
-	_, err := r.db.NewUpdate().
-		TableExpr("users").
-		Set("password_hash = ?", passwordHash).
-		Set("kdf_salt = ?", base64.RawURLEncoding.EncodeToString(kdfSalt)).
-		Set("totp_secret = ?", totpSecret).
-		Where("id = ?", id).
-		Exec(ctx)
+	err := r.db.RunInTx(ctx, nil, func(ctx context.Context, btx bun.Tx) error {
+		res, updErr := btx.NewUpdate().
+			TableExpr("users").
+			Set("password_hash = ?", passwordHash).
+			Set("kdf_salt = ?", base64.RawURLEncoding.EncodeToString(kdfSalt)).
+			Set("totp_secret = ?", totpSecret).
+			Where("id = ?", sess.UserID).
+			Exec(ctx)
+		if updErr != nil {
+			return fmt.Errorf("sqlite update password: %w", updErr)
+		}
+
+		affected, affErr := res.RowsAffected()
+		if affErr != nil {
+			return fmt.Errorf("sqlite update password rows affected: %w", affErr)
+		}
+
+		if affected == 0 {
+			return domain.ErrNotFound
+		}
+
+		return replaceUserAccess(ctx, btx, sess)
+	})
 	if err != nil {
-		return fmt.Errorf("update password: %w", err)
+		return fmt.Errorf("sqlite change password: %w", err)
+	}
+
+	return nil
+}
+
+// replaceUserAccess deletes all sessions and API tokens of sess.UserID and stores sess, inside the
+// transaction of ChangePassword.
+func replaceUserAccess(ctx context.Context, btx bun.Tx, sess *domain.Session) error {
+	_, err := btx.NewDelete().TableExpr("sessions").Where("user_id = ?", sess.UserID).Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("sqlite delete sessions of user: %w", err)
+	}
+
+	_, err = btx.NewInsert().Model(toSessionRow(sess)).Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("sqlite insert session: %w", err)
+	}
+
+	_, err = btx.NewDelete().TableExpr("api_tokens").Where("user_id = ?", sess.UserID).Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("sqlite delete api tokens of user: %w", err)
 	}
 
 	return nil
@@ -242,13 +284,27 @@ func (r *UserRepository) UpdateTOTPSecret(
 		Where("totp_secret = ?", expected).
 		Exec(ctx)
 	if err != nil {
-		return false, fmt.Errorf("update totp secret: %w", err)
+		return false, fmt.Errorf("sqlite update totp secret: %w", err)
 	}
 
 	affected, err := res.RowsAffected()
 	if err != nil {
-		return false, fmt.Errorf("rows affected: %w", err)
+		return false, fmt.Errorf("sqlite rows affected: %w", err)
 	}
 
 	return affected > 0, nil
+}
+
+// requireAffected returns domain.ErrNotFound when res changed no row.
+func requireAffected(res sql.Result) error {
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("sqlite rows affected: %w", err)
+	}
+
+	if affected == 0 {
+		return domain.ErrNotFound
+	}
+
+	return nil
 }

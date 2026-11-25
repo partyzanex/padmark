@@ -7,18 +7,27 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/suite"
 	"github.com/uptrace/bun"
 
-	"github.com/partyzanex/padmark/internal/infra/lock"
+	"github.com/partyzanex/padmark/internal/infra/expiredslugs"
+	"github.com/partyzanex/padmark/internal/infra/storage/s3store"
 	sqliterepo "github.com/partyzanex/padmark/internal/infra/storage/sqlite"
+	"github.com/partyzanex/padmark/internal/usecases/auth"
+	"github.com/partyzanex/padmark/tests/internal/testenv"
 )
 
 type SQLiteManagerSuite struct {
 	ManagerSuite
 
-	db *bun.DB
+	objects *s3store.Store
+	db      *bun.DB
+}
+
+func (s *SQLiteManagerSuite) SetupSuite() {
+	s.objects = testenv.S3Mock(s.T()).Store(s.T())
 }
 
 func (s *SQLiteManagerSuite) SetupTest() {
@@ -33,15 +42,17 @@ func (s *SQLiteManagerSuite) SetupTest() {
 	_, migrateErr := sqliterepo.Migrate(s.T().Context(), s.db)
 	s.Require().NoError(migrateErr)
 
-	slugLock := lock.NewLocker()
+	noteRepo, linkRepo := sqliterepo.NewNoteRepository(s.db), sqliterepo.NewLinkRepository(s.db, slog.Default())
+	expired := expiredslugs.New(noteRepo, linkRepo)
 
-	s.Manager = newManager(s.T(),
-		sqliterepo.NewNoteRepository(s.db), sqliterepo.NewLinkRepository(s.db, slog.Default()), slugLock,
-	)
-	s.LinkManager = newLinkManager(s.T(),
-		sqliterepo.NewLinkRepository(s.db, slog.Default()), sqliterepo.NewNoteRepository(s.db), slugLock,
-	)
-	s.RevealStore = sqliterepo.NewRevealRepository(s.db, slog.Default())
+	fileRepo := sqliterepo.NewFileRepository(s.db)
+
+	s.Manager = newManager(s.T(), noteRepo, expired)
+	s.LinkManager = newLinkManager(s.T(), linkRepo, expired)
+	s.FileManager = newFileManager(&s.Suite, fileRepo, expired, s.objects)
+	s.NoteStorage, s.LinkStorage, s.FileStorage = noteRepo, linkRepo, fileRepo
+	s.Objects = s.objects
+	s.RevealStore = auth.NewRevealManager(sqliterepo.NewRevealRepository(s.db), slog.Default(), time.Now)
 	s.DB = s.db
 }
 

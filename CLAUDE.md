@@ -4,10 +4,11 @@ Project guidance for development and maintenance of this repository.
 
 ## Project
 
-**padmark** is a Go service for Markdown notes, short links and account-based access,
-with HTML/JSON/raw content negotiation and encrypted storage. Use Go 1.27.3 as specified
-in [go.mod](go.mod). Read [README.md](README.md) for operation and
-[docs/GUIDE.md](docs/GUIDE.md) for architecture.
+**padmark** is a Go service for Markdown notes, short links, optional S3 files and
+account-based access, with HTML/JSON/raw content negotiation and encrypted storage. Build with Go
+1.27.4 or later (GO-2026-6859); [go.mod](go.mod) gives the minimum.
+Read [README.md](README.md) for operation,
+[docs/GUIDE.md](docs/GUIDE.md) for architecture and [docs/adr/](docs/adr/README.md) for decisions.
 
 ## Commands
 
@@ -39,8 +40,10 @@ Dependencies point inward: adapters and infrastructure depend on usecases and do
 
 - **domain** (`internal/domain/`): entities, validation and sentinel errors; no interfaces.
   Dependencies are stdlib plus `github.com/google/uuid` for account ownership IDs.
-- **usecases** (`internal/usecases/`): note/link lifecycle, account management and content-key
+- **usecases** (`internal/usecases/`): note/link/file lifecycle, account management and content-key
   migration/rotation. Each consumer defines its dependency interfaces beside its implementation.
+- **files**: optional; `internal/usecases/files` streams uploads through `crypto.FileCipher` to
+  `infra/storage/s3store`. `files.sealed_meta` (name + content key) is a key-rotation resource.
 - **infra** (`internal/infra/`): SQLite/PostgreSQL repositories, rendering, crypto, caches,
   metrics and server composition/configuration in `infra/server/`.
 - **adapters** (`internal/adapters/`): HTTP, CLI and MCP. HTTP templates, CSS, JavaScript,
@@ -53,20 +56,32 @@ Dependencies point inward: adapters and infrastructure depend on usecases and do
 - Constructors return concrete types. Use constructor arguments for required dependencies;
   optional caches/configuration may use explicit options.
 - Each adapter defines its own interfaces instead of importing another adapter's interfaces.
-- Manual wiring lives in `internal/infra/server/server.go`, through `serverAction`,
-  `buildHandlers` and `buildRouter`; do not introduce a DI framework.
+- Manual wiring lives in `internal/infra/server/server.go`: `serverAction` gets a checked
+  `Config` from `configFromCommand` (`config.go`), then `serve`, `buildHandlers` and `buildRouter`
+  read only that `Config`, never `*cli.Command`. `newStorage` (`db.go`) is the one dialect switch.
+  Do not introduce a DI framework.
+- One LIFO manager, `serverStop` (`shutdown.go`), closes the listeners, then the background work,
+  then the database; `serve` registers them in the reverse order. Do not register closers in the
+  global `compat` manager; only its stateless `compat.WaitForSignal` is in use.
 - HTTP middleware and its request context live in `internal/adapters/web/middleware/`.
   Keep it independent of the parent `web` package; shared JSON errors live in `web/response/`.
-- Notes and links share the same slug-lock instance for local preflight/cache coordination.
-  Storage triggers enforce cross-process uniqueness through the `slug_namespace` primary key.
-- `NewHandler(manager, linkManager, log)` requires both managers.
-  `NewRouter(handler, ogenHandler, opts)` receives `*RouterOptions` and returns `(http.Handler, error)`.
-  Use `NoPinger{}` for test setups without a DB pinger.
+- Only storage keeps slugs unique: triggers and the `slug_namespace` primary key, also across
+  processes (`docs/adr/0003-storage-slug-uniqueness.md`). Create makes no pre-check and holds no lock.
+  On `ErrSlugConflict` a random slug retries (5 attempts); a custom slug asks the shared
+  `expiredslugs.Releaser` to remove an expired holder of any kind, then tries once more.
+- `NewHandler(*HandlerConfig)` returns `(*Handler, error)` and builds the complete handler, the ogen
+  API handler included; `web.Handler` has no setters. Notes, Links, Pinger and Log are required; a nil
+  Accounts, Files or Reveal turns that feature off. `GET /{id}` and `/edit/{id}` read
+  the note first; the note `Get` returns `*domain.OtherKindError` for a link or file slug in the same
+  query, so a note view costs one database read (`tests/slugs` `record_reads` pins the counts).
+  `NewRouter(handler, opts)` only reads the handler, receives `*RouterOptions` (middleware settings)
+  and returns `(http.Handler, error)`. Use `NoPinger{}` for test setups without a DB pinger.
 
 ### Configuration and storage
 
 - Flag names, environment variables and defaults are grouped in `internal/infra/server/flags.go`.
   Server variables use `PADMARK_*`; `PADMARK_BOOTSTRAP_TOKEN` is environment-only.
+  `configFromCommand` reads each flag once and does all startup checks before the keyring opens.
 - File-backed SQLite defaults to `padmark-keys.json` beside the DB; PostgreSQL uses the
   working directory. The container works in `/data`, persisted by a named volume in Compose.
   Only `serve` generates missing default keys. Explicit paths must already exist;
@@ -78,6 +93,11 @@ Dependencies point inward: adapters and infrastructure depend on usecases and do
 - Keep installation keys and real credentials out of the repository. Test credentials must
   belong only to isolated fixtures. Back up database and keyring separately.
 - SQL migrations live in `migrations/sqlite/` and `migrations/postgres/` and are embedded per dialect.
+- `--s3-endpoint` turns files on; `configFromCommand` requires the bucket and both keys, and
+  `attachFiles` (`infra/server/files.go`) creates a missing bucket and stops startup when the key
+  has no access or cannot create it. S3 keys come only from `PADMARK_S3_ACCESS_KEY` / `PADMARK_S3_SECRET_KEY`.
+  Other flags: `--s3-bucket`, `--s3-region`, `--s3-path-style`, `--max-file-size`,
+  `--files-sweep-interval` (`0` = no background sweep).
 
 ### HTTP and access control
 
@@ -90,16 +110,35 @@ Dependencies point inward: adapters and infrastructure depend on usecases and do
   Note views, link redirects, account/admin forms and health checks remain available.
 - Delete credentials use `X-Edit-Code`. Notes retain the deprecated query-string fallback
   for v0.1.6 clients; links ignore query-string edit codes.
+- `FileHandler` serves `/files*` by hand, not ogen (`docs/adr/0002-files-outside-ogen.md`).
+  Pages: `/files` (upload), `/edit/{id}` (editor), file page at `/{id}` for `Accept: text/html`;
+  other clients get the content. `--disable-api` keeps only the GET/HEAD file pages.
+- CLI file commands: `upload`, `download`, `file-info`, `update-file`, `delete-file`. MCP file
+  tools: `upload_file` (needs `--upload-root` / `PADMARK_MCP_UPLOAD_ROOT`), `get_file`,
+  `update_file`, `delete_file`. Use `pkg/client` `UploadFile`/`DownloadFile`, not the
+  generated `CreateFile`/`GetFileContent`. Links: CLI `update-link`, MCP `update_link`.
+- The CLI and the MCP proxy each have one `*padmark.Client` for their one server, built by
+  `clientauth.NewClient` (`internal/clientauth`: token file, trust-on-first-use, plain-HTTP
+  policy, redirect guard). Its HTTP client uses `--timeout` only for the response headers.
+  Ordinary calls add a context deadline (`requestContext` in the CLI, `limitCall` in MCP);
+  file uploads and downloads do not. Map error responses through `padmark.ResponseError`
+  (`*APIError`) and the status table of each adapter (`responses.go`, `respond.go`).
+- `tests/arch` checks the layer imports with `go list`; give each new package a layer there.
 - Translate domain errors centrally through `errors.go`/`ogen_errors.go`; JSON responses use
   `{"message": ..., "code"?: ...}`. Do not expose wrapped internal errors to clients.
 
 ## Coding rules
 
 - Never store `context.Context` in struct fields; pass it as the first argument.
-- Wrap errors with operation context and translate DB errors to domain errors.
+- Wrap errors with operation context and translate DB errors to domain errors. Wrap once where
+  the error enters a package; return errors of same-package functions as they are.
+- Read the time only through the `Now` dependency of a manager (`time.Now` at the composition
+  root, a fixed clock in tests). Pass it to storage as `now`; a record is expired when
+  `now >= expires_at` (`domain.*.Expired`, `expiredWhere`/`liveWhere` in SQL).
 - Required dependencies need no repeated nil checks. Use mocks or no-op implementations in tests.
 - Add interfaces for testing, multiple implementations or cross-package decoupling.
 - Do not hold a mutex across network I/O.
+- Do not write compile-time interface assertions such as `var _ I = (*T)(nil)`; `make lint` refuses them.
 - Use `log/slog` (JSON in production, text for local debugging).
 - Prefer `for range N`, `t.Context()` / `s.T().Context()` and `sync.WaitGroup.Go` where applicable.
   Run and review `go fix ./...` when upgrading the toolchain.
@@ -112,6 +151,8 @@ Dependencies point inward: adapters and infrastructure depend on usecases and do
 - Use `t.Context()` / `s.T().Context()` in tests, never a stored background context.
 - Integration suites in `tests/` and PostgreSQL repository tests use the `integration` tag.
   SQLite can use temporary/in-memory databases; PostgreSQL uses testcontainers and needs Docker.
+- File suites (`tests/files`, `tests/manager`, `tests/cli`, `tests/mcp`, `s3store`) start
+  `adobe/s3mock:3.12.0` and need Docker.
 - Clean state between tests. Use polling/waiting assertions instead of fixed sleeps.
 - Browser tests are Go scenarios in `tests/ui/`, with separate dependencies and their own Makefile.
   See [tests/ui/README.md](tests/ui/README.md) before changing the harness or PNG references.
@@ -129,7 +170,7 @@ Dependencies point inward: adapters and infrastructure depend on usecases and do
   owner's explicit request. Fix code under the existing checks instead of weakening them.
 - `.golangci.yml` defines enabled linters, exclusions and thresholds (121-column lines,
   complexity 12, JSON `snake_case`, YAML `camelCase`). `_test.go` has specific exclusions.
-- CI pins golangci-lint v2.15.0 and Go 1.27.3. The lint config currently sets analysis
+- CI pins golangci-lint v2.15.0 and Go 1.27.4. The lint config currently sets analysis
   language `go: '1.25'`; that is separate from the build-toolchain requirement.
 - `*.mk` files are fetched from `github.com/partyzanex/go-makefile`; do not edit them manually.
   Add project targets to `Makefile` and browser-specific targets to `tests/ui/Makefile`.
@@ -151,6 +192,9 @@ Dependencies point inward: adapters and infrastructure depend on usecases and do
   variables, spacing, classes and existing colors instead of introducing another style system.
 - Fonts are self-hosted Onest (interface), Source Serif 4 (display/prose) and JetBrains Mono
   (code, slugs, labels).
+- TeX formulas: `infra/render/math.go` marks them, `static/math.js` draws them with the vendored
+  `static/katex/` (provenance in its `LICENSE.txt`). The preview has the same rules in
+  `static/editor-preview.js`; change both together. Load nothing from other origins.
   Themes are `light`, `dim` (default) and `dark`, selected through `[data-theme]`.
 - Use `html/template`, keep CSP-compatible script/style loading, and check affected forms and
   desktop/mobile screenshots with `make test-ui` after a frontend change.

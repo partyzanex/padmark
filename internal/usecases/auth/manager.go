@@ -3,63 +3,19 @@
 package auth
 
 import (
-	"context"
-	"fmt"
 	"log/slog"
 	"time"
-
-	"github.com/google/uuid"
-
-	"github.com/partyzanex/padmark/internal/domain"
 )
 
-// UserStore persists registered users.
+// UserStore is the union of the user-store roles of the four auth managers. Only NewManager
+// needs all of them, because it builds all four managers from one repository. Each manager
+// keeps only its own narrow role: SessionUserStore, OnboardingUserStore, UserAdminStore and
+// APITokenUserStore.
 type UserStore interface {
-	Create(ctx context.Context, u *domain.User) error
-	GetByUsername(ctx context.Context, username string) (*domain.User, error)
-	GetByID(ctx context.Context, id uuid.UUID) (*domain.User, error)
-	List(ctx context.Context) ([]*domain.User, error)
-	UpdateLastLogin(ctx context.Context, id uuid.UUID, t time.Time) error
-	UpdatePassword(ctx context.Context, id uuid.UUID, passwordHash string, kdfSalt []byte, totpSecret string) error
-	// UpdateTOTPSecret replaces only the sealed TOTP secret, leaving the password hash and KDF
-	// salt untouched. It exists for the re-seal-on-login migration (see
-	// SessionManager.resealTOTPSecret), where the secret is rewritten under the current argon2
-	// cost but the credentials themselves do not change. It writes only while the stored seal
-	// equals expected and reports false otherwise, so a reseal started before a concurrent
-	// password change never overwrites the seal of the new password.
-	UpdateTOTPSecret(ctx context.Context, id uuid.UUID, expected, totpSecret string) (bool, error)
-	// UpdateTOTPCounter atomically advances the user's last accepted TOTP counter,
-	// returning false when counter is not strictly greater (replay). The conditional
-	// update is the cross-instance, restart-safe guard against TOTP code reuse.
-	UpdateTOTPCounter(ctx context.Context, id uuid.UUID, counter int64) (bool, error)
-	// Revoke deletes the user record by ID. The delete itself refuses to remove the last
-	// remaining admin (a cross-instance TOCTOU on a read-side count would still let two
-	// concurrent revocations take all admins out), returning domain.ErrForbidden in that case
-	// or when the target does not exist — callers pre-check GetByID to surface a friendlier
-	// ErrNotFound.
-	Revoke(ctx context.Context, id uuid.UUID) error
-}
-
-// InviteStore persists single-use invite links.
-type InviteStore interface {
-	Issue(ctx context.Context, createdByID uuid.UUID) (string, error)
-	// RedeemInvite atomically consumes the invite and inserts usr in one transaction,
-	// so a failed user creation (e.g. a username race) never burns the token.
-	RedeemInvite(ctx context.Context, token, username string, usr *domain.User) error
-}
-
-// SessionStore persists authenticated browser sessions.
-//
-// All key parameters carry the at-rest value domain.Session.SessionHash — the SHA-256 digest
-// of the raw session id (see hashToken) — never the raw cookie value.
-type SessionStore interface {
-	Create(ctx context.Context, s *domain.Session) error
-	Get(ctx context.Context, sessionID string) (*domain.Session, error)
-	Delete(ctx context.Context, sessionID string) error
-	// DeleteByUserID removes all sessions for a given user (e.g. after password change).
-	DeleteByUserID(ctx context.Context, userID uuid.UUID) error
-	// DeleteByUserIDExcept removes all sessions for the user except the one with the given session ID.
-	DeleteByUserIDExcept(ctx context.Context, userID uuid.UUID, exceptSessionID string) error
+	SessionUserStore
+	OnboardingUserStore
+	UserAdminStore
+	APITokenUserStore
 }
 
 // PasswordHasher hashes and verifies user passwords (argon2id with configurable cost).
@@ -96,27 +52,6 @@ type TOTPManager interface {
 	TOTPURI(issuer, account, secret string) (string, error)
 }
 
-// APITokenStore persists CLI API tokens keyed by their SHA-256 hash. The plain key is never stored.
-type APITokenStore interface {
-	// CreateIfUnderLimit atomically counts t.UserID's live (unexpired) tokens and inserts t only
-	// if that count is below limit, reporting false (no error) when the limit is already reached. The
-	// count-then-insert must be a single atomic operation — two concurrent issuance requests each
-	// doing a separate count check followed by an unconditional insert could both pass the check
-	// before either insert lands, letting the user exceed the limit.
-	CreateIfUnderLimit(ctx context.Context, t *domain.APIToken, limit int) (bool, error)
-	// GetByHash resolves a token by its SHA-256 hash. Returns domain.ErrNotFound when absent.
-	GetByHash(ctx context.Context, tokenHash string) (*domain.APIToken, error)
-	// List returns all tokens for the admin panel.
-	List(ctx context.Context) ([]*domain.APIToken, error)
-	// RevokeByHash deletes a token by its SHA-256 hash (the public identifier). Returns
-	// domain.ErrNotFound when absent.
-	RevokeByHash(ctx context.Context, tokenHash string) error
-	// UpdateLastUsed records the time of the most recent successful token check, keyed by hash.
-	UpdateLastUsed(ctx context.Context, tokenHash string, t time.Time) error
-	// DeleteByUserID revokes every token of the user (e.g. after a password change).
-	DeleteByUserID(ctx context.Context, userID uuid.UUID) error
-}
-
 // Manager composes the four narrower auth managers — SessionManager (session.go),
 // OnboardingManager (onboarding.go), UserAdminManager (user_admin.go), and APITokenManager
 // (api_token.go) — into the single seam internal/adapters/web.AuthManager consumes. Each
@@ -140,38 +75,36 @@ type Stores struct {
 	APITokens APITokenStore
 }
 
-// NewManager returns a new auth Manager.
-// passwordHasher carries the (configurable) argon2 cost used for password hashing/verification.
-// sealer and totp provide the secret-sealing and TOTP primitives (injected so the usecase owns
-// its contracts instead of importing infra/crypto). issuer is the TOTP issuer name shown in the
+// Deps holds the primitives that the auth managers share. All fields are mandatory.
+// PasswordHasher carries the configurable argon2 cost of password hashing and verification.
+// Sealer and TOTP give the secret-sealing and TOTP primitives: the usecase owns their contracts
+// and does not import infra/crypto. Now is the time source of sessions, invites and API tokens:
+// the composition root gives time.Now, tests give a fixed clock.
+type Deps struct {
+	PasswordHasher PasswordHasher
+	Sealer         SecretSealer
+	TOTP           TOTPManager
+	Log            *slog.Logger
+	Now            func() time.Time
+}
+
+// NewManager returns a new auth Manager. issuer is the TOTP issuer name shown in the
 // authenticator app. sessionTTL controls how long a session remains valid; pass 0 for the
 // default (30 days).
 //
 // Returns an error when NewSessionManager's bootstrap-time crypto precompute fails (see its
 // doc); NewManager runs only at the composition root, so the caller should treat this as fatal.
-func NewManager(
-	stores Stores,
-	passwordHasher PasswordHasher,
-	sealer SecretSealer,
-	totp TOTPManager,
-	log *slog.Logger,
-	issuer string,
-	sessionTTL time.Duration,
-) (*Manager, error) {
-	sessionMgr, err := NewSessionManager(
-		stores.Users, stores.Sessions, stores.APITokens, passwordHasher, sealer, totp, log, sessionTTL,
-	)
+func NewManager(stores Stores, deps *Deps, issuer string, sessionTTL time.Duration) (*Manager, error) {
+	sessionMgr, err := NewSessionManager(stores.Users, stores.Sessions, deps, sessionTTL)
 	if err != nil {
-		return nil, fmt.Errorf("new session manager: %w", err)
+		return nil, err
 	}
 
 	// SessionManager owns the login factors, so it is the step-up verifier for both issuers.
 	return &Manager{
-		SessionManager: sessionMgr,
-		OnboardingManager: NewOnboardingManager(
-			stores.Users, stores.Invites, passwordHasher, sealer, totp, sessionMgr, issuer,
-		),
-		UserAdminManager: NewUserAdminManager(stores.Users),
-		APITokenManager:  NewAPITokenManager(stores.APITokens, stores.Users, sessionMgr, log),
+		SessionManager:    sessionMgr,
+		OnboardingManager: NewOnboardingManager(stores.Users, stores.Invites, sessionMgr, deps, issuer),
+		UserAdminManager:  NewUserAdminManager(stores.Users),
+		APITokenManager:   NewAPITokenManager(stores.APITokens, stores.Users, sessionMgr, deps.Log, deps.Now),
 	}, nil
 }

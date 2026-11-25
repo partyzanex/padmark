@@ -12,69 +12,91 @@ import (
 )
 
 // registerLinkTools adds the short-link tools to the server.
-func registerLinkTools(srv *mcpsdk.Server, m *Manager) {
-	mcpsdk.AddTool[createLinkInput, createLinkOutput](srv, createLinkTool(), m.createLink)
-	mcpsdk.AddTool[createBulkLinksInput, createBulkLinksOutput](srv, createLinksBulkTool(), m.createLinksBulk)
-	mcpsdk.AddTool[getLinkInput, createLinkOutput](srv, getLinkTool(), m.getLink)
-	mcpsdk.AddTool[deleteLinkInput, deleteNoteOutput](srv, deleteLinkTool(), m.deleteLink)
+func registerLinkTools(srv *mcpsdk.Server, proxy *Server) {
+	mcpsdk.AddTool[createLinkInput, linkOutput](srv, createLinkTool(), limitCall(proxy, proxy.createLink))
+	mcpsdk.AddTool[createBulkLinksInput, createBulkLinksOutput](
+		srv, createLinksBulkTool(), limitCall(proxy, proxy.createLinksBulk),
+	)
+	mcpsdk.AddTool[getLinkInput, linkOutput](srv, getLinkTool(), limitCall(proxy, proxy.getLink))
+	mcpsdk.AddTool[updateLinkInput, linkOutput](srv, updateLinkTool(), limitCall(proxy, proxy.updateLink))
+	mcpsdk.AddTool[deleteLinkInput, deletedOutput](srv, deleteLinkTool(), limitCall(proxy, proxy.deleteLink))
 }
 
 func createLinkTool() *mcpsdk.Tool {
 	return newTool("create_link",
 		"Create a short link to a target URL (http/https only). Browsers follow it at GET /{id}; the padmark "+
-			"edit_code is returned exactly once and is kept in the proxy for delete within this session; it is shown "+
-			"in the result only when reveal_edit_code is set.",
-		hints(false, false, false))
+			"edit_code is returned exactly once and is kept in the proxy for update_link and delete_link within this "+
+			"session; it is shown in the result only when reveal_edit_code is set.",
+		additiveTool)
 }
 
 func createLinksBulkTool() *mcpsdk.Tool {
 	return newTool("create_links_bulk",
 		"Create one to one hundred short links in order, best-effort: each result item reports its own id or "+
 			"error, and a failing item does not stop the others.",
-		hints(false, false, false))
+		additiveTool)
 }
 
 func getLinkTool() *mcpsdk.Tool {
 	return newTool("get_link",
 		"Read short-link metadata. Read-only: this does not follow the link, bump views, or consume "+
 			"burn-after-click — following happens on the browser-facing GET /{id} path.",
-		hints(true, false, false))
+		readOnlyTool)
+}
+
+func updateLinkTool() *mcpsdk.Tool {
+	return newTool("update_link",
+		"Replace a short link's destination (like the REST PUT). An omitted optional field keeps its value. "+
+			"ttl counts from now and 0 expires the link now. The edit_code comes from the input, else from "+
+			"the proxy's session vault, else from the bearer token (the link's owner may omit the code).",
+		// Destructive: the old destination is replaced, and ttl 0 expires the link now. Not
+		// idempotent: a repeated ttl moves the expiry, because ttl counts from the call.
+		destructiveTool)
 }
 
 func deleteLinkTool() *mcpsdk.Tool {
 	return newTool("delete_link",
 		"Delete a short link permanently. The edit_code comes from the input, else from the proxy's session "+
 			"vault, else from the bearer token.",
-		hints(false, true, false))
+		destructiveTool)
 }
 
-func (m *Manager) createLink(
+func (s *Server) createLink(
 	ctx context.Context, _ *mcpsdk.CallToolRequest, input createLinkInput,
-) (*mcpsdk.CallToolResult, createLinkOutput, error) {
-	// A bad target URL is a model-fixable mistake; fail up front instead of a 400 round-trip.
-	parsed, err := url.Parse(input.TargetURL)
-	if err != nil || (parsed.Host == "" && parsed.Scheme == "") {
-		return nil, createLinkOutput{}, fmt.Errorf("target_url %q %w", input.TargetURL, errInvalidTargetURL)
+) (*mcpsdk.CallToolResult, linkOutput, error) {
+	parsed, err := parseTargetURL(input.TargetURL)
+	if err != nil {
+		return nil, linkOutput{}, err
 	}
 
 	req := newCreateLinkRequest(input, parsed)
 
-	res, err := m.client.CreateLink(ctx, req)
+	res, err := s.client.CreateLink(ctx, req)
+
+	resp, err := fetch[*padmark.CreateLinkResponseHeaders](res, err, "create link", operation{
+		context: "decode create link response", rateScope: "link creations", kind: linkRecord(),
+	})
 	if err != nil {
-		return nil, createLinkOutput{}, errorcontext.Wrap(transportError("create link", err), "handle create link")
+		return nil, linkOutput{}, err
 	}
 
-	resp, apiErr := mapCreateLinkRes(res)
-	if apiErr != nil {
-		return nil, createLinkOutput{}, fmt.Errorf("map create link res: %w", apiErr)
-	}
-
-	out := m.linkOutputFromCreate(resp)
+	out := s.linkOutputFromCreate(resp)
 	if input.RevealEditCode && resp.Response.EditCode != "" {
 		out.revealEditCode(resp.Response.EditCode)
 	}
 
 	return nil, out, nil
+}
+
+// parseTargetURL refuses a target URL that is not an absolute address. A bad target URL is a
+// model-fixable mistake, so the tool fails before a 400 round-trip.
+func parseTargetURL(raw string) (*url.URL, error) {
+	parsed, err := url.Parse(raw)
+	if err != nil || (parsed.Host == "" && parsed.Scheme == "") {
+		return nil, fmt.Errorf("target_url %q %w", raw, errInvalidTargetURL)
+	}
+
+	return parsed, nil
 }
 
 // newCreateLinkRequest converts the parsed tool input into an ogen request, leaving optional
@@ -117,7 +139,7 @@ func newCreateLinkRequest(input createLinkInput, parsed *url.URL) *padmark.Creat
 	return req
 }
 
-func (m *Manager) createLinksBulk(
+func (s *Server) createLinksBulk(
 	ctx context.Context, _ *mcpsdk.CallToolRequest, input createBulkLinksInput,
 ) (*mcpsdk.CallToolResult, createBulkLinksOutput, error) {
 	if len(input.TargetURLs) == 0 {
@@ -136,19 +158,21 @@ func (m *Manager) createLinksBulk(
 		return nil, createBulkLinksOutput{}, fmt.Errorf("bulk create requests: %w", buildErr)
 	}
 
-	res, err := m.client.CreateLinksBulk(ctx, &padmark.BulkCreateLinksRequest{Links: reqs})
+	res, err := s.client.CreateLinksBulk(ctx, &padmark.BulkCreateLinksRequest{Links: reqs})
 	if err != nil {
 		return nil, createBulkLinksOutput{}, errorcontext.Wrap(
 			transportError("bulk create links", err), "create bulk links",
 		)
 	}
 
-	resp, apiErr := mapCreateLinksBulkRes(res)
-	if apiErr != nil {
-		return nil, createBulkLinksOutput{}, fmt.Errorf("map create links bulk res: %w", apiErr)
+	resp, err := successOf[*padmark.BulkCreateLinksResponse](res, "map create links bulk res", operation{
+		context: "decode create links bulk response", rateScope: "bulk link creations", kind: linkRecord(),
+	}, nil)
+	if err != nil {
+		return nil, createBulkLinksOutput{}, err
 	}
 
-	return nil, m.bulkLinkOutput(resp), nil
+	return nil, s.bulkLinkOutput(resp), nil
 }
 
 // bulkCreateRequests parses every target URL up front, reporting the first failure with the
@@ -185,43 +209,101 @@ func bulkCreateRequests(targetURLs []string) ([]padmark.CreateLinkRequest, error
 	return reqs, nil
 }
 
-func (m *Manager) getLink(
+func (s *Server) getLink(
 	ctx context.Context, _ *mcpsdk.CallToolRequest, input getLinkInput,
-) (*mcpsdk.CallToolResult, createLinkOutput, error) {
-	res, err := m.client.GetLink(ctx, padmark.GetLinkParams{ID: input.ID})
+) (*mcpsdk.CallToolResult, linkOutput, error) {
+	res, err := s.client.GetLink(ctx, padmark.GetLinkParams{ID: input.ID})
+
+	link, err := fetch[*padmark.LinkResponse](res, err, "get link", operation{
+		context: "decode get link response", rateScope: "link reads", kind: linkRecord(),
+	})
 	if err != nil {
-		return nil, createLinkOutput{}, errorcontext.Wrap(transportError("get link", err), "handle get link")
+		return nil, linkOutput{}, err
 	}
 
-	resp, apiErr := mapGetLinkRes(res)
-	if apiErr != nil {
-		return nil, createLinkOutput{}, fmt.Errorf("map get link res: %w", apiErr)
-	}
-
-	return nil, linkOutputFromLink(resp), nil
+	return nil, linkOutputFromLink(link), nil
 }
 
-func (m *Manager) deleteLink(
+// updateLink replaces the destination of a link, as update_note replaces the content of a note.
+// An unset optional field is not sent, so the server keeps its value.
+func (s *Server) updateLink(
+	ctx context.Context, _ *mcpsdk.CallToolRequest, input updateLinkInput,
+) (*mcpsdk.CallToolResult, linkOutput, error) {
+	req, err := newUpdateLinkRequest(input)
+	if err != nil {
+		return nil, linkOutput{}, err
+	}
+
+	req.EditCode = editCodeParam(s.vault, input.ID, input.EditCode)
+
+	res, err := s.client.UpdateLink(ctx, req, padmark.UpdateLinkParams{ID: input.ID})
+
+	link, err := fetch[*padmark.LinkResponse](res, err, "update link", operation{
+		context: "decode update link response", rateScope: "link updates", kind: linkRecord(),
+	})
+	if err != nil {
+		return nil, linkOutput{}, err
+	}
+
+	return nil, linkOutputFromLink(link), nil
+}
+
+// newUpdateLinkRequest converts the tool input into the PUT body without the edit code. It
+// refuses input that the model can correct before a server call.
+func newUpdateLinkRequest(input updateLinkInput) (*padmark.UpdateLinkRequest, error) {
+	parsed, err := parseTargetURL(input.TargetURL)
+	if err != nil {
+		return nil, err
+	}
+
+	err = checkTTL(input.TTL, 0, errLinkTTLRange)
+	if err != nil {
+		return nil, err
+	}
+
+	req := &padmark.UpdateLinkRequest{
+		TargetURL:      *parsed,
+		EditCode:       padmark.OptString{Value: "", Set: false},
+		TTL:            padmark.OptNilInt64{Value: 0, Set: false, Null: false},
+		Privacy:        padmark.OptUpdateLinkRequestPrivacy{Value: "", Set: false},
+		DirectRedirect: padmark.OptNilBool{Value: false, Set: false, Null: false},
+	}
+
+	if input.TTL != nil {
+		req.TTL = padmark.NewOptNilInt64(*input.TTL)
+	}
+
+	if input.Privacy != nil {
+		req.Privacy = padmark.NewOptUpdateLinkRequestPrivacy(padmark.UpdateLinkRequestPrivacy(*input.Privacy))
+	}
+
+	if input.DirectRedirect != nil {
+		req.DirectRedirect = padmark.NewOptNilBool(*input.DirectRedirect)
+	}
+
+	return req, nil
+}
+
+func (s *Server) deleteLink(
 	ctx context.Context, _ *mcpsdk.CallToolRequest, input deleteLinkInput,
-) (*mcpsdk.CallToolResult, deleteNoteOutput, error) {
+) (*mcpsdk.CallToolResult, deletedOutput, error) {
 	params := padmark.DeleteLinkParams{
 		ID:        input.ID,
 		XEditCode: padmark.OptString{Value: "", Set: false},
 	}
-	if code := editCodeFor(m.vault, input.ID, input.EditCode); code != "" {
+	if code := editCodeFor(s.vault, input.ID, input.EditCode); code != "" {
 		// The header, not the query parameter — query strings land in access logs.
 		params.XEditCode = padmark.NewOptString(code)
 	}
 
-	res, err := m.client.DeleteLink(ctx, params)
+	res, err := s.client.DeleteLink(ctx, params)
+
+	_, err = fetch[*padmark.DeleteLinkNoContent](res, err, "delete link", operation{
+		context: "delete link response", rateScope: "link deletes", kind: linkRecord(),
+	})
 	if err != nil {
-		return nil, deleteNoteOutput{}, errorcontext.Wrap(transportError("delete link", err), "handle delete link")
+		return nil, deletedOutput{}, err
 	}
 
-	apiErr := mapDeleteLinkRes(res)
-	if apiErr != nil {
-		return nil, deleteNoteOutput{}, fmt.Errorf("map delete link res: %w", apiErr)
-	}
-
-	return nil, deleteNoteOutput{ID: input.ID, Deleted: true}, nil
+	return nil, deletedOutput{ID: input.ID, Deleted: true}, nil
 }

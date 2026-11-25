@@ -1,3 +1,5 @@
+//go:generate go run go.uber.org/mock/mockgen@latest -source=user_admin.go -destination=user_admin_mocks_test.go -package=auth -write_package_comment=false
+
 package auth
 
 import (
@@ -9,13 +11,23 @@ import (
 	"github.com/partyzanex/padmark/internal/domain"
 )
 
+// UserAdminStore is the part of the user store that UserAdminManager uses. Fail-hard.
+type UserAdminStore interface {
+	GetByID(ctx context.Context, id uuid.UUID) (*domain.User, error)
+	List(ctx context.Context) ([]*domain.User, error)
+	// Revoke deletes the user record by ID. The delete itself refuses to remove an admin and
+	// returns domain.ErrForbidden in that case or when the target does not exist. Callers check
+	// GetByID first to give ErrNotFound.
+	Revoke(ctx context.Context, id uuid.UUID) error
+}
+
 // UserAdminManager lists and revokes user accounts for the admin panel.
 type UserAdminManager struct {
-	users UserStore
+	users UserAdminStore
 }
 
 // NewUserAdminManager returns a new UserAdminManager.
-func NewUserAdminManager(users UserStore) *UserAdminManager {
+func NewUserAdminManager(users UserAdminStore) *UserAdminManager {
 	return &UserAdminManager{users: users}
 }
 
@@ -42,7 +54,10 @@ func (m *UserAdminManager) ListUsers(ctx context.Context, adminUserID uuid.UUID)
 // RevokeUser removes a user. Returns domain.ErrForbidden when:
 //   - the caller is not an admin
 //   - the caller tries to revoke themselves
-//   - the target is the last admin (would open the bootstrap hole)
+//   - the target is an admin
+//
+// The schema allows only one admin (idx_users_single_admin), so an admin target is always the
+// last admin, and its removal would open the bootstrap hole. UserAdminStore.Revoke refuses it too.
 func (m *UserAdminManager) RevokeUser(ctx context.Context, adminUserID, targetUserID uuid.UUID) error {
 	if adminUserID == targetUserID {
 		return domain.ErrForbidden
@@ -63,38 +78,12 @@ func (m *UserAdminManager) RevokeUser(ctx context.Context, adminUserID, targetUs
 	}
 
 	if target.IsAdmin {
-		err = m.requireOtherAdmin(ctx, targetUserID)
-		if err != nil {
-			return err
-		}
+		return domain.ErrForbidden
 	}
 
 	err = m.users.Revoke(ctx, targetUserID)
 	if err != nil {
 		return fmt.Errorf("revoke user: %w", err)
-	}
-
-	return nil
-}
-
-// requireOtherAdmin returns domain.ErrForbidden when no admin other than targetUserID exists.
-// Removing the last admin would open the bootstrap hole.
-func (m *UserAdminManager) requireOtherAdmin(ctx context.Context, targetUserID uuid.UUID) error {
-	all, err := m.users.List(ctx)
-	if err != nil {
-		return fmt.Errorf("list users: %w", err)
-	}
-
-	remainingAdmins := 0
-
-	for _, u := range all {
-		if u.IsAdmin && u.ID != targetUserID {
-			remainingAdmins++
-		}
-	}
-
-	if remainingAdmins == 0 {
-		return domain.ErrForbidden
 	}
 
 	return nil

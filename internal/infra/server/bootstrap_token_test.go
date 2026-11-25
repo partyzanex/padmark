@@ -35,19 +35,19 @@ func TestParseBootstrapToken(t *testing.T) {
 
 // TestServerRejectsShortBootstrapTokenBeforeOpeningDB: a guessable bootstrap token fails startup
 // before the keyring or the database is touched.
-func TestServerRejectsShortBootstrapTokenBeforeOpeningDB(t *testing.T) {
-	t.Setenv(EnvBootstrapToken, "too-short")
+func (s *CommandSuite) TestServerRejectsShortBootstrapTokenBeforeOpeningDB() {
+	s.T().Setenv(EnvBootstrapToken, "too-short")
 
-	dir := t.TempDir()
+	dir := s.T().TempDir()
 	dsn := filepath.Join(dir, "padmark.db")
 
-	err := NewApp().Run(t.Context(), []string{"padmark", "serve", "--dsn", dsn})
+	err := NewApp().Run(s.T().Context(), []string{"padmark", "serve", "--dsn", dsn})
 
-	require.ErrorContains(t, err, "validate bootstrap token")
-	require.NotContains(t, err.Error(), "too-short")
-	require.NotContains(t, err.Error(), "keyring", "configuration error must precede keyring startup")
+	s.Require().ErrorContains(err, "validate bootstrap token")
+	s.Require().NotContains(err.Error(), "too-short")
+	s.Require().NotContains(err.Error(), "keyring", "configuration error must precede keyring startup")
 
 	entries, readErr := os.ReadDir(dir)
-	require.NoError(t, readErr)
-	require.Empty(t, entries, "no database (or journal) file may be created")
+	s.Require().NoError(readErr)
+	s.Require().Empty(entries, "no database (or journal) file may be created")
 }

@@ -10,7 +10,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/driver/pgdriver"
 
 	"github.com/partyzanex/padmark/internal/domain"
 )
@@ -60,11 +59,10 @@ func linkToDomain(dbLink *link) *domain.Link {
 	}
 }
 
-// Create inserts a new link. Expired links are lazily swept on each call (mirroring the
-// session/invite/reveal-token pattern — see session_repository.go) since there is no background
-// sweep worker in this codebase. This is the "nobody ever revisits it" gap Redirect's own
-// delete-on-read (links.Manager.Redirect) can't close on its own: a link that expires and is
-// never followed again would otherwise linger in the table forever.
+// Create inserts a new link. Links have no background sweep, so each call also deletes the
+// expired links of other IDs. links.Manager.Follow deletes an expired link only when a caller
+// follows it: a link that expires and that nobody follows again would otherwise stay in the
+// table.
 func (r *LinkRepository) Create(ctx context.Context, domLink *domain.Link) error {
 	dbLink := &link{
 		BaseModel:      bun.BaseModel{},
@@ -82,8 +80,7 @@ func (r *LinkRepository) Create(ctx context.Context, domLink *domain.Link) error
 
 	_, err := r.db.NewInsert().Model(dbLink).Exec(ctx)
 	if err != nil {
-		var pgErr pgdriver.Error
-		if errors.As(err, &pgErr) && pgErr.Field('C') == "23505" {
+		if isSlugConflict(err) {
 			return domain.ErrSlugConflict
 		}
 
@@ -97,7 +94,7 @@ func (r *LinkRepository) Create(ctx context.Context, domLink *domain.Link) error
 	// stale rows simply persist until the next Create call.
 	_, sweepErr := r.db.NewDelete().
 		TableExpr("links").
-		Where("id != ? AND expires_at IS NOT NULL AND expires_at < ?", dbLink.ID, time.Now()).
+		Where("id != ?", dbLink.ID).Where(expiredWhere, dbLink.CreatedAt).
 		Exec(ctx)
 	if sweepErr != nil {
 		r.log.WarnContext(ctx, "link sweep failed", "err", sweepErr)
@@ -106,18 +103,21 @@ func (r *LinkRepository) Create(ctx context.Context, domLink *domain.Link) error
 	return nil
 }
 
-// Update changes only editable fields. RETURNING reports the persisted counters and
-// immutable fields without overwriting clicks recorded since the caller's read.
-func (r *LinkRepository) Update(ctx context.Context, id string, domLink *domain.Link) (*domain.Link, error) {
+// Update writes the target URL and only the optional fields that patch sets (see
+// links.Storage). RETURNING reports the persisted counters and immutable fields without
+// overwriting clicks recorded since the caller's read. storedEditCode selects the link version.
+// An expired link is not changed (liveWhere): the write gets domain.ErrNotFound, as for files.
+func (r *LinkRepository) Update(
+	ctx context.Context, id, storedEditCode string, patch *domain.LinkPatch, now time.Time,
+) (*domain.Link, error) {
 	var dbLink link
 
-	err := r.db.NewUpdate().
-		Model(&dbLink).
-		Set("target_url = ?", domLink.TargetURL).
-		Set("expires_at = ?", domLink.ExpiresAt).
-		Set("privacy = COALESCE(?, privacy)", optionalPrivacy(domLink.Privacy)).
-		Set("direct_redirect = ?", domLink.DirectRedirect).
+	query := r.db.NewUpdate().Model(&dbLink).Set("target_url = ?", patch.TargetURL)
+
+	err := setLinkPatch(query, patch).
 		Where("id = ?", id).
+		Where("edit_code = ?", storedEditCode).
+		Where(liveWhere, now).
 		Returning("*").
 		Scan(ctx)
 	if err != nil {
@@ -131,15 +131,32 @@ func (r *LinkRepository) Update(ctx context.Context, id string, domLink *domain.
 	return linkToDomain(&dbLink), nil
 }
 
-// optionalPrivacy is the privacy value for a COALESCE update: nil keeps the stored level.
-func optionalPrivacy(p *domain.Privacy) *string {
-	if p == nil {
-		return nil
+// setLinkPatch adds a SET clause for each optional field that patch sets. An omitted field gets
+// no clause, so the UPDATE keeps the value that is stored at the time of the write.
+func setLinkPatch(query *bun.UpdateQuery, patch *domain.LinkPatch) *bun.UpdateQuery {
+	patched := query
+
+	switch {
+	case patch.ClearExpiry:
+		patched = patched.Set("expires_at = NULL")
+	case patch.ExpiresAt != nil:
+		patched = patched.Set("expires_at = ?", patch.ExpiresAt)
+	default: // The caller omitted the expiry.
 	}
 
-	value := string(*p)
+	if patch.Privacy != nil {
+		patched = patched.Set("privacy = ?", string(*patch.Privacy))
+	}
 
-	return &value
+	switch {
+	case patch.ResetDirectRedirect:
+		patched = patched.Set("direct_redirect = NULL")
+	case patch.DirectRedirect != nil:
+		patched = patched.Set("direct_redirect = ?", *patch.DirectRedirect)
+	default: // The caller omitted the redirect mode.
+	}
+
+	return patched
 }
 
 // GetByID retrieves a link by ID (HashSlug(slug)).
@@ -158,28 +175,17 @@ func (r *LinkRepository) GetByID(ctx context.Context, id string) (*domain.Link, 
 	return linkToDomain(&dbLink), nil
 }
 
-// Exists reports whether a link with the given ID exists — used for the cross-table slug
-// uniqueness check shared with notes (see links.Manager.Create / notes.Manager.Create).
-func (r *LinkRepository) Exists(ctx context.Context, id string) (bool, error) {
-	exists, err := r.db.NewSelect().Model((*link)(nil)).Where("id = ?", id).Exists(ctx)
-	if err != nil {
-		return false, fmt.Errorf("postgres link exists: %w", err)
-	}
-
-	return exists, nil
-}
-
 // Consume atomically deletes a link and returns it, but only if the link is eligible for
-// deletion: burn_after_click is set, or expires_at has passed. Returns domain.ErrNotFound
+// deletion: burn_after_click is set, or the link is expired at now. Returns domain.ErrNotFound
 // otherwise. Mirrors note_repository.go:Consume. Unlike notes, links has no deprecated column
 // the Go struct doesn't map, so a plain Returning("*") is safe here.
-func (r *LinkRepository) Consume(ctx context.Context, id string) (*domain.Link, error) {
+func (r *LinkRepository) Consume(ctx context.Context, id string, now time.Time) (*domain.Link, error) {
 	var dbLink link
 
 	err := r.db.NewDelete().
 		Model(&dbLink).
 		Where("id = ?", id).
-		Where("burn_after_click OR (expires_at IS NOT NULL AND expires_at <= ?)", time.Now()).
+		Where("burn_after_click OR ("+expiredWhere+")", now).
 		Returning("*").
 		Scan(ctx)
 	if err != nil {
@@ -196,12 +202,12 @@ func (r *LinkRepository) Consume(ctx context.Context, id string) (*domain.Link, 
 // ConsumeVisible enforces the reader's current access in the DELETE itself, including after
 // a concurrent writer has changed privacy. With allowBurn=false only expired rows qualify.
 func (r *LinkRepository) ConsumeVisible(
-	ctx context.Context, id string, callerID uuid.UUID, authenticated, allowBurn bool,
+	ctx context.Context, id string, callerID uuid.UUID, authenticated, allowBurn bool, now time.Time,
 ) (*domain.Link, error) {
 	var dbLink link
 
 	err := r.db.NewDelete().Model(&dbLink).Where("id = ?", id).
-		Where("(expires_at IS NOT NULL AND expires_at <= ?) OR (burn_after_click AND ?)", time.Now(), allowBurn).
+		Where("("+expiredWhere+") OR (burn_after_click AND ?)", now, allowBurn).
 		Where("privacy = ? OR (privacy = ? AND ?) OR (privacy = ? AND owner_id = ? AND ?)",
 			domain.PrivacyPublic, domain.PrivacyAuthenticated, authenticated,
 			domain.PrivacyOwner, callerID, callerID != uuid.Nil).
@@ -264,13 +270,34 @@ func (r *LinkRepository) IncrementViews(ctx context.Context, id string) error {
 	return nil
 }
 
-// Delete removes a link by ID.
-func (r *LinkRepository) Delete(ctx context.Context, id string) error {
-	result, err := r.db.NewDelete().Model((*link)(nil)).Where("id = ?", id).Exec(ctx)
+// Delete removes the link version with id and storedEditCode (see links.Storage).
+func (r *LinkRepository) Delete(ctx context.Context, id, storedEditCode string) error {
+	result, err := r.db.NewDelete().Model((*link)(nil)).
+		Where("id = ?", id).Where("edit_code = ?", storedEditCode).Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("postgres delete link: %w", err)
 	}
 
+	return linkRowRemoved(result)
+}
+
+// DeleteExpired removes the link with id only while it is still expired at the moment of the
+// DELETE. It returns domain.ErrNotFound when no such row exists, for example after its owner
+// extended it. An unread burn-after-click link without an expiry stays.
+func (r *LinkRepository) DeleteExpired(ctx context.Context, id string, now time.Time) error {
+	result, err := r.db.NewDelete().Model((*link)(nil)).
+		Where("id = ?", id).
+		Where(expiredWhere, now).
+		Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("postgres delete expired link: %w", err)
+	}
+
+	return linkRowRemoved(result)
+}
+
+// linkRowRemoved returns domain.ErrNotFound when a DELETE removed no link.
+func linkRowRemoved(result sql.Result) error {
 	affected, err := result.RowsAffected()
 	if err != nil {
 		return fmt.Errorf("postgres rowsaffected: %w", err)

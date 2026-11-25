@@ -11,8 +11,8 @@ import (
 	"github.com/urfave/cli/v3"
 )
 
-// runWithSessionTTL parses args against the real flag set and returns what sessionTTL resolves
-// together with the log output of warnDeprecatedSessionFlags.
+// runWithSessionTTL parses args against the real flag set and returns the session TTL of
+// accountsConfigFromCommand together with the log output of warnDeprecatedSessionFlags.
 func runWithSessionTTL(t *testing.T, args ...string) (time.Duration, string) {
 	t.Helper()
 
@@ -23,10 +23,11 @@ func runWithSessionTTL(t *testing.T, args ...string) (time.Duration, string) {
 
 	log := slog.New(slog.NewTextHandler(&out, nil))
 	cmd := newCommand("padmark", "test", appFlags(), func(ctx context.Context, cmd *cli.Command) error {
-		warnDeprecatedSessionFlags(ctx, cmd, log)
-		got = sessionTTL(cmd)
+		accounts, err := accountsConfigFromCommand(cmd)
+		warnDeprecatedSessionFlags(ctx, accounts, log)
+		got = accounts.sessionTTL
 
-		return nil
+		return err
 	})
 
 	require.NoError(t, cmd.Run(t.Context(), append([]string{"padmark"}, args...)))
@@ -34,7 +35,7 @@ func runWithSessionTTL(t *testing.T, args ...string) (time.Duration, string) {
 	return got, out.String()
 }
 
-func TestServerRejectsRemovedAuthTokens(t *testing.T) {
+func (s *CommandSuite) TestServerRejectsRemovedAuthTokens() {
 	const secret = "s3cr3t-legacy-token-value"
 
 	tests := []struct {
@@ -53,25 +54,25 @@ func TestServerRejectsRemovedAuthTokens(t *testing.T) {
 	}
 
 	for _, testCase := range tests {
-		t.Run(testCase.name, func(t *testing.T) {
+		s.Run(testCase.name, func() {
 			if testCase.env {
-				t.Setenv(EnvAuthTokens, secret)
+				s.T().Setenv(EnvAuthTokens, secret)
 			}
 
-			dir := t.TempDir()
+			dir := s.T().TempDir()
 			dsn := filepath.Join(dir, "padmark.db")
 			args := append([]string{"padmark", "serve", "--dsn", dsn}, testCase.args...)
 
-			err := NewApp().Run(t.Context(), args)
+			err := NewApp().Run(s.T().Context(), args)
 
-			require.Error(t, err)
-			require.ErrorContains(t, err, "was removed")
-			require.ErrorContains(t, err, "--enable-accounts")
-			require.ErrorContains(t, err, EnvBootstrapToken)
-			require.ErrorContains(t, err, "/api/tokens")
-			require.NotContains(t, err.Error(), secret, "the token value must never appear in errors")
-			require.NotContains(t, err.Error(), "not defined", "must not be urfave's generic error")
-			require.NoFileExists(t, dsn, "the refusal must precede opening the database")
+			s.Require().Error(err)
+			s.Require().ErrorContains(err, "was removed")
+			s.Require().ErrorContains(err, "--enable-accounts")
+			s.Require().ErrorContains(err, EnvBootstrapToken)
+			s.Require().ErrorContains(err, "/api/tokens")
+			s.Require().NotContains(err.Error(), secret, "the token value must never appear in errors")
+			s.Require().NotContains(err.Error(), "not defined", "must not be urfave's generic error")
+			s.Require().NoFileExists(dsn, "the refusal must precede opening the database")
 		})
 	}
 }

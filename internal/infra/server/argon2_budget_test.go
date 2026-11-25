@@ -50,7 +50,7 @@ func TestArgon2MemoryBudgetFlagParsesFromEnv(t *testing.T) {
 	require.Equal(t, 65536, parseBudgetFlag(t))
 }
 
-func TestServerRejectsArgon2MemoryBudgetBelowArgon2Memory(t *testing.T) {
+func (s *CommandSuite) TestServerRejectsArgon2MemoryBudgetBelowArgon2Memory() {
 	tests := []struct {
 		name string
 		env  string
@@ -67,23 +67,23 @@ func TestServerRejectsArgon2MemoryBudgetBelowArgon2Memory(t *testing.T) {
 	}
 
 	for _, testCase := range tests {
-		t.Run(testCase.name, func(t *testing.T) {
+		s.Run(testCase.name, func() {
 			if testCase.env != "" {
-				t.Setenv(budgetEnvName, testCase.env)
+				s.T().Setenv(budgetEnvName, testCase.env)
 			}
 
-			dir := t.TempDir()
+			dir := s.T().TempDir()
 			dsn := filepath.Join(dir, "padmark.db")
 			args := append([]string{"padmark", "serve", "--dsn", dsn}, testCase.args...)
 
-			err := NewApp().Run(t.Context(), args)
+			err := NewApp().Run(s.T().Context(), args)
 
-			require.ErrorContains(t, err, budgetTooSmall)
-			require.NotContains(t, err.Error(), "keyring", "configuration error must precede keyring startup")
+			s.Require().ErrorContains(err, budgetTooSmall)
+			s.Require().NotContains(err.Error(), "keyring", "configuration error must precede keyring startup")
 
 			entries, readErr := os.ReadDir(dir)
-			require.NoError(t, readErr)
-			require.Empty(t, entries, "no database (or journal) file may be created")
+			s.Require().NoError(readErr)
+			s.Require().Empty(entries, "no database (or journal) file may be created")
 		})
 	}
 }

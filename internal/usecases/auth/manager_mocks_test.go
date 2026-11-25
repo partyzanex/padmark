@@ -42,6 +42,20 @@ func (m *MockUserStore) EXPECT() *MockUserStoreMockRecorder {
 	return m.recorder
 }
 
+// ChangePassword mocks base method.
+func (m *MockUserStore) ChangePassword(ctx context.Context, sess *domain.Session, passwordHash string, kdfSalt []byte, totpSecret string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ChangePassword", ctx, sess, passwordHash, kdfSalt, totpSecret)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// ChangePassword indicates an expected call of ChangePassword.
+func (mr *MockUserStoreMockRecorder) ChangePassword(ctx, sess, passwordHash, kdfSalt, totpSecret any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ChangePassword", reflect.TypeOf((*MockUserStore)(nil).ChangePassword), ctx, sess, passwordHash, kdfSalt, totpSecret)
+}
+
 // Create mocks base method.
 func (m *MockUserStore) Create(ctx context.Context, u *domain.User) error {
 	m.ctrl.T.Helper()
@@ -129,20 +143,6 @@ func (mr *MockUserStoreMockRecorder) UpdateLastLogin(ctx, id, t any) *gomock.Cal
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateLastLogin", reflect.TypeOf((*MockUserStore)(nil).UpdateLastLogin), ctx, id, t)
 }
 
-// UpdatePassword mocks base method.
-func (m *MockUserStore) UpdatePassword(ctx context.Context, id uuid.UUID, passwordHash string, kdfSalt []byte, totpSecret string) error {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "UpdatePassword", ctx, id, passwordHash, kdfSalt, totpSecret)
-	ret0, _ := ret[0].(error)
-	return ret0
-}
-
-// UpdatePassword indicates an expected call of UpdatePassword.
-func (mr *MockUserStoreMockRecorder) UpdatePassword(ctx, id, passwordHash, kdfSalt, totpSecret any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdatePassword", reflect.TypeOf((*MockUserStore)(nil).UpdatePassword), ctx, id, passwordHash, kdfSalt, totpSecret)
-}
-
 // UpdateTOTPCounter mocks base method.
 func (m *MockUserStore) UpdateTOTPCounter(ctx context.Context, id uuid.UUID, counter int64) (bool, error) {
 	m.ctrl.T.Helper()
@@ -171,154 +171,6 @@ func (m *MockUserStore) UpdateTOTPSecret(ctx context.Context, id uuid.UUID, expe
 func (mr *MockUserStoreMockRecorder) UpdateTOTPSecret(ctx, id, expected, totpSecret any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateTOTPSecret", reflect.TypeOf((*MockUserStore)(nil).UpdateTOTPSecret), ctx, id, expected, totpSecret)
-}
-
-// MockInviteStore is a mock of InviteStore interface.
-type MockInviteStore struct {
-	ctrl     *gomock.Controller
-	recorder *MockInviteStoreMockRecorder
-	isgomock struct{}
-}
-
-// MockInviteStoreMockRecorder is the mock recorder for MockInviteStore.
-type MockInviteStoreMockRecorder struct {
-	mock *MockInviteStore
-}
-
-// NewMockInviteStore creates a new mock instance.
-func NewMockInviteStore(ctrl *gomock.Controller) *MockInviteStore {
-	mock := &MockInviteStore{ctrl: ctrl}
-	mock.recorder = &MockInviteStoreMockRecorder{mock}
-	return mock
-}
-
-// EXPECT returns an object that allows the caller to indicate expected use.
-func (m *MockInviteStore) EXPECT() *MockInviteStoreMockRecorder {
-	return m.recorder
-}
-
-// Issue mocks base method.
-func (m *MockInviteStore) Issue(ctx context.Context, createdByID uuid.UUID) (string, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Issue", ctx, createdByID)
-	ret0, _ := ret[0].(string)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// Issue indicates an expected call of Issue.
-func (mr *MockInviteStoreMockRecorder) Issue(ctx, createdByID any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Issue", reflect.TypeOf((*MockInviteStore)(nil).Issue), ctx, createdByID)
-}
-
-// RedeemInvite mocks base method.
-func (m *MockInviteStore) RedeemInvite(ctx context.Context, token, username string, usr *domain.User) error {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "RedeemInvite", ctx, token, username, usr)
-	ret0, _ := ret[0].(error)
-	return ret0
-}
-
-// RedeemInvite indicates an expected call of RedeemInvite.
-func (mr *MockInviteStoreMockRecorder) RedeemInvite(ctx, token, username, usr any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RedeemInvite", reflect.TypeOf((*MockInviteStore)(nil).RedeemInvite), ctx, token, username, usr)
-}
-
-// MockSessionStore is a mock of SessionStore interface.
-type MockSessionStore struct {
-	ctrl     *gomock.Controller
-	recorder *MockSessionStoreMockRecorder
-	isgomock struct{}
-}
-
-// MockSessionStoreMockRecorder is the mock recorder for MockSessionStore.
-type MockSessionStoreMockRecorder struct {
-	mock *MockSessionStore
-}
-
-// NewMockSessionStore creates a new mock instance.
-func NewMockSessionStore(ctrl *gomock.Controller) *MockSessionStore {
-	mock := &MockSessionStore{ctrl: ctrl}
-	mock.recorder = &MockSessionStoreMockRecorder{mock}
-	return mock
-}
-
-// EXPECT returns an object that allows the caller to indicate expected use.
-func (m *MockSessionStore) EXPECT() *MockSessionStoreMockRecorder {
-	return m.recorder
-}
-
-// Create mocks base method.
-func (m *MockSessionStore) Create(ctx context.Context, s *domain.Session) error {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Create", ctx, s)
-	ret0, _ := ret[0].(error)
-	return ret0
-}
-
-// Create indicates an expected call of Create.
-func (mr *MockSessionStoreMockRecorder) Create(ctx, s any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Create", reflect.TypeOf((*MockSessionStore)(nil).Create), ctx, s)
-}
-
-// Delete mocks base method.
-func (m *MockSessionStore) Delete(ctx context.Context, sessionID string) error {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Delete", ctx, sessionID)
-	ret0, _ := ret[0].(error)
-	return ret0
-}
-
-// Delete indicates an expected call of Delete.
-func (mr *MockSessionStoreMockRecorder) Delete(ctx, sessionID any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Delete", reflect.TypeOf((*MockSessionStore)(nil).Delete), ctx, sessionID)
-}
-
-// DeleteByUserID mocks base method.
-func (m *MockSessionStore) DeleteByUserID(ctx context.Context, userID uuid.UUID) error {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "DeleteByUserID", ctx, userID)
-	ret0, _ := ret[0].(error)
-	return ret0
-}
-
-// DeleteByUserID indicates an expected call of DeleteByUserID.
-func (mr *MockSessionStoreMockRecorder) DeleteByUserID(ctx, userID any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteByUserID", reflect.TypeOf((*MockSessionStore)(nil).DeleteByUserID), ctx, userID)
-}
-
-// DeleteByUserIDExcept mocks base method.
-func (m *MockSessionStore) DeleteByUserIDExcept(ctx context.Context, userID uuid.UUID, exceptSessionID string) error {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "DeleteByUserIDExcept", ctx, userID, exceptSessionID)
-	ret0, _ := ret[0].(error)
-	return ret0
-}
-
-// DeleteByUserIDExcept indicates an expected call of DeleteByUserIDExcept.
-func (mr *MockSessionStoreMockRecorder) DeleteByUserIDExcept(ctx, userID, exceptSessionID any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteByUserIDExcept", reflect.TypeOf((*MockSessionStore)(nil).DeleteByUserIDExcept), ctx, userID, exceptSessionID)
-}
-
-// Get mocks base method.
-func (m *MockSessionStore) Get(ctx context.Context, sessionID string) (*domain.Session, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Get", ctx, sessionID)
-	ret0, _ := ret[0].(*domain.Session)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// Get indicates an expected call of Get.
-func (mr *MockSessionStoreMockRecorder) Get(ctx, sessionID any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Get", reflect.TypeOf((*MockSessionStore)(nil).Get), ctx, sessionID)
 }
 
 // MockPasswordHasher is a mock of PasswordHasher interface.
@@ -526,115 +378,4 @@ func (m *MockTOTPManager) ValidateWithCounter(secret, code string) (bool, int64)
 func (mr *MockTOTPManagerMockRecorder) ValidateWithCounter(secret, code any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ValidateWithCounter", reflect.TypeOf((*MockTOTPManager)(nil).ValidateWithCounter), secret, code)
-}
-
-// MockAPITokenStore is a mock of APITokenStore interface.
-type MockAPITokenStore struct {
-	ctrl     *gomock.Controller
-	recorder *MockAPITokenStoreMockRecorder
-	isgomock struct{}
-}
-
-// MockAPITokenStoreMockRecorder is the mock recorder for MockAPITokenStore.
-type MockAPITokenStoreMockRecorder struct {
-	mock *MockAPITokenStore
-}
-
-// NewMockAPITokenStore creates a new mock instance.
-func NewMockAPITokenStore(ctrl *gomock.Controller) *MockAPITokenStore {
-	mock := &MockAPITokenStore{ctrl: ctrl}
-	mock.recorder = &MockAPITokenStoreMockRecorder{mock}
-	return mock
-}
-
-// EXPECT returns an object that allows the caller to indicate expected use.
-func (m *MockAPITokenStore) EXPECT() *MockAPITokenStoreMockRecorder {
-	return m.recorder
-}
-
-// CreateIfUnderLimit mocks base method.
-func (m *MockAPITokenStore) CreateIfUnderLimit(ctx context.Context, t *domain.APIToken, limit int) (bool, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "CreateIfUnderLimit", ctx, t, limit)
-	ret0, _ := ret[0].(bool)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// CreateIfUnderLimit indicates an expected call of CreateIfUnderLimit.
-func (mr *MockAPITokenStoreMockRecorder) CreateIfUnderLimit(ctx, t, limit any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateIfUnderLimit", reflect.TypeOf((*MockAPITokenStore)(nil).CreateIfUnderLimit), ctx, t, limit)
-}
-
-// DeleteByUserID mocks base method.
-func (m *MockAPITokenStore) DeleteByUserID(ctx context.Context, userID uuid.UUID) error {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "DeleteByUserID", ctx, userID)
-	ret0, _ := ret[0].(error)
-	return ret0
-}
-
-// DeleteByUserID indicates an expected call of DeleteByUserID.
-func (mr *MockAPITokenStoreMockRecorder) DeleteByUserID(ctx, userID any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteByUserID", reflect.TypeOf((*MockAPITokenStore)(nil).DeleteByUserID), ctx, userID)
-}
-
-// GetByHash mocks base method.
-func (m *MockAPITokenStore) GetByHash(ctx context.Context, tokenHash string) (*domain.APIToken, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetByHash", ctx, tokenHash)
-	ret0, _ := ret[0].(*domain.APIToken)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// GetByHash indicates an expected call of GetByHash.
-func (mr *MockAPITokenStoreMockRecorder) GetByHash(ctx, tokenHash any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetByHash", reflect.TypeOf((*MockAPITokenStore)(nil).GetByHash), ctx, tokenHash)
-}
-
-// List mocks base method.
-func (m *MockAPITokenStore) List(ctx context.Context) ([]*domain.APIToken, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "List", ctx)
-	ret0, _ := ret[0].([]*domain.APIToken)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// List indicates an expected call of List.
-func (mr *MockAPITokenStoreMockRecorder) List(ctx any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "List", reflect.TypeOf((*MockAPITokenStore)(nil).List), ctx)
-}
-
-// RevokeByHash mocks base method.
-func (m *MockAPITokenStore) RevokeByHash(ctx context.Context, tokenHash string) error {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "RevokeByHash", ctx, tokenHash)
-	ret0, _ := ret[0].(error)
-	return ret0
-}
-
-// RevokeByHash indicates an expected call of RevokeByHash.
-func (mr *MockAPITokenStoreMockRecorder) RevokeByHash(ctx, tokenHash any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RevokeByHash", reflect.TypeOf((*MockAPITokenStore)(nil).RevokeByHash), ctx, tokenHash)
-}
-
-// UpdateLastUsed mocks base method.
-func (m *MockAPITokenStore) UpdateLastUsed(ctx context.Context, tokenHash string, t time.Time) error {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "UpdateLastUsed", ctx, tokenHash, t)
-	ret0, _ := ret[0].(error)
-	return ret0
-}
-
-// UpdateLastUsed indicates an expected call of UpdateLastUsed.
-func (mr *MockAPITokenStoreMockRecorder) UpdateLastUsed(ctx, tokenHash, t any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateLastUsed", reflect.TypeOf((*MockAPITokenStore)(nil).UpdateLastUsed), ctx, tokenHash, t)
 }

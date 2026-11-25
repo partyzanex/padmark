@@ -8,6 +8,7 @@ import (
 	"github.com/pressly/goose/v3"
 	"github.com/stretchr/testify/require"
 
+	"github.com/partyzanex/padmark/internal/domain"
 	migrations "github.com/partyzanex/padmark/migrations/sqlite"
 )
 
@@ -35,18 +36,24 @@ func TestMigrateRevealTokens_InvalidatesPlaintextEraTokensAndDowngradeDropsHashe
 	require.NoError(t, err)
 	require.Zero(t, count, "plaintext-era reveal tokens must be invalidated")
 
-	repo := NewRevealRepository(db, slog.Default())
-	require.False(t, repo.Consume(t.Context(), "legacy-raw-token", "note-1"))
+	repo := NewRevealRepository(db)
+	now := time.Now()
 
-	issued, err := repo.Issue(t.Context(), "note-1")
+	consumed, err := repo.Consume(t.Context(), domain.HashRevealToken("legacy-raw-token"), "note-1", now)
 	require.NoError(t, err)
+	require.False(t, consumed)
+
+	issued := domain.HashRevealToken("new-token")
+	require.NoError(t, repo.Create(t.Context(), issued, "note-1", now.Add(time.Minute)))
 
 	_, err = provider.Up(t.Context())
 	require.NoError(t, err)
-	require.True(t, repo.Consume(t.Context(), issued, "note-1"), "reapplying migrations keeps new tokens")
 
-	_, err = repo.Issue(t.Context(), "note-1")
+	consumed, err = repo.Consume(t.Context(), issued, "note-1", now)
 	require.NoError(t, err)
+	require.True(t, consumed, "reapplying migrations keeps new tokens")
+
+	require.NoError(t, repo.Create(t.Context(), domain.HashRevealToken("later-token"), "note-1", now.Add(time.Minute)))
 
 	_, err = provider.DownTo(t.Context(), before)
 	require.NoError(t, err)

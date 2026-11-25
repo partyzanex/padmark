@@ -28,7 +28,7 @@ func TestMigrateUsernameNoCase_KeepsExistingRowsAndEnforcesUniqueness(t *testing
 	require.NoError(t, err)
 
 	repo := NewUserRepository(db)
-	require.NoError(t, repo.Create(t.Context(), inviteTestUser("Mixed")))
+	require.NoError(t, repo.Create(t.Context(), migrationTestUser("Mixed")))
 
 	_, err = provider.UpTo(t.Context(), usernameNoCaseVersion)
 	require.NoError(t, err)
@@ -37,7 +37,7 @@ func TestMigrateUsernameNoCase_KeepsExistingRowsAndEnforcesUniqueness(t *testing
 	require.NoError(t, err)
 	require.Equal(t, "Mixed", got.Username, "existing rows stay valid and keep their spelling")
 
-	require.ErrorIs(t, repo.Create(t.Context(), inviteTestUser("MIXED")), domain.ErrUserExists)
+	require.ErrorIs(t, repo.Create(t.Context(), migrationTestUser("MIXED")), domain.ErrUserExists)
 }
 
 func TestMigrateUsernameNoCase_FailsLoudlyOnExistingCollision(t *testing.T) {
@@ -52,8 +52,8 @@ func TestMigrateUsernameNoCase_FailsLoudlyOnExistingCollision(t *testing.T) {
 	require.NoError(t, err)
 
 	repo := NewUserRepository(db)
-	require.NoError(t, repo.Create(t.Context(), inviteTestUser("admin")))
-	require.NoError(t, repo.Create(t.Context(), inviteTestUser("Admin")))
+	require.NoError(t, repo.Create(t.Context(), migrationTestUser("admin")))
+	require.NoError(t, repo.Create(t.Context(), migrationTestUser("Admin")))
 
 	_, err = provider.UpTo(t.Context(), usernameNoCaseVersion)
 	require.Error(t, err, "colliding usernames must abort the migration, not be merged or dropped")

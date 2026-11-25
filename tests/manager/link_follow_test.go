@@ -11,9 +11,10 @@ import (
 	"github.com/uptrace/bun/dialect"
 
 	"github.com/partyzanex/padmark/internal/domain"
-	"github.com/partyzanex/padmark/internal/infra/lock"
+	"github.com/partyzanex/padmark/internal/infra/expiredslugs"
 	pgrepo "github.com/partyzanex/padmark/internal/infra/storage/postgres"
 	sqliterepo "github.com/partyzanex/padmark/internal/infra/storage/sqlite"
+	"github.com/partyzanex/padmark/internal/testutil"
 	"github.com/partyzanex/padmark/internal/usecases/links"
 )
 
@@ -34,18 +35,22 @@ func (r *changedLinkRead) GetByID(ctx context.Context, id string) (*domain.Link,
 }
 
 //nolint:ireturn // test factory selects backend implementations of the same usecase ports
-func (s *ManagerSuite) linkStorage() (links.Storage, links.NotesChecker) {
+func (s *ManagerSuite) linkStorage() (links.Storage, *expiredslugs.Releaser) {
 	if s.DB.Dialect().Name() == dialect.PG {
-		return pgrepo.NewLinkRepository(s.DB, discardLog()), pgrepo.NewNoteRepository(s.DB)
+		repo := pgrepo.NewLinkRepository(s.DB, discardLog())
+
+		return repo, expiredslugs.New(pgrepo.NewNoteRepository(s.DB), repo)
 	}
 
-	return sqliterepo.NewLinkRepository(s.DB, discardLog()), sqliterepo.NewNoteRepository(s.DB)
+	repo := sqliterepo.NewLinkRepository(s.DB, discardLog())
+
+	return repo, expiredslugs.New(sqliterepo.NewNoteRepository(s.DB), repo)
 }
 
 // This suite runs against SQLite and PostgreSQL. A second manager commits between SELECT
 // and the read's mutation, exercising each backend's actual visibility predicates.
 func (s *ManagerSuite) TestFollowConcurrentPrivacyChange() {
-	storage, checker := s.linkStorage()
+	storage, expired := s.linkStorage()
 	ownerID := s.insertLinkOwner()
 
 	for _, scenario := range []struct {
@@ -72,10 +77,10 @@ func (s *ManagerSuite) TestFollowConcurrentPrivacyChange() {
 
 			privateURL := "https://example.com/private?secret=hidden"
 			changing := s.privatizeAfterRead(storage, link.ID, ownerID, privateURL)
-			reader := newLinkManager(s.T(), changing, checker, lock.NewLocker())
-			result, followErr := reader.Follow(s.T().Context(), link.ID, links.FollowOptions{
-				AllowBurn: true,
-				CallerID:  uuid.UUID{}, Authenticated: false,
+			reader := newLinkManager(s.T(), changing, expired)
+			result, followErr := reader.Follow(s.T().Context(), link.ID, domain.Reader{
+				AllowBurn: true, SkipPrivacy: false,
+				CallerID: uuid.UUID{}, Authenticated: false,
 			})
 			s.Require().ErrorIs(followErr, domain.ErrNotFound)
 			s.Nil(result, "a raced privacy change must not expose the new destination")
@@ -83,15 +88,15 @@ func (s *ManagerSuite) TestFollowConcurrentPrivacyChange() {
 			s.Require().NoError(getErr, "the private replacement must survive both burn and expiry cleanup")
 			s.Zero(stored.Views)
 
-			followed, ownerErr := reader.Follow(s.T().Context(), link.ID, links.FollowOptions{
-				CallerID: ownerID, Authenticated: true, AllowBurn: true,
+			followed, ownerErr := reader.Follow(s.T().Context(), link.ID, domain.Reader{
+				CallerID: ownerID, Authenticated: true, AllowBurn: true, SkipPrivacy: false,
 			})
 			s.Require().NoError(ownerErr)
 			s.Equal(privateURL, followed.TargetURL)
 
 			if scenario.burn {
-				_, followErr = reader.Follow(s.T().Context(), link.ID, links.FollowOptions{
-					CallerID: ownerID, Authenticated: true, AllowBurn: true,
+				_, followErr = reader.Follow(s.T().Context(), link.ID, domain.Reader{
+					CallerID: ownerID, Authenticated: true, AllowBurn: true, SkipPrivacy: false,
 				})
 				s.Require().ErrorIs(followErr, domain.ErrNotFound, "only one owner read may consume the link")
 			}
@@ -111,7 +116,9 @@ func (s *ManagerSuite) insertLinkOwner() uuid.UUID {
 }
 
 // privatizeAfterRead wraps storage so that the first successful read makes the link owner-only
-// with privateURL. The update commits between the reader's SELECT and its mutation.
+// with privateURL and a new expiry. The change commits between the reader's SELECT and its
+// mutation. It writes the row with SQL, as a second server process can: links.Manager.Update and
+// the storage Update refuse an expired link, and the expired scenario needs a change of that link.
 func (s *ManagerSuite) privatizeAfterRead(
 	storage links.Storage, linkID string, ownerID uuid.UUID, privateURL string,
 ) *changedLinkRead {
@@ -121,11 +128,21 @@ func (s *ManagerSuite) privatizeAfterRead(
 		Storage: storage,
 		once:    sync.Once{},
 		afterRead: func() {
-			_, updateErr := s.LinkManager.Update(s.T().Context(), linkID, "", ownerID, privateURL,
-				links.UpdateOptions{
-					Privacy: new(domain.PrivacyOwner), ExpiresAt: new(time.Now().Add(time.Hour)),
-					DirectRedirect: nil, ClearExpiry: false, ResetDirectRedirect: false,
-				})
+			ctx := s.T().Context()
+			id := domain.HashSlug(linkID)
+
+			stored, getErr := storage.GetByID(ctx, id)
+			s.Require().NoError(getErr)
+			s.Require().Equal(&ownerID, stored.OwnerID)
+
+			ciphertext, encryptErr := testutil.ContentEncryptor(s.T(), "link").Encrypt(privateURL, id)
+			s.Require().NoError(encryptErr)
+
+			_, updateErr := s.DB.NewUpdate().Table("links").
+				Set("target_url = ?", ciphertext).
+				Set("privacy = ?", string(domain.PrivacyOwner)).
+				Set("expires_at = ?", time.Now().Add(time.Hour)).
+				Where("id = ?", id).Exec(ctx)
 			s.Require().NoError(updateErr)
 		},
 	}

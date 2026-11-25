@@ -24,11 +24,19 @@ var adminTmplSrc string
 type AdminHandler struct {
 	*common
 
+	// users, tokens and onboarding hold disabledAccounts when the account system is off.
+	users      UserAdminManager
+	tokens     APITokenManager
+	onboarding OnboardingManager
+
 	adminTmpl *template.Template
 }
 
-func newAdminHandler(c *common, adminTmpl *template.Template) *AdminHandler {
-	return &AdminHandler{common: c, adminTmpl: adminTmpl}
+func newAdminHandler(c *common, accounts AuthManager) *AdminHandler {
+	return &AdminHandler{
+		common: c, users: accounts, tokens: accounts, onboarding: accounts,
+		adminTmpl: parseTmpl("admin", adminTmplSrc),
+	}
 }
 
 // RegisterRoutes registers the admin panel and its invite/revoke/API-key management routes.
@@ -92,7 +100,7 @@ func (h *AdminHandler) AdminInviteHandler(w http.ResponseWriter, r *http.Request
 	}
 
 	// requireAdmin admits only browser sessions, which issue without a step-up.
-	token, genErr := h.authMgr.GenerateInvite(r.Context(), usr.ID, auth.SessionIssuer())
+	token, genErr := h.onboarding.GenerateInvite(r.Context(), usr.ID, auth.SessionIssuer())
 	if genErr != nil {
 		data.InviteError = "Failed to generate invite link."
 	} else {
@@ -123,7 +131,7 @@ func (h *AdminHandler) AdminRevokeHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	revokeErr := h.authMgr.RevokeUser(r.Context(), usr.ID, targetID)
+	revokeErr := h.users.RevokeUser(r.Context(), usr.ID, targetID)
 	if revokeErr != nil {
 		h.log.ErrorContext(r.Context(), "revoke user", "target_id", targetID, "err", revokeErr)
 
@@ -163,7 +171,7 @@ func (h *AdminHandler) AdminCreateKeyHandler(w http.ResponseWriter, r *http.Requ
 		ttlDays = parsed
 	}
 
-	plain, createErr := h.authMgr.CreateAPIToken(r.Context(), usr.ID, auth.SessionIssuer(), ttlDays)
+	plain, createErr := h.tokens.CreateAPIToken(r.Context(), usr.ID, auth.SessionIssuer(), ttlDays)
 
 	data, err := h.adminData(r, usr.ID)
 	if err != nil {
@@ -220,7 +228,7 @@ func (h *AdminHandler) AdminRevokeKeyHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	revokeErr := h.authMgr.RevokeAPIToken(r.Context(), usr.ID, tokenID)
+	revokeErr := h.tokens.RevokeAPIToken(r.Context(), usr.ID, tokenID)
 	if revokeErr != nil {
 		h.log.ErrorContext(r.Context(), "revoke api token", "err", revokeErr)
 		http.Redirect(w, r, "/admin?key_error="+url.QueryEscape("Failed to revoke API key."), http.StatusSeeOther)
@@ -235,7 +243,7 @@ func (h *AdminHandler) AdminRevokeKeyHandler(w http.ResponseWriter, r *http.Requ
 // and API-token lists. Both lists require admin rights, already verified by the caller.
 func (h *AdminHandler) adminData(r *http.Request, adminID uuid.UUID) (adminViewData, error) {
 	data := adminViewData{
-		Header:    h.header(r, headerKindAdmin),
+		Header:    h.header(r, headerKindPlain),
 		Nonce:     middleware.NonceFromContext(r.Context()),
 		CSRFToken: middleware.CSRFFromContext(r.Context()),
 		// Status/action fields zeroed: populated by the per-action POST handler before re-render on failure
@@ -249,14 +257,14 @@ func (h *AdminHandler) adminData(r *http.Request, adminID uuid.UUID) (adminViewD
 		APITokens:   nil,
 	}
 
-	users, err := h.authMgr.ListUsers(r.Context(), adminID)
+	users, err := h.users.ListUsers(r.Context(), adminID)
 	if err != nil {
-		return data, fmt.Errorf("list users: %w", err)
+		return data, fmt.Errorf("admin page: %w", err)
 	}
 
-	tokens, err := h.authMgr.ListAPITokens(r.Context(), adminID)
+	tokens, err := h.tokens.ListAPITokens(r.Context(), adminID)
 	if err != nil {
-		return data, fmt.Errorf("list api tokens: %w", err)
+		return data, fmt.Errorf("admin page: %w", err)
 	}
 
 	data.Users = users

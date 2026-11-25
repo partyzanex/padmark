@@ -7,16 +7,21 @@ type OperationName = string
 
 const (
 	CreateAPITokenOperation  OperationName = "CreateAPIToken"
+	CreateFileOperation      OperationName = "CreateFile"
 	CreateInviteOperation    OperationName = "CreateInvite"
 	CreateLinkOperation      OperationName = "CreateLink"
 	CreateLinksBulkOperation OperationName = "CreateLinksBulk"
 	CreateNoteOperation      OperationName = "CreateNote"
+	DeleteFileOperation      OperationName = "DeleteFile"
 	DeleteLinkOperation      OperationName = "DeleteLink"
 	DeleteNoteOperation      OperationName = "DeleteNote"
+	GetFileOperation         OperationName = "GetFile"
+	GetFileContentOperation  OperationName = "GetFileContent"
 	GetLinkOperation         OperationName = "GetLink"
 	GetNoteOperation         OperationName = "GetNote"
 	HealthzOperation         OperationName = "Healthz"
 	ReadyzOperation          OperationName = "Readyz"
+	UpdateFileOperation      OperationName = "UpdateFile"
 	UpdateLinkOperation      OperationName = "UpdateLink"
 	UpdateNoteOperation      OperationName = "UpdateNote"
 )

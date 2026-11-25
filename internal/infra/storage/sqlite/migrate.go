@@ -31,15 +31,10 @@ func newProvider(db *bun.DB) (*goose.Provider, error) {
 func Migrate(ctx context.Context, db *bun.DB) ([]*goose.MigrationResult, error) {
 	provider, err := newProvider(db)
 	if err != nil {
-		return nil, fmt.Errorf("new provider: %w", err)
+		return nil, err
 	}
 
-	operationResult, operationErr := up(ctx, provider)
-	if operationErr != nil {
-		return operationResult, fmt.Errorf("up: %w", operationErr)
-	}
-
-	return operationResult, nil
+	return up(ctx, provider)
 }
 
 // MigrateWithBackup applies pending migrations like Migrate, but first copies a file-backed
@@ -54,7 +49,7 @@ func MigrateWithBackup(
 ) ([]*goose.MigrationResult, error) {
 	provider, err := newProvider(db)
 	if err != nil {
-		return nil, fmt.Errorf("new provider: %w", err)
+		return nil, err
 	}
 
 	path, _ := DBFilePath(dsn)
@@ -65,12 +60,7 @@ func MigrateWithBackup(
 		}
 	}
 
-	operationResult, operationErr := up(ctx, provider)
-	if operationErr != nil {
-		return operationResult, fmt.Errorf("up: %w", operationErr)
-	}
-
-	return operationResult, nil
+	return up(ctx, provider)
 }
 
 // backupBeforeMigrations backs up the database file at path when migrations are pending.
@@ -80,7 +70,7 @@ func backupBeforeMigrations(
 ) error {
 	applied, pending, err := countMigrations(ctx, provider)
 	if err != nil {
-		return fmt.Errorf("count migrations: %w", err)
+		return err
 	}
 
 	if applied == 0 || pending == 0 {
@@ -89,7 +79,7 @@ func backupBeforeMigrations(
 
 	backupPath, err := backupDB(ctx, db, path+".bak-"+time.Now().Format(backupTimeLayout), log)
 	if err != nil {
-		return fmt.Errorf("backup before migrations: %w", err)
+		return err
 	}
 
 	log.InfoContext(ctx, "database backed up before migrations", "backup", backupPath, "pending", pending)
@@ -128,7 +118,7 @@ func countMigrations(ctx context.Context, provider *goose.Provider) (applied, pe
 func backupDB(ctx context.Context, db *bun.DB, preferred string, log *slog.Logger) (string, error) {
 	backupPath, err := reserveBackupFile(preferred)
 	if err != nil {
-		return "", fmt.Errorf("reserve backup file: %w", err)
+		return "", err
 	}
 
 	quoted := "'" + strings.ReplaceAll(backupPath, "'", "''") + "'"

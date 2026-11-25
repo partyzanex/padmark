@@ -3,10 +3,10 @@ package web
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/partyzanex/padmark/internal/adapters/web/middleware"
@@ -27,21 +27,26 @@ type OgenHandler struct {
 	manager     NoteManager
 	linkManager LinkManager
 	pinger      Pinger
-	// authMgr is optional (WithAuthManager): when unset, POST /api/tokens and
-	// POST /api/invites answer 503 (feature not enabled).
-	authMgr AuthManager
-	log     *slog.Logger
+	// tokens and onboarding hold disabledAccounts when the account system is off; then
+	// POST /api/tokens and POST /api/invites answer 503.
+	tokens     APITokenManager
+	onboarding OnboardingManager
+	log        *slog.Logger
+	accounts   accountMode
 }
 
-// NewOgenHandler creates an OgenHandler with required dependencies.
-func NewOgenHandler(manager NoteManager, linkManager LinkManager, pinger Pinger, log *slog.Logger) *OgenHandler {
+// newOgenHandler builds the OgenHandler of NewHandler from the same HandlerConfig and account
+// system as the browser handlers, so the JSON API and the pages cannot disagree about accounts.
+func newOgenHandler(cfg *HandlerConfig, accounts accountSystem) *OgenHandler {
 	return &OgenHandler{
 		UnimplementedHandler: ogenapi.UnimplementedHandler{},
-		manager:              manager,
-		linkManager:          linkManager,
-		pinger:               pinger,
-		authMgr:              nil,
-		log:                  log,
+		manager:              cfg.Notes,
+		linkManager:          cfg.Links,
+		pinger:               cfg.Pinger,
+		tokens:               accounts.manager,
+		onboarding:           accounts.manager,
+		log:                  cfg.Log,
+		accounts:             accounts.mode,
 	}
 }
 
@@ -94,31 +99,6 @@ func (h *OgenHandler) CreateNote(
 	}, nil
 }
 
-// GetNote implements ogenapi.Handler.
-// The native route handles content negotiation; this JSON implementation also enforces
-// privacy before invoking any view-count or burn-after-reading side effect.
-func (h *OgenHandler) GetNote(
-	ctx context.Context, params ogenapi.GetNoteParams,
-) (ogenapi.GetNoteRes, error) {
-	note, err := h.manager.Peek(ctx, params.ID)
-	if err != nil {
-		return mapGetError(err, h.log), nil
-	}
-
-	if !note.VisibleTo(middleware.CallerIDFromCtx(ctx), middleware.AuthenticatedFromCtx(ctx)) {
-		v := ogenapi.GetNoteUnauthorized(errorResponse(middleware.MsgUnauthorized))
-
-		return &v, nil
-	}
-
-	note, err = h.manager.ViewPreloaded(ctx, params.ID, note)
-	if err != nil {
-		return mapGetError(err, h.log), nil
-	}
-
-	return domainToResponse(note), nil
-}
-
 // UpdateNote implements ogenapi.Handler.
 func (h *OgenHandler) UpdateNote(
 	ctx context.Context, req *ogenapi.UpdateNoteRequest, params ogenapi.UpdateNoteParams,
@@ -137,13 +117,12 @@ func (h *OgenHandler) UpdateNote(
 		return mapUpdateError(err, h.log), nil
 	}
 
-	if !h.noteMutationAllowed(ctx, params.ID) {
-		v := ogenapi.UpdateNoteUnauthorized{}
-
-		return &v, nil
+	note, err := h.manager.Update(ctx, params.ID, req.EditCode.Or(""), h.reader(ctx), payload)
+	if errors.Is(err, domain.ErrForbidden) {
+		// A caller that cannot see the note gets 401, as for a read; see common.writeMutationError.
+		return &ogenapi.UpdateNoteUnauthorized{}, nil
 	}
 
-	note, err := h.manager.Update(ctx, params.ID, req.EditCode.Or(""), middleware.CallerIDFromCtx(ctx), payload)
 	if err != nil {
 		return mapUpdateError(err, h.log), nil
 	}
@@ -156,7 +135,7 @@ func (h *OgenHandler) UpdateNote(
 func noteUpdatePayload(req *ogenapi.UpdateNoteRequest) (*domain.Note, error) {
 	privacy, err := resolvePrivacy(req.GetPrivate(), optUpdatePrivacyPtr(req.Privacy))
 	if err != nil {
-		return nil, fmt.Errorf("resolve privacy: %w", err)
+		return nil, err
 	}
 
 	burnAfterReading := req.BurnAfterReading.Or(false)
@@ -174,7 +153,7 @@ func noteUpdatePayload(req *ogenapi.UpdateNoteRequest) (*domain.Note, error) {
 	}
 
 	return &domain.Note{
-		// UpdatePath/Update semantics: CreatedAt/UpdatedAt/Views are not caller-set; OwnerID/ID are
+		// UpdateNote/UpdateNoteByPath semantics: CreatedAt/UpdatedAt/Views are not caller-set; OwnerID/ID are
 		// pinned from the existing note inside the usecase; EditCode is the caller-supplied credential.
 		CreatedAt:        time.Time{},
 		UpdatedAt:        time.Time{},
@@ -201,15 +180,15 @@ func noteUpdatePayload(req *ogenapi.UpdateNoteRequest) (*domain.Note, error) {
 func (h *OgenHandler) DeleteNote(
 	ctx context.Context, params ogenapi.DeleteNoteParams,
 ) (ogenapi.DeleteNoteRes, error) {
-	if !h.noteMutationAllowed(ctx, params.ID) {
-		return &ogenapi.DeleteNoteUnauthorized{}, nil
-	}
-
 	editCode := deleteEditCode(
 		ctx, h.log, params.ID, params.XEditCode.Or(""), middleware.LegacyNoteEditCodeFromCtx(ctx),
 	)
 
-	err := h.manager.Delete(ctx, params.ID, editCode, middleware.CallerIDFromCtx(ctx))
+	err := h.manager.Delete(ctx, params.ID, editCode, h.reader(ctx))
+	if errors.Is(err, domain.ErrForbidden) {
+		return &ogenapi.DeleteNoteUnauthorized{}, nil
+	}
+
 	if err != nil {
 		return mapDeleteError(err, h.log), nil
 	}
@@ -226,7 +205,7 @@ func (h *OgenHandler) CreateLink(
 		return mapCreateLinkError(err, h.log), nil
 	}
 
-	link, err := h.linkManager.Create(ctx, req.TargetURL.String(), buildCreateLinkOptions(ctx, req))
+	link, err := h.linkManager.Create(ctx, requestTargetURL(&req.TargetURL), buildCreateLinkOptions(ctx, req))
 	if err != nil {
 		return mapCreateLinkError(err, h.log), nil
 	}
@@ -254,36 +233,22 @@ func (h *OgenHandler) CreateLinksBulk(
 	return &ogenapi.BulkCreateLinksResponse{Results: results}, nil
 }
 
-// GetLink implements ogenapi.Handler. This is a metadata-only read (links.Manager.Peek): it does
-// not increment views, consume a burn-after-click link, or follow the redirect — see the "Short
-// links" section in openapi.yaml.
-//
-// GET /links/{id} is routed through ogenSrv (unlike GET /notes/{id}, which bypasses it — see
-// GetNote's doc comment), so this method is the sole enforcement point for the link's privacy
-// level on this path and must check it explicitly, like the Follow usecase on the redirect path.
-// AuthenticatedFromCtx recognizes a TOTP session or an API token (both set the context user via
-// the auth middleware's isPublicRoute branch).
+// GetLink implements ogenapi.Handler. This is a metadata-only read (links.Manager.Inspect): it
+// does not increment views, consume a burn-after-click link, or follow the redirect — see the
+// "Short links" section in openapi.yaml. Inspect applies the privacy and expiry rules; this
+// method translates its errors (a hidden link gives 401).
 func (h *OgenHandler) GetLink(
 	ctx context.Context, params ogenapi.GetLinkParams,
 ) (ogenapi.GetLinkRes, error) {
-	link, err := h.linkManager.Peek(ctx, params.ID)
-	if err != nil {
-		return mapGetLinkError(err, h.log), nil
-	}
-
-	if !link.VisibleTo(middleware.CallerIDFromCtx(ctx), middleware.AuthenticatedFromCtx(ctx)) {
+	link, err := h.linkManager.Inspect(ctx, params.ID, h.reader(ctx))
+	if errors.Is(err, domain.ErrForbidden) {
 		v := ogenapi.GetLinkUnauthorized(errorResponse(middleware.MsgUnauthorized))
 
 		return &v, nil
 	}
 
-	// Peek does not apply expiry policy, so this path has to. Checked after the privacy gate,
-	// matching LinkHandler.Redirect's order, so an expired private link answers a stranger with
-	// 401 rather than confirming it once existed. Unlike the redirect path this only reports the
-	// expiry and does not delete the row: GET /links/{id} is documented as a side-effect-free
-	// metadata read, and the expired link is cleaned up on its next GET /{id}.
-	if link.Expired(time.Now()) {
-		return mapGetLinkError(domain.ErrExpired, h.log), nil
+	if err != nil {
+		return mapGetLinkError(err, h.log), nil
 	}
 
 	return domainLinkToResponse(link, h.log), nil
@@ -293,11 +258,11 @@ func (h *OgenHandler) GetLink(
 func (h *OgenHandler) DeleteLink(
 	ctx context.Context, params ogenapi.DeleteLinkParams,
 ) (ogenapi.DeleteLinkRes, error) {
-	if !h.linkMutationAllowed(ctx, params.ID) {
+	err := h.linkManager.Delete(ctx, params.ID, params.XEditCode.Or(""), h.reader(ctx))
+	if errors.Is(err, domain.ErrForbidden) {
 		return &ogenapi.DeleteLinkUnauthorized{}, nil
 	}
 
-	err := h.linkManager.Delete(ctx, params.ID, params.XEditCode.Or(""), middleware.CallerIDFromCtx(ctx))
 	if err != nil {
 		return mapDeleteLinkError(err, h.log), nil
 	}
@@ -332,9 +297,14 @@ func createOneBulkLink(
 ) ogenapi.BulkLinkResult {
 	var link *domain.Link
 
+	// target is the address in the form that the client sent. The echo uses it too: ogen decodes
+	// a "#fragment" into the path, and item.TargetURL would give "%23" back to the client.
+	target := requestTargetURL(&item.TargetURL)
+	echo := linkTargetURL(target, log)
+
 	err := requirePrivacySupport(accounts, optCreateLinkPrivacyPtr(item.Privacy))
 	if err == nil {
-		link, err = manager.Create(ctx, item.TargetURL.String(), buildCreateLinkOptions(ctx, item))
+		link, err = manager.Create(ctx, target, buildCreateLinkOptions(ctx, item))
 	}
 
 	if err != nil {
@@ -344,7 +314,7 @@ func createOneBulkLink(
 		}
 
 		return ogenapi.BulkLinkResult{
-			TargetURL: item.TargetURL,
+			TargetURL: echo,
 			Error:     ogenapi.NewOptString(message),
 			// Successful fields stay zero — invariant: never both link fields and Error in the same item.
 			ID:             ogenapi.OptString{Value: "", Set: false},
@@ -359,7 +329,7 @@ func createOneBulkLink(
 	}
 
 	result := ogenapi.BulkLinkResult{
-		TargetURL:      item.TargetURL,
+		TargetURL:      echo,
 		ID:             ogenapi.NewOptString(link.ID),
 		EditCode:       ogenapi.NewOptString(link.EditCode),
 		Views:          ogenapi.NewOptInt(link.Views),
@@ -531,7 +501,7 @@ func (h *OgenHandler) Readyz(ctx context.Context) (ogenapi.ReadyzRes, error) {
 func (h *OgenHandler) CreateAPIToken(
 	ctx context.Context, req ogenapi.OptCreateAPITokenRequest,
 ) (ogenapi.CreateAPITokenRes, error) {
-	if h.authMgr == nil {
+	if h.accounts == accountsOff {
 		return mapCreateAPITokenError(domain.ErrFeatureNotSupported, h.log), nil
 	}
 
@@ -551,7 +521,7 @@ func (h *OgenHandler) CreateAPIToken(
 	})
 	issuer := issuerFromCtx(ctx, body.Password.Or(""), body.TotpCode.Or(""))
 
-	plain, err := h.authMgr.CreateAPIToken(ctx, usr.ID, issuer, body.TTLDays.Or(0))
+	plain, err := h.tokens.CreateAPIToken(ctx, usr.ID, issuer, body.TTLDays.Or(0))
 	if err != nil {
 		return mapCreateAPITokenError(err, h.log), nil
 	}
@@ -566,7 +536,7 @@ func (h *OgenHandler) CreateAPIToken(
 
 // CreateInvite implements ogenapi.Handler — POST /api/invites.
 func (h *OgenHandler) CreateInvite(ctx context.Context, req ogenapi.OptStepUpRequest) (ogenapi.CreateInviteRes, error) {
-	if h.authMgr == nil {
+	if h.accounts == accountsOff {
 		return mapCreateInviteError(domain.ErrFeatureNotSupported, h.log), nil
 	}
 
@@ -586,7 +556,7 @@ func (h *OgenHandler) CreateInvite(ctx context.Context, req ogenapi.OptStepUpReq
 
 	issuer := issuerFromCtx(ctx, stepUp.Password.Or(""), stepUp.TotpCode.Or(""))
 
-	tok, err := h.authMgr.GenerateInvite(ctx, usr.ID, issuer)
+	tok, err := h.onboarding.GenerateInvite(ctx, usr.ID, issuer)
 	if err != nil {
 		return mapCreateInviteError(err, h.log), nil
 	}
@@ -696,44 +666,32 @@ func mapCreateInviteError(err error, log *slog.Logger) ogenapi.CreateInviteRes {
 // accountsEnabled reports whether the account system is attached (--enable-accounts): only then
 // can the authenticated and owner privacy levels be enforced.
 func (h *OgenHandler) accountsEnabled() accountMode {
-	if h.authMgr == nil {
-		return accountsOff
-	}
-
-	return accountsOn
+	return h.accounts
 }
 
-// noteMutationAllowed reports whether the caller may attempt to mutate a note (PUT/DELETE): the
-// note's read-level privacy must admit this caller, as on GetNote. An edit code proves the right
-// to change a note the caller can read; it never opens a note that privacy hides, such as another
-// account's owner-only note. The denial is 401, like the read, so it never counts as a wrong edit
-// code for the fail lockout. A failed Peek defers to the real mutation so the caller sees the
-// same error (404) a read would produce. Without the account system no privacy level is enforced
-// on reads, as in v0.1.6 without --auth-tokens, so the edit code alone decides.
-func (h *OgenHandler) noteMutationAllowed(ctx context.Context, id string) bool {
-	if !h.accountsEnabled() {
-		return true
-	}
-
-	note, err := h.manager.Peek(ctx, id)
-	if err != nil {
-		return true
-	}
-
-	return note.VisibleTo(middleware.CallerIDFromCtx(ctx), middleware.AuthenticatedFromCtx(ctx))
+// reader identifies the caller of an ogen operation for the usecases (see common.reader).
+func (h *OgenHandler) reader(ctx context.Context) domain.Reader {
+	return readerFromCtx(ctx, h.accountsEnabled())
 }
 
-// linkMutationAllowed is the links counterpart of noteMutationAllowed
-// (see GetLink's VisibleTo check for the read-path symmetry).
-func (h *OgenHandler) linkMutationAllowed(ctx context.Context, id string) bool {
-	if !h.accountsEnabled() {
-		return true
+// requestTargetURL returns the target URL in the form that the client sent. ogen decodes a
+// "uri" field with url.ParseRequestURI, which does not split off "#fragment": the fragment
+// stays in the path, and url.URL.String then encodes "#" as "%23", so the redirect goes to a
+// different page. A literal "#" in the path always sets RawPath, because the escaped form is
+// different; an encoded "%23" does not, so that value stays encoded. links.Manager parses the
+// result again with url.Parse.
+func requestTargetURL(target *url.URL) string {
+	if !strings.Contains(target.RawPath, "#") {
+		return target.String()
 	}
 
-	link, err := h.linkManager.Peek(ctx, id)
-	if err != nil {
-		return true
+	origin := *target
+	origin.Path, origin.RawPath, origin.RawQuery, origin.ForceQuery = "", "", "", false
+
+	raw := origin.String() + target.RawPath
+	if target.ForceQuery || target.RawQuery != "" {
+		raw += "?" + target.RawQuery
 	}
 
-	return link.VisibleTo(middleware.CallerIDFromCtx(ctx), middleware.AuthenticatedFromCtx(ctx))
+	return raw
 }

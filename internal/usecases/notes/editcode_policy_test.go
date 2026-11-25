@@ -52,8 +52,7 @@ func (s *ManagerTestSuite) TestCreate_AcceptsMinLengthCustomEditCode() {
 		Views: 0, BurnTTL: 0, BurnAfterReading: false, ClearExpiry: false, ShowContents: nil,
 	}
 
-	s.expectSlugFree()
-	s.storage.EXPECT().Create(gomock.Any(), note).Return(nil)
+	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
 
 	result, err := s.manager.Create(s.T().Context(), note)
 

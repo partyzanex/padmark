@@ -4,7 +4,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/google/uuid"
 	"go.uber.org/mock/gomock"
 
 	"github.com/partyzanex/padmark/internal/domain"
@@ -24,7 +23,6 @@ func contentsNote(showContents *bool) *domain.Note {
 // TestCreate_ShowContentsDefaultsToFalse pins the old-client contract: a create request without
 // the option stores false, so the note view keeps the full-width article.
 func (s *ManagerTestSuite) TestCreate_ShowContentsDefaultsToFalse() {
-	s.expectSlugFree()
 	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).DoAndReturn(
 		func(_ context.Context, written *domain.Note) error {
 			s.Require().NotNil(written.ShowContents)
@@ -40,7 +38,6 @@ func (s *ManagerTestSuite) TestCreate_ShowContentsDefaultsToFalse() {
 }
 
 func (s *ManagerTestSuite) TestCreate_ShowContentsTrueIsStored() {
-	s.expectSlugFree()
 	s.storage.EXPECT().Create(gomock.Any(), gomock.Any()).DoAndReturn(
 		func(_ context.Context, written *domain.Note) error {
 			s.True(written.ContentsSidebar())
@@ -62,14 +59,14 @@ func (s *ManagerTestSuite) TestUpdate_OmittedShowContentsKeepsStoredValue() {
 	existing.EditCode = "secret123456"
 
 	s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(existing, nil)
-	s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("abc-123"), gomock.Any()).DoAndReturn(
-		func(_ context.Context, _ string, written *domain.Note) error {
+	s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("abc-123"), gomock.Any(), testNow()).DoAndReturn(
+		func(_ context.Context, _ string, written *domain.Note, _ time.Time) error {
 			s.Nil(written.ShowContents, "an omitted option must not overwrite a concurrent change")
 
 			return nil
 		})
 
-	result, err := s.manager.Update(s.T().Context(), "abc-123", "secret123456", uuid.Nil, contentsNote(nil))
+	result, err := s.manager.Update(s.T().Context(), "abc-123", "secret123456", openReader(), contentsNote(nil))
 
 	s.Require().NoError(err)
 	s.True(result.ContentsSidebar(), "the omitted option must not reset to false")
@@ -82,15 +79,15 @@ func (s *ManagerTestSuite) TestUpdate_ExplicitShowContentsIsWritten() {
 		existing.EditCode = "secret123456"
 
 		s.storage.EXPECT().Get(gomock.Any(), domain.HashSlug("abc-123")).Return(existing, nil)
-		s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("abc-123"), gomock.Any()).DoAndReturn(
-			func(_ context.Context, _ string, written *domain.Note) error {
+		s.storage.EXPECT().Update(gomock.Any(), domain.HashSlug("abc-123"), gomock.Any(), testNow()).DoAndReturn(
+			func(_ context.Context, _ string, written *domain.Note, _ time.Time) error {
 				s.Require().NotNil(written.ShowContents)
 				s.Equal(value, *written.ShowContents)
 
 				return nil
 			})
 
-		result, err := s.manager.Update(s.T().Context(), "abc-123", "secret123456", uuid.Nil, contentsNote(new(value)))
+		result, err := s.manager.Update(s.T().Context(), "abc-123", "secret123456", openReader(), contentsNote(new(value)))
 
 		s.Require().NoError(err)
 		s.Equal(value, result.ContentsSidebar())

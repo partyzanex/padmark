@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 )
 
 func TestWithPragmas(t *testing.T) {
@@ -92,58 +93,66 @@ func requireOwnerOnly(t *testing.T, path string) {
 	}
 }
 
+type OpenPermissionsSuite struct {
+	suite.Suite
+}
+
+func TestOpenPermissionsSuite(t *testing.T) {
+	suite.Run(t, new(OpenPermissionsSuite))
+}
+
 // TestOpen_CreatesDatabaseFileOwnerOnly pins that a fresh database is not world-readable: the
 // file holds password hashes, sealed TOTP secrets, token hashes and content envelopes, and the
 // driver's default (SQLITE_DEFAULT_FILE_PERMISSIONS, 0644) would hand all of it to every other
 // local account on the host.
-func TestOpen_CreatesDatabaseFileOwnerOnly(t *testing.T) {
-	skipWithoutPOSIXPerms(t)
+func (s *OpenPermissionsSuite) TestOpen_CreatesDatabaseFileOwnerOnly() {
+	skipWithoutPOSIXPerms(s.T())
 
-	path := filepath.Join(t.TempDir(), "padmark.db")
+	path := filepath.Join(s.T().TempDir(), "padmark.db")
 
-	closeDB := touchDB(t, path)
+	closeDB := touchDB(s.T(), path)
 	defer closeDB()
 
 	// WAL is on, so the sidecars exist while the handle is open: the sidecar check is not vacuous.
-	require.FileExists(t, path+"-wal")
-	require.FileExists(t, path+"-shm")
+	s.Require().FileExists(path + "-wal")
+	s.Require().FileExists(path + "-shm")
 
-	requireOwnerOnly(t, path)
+	requireOwnerOnly(s.T(), path)
 }
 
 // TestOpen_FileURICreatesDatabaseFileOwnerOnly covers the "file:" URI DSN shape with a query
 // string, which must resolve to the same on-disk path as the bare form.
-func TestOpen_FileURICreatesDatabaseFileOwnerOnly(t *testing.T) {
-	skipWithoutPOSIXPerms(t)
+func (s *OpenPermissionsSuite) TestOpen_FileURICreatesDatabaseFileOwnerOnly() {
+	skipWithoutPOSIXPerms(s.T())
 
-	path := filepath.Join(t.TempDir(), "padmark.db")
+	path := filepath.Join(s.T().TempDir(), "padmark.db")
 
-	closeDB := touchDB(t, "file:"+path+"?cache=shared")
+	closeDB := touchDB(s.T(), "file:"+path+"?cache=shared")
 	defer closeDB()
 
-	requireOwnerOnly(t, path)
+	requireOwnerOnly(s.T(), path)
 }
 
 // TestOpen_TightensExistingWorldReadableFile pins that a database left world-readable by an
 // earlier version (or a careless restore) is tightened on the next start, sidecars included.
-func TestOpen_TightensExistingWorldReadableFile(t *testing.T) {
-	skipWithoutPOSIXPerms(t)
+func (s *OpenPermissionsSuite) TestOpen_TightensExistingWorldReadableFile() {
+	skipWithoutPOSIXPerms(s.T())
 
-	path := filepath.Join(t.TempDir(), "padmark.db")
+	path := filepath.Join(s.T().TempDir(), "padmark.db")
 
 	// Hold the first handle open so the WAL sidecars survive; loosen everything it left behind.
-	closeFirst := touchDB(t, path)
+	closeFirst := touchDB(s.T(), path)
 
 	for _, name := range []string{path, path + "-wal", path + "-shm"} {
 		chmodErr := os.Chmod(name, 0o644) //nolint:gosec // deliberately loosened to reproduce the old default
 		if !os.IsNotExist(chmodErr) {
-			require.NoError(t, chmodErr)
+			s.Require().NoError(chmodErr)
 		}
 	}
 
-	closeSecond := touchDB(t, path)
+	closeSecond := touchDB(s.T(), path)
 
-	requireOwnerOnly(t, path)
+	requireOwnerOnly(s.T(), path)
 
 	closeSecond()
 	closeFirst()
@@ -152,36 +161,36 @@ func TestOpen_TightensExistingWorldReadableFile(t *testing.T) {
 // TestOpen_InMemoryCreatesNoFile pins that in-memory DSNs never touch the filesystem: a named
 // shared-cache memory database ("file:name?mode=memory") must not leave a file called name in
 // the working directory.
-func TestOpen_InMemoryCreatesNoFile(t *testing.T) {
-	dir := t.TempDir()
-	t.Chdir(dir)
+func (s *OpenPermissionsSuite) TestOpen_InMemoryCreatesNoFile() {
+	dir := s.T().TempDir()
+	s.T().Chdir(dir)
 
 	for _, dsn := range []string{
 		":memory:",
 		"file::memory:?cache=shared",
 		"file:permmem?mode=memory&cache=shared",
 	} {
-		closeDB := touchDB(t, dsn)
+		closeDB := touchDB(s.T(), dsn)
 		closeDB()
 	}
 
 	entries, err := os.ReadDir(dir)
-	require.NoError(t, err)
-	require.Empty(t, entries, "in-memory DSNs must not create files")
+	s.Require().NoError(err)
+	s.Require().Empty(entries, "in-memory DSNs must not create files")
 }
 
 // TestOpen_ReadOnlyURIDoesNotCreateFile pins that mode=ro keeps failing on a missing database
 // instead of being handed an empty file by the permission pre-create.
-func TestOpen_ReadOnlyURIDoesNotCreateFile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "missing.db")
+func (s *OpenPermissionsSuite) TestOpen_ReadOnlyURIDoesNotCreateFile() {
+	path := filepath.Join(s.T().TempDir(), "missing.db")
 
 	db, err := Open("file:"+path+"?mode=ro", slog.New(slog.DiscardHandler))
-	require.NoError(t, err)
+	s.Require().NoError(err)
 
-	defer func() { require.NoError(t, db.Close()) }()
+	defer func() { s.Require().NoError(db.Close()) }()
 
-	require.Error(t, db.PingContext(t.Context()))
-	require.NoFileExists(t, path)
+	s.Require().Error(db.PingContext(s.T().Context()))
+	s.Require().NoFileExists(path)
 }
 
 func TestDBFilePath(t *testing.T) {
@@ -261,48 +270,48 @@ func writeLooseDB(t *testing.T) string {
 }
 
 // TestOpen_NewFileLogsNothing pins that a freshly created 0600 file is not reported as tightened.
-func TestOpen_NewFileLogsNothing(t *testing.T) {
-	skipWithoutPOSIXPerms(t)
+func (s *OpenPermissionsSuite) TestOpen_NewFileLogsNothing() {
+	skipWithoutPOSIXPerms(s.T())
 
 	log, buf := recordingLogger()
-	path := filepath.Join(t.TempDir(), "padmark.db")
+	path := filepath.Join(s.T().TempDir(), "padmark.db")
 
-	touchDBLogged(t, path, log)()
+	touchDBLogged(s.T(), path, log)()
 
-	requireOwnerOnly(t, path)
-	require.Empty(t, buf.String())
+	requireOwnerOnly(s.T(), path)
+	s.Require().Empty(buf.String())
 }
 
 // TestOpen_LogsWhenTighteningExistingFile pins that narrowing a pre-existing file is never silent:
 // the operator must be able to see why group/other access disappeared.
-func TestOpen_LogsWhenTighteningExistingFile(t *testing.T) {
-	skipWithoutPOSIXPerms(t)
+func (s *OpenPermissionsSuite) TestOpen_LogsWhenTighteningExistingFile() {
+	skipWithoutPOSIXPerms(s.T())
 
 	log, buf := recordingLogger()
-	path := writeLooseDB(t)
+	path := writeLooseDB(s.T())
 
-	touchDBLogged(t, path, log)()
+	touchDBLogged(s.T(), path, log)()
 
-	requireOwnerOnly(t, path)
-	require.Contains(t, buf.String(), "level=INFO")
-	require.Contains(t, buf.String(), "tightened")
-	require.Contains(t, buf.String(), "file="+path)
-	require.Contains(t, buf.String(), "from=0644")
-	require.Contains(t, buf.String(), "to=0600")
-	require.NotContains(t, buf.String(), "level=WARN")
+	requireOwnerOnly(s.T(), path)
+	s.Require().Contains(buf.String(), "level=INFO")
+	s.Require().Contains(buf.String(), "tightened")
+	s.Require().Contains(buf.String(), "file="+path)
+	s.Require().Contains(buf.String(), "from=0644")
+	s.Require().Contains(buf.String(), "to=0600")
+	s.Require().NotContains(buf.String(), "level=WARN")
 }
 
 // TestOpen_AlreadyOwnerOnlyIsUntouched pins that a file with no group/other bits is neither
 // chmod-ed nor reported.
-func TestOpen_AlreadyOwnerOnlyIsUntouched(t *testing.T) {
-	skipWithoutPOSIXPerms(t)
+func (s *OpenPermissionsSuite) TestOpen_AlreadyOwnerOnlyIsUntouched() {
+	skipWithoutPOSIXPerms(s.T())
 
-	path := filepath.Join(t.TempDir(), "padmark.db")
-	require.NoError(t, os.WriteFile(path, nil, 0o600))
+	path := filepath.Join(s.T().TempDir(), "padmark.db")
+	s.Require().NoError(os.WriteFile(path, nil, 0o600))
 
 	calls := 0
 
-	t.Cleanup(func() { chmod = os.Chmod })
+	s.T().Cleanup(func() { chmod = os.Chmod })
 
 	chmod = func(name string, mode fs.FileMode) error {
 		calls++
@@ -312,20 +321,20 @@ func TestOpen_AlreadyOwnerOnlyIsUntouched(t *testing.T) {
 
 	log, buf := recordingLogger()
 
-	touchDBLogged(t, path, log)()
+	touchDBLogged(s.T(), path, log)()
 
-	require.Zero(t, calls, "an owner-only file must not be chmod-ed")
-	require.Empty(t, buf.String())
+	s.Require().Zero(calls, "an owner-only file must not be chmod-ed")
+	s.Require().Empty(buf.String())
 }
 
 // TestOpen_ChmodFailureIsSoft pins that a pre-existing file whose permissions cannot be tightened
 // (foreign owner, read-only mount) does not block startup: a WARN is logged and the database works.
-func TestOpen_ChmodFailureIsSoft(t *testing.T) {
-	skipWithoutPOSIXPerms(t)
+func (s *OpenPermissionsSuite) TestOpen_ChmodFailureIsSoft() {
+	skipWithoutPOSIXPerms(s.T())
 
-	path := writeLooseDB(t)
+	path := writeLooseDB(s.T())
 
-	t.Cleanup(func() { chmod = os.Chmod })
+	s.T().Cleanup(func() { chmod = os.Chmod })
 
 	chmod = func(name string, _ fs.FileMode) error {
 		return &fs.PathError{Op: "chmod", Path: name, Err: syscall.EPERM}
@@ -333,17 +342,17 @@ func TestOpen_ChmodFailureIsSoft(t *testing.T) {
 
 	log, buf := recordingLogger()
 
-	touchDBLogged(t, path, log)()
+	touchDBLogged(s.T(), path, log)()
 
 	info, err := os.Stat(path)
-	require.NoError(t, err)
-	require.Equal(t, os.FileMode(0o644), info.Mode().Perm(), "the failed chmod must leave the mode alone")
+	s.Require().NoError(err)
+	s.Require().Equal(os.FileMode(0o644), info.Mode().Perm(), "the failed chmod must leave the mode alone")
 
-	require.Contains(t, buf.String(), "level=WARN")
-	require.Contains(t, buf.String(), "file="+path)
-	require.Contains(t, buf.String(), "mode=0644")
-	require.Contains(t, buf.String(), "operation not permitted")
-	require.NotContains(t, buf.String(), "level=INFO")
+	s.Require().Contains(buf.String(), "level=WARN")
+	s.Require().Contains(buf.String(), "file="+path)
+	s.Require().Contains(buf.String(), "mode=0644")
+	s.Require().Contains(buf.String(), "operation not permitted")
+	s.Require().NotContains(buf.String(), "level=INFO")
 }
 
 func TestDBFilePathExported(t *testing.T) {

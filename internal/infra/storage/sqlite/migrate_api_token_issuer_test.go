@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/pressly/goose/v3"
 	"github.com/stretchr/testify/require"
 
@@ -28,7 +29,7 @@ func TestMigrateAPITokenIssuer_DownKeepsTokens(t *testing.T) {
 	_, err = provider.UpTo(t.Context(), version)
 	require.NoError(t, err)
 
-	owner := inviteTestUser("owner")
+	owner := migrationTestUser("owner")
 	require.NoError(t, NewUserRepository(db).Create(t.Context(), owner))
 
 	repo := NewAPITokenRepository(db)
@@ -71,4 +72,14 @@ func TestMigrateAPITokenIssuer_DownKeepsTokens(t *testing.T) {
 
 	_, err = repo.GetByHash(t.Context(), "hash-child")
 	require.NoError(t, err)
+}
+
+// --- helpers ---
+
+func migrationTestUser(username string) *domain.User {
+	return &domain.User{
+		ID: uuid.New(), Username: username, TOTPSecret: "secret", PasswordHash: "hash",
+		KDFSalt: []byte("salt"), IsAdmin: false, LastTOTPCounter: 0,
+		CreatedAt: time.Now().UTC().Truncate(time.Second), LastLoginAt: nil,
+	}
 }

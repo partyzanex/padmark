@@ -63,7 +63,7 @@ func (h *AuthHandler) writeJSONStatus(w http.ResponseWriter, r *http.Request, st
 // body (JSON, not form fields), the response and the bootstrap-gate rendering differ — setup
 // without an invite answers 403 JSON once any account exists.
 func (h *AuthHandler) setupJSON(w http.ResponseWriter, r *http.Request) {
-	if h.authMgr == nil {
+	if h.accounts == accountsOff {
 		http.Error(w, "not found", http.StatusNotFound)
 
 		return
@@ -100,9 +100,9 @@ func (h *AuthHandler) setupJSON(w http.ResponseWriter, r *http.Request) {
 	)
 
 	if req.Invite != "" {
-		enrollment, setupErr = h.authMgr.AcceptInvite(r.Context(), req.Invite, req.Username, req.Password)
+		enrollment, setupErr = h.onboarding.AcceptInvite(r.Context(), req.Invite, req.Username, req.Password)
 	} else {
-		enrollment, setupErr = h.authMgr.AcceptFirstAdmin(r.Context(), req.Username, req.Password)
+		enrollment, setupErr = h.onboarding.AcceptFirstAdmin(r.Context(), req.Username, req.Password)
 	}
 
 	if setupErr != nil {
@@ -128,7 +128,7 @@ const (
 // 403 with the invite hint when the first admin already exists, and 403 when the bootstrap token
 // is not configured on the server or presented does not match it.
 func (h *AuthHandler) setupGateOpenJSON(w http.ResponseWriter, r *http.Request, presented string) bool {
-	empty, gateErr := h.authMgr.IsEmpty(r.Context())
+	empty, gateErr := h.onboarding.IsEmpty(r.Context())
 	if gateErr != nil {
 		h.log.ErrorContext(r.Context(), "check empty", "err", gateErr)
 		response.WriteJSONErrorStatus(w, r, h.log, http.StatusInternalServerError, internalErrorMessage)

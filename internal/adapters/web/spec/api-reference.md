@@ -1,6 +1,6 @@
 # Padmark API reference
 
-Self-hosted markdown notes and short links. One URL, many consumers: a browser sees the same
+Self-hosted markdown notes, short links and files. One URL, many consumers: a browser sees the same
 `/{id}` path as a rendered page, a machine client that sends `Accept: application/json` gets
 structured JSON. This reference describes release {{VERSION}}. The request/response schemas
 are at [OpenAPI](/api/openapi.yaml), embedded in the same server build. The browser-facing
@@ -37,7 +37,8 @@ the original API base explicitly. A decoded token envelope can also supply its `
   current value), `edit_code`; the slug cannot be
   changed. Pass the `edit_code` in the body, or omit it when authenticated as the note's
   owner. `401` for an anonymous caller on a note whose `privacy` requires a credential, `403`
-  on a wrong edit code (or a non-owner without one). As in `POST`, a non-burn `ttl` is
+  on a wrong edit code (or a non-owner without one), `410` for an expired note: an update does
+  not extend the life of an expired note. As in `POST`, a non-burn `ttl` is
   a hard expiry, here counted from the update: `ttl: N` sets it, `ttl: 0` expires
   immediately, omitted preserves the current expiry (except that disabling an existing burn
   timer clears its expiry), and `ttl: null` removes it. With burn, `ttl` is the post-read
@@ -66,12 +67,15 @@ or control characters (`400` if too short/long, `422` otherwise).
 - `GET /links/{id}` — link metadata; no `views` increment, no burn-after-click consumption.
   `401` when the link's `privacy` requires a credential, `404` unknown, `410` expired.
   Metadata and privacy are read from storage on every request across replicas. Only decrypted
-  public targets may be reused from cache, after matching the current ciphertext.
+  public targets may be reused from cache, after matching the current ciphertext. A client
+  whose `Accept` prefers `text/html` gets the browser page of the link with the same rules;
+  send `Accept: application/json` for the JSON body.
 - `PUT /links/{id}` — replace `target_url` (required, http/https only); pass `edit_code` in
   the body or omit it as the exact authenticated owner. Optional `ttl`, `privacy`, and
   `direct_redirect` preserve current values when omitted. TTL counts from this update;
   `ttl: null` removes expiry, `ttl: 0` expires immediately. `direct_redirect: null` restores
   the server default. Preserves slug, views, edit code, owner, creation time and burn setting.
+  `410` for an expired link: an update does not extend the life of an expired link.
 - `DELETE /links/{id}` — send `X-Edit-Code`, or omit it as the authenticated owner.
   Unlike notes' legacy fallback, an `edit_code` query parameter is ignored.
 - `GET /{id}` follows a link when no note has this `id` (the older `GET /r/{id}` also works):
@@ -81,6 +85,63 @@ or control characters (`400` if too short/long, `422` otherwise).
   browser navigation, or an `Accept` naming e.g. `text/html` exactly); without `Accept`, with
   `*/*`, with `HEAD` or as an embedded subresource it answers `409`
   (`code: burn_read_not_explicit`) and stays intact.
+
+## Files
+
+Files are optional. Without object storage on the server, each `/files` operation answers
+`503`. A file uses the same `privacy` levels, edit codes and ownership rules as a note. A file
+shares the slug namespace with notes and links. The server keeps each file encrypted.
+
+- `POST /files` — upload one file as `multipart/form-data`, not JSON. Optional text fields:
+  `ttl` (lifetime in seconds from the upload; omitted means no expiry; `0` makes a file that
+  is already expired), `privacy`, `burn_after_download` (`true` or `false`), `slug` (one path
+  segment) and `edit_code`. Send these fields before the `file` part: a part after `file`
+  gives `400`, and the server does not keep the file. Each field can occur one time, and all
+  data before `file` can have a maximum of 64 KiB. The `filename` of the part becomes the file
+  name (1–255 bytes). The server streams the file to storage, and `--max-file-size` limits its
+  size. Responds `201` with the file description, the one-time `edit_code` and
+  `Location: /{id}`. Errors: `400` for a form without a `file` part, a field that is not
+  valid, an unknown or repeated field, a part after `file` or a malformed or cut body; `408`
+  when the upload sends no data for the idle timeout; `409` when the slug is taken; `413`
+  above the size limit, also for a `Content-Length` above it before the server reads the
+  body; `422` for an invalid slug, name or privacy level; `429` (per client) or `503` (per
+  server) with `Retry-After` when too many uploads are in progress. An invalid bearer token
+  does not give `401`: the file then has no owner, as for notes and links.
+- `GET /files/{id}` — the file description as JSON: `id`, `url`, `name`, `size`, `privacy`,
+  `downloads`, `burn_after_download`, `created_at` and `expires_at` (absent without expiry).
+  It does not download the content and does not count a download. `401` when the file's
+  `privacy` requires a credential, `404` for a wrong id, `410` for an expired file.
+- `GET /files/{id}/download` — the content as `application/octet-stream` with
+  `Content-Disposition: attachment` and `Content-Length`. Each download increments
+  `downloads`. A `burn_after_download` file is deleted by its first deliberate download: send
+  `Accept: application/octet-stream`. Without it, the server answers `409`
+  (`code: burn_read_not_explicit`) and the file stays. A browser request (`Sec-Fetch-Site`)
+  or a prefetch never consumes the file; a browser uses the download form of the file page.
+  `GET /{id}` also downloads the file. A storage failure before the first byte gives `503`.
+  After the first byte the server closes the connection, so the client gets fewer bytes than
+  `Content-Length`; discard that data.
+- `PUT /files/{id}` — change the access rules. JSON body with optional `ttl` (seconds from
+  this change; `null` removes the expiry, `0` expires now), `privacy` and
+  `burn_after_download`. An omitted field keeps its value. The content, name and owner do not
+  change. Send the edit code only in the `X-Edit-Code` header, or omit it as the owner; an
+  `edit_code` field in the body gets `400`. Responds `200` with the file description, `410`
+  for an expired file: an update does not extend the life of an expired file.
+- `DELETE /files/{id}` — delete the file and its content. Send `X-Edit-Code`, or omit it as
+  the owner. The server ignores an `edit_code` query parameter. Responds `204`.
+
+`PUT` and `DELETE` use the same `401`/`403`/`410`/`429` rules as links. Upload a file with curl.
+curl sends the parts in the order of the `-F` options, so put `-F file=@…` last:
+
+```sh
+curl --fail-with-body -H "Authorization: Bearer $PADMARK_TOKEN" \
+  -F ttl=86400 -F privacy=authenticated -F file=@report.pdf "$PADMARK_URL/files"
+```
+
+Download it with the name from `Content-Disposition`:
+
+```sh
+curl --fail -OJ -H "Accept: application/octet-stream" "$PADMARK_URL/files/$FILE_ID/download"
+```
 
 ## Authentication
 
@@ -148,7 +209,8 @@ curl --fail --silent --show-error "$PADMARK_URL/healthz"
 ```
 
 Do not probe a note or follow a short URL just to test connectivity: those requests can increment
-views or consume burn content. Authorization is enforced by the server, not by this document.
+views or consume burn content. Do not download a file to test connectivity: a download
+increments `downloads` and can delete a burn-after-download file. Authorization is enforced by the server, not by this document.
 
 ## Health
 

@@ -3,10 +3,10 @@ package cli
 import (
 	"context"
 	"fmt"
-	"os"
 
 	urcli "github.com/urfave/cli/v3"
 
+	"github.com/partyzanex/padmark/internal/clientauth"
 	"github.com/partyzanex/padmark/internal/clifactory"
 	"github.com/partyzanex/padmark/internal/errorcontext"
 	padmark "github.com/partyzanex/padmark/pkg/client"
@@ -28,17 +28,20 @@ func expandCommand() *urcli.Command {
 }
 
 func expandAction(ctx context.Context, cmd *urcli.Command) error {
-	id, err := linkIDArg(cmd)
+	id, err := recordIDArg(cmd, linkRecord())
 	if err != nil {
 		return fmt.Errorf("read link ID: %w", err)
 	}
 
-	cl, err := newPadmarkClient(cmd)
+	apiClient, _, err := clientauth.NewClient(clientSettings(cmd))
 	if err != nil {
 		return fmt.Errorf("create API client: %w", err)
 	}
 
-	res, err := cl.GetLink(ctx, padmark.GetLinkParams{ID: id})
+	callCtx, cancel := requestContext(ctx, cmd)
+	defer cancel()
+
+	res, err := apiClient.GetLink(callCtx, padmark.GetLinkParams{ID: id})
 	if err != nil {
 		return fmt.Errorf("get link: %w", err)
 	}
@@ -48,29 +51,23 @@ func expandAction(ctx context.Context, cmd *urcli.Command) error {
 		return fmt.Errorf("decode get link response: %w", apiErr)
 	}
 
+	out := commandWriter(cmd)
+
 	if cmd.Bool(FlagJSON) {
-		return errorcontext.Wrap(printLinkJSON(os.Stdout, link), "print link json")
+		return errorcontext.Wrap(printJSON(out, link), "print link json")
 	}
 
-	return errorcontext.Wrap(printLink(os.Stdout, link), "print link")
+	return errorcontext.Wrap(printLink(out, link), "print link")
 }
 
 func handleGetLinkRes(res padmark.GetLinkRes) (*padmark.LinkResponse, error) {
-	switch typed := res.(type) {
-	case *padmark.LinkResponse:
-		return typed, nil
-	case *padmark.GetLinkUnauthorized:
-		return nil, fmt.Errorf("%w: %s", ErrUnauthorized, typed.Message)
-	case *padmark.GetLinkNotFound:
-		return nil, ErrLinkNotFound
-	case *padmark.GetLinkGone:
-		return nil, ErrLinkGone
-	case *padmark.GetLinkServiceUnavailable:
-		return nil, errorcontext.Wrap(
-			serviceUnavailableError(padmark.ErrorResponse(*typed)), "decode get link response")
-	case *padmark.GetLinkInternalServerError:
-		return nil, fmt.Errorf("%w: %s", ErrServer, typed.Message)
-	default:
-		return nil, fmt.Errorf("%w: %T", ErrUnexpectedResponse, res)
+	link, ok := res.(*padmark.LinkResponse)
+	if !ok {
+		return nil, responseError(res, linkRecord(), nil)
 	}
+
+	// The generated decoder leaves a "#fragment" in the path, and the output would show "%23".
+	link.TargetURL = padmark.SplitFragment(link.TargetURL)
+
+	return link, nil
 }

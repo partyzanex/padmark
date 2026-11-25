@@ -2,7 +2,6 @@ package web
 
 import (
 	"bytes"
-	"context"
 	"log/slog"
 	net_http "net/http"
 	"net/http/httptest"
@@ -88,5 +87,65 @@ func TestAPISpec_OK_SetsContentType(t *testing.T) {
 func TestNoPinger(t *testing.T) {
 	var pinger Pinger = NoPinger{}
 
-	assert.NoError(t, pinger.PingContext(context.Background()))
+	assert.NoError(t, pinger.PingContext(t.Context()))
+}
+
+// ogenSpy stands in for the generated ogen server. It counts the requests that reach it.
+type ogenSpy struct {
+	calls int
+}
+
+func (o *ogenSpy) ServeHTTP(w net_http.ResponseWriter, _ *net_http.Request) {
+	o.calls++
+
+	w.WriteHeader(net_http.StatusTeapot)
+}
+
+// TestFileRoutes_ServedByFileHandler verifies that each /files path goes to FileHandler and
+// never to the ogen server. The generated server buffers multipart bodies, so a /files route on
+// it would break the streaming upload.
+func TestFileRoutes_ServedByFileHandler(t *testing.T) {
+	// The managers stay nil: the test only matches routes and never calls a handler.
+	handler, err := NewHandler(&HandlerConfig{
+		Notes: nil, Links: nil, Pinger: NoPinger{}, Log: slog.New(slog.DiscardHandler),
+		Accounts: nil, Files: nil, Reveal: nil,
+		ForcedScheme: "", BootstrapToken: "", TrustedProxies: nil, CSRFSecret: nil, SessionTTL: 0,
+		FileTransfer:   FileTransferLimits{IdleTimeout: 0, MaxUploads: 0, MaxUploadsPerClient: 0},
+		DirectRedirect: false,
+	})
+	require.NoError(t, err)
+
+	spy := &ogenSpy{calls: 0}
+	mux := net_http.NewServeMux()
+
+	registerAllRoutes(mux, handler, spy)
+
+	cases := []struct {
+		method  string
+		path    string
+		pattern string
+	}{
+		{net_http.MethodPost, "/files", "POST /files"},
+		{net_http.MethodGet, "/files/abc", "GET /files/{id}"},
+		{net_http.MethodGet, "/files/abc/download", "GET /files/{id}/download"},
+		{net_http.MethodHead, "/files/abc/download", "GET /files/{id}/download"},
+		{net_http.MethodPut, "/files/abc", "PUT /files/{id}"},
+		{net_http.MethodDelete, "/files/abc", "DELETE /files/{id}"},
+	}
+
+	for _, route := range cases {
+		t.Run(route.method+" "+route.path, func(t *testing.T) {
+			req := httptest.NewRequestWithContext(t.Context(), route.method, route.path, nil)
+
+			_, pattern := mux.Handler(req)
+			require.Equal(t, route.pattern, pattern)
+
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, req)
+
+			// Without a FileManager, FileHandler answers 503 (files are not enabled).
+			assert.Equal(t, net_http.StatusServiceUnavailable, rec.Code)
+			assert.Zero(t, spy.calls, "the ogen server must not serve %s %s", route.method, route.path)
+		})
+	}
 }

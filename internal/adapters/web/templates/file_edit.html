@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dim">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Padmark — Edit file</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    {{template "theme-head" .Nonce}}
+    <link rel="stylesheet" href="/static/style.css?p={{styleVersion}}">
+</head>
+<body>
+<div class="wrapper wrapper--create">
+    {{template "header" .Header}}
+
+    <main>
+    <form id="fileEditForm" class="create-layout" autocomplete="off">
+        <section class="card editor-card editor-card--link" aria-labelledby="fileHeading">
+            <h1 class="sr-only" id="fileHeading">Edit file</h1>
+            <div class="link-fields link-fields--grow">
+                <span class="field-label">File</span>
+                <div class="drop-zone drop-zone--picked drop-zone--fixed">
+                    <div class="file-card">
+                        <span class="file-icon" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h4"/></svg>
+                        </span>
+                        <span class="file-card-text">
+                            <strong class="file-name" id="fileName">{{.Name}}</strong>
+                            <span class="file-meta" id="fileSize">{{.SizeLabel}}</span>
+                        </span>
+                        <span class="fixed-note">{{template "lock-icon"}}Name and content are fixed</span>
+                    </div>
+                </div>
+                <div class="field-group">
+                    <span class="field-label" id="slugLabel">Slug</span>
+                    <span class="fixed-value" id="slugFixed" aria-labelledby="slugLabel" title="The slug is fixed when the file is uploaded">{{template "lock-icon"}}/{{.ID}}</span>
+                </div>
+            </div>
+            <div class="link-strip">
+                <span class="link-strip-caption">Your file link</span>
+                <a class="link-strip-short" href="{{.URL}}">{{.URL}}</a>
+            </div>
+        </section>
+
+        <aside class="card settings-panel" aria-label="Publish settings">
+            <section class="settings-card" id="settingsSheet" aria-labelledby="sheetTitle">
+                {{template "sheet-head" "Publish settings"}}
+
+                <fieldset class="privacy-options" id="privacySelect">
+                    <legend class="lbl">Who can download</legend>
+                    {{template "privacy-options" .Access}}
+                </fieldset>
+
+                <div class="field-group">
+                    <label class="field-label" for="expirySelect">Expires</label>
+                    <select class="field-select" id="expirySelect">
+                        <option value="keep">Keep current expiration</option>
+                        <option value="never">Never</option>
+                        <option value="3600">In 1 hour</option>
+                        <option value="86400">In 1 day</option>
+                        <option value="604800">In 7 days</option>
+                        <option value="2592000">In 30 days</option>
+                        <option value="custom">Custom…</option>
+                    </select>
+                    <span class="field-hint" id="expiryHint">{{.ExpiresLabel}}</span>
+                </div>
+
+                {{template "expiry-custom"}}
+
+                <div class="setting-list">
+                    <label class="setting-row" id="burnLabel">
+                        <span class="setting-text">
+                            <span class="setting-title">Burn after first download</span>
+                            <span class="setting-desc">The file page warns before the download</span>
+                        </span>
+                        <input type="checkbox" class="switch" role="switch" id="burnCheck"{{if .Burn}} checked{{end}}>
+                    </label>
+                </div>
+
+                <div class="field-group">
+                    <label class="field-label" for="editCodeInput">Edit code <span class="optional">· {{if .IsOwner}}optional, you created this file{{else}}required{{end}}</span></label>
+                    <div class="field-box">
+                        <input type="text" id="editCodeInput" name="file_edit_code" placeholder="Paste your edit code" autocomplete="off" autocapitalize="none" spellcheck="false">
+                    </div>
+                </div>
+            </section>
+
+            <div class="settings-divider"></div>
+
+            <div class="publish-bar">
+                <p id="fileError" class="form-error" role="alert" hidden></p>
+                {{template "settings-toggle"}}
+                <div class="publish-block">
+                    <button type="submit" class="btn-publish" id="saveBtn" data-kbd="Ctrl ↵">Save</button>
+                    <p class="publish-note">Saving replaces the settings of this file.</p>
+                </div>
+                <div class="danger-block">
+                    <button type="button" class="btn-danger" id="deleteBtn">Delete file</button>
+                </div>
+            </div>
+        </aside>
+        <div class="sheet-backdrop" id="sheetBackdrop" hidden></div>
+    </form>
+    </main>
+
+    {{template "footer"}}
+</div>
+
+<script nonce="{{.Nonce}}">
+    {{template "theme-js"}}
+    {{template "sheet-js"}}
+    {{template "file-errors-js"}}
+    {{template "expiry-js"}}
+
+    const fileID = {{.ID}};
+    const isOwner = {{.IsOwner}};
+    const form = document.getElementById('fileEditForm');
+    const saveButton = document.getElementById('saveBtn');
+    const deleteButton = document.getElementById('deleteBtn');
+    const errorBox = document.getElementById('fileError');
+    const burnCheck = document.getElementById('burnCheck');
+    const privacyValue = () => {
+        const checked = document.querySelector('input[name="privacy"]:checked');
+        return checked ? checked.value : 'public';
+    };
+    const initialPrivacy = privacyValue();
+    const initialBurn = burnCheck.checked;
+
+    function showError(message) {
+        errorBox.textContent = message;
+        errorBox.hidden = false;
+    }
+
+    // The settings button of the phone bar shows the chosen level and the expiration.
+    function updateSummary() {
+        document.getElementById('settingsSummary').textContent = privacyText() + ' · ' + expirySummary();
+    }
+    updateSummary();
+    document.getElementById('settingsSheet').addEventListener('change', updateSummary);
+    document.getElementById('settingsSheet').addEventListener('input', updateSummary);
+
+    // fileRequest sends the edit code only in the X-Edit-Code header, as the API asks.
+    async function fileRequest(method, payload) {
+        const headers = {'Accept': 'application/json'};
+        if (payload) headers['Content-Type'] = 'application/json';
+        const code = document.getElementById('editCodeInput').value;
+        if (code) headers['X-Edit-Code'] = code;
+        let response;
+        try {
+            response = await fetch('/files/' + encodeURIComponent(fileID), {method, headers, body: payload ? JSON.stringify(payload) : undefined});
+        } catch (_) {
+            throw new Error(fileErrorMessage(0, null, ''));
+        }
+        if (!response.ok) {
+            let body = null;
+            try { body = await response.json(); } catch (_) {}
+            throw new Error(fileErrorMessage(response.status, body, ''));
+        }
+        return response.status === 204 ? null : response.json();
+    }
+
+    function needCode() {
+        if (isOwner || document.getElementById('editCodeInput').value) return false;
+        showError('Edit code required');
+        return true;
+    }
+
+    // setBusy shows the request in progress on the main button, as the note editor does.
+    function setBusy(busy) {
+        saveButton.disabled = busy;
+        saveButton.textContent = busy ? 'Saving…' : 'Save';
+    }
+
+    form.addEventListener('submit', async event => {
+        event.preventDefault();
+        errorBox.hidden = true;
+        if (needCode()) return;
+        const payload = {};
+        if (privacyValue() !== initialPrivacy) payload.privacy = privacyValue();
+        if (burnCheck.checked !== initialBurn) payload.burn_after_download = burnCheck.checked;
+        const ttl = expirySeconds();
+        if (ttl !== undefined) payload.ttl = ttl;
+
+        setBusy(true);
+        try {
+            await fileRequest('PUT', payload);
+            // After a save, the browser shows the file page, as the note editor shows the note.
+            location.href = '/' + fileID;
+        } catch (error) {
+            showError(error.message);
+            setBusy(false);
+        }
+    });
+
+    deleteButton.addEventListener('click', async () => {
+        errorBox.hidden = true;
+        if (needCode()) return;
+        if (!confirm('Permanently delete this file?')) return;
+        deleteButton.disabled = true;
+        saveButton.disabled = true;
+        try {
+            await fileRequest('DELETE', null);
+            location.href = '/files';
+        } catch (error) { showError(error.message); }
+        finally { deleteButton.disabled = false; saveButton.disabled = false; }
+    });
+
+    document.addEventListener('keydown', event => {
+        if ((event.ctrlKey || event.metaKey) && event.key === 'Enter' && !saveButton.disabled) {
+            event.preventDefault();
+            form.requestSubmit();
+        }
+    });
+</script>
+</body>
+</html>

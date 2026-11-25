@@ -15,10 +15,12 @@ import (
 
 // Pathological-input cost of Renderer.Render (audit L-11).
 //
-// maxContentBytes mirrors server.DefaultMaxBodyBytes (--max-body-bytes, 4 MiB), the only bound on
-// note content: the domain caps only the title, the OpenAPI schema puts no maxLength on content,
-// and notes.Manager renders on every HTML view (GetRendered → renderNote) with no cache. Render
-// takes no context, so a slow render keeps burning its goroutine after the client goes away.
+// maxContentBytes mirrors server.DefaultMaxBodyBytes (--max-body-bytes, 4 MiB), the default bound
+// on a request body; domain.DefaultMaxContentLength has the same value in characters.
+// notes.Manager renders a note on an HTML view (ReadRendered → renderNote). The render cache
+// keeps only the HTML of a note that is not burn-after-reading, so a first view or a burn note
+// pays the full cost. Render takes no context, so a slow render keeps burning its goroutine after
+// the client goes away.
 //
 // Measured (Apple Silicon, no -race): most inputs scale linearly (worst: many chroma-highlighted
 // fences, ~15 s per 4 MiB render), but stock goldmark v1.8.6 is quadratic on several inputs that
@@ -34,9 +36,6 @@ const superLinearBudget = time.Second
 // linearWorstCaseBudget bounds the worst linear-time input (fence_many_langs) at the full cap.
 // Measured ~15 s; the budget is ~5× that so only a real complexity regression trips it.
 const linearWorstCaseBudget = 75 * time.Second
-
-// raceSlowdown scales budgets when the binary is built with -race (roughly 5–10× slower).
-const raceSlowdown = 10
 
 // coverSlowdown scales budgets when coverage instrumentation is on: counters in the parser's hot
 // loops make each render several times slower, and the budget only has to catch a change in
@@ -216,6 +215,13 @@ func pathoCases() []pathoCase {
 		{name: "backtick_unmatched", gen: func(n int) string { return fill("`a``a", n) }, probe: 512 << 10},
 		// One line of N '>' re-scans the line prefix per level (text.reader.LineOffset).
 		{name: "blockquote_nested_1line", gen: func(n int) string { return fill(">", n) }, probe: 128 << 10},
+		// Formula openers without a closer on one long line (math.go). A scan to the end of the
+		// line for each opener would be quadratic; the scans stop at the next opener instead.
+		{name: "math_dollar_unclosed", gen: func(n int) string { return fill("$a", n) }, probe: 512 << 10},
+		{name: "math_dollar_spaced", gen: func(n int) string { return fill("$a $", n) }, probe: 512 << 10},
+		{name: "math_dollars_unclosed", gen: func(n int) string { return fill("$$a", n) }, probe: 512 << 10},
+		{name: "math_paren_unclosed", gen: func(n int) string { return fill(`\(a`, n) }, probe: 512 << 10},
+		{name: "math_paren_mixed", gen: func(n int) string { return fill(`\(a$b\[`, n) }, probe: 512 << 10},
 		// Mildly super-linear on stock goldmark (exponent 1.4–1.8): measured, not budget-tested.
 		linearPathoCase("list_nested_indent", func(n int) string {
 			return staircase(n, 1000, func(d int) string { return strings.Repeat("  ", d) + "- x\n" })
@@ -246,6 +252,9 @@ func pathoCases() []pathoCase {
 		linearPathoCase("linkify_urls", func(n int) string { return fill("www.example.com ", n) }),
 		linearPathoCase("linkify_partial", func(n int) string { return fill("http://", n) }),
 		linearPathoCase("hard_wraps", func(n int) string { return fill("a\n", n) }),
+		linearPathoCase("math_inline_pairs", func(n int) string { return fill(`$x_i$ \(y_i\) `, n) }),
+		linearPathoCase("math_blocks", func(n int) string { return fill("$$\n\\sum_{i=1}^{n}x_i\n$$\n", n) }),
+		linearPathoCase("math_block_unclosed", func(n int) string { return "$$\n" + fill("x_i\n", n-3) }),
 		linearPathoCase("headings_unique", func(n int) string {
 			return staircase(n, 1<<30, func(d int) string { return fmt.Sprintf("# h%d\n", d) })
 		}),
@@ -275,7 +284,7 @@ func renderWithin(rnd *render.Renderer, input string, budget time.Duration) (tim
 
 	go func() {
 		start := time.Now()
-		_, _ = rnd.Render(input)
+		_, _, _ = rnd.Render(input)
 
 		done <- time.Since(start)
 	}()
@@ -299,15 +308,14 @@ func renderWithin(rnd *render.Renderer, input string, budget time.Duration) (tim
 func TestRenderSuperLinearInputsWithinBudget(t *testing.T) {
 	t.Parallel()
 
-	if testing.CoverMode() != "" && raceEnabled() {
-		t.Skip("atomic coverage counters under -race make render timing meaningless")
+	// The race detector slows the math scanners about 35 times (0.3 s → 10 s for 512 KiB), so a
+	// timing budget under -race fails at random. CI runs this test in its own step without -race
+	// and without coverage, as TestRenderLinearWorstCaseAtMaxSize.
+	if raceEnabled() {
+		t.Skip("the race detector makes render timing meaningless; CI times renders without -race")
 	}
 
 	budget := superLinearBudget
-	if raceEnabled() {
-		budget *= raceSlowdown
-	}
-
 	if testing.CoverMode() != "" {
 		budget *= coverSlowdown
 	}
@@ -382,7 +390,7 @@ func BenchmarkRenderPathological(b *testing.B) {
 				b.SetBytes(int64(len(input)))
 
 				for b.Loop() {
-					_, err := rnd.Render(input)
+					_, _, err := rnd.Render(input)
 					if err != nil {
 						b.Fatal(err)
 					}
@@ -457,7 +465,11 @@ func TestRenderPathologicalMeasure(t *testing.T) {
 	for _, testCase := range pathoCases() {
 		t.Run(testCase.name, func(t *testing.T) {
 			logScaling(t, testCase.name, func(size int) measurement {
-				return measureRender(t, testCase.gen(size), rnd.Render)
+				return measureRender(t, testCase.gen(size), func(input string) (string, error) {
+					out, _, err := rnd.Render(input)
+
+					return out, err
+				})
 			})
 		})
 	}
